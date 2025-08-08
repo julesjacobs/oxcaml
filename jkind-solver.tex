@@ -1,0 +1,318 @@
+\documentclass{article}
+\usepackage{graphicx} % Required for inserting images
+\usepackage{amsmath}
+
+\newcommand{\Type}{\mathsf{Type}}
+\newcommand{\type}{\mathsf{type\ }}
+\newcommand{\Kind}{\mathsf{Kind}}
+\newcommand{\with}{\mathsf{\ with\ }}
+\newcommand{\id}{\mathsf{id}}
+\newcommand{\normalize}{\mathsf{normalize}}
+
+
+\title{Exact jkind inference}
+\author{Jules Jacobs}
+\date{August 2025}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+    The goal of this document is to describe how to do jkind inference in a sound (no segfaults) and complete (most permissive) way.
+\end{abstract}
+
+
+\section{Background}
+
+Let $L$ be a lattice. We use $\ell : L$ for lattice variables. We use $m : L \to L$ for monotone functions on $L$, which we call \emph{modalities} if they also satisfy $m(\ell) \leq \ell$ and $m(\ell \vee \ell') = m(\ell) \vee m(\ell')$
+
+Intuition: Think of the lattice values as kinds of concrete types, which specify certain restrictions of the type (e.g., cannot be moved to another thread).
+Modalities can be viewed as weakening certain restrictions.
+
+\subsection*{Types and kinds}
+
+We have types $\tau : \mathsf{Type}$, which consists of applications of type constructors, applications of modalities, and type variables:
+\begin{align*}
+    \tau : \Type ::= C(\tau_1, \dots, \tau_n) \mid m(\tau) \mid a
+\end{align*}
+We can assume that there are some built-in type constructors, such as $C_1(a,b) = a \ast b$ and $C_2() = \mathsf{int}$.
+We can also define new type constructors in a mutually recursive way.
+Constructor definitions can be concrete:
+\begin{align*}
+    \type C(x_1, \dots, x_k) = \tau
+\end{align*}
+Or abstract:
+\begin{align*}
+    \type C(x_1, \dots, x_k) : \kappa
+\end{align*}
+where $\kappa$ is a kind expression consisting of a lattice value $\ell$ and with-bounds:
+\begin{align*}
+    \kappa : \Kind ::= \ell \with \tau_1,\dots,\tau_k
+\end{align*}
+Intuitively, this means that the kind has restrictions $\ell$ as well as the restrictions that the kinds of $\tau_1,\dots,\tau_k$ have.
+
+
+For example, we have:
+\begin{align*}
+    \mathsf{type\ list}(a) : \bot \mathsf{\ with\ } a
+\end{align*}
+which means that the list type has no restrictions ($\bot$) other than the restrictions of its argument type ($a$).
+Another example is $\mathsf{ref}$, which does have restrictions:
+\begin{align*}
+    \mathsf{type\ ref}(a) : \ell_{\mathsf{ref}} \mathsf{\ with\ } a
+\end{align*}
+where $\ell_{\mathsf{ref}}$ are the restrictions that references have (e.g., they cannot be mutated from several threads).
+
+Another example are modalities themselves; if type $C(a) := m(a)$ has been defined as a modality, then we may give it the following kind:
+\begin{align*}
+    \mathsf{type\ } C(a) : \bot \mathsf{\ with\ } m(a)
+\end{align*}
+That is, type $C(a)$ has the same restrictions as $a$ except $m(a)$ may erase some of those restrictions, meaning that $C(a)$ can have fewer restrictions than $a$.
+
+A constructor with no arguments is just a type. In OCaml, types can also be directly recursive, but here we assume that all recursion goes through constructor definitions, as you can always introduce constructor definitions to break up the direct circularity in types.
+
+\textbf{Important note:} the types in the with-bounds can be arbitrary type expressions that may refer to other constructors in the mutually recursive block.
+For instance, the following is perfectly valid:
+\begin{align*}
+    &\mathsf{type\ }C_1(a) = a \ast C_2(C_1(m(a)), C_2(\mathsf{unit}, C_1(a)))\\
+    &\mathsf{type\ }C_2(a,b) : \ell \mathsf{\ with\ } C_1(m(C_2(b,a)))
+\end{align*}
+This has concrete and abstract type constructors that refer to eachother recursively through their definition and with-bounds, involving nested applications and modalities.
+
+\subsection*{Canonical kind expressions}
+
+We say that a kind expression of a type constructor is canonical if it is in the form:
+\begin{align*}
+    \mathsf{type\ C}(a_1, \dots, a_k) : \ell \mathsf{\ with\ } m_1(a_1),\dots,m_k(a_k)
+\end{align*}
+A kind expression can be non-canonical if it has with-bounds that are not a direct application of a modality to one of its type arguments.
+
+Second, for a kind to be canonical we also insist that $m_i(a) = m_i(a) \vee \ell$. Note that if this is not the case, then changing $m_i'(a) := m_i(a) \vee \ell$ doesn't change the meaning of the kind expression, because $\ell$'s restrictions are going to be added in anyway. That would make the expression non-canonical, so we adopt this condition. An analogous opposite condition where we add restrictions from the $m_i$ to $\ell$ is not necessary, since if $a_i : \bot$ then the $m_i$ do not add in any additional restrictions.
+
+\textbf{Our goal: } given a set of mutually recursive concrete and abstract type constructor definitions, figure out canonical kinds of all of the definitions.
+This involves computing kinds for the concrete types, and putting the kinds for the abstract types in canonical form.
+This goal must be achieved in two steps:
+\begin{enumerate}
+    \item Define what it means to have a valid canonical kind assignment for a set of mutually recursive concrete and abstract types.
+    \item Find an algorithm to compute the ``best'' such valid assignment.
+\end{enumerate}
+
+\subsection*{Nasty examples}
+
+Here are some nasty examples that illustrate the difficulty.
+The first is a variant of a compiler bug found by Benjamin Peters.
+\begin{align*}
+    &\mathsf{type\ } C = \mathsf{list}(D)\\
+    &\mathsf{type\ } D : \bot \mathsf{\ with\ } C
+\end{align*}
+What should the kinds be? One might reason that both kinds should be $\bot$, i.e., no restrictions, because $C$ is just $\mathsf{list}(D)$, and $D$ has no restrictions other than those of $C$. One would, however, be wrong. Consider that a module implementing this signature would be perfectly able to instantiate $D$ with $\mathsf{ref(int)}$, because the following is perfectly valid:
+\begin{align*}
+    &\mathsf{type\ } C = \mathsf{list}(\mathsf{ref(int)})\\
+    &\mathsf{type\ } D : \bot \mathsf{\ with\ } \mathsf{list(ref(int))} = \mathsf{ref(int)}
+\end{align*}
+It is true that $\mathsf{ref(int)}$ has kind $\bot \mathsf{\ with\ } \mathsf{list(ref(int))}$, so this satisfies the signature. So the kind of the above types should actually be $\top$, the most restrictive kind!
+
+Here is another nasty example:
+\begin{align*}
+    \mathsf{type\ } C(a) = \mathsf{list}(a \ast C(\mathsf{list}(a)))
+\end{align*}
+This type is inhabited (e.g., the empty list is an element of it), but repeatedly unfolding the type keeps producing different applications of the $C$ constructor. There is no finite set of arguments to $C$ that suffices to analyze this type. Yet obviously this type should get a kind with no restrictions. And what kind should be assigned to the following type?
+\begin{align*}
+    \mathsf{type\ } C(a) : \bot \mathsf{\ with\ } \mathsf{list}(a \ast C(\mathsf{list}(a)))
+\end{align*}
+
+
+\section{The kind equations}
+
+In this section we'll develop a set of equations that the kinds of mutually recursive types have to satisfy. These equations can have multiple solutions. Which solutions are sound and which solutions are complete is discussed in a later section.
+
+\subsection{Non-recursive types}
+
+Suppose we have a type expression that only uses constructors for which we already know the canonical kind.
+Then we can compute its kind as follows:
+\newcommand{\kindof}{\mathsf{kindof}_\Gamma}
+\begin{align*}
+    \kindof &: \Type \to L\\
+    \kindof(C(\tau_1, \dots, \tau_k)) &= \ell \vee m_1(\kindof(\tau_1)) \vee \dots \vee m_k(\kindof(\tau_k))\\
+    &\qquad \text{where } \type C(a_1, \dots, a_k) : \ell \with m_1(a_1), \dots, m_k(a_k) \ \in\ \Gamma\\
+    \kindof(m(\tau)) &= m(\kindof(\tau))
+\end{align*}
+Here $\Gamma$ refers to a environment that stores all the kinds of type constructors that are in scope.
+
+We can further extend this to open types (with type variables) as follows, to compute a canonical kind expression for an open type:
+\begin{align*}
+    \kindof &: \Type \to \Kind\\
+    \kindof(C(\tau_1, \dots, \tau_k)) &= \ell \vee m_1(\kindof(\tau_1)) \vee \dots \vee m_k(\kindof(\tau_k))\\
+    &\qquad \text{where } \type C(a_1, \dots, a_k) : \ell \with m_1(a_1), \dots, m_k(a_k) \ \in\ \Gamma\\
+    \kindof(m(\tau)) &= m(\kindof(\tau))\\
+    \kindof(a) &= \bot \with a
+\end{align*}
+
+Here we lift the action of $\vee$ and modalities $m$ to $\Kind$:
+\begin{align*}
+    &(\ell \with m_1(a_1),\dots,m_k(a_k)) \vee (\ell' \with m'_1(a_1),\dots,m'_k(a_k) =\\
+    &\qquad (\ell \vee \ell') \with (m_1 \vee m'_1)(a_1),\dots,(m_k \vee m'_k)(a_k)\\
+    &m(\ell \with m'_1(a_1),\dots,m'_k(a_k)) =\\
+    &\qquad m(\ell) \with (m \circ m'_1)(a_1),\dots,(m \circ m'_k)(a_k)
+\end{align*}
+
+Where $(m \vee m')(\ell) = m(\ell) \vee m'(\ell)$. The above probably only makes sense if modalities distribute: $m(\ell \vee \ell') = m(\ell) \vee m(\ell')$.
+
+We can now compute canonical kinds for non-recursive type definitions:
+\begin{align*}
+    \type C(a_1, \dots, a_k) = RHS \qquad \implies \qquad \type C(a_1, \dots, a_k) : \kindof(RHS)
+\end{align*}
+
+\subsection{Concrete recursive type definitions only}
+
+Suppose we now do have recursive type definition:
+\begin{align*}
+    \type C(a_1, \dots, a_k) = RHS
+\end{align*}
+We can compute $\kindof(RHS)$ in an environment $\Gamma$ that includes a kind definition for $\type C(a_1, \dots, a_k) : \ell \with m_1(a_1),\dots,m_k(a_k)$.
+If this computed to get precisely:
+\begin{align*}
+    \kindof(RHS) = \ell \with m_1(a_1),\dots,m_k(a_k)
+\end{align*}
+with the same $\ell,m_1,\dots,m_k$ then we'd have a consistent kind assignment for $C$.
+In effect, we want to solve the above equation for $\ell,m_1,\dots,m_k$.
+
+Note that we sometimes have multiple solutions. Consider lists:
+\begin{align*}
+    \type \mathsf{list}(a) = \mathsf{Nil} \mid \mathsf{Cons}\ \text{of}\ (a \ast \mathsf{list}(a))
+\end{align*}
+This leads to the following kind equation:
+\begin{align*}
+    \kindof(\mathsf{Nil} \mid \mathsf{Cons}\ \text{of}\ (a \ast \mathsf{list}(a))) = \kappa \text{\quad where\quad} \Gamma = \{ \type \mathsf{list}(a) : \kappa \}
+\end{align*}
+The above equation has solution $\kappa = (\bot \with a)$ as well as $\kappa = (\top \with a)$.
+Of course, we prefer the former, since that assigns a more permissive kind to $\mathsf{list}$.
+
+\textbf{Conclusion:} for a recursive type, we want the most permissive kind that satisfies the equation.
+
+For mutually recursive types it is much the same: we want a kind assignment to all types in the mutual group, such that when you compute the kinds of their RHSs, you get the same consistent kind assignment. That is, we want a solution to the system of kind equations, and we want the most permissive solution.
+
+\subsection{Mix of concrete and abstract recursive types}
+
+If we have a mix of concrete and abstract types that are mutually recursive (through their definitions and with-bounds) then the story is more complicated, but can still create a system of equations, as follows.
+
+For the concrete types, we do as before.
+For the abstract types, we set up their equation according to their with-bound:
+\begin{align*}
+    \type C(a_1,\dots,a_k) : \ell \with \tau_1,\dots,\tau_n
+\end{align*}
+
+Where $\tau_1,\dots,\tau_n$ are arbitrary type expressions.
+We can now normalize the with-bounds as follows:
+\begin{align*}
+    \normalize_\Gamma(\ell \with \tau_1,\dots,\tau_n) = (\ell \with \emptyset) \vee \kindof(\tau_1) \vee \dots \vee \kindof(\tau_n)
+\end{align*}
+
+The normalized kind can then participate in the equation system just as kinds of RHSs did.
+
+\subsection{Examples}
+
+Consider the first nasty example:
+\begin{align*}
+    &\mathsf{type\ } C = \mathsf{list}(D)\\
+    &\mathsf{type\ } D : \bot \mathsf{\ with\ } C
+\end{align*}
+What are the kind equations for this system?
+To compute them, we assume that we know that $\type \mathsf{list}(a) : \bot \with \id(a)$ where $\id$ is the identity modality.
+We can then normalize the right hand sides in the following environment:
+\begin{align*}
+    \Gamma = \{ \type \mathsf{list}(a) : \bot \with \id(a), \type C : \ell_C \with \emptyset, \type D : \ell_D \with \emptyset\}
+\end{align*}
+where $\ell_C,\ell_D$ are the unknowns we are looking for.
+We now compute the normalized kinds of both types:
+\begin{align}
+    \kindof(\mathsf{list}(D)) &= \ell_D \with \emptyset\\
+    \normalize(\bot \with C) &= \ell_C \with \emptyset
+\end{align}
+This leads to the following kind equations:
+\begin{align*}
+    \text{For } C\!:\quad (\ell_C \with \emptyset) = (\ell_D \with \emptyset)\\
+    \text{For } D\!:\quad (\ell_D \with \emptyset) = (\ell_C \with \emptyset)
+\end{align*}
+
+Let us look at the second nasty example:
+\begin{align*}
+    \mathsf{type\ } C(a) = \mathsf{list}(a \ast C(\mathsf{list}(a)))
+\end{align*}
+When we compute the $\kindof$ the right hand side, we need a $\Gamma$ with $\mathsf{list}$ and $C$ in it:
+\begin{align}
+    \Gamma = \{ \type \mathsf{list}(a) : \bot \with \id(a), \type C(a) : \ell_C \with m_C(a) \}
+\end{align}
+We can now compute:
+\begin{align*}
+    \kindof(C(a)) = \ell_C \with (\id \vee (m_C \circ \id))(a)
+\end{align*}
+So we have this kind equation for $C$:
+\begin{align*}
+    \ell_C \with m_C(a) = \ell_C \with (\id \vee (m_C \circ \id))(a)
+\end{align*}
+It will turn out that this has best solution $\ell_C = \bot, m_C = \id$, leading to kind $\type C(a) : \bot \with a$.
+
+Let's look at a variation. What if we had the following:
+\begin{align*}
+    \mathsf{type\ } C(a) = \mathsf{list}(C(\mathsf{list}(a)))
+\end{align*}
+The kind equation would now be:
+\begin{align*}
+    \ell_C \with m_C(a) = \ell_C \with (m_C \circ \id)(a)
+\end{align*}
+Perhaps surprisingly, this has best solution $\ell_C = \bot, m_C = \bot$, leading to kind $\type C(a) : \bot \with \emptyset$.
+The kind doesn't have a with-bound for $a$ at all! In retrospect, this makes sense, as the above type cannot actually store any $a$'s.
+
+By contrast, the following two abstract type definitions:
+\begin{align*}
+    \mathsf{type\ } C(a) : \bot \with \mathsf{list}(a \ast C(\mathsf{list}(a)))\\
+    \mathsf{type\ } C(a) : \bot \with \mathsf{list}(C(\mathsf{list}(a)))
+\end{align*}
+Should both have kind $\top$, the worst kind!
+
+\section{Solutions to the kind equations}
+
+TODO
+
+\subsection{What are acceptable implementations of signatures?}
+
+TODO
+
+Explain what signatures may be instantiated with (i.e., pass the type checker on that end).
+
+\subsection{What are acceptable users of signatures?}
+
+Explain what that implies about the consumer of the signature.
+
+TODO
+
+\subsection{What is the best kind assignment?}
+
+TODO
+
+\section{Background: Knaster-Tarski fixpoint theorem}
+
+TODO
+
+\section{Computing the best kind assignment}
+
+TODO
+
+\subsubsection{Fixpoint solver}
+
+TODO
+
+\subsubsection{Using the fixpoint solver to compute kinds}
+
+TODO
+
+
+\subsection{Optimization for modalities of the form $m(a) = \ell \wedge a$}
+
+TODO
+
+
+
+\end{document}
