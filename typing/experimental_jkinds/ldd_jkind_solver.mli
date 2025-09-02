@@ -1,3 +1,15 @@
+(* The JKind solver. *)
+
+(** Functor inputs:
+    - The coefficient lattice [Lat]
+    - The type domain [Ty] with a comparison
+    - The constructor domain [Constr] with a comparison
+
+    Output:
+    - A Church-encoded kind [ckind = ops -> kind], where [kind] is the backend
+      semantic domain and [ops] provides the constructors. The solver interprets
+      [ckind] under a lattice-polynomial backend. *)
+
 module Make
     (Lat : Lattice_intf.LATTICE)
     (Ty : sig
@@ -15,19 +27,8 @@ module Make
   type ty = Ty.t
   type constr = Constr.t
   type lat = Lat.t
-  type atom = { constr : constr; arg_index : int }
-
-  module RigidName : sig
-    type t = Atom of atom | Ty of ty
-
-    val compare : t -> t -> int
-    val to_string : t -> string
-
-    val atomic : constr -> int -> t
-  end
-
-  type poly
   type kind
+  type solver
 
   type ops = {
     const : lat -> kind;
@@ -38,6 +39,16 @@ module Make
     rigid : ty -> kind;
   }
 
+  type atom = { constr : constr; arg_index : int }
+
+  module RigidName : sig
+    type t = Atom of atom | Ty of ty
+
+    val compare : t -> t -> int
+    val to_string : t -> string
+  end
+
+  type poly = Ldd.Make(Lat)(RigidName).node
   type ckind = ops -> kind
 
   type constr_decl =
@@ -45,7 +56,6 @@ module Make
     | Poly of poly * poly list
 
   type env = { kind_of : ty -> ckind; lookup : constr -> constr_decl }
-  type solver = { ops : ops; constr_kind_poly : constr -> poly * poly list }
 
   val make_solver : env -> solver
   val constr_kind_poly : solver -> constr -> poly * poly list
@@ -55,4 +65,3 @@ module Make
   val pp : poly -> string
   val pp_debug : poly -> string
 end
-

@@ -52,4 +52,3 @@ module Make (C : LATTICE) (V : ORDERED) : sig
   val pp : node -> string
   val pp_debug : node -> string
 end
-

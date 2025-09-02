@@ -218,200 +218,360 @@ module Make (C : LATTICE) (V : ORDERED) = struct
 
   let memo_join = NodePairTbl.create ()
 
-  let rec join (a : node) (b : node) : node =
+  let rec join (a : node) (b : node) =
     if node_id a = node_id b then a
     else if is_bot_node a then b
     else if is_bot_node b then a
-    else if is_top_node a || is_top_node b then top
+    else if is_top_node a then top
+    else if is_top_node b then top
+    else if node_id a > node_id b then join b a
     else
       match NodePairTbl.find_opt memo_join a b with
       | Some r -> r
       | None ->
         Global_counters.inc "join";
         let r =
-          match a, b with
+          match (a, b) with
           | Leaf x, Leaf y -> leaf (C.join x.c y.c)
-          | Node x, Leaf _ -> node x.v (join x.lo b) (join x.hi b)
-          | Leaf _, Node y -> node y.v (join a y.lo) (join a y.hi)
-          | Node x, Node y ->
-            if x.v.id = y.v.id then node x.v (join x.lo y.lo) (join x.hi y.hi)
-            else if x.v.id < y.v.id then node x.v (join x.lo b) (join x.hi b)
-            else node y.v (join a y.lo) (join a y.hi)
+          | Node na, Node nb ->
+            if na.v.id = nb.v.id then
+              (* node na.v (join na.lo nb.lo) (join na.hi nb.hi) *)
+              node_raw na.v (join na.lo nb.lo)
+                (join (canonicalize na.hi nb.lo) (canonicalize nb.hi na.lo))
+            else if na.v.id < nb.v.id then
+              (* node na.v (join na.lo b) (join na.hi b) *)
+              node_raw na.v (join na.lo b) (canonicalize na.hi b)
+            else
+              (* node nb.v (join a nb.lo) (join a nb.hi) *)
+              node_raw nb.v (join a nb.lo) (canonicalize nb.hi a)
+          | Leaf _, Node nb ->
+            (* node nb.v (join a nb.lo) (join a nb.hi) *)
+            node_raw nb.v (join a nb.lo) (canonicalize nb.hi a)
+          | Node na, Leaf _ ->
+            (* node na.v (join na.lo b) (join na.hi b) *)
+            node_raw na.v (join na.lo b) (canonicalize na.hi b)
         in
         NodePairTbl.add memo_join a b r;
         r
 
   let memo_meet = NodePairTbl.create ()
 
-  let rec meet (a : node) (b : node) : node =
+  let rec meet (a : node) (b : node) =
     if node_id a = node_id b then a
+    else if is_bot_node a then bot
+    else if is_bot_node b then bot
     else if is_top_node a then b
     else if is_top_node b then a
-    else if is_bot_node a || is_bot_node b then bot
+    else if node_id a > node_id b then meet b a
     else
       match NodePairTbl.find_opt memo_meet a b with
       | Some r -> r
       | None ->
         Global_counters.inc "meet";
         let r =
-          match a, b with
+          match (a, b) with
           | Leaf x, Leaf y -> leaf (C.meet x.c y.c)
-          | Node x, Leaf _ -> node x.v (meet x.lo b) (meet x.hi b)
-          | Leaf _, Node y -> node y.v (meet a y.lo) (meet a y.hi)
-          | Node x, Node y ->
-            if x.v.id = y.v.id then node x.v (meet x.lo y.lo) (meet x.hi y.hi)
-            else if x.v.id < y.v.id then node x.v (meet x.lo b) (meet x.hi b)
-            else node y.v (meet a y.lo) (meet a y.hi)
+          | (Leaf _ as x), Node na | Node na, (Leaf _ as x) ->
+            node na.v (meet na.lo x) (meet na.hi x)
+          | Node na, Node nb ->
+            if na.v.id = nb.v.id then
+              let lo = meet na.lo nb.lo in
+              (* let hi =
+                join (meet na.hi nb.lo)
+                  (join (meet na.lo nb.hi) (meet na.hi nb.hi)) *)
+              (* let left = sub_subsets (join na.hi na.lo) lo in
+              let right = sub_subsets (join nb.hi nb.lo) lo in
+              let hi = meet left right in *)
+              let hi = meet (join na.hi na.lo) (join nb.hi nb.lo) in
+              node na.v lo hi
+            else if na.v.id < nb.v.id then
+              (* let lo = meet na.lo b in let hi = meet na.hi b in node_raw na.v
+                 lo (sub_subsets hi na.lo) *)
+              node na.v (meet na.lo b) (meet na.hi b)
+            else node nb.v (meet a nb.lo) (meet a nb.hi)
         in
         NodePairTbl.add memo_meet a b r;
         r
 
-  let sub_subsets (h : node) (l : node) : node = canonicalize h l
+  (* --------- public constructors --------- *)
+  let const (c : C.t) = leaf c
+  let mk_var (v : var) = node v bot top
+  let rigid (name : V.t) = Var.make_rigid ~name ()
+  let new_var () = Var.make_var ()
 
-  (* --------- fixpoint solver --------- *)
-  let rec down0 = function Leaf { c; _ } -> c | Node { lo; _ } -> down0 lo
+  (* --------- restrictions (x ← ⊥ / ⊤) --------- *)
+  module VarNodePairTbl = struct
+    module Tbl = Hashtbl.Make (struct
+      type t = int * int
 
-  let rec force (n : node) : node =
-    match n with
-    | Leaf _ -> n
-    | Node ({ v = { state = Solved s; _ }; lo; hi; _ } as nn) ->
-      let lo' = force lo in
-      let hi' = force hi in
-      if nn.lo == lo' && nn.hi == hi' then n else node_raw nn.v lo' hi'
-    | Node nn ->
-      Global_counters.inc "force";
-      let lo = force nn.lo in
-      let hi = force nn.hi in
-      begin
-        match nn.v.state with
-        | Rigid _ -> node_raw nn.v lo hi
-        | Solved s ->
-          let hi' = canonicalize (join hi s) lo in
-          node_raw nn.v lo hi'
-        | Unsolved -> node_raw nn.v lo hi
-      end
+      let equal (a, b) (c, d) = a = c && b = d
+      let hash = Hashtbl.hash
+    end)
 
-  let make_var () = Var.make_var ()
-  let new_var = make_var
-  let var v = Node { id = fresh_id (); v; lo = bot; hi = top }
-  let rigid x = Var.make_rigid ~name:x ()
-  let const c = leaf c
-
-  let solve_lfp (v : var) (rhs : node) : unit =
-    v.state <- Solved (force rhs)
-
-  module Queue = struct
-    type t = var list ref
-
-    let create () = ref []
-    let push q v = q := v :: !q
-    let pop q =
-      match !q with [] -> None | x :: xs -> q := xs; Some x
-    let is_empty q = !q = []
+    let create () = Tbl.create 1024
+    let find_opt tbl v n = Tbl.find_opt tbl (v.id, node_id n)
+    let add tbl v n r = Tbl.add tbl (v.id, node_id n) r
+    let clear tbl = Tbl.clear tbl
   end
 
-  let gfp_queue = Queue.create ()
+  let memo_restrict0 = VarNodePairTbl.create ()
 
-  let enqueue_gfp (v : var) (rhs : node) : unit =
-    let rhs' = force rhs in
-    begin
-      match v.state with
-      | Unsolved | Rigid _ -> ()
-      | Solved s ->
-        (* install obligation v >= rhs' *)
-        let hi =
-          match s with Leaf _ -> s | Node n -> node_raw n.v n.lo (join n.hi rhs')
-        in
-        v.state <- Solved hi
-    end;
-    Queue.push gfp_queue v
-
-  let rec solve_pending () : unit =
-    match Queue.pop gfp_queue with
-    | None -> ()
-    | Some v ->
-      begin
-        match v.state with
-        | Unsolved | Rigid _ -> ()
-        | Solved s ->
-          (* push obligations down over s *)
-          let rec push (n : node) : unit =
-            match n with
-            | Leaf _ -> ()
-            | Node nn ->
-              begin
-                match nn.v.state with
-                | Rigid _ -> ()
-                | Unsolved ->
-                  let rhs = node nn.v nn.lo nn.hi in
-                  let rhs0 = down0 rhs in
-                  let rhs = node nn.v (leaf rhs0) (canonicalize rhs (leaf rhs0)) in
-                  solve_lfp nn.v rhs
-                | Solved s' ->
-                  (* install nn >= s' and continue down *)
-                  let hi = canonicalize (join nn.hi s') nn.lo in
-                  nn.hi <- hi
-              end;
-              push nn.lo;
-              push nn.hi
-          in
-          push s
-      end;
-      solve_pending ()
-
-  (* --------- linear helpers --------- *)
-  let rec leq a b =
-    match a, b with
-    | Leaf x, Leaf y -> C.equal x.c y.c
-    | Leaf x, Node n -> C.leq x.c (down0 b)
-    | Node n, Leaf _ -> leq n.lo b && leq n.hi b
-    | Node na, Node nb ->
-      if na.v.id = nb.v.id then leq na.lo nb.lo && leq na.hi nb.hi
-      else if na.v.id < nb.v.id then leq na.lo b && leq na.hi b
-      else leq a nb.lo && leq a nb.hi
-
-  let round_up n = down0 n
-
-  (* Decompose a polynomial along a set of rigid variables. *)
-  let decompose_linear ~(universe : var list) (n : node) : node * node list =
-    (* Fold the polynomial over the Boolean algebra to collect coefficients. *)
-    let rigid_ids =
-      universe |> List.map (fun v -> v.id) |> List.sort_uniq compare
-    in
-    let rec coeffs_of ids node : node list =
-      match ids with
-      | [] -> [ node ]
-      | id :: ids' -> (
-        match node with
-        | Leaf _ -> List.init (1 lsl List.length ids) (fun _ -> node)
+  let rec restrict0 (x : var) (w : node) : node =
+    match VarNodePairTbl.find_opt memo_restrict0 x w with
+    | Some r -> r
+    | None ->
+      let r =
+        match w with
+        | Leaf _ -> w
         | Node n ->
-          if n.v.id = id then
-            let cl = coeffs_of ids' n.lo in
-            let ch = coeffs_of ids' n.hi in
-            List.map2 join cl ch
-          else if n.v.id < id then
-            let cl = coeffs_of ids node in
-            let ch = coeffs_of ids node in
-            List.map2 join cl ch
-          else (* n.v.id > id *)
-            let cl = coeffs_of ids' node in
-            let ch = coeffs_of ids' node in
-            List.map2 join cl ch)
+          if x.id < n.v.id then w
+          else if n.v.id = x.id then restrict0 x n.lo
+          else node n.v (restrict0 x n.lo) (restrict0 x n.hi)
+      in
+      VarNodePairTbl.add memo_restrict0 x w r;
+      r
+
+  let memo_restrict1 = VarNodePairTbl.create ()
+
+  let rec restrict1 (x : var) (w : node) : node =
+    match VarNodePairTbl.find_opt memo_restrict1 x w with
+    | Some r -> r
+    | None ->
+      let r =
+        match w with
+        | Leaf _ -> w
+        | Node n ->
+          if x.id < n.v.id then w
+          else if n.v.id = x.id then join n.lo n.hi
+          else node n.v (restrict1 x n.lo) (restrict1 x n.hi)
+      in
+      VarNodePairTbl.add memo_restrict1 x w r;
+      r
+
+  (* --------- force (per-call memo; no env object) --------- *)
+  let memo_force = NodeTbl.create ()
+
+  let rec force (w : node) : node =
+    match NodeTbl.find_opt memo_force w with
+    | Some r -> r
+    | None ->
+      Global_counters.inc "force";
+      let r =
+        match w with
+        | Leaf _ -> w
+        | Node n -> (
+          if n.v.id > Var.rigid_var_start then w
+          else
+            let lo' = force n.lo
+            and hi' = force n.hi in
+            match n.v.state with
+            | Solved d ->
+              let d' = force d in
+              join lo' (meet hi' d')
+            | Unsolved ->
+              if node_id lo' = node_id n.lo && node_id hi' = node_id n.hi then w
+              else
+                let d' = force (mk_var n.v) in
+                join lo' (meet hi' d')
+            | Rigid _ -> failwith "force: rigid variable shouldn't be here")
+      in
+      NodeTbl.add memo_force w r;
+      r
+
+  and var (v : var) = mk_var v
+
+  let sub_subsets (a : node) (b : node) =
+    let a = force a in
+    let b = force b in
+    canonicalize a b
+
+  (* --------- solve-on-install (per-call; no env) --------- *)
+  let solve_lfp (var : var) (rhs_raw : node) : unit =
+    match var.state with
+    | Rigid _ -> invalid_arg "solve_lfp: rigid variable"
+    | Solved _ -> invalid_arg "solve_lfp: solved variable"
+    | Unsolved ->
+      let rhs_forced = force rhs_raw in
+      var.state <- Solved (restrict0 var rhs_forced);
+      NodeTbl.clear memo_force
+
+  let solve_gfp (var : var) (rhs_raw : node) : unit =
+    match var.state with
+    | Rigid _ -> invalid_arg "solve_gfp: rigid variable"
+    | Solved _ -> invalid_arg "solve_gfp: solved variable"
+    | Unsolved ->
+      let rhs_forced = force rhs_raw in
+      var.state <- Solved (restrict1 var rhs_forced);
+      NodeTbl.clear memo_force
+
+  (* Enqued gfps *)
+  let gfp_queue = Stack.create ()
+
+  let enqueue_gfp (var : var) (rhs_raw : node) : unit =
+    Stack.push (var, rhs_raw) gfp_queue
+
+  let solve_pending_gfps () : unit =
+    while not (Stack.is_empty gfp_queue) do
+      let var, rhs_raw = Stack.pop gfp_queue in
+      solve_gfp var rhs_raw
+    done
+
+  let solve_pending () : unit = solve_pending_gfps ()
+
+  (* Decompose into linear terms *)
+  let decompose_linear ~(universe : var list) (n : node) =
+    let rec go vs m ns =
+      match vs with
+      | [] -> (m, ns)
+      | v :: vs' ->
+        go vs' (restrict0 v m) (restrict1 v m :: List.map (restrict0 v) ns)
     in
-    let base = const (down0 n) in
-    let coeffs = coeffs_of rigid_ids n in
-    (base, coeffs)
+    let base, linears = go universe (force n) [] in
+    (base, List.rev linears)
 
-  (* --------- debug printing --------- *)
-  let rec to_string (n : node) : string =
-    match n with
-    | Leaf x -> Printf.sprintf "{%s}" (C.to_string x.c)
-    | Node n ->
-      Printf.sprintf "<%d>(%s,%s)" n.v.id (to_string n.lo) (to_string n.hi)
+  let leq (a : node) (b : node) =
+    let a = force a in
+    let b = force b in
+    node_id (join a b) = node_id b
 
-  let pp_debug (n : node) : string = to_string (force n)
-  let pp (n : node) : string =
-    let b = down0 n in
-    Printf.sprintf "{base=%s;...}" (C.to_string b)
+  let round_up'_memo = NodeTbl.create ()
+
+  let rec round_up' (n : node) =
+    match NodeTbl.find_opt round_up'_memo n with
+    | Some c -> c
+    | None -> (
+      match n with
+      | Leaf { c; _ } -> c
+      | Node n ->
+        let lo' = round_up' n.lo in
+        let hi' = round_up' n.hi in
+        C.join lo' hi')
+
+  let round_up (n : node) =
+    let n = force n in
+    round_up' n
+
+  (* Clear all memo tables *)
+  let clear_memos () : unit =
+    LeafTbl.clear leaf_tbl;
+    Unique.clear uniq_tbl;
+    NodeTbl.clear memo_force;
+    NodePairTbl.clear memo_join;
+    NodePairTbl.clear memo_meet;
+    VarNodePairTbl.clear memo_restrict0;
+    VarNodePairTbl.clear memo_restrict1;
+    NodePairTbl.clear memo_subs
+
+  (* --------- optional printer --------- *)
+
+  (* (Previously: enumeration helpers moved out of public API) *)
+
+  (* --------- polynomial-style pretty printer --------- *)
+  (* Prints using the same conventions as lattice_polynomial.pp:
+     - Deterministic term ordering (sort by rendered body string)
+     - Parentheses around meets when there are multiple terms
+     - Constants: ⊥ when empty; ⊤ when constant-top. *)
+  (* Extract terms with optional naming function for non-rigid vars. *)
+  let to_named_terms_with (pp_unsolved : var -> string) (w : node) :
+      (C.t * string list) list =
+    let rec aux (acc : string list) (w : node) : (C.t * string list) list =
+      match w with
+      | Leaf { c; _ } -> if C.equal c C.bot then [] else [ (c, acc) ]
+      | Node n ->
+        let acc_hi =
+          match n.v.state with
+          | Rigid name -> V.to_string name :: acc
+          | Unsolved -> pp_unsolved n.v :: acc
+          | Solved _ -> failwith "solved vars should not appear after force"
+        in
+        let lo_list = aux acc n.lo in
+        let hi_list = aux acc_hi n.hi in
+        lo_list @ hi_list
+    in
+    aux [] (force w)
+
+  let to_named_terms (w : node) : (C.t * string list) list =
+    to_named_terms_with (fun _ -> "<unsolved-var>") w
+
+  (* Pretty-print in polynomial style. If [pp_var] is provided, it is used to
+     name non-rigid variables when encountered on hi-edges (e.g., unsolved vars
+     for debugging/tests). *)
+  let pp (w : node) : string =
+    let pp_coeff = C.to_string in
+    (* Aggregate duplicate rigid var-sets by join on coefficients. *)
+    let tbl : (string list, C.t) Hashtbl.t = Hashtbl.create 16 in
+    let add_entry (c, names) =
+      let vs = List.sort String.compare names in
+      match Hashtbl.find_opt tbl vs with
+      | None -> Hashtbl.add tbl vs c
+      | Some prev -> Hashtbl.replace tbl vs (C.join prev c)
+    in
+    List.iter add_entry (to_named_terms w);
+    let terms =
+      Hashtbl.fold
+        (fun vs c acc -> if C.equal c C.bot then acc else (vs, c) :: acc)
+        tbl []
+    in
+    if terms = [] then "⊥"
+    else
+      let term_body vs c =
+        let is_top = C.equal c C.top in
+        match (vs, is_top) with
+        | [], true -> ("⊤", false)
+        | [], false -> (pp_coeff c, false)
+        | _ :: _, true -> (String.concat " ⊓ " vs, List.length vs > 1)
+        | _ :: _, false -> (pp_coeff c ^ " ⊓ " ^ String.concat " ⊓ " vs, true)
+      in
+      let items =
+        terms
+        |> List.map (fun (vs, c) ->
+               let body, has_meet = term_body vs c in
+               (body, has_meet))
+        |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+      in
+      let n_terms = List.length items in
+      items
+      |> List.map (fun (body, has_meet) ->
+             if n_terms > 1 && has_meet then "(" ^ body ^ ")" else body)
+      |> String.concat " ⊔ "
+
+  (* (Previously: var-order invariant checker was public; tests now rely on
+     pp/structural debug) *)
+
+  (* --------- structural debug printer --------- *)
+  (* Prints full DAG structure with node ids, var ids/states, and shared-node
+     references. Useful to diagnose memoization/path effects. *)
+  let pp_debug (w : node) : string =
+    let pp_coeff = C.to_string in
+    let b = Buffer.create 1024 in
+    let seen = Hashtbl.create 97 in
+    let pp_var_info (v : var) : string =
+      let state_s =
+        match v.state with
+        | Unsolved -> "Unsolved"
+        | Rigid name -> "Rigid(" ^ V.to_string name ^ ")"
+        | Solved n -> "Solved(#" ^ string_of_int (node_id n) ^ ")"
+      in
+      Printf.sprintf "v#%d:%s" v.id state_s
+    in
+    let rec go indent (n : node) : unit =
+      let id = node_id n in
+      if Hashtbl.mem seen id then
+        Buffer.add_string b (Printf.sprintf "%s#%d = <ref>\n" indent id)
+      else (
+        Hashtbl.add seen id true;
+        match n with
+        | Leaf { id; c } ->
+          Buffer.add_string b
+            (Printf.sprintf "%sLeaf#%d c=%s\n" indent id (pp_coeff c))
+        | Node { id; v; lo; hi } ->
+          Buffer.add_string b
+            (Printf.sprintf "%sNode#%d %s lo=#%d hi=#%d\n" indent id
+               (pp_var_info v) (node_id lo) (node_id hi));
+          let indent' = indent ^ "  " in
+          go indent' lo;
+          go indent' hi)
+    in
+    go "" w;
+    Buffer.contents b
 end
-
