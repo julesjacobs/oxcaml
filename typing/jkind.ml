@@ -3757,11 +3757,22 @@ let sub_or_error ~type_equal ~context t1 t2 =
 (* without affecting the original implementation.                          *)
 (* ====================================================================== *)
 
-(* Experimental axes comparator (to be replaced by Infer6-based leq).
-   For now, delegate to Mod_bounds.less_or_equal to keep behavior identical. *)
-let experimental_mod_bounds_leq (sub_upper_bounds : Mod_bounds.t)
-    (super_lower_bounds : Mod_bounds.t) : Sub_result.t =
-  Mod_bounds.less_or_equal sub_upper_bounds super_lower_bounds
+
+module Experimental_solver = struct
+  type env_api = {
+    find_type_decl : Path.t -> Types.type_declaration option;
+  }
+
+  let context_to_env_api ~context : env_api = failwith "We will implement this later"
+
+  let sub ~context sub super = 
+    let solver = create_solver (context_to_env_api ~context) in
+    if JK.sub solver sub super then OK () else Violation (* some default violation, -- we'll fix error messages later *)
+
+end
+
+(* Touch the module so it isn't considered unused under -warn-error. *)
+let () = let module _ = Experimental_solver in ()
 
 (* Experimental subjkind solver entry point. Mirrors the structure of
    sub_jkind_l: check layouts, expand right (MB_EXPAND_R), expand left
@@ -3785,39 +3796,7 @@ let experimental_jkind_sub_solver
   let* () = require_le (Layout.sub sub.jkind.layout super.jkind.layout) in
   match allow_any_crossing with
   | true -> Ok ()
-  | false ->
-    (* MB_EXPAND_R: best-normalize super and compute right with-bounds map *)
-    let best_super = normalize ~mode:Require_best ~context super in
-    let right_bounds =
-      With_bounds.to_best_eff_map best_super.jkind.with_bounds
-    in
-    let axes_max_on_right = Mod_bounds.get_max_axes best_super.jkind.mod_bounds in
-    let right_bounds_seq = right_bounds |> With_bounds_types.to_seq in
-    (* MB_EXPAND_L: normalize sub with map_type_info to drop axes covered on RHS *)
-    let ( ({ layout = _;
-             mod_bounds = sub_upper_bounds;
-             with_bounds = No_with_bounds
-           } :
-            (_ * allowed) jkind_desc),
-          _ ) =
-      Layout_and_axes.normalize sub.jkind ~skip_axes:axes_max_on_right ~context
-        ~mode:Ignore_best
-        ~map_type_info:(fun ty { relevant_axes = left_relevant_axes } ->
-          let right_relevant_axes =
-            right_bounds_seq
-            |> Seq.fold_left
-                 (fun acc (ty2, ti) ->
-                   if type_equal ty ty2
-                   then Axis_set.union acc ti.With_bounds_type_info.relevant_axes
-                   else acc)
-                 Axis_set.empty
-          in
-          { relevant_axes = Axis_set.diff left_relevant_axes right_relevant_axes
-          })
-    in
-    (* MB_MODE: compare remaining upper bounds of sub vs lower bounds of super *)
-    let super_lower_bounds = best_super.jkind.mod_bounds in
-    require_le (experimental_mod_bounds_leq sub_upper_bounds super_lower_bounds)
+  | false -> Experimental_solver.sub ~context sub super
 
 (* ====================================================================== *)
 (* END EXPERIMENTAL JKIND SOLVER HOOKS                                    *)
@@ -3859,7 +3838,7 @@ let sub_jkind_l ~type_equal ~context ?(allow_any_crossing = false) sub super =
   in
   match allow_any_crossing with
   | true -> Ok ()
-  | false ->
+  | false -> 
     let best_super =
       (* MB_EXPAND_R *)
       normalize ~mode:Require_best ~context super
