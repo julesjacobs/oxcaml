@@ -796,8 +796,18 @@ module With_bounds = struct
       in
       Format.(
         fprintf ppf "%a"
-          (pp_print_list (fun ppf -> fprintf ppf "with@ %s"))
+      (pp_print_list (fun ppf -> fprintf ppf "with@ %s"))
           type_exprs)
+
+  let to_seq (type l r) (t : (l * r) t) =
+    match t with
+    | No_with_bounds -> Seq.empty
+    | With_bounds tys -> With_bounds_types.to_seq tys
+
+  let type_info_relevant_axes ({ With_bounds_type_info.relevant_axes } :
+                                  With_bounds_type_info.t) :
+      Axis_set.t =
+    relevant_axes
 end
 
 (******************************)

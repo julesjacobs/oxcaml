@@ -50,13 +50,21 @@ let kind_of (ty : Types.type_expr) : JK.ckind =
   | Types.Tvariant _ -> failwith "kind_of: unhandled type"
   | Types.Tpackage _ -> failwith "kind_of: unhandled type"
 
-(* Convert an existing jkind (axes-only for now) to a ckind. We ignore
-   [layout] and [with_bounds] at this stage and encode only modality bounds
-   into the Axis_lattice. *)
 let ckind_of_jkind_l (j : Types.jkind_l) : JK.ckind =
-  let mb = j.jkind.mod_bounds in
-  let lat = Axis_lattice.of_mod_bounds mb in
-  fun (ops : JK.ops) -> ops.const lat
+  fun (ops : JK.ops) ->
+    (* Base is the modality bounds stored on this jkind. *)
+    let base = ops.const (Axis_lattice.of_mod_bounds j.jkind.mod_bounds) in
+    (* For each with-bound (ty, axes), contribute modality(axes_mask, kind_of ty). *)
+    let contribs =
+      Jkind.With_bounds.to_seq j.jkind.with_bounds
+      |> List.of_seq
+      |> List.map (fun (ty, info) ->
+             let axes = Jkind.With_bounds.type_info_relevant_axes info in
+             let mask = Axis_lattice.of_axis_set axes in
+             let kty = ops.kind_of ty in
+             ops.modality mask kty)
+    in
+    ops.join (base :: contribs)
 
 (* Build a JK environment lookup from a Jkind context. This mirrors infer6's
    lookup over a parsed program, but uses the real typing context. *)
@@ -67,14 +75,14 @@ let lookup_of_context ~(context : Jkind.jkind_context) (p : Path.t)
   | Some decl -> (
       match decl.type_manifest with
       | None ->
-        (* Abstract: no manifest. *)
-        (* TODO: use the jkind in the decl instead, convert it to a JK.ckind *)
-        let kind : JK.ckind = failwith "lookup_of_context: abstract type" in
-        JK.Ty { args = decl.type_params; kind; abstract=true }
+        (* Abstract: no manifest. Model as top over axes; params from decl. *)
+        let kind : JK.ckind = ckind_of_jkind_l decl.type_jkind in
+        JK.Ty { args = decl.type_params; kind; abstract = true }
       | Some body_ty ->
+        (* Concrete: compute kind of body. *)
         let args = decl.type_params in
         let kind : JK.ckind = fun ops -> ops.kind_of body_ty in
-        JK.Ty { args; kind; abstract=false})
+        JK.Ty { args; kind; abstract = false })
 
 (* Package the above into a full solver environment. *)
 let env_of_context ~(context : Jkind.jkind_context) : JK.env =
