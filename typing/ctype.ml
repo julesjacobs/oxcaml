@@ -7367,7 +7367,7 @@ let check_decl_jkind env decl jkind =
       Jkind.for_abbreviation ~type_jkind_purely ~modality inner_ty
     | _ -> decl.type_jkind
   in
-  match Jkind.sub_jkind_l ~type_equal ~context decl_jkind jkind with
+  match Ikind.sub_jkind_l ~type_equal ~context decl_jkind jkind with
   | Ok () -> Ok ()
   | Error _ as err ->
     match decl.type_manifest with
@@ -7376,7 +7376,7 @@ let check_decl_jkind env decl jkind =
       (* CR layouts v2.8: Should this use [type_jkind_purely_if_principal]? I
          think not. *)
       let ty_jkind = type_jkind env ty in
-      match Jkind.sub_jkind_l ~type_equal ~context ty_jkind jkind with
+      match Ikind.sub_jkind_l ~type_equal ~context ty_jkind jkind with
       | Ok () -> Ok ()
       | Error _ as err -> err
 

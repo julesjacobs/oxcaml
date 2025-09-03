@@ -3745,75 +3745,7 @@ let sub_or_error ~type_equal ~context t1 t2 =
       (Violation.of_ ~context
          (Not_a_subjkind (t1, t2, Nonempty_list.to_list reason)))
 
-(* Experimental hook: alternative subjkind solver (e.g. Infer6-based).
-   This will compare two jkinds within the provided context/environment.
-   For now it is unimplemented and gated by the OXCAML_JKIND_SOLVER env var. *)
-(* ====================================================================== *)
-(* BEGIN EXPERIMENTAL JKIND SOLVER HOOKS                                  *)
-(*                                                                         *)
-(* The code in this region is the experimental integration point for a     *)
-(* new jkind subjkind solver (e.g. based on the LDD solver from Infer6).   *)
-(* It is intentionally self-contained so it can be iterated on or removed  *)
-(* without affecting the original implementation.                          *)
-(* ====================================================================== *)
-
-
-module Experimental_solver = struct
-  type env_api = {
-    find_type_decl : Path.t -> Types.type_declaration option;
-  }
-
-  let context_to_env_api ~context : env_api = failwith "We will implement this later"
-
-  let sub ~context sub super = 
-    let solver = create_solver (context_to_env_api ~context) in
-    if JK.sub solver sub super then OK () else Violation (* some default violation, -- we'll fix error messages later *)
-
-end
-
-(* Touch the module so it isn't considered unused under -warn-error. *)
-let () = let module _ = Experimental_solver in ()
-
-(* Experimental subjkind solver entry point. Mirrors the structure of
-   sub_jkind_l: check layouts, expand right (MB_EXPAND_R), expand left
-   (MB_EXPAND_L) with axis filtering, then compare modal bounds via the
-   experimental axes comparator above. *)
-let experimental_jkind_sub_solver
-    ~type_equal
-    ~context
-    ?(allow_any_crossing = false)
-    (sub : Types.jkind_l)
-    (super : Types.jkind_l)
-    : (unit, Violation.t) result =
-  let open Misc.Stdlib.Monad.Result.Syntax in
-  let require_le sub_result =
-    Sub_result.require_le sub_result
-    |> Result.map_error (fun reasons ->
-           let best_sub = normalize ~mode:Require_best ~context sub in
-           Violation.of_ ~context
-             (Not_a_subjkind (best_sub, super, Nonempty_list.to_list reasons)))
-  in
-  let* () = require_le (Layout.sub sub.jkind.layout super.jkind.layout) in
-  match allow_any_crossing with
-  | true -> Ok ()
-  | false -> Experimental_solver.sub ~context sub super
-
-(* ====================================================================== *)
-(* END EXPERIMENTAL JKIND SOLVER HOOKS                                    *)
-(* ====================================================================== *)
-
 let sub_jkind_l ~type_equal ~context ?(allow_any_crossing = false) sub super =
-  (* Feature switch: if set, delegate to the experimental solver. *)
-  (match Sys.getenv_opt "OXCAML_JKIND_SOLVER" with
-  | Some ("6" | "proto6" | "on") ->
-    (* Delegate completely to the experimental solver. *)
-    experimental_jkind_sub_solver ~type_equal ~context ~allow_any_crossing sub
-      super
-  | _ ->
-    (* Fall through to the existing implementation below. *)
-    (* We wrap the rest of the function body in a [begin ... end] so the
-       structure remains unchanged. *)
-    begin
   (* This function implements the "SUB" judgement from kind-inference.md. *)
   let open Misc.Stdlib.Monad.Result.Syntax in
   let require_le sub_result =
@@ -3905,7 +3837,6 @@ let sub_jkind_l ~type_equal ~context ?(allow_any_crossing = false) sub super =
       require_le (Mod_bounds.less_or_equal sub_upper_bounds super_lower_bounds)
     in
     Ok ()
-    end)
 
 let is_void_defaulting = function
   | { jkind = { layout = Sort s; _ }; _ } -> Sort.is_void_defaulting s

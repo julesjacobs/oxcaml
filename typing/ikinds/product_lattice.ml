@@ -114,7 +114,7 @@ module Make (S : SHAPE) = struct
     if i < 0 || i >= num_axes then invalid_arg "get_axis: axis out of range";
     let bits = axis_bits.(i) in
     let mask = if bits = 0 then 0 else (1 lsl bits) - 1 in
-    let seg = (v lsr axis_offsets.(i)) land mask;
+    let seg = (v lsr axis_offsets.(i)) land mask in
     decode_levels.(i).(seg)
 
   let set_axis (v : t) ~axis:i ~level:lev : t =
@@ -152,4 +152,3 @@ module Make (S : SHAPE) = struct
     in
     Printf.sprintf "[%s]" parts
 end
-

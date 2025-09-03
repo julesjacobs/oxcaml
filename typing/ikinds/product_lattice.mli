@@ -41,4 +41,3 @@ module Make (_ : SHAPE) : sig
   (* Compact representation, e.g., "[a,b,...]" where entries are axis levels. *)
   val to_string : t -> string
 end
-
