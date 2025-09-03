@@ -50,6 +50,14 @@ let kind_of (ty : Types.type_expr) : JK.ckind =
   | Types.Tvariant _ -> failwith "kind_of: unhandled type"
   | Types.Tpackage _ -> failwith "kind_of: unhandled type"
 
+(* Convert an existing jkind (axes-only for now) to a ckind. We ignore
+   [layout] and [with_bounds] at this stage and encode only modality bounds
+   into the Axis_lattice. *)
+let ckind_of_jkind_l (j : Types.jkind_l) : JK.ckind =
+  let mb = j.jkind.mod_bounds in
+  let lat = Axis_lattice.of_mod_bounds mb in
+  fun (ops : JK.ops) -> ops.const lat
+
 (* Build a JK environment lookup from a Jkind context. This mirrors infer6's
    lookup over a parsed program, but uses the real typing context. *)
 let lookup_of_context ~(context : Jkind.jkind_context) (p : Path.t)
