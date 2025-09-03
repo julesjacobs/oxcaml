@@ -31,22 +31,21 @@ module JK = Ldd_jkind_solver.Make (Axis_lattice) (TyM) (ConstrM)
 let kind_of (ty : Types.type_expr) : JK.ckind =
  fun (ops : JK.ops) ->
   match Types.get_desc ty with
-  | Types.Tvar _ | Types.Tunivar _ -> ops.rigid ty
-  | Types.Tconstr (p, args, _) ->
+  | Types.Tvar {name=_name; jkind=_jkind} | Types.Tunivar {name=_name; jkind=_jkind} -> ops.rigid ty
+  | Types.Tconstr (p, args, _abbrev_memo) ->
     let arg_kinds = List.map (fun t -> ops.kind_of t) args in
     ops.constr p arg_kinds
   | Types.Ttuple elts ->
     elts |> List.map (fun (_lbl, t) -> ops.kind_of t) |> ops.join
   | Types.Tunboxed_tuple elts ->
     elts |> List.map (fun (_lbl, t) -> ops.kind_of t) |> ops.join
-  | Types.Tarrow (_lbl, t1, t2, _commu) -> ops.join [ ops.kind_of t1; ops.kind_of t2 ]
+  | Types.Tarrow (_lbl, _t1, _t2, _commu) -> failwith "kind_of: unhandled type"
   | Types.Tlink t -> ops.kind_of t
-  | Types.Tsubst (_, _)
-  | Types.Tpoly (_, _)
-  | Types.Tof_kind _
-  | Types.Tobject (_, _)
-  | Types.Tfield (_, _, _, _)
-  | Types.Tnil
-  | Types.Tvariant _
-  | Types.Tpackage _ ->
-    failwith "kind_of: unhandled type"
+  | Types.Tsubst (_, _) -> failwith "kind_of: unhandled type"
+  | Types.Tpoly (_, _) -> failwith "kind_of: unhandled type"
+  | Types.Tof_kind _ -> failwith "kind_of: unhandled type"
+  | Types.Tobject (_, _) -> failwith "kind_of: unhandled type"
+  | Types.Tfield (_, _, _, _) -> failwith "kind_of: unhandled type"
+  | Types.Tnil -> failwith "kind_of: unhandled type"  
+  | Types.Tvariant _ -> failwith "kind_of: unhandled type"
+  | Types.Tpackage _ -> failwith "kind_of: unhandled type"
