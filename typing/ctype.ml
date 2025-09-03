@@ -2298,7 +2298,12 @@ let mk_is_abstract env p =
   -> false
 
 let mk_jkind_context env jkind_of_type =
-  { Jkind.jkind_of_type; is_abstract = mk_is_abstract env }
+  let lookup_type p =
+    match Env.find_type p env with
+    | decl -> Some (decl.type_jkind, decl.type_manifest)
+    | exception Not_found -> None
+  in
+  { Jkind.jkind_of_type; is_abstract = mk_is_abstract env; lookup_type }
 
 (* This uses the forward ref - only needed inside estimate_type_jkind *)
 let mk_jkind_context_check_principal_ref env =
