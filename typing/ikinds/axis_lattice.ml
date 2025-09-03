@@ -20,3 +20,171 @@ end)
 include T
 
 let to_string = T.to_string
+
+(* Conversion between Types.Jkind_mod_bounds.t and Axis_lattice.t *)
+
+let level_of_areality (a : Mode.Regionality.Const.t) : int =
+  match a with
+  | Mode.Regionality.Const.Global -> 0
+  | Mode.Regionality.Const.Regional -> 1
+  | Mode.Regionality.Const.Local -> 2
+
+let areality_of_level = function
+  | 0 -> Mode.Regionality.Const.Global
+  | 1 -> Mode.Regionality.Const.Regional
+  | 2 -> Mode.Regionality.Const.Local
+  | _ -> invalid_arg "Axis_lattice.areality_of_level"
+
+let level_of_linearity (x : Mode.Linearity.Const.t) : int =
+  match x with
+  | Mode.Linearity.Const.Many -> 0
+  | Mode.Linearity.Const.Once -> 1
+
+let linearity_of_level = function
+  | 0 -> Mode.Linearity.Const.Many
+  | 1 -> Mode.Linearity.Const.Once
+  | _ -> invalid_arg "Axis_lattice.linearity_of_level"
+
+let level_of_uniqueness (x : Mode.Uniqueness.Const.t) : int =
+  match x with
+  | Mode.Uniqueness.Const.Unique -> 0
+  | Mode.Uniqueness.Const.Aliased -> 1
+
+let uniqueness_of_level = function
+  | 0 -> Mode.Uniqueness.Const.Unique
+  | 1 -> Mode.Uniqueness.Const.Aliased
+  | _ -> invalid_arg "Axis_lattice.uniqueness_of_level"
+
+let level_of_portability (x : Mode.Portability.Const.t) : int =
+  match x with
+  | Mode.Portability.Const.Portable -> 0
+  | Mode.Portability.Const.Nonportable -> 1
+
+let portability_of_level = function
+  | 0 -> Mode.Portability.Const.Portable
+  | 1 -> Mode.Portability.Const.Nonportable
+  | _ -> invalid_arg "Axis_lattice.portability_of_level"
+
+let level_of_contention (x : Mode.Contention.Const.t) : int =
+  match x with
+  | Mode.Contention.Const.Uncontended -> 0
+  | Mode.Contention.Const.Shared -> 1
+  | Mode.Contention.Const.Contended -> 2
+
+let contention_of_level = function
+  | 0 -> Mode.Contention.Const.Uncontended
+  | 1 -> Mode.Contention.Const.Shared
+  | 2 -> Mode.Contention.Const.Contended
+  | _ -> invalid_arg "Axis_lattice.contention_of_level"
+
+let level_of_yielding (x : Mode.Yielding.Const.t) : int =
+  match x with
+  | Mode.Yielding.Const.Unyielding -> 0
+  | Mode.Yielding.Const.Yielding -> 1
+
+let yielding_of_level = function
+  | 0 -> Mode.Yielding.Const.Unyielding
+  | 1 -> Mode.Yielding.Const.Yielding
+  | _ -> invalid_arg "Axis_lattice.yielding_of_level"
+
+let level_of_statefulness (x : Mode.Statefulness.Const.t) : int =
+  match x with
+  | Mode.Statefulness.Const.Stateless -> 0
+  | Mode.Statefulness.Const.Observing -> 1
+  | Mode.Statefulness.Const.Stateful -> 2
+
+let statefulness_of_level = function
+  | 0 -> Mode.Statefulness.Const.Stateless
+  | 1 -> Mode.Statefulness.Const.Observing
+  | 2 -> Mode.Statefulness.Const.Stateful
+  | _ -> invalid_arg "Axis_lattice.statefulness_of_level"
+
+let level_of_visibility (x : Mode.Visibility.Const.t) : int =
+  match x with
+  | Mode.Visibility.Const.Read_write -> 0
+  | Mode.Visibility.Const.Read -> 1
+  | Mode.Visibility.Const.Immutable -> 2
+
+let visibility_of_level = function
+  | 0 -> Mode.Visibility.Const.Read_write
+  | 1 -> Mode.Visibility.Const.Read
+  | 2 -> Mode.Visibility.Const.Immutable
+  | _ -> invalid_arg "Axis_lattice.visibility_of_level"
+
+let level_of_externality (x : Jkind_axis.Externality.t) : int =
+  match x with
+  | Jkind_axis.Externality.External -> 0
+  | Jkind_axis.Externality.External64 -> 1
+  | Jkind_axis.Externality.Internal -> 2
+
+let externality_of_level = function
+  | 0 -> Jkind_axis.Externality.External
+  | 1 -> Jkind_axis.Externality.External64
+  | 2 -> Jkind_axis.Externality.Internal
+  | _ -> invalid_arg "Axis_lattice.externality_of_level"
+
+let level_of_nullability (x : Jkind_axis.Nullability.t) : int =
+  match x with
+  | Jkind_axis.Nullability.Non_null -> 0
+  | Jkind_axis.Nullability.Maybe_null -> 1
+
+let nullability_of_level = function
+  | 0 -> Jkind_axis.Nullability.Non_null
+  | 1 -> Jkind_axis.Nullability.Maybe_null
+  | _ -> invalid_arg "Axis_lattice.nullability_of_level"
+
+let level_of_separability (x : Jkind_axis.Separability.t) : int =
+  match x with
+  | Jkind_axis.Separability.Non_float -> 0
+  | Jkind_axis.Separability.Separable -> 1
+  | Jkind_axis.Separability.Maybe_separable -> 2
+
+let separability_of_level = function
+  | 0 -> Jkind_axis.Separability.Non_float
+  | 1 -> Jkind_axis.Separability.Separable
+  | 2 -> Jkind_axis.Separability.Maybe_separable
+  | _ -> invalid_arg "Axis_lattice.separability_of_level"
+
+let of_mod_bounds (mb : Types.Jkind_mod_bounds.t) : t =
+  let levels = [|
+    level_of_areality (Types.Jkind_mod_bounds.areality mb);
+    level_of_linearity (Types.Jkind_mod_bounds.linearity mb);
+    level_of_uniqueness (Types.Jkind_mod_bounds.uniqueness mb);
+    level_of_portability (Types.Jkind_mod_bounds.portability mb);
+    level_of_contention (Types.Jkind_mod_bounds.contention mb);
+    level_of_yielding (Types.Jkind_mod_bounds.yielding mb);
+    level_of_statefulness (Types.Jkind_mod_bounds.statefulness mb);
+    level_of_visibility (Types.Jkind_mod_bounds.visibility mb);
+    level_of_externality (Types.Jkind_mod_bounds.externality mb);
+    level_of_nullability (Types.Jkind_mod_bounds.nullability mb);
+    level_of_separability (Types.Jkind_mod_bounds.separability mb);
+  |] in
+  encode ~levels
+
+let to_mod_bounds (v : t) : Types.Jkind_mod_bounds.t =
+  let lv = decode v in
+  let areality = areality_of_level lv.(0) in
+  let linearity = linearity_of_level lv.(1) in
+  let uniqueness = uniqueness_of_level lv.(2) in
+  let portability = portability_of_level lv.(3) in
+  let contention = contention_of_level lv.(4) in
+  let yielding = yielding_of_level lv.(5) in
+  let statefulness = statefulness_of_level lv.(6) in
+  let visibility = visibility_of_level lv.(7) in
+  let externality = externality_of_level lv.(8) in
+  let nullability = nullability_of_level lv.(9) in
+  let separability = separability_of_level lv.(10) in
+  Types.Jkind_mod_bounds.create ~areality ~linearity ~uniqueness ~portability
+    ~contention ~yielding ~statefulness ~visibility ~externality ~nullability
+    ~separability
+
+(* Map a set of relevant axes to a lattice element: relevant axes -> top level;
+   non-relevant -> level 0. Ordering must match Axis_set.axis_index and our
+   axis_sizes layout. *)
+let of_axis_set (set : Jkind_axis.Axis_set.t) : t =
+  let levels = Array.make num_axes 0 in
+  List.iteri
+    (fun i (Jkind_axis.Axis.Pack axis) ->
+      if Jkind_axis.Axis_set.mem set axis then levels.(i) <- axis_sizes.(i) - 1)
+    Jkind_axis.Axis.all;
+  encode ~levels
