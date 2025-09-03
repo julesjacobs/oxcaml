@@ -1,12 +1,3 @@
-let sub_jkind_l
-    ~(type_equal : Types.type_expr -> Types.type_expr -> bool)
-    ~(context : Jkind.jkind_context)
-    (sub : Types.jkind_l)
-    (super : Types.jkind_l)
-    : (unit, Jkind.Violation.t) result =
-  print_endline "sub_jkind_l";
-  Jkind.sub_jkind_l ~type_equal ~context sub super
-
 (* Minimal kind constructor over real Types.type_expr, inspired by infer6. *)
 
 module TyM = struct
@@ -92,3 +83,19 @@ let env_of_context ~(context : Jkind.jkind_context) : JK.env =
 
 let make_solver ~(context : Jkind.jkind_context) : JK.solver =
   JK.make_solver (env_of_context ~context)
+
+let sub_jkind_l
+    ~(type_equal : Types.type_expr -> Types.type_expr -> bool)
+    ~(context : Jkind.jkind_context)
+    (sub : Types.jkind_l)
+    (super : Types.jkind_l)
+    : (unit, Jkind.Violation.t) result =
+  print_endline "sub_jkind_l";
+  let solver = make_solver ~context in
+  let sub_poly = JK.normalize solver (ckind_of_jkind_l sub) in
+  let super_poly = JK.normalize solver (ckind_of_jkind_l super) in
+  let sub_poly_pp = JK.pp sub_poly in
+  let super_poly_pp = JK.pp super_poly in
+  (* Print sub: <sub_poly_pp>, super: <super_poly_pp> *)
+  print_endline (Format.asprintf "sub: %s, super: %s" sub_poly_pp super_poly_pp);
+  Jkind.sub_jkind_l ~type_equal ~context sub super

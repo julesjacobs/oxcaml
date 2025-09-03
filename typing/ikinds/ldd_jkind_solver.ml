@@ -186,6 +186,9 @@ struct
     in
     { ops; constr_kind_poly }
 
+  let normalize (solver : solver) (k : ckind) : poly =
+    k solver.ops
+
   let constr_kind_poly (solver : solver) (c : constr) : poly * poly list =
     solver.constr_kind_poly c
 

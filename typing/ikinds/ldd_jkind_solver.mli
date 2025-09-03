@@ -58,6 +58,7 @@ module Make
   type env = { kind_of : ty -> ckind; lookup : constr -> constr_decl }
 
   val make_solver : env -> solver
+  val normalize : solver -> ckind -> poly
   val constr_kind_poly : solver -> constr -> poly * poly list
   val leq : solver -> ckind -> ckind -> bool
   val round_up : solver -> ckind -> lat
