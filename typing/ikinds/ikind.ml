@@ -49,3 +49,30 @@ let kind_of (ty : Types.type_expr) : JK.ckind =
   | Types.Tnil -> failwith "kind_of: unhandled type"  
   | Types.Tvariant _ -> failwith "kind_of: unhandled type"
   | Types.Tpackage _ -> failwith "kind_of: unhandled type"
+
+(* Build a JK environment lookup from a Jkind context. This mirrors infer6's
+   lookup over a parsed program, but uses the real typing context. *)
+let lookup_of_context ~(context : Jkind.jkind_context) (p : Path.t)
+    : JK.constr_decl =
+  match context.lookup_type p with
+  | None -> failwith (Format.asprintf "Ikind.lookup: unknown constructor %a" Path.print p)
+  | Some decl -> (
+      match decl.type_manifest with
+      | None ->
+        (* Abstract: no manifest. *)
+        (* TODO: use the jkind in the decl instead, convert it to a JK.ckind *)
+        let kind : JK.ckind = failwith "lookup_of_context: abstract type" in
+        JK.Ty { args = decl.type_params; kind; abstract=true }
+      | Some body_ty ->
+        let args = decl.type_params in
+        let kind : JK.ckind = fun ops -> ops.kind_of body_ty in
+        JK.Ty { args; kind; abstract=false})
+
+(* Package the above into a full solver environment. *)
+let env_of_context ~(context : Jkind.jkind_context) : JK.env =
+  let kind_of = kind_of in
+  let lookup = lookup_of_context ~context in
+  { JK.kind_of; lookup }
+
+let make_solver ~(context : Jkind.jkind_context) : JK.solver =
+  JK.make_solver (env_of_context ~context)

@@ -806,7 +806,7 @@ end
 type jkind_context =
   { jkind_of_type : Types.type_expr -> Types.jkind_l option;
     is_abstract : Path.t -> bool;
-    lookup_type : Path.t -> (Types.jkind_l * Types.type_expr option) option;
+    lookup_type : Path.t -> Types.type_declaration option;
   }
 
 module Layout_and_axes = struct
