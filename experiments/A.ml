@@ -1,5 +1,5 @@
 module type Asig = sig
-  type t : value mod portable many
+  type t : value
 end
 
 module A : Asig = struct

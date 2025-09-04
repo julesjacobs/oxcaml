@@ -183,8 +183,27 @@ let to_mod_bounds (v : t) : Types.Jkind_mod_bounds.t =
    axis_sizes layout. *)
 let of_axis_set (set : Jkind_axis.Axis_set.t) : t =
   let levels = Array.make num_axes 0 in
-  List.iteri
-    (fun i (Jkind_axis.Axis.Pack axis) ->
-      if Jkind_axis.Axis_set.mem set axis then levels.(i) <- axis_sizes.(i) - 1)
-    Jkind_axis.Axis.all;
+  let open Jkind_axis in
+  let set_idx_by_name (name : string) =
+    let idx =
+      match name with
+      | "areality" -> Some 0
+      | "linearity" -> Some 1
+      | "uniqueness" -> Some 2
+      | "portability" -> Some 3
+      | "contention" -> Some 4
+      | "yielding" -> Some 5
+      | "statefulness" -> Some 6
+      | "visibility" -> Some 7
+      | "externality" -> Some 8
+      | "nullability" -> Some 9
+      | "separability" -> Some 10
+      | _ -> None
+    in
+    match idx with
+    | None -> ()
+    | Some i -> levels.(i) <- axis_sizes.(i) - 1
+  in
+  Axis_set.to_seq set
+  |> Seq.iter (fun (Axis.Pack ax) -> set_idx_by_name (Axis.name ax));
   encode ~levels

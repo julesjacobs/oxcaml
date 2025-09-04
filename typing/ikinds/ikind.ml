@@ -123,16 +123,19 @@ let sub_jkind_l
   let axes_info =
     if ik_leq then None
     else (
-      (* Fall back to Axis_lattice-level comparison for diagnostics. *)
-      let sub_lv = Axis_lattice.decode (Axis_lattice.of_mod_bounds sub.jkind.mod_bounds) in
-      let sup_lv = Axis_lattice.decode (Axis_lattice.of_mod_bounds super.jkind.mod_bounds) in
-      let parts =
-        Jkind_axis.Axis.all
-        |> List.mapi (fun i (Jkind_axis.Axis.Pack axis) ->
-               let a = sub_lv.(i) and b = sup_lv.(i) in
-               if a > b then Some (Jkind_axis.Axis.name axis) else None)
-        |> List.filter_map (fun x -> x)
+      (* Compare the IK-normalized lattice values that we also print above, so the
+         axes listed match the shown vectors. *)
+      let sub_lv = Axis_lattice.decode (JK.round_up solver (ckind_of_jkind_l sub)) in
+      let sup_lv = Axis_lattice.decode (JK.round_up solver (ckind_of_jkind_l super)) in
+      let names =
+        [| "areality"; "linearity"; "uniqueness"; "portability"; "contention";
+           "yielding"; "statefulness"; "visibility"; "externality"; "nullability"; "separability" |]
       in
+      let parts = ref [] in
+      for i = 0 to Array.length names - 1 do
+        if sub_lv.(i) > sup_lv.(i) then parts := names.(i) :: !parts
+      done;
+      let parts = List.rev !parts in
       if parts = [] then None else Some (" axes=[" ^ String.concat "," parts ^ "]"))
   in
   let allow_any_str = if allow_any then " allowAny" else "" in
@@ -153,6 +156,14 @@ let sub_jkind_l
      let jk_sub = Format.asprintf "%a" Jkind.format sub in
      let jk_sup = Format.asprintf "%a" Jkind.format super in
      print_endline (Format.asprintf "  %s <: %s" jk_sub jk_sup)
+   with _ -> ());
+  (* Print the IK round_up (axes lattice) as well *)
+  (try
+     let sub_ru_lat = JK.round_up solver (ckind_of_jkind_l sub) in
+     let sup_ru_lat = JK.round_up solver (ckind_of_jkind_l super) in
+     let sub_ru_pp = Axis_lattice.to_string sub_ru_lat in
+     let sup_ru_pp = Axis_lattice.to_string sup_ru_lat in
+     print_endline (Format.asprintf "  ik_round_up %s <: %s" sub_ru_pp sup_ru_pp)
    with _ -> ());
   print_endline
     (Format.asprintf
