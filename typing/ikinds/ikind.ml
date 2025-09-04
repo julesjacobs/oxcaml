@@ -276,10 +276,11 @@ let sub_jkind_l
       "  %s <: %s ik/jk=%s/%s%s%s"
       sub_poly_pp super_poly_pp ik_str jk_str allow_any_str axes_str
   in
-  let is_mismatch = (not ik_leq) || (not jk_ok) in
-  if is_mismatch then
-    (* Print mismatches in red *)
+  let disagreement = (ik_leq && not jk_ok) || ((not ik_leq) && jk_ok) in
+  if disagreement then
+    (* Only disagreements (IK!=JK) printed in red *)
     print_endline ("\027[31m" ^ summary ^ "\027[0m")
   else
+    (* Agreements (T/T) or (F/F) printed normally *)
     print_endline summary;
   res

@@ -1,0 +1,4 @@
+type 'a degenerate : immutable_data with 'a =
+  | Leaf of 'a
+  | Branch of ('a * 'a) degenerate
+
