@@ -38,25 +38,12 @@ module Make (S : SHAPE) = struct
         if bits = 0 then 0 else ((1 lsl bits) - 1) lsl axis_offsets.(i))
 
   let clear_masks = Array.init num_axes (fun i -> lnot full_masks.(i))
-  let all_mask = Array.fold_left ( lor ) 0 full_masks
-
   let level_masks =
     Array.init num_axes (fun i ->
         let n = axis_sizes.(i) in
         let off = axis_offsets.(i) in
         Array.init n (fun lev ->
             if lev = 0 then 0 else ((1 lsl lev) - 1) lsl off))
-
-  (* Bit-parallel helpers for co_sub *)
-  let max_axis_bits = Array.fold_left max 0 axis_bits
-
-  let group_masks_by_bits =
-    let arr = Array.make (max_axis_bits + 1) 0 in
-    for i = 0 to num_axes - 1 do
-      let w = axis_bits.(i) in
-      if w > 0 then arr.(w) <- arr.(w) lor full_masks.(i)
-    done;
-    arr
 
   let decode_levels =
     Array.init num_axes (fun i ->
@@ -82,34 +69,6 @@ module Make (S : SHAPE) = struct
   let equal (a : t) (b : t) : bool = leq a b && leq b a
   let hash a = a
 
-  let co_sub (a : t) (b : t) : t =
-    (* Bit-parallel within groups of equal width; avoid per-axis inspect. *)
-    let diff = a land lnot b land all_mask in
-    if diff = 0 then 0
-    else
-      let keep = ref 0 in
-      (* For each width w, propagate any 1 within that w-bit field across the
-         field. *)
-      for w = 1 to max_axis_bits do
-        let m = group_masks_by_bits.(w) in
-        if m <> 0 then (
-          let x = ref (diff land m) in
-          (* propagate right within fields (powers of two stride) *)
-          let k = ref 1 in
-          while !k < w do
-            x := !x lor ((!x lsr !k) land m);
-            k := !k lsl 1
-          done;
-          (* propagate left within fields *)
-          let k = ref 1 in
-          while !k < w do
-            x := !x lor ((!x lsl !k) land m);
-            k := !k lsl 1
-          done;
-          keep := !keep lor !x)
-      done;
-      a land !keep
-
   let get_axis (v : t) ~axis:i : int =
     if i < 0 || i >= num_axes then invalid_arg "get_axis: axis out of range";
     let bits = axis_bits.(i) in
@@ -123,6 +82,17 @@ module Make (S : SHAPE) = struct
     if lev < 0 || lev >= n then invalid_arg "set_axis: level out of range";
     let cleared = v land clear_masks.(i) in
     cleared lor level_masks.(i).(lev)
+
+  let co_sub (a : t) (b : t) : t =
+    (* Per-axis residual without full decode: keep a's level on axes where b < a;
+       zero out axes where b >= a. *)
+    let res = ref 0 in
+    for i = 0 to num_axes - 1 do
+      let alev = get_axis a ~axis:i in
+      let blev = get_axis b ~axis:i in
+      if blev < alev then res := set_axis !res ~axis:i ~level:alev
+    done;
+    !res
 
   let encode ~levels : t =
     if Array.length levels <> num_axes then invalid_arg "encode: wrong arity";
