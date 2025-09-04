@@ -50,10 +50,23 @@ let level_of_uniqueness (x : Mode.Uniqueness.Const.t) : int =
   | Mode.Uniqueness.Const.Unique -> 0
   | Mode.Uniqueness.Const.Aliased -> 1
 
+(* For monadic axes, the semantic ordering is flipped (we compare using the
+   op-lattice). When encoding into our numeric lattice where higher means
+   "more permissive/top", flip the levels for monadic axes. *)
+let level_of_uniqueness_monadic (x : Mode.Uniqueness.Const.t) : int =
+  match x with
+  | Mode.Uniqueness.Const.Unique -> 1
+  | Mode.Uniqueness.Const.Aliased -> 0
+
 let uniqueness_of_level = function
   | 0 -> Mode.Uniqueness.Const.Unique
   | 1 -> Mode.Uniqueness.Const.Aliased
   | _ -> invalid_arg "Axis_lattice.uniqueness_of_level"
+
+let uniqueness_of_level_monadic = function
+  | 0 -> Mode.Uniqueness.Const.Aliased
+  | 1 -> Mode.Uniqueness.Const.Unique
+  | _ -> invalid_arg "Axis_lattice.uniqueness_of_level_monadic"
 
 let level_of_portability (x : Mode.Portability.Const.t) : int =
   match x with
@@ -71,11 +84,23 @@ let level_of_contention (x : Mode.Contention.Const.t) : int =
   | Mode.Contention.Const.Shared -> 1
   | Mode.Contention.Const.Contended -> 2
 
+let level_of_contention_monadic (x : Mode.Contention.Const.t) : int =
+  match x with
+  | Mode.Contention.Const.Uncontended -> 2
+  | Mode.Contention.Const.Shared -> 1
+  | Mode.Contention.Const.Contended -> 0
+
 let contention_of_level = function
   | 0 -> Mode.Contention.Const.Uncontended
   | 1 -> Mode.Contention.Const.Shared
   | 2 -> Mode.Contention.Const.Contended
   | _ -> invalid_arg "Axis_lattice.contention_of_level"
+
+let contention_of_level_monadic = function
+  | 0 -> Mode.Contention.Const.Contended
+  | 1 -> Mode.Contention.Const.Shared
+  | 2 -> Mode.Contention.Const.Uncontended
+  | _ -> invalid_arg "Axis_lattice.contention_of_level_monadic"
 
 let level_of_yielding (x : Mode.Yielding.Const.t) : int =
   match x with
@@ -105,11 +130,23 @@ let level_of_visibility (x : Mode.Visibility.Const.t) : int =
   | Mode.Visibility.Const.Read -> 1
   | Mode.Visibility.Const.Immutable -> 2
 
+let level_of_visibility_monadic (x : Mode.Visibility.Const.t) : int =
+  match x with
+  | Mode.Visibility.Const.Read_write -> 2
+  | Mode.Visibility.Const.Read -> 1
+  | Mode.Visibility.Const.Immutable -> 0
+
 let visibility_of_level = function
   | 0 -> Mode.Visibility.Const.Read_write
   | 1 -> Mode.Visibility.Const.Read
   | 2 -> Mode.Visibility.Const.Immutable
   | _ -> invalid_arg "Axis_lattice.visibility_of_level"
+
+let visibility_of_level_monadic = function
+  | 0 -> Mode.Visibility.Const.Immutable
+  | 1 -> Mode.Visibility.Const.Read
+  | 2 -> Mode.Visibility.Const.Read_write
+  | _ -> invalid_arg "Axis_lattice.visibility_of_level_monadic"
 
 let level_of_externality (x : Jkind_axis.Externality.t) : int =
   match x with
@@ -149,12 +186,12 @@ let of_mod_bounds (mb : Types.Jkind_mod_bounds.t) : t =
   let levels = [|
     level_of_areality (Types.Jkind_mod_bounds.areality mb);
     level_of_linearity (Types.Jkind_mod_bounds.linearity mb);
-    level_of_uniqueness (Types.Jkind_mod_bounds.uniqueness mb);
+    level_of_uniqueness_monadic (Types.Jkind_mod_bounds.uniqueness mb);
     level_of_portability (Types.Jkind_mod_bounds.portability mb);
-    level_of_contention (Types.Jkind_mod_bounds.contention mb);
+    level_of_contention_monadic (Types.Jkind_mod_bounds.contention mb);
     level_of_yielding (Types.Jkind_mod_bounds.yielding mb);
     level_of_statefulness (Types.Jkind_mod_bounds.statefulness mb);
-    level_of_visibility (Types.Jkind_mod_bounds.visibility mb);
+    level_of_visibility_monadic (Types.Jkind_mod_bounds.visibility mb);
     level_of_externality (Types.Jkind_mod_bounds.externality mb);
     level_of_nullability (Types.Jkind_mod_bounds.nullability mb);
     level_of_separability (Types.Jkind_mod_bounds.separability mb);
@@ -165,12 +202,12 @@ let to_mod_bounds (v : t) : Types.Jkind_mod_bounds.t =
   let lv = decode v in
   let areality = areality_of_level lv.(0) in
   let linearity = linearity_of_level lv.(1) in
-  let uniqueness = uniqueness_of_level lv.(2) in
+  let uniqueness = uniqueness_of_level_monadic lv.(2) in
   let portability = portability_of_level lv.(3) in
-  let contention = contention_of_level lv.(4) in
+  let contention = contention_of_level_monadic lv.(4) in
   let yielding = yielding_of_level lv.(5) in
   let statefulness = statefulness_of_level lv.(6) in
-  let visibility = visibility_of_level lv.(7) in
+  let visibility = visibility_of_level_monadic lv.(7) in
   let externality = externality_of_level lv.(8) in
   let nullability = nullability_of_level lv.(9) in
   let separability = separability_of_level lv.(10) in

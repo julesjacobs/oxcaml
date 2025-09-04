@@ -165,8 +165,15 @@ let sub_jkind_l
      let sup_ru_pp = Axis_lattice.to_string sup_ru_lat in
      print_endline (Format.asprintf "  ik_round_up %s <: %s" sub_ru_pp sup_ru_pp)
    with _ -> ());
-  print_endline
-    (Format.asprintf
-       "  %s <: %s ik/jk=%s/%s%s%s"
-       sub_poly_pp super_poly_pp ik_str jk_str allow_any_str axes_str);
+  let summary =
+    Format.asprintf
+      "  %s <: %s ik/jk=%s/%s%s%s"
+      sub_poly_pp super_poly_pp ik_str jk_str allow_any_str axes_str
+  in
+  let is_mismatch = (not ik_leq) || (not jk_ok) in
+  if is_mismatch then
+    (* Print mismatches in red *)
+    print_endline ("\027[31m" ^ summary ^ "\027[0m")
+  else
+    print_endline summary;
   res
