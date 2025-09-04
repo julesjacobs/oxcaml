@@ -1,13 +1,14 @@
 (* Axis lattice specialized from the generic product lattice. *)
 module T = Product_lattice.Make (struct
   (* Align with all jkinds axes in OxCaml, in the same order
-     as typing/jkind_axis.ml Axis_set.axis_index:
+     as typing/jkind_axis.ml Axis_set.axis_index, and list values
+     in the same increasing order as our encoded levels:
      0 Areality (Regionality): Global, Regional, Local -> 3
      1 Linearity: Many, Once -> 2
-     2 Uniqueness (monadic): Unique, Aliased -> 2
+     2 Uniqueness (monadic): Aliased, Unique -> 2
      3 Portability: Portable, Nonportable -> 2
      4 Contention (monadic): Contended, Shared, Uncontended -> 3
-     5 Yielding: Yielding, Unyielding -> 2
+     5 Yielding: Unyielding, Yielding -> 2
      6 Statefulness: Stateless, Observing, Stateful -> 3
      7 Visibility (monadic): Immutable, Read, Read_write -> 3
      8 Externality: External, External64, Internal -> 3
