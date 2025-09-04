@@ -4,14 +4,14 @@ module type SHAPE = sig
 end
 
 module Make (_ : SHAPE) : sig
-  type t = int
+  type t
 
   (* Shape info *)
   val num_axes : int
   val axis_sizes : int array
-  val axis_bits : int array
-  val axis_offsets : int array
-  val total_bits : int
+  (* val axis_bits : int array *)
+  (* val axis_offsets : int array *)
+  (* val total_bits : int *)
 
   (* Lattice constants *)
   val bot : t
@@ -36,7 +36,7 @@ module Make (_ : SHAPE) : sig
   val decode : t -> int array
 
   (* Pretty-print; optionally name axes *)
-  val pp : ?axis_names:string array -> t -> string
+  val pp : t -> string
 
   (* Compact representation, e.g., "[a,b,...]" where entries are axis levels. *)
   val to_string : t -> string

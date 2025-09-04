@@ -217,29 +217,10 @@ let sub_jkind_l
     (sub : Types.jkind_l)
     (super : Types.jkind_l)
     : (unit, Jkind.Violation.t) result =
-  (* One-shot developer probe when requested via env var. *)
-  (let ran = ref false in
-   match Sys.getenv_opt "IKIND_POLY_PROBE" with
-   | Some v when (v = "1" || String.lowercase_ascii v = "true") && not !ran ->
-     ran := true;
-     let open Axis_lattice in
-     let a = encode ~levels:[| 0;1;0;1;2;1;2;2;1;0;0 |] in
-     let b = encode ~levels:[| 2;0;1;0;0;0;0;0;2;0;0 |] in
-     let residual = co_sub a b in
-     let joined = join b residual in
-     Printf.printf "a = %s\n" (to_string a);
-     Printf.printf "b = %s\n" (to_string b);
-     Printf.printf "co_sub a b = %s\n" (to_string residual);
-     Printf.printf "join b (co_sub a b) = %s\n" (to_string joined);
-     let module V = struct type t = string let compare = String.compare let to_string s = s end in
-     let module P = Ldd.Make (Axis_lattice) (V) in
-    let v = P.rigid "<ty#211>" in
-    let term = P.meet (P.const a) (P.var v) in
-     let base = P.const b in
-     let poly = P.join term base in
-     Printf.printf "poly = %s\n" (P.pp poly);
-     Printf.printf "round_up poly = %s\n" (to_string (P.round_up poly));
-     exit 0
+  (* Developer probe stub (disabled). Set IKIND_POLY_PROBE to enable future tests. *)
+  (match Sys.getenv_opt "IKIND_POLY_PROBE" with
+   | Some v when (v = "1" || String.lowercase_ascii v = "true") ->
+     Printf.eprintf "[ikind] IKIND_POLY_PROBE enabled (no-op stub)\n%!"
    | _ -> ());
   let solver = make_solver ~context in
   let sub_poly = JK.normalize solver (ckind_of_jkind_l sub) in
@@ -309,73 +290,9 @@ let sub_jkind_l
     print_endline summary;
   res
 
-(* Developer probe: build a lattice polynomial (a ⊓ <ty>) ⊔ b and print
-   co_sub results and round_up. Triggered by IKIND_POLY_PROBE env var. *)
+(* Developer probe stub: set IKIND_POLY_PROBE to enable future tests. No-op by default. *)
 let () =
   match Sys.getenv_opt "IKIND_POLY_PROBE" with
-  | None -> ()
-  | Some v when v = "0" || String.lowercase_ascii v = "false" -> ()
-  | Some _ ->
-    let open Axis_lattice in
-    let a_levels =
-      (* [0,1,0,1,2,1,2,2,1,0,0] *)
-      [| 0; 1; 0; 1; 2; 1; 2; 2; 1; 0; 0 |]
-    in
-    let b_levels =
-      (* [2,0,1,0,0,0,0,0,2,0,0] *)
-      [| 2; 0; 1; 0; 0; 0; 0; 0; 2; 0; 0 |]
-    in
-    let a = encode ~levels:a_levels in
-    let b = encode ~levels:b_levels in
-    let residual = co_sub a b in
-    let joined = join b residual in
-    Printf.printf "a = %s\n" (to_string a);
-    Printf.printf "b = %s\n" (to_string b);
-    Printf.printf "co_sub a b = %s\n" (to_string residual);
-    Printf.printf "join b (co_sub a b) = %s\n" (to_string joined);
-    (* Also test a single-axis lattice: [|1|] co_sub [|2|] *)
-    let module Single = Product_lattice.Make(struct let axis_sizes = [| 3 |] end) in
-    let a1 = Single.encode ~levels:[| 1 |] in
-    let b1 = Single.encode ~levels:[| 2 |] in
-    let r1 = Single.co_sub a1 b1 in
-    let j1 = Single.join b1 r1 in
-    Printf.printf "single a1 = %s\n" (Single.to_string a1);
-    Printf.printf "single b1 = %s\n" (Single.to_string b1);
-    Printf.printf "single co_sub a1 b1 = %s\n" (Single.to_string r1);
-    Printf.printf "single join b1 (co_sub a1 b1) = %s\n" (Single.to_string j1);
-    (* Scan a few axis shapes to narrow co_sub behavior *)
-    let scan shape target =
-      let module S = Product_lattice.Make(struct let axis_sizes = Array.of_list shape end) in
-      let levels_a = Array.make (List.length shape) 0 in
-      let levels_b = Array.make (List.length shape) 0 in
-      levels_a.(target) <- 1;
-      levels_b.(target) <- (List.nth shape target) - 1;
-      let aa = S.encode ~levels:levels_a in
-      let bb = S.encode ~levels:levels_b in
-      let rr = S.co_sub aa bb in
-      let jj = S.join bb rr in
-      Printf.printf "shape %s target=%d\n"
-        (String.concat "," (List.map string_of_int shape)) target;
-      Printf.printf "  a=%s b=%s\n" (S.to_string aa) (S.to_string bb);
-      Printf.printf "  co_sub=%s join=%s\n" (S.to_string rr) (S.to_string jj)
-    in
-    scan [3] 0;
-    scan [3;3] 1;
-    scan [3;2] 0;
-    scan [3;2;3] 2;
-    (* Full Axis_lattice shape, externality is index 8 *)
-    scan [3;2;2;2;3;2;3;3;3;2;3] 8;
-    (* Build polynomial: (a ⊓ <ty#211>) ⊔ b *)
-    let module V = struct
-      type t = string
-      let compare = String.compare
-      let to_string s = s
-    end in
-    let module P = Ldd.Make (Axis_lattice) (V) in
-    let v = P.rigid "<ty#211>" in
-    let term = P.meet (P.const a) (P.var v) in
-    let base = P.const b in
-    let poly = P.join term base in
-    Printf.printf "poly = %s\n" (P.pp poly);
-    Printf.printf "round_up poly = %s\n" (to_string (P.round_up poly));
-    exit 0
+  | Some v when (v = "1" || String.lowercase_ascii v = "true") ->
+    Printf.eprintf "[ikind] IKIND_POLY_PROBE enabled (no-op stub)\n%!"
+  | _ -> ()
