@@ -51,7 +51,7 @@ let of_axis_set (set : Jkind_axis.Axis_set.t) : t =
   |> Seq.iter (fun (Axis.Pack ax) -> set_idx_by_name (Axis.name ax));
   encode ~levels
 
-(* moved earlier: of_axis_set *)
+
 
 (* IK-only: compute relevant axes of a constant modality, mirroring
    Jkind.relevant_axes_of_modality. *)
@@ -118,11 +118,6 @@ let linearity_of_level = function
   | 1 -> Mode.Linearity.Const.Once
   | _ -> invalid_arg "Axis_lattice.linearity_of_level"
 
-let level_of_uniqueness (x : Mode.Uniqueness.Const.t) : int =
-  match x with
-  | Mode.Uniqueness.Const.Unique -> 0
-  | Mode.Uniqueness.Const.Aliased -> 1
-
 (* For monadic axes, the semantic ordering is flipped (we compare using the
    op-lattice). When encoding into our numeric lattice where higher means
    "more permissive/top", flip the levels for monadic axes. *)
@@ -130,11 +125,6 @@ let level_of_uniqueness_monadic (x : Mode.Uniqueness.Const.t) : int =
   match x with
   | Mode.Uniqueness.Const.Unique -> 1
   | Mode.Uniqueness.Const.Aliased -> 0
-
-let uniqueness_of_level = function
-  | 0 -> Mode.Uniqueness.Const.Unique
-  | 1 -> Mode.Uniqueness.Const.Aliased
-  | _ -> invalid_arg "Axis_lattice.uniqueness_of_level"
 
 let uniqueness_of_level_monadic = function
   | 0 -> Mode.Uniqueness.Const.Aliased
@@ -151,23 +141,11 @@ let portability_of_level = function
   | 1 -> Mode.Portability.Const.Nonportable
   | _ -> invalid_arg "Axis_lattice.portability_of_level"
 
-let level_of_contention (x : Mode.Contention.Const.t) : int =
-  match x with
-  | Mode.Contention.Const.Uncontended -> 0
-  | Mode.Contention.Const.Shared -> 1
-  | Mode.Contention.Const.Contended -> 2
-
 let level_of_contention_monadic (x : Mode.Contention.Const.t) : int =
   match x with
   | Mode.Contention.Const.Uncontended -> 2
   | Mode.Contention.Const.Shared -> 1
   | Mode.Contention.Const.Contended -> 0
-
-let contention_of_level = function
-  | 0 -> Mode.Contention.Const.Uncontended
-  | 1 -> Mode.Contention.Const.Shared
-  | 2 -> Mode.Contention.Const.Contended
-  | _ -> invalid_arg "Axis_lattice.contention_of_level"
 
 let contention_of_level_monadic = function
   | 0 -> Mode.Contention.Const.Contended
@@ -197,23 +175,11 @@ let statefulness_of_level = function
   | 2 -> Mode.Statefulness.Const.Stateful
   | _ -> invalid_arg "Axis_lattice.statefulness_of_level"
 
-let level_of_visibility (x : Mode.Visibility.Const.t) : int =
-  match x with
-  | Mode.Visibility.Const.Read_write -> 0
-  | Mode.Visibility.Const.Read -> 1
-  | Mode.Visibility.Const.Immutable -> 2
-
 let level_of_visibility_monadic (x : Mode.Visibility.Const.t) : int =
   match x with
   | Mode.Visibility.Const.Read_write -> 2
   | Mode.Visibility.Const.Read -> 1
   | Mode.Visibility.Const.Immutable -> 0
-
-let visibility_of_level = function
-  | 0 -> Mode.Visibility.Const.Read_write
-  | 1 -> Mode.Visibility.Const.Read
-  | 2 -> Mode.Visibility.Const.Immutable
-  | _ -> invalid_arg "Axis_lattice.visibility_of_level"
 
 let visibility_of_level_monadic = function
   | 0 -> Mode.Visibility.Const.Immutable
@@ -291,35 +257,6 @@ let to_mod_bounds (v : t) : Types.Jkind_mod_bounds.t =
 (* Lattice constant for non-float value base *)
 let nonfloat_value : t = of_mod_bounds (ik_base_bounds_nonfloat ())
 
-(* Map a set of relevant axes to a lattice element: relevant axes -> top level;
-   non-relevant -> level 0. Ordering must match Axis_set.axis_index and our
-   axis_sizes layout. *)
-let of_axis_set (set : Jkind_axis.Axis_set.t) : t =
-  let levels = Array.make num_axes 0 in
-  let open Jkind_axis in
-  let set_idx_by_name (name : string) =
-    let idx =
-      match name with
-      | "areality" -> Some 0
-      | "linearity" -> Some 1
-      | "uniqueness" -> Some 2
-      | "portability" -> Some 3
-      | "contention" -> Some 4
-      | "yielding" -> Some 5
-      | "statefulness" -> Some 6
-      | "visibility" -> Some 7
-      | "externality" -> Some 8
-      | "nullability" -> Some 9
-      | "separability" -> Some 10
-      | _ -> None
-    in
-    match idx with
-    | None -> ()
-    | Some i -> levels.(i) <- axis_sizes.(i) - 1
-  in
-  Axis_set.to_seq set
-  |> Seq.iter (fun (Axis.Pack ax) -> set_idx_by_name (Axis.name ax));
-  encode ~levels
 
 (* Convenience constants matching JK builtins for record bases. *)
 

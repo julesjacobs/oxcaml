@@ -42,26 +42,24 @@ let kind_of (ty : Types.type_expr) : JK.ckind =
     let contribs =
       List.map
         (fun (_lbl, t) ->
-           let axes =
-             Axis_lattice.ik_relevant_axes_of_modality ~relevant_for_shallow:`Irrelevant
+           let mask =
+             Axis_lattice.mask_of_modality ~relevant_for_shallow:`Irrelevant
                Mode.Modality.Const.id
            in
-           let mask = Axis_lattice.of_axis_set axes in
            ops.modality mask (ops.kind_of t))
         elts
     in
     ops.join (base :: contribs)
   | Types.Tunboxed_tuple elts ->
-    (* Unboxed tuples: use non-float base and per-element contributions with shallow axes relevant. *)
-    let base = ops.const (Axis_lattice.of_mod_bounds (Axis_lattice.ik_base_bounds_nonfloat ())) in
+    (* Unboxed tuples: non-float base + per-element contributions with shallow axes relevant. *)
+    let base = ops.const Axis_lattice.nonfloat_value in
     let contribs =
       List.map
         (fun (_lbl, t) ->
-           let axes =
-             Axis_lattice.ik_relevant_axes_of_modality ~relevant_for_shallow:`Relevant
+           let mask =
+             Axis_lattice.mask_of_modality ~relevant_for_shallow:`Relevant
                Mode.Modality.Const.id
            in
-           let mask = Axis_lattice.of_axis_set axes in
            ops.modality mask (ops.kind_of t))
         elts
     in
