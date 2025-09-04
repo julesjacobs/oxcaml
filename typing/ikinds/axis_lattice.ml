@@ -25,14 +25,14 @@ let to_string = T.to_string
 
 let level_of_areality (a : Mode.Regionality.Const.t) : int =
   match a with
-  | Mode.Regionality.Const.Global -> 2
+  | Mode.Regionality.Const.Global -> 0
   | Mode.Regionality.Const.Regional -> 1
-  | Mode.Regionality.Const.Local -> 0
+  | Mode.Regionality.Const.Local -> 2
 
 let areality_of_level = function
-  | 0 -> Mode.Regionality.Const.Local
+  | 0 -> Mode.Regionality.Const.Global
   | 1 -> Mode.Regionality.Const.Regional
-  | 2 -> Mode.Regionality.Const.Global
+  | 2 -> Mode.Regionality.Const.Local
   | _ -> invalid_arg "Axis_lattice.areality_of_level"
 
 let level_of_linearity (x : Mode.Linearity.Const.t) : int =
@@ -196,14 +196,7 @@ let of_mod_bounds (mb : Types.Jkind_mod_bounds.t) : t =
     level_of_nullability (Types.Jkind_mod_bounds.nullability mb);
     level_of_separability (Types.Jkind_mod_bounds.separability mb);
   |] in
-  let v = encode ~levels in
-  (* Debug: print conversion from mod_bounds to axis lattice element *)
-  (try
-     let mb_pp = Format.asprintf "%a" Types.Jkind_mod_bounds.debug_print mb in
-     let v_pp = to_string v in
-     Printf.printf "[ik-axis] of_mod_bounds %s -> %s\n%!" mb_pp v_pp
-   with _ -> ());
-  v
+  encode ~levels
 
 let to_mod_bounds (v : t) : Types.Jkind_mod_bounds.t =
   let lv = decode v in
@@ -250,14 +243,7 @@ let of_axis_set (set : Jkind_axis.Axis_set.t) : t =
   in
   Axis_set.to_seq set
   |> Seq.iter (fun (Axis.Pack ax) -> set_idx_by_name (Axis.name ax));
-  let v = encode ~levels in
-  (* Debug: print conversion from axis-set to axis lattice element *)
-  (try
-     let set_pp = Format.asprintf "%a" Jkind_axis.Axis_set.print set in
-     let v_pp = to_string v in
-     Printf.printf "[ik-axis] of_axis_set %s -> %s\n%!" set_pp v_pp
-   with _ -> ());
-  v
+  encode ~levels
 
 (* Convenience constants matching JK builtins for record bases. *)
 

@@ -83,14 +83,14 @@ let kind_of (ty : Types.type_expr) : JK.ckind =
     (* Arrows are values; axes only: approximate with non-float base. *)
     ops.const (Axis_lattice.of_mod_bounds (ik_base_bounds_nonfloat ()))
   | Types.Tlink t -> ops.kind_of t
-  | Types.Tsubst (t, _) -> ops.kind_of t
-  | Types.Tpoly (t, _) -> ops.kind_of t
-  | Types.Tof_kind _ -> ops.const (Axis_lattice.of_mod_bounds (ik_base_bounds_nonfloat ()))
-  | Types.Tobject (_t, _nm) -> ops.const (Axis_lattice.of_mod_bounds (ik_base_bounds_nonfloat ()))
-  | Types.Tfield (_name, _fk, _ty1, ty2) -> ops.kind_of ty2
-  | Types.Tnil -> ops.const (Axis_lattice.of_mod_bounds (ik_base_bounds_nonfloat ()))
-  | Types.Tvariant _ -> ops.const (Axis_lattice.of_mod_bounds (ik_base_bounds_nonfloat ()))
-  | Types.Tpackage _ -> ops.const (Axis_lattice.of_mod_bounds (ik_base_bounds_nonfloat ()))
+  | Types.Tsubst _ -> failwith "Tsubst shouldn't appear in kind_of"
+  | Types.Tpoly _ -> failwith "Tpoly not yet implemented in kind_of"
+  | Types.Tof_kind _ -> failwith "Tof_kind not yet implemented in kind_of"
+  | Types.Tobject _ -> failwith "Tobject not yet implemented in kind_of"
+  | Types.Tfield _ -> failwith "Tfield not yet implemented in kind_of"
+  | Types.Tnil -> failwith "Tnil not yet implemented in kind_of"
+  | Types.Tvariant _ -> failwith "Tvariant not yet implemented in kind_of"
+  | Types.Tpackage _ -> failwith "Tpackage not yet implemented in kind_of"
 
 let ckind_of_jkind_l (j : Types.jkind_l) : JK.ckind =
   fun (ops : JK.ops) ->
