@@ -19,9 +19,6 @@ end
 
 module JK = Ldd_jkind_solver.Make (Axis_lattice) (TyM) (ConstrM)
 
-(* Monotonic counter to identify individual subjkind checks within a process. *)
-let __ikind_call_counter = ref 0
-
 (* Optional ambient tag to disambiguate higher-level call sites (e.g. includecore).
    Other modules can bracket calls with [with_origin_tag] to add this suffix. *)
 let __ikind_origin_tag : string option ref = ref None
@@ -31,42 +28,6 @@ let with_origin_tag (tag : string) (f : unit -> 'a) : 'a =
   __ikind_origin_tag := Some tag;
   Fun.protect ~finally:(fun () -> __ikind_origin_tag := prev) f
 
-(* IK-only: compute relevant axes of a constant modality, mirroring
-   Jkind.relevant_axes_of_modality. *)
-let ik_relevant_axes_of_modality
-    ~(relevant_for_shallow:[`Relevant | `Irrelevant])
-    (modality : Mode.Modality.Const.t)
-  : Jkind_axis.Axis_set.t =
-  Jkind_axis.Axis_set.create ~f:(fun ~axis:(Jkind_axis.Axis.Pack axis) ->
-      match axis with
-      | Jkind_axis.Axis.Modal axis ->
-        let m = Mode.Modality.Const.proj axis modality in
-        not (Mode.Modality.Atom.is_constant m)
-      | Jkind_axis.Axis.Nonmodal Jkind_axis.Axis.Nonmodal.Externality -> true
-      | Jkind_axis.Axis.Nonmodal Jkind_axis.Axis.Nonmodal.Nullability -> (
-          match relevant_for_shallow with `Relevant -> true | `Irrelevant -> false)
-      | Jkind_axis.Axis.Nonmodal Jkind_axis.Axis.Nonmodal.Separability -> (
-          match relevant_for_shallow with `Relevant -> true | `Irrelevant -> false))
-
-let ik_base_bounds_nonfloat () : Types.Jkind_mod_bounds.t =
-  Types.Jkind_mod_bounds.create
-    ~areality:Mode.Regionality.Const.max
-    ~linearity:Mode.Linearity.Const.max
-    ~uniqueness:Mode.Uniqueness.Const_op.max
-    ~portability:Mode.Portability.Const.max
-    ~contention:Mode.Contention.Const_op.max
-    ~yielding:Mode.Yielding.Const.max
-    ~statefulness:Mode.Statefulness.Const.max
-    ~visibility:Mode.Visibility.Const_op.max
-    ~externality:Jkind_axis.Externality.max
-    ~nullability:Jkind_axis.Nullability.Non_null
-    ~separability:Jkind_axis.Separability.Non_float
-
-let has_mutable_label lbls =
-  List.exists
-    (fun (lbl : Types.label_declaration) ->
-      match lbl.ld_mutable with Immutable -> false | Mutable _ -> true)
-    lbls
 
 let kind_of (ty : Types.type_expr) : JK.ckind =
  fun (ops : JK.ops) ->
@@ -76,12 +37,38 @@ let kind_of (ty : Types.type_expr) : JK.ckind =
     let arg_kinds = List.map (fun t -> ops.kind_of t) args in
     ops.constr p arg_kinds
   | Types.Ttuple elts ->
-    elts |> List.map (fun (_lbl, t) -> ops.kind_of t) |> ops.join
+    (* Boxed tuples: immutable_data base + per-element contributions under id modality. *)
+    let base = ops.const Axis_lattice.immutable_data in
+    let contribs =
+      List.map
+        (fun (_lbl, t) ->
+           let axes =
+             Axis_lattice.ik_relevant_axes_of_modality ~relevant_for_shallow:`Irrelevant
+               Mode.Modality.Const.id
+           in
+           let mask = Axis_lattice.of_axis_set axes in
+           ops.modality mask (ops.kind_of t))
+        elts
+    in
+    ops.join (base :: contribs)
   | Types.Tunboxed_tuple elts ->
-    elts |> List.map (fun (_lbl, t) -> ops.kind_of t) |> ops.join
+    (* Unboxed tuples: use non-float base and per-element contributions with shallow axes relevant. *)
+    let base = ops.const (Axis_lattice.of_mod_bounds (Axis_lattice.ik_base_bounds_nonfloat ())) in
+    let contribs =
+      List.map
+        (fun (_lbl, t) ->
+           let axes =
+             Axis_lattice.ik_relevant_axes_of_modality ~relevant_for_shallow:`Relevant
+               Mode.Modality.Const.id
+           in
+           let mask = Axis_lattice.of_axis_set axes in
+           ops.modality mask (ops.kind_of t))
+        elts
+    in
+    ops.join (base :: contribs)
   | Types.Tarrow (_lbl, _t1, _t2, _commu) ->
-    (* Arrows are values; axes only: approximate with non-float base. *)
-    ops.const (Axis_lattice.of_mod_bounds (ik_base_bounds_nonfloat ()))
+    (* Arrows use the dedicated per-axis bounds (no with-bounds). *)
+    ops.const Axis_lattice.arrow
   | Types.Tlink t -> ops.kind_of t
   | Types.Tsubst _ -> failwith "Tsubst shouldn't appear in kind_of"
   | Types.Tpoly _ -> failwith "Tpoly not yet implemented in kind_of"
@@ -108,15 +95,13 @@ let ckind_of_jkind_l (j : Types.jkind_l) : JK.ckind =
     in
     ops.join (base :: contribs)
 
-(* Compute the effective left-hand upper-bounds used by the subjkind check,
-   taking into account the right-hand with-bounds: for each type present on the
-   right, subtract its relevant axes from the left's relevant axes. This matches
-   the intent of MB_EXPAND_L in Jkind.sub_jkind_l. *)
-(* (intentionally left without the "effective" variant; we model with-bounds
-   as a join of masked contributions, independent of the right-hand side) *)
 
-(* Build a JK environment lookup from a Jkind context. This mirrors infer6's
-   lookup over a parsed program, but uses the real typing context. *)
+let has_mutable_label lbls =
+  List.exists
+    (fun (lbl : Types.label_declaration) ->
+      match lbl.ld_mutable with Immutable -> false | Mutable _ -> true)
+    lbls
+    
 let lookup_of_context ~(context : Jkind.jkind_context) (p : Path.t)
     : JK.constr_decl =
   match context.lookup_type p with
@@ -142,21 +127,72 @@ let lookup_of_context ~(context : Jkind.jkind_context) (p : Path.t)
               let contribs =
                 List.map
                   (fun (lbl : Types.label_declaration) ->
-                     let axes =
-                       ik_relevant_axes_of_modality ~relevant_for_shallow:`Irrelevant
+                     let mask =
+                       Axis_lattice.mask_of_modality
+                         ~relevant_for_shallow:`Irrelevant
                          lbl.ld_modalities
                      in
-                     let mask = Axis_lattice.of_axis_set axes in
                      ops.modality mask (ops.kind_of lbl.ld_type))
                   lbls
               in
               ops.join (base :: contribs)
           in
           JK.Ty { args = decl.type_params; kind; abstract = false }
-        | Types.Type_record_unboxed_product (_lbls, _rep, _umc_opt) ->
-          failwith "Type_record_unboxed_product not implemented"
-        | Types.Type_variant (_cstrs, _rep, _umc_opt) ->
-          failwith "Type_variant not implemented"
+        | Types.Type_record_unboxed_product (lbls, _rep, _umc_opt) ->
+          (* Similar to boxed record for axes: base + per-label contributions. *)
+          let base_lat = Axis_lattice.nonfloat_value in
+          let kind : JK.ckind =
+            fun (ops : JK.ops) ->
+              let base = ops.const base_lat in
+              let contribs =
+                List.map
+                  (fun (lbl : Types.label_declaration) ->
+                     let mask =
+                       Axis_lattice.mask_of_modality
+                         ~relevant_for_shallow:`Relevant
+                         lbl.ld_modalities
+                     in
+                     ops.modality mask (ops.kind_of lbl.ld_type))
+                  lbls
+              in
+              ops.join (base :: contribs)
+          in
+          JK.Ty { args = decl.type_params; kind; abstract = false }
+        | Types.Type_variant (cstrs, _rep, _umc_opt) ->
+          (* Base: use a non-float value base; per-constructor contributions. *)
+          let base_lat = Axis_lattice.nonfloat_value in
+          let kind : JK.ckind =
+            fun (ops : JK.ops) ->
+              let base = ops.const base_lat in
+              let contribs =
+                List.concat_map
+                  (fun (c : Types.constructor_declaration) ->
+                     match c.cd_args with
+                     | Types.Cstr_tuple args ->
+                       List.map
+                         (fun (arg : Types.constructor_argument) ->
+                           let mask =
+                             Axis_lattice.mask_of_modality
+                               ~relevant_for_shallow:`Irrelevant
+                               arg.ca_modalities
+                           in
+                           ops.modality mask (ops.kind_of arg.ca_type))
+                         args
+                     | Types.Cstr_record lbls ->
+                       List.map
+                         (fun (lbl : Types.label_declaration) ->
+                           let mask =
+                             Axis_lattice.mask_of_modality
+                               ~relevant_for_shallow:`Irrelevant
+                               lbl.ld_modalities
+                           in
+                           ops.modality mask (ops.kind_of lbl.ld_type))
+                         lbls)
+                  cstrs
+              in
+              ops.join (base :: contribs)
+          in
+          JK.Ty { args = decl.type_params; kind; abstract = false }
         | Types.Type_open ->
           failwith "Type_open not implemented"
         end

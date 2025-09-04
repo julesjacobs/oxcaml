@@ -21,6 +21,79 @@ include T
 
 let to_string = T.to_string
 
+(* Map a set of relevant axes to a lattice element: relevant axes -> top level;
+   non-relevant -> level 0. Ordering must match Axis_set.axis_index and our
+   axis_sizes layout. *)
+let of_axis_set (set : Jkind_axis.Axis_set.t) : t =
+  let levels = Array.make num_axes 0 in
+  let open Jkind_axis in
+  let set_idx_by_name (name : string) =
+    let idx =
+      match name with
+      | "areality" -> Some 0
+      | "linearity" -> Some 1
+      | "uniqueness" -> Some 2
+      | "portability" -> Some 3
+      | "contention" -> Some 4
+      | "yielding" -> Some 5
+      | "statefulness" -> Some 6
+      | "visibility" -> Some 7
+      | "externality" -> Some 8
+      | "nullability" -> Some 9
+      | "separability" -> Some 10
+      | _ -> None
+    in
+    match idx with
+    | None -> ()
+    | Some i -> levels.(i) <- axis_sizes.(i) - 1
+  in
+  Axis_set.to_seq set
+  |> Seq.iter (fun (Axis.Pack ax) -> set_idx_by_name (Axis.name ax));
+  encode ~levels
+
+(* moved earlier: of_axis_set *)
+
+(* IK-only: compute relevant axes of a constant modality, mirroring
+   Jkind.relevant_axes_of_modality. *)
+let ik_relevant_axes_of_modality
+    ~(relevant_for_shallow:[`Relevant | `Irrelevant])
+    (modality : Mode.Modality.Const.t)
+  : Jkind_axis.Axis_set.t =
+  Jkind_axis.Axis_set.create ~f:(fun ~axis:(Jkind_axis.Axis.Pack axis) ->
+      match axis with
+      | Jkind_axis.Axis.Modal axis ->
+        let m = Mode.Modality.Const.proj axis modality in
+        not (Mode.Modality.Atom.is_constant m)
+      | Jkind_axis.Axis.Nonmodal Jkind_axis.Axis.Nonmodal.Externality -> true
+      | Jkind_axis.Axis.Nonmodal Jkind_axis.Axis.Nonmodal.Nullability -> (
+          match relevant_for_shallow with `Relevant -> true | `Irrelevant -> false)
+      | Jkind_axis.Axis.Nonmodal Jkind_axis.Axis.Nonmodal.Separability -> (
+          match relevant_for_shallow with `Relevant -> true | `Irrelevant -> false))
+
+(* Directly produce an axis-lattice mask from a constant modality. *)
+let mask_of_modality
+    ~(relevant_for_shallow:[`Relevant | `Irrelevant])
+    (modality : Mode.Modality.Const.t)
+  : t =
+  ik_relevant_axes_of_modality ~relevant_for_shallow modality |> of_axis_set
+
+let ik_base_bounds_nonfloat () : Types.Jkind_mod_bounds.t =
+  Types.Jkind_mod_bounds.create
+    ~areality:Mode.Regionality.Const.max
+    ~linearity:Mode.Linearity.Const.max
+    ~uniqueness:Mode.Uniqueness.Const_op.max
+    ~portability:Mode.Portability.Const.max
+    ~contention:Mode.Contention.Const_op.max
+    ~yielding:Mode.Yielding.Const.max
+    ~statefulness:Mode.Statefulness.Const.max
+    ~visibility:Mode.Visibility.Const_op.max
+    ~externality:Jkind_axis.Externality.max
+    ~nullability:Jkind_axis.Nullability.Non_null
+    ~separability:Jkind_axis.Separability.Non_float
+
+(* Lattice constant for non-float value base *)
+
+
 (* Conversion between Types.Jkind_mod_bounds.t and Axis_lattice.t *)
 
 let level_of_areality (a : Mode.Regionality.Const.t) : int =
@@ -215,6 +288,9 @@ let to_mod_bounds (v : t) : Types.Jkind_mod_bounds.t =
     ~contention ~yielding ~statefulness ~visibility ~externality ~nullability
     ~separability
 
+(* Lattice constant for non-float value base *)
+let nonfloat_value : t = of_mod_bounds (ik_base_bounds_nonfloat ())
+
 (* Map a set of relevant axes to a lattice element: relevant axes -> top level;
    non-relevant -> level 0. Ordering must match Axis_set.axis_index and our
    axis_sizes layout. *)
@@ -275,6 +351,23 @@ let mutable_data : t =
       ~yielding:Mode.Yielding.Const.min
       ~statefulness:Mode.Statefulness.Const.min
       ~visibility:Mode.Visibility.Const_op.max
+      ~externality:Jkind_axis.Externality.max
+      ~nullability:Jkind_axis.Nullability.Non_null
+      ~separability:Jkind_axis.Separability.Non_float
+  in
+  of_mod_bounds mb
+
+let arrow : t =
+  let mb =
+    Types.Jkind_mod_bounds.create
+      ~areality:Mode.Regionality.Const.max
+      ~linearity:Mode.Linearity.Const.max
+      ~uniqueness:Mode.Uniqueness.Const_op.min
+      ~portability:Mode.Portability.Const.max
+      ~contention:Mode.Contention.Const_op.min
+      ~yielding:Mode.Yielding.Const.max
+      ~statefulness:Mode.Statefulness.Const.max
+      ~visibility:Mode.Visibility.Const_op.min
       ~externality:Jkind_axis.Externality.max
       ~nullability:Jkind_axis.Nullability.Non_null
       ~separability:Jkind_axis.Separability.Non_float
