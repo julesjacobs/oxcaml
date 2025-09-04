@@ -7368,7 +7368,9 @@ let check_decl_jkind env decl jkind =
       Jkind.for_abbreviation ~type_jkind_purely ~modality inner_ty
     | _ -> decl.type_jkind
   in
-  match Ikind.sub_jkind_l ~type_equal ~context decl_jkind jkind with
+  match Ikind.sub_jkind_l
+          ~origin:(Format.asprintf "ctype:decl %a" Location.print_loc decl.type_loc)
+          ~type_equal ~context decl_jkind jkind with
   | Ok () -> Ok ()
   | Error _ as err ->
     match decl.type_manifest with
@@ -7377,7 +7379,9 @@ let check_decl_jkind env decl jkind =
       (* CR layouts v2.8: Should this use [type_jkind_purely_if_principal]? I
          think not. *)
       let ty_jkind = type_jkind env ty in
-      match Ikind.sub_jkind_l ~type_equal ~context ty_jkind jkind with
+      match Ikind.sub_jkind_l
+              ~origin:(Format.asprintf "ctype:manifest %a" Location.print_loc decl.type_loc)
+              ~type_equal ~context ty_jkind jkind with
       | Ok () -> Ok ()
       | Error _ as err -> err
 
@@ -7387,7 +7391,7 @@ let constrain_decl_jkind env decl jkind =
   (* This case is sad, because it can't refine type variables. Hence
      the need for reimplementation. Hopefully no one hits this for
      a while. *)
-  | None -> check_decl_jkind env decl jkind
+  | None -> Ikind.with_origin_tag "ctype:constrain_decl_jkind" (fun () -> check_decl_jkind env decl jkind)
   | Some jkind ->
     let type_equal = type_equal env in
     let context = mk_jkind_context_always_principal env in

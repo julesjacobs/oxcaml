@@ -1,9 +1,7 @@
 module type Asig = sig
-  type t : value mod portable
-  type q : value with t
+  type t : value mod portable many
 end
 
 module A : Asig = struct
   type t = int
-  type q = t
 end

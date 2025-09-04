@@ -19,6 +19,18 @@ end
 
 module JK = Ldd_jkind_solver.Make (Axis_lattice) (TyM) (ConstrM)
 
+(* Monotonic counter to identify individual subjkind checks within a process. *)
+let __ikind_call_counter = ref 0
+
+(* Optional ambient tag to disambiguate higher-level call sites (e.g. includecore).
+   Other modules can bracket calls with [with_origin_tag] to add this suffix. *)
+let __ikind_origin_tag : string option ref = ref None
+
+let with_origin_tag (tag : string) (f : unit -> 'a) : 'a =
+  let prev = !__ikind_origin_tag in
+  __ikind_origin_tag := Some tag;
+  Fun.protect ~finally:(fun () -> __ikind_origin_tag := prev) f
+
 let kind_of (ty : Types.type_expr) : JK.ckind =
  fun (ops : JK.ops) ->
   match Types.get_desc ty with
@@ -93,6 +105,7 @@ let make_solver ~(context : Jkind.jkind_context) : JK.solver =
 
 let sub_jkind_l
     ?allow_any_crossing
+    ?origin
     ~(type_equal : Types.type_expr -> Types.type_expr -> bool)
     ~(context : Jkind.jkind_context)
     (sub : Types.jkind_l)
@@ -106,9 +119,49 @@ let sub_jkind_l
   let ik_leq = JK.leq solver (ckind_of_jkind_l sub) (ckind_of_jkind_l super) in
   let res = Jkind.sub_jkind_l ?allow_any_crossing ~type_equal ~context sub super in
   let allow_any = match allow_any_crossing with Some true -> true | _ -> false in
-  let jkind_str = match res with Ok () -> "ok" | Error _ -> "error" in
+  let jk_ok = match res with Ok () -> true | Error _ -> false in
+  let axes_info =
+    if ik_leq then None
+    else (
+      (* Fall back to Axis_lattice-level comparison for diagnostics. *)
+      let sub_lv = Axis_lattice.decode (Axis_lattice.of_mod_bounds sub.jkind.mod_bounds) in
+      let sup_lv = Axis_lattice.decode (Axis_lattice.of_mod_bounds super.jkind.mod_bounds) in
+      let parts =
+        Jkind_axis.Axis.all
+        |> List.mapi (fun i (Jkind_axis.Axis.Pack axis) ->
+               let a = sub_lv.(i) and b = sup_lv.(i) in
+               if a > b then Some (Jkind_axis.Axis.name axis) else None)
+        |> List.filter_map (fun x -> x)
+      in
+      if parts = [] then None else Some (" axes=[" ^ String.concat "," parts ^ "]"))
+  in
+  let allow_any_str = if allow_any then " allowAny" else "" in
+  let origin_str = match origin with None -> None | Some s -> Some ("[" ^ s ^ "]") in
+  let axes_str = match axes_info with None -> "" | Some s -> s in
+  let ik_str = if ik_leq then "T" else "F" in
+  let jk_str = if jk_ok then "T" else "F" in
+  let origin_str =
+    match origin_str, !__ikind_origin_tag with
+    | None, None -> None
+    | Some o, None -> Some o
+    | None, Some tag -> Some ("[" ^ tag ^ "]")
+    | Some o, Some tag -> Some (o ^ " {" ^ tag ^ "}")
+  in
+  (match origin_str with None -> () | Some o -> print_endline o);
   print_endline
     (Format.asprintf
-       "sub_jkind_l allowAny=%b sub:%s super:%s ikind_leq=%b jkind=%s"
-       allow_any sub_poly_pp super_poly_pp ik_leq jkind_str);
+       "  %s <: %s ik/jk=%s/%s%s%s"
+       sub_poly_pp super_poly_pp ik_str jk_str allow_any_str axes_str);
+  (* Also print the original jkinds for context, using the pluggable printer. *)
+(* Pretty-printer refs for jkinds, overridable if needed. Default to Jkind.format
+   to avoid cycles in other modules. *)
+let pp_jkind_l_ref : (Format.formatter -> Types.jkind_l -> unit) ref =
+  ref (fun ppf jk -> Jkind.format ppf jk)
+
+  (try
+     let sub_jk = Format.asprintf "%a" !pp_jkind_l_ref sub in
+     let sup_jk = Format.asprintf "%a" !pp_jkind_l_ref super in
+     print_endline ("    sub_jk: " ^ sub_jk);
+     print_endline ("    sup_jk: " ^ sup_jk)
+   with _ -> ());
   res
