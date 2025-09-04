@@ -31,6 +31,43 @@ let with_origin_tag (tag : string) (f : unit -> 'a) : 'a =
   __ikind_origin_tag := Some tag;
   Fun.protect ~finally:(fun () -> __ikind_origin_tag := prev) f
 
+(* IK-only: compute relevant axes of a constant modality, mirroring
+   Jkind.relevant_axes_of_modality. *)
+let ik_relevant_axes_of_modality
+    ~(relevant_for_shallow:[`Relevant | `Irrelevant])
+    (modality : Mode.Modality.Const.t)
+  : Jkind_axis.Axis_set.t =
+  Jkind_axis.Axis_set.create ~f:(fun ~axis:(Jkind_axis.Axis.Pack axis) ->
+      match axis with
+      | Jkind_axis.Axis.Modal axis ->
+        let m = Mode.Modality.Const.proj axis modality in
+        not (Mode.Modality.Atom.is_constant m)
+      | Jkind_axis.Axis.Nonmodal Jkind_axis.Axis.Nonmodal.Externality -> true
+      | Jkind_axis.Axis.Nonmodal Jkind_axis.Axis.Nonmodal.Nullability -> (
+          match relevant_for_shallow with `Relevant -> true | `Irrelevant -> false)
+      | Jkind_axis.Axis.Nonmodal Jkind_axis.Axis.Nonmodal.Separability -> (
+          match relevant_for_shallow with `Relevant -> true | `Irrelevant -> false))
+
+let ik_base_bounds_nonfloat () : Types.Jkind_mod_bounds.t =
+  Types.Jkind_mod_bounds.create
+    ~areality:Mode.Regionality.Const.max
+    ~linearity:Mode.Linearity.Const.max
+    ~uniqueness:Mode.Uniqueness.Const_op.max
+    ~portability:Mode.Portability.Const.max
+    ~contention:Mode.Contention.Const_op.max
+    ~yielding:Mode.Yielding.Const.max
+    ~statefulness:Mode.Statefulness.Const.max
+    ~visibility:Mode.Visibility.Const_op.max
+    ~externality:Jkind_axis.Externality.max
+    ~nullability:Jkind_axis.Nullability.Non_null
+    ~separability:Jkind_axis.Separability.Non_float
+
+let has_mutable_label lbls =
+  List.exists
+    (fun (lbl : Types.label_declaration) ->
+      match lbl.ld_mutable with Immutable -> false | Mutable _ -> true)
+    lbls
+
 let kind_of (ty : Types.type_expr) : JK.ckind =
  fun (ops : JK.ops) ->
   match Types.get_desc ty with
@@ -42,16 +79,18 @@ let kind_of (ty : Types.type_expr) : JK.ckind =
     elts |> List.map (fun (_lbl, t) -> ops.kind_of t) |> ops.join
   | Types.Tunboxed_tuple elts ->
     elts |> List.map (fun (_lbl, t) -> ops.kind_of t) |> ops.join
-  | Types.Tarrow (_lbl, _t1, _t2, _commu) -> failwith "kind_of: unhandled type"
+  | Types.Tarrow (_lbl, _t1, _t2, _commu) ->
+    (* Arrows are values; axes only: approximate with non-float base. *)
+    ops.const (Axis_lattice.of_mod_bounds (ik_base_bounds_nonfloat ()))
   | Types.Tlink t -> ops.kind_of t
-  | Types.Tsubst (_, _) -> failwith "kind_of: unhandled type"
-  | Types.Tpoly (_, _) -> failwith "kind_of: unhandled type"
-  | Types.Tof_kind _ -> failwith "kind_of: unhandled type"
-  | Types.Tobject (_, _) -> failwith "kind_of: unhandled type"
-  | Types.Tfield (_, _, _, _) -> failwith "kind_of: unhandled type"
-  | Types.Tnil -> failwith "kind_of: unhandled type"  
-  | Types.Tvariant _ -> failwith "kind_of: unhandled type"
-  | Types.Tpackage _ -> failwith "kind_of: unhandled type"
+  | Types.Tsubst (t, _) -> ops.kind_of t
+  | Types.Tpoly (t, _) -> ops.kind_of t
+  | Types.Tof_kind _ -> ops.const (Axis_lattice.of_mod_bounds (ik_base_bounds_nonfloat ()))
+  | Types.Tobject (_t, _nm) -> ops.const (Axis_lattice.of_mod_bounds (ik_base_bounds_nonfloat ()))
+  | Types.Tfield (_name, _fk, _ty1, ty2) -> ops.kind_of ty2
+  | Types.Tnil -> ops.const (Axis_lattice.of_mod_bounds (ik_base_bounds_nonfloat ()))
+  | Types.Tvariant _ -> ops.const (Axis_lattice.of_mod_bounds (ik_base_bounds_nonfloat ()))
+  | Types.Tpackage _ -> ops.const (Axis_lattice.of_mod_bounds (ik_base_bounds_nonfloat ()))
 
 let ckind_of_jkind_l (j : Types.jkind_l) : JK.ckind =
   fun (ops : JK.ops) ->
@@ -85,9 +124,42 @@ let lookup_of_context ~(context : Jkind.jkind_context) (p : Path.t)
   | Some decl -> (
       match decl.type_manifest with
       | None ->
-        (* Abstract: no manifest. Model as top over axes; params from decl. *)
-        let kind : JK.ckind = ckind_of_jkind_l decl.type_jkind in
-        JK.Ty { args = decl.type_params; kind; abstract = true }
+        (* No manifest: may still be concrete (record/variant/...). Build ckind. *)
+        begin match decl.type_kind with
+        | Types.Type_abstract _ ->
+          let kind : JK.ckind = ckind_of_jkind_l decl.type_jkind in
+          JK.Ty { args = decl.type_params; kind; abstract = true }
+        | Types.Type_record (lbls, _rep, _umc_opt) ->
+          (* Build from components: base (non-float value) + per-label contributions. *)
+          let base_lat = 
+            if has_mutable_label lbls then
+              Axis_lattice.mutable_data
+            else
+              Axis_lattice.immutable_data in
+          let kind : JK.ckind =
+            fun (ops : JK.ops) ->
+              let base = ops.const base_lat in
+              let contribs =
+                List.map
+                  (fun (lbl : Types.label_declaration) ->
+                     let axes =
+                       ik_relevant_axes_of_modality ~relevant_for_shallow:`Irrelevant
+                         lbl.ld_modalities
+                     in
+                     let mask = Axis_lattice.of_axis_set axes in
+                     ops.modality mask (ops.kind_of lbl.ld_type))
+                  lbls
+              in
+              ops.join (base :: contribs)
+          in
+          JK.Ty { args = decl.type_params; kind; abstract = false }
+        | Types.Type_record_unboxed_product (_lbls, _rep, _umc_opt) ->
+          failwith "Type_record_unboxed_product not implemented"
+        | Types.Type_variant (_cstrs, _rep, _umc_opt) ->
+          failwith "Type_variant not implemented"
+        | Types.Type_open ->
+          failwith "Type_open not implemented"
+        end
       | Some body_ty ->
         (* Concrete: compute kind of body. *)
         let args = decl.type_params in

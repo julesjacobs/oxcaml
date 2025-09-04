@@ -1,30 +1,7 @@
-Agent Notes: ikinds build + Ikind shim
-
-Overview
-- Enabled building of `typing/ikinds` sources in the dune build and exposed a thin shim `Ikind.sub_jkind_l` that currently delegates to `Jkind.sub_jkind_l`.
-- Redirected `ctype.ml` to use the shim so we can instrument and experiment without invasive changes elsewhere.
-
-What changed
-- Dune: copy and compile `typing/ikinds/*.ml{i}` and include their modules in the `ocamlcommon` library.
-  - Added modules: `typing/ikinds/global_counters.ml`, `typing/ikinds/lattice_intf.ml`, `typing/ikinds/product_lattice.ml`, `typing/ikinds/lattice_polynomial.ml`, `typing/ikinds/ldd.ml`, `typing/ikinds/ldd_jkind_solver.ml`, `typing/ikinds/axis_lattice.ml`, `typing/ikinds/ikind.ml`.
-- Ikind shim: `typing/ikinds/ikind.ml` defines:
-  - `let sub_jkind_l ~type_equal ~context sub super =
-       print_endline "sub_jkind_l"; Jkind.sub_jkind_l ~type_equal ~context sub super`
-- Call sites updated in `ctype` to go through the shim:
-  - `typing/ctype.ml:7361` and `typing/ctype.ml:7380` now call `Ikind.sub_jkind_l` instead of `Jkind.sub_jkind_l`.
-- Support: added `typing/ikinds/global_counters.ml` to satisfy references from ikinds helpers.
-
-How to see the message
-- Use the in-tree compiler built by dune:
-  - `_build/default/main_native.exe -version`
-  - `_build/default/main_native.exe -c experiments/jkinds/B.mli`
-  - `_build/default/main_native.exe -c experiments/jkinds/B.ml`
-- You should see the line `sub_jkind_l` printed during compilation (from the shim).
-
-Why `_install/bin/ocamlc` won’t show it
-- `_install/bin/ocamlc` reflects the last installation; unless you reinstall after these changes, it won’t include the shim or print. Prefer `_build/default/main_native.exe` for quick local testing.
 
 Goal and Migration Plan
+- Main development happens in `typing/ikinds`
+- Script to run tests/experiments we use during development at `experiments/run_all.sh`
 - Ultimate goal: replace the existing jkind system with a new ikind system.
 - Current scope: start by replacing only the `sub_jkind_l` check.
   - We have hooked all `sub_jkind_l` call sites to `Ikind.sub_jkind_l`.
@@ -67,3 +44,7 @@ Layout And Axes
     - with_bounds: Either `No_with_bounds` or `With_bounds of with_bounds_types`, tracking existential type equations used to refine layout/axes during checks.
   - Left/Right allowance: `'d = 'l * 'r` is managed by the allowance machinery; left jkinds allow joins, right jkinds allow meets. Some operations require disallowing one side to enforce invariants.
   - Common ops (see `typing/jkind.ml` Layout_and_axes): mapping over layouts, equality when both sides have `No_with_bounds`, and helpers to allow/disallow sides.
+
+Notes:
+- The new code is based on an enhanced solver that subsumes all MB_ rules (such as MB_EXPAND_L/R). The enhanced solver is correct and thoroughly tested.
+- The main challenge is building a sub checking algorithm on top of the solver, correctly aligning existing compiler data structures and mod bounds and axis with the internal representations we use here.
