@@ -158,7 +158,7 @@ let lookup_of_context ~(context : Jkind.jkind_context) (p : Path.t)
           JK.Ty { args = decl.type_params; kind; abstract = false }
         | Types.Type_variant (cstrs, _rep, _umc_opt) ->
           (* Base: use a non-float value base; per-constructor contributions. *)
-          let base_lat = Axis_lattice.nonfloat_value in
+          let base_lat = Axis_lattice.immutable_data in
           let kind : JK.ckind =
             fun (ops : JK.ops) ->
               let base = ops.const base_lat in
