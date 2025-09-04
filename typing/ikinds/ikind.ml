@@ -115,10 +115,7 @@ let lookup_of_context ~(context : Jkind.jkind_context) (p : Path.t)
         | Types.Type_record (lbls, _rep, _umc_opt) ->
           (* Build from components: base (non-float value) + per-label contributions. *)
           let base_lat = 
-            if has_mutable_label lbls then
-              Axis_lattice.mutable_data
-            else
-              Axis_lattice.immutable_data in
+            if has_mutable_label lbls then Axis_lattice.mutable_data else Axis_lattice.immutable_data in
           let kind : JK.ckind =
             fun (ops : JK.ops) ->
               let base = ops.const base_lat in
@@ -138,7 +135,7 @@ let lookup_of_context ~(context : Jkind.jkind_context) (p : Path.t)
           JK.Ty { args = decl.type_params; kind; abstract = false }
         | Types.Type_record_unboxed_product (lbls, _rep, _umc_opt) ->
           (* Similar to boxed record for axes: base + per-label contributions. *)
-          let base_lat = Axis_lattice.nonfloat_value in
+          let base_lat = if has_mutable_label lbls then Axis_lattice.mutable_data else Axis_lattice.nonfloat_value in
           let kind : JK.ckind =
             fun (ops : JK.ops) ->
               let base = ops.const base_lat in
