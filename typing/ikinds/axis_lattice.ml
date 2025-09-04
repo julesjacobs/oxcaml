@@ -311,3 +311,22 @@ let arrow : t =
       ~separability:Jkind_axis.Separability.Non_float
   in
   of_mod_bounds mb
+
+(* A lattice constant matching JK Builtin.immediate (mode-crosses everything,
+   with nullability Non_null and separability Non_float). *)
+let immediate : t =
+  let mb =
+    Types.Jkind_mod_bounds.create
+      ~areality:Mode.Regionality.Const.min
+      ~linearity:Mode.Linearity.Const.min
+      ~uniqueness:Mode.Uniqueness.Const_op.min
+      ~portability:Mode.Portability.Const.min
+      ~contention:Mode.Contention.Const_op.min
+      ~yielding:Mode.Yielding.Const.min
+      ~statefulness:Mode.Statefulness.Const.min
+      ~visibility:Mode.Visibility.Const_op.min
+      ~externality:Jkind_axis.Externality.min
+      ~nullability:Jkind_axis.Nullability.Non_null
+      ~separability:Jkind_axis.Separability.Non_float
+  in
+  of_mod_bounds mb

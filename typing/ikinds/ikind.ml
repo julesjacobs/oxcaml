@@ -54,10 +54,13 @@ let kind_of (ty : Types.type_expr) : JK.ckind =
     (* Unboxed tuples: non-float base + per-element contributions with shallow axes relevant. *)
     let base = ops.const Axis_lattice.nonfloat_value in
     let contribs =
+      let relevant_for_shallow =
+        match List.length elts with 1 -> `Relevant | _ -> `Irrelevant
+      in
       List.map
         (fun (_lbl, t) ->
            let mask =
-             Axis_lattice.mask_of_modality ~relevant_for_shallow:`Relevant
+             Axis_lattice.mask_of_modality ~relevant_for_shallow
                Mode.Modality.Const.id
            in
            ops.modality mask (ops.kind_of t))
@@ -99,6 +102,12 @@ let has_mutable_label lbls =
     (fun (lbl : Types.label_declaration) ->
       match lbl.ld_mutable with Immutable -> false | Mutable _ -> true)
     lbls
+
+let all_void_labels lbls =
+  List.for_all
+    (fun (lbl : Types.label_declaration) ->
+      Jkind_types.Sort.Const.all_void lbl.ld_sort)
+    lbls
     
 let lookup_of_context ~(context : Jkind.jkind_context) (p : Path.t)
     : JK.constr_decl =
@@ -134,17 +143,24 @@ let lookup_of_context ~(context : Jkind.jkind_context) (p : Path.t)
           in
           JK.Ty { args = decl.type_params; kind; abstract = false }
         | Types.Type_record_unboxed_product (lbls, _rep, _umc_opt) ->
-          (* Similar to boxed record for axes: base + per-label contributions. *)
-          let base_lat = if has_mutable_label lbls then Axis_lattice.mutable_data else Axis_lattice.nonfloat_value in
+          (* Unboxed products: non-float base; shallow axes relevant only for arity=1. *)
+          let base_lat =
+            if has_mutable_label lbls
+            then Axis_lattice.mutable_data
+            else Axis_lattice.nonfloat_value
+          in
           let kind : JK.ckind =
             fun (ops : JK.ops) ->
               let base = ops.const base_lat in
               let contribs =
+                let relevant_for_shallow =
+                  match List.length lbls with 1 -> `Relevant | _ -> `Irrelevant
+                in
                 List.map
                   (fun (lbl : Types.label_declaration) ->
                      let mask =
                        Axis_lattice.mask_of_modality
-                         ~relevant_for_shallow:`Relevant
+                         ~relevant_for_shallow
                          lbl.ld_modalities
                      in
                      ops.modality mask (ops.kind_of lbl.ld_type))
@@ -154,8 +170,33 @@ let lookup_of_context ~(context : Jkind.jkind_context) (p : Path.t)
           in
           JK.Ty { args = decl.type_params; kind; abstract = false }
         | Types.Type_variant (cstrs, _rep, _umc_opt) ->
-          (* Base: use a non-float value base; per-constructor contributions. *)
-          let base_lat = Axis_lattice.immutable_data in
+          (* Choose base: immediate for void-only variants; mutable if any
+             record constructor has a mutable field; otherwise immutable. *)
+          let all_args_void =
+            List.for_all
+              (fun (c : Types.constructor_declaration) ->
+                 match c.cd_args with
+                 | Types.Cstr_tuple args ->
+                   List.for_all
+                     (fun (arg : Types.constructor_argument) ->
+                       Jkind_types.Sort.Const.all_void arg.ca_sort)
+                     args
+                 | Types.Cstr_record lbls -> all_void_labels lbls)
+              cstrs
+          in
+          let has_mutable =
+            List.exists
+              (fun (c : Types.constructor_declaration) ->
+                 match c.cd_args with
+                 | Types.Cstr_tuple _ -> false
+                 | Types.Cstr_record lbls -> has_mutable_label lbls)
+              cstrs
+          in
+          let base_lat =
+            if all_args_void then Axis_lattice.immediate
+            else if has_mutable then Axis_lattice.mutable_data
+            else Axis_lattice.immutable_data
+          in
           let kind : JK.ckind =
             fun (ops : JK.ops) ->
               let base = ops.const base_lat in
