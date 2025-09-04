@@ -44,7 +44,8 @@ echo "Experiment dir: ${EXPDIR}"
 
 exit_code=0
 total_matches=0
-total_mismatches=0
+total_disagreements=0
+total_failures=0
 
 print_header_and_source() {
   local f="$1"
@@ -78,15 +79,17 @@ run_one() {
   fi
 
   # Count matches and mismatches
-  local file_matches file_total_mismatches
+  local file_matches file_disagreements file_failures
   file_matches=$(printf "%s" "$trimmed" | rg "ik/jk=T/T" -c || true)
   total_matches=$(( total_matches + file_matches ))
-  file_total_mismatches=$(printf "%s" "$trimmed" | rg "ik/jk=" | rg -v "ik/jk=T/T" -c || true)
-  total_mismatches=$(( total_mismatches + file_total_mismatches ))
+  file_disagreements=$(printf "%s" "$trimmed" | rg -e "ik/jk=T/F" -e "ik/jk=F/T" -c || true)
+  total_disagreements=$(( total_disagreements + file_disagreements ))
+  file_failures=$(printf "%s" "$trimmed" | rg "ik/jk=F/F" -c || true)
+  total_failures=$(( total_failures + file_failures ))
 
   if (( MISMATCH_ONLY == 1 )); then
     # Only print mismatches (and optional source if mismatches present)
-    if (( file_total_mismatches > 0 )); then
+    if (( file_disagreements > 0 || file_failures > 0 )); then
       if (( SHOW_SOURCE == 1 )); then
         print_header_and_source "${f}"
       else
@@ -125,6 +128,7 @@ fi
 
 echo ""
 echo "Matches: ${total_matches}"
-echo "Mismatches: ${total_mismatches}"
+echo "Disagreements (IK!=JK): ${total_disagreements}"
+echo "Failures (F/F): ${total_failures}"
 
 exit ${exit_code}
