@@ -57,6 +57,13 @@ let ckind_of_jkind_l (j : Types.jkind_l) : JK.ckind =
     in
     ops.join (base :: contribs)
 
+(* Compute the effective left-hand upper-bounds used by the subjkind check,
+   taking into account the right-hand with-bounds: for each type present on the
+   right, subtract its relevant axes from the left's relevant axes. This matches
+   the intent of MB_EXPAND_L in Jkind.sub_jkind_l. *)
+(* (intentionally left without the "effective" variant; we model with-bounds
+   as a join of masked contributions, independent of the right-hand side) *)
+
 (* Build a JK environment lookup from a Jkind context. This mirrors infer6's
    lookup over a parsed program, but uses the real typing context. *)
 let lookup_of_context ~(context : Jkind.jkind_context) (p : Path.t)
@@ -85,12 +92,16 @@ let make_solver ~(context : Jkind.jkind_context) : JK.solver =
   JK.make_solver (env_of_context ~context)
 
 let sub_jkind_l
+    ?allow_any_crossing
     ~(type_equal : Types.type_expr -> Types.type_expr -> bool)
     ~(context : Jkind.jkind_context)
     (sub : Types.jkind_l)
     (super : Types.jkind_l)
     : (unit, Jkind.Violation.t) result =
   print_endline "sub_jkind_l";
+  (match allow_any_crossing with
+   | Some true -> print_endline "allow_any_crossing=true"
+   | _ -> ());
   let solver = make_solver ~context in
   let sub_poly = JK.normalize solver (ckind_of_jkind_l sub) in
   let super_poly = JK.normalize solver (ckind_of_jkind_l super) in
@@ -98,4 +109,8 @@ let sub_jkind_l
   let super_poly_pp = JK.pp super_poly in
   (* Print sub: <sub_poly_pp>, super: <super_poly_pp> *)
   print_endline (Format.asprintf "sub: %s, super: %s" sub_poly_pp super_poly_pp);
-  Jkind.sub_jkind_l ~type_equal ~context sub super
+  let res = Jkind.sub_jkind_l ?allow_any_crossing ~type_equal ~context sub super in
+  (match res with
+   | Ok () -> print_endline "jkind: ok"
+   | Error _ -> print_endline "jkind: error");
+  res
