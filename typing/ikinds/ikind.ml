@@ -98,19 +98,17 @@ let sub_jkind_l
     (sub : Types.jkind_l)
     (super : Types.jkind_l)
     : (unit, Jkind.Violation.t) result =
-  print_endline "sub_jkind_l";
-  (match allow_any_crossing with
-   | Some true -> print_endline "allow_any_crossing=true"
-   | _ -> ());
   let solver = make_solver ~context in
   let sub_poly = JK.normalize solver (ckind_of_jkind_l sub) in
   let super_poly = JK.normalize solver (ckind_of_jkind_l super) in
   let sub_poly_pp = JK.pp sub_poly in
   let super_poly_pp = JK.pp super_poly in
-  (* Print sub: <sub_poly_pp>, super: <super_poly_pp> *)
-  print_endline (Format.asprintf "sub: %s, super: %s" sub_poly_pp super_poly_pp);
+  let ik_leq = JK.leq solver (ckind_of_jkind_l sub) (ckind_of_jkind_l super) in
   let res = Jkind.sub_jkind_l ?allow_any_crossing ~type_equal ~context sub super in
-  (match res with
-   | Ok () -> print_endline "jkind: ok"
-   | Error _ -> print_endline "jkind: error");
+  let allow_any = match allow_any_crossing with Some true -> true | _ -> false in
+  let jkind_str = match res with Ok () -> "ok" | Error _ -> "error" in
+  print_endline
+    (Format.asprintf
+       "sub_jkind_l allowAny=%b sub:%s super:%s ikind_leq=%b jkind=%s"
+       allow_any sub_poly_pp super_poly_pp ik_leq jkind_str);
   res
