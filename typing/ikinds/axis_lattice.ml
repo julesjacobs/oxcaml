@@ -22,7 +22,8 @@ include T
 
 let to_string = T.to_string
 
-(* Map a set of relevant axes to a lattice element: relevant axes -> top level;
+(* Axis-set encoding
+   Map a set of relevant axes to a lattice element: relevant axes -> top level;
    non-relevant -> level 0. Ordering must match Axis_set.axis_index and our
    axis_sizes layout. *)
 let of_axis_set (set : Jkind_axis.Axis_set.t) : t =
@@ -75,19 +76,6 @@ let mask_of_modality
   : t =
   relevant_axes_of_modality ~relevant_for_shallow modality |> of_axis_set
 
-let ik_base_bounds_nonfloat () : Types.Jkind_mod_bounds.t =
-  Types.Jkind_mod_bounds.create
-    ~areality:Mode.Regionality.Const.max
-    ~linearity:Mode.Linearity.Const.max
-    ~uniqueness:Mode.Uniqueness.Const_op.max
-    ~portability:Mode.Portability.Const.max
-    ~contention:Mode.Contention.Const_op.max
-    ~yielding:Mode.Yielding.Const.max
-    ~statefulness:Mode.Statefulness.Const.max
-    ~visibility:Mode.Visibility.Const_op.max
-    ~externality:Jkind_axis.Externality.max
-    ~nullability:Jkind_axis.Nullability.Non_null
-    ~separability:Jkind_axis.Separability.Non_float
 
 (* Conversion between Types.Jkind_mod_bounds.t and Axis_lattice.t *)
 
@@ -250,7 +238,22 @@ let to_mod_bounds (v : t) : Types.Jkind_mod_bounds.t =
     ~separability
 
 (* Lattice constant for non-float value base *)
-let nonfloat_value : t = of_mod_bounds (ik_base_bounds_nonfloat ())
+let nonfloat_value : t =
+  let mb =
+    Types.Jkind_mod_bounds.create
+      ~areality:Mode.Regionality.Const.max
+      ~linearity:Mode.Linearity.Const.max
+      ~uniqueness:Mode.Uniqueness.Const_op.max
+      ~portability:Mode.Portability.Const.max
+      ~contention:Mode.Contention.Const_op.max
+      ~yielding:Mode.Yielding.Const.max
+      ~statefulness:Mode.Statefulness.Const.max
+      ~visibility:Mode.Visibility.Const_op.max
+      ~externality:Jkind_axis.Externality.max
+      ~nullability:Jkind_axis.Nullability.Non_null
+      ~separability:Jkind_axis.Separability.Non_float
+  in
+  of_mod_bounds mb
 
 
 (* Convenience constants matching JK builtins for record bases. *)
