@@ -29,25 +29,29 @@ let to_string = T.to_string
 let of_axis_set (set : Jkind_axis.Axis_set.t) : t =
   let levels = Array.make num_axes 0 in
   let open Jkind_axis in
-  let top i = axis_sizes.(i) - 1 in
-  let index_of_axis (type a) (ax : a Axis.t) : int =
-    match ax with
-    | Axis.Modal (Mode.Value.Axis.Comonadic Mode.Areality) -> 0
-    | Axis.Modal (Mode.Value.Axis.Comonadic Mode.Linearity) -> 1
-    | Axis.Modal (Mode.Value.Axis.Monadic Mode.Uniqueness) -> 2
-    | Axis.Modal (Mode.Value.Axis.Comonadic Mode.Portability) -> 3
-    | Axis.Modal (Mode.Value.Axis.Monadic Mode.Contention) -> 4
-    | Axis.Modal (Mode.Value.Axis.Comonadic Mode.Yielding) -> 5
-    | Axis.Modal (Mode.Value.Axis.Comonadic Mode.Statefulness) -> 6
-    | Axis.Modal (Mode.Value.Axis.Monadic Mode.Visibility) -> 7
-    | Axis.Nonmodal Axis.Nonmodal.Externality -> 8
-    | Axis.Nonmodal Axis.Nonmodal.Nullability -> 9
-    | Axis.Nonmodal Axis.Nonmodal.Separability -> 10
+  let set_idx_by_name (name : string) =
+    let top i = axis_sizes.(i) - 1 in
+    let idx =
+      match name with
+      | "areality" -> Some 0
+      | "linearity" -> Some 1
+      | "uniqueness" -> Some 2
+      | "portability" -> Some 3
+      | "contention" -> Some 4
+      | "yielding" -> Some 5
+      | "statefulness" -> Some 6
+      | "visibility" -> Some 7
+      | "externality" -> Some 8
+      | "nullability" -> Some 9
+      | "separability" -> Some 10
+      | _ -> None
+    in
+    match idx with
+    | None -> ()
+    | Some i -> levels.(i) <- top i
   in
   Axis_set.to_seq set
-  |> Seq.iter (fun (Axis.Pack ax) ->
-         let i = index_of_axis ax in
-         levels.(i) <- top i);
+  |> Seq.iter (fun (Axis.Pack ax) -> set_idx_by_name (Axis.name ax));
   encode ~levels
 
 
@@ -349,7 +353,7 @@ let immediate : t =
 (* Matches JK for_object: legacy on comonadic axes, max on monadic axes; Non_null, Non_float. *)
 let object_legacy : t =
   let ({ linearity; areality; portability; yielding; statefulness }
-        : Mode.Value.Comonadic.Const.t) = Mode.Value.legacy in
+        : Mode.Value.Comonadic.Const.t) = Mode.Value.Comonadic.Const.legacy in
   let ({ contention; uniqueness; visibility }
         : Mode.Value.Monadic.Const_op.t) = Mode.Value.Monadic.Const_op.max in
   let mb =

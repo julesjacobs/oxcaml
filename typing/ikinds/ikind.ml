@@ -269,8 +269,6 @@ let sub_jkind_l
   let axes_info =
     if ik_leq then None
     else (
-      (* Compare the IK-normalized lattice values that we also print above, so the
-         axes listed match the shown vectors. *)
       let sub_lv = Axis_lattice.decode (JK.round_up solver (ckind_of_jkind_l sub)) in
       let sup_lv = Axis_lattice.decode (JK.round_up solver (ckind_of_jkind_l super)) in
       let names =
@@ -296,34 +294,47 @@ let sub_jkind_l
     | None, Some tag -> Some ("[" ^ tag ^ "]")
     | Some o, Some tag -> Some (o ^ " {" ^ tag ^ "}")
   in
-  (match origin_str with None -> () | Some o -> print_endline o);
-  (* Print the jkinds first for context *)
-  (try
-     let jk_sub = Format.asprintf "%a" Jkind.format sub in
-     let jk_sup = Format.asprintf "%a" Jkind.format super in
-     print_endline (Format.asprintf "  %s <: %s" jk_sub jk_sup)
-   with _ -> ());
-  (* Print the IK round_up (axes lattice) as well *)
-  (try
-     let sub_ru_lat = JK.round_up solver (ckind_of_jkind_l sub) in
-     let sup_ru_lat = JK.round_up solver (ckind_of_jkind_l super) in
-     let sub_ru_pp = Axis_lattice.to_string sub_ru_lat in
-     let sup_ru_pp = Axis_lattice.to_string sup_ru_lat in
-     print_endline (Format.asprintf "  ik_round_up %s <: %s" sub_ru_pp sup_ru_pp)
-   with _ -> ());
-  let summary =
-    Format.asprintf
-      "  %s <: %s ik/jk=%s/%s%s%s"
-      sub_poly_pp super_poly_pp ik_str jk_str allow_any_str axes_str
+  let debug = match Sys.getenv_opt "IKIND_DEBUG" with Some v when v = "1" || String.lowercase_ascii v = "true" -> true | _ -> false in
+  if debug then (
+    (match origin_str with None -> () | Some o -> print_endline o);
+    (* Print the jkinds first for context *)
+    (try
+       let jk_sub = Format.asprintf "%a" Jkind.format sub in
+       let jk_sup = Format.asprintf "%a" Jkind.format super in
+       print_endline (Format.asprintf "  %s <: %s" jk_sub jk_sup)
+     with _ -> ());
+    (* Print the IK round_up (axes lattice) as well *)
+    (try
+       let sub_ru_lat = JK.round_up solver (ckind_of_jkind_l sub) in
+       let sup_ru_lat = JK.round_up solver (ckind_of_jkind_l super) in
+       let sub_ru_pp = Axis_lattice.to_string sub_ru_lat in
+       let sup_ru_pp = Axis_lattice.to_string sup_ru_lat in
+       print_endline (Format.asprintf "  ik_round_up %s <: %s" sub_ru_pp sup_ru_pp)
+     with _ -> ());
+    let summary =
+      Format.asprintf
+        "  %s <: %s ik/jk=%s/%s%s%s"
+        sub_poly_pp super_poly_pp ik_str jk_str allow_any_str axes_str
+    in
+    let disagreement = (ik_leq && not jk_ok) || ((not ik_leq) && jk_ok) in
+    if disagreement then
+      print_endline ("\027[31m" ^ summary ^ "\027[0m")
+    else
+      print_endline summary
+  );
+  (* Switchable behavior: default returns JK result; IK mode enforces IK result. *)
+  let use_ik =
+    match Sys.getenv_opt "IKIND_MODE" with
+    | Some s when String.lowercase_ascii s = "ik" -> true
+    | Some s when s = "1" -> true
+    | _ -> false
   in
-  let disagreement = (ik_leq && not jk_ok) || ((not ik_leq) && jk_ok) in
-  if disagreement then
-    (* Only disagreements (IK!=JK) printed in red *)
-    print_endline ("\027[31m" ^ summary ^ "\027[0m")
-  else
-    (* Agreements (T/T) or (F/F) printed normally *)
-    print_endline summary;
-  res
+  if not use_ik then res
+  else if allow_any || ik_leq then Ok ()
+  else (
+    (* Do not try to adjust allowances; Violation.Not_a_subjkind accepts an r-jkind. *)
+    Error (Jkind.Violation.of_ ~context (Jkind.Violation.Not_a_subjkind (sub, super, [])))
+  )
 
 (* Developer probe stub: set IKIND_POLY_PROBE to enable future tests. No-op by default. *)
 let () =
