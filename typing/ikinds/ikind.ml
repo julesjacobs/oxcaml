@@ -72,7 +72,7 @@ let kind_of (ty : Types.type_expr) : JK.ckind =
     ops.const Axis_lattice.arrow
   | Types.Tlink t -> ops.kind_of t
   | Types.Tsubst _ -> failwith "Tsubst shouldn't appear in kind_of"
-  | Types.Tpoly _ -> failwith "Tpoly not yet implemented in kind_of"
+  | Types.Tpoly _ -> ops.const Axis_lattice.value
   | Types.Tof_kind _ -> failwith "Tof_kind not yet implemented in kind_of"
   | Types.Tobject _ -> ops.const Axis_lattice.object_legacy
   | Types.Tfield _ -> ops.const Axis_lattice.value
@@ -232,7 +232,8 @@ let lookup_of_context ~(context : Jkind.jkind_context) (p : Path.t)
           in
           JK.Ty { args = decl.type_params; kind; abstract = false }
         | Types.Type_open ->
-          failwith "Type_open not implemented"
+          let kind : JK.ckind = fun ops -> ops.const Axis_lattice.value in
+          JK.Ty { args = decl.type_params; kind; abstract = false }
         end
       | Some body_ty ->
         (* Concrete: compute kind of body. *)
