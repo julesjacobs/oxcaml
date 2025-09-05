@@ -103,11 +103,7 @@ let has_mutable_label lbls =
       match lbl.ld_mutable with Immutable -> false | Mutable _ -> true)
     lbls
 
-let all_void_labels lbls =
-  List.for_all
-    (fun (lbl : Types.label_declaration) ->
-      Jkind_types.Sort.Const.all_void lbl.ld_sort)
-    lbls
+  
     
 let lookup_of_context ~(context : Jkind.jkind_context) (p : Path.t)
     : JK.constr_decl =
@@ -181,7 +177,10 @@ let lookup_of_context ~(context : Jkind.jkind_context) (p : Path.t)
                      (fun (arg : Types.constructor_argument) ->
                        Jkind_types.Sort.Const.all_void arg.ca_sort)
                      args
-                 | Types.Cstr_record lbls -> all_void_labels lbls)
+                 | Types.Cstr_record lbls -> List.for_all
+                    (fun (lbl : Types.label_declaration) ->
+                      Jkind_types.Sort.Const.all_void lbl.ld_sort)
+                    lbls)
               cstrs
           in
           let has_mutable =
@@ -239,13 +238,8 @@ let lookup_of_context ~(context : Jkind.jkind_context) (p : Path.t)
         JK.Ty { args; kind; abstract = false })
 
 (* Package the above into a full solver environment. *)
-let env_of_context ~(context : Jkind.jkind_context) : JK.env =
-  let kind_of = kind_of in
-  let lookup = lookup_of_context ~context in
-  { JK.kind_of; lookup }
-
 let make_solver ~(context : Jkind.jkind_context) : JK.solver =
-  JK.make_solver (env_of_context ~context)
+  JK.make_solver { JK.kind_of; lookup = lookup_of_context ~context }
 
 let sub_jkind_l
     ?allow_any_crossing
