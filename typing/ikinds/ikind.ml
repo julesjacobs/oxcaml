@@ -74,11 +74,14 @@ let kind_of (ty : Types.type_expr) : JK.ckind =
   | Types.Tsubst _ -> failwith "Tsubst shouldn't appear in kind_of"
   | Types.Tpoly _ -> failwith "Tpoly not yet implemented in kind_of"
   | Types.Tof_kind _ -> failwith "Tof_kind not yet implemented in kind_of"
-  | Types.Tobject _ -> failwith "Tobject not yet implemented in kind_of"
-  | Types.Tfield _ -> failwith "Tfield not yet implemented in kind_of"
-  | Types.Tnil -> failwith "Tnil not yet implemented in kind_of"
-  | Types.Tvariant _ -> failwith "Tvariant not yet implemented in kind_of"
-  | Types.Tpackage _ -> failwith "Tpackage not yet implemented in kind_of"
+  | Types.Tobject _ -> ops.const Axis_lattice.object_legacy
+  | Types.Tfield _ -> ops.const Axis_lattice.value
+  | Types.Tnil -> ops.const Axis_lattice.value
+  | Types.Tvariant row ->
+    if Btype.tvariant_not_immediate row
+    then ops.const Axis_lattice.nonfloat_value
+    else ops.const Axis_lattice.immediate
+  | Types.Tpackage _ -> ops.const Axis_lattice.nonfloat_value
 
 let ckind_of_jkind_l (j : Types.jkind_l) : JK.ckind =
   fun (ops : JK.ops) ->

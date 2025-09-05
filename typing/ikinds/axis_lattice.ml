@@ -295,6 +295,24 @@ let mutable_data : t =
   in
   of_mod_bounds mb
 
+(* Matches JK Builtin.value: boxed value, Non_null and Separable; no mode-crossing. *)
+let value : t =
+  let mb =
+    Types.Jkind_mod_bounds.create
+      ~areality:Mode.Regionality.Const.max
+      ~linearity:Mode.Linearity.Const.max
+      ~uniqueness:Mode.Uniqueness.Const_op.max
+      ~portability:Mode.Portability.Const.max
+      ~contention:Mode.Contention.Const_op.max
+      ~yielding:Mode.Yielding.Const.max
+      ~statefulness:Mode.Statefulness.Const.max
+      ~visibility:Mode.Visibility.Const_op.max
+      ~externality:Jkind_axis.Externality.max
+      ~nullability:Jkind_axis.Nullability.Non_null
+      ~separability:Jkind_axis.Separability.Separable
+  in
+  of_mod_bounds mb
+
 let arrow : t =
   let mb =
     Types.Jkind_mod_bounds.create
@@ -326,6 +344,21 @@ let immediate : t =
       ~statefulness:Mode.Statefulness.Const.min
       ~visibility:Mode.Visibility.Const_op.min
       ~externality:Jkind_axis.Externality.min
+      ~nullability:Jkind_axis.Nullability.Non_null
+      ~separability:Jkind_axis.Separability.Non_float
+  in
+  of_mod_bounds mb
+
+(* Matches JK for_object: legacy on comonadic axes, max on monadic axes; Non_null, Non_float. *)
+let object_legacy : t =
+  let ({ linearity; areality; portability; yielding; statefulness }
+        : Mode.Value.Comonadic.Const.t) = Mode.Value.legacy in
+  let ({ contention; uniqueness; visibility }
+        : Mode.Value.Monadic.Const_op.t) = Mode.Value.Monadic.Const_op.max in
+  let mb =
+    Types.Jkind_mod_bounds.create ~linearity ~areality ~uniqueness ~portability
+      ~contention ~yielding ~statefulness ~visibility
+      ~externality:Jkind_axis.Externality.max
       ~nullability:Jkind_axis.Nullability.Non_null
       ~separability:Jkind_axis.Separability.Non_float
   in
