@@ -294,14 +294,19 @@ let sub_jkind_l
     | None, Some tag -> Some ("[" ^ tag ^ "]")
     | Some o, Some tag -> Some (o ^ " {" ^ tag ^ "}")
   in
-  let debug = match Sys.getenv_opt "IKIND_DEBUG" with Some v when v = "1" || String.lowercase_ascii v = "true" -> true | _ -> false in
+  let argv_has flag =
+    let a = Sys.argv in
+    let rec loop i = if i >= Array.length a then false else if String.equal a.(i) flag then true else loop (i+1) in
+    loop 1
+  in
+  let debug = argv_has "-ikind-debug" in
   if debug then (
-    (match origin_str with None -> () | Some o -> print_endline o);
+    (match origin_str with None -> () | Some o -> prerr_endline o);
     (* Print the jkinds first for context *)
     (try
        let jk_sub = Format.asprintf "%a" Jkind.format sub in
        let jk_sup = Format.asprintf "%a" Jkind.format super in
-       print_endline (Format.asprintf "  %s <: %s" jk_sub jk_sup)
+       prerr_endline (Format.asprintf "  %s <: %s" jk_sub jk_sup)
      with _ -> ());
     (* Print the IK round_up (axes lattice) as well *)
     (try
@@ -309,7 +314,7 @@ let sub_jkind_l
        let sup_ru_lat = JK.round_up solver (ckind_of_jkind_l super) in
        let sub_ru_pp = Axis_lattice.to_string sub_ru_lat in
        let sup_ru_pp = Axis_lattice.to_string sup_ru_lat in
-       print_endline (Format.asprintf "  ik_round_up %s <: %s" sub_ru_pp sup_ru_pp)
+       prerr_endline (Format.asprintf "  ik_round_up %s <: %s" sub_ru_pp sup_ru_pp)
      with _ -> ());
     let summary =
       Format.asprintf
@@ -318,17 +323,12 @@ let sub_jkind_l
     in
     let disagreement = (ik_leq && not jk_ok) || ((not ik_leq) && jk_ok) in
     if disagreement then
-      print_endline ("\027[31m" ^ summary ^ "\027[0m")
+      prerr_endline ("\027[31m" ^ summary ^ "\027[0m")
     else
-      print_endline summary
+      prerr_endline summary
   );
   (* Switchable behavior: default returns JK result; IK mode enforces IK result. *)
-  let use_ik =
-    match Sys.getenv_opt "IKIND_MODE" with
-    | Some s when String.lowercase_ascii s = "ik" -> true
-    | Some s when s = "1" -> true
-    | _ -> false
-  in
+  let use_ik = argv_has "-ikind" in
   if not use_ik then res
   else if allow_any || ik_leq then Ok ()
   else (
