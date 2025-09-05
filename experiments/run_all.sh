@@ -7,6 +7,9 @@ set -euo pipefail
 #   --show-all       Show all checks and full file listings
 #   --show-source    Always print source listings
 #   --show-matches   Print matching checks as well (ik/jk=T/T)
+#   --ikind          Pass -ikind to the compiler
+#   --ikind-debug    Pass -ikind-debug to the compiler
+#   --flags "..."    Extra flags to pass to the compiler
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 ROOT_DIR=$(cd -- "${SCRIPT_DIR}/.." && pwd -P)
@@ -23,6 +26,9 @@ MISMATCH_ONLY=1
 SHOW_SOURCE=0
 SHOW_MATCHES=0
 SHOW_ERRORS=0
+# Always run experiments with IK enabled
+COMPILER_FLAGS=("-ikind")
+EXTRA_FLAGS=""
 
 for arg in "$@"; do
   case "$arg" in
@@ -34,6 +40,10 @@ for arg in "$@"; do
       SHOW_MATCHES=1 ;;
     --show-errors)
       SHOW_ERRORS=1 ;;
+    --ikind-debug)
+      COMPILER_FLAGS+=("-ikind-debug") ;;
+    --flags)
+      shift || true; EXTRA_FLAGS="$1" ;;
     *)
       echo "Unknown option: $arg" >&2; exit 2 ;;
   esac
@@ -64,7 +74,7 @@ run_one() {
   local f="$1"
   # Compile and capture output
   local out
-  if ! out=$(RUNTIME_DIR=runtime "${OCAMLC_BIN}" -I "${EXPDIR}" -c "${f}" 2>&1); then
+  if ! out=$(RUNTIME_DIR=runtime "${OCAMLC_BIN}" ${COMPILER_FLAGS[@]:-} ${EXTRA_FLAGS} -I "${EXPDIR}" -c "${f}" 2>&1); then
     exit_code=$?
     # Even on compile errors, honor trimming and printing mode
     :
