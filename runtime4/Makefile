@@ -229,20 +229,82 @@ gen_prim_cmd = \
      cmp -s primitives primitives.new || echo primitives.new; \
   else echo gen-primitives-unavailable; fi
 primitives: $(shell $(gen_prim_cmd))
-	cp $^ $@
+		cp $^ $@
 
-prims.c : primitives
-	(echo '#define CAML_INTERNALS'; \
-         echo '#include "caml/mlvalues.h"'; \
-	 echo '#include "caml/prims.h"'; \
-   echo '#pragma GCC diagnostic ignored "-Wdeprecated-non-prototype"'; \
-	 sed -e 's/.*/extern value &();/' primitives; \
-	 echo 'c_primitive caml_builtin_cprim[] = {'; \
-	 sed -e 's/.*/  &,/' primitives; \
-	 echo '  0 };'; \
-	 echo 'char * caml_names_of_builtin_cprim[] = {'; \
-	 sed -e 's/.*/  "&",/' primitives; \
-	 echo '  0 };') > prims.c
+PRIMS_C_FILES = \
+  alloc.c \
+  array.c \
+  compare.c \
+  extern.c \
+  floats.c \
+  gc_ctrl.c \
+  hash.c \
+  intern.c \
+  interp.c \
+  ints.c \
+  io.c \
+  lexing.c \
+  md5.c \
+  meta.c \
+  memprof.c \
+  obj.c \
+  parsing.c \
+  signals.c \
+  str.c \
+  sys.c \
+  callback.c \
+  weak.c \
+  finalise.c \
+  stacks.c \
+  dynlink.c \
+  backtrace_byt.c \
+  backtrace.c \
+  afl.c \
+  bigarray.c \
+  prng.c \
+  eventlog.c \
+  misc.c \
+  domain.c \
+  float32.c \
+  simd.c \
+  blake2.c \
+  systhreads/st_stubs.c \
+  systhreads/st_posix.h
+
+prims.c : primitives $(PRIMS_C_FILES)
+		( \
+		  echo '/* Generated file, do not edit */'; \
+		  echo; \
+		  echo '#define CAML_INTERNALS'; \
+		  echo '#include "caml/mlvalues.h"'; \
+		  echo '#include "caml/prims.h"'; \
+		  echo; \
+		  echo 'struct lexing_table;'; \
+		  echo 'struct lexer_buffer;'; \
+		  echo 'struct parser_tables;'; \
+		  echo 'struct parser_env;'; \
+		  echo; \
+		  (for file in $(PRIMS_C_FILES); do \
+		     $(CC) $(OCAMLC_CFLAGS) -E -I$(CURDIR) \
+		       -DCAML_NO_DEFINE_CAMLprim $$file; \
+		   done) | \
+		    awk '{ gsub(/;[[:space:]]*CAMLprim /, \
+		                ";\nCAMLprim "); print }' | \
+		    sed -n \
+		      -e '/^[[:space:]]*CAMLprim .*).*/p' \
+		      -e '/^[[:space:]]*CAMLprim [^)]*$$/,/)/p' | \
+		    sed \
+		      -e 's/^[[:space:]]*CAMLprim /CAMLextern /' \
+		      -e 's/).*$$/);/'; \
+		  echo; \
+		  echo 'const c_primitive caml_builtin_cprim[] = {'; \
+		  sed -e 's/.*/  (c_primitive) &,/' primitives; \
+		  echo '  0 };'; \
+		  echo; \
+		  echo 'const char * const caml_names_of_builtin_cprim[] = {'; \
+		  sed -e 's/.*/  "&",/' primitives; \
+		  echo '  0 };'; \
+		) > prims.c
 
 caml/opnames.h : caml/instruct.h
 	tr -d '\r' < $< | \
