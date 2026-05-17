@@ -827,3 +827,51 @@
  (action
   (diff dls_get.output dls_get.output.corrected)))
 
+(rule
+ (enabled_if
+  (and
+   (= %{context_name} "main")
+   (= %{architecture} "amd64")
+   (<> %{env:OXCAML_CLANG=} "")))
+ (targets statepoint_metadata.output.corrected)
+ (deps statepoint_metadata.ml)
+ (action
+  (progn
+   (run %{bin:ocamlopt.opt} statepoint_metadata.ml -c -llvm-backend -llvm-path ${OXCAML_CLANG} -keep-llvmir -dno-asm-comments -disable-poll-insertion -g -O3 -opaque -dump-into-file -dcmm -dcfg -stop-after llvmize)
+   (with-outputs-to statepoint_metadata.output.corrected (pipe-outputs (run cat statepoint_metadata.ll) (run ./filter.sh))))))
+
+(rule
+ (enabled_if
+  (and
+   (= %{context_name} "main")
+   (= %{architecture} "amd64")
+   (<> %{env:OXCAML_CLANG=} "")))
+ (alias runtest-llvmize)
+ (deps statepoint_metadata.output statepoint_metadata.output.corrected)
+ (action
+  (diff statepoint_metadata.output statepoint_metadata.output.corrected)))
+
+(rule
+ (enabled_if
+  (and
+   (= %{context_name} "main")
+   (= %{architecture} "amd64")
+   (<> %{env:OXCAML_CLANG=} "")))
+ (targets poll.cmx poll.output.corrected)
+ (deps poll.ml)
+ (action
+  (progn
+   (run %{bin:ocamlopt.opt} poll.ml -c -llvm-backend -llvm-path ${OXCAML_CLANG} -keep-llvmir -dno-asm-comments -g -O3 -opaque -S -dump-into-file -dcmm -dcfg -dlinear)
+   (with-outputs-to poll.output.corrected (pipe-outputs (run cat poll.ll) (run ./filter.sh))))))
+
+(rule
+ (enabled_if
+  (and
+   (= %{context_name} "main")
+   (= %{architecture} "amd64")
+   (<> %{env:OXCAML_CLANG=} "")))
+ (alias runtest-llvmize)
+ (deps poll.output poll.output.corrected)
+ (action
+  (diff poll.output poll.output.corrected)))
+
