@@ -219,6 +219,17 @@ let () =
         [ Ocaml_llvm { filename = name; stop_after_llvmize = true };
           Output_ir { source = name; output = name } ]
   in
+  let print_test_compile_with_poll_insertion name =
+    print_test
+      ~extra_subst:
+        [ ( "llvm_flags",
+            "-llvm-backend -llvm-path ${OXCAML_CLANG} -keep-llvmir \
+             -dno-asm-comments" ) ]
+      ~buf ~run:None
+      ~tasks:
+        [ Ocaml_llvm { filename = name; stop_after_llvmize = false };
+          Output_ir { source = name; output = name } ]
+  in
   let print_test_ir_and_run name =
     let main_name = name ^ "_main" in
     print_test ~extra_subst:[] ~buf ~run:(Some name)
@@ -281,4 +292,6 @@ let () =
   print_test ~extra_subst:[] ~buf ~run:(Some "csel")
     ~tasks:([C "csel_stub"] @ ocaml_llvm_and_output_ir "csel");
   print_test_ir_only "dls_get";
+  print_test_ir_only "statepoint_metadata";
+  print_test_compile_with_poll_insertion "poll";
   ()
