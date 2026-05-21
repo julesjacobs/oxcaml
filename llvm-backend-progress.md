@@ -73,6 +73,12 @@ LLVM-built compiler:
   the expanded 20 output checks and produced 116 fresh wrapper calls.
 - `float_ops` uses `float_ops_arm64.output` for the arm64 NaN spelling/sign;
   the normal arm64 backend prints the same output.
+- A direct `testsuite/tests/basic-more` slice passes with the LLVM-built
+  compiler and `-llvm-backend`: 21 runtime/reference tests covering bounds
+  checks, division exceptions, evaluation order, pattern matching, structural
+  constants, buffers, and formatting. The main slice produced 96 fresh wrapper
+  calls; the larger pattern-matching slice produced 20; `safer_matching` with
+  its required `-safer-matching` flag produced 4.
 
 ## Key Findings
 
@@ -100,8 +106,9 @@ LLVM-built compiler:
 
 ## Next Checks
 
-1. Extend the test-suite-first approach beyond `llvmize`, using small slices
-   whose executables are built by the LLVM-built compiler with `-llvm-backend`.
+1. Convert the direct `basic-more` probe into a repeatable Dune or script-based
+   check, or move to the next small runtime-heavy testsuite slice if that gives
+   better signal.
 2. If an LLVM-built compiler test fails, reduce from that test-suite case rather
    than returning directly to broad self-hosting.
 3. Keep checking wrapper logs on forced rebuilds so cached Dune successes are
