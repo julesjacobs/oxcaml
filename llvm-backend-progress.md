@@ -41,12 +41,18 @@ The former `make_opcodes.exe` lexer crash is fixed by the frame-pointer change
 below. The next blocker is `tools/simdgen/amd64_simd_instrs.ml`: the
 LLVM-built `simdgen.exe` still fails while parsing `amd64/amd64.csv`.
 
-A temporary instrumented copy in `/tmp/oxcaml-simdgen-repro` shows a smaller
-failure shape: while parsing the CSV, `first_word` calls
-`String.split_on_char ' ' str` with the separator register correct but the
-string register holding a bad non-value. A tiny standalone `first_word` program
-compiled with the same LLVM backend works, so the bug needs the larger recursive
-`simdgen` parse path.
+The useful reduced test is now `/tmp/oxcaml-six-args-repro/filter_try.ml`.
+Normal backend output is correct, while the LLVM backend raises `Failure(4)`.
+The same test without the local `try ... with Unsupported -> None` wrapper
+(`/tmp/oxcaml-six-args-repro/filter_no_try.ml`) passes with LLVM. A plain
+six-argument recursive parser and a standalone `first_word` also pass. This
+points at active trap / exceptional-control handling around the parser path,
+not at six-argument calls or `String.split_on_char` by themselves.
+
+A temporary instrumented copy in `/tmp/oxcaml-simdgen-repro` shows the same
+failure shape in the full tool: while parsing the CSV, `first_word` eventually
+calls `String.split_on_char ' ' str` with the separator register correct but the
+string register holding a bad non-value.
 
 The refill reproducer in `/tmp/oxcaml-llvm-refill-repro` is now a passing
 regression test candidate:
@@ -102,8 +108,8 @@ threshold, and a diagnostic `CHECK_SP_IN_STACK` runtime guard.
 
 ## Next Checks
 
-1. Reduce the `simdgen` failure from `/tmp/oxcaml-simdgen-repro`: bad string
-   argument to `String.split_on_char` in the recursive parse path.
+1. Debug `/tmp/oxcaml-six-args-repro/filter_try.ml`: active local exception
+   handler makes the LLVM build fail, while the no-try variant passes.
 2. After fixing that, build `tools/simdgen/amd64_simd_instrs.ml` in
    `_llvm_stage2_fpfix_build`.
 3. Then resume broader stage-2 compiler test-suite targets with the LLVM flag.
