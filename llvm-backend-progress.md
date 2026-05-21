@@ -29,11 +29,11 @@ fixed arm64 runtime registers:
   -ffixed-x15 -ffixed-x26 -ffixed-x27 -ffixed-x28
 ```
 
-Progress is steady on single-domain tests. Multidomain LLVM code now has a
-small failing shape. The current evidence points to a real arm64 ABI design
-problem: LLVM functions with stackmaps use `x29` as a stable frame pointer, but
-normal arm64 OCaml callees do not preserve `x29`. Treat this as a design issue
-for focused experiments, not as something to hill-climb through self-hosting.
+Progress is steady on single-domain tests. The first small multidomain failure
+was reduced to an arm64 ABI issue: LLVM functions with stackmaps used `x29` as
+a stable frame pointer, but normal arm64 OCaml callees may not preserve `x29`.
+Treat broader multidomain support as a design/test-suite problem, not something
+to hill-climb through self-hosting.
 
 As of 2026-05-21, there is no active long-running build in this checkout. The
 latest process/timestamp check found no `dune`, `make`, `ocamlopt`, `clang`, or
@@ -181,13 +181,22 @@ LLVM-built compiler:
   preserved-register set to omit `x29`, and preserving `x29` only around
   noalloc C calls in the normal arm64 backend. LLVM still needs `x29` for
   stackmaps, and ordinary normal-backend OCaml callees can still clobber it.
+- Current promising fix: on arm64, OxCaml no longer asks LLVM for frame-pointer
+  codegen, even when `Config.with_frame_pointers` is true, and local LLVM no
+  longer forces a frame pointer only because an OxCaml function has stackmaps.
+  The rebuilt multidomain driver emits `-fomit-frame-pointer`, the kept IR has
+  no `"frame-pointer"="all"`, and the generated code saves/restores `x29`
+  without using it for local frame references.
+- With that fix, these multidomain probes pass with real LLVM (`-x ir`):
+  one-domain spawn/join, two-domain spawn/join, array two-domain spawn/join,
+  three-domain spawn/join, three-domain `Atomic.add`, and single-domain
+  `Atomic.add`.
 
 ## Next Checks
 
-1. Decide the arm64 mixed-code ABI strategy: either make LLVM stackmap code stop
-   depending on `x29`, make all normal arm64 OCaml callees preserve `x29`, or
-   test a runtime-stdlib-built-with-LLVM slice so LLVM code mostly calls LLVM
-   code.
+1. Turn the arm64 no-frame-pointer LLVM approach into a clean, committed pair
+   of OxCaml/LLVM changes, then add repeatable tests for the reduced
+   multidomain probes.
 2. Convert the direct `basic-more`/`misc` probes into repeatable checks, or move
    to the next small runtime-heavy testsuite slice if that gives better signal.
 3. If an LLVM-built compiler test fails, reduce from that test-suite case rather
