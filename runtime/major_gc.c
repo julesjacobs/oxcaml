@@ -1288,14 +1288,13 @@ void caml_darken(void* state, value v, volatile value* ignored) {
   if (!Is_markable (v)) return; /* foreign stack, at least */
 
   CAMLassert(caml_marking_started());
-  caml_domain_state* domain_state = (caml_domain_state*)state;
-  caml_debug_check_major_pool_root(domain_state->shared_heap, v, ignored);
   hd = Hd_val(v);
   if (Tag_hd(hd) == Infix_tag) {
     v -= Infix_offset_hd(hd);
     hd = Hd_val(v);
   }
   if (Has_status_hd(hd, caml_global_heap_state.UNMARKED)) {
+    caml_domain_state* domain_state = (caml_domain_state*)state;
     if (domain_state->marking_done) {
       (void)caml_atomic_counter_incr(&num_domains_to_mark);
       domain_state->marking_done = 0;
