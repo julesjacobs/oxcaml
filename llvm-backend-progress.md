@@ -99,6 +99,9 @@ LLVM-built compiler:
   four `basic-float` reference tests, `basic-io/wc`, and `basic-io-2/io`.
   Those corrected adjacent runs produced 20 fresh wrapper calls for the
   module/I/O cases.
+- Direct pure-OCaml callback/GC probes pass with the LLVM-built compiler and
+  `-llvm-backend`: `callback/test_finaliser_gc` and
+  `callback/callback_effects_gc`. These produced 8 fresh wrapper calls.
 
 ## Key Findings
 
