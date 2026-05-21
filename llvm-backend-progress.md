@@ -48,6 +48,15 @@ Always verify real LLVM use by checking `/tmp/oxcaml-clang-wrapper.log` for:
   run them through `runtime/ocamlrun`.
 - Do not point stage-4 ocamltest at stale `_install/lib/ocaml`; use
   `_build/runtime_stdlib_install/lib/ocaml_runtime_stdlib`.
+- Use `tools/setup-llvm-stage4-ocamltest.sh` to create a fresh fake root. It
+  was verified with `FAKE_ROOT=/tmp/oxcaml-stage4-ocamltest-src-script` on the
+  `lib-array`/`lib-str`/`lib-systhreads` subset: 55 passed, 5 skipped, 0
+  failed, with 22 fresh `-x ir` calls.
+- Extra fake-root paths currently needed for broader ocamltest slices:
+  `CAML_LD_LIBRARY_PATH=/tmp/oxcaml-stage4-ocamltest-src/stublibs`,
+  `otherlibs/{str,stdlib_stable}` symlinked to the normal stage-1 install,
+  thread stub archives symlinked into the fake `threads` library directory, and
+  `runtime/{threads.h,caml/threads.h}` available for C-stub tests.
 - `make runtime-stdlib` currently depends on the ambient opam switch and can
   fail if the switch is incompatible. For the latest runtime-only check, direct
   Dune rebuilt `_build/runtime_stdlib/runtime/libasmrun*`; those archives were
@@ -75,16 +84,19 @@ Always verify real LLVM use by checking `/tmp/oxcaml-clang-wrapper.log` for:
   through LLVM; the executable printed `55`.
 - Stage-3 and stage-4 compilers pass `@runtest-llvmize` on arm64 with
   `OXCAML_LLVM_TEST_OCAMLOPT` pointing at the LLVM-built compiler.
-- Stage-4 ocamltest stdlib slices pass with `-llvm-backend`: `lib-list`,
-  `lib-string`, `lib-buffer`, `lib-queue`, `lib-stack`, `lib-int`,
+- Stage-4 ocamltest stdlib/runtime slices pass with `-llvm-backend`:
+  `lib-list`, `lib-string`, `lib-buffer`, `lib-queue`, `lib-stack`, `lib-int`,
   `lib-int64`, `lib-float`, `lib-bytes`, `lib-printf`, `lib-format`,
   `lib-hashtbl`, `lib-set`, `lib-marshal`, `lib-filename`, `lib-obj`,
-  `lib-random`, and `lib-bigarray`.
-- Latest stage-4 effects run after the runtime `caml_reperform` fix:
-  125 passed, 28 skipped, 2 failed. The fixed test
-  `effects/reperform_consumed_cont.ml` passed with real LLVM use. The two
-  remaining failures are `effects/dynamic.ml` bytecode/native and are fake
-  library setup problems: missing `dllunix_stubs.so` and `threadsnat_stubs`.
+  `lib-random`, `lib-bigarray`, `lib-array`, `lib-arg`, `lib-bool`,
+  `lib-option`, `lib-result`, `lib-seq`, `lib-lazy`, `lib-digest`,
+  `lib-channels`, `lib-sys`, `lib-str`, `lib-unix`, and `lib-systhreads`.
+- Stage-4 callback/effects/gc-roots ocamltest slice passes with
+  `-llvm-backend`: 175 passed, 29 skipped, 0 failed, with 89 fresh `-x ir`
+  calls. This includes `effects/reperform_consumed_cont.ml` and
+  `effects/dynamic.ml`.
+- Stage-4 broader stdlib/unix/systhreads slice passes with `-llvm-backend`:
+  229 passed, 17 skipped, 0 failed, with 123 fresh `-x ir` calls.
 - Reduced repro `/tmp/oxcaml-reperform-consumed/test.ml` now passes with the
   normal-built compiler plus `-llvm-backend` and patched runtime:
   `first reperform raised Unhandled: true` and
@@ -117,12 +129,10 @@ Always verify real LLVM use by checking `/tmp/oxcaml-clang-wrapper.log` for:
 
 ## Next Checks
 
-1. Add a stable way to run selected ocamltest slices with `-llvm-backend` and
-   an LLVM-built `ocamlopt.opt`, including correct fake stublib/thread paths.
-2. Keep expanding stage-4 ocamltest slices before broad self-hosting.
-3. Convert the reduced runtime/effect issue into a committed source change and
+1. Keep expanding stage-4 ocamltest slices before broad self-hosting.
+2. Convert the reduced runtime/effect issue into a committed source change and
    rely on the existing `effects/reperform_consumed_cont.ml` test as coverage.
-4. Build enough LLVM tools for `llvm-lit`, or keep using direct `llc |
+3. Build enough LLVM tools for `llvm-lit`, or keep using direct `llc |
    FileCheck` for targeted LLVM tests until the toolchain build is expanded.
-5. If an LLVM-built compiler test fails, reduce from that test-suite case rather
+4. If an LLVM-built compiler test fails, reduce from that test-suite case rather
    than returning directly to broad self-hosting.
