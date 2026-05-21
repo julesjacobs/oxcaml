@@ -1467,6 +1467,8 @@ CFI_STARTPROC
     /*  %rax: effect to reperform
         %rbx: continuation
         %rdi: last_fiber */
+        cmpq    $1, Cont_fiber(%rbx)             /* Val_ptr(NULL), already consumed */
+        je      LBL(reperform_continuation_already_resumed)
         movq    Caml_state(current_stack), %rsi  /* %rsi := old stack */
         movq    (Stack_handler-1)(%rdi), %r10
         movq    %rsi, Handler_parent(%r10)       /* Append to last_fiber */
@@ -1475,6 +1477,11 @@ CFI_STARTPROC
         the handler may have caused the current fiber stack to reallocate. */
         UPDATE_BASE_POINTER(%r10)
         jmp     LBL(do_perform)
+LBL(reperform_continuation_already_resumed):
+        ENTER_FUNCTION
+        TSAN_ENTER_FUNCTION(0)
+        LEA_VAR(caml_raise_continuation_already_resumed, %rax)
+        jmp     LBL(caml_c_call)
 CFI_ENDPROC
 ENDFUNCTION(G(caml_reperform))
 
