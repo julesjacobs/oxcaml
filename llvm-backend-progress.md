@@ -79,6 +79,11 @@ LLVM-built compiler:
   constants, buffers, and formatting. The main slice produced 96 fresh wrapper
   calls; the larger pattern-matching slice produced 20; `safer_matching` with
   its required `-safer-matching` flag produced 4.
+- Direct `testsuite/tests/misc` reference tests also pass with the LLVM-built
+  compiler and `-llvm-backend`: `fib`, `taku`, `takc`, `bdd`, `boyer`,
+  `nucleic`, `hamming`, `gcwords`, `gctweaks`, `gc_mark_stack_overflow`,
+  `darkening_work`, `gpr1370`, `pr7168`, `sorts`, and `sieve`. The first batch
+  produced 40 fresh wrapper calls; the second produced 20.
 
 ## Key Findings
 
@@ -106,9 +111,8 @@ LLVM-built compiler:
 
 ## Next Checks
 
-1. Convert the direct `basic-more` probe into a repeatable Dune or script-based
-   check, or move to the next small runtime-heavy testsuite slice if that gives
-   better signal.
+1. Convert the direct `basic-more`/`misc` probes into repeatable checks, or move
+   to the next small runtime-heavy testsuite slice if that gives better signal.
 2. If an LLVM-built compiler test fails, reduce from that test-suite case rather
    than returning directly to broad self-hosting.
 3. Keep checking wrapper logs on forced rebuilds so cached Dune successes are
