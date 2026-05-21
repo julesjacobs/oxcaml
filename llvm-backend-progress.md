@@ -191,15 +191,23 @@ LLVM-built compiler:
   one-domain spawn/join, two-domain spawn/join, array two-domain spawn/join,
   three-domain spawn/join, three-domain `Atomic.add`, and single-domain
   `Atomic.add`.
+- The LLVM AArch64 OxCaml calling-convention test now checks that an OxCaml
+  poll/statepoint frame does not set up `x29` as a frame pointer. The Darwin
+  and Linux `llc | FileCheck` commands pass when run directly. `llvm-lit`
+  currently does not run from the minimal local LLVM build because
+  `llvm-config` and many auxiliary tools were not built. LLVM source commit:
+  `0fa649d3b`.
 
 ## Next Checks
 
 1. Turn the arm64 no-frame-pointer LLVM approach into a clean, committed pair
    of OxCaml/LLVM changes, then add repeatable tests for the reduced
    multidomain probes.
-2. Convert the direct `basic-more`/`misc` probes into repeatable checks, or move
+2. Build enough LLVM tools for `llvm-lit`, or keep using direct `llc |
+   FileCheck` for targeted LLVM tests until the toolchain build is expanded.
+3. Convert the direct `basic-more`/`misc` probes into repeatable checks, or move
    to the next small runtime-heavy testsuite slice if that gives better signal.
-3. If an LLVM-built compiler test fails, reduce from that test-suite case rather
+4. If an LLVM-built compiler test fails, reduce from that test-suite case rather
    than returning directly to broad self-hosting.
-4. Keep checking wrapper logs on forced rebuilds so cached Dune successes are
+5. Keep checking wrapper logs on forced rebuilds so cached Dune successes are
    not mistaken for fresh LLVM executions.
