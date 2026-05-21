@@ -590,7 +590,16 @@ next_chunk:
   retaddr = Saved_return_address(sp);
 
   while(1) {
+    char *scan_sp = sp;
+    uintnat scan_retaddr = retaddr;
     d = caml_find_frame_descr(fds, retaddr);
+    if (d == NULL) {
+      caml_fatal_error(
+        "caml_scan_stack: missing frame descriptor retaddr=%p sp=%p "
+        "stack=%p stack_sp=%p stack_low=%p stack_high=%p gc_regs=%p",
+        (void*)scan_retaddr, scan_sp, stack, stack->sp, Stack_base(stack),
+        Stack_high(stack), regs);
+    }
     CAMLassert(d);
     if (!frame_return_to_C(d)) {
       /* Scan the roots in this frame */

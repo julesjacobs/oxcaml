@@ -98,31 +98,37 @@ Important setup lesson: `duneconf/runtime_stdlib.ws` must also have empty
 `OCAMLPARAM` for normal stage-1 builds. A stale LLVM-built runtime stdlib made
 normal generated tools look broken and produced confusing `simdgen` crashes.
 
-This is steady progress, but the remaining failures are runtime/exception/GC
-contract problems. They should be handled by reduced experiments and targeted
-test-suite slices, not by repeatedly trying broad self-hosting builds.
+This is steady progress, but the remaining work is still runtime/exception/GC
+contract work. Keep using reduced experiments and targeted test-suite slices,
+not broad self-hosting builds, until the targeted suites are stable.
 
 Targeted `@runtest-llvmize` on arm64 with the normal-built compiler plus
-`-llvm-backend` uses real local LLVM; the wrapper log shows `-x ir`, fixed
-arm64 runtime registers, and `-fomit-frame-pointer`.
+`-llvm-backend` now passes. Individual forced rebuilds of the arm64 tests used
+real local LLVM; the wrapper log showed `-x ir`, fixed arm64 runtime registers,
+and `-fomit-frame-pointer`.
 
-Passing arm64 LLVM-backend tests:
+Passing arm64 LLVM-backend tests now include:
 
 - `arm64_many_args`: prints `66`.
 - `arm64_exception_root_refresh`: prints `1`.
 - `arm64_specific_ops`: matches expected arithmetic/float output.
+- `arm64_c_call_gc`: prints `160` after fixing the C-stub include path in the
+  test harness.
+- `arm64_input_channel_loop`: prints `5200`.
+- `arm64_stack_overflow_trap`: prints the expected stack-overflow/backtrace
+  result.
 
-Current targeted failures:
+Two important AArch64 trap fixes made this pass:
 
-- `arm64_input_channel_loop`: aborts in `caml_scan_stack` with `missing frame
-  descriptor`, so the next investigation should map the reported return address
-  back to the LLVM-generated assembly/frame table and determine whether this is
-  a missing descriptor, wrong return address, or wrong stack state.
-- `arm64_stack_overflow_trap`: exits with `SIGTRAP`; reduce/debug after the
-  frame-descriptor issue unless it proves related.
-- `arm64_c_call_gc`: harness compile fails because `<caml/mlvalues.h>` is not
-  found from the C stub rule; verify dune path expansion before changing backend
-  code.
+- Static entry-frame trap blocks must not also contribute their old dynamic
+  trap-block stack offset to statepoint frame-size metadata. The bad descriptor
+  in `arm64_input_channel_loop` was 320 bytes and made the stack scanner read a
+  heap pointer as a return address; after subtracting active static trap-block
+  bytes it is 288 bytes and the test passes.
+- The trap recovery shim now stores a trap-block-relative restore-SP delta, not
+  an absolute restore-SP. Stack growth rewrites the trap-block chain but cannot
+  rewrite extra absolute slots; the relative delta survives stack copying and
+  fixes `arm64_stack_overflow_trap`.
 
 A broad stage-2 `dune build --only-package=ocaml @install` is not a good next
 iteration target. It was stopped after ~20 minutes: dune had four child
@@ -148,9 +154,9 @@ threshold, and a diagnostic `CHECK_SP_IN_STACK` runtime guard.
 
 ## Next Checks
 
-1. Debug `arm64_input_channel_loop` by mapping the `caml_scan_stack` missing
-   frame-descriptor return address to generated code and frame-table entries.
-2. Fix the `arm64_c_call_gc` C-stub include path only after confirming the dune
-   path expansion.
-3. Reduce `arm64_stack_overflow_trap` if it is not explained by the
-   frame-descriptor investigation.
+1. Run a small targeted slice with the LLVM-built compiler, now that the
+   normal-built compiler plus `-llvm-backend` passes `@runtest-llvmize`.
+2. If LLVM-built compiler tests fail, reduce from the failing test-suite case
+   rather than returning to broad self-hosting.
+3. Keep checking wrapper logs on forced rebuilds so cached dune successes are
+   not mistaken for fresh LLVM executions.

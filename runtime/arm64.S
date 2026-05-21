@@ -238,6 +238,17 @@ G(name):
 #define Cont_last_fiber(reg) [reg, #8]
 #define Cont_gc_regs(reg)    [reg, #16]
 
+.macro CHECK_SP_IN_STACK stack
+        cmp     sp, \stack
+        b.lo    9999f
+        ldr     TMP2, Stack_handler(\stack)
+        cmp     sp, TMP2
+        b.hs    9999f
+        b       10000f
+9999:  brk     #0x4c56
+10000:
+.endm
+
 .macro WOSIZE_BLOCK_VAL dst, src
         ldr     \dst, [\src, #-8]
         lsr     \dst, \dst, #10
@@ -252,6 +263,7 @@ G(name):
 .macro SWITCH_OCAML_TO_C
     /* Fill in Caml_state->current_stack->sp */
         ldr     TMP, Caml_state(current_stack)
+        CHECK_SP_IN_STACK TMP
         mov     TMP2, sp
         str     TMP2, Stack_sp(TMP)
     /* No need to update Stack_local_sp: if the runtime
@@ -558,6 +570,109 @@ FUNCTION(caml_call_realloc_stack)
         b       G(caml_raise_async)
         CFI_ENDPROC
 END_FUNCTION(caml_call_realloc_stack)
+
+FUNCTION(caml_llvm_call_realloc_stack)
+        CFI_STARTPROC
+        CFI_SIGNAL_FRAME
+    /* Save return address and frame pointer */
+        CFI_OFFSET(29, -16)
+        CFI_OFFSET(30, -8)
+        stp     x29, x30, [sp, -16]!
+        CFI_ADJUST(16)
+        add     x29, sp, #0
+    /* Save all registers (including ALLOC_PTR & TRAP_PTR) */
+        SAVE_ALL_REGS
+        /* required space in words is already in C_ARG_1 */
+        SWITCH_OCAML_TO_C
+        bl      G(caml_try_realloc_stack)
+        SWITCH_C_TO_OCAML
+        cbz     x0, 1f
+        RESTORE_ALL_REGS
+    /* Free stack space and return to caller */
+        ldp     x29, x30, [sp], 16
+        ret
+1:  /* Restore the gc_regs bucket popped by SAVE_ALL_REGS */
+        ldr     TMP, Caml_state(gc_regs)
+        sub     TMP, TMP, #16
+        ldr     TMP2, Caml_state(gc_regs_buckets)
+        str     TMP2, [TMP, 0]  /* next ptr */
+        str     TMP, Caml_state(gc_regs_buckets)
+    /* Raise the Stack_overflow exception */
+        ldp     x29, x30, [sp], 16
+        ADDRGLOBAL(x0, caml_exn_Stack_overflow)
+        b       G(caml_raise_exn)
+        CFI_ENDPROC
+END_FUNCTION(caml_llvm_call_realloc_stack)
+
+FUNCTION(caml_llvm_prologue_realloc_stack)
+        CFI_STARTPROC
+        CFI_SIGNAL_FRAME
+    /* x16 contains the required space in words, and x17 contains the caller's
+       link register.  The LLVM machine prologue has already done the fast path
+       without touching allocatable registers. */
+        mov     x15, x16 /* required space in words */
+    /* The slow path must not push anything on the OCaml stack: the stack
+       check fires exactly when there may not be enough space to do that. */
+        str     ALLOC_PTR, Caml_state(young_ptr)
+        str     TRAP_PTR, Caml_state(exn_handler)
+        ldr     TMP, Caml_state(gc_regs_buckets)
+        str     x17, [TMP, 8]  /* caller's link register */
+        ldr     TMP2, [TMP, 0] /* next ptr */
+        str     TMP2, Caml_state(gc_regs_buckets)
+        str     x30, [TMP, 0]  /* return address back into the prologue */
+        stp     x0, x1, [TMP, 16]
+        stp     x2, x3, [TMP, 32]
+        stp     x4, x5, [TMP, 48]
+        stp     x6, x7, [TMP, 64]
+        stp     x8, x9, [TMP, 80]
+        stp     x10, x11, [TMP, 96]
+        stp     x12, x13, [TMP, 112]
+        stp     x14, x15, [TMP, 128]
+        stp     x19, x20, [TMP, 144]
+        stp     x21, x22, [TMP, 160]
+        stp     x23, x24, [TMP, 176]
+        str     x25, [TMP, 192]
+        stp     q0, q1, [TMP, 208]
+        stp     q2, q3, [TMP, 240]
+        stp     q4, q5, [TMP, 272]
+        stp     q6, q7, [TMP, 304]
+        stp     q8, q9, [TMP, 336]
+        stp     q10, q11, [TMP, 368]
+        stp     q12, q13, [TMP, 400]
+        stp     q14, q15, [TMP, 432]
+        stp     q16, q17, [TMP, 464]
+        stp     q18, q19, [TMP, 496]
+        stp     q20, q21, [TMP, 528]
+        stp     q22, q23, [TMP, 560]
+        stp     q24, q25, [TMP, 592]
+        stp     q26, q27, [TMP, 624]
+        stp     q28, q29, [TMP, 656]
+        stp     q30, q31, [TMP, 688]
+        add     TMP, TMP, #16
+        str     TMP, Caml_state(gc_regs)
+        mov     C_ARG_1, x15 /* required space in words */
+        SWITCH_OCAML_TO_C
+        bl      G(caml_try_realloc_stack)
+        SWITCH_C_TO_OCAML
+        ldr     TMP, Caml_state(gc_regs)
+        sub     TMP, TMP, #16
+        ldr     x30, [TMP, 0]
+        cbz     x0, 1f
+        RESTORE_ALL_REGS
+        ldr     TMP, Caml_state(gc_regs_buckets)
+        ldr     x17, [TMP, 8]
+        ret
+1:  /* Restore the gc_regs bucket popped by SAVE_ALL_REGS */
+        ldr     TMP, Caml_state(gc_regs)
+        sub     TMP, TMP, #16
+        ldr     TMP2, Caml_state(gc_regs_buckets)
+        str     TMP2, [TMP, 0]  /* next ptr */
+        str     TMP, Caml_state(gc_regs_buckets)
+    /* Raise the Stack_overflow exception */
+        ADDRGLOBAL(x0, caml_exn_Stack_overflow)
+        b       G(caml_raise_exn)
+        CFI_ENDPROC
+END_FUNCTION(caml_llvm_prologue_realloc_stack)
 
 FUNCTION(caml_call_gc)
         CFI_STARTPROC
@@ -1039,6 +1154,12 @@ FUNCTION(caml_reraise_exn)
         CFI_ENDPROC
 END_FUNCTION(caml_reraise_exn)
 
+FUNCTION(caml_raise_notrace)
+        CFI_STARTPROC
+        JUMP_TO_TRAP_PTR
+        CFI_ENDPROC
+END_FUNCTION(caml_raise_notrace)
+
 #if defined(WITH_THREAD_SANITIZER)
 /* When TSan support is enabled, this routine should be called just before
    raising an exception. It calls __tsan_func_exit for every OCaml frame about
@@ -1183,6 +1304,7 @@ END_FUNCTION(caml_callback3_asm)
         CFI_ADJUST(16)
         add     x29, sp, #0
     /* Save OCaml SP and exn_handler in the stack info */
+        CHECK_SP_IN_STACK \old_stack
         mov     TMP, sp
         str     TMP, Stack_sp(\old_stack)
         str     TRAP_PTR, Stack_exception(\old_stack)

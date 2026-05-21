@@ -195,7 +195,8 @@ let external_calling_conventions
   List.iteri (fun i (ty_arg : Cmm.exttype) ->
     let (ty : Cmm.machtype_component), registers, divisor, size =
       match ty_arg with
-      | XInt | XInt64 -> Int, int_registers, 1, size_int
+      | XInt -> Int, int_registers, 1, size_int
+      | XInt64 -> Int, int_registers, 1, size_int
       | XInt32 -> Int, int_registers, 2, size_int
       | XInt16 -> Int, int_registers, 4, size_int
       | XInt8 -> Int, int_registers, 8, size_int
@@ -339,7 +340,7 @@ let destroyed_at_basic (basic : Cfg_intf.S.basic) =
     -> [||]
   | Stack_check _ ->
     (* This case is used by [Cfg_available_regs] *)
-    [||]
+    destroyed_at_alloc_or_poll
   | Op (Const_vec256 _ | Const_vec512 _)
   | Op (Load
           {memory_chunk=(Twofiftysix_aligned|Twofiftysix_unaligned|
@@ -542,8 +543,4 @@ let expression_supported : Cmm.expression -> bool = function
 
 
 let trap_size_in_bytes () =
-  if !Clflags.llvm_backend
-  then
-    Misc.fatal_error
-      "Proc.trap_size_in_bytes: LLVM backend not supported for ARM"
-  else 16
+  if !Clflags.llvm_backend then 32 else 16

@@ -584,6 +584,8 @@ CAMLexport caml_local_arenas* caml_refresh_locals(struct stack_info* stack)
 
   if (stack == Caml_state->current_stack) {
     Caml_state->current_stack->local_sp = Caml_state->local_sp;
+    Caml_state->current_stack->local_top = Caml_state->local_top;
+    Caml_state->current_stack->local_limit = Caml_state->local_limit;
   }
 
   return s;
