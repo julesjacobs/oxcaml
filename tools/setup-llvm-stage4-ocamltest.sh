@@ -12,6 +12,7 @@ wrapper=${LLVM_WRAPPER:-/tmp/oxcaml-clang-wrapper}
 
 install_bin=$normal_build/install/main/bin
 install_lib=$normal_build/install/main/lib/ocaml
+stdlib_stable_dir=${STDLIB_STABLE_DIR:-$install_lib/stdlib_stable}
 runtime_dir=$normal_build/main/runtime
 stage_ocamlopt=$stage_build/main/oxcaml_main_native.exe
 
@@ -26,6 +27,7 @@ require_path "$install_bin/ocamlc.byte"
 require_path "$install_bin/ocamlopt.byte"
 require_path "$stage_ocamlopt"
 require_path "$stdlib_dir/stdlib.cmxa"
+require_path "$stdlib_stable_dir/stdlib_stable.cma"
 require_path "$runtime_dir/ocamlrun"
 require_path "$repo/_runtest/testsuite/tools/expect"
 require_path "$repo/_runtest/testsuite/tools/expectnat"
@@ -54,9 +56,10 @@ ln -sfn "$repo/tools" "$fake_root/tools"
 ln -sfn "$repo/_runtest/testsuite/tools/expect" "$fake_root/testsuite/tools/expect"
 ln -sfn "$repo/_runtest/testsuite/tools/expectnat" "$fake_root/testsuite/tools/expectnat"
 
-for lib in unix threads str stdlib_stable; do
+for lib in unix threads str; do
   ln -sfn "$install_lib/$lib" "$fake_root/otherlibs/$lib"
 done
+ln -sfn "$stdlib_stable_dir" "$fake_root/otherlibs/stdlib_stable"
 ln -sfn "$install_lib/threads" "$fake_root/otherlibs/systhreads"
 ln -sfn "$install_lib/stublibs" "$fake_root/stublibs"
 
