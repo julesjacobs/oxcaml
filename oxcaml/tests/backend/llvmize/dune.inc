@@ -1702,6 +1702,51 @@
    (<> %{env:OXCAML_CLANG=} "")
    (<> %{env:OXCAML_LLVM_TEST_OCAMLOPT=} "")
    (<> %{env:OXCAML_LLVM_TEST_STDLIB=} "")))
+ (targets arm64_global_roots_stubs.o arm64_global_roots.cmx arm64_global_roots.output.exe)
+ (deps arm64_global_roots_stubs.c arm64_global_roots.ml)
+ (action
+  (progn
+   (run clang arm64_global_roots_stubs.c -c -g -O3 -I ../../../../../../runtime)
+   (run %{env:OXCAML_LLVM_TEST_OCAMLOPT=} -I %{env:OXCAML_LLVM_TEST_STDLIB=} arm64_global_roots.ml -c -llvm-backend -llvm-path ${OXCAML_CLANG} -keep-llvmir -dno-asm-comments -disable-poll-insertion -g -O3 -opaque -S -dump-into-file -dcmm -dcfg -dlinear)
+   (run %{env:OXCAML_LLVM_TEST_OCAMLOPT=} -I %{env:OXCAML_LLVM_TEST_STDLIB=} arm64_global_roots_stubs.o arm64_global_roots.cmx -opaque -o arm64_global_roots.output.exe -llvm-backend -llvm-path ${OXCAML_CLANG} -keep-llvmir -dno-asm-comments -disable-poll-insertion))))
+
+(rule
+ (enabled_if
+  (and
+   (= %{context_name} "main")
+   (= %{architecture} "arm64")
+   (<> %{env:OXCAML_CLANG=} "")
+   (<> %{env:OXCAML_LLVM_TEST_OCAMLOPT=} "")
+   (<> %{env:OXCAML_LLVM_TEST_STDLIB=} "")))
+ (alias runtest-llvmize)
+ (deps arm64_global_roots.output.exe)
+ (targets arm64_global_roots.output.corrected)
+ (action
+  (with-outputs-to
+   arm64_global_roots.output.corrected
+   (run ./arm64_global_roots.output.exe))))
+
+(rule
+ (enabled_if
+  (and
+   (= %{context_name} "main")
+   (= %{architecture} "arm64")
+   (<> %{env:OXCAML_CLANG=} "")
+   (<> %{env:OXCAML_LLVM_TEST_OCAMLOPT=} "")
+   (<> %{env:OXCAML_LLVM_TEST_STDLIB=} "")))
+ (alias runtest-llvmize)
+ (deps arm64_global_roots.output arm64_global_roots.output.corrected)
+ (action
+  (diff arm64_global_roots.output arm64_global_roots.output.corrected)))
+
+(rule
+ (enabled_if
+  (and
+   (= %{context_name} "main")
+   (= %{architecture} "arm64")
+   (<> %{env:OXCAML_CLANG=} "")
+   (<> %{env:OXCAML_LLVM_TEST_OCAMLOPT=} "")
+   (<> %{env:OXCAML_LLVM_TEST_STDLIB=} "")))
  (targets arm64_many_args.cmx arm64_many_args.output.exe)
  (deps arm64_many_args.ml)
  (action

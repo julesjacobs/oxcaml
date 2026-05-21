@@ -84,7 +84,9 @@ LLVM-built compiler:
   generate `tools/simdgen/amd64_simd_instrs.ml`.
 - Dune-driven `@runtest-llvmize` for arm64 passes when
   `OXCAML_LLVM_TEST_OCAMLOPT` points at the LLVM-built compiler. This covered
-  the expanded 20 output checks and produced 116 fresh wrapper calls.
+  the expanded output checks and produced fresh wrapper calls. It now includes
+  `arm64_global_roots`, a C-stub/generational-global-root test that updates
+  roots across minor and major GC.
 - `float_ops` uses `float_ops_arm64.output` for the arm64 NaN spelling/sign;
   the normal arm64 backend prints the same output.
 - A direct `testsuite/tests/basic-more` slice passes with the LLVM-built
@@ -128,6 +130,15 @@ LLVM-built compiler:
   `register_typing`, `register_typing_switch`, `regression_value_kinds`,
   `select_addr`, `try_checkbound`, `unrolling_flambda`, and
   `unrolling_flambda2`. These produced 52 fresh wrapper calls.
+- Direct `testsuite/tests/effects` probes pass with the LLVM-built compiler and
+  `-llvm-backend`: `test1`, `test2`, `test3`, `test4`, `test5`, `test6`,
+  `test10`, `test11`, `evenodd`, `partial`, `reperform`, `used_cont`,
+  `shallow_state`, `cmphash`, `manylive`, `marshal`, and `sched`. These
+  produced 34 fresh wrapper calls. `dynamic` needs Thread setup, and
+  `test_lazy` is not useful in this non-multidomain checkout.
+- Direct `testsuite/tests/gc-roots/globroots_sequential` passes with the
+  LLVM-built compiler and `-llvm-backend`; the full default run produced the
+  expected 10,000 iterations for both non-generational and generational APIs.
 - `asmcomp/optargs` is not useful as a direct probe yet: it fails its
   no-allocation assertion even with the normal-built compiler and the normal
   backend, so it needs the real testsuite invocation or exact optimization
