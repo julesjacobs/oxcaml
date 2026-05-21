@@ -102,6 +102,16 @@ LLVM-built compiler:
 - Direct pure-OCaml callback/GC probes pass with the LLVM-built compiler and
   `-llvm-backend`: `callback/test_finaliser_gc` and
   `callback/callback_effects_gc`. These produced 8 fresh wrapper calls.
+- Direct non-C-stub `testsuite/tests/asmcomp` probes pass with the LLVM-built
+  compiler and `-llvm-backend`: `bind_tuples`, `compare`, `evaluation_order`,
+  `lift_mutable_let_flambda`, `obj_dup_primitive`, `prevent_fma`,
+  `register_typing`, `register_typing_switch`, `regression_value_kinds`,
+  `select_addr`, `try_checkbound`, `unrolling_flambda`, and
+  `unrolling_flambda2`. These produced 52 fresh wrapper calls.
+- `asmcomp/optargs` is not useful as a direct probe yet: it fails its
+  no-allocation assertion even with the normal-built compiler and the normal
+  backend, so it needs the real testsuite invocation or exact optimization
+  setup before it can classify an LLVM issue.
 
 ## Key Findings
 
