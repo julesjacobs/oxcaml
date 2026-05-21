@@ -53,9 +53,11 @@ normal generated tools look broken and produced confusing `simdgen` crashes.
 Normal-built compiler plus `-llvm-backend`:
 
 - `@runtest-llvmize` on arm64 passes.
-- Passing arm64 llvmize tests include `arm64_many_args`,
-  `arm64_exception_root_refresh`, `arm64_specific_ops`, `arm64_c_call_gc`,
-  `arm64_input_channel_loop`, and `arm64_stack_overflow_trap`.
+- The arm64 llvmize alias now includes 20 output checks. The generic output
+  checks compile every OCaml module and executable startup with
+  `-llvm-backend`; IR checks stay amd64-only because their expected output is
+  target-specific.
+- The normal-built compiler run of that alias produced 116 fresh wrapper calls.
 - Reduced repros in `/tmp/oxcaml-six-args-repro` and
   `/tmp/oxcaml-llvm-refill-repro` now pass.
 
@@ -68,15 +70,9 @@ LLVM-built compiler:
   generate `tools/simdgen/amd64_simd_instrs.ml`.
 - Dune-driven `@runtest-llvmize` for arm64 passes when
   `OXCAML_LLVM_TEST_OCAMLOPT` points at the LLVM-built compiler. This covered
-  the six arm64 llvmize tests and produced 28 fresh clang wrapper calls.
-- Generic llvmize output-only checks passed in a temporary directory for
-  `const_val`, `int_ops`, `gcd`, `array_rev`, `many_args`, `multi_ret`,
-  `indirect_call`, `extcalls`, `exn`, `alloc`, `tailcall`, `switch`, and
-  `csel`, with all OCaml modules compiled by the LLVM-built compiler using
-  `-llvm-backend`.
-- `float_ops` only differed from the checked-in amd64-oriented expected output
-  in the spelling/sign of printed NaNs; the normal arm64 backend prints the same
-  output as the LLVM run.
+  the expanded 20 output checks and produced 116 fresh wrapper calls.
+- `float_ops` uses `float_ops_arm64.output` for the arm64 NaN spelling/sign;
+  the normal arm64 backend prints the same output.
 
 ## Key Findings
 
@@ -104,11 +100,9 @@ LLVM-built compiler:
 
 ## Next Checks
 
-1. Expand repeatable LLVM-built compiler tests beyond the arm64-only Dune alias,
-   preferably as output-only checks that avoid amd64 IR expectations.
-2. Add or adapt test harness support so the generic llvmize output tests can run
-   on arm64 without checking amd64-specific IR.
-3. If an LLVM-built compiler test fails, reduce from that test-suite case rather
+1. Extend the test-suite-first approach beyond `llvmize`, using small slices
+   whose executables are built by the LLVM-built compiler with `-llvm-backend`.
+2. If an LLVM-built compiler test fails, reduce from that test-suite case rather
    than returning directly to broad self-hosting.
-4. Keep checking wrapper logs on forced rebuilds so cached Dune successes are
+3. Keep checking wrapper logs on forced rebuilds so cached Dune successes are
    not mistaken for fresh LLVM executions.
