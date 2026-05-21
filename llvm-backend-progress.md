@@ -16,10 +16,10 @@ tests and many small manual programs: allocation in `try`, external calls in
 small effect/continuation tests.
 
 The LLVM-built compiler is not self-host useful yet, but it now builds and runs
-small programs with both the normal backend and `-llvm-backend`. Do not rebuild
-stage 2 from an already LLVM-built compiler when trying to isolate bugs; seed it
-from the clean normal-built compiler to avoid preserving old broken generated
-code.
+many small single-domain programs with both the normal backend and
+`-llvm-backend`. Do not rebuild stage 2 from an already LLVM-built compiler when
+trying to isolate bugs; seed it from the clean normal-built compiler to avoid
+preserving old broken generated code.
 
 Always verify real LLVM use by checking the wrapper log for `-x ir` and the
 fixed arm64 runtime registers:
@@ -29,9 +29,9 @@ fixed arm64 runtime registers:
   -ffixed-x15 -ffixed-x26 -ffixed-x27 -ffixed-x28
 ```
 
-Progress is steady. The remaining work is still runtime/exception/GC contract
-work, so reduced experiments and targeted test-suite slices are more useful
-than hill-climbing on full self-hosting.
+Progress is steady on single-domain tests. Multidomain LLVM code now has a
+small failing shape, so that part should be handled by reduced experiments and
+design checks rather than hill-climbing on full self-hosting.
 
 ## Known Good Setup
 
@@ -43,10 +43,13 @@ than hill-climbing on full self-hosting.
   `_llvm_stage2_fpfix_build/main/oxcaml_main_native.exe`.
 - Its build used real local LLVM; the wrapper log had 1596 clang calls including
   `-x ir`.
-- Current configured compilers report `runtime5: true` and
-  `multidomain: false`; `Makefile.config` has `--enable-runtime5` but not
-  `--enable-multidomain`. Direct multidomain tests need a separate
-  multidomain-enabled build/configuration.
+- The main configured compilers report `runtime5: true` and
+  `multidomain: false`. Multidomain experiments use the detached worktree
+  `/Users/julesjacobs/git/jujacobs/oxcaml-llvm-md`, configured with
+  `--enable-runtime5 --enable-multidomain --enable-frame-pointers
+  --enable-poll-insertion --disable-function-sections --disable-stack-checks`.
+  Its normal backend compiler reports `with_frame_pointers: true`,
+  `runtime5: true`, and `multidomain: true`.
 
 Important setup lesson: `duneconf/runtime_stdlib.ws` must also have empty
 `OCAMLPARAM` for normal stage-1 builds. A stale LLVM-built runtime stdlib made
@@ -93,10 +96,6 @@ LLVM-built compiler:
   `weaklifetime2`, `finaliser`, `ephetest`, `ephetest2`, `ephetest3`,
   `ephe_infix`, and `pr12001`. This produced 44 fresh wrapper calls before the
   two multidomain tests were reached.
-- The current build is single-domain: `OCAMLRUNPARAM=d=4` reports that
-  `max_domains` cannot exceed 1, and `ocamlopt -config` reports
-  `multidomain: false`. Multidomain weak/finaliser tests need a separate
-  multidomain-enabled build before they give useful LLVM signal.
 - Direct `testsuite/tests/basic` reference tests pass with the LLVM-built
   compiler and `-llvm-backend`: 36 single-module executables produced 144 fresh
   wrapper calls. Correctly harnessed adjacent cases also pass:
@@ -126,6 +125,14 @@ LLVM-built compiler:
   no-allocation assertion even with the normal-built compiler and the normal
   backend, so it needs the real testsuite invocation or exact optimization
   setup before it can classify an LLVM issue.
+- In the multidomain worktree, the normal backend passes a simple `Domain.spawn`
+  probe, a two-domain spawn/join probe, and a three-domain `Atomic.add` probe.
+  With `-llvm-backend`, a one-domain spawn/join probe and single-domain
+  `Atomic.add` pass, but a two-domain spawn/join probe prints/completes child
+  work and then exits 139. This is the current smallest useful multidomain
+  LLVM failure. LLDB shows the first domain handle is corrupted when the main
+  function tries to join it after the second `Domain.spawn`; the IR does list
+  that handle as `gc-live` across the second spawn call.
 
 ## Key Findings
 
@@ -150,12 +157,20 @@ LLVM-built compiler:
 - A previous apparent stage-2 stall on `parser.pp.ml` was caused by temporary
   runtime diagnostics left in hot GC paths, not by LLVM. After removing those
   diagnostics, a parser typing probe completed in about 18s.
+- `configure.ac` now allows `--enable-frame-pointers` for arm64 Linux and arm64
+  Darwin clang/gcc-style configurations. This lets the LLVM arm64 ABI contract
+  be tested with a compiler/runtime that actually preserve `x29`.
+- Temporary minor-heap diagnostic hooks are now no-ops again. The old root-start
+  snapshot checker produced false failures in multidomain minor collection; it
+  was useful for earlier debugging but too intrusive for normal testing.
 
 ## Next Checks
 
-1. Convert the direct `basic-more`/`misc` probes into repeatable checks, or move
+1. Reduce the two-domain spawn/join LLVM crash and inspect whether it is a
+   runtime-register, callback, or domain teardown contract problem.
+2. Convert the direct `basic-more`/`misc` probes into repeatable checks, or move
    to the next small runtime-heavy testsuite slice if that gives better signal.
-2. If an LLVM-built compiler test fails, reduce from that test-suite case rather
+3. If an LLVM-built compiler test fails, reduce from that test-suite case rather
    than returning directly to broad self-hosting.
-3. Keep checking wrapper logs on forced rebuilds so cached Dune successes are
+4. Keep checking wrapper logs on forced rebuilds so cached Dune successes are
    not mistaken for fresh LLVM executions.
