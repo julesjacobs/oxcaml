@@ -30,13 +30,15 @@ fixed arm64 runtime registers:
 ```
 
 Progress is steady on single-domain tests. Multidomain LLVM code now has a
-small failing shape, so that part should be handled by reduced experiments and
-design checks rather than hill-climbing on full self-hosting.
+small failing shape. The current evidence points to a real arm64 ABI design
+problem: LLVM functions with stackmaps use `x29` as a stable frame pointer, but
+normal arm64 OCaml callees do not preserve `x29`. Treat this as a design issue
+for focused experiments, not as something to hill-climb through self-hosting.
 
 As of 2026-05-21, there is no active long-running build in this checkout. The
-last stopped stage-2-from-clean log was compiling compiler modules with the
-boot compiler, and no build files had changed in the last five minutes when
-checked.
+latest process/timestamp check found no `dune`, `make`, `ocamlopt`, `clang`, or
+`ninja` process. A follow-up `ninja clang` rebuild completed quickly, so the
+local clang binary again matches the restored LLVM source.
 
 ## Known Good Setup
 
@@ -135,9 +137,11 @@ LLVM-built compiler:
   With `-llvm-backend`, a one-domain spawn/join probe and single-domain
   `Atomic.add` pass, but a two-domain spawn/join probe prints/completes child
   work and then exits 139. This is the current smallest useful multidomain
-  LLVM failure. LLDB shows the first domain handle is corrupted when the main
-  function tries to join it after the second `Domain.spawn`; the IR does list
-  that handle as `gc-live` across the second spawn call.
+  LLVM failure. Compile it with `-llvm-path /tmp/oxcaml-clang-wrapper`; `-cc`
+  does not control the LLVM IR compiler. LLDB shows the first domain handle is
+  corrupted after the second `Domain.spawn`; the IR does list that handle as
+  `gc-live` across the second spawn call, and the wrapper log confirms real LLVM
+  use with `-x ir` and fixed runtime registers.
 
 ## Key Findings
 
@@ -168,11 +172,22 @@ LLVM-built compiler:
 - Temporary minor-heap diagnostic hooks are now no-ops again. The old root-start
   snapshot checker produced false failures in multidomain minor collection; it
   was useful for earlier debugging but too intrusive for normal testing.
+- The two-domain failure is not explained by missing `gc-live` metadata. A
+  watchpoint showed ordinary callee code reusing a stack address reached through
+  a clobbered `x29`. `Stdlib.Domain.spawn` temporarily stores the OCaml stack
+  pointer in `x29`; after returning, LLVM code still addresses locals through
+  `x29`.
+- Two incomplete fixes were tried and rejected: changing the LLVM OxCaml call
+  preserved-register set to omit `x29`, and preserving `x29` only around
+  noalloc C calls in the normal arm64 backend. LLVM still needs `x29` for
+  stackmaps, and ordinary normal-backend OCaml callees can still clobber it.
 
 ## Next Checks
 
-1. Reduce the two-domain spawn/join LLVM crash and inspect whether it is a
-   runtime-register, callback, or domain teardown contract problem.
+1. Decide the arm64 mixed-code ABI strategy: either make LLVM stackmap code stop
+   depending on `x29`, make all normal arm64 OCaml callees preserve `x29`, or
+   test a runtime-stdlib-built-with-LLVM slice so LLVM code mostly calls LLVM
+   code.
 2. Convert the direct `basic-more`/`misc` probes into repeatable checks, or move
    to the next small runtime-heavy testsuite slice if that gives better signal.
 3. If an LLVM-built compiler test fails, reduce from that test-suite case rather
