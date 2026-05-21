@@ -130,12 +130,14 @@ Two important AArch64 trap fixes made this pass:
   rewrite extra absolute slots; the relative delta survives stack copying and
   fixes `arm64_stack_overflow_trap`.
 
-A broad stage-2 `dune build --only-package=ocaml @install` is not a good next
-iteration target. It was stopped after ~20 minutes: dune had four child
-compilers burning CPU on `parser.ml` / `parser.pp.ml`, with no recent output
-files for those modules and no clang wrapper activity for them. A `sample` of
-one process showed time in typing / warning-scope recursion plus debug heap
-checks. No such build is currently still running.
+A broad stage-2 compiler build is not a good next iteration target. Building
+`oxcaml_main_native.exe` with `-llvm-backend` did make real LLVM progress
+(274 clang wrapper calls with `-x ir`), but then stalled on `parser.pp.ml`
+before any new clang call. A direct `parser.pp.ml` compile with
+`-llvm-backend` also stalled before clang, and a direct compile without
+`-llvm-backend` was still CPU-bound after about two minutes. This points at a
+front-end/compiler-module compile-time problem, not an LLVM backend codegen
+failure. No such build is currently still running.
 
 ## Prior Fix Direction
 
