@@ -43,6 +43,10 @@ than hill-climbing on full self-hosting.
   `_llvm_stage2_fpfix_build/main/oxcaml_main_native.exe`.
 - Its build used real local LLVM; the wrapper log had 1596 clang calls including
   `-x ir`.
+- Current configured compilers report `runtime5: true` and
+  `multidomain: false`; `Makefile.config` has `--enable-runtime5` but not
+  `--enable-multidomain`. Direct multidomain tests need a separate
+  multidomain-enabled build/configuration.
 
 Important setup lesson: `duneconf/runtime_stdlib.ws` must also have empty
 `OCAMLPARAM` for normal stage-1 builds. A stale LLVM-built runtime stdlib made
@@ -89,9 +93,10 @@ LLVM-built compiler:
   `weaklifetime2`, `finaliser`, `ephetest`, `ephetest2`, `ephetest3`,
   `ephe_infix`, and `pr12001`. This produced 44 fresh wrapper calls before the
   two multidomain tests were reached.
-- The current direct test setup is single-domain: `OCAMLRUNPARAM=d=4` reports
-  that `max_domains` cannot exceed 1. Multidomain weak/finaliser tests need a
-  proper multidomain runtime/test harness before they give useful LLVM signal.
+- The current build is single-domain: `OCAMLRUNPARAM=d=4` reports that
+  `max_domains` cannot exceed 1, and `ocamlopt -config` reports
+  `multidomain: false`. Multidomain weak/finaliser tests need a separate
+  multidomain-enabled build before they give useful LLVM signal.
 - Direct `testsuite/tests/basic` reference tests pass with the LLVM-built
   compiler and `-llvm-backend`: 36 single-module executables produced 144 fresh
   wrapper calls. Correctly harnessed adjacent cases also pass:
