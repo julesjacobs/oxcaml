@@ -364,6 +364,8 @@ let () =
   print_arm64_output_test_c ~c_suffix:"stub" "csel" ["csel"];
   print_test_c_for_arch ~architecture:"arm64" ~c_suffix:"stubs"
     "arm64_c_call_gc";
+  print_test_c_for_arch ~architecture:"arm64" ~c_suffix:"stubs"
+    "arm64_global_roots";
   print_test_run_no_main_for_arch ~architecture:"arm64" "arm64_many_args";
   print_test_run_no_main_for_arch ~architecture:"arm64"
     "arm64_input_channel_loop";
