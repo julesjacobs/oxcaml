@@ -125,10 +125,6 @@ shared_heap_fast_data_p caml_shared_fast_data(struct caml_heap_state *);
 void caml_shared_fast_data_refill(struct caml_heap_state *,
                                   sizeclass_t);
 
-void caml_debug_check_pool_free_block(struct caml_heap_state*, sizeclass_t,
-                                      value*, const char*);
-void caml_debug_check_pool_headers(struct caml_heap_state*, const char*);
-
 /* Expose implementation of this opaque type to allow the inline
  * function below to access the contents. Clients should not rely on
  * the contents of this data structure. */
@@ -158,8 +154,6 @@ Caml_inline void *caml_shared_fast_alloc (mlsize_t whsize,
     return NULL;
   }
   value *block = *free_p;
-  caml_debug_check_pool_free_block(domain->shared_heap, sz, block,
-                                   "fast_alloc");
   CAMLassert(block != NULL);
   value *next = (value*)(block[1]);
   caml_prefetchw(next);
@@ -178,9 +172,6 @@ void caml_shared_add_pool_stats(struct caml_heap_state *,
                                 uintnat /* pool_frag_words */);
 
 void caml_redarken_pool(struct pool*, scanning_action, void*);
-
-int caml_debug_check_major_pool_root(struct caml_heap_state*, value,
-                                     volatile value*);
 
 intnat caml_sweep(struct caml_heap_state*, intnat);
 
