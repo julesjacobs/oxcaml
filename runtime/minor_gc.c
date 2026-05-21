@@ -18,6 +18,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "caml/config.h"
 #include "caml/custom.h"
@@ -196,12 +197,224 @@ struct oldify_state {
   bool domain_alone;
   status status;
   shared_heap_fast_data_p fast_data;
+  header_t **minor_block_starts;
+  size_t minor_block_start_count;
   uintnat live_bytes;
   uintnat pool_live_blocks;
   uintnat pool_live_words;
   uintnat pool_frag_words;
   uintnat allocated_words;
 };
+
+static void minor_root_snapshot_abort(caml_domain_state* domain,
+                                      header_t* hp,
+                                      header_t* prev_hp,
+                                      const char* why)
+{
+  header_t hd = *hp;
+  fprintf(stderr,
+          "minor root snapshot failed: %s hp=%p young=[%p,%p) "
+          "hd=0x%lx tag=%u whsize=%lu words=[0x%lx,0x%lx,0x%lx,0x%lx]\n",
+          why, hp, domain->young_ptr, domain->young_end,
+          (unsigned long)hd, (unsigned)Tag_hd(hd),
+          (unsigned long)Whsize_hd(hd), (unsigned long)hp[0],
+          (unsigned long)hp[1], (unsigned long)hp[2],
+          (unsigned long)hp[3]);
+  if (prev_hp != NULL) {
+    header_t prev_hd = *prev_hp;
+    fprintf(stderr,
+            "previous minor block: hp=%p hd=0x%lx tag=%u whsize=%lu "
+            "next=%p words=[0x%lx,0x%lx,0x%lx,0x%lx]\n",
+            prev_hp, (unsigned long)prev_hd, (unsigned)Tag_hd(prev_hd),
+            (unsigned long)Whsize_hd(prev_hd), prev_hp + Whsize_hd(prev_hd),
+            (unsigned long)prev_hp[0], (unsigned long)prev_hp[1],
+            (unsigned long)prev_hp[2], (unsigned long)prev_hp[3]);
+  }
+  abort();
+}
+
+static size_t count_minor_block_starts(caml_domain_state* domain)
+{
+  header_t* hp = (header_t*)domain->young_ptr;
+  header_t* end = (header_t*)domain->young_end;
+  header_t* prev_hp = NULL;
+  size_t count = 0;
+  while (hp < end) {
+    header_t hd = *hp;
+    mlsize_t whsize = Whsize_hd(hd);
+    if (whsize == 0 || hp + whsize > end) {
+      minor_root_snapshot_abort(domain, hp, prev_hp, "invalid block size");
+    }
+    count++;
+    prev_hp = hp;
+    hp += whsize;
+  }
+  return count;
+}
+
+static int caml_debug_check_minor_heap_on_alloc_slow_path(void)
+{
+  static int enabled = -1;
+  if (enabled == -1) {
+    enabled =
+      getenv("OXCAML_DEBUG_CHECK_MINOR_HEAP_ON_ALLOC_SLOW_PATH") != NULL;
+  }
+  return enabled;
+}
+
+void caml_debug_check_minor_heap(void)
+{
+  static uintnat interval = (uintnat)-1;
+  static uintnat counter = 0;
+  if (interval == (uintnat)-1) {
+    const char* env = getenv("OXCAML_DEBUG_CHECK_MINOR_HEAP_EVERY_ALLOC");
+    if (env == NULL) {
+      interval = 0;
+    } else {
+      interval = strtoull(env, NULL, 10);
+      if (interval == 0) interval = 1;
+    }
+  }
+  if (interval == 0) return;
+  counter++;
+  if (counter % interval != 0) return;
+
+  caml_domain_state* domain = Caml_state;
+  if (domain == NULL || domain->young_ptr == NULL || domain->young_end == NULL) {
+    return;
+  }
+  (void)count_minor_block_starts(domain);
+}
+
+void caml_debug_check_minor_heap_head(value* young_ptr, uintnat func_hash,
+                                      uintnat instr_id)
+{
+  static int enabled = -1;
+  static uintnat last_func_hash = 0;
+  static uintnat last_instr_id = 0;
+  if (enabled == -1) {
+    enabled = getenv("OXCAML_DEBUG_CHECK_MINOR_HEAP_HEAD_EVERY_ALLOC") != NULL;
+  }
+  if (!enabled) return;
+
+  caml_domain_state* domain = Caml_state;
+  if (domain == NULL || domain->young_ptr == NULL || domain->young_end == NULL) {
+    return;
+  }
+  header_t* hp = (header_t*)young_ptr;
+  header_t* end = (header_t*)domain->young_end;
+  if (hp == end) return;
+  if (hp < (header_t*)domain->young_start || hp > end) {
+    minor_root_snapshot_abort(domain, hp, NULL, "invalid young_ptr");
+  }
+  header_t hd = *hp;
+  mlsize_t whsize = Whsize_hd(hd);
+  if (whsize == 0 || hp + whsize > end) {
+    fprintf(stderr, "head check site func_hash=%" ARCH_INTNAT_PRINTF_FORMAT
+                    "u instr_id=%" ARCH_INTNAT_PRINTF_FORMAT
+                    "u previous_func_hash=%" ARCH_INTNAT_PRINTF_FORMAT
+                    "u previous_instr_id=%" ARCH_INTNAT_PRINTF_FORMAT "u\n",
+            func_hash, instr_id, last_func_hash, last_instr_id);
+    minor_root_snapshot_abort(domain, hp, NULL, "invalid head block size");
+  }
+  last_func_hash = func_hash;
+  last_instr_id = instr_id;
+}
+
+static void build_minor_block_start_snapshot(struct oldify_state* st)
+{
+  caml_domain_state* domain = st->domain;
+  st->minor_block_start_count = count_minor_block_starts(domain);
+  if (st->minor_block_start_count == 0) return;
+
+  st->minor_block_starts =
+    caml_stat_alloc_noexc(st->minor_block_start_count * sizeof(header_t*));
+  if (st->minor_block_starts == NULL) {
+    caml_fatal_error("not enough memory for minor block-start snapshot");
+  }
+
+  header_t* hp = (header_t*)domain->young_ptr;
+  header_t* end = (header_t*)domain->young_end;
+  header_t* prev_hp = NULL;
+  for (size_t i = 0; i < st->minor_block_start_count; i++) {
+    header_t hd = *hp;
+    mlsize_t whsize = Whsize_hd(hd);
+    if (whsize == 0 || hp + whsize > end) {
+      minor_root_snapshot_abort(domain, hp, prev_hp,
+                                "invalid block size while building");
+    }
+    st->minor_block_starts[i] = hp;
+    prev_hp = hp;
+    hp += whsize;
+  }
+  if (hp != end) {
+    minor_root_snapshot_abort(domain, hp, prev_hp,
+                              "snapshot did not end at young_end");
+  }
+}
+
+static int minor_snapshot_find(struct oldify_state* st, header_t* hp,
+                               size_t* index)
+{
+  size_t lo = 0;
+  size_t hi = st->minor_block_start_count;
+  while (lo < hi) {
+    size_t mid = lo + (hi - lo) / 2;
+    header_t* mid_hp = st->minor_block_starts[mid];
+    if (mid_hp == hp) {
+      *index = mid;
+      return 1;
+    }
+    if (mid_hp < hp) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  *index = lo;
+  return 0;
+}
+
+static void validate_minor_root_start(struct oldify_state* st, value v,
+                                      volatile value* p)
+{
+  if (st->minor_block_start_count == 0) return;
+
+  header_t* hp = (header_t*)Hp_val(v);
+  size_t index = 0;
+  if (minor_snapshot_find(st, hp, &index)) return;
+
+  header_t hd = *hp;
+  if (Tag_hd(hd) == Infix_tag) {
+    mlsize_t infix_offset = Infix_offset_hd(hd);
+    if (infix_offset > 0
+        && (char*)v - (char*)st->domain->young_start >= (intnat)infix_offset) {
+      value real_v = v - infix_offset;
+      if (Is_block(real_v) && Is_young(real_v)
+          && minor_snapshot_find(st, (header_t*)Hp_val(real_v), &index)) {
+        return;
+      }
+    }
+  }
+
+  fprintf(stderr,
+          "bad young root: slot=%p value=%p hp=%p hd=0x%lx tag=%u "
+          "young=[%p,%p) starts=%zu\n",
+          (void*)p, (void*)v, (void*)hp, (unsigned long)hd,
+          (unsigned)Tag_hd(hd), st->domain->young_start,
+          st->domain->young_end, st->minor_block_start_count);
+  if (index > 0) {
+    header_t* block_hp = st->minor_block_starts[index - 1];
+    header_t block_hd = *block_hp;
+    fprintf(stderr,
+            "containing minor block: value=%p hp=%p offset_words=%td "
+            "hd=0x%lx tag=%u wosize=%lu\n",
+            (void*)Val_hp(block_hp), (void*)block_hp, hp - block_hp,
+            (unsigned long)block_hd, (unsigned)Tag_hd(block_hd),
+            (unsigned long)Wosize_hd(block_hd));
+  }
+  abort();
+}
 
 /* In-progress headers are zeros except for the lowest color bit set
    to 1. */
@@ -330,6 +543,7 @@ tail_call:
   }
 
   struct oldify_state* st = st_v;
+  validate_minor_root_start(st, v, p);
   header_t hd;
   tag_t tag;
   mlsize_t infix_offset = 0;
@@ -619,6 +833,8 @@ caml_empty_minor_heap_promote(caml_domain_state* domain,
   st.domain_alone = caml_domain_alone();
   st.status = caml_allocation_status();
   st.fast_data = caml_shared_fast_data(domain->shared_heap);
+  build_minor_block_start_snapshot(&st);
+  caml_debug_check_pool_headers(domain->shared_heap, "minor-promote-begin");
 
   prev_alloc_words = domain->allocated_words;
 
@@ -804,6 +1020,7 @@ caml_empty_minor_heap_promote(caml_domain_state* domain,
   /* Must be called during the STW section -- before any mutators
      start running, so before arriving at the barrier. */
   caml_collect_gc_stats_sample_stw(domain);
+  caml_debug_check_pool_headers(domain->shared_heap, "minor-promote-end");
 
   /* The code above is synchronised with other domains by the barrier below,
      which is split into two steps, "arriving" and "leaving". When the final
@@ -840,6 +1057,9 @@ caml_empty_minor_heap_promote(caml_domain_state* domain,
     CAML_EV_BEGIN(EV_MINOR_LEAVE_BARRIER);
     minor_gc_leave_barrier(domain, participating_count);
     CAML_EV_END(EV_MINOR_LEAVE_BARRIER);
+  }
+  if (st.minor_block_starts != NULL) {
+    caml_stat_free(st.minor_block_starts);
   }
   return result;
 }
@@ -1131,6 +1351,12 @@ void caml_alloc_small_dispatch (caml_domain_state * dom_st,
 
   /* First, we un-do the allocation performed in [Alloc_small] */
   dom_st->young_ptr += whsize;
+  if (caml_debug_check_minor_heap_on_alloc_slow_path()) {
+    fprintf(stderr, "checking minor heap after undoing slow allocation: "
+            "wosize=%ld whsize=%ld young_ptr=%p\n",
+            (long)wosize, (long)whsize, dom_st->young_ptr);
+    (void)count_minor_block_starts(dom_st);
+  }
 
   while(1) {
     /* We might be here because of an async callback / urgent GC

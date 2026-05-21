@@ -233,7 +233,14 @@ let select_operation
     (args : Cmm.expression list) dbg ~label_after :
     Cfg_selectgen_target_intf.select_operation_result =
   if !Clflags.llvm_backend
-  then Use_default
+  then
+    match select_operation' ~generic_select_condition op args dbg ~label_after with
+    | (Rewritten _ | Select_operation_then_rewrite _) as selected -> selected
+    | Use_default -> (
+      match op with
+      | Cextcall { func; builtin = true; _ } ->
+        Rewritten (specific (Illvm_intrinsic func), args)
+      | _ -> Use_default)
   else select_operation' ~generic_select_condition op args dbg ~label_after
 
 let select_store ~is_assign:_ _addr _exp :

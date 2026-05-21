@@ -158,10 +158,7 @@ module Type = struct
     match c with
     | Int -> i64
     | Val -> val_ptr
-    | Addr ->
-      val_ptr
-      (* We interpret [Addr]s as [val_ptr]s to let the RS4GC pass in LLVM to
-         handle derived pointers for us. *)
+    | Addr -> i64
     | Float -> double
     | Float32 -> float
     | Vec128 | Vec256 | Vec512 | Valx2 ->
@@ -278,15 +275,31 @@ module Ident = struct
 
   let of_label label = local ("L" ^ Label.to_string label)
 
+  let escape_quoted_global s =
+    let b = Buffer.create (String.length s) in
+    String.iter
+      (fun c ->
+        match c with
+        | '"' -> Buffer.add_string b {|\22|}
+        | '\\' -> Buffer.add_string b {|\5C|}
+        | c when Char.code c < 32 || Char.code c >= 127 ->
+          Buffer.add_string b (Printf.sprintf {|\%02X|} (Char.code c))
+        | c -> Buffer.add_char b c)
+      s;
+    Buffer.contents b
+
+  let asm_name s =
+    let encoded =
+      Asm_targets.(Asm_symbol.create_global s |> Asm_symbol.encode)
+    in
+    "\001" ^ encoded
+
   let pp_t ppf t =
     let open Format in
     match t with
     | Local s -> fprintf ppf "%%%s" s
-    | Global s ->
-      let encoded =
-        Asm_targets.(Asm_symbol.create_global s |> Asm_symbol.encode)
-      in
-      fprintf ppf "@%s" encoded
+    | Global s when String.begins_with ~prefix:"llvm." s -> fprintf ppf "@%s" s
+    | Global s -> fprintf ppf {|@"%s"|} (escape_quoted_global (asm_name s))
 
   let to_label_string_exn = function
     | Local s -> s ^ ":"
@@ -296,6 +309,7 @@ module Ident = struct
 
   let to_string_encoded = function
     | Local s -> s
+    | Global s when String.begins_with ~prefix:"llvm." s -> s
     | Global s -> Asm_targets.(Asm_symbol.create_global s |> Asm_symbol.encode)
 
   module Gen = struct
@@ -416,17 +430,21 @@ end
 module Fn_attr = struct
   type t =
     | Cold
+    | Frame_pointer_all
     | Gc of string
     | Gc_leaf_function
     | Noinline
+    | Oxcaml_stack_check
     | Returns_twice
     | Statepoint_id of int
 
   let to_string = function
     | Cold -> "cold"
+    | Frame_pointer_all -> {|"frame-pointer"="all"|}
     | Gc s -> Format.sprintf {|gc "%s"|} s
     | Gc_leaf_function -> {|"gc-leaf-function"="true"|}
     | Noinline -> "noinline"
+    | Oxcaml_stack_check -> {|"oxcaml-stack-check"="true"|}
     | Returns_twice -> "returns_twice"
     | Statepoint_id i -> Format.sprintf {|"statepoint-id"="%d"|} i
 
@@ -437,7 +455,9 @@ module Fn_attr = struct
   let to_string t = Format.asprintf "%a" pp_t t
 
   let order = function
-    | Cold | Gc_leaf_function | Noinline | Returns_twice | Statepoint_id _ -> 0
+    | Cold | Frame_pointer_all | Gc_leaf_function | Noinline
+    | Oxcaml_stack_check | Returns_twice | Statepoint_id _ ->
+      0
     | Gc _ -> 10
   (* [Gc] is not really an attribute, so it must occur after all attributes. It
      is included here because it basically behaves like one. *)
@@ -683,6 +703,16 @@ module Instruction = struct
           branches : switch_branch list
         }
     | Unreachable
+    | Invoke of
+        { func : Ident.t;
+          args : Value.t list;
+          res_type : Type.Or_void.t;
+          attrs : Fn_attr.t list;
+          operand_bundles : (string * Value.t list) list;
+          cc : Calling_conventions.t;
+          normal : Value.t;
+          unwind : Value.t
+        }
     (* Basic *)
     | Unary of
         { op : unary_op;
@@ -735,11 +765,13 @@ module Instruction = struct
         }
     | Load of
         { ptr : Value.t;
-          typ : Type.t
+          typ : Type.t;
+          volatile_ : bool
         }
     | Store of
         { ptr : Value.t;
-          to_store : Value.t
+          to_store : Value.t;
+          volatile_ : bool
         }
     | Getelementptr of
         { base_type : Type.t;
@@ -769,6 +801,7 @@ module Instruction = struct
           args : Value.t list;
           res_type : Type.Or_void.t;
           attrs : Fn_attr.t list;
+          operand_bundles : (string * Value.t list) list;
           cc : Calling_conventions.t;
           musttail : bool
         }
@@ -779,6 +812,11 @@ module Instruction = struct
           res_type : Type.Or_void.t;
           sideeffect : bool;
           attrs : Fn_attr.t list
+        }
+    (* Exception handling *)
+    | Landingpad of
+        { typ : Type.t;
+          cleanup : bool
         }
 
   type t =
@@ -792,6 +830,7 @@ module Instruction = struct
   let op_res_type = function
     (* Terminators return no value *)
     | Ret _ | Br _ | Br_cond _ | Switch _ | Unreachable -> None
+    | Invoke { res_type; _ } -> res_type
     (* Basic operations *)
     | Unary { arg; _ } -> Some (Value.get_type arg)
     | Binary { arg1; _ } -> Some (Value.get_type arg1)
@@ -820,6 +859,8 @@ module Instruction = struct
     | Select { ifso; _ } -> Some (Value.get_type ifso)
     | Call { res_type; _ } -> res_type
     | Inline_asm { res_type; _ } -> res_type
+    (* Exception handling *)
+    | Landingpad { typ; _ } -> Some typ
 
   let with_res op ident =
     assert' "with_res" (Option.is_some (op_res_type op));
@@ -862,6 +903,11 @@ module Instruction = struct
 
   let unreachable = Unreachable
 
+  let invoke ~func ~args ~res_type ~attrs ~operand_bundles ~cc ~normal ~unwind =
+    assert' "invoke" (Value.get_type normal |> Type.(equal label));
+    assert' "invoke" (Value.get_type unwind |> Type.(equal label));
+    Invoke { func; args; res_type; attrs; operand_bundles; cc; normal; unwind }
+
   let unary op ~arg = Unary { op; arg }
 
   let binary op ~arg1 ~arg2 = Binary { op; arg1; arg2 }
@@ -899,11 +945,19 @@ module Instruction = struct
 
   let load ~ptr ~typ =
     assert' "load" (Value.get_type ptr |> Type.is_ptr);
-    Load { ptr; typ }
+    Load { ptr; typ; volatile_ = false }
+
+  let load_volatile ~ptr ~typ =
+    assert' "load_volatile" (Value.get_type ptr |> Type.is_ptr);
+    Load { ptr; typ; volatile_ = true }
 
   let store ~ptr ~to_store =
     assert' "store" (Value.get_type ptr |> Type.is_ptr);
-    Store { ptr; to_store }
+    Store { ptr; to_store; volatile_ = false }
+
+  let store_volatile ~ptr ~to_store =
+    assert' "store_volatile" (Value.get_type ptr |> Type.is_ptr);
+    Store { ptr; to_store; volatile_ = true }
 
   let getelementptr ~base_type ~base_ptr ~indices =
     assert' "getelementptr" (Value.get_type base_ptr |> Type.is_ptr);
@@ -929,12 +983,12 @@ module Instruction = struct
     assert' "select" (Type.equal ifso_type ifnot_type);
     Select { cond; ifso; ifnot }
 
-  let call ~func ~args ~res_type ~attrs ~cc ~musttail =
+  let call ~func ~args ~res_type ~attrs ~operand_bundles ~cc ~musttail =
     (* Statepoint insertion breaks musttail checks. We can't mark them as GC
        leaves here, as LLVM might inline them to a position where they aren't
        tail calls anymore and we'd need a statepoint there. So, we make LLVM
        skip `musttail` calls instead. *)
-    Call { func; args; res_type; attrs; cc; musttail }
+    Call { func; args; res_type; attrs; operand_bundles; cc; musttail }
 
   let inline_asm ~args ~res_type ~asm ~constraints ~sideeffect =
     (* Similarly, it makes no sense to put statepoints for inline asm. *)
@@ -946,6 +1000,8 @@ module Instruction = struct
         sideeffect;
         attrs = [Fn_attr.Gc_leaf_function]
       }
+
+  let landingpad ~typ ~cleanup = Landingpad { typ; cleanup }
 
   (* Note: this function handles indentation and newlines itself *)
   let pp_t ?comment ppf { op; res } =
@@ -973,6 +1029,30 @@ module Instruction = struct
         branches;
       ins "]"
     | Unreachable -> ins "unreachable"
+    | Invoke
+        { func; args; res_type; attrs; operand_bundles; cc; normal; unwind } ->
+      let pp_operand_bundle ppf (name, args) =
+        fprintf ppf {|"%s"(%a)|} name
+          (pp_print_list ~pp_sep:pp_comma Value.pp_t)
+          args
+      in
+      let pp_operand_bundles ppf = function
+        | [] -> ()
+        | bundles ->
+          fprintf ppf " [ %a ]"
+            (pp_print_list ~pp_sep:pp_comma pp_operand_bundle)
+            bundles
+      in
+      let pp_invoke ppf () =
+        fprintf ppf "invoke %a %a %a(%a) %a%a to %a unwind %a"
+          Calling_conventions.pp_t cc Type.Or_void.pp_t res_type Ident.pp_t func
+          (pp_print_list ~pp_sep:pp_comma Value.pp_t)
+          args Fn_attr.pp_t_list attrs pp_operand_bundles operand_bundles
+          Value.pp_t normal Value.pp_t unwind
+      in
+      (match res with
+      | Some _ -> ins_res "%a" pp_invoke ()
+      | None -> ins "%a" pp_invoke ())
     | Unary { op; arg } ->
       ins_res "%s %a" (unary_op_to_string op) Value.pp_t arg
     | Binary { op; arg1; arg2 } ->
@@ -1007,9 +1087,12 @@ module Instruction = struct
         | None -> ()
       in
       ins_res "alloca %a%a" Type.pp_t typ pp_count ()
-    | Load { ptr; typ } -> ins_res "load %a, %a" Type.pp_t typ Value.pp_t ptr
-    | Store { ptr; to_store } ->
-      ins "store %a, %a" Value.pp_t to_store Value.pp_t ptr
+    | Load { ptr; typ; volatile_ } ->
+      ins_res "load %a%a, %a" (pp_str_if "volatile ") volatile_ Type.pp_t typ
+        Value.pp_t ptr
+    | Store { ptr; to_store; volatile_ } ->
+      ins "store %a%a, %a" (pp_str_if "volatile ") volatile_ Value.pp_t
+        to_store Value.pp_t ptr
     | Getelementptr { base_type; base_ptr; indices } ->
       ins_res "getelementptr %a, %a, %a" Type.pp_t base_type Value.pp_t base_ptr
         (pp_print_list ~pp_sep:pp_comma Value.pp_t)
@@ -1024,12 +1107,24 @@ module Instruction = struct
     | Select { cond; ifso; ifnot } ->
       ins_res "select %a, %a, %a" Value.pp_t cond Value.pp_t ifso Value.pp_t
         ifnot
-    | Call { func; args; res_type; attrs; cc; musttail } -> (
+    | Call { func; args; res_type; attrs; operand_bundles; cc; musttail } -> (
+      let pp_operand_bundle ppf (name, args) =
+        fprintf ppf {|"%s"(%a)|} name
+          (pp_print_list ~pp_sep:pp_comma Value.pp_t)
+          args
+      in
+      let pp_operand_bundles ppf = function
+        | [] -> ()
+        | bundles ->
+          fprintf ppf " [ %a ]"
+            (pp_print_list ~pp_sep:pp_comma pp_operand_bundle)
+            bundles
+      in
       let pp_call ppf () =
-        fprintf ppf "%acall %a %a %a(%a) %a" (pp_str_if "musttail ") musttail
+        fprintf ppf "%acall %a %a %a(%a) %a%a" (pp_str_if "musttail ") musttail
           Calling_conventions.pp_t cc Type.Or_void.pp_t res_type Ident.pp_t func
           (pp_print_list ~pp_sep:pp_comma Value.pp_t)
-          args Fn_attr.pp_t_list attrs
+          args Fn_attr.pp_t_list attrs pp_operand_bundles operand_bundles
       in
       match res with
       | Some _ -> ins_res "%a" pp_call ()
@@ -1044,6 +1139,8 @@ module Instruction = struct
       match res with
       | Some _ -> ins_res "%a" pp_call ()
       | None -> ins "%a" pp_call ())
+    | Landingpad { typ; cleanup } ->
+      ins_res "landingpad %a%a" Type.pp_t typ (pp_str_if " cleanup") cleanup
 end
 
 module Function = struct
@@ -1063,6 +1160,7 @@ module Function = struct
       res : Type.Or_void.t;
       cc : Calling_conventions.t;
       attrs : Fn_attr.t list;
+      personality : Ident.t option;
       private_ : bool;
       dbg : Debuginfo.t;
       mutable body_rev : slot list
@@ -1075,7 +1173,8 @@ module Function = struct
 
   let add_comment t comment = t.body_rev <- Comment comment :: t.body_rev
 
-  let pp_t ppf { name; args; res; cc; attrs; private_; dbg; body_rev } =
+  let pp_t ppf
+      { name; args; res; cc; attrs; personality; private_; dbg; body_rev } =
     let open Format in
     (* Definition line *)
     do_if_comments_enabled (fun () ->
@@ -1086,9 +1185,13 @@ module Function = struct
       pp_print_list ~pp_sep:pp_comma (fun ppf (typ, ident) ->
           fprintf ppf "%a %a" Type.pp_t typ Ident.pp_t ident)
     in
-    pp_line ppf "define %a %a %a %a(%a) %a {" pp_private ()
+    let pp_personality ppf = function
+      | None -> ()
+      | Some personality -> fprintf ppf " personality ptr %a" Ident.pp_t personality
+    in
+    pp_line ppf "define %a %a %a %a(%a) %a%a {" pp_private ()
       Calling_conventions.pp_t cc Type.Or_void.pp_t res Ident.pp_t name pp_args
-      args Fn_attr.pp_t_list attrs;
+      args Fn_attr.pp_t_list attrs pp_personality personality;
     (* Body *)
     let body = List.rev body_rev in
     List.iter
@@ -1109,7 +1212,7 @@ module Function = struct
         funcdef : funcdef
       }
 
-    let create ~name ~args ~res ~cc ~attrs ~dbg ~private_ =
+    let create ~personality ~name ~args ~res ~cc ~attrs ~dbg ~private_ =
       let ident_gen = Ident.Gen.create () in
       let name = Ident.global name in
       let args =
@@ -1119,7 +1222,7 @@ module Function = struct
          entry label. *)
       Ident.Gen.get_fresh ident_gen |> ignore;
       let funcdef =
-        { name; args; res; cc; attrs; private_; dbg; body_rev = [] }
+        { name; args; res; cc; attrs; personality; private_; dbg; body_rev = [] }
       in
       { ident_gen; funcdef }
 
@@ -1157,22 +1260,35 @@ module Fundecl = struct
   type t =
     { name : string;
       args : Type.t list; (* Not using [Value.t] to have explicit identifiers *)
-      res : Type.Or_void.t
+      res : Type.Or_void.t;
+      varargs : bool
     }
 
-  let create name args res = { name; args; res }
+  let create name args res = { name; args; res; varargs = false }
 
-  let pp_t ppf { name; args; res } =
+  let create_varargs name args res = { name; args; res; varargs = true }
+
+  let pp_t ppf { name; args; res; varargs } =
     let open Format in
     let ident = Ident.global name in
-    let pp_args = pp_print_list ~pp_sep:pp_comma Type.pp_t in
+    let pp_args ppf args =
+      match args, varargs with
+      | [], true -> fprintf ppf "..."
+      | _, false -> (pp_print_list ~pp_sep:pp_comma Type.pp_t) ppf args
+      | _ :: _, true ->
+        fprintf ppf "%a, ..."
+          (pp_print_list ~pp_sep:pp_comma Type.pp_t)
+          args
+    in
     pp_line ppf "declare %a %a(%a)" Type.Or_void.pp_t res Ident.pp_t ident
       pp_args args
 
-  let equal { name; args; res } { name = name'; args = args'; res = res' } =
+  let equal { name; args; res; varargs }
+      { name = name'; args = args'; res = res'; varargs = varargs' } =
     String.equal name name'
     && List.equal Type.equal args args'
     && Type.Or_void.equal res res'
+    && Bool.equal varargs varargs'
 end
 
 module Data = struct
@@ -1186,8 +1302,32 @@ module Data = struct
         }
     | External of string
 
-  let constant ?(section = Some ".data") ?(align = Some Arch.size_addr)
+  let default_data_section () =
+    match Target_system.derived_system () with
+    | Target_system.MacOS_like -> "__DATA,__data"
+    | Target_system.Linux
+    | Target_system.MinGW_32
+    | Target_system.MinGW_64
+    | Target_system.Win32
+    | Target_system.Win64
+    | Target_system.Cygwin
+    | Target_system.FreeBSD
+    | Target_system.NetBSD
+    | Target_system.OpenBSD
+    | Target_system.Generic_BSD
+    | Target_system.Solaris
+    | Target_system.Dragonfly
+    | Target_system.GNU
+    | Target_system.BeOS
+    | Target_system.Unknown -> ".data"
+
+  let constant ?(section = None) ?(align = Some Arch.size_addr)
       ?(private_ = false) name value =
+    let section =
+      match section with
+      | Some section -> Some section
+      | None -> Some (default_data_section ())
+    in
     Constant { name; value; section; align; private_ }
 
   let external_ name = External name
