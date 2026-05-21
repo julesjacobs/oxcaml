@@ -602,12 +602,28 @@ module Make (Target : Cfg_selectgen_target_intf.S) = struct
       | _ :: _ -> ty_args
     in
     let locs, stack_ofs, align = Proc.loc_external_arguments ty_args in
+    let preserve_llvm_value_arg_type ty_arg (src : Reg.t) (dst : Reg.t) =
+      if !Clflags.llvm_backend
+      then
+        match ty_arg, src.Reg.typ, dst.Reg.typ with
+        | Cmm.XInt, Cmm.Val, Cmm.Int -> (
+          match dst.loc with
+          | Reg _ -> Reg.create_alias dst ~typ:Cmm.Val
+          | Stack _ -> Reg.create_at_location Cmm.Val dst.loc
+          | Unknown -> Reg.create Cmm.Val)
+        | _ -> dst
+      else dst
+    in
     let ty_args = Array.of_list ty_args in
     if stack_ofs <> 0
     then SU.insert env sub_cfg (SU.make_stack_offset stack_ofs) [||] [||];
     List.iteri
       (fun i arg ->
-        insert_move_extcall_arg env sub_cfg ty_args.(i) arg locs.(i) dbg)
+        let arg_locs =
+          Array.map2 (preserve_llvm_value_arg_type ty_args.(i)) arg locs.(i)
+        in
+        locs.(i) <- arg_locs;
+        insert_move_extcall_arg env sub_cfg ty_args.(i) arg arg_locs dbg)
       args;
     Ok (Array.concat (Array.to_list locs), stack_ofs, align)
 

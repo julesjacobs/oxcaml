@@ -193,9 +193,11 @@ end
 module Fn_attr : sig
   type t =
     | Cold
+    | Frame_pointer_all
     | Gc of string
     | Gc_leaf_function
     | Noinline
+    | Oxcaml_stack_check
     | Returns_twice
     | Statepoint_id of int
 
@@ -342,6 +344,17 @@ module Instruction : sig
 
   val unreachable : op
 
+  val invoke :
+    func:Ident.t ->
+    args:Value.t list ->
+    res_type:Type.Or_void.t ->
+    attrs:Fn_attr.t list ->
+    operand_bundles:(string * Value.t list) list ->
+    cc:Calling_conventions.t ->
+    normal:Value.t ->
+    unwind:Value.t ->
+    op
+
   val unary : unary_op -> arg:Value.t -> op
 
   val binary : binary_op -> arg1:Value.t -> arg2:Value.t -> op
@@ -365,7 +378,11 @@ module Instruction : sig
 
   val load : ptr:Value.t -> typ:Type.t -> op
 
+  val load_volatile : ptr:Value.t -> typ:Type.t -> op
+
   val store : ptr:Value.t -> to_store:Value.t -> op
+
+  val store_volatile : ptr:Value.t -> to_store:Value.t -> op
 
   val getelementptr :
     base_type:Type.t -> base_ptr:Value.t -> indices:Value.t list -> op
@@ -382,6 +399,7 @@ module Instruction : sig
     args:Value.t list ->
     res_type:Type.Or_void.t ->
     attrs:Fn_attr.t list ->
+    operand_bundles:(string * Value.t list) list ->
     cc:Calling_conventions.t ->
     musttail:bool ->
     op
@@ -393,6 +411,8 @@ module Instruction : sig
     constraints:string ->
     sideeffect:bool ->
     op
+
+  val landingpad : typ:Type.t -> cleanup:bool -> op
 
   val pp_t : ?comment:string -> Format.formatter -> t -> unit
 end
@@ -417,6 +437,7 @@ module Function : sig
       }
 
     val create :
+      personality:Ident.t option ->
       name:string ->
       args:Type.t list ->
       res:Type.Or_void.t ->
@@ -449,10 +470,13 @@ module Fundecl : sig
   type t =
     { name : string;
       args : Type.t list;
-      res : Type.Or_void.t
+      res : Type.Or_void.t;
+      varargs : bool
     }
 
   val create : string -> Type.t list -> Type.Or_void.t -> t
+
+  val create_varargs : string -> Type.t list -> Type.Or_void.t -> t
 
   val pp_t : Format.formatter -> t -> unit
 

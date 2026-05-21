@@ -483,7 +483,6 @@ let compile_cfg ppf_dump ~funcnames fd_cmm cfg_with_layout =
   ++ Profile.record ~accumulate:true "cfg_to_linear" Cfg_to_linear.run
 
 let compile_via_llvm ~ppf_dump ~funcnames cfg_with_layout =
-  (* missing pass: stack checks *)
   cfg_with_layout
   ++ cfg_with_layout_profile ~accumulate:true "cfg_polling"
        (Cfg_polling.instrument_fundecl ~future_funcnames:funcnames)
@@ -492,6 +491,10 @@ let compile_via_llvm ~ppf_dump ~funcnames cfg_with_layout =
   ++ cfg_with_layout_profile ~accumulate:true "cfg_comballoc" Cfg_comballoc.run
   ++ Compiler_hooks.execute_and_pipe Compiler_hooks.Cfg_combine
   ++ pass_dump_cfg_if ppf_dump Oxcaml_flags.dump_cfg "After comballoc"
+  ++ (fun (cfg_with_layout : Cfg_with_layout.t) ->
+       match !Oxcaml_flags.cfg_stack_checks with
+       | false -> cfg_with_layout
+       | true -> Cfg_stack_checks.cfg cfg_with_layout)
   ++ Profile.record ~accumulate:true "save_cfg" save_cfg
   ++ Profile.record ~accumulate:true "llvmize" Llvmize.cfg
 
@@ -599,7 +602,10 @@ let compile_unit unix ~output_prefix ~asm_filename ~keep_asm ~obj_filename
   in
   let assemble_file () =
     if !Clflags.llvm_backend
-    then Llvmize.assemble_file ~asm_filename ~obj_filename
+    then
+      if not (should_emit ())
+      then 0
+      else Llvmize.assemble_file ~asm_filename ~obj_filename
     else if not (should_emit ())
     then 0
     else (
