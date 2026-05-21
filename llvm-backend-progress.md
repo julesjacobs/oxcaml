@@ -63,14 +63,17 @@ There is now a small reproducer in `/tmp/oxcaml-llvm-refill-repro`:
 - LLVM backend behavior: crash in `caml_lex_engine`.
 - The wrapper log confirms real local LLVM use with `-x ir` and the fixed
   arm64 runtime registers.
+- An lldb breakpoint at `caml_lex_engine` entry shows the first engine call has
+  correct arguments. The second engine call, after the generated lexer calls
+  `Lexing.lex_refill`, already has a stack-like value for `start_state` and the
+  `Lexing.lex_refill` code pointer where the lexbuf should be.
 
 Current evidence points at frame roots around the generated lexer's refill path:
 
 - The `caml_c_call` trampoline in the linked binary preserves `x0`/`x1`/`x2`.
 - The AArch64 prologue stack-growth helper in the linked binary saves and
   restores the argument registers.
-- The generated lexer frame has the bad values in its frame slots before the
-  crashing `caml_new_lex_engine` call.
+- The generated lexer frame has the bad values before the second engine call.
 - The relevant refill call has a frametable entry that scans both outgoing
   arguments and frame slots. This may still be wrong, but the simple
   frame-size conversion for the `caml_new_lex_engine` call itself looks
