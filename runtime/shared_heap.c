@@ -16,6 +16,8 @@
 #define CAML_INTERNALS
 
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "caml/addrmap.h"
@@ -535,6 +537,9 @@ void caml_shared_fast_data_refill(struct caml_heap_state *local,
   avail_pool_full(local, sz);
 }
 
+static int debug_check_free_block_in_pool(pool* p, sizeclass_t sz,
+                                          value* block, const char* source);
+
 static void* pool_allocate(struct caml_heap_state* local, sizeclass_t sz) {
   value* p;
   value* next;
@@ -543,6 +548,7 @@ static void* pool_allocate(struct caml_heap_state* local, sizeclass_t sz) {
   if (!r) return 0;
 
   p = r->next_obj;
+  debug_check_free_block_in_pool(r, sz, p, "pool_allocate");
   next = (value*)p[1];
   r->next_obj = next;
   CAMLassert(p[0] == 0);
@@ -740,6 +746,8 @@ static intnat large_alloc_sweep(struct caml_heap_state* local) {
 static void verify_swept(struct caml_heap_state*);
 
 intnat caml_sweep(struct caml_heap_state* local, intnat work) {
+  caml_debug_check_pool_headers(local, "sweep-begin");
+
   /* Sweep local pools */
   while (work > 0 && local->next_to_sweep < NUM_SIZECLASSES) {
     sizeclass_t sz = local->next_to_sweep;
@@ -765,6 +773,148 @@ intnat caml_sweep(struct caml_heap_state* local, intnat work) {
     verify_swept(local);
   }
   return work;
+}
+
+static int debug_check_major_pool_root_list(pool* p, value v, volatile value* root)
+{
+  header_t* hp = (header_t*)Hp_val(v);
+  while (p != NULL) {
+    header_t* first = POOL_FIRST_BLOCK(p, p->sz);
+    header_t* end = POOL_END(p);
+    if (first <= hp && hp < end) {
+      mlsize_t wh = whsize_sizeclass[p->sz];
+      ptrdiff_t offset = hp - first;
+      if (offset % wh == 0) return 1;
+
+      header_t hd = *hp;
+      if (Tag_hd(hd) == Infix_tag) {
+        mlsize_t infix_offset = Infix_offset_hd(hd);
+        if (infix_offset > 0 && (char*)v - (char*)first >= (intnat)infix_offset) {
+          value real_v = v - infix_offset;
+          header_t* real_hp = (header_t*)Hp_val(real_v);
+          ptrdiff_t real_offset = real_hp - first;
+          if (first <= real_hp && real_hp < end && real_offset % wh == 0) {
+            return 1;
+          }
+        }
+      }
+
+      fprintf(stderr,
+              "bad major pool root: slot=%p value=%p hp=%p pool=%p "
+              "sizeclass=%u wh=%lu offset_words=%td hd=0x%lx tag=%u\n",
+              (void*)root, (void*)v, (void*)hp, (void*)p, (unsigned)p->sz,
+              (unsigned long)wh, offset, (unsigned long)hd,
+              (unsigned)Tag_hd(hd));
+      abort();
+    }
+    p = p->next;
+  }
+  return 1;
+}
+
+static int debug_check_free_block_in_pool(pool* p, sizeclass_t sz,
+                                          value* block, const char* source)
+{
+  header_t* hp = (header_t*)block;
+  while (p != NULL) {
+    header_t* first = POOL_FIRST_BLOCK(p, sz);
+    header_t* end = POOL_END(p);
+    if (first <= hp && hp < end) {
+      mlsize_t wh = whsize_sizeclass[sz];
+      ptrdiff_t offset = hp - first;
+      if (offset % wh != 0 || hp + wh > end) {
+        fprintf(stderr,
+                "bad pool freelist block: source=%s block=%p pool=%p "
+                "sizeclass=%u wh=%lu offset_words=%td first=%p end=%p\n",
+                source, (void*)block, (void*)p, (unsigned)sz,
+                (unsigned long)wh, offset, (void*)first, (void*)end);
+        abort();
+      }
+      if (block[0] != 0) {
+        fprintf(stderr,
+                "bad pool freelist header: source=%s block=%p pool=%p "
+                "sizeclass=%u hd=0x%lx next=%p\n",
+                source, (void*)block, (void*)p, (unsigned)sz,
+                (unsigned long)block[0], (void*)block[1]);
+        abort();
+      }
+      return 1;
+    }
+    p = p->next;
+  }
+  return 0;
+}
+
+static void debug_check_pool_headers_list(pool* p, sizeclass_t sz,
+                                          const char* list_name,
+                                          const char* source)
+{
+  while (p != NULL) {
+    header_t* hp = POOL_FIRST_BLOCK(p, sz);
+    header_t* end = POOL_END(p);
+    mlsize_t wh = whsize_sizeclass[sz];
+    while (hp + wh <= end) {
+      header_t hd = (header_t)atomic_load_relaxed((atomic_uintnat*)hp);
+      if (hd != 0 && (Whsize_hd(hd) > wh || Tag_hd(hd) == Infix_tag)) {
+        fprintf(stderr,
+                "bad pool header: source=%s list=%s pool=%p sizeclass=%u "
+                "slot=%p wh=%lu hd=0x%lx tag=%u header_wh=%lu "
+                "words=[0x%lx,0x%lx,0x%lx,0x%lx]\n",
+                source, list_name, (void*)p, (unsigned)sz, (void*)hp,
+                (unsigned long)wh, (unsigned long)hd, (unsigned)Tag_hd(hd),
+                (unsigned long)Whsize_hd(hd), (unsigned long)hp[0],
+                (unsigned long)hp[1], (unsigned long)hp[2],
+                (unsigned long)hp[3]);
+        abort();
+      }
+      hp += wh;
+    }
+    p = p->next;
+  }
+}
+
+void caml_debug_check_pool_headers(struct caml_heap_state* local,
+                                   const char* source)
+{
+  for (sizeclass_t sz = 1; sz < NUM_SIZECLASSES; sz++) {
+    debug_check_pool_headers_list(local->avail_pools[sz], sz, "avail",
+                                  source);
+    debug_check_pool_headers_list(local->full_pools[sz], sz, "full",
+                                  source);
+    debug_check_pool_headers_list(local->unswept_avail_pools[sz], sz,
+                                  "unswept_avail", source);
+    debug_check_pool_headers_list(local->unswept_full_pools[sz], sz,
+                                  "unswept_full", source);
+  }
+}
+
+void caml_debug_check_pool_free_block(struct caml_heap_state* local,
+                                      sizeclass_t sz, value* block,
+                                      const char* source)
+{
+  if (block == NULL) return;
+  if (debug_check_free_block_in_pool(local->avail_pools[sz], sz, block, source))
+    return;
+  if (debug_check_free_block_in_pool(local->unswept_avail_pools[sz], sz, block,
+                                     source))
+    return;
+  fprintf(stderr,
+          "pool freelist block is not in an available pool: source=%s "
+          "block=%p sizeclass=%u\n",
+          source, (void*)block, (unsigned)sz);
+  abort();
+}
+
+int caml_debug_check_major_pool_root(struct caml_heap_state* local, value v,
+                                     volatile value* root)
+{
+  for (sizeclass_t sz = 1; sz < NUM_SIZECLASSES; sz++) {
+    debug_check_major_pool_root_list(local->avail_pools[sz], v, root);
+    debug_check_major_pool_root_list(local->full_pools[sz], v, root);
+    debug_check_major_pool_root_list(local->unswept_avail_pools[sz], v, root);
+    debug_check_major_pool_root_list(local->unswept_full_pools[sz], v, root);
+  }
+  return 1;
 }
 
 void caml_get_global_heap_stats(struct global_heap_stats *stats)

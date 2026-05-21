@@ -39,6 +39,12 @@ else
 ENV_VARS :=
 endif
 
+ifneq ($(findstring llvm-backend=1,$(BUILD_OCAMLPARAM)),)
+ifneq ($(WITH_FRAME_POINTERS),true)
+$(error BUILD_OCAMLPARAM enables llvm-backend=1, but this tree was configured without frame pointers. Re-run configure with --enable-frame-pointers)
+endif
+endif
+
 define dune_runtime_stdlib_context
 (lang dune 2.8)
 (context (default
