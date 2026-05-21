@@ -68,20 +68,33 @@ There is now a small reproducer in `/tmp/oxcaml-llvm-refill-repro`:
   `Lexing.lex_refill`, already has a stack-like value for `start_state` and the
   `Lexing.lex_refill` code pointer where the lexbuf should be.
 
-Current evidence points at frame roots around the generated lexer's refill path:
+The refill crash is now explained more directly: LLVM-generated AArch64 code
+was forcing `"frame-pointer"="all"` even in a no-frame-pointer compiler, so it
+used `x29` for local reloads across ordinary OCaml calls. Normal no-FP OxCaml
+callees may use `x29` as scratch. In the repro, `Lexing.lex_refill` returns with
+`x29` pointing at its own frame, and the LLVM caller reloads the lexbuf and
+start state from the wrong frame.
 
-- The `caml_c_call` trampoline in the linked binary preserves `x0`/`x1`/`x2`.
-- The AArch64 prologue stack-growth helper in the linked binary saves and
-  restores the argument registers.
-- The generated lexer frame has the bad values before the second engine call.
-- The relevant refill call has a frametable entry that scans both outgoing
-  arguments and frame slots. This may still be wrong, but the simple
-  frame-size conversion for the `caml_new_lex_engine` call itself looks
-  consistent in the generated assembly.
+Manual IR validation: removing only the generated `"frame-pointer"="all"`
+attribute from `lexer.ll`, while keeping `"oxcaml-stack-check"="true"` and even
+keeping clang's `-fno-omit-frame-pointer`, makes the refill repro print `12345`.
+The assembly then reloads locals from `sp` offsets instead of `x29` offsets.
 
-This is a design/debugging problem, not a good place for hill climbing. The next
-step is to use the small refill reproducer to inspect the exact stack-map roots
-at the call that first corrupts the lexbuf slot.
+Source change in progress: `backend/llvm/llvmize.ml` now emits
+`Frame_pointer_all` on AArch64 only when `Config.with_frame_pointers` is true,
+while still emitting `Oxcaml_stack_check`. It also stops passing
+`-fno-omit-frame-pointer` unless `Config.with_frame_pointers` is true.
+
+Validation blocker: rebuilding a fresh normal compiler to test this source
+change currently hits a separate bootstrap/generated-tool crash:
+`tools/simdgen/simdgen.exe amd64` segfaults in `Stdlib.Fun.protect`. This also
+appears in a fresh `_normal_stage1_fpfix_build`, so the next step is to decide
+whether this is caused by the dirty runtime/prologue work or by a contaminated
+bootstrap setup.
+
+This is steady progress on the refill failure, but the remaining work should be
+driven by focused experiments. Avoid piling on fixes until the bootstrap crash
+and the frame-pointer ABI contract are separated cleanly.
 
 ## Prior Fix Direction
 
@@ -100,9 +113,10 @@ threshold, and a diagnostic `CHECK_SP_IN_STACK` runtime guard.
 
 ## Next Checks
 
-1. Watch the generated lexer's lexbuf frame slot and identify the first write
-   or GC/frame scan that changes it.
-2. Compare the failing call's LLVM stack-map locations with the emitted
-   frametable offsets and the actual AArch64 frame layout.
-3. Only after the root contract is clear, patch either LLVM stack-map emission
-   or `llvmize.ml` root selection and rerun the stage-2 generated-tool target.
+1. Separate the fresh normal compiler rebuild from dirty runtime/prologue
+   changes, because the current rebuild crashes running `simdgen.exe`.
+2. Once a fresh normal compiler can be built, rerun the refill repro and confirm
+   the generated `lexer.ll` has no `"frame-pointer"="all"` attribute in no-FP
+   mode and still invokes local LLVM with `-x ir`.
+3. If that passes, rerun the stage-2 generated-tool target and then decide
+   whether `CSR_AArch64_OxCaml_WithoutFP` should also stop listing `FP`.
