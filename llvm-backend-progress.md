@@ -4,6 +4,9 @@ Last updated: 2026-05-21.
 
 Goal: make ordinary arm64 programs pass with the normal-built compiler plus
 `-llvm-backend`, then make an LLVM-built arm64 compiler self-host repeatedly.
+Near-term strategy: get useful test-suite slices passing with `-llvm-backend`
+using a normal-built compiler, then run those slices with an LLVM-built
+compiler, and only then target full self-hosting.
 
 ## Current State
 
@@ -34,25 +37,32 @@ compiler can preserve old broken generated code inside the next compiler.
 - LLVM stage-2 tool smoke test:
   `_llvm_stage2_fpfix_build/main/tools/make_opcodes.exe` builds with real local
   LLVM and now runs `-opcodes < runtime/caml/instruct.h` successfully.
+- LLVM-built `tools/simdgen/simdgen.exe` now generates
+  `tools/simdgen/amd64_simd_instrs.ml` successfully.
 
 ## Current Blocker
 
 The former `make_opcodes.exe` lexer crash is fixed by the frame-pointer change
-below. The next blocker is `tools/simdgen/amd64_simd_instrs.ml`: the
-LLVM-built `simdgen.exe` still fails while parsing `amd64/amd64.csv`.
+below. The former `tools/simdgen/amd64_simd_instrs.ml` blocker is also fixed:
+an LLVM-built `simdgen.exe` now generates the file successfully.
 
-The useful reduced test is now `/tmp/oxcaml-six-args-repro/filter_try.ml`.
-Normal backend output is correct, while the LLVM backend raises `Failure(4)`.
-The same test without the local `try ... with Unsupported -> None` wrapper
-(`/tmp/oxcaml-six-args-repro/filter_no_try.ml`) passes with LLVM. A plain
-six-argument recursive parser and a standalone `first_word` also pass. This
-points at active trap / exceptional-control handling around the parser path,
-not at six-argument calls or `String.split_on_char` by themselves.
+The useful reduced tests are in `/tmp/oxcaml-six-args-repro`:
 
-A temporary instrumented copy in `/tmp/oxcaml-simdgen-repro` shows the same
-failure shape in the full tool: while parsing the CSV, `first_word` eventually
-calls `String.split_on_char ' ' str` with the separator register correct but the
-string register holding a bad non-value.
+- `filter_try.ml`: local `try` around the parser, no exception raised.
+- `filter_try_raise.ml`: local `try`, an actual `Unsupported` raise is caught.
+- `filter_no_try.ml`: same parser shape without the local `try`.
+
+All three now pass with the normal-built compiler plus `-llvm-backend`. The
+wrapper log confirms real local LLVM use with `-x ir`, fixed arm64 runtime
+registers, and `-fomit-frame-pointer`.
+
+Root cause: arm64 `Pushtrap` used a dynamic alloca for the trap block. LLVM then
+forced `x29` as a frame pointer in the enclosing function, but normal no-FP
+OCaml callees may clobber `x29`. In the reduced parser, after
+`String.split_on_char`, a reload from `[x29, ...]` read the wrong list tail and
+passed `encs = []` to `parse_args`. The fix direction is to preallocate aligned
+arm64 trap blocks in the function entry frame and restore `sp` explicitly in the
+exception-entry shim.
 
 The refill reproducer in `/tmp/oxcaml-llvm-refill-repro` is now a passing
 regression test candidate:
@@ -88,8 +98,17 @@ Important setup lesson: `duneconf/runtime_stdlib.ws` must also have empty
 `OCAMLPARAM` for normal stage-1 builds. A stale LLVM-built runtime stdlib made
 normal generated tools look broken and produced confusing `simdgen` crashes.
 
-This is steady progress. The next hard problem is the `simdgen` recursive parse
-miscompile; it should be reduced by experiment, not patched around.
+This is steady progress. The current hard problems are still design-level
+runtime/exception/GC integration issues; they should keep being handled by
+reduced experiments rather than by hill-climbing around generated tools.
+
+A broad stage-2 `dune build --only-package=ocaml @install` is not a good next
+iteration target. It was stopped after ~20 minutes: dune had four child
+compilers burning CPU on `parser.ml` / `parser.pp.ml`, with no recent output
+files for those modules and no clang wrapper activity for them. A `sample` of
+one process showed time in typing / warning-scope recursion plus debug heap
+checks, so this is too coarse and should be replaced by targeted test-suite
+slices.
 
 ## Prior Fix Direction
 
@@ -108,8 +127,9 @@ threshold, and a diagnostic `CHECK_SP_IN_STACK` runtime guard.
 
 ## Next Checks
 
-1. Debug `/tmp/oxcaml-six-args-repro/filter_try.ml`: active local exception
-   handler makes the LLVM build fail, while the no-try variant passes.
-2. After fixing that, build `tools/simdgen/amd64_simd_instrs.ml` in
-   `_llvm_stage2_fpfix_build`.
-3. Then resume broader stage-2 compiler test-suite targets with the LLVM flag.
+1. Choose a targeted test-suite slice and run it with the normal-built compiler
+   plus `-llvm-backend`.
+2. Keep checking wrapper logs so every claimed LLVM test actually uses local
+   LLVM.
+3. If the next failure involves exceptions or stack growth, reduce it before
+   changing the runtime/LLVM contract again.
