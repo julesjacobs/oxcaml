@@ -1454,11 +1454,16 @@ FUNCTION(caml_reperform)
     /*  x0: effect to perform
         x1: continuation
         x2: last_fiber */
+        ldr     TMP, Cont_fiber(x1)
+        cmp     TMP, #1 /* Val_ptr(NULL), already consumed */
+        b.eq    1f
         ldr     TMP, Stack_handler_from_cont(x2)
         ldr     x2, Caml_state(current_stack) /* x2 := old stack */
         str     x2, Handler_parent(TMP) /* Append to last_fiber */
         add     x3, x2, 1 /* x3 (last_fiber) := Val_ptr(old stack) */
         b       L(do_perform)
+1:      ADDRGLOBAL(ADDITIONAL_ARG, caml_raise_continuation_already_resumed)
+        b       G(caml_c_call)
         CFI_ENDPROC
 END_FUNCTION(caml_reperform)
 
