@@ -92,6 +92,13 @@ LLVM-built compiler:
 - The current direct test setup is single-domain: `OCAMLRUNPARAM=d=4` reports
   that `max_domains` cannot exceed 1. Multidomain weak/finaliser tests need a
   proper multidomain runtime/test harness before they give useful LLVM signal.
+- Direct `testsuite/tests/basic` reference tests pass with the LLVM-built
+  compiler and `-llvm-backend`: 36 single-module executables produced 144 fresh
+  wrapper calls. Correctly harnessed adjacent cases also pass:
+  `basic-modules/main`, `basic-modules/recursive_module_init`,
+  four `basic-float` reference tests, `basic-io/wc`, and `basic-io-2/io`.
+  Those corrected adjacent runs produced 20 fresh wrapper calls for the
+  module/I/O cases.
 
 ## Key Findings
 
