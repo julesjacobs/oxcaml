@@ -40,7 +40,7 @@ compiler can preserve old broken generated code inside the next compiler.
 - LLVM-built `tools/simdgen/simdgen.exe` now generates
   `tools/simdgen/amd64_simd_instrs.ml` successfully.
 
-## Current Blocker
+## Current Test Frontier
 
 The former `make_opcodes.exe` lexer crash is fixed by the frame-pointer change
 below. The former `tools/simdgen/amd64_simd_instrs.ml` blocker is also fixed:
@@ -98,17 +98,38 @@ Important setup lesson: `duneconf/runtime_stdlib.ws` must also have empty
 `OCAMLPARAM` for normal stage-1 builds. A stale LLVM-built runtime stdlib made
 normal generated tools look broken and produced confusing `simdgen` crashes.
 
-This is steady progress. The current hard problems are still design-level
-runtime/exception/GC integration issues; they should keep being handled by
-reduced experiments rather than by hill-climbing around generated tools.
+This is steady progress, but the remaining failures are runtime/exception/GC
+contract problems. They should be handled by reduced experiments and targeted
+test-suite slices, not by repeatedly trying broad self-hosting builds.
+
+Targeted `@runtest-llvmize` on arm64 with the normal-built compiler plus
+`-llvm-backend` uses real local LLVM; the wrapper log shows `-x ir`, fixed
+arm64 runtime registers, and `-fomit-frame-pointer`.
+
+Passing arm64 LLVM-backend tests:
+
+- `arm64_many_args`: prints `66`.
+- `arm64_exception_root_refresh`: prints `1`.
+- `arm64_specific_ops`: matches expected arithmetic/float output.
+
+Current targeted failures:
+
+- `arm64_input_channel_loop`: aborts in `caml_scan_stack` with `missing frame
+  descriptor`, so the next investigation should map the reported return address
+  back to the LLVM-generated assembly/frame table and determine whether this is
+  a missing descriptor, wrong return address, or wrong stack state.
+- `arm64_stack_overflow_trap`: exits with `SIGTRAP`; reduce/debug after the
+  frame-descriptor issue unless it proves related.
+- `arm64_c_call_gc`: harness compile fails because `<caml/mlvalues.h>` is not
+  found from the C stub rule; verify dune path expansion before changing backend
+  code.
 
 A broad stage-2 `dune build --only-package=ocaml @install` is not a good next
 iteration target. It was stopped after ~20 minutes: dune had four child
 compilers burning CPU on `parser.ml` / `parser.pp.ml`, with no recent output
 files for those modules and no clang wrapper activity for them. A `sample` of
 one process showed time in typing / warning-scope recursion plus debug heap
-checks, so this is too coarse and should be replaced by targeted test-suite
-slices.
+checks. No such build is currently still running.
 
 ## Prior Fix Direction
 
@@ -127,9 +148,9 @@ threshold, and a diagnostic `CHECK_SP_IN_STACK` runtime guard.
 
 ## Next Checks
 
-1. Choose a targeted test-suite slice and run it with the normal-built compiler
-   plus `-llvm-backend`.
-2. Keep checking wrapper logs so every claimed LLVM test actually uses local
-   LLVM.
-3. If the next failure involves exceptions or stack growth, reduce it before
-   changing the runtime/LLVM contract again.
+1. Debug `arm64_input_channel_loop` by mapping the `caml_scan_stack` missing
+   frame-descriptor return address to generated code and frame-table entries.
+2. Fix the `arm64_c_call_gc` C-stub include path only after confirming the dune
+   path expansion.
+3. Reduce `arm64_stack_overflow_trap` if it is not explained by the
+   frame-descriptor investigation.
