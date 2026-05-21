@@ -102,6 +102,11 @@ LLVM-built compiler:
 - Direct pure-OCaml callback/GC probes pass with the LLVM-built compiler and
   `-llvm-backend`: `callback/test_finaliser_gc` and
   `callback/callback_effects_gc`. These produced 8 fresh wrapper calls.
+- Direct C-stub callback probes pass with the LLVM-built compiler and
+  `-llvm-backend`: `callback/test1`, `test2`, `test4`, `test5`, `test6`, and
+  `test_local_bug`. These cover OCaml-to-C-to-OCaml callbacks, callback
+  arguments, exception unwinding through C, and the local-argument repro; they
+  produced 24 fresh wrapper calls.
 - Direct non-C-stub `testsuite/tests/asmcomp` probes pass with the LLVM-built
   compiler and `-llvm-backend`: `bind_tuples`, `compare`, `evaluation_order`,
   `lift_mutable_let_flambda`, `obj_dup_primitive`, `prevent_fma`,
