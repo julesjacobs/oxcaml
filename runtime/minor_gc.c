@@ -834,7 +834,6 @@ caml_empty_minor_heap_promote(caml_domain_state* domain,
   st.status = caml_allocation_status();
   st.fast_data = caml_shared_fast_data(domain->shared_heap);
   build_minor_block_start_snapshot(&st);
-  caml_debug_check_pool_headers(domain->shared_heap, "minor-promote-begin");
 
   prev_alloc_words = domain->allocated_words;
 
@@ -1020,7 +1019,6 @@ caml_empty_minor_heap_promote(caml_domain_state* domain,
   /* Must be called during the STW section -- before any mutators
      start running, so before arriving at the barrier. */
   caml_collect_gc_stats_sample_stw(domain);
-  caml_debug_check_pool_headers(domain->shared_heap, "minor-promote-end");
 
   /* The code above is synchronised with other domains by the barrier below,
      which is split into two steps, "arriving" and "leaving". When the final
