@@ -33,6 +33,11 @@ Progress is steady on single-domain tests. Multidomain LLVM code now has a
 small failing shape, so that part should be handled by reduced experiments and
 design checks rather than hill-climbing on full self-hosting.
 
+As of 2026-05-21, there is no active long-running build in this checkout. The
+last stopped stage-2-from-clean log was compiling compiler modules with the
+boot compiler, and no build files had changed in the last five minutes when
+checked.
+
 ## Known Good Setup
 
 - Normal runtime stdlib: `_build/runtime_stdlib_install/lib/ocaml_runtime_stdlib`.
