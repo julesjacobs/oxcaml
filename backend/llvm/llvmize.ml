@@ -2528,9 +2528,7 @@ let fun_attrs ~has_try:_ codegen_options =
   let gc_attrs = [Gc gc_name] in
   let frame_pointer_attrs =
     match Target_system.architecture () with
-    | Target_system.AArch64 ->
-      (if Config.with_frame_pointers then [Frame_pointer_all] else [])
-      @ [Oxcaml_stack_check]
+    | Target_system.AArch64 -> [Oxcaml_stack_check]
     | Target_system.IA32 | Target_system.X86_64 | Target_system.ARM
     | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
       []
@@ -3103,9 +3101,13 @@ let invoke_clang_with_llvmir ~output_filename ~input_filename ~extra_flags =
       []
   in
   let fp_flags =
-    if Config.with_frame_pointers
-    then ["-fno-omit-frame-pointer"]
-    else ["-fomit-frame-pointer"; "-momit-leaf-frame-pointer"]
+    match Target_system.architecture () with
+    | Target_system.AArch64 -> ["-fomit-frame-pointer"; "-momit-leaf-frame-pointer"]
+    | Target_system.IA32 | Target_system.X86_64 | Target_system.ARM
+    | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
+      if Config.with_frame_pointers
+      then ["-fno-omit-frame-pointer"]
+      else ["-fomit-frame-pointer"; "-momit-leaf-frame-pointer"]
   in
   let llvm_flags = [!Oxcaml_flags.llvm_flags] in
   Ccomp.command
