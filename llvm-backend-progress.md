@@ -84,6 +84,14 @@ LLVM-built compiler:
   `nucleic`, `hamming`, `gcwords`, `gctweaks`, `gc_mark_stack_overflow`,
   `darkening_work`, `gpr1370`, `pr7168`, `sorts`, and `sieve`. The first batch
   produced 40 fresh wrapper calls; the second produced 20.
+- Direct single-domain `testsuite/tests/weak-ephe-final` tests pass with the
+  LLVM-built compiler and `-llvm-backend`: `weaktest`, `weaklifetime`,
+  `weaklifetime2`, `finaliser`, `ephetest`, `ephetest2`, `ephetest3`,
+  `ephe_infix`, and `pr12001`. This produced 44 fresh wrapper calls before the
+  two multidomain tests were reached.
+- The current direct test setup is single-domain: `OCAMLRUNPARAM=d=4` reports
+  that `max_domains` cannot exceed 1. Multidomain weak/finaliser tests need a
+  proper multidomain runtime/test harness before they give useful LLVM signal.
 
 ## Key Findings
 
