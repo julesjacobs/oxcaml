@@ -107,6 +107,10 @@ LLVM-built compiler:
   `test_local_bug`. These cover OCaml-to-C-to-OCaml callbacks, callback
   arguments, exception unwinding through C, and the local-argument repro; they
   produced 24 fresh wrapper calls.
+- Heavier C-stub callback probes also pass with the LLVM-built compiler and
+  `-llvm-backend`: `callback/test3`, `stack_overflow`, and `nested_fiber`.
+  These cover stack overflow through callback paths and nested effect/fiber
+  callbacks; they produced 12 fresh wrapper calls.
 - Direct non-C-stub `testsuite/tests/asmcomp` probes pass with the LLVM-built
   compiler and `-llvm-backend`: `bind_tuples`, `compare`, `evaluation_order`,
   `lift_mutable_let_flambda`, `obj_dup_primitive`, `prevent_fma`,
