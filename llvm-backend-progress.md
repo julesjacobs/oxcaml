@@ -130,14 +130,19 @@ Two important AArch64 trap fixes made this pass:
   rewrite extra absolute slots; the relative delta survives stack copying and
   fixes `arm64_stack_overflow_trap`.
 
-A broad stage-2 compiler build is not a good next iteration target. Building
-`oxcaml_main_native.exe` with `-llvm-backend` did make real LLVM progress
-(274 clang wrapper calls with `-x ir`), but then stalled on `parser.pp.ml`
-before any new clang call. A direct `parser.pp.ml` compile with
-`-llvm-backend` also stalled before clang, and a direct compile without
-`-llvm-backend` was still CPU-bound after about two minutes. This points at a
-front-end/compiler-module compile-time problem, not an LLVM backend codegen
-failure. No such build is currently still running.
+A broad stage-2 compiler build is not a good next iteration target. A previous
+build made real LLVM progress (274 clang wrapper calls with `-x ir`) and then
+appeared to stall on `parser.pp.ml`, but the stall was caused by temporary
+runtime diagnostics left in hot GC paths: every `caml_darken` scanned major
+heap pools. After removing those diagnostics, a fresh normal compiler target
+built in about two minutes and the same parser typing probe completed in 18s.
+Use build-dir-qualified Dune targets for manual compiler probes, e.g.
+`_some_build/main/oxcaml_main_native.exe`; plain `./oxcaml_main_native.exe`
+does not force the intended context target.
+
+This was steady progress, not a hard LLVM design problem. The hard design work
+is still the runtime/exception/GC contract; keep using reduced experiments and
+targeted test-suite slices rather than hill-climbing on full self-hosting.
 
 ## Prior Fix Direction
 
