@@ -23,9 +23,11 @@ wrapper log for commands like:
   -ffixed-x15 -ffixed-x26 -ffixed-x27 -ffixed-x28
 ```
 
-The LLVM-built compiler is not self-host useful yet. Always seed stage-2 tests
-from the clean normal-built compiler; rebuilding with an already-LLVM-built
-compiler can preserve old broken generated code inside the next compiler.
+The LLVM-built compiler is not self-host useful yet, but it now builds and runs
+small programs with both the normal backend and `-llvm-backend`. Always seed
+stage-2 tests from the clean normal-built compiler; rebuilding with an
+already-LLVM-built compiler can preserve old broken generated code inside the
+next compiler.
 
 ## Known Good Setup
 
@@ -34,6 +36,9 @@ compiler can preserve old broken generated code inside the next compiler.
 - Fresh normal stage-1 compiler:
   `_normal_stage1_fpfix_build/install/main/bin/ocamlopt.opt`.
 - Stage-2 workspace for current checks: `/tmp/oxcaml-llvm-stage2-fpfix.ws`.
+- LLVM-built compiler:
+  `_llvm_stage2_fpfix_build/main/oxcaml_main_native.exe`. Its build used real
+  local LLVM: the wrapper log had 1596 clang calls including `-x ir`.
 - LLVM stage-2 tool smoke test:
   `_llvm_stage2_fpfix_build/main/tools/make_opcodes.exe` builds with real local
   LLVM and now runs `-opcodes < runtime/caml/instruct.h` successfully.
@@ -144,6 +149,17 @@ This was steady progress, not a hard LLVM design problem. The hard design work
 is still the runtime/exception/GC contract; keep using reduced experiments and
 targeted test-suite slices rather than hill-climbing on full self-hosting.
 
+Stage-2 LLVM-built compiler checks now also pass on selected llvmize tests. Each
+manual compile used `OCAMLPARAM=_,llvm-backend=1,llvm-path=/tmp/oxcaml-clang-wrapper`
+and the wrapper log showed fresh `-x ir` clang calls:
+
+- hello world compiled and ran with both the normal backend and `-llvm-backend`.
+- `arm64_many_args`: prints `66`.
+- `arm64_exception_root_refresh`: prints `1`.
+- `arm64_input_channel_loop`: prints `5200`.
+- `arm64_stack_overflow_trap`: prints the expected stack-overflow/backtrace
+  result.
+
 ## Prior Fix Direction
 
 Earlier failures were hidden exceptional edges and stale trap-state restoration
@@ -161,9 +177,11 @@ threshold, and a diagnostic `CHECK_SP_IN_STACK` runtime guard.
 
 ## Next Checks
 
-1. Run a small targeted slice with the LLVM-built compiler, now that the
-   normal-built compiler plus `-llvm-backend` passes `@runtest-llvmize`.
-2. If LLVM-built compiler tests fail, reduce from the failing test-suite case
+1. Add a small Dune-driven stage-2 llvmize slice so these manual checks become
+   repeatable without depending on cached outputs.
+2. Extend the LLVM-built compiler checks to more `llvmize` cases, especially
+   external-call and multi-module cases.
+3. If LLVM-built compiler tests fail, reduce from the failing test-suite case
    rather than returning to broad self-hosting.
-3. Keep checking wrapper logs on forced rebuilds so cached dune successes are
+4. Keep checking wrapper logs on forced rebuilds so cached dune successes are
    not mistaken for fresh LLVM executions.
