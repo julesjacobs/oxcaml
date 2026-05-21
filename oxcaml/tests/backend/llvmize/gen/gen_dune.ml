@@ -79,8 +79,8 @@ module F = struct
       message
 
   let exe_rule ~deps ~output =
-    asprintf "(run ${ocamlopt} %a -opaque -o %s.exe)" (pp_strings pp_space) deps
-      output
+    asprintf "(run ${ocamlopt} %a -opaque -o %s.exe ${llvm_flags})"
+      (pp_strings pp_space) deps output
 
   (* CR yusumez: Make one rule per task to better use incremental tests. *)
   let pp_compile_rule ppf ~targets ~deps ~task_rules =
@@ -254,6 +254,25 @@ let () =
     print_test ~extra_subst:[] ~buf ~run:(Some name)
       ~tasks:(ocaml_llvm_and_output_ir name @ [Ocaml_default main_name])
   in
+  let print_arm64_output_test ?output name filenames =
+    print_test_for_arch ~architecture:"arm64" ~extra_subst:[] ~buf
+      ~run:(Some (Option.value output ~default:name))
+      ~tasks:
+        (List.map
+           (fun filename ->
+             Ocaml_llvm { filename; stop_after_llvmize = false })
+           filenames)
+  in
+  let print_arm64_output_test_c ?output ~c_suffix name filenames =
+    print_test_for_arch ~architecture:"arm64" ~extra_subst:[] ~buf
+      ~run:(Some (Option.value output ~default:name))
+      ~tasks:
+        (C (name ^ "_" ^ c_suffix)
+         :: List.map
+              (fun filename ->
+                Ocaml_llvm { filename; stop_after_llvmize = false })
+              filenames)
+  in
   let print_test_ir_and_run_with_dep ~extra_dep_suffix
       ?(extra_dep_with_llvm_backend = false) name =
     let extra_dep_name = name ^ "_" ^ extra_dep_suffix in
@@ -323,6 +342,26 @@ let () =
   print_test_ir_only "dls_get";
   print_test_ir_only "statepoint_metadata";
   print_test_compile_with_poll_insertion "poll";
+  print_arm64_output_test "const_val" ["const_val"; "const_val_main"];
+  print_arm64_output_test_c ~c_suffix:"stub" "int_ops"
+    ["int_ops_data"; "int_ops"; "int_ops_main"];
+  print_arm64_output_test "gcd" ["gcd_data"; "gcd"; "gcd_main"];
+  print_arm64_output_test "array_rev"
+    ["array_rev_data"; "array_rev"; "array_rev_main"];
+  print_arm64_output_test ~output:"float_ops_arm64" "float_ops"
+    ["float_ops"; "float_ops_main"];
+  print_arm64_output_test "many_args"
+    ["many_args_defn"; "many_args"; "many_args_main"];
+  print_arm64_output_test "multi_ret" ["multi_ret"; "multi_ret_main"];
+  print_arm64_output_test "indirect_call"
+    ["indirect_call"; "indirect_call_main"];
+  print_arm64_output_test_c ~c_suffix:"defn" "extcalls"
+    ["extcalls"; "extcalls_main"];
+  print_arm64_output_test "exn" ["exn_part1"; "exn_part2"; "exn_part3"];
+  print_arm64_output_test "alloc" ["alloc"];
+  print_arm64_output_test "tailcall" ["tailcall2"; "tailcall"];
+  print_arm64_output_test "switch" ["switch"];
+  print_arm64_output_test_c ~c_suffix:"stub" "csel" ["csel"];
   print_test_c_for_arch ~architecture:"arm64" ~c_suffix:"stubs"
     "arm64_c_call_gc";
   print_test_run_no_main_for_arch ~architecture:"arm64" "arm64_many_args";
