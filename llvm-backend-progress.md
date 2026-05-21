@@ -2,13 +2,14 @@
 
 Last updated: 2026-05-21.
 
-Goal: first make useful test-suite slices pass with a normal-built compiler plus
-`-llvm-backend`; then run the same slices with an LLVM-built compiler; only
-after that target full self-hosting.
+Goal: make the LLVM backend able to replace the native backend: build the
+compiler and required libraries with LLVM, then pass the compiler test suite
+using that LLVM-built toolchain.
 
 ## Current State
 
-- Progress is steady on single-domain programs and test-suite slices.
+- Progress is steady on single-domain programs, test-suite slices, and the
+  first required-library rebuilds.
 - Hard problems should still be handled by reductions and design experiments,
   not by broad self-host retries. The main hard areas are exception/effect
   control flow, runtime stack switching, and multidomain interactions.
@@ -21,8 +22,8 @@ after that target full self-hosting.
   `-llvm-backend`. The produced compilers report `5.2.0+ox`/`arm64` and can
   compile/run small programs with `-llvm-backend`.
 - This is not full production self-hosting yet: the workspace still uses
-  normal-built bytecode tools/runtime stdlib, and only selected test-suite
-  slices have been run on later-stage compilers.
+  normal-built bytecode tools and several normal-built libraries. LLVM-built
+  stdlib and `stdlib_stable` are now usable for a small ocamltest slice.
 
 Always verify real LLVM use by checking `/tmp/oxcaml-clang-wrapper.log` for:
 
@@ -52,6 +53,16 @@ Always verify real LLVM use by checking `/tmp/oxcaml-clang-wrapper.log` for:
   was verified with `FAKE_ROOT=/tmp/oxcaml-stage4-ocamltest-src-script` on the
   `lib-array`/`lib-str`/`lib-systhreads` subset: 55 passed, 5 skipped, 0
   failed, with 22 fresh `-x ir` calls.
+- LLVM-built runtime stdlib:
+  `_llvm_stage4_runtime_stdlib_build/install/runtime_stdlib/lib/ocaml_runtime_stdlib`.
+  Rebuilding it from a clean build dir with the stage-4 LLVM compiler produced
+  74 fresh `-x ir` calls. A smoke program using this stdlib printed `6 ok`.
+- LLVM-built `stdlib_stable`:
+  `_llvm_stage4_mainlibs_build/main/otherlibs/stdlib_stable`. Rebuilding it
+  against the LLVM-built stdlib produced 16 fresh `-x ir` calls. For ocamltest,
+  expose the `.objs/{byte,native}` artifacts at top level or use an installed
+  layout; pointing at the raw Dune build dir leaves modules such as
+  `Stdlib_stable` unbound in expect tests.
 - Extra fake-root paths currently needed for broader ocamltest slices:
   `CAML_LD_LIBRARY_PATH=/tmp/oxcaml-stage4-ocamltest-src/stublibs`,
   `otherlibs/{str,stdlib_stable}` symlinked to the normal stage-1 install,
@@ -97,6 +108,9 @@ Always verify real LLVM use by checking `/tmp/oxcaml-clang-wrapper.log` for:
   `effects/dynamic.ml`.
 - Stage-4 broader stdlib/unix/systhreads slice passes with `-llvm-backend`:
   229 passed, 17 skipped, 0 failed, with 123 fresh `-x ir` calls.
+- Stage-4 with LLVM-built stdlib plus LLVM-built `stdlib_stable` passes
+  `lib-list`/`lib-array`: 7 passed, 0 skipped, 0 failed, with 4 fresh `-x ir`
+  calls from the test run.
 - Reduced repro `/tmp/oxcaml-reperform-consumed/test.ml` now passes with the
   normal-built compiler plus `-llvm-backend` and patched runtime:
   `first reperform raised Unhandled: true` and
@@ -129,10 +143,12 @@ Always verify real LLVM use by checking `/tmp/oxcaml-clang-wrapper.log` for:
 
 ## Next Checks
 
-1. Keep expanding stage-4 ocamltest slices before broad self-hosting.
-2. Convert the reduced runtime/effect issue into a committed source change and
-   rely on the existing `effects/reperform_consumed_cont.ml` test as coverage.
-3. Build enough LLVM tools for `llvm-lit`, or keep using direct `llc |
+1. Build the remaining required libraries (`unix`, `str`, `systhreads`,
+   `runtime_events`, compiler libs) against the LLVM-built stdlib.
+2. Create a repeatable installed layout for LLVM-built libraries instead of
+   hand-made `/tmp` symlink trees.
+3. Run larger ocamltest slices with LLVM-built stdlib and required libraries.
+4. Build enough LLVM tools for `llvm-lit`, or keep using direct `llc |
    FileCheck` for targeted LLVM tests until the toolchain build is expanded.
-4. If an LLVM-built compiler test fails, reduce from that test-suite case rather
+5. If an LLVM-built compiler test fails, reduce from that test-suite case rather
    than returning directly to broad self-hosting.
