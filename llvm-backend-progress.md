@@ -54,6 +54,16 @@ A tiny ocamllex program compiled with the clean normal compiler plus
 `-llvm-backend` does use local LLVM and prints the expected result, so lexers and
 `caml_c_call` are not universally broken.
 
+There is now a small reproducer in `/tmp/oxcaml-llvm-refill-repro`:
+
+- `lexer.mll` has a simple digit token.
+- `main.ml` builds a lexbuf with `Lexing.from_function` that returns one byte
+  per refill.
+- Normal backend output: `12345`.
+- LLVM backend behavior: crash in `caml_lex_engine`.
+- The wrapper log confirms real local LLVM use with `-x ir` and the fixed
+  arm64 runtime registers.
+
 Current evidence points at frame roots around the generated lexer's refill path:
 
 - The `caml_c_call` trampoline in the linked binary preserves `x0`/`x1`/`x2`.
@@ -67,9 +77,8 @@ Current evidence points at frame roots around the generated lexer's refill path:
   consistent in the generated assembly.
 
 This is a design/debugging problem, not a good place for hill climbing. The next
-step should be a small reproducer that forces an ocamllex refill/OCaml callback
-under `-llvm-backend`, then inspect the exact stack-map roots at the call that
-first corrupts the lexbuf slot.
+step is to use the small refill reproducer to inspect the exact stack-map roots
+at the call that first corrupts the lexbuf slot.
 
 ## Prior Fix Direction
 
@@ -88,11 +97,9 @@ threshold, and a diagnostic `CHECK_SP_IN_STACK` runtime guard.
 
 ## Next Checks
 
-1. Build a small ocamllex/refill reproducer that fails without compiling the
-   whole compiler.
-2. Watch the generated lexer's lexbuf frame slot and identify the first write
+1. Watch the generated lexer's lexbuf frame slot and identify the first write
    or GC/frame scan that changes it.
-3. Compare the failing call's LLVM stack-map locations with the emitted
+2. Compare the failing call's LLVM stack-map locations with the emitted
    frametable offsets and the actual AArch64 frame layout.
-4. Only after the root contract is clear, patch either LLVM stack-map emission
+3. Only after the root contract is clear, patch either LLVM stack-map emission
    or `llvmize.ml` root selection and rerun the stage-2 generated-tool target.
