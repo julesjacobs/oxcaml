@@ -72,6 +72,12 @@ module Type : sig
 
   val doublex2 : t
 
+  val vec128 : t
+
+  val vec256 : t
+
+  val vec512 : t
+
   val label : t
 
   val metadata : t
@@ -378,9 +384,13 @@ module Instruction : sig
 
   val load : ptr:Value.t -> typ:Type.t -> op
 
+  val load_with_align : align:int -> ptr:Value.t -> typ:Type.t -> op
+
   val load_volatile : ptr:Value.t -> typ:Type.t -> op
 
   val store : ptr:Value.t -> to_store:Value.t -> op
+
+  val store_with_align : align:int -> ptr:Value.t -> to_store:Value.t -> op
 
   val store_volatile : ptr:Value.t -> to_store:Value.t -> op
 
