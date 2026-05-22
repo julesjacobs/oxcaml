@@ -15,10 +15,10 @@ using that LLVM-built toolchain.
   tools in parts of the pipeline.
 - The normal Make pipeline can build the compiler with LLVM enabled and can pass
   `make runtest-llvmize` and a broad `make runtest` on arm64 with real LLVM use.
-- The LLVM-built compiler can compile and run many ordinary, stdlib/runtime,
-  callback/effect/GC-root, SIMD, quotation, statmemprof, and unboxed-product
-  programs with `-llvm-backend`; a full installed-compiler sweep still has
-  failing clusters.
+- The LLVM-built installed compiler can pass the full compiler testsuite with
+  forced `-llvm-backend` on arm64. This is an important milestone, but the
+  current copied-stack fix is conservative and still needs design review before
+  treating it as production-ready.
 - Hard problems should be handled with reductions and design experiments, not
   broad self-host retries. The main hard areas remain exception/effect control
   flow, runtime stack switching, multidomain interactions, SIMD coverage, and
@@ -66,10 +66,11 @@ If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
 - `make test-one DIR=typing-layouts-products` with forced LLVM passed:
   `105` passed, `0` skipped, `0` failed. The wrapper log recorded `100` clang
   calls, `50` fresh `-x ir` compilations, and fixed-register flags.
-- Full installed-compiler flambda2 testsuite sweep with forced LLVM now reports
-  `6592` passed, `287` skipped, and `4` failed. The wrapper log recorded
-  `5483` clang calls, `2742` fresh `-x ir` compilations, and fixed-register
-  flags.
+- Full installed-compiler flambda2 testsuite sweep with forced LLVM now passes:
+  `6599` passed, `287` skipped, and `0` failed. The wrapper log recorded
+  `5490` clang calls, `2745` fresh `-x ir` compilations, and fixed-register
+  flags. The installed compilers and `fexprc.exe` were forced to relink first
+  to avoid stale diagnostic strings from earlier probes.
 - `tool-ocamlopt-disable-builtin-check` now passes with forced LLVM: `8`
   passed, `0` failed. The wrapper log recorded `1188` fresh `-x ir`
   compilations. Unknown `[@@builtin]` externals now fall back to the normal
@@ -77,6 +78,12 @@ If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
 - `tail-call-many-returns` now passes with forced LLVM after rebuilding the
   LLVM fork. The focused test recorded `2` fresh `-x ir` compilations and
   fixed-register flags. The reduced program also prints `1` through `75`.
+- `typing-small-numbers/test_matching_native.ml` in `toplevel.opt` now passes.
+  The reduced two-phrase `ocamlnat` crash was caused by LLVM keeping OCaml stack
+  addresses in saved registers and copied stack slots across prologue stack
+  growth. Relocating those raw stack addresses after the normal typed stack
+  rewrites fixes the reduced crash, `typing-small-numbers`, `async-exns`, and
+  `flambda2/examples`.
 
 Fix behind that progress:
 
@@ -95,6 +102,11 @@ Fix behind that progress:
   OxCaml integer values like non-Darwin. This avoids LLVM lowering large
   aggregate returns through a hidden return buffer in `x28`, which conflicts
   with the OxCaml domain-state register.
+- On AArch64, copied-stack growth now relocates old-stack addresses that LLVM
+  kept in saved GPR slots or copied stack words. The raw stack-word rewrite must
+  run after the typed exception-chain and frame-pointer rewrites; running it
+  earlier can hide old trap links from `caml_rewrite_exception_stack` and leave
+  `async_exn_handler` stale.
 
 ## Previously Verified
 
@@ -138,6 +150,9 @@ Fix behind that progress:
   nested LLVM builds can produce misleading crashes. Dune does not track
   `/tmp/oxcaml-clang-wrapper` or the nested LLVM build as dependencies; force a
   clean rebuild of the relevant libraries/tools before drawing conclusions.
+- Runtime assembly can also be stale independently in the main workspace. After
+  changing `runtime/arm64.S`, verify the linked tool with `otool`; a rebuilt
+  runtime archive alone does not prove `_install/bin/ocamlnat` was relinked.
 - `tests/statmemprof/bigarray.ml` exposed an LLVM statepoint liveness bug:
   `RewriteStatepointsForGC` included the statepoint instruction itself when
   computing caller live roots, which kept call arguments live across calls. The
@@ -147,12 +162,16 @@ Fix behind that progress:
   avoids the failing stack-result test by keeping more OxCaml values in
   registers. A cleaner long-term design may still need explicit LLVM lowering
   for true stack-passed OCaml call results.
+- The copied-stack relocation fix is a hard design point, not just a local test
+  fix. The runtime-side conservative scan passes the suite, but a cleaner
+  production design may need compiler/runtime metadata for which stack words are
+  actual stack addresses, or a way to prevent LLVM from materializing such
+  addresses across stack growth.
 
 ## Next Checks
 
-1. Reduce the native toplevel bus error in
-   `typing-small-numbers/test_matching_native.ml`.
-2. Re-run the full installed-compiler flambda2 testsuite with forced LLVM to
-   confirm only the native toplevel failure remains.
-3. Confirm a normal bootstrap using the LLVM-built installed compiler, not just
+1. Audit the copied-stack relocation design for false positives and decide
+   whether conservative runtime scanning is acceptable or needs stack-address
+   metadata from the LLVM backend.
+2. Confirm a normal bootstrap using the LLVM-built installed compiler, not just
    the boot compiler plus LLVM-enabled final build.
