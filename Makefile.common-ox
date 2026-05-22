@@ -22,16 +22,27 @@ override OCAMLPARAM := $(if $(OCAMLPARAM),$(OCAMLPARAM),_),llvm-backend=1,llvm-p
 export OCAMLPARAM
 endif
 
+ifeq ($(LLVM_BOOT_BACKEND),1)
+LLVM_PATH ?= /tmp/oxcaml-clang-wrapper
+LLVM_BOOT_INSTALL ?= $(CURDIR)/_install
+BOOT_OCAMLPARAM := _,llvm-backend=1,llvm-path=$(LLVM_PATH)
+BOOT_PATHS := \
+  (paths \
+    (PATH ("$(LLVM_BOOT_INSTALL)/bin" :standard)) \
+    (OCAMLLIB ("$(LLVM_BOOT_INSTALL)/lib/ocaml")))
+endif
+
 define dune_boot_context
 (lang dune 2.8)
 ; We need to call the boot context "default" so that dune selects it for merlin
 (context (default
   (name default)
   (profile dev)
+  $(BOOT_PATHS)
   (env (_
     (flags (:standard -warn-error +A -alert -unsafe_multidomain))
     (env-vars
-      ("OCAMLPARAM" "")
+      ("OCAMLPARAM" "$(BOOT_OCAMLPARAM)")
 
       ; Avoid using the full OC_CFLAGS for C code compiled during the boot
       ; In particular, we should avoid using ASan here even if it is otherwise
