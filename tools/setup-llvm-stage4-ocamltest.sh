@@ -16,6 +16,8 @@ stdlib_stable_dir=${STDLIB_STABLE_DIR:-$install_lib/stdlib_stable}
 runtime_dir=${RUNTIME_DIR_PATH:-$normal_build/main/runtime}
 stage_ocamlopt=$stage_build/main/oxcaml_main_native.exe
 toplevel_dir=${TOPLEVEL_DIR:-$stage_build/main/toplevel/byte/.ocamltoplevel.objs/byte}
+debugger_dir=${DEBUGGER_DIR:-$stage_build/main/debugger/.ocamldebug.objs/byte}
+debugger_exe=${DEBUGGER_EXE:-$install_bin/ocamldebug}
 config_obj=${CONFIG_OBJ:-$stage_build/main/.ocamlcommon.objs/native/config.o}
 
 require_path () {
@@ -35,6 +37,8 @@ require_path "$repo/_runtest/testsuite/tools/expect"
 require_path "$repo/_runtest/testsuite/tools/expectnat"
 require_path "$wrapper"
 require_path "$toplevel_dir/toploop.cmi"
+require_path "$debugger_dir/ocamldebug.cmi"
+require_path "$debugger_exe"
 require_path "$install_bin/ocamlmklib.byte"
 require_path "$install_bin/dumpobj.byte"
 require_path "$install_bin/ocamllex.byte"
@@ -83,6 +87,13 @@ ln -sfn "$config_obj" "$fake_root/utils/config.o"
 for dir in asmcomp bytecomp driver file_formats lambda middle_end parsing typing; do
   mkdir -p "$fake_root/$dir"
 done
+
+rm -rf "$fake_root/debugger"
+mkdir -p "$fake_root/debugger"
+for file in "$debugger_dir"/*; do
+  ln -sfn "$file" "$fake_root/debugger/$(basename "$file")"
+done
+ln -sfn "$debugger_exe" "$fake_root/debugger/ocamldebug"
 
 rm -rf "$fake_root/tools"
 mkdir -p "$fake_root/tools"
