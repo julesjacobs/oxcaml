@@ -22,8 +22,9 @@ using that LLVM-built toolchain.
   `-llvm-backend`. The produced compilers report `5.2.0+ox`/`arm64` and can
   compile/run small programs with `-llvm-backend`.
 - This is not full production self-hosting yet: the workspace still uses
-  normal-built bytecode tools and several normal-built libraries. LLVM-built
-  stdlib and `stdlib_stable` are now usable for a small ocamltest slice.
+  normal-built boot bytecode tools. The normal Make pipeline can now build the
+  runtime stdlib, required libraries, compiler libs, and installed compiler
+  with LLVM enabled.
 
 Always verify real LLVM use by checking `/tmp/oxcaml-clang-wrapper.log` for:
 
@@ -63,6 +64,25 @@ Always verify real LLVM use by checking `/tmp/oxcaml-clang-wrapper.log` for:
   expose the `.objs/{byte,native}` artifacts at top level or use an installed
   layout; pointing at the raw Dune build dir leaves modules such as
   `Stdlib_stable` unbound in expect tests.
+- LLVM-built `str`, `unix`, `runtime_events`, and `systhreads` build in
+  `_llvm_stage4_mainlibs_build/main/otherlibs` against the LLVM-built stdlib.
+  Rebuilding their OCaml native modules produced 7 fresh `-x ir` calls. Their
+  stubs and installed names must also be exposed in the fake root
+  (`lib*_stubs.a`, `dll*_stubs.so`, and `threads.cmxa -> threadsnat.cmxa`);
+  otherwise native tests fail at link time before testing codegen.
+- LLVM-built compiler libs now build far enough to produce `ocamlcommon.cma`,
+  `ocamlcommon.cmxa`, `ocamlbytecomp.cma`, `ocamlbytecomp.cmxa`, and
+  `ocamloptcomp.cmxa` against the LLVM-built stdlib. The successful rerun had
+  435 fresh `-x ir` calls. Required setup details: include `menhir` in PATH and
+  make `/tmp/oxcaml-stage4-bin/ocamlc` point at the 5.2+ox `ocamlc.byte`;
+  otherwise plain `ocamlc -i` rules fall through to the opam 5.4 compiler and
+  reject the 5.2+ox stdlib cmi.
+- Preferred path: use the normal Make pipeline with LLVM enabled, not a custom
+  fake install layout. The workspace files are generated and do not update just
+  because `BUILD_OCAMLPARAM` changes, so remove `duneconf/runtime_stdlib.ws`
+  and `duneconf/main.ws` before switching LLVM on/off. Also put the OxCaml opam
+  switch first in `PATH`; otherwise the boot context may use an unrelated
+  ambient compiler or miss `menhir`.
 - Extra fake-root paths currently needed for broader ocamltest slices:
   `CAML_LD_LIBRARY_PATH=/tmp/oxcaml-stage4-ocamltest-src/stublibs`,
   `otherlibs/{str,stdlib_stable}` symlinked to the normal stage-1 install,
@@ -111,6 +131,22 @@ Always verify real LLVM use by checking `/tmp/oxcaml-clang-wrapper.log` for:
 - Stage-4 with LLVM-built stdlib plus LLVM-built `stdlib_stable` passes
   `lib-list`/`lib-array`: 7 passed, 0 skipped, 0 failed, with 4 fresh `-x ir`
   calls from the test run.
+- Stage-4 with LLVM-built stdlib plus LLVM-built `str`, `unix`, and
+  `systhreads` passes `lib-str`/`lib-unix`/`lib-systhreads`: 176 passed,
+  16 skipped, 0 failed, with 79 fresh `-x ir` calls from the test run.
+- Normal Make pipeline with LLVM enabled:
+  `PATH=/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin:$PATH make compiler
+  BUILD_OCAMLPARAM='_,llvm-backend=1,llvm-path=/tmp/oxcaml-clang-wrapper'`
+  passes after regenerating `duneconf/runtime_stdlib.ws` and
+  `duneconf/main.ws`; wrapper log had 668 fresh `-x ir` calls. The installed
+  compiler reports `5.2.0+ox` and `arm64`, and installed `unix`, `threads`, and
+  `compiler-libs/ocamloptcomp.cmxa` are present.
+- Normal `make runtest-llvmize` with the same LLVM setting passes. The run was
+  mostly cached but still had 2 fresh `-x ir` calls.
+- Normal `make runtest` with LLVM enabled still fails. The first reduced blocker
+  is `oxcaml/tests/simd/builtins_u.ml`: after adding LLVM IR support for
+  vector machine types and a first batch of integer NEON lowering, it now gets
+  as far as `Cvtq_f64_s64` before hitting an unimplemented SIMD operation.
 - Reduced repro `/tmp/oxcaml-reperform-consumed/test.ml` now passes with the
   normal-built compiler plus `-llvm-backend` and patched runtime:
   `first reperform raised Unhandled: true` and
@@ -140,14 +176,19 @@ Always verify real LLVM use by checking `/tmp/oxcaml-clang-wrapper.log` for:
   no-allocation assertion even with the normal-built compiler and normal
   backend, so it needs the real testsuite invocation or exact optimization
   setup before classifying LLVM behavior.
+- The SIMD broad-test failure is now a coverage problem rather than a single
+  hidden compiler crash. Integer vector carriers, vector compare/select, simple
+  integer add/sub/bitwise/neg, shifts, lane duplication, and low-half widening
+  have tentative LLVM lowerings; float/vector conversions and many remaining
+  NEON operations still need deliberate lowering or a principled fallback.
 
 ## Next Checks
 
-1. Build the remaining required libraries (`unix`, `str`, `systhreads`,
-   `runtime_events`, compiler libs) against the LLVM-built stdlib.
-2. Create a repeatable installed layout for LLVM-built libraries instead of
-   hand-made `/tmp` symlink trees.
-3. Run larger ocamltest slices with LLVM-built stdlib and required libraries.
+1. Run broader normal `make runtest` with LLVM enabled and reduce any failures.
+2. Make the standard workflow less error-prone: workspace regeneration should
+   notice `BUILD_OCAMLPARAM` changes, or docs/scripts should force regeneration.
+3. Confirm a second normal bootstrap using the LLVM-built installed compiler,
+   not just the boot compiler plus LLVM-enabled final build.
 4. Build enough LLVM tools for `llvm-lit`, or keep using direct `llc |
    FileCheck` for targeted LLVM tests until the toolchain build is expanded.
 5. If an LLVM-built compiler test fails, reduce from that test-suite case rather
