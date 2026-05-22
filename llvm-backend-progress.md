@@ -25,7 +25,8 @@ using that LLVM-built toolchain.
 - The self-stage scripts now avoid known false failures: boot workspaces are
   generated with the same Makefile LLVM boot-context rules instead of patched
   with `sed`, and staged tool wrappers are copied via their `.real` executable
-  when present.
+  when present. Stage install and ocamltest helper paths are canonicalized so
+  the Make targets work when they pass relative paths.
 - This is a strong functional milestone, not a production sign-off. The backend
   still needs design review around GC/stack-map correctness, DWARF/debugging,
   unsupported asmgen/asmcomp tests, performance, and platform coverage.
