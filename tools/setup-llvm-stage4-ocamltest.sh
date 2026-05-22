@@ -17,7 +17,10 @@ runtime_dir=${RUNTIME_DIR_PATH:-$normal_build/main/runtime}
 stage_ocamlopt=$stage_build/main/oxcaml_main_native.exe
 expect_exe=${EXPECT_EXE:-$stage_build/main/oxcaml/testsuite/tools/expect.exe}
 expectnat_exe=${EXPECTNAT_EXE:-$stage_build/main/oxcaml/testsuite/tools/expectnat.exe}
+codegen_exe=${CODEGEN_EXE:-$stage_build/main/oxcaml/testsuite/tools/codegen_main.exe}
+ocamltest_exe=${OCAMLTEST_EXE:-$repo/_runtest/ocamltest/ocamltest}
 toplevel_dir=${TOPLEVEL_DIR:-$stage_build/main/toplevel/byte/.ocamltoplevel.objs/byte}
+opttoplevel_dir=${OPTTOPLEVEL_DIR:-$stage_build/main/toplevel/native/.ocamlopttoplevel.objs/byte}
 debugger_dir=${DEBUGGER_DIR:-$stage_build/main/debugger/.ocamldebug.objs/byte}
 debugger_exe=${DEBUGGER_EXE:-$install_bin/ocamldebug}
 fexprc_exe=${FEXPRC_EXE:-$stage_build/main/middle_end/flambda2/tests/tools/fexprc.exe}
@@ -38,8 +41,11 @@ require_path "$stdlib_stable_dir/stdlib_stable.cma"
 require_path "$runtime_dir/ocamlrun"
 require_path "$expect_exe"
 require_path "$expectnat_exe"
+require_path "$codegen_exe"
+require_path "$ocamltest_exe"
 require_path "$wrapper"
 require_path "$toplevel_dir/toploop.cmi"
+require_path "$opttoplevel_dir/opttopdirs.cmi"
 require_path "$debugger_dir/ocamldebug.cmi"
 require_path "$debugger_exe"
 require_path "$fexprc_exe"
@@ -103,12 +109,24 @@ ln -sfn . "$fake_root/yacc"
 ln -sfn "$runtime_dir" "$fake_root/runtime"
 ln -sfn "$stdlib_dir" "$fake_root/stdlib"
 ln -sfn "$install_lib/compiler-libs" "$fake_root/compilerlibs"
-ln -sfn "$toplevel_dir" "$fake_root/toplevel"
 ln -sfn "$repo/_install" "$fake_root/_install"
 ln -sfn "$repo/runtime5" "$fake_root/runtime5"
 ln -sfn "$expect_exe" "$fake_root/testsuite/tools/expect"
 ln -sfn "$expectnat_exe" "$fake_root/testsuite/tools/expectnat"
 ln -sfn "$fexprc_exe" "$fake_root/testsuite/tools/fexprc"
+ln -sfn "$codegen_exe" "$fake_root/testsuite/tools/codegen"
+for file in "$stage_build"/main/oxcaml/testsuite/tools/asmgen_*.o; do
+  ln -sfn "$file" "$fake_root/testsuite/tools/$(basename "$file")"
+done
+
+mkdir -p "$fake_root/ocamltest"
+ln -sfn "$ocamltest_exe" "$fake_root/ocamltest/ocamltest"
+
+rm -rf "$fake_root/toplevel"
+mkdir -p "$fake_root/toplevel"
+for file in "$toplevel_dir"/* "$opttoplevel_dir"/*; do
+  ln -sfn "$file" "$fake_root/toplevel/$(basename "$file")"
+done
 
 rm -rf "$fake_root/utils"
 mkdir -p "$fake_root/utils"

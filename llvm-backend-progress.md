@@ -255,6 +255,39 @@ If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
     helpers linked against the normal stdlib. `tests/ast-invariants` needed
     regular source files under the fake `OCAMLSRCDIR`, because it walks the
     tree with `Unix.lstat` and ignores symlinked files/directories.
+  - Another stage-5 batch passed with forced LLVM: `tests/async-exns`,
+    `tests/embedded`, `tests/fma`, `tests/lexing`, `tests/lib-bytes-utf`,
+    `tests/lib-extensions`, `tests/lib-lazy`, `tests/lib-scanf-2`,
+    `tests/lib-smallint`, `tests/locale`, manual module-init tests,
+    `tests/regression`, `tests/self-contained-toplevel`, `tests/translprim`,
+    `tests/unboxed-primitive-args`, and `tests/warnings`. Summary:
+    `316` passed, `21` skipped, `0` failed, with `153` fresh `-x ir`
+    compilations and fixed-register flags in the wrapper log.
+  - A typing-heavy stage-5 batch passed with forced LLVM: abstract kinds,
+    GADTs, labels, layout arrays/bits/floats/or-null/void/word, missing-cmi
+    tests, modal kinds, and related typing directories. Summary: `1041`
+    passed, `8` skipped, `0` failed, with `735` fresh `-x ir` compilations.
+  - A second typing-heavy stage-5 batch passed with forced LLVM: modules,
+    objects, polymorphism, private/recursive modules, signatures, SIMD,
+    small numbers, unboxed types, uniqueness, zero-alloc, UID tests, and
+    related directories. Summary: `527` passed, `1` skipped, `0` failed, with
+    `38` fresh `-x ir` compilations.
+  - A tool/misc stage-5 batch passed with forced LLVM after extending the fake
+    root: `tests/exotic-syntax`, `tests/formats-transition`, `tests/manifests`,
+    `tests/profile`, `tests/reaper`, `tests/shadow_include`,
+    `tests/tool-command-line`, `tests/tool-ocamlc-compat32`,
+    `tests/tool-ocamlobjinfo`, `tests/tool-ocamlopt-stop-after`,
+    `tests/tool-ocamltest`, `tests/tool-ocamltest-var-expansion`,
+    `tests/tool-toplevel`, `tests/tool-toplevel-invocation`, and
+    `tests/utils`. Summary: `206` passed, `52` skipped, `0` failed, with `51`
+    fresh `-x ir` compilations.
+  - The fake stage root now exposes stage `codegen`, `asmgen_*.o`, an
+    `ocamltest/ocamltest` executable, and native toplevel `opttop*` artifacts.
+    This fixed stale/missing helper failures in `tool-ocamltest` and
+    `tool-toplevel`. `tests/asmgen` no longer aborts in the helper, but still
+    fails before LLVM is involved: the existing `_runtest/testsuite/tools/codegen`
+    also reports a Cmm lexical error on `tests/asmgen/fib.cmm`, so treat this
+    as a separate raw-Asmgen/test-harness issue for now.
 
 Fix behind that progress:
 
