@@ -226,6 +226,51 @@ let preserve_reg_slot t (reg : Reg.t) =
 
 let current_compilation_unit = ref None
 
+let expect_llvm_ir_callbacks = ref []
+
+let expect_llvm_asm_callbacks = ref []
+
+let register_expect_llvm_ir_callback f =
+  expect_llvm_ir_callbacks := f :: !expect_llvm_ir_callbacks
+
+let register_expect_llvm_asm_callback f =
+  expect_llvm_asm_callbacks := f :: !expect_llvm_asm_callbacks
+
+let read_file_for_expect filename =
+  let ic = In_channel.open_text filename in
+  Fun.protect
+    ~finally:(fun () -> In_channel.close ic)
+    (fun () -> In_channel.input_all ic)
+
+let normalize_llvm_expect_line line =
+  if String.starts_with ~prefix:"source_filename = " line
+  then "source_filename = \"<source>\""
+  else if String.starts_with ~prefix:"\t.build_version macos, " line
+  then "\t.build_version macos, <version>"
+  else line
+
+let normalize_llvm_output s =
+  s |> Misc.normalise_eol |> Misc.delete_eol_spaces |> String.split_on_char '\n'
+  |> List.map normalize_llvm_expect_line
+  |> String.concat "\n"
+
+let invoke_and_clear_callbacks callbacks output =
+  let callbacks_to_invoke = List.rev !callbacks in
+  callbacks := [];
+  List.iter (fun f -> f output) callbacks_to_invoke
+
+let invoke_expect_llvm_ir_callbacks ~llvmir_filename =
+  if not (List.is_empty !expect_llvm_ir_callbacks)
+  then
+    invoke_and_clear_callbacks expect_llvm_ir_callbacks
+      (normalize_llvm_output (read_file_for_expect llvmir_filename))
+
+let invoke_expect_llvm_asm_callbacks ~asm_filename =
+  if not (List.is_empty !expect_llvm_asm_callbacks)
+  then
+    invoke_and_clear_callbacks expect_llvm_asm_callbacks
+      (normalize_llvm_output (read_file_for_expect asm_filename))
+
 let get_current_compilation_unit msg =
   match !current_compilation_unit with
   | Some t -> t
@@ -547,13 +592,14 @@ let alloc_deopt_args alloc_info =
 
 let deopt_bundle ?alloc_info ~primitive_call ~raise_call dbg =
   match
-    debug_deopt_args ~primitive_call ~raise_call dbg @ alloc_deopt_args alloc_info
+    debug_deopt_args ~primitive_call ~raise_call dbg
+    @ alloc_deopt_args alloc_info
   with
   | [] -> []
   | args -> ["deopt", args]
 
-let call_operand_bundles ?alloc_info t ~primitive_call ~raise_call dbg live_roots
-    =
+let call_operand_bundles ?alloc_info t ~primitive_call ~raise_call dbg
+    live_roots =
   deopt_bundle ?alloc_info ~primitive_call ~raise_call dbg
   @ live_gc_root_alloca_bundles t live_roots
 
@@ -2673,8 +2719,7 @@ let heap_alloc ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction)
   call_simple
     ~attrs:(gc_attr ~alloc_info ~can_call_gc:true t i @ [LL.Fn_attr.Cold])
     ~live_roots:(load_live_gc_roots_across t i)
-    ~alloc_info
-    ?unwind_label ~cc:Oxcaml_alloc t "caml_call_gc" [] []
+    ~alloc_info ?unwind_label ~cc:Oxcaml_alloc t "caml_call_gc" [] []
   |> ignore;
   emit_ins_no_res t (I.br after_gc);
   emit_unwind_landingpad_after t unwind_label exn_entry;
@@ -4141,6 +4186,7 @@ let end_assembly () =
   declare_data t;
   write_llvmir_to_file t;
   Out_channel.close t.oc;
+  invoke_expect_llvm_ir_callbacks ~llvmir_filename:t.llvmir_filename;
   (* Dump if -dllvmir passed *)
   if !Oxcaml_flags.dump_llvmir
   then (
@@ -4155,6 +4201,9 @@ let end_assembly () =
          (Asm_generation
             ( Option.value ~default:"(no source file specified)" t.sourcefile,
               ret_code )));
+  Option.iter
+    (fun asm_filename -> invoke_expect_llvm_asm_callbacks ~asm_filename)
+    t.asm_filename;
   if not !Oxcaml_flags.keep_llvmir then remove_file t.llvmir_filename;
   current_compilation_unit := None
 
