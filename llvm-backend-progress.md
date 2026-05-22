@@ -225,6 +225,29 @@ If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
     `tests/required-external`. `tests/no-alias-deps` needed the fake root to
     expose `ocamlobjinfo.byte` as `tools/ocamlobjinfo`, because ocamltest runs
     that path under `ocamlrun`.
+  - Primitive/runtime stage slices passed with forced LLVM:
+    `tests/prim-bigstring`, `tests/prim-bswap`, `tests/prim-revapply`,
+    `tests/runtime-objects`, `tests/atomic-locs`, `tests/lf_skiplist`,
+    `tests/lib-sync`, `tests/lib-domain`, `tests/lib-threads`,
+    `tests/memory-model`, and `tests/parallel`.
+  - Parser/diagnostic stage slices passed with forced LLVM or bytecode-only
+    paths as appropriate: `tests/parsing`, `tests/parse-errors`,
+    `tests/generated-parse-errors`, `tests/parsetree`, `tests/printing-types`,
+    `tests/messages`, `tests/misc`, `tests/misc-kb`, `tests/misc-unsafe`,
+    `tests/match-exception-warnings`, and `tests/match-side-effects`.
+  - Type-system/extension stage slices passed with forced LLVM or bytecode-only
+    paths as appropriate: `tests/language-extensions`, `tests/layout_poly`,
+    `tests/implicit-types`, `tests/generalized-open`, `tests/let-syntax`,
+    `tests/letrec-check`, `tests/ppx-attributes`, `tests/ppx-contexts`,
+    `tests/ppx-empty-cases`, `tests/ppx-error-message`, and
+    `tests/extension-constructor`.
+  - Flambda-oriented stage slices passed with forced LLVM:
+    `tests/flambda` (`44` passed, `47` fresh `-x ir`), `tests/flambda2`
+    (`611` passed, `2` skipped, `161` fresh), `tests/slambda`, `tests/templates`
+    (`412` passed, `5` skipped, `64` fresh), and `tests/comprehensions`.
+    `tests/flambda2` needed the fake root to expose the stage-built
+    `fexprc.exe`; using a stale/wrong helper produced a spurious
+    `Fatal error during unlock: Operation not permitted` in `lift_rec_cont.fl`.
 
 Fix behind that progress:
 
