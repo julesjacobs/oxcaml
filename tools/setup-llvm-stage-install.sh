@@ -11,6 +11,12 @@ stage_install=${STAGE_INSTALL:-$repo/_llvm_stage5_install}
 runtime_lib=${RUNTIME_LIB:-$runtime_install/lib/ocaml_runtime_stdlib}
 main_lib=${MAIN_LIB:-$main_install/lib/ocaml}
 
+runtime_install=$(cd "$runtime_install" && pwd)
+main_install=$(cd "$main_install" && pwd)
+stage_install=$(cd "$(dirname "$stage_install")" && pwd)/$(basename "$stage_install")
+runtime_lib=$(cd "$runtime_lib" && pwd)
+main_lib=$(cd "$main_lib" && pwd)
+
 require_path () {
   if [ ! -e "$1" ]; then
     echo "missing required path: $1" >&2
