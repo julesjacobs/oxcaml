@@ -33,6 +33,10 @@ require_path () {
   fi
 }
 
+stage_install=$(cd "$stage_install" && pwd)
+stage_build=$(cd "$stage_build" && pwd)
+normal_build=$(cd "$normal_build" && pwd)
+
 require_path "$stage_install/bin/ocamlopt.opt"
 require_path "$stage_install/bin/ocamlc.byte"
 require_path "$stage_install/lib/ocaml/stdlib.cmxa"
