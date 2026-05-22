@@ -1599,6 +1599,110 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       emit_ins t (I.binary Fsub ~arg1:neg_arg0 ~arg2:product)
     | `Negmulsub -> emit_ins t (I.binary Fsub ~arg1:product ~arg2:arg0)
   in
+  let int_vec_type ~width_in_bits =
+    T.Vector
+      { num_of_elems = 128 / width_in_bits;
+        elem_type = T.Int { width_in_bits }
+      }
+  in
+  let cast_if_needed value typ =
+    if T.equal (V.get_type value) typ
+    then value
+    else emit_ins t (I.convert Bitcast ~arg:value ~to_:typ)
+  in
+  let int_vector_constant width_in_bits n =
+    let typ = int_vec_type ~width_in_bits in
+    let elem_type = T.Int { width_in_bits } in
+    let elem = Format.asprintf "%a %d" T.pp_t elem_type n in
+    V.imm typ
+      (Format.asprintf "<%a>"
+         (Format.pp_print_list
+            ~pp_sep:(fun ppf () -> Format.fprintf ppf ", ")
+            Format.pp_print_string)
+         (List.init (128 / width_in_bits) (fun _ -> elem)))
+  in
+  let simd_int_unary width_in_bits op =
+    let typ = int_vec_type ~width_in_bits in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let res =
+      match op with
+      | `Neg ->
+        emit_ins t (I.binary Sub ~arg1:(V.zeroinitializer typ) ~arg2:arg)
+      | `Not ->
+        let all_ones = int_vector_constant width_in_bits (-1) in
+        emit_ins t (I.binary Xor ~arg1:arg ~arg2:all_ones)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_int_binary width_in_bits op =
+    let typ = int_vec_type ~width_in_bits in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let res = emit_ins t (I.binary op ~arg1 ~arg2) in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_int_shift_imm width_in_bits op n =
+    let typ = int_vec_type ~width_in_bits in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let shift = int_vector_constant width_in_bits n in
+    let res = emit_ins t (I.binary op ~arg1:arg ~arg2:shift) in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_int_variable_shift width_in_bits right_shift_op =
+    let typ = int_vec_type ~width_in_bits in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let shift = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let zero = V.zeroinitializer typ in
+    let left = emit_ins t (I.binary Shl ~arg1:arg ~arg2:shift) in
+    let neg_shift = emit_ins t (I.binary Sub ~arg1:zero ~arg2:shift) in
+    let right =
+      emit_ins t (I.binary right_shift_op ~arg1:arg ~arg2:neg_shift)
+    in
+    let is_left = emit_ins t (I.icmp Isge ~arg1:shift ~arg2:zero) in
+    let res = emit_ins t (I.select ~cond:is_left ~ifso:left ~ifnot:right) in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_int_dup_lane width_in_bits lane =
+    let typ = int_vec_type ~width_in_bits in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let elem =
+      emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int lane))
+    in
+    let lanes = 128 / width_in_bits in
+    let res =
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane) ~to_insert:elem))
+           (V.poison typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_int_widen_low src_width_in_bits convert_op =
+    let dst_width_in_bits = 2 * src_width_in_bits in
+    let src_typ = int_vec_type ~width_in_bits:src_width_in_bits in
+    let dst_typ = int_vec_type ~width_in_bits:dst_width_in_bits in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) src_typ in
+    let dst_elem_typ = T.Int { width_in_bits = dst_width_in_bits } in
+    let lanes = 128 / dst_width_in_bits in
+    let res =
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let elem =
+               emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int lane))
+             in
+             let widened =
+               emit_ins t (I.convert convert_op ~arg:elem ~to_:dst_elem_typ)
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane)
+                  ~to_insert:widened))
+           (V.poison dst_typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   match[@warning "-fragile-match"] op with
   | Ibswap { bitwidth } -> bswap t i bitwidth
   | Illvm_intrinsic intrinsic_name -> intrinsic t i intrinsic_name
@@ -1672,6 +1776,64 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     float_round_to_i64 T.float |> store_into_reg t i.res.(0)
   | Isimd Simd.Round_f64_s64 ->
     float_round_to_i64 T.double |> store_into_reg t i.res.(0)
+  | Isimd Simd.Addq_s64 -> simd_int_binary 64 Add
+  | Isimd Simd.Addq_s32 -> simd_int_binary 32 Add
+  | Isimd Simd.Addq_s16 -> simd_int_binary 16 Add
+  | Isimd Simd.Addq_s8 -> simd_int_binary 8 Add
+  | Isimd Simd.Subq_s64 -> simd_int_binary 64 Sub
+  | Isimd Simd.Subq_s32 -> simd_int_binary 32 Sub
+  | Isimd Simd.Subq_s16 -> simd_int_binary 16 Sub
+  | Isimd Simd.Subq_s8 -> simd_int_binary 8 Sub
+  | Isimd Simd.Andq_s64 -> simd_int_binary 64 And
+  | Isimd Simd.Andq_s32 -> simd_int_binary 32 And
+  | Isimd Simd.Andq_s16 -> simd_int_binary 16 And
+  | Isimd Simd.Andq_s8 -> simd_int_binary 8 And
+  | Isimd Simd.Orrq_s64 -> simd_int_binary 64 Or
+  | Isimd Simd.Orrq_s32 -> simd_int_binary 32 Or
+  | Isimd Simd.Orrq_s16 -> simd_int_binary 16 Or
+  | Isimd Simd.Orrq_s8 -> simd_int_binary 8 Or
+  | Isimd Simd.Eorq_s64 -> simd_int_binary 64 Xor
+  | Isimd Simd.Eorq_s32 -> simd_int_binary 32 Xor
+  | Isimd Simd.Eorq_s16 -> simd_int_binary 16 Xor
+  | Isimd Simd.Eorq_s8 -> simd_int_binary 8 Xor
+  | Isimd Simd.Negq_s64 -> simd_int_unary 64 `Neg
+  | Isimd Simd.Negq_s32 -> simd_int_unary 32 `Neg
+  | Isimd Simd.Negq_s16 -> simd_int_unary 16 `Neg
+  | Isimd Simd.Negq_s8 -> simd_int_unary 8 `Neg
+  | Isimd Simd.Mvnq_s64 -> simd_int_unary 64 `Not
+  | Isimd Simd.Mvnq_s32 -> simd_int_unary 32 `Not
+  | Isimd Simd.Mvnq_s16 -> simd_int_unary 16 `Not
+  | Isimd Simd.Mvnq_s8 -> simd_int_unary 8 `Not
+  | Isimd (Simd.Shlq_n_u64 n) -> simd_int_shift_imm 64 Shl n
+  | Isimd (Simd.Shlq_n_u32 n) -> simd_int_shift_imm 32 Shl n
+  | Isimd (Simd.Shlq_n_u16 n) -> simd_int_shift_imm 16 Shl n
+  | Isimd (Simd.Shlq_n_u8 n) -> simd_int_shift_imm 8 Shl n
+  | Isimd (Simd.Shrq_n_u64 n) -> simd_int_shift_imm 64 Lshr n
+  | Isimd (Simd.Shrq_n_u32 n) -> simd_int_shift_imm 32 Lshr n
+  | Isimd (Simd.Shrq_n_u16 n) -> simd_int_shift_imm 16 Lshr n
+  | Isimd (Simd.Shrq_n_u8 n) -> simd_int_shift_imm 8 Lshr n
+  | Isimd (Simd.Shrq_n_s64 n) -> simd_int_shift_imm 64 Ashr n
+  | Isimd (Simd.Shrq_n_s32 n) -> simd_int_shift_imm 32 Ashr n
+  | Isimd (Simd.Shrq_n_s16 n) -> simd_int_shift_imm 16 Ashr n
+  | Isimd (Simd.Shrq_n_s8 n) -> simd_int_shift_imm 8 Ashr n
+  | Isimd Simd.Shlq_u64 -> simd_int_variable_shift 64 Lshr
+  | Isimd Simd.Shlq_u32 -> simd_int_variable_shift 32 Lshr
+  | Isimd Simd.Shlq_u16 -> simd_int_variable_shift 16 Lshr
+  | Isimd Simd.Shlq_u8 -> simd_int_variable_shift 8 Lshr
+  | Isimd Simd.Shlq_s64 -> simd_int_variable_shift 64 Ashr
+  | Isimd Simd.Shlq_s32 -> simd_int_variable_shift 32 Ashr
+  | Isimd Simd.Shlq_s16 -> simd_int_variable_shift 16 Ashr
+  | Isimd Simd.Shlq_s8 -> simd_int_variable_shift 8 Ashr
+  | Isimd (Simd.Dupq_lane_s64 { lane }) -> simd_int_dup_lane 64 lane
+  | Isimd (Simd.Dupq_lane_s32 { lane }) -> simd_int_dup_lane 32 lane
+  | Isimd (Simd.Dupq_lane_s16 { lane }) -> simd_int_dup_lane 16 lane
+  | Isimd (Simd.Dupq_lane_s8 { lane }) -> simd_int_dup_lane 8 lane
+  | Isimd Simd.Movl_s32 -> simd_int_widen_low 32 Sext
+  | Isimd Simd.Movl_u32 -> simd_int_widen_low 32 Zext
+  | Isimd Simd.Movl_s16 -> simd_int_widen_low 16 Sext
+  | Isimd Simd.Movl_u16 -> simd_int_widen_low 16 Zext
+  | Isimd Simd.Movl_s8 -> simd_int_widen_low 8 Sext
+  | Isimd Simd.Movl_u8 -> simd_int_widen_low 8 Zext
   | _ -> not_implemented_basic ~msg:"specific" i
 
 (* CR yusumez: Implement atomic operations properly, since the current
