@@ -56,6 +56,7 @@ testsuite/tests/llvm-codegen/
   calls.ml
   control_flow.ml
   exceptions.ml
+  multiple_phrases.ml
 ```
 
 The first useful tests should be small:
@@ -63,6 +64,7 @@ The first useful tests should be small:
 - arithmetic and control flow;
 - allocation or calls with safepoints;
 - exception-handler setup/restore shape;
+- multiple phrases before one inline LLVM expectation;
 - final target assembly, not only LLVM IR.
 
 ## Implementation Shape
@@ -83,3 +85,7 @@ The clean design point is that the expected output lives inline with the OCaml
 example, while the harness captures the LLVM backend's actual per-phrase output
 from the compiler pipeline. It should not scrape a global `.s` file after the
 compile.
+
+When a chunk contains multiple phrases before an expectation, the harness should
+collect each phrase's LLVM IR or assembly callback output and compare their
+concatenation against the inline expectation.

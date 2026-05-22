@@ -355,8 +355,14 @@ let eval_expect_file _fname ~file_contents ~execute_phrase =
   let () = Misc.Style.set_tag_handling ppf in
   let exec_phrases phrases =
     let last_asm = ref None in
-    let last_llvm_ir = ref None in
-    let last_llvm_asm = ref None in
+    let llvm_ir_outputs = ref [] in
+    let llvm_asm_outputs = ref [] in
+    let add_output outputs output = outputs := output :: !outputs in
+    let collected_outputs outputs =
+      match List.rev !outputs with
+      | [] -> None
+      | outputs -> Some (String.concat ~sep:"\n" outputs)
+    in
     let phrases =
       match min_line_number phrases with
       | None -> phrases
@@ -369,10 +375,10 @@ let eval_expect_file _fname ~file_contents ~execute_phrase =
         (fun register -> register (fun asm_out -> last_asm := Some asm_out))
         !register_assembly_callback;
       Option.iter
-        (fun register -> register (fun ir_out -> last_llvm_ir := Some ir_out))
+        (fun register -> register (add_output llvm_ir_outputs))
         !register_llvm_ir_callback;
       Option.iter
-        (fun register -> register (fun asm_out -> last_llvm_asm := Some asm_out))
+        (fun register -> register (add_output llvm_asm_outputs))
         !register_llvm_asm_callback;
       let snap = Btype.snapshot () in
       try
@@ -402,8 +408,8 @@ let eval_expect_file _fname ~file_contents ~execute_phrase =
     Buffer.clear buf;
     ( Misc.delete_eol_spaces s,
       !last_asm,
-      !last_llvm_ir,
-      !last_llvm_asm )
+      collected_outputs llvm_ir_outputs,
+      collected_outputs llvm_asm_outputs )
   in
   let corrected_expectations =
     capture_everything buf ppf ~f:(fun () ->
