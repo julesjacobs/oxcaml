@@ -100,29 +100,29 @@ type fun_info =
     reg2alloca : LL.Value.t Reg.Tbl.t;
         (* Map [Reg.t]'s from OCaml to alloca'd identifiers in LLVM IR *)
     const_ints : nativeint Reg.Tbl.t;
-        (* Best-effort constants for registers defined by [Const_int].  This is
+        (* Best-effort constants for registers defined by [Const_int]. This is
            used to avoid reloading raw header words from temporary allocas. *)
     mutable liveness : Cfg_liveness.Liveness.domain InstructionId.Tbl.t option;
         (* Per-instruction liveness for exposing live OCaml roots across
            safepoints. *)
     mutable fun_args : Reg.t array;
-        (* Original CFG function arguments.  Self-tailcalls branch back to the
+        (* Original CFG function arguments. Self-tailcalls branch back to the
            function entry in LLVM, so their new arguments must be copied into
            these slots before the branch. *)
     mutable preserved_reg_slots : Reg.Set.t;
         (* Registers whose slots must not be promoted away because a trap
            handler may read them through a hidden exception edge. *)
     mutable active_traps : Label.t option InstructionId.Tbl.t;
-        (* Top trap handler active at each instruction.  [Cfg.basic_block.exn]
-           is only populated for blocks whose terminator can raise, but LLVM
-           also needs this for basic-instruction safepoints such as allocation
-           and polling. *)
+        (* Top trap handler active at each instruction. [Cfg.basic_block.exn] is
+           only populated for blocks whose terminator can raise, but LLVM also
+           needs this for basic-instruction safepoints such as allocation and
+           polling. *)
     mutable active_trap_depths : int InstructionId.Tbl.t;
-        (* Number of active trap blocks at each instruction.  On AArch64, trap
+        (* Number of active trap blocks at each instruction. On AArch64, trap
            blocks are preallocated in the static LLVM frame, so the frametable
            statepoint metadata must not add their dynamic stack offset again. *)
     trap_block_allocas : LL.Value.t Label.Tbl.t;
-        (* Trap blocks preallocated in the function entry block.  On arm64 this
+        (* Trap blocks preallocated in the function entry block. On arm64 this
            avoids dynamic allocas, which otherwise force LLVM to use x29 as a
            frame pointer even when normal OCaml callees may clobber x29. *)
     trap_blocks : trap_block_info Label.Tbl.t
@@ -440,7 +440,8 @@ let store_into_reg ?(force_volatile = false) t reg to_store =
   let ptr = get_alloca_for_reg t reg in
   let to_store = cast t to_store (T.of_reg reg) in
   let store =
-    if force_volatile || preserve_reg_slot t reg then I.store_volatile
+    if force_volatile || preserve_reg_slot t reg
+    then I.store_volatile
     else I.store
   in
   emit_ins_no_res t (store ~ptr ~to_store)
@@ -462,14 +463,15 @@ let load_live_gc_roots_across t i =
   |> Reg.Set.elements
   |> List.map (fun reg -> reg, V.poison T.val_ptr)
 
-let refresh_live_gc_roots _t _roots =
-  ()
+let refresh_live_gc_roots _t _roots = ()
 
 let live_gc_root_alloca_bundles t roots =
   let roots =
     List.filter_map
       (fun (reg, _root) ->
-        if preserve_reg_slot t reg then Some (get_alloca_for_reg t reg) else None)
+        if preserve_reg_slot t reg
+        then Some (get_alloca_for_reg t reg)
+        else None)
       roots
   in
   if List.is_empty roots then [] else ["gc-live", roots]
@@ -488,8 +490,7 @@ let string_deopt_args s =
       let chunk_len = Int.min chunk_size (len - pos) in
       let chunk = ref 0 in
       for i = 0 to chunk_len - 1 do
-        chunk
-          := !chunk lor (Char.code s.[pos + i] lsl (8 * i))
+        chunk := !chunk lor (Char.code s.[pos + i] lsl (8 * i))
       done;
       loop (pos + chunk_len) (V.of_int !chunk :: acc)
   in
@@ -506,28 +507,23 @@ let debug_deopt_bundle ~primitive_call ~raise_call dbg =
         Scoped_location.string_of_scopes ~include_zero_alloc:false
           d.dinfo_scopes
       in
-      let char_end =
-        d.dinfo_char_end + d.dinfo_start_bol - d.dinfo_end_bol
-      in
+      let char_end = d.dinfo_char_end + d.dinfo_start_bol - d.dinfo_end_bol in
       let char_end_offset = d.dinfo_end_bol - d.dinfo_start_bol in
       [ V.of_int d.dinfo_line;
         V.of_int (d.dinfo_end_line - d.dinfo_line);
         V.of_int d.dinfo_char_start;
         V.of_int char_end;
         V.of_int char_end_offset;
-        V.of_int d.dinfo_char_end
-      ]
+        V.of_int d.dinfo_char_end ]
       @ string_deopt_args d.dinfo_file
       @ string_deopt_args defname
     in
-    [ "deopt",
-      [ V.of_int oxcaml_debug_deopt_marker;
-        V.of_int oxcaml_debug_deopt_version;
-        V.of_int (if raise_call then 2 else if primitive_call then 1 else 0);
-        V.of_int (List.length items)
-      ]
-      @ (items |> List.map debug_item_deopt_args |> List.concat)
-    ]
+    [ ( "deopt",
+        [ V.of_int oxcaml_debug_deopt_marker;
+          V.of_int oxcaml_debug_deopt_version;
+          V.of_int (if raise_call then 2 else if primitive_call then 1 else 0);
+          V.of_int (List.length items) ]
+        @ (items |> List.map debug_item_deopt_args |> List.concat) ) ]
   | _ -> []
 
 let call_operand_bundles t ~primitive_call ~raise_call dbg live_roots =
@@ -688,8 +684,8 @@ let statepoint_stack_offset t (i : 'a Cfg.instruction) =
     in
     let static_trap_block_bytes = 32 * active_trap_depth in
     let stack_offset = i.stack_offset - static_trap_block_bytes in
-    fail_if_not ~msg:"negative adjusted stack offset"
-      "statepoint_stack_offset" (stack_offset >= 0);
+    fail_if_not ~msg:"negative adjusted stack offset" "statepoint_stack_offset"
+      (stack_offset >= 0);
     stack_offset
   | Target_system.X86_64 | Target_system.IA32 | Target_system.ARM
   | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
@@ -723,9 +719,8 @@ let debug_check_minor_heap_head t (i : 'a Cfg.instruction) =
   in
   let func_hash = Hashtbl.hash fun_name in
   let instr_id = InstructionId.to_int_unsafe i.id in
-  emit_comment t
-    "minor heap head check func_hash=%d instr_id=%d function=%s" func_hash
-    instr_id fun_name;
+  emit_comment t "minor heap head check func_hash=%d instr_id=%d function=%s"
+    func_hash instr_id fun_name;
   let current_alloc_ptr = emit_ins t (I.load ~ptr:allocation_ptr ~typ:T.i64) in
   call_simple
     ~attrs:(gc_attr ~can_call_gc:false t i)
@@ -738,8 +733,9 @@ let debug_check_minor_heap_head_for_current_repro t i =
   let fun_name =
     E.get_fun_ident (get_fun_info t).emitter |> LL.Ident.to_string_hum
   in
-  if String.starts_with ~prefix:"camlEnv__find_name_and_locks" fun_name
-     || String.starts_with ~prefix:"camlIdent__find_name" fun_name
+  if
+    String.starts_with ~prefix:"camlEnv__find_name_and_locks" fun_name
+    || String.starts_with ~prefix:"camlIdent__find_name" fun_name
   then debug_check_minor_heap_head t i
 
 (* Helpers for LLVM intrinsics *)
@@ -891,8 +887,8 @@ let test t (op : Operation.test) (i : _ Cfg.instruction) =
     let is_odd = odd_test t i in
     emit_ins t (I.binary Xor ~arg1:is_odd ~arg2:(V.of_int ~typ:T.i1 1))
 
-let call ?(tail = false) ?unwind_label t
-    (i : Cfg.terminator Cfg.instruction) (op : Cfg.func_call_operation) =
+let call ?(tail = false) ?unwind_label t (i : Cfg.terminator Cfg.instruction)
+    (op : Cfg.func_call_operation) =
   let args_begin, args_end =
     (* [Indirect] has the function in i.arg.(0) *)
     match op with
@@ -957,11 +953,11 @@ let exn_entry_for_block t (block : Cfg.basic_block) =
     match Label.Tbl.find_opt (get_fun_info t).trap_blocks lbl_handler with
     | Some { exn_entry; _ } -> Some exn_entry
     | None -> None)
-  | ( Target_system.X86_64 | Target_system.IA32 | Target_system.ARM
-    | Target_system.POWER | Target_system.Z | Target_system.Riscv ),
-    _
+  | ( ( Target_system.X86_64 | Target_system.IA32 | Target_system.ARM
+      | Target_system.POWER | Target_system.Z | Target_system.Riscv ),
+      _ )
   | Target_system.AArch64, None ->
-      None
+    None
 
 let exn_entry_for_instruction t (i : 'a Cfg.instruction) =
   match Target_system.architecture () with
@@ -1062,11 +1058,9 @@ let extcall ?unwind_label t (i : Cfg.terminator Cfg.instruction) ~func_symbol
     add_referenced_symbol t func_symbol;
     call_simple
       ~attrs:(gc_attr ~can_call_gc:true t i)
-      ~dbg:i.dbg
-      ~primitive_call:true
+      ~dbg:i.dbg ~primitive_call:true
       ~live_roots:(load_live_gc_roots_across t i)
-      ?unwind_label
-      ~cc t caml_c_call_symbol args res_types
+      ?unwind_label ~cc t caml_c_call_symbol args res_types
   in
   let call_func arg_regs arg_types res_types =
     if stack_ofs > 0
@@ -1168,11 +1162,9 @@ let extcall ?unwind_label t (i : Cfg.terminator Cfg.instruction) ~func_symbol
       add_referenced_symbol t func_symbol;
       call_simple
         ~attrs:(gc_attr ~can_call_gc:true t i)
-        ~dbg:i.dbg
-        ~primitive_call:true
+        ~dbg:i.dbg ~primitive_call:true
         ~live_roots:(load_live_gc_roots_across t i)
-        ?unwind_label
-        ~cc:Oxcaml t wrapper_symbol args res_types
+        ?unwind_label ~cc:Oxcaml t wrapper_symbol args res_types
   in
   let arg_regs = reg_list_for_call i.arg in
   let arg_types = extcall_arg_types ty_args arg_regs in
@@ -1191,8 +1183,7 @@ let raise_ t ~(exn_handler : Label.t option)
       debug_check_minor_heap_head_for_current_repro t i;
       call_simple
         ~attrs:(gc_attr ~can_call_gc:true t i)
-        ~dbg:i.dbg
-        ~raise_call:true
+        ~dbg:i.dbg ~raise_call:true
         ~live_roots:(load_live_gc_roots_across t i)
         ~cc:Oxcaml t raise_fn_name [exn_bucket] []
       |> ignore
@@ -1207,7 +1198,7 @@ let raise_ t ~(exn_handler : Label.t option)
     | None -> emit_ins_no_res t I.unreachable
   in
   match raise_kind with
-  | Raise_notrace ->
+  | Raise_notrace -> (
     (* Get exn bucket *)
     let exn_bucket = load_reg_to_temp t i.arg.(0) in
     (match Target_system.architecture () with
@@ -1241,7 +1232,7 @@ let raise_ t ~(exn_handler : Label.t option)
     | Target_system.IA32 | Target_system.ARM | Target_system.POWER
     | Target_system.Z | Target_system.Riscv ->
       not_implemented_terminator ~msg:"raise notrace" i);
-    (match exn_handler with
+    match exn_handler with
     | Some lbl_handler -> (
       match Label.Tbl.find_opt (get_fun_info t).trap_blocks lbl_handler with
       | Some { exn_entry; _ } -> emit_ins_no_res t (I.br exn_entry)
@@ -1583,7 +1574,9 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | Simd.Rounding_mode.Nearest -> "roundeven"
   in
   let float_round typ mode =
-    let name = round_intrinsic_name mode ^ "." ^ llvm_intrinsic_type_suffix typ in
+    let name =
+      round_intrinsic_name mode ^ "." ^ llvm_intrinsic_type_suffix typ
+    in
     call_llvm_intrinsic t name [float_arg typ 0] typ
   in
   let float_minmax intrinsic typ =
@@ -1622,9 +1615,7 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
   in
   let float_vec_type ~width =
     let elem_type, num_of_elems =
-      match width with
-      | Cmm.Float32 -> T.float, 4
-      | Cmm.Float64 -> T.double, 2
+      match width with Cmm.Float32 -> T.float, 4 | Cmm.Float64 -> T.double, 2
     in
     T.Vector { num_of_elems; elem_type }
   in
@@ -1646,7 +1637,7 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
   in
   let int_vector_constant_like typ n =
     match typ with
-    | T.Vector { num_of_elems; elem_type = (T.Int _ as elem_type) } ->
+    | T.Vector { num_of_elems; elem_type = T.Int _ as elem_type } ->
       let elem = Format.asprintf "%a %d" T.pp_t elem_type n in
       V.imm typ
         (Format.asprintf "<%a>"
@@ -1677,6 +1668,13 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
     let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
     let res = emit_ins t (I.binary op ~arg1 ~arg2) in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_binary_intrinsic typ intrinsic =
+    let name = intrinsic ^ "." ^ llvm_intrinsic_type_suffix typ in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let res = call_llvm_intrinsic t name [arg1; arg2] typ in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
   let simd_int_minmax width_in_bits cond =
@@ -1728,7 +1726,9 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
   let simd_int_get_lane width_in_bits lane =
     let typ = int_vec_type ~width_in_bits in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
-    let elem = emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int lane)) in
+    let elem =
+      emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int lane))
+    in
     let res =
       if width_in_bits = 64
       then elem
@@ -1745,11 +1745,13 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       then load_reg_to_temp ~typ:T.i64 t i.arg.(1)
       else
         emit_ins t
-          (I.convert Trunc ~arg:(load_reg_to_temp ~typ:T.i64 t i.arg.(1))
+          (I.convert Trunc
+             ~arg:(load_reg_to_temp ~typ:T.i64 t i.arg.(1))
              ~to_:elem_typ)
     in
     let res =
-      emit_ins t (I.insertelement ~vector:arg ~index:(V.of_int lane) ~to_insert:elem)
+      emit_ins t
+        (I.insertelement ~vector:arg ~index:(V.of_int lane) ~to_insert:elem)
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
@@ -1782,7 +1784,9 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let src_typ = int_vec_type ~width_in_bits:src_width_in_bits in
     let dst_typ = int_vec_type ~width_in_bits:dst_width_in_bits in
     let src_arg_index = if high then 1 else 0 in
-    let src = cast_if_needed (load_reg_to_temp t i.arg.(src_arg_index)) src_typ in
+    let src =
+      cast_if_needed (load_reg_to_temp t i.arg.(src_arg_index)) src_typ
+    in
     let dst_elem_typ = T.Int { width_in_bits = dst_width_in_bits } in
     let lanes = 128 / src_width_in_bits in
     let base =
@@ -1814,7 +1818,9 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let src_typ = int_vec_type ~width_in_bits:src_width_in_bits in
     let dst_typ = int_vec_type ~width_in_bits:dst_width_in_bits in
     let src_arg_index = if high then 1 else 0 in
-    let src = cast_if_needed (load_reg_to_temp t i.arg.(src_arg_index)) src_typ in
+    let src =
+      cast_if_needed (load_reg_to_temp t i.arg.(src_arg_index)) src_typ
+    in
     let min_value, max_value, cmp_lt, cmp_gt =
       if unsigned
       then 0, (1 lsl dst_width_in_bits) - 1, I.Iult, I.Iugt
@@ -1832,8 +1838,7 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       emit_ins t (I.select ~cond:below_min ~ifso:min_vector ~ifnot:src)
     in
     let clamped =
-      emit_ins t
-        (I.select ~cond:above_max ~ifso:max_vector ~ifnot:clamped_min)
+      emit_ins t (I.select ~cond:above_max ~ifso:max_vector ~ifnot:clamped_min)
     in
     let dst_elem_typ = T.Int { width_in_bits = dst_width_in_bits } in
     let lanes = 128 / src_width_in_bits in
@@ -1918,7 +1923,8 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let cmp = emit_ins t (I.fcmp cond ~arg1 ~arg2) in
     let res =
       emit_ins t
-        (I.convert Sext ~arg:cmp ~to_:(int_vec_type ~width_in_bits:mask_width_in_bits))
+        (I.convert Sext ~arg:cmp
+           ~to_:(int_vec_type ~width_in_bits:mask_width_in_bits))
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
@@ -1936,6 +1942,88 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
     let res = emit_ins t (I.binary op ~arg1 ~arg2) in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_float_unary_intrinsic width intrinsic =
+    let typ = float_vec_type ~width in
+    let name = intrinsic ^ "." ^ llvm_intrinsic_type_suffix typ in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let res = call_llvm_intrinsic t name [arg] typ in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_cvt_f64_f32 () =
+    let src_typ = float_vec_type ~width:Cmm.Float32 in
+    let dst_typ = float_vec_type ~width:Cmm.Float64 in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) src_typ in
+    let low =
+      List.init 2 Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let elem =
+               emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int lane))
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane) ~to_insert:elem))
+           (V.poison (T.Vector { num_of_elems = 2; elem_type = T.float }))
+    in
+    let res = emit_ins t (I.convert Fpext ~arg:low ~to_:dst_typ) in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_cvt_f32_f64 () =
+    let src_typ = float_vec_type ~width:Cmm.Float64 in
+    let dst_typ = float_vec_type ~width:Cmm.Float32 in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) src_typ in
+    let low =
+      emit_ins t
+        (I.convert Fptrunc ~arg
+           ~to_:(T.Vector { num_of_elems = 2; elem_type = T.float }))
+    in
+    let res =
+      List.init 2 Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let elem =
+               emit_ins t (I.extractelement ~vector:low ~index:(V.of_int lane))
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane) ~to_insert:elem))
+           (V.poison dst_typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_zip typ ~high =
+    match[@warning "-fragile-match"] typ with
+    | T.Vector { num_of_elems; _ } ->
+      let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+      let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+      let start = if high then num_of_elems / 2 else 0 in
+      let lanes = num_of_elems / 2 in
+      let res =
+        List.init lanes Fun.id
+        |> List.fold_left
+             (fun vector lane ->
+               let src_lane = start + lane in
+               let elem1 =
+                 emit_ins t
+                   (I.extractelement ~vector:arg1 ~index:(V.of_int src_lane))
+               in
+               let elem2 =
+                 emit_ins t
+                   (I.extractelement ~vector:arg2 ~index:(V.of_int src_lane))
+               in
+               let vector =
+                 emit_ins t
+                   (I.insertelement ~vector
+                      ~index:(V.of_int (2 * lane))
+                      ~to_insert:elem1)
+               in
+               emit_ins t
+                 (I.insertelement ~vector
+                    ~index:(V.of_int ((2 * lane) + 1))
+                    ~to_insert:elem2))
+             (V.poison typ)
+      in
+      cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+    | _ -> Misc.fatal_error "expected vector type"
   in
   let simd_int_cmp width_in_bits cond ~zero =
     let typ = int_vec_type ~width_in_bits in
@@ -1959,7 +2047,9 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
   in
   let simd_float_round width mode =
     let typ = float_vec_type ~width in
-    let name = round_intrinsic_name mode ^ "." ^ llvm_intrinsic_type_suffix typ in
+    let name =
+      round_intrinsic_name mode ^ "." ^ llvm_intrinsic_type_suffix typ
+    in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
     let res = call_llvm_intrinsic t name [arg] typ in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
@@ -2021,7 +2111,8 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let typ = T.of_reg i.res.(0) in
     call_llvm_intrinsic t
       ("sqrt." ^ llvm_intrinsic_type_suffix typ)
-      [float_arg typ 0] typ
+      [float_arg typ 0]
+      typ
     |> store_into_reg t i.res.(0)
   | Isimd (Simd.Round_f32 mode) ->
     float_round T.float mode |> store_into_reg t i.res.(0)
@@ -2128,24 +2219,27 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
   | Isimd Simd.Movl_s8 -> simd_int_widen_low 8 Sext
   | Isimd Simd.Movl_u8 -> simd_int_widen_low 8 Zext
   | Isimd Simd.Cvtq_f64_s64 ->
-    simd_convert (int_vec_type ~width_in_bits:64)
-      (float_vec_type ~width:Cmm.Float64) Sitofp
+    simd_convert
+      (int_vec_type ~width_in_bits:64)
+      (float_vec_type ~width:Cmm.Float64)
+      Sitofp
   | Isimd Simd.Cvtq_f32_s32 ->
-    simd_convert (int_vec_type ~width_in_bits:32)
-      (float_vec_type ~width:Cmm.Float32) Sitofp
+    simd_convert
+      (int_vec_type ~width_in_bits:32)
+      (float_vec_type ~width:Cmm.Float32)
+      Sitofp
   | Isimd Simd.Cvtq_s64_f64 | Isimd Simd.Cvtnq_s64_f64 ->
-    simd_convert (float_vec_type ~width:Cmm.Float64)
-      (int_vec_type ~width_in_bits:64) Fptosi
+    simd_convert
+      (float_vec_type ~width:Cmm.Float64)
+      (int_vec_type ~width_in_bits:64)
+      Fptosi
   | Isimd Simd.Cvtq_s32_f32 | Isimd Simd.Cvtnq_s32_f32 ->
-    simd_convert (float_vec_type ~width:Cmm.Float32)
-      (int_vec_type ~width_in_bits:32) Fptosi
-  | Isimd Simd.Cvt_f64_f32 ->
-    simd_convert (T.Vector { num_of_elems = 2; elem_type = T.float })
-      (float_vec_type ~width:Cmm.Float64) Fpext
-  | Isimd Simd.Cvt_f32_f64 ->
-    simd_convert (float_vec_type ~width:Cmm.Float64)
-      (T.Vector { num_of_elems = 2; elem_type = T.float })
-      Fptrunc
+    simd_convert
+      (float_vec_type ~width:Cmm.Float32)
+      (int_vec_type ~width_in_bits:32)
+      Fptosi
+  | Isimd Simd.Cvt_f64_f32 -> simd_cvt_f64_f32 ()
+  | Isimd Simd.Cvt_f32_f64 -> simd_cvt_f32_f64 ()
   | Isimd Simd.Movn_s64 -> simd_int_narrow 64 ~high:false
   | Isimd Simd.Movn_s32 -> simd_int_narrow 32 ~high:false
   | Isimd Simd.Movn_s16 -> simd_int_narrow 16 ~high:false
@@ -2172,14 +2266,33 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     simd_int_saturating_narrow 32 ~unsigned:true ~high:true
   | Isimd Simd.Qmovn_high_u16 ->
     simd_int_saturating_narrow 16 ~unsigned:true ~high:true
-  | Isimd Simd.Mullq_s16 ->
-    simd_int_widening_mul 16 Sext ~high:false
-  | Isimd Simd.Mullq_high_s16 ->
-    simd_int_widening_mul 16 Sext ~high:true
-  | Isimd Simd.Mullq_u16 ->
-    simd_int_widening_mul 16 Zext ~high:false
-  | Isimd Simd.Mullq_high_u16 ->
-    simd_int_widening_mul 16 Zext ~high:true
+  | Isimd Simd.Mullq_s16 -> simd_int_widening_mul 16 Sext ~high:false
+  | Isimd Simd.Mullq_high_s16 -> simd_int_widening_mul 16 Sext ~high:true
+  | Isimd Simd.Mullq_u16 -> simd_int_widening_mul 16 Zext ~high:false
+  | Isimd Simd.Mullq_high_u16 -> simd_int_widening_mul 16 Zext ~high:true
+  | Isimd Simd.Paddq_s8 ->
+    simd_binary_intrinsic (int_vec_type ~width_in_bits:8) "aarch64.neon.addp"
+  | Isimd Simd.Paddq_s16 ->
+    simd_binary_intrinsic (int_vec_type ~width_in_bits:16) "aarch64.neon.addp"
+  | Isimd Simd.Paddq_s32 ->
+    simd_binary_intrinsic (int_vec_type ~width_in_bits:32) "aarch64.neon.addp"
+  | Isimd Simd.Paddq_s64 ->
+    simd_binary_intrinsic (int_vec_type ~width_in_bits:64) "aarch64.neon.addp"
+  | Isimd Simd.Zip1_f32 ->
+    simd_zip (T.Vector { num_of_elems = 2; elem_type = T.float }) ~high:false
+  | Isimd Simd.Zip1q_s8 -> simd_zip (int_vec_type ~width_in_bits:8) ~high:false
+  | Isimd Simd.Zip2q_s8 -> simd_zip (int_vec_type ~width_in_bits:8) ~high:true
+  | Isimd Simd.Zip1q_s16 ->
+    simd_zip (int_vec_type ~width_in_bits:16) ~high:false
+  | Isimd Simd.Zip2q_s16 -> simd_zip (int_vec_type ~width_in_bits:16) ~high:true
+  | Isimd Simd.Zip1q_f32 ->
+    simd_zip (float_vec_type ~width:Cmm.Float32) ~high:false
+  | Isimd Simd.Zip2q_f32 ->
+    simd_zip (float_vec_type ~width:Cmm.Float32) ~high:true
+  | Isimd Simd.Zip1q_f64 ->
+    simd_zip (float_vec_type ~width:Cmm.Float64) ~high:false
+  | Isimd Simd.Zip2q_f64 ->
+    simd_zip (float_vec_type ~width:Cmm.Float64) ~high:true
   | Isimd Simd.Addq_f32 -> simd_float_binary Cmm.Float32 Fadd
   | Isimd Simd.Subq_f32 -> simd_float_binary Cmm.Float32 Fsub
   | Isimd Simd.Mulq_f32 -> simd_float_binary Cmm.Float32 Fmul
@@ -2188,6 +2301,14 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
   | Isimd Simd.Subq_f64 -> simd_float_binary Cmm.Float64 Fsub
   | Isimd Simd.Mulq_f64 -> simd_float_binary Cmm.Float64 Fmul
   | Isimd Simd.Divq_f64 -> simd_float_binary Cmm.Float64 Fdiv
+  | Isimd Simd.Paddq_f32 ->
+    simd_binary_intrinsic
+      (float_vec_type ~width:Cmm.Float32)
+      "aarch64.neon.faddp"
+  | Isimd Simd.Paddq_f64 ->
+    simd_binary_intrinsic
+      (float_vec_type ~width:Cmm.Float64)
+      "aarch64.neon.faddp"
   | Isimd (Simd.Cmp_f32 cond) -> simd_float_cmp Cmm.Float32 cond
   | Isimd (Simd.Cmp_f64 cond) -> simd_float_cmp Cmm.Float64 cond
   | Isimd (Simd.Cmpz_s64 cond) -> simd_int_cmp 64 cond ~zero:true
@@ -2202,6 +2323,14 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
   | Isimd Simd.Maxq_f32 -> simd_float_minmax Cmm.Float32 "maximum"
   | Isimd Simd.Minq_f64 -> simd_float_minmax Cmm.Float64 "minimum"
   | Isimd Simd.Maxq_f64 -> simd_float_minmax Cmm.Float64 "maximum"
+  | Isimd Simd.Sqrtq_f32 -> simd_float_unary_intrinsic Cmm.Float32 "sqrt"
+  | Isimd Simd.Sqrtq_f64 -> simd_float_unary_intrinsic Cmm.Float64 "sqrt"
+  | Isimd Simd.Recpeq_f32 ->
+    simd_float_unary_intrinsic Cmm.Float32 "aarch64.neon.frecpe"
+  | Isimd Simd.Rsqrteq_f32 ->
+    simd_float_unary_intrinsic Cmm.Float32 "aarch64.neon.frsqrte"
+  | Isimd Simd.Rsqrteq_f64 ->
+    simd_float_unary_intrinsic Cmm.Float64 "aarch64.neon.frsqrte"
   | Isimd (Simd.Roundq_f32 mode) -> simd_float_round Cmm.Float32 mode
   | Isimd (Simd.Roundq_f64 mode) -> simd_float_round Cmm.Float64 mode
   | _ -> not_implemented_basic ~msg:"specific" i
@@ -2422,8 +2551,7 @@ let heap_alloc ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction)
   call_simple
     ~attrs:(gc_attr ~alloc_info ~can_call_gc:true t i @ [LL.Fn_attr.Cold])
     ~live_roots:(load_live_gc_roots_across t i)
-    ?unwind_label
-    ~cc:Oxcaml_alloc t "caml_call_gc" [] []
+    ?unwind_label ~cc:Oxcaml_alloc t "caml_call_gc" [] []
   |> ignore;
   emit_ins_no_res t (I.br after_gc);
   emit_unwind_landingpad_after t unwind_label exn_entry;
@@ -2462,8 +2590,7 @@ let poll ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction) =
          ~can_call_gc:true t i
       @ [LL.Fn_attr.Cold])
     ~live_roots:(load_live_gc_roots_across t i)
-    ?unwind_label
-    ~cc:Oxcaml_alloc t "caml_call_gc" [] []
+    ?unwind_label ~cc:Oxcaml_alloc t "caml_call_gc" [] []
   |> ignore;
   emit_ins_no_res t (I.br after_poll);
   emit_unwind_landingpad_after t unwind_label exn_entry;
@@ -2472,11 +2599,9 @@ let poll ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction) =
 let stack_check _t (_i : Cfg.basic Cfg.instruction) _max_frame_size_bytes =
   match Target_system.architecture () with
   | Target_system.AArch64 -> ()
-  (*
-     The AArch64 LLVM backend emits OxCaml stack checks in the machine prologue.
+  (* The AArch64 LLVM backend emits OxCaml stack checks in the machine prologue.
      A normal LLVM IR instruction is too late: LLVM has already adjusted [sp]
-     for the frame by the time the instruction runs.
-  *)
+     for the frame by the time the instruction runs. *)
   | Target_system.IA32 | Target_system.X86_64 | Target_system.ARM
   | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
     fail_msg ~name:"stack_check" "unsupported architecture for LLVM backend"
@@ -2503,8 +2628,7 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
       | _ ->
         emit_ins t
           (I.inline_asm ~asm:"" ~constraints:"=r,0" ~args:[temp]
-             ~res_type:(Some typ)
-             ~sideeffect:false)
+             ~res_type:(Some typ) ~sideeffect:false)
     in
     store_into_reg t i.res.(0) opaque_temp
   | Const_int n ->
@@ -2553,6 +2677,36 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
       let converted = emit_ins t (I.convert op ~arg ~to_) in
       store_into_reg t i.res.(0) converted
     in
+    let vec128_elem_type (vec128_type : Cmm.vec128_type) =
+      match vec128_type with
+      | Cmm.Int8x16 -> T.Int { width_in_bits = 8 }
+      | Cmm.Int16x8 -> T.Int { width_in_bits = 16 }
+      | Cmm.Int32x4 -> T.i32
+      | Cmm.Int64x2 -> T.i64
+      | Cmm.Float16x8 -> fail_msg ~name:"static cast" "float16 unsupported"
+      | Cmm.Float32x4 -> T.float
+      | Cmm.Float64x2 -> T.double
+    in
+    let llvm_vec128_type vec128_type =
+      let elem_type = vec128_elem_type vec128_type in
+      let width_in_bits =
+        match[@warning "-fragile-match"] elem_type with
+        | T.Int { width_in_bits } -> width_in_bits
+        | T.Float -> 32
+        | T.Double -> 64
+        | T.Ptr _ | T.Struct _ | T.Array _ | T.Vector _ | T.Label | T.Token
+        | T.Metadata ->
+          Misc.fatal_error "unexpected vector element type"
+      in
+      T.Vector { num_of_elems = 128 / width_in_bits; elem_type }
+    in
+    let scalar_type_for_vec128 vec128_type =
+      match vec128_type with
+      | Cmm.Int8x16 | Cmm.Int16x8 | Cmm.Int32x4 | Cmm.Int64x2 -> T.i64
+      | Cmm.Float16x8 -> fail_msg ~name:"static cast" "float16 unsupported"
+      | Cmm.Float32x4 -> T.float
+      | Cmm.Float64x2 -> T.double
+    in
     match cast_op with
     | Float_of_int width ->
       do_conv Sitofp ~from:T.i64 ~to_:(T.of_float_width width)
@@ -2560,8 +2714,46 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
       do_conv Fptosi ~from:(T.of_float_width width) ~to_:T.i64
     | Float_of_float32 -> do_conv Fpext ~from:T.float ~to_:T.double
     | Float32_of_float -> do_conv Fptrunc ~from:T.double ~to_:T.float
-    | V128_of_scalar _ | Scalar_of_v128 _ | V256_of_scalar _ | Scalar_of_v256 _
-    | V512_of_scalar _ | Scalar_of_v512 _ ->
+    | V128_of_scalar vec128_type ->
+      let elem_type = vec128_elem_type vec128_type in
+      let vector_type = llvm_vec128_type vec128_type in
+      let scalar =
+        load_reg_to_temp ~typ:(scalar_type_for_vec128 vec128_type) t i.arg.(0)
+      in
+      let elem =
+        match[@warning "-fragile-match"] elem_type with
+        | T.Int { width_in_bits } when width_in_bits < 64 ->
+          emit_ins t (I.convert Trunc ~arg:scalar ~to_:elem_type)
+        | _ -> scalar
+      in
+      let vector =
+        emit_ins t
+          (I.insertelement ~vector:(V.poison vector_type) ~index:(V.of_int 0)
+             ~to_insert:elem)
+      in
+      let vector =
+        if T.equal vector_type T.vec128
+        then vector
+        else emit_ins t (I.convert Bitcast ~arg:vector ~to_:T.vec128)
+      in
+      store_into_reg t i.res.(0) vector
+    | Scalar_of_v128 vec128_type ->
+      let elem_type = vec128_elem_type vec128_type in
+      let vector_type = llvm_vec128_type vec128_type in
+      let vector =
+        load_reg_to_temp ~typ:T.vec128 t i.arg.(0) |> fun arg ->
+        emit_ins t (I.convert Bitcast ~arg ~to_:vector_type)
+      in
+      let elem = emit_ins t (I.extractelement ~vector ~index:(V.of_int 0)) in
+      let scalar =
+        match[@warning "-fragile-match"] elem_type with
+        | T.Int { width_in_bits } when width_in_bits < 64 ->
+          emit_ins t (I.convert Zext ~arg:elem ~to_:T.i64)
+        | _ -> elem
+      in
+      store_into_reg t i.res.(0) scalar
+    | V256_of_scalar _ | Scalar_of_v256 _ | V512_of_scalar _ | Scalar_of_v512 _
+      ->
       not_implemented_basic ~msg:"static cast" i)
   | Reinterpret_cast cast_op -> (
     let bitcast arg to_ = emit_ins t (I.convert Bitcast ~arg ~to_) in
@@ -2650,14 +2842,14 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
         let prev_exn_sp = emit_ins t (I.load ~ptr:trap_block_ptr ~typ:T.i64) in
         emit_ins_no_res t (I.store ~ptr:exn_sp_ptr ~to_store:prev_exn_sp);
         write_trap_pointer_register t prev_exn_sp
-      | Target_system.X86_64 ->
+      | Target_system.X86_64 -> (
         (* Restore previous exn handler sp (top word on trap block) *)
         let exn_sp_ptr = load_domainstate_addr t Domain_exn_handler in
         let prev_exn_sp = emit_ins t (I.load ~ptr:trap_block ~typ:T.i64) in
         emit_ins_no_res t (I.store ~ptr:exn_sp_ptr ~to_store:prev_exn_sp);
         write_trap_pointer_register t prev_exn_sp;
         (* Pop! *)
-        (match stacksave_ptr with
+        match stacksave_ptr with
         | Some stacksave_ptr ->
           call_llvm_intrinsic_no_res t "stackrestore" [stacksave_ptr]
         | None -> fail_msg ~name:"poptrap" "missing stack save")
@@ -2687,9 +2879,8 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
        words are placed below the normal trap block so that the top two words
        are handled as expected by the runtime and functions compiled without the
        LLVM backend. Pushtrap sets this up, while they get torn down at trap
-       handler entry. AArch64 instead stores the stack pointer to restore in
-       the third slot, avoiding dynamic allocas that force x29 as a frame
-       pointer.
+       handler entry. AArch64 instead stores the stack pointer to restore in the
+       third slot, avoiding dynamic allocas that force x29 as a frame pointer.
 
        To recover RBP in the case of an exception, we can't put that bit of code
        in the trap handler entry since things happen beforehand. So, we make
@@ -2839,7 +3030,9 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
       match Target_system.architecture () with
       | Target_system.AArch64 ->
         let trap_block =
-          match Label.Tbl.find_opt (get_fun_info t).trap_block_allocas lbl_handler with
+          match
+            Label.Tbl.find_opt (get_fun_info t).trap_block_allocas lbl_handler
+          with
           | Some trap_block -> trap_block
           | None -> fail_msg ~name:"pushtrap" "missing preallocated trap block"
         in
@@ -2858,9 +3051,9 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
     let rbp_slot = do_offset t trap_block T.ptr 16 in
     let handler_slot = do_offset t trap_block T.ptr 8 in
     let prev_sp_slot = do_offset t trap_block T.ptr 0 in
-    (* Push my trap block to the exn handler list.  On arm64 the current
-       handler chain is authoritative in x26; Caml_state(exn_handler) is only
-       refreshed on runtime transitions. *)
+    (* Push my trap block to the exn handler list. On arm64 the current handler
+       chain is authoritative in x26; Caml_state(exn_handler) is only refreshed
+       on runtime transitions. *)
     let exn_sp_ptr = load_domainstate_addr t Domain_exn_handler in
     let prev_exn_sp =
       match Target_system.architecture () with
@@ -2981,18 +3174,19 @@ let compute_active_traps (cfg : Cfg.t) =
                   lbl_handler Label.print top_trap
               | [] ->
                 fail_msg ~name:"compute_active_traps"
-                  "poptrap label %a with no active trap" Label.print lbl_handler)
+                  "poptrap label %a with no active trap" Label.print lbl_handler
+              )
             | Cfg.Op
                 ( Stackoffset _ | Move | Spill | Reload | Const_int _
                 | Const_float _ | Const_float32 _ | Const_symbol _
                 | Const_vec128 _ | Const_vec256 _ | Const_vec512 _ | Load _
-                | Store _ | Intop _ | Int128op _ | Intop_imm _
-                | Intop_atomic _ | Floatop _ | Csel _ | Static_cast _
-                | Reinterpret_cast _ | Probe_is_enabled _ | Opaque
-                | Begin_region | End_region | Specific _ | Name_for_debugger _
-                | Dls_get | Tls_get | Domain_index | Poll | Pause | Alloc _ )
-            | Cfg.Reloadretaddr | Cfg.Prologue | Cfg.Epilogue | Cfg.Stack_check _
-              ->
+                | Store _ | Intop _ | Int128op _ | Intop_imm _ | Intop_atomic _
+                | Floatop _ | Csel _ | Static_cast _ | Reinterpret_cast _
+                | Probe_is_enabled _ | Opaque | Begin_region | End_region
+                | Specific _ | Name_for_debugger _ | Dls_get | Tls_get
+                | Domain_index | Poll | Pause | Alloc _ )
+            | Cfg.Reloadretaddr | Cfg.Prologue | Cfg.Epilogue
+            | Cfg.Stack_check _ ->
               traps)
       in
       record block.terminator traps;
@@ -3013,24 +3207,26 @@ let basic_has_gc_safepoint (i : Cfg.basic Cfg.instruction) =
   match i.desc with
   | Op (Alloc { mode = Heap; _ } | Poll) -> true
   | Op (Alloc { mode = Local; _ }) -> false
-  | Reloadretaddr | Prologue | Epilogue | Pushtrap _ | Poptrap _
-  | Stack_check _
+  | Reloadretaddr | Prologue | Epilogue | Pushtrap _ | Poptrap _ | Stack_check _
   | Op
       ( Move | Spill | Reload | Opaque | Pause | Begin_region | End_region
       | Dls_get | Tls_get | Domain_index | Const_int _ | Const_float32 _
       | Const_float _ | Const_symbol _ | Const_vec128 _ | Const_vec256 _
-      | Const_vec512 _ | Stackoffset _ | Load _ | Store (_, _, _)
-      | Intop _ | Int128op _ | Intop_imm (_, _) | Intop_atomic _
-      | Floatop (_, _) | Csel _ | Reinterpret_cast _ | Static_cast _
-      | Probe_is_enabled _ | Specific _ | Name_for_debugger _ ) ->
+      | Const_vec512 _ | Stackoffset _ | Load _
+      | Store (_, _, _)
+      | Intop _ | Int128op _
+      | Intop_imm (_, _)
+      | Intop_atomic _
+      | Floatop (_, _)
+      | Csel _ | Reinterpret_cast _ | Static_cast _ | Probe_is_enabled _
+      | Specific _ | Name_for_debugger _ ) ->
     false
 
 let terminator_has_gc_safepoint (i : Cfg.terminator Cfg.instruction) =
   match i.desc with
   | Call _ -> true
   | Call_no_return { alloc; stack_ofs; _ } -> alloc || stack_ofs > 0
-  | Prim { op = External { alloc; stack_ofs; _ }; _ } ->
-    alloc || stack_ofs > 0
+  | Prim { op = External { alloc; stack_ofs; _ }; _ } -> alloc || stack_ofs > 0
   | Invalid { stack_ofs; _ } -> stack_ofs > 0
   | Raise (Raise_regular | Raise_reraise) -> true
   | Raise Raise_notrace -> false
@@ -3141,9 +3337,9 @@ let prepare_fun_info t (cfg : Cfg.t) =
       add_function_decl t
         (LL.Fundecl.create_varargs "caml_llvm_eh_personality" [] (Some T.i32));
       Some llvm_eh_personality
-    | ( Target_system.X86_64 | Target_system.IA32 | Target_system.ARM
-      | Target_system.POWER | Target_system.Z | Target_system.Riscv ),
-      _
+    | ( ( Target_system.X86_64 | Target_system.IA32 | Target_system.ARM
+        | Target_system.POWER | Target_system.Z | Target_system.Riscv ),
+        _ )
     | Target_system.AArch64, false ->
       None
   in
@@ -3240,16 +3436,14 @@ let alloca_regs t (cfg : Cfg.t) arg_values arg_regs =
       ~f:(fun () (i : Cfg.basic Cfg.instruction) ->
         match[@ocaml.warning "-fragile-match"] i.desc with
         | Pushtrap { lbl_handler } ->
-          if not
-               (Label.Tbl.mem (get_fun_info t).trap_block_allocas lbl_handler)
+          if not (Label.Tbl.mem (get_fun_info t).trap_block_allocas lbl_handler)
           then
             let raw_trap_block =
               emit_ins t (I.alloca ~count:(V.of_int 48) T.i8)
             in
             let raw_trap_block = cast t raw_trap_block T.i64 in
             let biased =
-              emit_ins t
-                (I.binary Add ~arg1:raw_trap_block ~arg2:(V.of_int 15))
+              emit_ins t (I.binary Add ~arg1:raw_trap_block ~arg2:(V.of_int 15))
             in
             let aligned =
               emit_ins t (I.binary And ~arg1:biased ~arg2:(V.of_int (-16)))
@@ -3269,7 +3463,7 @@ let trap_handler_entry t (block : Cfg.basic_block) label =
   let first_move =
     DLL.to_list block.body
     |> List.find_map (fun (i : _ Cfg.instruction) ->
-           match[@warning "-4"] i.desc with Cfg.Op Move -> Some i | _ -> None)
+        match[@warning "-4"] i.desc with Cfg.Op Move -> Some i | _ -> None)
   in
   match[@ocaml.warning "-fragile-match"]
     Option.map (fun (i : _ Cfg.instruction) -> i, i.desc) first_move
@@ -3353,8 +3547,7 @@ let llvm_values_of_data_item (d : Cmm.data_item) =
       i64_of_bits word4;
       i64_of_bits word5;
       i64_of_bits word6;
-      i64_of_bits word7
-    ]
+      i64_of_bits word7 ]
 
 let define_symbol t ~private_ ~header ~symbol (contents : Cmm.data_item list) =
   let symbol =
@@ -3465,7 +3658,8 @@ let data (ds : Cmm.data_item list) =
     in
     let rec loop current_symbol current_contents ds =
       match[@warning "-4"] ds with
-      | [] -> define_symbol_of_cmm_symbol current_symbol (List.rev current_contents)
+      | [] ->
+        define_symbol_of_cmm_symbol current_symbol (List.rev current_contents)
       | Cmm.Cdefine_symbol symbol :: ds ->
         define_symbol_of_cmm_symbol current_symbol (List.rev current_contents);
         loop symbol [] ds
@@ -3583,11 +3777,11 @@ let define_restore_rbp t =
               "  ldr x16, [x16, :lo12:" ^ recover_rbp_var ^ "]" ]
         in
         add_module_asm t
-          (["  .text";
-            recover_rbp_asm ^ ":";
-            "  sub x16, sp, #16";
-            "  ldr x17, [sp]";
-            "  add sp, x16, x17" ]
+          ([ "  .text";
+             recover_rbp_asm ^ ":";
+             "  sub x16, sp, #16";
+             "  ldr x17, [sp]";
+             "  add sp, x16, x17" ]
           @ load_target @ ["  br x16"]);
         add_data_def t
           (LL.Data.external_ (LL.Ident.to_string_hum recover_rbp_asm_ident));
@@ -3680,7 +3874,8 @@ let invoke_clang_with_llvmir ~output_filename ~input_filename ~extra_flags =
   in
   let fp_flags =
     match Target_system.architecture () with
-    | Target_system.AArch64 -> ["-fomit-frame-pointer"; "-momit-leaf-frame-pointer"]
+    | Target_system.AArch64 ->
+      ["-fomit-frame-pointer"; "-momit-leaf-frame-pointer"]
     | Target_system.IA32 | Target_system.X86_64 | Target_system.ARM
     | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
       if Config.with_frame_pointers
