@@ -1,6 +1,6 @@
 # LLVM Backend Progress
 
-Last updated: 2026-05-21.
+Last updated: 2026-05-22.
 
 Goal: make the LLVM backend able to replace the native backend: build the
 compiler and required libraries with LLVM, then pass the compiler test suite
@@ -62,6 +62,9 @@ If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
 - The reduced SIMD file `_build/main/oxcaml/tests/simd/builtins_u.ml` now
   compiles successfully with `-llvm-backend`; the wrapper log recorded
   `-x ir`.
+- Additional reduced SIMD files now compile through LLVM: `utils_u.ml` and
+  `basic_u.ml`. The broad `make runtest` run advances past those and now shows
+  remaining SIMD lowering gaps plus real behavior failures.
 
 Latest fixes behind that SIMD progress:
 
@@ -76,6 +79,12 @@ Latest fixes behind that SIMD progress:
   vector arguments/results to `Q0..Q15` and spill extra vectors to 16-byte
   aligned stack slots. Without this, clang crashed in AArch64 argument lowering
   on SIMD functions.
+- Added vector memory/external-argument lowering, vector static data as raw
+  64-bit words, vector `Opaque` lowering without scalar-register inline asm,
+  vector reinterpret casts, and ARM64 vector float min/max/arithmetic lowering.
+- Current broad `make runtest` blockers include missing SIMD operations
+  (`Recpeq_*`, scalar-to-vector casts, `Zip1_*`), scalar SIMD min/max NaN
+  mismatches, and `small_numbers` executable failures.
 
 ## Previously Verified
 

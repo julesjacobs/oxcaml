@@ -1038,8 +1038,9 @@ let extcall_arg_type (ty_arg : Cmm.exttype) (arg_reg : Reg.t) =
   | XInt64 | XInt32 | XInt16 | XInt8 -> T.i64
   | XFloat -> T.double
   | XFloat32 -> T.float
-  | XVec128 | XVec256 | XVec512 ->
-    fail_msg ~name:"extcall_arg_type" "vector external arguments unsupported"
+  | XVec128 -> T.vec128
+  | XVec256 -> T.vec256
+  | XVec512 -> T.vec512
 
 let extcall_arg_types ty_args arg_regs =
   let ty_args =
@@ -1678,6 +1679,14 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let res = emit_ins t (I.binary op ~arg1 ~arg2) in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_minmax width_in_bits cond =
+    let typ = int_vec_type ~width_in_bits in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let choose_arg1 = emit_ins t (I.icmp cond ~arg1 ~arg2) in
+    let res = emit_ins t (I.select ~cond:choose_arg1 ~ifso:arg1 ~ifnot:arg2) in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_shift_imm width_in_bits op n =
     let typ = int_vec_type ~width_in_bits in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -1913,6 +1922,21 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_float_minmax width intrinsic =
+    let typ = float_vec_type ~width in
+    let name = intrinsic ^ "." ^ llvm_intrinsic_type_suffix typ in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let res = call_llvm_intrinsic t name [arg1; arg2] typ in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_float_binary width op =
+    let typ = float_vec_type ~width in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let res = emit_ins t (I.binary op ~arg1 ~arg2) in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_cmp width_in_bits cond ~zero =
     let typ = int_vec_type ~width_in_bits in
     let cond =
@@ -2011,6 +2035,14 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     float_minmax "minnum" T.double |> store_into_reg t i.res.(0)
   | Isimd Simd.Max_scalar_f64 ->
     float_minmax "maxnum" T.double |> store_into_reg t i.res.(0)
+  | Isimd Simd.Fmin_f32 ->
+    float_minmax "minimum" T.float |> store_into_reg t i.res.(0)
+  | Isimd Simd.Fmax_f32 ->
+    float_minmax "maximum" T.float |> store_into_reg t i.res.(0)
+  | Isimd Simd.Fmin_f64 ->
+    float_minmax "minimum" T.double |> store_into_reg t i.res.(0)
+  | Isimd Simd.Fmax_f64 ->
+    float_minmax "maximum" T.double |> store_into_reg t i.res.(0)
   | Isimd Simd.Round_f32_s64 ->
     float_round_to_i64 T.float |> store_into_reg t i.res.(0)
   | Isimd Simd.Round_f64_s64 ->
@@ -2025,6 +2057,18 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
   | Isimd Simd.Subq_s8 -> simd_int_binary 8 Sub
   | Isimd Simd.Mulq_s32 -> simd_int_binary 32 Mul
   | Isimd Simd.Mulq_s16 -> simd_int_binary 16 Mul
+  | Isimd Simd.Minq_s32 -> simd_int_minmax 32 I.Islt
+  | Isimd Simd.Minq_s16 -> simd_int_minmax 16 I.Islt
+  | Isimd Simd.Minq_s8 -> simd_int_minmax 8 I.Islt
+  | Isimd Simd.Maxq_s32 -> simd_int_minmax 32 I.Isgt
+  | Isimd Simd.Maxq_s16 -> simd_int_minmax 16 I.Isgt
+  | Isimd Simd.Maxq_s8 -> simd_int_minmax 8 I.Isgt
+  | Isimd Simd.Minq_u32 -> simd_int_minmax 32 I.Iult
+  | Isimd Simd.Minq_u16 -> simd_int_minmax 16 I.Iult
+  | Isimd Simd.Minq_u8 -> simd_int_minmax 8 I.Iult
+  | Isimd Simd.Maxq_u32 -> simd_int_minmax 32 I.Iugt
+  | Isimd Simd.Maxq_u16 -> simd_int_minmax 16 I.Iugt
+  | Isimd Simd.Maxq_u8 -> simd_int_minmax 8 I.Iugt
   | Isimd Simd.Andq_s64 -> simd_int_binary 64 And
   | Isimd Simd.Andq_s32 -> simd_int_binary 32 And
   | Isimd Simd.Andq_s16 -> simd_int_binary 16 And
@@ -2136,6 +2180,14 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     simd_int_widening_mul 16 Zext ~high:false
   | Isimd Simd.Mullq_high_u16 ->
     simd_int_widening_mul 16 Zext ~high:true
+  | Isimd Simd.Addq_f32 -> simd_float_binary Cmm.Float32 Fadd
+  | Isimd Simd.Subq_f32 -> simd_float_binary Cmm.Float32 Fsub
+  | Isimd Simd.Mulq_f32 -> simd_float_binary Cmm.Float32 Fmul
+  | Isimd Simd.Divq_f32 -> simd_float_binary Cmm.Float32 Fdiv
+  | Isimd Simd.Addq_f64 -> simd_float_binary Cmm.Float64 Fadd
+  | Isimd Simd.Subq_f64 -> simd_float_binary Cmm.Float64 Fsub
+  | Isimd Simd.Mulq_f64 -> simd_float_binary Cmm.Float64 Fmul
+  | Isimd Simd.Divq_f64 -> simd_float_binary Cmm.Float64 Fdiv
   | Isimd (Simd.Cmp_f32 cond) -> simd_float_cmp Cmm.Float32 cond
   | Isimd (Simd.Cmp_f64 cond) -> simd_float_cmp Cmm.Float64 cond
   | Isimd (Simd.Cmpz_s64 cond) -> simd_int_cmp 64 cond ~zero:true
@@ -2146,6 +2198,10 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
   | Isimd (Simd.Cmp_s32 cond) -> simd_int_cmp 32 cond ~zero:false
   | Isimd (Simd.Cmp_s16 cond) -> simd_int_cmp 16 cond ~zero:false
   | Isimd (Simd.Cmp_s8 cond) -> simd_int_cmp 8 cond ~zero:false
+  | Isimd Simd.Minq_f32 -> simd_float_minmax Cmm.Float32 "minimum"
+  | Isimd Simd.Maxq_f32 -> simd_float_minmax Cmm.Float32 "maximum"
+  | Isimd Simd.Minq_f64 -> simd_float_minmax Cmm.Float64 "minimum"
+  | Isimd Simd.Maxq_f64 -> simd_float_minmax Cmm.Float64 "maximum"
   | Isimd (Simd.Roundq_f32 mode) -> simd_float_round Cmm.Float32 mode
   | Isimd (Simd.Roundq_f64 mode) -> simd_float_round Cmm.Float64 mode
   | _ -> not_implemented_basic ~msg:"specific" i
@@ -2226,9 +2282,18 @@ let load t (i : Cfg.basic Cfg.instruction) (memory_chunk : Cmm.memory_chunk)
   | Single { reg = Float32 } -> basic T.float
   | Double -> basic T.double
   | Single { reg = Float64 } -> extend Fpext ~from:T.float ~to_:T.double
-  | Onetwentyeight_unaligned | Onetwentyeight_aligned | Twofiftysix_unaligned
-  | Twofiftysix_aligned | Fivetwelve_unaligned | Fivetwelve_aligned ->
-    not_implemented_basic ~msg:"load vector" i
+  | Onetwentyeight_unaligned ->
+    let loaded = emit_ins t (I.load_with_align ~align:1 ~ptr ~typ:T.vec128) in
+    store_into_reg t i.res.(0) loaded
+  | Onetwentyeight_aligned -> basic T.vec128
+  | Twofiftysix_unaligned ->
+    let loaded = emit_ins t (I.load_with_align ~align:1 ~ptr ~typ:T.vec256) in
+    store_into_reg t i.res.(0) loaded
+  | Twofiftysix_aligned -> basic T.vec256
+  | Fivetwelve_unaligned ->
+    let loaded = emit_ins t (I.load_with_align ~align:1 ~ptr ~typ:T.vec512) in
+    store_into_reg t i.res.(0) loaded
+  | Fivetwelve_aligned -> basic T.vec512
 
 let store t (i : Cfg.basic Cfg.instruction) (memory_chunk : Cmm.memory_chunk)
     (addr_mode : Arch.addressing_mode) =
@@ -2257,9 +2322,18 @@ let store t (i : Cfg.basic Cfg.instruction) (memory_chunk : Cmm.memory_chunk)
   | Single { reg = Float32 } -> basic T.float
   | Double -> basic T.double
   | Single { reg = Float64 } -> trunc Fptrunc T.float
-  | Onetwentyeight_unaligned | Onetwentyeight_aligned | Twofiftysix_unaligned
-  | Twofiftysix_aligned | Fivetwelve_unaligned | Fivetwelve_aligned ->
-    not_implemented_basic ~msg:"store vector" i
+  | Onetwentyeight_unaligned ->
+    let to_store = load_reg_to_temp ~typ:T.vec128 t i.arg.(0) in
+    emit_ins_no_res t (I.store_with_align ~align:1 ~ptr ~to_store)
+  | Onetwentyeight_aligned -> basic T.vec128
+  | Twofiftysix_unaligned ->
+    let to_store = load_reg_to_temp ~typ:T.vec256 t i.arg.(0) in
+    emit_ins_no_res t (I.store_with_align ~align:1 ~ptr ~to_store)
+  | Twofiftysix_aligned -> basic T.vec256
+  | Fivetwelve_unaligned ->
+    let to_store = load_reg_to_temp ~typ:T.vec512 t i.arg.(0) in
+    emit_ins_no_res t (I.store_with_align ~align:1 ~ptr ~to_store)
+  | Fivetwelve_aligned -> basic T.vec512
 
 let local_alloc t (i : Cfg.basic Cfg.instruction) num_bytes =
   (* Make space on the local stack *)
@@ -2419,11 +2493,18 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
   | Move -> load_reg_to_temp t i.arg.(0) |> store_into_reg t i.res.(0)
   | Opaque ->
     let temp = load_reg_to_temp t i.arg.(0) in
+    let typ = V.get_type temp in
     let opaque_temp =
-      emit_ins t
-        (I.inline_asm ~asm:"" ~constraints:"=r,0" ~args:[temp]
-           ~res_type:(Some (V.get_type temp))
-           ~sideeffect:false)
+      match[@warning "-fragile-match"] typ with
+      | T.Vector _ ->
+        let slot = emit_ins t (I.alloca typ) in
+        emit_ins_no_res t (I.store_volatile ~ptr:slot ~to_store:temp);
+        emit_ins t (I.load_volatile ~ptr:slot ~typ)
+      | _ ->
+        emit_ins t
+          (I.inline_asm ~asm:"" ~constraints:"=r,0" ~args:[temp]
+             ~res_type:(Some typ)
+             ~sideeffect:false)
     in
     store_into_reg t i.res.(0) opaque_temp
   | Const_int n ->
@@ -2511,7 +2592,14 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
         emit_ins t (I.convert Bitcast ~arg ~to_:(T.of_reg i.res.(0)))
       in
       store_into_reg t i.res.(0) converted
-    | V128_of_vec _ | V256_of_vec _ | V512_of_vec _ ->
+    | V128_of_vec Vec128 ->
+      let arg = load_reg_to_temp ~typ:T.vec128 t i.arg.(0) in
+      let res_typ = T.of_reg i.res.(0) in
+      let converted =
+        if T.equal (V.get_type arg) res_typ then arg else bitcast arg res_typ
+      in
+      store_into_reg t i.res.(0) converted
+    | V128_of_vec (Vec256 | Vec512) | V256_of_vec _ | V512_of_vec _ ->
       not_implemented_basic ~msg:"vector reinterpret cast" i)
   | Specific op -> specific t i op
   | Intop_atomic { op; size; addr } -> atomic t i op ~size ~addr
@@ -3237,24 +3325,36 @@ let make_temp_data_symbol =
     incr idx;
     res
 
-let llvm_value_of_data_item (d : Cmm.data_item) =
+let llvm_values_of_data_item (d : Cmm.data_item) =
+  let i64_of_bits n = V.imm T.i64 (Int64.to_string n) in
   match d with
   | Cdefine_symbol _ -> fail_msg ~name:"llvm_value_of_data_item" "define_symbol"
   | Calign _ | Csymbol_offset _ ->
     (* [Calign] and [Csymbol_offset] are never produced *)
     fail_msg ~name:"llvm_value_of_data_item" "unexpected data item"
-  | Cint n -> V.of_nativeint ~typ:T.i64 n
-  | Cint8 n -> V.of_int ~typ:T.i8 n
-  | Cint16 n -> V.of_int ~typ:T.i16 n
-  | Cint32 n -> V.of_nativeint ~typ:T.i32 n
-  | Csymbol_address { sym_name; sym_global = _ } -> V.of_symbol sym_name
-  | Cstring s -> V.of_string_constant s
+  | Cint n -> [V.of_nativeint ~typ:T.i64 n]
+  | Cint8 n -> [V.of_int ~typ:T.i8 n]
+  | Cint16 n -> [V.of_int ~typ:T.i16 n]
+  | Cint32 n -> [V.of_nativeint ~typ:T.i32 n]
+  | Csymbol_address { sym_name; sym_global = _ } -> [V.of_symbol sym_name]
+  | Cstring s -> [V.of_string_constant s]
   | Cskip size ->
-    V.zeroinitializer (T.Array { num_of_elems = size; elem_type = T.i8 })
-  | Csingle f -> V.of_float ~typ:T.float f
-  | Cdouble f -> V.of_float ~typ:T.double f
-  | Cvec128 _ | Cvec256 _ | Cvec512 _ ->
-    fail_msg ~name:"llvm_value_of_data_item" "vector"
+    [V.zeroinitializer (T.Array { num_of_elems = size; elem_type = T.i8 })]
+  | Csingle f -> [V.of_float ~typ:T.float f]
+  | Cdouble f -> [V.of_float ~typ:T.double f]
+  | Cvec128 { word0; word1 } -> [i64_of_bits word0; i64_of_bits word1]
+  | Cvec256 { word0; word1; word2; word3 } ->
+    [i64_of_bits word0; i64_of_bits word1; i64_of_bits word2; i64_of_bits word3]
+  | Cvec512 { word0; word1; word2; word3; word4; word5; word6; word7 } ->
+    [ i64_of_bits word0;
+      i64_of_bits word1;
+      i64_of_bits word2;
+      i64_of_bits word3;
+      i64_of_bits word4;
+      i64_of_bits word5;
+      i64_of_bits word6;
+      i64_of_bits word7
+    ]
 
 let define_symbol t ~private_ ~header ~symbol (contents : Cmm.data_item list) =
   let symbol =
@@ -3267,7 +3367,9 @@ let define_symbol t ~private_ ~header ~symbol (contents : Cmm.data_item list) =
     add_data_def t
       (LL.Data.constant ~private_:true header_sym
          (V.of_nativeint ~typ:T.i64 header)));
-  let value = V.struct_constant (List.map llvm_value_of_data_item contents) in
+  let value =
+    V.struct_constant (List.concat_map llvm_values_of_data_item contents)
+  in
   add_data_def t (LL.Data.constant ~private_ symbol value);
   add_defined_symbol t symbol;
   List.iter
