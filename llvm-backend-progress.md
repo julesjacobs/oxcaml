@@ -34,6 +34,11 @@ using that LLVM-built toolchain.
   skipped, `0` failed, `0` unexpected errors. The wrapper log recorded `9540`
   clang calls and `4770` fresh `-x ir` compilations, all with the fixed
   register flags.
+- The named wrapper `make llvm-test LLVM_PATH=/tmp/oxcaml-clang-wrapper` also
+  passed the full explicit LLVM workflow on arm64: boot/runtime/main install
+  plus testsuite, `6599` passed, `287` skipped, `0` failed, `0` unexpected
+  errors. The wrapper log recorded `9540` clang calls and `4770` fresh `-x ir`
+  compilations, all with the fixed register flags.
 - The latest broad stage-5 ocamltest sweep excluded only `tests/asmgen` and
   `tests/asmcomp`. It passed with forced LLVM: `6573` passed, `274` skipped,
   `0` failed, `0` unexpected errors. The wrapper log recorded `5474` clang
@@ -48,6 +53,10 @@ using that LLVM-built toolchain.
   boot `839` fresh `-x ir`, runtime `74` fresh `-x ir`, main `1112` fresh
   `-x ir`; the resulting compiler compiled and ran `fib 10` with forced LLVM,
   output `55`, `2` fresh `-x ir`.
+- `make llvm-self-stage-install LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed
+  the same path through Make: boot `839` fresh `-x ir`, runtime `74`, main
+  `1112`, then the resulting `_llvm_self_stage_install/bin/ocamlopt.opt`
+  compiled and ran the `fib 10` smoke program with forced LLVM, output `55`.
 - The broad self-stage ocamltest sweep used `_llvm_self_stage_install` and
   `_llvm_self_stage_main_build`, excluded only `tests/asmgen` and
   `tests/asmcomp`, and passed with forced LLVM: `6573` passed, `274` skipped,
@@ -60,10 +69,10 @@ using that LLVM-built toolchain.
   Dune workspaces when the generated contents change.
 - `make llvm-compiler`, `make llvm-install`, `make llvm-test`, and
   `make llvm-test-one` are explicit opt-in aliases for the normal Make
-  workflow with `LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1`. The default Make targets
-  still use the normal backend. `make llvm-test-one DIR=basic` passed with
-  `82` passed, `0` failed, and `1264` fresh `-x ir` compilations, all with the
-  fixed register flags.
+  workflow with `LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1`. `make
+  llvm-self-stage-install` and `make llvm-self-stage-test` expose the
+  LLVM-built-compiler path. The default Make targets still use the normal
+  backend.
 - Normal `test-one-no-rebuild` also passed selected runtime/control-flow slices
   with forced LLVM: `effects`, `exception-extra-args`, `match-exception`,
   `runtime-C-exceptions`, `statmemprof`, and `weak-ephe-final`; combined wrapper
@@ -148,7 +157,15 @@ tools/build-llvm-stage5-install.sh
 Build the LLVM boot compiler, then rebuild a staged compiler from it:
 
 ```sh
-tools/build-llvm-self-stage-install.sh
+PATH=/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin:$PATH \
+  make llvm-self-stage-install LLVM_PATH=/tmp/oxcaml-clang-wrapper
+```
+
+Run the broad self-stage forced-LLVM ocamltest sweep through Make:
+
+```sh
+PATH=/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin:$PATH \
+  make llvm-self-stage-test LLVM_PATH=/tmp/oxcaml-clang-wrapper
 ```
 
 Build the boot compiler with the LLVM-capable installed compiler as stage 0:
@@ -229,6 +246,5 @@ Put the OxCaml opam switch first in `PATH`.
 
 1. Audit copied-stack relocation for false positives and decide whether
    conservative runtime scanning is acceptable or needs stack-address metadata.
-2. Decide whether the explicit LLVM-enabled Make workflow needs a single
-   documented wrapper target, or whether `LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1`
-   is enough.
+2. Re-check self-stage/full-suite behavior through `make llvm-self-stage-test`
+   instead of calling the older helper scripts directly.
