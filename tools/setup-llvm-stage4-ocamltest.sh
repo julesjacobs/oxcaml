@@ -10,10 +10,10 @@ stage_build=${STAGE_BUILD:-$repo/_llvm_stage4_probe_build}
 stdlib_dir=${STDLIB_DIR:-$repo/_build/runtime_stdlib_install/lib/ocaml_runtime_stdlib}
 wrapper=${LLVM_WRAPPER:-/tmp/oxcaml-clang-wrapper}
 
-install_bin=$normal_build/install/main/bin
-install_lib=$normal_build/install/main/lib/ocaml
+install_bin=${INSTALL_BIN:-$normal_build/install/main/bin}
+install_lib=${INSTALL_LIB:-$normal_build/install/main/lib/ocaml}
 stdlib_stable_dir=${STDLIB_STABLE_DIR:-$install_lib/stdlib_stable}
-runtime_dir=$normal_build/main/runtime
+runtime_dir=${RUNTIME_DIR_PATH:-$normal_build/main/runtime}
 stage_ocamlopt=$stage_build/main/oxcaml_main_native.exe
 
 require_path () {
