@@ -248,6 +248,13 @@ If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
     `tests/flambda2` needed the fake root to expose the stage-built
     `fexprc.exe`; using a stale/wrong helper produced a spurious
     `Fatal error during unlock: Operation not permitted` in `lift_rec_cont.fl`.
+  - Typing/source-walking stage slices passed with forced LLVM:
+    `tests/typing-local` (`87` passed, `6` skipped, `70` fresh `-x ir`) and
+    `tests/ast-invariants` (`2` passed, `2` fresh). `tests/typing-local`
+    needed stage-built `expect`/`expectnat`; otherwise native expect tests used
+    helpers linked against the normal stdlib. `tests/ast-invariants` needed
+    regular source files under the fake `OCAMLSRCDIR`, because it walks the
+    tree with `Unix.lstat` and ignores symlinked files/directories.
 
 Fix behind that progress:
 
@@ -341,6 +348,8 @@ Fix behind that progress:
    whether conservative runtime scanning is acceptable or needs stack-address
    metadata from the LLVM backend.
 2. Expand stage-5 ocamltest coverage toward the full suite, with real LLVM use
-   checked by the wrapper log.
+   checked by the wrapper log. The fake stage source root now has enough of the
+   source layout for source-walking tests, but this remains a test-harness
+   approximation rather than the final bootstrapping process.
 3. Decide whether the repeatable stage install setup should become a Make target
    or remain a development script.
