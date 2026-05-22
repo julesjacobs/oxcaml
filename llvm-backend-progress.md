@@ -158,12 +158,13 @@ Latest fixes behind that SIMD progress:
   bundled CM generation now uses LLVM begin/end hooks, headered data can be
   followed by additional C data labels, and `Name_for_debugger` is ignored like
   native emitters do.
-- `tests/statmemprof` improved from `41` passed / `7` failed to `47` passed /
-  `1` failed under the installed LLVM-built compiler with forced
-  `-llvm-backend`; the run used `40` fresh IR compilations. The fix passes the
-  full `Cmm.alloc_dbginfo` list through statepoint deopt metadata and teaches
-  the local LLVM frametable printer to emit one allocation entry and debug label
-  per combined allocation. Remaining failure: native `bigarray.ml`.
+- `tests/statmemprof` now passes under the installed LLVM-built compiler with
+  forced `-llvm-backend`: `48` passed, `3` skipped, `0` failed, with `40` fresh
+  IR compilations. Fixes: the OCaml frontend passes full allocation debug
+  metadata through statepoints, the local LLVM frametable printer emits one
+  allocation entry per combined allocation, and local LLVM statepoint liveness no
+  longer treats call arguments as caller roots unless they are live after the
+  call.
 
 ## Previously Verified
 
@@ -210,17 +211,18 @@ Latest fixes behind that SIMD progress:
   local LLVM changes. Dune does not track `/tmp/oxcaml-clang-wrapper` or the
   nested LLVM build as dependencies; force a clean rebuild of the relevant
   libraries/tools before drawing conclusions from generated-tool failures.
-- The remaining `tests/statmemprof/bigarray.ml` failure is not the combined
-  allocation metadata bug. The generated IR preserves the requested `musttail`
-  call, but the caller frame still reports the bigarray as live across the call
-  into the helper that runs `Gc.full_major`. A direct switch from recomputed
-  `across` liveness to `i.live` made the compiler build crash in `simdgen`, so
-  root liveness needs a smaller reduction/design fix rather than a broad swap.
+- `tests/statmemprof/bigarray.ml` exposed an LLVM statepoint liveness bug. The
+  generated IR preserved the requested `musttail` call, but
+  `RewriteStatepointsForGC` included the caller's object argument in the
+  statepoint live set, so the caller frame kept the bigarray alive while the
+  callee ran `Gc.full_major`. Excluding the statepoint instruction itself from
+  the live-before walk fixed the focused test and the full `tests/statmemprof`
+  slice.
 
 ## Next Checks
 
-1. Reduce the next installed-compiler failures, starting with statmemprof and
-   unboxed layout crash clusters from the full sweep.
+1. Reduce the next installed-compiler failures, starting with unboxed layout
+   crash clusters from the full sweep.
 2. Re-run the full installed-compiler flambda2 testsuite after each cluster fix.
 3. Confirm a normal bootstrap using the LLVM-built installed compiler, not just
    the boot compiler plus LLVM-enabled final build.
