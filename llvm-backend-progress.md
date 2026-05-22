@@ -8,102 +8,33 @@ using that LLVM-built toolchain.
 
 ## Current Status
 
-- Progress is steady. The normal-built compiler with `-llvm-backend` passes the
-  broad tests on arm64, and an LLVM-built boot compiler can now rebuild a staged
-  runtime/main compiler install with LLVM forced.
-- This is not production self-hosting yet. The staged compiler can compile and
-  run many real programs and tests, and the normal Make path now has an
-  opt-in LLVM boot context that can build boot/runtime/main and pass the full
-  testsuite with LLVM enabled.
-- `LLVM_BOOT_BACKEND=1` makes `duneconf/boot.ws` use an LLVM-capable stage-0
-  install, defaulting to `_install`, plus `llvm-backend=1`. After removing stale
-  `_build/default` artifacts from a previous non-LLVM boot context, `make
-  boot-compiler LLVM_BOOT_BACKEND=1` succeeded with `839` fresh `-x ir`
-  compilations.
-- `make compiler LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1` then succeeded through the
-  normal Make/Dune dependency chain on arm64, with `1186` fresh `-x ir`
-  compilations after clearing the wrapper log.
-- `make test-one DIR=basic LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1` passed through
-  the normal `install_for_test` path: `82` passed, `0` failed, with `78` fresh
-  `-x ir` compilations during the test run.
-- A standalone `make install LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1` passed on
-  arm64 and refreshed `_install`. The wrapper log recorded `3616` clang calls
-  and `1808` fresh `-x ir` compilations, all with the fixed register flags.
-- A clean top-level `make test LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1` passed on
-  arm64: boot/runtime/main install plus testsuite, `6599` passed, `287`
-  skipped, `0` failed, `0` unexpected errors. The wrapper log recorded `9540`
-  clang calls and `4770` fresh `-x ir` compilations, all with the fixed
-  register flags.
-- The named wrapper `make llvm-test LLVM_PATH=/tmp/oxcaml-clang-wrapper` also
-  passed the full explicit LLVM workflow on arm64: boot/runtime/main install
-  plus testsuite, `6599` passed, `287` skipped, `0` failed, `0` unexpected
-  errors. The wrapper log recorded `9540` clang calls and `4770` fresh `-x ir`
-  compilations, all with the fixed register flags.
-- The latest broad stage-5 ocamltest sweep excluded only `tests/asmgen` and
-  `tests/asmcomp`. It passed with forced LLVM: `6573` passed, `274` skipped,
-  `0` failed, `0` unexpected errors. The wrapper log recorded `5474` clang
-  calls and `2737` fresh `-x ir` compilations.
-- `tools/run-llvm-stage5-ocamltest.sh` now wraps the stage-5 fake-root setup,
-  self-stage fake-root setup with `SELF_STAGE=1`, list generation, forced-LLVM
-  ocamltest run, and wrapper counts.
-- `tools/build-llvm-self-stage-install.sh` is the current repeatable
-  self-stage path. It builds an LLVM boot compiler from `_install`, packages it
-  as `_llvm_boot_install`, then uses that LLVM-built boot compiler to rebuild
-  runtime/main into `_llvm_self_stage_install`. The latest script run succeeded:
-  boot `839` fresh `-x ir`, runtime `74` fresh `-x ir`, main `1112` fresh
-  `-x ir`; the resulting compiler compiled and ran `fib 10` with forced LLVM,
-  output `55`, `2` fresh `-x ir`.
-- `make llvm-self-stage-install LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed
-  the same path through Make: boot `839` fresh `-x ir`, runtime `74`, main
-  `1112`, then the resulting `_llvm_self_stage_install/bin/ocamlopt.opt`
-  compiled and ran the `fib 10` smoke program with forced LLVM, output `55`.
-- The broad self-stage ocamltest sweep used `_llvm_self_stage_install` and
-  `_llvm_self_stage_main_build`, excluded only `tests/asmgen` and
-  `tests/asmcomp`, and passed with forced LLVM: `6573` passed, `274` skipped,
-  `0` failed, `0` unexpected errors. The wrapper log recorded `5996` clang
-  calls and `2998` fresh `-x ir` compilations.
-- A repeat self-bootstrap using `_llvm_self_stage_install` as stage 0 also
-  passed through boot/runtime/main and produced `_llvm_self_stage2_install`:
-  boot `839` fresh `-x ir`, smoke `2`, runtime `74`, main `1112`; the
-  resulting compiler now reports `_llvm_self_stage2_install/lib/ocaml` as its
-  standard library by default and compiled and ran `fib 10` with forced LLVM
-  and no `OCAMLLIB`, output `55`, `2` fresh `-x ir`.
-- A broad `_llvm_self_stage2_install` ocamltest sweep got through the full list
-  with forced LLVM and found only fake-root wrapper bugs in the debugger tests:
-  `6561` passed, `274` skipped, `6` failed. After fixing fake-root tool links
-  to point at `.real` binaries when staged tools are wrapped, the focused
-  `tests/tool-debugger` rerun passed: `52` passed, `0` failed.
-- `tools/build-llvm-stage5-install.sh` still wraps the lower-level staged
-  LLVM runtime/main rebuild and `_llvm_stage5_install` refresh.
-- `LLVM_BACKEND=1` is now the normal Make entry point for this mode. It sets the
-  build contexts and testsuite environment consistently, and regenerates the
-  Dune workspaces when the generated contents change.
-- `make llvm-compiler`, `make llvm-install`, `make llvm-test`, and
-  `make llvm-test-one` are explicit opt-in aliases for the normal Make
-  workflow with `LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1`. `make
-  llvm-self-stage-install`, `make llvm-self-stage2-install`, and `make
-  llvm-self-stage-test`/`make llvm-self-stage2-test` expose the
-  LLVM-built-compiler paths. The default Make targets still use the normal
-  backend.
-- Normal `test-one-no-rebuild` also passed selected runtime/control-flow slices
-  with forced LLVM: `effects`, `exception-extra-args`, `match-exception`,
-  `runtime-C-exceptions`, `statmemprof`, and `weak-ephe-final`; combined wrapper
-  count was `130` fresh `-x ir`.
-- After refreshing `_install`, `_install/bin/ocamlopt.opt` compiled and ran a
-  recursive `fib` program with forced LLVM: output `55`, `2` fresh `-x ir`.
-- The boot Dune context still clears `OCAMLPARAM` by default. The old opam
-  compiler rejects `llvm-backend` and `llvm-path`, but
-  `LLVM_BOOT_BACKEND=1` makes the boot context use the LLVM-capable `_install`
-  compiler as stage 0 and force LLVM for boot compilation.
-- The current copied-stack relocation fix is conservative and still needs
-  design review before treating it as production-ready. Hard problems should be
-  handled with reductions and design experiments, not broad self-host retries.
+- Progress is steady. `LLVM_BACKEND=1` is the supported opt-in Make entry point
+  for LLVM builds. It implies the LLVM boot-context setup, puts the configured
+  Dune binary directory on `PATH` for Dune actions, and leaves default Make
+  targets on the normal backend.
+- `make llvm-test LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed the normal
+  boot/runtime/main install plus full testsuite on arm64: `6599` passed, `287`
+  skipped, `0` failed, `0` unexpected errors. The wrapper log recorded `4770`
+  fresh `-x ir` compilations with the fixed-register flags.
+- `make llvm-self-stage2-test LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed the
+  repeat self-stage flow on arm64. It built `_llvm_self_stage_install`, rebuilt
+  `_llvm_self_stage2_install` from that LLVM-built compiler, then ran the broad
+  testsuite through the stage2 compiler with `-llvm-backend` forced. Results:
+  `6573` passed, `274` skipped, `0` failed, `0` unexpected errors; the test
+  phase recorded `2998` fresh `-x ir` compilations.
+- The self-stage scripts now avoid known false failures: boot workspaces are
+  generated with the same Makefile LLVM boot-context rules instead of patched
+  with `sed`, and staged tool wrappers are copied via their `.real` executable
+  when present.
+- This is a strong functional milestone, not a production sign-off. The backend
+  still needs design review around GC/stack-map correctness, DWARF/debugging,
+  unsupported asmgen/asmcomp tests, performance, and platform coverage.
 
-The useful current capability is: a stage-5 LLVM-built compiler can compile and
-run a large fraction of ordinary native programs, including effects,
-exceptions, callbacks, dynlink, Unix/Str/systhreads slices, statmemprof,
-unboxed products, layouts, local allocation, C stubs, weak/finalizer tests, and
-many compiler/tool tests, when `-llvm-backend` is forced.
+The useful current capability is: an LLVM-built compiler can rebuild the
+compiler again and pass the broad non-asmgen/non-asmcomp testsuite on arm64 when
+`-llvm-backend` is forced. That includes effects, exceptions, callbacks,
+dynlink, Unix/Str/systhreads slices, statmemprof, unboxed products, layouts,
+local allocation, C stubs, weak/finalizer tests, and many compiler/tool tests.
 
 Always verify real LLVM use by checking `/tmp/oxcaml-clang-wrapper.log` for
 `-x ir` plus the fixed-register flags:
