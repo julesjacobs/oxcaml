@@ -284,6 +284,13 @@ module Type = struct
       ->
       false
 
+  let is_floating_point_or_vector = function
+    | Float | Double -> true
+    | Vector { elem_type = Float | Double; _ } -> true
+    | Ptr _ | Int _ | Struct _ | Array _ | Vector _ | Label | Token | Metadata
+      ->
+      false
+
   module Or_void = struct
     type nonrec t = t option
 
@@ -958,7 +965,7 @@ module Instruction = struct
     let arg1_type = Value.get_type arg1 in
     let arg2_type = Value.get_type arg2 in
     assert' "fcmp" (Type.equal arg1_type arg2_type);
-    assert' "fcmp" (Type.is_floating_point arg1_type);
+    assert' "fcmp" (Type.is_floating_point_or_vector arg1_type);
     Fcmp { cond; arg1; arg2 }
 
   let extractelement ~vector ~index =
