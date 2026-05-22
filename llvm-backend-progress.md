@@ -12,9 +12,20 @@ using that LLVM-built toolchain.
   broad tests on arm64, and an LLVM-built boot compiler can now rebuild a staged
   runtime/main compiler install with LLVM forced.
 - This is not production self-hosting yet. The staged compiler can compile and
-  run many real programs and tests, but the workflow still uses helper scripts
-  and staged install roots. We have not yet made the normal bootstrap process
-  use LLVM everywhere and then pass the full suite.
+  run many real programs and tests, and the normal Make path now has an
+  opt-in LLVM boot context, but the full normal `make test` path with LLVM
+  enabled everywhere has not passed yet.
+- `LLVM_BOOT_BACKEND=1` makes `duneconf/boot.ws` use an LLVM-capable stage-0
+  install, defaulting to `_install`, plus `llvm-backend=1`. After removing stale
+  `_build/default` artifacts from a previous non-LLVM boot context, `make
+  boot-compiler LLVM_BOOT_BACKEND=1` succeeded with `839` fresh `-x ir`
+  compilations.
+- `make compiler LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1` then succeeded through the
+  normal Make/Dune dependency chain on arm64, with `1186` fresh `-x ir`
+  compilations after clearing the wrapper log.
+- `make test-one DIR=basic LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1` passed through
+  the normal `install_for_test` path: `82` passed, `0` failed, with `78` fresh
+  `-x ir` compilations during the test run.
 - The latest broad stage-5 ocamltest sweep excluded only `tests/asmgen` and
   `tests/asmcomp`. It passed with forced LLVM: `6573` passed, `274` skipped,
   `0` failed, `0` unexpected errors. The wrapper log recorded `5474` clang
@@ -79,6 +90,16 @@ Build the normal compiler with LLVM enabled:
 PATH=/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin:$PATH \
   make compiler \
   LLVM_BACKEND=1 LLVM_PATH=/tmp/oxcaml-clang-wrapper
+```
+
+Build through the normal Make path with LLVM also enabled for the boot context:
+
+```sh
+rm -rf _build/default  # needed when switching from a non-LLVM boot context
+: > /tmp/oxcaml-clang-wrapper.log
+PATH=/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin:$PATH \
+  make compiler \
+  LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1 LLVM_PATH=/tmp/oxcaml-clang-wrapper
 ```
 
 Run one installed-compiler testsuite directory with forced LLVM:
