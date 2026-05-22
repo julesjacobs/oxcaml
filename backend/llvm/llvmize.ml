@@ -2716,9 +2716,9 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
     let opaque_temp =
       match[@warning "-fragile-match"] typ with
       | T.Vector _ ->
-        let slot = emit_ins t (I.alloca typ) in
-        emit_ins_no_res t (I.store_volatile ~ptr:slot ~to_store:temp);
-        emit_ins t (I.load_volatile ~ptr:slot ~typ)
+        emit_ins t
+          (I.inline_asm ~asm:"" ~constraints:"=w,0" ~args:[temp]
+             ~res_type:(Some typ) ~sideeffect:false)
       | _ ->
         emit_ins t
           (I.inline_asm ~asm:"" ~constraints:"=r,0" ~args:[temp]
