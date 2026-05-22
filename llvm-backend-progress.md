@@ -28,6 +28,9 @@ using that LLVM-built toolchain.
   broad self-host retries. The main hard areas remain exception/effect control
   flow, runtime stack switching, multidomain interactions, SIMD coverage, and
   the exact statepoint-to-frametable contract.
+- Current source has a normal-installed compiler fix for one new LLVM-specific
+  asmcomp failure. The existing `_llvm_stage5_*` compiler trees are stale until
+  rebuilt, so stage ocamltest will still show the old failure there.
 
 Always verify real LLVM use by checking `/tmp/oxcaml-clang-wrapper.log` for
 `-x ir` plus the fixed-register flags:
@@ -151,9 +154,30 @@ If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
     `tests/raise-counts`, `tests/compaction`, `tests/parallel`, and the
     non-multidomain dynlink directories. Directories with native compilations
     recorded fresh `-x ir`; driver-only/bytecode-only slices did not.
+  - Compiler/tooling-heavy stage slices passed after extending the fake root:
+    `tests/compiler-libs`, `tests/tool-dumpobj`, `tests/tool-ocaml`,
+    `tests/tool-ocamlc-locations`, `tests/tool-ocamlc-open`,
+    `tests/tool-ocamlc-stop-after`, `tests/tool-ocamldep-modalias`,
+    `tests/tool-ocamldep-shadowing`, `tests/tool-lexyacc`, and
+    `tests/codegen`. Native slices recorded fresh `-x ir` where applicable.
+  - `tests/asmcomp/0001-test.ml` exposed an LLVM-specific metadata bug: the
+    LLVM pass emitted `code_begin`/`data_begin`/`frametable` symbols using the
+    raw module name `0001-test`, while the rest of the compiler referenced the
+    assembler-escaped `0001$2dtest` spelling. Encoding the module name before
+    writing the `oxcaml_module` metadata fixes the direct repro with the
+    freshly rebuilt normal installed compiler (`6` wrapper calls, `4` fresh
+    `-x ir`). The stage compiler must be rebuilt before stage ocamltest sees
+    this fix.
+  - `tests/asmcomp/optargs.ml` currently fails its allocation assertion with
+    both default and LLVM backends, using both normal-installed and existing
+    stage-installed compilers. Treat that as unrelated to LLVM backend
+    selection until proven otherwise.
 
 Fix behind that progress:
 
+- LLVM module metadata must use the assembler-escaped module name. Otherwise
+  names that require escaping, such as `0001-test`, make the LLVM-generated
+  `code_begin`/`data_begin`/`frametable` labels disagree with startup references.
 - Generic intermediate curry wrappers allocate and return a closure, but their
   Cmm `fun_ret_type` used the final function result. Native codegen still
   returned the allocated closure in `x0`; LLVM trusted `fun_ret_type` and

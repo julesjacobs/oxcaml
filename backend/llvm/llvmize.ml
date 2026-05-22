@@ -4099,9 +4099,17 @@ let write_module_metadata t =
       fail_msg "unexpected LLVM module symbol shape %S; expected caml...%s"
         symbol suffix
   in
+  let encoded_symbol symbol =
+    let symbol =
+      Asm_targets.(Asm_symbol.create_global symbol |> Asm_symbol.encode)
+    in
+    if String.begins_with ~prefix:"_" symbol
+    then String.sub symbol 1 (String.length symbol - 1)
+    else symbol
+  in
   let module_name =
     module_name_from_symbol
-      (Cmm_helpers.make_symbol "code_begin")
+      (encoded_symbol (Cmm_helpers.make_symbol "code_begin"))
       "__code_begin"
   in
   F.pp_line t.ppf "";
