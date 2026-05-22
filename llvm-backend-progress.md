@@ -193,6 +193,31 @@ If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
   - The stage ocamltest helper now also creates empty source-layout directories
     such as `asmcomp`, `bytecomp`, and `typing`, because compiler-library link
     tests pass those `-I` directories and macOS `ld` warns if they are missing.
+  - Additional language/runtime stage slices passed with forced LLVM:
+    `tests/array-functions`, `tests/basic-io-2`, `tests/basic-multdef`,
+    `tests/basic-private`, `tests/extension-constructor`,
+    `tests/functors` (bytecode-only), and `tests/letrec-compilation`.
+  - Additional stdlib stage slices passed with forced LLVM:
+    `tests/lib-arg`, `tests/lib-atomic`, `tests/lib-bool`,
+    `tests/lib-dynarray`, `tests/lib-either` (expect-only),
+    `tests/lib-fun`, `tests/lib-internalformat` (expect-only),
+    `tests/lib-seq`, `tests/lib-stdlabels`, and `tests/lib-sys`.
+  - Additional OxCaml feature stage slices passed with forced LLVM:
+    `tests/local-functions`, `tests/mixed-blocks`, `tests/mixed-modules`,
+    `tests/nested-mixed-records`, `tests/records-and-block-indices`,
+    `tests/reinterpret-casts`, and `tests/peek_and_poke`.
+  - Native-heavy stage slices passed with forced LLVM:
+    `tests/lib-bigarray-file`, `tests/lib-floatarray`,
+    `tests/float-unboxing`, `tests/int64-unboxing`,
+    `tests/tail-call-many-returns`, `tests/tmc`, `tests/lazy`, and
+    `tests/syntactic-arity`.
+  - Tool/formatting stage slices passed with forced LLVM or bytecode-only
+    paths as appropriate: `tests/tool-debugger`, `tests/tool-expect-test`,
+    `tests/tool-ocaml-annot`, `tests/tool-ocamlc-error-cleanup`,
+    `tests/tool-ocamldep-abstract-kinds`, `tests/tool-ocamldep-with-kinds`,
+    and `tests/formatting`. `tests/tool-debugger` needed the fake root to
+    expose the staged `ocamldebug` executable and wrapped `Ocamldebug` module
+    artifacts.
 
 Fix behind that progress:
 
