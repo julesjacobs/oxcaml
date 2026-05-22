@@ -128,7 +128,11 @@ let make_bundled_cm_file unix ~ppf_dump ~quoted_cmi ~quoted_cmx ~output_name
       Emitaux.Dwarf_helpers.init ~ppf_dump
         ~disable_dwarf:(not !Dwarf_flags.dwarf_for_startup_file)
         ~sourcefile:sourcefile_for_dwarf;
-      Emit.begin_assembly unix;
+      if !Clflags.llvm_backend
+      then
+        Llvmize.begin_assembly ~is_startup:false
+          ~sourcefile:sourcefile_for_dwarf
+      else Emit.begin_assembly unix;
       let bundle_cm name value cont =
         let symbol = { Cmm.sym_name = name; sym_global = Global } in
         let string = Marshal.to_string value [] in
@@ -137,5 +141,7 @@ let make_bundled_cm_file unix ~ppf_dump ~quoted_cmi ~quoted_cmx ~output_name
       let cont = bundle_cm "caml_bundled_cmis" (cmi_bundle ~quoted_cmi) [] in
       let cont = bundle_cm "caml_bundled_cmxs" (cmx_bundle ~quoted_cmx) cont in
       Asmgen.compile_phrase ~ppf_dump (Cmm.Cdata cont);
-      Emit.end_assembly ());
+      if !Clflags.llvm_backend
+      then Llvmize.end_assembly ()
+      else Emit.end_assembly ());
   bundled_cm_obj

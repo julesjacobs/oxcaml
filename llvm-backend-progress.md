@@ -18,9 +18,8 @@ using that LLVM-built toolchain.
 - A broad `make runtest` with LLVM enabled passes on arm64 with real LLVM use.
   Latest run recorded 195 fresh `-x ir` clang invocations with fixed-register
   flags.
-- The LLVM-built compiler can compile and run small programs with
-  `-llvm-backend`. A full test-suite run with an LLVM-built compiler is still
-  pending.
+- The LLVM-built compiler can run many tests with `-llvm-backend`, but a full
+  installed-compiler sweep still has failing clusters.
 - Hard problems should be handled with reductions and design experiments, not
   broad self-host retries. The main hard areas remain exception/effect control
   flow, runtime stack switching, multidomain interactions, SIMD coverage, and
@@ -145,6 +144,20 @@ Latest fixes behind that SIMD progress:
 - Direct Dune probes must also be checked against
   `/tmp/oxcaml-clang-wrapper.log`; use `OCAMLPARAM`, not just
   `BUILD_OCAMLPARAM`, for these focused tests.
+- Installed LLVM-built compiler plus forced `-llvm-backend` passed
+  `@runtest-llvmize` with 60 fresh IR compilations.
+- Installed LLVM-built compiler plus forced `-llvm-backend` passed focused
+  ocamltest slices: `tests/basic`, `tests/effects`, `tests/callback`,
+  `tests/gc-roots`, `tests/lib-unix`, `tests/lib-str`, and
+  `tests/lib-systhreads`.
+- A full installed-compiler flambda2 testsuite sweep used real LLVM
+  (`2719` fresh IR compilations) and reported `6531` passed, `287` skipped,
+  and `63` failed. The first fixed cluster was `tests/quotation`.
+- `tests/quotation` now passes under the installed LLVM-built compiler with
+  forced `-llvm-backend`: `40` passed, `45` fresh IR compilations. Fixes:
+  bundled CM generation now uses LLVM begin/end hooks, headered data can be
+  followed by additional C data labels, and `Name_for_debugger` is ignored like
+  native emitters do.
 
 ## Previously Verified
 
@@ -194,8 +207,8 @@ Latest fixes behind that SIMD progress:
 
 ## Next Checks
 
-1. Confirm a normal bootstrap using the LLVM-built installed compiler, not just
+1. Reduce the next installed-compiler failures, starting with statmemprof and
+   unboxed layout crash clusters from the full sweep.
+2. Re-run the full installed-compiler flambda2 testsuite after each cluster fix.
+3. Confirm a normal bootstrap using the LLVM-built installed compiler, not just
    the boot compiler plus LLVM-enabled final build.
-2. Run broader test-suite slices with an LLVM-built compiler.
-3. Finish SIMD coverage or add a principled fallback for unsupported NEON ops
-   discovered by those LLVM-built compiler runs.

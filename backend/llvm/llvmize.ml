@@ -2921,7 +2921,8 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
     poll ?unwind_label ?exn_entry t i
   | Stackoffset _ -> () (* Handled separately via [Safepoint.attr] *)
   | Spill | Reload -> not_implemented_basic ~msg:"spill / reload" i
-  | Probe_is_enabled _ | Name_for_debugger _ -> not_implemented_basic i
+  | Name_for_debugger _ -> ()
+  | Probe_is_enabled _ -> not_implemented_basic i
 
 let emit_basic t (i : Cfg.basic Cfg.instruction) =
   emit_comment t "%a" F.pp_dbg_instr_basic i;
@@ -3769,6 +3770,20 @@ let data (ds : Cmm.data_item list) =
       true
     | _ -> false
   in
+  let header_symbol_with_trailing_symbols header symbol contents =
+    let rec split_at_next_symbol prefix = function[@warning "-4"]
+      | [] -> None
+      | Cmm.Cdefine_symbol _ :: _ as trailing_symbols ->
+        Some (List.rev prefix, trailing_symbols)
+      | d :: ds -> split_at_next_symbol (d :: prefix) ds
+    in
+    match split_at_next_symbol [] contents with
+    | None -> false
+    | Some (contents, trailing_symbols) ->
+      define_symbol ~private_:false ~header:(Some header) ~symbol:(Some symbol)
+        contents;
+      if no_header_symbols trailing_symbols then true else assert false
+  in
   let block ds =
     match eat_if peek_int ds with
     | Some (i, after_i) -> (
@@ -3778,6 +3793,8 @@ let data (ds : Cmm.data_item list) =
         if Nativeint.(logand i 0xffn = of_int Obj.closure_tag)
         then closure_block ds
         else if caml_startup ds
+        then ()
+        else if header_symbol_with_trailing_symbols i symbol after_symbol
         then ()
         else
           define_symbol ~private_:false ~header:(Some i) ~symbol:(Some symbol)
