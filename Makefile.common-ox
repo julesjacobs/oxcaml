@@ -488,7 +488,7 @@ runtest-upstream: test
 test-one: install_for_test
 	$(MAKE) test-one-no-rebuild
 
-.PHONY: llvm-compiler llvm-install llvm-test llvm-test-one
+.PHONY: llvm-compiler llvm-install llvm-test llvm-test-one llvm-self-stage-install llvm-self-stage-test
 llvm-compiler:
 	$(MAKE) compiler LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1
 
@@ -500,6 +500,14 @@ llvm-test:
 
 llvm-test-one:
 	$(MAKE) test-one LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1
+
+llvm-self-stage-install: llvm-install
+	LLVM_WRAPPER="$(or $(LLVM_PATH),/tmp/oxcaml-clang-wrapper)" \
+	  tools/build-llvm-self-stage-install.sh
+
+llvm-self-stage-test: llvm-self-stage-install
+	SELF_STAGE=1 LLVM_WRAPPER="$(or $(LLVM_PATH),/tmp/oxcaml-clang-wrapper)" \
+	  tools/run-llvm-stage5-ocamltest.sh
 
 # If the TEST argument is passed as `testsuite/tests/foo` (as is invited by
 # tab completion) then look for it in `tests/foo`. Otherwise, if it's passed as
