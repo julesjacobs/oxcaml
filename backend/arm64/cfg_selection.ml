@@ -65,6 +65,14 @@ let select_bitwidth : Cmm.bswap_bitwidth -> Arch.bswap_bitwidth = function
 
 let specific x : Cfg.basic_or_terminator = Basic (Op (Specific x))
 
+let is_llvm_intrinsic_builtin = function
+  | "caml_rdtsc_unboxed"
+  | "caml_rdpmc_unboxed"
+  | "caml_sse2_float64_min"
+  | "caml_sse2_float64_max" ->
+    true
+  | _ -> false
+
 let is_immediate (op : Operation.integer_operation) n :
     Cfg_selectgen_target_intf.is_immediate_result =
   match op with
@@ -238,7 +246,8 @@ let select_operation
     | (Rewritten _ | Select_operation_then_rewrite _) as selected -> selected
     | Use_default -> (
       match op with
-      | Cextcall { func; builtin = true; _ } ->
+      | Cextcall { func; builtin = true; _ } when is_llvm_intrinsic_builtin func
+        ->
         Rewritten (specific (Illvm_intrinsic func), args)
       | _ -> Use_default)
   else select_operation' ~generic_select_condition op args dbg ~label_after

@@ -66,6 +66,14 @@ If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
 - `make test-one DIR=typing-layouts-products` with forced LLVM passed:
   `105` passed, `0` skipped, `0` failed. The wrapper log recorded `100` clang
   calls, `50` fresh `-x ir` compilations, and fixed-register flags.
+- Full installed-compiler flambda2 testsuite sweep with forced LLVM now reports
+  `6592` passed, `287` skipped, and `4` failed. The wrapper log recorded
+  `5483` clang calls, `2742` fresh `-x ir` compilations, and fixed-register
+  flags.
+- `tool-ocamlopt-disable-builtin-check` now passes with forced LLVM: `8`
+  passed, `0` failed. The wrapper log recorded `1188` fresh `-x ir`
+  compilations. Unknown `[@@builtin]` externals now fall back to the normal
+  builtin-check path instead of being treated as LLVM intrinsics.
 
 Fix behind that progress:
 
@@ -94,7 +102,7 @@ Fix behind that progress:
   ocamltest slices: `tests/basic`, `tests/effects`, `tests/callback`,
   `tests/gc-roots`, `tests/lib-unix`, `tests/lib-str`, `tests/lib-systhreads`,
   `tests/quotation`, `tests/statmemprof`, and `tests/typing-layouts-products`.
-- A full installed-compiler flambda2 testsuite sweep used real LLVM
+- An earlier full installed-compiler flambda2 testsuite sweep used real LLVM
   (`2719` fresh IR compilations) and reported `6531` passed, `287` skipped,
   and `63` failed before the quotation, statmemprof, and unboxed-product fixes.
 - A forced LLVM-enabled compiler build on arm64 succeeded and recorded `1112`
@@ -125,8 +133,9 @@ Fix behind that progress:
 
 ## Next Checks
 
-1. Re-run the full installed-compiler flambda2 testsuite after the current
-   cluster fixes to get the new failure list.
-2. Reduce the next remaining installed-compiler failure cluster.
+1. Reduce the `tail-call-many-returns` LLVM/clang crash in AArch64 instruction
+   selection.
+2. Reduce the native toplevel bus error in
+   `typing-small-numbers/test_matching_native.ml`.
 3. Confirm a normal bootstrap using the LLVM-built installed compiler, not just
    the boot compiler plus LLVM-enabled final build.
