@@ -30,18 +30,22 @@ using that LLVM-built toolchain.
   runtime `148` wrapper lines / `74` fresh `-x ir`, main `2224` wrapper lines /
   `1112` fresh `-x ir`. The resulting compiler compiled and ran a simple native
   program with forced LLVM: `2` fresh `-x ir`.
-- The normal Make testsuite path now works for a forced-LLVM smoke test:
-  `make test-one DIR=basic BUILD_OCAMLPARAM=... OCAMLPARAM=...` passed
-  `82` tests with `78` fresh `-x ir`.
+- `LLVM_BACKEND=1` is now the normal Make entry point for this mode. It sets the
+  build contexts and testsuite environment consistently, and regenerates the
+  Dune workspaces when the generated contents change.
 - Normal `test-one-no-rebuild` also passed selected runtime/control-flow slices
   with forced LLVM: `effects`, `exception-extra-args`, `match-exception`,
   `runtime-C-exceptions`, `statmemprof`, and `weak-ephe-final`; combined wrapper
   count was `130` fresh `-x ir`.
-- The broad normal `make test` path with forced LLVM completed with `6598`
-  passed, `287` skipped, `1` failed, `0` unexpected errors, and `2745` fresh
-  `-x ir`. The only failure was bytecode-only
-  `tests/lib-threads/signal.ml` line 17; rerunning that test alone passed all
-  `14` actions, including native forced LLVM.
+- The broad normal `make test LLVM_BACKEND=1` path completed with `6599` passed,
+  `287` skipped, `0` failed, `0` unexpected errors, and `2745` fresh `-x ir`.
+- After refreshing `_install`, `_install/bin/ocamlopt.opt` compiled and ran a
+  recursive `fib` program with forced LLVM: output `55`, `2` fresh `-x ir`.
+- The boot Dune context still clears `OCAMLPARAM`. A direct experiment making
+  boot inherit `llvm-backend=1` failed before codegen because the stage-0 opam
+  compiler rejects `llvm-backend` and `llvm-path` under `-warn-error +A`; real
+  LLVM bootstrap needs a stage-0 compiler that understands these parameters, or
+  a different bootstrap switch-over point.
 - The current copied-stack relocation fix is conservative and still needs
   design review before treating it as production-ready. Hard problems should be
   handled with reductions and design experiments, not broad self-host retries.
@@ -68,7 +72,7 @@ Build the normal compiler with LLVM enabled:
 : > /tmp/oxcaml-clang-wrapper.log
 PATH=/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin:$PATH \
   make compiler \
-  BUILD_OCAMLPARAM='_,llvm-backend=1,llvm-path=/tmp/oxcaml-clang-wrapper'
+  LLVM_BACKEND=1 LLVM_PATH=/tmp/oxcaml-clang-wrapper
 ```
 
 Run one installed-compiler testsuite directory with forced LLVM:
@@ -77,7 +81,7 @@ Run one installed-compiler testsuite directory with forced LLVM:
 : > /tmp/oxcaml-clang-wrapper.log
 PATH=/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin:$PATH \
   make test-one DIR=typing-layouts-products \
-  OCAMLPARAM='_,llvm-backend=1,llvm-path=/tmp/oxcaml-clang-wrapper'
+  LLVM_BACKEND=1 LLVM_PATH=/tmp/oxcaml-clang-wrapper
 ```
 
 Run the broad stage-5 forced-LLVM ocamltest sweep:
@@ -92,8 +96,7 @@ Rebuild and refresh the staged LLVM install:
 tools/build-llvm-stage5-install.sh
 ```
 
-If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
-`duneconf/main.ws` first. Put the OxCaml opam switch first in `PATH`.
+Put the OxCaml opam switch first in `PATH`.
 
 ## Verified Fixes
 
