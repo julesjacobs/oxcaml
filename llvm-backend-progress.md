@@ -18,11 +18,12 @@ using that LLVM-built toolchain.
 - The LLVM-built installed compiler can pass the full compiler testsuite with
   forced `-llvm-backend` on arm64. It can also build a stage-5 runtime stdlib
   and complete stage-5 main install tree in a separate Dune build dir. The
-  stage-5 compiler now passes several focused ocamltest directories covering
-  basics, effects, GC roots, callbacks, Unix, Str, systhreads, quotation,
-  statmemprof, and layout products. This is an important milestone, but the
-  current copied-stack fix is conservative and still needs design review before
-  treating it as production-ready.
+  stage-5 compiler now passes a broader focused ocamltest sweep covering basics,
+  effects, GC roots, callbacks, Unix, Str, systhreads, quotation, statmemprof,
+  layout products, runtime events, weak/ephemeron/finalizers, and many stdlib
+  directories. This is an important milestone, but the current copied-stack fix
+  is conservative and still needs design review before treating it as
+  production-ready.
 - Hard problems should be handled with reductions and design experiments, not
   broad self-host retries. The main hard areas remain exception/effect control
   flow, runtime stack switching, multidomain interactions, SIMD coverage, and
@@ -127,6 +128,16 @@ If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
     exposes `otherlibs/eval`, `otherlibs/runtime_events`, and the stdlib
     universe directories. Without this, quotation and layout-product tests fail
     from missing `-I` directories/files rather than from compiler behavior.
+  - A broader stage-5 ocamltest sweep passed after exposing the staged toplevel
+    bytecode artifacts for expect tests: `tests/basic-float`, `tests/basic-io`,
+    `tests/basic-manyargs`, `tests/basic-modules`, `tests/basic-more`,
+    `tests/lib-array`, `tests/lib-bigarray`, `tests/lib-bigarray-2`,
+    `tests/lib-buffer`, `tests/lib-bytes`, `tests/lib-digest`,
+    `tests/lib-float`, `tests/lib-format`, `tests/lib-hashtbl`,
+    `tests/lib-list`, `tests/lib-marshal`, `tests/lib-obj`,
+    `tests/lib-random`, `tests/lib-runtime-events`, `tests/lib-string`,
+    `tests/runtime-errors`, and `tests/weak-ephe-final`. Every directory
+    recorded fresh `-x ir` wrapper calls.
 
 Fix behind that progress:
 

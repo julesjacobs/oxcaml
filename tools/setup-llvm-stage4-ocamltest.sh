@@ -15,6 +15,7 @@ install_lib=${INSTALL_LIB:-$normal_build/install/main/lib/ocaml}
 stdlib_stable_dir=${STDLIB_STABLE_DIR:-$install_lib/stdlib_stable}
 runtime_dir=${RUNTIME_DIR_PATH:-$normal_build/main/runtime}
 stage_ocamlopt=$stage_build/main/oxcaml_main_native.exe
+toplevel_dir=${TOPLEVEL_DIR:-$stage_build/main/toplevel/byte/.ocamltoplevel.objs/byte}
 
 require_path () {
   if [ ! -e "$1" ]; then
@@ -32,6 +33,7 @@ require_path "$runtime_dir/ocamlrun"
 require_path "$repo/_runtest/testsuite/tools/expect"
 require_path "$repo/_runtest/testsuite/tools/expectnat"
 require_path "$wrapper"
+require_path "$toplevel_dir/toploop.cmi"
 
 shopt -s nullglob
 
@@ -52,6 +54,7 @@ ln -sfn "$stage_ocamlopt" "$fake_root/ocamlopt.opt"
 
 ln -sfn "$runtime_dir" "$fake_root/runtime"
 ln -sfn "$stdlib_dir" "$fake_root/stdlib"
+ln -sfn "$toplevel_dir" "$fake_root/toplevel"
 ln -sfn "$repo/_install" "$fake_root/_install"
 ln -sfn "$repo/runtime5" "$fake_root/runtime5"
 ln -sfn "$repo/tools" "$fake_root/tools"
