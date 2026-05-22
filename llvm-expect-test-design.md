@@ -42,8 +42,10 @@ add1:
 ```
 
 The inline expectations should contain normalized output, not raw compiler
-output. Normalization should handle unstable names, labels, paths, metadata
-noise, and target-specific boilerplate deliberately.
+output. The first implementation keeps only user code functions, normalizes
+toplevel-generated names such as `camlTOP1` to `camlTOP`, and drops module/data
+boilerplate. Broader target support will need either more architecture/system
+filters or separate tests per target.
 
 ## Test Layout
 
@@ -72,7 +74,7 @@ backend/
   emit.mli               # keep existing native asm callback unchanged
 
 backend/llvm/
-  llvmize.ml             # capture and normalize LLVM IR/asm when callbacks run
+  llvmize.ml             # capture and normalize LLVM code functions and asm
 ```
 
 The clean design point is that the expected output lives inline with the OCaml
