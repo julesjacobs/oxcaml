@@ -16,7 +16,7 @@ using that LLVM-built toolchain.
 - The normal Make pipeline can build the compiler with LLVM enabled and can pass
   `make runtest-llvmize` on arm64 with real LLVM use.
 - A broad `make runtest` with LLVM enabled now gets past the earlier SIMD
-  compile blockers, but still fails at runtime in SIMD/small-number tests.
+  compile blockers, but still fails at runtime in later tests.
 - The LLVM-built compiler can compile and run small programs with
   `-llvm-backend`. A full test-suite run with an LLVM-built compiler is still
   pending.
@@ -68,8 +68,9 @@ If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
   compiles successfully with `-llvm-backend`; the wrapper log recorded
   `-x ir`.
 - Additional reduced SIMD files now compile through LLVM: `utils_u.ml`,
-  `basic_u.ml`, `ops_int64x2.ml`, `arrays256.ml`, and `ops_float32x4.ml`.
-  These focused checks recorded fresh `-x ir` clang invocations.
+  `basic_u.ml`, `ops_int64x2.ml`, `arrays256.ml`, `ops_float32x4.ml`, and
+  `ops_float64x2.ml`. These focused checks recorded fresh `-x ir` clang
+  invocations.
 
 Latest fixes behind that SIMD progress:
 
@@ -94,9 +95,17 @@ Latest fixes behind that SIMD progress:
   ordered compare plus select. After rebuilding the focused SIMD slice through
   LLVM, `oxcaml/tests/simd/consts.out` is empty with 10 fresh `-x ir` wrapper
   calls.
-- Current broad `make runtest` blockers include `small_numbers/float32_lib`
-  assertion failures and a SIMD callee-save NEON test segfault. A fresh broad
-  run is still needed after the scalar min/max fix.
+- Fixed ARM64 SIMD float-to-int conversions: `cvtt` lowers to `FCVTZS` and
+  `cvt` lowers to `FCVTNS`, matching the native ARM64 backend instead of using
+  LLVM `fptosi` for both. `ops_float32x4.out` is now empty with fresh LLVM IR
+  calls.
+- Fixed `float64x2 -> float32x4` lowering to zero the high half. After the fix,
+  `ops_float64x2.out` is empty with fresh LLVM IR calls.
+- `test_callee_save_neon_regs_nodynlink.out` still segfaults with fresh LLVM IR
+  calls and an empty output file. LLDB shows the crash in `caml_scan_stack`
+  through `Hd_val(4)`, so this now looks like a separate stack-map/root metadata
+  issue rather than the earlier SIMD arithmetic/conversion mismatch.
+- A fresh broad `make runtest` is still needed after the latest SIMD fixes.
 - Direct Dune probes must also be checked against
   `/tmp/oxcaml-clang-wrapper.log`; one direct Dune command with only
   `BUILD_OCAMLPARAM` rebuilt without invoking the LLVM wrapper.
