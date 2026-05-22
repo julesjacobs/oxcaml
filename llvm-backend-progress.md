@@ -68,6 +68,11 @@ using that LLVM-built toolchain.
   resulting compiler now reports `_llvm_self_stage2_install/lib/ocaml` as its
   standard library by default and compiled and ran `fib 10` with forced LLVM
   and no `OCAMLLIB`, output `55`, `2` fresh `-x ir`.
+- A broad `_llvm_self_stage2_install` ocamltest sweep got through the full list
+  with forced LLVM and found only fake-root wrapper bugs in the debugger tests:
+  `6561` passed, `274` skipped, `6` failed. After fixing fake-root tool links
+  to point at `.real` binaries when staged tools are wrapped, the focused
+  `tests/tool-debugger` rerun passed: `52` passed, `0` failed.
 - `tools/build-llvm-stage5-install.sh` still wraps the lower-level staged
   LLVM runtime/main rebuild and `_llvm_stage5_install` refresh.
 - `LLVM_BACKEND=1` is now the normal Make entry point for this mode. It sets the
@@ -77,8 +82,9 @@ using that LLVM-built toolchain.
   `make llvm-test-one` are explicit opt-in aliases for the normal Make
   workflow with `LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1`. `make
   llvm-self-stage-install`, `make llvm-self-stage2-install`, and `make
-  llvm-self-stage-test` expose the LLVM-built-compiler paths. The default Make
-  targets still use the normal backend.
+  llvm-self-stage-test`/`make llvm-self-stage2-test` expose the
+  LLVM-built-compiler paths. The default Make targets still use the normal
+  backend.
 - Normal `test-one-no-rebuild` also passed selected runtime/control-flow slices
   with forced LLVM: `effects`, `exception-extra-args`, `match-exception`,
   `runtime-C-exceptions`, `statmemprof`, and `weak-ephe-final`; combined wrapper
@@ -179,6 +185,13 @@ Run the broad self-stage forced-LLVM ocamltest sweep through Make:
 ```sh
 PATH=/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin:$PATH \
   make llvm-self-stage-test LLVM_PATH=/tmp/oxcaml-clang-wrapper
+```
+
+Run the broad repeat-self-stage forced-LLVM ocamltest sweep through Make:
+
+```sh
+PATH=/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin:$PATH \
+  make llvm-self-stage2-test LLVM_PATH=/tmp/oxcaml-clang-wrapper
 ```
 
 Build the boot compiler with the LLVM-capable installed compiler as stage 0:

@@ -488,7 +488,7 @@ runtest-upstream: test
 test-one: install_for_test
 	$(MAKE) test-one-no-rebuild
 
-.PHONY: llvm-compiler llvm-install llvm-test llvm-test-one llvm-self-stage-install llvm-self-stage2-install llvm-self-stage-test
+.PHONY: llvm-compiler llvm-install llvm-test llvm-test-one llvm-self-stage-install llvm-self-stage2-install llvm-self-stage-test llvm-self-stage2-test
 llvm-compiler:
 	$(MAKE) compiler LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1
 
@@ -517,6 +517,14 @@ llvm-self-stage2-install: llvm-self-stage-install
 
 llvm-self-stage-test: llvm-self-stage-install
 	SELF_STAGE=1 LLVM_WRAPPER="$(or $(LLVM_PATH),/tmp/oxcaml-clang-wrapper)" \
+	  tools/run-llvm-stage5-ocamltest.sh
+
+llvm-self-stage2-test: llvm-self-stage2-install
+	STAGE_INSTALL="$(ROOTDIR)/_llvm_self_stage2_install" \
+	  STAGE_BUILD="$(ROOTDIR)/_llvm_self_stage2_main_build" \
+	  FAKE_ROOT=/tmp/oxcaml-self-stage2-ocamltest-src \
+	  LIST=/tmp/oxcaml-self-stage2-all-minus-asm-list.txt \
+	  LLVM_WRAPPER="$(or $(LLVM_PATH),/tmp/oxcaml-clang-wrapper)" \
 	  tools/run-llvm-stage5-ocamltest.sh
 
 # If the TEST argument is passed as `testsuite/tests/foo` (as is invited by

@@ -85,6 +85,15 @@ mirror_ml_sources () {
   done
 }
 
+install_tool () {
+  local tool=$1
+  if [ -e "$tool.real" ]; then
+    printf '%s.real' "$tool"
+  else
+    printf '%s' "$tool"
+  fi
+}
+
 mkdir -p \
   "$fake_root" \
   "$fake_root/otherlibs" \
@@ -102,14 +111,14 @@ done
 
 for tool in "$install_bin"/*; do
   name=$(basename "$tool")
-  ln -sfn "$tool" "$fake_root/$name"
+  ln -sfn "$(install_tool "$tool")" "$fake_root/$name"
 done
 
-ln -sfn "$install_bin/ocamlc.byte" "$fake_root/ocamlc"
-ln -sfn "$install_bin/ocamlopt.byte" "$fake_root/ocamlopt"
-ln -sfn "$install_bin/ocamllex.byte" "$fake_root/ocamllex"
+ln -sfn "$(install_tool "$install_bin/ocamlc.byte")" "$fake_root/ocamlc"
+ln -sfn "$(install_tool "$install_bin/ocamlopt.byte")" "$fake_root/ocamlopt"
+ln -sfn "$(install_tool "$install_bin/ocamllex.byte")" "$fake_root/ocamllex"
 ln -sfn "$stage_ocamlopt" "$fake_root/ocamlopt.opt"
-ln -sfn "$install_bin/ocamlyacc" "$fake_root/ocamlyacc"
+ln -sfn "$(install_tool "$install_bin/ocamlyacc")" "$fake_root/ocamlyacc"
 ln -sfn . "$fake_root/lex"
 ln -sfn . "$fake_root/yacc"
 
@@ -156,16 +165,16 @@ mkdir -p "$fake_root/debugger"
 for file in "$debugger_dir"/*; do
   ln -sfn "$file" "$fake_root/debugger/$(basename "$file")"
 done
-ln -sfn "$debugger_exe" "$fake_root/debugger/ocamldebug"
+ln -sfn "$(install_tool "$debugger_exe")" "$fake_root/debugger/ocamldebug"
 
 rm -rf "$fake_root/tools"
 mkdir -p "$fake_root/tools"
 for file in "$repo"/tools/*; do
   ln -sfn "$file" "$fake_root/tools/$(basename "$file")"
 done
-ln -sfn "$install_bin/ocamlmklib.byte" "$fake_root/tools/ocamlmklib"
-ln -sfn "$install_bin/dumpobj.byte" "$fake_root/tools/dumpobj"
-ln -sfn "$install_bin/ocamlobjinfo.byte" "$fake_root/tools/ocamlobjinfo"
+ln -sfn "$(install_tool "$install_bin/ocamlmklib.byte")" "$fake_root/tools/ocamlmklib"
+ln -sfn "$(install_tool "$install_bin/dumpobj.byte")" "$fake_root/tools/dumpobj"
+ln -sfn "$(install_tool "$install_bin/ocamlobjinfo.byte")" "$fake_root/tools/ocamlobjinfo"
 
 rm -rf \
   "$fake_root/otherlibs/unix" \
