@@ -5,6 +5,7 @@ set -euo pipefail
 repo=$(cd "$(dirname "$0")/.." && pwd)
 
 stage0_install=${STAGE0_INSTALL:-$repo/_install}
+stage0_install=$(cd "$stage0_install" && pwd)
 boot_build=${BOOT_BUILD:-$repo/_llvm_boot_context_build}
 wrapper=${LLVM_WRAPPER:-/tmp/oxcaml-clang-wrapper}
 opam_switch_bin=${OPAM_SWITCH_BIN:-/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin}
@@ -56,12 +57,12 @@ if [ -z "$system" ] || [ -z "$model" ] || [ -z "$aspp" ]; then
   exit 1
 fi
 
-make -C "$repo" duneconf/boot.ws >/dev/null
+make -C "$repo" LLVM_BOOT_BACKEND=1 LLVM_BOOT_INSTALL="$stage0_install" \
+  LLVM_PATH="$wrapper" duneconf/boot.ws >/dev/null
 
 boot_ws=$(mktemp /tmp/oxcaml-llvm-boot.XXXXXX)
 trap 'rm -f "$boot_ws"' EXIT
-sed 's#("OCAMLPARAM" "")#("OCAMLPARAM" "_,llvm-backend=1,llvm-path='"$wrapper"'")#' \
-  "$repo/duneconf/boot.ws" > "$boot_ws"
+cp "$repo/duneconf/boot.ws" "$boot_ws"
 
 targets=(
   main_native.exe

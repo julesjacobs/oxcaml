@@ -26,6 +26,15 @@ copy_file () {
   cp -L "$src" "$dst"
 }
 
+copy_tool_file () {
+  local src=$1
+  local dst=$2
+  if [ -e "$src.real" ]; then
+    src="$src.real"
+  fi
+  copy_file "$src" "$dst"
+}
+
 print_wrapper_counts () {
   fresh_ir=$(rg -c -- '-x ir' /tmp/oxcaml-clang-wrapper.log || true)
   if [ -z "$fresh_ir" ]; then fresh_ir=0; fi
@@ -49,7 +58,7 @@ copy_file "$boot_build/default/boot_ocamlj.exe" "$boot_install/bin/ocamlj.opt"
 copy_file "$boot_build/default/tools/ocamlmklib.exe" "$boot_install/bin/ocamlmklib.opt"
 copy_file "$boot_build/default/tools/ocamldep.exe" "$boot_install/bin/ocamldep.opt"
 copy_file "$boot_build/default/tools/objinfo.exe" "$boot_install/bin/ocamlobjinfo.opt"
-copy_file "$stage0_install/bin/ocamllex.opt" "$boot_install/bin/ocamllex.opt"
+copy_tool_file "$stage0_install/bin/ocamllex.opt" "$boot_install/bin/ocamllex.opt"
 
 (
   cd "$boot_install/bin"
