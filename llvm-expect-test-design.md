@@ -53,7 +53,8 @@ filters or separate tests per target.
 testsuite/tests/llvm-codegen/
   arithmetic.ml
   allocation.ml
-  calls_and_safepoints.ml
+  calls.ml
+  control_flow.ml
   exceptions.ml
 ```
 
@@ -61,7 +62,8 @@ The first useful tests should be small:
 
 - arithmetic and control flow;
 - allocation or calls with safepoints;
-- one case that checks final target assembly, not only LLVM IR.
+- exception-handler setup/restore shape;
+- final target assembly, not only LLVM IR.
 
 ## Implementation Shape
 
