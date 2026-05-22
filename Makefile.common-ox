@@ -327,6 +327,7 @@ install_for_test: install
 	ln -s ../_install _runtest/_install
 	# Use rsync to ensure hardlinks are created on both Linux and macOS
 	rsync --link-dest=../../$(ocamldir)/testsuite/ -a $(ocamldir)/testsuite/ _runtest/testsuite/
+	find _runtest/testsuite/tests -name '*.corrected' -delete
 	 # replace backend-specific testsuite/tools with their new versions
 	rm -f _runtest/testsuite/tools/*
 	cp -a oxcaml/testsuite/tools/* _runtest/testsuite/tools/
@@ -447,6 +448,7 @@ test: install_for_test
 	    fi; \
 	  done > _runtest/flambda2-test-list; \
 	fi
+	find _runtest/testsuite/tests -name '*.corrected' -delete
 	(export OCAMLSRCDIR=$$(pwd)/_runtest; \
 	 export CAML_LD_LIBRARY_PATH=$$(pwd)/_runtest/lib/ocaml/stublibs; \
 	 if $$(which gfortran > /dev/null 2>&1); then \
@@ -493,6 +495,7 @@ locate_test = \
   )
 
 test-one-no-rebuild:
+	find _runtest/testsuite/tests -name '*.corrected' -delete
 	(export OCAMLSRCDIR=$$(pwd)/_runtest; \
 	 export CAML_LD_LIBRARY_PATH=$$(pwd)/_runtest/lib/ocaml/stublibs; \
 	 if $$(which gfortran > /dev/null 2>&1); then \

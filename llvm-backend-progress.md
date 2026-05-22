@@ -13,8 +13,7 @@ using that LLVM-built toolchain.
   runtime/main compiler install with LLVM forced.
 - This is not production self-hosting yet. The staged compiler can compile and
   run many real programs and tests, and the normal Make path now has an
-  opt-in LLVM boot context, but the full normal `make test` path with LLVM
-  enabled everywhere has not passed yet.
+  opt-in LLVM boot context that can build boot/runtime/main with LLVM enabled.
 - `LLVM_BOOT_BACKEND=1` makes `duneconf/boot.ws` use an LLVM-capable stage-0
   install, defaulting to `_install`, plus `llvm-backend=1`. After removing stale
   `_build/default` artifacts from a previous non-LLVM boot context, `make
@@ -26,6 +25,12 @@ using that LLVM-built toolchain.
 - `make test-one DIR=basic LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1` passed through
   the normal `install_for_test` path: `82` passed, `0` failed, with `78` fresh
   `-x ir` compilations during the test run.
+- A full clean no-rebuild testsuite run from `_runtest` with the normal
+  LLVM-enabled Make install passed on arm64: `6599` passed, `287` skipped,
+  `0` failed, `0` unexpected errors, with `2745` fresh `-x ir` compilations.
+  The prior full `make test LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1` run reached
+  the same test root but failed only because source-tree `*.corrected` files
+  were copied into `_runtest` and rediscovered as tests.
 - The latest broad stage-5 ocamltest sweep excluded only `tests/asmgen` and
   `tests/asmcomp`. It passed with forced LLVM: `6573` passed, `274` skipped,
   `0` failed, `0` unexpected errors. The wrapper log recorded `5474` clang
@@ -54,8 +59,6 @@ using that LLVM-built toolchain.
   with forced LLVM: `effects`, `exception-extra-args`, `match-exception`,
   `runtime-C-exceptions`, `statmemprof`, and `weak-ephe-final`; combined wrapper
   count was `130` fresh `-x ir`.
-- The broad normal `make test LLVM_BACKEND=1` path completed with `6599` passed,
-  `287` skipped, `0` failed, `0` unexpected errors, and `2745` fresh `-x ir`.
 - After refreshing `_install`, `_install/bin/ocamlopt.opt` compiled and ran a
   recursive `fib` program with forced LLVM: output `55`, `2` fresh `-x ir`.
 - The boot Dune context still clears `OCAMLPARAM` in the normal Make path. The
@@ -184,6 +187,10 @@ Put the OxCaml opam switch first in `PATH`.
 - The helper removes stale mirrored `*.ml`, `*.mli`, and `*.corrected` files
   before relinking sources. Without this, ignored generated correction files can
   be rediscovered as tests.
+- Normal `install_for_test`, `test`, and `test-one-no-rebuild` now delete
+  mirrored `*.corrected` files before running ocamltest. Without this, generated
+  correction files in the source tree or from a previous `_runtest` run can be
+  treated as tests with extension `corrected`.
 - `install_for_test` now removes replaced backend-specific testsuite
   directories recursively, so stale `_ocamltest` directories do not break
   repeated normal `make test-one` runs.
@@ -198,8 +205,10 @@ Put the OxCaml opam switch first in `PATH`.
   `_runtest/testsuite/tools/codegen` reports a Cmm lexical error on
   `tests/asmgen/fib.cmm`.
 - The stage fake root is a useful test harness, not the final bootstrap story.
-  The ordinary `make test` path now mostly works with LLVM forced; the next
-  major milestone is normal bootstrap with the LLVM backend as the default.
+  The ordinary Make path now builds boot/runtime/main with LLVM enabled and the
+  installed test root passes under forced LLVM. The next major milestone is
+  normal bootstrap with the LLVM backend as the default and no special
+  `OCAMLPARAM` forcing.
 - Main remaining design risks: exception/effect control flow, runtime stack
   switching, multidomain interactions, SIMD coverage, and the exact
   statepoint-to-frametable contract.
@@ -208,5 +217,6 @@ Put the OxCaml opam switch first in `PATH`.
 
 1. Audit copied-stack relocation for false positives and decide whether
    conservative runtime scanning is acceptable or needs stack-address metadata.
-2. Move from the fake-root sweep to the normal bootstrap process with LLVM
-   enabled everywhere, then run the full test suite.
+2. Re-run a clean top-level `make test LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1`
+   after the corrected-file cleanup, then move toward making LLVM the default
+   backend rather than forcing it through `OCAMLPARAM`.
