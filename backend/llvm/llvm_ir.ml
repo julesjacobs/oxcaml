@@ -148,6 +148,12 @@ module Type = struct
 
   let doublex2 = Vector { num_of_elems = 2; elem_type = double }
 
+  let vec128 = Vector { num_of_elems = 2; elem_type = i64 }
+
+  let vec256 = Vector { num_of_elems = 4; elem_type = i64 }
+
+  let vec512 = Vector { num_of_elems = 8; elem_type = i64 }
+
   let label = Label
 
   let metadata = Metadata
@@ -161,8 +167,10 @@ module Type = struct
     | Addr -> i64
     | Float -> double
     | Float32 -> float
-    | Vec128 | Vec256 | Vec512 | Valx2 ->
-      fail_msg ~name:"Type.of_machtype_component" "not_implemented"
+    | Vec128 -> vec128
+    | Vec256 -> vec256
+    | Vec512 -> vec512
+    | Valx2 -> vec128
 
   let of_reg (reg : Reg.t) = of_machtype_component reg.typ
 
@@ -244,6 +252,30 @@ module Type = struct
     | Int _ -> true
     | Ptr _ | Float | Double | Struct _ | Array _ | Vector _ | Label | Token
     | Metadata ->
+      false
+
+  let is_int_or_int_vector = function
+    | Int _ -> true
+    | Vector { elem_type = Int _; _ } -> true
+    | Ptr _ | Float | Double | Struct _ | Array _ | Vector _ | Label | Token
+    | Metadata ->
+      false
+
+  let cmp_res_type = function
+    | Vector { num_of_elems; elem_type = Int _ } ->
+      Vector { num_of_elems; elem_type = i1 }
+    | Vector { num_of_elems; elem_type = Float | Double } ->
+      Vector { num_of_elems; elem_type = i1 }
+    | Int _ | Float | Double -> i1
+    | Ptr _ | Struct _ | Array _ | Vector _ | Label | Token | Metadata ->
+      fail_msg ~name:"Type.cmp_res_type"
+        "expected scalar or vector comparison type"
+
+  let is_i1_or_i1_vector = function
+    | Int { width_in_bits = 1 } -> true
+    | Vector { elem_type = Int { width_in_bits = 1 }; _ } -> true
+    | Int _ | Ptr _ | Float | Double | Struct _ | Array _ | Vector _ | Label
+    | Token | Metadata ->
       false
 
   let is_floating_point = function
@@ -835,7 +867,8 @@ module Instruction = struct
     | Unary { arg; _ } -> Some (Value.get_type arg)
     | Binary { arg1; _ } -> Some (Value.get_type arg1)
     | Convert { to_; _ } -> Some to_
-    | Icmp _ | Fcmp _ -> Some Type.i1
+    | Icmp { arg1; _ } | Fcmp { arg1; _ } ->
+      Some (Type.cmp_res_type (Value.get_type arg1))
     (* Vector operations *)
     | Extractelement { vector; _ } -> Type.elem_type (Value.get_type vector)
     | Insertelement { vector; _ } -> Some (Value.get_type vector)
@@ -918,7 +951,7 @@ module Instruction = struct
     let arg1_type = Value.get_type arg1 in
     let arg2_type = Value.get_type arg2 in
     assert' "icmp" (Type.equal arg1_type arg2_type);
-    assert' "icmp" (Type.is_int arg1_type);
+    assert' "icmp" (Type.is_int_or_int_vector arg1_type);
     Icmp { cond; arg1; arg2 }
 
   let fcmp cond ~arg1 ~arg2 =
@@ -977,7 +1010,7 @@ module Instruction = struct
     Atomicrmw { op; ptr; arg }
 
   let select ~cond ~ifso ~ifnot =
-    assert' "select" (Value.get_type cond |> Type.(equal i1));
+    assert' "select" (Value.get_type cond |> Type.is_i1_or_i1_vector);
     let ifso_type = Value.get_type ifso in
     let ifnot_type = Value.get_type ifnot in
     assert' "select" (Type.equal ifso_type ifnot_type);
