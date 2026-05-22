@@ -1663,6 +1663,12 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_unary_intrinsic typ intrinsic =
+    let name = intrinsic ^ "." ^ llvm_intrinsic_type_suffix typ in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let res = call_llvm_intrinsic t name [arg] typ in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_binary width_in_bits op =
     let typ = int_vec_type ~width_in_bits in
     let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -1990,6 +1996,41 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_copyq_laneq_s64 ~src_lane ~dst_lane =
+    let typ = int_vec_type ~width_in_bits:64 in
+    let dst = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let src = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let elem =
+      emit_ins t (I.extractelement ~vector:src ~index:(V.of_int src_lane))
+    in
+    let res =
+      emit_ins t
+        (I.insertelement ~vector:dst ~index:(V.of_int dst_lane) ~to_insert:elem)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_extq_u8 n =
+    let typ = int_vec_type ~width_in_bits:8 in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let res =
+      List.init 16 Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let src_lane = lane + n in
+             let src, src_lane =
+               if src_lane < 16 then arg1, src_lane else arg2, src_lane - 16
+             in
+             let elem =
+               emit_ins t
+                 (I.extractelement ~vector:src ~index:(V.of_int src_lane))
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane) ~to_insert:elem))
+           (V.poison typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_zip typ ~high =
     match[@warning "-fragile-match"] typ with
     | T.Vector { num_of_elems; _ } ->
@@ -2266,10 +2307,34 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     simd_int_saturating_narrow 32 ~unsigned:true ~high:true
   | Isimd Simd.Qmovn_high_u16 ->
     simd_int_saturating_narrow 16 ~unsigned:true ~high:true
+  | Isimd Simd.Absq_s8 ->
+    simd_unary_intrinsic (int_vec_type ~width_in_bits:8) "aarch64.neon.abs"
+  | Isimd Simd.Absq_s16 ->
+    simd_unary_intrinsic (int_vec_type ~width_in_bits:16) "aarch64.neon.abs"
+  | Isimd Simd.Absq_s32 ->
+    simd_unary_intrinsic (int_vec_type ~width_in_bits:32) "aarch64.neon.abs"
+  | Isimd Simd.Absq_s64 ->
+    simd_unary_intrinsic (int_vec_type ~width_in_bits:64) "aarch64.neon.abs"
   | Isimd Simd.Mullq_s16 -> simd_int_widening_mul 16 Sext ~high:false
   | Isimd Simd.Mullq_high_s16 -> simd_int_widening_mul 16 Sext ~high:true
   | Isimd Simd.Mullq_u16 -> simd_int_widening_mul 16 Zext ~high:false
   | Isimd Simd.Mullq_high_u16 -> simd_int_widening_mul 16 Zext ~high:true
+  | Isimd Simd.Qaddq_s8 ->
+    simd_binary_intrinsic (int_vec_type ~width_in_bits:8) "aarch64.neon.sqadd"
+  | Isimd Simd.Qaddq_s16 ->
+    simd_binary_intrinsic (int_vec_type ~width_in_bits:16) "aarch64.neon.sqadd"
+  | Isimd Simd.Qaddq_u8 ->
+    simd_binary_intrinsic (int_vec_type ~width_in_bits:8) "aarch64.neon.uqadd"
+  | Isimd Simd.Qaddq_u16 ->
+    simd_binary_intrinsic (int_vec_type ~width_in_bits:16) "aarch64.neon.uqadd"
+  | Isimd Simd.Qsubq_s8 ->
+    simd_binary_intrinsic (int_vec_type ~width_in_bits:8) "aarch64.neon.sqsub"
+  | Isimd Simd.Qsubq_s16 ->
+    simd_binary_intrinsic (int_vec_type ~width_in_bits:16) "aarch64.neon.sqsub"
+  | Isimd Simd.Qsubq_u8 ->
+    simd_binary_intrinsic (int_vec_type ~width_in_bits:8) "aarch64.neon.uqsub"
+  | Isimd Simd.Qsubq_u16 ->
+    simd_binary_intrinsic (int_vec_type ~width_in_bits:16) "aarch64.neon.uqsub"
   | Isimd Simd.Paddq_s8 ->
     simd_binary_intrinsic (int_vec_type ~width_in_bits:8) "aarch64.neon.addp"
   | Isimd Simd.Paddq_s16 ->
@@ -2293,6 +2358,9 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     simd_zip (float_vec_type ~width:Cmm.Float64) ~high:false
   | Isimd Simd.Zip2q_f64 ->
     simd_zip (float_vec_type ~width:Cmm.Float64) ~high:true
+  | Isimd (Simd.Extq_u8 n) -> simd_extq_u8 n
+  | Isimd (Simd.Copyq_laneq_s64 { src_lane; dst_lane }) ->
+    simd_copyq_laneq_s64 ~src_lane ~dst_lane
   | Isimd Simd.Addq_f32 -> simd_float_binary Cmm.Float32 Fadd
   | Isimd Simd.Subq_f32 -> simd_float_binary Cmm.Float32 Fsub
   | Isimd Simd.Mulq_f32 -> simd_float_binary Cmm.Float32 Fmul
@@ -2640,8 +2708,13 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
     store_into_reg t i.res.(0) (V.of_symbol sym_name)
   | Const_float32 bits -> store_into_reg t i.res.(0) (V.of_float32_bits bits)
   | Const_float bits -> store_into_reg t i.res.(0) (V.of_float64_bits bits)
-  | Const_vec128 _ | Const_vec256 _ | Const_vec512 _ ->
-    not_implemented_basic ~msg:"const_vec" i
+  | Const_vec128 { word0; word1 } ->
+    let elem word = Format.asprintf "i64 %Ld" word in
+    let vector =
+      V.imm T.vec128 (Format.asprintf "<%s, %s>" (elem word0) (elem word1))
+    in
+    store_into_reg t i.res.(0) vector
+  | Const_vec256 _ | Const_vec512 _ -> not_implemented_basic ~msg:"const_vec" i
   (* CR yusumez: What do we do with mutability / is_atomic / is_modify? *)
   | Load { memory_chunk; addressing_mode; mutability = _; is_atomic = _ } ->
     load t i memory_chunk addressing_mode
