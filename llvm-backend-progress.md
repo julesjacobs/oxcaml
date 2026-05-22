@@ -158,6 +158,23 @@ Put the OxCaml opam switch first in `PATH`.
 
 ## Test Harness Notes
 
+- Existing `[%%expect_asm]` tests are driven by `expect.opt`, not by parsing a
+  `.s` file after `ocamlopt -S`: `expectnat` registers a one-shot callback with
+  `Emit`, amd64 `Emit.fundecl` records and normalizes the emitted function body,
+  and the expect runner compares that callback output against the inline
+  architecture-specific payload.
+- LLVM expect-test support is partially implemented. `expect.opt` accepts
+  `[%%expect_llvm_ir]` and `[%%expect_llvm_asm]`, `expectnat` registers
+  callbacks with `Llvmize`, and `Llvmize.end_assembly` captures normalized `.ll`
+  and LLVM-generated `.s` output per phrase. `expectnat` now reads `OCAMLPARAM`
+  before and after command-line parsing so `llvm-test-one` can pass
+  `llvm-path=/tmp/oxcaml-clang-wrapper`.
+- Validated: `make llvm-test-one DIR=llvm-codegen
+  LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed on arm64 with one
+  `testsuite/tests/llvm-codegen/arithmetic.ml` test. After restricting that
+  initial test to `macos; arch_arm64`, `make test-one-no-rebuild
+  DIR=llvm-codegen LLVM_BACKEND=1 LLVM_PATH=/tmp/oxcaml-clang-wrapper` also
+  passed; the wrapper log included `-x ir` for the expect phrase.
 - `_llvm_stage5_install` is assembled from the stage runtime stdlib and stage
   main install tree. It reports its standard library as
   `_llvm_stage5_install/lib/ocaml`.
@@ -206,8 +223,9 @@ Put the OxCaml opam switch first in `PATH`.
 
 ## Next Checks
 
-1. Audit copied-stack relocation for false positives and decide whether
+1. Harden LLVM expect output normalization: target/OS tags, unstable toplevel
+   names, and intentional pruning of boilerplate.
+2. Add a small set of LLVM expect tests for calls/safepoints, allocation, and
+   exception/control-flow shape.
+3. Audit copied-stack relocation for false positives and decide whether
    conservative runtime scanning is acceptable or needs stack-address metadata.
-2. Reduce the gap between the self-stage fake-root harness and ordinary
-   full-replacement testing: `asmgen`/`asmcomp`, multidomain/poll-insertion
-   configurations, and broad tests from `_llvm_self_stage2_install`.

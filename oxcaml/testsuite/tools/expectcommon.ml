@@ -22,9 +22,16 @@ type string_constant =
   ; tag : string
   }
 
-type expectation_filter = Principal | X86_64
+type expectation_filter =
+  | Principal
+  | X86_64
+  | AArch64
 
-type expectation_kind = Expect_toplevel | Expect_asm
+type expectation_kind =
+  | Expect_toplevel
+  | Expect_asm
+  | Expect_llvm_ir
+  | Expect_llvm_asm
 
 type expectation =
   { extid_loc       : Location.t (* Location of "expect" in "[%%expect ...]" *)
@@ -42,6 +49,10 @@ type chunk =
 let register_assembly_callback :
   ((string -> unit) -> unit) option ref = ref None
 
+let register_llvm_ir_callback : ((string -> unit) -> unit) option ref = ref None
+
+let register_llvm_asm_callback : ((string -> unit) -> unit) option ref = ref None
+
 type correction =
   { corrected_expectations : expectation list
   ; trailing_output        : string
@@ -50,16 +61,20 @@ type correction =
 let filter_of_string = function
   | "Principal" -> Some Principal
   | "X86_64" -> Some X86_64
+  | "AArch64" -> Some AArch64
   | _ -> None
 
 let string_of_filter = function
   | Principal -> "Principal"
   | X86_64 -> "X86_64"
+  | AArch64 -> "AArch64"
 
 let match_expect_extension (ext : Parsetree.extension) =
   let match_ext_name = function
     | "expect" | "ocaml.expect" -> Some Expect_toplevel
     | "expect_asm" | "ocaml.expect_asm" -> Some Expect_asm
+    | "expect_llvm_ir" | "ocaml.expect_llvm_ir" -> Some Expect_llvm_ir
+    | "expect_llvm_asm" | "ocaml.expect_llvm_asm" -> Some Expect_llvm_asm
     | _ -> None
   in
   match ext with
@@ -75,6 +90,12 @@ let match_expect_extension (ext : Parsetree.extension) =
     in
     if Option.is_none !register_assembly_callback && kind = Expect_asm
     then invalid_payload ~msg:"expect_asm is only supported by expect.opt" ();
+    if Option.is_none !register_llvm_ir_callback && kind = Expect_llvm_ir
+    then
+      invalid_payload ~msg:"expect_llvm_ir is only supported by expect.opt" ();
+    if Option.is_none !register_llvm_asm_callback && kind = Expect_llvm_asm
+    then
+      invalid_payload ~msg:"expect_llvm_asm is only supported by expect.opt" ();
     let string_constant (e : Parsetree.expression) =
       match e.pexp_desc with
       | Pexp_constant (Pconst_string (str, _, Some tag)) ->
@@ -103,7 +124,7 @@ let match_expect_extension (ext : Parsetree.extension) =
         ()
     in
     let is_arch_filter = function
-      | X86_64 -> true
+      | X86_64 | AArch64 -> true
       | Principal -> false
     in
     let validate_expect_toplevel entries =
@@ -119,7 +140,7 @@ let match_expect_extension (ext : Parsetree.extension) =
         in
         invalid_payload ~msg ()
     in
-    let validate_expect_asm entries =
+    let validate_arch_expectation ext_name entries =
       (* All entries must have architecture tags *)
       if List.for_all ~f:(fun (f, _) ->
         match f with
@@ -129,7 +150,9 @@ let match_expect_extension (ext : Parsetree.extension) =
       then entries
       else
         invalid_payload
-          ~msg:"expected [%%expect_asm Arch1{|...|}, Arch2{|...|}, ...]"
+          ~msg:
+            (Printf.sprintf
+               "expected [%%%s Arch1{|...|}, Arch2{|...|}, ...]" ext_name)
           ()
     in
     let expectation =
@@ -147,7 +170,11 @@ let match_expect_extension (ext : Parsetree.extension) =
         let expected_output =
           match kind with
           | Expect_toplevel -> validate_expect_toplevel expected_output
-          | Expect_asm -> validate_expect_asm expected_output
+          | Expect_asm -> validate_arch_expectation "expect_asm" expected_output
+          | Expect_llvm_ir ->
+            validate_arch_expectation "expect_llvm_ir" expected_output
+          | Expect_llvm_asm ->
+            validate_arch_expectation "expect_llvm_asm" expected_output
         in
         { extid_loc
         ; payload_loc = e.pexp_loc
@@ -163,7 +190,7 @@ let match_expect_extension (ext : Parsetree.extension) =
           ; expected_output = [(None, { tag = ""; str = "" })]
           ; kind
           }
-        | Expect_asm -> invalid_payload ())
+        | Expect_asm | Expect_llvm_ir | Expect_llvm_asm -> invalid_payload ())
       | _ -> invalid_payload ()
     in
     Some expectation
@@ -257,14 +284,15 @@ let parse_contents ~fname contents =
 let current_arch_filter () =
   match Target_system.architecture () with
   | X86_64 -> Some X86_64
-  | AArch64 | IA32 | ARM | POWER | Z | Riscv -> None
+  | AArch64 -> Some AArch64
+  | IA32 | ARM | POWER | Z | Riscv -> None
 
 (* For [%%expect]:
    - {|...|} alone: used for both principal and non-principal
    - {|...|}, Principal{|...|}: first for non-principal, second for principal
 
-   For [%%expect_asm]:
-   - All entries must have architecture tags (X86_64)
+   For [%%expect_asm], [%%expect_llvm_ir], and [%%expect_llvm_asm]:
+   - All entries must have architecture tags
 *)
 let eval_expectation expectation ~output =
   let to_update = match expectation.kind with
@@ -276,7 +304,7 @@ let eval_expectation expectation ~output =
         then [(Some Principal, if_principal)]
         else [(None, if_not_principal)]
       | _ -> Misc.fatal_error "impossible: already validated")
-  | Expect_asm ->
+  | Expect_asm | Expect_llvm_ir | Expect_llvm_asm ->
     List.filter
       ~f:(fun (f, _) -> f = current_arch_filter ())
       expectation.expected_output
@@ -292,7 +320,7 @@ let eval_expectation expectation ~output =
   | _ :: _ :: _ ->
     Location.raise_errorf
       ~loc:expectation.payload_loc
-      "duplicate architectures in [%%%%expect_asm]"
+      "duplicate architectures in architecture-specific expectation"
   | _ -> None
 
 let shift_lines delta phrases =
@@ -327,6 +355,8 @@ let eval_expect_file _fname ~file_contents ~execute_phrase =
   let () = Misc.Style.set_tag_handling ppf in
   let exec_phrases phrases =
     let last_asm = ref None in
+    let last_llvm_ir = ref None in
+    let last_llvm_asm = ref None in
     let phrases =
       match min_line_number phrases with
       | None -> phrases
@@ -338,6 +368,12 @@ let eval_expect_file _fname ~file_contents ~execute_phrase =
       Option.iter
         (fun register -> register (fun asm_out -> last_asm := Some asm_out))
         !register_assembly_callback;
+      Option.iter
+        (fun register -> register (fun ir_out -> last_llvm_ir := Some ir_out))
+        !register_llvm_ir_callback;
+      Option.iter
+        (fun register -> register (fun asm_out -> last_llvm_asm := Some asm_out))
+        !register_llvm_asm_callback;
       let snap = Btype.snapshot () in
       try
         Sys.with_async_exns
@@ -364,17 +400,28 @@ let eval_expect_file _fname ~file_contents ~execute_phrase =
       Buffer.add_char buf '\n';
     let s = Buffer.contents buf in
     Buffer.clear buf;
-    (Misc.delete_eol_spaces s, !last_asm)
+    ( Misc.delete_eol_spaces s,
+      !last_asm,
+      !last_llvm_ir,
+      !last_llvm_asm )
   in
   let corrected_expectations =
     capture_everything buf ppf ~f:(fun () ->
       List.concat_map chunks ~f:(fun chunk ->
-        let (toplevel_output, asm_output) = exec_phrases chunk.phrases in
+        let (toplevel_output, asm_output, llvm_ir_output, llvm_asm_output) =
+          exec_phrases chunk.phrases
+        in
         List.filter_map chunk.expectations ~f:(fun expectation ->
           let output = match expectation.kind with
             | Expect_toplevel -> toplevel_output
             | Expect_asm -> Option.value asm_output
                               ~default:"\nNo assembly: compilation failed\n"
+            | Expect_llvm_ir ->
+              Option.value llvm_ir_output
+                ~default:"\nNo LLVM IR: compilation failed\n"
+            | Expect_llvm_asm ->
+              Option.value llvm_asm_output
+                ~default:"\nNo LLVM assembly: compilation failed\n"
           in
           eval_expectation expectation ~output)))
   in
@@ -383,7 +430,9 @@ let eval_expect_file _fname ~file_contents ~execute_phrase =
     | None -> ""
     | Some phrases ->
       capture_everything buf ppf
-        ~f:(fun () -> fst (exec_phrases phrases))
+        ~f:(fun () ->
+          let (toplevel_output, _, _, _) = exec_phrases phrases in
+          toplevel_output)
   in
   { corrected_expectations; trailing_output }
 
@@ -494,7 +543,8 @@ let main (module Toplevel : Toplevel) fname =
   process_expect_file fname ~execute_phrase:Toplevel.execute_phrase;
   exit 0
 
-let run ~read_anonymous_arg ~extra_args ~extra_init toplevel =
+let run ~read_anonymous_arg ~extra_args ~extra_init ?(extra_after_args = fun () -> ())
+    toplevel =
   let args =
     Arg.align
       ( [ "-repo-root", Arg.String (fun s -> repo_root := Some s),
@@ -520,6 +570,7 @@ let run ~read_anonymous_arg ~extra_args ~extra_init toplevel =
   in
   try
     Arg.parse args read_anonymous_arg usage;
+    extra_after_args ();
     match !main_file with
     | Some fname -> main toplevel fname
     | None ->
