@@ -57,6 +57,16 @@ let fail_if_not ?msg name cond =
   if not cond
   then match msg with None -> fail name | Some msg -> fail_msg ~name "%s" msg
 
+let rec llvm_intrinsic_type_suffix (typ : T.t) =
+  match typ with
+  | Int { width_in_bits } -> F.sprintf "i%d" width_in_bits
+  | Float -> "f32"
+  | Double -> "f64"
+  | Vector { num_of_elems; elem_type } ->
+    F.sprintf "v%d%s" num_of_elems (llvm_intrinsic_type_suffix elem_type)
+  | Ptr _ | Struct _ | Array _ | Label | Token | Metadata ->
+    fail_msg ~name:"llvm_intrinsic_type_suffix" "unexpected type %a" T.pp_t typ
+
 let not_implemented_aux pp_instr ?msg i =
   fail_msg "unimplemented instruction: %a %a" pp_instr i
     (Format.pp_print_option
@@ -1373,7 +1383,7 @@ let int_op t (i : Cfg.basic Cfg.instruction) (op : Operation.integer_operation)
     let typ = T.i64 in
     let arg = load_reg_to_temp ~typ t i.arg.(0) in
     call_llvm_intrinsic t
-      (op_name ^ "." ^ T.to_string typ)
+      (op_name ^ "." ^ llvm_intrinsic_type_suffix typ)
       ([arg] @ extra_args) typ
   in
   let do_unary_intrinsic op_name = do_unary_intrinsic_extra_args op_name [] in
@@ -1455,7 +1465,9 @@ let float_op t (i : Cfg.basic Cfg.instruction) (width : Cmm.float_width)
   in
   let do_unary_intrinsic op_name =
     let arg = load_reg_to_temp ~typ t i.arg.(0) in
-    call_llvm_intrinsic t (op_name ^ "." ^ T.to_string typ) [arg] typ
+    call_llvm_intrinsic t
+      (op_name ^ "." ^ llvm_intrinsic_type_suffix typ)
+      [arg] typ
   in
   let res =
     match op with
@@ -1503,7 +1515,9 @@ let bswap t (i : Cfg.basic Cfg.instruction) (bitwidth : Arch.bswap_bitwidth) =
   let arg = load_reg_to_temp t i.arg.(0) in
   let trunced = do_trunc arg in
   let bswapped =
-    call_llvm_intrinsic t ("bswap." ^ T.to_string typ) [trunced] typ
+    call_llvm_intrinsic t
+      ("bswap." ^ llvm_intrinsic_type_suffix typ)
+      [trunced] typ
   in
   let zexted = do_zext bswapped in
   store_into_reg t i.res.(0) zexted
@@ -1568,19 +1582,19 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | Simd.Rounding_mode.Nearest -> "roundeven"
   in
   let float_round typ mode =
-    let name = round_intrinsic_name mode ^ "." ^ T.to_string typ in
+    let name = round_intrinsic_name mode ^ "." ^ llvm_intrinsic_type_suffix typ in
     call_llvm_intrinsic t name [float_arg typ 0] typ
   in
   let float_minmax intrinsic typ =
     call_llvm_intrinsic t
-      (intrinsic ^ "." ^ T.to_string typ)
+      (intrinsic ^ "." ^ llvm_intrinsic_type_suffix typ)
       [float_arg typ 0; float_arg typ 1]
       typ
   in
   let float_round_to_i64 typ =
     let rounded =
       call_llvm_intrinsic t
-        ("roundeven." ^ T.to_string typ)
+        ("roundeven." ^ llvm_intrinsic_type_suffix typ)
         [float_arg typ 0]
         typ
     in
@@ -1899,9 +1913,29 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_cmp width_in_bits cond ~zero =
+    let typ = int_vec_type ~width_in_bits in
+    let cond =
+      match cond with
+      | Simd.Cond.EQ -> I.Ieq
+      | Simd.Cond.GE -> I.Isge
+      | Simd.Cond.GT -> I.Isgt
+      | Simd.Cond.LE -> I.Isle
+      | Simd.Cond.LT -> I.Islt
+    in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 =
+      if zero
+      then V.zeroinitializer typ
+      else cast_if_needed (load_reg_to_temp t i.arg.(1)) typ
+    in
+    let cmp = emit_ins t (I.icmp cond ~arg1 ~arg2) in
+    let res = emit_ins t (I.convert Sext ~arg:cmp ~to_:typ) in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_float_round width mode =
     let typ = float_vec_type ~width in
-    let name = round_intrinsic_name mode ^ "." ^ T.to_string typ in
+    let name = round_intrinsic_name mode ^ "." ^ llvm_intrinsic_type_suffix typ in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
     let res = call_llvm_intrinsic t name [arg] typ in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
@@ -1961,7 +1995,9 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     float_muladd `Negmulsub typ |> store_into_reg t i.res.(0)
   | Isqrtf ->
     let typ = T.of_reg i.res.(0) in
-    call_llvm_intrinsic t ("sqrt." ^ T.to_string typ) [float_arg typ 0] typ
+    call_llvm_intrinsic t
+      ("sqrt." ^ llvm_intrinsic_type_suffix typ)
+      [float_arg typ 0] typ
     |> store_into_reg t i.res.(0)
   | Isimd (Simd.Round_f32 mode) ->
     float_round T.float mode |> store_into_reg t i.res.(0)
@@ -2102,6 +2138,14 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     simd_int_widening_mul 16 Zext ~high:true
   | Isimd (Simd.Cmp_f32 cond) -> simd_float_cmp Cmm.Float32 cond
   | Isimd (Simd.Cmp_f64 cond) -> simd_float_cmp Cmm.Float64 cond
+  | Isimd (Simd.Cmpz_s64 cond) -> simd_int_cmp 64 cond ~zero:true
+  | Isimd (Simd.Cmpz_s32 cond) -> simd_int_cmp 32 cond ~zero:true
+  | Isimd (Simd.Cmpz_s16 cond) -> simd_int_cmp 16 cond ~zero:true
+  | Isimd (Simd.Cmpz_s8 cond) -> simd_int_cmp 8 cond ~zero:true
+  | Isimd (Simd.Cmp_s64 cond) -> simd_int_cmp 64 cond ~zero:false
+  | Isimd (Simd.Cmp_s32 cond) -> simd_int_cmp 32 cond ~zero:false
+  | Isimd (Simd.Cmp_s16 cond) -> simd_int_cmp 16 cond ~zero:false
+  | Isimd (Simd.Cmp_s8 cond) -> simd_int_cmp 8 cond ~zero:false
   | Isimd (Simd.Roundq_f32 mode) -> simd_float_round Cmm.Float32 mode
   | Isimd (Simd.Roundq_f64 mode) -> simd_float_round Cmm.Float64 mode
   | _ -> not_implemented_basic ~msg:"specific" i
