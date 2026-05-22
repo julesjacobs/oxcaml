@@ -16,6 +16,8 @@ endif
 
 ifeq ($(LLVM_BACKEND),1)
 LLVM_PATH ?= /tmp/oxcaml-clang-wrapper
+LLVM_BOOT_BACKEND ?= 1
+export PATH := $(dir $(DUNE)):$(PATH)
 LLVM_BUILD_OCAMLPARAM := $(if $(BUILD_OCAMLPARAM),$(BUILD_OCAMLPARAM),_),llvm-backend=1,llvm-path=$(LLVM_PATH)
 override BUILD_OCAMLPARAM := $(LLVM_BUILD_OCAMLPARAM)
 override OCAMLPARAM := $(if $(OCAMLPARAM),$(OCAMLPARAM),_),llvm-backend=1,llvm-path=$(LLVM_PATH)
@@ -490,16 +492,16 @@ test-one: install_for_test
 
 .PHONY: llvm-compiler llvm-install llvm-test llvm-test-one llvm-self-stage-install llvm-self-stage2-install llvm-self-stage-test llvm-self-stage2-test
 llvm-compiler:
-	$(MAKE) compiler LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1
+	$(MAKE) compiler LLVM_BACKEND=1
 
 llvm-install:
-	$(MAKE) install LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1
+	$(MAKE) install LLVM_BACKEND=1
 
 llvm-test:
-	$(MAKE) test LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1
+	$(MAKE) test LLVM_BACKEND=1
 
 llvm-test-one:
-	$(MAKE) test-one LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1
+	$(MAKE) test-one LLVM_BACKEND=1
 
 llvm-self-stage-install: llvm-install
 	LLVM_WRAPPER="$(or $(LLVM_PATH),/tmp/oxcaml-clang-wrapper)" \
