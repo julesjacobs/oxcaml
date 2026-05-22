@@ -65,6 +65,7 @@ mirror_ml_sources () {
   local dst=$2
   [ -d "$src" ] || return 0
   mkdir -p "$dst"
+  find "$dst" -type f \( -name '*.ml' -o -name '*.mli' -o -name '*.corrected' \) -delete
   (
     cd "$src"
     find . -type d \
@@ -92,6 +93,12 @@ mkdir -p \
 
 ln -f "$repo/VERSION" "$fake_root/VERSION" 2>/dev/null \
   || cp -p "$repo/VERSION" "$fake_root/VERSION"
+for file in Makefile.config Makefile.build_config; do
+  if [ -e "$repo/$file" ]; then
+    ln -f "$repo/$file" "$fake_root/$file" 2>/dev/null \
+      || cp -p "$repo/$file" "$fake_root/$file"
+  fi
+done
 
 for tool in "$install_bin"/*; do
   name=$(basename "$tool")
