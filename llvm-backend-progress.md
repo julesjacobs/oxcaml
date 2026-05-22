@@ -288,6 +288,21 @@ If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
     fails before LLVM is involved: the existing `_runtest/testsuite/tools/codegen`
     also reports a Cmm lexical error on `tests/asmgen/fib.cmm`, so treat this
     as a separate raw-Asmgen/test-harness issue for now.
+  - All dynlink stage-5 directories passed or skipped as expected with forced
+    LLVM: bytecode, init-info, initializers, native, packed, PR regressions,
+    and private. Summary: `426` passed, `3` skipped, `0` failed, with `156`
+    fresh `-x ir` compilations. `lib-dynlink-domains` skipped because this
+    stage build is not multidomain-enabled.
+  - A broad stage-5 sweep of all test directories except `tests/asmgen` and
+    `tests/asmcomp` reached the end with forced LLVM: `6600` passed, `275`
+    skipped, and `2737` fresh `-x ir` compilations. The only unexpected errors
+    were stale ignored `*.ml.corrected` files being discovered as tests.
+  - The fake-root setup now removes stale mirrored OCaml source/correction
+    files and exposes `Makefile.config`/`Makefile.build_config`. The targeted
+    rerun of `tests/lib-bigarray-2`, `tests/mixed-blocks`,
+    `tests/records-and-block-indices`, `tests/typing-layouts`, and
+    `tests/typing-layouts-arrays` passed: `365` passed, `4` skipped, `0`
+    failed/errors, with `331` fresh `-x ir` compilations.
 
 Fix behind that progress:
 
