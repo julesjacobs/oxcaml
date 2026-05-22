@@ -74,6 +74,9 @@ If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
   passed, `0` failed. The wrapper log recorded `1188` fresh `-x ir`
   compilations. Unknown `[@@builtin]` externals now fall back to the normal
   builtin-check path instead of being treated as LLVM intrinsics.
+- `tail-call-many-returns` now passes with forced LLVM after rebuilding the
+  LLVM fork. The focused test recorded `2` fresh `-x ir` compilations and
+  fixed-register flags. The reduced program also prints `1` through `75`.
 
 Fix behind that progress:
 
@@ -83,6 +86,15 @@ Fix behind that progress:
   emitted wrappers such as `caml_curryVF_V_RF` as returning `double` in `d0`.
   Setting only the intermediate wrappers' `fun_ret_type` to `typ_val` fixes
   partial applications whose final result has a non-value return convention.
+- Unknown `[@@builtin]` externals must not be treated as arbitrary LLVM
+  intrinsics. The LLVM fallback now only accepts the intrinsic names that
+  `Llvmize.intrinsic` implements; otherwise the existing builtin-check path
+  reports the normal error, and `-disable-builtin-check` can still call the C
+  external.
+- On AArch64 Darwin, the LLVM OxCaml calling convention now uses `x8`-`x15` for
+  OxCaml integer values like non-Darwin. This avoids LLVM lowering large
+  aggregate returns through a hidden return buffer in `x28`, which conflicts
+  with the OxCaml domain-state register.
 
 ## Previously Verified
 
@@ -130,12 +142,17 @@ Fix behind that progress:
   `RewriteStatepointsForGC` included the statepoint instruction itself when
   computing caller live roots, which kept call arguments live across calls. The
   local LLVM fix computes liveness before the statepoint call.
+- Progress is steady on targeted call/GC metadata bugs, but stack-passed OCaml
+  call values are still design-sensitive. The current AArch64 Darwin change
+  avoids the failing stack-result test by keeping more OxCaml values in
+  registers. A cleaner long-term design may still need explicit LLVM lowering
+  for true stack-passed OCaml call results.
 
 ## Next Checks
 
-1. Reduce the `tail-call-many-returns` LLVM/clang crash in AArch64 instruction
-   selection.
-2. Reduce the native toplevel bus error in
+1. Reduce the native toplevel bus error in
    `typing-small-numbers/test_matching_native.ml`.
+2. Re-run the full installed-compiler flambda2 testsuite with forced LLVM to
+   confirm only the native toplevel failure remains.
 3. Confirm a normal bootstrap using the LLVM-built installed compiler, not just
    the boot compiler plus LLVM-enabled final build.
