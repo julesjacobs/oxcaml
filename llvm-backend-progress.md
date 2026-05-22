@@ -18,9 +18,10 @@ using that LLVM-built toolchain.
 - The LLVM-built installed compiler can pass the full compiler testsuite with
   forced `-llvm-backend` on arm64. It can also build a stage-5 runtime stdlib
   and complete stage-5 main install tree in a separate Dune build dir. The
-  stage-5 compiler now passes `tests/basic` through ocamltest. This is an
-  important milestone, but the current copied-stack fix is conservative and
-  still needs design review before treating it as production-ready.
+  stage-5 compiler now passes `tests/basic` and `tests/effects` through
+  ocamltest. This is an important milestone, but the current copied-stack fix is
+  conservative and still needs design review before treating it as
+  production-ready.
 - Hard problems should be handled with reductions and design experiments, not
   broad self-host retries. The main hard areas remain exception/effect control
   flow, runtime stack switching, multidomain interactions, SIMD coverage, and
@@ -106,6 +107,9 @@ If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
   - `tests/basic` passed through ocamltest using the stage-5 compiler and
     stdlib: `82` passed, `0` skipped, `0` failed. The wrapper recorded `156`
     clang calls and `78` fresh `-x ir` compilations.
+  - `tests/effects` passed through ocamltest using the stage-5 compiler and
+    stdlib: `127` passed, `28` skipped, `0` failed. The wrapper recorded `98`
+    clang calls and `49` fresh `-x ir` compilations.
 
 Fix behind that progress:
 
@@ -195,7 +199,7 @@ Fix behind that progress:
 1. Audit the copied-stack relocation design for false positives and decide
    whether conservative runtime scanning is acceptable or needs stack-address
    metadata from the LLVM backend.
-2. Turn the manual stage-5 install assembly into a repeatable target/script so
-   full stage-built tests can be run without relying on handwritten commands.
-3. Expand stage-5 ocamltest coverage beyond `tests/basic` toward the full
-   suite, with real LLVM use checked by the wrapper log.
+2. Expand stage-5 ocamltest coverage beyond `tests/basic` and `tests/effects`
+   toward the full suite, with real LLVM use checked by the wrapper log.
+3. Decide whether the repeatable stage install setup should become a Make target
+   or remain a development script.
