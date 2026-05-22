@@ -25,6 +25,10 @@ using that LLVM-built toolchain.
   with `GENERATE_LIST=0 LIST=/tmp/oxcaml-stage5-smoke-list.txt` containing
   `tests/basic` passed: `82` passed, `0` failed, with `78` fresh `-x ir`
   compilations.
+- `tools/build-llvm-stage5-install.sh` now wraps the staged LLVM runtime/main
+  rebuild and `_llvm_stage5_install` refresh. The cached validation path
+  succeeds and reports wrapper counts cleanly; use a clean build directory when
+  fresh `-x ir` counts are needed.
 - The current copied-stack relocation fix is conservative and still needs
   design review before treating it as production-ready. Hard problems should be
   handled with reductions and design experiments, not broad self-host retries.
@@ -69,6 +73,12 @@ Run the broad stage-5 forced-LLVM ocamltest sweep:
 tools/run-llvm-stage5-ocamltest.sh
 ```
 
+Rebuild and refresh the staged LLVM install:
+
+```sh
+tools/build-llvm-stage5-install.sh
+```
+
 If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
 `duneconf/main.ws` first. Put the OxCaml opam switch first in `PATH`.
 
@@ -99,6 +109,9 @@ If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
 - `_llvm_stage5_install` is assembled from the stage runtime stdlib and stage
   main install tree. It reports its standard library as
   `_llvm_stage5_install/lib/ocaml`.
+- `tools/build-llvm-stage5-install.sh` generates the staged runtime/main dune
+  workspaces, supplies the configured asm preprocessor environment, and refreshes
+  `_llvm_stage5_install`.
 - `tools/setup-llvm-stage4-ocamltest.sh` mirrors enough of `install_for_test`
   for stage ocamltest runs: staged tool binaries, runtime/stdlib files, compiler
   library source layout, `Makefile.config`, `Makefile.build_config`, debugger,
@@ -128,7 +141,7 @@ If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
 
 1. Audit copied-stack relocation for false positives and decide whether
    conservative runtime scanning is acceptable or needs stack-address metadata.
-2. Convert the stage install/test setup into a repeatable Make or script entry
-   point that can run from a clean checkout.
+2. Run `tools/build-llvm-stage5-install.sh` from a clean build directory and
+   record fresh wrapper counts.
 3. Move from the fake-root sweep to the normal bootstrap process with LLVM
    enabled everywhere, then run the full test suite.
