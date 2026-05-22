@@ -10,15 +10,17 @@ using that LLVM-built toolchain.
 
 - Progress is steady on normal-built compiler plus `-llvm-backend`,
   LLVM-built installed compiler probes, and targeted test-suite reductions.
-- This is not production self-hosting yet. Stage-3/stage-4 LLVM-built compiler
+- This is not production self-hosting yet. Stage-3/stage-5 LLVM-built compiler
   probes have worked, but the normal workspace still uses normal-built boot
   tools in parts of the pipeline.
 - The normal Make pipeline can build the compiler with LLVM enabled and can pass
   `make runtest-llvmize` and a broad `make runtest` on arm64 with real LLVM use.
 - The LLVM-built installed compiler can pass the full compiler testsuite with
-  forced `-llvm-backend` on arm64. This is an important milestone, but the
-  current copied-stack fix is conservative and still needs design review before
-  treating it as production-ready.
+  forced `-llvm-backend` on arm64. It can also build a stage-5 runtime stdlib
+  and complete stage-5 main install tree in a separate Dune build dir. The
+  stage-5 compiler now passes `tests/basic` through ocamltest. This is an
+  important milestone, but the current copied-stack fix is conservative and
+  still needs design review before treating it as production-ready.
 - Hard problems should be handled with reductions and design experiments, not
   broad self-host retries. The main hard areas remain exception/effect control
   flow, runtime stack switching, multidomain interactions, SIMD coverage, and
@@ -84,6 +86,26 @@ If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
   growth. Relocating those raw stack addresses after the normal typed stack
   rewrites fixes the reduced crash, `typing-small-numbers`, `async-exns`, and
   `flambda2/examples`.
+- Stage-5 bootstrap probe:
+  - Runtime stdlib built with the installed LLVM-built compiler in
+    `_llvm_stage5_bootstrap_build`; the wrapper recorded `148` clang calls and
+    `74` fresh `-x ir` compilations.
+  - Main compiler targets built in `_llvm_stage5_main_build` with
+    `ARCH=arm64`, the stage runtime stdlib, and forced LLVM. The wrapper
+    recorded `2206` clang calls and `1103` fresh `-x ir` compilations.
+  - Dune only generates `.cmxs` rules when `dynlink.cmxa` marker files exist in
+    the runtime stdlib. Adding the same markers as `make runtime-stdlib` lets
+    stage `@install` build native plugin artifacts (`str.cmxs`, `unix.cmxs`,
+    `runtime_events.cmxs`, `eval.cmxs`, `jit.cmxs`).
+  - A combined `_llvm_stage5_install` tree was assembled from the stage runtime
+    stdlib and stage main install tree. It reports its standard library as
+    `_llvm_stage5_install/lib/ocaml`.
+  - `@runtest-llvmize` passed with `_llvm_stage5_install/bin/ocamlopt.opt` and
+    `_llvm_stage5_install/lib/ocaml`; the wrapper recorded `120` clang calls and
+    `60` fresh `-x ir` compilations.
+  - `tests/basic` passed through ocamltest using the stage-5 compiler and
+    stdlib: `82` passed, `0` skipped, `0` failed. The wrapper recorded `156`
+    clang calls and `78` fresh `-x ir` compilations.
 
 Fix behind that progress:
 
@@ -173,5 +195,7 @@ Fix behind that progress:
 1. Audit the copied-stack relocation design for false positives and decide
    whether conservative runtime scanning is acceptable or needs stack-address
    metadata from the LLVM backend.
-2. Confirm a normal bootstrap using the LLVM-built installed compiler, not just
-   the boot compiler plus LLVM-enabled final build.
+2. Turn the manual stage-5 install assembly into a repeatable target/script so
+   full stage-built tests can be run without relying on handwritten commands.
+3. Expand stage-5 ocamltest coverage beyond `tests/basic` toward the full
+   suite, with real LLVM use checked by the wrapper log.
