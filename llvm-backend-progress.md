@@ -26,9 +26,22 @@ using that LLVM-built toolchain.
   `tests/basic` passed: `82` passed, `0` failed, with `78` fresh `-x ir`
   compilations.
 - `tools/build-llvm-stage5-install.sh` now wraps the staged LLVM runtime/main
-  rebuild and `_llvm_stage5_install` refresh. The cached validation path
-  succeeds and reports wrapper counts cleanly; use a clean build directory when
-  fresh `-x ir` counts are needed.
+  rebuild and `_llvm_stage5_install` refresh. A clean validation build succeeded:
+  runtime `148` wrapper lines / `74` fresh `-x ir`, main `2224` wrapper lines /
+  `1112` fresh `-x ir`. The resulting compiler compiled and ran a simple native
+  program with forced LLVM: `2` fresh `-x ir`.
+- The normal Make testsuite path now works for a forced-LLVM smoke test:
+  `make test-one DIR=basic BUILD_OCAMLPARAM=... OCAMLPARAM=...` passed
+  `82` tests with `78` fresh `-x ir`.
+- Normal `test-one-no-rebuild` also passed selected runtime/control-flow slices
+  with forced LLVM: `effects`, `exception-extra-args`, `match-exception`,
+  `runtime-C-exceptions`, `statmemprof`, and `weak-ephe-final`; combined wrapper
+  count was `130` fresh `-x ir`.
+- The broad normal `make test` path with forced LLVM completed with `6598`
+  passed, `287` skipped, `1` failed, `0` unexpected errors, and `2745` fresh
+  `-x ir`. The only failure was bytecode-only
+  `tests/lib-threads/signal.ml` line 17; rerunning that test alone passed all
+  `14` actions, including native forced LLVM.
 - The current copied-stack relocation fix is conservative and still needs
   design review before treating it as production-ready. Hard problems should be
   handled with reductions and design experiments, not broad self-host retries.
@@ -120,6 +133,9 @@ If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
 - The helper removes stale mirrored `*.ml`, `*.mli`, and `*.corrected` files
   before relinking sources. Without this, ignored generated correction files can
   be rediscovered as tests.
+- `install_for_test` now removes replaced backend-specific testsuite
+  directories recursively, so stale `_ocamltest` directories do not break
+  repeated normal `make test-one` runs.
 
 ## Known Gaps
 
@@ -131,8 +147,8 @@ If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
   `_runtest/testsuite/tools/codegen` reports a Cmm lexical error on
   `tests/asmgen/fib.cmm`.
 - The stage fake root is a useful test harness, not the final bootstrap story.
-  The next major milestone is to make the ordinary bootstrap/testing pipeline
-  build and test with LLVM everywhere.
+  The ordinary `make test` path now mostly works with LLVM forced; the next
+  major milestone is normal bootstrap with the LLVM backend as the default.
 - Main remaining design risks: exception/effect control flow, runtime stack
   switching, multidomain interactions, SIMD coverage, and the exact
   statepoint-to-frametable contract.
@@ -141,7 +157,5 @@ If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
 
 1. Audit copied-stack relocation for false positives and decide whether
    conservative runtime scanning is acceptable or needs stack-address metadata.
-2. Run `tools/build-llvm-stage5-install.sh` from a clean build directory and
-   record fresh wrapper counts.
-3. Move from the fake-root sweep to the normal bootstrap process with LLVM
+2. Move from the fake-root sweep to the normal bootstrap process with LLVM
    enabled everywhere, then run the full test suite.
