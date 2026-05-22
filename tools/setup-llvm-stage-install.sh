@@ -25,6 +25,31 @@ copy_tree_contents () {
   cp -L -R "$src"/* "$dst"/
 }
 
+wrap_ocamllib_tool () {
+  local tool=$1
+  local base
+  base=$(basename "$tool")
+  [ -L "$tool" ] && return 0
+  [ -f "$tool" ] || return 0
+  [ -x "$tool" ] || return 0
+
+  mv "$tool" "$tool.real"
+  cat > "$tool" <<EOF
+#!/usr/bin/env sh
+case "\$0" in
+  */*) tool="\$0" ;;
+  *) tool=\$(command -v "\$0") ;;
+esac
+bindir=\$(CDPATH= cd "\$(dirname "\$tool")" && pwd -P) || exit 127
+if [ "\${OCAMLLIB+x}" != x ]; then
+  OCAMLLIB=\$(CDPATH= cd "\$bindir/../lib/ocaml" && pwd -P) || exit 127
+  export OCAMLLIB
+fi
+exec "\$bindir/$base.real" "\$@"
+EOF
+  chmod +x "$tool"
+}
+
 require_path "$runtime_install/bin/ocamlrun"
 require_path "$runtime_lib/stdlib.cmxa"
 require_path "$main_install/bin/ocamlopt.opt"
@@ -66,8 +91,14 @@ if [ -d "$stage_install/lib/ocaml/stublibs" ]; then
     2>/dev/null || true
 fi
 
-OCAMLLIB="$stage_install/lib/ocaml" \
-  "$stage_install/bin/ocamlopt.opt" -config >/tmp/oxcaml-stage-install-config
+for tool in "$stage_install/bin"/*; do
+  case "$(basename "$tool")" in
+    *.real|ocamlrun|ocamlrund|ocamlruni) ;;
+    *) wrap_ocamllib_tool "$tool" ;;
+  esac
+done
+
+"$stage_install/bin/ocamlopt.opt" -config >/tmp/oxcaml-stage-install-config
 grep -q "^standard_library: $stage_install/lib/ocaml$" \
   /tmp/oxcaml-stage-install-config
 grep -q "^native_dynlink: true$" /tmp/oxcaml-stage-install-config
