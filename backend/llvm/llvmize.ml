@@ -249,9 +249,104 @@ let normalize_llvm_expect_line line =
   then "\t.build_version macos, <version>"
   else line
 
-let normalize_llvm_output s =
+let normalize_toplevel_names s =
+  let len = String.length s in
+  let buf = Buffer.create len in
+  let rec loop i =
+    if i >= len
+    then Buffer.contents buf
+    else if
+      i + 7 <= len
+      && String.sub s i 7 = "camlTOP"
+      && i + 7 < len
+      && Char.code s.[i + 7] >= Char.code '0'
+      && Char.code s.[i + 7] <= Char.code '9'
+    then (
+      Buffer.add_string buf "camlTOP";
+      let j = ref (i + 7) in
+      while
+        !j < len
+        && Char.code s.[!j] >= Char.code '0'
+        && Char.code s.[!j] <= Char.code '9'
+      do
+        incr j
+      done;
+      loop !j)
+    else (
+      Buffer.add_char buf s.[i];
+      loop (i + 1))
+  in
+  loop 0
+
+let base_normalize_llvm_output s =
   s |> Misc.normalise_eol |> Misc.delete_eol_spaces |> String.split_on_char '\n'
   |> List.map normalize_llvm_expect_line
+  |> List.map normalize_toplevel_names
+
+let line_contains_substring line substring =
+  let line_len = String.length line in
+  let substring_len = String.length substring in
+  let rec loop i =
+    if i + substring_len > line_len
+    then false
+    else String.sub line i substring_len = substring || loop (i + 1)
+  in
+  loop 0
+
+let extract_llvm_code_functions lines =
+  let rec collect_function acc = function
+    | [] -> List.rev acc, []
+    | line :: rest ->
+      let acc = line :: acc in
+      if String.trim line = "}"
+      then List.rev acc, rest
+      else collect_function acc rest
+  in
+  let rec loop acc = function
+    | [] -> List.rev acc
+    | line :: rest ->
+      if
+        String.starts_with ~prefix:"define " line
+        && line_contains_substring line "_code\""
+      then
+        let function_lines, rest = collect_function [] (line :: rest) in
+        loop (List.rev function_lines @ acc) rest
+      else loop acc rest
+  in
+  loop [] lines
+
+let asm_code_label line =
+  match String.index_opt line ':' with
+  | None -> None
+  | Some colon ->
+    let label = String.sub line 0 colon |> String.trim in
+    if String.ends_with ~suffix:"_code" label then Some (label ^ ":") else None
+
+let extract_llvm_asm_functions lines =
+  let rec collect_function acc = function
+    | [] -> List.rev acc, []
+    | line :: rest ->
+      if line_contains_substring line "; -- End function"
+      then List.rev acc, rest
+      else collect_function (line :: acc) rest
+  in
+  let rec loop acc = function
+    | [] -> List.rev acc
+    | line :: rest -> (
+      match asm_code_label line with
+      | Some label ->
+        let function_lines, rest = collect_function [label] rest in
+        loop (List.rev function_lines @ acc) rest
+      | None -> loop acc rest)
+  in
+  loop [] lines
+
+let normalize_llvm_ir_output s =
+  s |> base_normalize_llvm_output |> extract_llvm_code_functions
+  |> String.concat "\n"
+
+let normalize_llvm_asm_output s =
+  s |> base_normalize_llvm_output |> extract_llvm_asm_functions
   |> String.concat "\n"
 
 let invoke_and_clear_callbacks callbacks output =
@@ -263,13 +358,13 @@ let invoke_expect_llvm_ir_callbacks ~llvmir_filename =
   if not (List.is_empty !expect_llvm_ir_callbacks)
   then
     invoke_and_clear_callbacks expect_llvm_ir_callbacks
-      (normalize_llvm_output (read_file_for_expect llvmir_filename))
+      (normalize_llvm_ir_output (read_file_for_expect llvmir_filename))
 
 let invoke_expect_llvm_asm_callbacks ~asm_filename =
   if not (List.is_empty !expect_llvm_asm_callbacks)
   then
     invoke_and_clear_callbacks expect_llvm_asm_callbacks
-      (normalize_llvm_output (read_file_for_expect asm_filename))
+      (normalize_llvm_asm_output (read_file_for_expect asm_filename))
 
 let get_current_compilation_unit msg =
   match !current_compilation_unit with
