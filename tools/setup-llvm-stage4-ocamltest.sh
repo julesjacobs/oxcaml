@@ -35,6 +35,9 @@ require_path "$repo/_runtest/testsuite/tools/expectnat"
 require_path "$wrapper"
 require_path "$toplevel_dir/toploop.cmi"
 require_path "$install_bin/ocamlmklib.byte"
+require_path "$install_bin/dumpobj.byte"
+require_path "$install_bin/ocamllex.byte"
+require_path "$install_bin/ocamlyacc"
 require_path "$install_lib/compiler-libs/ocamlcommon.cma"
 require_path "$install_lib/compiler-libs/ocamlcommon.cmxa"
 
@@ -53,11 +56,16 @@ done
 
 ln -sfn "$install_bin/ocamlc.byte" "$fake_root/ocamlc"
 ln -sfn "$install_bin/ocamlopt.byte" "$fake_root/ocamlopt"
+ln -sfn "$install_bin/ocamllex.byte" "$fake_root/ocamllex"
 ln -sfn "$stage_ocamlopt" "$fake_root/ocamlopt.opt"
+ln -sfn "$install_bin/ocamlyacc" "$fake_root/ocamlyacc"
+ln -sfn . "$fake_root/lex"
+ln -sfn . "$fake_root/yacc"
 
 ln -sfn "$runtime_dir" "$fake_root/runtime"
 ln -sfn "$stdlib_dir" "$fake_root/stdlib"
 ln -sfn "$install_lib/compiler-libs" "$fake_root/compilerlibs"
+ln -sfn "$install_lib/compiler-libs" "$fake_root/utils"
 ln -sfn "$toplevel_dir" "$fake_root/toplevel"
 ln -sfn "$repo/_install" "$fake_root/_install"
 ln -sfn "$repo/runtime5" "$fake_root/runtime5"
@@ -70,6 +78,7 @@ for file in "$repo"/tools/*; do
   ln -sfn "$file" "$fake_root/tools/$(basename "$file")"
 done
 ln -sfn "$install_bin/ocamlmklib.byte" "$fake_root/tools/ocamlmklib"
+ln -sfn "$install_bin/dumpobj.byte" "$fake_root/tools/dumpobj"
 
 for lib in unix threads str; do
   ln -sfn "$install_lib/$lib" "$fake_root/otherlibs/$lib"
@@ -106,9 +115,25 @@ ln -sfn "$install_lib/caml/threads.h" "$runtime_dir/caml/threads.h"
 ln -sfn "$normal_build/main/otherlibs/systhreads/threads.h" "$runtime_dir/threads.h"
 
 testing_src=$repo/testsuite/lib/testing
+lib_src=$repo/testsuite/lib/lib
 ocamlc=$install_bin/ocamlc.byte
 ocamlopt=$stage_ocamlopt
 testing_dir=$fake_root/testsuite/lib
+
+"$ocamlc" -nostdlib -I "$stdlib_dir" -c -o "$testing_dir/lib.cmi" \
+  "$lib_src.mli"
+"$ocamlc" -nostdlib -I "$stdlib_dir" -I "$testing_dir" -c -o "$testing_dir/lib.cmo" \
+  "$lib_src.ml"
+"$ocamlc" -nostdlib -I "$stdlib_dir" -a -o "$testing_dir/lib.cma" \
+  "$testing_dir/lib.cmo"
+OCAMLLIB="$stdlib_dir" \
+OCAMLPARAM="_,llvm-backend=1,llvm-path=$wrapper" \
+  "$ocamlopt" -nostdlib -I "$stdlib_dir" -I "$testing_dir" -c -o "$testing_dir/lib.cmx" \
+  "$lib_src.ml"
+OCAMLLIB="$stdlib_dir" \
+OCAMLPARAM="_,llvm-backend=1,llvm-path=$wrapper" \
+  "$ocamlopt" -nostdlib -I "$stdlib_dir" -a -o "$testing_dir/lib.cmxa" \
+  "$testing_dir/lib.cmx"
 
 "$ocamlc" -nostdlib -I "$stdlib_dir" -c -o "$testing_dir/testing.cmi" \
   "$testing_src.mli"
