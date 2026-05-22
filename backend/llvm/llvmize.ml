@@ -1915,6 +1915,16 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let res = emit_ins t (I.convert convert_op ~arg ~to_:to_typ) in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_fp_to_signed_int from_typ to_typ intrinsic =
+    let name =
+      Format.sprintf "aarch64.neon.%s.%s.%s" intrinsic
+        (llvm_intrinsic_type_suffix to_typ)
+        (llvm_intrinsic_type_suffix from_typ)
+    in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) from_typ in
+    let res = call_llvm_intrinsic t name [arg] to_typ in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_float_cmp width cond =
     let typ = float_vec_type ~width in
     let mask_width_in_bits =
@@ -1998,7 +2008,7 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
              in
              emit_ins t
                (I.insertelement ~vector ~index:(V.of_int lane) ~to_insert:elem))
-           (V.poison dst_typ)
+           (V.zeroinitializer dst_typ)
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
@@ -2275,16 +2285,26 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       (int_vec_type ~width_in_bits:32)
       (float_vec_type ~width:Cmm.Float32)
       Sitofp
-  | Isimd Simd.Cvtq_s64_f64 | Isimd Simd.Cvtnq_s64_f64 ->
-    simd_convert
+  | Isimd Simd.Cvtq_s64_f64 ->
+    simd_fp_to_signed_int
       (float_vec_type ~width:Cmm.Float64)
       (int_vec_type ~width_in_bits:64)
-      Fptosi
-  | Isimd Simd.Cvtq_s32_f32 | Isimd Simd.Cvtnq_s32_f32 ->
-    simd_convert
+      "fcvtzs"
+  | Isimd Simd.Cvtnq_s64_f64 ->
+    simd_fp_to_signed_int
+      (float_vec_type ~width:Cmm.Float64)
+      (int_vec_type ~width_in_bits:64)
+      "fcvtns"
+  | Isimd Simd.Cvtq_s32_f32 ->
+    simd_fp_to_signed_int
       (float_vec_type ~width:Cmm.Float32)
       (int_vec_type ~width_in_bits:32)
-      Fptosi
+      "fcvtzs"
+  | Isimd Simd.Cvtnq_s32_f32 ->
+    simd_fp_to_signed_int
+      (float_vec_type ~width:Cmm.Float32)
+      (int_vec_type ~width_in_bits:32)
+      "fcvtns"
   | Isimd Simd.Cvt_f64_f32 -> simd_cvt_f64_f32 ()
   | Isimd Simd.Cvt_f32_f64 -> simd_cvt_f32_f64 ()
   | Isimd Simd.Movn_s64 -> simd_int_narrow 64 ~high:false
