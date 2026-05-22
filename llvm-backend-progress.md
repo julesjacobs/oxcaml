@@ -184,6 +184,15 @@ If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
   - The stage ocamltest helper now makes `utils` a mirror directory and adds
     the staged `config.o`, because tests that link `config.cmx` also need the
     matching object file.
+  - Link/stub-oriented stage slices passed with forced LLVM:
+    `tests/c-api` (`11` passed, `10` fresh `-x ir`), `tests/external`
+    (`2` passed, `2` fresh), `tests/link-order` (`33` passed, `6` fresh),
+    `tests/link-test` (`48` passed, `12` fresh), and
+    `tests/output-complete-obj` (`18` passed, `2` fresh). `tests/manual-intf-c`
+    skipped its only curses test.
+  - The stage ocamltest helper now also creates empty source-layout directories
+    such as `asmcomp`, `bytecomp`, and `typing`, because compiler-library link
+    tests pass those `-I` directories and macOS `ld` warns if they are missing.
 
 Fix behind that progress:
 
