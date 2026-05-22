@@ -41,11 +41,11 @@ using that LLVM-built toolchain.
   `287` skipped, `0` failed, `0` unexpected errors, and `2745` fresh `-x ir`.
 - After refreshing `_install`, `_install/bin/ocamlopt.opt` compiled and ran a
   recursive `fib` program with forced LLVM: output `55`, `2` fresh `-x ir`.
-- The boot Dune context still clears `OCAMLPARAM`. A direct experiment making
-  boot inherit `llvm-backend=1` failed before codegen because the stage-0 opam
-  compiler rejects `llvm-backend` and `llvm-path` under `-warn-error +A`; real
-  LLVM bootstrap needs a stage-0 compiler that understands these parameters, or
-  a different bootstrap switch-over point.
+- The boot Dune context still clears `OCAMLPARAM` in the normal Make path. The
+  old opam compiler rejects `llvm-backend` and `llvm-path`, but using the
+  LLVM-capable `_install` compiler as stage 0 works: `tools/build-llvm-boot-with-installed.sh`
+  built the boot compiler with `839` fresh `-x ir`, then that boot compiler
+  compiled and ran a smoke program with `2` fresh `-x ir`.
 - The current copied-stack relocation fix is conservative and still needs
   design review before treating it as production-ready. Hard problems should be
   handled with reductions and design experiments, not broad self-host retries.
@@ -94,6 +94,12 @@ Rebuild and refresh the staged LLVM install:
 
 ```sh
 tools/build-llvm-stage5-install.sh
+```
+
+Build the boot compiler with the LLVM-capable installed compiler as stage 0:
+
+```sh
+tools/build-llvm-boot-with-installed.sh
 ```
 
 Put the OxCaml opam switch first in `PATH`.
