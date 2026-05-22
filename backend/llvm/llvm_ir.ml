@@ -805,12 +805,14 @@ module Instruction = struct
     | Load of
         { ptr : Value.t;
           typ : Type.t;
-          volatile_ : bool
+          volatile_ : bool;
+          align : int option
         }
     | Store of
         { ptr : Value.t;
           to_store : Value.t;
-          volatile_ : bool
+          volatile_ : bool;
+          align : int option
         }
     | Getelementptr of
         { base_type : Type.t;
@@ -985,19 +987,27 @@ module Instruction = struct
 
   let load ~ptr ~typ =
     assert' "load" (Value.get_type ptr |> Type.is_ptr);
-    Load { ptr; typ; volatile_ = false }
+    Load { ptr; typ; volatile_ = false; align = None }
+
+  let load_with_align ~align ~ptr ~typ =
+    assert' "load_with_align" (Value.get_type ptr |> Type.is_ptr);
+    Load { ptr; typ; volatile_ = false; align = Some align }
 
   let load_volatile ~ptr ~typ =
     assert' "load_volatile" (Value.get_type ptr |> Type.is_ptr);
-    Load { ptr; typ; volatile_ = true }
+    Load { ptr; typ; volatile_ = true; align = None }
 
   let store ~ptr ~to_store =
     assert' "store" (Value.get_type ptr |> Type.is_ptr);
-    Store { ptr; to_store; volatile_ = false }
+    Store { ptr; to_store; volatile_ = false; align = None }
+
+  let store_with_align ~align ~ptr ~to_store =
+    assert' "store_with_align" (Value.get_type ptr |> Type.is_ptr);
+    Store { ptr; to_store; volatile_ = false; align = Some align }
 
   let store_volatile ~ptr ~to_store =
     assert' "store_volatile" (Value.get_type ptr |> Type.is_ptr);
-    Store { ptr; to_store; volatile_ = true }
+    Store { ptr; to_store; volatile_ = true; align = None }
 
   let getelementptr ~base_type ~base_ptr ~indices =
     assert' "getelementptr" (Value.get_type base_ptr |> Type.is_ptr);
@@ -1127,12 +1137,20 @@ module Instruction = struct
         | None -> ()
       in
       ins_res "alloca %a%a" Type.pp_t typ pp_count ()
-    | Load { ptr; typ; volatile_ } ->
-      ins_res "load %a%a, %a" (pp_str_if "volatile ") volatile_ Type.pp_t typ
-        Value.pp_t ptr
-    | Store { ptr; to_store; volatile_ } ->
-      ins "store %a%a, %a" (pp_str_if "volatile ") volatile_ Value.pp_t
-        to_store Value.pp_t ptr
+    | Load { ptr; typ; volatile_; align } ->
+      let pp_align ppf = function
+        | None -> ()
+        | Some align -> fprintf ppf ", align %d" align
+      in
+      ins_res "load %a%a, %a%a" (pp_str_if "volatile ") volatile_ Type.pp_t
+        typ Value.pp_t ptr pp_align align
+    | Store { ptr; to_store; volatile_; align } ->
+      let pp_align ppf = function
+        | None -> ()
+        | Some align -> fprintf ppf ", align %d" align
+      in
+      ins "store %a%a, %a%a" (pp_str_if "volatile ") volatile_ Value.pp_t
+        to_store Value.pp_t ptr pp_align align
     | Getelementptr { base_type; base_ptr; indices } ->
       ins_res "getelementptr %a, %a, %a" Type.pp_t base_type Value.pp_t base_ptr
         (pp_print_list ~pp_sep:pp_comma Value.pp_t)
