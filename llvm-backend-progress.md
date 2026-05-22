@@ -15,6 +15,8 @@ using that LLVM-built toolchain.
   tools in parts of the pipeline.
 - The normal Make pipeline can build the compiler with LLVM enabled and can pass
   `make runtest-llvmize` on arm64 with real LLVM use.
+- A broad `make runtest` with LLVM enabled now gets past the earlier SIMD
+  compile blockers, but still fails at runtime in SIMD/small-number tests.
 - The LLVM-built compiler can compile and run small programs with
   `-llvm-backend`. A full test-suite run with an LLVM-built compiler is still
   pending.
@@ -57,6 +59,9 @@ If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
 ## Latest Verification
 
 - `make compiler` with LLVM enabled passes on arm64.
+- A broad `make runtest` with LLVM enabled recorded fresh `-x ir` invocations
+  and fails later in the suite, not during the earlier unsupported SIMD-op
+  compile step.
 - `make runtest-llvmize` with LLVM enabled passes on arm64. The latest run was
   mostly cached but still recorded 2 fresh `-x ir` clang invocations.
 - The reduced SIMD file `_build/main/oxcaml/tests/simd/builtins_u.ml` now
@@ -81,13 +86,16 @@ Latest fixes behind that SIMD progress:
   on SIMD functions.
 - Added vector memory/external-argument lowering, vector static data as raw
   64-bit words, vector `Opaque` lowering without scalar-register inline asm,
-  vector reinterpret casts, scalar/vector casts, ZIP, pairwise add, reciprocal
-  estimate, reciprocal-square-root estimate, vector sqrt, ARM64 vector
-  float32/float64 low-lane conversion, and ARM64 vector float
-  min/max/arithmetic lowering.
-- Current broad `make runtest` blockers still need a fresh run after the latest
-  SIMD lowering fixes. Earlier blockers included scalar SIMD min/max NaN
-  mismatches and `small_numbers` executable failures.
+  vector reinterpret casts, scalar/vector casts, ZIP, EXT, pairwise add, vector
+  lane copy, reciprocal estimate, reciprocal-square-root estimate, vector sqrt,
+  ARM64 vector float32/float64 low-lane conversion, ARM64 vector float
+  min/max/arithmetic lowering, and more ARM64 integer SIMD lowering.
+- Current broad `make runtest` blockers include scalar SIMD Float64 min/max NaN
+  mismatches from the linked SIMD builtins library, `small_numbers/float32_lib`
+  assertion failures, and a SIMD callee-save NEON test segfault.
+- Direct Dune probes must also be checked against
+  `/tmp/oxcaml-clang-wrapper.log`; one direct Dune command with only
+  `BUILD_OCAMLPARAM` rebuilt without invoking the LLVM wrapper.
 
 ## Previously Verified
 
