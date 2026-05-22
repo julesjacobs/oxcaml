@@ -58,6 +58,12 @@ using that LLVM-built toolchain.
 - `LLVM_BACKEND=1` is now the normal Make entry point for this mode. It sets the
   build contexts and testsuite environment consistently, and regenerates the
   Dune workspaces when the generated contents change.
+- `make llvm-compiler`, `make llvm-install`, `make llvm-test`, and
+  `make llvm-test-one` are explicit opt-in aliases for the normal Make
+  workflow with `LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1`. The default Make targets
+  still use the normal backend. `make llvm-test-one DIR=basic` passed with
+  `82` passed, `0` failed, and `1264` fresh `-x ir` compilations, all with the
+  fixed register flags.
 - Normal `test-one-no-rebuild` also passed selected runtime/control-flow slices
   with forced LLVM: `effects`, `exception-extra-args`, `match-exception`,
   `runtime-C-exceptions`, `statmemprof`, and `weak-ephe-final`; combined wrapper
@@ -93,45 +99,32 @@ Build the normal compiler with LLVM enabled:
 ```sh
 : > /tmp/oxcaml-clang-wrapper.log
 PATH=/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin:$PATH \
-  make compiler \
-  LLVM_BACKEND=1 LLVM_PATH=/tmp/oxcaml-clang-wrapper
+  make llvm-compiler LLVM_PATH=/tmp/oxcaml-clang-wrapper
 ```
 
-Build through the normal Make path with LLVM also enabled for the boot context:
-
-```sh
-rm -rf _build/default  # needed when switching from a non-LLVM boot context
-: > /tmp/oxcaml-clang-wrapper.log
-PATH=/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin:$PATH \
-  make compiler \
-  LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1 LLVM_PATH=/tmp/oxcaml-clang-wrapper
-```
-
-Install through the same explicit LLVM-enabled path:
+Install through the same explicit LLVM-enabled workflow:
 
 ```sh
 : > /tmp/oxcaml-clang-wrapper.log
 PATH=/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin:$PATH \
-  make install \
-  LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1 LLVM_PATH=/tmp/oxcaml-clang-wrapper
+  make llvm-install LLVM_PATH=/tmp/oxcaml-clang-wrapper
 ```
 
-Run the full installed testsuite through the same path:
+Run the full installed testsuite through the same explicit workflow:
 
 ```sh
 : > /tmp/oxcaml-clang-wrapper.log
 PATH=/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin:$PATH \
-  make test \
-  LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1 LLVM_PATH=/tmp/oxcaml-clang-wrapper
+  make llvm-test LLVM_PATH=/tmp/oxcaml-clang-wrapper
 ```
 
-Run one installed-compiler testsuite directory with forced LLVM:
+Run one installed-compiler testsuite directory through the same explicit
+workflow:
 
 ```sh
 : > /tmp/oxcaml-clang-wrapper.log
 PATH=/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin:$PATH \
-  make test-one DIR=typing-layouts-products \
-  LLVM_BACKEND=1 LLVM_PATH=/tmp/oxcaml-clang-wrapper
+  make llvm-test-one DIR=typing-layouts-products LLVM_PATH=/tmp/oxcaml-clang-wrapper
 ```
 
 Run the broad stage-5 forced-LLVM ocamltest sweep:
