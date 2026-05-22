@@ -41,6 +41,7 @@ require_path "$debugger_dir/ocamldebug.cmi"
 require_path "$debugger_exe"
 require_path "$install_bin/ocamlmklib.byte"
 require_path "$install_bin/dumpobj.byte"
+require_path "$install_bin/ocamlobjinfo.byte"
 require_path "$install_bin/ocamllex.byte"
 require_path "$install_bin/ocamlyacc"
 require_path "$install_lib/compiler-libs/ocamlcommon.cma"
@@ -102,6 +103,7 @@ for file in "$repo"/tools/*; do
 done
 ln -sfn "$install_bin/ocamlmklib.byte" "$fake_root/tools/ocamlmklib"
 ln -sfn "$install_bin/dumpobj.byte" "$fake_root/tools/dumpobj"
+ln -sfn "$install_bin/ocamlobjinfo.byte" "$fake_root/tools/ocamlobjinfo"
 
 for lib in unix threads str; do
   ln -sfn "$install_lib/$lib" "$fake_root/otherlibs/$lib"
