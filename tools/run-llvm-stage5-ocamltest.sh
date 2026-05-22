@@ -4,12 +4,24 @@ set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
 
-stage_install=${STAGE_INSTALL:-$repo/_llvm_stage5_install}
-stage_build=${STAGE_BUILD:-$repo/_llvm_stage5_main_build}
+if [ "${SELF_STAGE:-0}" = 1 ]; then
+  default_stage_install=$repo/_llvm_self_stage_install
+  default_stage_build=$repo/_llvm_self_stage_main_build
+  default_fake_root=/tmp/oxcaml-self-stage-ocamltest-src
+  default_list=/tmp/oxcaml-self-stage-all-minus-asm-list.txt
+else
+  default_stage_install=$repo/_llvm_stage5_install
+  default_stage_build=$repo/_llvm_stage5_main_build
+  default_fake_root=/tmp/oxcaml-stage5-ocamltest-src
+  default_list=/tmp/oxcaml-stage5-all-minus-asm-list.txt
+fi
+
+stage_install=${STAGE_INSTALL:-$default_stage_install}
+stage_build=${STAGE_BUILD:-$default_stage_build}
 normal_build=${NORMAL_BUILD:-$repo/_normal_stage1_fpfix_build}
-fake_root=${FAKE_ROOT:-/tmp/oxcaml-stage5-ocamltest-src}
+fake_root=${FAKE_ROOT:-$default_fake_root}
 wrapper=${LLVM_WRAPPER:-/tmp/oxcaml-clang-wrapper}
-list=${LIST:-/tmp/oxcaml-stage5-all-minus-asm-list.txt}
+list=${LIST:-$default_list}
 generate_list=${GENERATE_LIST:-1}
 
 exclude_regex=${EXCLUDE_REGEX:-'^tests/(asmgen|asmcomp)$'}
