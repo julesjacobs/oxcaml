@@ -290,6 +290,7 @@ end
 module type Opttop_options = sig
   include Toplevel_options
   include Optcommon_options
+  val _llvm_backend : unit -> unit
   val _verbose : unit -> unit
   val _S : unit -> unit
 end
