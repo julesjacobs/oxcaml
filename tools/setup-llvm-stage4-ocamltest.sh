@@ -33,6 +33,8 @@ require_path "$repo/_runtest/testsuite/tools/expect"
 require_path "$repo/_runtest/testsuite/tools/expectnat"
 require_path "$wrapper"
 
+shopt -s nullglob
+
 mkdir -p \
   "$fake_root" \
   "$fake_root/otherlibs" \
@@ -59,9 +61,24 @@ ln -sfn "$repo/_runtest/testsuite/tools/expectnat" "$fake_root/testsuite/tools/e
 for lib in unix threads str; do
   ln -sfn "$install_lib/$lib" "$fake_root/otherlibs/$lib"
 done
-ln -sfn "$stdlib_stable_dir" "$fake_root/otherlibs/stdlib_stable"
 ln -sfn "$install_lib/threads" "$fake_root/otherlibs/systhreads"
 ln -sfn "$install_lib/stublibs" "$fake_root/stublibs"
+
+for universe in upstream_compatible stable beta alpha; do
+  mkdir -p "$fake_root/otherlibs/$universe"
+  ln -sfn "$install_lib/stdlib_$universe" \
+    "$fake_root/otherlibs/stdlib_$universe"
+done
+
+mkdir -p "$fake_root/otherlibs/eval"
+for file in "$install_lib"/eval* "$install_lib"/libeval*; do
+  ln -sfn "$file" "$fake_root/otherlibs/eval/$(basename "$file")"
+done
+
+mkdir -p "$fake_root/otherlibs/runtime_events"
+for file in "$install_lib"/runtime_events/{lib,}runtime_events*; do
+  ln -sfn "$file" "$fake_root/otherlibs/runtime_events/$(basename "$file")"
+done
 
 ln -sfn "$install_lib/libthreadsnat_stubs.a" "$install_lib/threads/libthreadsnat_stubs.a"
 ln -sfn "$install_lib/libthreadsnat_stubs_native.a" \

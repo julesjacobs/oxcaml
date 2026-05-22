@@ -18,10 +18,11 @@ using that LLVM-built toolchain.
 - The LLVM-built installed compiler can pass the full compiler testsuite with
   forced `-llvm-backend` on arm64. It can also build a stage-5 runtime stdlib
   and complete stage-5 main install tree in a separate Dune build dir. The
-  stage-5 compiler now passes `tests/basic` and `tests/effects` through
-  ocamltest. This is an important milestone, but the current copied-stack fix is
-  conservative and still needs design review before treating it as
-  production-ready.
+  stage-5 compiler now passes several focused ocamltest directories covering
+  basics, effects, GC roots, callbacks, Unix, Str, systhreads, quotation,
+  statmemprof, and layout products. This is an important milestone, but the
+  current copied-stack fix is conservative and still needs design review before
+  treating it as production-ready.
 - Hard problems should be handled with reductions and design experiments, not
   broad self-host retries. The main hard areas remain exception/effect control
   flow, runtime stack switching, multidomain interactions, SIMD coverage, and
@@ -110,6 +111,22 @@ If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
   - `tests/effects` passed through ocamltest using the stage-5 compiler and
     stdlib: `127` passed, `28` skipped, `0` failed. The wrapper recorded `98`
     clang calls and `49` fresh `-x ir` compilations.
+  - More stage-5 ocamltest slices passed:
+    `tests/gc-roots` (`10` passed, `0` failed, `11` fresh `-x ir`),
+    `tests/callback` (`38` passed, `1` skipped, `0` failed, `30` fresh
+    `-x ir`), `tests/lib-unix` (`126` passed, `11` skipped, `0` failed, `59`
+    fresh `-x ir`), and `tests/lib-str` (`4` passed, `1` skipped, `0` failed,
+    `2` fresh `-x ir`).
+  - Additional stage-5 ocamltest slices passed:
+    `tests/lib-systhreads` (`46` passed, `4` skipped, `0` failed, `18` fresh
+    `-x ir`), `tests/quotation` (`40` passed, `0` failed, `45` fresh `-x ir`),
+    `tests/statmemprof` (`48` passed, `3` skipped, `0` failed, `40` fresh
+    `-x ir`), and `tests/typing-layouts-products` (`105` passed, `0` failed,
+    `50` fresh `-x ir`).
+  - The stage ocamltest helper now mirrors more of `install_for_test`: it
+    exposes `otherlibs/eval`, `otherlibs/runtime_events`, and the stdlib
+    universe directories. Without this, quotation and layout-product tests fail
+    from missing `-I` directories/files rather than from compiler behavior.
 
 Fix behind that progress:
 
@@ -199,7 +216,7 @@ Fix behind that progress:
 1. Audit the copied-stack relocation design for false positives and decide
    whether conservative runtime scanning is acceptable or needs stack-address
    metadata from the LLVM backend.
-2. Expand stage-5 ocamltest coverage beyond `tests/basic` and `tests/effects`
-   toward the full suite, with real LLVM use checked by the wrapper log.
+2. Expand stage-5 ocamltest coverage toward the full suite, with real LLVM use
+   checked by the wrapper log.
 3. Decide whether the repeatable stage install setup should become a Make target
    or remain a development script.
