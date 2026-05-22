@@ -1605,6 +1605,14 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
         elem_type = T.Int { width_in_bits }
       }
   in
+  let float_vec_type ~width =
+    let elem_type, num_of_elems =
+      match width with
+      | Cmm.Float32 -> T.float, 4
+      | Cmm.Float64 -> T.double, 2
+    in
+    T.Vector { num_of_elems; elem_type }
+  in
   let cast_if_needed value typ =
     if T.equal (V.get_type value) typ
     then value
@@ -1620,6 +1628,21 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
             ~pp_sep:(fun ppf () -> Format.fprintf ppf ", ")
             Format.pp_print_string)
          (List.init (128 / width_in_bits) (fun _ -> elem)))
+  in
+  let int_vector_constant_like typ n =
+    match typ with
+    | T.Vector { num_of_elems; elem_type = (T.Int _ as elem_type) } ->
+      let elem = Format.asprintf "%a %d" T.pp_t elem_type n in
+      V.imm typ
+        (Format.asprintf "<%a>"
+           (Format.pp_print_list
+              ~pp_sep:(fun ppf () -> Format.fprintf ppf ", ")
+              Format.pp_print_string)
+           (List.init num_of_elems (fun _ -> elem)))
+    | T.Int _ -> V.of_int ~typ n
+    | T.Ptr _ | T.Float | T.Double | T.Struct _ | T.Array _ | T.Vector _
+    | T.Label | T.Token | T.Metadata ->
+      fail_msg ~name:"int_vector_constant_like" "expected integer vector"
   in
   let simd_int_unary width_in_bits op =
     let typ = int_vec_type ~width_in_bits in
@@ -1679,6 +1702,34 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_get_lane width_in_bits lane =
+    let typ = int_vec_type ~width_in_bits in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let elem = emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int lane)) in
+    let res =
+      if width_in_bits = 64
+      then elem
+      else emit_ins t (I.convert Sext ~arg:elem ~to_:T.i64)
+    in
+    store_into_reg t i.res.(0) res
+  in
+  let simd_int_set_lane width_in_bits lane =
+    let typ = int_vec_type ~width_in_bits in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let elem_typ = T.Int { width_in_bits } in
+    let elem =
+      if width_in_bits = 64
+      then load_reg_to_temp ~typ:T.i64 t i.arg.(1)
+      else
+        emit_ins t
+          (I.convert Trunc ~arg:(load_reg_to_temp ~typ:T.i64 t i.arg.(1))
+             ~to_:elem_typ)
+    in
+    let res =
+      emit_ins t (I.insertelement ~vector:arg ~index:(V.of_int lane) ~to_insert:elem)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_widen_low src_width_in_bits convert_op =
     let dst_width_in_bits = 2 * src_width_in_bits in
     let src_typ = int_vec_type ~width_in_bits:src_width_in_bits in
@@ -1701,6 +1752,158 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
                   ~to_insert:widened))
            (V.poison dst_typ)
     in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_int_narrow src_width_in_bits ~high =
+    let dst_width_in_bits = src_width_in_bits / 2 in
+    let src_typ = int_vec_type ~width_in_bits:src_width_in_bits in
+    let dst_typ = int_vec_type ~width_in_bits:dst_width_in_bits in
+    let src_arg_index = if high then 1 else 0 in
+    let src = cast_if_needed (load_reg_to_temp t i.arg.(src_arg_index)) src_typ in
+    let dst_elem_typ = T.Int { width_in_bits = dst_width_in_bits } in
+    let lanes = 128 / src_width_in_bits in
+    let base =
+      if high
+      then cast_if_needed (load_reg_to_temp t i.arg.(0)) dst_typ
+      else V.zeroinitializer dst_typ
+    in
+    let dst_lane_offset = if high then lanes else 0 in
+    let res =
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let elem =
+               emit_ins t (I.extractelement ~vector:src ~index:(V.of_int lane))
+             in
+             let narrowed =
+               emit_ins t (I.convert Trunc ~arg:elem ~to_:dst_elem_typ)
+             in
+             emit_ins t
+               (I.insertelement ~vector
+                  ~index:(V.of_int (lane + dst_lane_offset))
+                  ~to_insert:narrowed))
+           base
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_int_saturating_narrow src_width_in_bits ~unsigned ~high =
+    let dst_width_in_bits = src_width_in_bits / 2 in
+    let src_typ = int_vec_type ~width_in_bits:src_width_in_bits in
+    let dst_typ = int_vec_type ~width_in_bits:dst_width_in_bits in
+    let src_arg_index = if high then 1 else 0 in
+    let src = cast_if_needed (load_reg_to_temp t i.arg.(src_arg_index)) src_typ in
+    let min_value, max_value, cmp_lt, cmp_gt =
+      if unsigned
+      then 0, (1 lsl dst_width_in_bits) - 1, I.Iult, I.Iugt
+      else
+        ( ~-(1 lsl (dst_width_in_bits - 1)),
+          (1 lsl (dst_width_in_bits - 1)) - 1,
+          I.Islt,
+          I.Isgt )
+    in
+    let min_vector = int_vector_constant_like src_typ min_value in
+    let max_vector = int_vector_constant_like src_typ max_value in
+    let below_min = emit_ins t (I.icmp cmp_lt ~arg1:src ~arg2:min_vector) in
+    let above_max = emit_ins t (I.icmp cmp_gt ~arg1:src ~arg2:max_vector) in
+    let clamped_min =
+      emit_ins t (I.select ~cond:below_min ~ifso:min_vector ~ifnot:src)
+    in
+    let clamped =
+      emit_ins t
+        (I.select ~cond:above_max ~ifso:max_vector ~ifnot:clamped_min)
+    in
+    let dst_elem_typ = T.Int { width_in_bits = dst_width_in_bits } in
+    let lanes = 128 / src_width_in_bits in
+    let base =
+      if high
+      then cast_if_needed (load_reg_to_temp t i.arg.(0)) dst_typ
+      else V.zeroinitializer dst_typ
+    in
+    let dst_lane_offset = if high then lanes else 0 in
+    let res =
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let elem =
+               emit_ins t
+                 (I.extractelement ~vector:clamped ~index:(V.of_int lane))
+             in
+             let narrowed =
+               emit_ins t (I.convert Trunc ~arg:elem ~to_:dst_elem_typ)
+             in
+             emit_ins t
+               (I.insertelement ~vector
+                  ~index:(V.of_int (lane + dst_lane_offset))
+                  ~to_insert:narrowed))
+           base
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_int_widening_mul src_width_in_bits convert_op ~high =
+    let dst_width_in_bits = 2 * src_width_in_bits in
+    let src_typ = int_vec_type ~width_in_bits:src_width_in_bits in
+    let dst_typ = int_vec_type ~width_in_bits:dst_width_in_bits in
+    let dst_elem_typ = T.Int { width_in_bits = dst_width_in_bits } in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) src_typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) src_typ in
+    let lanes = 128 / dst_width_in_bits in
+    let src_lane_offset = if high then lanes else 0 in
+    let widen_arg arg =
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let elem =
+               emit_ins t
+                 (I.extractelement ~vector:arg
+                    ~index:(V.of_int (lane + src_lane_offset)))
+             in
+             let widened =
+               emit_ins t (I.convert convert_op ~arg:elem ~to_:dst_elem_typ)
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane)
+                  ~to_insert:widened))
+           (V.poison dst_typ)
+    in
+    let arg1 = widen_arg arg1 in
+    let arg2 = widen_arg arg2 in
+    let res = emit_ins t (I.binary Mul ~arg1 ~arg2) in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_convert from_typ to_typ convert_op =
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) from_typ in
+    let res = emit_ins t (I.convert convert_op ~arg ~to_:to_typ) in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_float_cmp width cond =
+    let typ = float_vec_type ~width in
+    let mask_width_in_bits =
+      match width with Cmm.Float32 -> 32 | Cmm.Float64 -> 64
+    in
+    let cond =
+      match cond with
+      | Simd.Float_cond.EQ -> I.Foeq
+      | Simd.Float_cond.GE -> I.Foge
+      | Simd.Float_cond.GT -> I.Fogt
+      | Simd.Float_cond.LE | Simd.Float_cond.LT | Simd.Float_cond.NE
+      | Simd.Float_cond.CC | Simd.Float_cond.CS | Simd.Float_cond.LS
+      | Simd.Float_cond.HI ->
+        fail_msg ~name:"simd_float_cmp" "unexpected float comparison"
+    in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let cmp = emit_ins t (I.fcmp cond ~arg1 ~arg2) in
+    let res =
+      emit_ins t
+        (I.convert Sext ~arg:cmp ~to_:(int_vec_type ~width_in_bits:mask_width_in_bits))
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_float_round width mode =
+    let typ = float_vec_type ~width in
+    let name = round_intrinsic_name mode ^ "." ^ T.to_string typ in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let res = call_llvm_intrinsic t name [arg] typ in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
   match[@warning "-fragile-match"] op with
@@ -1784,6 +1987,8 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
   | Isimd Simd.Subq_s32 -> simd_int_binary 32 Sub
   | Isimd Simd.Subq_s16 -> simd_int_binary 16 Sub
   | Isimd Simd.Subq_s8 -> simd_int_binary 8 Sub
+  | Isimd Simd.Mulq_s32 -> simd_int_binary 32 Mul
+  | Isimd Simd.Mulq_s16 -> simd_int_binary 16 Mul
   | Isimd Simd.Andq_s64 -> simd_int_binary 64 And
   | Isimd Simd.Andq_s32 -> simd_int_binary 32 And
   | Isimd Simd.Andq_s16 -> simd_int_binary 16 And
@@ -1828,12 +2033,77 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
   | Isimd (Simd.Dupq_lane_s32 { lane }) -> simd_int_dup_lane 32 lane
   | Isimd (Simd.Dupq_lane_s16 { lane }) -> simd_int_dup_lane 16 lane
   | Isimd (Simd.Dupq_lane_s8 { lane }) -> simd_int_dup_lane 8 lane
+  | Isimd (Simd.Getq_lane_s64 { lane }) -> simd_int_get_lane 64 lane
+  | Isimd (Simd.Getq_lane_s32 { lane }) -> simd_int_get_lane 32 lane
+  | Isimd (Simd.Getq_lane_s16 { lane }) -> simd_int_get_lane 16 lane
+  | Isimd (Simd.Getq_lane_s8 { lane }) -> simd_int_get_lane 8 lane
+  | Isimd (Simd.Setq_lane_s64 { lane }) -> simd_int_set_lane 64 lane
+  | Isimd (Simd.Setq_lane_s32 { lane }) -> simd_int_set_lane 32 lane
+  | Isimd (Simd.Setq_lane_s16 { lane }) -> simd_int_set_lane 16 lane
+  | Isimd (Simd.Setq_lane_s8 { lane }) -> simd_int_set_lane 8 lane
   | Isimd Simd.Movl_s32 -> simd_int_widen_low 32 Sext
   | Isimd Simd.Movl_u32 -> simd_int_widen_low 32 Zext
   | Isimd Simd.Movl_s16 -> simd_int_widen_low 16 Sext
   | Isimd Simd.Movl_u16 -> simd_int_widen_low 16 Zext
   | Isimd Simd.Movl_s8 -> simd_int_widen_low 8 Sext
   | Isimd Simd.Movl_u8 -> simd_int_widen_low 8 Zext
+  | Isimd Simd.Cvtq_f64_s64 ->
+    simd_convert (int_vec_type ~width_in_bits:64)
+      (float_vec_type ~width:Cmm.Float64) Sitofp
+  | Isimd Simd.Cvtq_f32_s32 ->
+    simd_convert (int_vec_type ~width_in_bits:32)
+      (float_vec_type ~width:Cmm.Float32) Sitofp
+  | Isimd Simd.Cvtq_s64_f64 | Isimd Simd.Cvtnq_s64_f64 ->
+    simd_convert (float_vec_type ~width:Cmm.Float64)
+      (int_vec_type ~width_in_bits:64) Fptosi
+  | Isimd Simd.Cvtq_s32_f32 | Isimd Simd.Cvtnq_s32_f32 ->
+    simd_convert (float_vec_type ~width:Cmm.Float32)
+      (int_vec_type ~width_in_bits:32) Fptosi
+  | Isimd Simd.Cvt_f64_f32 ->
+    simd_convert (T.Vector { num_of_elems = 2; elem_type = T.float })
+      (float_vec_type ~width:Cmm.Float64) Fpext
+  | Isimd Simd.Cvt_f32_f64 ->
+    simd_convert (float_vec_type ~width:Cmm.Float64)
+      (T.Vector { num_of_elems = 2; elem_type = T.float })
+      Fptrunc
+  | Isimd Simd.Movn_s64 -> simd_int_narrow 64 ~high:false
+  | Isimd Simd.Movn_s32 -> simd_int_narrow 32 ~high:false
+  | Isimd Simd.Movn_s16 -> simd_int_narrow 16 ~high:false
+  | Isimd Simd.Movn_high_s64 -> simd_int_narrow 64 ~high:true
+  | Isimd Simd.Movn_high_s32 -> simd_int_narrow 32 ~high:true
+  | Isimd Simd.Movn_high_s16 -> simd_int_narrow 16 ~high:true
+  | Isimd Simd.Qmovn_s64 ->
+    simd_int_saturating_narrow 64 ~unsigned:false ~high:false
+  | Isimd Simd.Qmovn_s32 ->
+    simd_int_saturating_narrow 32 ~unsigned:false ~high:false
+  | Isimd Simd.Qmovn_s16 ->
+    simd_int_saturating_narrow 16 ~unsigned:false ~high:false
+  | Isimd Simd.Qmovn_u32 ->
+    simd_int_saturating_narrow 32 ~unsigned:true ~high:false
+  | Isimd Simd.Qmovn_u16 ->
+    simd_int_saturating_narrow 16 ~unsigned:true ~high:false
+  | Isimd Simd.Qmovn_high_s64 ->
+    simd_int_saturating_narrow 64 ~unsigned:false ~high:true
+  | Isimd Simd.Qmovn_high_s32 ->
+    simd_int_saturating_narrow 32 ~unsigned:false ~high:true
+  | Isimd Simd.Qmovn_high_s16 ->
+    simd_int_saturating_narrow 16 ~unsigned:false ~high:true
+  | Isimd Simd.Qmovn_high_u32 ->
+    simd_int_saturating_narrow 32 ~unsigned:true ~high:true
+  | Isimd Simd.Qmovn_high_u16 ->
+    simd_int_saturating_narrow 16 ~unsigned:true ~high:true
+  | Isimd Simd.Mullq_s16 ->
+    simd_int_widening_mul 16 Sext ~high:false
+  | Isimd Simd.Mullq_high_s16 ->
+    simd_int_widening_mul 16 Sext ~high:true
+  | Isimd Simd.Mullq_u16 ->
+    simd_int_widening_mul 16 Zext ~high:false
+  | Isimd Simd.Mullq_high_u16 ->
+    simd_int_widening_mul 16 Zext ~high:true
+  | Isimd (Simd.Cmp_f32 cond) -> simd_float_cmp Cmm.Float32 cond
+  | Isimd (Simd.Cmp_f64 cond) -> simd_float_cmp Cmm.Float64 cond
+  | Isimd (Simd.Roundq_f32 mode) -> simd_float_round Cmm.Float32 mode
+  | Isimd (Simd.Roundq_f64 mode) -> simd_float_round Cmm.Float64 mode
   | _ -> not_implemented_basic ~msg:"specific" i
 
 (* CR yusumez: Implement atomic operations properly, since the current
