@@ -158,6 +158,12 @@ Latest fixes behind that SIMD progress:
   bundled CM generation now uses LLVM begin/end hooks, headered data can be
   followed by additional C data labels, and `Name_for_debugger` is ignored like
   native emitters do.
+- `tests/statmemprof` improved from `41` passed / `7` failed to `47` passed /
+  `1` failed under the installed LLVM-built compiler with forced
+  `-llvm-backend`; the run used `40` fresh IR compilations. The fix passes the
+  full `Cmm.alloc_dbginfo` list through statepoint deopt metadata and teaches
+  the local LLVM frametable printer to emit one allocation entry and debug label
+  per combined allocation. Remaining failure: native `bigarray.ml`.
 
 ## Previously Verified
 
@@ -204,6 +210,12 @@ Latest fixes behind that SIMD progress:
   local LLVM changes. Dune does not track `/tmp/oxcaml-clang-wrapper` or the
   nested LLVM build as dependencies; force a clean rebuild of the relevant
   libraries/tools before drawing conclusions from generated-tool failures.
+- The remaining `tests/statmemprof/bigarray.ml` failure is not the combined
+  allocation metadata bug. The generated IR preserves the requested `musttail`
+  call, but the caller frame still reports the bigarray as live across the call
+  into the helper that runs `Gc.full_major`. A direct switch from recomputed
+  `across` liveness to `i.live` made the compiler build crash in `simdgen`, so
+  root liveness needs a smaller reduction/design fix rather than a broad swap.
 
 ## Next Checks
 
