@@ -3709,18 +3709,17 @@ let data (ds : Cmm.data_item list) =
       let arity = Nativeint.shift_right_logical closinfo 56 in
       let slot_size = if arity <= 1n then 2 else 3 in
       let slot, tail = List.split_at slot_size ds in
-      define_symbol ~private_:false ~header:(Some header) ~symbol:(Some symbol)
-        slot;
       let is_last =
         Nativeint.(shift_right_logical (shift_left closinfo 8) (size - 1) = 1n)
       in
+      let contents = if is_last then slot @ tail else slot in
+      define_symbol ~private_:false ~header:(Some header) ~symbol:(Some symbol)
+        contents;
       tail, is_last
     in
     let rec iter_slots ds =
       let tail, is_last = function_slot ds in
-      if is_last
-      then define_symbol ~private_:true ~header:None ~symbol:None tail
-      else iter_slots tail
+      if not is_last then iter_slots tail
     in
     iter_slots ds
   in

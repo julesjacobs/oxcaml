@@ -15,8 +15,9 @@ using that LLVM-built toolchain.
   tools in parts of the pipeline.
 - The normal Make pipeline can build the compiler with LLVM enabled and can pass
   `make runtest-llvmize` on arm64 with real LLVM use.
-- A broad `make runtest` with LLVM enabled now gets past the earlier SIMD
-  compile blockers, but still fails at runtime in later tests.
+- A broad `make runtest` with LLVM enabled passes on arm64 with real LLVM use.
+  Latest run recorded 195 fresh `-x ir` clang invocations with fixed-register
+  flags.
 - The LLVM-built compiler can compile and run small programs with
   `-llvm-backend`. A full test-suite run with an LLVM-built compiler is still
   pending.
@@ -101,22 +102,46 @@ Latest fixes behind that SIMD progress:
   calls.
 - Fixed `float64x2 -> float32x4` lowering to zero the high half. After the fix,
   `ops_float64x2.out` is empty with fresh LLVM IR calls.
-- `basic_u.out` now passes with `OCAMLPARAM=_,llvm-backend=1,...` and fresh
+- `basic_u.out` passes with `OCAMLPARAM=_,llvm-backend=1,...` and fresh
   wrapper logs showing 32 `-x ir` calls. This is a real LLVM run; the generated
   `camlBasic_u__entry` has a valid x29 setup before the epilogue restores
   `sp` from x29.
-- `test_callee_save_neon_regs_nodynlink.out` still fails with fresh LLVM IR
-  calls. Current failure is `caml_scan_stack: missing frame descriptor
-  retaddr=0x4`; wrapper logs show real LLVM use. The immediate symptom is a
-  stack-frame walk mismatch, not the older deopt/gc-alloca root scan issue.
+- `test_callee_save_neon_regs_nodynlink.out` passes with
+  `OCAMLPARAM=_,llvm-backend=1,...` and a clean rebuilt runtime-stdlib. The
+  wrapper log recorded fresh `-x ir` plus fixed-register flags and the output
+  file is empty. The previous `retaddr=0x4` crash reproduced only while the
+  linked runtime-stdlib archive was stale; after rebuilding that archive from a
+  clean `runtime/fiber.c`, the focused test exits 0.
 - A conservative experiment routing noalloc C calls through `caml_c_call` did
   not change the `retaddr=0x4` failure, so the private C-call wrapper is not the
   only cause.
+- A 28-line CSV parser reduced from `tools/simdgen` compiles and runs with the
+  LLVM backend, printing `3601` on `tools/simdgen/amd64/amd64.csv` with fresh
+  `-x ir` wrapper calls. This reducer previously crashed after
+  `caml_create_bytes`: its IR had `"gc-live"` allocas on `caml_c_call`, but the
+  emitted frame descriptor had zero roots for those call sites.
+- The local LLVM stackmap printer now records GC alloca operands in
+  `GCLocations`, so OxCaml frame tables scan `"gc-live"` alloca roots on
+  statepoints. Calls with deopt plus `"gc-live"` are also accepted in
+  SelectionDAG lowering. This fixed the CSV reducer without adding OCaml-side
+  spills.
+- The local LLVM AArch64 frame lowering now places an LR-only OxCaml no-FP
+  frame's saved return address at `SP+8`, the slot expected by the OCaml stack
+  walker. Before that fix, the same reducer could fail with
+  `caml_scan_stack: missing frame descriptor retaddr=0x0`.
+- Fixed LLVM data emission for static closures with captured payloads. The last
+  closure function slot now owns the remaining payload instead of splitting it
+  into a separate temporary global. This fixed `basic256_u` and
+  `basic256_u_nodynlink`, where a captured `int64x4#` high half was read from
+  the next static object and printed `8 <> 10` / `9 <> 12`.
 - A forced LLVM-enabled compiler build on arm64 succeeded and recorded 1112
   fresh `-x ir` wrapper calls. The copied normal-built and LLVM-built compiler
   binaries were benchmarked on `typecore.ml`, `typedecl.ml`, and
   `translcore.ml`; results are in `llvm-backend-compile-benchmarks.md`.
-- A fresh broad `make runtest` is still needed after the latest SIMD fixes.
+- Clean LLVM-enabled compiler rebuild after the static-closure fix passed with
+  1186 fresh `-x ir` clang invocations. Focused `basic256_u` and
+  `basic256_u_nodynlink` targets then passed with empty output, and broad
+  `make runtest` passed with 195 fresh `-x ir` clang invocations.
 - Direct Dune probes must also be checked against
   `/tmp/oxcaml-clang-wrapper.log`; use `OCAMLPARAM`, not just
   `BUILD_OCAMLPARAM`, for these focused tests.
@@ -159,17 +184,18 @@ Latest fixes behind that SIMD progress:
 - Direct `asmcomp/optargs` probes are not useful yet because the no-allocation
   assertion can fail even with the normal backend unless the exact testsuite
   setup is used.
-- The focused callee-save SIMD crash currently gives the best signal for the
-  next design step. It records fresh LLVM use and fails before broad
-  self-hosting; solve the remaining frame-walk mismatch there before broad
-  retries.
+- Stale runtime-stdlib archives can produce misleading runtime crashes. When
+  changing runtime or local LLVM frame lowering, rebuild `runtime-stdlib` before
+  reducing stack-walk failures.
+- Stale stdlib/compiler-tool objects can also produce misleading crashes after
+  local LLVM changes. Dune does not track `/tmp/oxcaml-clang-wrapper` or the
+  nested LLVM build as dependencies; force a clean rebuild of the relevant
+  libraries/tools before drawing conclusions from generated-tool failures.
 
 ## Next Checks
 
-1. Reduce and fix the frame-walk mismatch exposed by
-   `test_callee_save_neon_regs_nodynlink.out`.
-2. Run broader normal `make runtest` with LLVM enabled and reduce failures.
-3. Finish SIMD coverage or add a principled fallback for unsupported NEON ops.
-4. Confirm a normal bootstrap using the LLVM-built installed compiler, not just
+1. Confirm a normal bootstrap using the LLVM-built installed compiler, not just
    the boot compiler plus LLVM-enabled final build.
-5. Run broader test-suite slices with an LLVM-built compiler.
+2. Run broader test-suite slices with an LLVM-built compiler.
+3. Finish SIMD coverage or add a principled fallback for unsupported NEON ops
+   discovered by those LLVM-built compiler runs.
