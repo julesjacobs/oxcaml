@@ -488,6 +488,19 @@ runtest-upstream: test
 test-one: install_for_test
 	$(MAKE) test-one-no-rebuild
 
+.PHONY: llvm-compiler llvm-install llvm-test llvm-test-one
+llvm-compiler:
+	$(MAKE) compiler LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1
+
+llvm-install:
+	$(MAKE) install LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1
+
+llvm-test:
+	$(MAKE) test LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1
+
+llvm-test-one:
+	$(MAKE) test-one LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1
+
 # If the TEST argument is passed as `testsuite/tests/foo` (as is invited by
 # tab completion) then look for it in `tests/foo`. Otherwise, if it's passed as
 # just `foo`, then look for it in `tests/foo` for backward compatibility.
