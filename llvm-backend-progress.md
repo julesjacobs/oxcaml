@@ -167,14 +167,17 @@ Put the OxCaml opam switch first in `PATH`.
   `expect.opt` accepts
   `[%%expect_llvm_ir]` and `[%%expect_llvm_asm]`, `expectnat` registers
   callbacks with `Llvmize`, and `Llvmize.end_assembly` captures normalized LLVM
-  code functions and LLVM-generated assembly functions per phrase. `expectnat`
-  now reads `OCAMLPARAM` before and after command-line parsing so
-  `llvm-test-one` can pass `llvm-path=/tmp/oxcaml-clang-wrapper`.
+  code functions and LLVM-generated assembly functions per phrase. If a chunk
+  has multiple phrases before one expectation, the expect harness concatenates
+  those per-phrase LLVM outputs. `expectnat` now reads `OCAMLPARAM` before and
+  after command-line parsing so `llvm-test-one` can pass
+  `llvm-path=/tmp/oxcaml-clang-wrapper`.
 - Validated: `make test-one DIR=llvm-codegen LLVM_BACKEND=1
   LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed on arm64. The current
   `llvm-codegen` directory has arithmetic, allocation/GC slow path,
-  indirect-call, control-flow, and exception-handler shape tests. The wrapper
-  log included `-x ir` plus the fixed-register flags for the expect phrases.
+  indirect-call, control-flow, exception-handler shape, and multi-phrase chunk
+  tests. The wrapper log included `-x ir` plus the fixed-register flags for the
+  expect phrases.
 - Validated: `make test-one DIR=tool-expect-test` without `LLVM_BACKEND=1`
   passed on arm64, so the focused existing expect-tool tests still work through
   the non-LLVM path.
