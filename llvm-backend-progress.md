@@ -173,8 +173,11 @@ Put the OxCaml opam switch first in `PATH`.
 - Validated: `make test-one DIR=llvm-codegen LLVM_BACKEND=1
   LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed on arm64. The current
   `llvm-codegen` directory has arithmetic, allocation/GC slow path,
-  indirect-call, and control-flow tests. The wrapper log included `-x ir` plus
-  the fixed-register flags for the expect phrases.
+  indirect-call, control-flow, and exception-handler shape tests. The wrapper
+  log included `-x ir` plus the fixed-register flags for the expect phrases.
+- Validated: `make test-one DIR=tool-expect-test` without `LLVM_BACKEND=1`
+  passed on arm64, so the focused existing expect-tool tests still work through
+  the non-LLVM path.
 - `_llvm_stage5_install` is assembled from the stage runtime stdlib and stage
   main install tree. It reports its standard library as
   `_llvm_stage5_install/lib/ocaml`.
@@ -225,7 +228,7 @@ Put the OxCaml opam switch first in `PATH`.
 
 1. Add target coverage beyond macOS/arm64. Final assembly expectations need
    target-specific handling because Mach-O and ELF sections differ.
-2. Add an exception/effect LLVM expect test once the expected output is small
-   enough to be useful.
+2. Add an effect-control-flow LLVM expect test once there is a small useful
+   example.
 3. Audit copied-stack relocation for false positives and decide whether
    conservative runtime scanning is acceptable or needs stack-address metadata.
