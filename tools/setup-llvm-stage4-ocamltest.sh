@@ -18,6 +18,7 @@ stage_ocamlopt=$stage_build/main/oxcaml_main_native.exe
 toplevel_dir=${TOPLEVEL_DIR:-$stage_build/main/toplevel/byte/.ocamltoplevel.objs/byte}
 debugger_dir=${DEBUGGER_DIR:-$stage_build/main/debugger/.ocamldebug.objs/byte}
 debugger_exe=${DEBUGGER_EXE:-$install_bin/ocamldebug}
+fexprc_exe=${FEXPRC_EXE:-$stage_build/main/middle_end/flambda2/tests/tools/fexprc.exe}
 config_obj=${CONFIG_OBJ:-$stage_build/main/.ocamlcommon.objs/native/config.o}
 
 require_path () {
@@ -39,6 +40,7 @@ require_path "$wrapper"
 require_path "$toplevel_dir/toploop.cmi"
 require_path "$debugger_dir/ocamldebug.cmi"
 require_path "$debugger_exe"
+require_path "$fexprc_exe"
 require_path "$install_bin/ocamlmklib.byte"
 require_path "$install_bin/dumpobj.byte"
 require_path "$install_bin/ocamlobjinfo.byte"
@@ -77,6 +79,7 @@ ln -sfn "$repo/_install" "$fake_root/_install"
 ln -sfn "$repo/runtime5" "$fake_root/runtime5"
 ln -sfn "$repo/_runtest/testsuite/tools/expect" "$fake_root/testsuite/tools/expect"
 ln -sfn "$repo/_runtest/testsuite/tools/expectnat" "$fake_root/testsuite/tools/expectnat"
+ln -sfn "$fexprc_exe" "$fake_root/testsuite/tools/fexprc"
 
 rm -rf "$fake_root/utils"
 mkdir -p "$fake_root/utils"
