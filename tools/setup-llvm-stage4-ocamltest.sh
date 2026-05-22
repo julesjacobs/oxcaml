@@ -15,6 +15,8 @@ install_lib=${INSTALL_LIB:-$normal_build/install/main/lib/ocaml}
 stdlib_stable_dir=${STDLIB_STABLE_DIR:-$install_lib/stdlib_stable}
 runtime_dir=${RUNTIME_DIR_PATH:-$normal_build/main/runtime}
 stage_ocamlopt=$stage_build/main/oxcaml_main_native.exe
+expect_exe=${EXPECT_EXE:-$stage_build/main/oxcaml/testsuite/tools/expect.exe}
+expectnat_exe=${EXPECTNAT_EXE:-$stage_build/main/oxcaml/testsuite/tools/expectnat.exe}
 toplevel_dir=${TOPLEVEL_DIR:-$stage_build/main/toplevel/byte/.ocamltoplevel.objs/byte}
 debugger_dir=${DEBUGGER_DIR:-$stage_build/main/debugger/.ocamldebug.objs/byte}
 debugger_exe=${DEBUGGER_EXE:-$install_bin/ocamldebug}
@@ -34,8 +36,8 @@ require_path "$stage_ocamlopt"
 require_path "$stdlib_dir/stdlib.cmxa"
 require_path "$stdlib_stable_dir/stdlib_stable.cma"
 require_path "$runtime_dir/ocamlrun"
-require_path "$repo/_runtest/testsuite/tools/expect"
-require_path "$repo/_runtest/testsuite/tools/expectnat"
+require_path "$expect_exe"
+require_path "$expectnat_exe"
 require_path "$wrapper"
 require_path "$toplevel_dir/toploop.cmi"
 require_path "$debugger_dir/ocamldebug.cmi"
@@ -52,11 +54,38 @@ require_path "$config_obj"
 
 shopt -s nullglob
 
+mirror_ml_sources () {
+  local src=$1
+  local dst=$2
+  [ -d "$src" ] || return 0
+  mkdir -p "$dst"
+  (
+    cd "$src"
+    find . -type d \
+      ! -path './_build*' \
+      ! -path './_runtest*' \
+      ! -path './.*' \
+      -exec mkdir -p "$dst/{}" \;
+    find . -type f \( -name '*.ml' -o -name '*.mli' \) \
+      ! -path './_build*' \
+      ! -path './_runtest*' \
+      ! -path './.*' \
+      -print
+  ) | while IFS= read -r file; do
+    mkdir -p "$dst/$(dirname "$file")"
+    ln -f "$src/$file" "$dst/$file" 2>/dev/null \
+      || cp -p "$src/$file" "$dst/$file"
+  done
+}
+
 mkdir -p \
   "$fake_root" \
   "$fake_root/otherlibs" \
   "$fake_root/testsuite/tools" \
   "$fake_root/testsuite/lib"
+
+ln -f "$repo/VERSION" "$fake_root/VERSION" 2>/dev/null \
+  || cp -p "$repo/VERSION" "$fake_root/VERSION"
 
 for tool in "$install_bin"/*; do
   name=$(basename "$tool")
@@ -77,8 +106,8 @@ ln -sfn "$install_lib/compiler-libs" "$fake_root/compilerlibs"
 ln -sfn "$toplevel_dir" "$fake_root/toplevel"
 ln -sfn "$repo/_install" "$fake_root/_install"
 ln -sfn "$repo/runtime5" "$fake_root/runtime5"
-ln -sfn "$repo/_runtest/testsuite/tools/expect" "$fake_root/testsuite/tools/expect"
-ln -sfn "$repo/_runtest/testsuite/tools/expectnat" "$fake_root/testsuite/tools/expectnat"
+ln -sfn "$expect_exe" "$fake_root/testsuite/tools/expect"
+ln -sfn "$expectnat_exe" "$fake_root/testsuite/tools/expectnat"
 ln -sfn "$fexprc_exe" "$fake_root/testsuite/tools/fexprc"
 
 rm -rf "$fake_root/utils"
@@ -90,6 +119,11 @@ ln -sfn "$config_obj" "$fake_root/utils/config.o"
 
 for dir in asmcomp bytecomp driver file_formats lambda middle_end parsing typing; do
   mkdir -p "$fake_root/$dir"
+done
+
+for dir in asmcomp bytecomp driver file_formats lambda middle_end \
+    ocamltest parsing testsuite typing utils; do
+  mirror_ml_sources "$repo/$dir" "$fake_root/$dir"
 done
 
 rm -rf "$fake_root/debugger"
@@ -108,28 +142,37 @@ ln -sfn "$install_bin/ocamlmklib.byte" "$fake_root/tools/ocamlmklib"
 ln -sfn "$install_bin/dumpobj.byte" "$fake_root/tools/dumpobj"
 ln -sfn "$install_bin/ocamlobjinfo.byte" "$fake_root/tools/ocamlobjinfo"
 
+rm -rf \
+  "$fake_root/otherlibs/unix" \
+  "$fake_root/otherlibs/threads" \
+  "$fake_root/otherlibs/systhreads" \
+  "$fake_root/otherlibs/str"
 for lib in unix threads str; do
   ln -sfn "$install_lib/$lib" "$fake_root/otherlibs/$lib"
 done
 ln -sfn "$install_lib/threads" "$fake_root/otherlibs/systhreads"
 ln -sfn "$install_lib/stublibs" "$fake_root/stublibs"
 
+rm -rf "$fake_root/otherlibs/dynlink"
 mkdir -p "$fake_root/otherlibs/dynlink/native"
 for file in "$install_lib"/dynlink/dynlink*; do
   ln -sfn "$file" "$fake_root/otherlibs/dynlink/$(basename "$file")"
 done
 
 for universe in upstream_compatible stable beta alpha; do
+  rm -rf "$fake_root/otherlibs/$universe" "$fake_root/otherlibs/stdlib_$universe"
   mkdir -p "$fake_root/otherlibs/$universe"
   ln -sfn "$install_lib/stdlib_$universe" \
     "$fake_root/otherlibs/stdlib_$universe"
 done
 
+rm -rf "$fake_root/otherlibs/eval"
 mkdir -p "$fake_root/otherlibs/eval"
 for file in "$install_lib"/eval* "$install_lib"/libeval*; do
   ln -sfn "$file" "$fake_root/otherlibs/eval/$(basename "$file")"
 done
 
+rm -rf "$fake_root/otherlibs/runtime_events"
 mkdir -p "$fake_root/otherlibs/runtime_events"
 for file in "$install_lib"/runtime_events/{lib,}runtime_events*; do
   ln -sfn "$file" "$fake_root/otherlibs/runtime_events/$(basename "$file")"
