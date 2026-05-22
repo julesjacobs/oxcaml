@@ -13,7 +13,8 @@ using that LLVM-built toolchain.
   runtime/main compiler install with LLVM forced.
 - This is not production self-hosting yet. The staged compiler can compile and
   run many real programs and tests, and the normal Make path now has an
-  opt-in LLVM boot context that can build boot/runtime/main with LLVM enabled.
+  opt-in LLVM boot context that can build boot/runtime/main and pass the full
+  testsuite with LLVM enabled.
 - `LLVM_BOOT_BACKEND=1` makes `duneconf/boot.ws` use an LLVM-capable stage-0
   install, defaulting to `_install`, plus `llvm-backend=1`. After removing stale
   `_build/default` artifacts from a previous non-LLVM boot context, `make
@@ -25,12 +26,14 @@ using that LLVM-built toolchain.
 - `make test-one DIR=basic LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1` passed through
   the normal `install_for_test` path: `82` passed, `0` failed, with `78` fresh
   `-x ir` compilations during the test run.
-- A full clean no-rebuild testsuite run from `_runtest` with the normal
-  LLVM-enabled Make install passed on arm64: `6599` passed, `287` skipped,
-  `0` failed, `0` unexpected errors, with `2745` fresh `-x ir` compilations.
-  The prior full `make test LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1` run reached
-  the same test root but failed only because source-tree `*.corrected` files
-  were copied into `_runtest` and rediscovered as tests.
+- A standalone `make install LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1` passed on
+  arm64 and refreshed `_install`. The wrapper log recorded `3616` clang calls
+  and `1808` fresh `-x ir` compilations, all with the fixed register flags.
+- A clean top-level `make test LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1` passed on
+  arm64: boot/runtime/main install plus testsuite, `6599` passed, `287`
+  skipped, `0` failed, `0` unexpected errors. The wrapper log recorded `9540`
+  clang calls and `4770` fresh `-x ir` compilations, all with the fixed
+  register flags.
 - The latest broad stage-5 ocamltest sweep excluded only `tests/asmgen` and
   `tests/asmcomp`. It passed with forced LLVM: `6573` passed, `274` skipped,
   `0` failed, `0` unexpected errors. The wrapper log recorded `5474` clang
@@ -61,11 +64,10 @@ using that LLVM-built toolchain.
   count was `130` fresh `-x ir`.
 - After refreshing `_install`, `_install/bin/ocamlopt.opt` compiled and ran a
   recursive `fib` program with forced LLVM: output `55`, `2` fresh `-x ir`.
-- The boot Dune context still clears `OCAMLPARAM` in the normal Make path. The
-  old opam compiler rejects `llvm-backend` and `llvm-path`, but using the
-  LLVM-capable `_install` compiler as stage 0 works: `tools/build-llvm-boot-with-installed.sh`
-  built the boot compiler with `839` fresh `-x ir`, then that boot compiler
-  compiled and ran a smoke program with `2` fresh `-x ir`.
+- The boot Dune context still clears `OCAMLPARAM` by default. The old opam
+  compiler rejects `llvm-backend` and `llvm-path`, but
+  `LLVM_BOOT_BACKEND=1` makes the boot context use the LLVM-capable `_install`
+  compiler as stage 0 and force LLVM for boot compilation.
 - The current copied-stack relocation fix is conservative and still needs
   design review before treating it as production-ready. Hard problems should be
   handled with reductions and design experiments, not broad self-host retries.
@@ -102,6 +104,24 @@ rm -rf _build/default  # needed when switching from a non-LLVM boot context
 : > /tmp/oxcaml-clang-wrapper.log
 PATH=/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin:$PATH \
   make compiler \
+  LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1 LLVM_PATH=/tmp/oxcaml-clang-wrapper
+```
+
+Install through the same explicit LLVM-enabled path:
+
+```sh
+: > /tmp/oxcaml-clang-wrapper.log
+PATH=/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin:$PATH \
+  make install \
+  LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1 LLVM_PATH=/tmp/oxcaml-clang-wrapper
+```
+
+Run the full installed testsuite through the same path:
+
+```sh
+: > /tmp/oxcaml-clang-wrapper.log
+PATH=/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin:$PATH \
+  make test \
   LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1 LLVM_PATH=/tmp/oxcaml-clang-wrapper
 ```
 
@@ -191,24 +211,23 @@ Put the OxCaml opam switch first in `PATH`.
   mirrored `*.corrected` files before running ocamltest. Without this, generated
   correction files in the source tree or from a previous `_runtest` run can be
   treated as tests with extension `corrected`.
+- Changing `duneconf/boot.ws` now clears `_build/default` and
+  `_build/_bootinstall`, so switching an existing checkout between normal boot
+  and `LLVM_BOOT_BACKEND=1` no longer needs a manual boot-context cleanup.
 - `install_for_test` now removes replaced backend-specific testsuite
   directories recursively, so stale `_ocamltest` directories do not break
   repeated normal `make test-one` runs.
 
 ## Known Gaps
 
-- `tests/asmcomp` under stage-5 forced LLVM reports `27` passed, `10` skipped,
-  `2` failed. The two failures, `optargs.ml` and `staticalloc.ml`, also fail in
-  non-LLVM configurations checked so far, so treat them as unrelated until
-  proven otherwise.
-- `tests/asmgen` still fails before LLVM is involved: the existing
-  `_runtest/testsuite/tools/codegen` reports a Cmm lexical error on
-  `tests/asmgen/fib.cmm`.
+- The staged fake-root `asmgen`/`asmcomp` issues are harness-specific. The
+  clean top-level Make path runs the normal `asmgen` tests successfully and
+  skips the configured `asmcomp` cases for this arm64/LLVM configuration.
 - The stage fake root is a useful test harness, not the final bootstrap story.
-  The ordinary Make path now builds boot/runtime/main with LLVM enabled and the
-  installed test root passes under forced LLVM. The next major milestone is
-  normal bootstrap with the LLVM backend as the default and no special
-  `OCAMLPARAM` forcing.
+  The ordinary Make path now builds boot/runtime/main with LLVM explicitly
+  enabled and passes the installed testsuite under forced LLVM. The next major
+  milestone is making the explicit LLVM-enabled `make` / `make install` /
+  `make test` workflow repeatable enough for regular use.
 - Main remaining design risks: exception/effect control flow, runtime stack
   switching, multidomain interactions, SIMD coverage, and the exact
   statepoint-to-frametable contract.
@@ -217,6 +236,6 @@ Put the OxCaml opam switch first in `PATH`.
 
 1. Audit copied-stack relocation for false positives and decide whether
    conservative runtime scanning is acceptable or needs stack-address metadata.
-2. Re-run a clean top-level `make test LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1`
-   after the corrected-file cleanup, then move toward making LLVM the default
-   backend rather than forcing it through `OCAMLPARAM`.
+2. Decide whether the explicit LLVM-enabled Make workflow needs a single
+   documented wrapper target, or whether `LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1`
+   is enough.
