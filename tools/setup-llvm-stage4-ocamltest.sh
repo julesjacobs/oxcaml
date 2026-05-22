@@ -34,6 +34,9 @@ require_path "$repo/_runtest/testsuite/tools/expect"
 require_path "$repo/_runtest/testsuite/tools/expectnat"
 require_path "$wrapper"
 require_path "$toplevel_dir/toploop.cmi"
+require_path "$install_bin/ocamlmklib.byte"
+require_path "$install_lib/compiler-libs/ocamlcommon.cma"
+require_path "$install_lib/compiler-libs/ocamlcommon.cmxa"
 
 shopt -s nullglob
 
@@ -54,18 +57,30 @@ ln -sfn "$stage_ocamlopt" "$fake_root/ocamlopt.opt"
 
 ln -sfn "$runtime_dir" "$fake_root/runtime"
 ln -sfn "$stdlib_dir" "$fake_root/stdlib"
+ln -sfn "$install_lib/compiler-libs" "$fake_root/compilerlibs"
 ln -sfn "$toplevel_dir" "$fake_root/toplevel"
 ln -sfn "$repo/_install" "$fake_root/_install"
 ln -sfn "$repo/runtime5" "$fake_root/runtime5"
-ln -sfn "$repo/tools" "$fake_root/tools"
 ln -sfn "$repo/_runtest/testsuite/tools/expect" "$fake_root/testsuite/tools/expect"
 ln -sfn "$repo/_runtest/testsuite/tools/expectnat" "$fake_root/testsuite/tools/expectnat"
+
+rm -rf "$fake_root/tools"
+mkdir -p "$fake_root/tools"
+for file in "$repo"/tools/*; do
+  ln -sfn "$file" "$fake_root/tools/$(basename "$file")"
+done
+ln -sfn "$install_bin/ocamlmklib.byte" "$fake_root/tools/ocamlmklib"
 
 for lib in unix threads str; do
   ln -sfn "$install_lib/$lib" "$fake_root/otherlibs/$lib"
 done
 ln -sfn "$install_lib/threads" "$fake_root/otherlibs/systhreads"
 ln -sfn "$install_lib/stublibs" "$fake_root/stublibs"
+
+mkdir -p "$fake_root/otherlibs/dynlink/native"
+for file in "$install_lib"/dynlink/dynlink*; do
+  ln -sfn "$file" "$fake_root/otherlibs/dynlink/$(basename "$file")"
+done
 
 for universe in upstream_compatible stable beta alpha; do
   mkdir -p "$fake_root/otherlibs/$universe"
