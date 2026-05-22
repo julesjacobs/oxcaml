@@ -65,8 +65,9 @@ using that LLVM-built toolchain.
 - A repeat self-bootstrap using `_llvm_self_stage_install` as stage 0 also
   passed through boot/runtime/main and produced `_llvm_self_stage2_install`:
   boot `839` fresh `-x ir`, smoke `2`, runtime `74`, main `1112`; the
-  resulting compiler compiled and ran `fib 10` against its staged stdlib with
-  forced LLVM, output `55`, `2` fresh `-x ir`.
+  resulting compiler now reports `_llvm_self_stage2_install/lib/ocaml` as its
+  standard library by default and compiled and ran `fib 10` with forced LLVM
+  and no `OCAMLLIB`, output `55`, `2` fresh `-x ir`.
 - `tools/build-llvm-stage5-install.sh` still wraps the lower-level staged
   LLVM runtime/main rebuild and `_llvm_stage5_install` refresh.
 - `LLVM_BACKEND=1` is now the normal Make entry point for this mode. It sets the
@@ -250,10 +251,10 @@ Put the OxCaml opam switch first in `PATH`.
   enabled and passes the installed testsuite under forced LLVM. The next major
   milestone is making the explicit LLVM-enabled `make` / `make install` /
   `make test` workflow repeatable enough for regular use.
-- Staged installs are currently verified with `OCAMLLIB` pointing at the staged
-  stdlib. The compiler binaries still report `_install/lib/ocaml` by default
-  when `OCAMLLIB` is unset, so self-contained install configuration remains to
-  be cleaned up before treating these stage dirs like normal installs.
+- Staged installs now wrap compiler tools to set `OCAMLLIB` relative to their
+  own `bin` directory. This makes the staged compiler find its staged stdlib by
+  default, even though the baked `standard_library_default` still points at the
+  top-level `_install`.
 - Main remaining design risks: exception/effect control flow, runtime stack
   switching, multidomain interactions, SIMD coverage, and the exact
   statepoint-to-frametable contract.
