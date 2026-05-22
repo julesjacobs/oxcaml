@@ -218,6 +218,13 @@ If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
     and `tests/formatting`. `tests/tool-debugger` needed the fake root to
     expose the staged `ocamldebug` executable and wrapped `Ocamldebug` module
     artifacts.
+  - Module/linking stage slices passed with forced LLVM or bytecode-only paths
+    as appropriate: `tests/packs`, `tests/load_path`, `tests/hidden_includes`,
+    `tests/no-alias-deps`, `tests/opaque`, `tests/badly-ordered-deps`,
+    `tests/dash-Ix`, `tests/reproducibility`, and
+    `tests/required-external`. `tests/no-alias-deps` needed the fake root to
+    expose `ocamlobjinfo.byte` as `tools/ocamlobjinfo`, because ocamltest runs
+    that path under `ocamlrun`.
 
 Fix behind that progress:
 
