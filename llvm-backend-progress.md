@@ -62,9 +62,9 @@ If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
 - The reduced SIMD file `_build/main/oxcaml/tests/simd/builtins_u.ml` now
   compiles successfully with `-llvm-backend`; the wrapper log recorded
   `-x ir`.
-- Additional reduced SIMD files now compile through LLVM: `utils_u.ml` and
-  `basic_u.ml`. The broad `make runtest` run advances past those and now shows
-  remaining SIMD lowering gaps plus real behavior failures.
+- Additional reduced SIMD files now compile through LLVM: `utils_u.ml`,
+  `basic_u.ml`, `ops_int64x2.ml`, `arrays256.ml`, and `ops_float32x4.ml`.
+  These focused checks recorded fresh `-x ir` clang invocations.
 
 Latest fixes behind that SIMD progress:
 
@@ -81,10 +81,13 @@ Latest fixes behind that SIMD progress:
   on SIMD functions.
 - Added vector memory/external-argument lowering, vector static data as raw
   64-bit words, vector `Opaque` lowering without scalar-register inline asm,
-  vector reinterpret casts, and ARM64 vector float min/max/arithmetic lowering.
-- Current broad `make runtest` blockers include missing SIMD operations
-  (`Recpeq_*`, scalar-to-vector casts, `Zip1_*`), scalar SIMD min/max NaN
-  mismatches, and `small_numbers` executable failures.
+  vector reinterpret casts, scalar/vector casts, ZIP, pairwise add, reciprocal
+  estimate, reciprocal-square-root estimate, vector sqrt, ARM64 vector
+  float32/float64 low-lane conversion, and ARM64 vector float
+  min/max/arithmetic lowering.
+- Current broad `make runtest` blockers still need a fresh run after the latest
+  SIMD lowering fixes. Earlier blockers included scalar SIMD min/max NaN
+  mismatches and `small_numbers` executable failures.
 
 ## Previously Verified
 
