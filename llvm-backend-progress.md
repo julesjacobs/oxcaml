@@ -8,29 +8,32 @@ using that LLVM-built toolchain.
 
 ## Current Status
 
-- Progress is steady on normal-built compiler plus `-llvm-backend`,
-  LLVM-built installed compiler probes, and targeted test-suite reductions.
-- This is not production self-hosting yet. Stage-3/stage-5 LLVM-built compiler
-  probes have worked, but the normal workspace still uses normal-built boot
-  tools in parts of the pipeline.
-- The normal Make pipeline can build the compiler with LLVM enabled and can pass
-  `make runtest-llvmize` and a broad `make runtest` on arm64 with real LLVM use.
-- The LLVM-built installed compiler can pass the full compiler testsuite with
-  forced `-llvm-backend` on arm64. It can also build a stage-5 runtime stdlib
-  and complete stage-5 main install tree in a separate Dune build dir. The
-  stage-5 compiler now passes a broader focused ocamltest sweep covering basics,
-  effects, GC roots, callbacks, exceptions/backtraces, dynlink, Unix, Str,
-  systhreads, quotation, statmemprof, layout products, runtime events,
-  weak/ephemeron/finalizers, and many stdlib directories. This is an important
-  milestone, but the current copied-stack fix is conservative and still needs
-  design review before treating it as production-ready.
-- Hard problems should be handled with reductions and design experiments, not
-  broad self-host retries. The main hard areas remain exception/effect control
-  flow, runtime stack switching, multidomain interactions, SIMD coverage, and
-  the exact statepoint-to-frametable contract.
-- The stage-5 main compiler has been rebuilt after the LLVM module-metadata
-  fix. `tests/asmcomp/0001-test.ml` now passes through stage ocamltest with
-  forced `-llvm-backend`.
+- Progress is steady. The normal-built compiler with `-llvm-backend` passes the
+  relevant LLVM smoke suite and broad tests on arm64, and the LLVM-built
+  stage-5 compiler can now run most of the compiler testsuite with
+  `-llvm-backend` forced.
+- This is not production self-hosting yet. The stage-5 compiler can compile and
+  run many real programs and tests, but the workflow still uses a staged fake
+  test root plus normal build infrastructure. We have not yet made the normal
+  bootstrap process use LLVM everywhere and then pass the full suite.
+- The latest broad stage-5 ocamltest sweep excluded only `tests/asmgen` and
+  `tests/asmcomp`. It passed with forced LLVM: `6573` passed, `274` skipped,
+  `0` failed, `0` unexpected errors. The wrapper log recorded `5474` clang
+  calls and `2737` fresh `-x ir` compilations.
+- `tools/run-llvm-stage5-ocamltest.sh` now wraps the stage-5 fake-root setup,
+  list generation, forced-LLVM ocamltest run, and wrapper counts. A smoke run
+  with `GENERATE_LIST=0 LIST=/tmp/oxcaml-stage5-smoke-list.txt` containing
+  `tests/basic` passed: `82` passed, `0` failed, with `78` fresh `-x ir`
+  compilations.
+- The current copied-stack relocation fix is conservative and still needs
+  design review before treating it as production-ready. Hard problems should be
+  handled with reductions and design experiments, not broad self-host retries.
+
+The useful current capability is: a stage-5 LLVM-built compiler can compile and
+run a large fraction of ordinary native programs, including effects,
+exceptions, callbacks, dynlink, Unix/Str/systhreads slices, statmemprof,
+unboxed products, layouts, local allocation, C stubs, weak/finalizer tests, and
+many compiler/tool tests, when `-llvm-backend` is forced.
 
 Always verify real LLVM use by checking `/tmp/oxcaml-clang-wrapper.log` for
 `-x ir` plus the fixed-register flags:
@@ -60,344 +63,72 @@ PATH=/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin:$PATH \
   OCAMLPARAM='_,llvm-backend=1,llvm-path=/tmp/oxcaml-clang-wrapper'
 ```
 
+Run the broad stage-5 forced-LLVM ocamltest sweep:
+
+```sh
+tools/run-llvm-stage5-ocamltest.sh
+```
+
 If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
 `duneconf/main.ws` first. Put the OxCaml opam switch first in `PATH`.
 
-## Latest Verification
-
-- `make install` from the patched source passed.
-- Reduced unboxed-product repro passed under `_install/bin/ocamlopt.opt` with
-  forced LLVM. The wrapper log recorded `4` clang calls, `2` fresh `-x ir`
-  compilations, and fixed-register flags.
-- `repro.opt.ll` now shows `caml_curryVF_V_RF` returning `ptr addrspace(1)`;
-  the final wrapper `caml_curryVF_V_RF_1` still returns `double`.
-- `make test-one DIR=typing-layouts-products` with forced LLVM passed:
-  `105` passed, `0` skipped, `0` failed. The wrapper log recorded `100` clang
-  calls, `50` fresh `-x ir` compilations, and fixed-register flags.
-- Full installed-compiler flambda2 testsuite sweep with forced LLVM now passes:
-  `6599` passed, `287` skipped, and `0` failed. The wrapper log recorded
-  `5490` clang calls, `2745` fresh `-x ir` compilations, and fixed-register
-  flags. The installed compilers and `fexprc.exe` were forced to relink first
-  to avoid stale diagnostic strings from earlier probes.
-- `tool-ocamlopt-disable-builtin-check` now passes with forced LLVM: `8`
-  passed, `0` failed. The wrapper log recorded `1188` fresh `-x ir`
-  compilations. Unknown `[@@builtin]` externals now fall back to the normal
-  builtin-check path instead of being treated as LLVM intrinsics.
-- `tail-call-many-returns` now passes with forced LLVM after rebuilding the
-  LLVM fork. The focused test recorded `2` fresh `-x ir` compilations and
-  fixed-register flags. The reduced program also prints `1` through `75`.
-- `typing-small-numbers/test_matching_native.ml` in `toplevel.opt` now passes.
-  The reduced two-phrase `ocamlnat` crash was caused by LLVM keeping OCaml stack
-  addresses in saved registers and copied stack slots across prologue stack
-  growth. Relocating those raw stack addresses after the normal typed stack
-  rewrites fixes the reduced crash, `typing-small-numbers`, `async-exns`, and
-  `flambda2/examples`.
-- Stage-5 bootstrap probe:
-  - Runtime stdlib built with the installed LLVM-built compiler in
-    `_llvm_stage5_bootstrap_build`; the wrapper recorded `148` clang calls and
-    `74` fresh `-x ir` compilations.
-  - Main compiler targets built in `_llvm_stage5_main_build` with
-    `ARCH=arm64`, the stage runtime stdlib, and forced LLVM. The wrapper
-    recorded `2206` clang calls and `1103` fresh `-x ir` compilations.
-  - Dune only generates `.cmxs` rules when `dynlink.cmxa` marker files exist in
-    the runtime stdlib. Adding the same markers as `make runtime-stdlib` lets
-    stage `@install` build native plugin artifacts (`str.cmxs`, `unix.cmxs`,
-    `runtime_events.cmxs`, `eval.cmxs`, `jit.cmxs`).
-  - A combined `_llvm_stage5_install` tree was assembled from the stage runtime
-    stdlib and stage main install tree. It reports its standard library as
-    `_llvm_stage5_install/lib/ocaml`.
-  - `@runtest-llvmize` passed with `_llvm_stage5_install/bin/ocamlopt.opt` and
-    `_llvm_stage5_install/lib/ocaml`; the wrapper recorded `120` clang calls and
-    `60` fresh `-x ir` compilations.
-  - `tests/basic` passed through ocamltest using the stage-5 compiler and
-    stdlib: `82` passed, `0` skipped, `0` failed. The wrapper recorded `156`
-    clang calls and `78` fresh `-x ir` compilations.
-  - `tests/effects` passed through ocamltest using the stage-5 compiler and
-    stdlib: `127` passed, `28` skipped, `0` failed. The wrapper recorded `98`
-    clang calls and `49` fresh `-x ir` compilations.
-  - More stage-5 ocamltest slices passed:
-    `tests/gc-roots` (`10` passed, `0` failed, `11` fresh `-x ir`),
-    `tests/callback` (`38` passed, `1` skipped, `0` failed, `30` fresh
-    `-x ir`), `tests/lib-unix` (`126` passed, `11` skipped, `0` failed, `59`
-    fresh `-x ir`), and `tests/lib-str` (`4` passed, `1` skipped, `0` failed,
-    `2` fresh `-x ir`).
-  - Additional stage-5 ocamltest slices passed:
-    `tests/lib-systhreads` (`46` passed, `4` skipped, `0` failed, `18` fresh
-    `-x ir`), `tests/quotation` (`40` passed, `0` failed, `45` fresh `-x ir`),
-    `tests/statmemprof` (`48` passed, `3` skipped, `0` failed, `40` fresh
-    `-x ir`), and `tests/typing-layouts-products` (`105` passed, `0` failed,
-    `50` fresh `-x ir`).
-  - The stage ocamltest helper now mirrors more of `install_for_test`: it
-    exposes `otherlibs/eval`, `otherlibs/runtime_events`, and the stdlib
-    universe directories. Without this, quotation and layout-product tests fail
-    from missing `-I` directories/files rather than from compiler behavior.
-  - A broader stage-5 ocamltest sweep passed after exposing the staged toplevel
-    bytecode artifacts for expect tests: `tests/basic-float`, `tests/basic-io`,
-    `tests/basic-manyargs`, `tests/basic-modules`, `tests/basic-more`,
-    `tests/lib-array`, `tests/lib-bigarray`, `tests/lib-bigarray-2`,
-    `tests/lib-buffer`, `tests/lib-bytes`, `tests/lib-digest`,
-    `tests/lib-float`, `tests/lib-format`, `tests/lib-hashtbl`,
-    `tests/lib-list`, `tests/lib-marshal`, `tests/lib-obj`,
-    `tests/lib-random`, `tests/lib-runtime-events`, `tests/lib-string`,
-    `tests/runtime-errors`, and `tests/weak-ephe-final`. Every directory
-    recorded fresh `-x ir` wrapper calls.
-  - Another stage-5 sweep passed after mirroring more `install_for_test`
-    layout into the fake source root: `tests/lib-channels`,
-    `tests/lib-filename`, `tests/lib-int`, `tests/lib-int64`,
-    `tests/lib-option`, `tests/lib-printf`, `tests/lib-queue`,
-    `tests/lib-result`, `tests/lib-scanf`, `tests/lib-set`,
-    `tests/lib-stack`, `tests/lib-uchar`,
-    `tests/tool-ocamlopt-disable-builtin-check`,
-    `tests/tool-ocamlopt-save-ir`, `tests/backtrace`,
-    `tests/backtrace-multifiles`, `tests/exception-extra-args`,
-    `tests/match-exception`, `tests/runtime-C-exceptions`,
-    `tests/raise-counts`, `tests/compaction`, `tests/parallel`, and the
-    non-multidomain dynlink directories. Directories with native compilations
-    recorded fresh `-x ir`; driver-only/bytecode-only slices did not.
-  - Compiler/tooling-heavy stage slices passed after extending the fake root:
-    `tests/compiler-libs`, `tests/tool-dumpobj`, `tests/tool-ocaml`,
-    `tests/tool-ocamlc-locations`, `tests/tool-ocamlc-open`,
-    `tests/tool-ocamlc-stop-after`, `tests/tool-ocamldep-modalias`,
-    `tests/tool-ocamldep-shadowing`, `tests/tool-lexyacc`, and
-    `tests/codegen`. Native slices recorded fresh `-x ir` where applicable.
-  - `tests/asmcomp/0001-test.ml` exposed an LLVM-specific metadata bug: the
-    LLVM pass emitted `code_begin`/`data_begin`/`frametable` symbols using the
-    raw module name `0001-test`, while the rest of the compiler referenced the
-    assembler-escaped `0001$2dtest` spelling. Encoding the module name before
-    writing the `oxcaml_module` metadata fixes the direct repro with the
-    freshly rebuilt normal installed compiler (`6` wrapper calls, `4` fresh
-    `-x ir`).
-  - After rebuilding the stage-5 main compiler and refreshing
-    `_llvm_stage5_install`, `tests/asmcomp/0001-test.ml` passes through stage
-    ocamltest with forced `-llvm-backend`; the wrapper recorded `4` calls and
-    `2` fresh `-x ir` compilations.
-  - `tests/asmcomp` now reports `27` passed, `10` skipped, and `2` failed with
-    stage-5 forced LLVM; the wrapper recorded `64` calls and `32` fresh
-    `-x ir` compilations. The remaining failures are `optargs.ml` and
-    `staticalloc.ml`.
-  - `tests/asmcomp/optargs.ml` fails its allocation assertion with both default
-    and LLVM backends, using both normal-installed and stage-installed
-    compilers. `tests/asmcomp/staticalloc.ml` also fails its line-20 assertion
-    with both stage forced LLVM and the normal installed compiler's default
-    backend. Treat both as unrelated to LLVM backend selection until proven
-    otherwise.
-  - The stage ocamltest helper now makes `utils` a mirror directory and adds
-    the staged `config.o`, because tests that link `config.cmx` also need the
-    matching object file.
-  - Link/stub-oriented stage slices passed with forced LLVM:
-    `tests/c-api` (`11` passed, `10` fresh `-x ir`), `tests/external`
-    (`2` passed, `2` fresh), `tests/link-order` (`33` passed, `6` fresh),
-    `tests/link-test` (`48` passed, `12` fresh), and
-    `tests/output-complete-obj` (`18` passed, `2` fresh). `tests/manual-intf-c`
-    skipped its only curses test.
-  - The stage ocamltest helper now also creates empty source-layout directories
-    such as `asmcomp`, `bytecomp`, and `typing`, because compiler-library link
-    tests pass those `-I` directories and macOS `ld` warns if they are missing.
-  - Additional language/runtime stage slices passed with forced LLVM:
-    `tests/array-functions`, `tests/basic-io-2`, `tests/basic-multdef`,
-    `tests/basic-private`, `tests/extension-constructor`,
-    `tests/functors` (bytecode-only), and `tests/letrec-compilation`.
-  - Additional stdlib stage slices passed with forced LLVM:
-    `tests/lib-arg`, `tests/lib-atomic`, `tests/lib-bool`,
-    `tests/lib-dynarray`, `tests/lib-either` (expect-only),
-    `tests/lib-fun`, `tests/lib-internalformat` (expect-only),
-    `tests/lib-seq`, `tests/lib-stdlabels`, and `tests/lib-sys`.
-  - Additional OxCaml feature stage slices passed with forced LLVM:
-    `tests/local-functions`, `tests/mixed-blocks`, `tests/mixed-modules`,
-    `tests/nested-mixed-records`, `tests/records-and-block-indices`,
-    `tests/reinterpret-casts`, and `tests/peek_and_poke`.
-  - Native-heavy stage slices passed with forced LLVM:
-    `tests/lib-bigarray-file`, `tests/lib-floatarray`,
-    `tests/float-unboxing`, `tests/int64-unboxing`,
-    `tests/tail-call-many-returns`, `tests/tmc`, `tests/lazy`, and
-    `tests/syntactic-arity`.
-  - Tool/formatting stage slices passed with forced LLVM or bytecode-only
-    paths as appropriate: `tests/tool-debugger`, `tests/tool-expect-test`,
-    `tests/tool-ocaml-annot`, `tests/tool-ocamlc-error-cleanup`,
-    `tests/tool-ocamldep-abstract-kinds`, `tests/tool-ocamldep-with-kinds`,
-    and `tests/formatting`. `tests/tool-debugger` needed the fake root to
-    expose the staged `ocamldebug` executable and wrapped `Ocamldebug` module
-    artifacts.
-  - Module/linking stage slices passed with forced LLVM or bytecode-only paths
-    as appropriate: `tests/packs`, `tests/load_path`, `tests/hidden_includes`,
-    `tests/no-alias-deps`, `tests/opaque`, `tests/badly-ordered-deps`,
-    `tests/dash-Ix`, `tests/reproducibility`, and
-    `tests/required-external`. `tests/no-alias-deps` needed the fake root to
-    expose `ocamlobjinfo.byte` as `tools/ocamlobjinfo`, because ocamltest runs
-    that path under `ocamlrun`.
-  - Primitive/runtime stage slices passed with forced LLVM:
-    `tests/prim-bigstring`, `tests/prim-bswap`, `tests/prim-revapply`,
-    `tests/runtime-objects`, `tests/atomic-locs`, `tests/lf_skiplist`,
-    `tests/lib-sync`, `tests/lib-domain`, `tests/lib-threads`,
-    `tests/memory-model`, and `tests/parallel`.
-  - Parser/diagnostic stage slices passed with forced LLVM or bytecode-only
-    paths as appropriate: `tests/parsing`, `tests/parse-errors`,
-    `tests/generated-parse-errors`, `tests/parsetree`, `tests/printing-types`,
-    `tests/messages`, `tests/misc`, `tests/misc-kb`, `tests/misc-unsafe`,
-    `tests/match-exception-warnings`, and `tests/match-side-effects`.
-  - Type-system/extension stage slices passed with forced LLVM or bytecode-only
-    paths as appropriate: `tests/language-extensions`, `tests/layout_poly`,
-    `tests/implicit-types`, `tests/generalized-open`, `tests/let-syntax`,
-    `tests/letrec-check`, `tests/ppx-attributes`, `tests/ppx-contexts`,
-    `tests/ppx-empty-cases`, `tests/ppx-error-message`, and
-    `tests/extension-constructor`.
-  - Flambda-oriented stage slices passed with forced LLVM:
-    `tests/flambda` (`44` passed, `47` fresh `-x ir`), `tests/flambda2`
-    (`611` passed, `2` skipped, `161` fresh), `tests/slambda`, `tests/templates`
-    (`412` passed, `5` skipped, `64` fresh), and `tests/comprehensions`.
-    `tests/flambda2` needed the fake root to expose the stage-built
-    `fexprc.exe`; using a stale/wrong helper produced a spurious
-    `Fatal error during unlock: Operation not permitted` in `lift_rec_cont.fl`.
-  - Typing/source-walking stage slices passed with forced LLVM:
-    `tests/typing-local` (`87` passed, `6` skipped, `70` fresh `-x ir`) and
-    `tests/ast-invariants` (`2` passed, `2` fresh). `tests/typing-local`
-    needed stage-built `expect`/`expectnat`; otherwise native expect tests used
-    helpers linked against the normal stdlib. `tests/ast-invariants` needed
-    regular source files under the fake `OCAMLSRCDIR`, because it walks the
-    tree with `Unix.lstat` and ignores symlinked files/directories.
-  - Another stage-5 batch passed with forced LLVM: `tests/async-exns`,
-    `tests/embedded`, `tests/fma`, `tests/lexing`, `tests/lib-bytes-utf`,
-    `tests/lib-extensions`, `tests/lib-lazy`, `tests/lib-scanf-2`,
-    `tests/lib-smallint`, `tests/locale`, manual module-init tests,
-    `tests/regression`, `tests/self-contained-toplevel`, `tests/translprim`,
-    `tests/unboxed-primitive-args`, and `tests/warnings`. Summary:
-    `316` passed, `21` skipped, `0` failed, with `153` fresh `-x ir`
-    compilations and fixed-register flags in the wrapper log.
-  - A typing-heavy stage-5 batch passed with forced LLVM: abstract kinds,
-    GADTs, labels, layout arrays/bits/floats/or-null/void/word, missing-cmi
-    tests, modal kinds, and related typing directories. Summary: `1041`
-    passed, `8` skipped, `0` failed, with `735` fresh `-x ir` compilations.
-  - A second typing-heavy stage-5 batch passed with forced LLVM: modules,
-    objects, polymorphism, private/recursive modules, signatures, SIMD,
-    small numbers, unboxed types, uniqueness, zero-alloc, UID tests, and
-    related directories. Summary: `527` passed, `1` skipped, `0` failed, with
-    `38` fresh `-x ir` compilations.
-  - A tool/misc stage-5 batch passed with forced LLVM after extending the fake
-    root: `tests/exotic-syntax`, `tests/formats-transition`, `tests/manifests`,
-    `tests/profile`, `tests/reaper`, `tests/shadow_include`,
-    `tests/tool-command-line`, `tests/tool-ocamlc-compat32`,
-    `tests/tool-ocamlobjinfo`, `tests/tool-ocamlopt-stop-after`,
-    `tests/tool-ocamltest`, `tests/tool-ocamltest-var-expansion`,
-    `tests/tool-toplevel`, `tests/tool-toplevel-invocation`, and
-    `tests/utils`. Summary: `206` passed, `52` skipped, `0` failed, with `51`
-    fresh `-x ir` compilations.
-  - The fake stage root now exposes stage `codegen`, `asmgen_*.o`, an
-    `ocamltest/ocamltest` executable, and native toplevel `opttop*` artifacts.
-    This fixed stale/missing helper failures in `tool-ocamltest` and
-    `tool-toplevel`. `tests/asmgen` no longer aborts in the helper, but still
-    fails before LLVM is involved: the existing `_runtest/testsuite/tools/codegen`
-    also reports a Cmm lexical error on `tests/asmgen/fib.cmm`, so treat this
-    as a separate raw-Asmgen/test-harness issue for now.
-  - All dynlink stage-5 directories passed or skipped as expected with forced
-    LLVM: bytecode, init-info, initializers, native, packed, PR regressions,
-    and private. Summary: `426` passed, `3` skipped, `0` failed, with `156`
-    fresh `-x ir` compilations. `lib-dynlink-domains` skipped because this
-    stage build is not multidomain-enabled.
-  - A broad stage-5 sweep of all test directories except `tests/asmgen` and
-    `tests/asmcomp` reached the end with forced LLVM: `6600` passed, `275`
-    skipped, and `2737` fresh `-x ir` compilations. The only unexpected errors
-    were stale ignored `*.ml.corrected` files being discovered as tests.
-  - The fake-root setup now removes stale mirrored OCaml source/correction
-    files and exposes `Makefile.config`/`Makefile.build_config`. The targeted
-    rerun of `tests/lib-bigarray-2`, `tests/mixed-blocks`,
-    `tests/records-and-block-indices`, `tests/typing-layouts`, and
-    `tests/typing-layouts-arrays` passed: `365` passed, `4` skipped, `0`
-    failed/errors, with `331` fresh `-x ir` compilations.
-
-Fix behind that progress:
+## Verified Fixes
 
 - LLVM module metadata must use the assembler-escaped module name. Otherwise
   names that require escaping, such as `0001-test`, make the LLVM-generated
-  `code_begin`/`data_begin`/`frametable` labels disagree with startup references.
-- Generic intermediate curry wrappers allocate and return a closure, but their
-  Cmm `fun_ret_type` used the final function result. Native codegen still
-  returned the allocated closure in `x0`; LLVM trusted `fun_ret_type` and
-  emitted wrappers such as `caml_curryVF_V_RF` as returning `double` in `d0`.
-  Setting only the intermediate wrappers' `fun_ret_type` to `typ_val` fixes
-  partial applications whose final result has a non-value return convention.
-- Unknown `[@@builtin]` externals must not be treated as arbitrary LLVM
-  intrinsics. The LLVM fallback now only accepts the intrinsic names that
-  `Llvmize.intrinsic` implements; otherwise the existing builtin-check path
-  reports the normal error, and `-disable-builtin-check` can still call the C
-  external.
-- On AArch64 Darwin, the LLVM OxCaml calling convention now uses `x8`-`x15` for
+  `code_begin`/`data_begin`/`frametable` labels disagree with startup
+  references.
+- Generic intermediate curry wrappers allocate and return a closure, so their
+  `fun_ret_type` must be `typ_val` even when the final function result has a
+  non-value return convention.
+- Unknown `[@@builtin]` externals must fall back to the normal builtin-check
+  path unless the name is one of the LLVM intrinsics implemented by
+  `Llvmize.intrinsic`.
+- On AArch64 Darwin, the LLVM OxCaml calling convention uses `x8`-`x15` for
   OxCaml integer values like non-Darwin. This avoids LLVM lowering large
   aggregate returns through a hidden return buffer in `x28`, which conflicts
   with the OxCaml domain-state register.
 - On AArch64, copied-stack growth now relocates old-stack addresses that LLVM
   kept in saved GPR slots or copied stack words. The raw stack-word rewrite must
-  run after the typed exception-chain and frame-pointer rewrites; running it
-  earlier can hide old trap links from `caml_rewrite_exception_stack` and leave
-  `async_exn_handler` stale.
+  run after the typed exception-chain and frame-pointer rewrites.
+- `RewriteStatepointsForGC` must compute caller live roots before the
+  statepoint call itself; otherwise call arguments can stay live across calls.
 
-## Previously Verified
+## Test Harness Notes
 
-- Normal-built compiler plus `-llvm-backend`: allocation in `try`, external
-  calls in `try`, stack growth, caught stack overflow, callbacks, effects,
-  continuation probes, small multi-module programs, weak/ephemeron/finalizer
-  tests, and several stdlib/runtime slices passed.
-- Normal LLVM-enabled compiler builds on arm64 recorded fresh `-x ir` wrapper
-  calls and passed `make runtest-llvmize`; a broad LLVM-enabled `make runtest`
-  also passed with fresh IR calls.
-- Stage-3 and stage-4 LLVM-built compiler probes built
-  `oxcaml_main_native.exe` with forced `-llvm-backend`; each compiler compiled a
-  Fibonacci smoke test through LLVM and printed `55`.
-- Stage-3 and stage-4 compilers passed `@runtest-llvmize` on arm64 with
-  `OXCAML_LLVM_TEST_OCAMLOPT` pointing at the LLVM-built compiler.
-- Installed LLVM-built compiler plus forced `-llvm-backend` passed focused
-  ocamltest slices: `tests/basic`, `tests/effects`, `tests/callback`,
-  `tests/gc-roots`, `tests/lib-unix`, `tests/lib-str`, `tests/lib-systhreads`,
-  `tests/quotation`, `tests/statmemprof`, and `tests/typing-layouts-products`.
-- An earlier full installed-compiler flambda2 testsuite sweep used real LLVM
-  (`2719` fresh IR compilations) and reported `6531` passed, `287` skipped,
-  and `63` failed before the quotation, statmemprof, and unboxed-product fixes.
-- A forced LLVM-enabled compiler build on arm64 succeeded and recorded `1112`
-  fresh `-x ir` wrapper calls. The copied normal-built and LLVM-built compiler
-  binaries were benchmarked on `typecore.ml`, `typedecl.ml`, and
-  `translcore.ml`; results are in `llvm-backend-compile-benchmarks.md`.
+- `_llvm_stage5_install` is assembled from the stage runtime stdlib and stage
+  main install tree. It reports its standard library as
+  `_llvm_stage5_install/lib/ocaml`.
+- `tools/setup-llvm-stage4-ocamltest.sh` mirrors enough of `install_for_test`
+  for stage ocamltest runs: staged tool binaries, runtime/stdlib files, compiler
+  library source layout, `Makefile.config`, `Makefile.build_config`, debugger,
+  toplevel, `fexprc.exe`, `codegen`, and source trees needed by source-walking
+  tests.
+- The helper removes stale mirrored `*.ml`, `*.mli`, and `*.corrected` files
+  before relinking sources. Without this, ignored generated correction files can
+  be rediscovered as tests.
 
-## Design Findings
+## Known Gaps
 
-- AArch64 LLVM code must not use the platform frame-pointer prologue for normal
-  OxCaml frames, because the OCaml stack walker finds saved return addresses
-  from `sp` and frame descriptors. LLVM still needs x29 for var-sized objects,
-  stack realignment, or frame-address-taking functions.
-- Protected OCaml calls, protected external calls, `raise_notrace`,
-  allocation/poll safepoints, and stack checks need explicit unwind successors
-  when a trap is active.
-- AArch64 `Pushtrap` uses preallocated entry-frame trap blocks. Trap recovery
-  must store a trap-block-relative restore-SP delta because stack growth rewrites
-  the trap-block chain.
-- Stale runtime-stdlib archives, stdlib objects, compiler-tool objects, or
-  nested LLVM builds can produce misleading crashes. Dune does not track
-  `/tmp/oxcaml-clang-wrapper` or the nested LLVM build as dependencies; force a
-  clean rebuild of the relevant libraries/tools before drawing conclusions.
-- Runtime assembly can also be stale independently in the main workspace. After
-  changing `runtime/arm64.S`, verify the linked tool with `otool`; a rebuilt
-  runtime archive alone does not prove `_install/bin/ocamlnat` was relinked.
-- `tests/statmemprof/bigarray.ml` exposed an LLVM statepoint liveness bug:
-  `RewriteStatepointsForGC` included the statepoint instruction itself when
-  computing caller live roots, which kept call arguments live across calls. The
-  local LLVM fix computes liveness before the statepoint call.
-- Progress is steady on targeted call/GC metadata bugs, but stack-passed OCaml
-  call values are still design-sensitive. The current AArch64 Darwin change
-  avoids the failing stack-result test by keeping more OxCaml values in
-  registers. A cleaner long-term design may still need explicit LLVM lowering
-  for true stack-passed OCaml call results.
-- The copied-stack relocation fix is a hard design point, not just a local test
-  fix. The runtime-side conservative scan passes the suite, but a cleaner
-  production design may need compiler/runtime metadata for which stack words are
-  actual stack addresses, or a way to prevent LLVM from materializing such
-  addresses across stack growth.
+- `tests/asmcomp` under stage-5 forced LLVM reports `27` passed, `10` skipped,
+  `2` failed. The two failures, `optargs.ml` and `staticalloc.ml`, also fail in
+  non-LLVM configurations checked so far, so treat them as unrelated until
+  proven otherwise.
+- `tests/asmgen` still fails before LLVM is involved: the existing
+  `_runtest/testsuite/tools/codegen` reports a Cmm lexical error on
+  `tests/asmgen/fib.cmm`.
+- The stage fake root is a useful test harness, not the final bootstrap story.
+  The next major milestone is to make the ordinary bootstrap/testing pipeline
+  build and test with LLVM everywhere.
+- Main remaining design risks: exception/effect control flow, runtime stack
+  switching, multidomain interactions, SIMD coverage, and the exact
+  statepoint-to-frametable contract.
 
 ## Next Checks
 
-1. Audit the copied-stack relocation design for false positives and decide
-   whether conservative runtime scanning is acceptable or needs stack-address
-   metadata from the LLVM backend.
-2. Expand stage-5 ocamltest coverage toward the full suite, with real LLVM use
-   checked by the wrapper log. The fake stage source root now has enough of the
-   source layout for source-walking tests, but this remains a test-harness
-   approximation rather than the final bootstrapping process.
-3. Decide whether the repeatable stage install setup should become a Make target
-   or remain a development script.
+1. Audit copied-stack relocation for false positives and decide whether
+   conservative runtime scanning is acceptable or needs stack-address metadata.
+2. Convert the stage install/test setup into a repeatable Make or script entry
+   point that can run from a clean checkout.
+3. Move from the fake-root sweep to the normal bootstrap process with LLVM
+   enabled everywhere, then run the full test suite.
