@@ -80,6 +80,10 @@ for file in "$install_lib"/compiler-libs/*; do
 done
 ln -sfn "$config_obj" "$fake_root/utils/config.o"
 
+for dir in asmcomp bytecomp driver file_formats lambda middle_end parsing typing; do
+  mkdir -p "$fake_root/$dir"
+done
+
 rm -rf "$fake_root/tools"
 mkdir -p "$fake_root/tools"
 for file in "$repo"/tools/*; do
