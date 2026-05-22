@@ -20,10 +20,8 @@ using that LLVM-built toolchain.
   `0` failed, `0` unexpected errors. The wrapper log recorded `5474` clang
   calls and `2737` fresh `-x ir` compilations.
 - `tools/run-llvm-stage5-ocamltest.sh` now wraps the stage-5 fake-root setup,
-  list generation, forced-LLVM ocamltest run, and wrapper counts. A smoke run
-  with `GENERATE_LIST=0 LIST=/tmp/oxcaml-stage5-smoke-list.txt` containing
-  `tests/basic` passed: `82` passed, `0` failed, with `78` fresh `-x ir`
-  compilations.
+  self-stage fake-root setup with `SELF_STAGE=1`, list generation, forced-LLVM
+  ocamltest run, and wrapper counts.
 - `tools/build-llvm-self-stage-install.sh` is the current repeatable
   self-stage path. It builds an LLVM boot compiler from `_install`, packages it
   as `_llvm_boot_install`, then uses that LLVM-built boot compiler to rebuild
@@ -31,6 +29,11 @@ using that LLVM-built toolchain.
   boot `839` fresh `-x ir`, runtime `74` fresh `-x ir`, main `1112` fresh
   `-x ir`; the resulting compiler compiled and ran `fib 10` with forced LLVM,
   output `55`, `2` fresh `-x ir`.
+- The broad self-stage ocamltest sweep used `_llvm_self_stage_install` and
+  `_llvm_self_stage_main_build`, excluded only `tests/asmgen` and
+  `tests/asmcomp`, and passed with forced LLVM: `6573` passed, `274` skipped,
+  `0` failed, `0` unexpected errors. The wrapper log recorded `5996` clang
+  calls and `2998` fresh `-x ir` compilations.
 - `tools/build-llvm-stage5-install.sh` still wraps the lower-level staged
   LLVM runtime/main rebuild and `_llvm_stage5_install` refresh.
 - `LLVM_BACKEND=1` is now the normal Make entry point for this mode. It sets the
@@ -91,6 +94,12 @@ Run the broad stage-5 forced-LLVM ocamltest sweep:
 
 ```sh
 tools/run-llvm-stage5-ocamltest.sh
+```
+
+Run the broad self-stage forced-LLVM ocamltest sweep:
+
+```sh
+SELF_STAGE=1 tools/run-llvm-stage5-ocamltest.sh
 ```
 
 Rebuild and refresh the staged LLVM install:
