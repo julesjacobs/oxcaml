@@ -132,6 +132,14 @@ let is_immediate_natint n =
 
 let specific x : Cfg.basic_or_terminator = Basic (Op (Specific x))
 
+let is_llvm_intrinsic_builtin = function
+  | "caml_rdtsc_unboxed"
+  | "caml_rdpmc_unboxed"
+  | "caml_sse2_float64_min"
+  | "caml_sse2_float64_max" ->
+    true
+  | _ -> false
+
 let pseudoregs_for_operation op arg res =
   match (op : Operation.t) with
   (* Two-address binary operations: arg.(0) and res.(0) must be the same *)
@@ -474,7 +482,8 @@ let select_operation
     | Cbswap { bitwidth } ->
       let bitwidth = select_bitwidth bitwidth in
       Rewritten (specific (Ibswap { bitwidth }), args)
-    | Cextcall { func; builtin = true; _ } ->
+    | Cextcall { func; builtin = true; _ } when is_llvm_intrinsic_builtin func
+      ->
       (* Illvm_intrinsic must not allocate on the OCaml heap. See
          [Arch.operation_allocates]. *)
       Rewritten (specific (Illvm_intrinsic func), args)
