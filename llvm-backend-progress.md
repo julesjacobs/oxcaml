@@ -145,8 +145,8 @@ Always verify real LLVM use by checking `/tmp/oxcaml-clang-wrapper.log` for:
   mostly cached but still had 2 fresh `-x ir` calls.
 - Normal `make runtest` with LLVM enabled still fails. The first reduced blocker
   is `oxcaml/tests/simd/builtins_u.ml`: after adding LLVM IR support for
-  vector machine types and a first batch of integer NEON lowering, it now gets
-  as far as `Cvtq_f64_s64` before hitting an unimplemented SIMD operation.
+  vector machine types and more ARM64 NEON lowering, it now gets as far as
+  `Cmpz_s32_lt` before hitting an unimplemented SIMD operation.
 - Reduced repro `/tmp/oxcaml-reperform-consumed/test.ml` now passes with the
   normal-built compiler plus `-llvm-backend` and patched runtime:
   `first reperform raised Unhandled: true` and
@@ -178,9 +178,11 @@ Always verify real LLVM use by checking `/tmp/oxcaml-clang-wrapper.log` for:
   setup before classifying LLVM behavior.
 - The SIMD broad-test failure is now a coverage problem rather than a single
   hidden compiler crash. Integer vector carriers, vector compare/select, simple
-  integer add/sub/bitwise/neg, shifts, lane duplication, and low-half widening
-  have tentative LLVM lowerings; float/vector conversions and many remaining
-  NEON operations still need deliberate lowering or a principled fallback.
+  integer add/sub/mul/bitwise/neg, shifts, lane duplication, lane
+  insert/extract, low-half widening, vector int/float conversions, saturating
+  narrows, float comparisons, vector rounding, and widening multiply have
+  tentative LLVM lowerings. Integer comparisons and several remaining NEON
+  operations still need deliberate lowering or a principled fallback.
 
 ## Next Checks
 
