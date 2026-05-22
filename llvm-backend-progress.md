@@ -9,13 +9,12 @@ using that LLVM-built toolchain.
 ## Current Status
 
 - Progress is steady. The normal-built compiler with `-llvm-backend` passes the
-  relevant LLVM smoke suite and broad tests on arm64, and the LLVM-built
-  stage-5 compiler can now run most of the compiler testsuite with
-  `-llvm-backend` forced.
-- This is not production self-hosting yet. The stage-5 compiler can compile and
-  run many real programs and tests, but the workflow still uses a staged fake
-  test root plus normal build infrastructure. We have not yet made the normal
-  bootstrap process use LLVM everywhere and then pass the full suite.
+  broad tests on arm64, and an LLVM-built boot compiler can now rebuild a staged
+  runtime/main compiler install with LLVM forced.
+- This is not production self-hosting yet. The staged compiler can compile and
+  run many real programs and tests, but the workflow still uses helper scripts
+  and staged install roots. We have not yet made the normal bootstrap process
+  use LLVM everywhere and then pass the full suite.
 - The latest broad stage-5 ocamltest sweep excluded only `tests/asmgen` and
   `tests/asmcomp`. It passed with forced LLVM: `6573` passed, `274` skipped,
   `0` failed, `0` unexpected errors. The wrapper log recorded `5474` clang
@@ -25,11 +24,15 @@ using that LLVM-built toolchain.
   with `GENERATE_LIST=0 LIST=/tmp/oxcaml-stage5-smoke-list.txt` containing
   `tests/basic` passed: `82` passed, `0` failed, with `78` fresh `-x ir`
   compilations.
-- `tools/build-llvm-stage5-install.sh` now wraps the staged LLVM runtime/main
-  rebuild and `_llvm_stage5_install` refresh. A clean validation build succeeded:
-  runtime `148` wrapper lines / `74` fresh `-x ir`, main `2224` wrapper lines /
-  `1112` fresh `-x ir`. The resulting compiler compiled and ran a simple native
-  program with forced LLVM: `2` fresh `-x ir`.
+- `tools/build-llvm-self-stage-install.sh` is the current repeatable
+  self-stage path. It builds an LLVM boot compiler from `_install`, packages it
+  as `_llvm_boot_install`, then uses that LLVM-built boot compiler to rebuild
+  runtime/main into `_llvm_self_stage_install`. The latest script run succeeded:
+  boot `839` fresh `-x ir`, runtime `74` fresh `-x ir`, main `1112` fresh
+  `-x ir`; the resulting compiler compiled and ran `fib 10` with forced LLVM,
+  output `55`, `2` fresh `-x ir`.
+- `tools/build-llvm-stage5-install.sh` still wraps the lower-level staged
+  LLVM runtime/main rebuild and `_llvm_stage5_install` refresh.
 - `LLVM_BACKEND=1` is now the normal Make entry point for this mode. It sets the
   build contexts and testsuite environment consistently, and regenerates the
   Dune workspaces when the generated contents change.
@@ -96,6 +99,12 @@ Rebuild and refresh the staged LLVM install:
 tools/build-llvm-stage5-install.sh
 ```
 
+Build the LLVM boot compiler, then rebuild a staged compiler from it:
+
+```sh
+tools/build-llvm-self-stage-install.sh
+```
+
 Build the boot compiler with the LLVM-capable installed compiler as stage 0:
 
 ```sh
@@ -131,6 +140,9 @@ Put the OxCaml opam switch first in `PATH`.
 - `_llvm_stage5_install` is assembled from the stage runtime stdlib and stage
   main install tree. It reports its standard library as
   `_llvm_stage5_install/lib/ocaml`.
+- `_llvm_self_stage_install` is assembled the same way, but its runtime/main
+  build uses `_llvm_boot_install` instead of `_install` as the boot compiler
+  install.
 - `tools/build-llvm-stage5-install.sh` generates the staged runtime/main dune
   workspaces, supplies the configured asm preprocessor environment, and refreshes
   `_llvm_stage5_install`.
