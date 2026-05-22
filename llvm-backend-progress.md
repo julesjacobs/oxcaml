@@ -90,9 +90,13 @@ Latest fixes behind that SIMD progress:
   lane copy, reciprocal estimate, reciprocal-square-root estimate, vector sqrt,
   ARM64 vector float32/float64 low-lane conversion, ARM64 vector float
   min/max/arithmetic lowering, and more ARM64 integer SIMD lowering.
-- Current broad `make runtest` blockers include scalar SIMD Float64 min/max NaN
-  mismatches from the linked SIMD builtins library, `small_numbers/float32_lib`
-  assertion failures, and a SIMD callee-save NEON test segfault.
+- Fixed scalar `caml_simd_float*_min/max` lowering to match SSE semantics with
+  ordered compare plus select. After rebuilding the focused SIMD slice through
+  LLVM, `oxcaml/tests/simd/consts.out` is empty with 10 fresh `-x ir` wrapper
+  calls.
+- Current broad `make runtest` blockers include `small_numbers/float32_lib`
+  assertion failures and a SIMD callee-save NEON test segfault. A fresh broad
+  run is still needed after the scalar min/max fix.
 - Direct Dune probes must also be checked against
   `/tmp/oxcaml-clang-wrapper.log`; one direct Dune command with only
   `BUILD_OCAMLPARAM` rebuilt without invoking the LLVM wrapper.

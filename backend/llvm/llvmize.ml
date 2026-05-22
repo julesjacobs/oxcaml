@@ -1585,6 +1585,12 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       [float_arg typ 0; float_arg typ 1]
       typ
   in
+  let float_minmax_match_sse cond typ =
+    let arg1 = float_arg typ 0 in
+    let arg2 = float_arg typ 1 in
+    let cmp = emit_ins t (I.fcmp cond ~arg1 ~arg2) in
+    emit_ins t (I.select ~cond:cmp ~ifso:arg1 ~ifnot:arg2)
+  in
   let float_round_to_i64 typ =
     let rounded =
       call_llvm_intrinsic t
@@ -2160,13 +2166,13 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
   | Isimd (Simd.Round_f64 mode) ->
     float_round T.double mode |> store_into_reg t i.res.(0)
   | Isimd Simd.Min_scalar_f32 ->
-    float_minmax "minnum" T.float |> store_into_reg t i.res.(0)
+    float_minmax_match_sse Folt T.float |> store_into_reg t i.res.(0)
   | Isimd Simd.Max_scalar_f32 ->
-    float_minmax "maxnum" T.float |> store_into_reg t i.res.(0)
+    float_minmax_match_sse Fogt T.float |> store_into_reg t i.res.(0)
   | Isimd Simd.Min_scalar_f64 ->
-    float_minmax "minnum" T.double |> store_into_reg t i.res.(0)
+    float_minmax_match_sse Folt T.double |> store_into_reg t i.res.(0)
   | Isimd Simd.Max_scalar_f64 ->
-    float_minmax "maxnum" T.double |> store_into_reg t i.res.(0)
+    float_minmax_match_sse Fogt T.double |> store_into_reg t i.res.(0)
   | Isimd Simd.Fmin_f32 ->
     float_minmax "minimum" T.float |> store_into_reg t i.res.(0)
   | Isimd Simd.Fmax_f32 ->
