@@ -19,11 +19,11 @@ using that LLVM-built toolchain.
   forced `-llvm-backend` on arm64. It can also build a stage-5 runtime stdlib
   and complete stage-5 main install tree in a separate Dune build dir. The
   stage-5 compiler now passes a broader focused ocamltest sweep covering basics,
-  effects, GC roots, callbacks, Unix, Str, systhreads, quotation, statmemprof,
-  layout products, runtime events, weak/ephemeron/finalizers, and many stdlib
-  directories. This is an important milestone, but the current copied-stack fix
-  is conservative and still needs design review before treating it as
-  production-ready.
+  effects, GC roots, callbacks, exceptions/backtraces, dynlink, Unix, Str,
+  systhreads, quotation, statmemprof, layout products, runtime events,
+  weak/ephemeron/finalizers, and many stdlib directories. This is an important
+  milestone, but the current copied-stack fix is conservative and still needs
+  design review before treating it as production-ready.
 - Hard problems should be handled with reductions and design experiments, not
   broad self-host retries. The main hard areas remain exception/effect control
   flow, runtime stack switching, multidomain interactions, SIMD coverage, and
@@ -138,6 +138,19 @@ If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
     `tests/lib-random`, `tests/lib-runtime-events`, `tests/lib-string`,
     `tests/runtime-errors`, and `tests/weak-ephe-final`. Every directory
     recorded fresh `-x ir` wrapper calls.
+  - Another stage-5 sweep passed after mirroring more `install_for_test`
+    layout into the fake source root: `tests/lib-channels`,
+    `tests/lib-filename`, `tests/lib-int`, `tests/lib-int64`,
+    `tests/lib-option`, `tests/lib-printf`, `tests/lib-queue`,
+    `tests/lib-result`, `tests/lib-scanf`, `tests/lib-set`,
+    `tests/lib-stack`, `tests/lib-uchar`,
+    `tests/tool-ocamlopt-disable-builtin-check`,
+    `tests/tool-ocamlopt-save-ir`, `tests/backtrace`,
+    `tests/backtrace-multifiles`, `tests/exception-extra-args`,
+    `tests/match-exception`, `tests/runtime-C-exceptions`,
+    `tests/raise-counts`, `tests/compaction`, `tests/parallel`, and the
+    non-multidomain dynlink directories. Directories with native compilations
+    recorded fresh `-x ir`; driver-only/bytecode-only slices did not.
 
 Fix behind that progress:
 
