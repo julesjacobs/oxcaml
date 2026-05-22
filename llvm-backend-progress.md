@@ -28,9 +28,9 @@ using that LLVM-built toolchain.
   broad self-host retries. The main hard areas remain exception/effect control
   flow, runtime stack switching, multidomain interactions, SIMD coverage, and
   the exact statepoint-to-frametable contract.
-- Current source has a normal-installed compiler fix for one new LLVM-specific
-  asmcomp failure. The existing `_llvm_stage5_*` compiler trees are stale until
-  rebuilt, so stage ocamltest will still show the old failure there.
+- The stage-5 main compiler has been rebuilt after the LLVM module-metadata
+  fix. `tests/asmcomp/0001-test.ml` now passes through stage ocamltest with
+  forced `-llvm-backend`.
 
 Always verify real LLVM use by checking `/tmp/oxcaml-clang-wrapper.log` for
 `-x ir` plus the fixed-register flags:
@@ -166,12 +166,24 @@ If switching LLVM on/off, remove stale `duneconf/runtime_stdlib.ws` and
     assembler-escaped `0001$2dtest` spelling. Encoding the module name before
     writing the `oxcaml_module` metadata fixes the direct repro with the
     freshly rebuilt normal installed compiler (`6` wrapper calls, `4` fresh
-    `-x ir`). The stage compiler must be rebuilt before stage ocamltest sees
-    this fix.
-  - `tests/asmcomp/optargs.ml` currently fails its allocation assertion with
-    both default and LLVM backends, using both normal-installed and existing
-    stage-installed compilers. Treat that as unrelated to LLVM backend
-    selection until proven otherwise.
+    `-x ir`).
+  - After rebuilding the stage-5 main compiler and refreshing
+    `_llvm_stage5_install`, `tests/asmcomp/0001-test.ml` passes through stage
+    ocamltest with forced `-llvm-backend`; the wrapper recorded `4` calls and
+    `2` fresh `-x ir` compilations.
+  - `tests/asmcomp` now reports `27` passed, `10` skipped, and `2` failed with
+    stage-5 forced LLVM; the wrapper recorded `64` calls and `32` fresh
+    `-x ir` compilations. The remaining failures are `optargs.ml` and
+    `staticalloc.ml`.
+  - `tests/asmcomp/optargs.ml` fails its allocation assertion with both default
+    and LLVM backends, using both normal-installed and stage-installed
+    compilers. `tests/asmcomp/staticalloc.ml` also fails its line-20 assertion
+    with both stage forced LLVM and the normal installed compiler's default
+    backend. Treat both as unrelated to LLVM backend selection until proven
+    otherwise.
+  - The stage ocamltest helper now makes `utils` a mirror directory and adds
+    the staged `config.o`, because tests that link `config.cmx` also need the
+    matching object file.
 
 Fix behind that progress:
 

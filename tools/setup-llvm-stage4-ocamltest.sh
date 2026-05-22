@@ -16,6 +16,7 @@ stdlib_stable_dir=${STDLIB_STABLE_DIR:-$install_lib/stdlib_stable}
 runtime_dir=${RUNTIME_DIR_PATH:-$normal_build/main/runtime}
 stage_ocamlopt=$stage_build/main/oxcaml_main_native.exe
 toplevel_dir=${TOPLEVEL_DIR:-$stage_build/main/toplevel/byte/.ocamltoplevel.objs/byte}
+config_obj=${CONFIG_OBJ:-$stage_build/main/.ocamlcommon.objs/native/config.o}
 
 require_path () {
   if [ ! -e "$1" ]; then
@@ -40,6 +41,7 @@ require_path "$install_bin/ocamllex.byte"
 require_path "$install_bin/ocamlyacc"
 require_path "$install_lib/compiler-libs/ocamlcommon.cma"
 require_path "$install_lib/compiler-libs/ocamlcommon.cmxa"
+require_path "$config_obj"
 
 shopt -s nullglob
 
@@ -65,12 +67,18 @@ ln -sfn . "$fake_root/yacc"
 ln -sfn "$runtime_dir" "$fake_root/runtime"
 ln -sfn "$stdlib_dir" "$fake_root/stdlib"
 ln -sfn "$install_lib/compiler-libs" "$fake_root/compilerlibs"
-ln -sfn "$install_lib/compiler-libs" "$fake_root/utils"
 ln -sfn "$toplevel_dir" "$fake_root/toplevel"
 ln -sfn "$repo/_install" "$fake_root/_install"
 ln -sfn "$repo/runtime5" "$fake_root/runtime5"
 ln -sfn "$repo/_runtest/testsuite/tools/expect" "$fake_root/testsuite/tools/expect"
 ln -sfn "$repo/_runtest/testsuite/tools/expectnat" "$fake_root/testsuite/tools/expectnat"
+
+rm -rf "$fake_root/utils"
+mkdir -p "$fake_root/utils"
+for file in "$install_lib"/compiler-libs/*; do
+  ln -sfn "$file" "$fake_root/utils/$(basename "$file")"
+done
+ln -sfn "$config_obj" "$fake_root/utils/config.o"
 
 rm -rf "$fake_root/tools"
 mkdir -p "$fake_root/tools"
