@@ -480,6 +480,10 @@ let oxcaml_debug_deopt_marker = 0x6f786364
 
 let oxcaml_debug_deopt_version = 1
 
+let oxcaml_alloc_deopt_marker = 0x6f786361
+
+let oxcaml_alloc_deopt_version = 1
+
 let string_deopt_args s =
   let chunk_size = 3 in
   let len = String.length s in
@@ -496,38 +500,61 @@ let string_deopt_args s =
   in
   V.of_int len :: loop 0 []
 
-let debug_deopt_bundle ~primitive_call ~raise_call dbg =
+let debug_item_deopt_args d =
+  let open Debuginfo in
+  let defname =
+    Scoped_location.string_of_scopes ~include_zero_alloc:false d.dinfo_scopes
+  in
+  let char_end = d.dinfo_char_end + d.dinfo_start_bol - d.dinfo_end_bol in
+  let char_end_offset = d.dinfo_end_bol - d.dinfo_start_bol in
+  [ V.of_int d.dinfo_line;
+    V.of_int (d.dinfo_end_line - d.dinfo_line);
+    V.of_int d.dinfo_char_start;
+    V.of_int char_end;
+    V.of_int char_end_offset;
+    V.of_int d.dinfo_char_end ]
+  @ string_deopt_args d.dinfo_file
+  @ string_deopt_args defname
+
+let debug_deopt_args ~primitive_call ~raise_call dbg =
   let items = Debuginfo.Dbg.to_list (Debuginfo.get_dbg dbg) |> List.rev in
   match items with
   | [] -> []
   | { Debuginfo.dinfo_line = line; _ } :: _ when line > 0 ->
-    let debug_item_deopt_args d =
-      let open Debuginfo in
-      let defname =
-        Scoped_location.string_of_scopes ~include_zero_alloc:false
-          d.dinfo_scopes
-      in
-      let char_end = d.dinfo_char_end + d.dinfo_start_bol - d.dinfo_end_bol in
-      let char_end_offset = d.dinfo_end_bol - d.dinfo_start_bol in
-      [ V.of_int d.dinfo_line;
-        V.of_int (d.dinfo_end_line - d.dinfo_line);
-        V.of_int d.dinfo_char_start;
-        V.of_int char_end;
-        V.of_int char_end_offset;
-        V.of_int d.dinfo_char_end ]
-      @ string_deopt_args d.dinfo_file
-      @ string_deopt_args defname
-    in
-    [ ( "deopt",
-        [ V.of_int oxcaml_debug_deopt_marker;
-          V.of_int oxcaml_debug_deopt_version;
-          V.of_int (if raise_call then 2 else if primitive_call then 1 else 0);
-          V.of_int (List.length items) ]
-        @ (items |> List.map debug_item_deopt_args |> List.concat) ) ]
+    [ V.of_int oxcaml_debug_deopt_marker;
+      V.of_int oxcaml_debug_deopt_version;
+      V.of_int (if raise_call then 2 else if primitive_call then 1 else 0);
+      V.of_int (List.length items) ]
+    @ (items |> List.map debug_item_deopt_args |> List.concat)
   | _ -> []
 
-let call_operand_bundles t ~primitive_call ~raise_call dbg live_roots =
-  debug_deopt_bundle ~primitive_call ~raise_call dbg
+let alloc_deopt_args alloc_info =
+  let alloc_item_deopt_args Cmm.{ alloc_words; alloc_dbg; _ } =
+    let items =
+      Debuginfo.Dbg.to_list (Debuginfo.get_dbg alloc_dbg) |> List.rev
+    in
+    V.of_int alloc_words
+    :: V.of_int (List.length items)
+    :: (items |> List.map debug_item_deopt_args |> List.concat)
+  in
+  match alloc_info with
+  | None -> []
+  | Some alloc_info ->
+    [ V.of_int oxcaml_alloc_deopt_marker;
+      V.of_int oxcaml_alloc_deopt_version;
+      V.of_int (List.length alloc_info) ]
+    @ (alloc_info |> List.map alloc_item_deopt_args |> List.concat)
+
+let deopt_bundle ?alloc_info ~primitive_call ~raise_call dbg =
+  match
+    debug_deopt_args ~primitive_call ~raise_call dbg @ alloc_deopt_args alloc_info
+  with
+  | [] -> []
+  | args -> ["deopt", args]
+
+let call_operand_bundles ?alloc_info t ~primitive_call ~raise_call dbg live_roots
+    =
+  deopt_bundle ?alloc_info ~primitive_call ~raise_call dbg
   @ live_gc_root_alloca_bundles t live_roots
 
 let load_domainstate_addr ?ds_loc ?(offset = 0) t ds_field =
@@ -595,13 +622,14 @@ let assemble_return t res_type values =
 (* Prepare and extract arguments following the OCaml calling convention in LLVM,
    handling the threading of runtime registers. *)
 let call_simple ?(attrs = []) ?(dbg = Debuginfo.none) ?(raise_call = false)
-    ?(primitive_call = false) ?(live_roots = []) ?unwind_label ~cc t name args
-    res_types =
+    ?(primitive_call = false) ?alloc_info ?(live_roots = []) ?unwind_label ~cc t
+    name args res_types =
   let args = prepare_call_args t args in
   let res_type = Some (make_ret_type res_types) in
   let func = LL.Ident.global name in
   let operand_bundles =
-    call_operand_bundles t ~primitive_call ~raise_call dbg live_roots
+    call_operand_bundles ?alloc_info t ~primitive_call ~raise_call dbg
+      live_roots
   in
   let res =
     match unwind_label with
@@ -2645,6 +2673,7 @@ let heap_alloc ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction)
   call_simple
     ~attrs:(gc_attr ~alloc_info ~can_call_gc:true t i @ [LL.Fn_attr.Cold])
     ~live_roots:(load_live_gc_roots_across t i)
+    ~alloc_info
     ?unwind_label ~cc:Oxcaml_alloc t "caml_call_gc" [] []
   |> ignore;
   emit_ins_no_res t (I.br after_gc);
