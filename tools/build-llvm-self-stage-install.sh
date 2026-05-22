@@ -78,6 +78,7 @@ let () = Printf.printf "%d\n" (fib 10)
 EOF
 
 : > /tmp/oxcaml-clang-wrapper.log
+OCAMLLIB="$self_stage_install/lib/ocaml" \
 OCAMLPARAM="_,llvm-backend=1,llvm-path=$wrapper" \
   "$self_stage_install/bin/ocamlopt.opt" -o "$tmpdir/main.exe" "$tmpdir/main.ml"
 "$tmpdir/main.exe"

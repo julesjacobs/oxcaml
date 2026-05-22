@@ -62,6 +62,11 @@ using that LLVM-built toolchain.
   `tests/asmcomp`, and passed with forced LLVM: `6573` passed, `274` skipped,
   `0` failed, `0` unexpected errors. The wrapper log recorded `5996` clang
   calls and `2998` fresh `-x ir` compilations.
+- A repeat self-bootstrap using `_llvm_self_stage_install` as stage 0 also
+  passed through boot/runtime/main and produced `_llvm_self_stage2_install`:
+  boot `839` fresh `-x ir`, smoke `2`, runtime `74`, main `1112`; the
+  resulting compiler compiled and ran `fib 10` against its staged stdlib with
+  forced LLVM, output `55`, `2` fresh `-x ir`.
 - `tools/build-llvm-stage5-install.sh` still wraps the lower-level staged
   LLVM runtime/main rebuild and `_llvm_stage5_install` refresh.
 - `LLVM_BACKEND=1` is now the normal Make entry point for this mode. It sets the
@@ -70,9 +75,9 @@ using that LLVM-built toolchain.
 - `make llvm-compiler`, `make llvm-install`, `make llvm-test`, and
   `make llvm-test-one` are explicit opt-in aliases for the normal Make
   workflow with `LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1`. `make
-  llvm-self-stage-install` and `make llvm-self-stage-test` expose the
-  LLVM-built-compiler path. The default Make targets still use the normal
-  backend.
+  llvm-self-stage-install`, `make llvm-self-stage2-install`, and `make
+  llvm-self-stage-test` expose the LLVM-built-compiler paths. The default Make
+  targets still use the normal backend.
 - Normal `test-one-no-rebuild` also passed selected runtime/control-flow slices
   with forced LLVM: `effects`, `exception-extra-args`, `match-exception`,
   `runtime-C-exceptions`, `statmemprof`, and `weak-ephe-final`; combined wrapper
@@ -161,6 +166,13 @@ PATH=/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin:$PATH \
   make llvm-self-stage-install LLVM_PATH=/tmp/oxcaml-clang-wrapper
 ```
 
+Repeat that once more, using the LLVM-built staged compiler as stage 0:
+
+```sh
+PATH=/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin:$PATH \
+  make llvm-self-stage2-install LLVM_PATH=/tmp/oxcaml-clang-wrapper
+```
+
 Run the broad self-stage forced-LLVM ocamltest sweep through Make:
 
 ```sh
@@ -238,6 +250,10 @@ Put the OxCaml opam switch first in `PATH`.
   enabled and passes the installed testsuite under forced LLVM. The next major
   milestone is making the explicit LLVM-enabled `make` / `make install` /
   `make test` workflow repeatable enough for regular use.
+- Staged installs are currently verified with `OCAMLLIB` pointing at the staged
+  stdlib. The compiler binaries still report `_install/lib/ocaml` by default
+  when `OCAMLLIB` is unset, so self-contained install configuration remains to
+  be cleaned up before treating these stage dirs like normal installs.
 - Main remaining design risks: exception/effect control flow, runtime stack
   switching, multidomain interactions, SIMD coverage, and the exact
   statepoint-to-frametable contract.
@@ -246,5 +262,6 @@ Put the OxCaml opam switch first in `PATH`.
 
 1. Audit copied-stack relocation for false positives and decide whether
    conservative runtime scanning is acceptable or needs stack-address metadata.
-2. Re-check self-stage/full-suite behavior through `make llvm-self-stage-test`
-   instead of calling the older helper scripts directly.
+2. Reduce the gap between the self-stage fake-root harness and ordinary
+   full-replacement testing: `asmgen`/`asmcomp`, multidomain/poll-insertion
+   configurations, and broad tests from `_llvm_self_stage2_install`.

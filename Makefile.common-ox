@@ -488,7 +488,7 @@ runtest-upstream: test
 test-one: install_for_test
 	$(MAKE) test-one-no-rebuild
 
-.PHONY: llvm-compiler llvm-install llvm-test llvm-test-one llvm-self-stage-install llvm-self-stage-test
+.PHONY: llvm-compiler llvm-install llvm-test llvm-test-one llvm-self-stage-install llvm-self-stage2-install llvm-self-stage-test
 llvm-compiler:
 	$(MAKE) compiler LLVM_BOOT_BACKEND=1 LLVM_BACKEND=1
 
@@ -503,6 +503,16 @@ llvm-test-one:
 
 llvm-self-stage-install: llvm-install
 	LLVM_WRAPPER="$(or $(LLVM_PATH),/tmp/oxcaml-clang-wrapper)" \
+	  tools/build-llvm-self-stage-install.sh
+
+llvm-self-stage2-install: llvm-self-stage-install
+	STAGE0_INSTALL="$(ROOTDIR)/_llvm_self_stage_install" \
+	  BOOT_BUILD="$(ROOTDIR)/_llvm_self_stage2_boot_context_build" \
+	  BOOT_INSTALL="$(ROOTDIR)/_llvm_self_stage2_boot_install" \
+	  SELF_RUNTIME_BUILD="$(ROOTDIR)/_llvm_self_stage2_runtime_build" \
+	  SELF_MAIN_BUILD="$(ROOTDIR)/_llvm_self_stage2_main_build" \
+	  SELF_STAGE_INSTALL="$(ROOTDIR)/_llvm_self_stage2_install" \
+	  LLVM_WRAPPER="$(or $(LLVM_PATH),/tmp/oxcaml-clang-wrapper)" \
 	  tools/build-llvm-self-stage-install.sh
 
 llvm-self-stage-test: llvm-self-stage-install
