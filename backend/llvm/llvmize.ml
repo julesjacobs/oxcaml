@@ -4408,7 +4408,9 @@ let invoke_clang_with_llvmir ~output_filename ~input_filename ~extra_flags =
   let fp_flags =
     match Target_system.architecture () with
     | Target_system.AArch64 ->
-      ["-fomit-frame-pointer"; "-momit-leaf-frame-pointer"]
+      if Config.with_frame_pointers
+      then ["-fno-omit-frame-pointer"; "-mno-omit-leaf-frame-pointer"]
+      else ["-fomit-frame-pointer"; "-momit-leaf-frame-pointer"]
     | Target_system.IA32 | Target_system.X86_64 | Target_system.ARM
     | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
       if Config.with_frame_pointers
