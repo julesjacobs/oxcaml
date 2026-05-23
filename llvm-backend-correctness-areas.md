@@ -37,9 +37,16 @@ Potential areas to audit next:
     so it is not useful LLVM-specific evidence. Need either a poll-insertion
     configured build or to cover preemption under the copied-stack/preemption
     audit before marking this complete.
-- [ ] C calls that can allocate. Check statepoint roots and runtime register
-   preservation around `caml_c_call`, `caml_c_call_stack_args`, callbacks, and
-   blocking sections.
+- [x] C calls that can allocate. LLVM lowering sends allocating externals
+  through `caml_c_call` or `caml_c_call_stack_args`, marks them as primitive
+  calls, attaches `statepoint-id`, passes `gc-live` roots from
+  `load_live_gc_roots_across`, and extracts the returned domain/allocation
+  registers. A focused `-keep-llvmir -dllvmir` compile showed both
+  `caml_c_call` with `gc-live` and `caml_c_call_stack_args` with a statepoint.
+  Existing runtime coverage also passed under real LLVM use: `c-api` (`11`
+  passed), `callback` (`38` passed, `1` skipped), and `statmemprof` (`48`
+  passed, `3` skipped), with wrapper logs confirming `-x ir` and fixed-register
+  flags.
 - [ ] Non-allocating C-call wrappers. Verify stack switching, register
    preservation, unwind behavior, and GC root handling.
 - [ ] Local allocation and stack allocation. Check `Begin_region`, `End_region`,
