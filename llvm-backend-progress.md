@@ -171,6 +171,10 @@ Put the OxCaml opam switch first in `PATH`.
   LLVM GC printer. Coverage is in
   `testsuite/tests/llvm-codegen/long_frame.ml`; the LLVM fork change is
   `.toolchains/llvm-project-source` commit `012c49512`.
+- LLVM frametable allocation metadata now has final-assembly coverage in
+  `testsuite/tests/llvm-codegen/allocation_frametable.ml`: a small
+  `-g -S -llvm-backend` program checks allocation count, per-allocation size
+  bytes, and source-file debug strings in the emitted frametable.
 - `-g -llvm-backend` currently supports OCaml frame-table debug metadata for
   backtraces, but not standard DWARF `.debug_*` sections or `.loc` directives.
   `testsuite/tests/llvm-codegen/dwarf_debug_info.ml` records that current
@@ -213,9 +217,15 @@ Put the OxCaml opam switch first in `PATH`.
   in an effect-handled non-tail-recursive computation and checks the result.
   `make llvm-test-one DIR=llvm-codegen LLVM_PATH=/tmp/oxcaml-clang-wrapper`
   passed (`27` passed), with `2051` real `-x ir` wrapper invocations. The
-  remaining copied-stack question is design-level: the arm64 runtime rewrites
-  raw stack words conservatively, and we still need stronger evidence or a
-  metadata design to rule out false-positive rewrites of non-pointer words.
+  remaining copied-stack question is design-level: temporary logging showed
+  real stack-growth rewrites in both copied stack slots and saved GPR slots, but
+  `testsuite/tests/llvm-codegen/raw_stack_word.ml` also shows that the same
+  conservative rewrite can change a raw `nativeint#` that only looks like an
+  old stack address. The likely fix needs precise stack-address metadata or a
+  design that avoids preserving stack addresses in unreported raw locations.
+  Existing LLVM statepoint stack maps describe GC roots, and patchpoint
+  liveness describes live-out registers, but neither currently identifies
+  stack-address-bearing locations at the prologue stack-growth check.
 - SIMD/vector lowering was audited for current arm64 support. Unaligned vector
   memory operations lower with `align 1`, arm64 splits 256-bit vectors before
   Cmm, and a focused SIMD smoke test plus `make llvm-test-one
@@ -310,5 +320,6 @@ Put the OxCaml opam switch first in `PATH`.
    target-specific handling because Mach-O and ELF sections differ.
 2. Add an effect-control-flow LLVM expect test once there is a small useful
    example.
-3. Audit copied-stack relocation for false positives and decide whether
-   conservative runtime scanning is acceptable or needs stack-address metadata.
+3. Design precise copied-stack relocation metadata. The current conservative
+   runtime scan is needed for real runs, but it can rewrite non-pointer raw
+   words that happen to look like old stack addresses.
