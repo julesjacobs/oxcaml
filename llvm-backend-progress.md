@@ -154,9 +154,11 @@ Put the OxCaml opam switch first in `PATH`.
   OxCaml integer values like non-Darwin. This avoids LLVM lowering large
   aggregate returns through a hidden return buffer in `x28`, which conflicts
   with the OxCaml domain-state register.
-- On AArch64, copied-stack growth now relocates old-stack addresses that LLVM
-  kept in saved GPR slots or copied stack words. The raw stack-word rewrite must
-  run after the typed exception-chain and frame-pointer rewrites.
+- AArch64 copied-stack growth uses the same typed runtime rewrites as the native
+  backend for exception/trap links, C stack links, and frame-pointer chains. An
+  imprecise fallback that rewrote every copied stack word or saved GPR that
+  looked like an old stack address was removed; it could corrupt raw unboxed
+  integers. Coverage is in `testsuite/tests/llvm-codegen/raw_stack_word.ml`.
 - `RewriteStatepointsForGC` must compute caller live roots before the
   statepoint call itself; otherwise call arguments can stay live across calls.
 - AArch64 non-initializing `Word_int`/`Word_val` stores in LLVM now emit

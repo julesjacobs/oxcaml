@@ -835,44 +835,6 @@ CAMLexport void caml_do_local_roots (
 */
 
 #ifdef NATIVE_CODE
-static value *caml_rewrite_stack_pointer(struct stack_info *old_stack,
-                                         struct stack_info *new_stack,
-                                         value *p)
-{
-  if (Stack_base(old_stack) <= p && p < Stack_high(old_stack)) {
-    ptrdiff_t delta =
-      (char*)Stack_high(new_stack) - (char*)Stack_high(old_stack);
-    return (value*)((char*)p + delta);
-  }
-  return p;
-}
-
-#ifdef TARGET_arm64
-static void caml_rewrite_arm64_copied_stack_pointers(
-    struct stack_info *old_stack, struct stack_info *new_stack)
-{
-  value *sp = (value*)new_stack->sp;
-  value *high = Stack_high(new_stack);
-  for (value *slot = sp; slot < high; slot++) {
-    *slot = (value)caml_rewrite_stack_pointer(old_stack, new_stack,
-                                              (value*)*slot);
-  }
-}
-
-static void caml_rewrite_arm64_saved_stack_pointers(
-    struct stack_info *old_stack, struct stack_info *new_stack)
-{
-  value *regs = Caml_state->gc_regs;
-  if (regs == NULL) return;
-
-  /* See runtime/arm64.S: Caml_state->gc_regs points at saved x0. */
-  for (int i = 0; i < 23; i++) {
-    regs[i] = (value)caml_rewrite_stack_pointer(old_stack, new_stack,
-                                                (value*)regs[i]);
-  }
-}
-#endif
-
 /* Update absolute exception pointers for new stack*/
 void caml_rewrite_exception_stack(struct stack_info *old_stack,
                                   value** exn_ptr, value** async_exn_ptr,
@@ -1028,15 +990,6 @@ int caml_try_realloc_stack(asize_t required_space)
       }
     }
   }
-
-#if defined(NATIVE_CODE) && defined(TARGET_arm64)
-  /* LLVM can keep OCaml stack addresses in ordinary stack slots and saved
-     registers across prologue stack growth.  Do this after the typed stack
-     rewrites above so exception and frame-pointer chains are still walked
-     using their original old-stack links. */
-  caml_rewrite_arm64_copied_stack_pointers(old_stack, new_stack);
-  caml_rewrite_arm64_saved_stack_pointers(old_stack, new_stack);
-#endif
 
   caml_free_stack(old_stack);
   Caml_state->current_stack = new_stack;

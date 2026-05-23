@@ -1,8 +1,8 @@
 (* TEST
  macos;
  arch_arm64;
- readonly_files = "raw_stack_word_stubs.c raw_stack_word_failure.sh";
- script = "sh ${test_source_directory}/raw_stack_word_failure.sh";
+ readonly_files = "raw_stack_word_stubs.c raw_stack_word.sh";
+ script = "sh ${test_source_directory}/raw_stack_word.sh";
  setup-ocamlopt.opt-build-env;
  script;
 *)
