@@ -208,6 +208,13 @@ Put the OxCaml opam switch first in `PATH`.
   `testsuite/tests/llvm-codegen/long_frame.ml`. `make llvm-test-one
   DIR=llvm-codegen LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed with the
   regression included (`31` passed, `2052` real `-x ir` wrapper invocations).
+- Effect preemption now has focused LLVM coverage in
+  `testsuite/tests/llvm-codegen/effect_preemption.ml`: signal-driven
+  preemption, allocation across the preemption, major GC in the handler, and
+  continuation resume. `make llvm-test-one DIR=llvm-codegen
+  LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed with this included (`36` passed,
+  `2054` real `-x ir` wrapper invocations). Full poll-insertion-configured
+  preemption coverage is still open.
 
 ## Test Harness Notes
 
