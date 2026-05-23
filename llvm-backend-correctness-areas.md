@@ -7,6 +7,18 @@ confident it is not currently a correctness issue.
 
 The ten audit areas are:
 
+- Quick reference:
+  1. Atomic loads and stores
+  2. Load mutability
+  3. Exception control-flow edges
+  4. Effect handlers
+  5. C calls that can allocate
+  6. Non-allocating C-call wrappers
+  7. Local allocation and stack allocation
+  8. Copied-stack growth
+  9. SIMD and vector memory operations
+  10. DWARF, frame tables, and statepoint metadata
+
 - [x] Atomic loads and stores. Check whether OCaml atomic primitives preserve the
    same ordering as the native backend.
   - Found and fixed: AArch64 atomic field loads used to lower to plain `ldr`.
@@ -131,15 +143,13 @@ The ten audit areas are:
     successfully, and emitted a `caml...__frametable` with descriptor count,
     live-root offsets, allocation metadata, and debug strings. The wrapper log
     confirmed real LLVM use.
-  - Found and covered: the LLVM frametable printer currently emits only the
-    short frame-descriptor format. A function with a large static frame aborts
-    in LLVM codegen with
-    `[OxCamlGCPrinter] frame size requires long frames` instead of using the
-    native backend's long-frame descriptor path. Coverage is in
-    `testsuite/tests/llvm-codegen/long_frame.ml`; `make llvm-test-one
-    DIR=llvm-codegen LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed (`31` passed,
-    `0` failed), and the wrapper log recorded `2052` `-x ir` invocations.
-  - Needed fix: implement long-frame descriptor emission in
-    `OxCamlGCPrinter.cpp` to match `runtime/caml/frame_descriptors.h` and
-    `backend/emitaux.ml`, including 32-bit frame data, live count, and live
-    offsets.
+  - Found and fixed: the LLVM frametable printer emitted only the short
+    frame-descriptor format. A function with a large static frame aborted in
+    LLVM codegen instead of using the native backend's long-frame descriptor
+    path. `OxCamlGCPrinter.cpp` now emits `FRAME_LONG_MARKER`, 32-bit frame
+    data, 32-bit live count, and 32-bit live offsets when the short format is
+    too small. Coverage is in `testsuite/tests/llvm-codegen/long_frame.ml`;
+    `make llvm-test-one DIR=llvm-codegen LLVM_PATH=/tmp/oxcaml-clang-wrapper`
+    passed (`40` passed, `0` failed), and the wrapper log recorded `2057`
+    `-x ir` invocations. A manual `-S` check showed `.short 32767` followed by
+    `.long 67793`, `.long 4300`, and 32-bit live offsets in the frametable.
