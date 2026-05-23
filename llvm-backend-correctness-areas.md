@@ -42,6 +42,14 @@ The ten audit areas are:
     so it is not useful LLVM-specific evidence. Need either a poll-insertion
     configured build or to cover preemption under the copied-stack/preemption
     audit before marking this complete.
+  - Added `testsuite/tests/llvm-codegen/effect_preemption.ml`, a focused
+    LLVM smoke test that uses signal-driven preemption, allocates across the
+    preemption, runs a major GC in the handler, resumes the continuation, and
+    checks that the live data is still valid. `make llvm-test-one
+    DIR=llvm-codegen LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed (`36` passed,
+    `0` failed), with `2054` wrapper invocations containing `-x ir`.
+    This gives real LLVM coverage for the preemption runtime path, but does not
+    replace a poll-insertion configured run of the full preemption suite.
 - [x] C calls that can allocate. LLVM lowering sends allocating externals
   through `caml_c_call` or `caml_c_call_stack_args`, marks them as primitive
   calls, attaches `statepoint-id`, passes `gc-live` roots from
