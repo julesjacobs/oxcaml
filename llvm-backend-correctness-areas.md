@@ -144,7 +144,7 @@ The ten audit areas are:
     LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed (`5` passed, `0` skipped,
     `0` failed), with `2025` `-x ir` wrapper invocations with fixed-register
     flags.
-- [ ] DWARF, frame tables, and statepoint metadata. Verify that LLVM-generated
+- [x] DWARF, frame tables, and statepoint metadata. Verify that LLVM-generated
     frame layout, live roots, return addresses, and debug info agree with the
     runtime and debugger.
   - Ordinary frame-table emission works in a focused manual smoke test: a
@@ -179,13 +179,14 @@ The ten audit areas are:
     `testsuite/tests/llvm-codegen/poll_statepoint.ml`: the test checks the
     `caml_call_gc` statepoint ID in LLVM IR and the final poll frame encoded as
     an allocation frame with zero allocation entries.
-  - Found and covered: `-g -llvm-backend` currently emits OCaml frame-table
-    debug metadata for backtraces, but not standard DWARF `.debug_*` sections
-    or `.loc` directives for source-level debugger support. Coverage is in
+  - Found and fixed: `-g -llvm-backend` preserved OCaml frame-table debug
+    metadata for backtraces, but did not emit standard DWARF `.debug_*`
+    sections or `.loc` directives for source-level debugger support. The LLVM
+    backend now emits minimal LLVM debug metadata: one compile unit, per
+    function subprogram metadata from `Debuginfo`, and source locations on
+    generated instructions/calls when available. Coverage is in
     `testsuite/tests/llvm-codegen/dwarf_debug_info.ml`; the test compiles the
-    same program through the native backend and LLVM backend, checks that the
-    native `-g -S` assembly has `.file`/`.loc`, and checks that the LLVM
-    assembly lacks equivalent source-debug markers. `make llvm-test-one
-    DIR=llvm-codegen LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed (`48`
-    passed, `0` failed), with `81` fresh wrapper invocations containing
-    `-x ir`.
+    same program through the native backend and LLVM backend and checks that
+    both `-g -S` outputs have source debug markers. `make llvm-test-one
+    DIR=llvm-codegen LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed (`52`
+    passed, `0` failed), with `2063` wrapper invocations containing `-x ir`.
