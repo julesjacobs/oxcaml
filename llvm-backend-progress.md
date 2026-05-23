@@ -196,6 +196,18 @@ Put the OxCaml opam switch first in `PATH`.
   remaining copied-stack question is design-level: the arm64 runtime rewrites
   raw stack words conservatively, and we still need stronger evidence or a
   metadata design to rule out false-positive rewrites of non-pointer words.
+- SIMD/vector lowering was audited for current arm64 support. Unaligned vector
+  memory operations lower with `align 1`, arm64 splits 256-bit vectors before
+  Cmm, and a focused SIMD smoke test plus `make llvm-test-one
+  DIR=typing-layouts-vec128 LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed under
+  real LLVM use.
+- DWARF/frame-table audit found a real compatibility gap: the custom LLVM
+  frametable printer only emits short frame descriptors. Large static frames
+  currently abort in LLVM codegen with
+  `[OxCamlGCPrinter] frame size requires long frames`; coverage is in
+  `testsuite/tests/llvm-codegen/long_frame.ml`. `make llvm-test-one
+  DIR=llvm-codegen LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed with the
+  regression included (`31` passed, `2052` real `-x ir` wrapper invocations).
 
 ## Test Harness Notes
 
@@ -264,9 +276,9 @@ Put the OxCaml opam switch first in `PATH`.
   own `bin` directory. This makes the staged compiler find its staged stdlib by
   default, even though the baked `standard_library_default` still points at the
   top-level `_install`.
-- Main remaining design risks: exception/effect control flow, runtime stack
-  switching, multidomain interactions, SIMD coverage, and the exact
-  statepoint-to-frametable contract.
+- Main remaining design risks: effect/preemption control flow, runtime stack
+  switching, multidomain interactions, and the exact statepoint-to-frametable
+  contract.
 
 ## Next Checks
 
