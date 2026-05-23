@@ -14,20 +14,26 @@ using that LLVM-built toolchain.
   targets on the normal backend.
 - Stack-check investigation work was saved on
   `jujacobs/llvm-stack-check-investigation-save` at `48e450fa4e`. The active
-  branch is back before that work at `9e64d1a3c2`.
+  branch for the tail-call fix is `jujacobs/llvm-tail-call-stack-returns`.
 - `make llvm-test LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed the normal
   boot/runtime/main install plus full testsuite on arm64: `6599` passed, `287`
   skipped, `0` failed, `0` unexpected errors. The wrapper log recorded `4770`
   fresh `-x ir` compilations with the fixed-register flags.
 - `make llvm-self-stage2-test LLVM_PATH=/tmp/oxcaml-clang-wrapper` currently
   builds both LLVM self stages on arm64, but the broad stage2 testsuite is not
-  fully green. Latest run after reverting stack-check experiments: `6623`
-  passed, `274` skipped, `2` failed, `0` unexpected errors. The failures are
-  `tests/tail-call-many-returns/tail_call_many_returns.ml` crashing patched
-  LLVM during AArch64 instruction selection, and
-  `tests/typing-small-numbers/test_matching_native.ml` crashing `ocamlnat`
-  with `SIGTRAP`. The wrapper log recorded `6452` LLVM `-x ir` invocations
-  across the full command.
+  fully green. Latest full run after reverting stack-check experiments: `6623`
+  passed, `274` skipped, `2` failed, `0` unexpected errors. The wrapper log
+  recorded `6452` LLVM `-x ir` invocations across the full command.
+- `tests/tail-call-many-returns/tail_call_many_returns.ml` now passes under
+  `make llvm-test-one TEST=tail-call-many-returns/tail_call_many_returns.ml`.
+  This exercises 75 returns on arm64 macOS: 8 register returns, 64 domainstate
+  returns, and 3 normal ABI overflow returns. The wrapper log confirms real
+  LLVM use via `-x ir` with fixed-register flags.
+- The other latest full-run failure was
+  `tests/typing-small-numbers/test_matching_native.ml` under `ocamlnat`
+  `SIGTRAP`. It did not reproduce with the freshly installed compiler, either
+  normally or with `OCAMLPARAM="_,llvm-backend=1,llvm-path=/tmp/oxcaml-clang-wrapper"`;
+  both direct runs exited `0`.
 - The self-stage scripts now avoid known false failures: boot workspaces are
   generated with the same Makefile LLVM boot-context rules instead of patched
   with `sed`, and staged tool wrappers are copied via their `.real` executable
@@ -40,11 +46,16 @@ using that LLVM-built toolchain.
   memory-ordering barrier in LLVM. A small `mutable int` setter emits
   `fence acquire` in LLVM IR and `dmb ishld; str ...` in final assembly, while
   pointer field assignment still goes through `caml_modify`.
+- LLVM call/return lowering now uses ABI result locations when copying results
+  back to the original pseudo-registers. This keeps domainstate results out of
+  the LLVM returned aggregate and explicitly reloads them from domainstate after
+  calls; focused 9-return, 72-return, and 75-return programs compile and run.
 
 The useful current capability is: an LLVM-built compiler can rebuild the
 compiler again and pass almost all of the broad non-asmgen/non-asmcomp testsuite
-on arm64 when `-llvm-backend` is forced. The current blockers are small enough
-to isolate in the testsuite rather than by attempting another self-host run.
+on arm64 when `-llvm-backend` is forced. Known remaining failures are small
+enough to isolate in the testsuite rather than by attempting another self-host
+run.
 
 Always verify real LLVM use by checking `/tmp/oxcaml-clang-wrapper.log` for
 `-x ir` plus the fixed-register flags:
@@ -324,11 +335,10 @@ Put the OxCaml opam switch first in `PATH`.
 - Main remaining design risks: effect/preemption control flow, precise
   copied-stack relocation, multidomain interactions, and the exact
   statepoint-to-frametable contract.
-- Current repeat-self-stage test blockers:
-  `tests/tail-call-many-returns/tail_call_many_returns.ml` crashes patched LLVM
-  in `DAGCombiner::visitSTORE`, and
-  `tests/typing-small-numbers/test_matching_native.ml` crashes `ocamlnat` with
-  `SIGTRAP` after printing the expected small-number match output.
+- Latest repeat-self-stage test blocker: the full run reported
+  `tests/typing-small-numbers/test_matching_native.ml` crashing `ocamlnat` with
+  `SIGTRAP` after printing the expected small-number match output, but a direct
+  retry with the freshly installed compiler did not reproduce it.
 - `/tmp/oxcaml-clang-wrapper` currently points at
   `/Users/julesjacobs/git/jujacobs/oxcaml-llvm/llvm-build/bin/clang`. A quick
   retry with `/Users/julesjacobs/git/jujacobs/llvm-build-host-aarch64-copy10`

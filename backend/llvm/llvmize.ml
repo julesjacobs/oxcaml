@@ -613,6 +613,10 @@ let runtime_reg_idents = List.map V.get_ident_exn runtime_regs
 let reg_list_for_call regs =
   Array.to_list regs |> List.filter (fun reg -> not (Reg.is_domainstate reg))
 
+let loc_results_call regs = Proc.loc_results_call (Reg.typv regs) |> fst
+
+let loc_results_return regs = Proc.loc_results_return (Reg.typv regs)
+
 let make_ret_type ret_types =
   let runtime_reg_types = List.map (fun _ -> T.i64) runtime_regs in
   T.(Struct [Struct runtime_reg_types; Struct ret_types])
@@ -824,6 +828,14 @@ let load_domainstate_addr ?ds_loc ?(offset = 0) t ds_field =
   let offset = offset + (Domainstate.idx_of_field ds_field * Arch.size_addr) in
   do_offset t ds typ offset
 
+let domainstate_addr_for_location t (loc : Reg.t) =
+  match loc.loc with
+  | Stack (Domainstate idx) ->
+    load_domainstate_addr ~offset:idx t Domain_extra_params
+  | Unknown | Reg _ | Stack (Local _ | Incoming _ | Outgoing _) ->
+    fail_msg ~name:"domainstate_addr_for_location"
+      "expected domainstate location"
+
 let load_address t addr_mode base typ =
   let offset = Arch.addressing_displacement_for_llvmize addr_mode in
   do_offset t base typ offset
@@ -863,9 +875,31 @@ let extract_call_res t call_res_struct num_res_values =
   let res_value_indices = List.init num_res_values (fun i -> [1; i]) in
   extract_struct t call_res_struct res_value_indices
 
-let extract_call_res_into_regs t call_res_struct res_regs =
-  let vals = extract_call_res t call_res_struct (List.length res_regs) in
-  List.iter2 (store_into_reg t) res_regs vals
+let extract_call_res_into_original_regs t call_res_struct original_res_regs =
+  let result_locations = loc_results_call original_res_regs in
+  let returned_count =
+    Array.fold_left
+      (fun count loc -> if Reg.is_domainstate loc then count else count + 1)
+      0 result_locations
+  in
+  let returned_values = extract_call_res t call_res_struct returned_count in
+  let returned_values = ref returned_values in
+  Array.iter2
+    (fun original_reg loc ->
+      if Reg.is_domainstate loc
+      then
+        let ptr = domainstate_addr_for_location t loc in
+        let value = emit_ins t (I.load ~ptr ~typ:(T.of_reg original_reg)) in
+        store_into_reg t original_reg value
+      else
+        match !returned_values with
+        | value :: rest ->
+          returned_values := rest;
+          store_into_reg t original_reg value
+        | [] ->
+          fail_msg ~name:"extract_call_res_into_original_regs"
+            "not enough returned values")
+    original_res_regs result_locations
 
 let assemble_return t res_type values =
   let runtime_values =
@@ -1193,7 +1227,8 @@ let call ?(tail = false) ?unwind_label t (i : Cfg.terminator Cfg.instruction)
   in
   let arg_regs = Array.sub i.arg args_begin args_end |> reg_list_for_call in
   let args = prepare_call_args_from_regs t arg_regs in
-  let res_regs = reg_list_for_call i.res in
+  let res_locs = loc_results_call i.res in
+  let res_regs = reg_list_for_call res_locs in
   let res_type =
     (* This will always be [Some] *)
     if tail
@@ -1237,7 +1272,7 @@ let call ?(tail = false) ?unwind_label t (i : Cfg.terminator Cfg.instruction)
   then emit_ins_no_res t (I.ret res)
   else (
     refresh_live_gc_roots t live_roots;
-    extract_call_res_into_regs t res res_regs)
+    extract_call_res_into_original_regs t res i.res)
 
 let emit_unwind_landingpad t exn_entry =
   ignore (emit_ins t (I.landingpad ~typ:llvm_landingpad_type ~cleanup:true));
@@ -1299,7 +1334,7 @@ let tailcall_self t (i : Cfg.terminator Cfg.instruction) destination =
   br_label t destination
 
 let return t (i : Cfg.terminator Cfg.instruction) =
-  let res_regs = reg_list_for_call i.arg in
+  let result_locations = loc_results_return i.arg in
   let res_type = E.get_res_type (get_fun_info t).emitter |> Option.get in
   (* Note: type information is not propagated to the backend for functions that
      never return, like [raise], so there might be type mismatches. If that is
@@ -1308,14 +1343,33 @@ let return t (i : Cfg.terminator Cfg.instruction) =
     Option.bind (T.extract_struct res_type [1]) T.get_struct_elements
     |> Option.get
   in
-  if List.length res_type_elems <> List.length res_regs
+  let returned_count =
+    Array.fold_left
+      (fun count loc -> if Reg.is_domainstate loc then count else count + 1)
+      0 result_locations
+  in
+  if List.length res_type_elems <> returned_count
   then emit_ins_no_res t I.unreachable
   else
-    let res_values =
-      List.map2
-        (fun reg typ -> load_reg_to_temp ~typ t reg)
-        res_regs res_type_elems
-    in
+    let res_type_elems = ref res_type_elems in
+    let res_values = ref [] in
+    Array.iter2
+      (fun original_reg loc ->
+        if Reg.is_domainstate loc
+        then
+          let value =
+            load_reg_to_temp ~typ:(T.of_reg original_reg) t original_reg
+          in
+          let ptr = domainstate_addr_for_location t loc in
+          emit_ins_no_res t (I.store ~ptr ~to_store:value)
+        else
+          match !res_type_elems with
+          | typ :: rest ->
+            res_type_elems := rest;
+            res_values := load_reg_to_temp ~typ t original_reg :: !res_values
+          | [] -> fail_msg ~name:"return" "not enough return types")
+      i.arg result_locations;
+    let res_values = List.rev !res_values in
     let res = assemble_return t res_type res_values in
     emit_ins_no_res t (I.ret res)
 
