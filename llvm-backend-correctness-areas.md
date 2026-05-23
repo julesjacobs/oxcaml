@@ -47,8 +47,15 @@ Potential areas to audit next:
   passed), `callback` (`38` passed, `1` skipped), and `statmemprof` (`48`
   passed, `3` skipped), with wrapper logs confirming `-x ir` and fixed-register
   flags.
-- [ ] Non-allocating C-call wrappers. Verify stack switching, register
-   preservation, unwind behavior, and GC root handling.
+- [x] Non-allocating C-call wrappers. Noalloc externals lower to private
+  `c_call_wrapper.*` functions using the OCaml calling convention. The wrapper
+  loads `Domain_c_stack`, switches to the C stack for the direct C call,
+  switches back, and returns the original domain/allocation registers with the C
+  result. Focused IR inspection of a noalloc external showed that shape, with
+  the outer call represented as a statepoint after LLVM's rewrite. Existing C
+  API coverage passed under real LLVM use. A noalloc C stub that raises is not a
+  useful LLVM-specific test: the native backend does not catch that exception
+  either, so that behavior is outside the supported noalloc contract.
 - [ ] Local allocation and stack allocation. Check `Begin_region`, `End_region`,
    `caml_modify_local`, and local roots under LLVM optimization.
 - [ ] Copied-stack growth. Look for missed saved pointers, false positives, stale
