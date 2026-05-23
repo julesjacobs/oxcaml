@@ -188,6 +188,14 @@ Put the OxCaml opam switch first in `PATH`.
   leaf, and focused IR showed local values live across a later `Gc.minor`
   statepoint. `make llvm-test-one DIR=typing-local
   LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed (`87` passed, `6` skipped).
+- Copied-stack growth now has focused LLVM runtime coverage:
+  `testsuite/tests/llvm-codegen/stack_growth.ml`. The test forces stack growth
+  in an effect-handled non-tail-recursive computation and checks the result.
+  `make llvm-test-one DIR=llvm-codegen LLVM_PATH=/tmp/oxcaml-clang-wrapper`
+  passed (`27` passed), with `2051` real `-x ir` wrapper invocations. The
+  remaining copied-stack question is design-level: the arm64 runtime rewrites
+  raw stack words conservatively, and we still need stronger evidence or a
+  metadata design to rule out false-positive rewrites of non-pointer words.
 
 ## Test Harness Notes
 

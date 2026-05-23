@@ -1,6 +1,11 @@
 # LLVM Backend Correctness Areas
 
-Potential areas to audit next:
+Checklist for correctness issues that could make the LLVM backend unsafe as a
+replacement for the native backend. Mark an area complete only after either
+finding and covering a concrete issue, or auditing enough source/tests to be
+confident it is not currently a correctness issue.
+
+The ten audit areas are:
 
 - [x] Atomic loads and stores. Check whether OCaml atomic primitives preserve the
    same ordering as the native backend.
@@ -69,6 +74,22 @@ Potential areas to audit next:
   exceptions, effects, region loops, and local-GC regression tests.
 - [ ] Copied-stack growth. Look for missed saved pointers, false positives, stale
    frame-pointer recovery, and interaction with LLVM spills.
+  - Added `testsuite/tests/llvm-codegen/stack_growth.ml`, which compiles with
+    `-llvm-backend`, runs an effect-handled non-tail-recursive computation, and
+    checks that copied-stack growth completes with the expected result.
+    `make llvm-test-one DIR=llvm-codegen
+    LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed (`27` passed, `0` skipped,
+    `0` failed), and the wrapper log recorded `2051` `-x ir` invocations with
+    the fixed-register flags.
+  - Source audit: on arm64, `gc_regs` points at saved `x0`; the rewrite helper
+    scans the saved OCaml value GPR slots through `x25`, matching
+    `runtime/arm64.S`. The raw copied-stack scan runs after exception and C
+    stack-link rewrites, so it does not hide old-stack links from those typed
+    rewrites.
+  - Still open: the current raw-word stack scan is conservative. A small manual
+    experiment with an unboxed `nativeint#` whose bits equal an OCaml-stack
+    address did not exhibit corruption, but that is not strong enough to rule
+    out all false-positive rewrites of non-pointer stack words.
 - [ ] SIMD and vector memory operations. Check alignment, truncation/extension,
    calling convention, and unsupported sizes.
 - [ ] DWARF, frame tables, and statepoint metadata. Verify that LLVM-generated
