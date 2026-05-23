@@ -18,7 +18,8 @@ fi
 
 stage_install=${STAGE_INSTALL:-$default_stage_install}
 stage_build=${STAGE_BUILD:-$default_stage_build}
-normal_build=${NORMAL_BUILD:-$repo/_normal_stage1_fpfix_build}
+normal_build=${NORMAL_BUILD:-$repo/_build}
+normal_runtime_dir=${NORMAL_RUNTIME_DIR:-$normal_build/runtime_stdlib/runtime}
 fake_root=${FAKE_ROOT:-$default_fake_root}
 wrapper=${LLVM_WRAPPER:-/tmp/oxcaml-clang-wrapper}
 list=${LIST:-$default_list}
@@ -36,12 +37,13 @@ require_path () {
 stage_install=$(cd "$stage_install" && pwd)
 stage_build=$(cd "$stage_build" && pwd)
 normal_build=$(cd "$normal_build" && pwd)
+normal_runtime_dir=$(cd "$normal_runtime_dir" && pwd)
 
 require_path "$stage_install/bin/ocamlopt.opt"
 require_path "$stage_install/bin/ocamlc.byte"
 require_path "$stage_install/lib/ocaml/stdlib.cmxa"
 require_path "$stage_build/main/oxcaml_main_native.exe"
-require_path "$normal_build/main/runtime/ocamlrun"
+require_path "$normal_runtime_dir/ocamlrun"
 require_path "$wrapper"
 
 find "$repo/testsuite/tests" -name '*.corrected' -delete
@@ -65,7 +67,7 @@ STDLIB_DIR="$stage_install/lib/ocaml" \
 INSTALL_BIN="$stage_install/bin" \
 INSTALL_LIB="$stage_install/lib/ocaml" \
 STDLIB_STABLE_DIR="$stage_install/lib/ocaml/stdlib_stable" \
-RUNTIME_DIR_PATH="$normal_build/main/runtime" \
+RUNTIME_DIR_PATH="$normal_runtime_dir" \
 DEBUGGER_EXE="$stage_install/bin/ocamldebug" \
 LLVM_WRAPPER="$wrapper" \
   "$repo/tools/setup-llvm-stage4-ocamltest.sh"

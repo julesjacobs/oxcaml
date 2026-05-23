@@ -5,7 +5,7 @@ set -euo pipefail
 repo=$(cd "$(dirname "$0")/.." && pwd)
 
 fake_root=${FAKE_ROOT:-/tmp/oxcaml-stage4-ocamltest-src}
-normal_build=${NORMAL_BUILD:-$repo/_normal_stage1_fpfix_build}
+normal_build=${NORMAL_BUILD:-$repo/_build}
 stage_build=${STAGE_BUILD:-$repo/_llvm_stage4_probe_build}
 stdlib_dir=${STDLIB_DIR:-$repo/_build/runtime_stdlib_install/lib/ocaml_runtime_stdlib}
 wrapper=${LLVM_WRAPPER:-/tmp/oxcaml-clang-wrapper}
@@ -13,7 +13,7 @@ wrapper=${LLVM_WRAPPER:-/tmp/oxcaml-clang-wrapper}
 install_bin=${INSTALL_BIN:-$normal_build/install/main/bin}
 install_lib=${INSTALL_LIB:-$normal_build/install/main/lib/ocaml}
 stdlib_stable_dir=${STDLIB_STABLE_DIR:-$install_lib/stdlib_stable}
-runtime_dir=${RUNTIME_DIR_PATH:-$normal_build/main/runtime}
+runtime_dir=${RUNTIME_DIR_PATH:-$normal_build/runtime_stdlib/runtime}
 stage_ocamlopt=$stage_build/main/oxcaml_main_native.exe
 expect_exe=${EXPECT_EXE:-$stage_build/main/oxcaml/testsuite/tools/expect.exe}
 expectnat_exe=${EXPECTNAT_EXE:-$stage_build/main/oxcaml/testsuite/tools/expectnat.exe}
