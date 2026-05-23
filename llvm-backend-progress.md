@@ -179,6 +179,10 @@ Put the OxCaml opam switch first in `PATH`.
   externals lowering to `caml_c_call`/`caml_c_call_stack_args` with statepoints
   and live roots. LLVM test runs passed for `c-api` (`11` passed), `callback`
   (`38` passed, `1` skipped), and `statmemprof` (`48` passed, `3` skipped).
+- Non-allocating C-call wrappers were audited. Focused IR inspection showed the
+  wrapper switching to `Domain_c_stack`, making the direct C call, switching
+  back, and returning unchanged runtime registers. A noalloc C stub that raises
+  is not a supported comparison point: native does not catch it either.
 
 ## Test Harness Notes
 
