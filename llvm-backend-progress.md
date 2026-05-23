@@ -165,6 +165,10 @@ Put the OxCaml opam switch first in `PATH`.
 - AArch64 atomic field loads in LLVM now emit `fence acquire` plus a `seq_cst`
   LLVM atomic load, matching the native backend's `dmb ishld; ldar` final
   assembly. Coverage is in `testsuite/tests/llvm-codegen/atomic_load.ml`.
+- Exception control-flow edges were audited for the current arm64 LLVM path.
+  Potentially-raising calls under a trap lower to `invoke` plus `landingpad`,
+  `wrap_try` is marked `returns_twice`, and a focused smoke test compiled with
+  `-llvm-backend` ran correctly.
 
 ## Test Harness Notes
 

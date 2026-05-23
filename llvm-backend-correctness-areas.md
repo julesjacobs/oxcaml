@@ -17,8 +17,14 @@ Potential areas to audit next:
   matches the native final emitters. `mutability` is already consumed by CFG CSE
   and vectorization before final lowering; final assembly selection does not need
   a separate mutable-vs-immutable instruction.
-- [ ] Exception control-flow edges. Verify that raise paths are visible enough to
-   LLVM, statepoints, and liveness.
+- [x] Exception control-flow edges. Real potentially-raising calls under a trap
+  lower to `invoke` plus `landingpad`; AArch64 trap setup uses `wrap_try`
+  marked `returns_twice`, records a recovery block address, and final assembly
+  contains the recovery path. A focused smoke test with `call_catch`,
+  `alloc_catch`, and `bounds_catch` compiled through `-llvm-backend` and ran
+  correctly, and inspection with `-keep-llvmir -dllvmir` showed `invoke`,
+  `landingpad`, statepoint bundles, `wrap_try`, and recovery assembly for real
+  call/handler paths.
 - [ ] Effect handlers. Effects stress stack switching, saved continuations, and
    non-local control flow.
 - [ ] C calls that can allocate. Check statepoint roots and runtime register
