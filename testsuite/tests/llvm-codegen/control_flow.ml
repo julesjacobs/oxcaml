@@ -11,7 +11,7 @@ let choose b x y = if b then x else y;;
 val choose : bool -> 'a -> 'a -> 'a = <fun>
 |}]
 
-[%%expect_llvm_ir AArch64{|define  oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__choose_0_1_code"(i64 %0, i64 %1, i64 %2, ptr addrspace(1) %3, ptr addrspace(1) %4) "oxcaml-stack-check"="true" noinline gc "oxcaml" {
+[%%expect_llvm_ir AArch64{|define  oxcaml_fpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__choose_0_1_code"(i64 %0, i64 %1, i64 %2, ptr addrspace(1) %3, ptr addrspace(1) %4) "oxcaml-stack-check"="true" noinline gc "oxcaml" {
   %ds = alloca i64
   store i64 %0, ptr %ds
   %alloc = alloca i64
