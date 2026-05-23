@@ -1071,17 +1071,29 @@ module Instruction = struct
   let landingpad ~typ ~cleanup = Landingpad { typ; cleanup }
 
   (* Note: this function handles indentation and newlines itself *)
-  let pp_t ?comment ppf { op; res } =
+  let pp_t ?comment ?dbg_metadata ppf { op; res } =
     let open Format in
+    let dbg_metadata =
+      match dbg_metadata with
+      | None -> ""
+      | Some dbg_metadata -> ", " ^ dbg_metadata
+    in
     let append =
       match comment with
       | Some str -> Some (string_of_pp (fun ppf -> pp_comment ppf "%s" str))
       | None -> None
     in
-    let ins ?(num_indents = 1) fmt = pp_line ~num_indents ?append ppf fmt in
+    let ins ?(num_indents = 1) fmt =
+      kasprintf
+        (fun body -> pp_line ~num_indents ?append ppf "%s%s" body dbg_metadata)
+        fmt
+    in
     let ins_res ?(num_indents = 1) fmt =
-      pp_line ~num_indents ?append ppf ("%a = " ^^ fmt) Ident.pp_t
-        (Option.get res)
+      kasprintf
+        (fun body ->
+          pp_line ~num_indents ?append ppf "%a = %s%s" Ident.pp_t
+            (Option.get res) body dbg_metadata)
+        fmt
     in
     match op with
     | Ret v -> ins "ret %a" Value.pp_t v
@@ -1089,6 +1101,12 @@ module Instruction = struct
     | Br_cond { cond; ifso; ifnot } ->
       ins "br %a, %a, %a" Value.pp_t cond Value.pp_t ifso Value.pp_t ifnot
     | Switch { discr; default; branches } ->
+      (* The multiline switch syntax needs instruction metadata after the
+         closing bracket. Leave it off for now rather than emitting malformed
+         IR; calls in switch arms still carry their own locations. *)
+      let ins ?(num_indents = 1) fmt =
+        kasprintf (fun body -> pp_line ~num_indents ?append ppf "%s" body) fmt
+      in
       ins "switch %a, %a [" Value.pp_t discr Value.pp_t default;
       List.iter
         (fun { index; label } ->
@@ -1097,7 +1115,8 @@ module Instruction = struct
       ins "]"
     | Unreachable -> ins "unreachable"
     | Invoke
-        { func; args; res_type; attrs; operand_bundles; cc; normal; unwind } ->
+        { func; args; res_type; attrs; operand_bundles; cc; normal; unwind }
+      -> (
       let pp_operand_bundle ppf (name, args) =
         fprintf ppf {|"%s"(%a)|} name
           (pp_print_list ~pp_sep:pp_comma Value.pp_t)
@@ -1117,7 +1136,7 @@ module Instruction = struct
           args Fn_attr.pp_t_list attrs pp_operand_bundles operand_bundles
           Value.pp_t normal Value.pp_t unwind
       in
-      (match res with
+      match res with
       | Some _ -> ins_res "%a" pp_invoke ()
       | None -> ins "%a" pp_invoke ())
     | Unary { op; arg } ->
@@ -1165,11 +1184,11 @@ module Instruction = struct
       in
       let pp_ordering ppf = function
         | None -> ()
-        | Some ordering -> fprintf ppf " %s" (atomic_ordering_to_string ordering)
+        | Some ordering ->
+          fprintf ppf " %s" (atomic_ordering_to_string ordering)
       in
-      ins_res "load %a%a%a, %a%a%a" (pp_str_if "volatile ") volatile_
-        pp_atomic atomic Type.pp_t typ Value.pp_t ptr pp_ordering atomic
-        pp_align align
+      ins_res "load %a%a%a, %a%a%a" (pp_str_if "volatile ") volatile_ pp_atomic
+        atomic Type.pp_t typ Value.pp_t ptr pp_ordering atomic pp_align align
     | Store { ptr; to_store; volatile_; align } ->
       let pp_align ppf = function
         | None -> ()
@@ -1235,7 +1254,8 @@ module Function = struct
     | Label_def of Ident.t
     | Instruction of
         { instr : Instruction.t;
-          comment : string option
+          comment : string option;
+          dbg_metadata : string option
         }
 
   type t =
@@ -1248,18 +1268,29 @@ module Function = struct
       personality : Ident.t option;
       private_ : bool;
       dbg : Debuginfo.t;
+      dbg_metadata : string option;
       mutable body_rev : slot list
     }
 
-  let add_instruction ?comment t instr =
-    t.body_rev <- Instruction { instr; comment } :: t.body_rev
+  let add_instruction ?comment ?dbg_metadata t instr =
+    t.body_rev <- Instruction { instr; comment; dbg_metadata } :: t.body_rev
 
   let add_label_def t label = t.body_rev <- Label_def label :: t.body_rev
 
   let add_comment t comment = t.body_rev <- Comment comment :: t.body_rev
 
   let pp_t ppf
-      { name; args; res; cc; attrs; personality; private_; dbg; body_rev } =
+      { name;
+        args;
+        res;
+        cc;
+        attrs;
+        personality;
+        private_;
+        dbg;
+        dbg_metadata;
+        body_rev
+      } =
     let open Format in
     (* Definition line *)
     do_if_comments_enabled (fun () ->
@@ -1272,16 +1303,23 @@ module Function = struct
     in
     let pp_personality ppf = function
       | None -> ()
-      | Some personality -> fprintf ppf " personality ptr %a" Ident.pp_t personality
+      | Some personality ->
+        fprintf ppf " personality ptr %a" Ident.pp_t personality
     in
-    pp_line ppf "define %a %a %a %a(%a) %a%a {" pp_private ()
+    let pp_dbg_metadata ppf = function
+      | None -> ()
+      | Some dbg_metadata -> fprintf ppf " %s" dbg_metadata
+    in
+    pp_line ppf "define %a %a %a %a(%a) %a%a%a {" pp_private ()
       Calling_conventions.pp_t cc Type.Or_void.pp_t res Ident.pp_t name pp_args
-      args Fn_attr.pp_t_list attrs pp_personality personality;
+      args Fn_attr.pp_t_list attrs pp_personality personality pp_dbg_metadata
+      dbg_metadata;
     (* Body *)
     let body = List.rev body_rev in
     List.iter
       (function
-        | Instruction { instr; comment } -> Instruction.pp_t ?comment ppf instr
+        | Instruction { instr; comment; dbg_metadata } ->
+          Instruction.pp_t ?comment ?dbg_metadata ppf instr
         | Comment s -> do_if_comments_enabled (fun () -> pp_ins ppf "%s" s)
         | Label_def ident -> pp_line ppf "%s" (Ident.to_label_string_exn ident))
       body;
@@ -1297,7 +1335,8 @@ module Function = struct
         funcdef : funcdef
       }
 
-    let create ~personality ~name ~args ~res ~cc ~attrs ~dbg ~private_ =
+    let create ~dbg_metadata ~personality ~name ~args ~res ~cc ~attrs ~dbg
+        ~private_ =
       let ident_gen = Ident.Gen.create () in
       let name = Ident.global name in
       let args =
@@ -1307,7 +1346,17 @@ module Function = struct
          entry label. *)
       Ident.Gen.get_fresh ident_gen |> ignore;
       let funcdef =
-        { name; args; res; cc; attrs; personality; private_; dbg; body_rev = [] }
+        { name;
+          args;
+          res;
+          cc;
+          attrs;
+          personality;
+          private_;
+          dbg;
+          dbg_metadata;
+          body_rev = []
+        }
       in
       { ident_gen; funcdef }
 
@@ -1320,19 +1369,19 @@ module Function = struct
 
     let get_fun_ident t = t.funcdef.name
 
-    let ins ?comment ?res_ident t op =
+    let ins ?comment ?dbg_metadata ?res_ident t op =
       let res_ident =
         match res_ident with
         | Some ident -> ident
         | None -> Ident.Gen.get_fresh t.ident_gen
       in
       let instr = Instruction.with_res op res_ident in
-      add_instruction ?comment t.funcdef instr;
+      add_instruction ?comment ?dbg_metadata t.funcdef instr;
       Instruction.get_res_value instr |> Option.get
 
-    let ins_no_res ?comment t op =
+    let ins_no_res ?comment ?dbg_metadata t op =
       let instr = Instruction.without_res op in
-      add_instruction ?comment t.funcdef instr
+      add_instruction ?comment ?dbg_metadata t.funcdef instr
 
     let comment t s = add_comment t.funcdef s
 
@@ -1361,9 +1410,7 @@ module Fundecl = struct
       | [], true -> fprintf ppf "..."
       | _, false -> (pp_print_list ~pp_sep:pp_comma Type.pp_t) ppf args
       | _ :: _, true ->
-        fprintf ppf "%a, ..."
-          (pp_print_list ~pp_sep:pp_comma Type.pp_t)
-          args
+        fprintf ppf "%a, ..." (pp_print_list ~pp_sep:pp_comma Type.pp_t) args
     in
     pp_line ppf "declare %a %a(%a)" Type.Or_void.pp_t res Ident.pp_t ident
       pp_args args
@@ -1390,21 +1437,13 @@ module Data = struct
   let default_data_section () =
     match Target_system.derived_system () with
     | Target_system.MacOS_like -> "__DATA,__data"
-    | Target_system.Linux
-    | Target_system.MinGW_32
-    | Target_system.MinGW_64
-    | Target_system.Win32
-    | Target_system.Win64
-    | Target_system.Cygwin
-    | Target_system.FreeBSD
-    | Target_system.NetBSD
-    | Target_system.OpenBSD
-    | Target_system.Generic_BSD
-    | Target_system.Solaris
-    | Target_system.Dragonfly
-    | Target_system.GNU
-    | Target_system.BeOS
-    | Target_system.Unknown -> ".data"
+    | Target_system.Linux | Target_system.MinGW_32 | Target_system.MinGW_64
+    | Target_system.Win32 | Target_system.Win64 | Target_system.Cygwin
+    | Target_system.FreeBSD | Target_system.NetBSD | Target_system.OpenBSD
+    | Target_system.Generic_BSD | Target_system.Solaris
+    | Target_system.Dragonfly | Target_system.GNU | Target_system.BeOS
+    | Target_system.Unknown ->
+      ".data"
 
   let constant ?(section = None) ?(align = Some Arch.size_addr)
       ?(private_ = false) name value =

@@ -50,10 +50,8 @@ grep -Eq "\\.loc|\\.file" "$native_asm"
 "$llvm_out" > "$build_dir/dwarf_debug_info_llvm_stdout.txt"
 grep -q "^42$" "$build_dir/dwarf_debug_info_llvm_stdout.txt"
 
-if grep -Eq "\\.debug_|\\.loc|DW_TAG|DW_AT" "$llvm_asm"; then
-  exit 1
-fi
+grep -Eq "\\.loc|\\.file" "$llvm_asm"
+grep -Eq "\\.debug_|DW_TAG|DW_AT" "$llvm_asm"
 
-# CR: This records the current gap.  The LLVM backend preserves OCaml backtrace
-# metadata in frame tables, but it does not yet emit standard DWARF debug info
-# for source-level debugger support.
+# CR: This checks that -g -llvm-backend emits standard DWARF debug info for
+# source-level debugger support, in addition to OCaml frame-table metadata.

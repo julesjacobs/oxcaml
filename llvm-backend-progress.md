@@ -181,11 +181,11 @@ Put the OxCaml opam switch first in `PATH`.
   `testsuite/tests/llvm-codegen/poll_statepoint.ml`: the test checks both the
   LLVM IR statepoint ID and the final poll frametable record encoded with zero
   allocation entries.
-- `-g -llvm-backend` currently supports OCaml frame-table debug metadata for
-  backtraces, but not standard DWARF `.debug_*` sections or `.loc` directives.
-  `testsuite/tests/llvm-codegen/dwarf_debug_info.ml` records that current
-  debugger-support gap by comparing the same `-g -S` program against the native
-  backend, which emits `.file`/`.loc` on arm64 macOS.
+- `-g -llvm-backend` now emits minimal standard DWARF source debug metadata in
+  addition to OCaml frame-table debug metadata. The LLVM IR contains a compile
+  unit, per-function subprogram metadata, and instruction/call locations when
+  `Debuginfo` is available, so clang emits `.loc` and `.debug_*` in assembly.
+  Coverage is in `testsuite/tests/llvm-codegen/dwarf_debug_info.ml`.
 - Exception control-flow edges were audited for the current arm64 LLVM path.
   Potentially-raising calls under a trap lower to `invoke` plus `landingpad`,
   `wrap_try` is marked `returns_twice`, and a focused smoke test compiled with
