@@ -90,8 +90,39 @@ The ten audit areas are:
     experiment with an unboxed `nativeint#` whose bits equal an OCaml-stack
     address did not exhibit corruption, but that is not strong enough to rule
     out all false-positive rewrites of non-pointer stack words.
-- [ ] SIMD and vector memory operations. Check alignment, truncation/extension,
+- [x] SIMD and vector memory operations. Check alignment, truncation/extension,
    calling convention, and unsupported sizes.
+  - Source audit: LLVM lowering maps unaligned 128/256/512-bit memory chunks to
+    LLVM loads/stores with `align 1`, and aligned chunks to normal vector
+    loads/stores. On the current arm64 path, 256-bit vectors are split into two
+    128-bit vectors before Cmm (`Lambda.split_vectors = true`), so the
+    unimplemented LLVM 256/512 scalar static-cast paths are not reachable for
+    the supported arm64 SIMD operations audited here.
+  - A manual `-llvm-backend` SIMD smoke test passed with real LLVM use
+    (`2` `-x ir` wrapper invocations). It covered unaligned 128-bit
+    bytes loads/stores, scalar-to/from-`int64x2#` builtin casts, and unboxed
+    vector calls through the existing SIMD C stubs.
+  - `make llvm-test-one DIR=typing-layouts-vec128
+    LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed (`5` passed, `0` skipped,
+    `0` failed), with `2025` `-x ir` wrapper invocations with fixed-register
+    flags.
 - [ ] DWARF, frame tables, and statepoint metadata. Verify that LLVM-generated
     frame layout, live roots, return addresses, and debug info agree with the
     runtime and debugger.
+  - Ordinary frame-table emission works in a focused manual smoke test: a
+    small allocating program compiled with `-g -O3 -llvm-backend -S`, ran
+    successfully, and emitted a `caml...__frametable` with descriptor count,
+    live-root offsets, allocation metadata, and debug strings. The wrapper log
+    confirmed real LLVM use.
+  - Found and covered: the LLVM frametable printer currently emits only the
+    short frame-descriptor format. A function with a large static frame aborts
+    in LLVM codegen with
+    `[OxCamlGCPrinter] frame size requires long frames` instead of using the
+    native backend's long-frame descriptor path. Coverage is in
+    `testsuite/tests/llvm-codegen/long_frame.ml`; `make llvm-test-one
+    DIR=llvm-codegen LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed (`31` passed,
+    `0` failed), and the wrapper log recorded `2052` `-x ir` invocations.
+  - Needed fix: implement long-frame descriptor emission in
+    `OxCamlGCPrinter.cpp` to match `runtime/caml/frame_descriptors.h` and
+    `backend/emitaux.ml`, including 32-bit frame data, live count, and live
+    offsets.
