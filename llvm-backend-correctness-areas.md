@@ -2,16 +2,17 @@
 
 Potential areas to audit next:
 
-- [ ] Atomic loads and stores. Check whether OCaml atomic primitives preserve the
+- [x] Atomic loads and stores. Check whether OCaml atomic primitives preserve the
    same ordering as the native backend.
   - Found and fixed: AArch64 atomic field loads used to lower to plain `ldr`.
     They now emit `fence acquire` plus a `seq_cst` LLVM atomic load, producing
     `dmb ishld; ldar` like the native backend. Covered by
     `testsuite/tests/llvm-codegen/atomic_load.ml`.
-  - Still to audit: `Intop_atomic` lowering for native-pointer/bigstring-style
-    atomics. Standard `Atomic.set`/`exchange`/CAS on arm64 currently goes
-    through runtime helper calls because `Catomic` is unsupported by the arm64
-    native backend.
+  - Audited for current macOS/arm64 LLVM builds: `Intop_atomic` is not reachable
+    through the native-pointer/bigstring builtin path because the arm64 target
+    reports `Catomic` unsupported, so those operations remain external calls.
+    The dormant LLVM `Intop_atomic` lowering should be re-audited before any
+    target enables `Catomic`.
 - [x] Load mutability. LLVM lowering ignores final-load `mutability`, but this
   matches the native final emitters. `mutability` is already consumed by CFG CSE
   and vectorization before final lowering; final assembly selection does not need
