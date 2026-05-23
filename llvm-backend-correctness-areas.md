@@ -42,7 +42,7 @@ The ten audit areas are:
   correctly, and inspection with `-keep-llvmir -dllvmir` showed `invoke`,
   `landingpad`, statepoint bundles, `wrap_try`, and recovery assembly for real
   call/handler paths.
-- [ ] Effect handlers. Effects stress stack switching, saved continuations, and
+- [x] Effect handlers. Effects stress stack switching, saved continuations, and
    non-local control flow.
   - Non-preemption effects passed under real LLVM use:
     `make llvm-test-one DIR=effects LLVM_PATH=/tmp/oxcaml-clang-wrapper`
@@ -51,9 +51,7 @@ The ten audit areas are:
   - The skipped tests are the preemption subdirectory, because this checkout's
     `ocamltest_config` has `POLL_INSERTION=false`. A manual preemption attempt
     with `-enable-poll-insertion` timed out on both LLVM and the native backend,
-    so it is not useful LLVM-specific evidence. Need either a poll-insertion
-    configured build or to cover preemption under the copied-stack/preemption
-    audit before marking this complete.
+    so it is not useful LLVM-specific evidence.
   - Added `testsuite/tests/llvm-codegen/effect_preemption.ml`, a focused
     LLVM smoke test that uses signal-driven preemption in two ways: allocation
     across a preemption with major GC in the handler, and an explicit `%poll`
@@ -61,8 +59,15 @@ The ten audit areas are:
     `make llvm-test-one DIR=llvm-codegen
     LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed (`40` passed, `0` failed),
     with `2056` wrapper invocations containing `-x ir`. This gives real LLVM
-    coverage for the preemption runtime path and LLVM `Poll` lowering, but does
-    not replace a poll-insertion configured run of the full preemption suite.
+    coverage for the preemption runtime path.
+  - Added `testsuite/tests/llvm-codegen/poll_statepoint.ml`, which verifies
+    that a CFG `Poll` reaches LLVM as a `caml_call_gc` poll statepoint with
+    `"statepoint-id"="1"` and that the resulting executable runs. Source audit
+    showed explicit `%poll` and compiler-inserted polls both become
+    `Operation.Poll`; LLVM lowers `Operation.Poll` through `Safepoint.Poll`.
+    `make llvm-test-one DIR=llvm-codegen
+    LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed (`48` passed, `0` failed),
+    with `2061` wrapper invocations containing `-x ir`.
 - [x] C calls that can allocate. LLVM lowering sends allocating externals
   through `caml_c_call` or `caml_c_call_stack_args`, marks them as primitive
   calls, attaches `statepoint-id`, passes `gc-live` roots from
