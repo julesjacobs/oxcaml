@@ -11,7 +11,7 @@ let catch_exit b x = try if b then raise Exit else x + 1 with Exit -> 0;;
 val catch_exit : bool -> int -> int = <fun>
 |}]
 
-[%%expect_llvm_ir AArch64{|define  oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_camlTOP__catch_exit_0_1_code"(i64 %0, i64 %1, i64 %2, i64 %3) "oxcaml-stack-check"="true" noinline gc "oxcaml" {
+[%%expect_llvm_ir AArch64{|define  oxcaml_fpcc { { i64, i64 }, { i64 } } @"\01_camlTOP__catch_exit_0_1_code"(i64 %0, i64 %1, i64 %2, i64 %3) "oxcaml-stack-check"="true" noinline gc "oxcaml" {
   %ds = alloca i64
   store i64 %0, ptr %ds
   %alloc = alloca i64
