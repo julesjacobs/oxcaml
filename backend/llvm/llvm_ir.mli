@@ -267,6 +267,7 @@ module Instruction : sig
 
   type atomic_ordering =
     | Acquire
+    | Seq_cst
 
   type convert_op =
     | Sext
@@ -392,6 +393,8 @@ module Instruction : sig
   val load_with_align : align:int -> ptr:Value.t -> typ:Type.t -> op
 
   val load_volatile : ptr:Value.t -> typ:Type.t -> op
+
+  val load_atomic : ordering:atomic_ordering -> ptr:Value.t -> typ:Type.t -> op
 
   val store : ptr:Value.t -> to_store:Value.t -> op
 
