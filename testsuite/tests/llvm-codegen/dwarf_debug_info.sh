@@ -3,9 +3,15 @@
 set -eu
 
 build_dir=$(pwd)
-src="$build_dir/dwarf_debug_info_generated.ml"
-out="$build_dir/dwarf_debug_info_generated.exe"
-asm="$build_dir/dwarf_debug_info_generated.s"
+native_dir="$build_dir/native_dwarf_debug_info"
+llvm_dir="$build_dir/llvm_dwarf_debug_info"
+mkdir -p "$native_dir" "$llvm_dir"
+native_src="$native_dir/dwarf_debug_info_generated.ml"
+llvm_src="$llvm_dir/dwarf_debug_info_generated.ml"
+native_out="$native_dir/dwarf_debug_info_generated.exe"
+llvm_out="$llvm_dir/dwarf_debug_info_generated.exe"
+native_asm="$native_dir/dwarf_debug_info_generated.s"
+llvm_asm="$llvm_dir/dwarf_debug_info_generated.s"
 
 search_dir=$build_dir
 ocamlopt=""
@@ -21,17 +27,30 @@ if [ -z "$ocamlopt" ]; then
   ocamlopt="_build/install/main/bin/ocamlopt.opt"
 fi
 
-cat > "$src" <<'EOF'
+cat > "$native_src" <<'EOF'
 let[@inline never] f x = x + 1
 let () = Printf.printf "%d\n" (f 41)
 EOF
+cp "$native_src" "$llvm_src"
 
-"$ocamlopt" -g -O3 -S -llvm-backend -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
-  -o "$out" "$src"
-"$out" > "$build_dir/dwarf_debug_info_stdout.txt"
-grep -q "^42$" "$build_dir/dwarf_debug_info_stdout.txt"
+(
+  cd "$native_dir"
+  unset OCAMLPARAM
+  "$ocamlopt" -g -O3 -S -o "$native_out" "$native_src"
+)
+"$native_out" > "$build_dir/dwarf_debug_info_native_stdout.txt"
+grep -q "^42$" "$build_dir/dwarf_debug_info_native_stdout.txt"
+grep -Eq "\\.loc|\\.file" "$native_asm"
 
-if grep -Eq "\\.debug_|\\.loc|DW_TAG|DW_AT" "$asm"; then
+(
+  cd "$llvm_dir"
+  "$ocamlopt" -g -O3 -S -llvm-backend -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
+    -o "$llvm_out" "$llvm_src"
+)
+"$llvm_out" > "$build_dir/dwarf_debug_info_llvm_stdout.txt"
+grep -q "^42$" "$build_dir/dwarf_debug_info_llvm_stdout.txt"
+
+if grep -Eq "\\.debug_|\\.loc|DW_TAG|DW_AT" "$llvm_asm"; then
   exit 1
 fi
 
