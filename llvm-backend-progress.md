@@ -175,6 +175,10 @@ Put the OxCaml opam switch first in `PATH`.
   `-x ir` invocations. The skipped preemption tests require a poll-insertion
   configured build; a manual `-enable-poll-insertion` attempt also timed out on
   the native backend, so it was not LLVM-specific evidence.
+- Allocating C calls were audited. Focused IR inspection showed allocating
+  externals lowering to `caml_c_call`/`caml_c_call_stack_args` with statepoints
+  and live roots. LLVM test runs passed for `c-api` (`11` passed), `callback`
+  (`38` passed, `1` skipped), and `statmemprof` (`48` passed, `3` skipped).
 
 ## Test Harness Notes
 
