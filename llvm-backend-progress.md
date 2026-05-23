@@ -30,6 +30,10 @@ using that LLVM-built toolchain.
 - This is a strong functional milestone, not a production sign-off. The backend
   still needs design review around GC/stack-map correctness, DWARF/debugging,
   unsupported asmgen/asmcomp tests, performance, and platform coverage.
+- AArch64 non-initializing word stores now preserve the native backend's
+  memory-ordering barrier in LLVM. A small `mutable int` setter emits
+  `fence acquire` in LLVM IR and `dmb ishld; str ...` in final assembly, while
+  pointer field assignment still goes through `caml_modify`.
 
 The useful current capability is: an LLVM-built compiler can rebuild the
 compiler again and pass the broad non-asmgen/non-asmcomp testsuite on arm64 when
@@ -155,6 +159,9 @@ Put the OxCaml opam switch first in `PATH`.
   run after the typed exception-chain and frame-pointer rewrites.
 - `RewriteStatepointsForGC` must compute caller live roots before the
   statepoint call itself; otherwise call arguments can stay live across calls.
+- AArch64 non-initializing `Word_int`/`Word_val` stores in LLVM now emit
+  `fence acquire`, matching the native backend's `dmb ishld` before the store.
+  Coverage is in `testsuite/tests/llvm-codegen/store_modify.ml`.
 
 ## Test Harness Notes
 
