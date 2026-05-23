@@ -171,6 +171,10 @@ Put the OxCaml opam switch first in `PATH`.
   LLVM GC printer. Coverage is in
   `testsuite/tests/llvm-codegen/long_frame.ml`; the LLVM fork change is
   `.toolchains/llvm-project-source` commit `012c49512`.
+- `-g -llvm-backend` currently supports OCaml frame-table debug metadata for
+  backtraces, but not standard DWARF `.debug_*` sections or `.loc` directives.
+  `testsuite/tests/llvm-codegen/dwarf_debug_info.ml` records that current
+  debugger-support gap.
 - Exception control-flow edges were audited for the current arm64 LLVM path.
   Potentially-raising calls under a trap lower to `invoke` plus `landingpad`,
   `wrap_try` is marked `returns_twice`, and a focused smoke test compiled with
