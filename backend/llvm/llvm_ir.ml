@@ -574,6 +574,9 @@ module Instruction = struct
     | Atomicrmw_xor
     | Atomicrmw_xchg
 
+  type atomic_ordering =
+    | Acquire
+
   type convert_op =
     (* Int *)
     | Sext
@@ -727,6 +730,8 @@ module Instruction = struct
     | Atomicrmw_xor -> "xor"
     | Atomicrmw_xchg -> "xchg"
 
+  let atomic_ordering_to_string = function Acquire -> "acquire"
+
   type op =
     (* Terminator *)
     | Ret of Value.t
@@ -821,6 +826,7 @@ module Instruction = struct
         }
     (* Atomics *)
     (* CR yusumez: Implement ordering constraints instead of hard-coding them *)
+    | Fence of atomic_ordering
     | Cmpxchg of
         { ptr : Value.t;
           compare_with : Value.t;
@@ -893,6 +899,7 @@ module Instruction = struct
     | Store _ -> None
     | Getelementptr { base_ptr; _ } -> Some (Value.get_type base_ptr)
     (* Atomics *)
+    | Fence _ -> None
     | Cmpxchg { compare_with; _ } ->
       let elem_type = Value.get_type compare_with in
       Some (Type.Struct [elem_type; Type.i1])
@@ -1026,6 +1033,8 @@ module Instruction = struct
     assert' "atomicrmw" (Value.get_type ptr |> Type.is_ptr);
     Atomicrmw { op; ptr; arg }
 
+  let fence ordering = Fence ordering
+
   let select ~cond ~ifso ~ifnot =
     assert' "select" (Value.get_type cond |> Type.is_i1_or_i1_vector);
     let ifso_type = Value.get_type ifso in
@@ -1155,6 +1164,7 @@ module Instruction = struct
       ins_res "getelementptr %a, %a, %a" Type.pp_t base_type Value.pp_t base_ptr
         (pp_print_list ~pp_sep:pp_comma Value.pp_t)
         indices
+    | Fence ordering -> ins "fence %s" (atomic_ordering_to_string ordering)
     | Cmpxchg { ptr; compare_with; set_if_equal } ->
       ins_res "cmpxchg %a, %a, %a acq_rel monotonic" Value.pp_t ptr Value.pp_t
         compare_with Value.pp_t set_if_equal

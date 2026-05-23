@@ -265,6 +265,9 @@ module Instruction : sig
     | Atomicrmw_xor
     | Atomicrmw_xchg
 
+  type atomic_ordering =
+    | Acquire
+
   type convert_op =
     | Sext
     | Zext
@@ -326,6 +329,8 @@ module Instruction : sig
   val fcmp_cond_of_ocaml : Cmm.float_comparison -> fcmp_cond
 
   val atomicrmw_op_to_string : atomicrmw_op -> string
+
+  val atomic_ordering_to_string : atomic_ordering -> string
 
   type op
 
@@ -396,6 +401,8 @@ module Instruction : sig
 
   val getelementptr :
     base_type:Type.t -> base_ptr:Value.t -> indices:Value.t list -> op
+
+  val fence : atomic_ordering -> op
 
   val cmpxchg :
     ptr:Value.t -> compare_with:Value.t -> set_if_equal:Value.t -> op
