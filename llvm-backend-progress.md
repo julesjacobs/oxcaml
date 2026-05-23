@@ -165,6 +165,12 @@ Put the OxCaml opam switch first in `PATH`.
 - AArch64 atomic field loads in LLVM now emit `fence acquire` plus a `seq_cst`
   LLVM atomic load, matching the native backend's `dmb ishld; ldar` final
   assembly. Coverage is in `testsuite/tests/llvm-codegen/atomic_load.ml`.
+- LLVM frame-table emission now supports the runtime long-frame descriptor
+  format. Large static frames emit `FRAME_LONG_MARKER`, 32-bit frame data,
+  32-bit live count, and 32-bit live offsets instead of aborting in the custom
+  LLVM GC printer. Coverage is in
+  `testsuite/tests/llvm-codegen/long_frame.ml`; the LLVM fork change is
+  `.toolchains/llvm-project-source` commit `012c49512`.
 - Exception control-flow edges were audited for the current arm64 LLVM path.
   Potentially-raising calls under a trap lower to `invoke` plus `landingpad`,
   `wrap_try` is marked `returns_twice`, and a focused smoke test compiled with
