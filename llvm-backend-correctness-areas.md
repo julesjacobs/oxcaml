@@ -65,9 +65,12 @@ The ten audit areas are:
     `"statepoint-id"="1"` and that the resulting executable runs. Source audit
     showed explicit `%poll` and compiler-inserted polls both become
     `Operation.Poll`; LLVM lowers `Operation.Poll` through `Safepoint.Poll`.
+    The test now also checks the final frametable assembly for the poll record:
+    a frame descriptor with the allocation flag set, zero live roots, and
+    allocation count byte `0`, matching the runtime's poll-frame encoding.
     `make llvm-test-one DIR=llvm-codegen
-    LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed (`48` passed, `0` failed),
-    with `2061` wrapper invocations containing `-x ir`.
+    LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed (`52` passed, `0` failed),
+    with `2063` wrapper invocations containing `-x ir`.
 - [x] C calls that can allocate. LLVM lowering sends allocating externals
   through `caml_c_call` or `caml_c_call_stack_args`, marks them as primitive
   calls, attaches `statepoint-id`, passes `gc-live` roots from
@@ -193,6 +196,10 @@ The ten audit areas are:
     `make llvm-test-one DIR=llvm-codegen
     LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed (`52` passed, `0` failed),
     with `2063` wrapper invocations containing `-x ir`.
+  - Poll statepoints also have final-assembly frametable coverage in
+    `testsuite/tests/llvm-codegen/poll_statepoint.ml`: the test checks the
+    `caml_call_gc` statepoint ID in LLVM IR and the final poll frame encoded as
+    an allocation frame with zero allocation entries.
   - Found and covered: `-g -llvm-backend` currently emits OCaml frame-table
     debug metadata for backtraces, but not standard DWARF `.debug_*` sections
     or `.loc` directives for source-level debugger support. Coverage is in
