@@ -43,24 +43,7 @@ count=4300
   echo "let () = Printf.printf \"%d\\n\" (f ())"
 } > "$src"
 
-set +e
 "$ocamlopt" -O3 -g -llvm-backend -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
   -o "$out" "$src" > "$stdout_file" 2> "$stderr_file"
-compile_status=$?
-set -e
-
-if [ "$compile_status" -eq 0 ]; then
-  "$out" > "$stdout_file"
-  exit 0
-fi
-
-if grep -q "\\[OxCamlGCPrinter\\] frame size requires long frames" "$stderr_file"; then
-  # CR: This exhibits the current problem.  The LLVM frametable printer only
-  # emits the short frame-descriptor format, so a function with a large static
-  # frame aborts in LLVM codegen instead of compiling like the native backend's
-  # long-frame path.
-  exit 0
-fi
-
-cat "$stderr_file"
-exit "$compile_status"
+"$out" > "$stdout_file"
+grep -q "^9247150$" "$stdout_file"
