@@ -125,9 +125,11 @@ type fun_info =
         (* Trap blocks preallocated in the function entry block. On arm64 this
            avoids dynamic allocas, which otherwise force LLVM to use x29 as a
            frame pointer even when normal OCaml callees may clobber x29. *)
-    trap_blocks : trap_block_info Label.Tbl.t
+    trap_blocks : trap_block_info Label.Tbl.t;
         (* Identifiers created during a [Pushtrap] instruction needed for
            [Poptrap] and trap handler entry *)
+    mutable current_dbg_metadata : string option;
+    subprogram_dbg_metadata_id : int option
   }
 
 type t =
@@ -157,12 +159,18 @@ type t =
         (* Wrappers for noalloc C calls. This is currently needed since
            manipulating the stack inline is broken. *)
     mutable all_trap_blocks : trap_block_info list;
-    mutable module_asm : string list
+    mutable module_asm : string list;
+    mutable next_debug_metadata_id : int;
+    mutable debug_compile_unit_id : int option;
+    mutable debug_file_id : int option;
+    mutable debug_subroutine_type_id : int option;
+    mutable debug_metadata_defs_rev : string list;
+    mutable debug_module_flag_ids_rev : int list
   }
 
 (* current_fun_info interface *)
 
-let create_fun_info emitter =
+let create_fun_info ?subprogram_dbg_metadata_id emitter =
   { emitter;
     reg2alloca = Reg.Tbl.create 0;
     const_ints = Reg.Tbl.create 0;
@@ -172,7 +180,9 @@ let create_fun_info emitter =
     active_traps = InstructionId.Tbl.create 0;
     active_trap_depths = InstructionId.Tbl.create 0;
     trap_block_allocas = Label.Tbl.create 0;
-    trap_blocks = Label.Tbl.create 0
+    trap_blocks = Label.Tbl.create 0;
+    current_dbg_metadata = None;
+    subprogram_dbg_metadata_id
   }
 
 let get_fun_info t =
@@ -180,8 +190,9 @@ let get_fun_info t =
   | Some fun_info -> fun_info
   | None -> fail_msg ~name:"get_fun_info" "not_available"
 
-let reset_fun_info t emitter =
-  t.current_fun_info <- Some (create_fun_info emitter)
+let reset_fun_info ?subprogram_dbg_metadata_id t emitter =
+  t.current_fun_info
+    <- Some (create_fun_info ?subprogram_dbg_metadata_id emitter)
 
 let get_alloca_for_reg t reg =
   let fun_info = get_fun_info t in
@@ -389,8 +400,111 @@ let create ~llvmir_filename ~ppf_dump =
     called_intrinsics = String.Map.empty;
     c_call_wrappers = String.Map.empty;
     all_trap_blocks = [];
-    module_asm = []
+    module_asm = [];
+    next_debug_metadata_id = 100000;
+    debug_compile_unit_id = None;
+    debug_file_id = None;
+    debug_subroutine_type_id = None;
+    debug_metadata_defs_rev = [];
+    debug_module_flag_ids_rev = []
   }
+
+let llvm_metadata_string s =
+  let b = Buffer.create (String.length s) in
+  String.iter
+    (fun c ->
+      match c with
+      | '"' -> Buffer.add_string b {|\22|}
+      | '\\' -> Buffer.add_string b {|\5C|}
+      | c when Char.code c < 32 || Char.code c >= 127 ->
+        Buffer.add_string b (Printf.sprintf {|\%02X|} (Char.code c))
+      | c -> Buffer.add_char b c)
+    s;
+  Buffer.contents b
+
+let fresh_debug_metadata_id t =
+  let id = t.next_debug_metadata_id in
+  t.next_debug_metadata_id <- id + 1;
+  id
+
+let add_debug_metadata_def t id def =
+  t.debug_metadata_defs_rev
+    <- Printf.sprintf "!%d = %s" id def :: t.debug_metadata_defs_rev
+
+let add_debug_module_flag t name value =
+  let id = fresh_debug_metadata_id t in
+  add_debug_metadata_def t id
+    (Printf.sprintf {|!{i32 2, !"%s", i32 %d}|} name value);
+  t.debug_module_flag_ids_rev <- id :: t.debug_module_flag_ids_rev
+
+let ensure_debug_compile_unit t =
+  if not !Clflags.debug
+  then None
+  else
+    match t.sourcefile with
+    | None -> None
+    | Some sourcefile -> (
+      match t.debug_compile_unit_id with
+      | Some id -> Some id
+      | None ->
+        let file_id = fresh_debug_metadata_id t in
+        let subroutine_type_id = fresh_debug_metadata_id t in
+        let compile_unit_id = fresh_debug_metadata_id t in
+        let filename = Filename.basename sourcefile in
+        let directory = Filename.dirname sourcefile in
+        add_debug_metadata_def t file_id
+          (Printf.sprintf {|!DIFile(filename: "%s", directory: "%s")|}
+             (llvm_metadata_string filename)
+             (llvm_metadata_string directory));
+        add_debug_metadata_def t subroutine_type_id
+          "!DISubroutineType(types: !{})";
+        add_debug_metadata_def t compile_unit_id
+          (Printf.sprintf
+             {|distinct !DICompileUnit(language: DW_LANG_OCaml, file: !%d, producer: "oxcaml-llvm", isOptimized: true, runtimeVersion: 0, emissionKind: FullDebug)|}
+             file_id);
+        add_debug_module_flag t "Dwarf Version" 4;
+        add_debug_module_flag t "Debug Info Version" 3;
+        t.debug_file_id <- Some file_id;
+        t.debug_subroutine_type_id <- Some subroutine_type_id;
+        t.debug_compile_unit_id <- Some compile_unit_id;
+        Some compile_unit_id)
+
+let first_debug_item dbg =
+  Debuginfo.Dbg.to_list (Debuginfo.get_dbg dbg)
+  |> List.rev
+  |> List.find_opt (fun item -> item.Debuginfo.dinfo_line > 0)
+
+let create_debug_subprogram t ~fun_name dbg =
+  match ensure_debug_compile_unit t, first_debug_item dbg with
+  | Some compile_unit_id, Some item ->
+    let file_id = Option.get t.debug_file_id in
+    let subroutine_type_id = Option.get t.debug_subroutine_type_id in
+    let id = fresh_debug_metadata_id t in
+    let name =
+      Debuginfo.Scoped_location.string_of_scopes ~include_zero_alloc:false
+        item.dinfo_scopes
+    in
+    let name = if String.equal name "<unknown>" then fun_name else name in
+    add_debug_metadata_def t id
+      (Printf.sprintf
+         {|distinct !DISubprogram(name: "%s", linkageName: "%s", scope: !%d, file: !%d, line: %d, type: !%d, scopeLine: %d, spFlags: DISPFlagDefinition, unit: !%d)|}
+         (llvm_metadata_string name)
+         (llvm_metadata_string fun_name)
+         file_id file_id item.dinfo_line subroutine_type_id item.dinfo_line
+         compile_unit_id);
+    Some id
+  | None, _ | _, None -> None
+
+let create_debug_location t subprogram_dbg_metadata_id dbg =
+  match subprogram_dbg_metadata_id, first_debug_item dbg with
+  | Some subprogram_id, Some item ->
+    let id = fresh_debug_metadata_id t in
+    let column = Int.max 0 item.dinfo_char_start in
+    add_debug_metadata_def t id
+      (Printf.sprintf {|!DILocation(line: %d, column: %d, scope: !%d)|}
+         item.dinfo_line column subprogram_id);
+    Some (Printf.sprintf "!dbg !%d" id)
+  | None, _ | _, None -> None
 
 let add_called_intrinsic t name ~args ~res =
   fail_if_not ~msg:"expected intrinsic" "add_called_intrinsic"
@@ -515,11 +629,13 @@ let make_arg_types arg_types =
 
 let emit_ins ?comment ?res_ident t op =
   let fun_info = get_fun_info t in
-  E.ins ?comment ?res_ident fun_info.emitter op
+  E.ins ?comment ?dbg_metadata:fun_info.current_dbg_metadata ?res_ident
+    fun_info.emitter op
 
 let emit_ins_no_res ?comment t op =
   let fun_info = get_fun_info t in
-  E.ins_no_res ?comment fun_info.emitter op
+  E.ins_no_res ?comment ?dbg_metadata:fun_info.current_dbg_metadata
+    fun_info.emitter op
 
 let emit_label t label_value =
   let fun_info = get_fun_info t in
@@ -765,31 +881,42 @@ let assemble_return t res_type values =
 let call_simple ?(attrs = []) ?(dbg = Debuginfo.none) ?(raise_call = false)
     ?(primitive_call = false) ?alloc_info ?(live_roots = []) ?unwind_label ~cc t
     name args res_types =
-  let args = prepare_call_args t args in
-  let res_type = Some (make_ret_type res_types) in
-  let func = LL.Ident.global name in
-  let operand_bundles =
-    call_operand_bundles ?alloc_info t ~primitive_call ~raise_call dbg
-      live_roots
+  let fun_info = get_fun_info t in
+  let prev_dbg_metadata = fun_info.current_dbg_metadata in
+  let call_dbg_metadata =
+    match prev_dbg_metadata with
+    | Some _ -> prev_dbg_metadata
+    | None -> create_debug_location t fun_info.subprogram_dbg_metadata_id dbg
   in
-  let res =
-    match unwind_label with
-    | None ->
-      emit_ins t
-        (I.call ~func ~args ~res_type ~attrs ~operand_bundles ~cc
-           ~musttail:false)
-    | Some unwind_label ->
-      let normal_label = V.of_label (Cmm.new_label ()) in
-      let res =
-        emit_ins t
-          (I.invoke ~func ~args ~res_type ~attrs ~operand_bundles ~cc
-             ~normal:normal_label ~unwind:unwind_label)
+  fun_info.current_dbg_metadata <- call_dbg_metadata;
+  Fun.protect
+    ~finally:(fun () -> fun_info.current_dbg_metadata <- prev_dbg_metadata)
+    (fun () ->
+      let args = prepare_call_args t args in
+      let res_type = Some (make_ret_type res_types) in
+      let func = LL.Ident.global name in
+      let operand_bundles =
+        call_operand_bundles ?alloc_info t ~primitive_call ~raise_call dbg
+          live_roots
       in
-      emit_label t normal_label;
-      res
-  in
-  refresh_live_gc_roots t live_roots;
-  extract_call_res t res (List.length res_types)
+      let res =
+        match unwind_label with
+        | None ->
+          emit_ins t
+            (I.call ~func ~args ~res_type ~attrs ~operand_bundles ~cc
+               ~musttail:false)
+        | Some unwind_label ->
+          let normal_label = V.of_label (Cmm.new_label ()) in
+          let res =
+            emit_ins t
+              (I.invoke ~func ~args ~res_type ~attrs ~operand_bundles ~cc
+                 ~normal:normal_label ~unwind:unwind_label)
+          in
+          emit_label t normal_label;
+          res
+      in
+      refresh_live_gc_roots t live_roots;
+      extract_call_res t res (List.length res_types))
 
 module Safepoint = struct
   type t =
@@ -1416,112 +1543,121 @@ let raise_ t ~(exn_handler : Label.t option)
 let emit_terminator t (block : Cfg.basic_block)
     (i : Cfg.terminator Cfg.instruction) =
   emit_comment t "%a" F.pp_dbg_instr_terminator i;
-  match i.desc with
-  | Never -> fail "terminator.Never"
-  | Always lbl -> br_label t lbl
-  | Parity_test { ifso; ifnot } ->
-    (* ifso -> even / ifnot -> odd, so labels are flipped *)
-    let cond = odd_test t i in
-    emit_ins_no_res t
-      (I.br_cond ~cond ~ifso:(V.of_label ifnot) ~ifnot:(V.of_label ifso))
-  | Truth_test { ifso; ifnot } ->
-    let cond = test t Itruetest i in
-    emit_ins_no_res t
-      (I.br_cond ~cond ~ifso:(V.of_label ifso) ~ifnot:(V.of_label ifnot))
-  | Return -> return t i
-  | Int_test { lt; eq; gt; is_signed; imm } ->
-    let open struct
-      type comp =
-        | Lt
-        | Gt
-    end in
-    let make_comp (comp : comp) : Cmm.integer_comparison =
-      match is_signed, comp with
-      | Signed, Lt -> Clt
-      | Signed, Gt -> Cgt
-      | Unsigned, Lt -> Cult
-      | Unsigned, Gt -> Cugt
-    in
-    let lt = V.of_label lt in
-    let eq = V.of_label eq in
-    let gt = V.of_label gt in
-    let ge = Cmm.new_label () |> V.of_label in
-    let is_lt = int_comp t (make_comp Lt) i ~imm in
-    emit_ins_no_res t (I.br_cond ~cond:is_lt ~ifso:lt ~ifnot:ge);
-    emit_label t ge;
-    let is_gt = int_comp t (make_comp Gt) i ~imm in
-    emit_ins_no_res t (I.br_cond ~cond:is_gt ~ifso:gt ~ifnot:eq)
-  | Float_test { width; lt; eq; gt; uo } ->
-    let typ = T.of_float_width width in
-    let lt = V.of_label lt in
-    let eq = V.of_label eq in
-    let gt = V.of_label gt in
-    let uo = V.of_label uo in
-    let ge = V.of_label (Cmm.new_label ()) in
-    let eq_or_uo = V.of_label (Cmm.new_label ()) in
-    let is_lt = float_comp t Cmm.CFlt i typ in
-    emit_ins_no_res t (I.br_cond ~cond:is_lt ~ifso:lt ~ifnot:ge);
-    emit_label t ge;
-    let is_gt = float_comp t Cmm.CFgt i typ in
-    emit_ins_no_res t (I.br_cond ~cond:is_gt ~ifso:gt ~ifnot:eq_or_uo);
-    emit_label t eq_or_uo;
-    let is_eq = float_comp t Cmm.CFeq i typ in
-    emit_ins_no_res t (I.br_cond ~cond:is_eq ~ifso:eq ~ifnot:uo)
-  | Switch labels ->
-    let discr = load_reg_to_temp ~typ:T.i64 t i.arg.(0) in
-    let default = V.of_label (Cmm.new_label ()) in
-    let branches =
-      List.mapi
-        (fun i label : I.switch_branch ->
-          { index = V.of_int i; label = V.of_label label })
-        (Array.to_list labels)
-    in
-    emit_ins_no_res t (I.switch ~discr ~default ~branches);
-    (* note: [Switch] does not take a default label, as switches are assumed to
-       be exhaustive. Since it is mandatory in LLVM, we will use a label with an
-       [unreachable] instruction for every instance of this instruction. *)
-    emit_label t default;
-    emit_ins_no_res t I.unreachable
-  | Raise raise_kind -> raise_ t ~exn_handler:block.exn i raise_kind
-  | Call { op; label_after } ->
-    reject_addr_regs i.arg "call";
-    let exn_entry = exn_entry_for_block t block in
-    let unwind_label =
-      Option.map (fun _ -> V.of_label (Cmm.new_label ())) exn_entry
-    in
-    call ?unwind_label t i op;
-    br_label t label_after;
-    emit_unwind_landingpad_after t unwind_label exn_entry
-  | Tailcall_self { destination } -> tailcall_self t i destination
-  | Tailcall_func op ->
-    reject_addr_regs i.arg "tailcall func";
-    call ~tail:true t i op
-  | Call_no_return { func_symbol; alloc; ty_args; stack_ofs; stack_align; _ } ->
-    let exn_entry = exn_entry_for_block t block in
-    let unwind_label =
-      Option.map (fun _ -> V.of_label (Cmm.new_label ())) exn_entry
-    in
-    extcall ?unwind_label t i ~func_symbol ~alloc ~ty_args ~stack_ofs
-      ~stack_align;
-    emit_ins_no_res t I.unreachable;
-    emit_unwind_landingpad_after t unwind_label exn_entry
-  | Prim { op; label_after } -> (
-    reject_addr_regs i.arg "prim";
-    match op with
-    | Probe _ -> not_implemented_terminator ~msg:"probe" i
-    | External { func_symbol; alloc; ty_args; stack_ofs; stack_align; _ } ->
-      let exn_entry = exn_entry_for_block t block in
-      let unwind_label =
-        Option.map (fun _ -> V.of_label (Cmm.new_label ())) exn_entry
-      in
-      extcall ?unwind_label t i ~func_symbol ~alloc ~ty_args ~stack_ofs
-        ~stack_align;
-      br_label t label_after;
-      emit_unwind_landingpad_after t unwind_label exn_entry)
-  | Invalid { message = _; stack_ofs; stack_align; label_after = _ } ->
-    extcall t i ~func_symbol:Cmm.caml_flambda2_invalid ~alloc:false
-      ~ty_args:[XInt] ~stack_ofs ~stack_align;
-    emit_ins_no_res t I.unreachable
+  let fun_info = get_fun_info t in
+  let prev_dbg_metadata = fun_info.current_dbg_metadata in
+  fun_info.current_dbg_metadata
+    <- create_debug_location t fun_info.subprogram_dbg_metadata_id i.dbg;
+  Fun.protect
+    ~finally:(fun () -> fun_info.current_dbg_metadata <- prev_dbg_metadata)
+    (fun () ->
+      match i.desc with
+      | Never -> fail "terminator.Never"
+      | Always lbl -> br_label t lbl
+      | Parity_test { ifso; ifnot } ->
+        (* ifso -> even / ifnot -> odd, so labels are flipped *)
+        let cond = odd_test t i in
+        emit_ins_no_res t
+          (I.br_cond ~cond ~ifso:(V.of_label ifnot) ~ifnot:(V.of_label ifso))
+      | Truth_test { ifso; ifnot } ->
+        let cond = test t Itruetest i in
+        emit_ins_no_res t
+          (I.br_cond ~cond ~ifso:(V.of_label ifso) ~ifnot:(V.of_label ifnot))
+      | Return -> return t i
+      | Int_test { lt; eq; gt; is_signed; imm } ->
+        let open struct
+          type comp =
+            | Lt
+            | Gt
+        end in
+        let make_comp (comp : comp) : Cmm.integer_comparison =
+          match is_signed, comp with
+          | Signed, Lt -> Clt
+          | Signed, Gt -> Cgt
+          | Unsigned, Lt -> Cult
+          | Unsigned, Gt -> Cugt
+        in
+        let lt = V.of_label lt in
+        let eq = V.of_label eq in
+        let gt = V.of_label gt in
+        let ge = Cmm.new_label () |> V.of_label in
+        let is_lt = int_comp t (make_comp Lt) i ~imm in
+        emit_ins_no_res t (I.br_cond ~cond:is_lt ~ifso:lt ~ifnot:ge);
+        emit_label t ge;
+        let is_gt = int_comp t (make_comp Gt) i ~imm in
+        emit_ins_no_res t (I.br_cond ~cond:is_gt ~ifso:gt ~ifnot:eq)
+      | Float_test { width; lt; eq; gt; uo } ->
+        let typ = T.of_float_width width in
+        let lt = V.of_label lt in
+        let eq = V.of_label eq in
+        let gt = V.of_label gt in
+        let uo = V.of_label uo in
+        let ge = V.of_label (Cmm.new_label ()) in
+        let eq_or_uo = V.of_label (Cmm.new_label ()) in
+        let is_lt = float_comp t Cmm.CFlt i typ in
+        emit_ins_no_res t (I.br_cond ~cond:is_lt ~ifso:lt ~ifnot:ge);
+        emit_label t ge;
+        let is_gt = float_comp t Cmm.CFgt i typ in
+        emit_ins_no_res t (I.br_cond ~cond:is_gt ~ifso:gt ~ifnot:eq_or_uo);
+        emit_label t eq_or_uo;
+        let is_eq = float_comp t Cmm.CFeq i typ in
+        emit_ins_no_res t (I.br_cond ~cond:is_eq ~ifso:eq ~ifnot:uo)
+      | Switch labels ->
+        let discr = load_reg_to_temp ~typ:T.i64 t i.arg.(0) in
+        let default = V.of_label (Cmm.new_label ()) in
+        let branches =
+          List.mapi
+            (fun i label : I.switch_branch ->
+              { index = V.of_int i; label = V.of_label label })
+            (Array.to_list labels)
+        in
+        emit_ins_no_res t (I.switch ~discr ~default ~branches);
+        (* note: [Switch] does not take a default label, as switches are assumed
+           to be exhaustive. Since it is mandatory in LLVM, we will use a label
+           with an [unreachable] instruction for every instance of this
+           instruction. *)
+        emit_label t default;
+        emit_ins_no_res t I.unreachable
+      | Raise raise_kind -> raise_ t ~exn_handler:block.exn i raise_kind
+      | Call { op; label_after } ->
+        reject_addr_regs i.arg "call";
+        let exn_entry = exn_entry_for_block t block in
+        let unwind_label =
+          Option.map (fun _ -> V.of_label (Cmm.new_label ())) exn_entry
+        in
+        call ?unwind_label t i op;
+        br_label t label_after;
+        emit_unwind_landingpad_after t unwind_label exn_entry
+      | Tailcall_self { destination } -> tailcall_self t i destination
+      | Tailcall_func op ->
+        reject_addr_regs i.arg "tailcall func";
+        call ~tail:true t i op
+      | Call_no_return
+          { func_symbol; alloc; ty_args; stack_ofs; stack_align; _ } ->
+        let exn_entry = exn_entry_for_block t block in
+        let unwind_label =
+          Option.map (fun _ -> V.of_label (Cmm.new_label ())) exn_entry
+        in
+        extcall ?unwind_label t i ~func_symbol ~alloc ~ty_args ~stack_ofs
+          ~stack_align;
+        emit_ins_no_res t I.unreachable;
+        emit_unwind_landingpad_after t unwind_label exn_entry
+      | Prim { op; label_after } -> (
+        reject_addr_regs i.arg "prim";
+        match op with
+        | Probe _ -> not_implemented_terminator ~msg:"probe" i
+        | External { func_symbol; alloc; ty_args; stack_ofs; stack_align; _ } ->
+          let exn_entry = exn_entry_for_block t block in
+          let unwind_label =
+            Option.map (fun _ -> V.of_label (Cmm.new_label ())) exn_entry
+          in
+          extcall ?unwind_label t i ~func_symbol ~alloc ~ty_args ~stack_ofs
+            ~stack_align;
+          br_label t label_after;
+          emit_unwind_landingpad_after t unwind_label exn_entry)
+      | Invalid { message = _; stack_ofs; stack_align; label_after = _ } ->
+        extcall t i ~func_symbol:Cmm.caml_flambda2_invalid ~alloc:false
+          ~ty_args:[XInt] ~stack_ofs ~stack_align;
+        emit_ins_no_res t I.unreachable)
 
 (* Basic instructions *)
 
@@ -2655,7 +2791,7 @@ let load t (i : Cfg.basic Cfg.instruction) (memory_chunk : Cmm.memory_chunk)
   let ptr = load_address_from_reg t addr_mode i.arg.(0) |> cast_to_ptr t in
   let load_op typ =
     if is_atomic
-    then (
+    then
       match memory_chunk with
       | Word_int | Word_val ->
         emit_ins_no_res t (I.fence Acquire);
@@ -2665,7 +2801,7 @@ let load t (i : Cfg.basic Cfg.instruction) (memory_chunk : Cmm.memory_chunk)
       | Onetwentyeight_unaligned | Onetwentyeight_aligned
       | Twofiftysix_unaligned | Twofiftysix_aligned | Fivetwelve_unaligned
       | Fivetwelve_aligned ->
-        fail_msg ~name:"load" "unsupported atomic load chunk")
+        fail_msg ~name:"load" "unsupported atomic load chunk"
     else I.load ~ptr ~typ
   in
   let basic typ =
@@ -2709,15 +2845,14 @@ let store t (i : Cfg.basic Cfg.instruction) (memory_chunk : Cmm.memory_chunk)
     if is_modify
     then
       match Target_system.architecture (), memory_chunk with
-      | AArch64, (Word_int | Word_val) ->
-        emit_ins_no_res t (I.fence Acquire)
+      | AArch64, (Word_int | Word_val) -> emit_ins_no_res t (I.fence Acquire)
       | (IA32 | X86_64 | ARM | POWER | Z | Riscv), _
-      | AArch64, ( Byte_unsigned | Byte_signed | Sixteen_unsigned
-                 | Sixteen_signed | Thirtytwo_unsigned | Thirtytwo_signed
-                 | Single _ | Double | Onetwentyeight_unaligned
-                 | Onetwentyeight_aligned | Twofiftysix_unaligned
-                 | Twofiftysix_aligned | Fivetwelve_unaligned
-                 | Fivetwelve_aligned ) ->
+      | ( AArch64,
+          ( Byte_unsigned | Byte_signed | Sixteen_unsigned | Sixteen_signed
+          | Thirtytwo_unsigned | Thirtytwo_signed | Single _ | Double
+          | Onetwentyeight_unaligned | Onetwentyeight_aligned
+          | Twofiftysix_unaligned | Twofiftysix_aligned | Fivetwelve_unaligned
+          | Fivetwelve_aligned ) ) ->
         ()
   in
   emit_modify_store_barrier ();
@@ -3126,283 +3261,307 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
 
 let emit_basic t (i : Cfg.basic Cfg.instruction) =
   emit_comment t "%a" F.pp_dbg_instr_basic i;
-  match i.desc with
-  | Op op -> basic_op t i op
-  | Prologue | Epilogue | Reloadretaddr -> () (* LLVM handles these for us *)
-  | Stack_check { max_frame_size_bytes } -> stack_check t i max_frame_size_bytes
-  | Poptrap { lbl_handler } -> (
-    match Label.Tbl.find_opt (get_fun_info t).trap_blocks lbl_handler with
-    | None -> fail_msg "unbalanced trap pop"
-    | Some { trap_block; stacksave_ptr; _ } -> (
-      match Target_system.architecture () with
-      | Target_system.AArch64 ->
-        let exn_sp_ptr = load_domainstate_addr t Domain_exn_handler in
-        let trap_block = read_trap_pointer_register t in
-        let trap_block_ptr = cast t trap_block T.ptr in
-        let prev_exn_sp = emit_ins t (I.load ~ptr:trap_block_ptr ~typ:T.i64) in
-        emit_ins_no_res t (I.store ~ptr:exn_sp_ptr ~to_store:prev_exn_sp);
-        write_trap_pointer_register t prev_exn_sp
-      | Target_system.X86_64 -> (
-        (* Restore previous exn handler sp (top word on trap block) *)
-        let exn_sp_ptr = load_domainstate_addr t Domain_exn_handler in
-        let prev_exn_sp = emit_ins t (I.load ~ptr:trap_block ~typ:T.i64) in
-        emit_ins_no_res t (I.store ~ptr:exn_sp_ptr ~to_store:prev_exn_sp);
-        write_trap_pointer_register t prev_exn_sp;
-        (* Pop! *)
-        match stacksave_ptr with
-        | Some stacksave_ptr ->
-          call_llvm_intrinsic_no_res t "stackrestore" [stacksave_ptr]
-        | None -> fail_msg ~name:"poptrap" "missing stack save")
-      | Target_system.IA32 | Target_system.ARM | Target_system.POWER
-      | Target_system.Z | Target_system.Riscv ->
-        fail_msg ~name:"poptrap" "unsupported architecture for LLVM backend"))
-  | Pushtrap { lbl_handler } -> (
-    (* Exception control flow is implemented in a way that emulates setjmp in C.
-       Namely. we call a function that "returns twice", first falling through to
-       the try block, second when an exception happens. This ensures that LLVM
-       is aware of potential control flow to the handler so that it doesn't
-       eliminate it as dead code or does other funny things moving blocks
-       around.
+  let fun_info = get_fun_info t in
+  let prev_dbg_metadata = fun_info.current_dbg_metadata in
+  fun_info.current_dbg_metadata
+    <- create_debug_location t fun_info.subprogram_dbg_metadata_id i.dbg;
+  Fun.protect
+    ~finally:(fun () -> fun_info.current_dbg_metadata <- prev_dbg_metadata)
+    (fun () ->
+      match i.desc with
+      | Op op -> basic_op t i op
+      | Prologue | Epilogue | Reloadretaddr ->
+        () (* LLVM handles these for us *)
+      | Stack_check { max_frame_size_bytes } ->
+        stack_check t i max_frame_size_bytes
+      | Poptrap { lbl_handler } -> (
+        match Label.Tbl.find_opt (get_fun_info t).trap_blocks lbl_handler with
+        | None -> fail_msg "unbalanced trap pop"
+        | Some { trap_block; stacksave_ptr; _ } -> (
+          match Target_system.architecture () with
+          | Target_system.AArch64 ->
+            let exn_sp_ptr = load_domainstate_addr t Domain_exn_handler in
+            let trap_block = read_trap_pointer_register t in
+            let trap_block_ptr = cast t trap_block T.ptr in
+            let prev_exn_sp =
+              emit_ins t (I.load ~ptr:trap_block_ptr ~typ:T.i64)
+            in
+            emit_ins_no_res t (I.store ~ptr:exn_sp_ptr ~to_store:prev_exn_sp);
+            write_trap_pointer_register t prev_exn_sp
+          | Target_system.X86_64 -> (
+            (* Restore previous exn handler sp (top word on trap block) *)
+            let exn_sp_ptr = load_domainstate_addr t Domain_exn_handler in
+            let prev_exn_sp = emit_ins t (I.load ~ptr:trap_block ~typ:T.i64) in
+            emit_ins_no_res t (I.store ~ptr:exn_sp_ptr ~to_store:prev_exn_sp);
+            write_trap_pointer_register t prev_exn_sp;
+            (* Pop! *)
+            match stacksave_ptr with
+            | Some stacksave_ptr ->
+              call_llvm_intrinsic_no_res t "stackrestore" [stacksave_ptr]
+            | None -> fail_msg ~name:"poptrap" "missing stack save")
+          | Target_system.IA32 | Target_system.ARM | Target_system.POWER
+          | Target_system.Z | Target_system.Riscv ->
+            fail_msg ~name:"poptrap" "unsupported architecture for LLVM backend"
+          ))
+      | Pushtrap { lbl_handler } -> (
+        (* Exception control flow is implemented in a way that emulates setjmp
+           in C. Namely. we call a function that "returns twice", first falling
+           through to the try block, second when an exception happens. This
+           ensures that LLVM is aware of potential control flow to the handler
+           so that it doesn't eliminate it as dead code or does other funny
+           things moving blocks around.
 
-       The wrapper function follows the OCaml calling conventions to handle
-       spilling/reloading registers. Note that here, we assume spill locations
-       are consistent across calls within the try block. We could solidify this
-       assumption via using native instructions like [invoke] or [callbr].
+           The wrapper function follows the OCaml calling conventions to handle
+           spilling/reloading registers. Note that here, we assume spill
+           locations are consistent across calls within the try block. We could
+           solidify this assumption via using native instructions like [invoke]
+           or [callbr].
 
-       Due to an unfortunate series of interactions with LLVM (allocating after
-       the entry block causes LLVM to force the use of frame pointers, and it
-       fails to save RBP across OCaml calls when this happens), this only can
-       work with frame pointers enabled.
+           Due to an unfortunate series of interactions with LLVM (allocating
+           after the entry block causes LLVM to force the use of frame pointers,
+           and it fails to save RBP across OCaml calls when this happens), this
+           only can work with frame pointers enabled.
 
-       On x86_64, trap blocks allocated by this backend are 4 words wide, as
-       opposed to 2, to account for RBP (and padding for alignment). These two
-       words are placed below the normal trap block so that the top two words
-       are handled as expected by the runtime and functions compiled without the
-       LLVM backend. Pushtrap sets this up, while they get torn down at trap
-       handler entry. AArch64 instead stores the stack pointer to restore in the
-       third slot, avoiding dynamic allocas that force x29 as a frame pointer.
+           On x86_64, trap blocks allocated by this backend are 4 words wide, as
+           opposed to 2, to account for RBP (and padding for alignment). These
+           two words are placed below the normal trap block so that the top two
+           words are handled as expected by the runtime and functions compiled
+           without the LLVM backend. Pushtrap sets this up, while they get torn
+           down at trap handler entry. AArch64 instead stores the stack pointer
+           to restore in the third slot, avoiding dynamic allocas that force x29
+           as a frame pointer.
 
-       To recover RBP in the case of an exception, we can't put that bit of code
-       in the trap handler entry since things happen beforehand. So, we make
-       exceptions jump to some extra bit of asm written in the module-level that
-       recovers RBP. For it to know where to jump back, we have an extra global
-       variable where we write the code address for right after the [wrap_try]
-       call. *)
-    let wrap_try_res =
-      call_simple
-        ~attrs:[Returns_twice; Gc_leaf_function]
-        ~cc:Oxcaml t "wrap_try" [] [T.i64]
-    in
-    let after_wrap_try = V.of_label (Cmm.new_label ()) in
-    emit_ins_no_res t (I.br after_wrap_try);
-    emit_label t after_wrap_try;
-    (* Record labels here - runtime exceptions jump back to [after_wrap_try],
-       then branch to [exn_entry] with the same path as [wrap_try]'s second
-       return. *)
-    let try_label = V.of_label (Cmm.new_label ()) in
-    let exn_entry = V.of_label (Cmm.new_label ()) in
-    let fun_name =
-      E.get_fun_ident (get_fun_info t).emitter |> LL.Ident.to_string_hum
-    in
-    let label_name = LL.Ident.to_string_hum (V.get_ident_exn exn_entry) in
-    let recover_rbp_asm_ident =
-      LL.Ident.global (fun_name ^ ".recover_rbp_asm." ^ label_name)
-    in
-    let recover_rbp_var_ident =
-      LL.Ident.global (fun_name ^ ".recover_rbp_var." ^ label_name)
-    in
-    let exn_bucket =
-      match Target_system.architecture () with
-      | Target_system.AArch64 ->
+           To recover RBP in the case of an exception, we can't put that bit of
+           code in the trap handler entry since things happen beforehand. So, we
+           make exceptions jump to some extra bit of asm written in the
+           module-level that recovers RBP. For it to know where to jump back, we
+           have an extra global variable where we write the code address for
+           right after the [wrap_try] call. *)
         let wrap_try_res =
-          match wrap_try_res with
-          | [wrap_try_res] -> wrap_try_res
-          | _ -> Misc.fatal_error "wrap_try returned unexpected arity"
+          call_simple
+            ~attrs:[Returns_twice; Gc_leaf_function]
+            ~cc:Oxcaml t "wrap_try" [] [T.i64]
         in
-        let wrap_try_res_is_zero =
-          emit_ins t (I.icmp Ieq ~arg1:wrap_try_res ~arg2:(V.of_int 0))
+        let after_wrap_try = V.of_label (Cmm.new_label ()) in
+        emit_ins_no_res t (I.br after_wrap_try);
+        emit_label t after_wrap_try;
+        (* Record labels here - runtime exceptions jump back to
+           [after_wrap_try], then branch to [exn_entry] with the same path as
+           [wrap_try]'s second return. *)
+        let try_label = V.of_label (Cmm.new_label ()) in
+        let exn_entry = V.of_label (Cmm.new_label ()) in
+        let fun_name =
+          E.get_fun_ident (get_fun_info t).emitter |> LL.Ident.to_string_hum
         in
-        emit_ins_no_res t
-          (I.br_cond ~cond:wrap_try_res_is_zero ~ifso:try_label ~ifnot:exn_entry);
-        emit_label t exn_entry;
+        let label_name = LL.Ident.to_string_hum (V.get_ident_exn exn_entry) in
+        let recover_rbp_asm_ident =
+          LL.Ident.global (fun_name ^ ".recover_rbp_asm." ^ label_name)
+        in
+        let recover_rbp_var_ident =
+          LL.Ident.global (fun_name ^ ".recover_rbp_var." ^ label_name)
+        in
         let exn_bucket =
-          emit_ins t
-            (I.inline_asm ~asm:"mov $0, x0" ~constraints:"=r" ~args:[]
-               ~res_type:(Some T.i64) ~sideeffect:true)
+          match Target_system.architecture () with
+          | Target_system.AArch64 ->
+            let wrap_try_res =
+              match wrap_try_res with
+              | [wrap_try_res] -> wrap_try_res
+              | _ -> Misc.fatal_error "wrap_try returned unexpected arity"
+            in
+            let wrap_try_res_is_zero =
+              emit_ins t (I.icmp Ieq ~arg1:wrap_try_res ~arg2:(V.of_int 0))
+            in
+            emit_ins_no_res t
+              (I.br_cond ~cond:wrap_try_res_is_zero ~ifso:try_label
+                 ~ifnot:exn_entry);
+            emit_label t exn_entry;
+            let exn_bucket =
+              emit_ins t
+                (I.inline_asm ~asm:"mov $0, x0" ~constraints:"=r" ~args:[]
+                   ~res_type:(Some T.i64) ~sideeffect:true)
+            in
+            let ds = read_domainstate_pointer_register t in
+            let alloc = read_allocation_pointer_register t in
+            let exn_bucket =
+              let prev_exn_sp = read_trap_pointer_register t in
+              let exn_sp_ptr =
+                load_domainstate_addr ~ds_loc:ds t Domain_exn_handler
+              in
+              emit_ins_no_res t (I.store ~ptr:exn_sp_ptr ~to_store:prev_exn_sp);
+              emit_ins_no_res t
+                (I.inline_asm ~asm:""
+                   ~constraints:
+                     (String.concat ","
+                        [ "~{x0}";
+                          "~{x1}";
+                          "~{x2}";
+                          "~{x3}";
+                          "~{x4}";
+                          "~{x5}";
+                          "~{x6}";
+                          "~{x7}";
+                          "~{x8}";
+                          "~{x9}";
+                          "~{x10}";
+                          "~{x11}";
+                          "~{x12}";
+                          "~{x13}";
+                          "~{x14}";
+                          "~{x15}";
+                          "~{x16}";
+                          "~{x17}";
+                          "~{x19}";
+                          "~{x20}";
+                          "~{x21}";
+                          "~{x22}";
+                          "~{x23}";
+                          "~{x24}";
+                          "~{x25}";
+                          "~{memory}" ])
+                   ~args:[] ~res_type:T.Or_void.void ~sideeffect:true);
+              exn_bucket
+            in
+            emit_ins_no_res t (I.store ~ptr:domainstate_ptr ~to_store:ds);
+            emit_ins_no_res t (I.store ~ptr:allocation_ptr ~to_store:alloc);
+            emit_ins_no_res t (I.br (V.of_label lbl_handler));
+            emit_label t try_label;
+            exn_bucket
+          | Target_system.X86_64 ->
+            emit_ins_no_res t
+              (I.inline_asm ~asm:"movq $0, %rax" ~constraints:"r"
+                 ~args:wrap_try_res ~res_type:T.Or_void.void ~sideeffect:true);
+            emit_ins_no_res t (I.br exn_entry);
+            emit_label t exn_entry;
+            let exn_bucket =
+              emit_ins t
+                (I.inline_asm ~asm:"mov %rax, $0" ~constraints:"=r" ~args:[]
+                   ~res_type:(Some T.i64) ~sideeffect:true)
+            in
+            (* If it's nonzero, we have an exception. Otherwise, go to the try
+               block. *)
+            let exn_bucket_is_zero =
+              emit_ins t (I.icmp Ieq ~arg1:exn_bucket ~arg2:(V.of_int 0))
+            in
+            let exn_label = V.of_label lbl_handler in
+            emit_ins_no_res t
+              (I.br_cond ~cond:exn_bucket_is_zero ~ifso:try_label
+                 ~ifnot:exn_label);
+            emit_label t try_label;
+            exn_bucket
+          | Target_system.IA32 | Target_system.ARM | Target_system.POWER
+          | Target_system.Z | Target_system.Riscv ->
+            fail_msg ~name:"pushtrap"
+              "unsupported architecture for LLVM backend"
         in
-        let ds = read_domainstate_pointer_register t in
-        let alloc = read_allocation_pointer_register t in
-        let exn_bucket =
-          let prev_exn_sp = read_trap_pointer_register t in
-          let exn_sp_ptr =
-            load_domainstate_addr ~ds_loc:ds t Domain_exn_handler
+        (match Target_system.architecture () with
+        | Target_system.X86_64 | Target_system.AArch64 ->
+          (* Take the address of common entry and put it somewhere
+             accessible. *)
+          let recover_target =
+            match Target_system.architecture () with
+            | Target_system.AArch64 -> exn_entry
+            | Target_system.X86_64 -> exn_entry
+            | Target_system.IA32 | Target_system.ARM | Target_system.POWER
+            | Target_system.Z | Target_system.Riscv ->
+              Misc.fatal_error "unreachable"
           in
-          emit_ins_no_res t (I.store ~ptr:exn_sp_ptr ~to_store:prev_exn_sp);
           emit_ins_no_res t
-            (I.inline_asm ~asm:""
-               ~constraints:
-                 (String.concat ","
-                    [ "~{x0}";
-                      "~{x1}";
-                      "~{x2}";
-                      "~{x3}";
-                      "~{x4}";
-                      "~{x5}";
-                      "~{x6}";
-                      "~{x7}";
-                      "~{x8}";
-                      "~{x9}";
-                      "~{x10}";
-                      "~{x11}";
-                      "~{x12}";
-                      "~{x13}";
-                      "~{x14}";
-                      "~{x15}";
-                      "~{x16}";
-                      "~{x17}";
-                      "~{x19}";
-                      "~{x20}";
-                      "~{x21}";
-                      "~{x22}";
-                      "~{x23}";
-                      "~{x24}";
-                      "~{x25}";
-                      "~{memory}" ])
-               ~args:[] ~res_type:T.Or_void.void ~sideeffect:true);
-          exn_bucket
-        in
-        emit_ins_no_res t (I.store ~ptr:domainstate_ptr ~to_store:ds);
-        emit_ins_no_res t (I.store ~ptr:allocation_ptr ~to_store:alloc);
-        emit_ins_no_res t (I.br (V.of_label lbl_handler));
-        emit_label t try_label;
-        exn_bucket
-      | Target_system.X86_64 ->
-        emit_ins_no_res t
-          (I.inline_asm ~asm:"movq $0, %rax" ~constraints:"r" ~args:wrap_try_res
-             ~res_type:T.Or_void.void ~sideeffect:true);
-        emit_ins_no_res t (I.br exn_entry);
-        emit_label t exn_entry;
-        let exn_bucket =
-          emit_ins t
-            (I.inline_asm ~asm:"mov %rax, $0" ~constraints:"=r" ~args:[]
-               ~res_type:(Some T.i64) ~sideeffect:true)
-        in
-        (* If it's nonzero, we have an exception. Otherwise, go to the try
-           block. *)
-        let exn_bucket_is_zero =
-          emit_ins t (I.icmp Ieq ~arg1:exn_bucket ~arg2:(V.of_int 0))
-        in
-        let exn_label = V.of_label lbl_handler in
-        emit_ins_no_res t
-          (I.br_cond ~cond:exn_bucket_is_zero ~ifso:try_label ~ifnot:exn_label);
-        emit_label t try_label;
-        exn_bucket
-      | Target_system.IA32 | Target_system.ARM | Target_system.POWER
-      | Target_system.Z | Target_system.Riscv ->
-        fail_msg ~name:"pushtrap" "unsupported architecture for LLVM backend"
-    in
-    (match Target_system.architecture () with
-    | Target_system.X86_64 | Target_system.AArch64 ->
-      (* Take the address of common entry and put it somewhere accessible. *)
-      let recover_target =
-        match Target_system.architecture () with
-        | Target_system.AArch64 -> exn_entry
-        | Target_system.X86_64 -> exn_entry
+            (I.store
+               ~ptr:(V.of_ident ~typ:T.ptr recover_rbp_var_ident)
+               ~to_store:
+                 (V.blockaddress
+                    ~func:(E.get_fun_ident (get_fun_info t).emitter)
+                    ~block:(V.get_ident_exn recover_target)))
         | Target_system.IA32 | Target_system.ARM | Target_system.POWER
         | Target_system.Z | Target_system.Riscv ->
-          Misc.fatal_error "unreachable"
-      in
-      emit_ins_no_res t
-        (I.store
-           ~ptr:(V.of_ident ~typ:T.ptr recover_rbp_var_ident)
-           ~to_store:
-             (V.blockaddress
-                ~func:(E.get_fun_ident (get_fun_info t).emitter)
-                ~block:(V.get_ident_exn recover_target)))
-    | Target_system.IA32 | Target_system.ARM | Target_system.POWER
-    | Target_system.Z | Target_system.Riscv ->
-      fail_msg ~name:"pushtrap" "unsupported architecture for LLVM backend");
-    (* Allocate trap block on stack. It will get allocated at the top of the
-       stack. The layout is [prev_sp; handler_addr; frame_pointer_recovery;
-       padding] on targets where LLVM uses a frame pointer for spills. *)
-    let trap_block_type = trap_block_type () in
-    let stacksave_ptr, trap_block =
-      match Target_system.architecture () with
-      | Target_system.AArch64 ->
-        let trap_block =
-          match
-            Label.Tbl.find_opt (get_fun_info t).trap_block_allocas lbl_handler
-          with
-          | Some trap_block -> trap_block
-          | None -> fail_msg ~name:"pushtrap" "missing preallocated trap block"
+          fail_msg ~name:"pushtrap" "unsupported architecture for LLVM backend");
+        (* Allocate trap block on stack. It will get allocated at the top of the
+           stack. The layout is [prev_sp; handler_addr; frame_pointer_recovery;
+           padding] on targets where LLVM uses a frame pointer for spills. *)
+        let trap_block_type = trap_block_type () in
+        let stacksave_ptr, trap_block =
+          match Target_system.architecture () with
+          | Target_system.AArch64 ->
+            let trap_block =
+              match
+                Label.Tbl.find_opt (get_fun_info t).trap_block_allocas
+                  lbl_handler
+              with
+              | Some trap_block -> trap_block
+              | None ->
+                fail_msg ~name:"pushtrap" "missing preallocated trap block"
+            in
+            None, trap_block
+          | Target_system.X86_64 ->
+            let stacksave_ptr = call_llvm_intrinsic t "stacksave" [] T.ptr in
+            let trap_block =
+              emit_ins t (I.alloca ~count:(V.of_int 1) trap_block_type)
+            in
+            Some stacksave_ptr, trap_block
+          | Target_system.IA32 | Target_system.ARM | Target_system.POWER
+          | Target_system.Z | Target_system.Riscv ->
+            fail_msg ~name:"pushtrap"
+              "unsupported architecture for LLVM backend"
         in
-        None, trap_block
-      | Target_system.X86_64 ->
-        let stacksave_ptr = call_llvm_intrinsic t "stacksave" [] T.ptr in
-        let trap_block =
-          emit_ins t (I.alloca ~count:(V.of_int 1) trap_block_type)
+        (* Slots on the trap block *)
+        let rbp_slot = do_offset t trap_block T.ptr 16 in
+        let handler_slot = do_offset t trap_block T.ptr 8 in
+        let prev_sp_slot = do_offset t trap_block T.ptr 0 in
+        (* Push my trap block to the exn handler list. On arm64 the current
+           handler chain is authoritative in x26; Caml_state(exn_handler) is
+           only refreshed on runtime transitions. *)
+        let exn_sp_ptr = load_domainstate_addr t Domain_exn_handler in
+        let prev_exn_sp =
+          match Target_system.architecture () with
+          | Target_system.AArch64 -> read_trap_pointer_register t
+          | Target_system.X86_64 ->
+            emit_ins t (I.load ~ptr:exn_sp_ptr ~typ:T.i64)
+          | Target_system.IA32 | Target_system.ARM | Target_system.POWER
+          | Target_system.Z | Target_system.Riscv ->
+            fail_msg ~name:"pushtrap"
+              "unsupported architecture for LLVM backend"
         in
-        Some stacksave_ptr, trap_block
-      | Target_system.IA32 | Target_system.ARM | Target_system.POWER
-      | Target_system.Z | Target_system.Riscv ->
-        fail_msg ~name:"pushtrap" "unsupported architecture for LLVM backend"
-    in
-    (* Slots on the trap block *)
-    let rbp_slot = do_offset t trap_block T.ptr 16 in
-    let handler_slot = do_offset t trap_block T.ptr 8 in
-    let prev_sp_slot = do_offset t trap_block T.ptr 0 in
-    (* Push my trap block to the exn handler list. On arm64 the current handler
-       chain is authoritative in x26; Caml_state(exn_handler) is only refreshed
-       on runtime transitions. *)
-    let exn_sp_ptr = load_domainstate_addr t Domain_exn_handler in
-    let prev_exn_sp =
-      match Target_system.architecture () with
-      | Target_system.AArch64 -> read_trap_pointer_register t
-      | Target_system.X86_64 -> emit_ins t (I.load ~ptr:exn_sp_ptr ~typ:T.i64)
-      | Target_system.IA32 | Target_system.ARM | Target_system.POWER
-      | Target_system.Z | Target_system.Riscv ->
-        fail_msg ~name:"pushtrap" "unsupported architecture for LLVM backend"
-    in
-    emit_ins_no_res t (I.store ~ptr:exn_sp_ptr ~to_store:trap_block);
-    write_trap_pointer_register t trap_block;
-    (* Fill up the slots *)
-    let handler_addr =
-      match Target_system.architecture () with
-      | Target_system.X86_64 | Target_system.AArch64 ->
-        V.of_ident ~typ:T.ptr recover_rbp_asm_ident
-      | Target_system.IA32 | Target_system.ARM | Target_system.POWER
-      | Target_system.Z | Target_system.Riscv ->
-        fail_msg ~name:"pushtrap" "unsupported architecture for LLVM backend"
-    in
-    emit_ins_no_res t (I.store ~ptr:handler_slot ~to_store:handler_addr);
-    (match Target_system.architecture () with
-    | Target_system.X86_64 ->
-      emit_ins_no_res t
-        (I.inline_asm ~asm:"mov %rbp, ($0)" ~constraints:"r" ~args:[rbp_slot]
-           ~res_type:T.Or_void.void ~sideeffect:true)
-    | Target_system.AArch64 ->
-      let sp = read_stack_pointer t in
-      let trap_block_int = cast t trap_block T.i64 in
-      let restore_sp_delta =
-        emit_ins t (I.binary Sub ~arg1:sp ~arg2:trap_block_int)
-      in
-      emit_ins_no_res t (I.store ~ptr:rbp_slot ~to_store:restore_sp_delta)
-    | Target_system.IA32 | Target_system.ARM | Target_system.POWER
-    | Target_system.Z | Target_system.Riscv ->
-      fail_msg ~name:"pushtrap" "unsupported architecture for LLVM backend");
-    emit_ins_no_res t (I.store ~ptr:prev_sp_slot ~to_store:prev_exn_sp);
-    (* Save the trap block in [t] *)
-    match Label.Tbl.find_opt (get_fun_info t).trap_blocks lbl_handler with
-    | Some _ -> fail_msg "multiple pushtraps for the same handler"
-    | None ->
-      Label.Tbl.add (get_fun_info t).trap_blocks lbl_handler
-        { trap_block;
-          stacksave_ptr;
-          exn_bucket;
-          exn_entry;
-          recover_rbp_asm_ident;
-          recover_rbp_var_ident
-        })
+        emit_ins_no_res t (I.store ~ptr:exn_sp_ptr ~to_store:trap_block);
+        write_trap_pointer_register t trap_block;
+        (* Fill up the slots *)
+        let handler_addr =
+          match Target_system.architecture () with
+          | Target_system.X86_64 | Target_system.AArch64 ->
+            V.of_ident ~typ:T.ptr recover_rbp_asm_ident
+          | Target_system.IA32 | Target_system.ARM | Target_system.POWER
+          | Target_system.Z | Target_system.Riscv ->
+            fail_msg ~name:"pushtrap"
+              "unsupported architecture for LLVM backend"
+        in
+        emit_ins_no_res t (I.store ~ptr:handler_slot ~to_store:handler_addr);
+        (match Target_system.architecture () with
+        | Target_system.X86_64 ->
+          emit_ins_no_res t
+            (I.inline_asm ~asm:"mov %rbp, ($0)" ~constraints:"r"
+               ~args:[rbp_slot] ~res_type:T.Or_void.void ~sideeffect:true)
+        | Target_system.AArch64 ->
+          let sp = read_stack_pointer t in
+          let trap_block_int = cast t trap_block T.i64 in
+          let restore_sp_delta =
+            emit_ins t (I.binary Sub ~arg1:sp ~arg2:trap_block_int)
+          in
+          emit_ins_no_res t (I.store ~ptr:rbp_slot ~to_store:restore_sp_delta)
+        | Target_system.IA32 | Target_system.ARM | Target_system.POWER
+        | Target_system.Z | Target_system.Riscv ->
+          fail_msg ~name:"pushtrap" "unsupported architecture for LLVM backend");
+        emit_ins_no_res t (I.store ~ptr:prev_sp_slot ~to_store:prev_exn_sp);
+        (* Save the trap block in [t] *)
+        match Label.Tbl.find_opt (get_fun_info t).trap_blocks lbl_handler with
+        | Some _ -> fail_msg "multiple pushtraps for the same handler"
+        | None ->
+          Label.Tbl.add (get_fun_info t).trap_blocks lbl_handler
+            { trap_block;
+              stacksave_ptr;
+              exn_bucket;
+              exn_entry;
+              recover_rbp_asm_ident;
+              recover_rbp_var_ident
+            }))
 
 (* Cfg translation entry *)
 
@@ -3631,6 +3790,10 @@ let prepare_fun_info t (cfg : Cfg.t) =
   let arg_types = List.map T.of_reg arg_regs |> make_arg_types in
   let res_type = filter_ds_and_make_ret_type fun_ret_type in
   let attrs = fun_attrs ~has_try fun_codegen_options in
+  let dbg_metadata_id = create_debug_subprogram t ~fun_name fun_dbg in
+  let dbg_metadata =
+    Option.map (fun id -> Printf.sprintf "!dbg !%d" id) dbg_metadata_id
+  in
   let personality =
     match Target_system.architecture (), has_try with
     | Target_system.AArch64, true ->
@@ -3645,9 +3808,9 @@ let prepare_fun_info t (cfg : Cfg.t) =
   in
   let emitter =
     E.create ~name:fun_name ~args:arg_types ~res:(Some res_type) ~cc:Oxcaml
-      ~attrs ~personality ~dbg:fun_dbg ~private_:false
+      ~attrs ~personality ~dbg:fun_dbg ~dbg_metadata ~private_:false
   in
-  reset_fun_info t emitter;
+  reset_fun_info ?subprogram_dbg_metadata_id:dbg_metadata_id t emitter;
   let liveness = compute_liveness cfg in
   (get_fun_info t).liveness <- Some liveness;
   (get_fun_info t).fun_args <- fun_args;
@@ -4022,7 +4185,8 @@ let define_c_call_wrappers t =
       let emitter =
         E.create ~name:wrapper_name ~args:wrapper_arg_types
           ~res:(Some wrapper_res_type) ~cc:Oxcaml ~attrs:[Noinline]
-          ~personality:None ~dbg:Debuginfo.none ~private_:true
+          ~personality:None ~dbg:Debuginfo.none ~dbg_metadata:None
+          ~private_:true
       in
       reset_fun_info t emitter;
       let runtime_args, c_fun_args =
@@ -4058,7 +4222,7 @@ let define_wrap_try t =
   let emitter =
     E.create ~name:"wrap_try" ~args:arg_types ~res:(Some res_type) ~cc:Oxcaml
       ~attrs:[Returns_twice; Noinline] ~personality:None ~dbg:Debuginfo.none
-      ~private_:true
+      ~dbg_metadata:None ~private_:true
   in
   reset_fun_info t emitter;
   let runtime_args =
@@ -4285,7 +4449,19 @@ let write_module_metadata t =
   in
   F.pp_line t.ppf "";
   F.pp_line t.ppf {|!0 = !{ i32 1, !"oxcaml_module", !"%s" }|} module_name;
-  F.pp_line t.ppf {|!llvm.module.flags = !{ !0 }|}
+  let debug_module_flags = List.rev t.debug_module_flag_ids_rev in
+  let pp_module_flag_id ppf id = Format.fprintf ppf "!%d" id in
+  F.pp_line t.ppf {|!llvm.module.flags = !{ !0%a }|}
+    (fun ppf ids ->
+      List.iter (fun id -> Format.fprintf ppf ", %a" pp_module_flag_id id) ids)
+    debug_module_flags;
+  (match t.debug_compile_unit_id with
+  | None -> ()
+  | Some compile_unit_id ->
+    F.pp_line t.ppf {|!llvm.dbg.cu = !{!%d}|} compile_unit_id);
+  List.iter
+    (fun metadata_def -> F.pp_line t.ppf "%s" metadata_def)
+    (List.rev t.debug_metadata_defs_rev)
 
 let write_llvmir_to_file t =
   (match t.sourcefile with
