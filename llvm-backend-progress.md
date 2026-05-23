@@ -162,6 +162,9 @@ Put the OxCaml opam switch first in `PATH`.
 - AArch64 non-initializing `Word_int`/`Word_val` stores in LLVM now emit
   `fence acquire`, matching the native backend's `dmb ishld` before the store.
   Coverage is in `testsuite/tests/llvm-codegen/store_modify.ml`.
+- AArch64 atomic field loads in LLVM now emit `fence acquire` plus a `seq_cst`
+  LLVM atomic load, matching the native backend's `dmb ishld; ldar` final
+  assembly. Coverage is in `testsuite/tests/llvm-codegen/atomic_load.ml`.
 
 ## Test Harness Notes
 
