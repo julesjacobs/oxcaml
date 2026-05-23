@@ -2651,10 +2651,25 @@ let atomic t (i : Cfg.basic Cfg.instruction) (op : Cmm.atomic_op) ~size ~addr =
     store_into_reg t i.res.(0) selected
 
 let load t (i : Cfg.basic Cfg.instruction) (memory_chunk : Cmm.memory_chunk)
-    (addr_mode : Arch.addressing_mode) =
+    (addr_mode : Arch.addressing_mode) ~(is_atomic : bool) =
   let ptr = load_address_from_reg t addr_mode i.arg.(0) |> cast_to_ptr t in
+  let load_op typ =
+    if is_atomic
+    then (
+      match memory_chunk with
+      | Word_int | Word_val ->
+        emit_ins_no_res t (I.fence Acquire);
+        I.load_atomic ~ordering:Seq_cst ~ptr ~typ
+      | Byte_unsigned | Byte_signed | Sixteen_unsigned | Sixteen_signed
+      | Thirtytwo_unsigned | Thirtytwo_signed | Single _ | Double
+      | Onetwentyeight_unaligned | Onetwentyeight_aligned
+      | Twofiftysix_unaligned | Twofiftysix_aligned | Fivetwelve_unaligned
+      | Fivetwelve_aligned ->
+        fail_msg ~name:"load" "unsupported atomic load chunk")
+    else I.load ~ptr ~typ
+  in
   let basic typ =
-    let loaded = emit_ins t (I.load ~ptr ~typ) in
+    let loaded = emit_ins t (load_op typ) in
     store_into_reg t i.res.(0) loaded
   in
   let extend op ~from ~to_ =
@@ -2927,8 +2942,8 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
     store_into_reg t i.res.(0) vector
   | Const_vec256 _ | Const_vec512 _ -> not_implemented_basic ~msg:"const_vec" i
   (* CR yusumez: What do we do with mutability / is_atomic? *)
-  | Load { memory_chunk; addressing_mode; mutability = _; is_atomic = _ } ->
-    load t i memory_chunk addressing_mode
+  | Load { memory_chunk; addressing_mode; mutability = _; is_atomic } ->
+    load t i memory_chunk addressing_mode ~is_atomic
   | Store (memory_chunk, addressing_mode, is_modify) ->
     store t i memory_chunk addressing_mode ~is_modify
   | Intop op -> int_op t i op ~imm:None
