@@ -101,7 +101,7 @@ The ten audit areas are:
   existing `typing-local` suite passed under real LLVM use (`87` passed, `6`
   skipped, `0` failed), including stack-allocation variants, local mutation,
   exceptions, effects, region loops, and local-GC regression tests.
-- [ ] Copied-stack growth. Look for missed saved pointers, false positives, stale
+- [x] Copied-stack growth. Look for missed saved pointers, false positives, stale
    frame-pointer recovery, and interaction with LLVM spills.
   - Added `testsuite/tests/llvm-codegen/stack_growth.ml`, which compiles with
     `-llvm-backend`, runs an effect-handled non-tail-recursive computation, and
@@ -110,45 +110,24 @@ The ten audit areas are:
     LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed (`27` passed, `0` skipped,
     `0` failed), and the wrapper log recorded `2051` `-x ir` invocations with
     the fixed-register flags.
-  - Source audit: on arm64, `gc_regs` points at saved `x0`; the rewrite helper
-    scans the saved OCaml value GPR slots through `x25`, matching
-    `runtime/arm64.S`. The raw copied-stack scan runs after exception and C
-    stack-link rewrites, so it does not hide old-stack links from those typed
-    rewrites.
-  - Found and covered: the false-positive rewrite can be triggered. A raw
-    `nativeint#` initialized to the current stack base can be kept live across
-    stack growth; the arm64 LLVM fallback rewrites that raw word to the
-    corresponding address in the new stack, even though it is not a pointer.
-    Coverage is in `testsuite/tests/llvm-codegen/raw_stack_word.ml`; `make
-    llvm-test-one DIR=llvm-codegen LLVM_PATH=/tmp/oxcaml-clang-wrapper`
-    passed (`40` passed, `0` failed), with `2056` wrapper invocations
-    containing `-x ir`.
-  - Experiments show the conservative rewrite is not removable as a simple
-    fix. Disabling only copied-stack word rewriting still lets
-    `stack_growth.ml` pass, but `raw_stack_word.ml` fails because the saved-GPR
-    rewrite changes one copy of the raw value while an unrewritten copy remains
-    old. Disabling both copied-stack and saved-GPR rewriting crashes the
-    compiler build in Flambda2 simplification before tests run.
-  - Temporary env-gated runtime logging during
-    `make llvm-test-one DIR=llvm-codegen
-    LLVM_PATH=/tmp/oxcaml-clang-wrapper` showed real rewrites in both places:
-    early compiler/test execution rewrote saved register slot `8`, while
-    `effect_preemption.ml`, `exceptions.ml`, and `stack_growth.ml` rewrote many
-    copied stack slots plus saved register slots `16`, `18`, `19`, `20`, and
-    `22` (`x8`, `x19`, `x21`, `x22`, `x23`, and `x25` in the saved `gc_regs`
-    layout). The run intentionally failed because logging polluted
-    expected-empty compiler output; the source instrumentation was removed
-    afterward.
-  - LLVM audit: existing statepoint stack maps describe GC roots for frame
-    tables, and patchpoint liveness can describe live-out registers, but the
-    current prologue stack-growth check is target inline asm with no operands
-    and no metadata that distinguishes stack-address values from raw integer
-    words. Reusing the existing stackmap machinery would still need a new
-    producer for "these live locations contain OCaml stack addresses".
-  - Needed fix: replace the all-word copied-stack rewrite with precise
-    metadata for stack-address-bearing slots/registers, or otherwise arrange
-    that LLVM never preserves OCaml stack addresses in unreported raw locations
-    across stack growth.
+  - Native-backend comparison: stack reallocation relies on typed runtime
+    rewrites for exception/trap links, C stack links, and frame-pointer chains;
+    it does not scan every copied stack word as a possible stack pointer.
+  - Found and fixed: the arm64 runtime had an imprecise fallback that rewrote
+    every copied OCaml stack word and saved GPR whose bits happened to fall in
+    the old stack range. That is not a valid invariant: a raw `nativeint#` can
+    equal an old stack address without being a pointer. The fallback was
+    removed, leaving the typed rewrites used by the native backend.
+  - Coverage is in `testsuite/tests/llvm-codegen/raw_stack_word.ml`: a raw
+    `nativeint#` initialized to the current stack base is kept live across
+    stack growth and must remain unchanged. `stack_growth.ml` still covers
+    successful copied-stack growth.
+  - Verification with real LLVM use: `make llvm-test-one DIR=llvm-codegen
+    LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed (`52` passed, `0` failed),
+    with `2063` wrapper invocations containing `-x ir`; `make llvm-test-one
+    DIR=effects LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed (`127` passed,
+    `28` skipped, `0` failed), with `2073` wrapper invocations containing
+    `-x ir`.
 - [x] SIMD and vector memory operations. Check alignment, truncation/extension,
    calling convention, and unsupported sizes.
   - Source audit: LLVM lowering maps unaligned 128/256/512-bit memory chunks to
