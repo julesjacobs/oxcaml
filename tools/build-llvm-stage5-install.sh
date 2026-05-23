@@ -17,6 +17,7 @@ build_runtime=${BUILD_RUNTIME:-1}
 build_main=${BUILD_MAIN:-1}
 refresh_install=${REFRESH_INSTALL:-1}
 opam_switch_bin=${OPAM_SWITCH_BIN:-/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin}
+read -r -a dune_build_flags <<< "${DUNE_BUILD_FLAGS:-}"
 
 if [ -z "$arch" ]; then
   case "$(uname -m)" in
@@ -117,7 +118,8 @@ if [ "$build_runtime" = 1 ]; then
   : > /tmp/oxcaml-clang-wrapper.log
   RUNTIME_DIR=runtime ARCH="$arch" \
     dune build --root="$repo" --build-dir "$runtime_build" \
-      --workspace="$runtime_ws" "${runtime_targets[@]}"
+      --workspace="$runtime_ws" "${dune_build_flags[@]}" \
+      "${runtime_targets[@]}"
 
   runtime_lib="$runtime_build/install/runtime_stdlib/lib/ocaml_runtime_stdlib"
   require_path "$runtime_lib/stdlib.cmxa"
@@ -133,7 +135,7 @@ if [ "$build_main" = 1 ]; then
   RUNTIME_DIR=runtime ARCH="$arch" SYSTEM="$system" MODEL="$model" \
   ASPP="$aspp" ASPPFLAGS="$asppflags" \
     dune build --root="$repo" --build-dir "$main_build" \
-      --workspace="$main_ws" "${main_targets[@]}"
+      --workspace="$main_ws" "${dune_build_flags[@]}" "${main_targets[@]}"
 
   print_wrapper_counts main
 fi
