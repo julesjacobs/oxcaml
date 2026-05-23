@@ -27,6 +27,16 @@ Potential areas to audit next:
   call/handler paths.
 - [ ] Effect handlers. Effects stress stack switching, saved continuations, and
    non-local control flow.
+  - Non-preemption effects passed under real LLVM use:
+    `make llvm-test-one DIR=effects LLVM_PATH=/tmp/oxcaml-clang-wrapper`
+    reported `127` passed, `28` skipped, `0` failed, with `2073` wrapper
+    invocations containing `-x ir` and the fixed-register flags.
+  - The skipped tests are the preemption subdirectory, because this checkout's
+    `ocamltest_config` has `POLL_INSERTION=false`. A manual preemption attempt
+    with `-enable-poll-insertion` timed out on both LLVM and the native backend,
+    so it is not useful LLVM-specific evidence. Need either a poll-insertion
+    configured build or to cover preemption under the copied-stack/preemption
+    audit before marking this complete.
 - [ ] C calls that can allocate. Check statepoint roots and runtime register
    preservation around `caml_c_call`, `caml_c_call_stack_args`, callbacks, and
    blocking sections.
