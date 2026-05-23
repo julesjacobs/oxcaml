@@ -12,16 +12,22 @@ using that LLVM-built toolchain.
   for LLVM builds. It implies the LLVM boot-context setup, puts the configured
   Dune binary directory on `PATH` for Dune actions, and leaves default Make
   targets on the normal backend.
+- Stack-check investigation work was saved on
+  `jujacobs/llvm-stack-check-investigation-save` at `48e450fa4e`. The active
+  branch is back before that work at `9e64d1a3c2`.
 - `make llvm-test LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed the normal
   boot/runtime/main install plus full testsuite on arm64: `6599` passed, `287`
   skipped, `0` failed, `0` unexpected errors. The wrapper log recorded `4770`
   fresh `-x ir` compilations with the fixed-register flags.
-- `make llvm-self-stage2-test LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed the
-  repeat self-stage flow on arm64. It built `_llvm_self_stage_install`, rebuilt
-  `_llvm_self_stage2_install` from that LLVM-built compiler, then ran the broad
-  testsuite through the stage2 compiler with `-llvm-backend` forced. Results:
-  `6573` passed, `274` skipped, `0` failed, `0` unexpected errors; the test
-  phase recorded `2998` fresh `-x ir` compilations.
+- `make llvm-self-stage2-test LLVM_PATH=/tmp/oxcaml-clang-wrapper` currently
+  builds both LLVM self stages on arm64, but the broad stage2 testsuite is not
+  fully green. Latest run after reverting stack-check experiments: `6623`
+  passed, `274` skipped, `2` failed, `0` unexpected errors. The failures are
+  `tests/tail-call-many-returns/tail_call_many_returns.ml` crashing patched
+  LLVM during AArch64 instruction selection, and
+  `tests/typing-small-numbers/test_matching_native.ml` crashing `ocamlnat`
+  with `SIGTRAP`. The wrapper log recorded `6452` LLVM `-x ir` invocations
+  across the full command.
 - The self-stage scripts now avoid known false failures: boot workspaces are
   generated with the same Makefile LLVM boot-context rules instead of patched
   with `sed`, and staged tool wrappers are copied via their `.real` executable
@@ -36,10 +42,9 @@ using that LLVM-built toolchain.
   pointer field assignment still goes through `caml_modify`.
 
 The useful current capability is: an LLVM-built compiler can rebuild the
-compiler again and pass the broad non-asmgen/non-asmcomp testsuite on arm64 when
-`-llvm-backend` is forced. That includes effects, exceptions, callbacks,
-dynlink, Unix/Str/systhreads slices, statmemprof, unboxed products, layouts,
-local allocation, C stubs, weak/finalizer tests, and many compiler/tool tests.
+compiler again and pass almost all of the broad non-asmgen/non-asmcomp testsuite
+on arm64 when `-llvm-backend` is forced. The current blockers are small enough
+to isolate in the testsuite rather than by attempting another self-host run.
 
 Always verify real LLVM use by checking `/tmp/oxcaml-clang-wrapper.log` for
 `-x ir` plus the fixed-register flags:
@@ -319,6 +324,16 @@ Put the OxCaml opam switch first in `PATH`.
 - Main remaining design risks: effect/preemption control flow, precise
   copied-stack relocation, multidomain interactions, and the exact
   statepoint-to-frametable contract.
+- Current repeat-self-stage test blockers:
+  `tests/tail-call-many-returns/tail_call_many_returns.ml` crashes patched LLVM
+  in `DAGCombiner::visitSTORE`, and
+  `tests/typing-small-numbers/test_matching_native.ml` crashes `ocamlnat` with
+  `SIGTRAP` after printing the expected small-number match output.
+- `/tmp/oxcaml-clang-wrapper` currently points at
+  `/Users/julesjacobs/git/jujacobs/oxcaml-llvm/llvm-build/bin/clang`. A quick
+  retry with `/Users/julesjacobs/git/jujacobs/llvm-build-host-aarch64-copy10`
+  failed earlier during the boot compiler with a Flambda2 SEGV, so that LLVM
+  build is not the current known-good toolchain for this checkout.
 
 ## Next Checks
 
