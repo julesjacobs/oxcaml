@@ -174,7 +174,8 @@ Put the OxCaml opam switch first in `PATH`.
 - `-g -llvm-backend` currently supports OCaml frame-table debug metadata for
   backtraces, but not standard DWARF `.debug_*` sections or `.loc` directives.
   `testsuite/tests/llvm-codegen/dwarf_debug_info.ml` records that current
-  debugger-support gap.
+  debugger-support gap by comparing the same `-g -S` program against the native
+  backend, which emits `.file`/`.loc` on arm64 macOS.
 - Exception control-flow edges were audited for the current arm64 LLVM path.
   Potentially-raising calls under a trap lower to `invoke` plus `landingpad`,
   `wrap_try` is marked `returns_twice`, and a focused smoke test compiled with
@@ -227,8 +228,10 @@ Put the OxCaml opam switch first in `PATH`.
   pointer. `make llvm-test-one DIR=llvm-codegen
   LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed with the current-behavior
   regression included (`40` passed, `2056` real `-x ir` wrapper invocations).
-  This needs precise metadata or another design that only rewrites real stack
-  addresses.
+  Removing the broad rewrite is not enough: disabling copied-stack word
+  rewriting still leaves saved-GPR false positives, while disabling both
+  rewrites crashes the compiler build in Flambda2 simplification. This needs
+  precise metadata or another design that only rewrites real stack addresses.
 
 ## Test Harness Notes
 

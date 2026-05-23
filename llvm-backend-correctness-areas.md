@@ -120,6 +120,12 @@ The ten audit areas are:
     llvm-test-one DIR=llvm-codegen LLVM_PATH=/tmp/oxcaml-clang-wrapper`
     passed (`40` passed, `0` failed), with `2056` wrapper invocations
     containing `-x ir`.
+  - Experiments show the conservative rewrite is not removable as a simple
+    fix. Disabling only copied-stack word rewriting still lets
+    `stack_growth.ml` pass, but `raw_stack_word.ml` fails because the saved-GPR
+    rewrite changes one copy of the raw value while an unrewritten copy remains
+    old. Disabling both copied-stack and saved-GPR rewriting crashes the
+    compiler build in Flambda2 simplification before tests run.
   - Needed fix: replace the all-word copied-stack rewrite with precise
     metadata for stack-address-bearing slots/registers, or otherwise arrange
     that LLVM never preserves OCaml stack addresses in unreported raw locations
@@ -166,5 +172,10 @@ The ten audit areas are:
   - Found and covered: `-g -llvm-backend` currently emits OCaml frame-table
     debug metadata for backtraces, but not standard DWARF `.debug_*` sections
     or `.loc` directives for source-level debugger support. Coverage is in
-    `testsuite/tests/llvm-codegen/dwarf_debug_info.ml`; the test records the
-    current behavior with a CR note rather than marking this area complete.
+    `testsuite/tests/llvm-codegen/dwarf_debug_info.ml`; the test compiles the
+    same program through the native backend and LLVM backend, checks that the
+    native `-g -S` assembly has `.file`/`.loc`, and checks that the LLVM
+    assembly lacks equivalent source-debug markers. `make llvm-test-one
+    DIR=llvm-codegen LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed (`48`
+    passed, `0` failed), with `81` fresh wrapper invocations containing
+    `-x ir`.
