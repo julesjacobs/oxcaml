@@ -1,6 +1,6 @@
 # LLVM Backend Progress
 
-Last updated: 2026-05-22.
+Last updated: 2026-05-23.
 
 Goal: make the LLVM backend able to replace the native backend: build the
 compiler and required libraries with LLVM, then pass the compiler test suite
@@ -185,6 +185,15 @@ Put the OxCaml opam switch first in `PATH`.
   `-x ir` invocations. The skipped preemption tests require a poll-insertion
   configured build; a manual `-enable-poll-insertion` attempt also timed out on
   the native backend, so it was not LLVM-specific evidence.
+- Effect preemption now has focused LLVM coverage in
+  `testsuite/tests/llvm-codegen/effect_preemption.ml`: signal-driven
+  preemption, allocation across the preemption, major GC in the handler,
+  explicit `%poll` in a non-allocating loop, and continuation resume. Explicit
+  `%poll` and compiler-inserted polls both become `Operation.Poll`, and
+  `testsuite/tests/llvm-codegen/poll_statepoint.ml` verifies that `Poll` reaches
+  LLVM as a `caml_call_gc` poll statepoint. `make llvm-test-one DIR=llvm-codegen
+  LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed with this included (`48` passed,
+  `2061` real `-x ir` wrapper invocations).
 - Allocating C calls were audited. Focused IR inspection showed allocating
   externals lowering to `caml_c_call`/`caml_c_call_stack_args` with statepoints
   and live roots. LLVM test runs passed for `c-api` (`11` passed), `callback`
@@ -211,20 +220,6 @@ Put the OxCaml opam switch first in `PATH`.
   Cmm, and a focused SIMD smoke test plus `make llvm-test-one
   DIR=typing-layouts-vec128 LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed under
   real LLVM use.
-- DWARF/frame-table audit found a real compatibility gap: the custom LLVM
-  frametable printer only emits short frame descriptors. Large static frames
-  currently abort in LLVM codegen with
-  `[OxCamlGCPrinter] frame size requires long frames`; coverage is in
-  `testsuite/tests/llvm-codegen/long_frame.ml`. `make llvm-test-one
-  DIR=llvm-codegen LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed with the
-  regression included (`31` passed, `2052` real `-x ir` wrapper invocations).
-- Effect preemption now has focused LLVM coverage in
-  `testsuite/tests/llvm-codegen/effect_preemption.ml`: signal-driven
-  preemption, allocation across the preemption, major GC in the handler,
-  explicit `%poll` in a non-allocating loop, and continuation resume. `make
-  llvm-test-one DIR=llvm-codegen LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed
-  with this included (`40` passed, `2056` real `-x ir` wrapper invocations).
-  Full poll-insertion-configured preemption coverage is still open.
 - Copied-stack growth has a concrete open correctness issue. The arm64 LLVM
   fallback rewrites any copied stack word whose bits fall in the old stack
   range; `testsuite/tests/llvm-codegen/raw_stack_word.ml` shows that an
