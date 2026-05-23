@@ -126,6 +126,22 @@ The ten audit areas are:
     rewrite changes one copy of the raw value while an unrewritten copy remains
     old. Disabling both copied-stack and saved-GPR rewriting crashes the
     compiler build in Flambda2 simplification before tests run.
+  - Temporary env-gated runtime logging during
+    `make llvm-test-one DIR=llvm-codegen
+    LLVM_PATH=/tmp/oxcaml-clang-wrapper` showed real rewrites in both places:
+    early compiler/test execution rewrote saved register slot `8`, while
+    `effect_preemption.ml`, `exceptions.ml`, and `stack_growth.ml` rewrote many
+    copied stack slots plus saved register slots `16`, `18`, `19`, `20`, and
+    `22` (`x8`, `x19`, `x21`, `x22`, `x23`, and `x25` in the saved `gc_regs`
+    layout). The run intentionally failed because logging polluted
+    expected-empty compiler output; the source instrumentation was removed
+    afterward.
+  - LLVM audit: existing statepoint stack maps describe GC roots for frame
+    tables, and patchpoint liveness can describe live-out registers, but the
+    current prologue stack-growth check is target inline asm with no operands
+    and no metadata that distinguishes stack-address values from raw integer
+    words. Reusing the existing stackmap machinery would still need a new
+    producer for "these live locations contain OCaml stack addresses".
   - Needed fix: replace the all-word copied-stack rewrite with precise
     metadata for stack-address-bearing slots/registers, or otherwise arrange
     that LLVM never preserves OCaml stack addresses in unreported raw locations
@@ -169,6 +185,14 @@ The ten audit areas are:
     reported `67` passed, `6` skipped, `0` failed, with `2081` wrapper
     invocations containing `-x ir`; `DIR=backtrace-multifiles` reported `24`
     passed, `0` failed, with `2037` `-x ir` invocations.
+  - Added `testsuite/tests/llvm-codegen/allocation_frametable.ml`, which
+    compiles a small `-g -S -llvm-backend` program and checks the final
+    LLVM-generated frametable assembly, not just the LLVM IR. It verifies that
+    a combined allocation slow path emits allocation count `3`, per-allocation
+    size bytes `1, 2, 1` (`alloc_words - 2`), and source-file debug strings.
+    `make llvm-test-one DIR=llvm-codegen
+    LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed (`52` passed, `0` failed),
+    with `2063` wrapper invocations containing `-x ir`.
   - Found and covered: `-g -llvm-backend` currently emits OCaml frame-table
     debug metadata for backtraces, but not standard DWARF `.debug_*` sections
     or `.loc` directives for source-level debugger support. Coverage is in
