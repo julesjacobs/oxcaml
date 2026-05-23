@@ -175,6 +175,10 @@ Put the OxCaml opam switch first in `PATH`.
   `testsuite/tests/llvm-codegen/allocation_frametable.ml`: a small
   `-g -S -llvm-backend` program checks allocation count, per-allocation size
   bytes, and source-file debug strings in the emitted frametable.
+- LLVM poll statepoint metadata now has final-assembly coverage in
+  `testsuite/tests/llvm-codegen/poll_statepoint.ml`: the test checks both the
+  LLVM IR statepoint ID and the final poll frametable record encoded with zero
+  allocation entries.
 - `-g -llvm-backend` currently supports OCaml frame-table debug metadata for
   backtraces, but not standard DWARF `.debug_*` sections or `.loc` directives.
   `testsuite/tests/llvm-codegen/dwarf_debug_info.ml` records that current
