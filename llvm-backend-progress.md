@@ -210,11 +210,11 @@ Put the OxCaml opam switch first in `PATH`.
   regression included (`31` passed, `2052` real `-x ir` wrapper invocations).
 - Effect preemption now has focused LLVM coverage in
   `testsuite/tests/llvm-codegen/effect_preemption.ml`: signal-driven
-  preemption, allocation across the preemption, major GC in the handler, and
-  continuation resume. `make llvm-test-one DIR=llvm-codegen
-  LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed with this included (`36` passed,
-  `2054` real `-x ir` wrapper invocations). Full poll-insertion-configured
-  preemption coverage is still open.
+  preemption, allocation across the preemption, major GC in the handler,
+  explicit `%poll` in a non-allocating loop, and continuation resume. `make
+  llvm-test-one DIR=llvm-codegen LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed
+  with this included (`40` passed, `2056` real `-x ir` wrapper invocations).
+  Full poll-insertion-configured preemption coverage is still open.
 - Copied-stack growth has a concrete open correctness issue. The arm64 LLVM
   fallback rewrites any copied stack word whose bits fall in the old stack
   range; `testsuite/tests/llvm-codegen/raw_stack_word.ml` shows that an

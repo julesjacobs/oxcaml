@@ -13,6 +13,8 @@ open Effect.Deep
 
 external preempt_self : unit -> unit = "caml_domain_preempt_self" [@@noalloc]
 
+external poll : unit -> unit = "%poll"
+
 let with_preemption_setup f =
   Unix.setitimer Unix.ITIMER_REAL { it_interval = 0.001; it_value = 0.001 }
   |> ignore;
@@ -50,6 +52,32 @@ let () =
                 (fun (k : (a, _) continuation) ->
                   preempted := true;
                   Gc.full_major ();
+                  continue k ())
+            | _ -> None)
+      })
+
+let () =
+  let preempted = ref false in
+  let x = ref 0 in
+  with_preemption_setup (fun () ->
+    try_with
+      (fun () ->
+        let start_at = Sys.time () in
+        while not !preempted do
+          if Sys.time () -. start_at > 5.
+          then failwith "did not get poll preempted";
+          x := !x + 1;
+          poll ()
+        done;
+        if !x <= 0 then failwith "poll loop did not run")
+      ()
+      { effc =
+          (fun (type a) (e : a t) ->
+            match e with
+            | Preemption ->
+              Some
+                (fun (k : (a, _) continuation) ->
+                  preempted := true;
                   continue k ())
             | _ -> None)
       })
