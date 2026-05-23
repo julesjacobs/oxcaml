@@ -24,7 +24,11 @@ while [ "$search_dir" != "/" ]; do
 done
 
 if [ -z "$ocamlopt" ]; then
-  ocamlopt="_build/install/main/bin/ocamlopt.opt"
+  if [ -n "${OCAMLSRCDIR:-}" ] && [ -x "$OCAMLSRCDIR/ocamlopt.opt" ]; then
+    ocamlopt="$OCAMLSRCDIR/ocamlopt.opt"
+  else
+    ocamlopt="_build/install/main/bin/ocamlopt.opt"
+  fi
 fi
 
 cat > "$native_src" <<'EOF'
