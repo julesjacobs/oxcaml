@@ -434,13 +434,15 @@ module Instruction : sig
 
   val landingpad : typ:Type.t -> cleanup:bool -> op
 
-  val pp_t : ?comment:string -> Format.formatter -> t -> unit
+  val pp_t :
+    ?comment:string -> ?dbg_metadata:string -> Format.formatter -> t -> unit
 end
 
 module Function : sig
   type t
 
-  val add_instruction : ?comment:string -> t -> Instruction.t -> unit
+  val add_instruction :
+    ?comment:string -> ?dbg_metadata:string -> t -> Instruction.t -> unit
 
   val add_label_def : t -> Ident.t -> unit
 
@@ -457,6 +459,7 @@ module Function : sig
       }
 
     val create :
+      dbg_metadata:string option ->
       personality:Ident.t option ->
       name:string ->
       args:Type.t list ->
@@ -476,9 +479,15 @@ module Function : sig
     val get_fun_ident : t -> Ident.t
 
     val ins :
-      ?comment:string -> ?res_ident:Ident.t -> t -> Instruction.op -> Value.t
+      ?comment:string ->
+      ?dbg_metadata:string ->
+      ?res_ident:Ident.t ->
+      t ->
+      Instruction.op ->
+      Value.t
 
-    val ins_no_res : ?comment:string -> t -> Instruction.op -> unit
+    val ins_no_res :
+      ?comment:string -> ?dbg_metadata:string -> t -> Instruction.op -> unit
 
     val comment : t -> string -> unit
 
