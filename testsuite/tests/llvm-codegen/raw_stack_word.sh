@@ -78,13 +78,5 @@ if [ "$run_status" -eq 0 ]; then
   exit 0
 fi
 
-if grep -q "raw stack-looking nativeint# was rewritten" "$stderr_file"; then
-  # CR: This exhibits the current problem.  The arm64 LLVM stack-growth
-  # fallback rewrites any copied stack word that happens to look like an old
-  # stack address, even when that word is an unboxed nativeint# rather than a
-  # pointer.  The value changes to the corresponding address in the new stack.
-  exit 0
-fi
-
 cat "$stderr_file"
 exit "$run_status"
