@@ -12,8 +12,10 @@ Potential areas to audit next:
     atomics. Standard `Atomic.set`/`exchange`/CAS on arm64 currently goes
     through runtime helper calls because `Catomic` is unsupported by the arm64
     native backend.
-- [ ] Load mutability. LLVM lowering still ignores `mutability` and `is_atomic` on
-   loads, which may matter for TSAN, CSE assumptions, or memory-model behavior.
+- [x] Load mutability. LLVM lowering ignores final-load `mutability`, but this
+  matches the native final emitters. `mutability` is already consumed by CFG CSE
+  and vectorization before final lowering; final assembly selection does not need
+  a separate mutable-vs-immutable instruction.
 - [ ] Exception control-flow edges. Verify that raise paths are visible enough to
    LLVM, statepoints, and liveness.
 - [ ] Effect handlers. Effects stress stack switching, saved continuations, and
