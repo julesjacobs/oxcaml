@@ -215,6 +215,15 @@ Put the OxCaml opam switch first in `PATH`.
   LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed with this included (`36` passed,
   `2054` real `-x ir` wrapper invocations). Full poll-insertion-configured
   preemption coverage is still open.
+- Copied-stack growth has a concrete open correctness issue. The arm64 LLVM
+  fallback rewrites any copied stack word whose bits fall in the old stack
+  range; `testsuite/tests/llvm-codegen/raw_stack_word.ml` shows that an
+  unboxed `nativeint#` with those bits is rewritten even though it is not a
+  pointer. `make llvm-test-one DIR=llvm-codegen
+  LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed with the current-behavior
+  regression included (`40` passed, `2056` real `-x ir` wrapper invocations).
+  This needs precise metadata or another design that only rewrites real stack
+  addresses.
 
 ## Test Harness Notes
 
@@ -283,9 +292,9 @@ Put the OxCaml opam switch first in `PATH`.
   own `bin` directory. This makes the staged compiler find its staged stdlib by
   default, even though the baked `standard_library_default` still points at the
   top-level `_install`.
-- Main remaining design risks: effect/preemption control flow, runtime stack
-  switching, multidomain interactions, and the exact statepoint-to-frametable
-  contract.
+- Main remaining design risks: effect/preemption control flow, precise
+  copied-stack relocation, multidomain interactions, and the exact
+  statepoint-to-frametable contract.
 
 ## Next Checks
 

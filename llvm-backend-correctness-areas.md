@@ -94,10 +94,18 @@ The ten audit areas are:
     `runtime/arm64.S`. The raw copied-stack scan runs after exception and C
     stack-link rewrites, so it does not hide old-stack links from those typed
     rewrites.
-  - Still open: the current raw-word stack scan is conservative. A small manual
-    experiment with an unboxed `nativeint#` whose bits equal an OCaml-stack
-    address did not exhibit corruption, but that is not strong enough to rule
-    out all false-positive rewrites of non-pointer stack words.
+  - Found and covered: the false-positive rewrite can be triggered. A raw
+    `nativeint#` initialized to the current stack base can be kept live across
+    stack growth; the arm64 LLVM fallback rewrites that raw word to the
+    corresponding address in the new stack, even though it is not a pointer.
+    Coverage is in `testsuite/tests/llvm-codegen/raw_stack_word.ml`; `make
+    llvm-test-one DIR=llvm-codegen LLVM_PATH=/tmp/oxcaml-clang-wrapper`
+    passed (`40` passed, `0` failed), with `2056` wrapper invocations
+    containing `-x ir`.
+  - Needed fix: replace the all-word copied-stack rewrite with precise
+    metadata for stack-address-bearing slots/registers, or otherwise arrange
+    that LLVM never preserves OCaml stack addresses in unreported raw locations
+    across stack growth.
 - [x] SIMD and vector memory operations. Check alignment, truncation/extension,
    calling convention, and unsupported sizes.
   - Source audit: LLVM lowering maps unaligned 128/256/512-bit memory chunks to
