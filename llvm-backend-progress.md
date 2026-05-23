@@ -183,6 +183,11 @@ Put the OxCaml opam switch first in `PATH`.
   wrapper switching to `Domain_c_stack`, making the direct C call, switching
   back, and returning unchanged runtime registers. A noalloc C stub that raises
   is not a supported comparison point: native does not catch it either.
+- Local allocation was audited. `Begin_region`/`End_region` match the native
+  local-sp protocol, the local slow path calls `caml_call_local_realloc` as a GC
+  leaf, and focused IR showed local values live across a later `Gc.minor`
+  statepoint. `make llvm-test-one DIR=typing-local
+  LLVM_PATH=/tmp/oxcaml-clang-wrapper` passed (`87` passed, `6` skipped).
 
 ## Test Harness Notes
 
