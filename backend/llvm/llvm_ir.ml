@@ -576,6 +576,7 @@ module Instruction = struct
 
   type atomic_ordering =
     | Acquire
+    | Seq_cst
 
   type convert_op =
     (* Int *)
@@ -730,7 +731,9 @@ module Instruction = struct
     | Atomicrmw_xor -> "xor"
     | Atomicrmw_xchg -> "xchg"
 
-  let atomic_ordering_to_string = function Acquire -> "acquire"
+  let atomic_ordering_to_string = function
+    | Acquire -> "acquire"
+    | Seq_cst -> "seq_cst"
 
   type op =
     (* Terminator *)
@@ -811,6 +814,7 @@ module Instruction = struct
         { ptr : Value.t;
           typ : Type.t;
           volatile_ : bool;
+          atomic : atomic_ordering option;
           align : int option
         }
     | Store of
@@ -994,15 +998,19 @@ module Instruction = struct
 
   let load ~ptr ~typ =
     assert' "load" (Value.get_type ptr |> Type.is_ptr);
-    Load { ptr; typ; volatile_ = false; align = None }
+    Load { ptr; typ; volatile_ = false; atomic = None; align = None }
 
   let load_with_align ~align ~ptr ~typ =
     assert' "load_with_align" (Value.get_type ptr |> Type.is_ptr);
-    Load { ptr; typ; volatile_ = false; align = Some align }
+    Load { ptr; typ; volatile_ = false; atomic = None; align = Some align }
 
   let load_volatile ~ptr ~typ =
     assert' "load_volatile" (Value.get_type ptr |> Type.is_ptr);
-    Load { ptr; typ; volatile_ = true; align = None }
+    Load { ptr; typ; volatile_ = true; atomic = None; align = None }
+
+  let load_atomic ~ordering ~ptr ~typ =
+    assert' "load_atomic" (Value.get_type ptr |> Type.is_ptr);
+    Load { ptr; typ; volatile_ = false; atomic = Some ordering; align = Some 8 }
 
   let store ~ptr ~to_store =
     assert' "store" (Value.get_type ptr |> Type.is_ptr);
@@ -1146,13 +1154,22 @@ module Instruction = struct
         | None -> ()
       in
       ins_res "alloca %a%a" Type.pp_t typ pp_count ()
-    | Load { ptr; typ; volatile_; align } ->
+    | Load { ptr; typ; volatile_; atomic; align } ->
       let pp_align ppf = function
         | None -> ()
         | Some align -> fprintf ppf ", align %d" align
       in
-      ins_res "load %a%a, %a%a" (pp_str_if "volatile ") volatile_ Type.pp_t
-        typ Value.pp_t ptr pp_align align
+      let pp_atomic ppf = function
+        | None -> ()
+        | Some _ -> fprintf ppf "atomic "
+      in
+      let pp_ordering ppf = function
+        | None -> ()
+        | Some ordering -> fprintf ppf " %s" (atomic_ordering_to_string ordering)
+      in
+      ins_res "load %a%a%a, %a%a%a" (pp_str_if "volatile ") volatile_
+        pp_atomic atomic Type.pp_t typ Value.pp_t ptr pp_ordering atomic
+        pp_align align
     | Store { ptr; to_store; volatile_; align } ->
       let pp_align ppf = function
         | None -> ()
