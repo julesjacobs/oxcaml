@@ -153,3 +153,13 @@ The ten audit areas are:
     passed (`40` passed, `0` failed), and the wrapper log recorded `2057`
     `-x ir` invocations. A manual `-S` check showed `.short 32767` followed by
     `.long 67793`, `.long 4300`, and 32-bit live offsets in the frametable.
+  - Backtrace debug metadata passed under real LLVM use:
+    `make llvm-test-one DIR=backtrace LLVM_PATH=/tmp/oxcaml-clang-wrapper`
+    reported `67` passed, `6` skipped, `0` failed, with `2081` wrapper
+    invocations containing `-x ir`; `DIR=backtrace-multifiles` reported `24`
+    passed, `0` failed, with `2037` `-x ir` invocations.
+  - Found and covered: `-g -llvm-backend` currently emits OCaml frame-table
+    debug metadata for backtraces, but not standard DWARF `.debug_*` sections
+    or `.loc` directives for source-level debugger support. Coverage is in
+    `testsuite/tests/llvm-codegen/dwarf_debug_info.ml`; the test records the
+    current behavior with a CR note rather than marking this area complete.
