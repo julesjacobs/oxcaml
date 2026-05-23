@@ -11,7 +11,7 @@ let make_pair x y = x, y;;
 val make_pair : 'a -> 'b -> 'a * 'b = <fun>
 |}]
 
-[%%expect_llvm_ir AArch64{|define  oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__make_pair_0_1_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3) "oxcaml-stack-check"="true" noinline gc "oxcaml" {
+[%%expect_llvm_ir AArch64{|define  oxcaml_fpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__make_pair_0_1_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3) "oxcaml-stack-check"="true" noinline gc "oxcaml" {
   %ds = alloca i64
   store i64 %0, ptr %ds
   %alloc = alloca i64
@@ -39,7 +39,7 @@ L101:
   store i64 %13, ptr %16
   %17 = load i64, ptr %ds
   %18 = load i64, ptr %alloc
-  %19 = call oxcaml_nofpcc { { i64, i64 }, {  } } @"\01_c_call_wrapper.caml_debug_check_minor_heap.0..0"(i64 %17, i64 %18) "gc-leaf-function"="true"
+  %19 = call oxcaml_fpcc { { i64, i64 }, {  } } @"\01_c_call_wrapper.caml_debug_check_minor_heap.0..0"(i64 %17, i64 %18) "gc-leaf-function"="true"
   %20 = extractvalue { { i64, i64 }, {  } } %19, 0, 0
   %21 = extractvalue { { i64, i64 }, {  } } %19, 0, 1
   store i64 %20, ptr %ds
@@ -47,7 +47,7 @@ L101:
   %22 = load i64, ptr %alloc
   %23 = load i64, ptr %ds
   %24 = load i64, ptr %alloc
-  %25 = call oxcaml_nofpcc { { i64, i64 }, {  } } @"\01_c_call_wrapper.caml_debug_check_minor_heap_head.3.ptr.i64.i64.0"(i64 %23, i64 %24, i64 %22, i64 345357463, i64 5) "gc-leaf-function"="true"
+  %25 = call oxcaml_fpcc { { i64, i64 }, {  } } @"\01_c_call_wrapper.caml_debug_check_minor_heap_head.3.ptr.i64.i64.0"(i64 %23, i64 %24, i64 %22, i64 345357463, i64 5) "gc-leaf-function"="true"
   %26 = extractvalue { { i64, i64 }, {  } } %25, 0, 0
   %27 = extractvalue { { i64, i64 }, {  } } %25, 0, 1
   store i64 %26, ptr %ds
@@ -120,14 +120,15 @@ L105:
 Ltmp0:
 	mov	x30, x17
 	; InlineAsm End
-	sub	sp, sp, #16
+	stp	x29, x30, [sp, #-16]!           ; 16-byte Folded Spill
 	.cfi_def_cfa_offset 16
-	str	x30, [sp, #8]                   ; 8-byte Folded Spill
+	mov	x29, sp
 	.cfi_offset w30, -8
+	.cfi_offset w29, -16
 	sub	sp, sp, #16
 	.cfi_def_cfa_offset 32
-	str	x0, [sp, #16]
-	str	x1, [sp, #8]
+	str	x0, [sp, #8]
+	str	x1, [sp]
 	str	x27, [x28, #8]
 	bl	_c_call_wrapper.caml_debug_check_minor_heap.0..0
 	mov	x0, x27
@@ -144,14 +145,14 @@ Ltmp0:
 LBB0_1:                                 ; %L105
 	mov	w9, #2048
 	str	x9, [x8]
-	ldr	x9, [sp, #16]
+	ldr	x9, [sp, #8]
 	mov	x0, x8
 	str	x9, [x0, #8]!
-	ldr	x9, [sp, #8]
+	ldr	x9, [sp]
 	str	x9, [x8, #16]
 	mov	x28, x1
 	mov	x27, x8
-	ldr	x30, [sp, #24]                  ; 8-byte Folded Reload
+	ldp	x29, x30, [sp, #16]             ; 16-byte Folded Reload
 	add	sp, sp, #32
 	ret
 LBB0_2:                                 ; %L104

@@ -13,7 +13,7 @@ val add1 : int -> int = <fun>
 val sub1 : int -> int = <fun>
 |}]
 
-[%%expect_llvm_ir AArch64{|define  oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_camlTOP__add1_0_1_code"(i64 %0, i64 %1, i64 %2) "oxcaml-stack-check"="true" noinline gc "oxcaml" {
+[%%expect_llvm_ir AArch64{|define  oxcaml_fpcc { { i64, i64 }, { i64 } } @"\01_camlTOP__add1_0_1_code"(i64 %0, i64 %1, i64 %2) "oxcaml-stack-check"="true" noinline gc "oxcaml" {
   %ds = alloca i64
   store i64 %0, ptr %ds
   %alloc = alloca i64
@@ -41,7 +41,7 @@ L101:
   %16 = insertvalue { { i64, i64 }, { i64 } } %15, i64 %11, 1, 0
   ret { { i64, i64 }, { i64 } } %16
 }
-define  oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_camlTOP__sub1_2_3_code"(i64 %0, i64 %1, i64 %2) "oxcaml-stack-check"="true" noinline gc "oxcaml" {
+define  oxcaml_fpcc { { i64, i64 }, { i64 } } @"\01_camlTOP__sub1_2_3_code"(i64 %0, i64 %1, i64 %2) "oxcaml-stack-check"="true" noinline gc "oxcaml" {
   %ds = alloca i64
   store i64 %0, ptr %ds
   %alloc = alloca i64
