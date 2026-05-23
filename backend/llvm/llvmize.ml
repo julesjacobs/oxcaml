@@ -2688,8 +2688,24 @@ let load t (i : Cfg.basic Cfg.instruction) (memory_chunk : Cmm.memory_chunk)
   | Fivetwelve_aligned -> basic T.vec512
 
 let store t (i : Cfg.basic Cfg.instruction) (memory_chunk : Cmm.memory_chunk)
-    (addr_mode : Arch.addressing_mode) =
+    (addr_mode : Arch.addressing_mode) ~(is_modify : bool) =
   let ptr = load_address_from_reg t addr_mode i.arg.(1) |> cast_to_ptr t in
+  let emit_modify_store_barrier () =
+    if is_modify
+    then
+      match Target_system.architecture (), memory_chunk with
+      | AArch64, (Word_int | Word_val) ->
+        emit_ins_no_res t (I.fence Acquire)
+      | (IA32 | X86_64 | ARM | POWER | Z | Riscv), _
+      | AArch64, ( Byte_unsigned | Byte_signed | Sixteen_unsigned
+                 | Sixteen_signed | Thirtytwo_unsigned | Thirtytwo_signed
+                 | Single _ | Double | Onetwentyeight_unaligned
+                 | Onetwentyeight_aligned | Twofiftysix_unaligned
+                 | Twofiftysix_aligned | Fivetwelve_unaligned
+                 | Fivetwelve_aligned ) ->
+        ()
+  in
+  emit_modify_store_barrier ();
   let basic typ =
     let to_store = load_reg_to_temp ~typ t i.arg.(0) in
     emit_ins_no_res t (I.store ~ptr ~to_store)
@@ -2910,11 +2926,11 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
     in
     store_into_reg t i.res.(0) vector
   | Const_vec256 _ | Const_vec512 _ -> not_implemented_basic ~msg:"const_vec" i
-  (* CR yusumez: What do we do with mutability / is_atomic / is_modify? *)
+  (* CR yusumez: What do we do with mutability / is_atomic? *)
   | Load { memory_chunk; addressing_mode; mutability = _; is_atomic = _ } ->
     load t i memory_chunk addressing_mode
-  | Store (memory_chunk, addressing_mode, _is_modify) ->
-    store t i memory_chunk addressing_mode
+  | Store (memory_chunk, addressing_mode, is_modify) ->
+    store t i memory_chunk addressing_mode ~is_modify
   | Intop op -> int_op t i op ~imm:None
   | Int128op op -> int128_op t i op
   | Intop_imm (op, n) -> int_op t i op ~imm:(Some n)
