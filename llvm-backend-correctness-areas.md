@@ -56,8 +56,17 @@ Potential areas to audit next:
   API coverage passed under real LLVM use. A noalloc C stub that raises is not a
   useful LLVM-specific test: the native backend does not catch that exception
   either, so that behavior is outside the supported noalloc contract.
-- [ ] Local allocation and stack allocation. Check `Begin_region`, `End_region`,
-   `caml_modify_local`, and local roots under LLVM optimization.
+- [x] Local allocation and stack allocation. `Begin_region` loads
+  `Domain_local_sp`, `End_region` restores it, and local allocations update the
+  domain local stack fields before computing the local block address. The slow
+  path calls `caml_call_local_realloc` as a GC leaf; runtime inspection shows it
+  grows the local arena with stat allocation rather than OCaml heap GC, and the
+  assembly wrapper saves/restores all OCaml registers. A focused
+  `-keep-llvmir -dllvmir` compile showed `caml_call_local_realloc` on the local
+  slow path and a later `Gc.minor` statepoint with the local value live. The
+  existing `typing-local` suite passed under real LLVM use (`87` passed, `6`
+  skipped, `0` failed), including stack-allocation variants, local mutation,
+  exceptions, effects, region loops, and local-GC regression tests.
 - [ ] Copied-stack growth. Look for missed saved pointers, false positives, stale
    frame-pointer recovery, and interaction with LLVM spills.
 - [ ] SIMD and vector memory operations. Check alignment, truncation/extension,
