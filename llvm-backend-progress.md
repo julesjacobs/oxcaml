@@ -169,6 +169,12 @@ Put the OxCaml opam switch first in `PATH`.
   Potentially-raising calls under a trap lower to `invoke` plus `landingpad`,
   `wrap_try` is marked `returns_twice`, and a focused smoke test compiled with
   `-llvm-backend` ran correctly.
+- Non-preemption effect-handler tests passed under real LLVM use:
+  `make llvm-test-one DIR=effects LLVM_PATH=/tmp/oxcaml-clang-wrapper` reported
+  `127` passed, `28` skipped, `0` failed, and the wrapper log contained `2073`
+  `-x ir` invocations. The skipped preemption tests require a poll-insertion
+  configured build; a manual `-enable-poll-insertion` attempt also timed out on
+  the native backend, so it was not LLVM-specific evidence.
 
 ## Test Harness Notes
 
