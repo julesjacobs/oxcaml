@@ -2941,7 +2941,7 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
     in
     store_into_reg t i.res.(0) vector
   | Const_vec256 _ | Const_vec512 _ -> not_implemented_basic ~msg:"const_vec" i
-  (* CR yusumez: What do we do with mutability / is_atomic? *)
+  (* [mutability] is used by CFG optimizations before final lowering. *)
   | Load { memory_chunk; addressing_mode; mutability = _; is_atomic } ->
     load t i memory_chunk addressing_mode ~is_atomic
   | Store (memory_chunk, addressing_mode, is_modify) ->
