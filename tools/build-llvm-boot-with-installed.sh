@@ -11,6 +11,7 @@ wrapper=${LLVM_WRAPPER:-/tmp/oxcaml-clang-wrapper}
 opam_switch_bin=${OPAM_SWITCH_BIN:-/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin}
 arch=${ARCH:-}
 run_smoke=${RUN_SMOKE:-1}
+read -r -a dune_build_flags <<< "${DUNE_BUILD_FLAGS:-}"
 
 if [ -z "$arch" ]; then
   case "$(uname -m)" in
@@ -81,7 +82,7 @@ PATH="$stage0_install/bin:$opam_switch_bin:$PATH" \
 RUNTIME_DIR=runtime ARCH="$arch" SYSTEM="$system" MODEL="$model" \
 ASPP="$aspp" ASPPFLAGS="$asppflags" \
   "$opam_switch_bin/dune" build --root="$repo" --build-dir="$boot_build" \
-    --workspace="$boot_ws" "${targets[@]}"
+    --workspace="$boot_ws" "${dune_build_flags[@]}" "${targets[@]}"
 
 print_wrapper_counts boot
 
