@@ -15,6 +15,8 @@ Agent workspace created and goal defined. No implementation changes yet.
 - Agent state path: `agent-state/allocation-slow-path-roots`
 - Goal file defines the intended slow-path-only GC root materialization fix for
   LLVM backend heap allocation.
+- Goal file requires full LLVM backend test suite success, then stage2
+  validation success, before completion.
 
 ## Current Blocker
 

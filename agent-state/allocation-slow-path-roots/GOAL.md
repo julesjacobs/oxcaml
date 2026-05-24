@@ -31,6 +31,18 @@ Implement a native-like allocation shape:
   allocation fast path does not spill roots before the heap-limit branch, and
   updated expected-output files.
 
+## Validation
+
+Before marking the implementation complete:
+
+1. Run the full LLVM backend test suite and make it pass.
+2. Then run stage2 validation and make it pass.
+
+Use the standard installed compiler with `-llvm-backend` for focused
+reproducers during development. Use self-stage2 for the final full validation
+unless workspace instructions or later handoff notes specify a more exact
+command.
+
 ## Design Direction
 
 Prefer splitting two concepts that are currently conflated:
