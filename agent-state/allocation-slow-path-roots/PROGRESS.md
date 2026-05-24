@@ -4,7 +4,7 @@ Last updated: 2026-05-24.
 
 ## Current Claim
 
-Fresh agent workspace created. No claim yet.
+Agent workspace created and goal defined. No implementation changes yet.
 
 ## Evidence
 
@@ -13,11 +13,16 @@ Fresh agent workspace created. No claim yet.
 - Initial state commit: `831f10467c37`
 - Vendored LLVM path: `oxcaml/vendor/llvm-project`
 - Agent state path: `agent-state/allocation-slow-path-roots`
+- Goal file defines the intended slow-path-only GC root materialization fix for
+  LLVM backend heap allocation.
 
 ## Current Blocker
 
-Fill in `agent-state/allocation-slow-path-roots/GOAL.md`.
+None.
 
 ## Next Step
 
-Define the goal, then make the smallest focused change or reproducer.
+Run `eval "$(../../../scripts/agent-tmp-env)"`, reproduce the simple pair
+allocation fast-path root spills with the installed compiler and agent-local
+clang wrapper, then implement the smallest `llvmize.ml` change that moves root
+materialization out of the fast path while preserving GC root metadata.
