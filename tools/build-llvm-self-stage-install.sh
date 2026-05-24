@@ -11,6 +11,7 @@ self_runtime_build=${SELF_RUNTIME_BUILD:-$repo/_llvm_self_stage_runtime_build}
 self_main_build=${SELF_MAIN_BUILD:-$repo/_llvm_self_stage_main_build}
 self_stage_install=${SELF_STAGE_INSTALL:-$repo/_llvm_self_stage_install}
 wrapper=${LLVM_WRAPPER:-/tmp/oxcaml-clang-wrapper}
+wrapper_log=${LLVM_WRAPPER_LOG:-$wrapper.log}
 
 require_path () {
   if [ ! -e "$1" ]; then
@@ -36,9 +37,9 @@ copy_tool_file () {
 }
 
 print_wrapper_counts () {
-  fresh_ir=$(rg -c -- '-x ir' /tmp/oxcaml-clang-wrapper.log || true)
+  fresh_ir=$(rg -c -- '-x ir' "$wrapper_log" || true)
   if [ -z "$fresh_ir" ]; then fresh_ir=0; fi
-  printf '%s wrapper lines: %s\n' "$1" "$(wc -l < /tmp/oxcaml-clang-wrapper.log)"
+  printf '%s wrapper lines: %s\n' "$1" "$(wc -l < "$wrapper_log")"
   printf '%s fresh ir: %s\n' "$1" "$fresh_ir"
 }
 
@@ -86,7 +87,7 @@ let rec fib n = if n < 2 then n else fib (n - 1) + fib (n - 2)
 let () = Printf.printf "%d\n" (fib 10)
 EOF
 
-: > /tmp/oxcaml-clang-wrapper.log
+: > "$wrapper_log"
 OCAMLLIB="$self_stage_install/lib/ocaml" \
 OCAMLPARAM="_,llvm-backend=1,llvm-path=$wrapper" \
   "$self_stage_install/bin/ocamlopt.opt" -o "$tmpdir/main.exe" "$tmpdir/main.ml"
