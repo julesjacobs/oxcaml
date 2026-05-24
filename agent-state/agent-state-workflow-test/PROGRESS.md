@@ -9,7 +9,8 @@ Fresh agent workspace created. No claim yet.
 ## Evidence
 
 - OxCaml branch: `jujacobs/agent-state-workflow-test`
-- OxCaml PR: pending
+- OxCaml PR: https://github.com/julesjacobs/oxcaml/pull/4
+- Initial state commit: `d0b813531d1c`
 - Vendored LLVM path: `oxcaml/vendor/llvm-project`
 - Agent state path: `agent-state/agent-state-workflow-test`
 
