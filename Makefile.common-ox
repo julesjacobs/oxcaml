@@ -522,10 +522,7 @@ llvm-self-stage-test: llvm-self-stage-install
 	  tools/run-llvm-stage5-ocamltest.sh
 
 llvm-self-stage2-test: llvm-self-stage2-install
-	STAGE_INSTALL="$(ROOTDIR)/_llvm_self_stage2_install" \
-	  STAGE_BUILD="$(ROOTDIR)/_llvm_self_stage2_main_build" \
-	  FAKE_ROOT=/tmp/oxcaml-self-stage2-ocamltest-src \
-	  LIST=/tmp/oxcaml-self-stage2-all-minus-asm-list.txt \
+	SELF_STAGE=2 \
 	  LLVM_WRAPPER="$(or $(LLVM_PATH),/tmp/oxcaml-clang-wrapper)" \
 	  tools/run-llvm-stage5-ocamltest.sh
 
