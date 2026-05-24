@@ -3753,7 +3753,18 @@ let reg_listed_in_signature (reg : Reg.t) =
   | Stack (Local _ | Outgoing _ | Domainstate _) -> false
   | Unknown -> fail "reg_listed_in_signature"
 
-let fun_attrs ~has_try:_ codegen_options =
+let cfg_has_stack_check cfg =
+  Cfg.fold_body_instructions cfg
+    ~f:(fun has_stack_check i ->
+      has_stack_check
+      ||
+      match i.desc with
+      | Stack_check _ -> true
+      | Reloadretaddr | Prologue | Epilogue | Pushtrap _ | Poptrap _ | Op _ ->
+        false)
+    ~init:false
+
+let fun_attrs ~has_try:_ ~has_stack_check codegen_options =
   let open LL.Fn_attr in
   let safepoint_attrs =
     (* Statepoint IDs encode the active stack adjustment at the call site.
@@ -3763,7 +3774,8 @@ let fun_attrs ~has_try:_ codegen_options =
   let gc_attrs = [Gc gc_name] in
   let frame_pointer_attrs =
     match Target_system.architecture () with
-    | Target_system.AArch64 -> [Oxcaml_stack_check]
+    | Target_system.AArch64 ->
+      if has_stack_check then [Oxcaml_stack_check] else []
     | Target_system.IA32 | Target_system.X86_64 | Target_system.ARM
     | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
       []
@@ -3805,7 +3817,8 @@ let prepare_fun_info t (cfg : Cfg.t) =
   in
   let arg_types = List.map T.of_reg arg_regs |> make_arg_types in
   let res_type = filter_ds_and_make_ret_type fun_ret_type in
-  let attrs = fun_attrs ~has_try fun_codegen_options in
+  let has_stack_check = cfg_has_stack_check cfg in
+  let attrs = fun_attrs ~has_try ~has_stack_check fun_codegen_options in
   let dbg_metadata_id = create_debug_subprogram t ~fun_name fun_dbg in
   let dbg_metadata =
     Option.map (fun id -> Printf.sprintf "!dbg !%d" id) dbg_metadata_id
