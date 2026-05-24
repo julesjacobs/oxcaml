@@ -9,7 +9,8 @@ Fresh agent workspace created. No claim yet.
 ## Evidence
 
 - OxCaml branch: `jujacobs/allocation-slow-path-roots`
-- OxCaml PR: pending
+- OxCaml PR: https://github.com/julesjacobs/oxcaml/pull/9
+- Initial state commit: `831f10467c37`
 - Vendored LLVM path: `oxcaml/vendor/llvm-project`
 - Agent state path: `agent-state/allocation-slow-path-roots`
 
