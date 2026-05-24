@@ -4,7 +4,9 @@ Last updated: 2026-05-24.
 
 ## Current Claim
 
-Fresh agent workspace created. No claim yet.
+Goal defined. The first implementation task is to add and test an explicit
+CFG-required stack-check byte-count contract from `llvmize.ml` to AArch64 LLVM
+frame lowering.
 
 ## Evidence
 
@@ -16,8 +18,11 @@ Fresh agent workspace created. No claim yet.
 
 ## Current Blocker
 
-Fill in `agent-state/stack-check-size-contract/GOAL.md`.
+None.
 
 ## Next Step
 
-Define the goal, then make the smallest focused change or reproducer.
+Run `eval "$(../../../scripts/agent-tmp-env)"`, inspect the current LLVM stack
+check attributes in `backend/llvm/llvmize.ml` and
+`vendor/llvm-project/llvm/lib/Target/AArch64/AArch64FrameLowering.cpp`, then
+add the numeric byte-count attribute with focused tests.
