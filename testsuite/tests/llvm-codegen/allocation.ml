@@ -107,12 +107,7 @@ L105:
 	; InlineAsm Start
 	mov	x17, x30
 	ldr	x16, [x28, #40]
-	adrp	x30, _caml_plat_pagesize@GOTPAGE
-	ldr	x30, [x30, _caml_plat_pagesize@GOTPAGEOFF]
-	ldr	x30, [x30]
-	add	x16, x16, x30, lsl #1
-	mov	x30, #36
-	add	x16, x16, x30, lsl #3
+	add	x16, x16, #392
 	cmp	sp, x16
 	b.hs	Ltmp0
 	mov	x16, #36

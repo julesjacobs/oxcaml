@@ -904,18 +904,36 @@ static void emitOxCamlStackCheck(MachineBasicBlock &MBB,
     return;
 
   constexpr uint64_t StackThresholdWords = 32;
+  // Stack_ctx_words from runtime/caml/config.h on 64-bit targets.
+  constexpr uint64_t StackContextWords = 13;
   uint64_t RequiredWords = StackThresholdWords + alignTo(StackSizeInBytes, 8) / 8;
+  uint64_t LimitOffsetBytes = (StackContextWords + RequiredWords) * 8;
+  auto LoadScratchRegister = [](uint64_t Value) {
+    std::string Asm = "movz x30, #" + std::to_string(Value & 0xffff);
+    for (unsigned Shift = 16; Shift < 64; Shift += 16) {
+      uint64_t Chunk = (Value >> Shift) & 0xffff;
+      if (Chunk != 0)
+        Asm += "\n\tmovk x30, #" + std::to_string(Chunk) + ", lsl #" +
+               std::to_string(Shift);
+    }
+    return Asm;
+  };
+  std::string AddLimitOffset;
+  if (LimitOffsetBytes < 4096)
+    AddLimitOffset = "add x16, x16, #" + std::to_string(LimitOffsetBytes);
+  else if (LimitOffsetBytes % 4096 == 0 && LimitOffsetBytes / 4096 < 4096)
+    AddLimitOffset = "add x16, x16, #" +
+                     std::to_string(LimitOffsetBytes / 4096) + ", lsl #12";
+  else
+    AddLimitOffset = LoadScratchRegister(LimitOffsetBytes) +
+                     "\n\t"
+                     "add x16, x16, x30";
+
   std::string Asm =
       "mov x17, x30\n\t"
       "ldr x16, [x28, #40]\n\t"
-      "adrp x30, _caml_plat_pagesize@GOTPAGE\n\t"
-      "ldr x30, [x30, _caml_plat_pagesize@GOTPAGEOFF]\n\t"
-      "ldr x30, [x30]\n\t"
-      "add x16, x16, x30, lsl #1\n\t"
-      "mov x30, #" +
-      std::to_string(RequiredWords) +
+      + AddLimitOffset +
       "\n\t"
-      "add x16, x16, x30, lsl #3\n\t"
       "cmp sp, x16\n\t"
       "b.hs 9f\n\t"
       "mov x16, #" +
