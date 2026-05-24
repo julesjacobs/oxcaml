@@ -181,6 +181,10 @@ build-aux/ltmain.sh linguist-generated text eol=lf
 build-aux/missing linguist-generated text eol=lf
 build-aux/*.m4 linguist-vendored
 build-aux/ocaml_version.m4 -linguist-vendored linguist-language=M4Sugar
+
+# Vendored LLVM snapshot used by the LLVM backend integration branch.
+/vendor/llvm-project/** -text linguist-vendored typo.prune
+
 ocamltest/OCAMLTEST.org typo.long-line=may typo.missing-header
 stdlib/Compflags text eol=lf
 stdlib/hashbang -text
