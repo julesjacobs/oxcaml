@@ -33,72 +33,52 @@ L101:
   %12 = load ptr addrspace(1), ptr %6
   store volatile ptr addrspace(1) %12, ptr %8
   %13 = load i64, ptr %alloc
-  %14 = load i64, ptr %ds
-  %15 = add i64 %14, 8
+  %14 = sub i64 %13, 24
+  store i64 %14, ptr %alloc
+  %15 = load i64, ptr %ds
   %16 = inttoptr i64 %15 to ptr
-  store i64 %13, ptr %16
-  %17 = load i64, ptr %ds
-  %18 = load i64, ptr %alloc
-  %19 = call oxcaml_fpcc { { i64, i64 }, {  } } @"\01_c_call_wrapper.caml_debug_check_minor_heap.0..0"(i64 %17, i64 %18) "gc-leaf-function"="true"
-  %20 = extractvalue { { i64, i64 }, {  } } %19, 0, 0
-  %21 = extractvalue { { i64, i64 }, {  } } %19, 0, 1
-  store i64 %20, ptr %ds
-  store i64 %21, ptr %alloc
-  %22 = load i64, ptr %alloc
-  %23 = load i64, ptr %ds
-  %24 = load i64, ptr %alloc
-  %25 = call oxcaml_fpcc { { i64, i64 }, {  } } @"\01_c_call_wrapper.caml_debug_check_minor_heap_head.3.ptr.i64.i64.0"(i64 %23, i64 %24, i64 %22, i64 345357463, i64 5) "gc-leaf-function"="true"
-  %26 = extractvalue { { i64, i64 }, {  } } %25, 0, 0
-  %27 = extractvalue { { i64, i64 }, {  } } %25, 0, 1
-  store i64 %26, ptr %ds
-  store i64 %27, ptr %alloc
-  %28 = load i64, ptr %alloc
-  %29 = sub i64 %28, 24
-  store i64 %29, ptr %alloc
-  %30 = load i64, ptr %ds
-  %31 = inttoptr i64 %30 to ptr
-  %32 = load i64, ptr %31
-  %33 = icmp ule i64 %32, %29
-  %34 = call  i1 @llvm.expect.i1(i1 %33, i1 1)
-  br i1 %34, label %L105, label %L104
+  %17 = load i64, ptr %16
+  %18 = icmp ule i64 %17, %14
+  %19 = call  i1 @llvm.expect.i1(i1 %18, i1 1)
+  br i1 %19, label %L105, label %L104
 L104:
-  %35 = load i64, ptr %ds
-  %36 = load i64, ptr %alloc
-  %37 = call oxcaml_alloccc { { i64, i64 }, {  } } @"\01_caml_call_gc"(i64 %35, i64 %36) "statepoint-id"="196609" cold [ "deopt"(i64 1870160737, i64 1, i64 1, i64 3, i64 1, i64 1, i64 0, i64 20, i64 24, i64 0, i64 24, i64 0, i64 14, i64 5263188, i64 7155249, i64 6646625, i64 6385759, i64 29289), "gc-live"(ptr %7, ptr %8) ]
-  %38 = extractvalue { { i64, i64 }, {  } } %37, 0, 0
-  %39 = extractvalue { { i64, i64 }, {  } } %37, 0, 1
-  store i64 %38, ptr %ds
-  store i64 %39, ptr %alloc
+  %20 = load i64, ptr %ds
+  %21 = load i64, ptr %alloc
+  %22 = call oxcaml_alloccc { { i64, i64 }, {  } } @"\01_caml_call_gc"(i64 %20, i64 %21) "statepoint-id"="196609" cold [ "deopt"(i64 1870160737, i64 1, i64 1, i64 3, i64 1, i64 1, i64 0, i64 20, i64 24, i64 0, i64 24, i64 0, i64 14, i64 5263188, i64 7155249, i64 6646625, i64 6385759, i64 29289), "gc-live"(ptr %7, ptr %8) ]
+  %23 = extractvalue { { i64, i64 }, {  } } %22, 0, 0
+  %24 = extractvalue { { i64, i64 }, {  } } %22, 0, 1
+  store i64 %23, ptr %ds
+  store i64 %24, ptr %alloc
   br label %L105
 L105:
-  %40 = load i64, ptr %alloc
-  %41 = add i64 %40, 8
-  %42 = inttoptr i64 %41 to ptr addrspace(1)
-  store ptr addrspace(1) %42, ptr %9
-  %43 = load ptr addrspace(1), ptr %9
-  %44 = ptrtoint ptr addrspace(1) %43 to i64
-  %45 = add i64 %44, -8
-  %46 = inttoptr i64 %45 to ptr
-  store volatile i64 2048, ptr %46
-  %47 = load ptr addrspace(1), ptr %9
-  %48 = addrspacecast ptr addrspace(1) %47 to ptr
-  %49 = load volatile ptr addrspace(1), ptr %7
-  store ptr addrspace(1) %49, ptr %48
-  %50 = load ptr addrspace(1), ptr %9
-  %51 = ptrtoint ptr addrspace(1) %50 to i64
-  %52 = add i64 %51, 8
-  %53 = inttoptr i64 %52 to ptr
-  %54 = load volatile ptr addrspace(1), ptr %8
-  store ptr addrspace(1) %54, ptr %53
-  %55 = load ptr addrspace(1), ptr %9
-  store ptr addrspace(1) %55, ptr %5
-  %56 = load ptr addrspace(1), ptr %5
-  %57 = load i64, ptr %ds
-  %58 = load i64, ptr %alloc
-  %59 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %57, 0, 0
-  %60 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %59, i64 %58, 0, 1
-  %61 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %60, ptr addrspace(1) %56, 1, 0
-  ret { { i64, i64 }, { ptr addrspace(1) } } %61
+  %25 = load i64, ptr %alloc
+  %26 = add i64 %25, 8
+  %27 = inttoptr i64 %26 to ptr addrspace(1)
+  store ptr addrspace(1) %27, ptr %9
+  %28 = load ptr addrspace(1), ptr %9
+  %29 = ptrtoint ptr addrspace(1) %28 to i64
+  %30 = add i64 %29, -8
+  %31 = inttoptr i64 %30 to ptr
+  store volatile i64 2048, ptr %31
+  %32 = load ptr addrspace(1), ptr %9
+  %33 = addrspacecast ptr addrspace(1) %32 to ptr
+  %34 = load volatile ptr addrspace(1), ptr %7
+  store ptr addrspace(1) %34, ptr %33
+  %35 = load ptr addrspace(1), ptr %9
+  %36 = ptrtoint ptr addrspace(1) %35 to i64
+  %37 = add i64 %36, 8
+  %38 = inttoptr i64 %37 to ptr
+  %39 = load volatile ptr addrspace(1), ptr %8
+  store ptr addrspace(1) %39, ptr %38
+  %40 = load ptr addrspace(1), ptr %9
+  store ptr addrspace(1) %40, ptr %5
+  %41 = load ptr addrspace(1), ptr %5
+  %42 = load i64, ptr %ds
+  %43 = load i64, ptr %alloc
+  %44 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %42, 0, 0
+  %45 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %44, i64 %43, 0, 1
+  %46 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %45, ptr addrspace(1) %41, 1, 0
+  ret { { i64, i64 }, { ptr addrspace(1) } } %46
 }|}]
 
 [%%expect_llvm_asm AArch64{|_camlTOP__make_pair_0_1_code:
@@ -129,20 +109,12 @@ Ltmp0:
 	.cfi_def_cfa_offset 32
 	str	x0, [sp, #8]
 	str	x1, [sp]
-	str	x27, [x28, #8]
-	bl	_c_call_wrapper.caml_debug_check_minor_heap.0..0
-	mov	x0, x27
-	mov	x27, x0
-	mov	w1, #48279
-	movk	w1, #5269, lsl #16
-	mov	w2, #5
-	bl	_c_call_wrapper.caml_debug_check_minor_heap_head.3.ptr.i64.i64.0
-	mov	x1, x28
 	sub	x8, x27, #24
 	ldr	x9, [x28]
 	cmp	x9, x8
 	b.hi	LBB0_2
 LBB0_1:                                 ; %L105
+	mov	x1, x28
 	mov	w9, #2048
 	str	x9, [x8]
 	ldr	x9, [sp, #8]
@@ -156,11 +128,9 @@ LBB0_1:                                 ; %L105
 	add	sp, sp, #32
 	ret
 LBB0_2:                                 ; %L104
-	mov	x28, x1
 	mov	x27, x8
 	bl	_caml_call_gc
 Ltmp1:
 	mov	x8, x27
-	mov	x1, x28
 	b	LBB0_1
 	.cfi_endproc|}]
