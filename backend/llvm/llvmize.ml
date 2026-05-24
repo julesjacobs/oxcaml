@@ -3559,6 +3559,7 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
         in
         (* Slots on the trap block *)
         let rbp_slot = do_offset t trap_block T.ptr 16 in
+        let saved_fp_slot = do_offset t trap_block T.ptr 24 in
         let handler_slot = do_offset t trap_block T.ptr 8 in
         let prev_sp_slot = do_offset t trap_block T.ptr 0 in
         (* Push my trap block to the exn handler list. On arm64 the current
@@ -3599,7 +3600,13 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
           let restore_sp_delta =
             emit_ins t (I.binary Sub ~arg1:sp ~arg2:trap_block_int)
           in
-          emit_ins_no_res t (I.store ~ptr:rbp_slot ~to_store:restore_sp_delta)
+          emit_ins_no_res t (I.store ~ptr:rbp_slot ~to_store:restore_sp_delta);
+          if Config.with_frame_pointers
+          then
+            emit_ins_no_res t
+              (I.inline_asm ~asm:"str x29, [$0]" ~constraints:"r"
+                 ~args:[saved_fp_slot] ~res_type:T.Or_void.void
+                 ~sideeffect:true)
         | Target_system.IA32 | Target_system.ARM | Target_system.POWER
         | Target_system.Z | Target_system.Riscv ->
           fail_msg ~name:"pushtrap" "unsupported architecture for LLVM backend");
@@ -4309,13 +4316,16 @@ let define_restore_rbp t =
             [ "  adrp x16, " ^ recover_rbp_var;
               "  ldr x16, [x16, :lo12:" ^ recover_rbp_var ^ "]" ]
         in
+        let restore_fp =
+          if Config.with_frame_pointers then ["  ldr x29, [sp, #8]"] else []
+        in
         add_module_asm t
           ([ "  .text";
              recover_rbp_asm ^ ":";
              "  sub x16, sp, #16";
-             "  ldr x17, [sp]";
-             "  add sp, x16, x17" ]
-          @ load_target @ ["  br x16"]);
+             "  ldr x17, [sp]" ]
+          @ restore_fp
+          @ ["  add sp, x16, x17"] @ load_target @ ["  br x16"]);
         add_data_def t
           (LL.Data.external_ (LL.Ident.to_string_hum recover_rbp_asm_ident));
         add_data_def t
