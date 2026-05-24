@@ -114,9 +114,6 @@ bool caml_maybe_minor_gc_before_writes(mlsize_t count);
 extern int caml_debug_is_minor(value val);
 extern int caml_debug_is_major(value val);
 #endif
-extern void caml_debug_check_minor_heap(void);
-extern void caml_debug_check_minor_heap_head(value* young_ptr, uintnat func_hash,
-                                             uintnat instr_id);
 
 #define Ref_table_add(ref_table, x) do {                                \
     struct caml_ref_table* ref = (ref_table);                           \
