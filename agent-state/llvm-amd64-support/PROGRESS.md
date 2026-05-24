@@ -9,6 +9,10 @@ prologue now recognizes OxCaml stack-check functions and emits an AMD64
 prologue stack-growth slow path, and the AMD64 runtime now provides the
 matching no-OCaml-stack helper.
 
+The X86 prologue patch now also builds with this vendored LLVM snapshot and
+passes a direct `llc` prologue smoke test for a stack-frame-using
+`oxcaml_fpcc` function.
+
 ## Evidence
 
 - OxCaml branch: `jujacobs/llvm-amd64-support`
@@ -39,9 +43,26 @@ matching no-OCaml-stack helper.
     `Stack_overflow` via the no-push internal raise path on failure.
 - Validation done this turn:
   - `git diff --check` passed.
+  - Added local opam repository `tools/ci/local-opam` as `oxcaml-local`.
+  - Created switch `oxcaml-5.4.0+oxcaml` with
+    `ocaml-base-compiler.5.4.0+oxcaml`; installed `dune.3.20.2` and
+    `menhir.20231231`.
+  - `./configure --enable-frame-pointers` now succeeds in that switch.
+  - Stock `/usr/bin/llc` is not usable for this validation because it rejects
+    `oxcaml_fpcc` IR.
+  - Built patched vendored LLVM tools in
+    `/tmp/oxcaml-agent-llvm-amd64-support/llvm-build` with:
+    `cmake -S vendor/llvm-project/llvm -B /tmp/oxcaml-agent-llvm-amd64-support/llvm-build -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -DLLVM_TARGETS_TO_BUILD=X86 -DLLVM_ENABLE_PROJECTS= -DLLVM_ENABLE_ASSERTIONS=ON -DLLVM_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_BENCHMARKS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF -DCMAKE_CXX_FLAGS='-include cstdint'`
+    then
+    `cmake --build /tmp/oxcaml-agent-llvm-amd64-support/llvm-build --target llc opt -- -j8`.
+  - Fixed two X86 prologue patch issues found by the vendored LLVM build and a
+    direct `llc` test:
+    - `getOxCamlRuntimeSymbol` now uses `MachineFunction::getDataLayout()`
+      because this vendored LLVM snapshot has no `Function::getDataLayout()`.
+    - The inline asm immediate uses `$$` so LLVM's inline asm printer emits a
+      literal `$`.
   - Runtime assembly was preprocessed and assembled with temporary configured
-    `m.h`/`s.h` shims because `./configure` cannot complete in the current
-    opam switch:
+    `m.h`/`s.h` shims before the OCaml 5.4 switch was available:
     `gcc -E -x assembler-with-cpp -I /tmp/oxcaml-agent-llvm-amd64-support/include -I /tmp/oxcaml-agent-llvm-amd64-support/include/caml -I runtime -DSYS_linux runtime/amd64.S >/tmp/oxcaml-agent-llvm-amd64-support/amd64.S.pp`
     then
     `gcc -c -x assembler /tmp/oxcaml-agent-llvm-amd64-support/amd64.S.pp -o /tmp/oxcaml-agent-llvm-amd64-support/amd64.o`.
@@ -50,27 +71,40 @@ matching no-OCaml-stack helper.
   - A standalone AMD64 assembly snippet using the LLVM inline stack-check
     sequence assembled and produced the expected `R_X86_64_PLT32`
     relocation to `caml_llvm_prologue_realloc_stack`.
+  - Temporary wrapper:
+    `/tmp/oxcaml-agent-llvm-amd64-support/clang-wrapper`, log at
+    `/tmp/oxcaml-agent-llvm-amd64-support/clang-wrapper.log`. It dispatches
+    `-x ir -emit-llvm -S` to patched `opt`, `-x ir -S` to patched `llc`, and
+    assembly/object work to `/usr/bin/gcc`.
+  - Direct prologue smoke test:
+    `/tmp/oxcaml-agent-llvm-amd64-support/llvm-build/bin/llc -O3 -filetype=asm /tmp/oxcaml-agent-llvm-amd64-support/prologue.ll -o /tmp/oxcaml-agent-llvm-amd64-support/prologue.s`
+    emitted the stack check before `subq $72, %rsp`, with `%r10` carrying the
+    required words, `%r11` carrying the continuation label, and a relocation to
+    `caml_llvm_prologue_realloc_stack`. `/usr/bin/gcc -c` assembled it
+    successfully.
 - Validation attempted but blocked:
-  - `./configure --enable-frame-pointers` fails because the active compiler is
-    OCaml 4.14.2, while this tree requires OCaml 5.4.x.
-  - Direct `g++ -fsyntax-only` for `X86FrameLowering.cpp` cannot run from this
-    unconfigured checkout because generated LLVM headers such as
-    `X86GenRegisterInfo.inc` are unavailable.
+  - `DUNE_BUILD_FLAGS=-j1 ARCH=amd64 LLVM_PATH="$LLVM_PATH" make llvm-install`
+    fails immediately with the default `LLVM_BOOT_BACKEND=1` because this
+    fresh checkout has no `_install/lib/ocaml/Makefile.config`.
+  - Retrying with `LLVM_BOOT_BACKEND=0` gets into OCaml compilation but fails
+    before any LLVM wrapper invocation with unrelated source/generated-SIMD
+    errors:
+    `backend/amd64/simd_selection.ml`: unbound value `vpmulhrsw_Y_Y_Y`, and
+    `backend/llvm/llvmize.ml`: unbound module `Simd.Rounding_mode`.
 
 ## Current Blocker
 
-Focused compiler/test validation is blocked until the checkout is configured
-with an OCaml 5.4.x compiler and generated LLVM build headers are available.
-This is not a blocker for source work; it is the current blocker for running
-`llvm-install`/`llvm-test-one` in this checkout.
+Focused compiler/test validation is blocked by the `llvm-install` build
+failure above, after successful configure and vendored LLVM `llc`/`opt` build.
+This is not a blocker for source work; it blocks the standard
+`llvm-install`/`llvm-test-one` path in this checkout.
 
 ## Next Step
 
-Install or select an OCaml 5.4.x opam switch, rerun
-`./configure --enable-frame-pointers`, then build enough vendored LLVM/OxCaml
-state to run:
+Resolve the SIMD build mismatch or find the intended bootstrap target sequence
+for this checkout, then rerun:
 `DUNE_BUILD_FLAGS=-j1 ARCH=amd64 LLVM_PATH="$LLVM_PATH" make llvm-install`,
-followed by
+followed by:
 `ARCH=amd64 LLVM_PATH="$LLVM_PATH" make llvm-test-one TEST=llvm-codegen/arithmetic`.
 If that exposes an AMD64 lowering/runtime failure, reduce it before expanding
 the implementation.

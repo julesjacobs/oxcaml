@@ -51,7 +51,7 @@ static bool needsOxCamlStackCheck(const MachineFunction &MF) {
 
 static std::string getOxCamlRuntimeSymbol(const MachineFunction &MF,
                                           StringRef Name) {
-  char Prefix = MF.getFunction().getDataLayout().getGlobalPrefix();
+  char Prefix = MF.getDataLayout().getGlobalPrefix();
   if (Prefix == '\0')
     return Name.str();
   std::string Symbol(1, Prefix);
@@ -84,7 +84,7 @@ static void emitOxCamlStackCheck(MachineBasicBlock &MBB,
       "leaq -" + std::to_string(CheckBytes) + "(%rsp), %r10\n\t"
       "cmpq " + std::to_string(CurrentStackOffset) + "(%r14), %r10\n\t"
       "jae 9f\n\t"
-      "movq $" + std::to_string(RequiredWords) + ", %r10\n\t"
+      "movq $$" + std::to_string(RequiredWords) + ", %r10\n\t"
       "leaq 9f(%rip), %r11\n\t"
       "jmp " + ReallocStack + "\n"
       "9:";
