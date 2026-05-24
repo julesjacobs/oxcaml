@@ -11,6 +11,7 @@ only functions where the CFG stack-check pass inserted `Stack_check`.
 ## Current Scope
 
 - OxCaml branch: `jujacobs/allocation-debug-checks`
+- Active OxCaml PR: https://github.com/julesjacobs/oxcaml/pull/8
 - Agent state path: `agent-state/allocation-debug-checks`
 - Active goal recorded in `agent-state/allocation-debug-checks/GOAL.md`
 - Compare normal native backend assembly with normal `-llvm-backend` assembly.
@@ -92,6 +93,5 @@ only functions where the CFG stack-check pass inserted `Stack_check`.
 
 ## Next Step
 
-Review the diff, then commit and push the focused stack-check attribute fix and
-test. Continue with the preserved-root allocation fast-path spill candidate
-after this patch is reviewed or merged.
+Address review on PR 8. Continue with the preserved-root allocation fast-path
+spill candidate after this patch is reviewed or merged.
