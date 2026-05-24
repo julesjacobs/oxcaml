@@ -21,9 +21,8 @@ functionality.
     `caml_debug_check_minor_heap` or `caml_debug_check_minor_heap_head`.
   - `testsuite/tests/llvm-codegen/allocation.ml` was the only LLVM codegen
     expected-output test containing these helper calls.
-  - `runtime/minor_gc.c` and `runtime/caml/minor_gc.h` still contain no-op
-    helper definitions/declarations, but they are no longer referenced by LLVM
-    backend codegen or LLVM codegen tests.
+  - `runtime/minor_gc.c` and `runtime/caml/minor_gc.h` contained no-op
+    helper definitions/declarations after the initial codegen cleanup.
 - Native backend comparison:
   - `backend/amd64/emit.ml` and `backend/arm64/emit.ml` lower heap allocation
     by subtracting from the allocation pointer, comparing with
@@ -39,10 +38,14 @@ functionality.
     raises.
   - Updated `testsuite/tests/llvm-codegen/allocation.ml` expected IR/assembly
     to prove the default allocation path has no debug helper calls.
+  - Addressed PR review by removing the dead no-op runtime declarations and
+    definitions from `runtime/caml/minor_gc.h` and `runtime/minor_gc.c`.
 - Verification:
   - `rg -n "caml_debug_check_minor_heap(_head)?|debug_check_minor_heap|minor_heap_head|current_repro" backend/llvm testsuite/tests/llvm-codegen/allocation.ml testsuite/tests/llvm-codegen`
     finds no matches. This command is long; keep it as a single shell command
     when rerunning.
+  - `rg -n "caml_debug_check_minor_heap(_head)?" .` now finds only
+    goal/progress text, not source code or tests.
   - Direct compile with installed compiler and agent-local patched clang wrapper
     passed:
     `OCAMLPARAM="_,llvm-path=$LLVM_PATH" ./_install/bin/ocamlopt.opt -O3 -llvm-backend -keep-llvmir -S allocation.ml`.
@@ -58,6 +61,9 @@ functionality.
   - Focused expected-output check passed with the matching patched clang:
     `OCAMLPARAM="_,llvm-path=$LLVM_PATH" make promote-one-no-rebuild TEST=llvm-codegen/allocation.ml`
     after `unset LIST`.
+  - After addressing PR review, `make -s runtime` passed.
+  - After addressing PR review, the focused allocation expected-output check
+    passed again with the matching patched clang.
 - Test note:
   - `make promote-one TEST=llvm-codegen/allocation.ml` needed `LIST` unset
     because `agent-tmp-env` exports `LIST`.
