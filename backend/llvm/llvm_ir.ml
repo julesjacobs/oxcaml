@@ -856,6 +856,11 @@ module Instruction = struct
           cc : Calling_conventions.t;
           musttail : bool
         }
+    | Stackmap of
+        { id : Value.t;
+          shadow_bytes : Value.t;
+          args : Value.t list
+        }
     | Inline_asm of
         { asm : string;
           constraints : string;
@@ -911,6 +916,7 @@ module Instruction = struct
     (* Control flow *)
     | Select { ifso; _ } -> Some (Value.get_type ifso)
     | Call { res_type; _ } -> res_type
+    | Stackmap _ -> None
     | Inline_asm { res_type; _ } -> res_type
     (* Exception handling *)
     | Landingpad { typ; _ } -> Some typ
@@ -1056,6 +1062,11 @@ module Instruction = struct
        tail calls anymore and we'd need a statepoint there. So, we make LLVM
        skip `musttail` calls instead. *)
     Call { func; args; res_type; attrs; operand_bundles; cc; musttail }
+
+  let stackmap ~id ~shadow_bytes ~args =
+    assert' "stackmap" (Type.equal (Value.get_type id) Type.i64);
+    assert' "stackmap" (Type.equal (Value.get_type shadow_bytes) Type.i32);
+    Stackmap { id; shadow_bytes; args }
 
   let inline_asm ~args ~res_type ~asm ~constraints ~sideeffect =
     (* Similarly, it makes no sense to put statepoints for inline asm. *)
@@ -1233,6 +1244,15 @@ module Instruction = struct
       match res with
       | Some _ -> ins_res "%a" pp_call ()
       | None -> ins "%a" pp_call ())
+    | Stackmap { id; shadow_bytes; args } ->
+      let pp_args ppf args =
+        match args with
+        | [] -> ()
+        | args ->
+          fprintf ppf ", %a" (pp_print_list ~pp_sep:pp_comma Value.pp_t) args
+      in
+      ins "call void (i64, i32, ...) @llvm.experimental.stackmap(%a, %a%a)"
+        Value.pp_t id Value.pp_t shadow_bytes pp_args args
     | Inline_asm { args; res_type; asm; constraints; sideeffect; attrs } -> (
       let pp_call ppf () =
         fprintf ppf {|call %a asm %a "%s", "%s"(%a) %a|} Type.Or_void.pp_t

@@ -41,6 +41,16 @@ passes a direct `llc` prologue smoke test for a stack-frame-using
     OCaml registers in a `gc_regs` bucket, calling `caml_try_realloc_stack`
     from the C stack, restoring registers on success, and raising
     `Stack_overflow` via the no-push internal raise path on failure.
+  - `backend/amd64/simd_selection.ml` uses the generated AVX2
+    `vpmulhrsw_Y_Y_Ym256` selector for `caml_avx2_int16x16_mul_round`.
+  - `backend/llvm/llvm_ir.{ml,mli}` can now print
+    `llvm.experimental.stackmap` calls with optional live-root operands.
+  - `backend/llvm/llvmize.ml` now permits AMD64 stack checks, attaches
+    `oxcaml-stack-check` on AMD64 LLVM functions, emits an incremental
+    AMD64-specific `specific` lowering subset, and emits explicit stackmap
+    descriptors for non-tail indirect OCaml calls. This gets AMD64 buildability
+    further but is not a final multi-arch cleanup: the old ARM64-specific
+    `specific` body is temporarily commented out.
 - Validation done this turn:
   - `git diff --check` passed.
   - Added local opam repository `tools/ci/local-opam` as `oxcaml-local`.
@@ -82,28 +92,34 @@ passes a direct `llc` prologue smoke test for a stack-frame-using
     required words, `%r11` carrying the continuation label, and a relocation to
     `caml_llvm_prologue_realloc_stack`. `/usr/bin/gcc -c` assembled it
     successfully.
-- Validation attempted but blocked:
-  - `DUNE_BUILD_FLAGS=-j1 ARCH=amd64 LLVM_PATH="$LLVM_PATH" make llvm-install`
-    fails immediately with the default `LLVM_BOOT_BACKEND=1` because this
-    fresh checkout has no `_install/lib/ocaml/Makefile.config`.
-  - Retrying with `LLVM_BOOT_BACKEND=0` gets into OCaml compilation but fails
-    before any LLVM wrapper invocation with unrelated source/generated-SIMD
-    errors:
-    `backend/amd64/simd_selection.ml`: unbound value `vpmulhrsw_Y_Y_Y`, and
-    `backend/llvm/llvmize.ml`: unbound module `Simd.Rounding_mode`.
+  - `ARCH=amd64 OCAMLPARAM='_,ccopt=-no-pie,keep-llvmir=1'
+    BUILD_OCAMLPARAM='_,ccopt=-no-pie,keep-llvmir=1'
+    LLVM_PATH="$LLVM_PATH" LLVM_BOOT_BACKEND=0 make llvm-install` now gets
+    past the previous generated-SIMD typechecking mismatch, past PIE link
+    failures, and past the LLVM-built `tools/simdgen/simdgen.exe` startup
+    stack-scan crash.
+  - The wrapper log contains many `-x ir` invocations, confirming the patched
+    LLVM tools are being exercised.
+  - Manual reproduction of the former `simdgen.exe` blocker now succeeds:
+    `cd _build/main/tools/simdgen && ./simdgen.exe amd64` exits 0, writes
+    9,987 lines, and emits no stderr.
 
 ## Current Blocker
 
-Focused compiler/test validation is blocked by the `llvm-install` build
-failure above, after successful configure and vendored LLVM `llc`/`opt` build.
-This is not a blocker for source work; it blocks the standard
-`llvm-install`/`llvm-test-one` path in this checkout.
+Focused compiler/test validation now reaches later dynamic/shared artifact
+linking, then fails while linking `otherlibs/unix`/related artifacts with many
+undefined symbols such as `main`, `caml_call_gc`,
+`caml_call_local_realloc`, `caml_c_call`,
+`caml_llvm_prologue_realloc_stack`, and compiler/runtime symbols from stdlib
+and other libraries. This is after `simdgen.exe` successfully runs, so the
+previous missing-frame-descriptor blocker is cleared.
 
 ## Next Step
 
-Resolve the SIMD build mismatch or find the intended bootstrap target sequence
-for this checkout, then rerun:
-`DUNE_BUILD_FLAGS=-j1 ARCH=amd64 LLVM_PATH="$LLVM_PATH" make llvm-install`,
+Diagnose why the dynamic/shared-library link path is invoking the system linker
+without the runtime/compiler libraries or appropriate shared-library flags, then
+rerun:
+`ARCH=amd64 OCAMLPARAM='_,ccopt=-no-pie,keep-llvmir=1' BUILD_OCAMLPARAM='_,ccopt=-no-pie,keep-llvmir=1' LLVM_PATH="$LLVM_PATH" LLVM_BOOT_BACKEND=0 make llvm-install`,
 followed by:
 `ARCH=amd64 LLVM_PATH="$LLVM_PATH" make llvm-test-one TEST=llvm-codegen/arithmetic`.
 If that exposes an AMD64 lowering/runtime failure, reduce it before expanding

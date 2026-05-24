@@ -1038,6 +1038,27 @@ let gc_attr ?alloc_info ?safepoint ~can_call_gc t (i : 'a Cfg.instruction) =
     [Safepoint.attr safepoint]
   else [LL.Fn_attr.Gc_leaf_function]
 
+let has_gc_live_bundle bundles =
+  List.exists (fun (name, _) -> String.equal name "gc-live") bundles
+
+let gc_live_stackmap_args bundles =
+  List.find_map
+    (fun (name, args) -> if String.equal name "gc-live" then Some args else None)
+    bundles
+  |> Option.value ~default:[]
+
+let emit_stackmap_safepoint t (i : 'a Cfg.instruction) operand_bundles =
+  add_function_decl t
+    (LL.Fundecl.create_varargs "llvm.experimental.stackmap" [T.i64; T.i32] None);
+  let statepoint_id =
+    let stack_offset = statepoint_stack_offset t i in
+    Safepoint.(encode_statepoint_id (Call { stack_offset }))
+  in
+  emit_ins_no_res t
+    (I.stackmap ~id:(V.of_int ~typ:T.i64 statepoint_id)
+       ~shadow_bytes:(V.of_int ~typ:T.i32 0)
+       ~args:(gc_live_stackmap_args operand_bundles))
+
 (* Helpers for LLVM intrinsics *)
 
 let call_llvm_intrinsic_aux ~emit_ins t name args res_type =
@@ -1221,6 +1242,13 @@ let call ?(tail = false) ?unwind_label t (i : Cfg.terminator Cfg.instruction)
       call_operand_bundles t ~primitive_call:false ~raise_call:false i.dbg
         live_roots
   in
+  let needs_stackmap =
+    (not tail)
+    &&
+    match op with
+    | Indirect _ -> true
+    | Direct _ -> not (has_gc_live_bundle operand_bundles)
+  in
   let res =
     match unwind_label with
     | Some unwind_label when not tail ->
@@ -1237,6 +1265,7 @@ let call ?(tail = false) ?unwind_label t (i : Cfg.terminator Cfg.instruction)
         (I.call ~func ~args ~res_type ~attrs ~operand_bundles ~cc:Oxcaml
            ~musttail:tail)
   in
+  if needs_stackmap then emit_stackmap_safepoint t i operand_bundles;
   if tail
   then emit_ins_no_res t (I.ret res)
   else (
@@ -1887,6 +1916,58 @@ let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
   | "caml_rdpmc_unboxed" -> do_intrinsic_call "x86.rdpmc" [T.i32] T.i64
   | _ -> not_implemented_basic ~msg:"specific intrinsic" i
 
+let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
+  let int_arg n = load_reg_to_temp ~typ:T.i64 t i.arg.(n) in
+  let store_int_res value = store_into_reg t i.res.(0) value in
+  let store_i64_to_address addr base_arg value =
+    let ptr = load_address_from_reg t addr base_arg in
+    emit_ins_no_res t (I.store ~ptr ~to_store:value)
+  in
+  let float_arg typ n = load_reg_to_temp ~typ t i.arg.(n) in
+  let float_op : Arch.float_operation -> I.binary_op = function
+    | Ifloatadd -> Fadd
+    | Ifloatsub -> Fsub
+    | Ifloatmul -> Fmul
+    | Ifloatdiv -> Fdiv
+  in
+  let float_arith_mem width op addr =
+    let typ = T.of_float_width width in
+    let lhs = float_arg typ 0 in
+    let ptr = load_address_from_reg t addr i.arg.(1) in
+    let rhs = emit_ins t (I.load ~ptr ~typ) in
+    emit_ins t (I.binary (float_op op) ~arg1:lhs ~arg2:rhs)
+    |> store_into_reg t i.res.(0)
+  in
+  match[@warning "-fragile-match"] op with
+  | Ilea addr ->
+    load_address_from_reg t addr i.arg.(0) |> store_int_res
+  | Istore_int (n, addr, _is_modify) ->
+    store_i64_to_address addr i.arg.(0) (V.of_nativeint n)
+  | Ioffset_loc (n, addr) ->
+    let ptr = load_address_from_reg t addr i.arg.(0) in
+    let old_value = emit_ins t (I.load ~ptr ~typ:T.i64) in
+    let new_value =
+      emit_ins t (I.binary Add ~arg1:old_value ~arg2:(V.of_int n))
+    in
+    emit_ins_no_res t (I.store ~ptr ~to_store:new_value)
+  | Ifloatarithmem (width, op, addr) -> float_arith_mem width op addr
+  | Ibswap { bitwidth } -> bswap t i bitwidth
+  | Isextend32 ->
+    let narrowed = emit_ins t (I.convert Trunc ~arg:(int_arg 0) ~to_:T.i32) in
+    emit_ins t (I.convert Sext ~arg:narrowed ~to_:T.i64) |> store_int_res
+  | Izextend32 ->
+    let narrowed = emit_ins t (I.convert Trunc ~arg:(int_arg 0) ~to_:T.i32) in
+    emit_ins t (I.convert Zext ~arg:narrowed ~to_:T.i64) |> store_int_res
+  | Irdtsc -> call_llvm_intrinsic t "readcyclecounter" [] T.i64 |> store_int_res
+  | Irdpmc ->
+    let counter = emit_ins t (I.convert Trunc ~arg:(int_arg 0) ~to_:T.i32) in
+    call_llvm_intrinsic t "x86.rdpmc" [counter] T.i64 |> store_int_res
+  | Ilfence | Isfence | Imfence -> emit_ins_no_res t (I.fence Seq_cst)
+  | Illvm_intrinsic intrinsic_name -> intrinsic t i intrinsic_name
+  | Ipackf32 | Isimd _ | Isimd_mem _ | Icldemote _ | Iprefetch _ ->
+    not_implemented_basic ~msg:"specific" i
+
+(*
 let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
   let int_arg n = load_reg_to_temp ~typ:T.i64 t i.arg.(n) in
   let store_int_res value = store_into_reg t i.res.(0) value in
@@ -2754,6 +2835,7 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
   | Isimd (Simd.Roundq_f32 mode) -> simd_float_round Cmm.Float32 mode
   | Isimd (Simd.Roundq_f64 mode) -> simd_float_round Cmm.Float64 mode
   | _ -> not_implemented_basic ~msg:"specific" i
+*)
 
 (* CR yusumez: Implement atomic operations properly, since the current
    implementation is most likely incorrect. Check how the C++ memory model (or
@@ -3763,9 +3845,9 @@ let fun_attrs ~has_try:_ codegen_options =
   let gc_attrs = [Gc gc_name] in
   let frame_pointer_attrs =
     match Target_system.architecture () with
-    | Target_system.AArch64 -> [Oxcaml_stack_check]
-    | Target_system.IA32 | Target_system.X86_64 | Target_system.ARM
-    | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
+    | Target_system.AArch64 | Target_system.X86_64 -> [Oxcaml_stack_check]
+    | Target_system.IA32 | Target_system.ARM | Target_system.POWER
+    | Target_system.Z | Target_system.Riscv ->
       []
   in
   let codegen_attrs =
@@ -4332,9 +4414,9 @@ let init ~output_prefix ~ppf_dump =
     (Config.no_stack_checks
     ||
     match Target_system.architecture () with
-    | Target_system.AArch64 -> true
-    | Target_system.IA32 | Target_system.X86_64 | Target_system.ARM
-    | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
+    | Target_system.AArch64 | Target_system.X86_64 -> true
+    | Target_system.IA32 | Target_system.ARM | Target_system.POWER
+    | Target_system.Z | Target_system.Riscv ->
       false);
   fail_if_not ~msg:"runtime5 required" "init" Config.runtime5;
   let llvmir_filename = output_prefix ^ ".ll" in

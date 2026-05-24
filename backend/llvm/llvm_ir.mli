@@ -424,6 +424,8 @@ module Instruction : sig
     musttail:bool ->
     op
 
+  val stackmap : id:Value.t -> shadow_bytes:Value.t -> args:Value.t list -> op
+
   val inline_asm :
     args:Value.t list ->
     res_type:Type.Or_void.t ->
