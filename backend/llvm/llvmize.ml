@@ -1038,36 +1038,6 @@ let gc_attr ?alloc_info ?safepoint ~can_call_gc t (i : 'a Cfg.instruction) =
     [Safepoint.attr safepoint]
   else [LL.Fn_attr.Gc_leaf_function]
 
-let debug_check_minor_heap_head t (i : 'a Cfg.instruction) =
-  let wrapper_symbol =
-    add_c_call_wrapper t "caml_debug_check_minor_heap_head"
-      ~args:[T.ptr; T.i64; T.i64] ~res:[]
-  in
-  add_referenced_symbol t "caml_debug_check_minor_heap_head";
-  let fun_name =
-    E.get_fun_ident (get_fun_info t).emitter |> LL.Ident.to_string_hum
-  in
-  let func_hash = Hashtbl.hash fun_name in
-  let instr_id = InstructionId.to_int_unsafe i.id in
-  emit_comment t "minor heap head check func_hash=%d instr_id=%d function=%s"
-    func_hash instr_id fun_name;
-  let current_alloc_ptr = emit_ins t (I.load ~ptr:allocation_ptr ~typ:T.i64) in
-  call_simple
-    ~attrs:(gc_attr ~can_call_gc:false t i)
-    ~cc:Oxcaml t wrapper_symbol
-    [current_alloc_ptr; V.of_int func_hash; V.of_int instr_id]
-    []
-  |> ignore
-
-let debug_check_minor_heap_head_for_current_repro t i =
-  let fun_name =
-    E.get_fun_ident (get_fun_info t).emitter |> LL.Ident.to_string_hum
-  in
-  if
-    String.starts_with ~prefix:"camlEnv__find_name_and_locks" fun_name
-    || String.starts_with ~prefix:"camlIdent__find_name" fun_name
-  then debug_check_minor_heap_head t i
-
 (* Helpers for LLVM intrinsics *)
 
 let call_llvm_intrinsic_aux ~emit_ins t name args res_type =
@@ -1251,7 +1221,6 @@ let call ?(tail = false) ?unwind_label t (i : Cfg.terminator Cfg.instruction)
       call_operand_bundles t ~primitive_call:false ~raise_call:false i.dbg
         live_roots
   in
-  if not tail then debug_check_minor_heap_head_for_current_repro t i;
   let res =
     match unwind_label with
     | Some unwind_label when not tail ->
@@ -1530,7 +1499,6 @@ let raise_ t ~(exn_handler : Label.t option)
     (match Target_system.architecture () with
     | Target_system.X86_64 | Target_system.AArch64 ->
       add_referenced_symbol t raise_fn_name;
-      debug_check_minor_heap_head_for_current_repro t i;
       call_simple
         ~attrs:(gc_attr ~can_call_gc:true t i)
         ~dbg:i.dbg ~raise_call:true
@@ -1554,7 +1522,6 @@ let raise_ t ~(exn_handler : Label.t option)
     (match Target_system.architecture () with
     | Target_system.AArch64 ->
       add_referenced_symbol t "caml_raise_notrace";
-      debug_check_minor_heap_head_for_current_repro t i;
       call_simple ~attrs:[Gc_leaf_function] ~cc:Oxcaml t "caml_raise_notrace"
         [exn_bucket] []
       |> ignore
@@ -2993,18 +2960,6 @@ let local_alloc t (i : Cfg.basic Cfg.instruction) num_bytes =
 
 let heap_alloc ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction)
     num_bytes alloc_info =
-  let current_alloc_ptr = emit_ins t (I.load ~ptr:allocation_ptr ~typ:T.i64) in
-  let domain_young_ptr = load_domainstate_addr t Domain_young_ptr in
-  emit_ins_no_res t (I.store ~ptr:domain_young_ptr ~to_store:current_alloc_ptr);
-  let wrapper_symbol =
-    add_c_call_wrapper t "caml_debug_check_minor_heap" ~args:[] ~res:[]
-  in
-  add_referenced_symbol t "caml_debug_check_minor_heap";
-  call_simple
-    ~attrs:(gc_attr ~can_call_gc:false t i)
-    ~cc:Oxcaml t wrapper_symbol [] []
-  |> ignore;
-  debug_check_minor_heap_head t i;
   (* Make space on the minor heap *)
   let alloc_ptr = emit_ins t (I.load ~ptr:allocation_ptr ~typ:T.i64) in
   let new_alloc_ptr =

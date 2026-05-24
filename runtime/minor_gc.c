@@ -204,20 +204,6 @@ struct oldify_state {
   uintnat allocated_words;
 };
 
-void caml_debug_check_minor_heap(void)
-{
-  return;
-}
-
-void caml_debug_check_minor_heap_head(value* young_ptr, uintnat func_hash,
-                                      uintnat instr_id)
-{
-  (void)young_ptr;
-  (void)func_hash;
-  (void)instr_id;
-  return;
-}
-
 /* In-progress headers are zeros except for the lowest color bit set
    to 1. */
 #define In_progress_hd (Make_header(0, 0, 0x100))
