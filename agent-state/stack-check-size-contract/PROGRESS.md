@@ -8,7 +8,9 @@ Goal defined. The first implementation task is to add and test an explicit
 CFG-required stack-check byte-count contract from `llvmize.ml` to AArch64 LLVM
 frame lowering. The goal now defines the source of truth precisely: the value is
 the maximum `Cfg.Stack_check.max_frame_size_bytes` already present in the CFG,
-or `0` if there is no `Cfg.Stack_check`.
+or `0` if there is no `Cfg.Stack_check`. When stack checks are enabled, the
+attribute should be emitted explicitly even for `0`; absence is reserved for
+disabled stack checks.
 
 ## Evidence
 
@@ -26,8 +28,7 @@ None.
 ## Next Step
 
 Run `eval "$(../../../scripts/agent-tmp-env)"`, inspect the current LLVM stack
-check attributes in `backend/llvm/llvmize.ml` and
-`vendor/llvm-project/llvm/lib/Target/AArch64/AArch64FrameLowering.cpp`, then
-add the numeric byte-count attribute with focused tests. Do not invent stack
-sizes from source shape or final LLVM assembly; compare the attribute against
-the CFG `Stack_check` size.
+check attributes in `backend/llvm/llvmize.ml`, then add the numeric byte-count
+attribute with focused tests. Do not invent stack sizes from source shape or
+final LLVM assembly; compare the attribute against the CFG `Stack_check` size.
+Do not change AArch64 prologue sizing or omission policy in this first PR.

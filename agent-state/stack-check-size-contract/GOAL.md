@@ -48,27 +48,39 @@ up. Do not change the meaning of this contract in this PR.
    size for each generated function from `Cfg.Stack_check
    { max_frame_size_bytes }` instructions.
 
-2. Emit a numeric LLVM function attribute carrying that size, for example:
+2. Emit this numeric LLVM function attribute carrying that size:
 
    ```text
    "oxcaml-stack-check-bytes"="<n>"
    ```
 
-   The exact attribute name may change if there is a better local convention,
-   but it must be numeric and function-local.
+   The attribute must be function-local.
+
+   When stack checks are enabled, emit this attribute for every AArch64 LLVM
+   backend function that would currently receive the existing
+   `"oxcaml-stack-check"` request, including:
+
+   ```text
+   "oxcaml-stack-check-bytes"="0"
+   ```
+
+   for functions with no CFG `Stack_check`.
 
 3. Preserve the existing stack-check emission policy as much as possible. This
-   PR should establish the data contract, not remove stack checks broadly.
+   PR should establish the data contract, not remove stack checks broadly. In
+   particular, keep the existing `"oxcaml-stack-check"` request attribute under
+   the same conditions as before, except for respecting `Config.no_stack_checks`
+   as described below.
 
 4. Respect `Config.no_stack_checks`: when stack checks are disabled, do not emit
-   the new stack-check byte-count attribute or any equivalent stack-check
+   either `"oxcaml-stack-check-bytes"` or the existing `"oxcaml-stack-check"`
    request.
 
-5. In AArch64 LLVM frame lowering, parse the numeric attribute and consume it in
-   a way that tests can prove. If the implementation keeps the current emitted
-   sequence unchanged, add enough test visibility to prove LLVM read the value.
-   If the implementation uses the value in the existing prologue check size,
-   keep behavior conservative and document why it is safe.
+5. In AArch64 LLVM frame lowering, do not change stack-check sizing or omission
+   policy in this PR. It is acceptable to add parsing code for the new numeric
+   attribute only if doing so does not change emitted assembly. The required
+   observable contract for this PR is the LLVM IR attribute, not a changed
+   prologue sequence.
 
 6. Do not use this PR to change the stack-check policy from "current LLVM
    behavior" to "omit small leaf checks". That is the next PR.
@@ -83,20 +95,21 @@ insertion, not handwritten guesses. A good test should compare:
 ```text
 CFG dump:    stack_check size=N
 LLVM IR:     "oxcaml-stack-check-bytes"="N"
-LLVM output: evidence that AArch64 frame lowering parsed N, if this PR changes
-             frame lowering
 ```
 
-For functions with no CFG `Stack_check`, the expected value is `0` or an absent
-attribute, according to the chosen representation.
+For functions with no CFG `Stack_check`, the expected value is exactly:
+
+```text
+"oxcaml-stack-check-bytes"="0"
+```
 
 The tests must cover these cases:
 
 1. Small allocation-only leaf function
    - CFG source of truth: no `Cfg.Stack_check`.
-   - Expected contract value: `0` or absent.
-   - The test must prove the new byte-count contract represents this as zero or
-     absent, according to the chosen representation.
+   - Expected contract value: exactly `"oxcaml-stack-check-bytes"="0"`.
+   - This proves enabled stack-check plumbing can distinguish "enabled with CFG
+     size zero" from "stack checks disabled".
 
 2. Function with a non-tail call
    - CFG source of truth: at least one `Cfg.Stack_check { max_frame_size_bytes
@@ -114,10 +127,18 @@ The tests must cover these cases:
    - If the CFG value does not cover the outgoing stack-argument adjustment,
      record the mismatch in `PROGRESS.md` and leave the accounting fix to a
      separate follow-up.
+   - This characterization test should not fail solely because CFG undercounts
+     the outgoing stack-argument adjustment. It should fail if the LLVM
+     attribute differs from the CFG value.
 
 4. `-no-stack-checks`
-   - The test must prove the new attribute is absent and disabled stack-check
-     behavior is preserved.
+   - If the test harness can build or run with `Config.no_stack_checks = true`,
+     prove both `"oxcaml-stack-check-bytes"` and `"oxcaml-stack-check"` are
+     absent and disabled stack-check behavior is preserved.
+   - If the current local harness cannot directly exercise
+     `Config.no_stack_checks`, record that in `PROGRESS.md` and add the smallest
+     available source-level or unit-style check instead. Do not spend this PR
+     inventing a large harness just for this build-time configuration.
 
 These tests should fail if the backend only tracks a boolean. They should also
 fail if the LLVM attribute differs from the CFG `Stack_check` size.
@@ -127,7 +148,7 @@ fail if the LLVM attribute differs from the CFG `Stack_check` size.
 The PR must make the later optimization mechanically possible.
 
 In either tests, comments, or a short note in `PROGRESS.md`, show that the new
-contract exposes the inputs needed for the later rule:
+contract exposes the inputs needed for this intended next policy sketch:
 
 ```text
 required_bytes = max(final_static_llvm_frame_bytes, cfg_required_stack_check_bytes)
