@@ -737,6 +737,34 @@ Make_call_realloc_stack(_sse, XMM)
 Make_call_realloc_stack(_avx, YMM)
 Make_call_realloc_stack(_avx512, ZMM)
 
+FUNCTION(G(caml_llvm_prologue_realloc_stack))
+CFI_STARTPROC
+        CFI_SIGNAL_FRAME
+    /* %r10 contains the required space in words and %r11 contains the
+       continuation label in the LLVM-generated machine prologue.  This path
+       must not push anything on the OCaml stack: the stack check fires exactly
+       when there may not be enough space to do that. */
+        SAVE_ALL_REGS(NO)
+        movq    %r15, Caml_state(gc_regs)
+        movq    10*8(%r15), C_ARG_1 /* required space in words */
+        SWITCH_OCAML_TO_C
+        C_call  (GCALL(caml_try_realloc_stack))
+        SWITCH_C_TO_OCAML
+        movq    Caml_state(gc_regs), %r15
+        testq   %rax, %rax
+        jz      1f
+        RESTORE_ALL_REGS(NO)
+        jmp     *%r11
+1:      /* Restore the gc_regs bucket popped by SAVE_ALL_REGS */
+        movq    Caml_state(gc_regs_buckets), %r11
+        movq    %r11, 0(%r15) /* next ptr */
+        movq    %r15, Caml_state(gc_regs_buckets)
+        movq    Caml_state(young_ptr), %r15
+        LEA_VAR(caml_exn_Stack_overflow, %rax)
+        jmp     LBL(caml_raise_exn)
+CFI_ENDPROC
+ENDFUNCTION(G(caml_llvm_prologue_realloc_stack))
+
 #define Make_call_gc(suffix, simd)                   \
     FUNCTION(G(caml_call_gc##suffix)) ;              \
     CFI_STARTPROC                     ;              \

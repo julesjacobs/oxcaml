@@ -33,6 +33,7 @@
 #include "llvm/MC/MCObjectFileInfo.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Target/TargetOptions.h"
 #include <cstdlib>
 
@@ -43,6 +44,58 @@ STATISTIC(NumFrameExtraProbe,
           "Number of extra stack probes generated in prologue");
 
 using namespace llvm;
+
+static bool needsOxCamlStackCheck(const MachineFunction &MF) {
+  return MF.getFunction().hasFnAttribute("oxcaml-stack-check");
+}
+
+static std::string getOxCamlRuntimeSymbol(const MachineFunction &MF,
+                                          StringRef Name) {
+  char Prefix = MF.getFunction().getDataLayout().getGlobalPrefix();
+  if (Prefix == '\0')
+    return Name.str();
+  std::string Symbol(1, Prefix);
+  Symbol += Name.str();
+  return Symbol;
+}
+
+static void emitOxCamlStackCheck(MachineBasicBlock &MBB,
+                                 MachineBasicBlock::iterator MBBI,
+                                 const DebugLoc &DL,
+                                 const TargetInstrInfo &TII,
+                                 uint64_t StackSizeInBytes) {
+  if (StackSizeInBytes == 0)
+    return;
+
+  MachineFunction *MF = MBB.getParent();
+  if (!MF->getSubtarget<X86Subtarget>().is64Bit())
+    report_fatal_error("OxCaml LLVM stack checks require x86-64");
+
+  constexpr uint64_t StackThresholdWords = 32;
+  constexpr uint64_t StackCtxWords = 13;
+  constexpr uint64_t CurrentStackOffset = 40;
+  uint64_t AlignedStackSize = alignTo(StackSizeInBytes, 8);
+  uint64_t RequiredWords = StackThresholdWords + AlignedStackSize / 8;
+  uint64_t CheckBytes = AlignedStackSize +
+                        ((StackThresholdWords + StackCtxWords) * 8);
+  std::string ReallocStack =
+      getOxCamlRuntimeSymbol(*MF, "caml_llvm_prologue_realloc_stack");
+  std::string Asm =
+      "leaq -" + std::to_string(CheckBytes) + "(%rsp), %r10\n\t"
+      "cmpq " + std::to_string(CurrentStackOffset) + "(%r14), %r10\n\t"
+      "jae 9f\n\t"
+      "movq $" + std::to_string(RequiredWords) + ", %r10\n\t"
+      "leaq 9f(%rip), %r11\n\t"
+      "jmp " + ReallocStack + "\n"
+      "9:";
+  unsigned ExtraInfo = InlineAsm::Extra_HasSideEffects |
+                       InlineAsm::Extra_MayLoad |
+                       InlineAsm::Extra_MayStore;
+  BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::INLINEASM))
+      .addExternalSymbol(MF->createExternalSymbolName(Asm))
+      .addImm(ExtraInfo)
+      .setMIFlags(MachineInstr::FrameSetup);
+}
 
 X86FrameLowering::X86FrameLowering(const X86Subtarget &STI,
                                    MaybeAlign StackAlignOverride)
@@ -1582,6 +1635,7 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
       !MFI.adjustsStack() &&                   // No calls.
       !EmitStackProbeCall &&                   // No stack probes.
       !MFI.hasCopyImplyingStackAdjustment() && // Don't push and pop.
+      !needsOxCamlStackCheck(MF) &&             // No OCaml stack checks.
       !MF.shouldSplitStack()) {                // Regular stack
     uint64_t MinSize =
         X86FI->getCalleeSavedFrameSize() - X86FI->getTCReturnAddrDelta();
@@ -1820,6 +1874,9 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
   // the two. This can be the case when tail call elimination is enabled and
   // the callee has more arguments then the caller.
   NumBytes -= mergeSPUpdates(MBB, MBBI, true);
+
+  if (needsOxCamlStackCheck(MF))
+    emitOxCamlStackCheck(MBB, MBB.begin(), DL, TII, StackSize);
 
   // Adjust stack pointer: ESP -= numbytes.
 
