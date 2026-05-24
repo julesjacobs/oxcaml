@@ -22,6 +22,7 @@ normal_build=${NORMAL_BUILD:-$repo/_build}
 normal_runtime_dir=${NORMAL_RUNTIME_DIR:-$normal_build/runtime_stdlib/runtime}
 fake_root=${FAKE_ROOT:-$default_fake_root}
 wrapper=${LLVM_WRAPPER:-/tmp/oxcaml-clang-wrapper}
+wrapper_log=${LLVM_WRAPPER_LOG:-$wrapper.log}
 list=${LIST:-$default_list}
 generate_list=${GENERATE_LIST:-1}
 
@@ -72,8 +73,9 @@ DEBUGGER_EXE="$stage_install/bin/ocamldebug" \
 LLVM_WRAPPER="$wrapper" \
   "$repo/tools/setup-llvm-stage4-ocamltest.sh"
 
-: > /tmp/oxcaml-clang-wrapper.log
+: > "$wrapper_log"
 
+set +e
 OCAMLSRCDIR="$fake_root" \
 CAML_LD_LIBRARY_PATH="$fake_root/stublibs" \
 OCAMLPARAM="_,llvm-backend=1,llvm-path=$wrapper" \
@@ -81,8 +83,12 @@ OCAMLLIB="$stage_install/lib/ocaml" \
 PATH="/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin:$PATH" \
   make -C "$repo/testsuite" one LIST="$list" \
     ocamltest_directory=../_runtest/ocamltest
+test_status=$?
+set -e
 
 printf 'wrapper lines: '
-wc -l < /tmp/oxcaml-clang-wrapper.log
+wc -l < "$wrapper_log"
 printf 'fresh ir: '
-rg -c -- '-x ir' /tmp/oxcaml-clang-wrapper.log || true
+rg -c -- '-x ir' "$wrapper_log" || true
+
+exit "$test_status"

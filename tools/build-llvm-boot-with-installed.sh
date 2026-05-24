@@ -8,10 +8,14 @@ stage0_install=${STAGE0_INSTALL:-$repo/_install}
 stage0_install=$(cd "$stage0_install" && pwd)
 boot_build=${BOOT_BUILD:-$repo/_llvm_boot_context_build}
 wrapper=${LLVM_WRAPPER:-/tmp/oxcaml-clang-wrapper}
+wrapper_log=${LLVM_WRAPPER_LOG:-$wrapper.log}
 opam_switch_bin=${OPAM_SWITCH_BIN:-/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin}
 arch=${ARCH:-}
 run_smoke=${RUN_SMOKE:-1}
-read -r -a dune_build_flags <<< "${DUNE_BUILD_FLAGS:-}"
+dune_build_flags=()
+if [ -n "${DUNE_BUILD_FLAGS:-}" ]; then
+  read -r -a dune_build_flags <<< "$DUNE_BUILD_FLAGS"
+fi
 
 if [ -z "$arch" ]; then
   case "$(uname -m)" in
@@ -33,9 +37,9 @@ make_var () {
 }
 
 print_wrapper_counts () {
-  fresh_ir=$(rg -c -- '-x ir' /tmp/oxcaml-clang-wrapper.log || true)
+  fresh_ir=$(rg -c -- '-x ir' "$wrapper_log" || true)
   if [ -z "$fresh_ir" ]; then fresh_ir=0; fi
-  printf '%s wrapper lines: %s\n' "$1" "$(wc -l < /tmp/oxcaml-clang-wrapper.log)"
+  printf '%s wrapper lines: %s\n' "$1" "$(wc -l < "$wrapper_log")"
   printf '%s fresh ir: %s\n' "$1" "$fresh_ir"
 }
 
@@ -76,7 +80,7 @@ targets=(
 )
 
 rm -rf "$boot_build"
-: > /tmp/oxcaml-clang-wrapper.log
+: > "$wrapper_log"
 
 PATH="$stage0_install/bin:$opam_switch_bin:$PATH" \
 RUNTIME_DIR=runtime ARCH="$arch" SYSTEM="$system" MODEL="$model" \
@@ -91,7 +95,7 @@ if [ "$run_smoke" = 1 ]; then
   trap 'rm -f "$boot_ws"; rm -rf "$tmpdir"' EXIT
   printf 'let rec sum n acc = if n = 0 then acc else sum (n - 1) (acc + n)\nlet () = Printf.printf "%%d\\n" (sum 10 0)\n' \
     > "$tmpdir/main.ml"
-  : > /tmp/oxcaml-clang-wrapper.log
+  : > "$wrapper_log"
   OCAMLLIB="$stage0_install/lib/ocaml" \
   OCAMLPARAM="_,llvm-backend=1,llvm-path=$wrapper" \
     "$boot_build/default/boot_ocamlopt.exe" -o "$tmpdir/main.exe" "$tmpdir/main.ml"

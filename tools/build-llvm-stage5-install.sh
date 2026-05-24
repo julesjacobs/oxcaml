@@ -9,6 +9,7 @@ runtime_build=${RUNTIME_BUILD:-$repo/_llvm_stage5_bootstrap_build}
 main_build=${MAIN_BUILD:-$repo/_llvm_stage5_main_build}
 stage_install=${STAGE_INSTALL:-$repo/_llvm_stage5_install}
 wrapper=${LLVM_WRAPPER:-/tmp/oxcaml-clang-wrapper}
+wrapper_log=${LLVM_WRAPPER_LOG:-$wrapper.log}
 runtime_ws=${RUNTIME_WS:-/tmp/oxcaml-stage5-runtime.ws}
 main_ws=${MAIN_WS:-/tmp/oxcaml-stage5-main.ws}
 arch=${ARCH:-}
@@ -17,7 +18,10 @@ build_runtime=${BUILD_RUNTIME:-1}
 build_main=${BUILD_MAIN:-1}
 refresh_install=${REFRESH_INSTALL:-1}
 opam_switch_bin=${OPAM_SWITCH_BIN:-/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin}
-read -r -a dune_build_flags <<< "${DUNE_BUILD_FLAGS:-}"
+dune_build_flags=()
+if [ -n "${DUNE_BUILD_FLAGS:-}" ]; then
+  read -r -a dune_build_flags <<< "$DUNE_BUILD_FLAGS"
+fi
 
 if [ -z "$arch" ]; then
   case "$(uname -m)" in
@@ -40,9 +44,9 @@ require_path "$boot_install/lib/ocaml/stdlib.cmxa"
 require_path "$wrapper"
 
 print_wrapper_counts () {
-  fresh_ir=$(rg -c -- '-x ir' /tmp/oxcaml-clang-wrapper.log || true)
+  fresh_ir=$(rg -c -- '-x ir' "$wrapper_log" || true)
   if [ -z "$fresh_ir" ]; then fresh_ir=0; fi
-  printf '%s wrapper lines: %s\n' "$1" "$(wc -l < /tmp/oxcaml-clang-wrapper.log)"
+  printf '%s wrapper lines: %s\n' "$1" "$(wc -l < "$wrapper_log")"
   printf '%s fresh ir: %s\n' "$1" "$fresh_ir"
 }
 
@@ -115,7 +119,7 @@ main_targets=(
 export PATH="$opam_switch_bin:$PATH"
 
 if [ "$build_runtime" = 1 ]; then
-  : > /tmp/oxcaml-clang-wrapper.log
+  : > "$wrapper_log"
   RUNTIME_DIR=runtime ARCH="$arch" \
     dune build --root="$repo" --build-dir "$runtime_build" \
       --workspace="$runtime_ws" "${dune_build_flags[@]}" \
@@ -131,7 +135,7 @@ fi
 
 if [ "$build_main" = 1 ]; then
   require_path "$runtime_build/install/runtime_stdlib/lib/ocaml_runtime_stdlib/stdlib.cmxa"
-  : > /tmp/oxcaml-clang-wrapper.log
+  : > "$wrapper_log"
   RUNTIME_DIR=runtime ARCH="$arch" SYSTEM="$system" MODEL="$model" \
   ASPP="$aspp" ASPPFLAGS="$asppflags" \
     dune build --root="$repo" --build-dir "$main_build" \
