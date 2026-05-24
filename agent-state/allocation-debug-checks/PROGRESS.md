@@ -50,15 +50,19 @@ functionality.
     `caml_debug_check_minor_heap`, `caml_debug_check_minor_heap_head`,
     `debug_check_minor_heap`, or `minor_heap_head`.
   - `make -s boot-compiler` passed.
+  - Built agent-local clang from
+    `/Users/julesjacobs/git/oxcaml-llvm/main/llvm-project` at commit
+    `1fc49b70ffad` into
+    `/tmp/oxcaml-agent-allocation-debug-checks/llvm-build-1fc`, then pointed
+    the agent clang wrapper at that binary.
+  - Focused expected-output check passed with the matching patched clang:
+    `OCAMLPARAM="_,llvm-path=$LLVM_PATH" make promote-one-no-rebuild TEST=llvm-codegen/allocation.ml`
+    after `unset LIST`.
 - Test note:
   - `make promote-one TEST=llvm-codegen/allocation.ml` needed `LIST` unset
     because `agent-tmp-env` exports `LIST`.
-  - The focused promotion generated the updated allocation IR. Local assembly
-    promotion required `OCAMLPARAM="_,llvm-path=$LLVM_PATH"` so the test
-    compiler uses the patched clang wrapper. The patched clangs available on
-    this machine differ in unrelated stack-check prologue formatting, so the
-    committed assembly expectation was kept scoped to removing the debug calls
-    and not to that local toolchain formatting drift.
+  - The focused promotion requires `OCAMLPARAM="_,llvm-path=$LLVM_PATH"` so
+    the test compiler uses the agent-local patched clang wrapper.
 
 ## Current Blocker
 
@@ -66,5 +70,4 @@ None.
 
 ## Next Step
 
-Review the diff, then commit and push the source, expected-output, and progress
-updates.
+Ready for review.
