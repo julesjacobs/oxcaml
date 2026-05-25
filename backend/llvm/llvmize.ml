@@ -1408,6 +1408,11 @@ let extcall ?unwind_label t (i : Cfg.terminator Cfg.instruction) ~func_symbol
       ~live_roots:(load_live_gc_roots_across t i)
       ?unwind_label ~cc t caml_c_call_symbol args res_types
   in
+  let load_arg_regs arg_regs arg_types =
+    List.map2
+      (fun reg typ -> load_reg_to_temp ~typ t reg)
+      arg_regs arg_types
+  in
   let call_func arg_regs arg_types res_types =
     if stack_ofs > 0
     then (
@@ -1486,21 +1491,12 @@ let extcall ?unwind_label t (i : Cfg.terminator Cfg.instruction) ~func_symbol
       res_vals)
     else if alloc
     then
-      let args =
-        [func_ptr]
-        @ List.map2
-            (fun reg typ -> load_reg_to_temp ~typ t reg)
-            arg_regs arg_types
-      in
+      let args = [func_ptr] @ load_arg_regs arg_regs arg_types in
       make_ocaml_c_call ~cc:Oxcaml_c_call "caml_c_call" args res_types
     else
       (* Wrap C calls to avoid reloading from the stack after overwriting the
          stack pointer *)
-      let args =
-        List.map2
-          (fun reg typ -> load_reg_to_temp ~typ t reg)
-          arg_regs arg_types
-      in
+      let args = load_arg_regs arg_regs arg_types in
       let wrapper_symbol =
         add_c_call_wrapper t func_symbol ~args:(List.map V.get_type args)
           ~res:res_types
