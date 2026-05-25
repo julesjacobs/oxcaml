@@ -4,8 +4,8 @@ Last updated: 2026-05-25.
 
 ## Current Claim
 
-Iterations 1, 2, 3, 4, 5, 6, and 7 are committed or ready to commit; iteration
-7 is reviewed and validated.
+Iterations 1 through 8 are committed or ready to commit; iteration 8 passed
+review with no findings on the corrected diff and is validated.
 
 ## Evidence
 
@@ -23,7 +23,7 @@ None.
 ## Iteration State
 
 - Target: 10 completed iterations.
-- Completed iterations: 7.
+- Completed iterations: 8.
 - Committed cleanups:
   - Iteration 1: simplified deopt argument list construction in
     `backend/llvm/llvmize.ml` with `List.concat_map`.
@@ -40,6 +40,8 @@ None.
     `backend/llvm/llvmize.ml`.
   - Iteration 7: combined type-to-string and sanitize steps in
     `backend/llvm/llvmize.ml`'s `add_c_call_wrapper`.
+  - Iteration 8: reused `runtime_reg_types` in
+    `backend/llvm/llvmize.ml`.
 - Dropped ideas: none yet.
 - Stop condition: stop after 10 completed iterations, then summarize committed
   cleanups, dropped ideas, and remaining promising targets.
@@ -394,7 +396,56 @@ Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
 are broad LLVM backend validation runs, and this commit only changes a
 behavior-preserving local list transformation.
 
+## Iteration 8 Candidate
+
+Path: self-proposed candidate.
+
+Candidate: derive `runtime_reg_types` once next to `runtime_regs` in
+`backend/llvm/llvmize.ml`, then reuse it in `make_ret_type` and
+`make_arg_types`.
+
+Why likely useful: both argument and return type construction currently rebuild
+the same list from `runtime_regs`. A single local binding keeps the invariant
+next to the runtime-register definitions and avoids duplicated construction.
+
+Review gate: passed after five human-like reviews of the corrected final diff.
+
+Review result: the first review round found one progress-file wording mismatch:
+the candidate said `runtime_reg_types` was derived next to `runtime_reg_idents`,
+but the code derives it next to `runtime_regs`. That finding was accepted and
+fixed. A fresh review of the corrected diff then returned five keep verdicts
+with no findings.
+
+Validation result:
+
+- `git diff --check`: passed.
+- `eval "$(../../../scripts/agent-tmp-env)" && opam exec
+  --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`: passed.
+
+## Testing Story for This Commit
+
+Change: derive `runtime_reg_types` once next to `runtime_regs` in
+`backend/llvm/llvmize.ml`, reuse it in `make_ret_type` and `make_arg_types`,
+and record iteration 8 state in this progress file.
+Risk: if the rewrite is wrong, LLVM function argument or return type shapes
+could change for runtime registers.
+Validation: `git diff --check`; `eval "$(../../../scripts/agent-tmp-env)" &&
+opam exec --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`.
+Full LLVM validation: not run for this commit; the rewrite preserves the same
+`List.map (fun _ -> T.i64) runtime_regs` value and only reuses it in the two
+places that previously rebuilt it.
+Stage2 verification: not run for this commit; self-stage2 is intentionally
+deferred for the same reason as full LLVM validation.
+Why this is enough: five human-like reviews of the corrected diff found no
+issues and checked that the argument and return type shapes are unchanged; the
+build check covers type and syntax validity.
+Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
+`make llvm-self-stage2-test LLVM_PATH="$LLVM_PATH"` are deferred because they
+are broad LLVM backend validation runs, and this commit only changes a
+behavior-preserving local binding.
+
 ## Next Step
 
-Commit iteration 7, push it to the draft PR branch, then choose the next
-reviewed cleanup candidate.
+Commit iteration 8 and push it to the draft PR branch. The updated thread goal
+is satisfied because a fresh human-like review of the corrected diff returned
+no findings.

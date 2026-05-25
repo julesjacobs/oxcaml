@@ -594,6 +594,8 @@ let allocation_ptr = V.of_ident ~typ:T.ptr (LL.Ident.local "alloc")
 
 let runtime_regs = [domainstate_ptr; allocation_ptr]
 
+let runtime_reg_types = List.map (fun _ -> T.i64) runtime_regs
+
 let domainstate_idx = 0
 
 let _allocation_idx = 1
@@ -614,7 +616,6 @@ let loc_results_call regs = Proc.loc_results_call (Reg.typv regs) |> fst
 let loc_results_return regs = Proc.loc_results_return (Reg.typv regs)
 
 let make_ret_type ret_types =
-  let runtime_reg_types = List.map (fun _ -> T.i64) runtime_regs in
   T.(Struct [Struct runtime_reg_types; Struct ret_types])
 
 (* Filters out return types to be passed via domain state since they aren't
@@ -624,8 +625,7 @@ let filter_ds_and_make_ret_type ret_machtype =
   let actual_ret_types = reg_list_for_call cc_regs |> List.map T.of_reg in
   make_ret_type actual_ret_types
 
-let make_arg_types arg_types =
-  List.map (fun _ -> T.i64) runtime_regs @ arg_types
+let make_arg_types arg_types = runtime_reg_types @ arg_types
 
 let emit_ins ?comment ?res_ident t op =
   let fun_info = get_fun_info t in
