@@ -82,11 +82,17 @@ targets=(
 rm -rf "$boot_build"
 : > "$wrapper_log"
 
+dune_command=(
+  "$opam_switch_bin/dune" build --root="$repo" --build-dir="$boot_build"
+  --workspace="$boot_ws"
+)
+if [ "${#dune_build_flags[@]}" -ne 0 ]; then
+  dune_command+=("${dune_build_flags[@]}")
+fi
 PATH="$stage0_install/bin:$opam_switch_bin:$PATH" \
 RUNTIME_DIR=runtime ARCH="$arch" SYSTEM="$system" MODEL="$model" \
 ASPP="$aspp" ASPPFLAGS="$asppflags" \
-  "$opam_switch_bin/dune" build --root="$repo" --build-dir="$boot_build" \
-    --workspace="$boot_ws" "${dune_build_flags[@]}" "${targets[@]}"
+  "${dune_command[@]}" "${targets[@]}"
 
 print_wrapper_counts boot
 

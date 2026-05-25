@@ -891,8 +891,81 @@ static bool windowsRequiresStackProbe(MachineFunction &MF,
          !F.hasFnAttribute("no-stack-arg-probe");
 }
 
-static bool needsOxCamlStackCheck(const MachineFunction &MF) {
-  return MF.getFunction().hasFnAttribute("oxcaml-stack-check");
+struct OxCamlStackCheckAttrs {
+  bool Requested = false;
+  bool HasCfgBytes = false;
+  uint64_t CfgBytes = 0;
+  bool HasBeforeBytes = false;
+  uint64_t BeforeBytes = 0;
+};
+
+static OxCamlStackCheckAttrs
+getOxCamlStackCheckAttrs(const MachineFunction &MF) {
+  const Function &F = MF.getFunction();
+  OxCamlStackCheckAttrs Attrs;
+  Attrs.Requested = F.hasFnAttribute("oxcaml-stack-check");
+
+  Attribute CfgBytesAttr = F.getFnAttribute("oxcaml-stack-check-bytes");
+  if (CfgBytesAttr.isValid()) {
+    bool Failed =
+        CfgBytesAttr.getValueAsString().getAsInteger(10, Attrs.CfgBytes);
+    assert(!Failed && "invalid oxcaml-stack-check-bytes attribute");
+    Attrs.HasCfgBytes = !Failed;
+  }
+
+  Attribute BeforeBytesAttr =
+      F.getFnAttribute("oxcaml-stack-check-before-bytes");
+  if (BeforeBytesAttr.isValid()) {
+    bool Failed =
+        BeforeBytesAttr.getValueAsString().getAsInteger(10, Attrs.BeforeBytes);
+    assert(!Failed && "invalid oxcaml-stack-check-before-bytes attribute");
+    Attrs.HasBeforeBytes = !Failed;
+  }
+
+  return Attrs;
+}
+
+static bool hasOxCamlStackCheckProtocol(const MachineFunction &MF) {
+  return getOxCamlStackCheckAttrs(MF).Requested;
+}
+
+static uint64_t getOxCamlPrologueStackCheckBytes(const MachineFunction &MF,
+                                                 uint64_t PrefixBytes) {
+  constexpr uint64_t StackThresholdBytes = 32 * 8;
+  // Leave room for the frame record pushed by stack-growth helpers plus extra
+  // helper-side scratch space before the next ordinary stack check can run.
+  constexpr uint64_t OrdinaryCheckSlowPathReserveBytes = 128;
+  constexpr uint64_t SpendablePrefixBytes =
+      StackThresholdBytes - OrdinaryCheckSlowPathReserveBytes;
+  if (!hasOxCamlStackCheckProtocol(MF))
+    return 0;
+
+  OxCamlStackCheckAttrs Attrs = getOxCamlStackCheckAttrs(MF);
+
+  // Preserve legacy safety when CFG stack-check insertion did not run.
+  if (!Attrs.HasCfgBytes)
+    return PrefixBytes == 0 ? 0
+                            : PrefixBytes + OrdinaryCheckSlowPathReserveBytes;
+
+  // If CFG stack-check insertion found an ordinary check, that check may still
+  // run after some OCaml stack has already been consumed by the LLVM prologue,
+  // traps, or stack offsets.  Keep the prologue check unless the ordinary check
+  // is known to run before any OCaml stack is spent.
+  if (Attrs.CfgBytes != 0) {
+    if (!Attrs.HasBeforeBytes)
+      return PrefixBytes + OrdinaryCheckSlowPathReserveBytes;
+    uint64_t BytesBeforeOrdinaryCheck = PrefixBytes + Attrs.BeforeBytes;
+    if (BytesBeforeOrdinaryCheck != 0)
+      return BytesBeforeOrdinaryCheck + OrdinaryCheckSlowPathReserveBytes;
+    return 0;
+  }
+
+  // Runtime helpers reached from slow paths may push FP/LR on the OCaml stack.
+  // Keep that emergency stack space available after the LLVM prologue even when
+  // no ordinary CFG stack-check instruction was needed.
+  return PrefixBytes >= SpendablePrefixBytes
+             ? PrefixBytes + OrdinaryCheckSlowPathReserveBytes
+             : 0;
 }
 
 static void emitOxCamlStackCheck(MachineBasicBlock &MBB,
@@ -921,7 +994,9 @@ static void emitOxCamlStackCheck(MachineBasicBlock &MBB,
       "mov x16, #" +
       std::to_string(RequiredWords) +
       "\n\t"
-      "bl _caml_llvm_prologue_realloc_stack\n"
+      "stp x16, x17, [sp, #-16]!\n\t"
+      "bl _caml_call_realloc_stack\n\t"
+      "ldp x16, x17, [sp], #16\n"
       "9:\n\t"
       "mov x30, x17";
   unsigned ExtraInfo = InlineAsm::Extra_HasSideEffects | InlineAsm::Extra_MayLoad |
@@ -1560,6 +1635,11 @@ void AArch64FrameLowering::emitPrologue(MachineFunction &MF,
            "unexpected function without stack frame but with SVE objects");
     // All of the stack allocation is for locals.
     AFI->setLocalStackSize(NumBytes);
+    uint64_t OxCamlPrologueStackCheckBytes =
+        getOxCamlPrologueStackCheckBytes(MF, NumBytes);
+    if (OxCamlPrologueStackCheckBytes != 0)
+      emitOxCamlStackCheck(MBB, MBBI, DL, TII,
+                           OxCamlPrologueStackCheckBytes);
     if (!NumBytes)
       return;
     // REDZONE: If the stack size is less than 128 bytes, we don't need
@@ -1589,8 +1669,6 @@ void AArch64FrameLowering::emitPrologue(MachineFunction &MF,
           .setMIFlag(MachineInstr::FrameSetup);
     }
 
-    if (needsOxCamlStackCheck(MF))
-      emitOxCamlStackCheck(MBB, MBB.begin(), DL, TII, NumBytes);
     return;
   }
 
@@ -1609,8 +1687,14 @@ void AArch64FrameLowering::emitPrologue(MachineFunction &MF,
           : 0;
   int64_t OxCamlStackCheckSize =
       NumBytes + OxCamlStackCheckRealignmentPadding;
-  bool CombineSPBump =
-      !needsOxCamlStackCheck(MF) && shouldCombineCSRLocalStackBump(MF, NumBytes);
+  uint64_t OxCamlPrologueStackCheckBytes =
+      getOxCamlPrologueStackCheckBytes(MF, OxCamlStackCheckSize);
+  bool NeedsOxCamlPrologueStackCheck = OxCamlPrologueStackCheckBytes != 0;
+  if (NeedsOxCamlPrologueStackCheck)
+    emitOxCamlStackCheck(MBB, MBBI, DL, TII,
+                         OxCamlPrologueStackCheckBytes);
+  bool CombineSPBump = !hasOxCamlStackCheckProtocol(MF) &&
+                       shouldCombineCSRLocalStackBump(MF, NumBytes);
   bool HomPrologEpilog = homogeneousPrologEpilog(MF);
   if (CombineSPBump) {
     assert(!SVEStackSize && "Cannot combine SP bump with SVE");
@@ -1622,7 +1706,7 @@ void AArch64FrameLowering::emitPrologue(MachineFunction &MF,
   } else if (HomPrologEpilog) {
     // Stack has been already adjusted.
     NumBytes -= PrologueSaveSize;
-  } else if (PrologueSaveSize != 0 && needsOxCamlStackCheck(MF)) {
+  } else if (PrologueSaveSize != 0 && NeedsOxCamlPrologueStackCheck) {
     MachineBasicBlock::iterator FirstCSR = MBBI;
     MachineBasicBlock::iterator End = MBB.end();
     while (FirstCSR != End && !isCalleeSaveSaveOpcode(FirstCSR->getOpcode()))
@@ -1957,9 +2041,6 @@ void AArch64FrameLowering::emitPrologue(MachineFunction &MF,
       MBB.addLiveIn(AArch64::X1);
     }
   }
-
-  if (needsOxCamlStackCheck(MF))
-    emitOxCamlStackCheck(MBB, MBB.begin(), DL, TII, OxCamlStackCheckSize);
 }
 
 static void InsertReturnAddressAuth(MachineFunction &MF, MachineBasicBlock &MBB,
@@ -3166,7 +3247,7 @@ void AArch64FrameLowering::determineCalleeSaves(MachineFunction &MF,
   uint64_t EstimatedStackSize = MFI.estimateStackSize(MF);
   if (hasFP(MF) ||
       windowsRequiresStackProbe(MF, EstimatedStackSize + CSStackSize + 16) ||
-      (needsOxCamlStackCheck(MF) && EstimatedStackSize != 0)) {
+      (hasOxCamlStackCheckProtocol(MF) && EstimatedStackSize != 0)) {
     SavedRegs.set(AArch64::FP);
     SavedRegs.set(AArch64::LR);
   }
