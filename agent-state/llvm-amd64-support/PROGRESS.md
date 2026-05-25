@@ -20,10 +20,12 @@ X86_64 `Raise_notrace` inline exception jump, correct LLVM `Compare_exchange`
 lowering, and add focused AMD64 probe terminator lowering plus focused AMD64
 SIMD LLVM lowering for i64x2 arithmetic, vec128 interleaves, and vec256
 join/split support. The poll slow-path frame descriptor gap in
-`lib-domain/cpu_relax.ml` is also fixed for AMD64 LLVM output. Earlier fixes
-reserve the AMD64 OxCaml runtime registers in LLVM's X86 register allocator and
-make exception-recovery blocks treat runtime blockaddress entry as a
-register-clobbering edge.
+`lib-domain/cpu_relax.ml` is also fixed for AMD64 LLVM output. Plain
+debug-less X86_64 raise/reraise calls now emit a standalone frame stackmap,
+fixing the standard-compiler LLVM-backend backtrace propagation gap in
+`tests/backtrace/backtrace.ml`. Earlier fixes reserve the AMD64 OxCaml runtime
+registers in LLVM's X86 register allocator and make exception-recovery blocks
+treat runtime blockaddress entry as a register-clobbering edge.
 
 ## Evidence
 
@@ -104,6 +106,11 @@ register-clobbering edge.
     X86_64 `Raise_notrace` inline jump to an exception handler. This prevents
     a handler-allocated exception bucket from being overwritten by later
     allocations in the catching handler.
+  - `backend/llvm/llvmize.ml` now lets raise/reraise calls request an explicit
+    standalone X86_64 stackmap when the call has no deopt or GC-live operand
+    bundle. This records the otherwise-missing frame descriptor for debug-less
+    unmatched-handler propagation paths, while leaving existing debug-bearing
+    raise descriptors to the statepoint/deopt path.
   - `backend/llvm/llvmize.ml` now emits explicit standalone stackmaps for all
     non-tail X86_64 OCaml calls, including direct calls that have live GC roots.
     This covers frame descriptors for direct-call return addresses when the
@@ -181,6 +188,17 @@ register-clobbering edge.
   - Per workspace guidance and user clarification, validation now uses normal
     Dune parallelism and avoids only concurrent top-level `make`/`dune`
     commands in this checkout; no `-j1` is used for OxCaml builds.
+  - `ARCH=amd64 LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+    make llvm-test-one TEST=backtrace/backtrace.ml` now passes with the
+    standard compiler LLVM backend: 2 tests passed, 0 failed. Before the
+    debug-less raise/reraise stackmap fix, the native run omitted the
+    `Called from Backtrace in file "backtrace.ml", line 21, characters 9-25`
+    frame for the uncaught `Error "d"` propagation case.
+  - Follow-up standard-compiler LLVM-backend backtrace validations also pass:
+    `make test-one-no-rebuild TEST=backtrace/backtrace_deprecated.ml`,
+    `make test-one-no-rebuild TEST=backtrace/backtrace_slots.ml`, and
+    `make test-one-no-rebuild TEST=backtrace/raw_backtrace.ml` each report
+    2 tests passed, 0 failed.
   - A stale previous run with `ccopt=-no-pie` left non-PIC options in `.cmxa`
     metadata. `make clean` plus rerunning without `ccopt=-no-pie` confirmed the
     remaining link failures were LLVM AMD64 PIC/codegen issues, not a global

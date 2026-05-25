@@ -913,8 +913,8 @@ let assemble_return t res_type values =
 (* Prepare and extract arguments following the OCaml calling convention in LLVM,
    handling the threading of runtime registers. *)
 let call_simple ?(attrs = []) ?(dbg = Debuginfo.none) ?(raise_call = false)
-    ?(primitive_call = false) ?alloc_info ?(live_roots = []) ?unwind_label ~cc t
-    name args res_types =
+    ?(primitive_call = false) ?alloc_info ?(live_roots = []) ?unwind_label ~cc
+    t name args res_types =
   let fun_info = get_fun_info t in
   let prev_dbg_metadata = fun_info.current_dbg_metadata in
   let call_dbg_metadata =
@@ -1063,7 +1063,8 @@ let emit_stackmap_safepoint ?safepoint t (i : 'a Cfg.instruction)
        ~shadow_bytes:(V.of_int ~typ:T.i32 0)
        ~args:(gc_live_stackmap_args operand_bundles))
 
-let call_simple_with_stackmap ?unwind_label ~attrs ~live_roots ~safepoint ~cc t
+let call_simple_with_stackmap ?unwind_label ?(raise_call = false)
+    ?(stackmap_if_plain_call = false) ~attrs ~live_roots ~safepoint ~cc t
     (i : 'a Cfg.instruction) name args res_types =
   let fun_info = get_fun_info t in
   let prev_dbg_metadata = fun_info.current_dbg_metadata in
@@ -1076,7 +1077,7 @@ let call_simple_with_stackmap ?unwind_label ~attrs ~live_roots ~safepoint ~cc t
       let res_type = Some (make_ret_type res_types) in
       let func = LL.Ident.global name in
       let operand_bundles =
-        call_operand_bundles t ~primitive_call:false ~raise_call:false i.dbg
+        call_operand_bundles t ~primitive_call:false ~raise_call i.dbg
           live_roots
       in
       let res =
@@ -1095,7 +1096,8 @@ let call_simple_with_stackmap ?unwind_label ~attrs ~live_roots ~safepoint ~cc t
           emit_label t normal_label;
           res
       in
-      emit_stackmap_safepoint ~safepoint t i operand_bundles;
+      if (not stackmap_if_plain_call) || operand_bundles = []
+      then emit_stackmap_safepoint ~safepoint t i operand_bundles;
       refresh_live_gc_roots t live_roots;
       extract_call_res t res (List.length res_types))
 
@@ -1600,11 +1602,13 @@ let raise_ t ~(exn_handler : Label.t option)
     (match Target_system.architecture () with
     | Target_system.X86_64 | Target_system.AArch64 ->
       add_referenced_symbol t raise_fn_name;
-      call_simple
-        ~attrs:(gc_attr ~can_call_gc:true t i)
-        ~dbg:i.dbg ~raise_call:true
-        ~live_roots:(load_live_gc_roots_across t i)
-        ~cc:Oxcaml t raise_fn_name [exn_bucket] []
+      let live_roots = load_live_gc_roots_across t i in
+      let stack_offset = statepoint_stack_offset t i in
+      let safepoint = Safepoint.Call { stack_offset } in
+      call_simple_with_stackmap
+        ~attrs:(gc_attr ~safepoint ~can_call_gc:true t i)
+        ~raise_call:true ~stackmap_if_plain_call:true ~live_roots ~safepoint
+        ~cc:Oxcaml t i raise_fn_name [exn_bucket] []
       |> ignore
     | Target_system.IA32 | Target_system.ARM | Target_system.POWER
     | Target_system.Z | Target_system.Riscv ->
