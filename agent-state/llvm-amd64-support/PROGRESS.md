@@ -80,6 +80,22 @@ passes a direct `llc` prologue smoke test for a stack-frame-using
   - `testsuite/tests/llvm-codegen/amd64_stack_growth.ml` is an AMD64/Linux
     LLVM-backend regression test for stack growth through an effect
     continuation.
+  - `testsuite/tests/llvm-codegen/amd64_core_ops.ml` is an AMD64/Linux
+    LLVM-backend regression test covering allocation, indirect calls, control
+    flow, atomic get/set, integer mutable fields, `caml_modify` for pointer
+    fields, and repeated allocation across GC.
+  - `tools/build-llvm-boot-with-installed.sh` and
+    `tools/build-llvm-stage5-install.sh` no longer default `OPAM_SWITCH_BIN` to
+    a hard-coded macOS path. They derive it from the active `dune` on `PATH`
+    unless `OPAM_SWITCH_BIN` is explicitly supplied.
+  - `tools/build-llvm-boot-with-installed.sh` creates a temporary `ocaml`
+    wrapper for Dune feature detection during self-stage boot builds. This
+    wrapper runs the stage0 install's bytecode toplevel with the matching
+    `ocamlrun`, `OCAMLLIB`, and `CAML_LD_LIBRARY_PATH`, and the copied boot
+    workspace puts the wrapper directory before the stage0 `bin` path. This
+    prevents the `camlinternalquote_if_missing_from_stdlib` rule from
+    mistakenly compiling a second `camlinternalQuote` against the installed
+    stdlib.
 - Validation done this turn:
   - `git diff --check` passed.
   - Added local opam repository `tools/ci/local-opam` as `oxcaml-local`.
@@ -213,18 +229,65 @@ passes a direct `llc` prologue smoke test for a stack-frame-using
     - `make llvm-test-one TEST=llvm-codegen/amd64_stack_growth.ml LIST= DIR=
       prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 4 passed,
       0 skipped, 0 failed.
+  - Added and validated
+    `testsuite/tests/llvm-codegen/amd64_core_ops.ml`:
+    `make llvm-test-one TEST=llvm-codegen/amd64_core_ops.ml LIST= DIR=
+    prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 4 passed,
+    0 skipped, 0 failed.
+  - Directory-level focused validation now passes for enabled LLVM-codegen
+    tests on Linux/AMD64:
+    `make llvm-test-one DIR=llvm-codegen LIST= TEST=
+    prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 16 passed,
+    15 skipped, 0 failed.
+  - Started `llvm-self-stage-install` validation. Without extra stack settings,
+    the LLVM-built `_install/bin/ocamlc.opt` reliably overflows while inferring
+    the interface of `parser__mock.ml.mock`:
+    `OCAMLLIB=$(pwd)/_install/lib/ocaml OCAMLRUNPARAM=b
+    _install/bin/ocamlc.opt ... -short-paths -i -impl
+    _build/main/parser__mock.ml.mock` exits 2 with `Stack overflow`.
+  - A smaller stack-usage reproducer shows that a normal opam native compiler
+    handles 50,000 non-tail recursive calls with the default stack, while an
+    LLVM-built executable raises `Stack_overflow` unless run with
+    `OCAMLRUNPARAM=b,Xmain_stack_size=64M`. This is recorded as an AMD64 LLVM
+    stack-usage/stack-growth follow-up, not treated as fixed.
+  - With `OCAMLRUNPARAM=b,Xmain_stack_size=64M`, the self-stage boot-context
+    build gets past the parser mock overflow and the previous
+    `CamlinternalQuote` duplicate-interface failure. The boot build prints:
+    `boot wrapper lines: 1678` and `boot fresh ir: 831`, confirming the
+    LLVM-backed boot compiler build is exercising the wrapper.
+  - The current self-stage blocker is now the boot compiler smoke:
+    `_llvm_boot_context_build/default/boot_ocamlopt.exe` segfaults compiling a
+    tiny recursive program. Focused repro:
+    `OCAMLLIB=$(pwd)/_install/lib/ocaml
+    _llvm_boot_context_build/default/boot_ocamlopt.exe -c /tmp/rec_simple.ml`
+    where `/tmp/rec_simple.ml` contains
+    `let rec f n = if n = 0 then 0 else f (n - 1)`.
+    Empty, constant-only, and `Printf.printf`-only files compile; recursive
+    files (`rec_simple.ml` and the self-stage `fib` smoke) segfault.
+  - GDB on the `fib` smoke segfault shows a bad indirect call in `caml_apply2`.
+    The backtrace reaches
+    `camlFlambda2_algorithms__Table_by_int_id__add_7_19_code` and the closure
+    argument to `caml_apply2` is the code symbol `caml_curry2` itself rather
+    than a heap closure whose first word is `caml_curry2`.
 
 ## Current Blocker
 
 No focused blocker remains for `llvm-install` with a writable prefix or for the
-new AMD64 direct-call stackmap regression. The default `/usr/local` install
+enabled Linux/AMD64 `llvm-codegen` tests. The default `/usr/local` install
 prefix is not writable in this environment, so use an explicit agent-local
 `prefix=...` for install validation. Also clear `LIST=`/`DIR=` when running a
 single `TEST=...` after `eval "$(../../../scripts/agent-tmp-env)"`, because the
 agent env may set `LIST` for broader test runs.
 
+The current broader validation blocker is `llvm-self-stage-install`: after
+using `OCAMLRUNPARAM=b,Xmain_stack_size=64M` to get past the current LLVM
+stack-usage overflow, the LLVM-built boot compiler segfaults compiling even a
+tiny recursive source file. The smallest current reproducer is
+`boot_ocamlopt.exe -c /tmp/rec_simple.ml` as described above.
+
 ## Next Step
 
-Continue expanding focused AMD64 LLVM tests under the standard installed
-compiler with `-llvm-backend`, then move to broader self-stage2 validation once
-the focused exception, stack-growth, and stackmap paths stay clean.
+Reduce the self-stage `boot_ocamlopt.exe -c /tmp/rec_simple.ml` segfault to the
+smallest generated-code/runtime bug. The current evidence points at closure or
+partial-application handling around `caml_apply2`/`caml_curry2`, but that needs
+confirmation from the generated IR/assembly before patching.

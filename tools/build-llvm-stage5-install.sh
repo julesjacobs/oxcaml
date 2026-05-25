@@ -17,7 +17,7 @@ arch=${ARCH:-}
 build_runtime=${BUILD_RUNTIME:-1}
 build_main=${BUILD_MAIN:-1}
 refresh_install=${REFRESH_INSTALL:-1}
-opam_switch_bin=${OPAM_SWITCH_BIN:-/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin}
+opam_switch_bin=${OPAM_SWITCH_BIN:-}
 dune_build_flags=()
 if [ -n "${DUNE_BUILD_FLAGS:-}" ]; then
   read -r -a dune_build_flags <<< "$DUNE_BUILD_FLAGS"
@@ -37,6 +37,16 @@ require_path () {
     exit 1
   fi
 }
+
+if [ -z "$opam_switch_bin" ]; then
+  dune_path=$(command -v dune || true)
+  if [ -z "$dune_path" ]; then
+    echo "could not find dune; set OPAM_SWITCH_BIN" >&2
+    exit 1
+  fi
+  opam_switch_bin=$(cd "$(dirname "$dune_path")" && pwd)
+fi
+require_path "$opam_switch_bin/dune"
 
 require_path "$boot_install/bin/ocamlopt.opt"
 require_path "$boot_install/bin/ocamlc.opt"

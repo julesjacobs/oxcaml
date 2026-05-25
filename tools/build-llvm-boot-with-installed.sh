@@ -9,7 +9,7 @@ stage0_install=$(cd "$stage0_install" && pwd)
 boot_build=${BOOT_BUILD:-$repo/_llvm_boot_context_build}
 wrapper=${LLVM_WRAPPER:-/tmp/oxcaml-clang-wrapper}
 wrapper_log=${LLVM_WRAPPER_LOG:-$wrapper.log}
-opam_switch_bin=${OPAM_SWITCH_BIN:-/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin}
+opam_switch_bin=${OPAM_SWITCH_BIN:-}
 arch=${ARCH:-}
 run_smoke=${RUN_SMOKE:-1}
 dune_build_flags=()
@@ -32,6 +32,16 @@ require_path () {
   fi
 }
 
+if [ -z "$opam_switch_bin" ]; then
+  dune_path=$(command -v dune || true)
+  if [ -z "$dune_path" ]; then
+    echo "could not find dune; set OPAM_SWITCH_BIN" >&2
+    exit 1
+  fi
+  opam_switch_bin=$(cd "$(dirname "$dune_path")" && pwd)
+fi
+require_path "$opam_switch_bin/dune"
+
 make_var () {
   awk -F= -v name="$1" '$1 == name { sub(/^[ \t]*/, "", $2); sub(/[ \t]*$/, "", $2); print $2; exit }' "$2"
 }
@@ -45,6 +55,8 @@ print_wrapper_counts () {
 
 require_path "$stage0_install/bin/ocamlopt.opt"
 require_path "$stage0_install/bin/ocamlc.opt"
+require_path "$stage0_install/bin/ocaml"
+require_path "$stage0_install/bin/ocamlrun"
 require_path "$stage0_install/lib/ocaml/stdlib.cmxa"
 require_path "$wrapper"
 
@@ -66,8 +78,28 @@ make -C "$repo" LLVM_BOOT_BACKEND=1 LLVM_BOOT_INSTALL="$stage0_install" \
   LLVM_PATH="$wrapper" duneconf/boot.ws >/dev/null
 
 boot_ws=$(mktemp /tmp/oxcaml-llvm-boot.XXXXXX)
-trap 'rm -f "$boot_ws"' EXIT
+tool_bin=$(mktemp -d /tmp/oxcaml-llvm-boot-tools.XXXXXX)
+cleanup () {
+  rm -f "$boot_ws"
+  rm -rf "$tool_bin"
+}
+trap cleanup EXIT
 cp "$repo/duneconf/boot.ws" "$boot_ws"
+
+cat > "$tool_bin/ocaml" <<EOF
+#!/usr/bin/env bash
+if [ -n "\${CAML_LD_LIBRARY_PATH:-}" ]; then
+  export CAML_LD_LIBRARY_PATH="$stage0_install/lib/ocaml/stublibs:\$CAML_LD_LIBRARY_PATH"
+else
+  export CAML_LD_LIBRARY_PATH="$stage0_install/lib/ocaml/stublibs"
+fi
+export OCAMLLIB="$stage0_install/lib/ocaml"
+exec "$stage0_install/bin/ocamlrun" "$stage0_install/bin/ocaml" "\$@"
+EOF
+chmod +x "$tool_bin/ocaml"
+sed -i \
+  "s|(PATH (\"$stage0_install/bin\" :standard))|(PATH (\"$tool_bin\" \"$stage0_install/bin\" :standard))|" \
+  "$boot_ws"
 
 targets=(
   main_native.exe
@@ -82,7 +114,7 @@ targets=(
 rm -rf "$boot_build"
 : > "$wrapper_log"
 
-PATH="$stage0_install/bin:$opam_switch_bin:$PATH" \
+PATH="$tool_bin:$stage0_install/bin:$opam_switch_bin:$PATH" \
 RUNTIME_DIR=runtime ARCH="$arch" SYSTEM="$system" MODEL="$model" \
 ASPP="$aspp" ASPPFLAGS="$asppflags" \
   "$opam_switch_bin/dune" build --root="$repo" --build-dir="$boot_build" \
@@ -92,7 +124,12 @@ print_wrapper_counts boot
 
 if [ "$run_smoke" = 1 ]; then
   tmpdir=$(mktemp -d /tmp/oxcaml-llvm-boot-smoke.XXXXXX)
-  trap 'rm -f "$boot_ws"; rm -rf "$tmpdir"' EXIT
+  cleanup () {
+    rm -f "$boot_ws"
+    rm -rf "$tool_bin"
+    rm -rf "$tmpdir"
+  }
+  trap cleanup EXIT
   printf 'let rec sum n acc = if n = 0 then acc else sum (n - 1) (acc + n)\nlet () = Printf.printf "%%d\\n" (sum 10 0)\n' \
     > "$tmpdir/main.ml"
   : > "$wrapper_log"
