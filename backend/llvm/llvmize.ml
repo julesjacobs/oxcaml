@@ -313,7 +313,7 @@ let extract_llvm_code_functions lines =
         && line_contains_substring line "_code\""
       then
         let function_lines, rest = collect_function [] (line :: rest) in
-        loop (List.rev function_lines @ acc) rest
+        loop (List.rev_append function_lines acc) rest
       else loop acc rest
   in
   loop [] lines
@@ -339,7 +339,7 @@ let extract_llvm_asm_functions lines =
       match asm_code_label line with
       | Some label ->
         let function_lines, rest = collect_function [label] rest in
-        loop (List.rev function_lines @ acc) rest
+        loop (List.rev_append function_lines acc) rest
       | None -> loop acc rest)
   in
   loop [] lines

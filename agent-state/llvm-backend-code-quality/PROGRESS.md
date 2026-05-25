@@ -4,8 +4,8 @@ Last updated: 2026-05-25.
 
 ## Current Claim
 
-Iterations 1 through 11 are committed, pushed, reviewed with no accepted
-findings, and focused validation passed.
+Iterations 1 through 12 are committed or ready to commit; iteration 12 passed
+review with no findings and focused validation passed.
 
 ## Evidence
 
@@ -23,7 +23,7 @@ None.
 ## Iteration State
 
 - Target: open-ended follow-up after the initial 10 completed iterations.
-- Completed iterations: 11.
+- Completed iterations: 12.
 - Committed cleanups:
   - Iteration 1: simplified deopt argument list construction in
     `backend/llvm/llvmize.ml` with `List.concat_map`.
@@ -47,6 +47,8 @@ None.
   - Iteration 10: used `In_channel.with_open_text` for LLVM backend file reads
     in `backend/llvm/llvmize.ml`.
   - Iteration 11: iterated external-call stack argument pairs directly in
+    `backend/llvm/llvmize.ml`.
+  - Iteration 12: used `List.rev_append` in LLVM expect-output extraction in
     `backend/llvm/llvmize.ml`.
 - Dropped ideas: none yet.
 - Stop condition: continue only while a small candidate passes five-reviewer
@@ -584,7 +586,50 @@ Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
 are broad LLVM backend validation runs, and this commit only changes a local
 list iteration.
 
+## Iteration 12 Candidate
+
+Path: self-proposed candidate.
+
+Candidate: replace `List.rev function_lines @ acc` with
+`List.rev_append function_lines acc` in the LLVM IR and assembly expect-output
+extraction loops in `backend/llvm/llvmize.ml`.
+
+Why likely useful: this is the standard OCaml helper for the existing
+reverse-then-append accumulator pattern. It preserves order while avoiding the
+manual append expression.
+
+Review gate: passed after five human-like reviews of the final diff.
+
+Review result: all five reviewers said keep with no findings. Reviewers checked
+that `List.rev_append function_lines acc` is equivalent to
+`List.rev function_lines @ acc`, including empty and singleton lists, and that
+the change is limited to the intended accumulator pattern.
+
+Validation result:
+
+- `git diff --check`: passed.
+- `eval "$(../../../scripts/agent-tmp-env)" && opam exec
+  --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`: passed.
+
+## Testing Story for This Commit
+
+Change: use `List.rev_append` in LLVM expect-output extraction loops, and
+record iteration 12 state in this progress file.
+Risk: if the rewrite is wrong, normalized LLVM IR or assembly expect output
+could reorder extracted function lines.
+Validation: `git diff --check`; `eval "$(../../../scripts/agent-tmp-env)" &&
+opam exec --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`.
+Full LLVM validation: not run for this commit; the rewrite is the standard
+equivalent of the existing reverse-then-append expression.
+Stage2 verification: not run for this commit; self-stage2 is intentionally
+deferred for the same reason as full LLVM validation.
+Why this is enough: five human-like reviews found no issues and checked the
+line-order behavior; the build check covers type and syntax validity.
+Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
+`make llvm-self-stage2-test LLVM_PATH="$LLVM_PATH"` are deferred because they
+are broad LLVM backend validation runs, and this commit only changes local list
+accumulation.
+
 ## Next Step
 
-No immediate code-quality iteration is queued. Continue only if another small,
-behavior-preserving candidate is found and passes the five-reviewer gate.
+Commit iteration 12 and push it to the draft PR branch.
