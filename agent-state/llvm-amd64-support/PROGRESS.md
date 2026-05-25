@@ -5,11 +5,12 @@ Last updated: 2026-05-25.
 ## Current Claim
 
 AMD64 LLVM backend bring-up now passes focused install, enabled Linux/AMD64
-`llvm-codegen`, and installed-compiler boot-smoke validation with the
-agent-local LLVM tools and writable install prefix. Focused AMD64 SIMD
-lowering now also covers the i64x2 add/sub, vec128 interleave, and vec256
-join/split operations needed by several layout/block-index tests, including
-the generated mixed-blocks native test on AMD64. The stale
+`llvm-codegen`, installed-compiler boot-smoke validation, and a full AMD64
+LLVM self-stage ocamltest refresh with the agent-local LLVM tools and writable
+install prefix. Focused AMD64 SIMD lowering now also covers the i64x2 add/sub,
+vec128 interleave, and vec256 join/split operations needed by several
+layout/block-index tests, including the generated mixed-blocks native test on
+AMD64. The stale
 `typing-layouts-or-null/probe.ml` LLVM lowering failure is also fixed for the
 default disabled-probe path. The standard-compiler LLVM-backend
 `lib-atomic/test_atomic_cmpxchg.ml` failure is fixed too. The native
@@ -649,29 +650,42 @@ register-clobbering edge.
       ARCH=amd64 LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
       prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 3 passed,
       0 skipped, 0 failed.
+  - Rebuilt the current AMD64 self-stage install after the frame-pointer,
+    native CFI, float32 array, and gctweaks fixes:
+    `tools/build-llvm-self-stage-install.sh` exits 0 with
+    `OCAMLRUNPARAM='b,Xmain_stack_size=64M'`. It reported boot wrapper/fresh IR
+    counts of 1678/827, runtime counts of 148/74, main counts of 2224/1105,
+    and both the stage0 and self-stage smoke tests printed `55`.
+  - Full self-stage ocamltest refresh now passes with normal build
+    parallelism and no concurrent top-level Make/Dune command:
+    `SELF_STAGE=1 ARCH=amd64 LLVM_WRAPPER="$LLVM_PATH"
+    LLVM_WRAPPER_LOG="$LLVM_WRAPPER_LOG" OCAMLRUNPARAM='b,Xmain_stack_size=64M'
+    tools/run-llvm-stage5-ocamltest.sh` exited 0 after 6346 passed, 269
+    skipped, 0 failed, 0 not started, and 0 unexpected errors. GNU parallel was
+    unavailable, so the script ran the testsuite serially. Wrapper counts:
+    6198 lines, 3099 fresh IR files.
+  - The broad self-stage refresh confirmed the previously failing families now
+    pass in context: `tests/backtrace`, `tests/frame-pointers`,
+    `tests/native-cfi-stepping`, `tests/typing-layouts-arrays` including
+    `test_float32_u_array.ml`, `tests/misc/gctweaks.ml`, and the AMD64
+    `llvm-codegen` regressions all passed.
 
 ## Current Blocker
 
 No focused blocker remains for `llvm-install` with a writable prefix, the
-enabled Linux/AMD64 `llvm-codegen` tests, or self-stage install and smoke. The
-default `/usr/local` install prefix is not writable in this environment, so use
-an explicit agent-local `prefix=...` for install validation. Also clear
-`LIST=`/`DIR=` when running a single `TEST=...` after
-`eval "$(../../../scripts/agent-tmp-env)"`, because the agent env may set
-`LIST` for broader test runs.
+enabled Linux/AMD64 `llvm-codegen` tests, self-stage install and smoke, or the
+full AMD64 LLVM self-stage ocamltest refresh. The default `/usr/local` install
+prefix is not writable in this environment, so use an explicit agent-local
+`prefix=...` for install validation. Also clear `LIST=`/`DIR=` when running a
+single `TEST=...` after `eval "$(../../../scripts/agent-tmp-env)"`, because the
+agent env may set `LIST` for broader test runs.
 
-The last full self-stage ocamltest refresh was down to 15 failures. Since then,
-focused standard-compiler LLVM-backend validation has cleared the backtrace,
-frame-pointer, native CFI stepping, and unboxed float32 array families, but a
-broad self-stage rerun is still needed for an updated final count. The
-`gctweaks.ml` failure was a test assumption about `Gc.Tweak.list_active ()`
-under `OCAMLRUNPARAM=Xmain_stack_size=...`, not an LLVM-native-specific codegen
-failure. The known stack-usage issue remains: some LLVM-built compiler paths need
+The known stack-usage issue remains: some LLVM-built compiler paths need
 `OCAMLRUNPARAM=b,Xmain_stack_size=64M` where the normal opam compiler does not.
 
 ## Next Step
 
-Run a broad self-stage ocamltest refresh to get an updated failure count after
-the focused backtrace, frame-pointer, native CFI, float32 array, and gctweaks
-fixes. Keep using normal build parallelism; avoid only concurrent top-level
+Do a final PR-readiness audit of the AMD64 LLVM backend changes and decide
+whether to split or polish any broad implementation commits before requesting
+review. Keep using normal build parallelism; avoid only concurrent top-level
 `make`/`dune` commands in this checkout because of the shared lockfile.
