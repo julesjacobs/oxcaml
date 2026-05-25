@@ -1909,6 +1909,36 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     emit_ins t (I.binary (float_op op) ~arg1:lhs ~arg2:rhs)
     |> store_into_reg t i.res.(0)
   in
+  let packf32 () =
+    let low =
+      load_reg_to_temp ~typ:T.float t i.arg.(0)
+      |> fun arg -> emit_ins t (I.convert Bitcast ~arg ~to_:T.i32)
+      |> fun bits -> emit_ins t (I.convert Zext ~arg:bits ~to_:T.i64)
+    in
+    let high =
+      load_reg_to_temp ~typ:T.float t i.arg.(1)
+      |> fun arg -> emit_ins t (I.convert Bitcast ~arg ~to_:T.i32)
+      |> fun bits -> emit_ins t (I.convert Zext ~arg:bits ~to_:T.i64)
+      |> fun bits -> emit_ins t (I.binary Shl ~arg1:bits ~arg2:(V.of_int 32))
+    in
+    let packed = emit_ins t (I.binary Or ~arg1:low ~arg2:high) in
+    emit_ins t (I.convert Bitcast ~arg:packed ~to_:T.double)
+    |> store_into_reg t i.res.(0)
+  in
+  let prefetch ~is_write ~locality addr =
+    let ptr = load_address_from_reg t addr i.arg.(0) in
+    let rw = if is_write then 1 else 0 in
+    let locality =
+      match locality with
+      | Arch.Nonlocal -> 0
+      | Arch.Low -> 1
+      | Arch.Moderate -> 2
+      | Arch.High -> 3
+    in
+    call_llvm_intrinsic_no_res t "prefetch.p0"
+      [ptr; V.of_int ~typ:T.i32 rw; V.of_int ~typ:T.i32 locality;
+       V.of_int ~typ:T.i32 1]
+  in
   match[@warning "-fragile-match"] op with
   | Ilea addr -> load_address_from_reg t addr i.arg.(0) |> store_int_res
   | Istore_int (n, addr, _is_modify) ->
@@ -1934,7 +1964,11 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     call_llvm_intrinsic t "x86.rdpmc" [counter] T.i64 |> store_int_res
   | Ilfence | Isfence | Imfence -> emit_ins_no_res t (I.fence Seq_cst)
   | Illvm_intrinsic intrinsic_name -> intrinsic t i intrinsic_name
-  | Ipackf32 | Isimd _ | Isimd_mem _ | Icldemote _ | Iprefetch _ ->
+  | Ipackf32 -> packf32 ()
+  | Icldemote _addr ->
+    ()
+  | Iprefetch { is_write; locality; addr } -> prefetch ~is_write ~locality addr
+  | Isimd _ | Isimd_mem _ ->
     not_implemented_basic ~msg:"specific" i
 
 (* CR yusumez: Implement atomic operations properly, since the current

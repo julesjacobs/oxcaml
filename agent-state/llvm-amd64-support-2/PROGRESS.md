@@ -25,14 +25,19 @@ builds on AMD64, and simple scalar programs compile and run with
   - `LLVM_WRAPPER_LOG=/tmp/oxcaml-agent-llvm-amd64-support-2/clang-wrapper.log`
 - Built vendored LLVM `llc` and `opt` for this agent checkout under
   `$OXCAML_AGENT_TMP/llvm-build` with `LLVM_TARGETS_TO_BUILD=X86`.
-- Implemented scalar AMD64 lowering in `backend/llvm/llvmize.ml` for the AMD64
+- Implemented AMD64 lowering in `backend/llvm/llvmize.ml` for the AMD64
   `Arch.specific_operation` constructors needed by non-SIMD code:
   `Ilea`, `Istore_int`, `Ioffset_loc`, `Ifloatarithmem`, `Ibswap`,
   `Isextend32`, `Izextend32`, `Irdtsc`, `Irdpmc`, fences, and
   `Illvm_intrinsic`.
-- SIMD/prefetch/cache-demote AMD64 specifics are intentionally still reported
-  as not implemented; this keeps the first implementation scalar and avoids
-  importing ARM64-specific lowering into AMD64.
+- Added AMD64 LLVM-backend selection/lowering for target-only `Cpackf32` and
+  `Cprefetch` so they no longer fall into the generic selector fatal path.
+  `Icldemote` is selected but lowered as a no-op because it is only a cache hint
+  and `llvm.x86.cldemote` aborts in this LLVM X86 configuration without the
+  matching selectable target feature.
+- SIMD AMD64 specifics are intentionally still reported as not implemented;
+  this keeps the first implementation scalar and avoids importing ARM64-specific
+  lowering into AMD64.
 - Fixed a normal AMD64 compiler build break in
   `backend/amd64/simd_selection.ml` by selecting the generated
   `vpmulhrsw_Y_Y_Ym256` AVX2 instruction helper.
@@ -45,26 +50,28 @@ builds on AMD64, and simple scalar programs compile and run with
   - program used recursion, allocation, exceptions, `Printf`, and `sqrt`
   - output: `42 24 3.0`
   - wrapper log contained 2 `-x ir` invocations.
-- Tried `ARCH=amd64 LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH" make
-  llvm-test-one TEST=llvm-codegen/arithmetic`.
-  - With the default `/usr/local` prefix it reached `install` and failed
-    because the sandbox cannot write `/usr/local`.
-  - Reconfiguring to a local prefix avoided that but forced a main compiler
-    rebuild on this host; GCC 15 defaults to PIE for executable links and Dune
-    then failed to link non-PIE OCaml objects. Global `LDFLAGS=-no-pie` fixed
-    executable linking but broke shared runtime library linking, so it is not a
-    valid workaround.
-  - The official target has not yet reached a real AMD64 LLVM codegen failure.
+- Manual prefetch/cldemote smoke:
+  - used builtin externals for `caml_prefetch_read_high`,
+    `caml_prefetch_write_low`, and `caml_cldemote`, plus temporary C stubs for
+    primitive table symbols
+  - compiled with the same `-llvm-backend -llvm-path "$LLVM_PATH"` setup
+  - output: `7`
+  - wrapper log contained 2 `-x ir` invocations.
+- Local testsuite setup works when run under opam with a make-time local prefix:
+  `opam exec -- make prefix="$PWD/_local-test-install" install_for_test`.
+- Direct testsuite run of `tests/llvm-codegen/arithmetic.ml` completed through
+  the harness but skipped because the test is currently gated by `macos` and
+  `arch_arm64`.
 
 ## Current Blocker
 
-No source blocker. The official `llvm-test-one` path currently needs a clean
-local install/test setup that avoids both `/usr/local` writes and global
-`-no-pie` on shared-library links.
+No source blocker. The existing `tests/llvm-codegen` tests are arm64/macos
+expect tests, so AMD64 needs its own focused LLVM tests or updated predicates
+before the official harness will execute useful LLVM-codegen coverage.
 
 ## Next Step
 
-Find or add a test invocation path that reuses the built compiler/runtime
-without installing to `/usr/local`, then run focused scalar LLVM tests and fix
-the first real AMD64 `-llvm-backend` lowering/runtime failure. After that,
-expand toward full `llvm-test` and `llvm-self-stage2-test`.
+Add AMD64-specific `llvm-codegen` tests for the scalar paths now working
+manually, then expand test coverage until the first real AMD64
+`-llvm-backend` lowering/runtime failure is exposed. After that, move toward
+full `llvm-test` and `llvm-self-stage2-test`.
