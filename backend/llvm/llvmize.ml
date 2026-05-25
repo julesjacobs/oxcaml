@@ -2641,6 +2641,53 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_pack_saturating src_width_in_bits ~unsigned =
+    let dst_width_in_bits = src_width_in_bits / 2 in
+    let src_typ = int_vec_type ~width_in_bits:src_width_in_bits in
+    let dst_typ = int_vec_type ~width_in_bits:dst_width_in_bits in
+    let dst_elem_typ = T.Int { width_in_bits = dst_width_in_bits } in
+    let min_value, max_value =
+      if unsigned
+      then 0, (1 lsl dst_width_in_bits) - 1
+      else
+        ( ~-(1 lsl (dst_width_in_bits - 1)),
+          (1 lsl (dst_width_in_bits - 1)) - 1 )
+    in
+    let min_vector = int_vector_constant_like src_typ min_value in
+    let max_vector = int_vector_constant_like src_typ max_value in
+    let lanes = 128 / src_width_in_bits in
+    let clamp src =
+      let below_min = emit_ins t (I.icmp I.Islt ~arg1:src ~arg2:min_vector) in
+      let above_max = emit_ins t (I.icmp I.Isgt ~arg1:src ~arg2:max_vector) in
+      let clamped_min =
+        emit_ins t (I.select ~cond:below_min ~ifso:min_vector ~ifnot:src)
+      in
+      emit_ins t (I.select ~cond:above_max ~ifso:max_vector ~ifnot:clamped_min)
+    in
+    let insert_arg vector arg_index =
+      let src =
+        cast_if_needed (load_reg_to_temp t i.arg.(arg_index)) src_typ |> clamp
+      in
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let elem =
+               emit_ins t (I.extractelement ~vector:src ~index:(V.of_int lane))
+             in
+             let narrowed =
+               emit_ins t (I.convert Trunc ~arg:elem ~to_:dst_elem_typ)
+             in
+             emit_ins t
+               (I.insertelement ~vector
+                  ~index:(V.of_int ((arg_index * lanes) + lane))
+                  ~to_insert:narrowed))
+           vector
+    in
+    let res =
+      insert_arg (V.poison dst_typ) 0 |> fun vector -> insert_arg vector 1
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_widening_mul src_width_in_bits convert_op ~high =
     let dst_width_in_bits = 2 * src_width_in_bits in
     let src_typ = int_vec_type ~width_in_bits:src_width_in_bits in
@@ -3368,6 +3415,18 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_avg_unsigned 8
     | Amd64_simd_instrs.Pavgw_X_Xm128 | Amd64_simd_instrs.Vpavgw_X_X_Xm128 ->
       simd_int_avg_unsigned 16
+    | Amd64_simd_instrs.Packsswb
+    | Amd64_simd_instrs.Vpacksswb_X_X_Xm128 ->
+      simd_int_pack_saturating 16 ~unsigned:false
+    | Amd64_simd_instrs.Packssdw
+    | Amd64_simd_instrs.Vpackssdw_X_X_Xm128 ->
+      simd_int_pack_saturating 32 ~unsigned:false
+    | Amd64_simd_instrs.Packuswb
+    | Amd64_simd_instrs.Vpackuswb_X_X_Xm128 ->
+      simd_int_pack_saturating 16 ~unsigned:true
+    | Amd64_simd_instrs.Packusdw
+    | Amd64_simd_instrs.Vpackusdw_X_X_Xm128 ->
+      simd_int_pack_saturating 32 ~unsigned:true
     | Amd64_simd_instrs.Pcmpeqb | Amd64_simd_instrs.Vpcmpeqb_X_X_Xm128 ->
       simd_int_cmp 8 Int_EQ ~zero:false
     | Amd64_simd_instrs.Pcmpeqw | Amd64_simd_instrs.Vpcmpeqw_X_X_Xm128 ->
