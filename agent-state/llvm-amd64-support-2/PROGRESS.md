@@ -62,16 +62,31 @@ builds on AMD64, and simple scalar programs compile and run with
 - Direct testsuite run of `tests/llvm-codegen/arithmetic.ml` completed through
   the harness but skipped because the test is currently gated by `macos` and
   `arch_arm64`.
+- Added `testsuite/tests/llvm-codegen/amd64_smoke.ml` plus
+  `amd64_smoke.sh`, an AMD64-gated testsuite smoke that builds and runs three
+  `-llvm-backend` programs:
+  - scalar recursion/allocation/exception/`Printf`/`sqrt` smoke, expected
+    output `42 24 3.0`
+  - float32 conversion smoke, expected output `1.5 2.5`
+  - prefetch/cldemote builtin smoke with local C primitive-table stubs,
+    expected output `7`
+- The smoke script passes `_runtest/stdlib` explicitly with `-nostdlib -I`
+  because the local `ocamlopt.opt` can otherwise look at its configured install
+  prefix and fail with `Unbound module "Stdlib"` in this harness setup.
+- Focused testsuite run passed:
+  `env -u DIR -u LIST opam exec -- make --trace one TEST=tests/llvm-codegen/amd64_smoke.ml`
+  from `_runtest/testsuite`, with `OCAMLSRCDIR` and
+  `CAML_LD_LIBRARY_PATH` pointed at `_runtest`.
 
 ## Current Blocker
 
-No source blocker. The existing `tests/llvm-codegen` tests are arm64/macos
-expect tests, so AMD64 needs its own focused LLVM tests or updated predicates
-before the official harness will execute useful LLVM-codegen coverage.
+No immediate source blocker. The first AMD64-specific `llvm-codegen` smoke now
+runs through the official harness, but full `llvm-test` and
+`llvm-self-stage2-test` have not been attempted yet.
 
 ## Next Step
 
-Add AMD64-specific `llvm-codegen` tests for the scalar paths now working
-manually, then expand test coverage until the first real AMD64
-`-llvm-backend` lowering/runtime failure is exposed. After that, move toward
-full `llvm-test` and `llvm-self-stage2-test`.
+Run broader AMD64 `-llvm-backend` test targets and use the first focused failure
+to decide whether the next work is additional scalar lowering, SIMD lowering, or
+runtime/linkage support. After that, move toward full `llvm-test` and
+`llvm-self-stage2-test`.
