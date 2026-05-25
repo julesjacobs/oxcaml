@@ -205,6 +205,7 @@ module Fn_attr : sig
     | Noinline
     | Oxcaml_stack_check
     | Oxcaml_stack_check_bytes of int
+    | Oxcaml_stack_check_before_bytes of int
     | Returns_twice
     | Statepoint_id of int
 

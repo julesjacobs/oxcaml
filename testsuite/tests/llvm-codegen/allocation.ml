@@ -84,22 +84,6 @@ L105:
 [%%expect_llvm_asm AArch64{|_camlTOP__make_pair_0_1_code:
 	.cfi_startproc
 ; %bb.0:                                ; %L1
-	; InlineAsm Start
-	mov	x17, x30
-	ldr	x16, [x28, #40]
-	adrp	x30, _caml_plat_pagesize@GOTPAGE
-	ldr	x30, [x30, _caml_plat_pagesize@GOTPAGEOFF]
-	ldr	x30, [x30]
-	add	x16, x16, x30, lsl #1
-	mov	x30, #36
-	add	x16, x16, x30, lsl #3
-	cmp	sp, x16
-	b.hs	Ltmp0
-	mov	x16, #36
-	bl	_caml_llvm_prologue_realloc_stack
-Ltmp0:
-	mov	x30, x17
-	; InlineAsm End
 	stp	x29, x30, [sp, #-16]!           ; 16-byte Folded Spill
 	.cfi_def_cfa_offset 16
 	mov	x29, sp
@@ -130,7 +114,7 @@ LBB0_1:                                 ; %L105
 LBB0_2:                                 ; %L104
 	mov	x27, x8
 	bl	_caml_call_gc
-Ltmp1:
+Ltmp0:
 	mov	x8, x27
 	b	LBB0_1
 	.cfi_endproc|}]
