@@ -16,6 +16,10 @@ Use `PLAN.md` as a guide, not a rigid checklist.
 - Expected output: one small, well-reviewed cleanup that improves maintainability
   without intended behavior changes, plus focused validation.
 
+Each commit must have a written testing story in `PROGRESS.md`: what was run,
+why that validation is enough for the commit's risk, and what broader validation
+is intentionally deferred.
+
 ## Branches
 
 - OxCaml: `jujacobs/llvm-backend-code-quality`
