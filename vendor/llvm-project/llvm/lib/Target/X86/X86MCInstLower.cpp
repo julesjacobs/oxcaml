@@ -125,9 +125,39 @@ void X86AsmPrinter::StackMapShadowTracker::emitShadowPadding(
   }
 }
 
+static bool isCallOpcode(unsigned Opcode) {
+  switch (Opcode) {
+  case X86::CALLpcrel16:
+  case X86::CALLpcrel32:
+  case X86::CALL16r:
+  case X86::CALL16m:
+  case X86::CALL32r:
+  case X86::CALL32m:
+  case X86::CALL16r_NT:
+  case X86::CALL16m_NT:
+  case X86::CALL32r_NT:
+  case X86::CALL32m_NT:
+  case X86::CALL64pcrel32:
+  case X86::CALL64r:
+  case X86::CALL64m:
+  case X86::CALL64r_NT:
+  case X86::CALL64m_NT:
+  case X86::CALL64m_RVMARKER:
+  case X86::CALL64r_RVMARKER:
+  case X86::CALL64pcrel32_RVMARKER:
+    return true;
+  default:
+    return false;
+  }
+}
+
 void X86AsmPrinter::EmitAndCountInstruction(MCInst &Inst) {
   OutStreamer->emitInstruction(Inst, getSubtargetInfo());
   SMShadowTracker.count(Inst, getSubtargetInfo(), CodeEmitter.get());
+  if (isCallOpcode(Inst.getOpcode())) {
+    LastCallReturnLabel = OutStreamer->getContext().createTempSymbol();
+    OutStreamer->emitLabel(LastCallReturnLabel);
+  }
 }
 
 X86MCInstLower::X86MCInstLower(const MachineFunction &mf,
@@ -1484,8 +1514,12 @@ void X86AsmPrinter::LowerSTACKMAP(const MachineInstr &MI) {
   SMShadowTracker.emitShadowPadding(*OutStreamer, getSubtargetInfo());
 
   auto &Ctx = OutStreamer->getContext();
-  MCSymbol *MILabel = Ctx.createTempSymbol();
-  OutStreamer->emitLabel(MILabel);
+  MCSymbol *MILabel = LastCallReturnLabel;
+  if (!MILabel) {
+    MILabel = Ctx.createTempSymbol();
+    OutStreamer->emitLabel(MILabel);
+  }
+  LastCallReturnLabel = nullptr;
 
   SM.recordStackMap(*MILabel, MI);
   unsigned NumShadowBytes = MI.getOperand(1).getImm();
@@ -2752,6 +2786,8 @@ void X86AsmPrinter::emitInstruction(const MachineInstr *MI) {
     SMShadowTracker.emitShadowPadding(*OutStreamer, getSubtargetInfo());
     // Then emit the call
     OutStreamer->emitInstruction(TmpInst, getSubtargetInfo());
+    LastCallReturnLabel = OutStreamer->getContext().createTempSymbol();
+    OutStreamer->emitLabel(LastCallReturnLabel);
     return;
   }
 

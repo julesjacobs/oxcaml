@@ -71,6 +71,7 @@ class LLVM_LIBRARY_VISIBILITY X86AsmPrinter : public AsmPrinter {
   };
 
   StackMapShadowTracker SMShadowTracker;
+  MCSymbol *LastCallReturnLabel = nullptr;
 
   // All instructions emitted by the X86AsmPrinter should use this helper
   // method.

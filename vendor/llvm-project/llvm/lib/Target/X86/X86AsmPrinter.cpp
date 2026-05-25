@@ -61,6 +61,7 @@ bool X86AsmPrinter::runOnMachineFunction(MachineFunction &MF) {
   Subtarget = &MF.getSubtarget<X86Subtarget>();
 
   SMShadowTracker.startFunction(MF);
+  LastCallReturnLabel = nullptr;
   CodeEmitter.reset(TM.getTarget().createMCCodeEmitter(
       *Subtarget->getInstrInfo(), MF.getContext()));
 

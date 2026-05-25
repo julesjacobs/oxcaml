@@ -57,6 +57,12 @@ passes a direct `llc` prologue smoke test for a stack-frame-using
   - `backend/amd64/{cfg_selection,arch}.ml` and `backend/llvm/llvmize.ml`
     recognize and lower the scalar float `sqrt`/`sqrtf` and SIMD float32/float64
     min/max/round/cast builtins needed by the LLVM backend path.
+  - `vendor/llvm-project/llvm/lib/Target/X86/{X86AsmPrinter.cpp,
+    X86AsmPrinter.h,X86MCInstLower.cpp}` records a temporary return-address
+    label after emitted X86 call instructions and lets the following
+    standalone stackmap consume that label. This fixes call stackmaps whose
+    MachineInstr position is after LLVM's return-value copies, where the
+    runtime needs the actual post-call return address.
 - Validation done this turn:
   - `git diff --check` passed.
   - Added local opam repository `tools/ci/local-opam` as `oxcaml-local`.
@@ -117,6 +123,18 @@ passes a direct `llc` prologue smoke test for a stack-frame-using
   - Manual reproduction of the former `simdgen.exe` blocker now succeeds:
     `cd _build/main/tools/simdgen && ./simdgen.exe amd64` exits 0, writes
     9,987 lines, and emits no stderr.
+  - Diagnosed the next stack-scan crash in
+    `_build/main/tools/objinfo.exe ocamloptcomp.cma`: the missing descriptor was
+    for the first non-tail indirect call in `caml_apply3`. The return address
+    was `0x...4664`, but the standalone stackmap descriptor had been emitted
+    after LLVM's `mov %rax,%rbx` return-value copy at `0x...4667`.
+  - A statepoint-based attempt fixed that descriptor but corrupted the
+    `merge_archives.exe` path, so it was backed out. The committed direction is
+    the narrower X86 asm-printer label fix described above.
+  - After rebuilding agent-local `llc` and forcing `_build/main` regeneration,
+    `_build/main/tools/objinfo.exe ocamloptcomp.cma` now exits 0 and writes
+    34,474 lines, confirming the `caml_apply3` missing-frame-descriptor
+    reproducer is fixed.
 
 ## Current Blocker
 
@@ -128,9 +146,10 @@ Focused compiler/install validation now reaches the
 
 With `OCAMLRUNPARAM=b`, the backtrace points through
 `Bytelibrarian.copy_object_file` called by `tools/merge_archives.ml`.
-`_build/main/tools/objinfo.exe ocamloptcomp.cma` can read the archive, so the
-current evidence points to an LLVM-built tool/runtime miscompile rather than an
-obviously corrupt `.cma`.
+`_build/main/tools/objinfo.exe ocamloptcomp.cma` now reads the archive
+successfully after the X86 stackmap label fix, so the remaining failure appears
+to be a separate LLVM-built tool/runtime miscompile rather than an obviously
+corrupt `.cma` or the previous missing-frame-descriptor crash.
 
 ## Next Step
 
