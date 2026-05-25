@@ -1716,6 +1716,13 @@ limit is raised from `l=100000` to `l=150000`.
       directly under `validation-tmp/simd_int_add_sub_script`; the kept IR
       contains vector `add`/`sub` operations for `<16 x i8>`, `<8 x i16>`,
       and `<4 x i32>`.
+    - Implemented AMD64 LLVM lowering for the SSE vec128 bitwise subset
+      (`and`, `andnot`, `or`, `xor`) and rebuilt with
+      `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_bitwise.sh` script passed
+      directly under `validation-tmp/simd_bitwise_script`; the kept IR
+      contains `<2 x i64>` `and`, `or`, and `xor` operations, including the
+      all-ones vector used to lower `andnot`.
 
 ## Current Blocker
 

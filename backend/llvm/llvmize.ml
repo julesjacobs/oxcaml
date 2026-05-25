@@ -2412,6 +2412,15 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let res = emit_ins t (I.binary op ~arg1 ~arg2) in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_andnot width_in_bits =
+    let typ = int_vec_type ~width_in_bits in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let all_ones = int_vector_constant width_in_bits (-1) in
+    let not_arg1 = emit_ins t (I.binary Xor ~arg1 ~arg2:all_ones) in
+    let res = emit_ins t (I.binary And ~arg1:not_arg1 ~arg2) in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_binary_intrinsic typ intrinsic =
     let name = intrinsic ^ "." ^ llvm_intrinsic_type_suffix typ in
     let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -3253,6 +3262,14 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_binary 32 Sub
     | Amd64_simd_instrs.Psubq_X_Xm128 | Amd64_simd_instrs.Vpsubq_X_X_Xm128 ->
       simd_int_binary 64 Sub
+    | Amd64_simd_instrs.Andps | Amd64_simd_instrs.Vandps_X_X_Xm128 ->
+      simd_int_binary 64 And
+    | Amd64_simd_instrs.Andnps | Amd64_simd_instrs.Vandnps_X_X_Xm128 ->
+      simd_int_andnot 64
+    | Amd64_simd_instrs.Orps | Amd64_simd_instrs.Vorps_X_X_Xm128 ->
+      simd_int_binary 64 Or
+    | Amd64_simd_instrs.Xorps | Amd64_simd_instrs.Vxorps_X_X_Xm128 ->
+      simd_int_binary 64 Xor
     | Amd64_simd_instrs.Punpckhqdq | Amd64_simd_instrs.Vpunpckhqdq_X_X_Xm128 ->
       simd_zip (int_vec_type ~width_in_bits:64) ~high:true
     | Amd64_simd_instrs.Punpcklqdq | Amd64_simd_instrs.Vpunpcklqdq_X_X_Xm128 ->
