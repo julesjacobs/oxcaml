@@ -1081,6 +1081,17 @@ call. This clears the remaining focused vector array/product-array failures.
       `test_ignorable_product_array_4.ml`,
       `test_ignorable_product_array_with_uninit_3.ml`, and
       `test_ignorable_product_array_with_uninit_4.ml`.
+    - Rechecked the two old non-layout focused failures on top of
+      `f6451372fe`:
+      - `native-cfi-stepping/test_cfi.ml` still mismatches. The direct compile
+        in `validation-tmp/native_cfi_xmm_default` succeeds, but
+        `run_gdb.sh ./test_cfi` emits repeated `Backtrace failed` sections
+        while single-stepping through `caml_raise_exn` around
+        `test_cfi.ml:50`; the expected output is just `ok`.
+      - `runtime-errors/stackoverflow.ml` still mismatches. The direct run in
+        `validation-tmp/stackoverflow_xmm_default` exits 0, but omits both
+        `x = 20000` lines from `stackoverflow.opt.reference`, while preserving
+        the later `x = 10000`, `x = 0`, backtrace, and `!p = 42` lines.
 
 ## Current Blocker
 
