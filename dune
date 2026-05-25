@@ -666,6 +666,7 @@
   vectorize_specific
   ;; backend/llvm
   llvm_ir
+  llvmize_specific
   llvmize
   ;; backend/regalloc
   regalloc_affinity

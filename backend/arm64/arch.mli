@@ -43,15 +43,7 @@ type cmm_label = Label.t
 
 type bswap_bitwidth = Sixteen | Thirtytwo | Sixtyfour
 
-type prefetch_temporal_locality_hint = Nonlocal | Low | Moderate | High
-
-type float_width = Cmm.float_width
-
 type specific_operation =
-  | Ilea of addressing_mode
-  | Istore_int of nativeint * addressing_mode * bool
-  | Ioffset_loc of int * addressing_mode
-  | Ifloatarithmem of float_width * float_operation * addressing_mode
   | Ifar_poll
   | Ifar_alloc of { bytes : int; dbginfo : Cmm.alloc_dbginfo }
   | Ishiftarith of arith_operation * int
@@ -64,35 +56,14 @@ type specific_operation =
   | Inegmulsubf   (* floating-point negate, multiply and subtract *)
   | Isqrtf        (* floating-point square root *)
   | Ibswap of { bitwidth: bswap_bitwidth; } (* endianness conversion *)
-  | Isextend32
-  | Izextend32
-  | Irdtsc
-  | Irdpmc
-  | Ilfence
-  | Isfence
-  | Imfence
-  | Ipackf32
   | Imove32       (* 32-bit integer move *)
   | Isignext of int (* sign extension *)
   | Isimd of Simd.operation
-  | Isimd_mem of Simd.Mem.operation * addressing_mode
-  | Icldemote of addressing_mode
-  | Iprefetch of
-      { is_write: bool;
-        locality: prefetch_temporal_locality_hint;
-        addr: addressing_mode;
-      }
   | Illvm_intrinsic of string
 
 and arith_operation =
     Ishiftadd
   | Ishiftsub
-
-and float_operation =
-  | Ifloatadd
-  | Ifloatsub
-  | Ifloatmul
-  | Ifloatdiv
 
 val equal_specific_operation : specific_operation -> specific_operation -> bool
 

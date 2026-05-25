@@ -2044,7 +2044,7 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     emit_ins_no_res t (I.store ~ptr ~to_store:value)
   in
   let float_arg typ n = load_reg_to_temp ~typ t i.arg.(n) in
-  let float_op : Arch.float_operation -> I.binary_op = function
+  let float_op : Llvmize_specific.float_operation -> I.binary_op = function
     | Ifloatadd -> Fadd
     | Ifloatsub -> Fsub
     | Ifloatmul -> Fmul
@@ -2110,19 +2110,10 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       |> store_simd_res
     | _ -> Misc.fatal_error "expected vector type"
   in
-  let simd_imm simd =
-    let imm : int option = Obj.obj (Obj.field (Obj.repr simd) 1) in
+  let simd_imm imm =
     match imm with
     | Some imm -> imm
     | None -> fail_msg ~name:"specific" "missing SIMD immediate"
-  in
-  let amd64_simd_instr_id simd =
-    let pseudo_instr = Obj.field (Obj.repr simd) 0 in
-    if Obj.tag pseudo_instr = 0
-    then
-      let instr : Amd64_simd_instrs.instr = Obj.obj (Obj.field pseudo_instr 0) in
-      instr.id
-    else not_implemented_basic ~msg:"specific sequence" i
   in
   let simd_vec256_insert_128 imm =
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) T.vec256 in
@@ -2156,32 +2147,34 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
          (V.poison T.vec128)
     |> store_simd_res
   in
-  match[@warning "-4-8-18"] op with
-  | Ilea addr ->
+  match Llvmize_specific.classify op with
+  | Amd64_lea addr ->
     load_address_from_reg t addr i.arg.(0) |> store_int_res
-  | Istore_int (n, addr, _is_modify) ->
+  | Amd64_store_int (n, addr, _is_modify) ->
     store_i64_to_address addr i.arg.(0) (V.of_nativeint n)
-  | Ioffset_loc (n, addr) ->
+  | Amd64_offset_loc (n, addr) ->
     let ptr = load_address_from_reg t addr i.arg.(0) in
     let old_value = emit_ins t (I.load ~ptr ~typ:T.i64) in
     let new_value =
       emit_ins t (I.binary Add ~arg1:old_value ~arg2:(V.of_int n))
     in
     emit_ins_no_res t (I.store ~ptr ~to_store:new_value)
-  | Ifloatarithmem (width, op, addr) -> float_arith_mem width op addr
-  | Ibswap { bitwidth } -> bswap t i bitwidth
-  | Isextend32 ->
+  | Amd64_floatarithmem (width, op, addr) -> float_arith_mem width op addr
+  | Bswap bitwidth -> bswap t i bitwidth
+  | Amd64_sextend32 ->
     let narrowed = emit_ins t (I.convert Trunc ~arg:(int_arg 0) ~to_:T.i32) in
     emit_ins t (I.convert Sext ~arg:narrowed ~to_:T.i64) |> store_int_res
-  | Izextend32 ->
+  | Amd64_zextend32 ->
     let narrowed = emit_ins t (I.convert Trunc ~arg:(int_arg 0) ~to_:T.i32) in
     emit_ins t (I.convert Zext ~arg:narrowed ~to_:T.i64) |> store_int_res
-  | Irdtsc -> call_llvm_intrinsic t "readcyclecounter" [] T.i64 |> store_int_res
-  | Irdpmc ->
+  | Amd64_rdtsc ->
+    call_llvm_intrinsic t "readcyclecounter" [] T.i64 |> store_int_res
+  | Amd64_rdpmc ->
     let counter = emit_ins t (I.convert Trunc ~arg:(int_arg 0) ~to_:T.i32) in
     call_llvm_intrinsic t "x86.rdpmc" [counter] T.i64 |> store_int_res
-  | Ilfence | Isfence | Imfence -> emit_ins_no_res t (I.fence Seq_cst)
-  | Ipackf32 ->
+  | Amd64_lfence | Amd64_sfence | Amd64_mfence ->
+    emit_ins_no_res t (I.fence Seq_cst)
+  | Amd64_packf32 ->
     let pack_arg n =
       let arg = float_arg T.double n in
       let bits64 = emit_ins t (I.convert Bitcast ~arg ~to_:T.i64) in
@@ -2197,9 +2190,9 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let packed = emit_ins t (I.binary Or ~arg1:low64 ~arg2:high64) in
     emit_ins t (I.convert Bitcast ~arg:packed ~to_:T.double)
     |> store_into_reg t i.res.(0)
-  | Illvm_intrinsic intrinsic_name -> intrinsic t i intrinsic_name
-  | Isimd simd when Target_system.architecture () = X86_64 -> (
-    match (amd64_simd_instr_id simd : Amd64_simd_instrs.id) with
+  | Llvm_intrinsic intrinsic_name -> intrinsic t i intrinsic_name
+  | Amd64_simd (instr_id, imm) -> (
+    match[@warning "-4"] instr_id with
     | Amd64_simd_instrs.Paddq
     | Amd64_simd_instrs.Vpaddq_X_X_Xm128 ->
       simd_int_binary 64 Add
@@ -2213,11 +2206,15 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | Amd64_simd_instrs.Vpunpcklqdq_X_X_Xm128 ->
       simd_zip (int_vec_type ~width_in_bits:64) ~high:false
     | Amd64_simd_instrs.Vinsertf128 ->
-      simd_vec256_insert_128 (simd_imm simd)
+      simd_vec256_insert_128 (simd_imm imm)
     | Amd64_simd_instrs.Vextractf128 ->
-      simd_vec256_extract_128 (simd_imm simd)
+      simd_vec256_extract_128 (simd_imm imm)
     | _ -> not_implemented_basic ~msg:"specific" i)
-  | Isimd_mem _ | Icldemote _ | Iprefetch _ ->
+  | Amd64_simd_mem | Amd64_cldemote | Amd64_prefetch ->
+    not_implemented_basic ~msg:"specific" i
+  | Arm64_shiftarith _ | Arm64_muladd | Arm64_mulsub | Arm64_negmulf
+  | Arm64_muladdf | Arm64_negmuladdf | Arm64_mulsubf | Arm64_negmulsubf
+  | Arm64_sqrtf | Arm64_move32 | Arm64_signext _ | Arm64_simd _ ->
     not_implemented_basic ~msg:"specific" i
 
 (* CR yusumez: Implement atomic operations properly, since the current

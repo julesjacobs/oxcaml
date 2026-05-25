@@ -21,10 +21,6 @@ module Arm64_ast = Arm64_ast.Ast
 
 type operation_class = Pure
 
-module Mem = struct
-  type operation = unit
-end
-
 module Rounding_mode = struct
   type t =
     | Current (* Default is Nearest *)

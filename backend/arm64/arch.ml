@@ -63,16 +63,8 @@ type cmm_label = Label.t
 
 type bswap_bitwidth = Sixteen | Thirtytwo | Sixtyfour
 
-type prefetch_temporal_locality_hint = Nonlocal | Low | Moderate | High
-
-type float_width = Cmm.float_width
-
 (* Specific operations, including [Simd], must not raise. *)
 type specific_operation =
-  | Ilea of addressing_mode
-  | Istore_int of nativeint * addressing_mode * bool
-  | Ioffset_loc of int * addressing_mode
-  | Ifloatarithmem of float_width * float_operation * addressing_mode
   | Ifar_poll
   | Ifar_alloc of { bytes : int; dbginfo : Cmm.alloc_dbginfo }
   | Ishiftarith of arith_operation * int
@@ -85,35 +77,14 @@ type specific_operation =
   | Inegmulsubf   (* floating-point negate, multiply and subtract *)
   | Isqrtf        (* floating-point square root *)
   | Ibswap of { bitwidth: bswap_bitwidth; } (* endianness conversion *)
-  | Isextend32
-  | Izextend32
-  | Irdtsc
-  | Irdpmc
-  | Ilfence
-  | Isfence
-  | Imfence
-  | Ipackf32
   | Imove32       (* 32-bit integer move *)
   | Isignext of int (* sign extension *)
   | Isimd of Simd.operation
-  | Isimd_mem of Simd.Mem.operation * addressing_mode
-  | Icldemote of addressing_mode
-  | Iprefetch of
-      { is_write: bool;
-        locality: prefetch_temporal_locality_hint;
-        addr: addressing_mode;
-      }
   | Illvm_intrinsic of string
 
 and arith_operation =
     Ishiftadd
   | Ishiftsub
-
-and float_operation =
-  | Ifloatadd
-  | Ifloatsub
-  | Ifloatmul
-  | Ifloatdiv
 
 (* Sizes, endianness *)
 
@@ -198,22 +169,8 @@ let int_of_bswap_bitwidth = function
   | Thirtytwo -> 32
   | Sixtyfour -> 64
 
-let string_of_prefetch_temporal_locality_hint = function
-  | Nonlocal -> "nonlocal"
-  | Low -> "low"
-  | Moderate -> "moderate"
-  | High -> "high"
-
 let print_specific_operation printreg op ppf arg =
   match op with
-  | Ilea addr ->
-    print_addressing printreg addr ppf arg
-  | Istore_int (n, addr, _is_assign) ->
-    fprintf ppf "%nd -> %a" n (print_addressing printreg addr) arg
-  | Ioffset_loc (n, addr) ->
-    fprintf ppf "%i + %a" n (print_addressing printreg addr) arg
-  | Ifloatarithmem _ ->
-    fprintf ppf "floatarithmem"
   | Ifar_poll ->
     fprintf ppf "(far) poll"
   | Ifar_alloc { bytes; dbginfo = _ } ->
@@ -269,16 +226,6 @@ let print_specific_operation printreg op ppf arg =
       let n = int_of_bswap_bitwidth bitwidth in
       fprintf ppf "bswap%i %a" n
         printreg arg.(0)
-  | Isextend32 ->
-      fprintf ppf "sextend32 %a" printreg arg.(0)
-  | Izextend32 ->
-      fprintf ppf "zextend32 %a" printreg arg.(0)
-  | Irdtsc -> fprintf ppf "rdtsc"
-  | Irdpmc -> fprintf ppf "rdpmc"
-  | Ilfence -> fprintf ppf "lfence"
-  | Isfence -> fprintf ppf "sfence"
-  | Imfence -> fprintf ppf "mfence"
-  | Ipackf32 -> fprintf ppf "packf32"
   | Imove32 ->
       fprintf ppf "move32 %a"
         printreg arg.(0)
@@ -287,23 +234,11 @@ let print_specific_operation printreg op ppf arg =
         n printreg arg.(0)
   | Isimd op ->
     Simd.print_operation printreg op ppf arg
-  | Isimd_mem _ ->
-      fprintf ppf "simd_mem"
-  | Icldemote addr ->
-      fprintf ppf "cldemote %a" (print_addressing printreg addr) arg
-  | Iprefetch { is_write; locality; addr } ->
-      fprintf ppf "prefetch is_write=%b prefetch_temporal_locality_hint=%s %a"
-        is_write (string_of_prefetch_temporal_locality_hint locality)
-        (print_addressing printreg addr) arg
   | Illvm_intrinsic name ->
       fprintf ppf "llvm_intrinsic %s" name
 
 let specific_operation_name : specific_operation -> string = fun op ->
   match op with
-  | Ilea _ -> "lea"
-  | Istore_int (n, _addr, _is_assign) -> "store_int " ^ Nativeint.to_string n
-  | Ioffset_loc (n, _addr) -> "offset_loc " ^ string_of_int n
-  | Ifloatarithmem _ -> "floatarithmem"
   | Ifar_poll -> "far poll"
   | Ifar_alloc { bytes; dbginfo = _ } ->
       Printf.sprintf "far alloc of %d bytes" bytes
@@ -325,20 +260,9 @@ let specific_operation_name : specific_operation -> string = fun op ->
   | Inegmulsubf -> "negmulsubf"
   | Isqrtf -> "sqrtf"
   | Ibswap _ -> "bswap"
-  | Isextend32 -> "sextend32"
-  | Izextend32 -> "zextend32"
-  | Irdtsc -> "rdtsc"
-  | Irdpmc -> "rdpmc"
-  | Ilfence -> "lfence"
-  | Isfence -> "sfence"
-  | Imfence -> "mfence"
-  | Ipackf32 -> "packf32"
   | Imove32 -> "move32"
   | Isignext _ -> "signext"
   | Isimd _ -> "simd"
-  | Isimd_mem _ -> "simd_mem"
-  | Icldemote _ -> "cldemote"
-  | Iprefetch _ -> "prefetch"
   | Illvm_intrinsic _ -> "llvm_intrinsic"
 
 let equal_addressing_mode left right =
@@ -356,35 +280,8 @@ let equal_arith_operation left right =
   | Ishiftsub, Ishiftsub -> true
   | (Ishiftadd | Ishiftsub), _ -> false
 
-let equal_float_operation left right =
-  match left, right with
-  | Ifloatadd, Ifloatadd
-  | Ifloatsub, Ifloatsub
-  | Ifloatmul, Ifloatmul
-  | Ifloatdiv, Ifloatdiv ->
-    true
-  | (Ifloatadd | Ifloatsub | Ifloatmul | Ifloatdiv), _ -> false
-
-let equal_prefetch_temporal_locality_hint left right =
-  match left, right with
-  | Nonlocal, Nonlocal | Low, Low | Moderate, Moderate | High, High -> true
-  | (Nonlocal | Low | Moderate | High), _ -> false
-
 let equal_specific_operation left right =
   match left, right with
-  | Ilea left, Ilea right -> equal_addressing_mode left right
-  | Istore_int (left_n, left_addr, left_is_assign),
-    Istore_int (right_n, right_addr, right_is_assign) ->
-    Nativeint.equal left_n right_n
-    && equal_addressing_mode left_addr right_addr
-    && Bool.equal left_is_assign right_is_assign
-  | Ioffset_loc (left_n, left_addr), Ioffset_loc (right_n, right_addr) ->
-    Int.equal left_n right_n && equal_addressing_mode left_addr right_addr
-  | Ifloatarithmem (left_width, left_op, left_addr),
-    Ifloatarithmem (right_width, right_op, right_addr) ->
-    Cmm.equal_float_width left_width right_width
-    && equal_float_operation left_op right_op
-    && equal_addressing_mode left_addr right_addr
   | Ifar_alloc { bytes = left_bytes; dbginfo = _; },
     Ifar_alloc { bytes = right_bytes; dbginfo = _; } ->
     Int.equal left_bytes right_bytes
@@ -402,37 +299,13 @@ let equal_specific_operation left right =
   | Isqrtf, Isqrtf -> true
   | Ibswap { bitwidth = left }, Ibswap { bitwidth = right } ->
     Int.equal (int_of_bswap_bitwidth left) (int_of_bswap_bitwidth right)
-  | Isextend32, Isextend32 -> true
-  | Izextend32, Izextend32 -> true
-  | Irdtsc, Irdtsc -> true
-  | Irdpmc, Irdpmc -> true
-  | Ilfence, Ilfence -> true
-  | Isfence, Isfence -> true
-  | Imfence, Imfence -> true
-  | Ipackf32, Ipackf32 -> true
   | Imove32, Imove32 -> true
   | Isignext left, Isignext right -> Int.equal left right
   | Isimd left, Isimd right -> Simd.equal_operation left right
-  | Isimd_mem ((), left_addr), Isimd_mem ((), right_addr) ->
-    equal_addressing_mode left_addr right_addr
-  | Icldemote left, Icldemote right -> equal_addressing_mode left right
-  | Iprefetch
-      { is_write = left_is_write; locality = left_locality; addr = left_addr },
-    Iprefetch
-      { is_write = right_is_write;
-        locality = right_locality;
-        addr = right_addr
-      } ->
-    Bool.equal left_is_write right_is_write
-    && equal_prefetch_temporal_locality_hint left_locality right_locality
-    && equal_addressing_mode left_addr right_addr
   | Illvm_intrinsic left, Illvm_intrinsic right -> String.equal left right
-  | ( Ilea _ | Istore_int _ | Ioffset_loc _ | Ifloatarithmem _
-    | Ifar_alloc _  | Ifar_poll  | Ishiftarith _
+  | (Ifar_alloc _  | Ifar_poll  | Ishiftarith _
     | Imuladd | Imulsub | Inegmulf | Imuladdf | Inegmuladdf | Imulsubf
-    | Inegmulsubf | Isqrtf | Ibswap _ | Isextend32 | Izextend32 | Irdtsc
-    | Irdpmc | Ilfence | Isfence | Imfence | Ipackf32 | Imove32 | Isignext _
-    | Isimd _ | Isimd_mem _ | Icldemote _ | Iprefetch _
+    | Inegmulsubf | Isqrtf | Ibswap _ | Imove32 | Isignext _ | Isimd _
     | Illvm_intrinsic _), _ -> false
 
 let isomorphic_specific_operation op1 op2 =
@@ -441,10 +314,6 @@ let isomorphic_specific_operation op1 op2 =
 (* Specific operations that are pure *)
 
 let operation_is_pure : specific_operation -> bool = function
-  | Ilea _ | Ifloatarithmem _ | Ibswap _ | Isextend32 | Izextend32 | Irdtsc
-  | Irdpmc | Ilfence | Isfence | Imfence | Ipackf32 | Isimd _
-  | Icldemote _ | Iprefetch _ -> true
-  | Istore_int _ | Ioffset_loc _ | Isimd_mem _ -> false
   | Ifar_alloc _ | Ifar_poll -> false
   | Ishiftarith _ -> true
   | Imuladd -> true
@@ -455,8 +324,10 @@ let operation_is_pure : specific_operation -> bool = function
   | Imulsubf -> true
   | Inegmulsubf -> true
   | Isqrtf -> true
+  | Ibswap _ -> true
   | Imove32 -> true
   | Isignext _ -> true
+  | Isimd op -> Simd.operation_is_pure op
   | Illvm_intrinsic ("caml_sse2_float64_min" | "caml_sse2_float64_max") -> true
   | Illvm_intrinsic ("caml_rdtsc_unboxed" | "caml_rdpmc_unboxed") -> false
   | Illvm_intrinsic intr ->
@@ -466,10 +337,6 @@ let operation_is_pure : specific_operation -> bool = function
 
 let operation_allocates = function
   | Ifar_alloc _ -> true
-  | Ilea _
-  | Istore_int _
-  | Ioffset_loc _
-  | Ifloatarithmem _
   | Ifar_poll
   | Imuladd
   | Imulsub
@@ -483,18 +350,7 @@ let operation_allocates = function
   | Ishiftarith (_, _)
   | Isignext _
   | Ibswap _
-  | Isextend32
-  | Izextend32
-  | Irdtsc
-  | Irdpmc
-  | Ilfence
-  | Isfence
-  | Imfence
-  | Ipackf32
-  | Isimd _
-  | Isimd_mem _
-  | Icldemote _
-  | Iprefetch _ -> false
+  | Isimd _ -> false
   | Illvm_intrinsic _intr ->
       (* Used by the zero_alloc checker that runs before the Llvmize. *)
       false
