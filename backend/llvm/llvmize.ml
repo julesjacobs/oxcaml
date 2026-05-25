@@ -3468,6 +3468,22 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | Amd64_simd_instrs.Psadbw_X_Xm128
     | Amd64_simd_instrs.Vpsadbw_X_X_Xm128 ->
       simd_int_sad_unsigned ()
+    | Amd64_simd_instrs.Psllw_X | Amd64_simd_instrs.Vpsllw_X_X ->
+      simd_int_shift_imm 16 Shl (simd_imm imm)
+    | Amd64_simd_instrs.Pslld_X | Amd64_simd_instrs.Vpslld_X_X ->
+      simd_int_shift_imm 32 Shl (simd_imm imm)
+    | Amd64_simd_instrs.Psllq_X | Amd64_simd_instrs.Vpsllq_X_X ->
+      simd_int_shift_imm 64 Shl (simd_imm imm)
+    | Amd64_simd_instrs.Psrlw_X | Amd64_simd_instrs.Vpsrlw_X_X ->
+      simd_int_shift_imm 16 Lshr (simd_imm imm)
+    | Amd64_simd_instrs.Psrld_X | Amd64_simd_instrs.Vpsrld_X_X ->
+      simd_int_shift_imm 32 Lshr (simd_imm imm)
+    | Amd64_simd_instrs.Psrlq_X | Amd64_simd_instrs.Vpsrlq_X_X ->
+      simd_int_shift_imm 64 Lshr (simd_imm imm)
+    | Amd64_simd_instrs.Psraw_X | Amd64_simd_instrs.Vpsraw_X_X ->
+      simd_int_shift_imm 16 Ashr (simd_imm imm)
+    | Amd64_simd_instrs.Psrad_X | Amd64_simd_instrs.Vpsrad_X_X ->
+      simd_int_shift_imm 32 Ashr (simd_imm imm)
     | Amd64_simd_instrs.Packsswb
     | Amd64_simd_instrs.Vpacksswb_X_X_Xm128 ->
       simd_int_pack_saturating 16 ~unsigned:false
