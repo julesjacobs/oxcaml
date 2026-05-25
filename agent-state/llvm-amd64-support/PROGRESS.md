@@ -764,6 +764,40 @@ register-clobbering edge.
       prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0 with normal
       build parallelism after the shared-type cleanup: 20 passed, 15 skipped,
       0 failed.
+  - Local validation wrapper audit:
+    - The agent-local `/tmp/oxcaml-agent-llvm-amd64-support/clang-wrapper`
+      was a manual `opt`/`llc` substitute for clang because the local patched
+      LLVM build contains `opt` and `llc`, not clang. Its `-x ir -S` path had
+      been feeding raw LLVM IR directly to `llc`, unlike `clang -O3`, while
+      only the `-emit-llvm` path ran `opt -O3`.
+    - Updated that local wrapper so `-x ir -S` first runs `opt -O3 -S` to a
+      temporary IR file, then runs `llc -O3 -filetype=asm
+      -mtriple=x86_64-unknown-linux-gnu` on the optimized IR. The explicit
+      target triple is needed because optimized stackmap operands can require
+      OxCaml GC-printer DWARF register mapping.
+    - With the corrected wrapper, the small non-tail recursion stack-usage
+      check is no longer worse than native in the tested range: the explicit
+      standard-compiler AMD64 `-llvm-backend` executable runs 100,000,
+      200,000, and 400,000 recursive calls with default runtime settings, and
+      overflows at 800,000 like the native-backend executable. The generated
+      recursive function no longer has the old raw-IR `subq $80, %rsp` frame;
+      direct `llc` on optimized IR and the corrected wrapper both emit just
+      the frame-pointer push path for that function.
+    - Rechecked `make llvm-test-one DIR=llvm-codegen LIST= TEST= ARCH=amd64
+      LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` with the corrected
+      wrapper: 20 passed, 15 skipped, 0 failed.
+    - A fresh default-runtime-stack self-stage attempt in
+      `/tmp/oxcaml-agent-llvm-amd64-support/corrected_*` got past the old
+      parser-mock overflow only far enough to expose the missing-target-triple
+      wrapper issue above. After adding `-mtriple`, the `llc` failure
+      disappeared, but the boot build still reported `Stack overflow`, likely
+      because the stage0 `_install` compiler being used was itself built with
+      the old unoptimized wrapper path. A forced stage0 rebuild using a new
+      wrapper path was attempted, but stopped before LLVM codegen on a missing
+      `_build/default/duneconf/camlinternalquote_if_missing_from_stdlib`
+      generated include in the existing `_build`; retesting self-stage without
+      `OCAMLRUNPARAM` needs a refreshed stage0 install.
 
 ## Current Blocker
 
@@ -775,8 +809,13 @@ prefix is not writable in this environment, so use an explicit agent-local
 single `TEST=...` after `eval "$(../../../scripts/agent-tmp-env)"`, because the
 agent env may set `LIST` for broader test runs.
 
-The known stack-usage issue remains: some LLVM-built compiler paths need
-`OCAMLRUNPARAM=b,Xmain_stack_size=64M` where the normal opam compiler does not.
+The previous stack-usage caveat is now narrowed. With a corrected local
+optimizing wrapper, the standard explicit AMD64 `-llvm-backend` path matches
+the native backend on the small non-tail recursion threshold check. The old
+self-stage `OCAMLRUNPARAM=b,Xmain_stack_size=64M` evidence was gathered with a
+stage0 compiler built through a local wrapper that skipped `opt -O3` before
+`llc`; self-stage without the larger stack still needs to be revalidated after
+refreshing that stage0 install.
 The OxCaml PR is still draft; as of the latest check after the shared-type
 cleanup, GitHub reported `built with flambda-backend, flambda2` passed and the
 rest of CI still pending.
