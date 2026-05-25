@@ -689,6 +689,9 @@ register-clobbering edge.
       `testsuite/tests/typing-layouts-block-indices/block_indices_native.ml`
       exits 0, exercising the SIMD lowering path that uses the AMD64
       `Isimd` record layout.
+    - Follow-up wrapped the new classifier operation type declarations to stay
+      under 80 columns; `git diff --check` is clean and both `ARCH=arm64` and
+      `ARCH=amd64` `dune build ocamloptcomp.cma` checks still exit 0.
 
 ## Current Blocker
 
@@ -702,8 +705,9 @@ agent env may set `LIST` for broader test runs.
 
 The known stack-usage issue remains: some LLVM-built compiler paths need
 `OCAMLRUNPARAM=b,Xmain_stack_size=64M` where the normal opam compiler does not.
-The OxCaml PR is still draft; as of the latest check, GitHub reported no PR
-comments or reviews and CI jobs were pending.
+The OxCaml PR is still draft; as of the latest check after pushing
+`a02d5ba9ea`, GitHub reported no PR comments or reviews and CI jobs were still
+pending.
 
 ## Next Step
 
