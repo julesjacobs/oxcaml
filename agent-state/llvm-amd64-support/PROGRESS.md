@@ -525,6 +525,38 @@ register-clobbering edge.
       LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
       prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 20 passed,
       15 skipped, 0 failed.
+  - Rebuilt the current AMD64 self-stage install after the async exception fix:
+    `tools/build-llvm-self-stage-install.sh` exits 0 with
+    `OCAMLRUNPARAM='b,Xmain_stack_size=64M'`. It reported boot wrapper/fresh IR
+    counts of 1678/832, runtime counts of 148/73, main counts of 2224/1106,
+    and both the stage0 and self-stage smoke tests printed `55`.
+  - Full self-stage ocamltest refresh completed with normal build parallelism
+    and no concurrent top-level Make/Dune command:
+    `SELF_STAGE=1 ARCH=amd64 LLVM_WRAPPER="$LLVM_PATH"
+    LLVM_WRAPPER_LOG="$LLVM_WRAPPER_LOG" OCAMLRUNPARAM='b,Xmain_stack_size=64M'
+    tools/run-llvm-stage5-ocamltest.sh` exited 2 after 6331 passed, 269
+    skipped, and 15 failed. GNU parallel was unavailable, so the script ran the
+    testsuite serially. Wrapper counts: 6190 lines, 3095 fresh IR files.
+  - The full self-stage refresh confirmed the focused async fix:
+    `tests/async-exns` passed, and
+    `tests/llvm-codegen/amd64_raise_notrace_alloc.ml` passed in the broad run.
+  - The remaining full-run failures are:
+    - Native backtrace/frame descriptor output mismatches:
+      `tests/backtrace/backtrace.ml`,
+      `tests/backtrace/backtrace_deprecated.ml`,
+      `tests/backtrace/backtrace_slots.ml`, and
+      `tests/backtrace/raw_backtrace.ml`.
+    - Native frame-pointer stack walking output mismatches:
+      `tests/frame-pointers/c_call.ml`, `effects.ml`,
+      `exception_handler.ml`, `reperform.ml`, `stack_realloc.ml`, and
+      `stack_realloc2.ml`.
+    - `tests/native-cfi-stepping/test_cfi.ml` emits GDB "Backtrace failed"
+      dumps around `caml_raise_exn` and the generated
+      `recover_rbp_asm` block, then fails the reference comparison.
+    - `tests/misc/gctweaks.ml` fails in both bytecode and native at line 22
+      after printing `100`, so it is likely separate from LLVM native codegen.
+    - `tests/typing-layouts-arrays/test_float32_u_array.ml` fails two native
+      variants during compilation with `Fatal error: Selection.select_oper`.
 
 ## Current Blocker
 
@@ -536,18 +568,22 @@ an explicit agent-local `prefix=...` for install validation. Also clear
 `eval "$(../../../scripts/agent-tmp-env)"`, because the agent env may set
 `LIST` for broader test runs.
 
-Full self-stage ocamltest is now the broad validation blocker: it completed with
-61 failures before the focused SIMD and wide-vector alloca fixes, so it should
-be rerun to refresh the failure list. The known stack-usage issue remains: some
-LLVM-built compiler paths need
+Full self-stage ocamltest is now down to 15 failures. The dominant remaining
+failure family is AMD64 native unwinding: backtrace output, frame-pointer
+walking, and native CFI stepping all miss or mis-walk frames around exception
+raise/recover paths. Two non-unwinding failures also remain: `gctweaks.ml`
+fails in both bytecode and native, and `test_float32_u_array.ml` hits
+`Selection.select_oper` in native compilation. The known stack-usage issue
+remains: some LLVM-built compiler paths need
 `OCAMLRUNPARAM=b,Xmain_stack_size=64M` where the normal opam compiler does not.
 
 ## Next Step
 
-Rerun broad self-stage ocamltest or a representative subset to refresh the
-remaining failure families after the SIMD, wide-vector alloca, poll, and async
-exception fixes. Likely next targets from the stale full run are native
-backtrace/frame-pointer/CFI output mismatches. The stale
-`statmemprof/bigarray.ml` segfault and focused async-exns failure no longer
-reproduce. Keep using normal build parallelism; avoid only concurrent top-level
-`make`/`dune` commands in this checkout because of the shared lockfile.
+Start with a focused standard-compiler `-llvm-backend` reproducer for the native
+backtrace/frame-pointer/CFI failure family, then fix the AMD64 LLVM unwinding
+metadata or recover-frame emission. If it only reproduces under self-stage,
+record the smallest self-stage reproducer and why the standard compiler does
+not cover it. After that, investigate the separate `gctweaks.ml` bytecode/native
+failure and the `test_float32_u_array.ml` `Selection.select_oper` failure. Keep
+using normal build parallelism; avoid only concurrent top-level `make`/`dune`
+commands in this checkout because of the shared lockfile.
