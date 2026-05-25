@@ -50,6 +50,21 @@ required_bytes = max(final_static_llvm_frame_bytes, cfg_required_stack_check_byt
   - direct no-stack-checks test file run:
     `make one TEST=tests/llvm-codegen/stack_check_size_contract_no_stack_checks.ml`
     skipped at the `no-stack-checks` predicate, with no failures
+  - full-suite environment:
+    `opam exec --switch=oxcaml-5.4.0+oxcaml -- make -s boot-compiler
+    LLVM_BACKEND=1 LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"` passed after
+    `eval "$(../../../scripts/agent-tmp-env)"` and an agent-local clang wrapper.
+  - full-suite LLVM-codegen directory rerun:
+    `make -s test-one DIR=llvm-codegen LLVM_BACKEND=1 LLVM_BOOT_BACKEND=0
+    LLVM_PATH="$LLVM_PATH"` passed: 59 passed, 1 skipped, 0 failed.
+  - full suite rerun:
+    `make -s test LLVM_BACKEND=1 LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"`
+    reached the final report with 6666 passed, 281 skipped, 7 failed, 0 not
+    started, and 0 unexpected errors. The branch-related LLVM-codegen oracle
+    failures were fixed. The remaining failures were existing/non-branch
+    failures in six `tests/frame-pointers` native tests and
+    `tests/typing-small-numbers/test_matching_native.ml` in `ocamlnat`, which
+    exits with signal 5.
 
 ## Current Blocker
 
@@ -57,5 +72,5 @@ None.
 
 ## Next Step
 
-Review the diff, then commit and push the implementation plus tests to the
-existing PR branch.
+The implementation and focused tests are on the PR branch. Remaining full-suite
+failures are outside this stack-check byte-contract change.
