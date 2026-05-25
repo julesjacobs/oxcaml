@@ -2516,6 +2516,54 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let res = emit_ins t (I.binary op ~arg1:arg ~arg2:shift) in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_sse2_variable_shift width_in_bits op ~overlarge_zero =
+    let typ = int_vec_type ~width_in_bits in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let count_arg =
+      cast_if_needed (load_reg_to_temp t i.arg.(1))
+        (int_vec_type ~width_in_bits:64)
+    in
+    let count =
+      emit_ins t (I.extractelement ~vector:count_arg ~index:(V.of_int 0))
+    in
+    let too_large =
+      emit_ins t
+        (I.icmp I.Iuge ~arg1:count ~arg2:(V.of_int ~typ:T.i64 width_in_bits))
+    in
+    let safe_count =
+      let fallback = if overlarge_zero then 0 else width_in_bits - 1 in
+      emit_ins t
+        (I.select ~cond:too_large ~ifso:(V.of_int ~typ:T.i64 fallback)
+           ~ifnot:count)
+    in
+    let elem_count =
+      if width_in_bits = 64
+      then safe_count
+      else
+        emit_ins t
+          (I.convert Trunc ~arg:safe_count
+             ~to_:(T.Int { width_in_bits }))
+    in
+    let shift =
+      List.init (128 / width_in_bits) Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane)
+                  ~to_insert:elem_count))
+           (V.poison typ)
+    in
+    let shifted = emit_ins t (I.binary op ~arg1:arg ~arg2:shift) in
+    let res =
+      if overlarge_zero
+      then
+        emit_ins t
+          (I.select ~cond:too_large ~ifso:(V.zeroinitializer typ)
+             ~ifnot:shifted)
+      else shifted
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_variable_shift width_in_bits right_shift_op =
     let typ = int_vec_type ~width_in_bits in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -3468,6 +3516,30 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | Amd64_simd_instrs.Psadbw_X_Xm128
     | Amd64_simd_instrs.Vpsadbw_X_X_Xm128 ->
       simd_int_sad_unsigned ()
+    | Amd64_simd_instrs.Psllw_X_Xm128
+    | Amd64_simd_instrs.Vpsllw_X_X_Xm128 ->
+      simd_int_sse2_variable_shift 16 Shl ~overlarge_zero:true
+    | Amd64_simd_instrs.Pslld_X_Xm128
+    | Amd64_simd_instrs.Vpslld_X_X_Xm128 ->
+      simd_int_sse2_variable_shift 32 Shl ~overlarge_zero:true
+    | Amd64_simd_instrs.Psllq_X_Xm128
+    | Amd64_simd_instrs.Vpsllq_X_X_Xm128 ->
+      simd_int_sse2_variable_shift 64 Shl ~overlarge_zero:true
+    | Amd64_simd_instrs.Psrlw_X_Xm128
+    | Amd64_simd_instrs.Vpsrlw_X_X_Xm128 ->
+      simd_int_sse2_variable_shift 16 Lshr ~overlarge_zero:true
+    | Amd64_simd_instrs.Psrld_X_Xm128
+    | Amd64_simd_instrs.Vpsrld_X_X_Xm128 ->
+      simd_int_sse2_variable_shift 32 Lshr ~overlarge_zero:true
+    | Amd64_simd_instrs.Psrlq_X_Xm128
+    | Amd64_simd_instrs.Vpsrlq_X_X_Xm128 ->
+      simd_int_sse2_variable_shift 64 Lshr ~overlarge_zero:true
+    | Amd64_simd_instrs.Psraw_X_Xm128
+    | Amd64_simd_instrs.Vpsraw_X_X_Xm128 ->
+      simd_int_sse2_variable_shift 16 Ashr ~overlarge_zero:false
+    | Amd64_simd_instrs.Psrad_X_Xm128
+    | Amd64_simd_instrs.Vpsrad_X_X_Xm128 ->
+      simd_int_sse2_variable_shift 32 Ashr ~overlarge_zero:false
     | Amd64_simd_instrs.Psllw_X | Amd64_simd_instrs.Vpsllw_X_X ->
       simd_int_shift_imm 16 Shl (simd_imm imm)
     | Amd64_simd_instrs.Pslld_X | Amd64_simd_instrs.Vpslld_X_X ->
