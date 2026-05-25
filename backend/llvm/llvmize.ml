@@ -460,7 +460,9 @@ let ensure_debug_compile_unit t =
           "!DISubroutineType(types: !{})";
         add_debug_metadata_def t compile_unit_id
           (Printf.sprintf
-             {|distinct !DICompileUnit(language: DW_LANG_OCaml, file: !%d, producer: "oxcaml-llvm", isOptimized: true, runtimeVersion: 0, emissionKind: FullDebug)|}
+             ({|distinct !DICompileUnit(language: DW_LANG_OCaml, file: !%d, |}
+            ^^ {|producer: "oxcaml-llvm", isOptimized: true, runtimeVersion: 0, |}
+            ^^ {|emissionKind: FullDebug)|})
              file_id);
         add_debug_module_flag t "Dwarf Version" 4;
         add_debug_module_flag t "Debug Info Version" 3;
@@ -487,7 +489,9 @@ let create_debug_subprogram t ~fun_name dbg =
     let name = if String.equal name "<unknown>" then fun_name else name in
     add_debug_metadata_def t id
       (Printf.sprintf
-         {|distinct !DISubprogram(name: "%s", linkageName: "%s", scope: !%d, file: !%d, line: %d, type: !%d, scopeLine: %d, spFlags: DISPFlagDefinition, unit: !%d)|}
+         ({|distinct !DISubprogram(name: "%s", linkageName: "%s", |}
+        ^^ {|scope: !%d, file: !%d, line: %d, type: !%d, scopeLine: %d, |}
+        ^^ {|spFlags: DISPFlagDefinition, unit: !%d)|})
          (llvm_metadata_string name)
          (llvm_metadata_string fun_name)
          file_id file_id item.dinfo_line subroutine_type_id item.dinfo_line
@@ -913,8 +917,8 @@ let assemble_return t res_type values =
 (* Prepare and extract arguments following the OCaml calling convention in LLVM,
    handling the threading of runtime registers. *)
 let call_simple ?(attrs = []) ?(dbg = Debuginfo.none) ?(raise_call = false)
-    ?(primitive_call = false) ?alloc_info ?(live_roots = []) ?unwind_label ~cc
-    t name args res_types =
+    ?(primitive_call = false) ?alloc_info ?(live_roots = []) ?unwind_label ~cc t
+    name args res_types =
   let fun_info = get_fun_info t in
   let prev_dbg_metadata = fun_info.current_dbg_metadata in
   let call_dbg_metadata =
@@ -1043,7 +1047,8 @@ let has_gc_live_bundle bundles =
 
 let gc_live_stackmap_args bundles =
   List.find_map
-    (fun (name, args) -> if String.equal name "gc-live" then Some args else None)
+    (fun (name, args) ->
+      if String.equal name "gc-live" then Some args else None)
     bundles
   |> Option.value ~default:[]
 
@@ -1059,7 +1064,8 @@ let emit_stackmap_safepoint ?safepoint t (i : 'a Cfg.instruction)
       Safepoint.(encode_statepoint_id (Call { stack_offset }))
   in
   emit_ins_no_res t
-    (I.stackmap ~id:(V.of_int ~typ:T.i64 statepoint_id)
+    (I.stackmap
+       ~id:(V.of_int ~typ:T.i64 statepoint_id)
        ~shadow_bytes:(V.of_int ~typ:T.i32 0)
        ~args:(gc_live_stackmap_args operand_bundles))
 
@@ -1333,17 +1339,13 @@ let call ?(tail = false) ?unwind_label t (i : Cfg.terminator Cfg.instruction)
     refresh_live_gc_roots t live_roots;
     extract_call_res_into_original_regs t res i.res)
 
-let probe t (i : Cfg.terminator Cfg.instruction)
-    (op : Cfg.prim_call_operation) =
+let probe t (i : Cfg.terminator Cfg.instruction) (op : Cfg.prim_call_operation)
+    =
   match op with
   | Probe { handler_code_sym; enabled_at_init; _ } ->
     if enabled_at_init
     then
-      call t i
-        (Direct
-           { sym_name = handler_code_sym;
-             sym_global = Cmm.Global
-           })
+      call t i (Direct { sym_name = handler_code_sym; sym_global = Cmm.Global })
   | External _ -> fail_msg ~name:"probe" "expected probe operation"
 
 let emit_unwind_landingpad t exn_entry =
@@ -2099,7 +2101,8 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
              in
              let vector =
                emit_ins t
-                 (I.insertelement ~vector ~index:(V.of_int (2 * lane))
+                 (I.insertelement ~vector
+                    ~index:(V.of_int (2 * lane))
                     ~to_insert:elem1)
              in
              emit_ins t
@@ -2122,11 +2125,11 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     |> List.fold_left
          (fun vector offset ->
            let elem =
-             emit_ins t
-               (I.extractelement ~vector:lane ~index:(V.of_int offset))
+             emit_ins t (I.extractelement ~vector:lane ~index:(V.of_int offset))
            in
            emit_ins t
-             (I.insertelement ~vector ~index:(V.of_int ((imm * 2) + offset))
+             (I.insertelement ~vector
+                ~index:(V.of_int ((imm * 2) + offset))
                 ~to_insert:elem))
          arg
     |> store_simd_res
@@ -2142,14 +2145,12 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
                   ~index:(V.of_int ((imm * 2) + offset)))
            in
            emit_ins t
-             (I.insertelement ~vector ~index:(V.of_int offset)
-                ~to_insert:elem))
+             (I.insertelement ~vector ~index:(V.of_int offset) ~to_insert:elem))
          (V.poison T.vec128)
     |> store_simd_res
   in
   match Llvmize_specific.classify op with
-  | Amd64_lea addr ->
-    load_address_from_reg t addr i.arg.(0) |> store_int_res
+  | Amd64_lea addr -> load_address_from_reg t addr i.arg.(0) |> store_int_res
   | Amd64_store_int (n, addr, _is_modify) ->
     store_i64_to_address addr i.arg.(0) (V.of_nativeint n)
   | Amd64_offset_loc (n, addr) ->
@@ -2184,31 +2185,23 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let high = pack_arg 1 in
     let low64 = emit_ins t (I.convert Zext ~arg:low ~to_:T.i64) in
     let high64 = emit_ins t (I.convert Zext ~arg:high ~to_:T.i64) in
-    let high64 =
-      emit_ins t (I.binary Shl ~arg1:high64 ~arg2:(V.of_int 32))
-    in
+    let high64 = emit_ins t (I.binary Shl ~arg1:high64 ~arg2:(V.of_int 32)) in
     let packed = emit_ins t (I.binary Or ~arg1:low64 ~arg2:high64) in
     emit_ins t (I.convert Bitcast ~arg:packed ~to_:T.double)
     |> store_into_reg t i.res.(0)
   | Llvm_intrinsic intrinsic_name -> intrinsic t i intrinsic_name
   | Amd64_simd (instr_id, imm) -> (
     match[@warning "-4"] instr_id with
-    | Amd64_simd_instrs.Paddq
-    | Amd64_simd_instrs.Vpaddq_X_X_Xm128 ->
+    | Amd64_simd_instrs.Paddq | Amd64_simd_instrs.Vpaddq_X_X_Xm128 ->
       simd_int_binary 64 Add
-    | Amd64_simd_instrs.Psubq_X_Xm128
-    | Amd64_simd_instrs.Vpsubq_X_X_Xm128 ->
+    | Amd64_simd_instrs.Psubq_X_Xm128 | Amd64_simd_instrs.Vpsubq_X_X_Xm128 ->
       simd_int_binary 64 Sub
-    | Amd64_simd_instrs.Punpckhqdq
-    | Amd64_simd_instrs.Vpunpckhqdq_X_X_Xm128 ->
+    | Amd64_simd_instrs.Punpckhqdq | Amd64_simd_instrs.Vpunpckhqdq_X_X_Xm128 ->
       simd_zip (int_vec_type ~width_in_bits:64) ~high:true
-    | Amd64_simd_instrs.Punpcklqdq
-    | Amd64_simd_instrs.Vpunpcklqdq_X_X_Xm128 ->
+    | Amd64_simd_instrs.Punpcklqdq | Amd64_simd_instrs.Vpunpcklqdq_X_X_Xm128 ->
       simd_zip (int_vec_type ~width_in_bits:64) ~high:false
-    | Amd64_simd_instrs.Vinsertf128 ->
-      simd_vec256_insert_128 (simd_imm imm)
-    | Amd64_simd_instrs.Vextractf128 ->
-      simd_vec256_extract_128 (simd_imm imm)
+    | Amd64_simd_instrs.Vinsertf128 -> simd_vec256_insert_128 (simd_imm imm)
+    | Amd64_simd_instrs.Vextractf128 -> simd_vec256_extract_128 (simd_imm imm)
     | _ -> not_implemented_basic ~msg:"specific" i)
   | Amd64_simd_mem | Amd64_cldemote | Amd64_prefetch ->
     not_implemented_basic ~msg:"specific" i
@@ -2484,13 +2477,13 @@ let poll ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction) =
   let attrs = gc_attr ~safepoint ~can_call_gc:true t i @ [LL.Fn_attr.Cold] in
   let live_roots = load_live_gc_roots_across t i in
   (match Target_system.architecture () with
-  | Target_system.X86_64 ->
-    call_simple_with_stackmap ~attrs ~live_roots ~safepoint ?unwind_label
-      ~cc:Oxcaml_alloc t i "caml_call_gc" [] []
-  | Target_system.AArch64 | Target_system.IA32 | Target_system.ARM
-  | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
-    call_simple ~attrs ~live_roots ?unwind_label ~cc:Oxcaml_alloc t
-      "caml_call_gc" [] [])
+    | Target_system.X86_64 ->
+      call_simple_with_stackmap ~attrs ~live_roots ~safepoint ?unwind_label
+        ~cc:Oxcaml_alloc t i "caml_call_gc" [] []
+    | Target_system.AArch64 | Target_system.IA32 | Target_system.ARM
+    | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
+      call_simple ~attrs ~live_roots ?unwind_label ~cc:Oxcaml_alloc t
+        "caml_call_gc" [] [])
   |> ignore;
   emit_ins_no_res t (I.br after_poll);
   emit_unwind_landingpad_after t unwind_label exn_entry;
@@ -2676,8 +2669,7 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
                emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int lane))
              in
              emit_ins t
-               (I.insertelement ~vector ~index:(V.of_int lane)
-                  ~to_insert:elem))
+               (I.insertelement ~vector ~index:(V.of_int lane) ~to_insert:elem))
            (V.poison T.vec256)
     in
     let extract_vec256_low_to_vec128 arg =
@@ -2689,8 +2681,7 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
                emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int lane))
              in
              emit_ins t
-               (I.insertelement ~vector ~index:(V.of_int lane)
-                  ~to_insert:elem))
+               (I.insertelement ~vector ~index:(V.of_int lane) ~to_insert:elem))
            (V.poison T.vec128)
     in
     match cast_op with
@@ -2956,7 +2947,7 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
                    ~res_type:(Some T.i64) ~sideeffect:true)
             in
             (* The runtime can enter this block directly via the blockaddress
-               stored below, bypassing the normal predecessor.  Clobber the
+               stored below, bypassing the normal predecessor. Clobber the
                non-runtime OCaml registers so LLVM does not keep values live in
                registers that were only set up on the normal edge. *)
             emit_ins_no_res t
@@ -3107,8 +3098,7 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
           then
             emit_ins_no_res t
               (I.inline_asm ~asm:"str x29, [$0]" ~constraints:"r"
-                 ~args:[saved_fp_slot] ~res_type:T.Or_void.void
-                 ~sideeffect:true)
+                 ~args:[saved_fp_slot] ~res_type:T.Or_void.void ~sideeffect:true)
         | Target_system.IA32 | Target_system.ARM | Target_system.POWER
         | Target_system.Z | Target_system.Riscv ->
           fail_msg ~name:"pushtrap" "unsupported architecture for LLVM backend");
@@ -3765,9 +3755,8 @@ let define_c_call_wrappers t =
       in
       let emitter =
         E.create ~name:wrapper_name ~args:wrapper_arg_types
-          ~res:(Some wrapper_res_type) ~cc:Oxcaml ~attrs
-          ~personality:None ~dbg:Debuginfo.none ~dbg_metadata:None
-          ~private_:true
+          ~res:(Some wrapper_res_type) ~cc:Oxcaml ~attrs ~personality:None
+          ~dbg:Debuginfo.none ~dbg_metadata:None ~private_:true
       in
       reset_fun_info t emitter;
       let runtime_args, c_fun_args =
@@ -3844,8 +3833,7 @@ let define_restore_rbp t =
              recover_rbp_asm ^ ":";
              "  sub x16, sp, #16";
              "  ldr x17, [sp]" ]
-          @ restore_fp
-          @ ["  add sp, x16, x17"] @ load_target @ ["  br x16"]);
+          @ restore_fp @ ["  add sp, x16, x17"] @ load_target @ ["  br x16"]);
         add_data_def t
           (LL.Data.external_ (LL.Ident.to_string_hum recover_rbp_asm_ident));
         add_data_def t

@@ -692,6 +692,20 @@ register-clobbering edge.
     - Follow-up wrapped the new classifier operation type declarations to stay
       under 80 columns; `git diff --check` is clean and both `ARCH=arm64` and
       `ARCH=amd64` `dune build ocamloptcomp.cma` checks still exit 0.
+  - Installed `ocamlformat.0.29.0` into the agent opam switch and formatted the
+    branch-touched OCaml files. This cleaned the PR-specific `@fmt` output for
+    `backend/amd64/cfg_selection.ml` and `backend/llvm/llvmize.ml`.
+    `dune build @fmt` still reports pre-existing integration-branch diffs in
+    files this branch did not touch, such as `asmcomp/asmgen.ml` and
+    `oxcaml/tests/backend/llvmize/*`; those were intentionally left alone.
+  - Rechecked after formatting:
+    - `git diff --check` exits 0.
+    - `ARCH=arm64 RUNTIME_DIR=runtime dune build ocamloptcomp.cma` exits 0.
+    - `ARCH=amd64 RUNTIME_DIR=runtime dune build ocamloptcomp.cma` exits 0.
+    - With a local `main` branch tracking `oxcaml/main`, `scripts/80ch.sh`
+      still reports inherited vendored LLVM/expectcommon long lines when run
+      locally against upstream `main`, but no longer reports the branch-touched
+      `backend/llvm/llvmize.ml` lines after running through the opam switch.
 
 ## Current Blocker
 
@@ -705,9 +719,9 @@ agent env may set `LIST` for broader test runs.
 
 The known stack-usage issue remains: some LLVM-built compiler paths need
 `OCAMLRUNPARAM=b,Xmain_stack_size=64M` where the normal opam compiler does not.
-The OxCaml PR is still draft; as of the latest check after pushing
-`a02d5ba9ea`, GitHub reported no PR comments or reviews and CI jobs were still
-pending.
+The OxCaml PR is still draft; as of the latest check before this formatting
+cleanup, GitHub reported no PR comments or reviews, the Merlin check had
+passed, and the rest of CI was still pending.
 
 ## Next Step
 

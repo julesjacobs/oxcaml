@@ -133,39 +133,23 @@ let is_immediate_natint n =
 let specific x : Cfg.basic_or_terminator = Basic (Op (Specific x))
 
 let is_llvm_intrinsic_builtin = function
-  | "sqrt"
-  | "sqrtf"
-  | "caml_rdtsc_unboxed"
-  | "caml_rdpmc_unboxed"
-  | "caml_simd_float32_min"
-  | "caml_simd_float32_max"
-  | "caml_simd_cast_float32_int64"
-  | "caml_simd_float32_round_current"
-  | "caml_simd_float32_round_neg_inf"
-  | "caml_simd_float32_round_pos_inf"
-  | "caml_simd_float32_round_towards_zero"
-  | "caml_simd_float64_min"
-  | "caml_simd_float64_max"
-  | "caml_simd_cast_float64_int64"
-  | "caml_simd_float64_round_current"
-  | "caml_simd_float64_round_neg_inf"
-  | "caml_simd_float64_round_pos_inf"
-  | "caml_simd_float64_round_towards_zero"
-  | "caml_sse2_float64_min"
-  | "caml_sse2_float64_max" ->
+  | "sqrt" | "sqrtf" | "caml_rdtsc_unboxed" | "caml_rdpmc_unboxed"
+  | "caml_simd_float32_min" | "caml_simd_float32_max"
+  | "caml_simd_cast_float32_int64" | "caml_simd_float32_round_current"
+  | "caml_simd_float32_round_neg_inf" | "caml_simd_float32_round_pos_inf"
+  | "caml_simd_float32_round_towards_zero" | "caml_simd_float64_min"
+  | "caml_simd_float64_max" | "caml_simd_cast_float64_int64"
+  | "caml_simd_float64_round_current" | "caml_simd_float64_round_neg_inf"
+  | "caml_simd_float64_round_pos_inf" | "caml_simd_float64_round_towards_zero"
+  | "caml_sse2_float64_min" | "caml_sse2_float64_max" ->
     true
   | _ -> false
 
 let is_llvm_simd_builtin = function
-  | "caml_simd_int64x2_add"
-  | "caml_sse2_int64x2_add"
-  | "caml_simd_int64x2_sub"
-  | "caml_sse2_int64x2_sub"
-  | "caml_simd_vec128_interleave_high_64"
-  | "caml_sse2_vec128_interleave_high_64"
-  | "caml_simd_vec128_interleave_low_64"
-  | "caml_sse2_vec128_interleave_low_64"
-  | "caml_avx_vec256_extract_128"
+  | "caml_simd_int64x2_add" | "caml_sse2_int64x2_add" | "caml_simd_int64x2_sub"
+  | "caml_sse2_int64x2_sub" | "caml_simd_vec128_interleave_high_64"
+  | "caml_sse2_vec128_interleave_high_64" | "caml_simd_vec128_interleave_low_64"
+  | "caml_sse2_vec128_interleave_low_64" | "caml_avx_vec256_extract_128"
   | "caml_avx_vec256_insert_128" ->
     true
   | _ -> false
