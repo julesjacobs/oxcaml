@@ -283,8 +283,8 @@ let normalize_toplevel_names s =
 
 let base_normalize_llvm_output s =
   s |> Misc.normalise_eol |> Misc.delete_eol_spaces |> String.split_on_char '\n'
-  |> List.map normalize_llvm_expect_line
-  |> List.map normalize_toplevel_names
+  |> List.map (fun line ->
+         normalize_toplevel_names (normalize_llvm_expect_line line))
 
 let line_contains_substring line substring =
   let line_len = String.length line in

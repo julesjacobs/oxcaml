@@ -4,8 +4,8 @@ Last updated: 2026-05-25.
 
 ## Current Claim
 
-Iterations 1 through 13 are committed, pushed, reviewed with no accepted
-findings, and focused validation passed.
+Iterations 1 through 14 are committed or ready to commit; iteration 14 passed
+review with no findings and focused validation passed.
 
 ## Evidence
 
@@ -23,7 +23,7 @@ None.
 ## Iteration State
 
 - Target: open-ended follow-up after the initial 10 completed iterations.
-- Completed iterations: 13.
+- Completed iterations: 14.
 - Committed cleanups:
   - Iteration 1: simplified deopt argument list construction in
     `backend/llvm/llvmize.ml` with `List.concat_map`.
@@ -51,6 +51,8 @@ None.
   - Iteration 12: used `List.rev_append` in LLVM expect-output extraction in
     `backend/llvm/llvmize.ml`.
   - Iteration 13: shared external-call argument register loading in
+    `backend/llvm/llvmize.ml`.
+  - Iteration 14: combined LLVM expect-output line normalization passes in
     `backend/llvm/llvmize.ml`.
 - Dropped ideas: none yet.
 - Stop condition: continue only while a small candidate passes five-reviewer
@@ -678,7 +680,50 @@ Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
 are broad LLVM backend validation runs, and this commit only changes local
 helper sharing.
 
+## Iteration 14 Candidate
+
+Path: self-proposed candidate.
+
+Candidate: combine the two consecutive `List.map` passes in
+`base_normalize_llvm_output` in `backend/llvm/llvmize.ml`.
+
+Why likely useful: each line was first normalized for stable source/version
+output and then normalized for toplevel names in a second traversal. A single
+line transformation preserves that order while avoiding the intermediate list.
+
+Review gate: passed after five human-like reviews of the final diff.
+
+Review result: all five reviewers said keep with no findings. Reviewers checked
+that `normalize_llvm_expect_line` still runs before `normalize_toplevel_names`
+for each line, that both transformations are pure and line-local, and that the
+diff does not add an unnecessary helper.
+
+Validation result:
+
+- `git diff --check`: passed.
+- `eval "$(../../../scripts/agent-tmp-env)" && opam exec
+  --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`: passed.
+
+## Testing Story for This Commit
+
+Change: combine two consecutive LLVM expect-output line normalization maps, and
+record iteration 14 state in this progress file.
+Risk: if the rewrite is wrong, expect-output normalization could apply the
+toplevel-name normalization before source/version normalization or otherwise
+change line normalization order.
+Validation: `git diff --check`; `eval "$(../../../scripts/agent-tmp-env)" &&
+opam exec --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`.
+Full LLVM validation: not run for this commit; the rewrite preserves the same
+per-line transformation order and only removes an intermediate list.
+Stage2 verification: not run for this commit; self-stage2 is intentionally
+deferred for the same reason as full LLVM validation.
+Why this is enough: five human-like reviews found no issues and checked the
+normalization order; the build check covers type and syntax validity.
+Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
+`make llvm-self-stage2-test LLVM_PATH="$LLVM_PATH"` are deferred because they
+are broad LLVM backend validation runs, and this commit only changes a local
+list transformation.
+
 ## Next Step
 
-No immediate code-quality iteration is queued. Continue only if another small,
-behavior-preserving candidate is found and passes the five-reviewer gate.
+Commit iteration 14 and push it to the draft PR branch.
