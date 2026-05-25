@@ -34,10 +34,10 @@ Before each commit, record:
 
 ## Testing Story for This Commit
 
-Change: require per-commit testing stories and explicit full LLVM plus stage2
-validation for implementation commits.
-Risk: the agent may still treat broad validation as optional before finalizing
-implementation work.
+Change: allow cleanup targets to come either from human-like review or from a
+self-proposed implemented candidate that is reviewed before committing.
+Risk: the agent may otherwise treat target selection as only one fixed workflow
+instead of using review where it is most helpful.
 Validation: inspect the changed `GOAL.md`, `PLAN.md`, and `PROGRESS.md`.
 Full LLVM validation: not run; this commit only changes agent instructions.
 Stage2 verification: not run; this commit only changes agent instructions.
@@ -46,5 +46,6 @@ Deferred validation: no OxCaml tests; no compiler or runtime code changed.
 
 ## Next Step
 
-Inspect the LLVM backend, propose 3-5 candidate cleanup targets, then run
-human-like review on the target list before editing.
+Inspect the LLVM backend and choose either a review-selected target loop or a
+self-proposed candidate loop. In either case, use human-like review before
+finalizing an implementation commit.

@@ -3,9 +3,14 @@
 Iteratively improve LLVM backend code quality through small, reviewable cleanup
 PRs.
 
-First propose a short list of candidate cleanup targets in `PROGRESS.md`, then
-use human-like review to pick a target before implementing it. After
-implementation, run human-like review on the diff before finalizing.
+Use either path:
+
+- Ask human-like review for candidate cleanup targets, then pick a reviewed
+  target before implementing it.
+- Self-propose and implement a small candidate cleanup, then use human-like
+  review to decide whether the diff should be kept, revised, or dropped.
+
+In both paths, run human-like review on the diff before finalizing.
 
 Use `PLAN.md` as a guide, not a rigid checklist.
 
