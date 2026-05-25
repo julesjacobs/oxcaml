@@ -60,6 +60,12 @@ boxed float32 allocation hit the slow path after computing the payload in
 XMM-preserving helper even when Cfg liveness only sees scalar values, because
 LLVM can materialize scalar lane extracts through XMM registers across the
 call. This clears the remaining focused vector array/product-array failures.
+The newest AMD64 LLVM debug fix emits a real post-raise `nop` after regular
+and reraising calls, so the return address used by GDB unwinding stays inside
+the raising function's symbol and DWARF subprogram range. LLVM function
+attributes also now respect `Config.no_stack_checks`: frame pointers remain
+requested on AMD64 frame-pointer builds, but `oxcaml-stack-check` is not added
+when the configured native compiler would omit stack checks.
 
 ## Evidence
 
@@ -1092,6 +1098,38 @@ call. This clears the remaining focused vector array/product-array failures.
         `validation-tmp/stackoverflow_xmm_default` exits 0, but omits both
         `x = 20000` lines from `stackoverflow.opt.reference`, while preserving
         the later `x = 10000`, `x = 0`, backtrace, and `!p = 42` lines.
+    - Fixed the `native-cfi-stepping/test_cfi.ml` mismatch. GDB was unwinding
+      through `caml_raise_exn` to the call return address at the first byte
+      after the LLVM function's DWARF range, so the caller frame printed as
+      `?? () at test_cfi.ml:50` even though the preceding bytes had the right
+      symbol and debug subprogram. AMD64 LLVM regular/reraise lowering now
+      emits a side-effecting `nop` after the raise call, matching the native
+      backend's post-raise padding contract.
+    - Rebuilt a fresh boot compiler with normal Dune parallelism in
+      `validation-tmp/no_stackcheck_attr_boot/boot_context_build`:
+      `DUNE_BUILD_FLAGS="-j $(nproc)" ./tools/build-llvm-boot-with-installed.sh`
+      produced `1682` boot wrapper lines / `835` fresh IR, and the smoke
+      printed `55`.
+    - With that boot compiler, the focused direct
+      `native-cfi-stepping/test_cfi.ml` run in
+      `validation-tmp/native_cfi_no_stackcheck_attr` passes: `run_gdb.sh`
+      exits 0 and `diff -u test_cfi.reference test_cfi.output` is empty.
+      Wrapper log evidence: `4` wrapper lines / `2` fresh IR.
+    - Also fixed the LLVM function attribute mismatch with this switch's
+      `no_stack_checks: true`: AMD64 LLVM functions keep
+      `frame-pointer="all"` but no longer receive `oxcaml-stack-check` unless
+      `Config.no_stack_checks` is false. The focused
+      `runtime-errors/stackoverflow.ml` repro in
+      `validation-tmp/stackoverflow_no_stackcheck_attr` confirms the recursive
+      function no longer has the LLVM prologue stack check, but it still omits
+      both `x = 20000` lines because the LLVM frame for the recursive function
+      is larger than the native frame. The run still exits 0 and preserves the
+      `x = 10000`, `x = 0`, backtrace, and `!p = 42` lines.
+    - The focused Linux/AMD64 stack-growth regression
+      `testsuite/tests/llvm-codegen/amd64_stack_growth.ml` still passes with
+      the no-stack-check-attribute compiler in
+      `validation-tmp/amd64_stack_growth_no_stackcheck_attr`; output is empty,
+      wrapper log evidence is `4` wrapper lines / `2` fresh IR.
 
 ## Current Blocker
 
@@ -1118,10 +1156,12 @@ rest of CI still pending.
 
 ## Next Step
 
-Refresh broader self-stage ocamltest on top of the SIMD/XMM GC slow-path fixes.
-The previously recorded `unboxed-primitive-args` and unboxed
-array/iarray/vector-array clusters now pass in focused validation, so the next
-known old failures to revisit are `native-cfi-stepping/test_cfi.ml` and
-`runtime-errors/stackoverflow.ml`, plus any failures that remain after the
-refresh. Keep using normal build parallelism; avoid only concurrent top-level
-`make` or `dune` commands in this checkout because of the shared lockfile.
+Refresh broader self-stage ocamltest on top of the SIMD/XMM GC slow-path and
+post-raise CFI fixes. The previously recorded `unboxed-primitive-args`,
+unboxed array/iarray/vector-array clusters, and `native-cfi-stepping/test_cfi.ml`
+now pass in focused validation. The remaining known focused mismatch is
+`runtime-errors/stackoverflow.ml`, which now appears to be a stack-depth
+expectation difference from the larger LLVM recursive frame rather than an
+extra LLVM prologue stack check. Keep using normal build parallelism; avoid
+only concurrent top-level `make` or `dune` commands in this checkout because of
+the shared lockfile.

@@ -1114,6 +1114,20 @@ let emit_stackmap_safepoint ?safepoint t (i : 'a Cfg.instruction)
        ~shadow_bytes:(V.of_int ~typ:T.i32 0)
        ~args:(gc_live_stackmap_args operand_bundles))
 
+let emit_post_raise_nop t =
+  match Target_system.architecture () with
+  | Target_system.X86_64 ->
+    (* [caml_raise_exn] and [caml_reraise_exn] use their caller's return
+       address for debugger unwinding. If the raise call is the last emitted
+       instruction, that address can land just outside this function's DWARF
+       range, so keep one real instruction after it. *)
+    emit_ins_no_res t
+      (I.inline_asm ~asm:"nop" ~constraints:"" ~args:[]
+         ~res_type:T.Or_void.void ~sideeffect:true)
+  | Target_system.AArch64 | Target_system.IA32 | Target_system.ARM
+  | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
+    ()
+
 let call_simple_with_stackmap ?unwind_label ?(raise_call = false)
     ?(stackmap_if_plain_call = false) ~attrs ~live_roots ~safepoint ~cc t
     (i : 'a Cfg.instruction) name args res_types =
@@ -1656,7 +1670,8 @@ let raise_ t ~(exn_handler : Label.t option)
         ~attrs:(gc_attr ~safepoint ~can_call_gc:true t i)
         ~raise_call:true ~stackmap_if_plain_call:true ~live_roots ~safepoint
         ~cc:Oxcaml t i raise_fn_name [exn_bucket] []
-      |> ignore
+      |> ignore;
+      emit_post_raise_nop t
     | Target_system.IA32 | Target_system.ARM | Target_system.POWER
     | Target_system.Z | Target_system.Riscv ->
       not_implemented_terminator ~msg:"raise" i);
@@ -4259,11 +4274,21 @@ let fun_attrs ~has_try:_ codegen_options =
   let frame_pointer_attrs =
     match Target_system.architecture () with
     | Target_system.X86_64 when Config.with_frame_pointers ->
-      [Oxcaml_stack_check; Frame_pointer_all]
-    | Target_system.AArch64 | Target_system.X86_64 -> [Oxcaml_stack_check]
+      [Frame_pointer_all]
+    | Target_system.AArch64 | Target_system.X86_64 -> []
     | Target_system.IA32 | Target_system.ARM | Target_system.POWER
     | Target_system.Z | Target_system.Riscv ->
       []
+  in
+  let stack_check_attrs =
+    if Config.no_stack_checks
+    then []
+    else
+      match Target_system.architecture () with
+      | Target_system.AArch64 | Target_system.X86_64 -> [Oxcaml_stack_check]
+      | Target_system.IA32 | Target_system.ARM | Target_system.POWER
+      | Target_system.Z | Target_system.Riscv ->
+        []
   in
   let codegen_attrs =
     List.concat_map
@@ -4275,7 +4300,8 @@ let fun_attrs ~has_try:_ codegen_options =
           [] (* CR yusumez: Do these require any attributes? *))
       codegen_options
   in
-  safepoint_attrs @ frame_pointer_attrs @ gc_attrs @ codegen_attrs
+  safepoint_attrs @ frame_pointer_attrs @ stack_check_attrs @ gc_attrs
+  @ codegen_attrs
   |> List.sort_uniq LL.Fn_attr.compare
 
 (* Returns argument registers listed in the signature *)
