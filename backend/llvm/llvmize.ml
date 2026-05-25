@@ -2913,9 +2913,17 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
         emit_ins_no_res t (I.store ~ptr:handler_slot ~to_store:handler_addr);
         (match Target_system.architecture () with
         | Target_system.X86_64 ->
+          let rbp =
+            emit_ins t
+              (I.inline_asm ~asm:"movq %rbp, $0" ~constraints:"=r" ~args:[]
+                 ~res_type:(Some T.i64) ~sideeffect:true)
+          in
+          let trap_block_int = cast t trap_block T.i64 in
+          let rbp_delta =
+            emit_ins t (I.binary Sub ~arg1:rbp ~arg2:trap_block_int)
+          in
           emit_ins_no_res t
-            (I.inline_asm ~asm:"mov %rbp, ($0)" ~constraints:"r"
-               ~args:[rbp_slot] ~res_type:T.Or_void.void ~sideeffect:true)
+            (I.store ~ptr:rbp_slot ~to_store:rbp_delta)
         | Target_system.AArch64 ->
           let sp = read_stack_pointer t in
           let trap_block_int = cast t trap_block T.i64 in
@@ -3717,9 +3725,10 @@ let define_restore_rbp t =
             recover_rbp_asm ^ ":";
             "  movq %rax, %r11";
             "  movq %r14, %rax";
-            "  movq %r15, %rcx";
-            "  pop %rbp";
-            "  addq $8, %rsp";
+            "  movq %r14, %rcx";
+            "  movq (%rsp), %rbp";
+            "  leaq -16(%rsp,%rbp), %rbp";
+            "  addq $16, %rsp";
             "  movq " ^ recover_rbp_var ^ "@GOTPCREL(%rip), %rbx";
             "  movq (%rbx), %rbx";
             "  jmpq *%rbx" ];

@@ -144,20 +144,52 @@ builds on AMD64, and simple scalar programs compile and run with
 - Attempted a simpler AMD64 exception recovery path that avoided moving `%r14`
   and `%r15` into LLVM's landing registers; it immediately regressed
   `exception_extra_args`, so that experiment was backed out before this handoff.
+- Fixed the remaining AMD64 LLVM exception recovery corruption independently:
+  - AMD64 trap frames now save `%rbp` as `rbp - trap_block`, matching the
+    relocation-stable AArch64 model instead of storing an absolute stack
+    pointer that can go stale across stack relocation.
+  - The recovery shim reconstructs `%rbp` from the current trap block and seeds
+    both `%rax` and `%rcx` from the domain-state register `%r14`; this avoids
+    corrupting the domain state after exception recovery.
+- Focused tests that now pass after the recovery fix:
+  - `tests/async-exns/async_exns_2.ml`
+  - `tests/exception-extra-args/exception_extra_args.ml`
+  - `tests/match-exception/nested_handlers.ml`
+  - `tests/basic/patmatch.ml`
+  - `tests/lib-smallint/test_int16_u.ml`
+  - `tests/lib-smallint/test_int8_u.ml`
+  - `tests/misc-kb/kbmain.ml`
+  - `tests/typing-layouts/unboxed_int_stringlike_indexing.ml`
+  - `tests/typing-layouts-arrays/test_or_null_product_array.ml`
+- Rebuilt and refreshed the local testsuite install after the recovery fix:
+  - `opam exec -- make compiler`
+  - `opam exec -- make prefix="$PWD/_local-llvm-test-install" install_for_test`
+- Full `llvm-test` with `LLVM_BOOT_BACKEND=0` completed again:
+  - `6641 passed`, `280 skipped`, `34 failed`, `6955 considered`
+  - This improves from the previous full run's `6632 passed`, `280 skipped`,
+    `43 failed`, `6955 considered`.
+  - The previous native segfault failures in `async_exns_2`, `patmatch`,
+    `test_int16_u`, `test_int8_u`, `kbmain`,
+    `unboxed_int_stringlike_indexing`, and `test_or_null_product_array` are now
+    fixed.
+  - Remaining notable failures are native CFI stepping, quotation native/linker
+    tests with missing stub libraries, product array/iarray semantic assertion
+    failures, `tool-toplevel/dwarf_binary_emitter.ml`, and the AMD64
+    unboxed-primitive argument ABI mismatch.
 
 ## Current Blocker
 
-No immediate source blocker. Full `llvm-test` now completes but still has 43
-failures. The next focused runtime/codegen blocker is the native segfault in
-`tests/async-exns/async_exns_2.ml`; it reproduces after the current exception
-fixes, while `exception_extra_args` and `nested_handlers` pass. Several layout
-array/iarray tests now compile but fail semantic assertions, so the remaining
-SIMD/product-array work is beyond just adding missing builtins.
+No immediate source blocker. Full `llvm-test` now completes but still has 34
+failures. The exception-recovery segfault class is fixed; the next focused
+backend blocker is the AMD64 unboxed primitive argument ABI mismatch, especially
+float32 and vec128/int64x2 values being observed as zero or `1:1` on the C side.
+Several product array/iarray tests now compile but fail semantic assertions, so
+the remaining SIMD/product-array work is beyond just adding missing builtins.
 
 ## Next Step
 
-Reduce `tests/async-exns/async_exns_2.ml` under the standard compiler with
-`-llvm-backend`, then fix the AMD64 runtime/exception state issue without
-regressing `exception_extra_args` or `nested_handlers`. After that, rerun the
-full `llvm-test` and continue into layout array semantics and unboxed primitive
-argument ABI failures before attempting `llvm-self-stage2-test`.
+Reduce `tests/unboxed-primitive-args/test.ml` under the standard compiler with
+`-llvm-backend`, then fix AMD64 external-call argument/result classification for
+float32 and SIMD vector values. After that, rerun the relevant layout array and
+iarray semantic tests, then the full `llvm-test`, before attempting
+`llvm-self-stage2-test`.
