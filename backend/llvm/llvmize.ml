@@ -1444,8 +1444,8 @@ let extcall ?unwind_label t (i : Cfg.terminator Cfg.instruction) ~func_symbol
           (List.combine arg_regs arg_types)
       in
       (* Fill up the slots *)
-      List.iter2
-        (fun (reg : Reg.t) typ ->
+      List.iter
+        (fun ((reg : Reg.t), typ) ->
           match reg.loc with
           | Stack (Outgoing n) ->
             let temp = load_reg_to_temp ~typ t reg in
@@ -1457,7 +1457,7 @@ let extcall ?unwind_label t (i : Cfg.terminator Cfg.instruction) ~func_symbol
             emit_ins_no_res t (I.store ~ptr:slot ~to_store:temp)
           | Stack (Local _ | Incoming _ | Domainstate _) | Unknown | Reg _ ->
             assert false)
-        (List.map fst stack_args) (List.map snd stack_args);
+        stack_args;
       (* Prepare direct args + special values for [caml_c_call_stack_args] *)
       let stack_args_begin =
         emit_ins t (I.convert Ptrtoint ~arg:stack_args_alloca ~to_:T.i64)

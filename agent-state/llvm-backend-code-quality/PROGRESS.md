@@ -4,8 +4,8 @@ Last updated: 2026-05-25.
 
 ## Current Claim
 
-Iterations 1 through 10 are committed, pushed, reviewed with no accepted
-findings, and focused validation passed.
+Iterations 1 through 11 are committed or ready to commit; iteration 11 passed
+review with no findings and focused validation passed.
 
 ## Evidence
 
@@ -22,8 +22,8 @@ None.
 
 ## Iteration State
 
-- Target: 10 completed iterations.
-- Completed iterations: 10.
+- Target: open-ended follow-up after the initial 10 completed iterations.
+- Completed iterations: 11.
 - Committed cleanups:
   - Iteration 1: simplified deopt argument list construction in
     `backend/llvm/llvmize.ml` with `List.concat_map`.
@@ -46,8 +46,11 @@ None.
     `backend/llvm/llvmize.ml`.
   - Iteration 10: used `In_channel.with_open_text` for LLVM backend file reads
     in `backend/llvm/llvmize.ml`.
+  - Iteration 11: iterated external-call stack argument pairs directly in
+    `backend/llvm/llvmize.ml`.
 - Dropped ideas: none yet.
-- Stop condition: met after 10 completed iterations.
+- Stop condition: continue only while a small candidate passes five-reviewer
+  review with no accepted findings and focused validation.
 
 ## Iteration 1 Candidate
 
@@ -536,9 +539,51 @@ Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
 are broad LLVM backend validation runs, and this commit only changes local file
 read resource handling.
 
+## Iteration 11 Candidate
+
+Path: self-proposed candidate.
+
+Candidate: iterate the existing `(reg, typ)` pairs in `stack_args` directly
+when filling external-call stack argument slots in `backend/llvm/llvmize.ml`.
+
+Why likely useful: the code already partitions a pair list, then rebuilt
+separate register and type lists only to immediately consume them with
+`List.iter2`. Direct iteration keeps the existing pair shape and avoids two
+temporary lists.
+
+Review gate: passed after five human-like reviews of the final diff.
+
+Review result: all five reviewers said keep with no findings. Reviewers checked
+that the removed `List.iter2` length check was redundant because both lists came
+from the same `stack_args` value, and that direct pair iteration matches the
+nearby code shape.
+
+Validation result:
+
+- `git diff --check`: passed.
+- `eval "$(../../../scripts/agent-tmp-env)" && opam exec
+  --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`: passed.
+
+## Testing Story for This Commit
+
+Change: replace `List.iter2` over `List.map fst stack_args` and
+`List.map snd stack_args` with direct `List.iter` over `stack_args`, and record
+iteration 11 state in this progress file.
+Risk: if the rewrite is wrong, external calls with outgoing stack arguments
+could store the wrong register value or LLVM type into a stack argument slot.
+Validation: `git diff --check`; `eval "$(../../../scripts/agent-tmp-env)" &&
+opam exec --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`.
+Full LLVM validation: not run for this commit; the rewrite preserves the
+existing `(reg, typ)` pair order and only removes redundant list projection.
+Stage2 verification: not run for this commit; self-stage2 is intentionally
+deferred for the same reason as full LLVM validation.
+Why this is enough: five human-like reviews found no issues and checked the
+pair-list behavior; the build check covers type and syntax validity.
+Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
+`make llvm-self-stage2-test LLVM_PATH="$LLVM_PATH"` are deferred because they
+are broad LLVM backend validation runs, and this commit only changes a local
+list iteration.
+
 ## Next Step
 
-No immediate code-quality iteration is queued. Remaining promising targets are
-larger than the accepted cleanup size so far, especially debug metadata printing
-and architecture-specific restore assembly helpers; revisit them only with a
-dedicated review and test scope.
+Commit iteration 11 and push it to the draft PR branch.
