@@ -4,8 +4,8 @@ Last updated: 2026-05-25.
 
 ## Current Claim
 
-Iterations 1 through 10 are committed or ready to commit; iteration 10 passed
-review with no findings and is validated.
+Iterations 1 through 10 are committed, pushed, reviewed with no accepted
+findings, and focused validation passed.
 
 ## Evidence
 
@@ -47,8 +47,7 @@ None.
   - Iteration 10: used `In_channel.with_open_text` for LLVM backend file reads
     in `backend/llvm/llvmize.ml`.
 - Dropped ideas: none yet.
-- Stop condition: stop after 10 completed iterations, then summarize committed
-  cleanups, dropped ideas, and remaining promising targets.
+- Stop condition: met after 10 completed iterations.
 
 ## Iteration 1 Candidate
 
@@ -539,4 +538,7 @@ read resource handling.
 
 ## Next Step
 
-Commit iteration 10 and push it to the draft PR branch.
+No immediate code-quality iteration is queued. Remaining promising targets are
+larger than the accepted cleanup size so far, especially debug metadata printing
+and architecture-specific restore assembly helpers; revisit them only with a
+dedicated review and test scope.
