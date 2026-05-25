@@ -2436,6 +2436,29 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let res = emit_ins t (I.select ~cond:choose_arg1 ~ifso:arg1 ~ifnot:arg2) in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_avg_unsigned width_in_bits =
+    let lanes = 128 / width_in_bits in
+    let typ = int_vec_type_of_lanes ~width_in_bits ~lanes in
+    let wide_typ =
+      int_vec_type_of_lanes ~width_in_bits:(2 * width_in_bits) ~lanes
+    in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let arg1 = emit_ins t (I.convert Zext ~arg:arg1 ~to_:wide_typ) in
+    let arg2 = emit_ins t (I.convert Zext ~arg:arg2 ~to_:wide_typ) in
+    let sum = emit_ins t (I.binary Add ~arg1 ~arg2) in
+    let rounded =
+      emit_ins t
+        (I.binary Add ~arg1:sum ~arg2:(int_vector_constant_like wide_typ 1))
+    in
+    let avg =
+      emit_ins t
+        (I.binary Lshr ~arg1:rounded
+           ~arg2:(int_vector_constant_like wide_typ 1))
+    in
+    let res = emit_ins t (I.convert Trunc ~arg:avg ~to_:typ) in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_shift_imm width_in_bits op n =
     let typ = int_vec_type ~width_in_bits in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -3341,6 +3364,10 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | Amd64_simd_instrs.Pminsw_X_Xm128
     | Amd64_simd_instrs.Vpminsw_X_X_Xm128 ->
       simd_int_minmax 16 I.Islt
+    | Amd64_simd_instrs.Pavgb_X_Xm128 | Amd64_simd_instrs.Vpavgb_X_X_Xm128 ->
+      simd_int_avg_unsigned 8
+    | Amd64_simd_instrs.Pavgw_X_Xm128 | Amd64_simd_instrs.Vpavgw_X_X_Xm128 ->
+      simd_int_avg_unsigned 16
     | Amd64_simd_instrs.Pcmpeqb | Amd64_simd_instrs.Vpcmpeqb_X_X_Xm128 ->
       simd_int_cmp 8 Int_EQ ~zero:false
     | Amd64_simd_instrs.Pcmpeqw | Amd64_simd_instrs.Vpcmpeqw_X_X_Xm128 ->
