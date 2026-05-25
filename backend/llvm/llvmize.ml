@@ -3611,6 +3611,14 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_binary 64 Or
     | Amd64_simd_instrs.Xorps | Amd64_simd_instrs.Vxorps_X_X_Xm128 ->
       simd_int_binary 64 Xor
+    | Amd64_simd_instrs.Punpckhbw | Amd64_simd_instrs.Vpunpckhbw_X_X_Xm128 ->
+      simd_zip (int_vec_type ~width_in_bits:8) ~high:true
+    | Amd64_simd_instrs.Punpcklbw | Amd64_simd_instrs.Vpunpcklbw_X_X_Xm128 ->
+      simd_zip (int_vec_type ~width_in_bits:8) ~high:false
+    | Amd64_simd_instrs.Punpckhwd | Amd64_simd_instrs.Vpunpckhwd_X_X_Xm128 ->
+      simd_zip (int_vec_type ~width_in_bits:16) ~high:true
+    | Amd64_simd_instrs.Punpcklwd | Amd64_simd_instrs.Vpunpcklwd_X_X_Xm128 ->
+      simd_zip (int_vec_type ~width_in_bits:16) ~high:false
     | Amd64_simd_instrs.Punpckhqdq | Amd64_simd_instrs.Vpunpckhqdq_X_X_Xm128 ->
       simd_zip (int_vec_type ~width_in_bits:64) ~high:true
     | Amd64_simd_instrs.Punpcklqdq | Amd64_simd_instrs.Vpunpcklqdq_X_X_Xm128 ->
