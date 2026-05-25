@@ -123,6 +123,12 @@ fi
 require_path "$list"
 validate_testsuite_list
 
+if [ "${LLVM_TESTSUITE_VALIDATE_ONLY:-0}" = 1 ]; then
+  printf 'FAKE_ROOT=%s\n' "$fake_root"
+  printf 'LIST=%s\n' "$list"
+  exit 0
+fi
+
 STAGE_BUILD="$stage_build" \
 NORMAL_BUILD="$normal_build" \
 FAKE_ROOT="$fake_root" \
