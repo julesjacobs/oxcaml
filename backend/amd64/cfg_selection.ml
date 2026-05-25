@@ -136,7 +136,17 @@ let is_llvm_intrinsic_builtin = function
   | "caml_rdtsc_unboxed"
   | "caml_rdpmc_unboxed"
   | "caml_sse2_float64_min"
-  | "caml_sse2_float64_max" ->
+  | "caml_sse2_float64_max"
+  | "caml_avx_vec256_extract_128"
+  | "caml_avx_vec256_insert_128"
+  | "caml_int64x2_const1"
+  | "caml_int64x2_low_of_int64"
+  | "caml_int64x2_low_to_int64"
+  | "caml_simd_int64x2_sub"
+  | "caml_simd_int64x2_add"
+  | "caml_simd_vec128_interleave_high_64"
+  | "caml_simd_vec128_interleave_low_64"
+  | "caml_vec256_low_to_vec128" ->
     true
   | _ -> false
 
