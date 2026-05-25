@@ -87,6 +87,8 @@ LLVM vector load/store path for correctness; the non-temporal cache hint is
 not yet modeled in the emitted IR.
 The AVX masked SIMD memory forms now lower to LLVM masked load/store
 intrinsics, deriving the lane predicate from the sign bit of each mask lane.
+The SSE2 byte masked store form (`caml_sse2_vec128_store_mask8`) now lowers
+through the same LLVM masked-store strategy over `<16 x i8>`.
 
 The latest stack-pressure fix safely pools X86_64 preserved GC-root stack slots
 using full CFG liveness interference instead of safepoint-only disjointness.
@@ -281,6 +283,14 @@ limit is raised from `l=100000` to `l=150000`.
     `llvm.masked.load.*.p0` / `llvm.masked.store.*.p0`.
     `testsuite/tests/llvm-codegen/amd64_simd_masked_mem.{ml,sh}` checks these
     cases with `-llvm-backend -c -S -keep-llvmir`.
+  - `backend/amd64/cfg_selection.ml` and `backend/llvm/llvmize.ml` also lower
+    the SSE2 `caml_sse2_vec128_store_mask8` builtin, which is selected as an
+    implicit-memory SIMD instruction instead of `Isimd_mem`. The LLVM lowering
+    takes the address from the third builtin argument, bitcasts data and mask
+    operands to `<16 x i8>`, compares mask bytes against zero with signed `<`,
+    and emits `llvm.masked.store.v16i8.p0`.
+    `testsuite/tests/llvm-codegen/amd64_simd_mask8_store.{ml,sh}` checks this
+    case with `-llvm-backend -c -S -keep-llvmir`.
   - `backend/llvm/llvmize.ml` now stores LLVM `cmpxchg`'s loaded value for
     `Compare_exchange`. LLVM returns the old memory value in both success and
     failure cases, which is exactly the OCaml `Atomic.compare_exchange` result;
@@ -1677,6 +1687,12 @@ limit is raised from `l=100000` to `l=150000`.
       IR contains `llvm.masked.load`/`llvm.masked.store` calls for v2i64,
       v4i64, v4i32, and v8i32, plus signed vector compares for the mask
       predicates.
+    - Implemented AMD64 LLVM lowering for `caml_sse2_vec128_store_mask8` and
+      rebuilt with `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_mask8_store.sh` script passed
+      directly under `validation-tmp/simd_mask8_store_script`; the kept IR
+      contains a `llvm.masked.store.v16i8.p0` call, a signed `<16 x i8>` mask
+      compare, and an `inttoptr` of the address argument.
 
 ## Current Blocker
 

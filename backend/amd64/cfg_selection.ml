@@ -165,6 +165,7 @@ let is_llvm_simd_builtin = function
   | "caml_avx_vec128_load_mask32" | "caml_avx_vec256_load_mask32"
   | "caml_avx_vec128_store_mask64" | "caml_avx_vec256_store_mask64"
   | "caml_avx_vec128_store_mask32" | "caml_avx_vec256_store_mask32"
+  | "caml_sse2_vec128_store_mask8"
   | "caml_sse2_vec128_store_low64" | "caml_sse2_vec128_store_low32" ->
     true
   | _ -> false

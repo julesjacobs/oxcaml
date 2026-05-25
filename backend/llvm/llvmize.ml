@@ -2898,6 +2898,19 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       ("masked.store." ^ llvm_intrinsic_type_suffix data_typ ^ ".p0")
       [ value; ptr; V.of_int ~typ:T.i32 1; mask ]
   in
+  let simd_masked_byte_store () =
+    let data_typ =
+      wide_int_vec_type ~vector_width_in_bits:128 ~width_in_bits:8
+    in
+    let ptr = load_reg_to_temp ~typ:T.i64 t i.arg.(2) |> cast_to_ptr t in
+    let value =
+      load_reg_to_temp t i.arg.(0) |> fun value -> cast_if_needed value data_typ
+    in
+    let mask = simd_mem_mask 1 data_typ in
+    call_llvm_intrinsic_no_res t
+      ("masked.store." ^ llvm_intrinsic_type_suffix data_typ ^ ".p0")
+      [ value; ptr; V.of_int ~typ:T.i32 1; mask ]
+  in
   let simd_mem_store_low64 ~addr =
     let vector = load_reg_to_temp ~typ:T.vec128 t i.arg.(1) in
     let low = extract_i64_lane vector 0 in
@@ -3042,6 +3055,8 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_zip (int_vec_type ~width_in_bits:64) ~high:true
     | Amd64_simd_instrs.Punpcklqdq | Amd64_simd_instrs.Vpunpcklqdq_X_X_Xm128 ->
       simd_zip (int_vec_type ~width_in_bits:64) ~high:false
+    | Amd64_simd_instrs.Maskmovdqu | Amd64_simd_instrs.Vmaskmovdqu ->
+      simd_masked_byte_store ()
     | Amd64_simd_instrs.Vinsertf128 -> simd_vec256_insert_128 (simd_imm imm)
     | Amd64_simd_instrs.Vextractf128 -> simd_vec256_extract_128 (simd_imm imm)
     | _ -> not_implemented_basic ~msg:"specific" i)
