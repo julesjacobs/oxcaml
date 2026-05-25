@@ -422,6 +422,20 @@ passes, and `llvm-self-stage2-test` passes.
   - verified focused testsuite run:
     `tests/llvm-codegen/amd64_regressions.ml`: `3 passed`, `0 skipped`,
     `0 failed`, `3 considered`.
+  - verified clean-worktree validation in
+    `/home/jules/git/oxcaml-llvm/clean-amd64-pr`:
+    `autoconf`, `./configure --enable-frame-pointers`,
+    `opam exec -- make compiler LLVM_BACKEND=0 LLVM_BOOT_BACKEND=0`,
+    local-prefix `install_for_test`, and focused
+    `tests/llvm-codegen/amd64_regressions.ml` with `3 passed`, `0 skipped`,
+    `0 failed`, `3 considered`.
+  - deleted the self-stage directories and repeated
+    `opam exec -- make llvm-self-stage2-test LLVM_PATH="$LLVM_PATH"`;
+  - verified the repeated full self-stage2 testsuite run:
+    `6369 passed`, `272 skipped`, `0 failed`, `6641 considered`;
+  - the repeated run also exercised `tests/llvm-codegen/amd64_regressions.ml`
+    in the full self-stage2 suite and ended with wrapper log summary:
+    `wrapper lines: 6598`, `fresh ir: 3299`.
 
 ## Current Blocker
 
@@ -429,4 +443,4 @@ No current source blocker. The requested AMD64 LLVM-backend validation passes.
 
 ## Next Step
 
-Run clean-worktree validation and repeat self-stage validation if requested.
+All TESTING.md checklist items are implemented and validated.

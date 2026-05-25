@@ -12,7 +12,7 @@
 - [x] Add LLVM IR or assembly shape checks for fragile paths such as
   `no-realign-stack`, GC helper selection, PIC-safe recovery, and vector
   calling-convention lowering.
-- [ ] Run validation from a clean clone or clean worktree to catch dependence
+- [x] Run validation from a clean clone or clean worktree to catch dependence
   on stale `_llvm_*` or `_build` artifacts.
-- [ ] Repeat the self-stage validation after deleting stage directories to
+- [x] Repeat the self-stage validation after deleting stage directories to
   check temp-file, staged-install, and stale-state repeatability.
