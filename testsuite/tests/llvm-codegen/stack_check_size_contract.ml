@@ -9,5 +9,5 @@
 *)
 
 (* The script checks the OxCaml LLVM stack-check byte-count contract against the
-   post-stack-check CFG dump, and characterizes the outgoing stack-argument
-   adjustment for the noalloc extcall case. *)
+   post-stack-check CFG dump and checks that the legacy boolean stack-check
+   request is still emitted. *)

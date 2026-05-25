@@ -65,6 +65,11 @@ required_bytes = max(final_static_llvm_frame_bytes, cfg_required_stack_check_byt
     failures in six `tests/frame-pointers` native tests and
     `tests/typing-small-numbers/test_matching_native.ml` in `ocamlnat`, which
     exits with signal 5.
+  - review follow-up:
+    `make -s test-one DIR=llvm-codegen LLVM_BACKEND=1 LLVM_BOOT_BACKEND=0
+    LLVM_PATH="$LLVM_PATH"` passed after tightening the focused test for the
+    legacy boolean attribute and leaf CFG `stack_check` absence: 59 passed, 1
+    skipped, 0 failed.
 
 ## Current Blocker
 
