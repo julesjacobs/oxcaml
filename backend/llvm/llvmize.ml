@@ -3767,6 +3767,16 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_binary 64 Or
     | Amd64_simd_instrs.Xorps | Amd64_simd_instrs.Vxorps_X_X_Xm128 ->
       simd_int_binary 64 Xor
+    | Amd64_simd_instrs.Addps | Amd64_simd_instrs.Vaddps_X_X_Xm128 ->
+      simd_float_binary Cmm.Float32 Fadd
+    | Amd64_simd_instrs.Subps | Amd64_simd_instrs.Vsubps_X_X_Xm128 ->
+      simd_float_binary Cmm.Float32 Fsub
+    | Amd64_simd_instrs.Mulps | Amd64_simd_instrs.Vmulps_X_X_Xm128 ->
+      simd_float_binary Cmm.Float32 Fmul
+    | Amd64_simd_instrs.Divps | Amd64_simd_instrs.Vdivps_X_X_Xm128 ->
+      simd_float_binary Cmm.Float32 Fdiv
+    | Amd64_simd_instrs.Sqrtps | Amd64_simd_instrs.Vsqrtps_X_Xm128 ->
+      simd_float_unary_intrinsic Cmm.Float32 "sqrt"
     | Amd64_simd_instrs.Shufps | Amd64_simd_instrs.Vshufps_X_X_Xm128 ->
       simd_shuffle_32 (simd_imm imm)
     | Amd64_simd_instrs.Shufpd | Amd64_simd_instrs.Vshufpd_X_X_Xm128 ->
