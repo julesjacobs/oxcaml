@@ -120,10 +120,15 @@ export PATH="$opam_switch_bin:$PATH"
 
 if [ "$build_runtime" = 1 ]; then
   : > "$wrapper_log"
+  runtime_command=(
+    dune build --root="$repo" --build-dir "$runtime_build"
+    --workspace="$runtime_ws"
+  )
+  if [ "${#dune_build_flags[@]}" -ne 0 ]; then
+    runtime_command+=("${dune_build_flags[@]}")
+  fi
   RUNTIME_DIR=runtime ARCH="$arch" \
-    dune build --root="$repo" --build-dir "$runtime_build" \
-      --workspace="$runtime_ws" "${dune_build_flags[@]}" \
-      "${runtime_targets[@]}"
+    "${runtime_command[@]}" "${runtime_targets[@]}"
 
   runtime_lib="$runtime_build/install/runtime_stdlib/lib/ocaml_runtime_stdlib"
   require_path "$runtime_lib/stdlib.cmxa"
@@ -136,10 +141,16 @@ fi
 if [ "$build_main" = 1 ]; then
   require_path "$runtime_build/install/runtime_stdlib/lib/ocaml_runtime_stdlib/stdlib.cmxa"
   : > "$wrapper_log"
+  main_command=(
+    dune build --root="$repo" --build-dir "$main_build"
+    --workspace="$main_ws"
+  )
+  if [ "${#dune_build_flags[@]}" -ne 0 ]; then
+    main_command+=("${dune_build_flags[@]}")
+  fi
   RUNTIME_DIR=runtime ARCH="$arch" SYSTEM="$system" MODEL="$model" \
   ASPP="$aspp" ASPPFLAGS="$asppflags" \
-    dune build --root="$repo" --build-dir "$main_build" \
-      --workspace="$main_ws" "${dune_build_flags[@]}" "${main_targets[@]}"
+    "${main_command[@]}" "${main_targets[@]}"
 
   print_wrapper_counts main
 fi
