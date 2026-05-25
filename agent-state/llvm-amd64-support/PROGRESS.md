@@ -72,9 +72,7 @@ register-clobbering edge.
   - `backend/llvm/llvmize.ml` now permits AMD64 stack checks, attaches
     `oxcaml-stack-check` on AMD64 LLVM functions, emits an incremental
     AMD64-specific `specific` lowering subset, and emits explicit stackmap
-    descriptors for non-tail indirect OCaml calls. This gets AMD64 buildability
-    further but is not a final multi-arch cleanup: the old ARM64-specific
-    `specific` body is temporarily commented out.
+    descriptors for non-tail indirect OCaml calls.
   - `backend/llvm/llvmize.ml` passes `-fPIC` for AMD64 LLVM IR-to-assembly
     compilation and emits AMD64 recover-rbp variable loads through
     `@GOTPCREL`, clearing PIE and shared-object relocation failures.
@@ -671,6 +669,10 @@ register-clobbering edge.
     `tests/native-cfi-stepping`, `tests/typing-layouts-arrays` including
     `test_float32_u_array.ml`, `tests/misc/gctweaks.ml`, and the AMD64
     `llvm-codegen` regressions all passed.
+  - PR-readiness cleanup: removed the large commented-out ARM64
+    `specific`-lowering reference block from `backend/llvm/llvmize.ml`. This
+    does not change AMD64 generated code, but it removes review noise from the
+    AMD64 branch.
 
 ## Current Blocker
 
@@ -691,10 +693,9 @@ comments or reviews and CI jobs were pending.
 
 Do a final PR-readiness audit of the AMD64 LLVM backend changes and decide
 whether to split or polish any broad implementation commits before requesting
-review. The largest known cleanup debt is the large commented-out
-ARM64-specific `specific` lowering reference in `backend/llvm/llvmize.ml`; it
-does not affect AMD64 validation but should be removed or replaced by a cleaner
-multi-arch organization before final review if preserving ARM64 support in the
-same branch is required. Keep using normal build parallelism; avoid only
+review. If preserving ARM64 LLVM-backend support in the same branch is required,
+the AMD64-specific `specific` lowering should be reorganized into a cleaner
+multi-arch structure rather than relying on the previous ARM64-only
+implementation shape. Keep using normal build parallelism; avoid only
 concurrent top-level `make`/`dune` commands in this checkout because of the
 shared lockfile.
