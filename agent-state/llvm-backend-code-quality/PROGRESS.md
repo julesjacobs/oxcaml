@@ -19,6 +19,15 @@ Agent workspace is initialized for iterative LLVM backend code-quality cleanup.
 
 None.
 
+## Iteration State
+
+- Target: 10 completed iterations.
+- Completed iterations: 0.
+- Committed cleanups: none yet.
+- Dropped ideas: none yet.
+- Stop condition: stop after 10 completed iterations, then summarize committed
+  cleanups, dropped ideas, and remaining promising targets.
+
 ## Testing Story
 
 Before each commit, record:
@@ -34,10 +43,9 @@ Before each commit, record:
 
 ## Testing Story for This Commit
 
-Change: make human-like review a keep/revise/drop gate, so implemented ideas
-can be discarded instead of forced into commits.
-Risk: the agent may otherwise treat target selection as only one fixed workflow
-or treat implementation as a commitment to commit.
+Change: add a concrete end state of 10 completed iterations.
+Risk: without a stop condition, the agent may run indefinitely or confuse
+iterations with mandatory commits.
 Validation: inspect the changed `GOAL.md`, `PLAN.md`, and `PROGRESS.md`.
 Full LLVM validation: not run; this commit only changes agent instructions.
 Stage2 verification: not run; this commit only changes agent instructions.

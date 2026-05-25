@@ -20,8 +20,12 @@ Use `PLAN.md` as a guide, not a rigid checklist.
 
 - Primary repo: OxCaml monorepo at `oxcaml/`
 - Vendored LLVM path: `oxcaml/vendor/llvm-project`
-- Expected output: one small, well-reviewed cleanup that improves maintainability
-  without intended behavior changes, plus focused validation.
+- Expected output: up to 10 completed cleanup iterations. A completed iteration
+  is either a committed cleanup, or a discarded idea with the reason recorded in
+  `PROGRESS.md`.
+
+Stop after 10 completed iterations. Do not force 10 commits; weak ideas should
+be dropped.
 
 Each commit must have a written testing story in `PROGRESS.md`: what was run,
 why that validation is enough for the commit's risk, and what broader validation

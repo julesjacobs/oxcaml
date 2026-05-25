@@ -2,6 +2,15 @@
 
 Use a mixed review loop. Choose one path per iteration:
 
+End state:
+
+- Complete 10 iterations, then stop and summarize the committed cleanups,
+  dropped ideas, and remaining promising targets in `PROGRESS.md`.
+- Count an iteration when it ends in either a committed cleanup or a discarded
+  idea with a recorded reason.
+- Do not keep working just to make 10 commits. The goal is 10 reviewed
+  decisions, not 10 diffs.
+
 Path A: review-selected target.
 
 1. Inspect `backend/llvm/`, LLVM-codegen tests, and nearby integration code.
@@ -61,6 +70,8 @@ Quality bar:
   If either is skipped, record the exact reason in `PROGRESS.md`.
 - `PROGRESS.md` should record the chosen target, review result, testing story,
   validation result, any rejected review findings, and any dropped ideas.
+- `PROGRESS.md` should track the iteration count, committed cleanups, dropped
+  ideas, and current stop condition.
 
 Testing story template:
 
