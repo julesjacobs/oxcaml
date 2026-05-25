@@ -731,6 +731,10 @@ let live_gc_root_regs_across t (i : 'a Cfg.instruction) =
           Cmm.is_val reg.typ && Option.is_some (get_alloca_for_reg_opt t reg))
         across)
 
+let slow_path_root_regs_across t i =
+  live_gc_root_regs_across t i
+  |> Reg.Set.filter (fun reg -> Option.is_none (get_const_int_for_reg t reg))
+
 let basic_has_gc_safepoint (i : Cfg.basic Cfg.instruction) =
   match i.desc with
   | Op (Alloc { mode = Heap; _ } | Poll) -> true
@@ -777,9 +781,8 @@ let slow_path_root_slots_for_basic_safepoint ?unwind_label t i =
         fail_msg ~name:"slow_path_root_slots_for_basic_safepoint"
           "not enough slow path root slots"
     in
-    live_gc_root_regs_across t i
+    slow_path_root_regs_across t i
     |> Reg.Set.elements
-    |> List.filter (fun reg -> Option.is_none (get_const_int_for_reg t reg))
     |> pair (get_fun_info t).slow_path_root_slots
     |> fun roots -> Some roots
   else None
@@ -3820,6 +3823,10 @@ let max_slow_path_root_slots t active_traps cfg =
   Cfg.fold_body_instructions cfg
     ~f:(fun max_roots i ->
       if eligible_basic_safepoint_for_slow_root_slots active_traps i
+      (* [const_ints] is populated while emitting instructions, so this
+         pre-emission count can only use the conservative live root set. The
+         actual slow-path bundle still filters known immediates at the call
+         site. *)
       then Int.max max_roots (Reg.Set.cardinal (live_gc_root_regs_across t i))
       else max_roots)
     ~init:0

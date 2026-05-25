@@ -6,12 +6,15 @@ Last updated: 2026-05-25.
 
 Implemented LLVM fast-path root slots for eligible basic allocation and poll
 safepoints, with expect tests covering the optimized path, const-int filtering,
-and trap/unwind fallback.
+trap/unwind fallback, no-root safepoints, multiple live-root counts, aliased
+logical roots, and interaction with ordinary call root preservation.
 
 ## Evidence
 
 - OxCaml branch: `jujacobs/llvm-fast-path-roots`
 - OxCaml PR: https://github.com/julesjacobs/oxcaml/pull/14
+- Rebasing: branch rebased on `upstream/main` on 2026-05-25 after debug checks
+  were moved behind a flag upstream.
 - Initial state commit: `4fbbb1a88324`
 - Vendored LLVM path: `oxcaml/vendor/llvm-project`
 - Agent state path: `agent-state/llvm-fast-path-roots`
@@ -20,12 +23,17 @@ and trap/unwind fallback.
 - Tests:
   - `testsuite/tests/llvm-codegen/allocation.ml`
   - `testsuite/tests/llvm-codegen/fast_path_roots.ml`
-- Human-like review: 5 agents run. Addressed the actionable findings by adding
-  the trap/unwind fallback test, keeping the new test tracked, and refactoring
-  duplicate slow-path GC-call emission through one helper.
+- Human-like review: 5 agents run after the expanded expect coverage. Addressed
+  the actionable findings by adding allocation no-root, allocation const-int
+  filtering, allocation trap/unwind fallback, and call-preservation interaction
+  cases; renaming the aliased-root and call-then-allocation cases; and clarifying
+  the conservative slow-path slot preallocation count.
 - Focused validation passed:
   `llvm-codegen/fast_path_roots.ml`, `llvm-codegen/allocation.ml`,
   `typing-small-numbers/test_matching_native.ml`.
+- Latest focused validation after rebase and extra tests:
+  `make test-one-no-rebuild TEST=llvm-codegen/fast_path_roots.ml
+  LLVM_BACKEND=1 LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"` passed.
 - Formatting passed:
   `ocamlformat --check backend/llvm/llvmize.ml
   testsuite/tests/llvm-codegen/allocation.ml
