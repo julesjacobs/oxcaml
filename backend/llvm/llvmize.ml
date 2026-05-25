@@ -785,7 +785,7 @@ let debug_deopt_args ~primitive_call ~raise_call dbg =
       V.of_int oxcaml_debug_deopt_version;
       V.of_int (if raise_call then 2 else if primitive_call then 1 else 0);
       V.of_int (List.length items) ]
-    @ (items |> List.map debug_item_deopt_args |> List.concat)
+    @ List.concat_map debug_item_deopt_args items
   | _ -> []
 
 let alloc_deopt_args alloc_info =
@@ -795,7 +795,7 @@ let alloc_deopt_args alloc_info =
     in
     V.of_int alloc_words
     :: V.of_int (List.length items)
-    :: (items |> List.map debug_item_deopt_args |> List.concat)
+    :: List.concat_map debug_item_deopt_args items
   in
   match alloc_info with
   | None -> []
@@ -803,7 +803,7 @@ let alloc_deopt_args alloc_info =
     [ V.of_int oxcaml_alloc_deopt_marker;
       V.of_int oxcaml_alloc_deopt_version;
       V.of_int (List.length alloc_info) ]
-    @ (alloc_info |> List.map alloc_item_deopt_args |> List.concat)
+    @ List.concat_map alloc_item_deopt_args alloc_info
 
 let deopt_bundle ?alloc_info ~primitive_call ~raise_call dbg =
   match
