@@ -1693,6 +1693,13 @@ limit is raised from `l=100000` to `l=150000`.
       directly under `validation-tmp/simd_mask8_store_script`; the kept IR
       contains a `llvm.masked.store.v16i8.p0` call, a signed `<16 x i8>` mask
       compare, and an `inttoptr` of the address argument.
+    - Implemented AMD64 LLVM lowering for the AVX2 gather SIMD memory subset
+      and rebuilt with `make -s compiler -j "$(nproc)"`; result: passed. The
+      new `testsuite/tests/llvm-codegen/amd64_simd_gather_mem.sh` script
+      passed directly under `validation-tmp/simd_gather_mem_script`; the kept
+      IR contains `llvm.masked.gather` calls for v2i32, v4i32, v8i32, v2i64,
+      and v4i64, signed vector mask compares, and scalar `inttoptr` address
+      formation for gather lanes.
 
 ## Current Blocker
 

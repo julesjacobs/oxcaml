@@ -2256,6 +2256,20 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
         elem_type = T.Int { width_in_bits }
       }
   in
+  let int_vec_type_of_lanes ~lanes ~width_in_bits =
+    T.Vector { num_of_elems = lanes; elem_type = T.Int { width_in_bits } }
+  in
+  let ptr_vec_type ~lanes =
+    T.Vector { num_of_elems = lanes; elem_type = T.ptr }
+  in
+  let vector_width_in_bits_of_reg reg =
+    match[@warning "-4"] T.of_reg reg with
+    | T.Vector { num_of_elems; elem_type = T.Int { width_in_bits } } ->
+      num_of_elems * width_in_bits
+    | typ ->
+      fail_msg ~name:"vector_width_in_bits_of_reg"
+        "unexpected vector storage type %a" T.pp_t typ
+  in
   let float_vec_type ~width =
     let elem_type, num_of_elems =
       match width with Cmm.Float32 -> T.float, 4 | Cmm.Float64 -> T.double, 2
@@ -2278,6 +2292,9 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
   in
   let extract_i32_lane vector lane =
     emit_ins t (I.extractelement ~vector ~index:(V.of_int lane))
+  in
+  let insert_ptr_lane vector lane to_insert =
+    emit_ins t (I.insertelement ~vector ~index:(V.of_int lane) ~to_insert)
   in
   let zero_vec128 () =
     List.init 2 Fun.id
@@ -2312,6 +2329,36 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
   let store_i32_to_address_arg addr arg_idx to_store =
     let ptr = load_address_from_reg t addr i.arg.(arg_idx) in
     emit_ins_no_res t (I.store_with_align ~align:1 ~ptr ~to_store)
+  in
+  let extract_int_lane ~width_in_bits vector lane =
+    match width_in_bits with
+    | 32 -> extract_i32_lane vector lane
+    | 64 -> extract_i64_lane vector lane
+    | _ ->
+      fail_msg ~name:"extract_int_lane" "unexpected lane width %d"
+        width_in_bits
+  in
+  let insert_int_lane ~width_in_bits vector lane to_insert =
+    match width_in_bits with
+    | 32 -> insert_i32_lane vector lane to_insert
+    | 64 -> insert_i64_lane vector lane to_insert
+    | _ ->
+      fail_msg ~name:"insert_int_lane" "unexpected lane width %d"
+        width_in_bits
+  in
+  let int_vector_prefix ~src ~src_lanes ~dst_lanes ~width_in_bits =
+    let src_typ = int_vec_type_of_lanes ~lanes:src_lanes ~width_in_bits in
+    let dst_typ = int_vec_type_of_lanes ~lanes:dst_lanes ~width_in_bits in
+    let src = cast_if_needed src src_typ in
+    if src_lanes = dst_lanes
+    then src
+    else
+      List.init dst_lanes Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             extract_int_lane ~width_in_bits src lane
+             |> insert_int_lane ~width_in_bits vector lane)
+           (V.poison dst_typ)
   in
   let int_vector_constant width_in_bits n =
     let typ = int_vec_type ~width_in_bits in
@@ -2898,6 +2945,104 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       ("masked.store." ^ llvm_intrinsic_type_suffix data_typ ^ ".p0")
       [ value; ptr; V.of_int ~typ:T.i32 1; mask ]
   in
+  let simd_mem_gather ~addr ~data_width_in_bits ~data_lanes
+      ~index_width_in_bits ~index_lanes ~mask_width_in_bits ~mask_lanes =
+    let scale, displ =
+      match[@warning "-4"] (addr : Arch.addressing_mode) with
+      | Iindexed2scaled (scale, displ) -> scale, displ
+      | _ ->
+        fail_msg ~name:"simd_mem_gather"
+          "unexpected addressing mode for gather"
+    in
+    let data_typ =
+      int_vec_type_of_lanes ~lanes:data_lanes
+        ~width_in_bits:data_width_in_bits
+    in
+    let ptr_typ = ptr_vec_type ~lanes:data_lanes in
+    let base = load_reg_to_temp ~typ:T.i64 t i.arg.(1) in
+    let index =
+      load_reg_to_temp t i.arg.(2)
+      |> fun src ->
+      int_vector_prefix ~src ~src_lanes:index_lanes ~dst_lanes:data_lanes
+        ~width_in_bits:index_width_in_bits
+    in
+    let ptrs =
+      List.init data_lanes Fun.id
+      |> List.fold_left
+           (fun ptrs lane ->
+             let index =
+               extract_int_lane ~width_in_bits:index_width_in_bits index lane
+             in
+             let index =
+               if index_width_in_bits = 64
+               then index
+               else emit_ins t (I.convert Sext ~arg:index ~to_:T.i64)
+             in
+             let offset =
+               if scale = 1
+               then index
+               else
+                 emit_ins t
+                   (I.binary Mul ~arg1:index
+                      ~arg2:(V.of_int ~typ:T.i64 scale))
+             in
+             let offset =
+               if displ = 0
+               then offset
+               else
+                 emit_ins t
+                   (I.binary Add ~arg1:offset
+                      ~arg2:(V.of_int ~typ:T.i64 displ))
+             in
+             let ptr_int = emit_ins t (I.binary Add ~arg1:base ~arg2:offset) in
+             let ptr = emit_ins t (I.convert Inttoptr ~arg:ptr_int ~to_:T.ptr) in
+             insert_ptr_lane ptrs lane ptr)
+           (V.poison ptr_typ)
+    in
+    let mask =
+      load_reg_to_temp t i.arg.(3)
+      |> fun src ->
+      int_vector_prefix ~src ~src_lanes:mask_lanes ~dst_lanes:data_lanes
+        ~width_in_bits:mask_width_in_bits
+      |> fun mask ->
+      emit_ins t
+        (I.icmp Islt ~arg1:mask
+           ~arg2:
+             (V.zeroinitializer
+                (int_vec_type_of_lanes ~lanes:data_lanes
+                   ~width_in_bits:mask_width_in_bits)))
+    in
+    let passthru =
+      load_reg_to_temp t i.arg.(0)
+      |> fun src ->
+      int_vector_prefix ~src
+        ~src_lanes:
+          (vector_width_in_bits_of_reg i.arg.(0) / data_width_in_bits)
+        ~dst_lanes:data_lanes ~width_in_bits:data_width_in_bits
+    in
+    let name =
+      Format.asprintf "masked.gather.%s.v%dp0"
+        (llvm_intrinsic_type_suffix data_typ)
+        data_lanes
+    in
+    let gathered =
+      call_llvm_intrinsic t name
+        [ ptrs; V.of_int ~typ:T.i32 1; mask; passthru ]
+        data_typ
+    in
+    let result =
+      if data_width_in_bits = 32 && data_lanes = 2
+      then
+        List.init data_lanes Fun.id
+        |> List.fold_left
+             (fun vector lane ->
+               extract_i32_lane gathered lane |> insert_i32_lane vector lane)
+             (zero_i32x4 ())
+        |> fun vector -> cast_if_needed vector T.vec128
+      else cast_if_needed gathered (T.of_reg i.res.(0))
+    in
+    store_into_reg t i.res.(0) result
+  in
   let simd_masked_byte_store () =
     let data_typ =
       wide_int_vec_type ~vector_width_in_bits:128 ~width_in_bits:8
@@ -3001,6 +3146,38 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_mem_masked_store ~addr ~mask_arg:2
         ~mask_typ:(wide_int_vec_type ~vector_width_in_bits:256 ~width_in_bits:32)
         ~data_typ:(wide_int_vec_type ~vector_width_in_bits:256 ~width_in_bits:32)
+    | Simd_mem_load, Amd64_simd_instrs.Vpgatherdd_X_M32X_X ->
+      simd_mem_gather ~addr ~data_width_in_bits:32 ~data_lanes:4
+        ~index_width_in_bits:32 ~index_lanes:4 ~mask_width_in_bits:32
+        ~mask_lanes:4
+    | Simd_mem_load, Amd64_simd_instrs.Vpgatherdd_Y_M32Y_Y ->
+      simd_mem_gather ~addr ~data_width_in_bits:32 ~data_lanes:8
+        ~index_width_in_bits:32 ~index_lanes:8 ~mask_width_in_bits:32
+        ~mask_lanes:8
+    | Simd_mem_load, Amd64_simd_instrs.Vpgatherdq_X_M32X_X ->
+      simd_mem_gather ~addr ~data_width_in_bits:64 ~data_lanes:2
+        ~index_width_in_bits:32 ~index_lanes:4 ~mask_width_in_bits:64
+        ~mask_lanes:2
+    | Simd_mem_load, Amd64_simd_instrs.Vpgatherdq_Y_M32X_Y ->
+      simd_mem_gather ~addr ~data_width_in_bits:64 ~data_lanes:4
+        ~index_width_in_bits:32 ~index_lanes:4 ~mask_width_in_bits:64
+        ~mask_lanes:4
+    | Simd_mem_load, Amd64_simd_instrs.Vpgatherqd_X_M64X_X ->
+      simd_mem_gather ~addr ~data_width_in_bits:32 ~data_lanes:2
+        ~index_width_in_bits:64 ~index_lanes:2 ~mask_width_in_bits:32
+        ~mask_lanes:4
+    | Simd_mem_load, Amd64_simd_instrs.Vpgatherqd_X_M64Y_X ->
+      simd_mem_gather ~addr ~data_width_in_bits:32 ~data_lanes:4
+        ~index_width_in_bits:64 ~index_lanes:4 ~mask_width_in_bits:32
+        ~mask_lanes:4
+    | Simd_mem_load, Amd64_simd_instrs.Vpgatherqq_X_M64X_X ->
+      simd_mem_gather ~addr ~data_width_in_bits:64 ~data_lanes:2
+        ~index_width_in_bits:64 ~index_lanes:2 ~mask_width_in_bits:64
+        ~mask_lanes:2
+    | Simd_mem_load, Amd64_simd_instrs.Vpgatherqq_Y_M64Y_Y ->
+      simd_mem_gather ~addr ~data_width_in_bits:64 ~data_lanes:4
+        ~index_width_in_bits:64 ~index_lanes:4 ~mask_width_in_bits:64
+        ~mask_lanes:4
     | _ -> not_implemented_basic ~msg:"specific" i
   in
   let classified = Llvmize_specific.classify op in
