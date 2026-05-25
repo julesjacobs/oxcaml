@@ -79,6 +79,9 @@ generic LLVM vector load/store path for 128-bit SSE and 256-bit AVX vectors.
 The LLVM path now also covers the 128-bit SSE2/SSE3 low-64 memory forms,
 including zeroing, copy-low/high, broadcast, and low-lane stores.
 It also covers the related SSE2 vec128 low-32 load/zero-load/store forms.
+The AVX memory-broadcast forms now lower through LLVM as scalar/vector loads
+plus lane replication for 128-bit-to-256-bit, 64-bit-to-256-bit, and
+32-bit-to-128/256-bit broadcasts.
 
 The latest stack-pressure fix safely pools X86_64 preserved GC-root stack slots
 using full CFG liveness interference instead of safepoint-only disjointness.
@@ -245,6 +248,15 @@ limit is raised from `l=100000` to `l=150000`.
     from the same view and write an unaligned `i32`.
     `testsuite/tests/llvm-codegen/amd64_simd_low32_mem.{ml,sh}` checks this
     subset with `-llvm-backend -c -S -keep-llvmir`.
+  - `backend/amd64/cfg_selection.ml` and `backend/llvm/llvmize.ml` now lower
+    AVX memory broadcasts: `caml_avx_vec256_load_broadcast128`,
+    `caml_avx_vec256_load_broadcast64`,
+    `caml_avx_vec256_load_broadcast32`, and
+    `caml_avx_vec128_load_broadcast32`. The LLVM lowering uses unaligned
+    loads from memory and explicit lane insertion into the canonical vec128 or
+    vec256 storage type.
+    `testsuite/tests/llvm-codegen/amd64_simd_broadcast_mem.{ml,sh}` checks
+    these cases with `-llvm-backend -c -S -keep-llvmir`.
   - `backend/llvm/llvmize.ml` now stores LLVM `cmpxchg`'s loaded value for
     `Compare_exchange`. LLVM returns the old memory value in both success and
     failure cases, which is exactly the OCaml `Atomic.compare_exchange` result;
@@ -1621,6 +1633,13 @@ limit is raised from `l=100000` to `l=150000`.
       directly under `validation-tmp/simd_low32_mem_script`; the kept IR
       contains unaligned `i32` loads, an unaligned `i32` store, `<4 x i32>`
       lane-0 inserts, and a lane-0 extract.
+    - Implemented AMD64 LLVM lowering for the AVX memory-broadcast subset and
+      rebuilt with `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_broadcast_mem.sh` script passed
+      directly under `validation-tmp/simd_broadcast_mem_script`; the kept IR
+      contains an unaligned `<2 x i64>` load for broadcast128, unaligned
+      scalar loads for the 64-bit and 32-bit broadcasts, and lane inserts up
+      to the final vec128/vec256 lanes.
 
 ## Current Blocker
 

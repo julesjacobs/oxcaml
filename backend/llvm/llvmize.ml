@@ -2250,6 +2250,12 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
         elem_type = T.Int { width_in_bits }
       }
   in
+  let wide_int_vec_type ~vector_width_in_bits ~width_in_bits =
+    T.Vector
+      { num_of_elems = vector_width_in_bits / width_in_bits;
+        elem_type = T.Int { width_in_bits }
+      }
+  in
   let float_vec_type ~width =
     let elem_type, num_of_elems =
       match width with Cmm.Float32 -> T.float, 4 | Cmm.Float64 -> T.double, 2
@@ -2294,6 +2300,10 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
   let load_i32_from_address addr arg_idx =
     let ptr = load_address_from_reg t addr i.arg.(arg_idx) in
     emit_ins t (I.load_with_align ~align:1 ~ptr ~typ:T.i32)
+  in
+  let load_vec128_from_address addr arg_idx =
+    let ptr = load_address_from_reg t addr i.arg.(arg_idx) in
+    emit_ins t (I.load_with_align ~align:1 ~ptr ~typ:T.vec128)
   in
   let store_i64_to_address_arg addr arg_idx to_store =
     let ptr = load_address_from_reg t addr i.arg.(arg_idx) in
@@ -2831,6 +2841,33 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     |> fun vector -> cast_if_needed vector T.vec128
     |> store_into_reg t i.res.(0)
   in
+  let simd_mem_broadcast_i64 ~addr ~typ ~lanes =
+    let loaded = load_i64_from_address addr 0 in
+    List.init lanes Fun.id
+    |> List.fold_left
+         (fun vector lane -> insert_i64_lane vector lane loaded)
+         (V.poison typ)
+    |> store_into_reg t i.res.(0)
+  in
+  let simd_mem_broadcast_i32 ~addr ~typ ~lanes ~res_typ =
+    let loaded = load_i32_from_address addr 0 in
+    List.init lanes Fun.id
+    |> List.fold_left
+         (fun vector lane -> insert_i32_lane vector lane loaded)
+         (V.poison typ)
+    |> fun vector -> cast_if_needed vector res_typ
+    |> store_into_reg t i.res.(0)
+  in
+  let simd_mem_broadcast_vec128 ~addr =
+    let loaded = load_vec128_from_address addr 0 in
+    List.init 4 Fun.id
+    |> List.fold_left
+         (fun vector lane ->
+           let loaded_lane = extract_i64_lane loaded (lane mod 2) in
+           insert_i64_lane vector lane loaded_lane)
+         (V.poison T.vec256)
+    |> store_into_reg t i.res.(0)
+  in
   let simd_mem_store_low64 ~addr =
     let vector = load_reg_to_temp ~typ:T.vec128 t i.arg.(1) in
     let low = extract_i64_lane vector 0 in
@@ -2875,6 +2912,17 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       |> fun vector -> insert_i64_lane vector 0 loaded
       |> fun vector -> insert_i64_lane vector 1 loaded
       |> store_into_reg t i.res.(0)
+    | Simd_mem_load, Amd64_simd_instrs.Vbroadcastf128 ->
+      simd_mem_broadcast_vec128 ~addr
+    | Simd_mem_load, Amd64_simd_instrs.Vbroadcastsd_Y_m64 ->
+      simd_mem_broadcast_i64 ~addr ~typ:T.vec256 ~lanes:4
+    | Simd_mem_load, Amd64_simd_instrs.Vbroadcastss_X_m32 ->
+      simd_mem_broadcast_i32 ~addr ~typ:(int_vec_type ~width_in_bits:32)
+        ~lanes:4 ~res_typ:T.vec128
+    | Simd_mem_load, Amd64_simd_instrs.Vbroadcastss_Y_m32 ->
+      simd_mem_broadcast_i32 ~addr
+        ~typ:(wide_int_vec_type ~vector_width_in_bits:256 ~width_in_bits:32)
+        ~lanes:8 ~res_typ:T.vec256
     | ( Simd_mem_store,
         (Amd64_simd_instrs.Movsd_m64_X | Amd64_simd_instrs.Vmovsd_m64_X) ) ->
       simd_mem_store_low64 ~addr
