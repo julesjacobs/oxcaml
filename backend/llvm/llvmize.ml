@@ -2175,6 +2175,22 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let counter = emit_ins t (I.convert Trunc ~arg:(int_arg 0) ~to_:T.i32) in
     call_llvm_intrinsic t "x86.rdpmc" [counter] T.i64 |> store_int_res
   | Ilfence | Isfence | Imfence -> emit_ins_no_res t (I.fence Seq_cst)
+  | Ipackf32 ->
+    let pack_arg n =
+      let arg = float_arg T.double n in
+      let bits64 = emit_ins t (I.convert Bitcast ~arg ~to_:T.i64) in
+      emit_ins t (I.convert Trunc ~arg:bits64 ~to_:T.i32)
+    in
+    let low = pack_arg 0 in
+    let high = pack_arg 1 in
+    let low64 = emit_ins t (I.convert Zext ~arg:low ~to_:T.i64) in
+    let high64 = emit_ins t (I.convert Zext ~arg:high ~to_:T.i64) in
+    let high64 =
+      emit_ins t (I.binary Shl ~arg1:high64 ~arg2:(V.of_int 32))
+    in
+    let packed = emit_ins t (I.binary Or ~arg1:low64 ~arg2:high64) in
+    emit_ins t (I.convert Bitcast ~arg:packed ~to_:T.double)
+    |> store_into_reg t i.res.(0)
   | Illvm_intrinsic intrinsic_name -> intrinsic t i intrinsic_name
   | Isimd simd -> (
     match amd64_simd_instr_id simd with
@@ -2195,7 +2211,7 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | Simd.Amd64_simd_instrs.Vextractf128 ->
       simd_vec256_extract_128 (simd_imm simd)
     | _ -> not_implemented_basic ~msg:"specific" i)
-  | Ipackf32 | Isimd_mem _ | Icldemote _ | Iprefetch _ ->
+  | Isimd_mem _ | Icldemote _ | Iprefetch _ ->
     not_implemented_basic ~msg:"specific" i
 
 (*

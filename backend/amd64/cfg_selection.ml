@@ -509,6 +509,7 @@ let select_operation
   if !Clflags.llvm_backend
   then
     match op with
+    | Cpackf32 -> Rewritten (specific Ipackf32, args)
     | Cbswap { bitwidth } ->
       let bitwidth = select_bitwidth bitwidth in
       Rewritten (specific (Ibswap { bitwidth }), args)
