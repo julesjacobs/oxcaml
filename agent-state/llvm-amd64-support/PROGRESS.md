@@ -1700,6 +1700,15 @@ limit is raised from `l=100000` to `l=150000`.
       IR contains `llvm.masked.gather` calls for v2i32, v4i32, v8i32, v2i64,
       and v4i64, signed vector mask compares, and scalar `inttoptr` address
       formation for gather lanes.
+    - Implemented AMD64 LLVM lowering for the SSE2 scalar uncached store
+      subset and rebuilt with `make -s compiler -j "$(nproc)"`; result:
+      passed. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_uncached_scalar_store.sh`
+      script passed directly under
+      `validation-tmp/simd_uncached_scalar_store_script`; the kept IR contains
+      an `i64` to `i32` truncation for `caml_sse2_int32_store_uncached` and
+      aligned-one `i32`/`i64` stores. As with the full-width uncached vector
+      memory lowering, the non-temporal cache hint is not modeled in IR.
 
 ## Current Blocker
 

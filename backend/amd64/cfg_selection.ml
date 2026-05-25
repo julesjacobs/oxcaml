@@ -174,6 +174,7 @@ let is_llvm_simd_builtin = function
   | "caml_avx2_vec256_gather32_index64"
   | "caml_avx2_vec128_gather64_index64"
   | "caml_avx2_vec256_gather64_index64"
+  | "caml_sse2_int32_store_uncached" | "caml_sse2_int64_store_uncached"
   | "caml_sse2_vec128_store_low64" | "caml_sse2_vec128_store_low32" ->
     true
   | _ -> false

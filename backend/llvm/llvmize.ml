@@ -3069,6 +3069,15 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let low = extract_i32_lane vector 0 in
     store_i32_to_address_arg addr 0 low
   in
+  let simd_mem_store_int32 ~addr =
+    let value = load_reg_to_temp ~typ:T.i64 t i.arg.(1) in
+    let value = emit_ins t (I.convert Trunc ~arg:value ~to_:T.i32) in
+    store_i32_to_address_arg addr 0 value
+  in
+  let simd_mem_store_int64 ~addr =
+    let value = load_reg_to_temp ~typ:T.i64 t i.arg.(1) in
+    store_i64_to_address_arg addr 0 value
+  in
   let simd_mem
       ~(mem_operation : amd64_simd_mem_operation)
       ~(instr : Amd64_simd_instrs.id) ~imm:_ ~addr =
@@ -3132,6 +3141,10 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | ( Simd_mem_store,
         (Amd64_simd_instrs.Movss_m32_X | Amd64_simd_instrs.Vmovss_m32_X) ) ->
       simd_mem_store_low32 ~addr
+    | Simd_mem_store, Amd64_simd_instrs.Movnti_m32_r32 ->
+      simd_mem_store_int32 ~addr
+    | Simd_mem_store, Amd64_simd_instrs.Movnti_m64_r64 ->
+      simd_mem_store_int64 ~addr
     | Simd_mem_store, Amd64_simd_instrs.Vmaskmovpd_m128_X_X ->
       simd_mem_masked_store ~addr ~mask_arg:2 ~mask_typ:T.vec128
         ~data_typ:T.vec128
