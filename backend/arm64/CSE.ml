@@ -29,6 +29,11 @@ let class_of_operation (op : Operation.t)
   | Specific spec ->
     let op_class : Cfg_cse_target_intf.op_class =
       match spec with
+      | Ilea _ | Isextend32 | Izextend32 | Ipackf32 -> Op_pure
+      | Istore_int _ | Ioffset_loc _ | Ifloatarithmem _ | Irdtsc | Irdpmc
+      | Ilfence | Isfence | Imfence | Isimd_mem _ | Icldemote _
+      | Iprefetch _ ->
+        Op_other
       | Ifar_poll
       | Ifar_alloc _
       | Ishiftarith _

@@ -1764,6 +1764,14 @@ let emit_instr env i =
     let rd, rn = H.reg_x i.res.(0), H.reg_x i.arg.(0) in
     A.ins4 SBFM rd rn (O.imm_six 0) (O.imm_six (size - 1))
   | Lop (Specific (Isimd simd)) -> simd_instr simd i
+  | Lop
+      (Specific
+         ( Ilea _ | Istore_int _ | Ioffset_loc _ | Ifloatarithmem _
+         | Isextend32 | Izextend32 | Irdtsc | Irdpmc | Ilfence | Isfence
+         | Imfence | Ipackf32 | Isimd_mem _ | Icldemote _ | Iprefetch _ )) ->
+    Misc.fatal_errorf
+      "Emit: AMD64-only specific operation reached ARM64 emitter: %a"
+      Printlinear.instr i
   | Lop (Name_for_debugger _) -> ()
   | Lcall_op (Lprobe _) ->
     Misc.fatal_error "Optimized probes not supported on arm64."

@@ -18,9 +18,11 @@ let memory_access : Arch.specific_operation -> Memory_access.t option =
        insertion pass currently happens after vectorize. *)
     create Arbitrary
   | Ifar_alloc _ -> create Alloc
-  | Ishiftarith _ | Imuladd | Imulsub | Inegmulf | Imuladdf | Inegmuladdf
-  | Imulsubf | Inegmulsubf | Isqrtf | Ibswap _ | Imove32 | Isignext _ | Isimd _
-    ->
+  | Ilea _ | Istore_int _ | Ioffset_loc _ | Ifloatarithmem _ | Ishiftarith _
+  | Imuladd | Imulsub | Inegmulf | Imuladdf | Inegmuladdf | Imulsubf
+  | Inegmulsubf | Isqrtf | Ibswap _ | Isextend32 | Izextend32 | Irdtsc | Irdpmc
+  | Ilfence | Isfence | Imfence | Ipackf32 | Imove32 | Isignext _ | Isimd _
+  | Isimd_mem _ | Icldemote _ | Iprefetch _ ->
     (* Conservative. we don't have any specific operations with memory
        operations at the moment. *)
     if Arch.operation_is_pure op then None else create Memory_access.Arbitrary
@@ -31,9 +33,11 @@ let memory_access : Arch.specific_operation -> Memory_access.t option =
 
 let is_seed_store (op : Arch.specific_operation) =
   match op with
-  | Ifar_poll | Ifar_alloc _ | Ishiftarith _ | Imuladd | Imulsub | Inegmulf
-  | Imuladdf | Inegmuladdf | Imulsubf | Inegmulsubf | Isqrtf | Ibswap _
-  | Imove32 | Isignext _ | Isimd _ ->
+  | Ilea _ | Istore_int _ | Ioffset_loc _ | Ifloatarithmem _ | Ifar_poll
+  | Ifar_alloc _ | Ishiftarith _ | Imuladd | Imulsub | Inegmulf | Imuladdf
+  | Inegmuladdf | Imulsubf | Inegmulsubf | Isqrtf | Ibswap _ | Isextend32
+  | Izextend32 | Irdtsc | Irdpmc | Ilfence | Isfence | Imfence | Ipackf32
+  | Imove32 | Isignext _ | Isimd _ | Isimd_mem _ | Icldemote _ | Iprefetch _ ->
     None
   | Illvm_intrinsic intr ->
     Misc.fatal_errorf

@@ -673,6 +673,28 @@ register-clobbering edge.
     `specific`-lowering reference block from `backend/llvm/llvmize.ml`. This
     does not change AMD64 generated code, but it removes review noise from the
     AMD64 branch.
+  - Cross-arch compile compatibility: `backend/llvm/llvmize.ml` now typechecks
+    under `ARCH=arm64` again after the AMD64-specific lowering additions. The
+    ARM64 `Arch.specific_operation` type exposes compatibility-only AMD64
+    constructors so shared LLVM lowering can compile in the arm64 dune build;
+    the ARM64 emitter treats those constructors as unreachable.
+  - Fresh compile/smoke checks after the cross-arch compatibility change:
+    - `ARCH=arm64 RUNTIME_DIR=runtime dune build ocamloptcomp.cma` exits 0.
+    - `ARCH=amd64 RUNTIME_DIR=runtime dune build ocamloptcomp.cma` exits 0.
+    - A direct AMD64 `-llvm-backend -llvm-path "$LLVM_PATH"` compile/link/run
+      smoke with the freshly built compiler prints `42`.
+    - A direct AMD64 `-llvm-backend -S -c` compile of
+      `testsuite/tests/typing-layouts-block-indices/block_indices_native.ml`
+      exits 0, exercising the SIMD lowering path that uses the AMD64
+      `Isimd` record layout.
+    - `make runtest-llvmize` is not currently a clean local signal on this
+      branch: without extra env it stops at missing `OXCAML_CLANG`,
+      `OXCAML_LLVM_TEST_OCAMLOPT`, and `OXCAML_LLVM_TEST_STDLIB`; with those
+      supplied it still expects `clang` literally on `PATH` and then reports
+      broad checked-output diffs from existing branch LLVM IR changes.
+  - Latest GitHub PR check poll: `built with flambda-backend, flambda2` passed;
+    most other checks were still pending and there were still no PR comments or
+    reviews.
 
 ## Current Blocker
 
@@ -687,15 +709,13 @@ agent env may set `LIST` for broader test runs.
 The known stack-usage issue remains: some LLVM-built compiler paths need
 `OCAMLRUNPARAM=b,Xmain_stack_size=64M` where the normal opam compiler does not.
 The OxCaml PR is still draft; as of the latest check, GitHub reported no PR
-comments or reviews and CI jobs were pending.
+comments or reviews, one passing job, and the remaining CI jobs pending.
 
 ## Next Step
 
-Do a final PR-readiness audit of the AMD64 LLVM backend changes and decide
-whether to split or polish any broad implementation commits before requesting
-review. If preserving ARM64 LLVM-backend support in the same branch is required,
-the AMD64-specific `specific` lowering should be reorganized into a cleaner
-multi-arch structure rather than relying on the previous ARM64-only
-implementation shape. Keep using normal build parallelism; avoid only
+Poll CI and investigate any concrete failure. If preserving runtime ARM64
+LLVM-backend behavior in the same branch is required, the compatibility-only
+constructor approach should still be replaced by a cleaner multi-arch
+`specific` lowering split. Keep using normal build parallelism; avoid only
 concurrent top-level `make`/`dune` commands in this checkout because of the
 shared lockfile.

@@ -2110,13 +2110,19 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       |> store_simd_res
     | _ -> Misc.fatal_error "expected vector type"
   in
-  let simd_imm (simd : Simd.operation) =
-    match simd.imm with
+  let simd_imm simd =
+    let imm : int option = Obj.obj (Obj.field (Obj.repr simd) 1) in
+    match imm with
     | Some imm -> imm
     | None -> fail_msg ~name:"specific" "missing SIMD immediate"
   in
-  let amd64_simd_instr_id (simd : Simd.operation) =
-    (Simd.Pseudo_instr.instr simd.instr).id
+  let amd64_simd_instr_id simd =
+    let pseudo_instr = Obj.field (Obj.repr simd) 0 in
+    if Obj.tag pseudo_instr = 0
+    then
+      let instr : Amd64_simd_instrs.instr = Obj.obj (Obj.field pseudo_instr 0) in
+      instr.id
+    else not_implemented_basic ~msg:"specific sequence" i
   in
   let simd_vec256_insert_128 imm =
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) T.vec256 in
@@ -2150,7 +2156,7 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
          (V.poison T.vec128)
     |> store_simd_res
   in
-  match[@warning "-fragile-match"] op with
+  match[@warning "-4-8-18"] op with
   | Ilea addr ->
     load_address_from_reg t addr i.arg.(0) |> store_int_res
   | Istore_int (n, addr, _is_modify) ->
@@ -2192,23 +2198,23 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     emit_ins t (I.convert Bitcast ~arg:packed ~to_:T.double)
     |> store_into_reg t i.res.(0)
   | Illvm_intrinsic intrinsic_name -> intrinsic t i intrinsic_name
-  | Isimd simd -> (
-    match amd64_simd_instr_id simd with
-    | Simd.Amd64_simd_instrs.Paddq
-    | Simd.Amd64_simd_instrs.Vpaddq_X_X_Xm128 ->
+  | Isimd simd when Target_system.architecture () = X86_64 -> (
+    match (amd64_simd_instr_id simd : Amd64_simd_instrs.id) with
+    | Amd64_simd_instrs.Paddq
+    | Amd64_simd_instrs.Vpaddq_X_X_Xm128 ->
       simd_int_binary 64 Add
-    | Simd.Amd64_simd_instrs.Psubq_X_Xm128
-    | Simd.Amd64_simd_instrs.Vpsubq_X_X_Xm128 ->
+    | Amd64_simd_instrs.Psubq_X_Xm128
+    | Amd64_simd_instrs.Vpsubq_X_X_Xm128 ->
       simd_int_binary 64 Sub
-    | Simd.Amd64_simd_instrs.Punpckhqdq
-    | Simd.Amd64_simd_instrs.Vpunpckhqdq_X_X_Xm128 ->
+    | Amd64_simd_instrs.Punpckhqdq
+    | Amd64_simd_instrs.Vpunpckhqdq_X_X_Xm128 ->
       simd_zip (int_vec_type ~width_in_bits:64) ~high:true
-    | Simd.Amd64_simd_instrs.Punpcklqdq
-    | Simd.Amd64_simd_instrs.Vpunpcklqdq_X_X_Xm128 ->
+    | Amd64_simd_instrs.Punpcklqdq
+    | Amd64_simd_instrs.Vpunpcklqdq_X_X_Xm128 ->
       simd_zip (int_vec_type ~width_in_bits:64) ~high:false
-    | Simd.Amd64_simd_instrs.Vinsertf128 ->
+    | Amd64_simd_instrs.Vinsertf128 ->
       simd_vec256_insert_128 (simd_imm simd)
-    | Simd.Amd64_simd_instrs.Vextractf128 ->
+    | Amd64_simd_instrs.Vextractf128 ->
       simd_vec256_extract_128 (simd_imm simd)
     | _ -> not_implemented_basic ~msg:"specific" i)
   | Isimd_mem _ | Icldemote _ | Iprefetch _ ->
