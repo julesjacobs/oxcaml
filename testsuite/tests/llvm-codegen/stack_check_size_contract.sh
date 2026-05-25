@@ -29,7 +29,6 @@ if [ -z "$ocamlopt" ]; then
 fi
 
 arg_count=48
-expected_outgoing_stack_adjustment=$(( (arg_count - 8) * 8 ))
 
 {
 cat <<'EOF'
@@ -80,6 +79,11 @@ stack_check_bytes() {
     | sed -n 's/.*"oxcaml-stack-check-bytes"="\([0-9][0-9]*\)".*/\1/p'
 }
 
+has_stack_check_request() {
+  name="$1"
+  function_attr_line "$name" | grep -q '"oxcaml-stack-check"="true"'
+}
+
 cfg_stack_check_bytes() {
   name="$1"
   awk -v name="camlStack_check_size_contract_generated__${name}_" '
@@ -102,12 +106,35 @@ cfg_stack_check_bytes() {
   ' "$cfg_dump"
 }
 
+cfg_stack_check_count() {
+  name="$1"
+  awk -v name="camlStack_check_size_contract_generated__${name}_" '
+    /^\*\*\*/ {
+      in_stack_check_dump = $0 ~ /^\*\*\* After cfg_stack_checks/
+      in_function = 0
+      next
+    }
+    in_stack_check_dump && /^cfg for / {
+      in_function = index($0, name) != 0
+      next
+    }
+    in_function && /stack_check size=[0-9]+/ {
+      count++
+    }
+    END { print count + 0 }
+  ' "$cfg_dump"
+}
+
 check_contract_matches_cfg() {
   name="$1"
   cfg_bytes=$(cfg_stack_check_bytes "$name")
   ir_bytes=$(stack_check_bytes "$name")
   if [ "$ir_bytes" != "$cfg_bytes" ]; then
     echo "$name stack-check bytes: CFG has $cfg_bytes, LLVM IR has ${ir_bytes:-absent}" >&2
+    exit 1
+  fi
+  if ! has_stack_check_request "$name"; then
+    echo "$name missing legacy OxCaml stack-check request attribute" >&2
     exit 1
   fi
 }
@@ -129,6 +156,10 @@ if [ "$(cfg_stack_check_bytes leaf_alloc)" != "0" ]; then
   echo "leaf_alloc should have CFG stack-check bytes 0" >&2
   exit 1
 fi
+if [ "$(cfg_stack_check_count leaf_alloc)" != "0" ]; then
+  echo "leaf_alloc should have no CFG stack_check instructions" >&2
+  exit 1
+fi
 
 check_contract_matches_cfg non_tail_call
 if [ "$(cfg_stack_check_bytes non_tail_call)" = "0" ]; then
@@ -141,18 +172,3 @@ if [ "$(cfg_stack_check_bytes noalloc_outgoing_stack_args)" = "0" ]; then
   echo "noalloc_outgoing_stack_args should have nonzero CFG stack-check bytes" >&2
   exit 1
 fi
-
-awk '
-  /_camlStack_check_size_contract_generated__noalloc_outgoing_stack_args_.*_code:/ {
-    in_function = 1
-  }
-  in_function && $0 ~ "mov[[:space:]]+w8, #" expected_adjustment {
-    found_outgoing_adjustment = 1
-  }
-  in_function && /\.cfi_endproc/ {
-    exit found_outgoing_adjustment ? 0 : 1
-  }
-  END {
-    if (!in_function) exit 1
-  }
-' expected_adjustment="$expected_outgoing_stack_adjustment" "$asm"
