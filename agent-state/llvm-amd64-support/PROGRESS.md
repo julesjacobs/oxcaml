@@ -63,7 +63,10 @@ lowering now also supports the AMD64 int128 builtins
 `caml_int128_add`, `caml_int128_sub`, `caml_int64_mul128`, and
 `caml_unsigned_int64_mul128` via LLVM `i128` arithmetic. Wide vector constants
 now lower directly to LLVM `<2 x i64>`, `<4 x i64>`, and `<8 x i64>` immediate
-vectors instead of fatal-erroring on 256-bit and 512-bit constants.
+vectors instead of fatal-erroring on 256-bit and 512-bit constants. Wide
+vector scalar casts now lower for 256-bit and 512-bit vectors as well, covering
+the `caml_*_low_of_*` and `caml_*_low_to_*` builtins that previously hit the
+LLVM static-cast fatal path.
 
 The latest stack-pressure fix safely pools X86_64 preserved GC-root stack slots
 using full CFG liveness interference instead of safepoint-only disjointness.
@@ -165,6 +168,12 @@ limit is raised from `l=100000` to `l=150000`.
     `Const_vec512` through a shared LLVM vector-immediate helper. This removes
     the previous AMD64 LLVM fatal path for 256-bit and 512-bit vector
     constants.
+  - `backend/llvm/llvmize.ml` now lowers `V256_of_scalar`,
+    `Scalar_of_v256`, `V512_of_scalar`, and `Scalar_of_v512` using the same
+    insert/extract-element strategy as the 128-bit scalar casts. Integer
+    scalar casts use the existing 64-bit carrier with truncation or zero
+    extension for narrow lanes, and float vector storage is bitcast to the
+    canonical LLVM vector storage type.
   - `backend/llvm/llvmize.ml` now stores LLVM `cmpxchg`'s loaded value for
     `Compare_exchange`. LLVM returns the old memory value in both success and
     failure cases, which is exactly the OCaml `Atomic.compare_exchange` result;
@@ -1454,6 +1463,23 @@ limit is raised from `l=100000` to `l=150000`.
       `_build/default/duneconf/camlinternalquote_if_missing_from_stdlib`, the
       same generated-include issue seen in earlier focused `llvm-test-one`
       attempts. The build state was restored afterward with another clean
+      `dune clean --workspace=duneconf/boot.ws` followed by
+      `make -s compiler -j "$(nproc)"`; result: passed.
+    - Implemented LLVM lowering for 256-bit and 512-bit vector scalar casts
+      and rebuilt with a clean `dune clean --workspace=duneconf/boot.ws`
+      followed by `make -s compiler -j "$(nproc)"`; result: passed.
+    - Direct focused validation using the rebuilt optimizing compiler passed:
+      `OCAMLLIB=_install/lib/ocaml _build/main/oxcaml_main_native.exe
+      -O3 -llvm-backend -llvm-path "$LLVM_PATH" -keep-llvmir -o
+      validation-tmp/vec256_scalar_cast/amd64_vec256_scalar_cast.exe
+      amd64_vec256_scalar_cast_stubs.c amd64_vec256_scalar_cast.ml`. Result:
+      binary ran successfully, `4` wrapper lines / `2` fresh IR, and the kept
+      IR contains `insertelement`/`extractelement` lowering for both
+      `<4 x i64>` and `<4 x double>`.
+    - `make llvm-test-one TEST=llvm-codegen/amd64_vec256_scalar_cast` still
+      did not reach the test: its LLVM boot-context rebuild failed while
+      opening `_build/default/duneconf/camlinternalquote_if_missing_from_stdlib`.
+      The build state was restored afterward with another clean
       `dune clean --workspace=duneconf/boot.ws` followed by
       `make -s compiler -j "$(nproc)"`; result: passed.
 

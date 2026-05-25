@@ -3512,7 +3512,7 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
       let converted = emit_ins t (I.convert op ~arg ~to_) in
       store_into_reg t i.res.(0) converted
     in
-    let vec128_elem_type (vec128_type : Cmm.vec128_type) =
+    let elem_type_of_vec128 (vec128_type : Cmm.vec128_type) =
       match vec128_type with
       | Cmm.Int8x16 -> T.Int { width_in_bits = 8 }
       | Cmm.Int16x8 -> T.Int { width_in_bits = 16 }
@@ -3522,8 +3522,27 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
       | Cmm.Float32x4 -> T.float
       | Cmm.Float64x2 -> T.double
     in
-    let llvm_vec128_type vec128_type =
-      let elem_type = vec128_elem_type vec128_type in
+    let elem_type_of_vec256 (vec256_type : Cmm.vec256_type) =
+      match vec256_type with
+      | Cmm.Int8x32 -> T.Int { width_in_bits = 8 }
+      | Cmm.Int16x16 -> T.Int { width_in_bits = 16 }
+      | Cmm.Int32x8 -> T.i32
+      | Cmm.Int64x4 -> T.i64
+      | Cmm.Float16x16 -> fail_msg ~name:"static cast" "float16 unsupported"
+      | Cmm.Float32x8 -> T.float
+      | Cmm.Float64x4 -> T.double
+    in
+    let elem_type_of_vec512 (vec512_type : Cmm.vec512_type) =
+      match vec512_type with
+      | Cmm.Int8x64 -> T.Int { width_in_bits = 8 }
+      | Cmm.Int16x32 -> T.Int { width_in_bits = 16 }
+      | Cmm.Int32x16 -> T.i32
+      | Cmm.Int64x8 -> T.i64
+      | Cmm.Float16x32 -> fail_msg ~name:"static cast" "float16 unsupported"
+      | Cmm.Float32x16 -> T.float
+      | Cmm.Float64x8 -> T.double
+    in
+    let llvm_vector_type ~num_bits elem_type =
       let width_in_bits =
         match[@warning "-fragile-match"] elem_type with
         | T.Int { width_in_bits } -> width_in_bits
@@ -3533,27 +3552,21 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
         | T.Metadata ->
           Misc.fatal_error "unexpected vector element type"
       in
-      T.Vector { num_of_elems = 128 / width_in_bits; elem_type }
+      T.Vector { num_of_elems = num_bits / width_in_bits; elem_type }
     in
-    let scalar_type_for_vec128 vec128_type =
-      match vec128_type with
-      | Cmm.Int8x16 | Cmm.Int16x8 | Cmm.Int32x4 | Cmm.Int64x2 -> T.i64
-      | Cmm.Float16x8 -> fail_msg ~name:"static cast" "float16 unsupported"
-      | Cmm.Float32x4 -> T.float
-      | Cmm.Float64x2 -> T.double
+    let scalar_type_for_elem elem_type =
+      match[@warning "-fragile-match"] elem_type with
+      | T.Int _ -> T.i64
+      | T.Float -> T.float
+      | T.Double -> T.double
+      | T.Ptr _ | T.Struct _ | T.Array _ | T.Vector _ | T.Label | T.Token
+      | T.Metadata ->
+        Misc.fatal_error "unexpected vector element type"
     in
-    match cast_op with
-    | Float_of_int width ->
-      do_conv Sitofp ~from:T.i64 ~to_:(T.of_float_width width)
-    | Int_of_float width ->
-      do_conv Fptosi ~from:(T.of_float_width width) ~to_:T.i64
-    | Float_of_float32 -> do_conv Fpext ~from:T.float ~to_:T.double
-    | Float32_of_float -> do_conv Fptrunc ~from:T.double ~to_:T.float
-    | V128_of_scalar vec128_type ->
-      let elem_type = vec128_elem_type vec128_type in
-      let vector_type = llvm_vec128_type vec128_type in
+    let vector_of_scalar ~storage_type ~num_bits elem_type =
+      let vector_type = llvm_vector_type ~num_bits elem_type in
       let scalar =
-        load_reg_to_temp ~typ:(scalar_type_for_vec128 vec128_type) t i.arg.(0)
+        load_reg_to_temp ~typ:(scalar_type_for_elem elem_type) t i.arg.(0)
       in
       let elem =
         match[@warning "-fragile-match"] elem_type with
@@ -3567,16 +3580,16 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
              ~to_insert:elem)
       in
       let vector =
-        if T.equal vector_type T.vec128
+        if T.equal vector_type storage_type
         then vector
-        else emit_ins t (I.convert Bitcast ~arg:vector ~to_:T.vec128)
+        else emit_ins t (I.convert Bitcast ~arg:vector ~to_:storage_type)
       in
       store_into_reg t i.res.(0) vector
-    | Scalar_of_v128 vec128_type ->
-      let elem_type = vec128_elem_type vec128_type in
-      let vector_type = llvm_vec128_type vec128_type in
+    in
+    let scalar_of_vector ~storage_type ~num_bits elem_type =
+      let vector_type = llvm_vector_type ~num_bits elem_type in
       let vector =
-        load_reg_to_temp ~typ:T.vec128 t i.arg.(0) |> fun arg ->
+        load_reg_to_temp ~typ:storage_type t i.arg.(0) |> fun arg ->
         emit_ins t (I.convert Bitcast ~arg ~to_:vector_type)
       in
       let elem = emit_ins t (I.extractelement ~vector ~index:(V.of_int 0)) in
@@ -3587,9 +3600,32 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
         | _ -> elem
       in
       store_into_reg t i.res.(0) scalar
-    | V256_of_scalar _ | Scalar_of_v256 _ | V512_of_scalar _ | Scalar_of_v512 _
-      ->
-      not_implemented_basic ~msg:"static cast" i)
+    in
+    match cast_op with
+    | Float_of_int width ->
+      do_conv Sitofp ~from:T.i64 ~to_:(T.of_float_width width)
+    | Int_of_float width ->
+      do_conv Fptosi ~from:(T.of_float_width width) ~to_:T.i64
+    | Float_of_float32 -> do_conv Fpext ~from:T.float ~to_:T.double
+    | Float32_of_float -> do_conv Fptrunc ~from:T.double ~to_:T.float
+    | V128_of_scalar vec128_type ->
+      vector_of_scalar ~storage_type:T.vec128 ~num_bits:128
+        (elem_type_of_vec128 vec128_type)
+    | Scalar_of_v128 vec128_type ->
+      scalar_of_vector ~storage_type:T.vec128 ~num_bits:128
+        (elem_type_of_vec128 vec128_type)
+    | V256_of_scalar vec256_type ->
+      vector_of_scalar ~storage_type:T.vec256 ~num_bits:256
+        (elem_type_of_vec256 vec256_type)
+    | Scalar_of_v256 vec256_type ->
+      scalar_of_vector ~storage_type:T.vec256 ~num_bits:256
+        (elem_type_of_vec256 vec256_type)
+    | V512_of_scalar vec512_type ->
+      vector_of_scalar ~storage_type:T.vec512 ~num_bits:512
+        (elem_type_of_vec512 vec512_type)
+    | Scalar_of_v512 vec512_type ->
+      scalar_of_vector ~storage_type:T.vec512 ~num_bits:512
+        (elem_type_of_vec512 vec512_type))
   | Reinterpret_cast cast_op -> (
     let bitcast arg to_ = emit_ins t (I.convert Bitcast ~arg ~to_) in
     let bitcast_if_needed arg to_ =
