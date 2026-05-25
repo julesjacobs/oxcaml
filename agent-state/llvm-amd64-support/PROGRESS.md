@@ -25,9 +25,11 @@ debug-less X86_64 raise/reraise calls now emit a standalone frame stackmap,
 fixing the standard-compiler LLVM-backend backtrace propagation gap in
 `tests/backtrace/backtrace.ml`. AMD64 LLVM frame-pointer builds now request
 frame-pointer frames for normal LLVM functions and generated noalloc C-call
-wrappers, fixing focused `tests/frame-pointers` stack walks. Earlier fixes
-reserve the AMD64 OxCaml runtime registers in LLVM's X86 register allocator
-and make exception-recovery blocks treat runtime blockaddress entry as a
+wrappers, fixing focused `tests/frame-pointers` stack walks. The generated
+AMD64 recover-rbp exception shims now carry CFI, fixing focused native CFI
+single-stepping through exception recovery. Earlier fixes reserve the AMD64
+OxCaml runtime registers in LLVM's X86 register allocator and make
+exception-recovery blocks treat runtime blockaddress entry as a
 register-clobbering edge.
 
 ## Evidence
@@ -121,6 +123,12 @@ register-clobbering edge.
     generated noalloc C-call wrappers on AMD64 frame-pointer builds. Those
     wrappers switch stacks before calling C, so they need an explicit wrapper
     frame for C-side `%rbp` stack walkers to report the OCaml caller frame.
+  - `backend/llvm/llvmize.ml` now emits `.cfi_startproc`/`.cfi_endproc` and
+    CFA rules for generated X86_64 `recover_rbp_asm` labels. The entry rule
+    computes the CFA from the saved `%rbp` still on the trap block; after
+    `pop %rbp`, the rule switches to the normal `%rbp + 16` frame-pointer
+    CFA. This lets GDB unwind through each instruction in the transient
+    exception-recovery shim.
   - `backend/llvm/llvmize.ml` now emits explicit standalone stackmaps for all
     non-tail X86_64 OCaml calls, including direct calls that have live GC roots.
     This covers frame descriptors for direct-call return addresses when the
@@ -588,11 +596,20 @@ register-clobbering edge.
       LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
       prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 21 passed,
       0 skipped, 0 failed.
+  - Focused native CFI stepping validation now passes with the standard
+    compiler LLVM backend. Before the recover-rbp CFI fix, GDB reported
+    "Backtrace failed" while single-stepping through `caml_raise_exn` and the
+    generated `recover_rbp_asm` block.
+    - `make llvm-test-one TEST=native-cfi-stepping/test_cfi.ml LIST= DIR=
+      ARCH=amd64 LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 6 passed,
+      0 skipped, 0 failed.
+    - `make test-one-no-rebuild DIR=native-cfi-stepping LLVM_BACKEND=1
+      ARCH=amd64 LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 6 passed,
+      0 skipped, 0 failed.
   - From the last full self-stage refresh, failures still needing focused
     investigation or a broad rerun after the backtrace/frame-pointer fixes are:
-    - `tests/native-cfi-stepping/test_cfi.ml` emits GDB "Backtrace failed"
-      dumps around `caml_raise_exn` and the generated
-      `recover_rbp_asm` block, then fails the reference comparison.
     - `tests/misc/gctweaks.ml` fails in both bytecode and native at line 22
       after printing `100`, so it is likely separate from LLVM native codegen.
     - `tests/typing-layouts-arrays/test_float32_u_array.ml` fails two native
@@ -609,9 +626,9 @@ an explicit agent-local `prefix=...` for install validation. Also clear
 `LIST` for broader test runs.
 
 The last full self-stage ocamltest refresh was down to 15 failures. Since then,
-focused standard-compiler LLVM-backend validation has cleared the backtrace and
-frame-pointer families, but a broad self-stage rerun is still needed for an
-updated final count. The remaining known families are native CFI stepping,
+focused standard-compiler LLVM-backend validation has cleared the backtrace,
+frame-pointer, and native CFI stepping families, but a broad self-stage rerun
+is still needed for an updated final count. The remaining known families are
 `gctweaks.ml` failing in both bytecode and native, and
 `test_float32_u_array.ml` hitting `Selection.select_oper` in native
 compilation. The known stack-usage issue remains: some LLVM-built compiler
@@ -621,11 +638,9 @@ paths need
 ## Next Step
 
 Start with a focused standard-compiler `-llvm-backend` reproducer for
-`tests/native-cfi-stepping/test_cfi.ml`, then fix the AMD64 LLVM unwind or
-recover-frame metadata if it reproduces outside self-stage. If it only
-reproduces under self-stage, record the smallest self-stage reproducer and why
-the standard compiler does not cover it. After that, investigate the separate
-`gctweaks.ml` bytecode/native failure and the `test_float32_u_array.ml`
-`Selection.select_oper` failure. Keep using normal build parallelism; avoid
-only concurrent top-level `make`/`dune` commands in this checkout because of
-the shared lockfile.
+`tests/typing-layouts-arrays/test_float32_u_array.ml` and fix the
+`Selection.select_oper` failure if it reproduces outside self-stage. Then
+investigate the separate `gctweaks.ml` bytecode/native failure, and run a broad
+self-stage ocamltest refresh once the focused remaining failures are addressed.
+Keep using normal build parallelism; avoid only concurrent top-level
+`make`/`dune` commands in this checkout because of the shared lockfile.

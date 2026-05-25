@@ -4713,11 +4713,17 @@ let define_restore_rbp t =
         add_module_asm t
           [ "  .text";
             recover_rbp_asm ^ ":";
+            "  .cfi_startproc";
+            "  .cfi_escape 0x0f, 5, 0x77, 0, 0x06, 0x23, 16";
+            "  .cfi_offset %rbp, -16";
             "  pop %rbp";
+            "  .cfi_def_cfa %rbp, 16";
+            "  .cfi_offset %rbp, -16";
             "  addq $8, %rsp";
             "  movq " ^ recover_rbp_var ^ "@GOTPCREL(%rip), %rbx";
             "  movq (%rbx), %rbx";
-            "  jmpq *%rbx" ];
+            "  jmpq *%rbx";
+            "  .cfi_endproc" ];
         add_data_def t
           (LL.Data.external_ (LL.Ident.to_string_hum recover_rbp_asm_ident));
         add_data_def t
