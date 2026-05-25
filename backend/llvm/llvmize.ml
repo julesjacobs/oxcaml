@@ -3772,7 +3772,11 @@ let fun_attrs ~has_try:_ ~cfg_stack_check_bytes codegen_options =
   let frame_pointer_attrs =
     match Target_system.architecture (), Config.no_stack_checks with
     | Target_system.AArch64, false ->
-      [Oxcaml_stack_check; Oxcaml_stack_check_bytes cfg_stack_check_bytes]
+      Oxcaml_stack_check
+      ::
+      (if !Oxcaml_flags.cfg_stack_checks
+       then [Oxcaml_stack_check_bytes cfg_stack_check_bytes]
+       else [])
     | Target_system.AArch64, true ->
       []
     | ( Target_system.IA32 | Target_system.X86_64 | Target_system.ARM
