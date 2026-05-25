@@ -1731,6 +1731,13 @@ limit is raised from `l=100000` to `l=150000`.
       the kept IR contains `llvm.sadd.sat`, `llvm.uadd.sat`,
       `llvm.ssub.sat`, and `llvm.usub.sat` calls for `<16 x i8>` and
       `<8 x i16>`.
+    - Implemented AMD64 LLVM lowering for the SSE2 integer min/max subset
+      covering unsigned `int8x16` and signed `int16x8`, and rebuilt with
+      `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_min_max.sh` script passed
+      directly under `validation-tmp/simd_min_max_script`; the kept IR
+      contains vector `icmp`/`select` lowering for unsigned byte max/min and
+      signed word max/min.
 
 ## Current Blocker
 

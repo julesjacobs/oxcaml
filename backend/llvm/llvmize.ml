@@ -3278,6 +3278,18 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_binary_intrinsic (int_vec_type ~width_in_bits:8) "usub.sat"
     | Amd64_simd_instrs.Psubusw | Amd64_simd_instrs.Vpsubusw_X_X_Xm128 ->
       simd_binary_intrinsic (int_vec_type ~width_in_bits:16) "usub.sat"
+    | Amd64_simd_instrs.Pmaxub_X_Xm128
+    | Amd64_simd_instrs.Vpmaxub_X_X_Xm128 ->
+      simd_int_minmax 8 I.Iugt
+    | Amd64_simd_instrs.Pminub_X_Xm128
+    | Amd64_simd_instrs.Vpminub_X_X_Xm128 ->
+      simd_int_minmax 8 I.Iult
+    | Amd64_simd_instrs.Pmaxsw_X_Xm128
+    | Amd64_simd_instrs.Vpmaxsw_X_X_Xm128 ->
+      simd_int_minmax 16 I.Isgt
+    | Amd64_simd_instrs.Pminsw_X_Xm128
+    | Amd64_simd_instrs.Vpminsw_X_X_Xm128 ->
+      simd_int_minmax 16 I.Islt
     | Amd64_simd_instrs.Andps | Amd64_simd_instrs.Vandps_X_X_Xm128 ->
       simd_int_binary 64 And
     | Amd64_simd_instrs.Andnps | Amd64_simd_instrs.Vandnps_X_X_Xm128 ->

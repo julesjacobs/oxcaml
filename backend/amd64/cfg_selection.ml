@@ -159,6 +159,8 @@ let is_llvm_simd_builtin = function
   | "caml_sse2_int16x8_sub_saturating"
   | "caml_sse2_int8x16_sub_saturating_unsigned"
   | "caml_sse2_int16x8_sub_saturating_unsigned"
+  | "caml_sse2_int8x16_max_unsigned" | "caml_sse2_int8x16_min_unsigned"
+  | "caml_sse2_int16x8_max" | "caml_sse2_int16x8_min"
   | "caml_sse_vec128_and" | "caml_sse_vec128_andnot"
   | "caml_sse_vec128_or" | "caml_sse_vec128_xor"
   | "caml_simd_vec128_interleave_high_64"
