@@ -74,6 +74,12 @@ passes a direct `llc` prologue smoke test for a stack-frame-using
   - `testsuite/tests/llvm-codegen/amd64_direct_call_stackmap.ml` is an
     AMD64/Linux LLVM-backend regression test for a direct call with a live heap
     root across an allocating callee.
+  - `testsuite/tests/llvm-codegen/amd64_exceptions.ml` is an AMD64/Linux
+    LLVM-backend regression test for exception handler setup and exception
+    bucket recovery.
+  - `testsuite/tests/llvm-codegen/amd64_stack_growth.ml` is an AMD64/Linux
+    LLVM-backend regression test for stack growth through an effect
+    continuation.
 - Validation done this turn:
   - `git diff --check` passed.
   - Added local opam repository `tools/ci/local-opam` as `oxcaml-local`.
@@ -198,6 +204,15 @@ passes a direct `llc` prologue smoke test for a stack-frame-using
     AMD64 validation: the existing `arithmetic.ml` test is ARM64/macOS-only and
     skips on this Linux AMD64 checkout. The new
     `amd64_direct_call_stackmap.ml` test covers the current AMD64 failure.
+  - Added and validated two more focused AMD64/Linux LLVM-backend native tests
+    using normal Make/Dune parallelism, with `LIST=` and `DIR=` cleared because
+    `agent-tmp-env` sets a broad `LIST`:
+    - `make llvm-test-one TEST=llvm-codegen/amd64_exceptions.ml LIST= DIR=
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 4 passed,
+      0 skipped, 0 failed.
+    - `make llvm-test-one TEST=llvm-codegen/amd64_stack_growth.ml LIST= DIR=
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 4 passed,
+      0 skipped, 0 failed.
 
 ## Current Blocker
 
@@ -210,7 +225,6 @@ agent env may set `LIST` for broader test runs.
 
 ## Next Step
 
-Expand focused AMD64 LLVM tests beyond the direct-call stackmap case, starting
-with exception and stack-growth programs under the standard installed compiler
-with `-llvm-backend`. If a failure appears, reduce it before broadening to
-self-stage2 validation.
+Continue expanding focused AMD64 LLVM tests under the standard installed
+compiler with `-llvm-backend`, then move to broader self-stage2 validation once
+the focused exception, stack-growth, and stackmap paths stay clean.
