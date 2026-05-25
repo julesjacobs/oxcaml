@@ -41,6 +41,19 @@ using namespace llvm;
 #define GET_REGINFO_TARGET_DESC
 #include "X86GenRegisterInfo.inc"
 
+static bool isOxCamlCallingConv(CallingConv::ID CC) {
+  switch (CC) {
+  case CallingConv::OxCaml_WithFP:
+  case CallingConv::OxCaml_WithoutFP:
+  case CallingConv::OxCaml_C_Call:
+  case CallingConv::OxCaml_C_Call_StackArgs:
+  case CallingConv::OxCaml_Alloc:
+    return true;
+  default:
+    return false;
+  }
+}
+
 static cl::opt<bool>
 EnableBasePointer("x86-use-base-pointer", cl::Hidden, cl::init(true),
           cl::desc("Enable use of a base pointer for complex stack frames"));
@@ -571,6 +584,13 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   // Set the instruction pointer register and its aliases as reserved.
   for (const MCPhysReg &SubReg : subregs_inclusive(X86::RIP))
     Reserved.set(SubReg);
+
+  if (isOxCamlCallingConv(MF.getFunction().getCallingConv())) {
+    for (const MCPhysReg &SubReg : subregs_inclusive(X86::R14))
+      Reserved.set(SubReg);
+    for (const MCPhysReg &SubReg : subregs_inclusive(X86::R15))
+      Reserved.set(SubReg);
+  }
 
   // Set the frame-pointer register and its aliases as reserved if needed.
   if (TFI->hasFP(MF)) {

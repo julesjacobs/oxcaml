@@ -3579,6 +3579,44 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
                 (I.inline_asm ~asm:"" ~constraints:"={rax}" ~args:[]
                    ~res_type:(Some T.i64) ~sideeffect:true)
             in
+            (* The runtime can enter this block directly via the blockaddress
+               stored below, bypassing the normal predecessor.  Clobber the
+               non-runtime OCaml registers so LLVM does not keep values live in
+               registers that were only set up on the normal edge. *)
+            emit_ins_no_res t
+              (I.inline_asm ~asm:""
+                 ~constraints:
+                   (String.concat ","
+                      [ "~{rax}";
+                        "~{rbx}";
+                        "~{rdi}";
+                        "~{rsi}";
+                        "~{rdx}";
+                        "~{rcx}";
+                        "~{r8}";
+                        "~{r9}";
+                        "~{r10}";
+                        "~{r11}";
+                        "~{r12}";
+                        "~{r13}";
+                        "~{xmm0}";
+                        "~{xmm1}";
+                        "~{xmm2}";
+                        "~{xmm3}";
+                        "~{xmm4}";
+                        "~{xmm5}";
+                        "~{xmm6}";
+                        "~{xmm7}";
+                        "~{xmm8}";
+                        "~{xmm9}";
+                        "~{xmm10}";
+                        "~{xmm11}";
+                        "~{xmm12}";
+                        "~{xmm13}";
+                        "~{xmm14}";
+                        "~{xmm15}";
+                        "~{memory}" ])
+                 ~args:[] ~res_type:T.Or_void.void ~sideeffect:true);
             (* If it's nonzero, we have an exception. Otherwise, go to the try
                block. *)
             let exn_bucket_is_zero =

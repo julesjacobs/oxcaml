@@ -4,14 +4,13 @@ Last updated: 2026-05-25.
 
 ## Current Claim
 
-First AMD64 implementation patch is in progress. The vendored LLVM X86
-prologue now recognizes OxCaml stack-check functions and emits an AMD64
-prologue stack-growth slow path, and the AMD64 runtime now provides the
-matching no-OCaml-stack helper.
+AMD64 LLVM backend bring-up now passes focused install, enabled Linux/AMD64
+`llvm-codegen`, and installed-compiler boot-smoke validation with the
+agent-local LLVM tools and writable install prefix.
 
-The X86 prologue patch now also builds with this vendored LLVM snapshot and
-passes a direct `llc` prologue smoke test for a stack-frame-using
-`oxcaml_fpcc` function.
+The latest fixes reserve the AMD64 OxCaml runtime registers in LLVM's X86
+register allocator and make exception-recovery blocks treat runtime
+blockaddress entry as a register-clobbering edge.
 
 ## Evidence
 
@@ -255,20 +254,63 @@ passes a direct `llc` prologue smoke test for a stack-frame-using
     `CamlinternalQuote` duplicate-interface failure. The boot build prints:
     `boot wrapper lines: 1678` and `boot fresh ir: 831`, confirming the
     LLVM-backed boot compiler build is exercising the wrapper.
-  - The current self-stage blocker is now the boot compiler smoke:
-    `_llvm_boot_context_build/default/boot_ocamlopt.exe` segfaults compiling a
+  - The next self-stage blocker was the boot compiler smoke:
+    `_llvm_boot_context_build/default/boot_ocamlopt.exe` segfaulted compiling a
     tiny recursive program. Focused repro:
     `OCAMLLIB=$(pwd)/_install/lib/ocaml
     _llvm_boot_context_build/default/boot_ocamlopt.exe -c /tmp/rec_simple.ml`
     where `/tmp/rec_simple.ml` contains
     `let rec f n = if n = 0 then 0 else f (n - 1)`.
-    Empty, constant-only, and `Printf.printf`-only files compile; recursive
-    files (`rec_simple.ml` and the self-stage `fib` smoke) segfault.
+    Empty, constant-only, and `Printf.printf`-only files compiled; recursive
+    files (`rec_simple.ml` and the self-stage `fib` smoke) segfaulted.
   - GDB on the `fib` smoke segfault shows a bad indirect call in `caml_apply2`.
     The backtrace reaches
     `camlFlambda2_algorithms__Table_by_int_id__add_7_19_code` and the closure
     argument to `caml_apply2` is the code symbol `caml_curry2` itself rather
     than a heap closure whose first word is `caml_curry2`.
+  - Diagnosed that boot compiler segfault as two AMD64 LLVM issues:
+    - X86 LLVM did not reserve `%r14`/`%r15` for OxCaml calling conventions, so
+      LLVM could allocate ordinary values into `%r15`, which is the AMD64
+      allocation-pointer runtime register.
+    - The X86_64 `Pushtrap` exception recovery block can be entered directly by
+      the runtime through a stored `blockaddress`, bypassing the normal LLVM CFG
+      predecessor. Values kept only in registers set up on the normal edge were
+      therefore stale on real exception entry.
+  - Implemented fixes:
+    - `vendor/llvm-project/llvm/lib/Target/X86/X86RegisterInfo.cpp` reserves
+      all aliases of `%r14` and `%r15` for OxCaml calling conventions, matching
+      the existing AArch64 reservation pattern for runtime registers.
+    - `backend/llvm/llvmize.ml` emits a side-effect inline-asm clobber barrier
+      on X86_64 `Pushtrap` exception entry after reading the exception bucket
+      from `%rax`. The barrier clobbers non-runtime OCaml GPRs, XMM registers,
+      and memory, so LLVM cannot preserve handler values only in registers that
+      the runtime direct edge did not establish.
+  - Rebuilt agent-local LLVM after the X86 register-reservation patch:
+    `cmake --build /tmp/oxcaml-agent-llvm-amd64-support/llvm-build --target
+    llc opt -- -j8` exits 0.
+  - Rebuilt the installed compiler with the patched `llvmize.ml` using the
+    opam boot compiler and writable prefix:
+    `OCAMLRUNPARAM=b,Xmain_stack_size=64M make llvm-install
+    LLVM_BOOT_BACKEND=0 ARCH=amd64 LLVM_PATH="$LLVM_PATH"
+    prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0.
+  - The previous focused boot-compiler segfault repros now pass:
+    `OCAMLLIB=$(pwd)/_install/lib/ocaml
+    _llvm_boot_context_build/default/boot_ocamlopt.exe -c /tmp/const_add.ml`
+    and the same command for `/tmp/rec_simple.ml` both exit 0.
+  - Installed-compiler boot-context validation now passes with normal Dune
+    parallelism and no `-j1`:
+    `ARCH=amd64 LLVM_WRAPPER="$LLVM_PATH"
+    LLVM_WRAPPER_LOG="$LLVM_WRAPPER_LOG"
+    OCAMLRUNPARAM=b,Xmain_stack_size=64M RUN_SMOKE=1
+    tools/build-llvm-boot-with-installed.sh` exits 0. The final run prints
+    `boot wrapper lines: 1678`, `boot fresh ir: 836`, smoke output `55`,
+    `smoke wrapper lines: 4`, and `smoke fresh ir: 2`.
+  - `make llvm-test-one DIR=llvm-codegen LIST= TEST= ARCH=amd64
+    LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+    prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 16 passed,
+    15 skipped, 0 failed. `LLVM_BOOT_BACKEND=0` avoids the Makefile boot path's
+    stale `CamlinternalQuote` detection issue; the test compiler itself remains
+    LLVM-backed through `LLVM_BACKEND=1`.
 
 ## Current Blocker
 
@@ -279,15 +321,14 @@ prefix is not writable in this environment, so use an explicit agent-local
 single `TEST=...` after `eval "$(../../../scripts/agent-tmp-env)"`, because the
 agent env may set `LIST` for broader test runs.
 
-The current broader validation blocker is `llvm-self-stage-install`: after
-using `OCAMLRUNPARAM=b,Xmain_stack_size=64M` to get past the current LLVM
-stack-usage overflow, the LLVM-built boot compiler segfaults compiling even a
-tiny recursive source file. The smallest current reproducer is
-`boot_ocamlopt.exe -c /tmp/rec_simple.ml` as described above.
+No focused blocker remains for the installed-compiler boot smoke. Full
+self-stage validation still needs a separate pass. The known stack-usage issue
+remains: some LLVM-built compiler paths need
+`OCAMLRUNPARAM=b,Xmain_stack_size=64M` where the normal opam compiler does not.
 
 ## Next Step
 
-Reduce the self-stage `boot_ocamlopt.exe -c /tmp/rec_simple.ml` segfault to the
-smallest generated-code/runtime bug. The current evidence points at closure or
-partial-application handling around `caml_apply2`/`caml_curry2`, but that needs
-confirmation from the generated IR/assembly before patching.
+Run broader self-stage validation from the now-passing boot-smoke baseline, and
+then reduce any remaining self-stage-only failure. Keep using normal build
+parallelism; avoid only concurrent top-level `make`/`dune` commands in this
+checkout because of the shared lockfile.
