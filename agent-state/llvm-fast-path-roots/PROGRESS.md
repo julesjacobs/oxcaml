@@ -4,7 +4,8 @@ Last updated: 2026-05-25.
 
 ## Current Claim
 
-Fresh agent workspace created. No claim yet.
+Agent workspace is initialized with a short goal and detailed implementation
+plan.
 
 ## Evidence
 
@@ -13,11 +14,13 @@ Fresh agent workspace created. No claim yet.
 - Initial state commit: `4fbbb1a88324`
 - Vendored LLVM path: `oxcaml/vendor/llvm-project`
 - Agent state path: `agent-state/llvm-fast-path-roots`
+- Design plan: `agent-state/llvm-fast-path-roots/PLAN.md`
 
 ## Current Blocker
 
-Fill in `agent-state/llvm-fast-path-roots/GOAL.md`.
+None.
 
 ## Next Step
 
-Define the goal, then make the smallest focused change or reproducer.
+Start from `PLAN.md`, build the focused reproducer/tests, then implement the
+first slice in `backend/llvm/llvmize.ml`.
