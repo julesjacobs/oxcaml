@@ -4,7 +4,7 @@ Last updated: 2026-05-25.
 
 ## Current Claim
 
-Fresh agent workspace created. No claim yet.
+Agent workspace is initialized for iterative LLVM backend code-quality cleanup.
 
 ## Evidence
 
@@ -13,11 +13,13 @@ Fresh agent workspace created. No claim yet.
 - Initial state commit: `ac299acb8526`
 - Vendored LLVM path: `oxcaml/vendor/llvm-project`
 - Agent state path: `agent-state/llvm-backend-code-quality`
+- Plan: `agent-state/llvm-backend-code-quality/PLAN.md`
 
 ## Current Blocker
 
-Fill in `agent-state/llvm-backend-code-quality/GOAL.md`.
+None.
 
 ## Next Step
 
-Define the goal, then make the smallest focused change or reproducer.
+Inspect the LLVM backend, propose 3-5 candidate cleanup targets, then run
+human-like review on the target list before editing.
