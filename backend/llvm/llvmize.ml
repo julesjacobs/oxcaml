@@ -3139,6 +3139,31 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let res = call_llvm_intrinsic t name [arg] typ in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_shuffle_32 imm =
+    let typ = int_vec_type ~width_in_bits:32 in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let res =
+      List.init 4 Fun.id
+      |> List.fold_left
+           (fun vector dst_lane ->
+             let src, shift =
+               if dst_lane < 2
+               then arg1, 2 * dst_lane
+               else arg2, 2 * dst_lane
+             in
+             let src_lane = (imm lsr shift) land 3 in
+             let elem =
+               emit_ins t
+                 (I.extractelement ~vector:src ~index:(V.of_int src_lane))
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int dst_lane)
+                  ~to_insert:elem))
+           (V.poison typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_shuffle_64 imm =
     let typ = int_vec_type ~width_in_bits:64 in
     let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -3722,6 +3747,8 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_binary 64 Or
     | Amd64_simd_instrs.Xorps | Amd64_simd_instrs.Vxorps_X_X_Xm128 ->
       simd_int_binary 64 Xor
+    | Amd64_simd_instrs.Shufps | Amd64_simd_instrs.Vshufps_X_X_Xm128 ->
+      simd_shuffle_32 (simd_imm imm)
     | Amd64_simd_instrs.Shufpd | Amd64_simd_instrs.Vshufpd_X_X_Xm128 ->
       simd_shuffle_64 (simd_imm imm)
     | Amd64_simd_instrs.Pshufhw | Amd64_simd_instrs.Vpshufhw_X_Xm128 ->

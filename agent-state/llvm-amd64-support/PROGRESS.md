@@ -17,15 +17,16 @@ default disabled-probe path. The standard-compiler LLVM-backend
 `lib-atomic/test_atomic_cmpxchg.ml` failure is fixed too. The native
 `async-exns/async_exns_1.ml` output mismatch is now fixed as well.
 
-The latest SIMD follow-ups add SSE2 signed word multiply-add and unsigned even
-doubleword multiply lowering, SSE2 vec128 shuffle lowering for 64-bit lanes and
-high/low 16-bit halves, SSE2 vec128 interleave lowering for 8- and 16-bit
-lanes, SSE2 int16 multiply low/high/high-unsigned lowering, SSE2 variable and
-immediate integer shift lowering, SSE2 unsigned SAD lowering, SSE2 saturating
-pack/narrow lowering, SSE2 unsigned average lowering for 8- and 16-bit lanes,
-SSE/SSE2 vec128 movemask lowering, SSE2 integer compare lowering for 8-, 16-,
-and 32-bit lanes, and vec128 byte-shift lowering. Earlier fixes publish the
-current allocation pointer to `%r15` before the X86_64
+The latest SIMD follow-ups add SSE vec128 shuffle lowering for 32-bit lanes,
+SSE2 signed word multiply-add and unsigned even doubleword multiply lowering,
+SSE2 vec128 shuffle lowering for 64-bit lanes and high/low 16-bit halves, SSE2
+vec128 interleave lowering for 8- and 16-bit lanes, SSE2 int16 multiply
+low/high/high-unsigned lowering, SSE2 variable and immediate integer shift
+lowering, SSE2 unsigned SAD lowering, SSE2 saturating pack/narrow lowering,
+SSE2 unsigned average lowering for 8- and 16-bit lanes, SSE/SSE2 vec128
+movemask lowering, SSE2 integer compare lowering for 8-, 16-, and 32-bit lanes,
+and vec128 byte-shift lowering. Earlier fixes publish the current allocation
+pointer to `%r15` before the X86_64
 `Raise_notrace` inline exception jump, correct LLVM `Compare_exchange`
 lowering, and add focused AMD64 probe terminator lowering plus focused AMD64
 SIMD LLVM lowering for i64x2 arithmetic, vec128 interleaves, and vec256
@@ -1847,6 +1848,16 @@ limit is raised from `l=100000` to `l=150000`.
       directly under `validation-tmp/amd64-simd-mul-hadd-even`; the kept IR
       widens signed words, multiplies, adds adjacent products into `<4 x i32>`,
       and zero-extends even 32-bit lanes before multiplying into `<2 x i64>`.
+    - Implemented AMD64 LLVM lowering for the SSE vec128 32-bit shuffle
+      builtin (`caml_sse_vec128_shuffle_32`). The first rebuild attempt failed
+      because the agent-local `/tmp` was full and `ocamlc.opt -config` could
+      not write its redirected output; clearing generated files under
+      `/tmp/oxcaml-agent-llvm-amd64-support/tmp` freed `/tmp`, after which
+      `make -s compiler -j "$(nproc)"` passed. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_shuffle_32.sh` script passed
+      directly under `validation-tmp/amd64-simd-shuffle-32`; the kept IR
+      extracts the low result lanes from the first `<4 x i32>` operand and the
+      high result lanes from the second operand.
 
 ## Current Blocker
 
