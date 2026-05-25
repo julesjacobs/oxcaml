@@ -3237,8 +3237,20 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     |> store_into_reg t i.res.(0)
   | Amd64_simd (instr_id, imm) -> (
     match[@warning "-4"] instr_id with
+    | Amd64_simd_instrs.Paddb | Amd64_simd_instrs.Vpaddb_X_X_Xm128 ->
+      simd_int_binary 8 Add
+    | Amd64_simd_instrs.Paddw | Amd64_simd_instrs.Vpaddw_X_X_Xm128 ->
+      simd_int_binary 16 Add
+    | Amd64_simd_instrs.Paddd | Amd64_simd_instrs.Vpaddd_X_X_Xm128 ->
+      simd_int_binary 32 Add
     | Amd64_simd_instrs.Paddq | Amd64_simd_instrs.Vpaddq_X_X_Xm128 ->
       simd_int_binary 64 Add
+    | Amd64_simd_instrs.Psubb | Amd64_simd_instrs.Vpsubb_X_X_Xm128 ->
+      simd_int_binary 8 Sub
+    | Amd64_simd_instrs.Psubw | Amd64_simd_instrs.Vpsubw_X_X_Xm128 ->
+      simd_int_binary 16 Sub
+    | Amd64_simd_instrs.Psubd | Amd64_simd_instrs.Vpsubd_X_X_Xm128 ->
+      simd_int_binary 32 Sub
     | Amd64_simd_instrs.Psubq_X_Xm128 | Amd64_simd_instrs.Vpsubq_X_X_Xm128 ->
       simd_int_binary 64 Sub
     | Amd64_simd_instrs.Punpckhqdq | Amd64_simd_instrs.Vpunpckhqdq_X_X_Xm128 ->

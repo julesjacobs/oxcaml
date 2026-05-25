@@ -146,8 +146,12 @@ let is_llvm_intrinsic_builtin = function
   | _ -> false
 
 let is_llvm_simd_builtin = function
-  | "caml_simd_int64x2_add" | "caml_sse2_int64x2_add" | "caml_simd_int64x2_sub"
-  | "caml_sse2_int64x2_sub" | "caml_simd_vec128_interleave_high_64"
+  | "caml_sse2_int8x16_add" | "caml_sse2_int16x8_add"
+  | "caml_sse2_int32x4_add" | "caml_simd_int64x2_add"
+  | "caml_sse2_int64x2_add" | "caml_sse2_int8x16_sub"
+  | "caml_sse2_int16x8_sub" | "caml_sse2_int32x4_sub"
+  | "caml_simd_int64x2_sub" | "caml_sse2_int64x2_sub"
+  | "caml_simd_vec128_interleave_high_64"
   | "caml_sse2_vec128_interleave_high_64" | "caml_simd_vec128_interleave_low_64"
   | "caml_sse2_vec128_interleave_low_64" | "caml_avx_vec256_extract_128"
   | "caml_avx_vec256_insert_128" | "caml_sse2_vec128_load_low64"

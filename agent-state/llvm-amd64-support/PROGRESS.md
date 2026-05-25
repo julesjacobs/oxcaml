@@ -1709,6 +1709,13 @@ limit is raised from `l=100000` to `l=150000`.
       an `i64` to `i32` truncation for `caml_sse2_int32_store_uncached` and
       aligned-one `i32`/`i64` stores. As with the full-width uncached vector
       memory lowering, the non-temporal cache hint is not modeled in IR.
+    - Implemented AMD64 LLVM lowering for the plain SSE2 128-bit integer
+      add/sub subset (`int8x16`, `int16x8`, and `int32x4`) and rebuilt with
+      `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_int_add_sub.sh` script passed
+      directly under `validation-tmp/simd_int_add_sub_script`; the kept IR
+      contains vector `add`/`sub` operations for `<16 x i8>`, `<8 x i16>`,
+      and `<4 x i32>`.
 
 ## Current Blocker
 
