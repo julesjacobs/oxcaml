@@ -9,6 +9,7 @@ out="$build_dir/stack_check_size_contract_generated.o"
 ir="$build_dir/stack_check_size_contract_generated.ll"
 asm="$build_dir/stack_check_size_contract_generated.s"
 cfg_dump="$build_dir/stack_check_size_contract_generated.cmx.dump"
+extra_ocamlopt_flags=""
 
 search_dir=$build_dir
 ocamlopt=""
@@ -26,6 +27,10 @@ if [ -z "$ocamlopt" ]; then
   else
     ocamlopt="_build/install/main/bin/ocamlopt.opt"
   fi
+fi
+
+if [ "$mode" = "no-cfg-stack-checks" ]; then
+  extra_ocamlopt_flags="-no-cfg-stack-checks"
 fi
 
 arg_count=48
@@ -65,8 +70,16 @@ printf "\n"
 
 "$ocamlopt" -O3 -g -S -c -keep-llvmir -llvm-backend \
   -dcfg -dump-into-file \
+  $extra_ocamlopt_flags \
   -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
   -o "$out" "$src"
+
+for generated_file in "$ir" "$asm" "$cfg_dump"; do
+  if [ ! -f "$generated_file" ]; then
+    echo "expected generated file missing: $generated_file" >&2
+    exit 1
+  fi
+done
 
 function_attr_line() {
   name="$1"
@@ -146,6 +159,24 @@ if [ "$mode" = "no-stack-checks" ]; then
   fi
   if grep -q '_caml_llvm_prologue_realloc_stack' "$asm"; then
     echo "unexpected OxCaml stack-check prologue in no-stack-checks build" >&2
+    exit 1
+  fi
+  exit 0
+fi
+
+if [ "$mode" = "no-cfg-stack-checks" ]; then
+  if grep -q '"oxcaml-stack-check-bytes"' "$ir"; then
+    echo "unexpected OxCaml stack-check byte attribute without CFG stack checks" >&2
+    exit 1
+  fi
+  for name in leaf_alloc non_tail_call noalloc_outgoing_stack_args; do
+    if ! has_stack_check_request "$name"; then
+      echo "$name missing legacy OxCaml stack-check request attribute" >&2
+      exit 1
+    fi
+  done
+  if [ "$(cfg_stack_check_count non_tail_call)" != "0" ]; then
+    echo "non_tail_call should have no CFG stack_check instructions" >&2
     exit 1
   fi
   exit 0

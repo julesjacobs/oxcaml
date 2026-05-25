@@ -70,6 +70,11 @@ required_bytes = max(final_static_llvm_frame_bytes, cfg_required_stack_check_byt
     LLVM_PATH="$LLVM_PATH"` passed after tightening the focused test for the
     legacy boolean attribute and leaf CFG `stack_check` absence: 59 passed, 1
     skipped, 0 failed.
+  - follow-up review for `-no-cfg-stack-checks`:
+    the LLVM backend now omits `"oxcaml-stack-check-bytes"` when CFG stack-check
+    insertion did not run, while preserving the legacy boolean request. The
+    focused LLVM-codegen directory passed with the added regression test:
+    64 passed, 1 skipped, 0 failed.
 
 ## Current Blocker
 
