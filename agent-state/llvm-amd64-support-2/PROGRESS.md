@@ -258,18 +258,33 @@ builds on AMD64, and simple scalar programs compile and run with
   with `OCAMLRUNPARAM=s=256M`, but with `OCAMLRUNPARAM=s=32k` it aborts in
   `caml_scan_stack` with a missing frame descriptor while exercising
   `caml_call_gc_avx`. This is the next reduced vector-array issue.
+- Fixed the vec256 small-stack scan abort independently by preventing LLVM from
+  dynamically realigning AMD64 OxCaml stack frames. LLVM's `andq $-32, %rsp`
+  prologue creates a call-site-dependent gap that the OCaml frame table cannot
+  encode as one static frame size; the AMD64 LLVM backend now emits
+  `"no-realign-stack"` on generated OxCaml functions while keeping frame
+  pointers.
+- Verified after the no-realign-stack fix:
+  - `opam exec -- make compiler`
+  - `opam exec -- make prefix="$PWD/_local-llvm-test-install" install_for_test`
+  - direct reduced `test_vec256_u_array.ml` compile/run with
+    `OCAMLRUNPARAM=s=32k,b`
+  - `opam exec -- make prefix="$PWD/_local-llvm-test-install" llvm-test-one
+    TEST=typing-layouts-arrays/test_vec256_u_array.ml LLVM_PATH="$LLVM_PATH"
+    LLVM_BOOT_BACKEND=0`
+  - `opam exec -- make prefix="$PWD/_local-llvm-test-install" llvm-test-one
+    TEST=llvm-codegen/amd64_smoke.ml LLVM_PATH="$LLVM_PATH"
+    LLVM_BOOT_BACKEND=0`
 
 ## Current Blocker
 
 No immediate source blocker. Full `llvm-test` has not yet been rerun after the
-non-root safepoint preservation fix. The vec128 and product-array focused
-semantic failures are fixed; the remaining reduced vector-array issue is the
-vec256 small-heap `caml_call_gc_avx` stack-scan abort. Other known failures from
-the last full run include native CFI stepping, quotation native/linker tests
-with missing stub libraries, and `tool-toplevel/dwarf_binary_emitter.ml`.
+non-root safepoint preservation and AMD64 no-realign-stack fixes. Other known
+failures from the last full run include native CFI stepping, quotation
+native/linker tests with missing stub libraries, and
+`tool-toplevel/dwarf_binary_emitter.ml`.
 
 ## Next Step
 
-Reduce the vec256 small-heap `caml_call_gc_avx` stack-scan abort, rerun
-`llvm-test`, then address `tool-toplevel/dwarf_binary_emitter.ml` and native CFI
-stepping before attempting `llvm-self-stage2-test`.
+Rerun full `llvm-test`, then address `tool-toplevel/dwarf_binary_emitter.ml`
+and native CFI stepping before attempting `llvm-self-stage2-test`.

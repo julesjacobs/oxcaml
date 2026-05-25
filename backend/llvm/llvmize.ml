@@ -848,7 +848,8 @@ let is_gc_leaf_call attrs =
     (function
       | LL.Fn_attr.Gc_leaf_function -> true
       | LL.Fn_attr.Cold | LL.Fn_attr.Frame_pointer_all | LL.Fn_attr.Gc _
-      | LL.Fn_attr.Noinline | LL.Fn_attr.Oxcaml_stack_check
+      | LL.Fn_attr.Noinline | LL.Fn_attr.No_realign_stack
+      | LL.Fn_attr.Oxcaml_stack_check
       | LL.Fn_attr.Returns_twice | LL.Fn_attr.Statepoint_id _ ->
         false)
     attrs
@@ -3176,11 +3177,21 @@ let cfg_stack_check_before_bytes (cfg : Cfg.t) =
 let frame_pointer_attrs ?cfg_stack_check_bytes ?cfg_stack_check_before_bytes ()
     =
   let open LL.Fn_attr in
-  let frame_pointer_attrs =
-    if Config.with_frame_pointers then [Frame_pointer_all] else []
+  let frame_pointer_attrs arch =
+    match arch with
+    | Target_system.X86_64 ->
+      if Config.with_frame_pointers
+      then [Frame_pointer_all; No_realign_stack]
+      else [No_realign_stack]
+    | Target_system.AArch64 ->
+      if Config.with_frame_pointers then [Frame_pointer_all] else []
+    | Target_system.IA32 | Target_system.ARM | Target_system.POWER
+    | Target_system.Z | Target_system.Riscv ->
+      []
   in
+  let arch = Target_system.architecture () in
   let stack_check_attrs =
-    match Target_system.architecture (), Config.no_stack_checks with
+    match arch, Config.no_stack_checks with
     | Target_system.AArch64, false ->
       Oxcaml_stack_check
       ::
@@ -3204,7 +3215,7 @@ let frame_pointer_attrs ?cfg_stack_check_bytes ?cfg_stack_check_before_bytes ()
       (_ : bool) ->
       []
   in
-  frame_pointer_attrs @ stack_check_attrs
+  frame_pointer_attrs arch @ stack_check_attrs
 
 let fun_attrs ~has_try:_ ~cfg_stack_check_bytes ~cfg_stack_check_before_bytes
     codegen_options =
