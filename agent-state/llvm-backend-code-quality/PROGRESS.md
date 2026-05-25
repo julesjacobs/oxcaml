@@ -4,7 +4,7 @@ Last updated: 2026-05-25.
 
 ## Current Claim
 
-Iterations 1 through 9 are committed or ready to commit; iteration 9 passed
+Iterations 1 through 10 are committed or ready to commit; iteration 10 passed
 review with no findings and is validated.
 
 ## Evidence
@@ -23,7 +23,7 @@ None.
 ## Iteration State
 
 - Target: 10 completed iterations.
-- Completed iterations: 9.
+- Completed iterations: 10.
 - Committed cleanups:
   - Iteration 1: simplified deopt argument list construction in
     `backend/llvm/llvmize.ml` with `List.concat_map`.
@@ -44,6 +44,8 @@ None.
     `backend/llvm/llvmize.ml`.
   - Iteration 9: shared fresh unwind label creation in
     `backend/llvm/llvmize.ml`.
+  - Iteration 10: used `In_channel.with_open_text` for LLVM backend file reads
+    in `backend/llvm/llvmize.ml`.
 - Dropped ideas: none yet.
 - Stop condition: stop after 10 completed iterations, then summarize committed
   cleanups, dropped ideas, and remaining promising targets.
@@ -490,6 +492,51 @@ Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
 are broad LLVM backend validation runs, and this commit only changes
 behavior-preserving helper sharing.
 
+## Iteration 10 Candidate
+
+Path: self-proposed candidate.
+
+Candidate: use `In_channel.with_open_text` for the LLVM expect-output reader
+and LLVM IR dump reader in `backend/llvm/llvmize.ml`.
+
+Why likely useful: the expect-output reader manually implemented the same
+open/read/close pattern as `In_channel.with_open_text`, while the dump reader
+manually closed after a successful read. The standard helper is shorter and
+keeps channel cleanup tied to the file read.
+
+Review gate: passed after five human-like reviews of the final diff.
+
+Review result: all five reviewers said keep with no findings. Reviewers checked
+that the change preserves text-mode reads, removes manual close handling without
+adding abstraction, and improves exception cleanup in the dump reader.
+
+Validation result:
+
+- `git diff --check`: passed.
+- `eval "$(../../../scripts/agent-tmp-env)" && opam exec
+  --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`: passed.
+
+## Testing Story for This Commit
+
+Change: replace manual LLVM backend text-file open/read/close code with
+`In_channel.with_open_text`, and record iteration 10 state in this progress
+file.
+Risk: if the rewrite is wrong, expect-output normalization or LLVM IR dumping
+could fail to read the generated files, or channel close timing could change in
+an observable way.
+Validation: `git diff --check`; `eval "$(../../../scripts/agent-tmp-env)" &&
+opam exec --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`.
+Full LLVM validation: not run for this commit; the rewrite preserves text-mode
+file reads and only replaces manual resource handling with the standard helper.
+Stage2 verification: not run for this commit; self-stage2 is intentionally
+deferred for the same reason as full LLVM validation.
+Why this is enough: five human-like reviews found no issues and checked the
+channel-handling behavior; the build check covers type and syntax validity.
+Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
+`make llvm-self-stage2-test LLVM_PATH="$LLVM_PATH"` are deferred because they
+are broad LLVM backend validation runs, and this commit only changes local file
+read resource handling.
+
 ## Next Step
 
-Commit iteration 9 and push it to the draft PR branch.
+Commit iteration 10 and push it to the draft PR branch.

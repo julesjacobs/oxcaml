@@ -248,10 +248,7 @@ let register_expect_llvm_asm_callback f =
   expect_llvm_asm_callbacks := f :: !expect_llvm_asm_callbacks
 
 let read_file_for_expect filename =
-  let ic = In_channel.open_text filename in
-  Fun.protect
-    ~finally:(fun () -> In_channel.close ic)
-    (fun () -> In_channel.input_all ic)
+  In_channel.with_open_text filename In_channel.input_all
 
 let normalize_llvm_expect_line line =
   if String.starts_with ~prefix:"source_filename = " line
@@ -4432,10 +4429,10 @@ let llvmir_to_assembly t =
       ~output_filename:asm_filename ~extra_flags:[]
 
 let dump_llvmir ~llvmir_filename ~message t =
-  let ic = In_channel.open_text llvmir_filename in
-  let contents = In_channel.input_all ic in
-  Format.fprintf t.ppf_dump "\n*** %s\n\n%s" message contents;
-  In_channel.close ic
+  let contents =
+    In_channel.with_open_text llvmir_filename In_channel.input_all
+  in
+  Format.fprintf t.ppf_dump "\n*** %s\n\n%s" message contents
 
 let dump_llvmir_after_llvmize t =
   dump_llvmir ~llvmir_filename:t.llvmir_filename ~message:"After llvmize" t
