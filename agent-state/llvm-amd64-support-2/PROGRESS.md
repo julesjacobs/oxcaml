@@ -203,24 +203,40 @@ builds on AMD64, and simple scalar programs compile and run with
   `test_v_sfIxI`, `test_v_xll`, and related mixed signatures. Large C-stack
   argument reductions that previously failed early are no longer the leading
   reduced failure.
+- Corrected the noalloc C-stack-argument experiment above: private noalloc
+  wrappers switch to the C stack before LLVM has reserved an outgoing C call
+  area, so generated code wrote stack arguments directly at `%rsp`. Calls with
+  C stack arguments now use `caml_c_call_stack_args` regardless of `alloc`.
+- Independently reduced the unboxed primitive failure to boxed `float32`
+  corruption in `Common.Buffer.get_float32`: the raw `int32` bits were correct,
+  but the converted double in `%xmm0` crossed an allocation slow path and the
+  LLVM backend always called plain `caml_call_gc`, which saves no SIMD
+  registers. The allocated `float32` box then received zero after GC clobbered
+  `%xmm0`.
+- Added LLVM AMD64 GC-call selection for allocation and poll safepoints:
+  choose `caml_call_gc_sse`, `caml_call_gc_avx`, or
+  `caml_call_gc_avx512` when liveness shows Float/Float32/Vec128/Vec256/Vec512
+  values across the safepoint.
+- Rebuilt and refreshed the local testsuite install after the GC-call fix:
+  - `opam exec -- make compiler`
+  - `opam exec -- make prefix="$PWD/_local-llvm-test-install" install_for_test`
+- Focused unboxed primitive test now passes:
+  `env -u DIR -u LIST opam exec -- sh -c 'export CAML_LD_LIBRARY_PATH="$TEST_CAML_LD_LIBRARY_PATH"; make one TEST=tests/unboxed-primitive-args/test.ml'`
+  from `_runtest/testsuite` completed with `8 tests passed`, `1 skipped`,
+  `0 failed`.
 
 ## Current Blocker
 
 No immediate source blocker. Full `llvm-test` now completes but still has 34
-failures. The exception-recovery segfault class is fixed; the active focused
-backend blocker is the AMD64 unboxed primitive argument ABI mismatch. Isolated
-externals can pass, while the full generated list exposes missing/incorrect
-movement of float32 and vec128/int64x2 values after prior calls perturb
-register state. Several product array/iarray tests now compile but fail
-semantic assertions, so the remaining SIMD/product-array work is beyond just
-adding missing builtins.
+failures from the last full run. The exception-recovery segfault class and the
+focused AMD64 unboxed primitive argument test are fixed. Remaining known
+failures from the last full run include native CFI stepping, quotation
+native/linker tests with missing stub libraries, product array/iarray semantic
+assertions, and `tool-toplevel/dwarf_binary_emitter.ml`.
 
 ## Next Step
 
-Continue reducing the order-dependent `Common.exec`/`caml_apply*` path in
-`tests/unboxed-primitive-args/test.ml`. The next useful check is to inspect how
-the LLVM backend lowers boxed/unboxed float32 and vec128 arguments through
-generic application/PAPs, since saturated and single-test paths can pass while
-the full list exposes stale zero or `1:1` values. After fixing that, rerun the
-focused unboxed primitive test, the relevant layout array/iarray semantic
-tests, then the full `llvm-test`, before attempting `llvm-self-stage2-test`.
+Rerun full `llvm-test LLVM_BOOT_BACKEND=0` after the SIMD-saving GC fix to get
+the new baseline, then reduce the remaining product array/iarray semantic
+failures and `tool-toplevel/dwarf_binary_emitter.ml` before attempting
+`llvm-self-stage2-test`.

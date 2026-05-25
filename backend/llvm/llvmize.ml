@@ -718,6 +718,32 @@ let live_gc_root_regs_across t (i : 'a Cfg.instruction) =
           Cmm.is_val reg.typ && Option.is_some (get_alloca_for_reg_opt t reg))
         across)
 
+let live_regs_across t (i : 'a Cfg.instruction) =
+  match (get_fun_info t).liveness with
+  | None -> Reg.Set.empty
+  | Some liveness -> (
+    match InstructionId.Tbl.find_opt liveness i.id with
+    | None -> Reg.Set.empty
+    | Some { Cfg_liveness.before = _; across } -> across)
+
+let gc_simd_suffix t i =
+  let save_xmm, save_ymm, save_zmm = ref false, ref false, ref false in
+  Reg.Set.iter
+    (fun (reg : Reg.t) ->
+      match reg.typ with
+      | Vec512 -> save_zmm := true
+      | Vec256 -> save_ymm := true
+      | Float | Float32 | Vec128 | Valx2 -> save_xmm := true
+      | Val | Addr | Int -> ())
+    (live_regs_across t i);
+  if !save_zmm
+  then "_avx512"
+  else if !save_ymm
+  then "_avx"
+  else if !save_xmm
+  then "_sse"
+  else ""
+
 let load_live_gc_roots_across t i =
   live_gc_root_regs_across t i
   |> Reg.Set.elements
@@ -1394,7 +1420,7 @@ let extcall ?unwind_label t (i : Cfg.terminator Cfg.instruction) ~func_symbol
       ?unwind_label ~cc t caml_c_call_symbol args res_types
   in
   let call_func arg_regs arg_types res_types =
-    if stack_ofs > 0 && alloc
+    if stack_ofs > 0
     then (
       (* We handle stack arguments manually as opposed to making LLVM's C
          calling conventions handle it. The reason is twofold:
@@ -2283,11 +2309,12 @@ let heap_alloc ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction)
     (I.br_cond ~cond:skip_gc_expect ~ifso:after_gc ~ifnot:call_gc);
   (* Call GC *)
   emit_label t call_gc;
-  add_referenced_symbol t "caml_call_gc";
+  let call_gc_symbol = "caml_call_gc" ^ gc_simd_suffix t i in
+  add_referenced_symbol t call_gc_symbol;
   call_simple
     ~attrs:(gc_attr ~alloc_info ~can_call_gc:true t i @ [LL.Fn_attr.Cold])
     ~live_roots:(load_live_gc_roots_across t i)
-    ~alloc_info ?unwind_label ~cc:Oxcaml_alloc t "caml_call_gc" [] []
+    ~alloc_info ?unwind_label ~cc:Oxcaml_alloc t call_gc_symbol [] []
   |> ignore;
   emit_ins_no_res t (I.br after_gc);
   emit_unwind_landingpad_after t unwind_label exn_entry;
@@ -2318,7 +2345,8 @@ let poll ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction) =
   emit_ins_no_res t
     (I.br_cond ~cond:skip_poll_expect ~ifso:after_poll ~ifnot:call_gc);
   emit_label t call_gc;
-  add_referenced_symbol t "caml_call_gc";
+  let call_gc_symbol = "caml_call_gc" ^ gc_simd_suffix t i in
+  add_referenced_symbol t call_gc_symbol;
   call_simple
     ~attrs:
       (gc_attr
@@ -2326,7 +2354,7 @@ let poll ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction) =
          ~can_call_gc:true t i
       @ [LL.Fn_attr.Cold])
     ~live_roots:(load_live_gc_roots_across t i)
-    ?unwind_label ~cc:Oxcaml_alloc t "caml_call_gc" [] []
+    ?unwind_label ~cc:Oxcaml_alloc t call_gc_symbol [] []
   |> ignore;
   emit_ins_no_res t (I.br after_poll);
   emit_unwind_landingpad_after t unwind_label exn_entry;
