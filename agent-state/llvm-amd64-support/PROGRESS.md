@@ -29,9 +29,12 @@ wrappers, fixing focused `tests/frame-pointers` stack walks. The generated
 AMD64 recover-rbp exception shims now carry CFI, fixing focused native CFI
 single-stepping through exception recovery. The AMD64 LLVM path now also
 selects and lowers `Cpackf32`, fixing unboxed float32 array native
-compilation. Earlier fixes reserve the AMD64 OxCaml runtime registers in
-LLVM's X86 register allocator and make exception-recovery blocks treat runtime
-blockaddress entry as a register-clobbering edge.
+compilation. `tests/misc/gctweaks.ml` now tolerates pre-existing active GC
+tweaks from validation `OCAMLRUNPARAM`, clearing the last known focused
+failure from the previous self-stage ocamltest run. Earlier fixes reserve the
+AMD64 OxCaml runtime registers in LLVM's X86 register allocator and make
+exception-recovery blocks treat runtime blockaddress entry as a
+register-clobbering edge.
 
 ## Evidence
 
@@ -135,6 +138,11 @@ blockaddress entry as a register-clobbering edge.
     by combining the low 32 bits of two float32 bit-pattern carriers into one
     64-bit payload word. This fixes the previous
     `Selection.select_oper` failure for unboxed float32 array payloads.
+  - `testsuite/tests/misc/gctweaks.ml` now records the initially active GC
+    tweaks and verifies that `custom_work_max_multiplier` is added and removed
+    relative to that baseline. This keeps the test valid when AMD64 validation
+    runs with `OCAMLRUNPARAM=b,Xmain_stack_size=64M`, which makes
+    `main_stack_size` appear in `Gc.Tweak.list_active ()`.
   - `backend/llvm/llvmize.ml` now emits explicit standalone stackmaps for all
     non-tail X86_64 OCaml calls, including direct calls that have live GC roots.
     This covers frame descriptors for direct-call return addresses when the
@@ -627,10 +635,20 @@ blockaddress entry as a register-clobbering edge.
       ARCH=amd64 LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
       prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 134
       passed, 0 skipped, 0 failed.
-  - From the last full self-stage refresh, the failure still needing focused
-    investigation or a broad rerun after the focused fixes is:
-    - `tests/misc/gctweaks.ml` fails in both bytecode and native at line 22
-      after printing `100`, so it is likely separate from LLVM native codegen.
+  - Focused `gctweaks.ml` validation now passes:
+    - With AMD64 validation stack settings:
+      `OCAMLRUNPARAM='b,Xmain_stack_size=64M' make llvm-test-one
+      TEST=misc/gctweaks.ml LIST= DIR= ARCH=amd64 LLVM_BOOT_BACKEND=0
+      LLVM_PATH="$LLVM_PATH"
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 3 passed,
+      0 skipped, 0 failed. Before the test fix, both bytecode and native
+      failed after printing `100` because `Gc.Tweak.list_active ()` also
+      contained `main_stack_size`.
+    - Without `OCAMLRUNPARAM`:
+      `make test-one-no-rebuild TEST=misc/gctweaks.ml LLVM_BACKEND=1
+      ARCH=amd64 LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 3 passed,
+      0 skipped, 0 failed.
 
 ## Current Blocker
 
@@ -646,14 +664,14 @@ The last full self-stage ocamltest refresh was down to 15 failures. Since then,
 focused standard-compiler LLVM-backend validation has cleared the backtrace,
 frame-pointer, native CFI stepping, and unboxed float32 array families, but a
 broad self-stage rerun is still needed for an updated final count. The
-remaining known family is `gctweaks.ml` failing in both bytecode and native.
-The known stack-usage issue remains: some LLVM-built compiler paths need
+`gctweaks.ml` failure was a test assumption about `Gc.Tweak.list_active ()`
+under `OCAMLRUNPARAM=Xmain_stack_size=...`, not an LLVM-native-specific codegen
+failure. The known stack-usage issue remains: some LLVM-built compiler paths need
 `OCAMLRUNPARAM=b,Xmain_stack_size=64M` where the normal opam compiler does not.
 
 ## Next Step
 
-Investigate the separate `tests/misc/gctweaks.ml` bytecode/native failure, then
-run a broad self-stage ocamltest refresh once that focused remaining failure is
-understood or addressed. Keep using normal build parallelism; avoid only
-concurrent top-level `make`/`dune` commands in this checkout because of the
-shared lockfile.
+Run a broad self-stage ocamltest refresh to get an updated failure count after
+the focused backtrace, frame-pointer, native CFI, float32 array, and gctweaks
+fixes. Keep using normal build parallelism; avoid only concurrent top-level
+`make`/`dune` commands in this checkout because of the shared lockfile.
