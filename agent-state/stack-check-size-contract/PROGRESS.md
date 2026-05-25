@@ -5,16 +5,18 @@ Last updated: 2026-05-24.
 ## Current Claim
 
 Implemented locally. The LLVM backend now emits an explicit function-local
-`"oxcaml-stack-check-bytes"="<n>"` attribute for AArch64 LLVM functions that
-also receive `"oxcaml-stack-check"="true"`. The value is exactly the maximum
-`Cfg.Stack_check.max_frame_size_bytes` in the CFG, or `0` when the function has
-no CFG `Stack_check`. When `Config.no_stack_checks` is true, neither attribute
-is emitted.
+`"oxcaml-stack-check-bytes"="<n>"` attribute when the CFG-derived stack-check
+byte requirement is known. The value is exactly the maximum
+`Cfg.Stack_check.max_frame_size_bytes` in the CFG, or `0` when CFG stack-check
+insertion ran and the function has no CFG `Stack_check`. When CFG stack-check
+insertion did not run, the byte attribute is omitted instead of encoding the
+unknown value as `0`. When `Config.no_stack_checks` is true, OxCaml stack-check
+attributes are not emitted.
 
 This PR does not change the AArch64 LLVM prologue sizing or omission policy.
 The byte-count contract exposes the later-rule input
-`cfg_required_stack_check_bytes`; the later rule can combine it with
-`final_static_llvm_frame_bytes` as:
+`cfg_required_stack_check_bytes` when it is known; the later rule can combine it
+with `final_static_llvm_frame_bytes` as:
 
 ```text
 required_bytes = max(final_static_llvm_frame_bytes, cfg_required_stack_check_bytes)
