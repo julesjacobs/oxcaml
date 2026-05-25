@@ -371,6 +371,19 @@ passes, and `llvm-self-stage2-test` passes.
   - verified `build-llvm-self-stage-install.sh` in disposable boot/stage
     directories with runtime/main rebuilds disabled, ending in self-stage
     smoke output `55`.
+- Second PR review loop:
+  - changed `run-llvm-stage5-ocamltest.sh` to use unique default fake-root and
+    test-list paths instead of shared `/tmp` names;
+  - changed standalone `setup-llvm-stage4-ocamltest.sh` to create a unique
+    default fake root when `FAKE_ROOT` is not supplied;
+  - added testsuite list-entry validation so bad entries fail before ocamltest
+    can print a fatal error yet report `0 tests considered`;
+  - verified validation rejects a bad list entry
+    (`tests/llvm-codegen/amd64_smoke`);
+  - verified focused self-stage2 `tests/llvm-codegen` run:
+    `3 passed`, `15 skipped`, `0 failed`, `18 considered`.
+  - updated the PR body to reflect the completed implementation and validation
+    state.
 
 ## Current Blocker
 

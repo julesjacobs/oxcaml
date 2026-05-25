@@ -4,7 +4,7 @@ set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
 
-fake_root=${FAKE_ROOT:-/tmp/oxcaml-stage4-ocamltest-src}
+fake_root=${FAKE_ROOT:-$(mktemp -d /tmp/oxcaml-stage4-ocamltest-src.XXXXXX)}
 normal_build=${NORMAL_BUILD:-$repo/_build}
 stage_build=${STAGE_BUILD:-$repo/_llvm_stage4_probe_build}
 stdlib_dir=${STDLIB_DIR:-$repo/_build/runtime_stdlib_install/lib/ocaml_runtime_stdlib}
