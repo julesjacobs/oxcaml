@@ -2459,6 +2459,56 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let res = emit_ins t (I.convert Trunc ~arg:avg ~to_:typ) in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_sad_unsigned () =
+    let byte_typ = int_vec_type ~width_in_bits:8 in
+    let word_typ = int_vec_type_of_lanes ~width_in_bits:16 ~lanes:16 in
+    let res_typ = int_vec_type ~width_in_bits:64 in
+    let arg1 =
+      cast_if_needed (load_reg_to_temp t i.arg.(0)) byte_typ
+      |> fun arg -> emit_ins t (I.convert Zext ~arg ~to_:word_typ)
+    in
+    let arg2 =
+      cast_if_needed (load_reg_to_temp t i.arg.(1)) byte_typ
+      |> fun arg -> emit_ins t (I.convert Zext ~arg ~to_:word_typ)
+    in
+    let abs_diff lane =
+      let lane_index = V.of_int lane in
+      let elem1 =
+        emit_ins t (I.extractelement ~vector:arg1 ~index:lane_index)
+      in
+      let elem2 =
+        emit_ins t (I.extractelement ~vector:arg2 ~index:lane_index)
+      in
+      let elem1_is_greater =
+        emit_ins t (I.icmp I.Iugt ~arg1:elem1 ~arg2:elem2)
+      in
+      let hi =
+        emit_ins t (I.select ~cond:elem1_is_greater ~ifso:elem1 ~ifnot:elem2)
+      in
+      let lo =
+        emit_ins t (I.select ~cond:elem1_is_greater ~ifso:elem2 ~ifnot:elem1)
+      in
+      emit_ins t (I.binary Sub ~arg1:hi ~arg2:lo)
+      |> fun diff -> emit_ins t (I.convert Zext ~arg:diff ~to_:T.i64)
+    in
+    let sum_half half =
+      List.init 8 (fun lane -> (half * 8) + lane)
+      |> List.fold_left
+           (fun sum lane ->
+             emit_ins t (I.binary Add ~arg1:sum ~arg2:(abs_diff lane)))
+           (V.of_int ~typ:T.i64 0)
+    in
+    let res =
+      List.init 2 Fun.id
+      |> List.fold_left
+           (fun vector half ->
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int half)
+                  ~to_insert:(sum_half half)))
+           (V.poison res_typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_shift_imm width_in_bits op n =
     let typ = int_vec_type ~width_in_bits in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -3415,6 +3465,9 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_avg_unsigned 8
     | Amd64_simd_instrs.Pavgw_X_Xm128 | Amd64_simd_instrs.Vpavgw_X_X_Xm128 ->
       simd_int_avg_unsigned 16
+    | Amd64_simd_instrs.Psadbw_X_Xm128
+    | Amd64_simd_instrs.Vpsadbw_X_X_Xm128 ->
+      simd_int_sad_unsigned ()
     | Amd64_simd_instrs.Packsswb
     | Amd64_simd_instrs.Vpacksswb_X_X_Xm128 ->
       simd_int_pack_saturating 16 ~unsigned:false

@@ -17,15 +17,15 @@ default disabled-probe path. The standard-compiler LLVM-backend
 `lib-atomic/test_atomic_cmpxchg.ml` failure is fixed too. The native
 `async-exns/async_exns_1.ml` output mismatch is now fixed as well.
 
-The latest SIMD follow-ups add SSE2 saturating pack/narrow lowering, SSE2
-unsigned average lowering for 8- and 16-bit lanes, SSE/SSE2 vec128 movemask
-lowering, SSE2 integer compare lowering for 8-, 16-, and 32-bit lanes, and
-vec128 byte-shift lowering. Earlier fixes publish the current allocation
-pointer to `%r15` before the X86_64 `Raise_notrace` inline exception jump,
-correct LLVM `Compare_exchange` lowering, and add focused AMD64 probe
-terminator lowering plus focused AMD64 SIMD LLVM lowering for i64x2 arithmetic,
-vec128 interleaves, and vec256 join/split support. The poll slow-path frame
-descriptor gap in
+The latest SIMD follow-ups add SSE2 unsigned SAD lowering, SSE2 saturating
+pack/narrow lowering, SSE2 unsigned average lowering for 8- and 16-bit lanes,
+SSE/SSE2 vec128 movemask lowering, SSE2 integer compare lowering for 8-, 16-,
+and 32-bit lanes, and vec128 byte-shift lowering. Earlier fixes publish the
+current allocation pointer to `%r15` before the X86_64 `Raise_notrace` inline
+exception jump, correct LLVM `Compare_exchange` lowering, and add focused AMD64
+probe terminator lowering plus focused AMD64 SIMD LLVM lowering for i64x2
+arithmetic, vec128 interleaves, and vec256 join/split support. The poll
+slow-path frame descriptor gap in
 `lib-domain/cpu_relax.ml` is also fixed for AMD64 LLVM output. Plain
 debug-less X86_64 raise/reraise calls now emit a standalone frame stackmap,
 fixing the standard-compiler LLVM-backend backtrace propagation gap in
@@ -1784,6 +1784,14 @@ limit is raised from `l=100000` to `l=150000`.
       passed directly under `validation-tmp/simd_pack_saturating_script`; the
       kept IR contains signed min/max clamps, lane truncation, and inserts for
       the packed result vectors.
+    - Implemented AMD64 LLVM lowering for the SSE2 unsigned sum of absolute
+      byte differences builtin (`caml_sse2_int8x16_sad_unsigned`) and rebuilt
+      with `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_sad_unsigned.sh` script passed
+      directly under `validation-tmp/simd_sad_unsigned_script`; the kept IR
+      contains unsigned byte widening, unsigned compares/selects for absolute
+      differences, i64 accumulation for each 8-byte half, and two result lane
+      inserts.
 
 ## Current Blocker
 

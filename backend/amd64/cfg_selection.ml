@@ -163,6 +163,7 @@ let is_llvm_simd_builtin = function
   | "caml_sse2_int16x8_max" | "caml_sse2_int16x8_min"
   | "caml_sse2_int8x16_avg_unsigned"
   | "caml_sse2_int16x8_avg_unsigned"
+  | "caml_sse2_int8x16_sad_unsigned"
   | "caml_sse2_cvt_int16x8_int8x16_saturating"
   | "caml_sse2_cvt_int32x4_int16x8_saturating"
   | "caml_sse2_cvt_int16x8_int8x16_saturating_unsigned"
