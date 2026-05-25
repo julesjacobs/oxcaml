@@ -3290,6 +3290,18 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | Amd64_simd_instrs.Pminsw_X_Xm128
     | Amd64_simd_instrs.Vpminsw_X_X_Xm128 ->
       simd_int_minmax 16 I.Islt
+    | Amd64_simd_instrs.Pcmpeqb | Amd64_simd_instrs.Vpcmpeqb_X_X_Xm128 ->
+      simd_int_cmp 8 Int_EQ ~zero:false
+    | Amd64_simd_instrs.Pcmpeqw | Amd64_simd_instrs.Vpcmpeqw_X_X_Xm128 ->
+      simd_int_cmp 16 Int_EQ ~zero:false
+    | Amd64_simd_instrs.Pcmpeqd | Amd64_simd_instrs.Vpcmpeqd_X_X_Xm128 ->
+      simd_int_cmp 32 Int_EQ ~zero:false
+    | Amd64_simd_instrs.Pcmpgtb | Amd64_simd_instrs.Vpcmpgtb_X_X_Xm128 ->
+      simd_int_cmp 8 Int_GT ~zero:false
+    | Amd64_simd_instrs.Pcmpgtw | Amd64_simd_instrs.Vpcmpgtw_X_X_Xm128 ->
+      simd_int_cmp 16 Int_GT ~zero:false
+    | Amd64_simd_instrs.Pcmpgtd | Amd64_simd_instrs.Vpcmpgtd_X_X_Xm128 ->
+      simd_int_cmp 32 Int_GT ~zero:false
     | Amd64_simd_instrs.Andps | Amd64_simd_instrs.Vandps_X_X_Xm128 ->
       simd_int_binary 64 And
     | Amd64_simd_instrs.Andnps | Amd64_simd_instrs.Vandnps_X_X_Xm128 ->

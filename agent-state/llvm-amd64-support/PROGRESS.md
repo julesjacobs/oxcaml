@@ -17,11 +17,13 @@ default disabled-probe path. The standard-compiler LLVM-backend
 `lib-atomic/test_atomic_cmpxchg.ml` failure is fixed too. The native
 `async-exns/async_exns_1.ml` output mismatch is now fixed as well.
 
-The latest fixes publish the current allocation pointer to `%r15` before the
-X86_64 `Raise_notrace` inline exception jump, correct LLVM `Compare_exchange`
-lowering, and add focused AMD64 probe terminator lowering plus focused AMD64
-SIMD LLVM lowering for i64x2 arithmetic, vec128 interleaves, and vec256
-join/split support. The poll slow-path frame descriptor gap in
+The latest SIMD follow-up adds SSE2 integer compare lowering for 8-, 16-, and
+32-bit lanes. Earlier fixes publish the current allocation pointer to `%r15`
+before the X86_64 `Raise_notrace` inline exception jump, correct LLVM
+`Compare_exchange` lowering, and add focused AMD64 probe terminator lowering
+plus focused AMD64 SIMD LLVM lowering for i64x2 arithmetic, vec128
+interleaves, and vec256 join/split support. The poll slow-path frame
+descriptor gap in
 `lib-domain/cpu_relax.ml` is also fixed for AMD64 LLVM output. Plain
 debug-less X86_64 raise/reraise calls now emit a standalone frame stackmap,
 fixing the standard-compiler LLVM-backend backtrace propagation gap in
@@ -1738,6 +1740,14 @@ limit is raised from `l=100000` to `l=150000`.
       directly under `validation-tmp/simd_min_max_script`; the kept IR
       contains vector `icmp`/`select` lowering for unsigned byte max/min and
       signed word max/min.
+    - Implemented AMD64 LLVM lowering for the SSE2 integer compare subset
+      covering equality and signed greater-than on 8-bit, 16-bit, and 32-bit
+      lanes, and rebuilt with `make -s compiler -j "$(nproc)"`; result:
+      passed. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_int_compare.sh` script passed
+      directly under `validation-tmp/simd_int_compare_script`; the kept IR
+      contains vector `icmp eq`/`icmp sgt` operations and sign-extension from
+      vector `i1` masks to the integer result vectors.
 
 ## Current Blocker
 
