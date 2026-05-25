@@ -4,6 +4,7 @@
  include unix;
  hasunix;
  runtime5;
+ poll_insertion;
  flags += " -alert -unsafe_multidomain -w -21 -O3 -llvm-backend";
  native;
 *)
@@ -11,25 +12,16 @@
 open Effect
 open Effect.Deep
 
-external preempt_self : unit -> unit = "caml_domain_preempt_self" [@@noalloc]
-
 external poll : unit -> unit = "%poll"
 
-let with_preemption_setup f =
-  Unix.setitimer Unix.ITIMER_REAL { it_interval = 0.001; it_value = 0.001 }
-  |> ignore;
-  Sys.set_signal Sys.sigalrm (Signal_handle (fun _ -> preempt_self ()))
-  |> ignore;
-  Fun.protect f
-    ~finally:(fun () ->
-      Unix.setitimer Unix.ITIMER_REAL { it_interval = 0.; it_value = 0. }
-      |> ignore)
+let run_with_preemption f effc =
+  Domain.Tick.with_ ~interval_usec:1_000 (fun _ ->
+    Preemptible.try_with ~on_tick:(fun () -> Preempt) f () { effc })
 
 let () =
   let preempted = ref false in
   let data = ref [] in
-  with_preemption_setup (fun () ->
-    try_with
+  run_with_preemption
       (fun () ->
         let start_at = Sys.time () in
         while not !preempted do
@@ -43,24 +35,20 @@ let () =
             if List.length refs <> 5 then failwith "corrupt list";
             List.iter (fun r -> if !r < 1 then failwith "corrupt ref") refs)
           !data)
-      ()
-      { effc =
-          (fun (type a) (e : a t) ->
-            match e with
-            | Preemption ->
-              Some
-                (fun (k : (a, _) continuation) ->
-                  preempted := true;
-                  Gc.full_major ();
-                  continue k ())
-            | _ -> None)
-      })
+      (fun (type a) (e : a t) ->
+        match e with
+        | Preemption ->
+          Some
+            (fun (k : (a, _) continuation) ->
+              preempted := true;
+              Gc.full_major ();
+              continue k ())
+        | _ -> None)
 
 let () =
   let preempted = ref false in
   let x = ref 0 in
-  with_preemption_setup (fun () ->
-    try_with
+  run_with_preemption
       (fun () ->
         let start_at = Sys.time () in
         while not !preempted do
@@ -70,14 +58,11 @@ let () =
           poll ()
         done;
         if !x <= 0 then failwith "poll loop did not run")
-      ()
-      { effc =
-          (fun (type a) (e : a t) ->
-            match e with
-            | Preemption ->
-              Some
-                (fun (k : (a, _) continuation) ->
-                  preempted := true;
-                  continue k ())
-            | _ -> None)
-      })
+      (fun (type a) (e : a t) ->
+        match e with
+        | Preemption ->
+          Some
+            (fun (k : (a, _) continuation) ->
+              preempted := true;
+              continue k ())
+        | _ -> None)

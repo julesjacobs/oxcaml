@@ -93,6 +93,11 @@ type trap_block_info =
     recover_rbp_var_ident : LL.Ident.t
   }
 
+type slow_path_root_slot =
+  { reg : Reg.t;
+    root_slot : LL.Value.t
+  }
+
 (* CR yusumez: Refactor into its own sub-module *)
 type fun_info =
   { emitter : LL.Function.Emitter.t;
@@ -112,6 +117,9 @@ type fun_info =
     mutable preserved_reg_slots : Reg.Set.t;
         (* Registers whose slots must not be promoted away because a trap
            handler may read them through a hidden exception edge. *)
+    mutable slow_path_root_slots : LL.Value.t list;
+        (* Static entry-block spill slots used only by eligible allocation and
+           poll slow paths. *)
     mutable active_traps : Label.t option InstructionId.Tbl.t;
         (* Top trap handler active at each instruction. [Cfg.basic_block.exn] is
            only populated for blocks whose terminator can raise, but LLVM also
@@ -177,6 +185,7 @@ let create_fun_info ?subprogram_dbg_metadata_id emitter =
     liveness = None;
     fun_args = [||];
     preserved_reg_slots = Reg.Set.empty;
+    slow_path_root_slots = [];
     active_traps = InstructionId.Tbl.create 0;
     active_trap_depths = InstructionId.Tbl.create 0;
     trap_block_allocas = Label.Tbl.create 0;
@@ -713,15 +722,70 @@ let live_gc_root_regs_across t (i : 'a Cfg.instruction) =
     match InstructionId.Tbl.find_opt liveness i.id with
     | None -> Reg.Set.empty
     | Some { Cfg_liveness.before = _; across } ->
+      (* This path deliberately handles only single-word OCaml [Val] roots.
+         [Cmm.is_val] excludes [Valx2], so the new slow-path root slots match
+         the old alloca-root behavior rather than adding partial [Valx2]
+         support. *)
       Reg.Set.filter
         (fun reg ->
           Cmm.is_val reg.typ && Option.is_some (get_alloca_for_reg_opt t reg))
         across)
 
+let slow_path_root_regs_across t i =
+  live_gc_root_regs_across t i
+  |> Reg.Set.filter (fun reg -> Option.is_none (get_const_int_for_reg t reg))
+
+let basic_has_gc_safepoint (i : Cfg.basic Cfg.instruction) =
+  match i.desc with
+  | Op (Alloc { mode = Heap; _ } | Poll) -> true
+  | Op (Alloc { mode = Local; _ }) -> false
+  | Reloadretaddr | Prologue | Epilogue | Pushtrap _ | Poptrap _ | Stack_check _
+  | Op
+      ( Move | Spill | Reload | Opaque | Pause | Begin_region | End_region
+      | Dls_get | Tls_get | Domain_index | Const_int _ | Const_float32 _
+      | Const_float _ | Const_symbol _ | Const_vec128 _ | Const_vec256 _
+      | Const_vec512 _ | Stackoffset _ | Load _
+      | Store (_, _, _)
+      | Intop _ | Int128op _
+      | Intop_imm (_, _)
+      | Intop_atomic _
+      | Floatop (_, _)
+      | Csel _ | Reinterpret_cast _ | Static_cast _ | Probe_is_enabled _
+      | Specific _ | Name_for_debugger _ ) ->
+    false
+
+let eligible_basic_safepoint_for_slow_root_slots ?(has_unwind = false)
+    active_traps (i : Cfg.basic Cfg.instruction) =
+  basic_has_gc_safepoint i && (not has_unwind)
+  &&
+  match InstructionId.Tbl.find_opt active_traps i.id with
+  | Some None -> true
+  | None | Some (Some _) -> false
+
 let load_live_gc_roots_across t i =
   live_gc_root_regs_across t i
   |> Reg.Set.elements
   |> List.map (fun reg -> reg, V.poison T.val_ptr)
+
+let slow_path_root_slots_for_basic_safepoint ?unwind_label t i =
+  if
+    eligible_basic_safepoint_for_slow_root_slots
+      ~has_unwind:(Option.is_some unwind_label)
+      (get_fun_info t).active_traps i
+  then
+    let rec pair slots regs =
+      match slots, regs with
+      | _, [] -> []
+      | root_slot :: slots, reg :: regs -> { reg; root_slot } :: pair slots regs
+      | [], _ :: _ ->
+        fail_msg ~name:"slow_path_root_slots_for_basic_safepoint"
+          "not enough slow path root slots"
+    in
+    slow_path_root_regs_across t i
+    |> Reg.Set.elements
+    |> pair (get_fun_info t).slow_path_root_slots
+    |> fun roots -> Some roots
+  else None
 
 let refresh_live_gc_roots _t _roots = ()
 
@@ -735,6 +799,24 @@ let live_gc_root_alloca_bundles t roots =
       roots
   in
   if List.is_empty roots then [] else ["gc-live", roots]
+
+let live_gc_root_slot_bundles root_slots =
+  let roots = List.map (fun { root_slot; reg = _ } -> root_slot) root_slots in
+  if List.is_empty roots then [] else ["gc-live", roots]
+
+let store_slow_path_roots t root_slots =
+  List.iter
+    (fun { reg; root_slot } ->
+      let value = cast t (load_reg_to_temp t reg) T.val_ptr in
+      emit_ins_no_res t (I.store_volatile ~ptr:root_slot ~to_store:value))
+    root_slots
+
+let refresh_slow_path_roots t root_slots =
+  List.iter
+    (fun { reg; root_slot } ->
+      let value = emit_ins t (I.load_volatile ~ptr:root_slot ~typ:T.val_ptr) in
+      store_into_reg t reg value)
+    root_slots
 
 let oxcaml_debug_deopt_marker = 0x6f786364
 
@@ -813,10 +895,11 @@ let deopt_bundle ?alloc_info ~primitive_call ~raise_call dbg =
   | [] -> []
   | args -> ["deopt", args]
 
-let call_operand_bundles ?alloc_info t ~primitive_call ~raise_call dbg
-    live_roots =
+let call_operand_bundles ?alloc_info ?(slow_path_roots = []) t ~primitive_call
+    ~raise_call dbg live_roots =
   deopt_bundle ?alloc_info ~primitive_call ~raise_call dbg
   @ live_gc_root_alloca_bundles t live_roots
+  @ live_gc_root_slot_bundles slow_path_roots
 
 let load_domainstate_addr ?ds_loc ?(offset = 0) t ds_field =
   let typ = T.ptr in
@@ -913,8 +996,8 @@ let assemble_return t res_type values =
 (* Prepare and extract arguments following the OCaml calling convention in LLVM,
    handling the threading of runtime registers. *)
 let call_simple ?(attrs = []) ?(dbg = Debuginfo.none) ?(raise_call = false)
-    ?(primitive_call = false) ?alloc_info ?(live_roots = []) ?unwind_label ~cc t
-    name args res_types =
+    ?(primitive_call = false) ?alloc_info ?(live_roots = [])
+    ?(slow_path_roots = []) ?unwind_label ~cc t name args res_types =
   let fun_info = get_fun_info t in
   let prev_dbg_metadata = fun_info.current_dbg_metadata in
   let call_dbg_metadata =
@@ -930,8 +1013,8 @@ let call_simple ?(attrs = []) ?(dbg = Debuginfo.none) ?(raise_call = false)
       let res_type = Some (make_ret_type res_types) in
       let func = LL.Ident.global name in
       let operand_bundles =
-        call_operand_bundles ?alloc_info t ~primitive_call ~raise_call dbg
-          live_roots
+        call_operand_bundles ?alloc_info ~slow_path_roots t ~primitive_call
+          ~raise_call dbg live_roots
       in
       let res =
         match unwind_label with
@@ -2958,6 +3041,19 @@ let local_alloc t (i : Cfg.basic Cfg.instruction) num_bytes =
   let res = do_offset t new_local_sp_addr T.val_ptr 8 in
   store_into_reg t i.res.(0) res
 
+let call_gc_for_basic_safepoint ?alloc_info ?unwind_label ~attrs t i =
+  add_referenced_symbol t "caml_call_gc";
+  let slow_path_roots, live_roots =
+    slow_path_root_slots_for_basic_safepoint ?unwind_label t i |> function
+    | Some roots -> roots, []
+    | None -> [], load_live_gc_roots_across t i
+  in
+  store_slow_path_roots t slow_path_roots;
+  call_simple ~attrs ~live_roots ~slow_path_roots ?alloc_info ?unwind_label
+    ~cc:Oxcaml_alloc t "caml_call_gc" [] []
+  |> ignore;
+  refresh_slow_path_roots t slow_path_roots
+
 let heap_alloc ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction)
     num_bytes alloc_info =
   (* Make space on the minor heap *)
@@ -2985,12 +3081,9 @@ let heap_alloc ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction)
     (I.br_cond ~cond:skip_gc_expect ~ifso:after_gc ~ifnot:call_gc);
   (* Call GC *)
   emit_label t call_gc;
-  add_referenced_symbol t "caml_call_gc";
-  call_simple
+  call_gc_for_basic_safepoint
     ~attrs:(gc_attr ~alloc_info ~can_call_gc:true t i @ [LL.Fn_attr.Cold])
-    ~live_roots:(load_live_gc_roots_across t i)
-    ~alloc_info ?unwind_label ~cc:Oxcaml_alloc t "caml_call_gc" [] []
-  |> ignore;
+    ~alloc_info ?unwind_label t i;
   emit_ins_no_res t (I.br after_gc);
   emit_unwind_landingpad_after t unwind_label exn_entry;
   (* After GC *)
@@ -3020,16 +3113,13 @@ let poll ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction) =
   emit_ins_no_res t
     (I.br_cond ~cond:skip_poll_expect ~ifso:after_poll ~ifnot:call_gc);
   emit_label t call_gc;
-  add_referenced_symbol t "caml_call_gc";
-  call_simple
+  call_gc_for_basic_safepoint
     ~attrs:
       (gc_attr
          ~safepoint:(Safepoint.Poll { stack_offset = i.stack_offset })
          ~can_call_gc:true t i
       @ [LL.Fn_attr.Cold])
-    ~live_roots:(load_live_gc_roots_across t i)
-    ?unwind_label ~cc:Oxcaml_alloc t "caml_call_gc" [] []
-  |> ignore;
+    ?unwind_label t i;
   emit_ins_no_res t (I.br after_poll);
   emit_unwind_landingpad_after t unwind_label exn_entry;
   emit_label t after_poll
@@ -3712,25 +3802,6 @@ let live_val_regs_across liveness (i : 'a Cfg.instruction) =
   | Some { Cfg_liveness.before = _; across } ->
     Reg.Set.filter (fun reg -> Cmm.is_val reg.typ) across
 
-let basic_has_gc_safepoint (i : Cfg.basic Cfg.instruction) =
-  match i.desc with
-  | Op (Alloc { mode = Heap; _ } | Poll) -> true
-  | Op (Alloc { mode = Local; _ }) -> false
-  | Reloadretaddr | Prologue | Epilogue | Pushtrap _ | Poptrap _ | Stack_check _
-  | Op
-      ( Move | Spill | Reload | Opaque | Pause | Begin_region | End_region
-      | Dls_get | Tls_get | Domain_index | Const_int _ | Const_float32 _
-      | Const_float _ | Const_symbol _ | Const_vec128 _ | Const_vec256 _
-      | Const_vec512 _ | Stackoffset _ | Load _
-      | Store (_, _, _)
-      | Intop _ | Int128op _
-      | Intop_imm (_, _)
-      | Intop_atomic _
-      | Floatop (_, _)
-      | Csel _ | Reinterpret_cast _ | Static_cast _ | Probe_is_enabled _
-      | Specific _ | Name_for_debugger _ ) ->
-    false
-
 let terminator_has_gc_safepoint (i : Cfg.terminator Cfg.instruction) =
   match i.desc with
   | Call _ -> true
@@ -3744,11 +3815,13 @@ let terminator_has_gc_safepoint (i : Cfg.terminator Cfg.instruction) =
   | Prim { op = Probe _; _ } ->
     false
 
-let preserved_reg_slots liveness cfg =
+let preserved_reg_slots liveness active_traps cfg =
   let across_basic_safepoints =
     Cfg.fold_body_instructions cfg
       ~f:(fun acc i ->
-        if basic_has_gc_safepoint i
+        if
+          basic_has_gc_safepoint i
+          && not (eligible_basic_safepoint_for_slow_root_slots active_traps i)
         then Reg.Set.union acc (live_val_regs_across liveness i)
         else acc)
       ~init:Reg.Set.empty
@@ -3780,6 +3853,19 @@ let preserved_reg_slots liveness cfg =
   Reg.Set.union
     (Reg.Set.union across_basic_safepoints across_terminator_safepoints)
     across_traps
+
+let max_slow_path_root_slots t active_traps cfg =
+  Cfg.fold_body_instructions cfg
+    ~f:(fun max_roots i ->
+      if
+        eligible_basic_safepoint_for_slow_root_slots active_traps i
+        (* [const_ints] is populated while emitting instructions, so this
+           pre-emission count can only use the conservative live root set. The
+           actual slow-path bundle still filters known immediates at the call
+           site. *)
+      then Int.max max_roots (Reg.Set.cardinal (live_gc_root_regs_across t i))
+      else max_roots)
+    ~init:0
 
 let reg_listed_in_signature (reg : Reg.t) =
   match reg.loc with
@@ -3896,12 +3982,13 @@ let prepare_fun_info t (cfg : Cfg.t) =
   in
   reset_fun_info ?subprogram_dbg_metadata_id:dbg_metadata_id t emitter;
   let liveness = compute_liveness cfg in
+  let active_traps, active_trap_depths = compute_active_traps cfg in
   (get_fun_info t).liveness <- Some liveness;
   (get_fun_info t).fun_args <- fun_args;
-  (get_fun_info t).preserved_reg_slots <- preserved_reg_slots liveness cfg;
-  let active_traps, active_trap_depths = compute_active_traps cfg in
   (get_fun_info t).active_traps <- active_traps;
   (get_fun_info t).active_trap_depths <- active_trap_depths;
+  (get_fun_info t).preserved_reg_slots
+    <- preserved_reg_slots liveness active_traps cfg;
   arg_regs
 
 (* Emits [alloca]'s in the entry block for all [Reg.t]s in [cfg] and runtime
@@ -3977,6 +4064,13 @@ let alloca_regs t (cfg : Cfg.t) arg_values arg_regs =
     Reg.Set.diff all_body_regs (Reg.Set.of_list arg_regs)
   in
   Reg.Set.iter (fun reg -> alloca_reg reg) body_regs;
+  (match (get_fun_info t).liveness with
+  | None -> ()
+  | Some _ ->
+    let count = max_slow_path_root_slots t (get_fun_info t).active_traps cfg in
+    (get_fun_info t).slow_path_root_slots
+      <- List.init count (fun _ ->
+             emit_ins ~comment:"slow path GC root slot" t (I.alloca T.val_ptr)));
   (match Target_system.architecture () with
   | Target_system.AArch64 ->
     Cfg.fold_body_instructions cfg
