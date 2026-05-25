@@ -261,25 +261,20 @@ let normalize_llvm_expect_line line =
   else line
 
 let normalize_toplevel_names s =
+  let is_digit = function '0' .. '9' -> true | _ -> false in
   let len = String.length s in
   let buf = Buffer.create len in
   let rec loop i =
     if i >= len
     then Buffer.contents buf
     else if
-      i + 7 <= len
+      i + 7 < len
       && String.sub s i 7 = "camlTOP"
-      && i + 7 < len
-      && Char.code s.[i + 7] >= Char.code '0'
-      && Char.code s.[i + 7] <= Char.code '9'
+      && is_digit s.[i + 7]
     then (
       Buffer.add_string buf "camlTOP";
       let j = ref (i + 7) in
-      while
-        !j < len
-        && Char.code s.[!j] >= Char.code '0'
-        && Char.code s.[!j] <= Char.code '9'
-      do
+      while !j < len && is_digit s.[!j] do
         incr j
       done;
       loop !j)

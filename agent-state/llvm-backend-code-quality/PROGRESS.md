@@ -4,7 +4,7 @@ Last updated: 2026-05-25.
 
 ## Current Claim
 
-Iterations 1 and 2 are committed or ready to commit; iteration 2 is reviewed
+Iterations 1, 2, and 3 are committed or ready to commit; iteration 3 is reviewed
 and validated.
 
 ## Evidence
@@ -23,13 +23,15 @@ None.
 ## Iteration State
 
 - Target: 10 completed iterations.
-- Completed iterations: 2.
+- Completed iterations: 3.
 - Committed cleanups:
   - Iteration 1: simplified deopt argument list construction in
     `backend/llvm/llvmize.ml` with `List.concat_map`.
   - Iteration 2: simplified module metadata prefix/suffix checks in
     `backend/llvm/llvmize.ml` with `String.starts_with` and
     `String.ends_with`.
+  - Iteration 3: simplified digit detection in
+    `backend/llvm/llvmize.ml`'s `normalize_toplevel_names`.
 - Dropped ideas: none yet.
 - Stop condition: stop after 10 completed iterations, then summarize committed
   cleanups, dropped ideas, and remaining promising targets.
@@ -149,7 +151,56 @@ Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
 are broad LLVM backend validation runs, and this commit only changes a
 behavior-preserving local string idiom.
 
+## Iteration 3 Candidate
+
+Path: self-proposed candidate.
+
+Candidate: simplify digit detection in `normalize_toplevel_names` by using a
+local `is_digit` helper with a character range pattern instead of repeating
+manual `Char.code` bounds.
+
+Why likely useful: the helper names the contract being checked and removes a
+duplicated low-level digit test in code that is otherwise about normalizing
+temporary toplevel names.
+
+Review gate: passed after five human-like reviews of the final diff.
+
+Review result: all five reviewers judged the `llvmize.ml` cleanup clean,
+idiomatic, and proportionate. Three reviewers requested progress-file fixes for
+an accidental duplicate `Next Step` heading and stale next-step wording. Those
+findings were accepted and fixed. Two reviewers had no findings.
+
+Validation result:
+
+- `git diff --check`: passed.
+- `eval "$(../../../scripts/agent-tmp-env)" && opam exec
+  --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`: passed.
+
+## Testing Story for This Commit
+
+Change: simplify digit detection in `normalize_toplevel_names` by using a local
+`is_digit` helper with a character range pattern instead of repeated
+`Char.code` bounds, and record iteration 3 state in this progress file.
+Risk: if the rewrite is wrong, expect-test normalization could stop normalizing
+temporary `camlTOP` names, or it could normalize names that are not followed by
+a digit.
+Validation: `git diff --check`; `eval "$(../../../scripts/agent-tmp-env)" &&
+opam exec --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`.
+Full LLVM validation: not run for this commit; the source rewrite preserves the
+old contract that normalization only happens for `camlTOP` followed by at least
+one digit.
+Stage2 verification: not run for this commit; self-stage2 is intentionally
+deferred for the same reason as full LLVM validation.
+Why this is enough: five human-like reviews checked that `is_digit` preserves
+the old ASCII digit test and that the `i + 7 < len` guard still requires a
+following digit before normalization; the build check covers type and syntax
+validity.
+Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
+`make llvm-self-stage2-test LLVM_PATH="$LLVM_PATH"` are deferred because they
+are broad LLVM backend validation runs, and this commit only changes a
+behavior-preserving local expect-output normalization idiom.
+
 ## Next Step
 
-Commit iteration 2, push it to the draft PR branch, then choose the next
+Commit iteration 3, push it to the draft PR branch, then choose the next
 reviewed cleanup candidate.
