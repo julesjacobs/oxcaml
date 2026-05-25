@@ -4297,10 +4297,16 @@ let prepare_fun_info t (cfg : Cfg.t) =
    loads and stores to pointers returned by [alloca] instructions. These will
    then get optimised by LLVM as part of the mem2reg pass.
 
-   Note that arguments not passed in registers (e.g. in Domainstate) will point
-   to that block of memory instead of being allocated on the stack for
-   uniformity. *)
+   Note that non-argument Domainstate registers point to the shared
+   [extra_params] area.  Incoming Domainstate function arguments are different:
+   the caller-owned slots may be reused by later calls, so copy them into
+   private allocas at function entry. *)
 let alloca_regs t (cfg : Cfg.t) arg_values arg_regs =
+  let domainstate_fun_args =
+    Array.to_list cfg.fun_args
+    |> List.filter Reg.is_domainstate
+    |> Reg.Set.of_list
+  in
   let pooled_preserved_reg_slots =
     match Target_system.architecture (), (get_fun_info t).liveness with
     | Target_system.X86_64, Some liveness ->
@@ -4368,10 +4374,25 @@ let alloca_regs t (cfg : Cfg.t) arg_values arg_regs =
       | None -> () (* Don't initialise *)
       | Some value -> store_into_reg t reg value)
     | Stack (Domainstate idx) ->
-      (* Compute pointer to where [reg] is located - we can assume [ds] will not
-         change through the run of this function *)
       let ds_loc = load_domainstate_addr ~offset:idx t Domain_extra_params in
-      set_alloca_for_reg t reg ds_loc
+      if Reg.Set.mem reg domainstate_fun_args
+      then (
+        let alloca'd =
+          emit_ins
+            ~comment:
+              (F.asprintf "%a"
+                 (fun ppf reg -> F.pp_comment ppf "%a" Printreg.reg reg)
+                 reg)
+            t
+            (I.alloca ?align:(alloca_align_for_reg reg) (T.of_reg reg))
+        in
+        set_alloca_for_reg t reg alloca'd;
+        let value = emit_ins t (I.load ~ptr:ds_loc ~typ:(T.of_reg reg)) in
+        emit_ins_no_res t (I.store ~ptr:alloca'd ~to_store:value))
+      else
+        (* Outgoing call arguments and return locations must keep referring to
+           the shared slots so the caller/callee Domainstate convention works. *)
+        set_alloca_for_reg t reg ds_loc
   in
   (* First handle values passed from the arguments *)
   let open struct

@@ -1005,6 +1005,24 @@ stored into their allocas before the first CFG instruction is emitted.
       vector registers on at least one call. The remaining mismatch appears to
       involve the large harness's argument construction/preservation path, not
       the basic noalloc vector C-call edge.
+    - Fixed one LLVM-side violation of the Domainstate extra-params contract:
+      incoming function arguments located in `Stack (Domainstate _)` are now
+      copied into private allocas at function entry instead of using the shared
+      domain slots as their backing storage for the whole function. Outgoing
+      call arguments and return locations still point at the real shared slots.
+      Validation used a fresh boot compiler built with normal Dune parallelism
+      in `validation-tmp/domainstate_arg_boot/boot_context_build`; the boot
+      build printed `1682` wrapper lines / `833` fresh IR and the smoke printed
+      `55`.
+    - Rebuilt the compact generated repro in
+      `validation-tmp/subset_full_test0/select.domainstate.opt` with the
+      Domainstate copy fix. Compared with the previous `select.opt 23`
+      mismatch in `test_x_xxxxxxxxxxxxxxxxx`, the new run has no vector
+      mismatch and reports a single remaining mismatch in
+      `test_s_sssssssssssssssss`. `select.domainstate.opt 22` and
+      `select.domainstate.opt 25` both pass; extras `23` and `24` expose the
+      same single `float32` stack-argument mismatch. This leaves a narrower
+      high-arity `float32`/stack-argument issue to investigate next.
 
 ## Current Blocker
 
