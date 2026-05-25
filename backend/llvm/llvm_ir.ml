@@ -190,7 +190,7 @@ module Type = struct
       | None -> ())
     | Struct typs ->
       fprintf ppf "{ %a }"
-        (pp_print_list ~pp_sep:(fun ppf () -> fprintf ppf ", ") pp_t)
+        (pp_print_list ~pp_sep:pp_comma pp_t)
         typs
     | Array { num_of_elems; elem_type } ->
       fprintf ppf "[ %d x %a ]" num_of_elems pp_t elem_type

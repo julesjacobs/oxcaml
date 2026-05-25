@@ -4,8 +4,8 @@ Last updated: 2026-05-25.
 
 ## Current Claim
 
-Iterations 1, 2, and 3 are committed or ready to commit; iteration 3 is reviewed
-and validated.
+Iterations 1, 2, 3, and 4 are committed or ready to commit; iteration 4 is
+reviewed and validated.
 
 ## Evidence
 
@@ -23,7 +23,7 @@ None.
 ## Iteration State
 
 - Target: 10 completed iterations.
-- Completed iterations: 3.
+- Completed iterations: 4.
 - Committed cleanups:
   - Iteration 1: simplified deopt argument list construction in
     `backend/llvm/llvmize.ml` with `List.concat_map`.
@@ -32,6 +32,8 @@ None.
     `String.ends_with`.
   - Iteration 3: simplified digit detection in
     `backend/llvm/llvmize.ml`'s `normalize_toplevel_names`.
+  - Iteration 4: reused `Format.pp_comma` in
+    `backend/llvm/llvm_ir.ml`'s `Type.pp_t`.
 - Dropped ideas: none yet.
 - Stop condition: stop after 10 completed iterations, then summarize committed
   cleanups, dropped ideas, and remaining promising targets.
@@ -200,7 +202,53 @@ Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
 are broad LLVM backend validation runs, and this commit only changes a
 behavior-preserving local expect-output normalization idiom.
 
+## Iteration 4 Candidate
+
+Path: self-proposed candidate.
+
+Candidate: use the existing `Format.pp_comma` separator in
+`backend/llvm/llvm_ir.ml`'s `Type.pp_t` instead of an anonymous comma printer.
+
+Why likely useful: `llvm_ir.ml` defines `pp_comma` for this exact formatting
+contract and uses it throughout the rest of the file. This keeps type printing
+on the same local style without changing emitted text.
+
+Review gate: passed after five human-like reviews of the final diff.
+
+Review result: all five reviewers said keep with no findings. Reviewers checked
+that `Format.pp_comma` emits the same text as the anonymous separator, is in
+scope through `let open Format`, and preserves the general `pp_print_list`
+behavior for empty and single-element lists.
+
+Validation result:
+
+- `git diff --check`: passed.
+- `eval "$(../../../scripts/agent-tmp-env)" && opam exec
+  --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`: passed.
+
+## Testing Story for This Commit
+
+Change: use the existing `Format.pp_comma` separator in
+`backend/llvm/llvm_ir.ml`'s `Type.pp_t`, and record iteration 4 state in this
+progress file.
+Risk: if the rewrite is wrong, LLVM type printing for struct types could change
+or the file could fail to compile.
+Validation: `git diff --check`; `eval "$(../../../scripts/agent-tmp-env)" &&
+opam exec --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`.
+Full LLVM validation: not run for this commit; the helper has the same
+implementation as the replaced anonymous separator and only affects one local
+pretty-printer separator.
+Stage2 verification: not run for this commit; self-stage2 is intentionally
+deferred for the same reason as full LLVM validation.
+Why this is enough: five human-like reviews checked that the emitted separator
+text is unchanged and that no list special cases are introduced; the build check
+covers type and syntax validity.
+Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
+`make llvm-self-stage2-test LLVM_PATH="$LLVM_PATH"` are deferred because they
+are broad LLVM backend validation runs, and this commit only changes a
+behavior-preserving pretty-printer helper usage.
+
 ## Next Step
 
-Commit iteration 3, push it to the draft PR branch, then choose the next
+Commit iteration 4, push it to the draft PR branch, then choose the next
 reviewed cleanup candidate.
