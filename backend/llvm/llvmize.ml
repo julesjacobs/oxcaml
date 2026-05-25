@@ -1276,6 +1276,19 @@ let call ?(tail = false) ?unwind_label t (i : Cfg.terminator Cfg.instruction)
     refresh_live_gc_roots t live_roots;
     extract_call_res_into_original_regs t res i.res)
 
+let probe t (i : Cfg.terminator Cfg.instruction)
+    (op : Cfg.prim_call_operation) =
+  match op with
+  | Probe { handler_code_sym; enabled_at_init; _ } ->
+    if enabled_at_init
+    then
+      call t i
+        (Direct
+           { sym_name = handler_code_sym;
+             sym_global = Cmm.Global
+           })
+  | External _ -> fail_msg ~name:"probe" "expected probe operation"
+
 let emit_unwind_landingpad t exn_entry =
   ignore (emit_ins t (I.landingpad ~typ:llvm_landingpad_type ~cleanup:true));
   emit_ins_no_res t (I.br exn_entry)
@@ -1698,7 +1711,9 @@ let emit_terminator t (block : Cfg.basic_block)
       | Prim { op; label_after } -> (
         reject_addr_regs i.arg "prim";
         match op with
-        | Probe _ -> not_implemented_terminator ~msg:"probe" i
+        | Probe probe_op ->
+          probe t i (Probe probe_op);
+          br_label t label_after
         | External { func_symbol; alloc; ty_args; stack_ofs; stack_align; _ } ->
           let exn_entry = exn_entry_for_block t block in
           let unwind_label =

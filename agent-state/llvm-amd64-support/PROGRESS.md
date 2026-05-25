@@ -9,10 +9,13 @@ AMD64 LLVM backend bring-up now passes focused install, enabled Linux/AMD64
 agent-local LLVM tools and writable install prefix. Focused AMD64 SIMD
 lowering now also covers the i64x2 add/sub, vec128 interleave, and vec256
 join/split operations needed by several layout/block-index tests, including
-the generated mixed-blocks native test on AMD64.
+the generated mixed-blocks native test on AMD64. The stale
+`typing-layouts-or-null/probe.ml` LLVM lowering failure is also fixed for the
+default disabled-probe path.
 
-The latest fixes add focused AMD64 SIMD LLVM lowering for i64x2 arithmetic,
-vec128 interleaves, and vec256 join/split support. Earlier fixes reserve the
+The latest fixes add focused AMD64 probe terminator lowering and focused AMD64
+SIMD LLVM lowering for i64x2 arithmetic, vec128 interleaves, and vec256
+join/split support. Earlier fixes reserve the
 AMD64 OxCaml runtime registers in LLVM's X86 register allocator and make
 exception-recovery blocks treat runtime blockaddress entry as a
 register-clobbering edge.
@@ -72,6 +75,10 @@ register-clobbering edge.
     explicit alignment on `alloca`. Wide vector register spill slots (`Vec256`
     and `Vec512`) are now capped at `align 16`, avoiding X86 stack realignment
     and base-pointer stackmap operands for generated mixed-block SIMD code.
+  - `backend/llvm/llvmize.ml` lowers `Probe` terminators enough for AMD64 LLVM
+    bring-up: default disabled probes fall through, while `enabled_at_init`
+    probes are emitted as ordinary direct OCaml calls to their generated
+    handler before branching to the continuation.
   - `vendor/llvm-project/llvm/lib/Target/X86/{X86AsmPrinter.cpp,
     X86AsmPrinter.h,X86MCInstLower.cpp}` records a temporary return-address
     label after emitted X86 call instructions and lets the following
@@ -415,6 +422,12 @@ register-clobbering edge.
       LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
       prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 16 passed,
       15 skipped, 0 failed.
+  - Focused validation of the stale probe lowering failure now passes with
+    normal Make/Dune parallelism:
+    `make llvm-test-one TEST=typing-layouts-or-null/probe.ml LIST= DIR=
+    ARCH=amd64 LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+    prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 5 passed,
+    0 skipped, 0 failed.
 
 ## Current Blocker
 
@@ -437,8 +450,6 @@ LLVM-built compiler paths need
 Rerun broad self-stage ocamltest or a representative subset to refresh the
 remaining failure families after the SIMD and wide-vector alloca fixes. Likely
 next targets from the stale full run are native atomic/cmpxchg failures, native
-async/backtrace/CFI output mismatches, and
-`Llvmize: unimplemented instruction: probe` in
-`typing-layouts-or-null/probe.ml`. Keep using normal build parallelism; avoid
-only concurrent top-level `make`/`dune` commands in this checkout because of the
-shared lockfile.
+async/backtrace/CFI output mismatches. Keep using normal build parallelism;
+avoid only concurrent top-level `make`/`dune` commands in this checkout because
+of the shared lockfile.
