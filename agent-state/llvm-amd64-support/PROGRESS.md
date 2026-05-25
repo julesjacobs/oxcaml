@@ -58,7 +58,10 @@ non-256-bit name. A merged self-stage2 validation pass now also succeeds: the
 merged self-stage2 compiler passes the focused Linux/AMD64 `llvm-codegen`
 tests and a full self-stage2 ocamltest run. The AMD64 LLVM path now also
 lowers `Probe_is_enabled` by reading the OCaml probe semaphore slot, covering
-the non-optimized probe lowering path instead of fatal-erroring.
+the non-optimized probe lowering path instead of fatal-erroring. The LLVM
+lowering now also supports the AMD64 int128 builtins
+`caml_int128_add`, `caml_int128_sub`, `caml_int64_mul128`, and
+`caml_unsigned_int64_mul128` via LLVM `i128` arithmetic.
 
 The latest stack-pressure fix safely pools X86_64 preserved GC-root stack slots
 using full CFG liveness interference instead of safepoint-only disjointness.
@@ -152,6 +155,10 @@ limit is raised from `l=100000` to `l=150000`.
     `+2`, and stores a `0`/`1` result. Unknown initial enabledness defaults to
     disabled, matching the dummy semaphore initial state used by the native
     probe emitter.
+  - `backend/llvm/llvmize.ml` lowers `Int128op`: 128-bit add/sub combine the
+    low/high 64-bit inputs into an LLVM `i128`, do the arithmetic, then split
+    low/high results; signed and unsigned 64x64->128 multiplies use `sext` or
+    `zext` to `i128` before multiplication.
   - `backend/llvm/llvmize.ml` now stores LLVM `cmpxchg`'s loaded value for
     `Compare_exchange`. LLVM returns the old memory value in both success and
     failure cases, which is exactly the OCaml `Atomic.compare_exchange` result;
@@ -223,6 +230,10 @@ limit is raised from `l=100000` to `l=150000`.
   - `testsuite/tests/llvm-codegen/amd64_exceptions.ml` is an AMD64/Linux
     LLVM-backend regression test for exception handler setup and exception
     bucket recovery.
+  - `testsuite/tests/llvm-codegen/amd64_int128_ops.ml` and
+    `testsuite/tests/llvm-codegen/amd64_int128_ops_stubs.c` are an
+    AMD64/Linux LLVM-backend regression test for int128 add/sub plus signed
+    and unsigned 64x64->128 multiplication builtins.
   - `testsuite/tests/llvm-codegen/amd64_probe_is_enabled.ml` is an AMD64/Linux
     LLVM-backend regression test for non-optimized probes and
     `[%probe_is_enabled]` using disabled and `~enabled_at_init:true`
@@ -1405,6 +1416,23 @@ limit is raised from `l=100000` to `l=150000`.
       dependency-file expectations, so the build state was cleaned with
       `dune clean --workspace=duneconf/boot.ws` before the successful normal
       compiler rebuild.
+    - Implemented LLVM lowering for `Int128op` and rebuilt with a clean
+      `dune clean --workspace=duneconf/boot.ws` followed by
+      `make -s compiler -j "$(nproc)"`; result: passed.
+    - Direct focused validation using the rebuilt optimizing compiler
+      `_build/main/oxcaml_main_native.exe` passed for int128 add/sub,
+      signed 64x64->128 multiply, and unsigned 64x64->128 multiply:
+      `OCAMLLIB=_install/lib/ocaml _build/main/oxcaml_main_native.exe
+      -I +stdlib_upstream_compatible -O3 -llvm-backend
+      -llvm-path "$LLVM_PATH" -o validation-tmp/int128_ops_direct/int128_ops.exe
+      stdlib_upstream_compatible.cmxa amd64_int128_ops_stubs.c int128_ops.ml`.
+      Result: binary ran successfully, `4` wrapper lines / `2` fresh IR.
+    - A second direct `-S -keep-llvmir` run also passed and showed LLVM
+      `i128` lowering in
+      `validation-tmp/int128_ops_direct/int128_ops.ll`: 128-bit add/sub use
+      `add i128`/`sub i128`, signed multiply uses `sext i64 ... to i128`, and
+      unsigned multiply uses `zext i64 ... to i128`; wrapper evidence again
+      was `4` lines / `2` fresh IR.
 
 ## Current Blocker
 

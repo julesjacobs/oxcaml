@@ -2005,13 +2005,38 @@ let float_op t (i : Cfg.basic Cfg.instruction) (width : Cmm.float_width)
   in
   store_into_reg t i.res.(0) res
 
-let int128_op _t (i : Cfg.basic Cfg.instruction)
+let int128_op t (i : Cfg.basic Cfg.instruction)
     (op : Operation.int128_operation) =
-  (* CR-soon mslater for gyorsh: implement these in llvm intrinsics *)
+  let i128_const n = V.of_int ~typ:T.i128 n in
+  let zext64_to_i128 arg = emit_ins t (I.convert Zext ~arg ~to_:T.i128) in
+  let sext64_to_i128 arg = emit_ins t (I.convert Sext ~arg ~to_:T.i128) in
+  let load64 n = load_reg_to_temp ~typ:T.i64 t i.arg.(n) in
+  let store_i128_pair value =
+    let low = emit_ins t (I.convert Trunc ~arg:value ~to_:T.i64) in
+    let high128 = emit_ins t (I.binary Lshr ~arg1:value ~arg2:(i128_const 64)) in
+    let high = emit_ins t (I.convert Trunc ~arg:high128 ~to_:T.i64) in
+    store_into_reg t i.res.(0) low;
+    store_into_reg t i.res.(1) high
+  in
+  let combine_i128 ~low ~high =
+    let low = zext64_to_i128 low in
+    let high = zext64_to_i128 high in
+    let high = emit_ins t (I.binary Shl ~arg1:high ~arg2:(i128_const 64)) in
+    emit_ins t (I.binary Or ~arg1:low ~arg2:high)
+  in
+  let binary128 llvm_op =
+    let left = combine_i128 ~low:(load64 0) ~high:(load64 1) in
+    let right = combine_i128 ~low:(load64 2) ~high:(load64 3) in
+    emit_ins t (I.binary llvm_op ~arg1:left ~arg2:right) |> store_i128_pair
+  in
   match op with
-  | Iadd128 -> not_implemented_basic ~msg:"Iadd128" i
-  | Isub128 -> not_implemented_basic ~msg:"Isub128" i
-  | Imul64 { signed = _ } -> not_implemented_basic ~msg:"Imul64" i
+  | Iadd128 -> binary128 Add
+  | Isub128 -> binary128 Sub
+  | Imul64 { signed } ->
+    let extend = if signed then sext64_to_i128 else zext64_to_i128 in
+    let arg1 = extend (load64 0) in
+    let arg2 = extend (load64 1) in
+    emit_ins t (I.binary Mul ~arg1 ~arg2) |> store_i128_pair
 
 (* CR yusumez: add a generic Cfg instruction for bswap *)
 let bswap t (i : Cfg.basic Cfg.instruction) (bitwidth : Arch.bswap_bitwidth) =
