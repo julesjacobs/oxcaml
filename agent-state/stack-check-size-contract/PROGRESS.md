@@ -25,7 +25,7 @@ required_bytes = max(final_static_llvm_frame_bytes, cfg_required_stack_check_byt
 - OxCaml branch: `jujacobs/stack-check-size-contract`
 - OxCaml PR: https://github.com/julesjacobs/oxcaml/pull/11
 - Initial state commit: `106d76c3c37f`
-- Goal clarification commit: `afb853a6361b`
+- Goal clarification commit: `8145da3b9b`
 - Vendored LLVM path: `oxcaml/vendor/llvm-project`
 - Agent state path: `agent-state/stack-check-size-contract`
 - Focused test added: `testsuite/tests/llvm-codegen/stack_check_size_contract.ml`
@@ -75,6 +75,11 @@ required_bytes = max(final_static_llvm_frame_bytes, cfg_required_stack_check_byt
     insertion did not run, while preserving the legacy boolean request. The
     focused LLVM-codegen directory passed with the added regression test:
     64 passed, 1 skipped, 0 failed.
+  - dump-label review follow-up:
+    the LLVM path now emits the `After cfg_stack_checks` CFG dump only when
+    `Cfg_stack_checks.cfg` actually ran. The no-CFG-stack-checks regression test
+    asserts that the heading is absent in `-no-cfg-stack-checks` mode. The
+    focused LLVM-codegen directory passed again: 64 passed, 1 skipped, 0 failed.
 
 ## Current Blocker
 
