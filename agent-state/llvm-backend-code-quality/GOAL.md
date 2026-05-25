@@ -20,6 +20,17 @@ Each commit must have a written testing story in `PROGRESS.md`: what was run,
 why that validation is enough for the commit's risk, and what broader validation
 is intentionally deferred.
 
+Before finalizing any implementation commit, the default validation is:
+
+```sh
+eval "$(../../../scripts/agent-tmp-env)"
+make llvm-test LLVM_PATH="$LLVM_PATH"
+make llvm-self-stage2-test LLVM_PATH="$LLVM_PATH"
+```
+
+If a commit does not run both, `PROGRESS.md` must say exactly why that is safe
+for this commit.
+
 ## Branches
 
 - OxCaml: `jujacobs/llvm-backend-code-quality`
