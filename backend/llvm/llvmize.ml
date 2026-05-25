@@ -3796,6 +3796,10 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
             let exn_bucket_is_zero =
               emit_ins t (I.icmp Ieq ~arg1:exn_bucket ~arg2:(V.of_int 0))
             in
+            let ds = read_domainstate_pointer_register t in
+            let alloc = read_allocation_pointer_register t in
+            emit_ins_no_res t (I.store ~ptr:domainstate_ptr ~to_store:ds);
+            emit_ins_no_res t (I.store ~ptr:allocation_ptr ~to_store:alloc);
             let exn_label = V.of_label lbl_handler in
             emit_ins_no_res t
               (I.br_cond ~cond:exn_bucket_is_zero ~ifso:try_label

@@ -35,7 +35,10 @@ tweaks from validation `OCAMLRUNPARAM`, clearing the last known focused
 failure from the previous self-stage ocamltest run. Earlier fixes reserve the
 AMD64 OxCaml runtime registers in LLVM's X86 register allocator and make
 exception-recovery blocks treat runtime blockaddress entry as a
-register-clobbering edge.
+register-clobbering edge. The newest X86_64 `Pushtrap` fix now refreshes the
+LLVM runtime-register spill slots after the direct exception-runtime entry
+returns to the exception edge, preventing optimized IR from reloading stale
+domain-state/allocation-pointer values on handler entry.
 
 ## Evidence
 
@@ -798,6 +801,47 @@ register-clobbering edge.
       `_build/default/duneconf/camlinternalquote_if_missing_from_stdlib`
       generated include in the existing `_build`; retesting self-stage without
       `OCAMLRUNPARAM` needs a refreshed stage0 install.
+  - Fixed the optimized-wrapper X86_64 exception regression:
+    - A stage0 compiler rebuilt with the corrected optimizing wrapper
+      initially segfaulted in generated build tools (`make_opcodes.exe` and
+      `simdgen.exe`). GDB showed `caml_c_call` using a stale `%r14` domain
+      state register on the `Pushtrap` exception edge, with `%r14 == %r15`.
+    - `backend/llvm/llvmize.ml` now mirrors the AArch64 path by reading the
+      current X86_64 domain-state and allocation-pointer registers after the
+      direct exception-runtime entry returns, then storing them back to
+      `domainstate_ptr` and `allocation_ptr` before branching to the handler.
+    - `make llvm-install ARCH=amd64 LLVM_BOOT_BACKEND=0
+      LLVM_PATH=/tmp/oxcaml-agent-llvm-amd64-support/clang-wrapper-opt
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install-opt` exits 0 with
+      normal build parallelism.
+    - The previously crashing generated tools now run:
+      `_build/main/tools/make_opcodes.exe -opcodes < runtime/caml/instruct.h`
+      writes 156 lines, and
+      `tools/simdgen`-relative
+      `../../_build/main/tools/simdgen/simdgen.exe amd64` writes 9,987 lines.
+    - Direct installed-compiler smoke with
+      `OCAMLLIB=/tmp/oxcaml-agent-llvm-amd64-support/install-opt/lib/ocaml`
+      and `-llvm-backend -llvm-path
+      /tmp/oxcaml-agent-llvm-amd64-support/clang-wrapper-opt` prints `11`.
+    - `make llvm-test-one DIR=llvm-codegen LIST= TEST= ARCH=amd64
+      LLVM_BOOT_BACKEND=0
+      LLVM_PATH=/tmp/oxcaml-agent-llvm-amd64-support/clang-wrapper-opt
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install-opt` exits 0 after
+      a clean `_build` refresh: 20 passed, 15 skipped, 0 failed.
+    - A default-stack self-stage attempt with that refreshed stage0 still
+      fails in the boot-context build compiling `amd64_simd_instrs.ml`:
+      `/tmp/oxcaml-agent-llvm-amd64-support/install-opt/bin/ocamlopt.opt`
+      reports `Fatal error: exception Stack overflow`. The single compile
+      passes with `OCAMLRUNPARAM=b,Xmain_stack_size=64M`.
+    - GDB on that single compile shows the overflow in deep Flambda2
+      closure-conversion recursion over the generated SIMD table:
+      repeated
+      `Flambda2_from_lambda__Closure_conversion__cont` frames at
+      `closure_conversion.ml:1442`, with the top frame in
+      `Lambda_to_flambda_primitives.convert_lprim` at
+      `lambda_to_flambda_primitives.ml:1790`. This is the remaining
+      default-stack self-stage caveat, not a focused standard `-llvm-backend`
+      failure.
 
 ## Current Blocker
 
@@ -811,17 +855,20 @@ agent env may set `LIST` for broader test runs.
 
 The previous stack-usage caveat is now narrowed. With a corrected local
 optimizing wrapper, the standard explicit AMD64 `-llvm-backend` path matches
-the native backend on the small non-tail recursion threshold check. The old
-self-stage `OCAMLRUNPARAM=b,Xmain_stack_size=64M` evidence was gathered with a
-stage0 compiler built through a local wrapper that skipped `opt -O3` before
-`llc`; self-stage without the larger stack still needs to be revalidated after
-refreshing that stage0 install.
+the native backend on the small non-tail recursion threshold check, and the
+focused Linux/AMD64 `llvm-codegen` suite passes with the refreshed stage0
+install. Self-stage without `OCAMLRUNPARAM` still overflows while compiling the
+generated `amd64_simd_instrs.ml`; the single failing compile passes with
+`OCAMLRUNPARAM=b,Xmain_stack_size=64M`, and GDB attributes the default-stack
+overflow to deep Flambda2 closure-conversion recursion over that generated
+file.
 The OxCaml PR is still draft; as of the latest check after the shared-type
 cleanup, GitHub reported `built with flambda-backend, flambda2` passed and the
 rest of CI still pending.
 
 ## Next Step
 
-Poll CI and investigate any concrete failure. Keep using normal build
-parallelism; avoid only concurrent top-level `make`/`dune` commands in this
-checkout because of the shared lockfile.
+Commit and push the X86_64 `Pushtrap` spill-slot refresh, then poll CI and
+investigate any concrete failure. Keep using normal build parallelism; avoid
+only concurrent top-level `make`/`dune` commands in this checkout because of
+the shared lockfile.
