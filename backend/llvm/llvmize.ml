@@ -2868,6 +2868,36 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
          (V.poison T.vec256)
     |> store_into_reg t i.res.(0)
   in
+  let simd_mem_mask mask_arg mask_typ =
+    let mask = cast_if_needed (load_reg_to_temp t i.arg.(mask_arg)) mask_typ in
+    emit_ins t
+      (I.icmp Islt ~arg1:mask ~arg2:(V.zeroinitializer mask_typ))
+  in
+  let simd_mem_masked_load ~addr ~mask_arg ~mask_typ ~data_typ ~res_typ =
+    let ptr = load_address_from_reg t addr i.arg.(1) in
+    let mask = simd_mem_mask mask_arg mask_typ in
+    let loaded =
+      call_llvm_intrinsic t
+        ("masked.load." ^ llvm_intrinsic_type_suffix data_typ ^ ".p0")
+        [ ptr;
+          V.of_int ~typ:T.i32 1;
+          mask;
+          V.zeroinitializer data_typ
+        ]
+        data_typ
+    in
+    cast_if_needed loaded res_typ |> store_into_reg t i.res.(0)
+  in
+  let simd_mem_masked_store ~addr ~mask_arg ~mask_typ ~data_typ =
+    let ptr = load_address_from_reg t addr i.arg.(0) in
+    let value =
+      load_reg_to_temp t i.arg.(1) |> fun value -> cast_if_needed value data_typ
+    in
+    let mask = simd_mem_mask mask_arg mask_typ in
+    call_llvm_intrinsic_no_res t
+      ("masked.store." ^ llvm_intrinsic_type_suffix data_typ ^ ".p0")
+      [ value; ptr; V.of_int ~typ:T.i32 1; mask ]
+  in
   let simd_mem_store_low64 ~addr =
     let vector = load_reg_to_temp ~typ:T.vec128 t i.arg.(1) in
     let low = extract_i64_lane vector 0 in
@@ -2923,12 +2953,41 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_mem_broadcast_i32 ~addr
         ~typ:(wide_int_vec_type ~vector_width_in_bits:256 ~width_in_bits:32)
         ~lanes:8 ~res_typ:T.vec256
+    | Simd_mem_load, Amd64_simd_instrs.Vmaskmovpd_X_X_m128 ->
+      simd_mem_masked_load ~addr ~mask_arg:0 ~mask_typ:T.vec128
+        ~data_typ:T.vec128 ~res_typ:T.vec128
+    | Simd_mem_load, Amd64_simd_instrs.Vmaskmovpd_Y_Y_m256 ->
+      simd_mem_masked_load ~addr ~mask_arg:0 ~mask_typ:T.vec256
+        ~data_typ:T.vec256 ~res_typ:T.vec256
+    | Simd_mem_load, Amd64_simd_instrs.Vmaskmovps_X_X_m128 ->
+      simd_mem_masked_load ~addr ~mask_arg:0
+        ~mask_typ:(int_vec_type ~width_in_bits:32)
+        ~data_typ:(int_vec_type ~width_in_bits:32) ~res_typ:T.vec128
+    | Simd_mem_load, Amd64_simd_instrs.Vmaskmovps_Y_Y_m256 ->
+      simd_mem_masked_load ~addr ~mask_arg:0
+        ~mask_typ:(wide_int_vec_type ~vector_width_in_bits:256 ~width_in_bits:32)
+        ~data_typ:(wide_int_vec_type ~vector_width_in_bits:256 ~width_in_bits:32)
+        ~res_typ:T.vec256
     | ( Simd_mem_store,
         (Amd64_simd_instrs.Movsd_m64_X | Amd64_simd_instrs.Vmovsd_m64_X) ) ->
       simd_mem_store_low64 ~addr
     | ( Simd_mem_store,
         (Amd64_simd_instrs.Movss_m32_X | Amd64_simd_instrs.Vmovss_m32_X) ) ->
       simd_mem_store_low32 ~addr
+    | Simd_mem_store, Amd64_simd_instrs.Vmaskmovpd_m128_X_X ->
+      simd_mem_masked_store ~addr ~mask_arg:2 ~mask_typ:T.vec128
+        ~data_typ:T.vec128
+    | Simd_mem_store, Amd64_simd_instrs.Vmaskmovpd_m256_Y_Y ->
+      simd_mem_masked_store ~addr ~mask_arg:2 ~mask_typ:T.vec256
+        ~data_typ:T.vec256
+    | Simd_mem_store, Amd64_simd_instrs.Vmaskmovps_m128_X_X ->
+      simd_mem_masked_store ~addr ~mask_arg:2
+        ~mask_typ:(int_vec_type ~width_in_bits:32)
+        ~data_typ:(int_vec_type ~width_in_bits:32)
+    | Simd_mem_store, Amd64_simd_instrs.Vmaskmovps_m256_Y_Y ->
+      simd_mem_masked_store ~addr ~mask_arg:2
+        ~mask_typ:(wide_int_vec_type ~vector_width_in_bits:256 ~width_in_bits:32)
+        ~data_typ:(wide_int_vec_type ~vector_width_in_bits:256 ~width_in_bits:32)
     | _ -> not_implemented_basic ~msg:"specific" i
   in
   let classified = Llvmize_specific.classify op in

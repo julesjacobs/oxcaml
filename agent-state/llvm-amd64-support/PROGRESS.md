@@ -85,6 +85,8 @@ plus lane replication for 128-bit-to-256-bit, 64-bit-to-256-bit, and
 The full-width uncached SIMD memory forms now select to the generic aligned
 LLVM vector load/store path for correctness; the non-temporal cache hint is
 not yet modeled in the emitted IR.
+The AVX masked SIMD memory forms now lower to LLVM masked load/store
+intrinsics, deriving the lane predicate from the sign bit of each mask lane.
 
 The latest stack-pressure fix safely pools X86_64 preserved GC-root stack slots
 using full CFG liveness interference instead of safepoint-only disjointness.
@@ -268,6 +270,17 @@ limit is raised from `l=100000` to `l=150000`.
     `caml_avx_vec256_store_aligned_uncached`.
     `testsuite/tests/llvm-codegen/amd64_simd_uncached_mem.{ml,sh}` checks
     these cases with `-llvm-backend -c -S -keep-llvmir`.
+  - `backend/amd64/cfg_selection.ml` and `backend/llvm/llvmize.ml` now lower
+    AVX masked SIMD memory builtins:
+    `caml_avx_vec128_load_mask64`, `caml_avx_vec256_load_mask64`,
+    `caml_avx_vec128_load_mask32`, `caml_avx_vec256_load_mask32`,
+    `caml_avx_vec128_store_mask64`, `caml_avx_vec256_store_mask64`,
+    `caml_avx_vec128_store_mask32`, and
+    `caml_avx_vec256_store_mask32`. The lowering bitcasts 32-bit forms to
+    `<N x i32>`, compares mask lanes against zero with signed `<`, and emits
+    `llvm.masked.load.*.p0` / `llvm.masked.store.*.p0`.
+    `testsuite/tests/llvm-codegen/amd64_simd_masked_mem.{ml,sh}` checks these
+    cases with `-llvm-backend -c -S -keep-llvmir`.
   - `backend/llvm/llvmize.ml` now stores LLVM `cmpxchg`'s loaded value for
     `Compare_exchange`. LLVM returns the old memory value in both success and
     failure cases, which is exactly the OCaml `Atomic.compare_exchange` result;
@@ -1657,6 +1670,13 @@ limit is raised from `l=100000` to `l=150000`.
       `testsuite/tests/llvm-codegen/amd64_simd_uncached_mem.sh` script passed
       directly under `validation-tmp/simd_uncached_mem_script`; the kept IR
       contains 128-bit and 256-bit vector loads and stores.
+    - Implemented AMD64 LLVM lowering for the AVX masked SIMD memory subset
+      and rebuilt with `make -s compiler -j "$(nproc)"`; result: passed. The
+      new `testsuite/tests/llvm-codegen/amd64_simd_masked_mem.sh` script
+      passed directly under `validation-tmp/simd_masked_mem_script`; the kept
+      IR contains `llvm.masked.load`/`llvm.masked.store` calls for v2i64,
+      v4i64, v4i32, and v8i32, plus signed vector compares for the mask
+      predicates.
 
 ## Current Blocker
 
