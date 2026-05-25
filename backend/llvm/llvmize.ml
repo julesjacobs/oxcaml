@@ -3753,7 +3753,15 @@ let reg_listed_in_signature (reg : Reg.t) =
   | Stack (Local _ | Outgoing _ | Domainstate _) -> false
   | Unknown -> fail "reg_listed_in_signature"
 
-let fun_attrs ~has_try:_ codegen_options =
+let cfg_required_stack_check_bytes (cfg : Cfg.t) =
+  Cfg.fold_body_instructions cfg ~init:0
+    ~f:(fun max_bytes (i : Cfg.basic Cfg.instruction) ->
+      match[@ocaml.warning "-fragile-match"] i.desc with
+      | Cfg.Stack_check { max_frame_size_bytes } ->
+        max max_bytes max_frame_size_bytes
+      | _ -> max_bytes)
+
+let fun_attrs ~has_try:_ ~cfg_stack_check_bytes codegen_options =
   let open LL.Fn_attr in
   let safepoint_attrs =
     (* Statepoint IDs encode the active stack adjustment at the call site.
@@ -3762,10 +3770,18 @@ let fun_attrs ~has_try:_ codegen_options =
   in
   let gc_attrs = [Gc gc_name] in
   let frame_pointer_attrs =
-    match Target_system.architecture () with
-    | Target_system.AArch64 -> [Oxcaml_stack_check]
-    | Target_system.IA32 | Target_system.X86_64 | Target_system.ARM
-    | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
+    match Target_system.architecture (), Config.no_stack_checks with
+    | Target_system.AArch64, false ->
+      Oxcaml_stack_check
+      ::
+      (if !Oxcaml_flags.cfg_stack_checks
+       then [Oxcaml_stack_check_bytes cfg_stack_check_bytes]
+       else [])
+    | Target_system.AArch64, true ->
+      []
+    | ( Target_system.IA32 | Target_system.X86_64 | Target_system.ARM
+      | Target_system.POWER | Target_system.Z | Target_system.Riscv ),
+      (_ : bool) ->
       []
   in
   let codegen_attrs =
@@ -3805,7 +3821,8 @@ let prepare_fun_info t (cfg : Cfg.t) =
   in
   let arg_types = List.map T.of_reg arg_regs |> make_arg_types in
   let res_type = filter_ds_and_make_ret_type fun_ret_type in
-  let attrs = fun_attrs ~has_try fun_codegen_options in
+  let cfg_stack_check_bytes = cfg_required_stack_check_bytes cfg in
+  let attrs = fun_attrs ~has_try ~cfg_stack_check_bytes fun_codegen_options in
   let dbg_metadata_id = create_debug_subprogram t ~fun_name fun_dbg in
   let dbg_metadata =
     Option.map (fun id -> Printf.sprintf "!dbg !%d" id) dbg_metadata_id
