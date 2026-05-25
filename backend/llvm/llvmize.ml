@@ -3052,12 +3052,8 @@ let atomic t (i : Cfg.basic Cfg.instruction) (op : Cmm.atomic_op) ~size ~addr =
     let res = emit_ins t (I.convert Zext ~arg:success ~to_:typ) in
     store_into_reg t i.res.(0) res
   | Compare_exchange ->
-    let loaded, success = do_cmpxchg () in
-    let orig = load_reg_to_temp ~typ t i.res.(0) in
-    let selected =
-      emit_ins t (I.select ~cond:success ~ifso:orig ~ifnot:loaded)
-    in
-    store_into_reg t i.res.(0) selected
+    let loaded, _success = do_cmpxchg () in
+    store_into_reg t i.res.(0) loaded
 
 let load t (i : Cfg.basic Cfg.instruction) (memory_chunk : Cmm.memory_chunk)
     (addr_mode : Arch.addressing_mode) ~(is_atomic : bool) =

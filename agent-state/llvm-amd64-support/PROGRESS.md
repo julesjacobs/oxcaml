@@ -11,13 +11,14 @@ lowering now also covers the i64x2 add/sub, vec128 interleave, and vec256
 join/split operations needed by several layout/block-index tests, including
 the generated mixed-blocks native test on AMD64. The stale
 `typing-layouts-or-null/probe.ml` LLVM lowering failure is also fixed for the
-default disabled-probe path.
+default disabled-probe path. The standard-compiler LLVM-backend
+`lib-atomic/test_atomic_cmpxchg.ml` failure is fixed too.
 
-The latest fixes add focused AMD64 probe terminator lowering and focused AMD64
-SIMD LLVM lowering for i64x2 arithmetic, vec128 interleaves, and vec256
-join/split support. Earlier fixes reserve the
-AMD64 OxCaml runtime registers in LLVM's X86 register allocator and make
-exception-recovery blocks treat runtime blockaddress entry as a
+The latest fixes correct LLVM `Compare_exchange` lowering and add focused AMD64
+probe terminator lowering plus focused AMD64 SIMD LLVM lowering for i64x2
+arithmetic, vec128 interleaves, and vec256 join/split support. Earlier fixes
+reserve the AMD64 OxCaml runtime registers in LLVM's X86 register allocator and
+make exception-recovery blocks treat runtime blockaddress entry as a
 register-clobbering edge.
 
 ## Evidence
@@ -79,6 +80,11 @@ register-clobbering edge.
     bring-up: default disabled probes fall through, while `enabled_at_init`
     probes are emitted as ordinary direct OCaml calls to their generated
     handler before branching to the continuation.
+  - `backend/llvm/llvmize.ml` now stores LLVM `cmpxchg`'s loaded value for
+    `Compare_exchange`. LLVM returns the old memory value in both success and
+    failure cases, which is exactly the OCaml `Atomic.compare_exchange` result;
+    the previous lowering incorrectly selected the destination register's old
+    contents on success.
   - `vendor/llvm-project/llvm/lib/Target/X86/{X86AsmPrinter.cpp,
     X86AsmPrinter.h,X86MCInstLower.cpp}` records a temporary return-address
     label after emitted X86 call instructions and lets the following
@@ -428,6 +434,16 @@ register-clobbering edge.
     ARCH=amd64 LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
     prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 5 passed,
     0 skipped, 0 failed.
+  - Focused validation of the stale atomic compare-exchange failure now passes
+    with normal Make/Dune parallelism:
+    - `make llvm-test-one TEST=lib-atomic/test_atomic_cmpxchg.ml LIST= DIR=
+      ARCH=amd64 LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 2 passed,
+      0 skipped, 0 failed.
+    - `make llvm-test-one DIR=lib-atomic LIST= TEST= ARCH=amd64
+      LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 5 passed,
+      1 skipped, 0 failed.
 
 ## Current Blocker
 
@@ -449,7 +465,8 @@ LLVM-built compiler paths need
 
 Rerun broad self-stage ocamltest or a representative subset to refresh the
 remaining failure families after the SIMD and wide-vector alloca fixes. Likely
-next targets from the stale full run are native atomic/cmpxchg failures, native
-async/backtrace/CFI output mismatches. Keep using normal build parallelism;
-avoid only concurrent top-level `make`/`dune` commands in this checkout because
-of the shared lockfile.
+next targets from the stale full run are native `lib-domain/cpu_relax.ml` and
+`statmemprof/bigarray.ml` segfaults plus native async/backtrace/CFI output
+mismatches. Keep using normal build parallelism; avoid only concurrent
+top-level `make`/`dune` commands in this checkout because of the shared
+lockfile.
