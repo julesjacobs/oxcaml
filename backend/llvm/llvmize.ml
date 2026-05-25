@@ -723,6 +723,45 @@ let live_gc_root_regs_across t (i : 'a Cfg.instruction) =
           Cmm.is_val reg.typ && Option.is_some (get_alloca_for_reg_opt t reg))
         across)
 
+let live_regs_across t (i : 'a Cfg.instruction) =
+  match (get_fun_info t).liveness with
+  | None -> Reg.Set.empty
+  | Some liveness -> (
+    match InstructionId.Tbl.find_opt liveness i.id with
+    | None -> Reg.Set.empty
+    | Some { Cfg_liveness.before = _; across } -> across)
+
+let amd64_call_gc_symbol t (i : 'a Cfg.instruction) =
+  let live_reg_matches f =
+    live_regs_across t i
+    |> Reg.Set.exists (fun (reg : Reg.t) -> f reg.typ)
+  in
+  match Target_system.architecture () with
+  | Target_system.X86_64 ->
+    if
+      live_reg_matches (fun typ ->
+          match[@ocaml.warning "-fragile-match"] typ with
+          | Cmm.Vec512 -> true
+          | _ -> false)
+    then "caml_call_gc_avx512"
+    else if
+      live_reg_matches (fun typ ->
+          match[@ocaml.warning "-fragile-match"] typ with
+          | Cmm.Vec256 -> true
+          | _ -> false)
+    then "caml_call_gc_avx"
+    else if
+      live_reg_matches (fun typ ->
+          match[@ocaml.warning "-fragile-match"] typ with
+          | Cmm.Float | Cmm.Float32 | Cmm.Vec128 | Cmm.Valx2 -> true
+          | Cmm.Val | Cmm.Addr | Cmm.Int | Cmm.Vec256 | Cmm.Vec512 ->
+            false)
+    then "caml_call_gc_sse"
+    else "caml_call_gc"
+  | Target_system.AArch64 | Target_system.IA32 | Target_system.ARM
+  | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
+    "caml_call_gc"
+
 let load_live_gc_roots_across t i =
   live_gc_root_regs_across t i
   |> Reg.Set.elements
@@ -3243,11 +3282,12 @@ let heap_alloc ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction)
     (I.br_cond ~cond:skip_gc_expect ~ifso:after_gc ~ifnot:call_gc);
   (* Call GC *)
   emit_label t call_gc;
-  add_referenced_symbol t "caml_call_gc";
+  let call_gc_symbol = amd64_call_gc_symbol t i in
+  add_referenced_symbol t call_gc_symbol;
   call_simple
     ~attrs:(gc_attr ~alloc_info ~can_call_gc:true t i @ [LL.Fn_attr.Cold])
     ~live_roots:(load_live_gc_roots_across t i)
-    ~alloc_info ?unwind_label ~cc:Oxcaml_alloc t "caml_call_gc" [] []
+    ~alloc_info ?unwind_label ~cc:Oxcaml_alloc t call_gc_symbol [] []
   |> ignore;
   emit_ins_no_res t (I.br after_gc);
   emit_unwind_landingpad_after t unwind_label exn_entry;
@@ -3278,7 +3318,8 @@ let poll ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction) =
   emit_ins_no_res t
     (I.br_cond ~cond:skip_poll_expect ~ifso:after_poll ~ifnot:call_gc);
   emit_label t call_gc;
-  add_referenced_symbol t "caml_call_gc";
+  let call_gc_symbol = amd64_call_gc_symbol t i in
+  add_referenced_symbol t call_gc_symbol;
   let stack_offset = statepoint_stack_offset t i in
   let safepoint = Safepoint.Poll { stack_offset } in
   let attrs = gc_attr ~safepoint ~can_call_gc:true t i @ [LL.Fn_attr.Cold] in
@@ -3286,11 +3327,11 @@ let poll ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction) =
   (match Target_system.architecture () with
     | Target_system.X86_64 ->
       call_simple_with_stackmap ~attrs ~live_roots ~safepoint ?unwind_label
-        ~cc:Oxcaml_alloc t i "caml_call_gc" [] []
+        ~cc:Oxcaml_alloc t i call_gc_symbol [] []
     | Target_system.AArch64 | Target_system.IA32 | Target_system.ARM
     | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
       call_simple ~attrs ~live_roots ?unwind_label ~cc:Oxcaml_alloc t
-        "caml_call_gc" [] [])
+        call_gc_symbol [] [])
   |> ignore;
   emit_ins_no_res t (I.br after_poll);
   emit_unwind_landingpad_after t unwind_label exn_entry;

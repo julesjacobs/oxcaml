@@ -51,6 +51,12 @@ and a fresh default-stack boot-context build passes without
 `OCAMLRUNPARAM=b,Xmain_stack_size=64M`. The newest follow-up also makes all
 entry function arguments interfere for this pooling, because they are all
 stored into their allocas before the first CFG instruction is emitted.
+The latest AMD64 LLVM allocation follow-up now selects the GC slow-path entry
+that preserves live SIMD registers (`caml_call_gc_sse`, `caml_call_gc_avx`, or
+`caml_call_gc_avx512`) when float/SIMD values are live across heap allocation
+or poll slow paths. This fixes the reduced high-arity `float32` mismatch where
+boxed float32 allocation hit the slow path after computing the payload in
+`%xmm0`.
 
 ## Evidence
 
@@ -1023,6 +1029,25 @@ stored into their allocas before the first CFG instruction is emitted.
       `select.domainstate.opt 25` both pass; extras `23` and `24` expose the
       same single `float32` stack-argument mismatch. This leaves a narrower
       high-arity `float32`/stack-argument issue to investigate next.
+    - Reduced that remaining `float32` mismatch to the boxed-float32 allocation
+      slow path in `Common.Buffer.get_float32`: LLVM emitted
+      `callq caml_call_gc@PLT` while `%xmm0` still held the double result of
+      `caml_int32_float_of_bits_unboxed`; the native backend emits
+      `caml_call_gc_sse_` for the same CFG because the live float register must
+      survive the GC.
+    - Fixed AMD64 LLVM heap allocation and poll slow paths to pick
+      `caml_call_gc_sse`, `caml_call_gc_avx`, or `caml_call_gc_avx512` when
+      liveness shows float/SIMD values across the safepoint. Rebuilt the boot
+      compiler with normal Dune parallelism:
+      `DUNE_BUILD_FLAGS="-j $(nproc)" ./tools/build-llvm-boot-with-installed.sh`
+      using `BOOT_BUILD=validation-tmp/simd_gc_boot/boot_context_build`;
+      result: `1682` boot wrapper lines, `839` fresh IR, smoke printed `55`.
+    - Rebuilt the compact repro as
+      `validation-tmp/subset_full_test0/select.simdgc.opt` with
+      `OCAMLPARAM="_,llvm-backend=1,llvm-path=/tmp/oxcaml-agent-llvm-amd64-support/clang-wrapper-opt,keep-llvmir=1"`.
+      The generated `common.s` now calls `caml_call_gc_sse@PLT` in
+      `camlCommon__get_float32_27_71_code`, and selectors `22`, `23`, `24`,
+      and `25` all exit 0 with empty output.
 
 ## Current Blocker
 
