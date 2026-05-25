@@ -759,6 +759,11 @@ register-clobbering edge.
       `backend/llvm/llvmize_specific_types.ml`,
       `backend/arm64/llvmize_specific.ml`, and
       `backend/amd64/llvmize_specific.ml`.
+    - `make llvm-test-one DIR=llvm-codegen LIST= TEST= ARCH=amd64
+      LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0 with normal
+      build parallelism after the shared-type cleanup: 20 passed, 15 skipped,
+      0 failed.
 
 ## Current Blocker
 
@@ -772,9 +777,9 @@ agent env may set `LIST` for broader test runs.
 
 The known stack-usage issue remains: some LLVM-built compiler paths need
 `OCAMLRUNPARAM=b,Xmain_stack_size=64M` where the normal opam compiler does not.
-The OxCaml PR is still draft; as of the latest check after the formatting
-cleanup, GitHub reported the Merlin check passed and the rest of CI still
-pending.
+The OxCaml PR is still draft; as of the latest check after the shared-type
+cleanup, GitHub reported `built with flambda-backend, flambda2` passed and the
+rest of CI still pending.
 
 ## Next Step
 
