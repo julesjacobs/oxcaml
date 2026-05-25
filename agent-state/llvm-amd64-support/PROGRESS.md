@@ -267,6 +267,16 @@ limit is raised from `l=100000` to `l=150000`.
     `tests/lib-smallint`, and `tests/typing-labels`) passes: `66` passed,
     `0` skipped, `0` failed. Wrapper evidence: `110` wrapper lines /
     `55` fresh IR.
+  - A fresh full self-stage2 ocamltest rerun from the patched stage2b compiler
+    now passes. Command used `SELF_STAGE=2`,
+    `STAGE_INSTALL=validation-tmp/c_call_stackmap_stage2b/stage_install`,
+    `STAGE_BUILD=validation-tmp/c_call_stackmap_stage2b/main_build`,
+    `LLVM_TESTSUITE_PARALLEL=auto`, and `LLVM_TESTSUITE_JOBS=$(nproc)`.
+    GNU parallel was unavailable, so the script used the serial `one` target
+    with `make -j$(nproc)`. Result: `6351` tests passed, `269` skipped,
+    `0` failed, `0` unexpected errors, `6620` considered. Wrapper evidence:
+    `6202` wrapper lines / `3101` fresh IR. Log:
+    `validation-tmp/c_call_stackmap_stage2b/full_self_stage2_ocamltest_after_c_call_stackmap.log`.
   - Added local opam repository `tools/ci/local-opam` as `oxcaml-local`.
   - Created switch `oxcaml-5.4.0+oxcaml` with
     `ocaml-base-compiler.5.4.0+oxcaml`; installed `dune.3.20.2` and
@@ -1275,16 +1285,17 @@ limit is raised from `l=100000` to `l=150000`.
 ## Current Blocker
 
 No focused blocker remains for `llvm-install` with a writable prefix, the
-enabled Linux/AMD64 `llvm-codegen` tests, self-stage install/smoke, or full
-self-stage ocamltest. The previously intermittent self-stage2
-`caml_scan_stack: missing frame descriptor` abort has a concrete fixed
+enabled Linux/AMD64 `llvm-codegen` tests, self-stage install/smoke, full
+self-stage ocamltest, self-stage2 install/smoke, or full self-stage2
+ocamltest. The previously intermittent self-stage2
+`caml_scan_stack: missing frame descriptor` abort had a concrete fixed
 reproducer: the first external C call in `camlCmi_format__marshal_11_39_code`
-now has a frame descriptor in the patched stage2b compiler, and the previously
-failing self-stage2 directories pass focused validation. A fresh full
-self-stage2 ocamltest rerun is still pending after this C-call stackmap fix.
-The default `/usr/local` install prefix is not writable in this environment,
-so use an explicit agent-local `prefix=...` for install validation. Also clear
-`LIST=`/`DIR=` when running a single `TEST=...` after
+now has a frame descriptor in the patched stage2b compiler, the previously
+failing self-stage2 directories pass focused validation, and the full
+self-stage2 ocamltest rerun passes. The default `/usr/local` install prefix is
+not writable in this environment, so use an explicit agent-local `prefix=...`
+for install validation. Also clear `LIST=`/`DIR=` when running a single
+`TEST=...` after
 `eval "$(../../../scripts/agent-tmp-env)"`, because the agent env may set
 `LIST` for broader test runs.
 
@@ -1305,8 +1316,7 @@ rest of CI still pending.
 
 ## Next Step
 
-Next step is a fresh full self-stage2 ocamltest rerun from the patched
-stage2b compiler to confirm the C-call stackmap fix clears the previous
-intermittent missing-frame-descriptor aborts at suite scale. Keep using normal
-build parallelism; avoid only concurrent top-level `make` or `dune` commands
-in this checkout because of the shared lockfile.
+Next step is to keep the draft PR current, monitor GitHub CI, and continue
+reviewing the remaining AMD64 LLVM backend surface for unsupported lowering
+cases. Keep using normal build parallelism; avoid only concurrent top-level
+`make` or `dune` commands in this checkout because of the shared lockfile.
