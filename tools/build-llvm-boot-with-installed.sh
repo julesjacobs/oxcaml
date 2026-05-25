@@ -9,6 +9,13 @@ stage0_install=$(cd "$stage0_install" && pwd)
 boot_build=${BOOT_BUILD:-$repo/_llvm_boot_context_build}
 wrapper=${LLVM_WRAPPER:-/tmp/oxcaml-clang-wrapper}
 wrapper_log=${LLVM_WRAPPER_LOG:-$wrapper.log}
+cleanup_paths=()
+cleanup () {
+  if [ "${#cleanup_paths[@]}" -gt 0 ]; then
+    rm -rf "${cleanup_paths[@]}"
+  fi
+}
+trap cleanup EXIT
 if [ -n "${OPAM_SWITCH_BIN:-}" ]; then
   opam_switch_bin=$OPAM_SWITCH_BIN
 else
@@ -93,13 +100,14 @@ fi
 
 boot_ws=
 stage0_boot_install=$(mktemp -d /tmp/oxcaml-llvm-stage0-boot.XXXXXX)
-trap 'if [ -n "${boot_ws:-}" ]; then rm -f "$boot_ws"; fi; rm -rf "$stage0_boot_install"' EXIT
+cleanup_paths+=("$stage0_boot_install")
 make_stage0_boot_install "$stage0_boot_install"
 
 make -C "$repo" LLVM_BOOT_BACKEND=1 LLVM_BOOT_INSTALL="$stage0_boot_install" \
   LLVM_PATH="$wrapper" duneconf/boot.ws >/dev/null
 
 boot_ws=$(mktemp /tmp/oxcaml-llvm-boot.XXXXXX)
+cleanup_paths+=("$boot_ws")
 cp "$repo/duneconf/boot.ws" "$boot_ws"
 
 targets=(
@@ -125,7 +133,7 @@ print_wrapper_counts boot
 
 if [ "$run_smoke" = 1 ]; then
   tmpdir=$(mktemp -d /tmp/oxcaml-llvm-boot-smoke.XXXXXX)
-  trap 'rm -f "$boot_ws"; rm -rf "$stage0_boot_install"; rm -rf "$tmpdir"' EXIT
+  cleanup_paths+=("$tmpdir")
   printf 'let rec sum n acc = if n = 0 then acc else sum (n - 1) (acc + n)\nlet () = Printf.printf "%%d\\n" (sum 10 0)\n' \
     > "$tmpdir/main.ml"
   : > "$wrapper_log"
