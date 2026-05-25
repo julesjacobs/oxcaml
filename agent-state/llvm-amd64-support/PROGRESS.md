@@ -66,7 +66,9 @@ now lower directly to LLVM `<2 x i64>`, `<4 x i64>`, and `<8 x i64>` immediate
 vectors instead of fatal-erroring on 256-bit and 512-bit constants. Wide
 vector scalar casts now lower for 256-bit and 512-bit vectors as well, covering
 the `caml_*_low_of_*` and `caml_*_low_to_*` builtins that previously hit the
-LLVM static-cast fatal path.
+LLVM static-cast fatal path. Vec512 reinterpret casts now lower too: the AMD64
+LLVM path copies the shared low 64-bit lanes for vec128/vec256/vec512
+widening and narrowing instead of fatal-erroring on 512-bit reinterpret casts.
 
 The latest stack-pressure fix safely pools X86_64 preserved GC-root stack slots
 using full CFG liveness interference instead of safepoint-only disjointness.
@@ -174,6 +176,11 @@ limit is raised from `l=100000` to `l=150000`.
     scalar casts use the existing 64-bit carrier with truncation or zero
     extension for narrow lanes, and float vector storage is bitcast to the
     canonical LLVM vector storage type.
+  - `backend/llvm/llvmize.ml` now lowers vec512 reinterpret casts for AMD64
+    LLVM output. `V128_of_vec`, `V256_of_vec`, and `V512_of_vec` share a
+    low-lane copy helper over the canonical `<N x i64>` storage types, so
+    vec512-to-vec128/vec256 narrowing and vec128/vec256-to-vec512 widening no
+    longer hit the `vector reinterpret cast` fatal path.
   - `backend/llvm/llvmize.ml` now stores LLVM `cmpxchg`'s loaded value for
     `Compare_exchange`. LLVM returns the old memory value in both success and
     failure cases, which is exactly the OCaml `Atomic.compare_exchange` result;
@@ -1500,6 +1507,13 @@ limit is raised from `l=100000` to `l=150000`.
       operations plus AMD64 `frame-pointer="all"` attributes. This checkout is
       configured with `no_stack_checks: true`, so the direct IR smoke does not
       contain `oxcaml-stack-check` attributes.
+    - Implemented LLVM lowering for vec512 reinterpret casts and rebuilt with
+      a clean `dune clean --workspace=duneconf/boot.ws` followed by
+      `make -s compiler -j "$(nproc)"`; result: passed. An attempted direct
+      ML-level vec512 smoke could not be made source-visible in this checkout:
+      the public SIMD extension accepts the existing `int64x2`/`int64x4`
+      surface types, but the attempted `int64x8` external declarations fail
+      before lowering with `Unbound type constructor "int64x8"`.
 
 ## Current Blocker
 

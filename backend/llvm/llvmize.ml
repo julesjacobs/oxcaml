@@ -3666,29 +3666,31 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
     in
     let trunc arg to_ = emit_ins t (I.convert Trunc ~arg ~to_) in
     let zext arg to_ = emit_ins t (I.convert Zext ~arg ~to_) in
-    let insert_vec128_low_into_vec256 arg =
-      let arg = bitcast_if_needed arg T.vec128 in
-      List.init 2 Fun.id
-      |> List.fold_left
-           (fun vector lane ->
-             let elem =
-               emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int lane))
-             in
-             emit_ins t
-               (I.insertelement ~vector ~index:(V.of_int lane) ~to_insert:elem))
-           (V.poison T.vec256)
+    let type_of_vector_width (width : Cmm.vector_width) =
+      match width with
+      | Vec128 -> T.vec128
+      | Vec256 -> T.vec256
+      | Vec512 -> T.vec512
     in
-    let extract_vec256_low_to_vec128 arg =
-      let arg = bitcast_if_needed arg T.vec256 in
-      List.init 2 Fun.id
+    let i64_lanes_of_vector_width (width : Cmm.vector_width) =
+      match width with Vec128 -> 2 | Vec256 -> 4 | Vec512 -> 8
+    in
+    let copy_low_lanes ~src_width ~dst_width arg =
+      let src_typ = type_of_vector_width src_width in
+      let dst_typ = type_of_vector_width dst_width in
+      let arg = bitcast_if_needed arg src_typ in
+      let lanes =
+        min
+          (i64_lanes_of_vector_width src_width)
+          (i64_lanes_of_vector_width dst_width)
+      in
+      List.init lanes Fun.id
       |> List.fold_left
            (fun vector lane ->
-             let elem =
-               emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int lane))
-             in
-             emit_ins t
-               (I.insertelement ~vector ~index:(V.of_int lane) ~to_insert:elem))
-           (V.poison T.vec128)
+             let index = V.of_int lane in
+             let elem = emit_ins t (I.extractelement ~vector:arg ~index) in
+             emit_ins t (I.insertelement ~vector ~index ~to_insert:elem))
+           (V.poison dst_typ)
     in
     match cast_op with
     | Float32_of_int32 ->
@@ -3722,19 +3724,38 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
       store_into_reg t i.res.(0) converted
     | V128_of_vec Vec256 ->
       load_reg_to_temp ~typ:T.vec256 t i.arg.(0)
-      |> extract_vec256_low_to_vec128
+      |> copy_low_lanes ~src_width:Vec256 ~dst_width:Vec128
+      |> store_into_reg t i.res.(0)
+    | V128_of_vec Vec512 ->
+      load_reg_to_temp ~typ:T.vec512 t i.arg.(0)
+      |> copy_low_lanes ~src_width:Vec512 ~dst_width:Vec128
       |> store_into_reg t i.res.(0)
     | V256_of_vec Vec128 ->
       load_reg_to_temp ~typ:T.vec128 t i.arg.(0)
-      |> insert_vec128_low_into_vec256
+      |> copy_low_lanes ~src_width:Vec128 ~dst_width:Vec256
       |> store_into_reg t i.res.(0)
     | V256_of_vec Vec256 ->
       let arg = load_reg_to_temp ~typ:T.vec256 t i.arg.(0) in
       let res_typ = T.of_reg i.res.(0) in
       let converted = bitcast_if_needed arg res_typ in
       store_into_reg t i.res.(0) converted
-    | V128_of_vec Vec512 | V256_of_vec Vec512 | V512_of_vec _ ->
-      not_implemented_basic ~msg:"vector reinterpret cast" i)
+    | V256_of_vec Vec512 ->
+      load_reg_to_temp ~typ:T.vec512 t i.arg.(0)
+      |> copy_low_lanes ~src_width:Vec512 ~dst_width:Vec256
+      |> store_into_reg t i.res.(0)
+    | V512_of_vec Vec128 ->
+      load_reg_to_temp ~typ:T.vec128 t i.arg.(0)
+      |> copy_low_lanes ~src_width:Vec128 ~dst_width:Vec512
+      |> store_into_reg t i.res.(0)
+    | V512_of_vec Vec256 ->
+      load_reg_to_temp ~typ:T.vec256 t i.arg.(0)
+      |> copy_low_lanes ~src_width:Vec256 ~dst_width:Vec512
+      |> store_into_reg t i.res.(0)
+    | V512_of_vec Vec512 ->
+      let arg = load_reg_to_temp ~typ:T.vec512 t i.arg.(0) in
+      let res_typ = T.of_reg i.res.(0) in
+      let converted = bitcast_if_needed arg res_typ in
+      store_into_reg t i.res.(0) converted)
   | Specific op -> specific t i op
   | Intop_atomic { op; size; addr } -> atomic t i op ~size ~addr
   | Pause -> (
