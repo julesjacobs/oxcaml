@@ -1874,6 +1874,8 @@ let bswap t (i : Cfg.basic Cfg.instruction) (bitwidth : Arch.bswap_bitwidth) =
    [Cfg_selection] will be responsible for all the arch-specific handling, while
    this function can stay generic *)
 let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
+  let float_arg typ n = load_reg_to_temp ~typ t i.arg.(n) in
+  let store_res value = store_into_reg t i.res.(0) value in
   let do_conv arg (to_ : T.t) =
     let from : T.t = V.get_type arg in
     (* CR yusumez: I really don't like the -fragile-match... *)
@@ -1905,9 +1907,47 @@ let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
     let conved_res = do_conv res (T.of_reg i.res.(0)) in
     store_into_reg t i.res.(0) conved_res
   in
+  let float_round typ llvm_name =
+    call_llvm_intrinsic t
+      (llvm_name ^ "." ^ llvm_intrinsic_type_suffix typ)
+      [float_arg typ 0]
+      typ
+    |> store_res
+  in
+  let float_minmax_match_sse cond typ =
+    let arg1 = float_arg typ 0 in
+    let arg2 = float_arg typ 1 in
+    let cmp = emit_ins t (I.fcmp cond ~arg1 ~arg2) in
+    emit_ins t (I.select ~cond:cmp ~ifso:arg1 ~ifnot:arg2) |> store_res
+  in
+  let float_round_to_i64 typ =
+    let rounded =
+      call_llvm_intrinsic t
+        ("roundeven." ^ llvm_intrinsic_type_suffix typ)
+        [float_arg typ 0]
+        typ
+    in
+    emit_ins t (I.convert Fptosi ~arg:rounded ~to_:T.i64) |> store_res
+  in
   (* Intrinsics must not allocate on the OCaml heap. See
      [Arch.operation_allocates]. *)
   match intrinsic_name with
+  | "sqrt" -> float_round T.double "sqrt"
+  | "sqrtf" -> float_round T.float "sqrt"
+  | "caml_simd_float32_min" -> float_minmax_match_sse Folt T.float
+  | "caml_simd_float32_max" -> float_minmax_match_sse Fogt T.float
+  | "caml_simd_cast_float32_int64" -> float_round_to_i64 T.float
+  | "caml_simd_float32_round_current" -> float_round T.float "nearbyint"
+  | "caml_simd_float32_round_neg_inf" -> float_round T.float "floor"
+  | "caml_simd_float32_round_pos_inf" -> float_round T.float "ceil"
+  | "caml_simd_float32_round_towards_zero" -> float_round T.float "trunc"
+  | "caml_simd_float64_min" -> float_minmax_match_sse Folt T.double
+  | "caml_simd_float64_max" -> float_minmax_match_sse Fogt T.double
+  | "caml_simd_cast_float64_int64" -> float_round_to_i64 T.double
+  | "caml_simd_float64_round_current" -> float_round T.double "nearbyint"
+  | "caml_simd_float64_round_neg_inf" -> float_round T.double "floor"
+  | "caml_simd_float64_round_pos_inf" -> float_round T.double "ceil"
+  | "caml_simd_float64_round_towards_zero" -> float_round T.double "trunc"
   | "caml_sse2_float64_min" ->
     do_intrinsic_call "x86.sse2.min.sd" [T.doublex2; T.doublex2] T.doublex2
   | "caml_sse2_float64_max" ->
@@ -4381,7 +4421,8 @@ let define_restore_rbp t =
             recover_rbp_asm ^ ":";
             "  pop %rbp";
             "  addq $8, %rsp";
-            "  movq " ^ recover_rbp_var ^ "(%rip), %rbx";
+            "  movq " ^ recover_rbp_var ^ "@GOTPCREL(%rip), %rbx";
+            "  movq (%rbx), %rbx";
             "  jmpq *%rbx" ];
         add_data_def t
           (LL.Data.external_ (LL.Ident.to_string_hum recover_rbp_asm_ident));
@@ -4464,6 +4505,13 @@ let invoke_clang_with_llvmir ~output_filename ~input_filename ~extra_flags =
       then ["-fno-omit-frame-pointer"]
       else ["-fomit-frame-pointer"; "-momit-leaf-frame-pointer"]
   in
+  let pic_flags =
+    match Target_system.architecture () with
+    | Target_system.X86_64 -> ["-fPIC"]
+    | Target_system.AArch64 | Target_system.IA32 | Target_system.ARM
+    | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
+      []
+  in
   let llvm_flags = [!Oxcaml_flags.llvm_flags] in
   Ccomp.command
     (String.concat " "
@@ -4471,7 +4519,7 @@ let invoke_clang_with_llvmir ~output_filename ~input_filename ~extra_flags =
        @ ["-o"; Filename.quote output_filename]
        @ ["-x ir"; Filename.quote input_filename]
        @ ["-O3"; "-S"; "-Wno-override-module"]
-       @ fixed_reg_flags @ fp_flags @ llvm_flags @ extra_flags))
+       @ fixed_reg_flags @ fp_flags @ pic_flags @ llvm_flags @ extra_flags))
 
 let llvmir_to_assembly t =
   match t.asm_filename with

@@ -51,6 +51,12 @@ passes a direct `llc` prologue smoke test for a stack-frame-using
     descriptors for non-tail indirect OCaml calls. This gets AMD64 buildability
     further but is not a final multi-arch cleanup: the old ARM64-specific
     `specific` body is temporarily commented out.
+  - `backend/llvm/llvmize.ml` passes `-fPIC` for AMD64 LLVM IR-to-assembly
+    compilation and emits AMD64 recover-rbp variable loads through
+    `@GOTPCREL`, clearing PIE and shared-object relocation failures.
+  - `backend/amd64/{cfg_selection,arch}.ml` and `backend/llvm/llvmize.ml`
+    recognize and lower the scalar float `sqrt`/`sqrtf` and SIMD float32/float64
+    min/max/round/cast builtins needed by the LLVM backend path.
 - Validation done this turn:
   - `git diff --check` passed.
   - Added local opam repository `tools/ci/local-opam` as `oxcaml-local`.
@@ -92,12 +98,20 @@ passes a direct `llc` prologue smoke test for a stack-frame-using
     required words, `%r11` carrying the continuation label, and a relocation to
     `caml_llvm_prologue_realloc_stack`. `/usr/bin/gcc -c` assembled it
     successfully.
-  - `ARCH=amd64 OCAMLPARAM='_,ccopt=-no-pie,keep-llvmir=1'
-    BUILD_OCAMLPARAM='_,ccopt=-no-pie,keep-llvmir=1'
-    LLVM_PATH="$LLVM_PATH" LLVM_BOOT_BACKEND=0 make llvm-install` now gets
-    past the previous generated-SIMD typechecking mismatch, past PIE link
-    failures, and past the LLVM-built `tools/simdgen/simdgen.exe` startup
-    stack-scan crash.
+  - Per workspace guidance and user clarification, validation now uses normal
+    Dune parallelism and avoids only concurrent top-level `make`/`dune`
+    commands in this checkout; no `-j1` is used for OxCaml builds.
+  - A stale previous run with `ccopt=-no-pie` left non-PIC options in `.cmxa`
+    metadata. `make clean` plus rerunning without `ccopt=-no-pie` confirmed the
+    remaining link failures were LLVM AMD64 PIC/codegen issues, not a global
+    link flag fix.
+  - `ARCH=amd64 OCAMLPARAM='_,keep-llvmir=1'
+    BUILD_OCAMLPARAM='_,keep-llvmir=1' LLVM_PATH="$LLVM_PATH"
+    LLVM_BOOT_BACKEND=0 make llvm-install` now gets past the previous
+    generated-SIMD typechecking mismatch, PIE executable link failures,
+    shared-object `recover_rbp_var` relocation failures, scalar builtin
+    recognition failures, and the LLVM-built `tools/simdgen/simdgen.exe`
+    startup stack-scan crash.
   - The wrapper log contains many `-x ir` invocations, confirming the patched
     LLVM tools are being exercised.
   - Manual reproduction of the former `simdgen.exe` blocker now succeeds:
@@ -106,21 +120,25 @@ passes a direct `llc` prologue smoke test for a stack-frame-using
 
 ## Current Blocker
 
-Focused compiler/test validation now reaches later dynamic/shared artifact
-linking, then fails while linking `otherlibs/unix`/related artifacts with many
-undefined symbols such as `main`, `caml_call_gc`,
-`caml_call_local_realloc`, `caml_c_call`,
-`caml_llvm_prologue_realloc_stack`, and compiler/runtime symbols from stdlib
-and other libraries. This is after `simdgen.exe` successfully runs, so the
-previous missing-frame-descriptor blocker is cleared.
+Focused compiler/install validation now reaches the
+`ocamloptcomp_with_flambda2.cma` merge step. The LLVM-built
+`tools/merge_archives.exe` aborts while reading `ocamloptcomp.cma`:
+
+`Fatal error: exception \001...`
+
+With `OCAMLRUNPARAM=b`, the backtrace points through
+`Bytelibrarian.copy_object_file` called by `tools/merge_archives.ml`.
+`_build/main/tools/objinfo.exe ocamloptcomp.cma` can read the archive, so the
+current evidence points to an LLVM-built tool/runtime miscompile rather than an
+obviously corrupt `.cma`.
 
 ## Next Step
 
-Diagnose why the dynamic/shared-library link path is invoking the system linker
-without the runtime/compiler libraries or appropriate shared-library flags, then
-rerun:
-`ARCH=amd64 OCAMLPARAM='_,ccopt=-no-pie,keep-llvmir=1' BUILD_OCAMLPARAM='_,ccopt=-no-pie,keep-llvmir=1' LLVM_PATH="$LLVM_PATH" LLVM_BOOT_BACKEND=0 make llvm-install`,
-followed by:
+Reduce the `tools/merge_archives.exe` failure to the smallest LLVM-built native
+program that reads a `.cma`/marshaled value and raises the malformed exception,
+then fix the underlying AMD64 LLVM lowering/runtime issue. Rerun:
+`ARCH=amd64 OCAMLPARAM='_,keep-llvmir=1' BUILD_OCAMLPARAM='_,keep-llvmir=1' LLVM_PATH="$LLVM_PATH" LLVM_BOOT_BACKEND=0 make llvm-install`,
+then:
 `ARCH=amd64 LLVM_PATH="$LLVM_PATH" make llvm-test-one TEST=llvm-codegen/arithmetic`.
 If that exposes an AMD64 lowering/runtime failure, reduce it before expanding
 the implementation.
