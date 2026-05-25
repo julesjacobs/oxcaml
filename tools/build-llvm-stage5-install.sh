@@ -5,6 +5,7 @@ set -euo pipefail
 repo=$(cd "$(dirname "$0")/.." && pwd)
 
 boot_install=${BOOT_INSTALL:-$repo/_install}
+boot_install=$(cd "$boot_install" && pwd)
 runtime_build=${RUNTIME_BUILD:-$repo/_llvm_stage5_bootstrap_build}
 main_build=${MAIN_BUILD:-$repo/_llvm_stage5_main_build}
 stage_install=${STAGE_INSTALL:-$repo/_llvm_stage5_install}
@@ -17,7 +18,16 @@ arch=${ARCH:-}
 build_runtime=${BUILD_RUNTIME:-1}
 build_main=${BUILD_MAIN:-1}
 refresh_install=${REFRESH_INSTALL:-1}
-opam_switch_bin=${OPAM_SWITCH_BIN:-/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin}
+if [ -n "${OPAM_SWITCH_BIN:-}" ]; then
+  opam_switch_bin=$OPAM_SWITCH_BIN
+else
+  dune_path=$(command -v dune || true)
+  if [ -z "$dune_path" ]; then
+    echo "could not find dune; set OPAM_SWITCH_BIN" >&2
+    exit 1
+  fi
+  opam_switch_bin=$(dirname "$dune_path")
+fi
 dune_build_flags=()
 if [ -n "${DUNE_BUILD_FLAGS:-}" ]; then
   read -r -a dune_build_flags <<< "$DUNE_BUILD_FLAGS"
@@ -50,6 +60,29 @@ print_wrapper_counts () {
   printf '%s fresh ir: %s\n' "$1" "$fresh_ir"
 }
 
+make_boot_build_install () {
+  local wrapped=$1
+  local force_classic=${2:-0}
+  mkdir -p "$wrapped/bin" "$wrapped/lib"
+  ln -s "$boot_install/lib/ocaml" "$wrapped/lib/ocaml"
+  for tool in "$boot_install"/bin/*; do
+    ln -s "$tool" "$wrapped/bin/$(basename "$tool")"
+  done
+
+  if [ "$force_classic" = 1 ]; then
+    # Dune appends some per-library optimization flags after workspace flags.
+    # Keep the LLVM-built boot compiler in classic mode while it builds the
+    # next compiler by appending -Oclassic from a wrapper.
+    rm -f "$wrapped/bin/ocamlopt" "$wrapped/bin/ocamlopt.opt"
+    cat > "$wrapped/bin/ocamlopt.opt" <<EOF
+#!/usr/bin/env bash
+exec "$boot_install/bin/ocamlopt.opt" "\$@" -Oclassic
+EOF
+    chmod +x "$wrapped/bin/ocamlopt.opt"
+    ln -s ocamlopt.opt "$wrapped/bin/ocamlopt"
+  fi
+}
+
 make_var () {
   awk -F= -v name="$1" '$1 == name { sub(/^[ \t]*/, "", $2); sub(/[ \t]*$/, "", $2); print $2; exit }' "$2"
 }
@@ -68,14 +101,20 @@ if [ -z "$system" ] || [ -z "$model" ] || [ -z "$aspp" ]; then
   exit 1
 fi
 
+runtime_boot_build_install=$(mktemp -d /tmp/oxcaml-llvm-runtime-boot-build.XXXXXX)
+main_boot_build_install=$(mktemp -d /tmp/oxcaml-llvm-main-boot-build.XXXXXX)
+trap 'rm -rf "$runtime_boot_build_install" "$main_boot_build_install"' EXIT
+make_boot_build_install "$runtime_boot_build_install" 0
+make_boot_build_install "$main_boot_build_install" 1
+
 cat > "$runtime_ws" <<EOF
 (lang dune 2.8)
 (context (default
   (name runtime_stdlib)
   (profile main)
   (paths
-    (PATH ("$boot_install/bin" :standard))
-    (OCAMLLIB ("$boot_install/lib/ocaml")))
+    (PATH ("$runtime_boot_build_install/bin" :standard))
+    (OCAMLLIB ("$runtime_boot_build_install/lib/ocaml")))
   (env (_
     (flags (:standard -directory stdlib -warn-error +A -alert -unsafe_multidomain))
     (env-vars ("OCAMLPARAM" "_,llvm-backend=1,llvm-path=$wrapper"))))))
@@ -87,7 +126,7 @@ cat > "$main_ws" <<EOF
   (name main)
   (profile main)
   (paths
-    (PATH ("$boot_install/bin" :standard))
+    (PATH ("$main_boot_build_install/bin" :standard))
     (OCAMLLIB ("$runtime_build/install/runtime_stdlib/lib/ocaml_runtime_stdlib")))
   (env (_
     (flags (:standard -directory compiler-distro -warn-error +A -alert -unsafe_multidomain))

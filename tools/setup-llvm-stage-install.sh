@@ -34,12 +34,17 @@ copy_tree_contents () {
 wrap_ocamllib_tool () {
   local tool=$1
   local base
+  local run_with_ocamlrun=0
   base=$(basename "$tool")
   [ -L "$tool" ] && return 0
   [ -f "$tool" ] || return 0
   [ -x "$tool" ] || return 0
 
   mv "$tool" "$tool.real"
+  if IFS= read -r first_line < "$tool.real" \
+      && [ "$first_line" = "#!/usr/local/bin/ocamlrun" ]; then
+    run_with_ocamlrun=1
+  fi
   cat > "$tool" <<EOF
 #!/usr/bin/env sh
 case "\$0" in
@@ -50,6 +55,9 @@ bindir=\$(CDPATH= cd "\$(dirname "\$tool")" && pwd -P) || exit 127
 if [ "\${OCAMLLIB+x}" != x ]; then
   OCAMLLIB=\$(CDPATH= cd "\$bindir/../lib/ocaml" && pwd -P) || exit 127
   export OCAMLLIB
+fi
+if [ $run_with_ocamlrun = 1 ]; then
+  exec "\$bindir/ocamlrun" "\$bindir/$base.real" "\$@"
 fi
 exec "\$bindir/$base.real" "\$@"
 EOF
@@ -96,6 +104,12 @@ if [ -d "$stage_install/lib/ocaml/stublibs" ]; then
   cp -L "$stage_install"/lib/ocaml/stublibs/* "$stage_install/lib/stublibs"/ \
     2>/dev/null || true
 fi
+rm -f "$stage_install/lib/ocaml/ld.conf"
+cat > "$stage_install/lib/ocaml/ld.conf" <<EOF
+$stage_install/lib/ocaml/stublibs
+$stage_install/lib/stublibs
+$stage_install/lib/ocaml
+EOF
 
 for tool in "$stage_install/bin"/*; do
   case "$(basename "$tool")" in

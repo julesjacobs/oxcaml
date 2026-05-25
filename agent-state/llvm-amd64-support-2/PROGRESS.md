@@ -4,9 +4,9 @@ Last updated: 2026-05-25.
 
 ## Current Claim
 
-Independent AMD64 LLVM-backend implementation is in progress. The compiler
-builds on AMD64, and simple scalar programs compile and run with
-`-llvm-backend` through this agent's own LLVM wrapper.
+Independent AMD64 LLVM-backend implementation now passes the requested AMD64
+validation: simple `-llvm-backend` programs run, the standard `llvm-test`
+passes, and `llvm-self-stage2-test` passes.
 
 ## Evidence
 
@@ -321,15 +321,50 @@ builds on AMD64, and simple scalar programs compile and run with
   - This cleared the previous 13-failure full-run baseline, including native
     CFI stepping, quotation native/linker tests, `dwarf_binary_emitter.ml`, and
     the product/vector array families.
+- Finished the independent self-stage implementation/validation:
+  - `llvm-self-stage-install` now builds the seed `_install` with the normal
+    backend first, so self-stage does not depend on a stale LLVM install.
+  - bootstrap scripts discover the active opam switch portably instead of using
+    a local absolute path.
+  - stage bootstrap wraps compiler builds with `-Oclassic` where needed for
+    stability, but keeps the runtime stdlib build non-classic so inlined
+    backtrace metadata is preserved.
+  - staged installs wrap bytecode tools with the staged `ocamlrun` when their
+    shebang names `/usr/local/bin/ocamlrun`, and rewrite `ld.conf` to staged
+    absolute library paths.
+  - final self-stage tests run with a larger OCaml runtime stack
+    (`OCAMLRUNPARAM=l=10000000` by default), fixing the generated mixed-block
+    and `pr7168` stack overflows.
+- Fixed the final AMD64 exception/self-stage corruption in
+  `backend/llvm/llvmize.ml`:
+  - preserve the physical domain-state register after deriving domain-state
+    addresses, avoiding LLVM allocation clobbering `%r14`;
+  - remove the synthetic `wrap_try` exception result and read `%r11`
+    explicitly on AMD64 recovery;
+  - materialize the AMD64 recovery target with inline assembly instead of LLVM
+    `blockaddress`, which lowered to the invalid literal address `1` in the
+    self-stage compiler;
+  - synchronize young pointers around C-call wrappers and fix the AMD64
+    recovery shim register typo.
+- Focused self-stage install passed:
+  `opam exec -- env LLVM_WRAPPER="$LLVM_PATH" tools/build-llvm-self-stage-install.sh`
+  with smoke output `55`.
+- Focused second-stage install passed with explicit
+  `STAGE0_INSTALL`, `BOOT_BUILD`, `BOOT_INSTALL`, `SELF_RUNTIME_BUILD`,
+  `SELF_MAIN_BUILD`, `SELF_STAGE_INSTALL`, and `LLVM_WRAPPER="$LLVM_PATH"`,
+  with smoke output `55`.
+- Canonical `llvm-self-stage2-test` passed:
+  `opam exec -- make llvm-self-stage2-test LLVM_PATH="$LLVM_PATH"`
+  - final self-stage testsuite: `6383 passed`, `264 skipped`, `0 failed`,
+    `6647 considered`
+  - wrapper log summary: `wrapper lines: 6062`, `fresh ir: 3031`
+  - previously failing backtrace, `pr7168`, mixed-blocks, AMD64 smoke, and
+    self-stage recovery paths all passed in the full run.
 
 ## Current Blocker
 
-No immediate source blocker for `llvm-test`: it passes with
-`LLVM_BOOT_BACKEND=0`. `llvm-self-stage2-test` remains unvalidated, and a prior
-`LLVM_BACKEND=1` self-built compiler raised `Not_found` when used for focused
-CFI compilation.
+No current source blocker. The requested AMD64 LLVM-backend validation passes.
 
 ## Next Step
 
-Investigate the `LLVM_BACKEND=1` self-built compiler `Not_found`, then attempt
-`llvm-self-stage2-test`.
+Prepare review cleanup or broaden platform coverage if requested.

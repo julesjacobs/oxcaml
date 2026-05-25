@@ -15,7 +15,12 @@
  (action
   (with-stdout-to %{targets}
    (bash "
-     if ocaml -e 'open CamlinternalQuote' 2>/dev/null
+     tmp_ml=camlinternalquote_check.ml
+     tmp_cmi=camlinternalquote_check.cmi
+     tmp_cmo=camlinternalquote_check.cmo
+     trap 'rm -f \"$tmp_ml\" \"$tmp_cmi\" \"$tmp_cmo\"' EXIT
+     printf 'open CamlinternalQuote\n' > \"$tmp_ml\"
+     if ocamlc -c \"$tmp_ml\" 2>/dev/null
      then echo '()'
      else echo 'camlinternalQuote'
      fi

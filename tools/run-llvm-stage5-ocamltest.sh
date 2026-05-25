@@ -137,10 +137,15 @@ select_testsuite_target
 
 echo "Running testsuite target '$testsuite_target' with $testsuite_list_var=$list"
 
+if [ "${LLVM_TESTSUITE_STACK_SIZE:-unlimited}" != keep ]; then
+  ulimit -s "${LLVM_TESTSUITE_STACK_SIZE:-unlimited}" || true
+fi
+
 OCAMLSRCDIR="$fake_root" \
 CAML_LD_LIBRARY_PATH="$fake_root/stublibs" \
 OCAMLPARAM="_,llvm-backend=1,llvm-path=$wrapper" \
 OCAMLLIB="$stage_install/lib/ocaml" \
+OCAMLRUNPARAM="${OCAMLRUNPARAM:-l=10000000}" \
   make "${make_args[@]}" "$testsuite_target" "$testsuite_list_var=$list" \
     ocamltest_directory=../_runtest/ocamltest
 test_status=$?

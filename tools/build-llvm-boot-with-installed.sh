@@ -9,7 +9,16 @@ stage0_install=$(cd "$stage0_install" && pwd)
 boot_build=${BOOT_BUILD:-$repo/_llvm_boot_context_build}
 wrapper=${LLVM_WRAPPER:-/tmp/oxcaml-clang-wrapper}
 wrapper_log=${LLVM_WRAPPER_LOG:-$wrapper.log}
-opam_switch_bin=${OPAM_SWITCH_BIN:-/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin}
+if [ -n "${OPAM_SWITCH_BIN:-}" ]; then
+  opam_switch_bin=$OPAM_SWITCH_BIN
+else
+  dune_path=$(command -v dune || true)
+  if [ -z "$dune_path" ]; then
+    echo "could not find dune; set OPAM_SWITCH_BIN" >&2
+    exit 1
+  fi
+  opam_switch_bin=$(dirname "$dune_path")
+fi
 arch=${ARCH:-}
 run_smoke=${RUN_SMOKE:-1}
 dune_build_flags=()
@@ -43,6 +52,26 @@ print_wrapper_counts () {
   printf '%s fresh ir: %s\n' "$1" "$fresh_ir"
 }
 
+make_stage0_boot_install () {
+  local wrapped=$1
+  mkdir -p "$wrapped/bin" "$wrapped/lib"
+  ln -s "$stage0_install/lib/ocaml" "$wrapped/lib/ocaml"
+  for tool in "$stage0_install"/bin/*; do
+    ln -s "$tool" "$wrapped/bin/$(basename "$tool")"
+  done
+
+  # Dune appends some per-library optimization flags after workspace flags.
+  # Keep the LLVM-built stage0 compiler in classic mode for the bootstrap by
+  # appending -Oclassic from a wrapper, so it wins over those local flags.
+  rm -f "$wrapped/bin/ocamlopt" "$wrapped/bin/ocamlopt.opt"
+  cat > "$wrapped/bin/ocamlopt.opt" <<EOF
+#!/usr/bin/env bash
+exec "$stage0_install/bin/ocamlopt.opt" "\$@" -Oclassic
+EOF
+  chmod +x "$wrapped/bin/ocamlopt.opt"
+  ln -s ocamlopt.opt "$wrapped/bin/ocamlopt"
+}
+
 require_path "$stage0_install/bin/ocamlopt.opt"
 require_path "$stage0_install/bin/ocamlc.opt"
 require_path "$stage0_install/lib/ocaml/stdlib.cmxa"
@@ -62,11 +91,15 @@ if [ -z "$system" ] || [ -z "$model" ] || [ -z "$aspp" ]; then
   exit 1
 fi
 
-make -C "$repo" LLVM_BOOT_BACKEND=1 LLVM_BOOT_INSTALL="$stage0_install" \
+boot_ws=
+stage0_boot_install=$(mktemp -d /tmp/oxcaml-llvm-stage0-boot.XXXXXX)
+trap 'if [ -n "${boot_ws:-}" ]; then rm -f "$boot_ws"; fi; rm -rf "$stage0_boot_install"' EXIT
+make_stage0_boot_install "$stage0_boot_install"
+
+make -C "$repo" LLVM_BOOT_BACKEND=1 LLVM_BOOT_INSTALL="$stage0_boot_install" \
   LLVM_PATH="$wrapper" duneconf/boot.ws >/dev/null
 
 boot_ws=$(mktemp /tmp/oxcaml-llvm-boot.XXXXXX)
-trap 'rm -f "$boot_ws"' EXIT
 cp "$repo/duneconf/boot.ws" "$boot_ws"
 
 targets=(
@@ -89,7 +122,7 @@ dune_command=(
 if [ "${#dune_build_flags[@]}" -ne 0 ]; then
   dune_command+=("${dune_build_flags[@]}")
 fi
-PATH="$stage0_install/bin:$opam_switch_bin:$PATH" \
+PATH="$stage0_boot_install/bin:$opam_switch_bin:$PATH" \
 RUNTIME_DIR=runtime ARCH="$arch" SYSTEM="$system" MODEL="$model" \
 ASPP="$aspp" ASPPFLAGS="$asppflags" \
   "${dune_command[@]}" "${targets[@]}"
@@ -98,13 +131,14 @@ print_wrapper_counts boot
 
 if [ "$run_smoke" = 1 ]; then
   tmpdir=$(mktemp -d /tmp/oxcaml-llvm-boot-smoke.XXXXXX)
-  trap 'rm -f "$boot_ws"; rm -rf "$tmpdir"' EXIT
+  trap 'rm -f "$boot_ws"; rm -rf "$stage0_boot_install"; rm -rf "$tmpdir"' EXIT
   printf 'let rec sum n acc = if n = 0 then acc else sum (n - 1) (acc + n)\nlet () = Printf.printf "%%d\\n" (sum 10 0)\n' \
     > "$tmpdir/main.ml"
   : > "$wrapper_log"
   OCAMLLIB="$stage0_install/lib/ocaml" \
   OCAMLPARAM="_,llvm-backend=1,llvm-path=$wrapper" \
-    "$boot_build/default/boot_ocamlopt.exe" -o "$tmpdir/main.exe" "$tmpdir/main.ml"
+    "$boot_build/default/boot_ocamlopt.exe" -Oclassic -o "$tmpdir/main.exe" \
+      "$tmpdir/main.ml"
   "$tmpdir/main.exe"
   print_wrapper_counts smoke
 fi
