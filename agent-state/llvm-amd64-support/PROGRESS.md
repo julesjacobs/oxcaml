@@ -870,6 +870,32 @@ domain-state/allocation-pointer values on handler entry.
       failure. The root-slot pooling edits were backed out before commit; the
       current worktree is back to the pushed backend code plus this progress
       note.
+  - Revalidated the current pushed backend after backing out the root-slot
+    pooling experiment:
+    - A clean `make llvm-install ARCH=amd64 LLVM_BOOT_BACKEND=0
+      LLVM_PATH=/tmp/oxcaml-agent-llvm-amd64-support/clang-wrapper-opt
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install-opt` passed with
+      normal build parallelism after `make clean`.
+    - The refreshed installed compiler smoke with `-llvm-backend` and the
+      agent-local wrapper printed `11`.
+    - A fresh default-stack boot-context build in
+      `/tmp/oxcaml-agent-llvm-amd64-support/current_boot_context_build`
+      failed in two actions: `ocamlc.opt` compiling `simd.ml` aborted with
+      `caml_scan_stack: missing frame descriptor`, and `ocamlopt.opt`
+      compiling `amd64_simd_instrs.ml` reported `Stack overflow`.
+    - The missing-frame retaddr mapped to the LLVM-built `ocamlc.opt`
+      function `camlMode__zap_to_floor_279_1375_code` at `typing/mode.ml`,
+      near ordinary allocation code rather than an obvious call return site.
+      A direct rerun of the `simd.ml` byte target then succeeded, so this
+      frame-scan abort is recorded as a schedule/retry-sensitive symptom, not
+      yet a stable isolated reproducer.
+    - A direct rerun of the native `amd64_simd_instrs.ml` target reproduced
+      the default-stack overflow, and the same target passed with
+      `OCAMLRUNPARAM=b,Xmain_stack_size=64M`.
+    - A fresh boot-context build with
+      `OCAMLRUNPARAM=b,Xmain_stack_size=64M` and normal build parallelism
+      passed with `RUN_SMOKE=0`: 1,678 wrapper invocations and 827 fresh IR
+      compilations.
 
 ## Current Blocker
 
@@ -889,7 +915,10 @@ install. Self-stage without `OCAMLRUNPARAM` still overflows while compiling the
 generated `amd64_simd_instrs.ml`; the single failing compile passes with
 `OCAMLRUNPARAM=b,Xmain_stack_size=64M`, and GDB attributes the default-stack
 overflow to deep Flambda2 closure-conversion recursion over that generated
-file.
+file. A fresh boot-context build with `Xmain_stack_size=64M` now passes. The
+latest default-stack boot-context attempt also produced one non-reproduced
+`ocamlc.opt` `simd.ml` missing-frame-descriptor abort that should stay on the
+watch list while investigating stack pressure and frame metadata.
 The OxCaml PR is still draft; as of the latest check after the shared-type
 cleanup, GitHub reported `built with flambda-backend, flambda2` passed and the
 rest of CI still pending.
@@ -897,6 +926,7 @@ rest of CI still pending.
 ## Next Step
 
 Continue investigating the remaining default-stack self-stage overflow without
-committing the unsafe reusable-root-slot experiment. Keep using normal build
+committing the unsafe reusable-root-slot experiment, and watch for recurrence
+of the `simd.ml` byte-compiler frame-scan abort. Keep using normal build
 parallelism; avoid only concurrent top-level `make`/`dune` commands in this
 checkout because of the shared lockfile.
