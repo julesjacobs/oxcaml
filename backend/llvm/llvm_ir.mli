@@ -520,6 +520,8 @@ module Data : sig
   val constant :
     ?section:string option ->
     ?align:int option ->
+    ?weak:bool ->
+    ?hidden:bool ->
     ?private_:bool ->
     string ->
     Value.t ->

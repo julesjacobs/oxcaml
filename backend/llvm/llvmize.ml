@@ -159,6 +159,9 @@ type t =
     mutable c_call_wrappers : c_call_wrapper String.Map.t;
         (* Wrappers for noalloc C calls. This is currently needed since
            manipulating the stack inline is broken. *)
+    mutable probe_semaphores : bool option String.Map.t;
+        (* Probe semaphores referenced by [Probe_is_enabled]. [None] means the
+           initial enabledness is unknown and defaults to disabled. *)
     mutable all_trap_blocks : trap_block_info list;
     mutable module_asm : string list;
     mutable next_debug_metadata_id : int;
@@ -400,6 +403,7 @@ let create ~llvmir_filename ~ppf_dump =
     function_decls = String.Map.empty;
     called_intrinsics = String.Map.empty;
     c_call_wrappers = String.Map.empty;
+    probe_semaphores = String.Map.empty;
     all_trap_blocks = [];
     module_asm = [];
     next_debug_metadata_id = 100000;
@@ -572,6 +576,28 @@ let add_defined_symbol t sym_name =
 
 let add_referenced_symbol t sym_name =
   t.referenced_symbols <- String.Set.add sym_name t.referenced_symbols
+
+let probe_semaphore_symbol name =
+  Asm_targets.Asm_symbol.Predef.caml_probes_semaphore ~name
+  |> Asm_targets.Asm_symbol.to_raw_string
+
+let record_probe_semaphore t ~name ~enabled_at_init =
+  let merge old_ =
+    match old_, enabled_at_init with
+    | None, init | init, None -> init
+    | Some old_enabled, Some enabled ->
+      if Bool.equal old_enabled enabled
+      then old_
+      else
+        fail_msg ~name:"probe_is_enabled"
+          "inconsistent initial enabledness for probe %S" name
+  in
+  let enabled_at_init =
+    match String.Map.find_opt name t.probe_semaphores with
+    | None -> enabled_at_init
+    | Some old -> merge old
+  in
+  t.probe_semaphores <- String.Map.add name enabled_at_init t.probe_semaphores
 
 (* Note that these need to be reversed while emitting *)
 
@@ -3631,7 +3657,22 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
   | Stackoffset _ -> () (* Handled separately via [Safepoint.attr] *)
   | Spill | Reload -> not_implemented_basic ~msg:"spill / reload" i
   | Name_for_debugger _ -> ()
-  | Probe_is_enabled _ -> not_implemented_basic i
+  | Probe_is_enabled { name; enabled_at_init } ->
+    record_probe_semaphore t ~name ~enabled_at_init;
+    let semaphore_ptr = V.of_symbol (probe_semaphore_symbol name) in
+    let ocaml_semaphore_ptr =
+      emit_ins t
+        (I.getelementptr ~base_type:T.i8 ~base_ptr:semaphore_ptr
+           ~indices:[V.of_int 2])
+    in
+    let ocaml_semaphore =
+      emit_ins t (I.load_with_align ~align:2 ~ptr:ocaml_semaphore_ptr ~typ:T.i16)
+    in
+    let enabled =
+      emit_ins t (I.icmp Ine ~arg1:ocaml_semaphore ~arg2:(V.of_int ~typ:T.i16 0))
+    in
+    let enabled = emit_ins t (I.convert Zext ~arg:enabled ~to_:T.i64) in
+    store_into_reg t i.res.(0) enabled
 
 let emit_basic t (i : Cfg.basic Cfg.instruction) =
   emit_comment t "%a" F.pp_dbg_instr_basic i;
@@ -4918,6 +4959,22 @@ let define_restore_rbp t =
       fail_msg ~name:"define_restore_rbp"
         "unsupported architecture for LLVM backend"
 
+let define_probe_semaphores t =
+  String.Map.iter
+    (fun name enabled_at_init ->
+      let enabled_at_init = Option.value enabled_at_init ~default:false in
+      let symbol = probe_semaphore_symbol name in
+      let value =
+        V.struct_constant
+          [ V.of_int ~typ:T.i16 0;
+            V.of_int ~typ:T.i16 (Bool.to_int enabled_at_init) ]
+      in
+      add_data_def t
+        (LL.Data.constant ~section:(Some ".probes") ~align:(Some 2) ~weak:true
+           ~hidden:true symbol value);
+      add_defined_symbol t symbol)
+    t.probe_semaphores
+
 (* Declare menitoned but not declared data items as extern *)
 let declare_data t =
   String.Set.diff t.referenced_symbols t.defined_symbols
@@ -4926,7 +4983,8 @@ let declare_data t =
 let define_auxiliary_functions t =
   define_c_call_wrappers t;
   define_wrap_try t;
-  define_restore_rbp t
+  define_restore_rbp t;
+  define_probe_semaphores t
 
 (* Interface with the rest of the compiler *)
 

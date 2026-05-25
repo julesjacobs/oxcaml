@@ -56,7 +56,9 @@ backend conflict resolutions and restored the AVX2
 `vpmulhrsw_Y_Y_Ym256` helper after the integration merge selected the stale
 non-256-bit name. A merged self-stage2 validation pass now also succeeds: the
 merged self-stage2 compiler passes the focused Linux/AMD64 `llvm-codegen`
-tests and a full self-stage2 ocamltest run.
+tests and a full self-stage2 ocamltest run. The AMD64 LLVM path now also
+lowers `Probe_is_enabled` by reading the OCaml probe semaphore slot, covering
+the non-optimized probe lowering path instead of fatal-erroring.
 
 The latest stack-pressure fix safely pools X86_64 preserved GC-root stack slots
 using full CFG liveness interference instead of safepoint-only disjointness.
@@ -144,6 +146,12 @@ limit is raised from `l=100000` to `l=150000`.
     bring-up: default disabled probes fall through, while `enabled_at_init`
     probes are emitted as ordinary direct OCaml calls to their generated
     handler before branching to the continuation.
+  - `backend/llvm/llvm_ir.{ml,mli}` and `backend/llvm/llvmize.ml` can emit
+    weak hidden data globals. AMD64 LLVM `Probe_is_enabled` now records a weak
+    hidden `.probes` semaphore, loads the OCaml semaphore halfword at offset
+    `+2`, and stores a `0`/`1` result. Unknown initial enabledness defaults to
+    disabled, matching the dummy semaphore initial state used by the native
+    probe emitter.
   - `backend/llvm/llvmize.ml` now stores LLVM `cmpxchg`'s loaded value for
     `Compare_exchange`. LLVM returns the old memory value in both success and
     failure cases, which is exactly the OCaml `Atomic.compare_exchange` result;
@@ -215,6 +223,10 @@ limit is raised from `l=100000` to `l=150000`.
   - `testsuite/tests/llvm-codegen/amd64_exceptions.ml` is an AMD64/Linux
     LLVM-backend regression test for exception handler setup and exception
     bucket recovery.
+  - `testsuite/tests/llvm-codegen/amd64_probe_is_enabled.ml` is an AMD64/Linux
+    LLVM-backend regression test for non-optimized probes and
+    `[%probe_is_enabled]` using disabled and `~enabled_at_init:true`
+    semaphores.
   - `testsuite/tests/llvm-codegen/amd64_raise_notrace_alloc.ml` is an
     AMD64/Linux LLVM-backend regression test for the `Raise_notrace` path that
     allocates an exception bucket in one handler and allocates again before the
@@ -1368,6 +1380,31 @@ limit is raised from `l=100000` to `l=150000`.
       `272` skipped, `0` failed, `0` unexpected errors, and `6660`
       considered. Wrapper evidence: `6326` lines / `3163` fresh IR. Log:
       `../validation-tmp/integration_merge_stage2/full_self_stage2_ocamltest.log`.
+    - Implemented AMD64 LLVM `Probe_is_enabled` lowering. The first compiler
+      rebuild caught the local LLVM IR comparison constructor typo (`Ne`
+      instead of `Ine`); after fixing it, a clean `dune clean` followed by
+      `make -s compiler -j "$(nproc)"` passed.
+    - Direct focused validation using the rebuilt optimizing compiler
+      `_build/main/oxcaml_main_native.exe` passed for a disabled probe, an
+      `~enabled_at_init:true` probe, and matching `[%probe_is_enabled]`
+      assertions:
+      `OCAMLLIB=_build/runtime_stdlib_install/lib/ocaml_runtime_stdlib
+      _build/main/oxcaml_main_native.exe -O3 -llvm-backend
+      -llvm-path "$LLVM_PATH" -probes -no-probes-optimized`. Result: binary
+      ran successfully, `4` wrapper lines / `2` fresh IR. A second
+      `-S -keep-llvmir` run also succeeded and showed weak hidden `.probes`
+      globals for `caml_probes_semaphore_disabled` and
+      `caml_probes_semaphore_enabled`, plus aligned `load i16` operations from
+      offset `+2`; wrapper evidence again was `4` lines / `2` fresh IR. Log
+      artifacts are under `validation-tmp/probe_is_enabled_direct`.
+    - The repository `make llvm-test-one
+      TEST=llvm-codegen/amd64_probe_is_enabled` target did not reach the test:
+      its LLVM boot-context rebuild failed while opening
+      `_build/default/duneconf/camlinternalquote_if_missing_from_stdlib`.
+      Regenerating only that include left Dune's default context with stale
+      dependency-file expectations, so the build state was cleaned with
+      `dune clean --workspace=duneconf/boot.ws` before the successful normal
+      compiler rebuild.
 
 ## Current Blocker
 
@@ -1401,7 +1438,9 @@ now passes on top of the SIMD/XMM GC slow-path, post-raise CFI, and
 validation also passes after the external C-call stackmap fix.
 The OxCaml PR is still draft. After pushing the integration merge commit,
 GitHub reports `mergeStateStatus: UNSTABLE`; checks were queued or in
-progress at the last check.
+progress at the last check. On the latest recheck before the
+`Probe_is_enabled` commit, `built with flambda-backend, flambda2` had passed
+and the remaining checks were still pending.
 
 ## Next Step
 

@@ -1455,6 +1455,8 @@ module Data = struct
           value : Value.t; (* CR yusumez: check this is actually a constant? *)
           section : string option;
           align : int option;
+          weak : bool;
+          hidden : bool;
           private_ : bool
         }
     | External of string
@@ -1470,19 +1472,19 @@ module Data = struct
     | Target_system.Unknown ->
       ".data"
 
-  let constant ?(section = None) ?(align = Some Arch.size_addr)
-      ?(private_ = false) name value =
+  let constant ?(section = None) ?(align = Some Arch.size_addr) ?(weak = false)
+      ?(hidden = false) ?(private_ = false) name value =
     let section =
       match section with
       | Some section -> Some section
       | None -> Some (default_data_section ())
     in
-    Constant { name; value; section; align; private_ }
+    Constant { name; value; section; align; weak; hidden; private_ }
 
   let external_ name = External name
 
   let pp_t ppf = function
-    | Constant { name; value; section; align; private_ = _ } ->
+    | Constant { name; value; section; align; weak; hidden; private_ = _ } ->
       (* CR yusumez: If private global variables are not referenced anywhere
          directly, LLVM will delete them in the globaldce (dead global
          elimination) pass, so we don't mark anything as private for now. *)
@@ -1495,8 +1497,10 @@ module Data = struct
         pp_print_option (fun ppf align -> fprintf ppf ", align %d" align)
       in
       let ident = Ident.global name in
-      pp_line ppf "%a = global %a%a%a" Ident.pp_t ident Value.pp_t value
-        pp_section section pp_align align
+      pp_line ppf "%a = %s%sglobal %a%a%a" Ident.pp_t ident
+        (if weak then "weak " else "")
+        (if hidden then "hidden " else "")
+        Value.pp_t value pp_section section pp_align align
     | External name ->
       (* CR yusumez: We don't need that ptr there... *)
       Format.pp_line ppf "%a = external global ptr" Ident.pp_t
