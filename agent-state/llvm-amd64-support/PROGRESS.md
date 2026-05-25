@@ -17,18 +17,18 @@ default disabled-probe path. The standard-compiler LLVM-backend
 `lib-atomic/test_atomic_cmpxchg.ml` failure is fixed too. The native
 `async-exns/async_exns_1.ml` output mismatch is now fixed as well.
 
-The latest SIMD follow-ups add SSE float32x4 add/sub/mul/div/sqrt lowering, SSE
-vec128 64-bit lane-move lowering, SSE vec128 interleave lowering for 32-bit
-lanes, SSE vec128 shuffle lowering for 32-bit lanes, SSE2 signed word
-multiply-add and unsigned even doubleword multiply lowering, SSE2 vec128
-shuffle lowering for 64-bit lanes and high/low 16-bit halves, SSE2 vec128
-interleave lowering for 8- and 16-bit lanes, SSE2 int16 multiply
-low/high/high-unsigned lowering, SSE2 variable and immediate integer shift
-lowering, SSE2 unsigned SAD lowering, SSE2 saturating pack/narrow lowering,
-SSE2 unsigned average lowering for 8- and 16-bit lanes, SSE/SSE2 vec128
-movemask lowering, SSE2 integer compare lowering for 8-, 16-, and 32-bit lanes,
-and vec128 byte-shift lowering. Earlier fixes publish the current allocation
-pointer to `%r15` before the X86_64
+The latest SIMD follow-ups add SSE2 float64x2 add/sub/mul/div/sqrt lowering,
+SSE float32x4 add/sub/mul/div/sqrt lowering, SSE vec128 64-bit lane-move
+lowering, SSE vec128 interleave lowering for 32-bit lanes, SSE vec128 shuffle
+lowering for 32-bit lanes, SSE2 signed word multiply-add and unsigned even
+doubleword multiply lowering, SSE2 vec128 shuffle lowering for 64-bit lanes and
+high/low 16-bit halves, SSE2 vec128 interleave lowering for 8- and 16-bit
+lanes, SSE2 int16 multiply low/high/high-unsigned lowering, SSE2 variable and
+immediate integer shift lowering, SSE2 unsigned SAD lowering, SSE2 saturating
+pack/narrow lowering, SSE2 unsigned average lowering for 8- and 16-bit lanes,
+SSE/SSE2 vec128 movemask lowering, SSE2 integer compare lowering for 8-, 16-,
+and 32-bit lanes, and vec128 byte-shift lowering. Earlier fixes publish the
+current allocation pointer to `%r15` before the X86_64
 `Raise_notrace` inline exception jump, correct LLVM `Compare_exchange`
 lowering, and add focused AMD64 probe terminator lowering plus focused AMD64
 SIMD LLVM lowering for i64x2 arithmetic, vec128 interleaves, and vec256
@@ -1886,6 +1886,15 @@ limit is raised from `l=100000` to `l=150000`.
       contains vector `fadd`, `fsub`, `fmul`, `fdiv`, and
       `llvm.sqrt.v4f32`. SSE `min/max` and approximate `rcp/rsqrt` remain
       separate semantic follow-ups.
+    - Implemented AMD64 LLVM lowering for the SSE2 float64x2 arithmetic subset
+      with direct LLVM equivalents (`caml_sse2_float64x2_{add,sub,mul,div}` and
+      `caml_sse2_float64x2_sqrt`) and rebuilt with
+      `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_float64_arith.sh` script passed
+      directly under `validation-tmp/amd64-simd-float64-arith`; the kept IR
+      contains vector `fadd`, `fsub`, `fmul`, `fdiv`, and
+      `llvm.sqrt.v2f64`. SSE2 packed float64 `min/max` remain separate
+      semantic follow-ups.
 
 ## Current Blocker
 
