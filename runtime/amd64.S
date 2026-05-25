@@ -86,6 +86,7 @@
 #define CFI_ENDPROC .cfi_endproc
 #define CFI_ADJUST(n) .cfi_adjust_cfa_offset n
 #define CFI_OFFSET(r, n) .cfi_offset r, n
+#define CFI_DEF_CFA(r, n) .cfi_def_cfa r, n
 #define CFI_DEF_CFA_OFFSET(n) .cfi_def_cfa_offset n
 #define CFI_DEF_CFA_REGISTER(r) .cfi_def_cfa_register r
 #define CFI_SAME_VALUE(r) .cfi_same_value r
@@ -97,6 +98,7 @@
 #define CFI_ENDPROC
 #define CFI_ADJUST(n)
 #define CFI_OFFSET(r, n)
+#define CFI_DEF_CFA(r, n)
 #define CFI_DEF_CFA_OFFSET(n)
 #define CFI_DEF_CFA_REGISTER(r)
 #define CFI_SAME_VALUE(r)
@@ -1171,7 +1173,15 @@ ENDFUNCTION(G(caml_start_program))
 FUNCTION(G(caml_raise_exn))
 CFI_STARTPROC
         CFI_SIGNAL_FRAME
-        ENTER_FUNCTION
+#ifdef ASM_CFI_SUPPORTED
+        /* Logically, this frame returns through the active OCaml exception
+           handler, even before %rsp has been restored from the domain state. */
+        .cfi_escape DW_CFA_def_cfa_expression, 5, \
+          DW_OP_breg + DW_REG_r14, 8*domain_field_caml_exn_handler, \
+          DW_OP_deref, DW_OP_plus_uconst, 16
+#endif
+        pushq   %rbp
+        movq    %rsp, %rbp
 LBL(caml_raise_exn):
         testq   $1, Caml_state(backtrace_active)
         jne   LBL(116)
@@ -1183,7 +1193,7 @@ LBL(116):
         movq    $0, Caml_state(backtrace_pos)
 LBL(117):
         movq    %rsp, %r13        /* Save OCaml stack pointer */
-        CFI_DEF_CFA_REGISTER(DW_REG_r13)
+        CFI_DEF_CFA(DW_REG_r13, 16)
         movq    %rax, %r12        /* Save exception bucket */
         movq    Caml_state(c_stack), %rsp
         movq    %rax, C_ARG_1     /* arg 1: exception bucket */

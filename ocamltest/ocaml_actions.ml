@@ -87,6 +87,7 @@ let env_setting env_reader default_setting =
 
 let default_ocaml_env = [|
   "TERM=dumb";
+  "OCAMLLIB=" ^ Ocaml_directories.stdlib;
   env_setting Clflags.color_reader Misc.Color.default_setting;
   env_setting Clflags.error_style_reader Misc.Error_style.default_setting;
 |]

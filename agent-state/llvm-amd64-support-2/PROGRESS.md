@@ -275,16 +275,61 @@ builds on AMD64, and simple scalar programs compile and run with
   - `opam exec -- make prefix="$PWD/_local-llvm-test-install" llvm-test-one
     TEST=llvm-codegen/amd64_smoke.ml LLVM_PATH="$LLVM_PATH"
     LLVM_BOOT_BACKEND=0`
+- Full `llvm-test` with `LLVM_BOOT_BACKEND=0` completed after the
+  no-realign-stack fix:
+  - `6663 passed`, `280 skipped`, `13 failed`, `6956 considered`
+  - `tests/typing-layouts-arrays/test_vec256_u_array.ml` passed in the full
+    run.
+  - Remaining failures were native CFI stepping, 11 quotation native/linker
+    tests resolving stub libraries from the wrong stdlib, and
+    `tests/tool-toplevel/dwarf_binary_emitter.ml`.
+- Fixed the ocamltest environment independently by setting `OCAMLLIB` to the
+  testsuite stdlib path for compiler and toplevel actions. This keeps
+  `+compiler-libs`, `+ocaml-jit`, `+unix`, and similar include paths inside
+  `_runtest` instead of falling back to the system install.
+- Added AMD64 CFI for LLVM exception recovery thunks. The generated
+  `recover_rbp_asm` frame now describes the temporary CFA as
+  `rsp + *(rsp)` until the recovered `%rbp` is available, then switches back
+  to `%rbp + 16`.
+- Fixed native CFI stepping through `caml_raise_exn` by giving the whole entry
+  path a logical CFA based on the active OCaml exception handler:
+  `*(r14 + domain_state.exn_handler) + 16`. The function uses a hand-written
+  frame-pointer prologue so generic `ENTER_FUNCTION` CFI does not override
+  that rule before the real stack restore happens.
+- Added AMD64 LLVM lowering for the float32/float64 intrinsics needed to build
+  the compiler itself with `LLVM_BACKEND=1`: `sqrtf`, float32 min/max,
+  float32-to-int64 conversion, and current/down/up/towards-zero rounding for
+  float32 and float64. The self-built LLVM compiler build completed after
+  these changes, but this is not yet a validated self-stage because that
+  compiler later raised `Not_found` when used for focused CFI compilation.
+- Fixed a local Dune rebuild hazard when regenerating `duneconf/boot.ws` by
+  clearing the Dune metadata databases along with `_build/default`; otherwise
+  Dune could report missing generated files as already built after switching
+  backend build settings.
+- Rebuilt and refreshed the local testsuite install after the latest fixes:
+  - `opam exec -- make compiler LLVM_BACKEND=0 LLVM_BOOT_BACKEND=0`
+  - `opam exec -- make prefix="$PWD/_local-llvm-test-install"
+    install_for_test LLVM_BACKEND=0 LLVM_BOOT_BACKEND=0`
+- Focused tests now passing with
+  `OCAMLPARAM="_,llvm-backend=1,llvm-path=$LLVM_PATH"`:
+  - `tests/native-cfi-stepping/test_cfi.ml`: `6 passed`
+  - `tests/quotation`: `40 passed`
+  - `tests/tool-toplevel/dwarf_binary_emitter.ml`: `2 passed`
+- Full `llvm-test` with `LLVM_BOOT_BACKEND=0` now passes after the latest
+  fixes:
+  - `6678 passed`, `280 skipped`, `0 failed`, `6958 considered`
+  - This cleared the previous 13-failure full-run baseline, including native
+    CFI stepping, quotation native/linker tests, `dwarf_binary_emitter.ml`, and
+    the product/vector array families.
 
 ## Current Blocker
 
-No immediate source blocker. Full `llvm-test` has not yet been rerun after the
-non-root safepoint preservation and AMD64 no-realign-stack fixes. Other known
-failures from the last full run include native CFI stepping, quotation
-native/linker tests with missing stub libraries, and
-`tool-toplevel/dwarf_binary_emitter.ml`.
+No immediate source blocker for `llvm-test`: it passes with
+`LLVM_BOOT_BACKEND=0`. `llvm-self-stage2-test` remains unvalidated, and a prior
+`LLVM_BACKEND=1` self-built compiler raised `Not_found` when used for focused
+CFI compilation.
 
 ## Next Step
 
-Rerun full `llvm-test`, then address `tool-toplevel/dwarf_binary_emitter.ml`
-and native CFI stepping before attempting `llvm-self-stage2-test`.
+Investigate the `LLVM_BACKEND=1` self-built compiler `Not_found`, then attempt
+`llvm-self-stage2-test`.

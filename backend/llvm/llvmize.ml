@@ -1889,11 +1889,13 @@ let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
     (* CR yusumez: I really don't like the -fragile-match... *)
     match[@warning "-fragile-match"] from, to_ with
     | _ when T.equal from to_ -> arg
-    | Double, Vector { num_of_elems = _; elem_type = Double } ->
+    | (Float | Double), Vector { num_of_elems = _; elem_type }
+      when T.equal from elem_type ->
       emit_ins t
         (I.insertelement ~vector:(V.poison to_) ~index:(V.of_int 0)
            ~to_insert:arg)
-    | Vector { num_of_elems = _; elem_type = Double }, Double ->
+    | Vector { num_of_elems = _; elem_type }, (Float | Double)
+      when T.equal to_ elem_type ->
       emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int 0))
     | Int { width_in_bits = 64 }, Int { width_in_bits = 32 } ->
       emit_ins t (I.convert Trunc ~arg ~to_)
@@ -1917,6 +1919,7 @@ let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
   in
   let vec128_arg n = load_reg_to_temp ~typ:T.vec128 t i.arg.(n) in
   let vec256_arg n = load_reg_to_temp ~typ:T.vec256 t i.arg.(n) in
+  let floatx4 = T.Vector { num_of_elems = 4; elem_type = T.float } in
   let store_vec128_res value = store_into_reg t i.res.(0) value in
   let store_vec256_res value = store_into_reg t i.res.(0) value in
   let extract_vec_elem vector idx =
@@ -1962,6 +1965,13 @@ let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
     let insert_high = vec256_of_elems base0 base1 sub0 sub1 in
     select_by_index idx insert_low insert_high
   in
+  let scalar_round typ llvm_intrinsic =
+    let arg = load_reg_to_temp ~typ t i.arg.(0) in
+    call_llvm_intrinsic t
+      (llvm_intrinsic ^ "." ^ llvm_intrinsic_type_suffix typ)
+      [arg] typ
+    |> store_into_reg t i.res.(0)
+  in
   (* Intrinsics must not allocate on the OCaml heap. See
      [Arch.operation_allocates]. *)
   match intrinsic_name with
@@ -1969,6 +1979,21 @@ let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
     do_intrinsic_call "x86.sse2.min.sd" [T.doublex2; T.doublex2] T.doublex2
   | "caml_sse2_float64_max" ->
     do_intrinsic_call "x86.sse2.max.sd" [T.doublex2; T.doublex2] T.doublex2
+  | "caml_simd_float32_min" ->
+    do_intrinsic_call "x86.sse.min.ss" [floatx4; floatx4] floatx4
+  | "caml_simd_float32_max" ->
+    do_intrinsic_call "x86.sse.max.ss" [floatx4; floatx4] floatx4
+  | "caml_simd_cast_float32_int64" ->
+    do_intrinsic_call "x86.sse.cvtss2si64" [floatx4] T.i64
+  | "sqrtf" -> scalar_round T.float "sqrt"
+  | "caml_simd_float32_round_current" -> scalar_round T.float "nearbyint"
+  | "caml_simd_float32_round_neg_inf" -> scalar_round T.float "floor"
+  | "caml_simd_float32_round_pos_inf" -> scalar_round T.float "ceil"
+  | "caml_simd_float32_round_towards_zero" -> scalar_round T.float "trunc"
+  | "caml_simd_float64_round_current" -> scalar_round T.double "nearbyint"
+  | "caml_simd_float64_round_neg_inf" -> scalar_round T.double "floor"
+  | "caml_simd_float64_round_pos_inf" -> scalar_round T.double "ceil"
+  | "caml_simd_float64_round_towards_zero" -> scalar_round T.double "trunc"
   | "caml_int64x2_const1" ->
     let arg = load_reg_to_temp ~typ:T.i64 t i.arg.(0) in
     vec128_of_elems arg arg |> store_vec128_res
@@ -3770,15 +3795,20 @@ let define_restore_rbp t =
         add_module_asm t
           [ "  .text";
             recover_rbp_asm ^ ":";
+            "  .cfi_startproc";
+            "  .cfi_escape 0x0f, 6, 0x77, 0, 0x77, 0, 0x06, 0x22";
+            "  .cfi_offset %rbp, -16";
             "  movq %rax, %r11";
             "  movq %r14, %rax";
             "  movq %r14, %rcx";
             "  movq (%rsp), %rbp";
             "  leaq -16(%rsp,%rbp), %rbp";
+            "  .cfi_def_cfa %rbp, 16";
             "  addq $16, %rsp";
             "  movq " ^ recover_rbp_var ^ "@GOTPCREL(%rip), %rbx";
             "  movq (%rbx), %rbx";
-            "  jmpq *%rbx" ];
+            "  jmpq *%rbx";
+            "  .cfi_endproc" ];
         add_data_def t
           (LL.Data.external_ (LL.Ident.to_string_hum recover_rbp_asm_ident));
         add_data_def t
