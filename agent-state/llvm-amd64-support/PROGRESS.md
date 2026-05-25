@@ -49,6 +49,13 @@ descriptor for the post-call return address, while the following
 `caml_output_value` call did have descriptors. A patched stage now records the
 formerly missing `camlCmi_format__marshal` return address.
 
+The AMD64 branch has now merged the updated
+`jujacobs/llvm-backend-integration` base. The merge kept the AMD64 LLVM
+backend conflict resolutions and restored the AVX2
+`caml_avx2_int16x16_mul_round` selector to the generated 256-bit
+`vpmulhrsw_Y_Y_Ym256` helper after the integration merge selected the stale
+non-256-bit name.
+
 The latest stack-pressure fix safely pools X86_64 preserved GC-root stack slots
 using full CFG liveness interference instead of safepoint-only disjointness.
 This keeps simultaneously live preserved roots in distinct slots, but lets
@@ -231,6 +238,41 @@ limit is raised from `l=100000` to `l=150000`.
     stdlib.
 - Validation done this turn:
   - `git diff --check` passed.
+  - Checked PR state with GitHub CLI: draft PR
+    https://github.com/julesjacobs/oxcaml/pull/10 was open but reported
+    `mergeStateStatus: DIRTY` against `jujacobs/llvm-backend-integration`;
+    no checks were reported on the branch at that time.
+  - Merged `origin/jujacobs/llvm-backend-integration` into
+    `jujacobs/llvm-amd64-support`. Conflicts were in AMD64/LLVM backend files
+    plus LLVM stage helper scripts and X86 vendored LLVM target files; the
+    resolution preserved the AMD64 LLVM backend versions for those files.
+  - A standard `make compiler -j "$(nproc)"` under the
+    `oxcaml-5.4.0+oxcaml` switch initially failed after the merge because
+    `backend/amd64/simd_selection.ml` referenced the stale
+    `vpmulhrsw_Y_Y_Y` selector. Restoring
+    `vpmulhrsw_Y_Y_Ym256` for `caml_avx2_int16x16_mul_round` fixed the build;
+    the rerun of `make compiler -j "$(nproc)"` passed.
+  - The updated integration base adds `%with_stack_preemptible`, so the stale
+    checkout-local `_install` compiler could not bootstrap the merged stdlib.
+    Running `make install` refreshed `_install`; after that,
+    `_install/bin/ocamlc.opt` recognized the primitive.
+  - Built a fresh AMD64 LLVM stage from the refreshed `_install` in
+    `validation-tmp/integration_merge_stage` with normal Dune parallelism:
+    `DUNE_BUILD_FLAGS="-j $(nproc)" ./tools/build-llvm-stage5-install.sh`.
+    Runtime build evidence: `148` wrapper lines / `73` fresh IR. Main build
+    evidence: `2228` wrapper lines / `1105` fresh IR. Stage install:
+    `validation-tmp/integration_merge_stage/stage_install`.
+  - Ran focused LLVM-codegen ocamltest from that merged stage install:
+    `STAGE_INSTALL=validation-tmp/integration_merge_stage/stage_install`,
+    `STAGE_BUILD=validation-tmp/integration_merge_stage/main_build`,
+    `LIST=validation-tmp/integration_merge_stage/llvm-codegen-list.txt`,
+    `LLVM_TESTSUITE_PARALLEL=auto`, and `LLVM_TESTSUITE_JOBS=$(nproc)`.
+    GNU parallel was unavailable, so the script used the serial `one` target
+    with `make -j$(nproc)`. Result: `25` tests passed, `15` skipped,
+    `0` failed, `0` unexpected errors, `40` considered. The focused AMD64
+    tests including `c_call_stackmap.ml` passed. Wrapper evidence:
+    `24` wrapper lines / `12` fresh IR. Log:
+    `validation-tmp/integration_merge_stage/llvm_codegen_ocamltest.log`.
   - Reduced the intermittent self-stage2
     `caml_scan_stack: missing frame descriptor` abort to a missing descriptor
     after the first C call in `camlCmi_format__marshal_11_39_code`
@@ -1287,7 +1329,9 @@ limit is raised from `l=100000` to `l=150000`.
 No focused blocker remains for `llvm-install` with a writable prefix, the
 enabled Linux/AMD64 `llvm-codegen` tests, self-stage install/smoke, full
 self-stage ocamltest, self-stage2 install/smoke, or full self-stage2
-ocamltest. The previously intermittent self-stage2
+ocamltest. After merging the updated integration base, a standard compiler
+build and a focused merged-stage AMD64 LLVM-codegen run also pass. The
+previously intermittent self-stage2
 `caml_scan_stack: missing frame descriptor` abort had a concrete fixed
 reproducer: the first external C call in `camlCmi_format__marshal_11_39_code`
 now has a frame descriptor in the patched stage2b compiler, the previously
@@ -1308,11 +1352,10 @@ default-stack boot-context build pass without
 `OCAMLRUNPARAM=b,Xmain_stack_size=64M`. Broader self-stage/ocamltest validation
 now passes on top of the SIMD/XMM GC slow-path, post-raise CFI, and
 `runtime-errors/stackoverflow.ml` stack-budget fixes. Broader self-stage2
-validation now needs the intermittent stage2 compiler missing-frame-descriptor
-abort reduced or fixed.
-The OxCaml PR is still draft; as of the latest check after the shared-type
-cleanup, GitHub reported `built with flambda-backend, flambda2` passed and the
-rest of CI still pending.
+validation also passes after the external C-call stackmap fix.
+The OxCaml PR is still draft; before the integration merge commit is pushed,
+GitHub reports it as dirty against `jujacobs/llvm-backend-integration` and no
+checks are reported.
 
 ## Next Step
 
