@@ -40,6 +40,14 @@ LLVM runtime-register spill slots after the direct exception-runtime entry
 returns to the exception edge, preventing optimized IR from reloading stale
 domain-state/allocation-pointer values on handler entry.
 
+The latest stack-pressure fix safely pools X86_64 preserved GC-root stack slots
+using full CFG liveness interference instead of safepoint-only disjointness.
+This keeps simultaneously live preserved roots in distinct slots, but lets
+non-overlapping preserved roots share storage. A clean patched install now
+passes, focused AMD64 LLVM-codegen tests pass through the installed compiler,
+and a fresh default-stack boot-context build passes without
+`OCAMLRUNPARAM=b,Xmain_stack_size=64M`.
+
 ## Evidence
 
 - OxCaml branch: `jujacobs/llvm-amd64-support`
@@ -896,6 +904,50 @@ domain-state/allocation-pointer values on handler entry.
       `OCAMLRUNPARAM=b,Xmain_stack_size=64M` and normal build parallelism
       passed with `RUN_SMOKE=0`: 1,678 wrapper invocations and 827 fresh IR
       compilations.
+  - Implemented safe X86_64 preserved-root slot pooling in
+    `backend/llvm/llvmize.ml`:
+    - The new helper builds an interference graph from CFG liveness `before`
+      and `across` sets, adds tailcall-self parallel-assignment interference
+      between terminator arguments and function arguments, and greedily colors
+      only preserved value registers.
+    - `alloca_regs` reuses one `alloca` for each X86_64 liveness color class.
+      AArch64 and non-X86_64 targets keep the previous one-slot-per-register
+      behavior.
+    - `ARCH=amd64 RUNTIME_DIR=runtime dune build ocamloptcomp.cma` exits 0
+      after regenerating the clean build's configure/dune files.
+    - `opam exec --switch=oxcaml-5.4.0+oxcaml -- ocamlformat --check
+      backend/llvm/llvmize.ml` exits 0, and `git diff --check` exits 0.
+    - A clean `make llvm-install ARCH=amd64 LLVM_BOOT_BACKEND=0
+      LLVM_PATH=/tmp/oxcaml-agent-llvm-amd64-support/clang-wrapper-opt
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install-pooled` exits 0 with
+      normal build parallelism.
+    - The patched installed compiler reports version `5.2.0+ox`; its BuildID
+      is `e84aedaa0f007fd6c2c1301adb88ebe3021ff0fc`.
+    - A direct installed-compiler smoke with `-llvm-backend` and the
+      agent-local wrapper prints `11`.
+    - Key patched `ocamlopt.opt` stack frames are much smaller than the current
+      pushed backend: `Typecore__type_expect` is 400 bytes,
+      `Closure_conversion__cont` is 256 bytes,
+      `Lambda_to_flambda_primitives__convert_lprim` is 160 bytes, and
+      `Flambda2_reaper__Points_to_analysis__entry` is 80 bytes. Previously
+      observed current-backend values were roughly 4,112 bytes, 672 bytes,
+      4,464 bytes, and 6,128 bytes respectively.
+    - A fresh default-stack boot-context build in
+      `/tmp/oxcaml-agent-llvm-amd64-support/pooled_boot_context_build` passes
+      with `RUN_SMOKE=0` and without `OCAMLRUNPARAM=b,Xmain_stack_size=64M`:
+      1,678 wrapper invocations and 825 fresh IR compilations.
+    - Focused manual AMD64 LLVM-codegen regressions compile and run through
+      the patched installed compiler:
+      `amd64_core_ops.ml`, `amd64_direct_call_stackmap.ml`,
+      `amd64_exceptions.ml`, `amd64_raise_notrace_alloc.ml`, and
+      `amd64_stack_growth.ml`.
+    - `make llvm-test-one DIR=llvm-codegen ...` was not rerun successfully in
+      the local checkout after the clean install because `_build/default` was
+      missing generated dependency/include files such as
+      `duneconf/camlinternalquote_if_missing_from_stdlib`, then many `.d` and
+      `.sexp` files. This is recorded as a stale local build-context issue;
+      use the direct installed-compiler tests above as the focused result for
+      this patch.
 
 ## Current Blocker
 
@@ -907,26 +959,22 @@ prefix is not writable in this environment, so use an explicit agent-local
 single `TEST=...` after `eval "$(../../../scripts/agent-tmp-env)"`, because the
 agent env may set `LIST` for broader test runs.
 
-The previous stack-usage caveat is now narrowed. With a corrected local
-optimizing wrapper, the standard explicit AMD64 `-llvm-backend` path matches
-the native backend on the small non-tail recursion threshold check, and the
-focused Linux/AMD64 `llvm-codegen` suite passes with the refreshed stage0
-install. Self-stage without `OCAMLRUNPARAM` still overflows while compiling the
-generated `amd64_simd_instrs.ml`; the single failing compile passes with
-`OCAMLRUNPARAM=b,Xmain_stack_size=64M`, and GDB attributes the default-stack
-overflow to deep Flambda2 closure-conversion recursion over that generated
-file. A fresh boot-context build with `Xmain_stack_size=64M` now passes. The
-latest default-stack boot-context attempt also produced one non-reproduced
-`ocamlc.opt` `simd.ml` missing-frame-descriptor abort that should stay on the
-watch list while investigating stack pressure and frame metadata.
+The previous stack-usage caveat is now narrowed further. With a corrected
+local optimizing wrapper, the standard explicit AMD64 `-llvm-backend` path
+matches the native backend on the small non-tail recursion threshold check, and
+the focused Linux/AMD64 `llvm-codegen` suite passes with the refreshed stage0
+install. The safe X86_64 preserved-root slot pooling patch also lets the fresh
+default-stack boot-context build pass without
+`OCAMLRUNPARAM=b,Xmain_stack_size=64M`. Broader self-stage/ocamltest validation
+still needs a fresh run on top of this patch.
 The OxCaml PR is still draft; as of the latest check after the shared-type
 cleanup, GitHub reported `built with flambda-backend, flambda2` passed and the
 rest of CI still pending.
 
 ## Next Step
 
-Continue investigating the remaining default-stack self-stage overflow without
-committing the unsafe reusable-root-slot experiment, and watch for recurrence
-of the `simd.ml` byte-compiler frame-scan abort. Keep using normal build
-parallelism; avoid only concurrent top-level `make`/`dune` commands in this
-checkout because of the shared lockfile.
+Run a fresh broader self-stage/ocamltest validation on top of the safe
+preserved-root slot pooling patch, and watch for recurrence of the earlier
+`simd.ml` byte-compiler frame-scan abort. Keep using normal build parallelism;
+avoid only concurrent top-level `make`/`dune` commands in this checkout because
+of the shared lockfile.

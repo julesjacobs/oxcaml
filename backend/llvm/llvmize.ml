@@ -4095,6 +4095,102 @@ let preserved_reg_slots liveness cfg =
     (Reg.Set.union across_basic_safepoints across_terminator_safepoints)
     across_traps
 
+let x86_64_pooled_preserved_reg_slots liveness (cfg : Cfg.t) preserved_reg_slots
+    =
+  let poolable =
+    Reg.Set.filter (fun reg -> Cmm.is_val reg.typ) preserved_reg_slots
+  in
+  let interferes = Reg.Tbl.create 0 in
+  let add_interference left right =
+    if not (Reg.same left right)
+    then (
+      let add left right =
+        let old =
+          Reg.Tbl.find_opt interferes left
+          |> Option.value ~default:Reg.Set.empty
+        in
+        Reg.Tbl.replace interferes left (Reg.Set.add right old)
+      in
+      add left right;
+      add right left)
+  in
+  let add_live_set regs =
+    let regs = Reg.Set.inter regs poolable |> Reg.Set.elements in
+    let rec add_one reg = function
+      | [] -> ()
+      | other :: rest ->
+        add_interference reg other;
+        add_one reg rest
+    in
+    let rec loop = function
+      | [] -> ()
+      | reg :: rest ->
+        add_one reg rest;
+        loop rest
+    in
+    loop regs
+  in
+  InstructionId.Tbl.iter
+    (fun _ { Cfg_liveness.before; across } ->
+      add_live_set before;
+      add_live_set across)
+    liveness;
+  Cfg.fold_blocks cfg
+    ~f:(fun _ block () ->
+      match block.terminator.desc with
+      | Tailcall_self _ ->
+        let regs =
+          Reg.Set.union
+            (Reg.set_of_array block.terminator.arg)
+            (Reg.set_of_array cfg.fun_args)
+        in
+        add_live_set regs
+      | Tailcall_func _ | Return | Never | Always _ | Parity_test _
+      | Truth_test _ | Float_test _ | Int_test _ | Switch _ | Call _
+      | Call_no_return _ | Raise _ | Prim _ | Invalid _ ->
+        ())
+    ~init:();
+  let interferes_with_class reg class_regs =
+    let reg_interferences =
+      Reg.Tbl.find_opt interferes reg |> Option.value ~default:Reg.Set.empty
+    in
+    List.exists (fun other -> Reg.Set.mem other reg_interferences) class_regs
+  in
+  let degree reg =
+    Reg.Tbl.find_opt interferes reg
+    |> Option.value ~default:Reg.Set.empty
+    |> Reg.Set.cardinal
+  in
+  let regs =
+    Reg.Set.elements poolable
+    |> List.sort (fun left right ->
+        let degree_cmp = Int.compare (degree right) (degree left) in
+        if degree_cmp <> 0 then degree_cmp else Reg.compare left right)
+  in
+  let representative = Reg.Tbl.create 0 in
+  let classes = ref [] in
+  List.iter
+    (fun reg ->
+      match
+        List.find_opt
+          (fun (_rep, class_regs) -> not (interferes_with_class reg class_regs))
+          !classes
+      with
+      | Some (rep, class_regs) ->
+        Reg.Tbl.replace representative reg rep;
+        classes
+          := List.map
+               (fun ((class_rep, _) as class_) ->
+                 if Reg.same class_rep rep
+                 then class_rep, reg :: class_regs
+                 else class_)
+               !classes
+      | None ->
+        Reg.Tbl.replace representative reg reg;
+        classes := (reg, [reg]) :: !classes)
+    regs;
+  representative
+
 let reg_listed_in_signature (reg : Reg.t) =
   match reg.loc with
   | Reg _ | Stack (Incoming _) -> true
@@ -4200,6 +4296,21 @@ let prepare_fun_info t (cfg : Cfg.t) =
    to that block of memory instead of being allocated on the stack for
    uniformity. *)
 let alloca_regs t (cfg : Cfg.t) arg_values arg_regs =
+  let pooled_preserved_reg_slots =
+    match Target_system.architecture (), (get_fun_info t).liveness with
+    | Target_system.X86_64, Some liveness ->
+      x86_64_pooled_preserved_reg_slots liveness cfg
+        (get_fun_info t).preserved_reg_slots
+    | Target_system.X86_64, None
+    | Target_system.AArch64, (Some _ | None)
+    | Target_system.IA32, (Some _ | None)
+    | Target_system.ARM, (Some _ | None)
+    | Target_system.POWER, (Some _ | None)
+    | Target_system.Z, (Some _ | None)
+    | Target_system.Riscv, (Some _ | None) ->
+      Reg.Tbl.create 0
+  in
+  let pooled_slot_allocas = Reg.Tbl.create 0 in
   let alloca_align_for_reg (reg : Reg.t) =
     match reg.typ with
     | Cmm.Vec256 | Cmm.Vec512 -> Some 16
@@ -4220,13 +4331,32 @@ let alloca_regs t (cfg : Cfg.t) arg_values arg_regs =
        to use the stack for us... *)
     | Unknown | Reg _ | Stack (Local _ | Incoming _ | Outgoing _) -> (
       let alloca'd =
-        emit_ins
-          ~comment:
-            (F.asprintf "%a"
-               (fun ppf reg -> F.pp_comment ppf "%a" Printreg.reg reg)
-               reg)
-          t
-          (I.alloca ?align:(alloca_align_for_reg reg) (T.of_reg reg))
+        match Reg.Tbl.find_opt pooled_preserved_reg_slots reg with
+        | None ->
+          emit_ins
+            ~comment:
+              (F.asprintf "%a"
+                 (fun ppf reg -> F.pp_comment ppf "%a" Printreg.reg reg)
+                 reg)
+            t
+            (I.alloca ?align:(alloca_align_for_reg reg) (T.of_reg reg))
+        | Some representative -> (
+          match Reg.Tbl.find_opt pooled_slot_allocas representative with
+          | Some alloca'd -> alloca'd
+          | None ->
+            let alloca'd =
+              emit_ins
+                ~comment:
+                  (F.asprintf "%a"
+                     (fun ppf reg -> F.pp_comment ppf "%a" Printreg.reg reg)
+                     representative)
+                t
+                (I.alloca
+                   ?align:(alloca_align_for_reg representative)
+                   (T.of_reg representative))
+            in
+            Reg.Tbl.add pooled_slot_allocas representative alloca'd;
+            alloca'd)
       in
       set_alloca_for_reg t reg alloca'd;
       match init with
