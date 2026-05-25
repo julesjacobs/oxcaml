@@ -9,7 +9,8 @@ Fresh agent workspace created. No claim yet.
 ## Evidence
 
 - OxCaml branch: `jujacobs/llvm-fp-contract`
-- OxCaml PR: pending
+- OxCaml PR: https://github.com/julesjacobs/oxcaml/pull/17
+- Initial state commit: `9805def1dbff`
 - Vendored LLVM path: `oxcaml/vendor/llvm-project`
 - Agent state path: `agent-state/llvm-fp-contract`
 
