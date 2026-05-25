@@ -4,8 +4,8 @@ Last updated: 2026-05-25.
 
 ## Current Claim
 
-Iterations 1, 2, 3, 4, 5, and 6 are committed or ready to commit; iteration 6
-is reviewed and validated.
+Iterations 1, 2, 3, 4, 5, 6, and 7 are committed or ready to commit; iteration
+7 is reviewed and validated.
 
 ## Evidence
 
@@ -23,7 +23,7 @@ None.
 ## Iteration State
 
 - Target: 10 completed iterations.
-- Completed iterations: 6.
+- Completed iterations: 7.
 - Committed cleanups:
   - Iteration 1: simplified deopt argument list construction in
     `backend/llvm/llvmize.ml` with `List.concat_map`.
@@ -38,6 +38,8 @@ None.
     `backend/llvm/llvm_ir.ml`'s `Instruction.pp_t`.
   - Iteration 6: shared integer vector immediate construction in
     `backend/llvm/llvmize.ml`.
+  - Iteration 7: combined type-to-string and sanitize steps in
+    `backend/llvm/llvmize.ml`'s `add_c_call_wrapper`.
 - Dropped ideas: none yet.
 - Stop condition: stop after 10 completed iterations, then summarize committed
   cleanups, dropped ideas, and remaining promising targets.
@@ -345,7 +347,54 @@ Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
 are broad LLVM backend validation runs, and this commit only changes
 behavior-preserving SIMD immediate construction sharing.
 
+## Iteration 7 Candidate
+
+Path: self-proposed candidate.
+
+Candidate: combine the type-to-string and sanitize steps in
+`backend/llvm/llvmize.ml`'s `add_c_call_wrapper` signature construction.
+
+Why likely useful: signature construction currently maps over the same list
+twice. Combining the two pure per-type transformations keeps the output the same
+while making the intended transformation from type to sanitized component
+direct.
+
+Review gate: passed after five human-like reviews of the final diff.
+
+Review result: all five reviewers judged the cleanup behavior-preserving and
+proportionate. Three reviewers requested removing a duplicate `Next Step`
+heading in this progress file; that finding was accepted and fixed. One
+reviewer suggested a plainer lambda style, and one reviewer found that the first
+accepted lambda was not ocamlformatted; both findings were accepted and fixed.
+
+Validation result:
+
+- `git diff --check`: passed.
+- `eval "$(../../../scripts/agent-tmp-env)" && opam exec
+  --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`: passed.
+
+## Testing Story for This Commit
+
+Change: combine the type-to-string and sanitize steps in
+`backend/llvm/llvmize.ml`'s `add_c_call_wrapper` signature construction, and
+record iteration 7 state in this progress file.
+Risk: if the rewrite is wrong, generated C-call wrapper names could change,
+causing wrapper reuse or declaration names to differ.
+Validation: `git diff --check`; `eval "$(../../../scripts/agent-tmp-env)" &&
+opam exec --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`.
+Full LLVM validation: not run for this commit; the rewrite preserves the same
+per-type transformation, order, empty-list behavior, and `String.concat`
+separator.
+Stage2 verification: not run for this commit; self-stage2 is intentionally
+deferred for the same reason as full LLVM validation.
+Why this is enough: five human-like reviews checked that the wrapper-name
+components are unchanged; the build check covers type and syntax validity.
+Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
+`make llvm-self-stage2-test LLVM_PATH="$LLVM_PATH"` are deferred because they
+are broad LLVM backend validation runs, and this commit only changes a
+behavior-preserving local list transformation.
+
 ## Next Step
 
-Commit iteration 6, push it to the draft PR branch, then choose the next
+Commit iteration 7, push it to the draft PR branch, then choose the next
 reviewed cleanup candidate.

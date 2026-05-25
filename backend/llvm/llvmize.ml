@@ -536,8 +536,9 @@ let sanitize_symbol_component s =
 
 let add_c_call_wrapper t c_fun_name ~args ~res =
   let signature =
-    List.map T.to_string (args @ res)
-    |> List.map sanitize_symbol_component
+    List.map
+      (fun typ -> sanitize_symbol_component (T.to_string typ))
+      (args @ res)
     |> String.concat "."
   in
   let wrapper_name =
