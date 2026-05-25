@@ -451,6 +451,22 @@ def RetCC_X86_64_OxCaml : CallingConv<[
   CCIfType<[f32, f64], CCAssignToReg<[
     XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7,
     XMM8, XMM9, XMM10, XMM11, XMM12, XMM13, XMM14, XMM15
+  ]>>,
+
+  // OxCaml represents 128/256/512-bit SIMD values as integer vectors in LLVM.
+  CCIfType<[v2i64], CCAssignToReg<[
+    XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7,
+    XMM8, XMM9, XMM10, XMM11, XMM12, XMM13, XMM14, XMM15
+  ]>>,
+
+  CCIfType<[v4i64], CCAssignToReg<[
+    YMM0, YMM1, YMM2, YMM3, YMM4, YMM5, YMM6, YMM7,
+    YMM8, YMM9, YMM10, YMM11, YMM12, YMM13, YMM14, YMM15
+  ]>>,
+
+  CCIfType<[v8i64], CCAssignToReg<[
+    ZMM0, ZMM1, ZMM2, ZMM3, ZMM4, ZMM5, ZMM6, ZMM7,
+    ZMM8, ZMM9, ZMM10, ZMM11, ZMM12, ZMM13, ZMM14, ZMM15
   ]>>
 ]>;
 
@@ -752,6 +768,22 @@ def CC_X86_64_OxCaml : CallingConv<[
   CCIfType<[f32, f64], CCAssignToReg<[
     XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7,
     XMM8, XMM9, XMM10, XMM11, XMM12, XMM13, XMM14, XMM15
+  ]>>,
+
+  // OxCaml represents 128/256/512-bit SIMD values as integer vectors in LLVM.
+  CCIfType<[v2i64], CCAssignToReg<[
+    XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7,
+    XMM8, XMM9, XMM10, XMM11, XMM12, XMM13, XMM14, XMM15
+  ]>>,
+
+  CCIfType<[v4i64], CCAssignToReg<[
+    YMM0, YMM1, YMM2, YMM3, YMM4, YMM5, YMM6, YMM7,
+    YMM8, YMM9, YMM10, YMM11, YMM12, YMM13, YMM14, YMM15
+  ]>>,
+
+  CCIfType<[v8i64], CCAssignToReg<[
+    ZMM0, ZMM1, ZMM2, ZMM3, ZMM4, ZMM5, ZMM6, ZMM7,
+    ZMM8, ZMM9, ZMM10, ZMM11, ZMM12, ZMM13, ZMM14, ZMM15
   ]>>
 ]>;
 

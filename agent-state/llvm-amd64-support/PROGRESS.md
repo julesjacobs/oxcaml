@@ -986,6 +986,25 @@ stored into their allocas before the first CFG instruction is emitted.
       boot-context build with that follow-up passed with `1678` wrapper lines
       and `825` fresh IR. This does not fix the array sort or ABI clusters,
       which reproduce without pooling.
+    - Added X86_64 OxCaml calling-convention rules for LLVM vector value types
+      (`v2i64`, `v4i64`, `v8i64`) in both argument and return lowering. Rebuilt
+      the local wrapper tools with
+      `cmake --build /tmp/oxcaml-agent-llvm-amd64-support/llvm-build --target llc opt --parallel`;
+      this regenerated `X86GenCallingConv.inc` and rebuilt `llc`/`opt`.
+    - A direct temporary repro at
+      `validation-tmp/min_sii_direct` passes through the patched wrapper:
+      constructing two `int64x2` values with `vec128_of_int64s`, reading them
+      back with `vec128_low_int64`/`vec128_high_int64`, and passing
+      `float32, int64x2, int64x2` to a noalloc C stub prints matching ML/C
+      bits. Exact compile used the entry-interference boot compiler with
+      `OCAMLPARAM="_,llvm-backend=1,llvm-path=/tmp/oxcaml-agent-llvm-amd64-support/clang-wrapper-opt"`.
+    - The full generated `unboxed-primitive-args` direct repro still fails
+      after the vector CC patch. The generated assembly for simple wrappers
+      such as `test_v_sII` now passes vector C arguments in `xmm0..` as
+      expected, and a direct `gdb` breakpoint at `test_v_IIfx` showed valid
+      vector registers on at least one call. The remaining mismatch appears to
+      involve the large harness's argument construction/preservation path, not
+      the basic noalloc vector C-call edge.
 
 ## Current Blocker
 
@@ -1013,7 +1032,7 @@ rest of CI still pending.
 ## Next Step
 
 Reduce and fix the remaining full-suite failures, starting with the native
-unboxed array/iarray sort/permutation cluster and
-`unboxed-primitive-args/test.ml` mixed unboxed primitive ABI mismatches. Keep
-using normal build parallelism; avoid only concurrent top-level `make`/`dune`
-commands in this checkout because of the shared lockfile.
+unboxed array/iarray sort/permutation cluster and the remaining
+`unboxed-primitive-args/test.ml` mixed unboxed primitive harness mismatches.
+Keep using normal build parallelism; avoid only concurrent top-level `make` or
+`dune` commands in this checkout because of the shared lockfile.
