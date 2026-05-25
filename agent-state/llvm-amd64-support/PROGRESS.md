@@ -63,6 +63,10 @@ passes a direct `llc` prologue smoke test for a stack-frame-using
     standalone stackmap consume that label. This fixes call stackmaps whose
     MachineInstr position is after LLVM's return-value copies, where the
     runtime needs the actual post-call return address.
+  - `backend/llvm/llvmize.ml` now lowers X86_64 `Pushtrap` without routing the
+    normal `wrap_try` return through an unmodelled `%rax` write/read pair. The
+    normal path branches on the SSA `wrap_try` result, while exception recovery
+    reads the bucket with a fixed `={rax}` inline-asm constraint.
 - Validation done this turn:
   - `git diff --check` passed.
   - Added local opam repository `tools/ci/local-opam` as `oxcaml-local`.
@@ -135,29 +139,42 @@ passes a direct `llc` prologue smoke test for a stack-frame-using
     `_build/main/tools/objinfo.exe ocamloptcomp.cma` now exits 0 and writes
     34,474 lines, confirming the `caml_apply3` missing-frame-descriptor
     reproducer is fixed.
+  - Diagnosed the next `tools/merge_archives.exe` crash as X86_64 exception
+    lowering relying on `%rax` without telling LLVM. In
+    `Bytelink.check_consistency`, the old lowering wrote the zero `wrap_try`
+    result to `%rax`, branched to the shared exception-entry block, and then
+    read `%rax`; LLVM was free to reuse `%rax` for the
+    `camlBytelink__check_consistency_138 + 0x18` closure address before the
+    read, causing `caml_reraise_exn` to propagate that closure as a bogus
+    exception bucket.
+  - After rebuilding the boot compiler under the
+    `oxcaml-5.4.0+oxcaml` opam switch, regenerating `duneconf/main.ws` with
+    `LLVM_BACKEND=1`, and forcing `_build/main` regeneration, the regenerated
+    `bytelink.ll` contains `asm sideeffect "", "={rax}"()` for exception
+    bucket reads and no longer contains the old `movq $0, %rax` / `mov %rax,
+    $0` pair.
+  - Focused validation now passes:
+    - `_build/main/tools/merge_archives.exe /tmp/merge_repro.cma
+      ocamloptcomp.cma` exits 0.
+    - `_build/main/tools/objinfo.exe ocamloptcomp.cma` exits 0 and writes
+      34,474 lines.
+  - `make llvm-install` with
+    `ARCH=amd64 OCAMLPARAM='_,keep-llvmir=1'
+    BUILD_OCAMLPARAM='_,keep-llvmir=1' LLVM_PATH="$LLVM_PATH"
+    LLVM_BOOT_BACKEND=0` now reaches the final install rsync. The default
+    `/usr/local` prefix fails with permission denied, but rerunning as
+    `make llvm-install prefix=/tmp/oxcaml-agent-llvm-amd64-support/install`
+    succeeds.
 
 ## Current Blocker
 
-Focused compiler/install validation now reaches the
-`ocamloptcomp_with_flambda2.cma` merge step. The LLVM-built
-`tools/merge_archives.exe` aborts while reading `ocamloptcomp.cma`:
-
-`Fatal error: exception \001...`
-
-With `OCAMLRUNPARAM=b`, the backtrace points through
-`Bytelibrarian.copy_object_file` called by `tools/merge_archives.ml`.
-`_build/main/tools/objinfo.exe ocamloptcomp.cma` now reads the archive
-successfully after the X86 stackmap label fix, so the remaining failure appears
-to be a separate LLVM-built tool/runtime miscompile rather than an obviously
-corrupt `.cma` or the previous missing-frame-descriptor crash.
+No focused blocker remains for `llvm-install` with a writable prefix. The
+default `/usr/local` install prefix is not writable in this environment, so use
+an explicit agent-local `prefix=...` for install validation.
 
 ## Next Step
 
-Reduce the `tools/merge_archives.exe` failure to the smallest LLVM-built native
-program that reads a `.cma`/marshaled value and raises the malformed exception,
-then fix the underlying AMD64 LLVM lowering/runtime issue. Rerun:
-`ARCH=amd64 OCAMLPARAM='_,keep-llvmir=1' BUILD_OCAMLPARAM='_,keep-llvmir=1' LLVM_PATH="$LLVM_PATH" LLVM_BOOT_BACKEND=0 make llvm-install`,
-then:
+Run the first focused LLVM tests with the installed compiler:
 `ARCH=amd64 LLVM_PATH="$LLVM_PATH" make llvm-test-one TEST=llvm-codegen/arithmetic`.
 If that exposes an AMD64 lowering/runtime failure, reduce it before expanding
 the implementation.

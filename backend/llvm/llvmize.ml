@@ -3558,14 +3558,21 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
             emit_label t try_label;
             exn_bucket
           | Target_system.X86_64 ->
+            let wrap_try_res =
+              match wrap_try_res with
+              | [wrap_try_res] -> wrap_try_res
+              | _ -> Misc.fatal_error "wrap_try returned unexpected arity"
+            in
+            let wrap_try_res_is_zero =
+              emit_ins t (I.icmp Ieq ~arg1:wrap_try_res ~arg2:(V.of_int 0))
+            in
             emit_ins_no_res t
-              (I.inline_asm ~asm:"movq $0, %rax" ~constraints:"r"
-                 ~args:wrap_try_res ~res_type:T.Or_void.void ~sideeffect:true);
-            emit_ins_no_res t (I.br exn_entry);
+              (I.br_cond ~cond:wrap_try_res_is_zero ~ifso:try_label
+                 ~ifnot:exn_entry);
             emit_label t exn_entry;
             let exn_bucket =
               emit_ins t
-                (I.inline_asm ~asm:"mov %rax, $0" ~constraints:"=r" ~args:[]
+                (I.inline_asm ~asm:"" ~constraints:"={rax}" ~args:[]
                    ~res_type:(Some T.i64) ~sideeffect:true)
             in
             (* If it's nonzero, we have an exception. Otherwise, go to the try
