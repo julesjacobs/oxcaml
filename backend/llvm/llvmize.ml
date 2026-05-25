@@ -3666,6 +3666,9 @@ let invoke_clang_with_llvmir ~output_filename ~input_filename ~extra_flags =
       then ["-fno-omit-frame-pointer"]
       else ["-fomit-frame-pointer"; "-momit-leaf-frame-pointer"]
   in
+  let pic_flags =
+    if !Clflags.pic_code || !Clflags.dlcode then ["-fPIC"] else []
+  in
   let llvm_flags = [!Oxcaml_flags.llvm_flags] in
   Ccomp.command
     (String.concat " "
@@ -3673,7 +3676,7 @@ let invoke_clang_with_llvmir ~output_filename ~input_filename ~extra_flags =
        @ ["-o"; Filename.quote output_filename]
        @ ["-x ir"; Filename.quote input_filename]
        @ ["-O3"; "-S"; "-Wno-override-module"]
-       @ fixed_reg_flags @ fp_flags @ llvm_flags @ extra_flags))
+       @ fixed_reg_flags @ fp_flags @ pic_flags @ llvm_flags @ extra_flags))
 
 let llvmir_to_assembly t =
   match t.asm_filename with

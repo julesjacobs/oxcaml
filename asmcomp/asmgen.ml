@@ -581,7 +581,9 @@ let compile_unit unix ~output_prefix ~asm_filename ~keep_asm ~obj_filename
   reset ();
   Emitaux.output_prefix := output_prefix;
   let create_asm =
-    should_emit () && (keep_asm || not !Emitaux.binary_backend_available)
+    should_emit ()
+    && (!Clflags.llvm_backend || keep_asm
+       || not !Emitaux.binary_backend_available)
   in
   X86_proc.create_asm_file := create_asm;
   let remove_asm_file () =
