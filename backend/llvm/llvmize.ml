@@ -600,7 +600,7 @@ let runtime_regs = [domainstate_ptr; allocation_ptr]
 
 let domainstate_idx = 0
 
-let _allocation_idx = 1
+let allocation_idx = 1
 
 let runtime_reg_idents = List.map V.get_ident_exn runtime_regs
 
@@ -854,6 +854,16 @@ let is_gc_leaf_call attrs =
         false)
     attrs
 
+let preserve_domainstate_pointer_register t ds =
+  match Target_system.architecture () with
+  | Target_system.X86_64 ->
+    emit_ins_no_res t
+      (I.inline_asm ~asm:"movq $0, %r14" ~constraints:"r,~{r14}"
+         ~args:[ds] ~res_type:T.Or_void.void ~sideeffect:true)
+  | Target_system.AArch64 | Target_system.IA32 | Target_system.ARM
+  | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
+    ()
+
 let load_domainstate_addr ?ds_loc ?(offset = 0) t ds_field =
   let typ = T.ptr in
   let ds =
@@ -862,7 +872,9 @@ let load_domainstate_addr ?ds_loc ?(offset = 0) t ds_field =
     | Some ds_loc -> ds_loc
   in
   let offset = offset + (Domainstate.idx_of_field ds_field * Arch.size_addr) in
-  do_offset t ds typ offset
+  let addr = do_offset t ds typ offset in
+  preserve_domainstate_pointer_register t ds;
+  addr
 
 let domainstate_addr_for_location t (loc : Reg.t) =
   match loc.loc with
@@ -2733,11 +2745,10 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
            module-level that recovers RBP. For it to know where to jump back, we
            have an extra global variable where we write the code address for
            right after the [wrap_try] call. *)
-        let wrap_try_res =
-          call_simple
-            ~attrs:[Returns_twice; Gc_leaf_function]
-            ~cc:Oxcaml t "wrap_try" [] [T.i64]
-        in
+        ignore
+          (call_simple
+             ~attrs:[Returns_twice; Gc_leaf_function]
+             ~cc:Oxcaml t "wrap_try" [] [] : V.t list);
         let after_wrap_try = V.of_label (Cmm.new_label ()) in
         emit_ins_no_res t (I.br after_wrap_try);
         emit_label t after_wrap_try;
@@ -2756,20 +2767,10 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
         let recover_rbp_var_ident =
           LL.Ident.global (fun_name ^ ".recover_rbp_var." ^ label_name)
         in
-        let exn_bucket =
+        let exn_bucket, amd64_recover_target =
           match Target_system.architecture () with
           | Target_system.AArch64 ->
-            let wrap_try_res =
-              match wrap_try_res with
-              | [wrap_try_res] -> wrap_try_res
-              | _ -> Misc.fatal_error "wrap_try returned unexpected arity"
-            in
-            let wrap_try_res_is_zero =
-              emit_ins t (I.icmp Ieq ~arg1:wrap_try_res ~arg2:(V.of_int 0))
-            in
-            emit_ins_no_res t
-              (I.br_cond ~cond:wrap_try_res_is_zero ~ifso:try_label
-                 ~ifnot:exn_entry);
+            emit_ins_no_res t (I.br try_label);
             emit_label t exn_entry;
             let exn_bucket =
               emit_ins t
@@ -2821,29 +2822,41 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
             emit_ins_no_res t (I.store ~ptr:allocation_ptr ~to_store:alloc);
             emit_ins_no_res t (I.br (V.of_label lbl_handler));
             emit_label t try_label;
-            exn_bucket
+            exn_bucket, None
           | Target_system.X86_64 ->
             emit_ins_no_res t
-              (I.inline_asm ~asm:"movq $0, %r11" ~constraints:"r,~{r11}"
-                 ~args:wrap_try_res ~res_type:T.Or_void.void ~sideeffect:true);
+              (I.inline_asm ~asm:"xorq %r11, %r11" ~constraints:"~{r11}"
+                 ~args:[] ~res_type:T.Or_void.void ~sideeffect:true);
             emit_ins_no_res t (I.br exn_entry);
             emit_label t exn_entry;
+            let recover_target =
+              emit_ins t
+                (I.inline_asm
+                   ~asm:
+                     "leaq .Loxcaml_recover_target_${:uid}(%rip), $0\n\
+                      .Loxcaml_recover_target_${:uid}:"
+                   ~constraints:"=r,~{memory}" ~args:[]
+                   ~res_type:(Some T.ptr) ~sideeffect:true)
+            in
             let exn_bucket =
               emit_ins t
                 (I.inline_asm ~asm:"" ~constraints:"={r11}" ~args:[]
                    ~res_type:(Some T.i64) ~sideeffect:true)
             in
+            let ds = read_domainstate_pointer_register t in
+            emit_ins_no_res t (I.store ~ptr:domainstate_ptr ~to_store:ds);
+            let alloc = read_allocation_pointer_register t in
+            emit_ins_no_res t (I.store ~ptr:allocation_ptr ~to_store:alloc);
             (* If it's nonzero, we have an exception. Otherwise, go to the try
                block. *)
             let exn_bucket_is_zero =
               emit_ins t (I.icmp Ieq ~arg1:exn_bucket ~arg2:(V.of_int 0))
             in
-            let exn_label = V.of_label lbl_handler in
             emit_ins_no_res t
               (I.br_cond ~cond:exn_bucket_is_zero ~ifso:try_label
-                 ~ifnot:exn_label);
+                 ~ifnot:(V.of_label lbl_handler));
             emit_label t try_label;
-            exn_bucket
+            exn_bucket, Some recover_target
           | Target_system.IA32 | Target_system.ARM | Target_system.POWER
           | Target_system.Z | Target_system.Riscv ->
             fail_msg ~name:"pushtrap"
@@ -2855,8 +2868,14 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
              accessible. *)
           let recover_target =
             match Target_system.architecture () with
-            | Target_system.AArch64 -> exn_entry
-            | Target_system.X86_64 -> exn_entry
+            | Target_system.X86_64 -> (
+              match amd64_recover_target with
+              | Some recover_target -> recover_target
+              | None -> Misc.fatal_error "missing AMD64 recover target")
+            | Target_system.AArch64 ->
+              V.blockaddress
+                ~func:(E.get_fun_ident (get_fun_info t).emitter)
+                ~block:(V.get_ident_exn exn_entry)
             | Target_system.IA32 | Target_system.ARM | Target_system.POWER
             | Target_system.Z | Target_system.Riscv ->
               Misc.fatal_error "unreachable"
@@ -2864,10 +2883,7 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
           emit_ins_no_res t
             (I.store
                ~ptr:(V.of_ident ~typ:T.ptr recover_rbp_var_ident)
-               ~to_store:
-                 (V.blockaddress
-                    ~func:(E.get_fun_ident (get_fun_info t).emitter)
-                    ~block:(V.get_ident_exn recover_target)))
+               ~to_store:recover_target)
         | Target_system.IA32 | Target_system.ARM | Target_system.POWER
         | Target_system.Z | Target_system.Riscv ->
           fail_msg ~name:"pushtrap" "unsupported architecture for LLVM backend");
@@ -3616,6 +3632,8 @@ let define_c_call_wrappers t =
         List.split_at (List.length runtime_regs) (E.get_args_as_values emitter)
       in
       let ds = List.nth runtime_args domainstate_idx in
+      let alloc = List.nth runtime_args allocation_idx in
+      let young_ptr = load_domainstate_addr ~ds_loc:ds t Domain_young_ptr in
       let c_sp =
         let c_sp_ptr = load_domainstate_addr ~ds_loc:ds t Domain_c_stack in
         emit_ins t (I.load ~ptr:c_sp_ptr ~typ:T.i64)
@@ -3624,6 +3642,7 @@ let define_c_call_wrappers t =
       let ocaml_sp_slot = emit_ins t (I.alloca T.i64) in
       emit_ins_no_res t
         (I.store_volatile ~ptr:ocaml_sp_slot ~to_store:ocaml_sp);
+      emit_ins_no_res t (I.store ~ptr:young_ptr ~to_store:alloc);
       write_stack_pointer t c_sp;
       let c_res =
         emit_ins t
@@ -3635,7 +3654,13 @@ let define_c_call_wrappers t =
       let ocaml_sp =
         emit_ins t (I.load_volatile ~ptr:ocaml_sp_slot ~typ:T.i64)
       in
+      let alloc = emit_ins t (I.load ~ptr:young_ptr ~typ:T.i64) in
       write_stack_pointer t ocaml_sp;
+      let runtime_args =
+        List.mapi
+          (fun i arg -> if i = allocation_idx then alloc else arg)
+          runtime_args
+      in
       let wrapper_res =
         assemble_struct t wrapper_res_type
           (([1], c_res) :: List.mapi (fun i v -> [0; i], v) runtime_args)
@@ -3647,7 +3672,7 @@ let define_c_call_wrappers t =
 
 let define_wrap_try t =
   let arg_types = make_arg_types [] in
-  let res_type = make_ret_type [T.i64] in
+  let res_type = make_ret_type [] in
   let emitter =
     E.create ~name:"wrap_try" ~args:arg_types ~res:(Some res_type) ~cc:Oxcaml
       ~attrs:(Returns_twice :: Noinline :: frame_pointer_attrs ())
@@ -3659,10 +3684,12 @@ let define_wrap_try t =
     E.get_args_as_values emitter
     (* All are runtime regs *)
   in
-  let try_res = V.of_int ~typ:T.i64 0 in
+  emit_ins_no_res t
+    (I.inline_asm ~asm:"" ~constraints:"~{memory}" ~args:[]
+       ~res_type:T.Or_void.void ~sideeffect:true);
   let res =
     assemble_struct t res_type
-      (([1; 0], try_res) :: List.mapi (fun i v -> [0; i], v) runtime_args)
+      (List.mapi (fun i v -> [0; i], v) runtime_args)
   in
   emit_ins_no_res t (I.ret res);
   complete_func_def t
@@ -3716,14 +3743,14 @@ let define_restore_rbp t =
             "  .cfi_offset %rbp, -16";
             "  movq %rax, %r11";
             "  movq %r14, %rax";
-            "  movq %r14, %rcx";
+            "  movq %r15, %rcx";
             "  movq (%rsp), %rbp";
             "  leaq -16(%rsp,%rbp), %rbp";
             "  .cfi_def_cfa %rbp, 16";
             "  addq $16, %rsp";
-            "  movq " ^ recover_rbp_var ^ "@GOTPCREL(%rip), %rbx";
-            "  movq (%rbx), %rbx";
-            "  jmpq *%rbx";
+            "  movq " ^ recover_rbp_var ^ "@GOTPCREL(%rip), %r10";
+            "  movq (%r10), %r10";
+            "  jmpq *%r10";
             "  .cfi_endproc" ];
         add_data_def t
           (LL.Data.external_ (LL.Ident.to_string_hum recover_rbp_asm_ident));

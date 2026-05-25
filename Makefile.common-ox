@@ -505,7 +505,8 @@ llvm-test:
 llvm-test-one:
 	$(MAKE) test-one LLVM_BACKEND=1
 
-llvm-self-stage-install: llvm-install
+llvm-self-stage-install:
+	$(MAKE) _install LLVM_BACKEND=0 LLVM_BOOT_BACKEND=0
 	LLVM_WRAPPER="$(or $(LLVM_PATH),/tmp/oxcaml-clang-wrapper)" \
 	  tools/build-llvm-self-stage-install.sh
 
