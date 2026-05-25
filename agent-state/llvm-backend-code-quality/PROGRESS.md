@@ -4,7 +4,7 @@ Last updated: 2026-05-25.
 
 ## Current Claim
 
-Iterations 1, 2, 3, and 4 are committed or ready to commit; iteration 4 is
+Iterations 1, 2, 3, 4, and 5 are committed or ready to commit; iteration 5 is
 reviewed and validated.
 
 ## Evidence
@@ -23,7 +23,7 @@ None.
 ## Iteration State
 
 - Target: 10 completed iterations.
-- Completed iterations: 4.
+- Completed iterations: 5.
 - Committed cleanups:
   - Iteration 1: simplified deopt argument list construction in
     `backend/llvm/llvmize.ml` with `List.concat_map`.
@@ -34,6 +34,8 @@ None.
     `backend/llvm/llvmize.ml`'s `normalize_toplevel_names`.
   - Iteration 4: reused `Format.pp_comma` in
     `backend/llvm/llvm_ir.ml`'s `Type.pp_t`.
+  - Iteration 5: shared operand-bundle pretty-printers in
+    `backend/llvm/llvm_ir.ml`'s `Instruction.pp_t`.
 - Dropped ideas: none yet.
 - Stop condition: stop after 10 completed iterations, then summarize committed
   cleanups, dropped ideas, and remaining promising targets.
@@ -248,7 +250,53 @@ Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
 are broad LLVM backend validation runs, and this commit only changes a
 behavior-preserving pretty-printer helper usage.
 
+## Iteration 5 Candidate
+
+Path: self-proposed candidate.
+
+Candidate: share the operand-bundle pretty-printers used by `Invoke` and `Call`
+inside `backend/llvm/llvm_ir.ml`'s `Instruction.pp_t`.
+
+Why likely useful: `Invoke` and `Call` currently duplicate the same two local
+pretty-printers. Hoisting them once inside `Instruction.pp_t` keeps the
+abstraction local to the only function that uses it and reduces duplicate
+formatting logic without changing emitted text.
+
+Review gate: passed after five human-like reviews of the final diff.
+
+Review result: three reviewers said keep with no findings. Two reviewers said
+revise only because this progress file had an accidental duplicate `Next Step`
+heading before the iteration 5 section. That finding was accepted and fixed. No
+reviewer objected to the `llvm_ir.ml` cleanup.
+
+Validation result:
+
+- `git diff --check`: passed.
+- `eval "$(../../../scripts/agent-tmp-env)" && opam exec
+  --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`: passed.
+
+## Testing Story for This Commit
+
+Change: share the operand-bundle pretty-printers used by `Invoke` and `Call`
+inside `backend/llvm/llvm_ir.ml`'s `Instruction.pp_t`, and record iteration 5
+state in this progress file.
+Risk: if the rewrite is wrong, call or invoke operand bundles could print
+differently, especially for empty, single, or multiple bundle lists.
+Validation: `git diff --check`; `eval "$(../../../scripts/agent-tmp-env)" &&
+opam exec --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`.
+Full LLVM validation: not run for this commit; the change hoists identical local
+formatting helpers without changing their bodies or call sites.
+Stage2 verification: not run for this commit; self-stage2 is intentionally
+deferred for the same reason as full LLVM validation.
+Why this is enough: five human-like reviews checked that the helper bodies and
+formatting paths are unchanged and remain scoped to `Instruction.pp_t`; the
+build check covers type and syntax validity.
+Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
+`make llvm-self-stage2-test LLVM_PATH="$LLVM_PATH"` are deferred because they
+are broad LLVM backend validation runs, and this commit only changes
+behavior-preserving pretty-printer helper sharing.
+
 ## Next Step
 
-Commit iteration 4, push it to the draft PR branch, then choose the next
+Commit iteration 5, push it to the draft PR branch, then choose the next
 reviewed cleanup candidate.

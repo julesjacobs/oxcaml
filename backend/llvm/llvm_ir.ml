@@ -1095,6 +1095,18 @@ module Instruction = struct
             (Option.get res) body dbg_metadata)
         fmt
     in
+    let pp_operand_bundle ppf (name, args) =
+      fprintf ppf {|"%s"(%a)|} name
+        (pp_print_list ~pp_sep:pp_comma Value.pp_t)
+        args
+    in
+    let pp_operand_bundles ppf = function
+      | [] -> ()
+      | bundles ->
+        fprintf ppf " [ %a ]"
+          (pp_print_list ~pp_sep:pp_comma pp_operand_bundle)
+          bundles
+    in
     match op with
     | Ret v -> ins "ret %a" Value.pp_t v
     | Br v -> ins "br %a" Value.pp_t v
@@ -1117,18 +1129,6 @@ module Instruction = struct
     | Invoke
         { func; args; res_type; attrs; operand_bundles; cc; normal; unwind }
       -> (
-      let pp_operand_bundle ppf (name, args) =
-        fprintf ppf {|"%s"(%a)|} name
-          (pp_print_list ~pp_sep:pp_comma Value.pp_t)
-          args
-      in
-      let pp_operand_bundles ppf = function
-        | [] -> ()
-        | bundles ->
-          fprintf ppf " [ %a ]"
-            (pp_print_list ~pp_sep:pp_comma pp_operand_bundle)
-            bundles
-      in
       let pp_invoke ppf () =
         fprintf ppf "invoke %a %a %a(%a) %a%a to %a unwind %a"
           Calling_conventions.pp_t cc Type.Or_void.pp_t res_type Ident.pp_t func
@@ -1212,18 +1212,6 @@ module Instruction = struct
       ins_res "select %a, %a, %a" Value.pp_t cond Value.pp_t ifso Value.pp_t
         ifnot
     | Call { func; args; res_type; attrs; operand_bundles; cc; musttail } -> (
-      let pp_operand_bundle ppf (name, args) =
-        fprintf ppf {|"%s"(%a)|} name
-          (pp_print_list ~pp_sep:pp_comma Value.pp_t)
-          args
-      in
-      let pp_operand_bundles ppf = function
-        | [] -> ()
-        | bundles ->
-          fprintf ppf " [ %a ]"
-            (pp_print_list ~pp_sep:pp_comma pp_operand_bundle)
-            bundles
-      in
       let pp_call ppf () =
         fprintf ppf "%acall %a %a %a(%a) %a%a" (pp_str_if "musttail ") musttail
           Calling_conventions.pp_t cc Type.Or_void.pp_t res_type Ident.pp_t func
