@@ -3216,6 +3216,26 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_move_64 ~high_to_low =
+    let typ = int_vec_type ~width_in_bits:64 in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let lane src lane =
+      emit_ins t (I.extractelement ~vector:src ~index:(V.of_int lane))
+    in
+    let low, high =
+      if high_to_low then lane arg2 1, lane arg1 1 else lane arg1 0, lane arg2 0
+    in
+    let res =
+      emit_ins t
+        (I.insertelement ~vector:(V.poison typ) ~index:(V.of_int 0)
+           ~to_insert:low)
+    in
+    let res =
+      emit_ins t (I.insertelement ~vector:res ~index:(V.of_int 1) ~to_insert:high)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_imm imm =
     match imm with
     | Some imm -> imm
@@ -3755,6 +3775,10 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_shuffle_16 (simd_imm imm) ~high:true
     | Amd64_simd_instrs.Pshuflw | Amd64_simd_instrs.Vpshuflw_X_Xm128 ->
       simd_shuffle_16 (simd_imm imm) ~high:false
+    | Amd64_simd_instrs.Movhlps | Amd64_simd_instrs.Vmovhlps ->
+      simd_move_64 ~high_to_low:true
+    | Amd64_simd_instrs.Movlhps | Amd64_simd_instrs.Vmovlhps ->
+      simd_move_64 ~high_to_low:false
     | Amd64_simd_instrs.Unpckhps | Amd64_simd_instrs.Vunpckhps_X_X_Xm128 ->
       simd_zip (int_vec_type ~width_in_bits:32) ~high:true
     | Amd64_simd_instrs.Unpcklps | Amd64_simd_instrs.Vunpcklps_X_X_Xm128 ->
