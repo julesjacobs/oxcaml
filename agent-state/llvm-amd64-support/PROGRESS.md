@@ -78,6 +78,7 @@ Simple full-width AMD64 SIMD load/store builtins now also lower through the
 generic LLVM vector load/store path for 128-bit SSE and 256-bit AVX vectors.
 The LLVM path now also covers the 128-bit SSE2/SSE3 low-64 memory forms,
 including zeroing, copy-low/high, broadcast, and low-lane stores.
+It also covers the related SSE2 vec128 low-32 load/zero-load/store forms.
 
 The latest stack-pressure fix safely pools X86_64 preserved GC-root stack slots
 using full CFG liveness interference instead of safepoint-only disjointness.
@@ -236,6 +237,14 @@ limit is raised from `l=100000` to `l=150000`.
     memory operand is not the first argument.
     `testsuite/tests/llvm-codegen/amd64_simd_low64_mem.{ml,sh}` checks the
     low-64 memory subset with `-llvm-backend -c -S -keep-llvmir`.
+  - `backend/amd64/cfg_selection.ml` and `backend/llvm/llvmize.ml` also lower
+    the SSE2 vec128 low-32 memory subset:
+    `caml_sse2_vec128_load_low32`, `caml_sse2_vec128_load_zero_low32`, and
+    `caml_sse2_vec128_store_low32`. Loads use unaligned `i32` memory access
+    plus lane-0 insertion in a `<4 x i32>` vec128 view; stores extract lane 0
+    from the same view and write an unaligned `i32`.
+    `testsuite/tests/llvm-codegen/amd64_simd_low32_mem.{ml,sh}` checks this
+    subset with `-llvm-backend -c -S -keep-llvmir`.
   - `backend/llvm/llvmize.ml` now stores LLVM `cmpxchg`'s loaded value for
     `Compare_exchange`. LLVM returns the old memory value in both success and
     failure cases, which is exactly the OCaml `Atomic.compare_exchange` result;
@@ -1606,6 +1615,12 @@ limit is raised from `l=100000` to `l=150000`.
       `i64` store, lane inserts for lanes `0` and `1`, and a low-lane extract.
       The new `testsuite/tests/llvm-codegen/amd64_simd_low64_mem.sh` script
       also passed directly under `validation-tmp/simd_low64_mem_script`.
+    - Implemented AMD64 LLVM lowering for the SSE2 vec128 low-32 memory subset
+      and rebuilt with `make -s compiler -j "$(nproc)"`; result: passed. The
+      new `testsuite/tests/llvm-codegen/amd64_simd_low32_mem.sh` script passed
+      directly under `validation-tmp/simd_low32_mem_script`; the kept IR
+      contains unaligned `i32` loads, an unaligned `i32` store, `<4 x i32>`
+      lane-0 inserts, and a lane-0 extract.
 
 ## Current Blocker
 
