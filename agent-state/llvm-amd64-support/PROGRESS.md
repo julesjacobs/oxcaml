@@ -74,6 +74,8 @@ emit `llvm.prefetch` calls instead of falling back to the generic selector's
 `Selection.select_oper` fatal path. AMD64 `caml_cldemote` now reaches LLVM
 lowering under `-llvm-backend` as well and emits a side-effecting `cldemote`
 inline-asm instruction instead of falling through selection/lowering gaps.
+Simple full-width AMD64 SIMD load/store builtins now also lower through the
+generic LLVM vector load/store path for 128-bit SSE and 256-bit AVX vectors.
 
 The latest stack-pressure fix safely pools X86_64 preserved GC-root stack slots
 using full CFG liveness interference instead of safepoint-only disjointness.
@@ -204,6 +206,15 @@ limit is raised from `l=100000` to `l=150000`.
     `testsuite/tests/llvm-codegen/amd64_cldemote.{ml,sh}` checks that
     `caml_cldemote` compiles with `-llvm-backend -c -S -keep-llvmir` and that
     the kept IR/assembly contain the cldemote instruction.
+  - `backend/amd64/cfg_selection.ml` now rewrites simple full-width AMD64 SIMD
+    memory builtins to generic LLVM vector `Load`/`Store` operations when
+    `-llvm-backend` is enabled. This covers aligned/unaligned 128-bit SSE
+    vector loads/stores and aligned/unaligned/known-unaligned 256-bit AVX
+    vector loads/stores while leaving partial, broadcast, masked, and
+    uncached SIMD-memory forms to focused follow-ups.
+    `testsuite/tests/llvm-codegen/amd64_simd_mem.{ml,sh}` checks the
+    unaligned 128-bit and 256-bit cases with `-llvm-backend -c -S
+    -keep-llvmir`.
   - `backend/llvm/llvmize.ml` now stores LLVM `cmpxchg`'s loaded value for
     `Compare_exchange`. LLVM returns the old memory value in both success and
     failure cases, which is exactly the OCaml `Atomic.compare_exchange` result;
@@ -1554,6 +1565,16 @@ limit is raised from `l=100000` to `l=150000`.
       `cldemote (%rax)`. The new
       `testsuite/tests/llvm-codegen/amd64_cldemote.sh` script also passed
       directly under `validation-tmp/cldemote_script`.
+    - Implemented AMD64 LLVM selection for simple SIMD memory load/store
+      builtins and rebuilt with `make -s compiler -j "$(nproc)"`; result:
+      passed. Direct validation with `_build/main/oxcaml_main_native.exe
+      -extension layouts_alpha -extension simd_beta -extension small_numbers
+      -O3 -llvm-backend -c -S -keep-llvmir` passed under
+      `validation-tmp/simd_mem_direct`, with `2` wrapper lines / `1` fresh IR.
+      The kept IR contains unaligned `<2 x i64>` and `<4 x i64>` vector
+      stores and loads with `align 1`. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_mem.sh` script also passed
+      directly under `validation-tmp/simd_mem_script`.
 
 ## Current Blocker
 

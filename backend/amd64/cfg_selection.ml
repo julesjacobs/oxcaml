@@ -154,6 +154,27 @@ let is_llvm_simd_builtin = function
     true
   | _ -> false
 
+let llvm_simd_mem_builtin = function
+  | "caml_sse_vec128_load_aligned" ->
+    Some (`Load Cmm.Onetwentyeight_aligned)
+  | "caml_sse_vec128_load_unaligned"
+  | "caml_sse3_vec128_load_known_unaligned" ->
+    Some (`Load Cmm.Onetwentyeight_unaligned)
+  | "caml_sse_vec128_store_aligned" ->
+    Some (`Store Cmm.Onetwentyeight_aligned)
+  | "caml_sse_vec128_store_unaligned" ->
+    Some (`Store Cmm.Onetwentyeight_unaligned)
+  | "caml_avx_vec256_load_aligned" ->
+    Some (`Load Cmm.Twofiftysix_aligned)
+  | "caml_avx_vec256_load_unaligned"
+  | "caml_avx_vec256_load_known_unaligned" ->
+    Some (`Load Cmm.Twofiftysix_unaligned)
+  | "caml_avx_vec256_store_aligned" ->
+    Some (`Store Cmm.Twofiftysix_aligned)
+  | "caml_avx_vec256_store_unaligned" ->
+    Some (`Store Cmm.Twofiftysix_unaligned)
+  | _ -> None
+
 let pseudoregs_for_operation op arg res =
   match (op : Operation.t) with
   (* Two-address binary operations: arg.(0) and res.(0) must be the same *)
@@ -306,6 +327,28 @@ let select_addressing chunk exp : addressing_mode * Cmm.expression =
   if !Clflags.llvm_backend (* Llvmize only expects [Iindexed] *)
   then Iindexed 0, exp
   else select_addressing' chunk exp
+
+let select_llvm_simd_mem_builtin func args :
+    Cfg_selectgen_target_intf.select_operation_result =
+  match llvm_simd_mem_builtin func, args with
+  | Some (`Load memory_chunk), [addr] ->
+    let addressing_mode, eloc = select_addressing memory_chunk addr in
+    Rewritten
+      ( Basic
+          (Op
+             (Load
+                { memory_chunk;
+                  addressing_mode;
+                  mutability = Operation.Mutable;
+                  is_atomic = false
+                })),
+        [eloc] )
+  | Some (`Store memory_chunk), [addr; value] ->
+    let addressing_mode, eloc = select_addressing memory_chunk addr in
+    Rewritten
+      (Basic (Op (Store (memory_chunk, addressing_mode, true))), [value; eloc])
+  | Some _, _ -> Use_default
+  | None, _ -> Use_default
 
 let select_store' ~is_assign addr (exp : Cmm.expression) :
     Cfg_selectgen_target_intf.select_store_result =
@@ -497,17 +540,20 @@ let select_operation
     | Cbswap { bitwidth } ->
       let bitwidth = select_bitwidth bitwidth in
       Rewritten (specific (Ibswap { bitwidth }), args)
-    | Cextcall { func; builtin = true; _ } when is_llvm_simd_builtin func -> (
-      match Simd_selection.select_operation_cfg ~dbg func args with
-      | Some (op, args) -> Rewritten (Basic (Op op), args)
-      | None -> Use_default)
-    | Cextcall { func; builtin = true; _ } when is_llvm_intrinsic_builtin func
-      ->
-      (* Illvm_intrinsic must not allocate on the OCaml heap. See
-         [Arch.operation_allocates]. *)
-      Rewritten (specific (Illvm_intrinsic func), args)
-    | Cextcall { func = "caml_cldemote"; builtin = true; _ } ->
-      select_operation' ~generic_select_condition op args dbg ~label_after
+    | Cextcall { func; builtin = true; _ } -> (
+      match select_llvm_simd_mem_builtin func args with
+      | (Rewritten _ | Select_operation_then_rewrite _) as rewritten -> rewritten
+      | Use_default when is_llvm_simd_builtin func -> (
+        match Simd_selection.select_operation_cfg ~dbg func args with
+        | Some (op, args) -> Rewritten (Basic (Op op), args)
+        | None -> Use_default)
+      | Use_default when is_llvm_intrinsic_builtin func ->
+        (* Illvm_intrinsic must not allocate on the OCaml heap. See
+           [Arch.operation_allocates]. *)
+        Rewritten (specific (Illvm_intrinsic func), args)
+      | Use_default when String.equal func "caml_cldemote" ->
+        select_operation' ~generic_select_condition op args dbg ~label_after
+      | Use_default -> Use_default)
     | Cprefetch _ ->
       select_operation' ~generic_select_condition op args dbg ~label_after
     | _ -> Use_default
