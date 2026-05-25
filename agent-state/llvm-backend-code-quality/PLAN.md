@@ -35,7 +35,8 @@ Shared finalization:
 4. Run human-like review on the diff if it has not already been reviewed in its
    final form.
 5. Verify review findings before applying them.
-6. Keep or drop the change based on whether it remains obviously reviewable.
+6. Decide keep, revise, or drop. If dropping, discard the diff, record why in
+   `PROGRESS.md`, and return to target selection.
 
 Prefer changes that clarify existing contracts, reduce local coupling, remove
 misleading names, improve focused tests, or make future LLVM backend work safer.
@@ -49,6 +50,8 @@ Quality bar:
 - The reason for the cleanup should be concrete, not taste-based.
 - If the agent self-proposes a change, review must explicitly answer whether
   the completed diff is worth committing at all.
+- Do not commit a cleanup just because it was implemented. If review shows it
+  is weak, noisy, too risky, or not useful enough, drop it and pick a new idea.
 - Tests should prove the contract being cleaned up.
 - Every commit should have a clear testing story: exact commands or checks,
   expected coverage, why that scope is proportionate, and any validation that is
@@ -57,7 +60,7 @@ Quality bar:
   then `make llvm-self-stage2-test LLVM_PATH="$LLVM_PATH"` before finalizing.
   If either is skipped, record the exact reason in `PROGRESS.md`.
 - `PROGRESS.md` should record the chosen target, review result, testing story,
-  validation result, and any rejected review findings.
+  validation result, any rejected review findings, and any dropped ideas.
 
 Testing story template:
 

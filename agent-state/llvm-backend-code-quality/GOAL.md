@@ -10,7 +10,9 @@ Use either path:
 - Self-propose and implement a small candidate cleanup, then use human-like
   review to decide whether the diff should be kept, revised, or dropped.
 
-In both paths, run human-like review on the diff before finalizing.
+In both paths, run human-like review on the diff before finalizing. Use that
+review as a keep/revise/drop gate. If the idea is not worth committing, discard
+the diff, record why in `PROGRESS.md`, and pick a new idea.
 
 Use `PLAN.md` as a guide, not a rigid checklist.
 

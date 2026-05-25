@@ -34,10 +34,10 @@ Before each commit, record:
 
 ## Testing Story for This Commit
 
-Change: allow cleanup targets to come either from human-like review or from a
-self-proposed implemented candidate that is reviewed before committing.
+Change: make human-like review a keep/revise/drop gate, so implemented ideas
+can be discarded instead of forced into commits.
 Risk: the agent may otherwise treat target selection as only one fixed workflow
-instead of using review where it is most helpful.
+or treat implementation as a commitment to commit.
 Validation: inspect the changed `GOAL.md`, `PLAN.md`, and `PROGRESS.md`.
 Full LLVM validation: not run; this commit only changes agent instructions.
 Stage2 verification: not run; this commit only changes agent instructions.
@@ -48,4 +48,5 @@ Deferred validation: no OxCaml tests; no compiler or runtime code changed.
 
 Inspect the LLVM backend and choose either a review-selected target loop or a
 self-proposed candidate loop. In either case, use human-like review before
-finalizing an implementation commit.
+finalizing an implementation commit, and drop weak ideas instead of committing
+them.
