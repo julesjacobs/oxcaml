@@ -901,6 +901,42 @@ CAMLexport void caml_do_local_roots (
 */
 
 #ifdef NATIVE_CODE
+static int points_into_stack(struct stack_info *stack, value *ptr)
+{
+  uintnat addr = (uintnat) ptr;
+  return (uintnat) Stack_base(stack) < addr
+    && addr <= (uintnat) Stack_high(stack);
+}
+
+static value *rewrite_stack_pointer(struct stack_info *old_stack,
+                                    struct stack_info *new_stack,
+                                    value *ptr)
+{
+  uintnat offset = (uintnat) Stack_high(old_stack) - (uintnat) ptr;
+  return (value *) ((uintnat) Stack_high(new_stack) - offset);
+}
+
+static struct stack_info *stack_containing_pointer(value *ptr)
+{
+  for (struct stack_info *stack = Caml_state->current_stack;
+       stack != NULL;
+       stack = Stack_parent(stack)) {
+    if (points_into_stack(stack, ptr)) return stack;
+  }
+  return NULL;
+}
+
+static void rewrite_stack_words(struct stack_info *old_stack,
+                                struct stack_info *new_stack)
+{
+  for (value *slot = new_stack->sp; slot < Stack_high(new_stack); slot++) {
+    value *ptr = (value *)*slot;
+    if (points_into_stack(old_stack, ptr)) {
+      *slot = (value)rewrite_stack_pointer(old_stack, new_stack, ptr);
+    }
+  }
+}
+
 /* Update absolute exception pointers for new stack*/
 void caml_rewrite_exception_stack(struct stack_info *old_stack,
                                   value** exn_ptr, value** async_exn_ptr,
@@ -914,13 +950,20 @@ void caml_rewrite_exception_stack(struct stack_info *old_stack,
     fiber_debug_log ("*exn_ptr=%p", *exn_ptr);
     fiber_debug_log ("*async_exn_ptr=%p", *async_exn_ptr);
 
-    while (Stack_base(old_stack) < *exn_ptr &&
-           *exn_ptr <= Stack_high(old_stack)) {
+    while (*exn_ptr != NULL) {
+      struct stack_info *exn_stack = stack_containing_pointer(*exn_ptr);
+      if (exn_stack == NULL) break;
+      int must_rewrite_exn_ptr = exn_stack == old_stack;
+      if (!must_rewrite_exn_ptr) {
+        exn_ptr = (value**)*exn_ptr;
+        continue;
+      }
+
       int must_update_async_exn_ptr = *exn_ptr == *async_exn_ptr;
 #ifdef DEBUG
       value* old_val = *exn_ptr;
 #endif
-      *exn_ptr = Stack_high(new_stack) - (Stack_high(old_stack) - *exn_ptr);
+      *exn_ptr = rewrite_stack_pointer(old_stack, new_stack, *exn_ptr);
 
       if (must_update_async_exn_ptr) *async_exn_ptr = *exn_ptr;
       fiber_debug_log ("must_update_async_exn_ptr=%d",
@@ -932,6 +975,11 @@ void caml_rewrite_exception_stack(struct stack_info *old_stack,
       CAMLassert((value*)*exn_ptr <= Stack_high(new_stack));
 
       exn_ptr = (value**)*exn_ptr;
+    }
+    if (points_into_stack(old_stack, (value*)*async_exn_ptr)) {
+      *async_exn_ptr =
+        (value*)rewrite_stack_pointer(old_stack, new_stack,
+                                      (value*)*async_exn_ptr);
     }
     fiber_debug_log ("finished with *exn_ptr=%p", *exn_ptr);
   } else {
@@ -987,6 +1035,9 @@ int caml_try_realloc_stack(asize_t required_space)
          Stack_high(old_stack) - stack_used,
          stack_used * sizeof(value));
   new_stack->sp = Stack_high(new_stack) - stack_used;
+#ifdef NATIVE_CODE
+  rewrite_stack_words(old_stack, new_stack);
+#endif
   Stack_parent(new_stack) = Stack_parent(old_stack);
 
   new_stack->local_arenas = caml_refresh_locals(old_stack);

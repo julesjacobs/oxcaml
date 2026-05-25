@@ -1332,6 +1332,16 @@ END_FUNCTION(caml_callback3_asm)
         CFI_ADJUST(-16)
 .endm
 
+#if defined(WITH_FRAME_POINTERS)
+.macro UPDATE_BASE_POINTER stack_handler
+        sub     TMP, sp, 16
+        str     TMP, [\stack_handler, -48]
+.endm
+#else
+.macro UPDATE_BASE_POINTER stack_handler
+.endm
+#endif
+
 
 FUNCTION(caml_perform)
         CFI_STARTPROC
@@ -1461,6 +1471,7 @@ FUNCTION(caml_reperform)
         ldr     x2, Caml_state(current_stack) /* x2 := old stack */
         str     x2, Handler_parent(TMP) /* Append to last_fiber */
         add     x3, x2, 1 /* x3 (last_fiber) := Val_ptr(old stack) */
+        UPDATE_BASE_POINTER TMP
         b       L(do_perform)
 1:      ADDRGLOBAL(ADDITIONAL_ARG, caml_raise_continuation_already_resumed)
         b       G(caml_c_call)
@@ -1532,6 +1543,7 @@ FUNCTION(caml_resume)
     /* Pop our frame before stack switch */
         ldp     x29, x30, [sp], 16
         CFI_ADJUST(-16)
+        UPDATE_BASE_POINTER x8
         SWITCH_OCAML_STACKS x9, x0
         FLUSH_DYNAMIC_CACHE
     /* Is this a preemption continuation? */

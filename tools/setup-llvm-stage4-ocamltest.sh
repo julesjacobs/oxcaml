@@ -149,6 +149,12 @@ mkdir -p "$fake_root/utils"
 for file in "$install_lib"/compiler-libs/*; do
   ln -sfn "$file" "$fake_root/utils/$(basename "$file")"
 done
+for file in "$normal_build"/install/main/lib/ocaml/compiler-libs/*.cmo; do
+  name=$(basename "$file")
+  if [ ! -e "$fake_root/utils/$name" ]; then
+    ln -sfn "$file" "$fake_root/utils/$name"
+  fi
+done
 ln -sfn "$config_obj" "$fake_root/utils/config.o"
 
 for dir in asmcomp bytecomp driver file_formats lambda middle_end parsing typing; do
