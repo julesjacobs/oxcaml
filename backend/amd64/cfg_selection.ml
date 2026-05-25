@@ -506,6 +506,8 @@ let select_operation
       (* Illvm_intrinsic must not allocate on the OCaml heap. See
          [Arch.operation_allocates]. *)
       Rewritten (specific (Illvm_intrinsic func), args)
+    | Cextcall { func = "caml_cldemote"; builtin = true; _ } ->
+      select_operation' ~generic_select_condition op args dbg ~label_after
     | Cprefetch _ ->
       select_operation' ~generic_select_condition op args dbg ~label_after
     | _ -> Use_default

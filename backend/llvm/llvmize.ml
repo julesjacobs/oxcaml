@@ -2190,6 +2190,12 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
         V.of_int ~typ:T.i32 (prefetch_locality locality);
         V.of_int ~typ:T.i32 1 ]
   in
+  let cldemote addr =
+    let ptr = load_address_from_reg t addr i.arg.(0) in
+    emit_ins_no_res t
+      (I.inline_asm ~asm:"cldemote ($0)" ~constraints:"r" ~args:[ptr]
+         ~res_type:T.Or_void.void ~sideeffect:true)
+  in
   let round_intrinsic_name (mode : Llvmize_specific_types.rounding_mode) =
     match mode with
     | Round_current -> "nearbyint"
@@ -2829,7 +2835,8 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | _ -> not_implemented_basic ~msg:"specific" i)
   | Amd64_prefetch { is_write; locality; addr } ->
     prefetch ~is_write ~locality addr
-  | Amd64_simd_mem | Amd64_cldemote ->
+  | Amd64_cldemote addr -> cldemote addr
+  | Amd64_simd_mem ->
     not_implemented_basic ~msg:"specific" i
   | Arm64_shiftarith (shift_op, shift) ->
     let shifted =

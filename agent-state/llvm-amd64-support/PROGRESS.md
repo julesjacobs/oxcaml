@@ -71,7 +71,9 @@ LLVM path copies the shared low 64-bit lanes for vec128/vec256/vec512
 widening and narrowing instead of fatal-erroring on 512-bit reinterpret casts.
 AMD64 prefetch builtins now also reach LLVM lowering under `-llvm-backend` and
 emit `llvm.prefetch` calls instead of falling back to the generic selector's
-`Selection.select_oper` fatal path.
+`Selection.select_oper` fatal path. AMD64 `caml_cldemote` now reaches LLVM
+lowering under `-llvm-backend` as well and emits a side-effecting `cldemote`
+inline-asm instruction instead of falling through selection/lowering gaps.
 
 The latest stack-pressure fix safely pools X86_64 preserved GC-root stack slots
 using full CFG liveness interference instead of safepoint-only disjointness.
@@ -192,6 +194,16 @@ limit is raised from `l=100000` to `l=150000`.
     `testsuite/tests/llvm-codegen/amd64_prefetch.{ml,sh}` checks that
     ext-pointer prefetch builtins compile with `-llvm-backend -c -S
     -keep-llvmir` and emit the LLVM prefetch intrinsic.
+  - `backend/amd64/cfg_selection.ml`, `backend/amd64/llvmize_specific.ml`,
+    `backend/arm64/llvmize_specific.ml`, and `backend/llvm/llvmize.ml` now
+    carry AMD64 `caml_cldemote` addressing through LLVM-backend selection and
+    lower it with side-effecting inline assembly. The LLVM X86 cldemote
+    intrinsic requires a target-feature attribute for instruction selection;
+    inline assembly matches the native backend's explicit instruction emission
+    without adding a whole-function CPU-feature contract.
+    `testsuite/tests/llvm-codegen/amd64_cldemote.{ml,sh}` checks that
+    `caml_cldemote` compiles with `-llvm-backend -c -S -keep-llvmir` and that
+    the kept IR/assembly contain the cldemote instruction.
   - `backend/llvm/llvmize.ml` now stores LLVM `cmpxchg`'s loaded value for
     `Compare_exchange`. LLVM returns the old memory value in both success and
     failure cases, which is exactly the OCaml `Atomic.compare_exchange` result;
@@ -1531,6 +1543,17 @@ limit is raised from `l=100000` to `l=150000`.
       compiler also passed under `validation-tmp/prefetch_script`: the kept IR
       contains two `call void @llvm.prefetch.p0(...)` sites and the matching
       declaration.
+    - Implemented AMD64 LLVM `caml_cldemote` selection/lowering and rebuilt
+      with `make -s compiler -j "$(nproc)"`; result: passed. The first direct
+      smoke confirmed that `llvm.x86.cldemote` IR was emitted but `llc`
+      rejected the intrinsic without `+cldemote`; the final lowering uses
+      side-effecting inline assembly instead. Direct validation with
+      `_build/main/oxcaml_main_native.exe -O3 -llvm-backend -c -S
+      -keep-llvmir` passed under `validation-tmp/cldemote_direct`, with
+      `2` wrapper lines / `1` fresh IR and generated assembly containing
+      `cldemote (%rax)`. The new
+      `testsuite/tests/llvm-codegen/amd64_cldemote.sh` script also passed
+      directly under `validation-tmp/cldemote_script`.
 
 ## Current Blocker
 
