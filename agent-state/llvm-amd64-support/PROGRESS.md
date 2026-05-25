@@ -8,7 +8,8 @@ AMD64 LLVM backend bring-up now passes focused install, enabled Linux/AMD64
 `llvm-codegen`, and installed-compiler boot-smoke validation with the
 agent-local LLVM tools and writable install prefix. Focused AMD64 SIMD
 lowering now also covers the i64x2 add/sub, vec128 interleave, and vec256
-join/split operations needed by several layout/block-index tests.
+join/split operations needed by several layout/block-index tests, including
+the generated mixed-blocks native test on AMD64.
 
 The latest fixes add focused AMD64 SIMD LLVM lowering for i64x2 arithmetic,
 vec128 interleaves, and vec256 join/split support. Earlier fixes reserve the
@@ -67,6 +68,10 @@ register-clobbering edge.
     `caml_avx_vec256_{insert,extract}_128`, their SSE aliases where present,
     and the low-half vec128/vec256 reinterpret casts used by `%join_vec256` and
     `%split_vec256`.
+  - `backend/llvm/llvm_ir.{ml,mli}` and `backend/llvm/llvmize.ml` can emit an
+    explicit alignment on `alloca`. Wide vector register spill slots (`Vec256`
+    and `Vec512`) are now capped at `align 16`, avoiding X86 stack realignment
+    and base-pointer stackmap operands for generated mixed-block SIMD code.
   - `vendor/llvm-project/llvm/lib/Target/X86/{X86AsmPrinter.cpp,
     X86AsmPrinter.h,X86MCInstLower.cpp}` records a temporary return-address
     label after emitted X86 call instructions and lets the following
@@ -383,14 +388,33 @@ register-clobbering edge.
       LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
       prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 3 passed,
       0 skipped, 0 failed.
-  - `make llvm-test-one TEST=mixed-blocks/generated_native_test.ml LIST= DIR=
-    ARCH=amd64 LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
-    prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` still exits 2. The
-    failure has moved beyond missing builtin recognition to an agent-local
-    patched `llc` assertion in
-    `X86RegisterInfo::eliminateFrameIndex`: `BasePtr == FramePtr && "Expected
-    the FP as base register"` while compiling
-    `camlGenerated_native_test__create_int64x4_12_54_code`.
+  - Diagnosed the remaining
+    `mixed-blocks/generated_native_test.ml` failure. The target function
+    `camlGenerated_native_test__create_int64x4_12_54_code` has wide vector
+    stack slots; LLVM's default `<4 x i64>` alloca alignment triggered X86
+    stack realignment, which then selected the X86 base pointer for stackmap
+    frame-index operands and hit
+    `X86RegisterInfo::eliminateFrameIndex`'s `BasePtr == FramePtr` assertion.
+    A direct saved-IR experiment adding `align 16` to wide vector allocas made
+    the agent-local patched `llc` compile the file successfully.
+  - After emitting `align 16` for `Vec256`/`Vec512` register spill allocas,
+    focused validation now passes with normal Make/Dune parallelism:
+    - `OCAMLRUNPARAM=b,Xmain_stack_size=64M make llvm-install
+      LLVM_BOOT_BACKEND=0 ARCH=amd64 LLVM_PATH="$LLVM_PATH"
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0.
+    - `make llvm-test-one TEST=mixed-blocks/generated_native_test.ml LIST= DIR=
+      ARCH=amd64 LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 3 passed,
+      1 skipped, 0 failed.
+    - `make llvm-test-one
+      TEST=typing-layouts-arrays/test_vec128_u_array.ml LIST= DIR= ARCH=amd64
+      LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 3 passed,
+      0 skipped, 0 failed.
+    - `make llvm-test-one DIR=llvm-codegen LIST= TEST= ARCH=amd64
+      LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 16 passed,
+      15 skipped, 0 failed.
 
 ## Current Blocker
 
@@ -402,16 +426,19 @@ an explicit agent-local `prefix=...` for install validation. Also clear
 `eval "$(../../../scripts/agent-tmp-env)"`, because the agent env may set
 `LIST` for broader test runs.
 
-Full self-stage ocamltest is now the broad validation blocker: it completes but
-has 61 failures, some of which should be rerun after the focused SIMD fixes.
-The known stack-usage issue remains: some LLVM-built compiler paths need
+Full self-stage ocamltest is now the broad validation blocker: it completed with
+61 failures before the focused SIMD and wide-vector alloca fixes, so it should
+be rerun to refresh the failure list. The known stack-usage issue remains: some
+LLVM-built compiler paths need
 `OCAMLRUNPARAM=b,Xmain_stack_size=64M` where the normal opam compiler does not.
 
 ## Next Step
 
-Reduce the remaining self-stage ocamltest failure families. The most direct next
-target is the mixed-blocks `llc` frame-index assertion in
-`create_int64x4`, since the missing-builtin blocker for the focused i64x2 and
-vec256 join/split paths is now fixed. Keep using normal build parallelism; avoid
+Rerun broad self-stage ocamltest or a representative subset to refresh the
+remaining failure families after the SIMD and wide-vector alloca fixes. Likely
+next targets from the stale full run are native atomic/cmpxchg failures, native
+async/backtrace/CFI output mismatches, and
+`Llvmize: unimplemented instruction: probe` in
+`typing-layouts-or-null/probe.ml`. Keep using normal build parallelism; avoid
 only concurrent top-level `make`/`dune` commands in this checkout because of the
 shared lockfile.

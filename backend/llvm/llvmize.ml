@@ -4172,6 +4172,13 @@ let prepare_fun_info t (cfg : Cfg.t) =
    to that block of memory instead of being allocated on the stack for
    uniformity. *)
 let alloca_regs t (cfg : Cfg.t) arg_values arg_regs =
+  let alloca_align_for_reg (reg : Reg.t) =
+    match reg.typ with
+    | Cmm.Vec256 | Cmm.Vec512 -> Some 16
+    | Cmm.Addr | Cmm.Val | Cmm.Int | Cmm.Float | Cmm.Vec128 | Cmm.Float32
+    | Cmm.Valx2 ->
+      None
+  in
   let alloca_runtime_reg ~runtime_reg_ident ~arg_value =
     let alloca'ed =
       emit_ins ~res_ident:runtime_reg_ident t (I.alloca (V.get_type arg_value))
@@ -4191,7 +4198,7 @@ let alloca_regs t (cfg : Cfg.t) arg_values arg_regs =
                (fun ppf reg -> F.pp_comment ppf "%a" Printreg.reg reg)
                reg)
           t
-          (I.alloca (T.of_reg reg))
+          (I.alloca ?align:(alloca_align_for_reg reg) (T.of_reg reg))
       in
       set_alloca_for_reg t reg alloca'd;
       match init with
