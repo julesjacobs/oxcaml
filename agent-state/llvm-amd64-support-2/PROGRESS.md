@@ -176,20 +176,51 @@ builds on AMD64, and simple scalar programs compile and run with
     tests with missing stub libraries, product array/iarray semantic assertion
     failures, `tool-toplevel/dwarf_binary_emitter.ml`, and the AMD64
     unboxed-primitive argument ABI mismatch.
+- Began an independent reduction of
+  `tests/unboxed-primitive-args/test.ml` rather than using earlier agent code.
+  Isolated single generated externals such as `test_v_ssfls`,
+  `test_v_sfIxI`, `test_v_sIsf`, `test_v_fsLI`, `test_v_Ixff`, and
+  `test_v_xll` pass when run alone through the generated `Common.run_tests`
+  harness, but fail in the full generated list after prior calls have changed
+  register state.
+- Added LLVM AMD64 calling-convention coverage for vec128/vec256/vec512
+  values in the normal OxCaml convention, with stack fallback for float and
+  vector values. The normal argument vector register set is capped at
+  XMM/YMM/ZMM0-9 to match `backend/amd64/proc.ml`.
+- Changed noalloc external calls with C stack arguments to use private C-call
+  wrappers instead of the allocating-call `caml_c_call_stack_args` path. This
+  avoids relying on the runtime stack-copy helper for noalloc calls and lets
+  LLVM form the real C ABI call from the C stack.
+- Rebuilt after the ABI work:
+  - `cmake --build "$OXCAML_AGENT_TMP/llvm-build" --target llc opt`
+  - `opam exec -- make compiler`
+  - `opam exec -- make prefix="$PWD/_local-llvm-test-install" install_for_test`
+- The focused unboxed primitive test still fails at run time:
+  `env -u DIR -u LIST opam exec -- sh -c 'export CAML_LD_LIBRARY_PATH="$TEST_CAML_LD_LIBRARY_PATH"; make one TEST=tests/unboxed-primitive-args/test.ml'`
+  from `_runtest/testsuite`.
+  Remaining failures are now concentrated on order/register-state-dependent
+  float32 and vec128/int64x2 arguments, for example `test_v_ssfls`,
+  `test_v_sfIxI`, `test_v_xll`, and related mixed signatures. Large C-stack
+  argument reductions that previously failed early are no longer the leading
+  reduced failure.
 
 ## Current Blocker
 
 No immediate source blocker. Full `llvm-test` now completes but still has 34
-failures. The exception-recovery segfault class is fixed; the next focused
-backend blocker is the AMD64 unboxed primitive argument ABI mismatch, especially
-float32 and vec128/int64x2 values being observed as zero or `1:1` on the C side.
-Several product array/iarray tests now compile but fail semantic assertions, so
-the remaining SIMD/product-array work is beyond just adding missing builtins.
+failures. The exception-recovery segfault class is fixed; the active focused
+backend blocker is the AMD64 unboxed primitive argument ABI mismatch. Isolated
+externals can pass, while the full generated list exposes missing/incorrect
+movement of float32 and vec128/int64x2 values after prior calls perturb
+register state. Several product array/iarray tests now compile but fail
+semantic assertions, so the remaining SIMD/product-array work is beyond just
+adding missing builtins.
 
 ## Next Step
 
-Reduce `tests/unboxed-primitive-args/test.ml` under the standard compiler with
-`-llvm-backend`, then fix AMD64 external-call argument/result classification for
-float32 and SIMD vector values. After that, rerun the relevant layout array and
-iarray semantic tests, then the full `llvm-test`, before attempting
-`llvm-self-stage2-test`.
+Continue reducing the order-dependent `Common.exec`/`caml_apply*` path in
+`tests/unboxed-primitive-args/test.ml`. The next useful check is to inspect how
+the LLVM backend lowers boxed/unboxed float32 and vec128 arguments through
+generic application/PAPs, since saturated and single-test paths can pass while
+the full list exposes stale zero or `1:1` values. After fixing that, rerun the
+focused unboxed primitive test, the relevant layout array/iarray semantic
+tests, then the full `llvm-test`, before attempting `llvm-self-stage2-test`.

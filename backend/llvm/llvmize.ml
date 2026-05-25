@@ -1394,7 +1394,7 @@ let extcall ?unwind_label t (i : Cfg.terminator Cfg.instruction) ~func_symbol
       ?unwind_label ~cc t caml_c_call_symbol args res_types
   in
   let call_func arg_regs arg_types res_types =
-    if stack_ofs > 0
+    if stack_ofs > 0 && alloc
     then (
       (* We handle stack arguments manually as opposed to making LLVM's C
          calling conventions handle it. The reason is twofold:
@@ -3639,6 +3639,9 @@ let define_c_call_wrappers t =
         emit_ins t (I.load ~ptr:c_sp_ptr ~typ:T.i64)
       in
       let ocaml_sp = read_stack_pointer t in
+      let ocaml_sp_slot = emit_ins t (I.alloca T.i64) in
+      emit_ins_no_res t
+        (I.store_volatile ~ptr:ocaml_sp_slot ~to_store:ocaml_sp);
       write_stack_pointer t c_sp;
       let c_res =
         emit_ins t
@@ -3646,6 +3649,9 @@ let define_c_call_wrappers t =
              ~func:(V.of_symbol c_fun_name |> V.get_ident_exn)
              ~args:c_fun_args ~res_type:(Some (T.Struct c_res_types)) ~attrs:[]
              ~operand_bundles:[] ~cc:Default ~musttail:false)
+      in
+      let ocaml_sp =
+        emit_ins t (I.load_volatile ~ptr:ocaml_sp_slot ~typ:T.i64)
       in
       write_stack_pointer t ocaml_sp;
       let wrapper_res =
