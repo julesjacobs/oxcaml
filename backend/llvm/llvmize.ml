@@ -2459,6 +2459,22 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let res = emit_ins t (I.convert Trunc ~arg:avg ~to_:typ) in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_mul_high_16 convert_op shift_op =
+    let typ = int_vec_type ~width_in_bits:16 in
+    let wide_typ = int_vec_type_of_lanes ~width_in_bits:32 ~lanes:8 in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let arg1 = emit_ins t (I.convert convert_op ~arg:arg1 ~to_:wide_typ) in
+    let arg2 = emit_ins t (I.convert convert_op ~arg:arg2 ~to_:wide_typ) in
+    let product = emit_ins t (I.binary Mul ~arg1 ~arg2) in
+    let high =
+      emit_ins t
+        (I.binary shift_op ~arg1:product
+           ~arg2:(int_vector_constant_like wide_typ 16))
+    in
+    let res = emit_ins t (I.convert Trunc ~arg:high ~to_:typ) in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_sad_unsigned () =
     let byte_typ = int_vec_type ~width_in_bits:8 in
     let word_typ = int_vec_type_of_lanes ~width_in_bits:16 ~lanes:16 in
@@ -3513,6 +3529,13 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_avg_unsigned 8
     | Amd64_simd_instrs.Pavgw_X_Xm128 | Amd64_simd_instrs.Vpavgw_X_X_Xm128 ->
       simd_int_avg_unsigned 16
+    | Amd64_simd_instrs.Pmulhw | Amd64_simd_instrs.Vpmulhw_X_X_Xm128 ->
+      simd_int_mul_high_16 Sext Ashr
+    | Amd64_simd_instrs.Pmulhuw_X_Xm128
+    | Amd64_simd_instrs.Vpmulhuw_X_X_Xm128 ->
+      simd_int_mul_high_16 Zext Lshr
+    | Amd64_simd_instrs.Pmullw | Amd64_simd_instrs.Vpmullw_X_X_Xm128 ->
+      simd_int_binary 16 Mul
     | Amd64_simd_instrs.Psadbw_X_Xm128
     | Amd64_simd_instrs.Vpsadbw_X_X_Xm128 ->
       simd_int_sad_unsigned ()

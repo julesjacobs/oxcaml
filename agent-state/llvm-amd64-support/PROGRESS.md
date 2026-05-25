@@ -17,15 +17,16 @@ default disabled-probe path. The standard-compiler LLVM-backend
 `lib-atomic/test_atomic_cmpxchg.ml` failure is fixed too. The native
 `async-exns/async_exns_1.ml` output mismatch is now fixed as well.
 
-The latest SIMD follow-ups add SSE2 variable and immediate integer shift
-lowering, SSE2 unsigned SAD lowering, SSE2 saturating pack/narrow lowering,
-SSE2 unsigned average lowering for 8- and 16-bit lanes, SSE/SSE2 vec128
-movemask lowering, SSE2 integer compare lowering for 8-, 16-, and 32-bit
-lanes, and vec128 byte-shift lowering. Earlier fixes publish the current
-allocation pointer to `%r15` before the X86_64 `Raise_notrace` inline exception
-jump, correct LLVM `Compare_exchange` lowering, and add focused AMD64 probe
-terminator lowering plus focused AMD64 SIMD LLVM lowering for i64x2 arithmetic,
-vec128 interleaves, and vec256 join/split support. The poll slow-path frame
+The latest SIMD follow-ups add SSE2 int16 multiply low/high/high-unsigned
+lowering, SSE2 variable and immediate integer shift lowering, SSE2 unsigned SAD
+lowering, SSE2 saturating pack/narrow lowering, SSE2 unsigned average lowering
+for 8- and 16-bit lanes, SSE/SSE2 vec128 movemask lowering, SSE2 integer
+compare lowering for 8-, 16-, and 32-bit lanes, and vec128 byte-shift lowering.
+Earlier fixes publish the current allocation pointer to `%r15` before the
+X86_64 `Raise_notrace` inline exception jump, correct LLVM `Compare_exchange`
+lowering, and add focused AMD64 probe terminator lowering plus focused AMD64
+SIMD LLVM lowering for i64x2 arithmetic, vec128 interleaves, and vec256
+join/split support. The poll slow-path frame
 descriptor gap in
 `lib-domain/cpu_relax.ml` is also fixed for AMD64 LLVM output. Plain
 debug-less X86_64 raise/reraise calls now emit a standalone frame stackmap,
@@ -1810,6 +1811,15 @@ limit is raised from `l=100000` to `l=150000`.
       passed directly under `validation-tmp/simd_int_shift_variable_script`;
       the kept IR extracts the low i64 count lane, guards overlarge counts to
       avoid poison, and emits vector `shl`, `lshr`, and `ashr` operations.
+    - Implemented AMD64 LLVM lowering for the SSE2 int16 multiply subset
+      (`caml_sse2_int16x8_mul_low`, `caml_sse2_int16x8_mul_high`, and
+      `caml_sse2_int16x8_mul_high_unsigned`) and rebuilt with
+      `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_int16_mul.sh` script passed
+      directly under `validation-tmp/amd64-simd-int16-mul`; the kept IR
+      contains signed and unsigned widening to `<8 x i32>`, multiply, high-half
+      shifts, truncation back to `<8 x i16>`, and direct `<8 x i16>` low
+      multiply lowering.
 
 ## Current Blocker
 
