@@ -221,6 +221,8 @@ register-clobbering edge.
   - Per workspace guidance and user clarification, validation now uses normal
     Dune parallelism and avoids only concurrent top-level `make`/`dune`
     commands in this checkout; no `-j1` is used for OxCaml builds.
+  - Updated `GOAL.md` so the focused iteration example no longer recommends
+    `DUNE_BUILD_FLAGS=-j1`; normal internal build parallelism is expected.
   - `ARCH=amd64 LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
     make llvm-test-one TEST=backtrace/backtrace.ml` now passes with the
     standard compiler LLVM backend: 2 tests passed, 0 failed. Before the
@@ -682,10 +684,17 @@ agent env may set `LIST` for broader test runs.
 
 The known stack-usage issue remains: some LLVM-built compiler paths need
 `OCAMLRUNPARAM=b,Xmain_stack_size=64M` where the normal opam compiler does not.
+The OxCaml PR is still draft; as of the latest check, GitHub reported no PR
+comments or reviews and CI jobs were pending.
 
 ## Next Step
 
 Do a final PR-readiness audit of the AMD64 LLVM backend changes and decide
 whether to split or polish any broad implementation commits before requesting
-review. Keep using normal build parallelism; avoid only concurrent top-level
-`make`/`dune` commands in this checkout because of the shared lockfile.
+review. The largest known cleanup debt is the large commented-out
+ARM64-specific `specific` lowering reference in `backend/llvm/llvmize.ml`; it
+does not affect AMD64 validation but should be removed or replaced by a cleaner
+multi-arch organization before final review if preserving ARM64 support in the
+same branch is required. Keep using normal build parallelism; avoid only
+concurrent top-level `make`/`dune` commands in this checkout because of the
+shared lockfile.

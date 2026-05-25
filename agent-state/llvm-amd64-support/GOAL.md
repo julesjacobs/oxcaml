@@ -52,8 +52,10 @@ integration branch relies on for ARM64.
 - For AMD64 work, pass `ARCH=amd64` explicitly when validating target-specific
   paths, even though the scripts infer `amd64` from `x86_64` hosts.
 - Useful focused iteration shape:
-  `DUNE_BUILD_FLAGS=-j1 ARCH=amd64 LLVM_PATH="$LLVM_PATH" make llvm-install`,
-  then `ARCH=amd64 LLVM_PATH="$LLVM_PATH" make llvm-test-one TEST=llvm-codegen/arithmetic`.
+  `ARCH=amd64 LLVM_PATH="$LLVM_PATH" make llvm-install`, then
+  `ARCH=amd64 LLVM_PATH="$LLVM_PATH" make llvm-test-one TEST=llvm-codegen/arithmetic`.
+  Use normal build parallelism; avoid only concurrent top-level `make` or
+  `dune` commands in this checkout because they share lockfiles.
 - `llvm-self-stage-install` builds `_install`, then builds a compiler using the
   LLVM backend and runs a small smoke test.
 - `llvm-self-stage2-install` repeats self-staging from `_llvm_self_stage_install`
