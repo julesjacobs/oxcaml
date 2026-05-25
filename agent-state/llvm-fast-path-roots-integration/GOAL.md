@@ -14,4 +14,4 @@ Describe the concrete goal for this agent.
 
 ## Pull Requests
 
-- OxCaml PR: pending
+- OxCaml PR: https://github.com/julesjacobs/oxcaml/pull/18
