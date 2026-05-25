@@ -224,19 +224,28 @@ builds on AMD64, and simple scalar programs compile and run with
   `env -u DIR -u LIST opam exec -- sh -c 'export CAML_LD_LIBRARY_PATH="$TEST_CAML_LD_LIBRARY_PATH"; make one TEST=tests/unboxed-primitive-args/test.ml'`
   from `_runtest/testsuite` completed with `8 tests passed`, `1 skipped`,
   `0 failed`.
+- Full `llvm-test` with `LLVM_BOOT_BACKEND=0` completed after the SIMD-saving
+  GC fix:
+  - `6656 passed`, `280 skipped`, `20 failed`, `6956 considered`
+  - This improves from the previous full run's `6641 passed`, `280 skipped`,
+    `34 failed`, `6955 considered`.
+  - `tests/unboxed-primitive-args/test.ml` now passes in the full run.
+  - Remaining failures are native CFI stepping; quotation native/linker tests
+    that fail linking due to missing stub libraries; `tool-toplevel` native
+    toplevel output for `dwarf_binary_emitter.ml`; and product/vector array
+    semantic assertions in `tests/typing-layouts-arrays`.
 
 ## Current Blocker
 
-No immediate source blocker. Full `llvm-test` now completes but still has 34
+No immediate source blocker. Full `llvm-test` now completes but still has 20
 failures from the last full run. The exception-recovery segfault class and the
-focused AMD64 unboxed primitive argument test are fixed. Remaining known
-failures from the last full run include native CFI stepping, quotation
-native/linker tests with missing stub libraries, product array/iarray semantic
-assertions, and `tool-toplevel/dwarf_binary_emitter.ml`.
+AMD64 unboxed primitive argument test are fixed. Remaining known failures
+include native CFI stepping, quotation native/linker tests with missing stub
+libraries, product/vector array semantic assertions, and
+`tool-toplevel/dwarf_binary_emitter.ml`.
 
 ## Next Step
 
-Rerun full `llvm-test LLVM_BOOT_BACKEND=0` after the SIMD-saving GC fix to get
-the new baseline, then reduce the remaining product array/iarray semantic
-failures and `tool-toplevel/dwarf_binary_emitter.ml` before attempting
-`llvm-self-stage2-test`.
+Reduce the remaining product/vector array semantic failures in
+`tests/typing-layouts-arrays`, then address `tool-toplevel/dwarf_binary_emitter.ml`
+and native CFI stepping before attempting `llvm-self-stage2-test`.
