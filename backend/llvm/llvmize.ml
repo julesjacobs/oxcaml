@@ -4493,8 +4493,8 @@ let write_module_metadata t =
     let symbol_len = String.length symbol in
     if
       symbol_len >= prefix_len + suffix_len
-      && String.sub symbol 0 prefix_len = prefix
-      && String.sub symbol (symbol_len - suffix_len) suffix_len = suffix
+      && String.starts_with ~prefix symbol
+      && String.ends_with ~suffix symbol
     then String.sub symbol prefix_len (symbol_len - prefix_len - suffix_len)
     else
       fail_msg "unexpected LLVM module symbol shape %S; expected caml...%s"

@@ -4,7 +4,8 @@ Last updated: 2026-05-25.
 
 ## Current Claim
 
-Iteration 1 is reviewed, validated, and ready to commit.
+Iterations 1 and 2 are committed or ready to commit; iteration 2 is reviewed
+and validated.
 
 ## Evidence
 
@@ -22,10 +23,13 @@ None.
 ## Iteration State
 
 - Target: 10 completed iterations.
-- Completed iterations: 1.
+- Completed iterations: 2.
 - Committed cleanups:
   - Iteration 1: simplified deopt argument list construction in
     `backend/llvm/llvmize.ml` with `List.concat_map`.
+  - Iteration 2: simplified module metadata prefix/suffix checks in
+    `backend/llvm/llvmize.ml` with `String.starts_with` and
+    `String.ends_with`.
 - Dropped ideas: none yet.
 - Stop condition: stop after 10 completed iterations, then summarize committed
   cleanups, dropped ideas, and remaining promising targets.
@@ -95,7 +99,57 @@ Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
 are broad LLVM backend validation runs, and this commit only changes a
 behavior-preserving local list idiom.
 
+## Iteration 2 Candidate
+
+Path: self-proposed candidate.
+
+Candidate: simplify the prefix/suffix check in
+`backend/llvm/llvmize.ml`'s `module_name_from_symbol` by using
+`String.starts_with` and `String.ends_with` instead of manually comparing
+substrings.
+
+Why likely useful: the same file already uses `String.starts_with` and
+`String.ends_with`; using them here names the intended string contract directly
+and leaves the existing `String.sub` only for extracting the module name.
+
+Review gate: passed after five human-like reviews of the final diff.
+
+Review result: all five reviewers judged the `llvmize.ml` cleanup clean,
+idiomatic, and proportionate. The only findings were progress-file bookkeeping:
+an accidental duplicate `Next Step` heading and stale next-step wording. Those
+findings were accepted and fixed.
+
+Validation result:
+
+- `git diff --check`: passed.
+- `eval "$(../../../scripts/agent-tmp-env)" && opam exec
+  --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`: passed.
+
+## Testing Story for This Commit
+
+Change: replace manual prefix and suffix substring comparisons in
+`backend/llvm/llvmize.ml`'s `module_name_from_symbol` with
+`String.starts_with` and `String.ends_with`, and record iteration 2 state in
+this progress file.
+Risk: if the rewrite is wrong, module metadata symbol validation could accept or
+reject the wrong symbol shape, or the extracted module name could be computed
+from an invalid string.
+Validation: `git diff --check`; `eval "$(../../../scripts/agent-tmp-env)" &&
+opam exec --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`.
+Full LLVM validation: not run for this commit; the source rewrite keeps the
+existing combined length check and substring extraction, and only names the
+existing prefix/suffix checks with equivalent stdlib helpers.
+Stage2 verification: not run for this commit; self-stage2 is intentionally
+deferred for the same reason as full LLVM validation.
+Why this is enough: five human-like reviews checked that preserving the length
+guard avoids prefix/suffix overlap issues and that the helper calls preserve the
+old string contract; the build check covers type and syntax validity.
+Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
+`make llvm-self-stage2-test LLVM_PATH="$LLVM_PATH"` are deferred because they
+are broad LLVM backend validation runs, and this commit only changes a
+behavior-preserving local string idiom.
+
 ## Next Step
 
-Commit iteration 1, push it to the draft PR branch, then choose the next
+Commit iteration 2, push it to the draft PR branch, then choose the next
 reviewed cleanup candidate.
