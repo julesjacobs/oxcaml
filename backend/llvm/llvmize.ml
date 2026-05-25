@@ -757,7 +757,12 @@ let amd64_call_gc_symbol t (i : 'a Cfg.instruction) =
           | Cmm.Val | Cmm.Addr | Cmm.Int | Cmm.Vec256 | Cmm.Vec512 ->
             false)
     then "caml_call_gc_sse"
-    else "caml_call_gc"
+    else
+      (* LLVM can materialize non-vector values through XMM registers across
+         the slow-path call, for example when extracting a lane from a vector
+         before allocating the boxed scalar result.  The Cfg liveness may only
+         see the extracted scalar, so preserve XMM by default on AMD64. *)
+      "caml_call_gc_sse"
   | Target_system.AArch64 | Target_system.IA32 | Target_system.ARM
   | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
     "caml_call_gc"

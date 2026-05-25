@@ -56,7 +56,10 @@ that preserves live SIMD registers (`caml_call_gc_sse`, `caml_call_gc_avx`, or
 `caml_call_gc_avx512`) when float/SIMD values are live across heap allocation
 or poll slow paths. This fixes the reduced high-arity `float32` mismatch where
 boxed float32 allocation hit the slow path after computing the payload in
-`%xmm0`.
+`%xmm0`. A further AMD64 follow-up now defaults those LLVM slow paths to the
+XMM-preserving helper even when Cfg liveness only sees scalar values, because
+LLVM can materialize scalar lane extracts through XMM registers across the
+call. This clears the remaining focused vector array/product-array failures.
 
 ## Evidence
 
@@ -1048,6 +1051,36 @@ boxed float32 allocation hit the slow path after computing the payload in
       The generated `common.s` now calls `caml_call_gc_sse@PLT` in
       `camlCommon__get_float32_27_71_code`, and selectors `22`, `23`, `24`,
       and `25` all exit 0 with empty output.
+    - Rebuilt the full generated `unboxed-primitive-args` harness against the
+      latest boot compiler in
+      `validation-tmp/repro_unboxed_primitive_args_simdgc/test.opt`; it exits
+      0 with empty output.
+    - The previously reduced `float32` array sort repro now passes in
+      `validation-tmp/reduce_float32_sort_simdgc/repro.opt`, printing `ok`.
+      The original direct `typing-layouts-arrays/test_float32_u_array.ml`
+      shape also exits 0 with empty output in
+      `validation-tmp/repro_float32_array_simdgc`.
+    - A sequential direct batch of layout array/iarray tests with the
+      SIMD-preserving liveness patch showed all scalar arrays and all iarrays
+      passing, but still failed vector array/product-array cases. Reduction
+      showed `Vector_elem.Int64x2.high_to` emitted `caml_call_gc@PLT` while
+      LLVM had materialized a lane extract in `%xmm0` across the slow-path
+      call; the Cfg liveness only contained the extracted scalar.
+    - Updated AMD64 LLVM slow-path selection to use `caml_call_gc_sse` by
+      default when no wider live vector class requires `caml_call_gc_avx` or
+      `caml_call_gc_avx512`. Rebuilt a fresh boot compiler with normal Dune
+      parallelism in
+      `validation-tmp/xmm_default_gc_boot/boot_context_build`; result:
+      `1682` boot wrapper lines, `827` fresh IR, smoke printed `55`.
+    - With that compiler, `Vector_elem.Int64x2.high_to` now emits
+      `caml_call_gc_sse@PLT`, and the focused vector map repro passes under
+      default, `OCAMLRUNPARAM=s=4k`, `s=8k`, and `s=16k` minor heaps. Direct
+      `typing-layouts-arrays` validations now pass with empty output for
+      `test_vec128_u_array.ml`, `test_vec256_u_array.ml`,
+      `test_ignorable_product_array_3.ml`,
+      `test_ignorable_product_array_4.ml`,
+      `test_ignorable_product_array_with_uninit_3.ml`, and
+      `test_ignorable_product_array_with_uninit_4.ml`.
 
 ## Current Blocker
 
@@ -1074,8 +1107,10 @@ rest of CI still pending.
 
 ## Next Step
 
-Reduce and fix the remaining full-suite failures, starting with the native
-unboxed array/iarray sort/permutation cluster and the remaining
-`unboxed-primitive-args/test.ml` mixed unboxed primitive harness mismatches.
-Keep using normal build parallelism; avoid only concurrent top-level `make` or
-`dune` commands in this checkout because of the shared lockfile.
+Refresh broader self-stage ocamltest on top of the SIMD/XMM GC slow-path fixes.
+The previously recorded `unboxed-primitive-args` and unboxed
+array/iarray/vector-array clusters now pass in focused validation, so the next
+known old failures to revisit are `native-cfi-stepping/test_cfi.ml` and
+`runtime-errors/stackoverflow.ml`, plus any failures that remain after the
+refresh. Keep using normal build parallelism; avoid only concurrent top-level
+`make` or `dune` commands in this checkout because of the shared lockfile.
