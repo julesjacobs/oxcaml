@@ -4,8 +4,8 @@ Last updated: 2026-05-25.
 
 ## Current Claim
 
-Iterations 1 through 8 are committed or ready to commit; iteration 8 passed
-review with no findings on the corrected diff and is validated.
+Iterations 1 through 9 are committed or ready to commit; iteration 9 passed
+review with no findings and is validated.
 
 ## Evidence
 
@@ -23,7 +23,7 @@ None.
 ## Iteration State
 
 - Target: 10 completed iterations.
-- Completed iterations: 8.
+- Completed iterations: 9.
 - Committed cleanups:
   - Iteration 1: simplified deopt argument list construction in
     `backend/llvm/llvmize.ml` with `List.concat_map`.
@@ -41,6 +41,8 @@ None.
   - Iteration 7: combined type-to-string and sanitize steps in
     `backend/llvm/llvmize.ml`'s `add_c_call_wrapper`.
   - Iteration 8: reused `runtime_reg_types` in
+    `backend/llvm/llvmize.ml`.
+  - Iteration 9: shared fresh unwind label creation in
     `backend/llvm/llvmize.ml`.
 - Dropped ideas: none yet.
 - Stop condition: stop after 10 completed iterations, then summarize committed
@@ -444,8 +446,50 @@ Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
 are broad LLVM backend validation runs, and this commit only changes a
 behavior-preserving local binding.
 
+## Iteration 9 Candidate
+
+Path: self-proposed candidate.
+
+Candidate: share the creation of fresh unwind labels from exception entries in
+`backend/llvm/llvmize.ml`.
+
+Why likely useful: block terminator translation and basic-instruction unwind
+setup currently repeat the same `Option.map` over an exception entry. A small
+helper names the contract and keeps the fresh-label behavior in one place.
+
+Review gate: passed after five human-like reviews of the final diff.
+
+Review result: all five reviewers said keep with no findings. Reviewers checked
+that `Cmm.new_label ()` is still called only for `Some` exception entries, that
+fresh-label allocation is not shared across sites, and that the progress update
+is compact.
+
+Validation result:
+
+- `git diff --check`: passed.
+- `eval "$(../../../scripts/agent-tmp-env)" && opam exec
+  --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`: passed.
+
+## Testing Story for This Commit
+
+Change: share the creation of fresh unwind labels from exception entries in
+`backend/llvm/llvmize.ml`, and record iteration 9 state in this progress file.
+Risk: if the rewrite is wrong, unwind labels could be allocated too early, not
+allocated for some exception entries, or accidentally shared between call sites.
+Validation: `git diff --check`; `eval "$(../../../scripts/agent-tmp-env)" &&
+opam exec --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`.
+Full LLVM validation: not run for this commit; the helper preserves the exact
+`Option.map` body and each call site still calls it independently.
+Stage2 verification: not run for this commit; self-stage2 is intentionally
+deferred for the same reason as full LLVM validation.
+Why this is enough: five human-like reviews found no issues and checked the
+fresh-label allocation behavior; the build check covers type and syntax
+validity.
+Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
+`make llvm-self-stage2-test LLVM_PATH="$LLVM_PATH"` are deferred because they
+are broad LLVM backend validation runs, and this commit only changes
+behavior-preserving helper sharing.
+
 ## Next Step
 
-Commit iteration 8 and push it to the draft PR branch. The updated thread goal
-is satisfied because a fresh human-like review of the corrected diff returned
-no findings.
+Commit iteration 9 and push it to the draft PR branch.

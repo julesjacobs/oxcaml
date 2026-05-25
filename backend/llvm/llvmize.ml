@@ -1300,6 +1300,9 @@ let exn_entry_for_instruction t (i : 'a Cfg.instruction) =
   | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
     None
 
+let fresh_unwind_label exn_entry =
+  Option.map (fun _ -> V.of_label (Cmm.new_label ())) exn_entry
+
 let emit_unwind_landingpad_after t unwind_label exn_entry =
   match unwind_label, exn_entry with
   | Some unwind_label, Some exn_entry ->
@@ -1671,9 +1674,7 @@ let emit_terminator t (block : Cfg.basic_block)
       | Call { op; label_after } ->
         reject_addr_regs i.arg "call";
         let exn_entry = exn_entry_for_block t block in
-        let unwind_label =
-          Option.map (fun _ -> V.of_label (Cmm.new_label ())) exn_entry
-        in
+        let unwind_label = fresh_unwind_label exn_entry in
         call ?unwind_label t i op;
         br_label t label_after;
         emit_unwind_landingpad_after t unwind_label exn_entry
@@ -1684,9 +1685,7 @@ let emit_terminator t (block : Cfg.basic_block)
       | Call_no_return
           { func_symbol; alloc; ty_args; stack_ofs; stack_align; _ } ->
         let exn_entry = exn_entry_for_block t block in
-        let unwind_label =
-          Option.map (fun _ -> V.of_label (Cmm.new_label ())) exn_entry
-        in
+        let unwind_label = fresh_unwind_label exn_entry in
         extcall ?unwind_label t i ~func_symbol ~alloc ~ty_args ~stack_ofs
           ~stack_align;
         emit_ins_no_res t I.unreachable;
@@ -1697,9 +1696,7 @@ let emit_terminator t (block : Cfg.basic_block)
         | Probe _ -> not_implemented_terminator ~msg:"probe" i
         | External { func_symbol; alloc; ty_args; stack_ofs; stack_align; _ } ->
           let exn_entry = exn_entry_for_block t block in
-          let unwind_label =
-            Option.map (fun _ -> V.of_label (Cmm.new_label ())) exn_entry
-          in
+          let unwind_label = fresh_unwind_label exn_entry in
           extcall ?unwind_label t i ~func_symbol ~alloc ~ty_args ~stack_ofs
             ~stack_align;
           br_label t label_after;
@@ -3084,9 +3081,7 @@ let stack_check _t (_i : Cfg.basic Cfg.instruction) _max_frame_size_bytes =
 
 let unwind_for_instruction t i =
   let exn_entry = exn_entry_for_instruction t i in
-  let unwind_label =
-    Option.map (fun _ -> V.of_label (Cmm.new_label ())) exn_entry
-  in
+  let unwind_label = fresh_unwind_label exn_entry in
   unwind_label, exn_entry
 
 let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
