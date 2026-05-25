@@ -706,6 +706,45 @@ register-clobbering edge.
       still reports inherited vendored LLVM/expectcommon long lines when run
       locally against upstream `main`, but no longer reports the branch-touched
       `backend/llvm/llvmize.ml` lines after running through the opam switch.
+  - Restored the integration branch's explicit ARM64 LLVM `specific` lowering
+    behind the `Llvmize_specific` classifier instead of matching directly on
+    ARM64 `Arch`/`Simd` constructors in shared `llvmize.ml`:
+    - `backend/arm64/llvmize_specific.ml` now classifies the ARM64 SIMD subset
+      that the integration branch lowered into architecture-neutral
+      `arm64_simd_operation` constructors.
+    - `backend/amd64/llvmize_specific.ml` defines the same neutral operation
+      type so shared `backend/llvm/llvmize.ml` compiles under `ARCH=amd64`;
+      AMD64 classification still never constructs those ARM64 cases.
+    - Shared `backend/llvm/llvmize.ml` now lowers the ARM64 shift/add,
+      multiply-add/subtract, sign/zero-extension, float fused-operation,
+      `sqrt`, and restored SIMD operation subset through those neutral
+      classifier constructors. Unsupported ARM64 SIMD operations still flow to
+      the existing `not_implemented_basic` fallback, matching the old lowering
+      coverage rather than adding new ARM64 SIMD support.
+  - Rechecked after restoring ARM64 lowering:
+    - `ARCH=arm64 RUNTIME_DIR=runtime dune build ocamloptcomp.cma` exits 0.
+    - `ARCH=amd64 RUNTIME_DIR=runtime dune build ocamloptcomp.cma` exits 0.
+    - `git diff --check` exits 0.
+    - `ocamlformat --check` exits 0 for
+      `backend/llvm/llvmize.ml`,
+      `backend/arm64/llvmize_specific.ml`, and
+      `backend/amd64/llvmize_specific.ml`.
+    - `make llvm-install ARCH=amd64 LLVM_BOOT_BACKEND=0
+      LLVM_PATH="$LLVM_PATH"
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0 with normal
+      build parallelism.
+    - The freshly rebuilt installed compiler with
+      `OCAMLLIB=/tmp/oxcaml-agent-llvm-amd64-support/install/lib/ocaml`
+      compiles and runs a direct AMD64 `-llvm-backend -llvm-path "$LLVM_PATH"`
+      smoke that prints `42`.
+    - The freshly rebuilt installed compiler compiles
+      `testsuite/tests/typing-layouts-block-indices/block_indices_native.ml`
+      with `-llvm-backend -llvm-path "$LLVM_PATH" -S -c`, exercising the AMD64
+      SIMD classifier/lowering path.
+    - `make llvm-test-one DIR=llvm-codegen LIST= TEST= ARCH=amd64
+      LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 20 passed,
+      15 skipped, 0 failed.
 
 ## Current Blocker
 
@@ -719,16 +758,12 @@ agent env may set `LIST` for broader test runs.
 
 The known stack-usage issue remains: some LLVM-built compiler paths need
 `OCAMLRUNPARAM=b,Xmain_stack_size=64M` where the normal opam compiler does not.
-The OxCaml PR is still draft; as of the latest check before this formatting
-cleanup, GitHub reported no PR comments or reviews, the Merlin check had
-passed, and the rest of CI was still pending.
+The OxCaml PR is still draft; as of the latest check after the formatting
+cleanup, GitHub reported the Merlin check passed and the rest of CI still
+pending.
 
 ## Next Step
 
-Poll CI and investigate any concrete failure. The current `llvmize_specific`
-split fixes cross-arch compilation without adding AMD64 constructors to ARM64;
-if explicit ARM64 `-llvm-backend` runtime support must remain active in this
-branch, fill in the ARM64-specific lowering behind the classifier rather than
-putting ARM64 `Simd.operation` constructors back in shared `llvmize.ml`. Keep
-using normal build parallelism; avoid only concurrent top-level `make`/`dune`
-commands in this checkout because of the shared lockfile.
+Poll CI and investigate any concrete failure. Keep using normal build
+parallelism; avoid only concurrent top-level `make`/`dune` commands in this
+checkout because of the shared lockfile.
