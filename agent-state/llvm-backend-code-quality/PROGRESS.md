@@ -9,7 +9,8 @@ Fresh agent workspace created. No claim yet.
 ## Evidence
 
 - OxCaml branch: `jujacobs/llvm-backend-code-quality`
-- OxCaml PR: pending
+- OxCaml PR: https://github.com/julesjacobs/oxcaml/pull/16
+- Initial state commit: `ac299acb8526`
 - Vendored LLVM path: `oxcaml/vendor/llvm-project`
 - Agent state path: `agent-state/llvm-backend-code-quality`
 
