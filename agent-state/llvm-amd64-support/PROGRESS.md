@@ -842,6 +842,34 @@ domain-state/allocation-pointer values on handler entry.
       `lambda_to_flambda_primitives.ml:1790`. This is the remaining
       default-stack self-stage caveat, not a focused standard `-llvm-backend`
       failure.
+  - Investigated but did not commit a GC-root slot pooling experiment:
+    - Hypothesis: the default-stack self-stage overflow might be caused by
+      function-wide volatile root allocas for every register live across any
+      safepoint, inflating frames in LLVM-emitted compiler code.
+    - Tried replacing most function-wide preserved root slots with a reusable
+      pool sized to the maximum number of roots live at one safepoint, while
+      keeping trap-edge-visible roots in their original slots.
+    - The experiment built with `make llvm-install ARCH=amd64
+      LLVM_BOOT_BACKEND=0
+      LLVM_PATH=/tmp/oxcaml-agent-llvm-amd64-support/clang-wrapper-opt
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install-opt`, the direct
+      installed-compiler smoke printed `11`, and the focused
+      `llvm-codegen` suite still passed: 20 passed, 15 skipped, 0 failed.
+    - However, the default-stack boot-context build then failed
+      deterministically while building
+      `middle_end/flambda2/types/traversals.mli` with
+      `/tmp/oxcaml-agent-llvm-amd64-support/install-opt/bin/ocamlc.opt`:
+      `Fatal error: caml_scan_stack: missing frame descriptor`.
+    - The failing action reproduced under Dune but 50 isolated runs of the
+      same `ocamlc.opt` command passed. The bad reported return addresses
+      mapped into the middle of generated instructions, for example around
+      `camlPprintast__signature_item_134_918_code`, which points to corrupted
+      stack scanning or root/frame-slot metadata rather than one missing call
+      descriptor.
+    - Restoring an explicit stackmap after AMD64 raise calls did not fix the
+      failure. The root-slot pooling edits were backed out before commit; the
+      current worktree is back to the pushed backend code plus this progress
+      note.
 
 ## Current Blocker
 
@@ -868,7 +896,7 @@ rest of CI still pending.
 
 ## Next Step
 
-Commit and push the X86_64 `Pushtrap` spill-slot refresh, then poll CI and
-investigate any concrete failure. Keep using normal build parallelism; avoid
-only concurrent top-level `make`/`dune` commands in this checkout because of
-the shared lockfile.
+Continue investigating the remaining default-stack self-stage overflow without
+committing the unsafe reusable-root-slot experiment. Keep using normal build
+parallelism; avoid only concurrent top-level `make`/`dune` commands in this
+checkout because of the shared lockfile.
