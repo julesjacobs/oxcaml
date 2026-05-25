@@ -1047,17 +1047,57 @@ let gc_live_stackmap_args bundles =
     bundles
   |> Option.value ~default:[]
 
-let emit_stackmap_safepoint t (i : 'a Cfg.instruction) operand_bundles =
+let emit_stackmap_safepoint ?safepoint t (i : 'a Cfg.instruction)
+    operand_bundles =
   add_function_decl t
     (LL.Fundecl.create_varargs "llvm.experimental.stackmap" [T.i64; T.i32] None);
   let statepoint_id =
-    let stack_offset = statepoint_stack_offset t i in
-    Safepoint.(encode_statepoint_id (Call { stack_offset }))
+    match safepoint with
+    | Some safepoint -> Safepoint.encode_statepoint_id safepoint
+    | None ->
+      let stack_offset = statepoint_stack_offset t i in
+      Safepoint.(encode_statepoint_id (Call { stack_offset }))
   in
   emit_ins_no_res t
     (I.stackmap ~id:(V.of_int ~typ:T.i64 statepoint_id)
        ~shadow_bytes:(V.of_int ~typ:T.i32 0)
        ~args:(gc_live_stackmap_args operand_bundles))
+
+let call_simple_with_stackmap ?unwind_label ~attrs ~live_roots ~safepoint ~cc t
+    (i : 'a Cfg.instruction) name args res_types =
+  let fun_info = get_fun_info t in
+  let prev_dbg_metadata = fun_info.current_dbg_metadata in
+  fun_info.current_dbg_metadata
+    <- create_debug_location t fun_info.subprogram_dbg_metadata_id i.dbg;
+  Fun.protect
+    ~finally:(fun () -> fun_info.current_dbg_metadata <- prev_dbg_metadata)
+    (fun () ->
+      let args = prepare_call_args t args in
+      let res_type = Some (make_ret_type res_types) in
+      let func = LL.Ident.global name in
+      let operand_bundles =
+        call_operand_bundles t ~primitive_call:false ~raise_call:false i.dbg
+          live_roots
+      in
+      let res =
+        match unwind_label with
+        | None ->
+          emit_ins t
+            (I.call ~func ~args ~res_type ~attrs ~operand_bundles ~cc
+               ~musttail:false)
+        | Some unwind_label ->
+          let normal_label = V.of_label (Cmm.new_label ()) in
+          let res =
+            emit_ins t
+              (I.invoke ~func ~args ~res_type ~attrs ~operand_bundles ~cc
+                 ~normal:normal_label ~unwind:unwind_label)
+          in
+          emit_label t normal_label;
+          res
+      in
+      emit_stackmap_safepoint ~safepoint t i operand_bundles;
+      refresh_live_gc_roots t live_roots;
+      extract_call_res t res (List.length res_types))
 
 (* Helpers for LLVM intrinsics *)
 
@@ -3269,14 +3309,18 @@ let poll ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction) =
     (I.br_cond ~cond:skip_poll_expect ~ifso:after_poll ~ifnot:call_gc);
   emit_label t call_gc;
   add_referenced_symbol t "caml_call_gc";
-  call_simple
-    ~attrs:
-      (gc_attr
-         ~safepoint:(Safepoint.Poll { stack_offset = i.stack_offset })
-         ~can_call_gc:true t i
-      @ [LL.Fn_attr.Cold])
-    ~live_roots:(load_live_gc_roots_across t i)
-    ?unwind_label ~cc:Oxcaml_alloc t "caml_call_gc" [] []
+  let stack_offset = statepoint_stack_offset t i in
+  let safepoint = Safepoint.Poll { stack_offset } in
+  let attrs = gc_attr ~safepoint ~can_call_gc:true t i @ [LL.Fn_attr.Cold] in
+  let live_roots = load_live_gc_roots_across t i in
+  (match Target_system.architecture () with
+  | Target_system.X86_64 ->
+    call_simple_with_stackmap ~attrs ~live_roots ~safepoint ?unwind_label
+      ~cc:Oxcaml_alloc t i "caml_call_gc" [] []
+  | Target_system.AArch64 | Target_system.IA32 | Target_system.ARM
+  | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
+    call_simple ~attrs ~live_roots ?unwind_label ~cc:Oxcaml_alloc t
+      "caml_call_gc" [] [])
   |> ignore;
   emit_ins_no_res t (I.br after_poll);
   emit_unwind_landingpad_after t unwind_label exn_entry;

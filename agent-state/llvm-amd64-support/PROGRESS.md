@@ -16,7 +16,9 @@ default disabled-probe path. The standard-compiler LLVM-backend
 
 The latest fixes correct LLVM `Compare_exchange` lowering and add focused AMD64
 probe terminator lowering plus focused AMD64 SIMD LLVM lowering for i64x2
-arithmetic, vec128 interleaves, and vec256 join/split support. Earlier fixes
+arithmetic, vec128 interleaves, and vec256 join/split support. The poll
+slow-path frame descriptor gap in `lib-domain/cpu_relax.ml` is also fixed for
+AMD64 LLVM output. Earlier fixes
 reserve the AMD64 OxCaml runtime registers in LLVM's X86 register allocator and
 make exception-recovery blocks treat runtime blockaddress entry as a
 register-clobbering edge.
@@ -444,6 +446,36 @@ register-clobbering edge.
       LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
       prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 5 passed,
       1 skipped, 0 failed.
+  - Diagnosed the current `lib-domain/cpu_relax.ml` native segfault as a
+    missing frame descriptor for the AMD64 poll slow-path return address after
+    `call caml_call_gc`. The ordinary poll call carried a poll statepoint ID,
+    but did not produce a standalone X86 frame-table descriptor at the return
+    address used by `current_frame_alloc_wosize`.
+  - `backend/llvm/llvmize.ml` now emits an explicit poll stackmap after X86_64
+    `caml_call_gc` poll calls, using the same poll statepoint ID and live GC
+    root bundle as the call. This gives the X86 asm-printer label handoff a
+    concrete stackmap to record at the call return address.
+  - Focused poll validation now passes with normal Make/Dune parallelism:
+    - `make llvm-install ARCH=amd64 LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0.
+    - `make llvm-test-one TEST=lib-domain/cpu_relax.ml LIST= DIR= ARCH=amd64
+      LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 3 passed,
+      0 skipped, 0 failed.
+    - A direct retained-IR compile of `testsuite/tests/lib-domain/cpu_relax.ml`
+      with `/tmp/oxcaml-agent-llvm-amd64-support/install/bin/ocamlopt.opt
+      -llvm-backend -llvm-path "$LLVM_PATH" -nostdlib ... unix.cmxa
+      threads.cmxa` exits 0, and the generated assembly contains
+      `camlCpu_relax__frametable: .quad 9` with poll entries for the
+      `caml_call_gc` return labels.
+    - Forced-poll gdb validation of that direct binary sets the saved domain
+      young limit equal to the saved allocation pointer at
+      `camlCpu_relax__entry+0xf0`; the program exits normally and gdb reports
+      `No stack` instead of the previous `frame_end_of_live_ofs(d=0x0)` crash.
+    - `make llvm-test-one DIR=lib-domain LIST= TEST= ARCH=amd64
+      LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 21 passed,
+      4 skipped, 0 failed.
 
 ## Current Blocker
 
@@ -465,8 +497,7 @@ LLVM-built compiler paths need
 
 Rerun broad self-stage ocamltest or a representative subset to refresh the
 remaining failure families after the SIMD and wide-vector alloca fixes. Likely
-next targets from the stale full run are native `lib-domain/cpu_relax.ml` and
-`statmemprof/bigarray.ml` segfaults plus native async/backtrace/CFI output
-mismatches. Keep using normal build parallelism; avoid only concurrent
-top-level `make`/`dune` commands in this checkout because of the shared
-lockfile.
+next targets from the stale full run are native `statmemprof/bigarray.ml`
+segfaults plus native async/backtrace/CFI output mismatches. Keep using normal
+build parallelism; avoid only concurrent top-level `make`/`dune` commands in
+this checkout because of the shared lockfile.
