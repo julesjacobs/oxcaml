@@ -273,6 +273,10 @@ limit is raised from `l=100000` to `l=150000`.
     tests including `c_call_stackmap.ml` passed. Wrapper evidence:
     `24` wrapper lines / `12` fresh IR. Log:
     `validation-tmp/integration_merge_stage/llvm_codegen_ocamltest.log`.
+  - Pushed merge commit `76e149a203` to
+    `origin/jujacobs/llvm-amd64-support`. GitHub now reports the PR merge
+    state as `UNSTABLE` rather than `DIRTY`; checks are queued or in progress
+    on the pushed branch.
   - Reduced the intermittent self-stage2
     `caml_scan_stack: missing frame descriptor` abort to a missing descriptor
     after the first C call in `camlCmi_format__marshal_11_39_code`
@@ -1353,9 +1357,8 @@ default-stack boot-context build pass without
 now passes on top of the SIMD/XMM GC slow-path, post-raise CFI, and
 `runtime-errors/stackoverflow.ml` stack-budget fixes. Broader self-stage2
 validation also passes after the external C-call stackmap fix.
-The OxCaml PR is still draft; before the integration merge commit is pushed,
-GitHub reports it as dirty against `jujacobs/llvm-backend-integration` and no
-checks are reported.
+The OxCaml PR is still draft. After pushing the integration merge commit,
+GitHub reports `mergeStateStatus: UNSTABLE`; checks are queued or in progress.
 
 ## Next Step
 
