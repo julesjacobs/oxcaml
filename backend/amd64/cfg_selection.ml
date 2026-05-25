@@ -166,6 +166,8 @@ let is_llvm_simd_builtin = function
   | "caml_sse2_int16x8_cmpgt" | "caml_sse2_int32x4_cmpgt"
   | "caml_sse_vec128_and" | "caml_sse_vec128_andnot"
   | "caml_sse_vec128_or" | "caml_sse_vec128_xor"
+  | "caml_sse_vec128_movemask_32" | "caml_sse2_vec128_movemask_8"
+  | "caml_sse2_vec128_movemask_64"
   | "caml_simd_vec128_interleave_high_64"
   | "caml_sse2_vec128_interleave_high_64" | "caml_simd_vec128_interleave_low_64"
   | "caml_sse2_vec128_interleave_low_64" | "caml_avx_vec256_extract_128"

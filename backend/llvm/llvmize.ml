@@ -2841,6 +2841,36 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_movemask ~width_in_bits ~lanes =
+    let typ = int_vec_type_of_lanes ~width_in_bits ~lanes in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let lane_mask lane =
+      let elem =
+        emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int lane))
+      in
+      let shifted =
+        emit_ins t
+          (I.binary Lshr ~arg1:elem
+             ~arg2:(V.of_int ~typ:(T.Int { width_in_bits }) (width_in_bits - 1)))
+      in
+      let bit =
+        if width_in_bits = 64
+        then shifted
+        else emit_ins t (I.convert Zext ~arg:shifted ~to_:T.i64)
+      in
+      if lane = 0
+      then bit
+      else emit_ins t (I.binary Shl ~arg1:bit ~arg2:(V.of_int lane))
+    in
+    let res =
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun acc lane ->
+             emit_ins t (I.binary Or ~arg1:acc ~arg2:(lane_mask lane)))
+           (V.of_int ~typ:T.i64 0)
+    in
+    store_into_reg t i.res.(0) res
+  in
   let simd_int_cmp width_in_bits (cond : Llvmize_specific_types.int_cond) ~zero
       =
     let typ = int_vec_type ~width_in_bits in
@@ -3339,6 +3369,13 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_vec128_shift_bytes ~left:true (simd_imm imm)
     | Amd64_simd_instrs.Psrldq | Amd64_simd_instrs.Vpsrldq_X_X ->
       simd_vec128_shift_bytes ~left:false (simd_imm imm)
+    | Amd64_simd_instrs.Pmovmskb_r64_X
+    | Amd64_simd_instrs.Vpmovmskb_r64_X ->
+      simd_movemask ~width_in_bits:8 ~lanes:16
+    | Amd64_simd_instrs.Movmskps | Amd64_simd_instrs.Vmovmskps_r64_X ->
+      simd_movemask ~width_in_bits:32 ~lanes:4
+    | Amd64_simd_instrs.Movmskpd | Amd64_simd_instrs.Vmovmskpd_r64_X ->
+      simd_movemask ~width_in_bits:64 ~lanes:2
     | Amd64_simd_instrs.Maskmovdqu | Amd64_simd_instrs.Vmaskmovdqu ->
       simd_masked_byte_store ()
     | Amd64_simd_instrs.Vinsertf128 -> simd_vec256_insert_128 (simd_imm imm)
