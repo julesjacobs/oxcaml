@@ -17,8 +17,9 @@ default disabled-probe path. The standard-compiler LLVM-backend
 `lib-atomic/test_atomic_cmpxchg.ml` failure is fixed too. The native
 `async-exns/async_exns_1.ml` output mismatch is now fixed as well.
 
-The latest SIMD follow-ups add SSE2 vec128 shuffle lowering for 64-bit lanes
-and high/low 16-bit halves, SSE2 vec128 interleave lowering for 8- and 16-bit
+The latest SIMD follow-ups add SSE2 signed word multiply-add and unsigned even
+doubleword multiply lowering, SSE2 vec128 shuffle lowering for 64-bit lanes and
+high/low 16-bit halves, SSE2 vec128 interleave lowering for 8- and 16-bit
 lanes, SSE2 int16 multiply low/high/high-unsigned lowering, SSE2 variable and
 immediate integer shift lowering, SSE2 unsigned SAD lowering, SSE2 saturating
 pack/narrow lowering, SSE2 unsigned average lowering for 8- and 16-bit lanes,
@@ -1838,6 +1839,14 @@ limit is raised from `l=100000` to `l=150000`.
       directly under `validation-tmp/amd64-simd-shuffle`; the kept IR selects
       the requested 64-bit lanes from the two operands and preserves the
       untouched 16-bit half while permuting the selected half.
+    - Implemented AMD64 LLVM lowering for the remaining SSE2 multiply helpers
+      in the native selector (`caml_sse2_int16x8_mul_hadd_int32x4` and
+      `caml_sse2_int32x4_mul_even_unsigned`) and rebuilt with
+      `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_mul_hadd_even.sh` script passed
+      directly under `validation-tmp/amd64-simd-mul-hadd-even`; the kept IR
+      widens signed words, multiplies, adds adjacent products into `<4 x i32>`,
+      and zero-extends even 32-bit lanes before multiplying into `<2 x i64>`.
 
 ## Current Blocker
 

@@ -2475,6 +2475,60 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let res = emit_ins t (I.convert Trunc ~arg:high ~to_:typ) in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int16_mul_hadd_int32 () =
+    let src_typ = int_vec_type ~width_in_bits:16 in
+    let product_typ = int_vec_type_of_lanes ~width_in_bits:32 ~lanes:8 in
+    let res_typ = int_vec_type ~width_in_bits:32 in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) src_typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) src_typ in
+    let arg1 = emit_ins t (I.convert Sext ~arg:arg1 ~to_:product_typ) in
+    let arg2 = emit_ins t (I.convert Sext ~arg:arg2 ~to_:product_typ) in
+    let product = emit_ins t (I.binary Mul ~arg1 ~arg2) in
+    let product_lane lane =
+      emit_ins t (I.extractelement ~vector:product ~index:(V.of_int lane))
+    in
+    let res =
+      List.init 4 Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let lo = product_lane (2 * lane) in
+             let hi = product_lane ((2 * lane) + 1) in
+             let sum = emit_ins t (I.binary Add ~arg1:lo ~arg2:hi) in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane)
+                  ~to_insert:sum))
+           (V.poison res_typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_int32_mul_even_unsigned () =
+    let src_typ = int_vec_type ~width_in_bits:32 in
+    let res_typ = int_vec_type ~width_in_bits:64 in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) src_typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) src_typ in
+    let res =
+      List.init 2 Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let src_lane = 2 * lane in
+             let elem1 =
+               emit_ins t
+                 (I.extractelement ~vector:arg1 ~index:(V.of_int src_lane))
+             in
+             let elem2 =
+               emit_ins t
+                 (I.extractelement ~vector:arg2 ~index:(V.of_int src_lane))
+             in
+             let elem1 = emit_ins t (I.convert Zext ~arg:elem1 ~to_:T.i64) in
+             let elem2 = emit_ins t (I.convert Zext ~arg:elem2 ~to_:T.i64) in
+             let product = emit_ins t (I.binary Mul ~arg1:elem1 ~arg2:elem2) in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane)
+                  ~to_insert:product))
+           (V.poison res_typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_sad_unsigned () =
     let byte_typ = int_vec_type ~width_in_bits:8 in
     let word_typ = int_vec_type_of_lanes ~width_in_bits:16 ~lanes:16 in
@@ -3588,6 +3642,11 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_mul_high_16 Zext Lshr
     | Amd64_simd_instrs.Pmullw | Amd64_simd_instrs.Vpmullw_X_X_Xm128 ->
       simd_int_binary 16 Mul
+    | Amd64_simd_instrs.Pmaddwd | Amd64_simd_instrs.Vpmaddwd_X_X_Xm128 ->
+      simd_int16_mul_hadd_int32 ()
+    | Amd64_simd_instrs.Pmuludq_X_Xm128
+    | Amd64_simd_instrs.Vpmuludq_X_X_Xm128 ->
+      simd_int32_mul_even_unsigned ()
     | Amd64_simd_instrs.Psadbw_X_Xm128
     | Amd64_simd_instrs.Vpsadbw_X_X_Xm128 ->
       simd_int_sad_unsigned ()
