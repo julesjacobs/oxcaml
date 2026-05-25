@@ -9,7 +9,8 @@ Fresh agent workspace created. No claim yet.
 ## Evidence
 
 - OxCaml branch: `jujacobs/llvm-stack-check-slack`
-- OxCaml PR: pending
+- OxCaml PR: https://github.com/julesjacobs/oxcaml/pull/15
+- Initial state commit: `2d58d583e085`
 - Vendored LLVM path: `oxcaml/vendor/llvm-project`
 - Agent state path: `agent-state/llvm-stack-check-slack`
 
