@@ -4,8 +4,8 @@ Last updated: 2026-05-25.
 
 ## Current Claim
 
-Iterations 1 through 17 are committed, pushed, reviewed with no accepted
-findings, and focused validation passed.
+Iterations 1 through 17 are committed and pushed. Iteration 18 is reviewed with
+no accepted findings, focused validation passed, and it is ready to commit.
 
 ## Evidence
 
@@ -23,7 +23,7 @@ None.
 ## Iteration State
 
 - Target: open-ended follow-up after the initial 10 completed iterations.
-- Completed iterations: 17.
+- Completed iterations: 18.
 - Committed cleanups:
   - Iteration 1: simplified deopt argument list construction in
     `backend/llvm/llvmize.ml` with `List.concat_map`.
@@ -60,6 +60,8 @@ None.
     `backend/llvm/llvmize.ml`.
   - Iteration 17: named LLVM call-result struct index paths in
     `backend/llvm/llvmize.ml`.
+  - Iteration 18: reused the runtime-register result index helper in generated
+    LLVM helpers in `backend/llvm/llvmize.ml`.
 - Dropped ideas: none yet.
 - Stop condition: continue only while a small candidate passes five-reviewer
   review with no accepted findings and focused validation.
@@ -861,7 +863,52 @@ Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
 are broad LLVM backend validation runs, and this commit only names local result
 index paths.
 
+## Iteration 18 Candidate
+
+Path: self-proposed candidate.
+
+Candidate: reuse `runtime_reg_result_index` for runtime-register result paths
+in `define_c_call_wrappers` and `define_wrap_try`, while leaving the actual
+result paths `[1]` and `[1; 0]` explicit.
+
+Why likely useful: this is a follow-up to iteration 17. It keeps
+runtime-register result struct path naming consistent in generated helper
+returns without hiding the different actual-result struct shapes.
+
+Review gate: passed after five human-like reviews of the final diff.
+
+Review result: all five reviewers said keep with no findings. Reviewers checked
+that the changed paths are runtime-register result paths and that the explicit
+`[1]` and `[1; 0]` actual-result paths should stay explicit because they address
+different result struct shapes.
+
+Validation result:
+
+- `git diff --check`: passed.
+- `eval "$(../../../scripts/agent-tmp-env)" && opam exec
+  --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`: passed.
+
+## Testing Story for This Commit
+
+Change: reuse `runtime_reg_result_index` for runtime-register result paths in
+generated LLVM helper returns, and record iteration 18 state in this progress
+file.
+Risk: if the rewrite is wrong, generated C-call wrappers or `wrap_try` could
+insert runtime-register values into the wrong field of the result struct.
+Validation: `git diff --check`; `eval "$(../../../scripts/agent-tmp-env)" &&
+opam exec --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`.
+Full LLVM validation: not run for this commit; the helper body preserves the
+exact `[0; i]` path used before and the change only reuses that existing helper
+at two generated-helper return sites.
+Stage2 verification: not run for this commit; self-stage2 is intentionally
+deferred for the same reason as full LLVM validation.
+Why this is enough: five human-like reviews found no issues and checked the
+result-struct index behavior; the build check covers type and syntax validity.
+Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
+`make llvm-self-stage2-test LLVM_PATH="$LLVM_PATH"` are deferred because they
+are broad LLVM backend validation runs, and this commit only reuses a local
+result index helper.
+
 ## Next Step
 
-No immediate code-quality iteration is queued. Continue only if another small,
-behavior-preserving candidate is found and passes the five-reviewer gate.
+Commit iteration 18 and push the agent branch.

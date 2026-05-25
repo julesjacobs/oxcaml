@@ -4259,7 +4259,10 @@ let define_c_call_wrappers t =
       write_stack_pointer t ocaml_sp;
       let wrapper_res =
         assemble_struct t wrapper_res_type
-          (([1], c_res) :: List.mapi (fun i v -> [0; i], v) runtime_args)
+          (([1], c_res)
+          :: List.mapi
+               (fun i v -> runtime_reg_result_index i, v)
+               runtime_args)
       in
       emit_ins_no_res t (I.ret wrapper_res);
       add_defined_symbol t wrapper_name;
@@ -4282,7 +4285,8 @@ let define_wrap_try t =
   let try_res = V.of_int ~typ:T.i64 0 in
   let res =
     assemble_struct t res_type
-      (([1; 0], try_res) :: List.mapi (fun i v -> [0; i], v) runtime_args)
+      (([1; 0], try_res)
+      :: List.mapi (fun i v -> runtime_reg_result_index i, v) runtime_args)
   in
   emit_ins_no_res t (I.ret res);
   complete_func_def t
