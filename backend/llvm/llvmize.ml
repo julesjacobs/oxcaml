@@ -3755,6 +3755,10 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_shuffle_16 (simd_imm imm) ~high:true
     | Amd64_simd_instrs.Pshuflw | Amd64_simd_instrs.Vpshuflw_X_Xm128 ->
       simd_shuffle_16 (simd_imm imm) ~high:false
+    | Amd64_simd_instrs.Unpckhps | Amd64_simd_instrs.Vunpckhps_X_X_Xm128 ->
+      simd_zip (int_vec_type ~width_in_bits:32) ~high:true
+    | Amd64_simd_instrs.Unpcklps | Amd64_simd_instrs.Vunpcklps_X_X_Xm128 ->
+      simd_zip (int_vec_type ~width_in_bits:32) ~high:false
     | Amd64_simd_instrs.Punpckhbw | Amd64_simd_instrs.Vpunpckhbw_X_X_Xm128 ->
       simd_zip (int_vec_type ~width_in_bits:8) ~high:true
     | Amd64_simd_instrs.Punpcklbw | Amd64_simd_instrs.Vpunpcklbw_X_X_Xm128 ->
