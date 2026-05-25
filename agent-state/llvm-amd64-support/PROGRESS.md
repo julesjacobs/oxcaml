@@ -5,11 +5,10 @@ Last updated: 2026-05-25.
 ## Current Claim
 
 AMD64 LLVM backend bring-up now passes focused install, enabled Linux/AMD64
-`llvm-codegen`, installed-compiler boot-smoke validation, and self-stage
-install/smoke validation with the agent-local LLVM tools and writable install
-prefix. A full AMD64 LLVM self-stage ocamltest refresh has now completed and
-found 25 remaining failures to investigate. Focused AMD64 SIMD lowering now
-also covers the i64x2 add/sub,
+`llvm-codegen`, installed-compiler boot-smoke validation, self-stage
+install/smoke validation, and a fresh full self-stage ocamltest refresh with
+the agent-local LLVM tools and writable install prefix. Focused AMD64 SIMD
+lowering now also covers the i64x2 add/sub,
 vec128 interleave, and vec256 join/split operations needed by several
 layout/block-index tests, including the generated mixed-blocks native test on
 AMD64. The stale
@@ -1156,14 +1155,32 @@ limit is raised from `l=100000` to `l=150000`.
     - The same updated source also passes direct non-LLVM installed-compiler
       checks in `validation-tmp/stackoverflow_l150000_standard`: native and
       bytecode runs both exit 0 and match their existing references.
+    - Refreshed broader self-stage validation in
+      `validation-tmp/self_stage_refresh` with normal Dune parallelism:
+      `DUNE_BUILD_FLAGS="-j $(nproc)" ./tools/build-llvm-self-stage-install.sh`
+      built a fresh boot compiler (`1682` wrapper lines / `836` fresh IR,
+      smoke printed `55`) and a self-stage runtime (`148` wrapper lines /
+      `74` fresh IR). The first self-stage main build reported one transient
+      `caml_scan_stack: missing frame descriptor` while compiling
+      `otherlibs/dynlink`, but an immediate incremental rerun of the same main
+      build completed (`304` wrapper lines / `152` fresh IR). A refreshed
+      self-stage install smoke then printed `55` with `4` wrapper lines /
+      `2` fresh IR.
+    - Ran a fresh full self-stage ocamltest refresh from that install:
+      `SELF_STAGE=1 STAGE_INSTALL=validation-tmp/self_stage_refresh/stage_install
+      STAGE_BUILD=validation-tmp/self_stage_refresh/self_main_build
+      LLVM_TESTSUITE_PARALLEL=auto LLVM_TESTSUITE_JOBS=$(nproc)
+      ./tools/run-llvm-stage5-ocamltest.sh`. Result: `6346` tests passed,
+      `269` skipped, `0` failed, `0` unexpected errors, `6615` considered.
+      Wrapper evidence: `6470` wrapper lines / `3235` fresh IR. Log:
+      `validation-tmp/self_stage_refresh/self_stage_ocamltest.log`.
 
 ## Current Blocker
 
 No focused blocker remains for `llvm-install` with a writable prefix, the
-enabled Linux/AMD64 `llvm-codegen` tests, or self-stage install and smoke. The
-full AMD64 LLVM self-stage ocamltest refresh currently has 25 remaining
-failures. The default `/usr/local` install prefix is not writable in this
-environment, so use an explicit agent-local `prefix=...` for install
+enabled Linux/AMD64 `llvm-codegen` tests, self-stage install/smoke, or full
+self-stage ocamltest. The default `/usr/local` install prefix is not writable
+in this environment, so use an explicit agent-local `prefix=...` for install
 validation. Also clear `LIST=`/`DIR=` when running a single `TEST=...` after
 `eval "$(../../../scripts/agent-tmp-env)"`, because the agent env may set
 `LIST` for broader test runs.
@@ -1175,18 +1192,18 @@ the focused Linux/AMD64 `llvm-codegen` suite passes with the refreshed stage0
 install. The safe X86_64 preserved-root slot pooling patch also lets the fresh
 default-stack boot-context build pass without
 `OCAMLRUNPARAM=b,Xmain_stack_size=64M`. Broader self-stage/ocamltest validation
-still needs a fresh run on top of this patch.
+now passes on top of the SIMD/XMM GC slow-path, post-raise CFI, and
+`runtime-errors/stackoverflow.ml` stack-budget fixes.
 The OxCaml PR is still draft; as of the latest check after the shared-type
 cleanup, GitHub reported `built with flambda-backend, flambda2` passed and the
 rest of CI still pending.
 
 ## Next Step
 
-Refresh broader self-stage ocamltest on top of the SIMD/XMM GC slow-path,
-post-raise CFI, and `runtime-errors/stackoverflow.ml` stack-budget fixes. The
-previously recorded `unboxed-primitive-args`, unboxed
-array/iarray/vector-array clusters, `native-cfi-stepping/test_cfi.ml`, and the
-focused `runtime-errors/stackoverflow.ml` mismatch now pass in focused
-validation. Keep using normal build parallelism; avoid only concurrent
-top-level `make` or `dune` commands in this checkout because of the shared
-lockfile.
+Next validation step is self-stage2 install and testsuite refresh, since the
+current full self-stage ocamltest now passes. Keep an eye on the transient
+`caml_scan_stack: missing frame descriptor` seen during the first self-stage
+main build attempt; it did not reproduce in the immediate rerun, and the full
+self-stage ocamltest run passed afterward. Keep using normal build
+parallelism; avoid only concurrent top-level `make` or `dune` commands in this
+checkout because of the shared lockfile.
