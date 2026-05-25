@@ -495,6 +495,7 @@ let compile_via_llvm ~ppf_dump ~funcnames cfg_with_layout =
        match !Oxcaml_flags.cfg_stack_checks with
        | false -> cfg_with_layout
        | true -> Cfg_stack_checks.cfg cfg_with_layout)
+  ++ pass_dump_cfg_if ppf_dump Oxcaml_flags.dump_cfg "After cfg_stack_checks"
   ++ Profile.record ~accumulate:true "save_cfg" save_cfg
   ++ Profile.record ~accumulate:true "llvmize" Llvmize.cfg
 
