@@ -344,13 +344,14 @@ let extract_llvm_asm_functions lines =
   in
   loop [] lines
 
+let normalize_llvm_output extract_functions s =
+  s |> base_normalize_llvm_output |> extract_functions |> String.concat "\n"
+
 let normalize_llvm_ir_output s =
-  s |> base_normalize_llvm_output |> extract_llvm_code_functions
-  |> String.concat "\n"
+  normalize_llvm_output extract_llvm_code_functions s
 
 let normalize_llvm_asm_output s =
-  s |> base_normalize_llvm_output |> extract_llvm_asm_functions
-  |> String.concat "\n"
+  normalize_llvm_output extract_llvm_asm_functions s
 
 let invoke_and_clear_callbacks callbacks output =
   let callbacks_to_invoke = List.rev !callbacks in
