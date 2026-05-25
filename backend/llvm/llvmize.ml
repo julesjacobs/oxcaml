@@ -848,7 +848,8 @@ let is_gc_leaf_call attrs =
     (function
       | LL.Fn_attr.Gc_leaf_function -> true
       | LL.Fn_attr.Cold | LL.Fn_attr.Frame_pointer_all | LL.Fn_attr.Gc _
-      | LL.Fn_attr.Noinline | LL.Fn_attr.Oxcaml_stack_check
+      | LL.Fn_attr.Noinline | LL.Fn_attr.No_realign_stack
+      | LL.Fn_attr.Oxcaml_stack_check
       | LL.Fn_attr.Returns_twice | LL.Fn_attr.Statepoint_id _ ->
         false)
     attrs
@@ -3132,7 +3133,10 @@ let frame_pointer_attrs () =
     then [Frame_pointer_all; Oxcaml_stack_check]
     else [Oxcaml_stack_check]
   | Target_system.X86_64 ->
-    if Config.with_frame_pointers then [Frame_pointer_all] else []
+    let realign_attrs = [No_realign_stack] in
+    if Config.with_frame_pointers
+    then Frame_pointer_all :: realign_attrs
+    else realign_attrs
   | Target_system.IA32 | Target_system.ARM | Target_system.POWER
   | Target_system.Z | Target_system.Riscv ->
     []

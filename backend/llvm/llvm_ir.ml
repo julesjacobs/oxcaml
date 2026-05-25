@@ -473,6 +473,7 @@ module Fn_attr = struct
     | Gc of string
     | Gc_leaf_function
     | Noinline
+    | No_realign_stack
     | Oxcaml_stack_check
     | Returns_twice
     | Statepoint_id of int
@@ -483,6 +484,7 @@ module Fn_attr = struct
     | Gc s -> Format.sprintf {|gc "%s"|} s
     | Gc_leaf_function -> {|"gc-leaf-function"="true"|}
     | Noinline -> "noinline"
+    | No_realign_stack -> {|"no-realign-stack"|}
     | Oxcaml_stack_check -> {|"oxcaml-stack-check"="true"|}
     | Returns_twice -> "returns_twice"
     | Statepoint_id i -> Format.sprintf {|"statepoint-id"="%d"|} i
@@ -494,7 +496,7 @@ module Fn_attr = struct
   let to_string t = Format.asprintf "%a" pp_t t
 
   let order = function
-    | Cold | Frame_pointer_all | Gc_leaf_function | Noinline
+    | Cold | Frame_pointer_all | Gc_leaf_function | Noinline | No_realign_stack
     | Oxcaml_stack_check | Returns_twice | Statepoint_id _ ->
       0
     | Gc _ -> 10

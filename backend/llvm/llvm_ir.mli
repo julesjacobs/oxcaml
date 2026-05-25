@@ -203,6 +203,7 @@ module Fn_attr : sig
     | Gc of string
     | Gc_leaf_function
     | Noinline
+    | No_realign_stack
     | Oxcaml_stack_check
     | Returns_twice
     | Statepoint_id of int
