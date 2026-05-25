@@ -1170,6 +1170,21 @@ let read_allocation_pointer_register t =
     (I.inline_asm ~asm ~constraints:"=r" ~args:[] ~res_type:(Some T.i64)
        ~sideeffect:true)
 
+let write_allocation_pointer_register t alloc_ptr =
+  let alloc_ptr = cast t alloc_ptr T.i64 in
+  let asm =
+    match Target_system.architecture () with
+    | Target_system.X86_64 -> "movq $0, %r15"
+    | Target_system.AArch64 -> "mov x27, $0"
+    | Target_system.IA32 | Target_system.ARM | Target_system.POWER
+    | Target_system.Z | Target_system.Riscv ->
+      fail_msg ~name:"write_allocation_pointer_register"
+        "unsupported architecture for LLVM backend"
+  in
+  emit_ins_no_res t
+    (I.inline_asm ~asm ~constraints:"r" ~args:[alloc_ptr]
+       ~res_type:T.Or_void.void ~sideeffect:true)
+
 let write_trap_pointer_register t trap_ptr =
   match Target_system.architecture () with
   | Target_system.AArch64 ->
@@ -1627,6 +1642,8 @@ let raise_ t ~(exn_handler : Label.t option)
       let new_sp =
         emit_ins t (I.binary Add ~arg1:trap_block_int ~arg2:(V.of_int 16))
       in
+      let alloc_ptr = emit_ins t (I.load ~ptr:allocation_ptr ~typ:T.i64) in
+      write_allocation_pointer_register t alloc_ptr;
       write_stack_pointer t new_sp;
       emit_ins_no_res t
         (I.inline_asm ~asm:"movq $0, %rax; jmpq *$1" ~constraints:"r,r,~{rax}"

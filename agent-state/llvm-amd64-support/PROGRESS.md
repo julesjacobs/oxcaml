@@ -12,13 +12,15 @@ join/split operations needed by several layout/block-index tests, including
 the generated mixed-blocks native test on AMD64. The stale
 `typing-layouts-or-null/probe.ml` LLVM lowering failure is also fixed for the
 default disabled-probe path. The standard-compiler LLVM-backend
-`lib-atomic/test_atomic_cmpxchg.ml` failure is fixed too.
+`lib-atomic/test_atomic_cmpxchg.ml` failure is fixed too. The native
+`async-exns/async_exns_1.ml` output mismatch is now fixed as well.
 
-The latest fixes correct LLVM `Compare_exchange` lowering and add focused AMD64
-probe terminator lowering plus focused AMD64 SIMD LLVM lowering for i64x2
-arithmetic, vec128 interleaves, and vec256 join/split support. The poll
-slow-path frame descriptor gap in `lib-domain/cpu_relax.ml` is also fixed for
-AMD64 LLVM output. Earlier fixes
+The latest fixes publish the current allocation pointer to `%r15` before the
+X86_64 `Raise_notrace` inline exception jump, correct LLVM `Compare_exchange`
+lowering, and add focused AMD64 probe terminator lowering plus focused AMD64
+SIMD LLVM lowering for i64x2 arithmetic, vec128 interleaves, and vec256
+join/split support. The poll slow-path frame descriptor gap in
+`lib-domain/cpu_relax.ml` is also fixed for AMD64 LLVM output. Earlier fixes
 reserve the AMD64 OxCaml runtime registers in LLVM's X86 register allocator and
 make exception-recovery blocks treat runtime blockaddress entry as a
 register-clobbering edge.
@@ -97,6 +99,11 @@ register-clobbering edge.
     normal `wrap_try` return through an unmodelled `%rax` write/read pair. The
     normal path branches on the SSA `wrap_try` result, while exception recovery
     reads the bucket with a fixed `={rax}` inline-asm constraint.
+  - `backend/llvm/llvmize.ml` now writes the current LLVM allocation pointer
+    slot back to the AMD64 allocation-pointer register `%r15` before the
+    X86_64 `Raise_notrace` inline jump to an exception handler. This prevents
+    a handler-allocated exception bucket from being overwritten by later
+    allocations in the catching handler.
   - `backend/llvm/llvmize.ml` now emits explicit standalone stackmaps for all
     non-tail X86_64 OCaml calls, including direct calls that have live GC roots.
     This covers frame descriptors for direct-call return addresses when the
@@ -107,6 +114,10 @@ register-clobbering edge.
   - `testsuite/tests/llvm-codegen/amd64_exceptions.ml` is an AMD64/Linux
     LLVM-backend regression test for exception handler setup and exception
     bucket recovery.
+  - `testsuite/tests/llvm-codegen/amd64_raise_notrace_alloc.ml` is an
+    AMD64/Linux LLVM-backend regression test for the `Raise_notrace` path that
+    allocates an exception bucket in one handler and allocates again before the
+    outer handler reads that bucket.
   - `testsuite/tests/llvm-codegen/amd64_stack_growth.ml` is an AMD64/Linux
     LLVM-backend regression test for stack growth through an effect
     continuation.
@@ -482,24 +493,38 @@ register-clobbering edge.
     LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
     prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 3 passed,
     0 skipped, 0 failed.
-  - The async exception family still has a current focused failure:
-    `make llvm-test-one DIR=async-exns LIST= TEST= ARCH=amd64
-    LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
-    prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 2. The only
-    failure in that directory is native `async_exns_1.ml`, whose first line is
-    `1. 1.` instead of `1. OK`; bytecode `async_exns_1.ml` and both bytecode
-    and native `async_exns_2.ml` pass.
-  - Focused async-exns diagnosis so far:
-    - A retained-IR direct compile of `async_exns_1.ml` reproduces the same
-      native output mismatch.
-    - The first `caml_with_async_exns` call originally had no `gc-live` roots
-      in the call bundle. An experiment adding active trap-handler roots to
-      safepoint liveness did add roots such as `ptr %26, ptr %30, ptr %37` to
-      that call, but did not change the bad output.
-    - A separate experiment changed the AMD64 `recover_rbp_asm` helper to use
-      `%r11` instead of the OCaml value register `%rbx` to load the blockaddress
-      target; that also did not change the bad output. Both experiments were
-      reverted rather than committed.
+  - Diagnosed the native `async_exns_1.ml` output mismatch as stale `%r15` on
+    the X86_64 `Raise_notrace` path. GDB showed the inner handler built a
+    correct `Ok "OK"` exception bucket, but the outer handler entered with
+    `%r15` still pointing above that freshly allocated bucket. The next
+    allocation in `Printf` reused the bucket storage and changed the payload to
+    `"1. "`, producing `1. 1.`.
+  - `backend/llvm/llvmize.ml` now reloads the current LLVM allocation pointer
+    slot and writes it to `%r15` before the X86_64 `Raise_notrace` inline jump.
+  - Added `testsuite/tests/llvm-codegen/amd64_raise_notrace_alloc.ml` as a
+    focused AMD64/Linux LLVM-backend regression for that stale-allocation-
+    pointer exception path.
+  - Focused async and exception validation now passes with normal Make/Dune
+    parallelism:
+    - `make llvm-install ARCH=amd64 LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0.
+    - `make llvm-test-one DIR=async-exns LIST= TEST= ARCH=amd64
+      LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 5 passed,
+      0 skipped, 0 failed.
+    - `make llvm-test-one DIR=exception-extra-args LIST= TEST= ARCH=amd64
+      LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 6 passed,
+      0 skipped, 0 failed.
+    - `make llvm-test-one
+      TEST=llvm-codegen/amd64_raise_notrace_alloc.ml LIST= DIR= ARCH=amd64
+      LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 4 passed,
+      0 skipped, 0 failed.
+    - `make llvm-test-one DIR=llvm-codegen LIST= TEST= ARCH=amd64
+      LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 20 passed,
+      15 skipped, 0 failed.
 
 ## Current Blocker
 
@@ -520,8 +545,9 @@ LLVM-built compiler paths need
 ## Next Step
 
 Rerun broad self-stage ocamltest or a representative subset to refresh the
-remaining failure families after the SIMD and wide-vector alloca fixes. Likely
-next targets from the stale full run are native async/backtrace/CFI output
-mismatches; the stale `statmemprof/bigarray.ml` segfault no longer reproduces.
-Keep using normal build parallelism; avoid only concurrent top-level
+remaining failure families after the SIMD, wide-vector alloca, poll, and async
+exception fixes. Likely next targets from the stale full run are native
+backtrace/frame-pointer/CFI output mismatches. The stale
+`statmemprof/bigarray.ml` segfault and focused async-exns failure no longer
+reproduce. Keep using normal build parallelism; avoid only concurrent top-level
 `make`/`dune` commands in this checkout because of the shared lockfile.
