@@ -17,13 +17,14 @@ default disabled-probe path. The standard-compiler LLVM-backend
 `lib-atomic/test_atomic_cmpxchg.ml` failure is fixed too. The native
 `async-exns/async_exns_1.ml` output mismatch is now fixed as well.
 
-The latest SIMD follow-ups add SSE2 vec128 interleave lowering for 8- and
-16-bit lanes, SSE2 int16 multiply low/high/high-unsigned lowering, SSE2
-variable and immediate integer shift lowering, SSE2 unsigned SAD lowering, SSE2
-saturating pack/narrow lowering, SSE2 unsigned average lowering for 8- and
-16-bit lanes, SSE/SSE2 vec128 movemask lowering, SSE2 integer compare lowering
-for 8-, 16-, and 32-bit lanes, and vec128 byte-shift lowering. Earlier fixes
-publish the current allocation pointer to `%r15` before the X86_64
+The latest SIMD follow-ups add SSE2 vec128 shuffle lowering for 64-bit lanes
+and high/low 16-bit halves, SSE2 vec128 interleave lowering for 8- and 16-bit
+lanes, SSE2 int16 multiply low/high/high-unsigned lowering, SSE2 variable and
+immediate integer shift lowering, SSE2 unsigned SAD lowering, SSE2 saturating
+pack/narrow lowering, SSE2 unsigned average lowering for 8- and 16-bit lanes,
+SSE/SSE2 vec128 movemask lowering, SSE2 integer compare lowering for 8-, 16-,
+and 32-bit lanes, and vec128 byte-shift lowering. Earlier fixes publish the
+current allocation pointer to `%r15` before the X86_64
 `Raise_notrace` inline exception jump, correct LLVM `Compare_exchange`
 lowering, and add focused AMD64 probe terminator lowering plus focused AMD64
 SIMD LLVM lowering for i64x2 arithmetic, vec128 interleaves, and vec256
@@ -1828,6 +1829,15 @@ limit is raised from `l=100000` to `l=150000`.
       passed directly under `validation-tmp/amd64-simd-interleave-8-16`; the
       kept IR contains low-half and high-half lane extraction plus alternating
       lane insertion for `<16 x i8>` and `<8 x i16>` vectors.
+    - Implemented AMD64 LLVM lowering for the SSE2 vec128 shuffle subset
+      (`caml_sse2_vec128_shuffle_64`,
+      `caml_sse2_vec128_shuffle_high_16`, and
+      `caml_sse2_vec128_shuffle_low_16`) and rebuilt with
+      `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_shuffle.sh` script passed
+      directly under `validation-tmp/amd64-simd-shuffle`; the kept IR selects
+      the requested 64-bit lanes from the two operands and preserves the
+      untouched 16-bit half while permuting the selected half.
 
 ## Current Blocker
 

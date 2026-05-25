@@ -3085,6 +3085,58 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let res = call_llvm_intrinsic t name [arg] typ in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_shuffle_64 imm =
+    let typ = int_vec_type ~width_in_bits:64 in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let lane0 =
+      emit_ins t
+        (I.extractelement ~vector:arg1 ~index:(V.of_int (imm land 1)))
+    in
+    let lane1 =
+      emit_ins t
+        (I.extractelement ~vector:arg2
+           ~index:(V.of_int ((imm lsr 1) land 1)))
+    in
+    let res =
+      emit_ins t
+        (I.insertelement ~vector:(V.poison typ) ~index:(V.of_int 0)
+           ~to_insert:lane0)
+    in
+    let res =
+      emit_ins t
+        (I.insertelement ~vector:res ~index:(V.of_int 1) ~to_insert:lane1)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_shuffle_16 imm ~high =
+    let typ = int_vec_type ~width_in_bits:16 in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let res =
+      List.init 8 Fun.id
+      |> List.fold_left
+           (fun vector dst_lane ->
+             let in_shuffled_half =
+               if high then dst_lane >= 4 else dst_lane < 4
+             in
+             let src_lane =
+               if in_shuffled_half
+               then
+                 let half_lane = dst_lane land 3 in
+                 (if high then 4 else 0) + ((imm lsr (2 * half_lane)) land 3)
+               else dst_lane
+             in
+             let elem =
+               emit_ins t
+                 (I.extractelement ~vector:arg ~index:(V.of_int src_lane))
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int dst_lane)
+                  ~to_insert:elem))
+           (V.poison typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_imm imm =
     match imm with
     | Some imm -> imm
@@ -3611,6 +3663,12 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_binary 64 Or
     | Amd64_simd_instrs.Xorps | Amd64_simd_instrs.Vxorps_X_X_Xm128 ->
       simd_int_binary 64 Xor
+    | Amd64_simd_instrs.Shufpd | Amd64_simd_instrs.Vshufpd_X_X_Xm128 ->
+      simd_shuffle_64 (simd_imm imm)
+    | Amd64_simd_instrs.Pshufhw | Amd64_simd_instrs.Vpshufhw_X_Xm128 ->
+      simd_shuffle_16 (simd_imm imm) ~high:true
+    | Amd64_simd_instrs.Pshuflw | Amd64_simd_instrs.Vpshuflw_X_Xm128 ->
+      simd_shuffle_16 (simd_imm imm) ~high:false
     | Amd64_simd_instrs.Punpckhbw | Amd64_simd_instrs.Vpunpckhbw_X_X_Xm128 ->
       simd_zip (int_vec_type ~width_in_bits:8) ~high:true
     | Amd64_simd_instrs.Punpcklbw | Amd64_simd_instrs.Vpunpcklbw_X_X_Xm128 ->
