@@ -3041,11 +3041,10 @@ let compute_active_traps (cfg : Cfg.t) =
   update_block cfg.entry_label [];
   active_traps, active_trap_depths
 
-let live_val_regs_across liveness (i : 'a Cfg.instruction) =
+let live_regs_across_for_preservation liveness (i : 'a Cfg.instruction) =
   match InstructionId.Tbl.find_opt liveness i.id with
   | None -> Reg.Set.empty
-  | Some { Cfg_liveness.before = _; across } ->
-    Reg.Set.filter (fun reg -> Cmm.is_val reg.typ) across
+  | Some { Cfg_liveness.before = _; across } -> across
 
 let basic_has_gc_safepoint (i : Cfg.basic Cfg.instruction) =
   match i.desc with
@@ -3080,11 +3079,14 @@ let terminator_has_gc_safepoint (i : Cfg.terminator Cfg.instruction) =
     false
 
 let preserved_reg_slots liveness cfg =
+  (* Non-root values can still be live across a GC slow path. Keep them in
+     their allocas too, while [load_live_gc_roots_across] remains responsible
+     for reporting only OCaml values to the GC. *)
   let across_basic_safepoints =
     Cfg.fold_body_instructions cfg
       ~f:(fun acc i ->
         if basic_has_gc_safepoint i
-        then Reg.Set.union acc (live_val_regs_across liveness i)
+        then Reg.Set.union acc (live_regs_across_for_preservation liveness i)
         else acc)
       ~init:Reg.Set.empty
   in
@@ -3093,7 +3095,7 @@ let preserved_reg_slots liveness cfg =
       ~f:(fun _ block acc ->
         let i = block.terminator in
         if terminator_has_gc_safepoint i
-        then Reg.Set.union acc (live_val_regs_across liveness i)
+        then Reg.Set.union acc (live_regs_across_for_preservation liveness i)
         else acc)
       ~init:Reg.Set.empty
   in

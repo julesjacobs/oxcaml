@@ -234,18 +234,42 @@ builds on AMD64, and simple scalar programs compile and run with
     that fail linking due to missing stub libraries; `tool-toplevel` native
     toplevel output for `dwarf_binary_emitter.ml`; and product/vector array
     semantic assertions in `tests/typing-layouts-arrays`.
+- Independently reduced the remaining vec128/product-array semantic failures
+  to non-root raw values live across GC slow paths. In particular, boxed
+  int64x2 comparison could print equal lanes but return nonzero with a small
+  minor heap because an extracted raw scalar crossed a GC path without being
+  kept in its stack slot.
+- Changed LLVM AMD64 safepoint preservation so every Cfg register live across a
+  GC-capable instruction gets a preserved alloca slot. Only OCaml values are
+  still reported as `gc-live` roots.
+- Rebuilt and refreshed the local testsuite install after this preservation
+  fix:
+  - `opam exec -- make compiler`
+  - `opam exec -- make prefix="$PWD/_local-llvm-test-install" install_for_test`
+- Focused tests now passing with `OCAMLSRCDIR="$PWD/.."` from
+  `_runtest/testsuite` and `OCAMLPARAM="_,llvm-backend=1,llvm-path=$LLVM_PATH"`:
+  - `tests/typing-layouts-arrays/test_vec128_u_array.ml`
+  - `tests/typing-layouts-arrays/test_ignorable_product_array_3.ml`
+  - `tests/typing-layouts-arrays/test_ignorable_product_array_4.ml`
+  - `tests/typing-layouts-arrays/test_ignorable_product_array_with_uninit_3.ml`
+  - `tests/typing-layouts-arrays/test_ignorable_product_array_with_uninit_4.ml`
+  - `tests/unboxed-primitive-args/test.ml`
+- `tests/typing-layouts-arrays/test_vec256_u_array.ml` now compiles and passes
+  with `OCAMLRUNPARAM=s=256M`, but with `OCAMLRUNPARAM=s=32k` it aborts in
+  `caml_scan_stack` with a missing frame descriptor while exercising
+  `caml_call_gc_avx`. This is the next reduced vector-array issue.
 
 ## Current Blocker
 
-No immediate source blocker. Full `llvm-test` now completes but still has 20
-failures from the last full run. The exception-recovery segfault class and the
-AMD64 unboxed primitive argument test are fixed. Remaining known failures
-include native CFI stepping, quotation native/linker tests with missing stub
-libraries, product/vector array semantic assertions, and
-`tool-toplevel/dwarf_binary_emitter.ml`.
+No immediate source blocker. Full `llvm-test` has not yet been rerun after the
+non-root safepoint preservation fix. The vec128 and product-array focused
+semantic failures are fixed; the remaining reduced vector-array issue is the
+vec256 small-heap `caml_call_gc_avx` stack-scan abort. Other known failures from
+the last full run include native CFI stepping, quotation native/linker tests
+with missing stub libraries, and `tool-toplevel/dwarf_binary_emitter.ml`.
 
 ## Next Step
 
-Reduce the remaining product/vector array semantic failures in
-`tests/typing-layouts-arrays`, then address `tool-toplevel/dwarf_binary_emitter.ml`
-and native CFI stepping before attempting `llvm-self-stage2-test`.
+Reduce the vec256 small-heap `caml_call_gc_avx` stack-scan abort, rerun
+`llvm-test`, then address `tool-toplevel/dwarf_binary_emitter.ml` and native CFI
+stepping before attempting `llvm-self-stage2-test`.
