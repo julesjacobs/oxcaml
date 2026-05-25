@@ -4,8 +4,8 @@ Last updated: 2026-05-25.
 
 ## Current Claim
 
-Iterations 1, 2, 3, 4, and 5 are committed or ready to commit; iteration 5 is
-reviewed and validated.
+Iterations 1, 2, 3, 4, 5, and 6 are committed or ready to commit; iteration 6
+is reviewed and validated.
 
 ## Evidence
 
@@ -23,7 +23,7 @@ None.
 ## Iteration State
 
 - Target: 10 completed iterations.
-- Completed iterations: 5.
+- Completed iterations: 6.
 - Committed cleanups:
   - Iteration 1: simplified deopt argument list construction in
     `backend/llvm/llvmize.ml` with `List.concat_map`.
@@ -36,6 +36,8 @@ None.
     `backend/llvm/llvm_ir.ml`'s `Type.pp_t`.
   - Iteration 5: shared operand-bundle pretty-printers in
     `backend/llvm/llvm_ir.ml`'s `Instruction.pp_t`.
+  - Iteration 6: shared integer vector immediate construction in
+    `backend/llvm/llvmize.ml`.
 - Dropped ideas: none yet.
 - Stop condition: stop after 10 completed iterations, then summarize committed
   cleanups, dropped ideas, and remaining promising targets.
@@ -296,7 +298,54 @@ Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
 are broad LLVM backend validation runs, and this commit only changes
 behavior-preserving pretty-printer helper sharing.
 
+## Iteration 6 Candidate
+
+Path: self-proposed candidate.
+
+Candidate: share integer vector immediate construction between
+`int_vector_constant` and `int_vector_constant_like` in
+`backend/llvm/llvmize.ml`.
+
+Why likely useful: both helpers currently build the same textual vector
+immediate from an integer element type, element count, and integer value. A
+single local helper keeps that formatting contract in one place without
+changing the emitted LLVM IR text.
+
+Review gate: passed after five human-like reviews of the final diff.
+
+Review result: one reviewer said keep with no findings. Four reviewers said
+revise only because this progress file had an accidental duplicate `Next Step`
+heading before the iteration 6 section. That finding was accepted and fixed. No
+reviewer objected to the `llvmize.ml` cleanup.
+
+Validation result:
+
+- `git diff --check`: passed.
+- `eval "$(../../../scripts/agent-tmp-env)" && opam exec
+  --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`: passed.
+
+## Testing Story for This Commit
+
+Change: share integer vector immediate construction between
+`int_vector_constant` and `int_vector_constant_like` in
+`backend/llvm/llvmize.ml`, and record iteration 6 state in this progress file.
+Risk: if the rewrite is wrong, vector integer constants could be emitted with a
+different element type, element count, separator, or scalar fallback behavior.
+Validation: `git diff --check`; `eval "$(../../../scripts/agent-tmp-env)" &&
+opam exec --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`.
+Full LLVM validation: not run for this commit; the helper preserves the existing
+format string, separator, element repetition, and scalar `T.Int _` fallback.
+Stage2 verification: not run for this commit; self-stage2 is intentionally
+deferred for the same reason as full LLVM validation.
+Why this is enough: five human-like reviews checked that the helper remains
+local, preserves the existing vector string construction path, and does not add
+special cases; the build check covers type and syntax validity.
+Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
+`make llvm-self-stage2-test LLVM_PATH="$LLVM_PATH"` are deferred because they
+are broad LLVM backend validation runs, and this commit only changes
+behavior-preserving SIMD immediate construction sharing.
+
 ## Next Step
 
-Commit iteration 5, push it to the draft PR branch, then choose the next
+Commit iteration 6, push it to the draft PR branch, then choose the next
 reviewed cleanup candidate.

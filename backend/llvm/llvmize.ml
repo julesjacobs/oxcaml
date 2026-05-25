@@ -1984,27 +1984,24 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     then value
     else emit_ins t (I.convert Bitcast ~arg:value ~to_:typ)
   in
-  let int_vector_constant width_in_bits n =
-    let typ = int_vec_type ~width_in_bits in
-    let elem_type = T.Int { width_in_bits } in
+  let int_vector_immediate typ ~elem_type ~num_of_elems n =
     let elem = Format.asprintf "%a %d" T.pp_t elem_type n in
     V.imm typ
       (Format.asprintf "<%a>"
          (Format.pp_print_list
             ~pp_sep:(fun ppf () -> Format.fprintf ppf ", ")
             Format.pp_print_string)
-         (List.init (128 / width_in_bits) (fun _ -> elem)))
+         (List.init num_of_elems (fun _ -> elem)))
+  in
+  let int_vector_constant width_in_bits n =
+    let typ = int_vec_type ~width_in_bits in
+    let elem_type = T.Int { width_in_bits } in
+    int_vector_immediate typ ~elem_type ~num_of_elems:(128 / width_in_bits) n
   in
   let int_vector_constant_like typ n =
     match typ with
     | T.Vector { num_of_elems; elem_type = T.Int _ as elem_type } ->
-      let elem = Format.asprintf "%a %d" T.pp_t elem_type n in
-      V.imm typ
-        (Format.asprintf "<%a>"
-           (Format.pp_print_list
-              ~pp_sep:(fun ppf () -> Format.fprintf ppf ", ")
-              Format.pp_print_string)
-           (List.init num_of_elems (fun _ -> elem)))
+      int_vector_immediate typ ~elem_type ~num_of_elems n
     | T.Int _ -> V.of_int ~typ n
     | T.Ptr _ | T.Float | T.Double | T.Struct _ | T.Array _ | T.Vector _
     | T.Label | T.Token | T.Metadata ->
