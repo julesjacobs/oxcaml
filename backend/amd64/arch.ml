@@ -483,7 +483,20 @@ let operation_is_pure = function
   | Ipackf32 -> true
   | Isimd op -> Simd.is_pure_operation op
   | Isimd_mem (op, _addr) -> Simd.Mem.is_pure_operation op
-  | Illvm_intrinsic ("caml_sse2_float64_min" | "caml_sse2_float64_max") -> true
+  | Illvm_intrinsic
+      ( "caml_sse2_float64_min"
+      | "caml_sse2_float64_max"
+      | "caml_avx_vec256_extract_128"
+      | "caml_avx_vec256_insert_128"
+      | "caml_int64x2_const1"
+      | "caml_int64x2_low_of_int64"
+      | "caml_int64x2_low_to_int64"
+      | "caml_simd_int64x2_sub"
+      | "caml_simd_int64x2_add"
+      | "caml_simd_vec128_interleave_high_64"
+      | "caml_simd_vec128_interleave_low_64"
+      | "caml_vec256_low_to_vec128" ) ->
+    true
   | Illvm_intrinsic ("caml_rdtsc_unboxed" | "caml_rdpmc_unboxed") -> false
   | Illvm_intrinsic intr ->
       Misc.fatal_errorf "operation_is_pure: unknown llvm_intrinsic %s" intr

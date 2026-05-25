@@ -806,17 +806,26 @@ let alloc_deopt_args alloc_info =
     @ (alloc_info |> List.map alloc_item_deopt_args |> List.concat)
 
 let deopt_bundle ?alloc_info ~primitive_call ~raise_call dbg =
-  match
+  let args =
     debug_deopt_args ~primitive_call ~raise_call dbg
     @ alloc_deopt_args alloc_info
-  with
-  | [] -> []
-  | args -> ["deopt", args]
+  in
+  ["deopt", args]
 
 let call_operand_bundles ?alloc_info t ~primitive_call ~raise_call dbg
     live_roots =
   deopt_bundle ?alloc_info ~primitive_call ~raise_call dbg
   @ live_gc_root_alloca_bundles t live_roots
+
+let is_gc_leaf_call attrs =
+  List.exists
+    (function
+      | LL.Fn_attr.Gc_leaf_function -> true
+      | LL.Fn_attr.Cold | LL.Fn_attr.Frame_pointer_all | LL.Fn_attr.Gc _
+      | LL.Fn_attr.Noinline | LL.Fn_attr.Oxcaml_stack_check
+      | LL.Fn_attr.Returns_twice | LL.Fn_attr.Statepoint_id _ ->
+        false)
+    attrs
 
 let load_domainstate_addr ?ds_loc ?(offset = 0) t ds_field =
   let typ = T.ptr in
@@ -930,8 +939,11 @@ let call_simple ?(attrs = []) ?(dbg = Debuginfo.none) ?(raise_call = false)
       let res_type = Some (make_ret_type res_types) in
       let func = LL.Ident.global name in
       let operand_bundles =
-        call_operand_bundles ?alloc_info t ~primitive_call ~raise_call dbg
-          live_roots
+        if is_gc_leaf_call attrs
+        then []
+        else
+          call_operand_bundles ?alloc_info t ~primitive_call ~raise_call dbg
+            live_roots
       in
       let res =
         match unwind_label with
@@ -1665,7 +1677,7 @@ let emit_terminator t (block : Cfg.basic_block)
       | Prim { op; label_after } -> (
         reject_addr_regs i.arg "prim";
         match op with
-        | Probe _ -> not_implemented_terminator ~msg:"probe" i
+        | Probe _ -> br_label t label_after
         | External { func_symbol; alloc; ty_args; stack_ofs; stack_align; _ } ->
           let exn_entry = exn_entry_for_block t block in
           let unwind_label =
@@ -1876,6 +1888,53 @@ let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
     let conved_res = do_conv res (T.of_reg i.res.(0)) in
     store_into_reg t i.res.(0) conved_res
   in
+  let vec128_arg n = load_reg_to_temp ~typ:T.vec128 t i.arg.(n) in
+  let vec256_arg n = load_reg_to_temp ~typ:T.vec256 t i.arg.(n) in
+  let store_vec128_res value = store_into_reg t i.res.(0) value in
+  let store_vec256_res value = store_into_reg t i.res.(0) value in
+  let extract_vec_elem vector idx =
+    emit_ins t (I.extractelement ~vector ~index:(V.of_int idx))
+  in
+  let insert_vec_elem vector idx to_insert =
+    emit_ins t (I.insertelement ~vector ~index:(V.of_int idx) ~to_insert)
+  in
+  let vec128_of_elems low high =
+    let vector = insert_vec_elem (V.zeroinitializer T.vec128) 0 low in
+    insert_vec_elem vector 1 high
+  in
+  let vec256_of_elems e0 e1 e2 e3 =
+    let vector = insert_vec_elem (V.zeroinitializer T.vec256) 0 e0 in
+    let vector = insert_vec_elem vector 1 e1 in
+    let vector = insert_vec_elem vector 2 e2 in
+    insert_vec_elem vector 3 e3
+  in
+  let select_by_index idx if_zero if_one =
+    let cond = emit_ins t (I.icmp Ieq ~arg1:idx ~arg2:(V.of_int 0)) in
+    emit_ins t (I.select ~cond ~ifso:if_zero ~ifnot:if_one)
+  in
+  let interleave_64 idx =
+    let lhs = vec128_arg 0 in
+    let rhs = vec128_arg 1 in
+    vec128_of_elems (extract_vec_elem lhs idx) (extract_vec_elem rhs idx)
+    |> store_vec128_res
+  in
+  let vec256_low_to_vec128 vector =
+    vec128_of_elems (extract_vec_elem vector 0) (extract_vec_elem vector 1)
+  in
+  let vec256_high_to_vec128 vector =
+    vec128_of_elems (extract_vec_elem vector 2) (extract_vec_elem vector 3)
+  in
+  let vec256_insert_128 idx vector subvector =
+    let base0 = extract_vec_elem vector 0 in
+    let base1 = extract_vec_elem vector 1 in
+    let base2 = extract_vec_elem vector 2 in
+    let base3 = extract_vec_elem vector 3 in
+    let sub0 = extract_vec_elem subvector 0 in
+    let sub1 = extract_vec_elem subvector 1 in
+    let insert_low = vec256_of_elems sub0 sub1 base2 base3 in
+    let insert_high = vec256_of_elems base0 base1 sub0 sub1 in
+    select_by_index idx insert_low insert_high
+  in
   (* Intrinsics must not allocate on the OCaml heap. See
      [Arch.operation_allocates]. *)
   match intrinsic_name with
@@ -1883,6 +1942,33 @@ let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
     do_intrinsic_call "x86.sse2.min.sd" [T.doublex2; T.doublex2] T.doublex2
   | "caml_sse2_float64_max" ->
     do_intrinsic_call "x86.sse2.max.sd" [T.doublex2; T.doublex2] T.doublex2
+  | "caml_int64x2_const1" ->
+    let arg = load_reg_to_temp ~typ:T.i64 t i.arg.(0) in
+    vec128_of_elems arg arg |> store_vec128_res
+  | "caml_int64x2_low_of_int64" ->
+    let arg = load_reg_to_temp ~typ:T.i64 t i.arg.(0) in
+    vec128_of_elems arg (V.of_int 0) |> store_vec128_res
+  | "caml_int64x2_low_to_int64" ->
+    vec128_arg 0 |> fun arg -> extract_vec_elem arg 0 |> store_into_reg t i.res.(0)
+  | "caml_simd_int64x2_add" ->
+    emit_ins t (I.binary Add ~arg1:(vec128_arg 0) ~arg2:(vec128_arg 1))
+    |> store_vec128_res
+  | "caml_simd_int64x2_sub" ->
+    emit_ins t (I.binary Sub ~arg1:(vec128_arg 0) ~arg2:(vec128_arg 1))
+    |> store_vec128_res
+  | "caml_simd_vec128_interleave_high_64" -> interleave_64 1
+  | "caml_simd_vec128_interleave_low_64" -> interleave_64 0
+  | "caml_vec256_low_to_vec128" ->
+    vec256_arg 0 |> vec256_low_to_vec128 |> store_vec128_res
+  | "caml_avx_vec256_extract_128" ->
+    let idx = load_reg_to_temp ~typ:T.i64 t i.arg.(0) in
+    let vector = vec256_arg 1 in
+    select_by_index idx (vec256_low_to_vec128 vector)
+      (vec256_high_to_vec128 vector)
+    |> store_vec128_res
+  | "caml_avx_vec256_insert_128" ->
+    let idx = load_reg_to_temp ~typ:T.i64 t i.arg.(0) in
+    vec256_insert_128 idx (vec256_arg 1) (vec128_arg 2) |> store_vec256_res
   | "caml_rdtsc_unboxed" -> do_intrinsic_call "readcyclecounter" [] T.i64
   | "caml_rdpmc_unboxed" -> do_intrinsic_call "x86.rdpmc" [T.i32] T.i64
   | _ -> not_implemented_basic ~msg:"specific intrinsic" i
@@ -2016,12 +2102,8 @@ let atomic t (i : Cfg.basic Cfg.instruction) (op : Cmm.atomic_op) ~size ~addr =
     let res = emit_ins t (I.convert Zext ~arg:success ~to_:typ) in
     store_into_reg t i.res.(0) res
   | Compare_exchange ->
-    let loaded, success = do_cmpxchg () in
-    let orig = load_reg_to_temp ~typ t i.res.(0) in
-    let selected =
-      emit_ins t (I.select ~cond:success ~ifso:orig ~ifnot:loaded)
-    in
-    store_into_reg t i.res.(0) selected
+    let loaded, _success = do_cmpxchg () in
+    store_into_reg t i.res.(0) loaded
 
 let load t (i : Cfg.basic Cfg.instruction) (memory_chunk : Cmm.memory_chunk)
     (addr_mode : Arch.addressing_mode) ~(is_atomic : bool) =
@@ -2451,6 +2533,24 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
     let bitcast arg to_ = emit_ins t (I.convert Bitcast ~arg ~to_) in
     let trunc arg to_ = emit_ins t (I.convert Trunc ~arg ~to_) in
     let zext arg to_ = emit_ins t (I.convert Zext ~arg ~to_) in
+    let extract_vec_elem vector idx =
+      emit_ins t (I.extractelement ~vector ~index:(V.of_int idx))
+    in
+    let insert_vec_elem vector idx to_insert =
+      emit_ins t (I.insertelement ~vector ~index:(V.of_int idx) ~to_insert)
+    in
+    let vec128_low_of_vec256 vector =
+      let low = extract_vec_elem vector 0 in
+      let high = extract_vec_elem vector 1 in
+      let res = insert_vec_elem (V.zeroinitializer T.vec128) 0 low in
+      insert_vec_elem res 1 high
+    in
+    let vec256_low_of_vec128 vector =
+      let low = extract_vec_elem vector 0 in
+      let high = extract_vec_elem vector 1 in
+      let res = insert_vec_elem (V.zeroinitializer T.vec256) 0 low in
+      insert_vec_elem res 1 high
+    in
     match cast_op with
     | Float32_of_int32 ->
       let arg = load_reg_to_temp ~typ:T.i64 t i.arg.(0) in
@@ -2483,7 +2583,20 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
         if T.equal (V.get_type arg) res_typ then arg else bitcast arg res_typ
       in
       store_into_reg t i.res.(0) converted
-    | V128_of_vec (Vec256 | Vec512) | V256_of_vec _ | V512_of_vec _ ->
+    | V128_of_vec Vec256 ->
+      load_reg_to_temp ~typ:T.vec256 t i.arg.(0)
+      |> vec128_low_of_vec256 |> store_into_reg t i.res.(0)
+    | V256_of_vec Vec128 ->
+      load_reg_to_temp ~typ:T.vec128 t i.arg.(0)
+      |> vec256_low_of_vec128 |> store_into_reg t i.res.(0)
+    | V256_of_vec Vec256 ->
+      let arg = load_reg_to_temp ~typ:T.vec256 t i.arg.(0) in
+      let res_typ = T.of_reg i.res.(0) in
+      let converted =
+        if T.equal (V.get_type arg) res_typ then arg else bitcast arg res_typ
+      in
+      store_into_reg t i.res.(0) converted
+    | V128_of_vec Vec512 | V256_of_vec Vec512 | V512_of_vec _ ->
       not_implemented_basic ~msg:"vector reinterpret cast" i)
   | Specific op -> specific t i op
   | Intop_atomic { op; size; addr } -> atomic t i op ~size ~addr
@@ -2515,7 +2628,11 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
   | Stackoffset _ -> () (* Handled separately via [Safepoint.attr] *)
   | Spill | Reload -> not_implemented_basic ~msg:"spill / reload" i
   | Name_for_debugger _ -> ()
-  | Probe_is_enabled _ -> not_implemented_basic i
+  | Probe_is_enabled { name = _; enabled_at_init } ->
+    let enabled =
+      match enabled_at_init with None -> false | Some enabled -> enabled
+    in
+    store_into_reg t i.res.(0) (V.of_int (if enabled then 1 else 0))
 
 let emit_basic t (i : Cfg.basic Cfg.instruction) =
   emit_comment t "%a" F.pp_dbg_instr_basic i;
@@ -2687,13 +2804,13 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
             exn_bucket
           | Target_system.X86_64 ->
             emit_ins_no_res t
-              (I.inline_asm ~asm:"movq $0, %rax" ~constraints:"r"
+              (I.inline_asm ~asm:"movq $0, %r11" ~constraints:"r,~{r11}"
                  ~args:wrap_try_res ~res_type:T.Or_void.void ~sideeffect:true);
             emit_ins_no_res t (I.br exn_entry);
             emit_label t exn_entry;
             let exn_bucket =
               emit_ins t
-                (I.inline_asm ~asm:"mov %rax, $0" ~constraints:"=r" ~args:[]
+                (I.inline_asm ~asm:"" ~constraints:"={r11}" ~args:[]
                    ~res_type:(Some T.i64) ~sideeffect:true)
             in
             (* If it's nonzero, we have an exception. Otherwise, go to the try
@@ -3018,6 +3135,39 @@ let cfg_stack_check_before_bytes (cfg : Cfg.t) =
       | Cfg.Stack_check _ -> max max_bytes i.stack_offset
       | _ -> max_bytes)
 
+let frame_pointer_attrs ?cfg_stack_check_bytes ?cfg_stack_check_before_bytes ()
+    =
+  let open LL.Fn_attr in
+  let frame_pointer_attrs =
+    if Config.with_frame_pointers then [Frame_pointer_all] else []
+  in
+  let stack_check_attrs =
+    match Target_system.architecture (), Config.no_stack_checks with
+    | Target_system.AArch64, false ->
+      Oxcaml_stack_check
+      ::
+      (if !Oxcaml_flags.cfg_stack_checks
+       then
+         match cfg_stack_check_bytes, cfg_stack_check_before_bytes with
+         | Some cfg_stack_check_bytes, Some cfg_stack_check_before_bytes ->
+           Oxcaml_stack_check_bytes cfg_stack_check_bytes
+           ::
+           (if cfg_stack_check_bytes = 0
+            then []
+            else [Oxcaml_stack_check_before_bytes cfg_stack_check_before_bytes])
+         | None, None -> []
+         | Some _, None | None, Some _ ->
+           fail_msg ~name:"frame_pointer_attrs"
+             "partial stack-check byte metadata"
+       else [])
+    | Target_system.AArch64, true
+    | ( Target_system.IA32 | Target_system.X86_64 | Target_system.ARM
+      | Target_system.POWER | Target_system.Z | Target_system.Riscv ),
+      (_ : bool) ->
+      []
+  in
+  frame_pointer_attrs @ stack_check_attrs
+
 let fun_attrs ~has_try:_ ~cfg_stack_check_bytes ~cfg_stack_check_before_bytes
     codegen_options =
   let open LL.Fn_attr in
@@ -3027,26 +3177,6 @@ let fun_attrs ~has_try:_ ~cfg_stack_check_bytes ~cfg_stack_check_before_bytes
     [Noinline]
   in
   let gc_attrs = [Gc gc_name] in
-  let frame_pointer_attrs =
-    match Target_system.architecture (), Config.no_stack_checks with
-    | Target_system.AArch64, false ->
-      Oxcaml_stack_check
-      ::
-      (if !Oxcaml_flags.cfg_stack_checks
-       then
-         Oxcaml_stack_check_bytes cfg_stack_check_bytes
-         ::
-         (if cfg_stack_check_bytes = 0
-          then []
-          else [Oxcaml_stack_check_before_bytes cfg_stack_check_before_bytes])
-       else [])
-    | Target_system.AArch64, true ->
-      []
-    | ( Target_system.IA32 | Target_system.X86_64 | Target_system.ARM
-      | Target_system.POWER | Target_system.Z | Target_system.Riscv ),
-      (_ : bool) ->
-      []
-  in
   let codegen_attrs =
     List.concat_map
       (fun opt : LL.Fn_attr.t list ->
@@ -3057,7 +3187,9 @@ let fun_attrs ~has_try:_ ~cfg_stack_check_bytes ~cfg_stack_check_before_bytes
           [] (* CR yusumez: Do these require any attributes? *))
       codegen_options
   in
-  safepoint_attrs @ frame_pointer_attrs @ gc_attrs @ codegen_attrs
+  safepoint_attrs
+  @ frame_pointer_attrs ~cfg_stack_check_bytes ~cfg_stack_check_before_bytes ()
+  @ gc_attrs @ codegen_attrs
   |> List.sort_uniq LL.Fn_attr.compare
 
 (* Returns argument registers listed in the signature *)
@@ -3484,7 +3616,8 @@ let define_c_call_wrappers t =
       let wrapper_arg_types = make_arg_types c_arg_types in
       let emitter =
         E.create ~name:wrapper_name ~args:wrapper_arg_types
-          ~res:(Some wrapper_res_type) ~cc:Oxcaml ~attrs:[Noinline]
+          ~res:(Some wrapper_res_type) ~cc:Oxcaml
+          ~attrs:(Noinline :: frame_pointer_attrs ())
           ~personality:None ~dbg:Debuginfo.none ~dbg_metadata:None
           ~private_:true
       in
@@ -3521,7 +3654,8 @@ let define_wrap_try t =
   let res_type = make_ret_type [T.i64] in
   let emitter =
     E.create ~name:"wrap_try" ~args:arg_types ~res:(Some res_type) ~cc:Oxcaml
-      ~attrs:[Returns_twice; Noinline] ~personality:None ~dbg:Debuginfo.none
+      ~attrs:(Returns_twice :: Noinline :: frame_pointer_attrs ())
+      ~personality:None ~dbg:Debuginfo.none
       ~dbg_metadata:None ~private_:true
   in
   reset_fun_info t emitter;
@@ -3581,9 +3715,13 @@ let define_restore_rbp t =
         add_module_asm t
           [ "  .text";
             recover_rbp_asm ^ ":";
+            "  movq %rax, %r11";
+            "  movq %r14, %rax";
+            "  movq %r15, %rcx";
             "  pop %rbp";
             "  addq $8, %rsp";
-            "  movq " ^ recover_rbp_var ^ "(%rip), %rbx";
+            "  movq " ^ recover_rbp_var ^ "@GOTPCREL(%rip), %rbx";
+            "  movq (%rbx), %rbx";
             "  jmpq *%rbx" ];
         add_data_def t
           (LL.Data.external_ (LL.Ident.to_string_hum recover_rbp_asm_ident));

@@ -96,16 +96,68 @@ builds on AMD64, and simple scalar programs compile and run with
   - `tests/array-functions/test.ml` through `_runtest/testsuite`
   - `tests/asmcomp/movsx_small_ints.ml` through `_runtest/testsuite`
   - `tests/llvm-codegen/amd64_smoke.ml` through `_runtest/testsuite`
+- Added independent AMD64 exception/runtime fixes in
+  `backend/llvm/llvmize.ml`:
+  - empty `deopt` operand bundles are emitted for non-leaf calls, while
+    `Gc_leaf_function` calls skip operand bundles;
+  - `Compare_exchange` now returns the old loaded value from LLVM `cmpxchg`;
+  - AMD64 runtime exception recovery uses PIC-safe GOTPCREL addressing and
+    moves the exception bucket through `%r11`;
+  - frame-pointer attributes are attached on AMD64 when configured, including
+    generated C-call wrappers and `wrap_try`.
+- Added AMD64 LLVM lowering for the subset of SIMD builtins needed by layout
+  tests: `caml_int64x2_*`, `caml_simd_int64x2_{add,sub}`,
+  64-bit vec128 interleaves, low vec256 extraction, and AVX vec256
+  extract/insert 128 operations. Added the corresponding AMD64 selection and
+  purity table entries.
+- Added limited LLVM lowering for vector reinterpret casts between vec128 and
+  vec256 low lanes.
+- Added minimal probe lowering: `Probe` terminators branch to their continuation
+  and `Probe_is_enabled` returns the static `enabled_at_init` value when known
+  (otherwise false). This is enough for the focused probe tests but does not yet
+  emit real USDT probe metadata.
+- Focused tests that now pass:
+  - `tests/exception-extra-args/exception_extra_args.ml`
+  - `tests/match-exception/nested_handlers.ml`
+  - `tests/lib-atomic/test_atomic_cmpxchg.ml`
+  - `tests/callback/test3.ml`
+  - `tests/frame-pointers/stack_realloc.ml`
+  - `tests/frame-pointers/stack_realloc2.ml`
+  - `tests/typing-layouts-block-indices/block_indices_native.ml`
+  - `tests/typing-layouts-or-null/probe.ml`
+  - `tests/templates/basic/probe.ml`
+- Rebuilt and refreshed the local testsuite install after the latest source
+  changes:
+  - `opam exec -- make compiler`
+  - `opam exec -- make prefix="$PWD/_local-llvm-test-install" install_for_test`
+- Full `llvm-test` with `LLVM_BOOT_BACKEND=0` completed:
+  - `6632 passed`, `280 skipped`, `43 failed`, `6955 considered`
+  - This improves from the previous full run's `6605 passed`, `280 skipped`,
+    `67 failed`, `6952 considered`.
+  - Fixed failures include `exception_extra_args`, `nested_handlers`,
+    `test_atomic_cmpxchg`, block-index SIMD compilation, and probe tests.
+  - Remaining notable failures include native segfaults in
+    `tests/async-exns/async_exns_2.ml`, `tests/basic/patmatch.ml`,
+    small-int tests, `tests/misc-kb/kbmain.ml`, and several layout array/iarray
+    semantic assertions; quotation linking, native CFI stepping, and unboxed
+    primitive argument ABI failures remain.
+- Attempted a simpler AMD64 exception recovery path that avoided moving `%r14`
+  and `%r15` into LLVM's landing registers; it immediately regressed
+  `exception_extra_args`, so that experiment was backed out before this handoff.
 
 ## Current Blocker
 
-No immediate source blocker. Full `llvm-test` has not completed yet; the first
-broader run exposed and fixed Linux PIC/PIE handling and `-internal-assembler`
-assembly-file handling. `llvm-self-stage2-test` has not been attempted yet.
+No immediate source blocker. Full `llvm-test` now completes but still has 43
+failures. The next focused runtime/codegen blocker is the native segfault in
+`tests/async-exns/async_exns_2.ml`; it reproduces after the current exception
+fixes, while `exception_extra_args` and `nested_handlers` pass. Several layout
+array/iarray tests now compile but fail semantic assertions, so the remaining
+SIMD/product-array work is beyond just adding missing builtins.
 
 ## Next Step
 
-Run broader AMD64 `-llvm-backend` test targets and use the first focused failure
-to decide whether the next work is additional scalar lowering, SIMD lowering, or
-runtime/linkage support. After that, move toward full `llvm-test` and
-`llvm-self-stage2-test`.
+Reduce `tests/async-exns/async_exns_2.ml` under the standard compiler with
+`-llvm-backend`, then fix the AMD64 runtime/exception state issue without
+regressing `exception_extra_args` or `nested_handlers`. After that, rerun the
+full `llvm-test` and continue into layout array semantics and unboxed primitive
+argument ABI failures before attempting `llvm-self-stage2-test`.
