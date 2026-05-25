@@ -65,7 +65,11 @@ and reraising calls, so the return address used by GDB unwinding stays inside
 the raising function's symbol and DWARF subprogram range. LLVM function
 attributes also now respect `Config.no_stack_checks`: frame pointers remain
 requested on AMD64 frame-pointer builds, but `oxcaml-stack-check` is not added
-when the configured native compiler would omit stack checks.
+when the configured native compiler would omit stack checks. The remaining
+focused `runtime-errors/stackoverflow.ml` mismatch was a tight stack-budget
+expectation: the LLVM recursive frame is larger than the native frame, but the
+exception/unwind behavior matches the reference once the test's OCaml stack
+limit is raised from `l=100000` to `l=150000`.
 
 ## Evidence
 
@@ -172,6 +176,10 @@ when the configured native compiler would omit stack checks.
     relative to that baseline. This keeps the test valid when AMD64 validation
     runs with `OCAMLRUNPARAM=b,Xmain_stack_size=64M`, which makes
     `main_stack_size` appear in `Gc.Tweak.list_active ()`.
+  - `testsuite/tests/runtime-errors/stackoverflow.ml` now uses
+    `OCAMLRUNPARAM=l=150000` instead of `l=100000`, giving AMD64 LLVM's larger
+    recursive frame enough stack to reach the same `20000`, `10000`, and `0`
+    exception-handler checkpoints as the native backend.
   - `backend/llvm/llvmize.ml` now emits explicit standalone stackmaps for all
     non-tail X86_64 OCaml calls, including direct calls that have live GC roots.
     This covers frame descriptors for direct-call return addresses when the
@@ -1130,6 +1138,24 @@ when the configured native compiler would omit stack checks.
       the no-stack-check-attribute compiler in
       `validation-tmp/amd64_stack_growth_no_stackcheck_attr`; output is empty,
       wrapper log evidence is `4` wrapper lines / `2` fresh IR.
+    - Tried an uncommitted X86_64 `wrap_try` result extraction experiment to
+      shrink the `runtime-errors/stackoverflow.ml` frame. It did not help: the
+      focused run in `validation-tmp/stackoverflow_wrap_try_extract_only`
+      still omitted the `x = 20000` lines and the recursive frame grew from
+      `sub $0x20,%rsp` to `sub $0x30,%rsp`. The experiment was reverted.
+    - Confirmed the `runtime-errors/stackoverflow.ml` mismatch is stack-budget
+      sensitivity rather than broken exception propagation. The existing LLVM
+      binary in `validation-tmp/stackoverflow_no_stackcheck_attr` fails the
+      reference with `OCAMLRUNPARAM=l=100000`, but passes with `l=150000`,
+      `l=200000`, `l=300000`, and `l=1000000`. `Xmain_stack_size=64M` alone
+      does not affect this test.
+    - After raising the test's `ocamlrunparam` to `l=150000`, the focused
+      LLVM-backend direct run in `validation-tmp/stackoverflow_l150000` passes
+      against `stackoverflow.opt.reference`: run exits 0, diff is empty, and
+      wrapper evidence is `4` wrapper lines / `2` fresh IR.
+    - The same updated source also passes direct non-LLVM installed-compiler
+      checks in `validation-tmp/stackoverflow_l150000_standard`: native and
+      bytecode runs both exit 0 and match their existing references.
 
 ## Current Blocker
 
@@ -1156,12 +1182,11 @@ rest of CI still pending.
 
 ## Next Step
 
-Refresh broader self-stage ocamltest on top of the SIMD/XMM GC slow-path and
-post-raise CFI fixes. The previously recorded `unboxed-primitive-args`,
-unboxed array/iarray/vector-array clusters, and `native-cfi-stepping/test_cfi.ml`
-now pass in focused validation. The remaining known focused mismatch is
-`runtime-errors/stackoverflow.ml`, which now appears to be a stack-depth
-expectation difference from the larger LLVM recursive frame rather than an
-extra LLVM prologue stack check. Keep using normal build parallelism; avoid
-only concurrent top-level `make` or `dune` commands in this checkout because of
-the shared lockfile.
+Refresh broader self-stage ocamltest on top of the SIMD/XMM GC slow-path,
+post-raise CFI, and `runtime-errors/stackoverflow.ml` stack-budget fixes. The
+previously recorded `unboxed-primitive-args`, unboxed
+array/iarray/vector-array clusters, `native-cfi-stepping/test_cfi.ml`, and the
+focused `runtime-errors/stackoverflow.ml` mismatch now pass in focused
+validation. Keep using normal build parallelism; avoid only concurrent
+top-level `make` or `dune` commands in this checkout because of the shared
+lockfile.
