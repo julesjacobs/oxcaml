@@ -28,7 +28,11 @@ type operation =
   | Amd64_simd of Amd64_simd_instrs.id * int option
   | Amd64_simd_mem
   | Amd64_cldemote
-  | Amd64_prefetch
+  | Amd64_prefetch of
+      { is_write : bool;
+        locality : amd64_prefetch_temporal_locality_hint;
+        addr : Arch.addressing_mode
+      }
   | Arm64_shiftarith of shift_arith_operation * int
   | Arm64_muladd
   | Arm64_mulsub
@@ -48,6 +52,12 @@ let float_operation = function
   | Arch.Ifloatsub -> Ifloatsub
   | Arch.Ifloatmul -> Ifloatmul
   | Arch.Ifloatdiv -> Ifloatdiv
+
+let prefetch_temporal_locality_hint = function
+  | Arch.Nonlocal -> Prefetch_nonlocal
+  | Arch.Low -> Prefetch_low
+  | Arch.Moderate -> Prefetch_moderate
+  | Arch.High -> Prefetch_high
 
 let classify (op : Arch.specific_operation) =
   match op with
@@ -69,5 +79,7 @@ let classify (op : Arch.specific_operation) =
     Amd64_simd ((Simd.Pseudo_instr.instr simd.instr).id, simd.imm)
   | Isimd_mem _ -> Amd64_simd_mem
   | Icldemote _ -> Amd64_cldemote
-  | Iprefetch _ -> Amd64_prefetch
+  | Iprefetch { is_write; locality; addr } ->
+    Amd64_prefetch
+      { is_write; locality = prefetch_temporal_locality_hint locality; addr }
   | Illvm_intrinsic intrinsic_name -> Llvm_intrinsic intrinsic_name

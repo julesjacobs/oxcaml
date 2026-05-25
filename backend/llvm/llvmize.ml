@@ -2175,6 +2175,21 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     emit_ins t (I.binary (float_op op) ~arg1:lhs ~arg2:rhs)
     |> store_into_reg t i.res.(0)
   in
+  let prefetch_locality :
+      amd64_prefetch_temporal_locality_hint -> int = function
+    | Prefetch_nonlocal -> 0
+    | Prefetch_low -> 1
+    | Prefetch_moderate -> 2
+    | Prefetch_high -> 3
+  in
+  let prefetch ~is_write ~locality addr =
+    let ptr = load_address_from_reg t addr i.arg.(0) in
+    call_llvm_intrinsic_no_res t "prefetch.p0"
+      [ ptr;
+        V.of_int ~typ:T.i32 (if is_write then 1 else 0);
+        V.of_int ~typ:T.i32 (prefetch_locality locality);
+        V.of_int ~typ:T.i32 1 ]
+  in
   let round_intrinsic_name (mode : Llvmize_specific_types.rounding_mode) =
     match mode with
     | Round_current -> "nearbyint"
@@ -2812,7 +2827,9 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | Amd64_simd_instrs.Vinsertf128 -> simd_vec256_insert_128 (simd_imm imm)
     | Amd64_simd_instrs.Vextractf128 -> simd_vec256_extract_128 (simd_imm imm)
     | _ -> not_implemented_basic ~msg:"specific" i)
-  | Amd64_simd_mem | Amd64_cldemote | Amd64_prefetch ->
+  | Amd64_prefetch { is_write; locality; addr } ->
+    prefetch ~is_write ~locality addr
+  | Amd64_simd_mem | Amd64_cldemote ->
     not_implemented_basic ~msg:"specific" i
   | Arm64_shiftarith (shift_op, shift) ->
     let shifted =

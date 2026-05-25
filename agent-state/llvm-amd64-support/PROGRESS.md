@@ -69,6 +69,9 @@ the `caml_*_low_of_*` and `caml_*_low_to_*` builtins that previously hit the
 LLVM static-cast fatal path. Vec512 reinterpret casts now lower too: the AMD64
 LLVM path copies the shared low 64-bit lanes for vec128/vec256/vec512
 widening and narrowing instead of fatal-erroring on 512-bit reinterpret casts.
+AMD64 prefetch builtins now also reach LLVM lowering under `-llvm-backend` and
+emit `llvm.prefetch` calls instead of falling back to the generic selector's
+`Selection.select_oper` fatal path.
 
 The latest stack-pressure fix safely pools X86_64 preserved GC-root stack slots
 using full CFG liveness interference instead of safepoint-only disjointness.
@@ -181,6 +184,14 @@ limit is raised from `l=100000` to `l=150000`.
     low-lane copy helper over the canonical `<N x i64>` storage types, so
     vec512-to-vec128/vec256 narrowing and vec128/vec256-to-vec512 widening no
     longer hit the `vector reinterpret cast` fatal path.
+  - `backend/amd64/cfg_selection.ml`, `backend/amd64/llvmize_specific.ml`,
+    `backend/arm64/llvmize_specific.ml`,
+    `backend/llvm/llvmize_specific_types.ml`, and
+    `backend/llvm/llvmize.ml` now carry AMD64 prefetch read/write and locality
+    metadata through LLVM-backend selection and lower it to `llvm.prefetch.p0`.
+    `testsuite/tests/llvm-codegen/amd64_prefetch.{ml,sh}` checks that
+    ext-pointer prefetch builtins compile with `-llvm-backend -c -S
+    -keep-llvmir` and emit the LLVM prefetch intrinsic.
   - `backend/llvm/llvmize.ml` now stores LLVM `cmpxchg`'s loaded value for
     `Compare_exchange`. LLVM returns the old memory value in both success and
     failure cases, which is exactly the OCaml `Atomic.compare_exchange` result;
@@ -1514,6 +1525,12 @@ limit is raised from `l=100000` to `l=150000`.
       the public SIMD extension accepts the existing `int64x2`/`int64x4`
       surface types, but the attempted `int64x8` external declarations fail
       before lowering with `Unbound type constructor "int64x8"`.
+    - Implemented AMD64 LLVM prefetch selection/lowering and rebuilt with
+      `make -s compiler -j "$(nproc)"`; result: passed. Direct validation of
+      `testsuite/tests/llvm-codegen/amd64_prefetch.sh` against the rebuilt
+      compiler also passed under `validation-tmp/prefetch_script`: the kept IR
+      contains two `call void @llvm.prefetch.p0(...)` sites and the matching
+      declaration.
 
 ## Current Blocker
 

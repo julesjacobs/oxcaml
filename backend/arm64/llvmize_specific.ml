@@ -28,7 +28,11 @@ type operation =
   | Amd64_simd of Amd64_simd_instrs.id * int option
   | Amd64_simd_mem
   | Amd64_cldemote
-  | Amd64_prefetch
+  | Amd64_prefetch of
+      { is_write : bool;
+        locality : amd64_prefetch_temporal_locality_hint;
+        addr : Arch.addressing_mode
+      }
   | Arm64_shiftarith of shift_arith_operation * int
   | Arm64_muladd
   | Arm64_mulsub

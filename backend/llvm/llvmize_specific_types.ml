@@ -5,6 +5,12 @@ type rounding_mode =
   | Round_zero
   | Round_nearest
 
+type amd64_prefetch_temporal_locality_hint =
+  | Prefetch_nonlocal
+  | Prefetch_low
+  | Prefetch_moderate
+  | Prefetch_high
+
 type int_cond =
   | Int_EQ
   | Int_GE
