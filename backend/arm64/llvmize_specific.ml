@@ -12,7 +12,8 @@ type operation =
   | Amd64_lea of Arch.addressing_mode
   | Amd64_store_int of nativeint * Arch.addressing_mode * bool
   | Amd64_offset_loc of int * Arch.addressing_mode
-  | Amd64_floatarithmem of Cmm.float_width * float_operation * Arch.addressing_mode
+  | Amd64_floatarithmem of
+      Cmm.float_width * float_operation * Arch.addressing_mode
   | Bswap of Arch.bswap_bitwidth
   | Amd64_sextend32
   | Amd64_zextend32
