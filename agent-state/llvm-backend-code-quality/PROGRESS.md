@@ -4,8 +4,8 @@ Last updated: 2026-05-25.
 
 ## Current Claim
 
-Iterations 1 through 18 are committed, pushed, reviewed with no accepted
-findings, and focused validation passed.
+Iterations 1 through 18 are committed and pushed. Iteration 19 is reviewed with
+no accepted findings, focused validation passed, and it is ready to commit.
 
 ## Evidence
 
@@ -23,7 +23,7 @@ None.
 ## Iteration State
 
 - Target: open-ended follow-up after the initial 10 completed iterations.
-- Completed iterations: 18.
+- Completed iterations: 19.
 - Committed cleanups:
   - Iteration 1: simplified deopt argument list construction in
     `backend/llvm/llvmize.ml` with `List.concat_map`.
@@ -62,6 +62,8 @@ None.
     `backend/llvm/llvmize.ml`.
   - Iteration 18: reused the runtime-register result index helper in generated
     LLVM helpers in `backend/llvm/llvmize.ml`.
+  - Iteration 19: shared LLVM `expect.i1` true branch hints in
+    `backend/llvm/llvmize.ml`.
 - Dropped ideas: none yet.
 - Stop condition: continue only while a small candidate passes five-reviewer
   review with no accepted findings and focused validation.
@@ -909,7 +911,51 @@ Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
 are broad LLVM backend validation runs, and this commit only reuses a local
 result index helper.
 
+## Iteration 19 Candidate
+
+Path: self-proposed candidate.
+
+Candidate: add `expect_i1_true` next to the LLVM intrinsic helpers in
+`backend/llvm/llvmize.ml`, then use it in the local allocation, heap allocation,
+and poll branch hints.
+
+Why likely useful: all three sites emitted the same `llvm.expect.i1` call with
+an expected boolean value of true. Naming that pattern keeps branch-hint
+construction in one place without changing branch polarity.
+
+Review gate: passed after five human-like reviews of the final diff.
+
+Review result: all five reviewers said keep with no findings. Reviewers checked
+that the helper is placed with the intrinsic helpers, has a narrow name, and
+preserves the exact `expect.i1(..., true)` construction at all three sites.
+
+Validation result:
+
+- `git diff --check`: passed.
+- `eval "$(../../../scripts/agent-tmp-env)" && opam exec
+  --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`: passed.
+
+## Testing Story for This Commit
+
+Change: share the LLVM `expect.i1` true branch-hint construction through
+`expect_i1_true`, and record iteration 19 state in this progress file.
+Risk: if the rewrite is wrong, the allocation or poll fast paths could emit the
+wrong expected boolean, change branch polarity, or stop declaring the intrinsic
+with the correct argument/result types.
+Validation: `git diff --check`; `eval "$(../../../scripts/agent-tmp-env)" &&
+opam exec --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`.
+Full LLVM validation: not run for this commit; the helper body preserves the
+exact `expect.i1` name, expected `i1 true` value, and result type used before.
+Stage2 verification: not run for this commit; self-stage2 is intentionally
+deferred for the same reason as full LLVM validation.
+Why this is enough: five human-like reviews found no issues and checked branch
+polarity and intrinsic argument/result preservation; the build check covers type
+and syntax validity.
+Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
+`make llvm-self-stage2-test LLVM_PATH="$LLVM_PATH"` are deferred because they
+are broad LLVM backend validation runs, and this commit only shares a local
+intrinsic call idiom.
+
 ## Next Step
 
-No immediate code-quality iteration is queued. Continue only if another small,
-behavior-preserving candidate is found and passes the five-reviewer gate.
+Commit iteration 19 and push the agent branch.

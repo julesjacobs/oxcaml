@@ -1090,6 +1090,9 @@ let call_llvm_intrinsic_no_res t name args =
     ~emit_ins:(fun t -> emit_ins_no_res t)
     t name args None
 
+let expect_i1_true t value =
+  call_llvm_intrinsic t "expect.i1" [value; V.of_int ~typ:T.i1 1] T.i1
+
 let stack_pointer_register_name () =
   match Target_system.architecture () with
   | Target_system.AArch64 -> "sp"
@@ -2953,9 +2956,7 @@ let local_alloc t (i : Cfg.basic Cfg.instruction) num_bytes =
     emit_ins t (I.icmp Isle ~arg1:local_limit ~arg2:new_local_sp)
   in
   (* Let LLVM know calling realloc isn't likely *)
-  let skip_realloc_expect =
-    call_llvm_intrinsic t "expect.i1" [skip_realloc; V.of_int ~typ:T.i1 1] T.i1
-  in
+  let skip_realloc_expect = expect_i1_true t skip_realloc in
   (* Branch appropriately *)
   let call_realloc = V.of_label (Cmm.new_label ()) in
   let after_realloc = V.of_label (Cmm.new_label ()) in
@@ -3011,9 +3012,7 @@ let heap_alloc ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction)
     emit_ins t (I.icmp Iule ~arg1:domain_young_limit ~arg2:new_alloc_ptr)
   in
   (* Let LLVM know calling GC isn't likely *)
-  let skip_gc_expect =
-    call_llvm_intrinsic t "expect.i1" [skip_gc; V.of_int ~typ:T.i1 1] T.i1
-  in
+  let skip_gc_expect = expect_i1_true t skip_gc in
   (* Branch appropriately *)
   let call_gc = V.of_label (Cmm.new_label ()) in
   let after_gc = V.of_label (Cmm.new_label ()) in
@@ -3048,9 +3047,7 @@ let poll ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction) =
   let skip_poll =
     emit_ins t (I.icmp Iult ~arg1:domain_young_limit ~arg2:alloc_ptr)
   in
-  let skip_poll_expect =
-    call_llvm_intrinsic t "expect.i1" [skip_poll; V.of_int ~typ:T.i1 1] T.i1
-  in
+  let skip_poll_expect = expect_i1_true t skip_poll in
   let call_gc = V.of_label (Cmm.new_label ()) in
   let after_poll = V.of_label (Cmm.new_label ()) in
   emit_ins_no_res t
