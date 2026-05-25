@@ -1129,8 +1129,8 @@ let emit_post_raise_nop t =
     ()
 
 let call_simple_with_stackmap ?unwind_label ?(raise_call = false)
-    ?(stackmap_if_plain_call = false) ~attrs ~live_roots ~safepoint ~cc t
-    (i : 'a Cfg.instruction) name args res_types =
+    ?(primitive_call = false) ?(stackmap_if_plain_call = false) ~attrs
+    ~live_roots ~safepoint ~cc t (i : 'a Cfg.instruction) name args res_types =
   let fun_info = get_fun_info t in
   let prev_dbg_metadata = fun_info.current_dbg_metadata in
   fun_info.current_dbg_metadata
@@ -1142,7 +1142,7 @@ let call_simple_with_stackmap ?unwind_label ?(raise_call = false)
       let res_type = Some (make_ret_type res_types) in
       let func = LL.Ident.global name in
       let operand_bundles =
-        call_operand_bundles t ~primitive_call:false ~raise_call i.dbg
+        call_operand_bundles t ~primitive_call ~raise_call i.dbg
           live_roots
       in
       let res =
@@ -1539,11 +1539,15 @@ let extcall ?unwind_label t (i : Cfg.terminator Cfg.instruction) ~func_symbol
   let make_ocaml_c_call ~cc caml_c_call_symbol args res_types =
     add_referenced_symbol t caml_c_call_symbol;
     add_referenced_symbol t func_symbol;
-    call_simple
+    let safepoint =
+      let stack_offset = statepoint_stack_offset t i in
+      Safepoint.Call { stack_offset }
+    in
+    call_simple_with_stackmap
       ~attrs:(gc_attr ~can_call_gc:true t i)
-      ~dbg:i.dbg ~primitive_call:true
+      ~primitive_call:true
       ~live_roots:(load_live_gc_roots_across t i)
-      ?unwind_label ~cc t caml_c_call_symbol args res_types
+      ~safepoint ?unwind_label ~cc t i caml_c_call_symbol args res_types
   in
   let call_func arg_regs arg_types res_types =
     if stack_ofs > 0

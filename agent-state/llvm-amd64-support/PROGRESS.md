@@ -41,6 +41,14 @@ LLVM runtime-register spill slots after the direct exception-runtime entry
 returns to the exception edge, preventing optimized IR from reloading stale
 domain-state/allocation-pointer values on handler entry.
 
+The newest C-call stackmap fix emits an explicit frame stackmap for AMD64 LLVM
+external C calls through `caml_c_call`/`caml_c_call_stack_args`. The reduced
+self-stage2 crash mapped to the first `caml_ml_pos_out_64` C call in
+`camlCmi_format__marshal_11_39_code`: the pre-fix compiler had no frame
+descriptor for the post-call return address, while the following
+`caml_output_value` call did have descriptors. A patched stage now records the
+formerly missing `camlCmi_format__marshal` return address.
+
 The latest stack-pressure fix safely pools X86_64 preserved GC-root stack slots
 using full CFG liveness interference instead of safepoint-only disjointness.
 This keeps simultaneously live preserved roots in distinct slots, but lets
@@ -183,6 +191,15 @@ limit is raised from `l=100000` to `l=150000`.
     non-tail X86_64 OCaml calls, including direct calls that have live GC roots.
     This covers frame descriptors for direct-call return addresses when the
     callee triggers a GC and scans the caller.
+  - `backend/llvm/llvmize.ml` now also emits explicit stackmaps for external
+    C calls lowered through `caml_c_call` or `caml_c_call_stack_args` on the
+    AMD64 LLVM path, and passes the primitive-call operand bundle metadata
+    through the stackmap-emitting call helper.
+  - `testsuite/tests/llvm-codegen/c_call_stackmap.ml` and
+    `testsuite/tests/llvm-codegen/c_call_stackmap.sh` are an AMD64/Linux
+    LLVM-backend regression test that compiles an `Out_channel.pos` followed
+    by `Marshal.to_channel`, runs the binary, and checks the generated
+    frametable contains a descriptor for the first `caml_c_call` return label.
   - `testsuite/tests/llvm-codegen/amd64_direct_call_stackmap.ml` is an
     AMD64/Linux LLVM-backend regression test for a direct call with a live heap
     root across an allocating callee.
@@ -214,6 +231,42 @@ limit is raised from `l=100000` to `l=150000`.
     stdlib.
 - Validation done this turn:
   - `git diff --check` passed.
+  - Reduced the intermittent self-stage2
+    `caml_scan_stack: missing frame descriptor` abort to a missing descriptor
+    after the first C call in `camlCmi_format__marshal_11_39_code`
+    (`caml_ml_pos_out_64`). In the pre-fix self-stage2 compiler, the return
+    address after that `caml_c_call` was absent from the frametable; the later
+    `caml_output_value` C-call return address was present.
+  - A patched stage build in
+    `validation-tmp/c_call_stackmap_stage2a` completed with normal Dune
+    parallelism (`DUNE_BUILD_FLAGS="-j $(nproc)"`). Runtime build evidence:
+    `148` wrapper lines / `74` fresh IR. Main build evidence before the final
+    incremental C-call stackmap rebuild: `2228` wrapper lines / `1102` fresh
+    IR; the incremental main rebuild after emitting stackmaps for all
+    `caml_c_call` paths produced `154` wrapper lines / `76` fresh IR.
+  - The focused generated `Out_channel.pos`/`Marshal.to_channel` repro built
+    with the patched stage compiler and `-O3 -g -llvm-backend` now prints `0`;
+    frametable parsing finds descriptors for both the formerly missing first
+    C-call return address and the second C-call return address.
+  - Direct execution of
+    `testsuite/tests/llvm-codegen/c_call_stackmap.sh` against the patched
+    stage install passes.
+  - `tools/run-llvm-stage5-ocamltest.sh` for `tests/llvm-codegen` with the
+    patched stage install passes: `25` passed, `15` skipped, `0` failed,
+    `40` considered. Wrapper evidence: `24` wrapper lines / `12` fresh IR.
+  - Built another full patched stage in
+    `validation-tmp/c_call_stackmap_stage2b` from the stage2a install with
+    normal Dune parallelism. Runtime build evidence: `148` wrapper lines /
+    `74` fresh IR. Main build evidence: `2228` wrapper lines / `1101` fresh
+    IR. A stage2b smoke compiled and ran `fib 10`, printing `55`.
+  - Inspected `camlCmi_format__marshal_11_39_code` in the stage2b compiler.
+    The first `caml_c_call` return address now has a frametable descriptor,
+    as do the later C-call return descriptors.
+  - Focused self-stage2 ocamltest validation with the stage2b compiler for the
+    previously failing directories (`tests/flambda2/symbol_projections`,
+    `tests/lib-smallint`, and `tests/typing-labels`) passes: `66` passed,
+    `0` skipped, `0` failed. Wrapper evidence: `110` wrapper lines /
+    `55` fresh IR.
   - Added local opam repository `tools/ci/local-opam` as `oxcaml-local`.
   - Created switch `oxcaml-5.4.0+oxcaml` with
     `ocaml-base-compiler.5.4.0+oxcaml`; installed `dune.3.20.2` and
@@ -1223,14 +1276,15 @@ limit is raised from `l=100000` to `l=150000`.
 
 No focused blocker remains for `llvm-install` with a writable prefix, the
 enabled Linux/AMD64 `llvm-codegen` tests, self-stage install/smoke, or full
-self-stage ocamltest. Self-stage2 install and smoke now pass, but full
-self-stage2 ocamltest still exposes intermittent
-`caml_scan_stack: missing frame descriptor` aborts in the stage2
-`ocamlopt.opt`; the concrete failed test changes across reruns and focused
-reruns of the failed directories/tests have passed. The default `/usr/local`
-install prefix is not writable in this environment, so use an explicit
-agent-local `prefix=...` for install validation. Also clear `LIST=`/`DIR=`
-when running a single `TEST=...` after
+self-stage ocamltest. The previously intermittent self-stage2
+`caml_scan_stack: missing frame descriptor` abort has a concrete fixed
+reproducer: the first external C call in `camlCmi_format__marshal_11_39_code`
+now has a frame descriptor in the patched stage2b compiler, and the previously
+failing self-stage2 directories pass focused validation. A fresh full
+self-stage2 ocamltest rerun is still pending after this C-call stackmap fix.
+The default `/usr/local` install prefix is not writable in this environment,
+so use an explicit agent-local `prefix=...` for install validation. Also clear
+`LIST=`/`DIR=` when running a single `TEST=...` after
 `eval "$(../../../scripts/agent-tmp-env)"`, because the agent env may set
 `LIST` for broader test runs.
 
@@ -1251,11 +1305,8 @@ rest of CI still pending.
 
 ## Next Step
 
-Next step is reducing the intermittent self-stage2
-`caml_scan_stack: missing frame descriptor` abort in the stage2 `ocamlopt.opt`.
-The best current evidence is that it is not tied to a specific source file:
-first full run failed in `symbol_projections` and `lib-smallint`; a fully
-serial rerun failed only in `typing-labels/mixin.ml`; direct/focused reruns of
-those cases passed. Keep using normal build parallelism; avoid only concurrent
-top-level `make` or `dune` commands in this checkout because of the shared
-lockfile.
+Next step is a fresh full self-stage2 ocamltest rerun from the patched
+stage2b compiler to confirm the C-call stackmap fix clears the previous
+intermittent missing-frame-descriptor aborts at suite scale. Keep using normal
+build parallelism; avoid only concurrent top-level `make` or `dune` commands
+in this checkout because of the shared lockfile.
