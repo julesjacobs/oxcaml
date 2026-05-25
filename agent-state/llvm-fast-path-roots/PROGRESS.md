@@ -24,32 +24,33 @@ logical roots, and interaction with ordinary call root preservation.
   - `testsuite/tests/llvm-codegen/allocation.ml`
   - `testsuite/tests/llvm-codegen/fast_path_roots.ml`
 - Human-like review: 5 agents run after the expanded expect coverage. Addressed
-  the actionable findings by adding allocation no-root, allocation const-int
-  filtering, allocation trap/unwind fallback, and call-preservation interaction
-  cases; renaming the aliased-root and call-then-allocation cases; and clarifying
-  the conservative slow-path slot preallocation count.
+  the actionable findings by adding 10 allocation-focused codegen cases,
+  including no-root allocation, const-int filtering, allocation trap/unwind
+  fallback, call-preservation interaction, boxed float roots, aliased logical
+  roots, multiple allocation slow paths with varying root counts, and poll plus
+  allocation slot reuse; renaming the aliased-root and call-then-allocation
+  cases; and clarifying the conservative slow-path slot preallocation count.
 - Focused validation passed:
   `llvm-codegen/fast_path_roots.ml`, `llvm-codegen/allocation.ml`,
+  `llvm-codegen/effect_preemption.ml`,
   `typing-small-numbers/test_matching_native.ml`.
 - Latest focused validation after rebase and extra tests:
   `make test-one-no-rebuild TEST=llvm-codegen/fast_path_roots.ml
   LLVM_BACKEND=1 LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"` passed.
 - Formatting passed:
   `ocamlformat --check backend/llvm/llvmize.ml
-  testsuite/tests/llvm-codegen/allocation.ml
+  testsuite/tests/llvm-codegen/effect_preemption.ml
   testsuite/tests/llvm-codegen/fast_path_roots.ml`.
-- Full LLVM test suite passed:
-  `make llvm-test LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"`
-  with 6669 passed, 280 skipped, 0 failed.
+- Full LLVM test suite passed after the `effect_preemption.ml` predicate fix:
+  `make llvm-test LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"`.
 - Full self-stage2 LLVM test suite passed:
   `make llvm-self-stage2-test LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"`
-  with 6643 passed, 267 skipped, 0 failed. The successful run used
+  with 6363 passed, 271 skipped, 0 failed. The successful run used
   agent-local `RUNTIME_WS` and `MAIN_WS` paths to avoid global `/tmp`
   workspace collisions, and set `DUNE_BUILD_FLAGS="--display short"` to avoid
   the empty Bash-array `set -u` failure in the stage script.
 - Clang wrapper evidence:
-  - Full LLVM test: 5982 wrapper lines, 2983 fresh IR compiles.
-  - Self-stage2: 6488 wrapper lines, 3229 fresh IR compiles.
+  - Final self-stage2 test run: 6672 wrapper lines, 3328 fresh IR compiles.
 
 ## Current Blocker
 

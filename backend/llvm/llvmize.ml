@@ -3822,11 +3822,12 @@ let preserved_reg_slots liveness active_traps cfg =
 let max_slow_path_root_slots t active_traps cfg =
   Cfg.fold_body_instructions cfg
     ~f:(fun max_roots i ->
-      if eligible_basic_safepoint_for_slow_root_slots active_traps i
-      (* [const_ints] is populated while emitting instructions, so this
-         pre-emission count can only use the conservative live root set. The
-         actual slow-path bundle still filters known immediates at the call
-         site. *)
+      if
+        eligible_basic_safepoint_for_slow_root_slots active_traps i
+        (* [const_ints] is populated while emitting instructions, so this
+           pre-emission count can only use the conservative live root set. The
+           actual slow-path bundle still filters known immediates at the call
+           site. *)
       then Int.max max_roots (Reg.Set.cardinal (live_gc_root_regs_across t i))
       else max_roots)
     ~init:0
