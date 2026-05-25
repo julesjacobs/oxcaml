@@ -4,8 +4,8 @@ Last updated: 2026-05-25.
 
 ## Current Claim
 
-Iterations 1 through 16 are committed, pushed, reviewed with no accepted
-findings, and focused validation passed.
+Iterations 1 through 17 are committed or ready to commit; iteration 17 passed
+review with no findings and focused validation passed.
 
 ## Evidence
 
@@ -23,7 +23,7 @@ None.
 ## Iteration State
 
 - Target: open-ended follow-up after the initial 10 completed iterations.
-- Completed iterations: 16.
+- Completed iterations: 17.
 - Committed cleanups:
   - Iteration 1: simplified deopt argument list construction in
     `backend/llvm/llvmize.ml` with `List.concat_map`.
@@ -57,6 +57,8 @@ None.
   - Iteration 15: shared source-order debug item extraction in
     `backend/llvm/llvmize.ml`.
   - Iteration 16: shared LLVM expect-output normalization pipeline in
+    `backend/llvm/llvmize.ml`.
+  - Iteration 17: named LLVM call-result struct index paths in
     `backend/llvm/llvmize.ml`.
 - Dropped ideas: none yet.
 - Stop condition: continue only while a small candidate passes five-reviewer
@@ -814,7 +816,51 @@ Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
 are broad LLVM backend validation runs, and this commit only changes local
 helper sharing.
 
+## Iteration 17 Candidate
+
+Path: self-proposed candidate.
+
+Candidate: add `runtime_reg_result_index` and `actual_result_index` in
+`backend/llvm/llvmize.ml`, then use them in call-result extraction and return
+assembly.
+
+Why likely useful: the call-result struct layout uses `[0; i]` for runtime
+register fields and `[1; i]` for actual result fields. Naming those paths makes
+the shared layout convention visible in both extraction and assembly.
+
+Review gate: passed after five human-like reviews of the final diff.
+
+Review result: all five reviewers said keep with no findings. Reviewers checked
+that the helpers are placed next to the call helpers, name only the two repeated
+result-struct paths, do not add `n = 0` or `n = 1` special cases, and leave
+nearby raw paths alone when they address different struct shapes.
+
+Validation result:
+
+- `git diff --check`: passed.
+- `eval "$(../../../scripts/agent-tmp-env)" && opam exec
+  --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`: passed.
+
+## Testing Story for This Commit
+
+Change: name the LLVM call-result struct index paths for runtime-register
+fields and actual-result fields, and record iteration 17 state in this progress
+file.
+Risk: if the rewrite is wrong, call-result extraction or return assembly could
+read or write the wrong field of the result struct.
+Validation: `git diff --check`; `eval "$(../../../scripts/agent-tmp-env)" &&
+opam exec --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`.
+Full LLVM validation: not run for this commit; the helper bodies preserve the
+exact `[0; i]` and `[1; i]` paths used before.
+Stage2 verification: not run for this commit; self-stage2 is intentionally
+deferred for the same reason as full LLVM validation.
+Why this is enough: five human-like reviews found no issues and checked the
+result-struct index behavior; the build check covers type and syntax validity.
+Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
+`make llvm-self-stage2-test LLVM_PATH="$LLVM_PATH"` are deferred because they
+are broad LLVM backend validation runs, and this commit only names local result
+index paths.
+
 ## Next Step
 
-No immediate code-quality iteration is queued. Continue only if another small,
-behavior-preserving candidate is found and passes the five-reviewer gate.
+Commit iteration 17 and push it to the draft PR branch.

@@ -858,15 +858,21 @@ let prepare_call_args t args =
 let prepare_call_args_from_regs t regs =
   prepare_call_args t (List.map (load_reg_to_temp t) regs)
 
+let runtime_reg_result_index i = [0; i]
+
+let actual_result_index i = [1; i]
+
 let extract_call_res t call_res_struct num_res_values =
   (* Runtime regs *)
-  let runtime_reg_indices = List.mapi (fun i _ -> [0; i]) runtime_regs in
+  let runtime_reg_indices =
+    List.mapi (fun i _ -> runtime_reg_result_index i) runtime_regs
+  in
   let extracted_values = extract_struct t call_res_struct runtime_reg_indices in
   List.iter2
     (fun ptr to_store -> emit_ins_no_res t (I.store ~ptr ~to_store))
     runtime_regs extracted_values;
   (* Actual return values *)
-  let res_value_indices = List.init num_res_values (fun i -> [1; i]) in
+  let res_value_indices = List.init num_res_values actual_result_index in
   extract_struct t call_res_struct res_value_indices
 
 let extract_call_res_into_original_regs t call_res_struct original_res_regs =
@@ -898,10 +904,11 @@ let extract_call_res_into_original_regs t call_res_struct original_res_regs =
 let assemble_return t res_type values =
   let runtime_values =
     List.mapi
-      (fun i ptr -> [0; i], emit_ins t (I.load ~ptr ~typ:T.i64))
+      (fun i ptr ->
+        runtime_reg_result_index i, emit_ins t (I.load ~ptr ~typ:T.i64))
       runtime_regs
   in
-  let actual_values = List.mapi (fun i v -> [1; i], v) values in
+  let actual_values = List.mapi (fun i v -> actual_result_index i, v) values in
   assemble_struct t res_type (runtime_values @ actual_values)
 
 (* Prepare and extract arguments following the OCaml calling convention in LLVM,
