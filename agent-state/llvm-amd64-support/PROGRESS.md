@@ -1174,14 +1174,63 @@ limit is raised from `l=100000` to `l=150000`.
       `269` skipped, `0` failed, `0` unexpected errors, `6615` considered.
       Wrapper evidence: `6470` wrapper lines / `3235` fresh IR. Log:
       `validation-tmp/self_stage_refresh/self_stage_ocamltest.log`.
+    - Refreshed self-stage2 validation in
+      `validation-tmp/self_stage2_refresh` with normal Dune parallelism:
+      `DUNE_BUILD_FLAGS="-j $(nproc)" ./tools/build-llvm-stage5-install.sh`
+      completed from the refreshed self-stage install. Runtime build evidence:
+      `148` wrapper lines / `74` fresh IR. Main build evidence: `2228`
+      wrapper lines / `1104` fresh IR. The self-stage2 smoke printed `55`
+      with `4` wrapper lines / `2` fresh IR.
+    - The first full self-stage2 ocamltest run used
+      `SELF_STAGE=2 STAGE_INSTALL=validation-tmp/self_stage2_refresh/stage_install
+      STAGE_BUILD=validation-tmp/self_stage2_refresh/main_build
+      LLVM_TESTSUITE_PARALLEL=auto LLVM_TESTSUITE_JOBS=$(nproc)
+      ./tools/run-llvm-stage5-ocamltest.sh`. GNU parallel was unavailable, so
+      the script selected the serial `one` target, but `make -j$(nproc)` was
+      still active. Result: `6342` tests passed, `269` skipped, `4` failed,
+      `0` unexpected errors, `6615` considered. The four failures were all
+      `caml_scan_stack: missing frame descriptor` aborts while running the
+      stage2 `ocamlopt.opt`: two in
+      `tests/flambda2/symbol_projections/symbol_projections_mixed_blocks.ml`
+      line 6, plus `tests/lib-smallint/test_int16.ml` and
+      `tests/lib-smallint/test_int8.ml`. Wrapper evidence: `6178` lines /
+      `3089` fresh IR. Log:
+      `validation-tmp/self_stage2_refresh/self_stage2_ocamltest.log`.
+    - Focused self-stage2 repro attempts did not make those first-run aborts
+      deterministic. The exact `test_int8.ml` native compile passed when run
+      directly. A focused serial ocamltest run of
+      `tests/flambda2/symbol_projections` and `tests/lib-smallint` passed
+      `60` tests with `0` failures (`98` wrapper lines / `49` fresh IR; log
+      `validation-tmp/self_stage2_refresh/failed_dirs_serial.log`). Forcing
+      `LLVM_TESTSUITE_PARALLEL=1` could not run because GNU parallel is not
+      installed.
+    - A full self-stage2 ocamltest rerun with `LLVM_TESTSUITE_PARALLEL=0` and
+      no `LLVM_TESTSUITE_JOBS` reduced the abort pattern but still found one
+      intermittent missing-frame-descriptor abort:
+      `tests/typing-labels/mixin.ml` native failed while compiling with the
+      stage2 `ocamlopt.opt`; the emitted message was
+      `caml_scan_stack: missing frame descriptor`. Result: `6345` tests
+      passed, `269` skipped, `1` failed, `0` unexpected errors, `6615`
+      considered. Wrapper evidence: `6194` lines / `3097` fresh IR. Log:
+      `validation-tmp/self_stage2_refresh/self_stage2_ocamltest_rerun.log`.
+      Five direct retries of the same LLVM-backend `mixin.ml` native compile
+      passed (`20` wrapper lines / `10` fresh IR), and a focused serial
+      ocamltest run of `tests/typing-labels` passed all `6` tests
+      (`12` wrapper lines / `6` fresh IR; log
+      `validation-tmp/self_stage2_refresh/typing_labels_serial.log`).
 
 ## Current Blocker
 
 No focused blocker remains for `llvm-install` with a writable prefix, the
 enabled Linux/AMD64 `llvm-codegen` tests, self-stage install/smoke, or full
-self-stage ocamltest. The default `/usr/local` install prefix is not writable
-in this environment, so use an explicit agent-local `prefix=...` for install
-validation. Also clear `LIST=`/`DIR=` when running a single `TEST=...` after
+self-stage ocamltest. Self-stage2 install and smoke now pass, but full
+self-stage2 ocamltest still exposes intermittent
+`caml_scan_stack: missing frame descriptor` aborts in the stage2
+`ocamlopt.opt`; the concrete failed test changes across reruns and focused
+reruns of the failed directories/tests have passed. The default `/usr/local`
+install prefix is not writable in this environment, so use an explicit
+agent-local `prefix=...` for install validation. Also clear `LIST=`/`DIR=`
+when running a single `TEST=...` after
 `eval "$(../../../scripts/agent-tmp-env)"`, because the agent env may set
 `LIST` for broader test runs.
 
@@ -1193,17 +1242,20 @@ install. The safe X86_64 preserved-root slot pooling patch also lets the fresh
 default-stack boot-context build pass without
 `OCAMLRUNPARAM=b,Xmain_stack_size=64M`. Broader self-stage/ocamltest validation
 now passes on top of the SIMD/XMM GC slow-path, post-raise CFI, and
-`runtime-errors/stackoverflow.ml` stack-budget fixes.
+`runtime-errors/stackoverflow.ml` stack-budget fixes. Broader self-stage2
+validation now needs the intermittent stage2 compiler missing-frame-descriptor
+abort reduced or fixed.
 The OxCaml PR is still draft; as of the latest check after the shared-type
 cleanup, GitHub reported `built with flambda-backend, flambda2` passed and the
 rest of CI still pending.
 
 ## Next Step
 
-Next validation step is self-stage2 install and testsuite refresh, since the
-current full self-stage ocamltest now passes. Keep an eye on the transient
-`caml_scan_stack: missing frame descriptor` seen during the first self-stage
-main build attempt; it did not reproduce in the immediate rerun, and the full
-self-stage ocamltest run passed afterward. Keep using normal build
-parallelism; avoid only concurrent top-level `make` or `dune` commands in this
-checkout because of the shared lockfile.
+Next step is reducing the intermittent self-stage2
+`caml_scan_stack: missing frame descriptor` abort in the stage2 `ocamlopt.opt`.
+The best current evidence is that it is not tied to a specific source file:
+first full run failed in `symbol_projections` and `lib-smallint`; a fully
+serial rerun failed only in `typing-labels/mixin.ml`; direct/focused reruns of
+those cases passed. Keep using normal build parallelism; avoid only concurrent
+top-level `make` or `dune` commands in this checkout because of the shared
+lockfile.
