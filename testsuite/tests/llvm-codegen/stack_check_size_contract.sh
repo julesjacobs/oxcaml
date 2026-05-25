@@ -165,6 +165,10 @@ if [ "$mode" = "no-stack-checks" ]; then
 fi
 
 if [ "$mode" = "no-cfg-stack-checks" ]; then
+  if grep -q '^\*\*\* After cfg_stack_checks' "$cfg_dump"; then
+    echo "unexpected cfg_stack_checks dump when CFG stack checks are disabled" >&2
+    exit 1
+  fi
   if grep -q '"oxcaml-stack-check-bytes"' "$ir"; then
     echo "unexpected OxCaml stack-check byte attribute without CFG stack checks" >&2
     exit 1
