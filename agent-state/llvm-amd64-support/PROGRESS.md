@@ -6,11 +6,15 @@ Last updated: 2026-05-25.
 
 AMD64 LLVM backend bring-up now passes focused install, enabled Linux/AMD64
 `llvm-codegen`, and installed-compiler boot-smoke validation with the
-agent-local LLVM tools and writable install prefix.
+agent-local LLVM tools and writable install prefix. Focused AMD64 SIMD
+lowering now also covers the i64x2 add/sub, vec128 interleave, and vec256
+join/split operations needed by several layout/block-index tests.
 
-The latest fixes reserve the AMD64 OxCaml runtime registers in LLVM's X86
-register allocator and make exception-recovery blocks treat runtime
-blockaddress entry as a register-clobbering edge.
+The latest fixes add focused AMD64 SIMD LLVM lowering for i64x2 arithmetic,
+vec128 interleaves, and vec256 join/split support. Earlier fixes reserve the
+AMD64 OxCaml runtime registers in LLVM's X86 register allocator and make
+exception-recovery blocks treat runtime blockaddress entry as a
+register-clobbering edge.
 
 ## Evidence
 
@@ -56,6 +60,13 @@ blockaddress entry as a register-clobbering edge.
   - `backend/amd64/{cfg_selection,arch}.ml` and `backend/llvm/llvmize.ml`
     recognize and lower the scalar float `sqrt`/`sqrtf` and SIMD float32/float64
     min/max/round/cast builtins needed by the LLVM backend path.
+  - `backend/amd64/cfg_selection.ml` and `backend/llvm/llvmize.ml` recognize
+    and lower a focused AMD64 SIMD subset for the LLVM backend:
+    `caml_simd_int64x2_{add,sub}`,
+    `caml_simd_vec128_interleave_{low,high}_64`,
+    `caml_avx_vec256_{insert,extract}_128`, their SSE aliases where present,
+    and the low-half vec128/vec256 reinterpret casts used by `%join_vec256` and
+    `%split_vec256`.
   - `vendor/llvm-project/llvm/lib/Target/X86/{X86AsmPrinter.cpp,
     X86AsmPrinter.h,X86MCInstLower.cpp}` records a temporary return-address
     label after emitted X86 call instructions and lets the following
@@ -351,6 +362,35 @@ blockaddress entry as a register-clobbering edge.
       `typing-layouts-or-null/probe.ml`.
     - `misc/gctweaks.ml` fails in both bytecode and native under this
       self-stage test environment, so it is not clearly LLVM-native-specific.
+  - Implemented the first AMD64 SIMD LLVM-backend lowering tranche and rebuilt
+    with normal Make/Dune parallelism:
+    `OCAMLRUNPARAM=b,Xmain_stack_size=64M make llvm-install
+    LLVM_BOOT_BACKEND=0 ARCH=amd64 LLVM_PATH="$LLVM_PATH"
+    prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0.
+  - Focused SIMD/layout validation now passes with `LIST=` and `DIR=` cleared:
+    - `make llvm-test-one
+      TEST=typing-layouts-block-indices/block_indices_native.ml LIST= DIR=
+      ARCH=amd64 LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 2 passed,
+      0 skipped, 0 failed.
+    - `make llvm-test-one
+      TEST=records-and-block-indices/generated_record_access_native_test.ml
+      LIST= DIR= ARCH=amd64 LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 3 passed,
+      0 skipped, 0 failed.
+    - `make llvm-test-one
+      TEST=typing-layouts-arrays/test_vec128_u_array.ml LIST= DIR= ARCH=amd64
+      LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 3 passed,
+      0 skipped, 0 failed.
+  - `make llvm-test-one TEST=mixed-blocks/generated_native_test.ml LIST= DIR=
+    ARCH=amd64 LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+    prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` still exits 2. The
+    failure has moved beyond missing builtin recognition to an agent-local
+    patched `llc` assertion in
+    `X86RegisterInfo::eliminateFrameIndex`: `BasePtr == FramePtr && "Expected
+    the FP as base register"` while compiling
+    `camlGenerated_native_test__create_int64x4_12_54_code`.
 
 ## Current Blocker
 
@@ -363,16 +403,15 @@ an explicit agent-local `prefix=...` for install validation. Also clear
 `LIST` for broader test runs.
 
 Full self-stage ocamltest is now the broad validation blocker: it completes but
-has 61 failures. The known stack-usage issue remains: some LLVM-built compiler
-paths need `OCAMLRUNPARAM=b,Xmain_stack_size=64M` where the normal opam compiler
-does not.
+has 61 failures, some of which should be rerun after the focused SIMD fixes.
+The known stack-usage issue remains: some LLVM-built compiler paths need
+`OCAMLRUNPARAM=b,Xmain_stack_size=64M` where the normal opam compiler does not.
 
 ## Next Step
 
-Reduce the self-stage ocamltest failure families. The most direct next target is
-the missing AMD64 SIMD builtin recognition (`caml_simd_int64x2_sub`,
-`caml_simd_vec128_interleave_high_64`, and related operations), because one fix
-should collapse many native compile failures across mixed-block, record/index,
-and layout-array tests. Keep using normal build parallelism; avoid only
-concurrent top-level `make`/`dune` commands in this checkout because of the
+Reduce the remaining self-stage ocamltest failure families. The most direct next
+target is the mixed-blocks `llc` frame-index assertion in
+`create_int64x4`, since the missing-builtin blocker for the focused i64x2 and
+vec256 join/split paths is now fixed. Keep using normal build parallelism; avoid
+only concurrent top-level `make`/`dune` commands in this checkout because of the
 shared lockfile.

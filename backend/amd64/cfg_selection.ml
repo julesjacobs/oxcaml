@@ -156,6 +156,20 @@ let is_llvm_intrinsic_builtin = function
     true
   | _ -> false
 
+let is_llvm_simd_builtin = function
+  | "caml_simd_int64x2_add"
+  | "caml_sse2_int64x2_add"
+  | "caml_simd_int64x2_sub"
+  | "caml_sse2_int64x2_sub"
+  | "caml_simd_vec128_interleave_high_64"
+  | "caml_sse2_vec128_interleave_high_64"
+  | "caml_simd_vec128_interleave_low_64"
+  | "caml_sse2_vec128_interleave_low_64"
+  | "caml_avx_vec256_extract_128"
+  | "caml_avx_vec256_insert_128" ->
+    true
+  | _ -> false
+
 let pseudoregs_for_operation op arg res =
   match (op : Operation.t) with
   (* Two-address binary operations: arg.(0) and res.(0) must be the same *)
@@ -498,6 +512,10 @@ let select_operation
     | Cbswap { bitwidth } ->
       let bitwidth = select_bitwidth bitwidth in
       Rewritten (specific (Ibswap { bitwidth }), args)
+    | Cextcall { func; builtin = true; _ } when is_llvm_simd_builtin func -> (
+      match Simd_selection.select_operation_cfg ~dbg func args with
+      | Some (op, args) -> Rewritten (Basic (Op op), args)
+      | None -> Use_default)
     | Cextcall { func; builtin = true; _ } when is_llvm_intrinsic_builtin func
       ->
       (* Illvm_intrinsic must not allocate on the OCaml heap. See

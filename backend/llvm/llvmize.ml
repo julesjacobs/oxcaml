@@ -1982,6 +1982,98 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     emit_ins t (I.binary (float_op op) ~arg1:lhs ~arg2:rhs)
     |> store_into_reg t i.res.(0)
   in
+  let int_vec_type ~width_in_bits =
+    T.Vector
+      { num_of_elems = 128 / width_in_bits;
+        elem_type = T.Int { width_in_bits }
+      }
+  in
+  let cast_if_needed value typ =
+    if T.equal (V.get_type value) typ
+    then value
+    else emit_ins t (I.convert Bitcast ~arg:value ~to_:typ)
+  in
+  let store_simd_res value =
+    cast_if_needed value (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_int_binary width_in_bits op =
+    let typ = int_vec_type ~width_in_bits in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    emit_ins t (I.binary op ~arg1 ~arg2) |> store_simd_res
+  in
+  let simd_zip typ ~high =
+    match[@warning "-fragile-match"] typ with
+    | T.Vector { num_of_elems; _ } ->
+      let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+      let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+      let start = if high then num_of_elems / 2 else 0 in
+      let lanes = num_of_elems / 2 in
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let src_lane = start + lane in
+             let elem1 =
+               emit_ins t
+                 (I.extractelement ~vector:arg1 ~index:(V.of_int src_lane))
+             in
+             let elem2 =
+               emit_ins t
+                 (I.extractelement ~vector:arg2 ~index:(V.of_int src_lane))
+             in
+             let vector =
+               emit_ins t
+                 (I.insertelement ~vector ~index:(V.of_int (2 * lane))
+                    ~to_insert:elem1)
+             in
+             emit_ins t
+               (I.insertelement ~vector
+                  ~index:(V.of_int ((2 * lane) + 1))
+                  ~to_insert:elem2))
+           (V.poison typ)
+      |> store_simd_res
+    | _ -> Misc.fatal_error "expected vector type"
+  in
+  let simd_imm (simd : Simd.operation) =
+    match simd.imm with
+    | Some imm -> imm
+    | None -> fail_msg ~name:"specific" "missing SIMD immediate"
+  in
+  let amd64_simd_instr_id (simd : Simd.operation) =
+    (Simd.Pseudo_instr.instr simd.instr).id
+  in
+  let simd_vec256_insert_128 imm =
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) T.vec256 in
+    let lane = cast_if_needed (load_reg_to_temp t i.arg.(1)) T.vec128 in
+    List.init 2 Fun.id
+    |> List.fold_left
+         (fun vector offset ->
+           let elem =
+             emit_ins t
+               (I.extractelement ~vector:lane ~index:(V.of_int offset))
+           in
+           emit_ins t
+             (I.insertelement ~vector ~index:(V.of_int ((imm * 2) + offset))
+                ~to_insert:elem))
+         arg
+    |> store_simd_res
+  in
+  let simd_vec256_extract_128 imm =
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) T.vec256 in
+    List.init 2 Fun.id
+    |> List.fold_left
+         (fun vector offset ->
+           let elem =
+             emit_ins t
+               (I.extractelement ~vector:arg
+                  ~index:(V.of_int ((imm * 2) + offset)))
+           in
+           emit_ins t
+             (I.insertelement ~vector ~index:(V.of_int offset)
+                ~to_insert:elem))
+         (V.poison T.vec128)
+    |> store_simd_res
+  in
   match[@warning "-fragile-match"] op with
   | Ilea addr ->
     load_address_from_reg t addr i.arg.(0) |> store_int_res
@@ -2008,7 +2100,26 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     call_llvm_intrinsic t "x86.rdpmc" [counter] T.i64 |> store_int_res
   | Ilfence | Isfence | Imfence -> emit_ins_no_res t (I.fence Seq_cst)
   | Illvm_intrinsic intrinsic_name -> intrinsic t i intrinsic_name
-  | Ipackf32 | Isimd _ | Isimd_mem _ | Icldemote _ | Iprefetch _ ->
+  | Isimd simd -> (
+    match amd64_simd_instr_id simd with
+    | Simd.Amd64_simd_instrs.Paddq
+    | Simd.Amd64_simd_instrs.Vpaddq_X_X_Xm128 ->
+      simd_int_binary 64 Add
+    | Simd.Amd64_simd_instrs.Psubq_X_Xm128
+    | Simd.Amd64_simd_instrs.Vpsubq_X_X_Xm128 ->
+      simd_int_binary 64 Sub
+    | Simd.Amd64_simd_instrs.Punpckhqdq
+    | Simd.Amd64_simd_instrs.Vpunpckhqdq_X_X_Xm128 ->
+      simd_zip (int_vec_type ~width_in_bits:64) ~high:true
+    | Simd.Amd64_simd_instrs.Punpcklqdq
+    | Simd.Amd64_simd_instrs.Vpunpcklqdq_X_X_Xm128 ->
+      simd_zip (int_vec_type ~width_in_bits:64) ~high:false
+    | Simd.Amd64_simd_instrs.Vinsertf128 ->
+      simd_vec256_insert_128 (simd_imm simd)
+    | Simd.Amd64_simd_instrs.Vextractf128 ->
+      simd_vec256_extract_128 (simd_imm simd)
+    | _ -> not_implemented_basic ~msg:"specific" i)
+  | Ipackf32 | Isimd_mem _ | Icldemote _ | Iprefetch _ ->
     not_implemented_basic ~msg:"specific" i
 
 (*
@@ -3326,8 +3437,37 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
       not_implemented_basic ~msg:"static cast" i)
   | Reinterpret_cast cast_op -> (
     let bitcast arg to_ = emit_ins t (I.convert Bitcast ~arg ~to_) in
+    let bitcast_if_needed arg to_ =
+      if T.equal (V.get_type arg) to_ then arg else bitcast arg to_
+    in
     let trunc arg to_ = emit_ins t (I.convert Trunc ~arg ~to_) in
     let zext arg to_ = emit_ins t (I.convert Zext ~arg ~to_) in
+    let insert_vec128_low_into_vec256 arg =
+      let arg = bitcast_if_needed arg T.vec128 in
+      List.init 2 Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let elem =
+               emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int lane))
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane)
+                  ~to_insert:elem))
+           (V.poison T.vec256)
+    in
+    let extract_vec256_low_to_vec128 arg =
+      let arg = bitcast_if_needed arg T.vec256 in
+      List.init 2 Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let elem =
+               emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int lane))
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane)
+                  ~to_insert:elem))
+           (V.poison T.vec128)
+    in
     match cast_op with
     | Float32_of_int32 ->
       let arg = load_reg_to_temp ~typ:T.i64 t i.arg.(0) in
@@ -3356,11 +3496,22 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
     | V128_of_vec Vec128 ->
       let arg = load_reg_to_temp ~typ:T.vec128 t i.arg.(0) in
       let res_typ = T.of_reg i.res.(0) in
-      let converted =
-        if T.equal (V.get_type arg) res_typ then arg else bitcast arg res_typ
-      in
+      let converted = bitcast_if_needed arg res_typ in
       store_into_reg t i.res.(0) converted
-    | V128_of_vec (Vec256 | Vec512) | V256_of_vec _ | V512_of_vec _ ->
+    | V128_of_vec Vec256 ->
+      load_reg_to_temp ~typ:T.vec256 t i.arg.(0)
+      |> extract_vec256_low_to_vec128
+      |> store_into_reg t i.res.(0)
+    | V256_of_vec Vec128 ->
+      load_reg_to_temp ~typ:T.vec128 t i.arg.(0)
+      |> insert_vec128_low_into_vec256
+      |> store_into_reg t i.res.(0)
+    | V256_of_vec Vec256 ->
+      let arg = load_reg_to_temp ~typ:T.vec256 t i.arg.(0) in
+      let res_typ = T.of_reg i.res.(0) in
+      let converted = bitcast_if_needed arg res_typ in
+      store_into_reg t i.res.(0) converted
+    | V128_of_vec Vec512 | V256_of_vec Vec512 | V512_of_vec _ ->
       not_implemented_basic ~msg:"vector reinterpret cast" i)
   | Specific op -> specific t i op
   | Intop_atomic { op; size; addr } -> atomic t i op ~size ~addr
