@@ -311,24 +311,68 @@ blockaddress entry as a register-clobbering edge.
     15 skipped, 0 failed. `LLVM_BOOT_BACKEND=0` avoids the Makefile boot path's
     stale `CamlinternalQuote` detection issue; the test compiler itself remains
     LLVM-backed through `LLVM_BACKEND=1`.
+  - Direct self-stage install validation now passes with the patched AMD64 LLVM
+    backend:
+    `ARCH=amd64 LLVM_WRAPPER="$LLVM_PATH"
+    LLVM_WRAPPER_LOG="$LLVM_WRAPPER_LOG"
+    OCAMLRUNPARAM=b,Xmain_stack_size=64M
+    tools/build-llvm-self-stage-install.sh` exits 0. The run prints boot counts
+    `boot wrapper lines: 1678`, `boot fresh ir: 829`; runtime counts
+    `runtime wrapper lines: 148`, `runtime fresh ir: 74`; main counts
+    `main wrapper lines: 2224`, `main fresh ir: 1105`; and the self-stage smoke
+    output `55` with `self-stage-smoke wrapper lines: 4` and
+    `self-stage-smoke fresh ir: 2`.
+  - Fixed `tools/setup-llvm-stage-install.sh` so wrapped bytecode tools in
+    `_llvm_self_stage_install/bin` execute with the staged `ocamlrun` instead
+    of their original `/usr/local/bin/ocamlrun` shebang. The wrappers also add
+    staged `stublibs` directories to `CAML_LD_LIBRARY_PATH`. After regenerating
+    the stage install layout, `_llvm_self_stage_install/bin/ocamlc.byte
+    -version`, `ocamlopt.byte -version`, and `ocamlopt.opt -version` all print
+    `5.2.0+ox`.
+  - Full self-stage ocamltest now runs to completion rather than failing during
+    setup:
+    `SELF_STAGE=1 ARCH=amd64 LLVM_WRAPPER="$LLVM_PATH"
+    LLVM_WRAPPER_LOG="$LLVM_WRAPPER_LOG"
+    OCAMLRUNPARAM=b,Xmain_stack_size=64M
+    tools/run-llvm-stage5-ocamltest.sh` exits 2 with 6594 passed, 269 skipped,
+    61 failed, 0 unexpected errors, `wrapper lines: 5942`, and
+    `fresh ir: 2971`. GNU parallel was unavailable, so the testsuite fallback
+    was serial; no build was forced to `-j1`.
+  - Main failure families from that full self-stage run:
+    - Native async exception, backtrace, frame-pointer, and CFI stepping output
+      mismatches.
+    - Native atomic/cmpxchg and or-null atomic assertion failures, plus native
+      segfaults in `lib-domain/cpu_relax.ml` and `statmemprof/bigarray.ml`.
+    - Missing AMD64 SIMD builtin recognition for operations such as
+      `caml_simd_int64x2_sub` and
+      `caml_simd_vec128_interleave_high_64`, affecting mixed blocks, records and
+      block indices, product arrays, and vector-array tests.
+    - `Llvmize: unimplemented instruction: probe` in
+      `typing-layouts-or-null/probe.ml`.
+    - `misc/gctweaks.ml` fails in both bytecode and native under this
+      self-stage test environment, so it is not clearly LLVM-native-specific.
 
 ## Current Blocker
 
-No focused blocker remains for `llvm-install` with a writable prefix or for the
-enabled Linux/AMD64 `llvm-codegen` tests. The default `/usr/local` install
-prefix is not writable in this environment, so use an explicit agent-local
-`prefix=...` for install validation. Also clear `LIST=`/`DIR=` when running a
-single `TEST=...` after `eval "$(../../../scripts/agent-tmp-env)"`, because the
-agent env may set `LIST` for broader test runs.
+No focused blocker remains for `llvm-install` with a writable prefix, the
+enabled Linux/AMD64 `llvm-codegen` tests, or self-stage install and smoke. The
+default `/usr/local` install prefix is not writable in this environment, so use
+an explicit agent-local `prefix=...` for install validation. Also clear
+`LIST=`/`DIR=` when running a single `TEST=...` after
+`eval "$(../../../scripts/agent-tmp-env)"`, because the agent env may set
+`LIST` for broader test runs.
 
-No focused blocker remains for the installed-compiler boot smoke. Full
-self-stage validation still needs a separate pass. The known stack-usage issue
-remains: some LLVM-built compiler paths need
-`OCAMLRUNPARAM=b,Xmain_stack_size=64M` where the normal opam compiler does not.
+Full self-stage ocamltest is now the broad validation blocker: it completes but
+has 61 failures. The known stack-usage issue remains: some LLVM-built compiler
+paths need `OCAMLRUNPARAM=b,Xmain_stack_size=64M` where the normal opam compiler
+does not.
 
 ## Next Step
 
-Run broader self-stage validation from the now-passing boot-smoke baseline, and
-then reduce any remaining self-stage-only failure. Keep using normal build
-parallelism; avoid only concurrent top-level `make`/`dune` commands in this
-checkout because of the shared lockfile.
+Reduce the self-stage ocamltest failure families. The most direct next target is
+the missing AMD64 SIMD builtin recognition (`caml_simd_int64x2_sub`,
+`caml_simd_vec128_interleave_high_64`, and related operations), because one fix
+should collapse many native compile failures across mixed-block, record/index,
+and layout-array tests. Keep using normal build parallelism; avoid only
+concurrent top-level `make`/`dune` commands in this checkout because of the
+shared lockfile.

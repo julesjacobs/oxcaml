@@ -35,11 +35,15 @@ wrap_ocamllib_tool () {
   local tool=$1
   local base
   base=$(basename "$tool")
+  local bytecode=0
   [ -L "$tool" ] && return 0
   [ -f "$tool" ] || return 0
   [ -x "$tool" ] || return 0
 
   mv "$tool" "$tool.real"
+  if head -n 1 "$tool.real" | grep -q '/ocamlrun$'; then
+    bytecode=1
+  fi
   cat > "$tool" <<EOF
 #!/usr/bin/env sh
 case "\$0" in
@@ -51,8 +55,27 @@ if [ "\${OCAMLLIB+x}" != x ]; then
   OCAMLLIB=\$(CDPATH= cd "\$bindir/../lib/ocaml" && pwd -P) || exit 127
   export OCAMLLIB
 fi
+for dir in "\$bindir/../lib/stublibs" "\$bindir/../lib/ocaml/stublibs"; do
+  if [ -d "\$dir" ]; then
+    dir=\$(CDPATH= cd "\$dir" && pwd -P) || exit 127
+    if [ "\${CAML_LD_LIBRARY_PATH+x}" = x ]; then
+      CAML_LD_LIBRARY_PATH="\$dir:\$CAML_LD_LIBRARY_PATH"
+    else
+      CAML_LD_LIBRARY_PATH="\$dir"
+    fi
+    export CAML_LD_LIBRARY_PATH
+  fi
+done
+EOF
+  if [ "$bytecode" = 1 ]; then
+    cat >> "$tool" <<EOF
+exec "\$bindir/ocamlrun" "\$bindir/$base.real" "\$@"
+EOF
+  else
+    cat >> "$tool" <<EOF
 exec "\$bindir/$base.real" "\$@"
 EOF
+  fi
   chmod +x "$tool"
 }
 
