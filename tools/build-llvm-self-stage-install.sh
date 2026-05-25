@@ -12,6 +12,13 @@ self_main_build=${SELF_MAIN_BUILD:-$repo/_llvm_self_stage_main_build}
 self_stage_install=${SELF_STAGE_INSTALL:-$repo/_llvm_self_stage_install}
 wrapper=${LLVM_WRAPPER:-/tmp/oxcaml-clang-wrapper}
 wrapper_log=${LLVM_WRAPPER_LOG:-$wrapper.log}
+cleanup_paths=()
+cleanup () {
+  if [ "${#cleanup_paths[@]}" -gt 0 ]; then
+    rm -rf "${cleanup_paths[@]}"
+  fi
+}
+trap cleanup EXIT
 
 require_path () {
   if [ ! -e "$1" ]; then
@@ -68,10 +75,11 @@ copy_tool_file "$stage0_install/bin/ocamllex.opt" "$boot_install/bin/ocamllex.op
   done
 )
 
+config_file=$(mktemp /tmp/oxcaml-llvm-boot-install-config.XXXXXX)
+cleanup_paths+=("$config_file")
 OCAMLLIB="$boot_install/lib/ocaml" \
-  "$boot_install/bin/ocamlopt.opt" -config >/tmp/oxcaml-llvm-boot-install-config
-grep -q "^standard_library: $boot_install/lib/ocaml$" \
-  /tmp/oxcaml-llvm-boot-install-config
+  "$boot_install/bin/ocamlopt.opt" -config >"$config_file"
+grep -q "^standard_library: $boot_install/lib/ocaml$" "$config_file"
 
 BOOT_INSTALL="$boot_install" \
 RUNTIME_BUILD="$self_runtime_build" \
@@ -81,7 +89,7 @@ LLVM_WRAPPER="$wrapper" \
   "$repo/tools/build-llvm-stage5-install.sh"
 
 tmpdir=$(mktemp -d /tmp/oxcaml-llvm-self-stage-smoke.XXXXXX)
-trap 'rm -rf "$tmpdir"' EXIT
+cleanup_paths+=("$tmpdir")
 cat > "$tmpdir/main.ml" <<'EOF'
 let rec fib n = if n < 2 then n else fib (n - 1) + fib (n - 2)
 let () = Printf.printf "%d\n" (fib 10)

@@ -16,6 +16,13 @@ main_install=$(cd "$main_install" && pwd)
 stage_install=$(cd "$(dirname "$stage_install")" && pwd)/$(basename "$stage_install")
 runtime_lib=$(cd "$runtime_lib" && pwd)
 main_lib=$(cd "$main_lib" && pwd)
+cleanup_paths=()
+cleanup () {
+  if [ "${#cleanup_paths[@]}" -gt 0 ]; then
+    rm -rf "${cleanup_paths[@]}"
+  fi
+}
+trap cleanup EXIT
 
 require_path () {
   if [ ! -e "$1" ]; then
@@ -118,10 +125,11 @@ for tool in "$stage_install/bin"/*; do
   esac
 done
 
-"$stage_install/bin/ocamlopt.opt" -config >/tmp/oxcaml-stage-install-config
-grep -q "^standard_library: $stage_install/lib/ocaml$" \
-  /tmp/oxcaml-stage-install-config
-grep -q "^native_dynlink: true$" /tmp/oxcaml-stage-install-config
+config_file=$(mktemp /tmp/oxcaml-stage-install-config.XXXXXX)
+cleanup_paths+=("$config_file")
+"$stage_install/bin/ocamlopt.opt" -config >"$config_file"
+grep -q "^standard_library: $stage_install/lib/ocaml$" "$config_file"
+grep -q "^native_dynlink: true$" "$config_file"
 
 require_path "$stage_install/lib/ocaml/stdlib.cmxa"
 require_path "$stage_install/lib/ocaml/str/str.cmxs"

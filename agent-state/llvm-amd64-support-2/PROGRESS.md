@@ -360,6 +360,17 @@ passes, and `llvm-self-stage2-test` passes.
   - wrapper log summary: `wrapper lines: 6062`, `fresh ir: 3031`
   - previously failing backtrace, `pr7168`, mixed-blocks, AMD64 smoke, and
     self-stage recovery paths all passed in the full run.
+- Post-completion review/retest loop:
+  - fixed script temp-file handling so boot/stage/self-stage scripts use
+    unique `mktemp` files and one cleanup trap instead of fixed `/tmp` config
+    files or trap replacement;
+  - verified `bash -n` and `git diff --check`;
+  - verified `build-llvm-stage5-install.sh` refresh into a temporary install;
+  - verified `build-llvm-boot-with-installed.sh` in a disposable boot build
+    with smoke output `55`;
+  - verified `build-llvm-self-stage-install.sh` in disposable boot/stage
+    directories with runtime/main rebuilds disabled, ending in self-stage
+    smoke output `55`.
 
 ## Current Blocker
 

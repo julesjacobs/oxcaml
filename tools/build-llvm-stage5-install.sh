@@ -11,8 +11,26 @@ main_build=${MAIN_BUILD:-$repo/_llvm_stage5_main_build}
 stage_install=${STAGE_INSTALL:-$repo/_llvm_stage5_install}
 wrapper=${LLVM_WRAPPER:-/tmp/oxcaml-clang-wrapper}
 wrapper_log=${LLVM_WRAPPER_LOG:-$wrapper.log}
-runtime_ws=${RUNTIME_WS:-/tmp/oxcaml-stage5-runtime.ws}
-main_ws=${MAIN_WS:-/tmp/oxcaml-stage5-main.ws}
+cleanup_paths=()
+cleanup () {
+  if [ "${#cleanup_paths[@]}" -gt 0 ]; then
+    rm -rf "${cleanup_paths[@]}"
+  fi
+}
+trap cleanup EXIT
+
+if [ -n "${RUNTIME_WS:-}" ]; then
+  runtime_ws=$RUNTIME_WS
+else
+  runtime_ws=$(mktemp /tmp/oxcaml-stage5-runtime.XXXXXX)
+  cleanup_paths+=("$runtime_ws")
+fi
+if [ -n "${MAIN_WS:-}" ]; then
+  main_ws=$MAIN_WS
+else
+  main_ws=$(mktemp /tmp/oxcaml-stage5-main.XXXXXX)
+  cleanup_paths+=("$main_ws")
+fi
 arch=${ARCH:-}
 
 build_runtime=${BUILD_RUNTIME:-1}
@@ -103,7 +121,7 @@ fi
 
 runtime_boot_build_install=$(mktemp -d /tmp/oxcaml-llvm-runtime-boot-build.XXXXXX)
 main_boot_build_install=$(mktemp -d /tmp/oxcaml-llvm-main-boot-build.XXXXXX)
-trap 'rm -rf "$runtime_boot_build_install" "$main_boot_build_install"' EXIT
+cleanup_paths+=("$runtime_boot_build_install" "$main_boot_build_install")
 make_boot_build_install "$runtime_boot_build_install" 0
 make_boot_build_install "$main_boot_build_install" 1
 
