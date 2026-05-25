@@ -1723,6 +1723,14 @@ limit is raised from `l=100000` to `l=150000`.
       directly under `validation-tmp/simd_bitwise_script`; the kept IR
       contains `<2 x i64>` `and`, `or`, and `xor` operations, including the
       all-ones vector used to lower `andnot`.
+    - Implemented AMD64 LLVM lowering for the SSE2 signed/unsigned
+      saturating add/sub subset for 8-bit and 16-bit lanes and rebuilt with
+      `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_saturating_add_sub.sh` script
+      passed directly under `validation-tmp/simd_saturating_add_sub_script`;
+      the kept IR contains `llvm.sadd.sat`, `llvm.uadd.sat`,
+      `llvm.ssub.sat`, and `llvm.usub.sat` calls for `<16 x i8>` and
+      `<8 x i16>`.
 
 ## Current Blocker
 

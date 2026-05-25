@@ -3254,6 +3254,14 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_binary 32 Add
     | Amd64_simd_instrs.Paddq | Amd64_simd_instrs.Vpaddq_X_X_Xm128 ->
       simd_int_binary 64 Add
+    | Amd64_simd_instrs.Paddsb | Amd64_simd_instrs.Vpaddsb_X_X_Xm128 ->
+      simd_binary_intrinsic (int_vec_type ~width_in_bits:8) "sadd.sat"
+    | Amd64_simd_instrs.Paddsw | Amd64_simd_instrs.Vpaddsw_X_X_Xm128 ->
+      simd_binary_intrinsic (int_vec_type ~width_in_bits:16) "sadd.sat"
+    | Amd64_simd_instrs.Paddusb | Amd64_simd_instrs.Vpaddusb_X_X_Xm128 ->
+      simd_binary_intrinsic (int_vec_type ~width_in_bits:8) "uadd.sat"
+    | Amd64_simd_instrs.Paddusw | Amd64_simd_instrs.Vpaddusw_X_X_Xm128 ->
+      simd_binary_intrinsic (int_vec_type ~width_in_bits:16) "uadd.sat"
     | Amd64_simd_instrs.Psubb | Amd64_simd_instrs.Vpsubb_X_X_Xm128 ->
       simd_int_binary 8 Sub
     | Amd64_simd_instrs.Psubw | Amd64_simd_instrs.Vpsubw_X_X_Xm128 ->
@@ -3262,6 +3270,14 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_binary 32 Sub
     | Amd64_simd_instrs.Psubq_X_Xm128 | Amd64_simd_instrs.Vpsubq_X_X_Xm128 ->
       simd_int_binary 64 Sub
+    | Amd64_simd_instrs.Psubsb | Amd64_simd_instrs.Vpsubsb_X_X_Xm128 ->
+      simd_binary_intrinsic (int_vec_type ~width_in_bits:8) "ssub.sat"
+    | Amd64_simd_instrs.Psubsw | Amd64_simd_instrs.Vpsubsw_X_X_Xm128 ->
+      simd_binary_intrinsic (int_vec_type ~width_in_bits:16) "ssub.sat"
+    | Amd64_simd_instrs.Psubusb | Amd64_simd_instrs.Vpsubusb_X_X_Xm128 ->
+      simd_binary_intrinsic (int_vec_type ~width_in_bits:8) "usub.sat"
+    | Amd64_simd_instrs.Psubusw | Amd64_simd_instrs.Vpsubusw_X_X_Xm128 ->
+      simd_binary_intrinsic (int_vec_type ~width_in_bits:16) "usub.sat"
     | Amd64_simd_instrs.Andps | Amd64_simd_instrs.Vandps_X_X_Xm128 ->
       simd_int_binary 64 And
     | Amd64_simd_instrs.Andnps | Amd64_simd_instrs.Vandnps_X_X_Xm128 ->
