@@ -23,9 +23,12 @@ join/split support. The poll slow-path frame descriptor gap in
 `lib-domain/cpu_relax.ml` is also fixed for AMD64 LLVM output. Plain
 debug-less X86_64 raise/reraise calls now emit a standalone frame stackmap,
 fixing the standard-compiler LLVM-backend backtrace propagation gap in
-`tests/backtrace/backtrace.ml`. Earlier fixes reserve the AMD64 OxCaml runtime
-registers in LLVM's X86 register allocator and make exception-recovery blocks
-treat runtime blockaddress entry as a register-clobbering edge.
+`tests/backtrace/backtrace.ml`. AMD64 LLVM frame-pointer builds now request
+frame-pointer frames for normal LLVM functions and generated noalloc C-call
+wrappers, fixing focused `tests/frame-pointers` stack walks. Earlier fixes
+reserve the AMD64 OxCaml runtime registers in LLVM's X86 register allocator
+and make exception-recovery blocks treat runtime blockaddress entry as a
+register-clobbering edge.
 
 ## Evidence
 
@@ -111,6 +114,13 @@ treat runtime blockaddress entry as a register-clobbering edge.
     bundle. This records the otherwise-missing frame descriptor for debug-less
     unmatched-handler propagation paths, while leaving existing debug-bearing
     raise descriptors to the statepoint/deopt path.
+  - `backend/llvm/llvmize.ml` now adds LLVM `frame-pointer="all"` to AMD64
+    functions when OxCaml is configured with frame pointers. This keeps the
+    `%rbp` chain visible for normal LLVM-emitted OCaml frames.
+  - `backend/llvm/llvmize.ml` also adds LLVM `frame-pointer="all"` to
+    generated noalloc C-call wrappers on AMD64 frame-pointer builds. Those
+    wrappers switch stacks before calling C, so they need an explicit wrapper
+    frame for C-side `%rbp` stack walkers to report the OCaml caller frame.
   - `backend/llvm/llvmize.ml` now emits explicit standalone stackmaps for all
     non-tail X86_64 OCaml calls, including direct calls that have live GC roots.
     This covers frame descriptors for direct-call return addresses when the
@@ -199,6 +209,12 @@ treat runtime blockaddress entry as a register-clobbering edge.
     `make test-one-no-rebuild TEST=backtrace/backtrace_slots.ml`, and
     `make test-one-no-rebuild TEST=backtrace/raw_backtrace.ml` each report
     2 tests passed, 0 failed.
+  - After the frame-pointer attribute fixes, broader focused backtrace
+    validation also passes:
+    `make test-one-no-rebuild DIR=backtrace LLVM_BACKEND=1 ARCH=amd64
+    LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+    prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 67 passed,
+    6 skipped, 0 failed.
   - A stale previous run with `ccopt=-no-pie` left non-PIC options in `.cmxa`
     metadata. `make clean` plus rerunning without `ccopt=-no-pie` confirmed the
     remaining link failures were LLVM AMD64 PIC/codegen issues, not a global
@@ -558,16 +574,22 @@ treat runtime blockaddress entry as a register-clobbering edge.
   - The full self-stage refresh confirmed the focused async fix:
     `tests/async-exns` passed, and
     `tests/llvm-codegen/amd64_raise_notrace_alloc.ml` passed in the broad run.
-  - The remaining full-run failures are:
-    - Native backtrace/frame descriptor output mismatches:
-      `tests/backtrace/backtrace.ml`,
-      `tests/backtrace/backtrace_deprecated.ml`,
-      `tests/backtrace/backtrace_slots.ml`, and
-      `tests/backtrace/raw_backtrace.ml`.
-    - Native frame-pointer stack walking output mismatches:
-      `tests/frame-pointers/c_call.ml`, `effects.ml`,
-      `exception_handler.ml`, `reperform.ml`, `stack_realloc.ml`, and
-      `stack_realloc2.ml`.
+  - Focused frame-pointer validation now passes with the standard compiler
+    LLVM backend:
+    - `make llvm-test-one TEST=frame-pointers/c_call.ml LIST= DIR= ARCH=amd64
+      LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 3 passed,
+      0 skipped, 0 failed.
+    - `make llvm-test-one TEST=frame-pointers/stack_realloc2.ml LIST= DIR=
+      ARCH=amd64 LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 3 passed,
+      0 skipped, 0 failed.
+    - `make test-one-no-rebuild DIR=frame-pointers LLVM_BACKEND=1 ARCH=amd64
+      LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+      prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 21 passed,
+      0 skipped, 0 failed.
+  - From the last full self-stage refresh, failures still needing focused
+    investigation or a broad rerun after the backtrace/frame-pointer fixes are:
     - `tests/native-cfi-stepping/test_cfi.ml` emits GDB "Backtrace failed"
       dumps around `caml_raise_exn` and the generated
       `recover_rbp_asm` block, then fails the reference comparison.
@@ -586,22 +608,24 @@ an explicit agent-local `prefix=...` for install validation. Also clear
 `eval "$(../../../scripts/agent-tmp-env)"`, because the agent env may set
 `LIST` for broader test runs.
 
-Full self-stage ocamltest is now down to 15 failures. The dominant remaining
-failure family is AMD64 native unwinding: backtrace output, frame-pointer
-walking, and native CFI stepping all miss or mis-walk frames around exception
-raise/recover paths. Two non-unwinding failures also remain: `gctweaks.ml`
-fails in both bytecode and native, and `test_float32_u_array.ml` hits
-`Selection.select_oper` in native compilation. The known stack-usage issue
-remains: some LLVM-built compiler paths need
+The last full self-stage ocamltest refresh was down to 15 failures. Since then,
+focused standard-compiler LLVM-backend validation has cleared the backtrace and
+frame-pointer families, but a broad self-stage rerun is still needed for an
+updated final count. The remaining known families are native CFI stepping,
+`gctweaks.ml` failing in both bytecode and native, and
+`test_float32_u_array.ml` hitting `Selection.select_oper` in native
+compilation. The known stack-usage issue remains: some LLVM-built compiler
+paths need
 `OCAMLRUNPARAM=b,Xmain_stack_size=64M` where the normal opam compiler does not.
 
 ## Next Step
 
-Start with a focused standard-compiler `-llvm-backend` reproducer for the native
-backtrace/frame-pointer/CFI failure family, then fix the AMD64 LLVM unwinding
-metadata or recover-frame emission. If it only reproduces under self-stage,
-record the smallest self-stage reproducer and why the standard compiler does
-not cover it. After that, investigate the separate `gctweaks.ml` bytecode/native
-failure and the `test_float32_u_array.ml` `Selection.select_oper` failure. Keep
-using normal build parallelism; avoid only concurrent top-level `make`/`dune`
-commands in this checkout because of the shared lockfile.
+Start with a focused standard-compiler `-llvm-backend` reproducer for
+`tests/native-cfi-stepping/test_cfi.ml`, then fix the AMD64 LLVM unwind or
+recover-frame metadata if it reproduces outside self-stage. If it only
+reproduces under self-stage, record the smallest self-stage reproducer and why
+the standard compiler does not cover it. After that, investigate the separate
+`gctweaks.ml` bytecode/native failure and the `test_float32_u_array.ml`
+`Selection.select_oper` failure. Keep using normal build parallelism; avoid
+only concurrent top-level `make`/`dune` commands in this checkout because of
+the shared lockfile.

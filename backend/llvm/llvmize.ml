@@ -4161,6 +4161,8 @@ let fun_attrs ~has_try:_ codegen_options =
   let gc_attrs = [Gc gc_name] in
   let frame_pointer_attrs =
     match Target_system.architecture () with
+    | Target_system.X86_64 when Config.with_frame_pointers ->
+      [Oxcaml_stack_check; Frame_pointer_all]
     | Target_system.AArch64 | Target_system.X86_64 -> [Oxcaml_stack_check]
     | Target_system.IA32 | Target_system.ARM | Target_system.POWER
     | Target_system.Z | Target_system.Riscv ->
@@ -4603,9 +4605,18 @@ let define_c_call_wrappers t =
     (fun wrapper_name { c_fun_name; args = c_arg_types; res = c_res_types } ->
       let wrapper_res_type = make_ret_type c_res_types in
       let wrapper_arg_types = make_arg_types c_arg_types in
+      let attrs =
+        match Target_system.architecture () with
+        | Target_system.X86_64 when Config.with_frame_pointers ->
+          [LL.Fn_attr.Noinline; LL.Fn_attr.Frame_pointer_all]
+        | Target_system.X86_64 | Target_system.AArch64 | Target_system.IA32
+        | Target_system.ARM | Target_system.POWER | Target_system.Z
+        | Target_system.Riscv ->
+          [LL.Fn_attr.Noinline]
+      in
       let emitter =
         E.create ~name:wrapper_name ~args:wrapper_arg_types
-          ~res:(Some wrapper_res_type) ~cc:Oxcaml ~attrs:[Noinline]
+          ~res:(Some wrapper_res_type) ~cc:Oxcaml ~attrs
           ~personality:None ~dbg:Debuginfo.none ~dbg_metadata:None
           ~private_:true
       in
