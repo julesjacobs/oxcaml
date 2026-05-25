@@ -3429,6 +3429,15 @@ let unwind_for_instruction t i =
   in
   unwind_label, exn_entry
 
+let vector_constant typ words =
+  let elem word = Format.asprintf "i64 %Ld" word in
+  V.imm typ
+    (Format.asprintf "<%a>"
+       (Format.pp_print_list
+          ~pp_sep:(fun ppf () -> Format.fprintf ppf ", ")
+          Format.pp_print_string)
+       (List.map elem words))
+
 let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
   match op with
   | Move -> load_reg_to_temp t i.arg.(0) |> store_into_reg t i.res.(0)
@@ -3457,12 +3466,17 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
   | Const_float32 bits -> store_into_reg t i.res.(0) (V.of_float32_bits bits)
   | Const_float bits -> store_into_reg t i.res.(0) (V.of_float64_bits bits)
   | Const_vec128 { word0; word1 } ->
-    let elem word = Format.asprintf "i64 %Ld" word in
+    let vector = vector_constant T.vec128 [word0; word1] in
+    store_into_reg t i.res.(0) vector
+  | Const_vec256 { word0; word1; word2; word3 } ->
+    let vector = vector_constant T.vec256 [word0; word1; word2; word3] in
+    store_into_reg t i.res.(0) vector
+  | Const_vec512 { word0; word1; word2; word3; word4; word5; word6; word7 } ->
     let vector =
-      V.imm T.vec128 (Format.asprintf "<%s, %s>" (elem word0) (elem word1))
+      vector_constant T.vec512
+        [word0; word1; word2; word3; word4; word5; word6; word7]
     in
     store_into_reg t i.res.(0) vector
-  | Const_vec256 _ | Const_vec512 _ -> not_implemented_basic ~msg:"const_vec" i
   (* [mutability] is used by CFG optimizations before final lowering. *)
   | Load { memory_chunk; addressing_mode; mutability = _; is_atomic } ->
     load t i memory_chunk addressing_mode ~is_atomic

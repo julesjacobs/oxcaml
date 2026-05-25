@@ -61,7 +61,9 @@ lowers `Probe_is_enabled` by reading the OCaml probe semaphore slot, covering
 the non-optimized probe lowering path instead of fatal-erroring. The LLVM
 lowering now also supports the AMD64 int128 builtins
 `caml_int128_add`, `caml_int128_sub`, `caml_int64_mul128`, and
-`caml_unsigned_int64_mul128` via LLVM `i128` arithmetic.
+`caml_unsigned_int64_mul128` via LLVM `i128` arithmetic. Wide vector constants
+now lower directly to LLVM `<2 x i64>`, `<4 x i64>`, and `<8 x i64>` immediate
+vectors instead of fatal-erroring on 256-bit and 512-bit constants.
 
 The latest stack-pressure fix safely pools X86_64 preserved GC-root stack slots
 using full CFG liveness interference instead of safepoint-only disjointness.
@@ -159,6 +161,10 @@ limit is raised from `l=100000` to `l=150000`.
     low/high 64-bit inputs into an LLVM `i128`, do the arithmetic, then split
     low/high results; signed and unsigned 64x64->128 multiplies use `sext` or
     `zext` to `i128` before multiplication.
+  - `backend/llvm/llvmize.ml` lowers `Const_vec128`, `Const_vec256`, and
+    `Const_vec512` through a shared LLVM vector-immediate helper. This removes
+    the previous AMD64 LLVM fatal path for 256-bit and 512-bit vector
+    constants.
   - `backend/llvm/llvmize.ml` now stores LLVM `cmpxchg`'s loaded value for
     `Compare_exchange`. LLVM returns the old memory value in both success and
     failure cases, which is exactly the OCaml `Atomic.compare_exchange` result;
@@ -1433,6 +1439,23 @@ limit is raised from `l=100000` to `l=150000`.
       `add i128`/`sub i128`, signed multiply uses `sext i64 ... to i128`, and
       unsigned multiply uses `zext i64 ... to i128`; wrapper evidence again
       was `4` lines / `2` fresh IR.
+    - Implemented LLVM lowering for wide vector constants and rebuilt with a
+      clean `dune clean --workspace=duneconf/boot.ws` followed by
+      `make -s compiler -j "$(nproc)"`; result: passed.
+    - Direct focused validation using the rebuilt optimizing compiler passed:
+      `OCAMLLIB=_install/lib/ocaml _build/main/oxcaml_main_native.exe
+      -O3 -llvm-backend -llvm-path "$LLVM_PATH" -keep-llvmir -o
+      validation-tmp/vec256_const/amd64_vec256_const.exe
+      amd64_vec256_const_stubs.c amd64_vec256_const.ml`. Result: binary ran
+      successfully, `4` wrapper lines / `2` fresh IR, and the kept IR contains
+      the expected `<4 x i64>` constant literal for `caml_int64x4_const4`.
+    - `make llvm-test-one TEST=llvm-codegen/amd64_vec256_const` still did not
+      reach the test: its LLVM boot-context rebuild failed while opening
+      `_build/default/duneconf/camlinternalquote_if_missing_from_stdlib`, the
+      same generated-include issue seen in earlier focused `llvm-test-one`
+      attempts. The build state was restored afterward with another clean
+      `dune clean --workspace=duneconf/boot.ws` followed by
+      `make -s compiler -j "$(nproc)"`; result: passed.
 
 ## Current Blocker
 
