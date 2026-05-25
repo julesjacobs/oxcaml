@@ -461,10 +461,12 @@ let ensure_debug_compile_unit t =
         t.debug_compile_unit_id <- Some compile_unit_id;
         Some compile_unit_id)
 
-let first_debug_item dbg =
+let debug_items dbg =
   Debuginfo.Dbg.to_list (Debuginfo.get_dbg dbg)
   |> List.rev
-  |> List.find_opt (fun item -> item.Debuginfo.dinfo_line > 0)
+
+let first_debug_item dbg =
+  debug_items dbg |> List.find_opt (fun item -> item.Debuginfo.dinfo_line > 0)
 
 let create_debug_subprogram t ~fun_name dbg =
   match ensure_debug_compile_unit t, first_debug_item dbg with
@@ -770,7 +772,7 @@ let debug_item_deopt_args d =
   @ string_deopt_args defname
 
 let debug_deopt_args ~primitive_call ~raise_call dbg =
-  let items = Debuginfo.Dbg.to_list (Debuginfo.get_dbg dbg) |> List.rev in
+  let items = debug_items dbg in
   match items with
   | [] -> []
   | { Debuginfo.dinfo_line = line; _ } :: _ when line > 0 ->
@@ -783,9 +785,7 @@ let debug_deopt_args ~primitive_call ~raise_call dbg =
 
 let alloc_deopt_args alloc_info =
   let alloc_item_deopt_args Cmm.{ alloc_words; alloc_dbg; _ } =
-    let items =
-      Debuginfo.Dbg.to_list (Debuginfo.get_dbg alloc_dbg) |> List.rev
-    in
+    let items = debug_items alloc_dbg in
     V.of_int alloc_words
     :: V.of_int (List.length items)
     :: List.concat_map debug_item_deopt_args items

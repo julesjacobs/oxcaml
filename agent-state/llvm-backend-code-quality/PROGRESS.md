@@ -4,8 +4,8 @@ Last updated: 2026-05-25.
 
 ## Current Claim
 
-Iterations 1 through 14 are committed, pushed, reviewed with no accepted
-findings, and focused validation passed.
+Iterations 1 through 15 are committed or ready to commit; iteration 15 passed
+review with no findings and focused validation passed.
 
 ## Evidence
 
@@ -23,7 +23,7 @@ None.
 ## Iteration State
 
 - Target: open-ended follow-up after the initial 10 completed iterations.
-- Completed iterations: 14.
+- Completed iterations: 15.
 - Committed cleanups:
   - Iteration 1: simplified deopt argument list construction in
     `backend/llvm/llvmize.ml` with `List.concat_map`.
@@ -53,6 +53,8 @@ None.
   - Iteration 13: shared external-call argument register loading in
     `backend/llvm/llvmize.ml`.
   - Iteration 14: combined LLVM expect-output line normalization passes in
+    `backend/llvm/llvmize.ml`.
+  - Iteration 15: shared source-order debug item extraction in
     `backend/llvm/llvmize.ml`.
 - Dropped ideas: none yet.
 - Stop condition: continue only while a small candidate passes five-reviewer
@@ -724,7 +726,49 @@ Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
 are broad LLVM backend validation runs, and this commit only changes a local
 list transformation.
 
+## Iteration 15 Candidate
+
+Path: self-proposed candidate.
+
+Candidate: add `debug_items` in `backend/llvm/llvmize.ml` for the repeated
+`Debuginfo.Dbg.to_list (Debuginfo.get_dbg dbg) |> List.rev` expression, then
+reuse it in debug metadata and deopt argument construction.
+
+Why likely useful: the repeated expression encodes a source-order conversion of
+debug info. Naming it once keeps the order convention in one place and avoids
+duplicating the `Debuginfo.Dbg` access pattern.
+
+Review gate: passed after five human-like reviews of the final diff.
+
+Review result: all five reviewers said keep with no findings. Reviewers checked
+that the helper is placed next to `first_debug_item`, has a narrow name and
+scope, and preserves the existing debug-item order at all three call sites.
+
+Validation result:
+
+- `git diff --check`: passed.
+- `eval "$(../../../scripts/agent-tmp-env)" && opam exec
+  --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`: passed.
+
+## Testing Story for This Commit
+
+Change: share source-order debug item extraction through a `debug_items` helper,
+and record iteration 15 state in this progress file.
+Risk: if the rewrite is wrong, debug metadata and deopt argument construction
+could use debug items in a different order.
+Validation: `git diff --check`; `eval "$(../../../scripts/agent-tmp-env)" &&
+opam exec --switch=oxcaml-5.4.0+oxcaml -- make boot-compiler`.
+Full LLVM validation: not run for this commit; the rewrite preserves the exact
+`Debuginfo.Dbg.to_list` and `List.rev` expression and only shares it.
+Stage2 verification: not run for this commit; self-stage2 is intentionally
+deferred for the same reason as full LLVM validation.
+Why this is enough: five human-like reviews found no issues and checked the
+debug-item order; the build check covers type and syntax validity.
+Deferred validation: `make llvm-test LLVM_PATH="$LLVM_PATH"` and
+`make llvm-self-stage2-test LLVM_PATH="$LLVM_PATH"` are deferred because they
+are broad LLVM backend validation runs, and this commit only changes local
+helper sharing.
+
 ## Next Step
 
-No immediate code-quality iteration is queued. Continue only if another small,
-behavior-preserving candidate is found and passes the five-reviewer gate.
+Commit iteration 15 and push it to the draft PR branch.
