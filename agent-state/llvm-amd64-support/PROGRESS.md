@@ -82,6 +82,9 @@ It also covers the related SSE2 vec128 low-32 load/zero-load/store forms.
 The AVX memory-broadcast forms now lower through LLVM as scalar/vector loads
 plus lane replication for 128-bit-to-256-bit, 64-bit-to-256-bit, and
 32-bit-to-128/256-bit broadcasts.
+The full-width uncached SIMD memory forms now select to the generic aligned
+LLVM vector load/store path for correctness; the non-temporal cache hint is
+not yet modeled in the emitted IR.
 
 The latest stack-pressure fix safely pools X86_64 preserved GC-root stack slots
 using full CFG liveness interference instead of safepoint-only disjointness.
@@ -256,6 +259,14 @@ limit is raised from `l=100000` to `l=150000`.
     loads from memory and explicit lane insertion into the canonical vec128 or
     vec256 storage type.
     `testsuite/tests/llvm-codegen/amd64_simd_broadcast_mem.{ml,sh}` checks
+    these cases with `-llvm-backend -c -S -keep-llvmir`.
+  - `backend/amd64/cfg_selection.ml` also rewrites the full-width uncached
+    SIMD memory builtins to aligned generic vector memory operations under
+    `-llvm-backend`: `caml_sse41_vec128_load_aligned_uncached`,
+    `caml_sse_vec128_store_aligned_uncached`,
+    `caml_avx_vec256_load_aligned_uncached`, and
+    `caml_avx_vec256_store_aligned_uncached`.
+    `testsuite/tests/llvm-codegen/amd64_simd_uncached_mem.{ml,sh}` checks
     these cases with `-llvm-backend -c -S -keep-llvmir`.
   - `backend/llvm/llvmize.ml` now stores LLVM `cmpxchg`'s loaded value for
     `Compare_exchange`. LLVM returns the old memory value in both success and
@@ -1640,6 +1651,12 @@ limit is raised from `l=100000` to `l=150000`.
       contains an unaligned `<2 x i64>` load for broadcast128, unaligned
       scalar loads for the 64-bit and 32-bit broadcasts, and lane inserts up
       to the final vec128/vec256 lanes.
+    - Implemented AMD64 LLVM lowering for the full-width uncached SIMD memory
+      subset and rebuilt with `make -s compiler -j "$(nproc)"`; result:
+      passed. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_uncached_mem.sh` script passed
+      directly under `validation-tmp/simd_uncached_mem_script`; the kept IR
+      contains 128-bit and 256-bit vector loads and stores.
 
 ## Current Blocker
 

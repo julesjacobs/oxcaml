@@ -175,6 +175,10 @@ let llvm_simd_mem_builtin = function
     Some (`Store Cmm.Onetwentyeight_aligned)
   | "caml_sse_vec128_store_unaligned" ->
     Some (`Store Cmm.Onetwentyeight_unaligned)
+  | "caml_sse_vec128_store_aligned_uncached" ->
+    Some (`Store Cmm.Onetwentyeight_aligned)
+  | "caml_sse41_vec128_load_aligned_uncached" ->
+    Some (`Load Cmm.Onetwentyeight_aligned)
   | "caml_avx_vec256_load_aligned" ->
     Some (`Load Cmm.Twofiftysix_aligned)
   | "caml_avx_vec256_load_unaligned"
@@ -184,6 +188,10 @@ let llvm_simd_mem_builtin = function
     Some (`Store Cmm.Twofiftysix_aligned)
   | "caml_avx_vec256_store_unaligned" ->
     Some (`Store Cmm.Twofiftysix_unaligned)
+  | "caml_avx_vec256_load_aligned_uncached" ->
+    Some (`Load Cmm.Twofiftysix_aligned)
+  | "caml_avx_vec256_store_aligned_uncached" ->
+    Some (`Store Cmm.Twofiftysix_aligned)
   | _ -> None
 
 let pseudoregs_for_operation op arg res =
