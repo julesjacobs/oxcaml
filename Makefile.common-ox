@@ -197,7 +197,9 @@ duneconf/%.ws: FORCE
 	else \
 	  mv "$$tmp" "$@"; \
 	  if [ "$@" = "duneconf/boot.ws" ]; then \
-	    rm -rf _build/default _build/_bootinstall; \
+	    rm -rf _build/default _build/_bootinstall \
+	      _build/.action-trace _build/.copy-db _build/.db \
+	      _build/.digest-db _build/.filesystem-clock; \
 	  fi; \
 	fi
 
