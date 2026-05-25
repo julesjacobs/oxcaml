@@ -32,7 +32,11 @@ module Options = Oxcaml_args.Make_opttop_options (struct
   let anonymous s = read_anonymous_arg s
 end);;
 
+external llvm_personality_anchor : unit -> unit
+  = "caml_expectnat_llvm_personality_anchor"
+
 let () =
+  llvm_personality_anchor ();
   Expectcommon.register_assembly_callback :=
     Some Emit.register_expect_asm_callback;
   Expectcommon.register_llvm_ir_callback :=
