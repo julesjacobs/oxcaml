@@ -476,6 +476,30 @@ register-clobbering edge.
       LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
       prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 21 passed,
       4 skipped, 0 failed.
+  - The stale native `statmemprof/bigarray.ml` segfault no longer reproduces
+    after the current fixes:
+    `make llvm-test-one TEST=statmemprof/bigarray.ml LIST= DIR= ARCH=amd64
+    LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+    prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 3 passed,
+    0 skipped, 0 failed.
+  - The async exception family still has a current focused failure:
+    `make llvm-test-one DIR=async-exns LIST= TEST= ARCH=amd64
+    LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
+    prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 2. The only
+    failure in that directory is native `async_exns_1.ml`, whose first line is
+    `1. 1.` instead of `1. OK`; bytecode `async_exns_1.ml` and both bytecode
+    and native `async_exns_2.ml` pass.
+  - Focused async-exns diagnosis so far:
+    - A retained-IR direct compile of `async_exns_1.ml` reproduces the same
+      native output mismatch.
+    - The first `caml_with_async_exns` call originally had no `gc-live` roots
+      in the call bundle. An experiment adding active trap-handler roots to
+      safepoint liveness did add roots such as `ptr %26, ptr %30, ptr %37` to
+      that call, but did not change the bad output.
+    - A separate experiment changed the AMD64 `recover_rbp_asm` helper to use
+      `%r11` instead of the OCaml value register `%rbx` to load the blockaddress
+      target; that also did not change the bad output. Both experiments were
+      reverted rather than committed.
 
 ## Current Blocker
 
@@ -497,7 +521,7 @@ LLVM-built compiler paths need
 
 Rerun broad self-stage ocamltest or a representative subset to refresh the
 remaining failure families after the SIMD and wide-vector alloca fixes. Likely
-next targets from the stale full run are native `statmemprof/bigarray.ml`
-segfaults plus native async/backtrace/CFI output mismatches. Keep using normal
-build parallelism; avoid only concurrent top-level `make`/`dune` commands in
-this checkout because of the shared lockfile.
+next targets from the stale full run are native async/backtrace/CFI output
+mismatches; the stale `statmemprof/bigarray.ml` segfault no longer reproduces.
+Keep using normal build parallelism; avoid only concurrent top-level
+`make`/`dune` commands in this checkout because of the shared lockfile.
