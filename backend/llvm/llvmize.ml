@@ -1245,9 +1245,13 @@ let call ?(tail = false) ?unwind_label t (i : Cfg.terminator Cfg.instruction)
   let needs_stackmap =
     (not tail)
     &&
-    match op with
-    | Indirect _ -> true
-    | Direct _ -> not (has_gc_live_bundle operand_bundles)
+    match Target_system.architecture () with
+    | Target_system.X86_64 -> true
+    | Target_system.AArch64 | Target_system.IA32 | Target_system.ARM
+    | Target_system.POWER | Target_system.Z | Target_system.Riscv -> (
+      match op with
+      | Indirect _ -> true
+      | Direct _ -> not (has_gc_live_bundle operand_bundles))
   in
   let res =
     match unwind_label with

@@ -1,6 +1,6 @@
 # Progress
 
-Last updated: 2026-05-24.
+Last updated: 2026-05-25.
 
 ## Current Claim
 
@@ -67,6 +67,13 @@ passes a direct `llc` prologue smoke test for a stack-frame-using
     normal `wrap_try` return through an unmodelled `%rax` write/read pair. The
     normal path branches on the SSA `wrap_try` result, while exception recovery
     reads the bucket with a fixed `={rax}` inline-asm constraint.
+  - `backend/llvm/llvmize.ml` now emits explicit standalone stackmaps for all
+    non-tail X86_64 OCaml calls, including direct calls that have live GC roots.
+    This covers frame descriptors for direct-call return addresses when the
+    callee triggers a GC and scans the caller.
+  - `testsuite/tests/llvm-codegen/amd64_direct_call_stackmap.ml` is an
+    AMD64/Linux LLVM-backend regression test for a direct call with a live heap
+    root across an allocating callee.
 - Validation done this turn:
   - `git diff --check` passed.
   - Added local opam repository `tools/ci/local-opam` as `oxcaml-local`.
@@ -165,16 +172,45 @@ passes a direct `llc` prologue smoke test for a stack-frame-using
     `/usr/local` prefix fails with permission denied, but rerunning as
     `make llvm-install prefix=/tmp/oxcaml-agent-llvm-amd64-support/install`
     succeeds.
+  - A subsequent startup crash in the LLVM-built native compiler mapped to a
+    missing frame descriptor at the return address of the direct call from
+    `camlIdentifiable__Make_map_6_65_code` to
+    `camlStdlib__Map__Make_0_142_code`. That direct call had live roots, so
+    the old AMD64 logic skipped the standalone stackmap and relied on metadata
+    that did not produce a runtime frame descriptor.
+  - After changing X86_64 call lowering to emit explicit stackmaps for all
+    non-tail OCaml calls and rebuilding with normal Dune parallelism:
+    - `_build/main/oxcaml_main_native.exe -version` exits 0 and prints
+      `5.2.0+ox`.
+    - `_install/bin/ocamlopt.opt -version` exits 0 and prints `5.2.0+ox`.
+    - `/tmp/oxcaml-agent-llvm-amd64-support/install/bin/ocamlopt.opt -version`
+      exits 0 and prints `5.2.0+ox`.
+    - Manual direct-call/live-root reproducer compiled with
+      `_install/bin/ocamlopt.opt -O3 -llvm-backend` exits 0 and prints
+      `200007`.
+    - `make llvm-install prefix=/tmp/oxcaml-agent-llvm-amd64-support/install`
+      exits 0.
+    - `make llvm-test-one TEST=llvm-codegen/amd64_direct_call_stackmap.ml
+      LIST= DIR= prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0:
+      4 tests passed, 0 skipped, 0 failed.
+  - The older command
+    `make llvm-test-one TEST=llvm-codegen/arithmetic prefix=...` is not a useful
+    AMD64 validation: the existing `arithmetic.ml` test is ARM64/macOS-only and
+    skips on this Linux AMD64 checkout. The new
+    `amd64_direct_call_stackmap.ml` test covers the current AMD64 failure.
 
 ## Current Blocker
 
-No focused blocker remains for `llvm-install` with a writable prefix. The
-default `/usr/local` install prefix is not writable in this environment, so use
-an explicit agent-local `prefix=...` for install validation.
+No focused blocker remains for `llvm-install` with a writable prefix or for the
+new AMD64 direct-call stackmap regression. The default `/usr/local` install
+prefix is not writable in this environment, so use an explicit agent-local
+`prefix=...` for install validation. Also clear `LIST=`/`DIR=` when running a
+single `TEST=...` after `eval "$(../../../scripts/agent-tmp-env)"`, because the
+agent env may set `LIST` for broader test runs.
 
 ## Next Step
 
-Run the first focused LLVM tests with the installed compiler:
-`ARCH=amd64 LLVM_PATH="$LLVM_PATH" make llvm-test-one TEST=llvm-codegen/arithmetic`.
-If that exposes an AMD64 lowering/runtime failure, reduce it before expanding
-the implementation.
+Expand focused AMD64 LLVM tests beyond the direct-call stackmap case, starting
+with exception and stack-growth programs under the standard installed compiler
+with `-llvm-backend`. If a failure appears, reduce it before broadening to
+self-stage2 validation.
