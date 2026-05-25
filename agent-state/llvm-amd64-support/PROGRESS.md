@@ -1482,6 +1482,24 @@ limit is raised from `l=100000` to `l=150000`.
       The build state was restored afterward with another clean
       `dune clean --workspace=duneconf/boot.ws` followed by
       `make -s compiler -j "$(nproc)"`; result: passed.
+    - Merged the updated `origin/jujacobs/llvm-backend-integration` base at
+      `32d7ad2f69`, including the AArch64 LLVM stack-check byte/slack
+      contract work. Conflict resolutions kept the AMD64 LLVM frame-pointer
+      and stack-check attributes while preserving the new AArch64
+      `oxcaml-stack-check-bytes` and `oxcaml-stack-check-before-bytes`
+      attributes, and kept the boot-context script's agent-local `ocaml`
+      wrapper plus the new `dune_command` flag handling.
+    - Post-merge validation rebuilt with a clean
+      `dune clean --workspace=duneconf/boot.ws` followed by
+      `make -s compiler -j "$(nproc)"`; result: passed.
+    - Post-merge direct focused validation reran
+      `amd64_vec256_scalar_cast` with `_build/main/oxcaml_main_native.exe
+      -O3 -llvm-backend -llvm-path "$LLVM_PATH" -keep-llvmir`. Result:
+      binary ran successfully, `4` wrapper lines / `2` fresh IR, and the kept
+      IR still contains the expected vec256 scalar-cast insert/extract
+      operations plus AMD64 `frame-pointer="all"` attributes. This checkout is
+      configured with `no_stack_checks: true`, so the direct IR smoke does not
+      contain `oxcaml-stack-check` attributes.
 
 ## Current Blocker
 
@@ -1513,11 +1531,9 @@ default-stack boot-context build pass without
 now passes on top of the SIMD/XMM GC slow-path, post-raise CFI, and
 `runtime-errors/stackoverflow.ml` stack-budget fixes. Broader self-stage2
 validation also passes after the external C-call stackmap fix.
-The OxCaml PR is still draft. After pushing the integration merge commit,
-GitHub reports `mergeStateStatus: UNSTABLE`; checks were queued or in
-progress at the last check. On the latest recheck before the
-`Probe_is_enabled` commit, `built with flambda-backend, flambda2` had passed
-and the remaining checks were still pending.
+The OxCaml PR is still draft. Before the latest integration-base merge,
+GitHub reported `mergeStateStatus: DIRTY` because
+`jujacobs/llvm-backend-integration` had advanced to `32d7ad2f69`.
 
 ## Next Step
 

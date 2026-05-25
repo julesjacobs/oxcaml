@@ -3412,12 +3412,45 @@ let poll ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction) =
   emit_unwind_landingpad_after t unwind_label exn_entry;
   emit_label t after_poll
 
-let stack_check _t (_i : Cfg.basic Cfg.instruction) _max_frame_size_bytes =
+let stack_check ?unwind_label ?exn_entry t
+    (i : Cfg.basic Cfg.instruction) max_frame_size_bytes =
   match Target_system.architecture () with
-  | Target_system.AArch64 -> ()
-  (* The AArch64 LLVM backend emits OxCaml stack checks in the machine prologue.
-     A normal LLVM IR instruction is too late: LLVM has already adjusted [sp]
-     for the frame by the time the instruction runs. *)
+  | Target_system.AArch64 ->
+    let threshold_offset =
+      (Domainstate.stack_ctx_words * Arch.size_addr)
+      + Stack_check.stack_threshold_size
+    in
+    let current_stack_ptr = load_domainstate_addr t Domain_current_stack in
+    let current_stack = emit_ins t (I.load ~ptr:current_stack_ptr ~typ:T.i64) in
+    let limit =
+      emit_ins t
+        (I.binary Add ~arg1:current_stack
+           ~arg2:(V.of_int (threshold_offset + max_frame_size_bytes)))
+    in
+    let sp = read_stack_pointer t in
+    let skip_realloc = emit_ins t (I.icmp Iuge ~arg1:sp ~arg2:limit) in
+    let skip_realloc_expect =
+      call_llvm_intrinsic t "expect.i1" [skip_realloc; V.of_int ~typ:T.i1 1]
+        T.i1
+    in
+    let call_realloc = V.of_label (Cmm.new_label ()) in
+    let after_realloc = V.of_label (Cmm.new_label ()) in
+    emit_ins_no_res t
+      (I.br_cond ~cond:skip_realloc_expect ~ifso:after_realloc
+         ~ifnot:call_realloc);
+    emit_label t call_realloc;
+    let required_words =
+      (Stack_check.stack_threshold_size + Misc.align max_frame_size_bytes 8) / 8
+    in
+    add_referenced_symbol t "caml_llvm_call_realloc_stack";
+    call_simple
+      ~attrs:(gc_attr ~can_call_gc:false t i @ [LL.Fn_attr.Cold])
+      ?unwind_label ~cc:Oxcaml_alloc t "caml_llvm_call_realloc_stack"
+      [V.of_int required_words] []
+    |> ignore;
+    emit_ins_no_res t (I.br after_realloc);
+    emit_unwind_landingpad_after t unwind_label exn_entry;
+    emit_label t after_realloc
   | Target_system.IA32 | Target_system.X86_64 | Target_system.ARM
   | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
     fail_msg ~name:"stack_check" "unsupported architecture for LLVM backend"
@@ -3763,7 +3796,8 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
       | Prologue | Epilogue | Reloadretaddr ->
         () (* LLVM handles these for us *)
       | Stack_check { max_frame_size_bytes } ->
-        stack_check t i max_frame_size_bytes
+        let unwind_label, exn_entry = unwind_for_instruction t i in
+        stack_check ?unwind_label ?exn_entry t i max_frame_size_bytes
       | Poptrap { lbl_handler } -> (
         match Label.Tbl.find_opt (get_fun_info t).trap_blocks lbl_handler with
         | None -> fail_msg "unbalanced trap pop"
@@ -4383,7 +4417,23 @@ let reg_listed_in_signature (reg : Reg.t) =
   | Stack (Local _ | Outgoing _ | Domainstate _) -> false
   | Unknown -> fail "reg_listed_in_signature"
 
-let fun_attrs ~has_try:_ codegen_options =
+let cfg_required_stack_check_bytes (cfg : Cfg.t) =
+  Cfg.fold_body_instructions cfg ~init:0
+    ~f:(fun max_bytes (i : Cfg.basic Cfg.instruction) ->
+      match[@ocaml.warning "-fragile-match"] i.desc with
+      | Cfg.Stack_check { max_frame_size_bytes } ->
+        max max_bytes max_frame_size_bytes
+      | _ -> max_bytes)
+
+let cfg_stack_check_before_bytes (cfg : Cfg.t) =
+  Cfg.fold_body_instructions cfg ~init:0
+    ~f:(fun max_bytes (i : Cfg.basic Cfg.instruction) ->
+      match[@ocaml.warning "-fragile-match"] i.desc with
+      | Cfg.Stack_check _ -> max max_bytes i.stack_offset
+      | _ -> max_bytes)
+
+let fun_attrs ~has_try:_ ~cfg_stack_check_bytes ~cfg_stack_check_before_bytes
+    codegen_options =
   let open LL.Fn_attr in
   let safepoint_attrs =
     (* Statepoint IDs encode the active stack adjustment at the call site.
@@ -4401,14 +4451,24 @@ let fun_attrs ~has_try:_ codegen_options =
       []
   in
   let stack_check_attrs =
-    if Config.no_stack_checks
-    then []
-    else
-      match Target_system.architecture () with
-      | Target_system.AArch64 | Target_system.X86_64 -> [Oxcaml_stack_check]
-      | Target_system.IA32 | Target_system.ARM | Target_system.POWER
-      | Target_system.Z | Target_system.Riscv ->
-        []
+    match Target_system.architecture (), Config.no_stack_checks with
+    | Target_system.AArch64, false ->
+      Oxcaml_stack_check
+      ::
+      (if !Oxcaml_flags.cfg_stack_checks
+       then
+         Oxcaml_stack_check_bytes cfg_stack_check_bytes
+         ::
+         (if cfg_stack_check_bytes = 0
+          then []
+          else [Oxcaml_stack_check_before_bytes cfg_stack_check_before_bytes])
+       else [])
+    | Target_system.X86_64, false -> [Oxcaml_stack_check]
+    | (Target_system.AArch64 | Target_system.X86_64), true -> []
+    | ( Target_system.IA32 | Target_system.ARM | Target_system.POWER
+      | Target_system.Z | Target_system.Riscv ),
+      (_ : bool) ->
+      []
   in
   let codegen_attrs =
     List.concat_map
@@ -4448,7 +4508,12 @@ let prepare_fun_info t (cfg : Cfg.t) =
   in
   let arg_types = List.map T.of_reg arg_regs |> make_arg_types in
   let res_type = filter_ds_and_make_ret_type fun_ret_type in
-  let attrs = fun_attrs ~has_try fun_codegen_options in
+  let cfg_stack_check_bytes = cfg_required_stack_check_bytes cfg in
+  let cfg_stack_check_before_bytes = cfg_stack_check_before_bytes cfg in
+  let attrs =
+    fun_attrs ~has_try ~cfg_stack_check_bytes ~cfg_stack_check_before_bytes
+      fun_codegen_options
+  in
   let dbg_metadata_id = create_debug_subprogram t ~fun_name fun_dbg in
   let dbg_metadata =
     Option.map (fun id -> Printf.sprintf "!dbg !%d" id) dbg_metadata_id

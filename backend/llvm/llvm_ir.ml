@@ -474,6 +474,8 @@ module Fn_attr = struct
     | Gc_leaf_function
     | Noinline
     | Oxcaml_stack_check
+    | Oxcaml_stack_check_bytes of int
+    | Oxcaml_stack_check_before_bytes of int
     | Returns_twice
     | Statepoint_id of int
 
@@ -484,6 +486,10 @@ module Fn_attr = struct
     | Gc_leaf_function -> {|"gc-leaf-function"="true"|}
     | Noinline -> "noinline"
     | Oxcaml_stack_check -> {|"oxcaml-stack-check"="true"|}
+    | Oxcaml_stack_check_bytes i ->
+      Format.sprintf {|"oxcaml-stack-check-bytes"="%d"|} i
+    | Oxcaml_stack_check_before_bytes i ->
+      Format.sprintf {|"oxcaml-stack-check-before-bytes"="%d"|} i
     | Returns_twice -> "returns_twice"
     | Statepoint_id i -> Format.sprintf {|"statepoint-id"="%d"|} i
 
@@ -495,7 +501,9 @@ module Fn_attr = struct
 
   let order = function
     | Cold | Frame_pointer_all | Gc_leaf_function | Noinline
-    | Oxcaml_stack_check | Returns_twice | Statepoint_id _ ->
+    | Oxcaml_stack_check | Oxcaml_stack_check_bytes _
+    | Oxcaml_stack_check_before_bytes _ | Returns_twice
+    | Statepoint_id _ ->
       0
     | Gc _ -> 10
   (* [Gc] is not really an attribute, so it must occur after all attributes. It
