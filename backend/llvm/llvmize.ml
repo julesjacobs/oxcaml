@@ -4135,6 +4135,11 @@ let x86_64_pooled_preserved_reg_slots liveness (cfg : Cfg.t) preserved_reg_slots
       add_live_set before;
       add_live_set across)
     liveness;
+  (* Function arguments are all stored into their allocas before the first CFG
+     instruction is emitted. Even if their later liveness ranges do not overlap,
+     sharing the same preserved root slot would let one entry store overwrite
+     another argument before it is used. *)
+  add_live_set (Reg.set_of_array cfg.fun_args);
   Cfg.fold_blocks cfg
     ~f:(fun _ block () ->
       match block.terminator.desc with

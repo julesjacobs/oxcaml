@@ -5,9 +5,11 @@ Last updated: 2026-05-25.
 ## Current Claim
 
 AMD64 LLVM backend bring-up now passes focused install, enabled Linux/AMD64
-`llvm-codegen`, installed-compiler boot-smoke validation, and a full AMD64
-LLVM self-stage ocamltest refresh with the agent-local LLVM tools and writable
-install prefix. Focused AMD64 SIMD lowering now also covers the i64x2 add/sub,
+`llvm-codegen`, installed-compiler boot-smoke validation, and self-stage
+install/smoke validation with the agent-local LLVM tools and writable install
+prefix. A full AMD64 LLVM self-stage ocamltest refresh has now completed and
+found 25 remaining failures to investigate. Focused AMD64 SIMD lowering now
+also covers the i64x2 add/sub,
 vec128 interleave, and vec256 join/split operations needed by several
 layout/block-index tests, including the generated mixed-blocks native test on
 AMD64. The stale
@@ -46,7 +48,9 @@ This keeps simultaneously live preserved roots in distinct slots, but lets
 non-overlapping preserved roots share storage. A clean patched install now
 passes, focused AMD64 LLVM-codegen tests pass through the installed compiler,
 and a fresh default-stack boot-context build passes without
-`OCAMLRUNPARAM=b,Xmain_stack_size=64M`.
+`OCAMLRUNPARAM=b,Xmain_stack_size=64M`. The newest follow-up also makes all
+entry function arguments interfere for this pooling, because they are all
+stored into their allocas before the first CFG instruction is emitted.
 
 ## Evidence
 
@@ -948,16 +952,51 @@ and a fresh default-stack boot-context build passes without
       `.sexp` files. This is recorded as a stale local build-context issue;
       use the direct installed-compiler tests above as the focused result for
       this patch.
+  - Ran broader self-stage validation on top of the preserved-root slot
+    pooling patch using normal build parallelism:
+    - The first root-backed boot-context attempt failed once with
+      `Fatal error: caml_scan_stack: missing frame descriptor` during
+      `.ocamloptcomp.objs/byte/_unknown_`; rerunning the same boot build
+      without cleaning passed. This remains an intermittent frame-scan
+      symptom rather than a stable reduced action.
+    - A full self-stage install from the successful boot context passed:
+      boot `1678` wrapper lines / `828` fresh IR, runtime `148` / `74`,
+      main `2228` / `1108`, and both stage and self-stage smokes printed
+      `55`.
+    - Full self-stage ocamltest all-minus-asm completed with:
+      `6320` passed, `269` skipped, `25` failed, `0` unexpected errors,
+      wrapper lines `6198`, fresh IR `3099`.
+    - Failures were:
+      `lib-floatarray/floatarray.ml` native,
+      `native-cfi-stepping/test_cfi.ml` output mismatch,
+      `runtime-errors/stackoverflow.ml` native output mismatch,
+      21 native unboxed array/iarray layout tests, and
+      `unboxed-primitive-args/test.ml` AMD64 run.
+    - The unboxed array/product-array sort failures reproduce with a patched
+      boot compiler even when X86_64 preserved-root pooling is diagnostically
+      disabled, while the default backend passes the same direct compile. The
+      direct repro used `test_float32_u_array.ml` with
+      `OCAMLPARAM="_,llvm-backend=1,llvm-path=/tmp/oxcaml-agent-llvm-amd64-support/clang-wrapper-opt"`
+      and failed at `test_gen_u_array.ml` sort/permutation assertions.
+    - `unboxed-primitive-args/test.ml` still fails with the entry-argument
+      interference follow-up; mismatches show lost/zeroed `float32` and SIMD
+      arguments in mixed AMD64 unboxed primitive calls.
+    - Added a follow-up to the pooling graph so all `cfg.fun_args` interfere
+      with each other before coloring preserved-root slots. A fresh
+      boot-context build with that follow-up passed with `1678` wrapper lines
+      and `825` fresh IR. This does not fix the array sort or ABI clusters,
+      which reproduce without pooling.
 
 ## Current Blocker
 
 No focused blocker remains for `llvm-install` with a writable prefix, the
-enabled Linux/AMD64 `llvm-codegen` tests, self-stage install and smoke, or the
-full AMD64 LLVM self-stage ocamltest refresh. The default `/usr/local` install
-prefix is not writable in this environment, so use an explicit agent-local
-`prefix=...` for install validation. Also clear `LIST=`/`DIR=` when running a
-single `TEST=...` after `eval "$(../../../scripts/agent-tmp-env)"`, because the
-agent env may set `LIST` for broader test runs.
+enabled Linux/AMD64 `llvm-codegen` tests, or self-stage install and smoke. The
+full AMD64 LLVM self-stage ocamltest refresh currently has 25 remaining
+failures. The default `/usr/local` install prefix is not writable in this
+environment, so use an explicit agent-local `prefix=...` for install
+validation. Also clear `LIST=`/`DIR=` when running a single `TEST=...` after
+`eval "$(../../../scripts/agent-tmp-env)"`, because the agent env may set
+`LIST` for broader test runs.
 
 The previous stack-usage caveat is now narrowed further. With a corrected
 local optimizing wrapper, the standard explicit AMD64 `-llvm-backend` path
@@ -973,8 +1012,8 @@ rest of CI still pending.
 
 ## Next Step
 
-Run a fresh broader self-stage/ocamltest validation on top of the safe
-preserved-root slot pooling patch, and watch for recurrence of the earlier
-`simd.ml` byte-compiler frame-scan abort. Keep using normal build parallelism;
-avoid only concurrent top-level `make`/`dune` commands in this checkout because
-of the shared lockfile.
+Reduce and fix the remaining full-suite failures, starting with the native
+unboxed array/iarray sort/permutation cluster and
+`unboxed-primitive-args/test.ml` mixed unboxed primitive ABI mismatches. Keep
+using normal build parallelism; avoid only concurrent top-level `make`/`dune`
+commands in this checkout because of the shared lockfile.
