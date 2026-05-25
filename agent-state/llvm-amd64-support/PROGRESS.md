@@ -745,6 +745,20 @@ register-clobbering edge.
       LLVM_BOOT_BACKEND=0 LLVM_PATH="$LLVM_PATH"
       prefix=/tmp/oxcaml-agent-llvm-amd64-support/install` exits 0: 20 passed,
       15 skipped, 0 failed.
+  - Follow-up cleanup moved the neutral ARM64 SIMD operation type family from
+    duplicated definitions in `backend/{amd64,arm64}/llvmize_specific.ml` to
+    `backend/llvm/llvmize_specific_types.ml`. Both arch-specific classifiers
+    now open that shared type module, and `backend/llvm/llvmize.ml` lowers
+    those constructors directly. This keeps the architecture boundary explicit
+    while avoiding two large copies of the same neutral type.
+    - `ARCH=arm64 RUNTIME_DIR=runtime dune build ocamloptcomp.cma` exits 0.
+    - `ARCH=amd64 RUNTIME_DIR=runtime dune build ocamloptcomp.cma` exits 0.
+    - `git diff --check` exits 0.
+    - `ocamlformat --check` exits 0 for
+      `backend/llvm/llvmize.ml`,
+      `backend/llvm/llvmize_specific_types.ml`,
+      `backend/arm64/llvmize_specific.ml`, and
+      `backend/amd64/llvmize_specific.ml`.
 
 ## Current Blocker
 

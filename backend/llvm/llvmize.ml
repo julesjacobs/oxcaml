@@ -42,6 +42,7 @@ module T = LL.Type
 module E = LL.Function.Emitter
 module I = LL.Instruction
 module F = LL.Format
+open Llvmize_specific_types
 
 type error = Asm_generation of (string * int)
 
@@ -2060,7 +2061,7 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     emit_ins t (I.binary (float_op op) ~arg1:lhs ~arg2:rhs)
     |> store_into_reg t i.res.(0)
   in
-  let round_intrinsic_name (mode : Llvmize_specific.rounding_mode) =
+  let round_intrinsic_name (mode : Llvmize_specific_types.rounding_mode) =
     match mode with
     | Round_current -> "nearbyint"
     | Round_neg_inf -> "floor"
@@ -2420,7 +2421,7 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let res = call_llvm_intrinsic t name [arg] to_typ in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
-  let simd_float_cmp width (cond : Llvmize_specific.float_cond) =
+  let simd_float_cmp width (cond : Llvmize_specific_types.float_cond) =
     let typ = float_vec_type ~width in
     let mask_width_in_bits =
       match width with Cmm.Float32 -> 32 | Cmm.Float64 -> 64
@@ -2576,7 +2577,8 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
     | _ -> Misc.fatal_error "expected vector type"
   in
-  let simd_int_cmp width_in_bits (cond : Llvmize_specific.int_cond) ~zero =
+  let simd_int_cmp width_in_bits (cond : Llvmize_specific_types.int_cond) ~zero
+      =
     let typ = int_vec_type ~width_in_bits in
     let cond =
       match cond with
