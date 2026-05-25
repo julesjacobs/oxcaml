@@ -2820,6 +2820,27 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
     | _ -> Misc.fatal_error "expected vector type"
   in
+  let simd_vec128_shift_bytes ~left n =
+    let typ = int_vec_type ~width_in_bits:8 in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let zero = V.of_int ~typ:T.i8 0 in
+    let byte lane =
+      let src_lane = if left then lane - n else lane + n in
+      if src_lane < 0 || src_lane >= 16
+      then zero
+      else emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int src_lane))
+    in
+    let res =
+      List.init 16 Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane)
+                  ~to_insert:(byte lane)))
+           (V.poison typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_cmp width_in_bits (cond : Llvmize_specific_types.int_cond) ~zero
       =
     let typ = int_vec_type ~width_in_bits in
@@ -3314,6 +3335,10 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_zip (int_vec_type ~width_in_bits:64) ~high:true
     | Amd64_simd_instrs.Punpcklqdq | Amd64_simd_instrs.Vpunpcklqdq_X_X_Xm128 ->
       simd_zip (int_vec_type ~width_in_bits:64) ~high:false
+    | Amd64_simd_instrs.Pslldq | Amd64_simd_instrs.Vpslldq_X_X ->
+      simd_vec128_shift_bytes ~left:true (simd_imm imm)
+    | Amd64_simd_instrs.Psrldq | Amd64_simd_instrs.Vpsrldq_X_X ->
+      simd_vec128_shift_bytes ~left:false (simd_imm imm)
     | Amd64_simd_instrs.Maskmovdqu | Amd64_simd_instrs.Vmaskmovdqu ->
       simd_masked_byte_store ()
     | Amd64_simd_instrs.Vinsertf128 -> simd_vec256_insert_128 (simd_imm imm)
