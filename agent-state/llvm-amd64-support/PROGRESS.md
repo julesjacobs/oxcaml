@@ -54,7 +54,9 @@ The AMD64 branch has now merged the updated
 backend conflict resolutions and restored the AVX2
 `caml_avx2_int16x16_mul_round` selector to the generated 256-bit
 `vpmulhrsw_Y_Y_Ym256` helper after the integration merge selected the stale
-non-256-bit name.
+non-256-bit name. A merged self-stage2 validation pass now also succeeds: the
+merged self-stage2 compiler passes the focused Linux/AMD64 `llvm-codegen`
+tests and a full self-stage2 ocamltest run.
 
 The latest stack-pressure fix safely pools X86_64 preserved GC-root stack slots
 using full CFG liveness interference instead of safepoint-only disjointness.
@@ -1327,6 +1329,45 @@ limit is raised from `l=100000` to `l=150000`.
       ocamltest run of `tests/typing-labels` passed all `6` tests
       (`12` wrapper lines / `6` fresh IR; log
       `validation-tmp/self_stage2_refresh/typing_labels_serial.log`).
+    - Merged `origin/jujacobs/llvm-backend-integration` into the AMD64 branch,
+      resolved backend/vendor/script conflicts by preserving the AMD64 LLVM
+      bring-up changes, and restored
+      `caml_avx2_int16x16_mul_round -> vpmulhrsw_Y_Y_Ym256` after the merge
+      selected the stale non-256-bit helper name.
+    - Rebuilt the merged standard compiler with normal build parallelism:
+      `make -s compiler -j "$(nproc)"` passed after regenerating
+      `duneconf/camlinternalquote_if_missing_from_stdlib` and using the
+      `oxcaml-5.4.0+oxcaml` opam switch for the host compiler.
+    - Built a merged AMD64 LLVM stage in
+      `validation-tmp/integration_merge_stage` using the refreshed checkout
+      `_install` as `BOOT_INSTALL` and
+      `DUNE_BUILD_FLAGS="-j $(nproc)" ./tools/build-llvm-stage5-install.sh`.
+      Runtime build evidence: `148` wrapper lines / `73` fresh IR. Main build
+      evidence: `2228` wrapper lines / `1105` fresh IR. The focused merged
+      `tests/llvm-codegen` run passed `25` tests, skipped `15`, failed `0`,
+      and considered `40`; wrapper evidence was `24` lines / `12` fresh IR.
+    - Built a merged AMD64 LLVM self-stage2 in
+      `validation-tmp/integration_merge_stage2` from the merged stage install
+      with `DUNE_BUILD_FLAGS="-j $(nproc)"
+      ./tools/build-llvm-stage5-install.sh`. Runtime build evidence: `148`
+      wrapper lines / `74` fresh IR. Main build evidence: `2228` wrapper
+      lines / `1106` fresh IR. A self-stage2 smoke printed `55` with `4`
+      wrapper lines / `2` fresh IR.
+    - The focused merged self-stage2 `tests/llvm-codegen` run passed `25`
+      tests, skipped `15`, failed `0`, and considered `40`; wrapper evidence
+      was `24` lines / `12` fresh IR. The new `c_call_stackmap.ml` regression
+      passed in that run.
+    - A full merged self-stage2 ocamltest run from
+      `validation-tmp/integration_merge_stage2` used
+      `SELF_STAGE=2 STAGE_INSTALL=../validation-tmp/integration_merge_stage2/stage_install
+      STAGE_BUILD=../validation-tmp/integration_merge_stage2/main_build
+      LLVM_TESTSUITE_PARALLEL=auto LLVM_TESTSUITE_JOBS=$(nproc)
+      ./tools/run-llvm-stage5-ocamltest.sh`. GNU parallel was unavailable, so
+      the script selected the serial `one` target while the underlying make
+      still used normal `-j$(nproc)` parallelism. Result: `6388` tests passed,
+      `272` skipped, `0` failed, `0` unexpected errors, and `6660`
+      considered. Wrapper evidence: `6326` lines / `3163` fresh IR. Log:
+      `../validation-tmp/integration_merge_stage2/full_self_stage2_ocamltest.log`.
 
 ## Current Blocker
 
@@ -1334,7 +1375,8 @@ No focused blocker remains for `llvm-install` with a writable prefix, the
 enabled Linux/AMD64 `llvm-codegen` tests, self-stage install/smoke, full
 self-stage ocamltest, self-stage2 install/smoke, or full self-stage2
 ocamltest. After merging the updated integration base, a standard compiler
-build and a focused merged-stage AMD64 LLVM-codegen run also pass. The
+build, focused merged-stage AMD64 LLVM-codegen runs, merged self-stage2
+install/smoke, and full merged self-stage2 ocamltest run also pass. The
 previously intermittent self-stage2
 `caml_scan_stack: missing frame descriptor` abort had a concrete fixed
 reproducer: the first external C call in `camlCmi_format__marshal_11_39_code`
@@ -1358,7 +1400,8 @@ now passes on top of the SIMD/XMM GC slow-path, post-raise CFI, and
 `runtime-errors/stackoverflow.ml` stack-budget fixes. Broader self-stage2
 validation also passes after the external C-call stackmap fix.
 The OxCaml PR is still draft. After pushing the integration merge commit,
-GitHub reports `mergeStateStatus: UNSTABLE`; checks are queued or in progress.
+GitHub reports `mergeStateStatus: UNSTABLE`; checks were queued or in
+progress at the last check.
 
 ## Next Step
 
