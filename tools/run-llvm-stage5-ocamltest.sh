@@ -9,20 +9,20 @@ case "$self_stage" in
 0)
   default_stage_install=$repo/_llvm_stage5_install
   default_stage_build=$repo/_llvm_stage5_main_build
-  default_fake_root=/tmp/oxcaml-stage5-ocamltest-src
-  default_list=/tmp/oxcaml-stage5-all-minus-asm-list.txt
+  fake_root_template=/tmp/oxcaml-stage5-ocamltest-src.XXXXXX
+  list_template=/tmp/oxcaml-stage5-all-minus-asm-list.XXXXXX
   ;;
 1)
   default_stage_install=$repo/_llvm_self_stage_install
   default_stage_build=$repo/_llvm_self_stage_main_build
-  default_fake_root=/tmp/oxcaml-self-stage-ocamltest-src
-  default_list=/tmp/oxcaml-self-stage-all-minus-asm-list.txt
+  fake_root_template=/tmp/oxcaml-self-stage-ocamltest-src.XXXXXX
+  list_template=/tmp/oxcaml-self-stage-all-minus-asm-list.XXXXXX
   ;;
 2)
   default_stage_install=$repo/_llvm_self_stage2_install
   default_stage_build=$repo/_llvm_self_stage2_main_build
-  default_fake_root=/tmp/oxcaml-self-stage2-ocamltest-src
-  default_list=/tmp/oxcaml-self-stage2-all-minus-asm-list.txt
+  fake_root_template=/tmp/oxcaml-self-stage2-ocamltest-src.XXXXXX
+  list_template=/tmp/oxcaml-self-stage2-all-minus-asm-list.XXXXXX
   ;;
 *)
   echo "SELF_STAGE must be 0, 1, or 2" >&2
@@ -34,10 +34,28 @@ stage_install=${STAGE_INSTALL:-$default_stage_install}
 stage_build=${STAGE_BUILD:-$default_stage_build}
 normal_build=${NORMAL_BUILD:-$repo/_build}
 normal_runtime_dir=${NORMAL_RUNTIME_DIR:-$normal_build/runtime_stdlib/runtime}
-fake_root=${FAKE_ROOT:-$default_fake_root}
 wrapper=${LLVM_WRAPPER:-/tmp/oxcaml-clang-wrapper}
 wrapper_log=${LLVM_WRAPPER_LOG:-$wrapper.log}
-list=${LIST:-$default_list}
+cleanup_paths=()
+cleanup () {
+  if [ "${#cleanup_paths[@]}" -gt 0 ]; then
+    rm -rf "${cleanup_paths[@]}"
+  fi
+}
+trap cleanup EXIT
+
+if [ -n "${FAKE_ROOT:-}" ]; then
+  fake_root=$FAKE_ROOT
+else
+  fake_root=$(mktemp -d "$fake_root_template")
+  cleanup_paths+=("$fake_root")
+fi
+if [ -n "${LIST:-}" ]; then
+  list=$LIST
+else
+  list=$(mktemp "$list_template")
+  cleanup_paths+=("$list")
+fi
 generate_list=${GENERATE_LIST:-1}
 parallel_tests=${LLVM_TESTSUITE_PARALLEL:-auto}
 testsuite_jobs=${LLVM_TESTSUITE_JOBS:-}
@@ -48,6 +66,28 @@ exclude_regex=${EXCLUDE_REGEX:-'^tests/(asmgen|asmcomp)$'}
 require_path () {
   if [ ! -e "$1" ]; then
     echo "missing required path: $1" >&2
+    exit 1
+  fi
+}
+
+validate_testsuite_list () {
+  local missing=0
+  while IFS= read -r entry || [ -n "$entry" ]; do
+    [ -n "$entry" ] || continue
+    case "$entry" in
+      /* | *..*)
+        echo "invalid testsuite list entry: $entry" >&2
+        missing=1
+        ;;
+      *)
+        if [ ! -e "$repo/testsuite/$entry" ]; then
+          echo "missing testsuite list entry: $entry" >&2
+          missing=1
+        fi
+        ;;
+    esac
+  done < "$list"
+  if [ "$missing" != 0 ]; then
     exit 1
   fi
 }
@@ -81,6 +121,7 @@ if [ "$generate_list" = 1 ]; then
 fi
 
 require_path "$list"
+validate_testsuite_list
 
 STAGE_BUILD="$stage_build" \
 NORMAL_BUILD="$normal_build" \
