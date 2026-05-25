@@ -77,12 +77,31 @@ builds on AMD64, and simple scalar programs compile and run with
   `env -u DIR -u LIST opam exec -- make --trace one TEST=tests/llvm-codegen/amd64_smoke.ml`
   from `_runtest/testsuite`, with `OCAMLSRCDIR` and
   `CAML_LD_LIBRARY_PATH` pointed at `_runtest`.
+- Started broader `llvm-test` validation with a local prefix and
+  `LLVM_BOOT_BACKEND=0` to keep normal backend testing separate from self-stage:
+  `opam exec -- make prefix="$PWD/_local-llvm-test-install" llvm-test LLVM_BOOT_BACKEND=0`.
+  The run reached the testsuite and was stopped after the first repeated
+  failures were reduced.
+- Fixed AMD64 LLVM object files for Linux PIE/shared linking by passing `-fPIC`
+  to clang when `Clflags.pic_code` or `Clflags.dlcode` is set. This fixed the
+  repeated `R_X86_64_32S against .text` link failures seen in native tests.
+- Fixed `-internal-assembler` interactions with `-llvm-backend` by forcing
+  `Asmgen.compile_unit` to create an assembly file for LLVM even when
+  `Emitaux.binary_backend_available` has been enabled by the internal
+  assembler flag. This fixed the missing `.s` failure in AMD64 asmcomp tests.
+- Verified after both fixes:
+  - `opam exec -- make compiler`
+  - local `-shared` smoke using `_runtest/ocamlopt.opt` with
+    `OCAMLPARAM=_,llvm-backend=1,llvm-path=$LLVM_PATH`
+  - `tests/array-functions/test.ml` through `_runtest/testsuite`
+  - `tests/asmcomp/movsx_small_ints.ml` through `_runtest/testsuite`
+  - `tests/llvm-codegen/amd64_smoke.ml` through `_runtest/testsuite`
 
 ## Current Blocker
 
-No immediate source blocker. The first AMD64-specific `llvm-codegen` smoke now
-runs through the official harness, but full `llvm-test` and
-`llvm-self-stage2-test` have not been attempted yet.
+No immediate source blocker. Full `llvm-test` has not completed yet; the first
+broader run exposed and fixed Linux PIC/PIE handling and `-internal-assembler`
+assembly-file handling. `llvm-self-stage2-test` has not been attempted yet.
 
 ## Next Step
 
