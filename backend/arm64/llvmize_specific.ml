@@ -26,7 +26,12 @@ type operation =
   | Amd64_mfence
   | Amd64_packf32
   | Amd64_simd of Amd64_simd_instrs.id * int option
-  | Amd64_simd_mem
+  | Amd64_simd_mem of
+      { mem_operation : amd64_simd_mem_operation;
+        instr : Amd64_simd_instrs.id;
+        imm : int option;
+        addr : Arch.addressing_mode
+      }
   | Amd64_cldemote of Arch.addressing_mode
   | Amd64_prefetch of
       { is_write : bool;

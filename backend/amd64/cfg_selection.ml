@@ -150,7 +150,12 @@ let is_llvm_simd_builtin = function
   | "caml_sse2_int64x2_sub" | "caml_simd_vec128_interleave_high_64"
   | "caml_sse2_vec128_interleave_high_64" | "caml_simd_vec128_interleave_low_64"
   | "caml_sse2_vec128_interleave_low_64" | "caml_avx_vec256_extract_128"
-  | "caml_avx_vec256_insert_128" ->
+  | "caml_avx_vec256_insert_128" | "caml_sse2_vec128_load_low64"
+  | "caml_sse2_vec128_load_low64_copy_high64"
+  | "caml_sse2_vec128_load_high64_copy_low64"
+  | "caml_sse2_vec128_load_zero_low64"
+  | "caml_sse3_vec128_load_broadcast64"
+  | "caml_sse2_vec128_store_low64" ->
     true
   | _ -> false
 

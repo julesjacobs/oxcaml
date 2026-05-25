@@ -11,6 +11,10 @@ type amd64_prefetch_temporal_locality_hint =
   | Prefetch_moderate
   | Prefetch_high
 
+type amd64_simd_mem_operation =
+  | Simd_mem_load
+  | Simd_mem_store
+
 type int_cond =
   | Int_EQ
   | Int_GE

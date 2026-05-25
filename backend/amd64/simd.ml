@@ -270,7 +270,7 @@ let print_operation ?addr printreg (op : operation) ppf regs =
       (fun idx arg ->
         match Amd64_simd_defs.loc_allows_mem arg.loc, addr with
         | true, Some (print, n) ->
-          let addr_args = Array.sub regs idx (idx + n) in
+          let addr_args = Array.sub regs idx n in
           fprintf ppf " [%a]" print addr_args;
           idx + n
         | _ ->

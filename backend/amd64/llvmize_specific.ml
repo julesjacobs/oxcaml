@@ -26,7 +26,12 @@ type operation =
   | Amd64_mfence
   | Amd64_packf32
   | Amd64_simd of Amd64_simd_instrs.id * int option
-  | Amd64_simd_mem
+  | Amd64_simd_mem of
+      { mem_operation : amd64_simd_mem_operation;
+        instr : Amd64_simd_instrs.id;
+        imm : int option;
+        addr : Arch.addressing_mode
+      }
   | Amd64_cldemote of Arch.addressing_mode
   | Amd64_prefetch of
       { is_write : bool;
@@ -59,6 +64,12 @@ let prefetch_temporal_locality_hint = function
   | Arch.Moderate -> Prefetch_moderate
   | Arch.High -> Prefetch_high
 
+let simd_mem_operation = function
+  | Simd.Mem.Load op ->
+    Simd_mem_load, (Simd.Pseudo_instr.instr op.instr).id, op.imm
+  | Simd.Mem.Store op ->
+    Simd_mem_store, (Simd.Pseudo_instr.instr op.instr).id, op.imm
+
 let classify (op : Arch.specific_operation) =
   match op with
   | Ilea addr -> Amd64_lea addr
@@ -77,7 +88,9 @@ let classify (op : Arch.specific_operation) =
   | Ipackf32 -> Amd64_packf32
   | Isimd simd ->
     Amd64_simd ((Simd.Pseudo_instr.instr simd.instr).id, simd.imm)
-  | Isimd_mem _ -> Amd64_simd_mem
+  | Isimd_mem (op, addr) ->
+    let mem_operation, instr, imm = simd_mem_operation op in
+    Amd64_simd_mem { mem_operation; instr; imm; addr }
   | Icldemote addr -> Amd64_cldemote addr
   | Iprefetch { is_write; locality; addr } ->
     Amd64_prefetch
