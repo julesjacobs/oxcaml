@@ -2975,6 +2975,30 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let res = call_llvm_intrinsic t name [arg] typ in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int32_low_to_float64 () =
+    let src_typ = int_vec_type ~width_in_bits:32 in
+    let low_typ = T.Vector { num_of_elems = 2; elem_type = T.i32 } in
+    let dst_typ = float_vec_type ~width:Cmm.Float64 in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) src_typ in
+    let low =
+      List.init 2 Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let elem =
+               emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int lane))
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane) ~to_insert:elem))
+           (V.poison low_typ)
+    in
+    let res = emit_ins t (I.convert Sitofp ~arg:low ~to_:dst_typ) in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_x86_intrinsic name arg_typ res_typ =
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) arg_typ in
+    let res = call_llvm_intrinsic t name [arg] res_typ in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_cvt_f64_f32 () =
     let src_typ = float_vec_type ~width:Cmm.Float32 in
     let dst_typ = float_vec_type ~width:Cmm.Float64 in
@@ -3818,6 +3842,35 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_float_cmp_imm Cmm.Float32 (simd_imm imm)
     | Amd64_simd_instrs.Cmppd | Amd64_simd_instrs.Vcmppd_X_X_Xm128 ->
       simd_float_cmp_imm Cmm.Float64 (simd_imm imm)
+    | Amd64_simd_instrs.Cvtdq2pd | Amd64_simd_instrs.Vcvtdq2pd_X_Xm64 ->
+      simd_int32_low_to_float64 ()
+    | Amd64_simd_instrs.Cvtdq2ps | Amd64_simd_instrs.Vcvtdq2ps_X_Xm128 ->
+      simd_convert
+        (int_vec_type ~width_in_bits:32)
+        (float_vec_type ~width:Cmm.Float32)
+        Sitofp
+    | Amd64_simd_instrs.Cvtpd2dq | Amd64_simd_instrs.Vcvtpd2dq_X_Xm128 ->
+      simd_x86_intrinsic "x86.sse2.cvtpd2dq"
+        (float_vec_type ~width:Cmm.Float64)
+        (int_vec_type ~width_in_bits:32)
+    | Amd64_simd_instrs.Cvttpd2dq | Amd64_simd_instrs.Vcvttpd2dq_X_Xm128 ->
+      simd_x86_intrinsic "x86.sse2.cvttpd2dq"
+        (float_vec_type ~width:Cmm.Float64)
+        (int_vec_type ~width_in_bits:32)
+    | Amd64_simd_instrs.Cvtpd2ps | Amd64_simd_instrs.Vcvtpd2ps_X_Xm128 ->
+      simd_x86_intrinsic "x86.sse2.cvtpd2ps"
+        (float_vec_type ~width:Cmm.Float64)
+        (float_vec_type ~width:Cmm.Float32)
+    | Amd64_simd_instrs.Cvtps2dq | Amd64_simd_instrs.Vcvtps2dq_X_Xm128 ->
+      simd_x86_intrinsic "x86.sse2.cvtps2dq"
+        (float_vec_type ~width:Cmm.Float32)
+        (int_vec_type ~width_in_bits:32)
+    | Amd64_simd_instrs.Cvttps2dq | Amd64_simd_instrs.Vcvttps2dq_X_Xm128 ->
+      simd_x86_intrinsic "x86.sse2.cvttps2dq"
+        (float_vec_type ~width:Cmm.Float32)
+        (int_vec_type ~width_in_bits:32)
+    | Amd64_simd_instrs.Cvtps2pd | Amd64_simd_instrs.Vcvtps2pd_X_Xm64 ->
+      simd_cvt_f64_f32 ()
     | Amd64_simd_instrs.Shufps | Amd64_simd_instrs.Vshufps_X_X_Xm128 ->
       simd_shuffle_32 (simd_imm imm)
     | Amd64_simd_instrs.Shufpd | Amd64_simd_instrs.Vshufpd_X_X_Xm128 ->

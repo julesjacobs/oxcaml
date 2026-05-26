@@ -17,7 +17,8 @@ default disabled-probe path. The standard-compiler LLVM-backend
 `lib-atomic/test_atomic_cmpxchg.ml` failure is fixed too. The native
 `async-exns/async_exns_1.ml` output mismatch is now fixed as well.
 
-The latest SIMD follow-ups add SSE/SSE2 packed float comparison lowering, SSE2
+The latest SIMD follow-ups add SSE2 conversion lowering for packed int32,
+float32, and float64 vectors, SSE/SSE2 packed float comparison lowering, SSE2
 float64x2 add/sub/mul/div/sqrt lowering, SSE float32x4 add/sub/mul/div/sqrt
 lowering, SSE vec128 64-bit lane-move lowering, SSE vec128 interleave lowering
 for 32-bit lanes, SSE vec128 shuffle lowering for 32-bit lanes, SSE2 signed
@@ -1905,6 +1906,20 @@ limit is raised from `l=100000` to `l=150000`.
       contains `fcmp` predicates `oeq`, `olt`, `ole`, `uno`, `une`, `uge`,
       `ugt`, and `ord` for `<4 x float>` and `<2 x double>`, sign-extended to
       integer all-ones/zero masks.
+    - Implemented AMD64 LLVM lowering for the SSE2 packed conversion subset:
+      `caml_sse2_cvt_int32x4_float64x2`,
+      `caml_sse2_cvt_int32x4_float32x4`,
+      `caml_sse2_cvt_float64x2_int32x2`,
+      `caml_sse2_cvtt_float64x2_int32x2`,
+      `caml_sse2_cvt_float64x2_float32x2`,
+      `caml_sse2_cvt_float32x4_int32x4`,
+      `caml_sse2_cvtt_float32x4_int32x4`, and
+      `caml_sse2_cvt_float32x4_float64x2`. Rebuilt with
+      `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_conversions.sh` script passed
+      directly under `validation-tmp/amd64-simd-conversions`; the kept IR uses
+      ordinary `sitofp`/`fpext` for exact widening conversions and the LLVM X86
+      SSE2 intrinsics for packed float-to-int and double-to-float conversions.
 
 ## Current Blocker
 
