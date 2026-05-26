@@ -17,8 +17,8 @@ default disabled-probe path. The standard-compiler LLVM-backend
 `lib-atomic/test_atomic_cmpxchg.ml` failure is fixed too. The native
 `async-exns/async_exns_1.ml` output mismatch is now fixed as well.
 
-The latest AMD64 lowering follow-ups add scalar POPCNT builtin lowering,
-CLMUL int64x2 carry-less multiply lowering, SSE4.2 int64x2 signed
+The latest AMD64 lowering follow-ups add scalar POPCNT/LZCNT/TZCNT builtin
+lowering, CLMUL int64x2 carry-less multiply lowering, SSE4.2 int64x2 signed
 greater-than comparison lowering, SSE4.1 unsigned multi-SAD lowering, SSE4.1
 packed float dot-product lowering, SSE4.1 unsigned word min-position lowering,
 SSE4.1 scalar immediate rounding lowering, SSE4.1 packed float vector rounding
@@ -2158,6 +2158,16 @@ limit is raised from `l=100000` to `l=150000`.
       inputs to `i16`/`i32`, emits `llvm.ctpop.i16`, `llvm.ctpop.i32`, and
       `llvm.ctpop.i64`, then zero-extends narrow results back to the `i64`
       register representation.
+    - Implemented AMD64 LLVM lowering for scalar LZCNT/TZCNT builtins:
+      `caml_lzcnt_int16`, `caml_lzcnt_int32`, `caml_lzcnt_int64`,
+      `caml_bmi_tzcnt_int16`, `caml_bmi_tzcnt_int32`, and
+      `caml_bmi_tzcnt_int64`. Rebuilt with
+      `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_lzcnt_tzcnt.sh` script passed
+      directly under `validation-tmp/amd64-lzcnt-tzcnt`; the kept IR truncates
+      small-number inputs to `i16`/`i32`, emits `llvm.ctlz.*` and
+      `llvm.cttz.*` with `i1 0` so zero inputs are defined, then zero-extends
+      narrow results to the `i64` register representation.
 
 ## Current Blocker
 

@@ -2185,7 +2185,7 @@ let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
     in
     emit_ins t (I.convert Zext ~arg:res ~to_:T.i64) |> store_res
   in
-  let popcnt_int width_in_bits =
+  let scalar_int_count ?zero_is_poison intrinsic width_in_bits =
     let typ = T.Int { width_in_bits } in
     let convert_if_needed op arg to_ =
       if T.equal (V.get_type arg) to_
@@ -2196,10 +2196,16 @@ let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
       load_reg_to_temp t i.arg.(0)
       |> fun arg -> convert_if_needed Trunc arg typ
     in
+    let args =
+      match zero_is_poison with
+      | None -> [arg]
+      | Some zero_is_poison ->
+        [arg; V.of_int ~typ:T.i1 (Bool.to_int zero_is_poison)]
+    in
     let res =
       call_llvm_intrinsic t
-        ("ctpop." ^ llvm_intrinsic_type_suffix typ)
-        [arg] typ
+        (intrinsic ^ "." ^ llvm_intrinsic_type_suffix typ)
+        args typ
     in
     convert_if_needed Zext res (T.of_reg i.res.(0)) |> store_res
   in
@@ -2231,9 +2237,15 @@ let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
   | "caml_sse41_vec128_testz" -> sse41_vec128_ptest `Testz
   | "caml_sse41_vec128_testc" -> sse41_vec128_ptest `Testc
   | "caml_sse41_vec128_testnzc" -> sse41_vec128_ptest `Testnzc
-  | "caml_popcnt_int16" -> popcnt_int 16
-  | "caml_popcnt_int32" -> popcnt_int 32
-  | "caml_popcnt_int64" -> popcnt_int 64
+  | "caml_popcnt_int16" -> scalar_int_count "ctpop" 16
+  | "caml_popcnt_int32" -> scalar_int_count "ctpop" 32
+  | "caml_popcnt_int64" -> scalar_int_count "ctpop" 64
+  | "caml_lzcnt_int16" -> scalar_int_count ~zero_is_poison:false "ctlz" 16
+  | "caml_lzcnt_int32" -> scalar_int_count ~zero_is_poison:false "ctlz" 32
+  | "caml_lzcnt_int64" -> scalar_int_count ~zero_is_poison:false "ctlz" 64
+  | "caml_bmi_tzcnt_int16" -> scalar_int_count ~zero_is_poison:false "cttz" 16
+  | "caml_bmi_tzcnt_int32" -> scalar_int_count ~zero_is_poison:false "cttz" 32
+  | "caml_bmi_tzcnt_int64" -> scalar_int_count ~zero_is_poison:false "cttz" 64
   | "caml_rdtsc_unboxed" -> do_intrinsic_call "readcyclecounter" [] T.i64
   | "caml_rdpmc_unboxed" -> do_intrinsic_call "x86.rdpmc" [T.i32] T.i64
   | _ -> not_implemented_basic ~msg:"specific intrinsic" i
