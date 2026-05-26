@@ -17,10 +17,10 @@ default disabled-probe path. The standard-compiler LLVM-backend
 `lib-atomic/test_atomic_cmpxchg.ml` failure is fixed too. The native
 `async-exns/async_exns_1.ml` output mismatch is now fixed as well.
 
-The latest AMD64 lowering follow-ups add scalar POPCNT/LZCNT/TZCNT, BMI1, and
-BMI2 builtin lowering, CLMUL int64x2 carry-less multiply lowering, SSE4.2
-int64x2 signed greater-than comparison lowering, SSE4.1 unsigned multi-SAD
-lowering, SSE4.1 packed float dot-product lowering, SSE4.1 unsigned word
+The latest AMD64 lowering follow-ups add scalar POPCNT/LZCNT/TZCNT, BMI1,
+BMI2, and FMA builtin lowering, CLMUL int64x2 carry-less multiply lowering,
+SSE4.2 int64x2 signed greater-than comparison lowering, SSE4.1 unsigned
+multi-SAD lowering, SSE4.1 packed float dot-product lowering, SSE4.1 unsigned word
 min-position lowering, SSE4.1 scalar immediate rounding lowering, SSE4.1
 packed float vector rounding lowering, SSE4.1 vector test predicate lowering,
 SSE4.1 integer lane extract/insert lowering, SSE4.1 variable blend lowering,
@@ -2191,6 +2191,18 @@ limit is raised from `l=100000` to `l=150000`.
       count masking, PDEP/PEXT examples, and links/runs a small executable
       with dummy primitive-table stubs so the lowered native code is
       exercised.
+    - Implemented AMD64 LLVM lowering for scalar FMA builtins:
+      `caml_fma_float{32,64}_{mul_add,mul_sub,neg_mul_add,neg_mul_sub}`.
+      The lowering uses target-independent `llvm.fma.f32`/`llvm.fma.f64`
+      calls rather than feature-specific `llvm.x86.fma*` intrinsics, matching
+      the native AMD64 `213` operand order as `(arg0 * arg1) +/- arg2`.
+      Rebuilt with `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_fma_scalar.sh` script passed
+      directly under `validation-tmp/amd64_fma_scalar` with the in-tree
+      compiler and `OCAMLLIB` set to the agent-local `_install/lib/ocaml`;
+      it checks the kept IR for `llvm.fma.f32`/`llvm.fma.f64`, rejects
+      target-specific FMA intrinsics, and links/runs scalar `float32` and
+      `float64` examples with dummy primitive-table stubs.
 
 ## Current Blocker
 

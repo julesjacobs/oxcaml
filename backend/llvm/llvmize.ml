@@ -2111,6 +2111,25 @@ let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
       typ
     |> store_res
   in
+  let scalar_fma kind typ =
+    let multiplicand =
+      match kind with
+      | `Muladd | `Mulsub -> float_arg typ 0
+      | `Negmuladd | `Negmulsub ->
+        emit_ins t (I.unary Fneg ~arg:(float_arg typ 0))
+    in
+    let addend =
+      match kind with
+      | `Muladd | `Negmuladd -> float_arg typ 2
+      | `Mulsub | `Negmulsub ->
+        emit_ins t (I.unary Fneg ~arg:(float_arg typ 2))
+    in
+    call_llvm_intrinsic t
+      ("fma." ^ llvm_intrinsic_type_suffix typ)
+      [multiplicand; float_arg typ 1; addend]
+      typ
+    |> store_res
+  in
   let rounding_mode_of_sse41_imm imm =
     match imm with
     | 0x8 -> Round_nearest
@@ -2397,6 +2416,14 @@ let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
   | "caml_simd_float64_round_neg_inf" -> float_round T.double "floor"
   | "caml_simd_float64_round_pos_inf" -> float_round T.double "ceil"
   | "caml_simd_float64_round_towards_zero" -> float_round T.double "trunc"
+  | "caml_fma_float64_mul_add" -> scalar_fma `Muladd T.double
+  | "caml_fma_float64_mul_sub" -> scalar_fma `Mulsub T.double
+  | "caml_fma_float64_neg_mul_add" -> scalar_fma `Negmuladd T.double
+  | "caml_fma_float64_neg_mul_sub" -> scalar_fma `Negmulsub T.double
+  | "caml_fma_float32_mul_add" -> scalar_fma `Muladd T.float
+  | "caml_fma_float32_mul_sub" -> scalar_fma `Mulsub T.float
+  | "caml_fma_float32_neg_mul_add" -> scalar_fma `Negmuladd T.float
+  | "caml_fma_float32_neg_mul_sub" -> scalar_fma `Negmulsub T.float
   | "caml_sse41_float32_round" -> float_round_imm T.float
   | "caml_sse41_float64_round" -> float_round_imm T.double
   | "caml_sse2_float64_min" ->
