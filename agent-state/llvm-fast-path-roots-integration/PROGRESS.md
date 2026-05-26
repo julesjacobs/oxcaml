@@ -49,12 +49,41 @@ root handling.
     `tests/frame-pointers/{c_call,effects,exception_handler,reperform,stack_realloc,stack_realloc2}.ml`,
     `tests/llvm-stack-checks/challenges.ml`, and
     `tests/typing-small-numbers/test_matching_native.ml`.
+- Follow-up failure investigation:
+  - The LLVM-owned expect tests are self-describing: reran
+    `make test-one-no-rebuild DIR=llvm-codegen` without `LLVM_BACKEND=1`
+    and with only `OCAMLPARAM="_,llvm-path=$LLVM_PATH"`; 66 passed, 2
+    skipped, 0 failed.
+  - `tests/llvm-stack-checks/challenges.ml` failed only because the stress
+    program's hardcoded `OCAMLRUNPARAM=l=100000` was too small for the
+    frame-pointer LLVM build. The generated executable fails at `l=100000`
+    before printing `live-roots: ok`, and passes at `l=150000` and
+    `l=200000`. Raised the positive stress run to `l=200000`; the separate
+    negative stack-overflow check still uses `l=100000`.
+  - Reran `make test-one-no-rebuild DIR=llvm-stack-checks` without
+    `LLVM_BACKEND=1` and with only `OCAMLPARAM="_,llvm-path=$LLVM_PATH"`; 10
+    passed, 0 skipped, 0 failed.
+  - The frame-pointer failures are not LLVM-root-specific: `c_call.ml`
+    reproduces with normal native compilation in this checkout, without
+    `LLVM_BACKEND=1`. Raw frame walking showed the chain exists; the test
+    helper prints no frames in the ordinary test run on this macOS setup.
+  - `typing-small-numbers/test_matching_native.ml` also reproduces without
+    `LLVM_BACKEND=1`. It prints the expected values, then the native toplevel
+    traps after evaluation during `Stdlib.Domain.do_at_exit`, at
+    `caml_call_realloc_stack`'s `CHECK_SP_IN_STACK` `brk #0x4c56`.
+  - Conclusion: use self-describing LLVM tests for this PR. The global
+    `make llvm-test` mode is useful as a stress run, but it forces
+    `LLVM_BACKEND=1` onto unrelated native tests and currently reports
+    non-LLVM harness/configuration failures.
 
 ## Current Blocker
 
-Full `make llvm-test` still has non-codegen failures listed above.
+No current LLVM-codegen or LLVM-stack-check blocker. The remaining failures
+from global `make llvm-test` are non-LLVM-owned tests affected by the global
+`LLVM_BACKEND=1` mode or by the local frame-pointer/native-toplevel setup.
 
 ## Next Step
 
-Investigate whether the remaining full-suite failures are pre-existing LLVM
-backend gaps or regressions from the integration branch.
+Optionally rerun the full global `make llvm-test` for a fresh stress summary,
+but do not treat unrelated native test failures as fast-path-root regressions
+unless they also reproduce in a self-describing LLVM test.

@@ -277,9 +277,9 @@ fi
 
 runparam="${OCAMLRUNPARAM:-}"
 if [ -z "$runparam" ]; then
-  runparam="l=100000"
+  runparam="l=200000"
 else
-  runparam="$runparam,l=100000"
+  runparam="$runparam,l=200000"
 fi
 OCAMLRUNPARAM="$runparam" "$exe" > "$out"
 
