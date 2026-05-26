@@ -1,6 +1,7 @@
 (* TEST
  runtime5;
  frame_pointers;
+ not-macos;
  readonly_files = "fp_backtrace.c";
  all_modules = "${readonly_files} exception_handler.ml";
  native;
