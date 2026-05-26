@@ -2224,9 +2224,7 @@ let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
     let zero = V.of_int ~typ:T.i64 0 in
     let and_arg1_arg2 = emit_ins t (I.binary And ~arg1 ~arg2) in
     let all_ones = V.imm typ "<i64 -1, i64 -1, i64 -1, i64 -1>" in
-    let not_arg1 =
-      emit_ins t (I.binary Xor ~arg1 ~arg2:all_ones)
-    in
+    let not_arg1 = emit_ins t (I.binary Xor ~arg1 ~arg2:all_ones) in
     let and_not_arg1_arg2 = emit_ins t (I.binary And ~arg1:not_arg1 ~arg2) in
     let any_and = reduce_or and_arg1_arg2 in
     let any_and_not = reduce_or and_not_arg1_arg2 in
@@ -4108,6 +4106,48 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
     | _ -> Misc.fatal_error "expected vector type"
   in
+  let simd_zip_128_lanes ~vector_width_in_bits ~width_in_bits ~high =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits in
+    let block_lanes = 128 / width_in_bits in
+    let blocks = vector_width_in_bits / 128 in
+    let lanes_per_block = block_lanes / 2 in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let start = if high then lanes_per_block else 0 in
+    let res =
+      List.init blocks Fun.id
+      |> List.fold_left
+           (fun vector block ->
+             let block_base = block * block_lanes in
+             List.init lanes_per_block Fun.id
+             |> List.fold_left
+                  (fun vector lane ->
+                    let src_lane = block_base + start + lane in
+                    let dst_base = block_base + (2 * lane) in
+                    let elem1 =
+                      emit_ins t
+                        (I.extractelement ~vector:arg1
+                           ~index:(V.of_int src_lane))
+                    in
+                    let elem2 =
+                      emit_ins t
+                        (I.extractelement ~vector:arg2
+                           ~index:(V.of_int src_lane))
+                    in
+                    let vector =
+                      emit_ins t
+                        (I.insertelement ~vector ~index:(V.of_int dst_base)
+                           ~to_insert:elem1)
+                    in
+                    emit_ins t
+                      (I.insertelement ~vector
+                         ~index:(V.of_int (dst_base + 1))
+                         ~to_insert:elem2))
+                  vector)
+           (V.poison typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_vec128_shift_bytes ~left n =
     let typ = int_vec_type ~width_in_bits:8 in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -4198,18 +4238,112 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | 0xC -> Round_current
     | _ -> fail_msg ~name:"simd_rounding_mode_of_imm" "unexpected immediate"
   in
-  let simd_shuffle_32 imm =
-    let typ = int_vec_type ~width_in_bits:32 in
+  let simd_broadcast_low ~vector_width_in_bits ~width_in_bits =
+    let src_typ = int_vec_type ~width_in_bits in
+    let dst_typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) src_typ in
+    let elem = emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int 0)) in
+    let lanes = vector_width_in_bits / width_in_bits in
+    let res =
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane) ~to_insert:elem))
+           (V.poison dst_typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_permute_32 ?(vector_width_in_bits = 128) imm =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits:32 in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let blocks = vector_width_in_bits / 128 in
+    let res =
+      List.init blocks Fun.id
+      |> List.fold_left
+           (fun vector block ->
+             let block_base = block * 4 in
+             List.init 4 Fun.id
+             |> List.fold_left
+                  (fun vector lane ->
+                    let src_lane = block_base + ((imm lsr (2 * lane)) land 3) in
+                    let elem =
+                      emit_ins t
+                        (I.extractelement ~vector:arg ~index:(V.of_int src_lane))
+                    in
+                    emit_ins t
+                      (I.insertelement ~vector
+                         ~index:(V.of_int (block_base + lane))
+                         ~to_insert:elem))
+                  vector)
+           (V.poison typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_permute_64 ?(vector_width_in_bits = 128) imm =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits:64 in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let lanes = vector_width_in_bits / 64 in
+    let res =
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let block_base = lane land lnot 1 in
+             let src_lane = block_base + ((imm lsr lane) land 1) in
+             let elem =
+               emit_ins t
+                 (I.extractelement ~vector:arg ~index:(V.of_int src_lane))
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane) ~to_insert:elem))
+           (V.poison typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_shuffle_32 ?(vector_width_in_bits = 128) imm =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits:32 in
     let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
     let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let blocks = vector_width_in_bits / 128 in
     let res =
-      List.init 4 Fun.id
+      List.init blocks Fun.id
+      |> List.fold_left
+           (fun vector block ->
+             let block_base = block * 4 in
+             List.init 4 Fun.id
+             |> List.fold_left
+                  (fun vector dst_lane ->
+                    let src, shift =
+                      if dst_lane < 2
+                      then arg1, 2 * dst_lane
+                      else arg2, 2 * dst_lane
+                    in
+                    let src_lane = block_base + ((imm lsr shift) land 3) in
+                    let elem =
+                      emit_ins t
+                        (I.extractelement ~vector:src ~index:(V.of_int src_lane))
+                    in
+                    emit_ins t
+                      (I.insertelement ~vector
+                         ~index:(V.of_int (block_base + dst_lane))
+                         ~to_insert:elem))
+                  vector)
+           (V.poison typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_shuffle_64 ?(vector_width_in_bits = 128) imm =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits:64 in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let lanes = vector_width_in_bits / 64 in
+    let res =
+      List.init lanes Fun.id
       |> List.fold_left
            (fun vector dst_lane ->
-             let src, shift =
-               if dst_lane < 2 then arg1, 2 * dst_lane else arg2, 2 * dst_lane
-             in
-             let src_lane = (imm lsr shift) land 3 in
+             let block_base = dst_lane land lnot 1 in
+             let src = if dst_lane land 1 = 0 then arg1 else arg2 in
+             let src_lane = block_base + ((imm lsr dst_lane) land 1) in
              let elem =
                emit_ins t
                  (I.extractelement ~vector:src ~index:(V.of_int src_lane))
@@ -4218,28 +4352,6 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
                (I.insertelement ~vector ~index:(V.of_int dst_lane)
                   ~to_insert:elem))
            (V.poison typ)
-    in
-    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
-  in
-  let simd_shuffle_64 imm =
-    let typ = int_vec_type ~width_in_bits:64 in
-    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
-    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
-    let lane0 =
-      emit_ins t (I.extractelement ~vector:arg1 ~index:(V.of_int (imm land 1)))
-    in
-    let lane1 =
-      emit_ins t
-        (I.extractelement ~vector:arg2 ~index:(V.of_int ((imm lsr 1) land 1)))
-    in
-    let res =
-      emit_ins t
-        (I.insertelement ~vector:(V.poison typ) ~index:(V.of_int 0)
-           ~to_insert:lane0)
-    in
-    let res =
-      emit_ins t
-        (I.insertelement ~vector:res ~index:(V.of_int 1) ~to_insert:lane1)
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
@@ -4327,6 +4439,48 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
              (I.insertelement ~vector ~index:(V.of_int offset) ~to_insert:elem))
          (V.poison T.vec128)
     |> store_into_reg t i.res.(0)
+  in
+  let simd_vec256_permute2_128 imm =
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) T.vec256 in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) T.vec256 in
+    let insert_half vector dst_half control =
+      let dst_base = 2 * dst_half in
+      if control land 0x8 <> 0
+      then
+        List.init 2 Fun.id
+        |> List.fold_left
+             (fun vector offset ->
+               emit_ins t
+                 (I.insertelement ~vector
+                    ~index:(V.of_int (dst_base + offset))
+                    ~to_insert:(V.of_int ~typ:T.i64 0)))
+             vector
+      else
+        let src, src_base =
+          match control land 3 with
+          | 0 -> arg1, 0
+          | 1 -> arg1, 2
+          | 2 -> arg2, 0
+          | 3 -> arg2, 2
+          | _ -> assert false
+        in
+        List.init 2 Fun.id
+        |> List.fold_left
+             (fun vector offset ->
+               let elem =
+                 emit_ins t
+                   (I.extractelement ~vector:src
+                      ~index:(V.of_int (src_base + offset)))
+               in
+               emit_ins t
+                 (I.insertelement ~vector
+                    ~index:(V.of_int (dst_base + offset))
+                    ~to_insert:elem))
+             vector
+    in
+    V.poison T.vec256 |> fun vector ->
+    insert_half vector 0 (imm land 0xf) |> fun vector ->
+    insert_half vector 1 ((imm lsr 4) land 0xf) |> store_into_reg t i.res.(0)
   in
   let simd_mem_load_low64 ~addr ~addr_arg ~base ~lane =
     let loaded = load_i64_from_address addr addr_arg in
@@ -5051,6 +5205,12 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_blendv ~vector_width_in_bits:256 32
     | Amd64_simd_instrs.Vblendvpd_Y_Y_Ym256_Y ->
       simd_blendv ~vector_width_in_bits:256 64
+    | Amd64_simd_instrs.Vbroadcastsd_Y_X ->
+      simd_broadcast_low ~vector_width_in_bits:256 ~width_in_bits:64
+    | Amd64_simd_instrs.Vbroadcastss_X_X ->
+      simd_broadcast_low ~vector_width_in_bits:128 ~width_in_bits:32
+    | Amd64_simd_instrs.Vbroadcastss_Y_X ->
+      simd_broadcast_low ~vector_width_in_bits:256 ~width_in_bits:32
     | Amd64_simd_instrs.Pextrb | Amd64_simd_instrs.Vpextrb ->
       simd_extract_lane 8 (simd_imm imm)
     | Amd64_simd_instrs.Pextrw_r64m16_X | Amd64_simd_instrs.Vpextrw_r64m16_X ->
@@ -5144,6 +5304,16 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_shuffle_32 (simd_imm imm)
     | Amd64_simd_instrs.Shufpd | Amd64_simd_instrs.Vshufpd_X_X_Xm128 ->
       simd_shuffle_64 (simd_imm imm)
+    | Amd64_simd_instrs.Vshufps_Y_Y_Ym256 ->
+      simd_shuffle_32 ~vector_width_in_bits:256 (simd_imm imm)
+    | Amd64_simd_instrs.Vshufpd_Y_Y_Ym256 ->
+      simd_shuffle_64 ~vector_width_in_bits:256 (simd_imm imm)
+    | Amd64_simd_instrs.Vpermilps_X_Xm128 -> simd_permute_32 (simd_imm imm)
+    | Amd64_simd_instrs.Vpermilpd_X_Xm128 -> simd_permute_64 (simd_imm imm)
+    | Amd64_simd_instrs.Vpermilps_Y_Ym256 ->
+      simd_permute_32 ~vector_width_in_bits:256 (simd_imm imm)
+    | Amd64_simd_instrs.Vpermilpd_Y_Ym256 ->
+      simd_permute_64 ~vector_width_in_bits:256 (simd_imm imm)
     | Amd64_simd_instrs.Pshufhw | Amd64_simd_instrs.Vpshufhw_X_Xm128 ->
       simd_shuffle_16 (simd_imm imm) ~high:true
     | Amd64_simd_instrs.Pshuflw | Amd64_simd_instrs.Vpshuflw_X_Xm128 ->
@@ -5156,6 +5326,10 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_zip (int_vec_type ~width_in_bits:32) ~high:true
     | Amd64_simd_instrs.Unpcklps | Amd64_simd_instrs.Vunpcklps_X_X_Xm128 ->
       simd_zip (int_vec_type ~width_in_bits:32) ~high:false
+    | Amd64_simd_instrs.Vunpckhps_Y_Y_Ym256 ->
+      simd_zip_128_lanes ~vector_width_in_bits:256 ~width_in_bits:32 ~high:true
+    | Amd64_simd_instrs.Vunpcklps_Y_Y_Ym256 ->
+      simd_zip_128_lanes ~vector_width_in_bits:256 ~width_in_bits:32 ~high:false
     | Amd64_simd_instrs.Punpckhbw | Amd64_simd_instrs.Vpunpckhbw_X_X_Xm128 ->
       simd_zip (int_vec_type ~width_in_bits:8) ~high:true
     | Amd64_simd_instrs.Punpcklbw | Amd64_simd_instrs.Vpunpcklbw_X_X_Xm128 ->
@@ -5168,6 +5342,10 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_zip (int_vec_type ~width_in_bits:64) ~high:true
     | Amd64_simd_instrs.Punpcklqdq | Amd64_simd_instrs.Vpunpcklqdq_X_X_Xm128 ->
       simd_zip (int_vec_type ~width_in_bits:64) ~high:false
+    | Amd64_simd_instrs.Vunpckhpd_Y_Y_Ym256 ->
+      simd_zip_128_lanes ~vector_width_in_bits:256 ~width_in_bits:64 ~high:true
+    | Amd64_simd_instrs.Vunpcklpd_Y_Y_Ym256 ->
+      simd_zip_128_lanes ~vector_width_in_bits:256 ~width_in_bits:64 ~high:false
     | Amd64_simd_instrs.Pslldq | Amd64_simd_instrs.Vpslldq_X_X ->
       simd_vec128_shift_bytes ~left:true (simd_imm imm)
     | Amd64_simd_instrs.Psrldq | Amd64_simd_instrs.Vpsrldq_X_X ->
@@ -5186,6 +5364,7 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_masked_byte_store ()
     | Amd64_simd_instrs.Vinsertf128 -> simd_vec256_insert_128 (simd_imm imm)
     | Amd64_simd_instrs.Vextractf128 -> simd_vec256_extract_128 (simd_imm imm)
+    | Amd64_simd_instrs.Vperm2f128 -> simd_vec256_permute2_128 (simd_imm imm)
     | _ -> not_implemented_basic ~msg:"specific" i)
   | Amd64_prefetch { is_write; locality; addr } ->
     prefetch ~is_write ~locality addr

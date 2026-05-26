@@ -27,7 +27,8 @@ predicate lowering, SSE4.1 integer lane extract/insert lowering, SSE4.1
 variable blend lowering, SSE4.1 immediate blend lowering, SSE4.1 int32
 multiply lowering, SSE4.1 integer sign/zero extension lowering, SSE4.1
 integer compare/min/max lowering, AVX packed float arithmetic lowering, AVX
-vec256 logical/test/blend/duplicate/movemask lowering,
+vec256 logical/test/blend/duplicate/movemask lowering, AVX register-broadcast
+and immediate rearrangement lowering,
 SSSE3 unsigned-byte/signed-byte multiply-add saturating lowering, SSSE3 byte
 align-right lowering, SSSE3 byte-shuffle lowering, SSSE3 signed word rounded
 multiply lowering, SSSE3 mulsign lowering,
@@ -2248,6 +2249,21 @@ limit is raised from `l=100000` to `l=150000`.
       compiler and `OCAMLLIB` set to the agent-local `_install/lib/ocaml`;
       its kept IR contains target-independent vector integer operations,
       lane extracts, vector selects, scalar predicate reductions, and rejects
+      target-specific `llvm.x86.avx` intrinsics.
+    - Implemented AMD64 LLVM lowering for AVX register broadcasts and
+      immediate vector rearrangements:
+      `caml_avx_vec256_broadcast_{64,32}`,
+      `caml_avx_vec128_broadcast_32`,
+      `caml_avx_vec128{,x2}_permute_{64,32}`,
+      `caml_avx_vec256_permute2_128`,
+      `caml_avx_vec128x2_shuffle_{64,32}`, and
+      `caml_avx_vec128x2_interleave_{high,low}_{64,32}`. The 256-bit
+      shuffles/interleaves preserve AVX's per-128-bit-lane behavior. Rebuilt
+      with `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_avx_rearrange.sh` script passed
+      directly under `validation-tmp/amd64_avx_rearrange` with the in-tree
+      compiler and `OCAMLLIB` set to the agent-local `_install/lib/ocaml`;
+      its kept IR contains lane extract/insert sequences and rejects
       target-specific `llvm.x86.avx` intrinsics.
 
 ## Current Blocker
