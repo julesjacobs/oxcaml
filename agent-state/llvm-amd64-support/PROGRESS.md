@@ -21,11 +21,12 @@ The latest AMD64 lowering follow-ups add scalar POPCNT/LZCNT/TZCNT, BMI1,
 BMI2, and scalar/vector FMA builtin lowering, CLMUL int64x2 carry-less
 multiply lowering, SSE4.2 int64x2 signed greater-than comparison lowering,
 SSE4.1 unsigned multi-SAD lowering, SSE4.1 packed float dot-product lowering,
-SSE4.1 unsigned word min-position lowering, SSE4.1 scalar immediate rounding lowering, SSE4.1
-packed float vector rounding lowering, SSE4.1 vector test predicate lowering,
-SSE4.1 integer lane extract/insert lowering, SSE4.1 variable blend lowering,
-SSE4.1 immediate blend lowering, SSE4.1 int32 multiply lowering, SSE4.1
-integer sign/zero extension lowering, SSE4.1 integer compare/min/max lowering,
+SSE4.1 unsigned word min-position lowering, SSE4.1 scalar immediate rounding
+lowering, SSE4.1 packed float vector rounding lowering, SSE4.1 vector test
+predicate lowering, SSE4.1 integer lane extract/insert lowering, SSE4.1
+variable blend lowering, SSE4.1 immediate blend lowering, SSE4.1 int32
+multiply lowering, SSE4.1 integer sign/zero extension lowering, SSE4.1
+integer compare/min/max lowering, AVX packed float arithmetic lowering,
 SSSE3 unsigned-byte/signed-byte multiply-add saturating lowering, SSSE3 byte
 align-right lowering, SSSE3 byte-shuffle lowering, SSSE3 signed word rounded
 multiply lowering, SSSE3 mulsign lowering,
@@ -2216,6 +2217,23 @@ limit is raised from `l=100000` to `l=150000`.
       its kept IR contains the expected `llvm.fma.v2f64`, `llvm.fma.v4f32`,
       `llvm.fma.v4f64`, and `llvm.fma.v8f32` declarations/calls and rejects
       target-specific FMA intrinsics.
+    - Implemented AMD64 LLVM lowering for AVX packed float builtins:
+      `caml_avx_float32x8_{add,sub,mul,div,sqrt,min,max,addsub,cmp,round}`,
+      `caml_avx_float32x4x2_{hadd,hsub}`,
+      `caml_avx_float64x4_{add,sub,mul,div,sqrt,min,max,addsub,cmp,round}`,
+      and `caml_avx_float64x2x2_{hadd,hsub}`. The lowering uses wide
+      target-independent vector arithmetic, `llvm.sqrt.*`/rounding
+      intrinsics, and compare/select for AVX min/max so the IR does not depend
+      on feature-specific `llvm.x86.avx.*` intrinsics; the horizontal add/sub
+      helper now models AVX's per-128-bit-lane behavior for 256-bit vectors.
+      Rebuilt with `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_avx_float.sh` script passed
+      directly under `validation-tmp/amd64_avx_float` with the in-tree
+      compiler and `OCAMLLIB` set to the agent-local `_install/lib/ocaml`;
+      its kept IR contains the expected `<8 x float>`/`<4 x double>` arithmetic,
+      `llvm.sqrt.v8f32`, `llvm.sqrt.v4f64`, `llvm.roundeven.v8f32`,
+      `llvm.roundeven.v4f64`, and vector compare/sign-extension operations,
+      and rejects target-specific AVX min/max/approximate intrinsics.
 
 ## Current Blocker
 
