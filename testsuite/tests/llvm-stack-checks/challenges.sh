@@ -266,8 +266,8 @@ if ! grep -q '_caml_llvm_call_realloc_stack' "$asm"; then
   exit 1
 fi
 
-if ! grep -q '_caml_call_realloc_stack' "$asm"; then
-  echo "expected prologue LLVM stack-check slow path in stress program" >&2
+if grep -q '_caml_call_realloc_stack' "$asm"; then
+  echo "unexpected duplicate prologue LLVM stack-check slow path in CFG-checked stress program" >&2
   exit 1
 fi
 

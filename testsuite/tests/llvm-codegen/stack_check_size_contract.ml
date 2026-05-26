@@ -9,5 +9,7 @@
 *)
 
 (* The script checks the OxCaml LLVM stack-check byte-count contract against the
-   post-stack-check CFG dump and checks that the legacy boolean stack-check
-   request is still emitted. *)
+   post-stack-check CFG dump. A nonzero byte-count contract means the CFG check
+   is responsible for stack growth; LLVM should not add a duplicate prologue
+   check. The legacy boolean stack-check request is still emitted for the
+   no-CFG-stack-check path. *)

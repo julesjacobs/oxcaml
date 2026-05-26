@@ -107,16 +107,86 @@ root handling.
 - Added `testsuite/tests/llvm-codegen/fp_contract.ml` / `.sh`; focused
   validation passed, and `make llvm-test-one-no-rebuild DIR=llvm-codegen`
   reports 70 passed, 2 skipped, 0 failed.
+- Reran the slow-case benchmark set after the integration/FP-contract merge.
+  The big apparent regressions were `alloc_some_always_min` and
+  `variant_alloc_min`; both are allocation loops with an `inline never`
+  `Sys.opaque_identity` helper call on the allocated value.
+- Checked the source and generated IR for those cases:
+  - `backend/llvm/llvmize.ml` still uses slow-path root slots for eligible
+    basic heap allocations and inserted polls.
+  - The hot allocation `caml_call_gc` slow path in the generated IR has no
+    ordinary `gc-live` alloca bundle for these cases, so the allocation fast
+    path is not materializing roots into normal root slots.
+  - Ordinary call safepoints are still outside the fast-path-root scheme and
+    continue to make live value registers preserved stack slots. The benchmark
+    `black_box` calls hit this path, so their spills are not evidence that the
+    allocation/poll optimization regressed.
+- Follow-up correction: the integration checkout had lost the earlier local
+  vendored-LLVM quick-win edits. The old fast-path-roots checkout had dirty
+  changes in:
+  - `vendor/llvm-project/llvm/lib/Transforms/Scalar/LoopStrengthReduce.cpp`
+  - `vendor/llvm-project/llvm/lib/Target/AArch64/AArch64LoadStoreOptimizer.cpp`
+- Those edits add hidden LLVM controls:
+  - `-oxcaml-disable-statepoint-loop-lsr=true` by default
+  - `-oxcaml-suppress-statepoint-stack-pairs=true` by default
+  - `-oxcaml-skip-statepoint-call-arg-lsr=false` as an off-by-default
+    experiment knob
+- Losing those patches can explain the apparent benchmark regression even
+  though `llvmize.ml` still uses fast-path root slots: LoopStrengthReduce can
+  create loop-carried values that are live through statepoint calls, and the
+  AArch64 post-RA load/store optimizer can form stack-paired spills/reloads
+  close to statepoints. The previous custom LLVM build suppressed those
+  transformations for OxCaml statepoint-containing loops/functions.
+- Ported those two LLVM quick-win patches into this integration checkout. Next
+  validation is to rebuild the branch-local LLVM clang/llc/opt, confirm the
+  hidden flags exist in the rebuilt tools, and rerun focused slow-case
+  benchmarks plus LLVM codegen tests.
+- Rebuilt branch-local LLVM clang/llc/opt. `llc --help-hidden` now shows:
+  `-oxcaml-disable-statepoint-loop-lsr`,
+  `-oxcaml-suppress-statepoint-stack-pairs`, and
+  `-oxcaml-skip-statepoint-call-arg-lsr`.
+- First focused benchmark after restoring those quick wins fixed tuple,
+  closure, and object controls but left `alloc_some_always_min` and
+  `variant_alloc_min` at about 8.7x slower than native. The missing mechanism
+  was not root slots: compiling the same case with `-no-cfg-stack-checks`
+  recovered native speed (`alloc_some_always_min`: LLVM ~0.135s, native
+  ~0.136s, current CFG-stack-check LLVM ~1.18s).
+- Root cause: the CFG stack-check integration made LLVM add a prologue stack
+  check even when OxCaml had already emitted an ordinary CFG stack-check. That
+  duplicate check forced frame setup at function entry and caused much worse
+  hot-loop code shape. With a nonzero `oxcaml-stack-check-bytes` contract, the
+  CFG check should be the authority; LLVM should not also add a prologue
+  check. The prologue fallback remains for the legacy/no-CFG-stack-check path
+  and for zero-byte functions whose LLVM prologue itself spends too much stack.
+- Implemented the stack-check contract change in vendored LLVM
+  `AArch64FrameLowering.cpp`: nonzero CFG stack-check byte contracts suppress
+  the duplicate prologue check.
+- Focused 8-pair benchmark after the stack-check fix:
+  - `alloc_some_always_min`: native 0.1329s, LLVM 0.1336s, ratio 1.0009
+  - `variant_alloc_min`: native 0.1364s, LLVM 0.1354s, ratio 0.9947
+  - `alloc_tuple_pair_min`: native 0.0716s, LLVM 0.0698s, ratio 0.9743
+  - `closure_arg_call`: native 0.1186s, LLVM 0.1187s, ratio 0.9996
+  - `object_call_min`: native 0.2002s, LLVM 0.2402s, ratio 1.1939
+- Updated stack-check contract tests to assert the new contract: CFG-checked
+  functions have ordinary `caml_llvm_call_realloc_stack` checks and no
+  duplicate `caml_call_realloc_stack` prologue checks. Updated fast-path-root
+  assembly expects to remove the now-intentional duplicate prologue checks.
+- Validation after these changes:
+  - `make llvm-test-one-no-rebuild TEST=llvm-codegen/fast_path_roots.ml`:
+    3 passed, 0 failed
+  - `make llvm-test-one-no-rebuild TEST=llvm-codegen/stack_check_size_contract.ml`:
+    5 passed, 0 failed
+  - `make llvm-test-one-no-rebuild DIR=llvm-codegen`: 70 passed, 2 skipped,
+    0 failed
+  - `make llvm-test-one-no-rebuild DIR=llvm-stack-checks`: 10 passed,
+    0 skipped, 0 failed
 - Build/test latency notes are being kept in
   `agent-state/llvm-fast-path-roots-integration/BUILD_TEST_LATENCY_NOTES.md`.
 
 ## Current Blocker
 
-No current LLVM-codegen or LLVM-stack-check blocker. The remaining known gap
-from global LLVM-backend testing is the unpacked-product native C-call ABI
-crash, now explicitly skipped for that mode.
+No current LLVM-codegen or LLVM-stack-check blocker.
 
 ## Next Step
 
-Review the final diff, commit the FP contraction integration changes, and push
-the agent branch.
+Review the final diff, then commit and push the integration branch.

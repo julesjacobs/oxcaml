@@ -947,18 +947,12 @@ static uint64_t getOxCamlPrologueStackCheckBytes(const MachineFunction &MF,
     return PrefixBytes == 0 ? 0
                             : PrefixBytes + OrdinaryCheckSlowPathReserveBytes;
 
-  // If CFG stack-check insertion found an ordinary check, that check may still
-  // run after some OCaml stack has already been consumed by the LLVM prologue,
-  // traps, or stack offsets.  Keep the prologue check unless the ordinary check
-  // is known to run before any OCaml stack is spent.
-  if (Attrs.CfgBytes != 0) {
-    if (!Attrs.HasBeforeBytes)
-      return PrefixBytes + OrdinaryCheckSlowPathReserveBytes;
-    uint64_t BytesBeforeOrdinaryCheck = PrefixBytes + Attrs.BeforeBytes;
-    if (BytesBeforeOrdinaryCheck != 0)
-      return BytesBeforeOrdinaryCheck + OrdinaryCheckSlowPathReserveBytes;
+  // If CFG stack-check insertion found an ordinary check, that check accounts
+  // for the required frame space at the check site. Adding a second prologue
+  // check here is redundant and can force LLVM to set up the frame before cheap
+  // early exits, which severely hurts small hot loops.
+  if (Attrs.CfgBytes != 0)
     return 0;
-  }
 
   // Runtime helpers reached from slow paths may push FP/LR on the OCaml stack.
   // Keep that emergency stack space available after the LLVM prologue even when
