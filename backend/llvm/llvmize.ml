@@ -2496,6 +2496,27 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let res = emit_ins t (I.convert Trunc ~arg:high ~to_:typ) in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int16_mul_round () =
+    let typ = int_vec_type ~width_in_bits:16 in
+    let wide_typ = int_vec_type_of_lanes ~width_in_bits:32 ~lanes:8 in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let arg1 = emit_ins t (I.convert Sext ~arg:arg1 ~to_:wide_typ) in
+    let arg2 = emit_ins t (I.convert Sext ~arg:arg2 ~to_:wide_typ) in
+    let product = emit_ins t (I.binary Mul ~arg1 ~arg2) in
+    let rounded =
+      emit_ins t
+        (I.binary Add ~arg1:product
+           ~arg2:(int_vector_constant_like wide_typ 0x4000))
+    in
+    let scaled =
+      emit_ins t
+        (I.binary Ashr ~arg1:rounded
+           ~arg2:(int_vector_constant_like wide_typ 15))
+    in
+    let res = emit_ins t (I.convert Trunc ~arg:scaled ~to_:typ) in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int16_mul_hadd_int32 () =
     let src_typ = int_vec_type ~width_in_bits:16 in
     let product_typ = int_vec_type_of_lanes ~width_in_bits:32 ~lanes:8 in
@@ -4065,6 +4086,9 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | Amd64_simd_instrs.Phaddsw_X_Xm128
     | Amd64_simd_instrs.Vphaddsw_X_X_Xm128 ->
       simd_int16_haddsub_saturating Add
+    | Amd64_simd_instrs.Pmulhrsw_X_Xm128
+    | Amd64_simd_instrs.Vpmulhrsw_X_X_Xm128 ->
+      simd_int16_mul_round ()
     | Amd64_simd_instrs.Phsubw_X_Xm128
     | Amd64_simd_instrs.Vphsubw_X_X_Xm128 ->
       simd_int_haddsub 16 Sub

@@ -17,9 +17,10 @@ default disabled-probe path. The standard-compiler LLVM-backend
 `lib-atomic/test_atomic_cmpxchg.ml` failure is fixed too. The native
 `async-exns/async_exns_1.ml` output mismatch is now fixed as well.
 
-The latest SIMD follow-ups add SSSE3 mulsign lowering, SSSE3 absolute-value
-lowering, SSSE3 saturating and non-saturating horizontal integer add/sub
-lowering, SSE3 vec128 duplicate-lane lowering, SSE3 packed float
+The latest SIMD follow-ups add SSSE3 signed word rounded multiply lowering,
+SSSE3 mulsign lowering, SSSE3 absolute-value lowering, SSSE3 saturating and
+non-saturating horizontal integer add/sub lowering, SSE3 vec128
+duplicate-lane lowering, SSE3 packed float
 addsub/hadd/hsub lowering, SSE/SSE2 packed float min/max and approximate
 reciprocal/reciprocal-sqrt lowering, SSE2 conversion lowering for packed
 int32, float32, and float64 vectors, SSE/SSE2 packed float comparison
@@ -1987,6 +1988,14 @@ limit is raised from `l=100000` to `l=150000`.
       passed directly under `validation-tmp/amd64-simd-ssse3-mulsign`; the
       kept IR emits lane-wise signed comparisons, negation, and zero selection
       to match the x86 `psign*` semantics.
+    - Implemented AMD64 LLVM lowering for the SSSE3 signed word rounded
+      multiply helper `caml_ssse3_int16x8_mul_round`. Rebuilt with
+      `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_ssse3_mul_round.sh` script
+      passed directly under `validation-tmp/amd64-simd-ssse3-mul-round`; the
+      kept IR sign-extends i16 lanes to i32, multiplies, adds the `0x4000`
+      rounding bias, arithmetic-shifts right by 15, and truncates back to i16
+      to match `pmulhrsw`.
 
 ## Current Blocker
 
