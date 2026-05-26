@@ -3217,6 +3217,44 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_float_dot_product width imm =
+    let typ = float_vec_type ~width in
+    let elem_typ = match width with Cmm.Float32 -> T.float | Cmm.Float64 -> T.double in
+    let lanes = match width with Cmm.Float32 -> 4 | Cmm.Float64 -> 2 in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let elem arg lane =
+      emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int lane))
+    in
+    let sum =
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun sum lane ->
+             if (imm lsr (lane + 4)) land 1 = 0
+             then sum
+             else
+               let product =
+                 emit_ins t
+                   (I.binary Fmul ~arg1:(elem arg1 lane) ~arg2:(elem arg2 lane))
+               in
+               emit_ins t (I.binary Fadd ~arg1:sum ~arg2:product))
+           (V.zeroinitializer elem_typ)
+    in
+    let res =
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let elem =
+               if (imm lsr lane) land 1 = 0
+               then V.zeroinitializer elem_typ
+               else sum
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane) ~to_insert:elem))
+           (V.poison typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_dup_lanes width_in_bits src_lane_of_dst_lane =
     let typ = int_vec_type ~width_in_bits in
     let lanes = 128 / width_in_bits in
@@ -4476,6 +4514,10 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_float_round Cmm.Float32 (simd_rounding_mode_of_imm (simd_imm imm))
     | Amd64_simd_instrs.Roundpd | Amd64_simd_instrs.Vroundpd_X_Xm128 ->
       simd_float_round Cmm.Float64 (simd_rounding_mode_of_imm (simd_imm imm))
+    | Amd64_simd_instrs.Dpps | Amd64_simd_instrs.Vdpps_X_X_Xm128 ->
+      simd_float_dot_product Cmm.Float32 (simd_imm imm)
+    | Amd64_simd_instrs.Dppd | Amd64_simd_instrs.Vdppd ->
+      simd_float_dot_product Cmm.Float64 (simd_imm imm)
     | Amd64_simd_instrs.Phminposuw | Amd64_simd_instrs.Vphminposuw ->
       simd_int16_minpos_unsigned ()
     | Amd64_simd_instrs.Phaddw_X_Xm128

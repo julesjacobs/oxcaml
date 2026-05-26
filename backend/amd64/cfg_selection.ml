@@ -250,6 +250,8 @@ let is_llvm_simd_builtin = function
   | "caml_sse41_int64x2_insert"
   | "caml_sse41_float32x4_round"
   | "caml_sse41_float64x2_round"
+  | "caml_sse41_float32x4_dp"
+  | "caml_sse41_float64x2_dp"
   | "caml_sse41_int16x8_minpos_unsigned"
   | "caml_sse41_int32x4_mul_even"
   | "caml_sse41_int32x4_mul_low"
