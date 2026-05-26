@@ -501,7 +501,10 @@ let operation_is_pure = function
       | "caml_simd_float64_round_pos_inf"
       | "caml_simd_float64_round_towards_zero"
       | "caml_sse2_float64_min"
-      | "caml_sse2_float64_max" ) ->
+      | "caml_sse2_float64_max"
+      | "caml_sse41_vec128_testz"
+      | "caml_sse41_vec128_testc"
+      | "caml_sse41_vec128_testnzc" ) ->
     true
   | Illvm_intrinsic ("caml_rdtsc_unboxed" | "caml_rdpmc_unboxed") -> false
   | Illvm_intrinsic intr ->

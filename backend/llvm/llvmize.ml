@@ -2126,6 +2126,36 @@ let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
     in
     emit_ins t (I.convert Fptosi ~arg:rounded ~to_:T.i64) |> store_res
   in
+  let sse41_vec128_ptest test =
+    let to_i128 arg =
+      let arg = load_reg_to_temp t arg in
+      if T.equal (V.get_type arg) T.i128
+      then arg
+      else emit_ins t (I.convert Bitcast ~arg ~to_:T.i128)
+    in
+    let arg1 = to_i128 i.arg.(0) in
+    let arg2 = to_i128 i.arg.(1) in
+    let zero = V.of_int ~typ:T.i128 0 in
+    let and_arg1_arg2 = emit_ins t (I.binary And ~arg1 ~arg2) in
+    let not_arg1 =
+      emit_ins t (I.binary Xor ~arg1 ~arg2:(V.of_int ~typ:T.i128 (-1)))
+    in
+    let and_not_arg1_arg2 = emit_ins t (I.binary And ~arg1:not_arg1 ~arg2) in
+    let res =
+      match test with
+      | `Testz -> emit_ins t (I.icmp Ieq ~arg1:and_arg1_arg2 ~arg2:zero)
+      | `Testc -> emit_ins t (I.icmp Ieq ~arg1:and_not_arg1_arg2 ~arg2:zero)
+      | `Testnzc ->
+        let zf_clear =
+          emit_ins t (I.icmp Ine ~arg1:and_arg1_arg2 ~arg2:zero)
+        in
+        let cf_clear =
+          emit_ins t (I.icmp Ine ~arg1:and_not_arg1_arg2 ~arg2:zero)
+        in
+        emit_ins t (I.binary And ~arg1:zf_clear ~arg2:cf_clear)
+    in
+    emit_ins t (I.convert Zext ~arg:res ~to_:T.i64) |> store_res
+  in
   (* Intrinsics must not allocate on the OCaml heap. See
      [Arch.operation_allocates]. *)
   match intrinsic_name with
@@ -2149,6 +2179,9 @@ let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
     do_intrinsic_call "x86.sse2.min.sd" [T.doublex2; T.doublex2] T.doublex2
   | "caml_sse2_float64_max" ->
     do_intrinsic_call "x86.sse2.max.sd" [T.doublex2; T.doublex2] T.doublex2
+  | "caml_sse41_vec128_testz" -> sse41_vec128_ptest `Testz
+  | "caml_sse41_vec128_testc" -> sse41_vec128_ptest `Testc
+  | "caml_sse41_vec128_testnzc" -> sse41_vec128_ptest `Testnzc
   | "caml_rdtsc_unboxed" -> do_intrinsic_call "readcyclecounter" [] T.i64
   | "caml_rdpmc_unboxed" -> do_intrinsic_call "x86.rdpmc" [T.i32] T.i64
   | _ -> not_implemented_basic ~msg:"specific intrinsic" i

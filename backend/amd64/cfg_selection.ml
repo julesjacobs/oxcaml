@@ -141,7 +141,10 @@ let is_llvm_intrinsic_builtin = function
   | "caml_simd_float64_max" | "caml_simd_cast_float64_int64"
   | "caml_simd_float64_round_current" | "caml_simd_float64_round_neg_inf"
   | "caml_simd_float64_round_pos_inf" | "caml_simd_float64_round_towards_zero"
-  | "caml_sse2_float64_min" | "caml_sse2_float64_max" ->
+  | "caml_sse2_float64_min" | "caml_sse2_float64_max"
+  | "caml_sse41_vec128_testz"
+  | "caml_sse41_vec128_testc"
+  | "caml_sse41_vec128_testnzc" ->
     true
   | _ -> false
 
