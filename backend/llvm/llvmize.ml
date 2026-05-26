@@ -3071,6 +3071,48 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int16_haddsub_saturating (op : I.binary_op) =
+    let typ = int_vec_type ~width_in_bits:16 in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let elem arg lane =
+      let elem =
+        emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int lane))
+      in
+      emit_ins t (I.convert Sext ~arg:elem ~to_:T.i32)
+    in
+    let min_value = V.of_int ~typ:T.i32 (-32768) in
+    let max_value = V.of_int ~typ:T.i32 32767 in
+    let saturate value =
+      let below_min = emit_ins t (I.icmp I.Islt ~arg1:value ~arg2:min_value) in
+      let above_max = emit_ins t (I.icmp I.Isgt ~arg1:value ~arg2:max_value) in
+      let clamped_min =
+        emit_ins t (I.select ~cond:below_min ~ifso:min_value ~ifnot:value)
+      in
+      emit_ins t (I.select ~cond:above_max ~ifso:max_value ~ifnot:clamped_min)
+    in
+    let res =
+      List.init 8 Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let src, src_lane =
+               if lane < 4 then arg1, 2 * lane else arg2, 2 * (lane - 4)
+             in
+             let wide =
+               emit_ins t
+                 (I.binary op ~arg1:(elem src src_lane)
+                    ~arg2:(elem src (src_lane + 1)))
+             in
+             let narrowed =
+               emit_ins t (I.convert Trunc ~arg:(saturate wide) ~to_:T.i16)
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane)
+                  ~to_insert:narrowed))
+           (V.poison typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_float_unary_intrinsic width intrinsic =
     let typ = float_vec_type ~width in
     let name = intrinsic ^ "." ^ llvm_intrinsic_type_suffix typ in
@@ -3984,12 +4026,18 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | Amd64_simd_instrs.Phaddd_X_Xm128
     | Amd64_simd_instrs.Vphaddd_X_X_Xm128 ->
       simd_int_haddsub 32 Add
+    | Amd64_simd_instrs.Phaddsw_X_Xm128
+    | Amd64_simd_instrs.Vphaddsw_X_X_Xm128 ->
+      simd_int16_haddsub_saturating Add
     | Amd64_simd_instrs.Phsubw_X_Xm128
     | Amd64_simd_instrs.Vphsubw_X_X_Xm128 ->
       simd_int_haddsub 16 Sub
     | Amd64_simd_instrs.Phsubd_X_Xm128
     | Amd64_simd_instrs.Vphsubd_X_X_Xm128 ->
       simd_int_haddsub 32 Sub
+    | Amd64_simd_instrs.Phsubsw_X_Xm128
+    | Amd64_simd_instrs.Vphsubsw_X_X_Xm128 ->
+      simd_int16_haddsub_saturating Sub
     | Amd64_simd_instrs.Maxpd | Amd64_simd_instrs.Vmaxpd_X_X_Xm128 ->
       simd_x86_intrinsic "x86.sse2.max.pd"
         [float_vec_type ~width:Cmm.Float64; float_vec_type ~width:Cmm.Float64]
