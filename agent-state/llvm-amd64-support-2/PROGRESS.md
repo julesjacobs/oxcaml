@@ -436,6 +436,32 @@ passes, and `llvm-self-stage2-test` passes.
   - the repeated run also exercised `tests/llvm-codegen/amd64_regressions.ml`
     in the full self-stage2 suite and ended with wrapper log summary:
     `wrapper lines: 6598`, `fresh ir: 3299`.
+- Rebase onto current LLVM integration:
+  - preserved the pre-rebase PR head
+    `b9ae72710aac968362366aaa912e8b10440f87ae` on pushed backup branch
+    `jujacobs/llvm-amd64-support-2-backup-20260525-181620`;
+  - reconstructed `jujacobs/llvm-amd64-support-2` on
+    `origin/jujacobs/llvm-backend-integration` at
+    `32d7ad2f69f833ccd2cea55ef739d970eb9acf66`;
+  - resolved stack-check/frame-pointer attribute conflicts by preserving AMD64
+    `No_realign_stack` and integrating the new stack-check byte attributes;
+  - fixed the post-rebase compiler build by handling
+    `Oxcaml_stack_check_bytes` and `Oxcaml_stack_check_before_bytes` in
+    `is_gc_leaf_call`;
+  - added `LLVM_BUILD_STACK_SIZE` stack-limit guards to LLVM make/script paths;
+    the default is `unlimited`, while `keep` preserves the caller's limit;
+  - marked `testsuite/tests/misc/pr7168.ml` `only-default-codegen` because its
+    explicit `OCAMLRUNPARAM l=100000` stress cap is not compatible with
+    LLVM-built compiler suite runs and can leak a tiny stack cap into following
+    tests;
+  - verified `opam exec -- make compiler LLVM_BACKEND=0 LLVM_BOOT_BACKEND=0`;
+  - verified full `llvm-test` with `TMPDIR="$PWD/_tmp"`:
+    `6715 passed`, `289 skipped`, `0 failed`, `7004 considered`;
+  - verified full `llvm-self-stage2-test` with `TMPDIR="$PWD/_tmp"`:
+    `6682 passed`, `278 skipped`, `0 failed`, `6960 considered`, with wrapper
+    summary `6594` lines and `3297` fresh IR;
+  - verified `git diff --check`, `bash -n` on LLVM stage/test scripts, and an
+    exact conflict-marker scan excluding generated/vendor directories.
 
 ## Current Blocker
 

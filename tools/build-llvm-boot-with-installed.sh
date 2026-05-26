@@ -33,6 +33,10 @@ if [ -n "${DUNE_BUILD_FLAGS:-}" ]; then
   read -r -a dune_build_flags <<< "$DUNE_BUILD_FLAGS"
 fi
 
+if [ "${LLVM_BUILD_STACK_SIZE:-unlimited}" != keep ]; then
+  ulimit -s "${LLVM_BUILD_STACK_SIZE:-unlimited}" || true
+fi
+
 if [ -z "$arch" ]; then
   case "$(uname -m)" in
     arm64|aarch64) arch=arm64 ;;

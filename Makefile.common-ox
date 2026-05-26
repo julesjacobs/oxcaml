@@ -22,11 +22,13 @@ LLVM_BUILD_OCAMLPARAM := $(if $(BUILD_OCAMLPARAM),$(BUILD_OCAMLPARAM),_),llvm-ba
 override BUILD_OCAMLPARAM := $(LLVM_BUILD_OCAMLPARAM)
 override OCAMLPARAM := $(if $(OCAMLPARAM),$(OCAMLPARAM),_),llvm-backend=1,llvm-path=$(LLVM_PATH)
 export OCAMLPARAM
+llvm_stack_limit = ulimit -s $${LLVM_BUILD_STACK_SIZE:-unlimited} || true;
 endif
 
 ifeq ($(LLVM_BOOT_BACKEND),1)
 LLVM_PATH ?= /tmp/oxcaml-clang-wrapper
 LLVM_BOOT_INSTALL ?= $(CURDIR)/_install
+llvm_stack_limit ?= ulimit -s $${LLVM_BUILD_STACK_SIZE:-unlimited} || true;
 BOOT_OCAMLPARAM := _,llvm-backend=1,llvm-path=$(LLVM_PATH)
 BOOT_PATHS := \
   (paths \
@@ -108,13 +110,13 @@ boot_targets = \
   ocamltest/ocamltest.native
 
 boot-compiler: _build/_bootinstall
-	RUNTIME_DIR=$(RUNTIME_DIR) $(dune) build $(ws_boot) $(coverage_dune_flags) $(boot_targets)
+	$(llvm_stack_limit) RUNTIME_DIR=$(RUNTIME_DIR) $(dune) build $(ws_boot) $(coverage_dune_flags) $(boot_targets)
 
 boot-runtest: boot-compiler
-	RUNTIME_DIR=$(RUNTIME_DIR) $(dune) runtest $(ws_boot) $(coverage_dune_flags) --force
+	$(llvm_stack_limit) RUNTIME_DIR=$(RUNTIME_DIR) $(dune) runtest $(ws_boot) $(coverage_dune_flags) --force
 
 runtime-stdlib: boot-compiler
-	RUNTIME_DIR=$(RUNTIME_DIR) $(dune) build $(ws_runstd) --only-package=ocaml_runtime_stdlib @install
+	$(llvm_stack_limit) RUNTIME_DIR=$(RUNTIME_DIR) $(dune) build $(ws_runstd) --only-package=ocaml_runtime_stdlib @install
 	rm -rf _build/runtime_stdlib_install
 # Dune 3.11+ clears `_build/install` before building, move the runtime stdlib
 # to a separate directory.
@@ -128,10 +130,10 @@ runtime-stdlib: boot-compiler
 # This target is a polling version of "make runtime-stdlib"
 .PHONY: runtime-stdlib-hacking
 runtime-stdlib-hacking: boot-compiler
-	RUNTIME_DIR=$(RUNTIME_DIR) $(dune) build -w $(ws_runstd) --only-package=ocaml_runtime_stdlib @install
+	$(llvm_stack_limit) RUNTIME_DIR=$(RUNTIME_DIR) $(dune) build -w $(ws_runstd) --only-package=ocaml_runtime_stdlib @install
 
 compiler: runtime-stdlib
-	RUNTIME_DIR=$(RUNTIME_DIR) SYSTEM=$(SYSTEM) MODEL=$(MODEL) \
+	$(llvm_stack_limit) RUNTIME_DIR=$(RUNTIME_DIR) SYSTEM=$(SYSTEM) MODEL=$(MODEL) \
           ASPP="$(ASPP)" ASPPFLAGS="$(ASPPFLAGS)" \
           $(dune) build $(ws_main) \
           --only-package=ocaml @install \
@@ -147,7 +149,7 @@ compiler: runtime-stdlib
 
 .PHONY: minimize-failure
 minimize-failure: boot-minimizer boot-compiler runtime-stdlib
-	RUNTIME_DIR=$(RUNTIME_DIR) SYSTEM=$(SYSTEM) MODEL=$(MODEL) \
+	$(llvm_stack_limit) RUNTIME_DIR=$(RUNTIME_DIR) SYSTEM=$(SYSTEM) MODEL=$(MODEL) \
           ASPP="$(ASPP)" ASPPFLAGS="$(ASPPFLAGS)" \
           ./_build/default/chamelon/chamelon.exe dune build \
           $(ws_main) \
@@ -163,7 +165,7 @@ minimize-failure: boot-minimizer boot-compiler runtime-stdlib
 
 .PHONY: minimize-stdlib
 minimize-stdlib: boot-minimizer boot-compiler
-	RUNTIME_DIR=$(RUNTIME_DIR) \
+	$(llvm_stack_limit) RUNTIME_DIR=$(RUNTIME_DIR) \
           ./_build/default/chamelon/chamelon.exe dune build \
           $(ws_runstd) \
           --only-packages=ocaml_runtime_stdlib @install
@@ -173,13 +175,13 @@ minimize-stdlib: boot-minimizer boot-compiler
 # and implement [runtest-upstream-boot] for testing when the final compiler
 # itself is miscompiled.
 runtest: compiler
-	RUNTIME_DIR=$(RUNTIME_DIR) OXCAML_NAME_MANGLING=$(NAME_MANGLING_SCHEME) OXCAML_POLL_INSERTION=$(POLL_INSERTION) $(dune) runtest $(ws_main)
+	$(llvm_stack_limit) RUNTIME_DIR=$(RUNTIME_DIR) OXCAML_NAME_MANGLING=$(NAME_MANGLING_SCHEME) OXCAML_POLL_INSERTION=$(POLL_INSERTION) $(dune) runtest $(ws_main)
 
 runtest-llvmize: compiler
-	RUNTIME_DIR=$(RUNTIME_DIR) OXCAML_NAME_MANGLING=$(NAME_MANGLING_SCHEME) $(dune) build @runtest-llvmize $(ws_main)
+	$(llvm_stack_limit) RUNTIME_DIR=$(RUNTIME_DIR) OXCAML_NAME_MANGLING=$(NAME_MANGLING_SCHEME) $(dune) build @runtest-llvmize $(ws_main)
 
 runtest-dwarf: compiler
-	RUNTIME_DIR=$(RUNTIME_DIR) OXCAML_NAME_MANGLING=$(NAME_MANGLING_SCHEME) $(dune) build @runtest-dwarf $(ws_main)
+	$(llvm_stack_limit) RUNTIME_DIR=$(RUNTIME_DIR) OXCAML_NAME_MANGLING=$(NAME_MANGLING_SCHEME) $(dune) build @runtest-dwarf $(ws_main)
 
 # This Makefile supports old versions that don't have $(file), so we're using
 # environment var trickery to get a multiline string into a file
@@ -456,7 +458,7 @@ test: install_for_test
 	  done > _runtest/flambda2-test-list; \
 	fi
 	find _runtest/testsuite/tests -name '*.corrected' -delete
-	(export OCAMLSRCDIR=$$(pwd)/_runtest; \
+	($(llvm_stack_limit) export OCAMLSRCDIR=$$(pwd)/_runtest; \
 	 export CAML_LD_LIBRARY_PATH=$$(pwd)/_runtest/lib/ocaml/stublibs; \
 	 if $$(which gfortran > /dev/null 2>&1); then \
 	   export LIBRARY_PATH=$$(dirname $$(gfortran -print-file-name=libgfortran.a)); \
@@ -480,7 +482,7 @@ test: install_for_test
              fi)
 
 promote-failed:
-	(export OCAMLSRCDIR=$$(pwd)/_runtest; \
+	($(llvm_stack_limit) export OCAMLSRCDIR=$$(pwd)/_runtest; \
 	 export CAML_LD_LIBRARY_PATH=$$(pwd)/_runtest/lib/ocaml/stublibs; \
 	 if $$(which gfortran > /dev/null 2>&1); then \
 	   export LIBRARY_PATH=$$(dirname $$(gfortran -print-file-name=libgfortran.a)); \
@@ -540,7 +542,7 @@ locate_test = \
 
 test-one-no-rebuild:
 	find _runtest/testsuite/tests -name '*.corrected' -delete
-	(export OCAMLSRCDIR=$$(pwd)/_runtest; \
+	($(llvm_stack_limit) export OCAMLSRCDIR=$$(pwd)/_runtest; \
 	 export CAML_LD_LIBRARY_PATH=$$(pwd)/_runtest/lib/ocaml/stublibs; \
 	 if $$(which gfortran > /dev/null 2>&1); then \
 	   export LIBRARY_PATH=$$(dirname $$(gfortran -print-file-name=libgfortran.a)); \
@@ -551,7 +553,7 @@ promote-one: install_for_test
 	$(MAKE) promote-one-no-rebuild
 
 promote-one-no-rebuild:
-	(export OCAMLSRCDIR=$$(pwd)/_runtest; \
+	($(llvm_stack_limit) export OCAMLSRCDIR=$$(pwd)/_runtest; \
 	 export CAML_LD_LIBRARY_PATH=$$(pwd)/_runtest/lib/ocaml/stublibs; \
 	 if $$(which gfortran > /dev/null 2>&1); then \
 	   export LIBRARY_PATH=$$(dirname $$(gfortran -print-file-name=libgfortran.a)); \

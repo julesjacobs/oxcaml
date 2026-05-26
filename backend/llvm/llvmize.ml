@@ -849,7 +849,8 @@ let is_gc_leaf_call attrs =
       | LL.Fn_attr.Gc_leaf_function -> true
       | LL.Fn_attr.Cold | LL.Fn_attr.Frame_pointer_all | LL.Fn_attr.Gc _
       | LL.Fn_attr.Noinline | LL.Fn_attr.No_realign_stack
-      | LL.Fn_attr.Oxcaml_stack_check
+      | LL.Fn_attr.Oxcaml_stack_check | LL.Fn_attr.Oxcaml_stack_check_bytes _
+      | LL.Fn_attr.Oxcaml_stack_check_before_bytes _
       | LL.Fn_attr.Returns_twice | LL.Fn_attr.Statepoint_id _ ->
         false)
     attrs
