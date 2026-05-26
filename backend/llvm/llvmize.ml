@@ -3302,6 +3302,39 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int16_minpos_unsigned () =
+    let typ = int_vec_type ~width_in_bits:16 in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let elem lane =
+      emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int lane))
+    in
+    let min_value, min_index =
+      List.init 7 (fun lane -> lane + 1)
+      |> List.fold_left
+           (fun (min_value, min_index) lane ->
+             let value = elem lane in
+             let is_less = emit_ins t (I.icmp I.Iult ~arg1:value ~arg2:min_value) in
+             let min_value =
+               emit_ins t (I.select ~cond:is_less ~ifso:value ~ifnot:min_value)
+             in
+             let min_index =
+               emit_ins t
+                 (I.select ~cond:is_less ~ifso:(V.of_int ~typ:T.i16 lane)
+                    ~ifnot:min_index)
+             in
+             min_value, min_index)
+           (elem 0, V.of_int ~typ:T.i16 0)
+    in
+    let res =
+      emit_ins t
+        (I.insertelement ~vector:(V.zeroinitializer typ) ~index:(V.of_int 0)
+           ~to_insert:min_value)
+      |> fun vector ->
+      emit_ins t
+        (I.insertelement ~vector ~index:(V.of_int 1) ~to_insert:min_index)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_haddsub width_in_bits (op : I.binary_op) =
     let typ = int_vec_type ~width_in_bits in
     let lanes = 128 / width_in_bits in
@@ -4443,6 +4476,8 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_float_round Cmm.Float32 (simd_rounding_mode_of_imm (simd_imm imm))
     | Amd64_simd_instrs.Roundpd | Amd64_simd_instrs.Vroundpd_X_Xm128 ->
       simd_float_round Cmm.Float64 (simd_rounding_mode_of_imm (simd_imm imm))
+    | Amd64_simd_instrs.Phminposuw | Amd64_simd_instrs.Vphminposuw ->
+      simd_int16_minpos_unsigned ()
     | Amd64_simd_instrs.Phaddw_X_Xm128
     | Amd64_simd_instrs.Vphaddw_X_X_Xm128 ->
       simd_int_haddsub 16 Add
