@@ -97,6 +97,9 @@ root handling.
   `opam exec --switch=oxcaml-5.4.0+oxcaml -- env make llvm-test LLVM_PATH="$LLVM_PATH"`
   reports 6719 passed, 293 skipped, 0 failed, 0 not started, 0 unexpected
   errors.
+- Added `llvm-test-no-rebuild` and `llvm-test-one-no-rebuild` for cheap reruns
+  that keep the same LLVM-backend test-run environment while skipping the
+  expensive `install_for_test` refresh.
 - Build/test latency notes are being kept in
   `agent-state/llvm-fast-path-roots-integration/BUILD_TEST_LATENCY_NOTES.md`.
 
