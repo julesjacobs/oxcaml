@@ -204,6 +204,7 @@ let is_llvm_simd_builtin = function
   | "caml_ssse3_int8x16_mulsign"
   | "caml_ssse3_int16x8_mulsign"
   | "caml_ssse3_int32x4_mulsign"
+  | "caml_ssse3_vec128_shuffle_8"
   | "caml_ssse3_int16x8_hadd"
   | "caml_ssse3_int32x4_hadd"
   | "caml_ssse3_int16x8_hadd_saturating"

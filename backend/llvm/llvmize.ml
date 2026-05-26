@@ -2420,6 +2420,41 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let res = emit_ins t (I.select ~cond:is_zero ~ifso:zero ~ifnot:signed) in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_byte_shuffle () =
+    let typ = int_vec_type ~width_in_bits:8 in
+    let src = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let mask = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let res =
+      List.init 16 Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let selector =
+               emit_ins t (I.extractelement ~vector:mask ~index:(V.of_int lane))
+             in
+             let zero_lane =
+               emit_ins t
+                 (I.icmp Islt ~arg1:selector ~arg2:(V.of_int ~typ:T.i8 0))
+             in
+             let src_lane =
+               emit_ins t
+                 (I.binary And ~arg1:selector
+                    ~arg2:(V.of_int ~typ:T.i8 0x0f))
+               |> fun lane -> emit_ins t (I.convert Zext ~arg:lane ~to_:T.i32)
+             in
+             let selected =
+               emit_ins t (I.extractelement ~vector:src ~index:src_lane)
+             in
+             let elem =
+               emit_ins t
+                 (I.select ~cond:zero_lane ~ifso:(V.of_int ~typ:T.i8 0)
+                    ~ifnot:selected)
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane) ~to_insert:elem))
+           (V.poison typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_unary_intrinsic typ intrinsic =
     let name = intrinsic ^ "." ^ llvm_intrinsic_type_suffix typ in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -4077,6 +4112,9 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | Amd64_simd_instrs.Psignd_X_Xm128
     | Amd64_simd_instrs.Vpsignd_X_X_Xm128 ->
       simd_int_mulsign 32
+    | Amd64_simd_instrs.Pshufb_X_Xm128
+    | Amd64_simd_instrs.Vpshufb_X_X_Xm128 ->
+      simd_byte_shuffle ()
     | Amd64_simd_instrs.Phaddw_X_Xm128
     | Amd64_simd_instrs.Vphaddw_X_X_Xm128 ->
       simd_int_haddsub 16 Add
