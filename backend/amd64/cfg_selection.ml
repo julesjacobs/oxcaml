@@ -235,6 +235,8 @@ let is_llvm_simd_builtin = function
   | "caml_sse41_cvtzx_int16x8_int32x4"
   | "caml_sse41_cvtzx_int16x8_int64x2"
   | "caml_sse41_cvtzx_int32x4_int64x2"
+  | "caml_sse41_int32x4_mul_even"
+  | "caml_sse41_int32x4_mul_low"
   | "caml_sse2_int8x16_sad_unsigned"
   | "caml_sse2_int16x8_mul_high"
   | "caml_sse2_int16x8_mul_high_unsigned"
