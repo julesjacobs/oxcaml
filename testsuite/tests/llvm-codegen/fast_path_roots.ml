@@ -20,7 +20,7 @@ let poll_select x y n =
 val poll_select : 'a -> 'a -> int -> 'a = <fun>
 |}]
 
-[%%expect_llvm_ir AArch64{|define  oxcaml_fpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__poll_select_0_1_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3, i64 %4) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
+[%%expect_llvm_ir AArch64{|define  oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__poll_select_0_1_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3, i64 %4) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
   %ds = alloca i64
   store i64 %0, ptr %ds
   %alloc = alloca i64
@@ -106,11 +106,10 @@ L115:
 [%%expect_llvm_asm AArch64{|_camlTOP__poll_select_0_1_code:
 	.cfi_startproc
 ; %bb.0:                                ; %L1
-	stp	x29, x30, [sp, #-16]!           ; 16-byte Folded Spill
+	sub	sp, sp, #16
 	.cfi_def_cfa_offset 16
-	mov	x29, sp
-	.cfi_offset w30, -8
-	.cfi_offset w29, -16
+	str	x30, [sp, #8]                   ; 8-byte Folded Spill
+	.cfi_offset w30, -16
 	sub	sp, sp, #16
 	.cfi_def_cfa_offset 32
 	ldr	x8, [x28]
@@ -124,7 +123,7 @@ LBB0_2:                                 ; %L119
 	csel	x0, x0, x1, eq
 	mov	x28, x4
 	mov	x27, x3
-	ldp	x29, x30, [sp, #16]             ; 16-byte Folded Reload
+	ldr	x30, [sp, #24]                  ; 8-byte Folded Reload
 	add	sp, sp, #32
 	ret
 LBB0_3:                                 ; %L118
@@ -149,7 +148,7 @@ let poll_const_int x =
 val poll_const_int : String.t -> int = <fun>
 |}]
 
-[%%expect_llvm_ir AArch64{|define  oxcaml_fpcc { { i64, i64 }, { i64 } } @"\01_camlTOP__poll_const_int_2_3_code"(i64 %0, i64 %1, ptr addrspace(1) %2) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
+[%%expect_llvm_ir AArch64{|define  oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_camlTOP__poll_const_int_2_3_code"(i64 %0, i64 %1, ptr addrspace(1) %2) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
   %ds = alloca i64
   store i64 %0, ptr %ds
   %alloc = alloca i64
@@ -255,11 +254,10 @@ L145:
 [%%expect_llvm_asm AArch64{|_camlTOP__poll_const_int_2_3_code:
 	.cfi_startproc
 ; %bb.0:                                ; %L1
-	stp	x29, x30, [sp, #-16]!           ; 16-byte Folded Spill
+	sub	sp, sp, #16
 	.cfi_def_cfa_offset 16
-	mov	x29, sp
-	.cfi_offset w30, -8
-	.cfi_offset w29, -16
+	str	x30, [sp, #8]                   ; 8-byte Folded Spill
+	.cfi_offset w30, -16
 	sub	sp, sp, #16
 	.cfi_def_cfa_offset 32
 	ldr	x8, [x28]
@@ -279,7 +277,7 @@ LBB0_2:                                 ; %L145
 	add	x0, x8, #83
 	mov	x28, x2
 	mov	x27, x1
-	ldp	x29, x30, [sp, #16]             ; 16-byte Folded Reload
+	ldr	x30, [sp, #24]                  ; 8-byte Folded Reload
 	add	sp, sp, #32
 	ret
 LBB0_3:                                 ; %L144
@@ -304,7 +302,7 @@ let poll_under_trap x y f =
 val poll_under_trap : 'a -> 'a -> (unit -> 'b) -> 'a = <fun>
 |}]
 
-[%%expect_llvm_ir AArch64{|define  oxcaml_fpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__poll_under_trap_4_5_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3, ptr addrspace(1) %4) "oxcaml-stack-check"="true" "oxcaml-stack-check-before-bytes"="0" "oxcaml-stack-check-bytes"="48" noinline gc "oxcaml" personality ptr @"\01_caml_llvm_eh_personality" {
+[%%expect_llvm_ir AArch64{|define  oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__poll_under_trap_4_5_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3, ptr addrspace(1) %4) "oxcaml-stack-check"="true" "oxcaml-stack-check-before-bytes"="0" "oxcaml-stack-check-bytes"="48" noinline gc "oxcaml" personality ptr @"\01_caml_llvm_eh_personality" {
   %ds = alloca i64
   store i64 %0, ptr %ds
   %alloc = alloca i64
@@ -373,7 +371,7 @@ L176:
   store volatile i64 %49, ptr %14
   %50 = load i64, ptr %ds
   %51 = load i64, ptr %alloc
-  %52 = call oxcaml_fpcc { { i64, i64 }, { i64 } } @"\01_wrap_try"(i64 %50, i64 %51) returns_twice "gc-leaf-function"="true"
+  %52 = call oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_wrap_try"(i64 %50, i64 %51) returns_twice "gc-leaf-function"="true"
   %53 = extractvalue { { i64, i64 }, { i64 } } %52, 0, 0
   %54 = extractvalue { { i64, i64 }, { i64 } } %52, 0, 1
   store i64 %53, ptr %ds
@@ -454,7 +452,7 @@ L182:
   %98 = load i64, ptr %ds
   %99 = load i64, ptr %alloc
   %100 = load ptr, ptr %19
-  %101 = invoke oxcaml_fpcc { { i64, i64 }, { ptr addrspace(1) } } %100(i64 %98, i64 %99, i64 %96, ptr addrspace(1) %97) "statepoint-id"="0" [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 4, i64 0, i64 4, i64 8, i64 0, i64 8, i64 0, i64 20, i64 5263188, i64 7351860, i64 7105647, i64 7239007, i64 7497060, i64 7500895, i64 28769), "gc-live"(ptr %10, ptr %11) ] to label %L185 unwind label %L184
+  %101 = invoke oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } %100(i64 %98, i64 %99, i64 %96, ptr addrspace(1) %97) "statepoint-id"="0" [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 4, i64 0, i64 4, i64 8, i64 0, i64 8, i64 0, i64 20, i64 5263188, i64 7351860, i64 7105647, i64 7239007, i64 7497060, i64 7500895, i64 28769), "gc-live"(ptr %10, ptr %11) ] to label %L185 unwind label %L184
 L185:
   %102 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %101, 0, 0
   %103 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %101, 0, 1
@@ -518,11 +516,10 @@ Lfunc_begin0:
 	.cfi_personality 155, _caml_llvm_eh_personality
 	.cfi_lsda 16, Lexception0
 ; %bb.0:                                ; %L1
-	stp	x29, x30, [sp, #-16]!           ; 16-byte Folded Spill
+	sub	sp, sp, #16
 	.cfi_def_cfa_offset 16
-	mov	x29, sp
-	.cfi_offset w30, -8
-	.cfi_offset w29, -16
+	str	x30, [sp, #8]                   ; 8-byte Folded Spill
+	.cfi_offset w30, -16
 	sub	sp, sp, #80
 	.cfi_def_cfa_offset 96
 	mov	x9, x0
@@ -637,7 +634,7 @@ LBB0_6:                                 ; %common.ret
 	ldr	x0, [x8]
 	mov	x28, x2
 	mov	x27, x1
-	ldp	x29, x30, [sp, #80]             ; 16-byte Folded Reload
+	ldr	x30, [sp, #88]                  ; 8-byte Folded Reload
 	add	sp, sp, #96
 	ret
 LBB0_7:                                 ; %L175
@@ -704,7 +701,7 @@ let poll_no_roots n =
 val poll_no_roots : int -> int = <fun>
 |}]
 
-[%%expect_llvm_ir AArch64{|define  oxcaml_fpcc { { i64, i64 }, { i64 } } @"\01_camlTOP__poll_no_roots_6_7_code"(i64 %0, i64 %1, i64 %2) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
+[%%expect_llvm_ir AArch64{|define  oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_camlTOP__poll_no_roots_6_7_code"(i64 %0, i64 %1, i64 %2) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
   %ds = alloca i64
   store i64 %0, ptr %ds
   %alloc = alloca i64
@@ -756,26 +753,25 @@ L201:
 [%%expect_llvm_asm AArch64{|_camlTOP__poll_no_roots_6_7_code:
 	.cfi_startproc
 ; %bb.0:                                ; %L1
-	stp	x29, x30, [sp, #-16]!           ; 16-byte Folded Spill
+	sub	sp, sp, #16
 	.cfi_def_cfa_offset 16
-	mov	x29, sp
-	.cfi_offset w30, -8
-	.cfi_offset w29, -16
+	str	x30, [sp, #8]                   ; 8-byte Folded Spill
+	.cfi_offset w30, -16
 	ldr	x8, [x28]
 	cmp	x8, x27
 	b.hs	LBB0_2
-LBB0_1:                                 ; %L201
-	mov	x1, x27
-	mov	x2, x28
+; %bb.1:                                ; %L201
 	add	x0, x0, #2
-	mov	x28, x2
-	mov	x27, x1
-	ldp	x29, x30, [sp], #16             ; 16-byte Folded Reload
+	ldr	x30, [sp, #8]                   ; 8-byte Folded Reload
+	add	sp, sp, #16
 	ret
 LBB0_2:                                 ; %L200
 	bl	_caml_call_gc
 Ltmp0:
-	b	LBB0_1
+	add	x0, x0, #2
+	ldr	x30, [sp, #8]                   ; 8-byte Folded Reload
+	add	sp, sp, #16
+	ret
 	.cfi_endproc|}]
 
 let poll_boxed_float_root (x : float) n =
@@ -787,7 +783,7 @@ let poll_boxed_float_root (x : float) n =
 val poll_boxed_float_root : float -> int -> int = <fun>
 |}]
 
-[%%expect_llvm_ir AArch64{|define  oxcaml_fpcc { { i64, i64 }, { i64 } } @"\01_camlTOP__poll_boxed_float_root_8_9_code"(i64 %0, i64 %1, ptr addrspace(1) %2, i64 %3) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
+[%%expect_llvm_ir AArch64{|define  oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_camlTOP__poll_boxed_float_root_8_9_code"(i64 %0, i64 %1, ptr addrspace(1) %2, i64 %3) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
   %ds = alloca i64
   store i64 %0, ptr %ds
   %alloc = alloca i64
@@ -886,11 +882,10 @@ L219:
 [%%expect_llvm_asm AArch64{|_camlTOP__poll_boxed_float_root_8_9_code:
 	.cfi_startproc
 ; %bb.0:                                ; %L1
-	stp	x29, x30, [sp, #-16]!           ; 16-byte Folded Spill
+	sub	sp, sp, #16
 	.cfi_def_cfa_offset 16
-	mov	x29, sp
-	.cfi_offset w30, -8
-	.cfi_offset w29, -16
+	str	x30, [sp, #8]                   ; 8-byte Folded Spill
+	.cfi_offset w30, -16
 	sub	sp, sp, #16
 	.cfi_def_cfa_offset 32
 	ldr	x8, [x28]
@@ -908,7 +903,7 @@ LBB0_2:                                 ; %L224
 	add	x0, x8, x1
 	mov	x28, x3
 	mov	x27, x2
-	ldp	x29, x30, [sp, #16]             ; 16-byte Folded Reload
+	ldr	x30, [sp, #24]                  ; 8-byte Folded Reload
 	add	sp, sp, #32
 	ret
 LBB0_3:                                 ; %L223
@@ -930,7 +925,7 @@ let poll_many_roots x y z n =
 val poll_many_roots : 'a -> 'a -> 'a -> int -> 'a = <fun>
 |}]
 
-[%%expect_llvm_ir AArch64{|define  oxcaml_fpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__poll_many_roots_10_11_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3, ptr addrspace(1) %4, i64 %5) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
+[%%expect_llvm_ir AArch64{|define  oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__poll_many_roots_10_11_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3, ptr addrspace(1) %4, i64 %5) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
   %ds = alloca i64
   store i64 %0, ptr %ds
   %alloc = alloca i64
@@ -1044,30 +1039,34 @@ L246:
 [%%expect_llvm_asm AArch64{|_camlTOP__poll_many_roots_10_11_code:
 	.cfi_startproc
 ; %bb.0:                                ; %L1
-	stp	x29, x30, [sp, #-16]!           ; 16-byte Folded Spill
+	sub	sp, sp, #16
 	.cfi_def_cfa_offset 16
-	mov	x29, sp
-	.cfi_offset w30, -8
-	.cfi_offset w29, -16
+	str	x30, [sp, #8]                   ; 8-byte Folded Spill
+	.cfi_offset w30, -16
 	sub	sp, sp, #32
 	.cfi_def_cfa_offset 48
 	ldr	x8, [x28]
 	cmp	x8, x27
-	b.hs	LBB0_3
+	b.hs	LBB0_5
 ; %bb.1:
 	mov	x4, x27
 	mov	x5, x28
-LBB0_2:                                 ; %L251
-	cmp	x3, #1
-	csel	x8, x2, x0, ne
 	cmp	x3, #3
-	csel	x0, x1, x8, eq
+	b.eq	LBB0_4
+LBB0_2:                                 ; %L251
+	mov	x1, x0
+	cmp	x3, #1
+	b.eq	LBB0_4
+; %bb.3:                                ; %L246
+	mov	x1, x2
+LBB0_4:                                 ; %common.ret
 	mov	x28, x5
 	mov	x27, x4
-	ldp	x29, x30, [sp, #32]             ; 16-byte Folded Reload
+	mov	x0, x1
+	ldr	x30, [sp, #40]                  ; 8-byte Folded Reload
 	add	sp, sp, #48
 	ret
-LBB0_3:                                 ; %L250
+LBB0_5:                                 ; %L250
 	str	x0, [sp, #24]
 	str	x1, [sp, #16]
 	str	x2, [sp, #8]
@@ -1078,7 +1077,9 @@ Ltmp0:
 	ldr	x0, [sp, #24]
 	ldr	x1, [sp, #16]
 	ldr	x2, [sp, #8]
-	b	LBB0_2
+	cmp	x3, #3
+	b.ne	LBB0_2
+	b	LBB0_4
 	.cfi_endproc|}]
 
 let poll_aliased_roots x n =
@@ -1091,7 +1092,7 @@ let poll_aliased_roots x n =
 val poll_aliased_roots : 'a -> int -> 'a = <fun>
 |}]
 
-[%%expect_llvm_ir AArch64{|define  oxcaml_fpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__poll_aliased_roots_12_13_code"(i64 %0, i64 %1, ptr addrspace(1) %2, i64 %3) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
+[%%expect_llvm_ir AArch64{|define  oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__poll_aliased_roots_12_13_code"(i64 %0, i64 %1, ptr addrspace(1) %2, i64 %3) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
   %ds = alloca i64
   store i64 %0, ptr %ds
   %alloc = alloca i64
@@ -1178,11 +1179,10 @@ L269:
 [%%expect_llvm_asm AArch64{|_camlTOP__poll_aliased_roots_12_13_code:
 	.cfi_startproc
 ; %bb.0:                                ; %L1
-	stp	x29, x30, [sp, #-16]!           ; 16-byte Folded Spill
+	sub	sp, sp, #16
 	.cfi_def_cfa_offset 16
-	mov	x29, sp
-	.cfi_offset w30, -8
-	.cfi_offset w29, -16
+	str	x30, [sp, #8]                   ; 8-byte Folded Spill
+	.cfi_offset w30, -16
 	sub	sp, sp, #16
 	.cfi_def_cfa_offset 32
 	; InlineAsm Start
@@ -1199,7 +1199,7 @@ LBB0_2:                                 ; %L273
 	csel	x0, x0, x8, eq
 	mov	x28, x3
 	mov	x27, x2
-	ldp	x29, x30, [sp, #16]             ; 16-byte Folded Reload
+	ldr	x30, [sp, #24]                  ; 8-byte Folded Reload
 	add	sp, sp, #32
 	ret
 LBB0_3:                                 ; %L272
@@ -1225,7 +1225,7 @@ let poll_twice_varying_roots x y z n =
 val poll_twice_varying_roots : 'a -> 'a -> 'a -> int -> 'a = <fun>
 |}]
 
-[%%expect_llvm_ir AArch64{|define  oxcaml_fpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__poll_twice_varying_roots_14_15_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3, ptr addrspace(1) %4, i64 %5) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
+[%%expect_llvm_ir AArch64{|define  oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__poll_twice_varying_roots_14_15_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3, ptr addrspace(1) %4, i64 %5) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
   %ds = alloca i64
   store i64 %0, ptr %ds
   %alloc = alloca i64
@@ -1372,11 +1372,10 @@ L301:
 [%%expect_llvm_asm AArch64{|_camlTOP__poll_twice_varying_roots_14_15_code:
 	.cfi_startproc
 ; %bb.0:                                ; %L1
-	stp	x29, x30, [sp, #-16]!           ; 16-byte Folded Spill
+	sub	sp, sp, #16
 	.cfi_def_cfa_offset 16
-	mov	x29, sp
-	.cfi_offset w30, -8
-	.cfi_offset w29, -16
+	str	x30, [sp, #8]                   ; 8-byte Folded Spill
+	.cfi_offset w30, -16
 	sub	sp, sp, #32
 	.cfi_def_cfa_offset 48
 	ldr	x9, [x28]
@@ -1394,7 +1393,7 @@ LBB0_2:                                 ; %L309
 	csel	x0, x10, x2, eq
 	mov	x28, x4
 	mov	x27, x8
-	ldp	x29, x30, [sp, #32]             ; 16-byte Folded Reload
+	ldr	x30, [sp, #40]                  ; 8-byte Folded Reload
 	add	sp, sp, #48
 	ret
 LBB0_3:                                 ; %L305
@@ -1435,7 +1434,7 @@ let alloc_triple_live_roots x y z =
 val alloc_triple_live_roots : 'a -> 'b -> 'c -> 'a * 'b * 'c = <fun>
 |}]
 
-[%%expect_llvm_ir AArch64{|define  oxcaml_fpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__alloc_triple_live_roots_16_17_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3, ptr addrspace(1) %4) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
+[%%expect_llvm_ir AArch64{|define  oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__alloc_triple_live_roots_16_17_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3, ptr addrspace(1) %4) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
   %ds = alloca i64
   store i64 %0, ptr %ds
   %alloc = alloca i64
@@ -1534,11 +1533,10 @@ L325:
 [%%expect_llvm_asm AArch64{|_camlTOP__alloc_triple_live_roots_16_17_code:
 	.cfi_startproc
 ; %bb.0:                                ; %L1
-	stp	x29, x30, [sp, #-16]!           ; 16-byte Folded Spill
+	sub	sp, sp, #16
 	.cfi_def_cfa_offset 16
-	mov	x29, sp
-	.cfi_offset w30, -8
-	.cfi_offset w29, -16
+	str	x30, [sp, #8]                   ; 8-byte Folded Spill
+	.cfi_offset w30, -16
 	sub	sp, sp, #32
 	.cfi_def_cfa_offset 48
 	sub	x9, x27, #32
@@ -1556,7 +1554,7 @@ LBB0_2:                                 ; %L325
 	mov	x28, x3
 	mov	x27, x9
 	mov	x0, x8
-	ldp	x29, x30, [sp, #32]             ; 16-byte Folded Reload
+	ldr	x30, [sp, #40]                  ; 8-byte Folded Reload
 	add	sp, sp, #48
 	ret
 LBB0_3:                                 ; %L324
@@ -1583,7 +1581,7 @@ let call_with_live_roots x y f =
 val call_with_live_roots : 'a -> 'b -> ('a -> 'c) -> 'b = <fun>
 |}]
 
-[%%expect_llvm_ir AArch64{|define  oxcaml_fpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__call_with_live_roots_18_19_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3, ptr addrspace(1) %4) "oxcaml-stack-check"="true" "oxcaml-stack-check-before-bytes"="0" "oxcaml-stack-check-bytes"="16" noinline gc "oxcaml" {
+[%%expect_llvm_ir AArch64{|define  oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__call_with_live_roots_18_19_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3, ptr addrspace(1) %4) "oxcaml-stack-check"="true" "oxcaml-stack-check-before-bytes"="0" "oxcaml-stack-check-bytes"="16" noinline gc "oxcaml" {
   %ds = alloca i64
   store i64 %0, ptr %ds
   %alloc = alloca i64
@@ -1642,7 +1640,7 @@ L341:
   %38 = load i64, ptr %ds
   %39 = load i64, ptr %alloc
   %40 = load ptr, ptr %12
-  %41 = call oxcaml_fpcc { { i64, i64 }, { ptr addrspace(1) } } %40(i64 %38, i64 %39, ptr addrspace(1) %36, ptr addrspace(1) %37) "statepoint-id"="0" [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 2, i64 0, i64 2, i64 5, i64 0, i64 5, i64 0, i64 26, i64 5263188, i64 3027249, i64 7102819, i64 7823212, i64 6845545, i64 6909023, i64 6251894, i64 7303026, i64 29556), "gc-live"(ptr %10) ]
+  %41 = call oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } %40(i64 %38, i64 %39, ptr addrspace(1) %36, ptr addrspace(1) %37) "statepoint-id"="0" [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 2, i64 0, i64 2, i64 5, i64 0, i64 5, i64 0, i64 26, i64 5263188, i64 3027249, i64 7102819, i64 7823212, i64 6845545, i64 6909023, i64 6251894, i64 7303026, i64 29556), "gc-live"(ptr %10) ]
   %42 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %41, 0, 0
   %43 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %41, 0, 1
   store i64 %42, ptr %ds
@@ -1669,11 +1667,10 @@ L338:
 [%%expect_llvm_asm AArch64{|_camlTOP__call_with_live_roots_18_19_code:
 	.cfi_startproc
 ; %bb.0:                                ; %L1
-	stp	x29, x30, [sp, #-16]!           ; 16-byte Folded Spill
+	sub	sp, sp, #16
 	.cfi_def_cfa_offset 16
-	mov	x29, sp
-	.cfi_offset w30, -8
-	.cfi_offset w29, -16
+	str	x30, [sp, #8]                   ; 8-byte Folded Spill
+	.cfi_offset w30, -16
 	sub	sp, sp, #16
 	.cfi_def_cfa_offset 32
 	mov	x9, x0
@@ -1683,18 +1680,14 @@ L338:
 	cmp	x8, x10
 	b.lo	LBB0_2
 LBB0_1:                                 ; %L341
-	mov	x0, x27
-	mov	x3, x28
 	str	x1, [sp, #8]
 	ldr	x8, [x2]
-	mov	x28, x3
-	mov	x27, x0
 	mov	x0, x9
 	mov	x1, x2
 	blr	x8
 Ltmp0:
 	ldr	x0, [sp, #8]
-	ldp	x29, x30, [sp, #16]             ; 16-byte Folded Reload
+	ldr	x30, [sp, #24]                  ; 8-byte Folded Reload
 	add	sp, sp, #32
 	ret
 LBB0_2:                                 ; %L340
@@ -1711,7 +1704,7 @@ let alloc_no_roots n =
 val alloc_no_roots : int -> int * int = <fun>
 |}]
 
-[%%expect_llvm_ir AArch64{|define  oxcaml_fpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__alloc_no_roots_20_21_code"(i64 %0, i64 %1, i64 %2) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
+[%%expect_llvm_ir AArch64{|define  oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__alloc_no_roots_20_21_code"(i64 %0, i64 %1, i64 %2) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
   %ds = alloca i64
   store i64 %0, ptr %ds
   %alloc = alloca i64
@@ -1783,27 +1776,25 @@ L357:
 [%%expect_llvm_asm AArch64{|_camlTOP__alloc_no_roots_20_21_code:
 	.cfi_startproc
 ; %bb.0:                                ; %L1
-	stp	x29, x30, [sp, #-16]!           ; 16-byte Folded Spill
+	sub	sp, sp, #16
 	.cfi_def_cfa_offset 16
-	mov	x29, sp
-	.cfi_offset w30, -8
-	.cfi_offset w29, -16
+	str	x30, [sp, #8]                   ; 8-byte Folded Spill
+	.cfi_offset w30, -16
 	sub	x9, x27, #24
 	ldr	x8, [x28]
 	cmp	x8, x9
 	b.hi	LBB0_2
 LBB0_1:                                 ; %L357
-	mov	x1, x28
 	mov	w8, #2048
 	str	x8, [x9]
 	mov	x8, x9
 	str	x0, [x8, #8]!
 	add	x10, x0, #2
 	str	x10, [x9, #16]
-	mov	x28, x1
 	mov	x27, x9
 	mov	x0, x8
-	ldp	x29, x30, [sp], #16             ; 16-byte Folded Reload
+	ldr	x30, [sp, #8]                   ; 8-byte Folded Reload
+	add	sp, sp, #16
 	ret
 LBB0_2:                                 ; %L356
 	mov	x27, x9
@@ -1822,7 +1813,7 @@ let alloc_const_int_filter x =
 val alloc_const_int_filter : 'a -> 'a * int = <fun>
 |}]
 
-[%%expect_llvm_ir AArch64{|define  oxcaml_fpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__alloc_const_int_filter_22_23_code"(i64 %0, i64 %1, ptr addrspace(1) %2) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
+[%%expect_llvm_ir AArch64{|define  oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__alloc_const_int_filter_22_23_code"(i64 %0, i64 %1, ptr addrspace(1) %2) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
   %ds = alloca i64
   store i64 %0, ptr %ds
   %alloc = alloca i64
@@ -1894,11 +1885,10 @@ L372:
 [%%expect_llvm_asm AArch64{|_camlTOP__alloc_const_int_filter_22_23_code:
 	.cfi_startproc
 ; %bb.0:                                ; %L1
-	stp	x29, x30, [sp, #-16]!           ; 16-byte Folded Spill
+	sub	sp, sp, #16
 	.cfi_def_cfa_offset 16
-	mov	x29, sp
-	.cfi_offset w30, -8
-	.cfi_offset w29, -16
+	str	x30, [sp, #8]                   ; 8-byte Folded Spill
+	.cfi_offset w30, -16
 	sub	sp, sp, #16
 	.cfi_def_cfa_offset 32
 	sub	x9, x27, #24
@@ -1917,7 +1907,7 @@ LBB0_2:                                 ; %L372
 	mov	x28, x1
 	mov	x27, x9
 	mov	x0, x8
-	ldp	x29, x30, [sp, #16]             ; 16-byte Folded Reload
+	ldr	x30, [sp, #24]                  ; 8-byte Folded Reload
 	add	sp, sp, #32
 	ret
 LBB0_3:                                 ; %L371
@@ -1942,7 +1932,7 @@ let alloc_under_trap x y f =
 val alloc_under_trap : 'a -> 'b -> ('a * 'b -> 'a) -> 'a = <fun>
 |}]
 
-[%%expect_llvm_ir AArch64{|define  oxcaml_fpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__alloc_under_trap_24_25_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3, ptr addrspace(1) %4) "oxcaml-stack-check"="true" "oxcaml-stack-check-before-bytes"="0" "oxcaml-stack-check-bytes"="48" noinline gc "oxcaml" personality ptr @"\01_caml_llvm_eh_personality" {
+[%%expect_llvm_ir AArch64{|define  oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__alloc_under_trap_24_25_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3, ptr addrspace(1) %4) "oxcaml-stack-check"="true" "oxcaml-stack-check-before-bytes"="0" "oxcaml-stack-check-bytes"="48" noinline gc "oxcaml" personality ptr @"\01_caml_llvm_eh_personality" {
   %ds = alloca i64
   store i64 %0, ptr %ds
   %alloc = alloca i64
@@ -2011,7 +2001,7 @@ L403:
   store volatile i64 %49, ptr %14
   %50 = load i64, ptr %ds
   %51 = load i64, ptr %alloc
-  %52 = call oxcaml_fpcc { { i64, i64 }, { i64 } } @"\01_wrap_try"(i64 %50, i64 %51) returns_twice "gc-leaf-function"="true"
+  %52 = call oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_wrap_try"(i64 %50, i64 %51) returns_twice "gc-leaf-function"="true"
   %53 = extractvalue { { i64, i64 }, { i64 } } %52, 0, 0
   %54 = extractvalue { { i64, i64 }, { i64 } } %52, 0, 1
   store i64 %53, ptr %ds
@@ -2115,7 +2105,7 @@ L409:
   %116 = load i64, ptr %ds
   %117 = load i64, ptr %alloc
   %118 = load ptr, ptr %19
-  %119 = invoke oxcaml_fpcc { { i64, i64 }, { ptr addrspace(1) } } %118(i64 %116, i64 %117, ptr addrspace(1) %114, ptr addrspace(1) %115) "statepoint-id"="0" [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 4, i64 0, i64 4, i64 10, i64 0, i64 10, i64 0, i64 22, i64 5263188, i64 3028017, i64 7105633, i64 6251375, i64 6581877, i64 6255205, i64 6386292, i64 112), "gc-live"(ptr %10) ] to label %L412 unwind label %L411
+  %119 = invoke oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } %118(i64 %116, i64 %117, ptr addrspace(1) %114, ptr addrspace(1) %115) "statepoint-id"="0" [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 4, i64 0, i64 4, i64 10, i64 0, i64 10, i64 0, i64 22, i64 5263188, i64 3028017, i64 7105633, i64 6251375, i64 6581877, i64 6255205, i64 6386292, i64 112), "gc-live"(ptr %10) ] to label %L412 unwind label %L411
 L412:
   %120 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %119, 0, 0
   %121 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %119, 0, 1
@@ -2178,11 +2168,10 @@ Lfunc_begin0:
 	.cfi_personality 155, _caml_llvm_eh_personality
 	.cfi_lsda 16, Lexception0
 ; %bb.0:                                ; %L1
-	stp	x29, x30, [sp, #-16]!           ; 16-byte Folded Spill
+	sub	sp, sp, #16
 	.cfi_def_cfa_offset 16
-	mov	x29, sp
-	.cfi_offset w30, -8
-	.cfi_offset w29, -16
+	str	x30, [sp, #8]                   ; 8-byte Folded Spill
+	.cfi_offset w30, -16
 	sub	sp, sp, #80
 	.cfi_def_cfa_offset 96
 	mov	x9, x0
@@ -2229,7 +2218,7 @@ LBB0_2:                                 ; %L406
 	mov	x1, x30
 	mov	x28, x1
 	mov	x27, x2
-	ldp	x29, x30, [sp, #80]             ; 16-byte Folded Reload
+	ldr	x30, [sp, #88]                  ; 8-byte Folded Reload
 	add	sp, sp, #96
 	ret
 LBB0_3:                                 ; %L405
@@ -2303,7 +2292,7 @@ Ltmp3:
 	; InlineAsm End
 	mov	x28, x1
 	mov	x27, x2
-	ldp	x29, x30, [sp, #80]             ; 16-byte Folded Reload
+	ldr	x30, [sp, #88]                  ; 8-byte Folded Reload
 	add	sp, sp, #96
 	ret
 LBB0_6:                                 ; %L402
@@ -2372,7 +2361,7 @@ val call_then_alloc_with_live_roots : 'a -> 'b -> ('a -> 'c) -> 'a * 'b =
   <fun>
 |}]
 
-[%%expect_llvm_ir AArch64{|define  oxcaml_fpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__call_then_alloc_with_live_roots_26_27_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3, ptr addrspace(1) %4) "oxcaml-stack-check"="true" "oxcaml-stack-check-before-bytes"="0" "oxcaml-stack-check-bytes"="16" noinline gc "oxcaml" {
+[%%expect_llvm_ir AArch64{|define  oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__call_then_alloc_with_live_roots_26_27_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3, ptr addrspace(1) %4) "oxcaml-stack-check"="true" "oxcaml-stack-check-before-bytes"="0" "oxcaml-stack-check-bytes"="16" noinline gc "oxcaml" {
   %ds = alloca i64
   store i64 %0, ptr %ds
   %alloc = alloca i64
@@ -2435,7 +2424,7 @@ L429:
   %42 = load i64, ptr %ds
   %43 = load i64, ptr %alloc
   %44 = load ptr, ptr %12
-  %45 = call oxcaml_fpcc { { i64, i64 }, { ptr addrspace(1) } } %44(i64 %42, i64 %43, ptr addrspace(1) %40, ptr addrspace(1) %41) "statepoint-id"="0" [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 3, i64 0, i64 2, i64 5, i64 0, i64 5, i64 0, i64 37, i64 5263188, i64 3028273, i64 7102819, i64 7626604, i64 7234920, i64 7102815, i64 6516588, i64 6911839, i64 6252660, i64 7760236, i64 7495525, i64 7630703, i64 115), "gc-live"(ptr %9, ptr %10) ]
+  %45 = call oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } %44(i64 %42, i64 %43, ptr addrspace(1) %40, ptr addrspace(1) %41) "statepoint-id"="0" [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 3, i64 0, i64 2, i64 5, i64 0, i64 5, i64 0, i64 37, i64 5263188, i64 3028273, i64 7102819, i64 7626604, i64 7234920, i64 7102815, i64 6516588, i64 6911839, i64 6252660, i64 7760236, i64 7495525, i64 7630703, i64 115), "gc-live"(ptr %9, ptr %10) ]
   %46 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %45, 0, 0
   %47 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %45, 0, 1
   store i64 %46, ptr %ds
@@ -2507,11 +2496,10 @@ L431:
 [%%expect_llvm_asm AArch64{|_camlTOP__call_then_alloc_with_live_roots_26_27_code:
 	.cfi_startproc
 ; %bb.0:                                ; %L1
-	stp	x29, x30, [sp, #-16]!           ; 16-byte Folded Spill
+	sub	sp, sp, #16
 	.cfi_def_cfa_offset 16
-	mov	x29, sp
-	.cfi_offset w30, -8
-	.cfi_offset w29, -16
+	str	x30, [sp, #8]                   ; 8-byte Folded Spill
+	.cfi_offset w30, -16
 	sub	sp, sp, #32
 	.cfi_def_cfa_offset 48
 	mov	x9, x0
@@ -2521,14 +2509,10 @@ L431:
 	cmp	x8, x10
 	b.lo	LBB0_3
 LBB0_1:                                 ; %L429
-	mov	x3, x27
-	mov	x4, x28
 	str	x9, [sp, #24]
 	str	x1, [sp, #16]
 	ldr	x8, [x2]
 	ldr	x0, [sp, #24]
-	mov	x28, x4
-	mov	x27, x3
 	mov	x1, x2
 	blr	x8
 Ltmp0:
@@ -2547,7 +2531,7 @@ LBB0_2:                                 ; %L431
 	str	x9, [x8, #16]
 	mov	x28, x1
 	mov	x27, x8
-	ldp	x29, x30, [sp, #32]             ; 16-byte Folded Reload
+	ldr	x30, [sp, #40]                  ; 8-byte Folded Reload
 	add	sp, sp, #48
 	ret
 LBB0_3:                                 ; %L428
@@ -2580,7 +2564,7 @@ let alloc_boxed_float_root (x : float) y =
 val alloc_boxed_float_root : float -> 'a -> float * 'a = <fun>
 |}]
 
-[%%expect_llvm_ir AArch64{|define  oxcaml_fpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__alloc_boxed_float_root_28_29_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
+[%%expect_llvm_ir AArch64{|define  oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__alloc_boxed_float_root_28_29_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
   %ds = alloca i64
   store i64 %0, ptr %ds
   %alloc = alloca i64
@@ -2662,11 +2646,10 @@ L446:
 [%%expect_llvm_asm AArch64{|_camlTOP__alloc_boxed_float_root_28_29_code:
 	.cfi_startproc
 ; %bb.0:                                ; %L1
-	stp	x29, x30, [sp, #-16]!           ; 16-byte Folded Spill
+	sub	sp, sp, #16
 	.cfi_def_cfa_offset 16
-	mov	x29, sp
-	.cfi_offset w30, -8
-	.cfi_offset w29, -16
+	str	x30, [sp, #8]                   ; 8-byte Folded Spill
+	.cfi_offset w30, -16
 	sub	sp, sp, #16
 	.cfi_def_cfa_offset 32
 	sub	x9, x27, #24
@@ -2684,7 +2667,7 @@ LBB0_2:                                 ; %L446
 	mov	x28, x2
 	mov	x27, x9
 	mov	x0, x8
-	ldp	x29, x30, [sp, #16]             ; 16-byte Folded Reload
+	ldr	x30, [sp, #24]                  ; 8-byte Folded Reload
 	add	sp, sp, #32
 	ret
 LBB0_3:                                 ; %L445
@@ -2709,7 +2692,7 @@ let alloc_aliased_roots x n =
 val alloc_aliased_roots : 'a -> 'b -> 'a * 'a * 'b = <fun>
 |}]
 
-[%%expect_llvm_ir AArch64{|define  oxcaml_fpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__alloc_aliased_roots_30_31_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
+[%%expect_llvm_ir AArch64{|define  oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__alloc_aliased_roots_30_31_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
   %ds = alloca i64
   store i64 %0, ptr %ds
   %alloc = alloca i64
@@ -2808,11 +2791,10 @@ L461:
 [%%expect_llvm_asm AArch64{|_camlTOP__alloc_aliased_roots_30_31_code:
 	.cfi_startproc
 ; %bb.0:                                ; %L1
-	stp	x29, x30, [sp, #-16]!           ; 16-byte Folded Spill
+	sub	sp, sp, #16
 	.cfi_def_cfa_offset 16
-	mov	x29, sp
-	.cfi_offset w30, -8
-	.cfi_offset w29, -16
+	str	x30, [sp, #8]                   ; 8-byte Folded Spill
+	.cfi_offset w30, -16
 	sub	sp, sp, #32
 	.cfi_def_cfa_offset 48
 	; InlineAsm Start
@@ -2833,7 +2815,7 @@ LBB0_2:                                 ; %L461
 	mov	x28, x2
 	mov	x27, x9
 	mov	x0, x8
-	ldp	x29, x30, [sp, #32]             ; 16-byte Folded Reload
+	ldr	x30, [sp, #40]                  ; 8-byte Folded Reload
 	add	sp, sp, #48
 	ret
 LBB0_3:                                 ; %L460
@@ -2861,7 +2843,7 @@ val alloc_twice_varying_roots : 'a -> 'a -> 'a -> int -> ('a * 'a) * 'a =
   <fun>
 |}]
 
-[%%expect_llvm_ir AArch64{|define  oxcaml_fpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__alloc_twice_varying_roots_32_33_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3, ptr addrspace(1) %4, i64 %5) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
+[%%expect_llvm_ir AArch64{|define  oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__alloc_twice_varying_roots_32_33_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3, ptr addrspace(1) %4, i64 %5) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
   %ds = alloca i64
   store i64 %0, ptr %ds
   %alloc = alloca i64
@@ -3083,11 +3065,10 @@ L494:
 [%%expect_llvm_asm AArch64{|_camlTOP__alloc_twice_varying_roots_32_33_code:
 	.cfi_startproc
 ; %bb.0:                                ; %L1
-	stp	x29, x30, [sp, #-16]!           ; 16-byte Folded Spill
+	sub	sp, sp, #16
 	.cfi_def_cfa_offset 16
-	mov	x29, sp
-	.cfi_offset w30, -8
-	.cfi_offset w29, -16
+	str	x30, [sp, #8]                   ; 8-byte Folded Spill
+	.cfi_offset w30, -16
 	sub	sp, sp, #32
 	.cfi_def_cfa_offset 48
 	sub	x9, x27, #24
@@ -3125,7 +3106,7 @@ LBB0_6:                                 ; %L494
 	str	x2, [x9, #16]
 	mov	x28, x8
 	mov	x27, x9
-	ldp	x29, x30, [sp, #32]             ; 16-byte Folded Reload
+	ldr	x30, [sp, #40]                  ; 8-byte Folded Reload
 	add	sp, sp, #48
 	ret
 LBB0_7:                                 ; %L493
@@ -3176,7 +3157,7 @@ let alloc_after_poll_reuses_slots x y n =
 val alloc_after_poll_reuses_slots : 'a -> 'b -> 'c -> 'a * 'b * 'c = <fun>
 |}]
 
-[%%expect_llvm_ir AArch64{|define  oxcaml_fpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__alloc_after_poll_reuses_slots_34_35_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3, ptr addrspace(1) %4) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
+[%%expect_llvm_ir AArch64{|define  oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__alloc_after_poll_reuses_slots_34_35_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3, ptr addrspace(1) %4) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
   %ds = alloca i64
   store i64 %0, ptr %ds
   %alloc = alloca i64
@@ -3306,11 +3287,10 @@ L512:
 [%%expect_llvm_asm AArch64{|_camlTOP__alloc_after_poll_reuses_slots_34_35_code:
 	.cfi_startproc
 ; %bb.0:                                ; %L1
-	stp	x29, x30, [sp, #-16]!           ; 16-byte Folded Spill
+	sub	sp, sp, #16
 	.cfi_def_cfa_offset 16
-	mov	x29, sp
-	.cfi_offset w30, -8
-	.cfi_offset w29, -16
+	str	x30, [sp, #8]                   ; 8-byte Folded Spill
+	.cfi_offset w30, -16
 	sub	sp, sp, #32
 	.cfi_def_cfa_offset 48
 	ldr	x8, [x28]
@@ -3331,7 +3311,7 @@ LBB0_2:                                 ; %L512
 	mov	x28, x3
 	mov	x27, x9
 	mov	x0, x8
-	ldp	x29, x30, [sp, #32]             ; 16-byte Folded Reload
+	ldr	x30, [sp, #40]                  ; 8-byte Folded Reload
 	add	sp, sp, #48
 	ret
 LBB0_3:                                 ; %L509
@@ -3375,7 +3355,7 @@ let alloc_const_int_only_filter n =
 val alloc_const_int_only_filter : 'a -> int * int * 'a = <fun>
 |}]
 
-[%%expect_llvm_ir AArch64{|define  oxcaml_fpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__alloc_const_int_only_filter_36_37_code"(i64 %0, i64 %1, ptr addrspace(1) %2) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
+[%%expect_llvm_ir AArch64{|define  oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__alloc_const_int_only_filter_36_37_code"(i64 %0, i64 %1, ptr addrspace(1) %2) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
   %ds = alloca i64
   store i64 %0, ptr %ds
   %alloc = alloca i64
@@ -3453,11 +3433,10 @@ L527:
 [%%expect_llvm_asm AArch64{|_camlTOP__alloc_const_int_only_filter_36_37_code:
 	.cfi_startproc
 ; %bb.0:                                ; %L1
-	stp	x29, x30, [sp, #-16]!           ; 16-byte Folded Spill
+	sub	sp, sp, #16
 	.cfi_def_cfa_offset 16
-	mov	x29, sp
-	.cfi_offset w30, -8
-	.cfi_offset w29, -16
+	str	x30, [sp, #8]                   ; 8-byte Folded Spill
+	.cfi_offset w30, -16
 	sub	sp, sp, #16
 	.cfi_def_cfa_offset 32
 	sub	x9, x27, #32
@@ -3478,7 +3457,7 @@ LBB0_2:                                 ; %L527
 	mov	x28, x1
 	mov	x27, x9
 	mov	x0, x8
-	ldp	x29, x30, [sp, #16]             ; 16-byte Folded Reload
+	ldr	x30, [sp, #24]                  ; 8-byte Folded Reload
 	add	sp, sp, #32
 	ret
 LBB0_3:                                 ; %L526

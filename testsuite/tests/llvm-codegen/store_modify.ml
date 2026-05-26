@@ -17,7 +17,7 @@ let set_i r v = r.i <- v;;
 val set_i : r -> int -> unit = <fun>
 |}]
 
-[%%expect_llvm_ir AArch64{|define  oxcaml_fpcc { { i64, i64 }, { i64 } } @"\01_camlTOP__set_i_0_1_code"(i64 %0, i64 %1, ptr addrspace(1) %2, i64 %3) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
+[%%expect_llvm_ir AArch64{|define  oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_camlTOP__set_i_0_1_code"(i64 %0, i64 %1, ptr addrspace(1) %2, i64 %3) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
   %ds = alloca i64
   store i64 %0, ptr %ds
   %alloc = alloca i64
@@ -69,7 +69,7 @@ let set_s r v = r.s <- v;;
 val set_s : r -> string -> unit = <fun>
 |}]
 
-[%%expect_llvm_ir AArch64{|define  oxcaml_fpcc { { i64, i64 }, { i64 } } @"\01_camlTOP__set_s_2_3_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
+[%%expect_llvm_ir AArch64{|define  oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_camlTOP__set_s_2_3_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
   %ds = alloca i64
   store i64 %0, ptr %ds
   %alloc = alloca i64
@@ -106,7 +106,7 @@ L123:
   %23 = load ptr addrspace(1), ptr %6
   %24 = load i64, ptr %ds
   %25 = load i64, ptr %alloc
-  %26 = call oxcaml_fpcc { { i64, i64 }, {  } } @"\01_c_call_wrapper.caml_modify.2.i64.ptr_addrspace_1_.0"(i64 %24, i64 %25, i64 %22, ptr addrspace(1) %23) "statepoint-id"="0" [ "deopt"(i64 1870160740, i64 1, i64 1, i64 1, i64 1, i64 0, i64 16, i64 24, i64 0, i64 24, i64 0, i64 10, i64 5263188, i64 7548467, i64 6255717, i64 115) ]
+  %26 = call oxcaml_nofpcc { { i64, i64 }, {  } } @"\01_c_call_wrapper.caml_modify.2.i64.ptr_addrspace_1_.0"(i64 %24, i64 %25, i64 %22, ptr addrspace(1) %23) "statepoint-id"="0" [ "deopt"(i64 1870160740, i64 1, i64 1, i64 1, i64 1, i64 0, i64 16, i64 24, i64 0, i64 24, i64 0, i64 10, i64 5263188, i64 7548467, i64 6255717, i64 115) ]
   %27 = extractvalue { { i64, i64 }, {  } } %26, 0, 0
   %28 = extractvalue { { i64, i64 }, {  } } %26, 0, 1
   store i64 %27, ptr %ds
@@ -127,15 +127,15 @@ L125:
 [%%expect_llvm_asm AArch64{|_camlTOP__set_s_2_3_code:
 	.cfi_startproc
 ; %bb.0:                                ; %L1
-	stp	x29, x30, [sp, #-16]!           ; 16-byte Folded Spill
+	sub	sp, sp, #16
 	.cfi_def_cfa_offset 16
-	mov	x29, sp
-	.cfi_offset w30, -8
-	.cfi_offset w29, -16
+	str	x30, [sp, #8]                   ; 8-byte Folded Spill
+	.cfi_offset w30, -16
 	add	x0, x0, #8
 	bl	_c_call_wrapper.caml_modify.2.i64.ptr_addrspace_1_.0
 Ltmp0:
 	mov	w0, #1
-	ldp	x29, x30, [sp], #16             ; 16-byte Folded Reload
+	ldr	x30, [sp, #8]                   ; 8-byte Folded Reload
+	add	sp, sp, #16
 	ret
 	.cfi_endproc|}]

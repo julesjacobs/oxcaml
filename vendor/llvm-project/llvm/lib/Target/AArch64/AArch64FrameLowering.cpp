@@ -929,14 +929,18 @@ static bool hasOxCamlStackCheckProtocol(const MachineFunction &MF) {
   return getOxCamlStackCheckAttrs(MF).Requested;
 }
 
+static bool needsOxCamlFrameRecord(const MachineFunction &MF) {
+  const Function &F = MF.getFunction();
+  return F.getCallingConv() == CallingConv::OxCaml_WithFP &&
+         F.hasPersonalityFn();
+}
+
 static uint64_t getOxCamlPrologueStackCheckBytes(const MachineFunction &MF,
                                                  uint64_t PrefixBytes) {
   constexpr uint64_t StackThresholdBytes = 32 * 8;
-  // Leave room for the frame record pushed by stack-growth helpers plus extra
-  // helper-side scratch space before the next ordinary stack check can run.
-  constexpr uint64_t OrdinaryCheckSlowPathReserveBytes = 128;
-  constexpr uint64_t SpendablePrefixBytes =
-      StackThresholdBytes - OrdinaryCheckSlowPathReserveBytes;
+  // Leave room for the inline slow-path argument save and the frame record
+  // pushed by stack-growth helpers before they switch to the C stack.
+  constexpr uint64_t OrdinaryCheckSlowPathReserveBytes = 32;
   if (!hasOxCamlStackCheckProtocol(MF))
     return 0;
 
@@ -947,19 +951,20 @@ static uint64_t getOxCamlPrologueStackCheckBytes(const MachineFunction &MF,
     return PrefixBytes == 0 ? 0
                             : PrefixBytes + OrdinaryCheckSlowPathReserveBytes;
 
-  // If CFG stack-check insertion found an ordinary check, that check accounts
-  // for the required frame space at the check site. Adding a second prologue
-  // check here is redundant and can force LLVM to set up the frame before cheap
-  // early exits, which severely hurts small hot loops.
-  if (Attrs.CfgBytes != 0)
-    return 0;
-
-  // Runtime helpers reached from slow paths may push FP/LR on the OCaml stack.
-  // Keep that emergency stack space available after the LLVM prologue even when
-  // no ordinary CFG stack-check instruction was needed.
-  return PrefixBytes >= SpendablePrefixBytes
-             ? PrefixBytes + OrdinaryCheckSlowPathReserveBytes
-             : 0;
+  // The caller leaves StackThresholdBytes of slack at function entry. The
+  // prologue check is only needed when LLVM's machine prologue plus unchecked
+  // CFG stack use before the first ordinary CFG check would spend that slack,
+  // including the helper-side reserve needed if the ordinary check takes its
+  // slow path.
+  uint64_t UncheckedCfgBytes = 0;
+  if (Attrs.CfgBytes != 0) {
+    if (!Attrs.HasBeforeBytes)
+      return PrefixBytes + OrdinaryCheckSlowPathReserveBytes;
+    UncheckedCfgBytes = Attrs.BeforeBytes;
+  }
+  uint64_t UncheckedBytes =
+      PrefixBytes + UncheckedCfgBytes + OrdinaryCheckSlowPathReserveBytes;
+  return UncheckedBytes < StackThresholdBytes ? 0 : UncheckedBytes;
 }
 
 static void emitOxCamlStackCheck(MachineBasicBlock &MBB,
@@ -1730,8 +1735,7 @@ void AArch64FrameLowering::emitPrologue(MachineFunction &MF,
     ++MBBI;
   }
 
-  if (!IsFunclet && !HasFP &&
-      F.getCallingConv() == CallingConv::OxCaml_WithFP) {
+  if (!IsFunclet && !HasFP && needsOxCamlFrameRecord(MF)) {
     emitFrameOffset(MBB, MBBI, DL, AArch64::FP, AArch64::SP,
                     StackOffset::getFixed(0), TII, MachineInstr::FrameSetup,
                     false, NeedsWinCFI, &HasWinCFI);
@@ -2864,11 +2868,17 @@ static void computeCalleeSaveRegisterPairs(
     // OxCaml no-FP frames are walked from the stack pointer and expect the
     // saved return address at the top word of the fixed frame.  When LR is the
     // only callee-save register, the frame is still 16-byte aligned, so place
-    // LR at SP+8 rather than in the padding word at SP.
-    if (CC == CallingConv::OxCaml_WithoutFP && !NeedsFrameRecord &&
+    // LR at SP+8 rather than in the padding word at SP.  The frame object must
+    // also be 16-byte aligned so the padding word stays paired with LR and
+    // cannot be reused for an ordinary spill.
+    if ((CC == CallingConv::OxCaml_WithoutFP ||
+         CC == CallingConv::OxCaml_WithFP) &&
+        !NeedsFrameRecord &&
         !RPI.isPaired() && RPI.Reg1 == AArch64::LR &&
-        RPI.Type == RegPairInfo::GPR && Offset == 0)
+        RPI.Type == RegPairInfo::GPR && Offset == 0) {
+      MFI.setObjectAlignment(RPI.FrameIdx, Align(16));
       Offset += 8;
+    }
     RPI.Offset = Offset / Scale;
 
     assert(((!RPI.isScalable() && RPI.Offset >= -64 && RPI.Offset <= 63) ||
@@ -3241,7 +3251,7 @@ void AArch64FrameLowering::determineCalleeSaves(MachineFunction &MF,
   uint64_t EstimatedStackSize = MFI.estimateStackSize(MF);
   if (hasFP(MF) ||
       windowsRequiresStackProbe(MF, EstimatedStackSize + CSStackSize + 16) ||
-      (hasOxCamlStackCheckProtocol(MF) && EstimatedStackSize != 0)) {
+      (needsOxCamlFrameRecord(MF) && EstimatedStackSize != 0)) {
     SavedRegs.set(AArch64::FP);
     SavedRegs.set(AArch64::LR);
   }
@@ -3359,6 +3369,13 @@ bool AArch64FrameLowering::assignCalleeSavedSpillSlots(
 
     unsigned Size = RegInfo->getSpillSize(*RC);
     Align Alignment(RegInfo->getSpillAlign(*RC));
+    CallingConv::ID CC = MF.getFunction().getCallingConv();
+    if ((CC == CallingConv::OxCaml_WithoutFP ||
+         CC == CallingConv::OxCaml_WithFP) &&
+        !needsOxCamlFrameRecord(MF) && Reg == AArch64::LR) {
+      Size = 16;
+      Alignment = Align(16);
+    }
     int FrameIdx = MFI.CreateStackObject(Size, Alignment, true);
     CS.setFrameIdx(FrameIdx);
 

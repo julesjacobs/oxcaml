@@ -23,6 +23,7 @@
 #include "caml/fail.h"
 #include "caml/gc.h"
 #include "caml/interp.h"
+#include "caml/llvm_helper_profile.h"
 #include "caml/major_gc.h"
 #include "caml/memory.h"
 #include "caml/minor_gc.h"
@@ -53,6 +54,7 @@ static int obj_tag (value arg)
 
 CAMLprim value caml_obj_tag(value arg)
 {
+  CAML_LLVM_HELPER_PROFILE_INC(obj_tag_total);
   return Val_int (obj_tag(arg));
 }
 

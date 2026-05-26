@@ -29,11 +29,13 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineOperand.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/MC/MCInstrDesc.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CodeGen.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Target/TargetMachine.h"
 #include <cassert>
@@ -45,12 +47,14 @@
 using namespace llvm;
 
 #define AARCH64_EXPAND_PSEUDO_NAME "AArch64 pseudo instruction expansion pass"
+#define DEBUG_TYPE "aarch64-expand-pseudo"
 
 namespace {
 
 class AArch64ExpandPseudo : public MachineFunctionPass {
 public:
   const AArch64InstrInfo *TII;
+  const TargetRegisterInfo *TRI;
 
   static char ID;
 
@@ -64,6 +68,7 @@ public:
 
 private:
   bool expandMBB(MachineBasicBlock &MBB);
+  bool removeOxCamlRuntimeRegRoundTrips(MachineFunction &MF);
   bool expandMI(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
                 MachineBasicBlock::iterator &NextMBBI);
   bool expandMOVImm(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
@@ -101,6 +106,79 @@ char AArch64ExpandPseudo::ID = 0;
 
 INITIALIZE_PASS(AArch64ExpandPseudo, "aarch64-expand-pseudo",
                 AARCH64_EXPAND_PSEUDO_NAME, false, false)
+
+static bool isOxCamlRuntimeReg(Register Reg) {
+  return Reg == AArch64::X27 || Reg == AArch64::X28;
+}
+
+static bool isGPRZeroMove(const MachineInstr &MI, Register &Dst,
+                          Register &Src) {
+  if ((MI.getOpcode() != AArch64::ORRXrr &&
+       MI.getOpcode() != AArch64::ORRXrs) ||
+      !MI.getOperand(0).isReg() || !MI.getOperand(1).isReg() ||
+      !MI.getOperand(2).isReg() ||
+      MI.getOperand(1).getReg() != AArch64::XZR)
+    return false;
+
+  if (MI.getOpcode() == AArch64::ORRXrs && MI.getOperand(3).getImm() != 0)
+    return false;
+
+  Dst = MI.getOperand(0).getReg();
+  Src = MI.getOperand(2).getReg();
+  return Dst.isPhysical() && Src.isPhysical();
+}
+
+static bool isCallBoundary(const MachineInstr &MI) {
+  switch (MI.getOpcode()) {
+  case AArch64::BL:
+  case AArch64::BLR:
+  case AArch64::BLRNoIP:
+  case AArch64::BLRAA:
+  case AArch64::BLRAB:
+  case AArch64::BLRAAZ:
+  case AArch64::BLRABZ:
+  case AArch64::TCRETURNdi:
+  case AArch64::TCRETURNri:
+  case AArch64::TCRETURNriBTI:
+  case AArch64::TCRETURNriALL:
+    return true;
+  default:
+    return MI.isCall();
+  }
+}
+
+static bool operandReadsRegister(const MachineInstr &MI, Register Reg,
+                                 const TargetRegisterInfo *TRI) {
+  for (const MachineOperand &MO : MI.operands())
+    if (MO.isReg() && MO.isUse() && MO.getReg() &&
+        TRI->regsOverlap(MO.getReg(), Reg))
+      return true;
+  return false;
+}
+
+static bool operandDefinesRegister(const MachineInstr &MI, Register Reg,
+                                   const TargetRegisterInfo *TRI) {
+  for (const MachineOperand &MO : MI.operands())
+    if (MO.isReg() && MO.isDef() && MO.getReg() &&
+        TRI->regsOverlap(MO.getReg(), Reg))
+      return true;
+  return false;
+}
+
+static bool registerIsReadLaterInBlock(MachineBasicBlock::iterator I,
+                                       MachineBasicBlock::iterator E,
+                                       Register Reg,
+                                       const TargetRegisterInfo *TRI) {
+  for (auto J = std::next(I); J != E; ++J) {
+    if (J->isDebugInstr())
+      continue;
+    if (operandReadsRegister(*J, Reg, TRI))
+      return true;
+    if (operandDefinesRegister(*J, Reg, TRI))
+      return false;
+  }
+  return false;
+}
 
 /// Transfer implicit operands on the pseudo instruction to the
 /// instructions created from the expansion.
@@ -1472,12 +1550,66 @@ bool AArch64ExpandPseudo::expandMBB(MachineBasicBlock &MBB) {
   return Modified;
 }
 
+bool AArch64ExpandPseudo::removeOxCamlRuntimeRegRoundTrips(
+    MachineFunction &MF) {
+  bool Changed = false;
+  for (MachineBasicBlock &MBB : MF) {
+    bool ChangedBlock;
+    do {
+      ChangedBlock = false;
+      for (auto I = MBB.begin(), E = MBB.end(); I != E; ++I) {
+        Register TmpReg;
+        Register RuntimeReg;
+        if (!isGPRZeroMove(*I, TmpReg, RuntimeReg) ||
+            !isOxCamlRuntimeReg(RuntimeReg) ||
+            isOxCamlRuntimeReg(TmpReg) || TmpReg == AArch64::XZR)
+          continue;
+
+        for (auto J = std::next(I); J != E; ++J) {
+          if (J->isDebugInstr())
+            continue;
+
+          Register DstReg;
+          Register SrcReg;
+          if (isGPRZeroMove(*J, DstReg, SrcReg) &&
+              TRI->regsOverlap(DstReg, RuntimeReg) &&
+              TRI->regsOverlap(SrcReg, TmpReg) &&
+              !registerIsReadLaterInBlock(J, E, TmpReg, TRI)) {
+            LLVM_DEBUG(dbgs() << "Remove OxCaml runtime-reg round trip:\n  "
+                              << *I << "  " << *J);
+            J->eraseFromParent();
+            I->eraseFromParent();
+            Changed = true;
+            ChangedBlock = true;
+            break;
+          }
+
+          if (isCallBoundary(*J) || J->hasUnmodeledSideEffects() ||
+              J->isTerminator() ||
+              J->modifiesRegister(RuntimeReg, TRI) ||
+              J->modifiesRegister(TmpReg, TRI) ||
+              J->readsRegister(TmpReg, TRI) ||
+              operandReadsRegister(*J, TmpReg, TRI))
+            break;
+        }
+
+        if (ChangedBlock)
+          break;
+      }
+    } while (ChangedBlock);
+  }
+
+  return Changed;
+}
+
 bool AArch64ExpandPseudo::runOnMachineFunction(MachineFunction &MF) {
   TII = static_cast<const AArch64InstrInfo *>(MF.getSubtarget().getInstrInfo());
+  TRI = MF.getSubtarget().getRegisterInfo();
 
   bool Modified = false;
   for (auto &MBB : MF)
     Modified |= expandMBB(MBB);
+  Modified |= removeOxCamlRuntimeRegRoundTrips(MF);
   return Modified;
 }
 
