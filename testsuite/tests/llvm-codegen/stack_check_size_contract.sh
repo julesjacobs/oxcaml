@@ -283,16 +283,21 @@ EOF
   "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" -target arm64-apple-macosx \
     -Wno-override-module -x ir -S -O3 -o "$boundary_asm" "$boundary_ir"
 
-  if ! boundary_has_prologue_realloc zero_byte_safe; then
-    echo "nonzero stack-check contract should keep prologue checks for a 112-byte frame" >&2
+  # A nonzero byte-count attribute is a producer contract: OxCaml has inserted
+  # an ordinary CFG stack check and LLVM must not add a duplicate prologue
+  # check. The hand-written IR here checks the LLVM-side contract handling; the
+  # generated-code checks below verify that real OxCaml IR also contains the
+  # ordinary CFG check.
+  if boundary_has_prologue_realloc zero_byte_safe; then
+    echo "nonzero stack-check contract should rely on the CFG check, not add a prologue check for a 112-byte frame" >&2
     exit 1
   fi
-  if ! boundary_has_prologue_realloc zero_byte_boundary_needs_prologue; then
-    echo "nonzero stack-check contract should keep prologue checks for a 128-byte frame" >&2
+  if boundary_has_prologue_realloc zero_byte_boundary_needs_prologue; then
+    echo "nonzero stack-check contract should rely on the CFG check, not add a prologue check for a 128-byte frame" >&2
     exit 1
   fi
-  if ! boundary_has_prologue_realloc zero_byte_needs_prologue; then
-    echo "nonzero stack-check contract should keep prologue checks for a 256-byte frame" >&2
+  if boundary_has_prologue_realloc zero_byte_needs_prologue; then
+    echo "nonzero stack-check contract should rely on the CFG check, not add a prologue check for a 256-byte frame" >&2
     exit 1
   fi
 
@@ -302,8 +307,8 @@ EOF
   "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" -target arm64-apple-macosx \
     -Wno-override-module -x ir -S -O3 -o "$boundary_asm" "$boundary_ir"
 
-  if ! boundary_has_prologue_realloc zero_byte_safe; then
-    echo "nonzero stack-check contract should keep prologue checks when pre-check stack use spends the reserve" >&2
+  if boundary_has_prologue_realloc zero_byte_safe; then
+    echo "nonzero stack-check contract should still rely on the CFG check when pre-check stack use spends the reserve" >&2
     exit 1
   fi
 }
@@ -397,7 +402,7 @@ if [ "$(cfg_stack_check_bytes small_non_tail_call)" = "0" ]; then
   echo "small_non_tail_call should have nonzero CFG stack-check bytes" >&2
   exit 1
 fi
-assert_has_prologue_realloc small_non_tail_call
+assert_no_prologue_realloc small_non_tail_call
 assert_has_ordinary_realloc small_non_tail_call
 
 check_contract_matches_cfg noalloc_outgoing_stack_args
@@ -405,5 +410,5 @@ if [ "$(cfg_stack_check_bytes noalloc_outgoing_stack_args)" = "0" ]; then
   echo "noalloc_outgoing_stack_args should have nonzero CFG stack-check bytes" >&2
   exit 1
 fi
-assert_has_prologue_realloc noalloc_outgoing_stack_args
+assert_no_prologue_realloc noalloc_outgoing_stack_args
 assert_has_ordinary_realloc noalloc_outgoing_stack_args
