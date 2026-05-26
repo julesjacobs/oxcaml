@@ -1,6 +1,6 @@
 # Progress
 
-Last updated: 2026-05-25.
+Last updated: 2026-05-26.
 
 ## Current Claim
 
@@ -100,6 +100,13 @@ root handling.
 - Added `llvm-test-no-rebuild` and `llvm-test-one-no-rebuild` for cheap reruns
   that keep the same LLVM-backend test-run environment while skipping the
   expensive `install_for_test` refresh.
+- Merged PR #17 (`jujacobs/llvm-fp-contract`) and implemented the narrow FP
+  contraction goal on this integration branch. LLVM now emits `contract` only
+  for the scalar FP multiply-add/subtract specific operations that native arm64
+  already fuses; ordinary FP arithmetic remains strict.
+- Added `testsuite/tests/llvm-codegen/fp_contract.ml` / `.sh`; focused
+  validation passed, and `make llvm-test-one-no-rebuild DIR=llvm-codegen`
+  reports 70 passed, 2 skipped, 0 failed.
 - Build/test latency notes are being kept in
   `agent-state/llvm-fast-path-roots-integration/BUILD_TEST_LATENCY_NOTES.md`.
 
@@ -111,5 +118,5 @@ crash, now explicitly skipped for that mode.
 
 ## Next Step
 
-Review the final diff, commit the integration changes, and push the agent
-branch.
+Review the final diff, commit the FP contraction integration changes, and push
+the agent branch.

@@ -2011,16 +2011,19 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
   in
   let float_muladd kind typ =
     let product =
-      emit_ins t (I.binary Fmul ~arg1:(float_arg typ 1) ~arg2:(float_arg typ 2))
+      emit_ins t
+        (I.binary_contract Fmul ~arg1:(float_arg typ 1)
+           ~arg2:(float_arg typ 2))
     in
     let arg0 = float_arg typ 0 in
     match kind with
-    | `Muladd -> emit_ins t (I.binary Fadd ~arg1:arg0 ~arg2:product)
-    | `Mulsub -> emit_ins t (I.binary Fsub ~arg1:arg0 ~arg2:product)
+    | `Muladd -> emit_ins t (I.binary_contract Fadd ~arg1:arg0 ~arg2:product)
+    | `Mulsub -> emit_ins t (I.binary_contract Fsub ~arg1:arg0 ~arg2:product)
     | `Negmuladd ->
       let neg_arg0 = emit_ins t (I.unary Fneg ~arg:arg0) in
-      emit_ins t (I.binary Fsub ~arg1:neg_arg0 ~arg2:product)
-    | `Negmulsub -> emit_ins t (I.binary Fsub ~arg1:product ~arg2:arg0)
+      emit_ins t (I.binary_contract Fsub ~arg1:neg_arg0 ~arg2:product)
+    | `Negmulsub ->
+      emit_ins t (I.binary_contract Fsub ~arg1:product ~arg2:arg0)
   in
   let int_vec_type ~width_in_bits =
     T.Vector
