@@ -63,6 +63,10 @@ goal is to preserve concrete causes of slow feedback so we can fix them later.
 - The testsuite runner uses GNU parallel with `--keep-order`, so output can
   also look silent while later directories are running if an earlier directory
   has not emitted its buffered result yet.
+- `agent-tmp-env` exports `LIST` for the all-minus-asm test list. Focused
+  wrappers must clear inherited `DIR` / `LIST` / `TEST` selectors when the user
+  passes a different selector on the command line; otherwise `make one` sees
+  multiple selectors and fails before running the test.
 - Some individual test directories are large enough to dominate a supposedly
   broad run. In this pass, several long-lived `ocamlopt.opt` jobs came from
   typing-layouts tests rather than LLVM-specific tests.
@@ -81,10 +85,53 @@ goal is to preserve concrete causes of slow feedback so we can fix them later.
   completed with 6719 passed, 293 skipped, 0 failed, 0 not started, and 0
   unexpected errors. That run is a useful baseline for future latency work.
 
+## Fast Iteration Workflow
+
+Use these from an agent checkout after setting the branch-local LLVM
+environment:
+
+```
+eval "$(../../../scripts/agent-tmp-env)"
+eval "$(../../../scripts/write-agent-clang-wrapper "$OXCAML_AGENT_TMP/llvm-build/bin/clang")"
+```
+
+For a fresh, trustworthy focused LLVM test run after compiler, runtime, test
+metadata, or test-file edits:
+
+```
+opam exec --switch=oxcaml-5.4.0+oxcaml -- env \
+  make llvm-test-one TEST=llvm-codegen/fast_path_roots.ml LLVM_PATH="$LLVM_PATH"
+```
+
+For a fast focused rerun when `_runtest` is already current:
+
+```
+opam exec --switch=oxcaml-5.4.0+oxcaml -- env \
+  make llvm-test-one-no-rebuild TEST=llvm-codegen/fast_path_roots.ml LLVM_PATH="$LLVM_PATH"
+```
+
+For a fresh full LLVM-backend stress run:
+
+```
+opam exec --switch=oxcaml-5.4.0+oxcaml -- env \
+  make llvm-test LLVM_PATH="$LLVM_PATH"
+```
+
+For a fast full rerun when `_runtest` is already current:
+
+```
+opam exec --switch=oxcaml-5.4.0+oxcaml -- env \
+  make llvm-test-no-rebuild LLVM_PATH="$LLVM_PATH"
+```
+
+The `*-no-rebuild` targets skip `install_for_test`. They are only trustworthy
+when the installed compiler/runtime and copied `_runtest` tree already match
+the source changes being tested. If an expect tool, test metadata block, test
+source file, runtime object, or installed compiler changed, use the non
+`no-rebuild` target once first.
+
 ## Things To Investigate Later
 
-- Add a target for "run tests with an already-built LLVM compiler" that does
-  not globally inject `LLVM_BACKEND=1` and does not rebuild compiler artifacts.
 - Split "build compiler with LLVM backend" from "run test suite using LLVM
   backend" so a focused test rerun cannot unexpectedly become a compiler
   rebuild.
