@@ -3612,6 +3612,15 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let res = call_llvm_intrinsic t name [arg] typ in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_rounding_mode_of_imm imm =
+    match imm with
+    | 0x8 -> Round_nearest
+    | 0x9 -> Round_neg_inf
+    | 0xA -> Round_pos_inf
+    | 0xB -> Round_zero
+    | 0xC -> Round_current
+    | _ -> fail_msg ~name:"simd_rounding_mode_of_imm" "unexpected immediate"
+  in
   let simd_shuffle_32 imm =
     let typ = int_vec_type ~width_in_bits:32 in
     let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -4399,6 +4408,10 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_insert_lane 32 (simd_imm imm)
     | Amd64_simd_instrs.Pinsrq | Amd64_simd_instrs.Vpinsrq ->
       simd_insert_lane 64 (simd_imm imm)
+    | Amd64_simd_instrs.Roundps | Amd64_simd_instrs.Vroundps_X_Xm128 ->
+      simd_float_round Cmm.Float32 (simd_rounding_mode_of_imm (simd_imm imm))
+    | Amd64_simd_instrs.Roundpd | Amd64_simd_instrs.Vroundpd_X_Xm128 ->
+      simd_float_round Cmm.Float64 (simd_rounding_mode_of_imm (simd_imm imm))
     | Amd64_simd_instrs.Phaddw_X_Xm128
     | Amd64_simd_instrs.Vphaddw_X_X_Xm128 ->
       simd_int_haddsub 16 Add
