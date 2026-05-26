@@ -2455,6 +2455,33 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_byte_align_right n =
+    let typ = int_vec_type ~width_in_bits:8 in
+    let high = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let low = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let res =
+      List.init 16 Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let src_lane = n + lane in
+             let elem =
+               if src_lane < 16
+               then
+                 emit_ins t
+                   (I.extractelement ~vector:low ~index:(V.of_int src_lane))
+               else if src_lane < 32
+               then
+                 emit_ins t
+                   (I.extractelement ~vector:high
+                      ~index:(V.of_int (src_lane - 16)))
+               else V.of_int ~typ:T.i8 0
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane) ~to_insert:elem))
+           (V.poison typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_unary_intrinsic typ intrinsic =
     let name = intrinsic ^ "." ^ llvm_intrinsic_type_suffix typ in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -4115,6 +4142,9 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | Amd64_simd_instrs.Pshufb_X_Xm128
     | Amd64_simd_instrs.Vpshufb_X_X_Xm128 ->
       simd_byte_shuffle ()
+    | Amd64_simd_instrs.Palignr_X_Xm128
+    | Amd64_simd_instrs.Vpalignr_X_X_Xm128 ->
+      simd_byte_align_right (simd_imm imm)
     | Amd64_simd_instrs.Phaddw_X_Xm128
     | Amd64_simd_instrs.Vphaddw_X_X_Xm128 ->
       simd_int_haddsub 16 Add

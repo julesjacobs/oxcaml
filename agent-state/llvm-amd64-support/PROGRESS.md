@@ -17,10 +17,10 @@ default disabled-probe path. The standard-compiler LLVM-backend
 `lib-atomic/test_atomic_cmpxchg.ml` failure is fixed too. The native
 `async-exns/async_exns_1.ml` output mismatch is now fixed as well.
 
-The latest SIMD follow-ups add SSSE3 byte-shuffle lowering, SSSE3 signed word
-rounded multiply lowering, SSSE3 mulsign lowering, SSSE3 absolute-value
-lowering, SSSE3 saturating and non-saturating horizontal integer add/sub
-lowering, SSE3 vec128
+The latest SIMD follow-ups add SSSE3 byte align-right lowering, SSSE3
+byte-shuffle lowering, SSSE3 signed word rounded multiply lowering, SSSE3
+mulsign lowering, SSSE3 absolute-value lowering, SSSE3 saturating and
+non-saturating horizontal integer add/sub lowering, SSE3 vec128
 duplicate-lane lowering, SSE3 packed float
 addsub/hadd/hsub lowering, SSE/SSE2 packed float min/max and approximate
 reciprocal/reciprocal-sqrt lowering, SSE2 conversion lowering for packed
@@ -2005,6 +2005,13 @@ limit is raised from `l=100000` to `l=150000`.
       kept IR extracts each selector byte, zeros the output lane when the
       selector high bit is set, otherwise masks to the low nibble and extracts
       the selected source byte.
+    - Implemented AMD64 LLVM lowering for the SSSE3 byte align-right helper
+      `caml_ssse3_vec128_align_right_bytes`. Rebuilt with
+      `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_ssse3_align_right.sh` script
+      passed directly under `validation-tmp/amd64-simd-ssse3-align-right`; the
+      kept IR extracts constant byte lanes from the `low || high` argument
+      concatenation, inserting zero for shifted-out lanes to match `palignr`.
 
 ## Current Blocker
 
