@@ -518,24 +518,6 @@ Lfunc_begin0:
 	.cfi_personality 155, _caml_llvm_eh_personality
 	.cfi_lsda 16, Lexception0
 ; %bb.0:                                ; %L1
-	; InlineAsm Start
-	mov	x17, x30
-	ldr	x16, [x28, #40]
-	adrp	x30, _caml_plat_pagesize@GOTPAGE
-	ldr	x30, [x30, _caml_plat_pagesize@GOTPAGEOFF]
-	ldr	x30, [x30]
-	add	x16, x16, x30, lsl #1
-	mov	x30, #60
-	add	x16, x16, x30, lsl #3
-	cmp	sp, x16
-	b.hs	Ltmp6
-	mov	x16, #60
-	stp	x16, x17, [sp, #-16]!
-	bl	_caml_call_realloc_stack
-	ldp	x16, x17, [sp], #16
-Ltmp6:
-	mov	x30, x17
-	; InlineAsm End
 	stp	x29, x30, [sp, #-16]!           ; 16-byte Folded Spill
 	.cfi_def_cfa_offset 16
 	mov	x29, sp
@@ -636,7 +618,7 @@ Ltmp2:
 	mov	x28, x2
 	mov	x27, x9
 	blr	x8
-Ltmp7:
+Ltmp6:
 	mov	x0, x28
 	mov	x1, x27
 Ltmp3:
@@ -674,7 +656,7 @@ Ltmp0:
 	mov	x28, x1
 	mov	x27, x9
 	bl	_caml_call_gc
-Ltmp8:
+Ltmp7:
 	mov	x0, x28
 	mov	x1, x27
 Ltmp1:
@@ -1687,24 +1669,6 @@ L338:
 [%%expect_llvm_asm AArch64{|_camlTOP__call_with_live_roots_18_19_code:
 	.cfi_startproc
 ; %bb.0:                                ; %L1
-	; InlineAsm Start
-	mov	x17, x30
-	ldr	x16, [x28, #40]
-	adrp	x30, _caml_plat_pagesize@GOTPAGE
-	ldr	x30, [x30, _caml_plat_pagesize@GOTPAGEOFF]
-	ldr	x30, [x30]
-	add	x16, x16, x30, lsl #1
-	mov	x30, #52
-	add	x16, x16, x30, lsl #3
-	cmp	sp, x16
-	b.hs	Ltmp0
-	mov	x16, #52
-	stp	x16, x17, [sp, #-16]!
-	bl	_caml_call_realloc_stack
-	ldp	x16, x17, [sp], #16
-Ltmp0:
-	mov	x30, x17
-	; InlineAsm End
 	stp	x29, x30, [sp, #-16]!           ; 16-byte Folded Spill
 	.cfi_def_cfa_offset 16
 	mov	x29, sp
@@ -1728,7 +1692,7 @@ LBB0_1:                                 ; %L341
 	mov	x0, x9
 	mov	x1, x2
 	blr	x8
-Ltmp1:
+Ltmp0:
 	ldr	x0, [sp, #8]
 	ldp	x29, x30, [sp, #16]             ; 16-byte Folded Reload
 	add	sp, sp, #32
@@ -2214,24 +2178,6 @@ Lfunc_begin0:
 	.cfi_personality 155, _caml_llvm_eh_personality
 	.cfi_lsda 16, Lexception0
 ; %bb.0:                                ; %L1
-	; InlineAsm Start
-	mov	x17, x30
-	ldr	x16, [x28, #40]
-	adrp	x30, _caml_plat_pagesize@GOTPAGE
-	ldr	x30, [x30, _caml_plat_pagesize@GOTPAGEOFF]
-	ldr	x30, [x30]
-	add	x16, x16, x30, lsl #1
-	mov	x30, #60
-	add	x16, x16, x30, lsl #3
-	cmp	sp, x16
-	b.hs	Ltmp6
-	mov	x16, #60
-	stp	x16, x17, [sp, #-16]!
-	bl	_caml_call_realloc_stack
-	ldp	x16, x17, [sp], #16
-Ltmp6:
-	mov	x30, x17
-	; InlineAsm End
 	stp	x29, x30, [sp, #-16]!           ; 16-byte Folded Spill
 	.cfi_def_cfa_offset 16
 	mov	x29, sp
@@ -2342,7 +2288,7 @@ Ltmp2:
 	mov	x28, x2
 	mov	x27, x8
 	blr	x9
-Ltmp7:
+Ltmp6:
 	mov	x1, x28
 Ltmp3:
 ; %bb.5:                                ; %L412
@@ -2376,7 +2322,7 @@ Ltmp0:
 	mov	x28, x1
 	mov	x27, x8
 	bl	_caml_call_gc
-Ltmp8:
+Ltmp7:
 	mov	x0, x28
 	mov	x1, x27
 Ltmp1:
@@ -2561,24 +2507,6 @@ L431:
 [%%expect_llvm_asm AArch64{|_camlTOP__call_then_alloc_with_live_roots_26_27_code:
 	.cfi_startproc
 ; %bb.0:                                ; %L1
-	; InlineAsm Start
-	mov	x17, x30
-	ldr	x16, [x28, #40]
-	adrp	x30, _caml_plat_pagesize@GOTPAGE
-	ldr	x30, [x30, _caml_plat_pagesize@GOTPAGEOFF]
-	ldr	x30, [x30]
-	add	x16, x16, x30, lsl #1
-	mov	x30, #54
-	add	x16, x16, x30, lsl #3
-	cmp	sp, x16
-	b.hs	Ltmp0
-	mov	x16, #54
-	stp	x16, x17, [sp, #-16]!
-	bl	_caml_call_realloc_stack
-	ldp	x16, x17, [sp], #16
-Ltmp0:
-	mov	x30, x17
-	; InlineAsm End
 	stp	x29, x30, [sp, #-16]!           ; 16-byte Folded Spill
 	.cfi_def_cfa_offset 16
 	mov	x29, sp
@@ -2603,7 +2531,7 @@ LBB0_1:                                 ; %L429
 	mov	x27, x3
 	mov	x1, x2
 	blr	x8
-Ltmp1:
+Ltmp0:
 	mov	x1, x28
 	sub	x8, x27, #24
 	ldr	x9, [x28]
@@ -2634,7 +2562,7 @@ LBB0_4:                                 ; %L430
 	mov	x28, x1
 	mov	x27, x8
 	bl	_caml_call_gc
-Ltmp2:
+Ltmp1:
 	mov	x8, x27
 	mov	x1, x28
 	ldr	x9, [sp, #8]

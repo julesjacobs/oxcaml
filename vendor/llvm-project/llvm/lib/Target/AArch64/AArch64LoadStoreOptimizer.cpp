@@ -36,6 +36,7 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/IR/DebugLoc.h"
+#include "llvm/IR/Function.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCRegisterInfo.h"
@@ -79,6 +80,16 @@ static cl::opt<unsigned> UpdateLimit("aarch64-update-scan-limit", cl::init(100),
 // Enable register renaming to find additional store pairing opportunities.
 static cl::opt<bool> EnableRenaming("aarch64-load-store-renaming",
                                     cl::init(true), cl::Hidden);
+
+static cl::opt<bool> OxcamlSuppressStatepointStackPairs(
+    "oxcaml-suppress-statepoint-stack-pairs", cl::Hidden, cl::init(true),
+    cl::desc("Suppress stack load/store pairs close to OxCaml GC "
+             "statepoints"));
+
+static cl::opt<unsigned> OxcamlStatepointStackPairWindow(
+    "oxcaml-statepoint-stack-pair-window", cl::Hidden, cl::init(8),
+    cl::desc("Instruction window for OxCaml statepoint stack pair "
+             "suppression"));
 
 #define AARCH64_LOAD_STORE_OPT_NAME "AArch64 load / store optimization pass"
 
@@ -1281,6 +1292,64 @@ static bool needsWinCFI(const MachineFunction *MF) {
          MF->getFunction().needsUnwindTableEntry();
 }
 
+static bool isSPBasedLdSt(const MachineInstr &MI) {
+  const MachineOperand &BaseOp = AArch64InstrInfo::getLdStBaseOp(MI);
+  return BaseOp.isReg() && BaseOp.getReg() == AArch64::SP;
+}
+
+static bool isOxcamlGCFunction(const MachineFunction &MF) {
+  const Function &F = MF.getFunction();
+  return F.hasGC() && F.getGC() == "oxcaml";
+}
+
+static bool hasStatepointForward(const MachineInstr &MI, unsigned Limit) {
+  const MachineBasicBlock *MBB = MI.getParent();
+  unsigned Count = 0;
+  MachineBasicBlock::const_instr_iterator I = std::next(MI.getIterator());
+  MachineBasicBlock::const_instr_iterator E = MBB->instr_end();
+  for (; I != E; ++I) {
+    if (I->getOpcode() == TargetOpcode::STATEPOINT)
+      return true;
+    if (!I->isTransient() && ++Count >= Limit)
+      return false;
+  }
+  return false;
+}
+
+static bool hasStatepointBackward(const MachineInstr &MI, unsigned Limit) {
+  const MachineBasicBlock *MBB = MI.getParent();
+  unsigned Count = 0;
+  for (MachineBasicBlock::const_instr_iterator I = MI.getIterator(),
+                                               B = MBB->instr_begin();
+       I != B;) {
+    --I;
+    if (I->getOpcode() == TargetOpcode::STATEPOINT)
+      return true;
+    if (!I->isTransient() && ++Count >= Limit)
+      return false;
+  }
+  return false;
+}
+
+static bool shouldSuppressOxcamlStatepointStackPair(const MachineInstr &FirstMI,
+                                                   const MachineInstr &MI) {
+  if (!OxcamlSuppressStatepointStackPairs)
+    return false;
+  if (FirstMI.getParent() != MI.getParent())
+    return false;
+  if (!isOxcamlGCFunction(*MI.getParent()->getParent()))
+    return false;
+  if (!isSPBasedLdSt(FirstMI) || !isSPBasedLdSt(MI))
+    return false;
+
+  // Suppress only stack pairs that are immediately before or after an OxCaml
+  // STATEPOINT. Global ldst-opt disabling fixes some reducers but regresses
+  // allocation-like loops; this keeps ordinary stack pairing enabled away from
+  // call regions.
+  return hasStatepointBackward(FirstMI, OxcamlStatepointStackPairWindow) ||
+         hasStatepointForward(MI, OxcamlStatepointStackPairWindow);
+}
+
 // Returns true if FirstMI and MI are candidates for merging or pairing.
 // Otherwise, returns false.
 static bool areCandidatesToMergeOrPair(MachineInstr &FirstMI, MachineInstr &MI,
@@ -1565,6 +1634,10 @@ AArch64LoadStoreOpt::findMatchingInsn(MachineBasicBlock::iterator I,
     if (areCandidatesToMergeOrPair(FirstMI, MI, Flags, TII) &&
         AArch64InstrInfo::getLdStOffsetOp(MI).isImm()) {
       assert(MI.mayLoadOrStore() && "Expected memory operation.");
+      if (!FindNarrowMerge &&
+          shouldSuppressOxcamlStatepointStackPair(FirstMI, MI))
+        continue;
+
       // If we've found another instruction with the same opcode, check to see
       // if the base and offset are compatible with our starting instruction.
       // These instructions all have scaled immediate operands, so we just
