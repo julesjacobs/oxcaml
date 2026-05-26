@@ -2201,6 +2201,46 @@ let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
     in
     emit_ins t (I.convert Zext ~arg:res ~to_:T.i64) |> store_res
   in
+  let avx_vec256_ptest test =
+    let typ = T.Vector { num_of_elems = 4; elem_type = T.i64 } in
+    let to_vec arg =
+      let arg = load_reg_to_temp t arg in
+      if T.equal (V.get_type arg) typ
+      then arg
+      else emit_ins t (I.convert Bitcast ~arg ~to_:typ)
+    in
+    let reduce_or arg =
+      List.init 4 Fun.id
+      |> List.fold_left
+           (fun acc lane ->
+             let elem =
+               emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int lane))
+             in
+             emit_ins t (I.binary Or ~arg1:acc ~arg2:elem))
+           (V.of_int ~typ:T.i64 0)
+    in
+    let arg1 = to_vec i.arg.(0) in
+    let arg2 = to_vec i.arg.(1) in
+    let zero = V.of_int ~typ:T.i64 0 in
+    let and_arg1_arg2 = emit_ins t (I.binary And ~arg1 ~arg2) in
+    let all_ones = V.imm typ "<i64 -1, i64 -1, i64 -1, i64 -1>" in
+    let not_arg1 =
+      emit_ins t (I.binary Xor ~arg1 ~arg2:all_ones)
+    in
+    let and_not_arg1_arg2 = emit_ins t (I.binary And ~arg1:not_arg1 ~arg2) in
+    let any_and = reduce_or and_arg1_arg2 in
+    let any_and_not = reduce_or and_not_arg1_arg2 in
+    let res =
+      match test with
+      | `Testz -> emit_ins t (I.icmp Ieq ~arg1:any_and ~arg2:zero)
+      | `Testc -> emit_ins t (I.icmp Ieq ~arg1:any_and_not ~arg2:zero)
+      | `Testnzc ->
+        let zf_clear = emit_ins t (I.icmp Ine ~arg1:any_and ~arg2:zero) in
+        let cf_clear = emit_ins t (I.icmp Ine ~arg1:any_and_not ~arg2:zero) in
+        emit_ins t (I.binary And ~arg1:zf_clear ~arg2:cf_clear)
+    in
+    emit_ins t (I.convert Zext ~arg:res ~to_:T.i64) |> store_res
+  in
   let scalar_int_count ?zero_is_poison intrinsic width_in_bits =
     let typ = T.Int { width_in_bits } in
     let convert_if_needed op arg to_ =
@@ -2429,6 +2469,9 @@ let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
   | "caml_sse41_vec128_testz" -> sse41_vec128_ptest `Testz
   | "caml_sse41_vec128_testc" -> sse41_vec128_ptest `Testc
   | "caml_sse41_vec128_testnzc" -> sse41_vec128_ptest `Testnzc
+  | "caml_avx_vec256_testz" -> avx_vec256_ptest `Testz
+  | "caml_avx_vec256_testc" -> avx_vec256_ptest `Testc
+  | "caml_avx_vec256_testnzc" -> avx_vec256_ptest `Testnzc
   | "caml_popcnt_int16" -> scalar_int_count "ctpop" 16
   | "caml_popcnt_int32" -> scalar_int_count "ctpop" 32
   | "caml_popcnt_int64" -> scalar_int_count "ctpop" 64
@@ -2806,18 +2849,18 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let res = call_llvm_intrinsic t name [arg] typ in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
-  let simd_int_binary width_in_bits op =
-    let typ = int_vec_type ~width_in_bits in
+  let simd_int_binary ?(vector_width_in_bits = 128) width_in_bits op =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits in
     let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
     let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
     let res = emit_ins t (I.binary op ~arg1 ~arg2) in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
-  let simd_int_andnot width_in_bits =
-    let typ = int_vec_type ~width_in_bits in
+  let simd_int_andnot ?(vector_width_in_bits = 128) width_in_bits =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits in
     let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
     let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
-    let all_ones = int_vector_constant width_in_bits (-1) in
+    let all_ones = int_vector_constant_like typ (-1) in
     let not_arg1 = emit_ins t (I.binary Xor ~arg1 ~arg2:all_ones) in
     let res = emit_ins t (I.binary And ~arg1:not_arg1 ~arg2) in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
@@ -3683,9 +3726,10 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
-  let simd_dup_lanes width_in_bits src_lane_of_dst_lane =
-    let typ = int_vec_type ~width_in_bits in
-    let lanes = 128 / width_in_bits in
+  let simd_dup_lanes ?(vector_width_in_bits = 128) width_in_bits
+      src_lane_of_dst_lane =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits in
+    let lanes = vector_width_in_bits / width_in_bits in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
     let res =
       List.init lanes Fun.id
@@ -3703,9 +3747,9 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
-  let simd_blend_imm width_in_bits imm =
-    let typ = int_vec_type ~width_in_bits in
-    let lanes = 128 / width_in_bits in
+  let simd_blend_imm ?(vector_width_in_bits = 128) width_in_bits imm =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits in
+    let lanes = vector_width_in_bits / width_in_bits in
     let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
     let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
     let res =
@@ -3722,8 +3766,8 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
-  let simd_blendv width_in_bits =
-    let typ = int_vec_type ~width_in_bits in
+  let simd_blendv ?(vector_width_in_bits = 128) width_in_bits =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits in
     let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
     let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
     let mask = cast_if_needed (load_reg_to_temp t i.arg.(2)) typ in
@@ -4803,6 +4847,14 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_binary 64 Or
     | Amd64_simd_instrs.Xorps | Amd64_simd_instrs.Vxorps_X_X_Xm128 ->
       simd_int_binary 64 Xor
+    | Amd64_simd_instrs.Vandps_Y_Y_Ym256 ->
+      simd_int_binary ~vector_width_in_bits:256 64 And
+    | Amd64_simd_instrs.Vandnps_Y_Y_Ym256 ->
+      simd_int_andnot ~vector_width_in_bits:256 64
+    | Amd64_simd_instrs.Vorps_Y_Y_Ym256 ->
+      simd_int_binary ~vector_width_in_bits:256 64 Or
+    | Amd64_simd_instrs.Vxorps_Y_Y_Ym256 ->
+      simd_int_binary ~vector_width_in_bits:256 64 Xor
     | Amd64_simd_instrs.Addps | Amd64_simd_instrs.Vaddps_X_X_Xm128 ->
       simd_float_binary Cmm.Float32 Fadd
     | Amd64_simd_instrs.Subps | Amd64_simd_instrs.Vsubps_X_X_Xm128 ->
@@ -4953,6 +5005,15 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_dup_lanes 32 (fun dst_lane -> dst_lane lor 1)
     | Amd64_simd_instrs.Movsldup | Amd64_simd_instrs.Vmovsldup_X_Xm128 ->
       simd_dup_lanes 32 (fun dst_lane -> dst_lane land lnot 1)
+    | Amd64_simd_instrs.Vmovddup_Y_Ym256 ->
+      simd_dup_lanes ~vector_width_in_bits:256 64 (fun dst_lane ->
+          dst_lane land lnot 1)
+    | Amd64_simd_instrs.Vmovshdup_Y_Ym256 ->
+      simd_dup_lanes ~vector_width_in_bits:256 32 (fun dst_lane ->
+          dst_lane lor 1)
+    | Amd64_simd_instrs.Vmovsldup_Y_Ym256 ->
+      simd_dup_lanes ~vector_width_in_bits:256 32 (fun dst_lane ->
+          dst_lane land lnot 1)
     | Amd64_simd_instrs.Pabsb_X_Xm128 | Amd64_simd_instrs.Vpabsb_X_Xm128 ->
       simd_int_abs 8
     | Amd64_simd_instrs.Pabsw_X_Xm128 | Amd64_simd_instrs.Vpabsw_X_Xm128 ->
@@ -4976,12 +5037,20 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_blend_imm 32 (simd_imm imm)
     | Amd64_simd_instrs.Blendpd | Amd64_simd_instrs.Vblendpd_X_X_Xm128 ->
       simd_blend_imm 64 (simd_imm imm)
+    | Amd64_simd_instrs.Vblendps_Y_Y_Ym256 ->
+      simd_blend_imm ~vector_width_in_bits:256 32 (simd_imm imm)
+    | Amd64_simd_instrs.Vblendpd_Y_Y_Ym256 ->
+      simd_blend_imm ~vector_width_in_bits:256 64 (simd_imm imm)
     | Amd64_simd_instrs.Pblendvb | Amd64_simd_instrs.Vpblendvb_X_X_Xm128_X ->
       simd_blendv 8
     | Amd64_simd_instrs.Blendvps | Amd64_simd_instrs.Vblendvps_X_X_Xm128_X ->
       simd_blendv 32
     | Amd64_simd_instrs.Blendvpd | Amd64_simd_instrs.Vblendvpd_X_X_Xm128_X ->
       simd_blendv 64
+    | Amd64_simd_instrs.Vblendvps_Y_Y_Ym256_Y ->
+      simd_blendv ~vector_width_in_bits:256 32
+    | Amd64_simd_instrs.Vblendvpd_Y_Y_Ym256_Y ->
+      simd_blendv ~vector_width_in_bits:256 64
     | Amd64_simd_instrs.Pextrb | Amd64_simd_instrs.Vpextrb ->
       simd_extract_lane 8 (simd_imm imm)
     | Amd64_simd_instrs.Pextrw_r64m16_X | Amd64_simd_instrs.Vpextrw_r64m16_X ->
@@ -5109,6 +5178,10 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_movemask ~width_in_bits:32 ~lanes:4
     | Amd64_simd_instrs.Movmskpd | Amd64_simd_instrs.Vmovmskpd_r64_X ->
       simd_movemask ~width_in_bits:64 ~lanes:2
+    | Amd64_simd_instrs.Vmovmskps_r64_Y ->
+      simd_movemask ~width_in_bits:32 ~lanes:8
+    | Amd64_simd_instrs.Vmovmskpd_r64_Y ->
+      simd_movemask ~width_in_bits:64 ~lanes:4
     | Amd64_simd_instrs.Maskmovdqu | Amd64_simd_instrs.Vmaskmovdqu ->
       simd_masked_byte_store ()
     | Amd64_simd_instrs.Vinsertf128 -> simd_vec256_insert_128 (simd_imm imm)

@@ -26,7 +26,8 @@ lowering, SSE4.1 packed float vector rounding lowering, SSE4.1 vector test
 predicate lowering, SSE4.1 integer lane extract/insert lowering, SSE4.1
 variable blend lowering, SSE4.1 immediate blend lowering, SSE4.1 int32
 multiply lowering, SSE4.1 integer sign/zero extension lowering, SSE4.1
-integer compare/min/max lowering, AVX packed float arithmetic lowering,
+integer compare/min/max lowering, AVX packed float arithmetic lowering, AVX
+vec256 logical/test/blend/duplicate/movemask lowering,
 SSSE3 unsigned-byte/signed-byte multiply-add saturating lowering, SSSE3 byte
 align-right lowering, SSSE3 byte-shuffle lowering, SSSE3 signed word rounded
 multiply lowering, SSSE3 mulsign lowering,
@@ -2234,6 +2235,20 @@ limit is raised from `l=100000` to `l=150000`.
       `llvm.sqrt.v8f32`, `llvm.sqrt.v4f64`, `llvm.roundeven.v8f32`,
       `llvm.roundeven.v4f64`, and vector compare/sign-extension operations,
       and rejects target-specific AVX min/max/approximate intrinsics.
+    - Implemented AMD64 LLVM lowering for AVX vec256 logical/test/blend,
+      duplicate-lane, and movemask builtins:
+      `caml_avx_vec256_{and,andnot,or,xor}`,
+      `caml_avx_vec256_{testz,testc,testnzc}`,
+      `caml_avx_vec256_{blend_64,blend_32,blendv_64,blendv_32}`,
+      `caml_avx_vec256_{dup_even_64,dup_odd_32,dup_even_32}`, and
+      `caml_avx_vec256_{movemask_64,movemask_32}`. Rebuilt with
+      `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_avx_vec256.sh` script passed
+      directly under `validation-tmp/amd64_avx_vec256` with the in-tree
+      compiler and `OCAMLLIB` set to the agent-local `_install/lib/ocaml`;
+      its kept IR contains target-independent vector integer operations,
+      lane extracts, vector selects, scalar predicate reductions, and rejects
+      target-specific `llvm.x86.avx` intrinsics.
 
 ## Current Blocker
 
