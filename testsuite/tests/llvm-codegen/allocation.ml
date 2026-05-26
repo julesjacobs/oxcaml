@@ -11,7 +11,7 @@ let make_pair x y = x, y;;
 val make_pair : 'a -> 'b -> 'a * 'b = <fun>
 |}]
 
-[%%expect_llvm_ir AArch64{|define  oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__make_pair_0_1_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
+[%%expect_llvm_ir AArch64{|define  oxcaml_fpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTOP__make_pair_0_1_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) %3) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" noinline gc "oxcaml" {
   %ds = alloca i64
   store i64 %0, ptr %ds
   %alloc = alloca i64
@@ -94,10 +94,11 @@ L105:
 [%%expect_llvm_asm AArch64{|_camlTOP__make_pair_0_1_code:
 	.cfi_startproc
 ; %bb.0:                                ; %L1
-	sub	sp, sp, #16
+	stp	x29, x30, [sp, #-16]!           ; 16-byte Folded Spill
 	.cfi_def_cfa_offset 16
-	str	x30, [sp, #8]                   ; 8-byte Folded Spill
+	mov	x29, sp
 	.cfi_offset w30, -8
+	.cfi_offset w29, -16
 	sub	sp, sp, #16
 	.cfi_def_cfa_offset 32
 	sub	x9, x27, #24
@@ -115,18 +116,18 @@ LBB0_2:                                 ; %L105
 	mov	x28, x2
 	mov	x27, x9
 	mov	x0, x8
-	ldr	x30, [sp, #24]                  ; 8-byte Folded Reload
+	ldp	x29, x30, [sp, #16]             ; 16-byte Folded Reload
 	add	sp, sp, #32
 	ret
 LBB0_3:                                 ; %L104
-	str	x0, [sp, #16]
-	str	x1, [sp, #8]
+	str	x0, [sp, #8]
+	str	x1, [sp]
 	mov	x27, x9
 	bl	_caml_call_gc
 Ltmp0:
 	mov	x9, x27
 	mov	x2, x28
-	ldr	x0, [sp, #16]
-	ldr	x1, [sp, #8]
+	ldr	x0, [sp, #8]
+	ldr	x1, [sp]
 	b	LBB0_2
 	.cfi_endproc|}]
