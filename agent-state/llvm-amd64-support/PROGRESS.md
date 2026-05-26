@@ -17,13 +17,13 @@ default disabled-probe path. The standard-compiler LLVM-backend
 `lib-atomic/test_atomic_cmpxchg.ml` failure is fixed too. The native
 `async-exns/async_exns_1.ml` output mismatch is now fixed as well.
 
-The latest SIMD follow-ups add SSE4.1 int32 multiply lowering, SSE4.1 integer
-sign/zero extension lowering, SSE4.1 integer compare/min/max lowering, SSSE3
-unsigned-byte/signed-byte multiply-add saturating lowering, SSSE3 byte
-align-right lowering, SSSE3 byte-shuffle lowering, SSSE3 signed word rounded
-multiply lowering, SSSE3 mulsign lowering, SSSE3 absolute-value lowering,
-SSSE3 saturating and non-saturating horizontal integer add/sub lowering, SSE3
-vec128
+The latest SIMD follow-ups add SSE4.1 immediate blend lowering, SSE4.1 int32
+multiply lowering, SSE4.1 integer sign/zero extension lowering, SSE4.1
+integer compare/min/max lowering, SSSE3 unsigned-byte/signed-byte multiply-add
+saturating lowering, SSSE3 byte align-right lowering, SSSE3 byte-shuffle
+lowering, SSSE3 signed word rounded multiply lowering, SSSE3 mulsign lowering,
+SSSE3 absolute-value lowering, SSSE3 saturating and non-saturating horizontal
+integer add/sub lowering, SSE3 vec128
 duplicate-lane lowering, SSE3 packed float
 addsub/hadd/hsub lowering, SSE/SSE2 packed float min/max and approximate
 reciprocal/reciprocal-sqrt lowering, SSE2 conversion lowering for packed
@@ -2052,6 +2052,13 @@ limit is raised from `l=100000` to `l=150000`.
       passed directly under `validation-tmp/amd64-simd-sse41-int32-mul`; the
       kept IR sign-extends even i32 lanes for the signed i32-to-i64 multiply
       and uses vector i32 multiplication for the low 32-bit products.
+    - Implemented AMD64 LLVM lowering for the SSE4.1 immediate blend helpers:
+      `caml_sse41_vec128_blend_{16,32,64}`. Rebuilt with
+      `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_sse41_blend_imm.sh` script
+      passed directly under `validation-tmp/amd64-simd-sse41-blend-imm`; the
+      kept IR extracts lanes from the first or second operand according to the
+      immediate mask bit and inserts them into the 128-bit result vector.
 
 ## Current Blocker
 
