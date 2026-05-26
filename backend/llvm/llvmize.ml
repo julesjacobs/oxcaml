@@ -3204,6 +3204,40 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let res = emit_ins t (I.select ~cond ~ifso:arg2 ~ifnot:arg1) in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let convert_int_to_type arg to_ =
+    match[@warning "-4"] V.get_type arg, to_ with
+    | T.Int { width_in_bits = from_width }, T.Int { width_in_bits = to_width }
+      when from_width = to_width ->
+      arg
+    | T.Int { width_in_bits = from_width }, T.Int { width_in_bits = to_width }
+      when from_width < to_width ->
+      emit_ins t (I.convert Zext ~arg ~to_)
+    | T.Int { width_in_bits = from_width }, T.Int { width_in_bits = to_width }
+      when from_width > to_width ->
+      emit_ins t (I.convert Trunc ~arg ~to_)
+    | _ -> fail_msg ~name:"convert_int_to_type" "expected integer types"
+  in
+  let simd_extract_lane width_in_bits imm =
+    let typ = int_vec_type ~width_in_bits in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let elem =
+      emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int imm))
+    in
+    convert_int_to_type elem (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_insert_lane width_in_bits imm =
+    let typ = int_vec_type ~width_in_bits in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let elem =
+      convert_int_to_type (load_reg_to_temp t i.arg.(1))
+        (T.Int { width_in_bits })
+    in
+    let res =
+      emit_ins t
+        (I.insertelement ~vector:arg ~index:(V.of_int imm) ~to_insert:elem)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_haddsub width_in_bits (op : I.binary_op) =
     let typ = int_vec_type ~width_in_bits in
     let lanes = 128 / width_in_bits in
@@ -4315,6 +4349,23 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | Amd64_simd_instrs.Blendvpd
     | Amd64_simd_instrs.Vblendvpd_X_X_Xm128_X ->
       simd_blendv 64
+    | Amd64_simd_instrs.Pextrb | Amd64_simd_instrs.Vpextrb ->
+      simd_extract_lane 8 (simd_imm imm)
+    | Amd64_simd_instrs.Pextrw_r64m16_X
+    | Amd64_simd_instrs.Vpextrw_r64m16_X ->
+      simd_extract_lane 16 (simd_imm imm)
+    | Amd64_simd_instrs.Pextrd | Amd64_simd_instrs.Vpextrd ->
+      simd_extract_lane 32 (simd_imm imm)
+    | Amd64_simd_instrs.Pextrq | Amd64_simd_instrs.Vpextrq ->
+      simd_extract_lane 64 (simd_imm imm)
+    | Amd64_simd_instrs.Pinsrb | Amd64_simd_instrs.Vpinsrb ->
+      simd_insert_lane 8 (simd_imm imm)
+    | Amd64_simd_instrs.Pinsrw_X_r32m16 | Amd64_simd_instrs.Vpinsrw ->
+      simd_insert_lane 16 (simd_imm imm)
+    | Amd64_simd_instrs.Pinsrd | Amd64_simd_instrs.Vpinsrd ->
+      simd_insert_lane 32 (simd_imm imm)
+    | Amd64_simd_instrs.Pinsrq | Amd64_simd_instrs.Vpinsrq ->
+      simd_insert_lane 64 (simd_imm imm)
     | Amd64_simd_instrs.Phaddw_X_Xm128
     | Amd64_simd_instrs.Vphaddw_X_X_Xm128 ->
       simd_int_haddsub 16 Add
