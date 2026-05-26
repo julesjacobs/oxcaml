@@ -3042,6 +3042,35 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_haddsub width_in_bits (op : I.binary_op) =
+    let typ = int_vec_type ~width_in_bits in
+    let lanes = 128 / width_in_bits in
+    let half_lanes = lanes / 2 in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let elem arg lane =
+      emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int lane))
+    in
+    let res =
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let src, src_lane =
+               if lane < half_lanes
+               then arg1, 2 * lane
+               else arg2, 2 * (lane - half_lanes)
+             in
+             let elem =
+               emit_ins t
+                 (I.binary op ~arg1:(elem src src_lane)
+                    ~arg2:(elem src (src_lane + 1)))
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane) ~to_insert:elem))
+           (V.poison typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_float_unary_intrinsic width intrinsic =
     let typ = float_vec_type ~width in
     let name = intrinsic ^ "." ^ llvm_intrinsic_type_suffix typ in
@@ -3949,6 +3978,18 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_dup_lanes 32 (fun dst_lane -> dst_lane lor 1)
     | Amd64_simd_instrs.Movsldup | Amd64_simd_instrs.Vmovsldup_X_Xm128 ->
       simd_dup_lanes 32 (fun dst_lane -> dst_lane land lnot 1)
+    | Amd64_simd_instrs.Phaddw_X_Xm128
+    | Amd64_simd_instrs.Vphaddw_X_X_Xm128 ->
+      simd_int_haddsub 16 Add
+    | Amd64_simd_instrs.Phaddd_X_Xm128
+    | Amd64_simd_instrs.Vphaddd_X_X_Xm128 ->
+      simd_int_haddsub 32 Add
+    | Amd64_simd_instrs.Phsubw_X_Xm128
+    | Amd64_simd_instrs.Vphsubw_X_X_Xm128 ->
+      simd_int_haddsub 16 Sub
+    | Amd64_simd_instrs.Phsubd_X_Xm128
+    | Amd64_simd_instrs.Vphsubd_X_X_Xm128 ->
+      simd_int_haddsub 32 Sub
     | Amd64_simd_instrs.Maxpd | Amd64_simd_instrs.Vmaxpd_X_X_Xm128 ->
       simd_x86_intrinsic "x86.sse2.max.pd"
         [float_vec_type ~width:Cmm.Float64; float_vec_type ~width:Cmm.Float64]

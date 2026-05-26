@@ -17,8 +17,9 @@ default disabled-probe path. The standard-compiler LLVM-backend
 `lib-atomic/test_atomic_cmpxchg.ml` failure is fixed too. The native
 `async-exns/async_exns_1.ml` output mismatch is now fixed as well.
 
-The latest SIMD follow-ups add SSE3 vec128 duplicate-lane lowering, SSE3 packed
-float addsub/hadd/hsub lowering, SSE/SSE2 packed float min/max and approximate
+The latest SIMD follow-ups add SSSE3 non-saturating horizontal integer
+add/sub lowering, SSE3 vec128 duplicate-lane lowering, SSE3 packed float
+addsub/hadd/hsub lowering, SSE/SSE2 packed float min/max and approximate
 reciprocal/reciprocal-sqrt lowering, SSE2 conversion lowering for packed int32,
 float32, and float64 vectors, SSE/SSE2 packed float comparison lowering, SSE2
 float64x2 add/sub/mul/div/sqrt lowering, SSE float32x4 add/sub/mul/div/sqrt
@@ -1951,6 +1952,15 @@ limit is raised from `l=100000` to `l=150000`.
       directly under `validation-tmp/amd64-simd-sse3-dup`; the kept IR copies
       low 64-bit lanes and odd/even 32-bit lanes with extract/insert-element
       operations instead of requiring SSE3 target features.
+    - Implemented AMD64 LLVM lowering for the SSSE3 non-saturating horizontal
+      integer add/sub helpers: `caml_ssse3_int16x8_{hadd,hsub}` and
+      `caml_ssse3_int32x4_{hadd,hsub}`. Rebuilt with
+      `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_ssse3_hadd_hsub.sh` script
+      passed directly under `validation-tmp/amd64-simd-ssse3-hadd-hsub`; the
+      kept IR extracts adjacent lanes from the first and second operands, emits
+      scalar modular `add`/`sub`, and inserts the low-half and high-half
+      results into the vec128 result.
 
 ## Current Blocker
 
