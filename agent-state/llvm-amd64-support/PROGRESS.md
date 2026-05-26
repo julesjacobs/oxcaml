@@ -29,7 +29,8 @@ multiply lowering, SSE4.1 integer sign/zero extension lowering, SSE4.1
 integer compare/min/max lowering, AVX packed float arithmetic lowering, AVX
 vec256 logical/test/blend/duplicate/movemask lowering, AVX register-broadcast
 and immediate rearrangement lowering, AVX2 packed integer basic arithmetic,
-comparison, min/max, average, saturation, and absolute-value lowering,
+comparison, min/max, average, saturation, and absolute-value lowering, AVX2
+packed integer multiply/sign/SAD lowering,
 SSSE3 unsigned-byte/signed-byte multiply-add saturating lowering, SSSE3 byte
 align-right lowering, SSSE3 byte-shuffle lowering, SSSE3 signed word rounded
 multiply lowering, SSSE3 mulsign lowering,
@@ -2281,6 +2282,21 @@ limit is raised from `l=100000` to `l=150000`.
       select-based min/max, widening/narrowing averages, and
       `llvm.{s,u}{add,sub}.sat.*`/`llvm.abs.*` intrinsics, and rejects
       target-specific `llvm.x86.avx2` intrinsics.
+    - Implemented AMD64 LLVM lowering for AVX2 packed integer multiply/sign
+      and unsigned SAD helpers:
+      `caml_avx2_int8x32_mul_unsigned_hadd_saturating_int16x16`,
+      `caml_avx2_int8x32_sad_unsigned`,
+      `caml_avx2_int{8x32,16x16,32x8}_mulsign`,
+      `caml_avx2_int16x16_{mul_hadd_int32x8,mul_high,mul_high_unsigned,mul_low,mul_round}`,
+      and `caml_avx2_int32x8_{mul_even,mul_even_unsigned,mul_low}`. Rebuilt
+      with `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_avx2_int_multiply.sh` script passed
+      directly under `validation-tmp/amd64_avx2_int_multiply` with the
+      in-tree compiler and `OCAMLLIB` set to the agent-local
+      `_install/lib/ocaml`; its kept IR contains target-independent vector
+      widening, multiplication, shifts, truncation, lane extraction/insertion,
+      and select-based sign/SAD logic, and rejects target-specific
+      `llvm.x86.avx2` intrinsics.
 
 ## Current Blocker
 
