@@ -2111,6 +2111,35 @@ let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
       typ
     |> store_res
   in
+  let rounding_mode_of_sse41_imm imm =
+    match imm with
+    | 0x8 -> Round_nearest
+    | 0x9 -> Round_neg_inf
+    | 0xA -> Round_pos_inf
+    | 0xB -> Round_zero
+    | 0xC -> Round_current
+    | _ -> fail_msg ~name:"rounding_mode_of_sse41_imm" "unexpected immediate"
+  in
+  let round_intrinsic_name (mode : Llvmize_specific_types.rounding_mode) =
+    match mode with
+    | Round_current -> "nearbyint"
+    | Round_neg_inf -> "floor"
+    | Round_pos_inf -> "ceil"
+    | Round_zero -> "trunc"
+    | Round_nearest -> "roundeven"
+  in
+  let float_round_imm typ =
+    let imm =
+      match get_const_int_for_reg t i.arg.(0) with
+      | Some n -> Nativeint.to_int n
+      | None -> fail_msg ~name:"float_round_imm" "expected constant immediate"
+    in
+    let name =
+      round_intrinsic_name (rounding_mode_of_sse41_imm imm)
+      ^ "." ^ llvm_intrinsic_type_suffix typ
+    in
+    call_llvm_intrinsic t name [float_arg typ 1] typ |> store_res
+  in
   let float_minmax_match_sse cond typ =
     let arg1 = float_arg typ 0 in
     let arg2 = float_arg typ 1 in
@@ -2175,6 +2204,8 @@ let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
   | "caml_simd_float64_round_neg_inf" -> float_round T.double "floor"
   | "caml_simd_float64_round_pos_inf" -> float_round T.double "ceil"
   | "caml_simd_float64_round_towards_zero" -> float_round T.double "trunc"
+  | "caml_sse41_float32_round" -> float_round_imm T.float
+  | "caml_sse41_float64_round" -> float_round_imm T.double
   | "caml_sse2_float64_min" ->
     do_intrinsic_call "x86.sse2.min.sd" [T.doublex2; T.doublex2] T.doublex2
   | "caml_sse2_float64_max" ->

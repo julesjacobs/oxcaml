@@ -502,6 +502,8 @@ let operation_is_pure = function
       | "caml_simd_float64_round_towards_zero"
       | "caml_sse2_float64_min"
       | "caml_sse2_float64_max"
+      | "caml_sse41_float32_round"
+      | "caml_sse41_float64_round"
       | "caml_sse41_vec128_testz"
       | "caml_sse41_vec128_testc"
       | "caml_sse41_vec128_testnzc" ) ->

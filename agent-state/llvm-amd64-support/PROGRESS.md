@@ -17,15 +17,15 @@ default disabled-probe path. The standard-compiler LLVM-backend
 `lib-atomic/test_atomic_cmpxchg.ml` failure is fixed too. The native
 `async-exns/async_exns_1.ml` output mismatch is now fixed as well.
 
-The latest SIMD follow-ups add SSE4.1 packed float vector rounding lowering,
-SSE4.1 vector test predicate lowering, SSE4.1 integer lane extract/insert
-lowering, SSE4.1 variable blend lowering, SSE4.1 immediate blend lowering,
-SSE4.1 int32 multiply lowering, SSE4.1 integer sign/zero extension lowering,
-SSE4.1 integer compare/min/max lowering, SSSE3 unsigned-byte/signed-byte
-multiply-add saturating lowering, SSSE3 byte align-right lowering, SSSE3
-byte-shuffle lowering, SSSE3 signed word rounded multiply lowering, SSSE3
-mulsign lowering, SSSE3 absolute-value lowering, SSSE3 saturating and
-non-saturating horizontal integer add/sub lowering, SSE3 vec128
+The latest SIMD follow-ups add SSE4.1 scalar immediate rounding lowering,
+SSE4.1 packed float vector rounding lowering, SSE4.1 vector test predicate
+lowering, SSE4.1 integer lane extract/insert lowering, SSE4.1 variable blend
+lowering, SSE4.1 immediate blend lowering, SSE4.1 int32 multiply lowering,
+SSE4.1 integer sign/zero extension lowering, SSE4.1 integer compare/min/max
+lowering, SSSE3 unsigned-byte/signed-byte multiply-add saturating lowering,
+SSSE3 byte align-right lowering, SSSE3 byte-shuffle lowering, SSSE3 signed word
+rounded multiply lowering, SSSE3 mulsign lowering, SSSE3 absolute-value
+lowering, SSSE3 saturating and non-saturating horizontal integer add/sub lowering, SSE3 vec128
 duplicate-lane lowering, SSE3 packed float
 addsub/hadd/hsub lowering, SSE/SSE2 packed float min/max and approximate
 reciprocal/reciprocal-sqrt lowering, SSE2 conversion lowering for packed
@@ -2094,6 +2094,14 @@ limit is raised from `l=100000` to `l=150000`.
       kept IR maps immediates `0x8..0xC` to LLVM `roundeven`, `floor`, `ceil`,
       `trunc`, and `nearbyint` calls for both `<4 x float>` and
       `<2 x double>`.
+    - Implemented AMD64 LLVM lowering for the SSE4.1 scalar immediate rounding
+      helpers: `caml_sse41_float32_round` and `caml_sse41_float64_round`.
+      Rebuilt with `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_sse41_round_scalar.sh` script
+      passed directly under `validation-tmp/amd64-simd-sse41-round-scalar`;
+      the kept IR maps immediates `0x8..0xC` to LLVM scalar `roundeven`,
+      `floor`, `ceil`, `trunc`, and `nearbyint` calls for both `float` and
+      `double`.
 
 ## Current Blocker
 
