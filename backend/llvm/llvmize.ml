@@ -2746,21 +2746,21 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | T.Label | T.Token | T.Metadata ->
       fail_msg ~name:"int_vector_constant_like" "expected integer vector"
   in
-  let simd_int_unary width_in_bits op =
-    let typ = int_vec_type ~width_in_bits in
+  let simd_int_unary ?(vector_width_in_bits = 128) width_in_bits op =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
     let res =
       match op with
       | `Neg ->
         emit_ins t (I.binary Sub ~arg1:(V.zeroinitializer typ) ~arg2:arg)
       | `Not ->
-        let all_ones = int_vector_constant width_in_bits (-1) in
+        let all_ones = int_vector_constant_like typ (-1) in
         emit_ins t (I.binary Xor ~arg1:arg ~arg2:all_ones)
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
-  let simd_int_abs width_in_bits =
-    let typ = int_vec_type ~width_in_bits in
+  let simd_int_abs ?(vector_width_in_bits = 128) width_in_bits =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
     let name = "abs." ^ llvm_intrinsic_type_suffix typ in
     let res = call_llvm_intrinsic t name [arg; V.of_int ~typ:T.i1 0] typ in
@@ -2870,16 +2870,16 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let res = call_llvm_intrinsic t name [arg1; arg2] typ in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
-  let simd_int_minmax width_in_bits cond =
-    let typ = int_vec_type ~width_in_bits in
+  let simd_int_minmax ?(vector_width_in_bits = 128) width_in_bits cond =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits in
     let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
     let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
     let choose_arg1 = emit_ins t (I.icmp cond ~arg1 ~arg2) in
     let res = emit_ins t (I.select ~cond:choose_arg1 ~ifso:arg1 ~ifnot:arg2) in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
-  let simd_int_avg_unsigned width_in_bits =
-    let lanes = 128 / width_in_bits in
+  let simd_int_avg_unsigned ?(vector_width_in_bits = 128) width_in_bits =
+    let lanes = vector_width_in_bits / width_in_bits in
     let typ = int_vec_type_of_lanes ~width_in_bits ~lanes in
     let wide_typ =
       int_vec_type_of_lanes ~width_in_bits:(2 * width_in_bits) ~lanes
@@ -4199,9 +4199,9 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     store_into_reg t i.res.(0) res
   in
-  let simd_int_cmp width_in_bits (cond : Llvmize_specific_types.int_cond) ~zero
-      =
-    let typ = int_vec_type ~width_in_bits in
+  let simd_int_cmp ?(vector_width_in_bits = 128) width_in_bits
+      (cond : Llvmize_specific_types.int_cond) ~zero =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits in
     let cond =
       match cond with
       | Int_EQ -> I.Ieq
@@ -4839,6 +4839,14 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_binary 32 Add
     | Amd64_simd_instrs.Paddq | Amd64_simd_instrs.Vpaddq_X_X_Xm128 ->
       simd_int_binary 64 Add
+    | Amd64_simd_instrs.Vpaddb_Y_Y_Ym256 ->
+      simd_int_binary ~vector_width_in_bits:256 8 Add
+    | Amd64_simd_instrs.Vpaddw_Y_Y_Ym256 ->
+      simd_int_binary ~vector_width_in_bits:256 16 Add
+    | Amd64_simd_instrs.Vpaddd_Y_Y_Ym256 ->
+      simd_int_binary ~vector_width_in_bits:256 32 Add
+    | Amd64_simd_instrs.Vpaddq_Y_Y_Ym256 ->
+      simd_int_binary ~vector_width_in_bits:256 64 Add
     | Amd64_simd_instrs.Paddsb | Amd64_simd_instrs.Vpaddsb_X_X_Xm128 ->
       simd_binary_intrinsic (int_vec_type ~width_in_bits:8) "sadd.sat"
     | Amd64_simd_instrs.Paddsw | Amd64_simd_instrs.Vpaddsw_X_X_Xm128 ->
@@ -4847,6 +4855,22 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_binary_intrinsic (int_vec_type ~width_in_bits:8) "uadd.sat"
     | Amd64_simd_instrs.Paddusw | Amd64_simd_instrs.Vpaddusw_X_X_Xm128 ->
       simd_binary_intrinsic (int_vec_type ~width_in_bits:16) "uadd.sat"
+    | Amd64_simd_instrs.Vpaddsb_Y_Y_Ym256 ->
+      simd_binary_intrinsic
+        (wide_int_vec_type ~vector_width_in_bits:256 ~width_in_bits:8)
+        "sadd.sat"
+    | Amd64_simd_instrs.Vpaddsw_Y_Y_Ym256 ->
+      simd_binary_intrinsic
+        (wide_int_vec_type ~vector_width_in_bits:256 ~width_in_bits:16)
+        "sadd.sat"
+    | Amd64_simd_instrs.Vpaddusb_Y_Y_Ym256 ->
+      simd_binary_intrinsic
+        (wide_int_vec_type ~vector_width_in_bits:256 ~width_in_bits:8)
+        "uadd.sat"
+    | Amd64_simd_instrs.Vpaddusw_Y_Y_Ym256 ->
+      simd_binary_intrinsic
+        (wide_int_vec_type ~vector_width_in_bits:256 ~width_in_bits:16)
+        "uadd.sat"
     | Amd64_simd_instrs.Psubb | Amd64_simd_instrs.Vpsubb_X_X_Xm128 ->
       simd_int_binary 8 Sub
     | Amd64_simd_instrs.Psubw | Amd64_simd_instrs.Vpsubw_X_X_Xm128 ->
@@ -4855,6 +4879,14 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_binary 32 Sub
     | Amd64_simd_instrs.Psubq_X_Xm128 | Amd64_simd_instrs.Vpsubq_X_X_Xm128 ->
       simd_int_binary 64 Sub
+    | Amd64_simd_instrs.Vpsubb_Y_Y_Ym256 ->
+      simd_int_binary ~vector_width_in_bits:256 8 Sub
+    | Amd64_simd_instrs.Vpsubw_Y_Y_Ym256 ->
+      simd_int_binary ~vector_width_in_bits:256 16 Sub
+    | Amd64_simd_instrs.Vpsubd_Y_Y_Ym256 ->
+      simd_int_binary ~vector_width_in_bits:256 32 Sub
+    | Amd64_simd_instrs.Vpsubq_Y_Y_Ym256 ->
+      simd_int_binary ~vector_width_in_bits:256 64 Sub
     | Amd64_simd_instrs.Psubsb | Amd64_simd_instrs.Vpsubsb_X_X_Xm128 ->
       simd_binary_intrinsic (int_vec_type ~width_in_bits:8) "ssub.sat"
     | Amd64_simd_instrs.Psubsw | Amd64_simd_instrs.Vpsubsw_X_X_Xm128 ->
@@ -4863,6 +4895,22 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_binary_intrinsic (int_vec_type ~width_in_bits:8) "usub.sat"
     | Amd64_simd_instrs.Psubusw | Amd64_simd_instrs.Vpsubusw_X_X_Xm128 ->
       simd_binary_intrinsic (int_vec_type ~width_in_bits:16) "usub.sat"
+    | Amd64_simd_instrs.Vpsubsb_Y_Y_Ym256 ->
+      simd_binary_intrinsic
+        (wide_int_vec_type ~vector_width_in_bits:256 ~width_in_bits:8)
+        "ssub.sat"
+    | Amd64_simd_instrs.Vpsubsw_Y_Y_Ym256 ->
+      simd_binary_intrinsic
+        (wide_int_vec_type ~vector_width_in_bits:256 ~width_in_bits:16)
+        "ssub.sat"
+    | Amd64_simd_instrs.Vpsubusb_Y_Y_Ym256 ->
+      simd_binary_intrinsic
+        (wide_int_vec_type ~vector_width_in_bits:256 ~width_in_bits:8)
+        "usub.sat"
+    | Amd64_simd_instrs.Vpsubusw_Y_Y_Ym256 ->
+      simd_binary_intrinsic
+        (wide_int_vec_type ~vector_width_in_bits:256 ~width_in_bits:16)
+        "usub.sat"
     | Amd64_simd_instrs.Pmaxub_X_Xm128 | Amd64_simd_instrs.Vpmaxub_X_X_Xm128 ->
       simd_int_minmax 8 I.Iugt
     | Amd64_simd_instrs.Pminub_X_Xm128 | Amd64_simd_instrs.Vpminub_X_X_Xm128 ->
@@ -4887,10 +4935,38 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_minmax 16 I.Iult
     | Amd64_simd_instrs.Pminud | Amd64_simd_instrs.Vpminud_X_X_Xm128 ->
       simd_int_minmax 32 I.Iult
+    | Amd64_simd_instrs.Vpmaxub_Y_Y_Ym256 ->
+      simd_int_minmax ~vector_width_in_bits:256 8 I.Iugt
+    | Amd64_simd_instrs.Vpmaxuw_Y_Y_Ym256 ->
+      simd_int_minmax ~vector_width_in_bits:256 16 I.Iugt
+    | Amd64_simd_instrs.Vpmaxud_Y_Y_Ym256 ->
+      simd_int_minmax ~vector_width_in_bits:256 32 I.Iugt
+    | Amd64_simd_instrs.Vpminub_Y_Y_Ym256 ->
+      simd_int_minmax ~vector_width_in_bits:256 8 I.Iult
+    | Amd64_simd_instrs.Vpminuw_Y_Y_Ym256 ->
+      simd_int_minmax ~vector_width_in_bits:256 16 I.Iult
+    | Amd64_simd_instrs.Vpminud_Y_Y_Ym256 ->
+      simd_int_minmax ~vector_width_in_bits:256 32 I.Iult
+    | Amd64_simd_instrs.Vpmaxsb_Y_Y_Ym256 ->
+      simd_int_minmax ~vector_width_in_bits:256 8 I.Isgt
+    | Amd64_simd_instrs.Vpmaxsw_Y_Y_Ym256 ->
+      simd_int_minmax ~vector_width_in_bits:256 16 I.Isgt
+    | Amd64_simd_instrs.Vpmaxsd_Y_Y_Ym256 ->
+      simd_int_minmax ~vector_width_in_bits:256 32 I.Isgt
+    | Amd64_simd_instrs.Vpminsb_Y_Y_Ym256 ->
+      simd_int_minmax ~vector_width_in_bits:256 8 I.Islt
+    | Amd64_simd_instrs.Vpminsw_Y_Y_Ym256 ->
+      simd_int_minmax ~vector_width_in_bits:256 16 I.Islt
+    | Amd64_simd_instrs.Vpminsd_Y_Y_Ym256 ->
+      simd_int_minmax ~vector_width_in_bits:256 32 I.Islt
     | Amd64_simd_instrs.Pavgb_X_Xm128 | Amd64_simd_instrs.Vpavgb_X_X_Xm128 ->
       simd_int_avg_unsigned 8
     | Amd64_simd_instrs.Pavgw_X_Xm128 | Amd64_simd_instrs.Vpavgw_X_X_Xm128 ->
       simd_int_avg_unsigned 16
+    | Amd64_simd_instrs.Vpavgb_Y_Y_Ym256 ->
+      simd_int_avg_unsigned ~vector_width_in_bits:256 8
+    | Amd64_simd_instrs.Vpavgw_Y_Y_Ym256 ->
+      simd_int_avg_unsigned ~vector_width_in_bits:256 16
     | Amd64_simd_instrs.Pmulhw | Amd64_simd_instrs.Vpmulhw_X_X_Xm128 ->
       simd_int_mul_high_16 Sext Ashr
     | Amd64_simd_instrs.Pmulhuw_X_Xm128 | Amd64_simd_instrs.Vpmulhuw_X_X_Xm128
@@ -4961,6 +5037,14 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_cmp 32 Int_EQ ~zero:false
     | Amd64_simd_instrs.Pcmpeqq | Amd64_simd_instrs.Vpcmpeqq_X_X_Xm128 ->
       simd_int_cmp 64 Int_EQ ~zero:false
+    | Amd64_simd_instrs.Vpcmpeqb_Y_Y_Ym256 ->
+      simd_int_cmp ~vector_width_in_bits:256 8 Int_EQ ~zero:false
+    | Amd64_simd_instrs.Vpcmpeqw_Y_Y_Ym256 ->
+      simd_int_cmp ~vector_width_in_bits:256 16 Int_EQ ~zero:false
+    | Amd64_simd_instrs.Vpcmpeqd_Y_Y_Ym256 ->
+      simd_int_cmp ~vector_width_in_bits:256 32 Int_EQ ~zero:false
+    | Amd64_simd_instrs.Vpcmpeqq_Y_Y_Ym256 ->
+      simd_int_cmp ~vector_width_in_bits:256 64 Int_EQ ~zero:false
     | Amd64_simd_instrs.Pmovsxbw | Amd64_simd_instrs.Vpmovsxbw_X_Xm64 ->
       simd_int_extend_low ~src_width_in_bits:8 ~dst_width_in_bits:16 Sext
     | Amd64_simd_instrs.Pmovsxbd | Amd64_simd_instrs.Vpmovsxbd_X_Xm32 ->
@@ -4993,6 +5077,14 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_cmp 32 Int_GT ~zero:false
     | Amd64_simd_instrs.Pcmpgtq | Amd64_simd_instrs.Vpcmpgtq_X_X_Xm128 ->
       simd_int_cmp 64 Int_GT ~zero:false
+    | Amd64_simd_instrs.Vpcmpgtb_Y_Y_Ym256 ->
+      simd_int_cmp ~vector_width_in_bits:256 8 Int_GT ~zero:false
+    | Amd64_simd_instrs.Vpcmpgtw_Y_Y_Ym256 ->
+      simd_int_cmp ~vector_width_in_bits:256 16 Int_GT ~zero:false
+    | Amd64_simd_instrs.Vpcmpgtd_Y_Y_Ym256 ->
+      simd_int_cmp ~vector_width_in_bits:256 32 Int_GT ~zero:false
+    | Amd64_simd_instrs.Vpcmpgtq_Y_Y_Ym256 ->
+      simd_int_cmp ~vector_width_in_bits:256 64 Int_GT ~zero:false
     | Amd64_simd_instrs.Andps | Amd64_simd_instrs.Vandps_X_X_Xm128 ->
       simd_int_binary 64 And
     | Amd64_simd_instrs.Andnps | Amd64_simd_instrs.Vandnps_X_X_Xm128 ->
@@ -5174,6 +5266,12 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_abs 16
     | Amd64_simd_instrs.Pabsd_X_Xm128 | Amd64_simd_instrs.Vpabsd_X_Xm128 ->
       simd_int_abs 32
+    | Amd64_simd_instrs.Vpabsb_Y_Ym256 ->
+      simd_int_abs ~vector_width_in_bits:256 8
+    | Amd64_simd_instrs.Vpabsw_Y_Ym256 ->
+      simd_int_abs ~vector_width_in_bits:256 16
+    | Amd64_simd_instrs.Vpabsd_Y_Ym256 ->
+      simd_int_abs ~vector_width_in_bits:256 32
     | Amd64_simd_instrs.Psignb_X_Xm128 | Amd64_simd_instrs.Vpsignb_X_X_Xm128 ->
       simd_int_mulsign 8
     | Amd64_simd_instrs.Psignw_X_Xm128 | Amd64_simd_instrs.Vpsignw_X_X_Xm128 ->
