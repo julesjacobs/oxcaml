@@ -17,10 +17,11 @@ default disabled-probe path. The standard-compiler LLVM-backend
 `lib-atomic/test_atomic_cmpxchg.ml` failure is fixed too. The native
 `async-exns/async_exns_1.ml` output mismatch is now fixed as well.
 
-The latest SIMD follow-ups add SSSE3 byte align-right lowering, SSSE3
-byte-shuffle lowering, SSSE3 signed word rounded multiply lowering, SSSE3
-mulsign lowering, SSSE3 absolute-value lowering, SSSE3 saturating and
-non-saturating horizontal integer add/sub lowering, SSE3 vec128
+The latest SIMD follow-ups add SSSE3 unsigned-byte/signed-byte multiply-add
+saturating lowering, SSSE3 byte align-right lowering, SSSE3 byte-shuffle
+lowering, SSSE3 signed word rounded multiply lowering, SSSE3 mulsign lowering,
+SSSE3 absolute-value lowering, SSSE3 saturating and non-saturating horizontal
+integer add/sub lowering, SSE3 vec128
 duplicate-lane lowering, SSE3 packed float
 addsub/hadd/hsub lowering, SSE/SSE2 packed float min/max and approximate
 reciprocal/reciprocal-sqrt lowering, SSE2 conversion lowering for packed
@@ -2012,6 +2013,15 @@ limit is raised from `l=100000` to `l=150000`.
       passed directly under `validation-tmp/amd64-simd-ssse3-align-right`; the
       kept IR extracts constant byte lanes from the `low || high` argument
       concatenation, inserting zero for shifted-out lanes to match `palignr`.
+    - Implemented AMD64 LLVM lowering for the SSSE3 unsigned-byte/signed-byte
+      multiply-add saturating helper
+      `caml_ssse3_int8x16_mul_unsigned_hadd_saturating_int16x8`. Rebuilt with
+      `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_ssse3_pmaddubsw.sh` script
+      passed directly under `validation-tmp/amd64-simd-ssse3-pmaddubsw`; the
+      kept IR zero-extends unsigned byte lanes, sign-extends signed byte lanes,
+      multiplies in i32, horizontally adds adjacent products, clamps to signed
+      i16 range, and truncates before inserting the result lanes.
 
 ## Current Blocker
 

@@ -3217,6 +3217,49 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int8_mul_unsigned_hadd_saturating_int16 () =
+    let byte_typ = int_vec_type ~width_in_bits:8 in
+    let product_typ = int_vec_type_of_lanes ~width_in_bits:32 ~lanes:16 in
+    let res_typ = int_vec_type ~width_in_bits:16 in
+    let arg1 =
+      cast_if_needed (load_reg_to_temp t i.arg.(0)) byte_typ
+      |> fun arg -> emit_ins t (I.convert Zext ~arg ~to_:product_typ)
+    in
+    let arg2 =
+      cast_if_needed (load_reg_to_temp t i.arg.(1)) byte_typ
+      |> fun arg -> emit_ins t (I.convert Sext ~arg ~to_:product_typ)
+    in
+    let product = emit_ins t (I.binary Mul ~arg1 ~arg2) in
+    let product_lane lane =
+      emit_ins t (I.extractelement ~vector:product ~index:(V.of_int lane))
+    in
+    let min_value = V.of_int ~typ:T.i32 (-32768) in
+    let max_value = V.of_int ~typ:T.i32 32767 in
+    let saturate value =
+      let below_min = emit_ins t (I.icmp I.Islt ~arg1:value ~arg2:min_value) in
+      let above_max = emit_ins t (I.icmp I.Isgt ~arg1:value ~arg2:max_value) in
+      let clamped_min =
+        emit_ins t (I.select ~cond:below_min ~ifso:min_value ~ifnot:value)
+      in
+      emit_ins t (I.select ~cond:above_max ~ifso:max_value ~ifnot:clamped_min)
+    in
+    let res =
+      List.init 8 Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let lo = product_lane (2 * lane) in
+             let hi = product_lane ((2 * lane) + 1) in
+             let sum = emit_ins t (I.binary Add ~arg1:lo ~arg2:hi) in
+             let narrowed =
+               emit_ins t (I.convert Trunc ~arg:(saturate sum) ~to_:T.i16)
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane)
+                  ~to_insert:narrowed))
+           (V.poison res_typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_float_unary_intrinsic width intrinsic =
     let typ = float_vec_type ~width in
     let name = intrinsic ^ "." ^ llvm_intrinsic_type_suffix typ in
@@ -4154,6 +4197,9 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | Amd64_simd_instrs.Phaddsw_X_Xm128
     | Amd64_simd_instrs.Vphaddsw_X_X_Xm128 ->
       simd_int16_haddsub_saturating Add
+    | Amd64_simd_instrs.Pmaddubsw_X_Xm128
+    | Amd64_simd_instrs.Vpmaddubsw_X_X_Xm128 ->
+      simd_int8_mul_unsigned_hadd_saturating_int16 ()
     | Amd64_simd_instrs.Pmulhrsw_X_Xm128
     | Amd64_simd_instrs.Vpmulhrsw_X_X_Xm128 ->
       simd_int16_mul_round ()
