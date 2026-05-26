@@ -2273,6 +2273,111 @@ let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
     in
     convert_if_needed Zext res (T.of_reg i.res.(0)) |> store_res
   in
+  let scalar_bmi2 width_in_bits op =
+    let typ = T.Int { width_in_bits } in
+    let convert_if_needed op arg to_ =
+      if T.equal (V.get_type arg) to_
+      then arg
+      else emit_ins t (I.convert op ~arg ~to_)
+    in
+    let arg n =
+      load_reg_to_temp t i.arg.(n)
+      |> fun arg -> convert_if_needed Trunc arg typ
+    in
+    let zero = V.of_int ~typ 0 in
+    let one = V.of_int ~typ 1 in
+    let all_ones = V.of_int ~typ (-1) in
+    let mask_for_shift_count count =
+      emit_ins t (I.binary And ~arg1:count ~arg2:(V.of_int ~typ 0xff))
+    in
+    let masked_modulo_width_count count =
+      emit_ins t
+        (I.binary And ~arg1:count ~arg2:(V.of_int ~typ (width_in_bits - 1)))
+    in
+    let low_mask count =
+      let width = V.of_int ~typ width_in_bits in
+      let max_shift = V.of_int ~typ (width_in_bits - 1) in
+      let count_in_range = emit_ins t (I.icmp Iult ~arg1:count ~arg2:width) in
+      let safe_count =
+        emit_ins t (I.select ~cond:count_in_range ~ifso:count ~ifnot:max_shift)
+      in
+      let shifted_one = emit_ins t (I.binary Shl ~arg1:one ~arg2:safe_count) in
+      let mask = emit_ins t (I.binary Sub ~arg1:shifted_one ~arg2:one) in
+      emit_ins t (I.select ~cond:count_in_range ~ifso:mask ~ifnot:all_ones)
+    in
+    let bit_permute ~deposit =
+      let src = arg 0 in
+      let mask = ref (arg 1) in
+      let result = ref zero in
+      let bit = ref one in
+      for n = 0 to width_in_bits - 1 do
+        let neg_mask = emit_ins t (I.binary Sub ~arg1:zero ~arg2:!mask) in
+        let lowest = emit_ins t (I.binary And ~arg1:!mask ~arg2:neg_mask) in
+        let test_bit = if deposit then !bit else lowest in
+        let set_bit = if deposit then lowest else !bit in
+        let has_bit =
+          let tested = emit_ins t (I.binary And ~arg1:src ~arg2:test_bit) in
+          emit_ins t (I.icmp Ine ~arg1:tested ~arg2:zero)
+        in
+        let candidate = emit_ins t (I.binary Or ~arg1:!result ~arg2:set_bit) in
+        result
+          := emit_ins t
+               (I.select ~cond:has_bit ~ifso:candidate ~ifnot:!result);
+        let decremented_mask = emit_ins t (I.binary Sub ~arg1:!mask ~arg2:one) in
+        mask := emit_ins t (I.binary And ~arg1:!mask ~arg2:decremented_mask);
+        if n < width_in_bits - 1
+        then bit := emit_ins t (I.binary Shl ~arg1:!bit ~arg2:one)
+      done;
+      !result
+    in
+    let store_int_res res =
+      convert_if_needed Zext res (T.of_reg i.res.(0)) |> store_res
+    in
+    match op with
+    | `Bzhi ->
+      let src = arg 0 in
+      let count = mask_for_shift_count (arg 1) in
+      emit_ins t (I.binary And ~arg1:src ~arg2:(low_mask count))
+      |> store_int_res
+    | `Mulx ->
+      let extend arg = emit_ins t (I.convert Zext ~arg ~to_:T.i128) in
+      let product =
+        emit_ins t (I.binary Mul ~arg1:(extend (arg 0)) ~arg2:(extend (arg 1)))
+      in
+      let shift = V.of_int ~typ:T.i128 width_in_bits in
+      let high = emit_ins t (I.binary Lshr ~arg1:product ~arg2:shift) in
+      let low = emit_ins t (I.convert Trunc ~arg:product ~to_:typ) in
+      let high = emit_ins t (I.convert Trunc ~arg:high ~to_:typ) in
+      convert_if_needed Zext low (T.of_reg i.res.(0))
+      |> store_into_reg t i.res.(0);
+      convert_if_needed Zext high (T.of_reg i.res.(1))
+      |> store_into_reg t i.res.(1)
+    | `Pext -> bit_permute ~deposit:false |> store_int_res
+    | `Pdep -> bit_permute ~deposit:true |> store_int_res
+    | `Rorx ->
+      let src = arg 1 in
+      let count = masked_modulo_width_count (arg 0) in
+      let left_count =
+        let width = V.of_int ~typ width_in_bits in
+        let neg_count = emit_ins t (I.binary Sub ~arg1:width ~arg2:count) in
+        masked_modulo_width_count neg_count
+      in
+      let right = emit_ins t (I.binary Lshr ~arg1:src ~arg2:count) in
+      let left = emit_ins t (I.binary Shl ~arg1:src ~arg2:left_count) in
+      let res = emit_ins t (I.binary Or ~arg1:left ~arg2:right) in
+      store_int_res res
+    | `Sarx | `Shrx | `Shlx ->
+      let src = arg 0 in
+      let count = masked_modulo_width_count (arg 1) in
+      let shift_op : I.binary_op =
+        match op with
+        | `Sarx -> Ashr
+        | `Shrx -> Lshr
+        | `Shlx -> Shl
+        | (`Bzhi | `Mulx | `Pext | `Pdep | `Rorx) -> assert false
+      in
+      emit_ins t (I.binary shift_op ~arg1:src ~arg2:count) |> store_int_res
+  in
   (* Intrinsics must not allocate on the OCaml heap. See
      [Arch.operation_allocates]. *)
   match intrinsic_name with
@@ -2320,6 +2425,22 @@ let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
   | "caml_bmi_tzcnt_int16" -> scalar_int_count ~zero_is_poison:false "cttz" 16
   | "caml_bmi_tzcnt_int32" -> scalar_int_count ~zero_is_poison:false "cttz" 32
   | "caml_bmi_tzcnt_int64" -> scalar_int_count ~zero_is_poison:false "cttz" 64
+  | "caml_bmi2_bzhi_int32" -> scalar_bmi2 32 `Bzhi
+  | "caml_bmi2_bzhi_int64" -> scalar_bmi2 64 `Bzhi
+  | "caml_bmi2_mulx_int32" -> scalar_bmi2 32 `Mulx
+  | "caml_bmi2_mulx_int64" -> scalar_bmi2 64 `Mulx
+  | "caml_bmi2_pext_int32" -> scalar_bmi2 32 `Pext
+  | "caml_bmi2_pext_int64" -> scalar_bmi2 64 `Pext
+  | "caml_bmi2_pdep_int32" -> scalar_bmi2 32 `Pdep
+  | "caml_bmi2_pdep_int64" -> scalar_bmi2 64 `Pdep
+  | "caml_bmi2_rorx_int32" -> scalar_bmi2 32 `Rorx
+  | "caml_bmi2_rorx_int64" -> scalar_bmi2 64 `Rorx
+  | "caml_bmi2_sarx_int32" -> scalar_bmi2 32 `Sarx
+  | "caml_bmi2_sarx_int64" -> scalar_bmi2 64 `Sarx
+  | "caml_bmi2_shrx_int32" -> scalar_bmi2 32 `Shrx
+  | "caml_bmi2_shrx_int64" -> scalar_bmi2 64 `Shrx
+  | "caml_bmi2_shlx_int32" -> scalar_bmi2 32 `Shlx
+  | "caml_bmi2_shlx_int64" -> scalar_bmi2 64 `Shlx
   | "caml_rdtsc_unboxed" -> do_intrinsic_call "readcyclecounter" [] T.i64
   | "caml_rdpmc_unboxed" -> do_intrinsic_call "x86.rdpmc" [T.i32] T.i64
   | _ -> not_implemented_basic ~msg:"specific intrinsic" i

@@ -525,7 +525,23 @@ let operation_is_pure = function
       | "caml_bmi_blsr_int64"
       | "caml_bmi_tzcnt_int16"
       | "caml_bmi_tzcnt_int32"
-      | "caml_bmi_tzcnt_int64" ) ->
+      | "caml_bmi_tzcnt_int64"
+      | "caml_bmi2_bzhi_int32"
+      | "caml_bmi2_bzhi_int64"
+      | "caml_bmi2_mulx_int32"
+      | "caml_bmi2_mulx_int64"
+      | "caml_bmi2_pext_int32"
+      | "caml_bmi2_pext_int64"
+      | "caml_bmi2_pdep_int32"
+      | "caml_bmi2_pdep_int64"
+      | "caml_bmi2_rorx_int32"
+      | "caml_bmi2_rorx_int64"
+      | "caml_bmi2_sarx_int32"
+      | "caml_bmi2_sarx_int64"
+      | "caml_bmi2_shrx_int32"
+      | "caml_bmi2_shrx_int64"
+      | "caml_bmi2_shlx_int32"
+      | "caml_bmi2_shlx_int64" ) ->
     true
   | Illvm_intrinsic ("caml_rdtsc_unboxed" | "caml_rdpmc_unboxed") -> false
   | Illvm_intrinsic intr ->

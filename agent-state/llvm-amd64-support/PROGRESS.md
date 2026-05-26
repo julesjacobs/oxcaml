@@ -17,18 +17,18 @@ default disabled-probe path. The standard-compiler LLVM-backend
 `lib-atomic/test_atomic_cmpxchg.ml` failure is fixed too. The native
 `async-exns/async_exns_1.ml` output mismatch is now fixed as well.
 
-The latest AMD64 lowering follow-ups add scalar POPCNT/LZCNT/TZCNT and BMI1
-builtin lowering, CLMUL int64x2 carry-less multiply lowering, SSE4.2 int64x2
-signed greater-than comparison lowering, SSE4.1 unsigned multi-SAD lowering,
-SSE4.1 packed float dot-product lowering, SSE4.1 unsigned word min-position
-lowering, SSE4.1 scalar immediate rounding lowering, SSE4.1 packed float
-vector rounding lowering, SSE4.1 vector test predicate lowering, SSE4.1
-integer lane extract/insert lowering, SSE4.1 variable blend lowering, SSE4.1
-immediate blend lowering, SSE4.1 int32 multiply lowering, SSE4.1 integer
-sign/zero extension lowering, SSE4.1 integer compare/min/max lowering, SSSE3
-unsigned-byte/signed-byte multiply-add
-saturating lowering, SSSE3 byte align-right lowering, SSSE3 byte-shuffle
-lowering, SSSE3 signed word rounded multiply lowering, SSSE3 mulsign lowering,
+The latest AMD64 lowering follow-ups add scalar POPCNT/LZCNT/TZCNT, BMI1, and
+BMI2 builtin lowering, CLMUL int64x2 carry-less multiply lowering, SSE4.2
+int64x2 signed greater-than comparison lowering, SSE4.1 unsigned multi-SAD
+lowering, SSE4.1 packed float dot-product lowering, SSE4.1 unsigned word
+min-position lowering, SSE4.1 scalar immediate rounding lowering, SSE4.1
+packed float vector rounding lowering, SSE4.1 vector test predicate lowering,
+SSE4.1 integer lane extract/insert lowering, SSE4.1 variable blend lowering,
+SSE4.1 immediate blend lowering, SSE4.1 int32 multiply lowering, SSE4.1
+integer sign/zero extension lowering, SSE4.1 integer compare/min/max lowering,
+SSSE3 unsigned-byte/signed-byte multiply-add saturating lowering, SSSE3 byte
+align-right lowering, SSSE3 byte-shuffle lowering, SSSE3 signed word rounded
+multiply lowering, SSSE3 mulsign lowering,
 SSSE3 absolute-value lowering, SSSE3 saturating and non-saturating horizontal
 integer add/sub lowering, SSE3 vec128
 duplicate-lane lowering, SSE3 packed float
@@ -2178,6 +2178,19 @@ limit is raised from `l=100000` to `l=150000`.
       target-independent integer operations rather than feature-specific
       `llvm.x86.bmi*` intrinsics, then links and runs a small executable with
       dummy primitive-table stubs so the lowered native code is exercised.
+    - Implemented AMD64 LLVM lowering for scalar BMI2 builtins:
+      `caml_bmi2_bzhi_int{32,64}`, `caml_bmi2_mulx_int{32,64}`,
+      `caml_bmi2_pext_int{32,64}`, `caml_bmi2_pdep_int{32,64}`,
+      `caml_bmi2_rorx_int{32,64}`, `caml_bmi2_sarx_int{32,64}`,
+      `caml_bmi2_shrx_int{32,64}`, and `caml_bmi2_shlx_int{32,64}`. Rebuilt
+      with `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_bmi2.sh` script passed directly
+      under `validation-tmp/amd64-bmi2`; it checks the kept IR uses
+      target-independent integer operations instead of feature-specific
+      `llvm.x86.bmi*` intrinsics, covers `mulx` pair results, variable shift
+      count masking, PDEP/PEXT examples, and links/runs a small executable
+      with dummy primitive-table stubs so the lowered native code is
+      exercised.
 
 ## Current Blocker
 
