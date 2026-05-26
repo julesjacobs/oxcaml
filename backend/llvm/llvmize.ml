@@ -2399,6 +2399,13 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_abs width_in_bits =
+    let typ = int_vec_type ~width_in_bits in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let name = "abs." ^ llvm_intrinsic_type_suffix typ in
+    let res = call_llvm_intrinsic t name [arg; V.of_int ~typ:T.i1 0] typ in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_unary_intrinsic typ intrinsic =
     let name = intrinsic ^ "." ^ llvm_intrinsic_type_suffix typ in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -4020,6 +4027,12 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_dup_lanes 32 (fun dst_lane -> dst_lane lor 1)
     | Amd64_simd_instrs.Movsldup | Amd64_simd_instrs.Vmovsldup_X_Xm128 ->
       simd_dup_lanes 32 (fun dst_lane -> dst_lane land lnot 1)
+    | Amd64_simd_instrs.Pabsb_X_Xm128 | Amd64_simd_instrs.Vpabsb_X_Xm128 ->
+      simd_int_abs 8
+    | Amd64_simd_instrs.Pabsw_X_Xm128 | Amd64_simd_instrs.Vpabsw_X_Xm128 ->
+      simd_int_abs 16
+    | Amd64_simd_instrs.Pabsd_X_Xm128 | Amd64_simd_instrs.Vpabsd_X_Xm128 ->
+      simd_int_abs 32
     | Amd64_simd_instrs.Phaddw_X_Xm128
     | Amd64_simd_instrs.Vphaddw_X_X_Xm128 ->
       simd_int_haddsub 16 Add
