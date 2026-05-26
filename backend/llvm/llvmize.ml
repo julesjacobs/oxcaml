@@ -2589,12 +2589,14 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       fail_msg ~name:"vector_width_in_bits_of_reg"
         "unexpected vector storage type %a" T.pp_t typ
   in
-  let float_vec_type ~width =
-    let elem_type, num_of_elems =
-      match width with Cmm.Float32 -> T.float, 4 | Cmm.Float64 -> T.double, 2
+  let wide_float_vec_type ~vector_width_in_bits ~width =
+    let elem_type, elem_width_in_bits =
+      match width with Cmm.Float32 -> T.float, 32 | Cmm.Float64 -> T.double, 64
     in
-    T.Vector { num_of_elems; elem_type }
+    T.Vector
+      { num_of_elems = vector_width_in_bits / elem_width_in_bits; elem_type }
   in
+  let float_vec_type ~width = wide_float_vec_type ~vector_width_in_bits:128 ~width in
   let cast_if_needed value typ =
     if T.equal (V.get_type value) typ
     then value
@@ -3574,6 +3576,54 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
              emit_ins t
                (I.insertelement ~vector ~index:(V.of_int lane) ~to_insert:elem))
            (V.poison typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_float_fma ~vector_width_in_bits width kind =
+    let typ = wide_float_vec_type ~vector_width_in_bits ~width in
+    let lanes =
+      match width with
+      | Cmm.Float32 -> vector_width_in_bits / 32
+      | Cmm.Float64 -> vector_width_in_bits / 64
+    in
+    let arg0 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(2)) typ in
+    let neg value = emit_ins t (I.unary Fneg ~arg:value) in
+    let multiplicand =
+      match kind with
+      | `Muladd | `Mulsub | `Muladdsub | `Mulsubadd -> arg0
+      | `Negmuladd | `Negmulsub -> neg arg0
+    in
+    let addend =
+      match kind with
+      | `Muladd | `Negmuladd -> arg2
+      | `Mulsub | `Negmulsub -> neg arg2
+      | `Muladdsub | `Mulsubadd ->
+        List.init lanes Fun.id
+        |> List.fold_left
+             (fun vector lane ->
+               let elem =
+                 emit_ins t
+                   (I.extractelement ~vector:arg2 ~index:(V.of_int lane))
+               in
+               let should_negate =
+                 match kind with
+                 | `Muladdsub -> lane land 1 = 0
+                 | `Mulsubadd -> lane land 1 <> 0
+                 | `Muladd | `Mulsub | `Negmuladd | `Negmulsub -> assert false
+               in
+               let elem = if should_negate then neg elem else elem in
+               emit_ins t
+                 (I.insertelement ~vector ~index:(V.of_int lane)
+                    ~to_insert:elem))
+             (V.poison typ)
+    in
+    let res =
+      call_llvm_intrinsic t
+        ("fma." ^ llvm_intrinsic_type_suffix typ)
+        [multiplicand; arg1; addend]
+        typ
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
@@ -4817,6 +4867,54 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_float_haddsub Cmm.Float32 Fsub
     | Amd64_simd_instrs.Hsubpd | Amd64_simd_instrs.Vhsubpd_X_X_Xm128 ->
       simd_float_haddsub Cmm.Float64 Fsub
+    | Amd64_simd_instrs.Vfmadd213pd_X_X_Xm128 ->
+      simd_float_fma ~vector_width_in_bits:128 Cmm.Float64 `Muladd
+    | Amd64_simd_instrs.Vfmadd213pd_Y_Y_Ym256 ->
+      simd_float_fma ~vector_width_in_bits:256 Cmm.Float64 `Muladd
+    | Amd64_simd_instrs.Vfmadd213ps_X_X_Xm128 ->
+      simd_float_fma ~vector_width_in_bits:128 Cmm.Float32 `Muladd
+    | Amd64_simd_instrs.Vfmadd213ps_Y_Y_Ym256 ->
+      simd_float_fma ~vector_width_in_bits:256 Cmm.Float32 `Muladd
+    | Amd64_simd_instrs.Vfmaddsub213pd_X_X_Xm128 ->
+      simd_float_fma ~vector_width_in_bits:128 Cmm.Float64 `Muladdsub
+    | Amd64_simd_instrs.Vfmaddsub213pd_Y_Y_Ym256 ->
+      simd_float_fma ~vector_width_in_bits:256 Cmm.Float64 `Muladdsub
+    | Amd64_simd_instrs.Vfmaddsub213ps_X_X_Xm128 ->
+      simd_float_fma ~vector_width_in_bits:128 Cmm.Float32 `Muladdsub
+    | Amd64_simd_instrs.Vfmaddsub213ps_Y_Y_Ym256 ->
+      simd_float_fma ~vector_width_in_bits:256 Cmm.Float32 `Muladdsub
+    | Amd64_simd_instrs.Vfmsub213pd_X_X_Xm128 ->
+      simd_float_fma ~vector_width_in_bits:128 Cmm.Float64 `Mulsub
+    | Amd64_simd_instrs.Vfmsub213pd_Y_Y_Ym256 ->
+      simd_float_fma ~vector_width_in_bits:256 Cmm.Float64 `Mulsub
+    | Amd64_simd_instrs.Vfmsub213ps_X_X_Xm128 ->
+      simd_float_fma ~vector_width_in_bits:128 Cmm.Float32 `Mulsub
+    | Amd64_simd_instrs.Vfmsub213ps_Y_Y_Ym256 ->
+      simd_float_fma ~vector_width_in_bits:256 Cmm.Float32 `Mulsub
+    | Amd64_simd_instrs.Vfmsubadd213pd_X_X_Xm128 ->
+      simd_float_fma ~vector_width_in_bits:128 Cmm.Float64 `Mulsubadd
+    | Amd64_simd_instrs.Vfmsubadd213pd_Y_Y_Ym256 ->
+      simd_float_fma ~vector_width_in_bits:256 Cmm.Float64 `Mulsubadd
+    | Amd64_simd_instrs.Vfmsubadd213ps_X_X_Xm128 ->
+      simd_float_fma ~vector_width_in_bits:128 Cmm.Float32 `Mulsubadd
+    | Amd64_simd_instrs.Vfmsubadd213ps_Y_Y_Ym256 ->
+      simd_float_fma ~vector_width_in_bits:256 Cmm.Float32 `Mulsubadd
+    | Amd64_simd_instrs.Vfnmadd213pd_X_X_Xm128 ->
+      simd_float_fma ~vector_width_in_bits:128 Cmm.Float64 `Negmuladd
+    | Amd64_simd_instrs.Vfnmadd213pd_Y_Y_Ym256 ->
+      simd_float_fma ~vector_width_in_bits:256 Cmm.Float64 `Negmuladd
+    | Amd64_simd_instrs.Vfnmadd213ps_X_X_Xm128 ->
+      simd_float_fma ~vector_width_in_bits:128 Cmm.Float32 `Negmuladd
+    | Amd64_simd_instrs.Vfnmadd213ps_Y_Y_Ym256 ->
+      simd_float_fma ~vector_width_in_bits:256 Cmm.Float32 `Negmuladd
+    | Amd64_simd_instrs.Vfnmsub213pd_X_X_Xm128 ->
+      simd_float_fma ~vector_width_in_bits:128 Cmm.Float64 `Negmulsub
+    | Amd64_simd_instrs.Vfnmsub213pd_Y_Y_Ym256 ->
+      simd_float_fma ~vector_width_in_bits:256 Cmm.Float64 `Negmulsub
+    | Amd64_simd_instrs.Vfnmsub213ps_X_X_Xm128 ->
+      simd_float_fma ~vector_width_in_bits:128 Cmm.Float32 `Negmulsub
+    | Amd64_simd_instrs.Vfnmsub213ps_Y_Y_Ym256 ->
+      simd_float_fma ~vector_width_in_bits:256 Cmm.Float32 `Negmulsub
     | Amd64_simd_instrs.Movddup | Amd64_simd_instrs.Vmovddup_X_Xm64 ->
       simd_dup_lanes 64 (fun _dst_lane -> 0)
     | Amd64_simd_instrs.Movshdup | Amd64_simd_instrs.Vmovshdup_X_Xm128 ->

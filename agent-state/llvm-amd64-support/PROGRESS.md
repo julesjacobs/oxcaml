@@ -18,10 +18,10 @@ default disabled-probe path. The standard-compiler LLVM-backend
 `async-exns/async_exns_1.ml` output mismatch is now fixed as well.
 
 The latest AMD64 lowering follow-ups add scalar POPCNT/LZCNT/TZCNT, BMI1,
-BMI2, and FMA builtin lowering, CLMUL int64x2 carry-less multiply lowering,
-SSE4.2 int64x2 signed greater-than comparison lowering, SSE4.1 unsigned
-multi-SAD lowering, SSE4.1 packed float dot-product lowering, SSE4.1 unsigned word
-min-position lowering, SSE4.1 scalar immediate rounding lowering, SSE4.1
+BMI2, and scalar/vector FMA builtin lowering, CLMUL int64x2 carry-less
+multiply lowering, SSE4.2 int64x2 signed greater-than comparison lowering,
+SSE4.1 unsigned multi-SAD lowering, SSE4.1 packed float dot-product lowering,
+SSE4.1 unsigned word min-position lowering, SSE4.1 scalar immediate rounding lowering, SSE4.1
 packed float vector rounding lowering, SSE4.1 vector test predicate lowering,
 SSE4.1 integer lane extract/insert lowering, SSE4.1 variable blend lowering,
 SSE4.1 immediate blend lowering, SSE4.1 int32 multiply lowering, SSE4.1
@@ -2203,6 +2203,19 @@ limit is raised from `l=100000` to `l=150000`.
       it checks the kept IR for `llvm.fma.f32`/`llvm.fma.f64`, rejects
       target-specific FMA intrinsics, and links/runs scalar `float32` and
       `float64` examples with dummy primitive-table stubs.
+    - Implemented AMD64 LLVM lowering for vector FMA builtins:
+      the `caml_fma_float{32x4,32x8,64x2,64x4}` mul-add, mul-sub,
+      mul-addsub, mul-subadd, neg-mul-add, and neg-mul-sub forms.
+      The lowering uses target-independent vector `llvm.fma.*` intrinsics,
+      with per-lane sign adjustment for the alternating add/sub variants,
+      rather than feature-specific `llvm.x86.fma*` intrinsics. Rebuilt with
+      `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_fma_vector.sh` script passed
+      directly under `validation-tmp/amd64_fma_vector` with the in-tree
+      compiler and `OCAMLLIB` set to the agent-local `_install/lib/ocaml`;
+      its kept IR contains the expected `llvm.fma.v2f64`, `llvm.fma.v4f32`,
+      `llvm.fma.v4f64`, and `llvm.fma.v8f32` declarations/calls and rejects
+      target-specific FMA intrinsics.
 
 ## Current Blocker
 
