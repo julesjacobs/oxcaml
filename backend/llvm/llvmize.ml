@@ -2185,6 +2185,24 @@ let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
     in
     emit_ins t (I.convert Zext ~arg:res ~to_:T.i64) |> store_res
   in
+  let popcnt_int width_in_bits =
+    let typ = T.Int { width_in_bits } in
+    let convert_if_needed op arg to_ =
+      if T.equal (V.get_type arg) to_
+      then arg
+      else emit_ins t (I.convert op ~arg ~to_)
+    in
+    let arg =
+      load_reg_to_temp t i.arg.(0)
+      |> fun arg -> convert_if_needed Trunc arg typ
+    in
+    let res =
+      call_llvm_intrinsic t
+        ("ctpop." ^ llvm_intrinsic_type_suffix typ)
+        [arg] typ
+    in
+    convert_if_needed Zext res (T.of_reg i.res.(0)) |> store_res
+  in
   (* Intrinsics must not allocate on the OCaml heap. See
      [Arch.operation_allocates]. *)
   match intrinsic_name with
@@ -2213,6 +2231,9 @@ let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
   | "caml_sse41_vec128_testz" -> sse41_vec128_ptest `Testz
   | "caml_sse41_vec128_testc" -> sse41_vec128_ptest `Testc
   | "caml_sse41_vec128_testnzc" -> sse41_vec128_ptest `Testnzc
+  | "caml_popcnt_int16" -> popcnt_int 16
+  | "caml_popcnt_int32" -> popcnt_int 32
+  | "caml_popcnt_int64" -> popcnt_int 64
   | "caml_rdtsc_unboxed" -> do_intrinsic_call "readcyclecounter" [] T.i64
   | "caml_rdpmc_unboxed" -> do_intrinsic_call "x86.rdpmc" [T.i32] T.i64
   | _ -> not_implemented_basic ~msg:"specific intrinsic" i

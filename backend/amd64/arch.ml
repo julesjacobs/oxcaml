@@ -506,7 +506,10 @@ let operation_is_pure = function
       | "caml_sse41_float64_round"
       | "caml_sse41_vec128_testz"
       | "caml_sse41_vec128_testc"
-      | "caml_sse41_vec128_testnzc" ) ->
+      | "caml_sse41_vec128_testnzc"
+      | "caml_popcnt_int16"
+      | "caml_popcnt_int32"
+      | "caml_popcnt_int64" ) ->
     true
   | Illvm_intrinsic ("caml_rdtsc_unboxed" | "caml_rdpmc_unboxed") -> false
   | Illvm_intrinsic intr ->

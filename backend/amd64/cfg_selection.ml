@@ -146,7 +146,10 @@ let is_llvm_intrinsic_builtin = function
   | "caml_sse41_float64_round"
   | "caml_sse41_vec128_testz"
   | "caml_sse41_vec128_testc"
-  | "caml_sse41_vec128_testnzc" ->
+  | "caml_sse41_vec128_testnzc"
+  | "caml_popcnt_int16"
+  | "caml_popcnt_int32"
+  | "caml_popcnt_int64" ->
     true
   | _ -> false
 
