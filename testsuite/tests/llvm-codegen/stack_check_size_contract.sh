@@ -228,11 +228,10 @@ boundary_has_prologue_realloc() {
 
 check_zero_byte_prologue_boundary() {
   # Isolate the LLVM prologue heuristic around the 256-byte stack threshold.
-  # These oxcaml_fpcc functions also save FP/LR, so the alloca sizes below
-  # produce 112-, 128-, and 272-byte prologue prefixes respectively.
-  # A 112-byte prefix leaves the helper reserve. 128 and 272 do not: the
-  # self-stage compiler crash reproducer hit this exact boundary, so equality is
-  # kept conservative.
+  # The alloca sizes below produce 96-, 128-, and 256-byte prologue prefixes
+  # respectively. With the helper-side reserve, 96- and 128-byte prefixes leave
+  # enough of the 256-byte threshold when there is no unchecked CFG stack use.
+  # 256 bytes does not.
   cat > "$boundary_ir" <<'EOF'
 target triple = "arm64-apple-macosx"
 
@@ -245,7 +244,7 @@ entry:
 
 define oxcaml_fpcc i64 @zero_byte_boundary_needs_prologue(i64 %ds, i64 %alloc, i64 %x) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" {
 entry:
-  %buf = alloca [112 x i8], align 16
+  %buf = alloca [128 x i8], align 16
   call void asm sideeffect "", "r"(ptr %buf)
   ret i64 %x
 }
@@ -265,8 +264,8 @@ EOF
     echo "zero-byte stack-check contract should allow a 112-byte frame without a prologue check" >&2
     exit 1
   fi
-  if ! boundary_has_prologue_realloc zero_byte_boundary_needs_prologue; then
-    echo "zero-byte stack-check contract should keep prologue checks for a 128-byte frame" >&2
+  if boundary_has_prologue_realloc zero_byte_boundary_needs_prologue; then
+    echo "zero-byte stack-check contract should allow a 128-byte frame without a prologue check" >&2
     exit 1
   fi
   if ! boundary_has_prologue_realloc zero_byte_needs_prologue; then
@@ -284,31 +283,35 @@ EOF
     -Wno-override-module -x ir -S -O3 -o "$boundary_asm" "$boundary_ir"
 
   # A nonzero byte-count attribute is a producer contract: OxCaml has inserted
-  # an ordinary CFG stack check and LLVM must not add a duplicate prologue
-  # check. The hand-written IR here checks the LLVM-side contract handling; the
-  # generated-code checks below verify that real OxCaml IR also contains the
-  # ordinary CFG check.
+  # an ordinary CFG stack check. LLVM only needs a prologue check when its
+  # machine prologue plus unchecked CFG stack use plus the helper-side reserve
+  # would spend the caller-provided entry slack before that ordinary check can
+  # run.
   if boundary_has_prologue_realloc zero_byte_safe; then
-    echo "nonzero stack-check contract should rely on the CFG check, not add a prologue check for a 112-byte frame" >&2
+    echo "nonzero stack-check contract should allow a 112-byte frame with no unchecked CFG stack use" >&2
     exit 1
   fi
   if boundary_has_prologue_realloc zero_byte_boundary_needs_prologue; then
-    echo "nonzero stack-check contract should rely on the CFG check, not add a prologue check for a 128-byte frame" >&2
+    echo "nonzero stack-check contract should allow a 128-byte frame with no unchecked CFG stack use" >&2
     exit 1
   fi
-  if boundary_has_prologue_realloc zero_byte_needs_prologue; then
-    echo "nonzero stack-check contract should rely on the CFG check, not add a prologue check for a 256-byte frame" >&2
+  if ! boundary_has_prologue_realloc zero_byte_needs_prologue; then
+    echo "nonzero stack-check contract should keep prologue checks for a 256-byte frame" >&2
     exit 1
   fi
 
-  sed 's/"oxcaml-stack-check-before-bytes"="0"/"oxcaml-stack-check-before-bytes"="32"/g' \
+  sed 's/"oxcaml-stack-check-before-bytes"="0"/"oxcaml-stack-check-before-bytes"="96"/g' \
     "$boundary_ir" > "$boundary_ir.before64"
   mv "$boundary_ir.before64" "$boundary_ir"
   "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" -target arm64-apple-macosx \
     -Wno-override-module -x ir -S -O3 -o "$boundary_asm" "$boundary_ir"
 
   if boundary_has_prologue_realloc zero_byte_safe; then
-    echo "nonzero stack-check contract should still rely on the CFG check when pre-check stack use spends the reserve" >&2
+    echo "nonzero stack-check contract should allow a 112-byte frame when P + U + R is below the slack" >&2
+    exit 1
+  fi
+  if ! boundary_has_prologue_realloc zero_byte_boundary_needs_prologue; then
+    echo "nonzero stack-check contract should keep prologue checks when P + U + R reaches the slack" >&2
     exit 1
   fi
 }
