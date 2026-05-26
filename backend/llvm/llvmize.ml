@@ -2825,6 +2825,29 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_extend_low ~src_width_in_bits ~dst_width_in_bits convert_op =
+    let src_typ = int_vec_type ~width_in_bits:src_width_in_bits in
+    let dst_typ = int_vec_type ~width_in_bits:dst_width_in_bits in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) src_typ in
+    let dst_elem_typ = T.Int { width_in_bits = dst_width_in_bits } in
+    let lanes = 128 / dst_width_in_bits in
+    let res =
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let elem =
+               emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int lane))
+             in
+             let extended =
+               emit_ins t (I.convert convert_op ~arg:elem ~to_:dst_elem_typ)
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane)
+                  ~to_insert:extended))
+           (V.poison dst_typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_narrow src_width_in_bits ~high =
     let dst_width_in_bits = src_width_in_bits / 2 in
     let src_typ = int_vec_type ~width_in_bits:src_width_in_bits in
@@ -4127,6 +4150,30 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_cmp 32 Int_EQ ~zero:false
     | Amd64_simd_instrs.Pcmpeqq | Amd64_simd_instrs.Vpcmpeqq_X_X_Xm128 ->
       simd_int_cmp 64 Int_EQ ~zero:false
+    | Amd64_simd_instrs.Pmovsxbw | Amd64_simd_instrs.Vpmovsxbw_X_Xm64 ->
+      simd_int_extend_low ~src_width_in_bits:8 ~dst_width_in_bits:16 Sext
+    | Amd64_simd_instrs.Pmovsxbd | Amd64_simd_instrs.Vpmovsxbd_X_Xm32 ->
+      simd_int_extend_low ~src_width_in_bits:8 ~dst_width_in_bits:32 Sext
+    | Amd64_simd_instrs.Pmovsxbq | Amd64_simd_instrs.Vpmovsxbq_X_Xm16 ->
+      simd_int_extend_low ~src_width_in_bits:8 ~dst_width_in_bits:64 Sext
+    | Amd64_simd_instrs.Pmovsxwd | Amd64_simd_instrs.Vpmovsxwd_X_Xm64 ->
+      simd_int_extend_low ~src_width_in_bits:16 ~dst_width_in_bits:32 Sext
+    | Amd64_simd_instrs.Pmovsxwq | Amd64_simd_instrs.Vpmovsxwq_X_Xm32 ->
+      simd_int_extend_low ~src_width_in_bits:16 ~dst_width_in_bits:64 Sext
+    | Amd64_simd_instrs.Pmovsxdq | Amd64_simd_instrs.Vpmovsxdq_X_Xm64 ->
+      simd_int_extend_low ~src_width_in_bits:32 ~dst_width_in_bits:64 Sext
+    | Amd64_simd_instrs.Pmovzxbw | Amd64_simd_instrs.Vpmovzxbw_X_Xm64 ->
+      simd_int_extend_low ~src_width_in_bits:8 ~dst_width_in_bits:16 Zext
+    | Amd64_simd_instrs.Pmovzxbd | Amd64_simd_instrs.Vpmovzxbd_X_Xm32 ->
+      simd_int_extend_low ~src_width_in_bits:8 ~dst_width_in_bits:32 Zext
+    | Amd64_simd_instrs.Pmovzxbq | Amd64_simd_instrs.Vpmovzxbq_X_Xm16 ->
+      simd_int_extend_low ~src_width_in_bits:8 ~dst_width_in_bits:64 Zext
+    | Amd64_simd_instrs.Pmovzxwd | Amd64_simd_instrs.Vpmovzxwd_X_Xm64 ->
+      simd_int_extend_low ~src_width_in_bits:16 ~dst_width_in_bits:32 Zext
+    | Amd64_simd_instrs.Pmovzxwq | Amd64_simd_instrs.Vpmovzxwq_X_Xm32 ->
+      simd_int_extend_low ~src_width_in_bits:16 ~dst_width_in_bits:64 Zext
+    | Amd64_simd_instrs.Pmovzxdq | Amd64_simd_instrs.Vpmovzxdq_X_Xm64 ->
+      simd_int_extend_low ~src_width_in_bits:32 ~dst_width_in_bits:64 Zext
     | Amd64_simd_instrs.Pcmpgtb | Amd64_simd_instrs.Vpcmpgtb_X_X_Xm128 ->
       simd_int_cmp 8 Int_GT ~zero:false
     | Amd64_simd_instrs.Pcmpgtw | Amd64_simd_instrs.Vpcmpgtw_X_X_Xm128 ->

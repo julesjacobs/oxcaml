@@ -17,12 +17,12 @@ default disabled-probe path. The standard-compiler LLVM-backend
 `lib-atomic/test_atomic_cmpxchg.ml` failure is fixed too. The native
 `async-exns/async_exns_1.ml` output mismatch is now fixed as well.
 
-The latest SIMD follow-ups add SSE4.1 integer compare/min/max lowering, SSSE3
-unsigned-byte/signed-byte multiply-add saturating lowering, SSSE3 byte
-align-right lowering, SSSE3 byte-shuffle lowering, SSSE3 signed word rounded
-multiply lowering, SSSE3 mulsign lowering, SSSE3 absolute-value lowering,
-SSSE3 saturating and non-saturating horizontal integer add/sub lowering, SSE3
-vec128
+The latest SIMD follow-ups add SSE4.1 integer sign/zero extension lowering,
+SSE4.1 integer compare/min/max lowering, SSSE3 unsigned-byte/signed-byte
+multiply-add saturating lowering, SSSE3 byte align-right lowering, SSSE3
+byte-shuffle lowering, SSSE3 signed word rounded multiply lowering, SSSE3
+mulsign lowering, SSSE3 absolute-value lowering, SSSE3 saturating and
+non-saturating horizontal integer add/sub lowering, SSE3 vec128
 duplicate-lane lowering, SSE3 packed float
 addsub/hadd/hsub lowering, SSE/SSE2 packed float min/max and approximate
 reciprocal/reciprocal-sqrt lowering, SSE2 conversion lowering for packed
@@ -2034,6 +2034,16 @@ limit is raised from `l=100000` to `l=150000`.
       `validation-tmp/amd64-simd-sse41-int-minmax-cmp`; the kept IR emits
       generic vector `icmp`, `sext`, and `select` operations instead of using
       X86 target intrinsics.
+    - Implemented AMD64 LLVM lowering for the SSE4.1 integer sign/zero
+      extension helpers:
+      `caml_sse41_{cvtsx,cvtzx}_int8x16_int{16x8,32x4,64x2}`,
+      `caml_sse41_{cvtsx,cvtzx}_int16x8_int{32x4,64x2}`, and
+      `caml_sse41_{cvtsx,cvtzx}_int32x4_int64x2`. Rebuilt with
+      `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_sse41_int_extend.sh` script
+      passed directly under `validation-tmp/amd64-simd-sse41-int-extend`; the
+      kept IR extracts low source lanes and emits scalar `sext`/`zext` plus
+      lane insertion for the widened 128-bit result vectors.
 
 ## Current Blocker
 
