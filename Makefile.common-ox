@@ -325,7 +325,7 @@ boot_build = _build/default
 
 # The following horror will be removed when work to allow the testsuite to
 # run on an installed tree (led by David Allsopp) is completed.
-.PHONY: runtest-upstream test install_for_test
+.PHONY: runtest-upstream test test-no-rebuild install_for_test
 install_for_test: install
 	rm -rf _runtest
 	mkdir _runtest
@@ -446,6 +446,9 @@ install_for_test: install
 	mkdir _runtest/ocamltest
 	cp $(boot_build)/ocamltest/ocamltest.native _runtest/ocamltest/ocamltest
 test: install_for_test
+	$(MAKE) test-no-rebuild
+
+test-no-rebuild:
 	if [ "$(middle_end)" = "flambda2" ]; then \
 	  for path in `cd testsuite; ls -1 -d tests/*`; do \
 	    if [[ -d "testsuite/$$path" ]] && ! grep -q "^  $$path " oxcaml/testsuite/flambda2-test-list; then \
@@ -456,6 +459,7 @@ test: install_for_test
 	find _runtest/testsuite/tests -name '*.corrected' -delete
 	(export OCAMLSRCDIR=$$(pwd)/_runtest; \
 	 export CAML_LD_LIBRARY_PATH=$$(pwd)/_runtest/lib/ocaml/stublibs; \
+	 $(if $(TEST_RUN_OCAMLPARAM),export OCAMLPARAM="$(TEST_RUN_OCAMLPARAM)";) \
 	 if $$(which gfortran > /dev/null 2>&1); then \
 	   export LIBRARY_PATH=$$(dirname $$(gfortran -print-file-name=libgfortran.a)); \
 	 fi; \
@@ -498,10 +502,12 @@ llvm-install:
 	$(MAKE) install LLVM_BACKEND=1
 
 llvm-test:
-	$(MAKE) test LLVM_BACKEND=1
+	$(MAKE) install_for_test
+	$(MAKE) test-no-rebuild TEST_RUN_OCAMLPARAM="_,llvm-backend=1,llvm-path=$(LLVM_PATH)"
 
 llvm-test-one:
-	$(MAKE) test-one LLVM_BACKEND=1
+	$(MAKE) install_for_test
+	$(MAKE) test-one-no-rebuild TEST_RUN_OCAMLPARAM="_,llvm-backend=1,llvm-path=$(LLVM_PATH)"
 
 llvm-self-stage-install: llvm-install
 	LLVM_WRAPPER="$(or $(LLVM_PATH),/tmp/oxcaml-clang-wrapper)" \
@@ -539,6 +545,7 @@ test-one-no-rebuild:
 	find _runtest/testsuite/tests -name '*.corrected' -delete
 	(export OCAMLSRCDIR=$$(pwd)/_runtest; \
 	 export CAML_LD_LIBRARY_PATH=$$(pwd)/_runtest/lib/ocaml/stublibs; \
+	 $(if $(TEST_RUN_OCAMLPARAM),export OCAMLPARAM="$(TEST_RUN_OCAMLPARAM)";) \
 	 if $$(which gfortran > /dev/null 2>&1); then \
 	   export LIBRARY_PATH=$$(dirname $$(gfortran -print-file-name=libgfortran.a)); \
 	 fi; \

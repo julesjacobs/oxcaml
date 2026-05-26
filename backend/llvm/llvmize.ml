@@ -3854,16 +3854,18 @@ let preserved_reg_slots liveness active_traps cfg =
     (Reg.Set.union across_basic_safepoints across_terminator_safepoints)
     across_traps
 
-let max_slow_path_root_slots t active_traps cfg =
+let max_slow_path_root_slots liveness active_traps cfg =
   Cfg.fold_body_instructions cfg
     ~f:(fun max_roots i ->
       if
         eligible_basic_safepoint_for_slow_root_slots active_traps i
-        (* [const_ints] is populated while emitting instructions, so this
-           pre-emission count can only use the conservative live root set. The
-           actual slow-path bundle still filters known immediates at the call
-           site. *)
-      then Int.max max_roots (Reg.Set.cardinal (live_gc_root_regs_across t i))
+        (* [const_ints] and [reg2alloca] are populated while emitting
+           instructions, so this pre-emission count can only use the
+           conservative live root set. The actual slow-path bundle still filters
+           known immediates and non-alloca roots at the call site. *)
+      then
+        Int.max max_roots
+          (live_val_regs_across liveness i |> Reg.Set.cardinal)
       else max_roots)
     ~init:0
 
@@ -4066,8 +4068,10 @@ let alloca_regs t (cfg : Cfg.t) arg_values arg_regs =
   Reg.Set.iter (fun reg -> alloca_reg reg) body_regs;
   (match (get_fun_info t).liveness with
   | None -> ()
-  | Some _ ->
-    let count = max_slow_path_root_slots t (get_fun_info t).active_traps cfg in
+  | Some liveness ->
+    let count =
+      max_slow_path_root_slots liveness (get_fun_info t).active_traps cfg
+    in
     (get_fun_info t).slow_path_root_slots
       <- List.init count (fun _ ->
              emit_ins ~comment:"slow path GC root slot" t (I.alloca T.val_ptr)));

@@ -173,6 +173,39 @@ let not_macos = make
     "not on a MacOS system"
     "on a MacOS system")
 
+let contains_substring s substring =
+  let s_len = String.length s in
+  let substring_len = String.length substring in
+  let rec loop pos =
+    if pos + substring_len > s_len
+    then false
+    else if String.sub s pos substring_len = substring
+    then true
+    else loop (pos + 1)
+  in
+  loop 0
+
+let ocamlparam_enables_llvm_backend () =
+  match Sys.getenv_opt "OCAMLPARAM" with
+  | None -> false
+  | Some ocamlparam -> contains_substring ocamlparam "llvm-backend=1"
+
+let llvm_backend = make
+  ~name:"llvm-backend"
+  ~description:"Pass if tests are running with the LLVM backend enabled"
+  ~does_something:false
+  (Actions_helpers.predicate (ocamlparam_enables_llvm_backend ())
+    "LLVM backend enabled"
+    "LLVM backend disabled")
+
+let not_llvm_backend = make
+  ~name:"not-llvm-backend"
+  ~description:"Pass if tests are not running with the LLVM backend enabled"
+  ~does_something:false
+  (Actions_helpers.predicate (not (ocamlparam_enables_llvm_backend ()))
+    "LLVM backend disabled"
+    "LLVM backend enabled")
+
 let arch32 = make
   ~name:"arch32"
   ~description:"Pass if running on a 32-bit architecture"
@@ -429,6 +462,8 @@ let init () =
     not_bsd;
     macos;
     not_macos;
+    llvm_backend;
+    not_llvm_backend;
     arch32;
     arch64;
     has_symlink;
