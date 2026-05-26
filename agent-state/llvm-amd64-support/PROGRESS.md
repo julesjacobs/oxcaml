@@ -17,7 +17,8 @@ default disabled-probe path. The standard-compiler LLVM-backend
 `lib-atomic/test_atomic_cmpxchg.ml` failure is fixed too. The native
 `async-exns/async_exns_1.ml` output mismatch is now fixed as well.
 
-The latest SIMD follow-ups add SSE2 conversion lowering for packed int32,
+The latest SIMD follow-ups add SSE/SSE2 packed float min/max and approximate
+reciprocal/reciprocal-sqrt lowering, SSE2 conversion lowering for packed int32,
 float32, and float64 vectors, SSE/SSE2 packed float comparison lowering, SSE2
 float64x2 add/sub/mul/div/sqrt lowering, SSE float32x4 add/sub/mul/div/sqrt
 lowering, SSE vec128 64-bit lane-move lowering, SSE vec128 interleave lowering
@@ -1920,6 +1921,16 @@ limit is raised from `l=100000` to `l=150000`.
       directly under `validation-tmp/amd64-simd-conversions`; the kept IR uses
       ordinary `sitofp`/`fpext` for exact widening conversions and the LLVM X86
       SSE2 intrinsics for packed float-to-int and double-to-float conversions.
+    - Implemented AMD64 LLVM lowering for SSE/SSE2 packed float min/max and
+      approximate reciprocal helpers:
+      `caml_sse_float32x4_{max,min,rcp,rsqrt}` and
+      `caml_sse2_float64x2_{max,min}`. Rebuilt with
+      `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_float_minmax_approx.sh` script
+      passed directly under `validation-tmp/amd64-simd-float-minmax-approx`;
+      the kept IR calls the LLVM X86 SSE/SSE2 intrinsics for min/max and the
+      approximate packed float32 reciprocal instructions. The SSE2 conversion
+      script was rerun after sharing the intrinsic helper; result: passed.
 
 ## Current Blocker
 
