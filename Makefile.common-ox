@@ -494,7 +494,7 @@ runtest-upstream: test
 test-one: install_for_test
 	$(MAKE) test-one-no-rebuild
 
-.PHONY: llvm-compiler llvm-install llvm-test llvm-test-one llvm-self-stage-install llvm-self-stage2-install llvm-self-stage-test llvm-self-stage2-test
+.PHONY: llvm-compiler llvm-install llvm-test llvm-test-no-rebuild llvm-test-one llvm-test-one-no-rebuild llvm-self-stage-install llvm-self-stage2-install llvm-self-stage-test llvm-self-stage2-test
 llvm-compiler:
 	$(MAKE) compiler LLVM_BACKEND=1
 
@@ -505,8 +505,14 @@ llvm-test:
 	$(MAKE) install_for_test
 	$(MAKE) test-no-rebuild TEST_RUN_OCAMLPARAM="_,llvm-backend=1,llvm-path=$(LLVM_PATH)"
 
+llvm-test-no-rebuild:
+	$(MAKE) test-no-rebuild TEST_RUN_OCAMLPARAM="_,llvm-backend=1,llvm-path=$(LLVM_PATH)"
+
 llvm-test-one:
 	$(MAKE) install_for_test
+	$(MAKE) test-one-no-rebuild TEST_RUN_OCAMLPARAM="_,llvm-backend=1,llvm-path=$(LLVM_PATH)"
+
+llvm-test-one-no-rebuild:
 	$(MAKE) test-one-no-rebuild TEST_RUN_OCAMLPARAM="_,llvm-backend=1,llvm-path=$(LLVM_PATH)"
 
 llvm-self-stage-install: llvm-install
@@ -541,6 +547,13 @@ locate_test = \
     echo "tests/$${test}"; \
   )
 
+one_test_selector = \
+  $(if $(filter command line,$(origin TEST)),TEST=$(call locate_test,$(TEST)),TEST=)
+one_dir_selector = \
+  $(if $(filter command line,$(origin DIR)),DIR=$(call locate_test,$(DIR)),DIR=)
+one_list_selector = \
+  $(if $(filter command line,$(origin LIST)),LIST=$(LIST),LIST=)
+
 test-one-no-rebuild:
 	find _runtest/testsuite/tests -name '*.corrected' -delete
 	(export OCAMLSRCDIR=$$(pwd)/_runtest; \
@@ -549,7 +562,7 @@ test-one-no-rebuild:
 	 if $$(which gfortran > /dev/null 2>&1); then \
 	   export LIBRARY_PATH=$$(dirname $$(gfortran -print-file-name=libgfortran.a)); \
 	 fi; \
-	 cd _runtest/testsuite && make one $(if $(TEST),TEST=$(call locate_test,$(TEST))) $(if $(DIR),DIR=$(call locate_test,$(DIR))))
+	 cd _runtest/testsuite && make one $(one_test_selector) $(one_dir_selector) $(one_list_selector))
 
 promote-one: install_for_test
 	$(MAKE) promote-one-no-rebuild
@@ -560,7 +573,7 @@ promote-one-no-rebuild:
 	 if $$(which gfortran > /dev/null 2>&1); then \
 	   export LIBRARY_PATH=$$(dirname $$(gfortran -print-file-name=libgfortran.a)); \
 	 fi; \
-	 cd _runtest/testsuite && make promote $(if $(TEST),TEST=$(call locate_test,$(TEST))) $(if $(DIR),DIR=$(call locate_test,$(DIR))))
+	 cd _runtest/testsuite && make promote $(one_test_selector) $(one_dir_selector) $(one_list_selector))
 
 # This target is like a polling version of upstream "make ocamlopt"
 .PHONY: hacking
