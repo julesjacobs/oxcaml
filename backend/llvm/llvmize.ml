@@ -2406,6 +2406,20 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let res = call_llvm_intrinsic t name [arg; V.of_int ~typ:T.i1 0] typ in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_mulsign width_in_bits =
+    let typ = int_vec_type ~width_in_bits in
+    let value = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let sign = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let zero = V.zeroinitializer typ in
+    let negated = emit_ins t (I.binary Sub ~arg1:zero ~arg2:value) in
+    let is_negative = emit_ins t (I.icmp Islt ~arg1:sign ~arg2:zero) in
+    let is_zero = emit_ins t (I.icmp Ieq ~arg1:sign ~arg2:zero) in
+    let signed =
+      emit_ins t (I.select ~cond:is_negative ~ifso:negated ~ifnot:value)
+    in
+    let res = emit_ins t (I.select ~cond:is_zero ~ifso:zero ~ifnot:signed) in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_unary_intrinsic typ intrinsic =
     let name = intrinsic ^ "." ^ llvm_intrinsic_type_suffix typ in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -4033,6 +4047,15 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_abs 16
     | Amd64_simd_instrs.Pabsd_X_Xm128 | Amd64_simd_instrs.Vpabsd_X_Xm128 ->
       simd_int_abs 32
+    | Amd64_simd_instrs.Psignb_X_Xm128
+    | Amd64_simd_instrs.Vpsignb_X_X_Xm128 ->
+      simd_int_mulsign 8
+    | Amd64_simd_instrs.Psignw_X_Xm128
+    | Amd64_simd_instrs.Vpsignw_X_X_Xm128 ->
+      simd_int_mulsign 16
+    | Amd64_simd_instrs.Psignd_X_Xm128
+    | Amd64_simd_instrs.Vpsignd_X_X_Xm128 ->
+      simd_int_mulsign 32
     | Amd64_simd_instrs.Phaddw_X_Xm128
     | Amd64_simd_instrs.Vphaddw_X_X_Xm128 ->
       simd_int_haddsub 16 Add
