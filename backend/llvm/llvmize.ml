@@ -4445,6 +4445,8 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_cmp 16 Int_GT ~zero:false
     | Amd64_simd_instrs.Pcmpgtd | Amd64_simd_instrs.Vpcmpgtd_X_X_Xm128 ->
       simd_int_cmp 32 Int_GT ~zero:false
+    | Amd64_simd_instrs.Pcmpgtq | Amd64_simd_instrs.Vpcmpgtq_X_X_Xm128 ->
+      simd_int_cmp 64 Int_GT ~zero:false
     | Amd64_simd_instrs.Andps | Amd64_simd_instrs.Vandps_X_X_Xm128 ->
       simd_int_binary 64 And
     | Amd64_simd_instrs.Andnps | Amd64_simd_instrs.Vandnps_X_X_Xm128 ->
