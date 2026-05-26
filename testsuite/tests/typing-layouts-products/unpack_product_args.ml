@@ -4,6 +4,7 @@
  include stdlib_stable;
  flambda2;
  {
+   not-llvm-backend;
    native;
  }
  {
