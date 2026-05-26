@@ -2209,6 +2209,70 @@ let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
     in
     convert_if_needed Zext res (T.of_reg i.res.(0)) |> store_res
   in
+  let scalar_bmi width_in_bits op =
+    let typ = T.Int { width_in_bits } in
+    let convert_if_needed op arg to_ =
+      if T.equal (V.get_type arg) to_
+      then arg
+      else emit_ins t (I.convert op ~arg ~to_)
+    in
+    let arg n =
+      load_reg_to_temp t i.arg.(n)
+      |> fun arg -> convert_if_needed Trunc arg typ
+    in
+    let zero = V.of_int ~typ 0 in
+    let one = V.of_int ~typ 1 in
+    let all_ones = V.of_int ~typ (-1) in
+    let res =
+      match op with
+      | `Andn ->
+        let not_arg0 = emit_ins t (I.binary Xor ~arg1:(arg 0) ~arg2:all_ones) in
+        emit_ins t (I.binary And ~arg1:not_arg0 ~arg2:(arg 1))
+      | `Bextr ->
+        let src = arg 0 in
+        let control = arg 1 in
+        let width = V.of_int ~typ width_in_bits in
+        let max_shift = V.of_int ~typ (width_in_bits - 1) in
+        let start =
+          emit_ins t (I.binary And ~arg1:control ~arg2:(V.of_int ~typ 0xff))
+        in
+        let len =
+          let shifted =
+            emit_ins t (I.binary Lshr ~arg1:control ~arg2:(V.of_int ~typ 8))
+          in
+          emit_ins t (I.binary And ~arg1:shifted ~arg2:(V.of_int ~typ 0xff))
+        in
+        let start_in_range = emit_ins t (I.icmp Iult ~arg1:start ~arg2:width) in
+        let safe_start =
+          emit_ins t (I.select ~cond:start_in_range ~ifso:start ~ifnot:max_shift)
+        in
+        let shifted = emit_ins t (I.binary Lshr ~arg1:src ~arg2:safe_start) in
+        let len_is_wide = emit_ins t (I.icmp Iuge ~arg1:len ~arg2:width) in
+        let safe_len =
+          emit_ins t (I.select ~cond:len_is_wide ~ifso:max_shift ~ifnot:len)
+        in
+        let shifted_one = emit_ins t (I.binary Shl ~arg1:one ~arg2:safe_len) in
+        let mask = emit_ins t (I.binary Sub ~arg1:shifted_one ~arg2:one) in
+        let mask =
+          emit_ins t (I.select ~cond:len_is_wide ~ifso:all_ones ~ifnot:mask)
+        in
+        let extracted = emit_ins t (I.binary And ~arg1:shifted ~arg2:mask) in
+        emit_ins t (I.select ~cond:start_in_range ~ifso:extracted ~ifnot:zero)
+      | `Blsi ->
+        let arg = arg 0 in
+        let negated = emit_ins t (I.binary Sub ~arg1:zero ~arg2:arg) in
+        emit_ins t (I.binary And ~arg1:arg ~arg2:negated)
+      | `Blsmsk ->
+        let arg = arg 0 in
+        let decremented = emit_ins t (I.binary Sub ~arg1:arg ~arg2:one) in
+        emit_ins t (I.binary Xor ~arg1:arg ~arg2:decremented)
+      | `Blsr ->
+        let arg = arg 0 in
+        let decremented = emit_ins t (I.binary Sub ~arg1:arg ~arg2:one) in
+        emit_ins t (I.binary And ~arg1:arg ~arg2:decremented)
+    in
+    convert_if_needed Zext res (T.of_reg i.res.(0)) |> store_res
+  in
   (* Intrinsics must not allocate on the OCaml heap. See
      [Arch.operation_allocates]. *)
   match intrinsic_name with
@@ -2243,6 +2307,16 @@ let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
   | "caml_lzcnt_int16" -> scalar_int_count ~zero_is_poison:false "ctlz" 16
   | "caml_lzcnt_int32" -> scalar_int_count ~zero_is_poison:false "ctlz" 32
   | "caml_lzcnt_int64" -> scalar_int_count ~zero_is_poison:false "ctlz" 64
+  | "caml_bmi_andn_int32" -> scalar_bmi 32 `Andn
+  | "caml_bmi_andn_int64" -> scalar_bmi 64 `Andn
+  | "caml_bmi_bextr_int32" -> scalar_bmi 32 `Bextr
+  | "caml_bmi_bextr_int64" -> scalar_bmi 64 `Bextr
+  | "caml_bmi_blsi_int32" -> scalar_bmi 32 `Blsi
+  | "caml_bmi_blsi_int64" -> scalar_bmi 64 `Blsi
+  | "caml_bmi_blsmsk_int32" -> scalar_bmi 32 `Blsmsk
+  | "caml_bmi_blsmsk_int64" -> scalar_bmi 64 `Blsmsk
+  | "caml_bmi_blsr_int32" -> scalar_bmi 32 `Blsr
+  | "caml_bmi_blsr_int64" -> scalar_bmi 64 `Blsr
   | "caml_bmi_tzcnt_int16" -> scalar_int_count ~zero_is_poison:false "cttz" 16
   | "caml_bmi_tzcnt_int32" -> scalar_int_count ~zero_is_poison:false "cttz" 32
   | "caml_bmi_tzcnt_int64" -> scalar_int_count ~zero_is_poison:false "cttz" 64
