@@ -17,11 +17,12 @@ default disabled-probe path. The standard-compiler LLVM-backend
 `lib-atomic/test_atomic_cmpxchg.ml` failure is fixed too. The native
 `async-exns/async_exns_1.ml` output mismatch is now fixed as well.
 
-The latest SIMD follow-ups add SSSE3 unsigned-byte/signed-byte multiply-add
-saturating lowering, SSSE3 byte align-right lowering, SSSE3 byte-shuffle
-lowering, SSSE3 signed word rounded multiply lowering, SSSE3 mulsign lowering,
-SSSE3 absolute-value lowering, SSSE3 saturating and non-saturating horizontal
-integer add/sub lowering, SSE3 vec128
+The latest SIMD follow-ups add SSE4.1 integer compare/min/max lowering, SSSE3
+unsigned-byte/signed-byte multiply-add saturating lowering, SSSE3 byte
+align-right lowering, SSSE3 byte-shuffle lowering, SSSE3 signed word rounded
+multiply lowering, SSSE3 mulsign lowering, SSSE3 absolute-value lowering,
+SSSE3 saturating and non-saturating horizontal integer add/sub lowering, SSE3
+vec128
 duplicate-lane lowering, SSE3 packed float
 addsub/hadd/hsub lowering, SSE/SSE2 packed float min/max and approximate
 reciprocal/reciprocal-sqrt lowering, SSE2 conversion lowering for packed
@@ -2022,6 +2023,17 @@ limit is raised from `l=100000` to `l=150000`.
       kept IR zero-extends unsigned byte lanes, sign-extends signed byte lanes,
       multiplies in i32, horizontally adds adjacent products, clamps to signed
       i16 range, and truncates before inserting the result lanes.
+    - Implemented AMD64 LLVM lowering for the SSE4.1 integer compare/min/max
+      helpers: `caml_sse41_int64x2_cmpeq`,
+      `caml_sse41_int8x16_{max,min}`, `caml_sse41_int32x4_{max,min}`,
+      `caml_sse41_int16x8_{max_unsigned,min_unsigned}`, and
+      `caml_sse41_int32x4_{max_unsigned,min_unsigned}`. Rebuilt with
+      `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_sse41_int_minmax_cmp.sh`
+      script passed directly under
+      `validation-tmp/amd64-simd-sse41-int-minmax-cmp`; the kept IR emits
+      generic vector `icmp`, `sext`, and `select` operations instead of using
+      X86 target intrinsics.
 
 ## Current Blocker
 

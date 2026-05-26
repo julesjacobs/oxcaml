@@ -4024,6 +4024,30 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | Amd64_simd_instrs.Pminsw_X_Xm128
     | Amd64_simd_instrs.Vpminsw_X_X_Xm128 ->
       simd_int_minmax 16 I.Islt
+    | Amd64_simd_instrs.Pmaxsb
+    | Amd64_simd_instrs.Vpmaxsb_X_X_Xm128 ->
+      simd_int_minmax 8 I.Isgt
+    | Amd64_simd_instrs.Pmaxsd
+    | Amd64_simd_instrs.Vpmaxsd_X_X_Xm128 ->
+      simd_int_minmax 32 I.Isgt
+    | Amd64_simd_instrs.Pmaxuw
+    | Amd64_simd_instrs.Vpmaxuw_X_X_Xm128 ->
+      simd_int_minmax 16 I.Iugt
+    | Amd64_simd_instrs.Pmaxud
+    | Amd64_simd_instrs.Vpmaxud_X_X_Xm128 ->
+      simd_int_minmax 32 I.Iugt
+    | Amd64_simd_instrs.Pminsb
+    | Amd64_simd_instrs.Vpminsb_X_X_Xm128 ->
+      simd_int_minmax 8 I.Islt
+    | Amd64_simd_instrs.Pminsd
+    | Amd64_simd_instrs.Vpminsd_X_X_Xm128 ->
+      simd_int_minmax 32 I.Islt
+    | Amd64_simd_instrs.Pminuw
+    | Amd64_simd_instrs.Vpminuw_X_X_Xm128 ->
+      simd_int_minmax 16 I.Iult
+    | Amd64_simd_instrs.Pminud
+    | Amd64_simd_instrs.Vpminud_X_X_Xm128 ->
+      simd_int_minmax 32 I.Iult
     | Amd64_simd_instrs.Pavgb_X_Xm128 | Amd64_simd_instrs.Vpavgb_X_X_Xm128 ->
       simd_int_avg_unsigned 8
     | Amd64_simd_instrs.Pavgw_X_Xm128 | Amd64_simd_instrs.Vpavgw_X_X_Xm128 ->
@@ -4101,6 +4125,8 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_cmp 16 Int_EQ ~zero:false
     | Amd64_simd_instrs.Pcmpeqd | Amd64_simd_instrs.Vpcmpeqd_X_X_Xm128 ->
       simd_int_cmp 32 Int_EQ ~zero:false
+    | Amd64_simd_instrs.Pcmpeqq | Amd64_simd_instrs.Vpcmpeqq_X_X_Xm128 ->
+      simd_int_cmp 64 Int_EQ ~zero:false
     | Amd64_simd_instrs.Pcmpgtb | Amd64_simd_instrs.Vpcmpgtb_X_X_Xm128 ->
       simd_int_cmp 8 Int_GT ~zero:false
     | Amd64_simd_instrs.Pcmpgtw | Amd64_simd_instrs.Vpcmpgtw_X_X_Xm128 ->
