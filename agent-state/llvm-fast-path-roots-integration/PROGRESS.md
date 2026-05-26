@@ -37,11 +37,24 @@ root handling.
 - Added an `expectnat` anchor for `_caml_llvm_eh_personality`; without it,
   native toplevel fragments using LLVM EH failed at `dlopen` with a missing
   personality symbol.
+- Reconfigured with `--enable-frame-pointers`, which is required by
+  `LLVM_BACKEND=1`, and ran:
+  `OCAMLPARAM="_,llvm-path=$LLVM_PATH" make llvm-test`
+  - Result: 6717 passed, 285 skipped, 10 failed, 0 unexpected errors.
+  - Two failures were stale LLVM codegen expect output caused by frame-pointer
+    prologues and `oxcaml_fpcc`; promoted those expectations.
+  - Reran `make test-one-no-rebuild DIR=llvm-codegen LLVM_BACKEND=1`: 66
+    passed, 2 skipped, 0 failed.
+  - Remaining full-suite failures after the first run were:
+    `tests/frame-pointers/{c_call,effects,exception_handler,reperform,stack_realloc,stack_realloc2}.ml`,
+    `tests/llvm-stack-checks/challenges.ml`, and
+    `tests/typing-small-numbers/test_matching_native.ml`.
 
 ## Current Blocker
 
-No current blocker.
+Full `make llvm-test` still has non-codegen failures listed above.
 
 ## Next Step
 
-Review the diff, then commit and push the integration branch.
+Investigate whether the remaining full-suite failures are pre-existing LLVM
+backend gaps or regressions from the integration branch.
