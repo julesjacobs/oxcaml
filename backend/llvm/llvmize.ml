@@ -2926,6 +2926,33 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_float_cmp_imm width imm =
+    let typ = float_vec_type ~width in
+    let mask_width_in_bits =
+      match width with Cmm.Float32 -> 32 | Cmm.Float64 -> 64
+    in
+    let cond =
+      match imm with
+      | 0 -> I.Foeq
+      | 1 -> I.Folt
+      | 2 -> I.Fole
+      | 3 -> I.Funo
+      | 4 -> I.Fune
+      | 5 -> I.Fuge
+      | 6 -> I.Fugt
+      | 7 -> I.Ford
+      | _ -> fail_msg ~name:"simd_float_cmp_imm" "unexpected immediate %d" imm
+    in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let cmp = emit_ins t (I.fcmp cond ~arg1 ~arg2) in
+    let res =
+      emit_ins t
+        (I.convert Sext ~arg:cmp
+           ~to_:(int_vec_type ~width_in_bits:mask_width_in_bits))
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_float_minmax width intrinsic =
     let typ = float_vec_type ~width in
     let name = intrinsic ^ "." ^ llvm_intrinsic_type_suffix typ in
@@ -3787,6 +3814,10 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_float_binary Cmm.Float64 Fdiv
     | Amd64_simd_instrs.Sqrtpd | Amd64_simd_instrs.Vsqrtpd_X_Xm128 ->
       simd_float_unary_intrinsic Cmm.Float64 "sqrt"
+    | Amd64_simd_instrs.Cmpps | Amd64_simd_instrs.Vcmpps_X_X_Xm128 ->
+      simd_float_cmp_imm Cmm.Float32 (simd_imm imm)
+    | Amd64_simd_instrs.Cmppd | Amd64_simd_instrs.Vcmppd_X_X_Xm128 ->
+      simd_float_cmp_imm Cmm.Float64 (simd_imm imm)
     | Amd64_simd_instrs.Shufps | Amd64_simd_instrs.Vshufps_X_X_Xm128 ->
       simd_shuffle_32 (simd_imm imm)
     | Amd64_simd_instrs.Shufpd | Amd64_simd_instrs.Vshufpd_X_X_Xm128 ->
