@@ -2751,6 +2751,52 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_multi_sad_unsigned imm =
+    let byte_typ = int_vec_type ~width_in_bits:8 in
+    let res_typ = int_vec_type ~width_in_bits:16 in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) byte_typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) byte_typ in
+    let arg1_base = ((imm lsr 2) land 1) * 4 in
+    let arg2_base = (imm land 3) * 4 in
+    let byte_arg arg lane =
+      emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int lane))
+      |> fun byte -> emit_ins t (I.convert Zext ~arg:byte ~to_:T.i16)
+    in
+    let abs_diff arg1_lane arg2_lane =
+      let elem1 = byte_arg arg1 arg1_lane in
+      let elem2 = byte_arg arg2 arg2_lane in
+      let elem1_is_greater =
+        emit_ins t (I.icmp I.Iugt ~arg1:elem1 ~arg2:elem2)
+      in
+      let hi =
+        emit_ins t (I.select ~cond:elem1_is_greater ~ifso:elem1 ~ifnot:elem2)
+      in
+      let lo =
+        emit_ins t (I.select ~cond:elem1_is_greater ~ifso:elem2 ~ifnot:elem1)
+      in
+      emit_ins t (I.binary Sub ~arg1:hi ~arg2:lo)
+    in
+    let sum_lane lane =
+      List.init 4 Fun.id
+      |> List.fold_left
+           (fun sum offset ->
+             let diff =
+               abs_diff (arg1_base + lane + offset) (arg2_base + offset)
+             in
+             emit_ins t (I.binary Add ~arg1:sum ~arg2:diff))
+           (V.of_int ~typ:T.i16 0)
+    in
+    let res =
+      List.init 8 Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane)
+                  ~to_insert:(sum_lane lane)))
+           (V.poison res_typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_shift_imm width_in_bits op n =
     let typ = int_vec_type ~width_in_bits in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -4307,6 +4353,8 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | Amd64_simd_instrs.Psadbw_X_Xm128
     | Amd64_simd_instrs.Vpsadbw_X_X_Xm128 ->
       simd_int_sad_unsigned ()
+    | Amd64_simd_instrs.Mpsadbw | Amd64_simd_instrs.Vmpsadbw_X_X_Xm128 ->
+      simd_int_multi_sad_unsigned (simd_imm imm)
     | Amd64_simd_instrs.Psllw_X_Xm128
     | Amd64_simd_instrs.Vpsllw_X_X_Xm128 ->
       simd_int_sse2_variable_shift 16 Shl ~overlarge_zero:true
