@@ -23,6 +23,7 @@
 #include <stdarg.h>
 #include "caml/alloc.h"
 #include "caml/fail.h"
+#include "caml/llvm_helper_profile.h"
 #include "caml/memory.h"
 #include "caml/mlvalues.h"
 #include "caml/misc.h"
@@ -463,22 +464,36 @@ CAMLprim value caml_string_equal(value s1, value s2)
   mlsize_t sz1, sz2;
   value * p1, * p2;
 
-  if (s1 == s2) return Val_true;
+  CAML_LLVM_HELPER_PROFILE_INC(string_equal_total);
+  if (s1 == s2) {
+    CAML_LLVM_HELPER_PROFILE_INC(string_equal_pointer_equal);
+    return Val_true;
+  }
   sz1 = Wosize_val(s1);
   sz2 = Wosize_val(s2);
-  if (sz1 != sz2) return Val_false;
+  if (sz1 != sz2) {
+    CAML_LLVM_HELPER_PROFILE_INC(string_equal_size_mismatch);
+    return Val_false;
+  }
+  CAML_LLVM_HELPER_PROFILE_INC(string_equal_content_loop);
   for(p1 = Op_val(s1), p2 = Op_val(s2); sz1 > 0; sz1--, p1++, p2++)
-    if (*p1 != *p2) return Val_false;
+    if (*p1 != *p2) {
+      CAML_LLVM_HELPER_PROFILE_INC(string_equal_content_mismatch);
+      return Val_false;
+    }
+  CAML_LLVM_HELPER_PROFILE_INC(string_equal_content_equal);
   return Val_true;
 }
 
 CAMLprim value caml_bytes_equal(value s1, value s2)
 {
+  CAML_LLVM_HELPER_PROFILE_INC(bytes_equal_total);
   return caml_string_equal(s1,s2);
 }
 
 CAMLprim value caml_string_notequal(value s1, value s2)
 {
+  CAML_LLVM_HELPER_PROFILE_INC(string_notequal_total);
   return Val_not(caml_string_equal(s1, s2));
 }
 
@@ -489,22 +504,65 @@ CAMLprim value caml_bytes_notequal(value s1, value s2)
 
 CAMLprim value caml_string_compare(value s1, value s2)
 {
-  mlsize_t len1, len2;
+  mlsize_t len1, len2, min_len;
   int res;
 
-  if (s1 == s2) return Val_int(0);
+  CAML_LLVM_HELPER_PROFILE_INC(string_compare_total);
+  if (s1 == s2) {
+    CAML_LLVM_HELPER_PROFILE_INC(string_compare_pointer_equal);
+    return Val_int(0);
+  }
   len1 = caml_string_length(s1);
   len2 = caml_string_length(s2);
-  res = memcmp(String_val(s1), String_val(s2), len1 <= len2 ? len1 : len2);
-  if (res < 0) return Val_int(-1);
-  if (res > 0) return Val_int(1);
-  if (len1 < len2) return Val_int(-1);
-  if (len1 > len2) return Val_int(1);
+  min_len = len1 <= len2 ? len1 : len2;
+  if (min_len == 0) {
+    CAML_LLVM_HELPER_PROFILE_INC(string_compare_min_len_0);
+  } else if (min_len == 1) {
+    CAML_LLVM_HELPER_PROFILE_INC(string_compare_min_len_1);
+  } else if (min_len == 2) {
+    CAML_LLVM_HELPER_PROFILE_INC(string_compare_min_len_2);
+  } else if (min_len == 3) {
+    CAML_LLVM_HELPER_PROFILE_INC(string_compare_min_len_3);
+  } else if (min_len == 4) {
+    CAML_LLVM_HELPER_PROFILE_INC(string_compare_min_len_4);
+  } else if (min_len <= 7) {
+    CAML_LLVM_HELPER_PROFILE_INC(string_compare_min_len_5_7);
+  } else if (min_len <= 15) {
+    CAML_LLVM_HELPER_PROFILE_INC(string_compare_min_len_8_15);
+  } else if (min_len <= 31) {
+    CAML_LLVM_HELPER_PROFILE_INC(string_compare_min_len_16_31);
+  } else if (min_len <= 63) {
+    CAML_LLVM_HELPER_PROFILE_INC(string_compare_min_len_32_63);
+  } else if (min_len <= 127) {
+    CAML_LLVM_HELPER_PROFILE_INC(string_compare_min_len_64_127);
+  } else {
+    CAML_LLVM_HELPER_PROFILE_INC(string_compare_min_len_128_plus);
+  }
+  CAML_LLVM_HELPER_PROFILE_INC(string_compare_memcmp);
+  res = memcmp(String_val(s1), String_val(s2), min_len);
+  if (res < 0) {
+    CAML_LLVM_HELPER_PROFILE_INC(string_compare_memcmp_lt);
+    return Val_int(-1);
+  }
+  if (res > 0) {
+    CAML_LLVM_HELPER_PROFILE_INC(string_compare_memcmp_gt);
+    return Val_int(1);
+  }
+  if (len1 < len2) {
+    CAML_LLVM_HELPER_PROFILE_INC(string_compare_len_lt);
+    return Val_int(-1);
+  }
+  if (len1 > len2) {
+    CAML_LLVM_HELPER_PROFILE_INC(string_compare_len_gt);
+    return Val_int(1);
+  }
+  CAML_LLVM_HELPER_PROFILE_INC(string_compare_equal);
   return Val_int(0);
 }
 
 CAMLprim value caml_bytes_compare(value s1, value s2)
 {
+  CAML_LLVM_HELPER_PROFILE_INC(bytes_compare_total);
   return caml_string_compare(s1,s2);
 }
 
@@ -553,6 +611,8 @@ CAMLprim value caml_bytes_greaterequal(value s1, value s2)
 CAMLprim value caml_blit_bytes(value s1, value ofs1, value s2, value ofs2,
                                 value n)
 {
+  CAML_LLVM_HELPER_PROFILE_INC(blit_bytes_total);
+  CAML_LLVM_HELPER_PROFILE_ADD(blit_bytes_bytes, Long_val(n));
   memmove(&Byte(s2, Long_val(ofs2)), &Byte(s1, Long_val(ofs1)), Long_val(n));
   return Val_unit;
 }
@@ -560,11 +620,15 @@ CAMLprim value caml_blit_bytes(value s1, value ofs1, value s2, value ofs2,
 CAMLprim value caml_blit_string(value s1, value ofs1, value s2, value ofs2,
                                 value n)
 {
+  CAML_LLVM_HELPER_PROFILE_INC(blit_string_total);
+  CAML_LLVM_HELPER_PROFILE_ADD(blit_string_bytes, Long_val(n));
   return caml_blit_bytes (s1, ofs1, s2, ofs2, n);
 }
 
 CAMLprim value caml_fill_bytes(value s, value offset, value len, value init)
 {
+  CAML_LLVM_HELPER_PROFILE_INC(fill_bytes_total);
+  CAML_LLVM_HELPER_PROFILE_ADD(fill_bytes_bytes, Long_val(len));
   memset(&Byte(s, Long_val(offset)), Int_val(init), Long_val(len));
   return Val_unit;
 }

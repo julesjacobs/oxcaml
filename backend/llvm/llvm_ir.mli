@@ -268,6 +268,7 @@ module Instruction : sig
     | Atomicrmw_xchg
 
   type atomic_ordering =
+    | Monotonic
     | Acquire
     | Seq_cst
 

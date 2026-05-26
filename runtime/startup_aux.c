@@ -21,10 +21,12 @@
    and native code. */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "caml/backtrace.h"
 #include "caml/memory.h"
 #include "caml/callback.h"
+#include "caml/llvm_helper_profile.h"
 #include "caml/major_gc.h"
 #ifndef NATIVE_CODE
 #include "caml/dynlink.h"
@@ -253,6 +255,11 @@ int caml_startup_aux(int pooling)
   if (pooling)
     caml_stat_create_pool();
 
+  if (caml_secure_getenv(T("OCAML_LLVM_HELPER_PROFILE")) != NULL) {
+    caml_llvm_helper_profile_init();
+    atexit(caml_llvm_helper_profile_dump);
+  }
+
   return 1;
 }
 
@@ -277,6 +284,7 @@ CAMLexport void caml_shutdown(void)
 
   call_registered_value("Pervasives.do_at_exit");
   call_registered_value("Thread.at_shutdown");
+  caml_llvm_helper_profile_dump();
   caml_finalise_heap();
   caml_free_locale();
 #ifndef NATIVE_CODE

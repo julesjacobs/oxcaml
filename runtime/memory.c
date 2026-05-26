@@ -38,6 +38,139 @@
 #include "caml/platform.h"
 #include "caml/runtime_events.h"
 #include "caml/tsan.h"
+#include "caml/llvm_helper_profile.h"
+
+int caml_llvm_helper_profile_enabled = 0;
+struct caml_llvm_helper_profile caml_llvm_helper_profile;
+
+static int caml_llvm_helper_profile_dumped = 0;
+
+static uintnat profile_load(atomic_uintnat *counter)
+{
+  return atomic_load_relaxed(counter);
+}
+
+static void profile_print_counter(char const *name, atomic_uintnat *counter)
+{
+  fprintf(stderr, "ocaml_llvm_helper_profile,%s,%llu\n",
+          name, (unsigned long long)profile_load(counter));
+}
+
+void caml_llvm_helper_profile_init(void)
+{
+  caml_llvm_helper_profile_enabled = 1;
+}
+
+void caml_llvm_helper_profile_dump(void)
+{
+  if (!caml_llvm_helper_profile_enabled || caml_llvm_helper_profile_dumped) {
+    return;
+  }
+  caml_llvm_helper_profile_dumped = 1;
+
+#define PROFILE_PRINT(field) \
+  profile_print_counter(#field, &caml_llvm_helper_profile.field)
+
+  PROFILE_PRINT(initialize_total);
+  PROFILE_PRINT(initialize_dest_young);
+  PROFILE_PRINT(initialize_val_immediate);
+  PROFILE_PRINT(initialize_val_old);
+  PROFILE_PRINT(initialize_old_to_young);
+  PROFILE_PRINT(modify_total);
+  PROFILE_PRINT(modify_dest_young);
+  PROFILE_PRINT(modify_old_immediate);
+  PROFILE_PRINT(modify_old_young);
+  PROFILE_PRINT(modify_old_old_no_mark);
+  PROFILE_PRINT(modify_old_old_marking);
+  PROFILE_PRINT(modify_new_immediate);
+  PROFILE_PRINT(modify_new_old);
+  PROFILE_PRINT(modify_new_young_record_ref);
+  PROFILE_PRINT(modify_local_total);
+  PROFILE_PRINT(modify_local_not_markable);
+  PROFILE_PRINT(modify_local_fallback);
+  PROFILE_PRINT(string_equal_total);
+  PROFILE_PRINT(string_equal_pointer_equal);
+  PROFILE_PRINT(string_equal_size_mismatch);
+  PROFILE_PRINT(string_equal_content_loop);
+  PROFILE_PRINT(string_equal_content_mismatch);
+  PROFILE_PRINT(string_equal_content_equal);
+  PROFILE_PRINT(string_notequal_total);
+  PROFILE_PRINT(string_compare_total);
+  PROFILE_PRINT(string_compare_pointer_equal);
+  PROFILE_PRINT(string_compare_memcmp);
+  PROFILE_PRINT(string_compare_memcmp_lt);
+  PROFILE_PRINT(string_compare_memcmp_gt);
+  PROFILE_PRINT(string_compare_len_lt);
+  PROFILE_PRINT(string_compare_len_gt);
+  PROFILE_PRINT(string_compare_equal);
+  PROFILE_PRINT(string_compare_min_len_0);
+  PROFILE_PRINT(string_compare_min_len_1);
+  PROFILE_PRINT(string_compare_min_len_2);
+  PROFILE_PRINT(string_compare_min_len_3);
+  PROFILE_PRINT(string_compare_min_len_4);
+  PROFILE_PRINT(string_compare_min_len_5_7);
+  PROFILE_PRINT(string_compare_min_len_8_15);
+  PROFILE_PRINT(string_compare_min_len_16_31);
+  PROFILE_PRINT(string_compare_min_len_32_63);
+  PROFILE_PRINT(string_compare_min_len_64_127);
+  PROFILE_PRINT(string_compare_min_len_128_plus);
+  PROFILE_PRINT(bytes_equal_total);
+  PROFILE_PRINT(bytes_compare_total);
+  PROFILE_PRINT(blit_bytes_total);
+  PROFILE_PRINT(blit_bytes_bytes);
+  PROFILE_PRINT(blit_string_total);
+  PROFILE_PRINT(blit_string_bytes);
+  PROFILE_PRINT(fill_bytes_total);
+  PROFILE_PRINT(fill_bytes_bytes);
+  PROFILE_PRINT(obj_tag_total);
+
+#undef PROFILE_PRINT
+}
+
+void caml_llvm_helper_profile_record_initialize(volatile value *fp, value val)
+{
+  CAML_LLVM_HELPER_PROFILE_INC(initialize_total);
+  if (Is_young((value)fp)) {
+    CAML_LLVM_HELPER_PROFILE_INC(initialize_dest_young);
+  } else if (!Is_block(val)) {
+    CAML_LLVM_HELPER_PROFILE_INC(initialize_val_immediate);
+  } else if (Is_young(val)) {
+    CAML_LLVM_HELPER_PROFILE_INC(initialize_old_to_young);
+  } else {
+    CAML_LLVM_HELPER_PROFILE_INC(initialize_val_old);
+  }
+}
+
+void caml_llvm_helper_profile_record_modify(volatile value *fp, value val)
+{
+  value old_val;
+
+  CAML_LLVM_HELPER_PROFILE_INC(modify_total);
+  if (Is_young((value)fp)) {
+    CAML_LLVM_HELPER_PROFILE_INC(modify_dest_young);
+    return;
+  }
+
+  old_val = *fp;
+  if (!Is_block(old_val)) {
+    CAML_LLVM_HELPER_PROFILE_INC(modify_old_immediate);
+  } else if (Is_young(old_val)) {
+    CAML_LLVM_HELPER_PROFILE_INC(modify_old_young);
+    return;
+  } else if (caml_marking_started()) {
+    CAML_LLVM_HELPER_PROFILE_INC(modify_old_old_marking);
+  } else {
+    CAML_LLVM_HELPER_PROFILE_INC(modify_old_old_no_mark);
+  }
+
+  if (!Is_block(val)) {
+    CAML_LLVM_HELPER_PROFILE_INC(modify_new_immediate);
+  } else if (Is_young(val)) {
+    CAML_LLVM_HELPER_PROFILE_INC(modify_new_young_record_ref);
+  } else {
+    CAML_LLVM_HELPER_PROFILE_INC(modify_new_old);
+  }
+}
 
 /* Note [MM]: Enforcing the memory model.
 
@@ -211,6 +344,10 @@ CAMLexport CAMLweakdef void caml_modify (volatile value *fp, value val)
   __tsan_func_entry(__builtin_return_address(0));
 #endif
 
+  if (caml_llvm_helper_profile_enabled) {
+    caml_llvm_helper_profile_record_modify(fp, val);
+  }
+
   write_barrier((value)fp, 0, *fp, val);
 
   /* See Note [MM] above */
@@ -298,6 +435,9 @@ CAMLexport CAMLweakdef void caml_initialize (volatile value *fp, value val)
      or an uninitialized value canary (Debug_uninit_{major,minor}). */
   CAMLassert(Is_long(*fp));
 #endif
+  if (caml_llvm_helper_profile_enabled) {
+    caml_llvm_helper_profile_record_initialize(fp, val);
+  }
   *fp = val;
   if (!Is_young((value)fp) && Is_block_and_young (val))
     Ref_table_add(&Caml_state->minor_tables->major_ref, fp);
@@ -562,7 +702,9 @@ CAMLexport int caml_is_stack (value v)
    locally allocated) */
 CAMLexport void caml_modify_local (value obj, intnat i, value val)
 {
+  CAML_LLVM_HELPER_PROFILE_INC(modify_local_total);
   if (Color_hd(Hd_val(obj)) == NOT_MARKABLE) {
+    CAML_LLVM_HELPER_PROFILE_INC(modify_local_not_markable);
     /* This function should not be used on external values, but we have seen
        some cases where it has been, in safe contexts where only immediate
        values are involved. */
@@ -570,6 +712,7 @@ CAMLexport void caml_modify_local (value obj, intnat i, value val)
       || (!Is_block(val) && !Is_block(Field(obj, i))));
     Field(obj, i) = val;
   } else {
+    CAML_LLVM_HELPER_PROFILE_INC(modify_local_fallback);
     caml_modify(&Field(obj, i), val);
   }
 }

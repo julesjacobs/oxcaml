@@ -502,8 +502,7 @@ module Fn_attr = struct
   let order = function
     | Cold | Frame_pointer_all | Gc_leaf_function | Noinline
     | Oxcaml_stack_check | Oxcaml_stack_check_bytes _
-    | Oxcaml_stack_check_before_bytes _ | Returns_twice
-    | Statepoint_id _ ->
+    | Oxcaml_stack_check_before_bytes _ | Returns_twice | Statepoint_id _ ->
       0
     | Gc _ -> 10
   (* [Gc] is not really an attribute, so it must occur after all attributes. It
@@ -534,8 +533,11 @@ module Calling_conventions = struct
 
   let to_string = function
     | Default -> ""
-    | Oxcaml ->
-      if Config.with_frame_pointers then "oxcaml_fpcc" else "oxcaml_nofpcc"
+    | Oxcaml -> (
+      match Target_system.architecture () with
+      | AArch64 -> "oxcaml_nofpcc"
+      | IA32 | X86_64 | ARM | POWER | Z | Riscv ->
+        if Config.with_frame_pointers then "oxcaml_fpcc" else "oxcaml_nofpcc")
     | Oxcaml_c_call -> "oxcaml_ccc"
     | Oxcaml_c_call_stack_args -> "oxcaml_c_stackcc"
     | Oxcaml_alloc -> "oxcaml_alloccc"
@@ -583,6 +585,7 @@ module Instruction = struct
     | Atomicrmw_xchg
 
   type atomic_ordering =
+    | Monotonic
     | Acquire
     | Seq_cst
 
@@ -740,6 +743,7 @@ module Instruction = struct
     | Atomicrmw_xchg -> "xchg"
 
   let atomic_ordering_to_string = function
+    | Monotonic -> "monotonic"
     | Acquire -> "acquire"
     | Seq_cst -> "seq_cst"
 
@@ -975,8 +979,7 @@ module Instruction = struct
   let binary op ~arg1 ~arg2 = Binary { op; arg1; arg2; contract = false }
 
   let binary_contract op ~arg1 ~arg2 =
-    assert' "binary_contract"
-      (op = Fadd || op = Fsub || op = Fmul);
+    assert' "binary_contract" (op = Fadd || op = Fsub || op = Fmul);
     Binary { op; arg1; arg2; contract = true }
 
   let convert op ~arg ~to_ = Convert { op; arg; to_ }

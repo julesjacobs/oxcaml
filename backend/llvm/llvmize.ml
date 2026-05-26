@@ -137,7 +137,8 @@ type fun_info =
         (* Identifiers created during a [Pushtrap] instruction needed for
            [Poptrap] and trap handler entry *)
     mutable current_dbg_metadata : string option;
-    subprogram_dbg_metadata_id : int option
+    subprogram_dbg_metadata_id : int option;
+    mutable send_calls_may_use_physical_runtime_regs : bool
   }
 
 type t =
@@ -191,7 +192,8 @@ let create_fun_info ?subprogram_dbg_metadata_id emitter =
     trap_block_allocas = Label.Tbl.create 0;
     trap_blocks = Label.Tbl.create 0;
     current_dbg_metadata = None;
-    subprogram_dbg_metadata_id
+    subprogram_dbg_metadata_id;
+    send_calls_may_use_physical_runtime_regs = false
   }
 
 let get_fun_info t =
@@ -941,11 +943,33 @@ let extract_struct t root_struct indices_to_extract =
 
 (* Helpers for calls *)
 
-let prepare_call_args t args =
-  List.map (fun ptr -> emit_ins t (I.load ~ptr ~typ:T.i64)) runtime_regs @ args
+let runtime_register_metadata name = F.sprintf {|!{!"%s\00"}|} name
 
-let prepare_call_args_from_regs t regs =
-  prepare_call_args t (List.map (load_reg_to_temp t) regs)
+let read_fixed_runtime_register t name =
+  let intrinsic_name = "llvm.read_register.i64" in
+  let args = [V.imm T.metadata (runtime_register_metadata name)] in
+  add_called_intrinsic t intrinsic_name ~args:[T.metadata] ~res:(Some T.i64);
+  emit_ins t
+    (I.call ~func:(LL.Ident.global intrinsic_name) ~args ~res_type:(Some T.i64)
+       ~attrs:[] ~operand_bundles:[] ~cc:Default ~musttail:false)
+
+let prepare_call_args ?(use_physical_runtime_regs = false) t args =
+  let runtime_args =
+    if use_physical_runtime_regs
+    then
+      match Target_system.architecture () with
+      | Target_system.AArch64 ->
+        [read_fixed_runtime_register t "x28"; read_fixed_runtime_register t "x27"]
+      | Target_system.IA32 | Target_system.X86_64 | Target_system.ARM
+      | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
+        List.map (fun ptr -> emit_ins t (I.load ~ptr ~typ:T.i64)) runtime_regs
+    else List.map (fun ptr -> emit_ins t (I.load ~ptr ~typ:T.i64)) runtime_regs
+  in
+  runtime_args @ args
+
+let prepare_call_args_from_regs ?use_physical_runtime_regs t regs =
+  prepare_call_args ?use_physical_runtime_regs t
+    (List.map (load_reg_to_temp t) regs)
 
 let extract_call_res t call_res_struct num_res_values =
   (* Runtime regs *)
@@ -1279,7 +1303,17 @@ let call ?(tail = false) ?unwind_label t (i : Cfg.terminator Cfg.instruction)
     | Indirect _ -> 1, Array.length i.arg - 1
   in
   let arg_regs = Array.sub i.arg args_begin args_end |> reg_list_for_call in
-  let args = prepare_call_args_from_regs t arg_regs in
+  let direct_caml_send =
+    match op with
+    | Direct { sym_name; sym_global = _ } ->
+      String.begins_with ~prefix:"caml_send" sym_name
+    | Indirect _ -> false
+  in
+  let use_physical_runtime_regs =
+    direct_caml_send
+    && (get_fun_info t).send_calls_may_use_physical_runtime_regs
+  in
+  let args = prepare_call_args_from_regs ~use_physical_runtime_regs t arg_regs in
   let res_locs = loc_results_call i.res in
   let res_regs = reg_list_for_call res_locs in
   let res_type =
@@ -1450,6 +1484,202 @@ let extcall_arg_types ty_args arg_regs =
   then fail_msg ~name:"extcall" "external call argument arity mismatch";
   List.map2 extcall_arg_type ty_args arg_regs
 
+let supports_inline_string_compare () =
+  match Target_system.architecture (), Arch.size_addr with
+  | Target_system.AArch64, 8 -> true
+  | ( ( Target_system.IA32 | Target_system.X86_64 | Target_system.ARM
+      | Target_system.POWER | Target_system.Z | Target_system.Riscv ),
+      _ )
+  | Target_system.AArch64, _ ->
+    false
+
+let header_wosize_shift = 10
+
+let header_wosize_mask =
+  let header_bits = Arch.size_addr * 8 in
+  let header_tag_bits = 8 in
+  let header_color_bits = 2 in
+  let header_wosize_bits =
+    header_bits - header_tag_bits - header_color_bits
+    - Config.reserved_header_bits
+  in
+  Nativeint.(
+    shift_left (sub (shift_left 1n header_wosize_bits) 1n)
+      header_wosize_shift)
+
+let emit_ocaml_string_length t s =
+  let s = cast t s T.ptr in
+  let header_ptr = do_offset t s T.ptr (-Arch.size_addr) in
+  let header =
+    emit_ins t (I.load_atomic ~ordering:Monotonic ~ptr:header_ptr ~typ:T.i64)
+  in
+  let wosize_masked =
+    emit_ins t
+      (I.binary And ~arg1:header ~arg2:(V.of_nativeint header_wosize_mask))
+  in
+  let wosize =
+    emit_ins t
+      (I.binary Lshr ~arg1:wosize_masked
+         ~arg2:(V.of_int header_wosize_shift))
+  in
+  let bosize =
+    emit_ins t (I.binary Shl ~arg1:wosize ~arg2:(V.of_int 3))
+  in
+  let offset_index =
+    emit_ins t (I.binary Sub ~arg1:bosize ~arg2:(V.of_int 1))
+  in
+  let offset_ptr =
+    emit_ins t
+      (I.getelementptr ~base_type:T.i8 ~base_ptr:s ~indices:[offset_index])
+  in
+  let offset_byte =
+    emit_ins t (I.load_with_align ~align:1 ~ptr:offset_ptr ~typ:T.i8)
+  in
+  let offset = emit_ins t (I.convert Zext ~arg:offset_byte ~to_:T.i64) in
+  emit_ins t (I.binary Sub ~arg1:offset_index ~arg2:offset)
+
+let emit_min_u64 t x y =
+  let x_lt_y = emit_ins t (I.icmp Iult ~arg1:x ~arg2:y) in
+  emit_ins t (I.select ~cond:x_lt_y ~ifso:x ~ifnot:y)
+
+let emit_string_compare_word t s1 s2 ~offset ~count =
+  let load_word s =
+    let ptr = do_offset t (cast t s T.ptr) T.ptr offset in
+    let word = emit_ins t (I.load_with_align ~align:8 ~ptr ~typ:T.i64) in
+    call_llvm_intrinsic t "bswap.i64" [word] T.i64
+  in
+  let shift_bytes =
+    emit_ins t (I.binary Sub ~arg1:(V.of_int 8) ~arg2:count)
+  in
+  let shift_bits =
+    emit_ins t (I.binary Shl ~arg1:shift_bytes ~arg2:(V.of_int 3))
+  in
+  let mask =
+    emit_ins t (I.binary Shl ~arg1:(V.of_int (-1)) ~arg2:shift_bits)
+  in
+  let word1 = load_word s1 in
+  let word2 = load_word s2 in
+  let word1_masked = emit_ins t (I.binary And ~arg1:word1 ~arg2:mask) in
+  let word2_masked = emit_ins t (I.binary And ~arg1:word2 ~arg2:mask) in
+  let neq = emit_ins t (I.icmp Ine ~arg1:word1_masked ~arg2:word2_masked) in
+  let lt = emit_ins t (I.icmp Iult ~arg1:word1_masked ~arg2:word2_masked) in
+  neq, lt
+
+let emit_string_compare_result t res_reg ~lt ~done_label =
+  let result =
+    emit_ins t (I.select ~cond:lt ~ifso:(V.of_int (-1)) ~ifnot:(V.of_int 3))
+  in
+  store_into_reg t res_reg result;
+  emit_ins_no_res t (I.br done_label)
+
+let emit_string_compare_length_tiebreak t res_reg ~len1 ~len2 ~done_label =
+  let len1_lt_len2 = emit_ins t (I.icmp Iult ~arg1:len1 ~arg2:len2) in
+  let len1_gt_len2 = emit_ins t (I.icmp Iugt ~arg1:len1 ~arg2:len2) in
+  let gt_or_eq =
+    emit_ins t
+      (I.select ~cond:len1_gt_len2 ~ifso:(V.of_int 3) ~ifnot:(V.of_int 1))
+  in
+  let result =
+    emit_ins t
+      (I.select ~cond:len1_lt_len2 ~ifso:(V.of_int (-1)) ~ifnot:gt_or_eq)
+  in
+  store_into_reg t res_reg result;
+  emit_ins_no_res t (I.br done_label)
+
+let string_compare_symbol = function
+  | "caml_string_compare" | "caml_bytes_compare" -> true
+  | _ -> false
+
+let maybe_emit_specialized_string_compare_extcall t ~func_symbol ~alloc
+    ~stack_ofs arg_regs res_regs emit_fallback =
+  match arg_regs, res_regs with
+  | [arg1; arg2], [res_reg]
+    when (not alloc)
+         && stack_ofs = 0
+         && string_compare_symbol func_symbol
+         && supports_inline_string_compare ()
+         && (T.equal (T.of_reg res_reg) T.i64
+            || T.equal (T.of_reg res_reg) T.val_ptr) ->
+    let done_label = V.of_label (Cmm.new_label ()) in
+    let pointer_equal_label = V.of_label (Cmm.new_label ()) in
+    let not_pointer_equal_label = V.of_label (Cmm.new_label ()) in
+    let long_fallback_label = V.of_label (Cmm.new_label ()) in
+    let short_compare_label = V.of_label (Cmm.new_label ()) in
+    let length_tiebreak_label = V.of_label (Cmm.new_label ()) in
+    let word1_label = V.of_label (Cmm.new_label ()) in
+    let word1_mismatch_label = V.of_label (Cmm.new_label ()) in
+    let word1_equal_label = V.of_label (Cmm.new_label ()) in
+    let word2_label = V.of_label (Cmm.new_label ()) in
+    let word2_mismatch_label = V.of_label (Cmm.new_label ()) in
+    let s1 = load_reg_to_temp ~typ:T.val_ptr t arg1 in
+    let s2 = load_reg_to_temp ~typ:T.val_ptr t arg2 in
+    let s1_int = cast t s1 T.i64 in
+    let s2_int = cast t s2 T.i64 in
+    let pointer_equal = emit_ins t (I.icmp Ieq ~arg1:s1_int ~arg2:s2_int) in
+    emit_ins_no_res t
+      (I.br_cond ~cond:pointer_equal ~ifso:pointer_equal_label
+         ~ifnot:not_pointer_equal_label);
+    emit_label t pointer_equal_label;
+    store_into_reg t res_reg (V.of_int 1);
+    emit_ins_no_res t (I.br done_label);
+    emit_label t not_pointer_equal_label;
+    let len1 = emit_ocaml_string_length t s1 in
+    let len2 = emit_ocaml_string_length t s2 in
+    let min_len = emit_min_u64 t len1 len2 in
+    let min_len_gt_15 =
+      emit_ins t (I.icmp Iugt ~arg1:min_len ~arg2:(V.of_int 15))
+    in
+    emit_ins_no_res t
+      (I.br_cond ~cond:min_len_gt_15 ~ifso:long_fallback_label
+         ~ifnot:short_compare_label);
+    emit_label t long_fallback_label;
+    emit_fallback ();
+    emit_ins_no_res t (I.br done_label);
+    emit_label t short_compare_label;
+    let min_len_is_zero =
+      emit_ins t (I.icmp Ieq ~arg1:min_len ~arg2:(V.of_int 0))
+    in
+    emit_ins_no_res t
+      (I.br_cond ~cond:min_len_is_zero ~ifso:length_tiebreak_label
+         ~ifnot:word1_label);
+    emit_label t word1_label;
+    let min_len_gt_8 =
+      emit_ins t (I.icmp Iugt ~arg1:min_len ~arg2:(V.of_int 8))
+    in
+    let word1_count =
+      emit_ins t
+        (I.select ~cond:min_len_gt_8 ~ifso:(V.of_int 8) ~ifnot:min_len)
+    in
+    let word1_neq, word1_lt =
+      emit_string_compare_word t s1 s2 ~offset:0 ~count:word1_count
+    in
+    emit_ins_no_res t
+      (I.br_cond ~cond:word1_neq ~ifso:word1_mismatch_label
+         ~ifnot:word1_equal_label);
+    emit_label t word1_mismatch_label;
+    emit_string_compare_result t res_reg ~lt:word1_lt ~done_label;
+    emit_label t word1_equal_label;
+    emit_ins_no_res t
+      (I.br_cond ~cond:min_len_gt_8 ~ifso:word2_label
+         ~ifnot:length_tiebreak_label);
+    emit_label t word2_label;
+    let word2_count =
+      emit_ins t (I.binary Sub ~arg1:min_len ~arg2:(V.of_int 8))
+    in
+    let word2_neq, word2_lt =
+      emit_string_compare_word t s1 s2 ~offset:8 ~count:word2_count
+    in
+    emit_ins_no_res t
+      (I.br_cond ~cond:word2_neq ~ifso:word2_mismatch_label
+         ~ifnot:length_tiebreak_label);
+    emit_label t word2_mismatch_label;
+    emit_string_compare_result t res_reg ~lt:word2_lt ~done_label;
+    emit_label t length_tiebreak_label;
+    emit_string_compare_length_tiebreak t res_reg ~len1 ~len2 ~done_label;
+    emit_label t done_label;
+    true
+  | _ -> false
+
 let extcall ?unwind_label t (i : Cfg.terminator Cfg.instruction) ~func_symbol
     ~alloc ~ty_args ~stack_ofs ~stack_align =
   let func_ptr =
@@ -1572,8 +1802,15 @@ let extcall ?unwind_label t (i : Cfg.terminator Cfg.instruction) ~func_symbol
   let arg_types = extcall_arg_types ty_args arg_regs in
   let res_regs = reg_list_for_call i.res in
   let res_types = List.map T.of_reg res_regs in
-  let res_values = call_func arg_regs arg_types res_types in
-  List.iter2 (store_into_reg t) res_regs res_values
+  let emit_fallback () =
+    let res_values = call_func arg_regs arg_types res_types in
+    List.iter2 (store_into_reg t) res_regs res_values
+  in
+  if
+    not
+      (maybe_emit_specialized_string_compare_extcall t ~func_symbol ~alloc
+         ~stack_ofs arg_regs res_regs emit_fallback)
+  then emit_fallback ()
 
 let raise_ t ~(exn_handler : Label.t option)
     (i : Cfg.terminator Cfg.instruction) (raise_kind : Lambda.raise_kind) =
@@ -2012,8 +2249,7 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
   let float_muladd kind typ =
     let product =
       emit_ins t
-        (I.binary_contract Fmul ~arg1:(float_arg typ 1)
-           ~arg2:(float_arg typ 2))
+        (I.binary_contract Fmul ~arg1:(float_arg typ 1) ~arg2:(float_arg typ 2))
     in
     let arg0 = float_arg typ 0 in
     match kind with
@@ -2022,8 +2258,7 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | `Negmuladd ->
       let neg_arg0 = emit_ins t (I.unary Fneg ~arg:arg0) in
       emit_ins t (I.binary_contract Fsub ~arg1:neg_arg0 ~arg2:product)
-    | `Negmulsub ->
-      emit_ins t (I.binary_contract Fsub ~arg1:product ~arg2:arg0)
+    | `Negmulsub -> emit_ins t (I.binary_contract Fsub ~arg1:product ~arg2:arg0)
   in
   let int_vec_type ~width_in_bits =
     T.Vector
@@ -3127,8 +3362,8 @@ let poll ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction) =
   emit_unwind_landingpad_after t unwind_label exn_entry;
   emit_label t after_poll
 
-let stack_check ?unwind_label ?exn_entry t
-    (i : Cfg.basic Cfg.instruction) max_frame_size_bytes =
+let stack_check ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction)
+    max_frame_size_bytes =
   match Target_system.architecture () with
   | Target_system.AArch64 ->
     let threshold_offset =
@@ -3145,7 +3380,8 @@ let stack_check ?unwind_label ?exn_entry t
     let sp = read_stack_pointer t in
     let skip_realloc = emit_ins t (I.icmp Iuge ~arg1:sp ~arg2:limit) in
     let skip_realloc_expect =
-      call_llvm_intrinsic t "expect.i1" [skip_realloc; V.of_int ~typ:T.i1 1]
+      call_llvm_intrinsic t "expect.i1"
+        [skip_realloc; V.of_int ~typ:T.i1 1]
         T.i1
     in
     let call_realloc = V.of_label (Cmm.new_label ()) in
@@ -3161,7 +3397,8 @@ let stack_check ?unwind_label ?exn_entry t
     call_simple
       ~attrs:(gc_attr ~can_call_gc:false t i @ [LL.Fn_attr.Cold])
       ?unwind_label ~cc:Oxcaml_alloc t "caml_llvm_call_realloc_stack"
-      [V.of_int required_words] []
+      [V.of_int required_words]
+      []
     |> ignore;
     emit_ins_no_res t (I.br after_realloc);
     emit_unwind_landingpad_after t unwind_label exn_entry;
@@ -3687,8 +3924,7 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
           then
             emit_ins_no_res t
               (I.inline_asm ~asm:"str x29, [$0]" ~constraints:"r"
-                 ~args:[saved_fp_slot] ~res_type:T.Or_void.void
-                 ~sideeffect:true)
+                 ~args:[saved_fp_slot] ~res_type:T.Or_void.void ~sideeffect:true)
         | Target_system.IA32 | Target_system.ARM | Target_system.POWER
         | Target_system.Z | Target_system.Riscv ->
           fail_msg ~name:"pushtrap" "unsupported architecture for LLVM backend");
@@ -3867,10 +4103,33 @@ let max_slow_path_root_slots liveness active_traps cfg =
            conservative live root set. The actual slow-path bundle still filters
            known immediates and non-alloca roots at the call site. *)
       then
-        Int.max max_roots
-          (live_val_regs_across liveness i |> Reg.Set.cardinal)
+        Int.max max_roots (live_val_regs_across liveness i |> Reg.Set.cardinal)
       else max_roots)
     ~init:0
+
+let cfg_has_heap_allocation (cfg : Cfg.t) =
+  Cfg.fold_body_instructions cfg
+    ~f:(fun has_heap_allocation (i : Cfg.basic Cfg.instruction) ->
+      has_heap_allocation
+      ||
+      match i.desc with
+      | Op (Alloc { mode = Heap; _ }) -> true
+      | Op (Alloc { mode = Local; _ }) | Reloadretaddr | Prologue | Epilogue
+      | Pushtrap _ | Poptrap _ | Stack_check _
+      | Op
+          ( Move | Spill | Reload | Opaque | Pause | Begin_region | End_region
+          | Dls_get | Tls_get | Poll | Domain_index | Const_int _
+          | Const_float32 _ | Const_float _ | Const_symbol _ | Const_vec128 _
+          | Const_vec256 _ | Const_vec512 _ | Stackoffset _ | Load _
+          | Store (_, _, _)
+          | Intop _ | Int128op _
+          | Intop_imm (_, _)
+          | Intop_atomic _
+          | Floatop (_, _)
+          | Csel _ | Reinterpret_cast _ | Static_cast _ | Probe_is_enabled _
+          | Specific _ | Name_for_debugger _ ) ->
+        false)
+    ~init:false
 
 let reg_listed_in_signature (reg : Reg.t) =
   match reg.loc with
@@ -3887,11 +4146,32 @@ let cfg_required_stack_check_bytes (cfg : Cfg.t) =
       | _ -> max_bytes)
 
 let cfg_stack_check_before_bytes (cfg : Cfg.t) =
-  Cfg.fold_body_instructions cfg ~init:0
-    ~f:(fun max_bytes (i : Cfg.basic Cfg.instruction) ->
-      match[@ocaml.warning "-fragile-match"] i.desc with
-      | Cfg.Stack_check _ -> max max_bytes i.stack_offset
-      | _ -> max_bytes)
+  let visited = Label.Tbl.create 17 in
+  let max_bytes = ref 0 in
+  let rec visit label =
+    if not (Label.Tbl.mem visited label)
+    then (
+      Label.Tbl.add visited label ();
+      let block = Cfg.get_block_exn cfg label in
+      let found_stack_check =
+        DLL.fold_left block.body ~init:false
+          ~f:(fun found_stack_check (i : Cfg.basic Cfg.instruction) ->
+            if found_stack_check
+            then true
+            else (
+              max_bytes := max !max_bytes i.stack_offset;
+              match[@ocaml.warning "-fragile-match"] i.desc with
+              | Cfg.Stack_check _ -> true
+              | _ -> false))
+      in
+      if not found_stack_check
+      then (
+        max_bytes := max !max_bytes block.terminator.stack_offset;
+        Cfg.successor_labels ~normal:true ~exn:true block
+        |> Label.Set.iter visit))
+  in
+  visit cfg.entry_label;
+  !max_bytes
 
 let fun_attrs ~has_try:_ ~cfg_stack_check_bytes ~cfg_stack_check_before_bytes
     codegen_options =
@@ -3915,11 +4195,10 @@ let fun_attrs ~has_try:_ ~cfg_stack_check_bytes ~cfg_stack_check_before_bytes
           then []
           else [Oxcaml_stack_check_before_bytes cfg_stack_check_before_bytes])
        else [])
-    | Target_system.AArch64, true ->
-      []
-    | ( Target_system.IA32 | Target_system.X86_64 | Target_system.ARM
-      | Target_system.POWER | Target_system.Z | Target_system.Riscv ),
-      (_ : bool) ->
+    | Target_system.AArch64, true -> []
+    | ( ( Target_system.IA32 | Target_system.X86_64 | Target_system.ARM
+        | Target_system.POWER | Target_system.Z | Target_system.Riscv ),
+        (_ : bool) ) ->
       []
   in
   let codegen_attrs =
@@ -3992,6 +4271,8 @@ let prepare_fun_info t (cfg : Cfg.t) =
   (get_fun_info t).fun_args <- fun_args;
   (get_fun_info t).active_traps <- active_traps;
   (get_fun_info t).active_trap_depths <- active_trap_depths;
+  (get_fun_info t).send_calls_may_use_physical_runtime_regs
+    <- not (cfg_has_heap_allocation cfg);
   (get_fun_info t).preserved_reg_slots
     <- preserved_reg_slots liveness active_traps cfg;
   arg_regs
@@ -4448,8 +4729,7 @@ let define_restore_rbp t =
              recover_rbp_asm ^ ":";
              "  sub x16, sp, #16";
              "  ldr x17, [sp]" ]
-          @ restore_fp
-          @ ["  add sp, x16, x17"] @ load_target @ ["  br x16"]);
+          @ restore_fp @ ["  add sp, x16, x17"] @ load_target @ ["  br x16"]);
         add_data_def t
           (LL.Data.external_ (LL.Ident.to_string_hum recover_rbp_asm_ident));
         add_data_def t
@@ -4551,6 +4831,22 @@ let invoke_clang_with_llvmir ~output_filename ~input_filename ~extra_flags =
       then ["-fno-omit-frame-pointer"]
       else ["-fomit-frame-pointer"; "-momit-leaf-frame-pointer"]
   in
+  let branch_shape_flags =
+    match Target_system.architecture () with
+    | Target_system.AArch64 ->
+      (* OxCaml's middle end has already chosen branch shape before LLVM. Keep
+         asymmetric diamonds as branches instead of letting LLVM form selects
+         that compute both arms on the hot path. *)
+      [ "-mllvm";
+        "-two-entry-phi-node-folding-threshold=0";
+        "-mllvm";
+        "-disable-early-ifcvt";
+        "-mllvm";
+        "-aarch64-enable-early-ifcvt=false" ]
+    | Target_system.IA32 | Target_system.X86_64 | Target_system.ARM
+    | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
+      []
+  in
   let llvm_flags = [!Oxcaml_flags.llvm_flags] in
   Ccomp.command
     (String.concat " "
@@ -4558,7 +4854,8 @@ let invoke_clang_with_llvmir ~output_filename ~input_filename ~extra_flags =
        @ ["-o"; Filename.quote output_filename]
        @ ["-x ir"; Filename.quote input_filename]
        @ ["-O3"; "-S"; "-Wno-override-module"]
-       @ fixed_reg_flags @ fp_flags @ llvm_flags @ extra_flags))
+       @ fixed_reg_flags @ fp_flags @ branch_shape_flags @ llvm_flags
+       @ extra_flags))
 
 let llvmir_to_assembly t =
   match t.asm_filename with

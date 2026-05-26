@@ -1,0 +1,6 @@
+.build/
+inspect/
+*.cmi
+*.cmx
+*.o
+run_*.log
