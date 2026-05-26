@@ -2968,6 +2968,60 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let res = emit_ins t (I.binary op ~arg1 ~arg2) in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_float_addsub width =
+    let typ = float_vec_type ~width in
+    let lanes = match width with Cmm.Float32 -> 4 | Cmm.Float64 -> 2 in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let res =
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let elem1 =
+               emit_ins t (I.extractelement ~vector:arg1 ~index:(V.of_int lane))
+             in
+             let elem2 =
+               emit_ins t (I.extractelement ~vector:arg2 ~index:(V.of_int lane))
+             in
+             let op : I.binary_op =
+               if lane land 1 = 0 then Fsub else Fadd
+             in
+             let elem = emit_ins t (I.binary op ~arg1:elem1 ~arg2:elem2) in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane) ~to_insert:elem))
+           (V.poison typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_float_haddsub width (op : I.binary_op) =
+    let typ = float_vec_type ~width in
+    let lanes = match width with Cmm.Float32 -> 4 | Cmm.Float64 -> 2 in
+    let half_lanes = lanes / 2 in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let elem arg lane =
+      emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int lane))
+    in
+    let res =
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let src, src_lane =
+               if lane < half_lanes
+               then arg1, 2 * lane
+               else arg2, 2 * (lane - half_lanes)
+             in
+             let elem =
+               emit_ins t
+                 (I.binary op ~arg1:(elem src src_lane)
+                    ~arg2:(elem src (src_lane + 1)))
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane) ~to_insert:elem))
+           (V.poison typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_float_unary_intrinsic width intrinsic =
     let typ = float_vec_type ~width in
     let name = intrinsic ^ "." ^ llvm_intrinsic_type_suffix typ in
@@ -3857,6 +3911,18 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_float_binary Cmm.Float64 Fmul
     | Amd64_simd_instrs.Divpd | Amd64_simd_instrs.Vdivpd_X_X_Xm128 ->
       simd_float_binary Cmm.Float64 Fdiv
+    | Amd64_simd_instrs.Addsubps | Amd64_simd_instrs.Vaddsubps_X_X_Xm128 ->
+      simd_float_addsub Cmm.Float32
+    | Amd64_simd_instrs.Addsubpd | Amd64_simd_instrs.Vaddsubpd_X_X_Xm128 ->
+      simd_float_addsub Cmm.Float64
+    | Amd64_simd_instrs.Haddps | Amd64_simd_instrs.Vhaddps_X_X_Xm128 ->
+      simd_float_haddsub Cmm.Float32 Fadd
+    | Amd64_simd_instrs.Haddpd | Amd64_simd_instrs.Vhaddpd_X_X_Xm128 ->
+      simd_float_haddsub Cmm.Float64 Fadd
+    | Amd64_simd_instrs.Hsubps | Amd64_simd_instrs.Vhsubps_X_X_Xm128 ->
+      simd_float_haddsub Cmm.Float32 Fsub
+    | Amd64_simd_instrs.Hsubpd | Amd64_simd_instrs.Vhsubpd_X_X_Xm128 ->
+      simd_float_haddsub Cmm.Float64 Fsub
     | Amd64_simd_instrs.Maxpd | Amd64_simd_instrs.Vmaxpd_X_X_Xm128 ->
       simd_x86_intrinsic "x86.sse2.max.pd"
         [float_vec_type ~width:Cmm.Float64; float_vec_type ~width:Cmm.Float64]

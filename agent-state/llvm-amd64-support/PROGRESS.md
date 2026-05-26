@@ -17,13 +17,14 @@ default disabled-probe path. The standard-compiler LLVM-backend
 `lib-atomic/test_atomic_cmpxchg.ml` failure is fixed too. The native
 `async-exns/async_exns_1.ml` output mismatch is now fixed as well.
 
-The latest SIMD follow-ups add SSE/SSE2 packed float min/max and approximate
-reciprocal/reciprocal-sqrt lowering, SSE2 conversion lowering for packed int32,
-float32, and float64 vectors, SSE/SSE2 packed float comparison lowering, SSE2
-float64x2 add/sub/mul/div/sqrt lowering, SSE float32x4 add/sub/mul/div/sqrt
-lowering, SSE vec128 64-bit lane-move lowering, SSE vec128 interleave lowering
-for 32-bit lanes, SSE vec128 shuffle lowering for 32-bit lanes, SSE2 signed
-word multiply-add and unsigned even doubleword multiply lowering, SSE2 vec128
+The latest SIMD follow-ups add SSE3 packed float addsub/hadd/hsub lowering,
+SSE/SSE2 packed float min/max and approximate reciprocal/reciprocal-sqrt
+lowering, SSE2 conversion lowering for packed int32, float32, and float64
+vectors, SSE/SSE2 packed float comparison lowering, SSE2 float64x2
+add/sub/mul/div/sqrt lowering, SSE float32x4 add/sub/mul/div/sqrt lowering, SSE
+vec128 64-bit lane-move lowering, SSE vec128 interleave lowering for 32-bit
+lanes, SSE vec128 shuffle lowering for 32-bit lanes, SSE2 signed word
+multiply-add and unsigned even doubleword multiply lowering, SSE2 vec128
 shuffle lowering for 64-bit lanes and high/low 16-bit halves, SSE2 vec128
 interleave lowering for 8- and 16-bit lanes, SSE2 int16 multiply
 low/high/high-unsigned lowering, SSE2 variable and immediate integer shift
@@ -1931,6 +1932,16 @@ limit is raised from `l=100000` to `l=150000`.
       the kept IR calls the LLVM X86 SSE/SSE2 intrinsics for min/max and the
       approximate packed float32 reciprocal instructions. The SSE2 conversion
       script was rerun after sharing the intrinsic helper; result: passed.
+    - Implemented AMD64 LLVM lowering for the SSE3 packed float add/sub
+      helpers: `caml_sse3_float32x4_{addsub,hadd,hsub}` and
+      `caml_sse3_float64x2_{addsub,hadd,hsub}`. Rebuilt with
+      `make -s compiler -j "$(nproc)"`; result: passed. The first focused
+      script attempt using LLVM X86 SSE3 intrinsics exposed that the current
+      baseline X86_64 LLVM path does not attach a `+sse3` target feature, so
+      the committed lowering uses explicit lane extraction plus LLVM
+      `fadd`/`fsub` and lane insertion instead. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_sse3_float.sh` script passed
+      directly under `validation-tmp/amd64-simd-sse3-float`.
 
 ## Current Blocker
 
