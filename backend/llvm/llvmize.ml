@@ -3192,6 +3192,18 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_blendv width_in_bits =
+    let typ = int_vec_type ~width_in_bits in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let mask = cast_if_needed (load_reg_to_temp t i.arg.(2)) typ in
+    let cond =
+      emit_ins t
+        (I.icmp I.Islt ~arg1:mask ~arg2:(int_vector_constant_like typ 0))
+    in
+    let res = emit_ins t (I.select ~cond ~ifso:arg2 ~ifnot:arg1) in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_haddsub width_in_bits (op : I.binary_op) =
     let typ = int_vec_type ~width_in_bits in
     let lanes = 128 / width_in_bits in
@@ -4294,6 +4306,15 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_blend_imm 32 (simd_imm imm)
     | Amd64_simd_instrs.Blendpd | Amd64_simd_instrs.Vblendpd_X_X_Xm128 ->
       simd_blend_imm 64 (simd_imm imm)
+    | Amd64_simd_instrs.Pblendvb
+    | Amd64_simd_instrs.Vpblendvb_X_X_Xm128_X ->
+      simd_blendv 8
+    | Amd64_simd_instrs.Blendvps
+    | Amd64_simd_instrs.Vblendvps_X_X_Xm128_X ->
+      simd_blendv 32
+    | Amd64_simd_instrs.Blendvpd
+    | Amd64_simd_instrs.Vblendvpd_X_X_Xm128_X ->
+      simd_blendv 64
     | Amd64_simd_instrs.Phaddw_X_Xm128
     | Amd64_simd_instrs.Vphaddw_X_X_Xm128 ->
       simd_int_haddsub 16 Add
