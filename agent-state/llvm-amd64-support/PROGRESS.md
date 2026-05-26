@@ -17,14 +17,15 @@ default disabled-probe path. The standard-compiler LLVM-backend
 `lib-atomic/test_atomic_cmpxchg.ml` failure is fixed too. The native
 `async-exns/async_exns_1.ml` output mismatch is now fixed as well.
 
-The latest SIMD follow-ups add SSE4.2 int64x2 signed greater-than comparison
-lowering, SSE4.1 unsigned multi-SAD lowering, SSE4.1 packed float dot-product
-lowering, SSE4.1 unsigned word min-position lowering, SSE4.1 scalar immediate
-rounding lowering, SSE4.1 packed float vector rounding lowering, SSE4.1 vector
-test predicate lowering, SSE4.1 integer lane extract/insert lowering, SSE4.1
-variable blend lowering, SSE4.1 immediate blend lowering, SSE4.1 int32
-multiply lowering, SSE4.1 integer sign/zero extension lowering, SSE4.1
-integer compare/min/max lowering, SSSE3
+The latest SIMD follow-ups add CLMUL int64x2 carry-less multiply lowering,
+SSE4.2 int64x2 signed greater-than comparison lowering, SSE4.1 unsigned
+multi-SAD lowering, SSE4.1 packed float dot-product lowering, SSE4.1 unsigned
+word min-position lowering, SSE4.1 scalar immediate rounding lowering, SSE4.1
+packed float vector rounding lowering, SSE4.1 vector test predicate lowering,
+SSE4.1 integer lane extract/insert lowering, SSE4.1 variable blend lowering,
+SSE4.1 immediate blend lowering, SSE4.1 int32 multiply lowering, SSE4.1
+integer sign/zero extension lowering, SSE4.1 integer compare/min/max lowering,
+SSSE3
 unsigned-byte/signed-byte multiply-add
 saturating lowering, SSSE3 byte align-right lowering, SSSE3 byte-shuffle
 lowering, SSSE3 signed word rounded multiply lowering, SSSE3 mulsign lowering,
@@ -2138,6 +2139,17 @@ limit is raised from `l=100000` to `l=150000`.
       passed directly under `validation-tmp/amd64-simd-sse42-int64-cmpgt`; the
       kept IR emits `icmp sgt <2 x i64>` and sign-extends the vector predicate
       mask to `<2 x i64>`.
+    - Implemented AMD64 LLVM lowering for the CLMUL int64x2 carry-less
+      multiply helper: `caml_clmul_int64x2`. Rebuilt with
+      `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_clmul.sh` script passed
+      directly under `validation-tmp/amd64-simd-clmul`; the kept IR selects the
+      immediate-controlled i64 lanes, computes the 128-bit polynomial product
+      with target-independent `i128` shift/mask/select/XOR operations, and
+      inserts the low/high halves into the `<2 x i64>` result. A direct
+      `llvm.x86.pclmulqdq` intrinsic lowering was intentionally avoided because
+      the current `llc` invocation does not pass the required `+pclmul` target
+      feature.
 
 ## Current Blocker
 

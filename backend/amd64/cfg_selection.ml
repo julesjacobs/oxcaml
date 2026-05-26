@@ -219,6 +219,7 @@ let is_llvm_simd_builtin = function
   | "caml_ssse3_int16x8_hsub"
   | "caml_ssse3_int32x4_hsub"
   | "caml_ssse3_int16x8_hsub_saturating"
+  | "caml_clmul_int64x2"
   | "caml_sse41_int64x2_cmpeq"
   | "caml_sse41_int8x16_max"
   | "caml_sse41_int32x4_max"

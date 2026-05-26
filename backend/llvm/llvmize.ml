@@ -2701,6 +2701,65 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int64_clmul imm =
+    let typ = int_vec_type ~width_in_bits:64 in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let arg1_lane = imm land 1 in
+    let arg2_lane = (imm lsr 4) land 1 in
+    let lane arg index =
+      emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int index))
+    in
+    let a =
+      emit_ins t (I.convert Zext ~arg:(lane arg1 arg1_lane) ~to_:T.i128)
+    in
+    let b =
+      emit_ins t (I.convert Zext ~arg:(lane arg2 arg2_lane) ~to_:T.i128)
+    in
+    let product =
+      List.init 64 Fun.id
+      |> List.fold_left
+           (fun product bit ->
+             let shifted_b =
+               emit_ins t
+                 (I.binary Lshr ~arg1:b ~arg2:(V.of_int ~typ:T.i128 bit))
+             in
+             let bit_set =
+               emit_ins t
+                 (I.binary And ~arg1:shifted_b ~arg2:(V.of_int ~typ:T.i128 1))
+             in
+             let bit_set =
+               emit_ins t
+                 (I.icmp Ine ~arg1:bit_set ~arg2:(V.of_int ~typ:T.i128 0))
+             in
+             let shifted_a =
+               emit_ins t
+                 (I.binary Shl ~arg1:a ~arg2:(V.of_int ~typ:T.i128 bit))
+             in
+             let addend =
+               emit_ins t
+                 (I.select ~cond:bit_set ~ifso:shifted_a
+                    ~ifnot:(V.of_int ~typ:T.i128 0))
+             in
+             emit_ins t (I.binary Xor ~arg1:product ~arg2:addend))
+           (V.of_int ~typ:T.i128 0)
+    in
+    let low = emit_ins t (I.convert Trunc ~arg:product ~to_:T.i64) in
+    let high =
+      emit_ins t
+        (I.binary Lshr ~arg1:product ~arg2:(V.of_int ~typ:T.i128 64))
+      |> fun high -> emit_ins t (I.convert Trunc ~arg:high ~to_:T.i64)
+    in
+    let res =
+      emit_ins t
+        (I.insertelement ~vector:(V.poison typ) ~index:(V.of_int 0)
+           ~to_insert:low)
+    in
+    let res =
+      emit_ins t (I.insertelement ~vector:res ~index:(V.of_int 1) ~to_insert:high)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_sad_unsigned () =
     let byte_typ = int_vec_type ~width_in_bits:8 in
     let word_typ = int_vec_type_of_lanes ~width_in_bits:16 ~lanes:16 in
@@ -4350,6 +4409,8 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int32_mul_even Sext
     | Amd64_simd_instrs.Pmulld | Amd64_simd_instrs.Vpmulld_X_X_Xm128 ->
       simd_int_binary 32 Mul
+    | Amd64_simd_instrs.Pclmulqdq | Amd64_simd_instrs.Vpclmulqdq ->
+      simd_int64_clmul (simd_imm imm)
     | Amd64_simd_instrs.Psadbw_X_Xm128
     | Amd64_simd_instrs.Vpsadbw_X_X_Xm128 ->
       simd_int_sad_unsigned ()
