@@ -373,6 +373,8 @@ module Instruction : sig
 
   val binary : binary_op -> arg1:Value.t -> arg2:Value.t -> op
 
+  val binary_contract : binary_op -> arg1:Value.t -> arg2:Value.t -> op
+
   val convert : convert_op -> arg:Value.t -> to_:Type.t -> op
 
   val icmp : icmp_cond -> arg1:Value.t -> arg2:Value.t -> op

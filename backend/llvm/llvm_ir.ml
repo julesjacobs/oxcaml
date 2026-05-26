@@ -776,7 +776,8 @@ module Instruction = struct
     | Binary of
         { op : binary_op;
           arg1 : Value.t;
-          arg2 : Value.t
+          arg2 : Value.t;
+          contract : bool
         }
     | Convert of
         { op : convert_op;
@@ -971,7 +972,12 @@ module Instruction = struct
 
   let unary op ~arg = Unary { op; arg }
 
-  let binary op ~arg1 ~arg2 = Binary { op; arg1; arg2 }
+  let binary op ~arg1 ~arg2 = Binary { op; arg1; arg2; contract = false }
+
+  let binary_contract op ~arg1 ~arg2 =
+    assert' "binary_contract"
+      (op = Fadd || op = Fsub || op = Fmul);
+    Binary { op; arg1; arg2; contract = true }
 
   let convert op ~arg ~to_ = Convert { op; arg; to_ }
 
@@ -1149,8 +1155,9 @@ module Instruction = struct
       | None -> ins "%a" pp_invoke ())
     | Unary { op; arg } ->
       ins_res "%s %a" (unary_op_to_string op) Value.pp_t arg
-    | Binary { op; arg1; arg2 } ->
-      ins_res "%s %a, %a" (binary_op_to_string op) Value.pp_t arg1
+    | Binary { op; arg1; arg2; contract } ->
+      let flags = if contract then " contract" else "" in
+      ins_res "%s%s %a, %a" (binary_op_to_string op) flags Value.pp_t arg1
         Value.pp_contents (Value.get_contents arg2)
     | Convert { op; arg; to_ } ->
       ins_res "%s %a to %a" (convert_op_to_string op) Value.pp_t arg Type.pp_t
