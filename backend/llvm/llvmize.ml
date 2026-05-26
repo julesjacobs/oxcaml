@@ -3022,6 +3022,26 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_dup_lanes width_in_bits src_lane_of_dst_lane =
+    let typ = int_vec_type ~width_in_bits in
+    let lanes = 128 / width_in_bits in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let res =
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun vector dst_lane ->
+             let src_lane = src_lane_of_dst_lane dst_lane in
+             let elem =
+               emit_ins t
+                 (I.extractelement ~vector:arg ~index:(V.of_int src_lane))
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int dst_lane)
+                  ~to_insert:elem))
+           (V.poison typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_float_unary_intrinsic width intrinsic =
     let typ = float_vec_type ~width in
     let name = intrinsic ^ "." ^ llvm_intrinsic_type_suffix typ in
@@ -3923,6 +3943,12 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_float_haddsub Cmm.Float32 Fsub
     | Amd64_simd_instrs.Hsubpd | Amd64_simd_instrs.Vhsubpd_X_X_Xm128 ->
       simd_float_haddsub Cmm.Float64 Fsub
+    | Amd64_simd_instrs.Movddup | Amd64_simd_instrs.Vmovddup_X_Xm64 ->
+      simd_dup_lanes 64 (fun _dst_lane -> 0)
+    | Amd64_simd_instrs.Movshdup | Amd64_simd_instrs.Vmovshdup_X_Xm128 ->
+      simd_dup_lanes 32 (fun dst_lane -> dst_lane lor 1)
+    | Amd64_simd_instrs.Movsldup | Amd64_simd_instrs.Vmovsldup_X_Xm128 ->
+      simd_dup_lanes 32 (fun dst_lane -> dst_lane land lnot 1)
     | Amd64_simd_instrs.Maxpd | Amd64_simd_instrs.Vmaxpd_X_X_Xm128 ->
       simd_x86_intrinsic "x86.sse2.max.pd"
         [float_vec_type ~width:Cmm.Float64; float_vec_type ~width:Cmm.Float64]

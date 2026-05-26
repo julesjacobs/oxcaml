@@ -17,14 +17,14 @@ default disabled-probe path. The standard-compiler LLVM-backend
 `lib-atomic/test_atomic_cmpxchg.ml` failure is fixed too. The native
 `async-exns/async_exns_1.ml` output mismatch is now fixed as well.
 
-The latest SIMD follow-ups add SSE3 packed float addsub/hadd/hsub lowering,
-SSE/SSE2 packed float min/max and approximate reciprocal/reciprocal-sqrt
-lowering, SSE2 conversion lowering for packed int32, float32, and float64
-vectors, SSE/SSE2 packed float comparison lowering, SSE2 float64x2
-add/sub/mul/div/sqrt lowering, SSE float32x4 add/sub/mul/div/sqrt lowering, SSE
-vec128 64-bit lane-move lowering, SSE vec128 interleave lowering for 32-bit
-lanes, SSE vec128 shuffle lowering for 32-bit lanes, SSE2 signed word
-multiply-add and unsigned even doubleword multiply lowering, SSE2 vec128
+The latest SIMD follow-ups add SSE3 vec128 duplicate-lane lowering, SSE3 packed
+float addsub/hadd/hsub lowering, SSE/SSE2 packed float min/max and approximate
+reciprocal/reciprocal-sqrt lowering, SSE2 conversion lowering for packed int32,
+float32, and float64 vectors, SSE/SSE2 packed float comparison lowering, SSE2
+float64x2 add/sub/mul/div/sqrt lowering, SSE float32x4 add/sub/mul/div/sqrt
+lowering, SSE vec128 64-bit lane-move lowering, SSE vec128 interleave lowering
+for 32-bit lanes, SSE vec128 shuffle lowering for 32-bit lanes, SSE2 signed
+word multiply-add and unsigned even doubleword multiply lowering, SSE2 vec128
 shuffle lowering for 64-bit lanes and high/low 16-bit halves, SSE2 vec128
 interleave lowering for 8- and 16-bit lanes, SSE2 int16 multiply
 low/high/high-unsigned lowering, SSE2 variable and immediate integer shift
@@ -1942,6 +1942,15 @@ limit is raised from `l=100000` to `l=150000`.
       `fadd`/`fsub` and lane insertion instead. The new
       `testsuite/tests/llvm-codegen/amd64_simd_sse3_float.sh` script passed
       directly under `validation-tmp/amd64-simd-sse3-float`.
+    - Implemented AMD64 LLVM lowering for the SSE3 vec128 register duplicate
+      helpers: `caml_sse3_vec128_dup_low_64`,
+      `caml_sse3_vec128_dup_odd_32`, and
+      `caml_sse3_vec128_dup_even_32`. Rebuilt with
+      `make -s compiler -j "$(nproc)"`; result: passed. The new
+      `testsuite/tests/llvm-codegen/amd64_simd_sse3_dup.sh` script passed
+      directly under `validation-tmp/amd64-simd-sse3-dup`; the kept IR copies
+      low 64-bit lanes and odd/even 32-bit lanes with extract/insert-element
+      operations instead of requiring SSE3 target features.
 
 ## Current Blocker
 
