@@ -224,3 +224,47 @@ result is that removing `gc-live` and avoiding the statepoint did not fix the
 10x by itself. A non-inlined scalar `ccc` / `fastcc` leaf-call clone did fix it:
 about `0.08s` versus `1.08s` for baseline LLVM. That points at the OxCaml
 direct-call ABI cost, not integer variant dispatch itself.
+
+## String Equality Inline Check
+
+After the 2026-05-27 refresh, `String.equal` still went through a generated
+C-call wrapper while `String.compare` already had a specialized short-string
+path. Two `String.equal` shapes were tested:
+
+- Full short-string inline: pointer equality, dynamic length equality, up to
+  two masked word compares, then fallback for longer strings.
+- Pointer-only inline: pointer equality returns true, otherwise fallback to
+  `caml_string_equal` / `caml_bytes_equal`.
+
+Full short-string inline was not kept. It helped the pointer-heavy hash lookup
+case, but expanded every string guard into a larger branch tree and regressed
+the guarded-dispatch case.
+
+Command:
+
+```sh
+eval "$(../../../scripts/agent-tmp-env)"
+CASES=string_equal_guarded_dispatch,hash_lookup_string_equal,variant_dispatch_with_string_payload \
+PAIRS=7 LLVM_PATH="$LLVM_PATH" \
+  agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/run.sh \
+  2>&1 | tee agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/run_string_equal_pointer_20260527_070400.log
+cp agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/.build/summary.json \
+  agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/summary_string_equal_pointer_20260527_070400.json
+```
+
+Results for the kept pointer-only inline:
+
+| Case | Native median | LLVM median | LLVM/native | Wrapper refs | `_wrap_try` refs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `string_equal_guarded_dispatch` | 0.1391s | 0.2564s | 1.843x | 13 | 0 |
+| `hash_lookup_string_equal` | 0.6620s | 0.7301s | 1.103x | 25 | 0 |
+| `variant_dispatch_with_string_payload` | 0.0541s | 0.2455s | 4.537x | 13 | 0 |
+
+For reference, the latest pre-change refresh had ratios 1.752x, 1.251x, and
+4.638x for those three cases. The pointer-only inline is therefore a clear win
+for pointer-heavy equality, slightly helps the string-payload stress case, and
+is within noise/slightly worse for guarded dispatch. The full-content inline
+run is saved as `run_string_equal_inline_20260527_065500.log` /
+`summary_string_equal_inline_20260527_065500.json`; its guarded-dispatch ratio
+was 2.015x, so it should not be revived without a better constant-string or
+known-length design.
