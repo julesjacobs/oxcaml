@@ -1,0 +1,9 @@
+string_tree_prefix_heavy: native=0.3533s llvm=0.4647s ratio=1.3152 wrappers=31 wrap_try=0
+string_map_equal_content: native=0.2715s llvm=0.3172s ratio=1.1681 wrappers=43 wrap_try=0
+string_equal_guarded_dispatch: native=0.1350s llvm=0.2598s ratio=1.9240 wrappers=13 wrap_try=0
+try_with_string_compare_hit: native=0.2671s llvm=0.3611s ratio=1.3521 wrappers=39 wrap_try=4
+closure_call_in_try_hit: native=0.0733s llvm=0.0979s ratio=1.3355 wrappers=13 wrap_try=4
+direct_call_in_try_hit: native=0.0567s llvm=0.0994s ratio=1.7509 wrappers=13 wrap_try=4
+hash_lookup_string_equal: native=0.7130s llvm=0.8542s ratio=1.1981 wrappers=25 wrap_try=0
+variant_dispatch_with_string_payload: native=0.0542s llvm=0.2633s ratio=4.8611 wrappers=13 wrap_try=0
+SUMMARY_JSON=/Users/julesjacobs/git/oxcaml-llvm/agents/llvm-fast-path-roots-integration/oxcaml/agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/.build/summary.json

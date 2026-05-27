@@ -1564,3 +1564,27 @@ branch or needs one more focused performance pass.
     `agent-state/llvm-fast-path-roots-integration/c_call_slowdown/run_obj_tag_inline_20260526_212617.log`.
     Result: `obj_tag_loop` native 0.1974s, LLVM 0.0992s, ratio 0.5026, wrapper
     refs 0. Previous saved result was LLVM 2.307x slower with 4 wrapper refs.
+- Added `agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks`,
+  a generated microbenchmark suite for remaining compiler-like slowdown shapes.
+  It covers string lookup/dispatch, local handlers, direct and closure calls in
+  handlers, write-barrier shapes, and control cases.
+  - Full first pass:
+    `agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/run_all_20260526_213759.log`.
+  - Focused rerun:
+    `agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/run_focused_20260526_214010.log`.
+  - Saved interpretation:
+    `agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/RESULTS.md`.
+  - Strongest focused slowdowns:
+    `variant_dispatch_with_string_payload` 4.861x,
+    `string_equal_guarded_dispatch` 1.924x,
+    `direct_call_in_try_hit` 1.751x,
+    `try_with_string_compare_hit` 1.352x,
+    `closure_call_in_try_hit` 1.335x,
+    `string_tree_prefix_heavy` 1.315x,
+    `hash_lookup_string_equal` 1.198x,
+    `string_map_equal_content` 1.168x.
+  - Main conclusion: string-heavy helper shapes are still the clearest
+    compiler-representative remaining bucket; `_wrap_try` alone is not enough
+    to explain the remaining gap, but call-boundary shapes inside handlers are
+    still slower. Mutation/write-barrier shapes are currently around parity or
+    faster.
