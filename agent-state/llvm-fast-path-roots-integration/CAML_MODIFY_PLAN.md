@@ -6,6 +6,44 @@ This plan mirrors the string-compare plan style: start with the runtime facts,
 define candidate generated shapes, run small experiments before committing to a
 large implementation, then benchmark the compiler binary.
 
+## Implementation Status
+
+Candidate 1 has been implemented in this integration checkout.
+
+Implemented pieces:
+
+- `backend/llvm/llvmize.ml` recognizes the noalloc register-only
+  `caml_modify` extcall on 64-bit AArch64 when TSAN is disabled.
+- The generated hot path loads the field, classifies destination/old/new values
+  using the runtime minor-heap range globals, checks `caml_gc_phase`, emits
+  `llvm.expect` on the cold predicates, then performs the existing acquire
+  fence plus store.
+- The generated path falls back to the old `caml_modify` wrapper when
+  `OCAML_LLVM_HELPER_PROFILE=1`, so helper profiling remains exact.
+- The cold real-barrier branch calls a new runtime helper,
+  `caml_modify_slow_barrier(fp, old_val, new_val)`, which delegates to the
+  existing `write_barrier` logic. This keeps `Ref_table_add` and `caml_darken`
+  policy in C for the first implementation.
+
+Validation and benchmark evidence:
+
+- Focused codegen test:
+  `make llvm-test-one-no-rebuild TEST=llvm-codegen/store_modify.ml` passed.
+- Self-stage build with the branch-local custom LLVM passed:
+  `_self_build_current/self_build_caml_modify_20260526_201244.log`.
+- Head-to-head compiler benchmark:
+  `_compiler_binary_perf_current/summary_caml_modify_20260526_201756.json`.
+- Mutation-focused microbenchmarks:
+  `_bench_llvm_slow_cases_current/summary_caml_modify_6pairs_20260526_202340.json`.
+- Headline result: compiler-binary geomean LLVM/native ratio improved from
+  `1.0766` after string compare lowering to `1.0651` after this change.
+
+Candidate 2 is not implemented yet. The reason is still the same design
+constraint as in the plan below: inlining
+`Caml_state->minor_tables->major_ref.{ptr,limit}` should use a checked,
+maintained runtime-layout contract rather than spreading ad hoc offsets through
+`llvmize.ml`.
+
 Scope note: this is a follow-up optimization plan, not part of the fast-path
 root-slot PR #18. PR #18 should stay focused on root-slot traffic around
 allocations and poll points. `caml_modify` lowering should either get its own

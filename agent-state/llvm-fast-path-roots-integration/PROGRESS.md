@@ -1475,3 +1475,72 @@ branch or needs one more focused performance pass.
     for long-string-heavy lookup loops. The next version probably needs the
     planned prefix-then-suffix design, or a cheap first-word prefix check before
     deciding to fall back, so long strings do not pay only overhead.
+- Committed the accumulated integration/string/helper work before starting the
+  `caml_modify` implementation:
+  `b74bfc26f7 Integrate LLVM fast-path root and helper work`.
+- Implemented `caml_modify` Candidate 1 from `CAML_MODIFY_PLAN.md`.
+  - Added `caml_modify_slow_barrier(fp, old_val, val)` in `runtime/memory.c`;
+    it delegates to the existing `write_barrier` policy and does not perform
+    the final store.
+  - Added an AArch64/64-bit, non-TSAN LLVM lowering for noalloc register-only
+    `caml_modify` extcalls in `backend/llvm/llvmize.ml`.
+  - The generated hot path:
+    - falls back to the old helper while `OCAML_LLVM_HELPER_PROFILE=1`;
+    - loads the old field value;
+    - classifies destination, old value, and new value using
+      `caml_minor_heaps_start` / `caml_minor_heaps_end`;
+    - checks `caml_gc_phase`;
+    - branches cold to `caml_modify_slow_barrier` only for possible
+      remembered-set or marking work;
+    - emits the existing acquire fence and value store on all inline paths.
+  - Candidate 2, inline remembered-set append, was intentionally deferred until
+    there is a checked runtime-layout contract for
+    `Caml_state->minor_tables->major_ref.{ptr,limit}`.
+- Promoted the focused `store_modify.ml` expect output for the new IR/assembly
+  shape and validated it:
+  `make llvm-test-one-no-rebuild TEST=llvm-codegen/store_modify.ml` passed
+  with 3 passed, 0 failed.
+- Refreshed `_install` with `make install`, saved the previous
+  `_llvm_self_stage_install` to
+  `_self_build_current/saved_llvm_self_stage_install_before_caml_modify_20260526_201244`,
+  and rebuilt the LLVM self-stage compiler.
+  - Self-stage log:
+    `_self_build_current/self_build_caml_modify_20260526_201244.log`.
+  - Counts: boot wrapper lines 1678 / fresh IR 824; runtime wrapper lines 148
+    / fresh IR 74; main wrapper lines 2224 / fresh IR 1102; self-stage smoke
+    wrapper lines 4 / fresh IR 2.
+  - The self-stage smoke executable printed `55`.
+- Reran the representative compiler-binary benchmark using the normal native
+  backend for both timed compilers.
+  - Log:
+    `_compiler_binary_perf_current/bench_compiler_binary_caml_modify_20260526_201756.log`.
+  - Summary:
+    `_compiler_binary_perf_current/summary_caml_modify_20260526_201756.json`.
+  - Median timings, native-built vs LLVM-built:
+    - `env.ml`: 1.7630s vs 1.8592s, ratio 1.055.
+    - `ctype.ml`: 2.6298s vs 2.7737s, ratio 1.055.
+    - `typecore.ml`: 4.9551s vs 5.2423s, ratio 1.058.
+    - `translcore.ml`: 1.3656s vs 1.4607s, ratio 1.070.
+    - `typemod.ml`: 1.5182s vs 1.6043s, ratio 1.057.
+    - `cfg_to_linear.ml`: 0.1787s vs 0.1972s, ratio 1.103.
+    - `cfg_selectgen.ml`: 0.5639s vs 0.5965s, ratio 1.058.
+    - `llvmize.ml`: 1.6327s vs 1.7229s, ratio 1.055.
+    - `regalloc_irc.ml`: 0.3440s vs 0.3706s, ratio 1.077.
+  - Aggregate: geomean LLVM-built/native-built ratio 1.0651, median 1.0578,
+    min 1.0545, max 1.1030.
+  - Compared with the post-string-compare benchmark, the geomean improved from
+    1.0766 to 1.0651.
+- Reran mutation-focused generated-code benchmarks with `_install/bin/ocamlopt.opt`
+  for both native and LLVM timings.
+  - Log:
+    `_bench_llvm_slow_cases_current/bench_caml_modify_20260526_202340.log`.
+  - Summary:
+    `_bench_llvm_slow_cases_current/summary_caml_modify_6pairs_20260526_202340.json`.
+  - Results:
+    - `record_update`: native 0.0295s, LLVM 0.0160s, ratio 0.557.
+    - `int_ref_inc`: native 0.1453s, LLVM 0.1455s, ratio 0.999.
+    - `float_ref_inc`: native 0.3694s, LLVM 0.3597s, ratio 0.978.
+    - `list_build_sum`: native 0.4337s, LLVM 0.4260s, ratio 0.980.
+    - `object_call_min`: native 0.1976s, LLVM 0.2359s, ratio 1.198.
+  - Interpretation: the non-object mutation cases are at parity or better;
+    object dispatch remains the separate known outlier.
