@@ -1600,3 +1600,17 @@ branch or needs one more focused performance pass.
     faster than native when the tiny int `eval` function inlines. The bad
     non-inlined int case isolates tiny-call overhead in the inner loop; the
     string case combines that with string helper-call boundary overhead.
+- Investigated the LLVM IR for the 10x non-inlined int variant case.
+  - Notes:
+    `agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/IR_EXPERIMENTS.md`.
+  - Standard optimized LLVM IR still has a root alloca because the call becomes
+    a statepoint with `gc-live`; this is not a pre-mem2reg artifact.
+  - However, removing `gc-live`, removing root volatility, or forcing the call
+    to remain a direct non-statepoint call did not improve the runtime.
+  - A scalar non-inlined `ccc` / `fastcc` leaf-call clone ran in about 0.08s,
+    versus about 1.08s for the baseline LLVM call and 0.066s for the fully
+    inlined LLVM case.
+  - Conclusion: the dominant issue in this microcase is the OxCaml direct-call
+    ABI cost for tiny calls: domain/allocation state threading and pinned-state
+    repair around the call. A specialized proven-leaf direct-call ABI could fix
+    this class without inlining everything.
