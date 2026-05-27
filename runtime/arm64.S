@@ -44,6 +44,7 @@
 #define CFI_ADJUST(n) .cfi_adjust_cfa_offset n
 #define CFI_REGISTER(r1,r2) .cfi_register r1,r2
 #define CFI_OFFSET(r,n) .cfi_offset r,n
+#define CFI_UNDEFINED(r) .cfi_undefined r
 #define CFI_DEF_CFA_REGISTER(r) .cfi_def_cfa_register r
 #define CFI_SIGNAL_FRAME .cfi_signal_frame
 #define CFI_REMEMBER_STATE .cfi_remember_state
@@ -54,6 +55,7 @@
 #define CFI_ADJUST(n)
 #define CFI_REGISTER(r1,r2)
 #define CFI_OFFSET(r,n)
+#define CFI_UNDEFINED(r)
 #define CFI_DEF_CFA_REGISTER(r)
 #define CFI_SIGNAL_FRAME
 #define CFI_REMEMBER_STATE
@@ -574,11 +576,14 @@ END_FUNCTION(caml_call_realloc_stack)
 FUNCTION(caml_llvm_call_realloc_stack)
         CFI_STARTPROC
         CFI_SIGNAL_FRAME
-    /* Save return address and frame pointer */
-        CFI_OFFSET(29, -16)
+    /* Save return address and terminate the frame-pointer chain.
+       LLVM OxCaml frames do not maintain a valid x29 chain.  Saving the
+       incoming x29 here lets stack growth treat stale LLVM frame contents as a
+       frame-pointer link and rewrite raw stack-looking words. */
         CFI_OFFSET(30, -8)
-        stp     x29, x30, [sp, -16]!
+        stp     xzr, x30, [sp, -16]!
         CFI_ADJUST(16)
+        CFI_UNDEFINED(29)
         add     x29, sp, #0
     /* Save all registers (including ALLOC_PTR & TRAP_PTR) */
         SAVE_ALL_REGS
