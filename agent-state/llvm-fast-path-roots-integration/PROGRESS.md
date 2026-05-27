@@ -1923,3 +1923,44 @@ branch or needs one more focused performance pass.
     - `direct_call_in_try_hit`: native 0.0532s, LLVM 0.0891s, 1.674x.
     - `closure_call_in_try_hit`: native 0.0723s, LLVM 0.1411s, 1.951x.
     - `string_equal_guarded_dispatch`: native 0.1407s, LLVM 0.2649s, 1.883x.
+- Rebuilt and validated the no-scalar-clone self-stage compiler.
+  - Before rebuilding, saved the partial scalar-clone self-stage build under
+    `_self_build_current/saved_partial_llvm_self_stage_main_build_before_no_scalar_selfbuild_20260527_092520`.
+  - Command:
+    `make llvm-self-stage-install LLVM_PATH="$LLVM_PATH"`.
+  - Log:
+    `_self_build_current/self_build_no_scalar_clone_20260527_092520.log`.
+  - Result: `_llvm_self_stage_install/bin/ocamlopt.opt` was produced and the
+    self-stage smoke executable printed `55`.
+  - Counts: boot wrapper lines 1678 / fresh IR 828; smoke wrapper lines 4 /
+    fresh IR 2; runtime wrapper lines 148 / fresh IR 74; main wrapper lines
+    2224 / fresh IR 1095; self-stage-smoke wrapper lines 4 / fresh IR 2.
+- Ran the full self-stage LLVM-backend testsuite against that no-scalar-clone
+  compiler.
+  - First full run log:
+    `_self_build_current/self_stage_tests_no_scalar_clone_20260527_092520.log`.
+  - First full run result: one `tests/lib-threads/signal.ml` bytecode
+    `check-program-output` failure with `kill: No such process`; 6709 passed,
+    282 skipped, 1 failed, 6992 considered. This looked like the known
+    signal/timing flake, not a codegen failure.
+  - Focused serial rerun of `tests/lib-threads`:
+    `_self_build_current/self_stage_lib_threads_no_scalar_clone_20260527_092520.log`;
+    86 passed, 3 skipped, 0 failed, 89 considered.
+  - Second full self-stage run:
+    `_self_build_current/self_stage_tests_no_scalar_clone_rerun_20260527_092520.log`;
+    6394 passed, 282 skipped, 0 failed, 6676 considered. Wrapper counts:
+    6687 lines, 3321 fresh IR.
+- Re-ran the compiler-binary benchmark after the no-scalar-clone self-stage
+  rebuild, using the normal backend for both timed compilers.
+  - Command:
+    `python3 agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/bench_compiler_binary.py --pairs 7 ...`.
+  - Log:
+    `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/run_no_scalar_clone_20260527_095212.log`.
+  - Summary:
+    `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/summary_no_scalar_clone_20260527_095212.json`.
+  - Aggregate: geomean LLVM-built/native-built ratio 1.0085, median 1.0025,
+    min 0.9997, max 1.0374.
+  - `typecore.ml` remained at parity: native-built 5.4352s, LLVM-built
+    5.4335s, ratio 1.000.
+  - Current largest tail in this suite is `cfg_to_linear.ml` at 1.037x and
+    `regalloc_irc.ml` at 1.019x.
