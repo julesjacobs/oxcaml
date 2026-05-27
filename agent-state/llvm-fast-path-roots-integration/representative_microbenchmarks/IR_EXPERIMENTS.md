@@ -70,14 +70,30 @@ The statepoint live-root machinery is real, but it is not the main cause of the
 forcing the hot call to stay a direct non-statepoint call did not improve the
 runtime.
 
-The dominant cost is the OxCaml direct-call ABI for a tiny function:
+The domain-state and allocation-pointer SSA threading is also not the visible
+hot cost in current assembly. The AArch64 OxCaml calling convention maps those
+values to x28/x27, and current final assembly does not have x28/x27 copy traffic
+around the hot `eval` call.
 
-- the call takes domain state and allocation state;
-- the call returns domain state and allocation state;
-- LLVM must preserve loop state around the call;
-- LLVM must repair pinned OxCaml state registers around the call.
+The bad code is produced at the ordinary OxCaml call boundary for a tiny
+function, but the exact bad final-assembly shape is narrower than generic
+register pressure:
 
-For this tiny callee, that boundary work is much larger than the useful work.
+- the call has an OxCaml/statepoint register mask with no preserved ordinary
+  integer registers;
+- the actual argument/result uses fixed x0;
+- the accumulator, inner loop index, outer loop index, loop bound, and modulo
+  constants are live across or immediately around the call;
+- greedy register allocation splits the loop-carried values at the call and
+  uses stack slots/rematerialization in the inner loop;
+- AArch64 load/store optimization then pairs the two pre-call scalar spills for
+  the accumulator and inner index into `stp x0, x10, [sp, #40]`.
+
+Native is caller-save too, so "all caller-saved" by itself is not the full
+explanation. The LLVM-specific part is the generated caller-side preservation
+shape around the OxCaml call/statepoint, especially the paired stack spill. In
+samples of the slow binary, time is mostly charged to the caller loop rather
+than to `eval`; in the native binary, many more samples land in `eval`.
 
 The scalar `ccc` / `fastcc` experiments eliminate the slowdown without inlining
 the callee. The call remains a real call, but the ABI is just:
@@ -87,8 +103,10 @@ call fastcc i64 @eval_fast(ptr addrspace(1) %arg)
 ```
 
 The resulting inner loop keeps loop state in registers and has no OxCaml
-domain/allocation state repair around the call. It runs near the fully-inlined
-LLVM case.
+call-boundary state to preserve in stack slots. It runs near the fully-inlined
+LLVM case. This experiment is useful as a direction, but it is not the same
+calling convention as native OxCaml: AAPCS/fastcc give LLVM normal callee-saved
+registers such as x19-x25 for loop state, while ordinary OxCaml calls do not.
 
 The scalar `oxcaml_nofpcc` experiment is worse because the OxCaml convention
 uses pinned/special registers for arguments/results. With a scalar return, LLVM
@@ -102,15 +120,11 @@ Baseline LLVM inner loop:
 ```asm
 stp x0, x10, [sp, #40]
 ...
-mov x28, x8
-mov x27, x2
 bl  _camlVariant_dispatch_with_int_payload__eval_4_10_code
 ldr x10, [sp, #48]
 ldr x13, [sp, #32]
 mov/movk x12, ...
 mov/movk x11, ...
-mov x2, x27
-mov x8, x28
 ldr x9, [sp, #40]
 ...
 ```
@@ -152,3 +166,34 @@ contract would also fix this class:
 This is not a general replacement for OxCaml calls. It is a specialized ABI for
 tiny proven-leaf helpers. The experiment shows that such an ABI can recover the
 lost performance without requiring full inlining.
+
+## Negative Checks
+
+Additional checks on the current branch:
+
+- Replacing only LLVM's `eval` body with a native branch-shaped `eval` body did
+  not improve the runtime; user time stayed about `1.04s`.
+- Replacing LLVM's wrapped modulo address form with a small-remainder `msub`
+  form did not improve the runtime; user time stayed about `1.05s`.
+- A short `sample` run of the slow LLVM binary put nearly all samples in
+  `run_5_11_code`; the corresponding native sample split much more time into
+  `eval_4_10_code`.
+- Splitting only the paired pre-call spill
+  `stp x0, x10, [sp, #40]` into
+  `str x0, [sp, #40]; str x10, [sp, #48]` reduced the median from about
+  `1.07s` to about `0.076s`.
+- Keeping the `stp` but bypassing both stack reloads was still slow, about
+  `0.62s`, so the paired store itself is part of the problem, not only
+  store-to-load forwarding from the paired store.
+- Moving the pair spill to a 16-byte-aligned stack offset reduced the median to
+  about `0.29s`, and bypassing reloads from that aligned pair made it fast
+  again, about `0.078s`. This points to two costs: scalar reloads from a paired
+  store are slower than scalar reloads from scalar stores, and the original
+  `sp + 40` pair is much worse because it is an unaligned 16-byte store.
+- Widening the existing OxCaml statepoint stack-pair suppression window with
+  `-mllvm -oxcaml-statepoint-stack-pair-window=12` made the compiler emit the
+  two scalar stores and reduced the median to about `0.077s`.
+
+These checks rule out the tiny callee's `csel` shape and the wrapped modulo
+addressing as primary causes. The remaining issue is the paired caller-side
+stack spill that LLVM produces near the ordinary OxCaml call boundary.

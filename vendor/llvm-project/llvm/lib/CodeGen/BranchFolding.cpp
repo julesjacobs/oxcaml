@@ -1341,7 +1341,8 @@ ReoptimizeBlock:
   // explicitly.  Landing pads should not do this since the landing-pad table
   // points to this block.  Blocks with their addresses taken shouldn't be
   // optimized away.
-  if (IsEmptyBlock(MBB) && !MBB->isEHPad() && !MBB->hasAddressTaken() &&
+  if (IsEmptyBlock(MBB) && !MBB->isEHPad() && !MBB->isRuntimeEntered() &&
+      !MBB->hasAddressTaken() &&
       SameEHScope) {
     salvageDebugInfoFromEmptyBlock(TII, *MBB);
     // Dead block?  Leave for cleanup later.
@@ -1349,7 +1350,7 @@ ReoptimizeBlock:
 
     if (FallThrough == MF.end()) {
       // TODO: Simplify preds to not branch here if possible!
-    } else if (FallThrough->isEHPad()) {
+    } else if (FallThrough->isEHPad() || FallThrough->isRuntimeEntered()) {
       // Don't rewrite to a landing pad fallthough.  That could lead to the case
       // where a BB jumps to more than one landing pad.
       // TODO: Is it ever worth rewriting predecessors which don't already

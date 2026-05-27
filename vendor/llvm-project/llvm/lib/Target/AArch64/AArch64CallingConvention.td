@@ -159,11 +159,16 @@ def RetCC_AArch64_AAPCS : CallingConv<[
            CCAssignToReg<[P0, P1, P2, P3]>>
 ]>;
 
-// OxCaml runtime registers are threaded through calls and pinned by the calling
-// convention. On arm64, x28 is the domain state pointer and x27 is the
-// allocation pointer. x26 is the trap pointer, and x16/x17 are runtime/linker
-// temporaries. AArch64RegisterInfo reserves these registers for OxCaml
-// functions; see backend/arm64/proc.ml and runtime/arm64.S.
+// OxCaml runtime registers are threaded through ordinary OxCaml calls in LLVM
+// IR, then pinned by this calling convention. On arm64, x28 is the domain state
+// pointer and x27 is the allocation pointer. The LLVM IR models these as the
+// first two i64 arguments and the first two i64 return values so optimizations
+// and statepoints can see the dependency. The register assignment below maps
+// those slots directly to x28/x27; when caller and callee both use this
+// convention, register allocation should not need any extra copies just to pass
+// the domain state pointer or allocation pointer through the call. x26 is the
+// trap pointer, and x16/x17 are runtime/linker temporaries. See
+// backend/arm64/proc.ml and runtime/arm64.S.
 def RetCC_AArch64_OxCaml : CallingConv<[
   CCIfType<[i8, i16, i32], CCPromoteToType<i64>>,
 
