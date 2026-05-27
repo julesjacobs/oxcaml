@@ -1580,6 +1580,10 @@ let string_compare_symbol = function
   | "caml_string_compare" | "caml_bytes_compare" -> true
   | _ -> false
 
+let string_equal_symbol = function
+  | "caml_string_equal" | "caml_bytes_equal" -> true
+  | _ -> false
+
 let supports_inline_obj_tag () =
   match Target_system.architecture (), Arch.size_addr with
   | Target_system.AArch64, 8 -> not Config.tsan
@@ -1735,6 +1739,37 @@ let maybe_emit_specialized_string_compare_extcall t ~func_symbol ~alloc
     emit_string_compare_result t res_reg ~lt:word2_lt ~done_label;
     emit_label t length_tiebreak_label;
     emit_string_compare_length_tiebreak t res_reg ~len1 ~len2 ~done_label;
+    emit_label t done_label;
+    true
+  | _ -> false
+
+let maybe_emit_specialized_string_equal_extcall t ~func_symbol ~alloc ~stack_ofs
+    arg_regs res_regs emit_fallback =
+  match arg_regs, res_regs with
+  | [arg1; arg2], [res_reg]
+    when (not alloc)
+         && stack_ofs = 0
+         && string_equal_symbol func_symbol
+         && supports_inline_string_compare ()
+         && (T.equal (T.of_reg res_reg) T.i64
+            || T.equal (T.of_reg res_reg) T.val_ptr) ->
+    let done_label = V.of_label (Cmm.new_label ()) in
+    let true_label = V.of_label (Cmm.new_label ()) in
+    let fallback_label = V.of_label (Cmm.new_label ()) in
+    let s1 = load_reg_to_temp ~typ:T.val_ptr t arg1 in
+    let s2 = load_reg_to_temp ~typ:T.val_ptr t arg2 in
+    let s1_int = cast t s1 T.i64 in
+    let s2_int = cast t s2 T.i64 in
+    let pointer_equal = emit_ins t (I.icmp Ieq ~arg1:s1_int ~arg2:s2_int) in
+    emit_ins_no_res t
+      (I.br_cond ~cond:pointer_equal ~ifso:true_label
+         ~ifnot:fallback_label);
+    emit_label t fallback_label;
+    emit_fallback ();
+    emit_ins_no_res t (I.br done_label);
+    emit_label t true_label;
+    store_into_reg t res_reg (V.of_int 3);
+    emit_ins_no_res t (I.br done_label);
     emit_label t done_label;
     true
   | _ -> false
@@ -1997,7 +2032,12 @@ let extcall ?unwind_label t (i : Cfg.terminator Cfg.instruction) ~func_symbol
         not
           (maybe_emit_specialized_caml_modify_extcall t i ~func_symbol ~alloc
              ~stack_ofs arg_regs res_regs emit_fallback)
-      then emit_fallback ()
+      then
+        if
+          not
+            (maybe_emit_specialized_string_equal_extcall t ~func_symbol ~alloc
+               ~stack_ofs arg_regs res_regs emit_fallback)
+        then emit_fallback ()
 
 let raise_ t ~(exn_handler : Label.t option)
     (i : Cfg.terminator Cfg.instruction) (raise_kind : Lambda.raise_kind) =
