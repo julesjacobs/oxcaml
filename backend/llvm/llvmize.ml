@@ -98,6 +98,12 @@ type slow_path_root_slot =
     root_slot : LL.Value.t
   }
 
+type scalar_leaf_clone =
+  { symbol : string;
+    args : LL.Type.t list;
+    res : LL.Type.t
+  }
+
 (* CR yusumez: Refactor into its own sub-module *)
 type fun_info =
   { emitter : LL.Function.Emitter.t;
@@ -125,6 +131,9 @@ type fun_info =
            only populated for blocks whose terminator can raise, but LLVM also
            needs this for basic-instruction safepoints such as allocation and
            polling. *)
+    scalar_leaf_return : bool;
+        (* Whether the current function is a scalar leaf clone. Such functions
+           do not thread runtime state through their signature. *)
     mutable active_trap_depths : int InstructionId.Tbl.t;
         (* Number of active trap blocks at each instruction. On AArch64, trap
            blocks are preallocated in the static LLVM frame, so the frametable
@@ -167,6 +176,7 @@ type t =
         (* Wrappers for noalloc C calls. This is currently needed since
            manipulating the stack inline is broken. *)
     mutable all_trap_blocks : trap_block_info list;
+    scalar_leaf_clones : (string, scalar_leaf_clone) Hashtbl.t;
     mutable module_asm : string list;
     mutable next_debug_metadata_id : int;
     mutable debug_compile_unit_id : int option;
@@ -178,7 +188,8 @@ type t =
 
 (* current_fun_info interface *)
 
-let create_fun_info ?subprogram_dbg_metadata_id emitter =
+let create_fun_info ?(scalar_leaf_return = false) ?subprogram_dbg_metadata_id
+    emitter =
   { emitter;
     reg2alloca = Reg.Tbl.create 0;
     const_ints = Reg.Tbl.create 0;
@@ -188,6 +199,7 @@ let create_fun_info ?subprogram_dbg_metadata_id emitter =
     slow_path_root_slots = [];
     active_traps = InstructionId.Tbl.create 0;
     active_trap_depths = InstructionId.Tbl.create 0;
+    scalar_leaf_return;
     trap_block_allocas = Label.Tbl.create 0;
     trap_blocks = Label.Tbl.create 0;
     current_dbg_metadata = None;
@@ -199,9 +211,11 @@ let get_fun_info t =
   | Some fun_info -> fun_info
   | None -> fail_msg ~name:"get_fun_info" "not_available"
 
-let reset_fun_info ?subprogram_dbg_metadata_id t emitter =
+let reset_fun_info ?scalar_leaf_return ?subprogram_dbg_metadata_id t emitter =
   t.current_fun_info
-    <- Some (create_fun_info ?subprogram_dbg_metadata_id emitter)
+    <- Some
+         (create_fun_info ?scalar_leaf_return ?subprogram_dbg_metadata_id
+            emitter)
 
 let get_alloca_for_reg t reg =
   let fun_info = get_fun_info t in
@@ -409,6 +423,7 @@ let create ~llvmir_filename ~ppf_dump =
     called_intrinsics = String.Map.empty;
     c_call_wrappers = String.Map.empty;
     all_trap_blocks = [];
+    scalar_leaf_clones = Hashtbl.create 0;
     module_asm = [];
     next_debug_metadata_id = 100000;
     debug_compile_unit_id = None;
@@ -1289,6 +1304,45 @@ let test t (op : Operation.test) (i : _ Cfg.instruction) =
 
 let call ?(tail = false) ?unwind_label t (i : Cfg.terminator Cfg.instruction)
     (op : Cfg.func_call_operation) =
+  let try_scalar_leaf_call () =
+    match tail, op with
+    | false, Direct { sym_name; sym_global = _ } -> (
+      match Hashtbl.find_opt t.scalar_leaf_clones sym_name with
+      | None -> false
+      | Some { symbol; args = expected_args; res } ->
+        let args_begin = 0 in
+        let args_end = Array.length i.arg in
+        let arg_regs =
+          Array.sub i.arg args_begin args_end |> reg_list_for_call
+        in
+        let arg_types = List.map T.of_reg arg_regs in
+        let res_locs = loc_results_call i.res in
+        let res_regs = reg_list_for_call res_locs in
+        if
+          List.length res_regs = 1
+          && List.equal T.equal arg_types expected_args
+          && T.equal (T.of_reg (List.hd res_regs)) res
+        then (
+          add_referenced_symbol t symbol;
+          let args =
+            List.map2
+              (fun reg typ -> load_reg_to_temp ~typ t reg)
+              arg_regs arg_types
+          in
+          let value =
+            emit_ins t
+              (I.call ~func:(LL.Ident.global symbol) ~args
+                 ~res_type:(Some res) ~attrs:[] ~operand_bundles:[]
+                 ~cc:Default ~musttail:false)
+          in
+          store_into_reg t (List.hd res_regs) value;
+          true)
+        else false)
+    | true, _ | false, Indirect _ -> false
+  in
+  if try_scalar_leaf_call ()
+  then ()
+  else
   let args_begin, args_end =
     (* [Indirect] has the function in i.arg.(0) *)
     match op with
@@ -1410,6 +1464,14 @@ let tailcall_self t (i : Cfg.terminator Cfg.instruction) destination =
   br_label t destination
 
 let return t (i : Cfg.terminator Cfg.instruction) =
+  if (get_fun_info t).scalar_leaf_return
+  then (
+    match Array.to_list i.arg, E.get_res_type (get_fun_info t).emitter with
+    | [reg], Some typ ->
+      let res = load_reg_to_temp ~typ t reg in
+      emit_ins_no_res t (I.ret res)
+    | _ -> emit_ins_no_res t I.unreachable)
+  else
   let result_locations = loc_results_return i.arg in
   let res_type = E.get_res_type (get_fun_info t).emitter |> Option.get in
   (* Note: type information is not propagated to the backend for functions that
@@ -4450,6 +4512,101 @@ let prepare_fun_info t (cfg : Cfg.t) =
     <- preserved_reg_slots liveness active_traps cfg;
   arg_regs
 
+let scalar_leaf_clone_symbol fun_name = fun_name ^ ".llvm_leaf_scalar"
+
+let scalar_leaf_result_type (cfg : Cfg.t) =
+  let result_locations = Proc.loc_results_return cfg.Cfg.fun_ret_type in
+  match reg_list_for_call result_locations with
+  | [reg] -> if Reg.is_domainstate reg then None else Some (T.of_reg reg)
+  | [] | _ :: _ :: _ -> None
+
+let scalar_leaf_terminator_ok (i : Cfg.terminator Cfg.instruction) =
+  match i.desc with
+  | Never | Always _ | Parity_test _ | Truth_test _ | Float_test _ | Int_test _
+  | Switch _ | Return ->
+    true
+  | Raise _ | Tailcall_self _ | Tailcall_func _ | Call_no_return _ | Call _
+  | Prim _ | Invalid _ ->
+    false
+
+let scalar_leaf_basic_ok (i : Cfg.basic Cfg.instruction) =
+  match i.desc with
+  | Op (Poll | Alloc _ | Dls_get | Tls_get | Domain_index) -> false
+  | Reloadretaddr | Prologue | Epilogue -> true
+  | Pushtrap _ | Poptrap _ | Stack_check _ ->
+    false
+  | Op
+      ( Move | Spill | Reload | Opaque | Pause | Const_int _ | Const_float32 _
+      | Const_float _ | Const_symbol _
+      | Const_vec128 _ | Const_vec256 _ | Const_vec512 _ | Stackoffset _
+      | Load _ | Store (_, _, _) | Intop _ | Int128op _ | Intop_imm (_, _)
+      | Intop_atomic _ | Floatop _ | Csel _ | Reinterpret_cast _
+      | Static_cast _ | Probe_is_enabled _ | Specific _ | Name_for_debugger _ )
+    ->
+    true
+  | Op (Begin_region | End_region) -> false
+
+let scalar_leaf_reg_ok (reg : Reg.t) =
+  match reg.loc with
+  | Stack (Domainstate _) -> false
+  | Unknown | Reg _ | Stack (Local _ | Incoming _ | Outgoing _) -> true
+
+let scalar_leaf_regs_ok cfg arg_regs =
+  List.for_all scalar_leaf_reg_ok arg_regs
+  && Reg.Set.for_all scalar_leaf_reg_ok (collect_body_regs cfg)
+
+let scalar_leaf_clone_eligible (cfg : Cfg.t) arg_regs =
+  (not cfg.Cfg.fun_contains_calls)
+  && (not (has_trap_handler cfg))
+  && Option.is_some (scalar_leaf_result_type cfg)
+  && scalar_leaf_regs_ok cfg arg_regs
+  && Cfg.fold_body_instructions cfg ~init:true ~f:(fun ok i ->
+         ok && scalar_leaf_basic_ok i)
+  && Label.Tbl.fold
+       (fun _label (block : Cfg.basic_block) ok ->
+         ok && scalar_leaf_terminator_ok block.terminator)
+       cfg.blocks true
+
+let prepare_scalar_leaf_fun_info t (cfg : Cfg.t) arg_regs res_type =
+  let emitter =
+    E.create ~name:(scalar_leaf_clone_symbol cfg.Cfg.fun_name)
+      ~args:(List.map T.of_reg arg_regs) ~res:(Some res_type) ~cc:Default
+      ~attrs:[LL.Fn_attr.Noinline] ~personality:None ~dbg:cfg.fun_dbg
+      ~dbg_metadata:None ~private_:true
+  in
+  reset_fun_info ~scalar_leaf_return:true t emitter;
+  (get_fun_info t).fun_args <- cfg.fun_args;
+  arg_regs
+
+let alloca_regs_without_runtime t (cfg : Cfg.t) arg_values arg_regs =
+  let alloca_reg ?init (reg : Reg.t) =
+    match reg.loc with
+    | Unknown | Reg _ | Stack (Local _ | Incoming _ | Outgoing _) ->
+      let alloca'd =
+        emit_ins
+          ~comment:
+            (F.asprintf "%a"
+               (fun ppf reg -> F.pp_comment ppf "%a" Printreg.reg reg)
+               reg)
+          t
+          (I.alloca (T.of_reg reg))
+      in
+      set_alloca_for_reg t reg alloca'd;
+      Option.iter (store_into_reg t reg) init
+    | Stack (Domainstate _) ->
+      fail_msg ~name:"alloca_regs_without_runtime"
+        "domainstate register in scalar leaf clone"
+  in
+  (try List.iter2 (fun reg value -> alloca_reg ~init:value reg) arg_regs arg_values
+   with _ ->
+     fail_msg ~name:"alloca_regs_without_runtime" "argument count mismatch");
+  let body_regs =
+    let all_body_regs = collect_body_regs cfg in
+    Reg.Set.diff all_body_regs (Reg.Set.of_list arg_regs)
+  in
+  Reg.Set.iter (fun reg -> alloca_reg reg) body_regs;
+  emit_ins_no_res t (I.br (V.of_label cfg.entry_label))
+
 (* Emits [alloca]'s in the entry block for all [Reg.t]s in [cfg] and runtime
    registers and prepares the [t.reg2alloca] table. [arg_values] are all values
    listed in the signature in LLVM IR (including runtime registers). [arg_regs]
@@ -4598,12 +4755,40 @@ let emit_block t (cfg : Cfg.t) label =
   DLL.iter ~f:(emit_basic t) block.body;
   emit_terminator t block block.terminator
 
-let cfg (cl : CL.t) =
+let emit_scalar_leaf_clone_if_eligible t (cfg : Cfg.t) layout arg_regs
+    scalar_leaf_clone_candidates =
+  match scalar_leaf_result_type cfg with
+  | None -> false
+  | Some res ->
+    if
+      String.Set.mem cfg.fun_name scalar_leaf_clone_candidates
+      && scalar_leaf_clone_eligible cfg arg_regs
+    then (
+      let clone_symbol = scalar_leaf_clone_symbol cfg.fun_name in
+      let arg_regs = prepare_scalar_leaf_fun_info t cfg arg_regs res in
+      let arg_values = E.get_args_as_values (get_fun_info t).emitter in
+      alloca_regs_without_runtime t cfg arg_values arg_regs;
+      DLL.iter ~f:(emit_block t cfg) layout;
+      add_defined_symbol t clone_symbol;
+      complete_func_def t;
+      Hashtbl.replace t.scalar_leaf_clones cfg.fun_name
+        { symbol = clone_symbol; args = List.map T.of_reg arg_regs; res };
+      true)
+    else false
+
+let cfg ?(scalar_leaf_clone_candidates = String.Set.empty) (cl : CL.t) =
   let t = get_current_compilation_unit "cfg" in
   let layout = CL.layout cl in
   let cfg = CL.cfg cl in
   reject_addr_regs cfg.fun_args "fun args";
   let arg_regs = prepare_fun_info t cfg in
+  let emitted_scalar_leaf_clone =
+    emit_scalar_leaf_clone_if_eligible t cfg layout arg_regs
+      scalar_leaf_clone_candidates
+  in
+  let arg_regs =
+    if emitted_scalar_leaf_clone then prepare_fun_info t cfg else arg_regs
+  in
   let arg_values = E.get_args_as_values (get_fun_info t).emitter in
   alloca_regs t cfg arg_values arg_regs;
   DLL.iter ~f:(emit_block t cfg) layout;
