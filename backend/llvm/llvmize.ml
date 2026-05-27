@@ -1590,6 +1590,75 @@ let string_compare_symbol = function
   | "caml_string_compare" | "caml_bytes_compare" -> true
   | _ -> false
 
+let supports_inline_obj_tag () =
+  match Target_system.architecture (), Arch.size_addr with
+  | Target_system.AArch64, 8 -> not Config.tsan
+  | ( ( Target_system.IA32 | Target_system.X86_64 | Target_system.ARM
+      | Target_system.POWER | Target_system.Z | Target_system.Riscv ),
+      _ )
+  | Target_system.AArch64, _ ->
+    false
+
+let maybe_emit_specialized_obj_tag_extcall t ~func_symbol ~alloc ~stack_ofs
+    arg_regs res_regs =
+  match arg_regs, res_regs with
+  | [arg], [res_reg]
+    when (not alloc) && stack_ofs = 0
+         && String.equal func_symbol "caml_obj_tag"
+         && supports_inline_obj_tag ()
+         && (T.equal (T.of_reg res_reg) T.i64
+            || T.equal (T.of_reg res_reg) T.val_ptr) ->
+    add_referenced_symbol t func_symbol;
+    let done_label = V.of_label (Cmm.new_label ()) in
+    let null_label = V.of_label (Cmm.new_label ()) in
+    let not_null_label = V.of_label (Cmm.new_label ()) in
+    let int_label = V.of_label (Cmm.new_label ()) in
+    let not_int_label = V.of_label (Cmm.new_label ()) in
+    let unaligned_label = V.of_label (Cmm.new_label ()) in
+    let block_label = V.of_label (Cmm.new_label ()) in
+    let arg_raw = cast t (load_reg_to_temp t arg) T.i64 in
+    let is_null = emit_ins t (I.icmp Ieq ~arg1:arg_raw ~arg2:(V.of_int 0)) in
+    emit_ins_no_res t
+      (I.br_cond ~cond:is_null ~ifso:null_label ~ifnot:not_null_label);
+    emit_label t null_label;
+    store_into_reg t res_reg (V.of_int 2021);
+    emit_ins_no_res t (I.br done_label);
+    emit_label t not_null_label;
+    let low_bit = emit_ins t (I.binary And ~arg1:arg_raw ~arg2:(V.of_int 1)) in
+    let is_int = emit_ins t (I.icmp Ine ~arg1:low_bit ~arg2:(V.of_int 0)) in
+    emit_ins_no_res t
+      (I.br_cond ~cond:is_int ~ifso:int_label ~ifnot:not_int_label);
+    emit_label t int_label;
+    store_into_reg t res_reg (V.of_int 2001);
+    emit_ins_no_res t (I.br done_label);
+    emit_label t not_int_label;
+    let alignment_bits =
+      emit_ins t
+        (I.binary And ~arg1:arg_raw ~arg2:(V.of_int (Arch.size_addr - 1)))
+    in
+    let is_unaligned =
+      emit_ins t (I.icmp Ine ~arg1:alignment_bits ~arg2:(V.of_int 0))
+    in
+    emit_ins_no_res t
+      (I.br_cond ~cond:is_unaligned ~ifso:unaligned_label ~ifnot:block_label);
+    emit_label t unaligned_label;
+    store_into_reg t res_reg (V.of_int 2005);
+    emit_ins_no_res t (I.br done_label);
+    emit_label t block_label;
+    let block = cast t arg_raw T.ptr in
+    let header_ptr = do_offset t block T.ptr (-Arch.size_addr) in
+    let header =
+      emit_ins t (I.load_atomic ~ordering:Acquire ~ptr:header_ptr ~typ:T.i64)
+    in
+    let tag = emit_ins t (I.binary And ~arg1:header ~arg2:(V.of_int 255)) in
+    let shifted = emit_ins t (I.binary Shl ~arg1:tag ~arg2:(V.of_int 1)) in
+    let result = emit_ins t (I.binary Or ~arg1:shifted ~arg2:(V.of_int 1)) in
+    store_into_reg t res_reg result;
+    emit_ins_no_res t (I.br done_label);
+    emit_label t done_label;
+    true
+  | _ -> false
+
 let maybe_emit_specialized_string_compare_extcall t ~func_symbol ~alloc
     ~stack_ofs arg_regs res_regs emit_fallback =
   match arg_regs, res_regs with
@@ -1925,14 +1994,19 @@ let extcall ?unwind_label t (i : Cfg.terminator Cfg.instruction) ~func_symbol
   in
   if
     not
-      (maybe_emit_specialized_string_compare_extcall t ~func_symbol ~alloc
-         ~stack_ofs arg_regs res_regs emit_fallback)
+      (maybe_emit_specialized_obj_tag_extcall t ~func_symbol ~alloc ~stack_ofs
+         arg_regs res_regs)
   then
     if
       not
-        (maybe_emit_specialized_caml_modify_extcall t i ~func_symbol ~alloc
+        (maybe_emit_specialized_string_compare_extcall t ~func_symbol ~alloc
            ~stack_ofs arg_regs res_regs emit_fallback)
-    then emit_fallback ()
+    then
+      if
+        not
+          (maybe_emit_specialized_caml_modify_extcall t i ~func_symbol ~alloc
+             ~stack_ofs arg_regs res_regs emit_fallback)
+      then emit_fallback ()
 
 let raise_ t ~(exn_handler : Label.t option)
     (i : Cfg.terminator Cfg.instruction) (raise_kind : Lambda.raise_kind) =

@@ -119,6 +119,34 @@ Interpretation:
   through `caml_c_call_stack_args`, not a generated wrapper, and is not slower
   here. This is a useful control: the problem is not noalloc-ness by itself.
 
+## `caml_obj_tag` Inline Follow-up
+
+`caml_obj_tag` has now been specialized in the LLVM lowering instead of going
+through a generated noalloc C-call wrapper.
+
+Focused rerun:
+
+```text
+agent-state/llvm-fast-path-roots-integration/c_call_slowdown/run_obj_tag_inline_20260526_212617.log
+```
+
+Result:
+
+```text
+obj_tag_loop: native=0.1974s llvm=0.0992s ratio=0.5026 wrappers=0
+```
+
+Interpretation:
+
+- The previous `obj_tag_loop` result was `2.307x` slower with 4 wrapper
+  references in the LLVM assembly.
+- The new lowering removes those wrapper references and makes the LLVM version
+  faster than native on this focused benchmark.
+- This is a good proof point for tiny helper inlining, but the dynamic
+  compiler-file profile only had about 2.9M `caml_obj_tag` calls in
+  `typecore.ml`, so the compiler-binary impact should be much smaller than the
+  microbenchmark speedup.
+
 ## LLVM IR evidence
 
 Register-only noalloc call:
