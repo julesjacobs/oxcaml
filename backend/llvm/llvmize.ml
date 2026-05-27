@@ -93,6 +93,11 @@ type trap_block_info =
     recover_rbp_var_ident : LL.Ident.t
   }
 
+type active_trap =
+  { pushtrap_id : InstructionId.t;
+    trap_handler : Label.t
+  }
+
 type slow_path_root_slot =
   { reg : Reg.t;
     root_slot : LL.Value.t
@@ -120,8 +125,8 @@ type fun_info =
     mutable slow_path_root_slots : LL.Value.t list;
         (* Static entry-block spill slots used only by eligible allocation and
            poll slow paths. *)
-    mutable active_traps : Label.t option InstructionId.Tbl.t;
-        (* Top trap handler active at each instruction. [Cfg.basic_block.exn] is
+    mutable active_traps : active_trap option InstructionId.Tbl.t;
+        (* Top active trap region at each instruction. [Cfg.basic_block.exn] is
            only populated for blocks whose terminator can raise, but LLVM also
            needs this for basic-instruction safepoints such as allocation and
            polling. *)
@@ -129,13 +134,20 @@ type fun_info =
         (* Number of active trap blocks at each instruction. On AArch64, trap
            blocks are preallocated in the static LLVM frame, so the frametable
            statepoint metadata must not add their dynamic stack offset again. *)
-    trap_block_allocas : LL.Value.t Label.Tbl.t;
+    trap_block_allocas : LL.Value.t InstructionId.Tbl.t;
         (* Trap blocks preallocated in the function entry block. On arm64 this
            avoids dynamic allocas, which otherwise force LLVM to use x29 as a
            frame pointer even when normal OCaml callees may clobber x29. *)
+    trap_handler_exn_buckets : LL.Value.t Label.Tbl.t;
+        (* Per-handler entry-block slots used on AArch64 when multiple static
+           pushtrap regions can branch to the same handler block. *)
+    aarch64_trap_blocks : trap_block_info InstructionId.Tbl.t;
+        (* AArch64 trap recovery entries keyed by the static [Pushtrap]
+           instruction id. The handler label alone is not a unique trap-region
+           identity. *)
     trap_blocks : trap_block_info Label.Tbl.t;
         (* Identifiers created during a [Pushtrap] instruction needed for
-           [Poptrap] and trap handler entry *)
+           [Poptrap] and trap handler entry on non-AArch64 targets. *)
     mutable current_dbg_metadata : string option;
     subprogram_dbg_metadata_id : int option
   }
@@ -188,7 +200,9 @@ let create_fun_info ?subprogram_dbg_metadata_id emitter =
     slow_path_root_slots = [];
     active_traps = InstructionId.Tbl.create 0;
     active_trap_depths = InstructionId.Tbl.create 0;
-    trap_block_allocas = Label.Tbl.create 0;
+    trap_block_allocas = InstructionId.Tbl.create 0;
+    trap_handler_exn_buckets = Label.Tbl.create 0;
+    aarch64_trap_blocks = InstructionId.Tbl.create 0;
     trap_blocks = Label.Tbl.create 0;
     current_dbg_metadata = None;
     subprogram_dbg_metadata_id
@@ -1376,28 +1390,27 @@ let emit_unwind_landingpad t exn_entry =
   ignore (emit_ins t (I.landingpad ~typ:llvm_landingpad_type ~cleanup:true));
   emit_ins_no_res t (I.br exn_entry)
 
-let exn_entry_for_block t (block : Cfg.basic_block) =
-  match Target_system.architecture (), block.exn with
-  | Target_system.AArch64, Some lbl_handler -> (
-    match Label.Tbl.find_opt (get_fun_info t).trap_blocks lbl_handler with
+let aarch64_exn_entry_for_active_trap t (i : 'a Cfg.instruction) =
+  let fun_info = get_fun_info t in
+  match InstructionId.Tbl.find_opt fun_info.active_traps i.id with
+  | Some (Some { pushtrap_id; _ }) -> (
+    match InstructionId.Tbl.find_opt fun_info.aarch64_trap_blocks pushtrap_id with
     | Some { exn_entry; _ } -> Some exn_entry
     | None -> None)
+  | Some None | None -> None
+
+let exn_entry_for_block t (block : Cfg.basic_block) =
+  match Target_system.architecture (), block.exn with
+  | Target_system.AArch64, _ -> aarch64_exn_entry_for_active_trap t block.terminator
   | ( ( Target_system.X86_64 | Target_system.IA32 | Target_system.ARM
       | Target_system.POWER | Target_system.Z | Target_system.Riscv ),
       _ )
-  | Target_system.AArch64, None ->
+    ->
     None
 
 let exn_entry_for_instruction t (i : 'a Cfg.instruction) =
   match Target_system.architecture () with
-  | Target_system.AArch64 -> (
-    let fun_info = get_fun_info t in
-    match InstructionId.Tbl.find_opt fun_info.active_traps i.id with
-    | Some (Some lbl_handler) -> (
-      match Label.Tbl.find_opt fun_info.trap_blocks lbl_handler with
-      | Some { exn_entry; _ } -> Some exn_entry
-      | None -> None)
-    | Some None | None -> None)
+  | Target_system.AArch64 -> aarch64_exn_entry_for_active_trap t i
   | Target_system.X86_64 | Target_system.IA32 | Target_system.ARM
   | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
     None
@@ -1408,6 +1421,23 @@ let emit_unwind_landingpad_after t unwind_label exn_entry =
     emit_label t unwind_label;
     emit_unwind_landingpad t exn_entry
   | Some _, None | None, Some _ | None, None -> ()
+
+let unwind_label_and_landingpad_for_exn_entry exn_entry =
+  match Target_system.architecture (), exn_entry with
+  | Target_system.AArch64, Some exn_entry ->
+    (* AArch64 OxCaml trap recovery is modeled directly as an invoke edge to a
+       token landingpad recovery entry. Do not insert an intermediate ordinary
+       EH landingpad wrapper. *)
+    Some exn_entry, None
+  | Target_system.AArch64, None -> None, None
+  | ( ( Target_system.X86_64 | Target_system.IA32 | Target_system.ARM
+      | Target_system.POWER | Target_system.Z | Target_system.Riscv ),
+      Some exn_entry ) ->
+    Some (V.of_label (Cmm.new_label ())), Some exn_entry
+  | ( ( Target_system.X86_64 | Target_system.IA32 | Target_system.ARM
+      | Target_system.POWER | Target_system.Z | Target_system.Riscv ),
+      None ) ->
+    None, None
 
 let trap_block_type () =
   match Target_system.architecture () with
@@ -2063,26 +2093,43 @@ let extcall ?unwind_label t (i : Cfg.terminator Cfg.instruction) ~func_symbol
 
 let raise_ t ~(exn_handler : Label.t option)
     (i : Cfg.terminator Cfg.instruction) (raise_kind : Lambda.raise_kind) =
+  let unwind_label_for_active_handler () =
+    match Target_system.architecture () with
+    | Target_system.AArch64 -> aarch64_exn_entry_for_active_trap t i
+    | Target_system.X86_64 | Target_system.IA32 | Target_system.ARM
+    | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
+      None
+  in
   let call_raise raise_fn_name =
     let exn_bucket = load_reg_to_temp t i.arg.(0) in
     (match Target_system.architecture () with
-    | Target_system.X86_64 | Target_system.AArch64 ->
+    | Target_system.AArch64 ->
+      add_referenced_symbol t raise_fn_name;
+      call_simple
+        ?unwind_label:(unwind_label_for_active_handler ())
+        ~attrs:(gc_attr ~can_call_gc:true t i)
+        ~dbg:i.dbg ~raise_call:true
+        ~live_roots:(load_live_gc_roots_across t i)
+        ~cc:Oxcaml t raise_fn_name [exn_bucket] []
+      |> ignore;
+      emit_ins_no_res t I.unreachable
+    | Target_system.X86_64 ->
       add_referenced_symbol t raise_fn_name;
       call_simple
         ~attrs:(gc_attr ~can_call_gc:true t i)
         ~dbg:i.dbg ~raise_call:true
         ~live_roots:(load_live_gc_roots_across t i)
         ~cc:Oxcaml t raise_fn_name [exn_bucket] []
-      |> ignore
+      |> ignore;
+      (match exn_handler with
+      | Some lbl_handler -> (
+        match Label.Tbl.find_opt (get_fun_info t).trap_blocks lbl_handler with
+        | Some { exn_entry; _ } -> emit_ins_no_res t (I.br exn_entry)
+        | None -> emit_ins_no_res t I.unreachable)
+      | None -> emit_ins_no_res t I.unreachable)
     | Target_system.IA32 | Target_system.ARM | Target_system.POWER
     | Target_system.Z | Target_system.Riscv ->
-      not_implemented_terminator ~msg:"raise" i);
-    match exn_handler with
-    | Some lbl_handler -> (
-      match Label.Tbl.find_opt (get_fun_info t).trap_blocks lbl_handler with
-      | Some { exn_entry; _ } -> emit_ins_no_res t (I.br exn_entry)
-      | None -> emit_ins_no_res t I.unreachable)
-    | None -> emit_ins_no_res t I.unreachable
+      not_implemented_terminator ~msg:"raise" i)
   in
   match raise_kind with
   | Raise_notrace -> (
@@ -2091,8 +2138,9 @@ let raise_ t ~(exn_handler : Label.t option)
     (match Target_system.architecture () with
     | Target_system.AArch64 ->
       add_referenced_symbol t "caml_raise_notrace";
-      call_simple ~attrs:[Gc_leaf_function] ~cc:Oxcaml t "caml_raise_notrace"
-        [exn_bucket] []
+      call_simple ?unwind_label:(unwind_label_for_active_handler ())
+        ~attrs:[Gc_leaf_function] ~cc:Oxcaml t "caml_raise_notrace" [exn_bucket]
+        []
       |> ignore
     | Target_system.X86_64 ->
       (* Get sp for trap block *)
@@ -2118,12 +2166,18 @@ let raise_ t ~(exn_handler : Label.t option)
     | Target_system.IA32 | Target_system.ARM | Target_system.POWER
     | Target_system.Z | Target_system.Riscv ->
       not_implemented_terminator ~msg:"raise notrace" i);
-    match exn_handler with
-    | Some lbl_handler -> (
-      match Label.Tbl.find_opt (get_fun_info t).trap_blocks lbl_handler with
-      | Some { exn_entry; _ } -> emit_ins_no_res t (I.br exn_entry)
+    match Target_system.architecture () with
+    | Target_system.AArch64 -> emit_ins_no_res t I.unreachable
+    | Target_system.X86_64 -> (
+      match exn_handler with
+      | Some lbl_handler -> (
+        match Label.Tbl.find_opt (get_fun_info t).trap_blocks lbl_handler with
+        | Some { exn_entry; _ } -> emit_ins_no_res t (I.br exn_entry)
+        | None -> emit_ins_no_res t I.unreachable)
       | None -> emit_ins_no_res t I.unreachable)
-    | None -> emit_ins_no_res t I.unreachable)
+    | Target_system.IA32 | Target_system.ARM | Target_system.POWER
+    | Target_system.Z | Target_system.Riscv ->
+      emit_ins_no_res t I.unreachable)
   | Raise_regular ->
     let backtrace_pos = load_domainstate_addr t Domain_backtrace_pos in
     emit_ins_no_res t (I.store ~ptr:backtrace_pos ~to_store:(V.of_int 0));
@@ -2211,8 +2265,8 @@ let emit_terminator t (block : Cfg.basic_block)
       | Call { op; label_after } ->
         reject_addr_regs i.arg "call";
         let exn_entry = exn_entry_for_block t block in
-        let unwind_label =
-          Option.map (fun _ -> V.of_label (Cmm.new_label ())) exn_entry
+        let unwind_label, exn_entry =
+          unwind_label_and_landingpad_for_exn_entry exn_entry
         in
         call ?unwind_label t i op;
         br_label t label_after;
@@ -2224,8 +2278,8 @@ let emit_terminator t (block : Cfg.basic_block)
       | Call_no_return
           { func_symbol; alloc; ty_args; stack_ofs; stack_align; _ } ->
         let exn_entry = exn_entry_for_block t block in
-        let unwind_label =
-          Option.map (fun _ -> V.of_label (Cmm.new_label ())) exn_entry
+        let unwind_label, exn_entry =
+          unwind_label_and_landingpad_for_exn_entry exn_entry
         in
         extcall ?unwind_label t i ~func_symbol ~alloc ~ty_args ~stack_ofs
           ~stack_align;
@@ -2237,8 +2291,8 @@ let emit_terminator t (block : Cfg.basic_block)
         | Probe _ -> not_implemented_terminator ~msg:"probe" i
         | External { func_symbol; alloc; ty_args; stack_ofs; stack_align; _ } ->
           let exn_entry = exn_entry_for_block t block in
-          let unwind_label =
-            Option.map (fun _ -> V.of_label (Cmm.new_label ())) exn_entry
+          let unwind_label, exn_entry =
+            unwind_label_and_landingpad_for_exn_entry exn_entry
           in
           extcall ?unwind_label t i ~func_symbol ~alloc ~ty_args ~stack_ofs
             ~stack_align;
@@ -3658,10 +3712,105 @@ let stack_check ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction)
 
 let unwind_for_instruction t i =
   let exn_entry = exn_entry_for_instruction t i in
-  let unwind_label =
-    Option.map (fun _ -> V.of_label (Cmm.new_label ())) exn_entry
+  unwind_label_and_landingpad_for_exn_entry exn_entry
+
+let aarch64_trap_recover_type = T.(Struct [i64; i64; i64; i64])
+
+let restore_aarch64_trap_stack t =
+  let restore_fp =
+    if Config.with_frame_pointers then "\\0A\\09ldr x29, [sp, #8]" else ""
   in
-  unwind_label, exn_entry
+  emit_ins_no_res t
+    (I.inline_asm
+       ~asm:
+         ("sub x9, sp, #16\\0A\\09ldr x10, [sp]"
+         ^ restore_fp
+         ^ "\\0A\\09add sp, x9, x10")
+       ~constraints:"~{x9},~{x10}" ~args:[] ~res_type:T.Or_void.void
+       ~sideeffect:true)
+
+let emit_aarch64_pushtrap t (i : Cfg.basic Cfg.instruction) lbl_handler =
+  let try_label = V.of_label (Cmm.new_label ()) in
+  let exn_entry = V.of_label (Cmm.new_label ()) in
+  let fun_ident = E.get_fun_ident (get_fun_info t).emitter in
+  let fun_name = LL.Ident.to_string_hum fun_ident in
+  let label_name = LL.Ident.to_string_hum (V.get_ident_exn exn_entry) in
+  let recover_rbp_asm_ident =
+    LL.Ident.global (fun_name ^ ".recover_rbp_asm." ^ label_name)
+  in
+  let recover_rbp_var_ident =
+    LL.Ident.global (fun_name ^ ".recover_rbp_var." ^ label_name)
+  in
+  let trap_block =
+    match InstructionId.Tbl.find_opt (get_fun_info t).trap_block_allocas i.id with
+    | Some trap_block -> trap_block
+    | None -> fail_msg ~name:"pushtrap" "missing preallocated trap block"
+  in
+  let handler_bucket =
+    match
+      Label.Tbl.find_opt (get_fun_info t).trap_handler_exn_buckets lbl_handler
+    with
+    | Some handler_bucket -> handler_bucket
+    | None -> fail_msg ~name:"pushtrap" "missing preallocated handler bucket"
+  in
+  let rbp_slot = do_offset t trap_block T.ptr 16 in
+  let saved_fp_slot = do_offset t trap_block T.ptr 24 in
+  let prev_exn_sp = read_trap_pointer_register t in
+  let exn_sp_ptr = load_domainstate_addr t Domain_exn_handler in
+  emit_ins_no_res t (I.store ~ptr:exn_sp_ptr ~to_store:trap_block);
+  let sp = read_stack_pointer t in
+  let trap_block_int = cast t trap_block T.i64 in
+  let restore_sp_delta =
+    emit_ins t (I.binary Sub ~arg1:sp ~arg2:trap_block_int)
+  in
+  emit_ins_no_res t (I.store ~ptr:rbp_slot ~to_store:restore_sp_delta);
+  if Config.with_frame_pointers
+  then
+    emit_ins_no_res t
+      (I.inline_asm ~asm:"str x29, [$0]" ~constraints:"r"
+         ~args:[saved_fp_slot] ~res_type:T.Or_void.void ~sideeffect:true);
+  let recovery_target =
+    V.blockaddress ~func:fun_ident ~block:(V.get_ident_exn exn_entry)
+  in
+  call_llvm_intrinsic_no_res t "aarch64.oxcaml.trap.publish"
+    [trap_block; prev_exn_sp; recovery_target];
+  emit_ins_no_res t (I.br try_label);
+  emit_label t exn_entry;
+  ignore (emit_ins t (I.landingpad ~typ:T._token ~cleanup:true));
+  let recovered =
+    call_llvm_intrinsic t "aarch64.oxcaml.trap.recover" []
+      aarch64_trap_recover_type
+  in
+  let exn_bucket, prev_exn_sp, recovered_alloc, recovered_ds =
+    match extract_struct t recovered [[0]; [1]; [2]; [3]] with
+    | [exn_bucket; prev_exn_sp; recovered_alloc; recovered_ds] ->
+      exn_bucket, prev_exn_sp, recovered_alloc, recovered_ds
+    | _ -> Misc.fatal_error "unexpected trap recover result arity"
+  in
+  restore_aarch64_trap_stack t;
+  emit_ins_no_res t (I.store ~ptr:handler_bucket ~to_store:exn_bucket);
+  emit_ins_no_res t (I.store ~ptr:domainstate_ptr ~to_store:recovered_ds);
+  emit_ins_no_res t (I.store ~ptr:allocation_ptr ~to_store:recovered_alloc);
+  let exn_sp_ptr =
+    load_domainstate_addr ~ds_loc:recovered_ds t Domain_exn_handler
+  in
+  emit_ins_no_res t (I.store ~ptr:exn_sp_ptr ~to_store:prev_exn_sp);
+  write_trap_pointer_register t prev_exn_sp;
+  emit_ins_no_res t (I.br (V.of_label lbl_handler));
+  emit_label t try_label;
+  match
+    InstructionId.Tbl.find_opt (get_fun_info t).aarch64_trap_blocks i.id
+  with
+  | Some _ -> fail_msg "duplicate pushtrap instruction id"
+  | None ->
+    InstructionId.Tbl.add (get_fun_info t).aarch64_trap_blocks i.id
+      { trap_block;
+        stacksave_ptr = None;
+        exn_bucket;
+        exn_entry;
+        recover_rbp_asm_ident;
+        recover_rbp_var_ident
+      }
 
 let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
   match op with
@@ -3897,7 +4046,26 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
         let unwind_label, exn_entry = unwind_for_instruction t i in
         stack_check ?unwind_label ?exn_entry t i max_frame_size_bytes
       | Poptrap { lbl_handler } -> (
-        match Label.Tbl.find_opt (get_fun_info t).trap_blocks lbl_handler with
+        let trap_block_info =
+          match Target_system.architecture () with
+          | Target_system.AArch64 -> (
+            match
+              InstructionId.Tbl.find_opt (get_fun_info t).active_traps i.id
+            with
+            | Some (Some { pushtrap_id; trap_handler })
+              when Label.equal trap_handler lbl_handler -> (
+              match
+                InstructionId.Tbl.find_opt (get_fun_info t).aarch64_trap_blocks
+                  pushtrap_id
+              with
+              | Some trap_block_info -> Some trap_block_info
+              | None -> None)
+            | Some (Some _) | Some None | None -> None)
+          | Target_system.X86_64 | Target_system.IA32 | Target_system.ARM
+          | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
+            Label.Tbl.find_opt (get_fun_info t).trap_blocks lbl_handler
+        in
+        match trap_block_info with
         | None -> fail_msg "unbalanced trap pop"
         | Some { trap_block; stacksave_ptr; _ } -> (
           match Target_system.architecture () with
@@ -3926,6 +4094,10 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
             fail_msg ~name:"poptrap" "unsupported architecture for LLVM backend"
           ))
       | Pushtrap { lbl_handler } -> (
+        match Target_system.architecture () with
+        | Target_system.AArch64 -> emit_aarch64_pushtrap t i lbl_handler
+        | Target_system.X86_64 | Target_system.IA32 | Target_system.ARM
+        | Target_system.POWER | Target_system.Z | Target_system.Riscv -> (
         (* Exception control flow is implemented in a way that emulates setjmp
            in C. Namely. we call a function that "returns twice", first falling
            through to the try block, second when an exception happens. This
@@ -4075,8 +4247,8 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
           | Target_system.AArch64 ->
             let trap_block =
               match
-                Label.Tbl.find_opt (get_fun_info t).trap_block_allocas
-                  lbl_handler
+                InstructionId.Tbl.find_opt (get_fun_info t).trap_block_allocas
+                  i.id
               with
               | Some trap_block -> trap_block
               | None ->
@@ -4161,7 +4333,7 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
               exn_entry;
               recover_rbp_asm_ident;
               recover_rbp_var_ident
-            }))
+            })))
 
 (* Cfg translation entry *)
 
@@ -4200,8 +4372,12 @@ let compute_active_traps (cfg : Cfg.t) =
   let active_traps = InstructionId.Tbl.create 0 in
   let active_trap_depths = InstructionId.Tbl.create 0 in
   let visited = Label.Tbl.create 0 in
+  let equal_active_trap left right =
+    InstructionId.equal left.pushtrap_id right.pushtrap_id
+    && Label.equal left.trap_handler right.trap_handler
+  in
   let top_trap = function [] -> None | lbl :: _ -> Some lbl in
-  let record : type a. a Cfg.instruction -> Label.t list -> unit =
+  let record : type a. a Cfg.instruction -> active_trap list -> unit =
    fun i traps ->
     InstructionId.Tbl.replace active_traps i.id (top_trap traps);
     InstructionId.Tbl.replace active_trap_depths i.id (List.length traps)
@@ -4209,7 +4385,7 @@ let compute_active_traps (cfg : Cfg.t) =
   let rec update_block label traps =
     match Label.Tbl.find_opt visited label with
     | Some traps' ->
-      if not (List.equal Label.equal traps traps')
+      if not (List.equal equal_active_trap traps traps')
       then
         fail_msg ~name:"compute_active_traps"
           "block %a reached with incompatible trap stacks" Label.print label
@@ -4223,14 +4399,15 @@ let compute_active_traps (cfg : Cfg.t) =
             match (instr.desc : Cfg.basic) with
             | Cfg.Pushtrap { lbl_handler } ->
               update_block lbl_handler traps;
-              lbl_handler :: traps
+              { pushtrap_id = instr.id; trap_handler = lbl_handler } :: traps
             | Cfg.Poptrap { lbl_handler } -> (
               match traps with
-              | top_trap :: traps when Label.equal lbl_handler top_trap -> traps
+              | top_trap :: traps when Label.equal lbl_handler top_trap.trap_handler ->
+                traps
               | top_trap :: _ ->
                 fail_msg ~name:"compute_active_traps"
                   "poptrap label %a does not match active trap %a" Label.print
-                  lbl_handler Label.print top_trap
+                  lbl_handler Label.print top_trap.trap_handler
               | [] ->
                 fail_msg ~name:"compute_active_traps"
                   "poptrap label %a with no active trap" Label.print lbl_handler
@@ -4560,7 +4737,11 @@ let alloca_regs t (cfg : Cfg.t) arg_values arg_regs =
       ~f:(fun () (i : Cfg.basic Cfg.instruction) ->
         match[@ocaml.warning "-fragile-match"] i.desc with
         | Pushtrap { lbl_handler } ->
-          if not (Label.Tbl.mem (get_fun_info t).trap_block_allocas lbl_handler)
+          if not (Label.Tbl.mem (get_fun_info t).trap_handler_exn_buckets lbl_handler)
+          then
+            Label.Tbl.add (get_fun_info t).trap_handler_exn_buckets lbl_handler
+              (emit_ins t (I.alloca T.i64));
+          if not (InstructionId.Tbl.mem (get_fun_info t).trap_block_allocas i.id)
           then
             let raw_trap_block =
               emit_ins t (I.alloca ~count:(V.of_int 64) T.i8)
@@ -4573,7 +4754,7 @@ let alloca_regs t (cfg : Cfg.t) arg_values arg_regs =
               emit_ins t (I.binary And ~arg1:biased ~arg2:(V.of_int (-16)))
             in
             let trap_block = cast t aligned T.ptr in
-            Label.Tbl.add (get_fun_info t).trap_block_allocas lbl_handler
+            InstructionId.Tbl.add (get_fun_info t).trap_block_allocas i.id
               trap_block
         | _ -> ())
       ~init:()
@@ -4593,8 +4774,22 @@ let trap_handler_entry t (block : Cfg.basic_block) label =
     Option.map (fun (i : _ Cfg.instruction) -> i, i.desc) first_move
   with
   | Some (i, Op Move) -> (
-    match Label.Tbl.find_opt (get_fun_info t).trap_blocks label with
-    | Some { exn_bucket; _ } ->
+    let exn_bucket =
+      match Target_system.architecture () with
+      | Target_system.AArch64 -> (
+        match
+          Label.Tbl.find_opt (get_fun_info t).trap_handler_exn_buckets label
+        with
+        | Some handler_bucket -> Some (emit_ins t (I.load ~ptr:handler_bucket ~typ:T.i64))
+        | None -> None)
+      | Target_system.X86_64 | Target_system.IA32 | Target_system.ARM
+      | Target_system.POWER | Target_system.Z | Target_system.Riscv -> (
+        match Label.Tbl.find_opt (get_fun_info t).trap_blocks label with
+        | Some { exn_bucket; _ } -> Some exn_bucket
+        | None -> None)
+    in
+    match exn_bucket with
+    | Some exn_bucket ->
       (* Restore RBP (+ remove padding) *)
       (* emit_ins_no_res t (I.inline_asm ~asm:"pop %rbp; addq $$8, %rsp"
          ~constraints:"" ~args:[] ~res_type:T.Or_void.void ~sideeffect:true); *)
@@ -4907,26 +5102,7 @@ let define_restore_rbp t =
   let asm_symbol ident = LL.Ident.to_string_encoded ident in
   match Target_system.architecture () with
   | Target_system.AArch64 ->
-    List.iter
-      (fun ({ recover_rbp_asm_ident; recover_rbp_var_ident; _ } :
-             trap_block_info) ->
-        let recover_rbp_asm = asm_symbol recover_rbp_asm_ident in
-        let _recover_rbp_var = recover_rbp_var_ident in
-        let restore_fp =
-          if Config.with_frame_pointers then ["  ldr x29, [sp, #8]"] else []
-        in
-        add_module_asm t
-          ([ "  .text";
-             recover_rbp_asm ^ ":";
-             "  sub x16, sp, #16";
-             "  ldr x17, [sp]" ]
-          @ restore_fp
-          @ [ "  add sp, x16, x17";
-              "  ldr x17, [x16, #32]";
-              "  br x17" ]);
-        add_data_def t
-          (LL.Data.external_ (LL.Ident.to_string_hum recover_rbp_asm_ident)))
-      t.all_trap_blocks
+    ()
   | Target_system.X86_64 ->
     List.iter
       (fun ({ recover_rbp_asm_ident; recover_rbp_var_ident; _ } :

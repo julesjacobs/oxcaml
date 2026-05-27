@@ -218,6 +218,49 @@ Follow-up completed:
 - Factored the current IR spelling into `SelectionDAG/OxCamlTrapUtils.{h,cpp}`.
 - Added in-tree AArch64 CodeGen tests for the positive construct and five
   malformed shapes.
+
+Compiler-side integration completed:
+
+- AArch64 `Pushtrap` now emits a trap-publish intrinsic, a token landingpad
+  recovery entry, and a direct `invoke` unwind edge to that entry.
+- AArch64 raise calls inside an active trap region are emitted as `invoke`s to
+  the active recovery entry followed by `unreachable`.
+- AArch64 trap regions are keyed by the static `Pushtrap` instruction id, not
+  by handler label, so multiple static trap regions can share one OCaml handler
+  block.
+- Shared handler blocks receive the recovered exception bucket through a
+  handler-local entry alloca. The recovery entry remains responsible for
+  restoring SP/x29, recovered domain state, recovered allocation pointer, and
+  the previous trap chain before branching to ordinary handler code.
+- LLVM recovery classification now accepts `gc "oxcaml"`, recovery-local
+  values, constants/basic blocks/metadata, inline asm operands, and entry-block
+  allocas. It still rejects protected-path SSA values and PHIs in the recovery
+  block.
+
+Focused validation:
+
+- Rebuilt local LLVM `clang`, `llc`, `opt`, and `FileCheck`.
+- Rebuilt the installed native compiler with
+  `make install LLVM_BOOT_BACKEND=0 LLVM_BACKEND=0 OCAMLPARAM= BUILD_OCAMLPARAM=`.
+- Compiled and ran a minimal LLVM-backend `try` executable: normal path prints
+  `2`, exceptional path prints `42`.
+- Added and ran `testsuite/tests/llvm-codegen/trap_recovery_runtime.ml`.
+- Ran nearby `llvm-codegen` script tests `poll_statepoint.ml` and
+  `long_frame.ml`.
+- Manually checked LLVM positive lowering for `oxcaml-trap-recovery-invoke.ll`,
+  `oxcaml-trap-recovery-invoke-multiple.ll`, and the new
+  `oxcaml-trap-recovery-invoke-alloca-operands.ll`, including `opt -O2 | llc
+  -verify-machineinstrs`.
+- Rechecked the protected-path SSA negative test still rejects with
+  `trap recovery intrinsic must be in a runtime-entered ABI block`.
+
+Remaining risk:
+
+- The recovery-block classifier is intentionally narrow, but the allowed operand
+  set should still get reviewer attention. The important invariant is that
+  recovery code may use recovered ABI values and entry allocas, but not
+  protected normal-path SSA values.
+- Full self-stage validation has not been rerun after this integration patch.
 - Added a branched protected-body positive case with two invokes unwinding to
   one recovery block. This found a real missing integration point:
   `runtime-entered` successors also need EH-pad-like treatment in
