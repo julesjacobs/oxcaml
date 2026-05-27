@@ -128,14 +128,31 @@ def extract_compile_args(log_path: Path, module: str) -> tuple[Path, list[str]]:
     return candidates[-1]
 
 
+def rewrite_build_cwd(cwd: Path, build_dir: Path) -> Path:
+    if build_dir == ROOT / "_build":
+        return cwd
+    parts = cwd.parts
+    if cwd.is_absolute():
+        try:
+            index = parts.index("_build")
+        except ValueError:
+            return cwd
+        return build_dir.joinpath(*parts[index + 1 :])
+    if parts and parts[0] == "_build":
+        return build_dir.joinpath(*parts[1:])
+    return cwd
+
+
 def command_for(
     *,
     log_path: Path,
+    build_dir: Path,
     compiler: Path,
     module: str,
     output_dir: Path,
 ) -> tuple[Path, list[str]]:
     cwd, args = extract_compile_args(log_path, module)
+    cwd = rewrite_build_cwd(cwd, build_dir)
     args = list(args)
     args[0] = str(compiler)
     out_index = args.index("-o") + 1
@@ -175,14 +192,43 @@ def main() -> None:
     parser.add_argument("--pairs", type=int, default=7)
     parser.add_argument("--out-dir", type=Path, required=True)
     parser.add_argument("--summary", type=Path, required=True)
+    parser.add_argument(
+        "--native-build",
+        type=Path,
+        default=ROOT / "_native_build"
+        if (ROOT / "_native_build/log").exists()
+        else ROOT / "_build",
+    )
+    parser.add_argument(
+        "--native-install",
+        type=Path,
+        default=ROOT / "_native_install"
+        if (ROOT / "_native_install/bin/ocamlopt.opt").exists()
+        else ROOT / "_install",
+    )
+    parser.add_argument("--llvm-build", type=Path, default=ROOT / "_llvm_self_stage_main_build")
+    parser.add_argument("--llvm-install", type=Path, default=ROOT / "_llvm_self_stage_install")
     args = parser.parse_args()
 
-    native_compiler = ROOT / "_install/bin/ocamlopt.opt"
-    llvm_compiler = ROOT / "_llvm_self_stage_install/bin/ocamlopt.opt"
-    native_log = ROOT / "_build/log"
-    llvm_log = ROOT / "_llvm_self_stage_main_build/log"
-    native_lib = ROOT / "_install/lib/ocaml"
-    llvm_lib = ROOT / "_llvm_self_stage_install/lib/ocaml"
+    native_build = args.native_build
+    native_install = args.native_install
+    llvm_build = args.llvm_build
+    llvm_install = args.llvm_install
+    if not native_build.is_absolute():
+        native_build = ROOT / native_build
+    if not native_install.is_absolute():
+        native_install = ROOT / native_install
+    if not llvm_build.is_absolute():
+        llvm_build = ROOT / llvm_build
+    if not llvm_install.is_absolute():
+        llvm_install = ROOT / llvm_install
+
+    native_compiler = native_install / "bin/ocamlopt.opt"
+    llvm_compiler = llvm_install / "bin/ocamlopt.opt"
+    native_log = native_build / "log"
+    llvm_log = llvm_build / "log"
+    native_lib = native_install / "lib/ocaml"
+    llvm_lib = llvm_install / "lib/ocaml"
     input_info = validate_inputs(
         native_compiler=native_compiler,
         llvm_compiler=llvm_compiler,
@@ -209,12 +255,14 @@ def main() -> None:
     for label, module in MODULES:
         native_cwd, native_cmd = command_for(
             log_path=native_log,
+            build_dir=native_build,
             compiler=native_compiler,
             module=module,
             output_dir=native_out,
         )
         llvm_cwd, llvm_cmd = command_for(
             log_path=llvm_log,
+            build_dir=llvm_build,
             compiler=llvm_compiler,
             module=module,
             output_dir=llvm_out,
@@ -249,6 +297,10 @@ def main() -> None:
     ratios = [r["ratio"] for r in results]
     summary = {
         "pairs": args.pairs,
+        "native_build": str(native_build),
+        "native_install": str(native_install),
+        "llvm_build": str(llvm_build),
+        "llvm_install": str(llvm_install),
         "native_compiler": str(native_compiler),
         "llvm_compiler": str(llvm_compiler),
         "inputs": input_info,

@@ -58,12 +58,14 @@ perf.data.old
 
 _build/
 _build_upstream/
+_native_build/
 .rsync-output
 .rsync-output-compare
 _compare/
 _runtest/
 autom4te.cache
 _install/
+_native_install/
 _coverage/
 _profile/
 /Makefile.build_config
