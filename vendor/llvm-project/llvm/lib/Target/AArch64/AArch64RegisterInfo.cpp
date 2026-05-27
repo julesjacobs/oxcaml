@@ -409,6 +409,20 @@ const uint32_t *AArch64RegisterInfo::getWindowsStackProbePreservedMask() const {
   return CSR_AArch64_StackProbe_Windows_RegMask;
 }
 
+bool AArch64RegisterInfo::shouldSpillStatepointGCPtr(
+    const MachineFunction &MF, MCRegister PhysReg) const {
+  if (!isOxCamlCallingConv(MF.getFunction().getCallingConv()))
+    return false;
+
+  // The OxCaml AArch64 runtime saves only the ordinary root registers in
+  // runtime/arm64.S:SAVE_ALL_REGS. X27 is the allocation pointer and X28 is the
+  // domain state pointer at runtime boundaries; neither has an ordinary gc_regs
+  // slot. They remain allocatable for normal code, but a statepoint root in one
+  // of these registers must be described through a stack spill.
+  return MCRegisterInfo::regsOverlap(PhysReg, AArch64::X27) ||
+         MCRegisterInfo::regsOverlap(PhysReg, AArch64::X28);
+}
+
 std::optional<std::string>
 AArch64RegisterInfo::explainReservedReg(const MachineFunction &MF,
                                         MCRegister PhysReg) const {
@@ -464,8 +478,7 @@ AArch64RegisterInfo::getStrictlyReservedRegs(const MachineFunction &MF) const {
     markSuperRegs(Reserved, AArch64::W16);
     markSuperRegs(Reserved, AArch64::W17);
     markSuperRegs(Reserved, AArch64::W26);
-    markSuperRegs(Reserved, AArch64::W27);
-    markSuperRegs(Reserved, AArch64::W28);
+    markSuperRegs(Reserved, AArch64::W30);
   }
 
   for (size_t i = 0; i < AArch64::GPR32commonRegClass.getNumRegs(); ++i) {

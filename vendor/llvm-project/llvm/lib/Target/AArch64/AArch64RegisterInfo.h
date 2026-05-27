@@ -92,6 +92,9 @@ public:
   /// Stack probing calls preserve different CSRs to the normal CC.
   const uint32_t *getWindowsStackProbePreservedMask() const;
 
+  bool shouldSpillStatepointGCPtr(const MachineFunction &MF,
+                                  MCRegister PhysReg) const override;
+
   BitVector getStrictlyReservedRegs(const MachineFunction &MF) const;
   BitVector getReservedRegs(const MachineFunction &MF) const override;
   std::optional<std::string>

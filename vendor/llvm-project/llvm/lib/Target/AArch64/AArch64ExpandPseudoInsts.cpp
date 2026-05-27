@@ -1552,6 +1552,10 @@ bool AArch64ExpandPseudo::expandMBB(MachineBasicBlock &MBB) {
 
 bool AArch64ExpandPseudo::removeOxCamlRuntimeRegRoundTrips(
     MachineFunction &MF) {
+  BitVector Reserved = TRI->getReservedRegs(MF);
+  if (!Reserved[AArch64::X27] || !Reserved[AArch64::X28])
+    return false;
+
   bool Changed = false;
   for (MachineBasicBlock &MBB : MF) {
     bool ChangedBlock;
