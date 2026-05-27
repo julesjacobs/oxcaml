@@ -114,28 +114,25 @@ L115:
 	.cfi_def_cfa_offset 32
 	ldr	x8, [x28]
 	cmp	x8, x27
-	b.hs	LBB0_3
-; %bb.1:
-	mov	x3, x27
-	mov	x4, x28
-LBB0_2:                                 ; %L119
+	b.hs	LBB0_2
+; %bb.1:                                ; %L119
 	cmp	x2, #1
 	csel	x0, x0, x1, eq
-	mov	x28, x4
-	mov	x27, x3
 	ldr	x30, [sp, #24]                  ; 8-byte Folded Reload
 	add	sp, sp, #32
 	ret
-LBB0_3:                                 ; %L118
+LBB0_2:                                 ; %L118
 	str	x0, [sp, #8]
 	str	x1, [sp]
 	bl	_caml_call_gc
 Ltmp0:
-	mov	x3, x27
-	mov	x4, x28
 	ldr	x0, [sp, #8]
 	ldr	x1, [sp]
-	b	LBB0_2
+	cmp	x2, #1
+	csel	x0, x0, x1, eq
+	ldr	x30, [sp, #24]                  ; 8-byte Folded Reload
+	add	sp, sp, #32
+	ret
 	.cfi_endproc|}]
 
 let poll_const_int x =
@@ -262,11 +259,8 @@ L145:
 	.cfi_def_cfa_offset 32
 	ldr	x8, [x28]
 	cmp	x8, x27
-	b.hs	LBB0_3
-; %bb.1:
-	mov	x1, x27
-	mov	x2, x28
-LBB0_2:                                 ; %L145
+	b.hs	LBB0_2
+LBB0_1:                                 ; %L145
 	ldur	x8, [x0, #-8]
 	lsr	x8, x8, #7
 	and	x8, x8, #0x1fffffffffff8
@@ -275,19 +269,15 @@ LBB0_2:                                 ; %L145
 	sub	x8, x8, x9
 	lsl	x8, x8, #1
 	add	x0, x8, #83
-	mov	x28, x2
-	mov	x27, x1
 	ldr	x30, [sp, #24]                  ; 8-byte Folded Reload
 	add	sp, sp, #32
 	ret
-LBB0_3:                                 ; %L144
+LBB0_2:                                 ; %L144
 	str	x0, [sp, #8]
 	bl	_caml_call_gc
 Ltmp0:
-	mov	x1, x27
-	mov	x2, x28
 	ldr	x0, [sp, #8]
-	b	LBB0_2
+	b	LBB0_1
 	.cfi_endproc|}]
 
 let poll_under_trap x y f =
@@ -328,7 +318,7 @@ val poll_under_trap : 'a -> 'a -> (unit -> 'b) -> 'a = <fun>
   %21 = alloca ptr addrspace(1)
   %22 = alloca i64
   %23 = alloca i64
-  %24 = alloca i8, i64 48
+  %24 = alloca i8, i64 64
   %25 = ptrtoint ptr %24 to i64
   %26 = add i64 %25, 15
   %27 = and i64 %26, -16
@@ -382,132 +372,129 @@ L177:
   %56 = icmp eq i64 %55, 0
   br i1 %56, label %L178, label %L179
 L179:
-  %57 = call i64 asm sideeffect "mov $0, x0", "=r"() "gc-leaf-function"="true"
-  %58 = call i64 asm sideeffect "mov $0, x28", "=r"() "gc-leaf-function"="true"
-  %59 = call i64 asm sideeffect "mov $0, x27", "=r"() "gc-leaf-function"="true"
-  %60 = call i64 asm sideeffect "mov $0, x26", "=r"() "gc-leaf-function"="true"
-  %61 = add i64 %58, 48
-  %62 = inttoptr i64 %61 to ptr
-  store i64 %60, ptr %62
-  call void asm sideeffect "", "~{x0},~{x1},~{x2},~{x3},~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{x16},~{x17},~{x19},~{x20},~{x21},~{x22},~{x23},~{x24},~{x25},~{memory}"() "gc-leaf-function"="true"
-  store i64 %58, ptr %ds
-  store i64 %59, ptr %alloc
+  %57 = call i64 asm sideeffect "mov $0, x26", "=r"() "gc-leaf-function"="true"
+  %58 = load i64, ptr %ds
+  %59 = add i64 %58, 48
+  %60 = inttoptr i64 %59 to ptr
+  store i64 %57, ptr %60
   br label %L159
 L178:
-  store ptr blockaddress(@"\01_camlTOP__poll_under_trap_4_5_code", %L179), ptr @"\01_camlTOP__poll_under_trap_4_5_code.recover_rbp_var.L179"
-  %63 = ptrtoint ptr %28 to i64
-  %64 = add i64 %63, 16
-  %65 = inttoptr i64 %64 to ptr
-  %66 = ptrtoint ptr %28 to i64
-  %67 = add i64 %66, 24
-  %68 = inttoptr i64 %67 to ptr
-  %69 = ptrtoint ptr %28 to i64
-  %70 = add i64 %69, 8
-  %71 = inttoptr i64 %70 to ptr
-  %72 = load i64, ptr %ds
-  %73 = add i64 %72, 48
-  %74 = inttoptr i64 %73 to ptr
-  %75 = call i64 asm sideeffect "mov $0, x26", "=r"() "gc-leaf-function"="true"
-  store ptr %28, ptr %74
-  %76 = ptrtoint ptr %28 to i64
-  call void asm sideeffect "mov x26, $0", "r"(i64 %76) "gc-leaf-function"="true"
-  store ptr @"\01_camlTOP__poll_under_trap_4_5_code.recover_rbp_asm.L179", ptr %71
-  %77 = call  i64 @llvm.read_register.i64(metadata !{!"sp\00"})
-  %78 = ptrtoint ptr %28 to i64
-  %79 = sub i64 %77, %78
-  store i64 %79, ptr %65
-  call void asm sideeffect "str x29, [$0]", "r"(ptr %68) "gc-leaf-function"="true"
-  store i64 %75, ptr %28
-  %80 = load i64, ptr %alloc
-  %81 = load i64, ptr %ds
-  %82 = inttoptr i64 %81 to ptr
-  %83 = load i64, ptr %82
-  %84 = icmp ult i64 %83, %80
-  %85 = call  i1 @llvm.expect.i1(i1 %84, i1 1)
-  br i1 %85, label %L182, label %L181
+  %61 = ptrtoint ptr %28 to i64
+  %62 = add i64 %61, 16
+  %63 = inttoptr i64 %62 to ptr
+  %64 = ptrtoint ptr %28 to i64
+  %65 = add i64 %64, 24
+  %66 = inttoptr i64 %65 to ptr
+  %67 = ptrtoint ptr %28 to i64
+  %68 = add i64 %67, 32
+  %69 = inttoptr i64 %68 to ptr
+  %70 = ptrtoint ptr %28 to i64
+  %71 = add i64 %70, 8
+  %72 = inttoptr i64 %71 to ptr
+  %73 = load i64, ptr %ds
+  %74 = add i64 %73, 48
+  %75 = inttoptr i64 %74 to ptr
+  %76 = call i64 asm sideeffect "mov $0, x26", "=r"() "gc-leaf-function"="true"
+  store ptr %28, ptr %75
+  %77 = ptrtoint ptr %28 to i64
+  call void asm sideeffect "mov x26, $0", "r"(i64 %77) "gc-leaf-function"="true"
+  store ptr @"\01_camlTOP__poll_under_trap_4_5_code.recover_rbp_asm.L179", ptr %72
+  %78 = call  i64 @llvm.read_register.i64(metadata !{!"sp\00"})
+  %79 = ptrtoint ptr %28 to i64
+  %80 = sub i64 %78, %79
+  store i64 %80, ptr %63
+  call void asm sideeffect "str x29, [$0]", "r"(ptr %66) "gc-leaf-function"="true"
+  %81 = call  i64 @llvm.read_register.i64(metadata !{!"x30\00"})
+  store i64 %81, ptr %69
+  store i64 %76, ptr %28
+  %82 = load i64, ptr %alloc
+  %83 = load i64, ptr %ds
+  %84 = inttoptr i64 %83 to ptr
+  %85 = load i64, ptr %84
+  %86 = icmp ult i64 %85, %82
+  %87 = call  i1 @llvm.expect.i1(i1 %86, i1 1)
+  br i1 %87, label %L182, label %L181
 L181:
-  %86 = load i64, ptr %ds
-  %87 = load i64, ptr %alloc
-  %88 = invoke oxcaml_alloccc { { i64, i64 }, {  } } @"\01_caml_call_gc"(i64 %86, i64 %87) "statepoint-id"="33" cold [ "gc-live"(ptr %10, ptr %11, ptr %12) ] to label %L183 unwind label %L180
+  %88 = load i64, ptr %ds
+  %89 = load i64, ptr %alloc
+  %90 = invoke oxcaml_alloccc { { i64, i64 }, {  } } @"\01_caml_call_gc"(i64 %88, i64 %89) "statepoint-id"="33" cold [ "gc-live"(ptr %10, ptr %11, ptr %12) ] to label %L183 unwind label %L180
 L183:
-  %89 = extractvalue { { i64, i64 }, {  } } %88, 0, 0
-  %90 = extractvalue { { i64, i64 }, {  } } %88, 0, 1
-  store i64 %89, ptr %ds
-  store i64 %90, ptr %alloc
+  %91 = extractvalue { { i64, i64 }, {  } } %90, 0, 0
+  %92 = extractvalue { { i64, i64 }, {  } } %90, 0, 1
+  store i64 %91, ptr %ds
+  store i64 %92, ptr %alloc
   br label %L182
 L180:
-  %91 = landingpad { ptr, i32 } cleanup
+  %93 = landingpad { ptr, i32 } cleanup
   br label %L179
 L182:
   store i64 1, ptr %17
-  %92 = load volatile ptr addrspace(1), ptr %12
-  %93 = addrspacecast ptr addrspace(1) %92 to ptr
-  %94 = load i64, ptr %93
-  store i64 %94, ptr %19
+  %94 = load volatile ptr addrspace(1), ptr %12
+  %95 = addrspacecast ptr addrspace(1) %94 to ptr
+  %96 = load i64, ptr %95
+  store i64 %96, ptr %19
   store i64 1, ptr %9
-  %95 = load volatile ptr addrspace(1), ptr %12
-  store ptr addrspace(1) %95, ptr %7
-  %96 = load i64, ptr %9
-  %97 = load ptr addrspace(1), ptr %7
-  %98 = load i64, ptr %ds
-  %99 = load i64, ptr %alloc
-  %100 = load ptr, ptr %19
-  %101 = invoke oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } %100(i64 %98, i64 %99, i64 %96, ptr addrspace(1) %97) "statepoint-id"="0" [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 4, i64 0, i64 4, i64 8, i64 0, i64 8, i64 0, i64 20, i64 5263188, i64 7351860, i64 7105647, i64 7239007, i64 7497060, i64 7500895, i64 28769), "gc-live"(ptr %10, ptr %11) ] to label %L185 unwind label %L184
+  %97 = load volatile ptr addrspace(1), ptr %12
+  store ptr addrspace(1) %97, ptr %7
+  %98 = load i64, ptr %9
+  %99 = load ptr addrspace(1), ptr %7
+  %100 = load i64, ptr %ds
+  %101 = load i64, ptr %alloc
+  %102 = load ptr, ptr %19
+  %103 = invoke oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } %102(i64 %100, i64 %101, i64 %98, ptr addrspace(1) %99) "statepoint-id"="0" [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 4, i64 0, i64 4, i64 8, i64 0, i64 8, i64 0, i64 20, i64 5263188, i64 7351860, i64 7105647, i64 7239007, i64 7497060, i64 7500895, i64 28769), "gc-live"(ptr %10, ptr %11) ] to label %L185 unwind label %L184
 L185:
-  %102 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %101, 0, 0
-  %103 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %101, 0, 1
-  store i64 %102, ptr %ds
-  store i64 %103, ptr %alloc
-  %104 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %101, 1, 0
-  store ptr addrspace(1) %104, ptr %6
+  %104 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %103, 0, 0
+  %105 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %103, 0, 1
+  store i64 %104, ptr %ds
+  store i64 %105, ptr %alloc
+  %106 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %103, 1, 0
+  store ptr addrspace(1) %106, ptr %6
   br label %L168
 L184:
-  %105 = landingpad { ptr, i32 } cleanup
+  %107 = landingpad { ptr, i32 } cleanup
   br label %L179
 L168:
-  %106 = load ptr addrspace(1), ptr %6
-  store ptr addrspace(1) %106, ptr %20
-  %107 = load ptr addrspace(1), ptr %20
-  store ptr addrspace(1) %107, ptr %21
-  %108 = load i64, ptr %ds
-  %109 = add i64 %108, 48
-  %110 = inttoptr i64 %109 to ptr
-  %111 = call i64 asm sideeffect "mov $0, x26", "=r"() "gc-leaf-function"="true"
+  %108 = load ptr addrspace(1), ptr %6
+  store ptr addrspace(1) %108, ptr %20
+  %109 = load ptr addrspace(1), ptr %20
+  store ptr addrspace(1) %109, ptr %21
+  %110 = load i64, ptr %ds
+  %111 = add i64 %110, 48
   %112 = inttoptr i64 %111 to ptr
-  %113 = load i64, ptr %112
-  store i64 %113, ptr %110
-  call void asm sideeffect "mov x26, $0", "r"(i64 %113) "gc-leaf-function"="true"
-  %114 = load volatile ptr addrspace(1), ptr %11
-  store ptr addrspace(1) %114, ptr %6
-  %115 = load ptr addrspace(1), ptr %6
-  %116 = load i64, ptr %ds
-  %117 = load i64, ptr %alloc
-  %118 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %116, 0, 0
-  %119 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %118, i64 %117, 0, 1
-  %120 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %119, ptr addrspace(1) %115, 1, 0
-  ret { { i64, i64 }, { ptr addrspace(1) } } %120
+  %113 = call i64 asm sideeffect "mov $0, x26", "=r"() "gc-leaf-function"="true"
+  %114 = inttoptr i64 %113 to ptr
+  %115 = load i64, ptr %114
+  store i64 %115, ptr %112
+  call void asm sideeffect "mov x26, $0", "r"(i64 %115) "gc-leaf-function"="true"
+  %116 = load volatile ptr addrspace(1), ptr %11
+  store ptr addrspace(1) %116, ptr %6
+  %117 = load ptr addrspace(1), ptr %6
+  %118 = load i64, ptr %ds
+  %119 = load i64, ptr %alloc
+  %120 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %118, 0, 0
+  %121 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %120, i64 %119, 0, 1
+  %122 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %121, ptr addrspace(1) %117, 1, 0
+  ret { { i64, i64 }, { ptr addrspace(1) } } %122
 L159:
-  %121 = call i64 asm sideeffect "mov $0, x27", "=r"() "gc-leaf-function"="true"
-  store i64 %121, ptr %alloc
-  store i64 %57, ptr %9
-  %122 = load i64, ptr %9
-  %123 = inttoptr i64 %122 to ptr addrspace(1)
-  store ptr addrspace(1) %123, ptr %15
-  %124 = load i64, ptr %ds
-  %125 = add i64 %124, 64
-  %126 = inttoptr i64 %125 to ptr
-  %127 = load volatile i64, ptr %14
-  store i64 %127, ptr %126
+  store i64 %55, ptr %9
+  %123 = load i64, ptr %9
+  %124 = inttoptr i64 %123 to ptr addrspace(1)
+  store ptr addrspace(1) %124, ptr %15
+  %125 = load i64, ptr %ds
+  %126 = add i64 %125, 64
+  %127 = inttoptr i64 %126 to ptr
+  %128 = load volatile i64, ptr %14
+  store i64 %128, ptr %127
   store i64 1, ptr %23
-  %128 = load volatile ptr addrspace(1), ptr %10
-  store ptr addrspace(1) %128, ptr %6
-  %129 = load ptr addrspace(1), ptr %6
-  %130 = load i64, ptr %ds
-  %131 = load i64, ptr %alloc
-  %132 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %130, 0, 0
-  %133 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %132, i64 %131, 0, 1
-  %134 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %133, ptr addrspace(1) %129, 1, 0
-  ret { { i64, i64 }, { ptr addrspace(1) } } %134
+  %129 = load volatile ptr addrspace(1), ptr %10
+  store ptr addrspace(1) %129, ptr %6
+  %130 = load ptr addrspace(1), ptr %6
+  %131 = load i64, ptr %ds
+  %132 = load i64, ptr %alloc
+  %133 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %131, 0, 0
+  %134 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %133, i64 %132, 0, 1
+  %135 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %134, ptr addrspace(1) %130, 1, 0
+  ret { { i64, i64 }, { ptr addrspace(1) } } %135
 }|}]
 
 [%%expect_llvm_asm AArch64{|_camlTOP__poll_under_trap_4_5_code:
@@ -520,153 +507,122 @@ Lfunc_begin0:
 	.cfi_def_cfa_offset 16
 	str	x30, [sp, #8]                   ; 8-byte Folded Spill
 	.cfi_offset w30, -16
-	sub	sp, sp, #96
-	.cfi_def_cfa_offset 112
+	sub	sp, sp, #112
+	.cfi_def_cfa_offset 128
 	mov	x9, x0
-	mov	x8, x27
-	mov	x10, x28
-	mov	x11, sp
-	ldr	x12, [x10, #40]
-	add	x12, x12, #408
-	cmp	x11, x12
-	b.lo	LBB0_7
+	mov	x8, sp
+	ldr	x10, [x28, #40]
+	add	x10, x10, #408
+	cmp	x8, x10
+	b.lo	LBB0_6
 LBB0_1:                                 ; %L176
-	str	x9, [sp, #88]
-	str	x1, [sp, #80]
-	str	x2, [sp, #72]
-	ldr	x9, [x10, #64]
-	str	x9, [sp, #64]
-	mov	x28, x10
-	mov	x27, x8
+	str	x9, [sp, #104]
+	str	x1, [sp, #96]
+	str	x2, [sp, #88]
+	ldr	x8, [x28, #64]
+	str	x8, [sp, #80]
 	bl	_wrap_try
-	cbz	x0, LBB0_3
-Ltmp5:                                  ; Block address taken
-LBB0_2:                                 ; %L179
-	; InlineAsm Start
-	mov	x8, x0
-	; InlineAsm End
-	; InlineAsm Start
 	mov	x9, x28
-	; InlineAsm End
-	str	x9, [sp, #8]                    ; 8-byte Folded Spill
-	; InlineAsm Start
-	mov	x8, x27
-	; InlineAsm End
+	mov	x10, x27
+	cbz	x0, LBB0_3
+LBB0_2:                                 ; %L179
 	; InlineAsm Start
 	mov	x8, x26
 	; InlineAsm End
 	str	x8, [x9, #48]
-	; InlineAsm Start
-	; InlineAsm End
-	; InlineAsm Start
-	mov	x1, x27
-	; InlineAsm End
-	ldr	x9, [sp, #64]
-	ldr	x0, [sp, #8]                    ; 8-byte Folded Reload
-	str	x9, [x0, #64]
-	add	x9, sp, #88
-	mov	x8, x9
-	b	LBB0_6
+	ldr	x8, [sp, #80]
+	str	x8, [x9, #64]
+	add	x8, sp, #104
+	mov	x28, x9
+	mov	x27, x10
+	ldr	x0, [x8]
+	ldr	x30, [sp, #120]                 ; 8-byte Folded Reload
+	add	sp, sp, #128
+	ret
 LBB0_3:                                 ; %L178
-	mov	x1, x28
-	mov	x8, x27
-	mov	x9, sp
-	add	x10, sp, #16
-	add	x10, x10, #15
-	and	x10, x10, #0xfffffffffffffff0
-	add	x11, x10, #24
-	orr	x12, x10, #0x8
-	sub	x13, x9, x10
-	mov	x9, x8
+	mov	x8, sp
+	mov	x11, x30
+	add	x12, sp, #16
+	add	x12, x12, #15
+	and	x12, x12, #0xfffffffffffffff0
+	add	x13, x12, #24
+	orr	x14, x12, #0x8
+	sub	x8, x8, x12
+	; InlineAsm Start
+	mov	x19, x26
+	; InlineAsm End
+	str	x12, [x9, #48]
+	mov	x20, x12
+	; InlineAsm Start
+	mov	x26, x12
+	; InlineAsm End
 Lloh0:
-	adrp	x14, lCPI0_0@PAGE
+	adrp	x20, _camlTOP__poll_under_trap_4_5_code.recover_rbp_asm.L179@GOTPAGE
 Lloh1:
-	ldr	x14, [x14, lCPI0_0@PAGEOFF]
-	adrp	x19, _camlTOP__poll_under_trap_4_5_code.recover_rbp_var.L179@PAGE
-	str	x14, [x19, _camlTOP__poll_under_trap_4_5_code.recover_rbp_var.L179@PAGEOFF]
+	ldr	x20, [x20, _camlTOP__poll_under_trap_4_5_code.recover_rbp_asm.L179@GOTPAGEOFF]
+	str	x20, [x14]
+	str	x8, [x12, #16]
 	; InlineAsm Start
-	mov	x14, x26
+	str	x29, [x13]
 	; InlineAsm End
-	str	x10, [x1, #48]
-	mov	x19, x10
-	; InlineAsm Start
-	mov	x26, x10
-	; InlineAsm End
-Lloh2:
-	adrp	x19, _camlTOP__poll_under_trap_4_5_code.recover_rbp_asm.L179@GOTPAGE
-Lloh3:
-	ldr	x19, [x19, _camlTOP__poll_under_trap_4_5_code.recover_rbp_asm.L179@GOTPAGEOFF]
+	str	x11, [x12, #32]
 	str	x19, [x12]
-	str	x13, [x10, #16]
-	; InlineAsm Start
-	str	x29, [x11]
-	; InlineAsm End
-	str	x14, [x10]
-	ldr	x10, [x1]
-	cmp	x10, x8
-	b.hs	LBB0_8
+	ldr	x8, [x9]
+	cmp	x8, x27
+	b.hs	LBB0_7
 LBB0_4:                                 ; %L182
-	mov	x2, x1
-	ldr	x8, [sp, #72]
+	mov	x28, x9
+	ldr	x8, [sp, #88]
 	ldr	x8, [x8]
-	ldr	x1, [sp, #72]
-Ltmp2:
-	mov	w10, #1
-	mov	x0, x10
-	mov	x28, x2
-	mov	x27, x9
+	ldr	x1, [sp, #88]
+Ltmp3:
+	mov	w9, #1
+	mov	x0, x9
+	str	x28, [sp, #8]                   ; 8-byte Folded Spill
+	str	x10, [sp]                       ; 8-byte Folded Spill
+	mov	x27, x10
 	blr	x8
 Ltmp6:
-	mov	x0, x28
-	mov	x1, x27
-Ltmp3:
+Ltmp4:
 ; %bb.5:                                ; %L185
 	; InlineAsm Start
 	mov	x8, x26
 	; InlineAsm End
 	ldr	x8, [x8]
-	str	x8, [x0, #48]
+	str	x8, [x28, #48]
 	; InlineAsm Start
 	mov	x26, x8
 	; InlineAsm End
-	add	x8, sp, #80
-LBB0_6:                                 ; %common.ret
-	mov	x2, x0
+	add	x8, sp, #96
 	ldr	x0, [x8]
-	mov	x28, x2
-	mov	x27, x1
-	ldr	x30, [sp, #104]                 ; 8-byte Folded Reload
-	add	sp, sp, #112
+	ldr	x30, [sp, #120]                 ; 8-byte Folded Reload
+	add	sp, sp, #128
 	ret
-LBB0_7:                                 ; %L175
-	mov	w11, #38
-	mov	x0, x11
-	mov	x28, x10
-	mov	x27, x8
+LBB0_6:                                 ; %L175
+	mov	w8, #38
+	mov	x0, x8
 	bl	_caml_llvm_call_realloc_stack
-	mov	x0, x28
-	mov	x3, x27
-	mov	x8, x3
-	mov	x10, x0
 	b	LBB0_1
-LBB0_8:                                 ; %L181
+LBB0_7:                                 ; %L181
 Ltmp0:
-	mov	x28, x1
-	mov	x27, x9
+	mov	x28, x9
+	mov	x27, x10
 	bl	_caml_call_gc
 Ltmp7:
-	mov	x0, x28
-	mov	x1, x27
 Ltmp1:
-; %bb.9:                                ; %L183
-	mov	x9, x1
-	mov	x1, x0
+; %bb.8:                                ; %L183
+	mov	x10, x27
+	mov	x9, x28
 	b	LBB0_4
-LBB0_10:                                ; %L184.split-lp
-Ltmp4:
+LBB0_9:                                 ; %L18431
+Ltmp2:
 	b	LBB0_2
-	.loh AdrpLdrGot	Lloh2, Lloh3
-	.loh AdrpLdr	Lloh0, Lloh1
+LBB0_10:                                ; %L184.split-lp
+Ltmp5:
+	ldr	x10, [sp]                       ; 8-byte Folded Reload
+	ldr	x9, [sp, #8]                    ; 8-byte Folded Reload
+	b	LBB0_2
+	.loh AdrpLdrGot	Lloh0, Lloh1
 Lfunc_end0:
 	.cfi_endproc
 	.section	__TEXT,__gcc_except_tab
@@ -678,17 +634,17 @@ Lexception0:
 	.byte	1                               ; Call site Encoding = uleb128
 	.uleb128 Lcst_end0-Lcst_begin0
 Lcst_begin0:
-	.uleb128 Ltmp2-Lfunc_begin0             ; >> Call Site 1 <<
-	.uleb128 Ltmp3-Ltmp2                    ;   Call between Ltmp2 and Ltmp3
-	.uleb128 Ltmp4-Lfunc_begin0             ;     jumps to Ltmp4
+	.uleb128 Ltmp3-Lfunc_begin0             ; >> Call Site 1 <<
+	.uleb128 Ltmp4-Ltmp3                    ;   Call between Ltmp3 and Ltmp4
+	.uleb128 Ltmp5-Lfunc_begin0             ;     jumps to Ltmp5
 	.byte	0                               ;   On action: cleanup
-	.uleb128 Ltmp3-Lfunc_begin0             ; >> Call Site 2 <<
-	.uleb128 Ltmp0-Ltmp3                    ;   Call between Ltmp3 and Ltmp0
+	.uleb128 Ltmp4-Lfunc_begin0             ; >> Call Site 2 <<
+	.uleb128 Ltmp0-Ltmp4                    ;   Call between Ltmp4 and Ltmp0
 	.byte	0                               ;     has no landing pad
 	.byte	0                               ;   On action: cleanup
 	.uleb128 Ltmp0-Lfunc_begin0             ; >> Call Site 3 <<
 	.uleb128 Ltmp1-Ltmp0                    ;   Call between Ltmp0 and Ltmp1
-	.uleb128 Ltmp4-Lfunc_begin0             ;     jumps to Ltmp4
+	.uleb128 Ltmp2-Lfunc_begin0             ;     jumps to Ltmp2
 	.byte	0                               ;   On action: cleanup
 Lcst_end0:
 	.p2align	2, 0x0|}]
@@ -891,30 +847,23 @@ L219:
 	.cfi_def_cfa_offset 32
 	ldr	x8, [x28]
 	cmp	x8, x27
-	b.hs	LBB0_3
-; %bb.1:
-	mov	x2, x27
-	mov	x3, x28
-LBB0_2:                                 ; %L224
+	b.hs	LBB0_2
+LBB0_1:                                 ; %L224
 	ldr	d0, [x0]
 	fcmp	d0, #0.0
 	mov	w8, #2
 	mov	x9, #-2
 	csel	x8, x8, x9, gt
 	add	x0, x8, x1
-	mov	x28, x3
-	mov	x27, x2
 	ldr	x30, [sp, #24]                  ; 8-byte Folded Reload
 	add	sp, sp, #32
 	ret
-LBB0_3:                                 ; %L223
+LBB0_2:                                 ; %L223
 	str	x0, [sp, #8]
 	bl	_caml_call_gc
 Ltmp0:
-	mov	x2, x27
-	mov	x3, x28
 	ldr	x0, [sp, #8]
-	b	LBB0_2
+	b	LBB0_1
 	.cfi_endproc|}]
 
 let poll_many_roots x y z n =
@@ -1049,9 +998,7 @@ L246:
 	ldr	x8, [x28]
 	cmp	x8, x27
 	b.hs	LBB0_5
-; %bb.1:
-	mov	x4, x27
-	mov	x5, x28
+; %bb.1:                                ; %L251
 	cmp	x3, #3
 	b.eq	LBB0_4
 LBB0_2:                                 ; %L251
@@ -1061,8 +1008,6 @@ LBB0_2:                                 ; %L251
 ; %bb.3:                                ; %L246
 	mov	x1, x2
 LBB0_4:                                 ; %common.ret
-	mov	x28, x5
-	mov	x27, x4
 	mov	x0, x1
 	ldr	x30, [sp, #40]                  ; 8-byte Folded Reload
 	add	sp, sp, #48
@@ -1073,8 +1018,6 @@ LBB0_5:                                 ; %L250
 	str	x2, [sp, #8]
 	bl	_caml_call_gc
 Ltmp0:
-	mov	x4, x27
-	mov	x5, x28
 	ldr	x0, [sp, #24]
 	ldr	x1, [sp, #16]
 	ldr	x2, [sp, #8]
@@ -1190,29 +1133,25 @@ L269:
 	; InlineAsm End
 	ldr	x8, [x28]
 	cmp	x8, x27
-	b.hs	LBB0_3
+	b.hs	LBB0_2
 ; %bb.1:
-	mov	x2, x27
-	mov	x3, x28
-	mov	x8, x0
-LBB0_2:                                 ; %L273
 	cmp	x1, #1
-	csel	x0, x0, x8, eq
-	mov	x28, x3
-	mov	x27, x2
+	csel	x0, x0, x0, eq
 	ldr	x30, [sp, #24]                  ; 8-byte Folded Reload
 	add	sp, sp, #32
 	ret
-LBB0_3:                                 ; %L272
+LBB0_2:                                 ; %L272
 	str	x0, [sp, #8]
 	str	x0, [sp]
 	bl	_caml_call_gc
 Ltmp0:
-	mov	x2, x27
-	mov	x3, x28
 	ldr	x0, [sp, #8]
 	ldr	x8, [sp]
-	b	LBB0_2
+	cmp	x1, #1
+	csel	x0, x0, x8, eq
+	ldr	x30, [sp, #24]                  ; 8-byte Folded Reload
+	add	sp, sp, #32
+	ret
 	.cfi_endproc|}]
 
 let poll_twice_varying_roots x y z n =
@@ -1379,21 +1318,17 @@ L301:
 	.cfi_offset w30, -16
 	sub	sp, sp, #32
 	.cfi_def_cfa_offset 48
-	ldr	x9, [x28]
-	cmp	x9, x27
+	ldr	x8, [x28]
+	cmp	x8, x27
 	b.hs	LBB0_3
-; %bb.1:
-	mov	x8, x27
-	mov	x4, x28
+; %bb.1:                                ; %L306
 	cmp	x3, #1
-	csel	x10, x0, x1, eq
-	cmp	x9, x8
+	csel	x9, x0, x1, eq
+	cmp	x8, x27
 	b.hs	LBB0_4
 LBB0_2:                                 ; %L309
 	cmp	x3, #3
-	csel	x0, x10, x2, eq
-	mov	x28, x4
-	mov	x27, x8
+	csel	x0, x9, x2, eq
 	ldr	x30, [sp, #40]                  ; 8-byte Folded Reload
 	add	sp, sp, #48
 	ret
@@ -1403,28 +1338,26 @@ LBB0_3:                                 ; %L305
 	str	x2, [sp, #8]
 	bl	_caml_call_gc
 Ltmp0:
-	mov	x8, x27
-	mov	x4, x28
 	ldr	x0, [sp, #24]
 	ldr	x1, [sp, #16]
 	ldr	x2, [sp, #8]
-	ldr	x9, [x28]
+	ldr	x8, [x28]
 	cmp	x3, #1
-	csel	x10, x0, x1, eq
-	cmp	x9, x8
+	csel	x9, x0, x1, eq
+	cmp	x8, x27
 	b.lo	LBB0_2
 LBB0_4:                                 ; %L308
 	str	x2, [sp, #24]
-	str	x10, [sp, #16]
-	mov	x28, x4
-	mov	x27, x8
+	str	x9, [sp, #16]
 	bl	_caml_call_gc
 Ltmp1:
-	mov	x8, x27
-	mov	x4, x28
 	ldr	x2, [sp, #24]
-	ldr	x10, [sp, #16]
-	b	LBB0_2
+	ldr	x9, [sp, #16]
+	cmp	x3, #3
+	csel	x0, x9, x2, eq
+	ldr	x30, [sp, #40]                  ; 8-byte Folded Reload
+	add	sp, sp, #48
+	ret
 	.cfi_endproc|}]
 
 let alloc_triple_live_roots x y z =
@@ -1540,37 +1473,30 @@ L325:
 	.cfi_offset w30, -16
 	sub	sp, sp, #32
 	.cfi_def_cfa_offset 48
-	sub	x9, x27, #32
+	sub	x27, x27, #32
 	ldr	x8, [x28]
-	cmp	x8, x9
-	b.hi	LBB0_3
-; %bb.1:
-	mov	x3, x28
-LBB0_2:                                 ; %L325
+	cmp	x8, x27
+	b.hi	LBB0_2
+LBB0_1:                                 ; %L325
 	mov	w8, #3072
-	str	x8, [x9]
-	mov	x8, x9
+	str	x8, [x27]
+	mov	x8, x27
 	str	x0, [x8, #8]!
-	stp	x1, x2, [x9, #16]
-	mov	x28, x3
-	mov	x27, x9
+	stp	x1, x2, [x27, #16]
 	mov	x0, x8
 	ldr	x30, [sp, #40]                  ; 8-byte Folded Reload
 	add	sp, sp, #48
 	ret
-LBB0_3:                                 ; %L324
+LBB0_2:                                 ; %L324
 	str	x0, [sp, #24]
 	str	x1, [sp, #16]
 	str	x2, [sp, #8]
-	mov	x27, x9
 	bl	_caml_call_gc
 Ltmp0:
-	mov	x9, x27
-	mov	x3, x28
 	ldr	x0, [sp, #24]
 	ldr	x1, [sp, #16]
 	ldr	x2, [sp, #8]
-	b	LBB0_2
+	b	LBB0_1
 	.cfi_endproc|}]
 
 let call_with_live_roots x y f =
@@ -1781,27 +1707,24 @@ L357:
 	.cfi_def_cfa_offset 16
 	str	x30, [sp, #8]                   ; 8-byte Folded Spill
 	.cfi_offset w30, -16
-	sub	x9, x27, #24
+	sub	x27, x27, #24
 	ldr	x8, [x28]
-	cmp	x8, x9
+	cmp	x8, x27
 	b.hi	LBB0_2
 LBB0_1:                                 ; %L357
 	mov	w8, #2048
-	str	x8, [x9]
-	mov	x8, x9
+	str	x8, [x27]
+	mov	x8, x27
 	str	x0, [x8, #8]!
-	add	x10, x0, #2
-	str	x10, [x9, #16]
-	mov	x27, x9
+	add	x9, x0, #2
+	str	x9, [x27, #16]
 	mov	x0, x8
 	ldr	x30, [sp, #8]                   ; 8-byte Folded Reload
 	add	sp, sp, #16
 	ret
 LBB0_2:                                 ; %L356
-	mov	x27, x9
 	bl	_caml_call_gc
 Ltmp0:
-	mov	x9, x27
 	b	LBB0_1
 	.cfi_endproc|}]
 
@@ -1892,34 +1815,27 @@ L372:
 	.cfi_offset w30, -16
 	sub	sp, sp, #16
 	.cfi_def_cfa_offset 32
-	sub	x9, x27, #24
+	sub	x27, x27, #24
 	ldr	x8, [x28]
-	cmp	x8, x9
-	b.hi	LBB0_3
-; %bb.1:
-	mov	x1, x28
-LBB0_2:                                 ; %L372
+	cmp	x8, x27
+	b.hi	LBB0_2
+LBB0_1:                                 ; %L372
 	mov	w8, #2048
-	str	x8, [x9]
-	mov	x8, x9
+	str	x8, [x27]
+	mov	x8, x27
 	str	x0, [x8, #8]!
-	mov	w10, #85
-	str	x10, [x9, #16]
-	mov	x28, x1
-	mov	x27, x9
+	mov	w9, #85
+	str	x9, [x27, #16]
 	mov	x0, x8
 	ldr	x30, [sp, #24]                  ; 8-byte Folded Reload
 	add	sp, sp, #32
 	ret
-LBB0_3:                                 ; %L371
+LBB0_2:                                 ; %L371
 	str	x0, [sp, #8]
-	mov	x27, x9
 	bl	_caml_call_gc
 Ltmp0:
-	mov	x9, x27
-	mov	x1, x28
 	ldr	x0, [sp, #8]
-	b	LBB0_2
+	b	LBB0_1
 	.cfi_endproc|}]
 
 let alloc_under_trap x y f =
@@ -1959,7 +1875,7 @@ val alloc_under_trap : 'a -> 'b -> ('a * 'b -> 'a) -> 'a = <fun>
   %21 = alloca ptr addrspace(1)
   %22 = alloca i64
   %23 = alloca i64
-  %24 = alloca i8, i64 48
+  %24 = alloca i8, i64 64
   %25 = ptrtoint ptr %24 to i64
   %26 = add i64 %25, 15
   %27 = and i64 %26, -16
@@ -2013,155 +1929,152 @@ L404:
   %56 = icmp eq i64 %55, 0
   br i1 %56, label %L405, label %L406
 L406:
-  %57 = call i64 asm sideeffect "mov $0, x0", "=r"() "gc-leaf-function"="true"
-  %58 = call i64 asm sideeffect "mov $0, x28", "=r"() "gc-leaf-function"="true"
-  %59 = call i64 asm sideeffect "mov $0, x27", "=r"() "gc-leaf-function"="true"
-  %60 = call i64 asm sideeffect "mov $0, x26", "=r"() "gc-leaf-function"="true"
-  %61 = add i64 %58, 48
-  %62 = inttoptr i64 %61 to ptr
-  store i64 %60, ptr %62
-  call void asm sideeffect "", "~{x0},~{x1},~{x2},~{x3},~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{x16},~{x17},~{x19},~{x20},~{x21},~{x22},~{x23},~{x24},~{x25},~{memory}"() "gc-leaf-function"="true"
-  store i64 %58, ptr %ds
-  store i64 %59, ptr %alloc
+  %57 = call i64 asm sideeffect "mov $0, x26", "=r"() "gc-leaf-function"="true"
+  %58 = load i64, ptr %ds
+  %59 = add i64 %58, 48
+  %60 = inttoptr i64 %59 to ptr
+  store i64 %57, ptr %60
   br label %L386
 L405:
-  store ptr blockaddress(@"\01_camlTOP__alloc_under_trap_24_25_code", %L406), ptr @"\01_camlTOP__alloc_under_trap_24_25_code.recover_rbp_var.L406"
-  %63 = ptrtoint ptr %28 to i64
-  %64 = add i64 %63, 16
-  %65 = inttoptr i64 %64 to ptr
-  %66 = ptrtoint ptr %28 to i64
-  %67 = add i64 %66, 24
-  %68 = inttoptr i64 %67 to ptr
-  %69 = ptrtoint ptr %28 to i64
-  %70 = add i64 %69, 8
-  %71 = inttoptr i64 %70 to ptr
-  %72 = load i64, ptr %ds
-  %73 = add i64 %72, 48
-  %74 = inttoptr i64 %73 to ptr
-  %75 = call i64 asm sideeffect "mov $0, x26", "=r"() "gc-leaf-function"="true"
-  store ptr %28, ptr %74
-  %76 = ptrtoint ptr %28 to i64
-  call void asm sideeffect "mov x26, $0", "r"(i64 %76) "gc-leaf-function"="true"
-  store ptr @"\01_camlTOP__alloc_under_trap_24_25_code.recover_rbp_asm.L406", ptr %71
-  %77 = call  i64 @llvm.read_register.i64(metadata !{!"sp\00"})
-  %78 = ptrtoint ptr %28 to i64
-  %79 = sub i64 %77, %78
-  store i64 %79, ptr %65
-  call void asm sideeffect "str x29, [$0]", "r"(ptr %68) "gc-leaf-function"="true"
-  store i64 %75, ptr %28
-  %80 = load i64, ptr %alloc
-  %81 = sub i64 %80, 24
-  store i64 %81, ptr %alloc
-  %82 = load i64, ptr %ds
-  %83 = inttoptr i64 %82 to ptr
-  %84 = load i64, ptr %83
-  %85 = icmp ule i64 %84, %81
-  %86 = call  i1 @llvm.expect.i1(i1 %85, i1 1)
-  br i1 %86, label %L409, label %L408
+  %61 = ptrtoint ptr %28 to i64
+  %62 = add i64 %61, 16
+  %63 = inttoptr i64 %62 to ptr
+  %64 = ptrtoint ptr %28 to i64
+  %65 = add i64 %64, 24
+  %66 = inttoptr i64 %65 to ptr
+  %67 = ptrtoint ptr %28 to i64
+  %68 = add i64 %67, 32
+  %69 = inttoptr i64 %68 to ptr
+  %70 = ptrtoint ptr %28 to i64
+  %71 = add i64 %70, 8
+  %72 = inttoptr i64 %71 to ptr
+  %73 = load i64, ptr %ds
+  %74 = add i64 %73, 48
+  %75 = inttoptr i64 %74 to ptr
+  %76 = call i64 asm sideeffect "mov $0, x26", "=r"() "gc-leaf-function"="true"
+  store ptr %28, ptr %75
+  %77 = ptrtoint ptr %28 to i64
+  call void asm sideeffect "mov x26, $0", "r"(i64 %77) "gc-leaf-function"="true"
+  store ptr @"\01_camlTOP__alloc_under_trap_24_25_code.recover_rbp_asm.L406", ptr %72
+  %78 = call  i64 @llvm.read_register.i64(metadata !{!"sp\00"})
+  %79 = ptrtoint ptr %28 to i64
+  %80 = sub i64 %78, %79
+  store i64 %80, ptr %63
+  call void asm sideeffect "str x29, [$0]", "r"(ptr %66) "gc-leaf-function"="true"
+  %81 = call  i64 @llvm.read_register.i64(metadata !{!"x30\00"})
+  store i64 %81, ptr %69
+  store i64 %76, ptr %28
+  %82 = load i64, ptr %alloc
+  %83 = sub i64 %82, 24
+  store i64 %83, ptr %alloc
+  %84 = load i64, ptr %ds
+  %85 = inttoptr i64 %84 to ptr
+  %86 = load i64, ptr %85
+  %87 = icmp ule i64 %86, %83
+  %88 = call  i1 @llvm.expect.i1(i1 %87, i1 1)
+  br i1 %88, label %L409, label %L408
 L408:
-  %87 = load i64, ptr %ds
-  %88 = load i64, ptr %alloc
-  %89 = invoke oxcaml_alloccc { { i64, i64 }, {  } } @"\01_caml_call_gc"(i64 %87, i64 %88) "statepoint-id"="196609" cold [ "deopt"(i64 1870160737, i64 1, i64 1, i64 3, i64 1, i64 3, i64 0, i64 15, i64 19, i64 0, i64 19, i64 0, i64 22, i64 5263188, i64 3028017, i64 7105633, i64 6251375, i64 6581877, i64 6255205, i64 6386292, i64 112), "gc-live"(ptr %10, ptr %11, ptr %12) ] to label %L410 unwind label %L407
+  %89 = load i64, ptr %ds
+  %90 = load i64, ptr %alloc
+  %91 = invoke oxcaml_alloccc { { i64, i64 }, {  } } @"\01_caml_call_gc"(i64 %89, i64 %90) "statepoint-id"="196609" cold [ "deopt"(i64 1870160737, i64 1, i64 1, i64 3, i64 1, i64 3, i64 0, i64 15, i64 19, i64 0, i64 19, i64 0, i64 22, i64 5263188, i64 3028017, i64 7105633, i64 6251375, i64 6581877, i64 6255205, i64 6386292, i64 112), "gc-live"(ptr %10, ptr %11, ptr %12) ] to label %L410 unwind label %L407
 L410:
-  %90 = extractvalue { { i64, i64 }, {  } } %89, 0, 0
-  %91 = extractvalue { { i64, i64 }, {  } } %89, 0, 1
-  store i64 %90, ptr %ds
-  store i64 %91, ptr %alloc
+  %92 = extractvalue { { i64, i64 }, {  } } %91, 0, 0
+  %93 = extractvalue { { i64, i64 }, {  } } %91, 0, 1
+  store i64 %92, ptr %ds
+  store i64 %93, ptr %alloc
   br label %L409
 L407:
-  %92 = landingpad { ptr, i32 } cleanup
+  %94 = landingpad { ptr, i32 } cleanup
   br label %L406
 L409:
-  %93 = load i64, ptr %alloc
-  %94 = add i64 %93, 8
-  %95 = inttoptr i64 %94 to ptr addrspace(1)
-  store ptr addrspace(1) %95, ptr %16
-  %96 = load ptr addrspace(1), ptr %16
-  %97 = ptrtoint ptr addrspace(1) %96 to i64
-  %98 = add i64 %97, -8
-  %99 = inttoptr i64 %98 to ptr
-  store volatile i64 2048, ptr %99
-  %100 = load ptr addrspace(1), ptr %16
-  %101 = addrspacecast ptr addrspace(1) %100 to ptr
-  %102 = load volatile ptr addrspace(1), ptr %10
-  store ptr addrspace(1) %102, ptr %101
-  %103 = load ptr addrspace(1), ptr %16
-  %104 = ptrtoint ptr addrspace(1) %103 to i64
-  %105 = add i64 %104, 8
-  %106 = inttoptr i64 %105 to ptr
-  %107 = load volatile ptr addrspace(1), ptr %11
-  store ptr addrspace(1) %107, ptr %106
-  %108 = load ptr addrspace(1), ptr %16
-  store ptr addrspace(1) %108, ptr %18
-  %109 = load volatile ptr addrspace(1), ptr %12
-  %110 = addrspacecast ptr addrspace(1) %109 to ptr
-  %111 = load i64, ptr %110
-  store i64 %111, ptr %19
-  %112 = load ptr addrspace(1), ptr %18
-  store ptr addrspace(1) %112, ptr %6
-  %113 = load volatile ptr addrspace(1), ptr %12
-  store ptr addrspace(1) %113, ptr %7
-  %114 = load ptr addrspace(1), ptr %6
-  %115 = load ptr addrspace(1), ptr %7
-  %116 = load i64, ptr %ds
-  %117 = load i64, ptr %alloc
-  %118 = load ptr, ptr %19
-  %119 = invoke oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } %118(i64 %116, i64 %117, ptr addrspace(1) %114, ptr addrspace(1) %115) "statepoint-id"="0" [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 4, i64 0, i64 4, i64 10, i64 0, i64 10, i64 0, i64 22, i64 5263188, i64 3028017, i64 7105633, i64 6251375, i64 6581877, i64 6255205, i64 6386292, i64 112), "gc-live"(ptr %10) ] to label %L412 unwind label %L411
+  %95 = load i64, ptr %alloc
+  %96 = add i64 %95, 8
+  %97 = inttoptr i64 %96 to ptr addrspace(1)
+  store ptr addrspace(1) %97, ptr %16
+  %98 = load ptr addrspace(1), ptr %16
+  %99 = ptrtoint ptr addrspace(1) %98 to i64
+  %100 = add i64 %99, -8
+  %101 = inttoptr i64 %100 to ptr
+  store volatile i64 2048, ptr %101
+  %102 = load ptr addrspace(1), ptr %16
+  %103 = addrspacecast ptr addrspace(1) %102 to ptr
+  %104 = load volatile ptr addrspace(1), ptr %10
+  store ptr addrspace(1) %104, ptr %103
+  %105 = load ptr addrspace(1), ptr %16
+  %106 = ptrtoint ptr addrspace(1) %105 to i64
+  %107 = add i64 %106, 8
+  %108 = inttoptr i64 %107 to ptr
+  %109 = load volatile ptr addrspace(1), ptr %11
+  store ptr addrspace(1) %109, ptr %108
+  %110 = load ptr addrspace(1), ptr %16
+  store ptr addrspace(1) %110, ptr %18
+  %111 = load volatile ptr addrspace(1), ptr %12
+  %112 = addrspacecast ptr addrspace(1) %111 to ptr
+  %113 = load i64, ptr %112
+  store i64 %113, ptr %19
+  %114 = load ptr addrspace(1), ptr %18
+  store ptr addrspace(1) %114, ptr %6
+  %115 = load volatile ptr addrspace(1), ptr %12
+  store ptr addrspace(1) %115, ptr %7
+  %116 = load ptr addrspace(1), ptr %6
+  %117 = load ptr addrspace(1), ptr %7
+  %118 = load i64, ptr %ds
+  %119 = load i64, ptr %alloc
+  %120 = load ptr, ptr %19
+  %121 = invoke oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } %120(i64 %118, i64 %119, ptr addrspace(1) %116, ptr addrspace(1) %117) "statepoint-id"="0" [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 4, i64 0, i64 4, i64 10, i64 0, i64 10, i64 0, i64 22, i64 5263188, i64 3028017, i64 7105633, i64 6251375, i64 6581877, i64 6255205, i64 6386292, i64 112), "gc-live"(ptr %10) ] to label %L412 unwind label %L411
 L412:
-  %120 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %119, 0, 0
-  %121 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %119, 0, 1
-  store i64 %120, ptr %ds
-  store i64 %121, ptr %alloc
-  %122 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %119, 1, 0
-  store ptr addrspace(1) %122, ptr %6
+  %122 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %121, 0, 0
+  %123 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %121, 0, 1
+  store i64 %122, ptr %ds
+  store i64 %123, ptr %alloc
+  %124 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %121, 1, 0
+  store ptr addrspace(1) %124, ptr %6
   br label %L395
 L411:
-  %123 = landingpad { ptr, i32 } cleanup
+  %125 = landingpad { ptr, i32 } cleanup
   br label %L406
 L395:
-  %124 = load ptr addrspace(1), ptr %6
-  store ptr addrspace(1) %124, ptr %20
-  %125 = load ptr addrspace(1), ptr %20
-  store ptr addrspace(1) %125, ptr %21
-  %126 = load i64, ptr %ds
-  %127 = add i64 %126, 48
-  %128 = inttoptr i64 %127 to ptr
-  %129 = call i64 asm sideeffect "mov $0, x26", "=r"() "gc-leaf-function"="true"
+  %126 = load ptr addrspace(1), ptr %6
+  store ptr addrspace(1) %126, ptr %20
+  %127 = load ptr addrspace(1), ptr %20
+  store ptr addrspace(1) %127, ptr %21
+  %128 = load i64, ptr %ds
+  %129 = add i64 %128, 48
   %130 = inttoptr i64 %129 to ptr
-  %131 = load i64, ptr %130
-  store i64 %131, ptr %128
-  call void asm sideeffect "mov x26, $0", "r"(i64 %131) "gc-leaf-function"="true"
-  %132 = load ptr addrspace(1), ptr %21
-  store ptr addrspace(1) %132, ptr %6
-  %133 = load ptr addrspace(1), ptr %6
-  %134 = load i64, ptr %ds
-  %135 = load i64, ptr %alloc
-  %136 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %134, 0, 0
-  %137 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %136, i64 %135, 0, 1
-  %138 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %137, ptr addrspace(1) %133, 1, 0
-  ret { { i64, i64 }, { ptr addrspace(1) } } %138
+  %131 = call i64 asm sideeffect "mov $0, x26", "=r"() "gc-leaf-function"="true"
+  %132 = inttoptr i64 %131 to ptr
+  %133 = load i64, ptr %132
+  store i64 %133, ptr %130
+  call void asm sideeffect "mov x26, $0", "r"(i64 %133) "gc-leaf-function"="true"
+  %134 = load ptr addrspace(1), ptr %21
+  store ptr addrspace(1) %134, ptr %6
+  %135 = load ptr addrspace(1), ptr %6
+  %136 = load i64, ptr %ds
+  %137 = load i64, ptr %alloc
+  %138 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %136, 0, 0
+  %139 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %138, i64 %137, 0, 1
+  %140 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %139, ptr addrspace(1) %135, 1, 0
+  ret { { i64, i64 }, { ptr addrspace(1) } } %140
 L386:
-  %139 = call i64 asm sideeffect "mov $0, x27", "=r"() "gc-leaf-function"="true"
-  store i64 %139, ptr %alloc
-  store i64 %57, ptr %9
-  %140 = load i64, ptr %9
-  %141 = inttoptr i64 %140 to ptr addrspace(1)
-  store ptr addrspace(1) %141, ptr %15
-  %142 = load i64, ptr %ds
-  %143 = add i64 %142, 64
-  %144 = inttoptr i64 %143 to ptr
-  %145 = load volatile i64, ptr %14
-  store i64 %145, ptr %144
+  store i64 %55, ptr %9
+  %141 = load i64, ptr %9
+  %142 = inttoptr i64 %141 to ptr addrspace(1)
+  store ptr addrspace(1) %142, ptr %15
+  %143 = load i64, ptr %ds
+  %144 = add i64 %143, 64
+  %145 = inttoptr i64 %144 to ptr
+  %146 = load volatile i64, ptr %14
+  store i64 %146, ptr %145
   store i64 1, ptr %23
-  %146 = load volatile ptr addrspace(1), ptr %10
-  store ptr addrspace(1) %146, ptr %6
-  %147 = load ptr addrspace(1), ptr %6
-  %148 = load i64, ptr %ds
-  %149 = load i64, ptr %alloc
-  %150 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %148, 0, 0
-  %151 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %150, i64 %149, 0, 1
-  %152 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %151, ptr addrspace(1) %147, 1, 0
-  ret { { i64, i64 }, { ptr addrspace(1) } } %152
+  %147 = load volatile ptr addrspace(1), ptr %10
+  store ptr addrspace(1) %147, ptr %6
+  %148 = load ptr addrspace(1), ptr %6
+  %149 = load i64, ptr %ds
+  %150 = load i64, ptr %alloc
+  %151 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %149, 0, 0
+  %152 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %151, i64 %150, 0, 1
+  %153 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %152, ptr addrspace(1) %148, 1, 0
+  ret { { i64, i64 }, { ptr addrspace(1) } } %153
 }|}]
 [%%expect_llvm_asm AArch64{|_camlTOP__alloc_under_trap_24_25_code:
 Lfunc_begin0:
@@ -2173,159 +2086,128 @@ Lfunc_begin0:
 	.cfi_def_cfa_offset 16
 	str	x30, [sp, #8]                   ; 8-byte Folded Spill
 	.cfi_offset w30, -16
-	sub	sp, sp, #96
-	.cfi_def_cfa_offset 112
+	sub	sp, sp, #112
+	.cfi_def_cfa_offset 128
 	mov	x9, x0
-	mov	x8, x27
-	mov	x10, x28
-	mov	x11, sp
-	ldr	x12, [x10, #40]
-	add	x12, x12, #408
-	cmp	x11, x12
-	b.lo	LBB0_6
+	mov	x8, sp
+	ldr	x10, [x28, #40]
+	add	x10, x10, #408
+	cmp	x8, x10
+	b.lo	LBB0_7
 LBB0_1:                                 ; %L403
-	str	x9, [sp, #88]
-	str	x1, [sp, #80]
-	str	x2, [sp, #72]
-	ldr	x9, [x10, #64]
-	str	x9, [sp, #64]
-	mov	x28, x10
-	mov	x27, x8
+	str	x9, [sp, #104]
+	str	x1, [sp, #96]
+	str	x2, [sp, #88]
+	ldr	x8, [x28, #64]
+	str	x8, [sp, #80]
 	bl	_wrap_try
-	cbz	x0, LBB0_3
-Ltmp5:                                  ; Block address taken
-LBB0_2:                                 ; %L406
-	; InlineAsm Start
-	mov	x8, x0
-	; InlineAsm End
-	; InlineAsm Start
 	mov	x9, x28
-	; InlineAsm End
-	str	x9, [sp, #8]                    ; 8-byte Folded Spill
-	; InlineAsm Start
-	mov	x8, x27
-	; InlineAsm End
+	cbz	x0, LBB0_4
+; %bb.2:
+	mov	x2, x27
+LBB0_3:                                 ; %L406
 	; InlineAsm Start
 	mov	x8, x26
 	; InlineAsm End
 	str	x8, [x9, #48]
-	; InlineAsm Start
-	; InlineAsm End
-	; InlineAsm Start
-	mov	x2, x27
-	; InlineAsm End
-	ldr	x9, [sp, #64]
-	ldr	x1, [sp, #8]                    ; 8-byte Folded Reload
-	str	x9, [x1, #64]
-	ldr	x0, [sp, #88]
-	mov	x28, x1
+	ldr	x8, [sp, #80]
+	str	x8, [x9, #64]
+	ldr	x0, [sp, #104]
+	mov	x28, x9
 	mov	x27, x2
-	ldr	x30, [sp, #104]                 ; 8-byte Folded Reload
-	add	sp, sp, #112
+	ldr	x30, [sp, #120]                 ; 8-byte Folded Reload
+	add	sp, sp, #128
 	ret
-LBB0_3:                                 ; %L405
-	mov	x1, x28
-	mov	x8, x27
-	mov	x9, sp
-	add	x10, sp, #16
-	add	x10, x10, #15
-	and	x10, x10, #0xfffffffffffffff0
-	add	x11, x10, #24
-	orr	x12, x10, #0x8
-	sub	x9, x9, x10
+LBB0_4:                                 ; %L405
+	mov	x8, sp
+	mov	x10, x30
+	add	x11, sp, #16
+	add	x11, x11, #15
+	and	x11, x11, #0xfffffffffffffff0
+	add	x12, x11, #24
+	orr	x13, x11, #0x8
+	sub	x8, x8, x11
+	; InlineAsm Start
+	mov	x14, x26
+	; InlineAsm End
+	str	x11, [x9, #48]
+	mov	x19, x11
+	; InlineAsm Start
+	mov	x26, x11
+	; InlineAsm End
 Lloh0:
-	adrp	x13, lCPI0_0@PAGE
+	adrp	x19, _camlTOP__alloc_under_trap_24_25_code.recover_rbp_asm.L406@GOTPAGE
 Lloh1:
-	ldr	x13, [x13, lCPI0_0@PAGEOFF]
-	adrp	x14, _camlTOP__alloc_under_trap_24_25_code.recover_rbp_var.L406@PAGE
-	str	x13, [x14, _camlTOP__alloc_under_trap_24_25_code.recover_rbp_var.L406@PAGEOFF]
+	ldr	x19, [x19, _camlTOP__alloc_under_trap_24_25_code.recover_rbp_asm.L406@GOTPAGEOFF]
+	str	x19, [x13]
+	str	x8, [x11, #16]
 	; InlineAsm Start
-	mov	x13, x26
+	str	x29, [x12]
 	; InlineAsm End
-	str	x10, [x1, #48]
-	mov	x14, x10
-	; InlineAsm Start
-	mov	x26, x10
-	; InlineAsm End
-Lloh2:
-	adrp	x14, _camlTOP__alloc_under_trap_24_25_code.recover_rbp_asm.L406@GOTPAGE
-Lloh3:
-	ldr	x14, [x14, _camlTOP__alloc_under_trap_24_25_code.recover_rbp_asm.L406@GOTPAGEOFF]
-	str	x14, [x12]
-	str	x9, [x10, #16]
-	; InlineAsm Start
-	str	x29, [x11]
-	; InlineAsm End
-	str	x13, [x10]
-	sub	x9, x8, #24
-	mov	x8, x9
-	ldr	x10, [x1]
-	cmp	x10, x9
-	b.hi	LBB0_7
-LBB0_4:                                 ; %L409
-	mov	w9, #2048
-                                        ; kill: def $x9 killed $w9
-	str	x9, [x8]
-	ldr	x9, [sp, #88]
-	mov	x0, x8
-	str	x9, [x0, #8]!
-	mov	x2, x1
-	ldr	x9, [sp, #80]
-	str	x9, [x8, #16]
-	ldr	x9, [sp, #72]
-	ldr	x9, [x9]
-	ldr	x1, [sp, #72]
-Ltmp2:
-	mov	x28, x2
-	mov	x27, x8
-	blr	x9
-Ltmp6:
-	mov	x1, x28
+	str	x10, [x11, #32]
+	str	x14, [x11]
+	sub	x8, x27, #24
+	mov	x2, x8
+	ldr	x10, [x9]
+	cmp	x10, x8
+	b.hi	LBB0_8
+LBB0_5:                                 ; %L409
+	mov	w8, #2048
+                                        ; kill: def $x8 killed $w8
+	str	x8, [x2]
+	ldr	x8, [sp, #104]
+	mov	x0, x2
+	str	x8, [x0, #8]!
+	ldr	x8, [sp, #96]
+	str	x8, [x2, #16]
+	ldr	x8, [sp, #88]
+	ldr	x8, [x8]
+	ldr	x1, [sp, #88]
 Ltmp3:
-; %bb.5:                                ; %L412
-	mov	x2, x27
+	str	x9, [sp]                        ; 8-byte Folded Spill
+	mov	x28, x9
+	str	x2, [sp, #8]                    ; 8-byte Folded Spill
+	mov	x27, x2
+	blr	x8
+Ltmp6:
+Ltmp4:
+; %bb.6:                                ; %L412
 	; InlineAsm Start
 	mov	x8, x26
 	; InlineAsm End
 	ldr	x8, [x8]
-	str	x8, [x1, #48]
+	str	x8, [x28, #48]
 	; InlineAsm Start
 	mov	x26, x8
 	; InlineAsm End
-	mov	x28, x1
-	mov	x27, x2
-	ldr	x30, [sp, #104]                 ; 8-byte Folded Reload
-	add	sp, sp, #112
+	ldr	x30, [sp, #120]                 ; 8-byte Folded Reload
+	add	sp, sp, #128
 	ret
-LBB0_6:                                 ; %L402
-	mov	w11, #38
-	mov	x0, x11
-	mov	x28, x10
-	mov	x27, x8
+LBB0_7:                                 ; %L402
+	mov	w8, #38
+	mov	x0, x8
 	bl	_caml_llvm_call_realloc_stack
-	mov	x0, x28
-	mov	x3, x27
-	mov	x8, x3
-	mov	x10, x0
 	b	LBB0_1
-LBB0_7:                                 ; %L408
+LBB0_8:                                 ; %L408
 Ltmp0:
-	mov	x28, x1
-	mov	x27, x8
+	mov	x28, x9
+	mov	x27, x2
 	bl	_caml_call_gc
 Ltmp7:
-	mov	x0, x28
-	mov	x1, x27
 Ltmp1:
-; %bb.8:                                ; %L410
-	mov	x8, x1
-	mov	x1, x0
-	b	LBB0_4
-LBB0_9:                                 ; %L411.split-lp
-Ltmp4:
-	b	LBB0_2
-	.loh AdrpLdrGot	Lloh2, Lloh3
-	.loh AdrpLdr	Lloh0, Lloh1
+; %bb.9:                                ; %L410
+	mov	x2, x27
+	mov	x9, x28
+	b	LBB0_5
+LBB0_10:                                ; %L41138
+Ltmp2:
+	b	LBB0_3
+LBB0_11:                                ; %L411.split-lp
+Ltmp5:
+	ldr	x2, [sp, #8]                    ; 8-byte Folded Reload
+	ldr	x9, [sp]                        ; 8-byte Folded Reload
+	b	LBB0_3
+	.loh AdrpLdrGot	Lloh0, Lloh1
 Lfunc_end0:
 	.cfi_endproc
 	.section	__TEXT,__gcc_except_tab
@@ -2337,17 +2219,17 @@ Lexception0:
 	.byte	1                               ; Call site Encoding = uleb128
 	.uleb128 Lcst_end0-Lcst_begin0
 Lcst_begin0:
-	.uleb128 Ltmp2-Lfunc_begin0             ; >> Call Site 1 <<
-	.uleb128 Ltmp3-Ltmp2                    ;   Call between Ltmp2 and Ltmp3
-	.uleb128 Ltmp4-Lfunc_begin0             ;     jumps to Ltmp4
+	.uleb128 Ltmp3-Lfunc_begin0             ; >> Call Site 1 <<
+	.uleb128 Ltmp4-Ltmp3                    ;   Call between Ltmp3 and Ltmp4
+	.uleb128 Ltmp5-Lfunc_begin0             ;     jumps to Ltmp5
 	.byte	0                               ;   On action: cleanup
-	.uleb128 Ltmp3-Lfunc_begin0             ; >> Call Site 2 <<
-	.uleb128 Ltmp0-Ltmp3                    ;   Call between Ltmp3 and Ltmp0
+	.uleb128 Ltmp4-Lfunc_begin0             ; >> Call Site 2 <<
+	.uleb128 Ltmp0-Ltmp4                    ;   Call between Ltmp4 and Ltmp0
 	.byte	0                               ;     has no landing pad
 	.byte	0                               ;   On action: cleanup
 	.uleb128 Ltmp0-Lfunc_begin0             ; >> Call Site 3 <<
 	.uleb128 Ltmp1-Ltmp0                    ;   Call between Ltmp0 and Ltmp1
-	.uleb128 Ltmp4-Lfunc_begin0             ;     jumps to Ltmp4
+	.uleb128 Ltmp2-Lfunc_begin0             ;     jumps to Ltmp2
 	.byte	0                               ;   On action: cleanup
 Lcst_end0:
 	.p2align	2, 0x0|}]
@@ -2518,21 +2400,18 @@ LBB0_1:                                 ; %L429
 	mov	x1, x2
 	blr	x8
 Ltmp0:
-	mov	x1, x28
-	sub	x8, x27, #24
-	ldr	x9, [x28]
-	cmp	x9, x8
+	sub	x27, x27, #24
+	ldr	x8, [x28]
+	cmp	x8, x27
 	b.hi	LBB0_4
 LBB0_2:                                 ; %L431
-	mov	w9, #2048
-	str	x9, [x8]
-	ldr	x9, [sp, #24]
-	mov	x0, x8
-	str	x9, [x0, #8]!
-	ldr	x9, [sp, #16]
-	str	x9, [x8, #16]
-	mov	x28, x1
-	mov	x27, x8
+	mov	w8, #2048
+	str	x8, [x27]
+	ldr	x8, [sp, #24]
+	mov	x0, x27
+	str	x8, [x0, #8]!
+	ldr	x8, [sp, #16]
+	str	x8, [x27, #16]
 	ldr	x30, [sp, #40]                  ; 8-byte Folded Reload
 	add	sp, sp, #48
 	ret
@@ -2541,20 +2420,16 @@ LBB0_3:                                 ; %L428
 	bl	_caml_llvm_call_realloc_stack
 	b	LBB0_1
 LBB0_4:                                 ; %L430
-	ldr	x9, [sp, #24]
-	str	x9, [sp, #8]
-	ldr	x9, [sp, #16]
-	str	x9, [sp]
-	mov	x28, x1
-	mov	x27, x8
+	ldr	x8, [sp, #24]
+	str	x8, [sp, #8]
+	ldr	x8, [sp, #16]
+	str	x8, [sp]
 	bl	_caml_call_gc
 Ltmp1:
-	mov	x8, x27
-	mov	x1, x28
-	ldr	x9, [sp, #8]
-	str	x9, [sp, #24]
-	ldr	x9, [sp]
-	str	x9, [sp, #16]
+	ldr	x8, [sp, #8]
+	str	x8, [sp, #24]
+	ldr	x8, [sp]
+	str	x8, [sp, #16]
 	b	LBB0_2
 	.cfi_endproc|}]
 
@@ -2654,35 +2529,28 @@ L446:
 	.cfi_offset w30, -16
 	sub	sp, sp, #16
 	.cfi_def_cfa_offset 32
-	sub	x9, x27, #24
+	sub	x27, x27, #24
 	ldr	x8, [x28]
-	cmp	x8, x9
-	b.hi	LBB0_3
-; %bb.1:
-	mov	x2, x28
-LBB0_2:                                 ; %L446
+	cmp	x8, x27
+	b.hi	LBB0_2
+LBB0_1:                                 ; %L446
 	mov	w8, #2048
-	str	x8, [x9]
-	mov	x8, x9
+	str	x8, [x27]
+	mov	x8, x27
 	str	x0, [x8, #8]!
-	str	x1, [x9, #16]
-	mov	x28, x2
-	mov	x27, x9
+	str	x1, [x27, #16]
 	mov	x0, x8
 	ldr	x30, [sp, #24]                  ; 8-byte Folded Reload
 	add	sp, sp, #32
 	ret
-LBB0_3:                                 ; %L445
+LBB0_2:                                 ; %L445
 	str	x0, [sp, #8]
 	str	x1, [sp]
-	mov	x27, x9
 	bl	_caml_call_gc
 Ltmp0:
-	mov	x9, x27
-	mov	x2, x28
 	ldr	x0, [sp, #8]
 	ldr	x1, [sp]
-	b	LBB0_2
+	b	LBB0_1
 	.cfi_endproc|}]
 
 let alloc_aliased_roots x n =
@@ -2801,21 +2669,18 @@ L461:
 	.cfi_def_cfa_offset 48
 	; InlineAsm Start
 	; InlineAsm End
-	sub	x9, x27, #32
+	sub	x27, x27, #32
 	ldr	x8, [x28]
-	cmp	x8, x9
+	cmp	x8, x27
 	b.hi	LBB0_3
 ; %bb.1:
-	mov	x2, x28
-	mov	x10, x0
+	mov	x9, x0
 LBB0_2:                                 ; %L461
 	mov	w8, #3072
-	str	x8, [x9]
-	mov	x8, x9
+	str	x8, [x27]
+	mov	x8, x27
 	str	x0, [x8, #8]!
-	stp	x10, x1, [x9, #16]
-	mov	x28, x2
-	mov	x27, x9
+	stp	x9, x1, [x27, #16]
 	mov	x0, x8
 	ldr	x30, [sp, #40]                  ; 8-byte Folded Reload
 	add	sp, sp, #48
@@ -2824,14 +2689,11 @@ LBB0_3:                                 ; %L460
 	str	x0, [sp, #24]
 	str	x1, [sp, #16]
 	str	x0, [sp, #8]
-	mov	x27, x9
 	bl	_caml_call_gc
 Ltmp0:
-	mov	x9, x27
-	mov	x2, x28
 	ldr	x0, [sp, #24]
 	ldr	x1, [sp, #16]
-	ldr	x10, [sp, #8]
+	ldr	x9, [sp, #8]
 	b	LBB0_2
 	.cfi_endproc|}]
 
@@ -3073,77 +2935,61 @@ L494:
 	.cfi_offset w30, -16
 	sub	sp, sp, #32
 	.cfi_def_cfa_offset 48
-	sub	x9, x27, #24
+	sub	x27, x27, #24
 	ldr	x8, [x28]
 	cmp	x3, #1
 	b.ne	LBB0_3
 ; %bb.1:                                ; %L477
-	cmp	x8, x9
-	b.hi	LBB0_8
-; %bb.2:
-	mov	x8, x28
+	cmp	x8, x27
+	b.ls	LBB0_5
+; %bb.2:                                ; %L489
+	str	x0, [sp, #24]
+	str	x1, [sp, #16]
+	str	x2, [sp, #8]
+	bl	_caml_call_gc
+Ltmp0:
+	ldr	x0, [sp, #24]
+	ldr	x1, [sp, #16]
+	ldr	x2, [sp, #8]
 	b	LBB0_5
 LBB0_3:                                 ; %L480
-	cmp	x8, x9
-	b.hi	LBB0_9
+	cmp	x8, x27
+	b.hi	LBB0_8
 ; %bb.4:
-	mov	x8, x28
 	mov	x0, x1
 	mov	x1, x2
 LBB0_5:                                 ; %L484
-	mov	x10, x9
-	str	x0, [x10, #8]!
-	mov	w11, #2048
-	str	x11, [x9]
-	str	x1, [x9, #16]
-	sub	x9, x9, #24
-	ldr	x11, [x8]
-	cmp	x11, x9
+	mov	x8, x27
+	str	x0, [x8, #8]!
+	mov	w9, #2048
+	str	x9, [x27]
+	str	x1, [x27, #16]
+	sub	x27, x27, #24
+	ldr	x9, [x28]
+	cmp	x9, x27
 	b.hi	LBB0_7
 LBB0_6:                                 ; %L494
-	mov	w11, #2048
-	str	x11, [x9]
-	mov	x0, x9
-	str	x10, [x0, #8]!
-	str	x2, [x9, #16]
-	mov	x28, x8
-	mov	x27, x9
+	mov	w9, #2048
+	str	x9, [x27]
+	mov	x0, x27
+	str	x8, [x0, #8]!
+	str	x2, [x27, #16]
 	ldr	x30, [sp, #40]                  ; 8-byte Folded Reload
 	add	sp, sp, #48
 	ret
 LBB0_7:                                 ; %L493
 	str	x2, [sp, #24]
-	str	x10, [sp, #16]
-	mov	x28, x8
-	mov	x27, x9
-	bl	_caml_call_gc
-Ltmp0:
-	mov	x9, x27
-	mov	x8, x28
-	ldr	x2, [sp, #24]
-	ldr	x10, [sp, #16]
-	b	LBB0_6
-LBB0_8:                                 ; %L489
-	str	x0, [sp, #24]
-	str	x1, [sp, #16]
-	str	x2, [sp, #8]
-	mov	x27, x9
+	str	x8, [sp, #16]
 	bl	_caml_call_gc
 Ltmp1:
-	mov	x9, x27
-	mov	x8, x28
-	ldr	x0, [sp, #24]
-	ldr	x1, [sp, #16]
-	ldr	x2, [sp, #8]
-	b	LBB0_5
-LBB0_9:                                 ; %L491
+	ldr	x2, [sp, #24]
+	ldr	x8, [sp, #16]
+	b	LBB0_6
+LBB0_8:                                 ; %L491
 	str	x1, [sp, #24]
 	str	x2, [sp, #16]
-	mov	x27, x9
 	bl	_caml_call_gc
 Ltmp2:
-	mov	x9, x27
-	mov	x8, x28
 	ldr	x0, [sp, #24]
 	ldr	x1, [sp, #16]
 	mov	x2, x1
@@ -3298,20 +3144,16 @@ L512:
 	ldr	x8, [x28]
 	cmp	x8, x27
 	b.hs	LBB0_3
-; %bb.1:
-	mov	x9, x27
-	mov	x3, x28
-	sub	x9, x9, #32
-	cmp	x8, x9
+; %bb.1:                                ; %L510
+	sub	x27, x27, #32
+	cmp	x8, x27
 	b.hi	LBB0_4
 LBB0_2:                                 ; %L512
 	mov	w8, #3072
-	str	x8, [x9]
-	mov	x8, x9
+	str	x8, [x27]
+	mov	x8, x27
 	str	x0, [x8, #8]!
-	stp	x1, x2, [x9, #16]
-	mov	x28, x3
-	mov	x27, x9
+	stp	x1, x2, [x27, #16]
 	mov	x0, x8
 	ldr	x30, [sp, #40]                  ; 8-byte Folded Reload
 	add	sp, sp, #48
@@ -3322,25 +3164,19 @@ LBB0_3:                                 ; %L509
 	str	x2, [sp, #8]
 	bl	_caml_call_gc
 Ltmp0:
-	mov	x9, x27
-	mov	x3, x28
 	ldr	x0, [sp, #24]
 	ldr	x1, [sp, #16]
 	ldr	x2, [sp, #8]
 	ldr	x8, [x28]
-	sub	x9, x9, #32
-	cmp	x8, x9
+	sub	x27, x27, #32
+	cmp	x8, x27
 	b.ls	LBB0_2
 LBB0_4:                                 ; %L511
 	str	x0, [sp, #24]
 	str	x1, [sp, #16]
 	str	x2, [sp, #8]
-	mov	x28, x3
-	mov	x27, x9
 	bl	_caml_call_gc
 Ltmp1:
-	mov	x9, x27
-	mov	x3, x28
 	ldr	x0, [sp, #24]
 	ldr	x1, [sp, #16]
 	ldr	x2, [sp, #8]
@@ -3441,34 +3277,27 @@ L527:
 	.cfi_offset w30, -16
 	sub	sp, sp, #16
 	.cfi_def_cfa_offset 32
-	sub	x9, x27, #32
+	sub	x27, x27, #32
 	ldr	x8, [x28]
-	cmp	x8, x9
-	b.hi	LBB0_3
-; %bb.1:
-	mov	x1, x28
-LBB0_2:                                 ; %L527
+	cmp	x8, x27
+	b.hi	LBB0_2
+LBB0_1:                                 ; %L527
 	mov	w8, #3072
-	str	x8, [x9]
-	mov	w10, #3
-	mov	x8, x9
-	str	x10, [x8, #8]!
-	mov	w10, #5
-	str	x10, [x9, #16]
-	str	x0, [x9, #24]
-	mov	x28, x1
-	mov	x27, x9
+	str	x8, [x27]
+	mov	w9, #3
+	mov	x8, x27
+	str	x9, [x8, #8]!
+	mov	w9, #5
+	str	x9, [x27, #16]
+	str	x0, [x27, #24]
 	mov	x0, x8
 	ldr	x30, [sp, #24]                  ; 8-byte Folded Reload
 	add	sp, sp, #32
 	ret
-LBB0_3:                                 ; %L526
+LBB0_2:                                 ; %L526
 	str	x0, [sp, #8]
-	mov	x27, x9
 	bl	_caml_call_gc
 Ltmp0:
-	mov	x9, x27
-	mov	x1, x28
 	ldr	x0, [sp, #8]
-	b	LBB0_2
+	b	LBB0_1
 	.cfi_endproc|}]

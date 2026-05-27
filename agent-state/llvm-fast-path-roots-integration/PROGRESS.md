@@ -1730,3 +1730,33 @@ branch or needs one more focused performance pass.
     this benchmark set. The remaining measurable slowdowns are the smaller
     backend files, especially `cfg_to_linear.ml` at 1.037x; the large frontend
     files, including `typecore.ml`, are at parity in this run.
+- Promoted the LLVM codegen expect tests that changed because the generated
+  fast paths are now tighter.
+  - A stale `_runtest` binary initially made the installed
+    `llvm-test-one-no-rebuild` check look clean even though the self-stage run
+    saw expect diffs. Rebuilding the installed compiler/test tool with
+    `make install LLVM_BACKEND=1 LLVM_PATH="$LLVM_PATH"` and rerunning
+    `make llvm-test-one TEST=llvm-codegen/allocation.ml LLVM_PATH="$LLVM_PATH"`
+    reproduced the same expect change outside self-stage.
+  - Promoted:
+    `testsuite/tests/llvm-codegen/allocation.ml`,
+    `testsuite/tests/llvm-codegen/fast_path_roots.ml`,
+    `testsuite/tests/llvm-codegen/store_modify.ml`, and
+    `testsuite/tests/llvm-codegen/string_compare.ml`.
+  - The promoted shape removes many `x27`/`x28` state round trips around hot
+    allocation, barrier, and string-compare paths. Allocation fast paths now
+    update and use `x27` directly instead of carrying the new allocation
+    pointer through another temporary before copying it back.
+  - Focused installed validation after promotion:
+    `make llvm-test-one-no-rebuild TEST=llvm-codegen/{allocation,fast_path_roots,store_modify,string_compare}.ml LLVM_PATH="$LLVM_PATH"`
+    passed for all four tests.
+  - Focused self-stage `llvm-codegen` validation:
+    `SELF_STAGE=1 GENERATE_LIST=0 LIST=/tmp/oxcaml-self-stage-llvm-codegen-list.txt STAGE_INSTALL="$PWD/_llvm_self_stage_install" STAGE_BUILD="$PWD/_llvm_self_stage_main_build" LLVM_WRAPPER="$LLVM_PATH" tools/run-llvm-stage5-ocamltest.sh`
+    passed with 79 passed, 2 skipped, 0 failed.
+  - Full installed LLVM-backend suite after promotion:
+    `make llvm-test-no-rebuild LLVM_PATH="$LLVM_PATH"` passed with
+    6730 passed, 295 skipped, 0 failed, 7025 considered.
+  - Full self-stage LLVM-backend suite after promotion:
+    `SELF_STAGE=1 STAGE_INSTALL="$PWD/_llvm_self_stage_install" STAGE_BUILD="$PWD/_llvm_self_stage_main_build" LLVM_WRAPPER="$LLVM_PATH" tools/run-llvm-stage5-ocamltest.sh`
+    passed with 6388 passed, 282 skipped, 0 failed, 6670 considered.
+    Wrapper counts: 6675 lines, 3318 fresh IR.
