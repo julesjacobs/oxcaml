@@ -14,7 +14,10 @@ Benchmark shape:
 - Both compilers compile representative compiler source files with the normal
   backend. This measures the speed of the compiler binary itself, not LLVM
   backend compile time.
-- Current run, after the review fixes in `5eac16a411` and a fresh self-stage
+- Current run, after removing the scalar-clone experiment and rebuilding the
+  self-stage compiler:
+  `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/summary_no_scalar_clone_20260527_095212.json`.
+- Previous run, after the review fixes in `5eac16a411` and a fresh self-stage
   rebuild:
   `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/summary_reviewfix_20260527_061712.json`.
 - Previous run, after Design 1 runtime-state threading, stack-pair suppression
@@ -37,13 +40,40 @@ Geomean LLVM/native ratio:
 - Current after Design 1, stack-pair suppression, and tagged-int load-width
   prototype: `1.0090`
 - Current post-review rerun: `1.0079`
+- Current after removing scalar-clone experiment: `1.0085`
 - String-compare change: `-0.0131`
 - `caml_modify` Candidate 1 change: `-0.0115`
 - Later runtime-state/codegen changes since `caml_modify` Candidate 1:
   `-0.0561`
 - Total recorded change: `-0.0807`
 
-Current post-review run details:
+Current no-scalar-clone run details:
+
+- Build log:
+  `_self_build_current/self_build_no_scalar_clone_20260527_092520.log`.
+- Benchmark log:
+  `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/run_no_scalar_clone_20260527_095212.log`.
+- Summary:
+  `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/summary_no_scalar_clone_20260527_095212.json`.
+- Aggregate: geomean LLVM-built/native-built ratio `1.0085`, median `1.0025`,
+  min `0.9997`, max `1.0374`.
+- Self-stage validation:
+  `_self_build_current/self_stage_tests_no_scalar_clone_rerun_20260527_092520.log`
+  passed with 6394 passed, 282 skipped, 0 failed, 6676 considered.
+
+| file | native-built | LLVM-built | LLVM/native |
+| --- | ---: | ---: | ---: |
+| `env.ml` | 1.8470s | 1.8505s | 1.002 |
+| `ctype.ml` | 2.8490s | 2.8524s | 1.001 |
+| `typecore.ml` | 5.4352s | 5.4335s | 1.000 |
+| `translcore.ml` | 1.4660s | 1.4692s | 1.002 |
+| `typemod.ml` | 1.6198s | 1.6238s | 1.002 |
+| `cfg_to_linear.ml` | 0.1927s | 0.1999s | 1.037 |
+| `cfg_selectgen.ml` | 0.6038s | 0.6096s | 1.010 |
+| `llvmize.ml` | 1.7562s | 1.7624s | 1.004 |
+| `regalloc_irc.ml` | 0.3615s | 0.3684s | 1.019 |
+
+Previous post-review run details:
 
 - Build log:
   `_self_build_current/self_build_reviewfix_20260527_060224.log`.
