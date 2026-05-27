@@ -133,3 +133,46 @@ counts:
 The assembly counters match the benchmark story: string helper references and
 generic wrapper references remain visible in the LLVM output, while handler
 wrapping only becomes costly in some call-boundary shapes.
+
+## Integer Variant Dispatch Check
+
+After inspecting `variant_dispatch_with_string_payload`, we added two integer
+payload variants:
+
+- `variant_dispatch_with_int_payload`: same structure, but `eval` compares int
+  payloads and remains `[@inline never]`.
+- `variant_dispatch_with_int_payload_inline`: same int-payload structure, but
+  `eval` is allowed to inline into the loop.
+
+Command:
+
+```sh
+eval "$(../../../scripts/agent-tmp-env)"
+CASES=variant_dispatch_with_string_payload,variant_dispatch_with_int_payload,variant_dispatch_with_int_payload_inline \
+PAIRS=9 LLVM_PATH="$LLVM_PATH" \
+  agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/run.sh \
+  2>&1 | tee agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/run_variant_int_inline_compare_20260526_215428.log
+cp agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/.build/summary.json \
+  agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/summary_variant_int_inline_compare_20260526_215428.json
+```
+
+Results:
+
+| Case | Native median | LLVM median | LLVM/native | Wrapper refs | `_wrap_try` refs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `variant_dispatch_with_string_payload` | 0.0536s | 0.2472s | 4.615x | 13 | 0 |
+| `variant_dispatch_with_int_payload` | 0.1074s | 1.0998s | 10.240x | 5 | 0 |
+| `variant_dispatch_with_int_payload_inline` | 0.0764s | 0.0659s | 0.862x | 5 | 0 |
+
+Interpretation:
+
+The non-inlined int-payload variant is not evidence that integer variant
+dispatch is intrinsically bad in LLVM. The `eval` body itself is slightly
+better in LLVM assembly than native: LLVM uses conditional selects for the
+integer comparisons, while native uses branches. The slowdown appears when that
+tiny body is kept as a separate call in the inner loop.
+
+When `eval` is allowed to inline, LLVM becomes faster than native on the same
+integer variant dispatch shape. So the string-payload benchmark is mixing two
+effects: string helper-call boundary overhead and tiny non-inlined function-call
+overhead. The int-payload check isolates the second effect.
