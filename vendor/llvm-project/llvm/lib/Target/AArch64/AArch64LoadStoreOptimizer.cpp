@@ -1302,13 +1302,17 @@ static bool isOxcamlGCFunction(const MachineFunction &MF) {
   return F.hasGC() && F.getGC() == "oxcaml";
 }
 
-static bool hasStatepointForward(const MachineInstr &MI, unsigned Limit) {
+static bool isOxcamlCallBoundary(const MachineInstr &MI) {
+  return MI.isCall() || MI.getOpcode() == TargetOpcode::STATEPOINT;
+}
+
+static bool hasCallBoundaryForward(const MachineInstr &MI, unsigned Limit) {
   const MachineBasicBlock *MBB = MI.getParent();
   unsigned Count = 0;
   MachineBasicBlock::const_instr_iterator I = std::next(MI.getIterator());
   MachineBasicBlock::const_instr_iterator E = MBB->instr_end();
   for (; I != E; ++I) {
-    if (I->getOpcode() == TargetOpcode::STATEPOINT)
+    if (isOxcamlCallBoundary(*I))
       return true;
     if (!I->isTransient() && ++Count >= Limit)
       return false;
@@ -1316,17 +1320,50 @@ static bool hasStatepointForward(const MachineInstr &MI, unsigned Limit) {
   return false;
 }
 
-static bool hasStatepointBackward(const MachineInstr &MI, unsigned Limit) {
+static bool hasCallBoundaryBackward(const MachineInstr &MI, unsigned Limit) {
   const MachineBasicBlock *MBB = MI.getParent();
   unsigned Count = 0;
   for (MachineBasicBlock::const_instr_iterator I = MI.getIterator(),
                                                B = MBB->instr_begin();
        I != B;) {
     --I;
-    if (I->getOpcode() == TargetOpcode::STATEPOINT)
+    if (isOxcamlCallBoundary(*I))
       return true;
     if (!I->isTransient() && ++Count >= Limit)
       return false;
+  }
+  return false;
+}
+
+static bool isNearBlockStart(const MachineInstr &MI, unsigned Limit) {
+  const MachineBasicBlock *MBB = MI.getParent();
+  unsigned Count = 0;
+  for (MachineBasicBlock::const_instr_iterator I = MBB->instr_begin(),
+                                               E = MI.getIterator();
+       I != E; ++I) {
+    if (!I->isTransient() && ++Count >= Limit)
+      return false;
+  }
+  return true;
+}
+
+static bool hasCallBoundaryInPredecessorTail(const MachineInstr &MI,
+                                             unsigned Limit) {
+  if (!isNearBlockStart(MI, Limit))
+    return false;
+
+  const MachineBasicBlock *MBB = MI.getParent();
+  for (const MachineBasicBlock *Pred : MBB->predecessors()) {
+    unsigned Count = 0;
+    for (MachineBasicBlock::const_instr_iterator I = Pred->instr_end(),
+                                                 B = Pred->instr_begin();
+         I != B;) {
+      --I;
+      if (isOxcamlCallBoundary(*I))
+        return true;
+      if (!I->isTransient() && ++Count >= Limit)
+        break;
+    }
   }
   return false;
 }
@@ -1343,11 +1380,15 @@ static bool shouldSuppressOxcamlStatepointStackPair(const MachineInstr &FirstMI,
     return false;
 
   // Suppress only stack pairs that are immediately before or after an OxCaml
-  // STATEPOINT. Global ldst-opt disabling fixes some reducers but regresses
-  // allocation-like loops; this keeps ordinary stack pairing enabled away from
-  // call regions.
-  return hasStatepointBackward(FirstMI, OxcamlStatepointStackPairWindow) ||
-         hasStatepointForward(MI, OxcamlStatepointStackPairWindow);
+  // call boundary. After STATEPOINT lowering, call-result/reload code can start
+  // a successor block, so also look through predecessor tails for pairs at the
+  // start of a block. Global ldst-opt disabling fixes some reducers but
+  // regresses allocation-like loops; this keeps ordinary stack pairing enabled
+  // away from call regions.
+  return hasCallBoundaryBackward(FirstMI, OxcamlStatepointStackPairWindow) ||
+         hasCallBoundaryForward(MI, OxcamlStatepointStackPairWindow) ||
+         hasCallBoundaryInPredecessorTail(FirstMI,
+                                          OxcamlStatepointStackPairWindow);
 }
 
 // Returns true if FirstMI and MI are candidates for merging or pairing.

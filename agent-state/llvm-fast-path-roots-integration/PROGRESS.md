@@ -1614,3 +1614,37 @@ branch or needs one more focused performance pass.
     ABI cost for tiny calls: domain/allocation state threading and pinned-state
     repair around the call. A specialized proven-leaf direct-call ABI could fix
     this class without inlining everything.
+- Continued the Design 1 integration after committing the first principled
+  runtime-state threading step.
+  - The apparent current `alloc_some_always_min` issue was not stale `x27/x28`
+    movement: fresh LLVM assembly already kept allocation in `x27` and domain
+    state in `x28` through the hot allocation/call loop.
+  - The real issue was AArch64 stack-pair formation around a call boundary.
+    LLVM paired two post-call stack reloads into `ldp x9, x10, [sp, #32]` even
+    though the slots were stored by separate `str`s before the call. A manual
+    scratch rewrite that split/delayed that reload changed
+    `alloc_some_always_min` from about 0.40s LLVM user time to about 0.13s,
+    matching native.
+  - `-mllvm -tail-dup-placement=false` also recovered the case, but only because
+    it happened to avoid the bad paired reload. We did not re-add that broad
+    global flag.
+  - Implemented a narrower vendored LLVM fix in
+    `AArch64LoadStoreOptimizer.cpp`: for OxCaml GC functions, suppress SP-based
+    load/store pairing near call boundaries, including the common post-call
+    shape where reloads begin in a successor block whose predecessor tail
+    contains the call/statepoint.
+  - Rebuilt branch-local LLVM `clang`, `llc`, and `opt`.
+  - Focused allocation benchmark after the fix:
+    `alloc_some_always_min` native 0.1290s, LLVM 0.1286s, ratio 0.9997;
+    `variant_alloc_min` native 0.1288s, LLVM 0.1286s, ratio 0.9987.
+    `alloc_tuple_pair_min` remains slower at ratio 1.2648 and is now tracked as
+    a separate remaining case.
+  - Focused validation:
+    `make llvm-test-one-no-rebuild TEST=llvm-codegen/fast_path_roots.ml`
+    passed with 3 passed, 0 failed.
+  - Directory validation:
+    `make llvm-test-one-no-rebuild DIR=llvm-codegen` passed with 79 passed,
+    2 skipped, 0 failed.
+  - Full installed LLVM-backend suite validation:
+    `make llvm-test-no-rebuild LLVM_PATH="$LLVM_PATH"` passed with 6730 passed,
+    295 skipped, 0 failed, 0 unexpected, 7025 considered.
