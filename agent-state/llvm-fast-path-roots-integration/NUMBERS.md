@@ -90,7 +90,7 @@ inline/noalloc C-call work.
 | `caml_modify` | 88,484,839 | About 10.2% need remembered-set or marking work. |
 | `caml_string_compare` | 27,695,126 | 93.1% reach `memcmp`. |
 | `caml_string_equal` | 5,921,448 | 82.0% reach the content loop. |
-| `caml_obj_tag` | 2,888,252 | Tiny helper; good inline candidate. |
+| `caml_obj_tag` | 2,888,252 | Tiny helper; now inlined by the LLVM backend on AArch64. |
 | `caml_initialize` | 1,384,736 | Only 0.5% are old-to-young remembered-set writes. |
 | `caml_modify_local` | 5,738,361 | 97.4% fall back to `caml_modify`. |
 
@@ -100,5 +100,29 @@ Design implications:
   correctness and write-barrier behavior.
 - `caml_string_compare` is common enough to matter, but because most calls reach
   `memcmp`, a useful lowering needs to avoid adding overhead to long strings.
-- `caml_initialize`, `caml_obj_tag`, and selected write-barrier fast paths still
-  look like promising small inline targets.
+- `caml_obj_tag` was the easiest tiny helper target and is now inlined.
+- `caml_initialize` and selected write-barrier fast paths still look like
+  promising small inline targets.
+
+## `caml_obj_tag` Focused Benchmark
+
+Current focused rerun after inline lowering:
+
+- Log:
+  `agent-state/llvm-fast-path-roots-integration/c_call_slowdown/run_obj_tag_inline_20260526_212617.log`
+
+| case | native | LLVM | LLVM/native | LLVM wrapper refs |
+| --- | ---: | ---: | ---: | ---: |
+| `obj_tag_loop` | 0.1974s | 0.0992s | 0.503 | 0 |
+
+Previous saved result from `C_CALL_SLOWDOWN.md`:
+
+| case | native | LLVM | LLVM/native | LLVM wrapper refs |
+| --- | ---: | ---: | ---: | ---: |
+| `obj_tag_loop` | 0.1673s | 0.3860s | 2.307 | 4 |
+
+Interpretation:
+
+- This fully removes the noalloc wrapper overhead for the focused tag case.
+- The compiler-binary effect is expected to be modest because `caml_obj_tag`
+  is much less frequent than `caml_modify` and `caml_string_compare`.

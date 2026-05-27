@@ -1544,3 +1544,23 @@ branch or needs one more focused performance pass.
     - `object_call_min`: native 0.1976s, LLVM 0.2359s, ratio 1.198.
   - Interpretation: the non-object mutation cases are at parity or better;
     object dispatch remains the separate known outlier.
+- Implemented the trivial `caml_obj_tag` inline lowering on AArch64/64-bit
+  non-TSAN LLVM builds.
+  - `backend/llvm/llvmize.ml` now recognizes noalloc register-only
+    `caml_obj_tag` extcalls and emits the runtime helper logic directly:
+    null -> `Val_int 1010`, immediate -> `Val_int 1000`, unaligned pointer ->
+    `Val_int 1002`, otherwise acquire-load the header and return
+    `Val_int(Tag_hd(header))`.
+  - Added `testsuite/tests/llvm-codegen/obj_tag.ml` to pin the generated IR and
+    assembly. The assembly now has `cbz`/`tbnz`/alignment checks plus an
+    acquire header load; there is no `c_call_wrapper.caml_obj_tag`.
+  - Focused validation:
+    `make test-one-no-rebuild TEST=llvm-codegen/obj_tag.ml` passed with 3
+    passed, 0 failed.
+  - Manual correctness smoke compared normal native and `-llvm-backend` output
+    for immediates, variants, arrays, tuples, strings, floats, lazy values, and
+    closures; outputs matched.
+  - Focused benchmark:
+    `agent-state/llvm-fast-path-roots-integration/c_call_slowdown/run_obj_tag_inline_20260526_212617.log`.
+    Result: `obj_tag_loop` native 0.1974s, LLVM 0.0992s, ratio 0.5026, wrapper
+    refs 0. Previous saved result was LLVM 2.307x slower with 4 wrapper refs.
