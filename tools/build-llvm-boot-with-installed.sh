@@ -48,6 +48,31 @@ require_path "$stage0_install/bin/ocamlc.opt"
 require_path "$stage0_install/lib/ocaml/stdlib.cmxa"
 require_path "$wrapper"
 
+boot_ws=$(mktemp /tmp/oxcaml-llvm-boot.XXXXXX)
+saved_boot_ws=$(mktemp /tmp/oxcaml-llvm-saved-boot.XXXXXX)
+tmpdir=
+had_boot_ws=0
+if [ -f "$repo/duneconf/boot.ws" ]; then
+  cp "$repo/duneconf/boot.ws" "$saved_boot_ws"
+  had_boot_ws=1
+else
+  rm -f "$saved_boot_ws"
+fi
+
+cleanup () {
+  rm -f "$boot_ws"
+  if [ "$had_boot_ws" = 1 ]; then
+    cp "$saved_boot_ws" "$repo/duneconf/boot.ws"
+    rm -f "$saved_boot_ws"
+  else
+    rm -f "$repo/duneconf/boot.ws"
+  fi
+  if [ -n "$tmpdir" ]; then
+    rm -rf "$tmpdir"
+  fi
+}
+trap cleanup EXIT
+
 system=$(make_var SYSTEM "$repo/Makefile.config")
 model=$(make_var MODEL "$repo/Makefile.config")
 aspp=$(make_var ASPP "$repo/Makefile.config")
@@ -65,8 +90,6 @@ fi
 make -C "$repo" LLVM_BOOT_BACKEND=1 LLVM_BOOT_INSTALL="$stage0_install" \
   LLVM_PATH="$wrapper" duneconf/boot.ws >/dev/null
 
-boot_ws=$(mktemp /tmp/oxcaml-llvm-boot.XXXXXX)
-trap 'rm -f "$boot_ws"' EXIT
 cp "$repo/duneconf/boot.ws" "$boot_ws"
 
 targets=(
@@ -98,7 +121,6 @@ print_wrapper_counts boot
 
 if [ "$run_smoke" = 1 ]; then
   tmpdir=$(mktemp -d /tmp/oxcaml-llvm-boot-smoke.XXXXXX)
-  trap 'rm -f "$boot_ws"; rm -rf "$tmpdir"' EXIT
   printf 'let rec sum n acc = if n = 0 then acc else sum (n - 1) (acc + n)\nlet () = Printf.printf "%%d\\n" (sum 10 0)\n' \
     > "$tmpdir/main.ml"
   : > "$wrapper_log"

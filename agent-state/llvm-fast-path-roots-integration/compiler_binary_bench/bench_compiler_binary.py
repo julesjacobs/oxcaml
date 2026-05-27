@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -24,6 +25,87 @@ MODULES = [
     ("llvmize.ml", "llvmize"),
     ("regalloc_irc.ml", "regalloc_irc"),
 ]
+
+
+def sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def executable_info(path: Path) -> dict:
+    stat = path.stat()
+    payload = path.with_name(path.name + ".real")
+    if not payload.exists():
+        payload = path.resolve()
+    payload_stat = payload.stat()
+    return {
+        "path": str(path),
+        "realpath": str(path.resolve()),
+        "size": stat.st_size,
+        "sha256": sha256(path),
+        "payload_path": str(payload),
+        "payload_size": payload_stat.st_size,
+        "payload_sha256": sha256(payload),
+    }
+
+
+def read_ocamlparam_from_log(log_path: Path) -> str | None:
+    with log_path.open() as f:
+        for line in f:
+            if line.startswith("# OCAMLPARAM:"):
+                return line.removeprefix("# OCAMLPARAM:").strip()
+    return None
+
+
+def validate_inputs(
+    *,
+    native_compiler: Path,
+    llvm_compiler: Path,
+    native_log: Path,
+    llvm_log: Path,
+    native_lib: Path,
+    llvm_lib: Path,
+) -> dict:
+    for path in [
+        native_compiler,
+        llvm_compiler,
+        native_log,
+        llvm_log,
+        native_lib / "stdlib.cmxa",
+        llvm_lib / "stdlib.cmxa",
+    ]:
+        if not path.exists():
+            raise RuntimeError(f"missing required benchmark input: {path}")
+
+    native_info = executable_info(native_compiler)
+    llvm_info = executable_info(llvm_compiler)
+    if native_info["payload_path"] == llvm_info["payload_path"]:
+        raise RuntimeError(
+            "native and LLVM compiler paths resolve to the same executable: "
+            f"{native_info['payload_path']}"
+        )
+
+    native_ocamlparam = read_ocamlparam_from_log(native_log)
+    llvm_ocamlparam = read_ocamlparam_from_log(llvm_log)
+    if native_ocamlparam is not None and "llvm-backend=1" in native_ocamlparam:
+        raise RuntimeError(
+            "native build log is contaminated with llvm-backend=1; rebuild "
+            "the native comparison compiler with "
+            "tools/build-clean-native-install.sh before benchmarking. "
+            f"{native_log} has OCAMLPARAM: {native_ocamlparam}"
+        )
+
+    return {
+        "native_compiler": native_info,
+        "llvm_compiler": llvm_info,
+        "native_build_log": str(native_log),
+        "llvm_build_log": str(llvm_log),
+        "native_build_log_ocamlparam": native_ocamlparam,
+        "llvm_build_log_ocamlparam": llvm_ocamlparam,
+    }
 
 
 def extract_compile_args(log_path: Path, module: str) -> tuple[Path, list[str]]:
@@ -101,6 +183,14 @@ def main() -> None:
     llvm_log = ROOT / "_llvm_self_stage_main_build/log"
     native_lib = ROOT / "_install/lib/ocaml"
     llvm_lib = ROOT / "_llvm_self_stage_install/lib/ocaml"
+    input_info = validate_inputs(
+        native_compiler=native_compiler,
+        llvm_compiler=llvm_compiler,
+        native_log=native_log,
+        llvm_log=llvm_log,
+        native_lib=native_lib,
+        llvm_lib=llvm_lib,
+    )
 
     out_dir = args.out_dir
     if not out_dir.is_absolute():
@@ -161,6 +251,7 @@ def main() -> None:
         "pairs": args.pairs,
         "native_compiler": str(native_compiler),
         "llvm_compiler": str(llvm_compiler),
+        "inputs": input_info,
         "results": results,
         "geomean_ratio": geomean(ratios),
         "median_ratio": statistics.median(ratios),
