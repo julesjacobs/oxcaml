@@ -268,3 +268,39 @@ run is saved as `run_string_equal_inline_20260527_065500.log` /
 `summary_string_equal_inline_20260527_065500.json`; its guarded-dispatch ratio
 was 2.015x, so it should not be revived without a better constant-string or
 known-length design.
+
+## Constant String Equality Inline Rejection
+
+A follow-up prototype tracked `Const_symbol` values through `Move`, recorded
+static string payloads from Cmm data, and inlined `String.equal dynamic
+"literal"` when the literal payload was known. This did remove wrapper calls in
+literal-heavy shapes, but it was not kept because the resulting code was slower
+than the pointer-only inline.
+
+The all-short-literal prototype inlined literals up to 15 bytes:
+
+| Case | Native median | LLVM median | LLVM/native | Wrapper refs |
+| --- | ---: | ---: | ---: | ---: |
+| `string_equal_guarded_dispatch` | 0.1295s | 0.2699s | 2.084x | 5 |
+| `hash_lookup_string_equal` | 0.6622s | 0.7712s | 1.165x | 25 |
+| `variant_dispatch_with_string_payload` | 0.0519s | 0.2422s | 4.668x | 9 |
+
+The narrowed one-word-literal prototype inlined only literals up to 8 bytes:
+
+| Case | Native median | LLVM median | LLVM/native | Wrapper refs |
+| --- | ---: | ---: | ---: | ---: |
+| `string_equal_guarded_dispatch` | 0.1323s | 0.2492s | 1.884x | 12 |
+| `hash_lookup_string_equal` | 0.6394s | 0.7596s | 1.188x | 25 |
+| `variant_dispatch_with_string_payload` | 0.0515s | 0.2430s | 4.719x | 9 |
+
+The assembly explains the miss: the inlined literal path recomputes the OCaml
+string length at each guard, using a header load, shifts/mask, an offset-byte
+load, and dependent arithmetic before it can compare content. For guarded
+dispatch this makes the hot path larger and branchier than calling the helper.
+The generic helper also centralizes that length/content logic out of line, so
+removing wrapper calls is not enough by itself.
+
+This suggests that a viable content-inline design needs extra source-level
+facts, such as known dynamic length, a precomputed length reused across several
+guards, or a frontend/middle-end shape that groups literal dispatches. Blind
+per-call literal content inlining is not a good quick win.
