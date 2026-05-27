@@ -1,0 +1,4 @@
+variant_dispatch_with_string_payload: native=0.0536s llvm=0.2472s ratio=4.6149 wrappers=13 wrap_try=0
+variant_dispatch_with_int_payload: native=0.1074s llvm=1.0998s ratio=10.2395 wrappers=5 wrap_try=0
+variant_dispatch_with_int_payload_inline: native=0.0764s llvm=0.0659s ratio=0.8623 wrappers=5 wrap_try=0
+SUMMARY_JSON=/Users/julesjacobs/git/oxcaml-llvm/agents/llvm-fast-path-roots-integration/oxcaml/agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/.build/summary.json
