@@ -176,3 +176,9 @@ When `eval` is allowed to inline, LLVM becomes faster than native on the same
 integer variant dispatch shape. So the string-payload benchmark is mixing two
 effects: string helper-call boundary overhead and tiny non-inlined function-call
 overhead. The int-payload check isolates the second effect.
+
+The follow-up IR experiments are recorded in `IR_EXPERIMENTS.md`. The key
+result is that removing `gc-live` and avoiding the statepoint did not fix the
+10x by itself. A non-inlined scalar `ccc` / `fastcc` leaf-call clone did fix it:
+about `0.08s` versus `1.08s` for baseline LLVM. That points at the OxCaml
+direct-call ABI cost, not integer variant dispatch itself.
