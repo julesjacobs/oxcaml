@@ -121,6 +121,11 @@ EnableOptimizeLogicalImm("aarch64-enable-logical-imm", cl::Hidden,
                                   "optimization"),
                          cl::init(true));
 
+static cl::opt<bool> OxcamlAvoidI64LoadNarrowing(
+    "oxcaml-avoid-i64-load-narrowing", cl::Hidden, cl::init(false),
+    cl::desc("Avoid reducing plain i64 loads to i32 loads for OxCaml tagged "
+             "integer code"));
+
 // Temporary option added for the purpose of testing functionality added
 // to DAGCombiner.cpp in D92230. It is expected that this can be removed
 // in future when both implementations will be based off MGATHER rather
@@ -13619,6 +13624,17 @@ bool AArch64TargetLowering::shouldReduceLoadWidth(SDNode *Load,
   // instruction to do extension then it's probably a good idea.
   if (ExtTy != ISD::NON_EXTLOAD)
     return true;
+
+  // OxCaml tagged-integer code commonly masks after arithmetic. SelectionDAG
+  // can then decide only the low 32 bits of a 64-bit OCaml value are demanded
+  // and shrink heap-field loads to 32-bit loads. On the allocation fast path
+  // this loses the better tagged-integer shape, because the generated code
+  // materializes large 32-bit constants instead of using a small 64-bit
+  // subtract before the final mask.
+  if (OxcamlAvoidI64LoadNarrowing && Load->getValueType(0) == MVT::i64 &&
+      NewVT == MVT::i32)
+    return false;
+
   // Don't reduce load width if it would prevent us from combining a shift into
   // the offset.
   MemSDNode *Mem = dyn_cast<MemSDNode>(Load);
