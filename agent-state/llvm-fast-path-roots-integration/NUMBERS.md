@@ -224,3 +224,79 @@ Interpretation:
   `variant_dispatch_with_int_payload`, remain much slower. The inline control
   variant being faster than native (`0.868x`) says the bad case is mostly the
   call-boundary/code-shape contract, not integer variant dispatch itself.
+
+## Stack-Pair Boundary Fix
+
+The remaining `alloc_some_always_min` and `variant_alloc_min` regressions were
+not caused by `x27`/`x28` placement after Design 1. Fresh assembly already kept
+`alloc` in `x27` and `ds` in `x28` on the hot path.
+
+Root cause:
+
+- The AArch64 load/store optimizer paired post-call stack reloads into:
+
+  ```asm
+  ldp x9, x10, [sp, #32]
+  ```
+
+- Those slots were written by separate `str` instructions before the call:
+
+  ```asm
+  str x0,  [sp, #32]
+  str x10, [sp, #40]
+  ```
+
+- On the allocation microbenchmarks, this paired reload shape was enough to make
+  LLVM about 3x slower than native. Native used scalar reloads in the same
+  region.
+
+Evidence:
+
+- Baseline current LLVM:
+  `alloc_some_always_min` native 0.1288s, LLVM 0.4126s, ratio 3.0756.
+- Manual assembly rewrite, only splitting/delaying the hot reload:
+  `alloc_some_always_min` LLVM user time dropped from about 0.40s to about
+  0.13s.
+- Passing `-mllvm -tail-dup-placement=false` also produced scalar reloads and
+  restored user time to about 0.12s, but this is too broad to use as the fix.
+- Implemented the narrower fix in
+  `vendor/llvm-project/llvm/lib/Target/AArch64/AArch64LoadStoreOptimizer.cpp`:
+  suppress SP-based load/store pairing in OxCaml GC functions near call
+  boundaries, including successor blocks that start immediately after a
+  call/statepoint predecessor.
+
+Focused post-fix run:
+
+- Log:
+  `_bench_llvm_slow_cases_current/bench_after_stack_pair_boundary_focused_20260527_033547.log`
+- Summary:
+  `_bench_llvm_slow_cases_current/summary_after_stack_pair_boundary_focused_20260527_033657.json`
+
+| case | native | LLVM | LLVM/native |
+| --- | ---: | ---: | ---: |
+| `alloc_some_always_min` | 0.1290s | 0.1286s | 0.9997 |
+| `alloc_tuple_pair_min` | 0.0739s | 0.0931s | 1.2648 |
+| `variant_alloc_min` | 0.1288s | 0.1286s | 0.9987 |
+| `recursive_fib_small` | 0.0263s | 0.0252s | 0.9526 |
+| `try_lookup_hit` | 2.3861s | 2.4954s | 1.0519 |
+| `try_lookup_miss` | 1.8348s | 1.9072s | 1.0313 |
+| `object_call_min` | 0.1968s | 0.2305s | 1.1708 |
+| `string_safe_get` | 0.2141s | 0.2057s | 0.9604 |
+| `float_ref_loop` | 0.2021s | 0.2030s | 1.0034 |
+| `int_for_loop` | 0.2347s | 0.2310s | 0.9842 |
+
+Validation:
+
+- Rebuilt branch-local LLVM `clang`, `llc`, and `opt`.
+- `make llvm-test-one-no-rebuild TEST=llvm-codegen/fast_path_roots.ml
+  LLVM_PATH="$LLVM_PATH"` passed: 3 passed, 0 failed.
+- `make llvm-test-one-no-rebuild DIR=llvm-codegen LLVM_PATH="$LLVM_PATH"`
+  passed: 79 passed, 2 skipped, 0 failed.
+- `make llvm-test-no-rebuild LLVM_PATH="$LLVM_PATH"` passed: 6730 passed,
+  295 skipped, 0 failed, 0 unexpected, 7025 considered.
+
+Remaining:
+
+- `alloc_tuple_pair_min` is still slower in the focused run. It does not share
+  the fixed `alloc_some`/`variant_alloc` stack-pair pattern and should be
+  treated as a separate remaining case.
