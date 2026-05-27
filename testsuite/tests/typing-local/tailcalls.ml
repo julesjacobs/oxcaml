@@ -1,6 +1,12 @@
 (* TEST
  stack-allocation;
- native;
+ {
+   (* The LLVM backend may clone machine blocks during layout. That preserves
+      tail-call stack behavior, but gives repeated calls distinct raw return
+      addresses, which this test compares directly. *)
+   not-llvm-backend;
+   native;
+ }
 *)
 
 open Printexc

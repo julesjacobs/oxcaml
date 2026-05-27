@@ -520,8 +520,8 @@ Lfunc_begin0:
 	.cfi_def_cfa_offset 16
 	str	x30, [sp, #8]                   ; 8-byte Folded Spill
 	.cfi_offset w30, -16
-	sub	sp, sp, #80
-	.cfi_def_cfa_offset 96
+	sub	sp, sp, #96
+	.cfi_def_cfa_offset 112
 	mov	x9, x0
 	mov	x8, x27
 	mov	x10, x28
@@ -531,11 +531,11 @@ Lfunc_begin0:
 	cmp	x11, x12
 	b.lo	LBB0_7
 LBB0_1:                                 ; %L176
-	str	x9, [sp, #72]
-	str	x1, [sp, #64]
-	str	x2, [sp, #56]
+	str	x9, [sp, #88]
+	str	x1, [sp, #80]
+	str	x2, [sp, #72]
 	ldr	x9, [x10, #64]
-	str	x9, [sp, #48]
+	str	x9, [sp, #64]
 	mov	x28, x10
 	mov	x27, x8
 	bl	_wrap_try
@@ -546,31 +546,32 @@ LBB0_2:                                 ; %L179
 	mov	x8, x0
 	; InlineAsm End
 	; InlineAsm Start
-	mov	x30, x28
+	mov	x9, x28
 	; InlineAsm End
+	str	x9, [sp, #8]                    ; 8-byte Folded Spill
 	; InlineAsm Start
 	mov	x8, x27
 	; InlineAsm End
 	; InlineAsm Start
 	mov	x8, x26
 	; InlineAsm End
-	str	x8, [x30, #48]
+	str	x8, [x9, #48]
 	; InlineAsm Start
 	; InlineAsm End
 	; InlineAsm Start
 	mov	x1, x27
 	; InlineAsm End
-	ldr	x9, [sp, #48]
-	str	x9, [x30, #64]
-	add	x9, sp, #72
-	mov	x0, x30
+	ldr	x9, [sp, #64]
+	ldr	x0, [sp, #8]                    ; 8-byte Folded Reload
+	str	x9, [x0, #64]
+	add	x9, sp, #88
 	mov	x8, x9
 	b	LBB0_6
 LBB0_3:                                 ; %L178
 	mov	x1, x28
 	mov	x8, x27
 	mov	x9, sp
-	mov	x10, sp
+	add	x10, sp, #16
 	add	x10, x10, #15
 	and	x10, x10, #0xfffffffffffffff0
 	add	x11, x10, #24
@@ -606,9 +607,9 @@ Lloh3:
 	b.hs	LBB0_8
 LBB0_4:                                 ; %L182
 	mov	x2, x1
-	ldr	x8, [sp, #56]
+	ldr	x8, [sp, #72]
 	ldr	x8, [x8]
-	ldr	x1, [sp, #56]
+	ldr	x1, [sp, #72]
 Ltmp2:
 	mov	w10, #1
 	mov	x0, x10
@@ -628,14 +629,14 @@ Ltmp3:
 	; InlineAsm Start
 	mov	x26, x8
 	; InlineAsm End
-	add	x8, sp, #64
+	add	x8, sp, #80
 LBB0_6:                                 ; %common.ret
 	mov	x2, x0
 	ldr	x0, [x8]
 	mov	x28, x2
 	mov	x27, x1
-	ldr	x30, [sp, #88]                  ; 8-byte Folded Reload
-	add	sp, sp, #96
+	ldr	x30, [sp, #104]                 ; 8-byte Folded Reload
+	add	sp, sp, #112
 	ret
 LBB0_7:                                 ; %L175
 	mov	w11, #38
@@ -2172,8 +2173,8 @@ Lfunc_begin0:
 	.cfi_def_cfa_offset 16
 	str	x30, [sp, #8]                   ; 8-byte Folded Spill
 	.cfi_offset w30, -16
-	sub	sp, sp, #80
-	.cfi_def_cfa_offset 96
+	sub	sp, sp, #96
+	.cfi_def_cfa_offset 112
 	mov	x9, x0
 	mov	x8, x27
 	mov	x10, x28
@@ -2183,11 +2184,11 @@ Lfunc_begin0:
 	cmp	x11, x12
 	b.lo	LBB0_6
 LBB0_1:                                 ; %L403
-	str	x9, [sp, #72]
-	str	x1, [sp, #64]
-	str	x2, [sp, #56]
+	str	x9, [sp, #88]
+	str	x1, [sp, #80]
+	str	x2, [sp, #72]
 	ldr	x9, [x10, #64]
-	str	x9, [sp, #48]
+	str	x9, [sp, #64]
 	mov	x28, x10
 	mov	x27, x8
 	bl	_wrap_try
@@ -2198,34 +2199,35 @@ LBB0_2:                                 ; %L406
 	mov	x8, x0
 	; InlineAsm End
 	; InlineAsm Start
-	mov	x30, x28
+	mov	x9, x28
 	; InlineAsm End
+	str	x9, [sp, #8]                    ; 8-byte Folded Spill
 	; InlineAsm Start
 	mov	x8, x27
 	; InlineAsm End
 	; InlineAsm Start
 	mov	x8, x26
 	; InlineAsm End
-	str	x8, [x30, #48]
+	str	x8, [x9, #48]
 	; InlineAsm Start
 	; InlineAsm End
 	; InlineAsm Start
 	mov	x2, x27
 	; InlineAsm End
-	ldr	x9, [sp, #48]
-	str	x9, [x30, #64]
-	ldr	x0, [sp, #72]
-	mov	x1, x30
+	ldr	x9, [sp, #64]
+	ldr	x1, [sp, #8]                    ; 8-byte Folded Reload
+	str	x9, [x1, #64]
+	ldr	x0, [sp, #88]
 	mov	x28, x1
 	mov	x27, x2
-	ldr	x30, [sp, #88]                  ; 8-byte Folded Reload
-	add	sp, sp, #96
+	ldr	x30, [sp, #104]                 ; 8-byte Folded Reload
+	add	sp, sp, #112
 	ret
 LBB0_3:                                 ; %L405
 	mov	x1, x28
 	mov	x8, x27
 	mov	x9, sp
-	mov	x10, sp
+	add	x10, sp, #16
 	add	x10, x10, #15
 	and	x10, x10, #0xfffffffffffffff0
 	add	x11, x10, #24
@@ -2264,15 +2266,15 @@ LBB0_4:                                 ; %L409
 	mov	w9, #2048
                                         ; kill: def $x9 killed $w9
 	str	x9, [x8]
-	ldr	x9, [sp, #72]
+	ldr	x9, [sp, #88]
 	mov	x0, x8
 	str	x9, [x0, #8]!
 	mov	x2, x1
-	ldr	x9, [sp, #64]
+	ldr	x9, [sp, #80]
 	str	x9, [x8, #16]
-	ldr	x9, [sp, #56]
+	ldr	x9, [sp, #72]
 	ldr	x9, [x9]
-	ldr	x1, [sp, #56]
+	ldr	x1, [sp, #72]
 Ltmp2:
 	mov	x28, x2
 	mov	x27, x8
@@ -2292,8 +2294,8 @@ Ltmp3:
 	; InlineAsm End
 	mov	x28, x1
 	mov	x27, x2
-	ldr	x30, [sp, #88]                  ; 8-byte Folded Reload
-	add	sp, sp, #96
+	ldr	x30, [sp, #104]                 ; 8-byte Folded Reload
+	add	sp, sp, #112
 	ret
 LBB0_6:                                 ; %L402
 	mov	w11, #38

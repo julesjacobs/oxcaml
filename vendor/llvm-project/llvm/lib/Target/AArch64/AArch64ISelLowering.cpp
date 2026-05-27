@@ -9666,6 +9666,19 @@ SDValue AArch64TargetLowering::LowerSPONENTRY(SDValue Op,
 #define GET_REGISTER_MATCHER
 #include "AArch64GenAsmMatcher.inc"
 
+static bool isOxCamlCallingConv(CallingConv::ID CC) {
+  switch (CC) {
+  case CallingConv::OxCaml_WithFP:
+  case CallingConv::OxCaml_WithoutFP:
+  case CallingConv::OxCaml_C_Call:
+  case CallingConv::OxCaml_C_Call_StackArgs:
+  case CallingConv::OxCaml_Alloc:
+    return true;
+  default:
+    return false;
+  }
+}
+
 // FIXME? Maybe this could be a TableGen attribute on some registers and
 // this table could be generated automatically from RegInfo.
 Register AArch64TargetLowering::
@@ -9674,7 +9687,10 @@ getRegisterByName(const char* RegName, LLT VT, const MachineFunction &MF) const 
   if (AArch64::X1 <= Reg && Reg <= AArch64::X28) {
     const MCRegisterInfo *MRI = Subtarget->getRegisterInfo();
     unsigned DwarfRegNum = MRI->getDwarfRegNum(Reg, false);
-    if (!Subtarget->isXRegisterReserved(DwarfRegNum))
+    bool IsOxCamlRuntimeReg =
+        isOxCamlCallingConv(MF.getFunction().getCallingConv()) &&
+        (Reg == AArch64::X27 || Reg == AArch64::X28);
+    if (!Subtarget->isXRegisterReserved(DwarfRegNum) && !IsOxCamlRuntimeReg)
       Reg = 0;
   }
   if (Reg)
