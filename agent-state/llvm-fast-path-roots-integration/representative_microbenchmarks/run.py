@@ -685,6 +685,56 @@ let[@inline never] run n reps =
 let () = print_result (run (black_box_int n) (black_box_int reps))
 ''',
     },
+    "variant_dispatch_with_int_payload": {
+        "params": (4_000_000, 20),
+        "source": r'''
+type t = Attr of int | Prim of int | Other of int
+
+let[@inline never] eval = function
+  | Attr x -> if x = 17 then 1 else 2
+  | Prim x -> if x = 42 then 3 else 4
+  | Other i -> i land 7
+
+let[@inline never] run n reps =
+  let xs =
+    [| Attr 17; Attr 19; Prim 42; Prim 43; Other 17 |]
+  in
+  let acc = ref 0 in
+  for r = 1 to reps do
+    for i = 1 to n do
+      acc := !acc + eval (Array.unsafe_get xs ((i + r) mod 5))
+    done
+  done;
+  !acc
+
+let () = print_result (run (black_box_int n) (black_box_int reps))
+''',
+    },
+    "variant_dispatch_with_int_payload_inline": {
+        "params": (4_000_000, 20),
+        "source": r'''
+type t = Attr of int | Prim of int | Other of int
+
+let eval = function
+  | Attr x -> if x = 17 then 1 else 2
+  | Prim x -> if x = 42 then 3 else 4
+  | Other i -> i land 7
+
+let[@inline never] run n reps =
+  let xs =
+    [| Attr 17; Attr 19; Prim 42; Prim 43; Other 17 |]
+  in
+  let acc = ref 0 in
+  for r = 1 to reps do
+    for i = 1 to n do
+      acc := !acc + eval (Array.unsafe_get xs ((i + r) mod 5))
+    done
+  done;
+  !acc
+
+let () = print_result (run (black_box_int n) (black_box_int reps))
+''',
+    },
     "int_tree_find_same_shape": {
         "params": (1_200_000, 20),
         "source": r'''

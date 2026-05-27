@@ -1588,3 +1588,15 @@ branch or needs one more focused performance pass.
     to explain the remaining gap, but call-boundary shapes inside handlers are
     still slower. Mutation/write-barrier shapes are currently around parity or
     faster.
+- Added an integer-payload variant-dispatch check after inspecting the
+  string-payload variant assembly.
+  - Saved run:
+    `agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/run_variant_int_inline_compare_20260526_215428.log`.
+  - Results:
+    `variant_dispatch_with_string_payload` 4.615x,
+    `variant_dispatch_with_int_payload` 10.240x,
+    `variant_dispatch_with_int_payload_inline` 0.862x.
+  - Interpretation: integer variant dispatch itself is not the problem. LLVM is
+    faster than native when the tiny int `eval` function inlines. The bad
+    non-inlined int case isolates tiny-call overhead in the inner loop; the
+    string case combines that with string helper-call boundary overhead.
