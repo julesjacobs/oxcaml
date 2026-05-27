@@ -1881,3 +1881,21 @@ branch or needs one more focused performance pass.
   - Iteration-loop note: `make promote-one` for a single LLVM codegen expect
     still refreshed `_install` and `_runtest`, taking several minutes even
     after the compiler was already rebuilt.
+- Rejected a follow-up constant-string content inline for `String.equal`:
+  - Prototype tracked `Const_symbol` through moves and recorded static string
+    payloads from Cmm data, then inlined `String.equal dynamic "literal"` for
+    short literals.
+  - Up-to-15-byte literals removed most wrapper calls in
+    `string_equal_guarded_dispatch` but slowed it to 2.084x LLVM/native
+    (0.1295s native / 0.2699s LLVM). `hash_lookup_string_equal` was 1.165x
+    and `variant_dispatch_with_string_payload` was 4.668x.
+  - Narrowing to one-word literals (<= 8 bytes) still did not beat the kept
+    pointer-only baseline: `string_equal_guarded_dispatch` was 1.884x,
+    `hash_lookup_string_equal` 1.188x, and
+    `variant_dispatch_with_string_payload` 4.719x.
+  - Assembly reason: each inlined literal guard recomputes the OCaml string
+    length with a header load, offset-byte load, and dependent arithmetic
+    before doing content compares. Removing wrapper calls is not enough to pay
+    for that on guarded dispatch.
+  - The prototype was reverted; only the benchmark evidence was kept in
+    `representative_microbenchmarks/RESULTS.md`.

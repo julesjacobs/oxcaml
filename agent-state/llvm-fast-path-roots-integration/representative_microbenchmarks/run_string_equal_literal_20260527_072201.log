@@ -1,0 +1,4 @@
+string_equal_guarded_dispatch: native=0.1295s llvm=0.2699s ratio=2.0838 wrappers=5 wrap_try=0
+hash_lookup_string_equal: native=0.6622s llvm=0.7712s ratio=1.1645 wrappers=25 wrap_try=0
+variant_dispatch_with_string_payload: native=0.0519s llvm=0.2422s ratio=4.6683 wrappers=9 wrap_try=0
+SUMMARY_JSON=/Users/julesjacobs/git/oxcaml-llvm/agents/llvm-fast-path-roots-integration/oxcaml/agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/.build/summary.json
