@@ -1478,7 +1478,7 @@ void SelectionDAGISel::SelectAllBasicBlocks(const Function &Fn) {
     // Setup an EH landing-pad block.
     FuncInfo->ExceptionPointerVirtReg = 0;
     FuncInfo->ExceptionSelectorVirtReg = 0;
-    if (LLVMBB->isEHPad())
+    if (FuncInfo->MBB->isEHPad())
       if (!PrepareEHLandingPad())
         continue;
 

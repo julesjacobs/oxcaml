@@ -518,7 +518,14 @@ end
 module Calling_conventions = struct
   type t =
     | Default (* Default C calling convention *)
-    | Oxcaml (* See backend/<arch>/proc.ml for details *)
+    | Oxcaml
+      (* Ordinary OxCaml calling convention. Runtime registers are explicit in
+         the LLVM IR signature: domain state and allocation pointer are threaded
+         as leading i64 arguments and leading i64 return values. The target
+         calling convention assigns those slots to the physical runtime
+         registers, so for AArch64 they should become x28/x27 at the call
+         boundary without extra copy code. See backend/<arch>/proc.ml and the
+         target calling convention for details. *)
     | Oxcaml_c_call
       (* Same as [Default] but threads runtime registers through and passes the
          function address through RAX. Used for [caml_c_call] *)

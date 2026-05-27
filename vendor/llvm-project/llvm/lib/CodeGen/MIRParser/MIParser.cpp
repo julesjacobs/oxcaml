@@ -688,6 +688,7 @@ bool MIParser::parseBasicBlockDefinition(
   bool MachineBlockAddressTaken = false;
   BasicBlock *AddressTakenIRBlock = nullptr;
   bool IsLandingPad = false;
+  bool IsRuntimeEntered = false;
   bool IsInlineAsmBrIndirectTarget = false;
   bool IsEHFuncletEntry = false;
   std::optional<MBBSectionID> SectionID;
@@ -708,6 +709,10 @@ bool MIParser::parseBasicBlockDefinition(
         break;
       case MIToken::kw_landing_pad:
         IsLandingPad = true;
+        lex();
+        break;
+      case MIToken::kw_runtime_entered:
+        IsRuntimeEntered = true;
         lex();
         break;
       case MIToken::kw_inlineasm_br_indirect_target:
@@ -768,6 +773,7 @@ bool MIParser::parseBasicBlockDefinition(
   if (AddressTakenIRBlock)
     MBB->setAddressTakenIRBlock(AddressTakenIRBlock);
   MBB->setIsEHPad(IsLandingPad);
+  MBB->setIsRuntimeEntered(IsRuntimeEntered);
   MBB->setIsInlineAsmBrIndirectTarget(IsInlineAsmBrIndirectTarget);
   MBB->setIsEHFuncletEntry(IsEHFuncletEntry);
   if (SectionID) {

@@ -689,7 +689,7 @@ void MachineBlockPlacement::markBlockSuccessors(
       continue;
 
     auto *NewBB = *SuccChain.begin();
-    if (NewBB->isEHPad())
+    if (NewBB->isEHPad() || NewBB->isRuntimeEntered())
       EHPadWorkList.push_back(NewBB);
     else
       BlockWorkList.push_back(NewBB);
@@ -723,7 +723,8 @@ BranchProbability MachineBlockPlacement::collectViableSuccessors(
   auto AdjustedSumProb = BranchProbability::getOne();
   for (MachineBasicBlock *Succ : BB->successors()) {
     bool SkipSucc = false;
-    if (Succ->isEHPad() || (BlockFilter && !BlockFilter->count(Succ))) {
+    if (Succ->isEHPad() || Succ->isRuntimeEntered() ||
+        (BlockFilter && !BlockFilter->count(Succ))) {
       SkipSucc = true;
     } else {
       BlockChain *SuccChain = BlockToChain[Succ];
@@ -1814,7 +1815,7 @@ void MachineBlockPlacement::fillWorkLists(
     return;
 
   MachineBasicBlock *BB = *Chain.begin();
-  if (BB->isEHPad())
+  if (BB->isEHPad() || BB->isRuntimeEntered())
     EHPadWorkList.push_back(BB);
   else
     BlockWorkList.push_back(BB);
@@ -2212,7 +2213,7 @@ MachineBlockPlacement::findBestLoopExit(const MachineLoop &L,
     BlockFrequency OldBestExitEdgeFreq = BestExitEdgeFreq;
     bool HasLoopingSucc = false;
     for (MachineBasicBlock *Succ : MBB->successors()) {
-      if (Succ->isEHPad())
+      if (Succ->isEHPad() || Succ->isRuntimeEntered())
         continue;
       if (Succ == MBB)
         continue;

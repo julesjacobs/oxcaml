@@ -596,10 +596,20 @@ let gc_name = "oxcaml" (* The name of the [GCStrategy] we use in LLVM *)
 
 (* Runtime registers. These are registers that get threaded through function
    arguments and returns and are pinned to particular physical registers via the
-   calling convention. Note that we treat them similarly to [Reg.t]s, where we
-   alloca them in the entry block and access them through load/stores. to be
-   simplified by mem2reg in LLVM. We assume they are [i64]s while threading
-   through functions. *)
+   calling convention.
+
+   The threading exists to teach LLVM that ordinary OxCaml calls receive and
+   return the current domain state pointer and allocation pointer. It is not
+   meant to add real data movement. On AArch64, the OxCaml calling convention
+   assigns the first two integer argument and return slots to x28 and x27, which
+   are the runtime registers expected by the native runtime. When both caller
+   and callee use this calling convention, register allocation should therefore
+   make the SSA values and the physical runtime registers coincide at the call
+   boundary.
+
+   Note that we treat these similarly to [Reg.t]s, where we alloca them in the
+   entry block and access them through load/stores to be simplified by mem2reg
+   in LLVM. We assume they are [i64]s while threading through functions. *)
 
 let domainstate_ptr = V.of_ident ~typ:T.ptr (LL.Ident.local "ds")
 
@@ -1016,7 +1026,15 @@ let assemble_return t res_type values =
   assemble_struct t res_type (runtime_values @ actual_values)
 
 (* Prepare and extract arguments following the OCaml calling convention in LLVM,
-   handling the threading of runtime registers. *)
+   handling the threading of runtime registers.
+
+   For OxCaml calls, the generated IR signature explicitly passes [ds] and
+   [alloc] before the ordinary OCaml arguments, and explicitly returns updated
+   [ds] and [alloc] before the ordinary OCaml results. This is an SSA-level
+   model of the runtime-register dependency. The AArch64 OxCaml calling
+   convention maps those leading [i64] arguments/results to x28/x27, so the
+   intended final code has no copies just to pass the domain state pointer or
+   allocation pointer in and out of an ordinary OxCaml call. *)
 let call_simple ?(attrs = []) ?(dbg = Debuginfo.none) ?(raise_call = false)
     ?(primitive_call = false) ?alloc_info ?(live_roots = [])
     ?(slow_path_roots = []) ?unwind_label ~cc t name args res_types =
@@ -1299,8 +1317,12 @@ let call ?(tail = false) ?unwind_label t (i : Cfg.terminator Cfg.instruction)
   let use_physical_runtime_regs =
     (* Design 1 keeps the domain-state and allocation pointers as SSA values
        and relies on the OxCaml calling convention to place them in x28/x27 at
-       call boundaries. Reading physical x28/x27 here is only valid when those
-       registers are globally reserved, so keep ordinary calls on the SSA path. *)
+       call boundaries. The leading SSA arguments/results are the contract that
+       lets LLVM see the dependency; the target calling convention is what makes
+       it disappear in register allocation.
+
+       Reading physical x28/x27 here is only valid when those registers are
+       globally reserved, so keep ordinary calls on the SSA path. *)
     false
   in
   let args = prepare_call_args_from_regs ~use_physical_runtime_regs t arg_regs in
@@ -4456,7 +4478,7 @@ let prepare_fun_info t (cfg : Cfg.t) =
    are the [Reg.t]s corresponding to those present in the argument list.
 
    Our [Cfg.t] is not always in SSA form, and pinned registers also break SSA.
-   Because of this, all [Reg.t]s and runtime registere are accessed through
+   Because of this, all [Reg.t]s and runtime registers are accessed through
    loads and stores to pointers returned by [alloca] instructions. These will
    then get optimised by LLVM as part of the mem2reg pass.
 

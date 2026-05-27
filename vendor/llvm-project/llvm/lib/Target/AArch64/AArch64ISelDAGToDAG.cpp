@@ -14,6 +14,7 @@
 #include "AArch64TargetMachine.h"
 #include "MCTargetDesc/AArch64AddressingModes.h"
 #include "llvm/ADT/APSInt.h"
+#include "llvm/CodeGen/FunctionLoweringInfo.h"
 #include "llvm/CodeGen/ISDOpcodes.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/IR/Function.h" // To access function attributes.
@@ -4227,6 +4228,45 @@ void AArch64DAGToDAGISel::Select(SDNode *Node) {
     switch (IntNo) {
     default:
       break;
+    case Intrinsic::aarch64_oxcaml_trap_recover: {
+      SDLoc DL(Node);
+      SDValue Chain = Node->getOperand(0);
+      if (!FuncInfo->MBB->isRuntimeEntered())
+        report_fatal_error(
+            "trap recovery intrinsic must be in a runtime-entered ABI block");
+      if (FuncInfo->MBB->isRuntimeEntered()) {
+        for (const MachineInstr &MI : *FuncInfo->MBB) {
+          if (MI.isDebugInstr() || MI.isPosition() ||
+              MI.getOpcode() == TargetOpcode::EH_LABEL)
+            continue;
+          report_fatal_error(
+              "trap recovery intrinsic must be first in its recovery block");
+        }
+      }
+      FuncInfo->MBB->addLiveIn(AArch64::X0);
+      FuncInfo->MBB->addLiveIn(AArch64::X26);
+      FuncInfo->MBB->addLiveIn(AArch64::X27);
+      FuncInfo->MBB->addLiveIn(AArch64::X28);
+      SDValue Bucket = CurDAG->getCopyFromReg(Chain, DL, AArch64::X0,
+                                              MVT::i64);
+      Chain = Bucket.getValue(1);
+      SDValue PrevTrap = CurDAG->getCopyFromReg(Chain, DL, AArch64::X26,
+                                                MVT::i64);
+      Chain = PrevTrap.getValue(1);
+      SDValue Alloc = CurDAG->getCopyFromReg(Chain, DL, AArch64::X27,
+                                             MVT::i64);
+      Chain = Alloc.getValue(1);
+      SDValue Domain = CurDAG->getCopyFromReg(Chain, DL, AArch64::X28,
+                                              MVT::i64);
+      Chain = Domain.getValue(1);
+      ReplaceUses(SDValue(Node, 0), Bucket);
+      ReplaceUses(SDValue(Node, 1), PrevTrap);
+      ReplaceUses(SDValue(Node, 2), Alloc);
+      ReplaceUses(SDValue(Node, 3), Domain);
+      ReplaceUses(SDValue(Node, 4), Chain);
+      CurDAG->RemoveDeadNode(Node);
+      return;
+    }
     case Intrinsic::aarch64_ldaxp:
     case Intrinsic::aarch64_ldxp: {
       unsigned Op =
@@ -4783,6 +4823,16 @@ void AArch64DAGToDAGISel::Select(SDNode *Node) {
     switch (IntNo) {
     default:
       break;
+    case Intrinsic::aarch64_oxcaml_trap_publish: {
+      SDValue Chain = Node->getOperand(0);
+      SDValue TrapBlock = Node->getOperand(2);
+      SDValue PreviousTrap = Node->getOperand(3);
+      SDValue RecoveryTarget = Node->getOperand(4);
+      SDValue Ops[] = { TrapBlock, PreviousTrap, RecoveryTarget, Chain };
+      CurDAG->SelectNodeTo(Node, AArch64::OXCAML_TRAP_PUBLISH, MVT::Other,
+                           Ops);
+      return;
+    }
     case Intrinsic::aarch64_neon_st1x2: {
       if (VT == MVT::v8i8) {
         SelectStore(Node, 2, AArch64::ST1Twov8b);
