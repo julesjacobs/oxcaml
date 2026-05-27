@@ -1,6 +1,6 @@
 # Numbers
 
-Last updated: 2026-05-26.
+Last updated: 2026-05-27.
 
 This file keeps the headline performance numbers for the LLVM-built compiler
 and the runtime helper profiles that motivated the current noalloc C-call work.
@@ -126,3 +126,101 @@ Interpretation:
 - This fully removes the noalloc wrapper overhead for the focused tag case.
 - The compiler-binary effect is expected to be modest because `caml_obj_tag`
   is much less frequent than `caml_modify` and `caml_string_compare`.
+
+## Design 1 Runtime-State Prototype Benchmarks
+
+Current Design 1 prototype:
+
+- Keeps domain state and allocation pointer as ordinary SSA values.
+- Passes them through the OxCaml calling convention at relevant call
+  boundaries, with `x28`/`x27` allocatable instead of globally reserved.
+- Makes the AArch64 exception recovery path resume at the same machine return
+  point as the normal `wrap_try` return, so the normal call-result extraction
+  also supplies domain state and allocation pointer on the exceptional path.
+- Does not use the rejected global LLVM block-placement/tail-duplication
+  pessimization.
+
+Correctness status while these numbers were recorded:
+
+- Installed compiler rebuild passed.
+- Focused `fast_path_roots.ml` and `typing-local/tailcalls.ml` checks passed
+  after promoting/skipping tests for the intended code shape.
+- Full `make llvm-test-no-rebuild LLVM_PATH="$LLVM_PATH"` passed:
+  `6730` passed, `295` skipped, `0` failed, `0` unexpected errors.
+
+Representative microbenchmark run:
+
+- Log:
+  `agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/run_design1_current_20260527_030206.log`
+- Summary:
+  `agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/summary_design1_current_20260527_030505.json`
+- Command shape:
+  both native and LLVM cases used the same installed compiler and flags, except
+  for `-llvm-backend -llvm-path "$LLVM_PATH"` on the LLVM side.
+
+| case | native | LLVM | LLVM/native |
+| --- | ---: | ---: | ---: |
+| `try_find_hit_deep` | 0.6702s | 0.6235s | 0.930 |
+| `try_find_multiple_handlers` | 0.5918s | 0.5667s | 0.957 |
+| `try_find_cold_handler_large_body` | 0.7967s | 0.7410s | 0.930 |
+| `try_find_miss_rare` | 0.8649s | 0.8040s | 0.930 |
+| `try_int_find_hit` | 0.7586s | 0.7026s | 0.926 |
+| `env_find_same_mini` | 0.1240s | 0.0839s | 0.677 |
+| `record_mutate_old_to_immediate` | 0.0447s | 0.0445s | 0.996 |
+| `record_mutate_old_to_young` | 0.0091s | 0.0089s | 0.984 |
+| `array_set_young_values` | 0.0228s | 0.0210s | 0.922 |
+| `ref_option_churn` | 0.0138s | 0.0141s | 1.026 |
+| `string_assoc_find_hit` | 0.5525s | 0.6369s | 1.153 |
+| `string_tree_prefix_heavy` | 0.3374s | 0.4272s | 1.266 |
+| `string_tree_first_byte_diff` | 0.4223s | 0.4698s | 1.113 |
+| `string_map_interned_keys` | 0.2495s | 0.2666s | 1.069 |
+| `string_map_equal_content` | 0.2564s | 0.3163s | 1.234 |
+| `string_equal_guarded_dispatch` | 0.1276s | 0.2539s | 1.990 |
+| `try_with_string_compare_hit` | 0.2532s | 0.3515s | 1.388 |
+| `nested_scope_lookup` | 0.1576s | 0.1898s | 1.204 |
+| `persistent_map_update_lookup` | 0.1183s | 0.1366s | 1.155 |
+| `closure_call_in_try_hit` | 0.0665s | 0.1185s | 1.780 |
+| `direct_call_in_try_hit` | 0.0626s | 0.0872s | 1.394 |
+| `higher_order_fold_string_keys` | 1.1670s | 1.3562s | 1.162 |
+| `list_lookup_string_compare` | 0.8393s | 0.9597s | 1.144 |
+| `array_binary_search_string` | 0.3762s | 0.4113s | 1.093 |
+| `hash_lookup_string_equal` | 0.7386s | 0.8277s | 1.121 |
+| `variant_dispatch_with_string_payload` | 0.0546s | 0.2604s | 4.770 |
+| `variant_dispatch_with_int_payload` | 0.1081s | 1.1573s | 10.704 |
+| `variant_dispatch_with_int_payload_inline` | 0.0770s | 0.0668s | 0.868 |
+| `int_tree_find_same_shape` | 0.1476s | 0.0734s | 0.497 |
+
+Focused old slow-case run:
+
+- Log:
+  `_bench_llvm_slow_cases_current/bench_design1_current_20260527_030528.log`
+- Summary:
+  `_bench_llvm_slow_cases_current/summary_design1_current_20260527_030636.json`
+
+| case | native | LLVM | LLVM/native |
+| --- | ---: | ---: | ---: |
+| `alloc_some_always_min` | 0.1339s | 0.4254s | 3.169 |
+| `alloc_tuple_pair_min` | 0.0768s | 0.0880s | 1.143 |
+| `variant_alloc_min` | 0.1321s | 0.4317s | 3.248 |
+| `recursive_fib_small` | 0.0257s | 0.0257s | 1.019 |
+| `try_lookup_hit` | 2.3446s | 2.4640s | 1.051 |
+| `try_lookup_miss` | 1.9134s | 1.9427s | 1.015 |
+| `object_call_min` | 0.1964s | 0.2352s | 1.199 |
+| `string_safe_get` | 0.2228s | 0.2139s | 0.960 |
+| `float_ref_loop` | 0.2259s | 0.2278s | 1.009 |
+| `int_for_loop` | 0.2673s | 0.2616s | 0.978 |
+
+Interpretation:
+
+- Better: the old try/handler fast-path problem is materially improved. The
+  representative try-only cases are now near parity or faster than native.
+- Better: mutation/write-barrier focused shapes remain at parity or better.
+- Not worse: simple integer, floating-point, and safe-string-get loops stayed
+  near parity.
+- Still bad: `alloc_some_always_min` and `variant_alloc_min` are around `3.2x`
+  slower. This means the current Design 1 prototype has not recovered all of
+  the earlier allocation fast-path wins.
+- Still bad: non-inlined tiny call shapes, especially
+  `variant_dispatch_with_int_payload`, remain much slower. The inline control
+  variant being faster than native (`0.868x`) says the bad case is mostly the
+  call-boundary/code-shape contract, not integer variant dispatch itself.

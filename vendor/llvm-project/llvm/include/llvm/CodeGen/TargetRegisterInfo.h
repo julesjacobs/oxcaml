@@ -595,6 +595,17 @@ public:
   /// remove pseudo-registers that should be ignored).
   virtual void adjustStackMapLiveOutMask(uint32_t *Mask) const {}
 
+  /// Return true if a GC pointer in PhysReg must be spilled before it is
+  /// described in statepoint metadata.
+  ///
+  /// Some runtimes can only scan roots in a subset of physical registers. Such
+  /// registers may still be allocatable for ordinary code, but they cannot be
+  /// exposed as register root locations at safepoints.
+  virtual bool shouldSpillStatepointGCPtr(const MachineFunction &MF,
+                                          MCRegister PhysReg) const {
+    return false;
+  }
+
   /// Return a super-register of the specified register
   /// Reg so its sub-register of index SubIdx is Reg.
   MCRegister getMatchingSuperReg(MCRegister Reg, unsigned SubIdx,

@@ -324,6 +324,7 @@ private:
   // Cache of frame indexes used on previous instruction processing.
   FrameIndexesCache &CacheFI;
   bool AllowGCPtrInCSR;
+  bool OnlySpillTargetForcedRegs;
   // Operands with physical registers requiring spilling.
   SmallVector<unsigned, 8> OpsToSpill;
   // Set of register to spill.
@@ -335,10 +336,12 @@ private:
 
 public:
   StatepointState(MachineInstr &MI, const uint32_t *Mask,
-                  FrameIndexesCache &CacheFI, bool AllowGCPtrInCSR)
+                  FrameIndexesCache &CacheFI, bool AllowGCPtrInCSR,
+                  bool OnlySpillTargetForcedRegs)
       : MI(MI), MF(*MI.getMF()), TRI(*MF.getSubtarget().getRegisterInfo()),
         TII(*MF.getSubtarget().getInstrInfo()), MFI(MF.getFrameInfo()),
-        Mask(Mask), CacheFI(CacheFI), AllowGCPtrInCSR(AllowGCPtrInCSR) {
+        Mask(Mask), CacheFI(CacheFI), AllowGCPtrInCSR(AllowGCPtrInCSR),
+        OnlySpillTargetForcedRegs(OnlySpillTargetForcedRegs) {
 
     // Find statepoint's landing pad, if any.
     EHPad = nullptr;
@@ -388,7 +391,12 @@ public:
       Register Reg = MO.getReg();
       assert(Reg.isPhysical() && "Only physical regs are expected");
 
-      if (isCalleeSaved(Reg) && (AllowGCPtrInCSR || !is_contained(GCRegs, Reg)))
+      bool MustSpillForTarget = TRI.shouldSpillStatepointGCPtr(MF, Reg);
+      if (OnlySpillTargetForcedRegs && !MustSpillForTarget)
+        continue;
+
+      if (!MustSpillForTarget && isCalleeSaved(Reg) &&
+          (AllowGCPtrInCSR || !is_contained(GCRegs, Reg)))
         continue;
 
       LLVM_DEBUG(dbgs() << "Will spill " << printReg(Reg, &TRI) << " at index "
@@ -489,23 +497,21 @@ public:
       // We skipped undef uses and did not spill them, so we should not
       // proceed with defs here.
       if (MI.getOperand(MI.findTiedOperandIdx(I)).isUndef()) {
-        if (AllowGCPtrInCSR) {
+        if (AllowGCPtrInCSR || OnlySpillTargetForcedRegs) {
           NewIndices.push_back(NewMI->getNumOperands());
           MIB.addReg(Reg, RegState::Define);
         }
         continue;
       }
-      if (!AllowGCPtrInCSR) {
-        assert(is_contained(RegsToSpill, Reg));
+
+      if (is_contained(RegsToSpill, Reg)) {
         RegsToReload.push_back(Reg);
+        NewIndices.push_back(NumOps);
       } else {
-        if (isCalleeSaved(Reg)) {
-          NewIndices.push_back(NewMI->getNumOperands());
-          MIB.addReg(Reg, RegState::Define);
-        } else {
-          NewIndices.push_back(NumOps);
-          RegsToReload.push_back(Reg);
-        }
+        assert((AllowGCPtrInCSR || OnlySpillTargetForcedRegs) &&
+               "Expected all statepoint defs to be spilled");
+        NewIndices.push_back(NewMI->getNumOperands());
+        MIB.addReg(Reg, RegState::Define);
       }
     }
 
@@ -527,10 +533,12 @@ public:
       } else {
         MIB.add(MO);
         unsigned OldDef;
-        if (AllowGCPtrInCSR && MI.isRegTiedToDefOperand(I, &OldDef)) {
+        if (MI.isRegTiedToDefOperand(I, &OldDef)) {
           assert(OldDef < NumDefs);
-          assert(NewIndices[OldDef] < NumOps);
-          MIB->tieOperands(NewIndices[OldDef], MIB->getNumOperands() - 1);
+          if (OldDef < NewIndices.size()) {
+            assert(NewIndices[OldDef] < NumOps);
+            MIB->tieOperands(NewIndices[OldDef], MIB->getNumOperands() - 1);
+          }
         }
       }
     }
@@ -574,9 +582,11 @@ public:
   bool process(MachineInstr &MI, bool AllowGCPtrInCSR) {
     StatepointOpers SO(&MI);
     uint64_t Flags = SO.getFlags();
-    // Do nothing for LiveIn, it supports all registers.
-    if (Flags & (uint64_t)StatepointFlags::DeoptLiveIn)
-      return false;
+    // Generic DeoptLiveIn statepoints can describe any register. Still give the
+    // target a chance to force spills for registers its runtime cannot scan as
+    // GC root locations.
+    bool OnlySpillTargetForcedRegs =
+        Flags & (uint64_t)StatepointFlags::DeoptLiveIn;
     LLVM_DEBUG(dbgs() << "\nMBB " << MI.getParent()->getNumber() << " "
                       << MI.getParent()->getName() << " : process statepoint "
                       << MI);
@@ -590,7 +600,8 @@ public:
     }
     if (!Mask)
       Mask = TRI.getCallPreservedMask(MF, CC);
-    StatepointState SS(MI, Mask, CacheFI, AllowGCPtrInCSR);
+    StatepointState SS(MI, Mask, CacheFI, AllowGCPtrInCSR,
+                       OnlySpillTargetForcedRegs);
     CacheFI.reset(SS.getEHPad());
 
     if (!SS.findRegistersToSpill())
