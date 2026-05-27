@@ -258,61 +258,16 @@ Results for the kept pointer-only inline:
 | --- | ---: | ---: | ---: | ---: | ---: |
 | `string_equal_guarded_dispatch` | 0.1391s | 0.2564s | 1.843x | 13 | 0 |
 | `hash_lookup_string_equal` | 0.6620s | 0.7301s | 1.103x | 25 | 0 |
+| `variant_dispatch_with_string_payload` | 0.0541s | 0.2455s | 4.537x | 13 | 0 |
 
-For reference, the latest pre-change refresh had ratios 1.752x and 1.251x for
-those two cases. The pointer-only inline is therefore a clear win for
-pointer-heavy equality and within noise/slightly worse for guarded dispatch.
-The full-content inline run is saved as `run_string_equal_inline_20260527_065500.log`
-/ `summary_string_equal_inline_20260527_065500.json`; its guarded-dispatch ratio
+For reference, the latest pre-change refresh had ratios 1.752x, 1.251x, and
+4.638x for those three cases. The pointer-only inline is therefore a clear win
+for pointer-heavy equality, slightly helps the string-payload stress case, and
+is within noise/slightly worse for guarded dispatch. The full-content inline
+run is saved as `run_string_equal_inline_20260527_065500.log` /
+`summary_string_equal_inline_20260527_065500.json`; its guarded-dispatch ratio
 was 2.015x, so it should not be revived without a better constant-string or
 known-length design.
-
-## Scalar Leaf Clone Check
-
-The int-payload variant slowdown was caused by using the full OxCaml call ABI
-for a tiny same-unit leaf callee. A first eager prototype proved the mechanism:
-emitting a scalar default-CC clone for every eligible leaf changed
-`variant_dispatch_with_int_payload` from about 10x slower than native to faster
-than native, but it was rejected because it cloned every eligible leaf whether
-or not any direct caller needed it.
-
-The kept implementation is demand-gated. `asmgen.ml` scans Cmm direct calls in
-the remaining same-unit phrases; `Llvmize` emits a private scalar clone only
-when the current function is both demanded by a later direct call and proven to
-be a leaf with no allocation, polling, trap handling, raises, tailcalls, or
-runtime-state arguments/results.
-
-Command:
-
-```sh
-eval "$(../../../scripts/agent-tmp-env)"
-CASES=variant_dispatch_with_int_payload,variant_dispatch_with_int_payload_inline,variant_dispatch_with_string_payload,direct_call_in_try_hit,closure_call_in_try_hit,string_equal_guarded_dispatch \
-PAIRS=7 LLVM_PATH="$LLVM_PATH" \
-  agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/run.sh \
-  2>&1 | tee agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/run_scalar_leaf_demand_fixed_20260527_091500.log
-cp agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/.build/summary.json \
-  agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/summary_scalar_leaf_demand_fixed_20260527_091500.json
-```
-
-Results:
-
-| Case | Native median | LLVM median | LLVM/native | Wrapper refs | `_wrap_try` refs |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| `variant_dispatch_with_int_payload` | 0.1095s | 0.0791s | 0.722x | 5 | 0 |
-| `variant_dispatch_with_int_payload_inline` | 0.0772s | 0.0670s | 0.868x | 5 | 0 |
-| `variant_dispatch_with_string_payload` | 0.0547s | 0.2618s | 4.783x | 13 | 0 |
-| `direct_call_in_try_hit` | 0.0557s | 0.0971s | 1.744x | 13 | 4 |
-| `closure_call_in_try_hit` | 0.0733s | 0.1436s | 1.959x | 13 | 4 |
-| `string_equal_guarded_dispatch` | 0.1360s | 0.2700s | 1.986x | 13 | 0 |
-
-Interpretation:
-
-- The demand-gated clone keeps the main win from the eager prototype for the
-  tiny direct-call stress case.
-- It does not address string-payload dispatch, handler-wrapped direct calls, or
-  closure calls. Those remain separate call-boundary/helper issues.
-- The clone is deliberately `noinline`: this checks the call contract itself
-  and avoids making the optimization depend on LLVM inlining the callee.
 
 ## Constant String Equality Inline Rejection
 
@@ -349,3 +304,35 @@ This suggests that a viable content-inline design needs extra source-level
 facts, such as known dynamic length, a precomputed length reused across several
 guards, or a frontend/middle-end shape that groups literal dispatches. Blind
 per-call literal content inlining is not a good quick win.
+
+## Removed Scalar Leaf Clone Experiment
+
+The scalar leaf clone experiment was removed from the integration branch. It
+made the tiny direct-call benchmark much faster by routing eligible same-unit
+direct calls through private default-CC clones, but that defeats the purpose of
+the call-boundary benchmarks: they are supposed to measure the cost of the real
+OxCaml/LLVM runtime-state calling convention.
+
+The useful conclusion from the experiment is therefore negative: the remaining
+slow direct-call cases should be fixed by improving the real call-boundary
+contract/code shape, not by bypassing the boundary with private scalar clones.
+
+Validation after removal:
+
+```sh
+CASES=variant_dispatch_with_int_payload,variant_dispatch_with_int_payload_inline,variant_dispatch_with_string_payload,direct_call_in_try_hit,closure_call_in_try_hit,string_equal_guarded_dispatch \
+PAIRS=7 LLVM_PATH="$LLVM_PATH" \
+  agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/run.sh \
+  2>&1 | tee agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/run_no_scalar_clone_20260527_084100.log
+cp agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/.build/summary.json \
+  agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/summary_no_scalar_clone_20260527_084100.json
+```
+
+| Case | Native median | LLVM median | LLVM/native | Wrapper refs | `_wrap_try` refs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `variant_dispatch_with_int_payload` | 0.1083s | 1.1314s | 10.446x | 5 | 0 |
+| `variant_dispatch_with_int_payload_inline` | 0.0761s | 0.0659s | 0.866x | 5 | 0 |
+| `variant_dispatch_with_string_payload` | 0.0546s | 0.2565s | 4.701x | 13 | 0 |
+| `direct_call_in_try_hit` | 0.0532s | 0.0891s | 1.674x | 13 | 4 |
+| `closure_call_in_try_hit` | 0.0723s | 0.1411s | 1.951x | 13 | 4 |
+| `string_equal_guarded_dispatch` | 0.1407s | 0.2649s | 1.883x | 13 | 0 |

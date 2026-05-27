@@ -27,10 +27,7 @@
  ******************************************************************************)
 [@@@ocaml.warning "+a-40-41-42"]
 
-val cfg :
-  ?scalar_leaf_clone_candidates:Misc.Stdlib.String.Set.t ->
-  Cfg_with_layout.t ->
-  unit
+val cfg : Cfg_with_layout.t -> unit
 
 val data : Cmm.data_item list -> unit
 
