@@ -1648,3 +1648,48 @@ branch or needs one more focused performance pass.
   - Full installed LLVM-backend suite validation:
     `make llvm-test-no-rebuild LLVM_PATH="$LLVM_PATH"` passed with 6730 passed,
     295 skipped, 0 failed, 0 unexpected, 7025 considered.
+- Investigated the remaining `alloc_tuple_pair_min` slowdown after the
+  stack-pair boundary fix.
+  - A 12-pair rerun confirmed the slowdown was real:
+    `alloc_tuple_pair_min` native 0.0735s, LLVM 0.0946s, ratio 1.2850.
+  - Fresh assembly showed optimized LLVM IR reassociating the tagged arithmetic
+    into `acc + 2147483646 + field0 + field1`, then SelectionDAG using 32-bit
+    heap-field loads and 32-bit adds before the final mask.
+  - A scratch assembly rewrite to use the native-like 64-bit load/add/add/sub
+    shape reduced LLVM median time from about 0.0879s to 0.0725s.
+  - A narrower LLVM prototype added `-mllvm -oxcaml-avoid-i64-load-narrowing`
+    and had `llvmize.ml` pass it on AArch64. This keeps the heap-field loads
+    as 64-bit loads; the arithmetic is still 32-bit, but the focused benchmark
+    improved enough to make `alloc_tuple_pair_min` faster than native in this
+    run.
+  - Focused benchmark after the prototype:
+    `alloc_some_always_min` 0.9936x, `alloc_tuple_pair_min` 0.9197x,
+    `variant_alloc_min` 0.9941x, `recursive_fib_small` 0.9532x,
+    `try_lookup_hit` 0.9893x, `try_lookup_miss` 1.0421x,
+    `object_call_min` 1.1986x, `string_safe_get` 0.9676x,
+    `float_ref_loop` 1.0073x, `int_for_loop` 0.9907x.
+  - The first validation run exposed a separate raw-stack failure:
+    `llvm-codegen/raw_stack_word.ml` failed with `Failure("raw value changed")`.
+    Recompiling with `-ffixed-x27 -ffixed-x28` made it pass, but that was only
+    diagnostic; the real issue was not the load-width option.
+  - The raw-stack root cause was the LLVM stack-growth helper saving a stale
+    incoming `x29` frame pointer. LLVM OxCaml frames use `oxcaml_nofpcc` on
+    AArch64 and do not maintain a valid `x29` chain, while the runtime is built
+    with `WITH_FRAME_POINTERS`. During `caml_try_realloc_stack`, the runtime
+    follows and rewrites frame-pointer links. Saving stale `x29` in
+    `caml_llvm_call_realloc_stack` let stack growth interpret raw stack-looking
+    words in an LLVM frame as frame-pointer links and rewrite them.
+  - Fixed `caml_llvm_call_realloc_stack` by saving `xzr` instead of the stale
+    incoming `x29`, marking `x29` undefined in CFI, and then creating a local
+    helper frame. This terminates the frame-pointer chain at the LLVM
+    stack-growth boundary, which matches the fact that the caller is an LLVM
+    no-frame-pointer frame.
+  - Focused validation after the runtime fix:
+    `make llvm-test-one-no-rebuild TEST=llvm-codegen/raw_stack_word.ml`,
+    `make llvm-test-one-no-rebuild TEST=llvm-codegen/fast_path_roots.ml`, and
+    `make llvm-test-one-no-rebuild DIR=llvm-codegen` all passed. The
+    `llvm-codegen` directory result was 79 passed, 2 skipped, 0 failed.
+  - Full installed LLVM-backend suite validation after both the load-width
+    prototype and the runtime fix:
+    `make llvm-test-no-rebuild LLVM_PATH="$LLVM_PATH"` passed with 6730 passed,
+    295 skipped, 0 failed, 0 unexpected, 7025 considered.

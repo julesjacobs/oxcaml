@@ -4970,7 +4970,9 @@ let invoke_clang_with_llvmir ~output_filename ~input_filename ~extra_flags =
         "-mllvm";
         "-disable-early-ifcvt";
         "-mllvm";
-        "-aarch64-enable-early-ifcvt=false" ]
+        "-aarch64-enable-early-ifcvt=false";
+        "-mllvm";
+        "-oxcaml-avoid-i64-load-narrowing" ]
     | Target_system.IA32 | Target_system.X86_64 | Target_system.ARM
     | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
       []
