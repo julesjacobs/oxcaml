@@ -14,7 +14,11 @@ Benchmark shape:
 - Both compilers compile representative compiler source files with the normal
   backend. This measures the speed of the compiler binary itself, not LLVM
   backend compile time.
-- Current run, after the `caml_modify` Candidate 1 fast path:
+- Current run, after Design 1 runtime-state threading, stack-pair suppression
+  near OxCaml call boundaries, the tagged-int load-width prototype, and the
+  LLVM stack-growth frame-pointer fix:
+  `_compiler_binary_perf_current/summary_i64_stackgrowth_20260527_044223.json`
+- Previous run, after the `caml_modify` Candidate 1 fast path:
   `_compiler_binary_perf_current/summary_caml_modify_20260526_201756.json`
 - Previous saved baseline, after conservative short string/bytes compare
   lowering:
@@ -27,9 +31,38 @@ Geomean LLVM/native ratio:
 - Old baseline: `1.0897`
 - After conservative short string/bytes compare lowering: `1.0766`
 - After `caml_modify` Candidate 1 fast path: `1.0651`
+- Current after Design 1, stack-pair suppression, and tagged-int load-width
+  prototype: `1.0090`
 - String-compare change: `-0.0131`
 - `caml_modify` Candidate 1 change: `-0.0115`
-- Total recorded change: `-0.0246`
+- Later runtime-state/codegen changes since `caml_modify` Candidate 1:
+  `-0.0561`
+- Total recorded change: `-0.0807`
+
+Current run details:
+
+- Build log:
+  `_self_build_current/self_build_i64_stackgrowth_20260527_043232.log`.
+- Benchmark log:
+  `_compiler_binary_perf_current/bench_compiler_binary_i64_stackgrowth_20260527_044223.log`.
+- Summary:
+  `_compiler_binary_perf_current/summary_i64_stackgrowth_20260527_044223.json`.
+- Aggregate: geomean LLVM-built/native-built ratio `1.0090`, median `1.0078`,
+  min `0.9915`, max `1.0374`.
+
+| file | native-built | LLVM-built | LLVM/native |
+| --- | ---: | ---: | ---: |
+| `env.ml` | 1.7706s | 1.7878s | 1.010 |
+| `ctype.ml` | 2.7536s | 2.7303s | 0.992 |
+| `typecore.ml` | 5.1648s | 5.1872s | 1.004 |
+| `translcore.ml` | 1.4082s | 1.4051s | 0.998 |
+| `typemod.ml` | 1.5595s | 1.5639s | 1.003 |
+| `cfg_to_linear.ml` | 0.1847s | 0.1916s | 1.037 |
+| `cfg_selectgen.ml` | 0.5806s | 0.5892s | 1.015 |
+| `llvmize.ml` | 1.6703s | 1.6833s | 1.008 |
+| `regalloc_irc.ml` | 0.3457s | 0.3512s | 1.016 |
+
+Previous `caml_modify` Candidate 1 run:
 
 | file | pre-modify native-built | pre-modify LLVM-built | pre-modify LLVM/native | post-modify native-built | post-modify LLVM-built | post-modify LLVM/native | ratio change |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |

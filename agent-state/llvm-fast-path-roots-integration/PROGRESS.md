@@ -1693,3 +1693,40 @@ branch or needs one more focused performance pass.
     prototype and the runtime fix:
     `make llvm-test-no-rebuild LLVM_PATH="$LLVM_PATH"` passed with 6730 passed,
     295 skipped, 0 failed, 0 unexpected, 7025 considered.
+- Committed and pushed the validated load-width/runtime fix as
+  `0fb0c26f2a Improve LLVM tagged integer and stack growth paths`.
+- Rebuilt the current branch as an LLVM self-stage compiler.
+  - Saved the previous `_llvm_self_stage_install` to
+    `_self_build_current/saved_llvm_self_stage_install_before_i64_stackgrowth_20260527_043232`.
+  - Command shape:
+    `make llvm-self-stage-install LLVM_PATH="$LLVM_PATH"` after setting the
+    agent opam switch and `agent-tmp-env`.
+  - Log:
+    `_self_build_current/self_build_i64_stackgrowth_20260527_043232.log`.
+  - Result: `_llvm_self_stage_install/bin/ocamlopt.opt` was produced and the
+    self-stage smoke executable printed `55`.
+  - Wrapper counts: boot 1678 lines / 824 fresh IR; runtime 148 lines / 73
+    fresh IR; main 2224 lines / 1094 fresh IR; self-stage smoke 4 lines / 2
+    fresh IR.
+- Reran the representative compiler-binary benchmark using the normal native
+  backend for both timed compilers.
+  - Log:
+    `_compiler_binary_perf_current/bench_compiler_binary_i64_stackgrowth_20260527_044223.log`.
+  - Summary:
+    `_compiler_binary_perf_current/summary_i64_stackgrowth_20260527_044223.json`.
+  - Median timings, native-built vs LLVM-built:
+    - `env.ml`: 1.7706s vs 1.7878s, ratio 1.010.
+    - `ctype.ml`: 2.7536s vs 2.7303s, ratio 0.992.
+    - `typecore.ml`: 5.1648s vs 5.1872s, ratio 1.004.
+    - `translcore.ml`: 1.4082s vs 1.4051s, ratio 0.998.
+    - `typemod.ml`: 1.5595s vs 1.5639s, ratio 1.003.
+    - `cfg_to_linear.ml`: 0.1847s vs 0.1916s, ratio 1.037.
+    - `cfg_selectgen.ml`: 0.5806s vs 0.5892s, ratio 1.015.
+    - `llvmize.ml`: 1.6703s vs 1.6833s, ratio 1.008.
+    - `regalloc_irc.ml`: 0.3457s vs 0.3512s, ratio 1.016.
+  - Aggregate: geomean LLVM-built/native-built ratio 1.0090, median 1.0078,
+    min 0.9915, max 1.0374.
+  - Interpretation: the LLVM-built compiler is now essentially at parity on
+    this benchmark set. The remaining measurable slowdowns are the smaller
+    backend files, especially `cfg_to_linear.ml` at 1.037x; the large frontend
+    files, including `typecore.ml`, are at parity in this run.
