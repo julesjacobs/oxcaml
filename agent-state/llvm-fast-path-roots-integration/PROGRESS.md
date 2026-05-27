@@ -1852,3 +1852,32 @@ branch or needs one more focused performance pass.
     `string_tree_prefix_heavy` 1.293x.
   - Plain try/handler lookup shapes remain around parity or faster, and
     mutation/write-barrier shapes remain around parity.
+- Added a narrow LLVM lowering for `caml_string_equal` and `caml_bytes_equal`:
+  pointer-equal inputs return `true` directly; non-pointer-equal inputs still
+  fall back to the existing C helper wrapper.
+  - A fuller short-string content inline was prototyped first, but rejected:
+    it improved pointer-heavy hash lookup but regressed
+    `string_equal_guarded_dispatch` to 2.015x by expanding each guard into
+    length and word-compare code.
+  - Kept pointer-only result, 7 pairs:
+    `string_equal_guarded_dispatch` 0.1391s native / 0.2564s LLVM, 1.843x;
+    `hash_lookup_string_equal` 0.6620s / 0.7301s, 1.103x; and
+    `variant_dispatch_with_string_payload` 0.0541s / 0.2455s, 4.537x.
+  - Latest pre-change refresh for the same cases was 1.752x, 1.251x, and
+    4.638x, so this is mainly a pointer-heavy equality win and a small
+    stress-case win, not a solution for general guarded string dispatch.
+  - Logs:
+    `agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/run_string_equal_inline_20260527_065500.log`
+    and
+    `agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/run_string_equal_pointer_20260527_070400.log`.
+  - Tests:
+    `make llvm-test-one-no-rebuild TEST=testsuite/tests/llvm-codegen/string_equal.ml LLVM_PATH="$LLVM_PATH"`
+    and
+    `make llvm-test-one-no-rebuild TEST=testsuite/tests/llvm-codegen/string_equal_runtime.ml LLVM_PATH="$LLVM_PATH"`
+    both passed.
+  - Focused directory validation:
+    `make llvm-test-one-no-rebuild DIR=testsuite/tests/llvm-codegen LLVM_PATH="$LLVM_PATH"`
+    passed with 85 passed, 2 skipped, 0 failed, 87 considered.
+  - Iteration-loop note: `make promote-one` for a single LLVM codegen expect
+    still refreshed `_install` and `_runtest`, taking several minutes even
+    after the compiler was already rebuilt.
