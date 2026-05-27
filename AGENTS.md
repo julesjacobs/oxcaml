@@ -36,7 +36,9 @@ make -s fmt                   # Auto-format code (always run before committing)
 
 For native-vs-LLVM compiler-binary benchmarking, build the native comparison
 compiler with `tools/build-clean-native-install.sh`. It removes stale LLVM
-workspace files and verifies `_build/log` does not contain `llvm-backend=1`.
+workspace files when needed, saves the clean comparison compiler under
+`_native_install` with its build tree under `_native_build`, and verifies the
+saved build log does not contain `llvm-backend=1`.
 
 ## Test Commands
 ```bash
