@@ -1680,6 +1680,123 @@ let maybe_emit_specialized_string_compare_extcall t ~func_symbol ~alloc
     true
   | _ -> false
 
+let supports_inline_caml_modify () =
+  match Target_system.architecture (), Arch.size_addr with
+  | Target_system.AArch64, 8 -> not Config.tsan
+  | ( ( Target_system.IA32 | Target_system.X86_64 | Target_system.ARM
+      | Target_system.POWER | Target_system.Z | Target_system.Riscv ),
+      _ )
+  | Target_system.AArch64, _ ->
+    false
+
+let load_runtime_i64_global t name =
+  add_referenced_symbol t name;
+  emit_ins t (I.load ~ptr:(V.of_symbol name) ~typ:T.i64)
+
+let load_runtime_i32_global t name =
+  add_referenced_symbol t name;
+  emit_ins t (I.load ~ptr:(V.of_symbol name) ~typ:T.i32)
+
+let emit_i1_not t v =
+  emit_ins t (I.icmp Ieq ~arg1:v ~arg2:(V.of_int ~typ:T.i1 0))
+
+let emit_i1_and t a b = emit_ins t (I.binary And ~arg1:a ~arg2:b)
+
+let emit_i1_or t a b = emit_ins t (I.binary Or ~arg1:a ~arg2:b)
+
+let emit_is_block_raw t raw =
+  let low_bit = emit_ins t (I.binary And ~arg1:raw ~arg2:(V.of_int 1)) in
+  let low_bit_zero = emit_ins t (I.icmp Ieq ~arg1:low_bit ~arg2:(V.of_int 0)) in
+  let not_null = emit_ins t (I.icmp Ine ~arg1:raw ~arg2:(V.of_int 0)) in
+  emit_i1_and t low_bit_zero not_null
+
+let emit_is_young_raw t raw =
+  let young_start = load_runtime_i64_global t "caml_minor_heaps_start" in
+  let young_end = load_runtime_i64_global t "caml_minor_heaps_end" in
+  let above_start = emit_ins t (I.icmp Iugt ~arg1:raw ~arg2:young_start) in
+  let below_end = emit_ins t (I.icmp Iult ~arg1:raw ~arg2:young_end) in
+  emit_i1_and t above_start below_end
+
+let emit_is_block_and_young_raw t raw =
+  let is_block = emit_is_block_raw t raw in
+  let is_young = emit_is_young_raw t raw in
+  emit_i1_and t is_block is_young
+
+let maybe_emit_specialized_caml_modify_extcall t (i : Cfg.terminator Cfg.instruction)
+    ~func_symbol ~alloc ~stack_ofs arg_regs res_regs emit_fallback =
+  match arg_regs, res_regs with
+  | [fp_reg; new_val_reg], []
+    when (not alloc)
+         && stack_ofs = 0
+         && String.equal func_symbol "caml_modify"
+         && supports_inline_caml_modify () ->
+    let done_label = V.of_label (Cmm.new_label ()) in
+    let fallback_label = V.of_label (Cmm.new_label ()) in
+    let inline_label = V.of_label (Cmm.new_label ()) in
+    let slow_barrier_label = V.of_label (Cmm.new_label ()) in
+    let store_label = V.of_label (Cmm.new_label ()) in
+    let profile_enabled =
+      load_runtime_i32_global t "caml_llvm_helper_profile_enabled"
+    in
+    let profile_enabled =
+      emit_ins t (I.icmp Ine ~arg1:profile_enabled ~arg2:(V.of_int ~typ:T.i32 0))
+    in
+    let profile_enabled_expect =
+      call_llvm_intrinsic t "expect.i1"
+        [profile_enabled; V.of_int ~typ:T.i1 0] T.i1
+    in
+    emit_ins_no_res t
+      (I.br_cond ~cond:profile_enabled_expect ~ifso:fallback_label
+         ~ifnot:inline_label);
+    emit_label t fallback_label;
+    emit_fallback ();
+    emit_ins_no_res t (I.br done_label);
+    emit_label t inline_label;
+    let fp_raw = load_reg_to_temp ~typ:T.i64 t fp_reg in
+    let fp = cast t fp_raw T.ptr in
+    let new_val_raw = cast t (load_reg_to_temp t new_val_reg) T.i64 in
+    let old_val_raw = emit_ins t (I.load ~ptr:fp ~typ:T.i64) in
+    let dest_is_young = emit_is_young_raw t fp_raw in
+    let dest_is_old = emit_i1_not t dest_is_young in
+    let old_is_block = emit_is_block_raw t old_val_raw in
+    let old_is_young = emit_is_block_and_young_raw t old_val_raw in
+    let old_is_not_young = emit_i1_not t old_is_young in
+    let old_is_old_block = emit_i1_and t old_is_block old_is_not_young in
+    let new_is_young = emit_is_block_and_young_raw t new_val_raw in
+    let gc_phase = load_runtime_i32_global t "caml_gc_phase" in
+    let marking_started =
+      emit_ins t (I.icmp Ine ~arg1:gc_phase ~arg2:(V.of_int ~typ:T.i32 0))
+    in
+    let old_needs_darken = emit_i1_and t old_is_old_block marking_started in
+    let slow_reason = emit_i1_or t new_is_young old_needs_darken in
+    let dest_slow_reason = emit_i1_and t dest_is_old slow_reason in
+    let need_slow = emit_i1_and t dest_slow_reason old_is_not_young in
+    let need_slow_expect =
+      call_llvm_intrinsic t "expect.i1" [need_slow; V.of_int ~typ:T.i1 0] T.i1
+    in
+    emit_ins_no_res t
+      (I.br_cond ~cond:need_slow_expect ~ifso:slow_barrier_label
+         ~ifnot:store_label);
+    emit_label t slow_barrier_label;
+    let wrapper_symbol =
+      add_c_call_wrapper t "caml_modify_slow_barrier"
+        ~args:[T.i64; T.i64; T.i64] ~res:[]
+    in
+    add_referenced_symbol t "caml_modify_slow_barrier";
+    call_simple
+      ~attrs:(gc_attr ~can_call_gc:false t i @ [LL.Fn_attr.Cold])
+      ~dbg:i.dbg ~primitive_call:true ~live_roots:[]
+      ~cc:Oxcaml t wrapper_symbol [fp_raw; old_val_raw; new_val_raw] []
+    |> ignore;
+    emit_ins_no_res t (I.br store_label);
+    emit_label t store_label;
+    emit_ins_no_res t (I.fence Acquire);
+    emit_ins_no_res t (I.store ~ptr:fp ~to_store:new_val_raw);
+    emit_ins_no_res t (I.br done_label);
+    emit_label t done_label;
+    true
+  | _ -> false
+
 let extcall ?unwind_label t (i : Cfg.terminator Cfg.instruction) ~func_symbol
     ~alloc ~ty_args ~stack_ofs ~stack_align =
   let func_ptr =
@@ -1810,7 +1927,12 @@ let extcall ?unwind_label t (i : Cfg.terminator Cfg.instruction) ~func_symbol
     not
       (maybe_emit_specialized_string_compare_extcall t ~func_symbol ~alloc
          ~stack_ofs arg_regs res_regs emit_fallback)
-  then emit_fallback ()
+  then
+    if
+      not
+        (maybe_emit_specialized_caml_modify_extcall t i ~func_symbol ~alloc
+           ~stack_ofs arg_regs res_regs emit_fallback)
+    then emit_fallback ()
 
 let raise_ t ~(exn_handler : Label.t option)
     (i : Cfg.terminator Cfg.instruction) (raise_kind : Lambda.raise_kind) =

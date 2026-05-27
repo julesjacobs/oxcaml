@@ -334,6 +334,12 @@ Caml_inline void write_barrier(
    }
 }
 
+CAMLexport void caml_modify_slow_barrier
+  (volatile value *fp, value old_val, value val)
+{
+  write_barrier((value)fp, 0, old_val, val);
+}
+
 CAMLno_tsan /* We remove the ThreadSanitizer instrumentation of memory accesses
                by the compiler and instrument manually, because we want
                ThreadSanitizer to see a plain store here (this is necessary to
