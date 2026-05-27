@@ -482,7 +482,8 @@ let compile_cfg ppf_dump ~funcnames fd_cmm cfg_with_layout =
           ~f:Cfg_available_regs.run)
   ++ Profile.record ~accumulate:true "cfg_to_linear" Cfg_to_linear.run
 
-let compile_via_llvm ~ppf_dump ~funcnames cfg_with_layout =
+let compile_via_llvm ~ppf_dump ~funcnames ~scalar_leaf_clone_candidates
+    cfg_with_layout =
   cfg_with_layout
   ++ cfg_with_layout_profile ~accumulate:true "cfg_polling"
        (Cfg_polling.instrument_fundecl ~future_funcnames:funcnames)
@@ -500,7 +501,8 @@ let compile_via_llvm ~ppf_dump ~funcnames cfg_with_layout =
          |> pass_dump_cfg_if ppf_dump Oxcaml_flags.dump_cfg
               "After cfg_stack_checks")
   ++ Profile.record ~accumulate:true "save_cfg" save_cfg
-  ++ Profile.record ~accumulate:true "llvmize" Llvmize.cfg
+  ++ Profile.record ~accumulate:true "llvmize"
+       (Llvmize.cfg ~scalar_leaf_clone_candidates)
 
 let compile_via_linear ~ppf_dump ~funcnames fd_cmm cfg_with_layout =
   cfg_with_layout
@@ -514,7 +516,7 @@ let compile_via_linear ~ppf_dump ~funcnames fd_cmm cfg_with_layout =
   | true -> fd)
   ++ Profile.record ~accumulate:true "emit_fundecl" emit_fundecl
 
-let compile_fundecl ~ppf_dump ~funcnames fd_cmm =
+let compile_fundecl ~ppf_dump ~funcnames ~scalar_leaf_clone_candidates fd_cmm =
   let module Cfg_selection = Cfg_selectgen.Make (Cfg_selection) in
   Reg.clear_relocatable_regs ();
   fd_cmm
@@ -525,10 +527,48 @@ let compile_fundecl ~ppf_dump ~funcnames fd_cmm =
   ++ Profile.record ~accumulate:true "cfg_invariants" (cfg_invariants ppf_dump)
   ++ Profile.record ~accumulate:true "cfg" (fun cfg_with_layout ->
       if !Clflags.llvm_backend
-      then compile_via_llvm ~ppf_dump ~funcnames cfg_with_layout
+      then
+        compile_via_llvm ~ppf_dump ~funcnames ~scalar_leaf_clone_candidates
+          cfg_with_layout
       else compile_via_linear ~ppf_dump ~funcnames fd_cmm cfg_with_layout)
 
 let compile_data dl = dl ++ save_data ++ emit_data
+
+let direct_callees_of_expr expr =
+  let callees = ref String.Set.empty in
+  let rec loop expr =
+    (match expr with
+    | Cop (Capply _, Cconst_symbol (sym, _dbg_sym) :: _args, _dbg) ->
+      callees := String.Set.add sym.sym_name !callees
+    | _ -> ());
+    Cmm.iter_shallow loop expr
+  in
+  loop expr;
+  !callees
+
+let direct_callees_of_phrase = function
+  | Cfunction fd -> direct_callees_of_expr fd.fun_body
+  | Cdata _ -> String.Set.empty
+
+(* Llvmize emits a scalar leaf clone before the normal function body. Since this
+   pipeline emits functions in phrase order, only later same-unit direct calls
+   can use such a clone without speculative declarations. *)
+let direct_callee_count_set counts =
+  Hashtbl.fold
+    (fun callee count set ->
+      if count > 0 then String.Set.add callee set else set)
+    counts String.Set.empty
+
+let remove_direct_callee_counts counts callees =
+  String.Set.iter
+    (fun callee ->
+      match Hashtbl.find_opt counts callee with
+      | None -> ()
+      | Some count ->
+        if count <= 1
+        then Hashtbl.remove counts callee
+        else Hashtbl.replace counts callee (count - 1))
+    callees
 
 let compile_phrases ~ppf_dump ps =
   let funcnames =
@@ -539,6 +579,19 @@ let compile_phrases ~ppf_dump ps =
         | Cdata _ -> s)
       String.Set.empty ps
   in
+  let future_direct_callee_counts = Hashtbl.create 0 in
+  List.iter
+    (fun phrase ->
+      String.Set.iter
+        (fun callee ->
+          let count =
+            match Hashtbl.find_opt future_direct_callee_counts callee with
+            | None -> 0
+            | Some count -> count
+          in
+          Hashtbl.replace future_direct_callee_counts callee (count + 1))
+        (direct_callees_of_phrase phrase))
+    ps;
   let rec compile ~funcnames ps =
     match ps with
     | [] -> ()
@@ -555,7 +608,14 @@ let compile_phrases ~ppf_dump ps =
               ("function=" ^ X86_proc.string_of_symbol "" fd.fun_name.sym_name)
           | File_level -> Fun.id
         in
-        profile_wrapper (compile_fundecl ~ppf_dump ~funcnames) fd;
+        let direct_callees = direct_callees_of_phrase p in
+        remove_direct_callee_counts future_direct_callee_counts direct_callees;
+        let scalar_leaf_clone_candidates =
+          direct_callee_count_set future_direct_callee_counts
+        in
+        profile_wrapper
+          (compile_fundecl ~ppf_dump ~funcnames ~scalar_leaf_clone_candidates)
+          fd;
         compile ~funcnames:(String.Set.remove fd.fun_name.sym_name funcnames) ps
       | Cdata dl ->
         compile_data dl;

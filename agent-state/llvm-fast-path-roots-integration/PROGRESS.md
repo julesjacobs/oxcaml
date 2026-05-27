@@ -1,6 +1,6 @@
 # Progress
 
-Last updated: 2026-05-26.
+Last updated: 2026-05-27.
 
 ## Current Claim
 
@@ -218,6 +218,41 @@ root handling.
     contracts was unsafe. A caller may leave SP close to the bottom of the
     current stack chunk, and even a small LLVM frame prefix before the ordinary
     CFG check can put SP outside the current chunk before stack growth happens.
+- Implemented a demand-gated scalar leaf clone path for the LLVM backend:
+  - `asmgen.ml` scans direct Cmm calls in the remaining same-unit phrases.
+  - `Llvmize` emits a private default-CC scalar clone only for a demanded
+    callee that is proven to have no calls, allocations, polls, trap handlers,
+    raises, tailcalls, runtime-state arguments, or runtime-state results.
+  - Later direct calls to that callee use the scalar clone and avoid the full
+    OxCaml call result/state threading when the call-site signature matches.
+- Validation for scalar leaf clones:
+  - `make boot-compiler` passed.
+  - `make install` passed.
+  - Added `testsuite/tests/llvm-codegen/scalar_leaf_clone.ml` / `.sh`, which
+    checks the generated IR has a private default-CC scalar clone, the direct
+    call uses that clone, the normal OxCaml ABI entry remains, and assembly
+    calls the clone directly.
+  - `make llvm-test-one TEST=testsuite/tests/llvm-codegen/scalar_leaf_clone.ml`
+    passed.
+  - `make llvm-test-one TEST=testsuite/tests/basic/tailcalls.ml` passed after
+    rejecting scalar clones that touch domain-state stack locations.
+  - `make llvm-test-one TEST=testsuite/tests/lib-systhreads/boundscheck.ml`
+    passed after rejecting `Begin_region` / `End_region`, which access
+    `Domain_local_sp` through the runtime domain state.
+  - `make llvm-test-one-no-rebuild DIR=testsuite/tests/llvm-codegen` passed
+    with 89 passed, 2 skipped, 0 failed.
+  - `make llvm-test-no-rebuild LLVM_PATH="$LLVM_PATH"` passed with 6740
+    passed, 295 skipped, 0 failed.
+- Benchmark evidence for scalar leaf clones is in
+  `representative_microbenchmarks/RESULTS.md`:
+  - `variant_dispatch_with_int_payload`: native 0.1095s, LLVM 0.0791s,
+    LLVM/native 0.722x.
+  - `variant_dispatch_with_int_payload_inline`: native 0.0772s, LLVM 0.0670s,
+    LLVM/native 0.868x.
+  - Non-target cases were not materially changed:
+    `variant_dispatch_with_string_payload` remains 4.783x,
+    `direct_call_in_try_hit` 1.744x, `closure_call_in_try_hit` 1.959x,
+    `string_equal_guarded_dispatch` 1.986x.
   - The vendored LLVM rule is now: if there is a nonzero CFG stack-check byte
     contract, skip the prologue check only when LLVM's pre-check prefix is zero;
     otherwise check `prefix + ordinary-helper-reserve`.
