@@ -270,6 +270,7 @@ module Instruction : sig
   type atomic_ordering =
     | Monotonic
     | Acquire
+    | Release
     | Seq_cst
 
   type convert_op =
@@ -406,6 +407,9 @@ module Instruction : sig
   val store_with_align : align:int -> ptr:Value.t -> to_store:Value.t -> op
 
   val store_volatile : ptr:Value.t -> to_store:Value.t -> op
+
+  val store_atomic :
+    ordering:atomic_ordering -> ptr:Value.t -> to_store:Value.t -> op
 
   val getelementptr :
     base_type:Type.t -> base_ptr:Value.t -> indices:Value.t list -> op

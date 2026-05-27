@@ -1760,3 +1760,39 @@ branch or needs one more focused performance pass.
     `SELF_STAGE=1 STAGE_INSTALL="$PWD/_llvm_self_stage_install" STAGE_BUILD="$PWD/_llvm_self_stage_main_build" LLVM_WRAPPER="$LLVM_PATH" tools/run-llvm-stage5-ocamltest.sh`
     passed with 6388 passed, 282 skipped, 0 failed, 6670 considered.
     Wrapper counts: 6675 lines, 3318 fresh IR.
+- Ran a five-agent human-like review pass over the current PR shape.
+  - Repeated review concern: the branch is now broader than the original
+    fast-path-root-slot goal because it also contains helper inlining,
+    profiling support, benchmark notes, test plumbing, and vendored LLVM
+    policy changes. This is a PR-shaping concern for later split/cleanup, not
+    a new functional failure.
+  - Accepted correctness finding: inline `caml_modify` had copied the runtime
+    acquire fence but used a plain store, while `runtime/memory.c` uses
+    `atomic_store_release`. Added LLVM release atomic-store support, changed
+    the inline `caml_modify` store to `store atomic ... release`, and promoted
+    the AArch64 expect output from `str` to `stlr`.
+  - Accepted cleanup finding: the old AArch64 x27/x28 round-trip cleanup pass
+    was unreachable under Design 1 because x27/x28 are no longer reserved.
+    Removed that dead vendored LLVM cleanup and its private helpers.
+  - Partially accepted trap-offset finding: the statepoint stack-offset
+    adjustment was easy to misread because the comment still talked about trap
+    blocks as if it were subtracting the raw LLVM alloca size. The adjustment
+    is intentionally against the logical CFG trap-block stack cost; the
+    64-byte AArch64 alloca is aligned recovery storage with extra LLVM-only
+    slots. Clarified the comment and did not change the encoding blindly.
+  - Removed four tracked root-level `_bench_llvm_slow_cases_current` scratch
+    logs/JSON files. The useful benchmark numbers are already recorded in
+    `agent-state/.../NUMBERS.md` and this progress file.
+  - Validation after the review fixes:
+    - Rebuilt the installed compiler/test tree after freeing disk space from
+      old untracked scratch self-stage copies.
+    - Rebuilt branch-local LLVM `clang`, `llc`, and `opt`; this recompiled
+      `AArch64ExpandPseudoInsts.cpp`.
+    - `make llvm-test-one-no-rebuild TEST=llvm-codegen/store_modify.ml LLVM_PATH="$LLVM_PATH"`
+      passed after promotion.
+    - Focused tests for `fast_path_roots.ml`, `allocation.ml`, and
+      `string_compare.ml` passed.
+    - `make llvm-test-one-no-rebuild DIR=llvm-codegen LLVM_PATH="$LLVM_PATH"`
+      passed with 79 passed, 2 skipped, 0 failed.
+    - `make llvm-test-no-rebuild LLVM_PATH="$LLVM_PATH"` passed with
+      6730 passed, 295 skipped, 0 failed, 7025 considered.

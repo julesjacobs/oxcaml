@@ -1076,14 +1076,15 @@ module Safepoint = struct
      because the current encoding does not have room to list them separately.
 
      * [stack_offset]: This lives in the least significant 16 bits. This tells
-     LLVM to adjust the frame size for trap blocks. We need this because LLVM
-     sees alloca'd trap blocks as dynamic stack objects and does not keep track
-     of them statically.
+     LLVM to adjust the frame size for logical trap blocks. We need this because
+     LLVM sees alloca'd trap recovery storage as dynamic stack objects and does
+     not keep track of it statically.
 
-     Note that we multiply by 2 since our trap blocks are 4 words wide rather
-     than 2 for the normal compiler without frame pointers. OCaml functions are
-     not supposed to pass arguments via the stack, but C calls might, so we need
-     to account for [Stackoffset] instructions.
+     On AArch64, this adjustment matches the logical CFG trap-block stack cost,
+     not the 64-byte raw alloca used below to obtain a 16-byte aligned recovery
+     block with extra LLVM-only metadata slots. OCaml functions are not supposed
+     to pass arguments via the stack, but C calls might, so we need to account
+     for [Stackoffset] instructions.
 
      * The least significant bit is set if this call is to [caml_call_gc]. We
      can do this because [stack_offset] must be even. *)
@@ -1849,7 +1850,8 @@ let maybe_emit_specialized_caml_modify_extcall t (i : Cfg.terminator Cfg.instruc
     emit_ins_no_res t (I.br store_label);
     emit_label t store_label;
     emit_ins_no_res t (I.fence Acquire);
-    emit_ins_no_res t (I.store ~ptr:fp ~to_store:new_val_raw);
+    emit_ins_no_res t
+      (I.store_atomic ~ordering:Release ~ptr:fp ~to_store:new_val_raw);
     emit_ins_no_res t (I.br done_label);
     emit_label t done_label;
     true
