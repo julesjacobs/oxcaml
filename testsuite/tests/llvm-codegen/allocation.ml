@@ -100,33 +100,26 @@ L105:
 	.cfi_offset w30, -16
 	sub	sp, sp, #16
 	.cfi_def_cfa_offset 32
-	sub	x9, x27, #24
+	sub	x27, x27, #24
 	ldr	x8, [x28]
-	cmp	x8, x9
-	b.hi	LBB0_3
-; %bb.1:
-	mov	x2, x28
-LBB0_2:                                 ; %L105
+	cmp	x8, x27
+	b.hi	LBB0_2
+LBB0_1:                                 ; %L105
 	mov	w8, #2048
-	str	x8, [x9]
-	mov	x8, x9
+	str	x8, [x27]
+	mov	x8, x27
 	str	x0, [x8, #8]!
-	str	x1, [x9, #16]
-	mov	x28, x2
-	mov	x27, x9
+	str	x1, [x27, #16]
 	mov	x0, x8
 	ldr	x30, [sp, #24]                  ; 8-byte Folded Reload
 	add	sp, sp, #32
 	ret
-LBB0_3:                                 ; %L104
+LBB0_2:                                 ; %L104
 	str	x0, [sp, #8]
 	str	x1, [sp]
-	mov	x27, x9
 	bl	_caml_call_gc
 Ltmp0:
-	mov	x9, x27
-	mov	x2, x28
 	ldr	x0, [sp, #8]
 	ldr	x1, [sp]
-	b	LBB0_2
+	b	LBB0_1
 	.cfi_endproc|}]

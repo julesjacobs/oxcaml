@@ -253,13 +253,9 @@ Lloh11:
 	ccmp	w8, #0, #4, hs
 	ccmp	w10, #0, #0, ne
 	b.eq	LBB0_4
-LBB0_2:                                 ; %L131
-	mov	x2, x27
-	mov	x1, x28
+; %bb.2:                                ; %L131
 	dmb	ishld
 	str	x13, [x0]
-	mov	x28, x1
-	mov	x27, x2
 	mov	w0, #1
 	ldr	x30, [sp, #24]                  ; 8-byte Folded Reload
 	add	sp, sp, #32
@@ -268,23 +264,24 @@ LBB0_3:                                 ; %L128
 	mov	x1, x13
 	bl	_c_call_wrapper.caml_modify.2.i64.ptr_addrspace_1_.0
 Ltmp0:
-	mov	x2, x27
-	mov	x1, x28
-	mov	x28, x1
-	mov	x27, x2
 	mov	w0, #1
 	ldr	x30, [sp, #24]                  ; 8-byte Folded Reload
 	add	sp, sp, #32
 	ret
 LBB0_4:                                 ; %L130
+	str	x0, [sp]                        ; 8-byte Folded Spill
 	str	x13, [sp, #8]                   ; 8-byte Folded Spill
 	mov	x2, x13
-	str	x0, [sp]                        ; 8-byte Folded Spill
 	bl	_c_call_wrapper.caml_modify_slow_barrier.3.i64.i64.i64.0
 Ltmp1:
 	ldr	x0, [sp]                        ; 8-byte Folded Reload
 	ldr	x13, [sp, #8]                   ; 8-byte Folded Reload
-	b	LBB0_2
+	dmb	ishld
+	str	x13, [x0]
+	mov	w0, #1
+	ldr	x30, [sp, #24]                  ; 8-byte Folded Reload
+	add	sp, sp, #32
+	ret
 	.loh AdrpLdrGotLdr	Lloh0, Lloh1, Lloh2
 	.loh AdrpLdrGotLdr	Lloh9, Lloh10, Lloh11
 	.loh AdrpLdrGotLdr	Lloh6, Lloh7, Lloh8

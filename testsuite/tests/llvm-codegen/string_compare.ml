@@ -175,94 +175,80 @@ L103:
 	.cfi_def_cfa_offset 16
 	str	x30, [sp, #8]                   ; 8-byte Folded Spill
 	.cfi_offset w30, -16
-	mov	x8, x27
-	mov	x9, x28
 	cmp	x0, x1
 	b.eq	LBB0_3
 ; %bb.1:                                ; %L106
-	ldur	x10, [x0, #-8]
-	lsr	x10, x10, #7
-	and	x10, x10, #0x1fffffffffff8
-	sub	x10, x10, #1
-	ldrb	w11, [x0, x10]
-	sub	x10, x10, x11
-	ldur	x11, [x1, #-8]
-	lsr	x11, x11, #7
-	and	x11, x11, #0x1fffffffffff8
-	sub	x11, x11, #1
-	ldrb	w12, [x1, x11]
-	sub	x11, x11, x12
-	cmp	x10, x11
-	csel	x12, x10, x11, lo
-	cmp	x12, #16
+	ldur	x8, [x0, #-8]
+	lsr	x8, x8, #7
+	and	x8, x8, #0x1fffffffffff8
+	sub	x8, x8, #1
+	ldrb	w9, [x0, x8]
+	sub	x8, x8, x9
+	ldur	x9, [x1, #-8]
+	lsr	x9, x9, #7
+	and	x9, x9, #0x1fffffffffff8
+	sub	x9, x9, #1
+	ldrb	w10, [x1, x9]
+	sub	x9, x9, x10
+	cmp	x8, x9
+	csel	x10, x8, x9, lo
+	cmp	x10, #16
 	b.lo	LBB0_4
 ; %bb.2:                                ; %L107
-	mov	x28, x9
-	mov	x27, x8
 	bl	_c_call_wrapper.caml_string_compare.2.ptr_addrspace_1_.ptr_addrspace_1_.ptr_addrspace_1_.1
 Ltmp0:
-	mov	x8, x27
-	mov	x9, x28
-	mov	x28, x9
-	mov	x27, x8
 	ldr	x30, [sp, #8]                   ; 8-byte Folded Reload
 	add	sp, sp, #16
 	ret
 LBB0_3:
 	mov	w0, #1
-	mov	x28, x9
-	mov	x27, x8
 	ldr	x30, [sp, #8]                   ; 8-byte Folded Reload
 	add	sp, sp, #16
 	ret
 LBB0_4:                                 ; %L108
-	cbz	x12, LBB0_8
+	cbz	x10, LBB0_8
 ; %bb.5:                                ; %L110
-	mov	w13, #8
-	subs	x13, x13, x12
-	csel	x13, xzr, x13, lo
-	lsl	x13, x13, #3
-	mov	x14, #-1
-	lsl	x13, x14, x13
-	ldr	x14, [x0]
-	rev	x14, x14
-	ldr	x19, [x1]
-	rev	x19, x19
-	and	x14, x14, x13
-	and	x13, x19, x13
-	cmp	x14, x13
+	mov	w11, #8
+	subs	x11, x11, x10
+	csel	x11, xzr, x11, lo
+	lsl	x11, x11, #3
+	mov	x12, #-1
+	lsl	x11, x12, x11
+	ldr	x12, [x0]
+	rev	x12, x12
+	ldr	x13, [x1]
+	rev	x13, x13
+	and	x12, x12, x11
+	and	x11, x13, x11
+	cmp	x12, x11
 	b.ne	LBB0_9
 ; %bb.6:                                ; %L112
-	cmp	x12, #9
+	cmp	x10, #9
 	b.lo	LBB0_8
 ; %bb.7:                                ; %L113
-	lsl	x12, x12, #3
-	neg	x12, x12
-	mov	x13, #-1
-	lsl	x12, x13, x12
-	ldr	x13, [x0, #8]
-	rev	x13, x13
-	ldr	x14, [x1, #8]
-	rev	x14, x14
-	and	x13, x13, x12
-	and	x12, x14, x12
-	cmp	x13, x12
+	lsl	x10, x10, #3
+	neg	x10, x10
+	mov	x11, #-1
+	lsl	x10, x11, x10
+	ldr	x11, [x0, #8]
+	rev	x11, x11
+	ldr	x12, [x1, #8]
+	rev	x12, x12
+	and	x11, x11, x10
+	and	x10, x12, x10
+	cmp	x11, x10
 	b.ne	LBB0_9
 LBB0_8:                                 ; %L109
-	cmp	x10, x11
-	mov	w10, #3
-	csinc	x10, x10, xzr, hi
-	csinv	x0, x10, xzr, hs
-	mov	x28, x9
-	mov	x27, x8
+	cmp	x8, x9
+	mov	w8, #3
+	csinc	x8, x8, xzr, hi
+	csinv	x0, x8, xzr, hs
 	ldr	x30, [sp, #8]                   ; 8-byte Folded Reload
 	add	sp, sp, #16
 	ret
 LBB0_9:                                 ; %L111
-	mov	w10, #3
-	csinv	x0, x10, xzr, hs
-	mov	x28, x9
-	mov	x27, x8
+	mov	w8, #3
+	csinv	x0, x8, xzr, hs
 	ldr	x30, [sp, #8]                   ; 8-byte Folded Reload
 	add	sp, sp, #16
 	ret
@@ -438,94 +424,80 @@ L127:
 	.cfi_def_cfa_offset 16
 	str	x30, [sp, #8]                   ; 8-byte Folded Spill
 	.cfi_offset w30, -16
-	mov	x8, x27
-	mov	x9, x28
 	cmp	x0, x1
 	b.eq	LBB0_3
 ; %bb.1:                                ; %L130
-	ldur	x10, [x0, #-8]
-	lsr	x10, x10, #7
-	and	x10, x10, #0x1fffffffffff8
-	sub	x10, x10, #1
-	ldrb	w11, [x0, x10]
-	sub	x10, x10, x11
-	ldur	x11, [x1, #-8]
-	lsr	x11, x11, #7
-	and	x11, x11, #0x1fffffffffff8
-	sub	x11, x11, #1
-	ldrb	w12, [x1, x11]
-	sub	x11, x11, x12
-	cmp	x10, x11
-	csel	x12, x10, x11, lo
-	cmp	x12, #16
+	ldur	x8, [x0, #-8]
+	lsr	x8, x8, #7
+	and	x8, x8, #0x1fffffffffff8
+	sub	x8, x8, #1
+	ldrb	w9, [x0, x8]
+	sub	x8, x8, x9
+	ldur	x9, [x1, #-8]
+	lsr	x9, x9, #7
+	and	x9, x9, #0x1fffffffffff8
+	sub	x9, x9, #1
+	ldrb	w10, [x1, x9]
+	sub	x9, x9, x10
+	cmp	x8, x9
+	csel	x10, x8, x9, lo
+	cmp	x10, #16
 	b.lo	LBB0_4
 ; %bb.2:                                ; %L131
-	mov	x28, x9
-	mov	x27, x8
 	bl	_c_call_wrapper.caml_bytes_compare.2.ptr_addrspace_1_.ptr_addrspace_1_.ptr_addrspace_1_.1
 Ltmp0:
-	mov	x8, x27
-	mov	x9, x28
-	mov	x28, x9
-	mov	x27, x8
 	ldr	x30, [sp, #8]                   ; 8-byte Folded Reload
 	add	sp, sp, #16
 	ret
 LBB0_3:
 	mov	w0, #1
-	mov	x28, x9
-	mov	x27, x8
 	ldr	x30, [sp, #8]                   ; 8-byte Folded Reload
 	add	sp, sp, #16
 	ret
 LBB0_4:                                 ; %L132
-	cbz	x12, LBB0_8
+	cbz	x10, LBB0_8
 ; %bb.5:                                ; %L134
-	mov	w13, #8
-	subs	x13, x13, x12
-	csel	x13, xzr, x13, lo
-	lsl	x13, x13, #3
-	mov	x14, #-1
-	lsl	x13, x14, x13
-	ldr	x14, [x0]
-	rev	x14, x14
-	ldr	x19, [x1]
-	rev	x19, x19
-	and	x14, x14, x13
-	and	x13, x19, x13
-	cmp	x14, x13
+	mov	w11, #8
+	subs	x11, x11, x10
+	csel	x11, xzr, x11, lo
+	lsl	x11, x11, #3
+	mov	x12, #-1
+	lsl	x11, x12, x11
+	ldr	x12, [x0]
+	rev	x12, x12
+	ldr	x13, [x1]
+	rev	x13, x13
+	and	x12, x12, x11
+	and	x11, x13, x11
+	cmp	x12, x11
 	b.ne	LBB0_9
 ; %bb.6:                                ; %L136
-	cmp	x12, #9
+	cmp	x10, #9
 	b.lo	LBB0_8
 ; %bb.7:                                ; %L137
-	lsl	x12, x12, #3
-	neg	x12, x12
-	mov	x13, #-1
-	lsl	x12, x13, x12
-	ldr	x13, [x0, #8]
-	rev	x13, x13
-	ldr	x14, [x1, #8]
-	rev	x14, x14
-	and	x13, x13, x12
-	and	x12, x14, x12
-	cmp	x13, x12
+	lsl	x10, x10, #3
+	neg	x10, x10
+	mov	x11, #-1
+	lsl	x10, x11, x10
+	ldr	x11, [x0, #8]
+	rev	x11, x11
+	ldr	x12, [x1, #8]
+	rev	x12, x12
+	and	x11, x11, x10
+	and	x10, x12, x10
+	cmp	x11, x10
 	b.ne	LBB0_9
 LBB0_8:                                 ; %L133
-	cmp	x10, x11
-	mov	w10, #3
-	csinc	x10, x10, xzr, hi
-	csinv	x0, x10, xzr, hs
-	mov	x28, x9
-	mov	x27, x8
+	cmp	x8, x9
+	mov	w8, #3
+	csinc	x8, x8, xzr, hi
+	csinv	x0, x8, xzr, hs
 	ldr	x30, [sp, #8]                   ; 8-byte Folded Reload
 	add	sp, sp, #16
 	ret
 LBB0_9:                                 ; %L135
-	mov	w10, #3
-	csinv	x0, x10, xzr, hs
-	mov	x28, x9
-	mov	x27, x8
+	mov	w8, #3
+	csinv	x0, x8, xzr, hs
 	ldr	x30, [sp, #8]                   ; 8-byte Folded Reload
 	add	sp, sp, #16
 	ret
