@@ -174,7 +174,7 @@ L130:
   br label %L131
 L131:
   fence acquire
-  store i64 %35, ptr %33
+  store atomic i64 %35, ptr %33 release, align 8
   br label %L127
 L127:
   br label %L125
@@ -255,7 +255,7 @@ Lloh11:
 	b.eq	LBB0_4
 ; %bb.2:                                ; %L131
 	dmb	ishld
-	str	x13, [x0]
+	stlr	x13, [x0]
 	mov	w0, #1
 	ldr	x30, [sp, #24]                  ; 8-byte Folded Reload
 	add	sp, sp, #32
@@ -277,7 +277,7 @@ Ltmp1:
 	ldr	x0, [sp]                        ; 8-byte Folded Reload
 	ldr	x13, [sp, #8]                   ; 8-byte Folded Reload
 	dmb	ishld
-	str	x13, [x0]
+	stlr	x13, [x0]
 	mov	w0, #1
 	ldr	x30, [sp, #24]                  ; 8-byte Folded Reload
 	add	sp, sp, #32
