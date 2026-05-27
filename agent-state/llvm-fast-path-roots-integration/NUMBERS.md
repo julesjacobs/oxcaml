@@ -14,8 +14,12 @@ Benchmark shape:
 - Both compilers compile representative compiler source files with the normal
   backend. This measures the speed of the compiler binary itself, not LLVM
   backend compile time.
-- Current run, after removing the scalar-clone experiment and rebuilding the
-  self-stage compiler:
+- Current valid run, after removing the scalar-clone experiment, rebuilding the
+  LLVM self-stage compiler, and rebuilding `_install` as a clean normal-backend
+  compiler:
+  `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/summary_clean_native_vs_no_scalar_llvm_20260527_101300.json`.
+- Invalid run, after removing the scalar-clone experiment but before rebuilding
+  a clean normal-backend `_install`:
   `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/summary_no_scalar_clone_20260527_095212.json`.
 - Previous run, after the review fixes in `5eac16a411` and a fresh self-stage
   rebuild:
@@ -37,17 +41,51 @@ Geomean LLVM/native ratio:
 - Old baseline: `1.0897`
 - After conservative short string/bytes compare lowering: `1.0766`
 - After `caml_modify` Candidate 1 fast path: `1.0651`
-- Current after Design 1, stack-pair suppression, and tagged-int load-width
-  prototype: `1.0090`
-- Current post-review rerun: `1.0079`
-- Current after removing scalar-clone experiment: `1.0085`
+- Invalid/suspect after Design 1, stack-pair suppression, and tagged-int
+  load-width prototype: `1.0090`
+- Invalid post-review rerun: `1.0079`
+- Invalid no-scalar run with LLVM-built `_install`: `1.0085`
+- Current clean-native vs no-scalar LLVM-built run: `1.0618`
 - String-compare change: `-0.0131`
 - `caml_modify` Candidate 1 change: `-0.0115`
-- Later runtime-state/codegen changes since `caml_modify` Candidate 1:
-  `-0.0561`
-- Total recorded change: `-0.0807`
+- Later near-parity runs were invalid or suspect because the supposed native
+  `_install` had been built with LLVM backend enabled.
+- Current recorded change from old baseline to the corrected current run:
+  `-0.0279`.
 
-Current no-scalar-clone run details:
+Current clean-native vs no-scalar LLVM-built run details:
+
+- Clean native rebuild log:
+  `_self_build_current/make_install_clean_native_20260527_101000.log`.
+- Benchmark log:
+  `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/run_clean_native_vs_no_scalar_llvm_20260527_101300.log`.
+- Summary:
+  `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/summary_clean_native_vs_no_scalar_llvm_20260527_101300.json`.
+- Aggregate: geomean LLVM-built/native-built ratio `1.0618`, median `1.0561`,
+  min `1.0446`, max `1.0968`.
+- Sanity checks:
+  `_build/log` records `OCAMLPARAM: ""`; `_install/bin/ocamlopt.opt` is
+  48.5 MB and differs from `_llvm_self_stage_install/bin/ocamlopt.opt.real`
+  at 106.6 MB.
+
+| file | native-built | LLVM-built | LLVM/native |
+| --- | ---: | ---: | ---: |
+| `env.ml` | 1.7181s | 1.8107s | 1.054 |
+| `ctype.ml` | 2.5891s | 2.7135s | 1.048 |
+| `typecore.ml` | 4.9291s | 5.1974s | 1.054 |
+| `translcore.ml` | 1.3445s | 1.4199s | 1.056 |
+| `typemod.ml` | 1.5050s | 1.5721s | 1.045 |
+| `cfg_to_linear.ml` | 0.1825s | 0.2002s | 1.097 |
+| `cfg_selectgen.ml` | 0.5587s | 0.5949s | 1.065 |
+| `llvmize.ml` | 1.6287s | 1.7277s | 1.061 |
+| `regalloc_irc.ml` | 0.3334s | 0.3591s | 1.077 |
+
+Invalid no-scalar-clone run details:
+
+This run compared against an `_install` whose `_build/log` recorded
+`OCAMLPARAM: "_,llvm-backend=1,llvm-path=..."`, so the supposed native side was
+also built through the LLVM backend. Keep it only as evidence of the mistake,
+not as a native-vs-LLVM performance number.
 
 - Build log:
   `_self_build_current/self_build_no_scalar_clone_20260527_092520.log`.

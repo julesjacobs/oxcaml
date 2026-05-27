@@ -1951,7 +1951,7 @@ branch or needs one more focused performance pass.
     6394 passed, 282 skipped, 0 failed, 6676 considered. Wrapper counts:
     6687 lines, 3321 fresh IR.
 - Re-ran the compiler-binary benchmark after the no-scalar-clone self-stage
-  rebuild, using the normal backend for both timed compilers.
+  rebuild, but later found this run was invalid.
   - Command:
     `python3 agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/bench_compiler_binary.py --pairs 7 ...`.
   - Log:
@@ -1964,3 +1964,32 @@ branch or needs one more focused performance pass.
     5.4335s, ratio 1.000.
   - Current largest tail in this suite is `cfg_to_linear.ml` at 1.037x and
     `regalloc_irc.ml` at 1.019x.
+  - Invalidation reason: `_build/log` for the supposed native side recorded
+    `OCAMLPARAM: "_,llvm-backend=1,llvm-path=..."`, so `_install` had been
+    rebuilt with LLVM backend enabled. This compared an LLVM-built compiler
+    against another LLVM-built compiler shape and should not be used as a
+    native-vs-LLVM result.
+- Rebuilt `_install` as a clean normal-backend compiler and reran the
+  compiler-binary benchmark.
+  - Clean rebuild command:
+    `rm -rf _build _install duneconf/boot.ws duneconf/runtime_stdlib.ws duneconf/main.ws`
+    followed by
+    `make install LLVM_BOOT_BACKEND=0 LLVM_BACKEND=0 OCAMLPARAM= BUILD_OCAMLPARAM=`.
+  - Clean rebuild log:
+    `_self_build_current/make_install_clean_native_20260527_101000.log`.
+  - Sanity checks after rebuild:
+    `_build/log` records `OCAMLPARAM: ""`; `_install/bin/ocamlopt.opt` is
+    48.5 MB with sha256
+    `777c39715ed86105ae4dd45c1842f05605b93f2bd5dff6c0d1fcc3a9547ee711`;
+    `_llvm_self_stage_install/bin/ocamlopt.opt.real` is 106.6 MB with sha256
+    `99f43f69352372c043bc58ee2b092d2dca81f7ca7a79f93b380cc6d5ba81ef2a`.
+  - Corrected benchmark log:
+    `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/run_clean_native_vs_no_scalar_llvm_20260527_101300.log`.
+  - Corrected benchmark summary:
+    `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/summary_clean_native_vs_no_scalar_llvm_20260527_101300.json`.
+  - Corrected aggregate: geomean LLVM-built/native-built ratio 1.0618,
+    median 1.0561, min 1.0446, max 1.0968.
+  - Corrected `typecore.ml`: native-built 4.9291s, LLVM-built 5.1974s,
+    ratio 1.054.
+  - Corrected largest tails: `cfg_to_linear.ml` 1.097x,
+    `regalloc_irc.ml` 1.077x, `cfg_selectgen.ml` 1.065x.
