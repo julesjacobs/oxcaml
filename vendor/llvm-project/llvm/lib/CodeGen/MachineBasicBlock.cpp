@@ -284,7 +284,7 @@ MachineBasicBlock::getLastNonDebugInstr(bool SkipPseudoOp) {
 
 bool MachineBasicBlock::hasEHPadSuccessor() const {
   for (const MachineBasicBlock *Succ : successors())
-    if (Succ->isEHPad())
+    if (Succ->isEHPad() || Succ->isRuntimeEntered())
       return true;
   return false;
 }
@@ -533,6 +533,11 @@ void MachineBasicBlock::printName(raw_ostream &os, unsigned printNameFlags,
       os << "landing-pad";
       hasAttributes = true;
     }
+    if (isRuntimeEntered()) {
+      os << (hasAttributes ? ", " : " (");
+      os << "runtime-entered";
+      hasAttributes = true;
+    }
     if (isInlineAsmBrIndirectTarget()) {
       os << (hasAttributes ? ", " : " (");
       os << "inlineasm-br-indirect-target";
@@ -629,8 +634,8 @@ MachineBasicBlock::addLiveIn(MCRegister PhysReg, const TargetRegisterClass *RC) 
   assert(getParent() && "MBB must be inserted in function");
   assert(Register::isPhysicalRegister(PhysReg) && "Expected physreg");
   assert(RC && "Register class is required");
-  assert((isEHPad() || this == &getParent()->front()) &&
-         "Only the entry block and landing pads can have physreg live ins");
+  assert((isEHPad() || isRuntimeEntered() || this == &getParent()->front()) &&
+         "Only ABI-entry blocks can have physreg live ins");
 
   bool LiveIn = isLiveIn(PhysReg);
   iterator I = SkipPHIsAndLabels(begin()), E = end();
@@ -1270,7 +1275,7 @@ bool MachineBasicBlock::canSplitCriticalEdge(
     const MachineBasicBlock *Succ) const {
   // Splitting the critical edge to a landing pad block is non-trivial. Don't do
   // it in this generic function.
-  if (Succ->isEHPad())
+  if (Succ->isEHPad() || Succ->isRuntimeEntered())
     return false;
 
   // Splitting the critical edge to a callbr's indirect block isn't advised.

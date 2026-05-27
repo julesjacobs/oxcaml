@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "SelectionDAGBuilder.h"
+#include "OxCamlTrapUtils.h"
 #include "SDNodeDbgValue.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APInt.h"
@@ -2950,6 +2951,9 @@ void SelectionDAGBuilder::visitInvoke(const InvokeInst &I) {
   // catchswitch for successors.
   MachineBasicBlock *Return = FuncInfo.MBBMap[I.getSuccessor(0)];
   const BasicBlock *EHPadBB = I.getSuccessor(1);
+  bool IsOxCamlTrapRecoveryInvoke = isOxCamlTrapRecoveryInvoke(I);
+  const BasicBlock *CodegenEHPadBB =
+      IsOxCamlTrapRecoveryInvoke ? nullptr : EHPadBB;
 
   // Deopt bundles are lowered in LowerCallSiteWithDeoptBundle, and we don't
   // have to do anything here to lower funclet bundles.
@@ -2963,7 +2967,7 @@ void SelectionDAGBuilder::visitInvoke(const InvokeInst &I) {
   const Value *Callee(I.getCalledOperand());
   const Function *Fn = dyn_cast<Function>(Callee);
   if (isa<InlineAsm>(Callee))
-    visitInlineAsm(I, EHPadBB);
+    visitInlineAsm(I, CodegenEHPadBB);
   else if (Fn && Fn->isIntrinsic()) {
     switch (Fn->getIntrinsicID()) {
     default:
@@ -2977,10 +2981,10 @@ void SelectionDAGBuilder::visitInvoke(const InvokeInst &I) {
       break;
     case Intrinsic::experimental_patchpoint_void:
     case Intrinsic::experimental_patchpoint_i64:
-      visitPatchpoint(I, EHPadBB);
+      visitPatchpoint(I, CodegenEHPadBB);
       break;
     case Intrinsic::experimental_gc_statepoint:
-      LowerStatepoint(cast<GCStatepointInst>(I), EHPadBB);
+      LowerStatepoint(cast<GCStatepointInst>(I), CodegenEHPadBB);
       break;
     case Intrinsic::wasm_rethrow: {
       // This is usually done in visitTargetIntrinsic, but this intrinsic is
@@ -3002,9 +3006,9 @@ void SelectionDAGBuilder::visitInvoke(const InvokeInst &I) {
     // Eventually we will support lowering the @llvm.experimental.deoptimize
     // intrinsic, and right now there are no plans to support other intrinsics
     // with deopt state.
-    LowerCallSiteWithDeoptBundle(&I, getValue(Callee), EHPadBB);
+    LowerCallSiteWithDeoptBundle(&I, getValue(Callee), CodegenEHPadBB);
   } else {
-    LowerCallTo(I, getValue(Callee), false, false, EHPadBB);
+    LowerCallTo(I, getValue(Callee), false, false, CodegenEHPadBB);
   }
 
   // If the value of the invoke is used outside of its defining block, make it
@@ -3024,9 +3028,17 @@ void SelectionDAGBuilder::visitInvoke(const InvokeInst &I) {
 
   // Update successor info.
   addSuccessorWithProb(InvokeMBB, Return);
-  for (auto &UnwindDest : UnwindDests) {
-    UnwindDest.first->setIsEHPad();
-    addSuccessorWithProb(InvokeMBB, UnwindDest.first, UnwindDest.second);
+  if (IsOxCamlTrapRecoveryInvoke) {
+    MachineBasicBlock *Target = FuncInfo.MBBMap[EHPadBB];
+    Target->setIsRuntimeEntered();
+    Target->setMachineBlockAddressTaken();
+    Target->setLabelMustBeEmitted();
+    addSuccessorWithProb(InvokeMBB, Target, EHPadBBProb);
+  } else {
+    for (auto &UnwindDest : UnwindDests) {
+      UnwindDest.first->setIsEHPad();
+      addSuccessorWithProb(InvokeMBB, UnwindDest.first, UnwindDest.second);
+    }
   }
   InvokeMBB->normalizeSuccProbs();
 
@@ -3078,6 +3090,12 @@ void SelectionDAGBuilder::visitResume(const ResumeInst &RI) {
 }
 
 void SelectionDAGBuilder::visitLandingPad(const LandingPadInst &LP) {
+  if (FuncInfo.MBB->isRuntimeEntered()) {
+    assert(LP.getType()->isTokenTy() &&
+           "runtime-entered trap recovery must use token landingpad");
+    return;
+  }
+
   assert(FuncInfo.MBB->isEHPad() &&
          "Call to landingpad not in landing pad!");
 

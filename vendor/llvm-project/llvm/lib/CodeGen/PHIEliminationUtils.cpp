@@ -25,14 +25,16 @@ llvm::findPHICopyInsertPoint(MachineBasicBlock* MBB, MachineBasicBlock* SuccMBB,
     return MBB->begin();
 
   // Usually, we just want to insert the copy before the first terminator
-  // instruction. However, for the edge going to a landing pad, we must insert
-  // the copy before the call/invoke instruction. Similarly for an INLINEASM_BR
-  // going to an indirect target. This is similar to SplitKit.cpp's
+  // instruction. However, for the edge going to a runtime-entered ABI block,
+  // including a landing pad, we must insert the copy before the call/invoke
+  // instruction. Similarly for an INLINEASM_BR going to an indirect target.
+  // This is similar to SplitKit.cpp's
   // computeLastInsertPoint, and similarly assumes that there cannot be multiple
   // instructions that are Calls with EHPad successors or INLINEASM_BR in a
   // block.
-  bool EHPadSuccessor = SuccMBB->isEHPad();
-  if (!EHPadSuccessor && !SuccMBB->isInlineAsmBrIndirectTarget())
+  bool RuntimeEnteredSuccessor =
+      SuccMBB->isEHPad() || SuccMBB->isRuntimeEntered();
+  if (!RuntimeEnteredSuccessor && !SuccMBB->isInlineAsmBrIndirectTarget())
     return MBB->getFirstTerminator();
 
   // Discover any defs in this basic block.
@@ -51,7 +53,7 @@ llvm::findPHICopyInsertPoint(MachineBasicBlock* MBB, MachineBasicBlock* SuccMBB,
       InsertPoint = std::next(I.getReverse());
       break;
     }
-    if ((EHPadSuccessor && I->isCall()) ||
+    if ((RuntimeEnteredSuccessor && I->isCall()) ||
         I->getOpcode() == TargetOpcode::INLINEASM_BR) {
       InsertPoint = I.getReverse();
       break;

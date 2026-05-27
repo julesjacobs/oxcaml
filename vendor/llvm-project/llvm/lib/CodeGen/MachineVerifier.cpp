@@ -623,12 +623,14 @@ MachineVerifier::visitMachineBasicBlockBefore(const MachineBasicBlock *MBB) {
 
   if (!MF->getProperties().hasProperty(
       MachineFunctionProperties::Property::NoPHIs) && MRI->tracksLiveness()) {
-    // If this block has allocatable physical registers live-in, check that
-    // it is an entry block or landing pad.
+    // If this block has allocatable physical registers live-in, check that it
+    // is an ABI-entry block.
     for (const auto &LI : MBB->liveins()) {
       if (isAllocatable(LI.PhysReg) && !MBB->isEHPad() &&
+          !MBB->isRuntimeEntered() &&
           MBB->getIterator() != MBB->getParent()->begin()) {
-        report("MBB has allocatable live-in, but isn't entry or landing-pad.", MBB);
+        report("MBB has allocatable live-in, but isn't an ABI-entry block.",
+               MBB);
         report_context(LI.PhysReg);
       }
     }
@@ -638,6 +640,31 @@ MachineVerifier::visitMachineBasicBlockBefore(const MachineBasicBlock *MBB) {
     if (!MBB->getAddressTakenIRBlock()->hasAddressTaken())
       report("ir-block-address-taken is associated with basic block not used by "
              "a blockaddress.",
+             MBB);
+  }
+
+  if (MBB->isRuntimeEntered()) {
+    bool SawX0 = false, SawX26 = false, SawX27 = false, SawX28 = false;
+    for (const MachineInstr &MI : MBB->phis())
+      report("runtime-entered block must not contain PHIs.", &MI);
+    for (const auto &LI : MBB->liveins()) {
+      StringRef RegName = TRI->getName(LI.PhysReg);
+      if (RegName == "X0")
+        SawX0 = true;
+      else if (RegName == "X26")
+        SawX26 = true;
+      else if (RegName == "X27")
+        SawX27 = true;
+      else if (RegName == "X28")
+        SawX28 = true;
+      else {
+        report("runtime-entered block has non-OxCaml recovery ABI live-in.",
+               MBB);
+        report_context(LI.PhysReg);
+      }
+    }
+    if (!SawX0 || !SawX26 || !SawX27 || !SawX28)
+      report("runtime-entered block is missing an OxCaml recovery ABI live-in.",
              MBB);
   }
 
@@ -779,7 +806,8 @@ MachineVerifier::visitMachineBasicBlockBefore(const MachineBasicBlock *MBB) {
         continue;
       // Also accept successors which are for exception-handling or might be
       // inlineasm_br targets.
-      if (SuccMBB->isEHPad() || SuccMBB->isInlineAsmBrIndirectTarget())
+      if (SuccMBB->isEHPad() || SuccMBB->isRuntimeEntered() ||
+          SuccMBB->isInlineAsmBrIndirectTarget())
         continue;
       report("MBB has unexpected successors which are not branch targets, "
              "fallthrough, EHPads, or inlineasm_br targets.",
@@ -3221,8 +3249,9 @@ void MachineVerifier::verifyLiveRangeSegment(const LiveRange &LR,
 
   while (true) {
     assert(LiveInts->isLiveInToMBB(LR, &*MFI));
-    // We don't know how to track physregs into a landing pad.
-    if (!Reg.isVirtual() && MFI->isEHPad()) {
+    // We don't know how to track physregs into ABI blocks with runtime-provided
+    // physical-register live-ins.
+    if (!Reg.isVirtual() && (MFI->isEHPad() || MFI->isRuntimeEntered())) {
       if (&*MFI == EndMBB)
         break;
       ++MFI;
@@ -3236,8 +3265,8 @@ void MachineVerifier::verifyLiveRangeSegment(const LiveRange &LR,
     // Check that VNI is live-out of all predecessors.
     for (const MachineBasicBlock *Pred : MFI->predecessors()) {
       SlotIndex PEnd = LiveInts->getMBBEndIdx(Pred);
-      // Predecessor of landing pad live-out on last call.
-      if (MFI->isEHPad()) {
+      // Predecessor of runtime-entered ABI block live-out on the last call.
+      if (MFI->isEHPad() || MFI->isRuntimeEntered()) {
         for (const MachineInstr &MI : llvm::reverse(*Pred)) {
           if (MI.isCall()) {
             PEnd = Indexes->getInstructionIndex(MI).getBoundaryIndex();

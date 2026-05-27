@@ -81,15 +81,9 @@ static cl::opt<unsigned> UpdateLimit("aarch64-update-scan-limit", cl::init(100),
 static cl::opt<bool> EnableRenaming("aarch64-load-store-renaming",
                                     cl::init(true), cl::Hidden);
 
-static cl::opt<bool> OxcamlSuppressStatepointStackPairs(
+static cl::opt<bool> OxcamlSuppressStackPairs(
     "oxcaml-suppress-statepoint-stack-pairs", cl::Hidden, cl::init(true),
-    cl::desc("Suppress stack load/store pairs close to OxCaml GC "
-             "statepoints"));
-
-static cl::opt<unsigned> OxcamlStatepointStackPairWindow(
-    "oxcaml-statepoint-stack-pair-window", cl::Hidden, cl::init(8),
-    cl::desc("Instruction window for OxCaml statepoint stack pair "
-             "suppression"));
+    cl::desc("Suppress OxCaml stack load/store pairs"));
 
 #define AARCH64_LOAD_STORE_OPT_NAME "AArch64 load / store optimization pass"
 
@@ -1302,75 +1296,9 @@ static bool isOxcamlGCFunction(const MachineFunction &MF) {
   return F.hasGC() && F.getGC() == "oxcaml";
 }
 
-static bool isOxcamlCallBoundary(const MachineInstr &MI) {
-  return MI.isCall() || MI.getOpcode() == TargetOpcode::STATEPOINT;
-}
-
-static bool hasCallBoundaryForward(const MachineInstr &MI, unsigned Limit) {
-  const MachineBasicBlock *MBB = MI.getParent();
-  unsigned Count = 0;
-  MachineBasicBlock::const_instr_iterator I = std::next(MI.getIterator());
-  MachineBasicBlock::const_instr_iterator E = MBB->instr_end();
-  for (; I != E; ++I) {
-    if (isOxcamlCallBoundary(*I))
-      return true;
-    if (!I->isTransient() && ++Count >= Limit)
-      return false;
-  }
-  return false;
-}
-
-static bool hasCallBoundaryBackward(const MachineInstr &MI, unsigned Limit) {
-  const MachineBasicBlock *MBB = MI.getParent();
-  unsigned Count = 0;
-  for (MachineBasicBlock::const_instr_iterator I = MI.getIterator(),
-                                               B = MBB->instr_begin();
-       I != B;) {
-    --I;
-    if (isOxcamlCallBoundary(*I))
-      return true;
-    if (!I->isTransient() && ++Count >= Limit)
-      return false;
-  }
-  return false;
-}
-
-static bool isNearBlockStart(const MachineInstr &MI, unsigned Limit) {
-  const MachineBasicBlock *MBB = MI.getParent();
-  unsigned Count = 0;
-  for (MachineBasicBlock::const_instr_iterator I = MBB->instr_begin(),
-                                               E = MI.getIterator();
-       I != E; ++I) {
-    if (!I->isTransient() && ++Count >= Limit)
-      return false;
-  }
-  return true;
-}
-
-static bool hasCallBoundaryInPredecessorTail(const MachineInstr &MI,
-                                             unsigned Limit) {
-  if (!isNearBlockStart(MI, Limit))
-    return false;
-
-  const MachineBasicBlock *MBB = MI.getParent();
-  for (const MachineBasicBlock *Pred : MBB->predecessors()) {
-    unsigned Count = 0;
-    for (MachineBasicBlock::const_instr_iterator I = Pred->instr_end(),
-                                                 B = Pred->instr_begin();
-         I != B;) {
-      --I;
-      if (isOxcamlCallBoundary(*I))
-        return true;
-      if (!I->isTransient() && ++Count >= Limit)
-        break;
-    }
-  }
-  return false;
-}
-
-static bool shouldSuppressOxcamlStatepointStackPair(const MachineInstr &FirstMI,
-                                                   const MachineInstr &MI) {
-  if (!OxcamlSuppressStatepointStackPairs)
+static bool shouldSuppressOxcamlStackPair(const MachineInstr &FirstMI,
+                                          const MachineInstr &MI) {
+  if (!OxcamlSuppressStackPairs)
     return false;
   if (FirstMI.getParent() != MI.getParent())
     return false;
@@ -1379,16 +1307,13 @@ static bool shouldSuppressOxcamlStatepointStackPair(const MachineInstr &FirstMI,
   if (!isSPBasedLdSt(FirstMI) || !isSPBasedLdSt(MI))
     return false;
 
-  // Suppress only stack pairs that are immediately before or after an OxCaml
-  // call boundary. After STATEPOINT lowering, call-result/reload code can start
-  // a successor block, so also look through predecessor tails for pairs at the
-  // start of a block. Global ldst-opt disabling fixes some reducers but
-  // regresses allocation-like loops; this keeps ordinary stack pairing enabled
-  // away from call regions.
-  return hasCallBoundaryBackward(FirstMI, OxcamlStatepointStackPairWindow) ||
-         hasCallBoundaryForward(MI, OxcamlStatepointStackPairWindow) ||
-         hasCallBoundaryInPredecessorTail(FirstMI,
-                                          OxcamlStatepointStackPairWindow);
+  // Pairing OxCaml stack spills can turn two scalar stack stores/reloads around
+  // hot call boundaries into costly STP/LDP traffic. The old boundary-window
+  // heuristic was too brittle: a pair just outside the window caused a 10x
+  // microbenchmark regression. Suppress SP-based pairs in OxCaml GC functions
+  // for now; we can reintroduce narrower STP/LDP formation once it has a
+  // positive profitability model for these stack slots.
+  return true;
 }
 
 // Returns true if FirstMI and MI are candidates for merging or pairing.
@@ -1676,7 +1601,7 @@ AArch64LoadStoreOpt::findMatchingInsn(MachineBasicBlock::iterator I,
         AArch64InstrInfo::getLdStOffsetOp(MI).isImm()) {
       assert(MI.mayLoadOrStore() && "Expected memory operation.");
       if (!FindNarrowMerge &&
-          shouldSuppressOxcamlStatepointStackPair(FirstMI, MI))
+          shouldSuppressOxcamlStackPair(FirstMI, MI))
         continue;
 
       // If we've found another instruction with the same opcode, check to see

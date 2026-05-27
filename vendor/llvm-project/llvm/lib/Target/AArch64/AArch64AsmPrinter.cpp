@@ -1307,6 +1307,29 @@ void AArch64AsmPrinter::emitInstruction(const MachineInstr *MI) {
   switch (MI->getOpcode()) {
   default:
     break;
+  case AArch64::OXCAML_TRAP_PUBLISH: {
+    Register TrapBlock = MI->getOperand(0).getReg();
+    Register PreviousTrap = MI->getOperand(1).getReg();
+    Register RecoveryTarget = MI->getOperand(2).getReg();
+
+    EmitToStreamer(*OutStreamer,
+                   MCInstBuilder(AArch64::STRXui)
+                       .addReg(PreviousTrap)
+                       .addReg(TrapBlock)
+                       .addImm(0));
+    EmitToStreamer(*OutStreamer,
+                   MCInstBuilder(AArch64::STRXui)
+                       .addReg(RecoveryTarget)
+                       .addReg(TrapBlock)
+                       .addImm(1));
+    EmitToStreamer(*OutStreamer,
+                   MCInstBuilder(AArch64::ORRXrs)
+                       .addReg(AArch64::X26)
+                       .addReg(AArch64::XZR)
+                       .addReg(TrapBlock)
+                       .addImm(0));
+    return;
+  }
   case AArch64::HINT: {
     // CurrentPatchableFunctionEntrySym can be CurrentFnBegin only for
     // -fpatchable-function-entry=N,0. The entry MBB is guaranteed to be

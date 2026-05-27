@@ -89,6 +89,24 @@ def int_aarch64_isb : ClangBuiltin<"__builtin_arm_isb">, MSBuiltin<"__isb">,
 // ordering during ISel.
 def int_aarch64_space : DefaultAttrsIntrinsic<[llvm_i64_ty], [llvm_i32_ty, llvm_i64_ty], []>;
 
+// OxCaml trap recovery state at a runtime-entered trap recovery block. This is
+// experimental and AArch64-specific: x0 is the exception bucket, x26 is the
+// previous trap pointer, x27 is the allocation pointer, and x28 is the domain
+// state pointer.
+def int_aarch64_oxcaml_trap_recover
+    : Intrinsic<[llvm_i64_ty, llvm_i64_ty, llvm_i64_ty, llvm_i64_ty], [],
+                [IntrNoMem, IntrHasSideEffects, IntrConvergent,
+                 IntrNoDuplicate, IntrNoMerge, IntrWillReturn, IntrNoCallback,
+                 IntrNoFree]>;
+
+// Experimental OxCaml trap publication. The third argument is the recovery
+// block address to store in the trap block. This is a spike-only shape while
+// callbr still carries the modeled recovery edge.
+def int_aarch64_oxcaml_trap_publish
+    : Intrinsic<[], [llvm_ptr_ty, llvm_i64_ty, llvm_ptr_ty],
+                [IntrHasSideEffects, IntrConvergent, IntrNoDuplicate,
+                 IntrNoMerge, IntrWillReturn, IntrNoCallback, IntrNoFree]>;
+
 }
 
 //===----------------------------------------------------------------------===//

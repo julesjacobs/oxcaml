@@ -17,6 +17,7 @@ INSPECT = BUILD / "inspect"
 OCAMLOPT = Path(os.environ["OCAMLOPT"])
 OCAMLLIB = Path(os.environ["OCAMLLIB"])
 LLVM_PATH = os.environ["LLVM_PATH"]
+LLVM_EXTRA_FLAGS = os.environ.get("LLVM_EXTRA_FLAGS", "")
 PAIRS = int(os.environ.get("PAIRS", "3"))
 
 
@@ -387,6 +388,278 @@ let[@inline never] run n reps =
 let () = print_result (run (black_box_int n) (black_box_int reps))
 ''',
     },
+    "ident_find_same_short_names": {
+        "params": (650_000, 20),
+        "source": r'''
+exception Not_found_same
+
+type ident = { name : string; stamp : int }
+type tree = Empty | Node of tree * ident * int * tree
+
+let fresh s = Bytes.to_string (Bytes.of_string s)
+let key i = "id_" ^ (if i < 10 then "0" else "") ^ string_of_int i
+
+let rec build lo hi =
+  if lo > hi then Empty
+  else
+    let mid = (lo + hi) / 2 in
+    Node (build lo (mid - 1), { name = key mid; stamp = mid }, mid,
+      build (mid + 1) hi)
+
+let same a b = a.stamp = b.stamp
+
+let[@inline never] rec find_same id = function
+  | Empty -> raise Not_found_same
+  | Node (left, k, value, right) ->
+    let c = String.compare id.name k.name in
+    if c = 0 then
+      if same id k then value else raise Not_found_same
+    else find_same id (if c < 0 then left else right)
+
+let[@inline never] run n reps =
+  let tree = build 0 63 in
+  let ids = Array.init 64 (fun i -> { name = fresh (key i); stamp = i }) in
+  let acc = ref 0 in
+  for r = 1 to reps do
+    for i = 1 to n do
+      acc := !acc + find_same (Array.unsafe_get ids ((i + r) land 63)) tree
+    done
+  done;
+  !acc
+
+let () = print_result (run (black_box_int n) (black_box_int reps))
+''',
+    },
+    "env_find_same_current_hit": {
+        "params": (650_000, 20),
+        "source": r'''
+exception Not_found_same
+
+type ident = { name : string; stamp : int }
+type tree = Empty | Node of tree * ident * int * tree
+type tbl = { current : tree; layer : layer }
+and layer = Nothing | Open of tbl | Lock of tbl | Map of (int -> int) * tbl
+
+let fresh s = Bytes.to_string (Bytes.of_string s)
+let key i = "env_id_" ^ (if i < 10 then "0" else "") ^ string_of_int i
+
+let rec build lo hi =
+  if lo > hi then Empty
+  else
+    let mid = (lo + hi) / 2 in
+    Node (build lo (mid - 1), { name = key mid; stamp = mid }, mid,
+      build (mid + 1) hi)
+
+let same a b = a.stamp = b.stamp
+
+let[@inline never] rec ident_find_same id = function
+  | Empty -> raise Not_found_same
+  | Node (left, k, value, right) ->
+    let c = String.compare id.name k.name in
+    if c = 0 then
+      if same id k then value else raise Not_found_same
+    else ident_find_same id (if c < 0 then left else right)
+
+let[@inline never] rec find_same_without_locks id tbl =
+  try ident_find_same id tbl.current
+  with Not_found_same ->
+    match tbl.layer with
+    | Open next -> find_same_without_locks id next
+    | Lock next -> find_same_without_locks id next
+    | Map (f, next) -> f (find_same_without_locks id next)
+    | Nothing -> raise Not_found_same
+
+let[@inline never] run n reps =
+  let tbl = { current = build 0 63; layer = Nothing } in
+  let ids = Array.init 64 (fun i -> { name = fresh (key i); stamp = i }) in
+  let acc = ref 0 in
+  for r = 1 to reps do
+    for i = 1 to n do
+      acc := !acc + find_same_without_locks
+        (Array.unsafe_get ids ((i + r) land 63)) tbl
+    done
+  done;
+  !acc
+
+let () = print_result (run (black_box_int n) (black_box_int reps))
+''',
+    },
+    "env_find_same_layered_hit": {
+        "params": (360_000, 20),
+        "source": r'''
+exception Not_found_same
+
+type ident = { name : string; stamp : int }
+type tree = Empty | Node of tree * ident * int * tree
+type tbl = { current : tree; layer : layer }
+and layer = Nothing | Open of tbl | Lock of tbl | Map of (int -> int) * tbl
+
+let fresh s = Bytes.to_string (Bytes.of_string s)
+let key i = "env_layered_id_" ^ (if i < 10 then "0" else "") ^ string_of_int i
+
+let rec build lo hi =
+  if lo > hi then Empty
+  else
+    let mid = (lo + hi) / 2 in
+    Node (build lo (mid - 1), { name = key mid; stamp = mid }, mid,
+      build (mid + 1) hi)
+
+let same a b = a.stamp = b.stamp
+
+let[@inline never] rec ident_find_same id = function
+  | Empty -> raise Not_found_same
+  | Node (left, k, value, right) ->
+    let c = String.compare id.name k.name in
+    if c = 0 then
+      if same id k then value else raise Not_found_same
+    else ident_find_same id (if c < 0 then left else right)
+
+let[@inline never] rec find_same_without_locks id tbl =
+  try ident_find_same id tbl.current
+  with Not_found_same ->
+    match tbl.layer with
+    | Open next -> find_same_without_locks id next
+    | Lock next -> find_same_without_locks id next
+    | Map (f, next) -> f (find_same_without_locks id next)
+    | Nothing -> raise Not_found_same
+
+let rec open_layers n tail =
+  if n = 0 then tail
+  else
+    { current = Empty;
+      layer =
+        if n land 1 = 0
+        then Open (open_layers (n - 1) tail)
+        else Lock (open_layers (n - 1) tail) }
+
+let[@inline never] run n reps =
+  let bottom = { current = build 0 63; layer = Nothing } in
+  let tbl = open_layers 6 bottom in
+  let ids = Array.init 64 (fun i -> { name = fresh (key i); stamp = i }) in
+  let acc = ref 0 in
+  for r = 1 to reps do
+    for i = 1 to n do
+      acc := !acc + find_same_without_locks
+        (Array.unsafe_get ids ((i + r) land 63)) tbl
+    done
+  done;
+  !acc
+
+let () = print_result (run (black_box_int n) (black_box_int reps))
+''',
+    },
+    "env_find_same_layered_map_hit": {
+        "params": (300_000, 20),
+        "source": r'''
+exception Not_found_same
+
+type ident = { name : string; stamp : int }
+type tree = Empty | Node of tree * ident * int * tree
+type tbl = { current : tree; layer : layer }
+and layer = Nothing | Open of tbl | Lock of tbl | Map of (int -> int) * tbl
+
+let fresh s = Bytes.to_string (Bytes.of_string s)
+let key i = "env_map_id_" ^ (if i < 10 then "0" else "") ^ string_of_int i
+
+let rec build lo hi =
+  if lo > hi then Empty
+  else
+    let mid = (lo + hi) / 2 in
+    Node (build lo (mid - 1), { name = key mid; stamp = mid }, mid,
+      build (mid + 1) hi)
+
+let same a b = a.stamp = b.stamp
+let[@inline never] adjust x = x + 1
+
+let[@inline never] rec ident_find_same id = function
+  | Empty -> raise Not_found_same
+  | Node (left, k, value, right) ->
+    let c = String.compare id.name k.name in
+    if c = 0 then
+      if same id k then value else raise Not_found_same
+    else ident_find_same id (if c < 0 then left else right)
+
+let[@inline never] rec find_same_without_locks id tbl =
+  try ident_find_same id tbl.current
+  with Not_found_same ->
+    match tbl.layer with
+    | Open next -> find_same_without_locks id next
+    | Lock next -> find_same_without_locks id next
+    | Map (f, next) -> f (find_same_without_locks id next)
+    | Nothing -> raise Not_found_same
+
+let rec mixed_layers n tail =
+  if n = 0 then tail
+  else
+    { current = Empty;
+      layer =
+        match n mod 3 with
+        | 0 -> Map (adjust, mixed_layers (n - 1) tail)
+        | 1 -> Open (mixed_layers (n - 1) tail)
+        | _ -> Lock (mixed_layers (n - 1) tail) }
+
+let[@inline never] run n reps =
+  let bottom = { current = build 0 63; layer = Nothing } in
+  let tbl = mixed_layers 6 bottom in
+  let ids = Array.init 64 (fun i -> { name = fresh (key i); stamp = i }) in
+  let acc = ref 0 in
+  for r = 1 to reps do
+    for i = 1 to n do
+      acc := !acc + find_same_without_locks
+        (Array.unsafe_get ids ((i + r) land 63)) tbl
+    done
+  done;
+  !acc
+
+let () = print_result (run (black_box_int n) (black_box_int reps))
+''',
+    },
+    "string_compare_short_equal_loop": {
+        "params": (3_000_000, 20),
+        "source": r'''
+let fresh s = Bytes.to_string (Bytes.of_string s)
+
+let[@inline never] run n reps =
+  let left = Array.init 32 (fun i -> "cmp_" ^ string_of_int i) in
+  let right = Array.map fresh left in
+  let acc = ref 0 in
+  for r = 1 to reps do
+    for i = 1 to n do
+      if String.compare
+           (Array.unsafe_get left ((i + r) land 31))
+           (Array.unsafe_get right ((i + r) land 31)) = 0
+      then incr acc
+      else decr acc
+    done
+  done;
+  !acc
+
+let () = print_result (run (black_box_int n) (black_box_int reps))
+''',
+    },
+    "string_compare_short_late_diff_loop": {
+        "params": (3_000_000, 20),
+        "source": r'''
+let fresh s = Bytes.to_string (Bytes.of_string s)
+
+let[@inline never] run n reps =
+  let left = Array.init 32 (fun i -> "cmp_" ^ string_of_int i ^ "_a") in
+  let right = Array.init 32 (fun i -> fresh ("cmp_" ^ string_of_int i ^ "_b")) in
+  let acc = ref 0 in
+  for r = 1 to reps do
+    for i = 1 to n do
+      if String.compare
+           (Array.unsafe_get left ((i + r) land 31))
+           (Array.unsafe_get right ((i + r) land 31)) < 0
+      then incr acc
+      else decr acc
+    done
+  done;
+  !acc
+
+let () = print_result (run (black_box_int n) (black_box_int reps))
+''',
+    },
     "nested_scope_lookup": {
         "params": (350_000, 20),
         "source": r'''
@@ -475,6 +748,37 @@ let[@inline never] run n reps =
     for i = 1 to n do
       try acc := inc (!acc + i)
       with Miss -> decr acc
+    done
+  done;
+  !acc
+
+let () = print_result (run (black_box_int n) (black_box_int reps))
+''',
+    },
+    "closure_call_in_nested_try_hit": {
+        "params": (2_000_000, 15),
+        "source": r'''
+exception Miss1
+exception Miss2
+exception Miss3
+exception Miss4
+
+let[@inline never] inc x = x + 1
+let[@inline never] call f x = f x
+
+let[@inline never] run n reps =
+  let f = black_box inc in
+  let acc = ref 0 in
+  for _ = 1 to reps do
+    for i = 1 to n do
+      try
+        try
+          try
+            try acc := call f (!acc + i)
+            with Miss1 -> decr acc
+          with Miss2 -> acc := !acc - 2
+        with Miss3 -> acc := !acc - 3
+      with Miss4 -> acc := !acc - 4
     done
   done;
   !acc
@@ -802,6 +1106,13 @@ def selected_cases():
     return names
 
 
+def llvm_flags():
+    flags = ["-llvm-backend", "-llvm-path", LLVM_PATH]
+    if LLVM_EXTRA_FLAGS:
+        flags += ["-llvm-flags", LLVM_EXTRA_FLAGS]
+    return flags
+
+
 def compile_case(name, mode, extra_flags):
     cmd = [
         str(OCAMLOPT),
@@ -884,9 +1195,9 @@ def main():
     for name in names:
         n, reps = CASES[name]["params"]
         compile_case(name, "native", [])
-        compile_case(name, "llvm", ["-llvm-backend", "-llvm-path", LLVM_PATH])
+        compile_case(name, "llvm", llvm_flags())
         native_asm = compile_asm(name, "native", [])
-        llvm_asm = compile_asm(name, "llvm", ["-llvm-backend", "-llvm-path", LLVM_PATH])
+        llvm_asm = compile_asm(name, "llvm", llvm_flags())
         exes = {
             "native": BUILD / f"{name}.native",
             "llvm": BUILD / f"{name}.llvm",

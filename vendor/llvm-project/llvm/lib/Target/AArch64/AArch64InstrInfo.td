@@ -953,6 +953,15 @@ def SPACE : Pseudo<(outs GPR64:$Rd), (ins i32imm:$size, GPR64:$Rn),
                    [(set GPR64:$Rd, (int_aarch64_space imm:$size, GPR64:$Rn))]>,
             Sched<[]>;
 
+let hasSideEffects = 1, mayStore = 1, isCodeGenOnly = 1,
+    Defs = [X26], Size = 16 in
+def OXCAML_TRAP_PUBLISH
+    : Pseudo<(outs),
+             (ins GPR64sp:$trap_block, GPR64:$previous_trap,
+                  GPR64:$recovery_target),
+             []>,
+      Sched<[]>;
+
 let hasSideEffects = 1, isCodeGenOnly = 1 in {
   def SpeculationSafeValueX
       : Pseudo<(outs GPR64:$dst), (ins GPR64:$src), []>, Sched<[]>;
