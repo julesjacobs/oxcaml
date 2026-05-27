@@ -587,6 +587,7 @@ module Instruction = struct
   type atomic_ordering =
     | Monotonic
     | Acquire
+    | Release
     | Seq_cst
 
   type convert_op =
@@ -745,6 +746,7 @@ module Instruction = struct
   let atomic_ordering_to_string = function
     | Monotonic -> "monotonic"
     | Acquire -> "acquire"
+    | Release -> "release"
     | Seq_cst -> "seq_cst"
 
   type op =
@@ -834,6 +836,7 @@ module Instruction = struct
         { ptr : Value.t;
           to_store : Value.t;
           volatile_ : bool;
+          atomic : atomic_ordering option;
           align : int option
         }
     | Getelementptr of
@@ -1031,15 +1034,20 @@ module Instruction = struct
 
   let store ~ptr ~to_store =
     assert' "store" (Value.get_type ptr |> Type.is_ptr);
-    Store { ptr; to_store; volatile_ = false; align = None }
+    Store { ptr; to_store; volatile_ = false; atomic = None; align = None }
 
   let store_with_align ~align ~ptr ~to_store =
     assert' "store_with_align" (Value.get_type ptr |> Type.is_ptr);
-    Store { ptr; to_store; volatile_ = false; align = Some align }
+    Store { ptr; to_store; volatile_ = false; atomic = None; align = Some align }
 
   let store_volatile ~ptr ~to_store =
     assert' "store_volatile" (Value.get_type ptr |> Type.is_ptr);
-    Store { ptr; to_store; volatile_ = true; align = None }
+    Store { ptr; to_store; volatile_ = true; atomic = None; align = None }
+
+  let store_atomic ~ordering ~ptr ~to_store =
+    assert' "store_atomic" (Value.get_type ptr |> Type.is_ptr);
+    Store
+      { ptr; to_store; volatile_ = false; atomic = Some ordering; align = Some 8 }
 
   let getelementptr ~base_type ~base_ptr ~indices =
     assert' "getelementptr" (Value.get_type base_ptr |> Type.is_ptr);
@@ -1207,13 +1215,22 @@ module Instruction = struct
       in
       ins_res "load %a%a%a, %a%a%a" (pp_str_if "volatile ") volatile_ pp_atomic
         atomic Type.pp_t typ Value.pp_t ptr pp_ordering atomic pp_align align
-    | Store { ptr; to_store; volatile_; align } ->
+    | Store { ptr; to_store; volatile_; atomic; align } ->
+      let pp_atomic ppf = function
+        | None -> ()
+        | Some _ -> fprintf ppf "atomic "
+      in
+      let pp_ordering ppf = function
+        | None -> ()
+        | Some ordering -> fprintf ppf " %s" (atomic_ordering_to_string ordering)
+      in
       let pp_align ppf = function
         | None -> ()
         | Some align -> fprintf ppf ", align %d" align
       in
-      ins "store %a%a, %a%a" (pp_str_if "volatile ") volatile_ Value.pp_t
-        to_store Value.pp_t ptr pp_align align
+      ins "store %a%a%a, %a%a%a" (pp_str_if "volatile ") volatile_ pp_atomic
+        atomic Value.pp_t to_store Value.pp_t ptr pp_ordering atomic pp_align
+        align
     | Getelementptr { base_type; base_ptr; indices } ->
       ins_res "getelementptr %a, %a, %a" Type.pp_t base_type Value.pp_t base_ptr
         (pp_print_list ~pp_sep:pp_comma Value.pp_t)
