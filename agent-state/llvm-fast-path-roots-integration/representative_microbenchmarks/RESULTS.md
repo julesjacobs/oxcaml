@@ -9,6 +9,48 @@ each case twice: once with the normal native backend and once with
 `-llvm-backend`. The timed binaries were then run with the same benchmark
 arguments and interleaved native/LLVM timing pairs.
 
+## 2026-05-27 Refresh
+
+Command:
+
+```sh
+eval "$(../../../scripts/agent-tmp-env)"
+PAIRS=3 LLVM_PATH="$LLVM_PATH" \
+  agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/run.sh \
+  2>&1 | tee agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/run_reviewfix_20260527_062050.log
+cp agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/.build/summary.json \
+  agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/summary_reviewfix_20260527_062050.json
+```
+
+Top current slowdowns:
+
+| Case | Native median | LLVM median | LLVM/native | Wrapper refs | `_wrap_try` refs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `variant_dispatch_with_int_payload` | 0.1006s | 1.0268s | 10.207x | 5 | 0 |
+| `variant_dispatch_with_string_payload` | 0.0497s | 0.2305s | 4.638x | 13 | 0 |
+| `closure_call_in_try_hit` | 0.0607s | 0.1279s | 2.107x | 13 | 4 |
+| `string_equal_guarded_dispatch` | 0.1324s | 0.2320s | 1.752x | 13 | 0 |
+| `direct_call_in_try_hit` | 0.0546s | 0.0824s | 1.508x | 13 | 4 |
+| `string_map_equal_content` | 0.2330s | 0.3057s | 1.312x | 43 | 0 |
+| `string_tree_prefix_heavy` | 0.3134s | 0.4053s | 1.293x | 31 | 0 |
+| `try_with_string_compare_hit` | 0.2485s | 0.3120s | 1.256x | 39 | 4 |
+| `hash_lookup_string_equal` | 0.6061s | 0.7583s | 1.251x | 25 | 0 |
+| `nested_scope_lookup` | 0.1481s | 0.1748s | 1.181x | 58 | 0 |
+
+Interpretation:
+
+- The current compiler-binary benchmark is effectively at parity, but
+  generated-code microbenchmarks still expose real target cases for phase 2.
+- The largest remaining generated-code issue is not generic try lowering:
+  plain `try_find_*` shapes are parity or faster. Handler cost still matters
+  when combined with direct or closure calls inside the handler-protected hot
+  path.
+- String helper calls are still the broadest next target. `String.equal` and
+  `String.compare` cases still show wrapper references in LLVM assembly.
+- The 10x non-inlined int-payload variant remains a stress test for tiny
+  direct-call ABI overhead. It is not representative of code that inlines, but
+  it is a useful target for a principled proven-leaf call contract.
+
 ## Commands
 
 Full first pass:

@@ -14,7 +14,10 @@ Benchmark shape:
 - Both compilers compile representative compiler source files with the normal
   backend. This measures the speed of the compiler binary itself, not LLVM
   backend compile time.
-- Current run, after Design 1 runtime-state threading, stack-pair suppression
+- Current run, after the review fixes in `5eac16a411` and a fresh self-stage
+  rebuild:
+  `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/summary_reviewfix_20260527_061712.json`.
+- Previous run, after Design 1 runtime-state threading, stack-pair suppression
   near OxCaml call boundaries, the tagged-int load-width prototype, and the
   LLVM stack-growth frame-pointer fix:
   `_compiler_binary_perf_current/summary_i64_stackgrowth_20260527_044223.json`
@@ -33,22 +36,37 @@ Geomean LLVM/native ratio:
 - After `caml_modify` Candidate 1 fast path: `1.0651`
 - Current after Design 1, stack-pair suppression, and tagged-int load-width
   prototype: `1.0090`
+- Current post-review rerun: `1.0079`
 - String-compare change: `-0.0131`
 - `caml_modify` Candidate 1 change: `-0.0115`
 - Later runtime-state/codegen changes since `caml_modify` Candidate 1:
   `-0.0561`
 - Total recorded change: `-0.0807`
 
-Current run details:
+Current post-review run details:
 
 - Build log:
-  `_self_build_current/self_build_i64_stackgrowth_20260527_043232.log`.
+  `_self_build_current/self_build_reviewfix_20260527_060224.log`.
 - Benchmark log:
-  `_compiler_binary_perf_current/bench_compiler_binary_i64_stackgrowth_20260527_044223.log`.
+  `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/run_reviewfix_20260527_061712.log`.
 - Summary:
-  `_compiler_binary_perf_current/summary_i64_stackgrowth_20260527_044223.json`.
-- Aggregate: geomean LLVM-built/native-built ratio `1.0090`, median `1.0078`,
-  min `0.9915`, max `1.0374`.
+  `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/summary_reviewfix_20260527_061712.json`.
+- Aggregate: geomean LLVM-built/native-built ratio `1.0079`, median `1.0033`,
+  min `0.9920`, max `1.0433`.
+
+| file | native-built | LLVM-built | LLVM/native |
+| --- | ---: | ---: | ---: |
+| `env.ml` | 1.5605s | 1.5644s | 1.002 |
+| `ctype.ml` | 2.3675s | 2.3665s | 1.000 |
+| `typecore.ml` | 4.5539s | 4.5552s | 1.000 |
+| `translcore.ml` | 1.2639s | 1.2538s | 0.992 |
+| `typemod.ml` | 1.3781s | 1.3867s | 1.006 |
+| `cfg_to_linear.ml` | 0.1608s | 0.1677s | 1.043 |
+| `cfg_selectgen.ml` | 0.5182s | 0.5218s | 1.007 |
+| `llvmize.ml` | 1.4729s | 1.4777s | 1.003 |
+| `regalloc_irc.ml` | 0.3060s | 0.3116s | 1.018 |
+
+Previous i64/stack-growth run:
 
 | file | native-built | LLVM-built | LLVM/native |
 | --- | ---: | ---: | ---: |
