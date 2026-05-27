@@ -1796,3 +1796,59 @@ branch or needs one more focused performance pass.
       passed with 79 passed, 2 skipped, 0 failed.
     - `make llvm-test-no-rebuild LLVM_PATH="$LLVM_PATH"` passed with
       6730 passed, 295 skipped, 0 failed, 7025 considered.
+- Post-review self-stage validation on commit `5eac16a411`:
+  - Set the local opam switch to `oxcaml-5.4.0+oxcaml` to avoid the stale
+    ambient `modal-kinds-rocq` switch.
+  - Saved the previous `_llvm_self_stage_install` under
+    `_self_build_current/saved_llvm_self_stage_install_before_reviewfix_selfbuild_20260527_060224`.
+  - Rebuilt with `make llvm-self-stage-install LLVM_PATH="$LLVM_PATH"`.
+  - Log: `_self_build_current/self_build_reviewfix_20260527_060224.log`.
+  - Result: `_llvm_self_stage_install/bin/ocamlopt.opt` was produced and the
+    self-stage smoke executable printed `55`.
+  - Counts: boot wrapper lines 1678 / fresh IR 833; runtime wrapper lines 148
+    / fresh IR 73; main wrapper lines 2224 / fresh IR 1097; self-stage smoke
+    wrapper lines 4 / fresh IR 2.
+  - Full self-stage LLVM-backend testsuite:
+    `SELF_STAGE=1 STAGE_INSTALL="$PWD/_llvm_self_stage_install"
+    STAGE_BUILD="$PWD/_llvm_self_stage_main_build"
+    LLVM_WRAPPER="$LLVM_PATH" tools/run-llvm-stage5-ocamltest.sh`.
+  - Log: `_self_build_current/self_stage_tests_reviewfix_20260527_060716.log`.
+  - Result: 6388 passed, 282 skipped, 0 failed, 0 not started,
+    0 unexpected errors; 6670 tests considered. Wrapper counts: 6675 lines,
+    3327 fresh IR.
+- Added a reusable compiler-binary benchmark harness under
+  `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench`.
+  It extracts the real dune compile commands from `_build/log` and
+  `_llvm_self_stage_main_build/log`, then swaps only the compiler executable
+  and output path. This keeps the native-built compiler paired with `_build`
+  artifacts and the LLVM-built compiler paired with `_llvm_self_stage_*`
+  artifacts.
+- Post-review compiler-binary benchmark:
+  - Command:
+    `python3 agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/bench_compiler_binary.py --pairs 7 ...`
+  - Log:
+    `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/run_reviewfix_20260527_061712.log`.
+  - Summary:
+    `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/summary_reviewfix_20260527_061712.json`.
+  - Aggregate: geomean LLVM-built/native-built ratio 1.0079, median 1.0033,
+    min 0.9920, max 1.0433.
+  - `typecore.ml` was at parity in this run: native-built 4.5539s,
+    LLVM-built 4.5552s, ratio 1.000.
+  - The remaining compiler-binary tail is small backend files, especially
+    `cfg_to_linear.ml` at 1.043 and `regalloc_irc.ml` at 1.018.
+- Refreshed the representative `-llvm-backend` generated-code microbenchmark
+  suite with the current installed compiler:
+  - Log:
+    `agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/run_reviewfix_20260527_062050.log`.
+  - Summary:
+    `agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/summary_reviewfix_20260527_062050.json`.
+  - Remaining slow cases are still string helper/call-boundary shapes and tiny
+    non-inlined calls: `variant_dispatch_with_int_payload` 10.207x,
+    `variant_dispatch_with_string_payload` 4.638x,
+    `closure_call_in_try_hit` 2.107x,
+    `string_equal_guarded_dispatch` 1.752x,
+    `direct_call_in_try_hit` 1.508x,
+    `string_map_equal_content` 1.312x, and
+    `string_tree_prefix_heavy` 1.293x.
+  - Plain try/handler lookup shapes remain around parity or faster, and
+    mutation/write-barrier shapes remain around parity.
