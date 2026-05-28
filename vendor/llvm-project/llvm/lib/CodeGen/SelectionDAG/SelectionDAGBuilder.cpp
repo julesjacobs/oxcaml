@@ -2951,7 +2951,9 @@ void SelectionDAGBuilder::visitInvoke(const InvokeInst &I) {
   // catchswitch for successors.
   MachineBasicBlock *Return = FuncInfo.MBBMap[I.getSuccessor(0)];
   const BasicBlock *EHPadBB = I.getSuccessor(1);
-  bool IsOxCamlTrapRecoveryInvoke = isOxCamlTrapRecoveryInvoke(I);
+  const BasicBlock *OxCamlTrapRecoveryBB =
+      getOxCamlTrapRecoveryInvokeTarget(I);
+  bool IsOxCamlTrapRecoveryInvoke = OxCamlTrapRecoveryBB != nullptr;
   const BasicBlock *CodegenEHPadBB =
       IsOxCamlTrapRecoveryInvoke ? nullptr : EHPadBB;
 
@@ -3029,7 +3031,7 @@ void SelectionDAGBuilder::visitInvoke(const InvokeInst &I) {
   // Update successor info.
   addSuccessorWithProb(InvokeMBB, Return);
   if (IsOxCamlTrapRecoveryInvoke) {
-    MachineBasicBlock *Target = FuncInfo.MBBMap[EHPadBB];
+    MachineBasicBlock *Target = FuncInfo.MBBMap[OxCamlTrapRecoveryBB];
     Target->setIsRuntimeEntered();
     Target->setMachineBlockAddressTaken();
     Target->setLabelMustBeEmitted();
@@ -3090,9 +3092,23 @@ void SelectionDAGBuilder::visitResume(const ResumeInst &RI) {
 }
 
 void SelectionDAGBuilder::visitLandingPad(const LandingPadInst &LP) {
+  if (!FuncInfo.MBB->isRuntimeEntered() &&
+      isOxCamlTrapRecoveryPad(*FuncInfo.Fn, *LP.getParent()) &&
+      hasOxCamlTrapPublishForRecoveryPad(*FuncInfo.Fn, *LP.getParent())) {
+    FuncInfo.MBB->setIsRuntimeEntered();
+    FuncInfo.MBB->setMachineBlockAddressTaken();
+    FuncInfo.MBB->setLabelMustBeEmitted();
+  }
+
   if (FuncInfo.MBB->isRuntimeEntered()) {
     assert(LP.getType()->isTokenTy() &&
            "runtime-entered trap recovery must use token landingpad");
+    return;
+  }
+
+  if (isOxCamlTrapRecoveryLandingPadTrampoline(*FuncInfo.Fn, *LP.getParent())) {
+    assert(LP.getType()->isTokenTy() &&
+           "trap recovery landingpad trampoline must use token landingpad");
     return;
   }
 
@@ -4834,6 +4850,15 @@ void SelectionDAGBuilder::visitAtomicStore(const StoreInst &I) {
 /// node.
 void SelectionDAGBuilder::visitTargetIntrinsic(const CallInst &I,
                                                unsigned Intrinsic) {
+  if (Intrinsic == llvm::Intrinsic::aarch64_oxcaml_trap_recover &&
+      !FuncInfo.MBB->isRuntimeEntered() &&
+      isOxCamlTrapRecoveryContinuation(*FuncInfo.Fn, *I.getParent()) &&
+      hasOxCamlTrapPublishForRecoveryPad(*FuncInfo.Fn, *I.getParent())) {
+    FuncInfo.MBB->setIsRuntimeEntered();
+    FuncInfo.MBB->setMachineBlockAddressTaken();
+    FuncInfo.MBB->setLabelMustBeEmitted();
+  }
+
   // Ignore the callsite's attributes. A specific call site may be marked with
   // readnone, but the lowering code will expect the chain based on the
   // definition.

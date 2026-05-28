@@ -24,8 +24,13 @@ bool isAArch64OxCamlTrapRecover(const Instruction *I);
 const LandingPadInst *getOxCamlTrapRecoveryLandingPad(const BasicBlock &BB);
 const IntrinsicInst *getOxCamlTrapRecoverAfterLandingPad(const BasicBlock &BB);
 bool isOxCamlTrapRecoveryPad(const Function &F, const BasicBlock &BB);
+bool isOxCamlTrapRecoveryContinuation(const Function &F,
+                                      const BasicBlock &BB);
+bool isOxCamlTrapRecoveryLandingPadTrampoline(const Function &F,
+                                              const BasicBlock &BB);
 bool hasOxCamlTrapPublishForRecoveryPad(const Function &F,
                                         const BasicBlock &RecoveryBB);
+const BasicBlock *getOxCamlTrapRecoveryInvokeTarget(const InvokeInst &I);
 bool isOxCamlTrapRecoveryInvoke(const InvokeInst &I);
 
 } // end namespace llvm

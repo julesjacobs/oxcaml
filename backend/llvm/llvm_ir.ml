@@ -830,7 +830,8 @@ module Instruction = struct
     (* Memory *)
     | Alloca of
         { typ : Type.t;
-          count : Value.t option
+          count : Value.t option;
+          align : int option
         }
     | Load of
         { ptr : Value.t;
@@ -1021,7 +1022,7 @@ module Instruction = struct
   let insertvalue ~aggregate ~indices ~to_insert =
     Insertvalue { aggregate; indices; to_insert }
 
-  let alloca ?count typ = Alloca { typ; count }
+  let alloca ?count ?align typ = Alloca { typ; count; align }
 
   let load ~ptr ~typ =
     assert' "load" (Value.get_type ptr |> Type.is_ptr);
@@ -1199,13 +1200,18 @@ module Instruction = struct
       ins_res "insertvalue %a, %a, %a" Value.pp_t aggregate Value.pp_t to_insert
         (pp_print_list ~pp_sep:pp_comma pp_print_int)
         indices
-    | Alloca { typ; count } ->
+    | Alloca { typ; count; align } ->
       let pp_count ppf () =
         match count with
         | Some count -> fprintf ppf ", %a" Value.pp_t count
         | None -> ()
       in
-      ins_res "alloca %a%a" Type.pp_t typ pp_count ()
+      let pp_align ppf () =
+        match align with
+        | Some align -> fprintf ppf ", align %d" align
+        | None -> ()
+      in
+      ins_res "alloca %a%a%a" Type.pp_t typ pp_count () pp_align ()
     | Load { ptr; typ; volatile_; atomic; align } ->
       let pp_align ppf = function
         | None -> ()
