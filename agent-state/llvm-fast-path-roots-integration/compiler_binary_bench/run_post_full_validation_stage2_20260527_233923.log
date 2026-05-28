@@ -1,0 +1,78 @@
+env.ml pair 1/7: native=1.8600s llvm=1.8873s ratio=1.015
+env.ml pair 2/7: native=1.7725s llvm=1.8594s ratio=1.049
+env.ml pair 3/7: native=1.7404s llvm=1.8065s ratio=1.038
+env.ml pair 4/7: native=1.7504s llvm=1.8080s ratio=1.033
+env.ml pair 5/7: native=1.7409s llvm=1.8542s ratio=1.065
+env.ml pair 6/7: native=1.7316s llvm=1.8154s ratio=1.048
+env.ml pair 7/7: native=1.7492s llvm=1.8268s ratio=1.044
+ctype.ml pair 1/7: native=2.6626s llvm=2.7907s ratio=1.048
+ctype.ml pair 2/7: native=2.6972s llvm=2.8355s ratio=1.051
+ctype.ml pair 3/7: native=2.6627s llvm=2.8482s ratio=1.070
+ctype.ml pair 4/7: native=2.7460s llvm=2.9256s ratio=1.065
+ctype.ml pair 5/7: native=2.7037s llvm=2.8246s ratio=1.045
+ctype.ml pair 6/7: native=2.7031s llvm=2.8523s ratio=1.055
+ctype.ml pair 7/7: native=2.7403s llvm=2.8495s ratio=1.040
+typecore.ml pair 1/7: native=5.1391s llvm=5.3857s ratio=1.048
+typecore.ml pair 2/7: native=5.1312s llvm=5.3628s ratio=1.045
+typecore.ml pair 3/7: native=5.1753s llvm=5.3945s ratio=1.042
+typecore.ml pair 4/7: native=5.2200s llvm=5.3968s ratio=1.034
+typecore.ml pair 5/7: native=5.1361s llvm=5.3384s ratio=1.039
+typecore.ml pair 6/7: native=5.1626s llvm=5.3844s ratio=1.043
+typecore.ml pair 7/7: native=5.1435s llvm=5.3765s ratio=1.045
+translcore.ml pair 1/7: native=1.3987s llvm=1.5010s ratio=1.073
+translcore.ml pair 2/7: native=1.4102s llvm=1.4624s ratio=1.037
+translcore.ml pair 3/7: native=1.3904s llvm=1.4670s ratio=1.055
+translcore.ml pair 4/7: native=1.4046s llvm=1.4743s ratio=1.050
+translcore.ml pair 5/7: native=1.4150s llvm=1.4844s ratio=1.049
+translcore.ml pair 6/7: native=1.3901s llvm=1.4427s ratio=1.038
+translcore.ml pair 7/7: native=1.3816s llvm=1.4992s ratio=1.085
+typemod.ml pair 1/7: native=1.5783s llvm=1.6677s ratio=1.057
+typemod.ml pair 2/7: native=1.5669s llvm=1.6445s ratio=1.049
+typemod.ml pair 3/7: native=1.5594s llvm=1.6361s ratio=1.049
+typemod.ml pair 4/7: native=1.5552s llvm=1.6180s ratio=1.040
+typemod.ml pair 5/7: native=1.5579s llvm=1.6255s ratio=1.043
+typemod.ml pair 6/7: native=1.5492s llvm=1.6099s ratio=1.039
+typemod.ml pair 7/7: native=1.5306s llvm=1.6366s ratio=1.069
+cfg_to_linear.ml pair 1/7: native=0.2119s llvm=0.2213s ratio=1.044
+cfg_to_linear.ml pair 2/7: native=0.1900s llvm=0.2027s ratio=1.067
+cfg_to_linear.ml pair 3/7: native=0.1826s llvm=0.2005s ratio=1.098
+cfg_to_linear.ml pair 4/7: native=0.1909s llvm=0.1991s ratio=1.043
+cfg_to_linear.ml pair 5/7: native=0.1877s llvm=0.2009s ratio=1.070
+cfg_to_linear.ml pair 6/7: native=0.1875s llvm=0.2000s ratio=1.067
+cfg_to_linear.ml pair 7/7: native=0.1839s llvm=0.2022s ratio=1.100
+cfg_selectgen.ml pair 1/7: native=0.5897s llvm=0.6153s ratio=1.044
+cfg_selectgen.ml pair 2/7: native=0.5788s llvm=0.6077s ratio=1.050
+cfg_selectgen.ml pair 3/7: native=0.5770s llvm=0.6100s ratio=1.057
+cfg_selectgen.ml pair 4/7: native=0.5849s llvm=0.6134s ratio=1.049
+cfg_selectgen.ml pair 5/7: native=0.5910s llvm=0.6088s ratio=1.030
+cfg_selectgen.ml pair 6/7: native=0.5822s llvm=0.6169s ratio=1.060
+cfg_selectgen.ml pair 7/7: native=0.5826s llvm=0.6087s ratio=1.045
+llvmize.ml pair 1/7: native=1.7248s llvm=1.8314s ratio=1.062
+llvmize.ml pair 2/7: native=1.6984s llvm=1.8728s ratio=1.103
+llvmize.ml pair 3/7: native=1.7348s llvm=1.8460s ratio=1.064
+llvmize.ml pair 4/7: native=1.7586s llvm=1.8486s ratio=1.051
+llvmize.ml pair 5/7: native=1.7184s llvm=1.8647s ratio=1.085
+llvmize.ml pair 6/7: native=1.7120s llvm=1.8540s ratio=1.083
+llvmize.ml pair 7/7: native=1.7241s llvm=1.8186s ratio=1.055
+regalloc_irc.ml pair 1/7: native=0.3620s llvm=0.3745s ratio=1.035
+regalloc_irc.ml pair 2/7: native=0.3540s llvm=0.3855s ratio=1.089
+regalloc_irc.ml pair 3/7: native=0.3475s llvm=0.3720s ratio=1.070
+regalloc_irc.ml pair 4/7: native=0.3578s llvm=0.3734s ratio=1.044
+regalloc_irc.ml pair 5/7: native=0.3632s llvm=0.3832s ratio=1.055
+regalloc_irc.ml pair 6/7: native=0.3590s llvm=0.4022s ratio=1.120
+regalloc_irc.ml pair 7/7: native=0.3583s llvm=0.3751s ratio=1.047
+
+Summary:
+geomean=1.0539
+median=1.0502
+min=1.0444
+max=1.0722
+env.ml: native=1.7492s llvm=1.8268s ratio=1.044
+ctype.ml: native=2.7031s llvm=2.8482s ratio=1.054
+typecore.ml: native=5.1435s llvm=5.3844s ratio=1.047
+translcore.ml: native=1.3987s llvm=1.4743s ratio=1.054
+typemod.ml: native=1.5579s llvm=1.6361s ratio=1.050
+cfg_to_linear.ml: native=0.1877s llvm=0.2009s ratio=1.070
+cfg_selectgen.ml: native=0.5826s llvm=0.6100s ratio=1.047
+llvmize.ml: native=1.7241s llvm=1.8486s ratio=1.072
+regalloc_irc.ml: native=0.3583s llvm=0.3751s ratio=1.047

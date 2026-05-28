@@ -306,3 +306,43 @@ generate the intended shape now, but the final LLVM design should either encode
 the active trap-region identity in the IR construct or add a dominance/region
 check that proves each protected `invoke` unwinds to the recovery entry named by
 the active publish.
+
+2026-05-27 full validation update:
+
+- `make llvm-test` passed after updating the stale `fast_path_roots.ml`
+  expectation for the new trap recovery emission shape:
+  6743 passed, 295 skipped, 0 failed, 7038 considered.
+- `make llvm-self-stage2-test LLVM_PATH="$LLVM_PATH"` initially failed during
+  stage2 main linking with `No space left on device` under the agent temp dir.
+  This was an environment/storage failure, not a compiler failure.
+- Removed generated build/temp artifacts only, freeing disk from about 643M to
+  about 100G available, removed the partial failed stage2 main/install dirs, and
+  reran the self-stage2 validation.
+- The retry built and smoke-tested stage1 and stage2 with fresh wrapper IR
+  activity, then the stage2 testsuite passed:
+  6717 passed, 282 skipped, 0 failed, 6999 considered.
+- `git diff --check` passed after the validation run.
+
+2026-05-27 post-validation benchmark update:
+
+- Ran representative generated-code microbenchmarks with `PAIRS=3`:
+  `agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/summary_post_full_validation_20260527_233923.json`.
+  Aggregate over 36 cases: geomean LLVM/native `0.9075`, median `1.0143`,
+  min `0.2958`, max `1.5118`.
+- Top remaining generated-code slowdowns in that run:
+  `env_find_same_layered_hit` `1.512x`,
+  `closure_call_in_try_hit` `1.397x`,
+  `closure_call_in_nested_try_hit` `1.394x`,
+  `direct_call_in_try_hit` `1.350x`,
+  `try_with_string_compare_hit` `1.318x`.
+  All reported `wrap_try_refs=0`.
+- Ran compiler-binary benchmark with clean `_native_install` versus validated
+  `_llvm_self_stage2_install`, `--pairs 7`:
+  `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/summary_post_full_validation_stage2_20260527_233923.json`.
+  Aggregate: geomean LLVM-built/native-built `1.0539`, median `1.0502`,
+  min `1.0444`, max `1.0722`.
+- Compiler-binary representative files:
+  `env.ml` `1.044x`, `ctype.ml` `1.054x`, `typecore.ml` `1.047x`,
+  `translcore.ml` `1.054x`, `typemod.ml` `1.050x`,
+  `cfg_to_linear.ml` `1.070x`, `cfg_selectgen.ml` `1.047x`,
+  `llvmize.ml` `1.072x`, `regalloc_irc.ml` `1.047x`.

@@ -123,6 +123,8 @@ public:
 
   void emitInstruction(const MachineInstr *MI) override;
 
+  void emitBasicBlockStart(const MachineBasicBlock &MBB) override;
+
   void emitFunctionHeaderComment() override;
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
@@ -196,6 +198,46 @@ private:
 };
 
 } // end anonymous namespace
+
+static void emitOxCamlTrapRecoveryEntryRestore(MCStreamer &OutStreamer,
+                                               const MCSubtargetInfo &STI) {
+  OutStreamer.emitInstruction(MCInstBuilder(AArch64::SUBXri)
+                                  .addReg(AArch64::X9)
+                                  .addReg(AArch64::SP)
+                                  .addImm(16)
+                                  .addImm(0),
+                              STI);
+  OutStreamer.emitInstruction(MCInstBuilder(AArch64::LDRXui)
+                                  .addReg(AArch64::X10)
+                                  .addReg(AArch64::SP)
+                                  .addImm(0),
+                              STI);
+  OutStreamer.emitInstruction(MCInstBuilder(AArch64::LDRXui)
+                                  .addReg(AArch64::FP)
+                                  .addReg(AArch64::SP)
+                                  .addImm(1),
+                              STI);
+  OutStreamer.emitInstruction(MCInstBuilder(AArch64::ADDXrs)
+                                  .addReg(AArch64::SP)
+                                  .addReg(AArch64::X9)
+                                  .addReg(AArch64::X10)
+                                  .addImm(0),
+                              STI);
+}
+
+void AArch64AsmPrinter::emitBasicBlockStart(const MachineBasicBlock &MBB) {
+  AsmPrinter::emitBasicBlockStart(MBB);
+
+  const auto *AFI = MBB.getParent()->getInfo<AArch64FunctionInfo>();
+  if (!AFI->isOxCamlTrapRecoveryEntry(MBB))
+    return;
+
+  assert(MBB.isRuntimeEntered() &&
+         "OxCaml trap recovery entry must be runtime-entered");
+  if (isVerbose())
+    OutStreamer->AddComment("OxCaml trap recovery stack restore");
+  emitOxCamlTrapRecoveryEntryRestore(*OutStreamer, *STI);
+}
 
 void AArch64AsmPrinter::emitStartOfAsmFile(Module &M) {
   const Triple &TT = TM.getTargetTriple();

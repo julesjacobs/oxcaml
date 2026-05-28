@@ -1113,10 +1113,10 @@ module Safepoint = struct
      not keep track of it statically.
 
      On AArch64, this adjustment matches the logical CFG trap-block stack cost,
-     not the 64-byte raw alloca used below to obtain a 16-byte aligned recovery
-     block with extra LLVM-only metadata slots. OCaml functions are not supposed
-     to pass arguments via the stack, but C calls might, so we need to account
-     for [Stackoffset] instructions.
+     not the 16-byte aligned static trap-block alloca with extra LLVM-only
+     metadata slots. OCaml functions are not supposed to pass arguments via the
+     stack, but C calls might, so we need to account for [Stackoffset]
+     instructions.
 
      * The least significant bit is set if this call is to [caml_call_gc]. We
      can do this because [stack_offset] must be even. *)
@@ -1210,9 +1210,16 @@ let stack_pointer_register_metadata () =
   F.sprintf {|!{!"%s\00"}|} (stack_pointer_register_name ())
 
 let read_stack_pointer t =
-  call_llvm_intrinsic t "read_register.i64"
-    [V.imm T.metadata (stack_pointer_register_metadata ())]
-    T.i64
+  match Target_system.architecture () with
+  | Target_system.AArch64 ->
+    emit_ins t
+      (I.inline_asm ~asm:"mov $0, sp" ~constraints:"=r" ~args:[]
+         ~res_type:(Some T.i64) ~sideeffect:true)
+  | Target_system.X86_64 | Target_system.IA32 | Target_system.ARM
+  | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
+    call_llvm_intrinsic t "read_register.i64"
+      [V.imm T.metadata (stack_pointer_register_metadata ())]
+      T.i64
 
 let write_stack_pointer t v =
   let v = cast t v T.i64 in
@@ -3716,19 +3723,6 @@ let unwind_for_instruction t i =
 
 let aarch64_trap_recover_type = T.(Struct [i64; i64; i64; i64])
 
-let restore_aarch64_trap_stack t =
-  let restore_fp =
-    if Config.with_frame_pointers then "\\0A\\09ldr x29, [sp, #8]" else ""
-  in
-  emit_ins_no_res t
-    (I.inline_asm
-       ~asm:
-         ("sub x9, sp, #16\\0A\\09ldr x10, [sp]"
-         ^ restore_fp
-         ^ "\\0A\\09add sp, x9, x10")
-       ~constraints:"~{x9},~{x10}" ~args:[] ~res_type:T.Or_void.void
-       ~sideeffect:true)
-
 let emit_aarch64_pushtrap t (i : Cfg.basic Cfg.instruction) lbl_handler =
   let try_label = V.of_label (Cmm.new_label ()) in
   let exn_entry = V.of_label (Cmm.new_label ()) in
@@ -3764,11 +3758,9 @@ let emit_aarch64_pushtrap t (i : Cfg.basic Cfg.instruction) lbl_handler =
     emit_ins t (I.binary Sub ~arg1:sp ~arg2:trap_block_int)
   in
   emit_ins_no_res t (I.store ~ptr:rbp_slot ~to_store:restore_sp_delta);
-  if Config.with_frame_pointers
-  then
-    emit_ins_no_res t
-      (I.inline_asm ~asm:"str x29, [$0]" ~constraints:"r"
-         ~args:[saved_fp_slot] ~res_type:T.Or_void.void ~sideeffect:true);
+  emit_ins_no_res t
+    (I.inline_asm ~asm:"str x29, [$0]" ~constraints:"r"
+       ~args:[saved_fp_slot] ~res_type:T.Or_void.void ~sideeffect:true);
   let recovery_target =
     V.blockaddress ~func:fun_ident ~block:(V.get_ident_exn exn_entry)
   in
@@ -3787,7 +3779,6 @@ let emit_aarch64_pushtrap t (i : Cfg.basic Cfg.instruction) lbl_handler =
       exn_bucket, prev_exn_sp, recovered_alloc, recovered_ds
     | _ -> Misc.fatal_error "unexpected trap recover result arity"
   in
-  restore_aarch64_trap_stack t;
   emit_ins_no_res t (I.store ~ptr:handler_bucket ~to_store:exn_bucket);
   emit_ins_no_res t (I.store ~ptr:domainstate_ptr ~to_store:recovered_ds);
   emit_ins_no_res t (I.store ~ptr:allocation_ptr ~to_store:recovered_alloc);
@@ -4743,17 +4734,9 @@ let alloca_regs t (cfg : Cfg.t) arg_values arg_regs =
               (emit_ins t (I.alloca T.i64));
           if not (InstructionId.Tbl.mem (get_fun_info t).trap_block_allocas i.id)
           then
-            let raw_trap_block =
-              emit_ins t (I.alloca ~count:(V.of_int 64) T.i8)
+            let trap_block =
+              emit_ins t (I.alloca ~count:(V.of_int 64) ~align:16 T.i8)
             in
-            let raw_trap_block = cast t raw_trap_block T.i64 in
-            let biased =
-              emit_ins t (I.binary Add ~arg1:raw_trap_block ~arg2:(V.of_int 15))
-            in
-            let aligned =
-              emit_ins t (I.binary And ~arg1:biased ~arg2:(V.of_int (-16)))
-            in
-            let trap_block = cast t aligned T.ptr in
             InstructionId.Tbl.add (get_fun_info t).trap_block_allocas i.id
               trap_block
         | _ -> ())
