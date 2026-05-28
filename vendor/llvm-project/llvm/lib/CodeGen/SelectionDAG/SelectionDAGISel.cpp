@@ -67,6 +67,7 @@
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/DiagnosticInfo.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/InstIterator.h"
@@ -324,6 +325,7 @@ SelectionDAGISel::SelectionDAGISel(char &ID, TargetMachine &tm,
   initializeGCModuleInfoPass(*PassRegistry::getPassRegistry());
   initializeBranchProbabilityInfoWrapperPassPass(
       *PassRegistry::getPassRegistry());
+  initializeDominatorTreeWrapperPassPass(*PassRegistry::getPassRegistry());
   initializeAAResultsWrapperPassPass(*PassRegistry::getPassRegistry());
   initializeTargetLibraryInfoWrapperPassPass(*PassRegistry::getPassRegistry());
 }
@@ -341,6 +343,8 @@ void SelectionDAGISel::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addPreserved<GCModuleInfo>();
   AU.addRequired<TargetLibraryInfoWrapperPass>();
   AU.addRequired<TargetTransformInfoWrapperPass>();
+  AU.addRequired<DominatorTreeWrapperPass>();
+  AU.addPreserved<DominatorTreeWrapperPass>();
   AU.addRequired<AssumptionCacheTracker>();
   if (UseMBPI && OptLevel != CodeGenOpt::None)
     AU.addRequired<BranchProbabilityInfoWrapperPass>();
@@ -428,7 +432,8 @@ bool SelectionDAGISel::runOnMachineFunction(MachineFunction &mf) {
   CurDAG->init(*MF, *ORE, this, LibInfo,
                getAnalysisIfAvailable<LegacyDivergenceAnalysis>(), PSI, BFI,
                FnVarLocs);
-  FuncInfo->set(Fn, *MF, CurDAG);
+  DominatorTree &DT = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
+  FuncInfo->set(Fn, *MF, CurDAG, &DT);
   SwiftError->setFunction(*MF);
 
   // Now get the optional analyzes if we want to.

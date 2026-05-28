@@ -492,6 +492,24 @@ public:
     return nullptr;
   }
 
+  /// Return true if \p PhysReg is a valid physical live-in for a
+  /// runtime-entered block.
+  ///
+  /// A runtime-entered block is reached by target/runtime control flow rather
+  /// than an ordinary machine branch. Targets that use such blocks must define
+  /// the ABI registers that are valid at the block entry.
+  virtual bool isRuntimeEnteredLiveIn(const MachineFunction &MF,
+                                      MCRegister PhysReg) const {
+    return false;
+  }
+
+  /// Return the physical registers that must be live-in to every
+  /// runtime-entered block for this target/runtime ABI.
+  virtual ArrayRef<MCPhysReg>
+  getRuntimeEnteredLiveIns(const MachineFunction &MF) const {
+    return {};
+  }
+
   /// Return a register mask that clobbers everything.
   virtual const uint32_t *getNoPreservedMask() const {
     llvm_unreachable("target does not provide no preserved mask");

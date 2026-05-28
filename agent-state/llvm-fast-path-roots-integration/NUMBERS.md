@@ -1,6 +1,6 @@
 # Numbers
 
-Last updated: 2026-05-27.
+Last updated: 2026-05-28.
 
 This file keeps the headline performance numbers for the LLVM-built compiler
 and the runtime helper profiles that motivated the current noalloc C-call work.
@@ -14,7 +14,13 @@ Benchmark shape:
 - Both compilers compile representative compiler source files with the normal
   backend. This measures the speed of the compiler binary itself, not LLVM
   backend compile time.
-- Current valid run, after removing the scalar-clone experiment, rebuilding the
+- Current valid run, after the native-like trap model, removing hot
+  `Caml_state(exn_handler)` stores from AArch64 trap push/pop/recovery, and
+  fresh self-stage2 validation:
+  `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/summary_final_no_domain_exn_store_20260528_030435.json`.
+- Previous valid run, after full validation and self-stage2:
+  `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/summary_post_full_validation_stage2_20260527_233923.json`.
+- Previous valid run, after removing the scalar-clone experiment, rebuilding the
   LLVM self-stage compiler, and rebuilding `_install` as a clean normal-backend
   compiler:
   `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/summary_clean_native_vs_no_scalar_llvm_20260527_101300.json`.
@@ -45,13 +51,65 @@ Geomean LLVM/native ratio:
   load-width prototype: `1.0090`
 - Invalid post-review rerun: `1.0079`
 - Invalid no-scalar run with LLVM-built `_install`: `1.0085`
-- Current clean-native vs no-scalar LLVM-built run: `1.0618`
+- Clean-native vs no-scalar LLVM-built run: `1.0618`
+- Current no-domain-exn-store stage2 run: `1.0478`
+- Previous post-validation stage2 run: `1.0539`
 - String-compare change: `-0.0131`
 - `caml_modify` Candidate 1 change: `-0.0115`
 - Later near-parity runs were invalid or suspect because the supposed native
   `_install` had been built with LLVM backend enabled.
-- Current recorded change from old baseline to the corrected current run:
+- Current recorded change from old baseline to the no-domain-exn-store stage2
+  run: `-0.0419`.
+- Previous recorded change from old baseline to the post-validation stage2 run:
+  `-0.0358`.
+- Previous recorded change from old baseline to the corrected clean-native run:
   `-0.0279`.
+
+Current no-domain-exn-store stage2 run details:
+
+- Benchmark log:
+  `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/run_final_no_domain_exn_store_20260528_030435.log`.
+- Summary:
+  `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/summary_final_no_domain_exn_store_20260528_030435.json`.
+- Compared clean `_native_install` against validated
+  `_llvm_self_stage2_install`.
+- Aggregate: geomean LLVM-built/native-built ratio `1.0478`, median `1.0422`,
+  min `1.0331`, max `1.0686`.
+
+| file | native-built | LLVM-built | LLVM/native |
+| --- | ---: | ---: | ---: |
+| `env.ml` | 1.6746s | 1.7385s | 1.038 |
+| `ctype.ml` | 2.5330s | 2.6400s | 1.042 |
+| `typecore.ml` | 4.8499s | 5.0452s | 1.040 |
+| `translcore.ml` | 1.3290s | 1.3729s | 1.033 |
+| `typemod.ml` | 1.4759s | 1.5340s | 1.039 |
+| `cfg_to_linear.ml` | 0.1782s | 0.1888s | 1.060 |
+| `cfg_selectgen.ml` | 0.5525s | 0.5781s | 1.046 |
+| `llvmize.ml` | 1.6055s | 1.7155s | 1.069 |
+| `regalloc_irc.ml` | 0.3294s | 0.3503s | 1.063 |
+
+Previous post-validation stage2 run details:
+
+- Benchmark log:
+  `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/run_post_full_validation_stage2_20260527_233923.log`.
+- Summary:
+  `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/summary_post_full_validation_stage2_20260527_233923.json`.
+- Compared clean `_native_install` against validated
+  `_llvm_self_stage2_install`.
+- Aggregate: geomean LLVM-built/native-built ratio `1.0539`, median `1.0502`,
+  min `1.0444`, max `1.0722`.
+
+| file | native-built | LLVM-built | LLVM/native |
+| --- | ---: | ---: | ---: |
+| `env.ml` | 1.7248s | 1.8013s | 1.044 |
+| `ctype.ml` | 2.6287s | 2.7703s | 1.054 |
+| `typecore.ml` | 4.9933s | 5.2252s | 1.047 |
+| `translcore.ml` | 1.3491s | 1.4213s | 1.054 |
+| `typemod.ml` | 1.5062s | 1.5818s | 1.050 |
+| `cfg_to_linear.ml` | 0.1838s | 0.1967s | 1.070 |
+| `cfg_selectgen.ml` | 0.5674s | 0.5940s | 1.047 |
+| `llvmize.ml` | 1.6295s | 1.7471s | 1.072 |
+| `regalloc_irc.ml` | 0.3360s | 0.3519s | 1.047 |
 
 Current clean-native vs no-scalar LLVM-built run details:
 
@@ -199,6 +257,37 @@ Interpretation:
 - `object_call_min` is unchanged and remains a separate object-dispatch/code
   layout outlier, not evidence against the `caml_modify` fast path.
 
+## Representative Try/Trap Microbenchmarks
+
+These compare native code generation with LLVM backend code generation using
+the installed compiler. The important checks here are that the hot `_wrap_try`
+helper has disappeared from the trap cases, and that removing the extra
+domain-state exception-handler stores improved the remaining try/call cases.
+
+- Current run:
+  `agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/summary_final_no_domain_exn_store_20260528_020706.json`
+- Previous same-day run before removing the hot `Caml_state(exn_handler)`
+  stores:
+  `agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/summary_final_20260528_015623.json`
+- Current aggregate across 36 cases: geomean LLVM/native `0.8861`, median
+  `1.0437`, min `0.2991`, max `1.5784`.
+- Previous aggregate across 36 cases: geomean LLVM/native `0.9131`, median
+  `0.9965`, min `0.2870`, max `1.6201`.
+- All listed current cases have `wrap_try_refs = 0`.
+
+| case | previous LLVM/native | current LLVM/native |
+| --- | ---: | ---: |
+| `try_find_hit_deep` | 0.927 | 0.942 |
+| `try_find_multiple_handlers` | 0.943 | 0.941 |
+| `try_find_cold_handler_large_body` | 0.957 | 0.996 |
+| `try_find_miss_rare` | 0.908 | 0.969 |
+| `try_int_find_hit` | 0.971 | 0.968 |
+| `direct_call_in_try_hit` | 1.378 | 1.174 |
+| `closure_call_in_try_hit` | 1.414 | 1.050 |
+| `closure_call_in_nested_try_hit` | 1.401 | 1.235 |
+| `try_with_string_compare_hit` | 1.470 | 1.185 |
+| `env_find_same_layered_hit` | 1.620 | 1.578 |
+
 ## Runtime Helper Counts
 
 These counts are from the runtime helper profiling runs used to prioritize
@@ -266,6 +355,28 @@ Correctness status while these numbers were recorded:
   after promoting/skipping tests for the intended code shape.
 - Full `make llvm-test-no-rebuild LLVM_PATH="$LLVM_PATH"` passed:
   `6730` passed, `295` skipped, `0` failed, `0` unexpected errors.
+
+Post-full-validation representative microbenchmark run:
+
+- Log:
+  `agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/run_post_full_validation_20260527_233923.log`
+- Summary:
+  `agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/summary_post_full_validation_20260527_233923.json`
+- Aggregate over 36 cases: geomean LLVM/native ratio `0.9075`, median
+  `1.0143`, min `0.2958`, max `1.5118`.
+- All reported try cases had `wrap_try_refs=0`.
+
+Largest slowdowns:
+
+| case | native | LLVM | LLVM/native |
+| --- | ---: | ---: | ---: |
+| `env_find_same_layered_hit` | 0.3431s | 0.5187s | 1.512 |
+| `closure_call_in_try_hit` | 0.0666s | 0.0931s | 1.397 |
+| `closure_call_in_nested_try_hit` | 0.0488s | 0.0680s | 1.394 |
+| `direct_call_in_try_hit` | 0.0628s | 0.0848s | 1.350 |
+| `try_with_string_compare_hit` | 0.2484s | 0.3274s | 1.318 |
+| `string_map_equal_content` | 0.2477s | 0.3176s | 1.282 |
+| `string_tree_prefix_heavy` | 0.3293s | 0.4100s | 1.245 |
 
 Representative microbenchmark run:
 

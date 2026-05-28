@@ -2952,7 +2952,7 @@ void SelectionDAGBuilder::visitInvoke(const InvokeInst &I) {
   MachineBasicBlock *Return = FuncInfo.MBBMap[I.getSuccessor(0)];
   const BasicBlock *EHPadBB = I.getSuccessor(1);
   const BasicBlock *OxCamlTrapRecoveryBB =
-      getOxCamlTrapRecoveryInvokeTarget(I);
+      getOxCamlTrapRecoveryInvokeTarget(I, *FuncInfo.DT);
   bool IsOxCamlTrapRecoveryInvoke = OxCamlTrapRecoveryBB != nullptr;
   const BasicBlock *CodegenEHPadBB =
       IsOxCamlTrapRecoveryInvoke ? nullptr : EHPadBB;
@@ -3094,7 +3094,9 @@ void SelectionDAGBuilder::visitResume(const ResumeInst &RI) {
 void SelectionDAGBuilder::visitLandingPad(const LandingPadInst &LP) {
   if (!FuncInfo.MBB->isRuntimeEntered() &&
       isOxCamlTrapRecoveryPad(*FuncInfo.Fn, *LP.getParent()) &&
-      hasOxCamlTrapPublishForRecoveryPad(*FuncInfo.Fn, *LP.getParent())) {
+      hasDominatingOxCamlTrapPublishForRecoveryPad(*FuncInfo.Fn,
+                                                   *LP.getParent(),
+                                                   *FuncInfo.DT)) {
     FuncInfo.MBB->setIsRuntimeEntered();
     FuncInfo.MBB->setMachineBlockAddressTaken();
     FuncInfo.MBB->setLabelMustBeEmitted();
@@ -3106,7 +3108,8 @@ void SelectionDAGBuilder::visitLandingPad(const LandingPadInst &LP) {
     return;
   }
 
-  if (isOxCamlTrapRecoveryLandingPadTrampoline(*FuncInfo.Fn, *LP.getParent())) {
+  if (isOxCamlTrapRecoveryLandingPadTrampoline(*FuncInfo.Fn, *LP.getParent(),
+                                               *FuncInfo.DT)) {
     assert(LP.getType()->isTokenTy() &&
            "trap recovery landingpad trampoline must use token landingpad");
     return;
@@ -4853,7 +4856,9 @@ void SelectionDAGBuilder::visitTargetIntrinsic(const CallInst &I,
   if (Intrinsic == llvm::Intrinsic::aarch64_oxcaml_trap_recover &&
       !FuncInfo.MBB->isRuntimeEntered() &&
       isOxCamlTrapRecoveryContinuation(*FuncInfo.Fn, *I.getParent()) &&
-      hasOxCamlTrapPublishForRecoveryPad(*FuncInfo.Fn, *I.getParent())) {
+      hasDominatingOxCamlTrapPublishForRecoveryPad(*FuncInfo.Fn,
+                                                   *I.getParent(),
+                                                   *FuncInfo.DT)) {
     FuncInfo.MBB->setIsRuntimeEntered();
     FuncInfo.MBB->setMachineBlockAddressTaken();
     FuncInfo.MBB->setLabelMustBeEmitted();
