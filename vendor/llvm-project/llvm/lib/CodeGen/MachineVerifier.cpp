@@ -644,28 +644,20 @@ MachineVerifier::visitMachineBasicBlockBefore(const MachineBasicBlock *MBB) {
   }
 
   if (MBB->isRuntimeEntered()) {
-    bool SawX0 = false, SawX26 = false, SawX27 = false, SawX28 = false;
     for (const MachineInstr &MI : MBB->phis())
       report("runtime-entered block must not contain PHIs.", &MI);
     for (const auto &LI : MBB->liveins()) {
-      StringRef RegName = TRI->getName(LI.PhysReg);
-      if (RegName == "X0")
-        SawX0 = true;
-      else if (RegName == "X26")
-        SawX26 = true;
-      else if (RegName == "X27")
-        SawX27 = true;
-      else if (RegName == "X28")
-        SawX28 = true;
-      else {
-        report("runtime-entered block has non-OxCaml recovery ABI live-in.",
-               MBB);
+      if (!TRI->isRuntimeEnteredLiveIn(*MF, LI.PhysReg)) {
+        report("runtime-entered block has invalid ABI live-in.", MBB);
         report_context(LI.PhysReg);
       }
     }
-    if (!SawX0 || !SawX26 || !SawX27 || !SawX28)
-      report("runtime-entered block is missing an OxCaml recovery ABI live-in.",
-             MBB);
+    for (MCRegister Reg : TRI->getRuntimeEnteredLiveIns(*MF)) {
+      if (!MBB->isLiveIn(Reg)) {
+        report("runtime-entered block is missing a required ABI live-in.", MBB);
+        report_context(Reg);
+      }
+    }
   }
 
   // Count the number of landing pad successors.

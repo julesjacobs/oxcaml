@@ -1240,14 +1240,6 @@ let read_allocation_pointer_register t =
     (I.inline_asm ~asm ~constraints ~args:[] ~res_type:(Some T.i64)
        ~sideeffect:true)
 
-let read_link_register t =
-  match Target_system.architecture () with
-  | Target_system.AArch64 -> read_fixed_runtime_register t "x30"
-  | Target_system.X86_64 | Target_system.IA32 | Target_system.ARM
-  | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
-    fail_msg ~name:"read_link_register"
-      "unsupported architecture for LLVM backend"
-
 let write_trap_pointer_register t trap_ptr =
   match Target_system.architecture () with
   | Target_system.AArch64 ->
@@ -3750,8 +3742,6 @@ let emit_aarch64_pushtrap t (i : Cfg.basic Cfg.instruction) lbl_handler =
   let rbp_slot = do_offset t trap_block T.ptr 16 in
   let saved_fp_slot = do_offset t trap_block T.ptr 24 in
   let prev_exn_sp = read_trap_pointer_register t in
-  let exn_sp_ptr = load_domainstate_addr t Domain_exn_handler in
-  emit_ins_no_res t (I.store ~ptr:exn_sp_ptr ~to_store:trap_block);
   let sp = read_stack_pointer t in
   let trap_block_int = cast t trap_block T.i64 in
   let restore_sp_delta =
@@ -3782,10 +3772,6 @@ let emit_aarch64_pushtrap t (i : Cfg.basic Cfg.instruction) lbl_handler =
   emit_ins_no_res t (I.store ~ptr:handler_bucket ~to_store:exn_bucket);
   emit_ins_no_res t (I.store ~ptr:domainstate_ptr ~to_store:recovered_ds);
   emit_ins_no_res t (I.store ~ptr:allocation_ptr ~to_store:recovered_alloc);
-  let exn_sp_ptr =
-    load_domainstate_addr ~ds_loc:recovered_ds t Domain_exn_handler
-  in
-  emit_ins_no_res t (I.store ~ptr:exn_sp_ptr ~to_store:prev_exn_sp);
   write_trap_pointer_register t prev_exn_sp;
   emit_ins_no_res t (I.br (V.of_label lbl_handler));
   emit_label t try_label;
@@ -4061,13 +4047,11 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
         | Some { trap_block; stacksave_ptr; _ } -> (
           match Target_system.architecture () with
           | Target_system.AArch64 ->
-            let exn_sp_ptr = load_domainstate_addr t Domain_exn_handler in
             let trap_block = read_trap_pointer_register t in
             let trap_block_ptr = cast t trap_block T.ptr in
             let prev_exn_sp =
               emit_ins t (I.load ~ptr:trap_block_ptr ~typ:T.i64)
             in
-            emit_ins_no_res t (I.store ~ptr:exn_sp_ptr ~to_store:prev_exn_sp);
             write_trap_pointer_register t prev_exn_sp
           | Target_system.X86_64 -> (
             (* Restore previous exn handler sp (top word on trap block) *)
@@ -4107,35 +4091,21 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
            and it fails to save RBP across OCaml calls when this happens), this
            only can work with frame pointers enabled.
 
-           On x86_64, trap blocks allocated by this backend are 4 words wide, as
-           opposed to 2, to account for RBP (and padding for alignment). These
+           On x86_64, trap blocks allocated by this backend are 4 words wide,
+           as opposed to 2, to account for RBP (and padding for alignment). These
            two words are placed below the normal trap block so that the top two
            words are handled as expected by the runtime and functions compiled
            without the LLVM backend. Pushtrap sets this up, while they get torn
-           down at trap handler entry. AArch64 instead stores the stack pointer
-           to restore in the third slot and the wrap_try resume PC in the fifth
-           slot, avoiding dynamic allocas that force x29 as a frame pointer.
+           down at trap handler entry.
 
            To recover RBP in the case of an exception, we can't put that bit of
            code in the trap handler entry since things happen beforehand. So, we
            make exceptions jump to some extra bit of asm written in the
-           module-level that recovers RBP. On x86_64, it reads the target from a
-           global variable. On AArch64, it reads the resume PC captured from the
-           [wrap_try] call's link register in the trap block, which makes the
-           exceptional path re-enter at the same machine return point as the
-           normal returns-twice path. *)
+           module-level that recovers RBP. It reads the target from a global
+           variable. *)
         let after_wrap_try = V.of_label (Cmm.new_label ()) in
         let wrap_try_res =
           match Target_system.architecture () with
-          | Target_system.AArch64 ->
-            let wrap_try_res =
-              call_simple
-                ~attrs:[Returns_twice; Gc_leaf_function]
-                ~cc:Oxcaml t "wrap_try" [] [T.i64]
-            in
-            emit_ins_no_res t (I.br after_wrap_try);
-            emit_label t after_wrap_try;
-            wrap_try_res
           | Target_system.X86_64 ->
             let wrap_try_res =
               call_simple
@@ -4145,8 +4115,8 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
             emit_ins_no_res t (I.br after_wrap_try);
             emit_label t after_wrap_try;
             wrap_try_res
-          | Target_system.IA32 | Target_system.ARM | Target_system.POWER
-          | Target_system.Z | Target_system.Riscv ->
+          | Target_system.AArch64 | Target_system.IA32 | Target_system.ARM
+          | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
             fail_msg ~name:"pushtrap"
               "unsupported architecture for LLVM backend"
         in
@@ -4167,25 +4137,6 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
         in
         let exn_bucket =
           match Target_system.architecture () with
-          | Target_system.AArch64 ->
-            let wrap_try_res =
-              match wrap_try_res with
-              | [wrap_try_res] -> wrap_try_res
-              | _ -> Misc.fatal_error "wrap_try returned unexpected arity"
-            in
-            let wrap_try_res_is_zero =
-              emit_ins t (I.icmp Ieq ~arg1:wrap_try_res ~arg2:(V.of_int 0))
-            in
-            emit_ins_no_res t
-              (I.br_cond ~cond:wrap_try_res_is_zero ~ifso:try_label
-                 ~ifnot:exn_entry);
-            emit_label t exn_entry;
-            let prev_exn_sp = read_trap_pointer_register t in
-            let exn_sp_ptr = load_domainstate_addr t Domain_exn_handler in
-            emit_ins_no_res t (I.store ~ptr:exn_sp_ptr ~to_store:prev_exn_sp);
-            emit_ins_no_res t (I.br (V.of_label lbl_handler));
-            emit_label t try_label;
-            wrap_try_res
           | Target_system.X86_64 ->
             emit_ins_no_res t
               (I.inline_asm ~asm:"movq $0, %rax" ~constraints:"r"
@@ -4208,8 +4159,8 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
                  ~ifnot:exn_label);
             emit_label t try_label;
             exn_bucket
-          | Target_system.IA32 | Target_system.ARM | Target_system.POWER
-          | Target_system.Z | Target_system.Riscv ->
+          | Target_system.AArch64 | Target_system.IA32 | Target_system.ARM
+          | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
             fail_msg ~name:"pushtrap"
               "unsupported architecture for LLVM backend"
         in
@@ -4224,10 +4175,8 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
                  (V.blockaddress
                     ~func:(E.get_fun_ident (get_fun_info t).emitter)
                     ~block:(V.get_ident_exn exn_entry)))
-        | Target_system.AArch64 ->
-          ()
-        | Target_system.IA32 | Target_system.ARM | Target_system.POWER
-        | Target_system.Z | Target_system.Riscv ->
+        | Target_system.AArch64 | Target_system.IA32 | Target_system.ARM
+        | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
           fail_msg ~name:"pushtrap" "unsupported architecture for LLVM backend");
         (* Allocate trap block on stack. It will get allocated at the top of the
            stack. The layout is [prev_sp; handler_addr; frame_pointer_recovery;
@@ -4235,45 +4184,29 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
         let trap_block_type = trap_block_type () in
         let stacksave_ptr, trap_block =
           match Target_system.architecture () with
-          | Target_system.AArch64 ->
-            let trap_block =
-              match
-                InstructionId.Tbl.find_opt (get_fun_info t).trap_block_allocas
-                  i.id
-              with
-              | Some trap_block -> trap_block
-              | None ->
-                fail_msg ~name:"pushtrap" "missing preallocated trap block"
-            in
-            None, trap_block
           | Target_system.X86_64 ->
             let stacksave_ptr = call_llvm_intrinsic t "stacksave" [] T.ptr in
             let trap_block =
               emit_ins t (I.alloca ~count:(V.of_int 1) trap_block_type)
             in
             Some stacksave_ptr, trap_block
-          | Target_system.IA32 | Target_system.ARM | Target_system.POWER
-          | Target_system.Z | Target_system.Riscv ->
+          | Target_system.AArch64 | Target_system.IA32 | Target_system.ARM
+          | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
             fail_msg ~name:"pushtrap"
               "unsupported architecture for LLVM backend"
         in
         (* Slots on the trap block *)
         let rbp_slot = do_offset t trap_block T.ptr 16 in
-        let saved_fp_slot = do_offset t trap_block T.ptr 24 in
-        let resume_pc_slot = do_offset t trap_block T.ptr 32 in
         let handler_slot = do_offset t trap_block T.ptr 8 in
         let prev_sp_slot = do_offset t trap_block T.ptr 0 in
-        (* Push my trap block to the exn handler list. On arm64 the current
-           handler chain is authoritative in x26; Caml_state(exn_handler) is
-           only refreshed on runtime transitions. *)
+        (* Push my trap block to the exn handler list. *)
         let exn_sp_ptr = load_domainstate_addr t Domain_exn_handler in
         let prev_exn_sp =
           match Target_system.architecture () with
-          | Target_system.AArch64 -> read_trap_pointer_register t
           | Target_system.X86_64 ->
             emit_ins t (I.load ~ptr:exn_sp_ptr ~typ:T.i64)
-          | Target_system.IA32 | Target_system.ARM | Target_system.POWER
-          | Target_system.Z | Target_system.Riscv ->
+          | Target_system.AArch64 | Target_system.IA32 | Target_system.ARM
+          | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
             fail_msg ~name:"pushtrap"
               "unsupported architecture for LLVM backend"
         in
@@ -4282,10 +4215,10 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
         (* Fill up the slots *)
         let handler_addr =
           match Target_system.architecture () with
-          | Target_system.X86_64 | Target_system.AArch64 ->
+          | Target_system.X86_64 ->
             V.of_ident ~typ:T.ptr recover_rbp_asm_ident
-          | Target_system.IA32 | Target_system.ARM | Target_system.POWER
-          | Target_system.Z | Target_system.Riscv ->
+          | Target_system.AArch64 | Target_system.IA32 | Target_system.ARM
+          | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
             fail_msg ~name:"pushtrap"
               "unsupported architecture for LLVM backend"
         in
@@ -4295,22 +4228,8 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
           emit_ins_no_res t
             (I.inline_asm ~asm:"mov %rbp, ($0)" ~constraints:"r"
                ~args:[rbp_slot] ~res_type:T.Or_void.void ~sideeffect:true)
-        | Target_system.AArch64 ->
-          let sp = read_stack_pointer t in
-          let trap_block_int = cast t trap_block T.i64 in
-          let restore_sp_delta =
-            emit_ins t (I.binary Sub ~arg1:sp ~arg2:trap_block_int)
-          in
-          emit_ins_no_res t (I.store ~ptr:rbp_slot ~to_store:restore_sp_delta);
-          if Config.with_frame_pointers
-          then
-            emit_ins_no_res t
-              (I.inline_asm ~asm:"str x29, [$0]" ~constraints:"r"
-                 ~args:[saved_fp_slot] ~res_type:T.Or_void.void ~sideeffect:true);
-          let resume_pc = read_link_register t in
-          emit_ins_no_res t (I.store ~ptr:resume_pc_slot ~to_store:resume_pc)
-        | Target_system.IA32 | Target_system.ARM | Target_system.POWER
-        | Target_system.Z | Target_system.Riscv ->
+        | Target_system.AArch64 | Target_system.IA32 | Target_system.ARM
+        | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
           fail_msg ~name:"pushtrap" "unsupported architecture for LLVM backend");
         emit_ins_no_res t (I.store ~ptr:prev_sp_slot ~to_store:prev_exn_sp);
         (* Save the trap block in [t] *)
@@ -5120,7 +5039,11 @@ let declare_data t =
 
 let define_auxiliary_functions t =
   define_c_call_wrappers t;
-  define_wrap_try t;
+  (match Target_system.architecture () with
+  | Target_system.AArch64 -> ()
+  | Target_system.X86_64 | Target_system.IA32 | Target_system.ARM
+  | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
+    define_wrap_try t);
   define_restore_rbp t
 
 (* Interface with the rest of the compiler *)

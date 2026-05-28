@@ -7,7 +7,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "OxCamlTrapUtils.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/CFG.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Instructions.h"
@@ -17,6 +20,41 @@
 #include "llvm/Support/Casting.h"
 
 using namespace llvm;
+
+static const IntrinsicInst *
+getUniqueOxCamlTrapPublishForRecoveryPad(const Function &F,
+                                         const BasicBlock &RecoveryBB) {
+  const IntrinsicInst *Publish = nullptr;
+  for (const BasicBlock &BB : F) {
+    for (const Instruction &I : BB) {
+      if (!isAArch64OxCamlTrapPublish(&I))
+        continue;
+      const auto *II = cast<IntrinsicInst>(&I);
+      const Value *RecoveryTarget = II->getArgOperand(2)->stripPointerCasts();
+      const auto *BA = dyn_cast<BlockAddress>(RecoveryTarget);
+      if (!BA || BA->getFunction() != &F ||
+          BA->getBasicBlock() != &RecoveryBB)
+        continue;
+      if (Publish)
+        return nullptr;
+      Publish = II;
+    }
+  }
+  return Publish;
+}
+
+static bool instructionDominates(const Instruction &Dom,
+                                 const Instruction &User,
+                                 const DominatorTree &DT) {
+  return DT.dominates(&Dom, &User);
+}
+
+static bool hasCallBrPredecessor(const BasicBlock &BB) {
+  for (const BasicBlock *Pred : predecessors(&BB))
+    if (isa<CallBrInst>(Pred->getTerminator()))
+      return true;
+  return false;
+}
 
 static bool isMaterializableTrapRecoveryOperand(const Function &F,
                                                 const Value *V,
@@ -186,6 +224,10 @@ bool llvm::isOxCamlTrapRecoveryContinuation(const Function &F,
                                             const BasicBlock &BB) {
   if (!isOxCamlGCFunction(F))
     return false;
+  // A callbr indirect target is a normal inline-asm branch target. It cannot
+  // also be treated as an external runtime-entry ABI label.
+  if (hasCallBrPredecessor(BB))
+    return false;
   if (!getOxCamlTrapRecoverAtBlockStart(F, BB))
     return false;
 
@@ -200,8 +242,45 @@ bool llvm::isOxCamlTrapRecoveryContinuation(const Function &F,
   return true;
 }
 
+static const BasicBlock *
+getBranchOnlyTrapRecoveryContinuationTarget(const Function &F,
+                                            const BasicBlock &BB,
+                                            SmallPtrSetImpl<const BasicBlock *>
+                                                &Visited) {
+  if (!Visited.insert(&BB).second)
+    return nullptr;
+
+  if (isOxCamlTrapRecoveryContinuation(F, BB))
+    return &BB;
+
+  if (BB.phis().begin() != BB.phis().end())
+    return nullptr;
+
+  for (const Instruction &I : BB) {
+    if (I.isDebugOrPseudoInst())
+      continue;
+
+    const auto *Br = dyn_cast<BranchInst>(&I);
+    if (!Br || !Br->isUnconditional())
+      return nullptr;
+
+    return getBranchOnlyTrapRecoveryContinuationTarget(F, *Br->getSuccessor(0),
+                                                       Visited);
+  }
+
+  return nullptr;
+}
+
+static const BasicBlock *
+getBranchOnlyTrapRecoveryContinuationTarget(const Function &F,
+                                            const BasicBlock &BB) {
+  SmallPtrSet<const BasicBlock *, 8> Visited;
+  return getBranchOnlyTrapRecoveryContinuationTarget(F, BB, Visited);
+}
+
 bool llvm::isOxCamlTrapRecoveryLandingPadTrampoline(const Function &F,
-                                                    const BasicBlock &BB) {
+                                                    const BasicBlock &BB,
+                                                    const DominatorTree &DT) {
   if (!isOxCamlGCFunction(F))
     return false;
   const LandingPadInst *LP = getOxCamlTrapRecoveryLandingPad(BB);
@@ -219,43 +298,82 @@ bool llvm::isOxCamlTrapRecoveryLandingPadTrampoline(const Function &F,
     const auto *Br = dyn_cast<BranchInst>(&I);
     if (!SawLandingPad || !Br || !Br->isUnconditional())
       return false;
-    return isOxCamlTrapRecoveryContinuation(F, *Br->getSuccessor(0)) &&
-           hasOxCamlTrapPublishForRecoveryPad(F, *Br->getSuccessor(0));
+    const BasicBlock *Target =
+        getBranchOnlyTrapRecoveryContinuationTarget(F, *Br->getSuccessor(0));
+    return Target &&
+           hasDominatingOxCamlTrapPublishForRecoveryPad(F, *Target, DT);
   }
   return false;
 }
 
-bool llvm::hasOxCamlTrapPublishForRecoveryPad(const Function &F,
-                                              const BasicBlock &RecoveryBB) {
-  unsigned MatchingPublishes = 0;
-  for (const BasicBlock &BB : F) {
-    for (const Instruction &I : BB) {
-      if (!isAArch64OxCamlTrapPublish(&I))
-        continue;
-      const auto *II = cast<IntrinsicInst>(&I);
-      const Value *RecoveryTarget = II->getArgOperand(2)->stripPointerCasts();
-      const auto *BA = dyn_cast<BlockAddress>(RecoveryTarget);
-      if (BA && BA->getFunction() == &F && BA->getBasicBlock() == &RecoveryBB)
-        ++MatchingPublishes;
-    }
-  }
-  return MatchingPublishes == 1;
-}
+static const BasicBlock *
+getOxCamlTrapRecoveryUnwindTargetShapeOnly(const Function &F,
+                                           const BasicBlock &UnwindBB) {
+  if (isOxCamlTrapRecoveryPad(F, UnwindBB))
+    return &UnwindBB;
 
-const BasicBlock *llvm::getOxCamlTrapRecoveryInvokeTarget(const InvokeInst &I) {
-  const Function *F = I.getFunction();
-  const BasicBlock *UnwindBB = I.getUnwindDest();
-  if (isOxCamlTrapRecoveryPad(*F, *UnwindBB) &&
-      hasOxCamlTrapPublishForRecoveryPad(*F, *UnwindBB))
-    return UnwindBB;
-
-  if (!isOxCamlTrapRecoveryLandingPadTrampoline(*F, *UnwindBB))
+  const LandingPadInst *LP = getOxCamlTrapRecoveryLandingPad(UnwindBB);
+  if (!LP || UnwindBB.phis().begin() != UnwindBB.phis().end())
     return nullptr;
 
-  const auto *Br = cast<BranchInst>(UnwindBB->getTerminator());
-  return Br->getSuccessor(0);
+  bool SawLandingPad = false;
+  for (const Instruction &I : UnwindBB) {
+    if (I.isDebugOrPseudoInst())
+      continue;
+    if (&I == LP) {
+      SawLandingPad = true;
+      continue;
+    }
+    const auto *Br = dyn_cast<BranchInst>(&I);
+    if (!SawLandingPad || !Br || !Br->isUnconditional())
+      return nullptr;
+    return getBranchOnlyTrapRecoveryContinuationTarget(F,
+                                                       *Br->getSuccessor(0));
+  }
+  return nullptr;
 }
 
-bool llvm::isOxCamlTrapRecoveryInvoke(const InvokeInst &I) {
-  return getOxCamlTrapRecoveryInvokeTarget(I) != nullptr;
+static bool
+hasDominatingOxCamlTrapPublishForInvoke(const InvokeInst &I,
+                                        const BasicBlock &RecoveryBB,
+                                        const DominatorTree &DT) {
+  const IntrinsicInst *Publish =
+      getUniqueOxCamlTrapPublishForRecoveryPad(*I.getFunction(), RecoveryBB);
+  return Publish && instructionDominates(*Publish, I, DT);
+}
+
+bool llvm::hasDominatingOxCamlTrapPublishForRecoveryPad(
+    const Function &F, const BasicBlock &RecoveryBB, const DominatorTree &DT) {
+  for (const BasicBlock &BB : F) {
+    for (const Instruction &I : BB) {
+      const auto *Invoke = dyn_cast<InvokeInst>(&I);
+      if (!Invoke)
+        continue;
+      const BasicBlock *Target =
+          getOxCamlTrapRecoveryUnwindTargetShapeOnly(F,
+                                                     *Invoke->getUnwindDest());
+      if (Target == &RecoveryBB &&
+          hasDominatingOxCamlTrapPublishForInvoke(*Invoke, RecoveryBB, DT))
+        return true;
+    }
+  }
+  return false;
+}
+
+const BasicBlock *
+llvm::getOxCamlTrapRecoveryInvokeTarget(const InvokeInst &I,
+                                        const DominatorTree &DT) {
+  const Function *F = I.getFunction();
+  const BasicBlock *UnwindBB = I.getUnwindDest();
+  const BasicBlock *Target =
+      getOxCamlTrapRecoveryUnwindTargetShapeOnly(*F, *UnwindBB);
+  if (!Target)
+    return nullptr;
+  return hasDominatingOxCamlTrapPublishForInvoke(I, *Target, DT) ? Target
+                                                                : nullptr;
+}
+
+bool llvm::isOxCamlTrapRecoveryInvoke(const InvokeInst &I,
+                                      const DominatorTree &DT) {
+  return getOxCamlTrapRecoveryInvokeTarget(I, DT) != nullptr;
 }

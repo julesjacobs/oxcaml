@@ -1,5 +1,6 @@
 ; RUN: opt -S -O2 < %s | llc -mtriple=arm64-apple-macosx -verify-machineinstrs > /dev/null
 ; RUN: llc -mtriple=arm64-apple-macosx -verify-machineinstrs -stop-after=finalize-isel < %s | FileCheck %s
+; RUN: llc -mtriple=arm64-apple-macosx -verify-machineinstrs -stop-after=branch-folder < %s | FileCheck %s
 ; RUN: llc -mtriple=aarch64-linux-gnu -verify-machineinstrs < %s > /dev/null
 
 declare void @llvm.aarch64.oxcaml.trap.publish(ptr, i64, ptr)

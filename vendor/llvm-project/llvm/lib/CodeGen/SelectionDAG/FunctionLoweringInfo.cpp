@@ -78,11 +78,12 @@ static ISD::NodeType getPreferredExtendForValue(const Instruction *I) {
 }
 
 void FunctionLoweringInfo::set(const Function &fn, MachineFunction &mf,
-                               SelectionDAG *DAG) {
+                               SelectionDAG *DAG, DominatorTree *DomTree) {
   Fn = &fn;
   MF = &mf;
   TLI = MF->getSubtarget().getTargetLowering();
   RegInfo = &MF->getRegInfo();
+  DT = DomTree;
   const TargetFrameLowering *TFI = MF->getSubtarget().getFrameLowering();
   DA = DAG->getDivergenceAnalysis();
 
@@ -270,9 +271,10 @@ void FunctionLoweringInfo::set(const Function &fn, MachineFunction &mf,
       MBB->setAddressTakenIRBlock(const_cast<BasicBlock *>(&BB));
 
     // Mark landing pad blocks.
-    if (BB.isEHPad() &&
-        !(isOxCamlTrapRecoveryPad(*Fn, BB) &&
-          hasOxCamlTrapPublishForRecoveryPad(*Fn, BB)))
+    bool IsOxCamlTrapRecoveryPad =
+        DT && llvm::isOxCamlTrapRecoveryPad(*Fn, BB) &&
+        hasDominatingOxCamlTrapPublishForRecoveryPad(*Fn, BB, *DT);
+    if (BB.isEHPad() && !IsOxCamlTrapRecoveryPad)
       MBB->setIsEHPad();
 
     // Create Machine PHI nodes for LLVM PHI nodes, lowering them as
