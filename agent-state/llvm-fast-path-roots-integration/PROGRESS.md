@@ -1,6 +1,6 @@
 # Progress
 
-Last updated: 2026-05-27.
+Last updated: 2026-05-28.
 
 ## Current state
 
@@ -9,9 +9,134 @@ Branch: `jujacobs/llvm-fast-path-roots-integration`
 PR: https://github.com/julesjacobs/oxcaml/pull/18
 
 Current focus: AArch64 LLVM `try`/trap performance. The fast-path-roots
-integration work and earlier compiler-benchmark work are background context; the
-active design question is how to remove the hot `_wrap_try` call without hiding
-the trap recovery edge from LLVM.
+integration work and earlier compiler-benchmark work are background context.
+The active implementation now uses optimizer-visible trap recovery edges instead
+of the hot `_wrap_try` helper.
+
+Note: despite the agent and branch name, the active goal has shifted from the
+fast-path-root-slot optimization to native-like AArch64 trap-region handling for
+the OxCaml LLVM backend. The updated `GOAL.md` is the source of truth.
+
+## 2026-05-28 Update
+
+The current `GOAL.md` is good enough as a guiding goal. It specifies the
+native-like trap model and validation expectations without forcing one exact
+LLVM spelling.
+
+Goal audit:
+
+- The goal should stay broad. It correctly asks for a native-like model and
+  explicit LLVM control-flow facts, rather than requiring today's exact
+  `invoke`/`landingpad token` spelling forever.
+- The current implementation now satisfies the main shape of that goal:
+  OxCaml emits real unwind edges for protected calls, LLVM classifies the
+  recovery entry as `runtime-entered`, AArch64 owns the recovery ABI live-in
+  rule, and the hot path no longer calls `_wrap_try`.
+- The implementation also covers the important hardening found during the
+  spike: multiple recovery entries, split unwind trampolines, nondominating
+  publish rejection, extra runtime-entered live-in rejection, PHI rejection in
+  recovery entries, and BranchFolding placement/tail-merge hazards.
+- The remaining question is no longer "is the goal bad?" but "is this
+  implementation reviewable and fast enough to land?" The main residual risk is
+  performance, not a known correctness hole.
+
+Implemented and validated since the previous note:
+
+- AArch64 `Pushtrap`/`Poptrap`/recovery no longer update
+  `Caml_state(exn_handler)` on the hot trap path. The intended model is that
+  x26 is authoritative while executing OCaml code; runtime transitions already
+  synchronize the domain-state field when needed.
+- Updated `testsuite/tests/llvm-codegen/fast_path_roots.ml` expected output for
+  the removed x28/#48 stores.
+- Extended `testsuite/tests/llvm-codegen/trap_recovery_runtime.sh` with a hot
+  try/call source case that rejects `[x28, #48]` stores in the generated
+  AArch64 assembly.
+- Rebuilt the installed compiler and refreshed `_runtest` before focused
+  expect testing. The `no-rebuild` one-test target was stale until `_runtest`
+  was refreshed.
+
+Validation:
+
+- `make llvm-test-one TEST=llvm-codegen/fast_path_roots.ml LLVM_PATH="$LLVM_PATH"`
+  passed.
+- `make llvm-test-one-no-rebuild TEST=llvm-codegen/trap_recovery_runtime.ml
+  LLVM_PATH="$LLVM_PATH"` passed after the install rebuild.
+- `make llvm-test-one-no-rebuild DIR=llvm-codegen LLVM_PATH="$LLVM_PATH"`
+  passed before the final expect promotion: 92 passed, 2 skipped.
+- `make llvm-test-no-rebuild LLVM_PATH="$LLVM_PATH"` passed before the final
+  expect promotion: 6743 passed, 295 skipped.
+- Fresh `make llvm-self-stage2-test LLVM_PATH="$LLVM_PATH"` passed:
+  6717 passed, 282 skipped, 0 failed, 6999 considered. Wrapper activity was
+  nonzero: 6701 wrapper lines and 3339 fresh IR lines.
+
+Performance:
+
+- Representative try/trap microbenchmarks:
+  `agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/summary_final_no_domain_exn_store_20260528_020706.json`.
+  The biggest try/call cases improved materially:
+  `direct_call_in_try_hit` 1.378 -> 1.174, `closure_call_in_try_hit` 1.414 ->
+  1.050, `closure_call_in_nested_try_hit` 1.401 -> 1.235, and
+  `try_with_string_compare_hit` 1.470 -> 1.185.
+- Fresh compiler binary benchmark against `_llvm_self_stage2_install`:
+  `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/summary_final_no_domain_exn_store_20260528_030435.json`.
+  Geomean LLVM-built/native-built ratio is 1.0478, improved from the previous
+  validated 1.0539 and the old 1.0897 baseline.
+
+Remaining performance risk:
+
+- The native-like trap model has removed the helper call and the extra hot
+  domain-state exception-handler stores, but some try/call cases are still slow
+  (`closure_call_in_nested_try_hit` is 1.235 and
+  `try_with_string_compare_hit` is 1.185).
+- Compiler binary speed is much better than the old baseline but still around
+  4.8% slower geomean. The largest current compiler-benchmark module slowdown
+  is `llvmize.ml` at 1.069.
+
+Recommended next step:
+
+- Do a focused review pass over the current diff, treating the native-like trap
+  model as the chosen design unless a concrete correctness issue appears.
+- Keep the `GOAL.md` as-is unless new evidence changes the target model.
+- Before landing, either explain the remaining `closure_call_in_nested_try_hit`
+  and `try_with_string_compare_hit` slowdowns, or reduce them to explicit
+  follow-up work with assembly evidence.
+- Commit the code/test/docs state only after that review pass has checked that
+  stale spike-only comments do not describe current production behavior.
+
+Follow-up production cleanup:
+
+- Removed the dead AArch64 cases from the old non-AArch64 `wrap_try` /
+  returns-twice `Pushtrap` branch in `backend/llvm/llvmize.ml`. The active
+  AArch64 path is `emit_aarch64_pushtrap`; the old branch now fails if it is
+  accidentally reached on AArch64 instead of silently emitting the retired
+  model.
+- Removed the now-unused `read_link_register` helper, which only served that
+  retired AArch64 `wrap_try` path.
+- The first focused rebuild failed because login shells inherited
+  `OPAMSWITCH=modal-kinds-rocq` from the parent app environment. Set the global
+  switch to `oxcaml-5.4.0+oxcaml`, updated `~/.zprofile` to clear that stale
+  inherited switch for login shells, and confirmed a fresh shell now reports
+  `OPAMSWITCH=oxcaml-5.4.0+oxcaml`.
+- Validation after the cleanup:
+  `make llvm-test-one TEST=llvm-codegen/trap_recovery_runtime.ml
+  LLVM_PATH="$LLVM_PATH"` passed, then
+  `make llvm-test-one-no-rebuild DIR=llvm-codegen LLVM_PATH="$LLVM_PATH"`
+  passed with 92 passed, 2 skipped, 0 failed.
+- Tightened the LLVM codegen boundary so `FunctionLoweringInfo::set` receives
+  the existing `DominatorTree` before it decides whether a token landingpad
+  should be marked as an ordinary EH pad. This now uses the same
+  publish-dominates-invoke rule as SelectionDAG lowering instead of the weaker
+  old "a publish exists somewhere" predicate.
+- Removed the now-unused public `hasOxCamlTrapPublishForRecoveryPad` helper, so
+  the only exported publish predicate is the dominance-backed one.
+- Rebuilt the agent LLVM tools after that interface change:
+  `ninja -C /tmp/oxcaml-agent-llvm-fast-path-roots-integration/llvm-build llc
+  opt FileCheck clang`.
+- Reran focused LLVM trap recovery RUN coverage manually with the rebuilt
+  `llc`, `opt`, and `FileCheck`: positive, malformed-shape negative, runtime
+  live-in negative, branch-folder, and Linux triple smoke checks passed.
+- Reran `make llvm-test-one-no-rebuild DIR=llvm-codegen LLVM_PATH="$LLVM_PATH"`
+  with the rebuilt wrapper tools: 92 passed, 2 skipped, 0 failed.
 
 ## Current decision
 
@@ -346,3 +471,197 @@ the active publish.
   `translcore.ml` `1.054x`, `typemod.ml` `1.050x`,
   `cfg_to_linear.ml` `1.070x`, `cfg_selectgen.ml` `1.047x`,
   `llvmize.ml` `1.072x`, `regalloc_irc.ml` `1.047x`.
+
+2026-05-28 LLVM trap-region hardening update:
+
+- Reproduced a real verifier failure in
+  `oxcaml-trap-recovery-invoke-multiple.ll` after `branch-folder`:
+  `exn_a` and `exn_b` had become identical after recovery values were dead, so
+  BranchFolding tail-merged `exn_a` into the layout-successor `exn_b`.
+  That created a normal machine CFG edge into a `runtime-entered` ABI block and
+  dropped the required `$x26` live-in from `exn_b`.
+- Fixed BranchFolding to treat `runtime-entered` blocks as ABI entry labels:
+  they are not profitable tail-merge inputs, not whole-block common-tail
+  targets, not no-successor merge candidates, not predecessor merge candidates,
+  and not candidates for adjacent inlining / branch-only forwarding / placement
+  rewrites that would create ordinary control flow into the ABI entry.
+- While expanding focused LLVM tests, found the `callbr` negative test was
+  actually being accepted because the continuation recognizer could classify a
+  `callbr` indirect target as a runtime recovery entry. Fixed that by rejecting
+  recovery continuations with a `callbr` predecessor.
+- Rebuilt the agent LLVM tools:
+  `ninja -C /tmp/oxcaml-agent-llvm-fast-path-roots-integration/llvm-build llc opt FileCheck clang`.
+- Hand-ran the `oxcaml-trap-recovery*.ll` RUN coverage with the agent LLVM
+  tools, including the new `-stop-after=branch-folder` check for the multiple
+  recovery-entry case: all passed.
+- Reran the compiler-facing focused tests with the agent wrapper:
+  `make llvm-test-one-no-rebuild DIR=llvm-codegen` passed with 92 passed,
+  2 skipped, 0 failed, 94 considered.
+- Added the `-stop-after=branch-folder` RUN line to
+  `oxcaml-trap-recovery-invoke-multiple.ll` so the tail-merge regression is
+  covered by the checked-in LLVM test, not only by a manual command.
+- Reran the focused regression checks after adding the RUN line:
+  `finalize-isel` FileCheck passed, `branch-folder` FileCheck passed, and the
+  `callbr` negative test still rejected with the expected diagnostic.
+- Reran `make llvm-test-one-no-rebuild DIR=llvm-codegen` with the agent wrapper
+  after the test update: 92 passed, 2 skipped, 0 failed, 94 considered.
+
+2026-05-28 active-publish hardening update:
+
+- Tightened LLVM recovery classification so a recovery entry is no longer
+  accepted just because a matching `trap.publish` exists somewhere in the
+  function. The unique publish naming a recovery entry must dominate at least
+  one invoke edge to that entry, and each invoke only classifies as a trap
+  recovery invoke when that publish dominates the invoke.
+- Added `oxcaml-trap-recovery-invoke-nondominating-publish.ll`, where one path
+  reaches the protected invoke without executing the publish. This now rejects
+  with `trap recovery intrinsic must be in a runtime-entered ABI block`.
+- This does not add a full IR-level pop marker. It closes the stale
+  publish-anywhere hole and proves the publish is on all paths to a classified
+  invoke; the complete active trap stack is still represented by OxCaml's
+  emitted invoke unwind targets plus the runtime trap-chain stores.
+- Rebuilt the agent LLVM tools:
+  `ninja -C /tmp/oxcaml-agent-llvm-fast-path-roots-integration/llvm-build llc opt FileCheck clang`.
+- Reran the hand-expanded `oxcaml-trap-recovery*.ll` RUN coverage, including
+  the new nondominating-publish negative test: all passed.
+- Reran `make llvm-test-one-no-rebuild DIR=llvm-codegen` with the agent wrapper:
+  92 passed, 2 skipped, 0 failed, 94 considered.
+- `git diff --check` passed.
+- Follow-up cleanup: replaced the first dominance implementation, which
+  hand-walked CFG reachability, with LLVM `DominatorTree`. This keeps the
+  active-publish proof aligned with LLVM's own dominance semantics instead of
+  maintaining a second local dominance algorithm.
+- Rebuilt LLVM tools after the cleanup and reran the same focused validation:
+  hand-expanded `oxcaml-trap-recovery*.ll` coverage passed, and
+  `make llvm-test-one-no-rebuild DIR=llvm-codegen` again passed with 92 passed,
+  2 skipped, 0 failed, 94 considered.
+- Follow-up production cleanup: threaded SelectionDAG's existing
+  `DominatorTreeWrapperPass` into `FunctionLoweringInfo` and passed that
+  analysis into the OxCaml trap recognizer. The publish-dominates-invoke rule
+  no longer rebuilds a fresh dominator tree inside helper queries.
+- Rebuilt LLVM tools after threading the analysis:
+  `ninja -C /tmp/oxcaml-agent-llvm-fast-path-roots-integration/llvm-build llc opt FileCheck clang`.
+- Reran the hand-expanded `oxcaml-trap-recovery*.ll` RUN coverage with the
+  agent LLVM tools, including positive MIR/asm checks, branch-folder coverage,
+  Linux triple smoke checks, and the negative malformed-shape tests: all
+  passed.
+- Reran `make llvm-test-one-no-rebuild DIR=llvm-codegen` with the agent
+  wrapper: 92 passed, 2 skipped, 0 failed, 94 considered.
+
+2026-05-28 runtime-entered verifier boundary cleanup:
+
+- Moved the `runtime-entered` live-in rule out of hard-coded generic
+  MachineVerifier AArch64 register-name checks. Generic verifier now asks
+  `TargetRegisterInfo` whether each runtime-entered live-in is valid and which
+  live-ins are required.
+- Added AArch64 `TargetRegisterInfo` hooks for OxCaml runtime-entered recovery
+  blocks: exactly `x0`, `x26`, `x27`, and `x28` are valid/required for
+  `gc "ocaml"` / `gc "oxcaml"` functions.
+- Updated the AArch64 trap intrinsic comments to remove stale callbr/spike
+  wording and describe the current invoke-edge model.
+- Added `oxcaml-runtime-entry-invalid-liveins.mir` so an extra live-in such as
+  `x1` on a runtime-entered block is rejected through the target hook.
+- Rebuilt LLVM tools after the public codegen interface change:
+  `ninja -C /tmp/oxcaml-agent-llvm-fast-path-roots-integration/llvm-build llc opt FileCheck clang`.
+- Validated the new MIR negative test and the existing
+  `oxcaml-runtime-entry-multiple-calls.mir` runtime-entry pass test.
+- Reran the hand-expanded `oxcaml-trap-recovery*.ll` RUN coverage with the
+  rebuilt LLVM tools: all passed.
+- Reran `make llvm-test-one-no-rebuild DIR=llvm-codegen` with the agent
+  wrapper: 92 passed, 2 skipped, 0 failed, 94 considered.
+
+2026-05-28 AArch64 wrap_try cleanup:
+
+- Found that real AArch64 OxCaml lowering no longer calls `wrap_try`, but
+  `define_auxiliary_functions` still emitted the private helper into AArch64 IR
+  and assembly. This was stale model leakage rather than a hot-path call, but
+  the native-like path should not emit the unused helper at all.
+- Changed `backend/llvm/llvmize.ml` so `define_wrap_try` is skipped on
+  AArch64 and still emitted for the non-AArch64 path that uses the old
+  returns-twice model.
+- Added a source-level regression check to
+  `testsuite/tests/llvm-codegen/trap_recovery_runtime.sh` that AArch64 trap
+  recovery emits `trap.publish` / `trap.recover` but not the `wrap_try` symbol.
+- Rebuilt the compiler with `make install`.
+- Manual source probe with a real raising call in a `try` showed:
+  `IR_wrap_try_symbol=0`, `ASM_wrap_try_label=0`, `IR_trap_publish=2`,
+  `IR_trap_recover=2`.
+- Reran `make llvm-test-one-no-rebuild TEST=llvm-codegen/trap_recovery_runtime.ml`
+  with the agent wrapper: 4 passed, 0 failed.
+- Reran `make llvm-test-one-no-rebuild DIR=llvm-codegen` with the agent
+  wrapper: 92 passed, 2 skipped, 0 failed, 94 considered.
+
+2026-05-28 split unwind recovery fix:
+
+- A broad `make llvm-test-no-rebuild` run exposed backend crashes in
+  `basic-io/wc.ml`, `lib-scanf/tscanf.ml`, and `lib-seq/test.ml`:
+  `trap recovery intrinsic must be in a runtime-entered ABI block`.
+- Reduced the first failure to generated `wc.ll`. The source lowering was
+  valid: `trap.publish` dominated the protected invokes and named the final
+  `trap.recover` block. The problem was LLVM `-O3` splitting unwind edges into
+  token `landingpad` trampoline blocks plus branch-only join blocks before the
+  final recover block.
+- Fixed the LLVM recognizer to follow a branch-only chain from a token
+  landingpad trampoline to the published `trap.recover` continuation, instead
+  of only accepting direct landingpad+recover or one-hop landingpad shapes.
+- Added `oxcaml-trap-recovery-split-unwind.ll` to block this multi-hop split
+  unwind shape.
+- Rebuilt LLVM tools:
+  `ninja -C /tmp/oxcaml-agent-llvm-fast-path-roots-integration/llvm-build llc opt FileCheck clang`.
+- Validated:
+  - New split-unwind LLVM test passes.
+  - The exact crashing `wc.ll` now compiles with the same `clang -O3` flags
+    used by the wrapper.
+  - Targeted source tests pass:
+    `basic-io/wc.ml`, `lib-scanf/tscanf.ml`, and `lib-seq/test.ml`.
+  - Hand-expanded positive and negative `oxcaml-trap-recovery*.ll` coverage
+    passes.
+  - `make llvm-test-one-no-rebuild DIR=llvm-codegen`: 92 passed, 2 skipped,
+    0 failed, 94 considered.
+  - `make llvm-test-no-rebuild`: 6743 passed, 295 skipped, 0 failed,
+    7038 considered.
+
+2026-05-28 full self-stage2 validation:
+
+- Ran:
+  `make llvm-self-stage2-test LLVM_PATH="$LLVM_PATH"` after setting the
+  `oxcaml-5.4.0+oxcaml` opam switch and the agent-local LLVM temp
+  environment.
+- Stage1 compiler build completed with fresh wrapper activity:
+  boot wrapper lines 1678 / fresh IR 834, runtime wrapper lines 148 /
+  fresh IR 74, main wrapper lines 2224 / fresh IR 1098, self-stage smoke
+  fresh IR 2.
+- Stage2 compiler build from `_llvm_self_stage_install` completed with fresh
+  wrapper activity: boot wrapper lines 1678 / fresh IR 831, runtime wrapper
+  lines 148 / fresh IR 74, main wrapper lines 2224 / fresh IR 1099, stage2
+  self-stage smoke fresh IR 2.
+- Stage2 testsuite passed:
+  6717 tests passed, 282 skipped, 0 failed, 0 not started, 0 unexpected
+  errors, 6999 tests considered.
+- Stage2 testsuite wrapper activity was nonzero:
+  wrapper lines 6699, fresh IR 3341.
+
+2026-05-28 post-dominance-cleanup broad validation:
+
+- Rebuilt LLVM tools after changing trap recovery EH-pad detection to use the
+  dominance-backed publish/recover predicate.
+- Reran focused LLVM trap recovery coverage and `llvm-codegen`; all passed.
+- First broad `make llvm-test-no-rebuild` run had one failure in
+  `tests/ast-invariants/test.ml`: the test recursively walked stale generated
+  `_ocamltest` directories under `_runtest` and hit a partially removed
+  `tests/codegen/allocation` path. This was not a compiler failure.
+- Removed generated `_ocamltest` work directories and reran the same broad
+  suite:
+  6743 tests passed, 295 skipped, 0 failed, 0 not started, 0 unexpected errors,
+  7038 tests considered.
+- Ran a fresh `make llvm-self-stage2-test LLVM_PATH="$LLVM_PATH"` after the
+  dominance cleanup.
+- Stage1 LLVM self-stage wrapper activity: boot fresh IR 830, smoke fresh IR 2,
+  runtime fresh IR 73, main fresh IR 1102, self-stage smoke fresh IR 2.
+- Stage2 compiler build wrapper activity: boot fresh IR 835, smoke fresh IR 2,
+  runtime fresh IR 74, main fresh IR 1105, self-stage smoke fresh IR 2.
+- Stage2 testsuite passed:
+  6717 tests passed, 282 skipped, 0 failed, 0 not started, 0 unexpected errors,
+  6999 tests considered.
+- Stage2 testsuite wrapper activity was nonzero:
+  wrapper lines 6701, fresh IR 3339.

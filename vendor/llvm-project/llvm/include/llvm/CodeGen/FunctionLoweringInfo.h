@@ -35,6 +35,7 @@ namespace llvm {
 class Argument;
 class BasicBlock;
 class BranchProbabilityInfo;
+class DominatorTree;
 class LegacyDivergenceAnalysis;
 class Function;
 class Instruction;
@@ -56,6 +57,7 @@ public:
   const TargetLowering *TLI;
   MachineRegisterInfo *RegInfo;
   BranchProbabilityInfo *BPI;
+  DominatorTree *DT;
   const LegacyDivergenceAnalysis *DA;
   /// CanLowerReturn - true iff the function's return value can be lowered to
   /// registers.
@@ -186,7 +188,8 @@ public:
   /// set - Initialize this FunctionLoweringInfo with the given Function
   /// and its associated MachineFunction.
   ///
-  void set(const Function &Fn, MachineFunction &MF, SelectionDAG *DAG);
+  void set(const Function &Fn, MachineFunction &MF, SelectionDAG *DAG,
+           DominatorTree *DT);
 
   /// clear - Clear out all the function-specific state. This returns this
   /// FunctionLoweringInfo to an empty state, ready to be used for a

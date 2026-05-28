@@ -63,7 +63,40 @@ grep -q "landingpad token" "$ir"
 grep -q "@llvm.aarch64.oxcaml.trap.publish" "$ir"
 grep -q "@llvm.aarch64.oxcaml.trap.recover" "$ir"
 grep -q "unwind label" "$ir"
+if grep -q '@"\\01_wrap_try"' "$ir" || grep -q '^_wrap_try:' "$asm"; then
+  echo "AArch64 trap recovery should not emit wrap_try" >&2
+  exit 1
+fi
 if grep -q "llvm.aarch64.oxcaml.trap" "$asm"; then
   echo "trap intrinsics leaked to assembly" >&2
+  exit 1
+fi
+
+hot_src="$build_dir/trap_recovery_hot_push_pop.ml"
+hot_cmx="$build_dir/trap_recovery_hot_push_pop.cmx"
+hot_asm="$build_dir/trap_recovery_hot_push_pop.s"
+
+cat > "$hot_src" <<'EOF'
+exception E
+
+let[@inline never] f x = x + 1
+
+let[@inline never] run n =
+  let acc = ref 0 in
+  for i = 1 to n do
+    try acc := f !acc with E -> decr acc
+  done;
+  !acc
+EOF
+
+"$ocamlopt" -O3 -S -c -llvm-backend \
+  -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" -o "$hot_cmx" "$hot_src"
+
+if grep -q '\[x28, #48\]' "$hot_asm"; then
+  echo "AArch64 hot trap push/pop should keep x26 authoritative" >&2
+  exit 1
+fi
+if grep -q '_wrap_try' "$hot_asm"; then
+  echo "AArch64 hot trap push/pop should not emit wrap_try" >&2
   exit 1
 fi

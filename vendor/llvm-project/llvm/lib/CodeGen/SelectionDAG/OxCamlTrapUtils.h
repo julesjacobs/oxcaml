@@ -12,6 +12,7 @@
 namespace llvm {
 
 class BasicBlock;
+class DominatorTree;
 class Function;
 class Instruction;
 class IntrinsicInst;
@@ -27,11 +28,13 @@ bool isOxCamlTrapRecoveryPad(const Function &F, const BasicBlock &BB);
 bool isOxCamlTrapRecoveryContinuation(const Function &F,
                                       const BasicBlock &BB);
 bool isOxCamlTrapRecoveryLandingPadTrampoline(const Function &F,
-                                              const BasicBlock &BB);
-bool hasOxCamlTrapPublishForRecoveryPad(const Function &F,
-                                        const BasicBlock &RecoveryBB);
-const BasicBlock *getOxCamlTrapRecoveryInvokeTarget(const InvokeInst &I);
-bool isOxCamlTrapRecoveryInvoke(const InvokeInst &I);
+                                              const BasicBlock &BB,
+                                              const DominatorTree &DT);
+bool hasDominatingOxCamlTrapPublishForRecoveryPad(
+    const Function &F, const BasicBlock &RecoveryBB, const DominatorTree &DT);
+const BasicBlock *getOxCamlTrapRecoveryInvokeTarget(const InvokeInst &I,
+                                                    const DominatorTree &DT);
+bool isOxCamlTrapRecoveryInvoke(const InvokeInst &I, const DominatorTree &DT);
 
 } // end namespace llvm
 

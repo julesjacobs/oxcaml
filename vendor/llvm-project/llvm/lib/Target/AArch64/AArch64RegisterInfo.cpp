@@ -19,6 +19,7 @@
 #include "MCTargetDesc/AArch64AddressingModes.h"
 #include "MCTargetDesc/AArch64InstPrinter.h"
 #include "llvm/ADT/BitVector.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -146,6 +147,27 @@ AArch64RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   if (MF->getInfo<AArch64FunctionInfo>()->isSVECC())
     return CSR_AArch64_SVE_AAPCS_SaveList;
   return CSR_AArch64_AAPCS_SaveList;
+}
+
+static constexpr MCPhysReg OxCamlRuntimeEnteredLiveIns[] = {
+    AArch64::X0, AArch64::X26, AArch64::X27, AArch64::X28};
+
+bool AArch64RegisterInfo::isRuntimeEnteredLiveIn(
+    const MachineFunction &MF, MCRegister PhysReg) const {
+  if (!MF.getFunction().hasGC() ||
+      (MF.getFunction().getGC() != "oxcaml" &&
+       MF.getFunction().getGC() != "ocaml"))
+    return false;
+  return is_contained(OxCamlRuntimeEnteredLiveIns, PhysReg);
+}
+
+ArrayRef<MCPhysReg>
+AArch64RegisterInfo::getRuntimeEnteredLiveIns(const MachineFunction &MF) const {
+  if (!MF.getFunction().hasGC() ||
+      (MF.getFunction().getGC() != "oxcaml" &&
+       MF.getFunction().getGC() != "ocaml"))
+    return {};
+  return OxCamlRuntimeEnteredLiveIns;
 }
 
 const MCPhysReg *
