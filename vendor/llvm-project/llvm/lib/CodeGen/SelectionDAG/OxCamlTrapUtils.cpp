@@ -14,8 +14,91 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/IntrinsicsAArch64.h"
 #include "llvm/IR/Metadata.h"
+#include "llvm/Support/Casting.h"
 
 using namespace llvm;
+
+static bool isMaterializableTrapRecoveryOperand(const Function &F,
+                                                const Value *V,
+                                                unsigned Depth = 0) {
+  if (Depth > 8)
+    return false;
+
+  if (isa<Constant>(V) || isa<BasicBlock>(V) || isa<InlineAsm>(V) ||
+      isa<MetadataAsValue>(V))
+    return true;
+
+  const auto *I = dyn_cast<Instruction>(V);
+  if (!I)
+    return false;
+
+  if (isa<AllocaInst>(I))
+    return I->getParent() == &F.getEntryBlock();
+
+  if (I->getParent() != &F.getEntryBlock())
+    return false;
+
+  switch (I->getOpcode()) {
+  case Instruction::Add:
+  case Instruction::Sub:
+  case Instruction::And:
+  case Instruction::Or:
+  case Instruction::Xor:
+  case Instruction::Shl:
+  case Instruction::LShr:
+  case Instruction::AShr:
+  case Instruction::GetElementPtr:
+  case Instruction::PtrToInt:
+  case Instruction::IntToPtr:
+  case Instruction::BitCast:
+  case Instruction::AddrSpaceCast:
+  case Instruction::Trunc:
+  case Instruction::ZExt:
+  case Instruction::SExt:
+    break;
+  default:
+    return false;
+  }
+
+  for (const Use &U : I->operands())
+    if (!isMaterializableTrapRecoveryOperand(F, U.get(), Depth + 1))
+      return false;
+  return true;
+}
+
+static bool isAllowedTrapRecoveryOperand(const Function &F,
+                                         const BasicBlock &RecoveryBB,
+                                         const Value *V);
+
+static bool isAllowedBeforeTrapRecover(const Function &F,
+                                       const BasicBlock &RecoveryBB,
+                                       const Instruction &I) {
+  if (I.mayReadOrWriteMemory() || I.mayThrow() || I.isTerminator() ||
+      isa<PHINode>(I) || isa<LandingPadInst>(I))
+    return false;
+
+  for (const Use &U : I.operands())
+    if (!isAllowedTrapRecoveryOperand(F, RecoveryBB, U.get()))
+      return false;
+  return true;
+}
+
+static const IntrinsicInst *
+getOxCamlTrapRecoverAtBlockStart(const Function &F, const BasicBlock &BB) {
+  if (BB.phis().begin() != BB.phis().end())
+    return nullptr;
+
+  for (const Instruction &I : BB) {
+    if (I.isDebugOrPseudoInst())
+      continue;
+    const auto *II = dyn_cast<IntrinsicInst>(&I);
+    if (II && isAArch64OxCamlTrapRecover(II))
+      return II;
+    if (!isAllowedBeforeTrapRecover(F, BB, I))
+      return nullptr;
+  }
+  return nullptr;
+}
 
 static bool isAllowedTrapRecoveryOperand(const Function &F,
                                          const BasicBlock &RecoveryBB,
@@ -32,8 +115,9 @@ static bool isAllowedTrapRecoveryOperand(const Function &F,
 
   // Recovery blocks may store recovered ABI values into compiler-created
   // entry slots before branching to ordinary handler code. They must not read
-  // protected-path SSA values.
-  return isa<AllocaInst>(I) && I->getParent() == &F.getEntryBlock();
+  // protected-path SSA values. They may also rematerialize simple expressions
+  // over entry allocas, such as aligned stack-frame slot addresses.
+  return isMaterializableTrapRecoveryOperand(F, I);
 }
 
 bool llvm::isOxCamlGCFunction(const Function &F) {
@@ -72,7 +156,8 @@ llvm::getOxCamlTrapRecoverAfterLandingPad(const BasicBlock &BB) {
     const auto *II = dyn_cast<IntrinsicInst>(&I);
     if (II && isAArch64OxCamlTrapRecover(II))
       return II;
-    return nullptr;
+    if (!isAllowedBeforeTrapRecover(*BB.getParent(), BB, I))
+      return nullptr;
   }
   return nullptr;
 }
@@ -97,6 +182,49 @@ bool llvm::isOxCamlTrapRecoveryPad(const Function &F, const BasicBlock &BB) {
   return true;
 }
 
+bool llvm::isOxCamlTrapRecoveryContinuation(const Function &F,
+                                            const BasicBlock &BB) {
+  if (!isOxCamlGCFunction(F))
+    return false;
+  if (!getOxCamlTrapRecoverAtBlockStart(F, BB))
+    return false;
+
+  for (const Instruction &I : BB) {
+    if (I.isDebugOrPseudoInst())
+      continue;
+    for (const Use &U : I.operands()) {
+      if (!isAllowedTrapRecoveryOperand(F, BB, U.get()))
+        return false;
+    }
+  }
+  return true;
+}
+
+bool llvm::isOxCamlTrapRecoveryLandingPadTrampoline(const Function &F,
+                                                    const BasicBlock &BB) {
+  if (!isOxCamlGCFunction(F))
+    return false;
+  const LandingPadInst *LP = getOxCamlTrapRecoveryLandingPad(BB);
+  if (!LP || BB.phis().begin() != BB.phis().end())
+    return false;
+
+  bool SawLandingPad = false;
+  for (const Instruction &I : BB) {
+    if (I.isDebugOrPseudoInst())
+      continue;
+    if (&I == LP) {
+      SawLandingPad = true;
+      continue;
+    }
+    const auto *Br = dyn_cast<BranchInst>(&I);
+    if (!SawLandingPad || !Br || !Br->isUnconditional())
+      return false;
+    return isOxCamlTrapRecoveryContinuation(F, *Br->getSuccessor(0)) &&
+           hasOxCamlTrapPublishForRecoveryPad(F, *Br->getSuccessor(0));
+  }
+  return false;
+}
+
 bool llvm::hasOxCamlTrapPublishForRecoveryPad(const Function &F,
                                               const BasicBlock &RecoveryBB) {
   unsigned MatchingPublishes = 0;
@@ -114,9 +242,20 @@ bool llvm::hasOxCamlTrapPublishForRecoveryPad(const Function &F,
   return MatchingPublishes == 1;
 }
 
-bool llvm::isOxCamlTrapRecoveryInvoke(const InvokeInst &I) {
+const BasicBlock *llvm::getOxCamlTrapRecoveryInvokeTarget(const InvokeInst &I) {
   const Function *F = I.getFunction();
-  const BasicBlock *RecoveryBB = I.getUnwindDest();
-  return isOxCamlTrapRecoveryPad(*F, *RecoveryBB) &&
-         hasOxCamlTrapPublishForRecoveryPad(*F, *RecoveryBB);
+  const BasicBlock *UnwindBB = I.getUnwindDest();
+  if (isOxCamlTrapRecoveryPad(*F, *UnwindBB) &&
+      hasOxCamlTrapPublishForRecoveryPad(*F, *UnwindBB))
+    return UnwindBB;
+
+  if (!isOxCamlTrapRecoveryLandingPadTrampoline(*F, *UnwindBB))
+    return nullptr;
+
+  const auto *Br = cast<BranchInst>(UnwindBB->getTerminator());
+  return Br->getSuccessor(0);
+}
+
+bool llvm::isOxCamlTrapRecoveryInvoke(const InvokeInst &I) {
+  return getOxCamlTrapRecoveryInvokeTarget(I) != nullptr;
 }

@@ -4243,6 +4243,8 @@ void AArch64DAGToDAGISel::Select(SDNode *Node) {
               "trap recovery intrinsic must be first in its recovery block");
         }
       }
+      MF->getInfo<AArch64FunctionInfo>()->addOxCamlTrapRecoveryEntry(
+          FuncInfo->MBB);
       FuncInfo->MBB->addLiveIn(AArch64::X0);
       FuncInfo->MBB->addLiveIn(AArch64::X26);
       FuncInfo->MBB->addLiveIn(AArch64::X27);

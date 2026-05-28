@@ -439,6 +439,13 @@ public:
   }
   bool hasSwiftAsyncContext() const { return HasSwiftAsyncContext; }
 
+  void addOxCamlTrapRecoveryEntry(MachineBasicBlock *MBB) {
+    OxCamlTrapRecoveryEntries.insert(MBB);
+  }
+  bool isOxCamlTrapRecoveryEntry(const MachineBasicBlock &MBB) const {
+    return OxCamlTrapRecoveryEntries.contains(&MBB);
+  }
+
   void setSwiftAsyncContextFrameIdx(int FI) {
     SwiftAsyncContextFrameIdx = FI;
   }
@@ -451,6 +458,8 @@ private:
   // Hold the lists of LOHs.
   MILOHContainer LOHContainerSet;
   SetOfInstructions LOHRelated;
+
+  SmallPtrSet<MachineBasicBlock *, 4> OxCamlTrapRecoveryEntries;
 
   SmallVector<std::pair<unsigned, MCSymbol *>, 2> JumpTableEntryInfo;
 };

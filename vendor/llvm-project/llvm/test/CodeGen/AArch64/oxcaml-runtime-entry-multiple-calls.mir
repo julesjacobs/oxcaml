@@ -1,0 +1,75 @@
+# RUN: llc -mtriple=arm64-apple-macosx -run-pass=aarch64-oxcaml-runtime-entry -verify-machineinstrs %s -o - | FileCheck %s
+
+--- |
+  target datalayout = "e-m:o-i64:64-i128:128-n32:64-S128"
+  target triple = "arm64-apple-macosx"
+
+  declare oxcaml_nofpcc { i64, i64, i64 } @callee_first(i64, i64, i64)
+  declare oxcaml_nofpcc { i64, i64, i64 } @callee_second(i64, i64, i64)
+  declare i32 @__gxx_personality_v0(...)
+
+  define oxcaml_nofpcc { i64, i64, i64 } @runtime_entry_clobbers_all_predecessor_calls(i64 %ds, i64 %alloc, i64 %value) gc "oxcaml" personality ptr @__gxx_personality_v0 {
+  entry:
+    ret { i64, i64, i64 } poison
+
+  exn_entry:
+    landingpad token cleanup
+    ret { i64, i64, i64 } poison
+  }
+
+...
+---
+name:            runtime_entry_clobbers_all_predecessor_calls
+alignment:       4
+tracksRegLiveness: true
+registers:
+  - { id: 0, class: gpr64, preferred-register: '' }
+  - { id: 1, class: gpr64, preferred-register: '' }
+  - { id: 2, class: gpr64, preferred-register: '' }
+liveins:
+  - { reg: '$x28', virtual-reg: '%0' }
+  - { reg: '$x27', virtual-reg: '%1' }
+  - { reg: '$x0', virtual-reg: '%2' }
+frameInfo:
+  hasCalls:        true
+body:             |
+  bb.0.entry:
+    successors: %bb.1(0x7ffff800), %bb.2(0x00000800)
+    liveins: $x28, $x27, $x0
+
+    %2:gpr64 = COPY $x0
+    %1:gpr64 = COPY $x27
+    %0:gpr64 = COPY $x28
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    $x28 = COPY %0
+    $x27 = COPY %1
+    $x0 = COPY %2
+    BL @callee_first, csr_aarch64_oxcaml_withoutfp, implicit-def dead $lr, implicit $sp, implicit $x28, implicit $x27, implicit $x0, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0
+    $x28 = COPY %0
+    $x27 = COPY %1
+    $x0 = COPY %2
+    BL @callee_second, csr_aarch64_oxcaml_withoutfp, implicit-def dead $lr, implicit $sp, implicit $x28, implicit $x27, implicit $x0, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    $x28 = COPY %0
+    $x27 = COPY %1
+    $x0 = COPY %2
+    RET_ReallyLR implicit $x28, implicit $x27, implicit $x0
+
+  bb.1:
+    liveins: $x28, $x27, $x0
+
+    RET_ReallyLR implicit $x28, implicit $x27, implicit $x0
+
+  bb.2.exn_entry (machine-block-address-taken, runtime-entered):
+    liveins: $x0, $x26, $x27, $x28
+
+    $x1 = COPY $x0
+    RET_ReallyLR implicit $x28, implicit $x27, implicit $x0
+
+...
+
+# CHECK-LABEL: name: runtime_entry_clobbers_all_predecessor_calls
+# CHECK: BL @callee_first
+# CHECK-SAME: implicit-def dead $x22
+# CHECK: BL @callee_second
+# CHECK-SAME: implicit-def dead $x22

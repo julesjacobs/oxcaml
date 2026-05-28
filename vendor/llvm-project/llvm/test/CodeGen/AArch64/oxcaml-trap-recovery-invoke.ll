@@ -106,5 +106,8 @@ exn_entry:
 ; ASM-NOT: .cfi_personality
 ; ASM: bl _devil_callee
 ; ASM: LBB{{[0-9]+}}_{{[0-9]+}}:
-; ASM: add
+; ASM: sub x9, sp, #16
+; ASM-NEXT: ldr x10, [sp]
+; ASM-NEXT: ldr x29, [sp, #8]
+; ASM-NEXT: add sp, x9, x10
 ; ASM-NOT: __gcc_except_tab
