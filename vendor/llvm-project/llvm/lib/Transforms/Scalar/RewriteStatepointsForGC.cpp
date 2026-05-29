@@ -892,6 +892,150 @@ static void setKnownBase(Value *V, bool IsKnownBase,
   KnownBases[V] = IsKnownBase;
 }
 
+struct OxCamlHeapAddress {
+  Value *Base;
+  Value *Offset;
+};
+
+static std::optional<OxCamlHeapAddress>
+findOxCamlHeapAddress(Value *V, IRBuilder<> &Builder) {
+  const DataLayout &DL = Builder.GetInsertBlock()->getModule()->getDataLayout();
+  Type *IntPtrTy = Builder.getIntNTy(DL.getPointerSizeInBits(1));
+
+  auto NormalizeOffset = [&](Value *Offset) -> Value * {
+    if (Offset->getType() == IntPtrTy)
+      return Offset;
+    return Builder.CreateIntCast(Offset, IntPtrTy, false,
+                                 "oxcaml.heap.addr.offset.cast");
+  };
+
+  auto WithOffset = [&](OxCamlHeapAddress Addr, Value *Offset,
+                        Instruction::BinaryOps Op) {
+    Offset = NormalizeOffset(Offset);
+    Value *NewOffset = nullptr;
+    if (Op == Instruction::Add)
+      NewOffset = Builder.CreateAdd(Addr.Offset, Offset,
+                                    "oxcaml.heap.addr.offset");
+    else {
+      assert(Op == Instruction::Sub);
+      NewOffset = Builder.CreateSub(Addr.Offset, Offset,
+                                    "oxcaml.heap.addr.offset");
+    }
+    return std::optional<OxCamlHeapAddress>(
+        OxCamlHeapAddress{Addr.Base, NewOffset});
+  };
+
+  auto RebuildFromPtr =
+      [&](auto &&SelfPtr, auto &&SelfInt,
+          Value *Ptr) -> std::optional<OxCamlHeapAddress> {
+    auto *PtrTy = dyn_cast<PointerType>(Ptr->getType());
+    if (!PtrTy)
+      return std::nullopt;
+
+    if (auto *ASC = dyn_cast<AddrSpaceCastInst>(Ptr))
+      return SelfPtr(SelfPtr, SelfInt, ASC->getPointerOperand());
+
+    if (auto *I2P = dyn_cast<IntToPtrInst>(Ptr))
+      return SelfInt(SelfPtr, SelfInt, I2P->getOperand(0));
+
+    if (auto *GEP = dyn_cast<GetElementPtrInst>(Ptr)) {
+      auto Addr = SelfPtr(SelfPtr, SelfInt, GEP->getPointerOperand());
+      if (!Addr)
+        return std::nullopt;
+      APInt Offset(DL.getIndexSizeInBits(PtrTy->getAddressSpace()), 0);
+      if (!GEP->accumulateConstantOffset(DL, Offset))
+        return std::nullopt;
+      return WithOffset(*Addr, ConstantInt::get(IntPtrTy, Offset),
+                        Instruction::Add);
+    }
+
+    if (PtrTy->getAddressSpace() == 1)
+      return OxCamlHeapAddress{Ptr, ConstantInt::get(IntPtrTy, 0)};
+
+    return std::nullopt;
+  };
+
+  auto RebuildFromInt =
+      [&](auto &&SelfPtr, auto &&SelfInt,
+          Value *IntV) -> std::optional<OxCamlHeapAddress> {
+    if (auto *P2I = dyn_cast<PtrToIntInst>(IntV)) {
+      auto Addr = SelfPtr(SelfPtr, SelfInt, P2I->getPointerOperand());
+      if (!Addr)
+        return std::nullopt;
+      Addr->Offset = NormalizeOffset(Addr->Offset);
+      return Addr;
+    }
+
+    auto *BO = dyn_cast<BinaryOperator>(IntV);
+    if (!BO)
+      return std::nullopt;
+
+    if (BO->getOpcode() == Instruction::Add) {
+      if (auto Left = SelfInt(SelfPtr, SelfInt, BO->getOperand(0)))
+        return WithOffset(*Left, BO->getOperand(1), Instruction::Add);
+      if (auto Right = SelfInt(SelfPtr, SelfInt, BO->getOperand(1)))
+        return WithOffset(*Right, BO->getOperand(0), Instruction::Add);
+      return std::nullopt;
+    }
+
+    if (BO->getOpcode() == Instruction::Sub)
+      if (auto Left = SelfInt(SelfPtr, SelfInt, BO->getOperand(0)))
+        return WithOffset(*Left, BO->getOperand(1), Instruction::Sub);
+
+    return std::nullopt;
+  };
+
+  return RebuildFromPtr(RebuildFromPtr, RebuildFromInt, V);
+}
+
+static bool canonicalizeOxCamlRawHeapMemoryAddresses(Function &F) {
+  if (!F.hasGC() || F.getGC() != "oxcaml")
+    return false;
+
+  bool Changed = false;
+  SmallVector<Instruction *, 32> MemoryInsts;
+  for (Instruction &I : instructions(F))
+    if (isa<LoadInst>(I) || isa<StoreInst>(I) || isa<AtomicRMWInst>(I) ||
+        isa<AtomicCmpXchgInst>(I))
+      MemoryInsts.push_back(&I);
+
+  for (Instruction *I : MemoryInsts) {
+    auto GetPointerOperand = [&]() -> std::pair<Value *, unsigned> {
+      if (auto *LI = dyn_cast<LoadInst>(I))
+        return {LI->getPointerOperand(), LoadInst::getPointerOperandIndex()};
+      if (auto *SI = dyn_cast<StoreInst>(I))
+        return {SI->getPointerOperand(), StoreInst::getPointerOperandIndex()};
+      if (auto *RMW = dyn_cast<AtomicRMWInst>(I))
+        return {RMW->getPointerOperand(),
+                AtomicRMWInst::getPointerOperandIndex()};
+      auto *CXI = cast<AtomicCmpXchgInst>(I);
+      return {CXI->getPointerOperand(),
+              AtomicCmpXchgInst::getPointerOperandIndex()};
+    };
+
+    auto [Ptr, OperandNo] = GetPointerOperand();
+    auto *PtrTy = dyn_cast<PointerType>(Ptr->getType());
+    if (!PtrTy || PtrTy->getAddressSpace() != 0)
+      continue;
+    IRBuilder<> Builder(I);
+    std::optional<OxCamlHeapAddress> Addr =
+        findOxCamlHeapAddress(Ptr, Builder);
+    if (!Addr)
+      continue;
+
+    Value *NewPtr = Addr->Base;
+    auto *OffsetCI = dyn_cast<ConstantInt>(Addr->Offset);
+    if (!OffsetCI || !OffsetCI->isZero())
+      NewPtr = Builder.CreateGEP(Builder.getInt8Ty(), Addr->Base,
+                                 Addr->Offset, "oxcaml.heap.addr");
+
+    I->setOperand(OperandNo, NewPtr);
+    Changed = true;
+  }
+
+  return Changed;
+}
+
 // Returns true if First and Second values are both scalar or both vector.
 static bool areBothVectorOrScalar(Value *First, Value *Second) {
   return isa<VectorType>(First->getType()) ==
@@ -1662,6 +1806,8 @@ static bool isOxCamlRecoveryBlockStart(BasicBlock &BB,
       SawLandingPad = true;
       continue;
     }
+    if (SawLandingPad && isa<AddrSpaceCastInst>(I))
+      continue;
     return &I == Recover;
   }
   return false;
@@ -1699,6 +1845,19 @@ static bool isBranchOnlyOxCamlRecoveryLandingPad(BasicBlock *BB,
 struct OxCamlRecoveryStoreSite {
   InvokeInst *Invoke;
   BasicBlock *PhiIncomingBlock;
+};
+
+struct OxCamlRecoveryBoundaryPhi {
+  PHINode *Phi;
+  unsigned IncomingIndex;
+  BasicBlock *IncomingBlock;
+  Value *IncomingValue;
+};
+
+struct OxCamlRecoveryBoundaryUse {
+  BasicBlock *IncomingBlock;
+  BasicBlock *BoundaryBlock;
+  Value *Value;
 };
 
 static bool
@@ -1780,6 +1939,156 @@ static BasicBlock *getOxCamlTrapRecoveryTargetShapeOnly(BasicBlock *BB) {
   return getOxCamlTrapRecoveryTargetShapeOnly(BB, Visited);
 }
 
+static bool isUnsupportedNestedOxCamlRecoveryInstruction(Instruction &I) {
+  auto *II = dyn_cast<IntrinsicInst>(&I);
+  if (!II)
+    return false;
+
+  switch (II->getIntrinsicID()) {
+  case Intrinsic::aarch64_oxcaml_push_trap:
+    return true;
+  default:
+    return false;
+  }
+}
+
+static bool isOxCamlExceptionRootLoad(Value *V) {
+  auto *LI = dyn_cast<LoadInst>(V);
+  return LI && LI->getMetadata("oxcaml.exnroot.load");
+}
+
+static Value *getOxCamlRecoveryGCPointer(Value *V) {
+  if (isHandledGCPointerType(V->getType()))
+    return V;
+
+  auto *ASC = dyn_cast<AddrSpaceCastInst>(V);
+  if (!ASC)
+    return nullptr;
+
+  Value *Base = ASC->getPointerOperand();
+  if (!isHandledGCPointerType(Base->getType()))
+    return nullptr;
+
+  return Base;
+}
+
+static bool collectStrictOxCamlRecoveryOnlyRegion(
+    BasicBlock &RecoveryBB, IntrinsicInst &Recover,
+    SmallPtrSetImpl<BasicBlock *> &Region,
+    SmallVectorImpl<OxCamlRecoveryBoundaryPhi> &BoundaryPhis,
+    SmallVectorImpl<OxCamlRecoveryBoundaryUse> &BoundaryUses) {
+  SmallVector<BasicBlock *, 8> Worklist;
+  Region.insert(&RecoveryBB);
+  Worklist.push_back(&RecoveryBB);
+
+  while (!Worklist.empty()) {
+    BasicBlock *BB = Worklist.pop_back_val();
+
+    if (BB != &RecoveryBB) {
+      for (Instruction &I : *BB) {
+        if (isa<PHINode>(I) || I.isDebugOrPseudoInst())
+          continue;
+        if (isa<LandingPadInst>(I) ||
+            isUnsupportedNestedOxCamlRecoveryInstruction(I))
+          return false;
+      }
+    }
+
+    for (BasicBlock *Succ : successors(BB)) {
+      if (Region.contains(Succ))
+        continue;
+
+      bool AllPredsInRegion = true;
+      if (Succ->getLandingPadInst())
+        AllPredsInRegion = false;
+      for (BasicBlock *Pred : predecessors(Succ)) {
+        if (!Region.contains(Pred)) {
+          AllPredsInRegion = false;
+          break;
+        }
+      }
+
+      if (AllPredsInRegion) {
+        Region.insert(Succ);
+        Worklist.push_back(Succ);
+        continue;
+      }
+
+      for (PHINode &PN : Succ->phis()) {
+        for (unsigned I = 0, E = PN.getNumIncomingValues(); I != E; ++I) {
+          if (PN.getIncomingBlock(I) != BB)
+            continue;
+          Value *Incoming = PN.getIncomingValue(I);
+          if (!isHandledGCPointerType(Incoming->getType()) ||
+              isa<Constant>(Incoming) || isOxCamlExceptionRootLoad(Incoming))
+            continue;
+          BoundaryPhis.push_back({&PN, I, BB, Incoming});
+        }
+      }
+
+      for (Instruction &I : *Succ) {
+        if (isa<PHINode>(I))
+          continue;
+        if (I.isDebugOrPseudoInst())
+          continue;
+        for (Use &U : I.operands()) {
+          Value *V = getOxCamlRecoveryGCPointer(U.get());
+          if (!V)
+            continue;
+          if (!isHandledGCPointerType(V->getType()) || isa<Constant>(V) ||
+              isOxCamlExceptionRootLoad(V))
+            continue;
+          if (auto *VI = dyn_cast<Instruction>(V))
+            if (Region.contains(VI->getParent()) || VI->getParent() == Succ)
+              continue;
+          bool Seen = false;
+          for (const OxCamlRecoveryBoundaryUse &BoundaryUse : BoundaryUses) {
+            if (BoundaryUse.IncomingBlock == BB &&
+                BoundaryUse.BoundaryBlock == Succ &&
+                BoundaryUse.Value == V) {
+              Seen = true;
+              break;
+            }
+          }
+          if (!Seen)
+            BoundaryUses.push_back({BB, Succ, V});
+        }
+      }
+    }
+  }
+
+  (void)Recover;
+  return true;
+}
+
+static void collectOxCamlRecoveryRegionLiveGCValues(
+    BasicBlock &RecoveryBB, IntrinsicInst &Recover,
+    const SmallPtrSetImpl<BasicBlock *> &Region,
+    SmallVectorImpl<Value *> &LiveGCValues, DenseSet<Value *> &Seen) {
+  for (BasicBlock *BB : Region) {
+    for (Instruction &I : *BB) {
+      if (isa<PHINode>(I) || I.isDebugOrPseudoInst())
+        continue;
+      if (BB == &RecoveryBB && !Recover.comesBefore(&I))
+        continue;
+
+      for (Use &U : I.operands()) {
+        Value *V = getOxCamlRecoveryGCPointer(U.get());
+        if (!V)
+          continue;
+        if (!isHandledGCPointerType(V->getType()) || isa<Constant>(V) ||
+            isOxCamlExceptionRootLoad(V))
+          continue;
+        if (auto *VI = dyn_cast<Instruction>(V))
+          if (Region.contains(VI->getParent()))
+            continue;
+        if (Seen.insert(V).second)
+          LiveGCValues.push_back(V);
+      }
+    }
+  }
+}
+
 static Value *nonPoisonTrapRecoverySlotValue(Value *V) {
   Type *Ty = V->getType();
   if (!isa<UndefValue>(V) && !isa<PoisonValue>(V))
@@ -1788,6 +2097,71 @@ static Value *nonPoisonTrapRecoverySlotValue(Value *V) {
   if (isHandledGCPointerType(Ty))
     return getOxCamlNonMovingImmediate(Ty);
   return Constant::getNullValue(Ty);
+}
+
+static bool isRootableOxCamlExceptionValue(Value *V,
+                                           DenseMap<Value *, bool> &Cache,
+                                           SmallPtrSetImpl<Value *> &Visiting) {
+  if (!isHandledGCPointerType(V->getType()))
+    return false;
+
+  auto Cached = Cache.find(V);
+  if (Cached != Cache.end())
+    return Cached->second;
+
+  if (isa<Constant>(V) || isa<Argument>(V) || isa<LoadInst>(V) ||
+      isa<ExtractValueInst>(V) || isa<CallInst>(V) || isa<InvokeInst>(V) ||
+      isa<AtomicCmpXchgInst>(V)) {
+    Cache[V] = true;
+    return true;
+  }
+
+  if (!Visiting.insert(V).second)
+    return true;
+
+  auto Finish = [&](bool Result) {
+    Visiting.erase(V);
+    Cache[V] = Result;
+    return Result;
+  };
+
+  if (auto *PN = dyn_cast<PHINode>(V)) {
+    for (Value *Incoming : PN->incoming_values()) {
+      if (isa<PoisonValue>(Incoming) || isa<UndefValue>(Incoming))
+        continue;
+      if (!isRootableOxCamlExceptionValue(Incoming, Cache, Visiting))
+        return Finish(false);
+    }
+    return Finish(true);
+  }
+
+  if (auto *SI = dyn_cast<SelectInst>(V)) {
+    return Finish(isRootableOxCamlExceptionValue(SI->getTrueValue(), Cache,
+                                                 Visiting) &&
+                  isRootableOxCamlExceptionValue(SI->getFalseValue(), Cache,
+                                                 Visiting));
+  }
+
+  if (auto *Freeze = dyn_cast<FreezeInst>(V))
+    return Finish(isRootableOxCamlExceptionValue(Freeze->getOperand(0), Cache,
+                                                 Visiting));
+
+  if (isa<IntToPtrInst>(V)) {
+    Cache[V] = true;
+    Visiting.erase(V);
+    return true;
+  }
+
+  if (auto *CI = dyn_cast<CastInst>(V)) {
+    Value *Def = CI->stripPointerCasts();
+    if (Def == V)
+      return Finish(false);
+    if (Def->getType() != V->getType())
+      return Finish(false);
+    return Finish(isRootableOxCamlExceptionValue(Def, Cache, Visiting));
+  }
+
+  return Finish(false);
 }
 
 static bool materializeOxCamlExceptionRootSlots(
@@ -1802,6 +2176,8 @@ static bool materializeOxCamlExceptionRootSlots(
   SmallVector<PHINode *, 8> HandlerLivePhis;
   SmallVector<Value *, 8> HandlerLiveGCValues;
   DenseSet<Value *> SeenHandlerLiveGCValues;
+  SmallVector<OxCamlRecoveryBoundaryPhi, 8> BoundaryPhis;
+  SmallVector<OxCamlRecoveryBoundaryUse, 8> BoundaryUses;
 
   for (BasicBlock &BB : F) {
     IntrinsicInst *Recover = getOxCamlTrapRecover(BB);
@@ -1827,7 +2203,9 @@ static bool materializeOxCamlExceptionRootSlots(
         continue;
 
       for (Use &U : I.operands()) {
-        Value *V = U.get();
+        Value *V = getOxCamlRecoveryGCPointer(U.get());
+        if (!V)
+          continue;
         if (!isHandledGCPointerType(V->getType()) || isa<Constant>(V))
           continue;
         if (auto *VI = dyn_cast<Instruction>(V))
@@ -1838,16 +2216,38 @@ static bool materializeOxCamlExceptionRootSlots(
       }
     }
 
-    if (HandlerLivePhis.empty() && HandlerLiveGCValues.empty())
-      continue;
-
-    auto IsBaseValue = [&](Value *V) {
-      return findBasePointer(V, DVCache, KnownBases) == V;
+    DenseMap<Value *, bool> RootableExceptionValueCache;
+    SmallPtrSet<Value *, 8> VisitingRootableExceptionValue;
+    auto IsRootableExceptionValue = [&](Value *V) {
+      return isRootableOxCamlExceptionValue(V, RootableExceptionValueCache,
+                                            VisitingRootableExceptionValue);
     };
+
+    BoundaryPhis.clear();
+    BoundaryUses.clear();
+    SmallPtrSet<BasicBlock *, 8> RecoveryOnlyRegion;
+    bool HasStrictRecoveryOnlyRegion =
+        collectStrictOxCamlRecoveryOnlyRegion(BB, *Recover,
+                                              RecoveryOnlyRegion,
+                                              BoundaryPhis, BoundaryUses);
+    if (HasStrictRecoveryOnlyRegion)
+      collectOxCamlRecoveryRegionLiveGCValues(
+          BB, *Recover, RecoveryOnlyRegion, HandlerLiveGCValues,
+          SeenHandlerLiveGCValues);
+    else {
+      RecoveryOnlyRegion.clear();
+      RecoveryOnlyRegion.insert(&BB);
+      BoundaryPhis.clear();
+      BoundaryUses.clear();
+    }
+
+    if (HandlerLivePhis.empty() && HandlerLiveGCValues.empty() &&
+        BoundaryPhis.empty() && BoundaryUses.empty())
+      continue;
 
     bool CanMaterializeWholeBlock = true;
     for (Value *V : HandlerLiveGCValues)
-      if (!IsBaseValue(V))
+      if (!IsRootableExceptionValue(V))
         CanMaterializeWholeBlock = false;
     if (!CanMaterializeWholeBlock)
       continue;
@@ -1863,6 +2263,10 @@ static bool materializeOxCamlExceptionRootSlots(
               suffixed_name_or(HandlerValue, ".exnroot", "exnroot"));
           Slot->setAlignment(DL.getABITypeAlign(HandlerValue->getType()));
           bool IsGCRoot = isHandledGCPointerType(HandlerValue->getType());
+          EntryBuilder.CreateAlignedStore(
+              IsGCRoot ? getOxCamlNonMovingImmediate(HandlerValue->getType())
+                       : Constant::getNullValue(HandlerValue->getType()),
+              Slot, DL.getABITypeAlign(HandlerValue->getType()));
 
           SmallVector<OxCamlRecoveryStoreSite, 8> StoreSites;
           if (&StoreSiteBB == &BB) {
@@ -1899,6 +2303,8 @@ static bool materializeOxCamlExceptionRootSlots(
               DL.getABITypeAlign(HandlerValue->getType()),
               suffixed_name_or(HandlerValue, ".exnroot.load",
                                "exnroot.load"));
+          Load->setMetadata("oxcaml.exnroot.load",
+                            MDNode::get(F.getContext(), {}));
           return Load;
         };
 
@@ -1922,12 +2328,105 @@ static bool materializeOxCamlExceptionRootSlots(
       LoadInst *Load =
           MaterializeRootSlot(V, BB,
                               [&](OxCamlRecoveryStoreSite) { return V; });
-      for (Instruction &I : BB) {
-        if (!Recover->comesBefore(&I) || &I == Load)
-          continue;
-        I.replaceUsesOfWith(V, Load);
+      for (BasicBlock *RegionBB : RecoveryOnlyRegion) {
+        for (Instruction &I : *RegionBB) {
+          if (RegionBB == &BB && !Recover->comesBefore(&I))
+            continue;
+          if (&I == Load)
+            continue;
+          I.replaceUsesOfWith(V, Load);
+        }
+      }
+
+      SmallVector<AddrSpaceCastInst *, 4> CastsToRebuild;
+      SmallPtrSet<AddrSpaceCastInst *, 4> SeenCastsToRebuild;
+      for (BasicBlock *RegionBB : RecoveryOnlyRegion) {
+        for (Instruction &I : *RegionBB) {
+          if (RegionBB == &BB && !Recover->comesBefore(&I))
+            continue;
+          for (Use &U : I.operands()) {
+            auto *ASC = dyn_cast<AddrSpaceCastInst>(U.get());
+            if (!ASC || ASC->getPointerOperand() != V)
+              continue;
+            if (auto *CastParent = ASC->getParent())
+              if (RecoveryOnlyRegion.contains(CastParent) &&
+                  (CastParent != &BB || Recover->comesBefore(ASC)))
+                continue;
+            if (SeenCastsToRebuild.insert(ASC).second)
+              CastsToRebuild.push_back(ASC);
+          }
+        }
+      }
+      for (AddrSpaceCastInst *ASC : CastsToRebuild) {
+        IRBuilder<> CastBuilder(Load->getNextNode());
+        Value *RecoveredCast =
+            CastBuilder.CreateAddrSpaceCast(Load, ASC->getType(),
+                                            suffixed_name_or(
+                                                ASC, ".exnroot.cast",
+                                                "exnroot.cast"));
+        for (Use &U : make_early_inc_range(ASC->uses())) {
+          auto *UserI = dyn_cast<Instruction>(U.getUser());
+          if (!UserI || !RecoveryOnlyRegion.contains(UserI->getParent()))
+            continue;
+          if (UserI->getParent() == &BB && !Recover->comesBefore(UserI))
+            continue;
+          U.set(RecoveredCast);
+        }
       }
       Changed = true;
+    }
+
+    if (HasStrictRecoveryOnlyRegion) {
+      for (OxCamlRecoveryBoundaryUse &BoundaryUse : BoundaryUses) {
+        Value *V = BoundaryUse.Value;
+        if (!IsRootableExceptionValue(V))
+          report_fatal_error("derived GC value escapes OxCaml recovery path");
+
+        LoadInst *Load =
+            MaterializeRootSlot(V, BB, [&](OxCamlRecoveryStoreSite) { return V; });
+        Load->moveBefore(BoundaryUse.IncomingBlock->getTerminator());
+
+        PHINode *Selector = PHINode::Create(
+            V->getType(), pred_size(BoundaryUse.BoundaryBlock),
+            suffixed_name_or(V, ".exnroot.select", "exnroot.select"),
+            BoundaryUse.BoundaryBlock->getFirstNonPHI());
+        for (BasicBlock *Pred : predecessors(BoundaryUse.BoundaryBlock))
+          Selector->addIncoming(Pred == BoundaryUse.IncomingBlock ? Load : V,
+                                Pred);
+
+        SmallVector<Use *, 8> UsesToReplace;
+        for (Use &U : V->uses()) {
+          auto *UserI = dyn_cast<Instruction>(U.getUser());
+          if (!UserI || UserI == Selector)
+            continue;
+          if (isa<PHINode>(UserI))
+            continue;
+          if (DT.dominates(Selector, UserI))
+            UsesToReplace.push_back(&U);
+        }
+        for (Use *U : UsesToReplace)
+          U->set(Selector);
+
+        Changed = true;
+      }
+
+      for (OxCamlRecoveryBoundaryPhi &BoundaryPhi : BoundaryPhis) {
+        Value *Incoming = BoundaryPhi.IncomingValue;
+        if (BoundaryPhi.Phi->getIncomingValue(BoundaryPhi.IncomingIndex) !=
+            Incoming)
+          continue;
+        if (auto *IncomingInst = dyn_cast<Instruction>(Incoming))
+          if (RecoveryOnlyRegion.contains(IncomingInst->getParent()))
+            continue;
+        if (!IsRootableExceptionValue(Incoming))
+          report_fatal_error("derived GC value escapes OxCaml recovery path");
+
+        LoadInst *Load = MaterializeRootSlot(
+            Incoming, BB, [&](OxCamlRecoveryStoreSite) { return Incoming; });
+        Load->moveBefore(BoundaryPhi.IncomingBlock->getTerminator());
+        BoundaryPhi.Phi->setIncomingValue(BoundaryPhi.IncomingIndex, Load);
+        Changed = true;
+      }
     }
   }
 
@@ -1984,6 +2483,31 @@ static bool appendExplicitRootSlotsToStatepoints(
     Changed = true;
   }
   return Changed;
+}
+
+static void collectExplicitRootSlots(const ExplicitRootSlotMapTy &RootSlots,
+                                     SmallVectorImpl<Value *> &Slots) {
+  SmallPtrSet<Value *, 16> Seen;
+  for (const auto &Pair : RootSlots)
+    for (Value *Slot : Pair.second)
+      if (Seen.insert(Slot).second)
+        Slots.push_back(Slot);
+}
+
+static bool appendExplicitRootSlotsToAllStatepoints(
+    Function &F, ArrayRef<Value *> Slots) {
+  if (Slots.empty())
+    return false;
+
+  ExplicitRootSlotMapTy RootSlotsForStatepoints;
+  for (Instruction &I : instructions(F)) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (!Call || !isa<GCStatepointInst>(Call))
+      continue;
+    llvm::append_range(RootSlotsForStatepoints[Call], Slots);
+  }
+
+  return appendExplicitRootSlotsToStatepoints(RootSlotsForStatepoints);
 }
 
 // List of all function attributes which must be stripped when lowering from
@@ -3443,6 +3967,8 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
   materializeOxCamlExceptionRootSlots(F, DT, ExplicitRootSlots,
                                       ExplicitExceptionRootCalls, DVCache,
                                       KnownBases);
+  SmallVector<Value *, 16> AllExplicitRootSlots;
+  collectExplicitRootSlots(ExplicitRootSlots, AllExplicitRootSlots);
   if (isOxCamlFunction(F)) {
     for (CallBase *Call : ToUpdate) {
       auto *II = dyn_cast<InvokeInst>(Call);
@@ -3489,9 +4015,15 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
 
   SmallVector<PartiallyConstructedSafepointRecord, 64> Records(ToUpdate.size());
   for (size_t I = 0; I < ToUpdate.size(); ++I) {
+    llvm::append_range(Records[I].ExplicitRootSlots, AllExplicitRootSlots);
     auto SlotIt = ExplicitRootSlots.find(ToUpdate[I]);
-    if (SlotIt != ExplicitRootSlots.end())
-      Records[I].ExplicitRootSlots = SlotIt->second;
+    if (SlotIt != ExplicitRootSlots.end()) {
+      SmallPtrSet<Value *, 16> Seen(Records[I].ExplicitRootSlots.begin(),
+                                    Records[I].ExplicitRootSlots.end());
+      for (Value *Slot : SlotIt->second)
+        if (Seen.insert(Slot).second)
+          Records[I].ExplicitRootSlots.push_back(Slot);
+    }
     Records[I].UsesExplicitExceptionRoots =
         ExplicitExceptionRootCalls.contains(ToUpdate[I]);
   }
@@ -3680,7 +4212,10 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
   bool ChangedLateRoots = materializeOxCamlExceptionRootSlots(
       F, DT, LateExplicitRootSlots, LateExplicitExceptionRootCalls, DVCache,
       KnownBases);
-  ChangedLateRoots |= appendExplicitRootSlotsToStatepoints(LateExplicitRootSlots);
+  SmallVector<Value *, 16> LateAllExplicitRootSlots;
+  collectExplicitRootSlots(LateExplicitRootSlots, LateAllExplicitRootSlots);
+  ChangedLateRoots |=
+      appendExplicitRootSlotsToAllStatepoints(F, LateAllExplicitRootSlots);
   return !Records.empty() || ChangedLateRoots;
 }
 
@@ -3984,6 +4519,8 @@ bool RewriteStatepointsForGC::runOnFunction(Function &F, DominatorTree &DT,
     // Inline @gc.get.pointer.base() and @gc.get.pointer.offset() before finding
     // live references.
     MadeChange |= inlineGetBaseAndOffset(F, Intrinsics, DVCache, KnownBases);
+
+  MadeChange |= canonicalizeOxCamlRawHeapMemoryAddresses(F);
 
   if (!ParsePointNeeded.empty())
     MadeChange |=
