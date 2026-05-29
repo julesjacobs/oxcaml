@@ -833,3 +833,73 @@ Interpretation:
   `closure_call_in_try_hit` improved from `1.334` to `1.183`.
 - The remaining representative slowdowns are mostly string/helper-heavy shapes
   and one layered environment lookup shape, not the old `_wrap_try` path.
+
+## Raw Heap Address Canonicalization, 2026-05-29
+
+Validation:
+
+- LLVM checks:
+  - `vendor/llvm-project/llvm/test/Transforms/RewriteStatepointsForGC/oxcaml-raw-heap-addresses.ll`
+  - `vendor/llvm-project/llvm/test/Transforms/RewriteStatepointsForGC/oxcaml-explicit-exception-roots.ll`
+- Focused LLVM-backend suites:
+  - `typing-layouts-iarrays`: 81 passed, 0 failed.
+  - `llvm-codegen`: 89 passed, 3 skipped, 0 failed.
+- Full LLVM-backend suite:
+  `agent-state/llvm-fast-path-roots-integration/full_suite_after_raw_heap_canonicalization_20260529_140100.log`,
+  6743 passed, 296 skipped, 0 failed.
+- Full self-stage2 validation:
+  `agent-state/llvm-fast-path-roots-integration/stage2_after_raw_heap_canonicalization_20260529_140725.log`,
+  6717 passed, 283 skipped, 0 failed.
+
+Representative microbenchmarks:
+
+- Summary:
+  `agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/summary_after_raw_heap_canonicalization_20260529_142901.json`
+- Log:
+  `agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/run_after_raw_heap_canonicalization_20260529_142901.log`
+- Aggregate across 43 cases: geomean `0.8144`, median `0.9588`, min
+  `0.2830`, max `1.0702`.
+
+Worst representative microbenchmark slowdowns:
+
+| case | LLVM/native |
+| --- | ---: |
+| `ref_option_churn` | 1.070 |
+| `env_find_same_layered_hit` | 1.068 |
+| `record_mutate_old_to_young` | 1.061 |
+| `env_find_same_layered_one_node` | 1.032 |
+| `closure_call_in_try_hit` | 1.021 |
+| `array_binary_search_string` | 1.020 |
+| `try_raise_cross_function_caught` | 1.010 |
+| `list_lookup_string_compare` | 1.002 |
+
+Compiler-binary benchmark:
+
+- Summary:
+  `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/summary_after_raw_heap_canonicalization_20260529_143216.json`
+- Log:
+  `agent-state/llvm-fast-path-roots-integration/compiler_binary_bench/run_after_raw_heap_canonicalization_20260529_143216.log`
+- Compared `_native_install` with `_llvm_self_stage2_install` using 7 pairs.
+- Aggregate geomean `0.9866`, median `0.9849`, min `0.9709`, max `1.0022`.
+
+Compiler-binary per-file medians:
+
+| file | native | LLVM | LLVM/native |
+| --- | ---: | ---: | ---: |
+| `env.ml` | 1.4928s | 1.4679s | 0.983 |
+| `ctype.ml` | 2.2723s | 2.2379s | 0.985 |
+| `typecore.ml` | 4.3947s | 4.3272s | 0.985 |
+| `translcore.ml` | 1.1855s | 1.1734s | 0.990 |
+| `typemod.ml` | 1.3293s | 1.3098s | 0.985 |
+| `cfg_to_linear.ml` | 0.1564s | 0.1567s | 1.002 |
+| `cfg_selectgen.ml` | 0.5008s | 0.4862s | 0.971 |
+| `llvmize.ml` | 1.4609s | 1.4311s | 0.980 |
+| `regalloc_irc.ml` | 0.2951s | 0.2949s | 0.999 |
+
+Interpretation:
+
+- The raw heap-address canonicalization fixed stale unrooted copies produced by
+  raw `addrspace(0)` heap addresses that survived across statepoints.
+- The remaining benchmark picture is now near parity or faster for this
+  benchmark set. The compiler-binary max slowdown in this run is
+  `cfg_to_linear.ml` at `1.002x`.
