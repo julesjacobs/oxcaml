@@ -52,6 +52,13 @@ def executable_info(path: Path) -> dict:
     }
 
 
+def payload_path(path: Path) -> Path:
+    payload = path.with_name(path.name + ".real")
+    if payload.exists():
+        return payload
+    return path.resolve()
+
+
 def read_ocamlparam_from_log(log_path: Path) -> str | None:
     with log_path.open() as f:
         for line in f:
@@ -208,6 +215,15 @@ def main() -> None:
     )
     parser.add_argument("--llvm-build", type=Path, default=ROOT / "_llvm_self_stage_main_build")
     parser.add_argument("--llvm-install", type=Path, default=ROOT / "_llvm_self_stage_install")
+    parser.add_argument(
+        "--time-wrapper",
+        action="store_true",
+        help=(
+            "Time the installed ocamlopt.opt command itself. By default the "
+            "benchmark times ocamlopt.opt.real when present, so shell wrapper "
+            "startup does not pollute compiler-code measurements."
+        ),
+    )
     args = parser.parse_args()
 
     native_build = args.native_build
@@ -237,6 +253,12 @@ def main() -> None:
         native_lib=native_lib,
         llvm_lib=llvm_lib,
     )
+    timed_native_compiler = (
+        native_compiler.resolve() if args.time_wrapper else payload_path(native_compiler)
+    )
+    timed_llvm_compiler = (
+        llvm_compiler.resolve() if args.time_wrapper else payload_path(llvm_compiler)
+    )
 
     out_dir = args.out_dir
     if not out_dir.is_absolute():
@@ -256,14 +278,14 @@ def main() -> None:
         native_cwd, native_cmd = command_for(
             log_path=native_log,
             build_dir=native_build,
-            compiler=native_compiler,
+            compiler=timed_native_compiler,
             module=module,
             output_dir=native_out,
         )
         llvm_cwd, llvm_cmd = command_for(
             log_path=llvm_log,
             build_dir=llvm_build,
-            compiler=llvm_compiler,
+            compiler=timed_llvm_compiler,
             module=module,
             output_dir=llvm_out,
         )
@@ -271,8 +293,17 @@ def main() -> None:
         native_times = []
         llvm_times = []
         for pair in range(args.pairs):
-            native_time = run_one(native_cwd, native_cmd, native_lib)
-            llvm_time = run_one(llvm_cwd, llvm_cmd, llvm_lib)
+            times = {}
+            commands = [
+                ("native", native_cwd, native_cmd, native_lib),
+                ("llvm", llvm_cwd, llvm_cmd, llvm_lib),
+            ]
+            if pair % 2 == 1:
+                commands.reverse()
+            for mode, cwd, cmd, lib in commands:
+                times[mode] = run_one(cwd, cmd, lib)
+            native_time = times["native"]
+            llvm_time = times["llvm"]
             native_times.append(native_time)
             llvm_times.append(llvm_time)
             ratio = llvm_time / native_time
@@ -303,6 +334,9 @@ def main() -> None:
         "llvm_install": str(llvm_install),
         "native_compiler": str(native_compiler),
         "llvm_compiler": str(llvm_compiler),
+        "time_wrapper": args.time_wrapper,
+        "timed_native_compiler": str(timed_native_compiler),
+        "timed_llvm_compiler": str(timed_llvm_compiler),
         "inputs": input_info,
         "results": results,
         "geomean_ratio": geomean(ratios),
