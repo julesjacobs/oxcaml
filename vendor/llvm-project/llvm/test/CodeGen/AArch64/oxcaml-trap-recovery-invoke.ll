@@ -86,10 +86,10 @@ exn_entry:
 
 ; MIR-LABEL: name: single_invoke_trap_recovery
 ; MIR: BL @devil_callee
-; MIR: bb.{{[0-9]+}}.exn_entry (machine-block-address-taken, ir-block-address-taken %ir-block.exn_entry, runtime-entered):
+; MIR: bb.{{[0-9]+}}.exn_entry (machine-block-address-taken, ir-block-address-taken %ir-block.exn_entry, {{(landing-pad, )?}}runtime-entered):
 ; MIR-NEXT: successors:
 ; MIR-NEXT: liveins: $x0, $x26, $x27, $x28
-; MIR-NOT: EH_LABEL
+; MIR: EH_LABEL
 
 ; MIR-LABEL: name: branched_invoke_trap_recovery
 ; MIR: bb.{{[0-9]+}}.try_left:
@@ -98,7 +98,7 @@ exn_entry:
 ; MIR: bb.{{[0-9]+}}.try_right:
 ; MIR: successors: {{.*}}%bb.[[RECOVERY]]
 ; MIR: BL @devil_callee
-; MIR: bb.[[RECOVERY]].exn_entry (machine-block-address-taken, ir-block-address-taken %ir-block.exn_entry, runtime-entered):
+; MIR: bb.[[RECOVERY]].exn_entry (machine-block-address-taken, ir-block-address-taken %ir-block.exn_entry, {{(landing-pad, )?}}runtime-entered):
 ; MIR-NEXT: successors:
 ; MIR-NEXT: liveins: $x0, $x26, $x27, $x28
 

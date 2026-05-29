@@ -175,19 +175,28 @@ static unsigned mapLLVMDwarfRegToOxCamlIndex(const Module &M,
   }
 }
 
-// note that although `StackMaps` keeps `ID` as a 64-bit integer, anything
-// above 32 bits gets truncated, so we can't use them.
+static uint64_t stackOffsetOfID(uint64_t ID, bool IsAArch64) {
+  uint64_t Mask = IsAArch64 ? ~15ull : ~1ull;
+  return ID & ((1ull << 16) - 1) & Mask;
+}
 
-static uint64_t stackOffsetOfID(uint64_t ID) {
-  return ID & ((1ull << 16) - 1) & ~(1ull);
+static uint64_t activeTrapBytesOfID(uint64_t ID, bool IsAArch64) {
+  if (!IsAArch64)
+    return 0;
+  return ((ID >> 1) & 7ull) * 16;
 }
 
 static uint64_t allocSizeOfID(uint64_t ID) {
-  return ID >> 16;
+  return (ID >> 16) & ((1ull << 16) - 1);
 }
 
 static bool IDHasAlloc(uint64_t ID) {
   return ID & 1ull;
+}
+
+static bool isOxCamlEncodedStatepointID(uint64_t ID) {
+  return ID != StatepointDirectives::DefaultStatepointID &&
+         ID != StatepointDirectives::DeoptBundleStatepointID;
 }
 
 // Every 8-bit entry emitted in the frametable is offset by 2 (since that is the
@@ -603,19 +612,17 @@ bool OxCamlGCMetadataPrinter::emitStackMaps(Module &M, StackMaps &SM, AsmPrinter
     if (!IsAArch64)
       FrameSize += PtrSize; // Return address
 
-    // The LLVM IR emitted from OxCaml will always set the statepoint ID for
-    // calls to be wrapped in a statepoint. Also, note that DefaultStatepointID
-    // (= 0xABCDEF00 as of now) does not clash with the encoding we use since
-    // anything that sets the upper 16 bits will also set the bottom bit.
-    if (CSI.ID != StatepointDirectives::DefaultStatepointID) {
+    // The LLVM IR emitted from OxCaml sets an encoded statepoint ID for calls
+    // that need OxCaml frame metadata. LLVM's own default statepoint IDs are
+    // not part of this encoding.
+    uint64_t ActiveTrapBytes = 0;
+    if (isOxCamlEncodedStatepointID(CSI.ID)) {
       // Stack offset from OxCaml for active trap blocks and explicit stack
       // adjustments. LLVM does not model this as part of the static frame size
       // consistently across call sites, so apply the OxCaml offset directly.
-      uint64_t StackOffset = stackOffsetOfID(CSI.ID);
-      bool HasDynamicFrameSize =
-          CSI.CSFunctionInfo.StackSize == std::numeric_limits<uint64_t>::max();
-      if (!IsAArch64 || HasDynamicFrameSize)
-        FrameSize += StackOffset;
+      uint64_t StackOffset = stackOffsetOfID(CSI.ID, IsAArch64);
+      ActiveTrapBytes = activeTrapBytesOfID(CSI.ID, IsAArch64);
+      FrameSize += StackOffset;
 
       if (FrameSize & FrameSizeReservedMask) {
         report_fatal_error("[OxCamlGCPrinter] frame size has bottom bits set: "
@@ -626,8 +633,7 @@ bool OxCamlGCMetadataPrinter::emitStackMaps(Module &M, StackMaps &SM, AsmPrinter
 
     OxCamlDebugInfo DebugInfo = debugInfoForCallsite(CSI);
     OxCamlAllocInfo AllocInfo = allocInfoForCallsite(CSI);
-    bool HasAlloc = CSI.ID != StatepointDirectives::DefaultStatepointID &&
-                    IDHasAlloc(CSI.ID);
+    bool HasAlloc = isOxCamlEncodedStatepointID(CSI.ID) && IDHasAlloc(CSI.ID);
     uint64_t AllocSize = HasAlloc ? allocSizeOfID(CSI.ID) : 0;
     std::vector<uint8_t> AllocSizes;
     if (HasAlloc && AllocInfo.Valid) {
@@ -684,7 +690,8 @@ bool OxCamlGCMetadataPrinter::emitStackMaps(Module &M, StackMaps &SM, AsmPrinter
         LiveOffsets.push_back((OxCamlIndex << 1) + 1);
       } else if (Loc.Type == StackMaps::Location::Direct ||
                  Loc.Type == StackMaps::Location::Indirect) {
-        LiveOffsets.push_back(stackOffset(FrameSize, PtrSize, Loc.Offset));
+        LiveOffsets.push_back(
+            stackOffset(FrameSize, PtrSize, Loc.Offset) + ActiveTrapBytes);
       } else {
         // TODO: Do we need anything else here?
       }
@@ -753,7 +760,8 @@ bool OxCamlGCMetadataPrinter::emitStackMaps(Module &M, StackMaps &SM, AsmPrinter
                              "large: " +
                              Twine(OxCamlIndex));
         OS.emitInt16(OxCamlIndex);
-        int64_t Offset = stackOffset(FrameSize, PtrSize, Entry.Offset);
+        int64_t Offset =
+            stackOffset(FrameSize, PtrSize, Entry.Offset) + ActiveTrapBytes;
         checkShortStackOffset(Offset);
         OS.emitInt16(static_cast<uint16_t>(Offset));
       }

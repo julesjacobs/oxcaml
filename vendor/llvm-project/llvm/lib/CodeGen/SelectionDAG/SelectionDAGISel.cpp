@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/CodeGen/SelectionDAGISel.h"
+#include "OxCamlTrapUtils.h"
 #include "ScheduleDAGSDNodes.h"
 #include "SelectionDAGBuilder.h"
 #include "llvm/ADT/APInt.h"
@@ -1244,6 +1245,20 @@ bool SelectionDAGISel::PrepareEHLandingPad() {
   const TargetRegisterClass *PtrRC =
       TLI->getRegClassFor(TLI->getPointerTy(CurDAG->getDataLayout()));
 
+  bool HasConcreteTrapTarget =
+      getOxCamlTrapRecoveryLandingPad(*LLVMBB) &&
+      hasOxCamlPushTrapTargeting(*FuncInfo->Fn, *LLVMBB);
+  bool HasAbstractTrapTarget =
+      FuncInfo->DT && isOxCamlTrapRecoveryPad(*FuncInfo->Fn, *LLVMBB) &&
+      hasDominatingOxCamlTrapPublishForRecoveryPad(*FuncInfo->Fn, *LLVMBB,
+                                                   *FuncInfo->DT);
+  if (!MBB->isRuntimeEntered() &&
+      (HasConcreteTrapTarget || HasAbstractTrapTarget)) {
+    MBB->setIsRuntimeEntered();
+    MBB->setMachineBlockAddressTaken();
+    MBB->setLabelMustBeEmitted();
+  }
+
   auto Pers = classifyEHPersonality(PersonalityFn);
 
   // Catchpads have one live-in register, which typically holds the exception
@@ -1285,6 +1300,10 @@ bool SelectionDAGISel::PrepareEHLandingPad() {
   } else {
     // Assign the call site to the landing pad's begin label.
     MF->setCallSiteLandingPad(Label, SDB->LPadToCallSiteMap[MBB]);
+    // OxCaml runtime-entered trap recovery blocks use a target-specific
+    // recovery ABI, not the platform EH exception pointer/selector ABI.
+    if (MBB->isRuntimeEntered())
+      return true;
     // Mark exception register as live in.
     if (unsigned Reg = TLI->getExceptionPointerRegister(PersonalityFn))
       FuncInfo->ExceptionPointerVirtReg = MBB->addLiveIn(Reg, PtrRC);

@@ -69,6 +69,23 @@ let with_byte len pos code =
   if pos < len then Bytes.set bytes pos (Char.chr code);
   opaque_string (Bytes.unsafe_to_string bytes)
 
+let check_string_map () =
+  let module M = Map.Make (String) in
+  let keys =
+    Array.init 64 (fun i -> opaque_string ("compiler_interned_key_" ^ string_of_int i))
+  in
+  let map =
+    Array.fold_left (fun map key -> M.add key (String.length key) map) M.empty keys
+  in
+  let total = ref 0 in
+  for r = 1 to 3 do
+    for i = 1 to 128 do
+      let key = Array.unsafe_get keys ((i + r) land 63) in
+      total := !total + M.find key map
+    done
+  done;
+  if !total <> 9156 then failwith "Map.Make(String).find mismatch"
+
 let () =
   let tiny =
     List.concat_map (all_strings [0; 1; 127; 128; 255]) [0; 1; 2; 3; 4]
@@ -94,4 +111,5 @@ let () =
   check_pair "abc\000" "abc";
   check_pair "\255" "\000";
   check_pair "\128" "\127";
+  check_string_map ();
   print_endline "OK"

@@ -120,8 +120,8 @@ type fun_info =
            function entry in LLVM, so their new arguments must be copied into
            these slots before the branch. *)
     mutable preserved_reg_slots : Reg.Set.t;
-        (* Registers whose slots must not be promoted away because a trap
-           handler may read them through a hidden exception edge. *)
+        (* Registers whose slots must remain addressable, for example because a
+           GC safepoint reports the slot through a ["gc-live"] bundle. *)
     mutable slow_path_root_slots : LL.Value.t list;
         (* Static entry-block spill slots used only by eligible allocation and
            poll slow paths. *)
@@ -131,13 +131,7 @@ type fun_info =
            needs this for basic-instruction safepoints such as allocation and
            polling. *)
     mutable active_trap_depths : int InstructionId.Tbl.t;
-        (* Number of active trap blocks at each instruction. On AArch64, trap
-           blocks are preallocated in the static LLVM frame, so the frametable
-           statepoint metadata must not add their dynamic stack offset again. *)
-    trap_block_allocas : LL.Value.t InstructionId.Tbl.t;
-        (* Trap blocks preallocated in the function entry block. On arm64 this
-           avoids dynamic allocas, which otherwise force LLVM to use x29 as a
-           frame pointer even when normal OCaml callees may clobber x29. *)
+        (* Number of active trap regions at each instruction. *)
     trap_handler_exn_buckets : LL.Value.t Label.Tbl.t;
         (* Per-handler entry-block slots used on AArch64 when multiple static
            pushtrap regions can branch to the same handler block. *)
@@ -200,7 +194,6 @@ let create_fun_info ?subprogram_dbg_metadata_id emitter =
     slow_path_root_slots = [];
     active_traps = InstructionId.Tbl.create 0;
     active_trap_depths = InstructionId.Tbl.create 0;
-    trap_block_allocas = InstructionId.Tbl.create 0;
     trap_handler_exn_buckets = Label.Tbl.create 0;
     aarch64_trap_blocks = InstructionId.Tbl.create 0;
     trap_blocks = Label.Tbl.create 0;
@@ -713,31 +706,23 @@ let do_offset ?(int_type = T.i64) t arg res_type offset =
    mem2reg pass, so we don't need a cast here. *)
 let load_reg_to_temp ?typ t reg =
   let typ = Option.value typ ~default:(T.of_reg reg) in
-  if preserve_reg_slot t reg
-  then
+  match get_const_int_for_reg t reg with
+  | Some n -> cast t (V.of_nativeint n) typ
+  | None ->
     let ptr = get_alloca_for_reg t reg in
-    emit_ins t (I.load_volatile ~ptr ~typ)
-  else
-    match get_const_int_for_reg t reg with
-    | Some n -> cast t (V.of_nativeint n) typ
-    | None ->
-      let ptr = get_alloca_for_reg t reg in
-      emit_ins t (I.load ~ptr ~typ)
+    emit_ins t (I.load ~ptr ~typ)
 
 (* Although the same applies here as above, the cast happening any time later
    for a store back would be problematic (e.g. consider setting a [ptr
    addrspace(1)] as an [i64]. if it gets cast after a function call, it won't be
    marked as live, which is bad). So, we put the cast explicitly. *)
 let store_into_reg ?(force_volatile = false) t reg to_store =
+  if force_volatile
+  then fail_msg ~name:"store_into_reg" "volatile register slots are unsupported";
   clear_const_int_for_reg t reg;
   let ptr = get_alloca_for_reg t reg in
   let to_store = cast t to_store (T.of_reg reg) in
-  let store =
-    if force_volatile || preserve_reg_slot t reg
-    then I.store_volatile
-    else I.store
-  in
-  emit_ins_no_res t (store ~ptr ~to_store)
+  emit_ins_no_res t (I.store ~ptr ~to_store)
 
 let live_gc_root_regs_across t (i : 'a Cfg.instruction) =
   match (get_fun_info t).liveness with
@@ -832,13 +817,13 @@ let store_slow_path_roots t root_slots =
   List.iter
     (fun { reg; root_slot } ->
       let value = cast t (load_reg_to_temp t reg) T.val_ptr in
-      emit_ins_no_res t (I.store_volatile ~ptr:root_slot ~to_store:value))
+      emit_ins_no_res t (I.store ~ptr:root_slot ~to_store:value))
     root_slots
 
 let refresh_slow_path_roots t root_slots =
   List.iter
     (fun { reg; root_slot } ->
-      let value = emit_ins t (I.load_volatile ~ptr:root_slot ~typ:T.val_ptr) in
+      let value = emit_ins t (I.load ~ptr:root_slot ~typ:T.val_ptr) in
       store_into_reg t reg value)
     root_slots
 
@@ -1091,15 +1076,28 @@ let call_simple ?(attrs = []) ?(dbg = Debuginfo.none) ?(raise_call = false)
 
 module Safepoint = struct
   type t =
-    | Call of { stack_offset : int }
-    | Poll of { stack_offset : int }
+    | Call of
+        { stack_offset : int;
+          active_trap_bytes : int
+        }
+    | Poll of
+        { stack_offset : int;
+          active_trap_bytes : int
+        }
     | Allocation of
         { alloc_words : int;
-          stack_offset : int
+          stack_offset : int;
+          active_trap_bytes : int
         }
 
-  (* We use statepoint IDs to pass information to the frametable printer in
-     LLVM. The current encoding is a 32-bit integer:
+  (* We use statepoint IDs to pass information to the frametable printer in LLVM.
+     The current encoding is:
+
+     * [active_trap_bytes]: On AArch64, this is encoded as a trap depth in bits
+     1..3. AArch64 stack offsets are 16-byte aligned, so these bits are
+     otherwise unused. This tells LLVM to adjust live stack root offsets for
+     native AArch64 trap frames. Those frames dynamically move SP, but they are
+     not LLVM frame objects.
 
      * [alloc_words]: This lives in the most significant 16 bits. This is used
      for calls to the GC generated by [Alloc] instructions which need to know
@@ -1108,34 +1106,46 @@ module Safepoint = struct
      because the current encoding does not have room to list them separately.
 
      * [stack_offset]: This lives in the least significant 16 bits. This tells
-     LLVM to adjust the frame size for logical trap blocks. We need this because
-     LLVM sees alloca'd trap recovery storage as dynamic stack objects and does
-     not keep track of it statically.
-
-     On AArch64, this adjustment matches the logical CFG trap-block stack cost,
-     not the 16-byte aligned static trap-block alloca with extra LLVM-only
-     metadata slots. OCaml functions are not supposed to pass arguments via the
-     stack, but C calls might, so we need to account for [Stackoffset]
-     instructions.
+     LLVM to adjust the frame size for dynamic stack pointer changes that are
+     already tracked in CFG stack offsets. On AArch64, native trap frame bytes
+     are carried in [active_trap_bytes] instead.
 
      * The least significant bit is set if this call is to [caml_call_gc]. We
      can do this because [stack_offset] must be even. *)
   let validate_stack_offset stack_offset =
+    let align_mask =
+      match Target_system.architecture () with
+      | Target_system.AArch64 -> 15
+      | Target_system.X86_64 | Target_system.IA32 | Target_system.ARM
+      | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
+        1
+    in
     fail_if_not ~msg:"invalid stack offset" "Safepoint.encode_statepoint_id"
-      (0 <= stack_offset && stack_offset < 65_536 && stack_offset land 1 = 0)
+      (0 <= stack_offset && stack_offset < 65_536
+      && stack_offset land align_mask = 0)
+
+  let validate_active_trap_bytes active_trap_bytes =
+    fail_if_not ~msg:"invalid active trap bytes" "Safepoint.encode_statepoint_id"
+      (0 <= active_trap_bytes && active_trap_bytes <= 7 * 16
+      && active_trap_bytes land 15 = 0)
+
+  let active_trap_bytes_bits active_trap_bytes =
+    validate_active_trap_bytes active_trap_bytes;
+    (active_trap_bytes / 16) lsl 1
 
   let encode_statepoint_id = function
-    | Call { stack_offset } ->
+    | Call { stack_offset; active_trap_bytes } ->
       validate_stack_offset stack_offset;
-      stack_offset
-    | Poll { stack_offset } ->
+      active_trap_bytes_bits active_trap_bytes lor stack_offset
+    | Poll { stack_offset; active_trap_bytes } ->
       validate_stack_offset stack_offset;
-      stack_offset lor 1
-    | Allocation { alloc_words; stack_offset } ->
+      active_trap_bytes_bits active_trap_bytes lor stack_offset lor 1
+    | Allocation { alloc_words; stack_offset; active_trap_bytes } ->
       fail_if_not ~msg:"invalid alloc size" "Safepoint.encode_statepoint_id"
         (0 <= alloc_words && alloc_words < 65_536);
       validate_stack_offset stack_offset;
-      (alloc_words lsl 16) lor stack_offset lor 1
+      active_trap_bytes_bits active_trap_bytes
+      lor (alloc_words lsl 16) lor stack_offset lor 1
 
   let attr t = LL.Fn_attr.Statepoint_id (encode_statepoint_id t)
 
@@ -1143,15 +1153,22 @@ module Safepoint = struct
     List.fold_left (fun acc Cmm.{ alloc_words; _ } -> acc + alloc_words) 0
 end
 
-let statepoint_stack_offset t (i : 'a Cfg.instruction) =
+let active_trap_bytes t (i : 'a Cfg.instruction) =
   match Target_system.architecture () with
   | Target_system.AArch64 ->
     let active_trap_depth =
       InstructionId.Tbl.find_opt (get_fun_info t).active_trap_depths i.id
       |> Option.value ~default:0
     in
-    let static_trap_block_bytes = 32 * active_trap_depth in
-    let stack_offset = i.stack_offset - static_trap_block_bytes in
+    16 * active_trap_depth
+  | Target_system.X86_64 | Target_system.IA32 | Target_system.ARM
+  | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
+    0
+
+let statepoint_stack_offset t (i : 'a Cfg.instruction) =
+  match Target_system.architecture () with
+  | Target_system.AArch64 ->
+    let stack_offset = i.stack_offset - active_trap_bytes t i in
     fail_if_not ~msg:"negative adjusted stack offset" "statepoint_stack_offset"
       (stack_offset >= 0);
     stack_offset
@@ -1163,6 +1180,7 @@ let gc_attr ?alloc_info ?safepoint ~can_call_gc t (i : 'a Cfg.instruction) =
   if can_call_gc
   then
     let stack_offset = statepoint_stack_offset t i in
+    let active_trap_bytes = active_trap_bytes t i in
     let safepoint =
       match safepoint, alloc_info with
       | Some safepoint, None -> safepoint
@@ -1170,8 +1188,8 @@ let gc_attr ?alloc_info ?safepoint ~can_call_gc t (i : 'a Cfg.instruction) =
         fail_msg ~name:"gc_attr" "got both [safepoint] and [alloc_info]"
       | None, Some alloc_info ->
         let alloc_words = Safepoint.alloc_words_of_dbg_alloc alloc_info in
-        Safepoint.Allocation { alloc_words; stack_offset }
-      | None, None -> Safepoint.Call { stack_offset }
+        Safepoint.Allocation { alloc_words; stack_offset; active_trap_bytes }
+      | None, None -> Safepoint.Call { stack_offset; active_trap_bytes }
     in
     [Safepoint.attr safepoint]
   else [LL.Fn_attr.Gc_leaf_function]
@@ -1251,20 +1269,6 @@ let write_trap_pointer_register t trap_ptr =
   | Target_system.IA32 | Target_system.ARM | Target_system.POWER
   | Target_system.Z | Target_system.Riscv ->
     fail_msg ~name:"write_trap_pointer_register"
-      "unsupported architecture for LLVM backend"
-
-let read_trap_pointer_register t =
-  match Target_system.architecture () with
-  | Target_system.AArch64 ->
-    emit_ins t
-      (I.inline_asm ~asm:"mov $0, x26" ~constraints:"=r" ~args:[]
-         ~res_type:(Some T.i64) ~sideeffect:true)
-  | Target_system.X86_64 ->
-    fail_msg ~name:"read_trap_pointer_register"
-      "x86_64 keeps the current trap block in rsp"
-  | Target_system.IA32 | Target_system.ARM | Target_system.POWER
-  | Target_system.Z | Target_system.Riscv ->
-    fail_msg ~name:"read_trap_pointer_register"
       "unsupported architecture for LLVM backend"
 
 (* Other miscellaneous stuff... *)
@@ -2043,23 +2047,58 @@ let extcall ?unwind_label t (i : Cfg.terminator Cfg.instruction) ~func_symbol
       in
       make_ocaml_c_call ~cc:Oxcaml_c_call "caml_c_call" args res_types
     else
-      (* Wrap C calls to avoid reloading from the stack after overwriting the
-         stack pointer *)
       let args =
         List.map2
           (fun reg typ -> load_reg_to_temp ~typ t reg)
           arg_regs arg_types
       in
-      let wrapper_symbol =
-        add_c_call_wrapper t func_symbol ~args:(List.map V.get_type args)
-          ~res:res_types
-      in
-      add_referenced_symbol t func_symbol;
-      call_simple
-        ~attrs:(gc_attr ~can_call_gc:true t i)
-        ~dbg:i.dbg ~primitive_call:true
-        ~live_roots:(load_live_gc_roots_across t i)
-        ?unwind_label ~cc:Oxcaml t wrapper_symbol args res_types
+      if Target_system.architecture () = Target_system.AArch64
+      then (
+        add_referenced_symbol t func_symbol;
+        let args = prepare_call_args t args in
+        let direct_res_types = List.map (fun _ -> T.i64) runtime_regs @ res_types in
+        let c_res =
+          (* Noalloc C calls follow the native backend model: they are ordinary
+             C ABI calls that cannot allocate or raise, so any active trap does
+             not create an exceptional edge from this call.
+
+             The leading runtime-register operands/results are not C-level
+             arguments/results. The [oxcaml_c_directcc] convention assigns them
+             to x28/x27 before the ordinary C arguments and returns them from
+             x28/x27 before the ordinary C result registers. AAPCS preserves
+             x28/x27, so this models the domain-state/allocation-pointer
+             dependency that the stack-switch pseudo needs while still
+             generating a plain direct C call. *)
+          ignore unwind_label;
+          emit_ins t
+            (I.call ~func:(LL.Ident.global func_symbol) ~args
+               ~res_type:(Some (T.Struct direct_res_types))
+               ~attrs:(gc_attr ~can_call_gc:false t i)
+               ~operand_bundles:[] ~cc:Oxcaml_c_direct_call ~musttail:false)
+        in
+        let runtime_values =
+          extract_struct t c_res
+            (List.init (List.length runtime_regs) (fun i -> [i]))
+        in
+        List.iter2
+          (fun ptr to_store -> emit_ins_no_res t (I.store ~ptr ~to_store))
+          runtime_regs runtime_values;
+        extract_struct t c_res
+          (List.init (List.length res_types) (fun i ->
+             [List.length runtime_regs + i])))
+      else
+        (* Wrap C calls to avoid reloading from the stack after overwriting the
+           stack pointer. *)
+        let wrapper_symbol =
+          add_c_call_wrapper t func_symbol ~args:(List.map V.get_type args)
+            ~res:res_types
+        in
+        add_referenced_symbol t func_symbol;
+        call_simple
+          ~attrs:(gc_attr ~can_call_gc:true t i)
+          ~dbg:i.dbg ~primitive_call:true
+          ~live_roots:(load_live_gc_roots_across t i)
+          ?unwind_label ~cc:Oxcaml t wrapper_symbol args res_types
   in
   let arg_regs = reg_list_for_call i.arg in
   let arg_types = extcall_arg_types ty_args arg_regs in
@@ -2136,11 +2175,22 @@ let raise_ t ~(exn_handler : Label.t option)
     let exn_bucket = load_reg_to_temp t i.arg.(0) in
     (match Target_system.architecture () with
     | Target_system.AArch64 ->
-      add_referenced_symbol t "caml_raise_notrace";
-      call_simple ?unwind_label:(unwind_label_for_active_handler ())
-        ~attrs:[Gc_leaf_function] ~cc:Oxcaml t "caml_raise_notrace" [exn_bucket]
-        []
-      |> ignore
+      (match unwind_label_for_active_handler () with
+      | Some unwind_label ->
+        add_referenced_symbol t "caml_raise_notrace";
+        call_simple ~unwind_label ~attrs:[Gc_leaf_function] ~cc:Oxcaml t
+          "caml_raise_notrace" [exn_bucket] []
+        |> ignore
+      | None ->
+        if Config.tsan
+        then (
+          add_referenced_symbol t "caml_raise_notrace";
+          call_simple ~attrs:[Gc_leaf_function] ~cc:Oxcaml t
+            "caml_raise_notrace" [exn_bucket] []
+          |> ignore)
+        else
+          call_llvm_intrinsic_no_res t "aarch64.oxcaml.raise.notrace"
+            [exn_bucket])
     | Target_system.X86_64 ->
       (* Get sp for trap block *)
       let exn_sp_ptr = load_domainstate_addr t Domain_exn_handler in
@@ -3656,7 +3706,11 @@ let poll ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction) =
   call_gc_for_basic_safepoint
     ~attrs:
       (gc_attr
-         ~safepoint:(Safepoint.Poll { stack_offset = i.stack_offset })
+         ~safepoint:
+           (Safepoint.Poll
+              { stack_offset = statepoint_stack_offset t i;
+                active_trap_bytes = active_trap_bytes t i
+              })
          ~can_call_gc:true t i
       @ [LL.Fn_attr.Cold])
     ?unwind_label t i;
@@ -3727,11 +3781,6 @@ let emit_aarch64_pushtrap t (i : Cfg.basic Cfg.instruction) lbl_handler =
   let recover_rbp_var_ident =
     LL.Ident.global (fun_name ^ ".recover_rbp_var." ^ label_name)
   in
-  let trap_block =
-    match InstructionId.Tbl.find_opt (get_fun_info t).trap_block_allocas i.id with
-    | Some trap_block -> trap_block
-    | None -> fail_msg ~name:"pushtrap" "missing preallocated trap block"
-  in
   let handler_bucket =
     match
       Label.Tbl.find_opt (get_fun_info t).trap_handler_exn_buckets lbl_handler
@@ -3739,23 +3788,10 @@ let emit_aarch64_pushtrap t (i : Cfg.basic Cfg.instruction) lbl_handler =
     | Some handler_bucket -> handler_bucket
     | None -> fail_msg ~name:"pushtrap" "missing preallocated handler bucket"
   in
-  let rbp_slot = do_offset t trap_block T.ptr 16 in
-  let saved_fp_slot = do_offset t trap_block T.ptr 24 in
-  let prev_exn_sp = read_trap_pointer_register t in
-  let sp = read_stack_pointer t in
-  let trap_block_int = cast t trap_block T.i64 in
-  let restore_sp_delta =
-    emit_ins t (I.binary Sub ~arg1:sp ~arg2:trap_block_int)
-  in
-  emit_ins_no_res t (I.store ~ptr:rbp_slot ~to_store:restore_sp_delta);
-  emit_ins_no_res t
-    (I.inline_asm ~asm:"str x29, [$0]" ~constraints:"r"
-       ~args:[saved_fp_slot] ~res_type:T.Or_void.void ~sideeffect:true);
   let recovery_target =
     V.blockaddress ~func:fun_ident ~block:(V.get_ident_exn exn_entry)
   in
-  call_llvm_intrinsic_no_res t "aarch64.oxcaml.trap.publish"
-    [trap_block; prev_exn_sp; recovery_target];
+  call_llvm_intrinsic_no_res t "aarch64.oxcaml.push.trap" [recovery_target];
   emit_ins_no_res t (I.br try_label);
   emit_label t exn_entry;
   ignore (emit_ins t (I.landingpad ~typ:T._token ~cleanup:true));
@@ -3763,16 +3799,15 @@ let emit_aarch64_pushtrap t (i : Cfg.basic Cfg.instruction) lbl_handler =
     call_llvm_intrinsic t "aarch64.oxcaml.trap.recover" []
       aarch64_trap_recover_type
   in
-  let exn_bucket, prev_exn_sp, recovered_alloc, recovered_ds =
-    match extract_struct t recovered [[0]; [1]; [2]; [3]] with
-    | [exn_bucket; prev_exn_sp; recovered_alloc; recovered_ds] ->
-      exn_bucket, prev_exn_sp, recovered_alloc, recovered_ds
+  let exn_bucket, recovered_alloc, recovered_ds =
+    match extract_struct t recovered [[0]; [2]; [3]] with
+    | [exn_bucket; recovered_alloc; recovered_ds] ->
+      exn_bucket, recovered_alloc, recovered_ds
     | _ -> Misc.fatal_error "unexpected trap recover result arity"
   in
   emit_ins_no_res t (I.store ~ptr:handler_bucket ~to_store:exn_bucket);
   emit_ins_no_res t (I.store ~ptr:domainstate_ptr ~to_store:recovered_ds);
   emit_ins_no_res t (I.store ~ptr:allocation_ptr ~to_store:recovered_alloc);
-  write_trap_pointer_register t prev_exn_sp;
   emit_ins_no_res t (I.br (V.of_label lbl_handler));
   emit_label t try_label;
   match
@@ -3781,7 +3816,7 @@ let emit_aarch64_pushtrap t (i : Cfg.basic Cfg.instruction) lbl_handler =
   | Some _ -> fail_msg "duplicate pushtrap instruction id"
   | None ->
     InstructionId.Tbl.add (get_fun_info t).aarch64_trap_blocks i.id
-      { trap_block;
+      { trap_block = V.poison T.ptr;
         stacksave_ptr = None;
         exn_bucket;
         exn_entry;
@@ -4047,12 +4082,7 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
         | Some { trap_block; stacksave_ptr; _ } -> (
           match Target_system.architecture () with
           | Target_system.AArch64 ->
-            let trap_block = read_trap_pointer_register t in
-            let trap_block_ptr = cast t trap_block T.ptr in
-            let prev_exn_sp =
-              emit_ins t (I.load ~ptr:trap_block_ptr ~typ:T.i64)
-            in
-            write_trap_pointer_register t prev_exn_sp
+            call_llvm_intrinsic_no_res t "aarch64.oxcaml.pop.trap" []
           | Target_system.X86_64 -> (
             (* Restore previous exn handler sp (top word on trap block) *)
             let exn_sp_ptr = load_domainstate_addr t Domain_exn_handler in
@@ -4555,8 +4585,8 @@ let prepare_fun_info t (cfg : Cfg.t) =
   (get_fun_info t).fun_args <- fun_args;
   (get_fun_info t).active_traps <- active_traps;
   (get_fun_info t).active_trap_depths <- active_trap_depths;
-  (get_fun_info t).preserved_reg_slots
-    <- preserved_reg_slots liveness active_traps cfg;
+  let preserved_reg_slots = preserved_reg_slots liveness active_traps cfg in
+  (get_fun_info t).preserved_reg_slots <- preserved_reg_slots;
   arg_regs
 
 (* Emits [alloca]'s in the entry block for all [Reg.t]s in [cfg] and runtime
@@ -4650,14 +4680,7 @@ let alloca_regs t (cfg : Cfg.t) arg_values arg_regs =
           if not (Label.Tbl.mem (get_fun_info t).trap_handler_exn_buckets lbl_handler)
           then
             Label.Tbl.add (get_fun_info t).trap_handler_exn_buckets lbl_handler
-              (emit_ins t (I.alloca T.i64));
-          if not (InstructionId.Tbl.mem (get_fun_info t).trap_block_allocas i.id)
-          then
-            let trap_block =
-              emit_ins t (I.alloca ~count:(V.of_int 64) ~align:16 T.i8)
-            in
-            InstructionId.Tbl.add (get_fun_info t).trap_block_allocas i.id
-              trap_block
+              (emit_ins t (I.alloca T.i64))
         | _ -> ())
       ~init:()
   | Target_system.X86_64 | Target_system.IA32 | Target_system.ARM

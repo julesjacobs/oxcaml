@@ -45,9 +45,9 @@ L101:
   br i1 %21, label %L105, label %L104
 L104:
   %22 = load ptr addrspace(1), ptr %7
-  store volatile ptr addrspace(1) %22, ptr %11
+  store ptr addrspace(1) %22, ptr %11
   %23 = load ptr addrspace(1), ptr %8
-  store volatile ptr addrspace(1) %23, ptr %12
+  store ptr addrspace(1) %23, ptr %12
   %24 = load i64, ptr %ds
   %25 = load i64, ptr %alloc
   %26 = call oxcaml_alloccc { { i64, i64 }, {  } } @"\01_caml_call_gc"(i64 %24, i64 %25) "statepoint-id"="196609" cold [ "deopt"(i64 1870160737, i64 1, i64 1, i64 3, i64 1, i64 1, i64 0, i64 20, i64 24, i64 0, i64 24, i64 0, i64 14, i64 5263188, i64 7155249, i64 6646625, i64 6385759, i64 29289), "gc-live"(ptr %11, ptr %12) ]
@@ -55,9 +55,9 @@ L104:
   %28 = extractvalue { { i64, i64 }, {  } } %26, 0, 1
   store i64 %27, ptr %ds
   store i64 %28, ptr %alloc
-  %29 = load volatile ptr addrspace(1), ptr %11
+  %29 = load ptr addrspace(1), ptr %11
   store ptr addrspace(1) %29, ptr %7
-  %30 = load volatile ptr addrspace(1), ptr %12
+  %30 = load ptr addrspace(1), ptr %12
   store ptr addrspace(1) %30, ptr %8
   br label %L105
 L105:

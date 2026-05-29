@@ -1,0 +1,54 @@
+# RUN: llc -mtriple=arm64-apple-macosx -run-pass=prologepilog -verify-machineinstrs %s -o - | FileCheck %s
+
+--- |
+  target datalayout = "e-m:o-i64:64-i128:128-n32:64-S128"
+  target triple = "arm64-apple-macosx"
+
+  declare oxcaml_nofpcc { i64, i64, i64 } @callee_many(i64, i64, i64, i64, i64, i64, i64, i64, i64)
+
+  define oxcaml_nofpcc i64 @native_trap_stack_arg_call(i64 %ds, i64 %alloc, i64 %arg) gc "oxcaml" {
+  entry:
+    ret i64 0
+
+  recover:
+    ret i64 1
+  }
+
+  !llvm.module.flags = !{!0}
+  !0 = !{i32 1, !"oxcaml_module", !"NativeTrapCallFrame"}
+
+...
+---
+name:            native_trap_stack_arg_call
+alignment:       4
+tracksRegLiveness: true
+frameInfo:
+  hasCalls:        true
+  adjustsStack:    true
+  maxCallFrameSize: 8
+body:             |
+  bb.0.entry:
+    successors: %bb.1(0x80000000)
+    liveins: $x0, $x1, $x2, $x3, $x4, $x5, $x6, $x7, $x8, $x27, $x28
+
+    $x10 = COPY $x8
+    OXCAML_PUSH_TRAP %bb.1, implicit-def dead $sp, implicit-def dead $x16, implicit-def $x26, implicit $sp, implicit $x26
+    ADJCALLSTACKDOWN 8, 0, implicit-def dead $sp, implicit $sp
+    STRXui killed $x10, $sp, 0 :: (store (s64) into stack)
+    BL @callee_many, csr_aarch64_oxcaml_withoutfp, implicit-def dead $lr, implicit $sp, implicit $x28, implicit $x27, implicit $x0, implicit $x1, implicit $x2, implicit $x3, implicit $x4, implicit $x5, implicit $x6, implicit $x7, implicit-def $sp, implicit-def dead $x28, implicit-def dead $x27, implicit-def $x0
+    ADJCALLSTACKUP 8, 0, implicit-def dead $sp, implicit $sp
+    OXCAML_RAISE_NOTRACE_EDGE $x0, %bb.1, implicit-def dead $x0, implicit-def dead $x16, implicit-def dead $x26, implicit-def dead $sp, implicit $x26
+
+  bb.1.recover (machine-block-address-taken, runtime-entered):
+    liveins: $x0, $x26, $x27, $x28
+
+    RET_ReallyLR implicit $x28, implicit $x27, implicit $x0
+
+...
+
+# CHECK-LABEL: name: native_trap_stack_arg_call
+# CHECK: $x10 = COPY $x8
+# CHECK-NEXT: OXCAML_PUSH_TRAP %bb.1
+# CHECK-NEXT: STRXui killed $x10, $sp, 2
+# CHECK-NEXT: BL @callee_many
+# CHECK: OXCAML_RAISE_NOTRACE_EDGE $x0, %bb.1

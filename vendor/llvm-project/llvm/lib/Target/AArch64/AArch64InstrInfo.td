@@ -580,6 +580,11 @@ def AArch64call          : SDNode<"AArch64ISD::CALL",
                                 [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
                                  SDNPVariadic]>;
 
+def AArch64oxcaml_c_direct_call
+    : SDNode<"AArch64ISD::OXCAML_C_DIRECT_CALL",
+             SDTypeProfile<0, -1, [SDTCisPtrTy<0>]>,
+             [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue, SDNPVariadic]>;
+
 def AArch64call_bti      : SDNode<"AArch64ISD::CALL_BTI",
                                 SDTypeProfile<0, -1, [SDTCisPtrTy<0>]>,
                                 [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
@@ -771,6 +776,8 @@ def AArch64faddp     : PatFrags<(ops node:$Rn, node:$Rm),
                                  (int_aarch64_neon_faddp node:$Rn, node:$Rm)]>;
 def AArch64roundingvlshr : ComplexPattern<vAny, 2, "SelectRoundingVLShr", [AArch64vlshr]>;
 
+def brtarget : Operand<OtherVT>;
+
 def SDT_AArch64SETTAG : SDTypeProfile<0, 2, [SDTCisPtrTy<0>, SDTCisPtrTy<1>]>;
 def AArch64stg : SDNode<"AArch64ISD::STG", SDT_AArch64SETTAG, [SDNPHasChain, SDNPMayStore, SDNPMemOperand]>;
 def AArch64stzg : SDNode<"AArch64ISD::STZG", SDT_AArch64SETTAG, [SDNPHasChain, SDNPMayStore, SDNPMemOperand]>;
@@ -960,6 +967,38 @@ def OXCAML_TRAP_PUBLISH
              (ins GPR64sp:$trap_block, GPR64:$previous_trap,
                   GPR64:$recovery_target),
              []>,
+      Sched<[]>;
+
+let hasSideEffects = 1, mayLoad = 1, isCodeGenOnly = 1, isTerminator = 1,
+    isBarrier = 1, isIndirectBranch = 1, Uses = [X26],
+    Defs = [X0, X16, X26, SP], Size = 16 in
+def OXCAML_RAISE_NOTRACE
+    : Pseudo<(outs), (ins GPR64:$exn_bucket), []>,
+      Sched<[]>;
+
+let hasSideEffects = 1, mayLoad = 1, isCodeGenOnly = 1, isTerminator = 1,
+    isBarrier = 1, isBranch = 1, isIndirectBranch = 1, Uses = [X26],
+    Defs = [X0, X16, X26, SP], Size = 16 in
+def OXCAML_RAISE_NOTRACE_EDGE
+    : Pseudo<(outs), (ins GPR64:$exn_bucket, brtarget:$recovery_target), []>,
+      Sched<[]>;
+
+let hasSideEffects = 1, mayStore = 1, isCodeGenOnly = 1, Uses = [SP, X26],
+    Defs = [SP, X16, X26], Size = 12 in
+def OXCAML_PUSH_TRAP
+    : Pseudo<(outs), (ins brtarget:$recovery_target), []>,
+      Sched<[]>;
+
+let hasSideEffects = 1, mayStore = 1, isCodeGenOnly = 1, Uses = [SP, X26],
+    Defs = [SP, X16, X26], Size = 12 in
+def OXCAML_PUSH_TRAP_DEAD
+    : Pseudo<(outs), (ins), []>,
+      Sched<[]>;
+
+let hasSideEffects = 1, mayLoad = 1, isCodeGenOnly = 1, Uses = [SP],
+    Defs = [SP, X26], Size = 4 in
+def OXCAML_POP_TRAP
+    : Pseudo<(outs), (ins), []>,
       Sched<[]>;
 
 let hasSideEffects = 1, isCodeGenOnly = 1 in {
@@ -2569,6 +2608,9 @@ let isCall = 1, Defs = [LR], Uses = [SP] in {
                      Sched<[WriteBrReg]>;
   def BLR_BTI : Pseudo<(outs), (ins variable_ops), []>,
                 Sched<[WriteBrReg]>;
+  def OXCAML_C_DIRECT_CALL : Pseudo<(outs), (ins variable_ops), []>,
+                             Sched<[WriteI, WriteLD, WriteI, WriteBrReg,
+                                    WriteI]>;
 } // isCall
 
 def : Pat<(AArch64call GPR64:$Rn),
@@ -2585,6 +2627,13 @@ def : Pat<(AArch64call_rvmarker (i64 tglobaladdr:$rvfunc), GPR64:$Rn),
 def : Pat<(AArch64call_bti GPR64:$Rn),
           (BLR_BTI GPR64:$Rn)>,
       Requires<[NoSLSBLRMitigation]>;
+
+def : Pat<(AArch64oxcaml_c_direct_call GPR64:$Rn),
+          (OXCAML_C_DIRECT_CALL GPR64:$Rn)>;
+def : Pat<(AArch64oxcaml_c_direct_call tglobaladdr:$addr),
+          (OXCAML_C_DIRECT_CALL tglobaladdr:$addr)>;
+def : Pat<(AArch64oxcaml_c_direct_call texternalsym:$func),
+          (OXCAML_C_DIRECT_CALL texternalsym:$func)>;
 
 let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1 in {
 def BR  : BranchReg<0b0000, "br", [(brind GPR64:$Rn)]>;

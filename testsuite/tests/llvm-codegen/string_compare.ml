@@ -82,12 +82,12 @@ L107:
   %51 = load ptr addrspace(1), ptr %6
   %52 = load i64, ptr %ds
   %53 = load i64, ptr %alloc
-  %54 = call oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_c_call_wrapper.caml_string_compare.2.ptr_addrspace_1_.ptr_addrspace_1_.ptr_addrspace_1_.1"(i64 %52, i64 %53, ptr addrspace(1) %50, ptr addrspace(1) %51) "statepoint-id"="0" [ "deopt"(i64 1870160740, i64 1, i64 1, i64 1, i64 1, i64 0, i64 47, i64 65, i64 0, i64 65, i64 0, i64 19, i64 5263188, i64 7548465, i64 6910580, i64 6252398, i64 7171939, i64 7496048, i64 101) ]
-  %55 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %54, 0, 0
-  %56 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %54, 0, 1
+  %54 = call oxcaml_c_directcc { i64, i64, ptr addrspace(1) } @"\01_caml_string_compare"(i64 %52, i64 %53, ptr addrspace(1) %50, ptr addrspace(1) %51) "gc-leaf-function"="true"
+  %55 = extractvalue { i64, i64, ptr addrspace(1) } %54, 0
+  %56 = extractvalue { i64, i64, ptr addrspace(1) } %54, 1
   store i64 %55, ptr %ds
   store i64 %56, ptr %alloc
-  %57 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %54, 1, 0
+  %57 = extractvalue { i64, i64, ptr addrspace(1) } %54, 2
   store ptr addrspace(1) %57, ptr %5
   br label %L104
 L108:
@@ -195,8 +195,14 @@ L103:
 	cmp	x10, #16
 	b.lo	LBB0_4
 ; %bb.2:                                ; %L107
-	bl	_c_call_wrapper.caml_string_compare.2.ptr_addrspace_1_.ptr_addrspace_1_.ptr_addrspace_1_.1
-Ltmp0:
+	mov	x29, sp
+	.cfi_remember_state
+	.cfi_def_cfa_register w29
+	ldr	x16, [x28, #104]
+	mov	sp, x16
+	bl	_caml_string_compare
+	mov	sp, x29
+	.cfi_restore_state
 	ldr	x30, [sp, #8]                   ; 8-byte Folded Reload
 	add	sp, sp, #16
 	ret
@@ -331,12 +337,12 @@ L131:
   %51 = load ptr addrspace(1), ptr %6
   %52 = load i64, ptr %ds
   %53 = load i64, ptr %alloc
-  %54 = call oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_c_call_wrapper.caml_bytes_compare.2.ptr_addrspace_1_.ptr_addrspace_1_.ptr_addrspace_1_.1"(i64 %52, i64 %53, ptr addrspace(1) %50, ptr addrspace(1) %51) "statepoint-id"="0" [ "deopt"(i64 1870160740, i64 1, i64 1, i64 2, i64 411, i64 0, i64 28, i64 46, i64 0, i64 46, i64 8, i64 7633250, i64 3044197, i64 27757, i64 21, i64 6583379, i64 6449516, i64 4349791, i64 6648953, i64 6499955, i64 7368047, i64 6648417, i64 1, i64 0, i64 44, i64 61, i64 0, i64 61, i64 0, i64 18, i64 5263188, i64 6434354, i64 6648953, i64 6512499, i64 7368047, i64 6648417) ]
-  %55 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %54, 0, 0
-  %56 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %54, 0, 1
+  %54 = call oxcaml_c_directcc { i64, i64, ptr addrspace(1) } @"\01_caml_bytes_compare"(i64 %52, i64 %53, ptr addrspace(1) %50, ptr addrspace(1) %51) "gc-leaf-function"="true"
+  %55 = extractvalue { i64, i64, ptr addrspace(1) } %54, 0
+  %56 = extractvalue { i64, i64, ptr addrspace(1) } %54, 1
   store i64 %55, ptr %ds
   store i64 %56, ptr %alloc
-  %57 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %54, 1, 0
+  %57 = extractvalue { i64, i64, ptr addrspace(1) } %54, 2
   store ptr addrspace(1) %57, ptr %5
   br label %L128
 L132:
@@ -444,8 +450,14 @@ L127:
 	cmp	x10, #16
 	b.lo	LBB0_4
 ; %bb.2:                                ; %L131
-	bl	_c_call_wrapper.caml_bytes_compare.2.ptr_addrspace_1_.ptr_addrspace_1_.ptr_addrspace_1_.1
-Ltmp0:
+	mov	x29, sp
+	.cfi_remember_state
+	.cfi_def_cfa_register w29
+	ldr	x16, [x28, #104]
+	mov	sp, x16
+	bl	_caml_bytes_compare
+	mov	sp, x29
+	.cfi_restore_state
 	ldr	x30, [sp, #8]                   ; 8-byte Folded Reload
 	add	sp, sp, #16
 	ret

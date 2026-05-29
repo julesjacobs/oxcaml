@@ -43,14 +43,14 @@ normal:
 }
 
 ; CHECK-LABEL: name: recover_after_setup
-; CHECK: bb.{{[0-9]+}}.exn_entry (machine-block-address-taken, ir-block-address-taken %ir-block.exn_entry, runtime-entered):
+; CHECK: bb.{{[0-9]+}}.exn_entry (machine-block-address-taken, ir-block-address-taken %ir-block.exn_entry, {{(landing-pad, )?}}runtime-entered):
 ; CHECK-NEXT: successors:
 ; CHECK-NEXT: liveins: $x0, $x26, $x27, $x28
 
 ; RUNTIME-LABEL: name: recover_after_setup
 ; RUNTIME: BL @callee
 ; RUNTIME-SAME: implicit-def dead $x22
-; RUNTIME: bb.{{[0-9]+}}.exn_entry (machine-block-address-taken, ir-block-address-taken %ir-block.exn_entry, runtime-entered):
+; RUNTIME: bb.{{[0-9]+}}.exn_entry (machine-block-address-taken, ir-block-address-taken %ir-block.exn_entry, {{(landing-pad, )?}}runtime-entered):
 ; RUNTIME: liveins: $x0, $x26, $x27, $x28
 ; RUNTIME: $q0 = IMPLICIT_DEF
 ; RUNTIME: $q31 = IMPLICIT_DEF
