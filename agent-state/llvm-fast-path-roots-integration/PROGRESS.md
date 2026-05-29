@@ -1294,3 +1294,42 @@ slots:
   Aggregate geomean 0.9983x, median 0.9910x. `typecore.ml` is 0.991x and
   `env.ml` is 0.992x.
 - Updated `NUMBERS.md` with the new validation and benchmark numbers.
+
+2026-05-29 raw heap-address canonicalization:
+
+- Reduced the iarray moving-GC crash to stale raw heap addresses derived from
+  `addrspace(1)` values but used as ordinary `addrspace(0)` memory operands
+  across statepoints. A loop-carried closure-code load in `Gen_u_iarray.init`
+  showed why a simple dominance-after-statepoint check was not enough: the load
+  can appear before the statepoint in a loop body while still being after the
+  previous iteration's statepoint.
+- Added an OxCaml-only RS4GC canonicalization that rewrites raw heap memory
+  operands back to typed `addrspace(1)` base-plus-offset addresses before
+  statepoint rewriting, so RS4GC sees and relocates the real object base.
+- Added LLVM IR coverage in
+  `vendor/llvm-project/llvm/test/Transforms/RewriteStatepointsForGC/oxcaml-raw-heap-addresses.ll`
+  and updated the explicit exception-root coverage for the canonicalized load
+  shape.
+- Added source regression
+  `testsuite/tests/typing-layouts-iarrays/test_float32_sort_moving_gc.ml`,
+  which sorts two float32 iarrays under a tiny minor heap to force movement
+  across the relevant generated code shape.
+- Validation:
+  - LLVM tools rebuilt: `ninja -C /tmp/oxcaml-agent-llvm-fast-path-roots-integration/llvm-build opt llc clang`.
+  - LLVM checks passed manually with `opt`/`FileCheck`.
+  - `make llvm-test-one DIR=typing-layouts-iarrays`: 81 passed, 0 failed.
+  - `make llvm-test-one DIR=llvm-codegen`: 89 passed, 3 skipped, 0 failed.
+  - Full LLVM-backend suite:
+    `full_suite_after_raw_heap_canonicalization_20260529_140100.log`,
+    6743 passed, 296 skipped, 0 failed.
+  - Full self-stage2 validation:
+    `stage2_after_raw_heap_canonicalization_20260529_140725.log`,
+    6717 passed, 283 skipped, 0 failed.
+- Benchmarks:
+  - Representative microbenchmarks:
+    `representative_microbenchmarks/summary_after_raw_heap_canonicalization_20260529_142901.json`,
+    geomean 0.8144x, median 0.9588x, max slowdown 1.0702x.
+  - Compiler-binary benchmark:
+    `compiler_binary_bench/summary_after_raw_heap_canonicalization_20260529_143216.json`,
+    geomean 0.9866x, median 0.9849x, max slowdown 1.0022x.
+  - Updated `NUMBERS.md` with the validation and benchmark details.
