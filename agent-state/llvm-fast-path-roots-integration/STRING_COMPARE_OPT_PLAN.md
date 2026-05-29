@@ -466,3 +466,26 @@ benchmark the full compiler binary against an unpatched LLVM-built baseline. If
 string compare remains visible and code size is acceptable, add the raw C-call
 design and evaluate `word_prefix_15_then_raw_memcmp` and
 `word_prefix_31_then_raw_memcmp` as follow-ups.
+
+## 2026-05-28 Env Benchmark Follow-Up
+
+While investigating the remaining exception slowdown after the AArch64
+`raise_notrace` pseudo, `env_find_same_layered_hit` showed a separate string
+compare issue:
+
+- The benchmark keys are length 17.
+- LLVM emits an inline short-string compare prelude in `ident_find_same`, but
+  because `min_len >= 16` it falls back to the helper anyway.
+- Native calls `caml_string_compare` directly at that site.
+- Manual assembly patch: branch directly to the existing helper fallback from
+  the non-pointer string path, skipping the LLVM inline prelude.
+- Measured result for `env_find_same_layered_hit`:
+  - native: about `0.361s`
+  - LLVM original: about `0.524s`
+  - LLVM with direct helper at this site: about `0.445s`
+
+Conclusion: this does not explain all of the layered exception slowdown, but it
+is a real independent cost. The first string-compare patch should avoid emitting
+a short-string prelude that immediately falls back for common length-17 strings.
+Either raise the direct compare threshold beyond 15 or make the threshold choice
+aware of measured compiler-like string lengths.

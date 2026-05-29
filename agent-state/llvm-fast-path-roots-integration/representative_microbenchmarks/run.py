@@ -614,6 +614,271 @@ let[@inline never] run n reps =
 let () = print_result (run (black_box_int n) (black_box_int reps))
 ''',
     },
+    "env_find_same_layered_one_node": {
+        "params": (1_200_000, 20),
+        "source": r'''
+exception Not_found_same
+
+type ident = { name : string; stamp : int }
+type tree = Empty | Node of tree * ident * int * tree
+type tbl = { current : tree; layer : layer }
+and layer = Nothing | Open of tbl | Lock of tbl
+
+let fresh s = Bytes.to_string (Bytes.of_string s)
+let key = "env_layered_id_00"
+
+let[@inline never] ident_find_same id = function
+  | Empty -> raise Not_found_same
+  | Node (_, k, value, _) ->
+    if id.stamp = k.stamp && String.equal id.name k.name
+    then value
+    else raise Not_found_same
+
+let[@inline never] rec find_same_without_locks id tbl =
+  try ident_find_same id tbl.current
+  with Not_found_same ->
+    match tbl.layer with
+    | Open next -> find_same_without_locks id next
+    | Lock next -> find_same_without_locks id next
+    | Nothing -> raise Not_found_same
+
+let rec open_layers n tail =
+  if n = 0 then tail
+  else
+    { current = Empty;
+      layer =
+        if n land 1 = 0
+        then Open (open_layers (n - 1) tail)
+        else Lock (open_layers (n - 1) tail) }
+
+let[@inline never] run n reps =
+  let bottom =
+    { current = Node (Empty, { name = key; stamp = 0 }, 1, Empty);
+      layer = Nothing }
+  in
+  let tbl = open_layers 6 bottom in
+  let id = { name = fresh key; stamp = 0 } in
+  let acc = ref 0 in
+  for _ = 1 to reps do
+    for _ = 1 to n do
+      acc := !acc + find_same_without_locks id tbl
+    done
+  done;
+  !acc
+
+let () = print_result (run (black_box_int n) (black_box_int reps))
+''',
+    },
+    "env_find_same_layered_int_key": {
+        "params": (1_500_000, 20),
+        "source": r'''
+exception Not_found_same
+
+type ident = { stamp : int }
+type tree = Empty | Node of tree * ident * int * tree
+type tbl = { current : tree; layer : layer }
+and layer = Nothing | Open of tbl | Lock of tbl
+
+let[@inline never] ident_find_same id = function
+  | Empty -> raise Not_found_same
+  | Node (_, k, value, _) ->
+    if id.stamp = k.stamp then value else raise Not_found_same
+
+let[@inline never] rec find_same_without_locks id tbl =
+  try ident_find_same id tbl.current
+  with Not_found_same ->
+    match tbl.layer with
+    | Open next -> find_same_without_locks id next
+    | Lock next -> find_same_without_locks id next
+    | Nothing -> raise Not_found_same
+
+let rec open_layers n tail =
+  if n = 0 then tail
+  else
+    { current = Empty;
+      layer =
+        if n land 1 = 0
+        then Open (open_layers (n - 1) tail)
+        else Lock (open_layers (n - 1) tail) }
+
+let[@inline never] run n reps =
+  let bottom =
+    { current = Node (Empty, { stamp = 0 }, 1, Empty); layer = Nothing }
+  in
+  let tbl = open_layers 6 bottom in
+  let id = { stamp = 0 } in
+  let acc = ref 0 in
+  for _ = 1 to reps do
+    for _ = 1 to n do
+      acc := !acc + find_same_without_locks id tbl
+    done
+  done;
+  !acc
+
+let () = print_result (run (black_box_int n) (black_box_int reps))
+''',
+    },
+    "layered_try_raise_hit_only": {
+        "params": (2_500_000, 20),
+        "source": r'''
+exception Not_found_same
+
+type tbl = { hit : bool; layer : layer }
+and layer = Nothing | Open of tbl | Lock of tbl
+
+let[@inline never] probe tbl =
+  if tbl.hit then 1 else raise Not_found_same
+
+let[@inline never] rec find tbl =
+  try probe tbl
+  with Not_found_same ->
+    match tbl.layer with
+    | Open next -> find next
+    | Lock next -> find next
+    | Nothing -> raise Not_found_same
+
+let rec open_layers n tail =
+  if n = 0 then tail
+  else
+    { hit = false;
+      layer =
+        if n land 1 = 0
+        then Open (open_layers (n - 1) tail)
+        else Lock (open_layers (n - 1) tail) }
+
+let[@inline never] run n reps =
+  let tbl = open_layers 6 { hit = true; layer = Nothing } in
+  let acc = ref 0 in
+  for _ = 1 to reps do
+    for _ = 1 to n do
+      acc := !acc + find tbl
+    done
+  done;
+  !acc
+
+let () = print_result (run (black_box_int n) (black_box_int reps))
+''',
+    },
+    "layered_try_raise_inline_hit_only": {
+        "params": (2_500_000, 20),
+        "source": r'''
+exception Not_found_same
+
+type tbl = { hit : bool; layer : layer }
+and layer = Nothing | Open of tbl | Lock of tbl
+
+let[@inline never] rec find tbl =
+  try
+    if tbl.hit then 1 else raise Not_found_same
+  with Not_found_same ->
+    match tbl.layer with
+    | Open next -> find next
+    | Lock next -> find next
+    | Nothing -> raise Not_found_same
+
+let rec open_layers n tail =
+  if n = 0 then tail
+  else
+    { hit = false;
+      layer =
+        if n land 1 = 0
+        then Open (open_layers (n - 1) tail)
+        else Lock (open_layers (n - 1) tail) }
+
+let[@inline never] run n reps =
+  let tbl = open_layers 6 { hit = true; layer = Nothing } in
+  let acc = ref 0 in
+  for _ = 1 to reps do
+    for _ = 1 to n do
+      acc := !acc + find tbl
+    done
+  done;
+  !acc
+
+let () = print_result (run (black_box_int n) (black_box_int reps))
+''',
+    },
+    "layered_no_exception_hit_only": {
+        "params": (5_000_000, 20),
+        "source": r'''
+type tbl = { hit : bool; layer : layer }
+and layer = Nothing | Open of tbl | Lock of tbl
+
+let[@inline never] rec find tbl =
+  if tbl.hit then 1
+  else
+    match tbl.layer with
+    | Open next -> find next
+    | Lock next -> find next
+    | Nothing -> 0
+
+let rec open_layers n tail =
+  if n = 0 then tail
+  else
+    { hit = false;
+      layer =
+        if n land 1 = 0
+        then Open (open_layers (n - 1) tail)
+        else Lock (open_layers (n - 1) tail) }
+
+let[@inline never] run n reps =
+  let tbl = open_layers 6 { hit = true; layer = Nothing } in
+  let acc = ref 0 in
+  for _ = 1 to reps do
+    for _ = 1 to n do
+      acc := !acc + find tbl
+    done
+  done;
+  !acc
+
+let () = print_result (run (black_box_int n) (black_box_int reps))
+''',
+    },
+    "try_raise_cross_function_caught": {
+        "params": (5_000_000, 20),
+        "source": r'''
+exception Miss
+
+let[@inline never] probe x =
+  if x = 0 then raise Miss else x
+
+let[@inline never] find x =
+  try probe x with Miss -> 1
+
+let[@inline never] run n reps =
+  let acc = ref 0 in
+  for _ = 1 to reps do
+    for _ = 1 to n do
+      acc := !acc + find 0
+    done
+  done;
+  !acc
+
+let () = print_result (run (black_box_int n) (black_box_int reps))
+''',
+    },
+    "try_raise_inline_caught": {
+        "params": (5_000_000, 20),
+        "source": r'''
+exception Miss
+
+let[@inline never] find x =
+  try
+    if x = 0 then raise Miss else x
+  with Miss -> 1
+
+let[@inline never] run n reps =
+  let acc = ref 0 in
+  for _ = 1 to reps do
+    for _ = 1 to n do
+      acc := !acc + find 0
+    done
+  done;
+  !acc
+
+let () = print_result (run (black_box_int n) (black_box_int reps))
+''',
+    },
     "string_compare_short_equal_loop": {
         "params": (3_000_000, 20),
         "source": r'''

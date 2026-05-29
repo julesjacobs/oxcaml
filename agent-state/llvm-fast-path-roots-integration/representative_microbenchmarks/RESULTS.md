@@ -9,6 +9,76 @@ each case twice: once with the normal native backend and once with
 `-llvm-backend`. The timed binaries were then run with the same benchmark
 arguments and interleaved native/LLVM timing pairs.
 
+## 2026-05-28 After Explicit Exception Roots And Non-Volatile Root Slots
+
+Commands:
+
+```sh
+eval "$(../../../scripts/agent-tmp-env)"
+PAIRS=3 LLVM_PATH="$LLVM_PATH" \
+  agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/run.sh \
+  2>&1 | tee agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/run_after_exnroot_volatile_removal_20260528_232227.log
+cp agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/.build/summary.json \
+  agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/summary_after_exnroot_volatile_removal_20260528_232227.json
+
+CASES=env_find_same_layered_hit,string_tree_prefix_heavy,higher_order_fold_string_keys,string_map_equal_content,try_with_string_compare_hit,string_tree_first_byte_diff,string_equal_guarded_dispatch,closure_call_in_try_hit,direct_call_in_try_hit,variant_dispatch_with_string_payload,variant_dispatch_with_int_payload \
+PAIRS=7 LLVM_PATH="$LLVM_PATH" \
+  agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/run.sh \
+  2>&1 | tee agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/run_after_exnroot_volatile_removal_focused_20260528_232542.log
+cp agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/.build/summary.json \
+  agent-state/llvm-fast-path-roots-integration/representative_microbenchmarks/summary_after_exnroot_volatile_removal_focused_20260528_232542.json
+```
+
+Full PAIRS=3 aggregate:
+
+| Metric | Value |
+| --- | ---: |
+| Cases | 43 |
+| Geomean LLVM/native | 0.8765x |
+| Median LLVM/native | 1.0090x |
+| Max LLVM/native | 1.2578x |
+| Min LLVM/native | 0.2826x |
+
+Top full-run slowdowns:
+
+| Case | Native median | LLVM median | LLVM/native | `_wrap_try` refs |
+| --- | ---: | ---: | ---: | ---: |
+| `env_find_same_layered_hit` | 0.3400s | 0.4276s | 1.258x | 0 |
+| `string_tree_prefix_heavy` | 0.3567s | 0.4471s | 1.253x | 0 |
+| `higher_order_fold_string_keys` | 1.1585s | 1.4254s | 1.230x | 0 |
+| `string_map_equal_content` | 0.2619s | 0.3179s | 1.214x | 0 |
+| `try_with_string_compare_hit` | 0.2719s | 0.3297s | 1.213x | 0 |
+| `string_tree_first_byte_diff` | 0.4177s | 0.5045s | 1.208x | 0 |
+| `string_equal_guarded_dispatch` | 0.1297s | 0.1552s | 1.197x | 0 |
+| `closure_call_in_try_hit` | 0.0739s | 0.0874s | 1.183x | 0 |
+| `list_lookup_string_compare` | 0.8350s | 0.9850s | 1.180x | 0 |
+| `closure_call_in_nested_try_hit` | 0.0496s | 0.0575s | 1.158x | 0 |
+
+Focused PAIRS=7 check:
+
+| Case | Native median | LLVM median | LLVM/native | `_wrap_try` refs |
+| --- | ---: | ---: | ---: | ---: |
+| `try_with_string_compare_hit` | 0.2552s | 0.3443s | 1.349x | 0 |
+| `env_find_same_layered_hit` | 0.3379s | 0.4452s | 1.317x | 0 |
+| `string_tree_prefix_heavy` | 0.3506s | 0.4566s | 1.302x | 0 |
+| `string_map_equal_content` | 0.2585s | 0.3238s | 1.252x | 0 |
+| `higher_order_fold_string_keys` | 1.1695s | 1.4231s | 1.217x | 0 |
+| `string_tree_first_byte_diff` | 0.4175s | 0.5004s | 1.199x | 0 |
+| `closure_call_in_try_hit` | 0.0733s | 0.0858s | 1.170x | 0 |
+| `string_equal_guarded_dispatch` | 0.1382s | 0.1614s | 1.168x | 0 |
+| `direct_call_in_try_hit` | 0.0544s | 0.0621s | 1.143x | 0 |
+| `variant_dispatch_with_int_payload` | 0.1095s | 0.0778s | 0.710x | 0 |
+| `variant_dispatch_with_string_payload` | 0.0540s | 0.0383s | 0.709x | 0 |
+
+Compared with `summary_stage2_validated_20260528_165527.json`, the full run's
+maximum slowdown improved from 1.488x to 1.258x. The direct-call-in-try case
+improved from 1.488x to 1.009x in the full run, and the closure-call-in-try
+case improved from 1.334x to 1.183x. All measured `_wrap_try` refs in these
+runs are now zero.
+
+The remaining top slowdowns are no longer the old trap-wrapper path. They are
+mostly string/helper-heavy shapes and the layered environment lookup shape.
+
 ## 2026-05-27 Refresh
 
 Command:
