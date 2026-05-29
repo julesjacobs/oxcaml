@@ -19,6 +19,7 @@
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
@@ -41,6 +42,7 @@
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicsAArch64.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/LLVMContext.h"
@@ -311,6 +313,15 @@ struct PartiallyConstructedSafepointRecord {
   /// They are not included into 'LiveSet' field.
   /// Maps rematerialized copy to it's original value.
   RematerializedValueMapTy RematerializedValues;
+
+  /// Late materialized explicit stack roots that should be listed in the
+  /// statepoint's gc-live bundle but should not get gc.relocate calls.
+  SmallVector<Value *, 4> ExplicitRootSlots;
+
+  /// This invoke unwinds to an OxCaml trap recovery landingpad whose
+  /// handler-live GC values have been materialized into ExplicitRootSlots.
+  /// Do not insert exceptional gc.relocate calls on that unwind path.
+  bool UsesExplicitExceptionRoots = false;
 };
 
 struct RematerizlizationCandidateRecord {
@@ -322,6 +333,9 @@ struct RematerizlizationCandidateRecord {
   InstructionCost Cost;
 };
 using RematCandTy = MapVector<Value *, RematerizlizationCandidateRecord>;
+
+using ExplicitRootSlotMapTy = DenseMap<CallBase *, SmallVector<Value *, 4>>;
+using ExplicitExceptionRootCallSetTy = DenseSet<CallBase *>;
 
 } // end anonymous namespace
 
@@ -373,6 +387,50 @@ static bool isHandledGCPointerType(Type *T) {
     if (isGCPointerType(VT->getElementType()))
       return true;
   return false;
+}
+
+static bool isOxCamlFunction(const Function &F);
+
+static Constant *getOxCamlNonMovingImmediate(Type *Ty) {
+  assert(isHandledGCPointerType(Ty) &&
+         "expected a GC pointer or vector of GC pointers");
+
+  auto *One = ConstantInt::get(Type::getInt64Ty(Ty->getContext()), 1);
+  if (isGCPointerType(Ty))
+    return ConstantExpr::getIntToPtr(One, Ty);
+
+  auto *VT = cast<VectorType>(Ty);
+  Type *EltTy = VT->getElementType();
+  assert(isGCPointerType(EltTy) && "expected a vector of GC pointers");
+  Constant *Elt = ConstantExpr::getIntToPtr(One, EltTy);
+  return ConstantVector::getSplat(VT->getElementCount(), Elt);
+}
+
+static Value *nonPoisonOxCamlGCPointerValue(Value *V) {
+  if (!isa<UndefValue>(V) && !isa<PoisonValue>(V))
+    return V;
+  if (!isHandledGCPointerType(V->getType()))
+    return V;
+  return getOxCamlNonMovingImmediate(V->getType());
+}
+
+static bool sanitizeOxCamlUndefinedGCPointers(Function &F) {
+  if (!isOxCamlFunction(F))
+    return false;
+
+  bool Changed = false;
+  for (Instruction &I : instructions(F)) {
+    for (Use &U : I.operands()) {
+      Value *V = U.get();
+      Value *Replacement = nonPoisonOxCamlGCPointerValue(V);
+      if (Replacement == V)
+        continue;
+
+      U.set(Replacement);
+      Changed = true;
+    }
+  }
+  return Changed;
 }
 
 #ifndef NDEBUG
@@ -1574,6 +1632,360 @@ normalizeForInvokeSafepoint(BasicBlock *BB, BasicBlock *InvokeParent,
   return Ret;
 }
 
+static bool isOxCamlFunction(const Function &F) {
+  return F.hasGC() && F.getGC() == "oxcaml";
+}
+
+static IntrinsicInst *getOxCamlTrapRecover(BasicBlock &BB) {
+  for (Instruction &I : BB) {
+    auto *II = dyn_cast<IntrinsicInst>(&I);
+    if (II && II->getIntrinsicID() ==
+                  Intrinsic::aarch64_oxcaml_trap_recover)
+      return II;
+  }
+  return nullptr;
+}
+
+static bool isOxCamlRecoveryBlockStart(BasicBlock &BB,
+                                       IntrinsicInst *Recover) {
+  if (!Recover)
+    return false;
+
+  bool SawLandingPad = false;
+  for (Instruction &I : BB) {
+    if (isa<PHINode>(I) || I.isDebugOrPseudoInst())
+      continue;
+    if (auto *LPad = dyn_cast<LandingPadInst>(&I)) {
+      if (!LPad->getType()->isTokenTy() || !LPad->isCleanup() ||
+          SawLandingPad)
+        return false;
+      SawLandingPad = true;
+      continue;
+    }
+    return &I == Recover;
+  }
+  return false;
+}
+
+static bool isBranchOnlyOxCamlRecoveryLandingPad(BasicBlock *BB,
+                                                 BasicBlock *Target,
+                                                 bool AllowPHIs = false) {
+  if (!BB || (!AllowPHIs && BB->phis().begin() != BB->phis().end()))
+    return false;
+
+  LandingPadInst *LPad = BB->getLandingPadInst();
+  if (!LPad || !LPad->getType()->isTokenTy() || !LPad->isCleanup())
+    return false;
+
+  bool SawLandingPad = false;
+  for (Instruction &I : *BB) {
+    if ((AllowPHIs && isa<PHINode>(I)) || I.isDebugOrPseudoInst())
+      continue;
+    if (&I == LPad) {
+      SawLandingPad = true;
+      continue;
+    }
+    auto *II = dyn_cast<IntrinsicInst>(&I);
+    if (SawLandingPad && II &&
+        II->getIntrinsicID() == Intrinsic::experimental_gc_relocate)
+      continue;
+    auto *Br = dyn_cast<BranchInst>(&I);
+    return SawLandingPad && Br && Br->isUnconditional() &&
+           Br->getSuccessor(0) == Target;
+  }
+  return false;
+}
+
+struct OxCamlRecoveryStoreSite {
+  InvokeInst *Invoke;
+  BasicBlock *PhiIncomingBlock;
+};
+
+static bool
+collectOxCamlRecoveryStoreSites(BasicBlock &RecoveryBB, BasicBlock *IncomingBB,
+                                SmallVectorImpl<OxCamlRecoveryStoreSite> &Out) {
+  if (auto *II = dyn_cast<InvokeInst>(IncomingBB->getTerminator())) {
+    if (II->getUnwindDest() == &RecoveryBB) {
+      Out.push_back({II, IncomingBB});
+      return true;
+    }
+  }
+
+  if (!isBranchOnlyOxCamlRecoveryLandingPad(IncomingBB, &RecoveryBB))
+    return false;
+
+  bool SawInvoke = false;
+  for (BasicBlock *Pred : predecessors(IncomingBB)) {
+    auto *II = dyn_cast<InvokeInst>(Pred->getTerminator());
+    if (!II || II->getUnwindDest() != IncomingBB)
+      return false;
+    Out.push_back({II, IncomingBB});
+    SawInvoke = true;
+  }
+  return SawInvoke;
+}
+
+static bool collectDirectOxCamlRecoveryStoreSites(
+    BasicBlock &RecoveryBB, SmallVectorImpl<OxCamlRecoveryStoreSite> &Out) {
+  bool SawInvoke = false;
+  for (BasicBlock *Pred : predecessors(&RecoveryBB)) {
+    auto *II = dyn_cast<InvokeInst>(Pred->getTerminator());
+    if (!II || II->getUnwindDest() != &RecoveryBB)
+      return false;
+    Out.push_back({II, Pred});
+    SawInvoke = true;
+  }
+  return SawInvoke;
+}
+
+static BasicBlock *
+getOxCamlTrapRecoveryTargetShapeOnly(BasicBlock *BB,
+                                     SmallPtrSetImpl<BasicBlock *> &Visited) {
+  if (!BB || !Visited.insert(BB).second)
+    return nullptr;
+
+  if (isOxCamlRecoveryBlockStart(*BB, getOxCamlTrapRecover(*BB)))
+    return BB;
+
+  if (BB->phis().begin() != BB->phis().end())
+    return nullptr;
+
+  LandingPadInst *LPad = BB->getLandingPadInst();
+  if (!LPad || !LPad->getType()->isTokenTy() || !LPad->isCleanup())
+    return nullptr;
+
+  bool SawLandingPad = false;
+  for (Instruction &I : *BB) {
+    if (I.isDebugOrPseudoInst())
+      continue;
+    if (&I == LPad) {
+      SawLandingPad = true;
+      continue;
+    }
+    auto *II = dyn_cast<IntrinsicInst>(&I);
+    if (SawLandingPad && II &&
+        II->getIntrinsicID() == Intrinsic::experimental_gc_relocate)
+      continue;
+    auto *Br = dyn_cast<BranchInst>(&I);
+    if (!SawLandingPad || !Br || !Br->isUnconditional())
+      return nullptr;
+    return getOxCamlTrapRecoveryTargetShapeOnly(Br->getSuccessor(0), Visited);
+  }
+
+  return nullptr;
+}
+
+static BasicBlock *getOxCamlTrapRecoveryTargetShapeOnly(BasicBlock *BB) {
+  SmallPtrSet<BasicBlock *, 8> Visited;
+  return getOxCamlTrapRecoveryTargetShapeOnly(BB, Visited);
+}
+
+static Value *nonPoisonTrapRecoverySlotValue(Value *V) {
+  Type *Ty = V->getType();
+  if (!isa<UndefValue>(V) && !isa<PoisonValue>(V))
+    return V;
+
+  if (isHandledGCPointerType(Ty))
+    return getOxCamlNonMovingImmediate(Ty);
+  return Constant::getNullValue(Ty);
+}
+
+static bool materializeOxCamlExceptionRootSlots(
+    Function &F, DominatorTree &DT, ExplicitRootSlotMapTy &ExplicitRootSlots,
+    ExplicitExceptionRootCallSetTy &ExplicitExceptionRootCalls,
+    DefiningValueMapTy &DVCache, IsKnownBaseMapTy &KnownBases) {
+  if (!isOxCamlFunction(F))
+    return false;
+
+  const DataLayout &DL = F.getParent()->getDataLayout();
+  bool Changed = false;
+  SmallVector<PHINode *, 8> HandlerLivePhis;
+  SmallVector<Value *, 8> HandlerLiveGCValues;
+  DenseSet<Value *> SeenHandlerLiveGCValues;
+
+  for (BasicBlock &BB : F) {
+    IntrinsicInst *Recover = getOxCamlTrapRecover(BB);
+    if (!isOxCamlRecoveryBlockStart(BB, Recover))
+      continue;
+
+    HandlerLivePhis.clear();
+    for (PHINode &PN : BB.phis()) {
+      HandlerLivePhis.push_back(&PN);
+    }
+    for (BasicBlock *Pred : predecessors(&BB)) {
+      if (!isBranchOnlyOxCamlRecoveryLandingPad(Pred, &BB,
+                                                /*AllowPHIs=*/true))
+        continue;
+      for (PHINode &PN : Pred->phis())
+        HandlerLivePhis.push_back(&PN);
+    }
+
+    HandlerLiveGCValues.clear();
+    SeenHandlerLiveGCValues.clear();
+    for (Instruction &I : BB) {
+      if (!Recover->comesBefore(&I))
+        continue;
+
+      for (Use &U : I.operands()) {
+        Value *V = U.get();
+        if (!isHandledGCPointerType(V->getType()) || isa<Constant>(V))
+          continue;
+        if (auto *VI = dyn_cast<Instruction>(V))
+          if (VI->getParent() == &BB)
+            continue;
+        if (SeenHandlerLiveGCValues.insert(V).second)
+          HandlerLiveGCValues.push_back(V);
+      }
+    }
+
+    if (HandlerLivePhis.empty() && HandlerLiveGCValues.empty())
+      continue;
+
+    auto IsBaseValue = [&](Value *V) {
+      return findBasePointer(V, DVCache, KnownBases) == V;
+    };
+
+    bool CanMaterializeWholeBlock = true;
+    for (Value *V : HandlerLiveGCValues)
+      if (!IsBaseValue(V))
+        CanMaterializeWholeBlock = false;
+    if (!CanMaterializeWholeBlock)
+      continue;
+
+    IRBuilder<> EntryBuilder(&*F.getEntryBlock().getFirstInsertionPt());
+    IRBuilder<> RecoverBuilder(Recover->getNextNode());
+
+    auto MaterializeRootSlot =
+        [&](Value *HandlerValue, BasicBlock &StoreSiteBB,
+            function_ref<Value *(OxCamlRecoveryStoreSite)> EdgeValueForSite) {
+          auto *Slot = EntryBuilder.CreateAlloca(
+              HandlerValue->getType(), DL.getAllocaAddrSpace(), nullptr,
+              suffixed_name_or(HandlerValue, ".exnroot", "exnroot"));
+          Slot->setAlignment(DL.getABITypeAlign(HandlerValue->getType()));
+          bool IsGCRoot = isHandledGCPointerType(HandlerValue->getType());
+
+          SmallVector<OxCamlRecoveryStoreSite, 8> StoreSites;
+          if (&StoreSiteBB == &BB) {
+            for (BasicBlock *Pred : predecessors(&BB)) {
+              if (!collectOxCamlRecoveryStoreSites(BB, Pred, StoreSites))
+                report_fatal_error("unsupported OxCaml recovery predecessor "
+                                   "for explicit exception roots");
+            }
+          } else if (!collectDirectOxCamlRecoveryStoreSites(StoreSiteBB,
+                                                           StoreSites)) {
+            report_fatal_error("unsupported OxCaml recovery trampoline "
+                               "predecessor for explicit exception roots");
+          }
+
+          for (OxCamlRecoveryStoreSite StoreSite : StoreSites) {
+            InvokeInst *II = StoreSite.Invoke;
+            Value *EdgeValue =
+                nonPoisonTrapRecoverySlotValue(EdgeValueForSite(StoreSite));
+            if (auto *EdgeInst = dyn_cast<Instruction>(EdgeValue))
+              if (!DT.dominates(EdgeInst, II))
+                report_fatal_error(
+                    "explicit exception root value does not dominate invoke");
+
+            IRBuilder<> StoreBuilder(II);
+            StoreBuilder.CreateAlignedStore(
+                EdgeValue, Slot, DL.getABITypeAlign(HandlerValue->getType()));
+            if (IsGCRoot)
+              ExplicitRootSlots[II].push_back(Slot);
+            ExplicitExceptionRootCalls.insert(II);
+          }
+
+          LoadInst *Load = RecoverBuilder.CreateAlignedLoad(
+              HandlerValue->getType(), Slot,
+              DL.getABITypeAlign(HandlerValue->getType()),
+              suffixed_name_or(HandlerValue, ".exnroot.load",
+                               "exnroot.load"));
+          return Load;
+        };
+
+    for (PHINode *PN : HandlerLivePhis) {
+      LoadInst *Load =
+          MaterializeRootSlot(PN, *PN->getParent(), [&](OxCamlRecoveryStoreSite StoreSite) {
+        BasicBlock *IncomingBlock = StoreSite.PhiIncomingBlock;
+        for (unsigned I = 0, E = PN->getNumIncomingValues(); I != E; ++I) {
+          if (PN->getIncomingBlock(I) == IncomingBlock)
+            return PN->getIncomingValue(I);
+        }
+        report_fatal_error("missing OxCaml recovery PHI incoming value");
+      });
+
+      PN->replaceAllUsesWith(Load);
+      PN->eraseFromParent();
+      Changed = true;
+    }
+
+    for (Value *V : HandlerLiveGCValues) {
+      LoadInst *Load =
+          MaterializeRootSlot(V, BB,
+                              [&](OxCamlRecoveryStoreSite) { return V; });
+      for (Instruction &I : BB) {
+        if (!Recover->comesBefore(&I) || &I == Load)
+          continue;
+        I.replaceUsesOfWith(V, Load);
+      }
+      Changed = true;
+    }
+  }
+
+  if (Changed)
+    DT.recalculate(F);
+  return Changed;
+}
+
+static bool appendExplicitRootSlotsToStatepoints(
+    const ExplicitRootSlotMapTy &ExplicitRootSlots) {
+  bool Changed = false;
+  for (const auto &Pair : ExplicitRootSlots) {
+    CallBase *Call = Pair.first;
+    ArrayRef<Value *> Slots = Pair.second;
+    if (Slots.empty())
+      continue;
+
+    SmallVector<OperandBundleDef, 4> Bundles;
+    Call->getOperandBundlesAsDefs(Bundles);
+
+    bool FoundGCLive = false;
+    bool ChangedThisCall = false;
+    for (OperandBundleDef &Bundle : Bundles) {
+      if (Bundle.getTag() != "gc-live")
+        continue;
+
+      FoundGCLive = true;
+      SmallVector<Value *, 64> Inputs(Bundle.input_begin(),
+                                      Bundle.input_end());
+      SmallPtrSet<Value *, 16> Seen(Inputs.begin(), Inputs.end());
+      for (Value *Slot : Slots) {
+        if (!Seen.insert(Slot).second)
+          continue;
+        Inputs.push_back(Slot);
+        ChangedThisCall = true;
+      }
+      if (ChangedThisCall)
+        Bundle = OperandBundleDef("gc-live", Inputs);
+      break;
+    }
+
+    if (!FoundGCLive) {
+      Bundles.emplace_back("gc-live", Slots);
+      ChangedThisCall = true;
+    }
+
+    if (!ChangedThisCall)
+      continue;
+
+    CallBase *NewCall = CallBase::Create(Call, Bundles, Call);
+    Call->replaceAllUsesWith(NewCall);
+    NewCall->takeName(Call);
+    Call->eraseFromParent();
+    Changed = true;
+  }
+  return Changed;
+}
+
 // List of all function attributes which must be stripped when lowering from
 // abstract machine model to physical machine model.  Essentially, these are
 // all the effects a safepoint might have which we ignored in the abstract
@@ -1938,8 +2350,9 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
       RematerializedDerivedValues.insert(LiveVariable);
       continue;
     }
-    FilteredLiveVariables.push_back(LiveVariable);
-    FilteredBasePtrs.push_back(BasePtrs[I]);
+    FilteredLiveVariables.push_back(
+        nonPoisonOxCamlGCPointerValue(LiveVariable));
+    FilteredBasePtrs.push_back(nonPoisonOxCamlGCPointerValue(BasePtrs[I]));
   }
 
   SmallVector<Value *, 16> GCArgsStorage(FilteredLiveVariables.begin(),
@@ -1947,8 +2360,9 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
   if (auto Bundle = Call->getOperandBundle(LLVMContext::OB_gc_live))
     for (const Use &U : Bundle->Inputs) {
       if (!RematerializedDerivedValues.contains(U.get()))
-        GCArgsStorage.push_back(U.get());
+        GCArgsStorage.push_back(nonPoisonOxCamlGCPointerValue(U.get()));
     }
+  llvm::append_range(GCArgsStorage, Result.ExplicitRootSlots);
   ArrayRef<Value *> GCArgs(GCArgsStorage);
   uint64_t StatepointID = StatepointDirectives::DefaultStatepointID;
   uint32_t NumPatchBytes = 0;
@@ -2162,19 +2576,25 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
 
     // Generate gc relocates in exceptional path
     BasicBlock *UnwindBlock = II->getUnwindDest();
-    assert(!isa<PHINode>(UnwindBlock->begin()) &&
-           UnwindBlock->getUniquePredecessor() &&
-           "can't safely insert in this block!");
+    if (Result.UsesExplicitExceptionRoots) {
+      Result.UnwindToken = UnwindBlock->getLandingPadInst();
+      assert(Result.UnwindToken &&
+             "explicit exception roots require a landingpad unwind block");
+    } else {
+      assert(!isa<PHINode>(UnwindBlock->begin()) &&
+             UnwindBlock->getUniquePredecessor() &&
+             "can't safely insert in this block!");
 
-    Builder.SetInsertPoint(&*UnwindBlock->getFirstInsertionPt());
-    Builder.SetCurrentDebugLocation(II->getDebugLoc());
+      Builder.SetInsertPoint(&*UnwindBlock->getFirstInsertionPt());
+      Builder.SetCurrentDebugLocation(II->getDebugLoc());
 
-    // Attach exceptional gc relocates to the landingpad.
-    Instruction *ExceptionalToken = UnwindBlock->getLandingPadInst();
-    Result.UnwindToken = ExceptionalToken;
+      // Attach exceptional gc relocates to the landingpad.
+      Instruction *ExceptionalToken = UnwindBlock->getLandingPadInst();
+      Result.UnwindToken = ExceptionalToken;
 
-    CreateGCRelocates(FilteredLiveVariables, FilteredBasePtrs,
-                      ExceptionalToken, Builder);
+      CreateGCRelocates(FilteredLiveVariables, FilteredBasePtrs,
+                        ExceptionalToken, Builder);
+    }
 
     // Generate gc relocates and returns for normal block
     BasicBlock *NormalDest = II->getNormalDest();
@@ -2372,6 +2792,17 @@ static void relocationViaAlloca(
                                         F.getEntryBlock().getFirstNonPHI());
     AllocaMap[LiveValue] = Alloca;
     PromotableAllocas.push_back(Alloca);
+
+    // OCaml frame tables may describe any promoted value as a runtime-scanned
+    // root after mem2reg.  If no defining store reaches a path, mem2reg would
+    // otherwise synthesize undef.  Choose a valid non-moving OCaml immediate
+    // for those abstract undefined paths so no physical root slot can contain
+    // arbitrary bits.
+    if (isOxCamlFunction(F) && !isa<Argument>(LiveValue) &&
+        isHandledGCPointerType(LiveValue->getType())) {
+      new StoreInst(getOxCamlNonMovingImmediate(LiveValue->getType()), Alloca,
+                    Alloca->getNextNode());
+    }
   };
 
   // Emit alloca for each live gc pointer
@@ -2409,7 +2840,7 @@ static void relocationViaAlloca(
 
     // In case if it was invoke statepoint
     // we will insert stores for exceptional path gc relocates.
-    if (isa<InvokeInst>(Statepoint)) {
+    if (isa<InvokeInst>(Statepoint) && !Info.UsesExplicitExceptionRoots) {
       insertRelocationStores(Info.UnwindToken->users(), AllocaMap,
                              VisitedLiveValues);
     }
@@ -2452,7 +2883,8 @@ static void relocationViaAlloca(
       // gc.results and gc.relocates, but that's fine.
       if (auto II = dyn_cast<InvokeInst>(Statepoint)) {
         InsertClobbersAt(&*II->getNormalDest()->getFirstInsertionPt());
-        InsertClobbersAt(&*II->getUnwindDest()->getFirstInsertionPt());
+        if (!Info.UsesExplicitExceptionRoots)
+          InsertClobbersAt(&*II->getUnwindDest()->getFirstInsertionPt());
       } else {
         InsertClobbersAt(cast<Instruction>(Statepoint)->getNextNode());
       }
@@ -2905,6 +3337,14 @@ static void rematerializeLiveValues(CallBase *Call,
           rematerializeChain(Record.ChainToBase, InsertBefore,
                              Record.RootOfChain, PointerToBase[LiveValue]);
       Info.RematerializedValues[RematerializedValue] = LiveValue;
+    } else if (Info.UsesExplicitExceptionRoots) {
+      auto *Invoke = cast<InvokeInst>(Call);
+      Instruction *NormalInsertBefore =
+          &*Invoke->getNormalDest()->getFirstInsertionPt();
+      Instruction *NormalRematerializedValue =
+          rematerializeChain(Record.ChainToBase, NormalInsertBefore,
+                             Record.RootOfChain, PointerToBase[LiveValue]);
+      Info.RematerializedValues[NormalRematerializedValue] = LiveValue;
     } else {
       auto *Invoke = cast<InvokeInst>(Call);
 
@@ -2998,6 +3438,21 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
     assert(Call->getFunction() == &F);
 #endif
 
+  ExplicitRootSlotMapTy ExplicitRootSlots;
+  ExplicitExceptionRootCallSetTy ExplicitExceptionRootCalls;
+  materializeOxCamlExceptionRootSlots(F, DT, ExplicitRootSlots,
+                                      ExplicitExceptionRootCalls, DVCache,
+                                      KnownBases);
+  if (isOxCamlFunction(F)) {
+    for (CallBase *Call : ToUpdate) {
+      auto *II = dyn_cast<InvokeInst>(Call);
+      if (!II)
+        continue;
+      if (getOxCamlTrapRecoveryTargetShapeOnly(II->getUnwindDest()))
+        ExplicitExceptionRootCalls.insert(II);
+    }
+  }
+
   // When inserting gc.relocates for invokes, we need to be able to insert at
   // the top of the successor blocks.  See the comment on
   // normalForInvokeSafepoint on exactly what is needed.  Note that this step
@@ -3007,7 +3462,8 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
     if (!II)
       continue;
     normalizeForInvokeSafepoint(II->getNormalDest(), II->getParent(), DT);
-    normalizeForInvokeSafepoint(II->getUnwindDest(), II->getParent(), DT);
+    if (!ExplicitExceptionRootCalls.contains(II))
+      normalizeForInvokeSafepoint(II->getUnwindDest(), II->getParent(), DT);
   }
 
   // A list of dummy calls added to the IR to keep various values obviously
@@ -3032,6 +3488,13 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
   }
 
   SmallVector<PartiallyConstructedSafepointRecord, 64> Records(ToUpdate.size());
+  for (size_t I = 0; I < ToUpdate.size(); ++I) {
+    auto SlotIt = ExplicitRootSlots.find(ToUpdate[I]);
+    if (SlotIt != ExplicitRootSlots.end())
+      Records[I].ExplicitRootSlots = SlotIt->second;
+    Records[I].UsesExplicitExceptionRoots =
+        ExplicitExceptionRootCalls.contains(ToUpdate[I]);
+  }
 
   // A) Identify all gc pointers which are statically live at the given call
   // site.
@@ -3178,7 +3641,9 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
     // That Value* no longer exists and we need to use the new gc_result.
     // Thankfully, the live set is embedded in the statepoint (and updated), so
     // we just grab that.
-    llvm::append_range(Live, Info.StatepointToken->gc_args());
+    for (Value *V : Info.StatepointToken->gc_args())
+      if (isHandledGCPointerType(V->getType()))
+        Live.push_back(V);
 #ifndef NDEBUG
     // Do some basic validation checking on our liveness results before
     // performing relocation.  Relocation can and will turn mistakes in liveness
@@ -3187,6 +3652,8 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
     assert(DT.isReachableFromEntry(Info.StatepointToken->getParent()) &&
            "statepoint must be reachable or liveness is meaningless");
     for (Value *V : Info.StatepointToken->gc_args()) {
+      if (!isHandledGCPointerType(V->getType()))
+        continue;
       if (!isa<Instruction>(V))
         // Non-instruction values trivial dominate all possible uses
         continue;
@@ -3208,7 +3675,13 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
 #endif
 
   relocationViaAlloca(F, DT, Live, Records);
-  return !Records.empty();
+  ExplicitRootSlotMapTy LateExplicitRootSlots;
+  ExplicitExceptionRootCallSetTy LateExplicitExceptionRootCalls;
+  bool ChangedLateRoots = materializeOxCamlExceptionRootSlots(
+      F, DT, LateExplicitRootSlots, LateExplicitExceptionRootCalls, DVCache,
+      KnownBases);
+  ChangedLateRoots |= appendExplicitRootSlotsToStatepoints(LateExplicitRootSlots);
+  return !Records.empty() || ChangedLateRoots;
 }
 
 // List of all parameter and return attributes which must be stripped when
@@ -3402,6 +3875,8 @@ bool RewriteStatepointsForGC::runOnFunction(Function &F, DominatorTree &DT,
   bool MadeChange = removeUnreachableBlocks(F, &DTU);
   // Flush the Dominator Tree.
   DTU.getDomTree();
+
+  MadeChange |= sanitizeOxCamlUndefinedGCPointers(F);
 
   // Gather all the statepoints which need rewritten.  Be careful to only
   // consider those in reachable code since we need to ask dominance queries
