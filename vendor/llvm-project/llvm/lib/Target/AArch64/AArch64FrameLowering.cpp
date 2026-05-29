@@ -193,8 +193,10 @@
 #include "AArch64TargetMachine.h"
 #include "MCTargetDesc/AArch64AddressingModes.h"
 #include "MCTargetDesc/AArch64MCTargetDesc.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/LivePhysRegs.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
@@ -206,6 +208,7 @@
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/PseudoSourceValue.h"
 #include "llvm/CodeGen/RegisterScavenging.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
@@ -433,6 +436,7 @@ bool AArch64FrameLowering::hasFP(const MachineFunction &MF) const {
       CC == CallingConv::OxCaml_WithFP || CC == CallingConv::OxCaml_WithoutFP ||
       CC == CallingConv::OxCaml_C_Call ||
       CC == CallingConv::OxCaml_C_Call_StackArgs ||
+      CC == CallingConv::OxCaml_C_Direct_Call ||
       CC == CallingConv::OxCaml_Alloc;
   // Win64 EH requires a frame pointer if funclets are present, as the locals
   // are accessed off the frame pointer in both the parent function and the
@@ -3952,10 +3956,165 @@ MachineBasicBlock::iterator tryMergeAdjacentSTG(MachineBasicBlock::iterator II,
 
   return InsertI;
 }
+
+static bool isOxCamlNativeTrapInstr(const MachineInstr &MI) {
+  switch (MI.getOpcode()) {
+  case AArch64::OXCAML_PUSH_TRAP:
+  case AArch64::OXCAML_PUSH_TRAP_DEAD:
+  case AArch64::OXCAML_POP_TRAP:
+  case AArch64::OXCAML_RAISE_NOTRACE_EDGE:
+    return true;
+  default:
+    return false;
+  }
+}
+
+static bool equalOxCamlTrapStacks(ArrayRef<const MachineInstr *> Left,
+                                  ArrayRef<const MachineInstr *> Right) {
+  if (Left.size() != Right.size())
+    return false;
+  for (auto [LeftMI, RightMI] : llvm::zip(Left, Right))
+    if (LeftMI != RightMI)
+      return false;
+  return true;
+}
+
+static void computeOxCamlActiveTrapBytes(MachineFunction &MF) {
+  AArch64FunctionInfo *AFI = MF.getInfo<AArch64FunctionInfo>();
+  AFI->clearOxCamlActiveTrapBytes();
+
+  bool HasNativeTrapInstr = false;
+  for (const MachineBasicBlock &MBB : MF)
+    for (const MachineInstr &MI : MBB)
+      HasNativeTrapInstr |= isOxCamlNativeTrapInstr(MI);
+  if (!HasNativeTrapInstr || MF.empty())
+    return;
+
+  using TrapStack = SmallVector<const MachineInstr *, 4>;
+  DenseMap<const MachineBasicBlock *, TrapStack> InStacks;
+  SmallVector<const MachineBasicBlock *, 16> Worklist;
+
+  auto PropagateStack = [&](const MachineBasicBlock *MBB,
+                            const TrapStack &Stack) {
+    auto It = InStacks.find(MBB);
+    if (It == InStacks.end()) {
+      InStacks[MBB] = Stack;
+      Worklist.push_back(MBB);
+      return;
+    }
+
+    if (!equalOxCamlTrapStacks(It->second, Stack))
+      report_fatal_error(
+          "incompatible OxCaml native trap stacks at machine CFG join");
+  };
+
+  PropagateStack(&MF.front(), TrapStack());
+  while (!Worklist.empty()) {
+    const MachineBasicBlock *MBB = Worklist.pop_back_val();
+    TrapStack Stack = InStacks.lookup(MBB);
+
+    for (const MachineInstr &MI : *MBB) {
+      AFI->setOxCamlActiveTrapBytes(MI, Stack.size() * 16);
+
+      switch (MI.getOpcode()) {
+      case AArch64::OXCAML_PUSH_TRAP: {
+        PropagateStack(MI.getOperand(0).getMBB(), Stack);
+        Stack.push_back(&MI);
+        break;
+      }
+      case AArch64::OXCAML_PUSH_TRAP_DEAD:
+        Stack.push_back(&MI);
+        break;
+      case AArch64::OXCAML_POP_TRAP:
+        if (Stack.empty())
+          report_fatal_error(
+              "OxCaml native trap pop without matching active trap");
+        Stack.pop_back();
+        break;
+      case AArch64::OXCAML_RAISE_NOTRACE_EDGE: {
+        TrapStack HandlerStack = Stack;
+        if (!HandlerStack.empty())
+          HandlerStack.pop_back();
+        PropagateStack(MI.getOperand(1).getMBB(), HandlerStack);
+        break;
+      }
+      default:
+        break;
+      }
+    }
+
+    if (!MBB->empty() &&
+        MBB->back().getOpcode() == AArch64::OXCAML_RAISE_NOTRACE_EDGE)
+      continue;
+
+    for (const MachineBasicBlock *Succ : MBB->successors()) {
+      TrapStack SuccStack = Stack;
+      if (Succ->isRuntimeEntered() && !SuccStack.empty())
+        SuccStack.pop_back();
+      PropagateStack(Succ, SuccStack);
+    }
+  }
+}
+
+static bool hasOxCamlStackPseudoMemOperand(const MachineInstr &MI) {
+  for (const MachineMemOperand *MMO : MI.memoperands()) {
+    const PseudoSourceValue *PSV = MMO->getPseudoValue();
+    if (PSV && PSV->isStack())
+      return true;
+  }
+  return false;
+}
+
+static void adjustOxCamlSPRelativeStackAccesses(MachineFunction &MF) {
+  AArch64FunctionInfo *AFI = MF.getInfo<AArch64FunctionInfo>();
+  const AArch64InstrInfo *TII =
+      static_cast<const AArch64InstrInfo *>(MF.getSubtarget().getInstrInfo());
+  const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+
+  for (MachineBasicBlock &MBB : MF) {
+    for (MachineInstr &MI : MBB) {
+      unsigned ActiveTrapBytes = AFI->getOxCamlActiveTrapBytes(MI);
+      if (ActiveTrapBytes == 0 || !MI.mayLoadOrStore() ||
+          !hasOxCamlStackPseudoMemOperand(MI))
+        continue;
+
+      const MachineOperand *BaseOp = nullptr;
+      int64_t Offset;
+      bool OffsetIsScalable;
+      unsigned Width;
+      if (!TII->getMemOperandWithOffsetWidth(MI, BaseOp, Offset,
+                                             OffsetIsScalable, Width, TRI) ||
+          OffsetIsScalable || !BaseOp->isReg() || BaseOp->getReg() != AArch64::SP)
+        continue;
+
+      TypeSize ScaleValue(0U, false);
+      int64_t MinOffset, MaxOffset;
+      if (!AArch64InstrInfo::getMemOpInfo(MI.getOpcode(), ScaleValue, Width,
+                                          MinOffset, MaxOffset) ||
+          ScaleValue.isScalable())
+        continue;
+
+      unsigned Scale = ScaleValue.getKnownMinValue();
+      if (ActiveTrapBytes % Scale != 0)
+        report_fatal_error(
+            "cannot adjust OxCaml stack access by active trap bytes");
+
+      MachineOperand &OffsetOp = TII->getMemOpBaseRegImmOfsOffsetOperand(MI);
+      int64_t NewOffset = OffsetOp.getImm() + ActiveTrapBytes / Scale;
+      if (NewOffset < MinOffset || NewOffset > MaxOffset)
+        report_fatal_error(
+            "OxCaml active trap adjustment exceeds stack access immediate range");
+      OffsetOp.ChangeToImmediate(NewOffset);
+    }
+  }
+}
 } // namespace
 
 void AArch64FrameLowering::processFunctionBeforeFrameIndicesReplaced(
     MachineFunction &MF, RegScavenger *RS = nullptr) const {
+  computeOxCamlActiveTrapBytes(MF);
+  adjustOxCamlSPRelativeStackAccesses(MF);
+
   if (StackTaggingMergeSetTag)
     for (auto &BB : MF)
       for (MachineBasicBlock::iterator II = BB.begin(); II != BB.end();)

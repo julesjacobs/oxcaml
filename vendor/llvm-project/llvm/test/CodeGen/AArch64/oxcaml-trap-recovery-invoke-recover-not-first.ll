@@ -16,7 +16,7 @@ normal_cont:
 
 exn_entry:
   %lp = landingpad token cleanup
-  %bad = add i64 1, 2
+  %bad = add i64 %normal_value, 2
   %rec = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
   %recovered_ds = extractvalue { i64, i64, i64, i64 } %rec, 3
   %ret0 = insertvalue { i64, i64, i64 } poison, i64 %recovered_ds, 0

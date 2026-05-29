@@ -192,6 +192,14 @@ def RetCC_AArch64_OxCaml_C_Call : CallingConv<[
   CCDelegateTo<RetCC_AArch64_AAPCS>
 ]>;
 
+def RetCC_AArch64_OxCaml_C_Direct_Call : CallingConv<[
+  // Hidden runtime-register results: x28 is domain state, x27 is allocation
+  // pointer. The C callee preserves both under the AAPCS, so these model the
+  // dependency without requiring real data movement.
+  CCIfType<[i64], CCAssignToReg<[X28, X27]>>,
+  CCDelegateTo<RetCC_AArch64_AAPCS>
+]>;
+
 // Vararg functions on windows pass floats in integer registers
 let Entry = 1 in
 def CC_AArch64_Win64_VarArg : CallingConv<[
@@ -456,6 +464,13 @@ def CC_AArch64_OxCaml_C_Call : CallingConv<[
 def CC_AArch64_OxCaml_C_Call_StackArgs : CallingConv<[
   // x20/x21 delimit the copied stack argument range.
   CCIfType<[i64], CCAssignToReg<[X28, X27, X8, X20, X21]>>,
+  CCDelegateTo<CC_AArch64_AAPCS>
+]>;
+
+def CC_AArch64_OxCaml_C_Direct_Call : CallingConv<[
+  // Hidden runtime-register arguments: x28 is domain state, x27 is allocation
+  // pointer. Ordinary C arguments start after these and follow the C ABI.
+  CCIfType<[i64], CCAssignToReg<[X28, X27]>>,
   CCDelegateTo<CC_AArch64_AAPCS>
 ]>;
 

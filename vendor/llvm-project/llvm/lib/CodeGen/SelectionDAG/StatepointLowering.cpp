@@ -1146,8 +1146,7 @@ SelectionDAGBuilder::LowerStatepoint(const GCStatepointInst &I,
   Type *RetTy = GCResultLocality.second->getType();
   Register Reg = FuncInfo.CreateRegs(RetTy);
   RegsForValue RFV(*DAG.getContext(), DAG.getTargetLoweringInfo(),
-                   DAG.getDataLayout(), Reg, RetTy,
-                   I.getCallingConv());
+                   DAG.getDataLayout(), Reg, RetTy, std::nullopt);
   SDValue Chain = DAG.getEntryNode();
   
   RFV.getCopyToRegs(ReturnValue, DAG, getCurSDLoc(), Chain, nullptr);
@@ -1181,8 +1180,13 @@ void SelectionDAGBuilder::LowerCallSiteWithDeoptBundleImpl(
   SI.EHPadBB = EHPadBB;
 
   if (auto GCLiveBundle = Call->getOperandBundle(LLVMContext::OB_gc_live)) {
+    SI.GCArgs =
+        ArrayRef<const Use>(GCLiveBundle->Inputs.begin(),
+                            GCLiveBundle->Inputs.end());
     for (const Use &U : GCLiveBundle->Inputs) {
       Value *V = U.get();
+      if (!isGCValue(V, *this))
+        continue;
       SI.Bases.push_back(V);
       SI.Ptrs.push_back(V);
     }
@@ -1191,6 +1195,8 @@ void SelectionDAGBuilder::LowerCallSiteWithDeoptBundleImpl(
   if (SDValue ReturnVal = LowerAsSTATEPOINT(SI)) {
     ReturnVal = lowerRangeToAssertZExt(DAG, *Call, ReturnVal);
     setValue(Call, ReturnVal);
+    if (FuncInfo.isExportedInst(Call))
+      CopyValueToVirtualRegister(Call, FuncInfo.ValueMap[Call]);
   }
 }
 
@@ -1319,9 +1325,15 @@ void SelectionDAGBuilder::visitGCRelocate(const GCRelocateInst &Relocate) {
   SDValue SD = getValue(DerivedPtr);
 
   if (SD.isUndef() && SD.getValueType().getSizeInBits() <= 64) {
-    // Lowering relocate(undef) as arbitrary constant. Current constant value
-    // is chosen such that it's unlikely to be a valid pointer.
-    setValue(&Relocate, DAG.getTargetConstant(0xFEFEFEFE, SDLoc(SD), MVT::i64));
+    // Lowering relocate(undef) as an arbitrary constant is valid, but for
+    // OCaml GC values it must be a non-pointer immediate in case the value is
+    // recorded as a root and scanned by the runtime.
+    const Function &F = DAG.getMachineFunction().getFunction();
+    uint64_t UndefValue =
+        (F.hasGC() && (F.getGC() == "oxcaml" || F.getGC() == "ocaml"))
+            ? 1
+            : 0xFEFEFEFE;
+    setValue(&Relocate, DAG.getConstant(UndefValue, SDLoc(SD), MVT::i64));
     return;
   }
 

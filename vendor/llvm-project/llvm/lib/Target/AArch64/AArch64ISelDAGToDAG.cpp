@@ -4231,9 +4231,15 @@ void AArch64DAGToDAGISel::Select(SDNode *Node) {
     case Intrinsic::aarch64_oxcaml_trap_recover: {
       SDLoc DL(Node);
       SDValue Chain = Node->getOperand(0);
-      if (!FuncInfo->MBB->isRuntimeEntered())
+      if (!FuncInfo->MBB->isRuntimeEntered()) {
+        std::string BlockName;
+        raw_string_ostream OS(BlockName);
+        FuncInfo->MBB->printName(OS);
         report_fatal_error(
-            "trap recovery intrinsic must be in a runtime-entered ABI block");
+            Twine("trap recovery intrinsic must be in a runtime-entered ABI "
+                  "block: ") +
+            OS.str());
+      }
       if (FuncInfo->MBB->isRuntimeEntered()) {
         for (const MachineInstr &MI : *FuncInfo->MBB) {
           if (MI.isDebugInstr() || MI.isPosition() ||
@@ -4832,6 +4838,40 @@ void AArch64DAGToDAGISel::Select(SDNode *Node) {
       SDValue RecoveryTarget = Node->getOperand(4);
       SDValue Ops[] = { TrapBlock, PreviousTrap, RecoveryTarget, Chain };
       CurDAG->SelectNodeTo(Node, AArch64::OXCAML_TRAP_PUBLISH, MVT::Other,
+                           Ops);
+      return;
+    }
+    case Intrinsic::aarch64_oxcaml_push_trap: {
+      SDValue Chain = Node->getOperand(0);
+      SDValue RecoveryTarget = Node->getOperand(2);
+      if (auto *RecoveryBB = dyn_cast<BasicBlockSDNode>(RecoveryTarget)) {
+        SDValue Ops[] = { CurDAG->getBasicBlock(RecoveryBB->getBasicBlock()),
+                          Chain };
+        CurDAG->SelectNodeTo(Node, AArch64::OXCAML_PUSH_TRAP, MVT::Other, Ops);
+        return;
+      }
+      if (auto *DeadTarget = dyn_cast<ConstantSDNode>(RecoveryTarget);
+          DeadTarget && DeadTarget->isZero()) {
+        SDValue Ops[] = { Chain };
+        CurDAG->SelectNodeTo(Node, AArch64::OXCAML_PUSH_TRAP_DEAD, MVT::Other,
+                             Ops);
+        return;
+      }
+      report_fatal_error(
+          "OxCaml push trap recovery target must be a machine basic block");
+      return;
+    }
+    case Intrinsic::aarch64_oxcaml_pop_trap: {
+      SDValue Chain = Node->getOperand(0);
+      SDValue Ops[] = { Chain };
+      CurDAG->SelectNodeTo(Node, AArch64::OXCAML_POP_TRAP, MVT::Other, Ops);
+      return;
+    }
+    case Intrinsic::aarch64_oxcaml_raise_notrace: {
+      SDValue Chain = Node->getOperand(0);
+      SDValue ExnBucket = Node->getOperand(2);
+      SDValue Ops[] = { ExnBucket, Chain };
+      CurDAG->SelectNodeTo(Node, AArch64::OXCAML_RAISE_NOTRACE, MVT::Other,
                            Ops);
       return;
     }

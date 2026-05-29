@@ -111,9 +111,9 @@ L128:
   %26 = load ptr addrspace(1), ptr %6
   %27 = load i64, ptr %ds
   %28 = load i64, ptr %alloc
-  %29 = call oxcaml_nofpcc { { i64, i64 }, {  } } @"\01_c_call_wrapper.caml_modify.2.i64.ptr_addrspace_1_.0"(i64 %27, i64 %28, i64 %25, ptr addrspace(1) %26) "statepoint-id"="0" [ "deopt"(i64 1870160740, i64 1, i64 1, i64 1, i64 1, i64 0, i64 16, i64 24, i64 0, i64 24, i64 0, i64 10, i64 5263188, i64 7548467, i64 6255717, i64 115) ]
-  %30 = extractvalue { { i64, i64 }, {  } } %29, 0, 0
-  %31 = extractvalue { { i64, i64 }, {  } } %29, 0, 1
+  %29 = call oxcaml_c_directcc { i64, i64 } @"\01_caml_modify"(i64 %27, i64 %28, i64 %25, ptr addrspace(1) %26) "gc-leaf-function"="true"
+  %30 = extractvalue { i64, i64 } %29, 0
+  %31 = extractvalue { i64, i64 } %29, 1
   store i64 %30, ptr %ds
   store i64 %31, ptr %alloc
   br label %L127
@@ -262,8 +262,14 @@ Lloh11:
 	ret
 LBB0_3:                                 ; %L128
 	mov	x1, x13
-	bl	_c_call_wrapper.caml_modify.2.i64.ptr_addrspace_1_.0
-Ltmp0:
+	mov	x29, sp
+	.cfi_remember_state
+	.cfi_def_cfa_register w29
+	ldr	x16, [x28, #104]
+	mov	sp, x16
+	bl	_caml_modify
+	mov	sp, x29
+	.cfi_restore_state
 	mov	w0, #1
 	ldr	x30, [sp, #24]                  ; 8-byte Folded Reload
 	add	sp, sp, #32
@@ -273,7 +279,7 @@ LBB0_4:                                 ; %L130
 	str	x13, [sp, #8]                   ; 8-byte Folded Spill
 	mov	x2, x13
 	bl	_c_call_wrapper.caml_modify_slow_barrier.3.i64.i64.i64.0
-Ltmp1:
+Ltmp0:
 	ldr	x0, [sp]                        ; 8-byte Folded Reload
 	ldr	x13, [sp, #8]                   ; 8-byte Folded Reload
 	dmb	ishld

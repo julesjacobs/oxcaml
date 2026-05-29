@@ -128,10 +128,10 @@ same_handler:
 }
 
 ; CHECK-LABEL: name: two_independent_trap_regions
-; CHECK: bb.{{[0-9]+}}.exn_a (machine-block-address-taken, ir-block-address-taken %ir-block.exn_a, runtime-entered):
+; CHECK: bb.{{[0-9]+}}.exn_a (machine-block-address-taken, ir-block-address-taken %ir-block.exn_a, {{(landing-pad, )?}}runtime-entered):
 ; CHECK-NEXT: successors:
 ; CHECK-NEXT: liveins: $x0, $x26, $x27, $x28
-; CHECK: bb.{{[0-9]+}}.exn_b (machine-block-address-taken, ir-block-address-taken %ir-block.exn_b, runtime-entered):
+; CHECK: bb.{{[0-9]+}}.exn_b (machine-block-address-taken, ir-block-address-taken %ir-block.exn_b, {{(landing-pad, )?}}runtime-entered):
 ; CHECK-NEXT: successors:
 ; CHECK-NEXT: liveins: $x0, $x26, $x27, $x28
 
@@ -140,9 +140,9 @@ same_handler:
 ; CHECK: successors: {{.*}}%bb.[[OUTER:[0-9]+]]
 ; CHECK: bb.{{[0-9]+}}.inner_setup:
 ; CHECK: successors: {{.*}}%bb.[[INNER:[0-9]+]]
-; CHECK: bb.[[OUTER]].outer_exn (machine-block-address-taken, ir-block-address-taken %ir-block.outer_exn, runtime-entered):
+; CHECK: bb.[[OUTER]].outer_exn (machine-block-address-taken, ir-block-address-taken %ir-block.outer_exn, {{(landing-pad, )?}}runtime-entered):
 ; CHECK-NEXT: successors:
 ; CHECK-NEXT: liveins: $x0, $x26, $x27, $x28
-; CHECK: bb.[[INNER]].inner_exn (machine-block-address-taken, ir-block-address-taken %ir-block.inner_exn, runtime-entered):
+; CHECK: bb.[[INNER]].inner_exn (machine-block-address-taken, ir-block-address-taken %ir-block.inner_exn, {{(landing-pad, )?}}runtime-entered):
 ; CHECK-NEXT: successors:
 ; CHECK-NEXT: liveins: $x0, $x26, $x27, $x28

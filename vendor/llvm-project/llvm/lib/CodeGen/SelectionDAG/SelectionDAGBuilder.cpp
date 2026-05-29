@@ -3094,9 +3094,10 @@ void SelectionDAGBuilder::visitResume(const ResumeInst &RI) {
 void SelectionDAGBuilder::visitLandingPad(const LandingPadInst &LP) {
   if (!FuncInfo.MBB->isRuntimeEntered() &&
       isOxCamlTrapRecoveryPad(*FuncInfo.Fn, *LP.getParent()) &&
-      hasDominatingOxCamlTrapPublishForRecoveryPad(*FuncInfo.Fn,
-                                                   *LP.getParent(),
-                                                   *FuncInfo.DT)) {
+      (hasDominatingOxCamlTrapPublishForRecoveryPad(*FuncInfo.Fn,
+                                                    *LP.getParent(),
+                                                    *FuncInfo.DT) ||
+       hasOxCamlPushTrapTargeting(*FuncInfo.Fn, *LP.getParent()))) {
     FuncInfo.MBB->setIsRuntimeEntered();
     FuncInfo.MBB->setMachineBlockAddressTaken();
     FuncInfo.MBB->setLabelMustBeEmitted();
@@ -4853,12 +4854,59 @@ void SelectionDAGBuilder::visitAtomicStore(const StoreInst &I) {
 /// node.
 void SelectionDAGBuilder::visitTargetIntrinsic(const CallInst &I,
                                                unsigned Intrinsic) {
+  if (Intrinsic == llvm::Intrinsic::aarch64_oxcaml_push_trap) {
+    const Value *RecoveryTarget = I.getArgOperand(0);
+    MachineBasicBlock *RecoveryMBB = nullptr;
+    bool DeletedRecoveryTarget = false;
+    if (auto *BA = dyn_cast<BlockAddress>(RecoveryTarget->stripPointerCasts())) {
+      RecoveryMBB = FuncInfo.MBBMap[BA->getBasicBlock()];
+      if (!RecoveryMBB)
+        report_fatal_error("missing machine block for OxCaml trap recovery");
+      if (!RecoveryMBB->isRuntimeEntered()) {
+        BasicBlock *RecoveryBB = BA->getBasicBlock();
+        if (isOxCamlTrapRecoveryPad(*FuncInfo.Fn, *RecoveryBB) ||
+            isOxCamlTrapRecoveryContinuation(*FuncInfo.Fn, *RecoveryBB)) {
+          RecoveryMBB->setIsRuntimeEntered();
+          RecoveryMBB->setMachineBlockAddressTaken();
+          RecoveryMBB->setLabelMustBeEmitted();
+        }
+      }
+    } else if (match(RecoveryTarget, m_IntToPtr(m_SpecificInt(1)))) {
+      // LLVM rewrites blockaddresses to inttoptr(1) when it deletes an
+      // unreachable block. This can happen after it proves every protected
+      // operation is nounwind: the trap frame is still pushed and popped on
+      // the normal path, but its recovery target is impossible to enter.
+      DeletedRecoveryTarget = true;
+    } else {
+      std::string ArgStr;
+      raw_string_ostream OS(ArgStr);
+      RecoveryTarget->print(OS);
+      report_fatal_error(Twine("OxCaml push trap recovery target must be a "
+                               "blockaddress or deleted-blockaddress sentinel, "
+                               "got: ") +
+                         OS.str());
+    }
+
+    const TargetLowering &TLI = DAG.getTargetLoweringInfo();
+    SmallVector<SDValue, 3> Ops;
+    Ops.push_back(getRoot());
+    Ops.push_back(DAG.getTargetConstant(Intrinsic, getCurSDLoc(),
+                                        TLI.getPointerTy(DAG.getDataLayout())));
+    if (DeletedRecoveryTarget)
+      Ops.push_back(DAG.getTargetConstant(0, getCurSDLoc(),
+                                          TLI.getPointerTy(DAG.getDataLayout())));
+    else
+      Ops.push_back(DAG.getBasicBlock(RecoveryMBB));
+    SDVTList VTs = DAG.getVTList(ArrayRef<EVT>({MVT::Other}));
+    SDValue Result =
+        DAG.getNode(ISD::INTRINSIC_VOID, getCurSDLoc(), VTs, Ops);
+    DAG.setRoot(Result.getValue(Result.getNode()->getNumValues() - 1));
+    return;
+  }
+
   if (Intrinsic == llvm::Intrinsic::aarch64_oxcaml_trap_recover &&
       !FuncInfo.MBB->isRuntimeEntered() &&
-      isOxCamlTrapRecoveryContinuation(*FuncInfo.Fn, *I.getParent()) &&
-      hasDominatingOxCamlTrapPublishForRecoveryPad(*FuncInfo.Fn,
-                                                   *I.getParent(),
-                                                   *FuncInfo.DT)) {
+      isOxCamlTrapRecoveryContinuation(*FuncInfo.Fn, *I.getParent())) {
     FuncInfo.MBB->setIsRuntimeEntered();
     FuncInfo.MBB->setMachineBlockAddressTaken();
     FuncInfo.MBB->setLabelMustBeEmitted();
