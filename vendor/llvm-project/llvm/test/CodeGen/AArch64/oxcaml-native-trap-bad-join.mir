@@ -1,0 +1,68 @@
+# RUN: not llc -mtriple=arm64-apple-macosx -run-pass=prologepilog -verify-machineinstrs %s -o - 2>&1 | FileCheck %s
+
+--- |
+  target datalayout = "e-m:o-i64:64-i128:128-n32:64-S128"
+  target triple = "arm64-apple-macosx"
+
+  define oxcaml_nofpcc void @bad_trap_join(i64 %cond) gc "oxcaml" {
+  entry:
+    ret void
+
+  left:
+    ret void
+
+  right:
+    ret void
+
+  join:
+    ret void
+
+  handler:
+    ret void
+  }
+
+  !llvm.module.flags = !{!0}
+  !0 = !{i32 1, !"oxcaml_module", !"NativeTrapBadJoin"}
+
+...
+---
+name:            bad_trap_join
+alignment:       4
+tracksRegLiveness: true
+liveins:
+  - { reg: '$w0' }
+  - { reg: '$x26' }
+body:             |
+  bb.0.entry:
+    successors: %bb.1(0x40000000), %bb.2(0x40000000)
+    liveins: $w0, $x26, $x27, $x28
+
+    CBZW killed $w0, %bb.1
+    B %bb.2
+
+  bb.1.left:
+    successors: %bb.3(0x80000000)
+    liveins: $x26, $x27, $x28
+
+    OXCAML_PUSH_TRAP %bb.4, implicit-def dead $sp, implicit-def dead $x16, implicit-def $x26, implicit $sp, implicit $x26
+    B %bb.3
+
+  bb.2.right:
+    successors: %bb.3(0x80000000)
+    liveins: $x26, $x27, $x28
+
+    B %bb.3
+
+  bb.3.join:
+    liveins: $x26, $x27, $x28
+
+    RET_ReallyLR implicit $x28, implicit $x27
+
+  bb.4.handler (machine-block-address-taken, runtime-entered):
+    liveins: $x0, $x26, $x27, $x28
+
+    RET_ReallyLR implicit $x28, implicit $x27, implicit $x0
+
+...
+
+# CHECK: LLVM ERROR: incompatible OxCaml native trap stacks at machine CFG join

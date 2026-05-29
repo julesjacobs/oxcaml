@@ -224,6 +224,7 @@ module Calling_conventions : sig
     | Oxcaml
     | Oxcaml_c_call
     | Oxcaml_c_call_stack_args
+    | Oxcaml_c_direct_call
     | Oxcaml_alloc
 
   val to_string : t -> string

@@ -52,6 +52,7 @@ static bool isOxCamlCallingConv(CallingConv::ID CC) {
   case CallingConv::OxCaml_C_Call:
   case CallingConv::OxCaml_C_Call_StackArgs:
   case CallingConv::OxCaml_Alloc:
+  case CallingConv::OxCaml_C_Direct_Call:
     return true;
   default:
     return false;
@@ -98,6 +99,8 @@ AArch64RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
     return CSR_AArch64_OxCaml_C_Call_SaveList;
   case CallingConv::OxCaml_C_Call_StackArgs:
     return CSR_AArch64_OxCaml_C_Call_StackArgs_SaveList;
+  case CallingConv::OxCaml_C_Direct_Call:
+    return CSR_AArch64_AAPCS_SaveList;
   case CallingConv::OxCaml_Alloc:
     return CSR_AArch64_OxCaml_Alloc_SaveList;
   default:
@@ -270,6 +273,8 @@ AArch64RegisterInfo::getDarwinCallPreservedMask(const MachineFunction &MF,
     return CSR_AArch64_OxCaml_C_Call_RegMask;
   case CallingConv::OxCaml_C_Call_StackArgs:
     return CSR_AArch64_OxCaml_C_Call_StackArgs_RegMask;
+  case CallingConv::OxCaml_C_Direct_Call:
+    return CSR_AArch64_AAPCS_RegMask;
   case CallingConv::OxCaml_Alloc:
     return CSR_AArch64_OxCaml_Alloc_RegMask;
   default:
@@ -319,6 +324,8 @@ AArch64RegisterInfo::getCallPreservedMask(const MachineFunction &MF,
     return CSR_AArch64_OxCaml_C_Call_RegMask;
   case CallingConv::OxCaml_C_Call_StackArgs:
     return CSR_AArch64_OxCaml_C_Call_StackArgs_RegMask;
+  case CallingConv::OxCaml_C_Direct_Call:
+    return CSR_AArch64_AAPCS_RegMask;
   case CallingConv::OxCaml_Alloc:
     return CSR_AArch64_OxCaml_Alloc_RegMask;
   default:
@@ -948,6 +955,10 @@ bool AArch64RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
                                         /*PreferFP=*/true,
                                         /*ForSimm=*/false);
     Offset += StackOffset::getFixed(MI.getOperand(FIOperandNum + 1).getImm());
+    if (FrameReg == AArch64::SP) {
+      const AArch64FunctionInfo *AFI = MF.getInfo<AArch64FunctionInfo>();
+      Offset += StackOffset::getFixed(AFI->getOxCamlActiveTrapBytes(MI));
+    }
     MI.getOperand(FIOperandNum).ChangeToRegister(FrameReg, false /*isDef*/);
     MI.getOperand(FIOperandNum + 1).ChangeToImmediate(Offset.getFixed());
     return false;
@@ -997,6 +1008,11 @@ bool AArch64RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   } else {
     Offset = TFI->resolveFrameIndexReference(
         MF, FrameIndex, FrameReg, /*PreferFP=*/false, /*ForSimm=*/true);
+  }
+
+  if (FrameReg == AArch64::SP) {
+    const AArch64FunctionInfo *AFI = MF.getInfo<AArch64FunctionInfo>();
+    Offset += StackOffset::getFixed(AFI->getOxCamlActiveTrapBytes(MI));
   }
 
   // Modify MI as necessary to handle as much of 'Offset' as possible

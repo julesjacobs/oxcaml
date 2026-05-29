@@ -2298,6 +2298,7 @@ const char *AArch64TargetLowering::getTargetNodeName(unsigned Opcode) const {
     MAKE_CASE(AArch64ISD::SMSTOP)
     MAKE_CASE(AArch64ISD::RESTORE_ZA)
     MAKE_CASE(AArch64ISD::CALL)
+    MAKE_CASE(AArch64ISD::OXCAML_C_DIRECT_CALL)
     MAKE_CASE(AArch64ISD::ADRP)
     MAKE_CASE(AArch64ISD::ADR)
     MAKE_CASE(AArch64ISD::ADDlow)
@@ -6218,6 +6219,8 @@ CCAssignFn *AArch64TargetLowering::CCAssignFnForCall(CallingConv::ID CC,
     return CC_AArch64_OxCaml_C_Call;
   case CallingConv::OxCaml_C_Call_StackArgs:
     return CC_AArch64_OxCaml_C_Call_StackArgs;
+  case CallingConv::OxCaml_C_Direct_Call:
+    return CC_AArch64_OxCaml_C_Direct_Call;
   case CallingConv::C:
   case CallingConv::Fast:
   case CallingConv::PreserveMost:
@@ -6265,6 +6268,8 @@ AArch64TargetLowering::CCAssignFnForReturn(CallingConv::ID CC) const {
   case CallingConv::OxCaml_C_Call:
   case CallingConv::OxCaml_C_Call_StackArgs:
     return RetCC_AArch64_OxCaml_C_Call;
+  case CallingConv::OxCaml_C_Direct_Call:
+    return RetCC_AArch64_OxCaml_C_Direct_Call;
   default:
     return RetCC_AArch64_AAPCS;
   }
@@ -7672,6 +7677,10 @@ AArch64TargetLowering::LowerCall(CallLoweringInfo &CLI,
   }
 
   unsigned CallOpc = AArch64ISD::CALL;
+  if (CallConv == CallingConv::OxCaml_C_Direct_Call) {
+    assert(!IsTailCall && "direct OxCaml C calls cannot be tail calls");
+    CallOpc = AArch64ISD::OXCAML_C_DIRECT_CALL;
+  }
   // Calls with operand bundle "clang.arc.attachedcall" are special. They should
   // be expanded to the call, directly followed by a special marker sequence and
   // a call to an ObjC library function.  Use CALL_RVMARKER to do that.
@@ -9677,6 +9686,7 @@ static bool isOxCamlCallingConv(CallingConv::ID CC) {
   case CallingConv::OxCaml_WithoutFP:
   case CallingConv::OxCaml_C_Call:
   case CallingConv::OxCaml_C_Call_StackArgs:
+  case CallingConv::OxCaml_C_Direct_Call:
   case CallingConv::OxCaml_Alloc:
     return true;
   default:

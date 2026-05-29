@@ -533,6 +533,10 @@ module Calling_conventions = struct
       (* Passes the number of bytes on the stack to be transferred in R12 in
          addition to [Ocaml_c_call]. Used for
          [caml_c_call_stack_args_llvm_backend] *)
+    | Oxcaml_c_direct_call
+      (* Ordinary C ABI arguments/results, but the AArch64 backend switches
+         from the OCaml stack to the C stack immediately around the call. Used
+         only for noalloc external calls with no stack arguments. *)
     | Oxcaml_alloc
   (* Saves almost all registers (see [Proc.destroyed_at_alloc_or_poll]),
      otherwise behaves like [Ocaml]. Used for [caml_call_gc] and
@@ -547,6 +551,7 @@ module Calling_conventions = struct
         if Config.with_frame_pointers then "oxcaml_fpcc" else "oxcaml_nofpcc")
     | Oxcaml_c_call -> "oxcaml_ccc"
     | Oxcaml_c_call_stack_args -> "oxcaml_c_stackcc"
+    | Oxcaml_c_direct_call -> "oxcaml_c_directcc"
     | Oxcaml_alloc -> "oxcaml_alloccc"
 
   let pp_t ppf t = Format.pp_print_string ppf (to_string t)

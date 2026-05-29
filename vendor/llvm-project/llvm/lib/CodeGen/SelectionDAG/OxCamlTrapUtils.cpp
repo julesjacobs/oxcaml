@@ -10,6 +10,7 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InlineAsm.h"
@@ -21,32 +22,49 @@
 
 using namespace llvm;
 
-static const IntrinsicInst *
-getUniqueOxCamlTrapPublishForRecoveryPad(const Function &F,
-                                         const BasicBlock &RecoveryBB) {
-  const IntrinsicInst *Publish = nullptr;
-  for (const BasicBlock &BB : F) {
-    for (const Instruction &I : BB) {
-      if (!isAArch64OxCamlTrapPublish(&I))
-        continue;
-      const auto *II = cast<IntrinsicInst>(&I);
-      const Value *RecoveryTarget = II->getArgOperand(2)->stripPointerCasts();
-      const auto *BA = dyn_cast<BlockAddress>(RecoveryTarget);
-      if (!BA || BA->getFunction() != &F ||
-          BA->getBasicBlock() != &RecoveryBB)
-        continue;
-      if (Publish)
-        return nullptr;
-      Publish = II;
-    }
-  }
-  return Publish;
-}
-
 static bool instructionDominates(const Instruction &Dom,
                                  const Instruction &User,
                                  const DominatorTree &DT) {
   return DT.dominates(&Dom, &User);
+}
+
+static const Value *getOxCamlTrapRecoveryTarget(const IntrinsicInst &II) {
+  unsigned RecoveryTargetOp;
+  if (II.getIntrinsicID() == Intrinsic::aarch64_oxcaml_trap_publish)
+    RecoveryTargetOp = 2;
+  else if (II.getIntrinsicID() == Intrinsic::aarch64_oxcaml_push_trap)
+    RecoveryTargetOp = 0;
+  else
+    return nullptr;
+  return II.getArgOperand(RecoveryTargetOp)->stripPointerCasts();
+}
+
+static bool isOxCamlTrapPublishForRecoveryPad(const Function &F,
+                                              const BasicBlock &RecoveryBB,
+                                              const Instruction &I) {
+  const auto *II = dyn_cast<IntrinsicInst>(&I);
+  if (!II)
+    return false;
+  const Value *RecoveryTarget = getOxCamlTrapRecoveryTarget(*II);
+  const auto *BA = dyn_cast_or_null<BlockAddress>(RecoveryTarget);
+  return BA && BA->getFunction() == &F && BA->getBasicBlock() == &RecoveryBB;
+}
+
+static const IntrinsicInst *
+getDominatingOxCamlTrapPublishForInvoke(const InvokeInst &I,
+                                        const BasicBlock &RecoveryBB,
+                                        const DominatorTree &DT) {
+  const Function &F = *I.getFunction();
+  for (const BasicBlock &BB : F) {
+    for (const Instruction &Candidate : BB) {
+      if (!isOxCamlTrapPublishForRecoveryPad(F, RecoveryBB, Candidate))
+        continue;
+      const auto *II = cast<IntrinsicInst>(&Candidate);
+      if (instructionDominates(*II, I, DT))
+        return II;
+    }
+  }
+  return nullptr;
 }
 
 static bool hasCallBrPredecessor(const BasicBlock &BB) {
@@ -123,11 +141,8 @@ static bool isAllowedBeforeTrapRecover(const Function &F,
 
 static const IntrinsicInst *
 getOxCamlTrapRecoverAtBlockStart(const Function &F, const BasicBlock &BB) {
-  if (BB.phis().begin() != BB.phis().end())
-    return nullptr;
-
   for (const Instruction &I : BB) {
-    if (I.isDebugOrPseudoInst())
+    if (isa<PHINode>(I) || I.isDebugOrPseudoInst())
       continue;
     const auto *II = dyn_cast<IntrinsicInst>(&I);
     if (II && isAArch64OxCamlTrapRecover(II))
@@ -136,6 +151,11 @@ getOxCamlTrapRecoverAtBlockStart(const Function &F, const BasicBlock &BB) {
       return nullptr;
   }
   return nullptr;
+}
+
+static bool isStatepointGCRelocate(const Instruction &I) {
+  const auto *II = dyn_cast<IntrinsicInst>(&I);
+  return II && II->getIntrinsicID() == Intrinsic::experimental_gc_relocate;
 }
 
 static bool isAllowedTrapRecoveryOperand(const Function &F,
@@ -203,20 +223,10 @@ llvm::getOxCamlTrapRecoverAfterLandingPad(const BasicBlock &BB) {
 bool llvm::isOxCamlTrapRecoveryPad(const Function &F, const BasicBlock &BB) {
   if (!isOxCamlGCFunction(F))
     return false;
-  const IntrinsicInst *Recover = getOxCamlTrapRecoverAfterLandingPad(BB);
-  if (!Recover)
+  if (!getOxCamlTrapRecoverAfterLandingPad(BB))
     return false;
   if (BB.phis().begin() != BB.phis().end())
     return false;
-
-  for (const Instruction &I : BB) {
-    if (I.isDebugOrPseudoInst())
-      continue;
-    for (const Use &U : I.operands()) {
-      if (!isAllowedTrapRecoveryOperand(F, BB, U.get()))
-        return false;
-    }
-  }
   return true;
 }
 
@@ -230,15 +240,6 @@ bool llvm::isOxCamlTrapRecoveryContinuation(const Function &F,
     return false;
   if (!getOxCamlTrapRecoverAtBlockStart(F, BB))
     return false;
-
-  for (const Instruction &I : BB) {
-    if (I.isDebugOrPseudoInst())
-      continue;
-    for (const Use &U : I.operands()) {
-      if (!isAllowedTrapRecoveryOperand(F, BB, U.get()))
-        return false;
-    }
-  }
   return true;
 }
 
@@ -253,11 +254,9 @@ getBranchOnlyTrapRecoveryContinuationTarget(const Function &F,
   if (isOxCamlTrapRecoveryContinuation(F, BB))
     return &BB;
 
-  if (BB.phis().begin() != BB.phis().end())
-    return nullptr;
-
   for (const Instruction &I : BB) {
-    if (I.isDebugOrPseudoInst())
+    if (isa<PHINode>(I) || I.isDebugOrPseudoInst() ||
+        isStatepointGCRelocate(I))
       continue;
 
     const auto *Br = dyn_cast<BranchInst>(&I);
@@ -295,6 +294,8 @@ bool llvm::isOxCamlTrapRecoveryLandingPadTrampoline(const Function &F,
       SawLandingPad = true;
       continue;
     }
+    if (SawLandingPad && isStatepointGCRelocate(I))
+      continue;
     const auto *Br = dyn_cast<BranchInst>(&I);
     if (!SawLandingPad || !Br || !Br->isUnconditional())
       return false;
@@ -324,6 +325,8 @@ getOxCamlTrapRecoveryUnwindTargetShapeOnly(const Function &F,
       SawLandingPad = true;
       continue;
     }
+    if (SawLandingPad && isStatepointGCRelocate(I))
+      continue;
     const auto *Br = dyn_cast<BranchInst>(&I);
     if (!SawLandingPad || !Br || !Br->isUnconditional())
       return nullptr;
@@ -337,9 +340,7 @@ static bool
 hasDominatingOxCamlTrapPublishForInvoke(const InvokeInst &I,
                                         const BasicBlock &RecoveryBB,
                                         const DominatorTree &DT) {
-  const IntrinsicInst *Publish =
-      getUniqueOxCamlTrapPublishForRecoveryPad(*I.getFunction(), RecoveryBB);
-  return Publish && instructionDominates(*Publish, I, DT);
+  return getDominatingOxCamlTrapPublishForInvoke(I, RecoveryBB, DT) != nullptr;
 }
 
 bool llvm::hasDominatingOxCamlTrapPublishForRecoveryPad(
@@ -354,6 +355,23 @@ bool llvm::hasDominatingOxCamlTrapPublishForRecoveryPad(
                                                      *Invoke->getUnwindDest());
       if (Target == &RecoveryBB &&
           hasDominatingOxCamlTrapPublishForInvoke(*Invoke, RecoveryBB, DT))
+        return true;
+    }
+  }
+  return false;
+}
+
+bool llvm::hasOxCamlPushTrapTargeting(const Function &F,
+                                      const BasicBlock &RecoveryBB) {
+  for (const BasicBlock &BB : F) {
+    for (const Instruction &I : BB) {
+      const auto *II = dyn_cast<IntrinsicInst>(&I);
+      if (!II ||
+          II->getIntrinsicID() != Intrinsic::aarch64_oxcaml_push_trap)
+        continue;
+      const auto *BA = dyn_cast<BlockAddress>(
+          II->getArgOperand(0)->stripPointerCasts());
+      if (BA && BA->getFunction() == &F && BA->getBasicBlock() == &RecoveryBB)
         return true;
     }
   }

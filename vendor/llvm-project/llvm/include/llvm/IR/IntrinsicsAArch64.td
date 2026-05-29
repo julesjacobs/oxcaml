@@ -106,6 +106,29 @@ def int_aarch64_oxcaml_trap_publish
                 [IntrHasSideEffects, IntrConvergent, IntrNoDuplicate,
                  IntrNoMerge, IntrWillReturn, IntrNoCallback, IntrNoFree]>;
 
+// OxCaml native-shaped trap frame push. The argument is a blockaddress for the
+// runtime-entered recovery block stored in the trap frame.
+def int_aarch64_oxcaml_push_trap
+    : Intrinsic<[], [llvm_ptr_ty],
+                [IntrHasSideEffects, IntrConvergent, IntrNoDuplicate,
+                 IntrNoMerge, IntrWillReturn, IntrNoCallback, IntrNoFree]>;
+
+// OxCaml native-shaped trap frame pop on the normal exit path.
+def int_aarch64_oxcaml_pop_trap
+    : Intrinsic<[], [],
+                [IntrHasSideEffects, IntrConvergent, IntrNoDuplicate,
+                 IntrNoMerge, IntrWillReturn, IntrNoCallback, IntrNoFree]>;
+
+// OxCaml dynamic raise-notrace. This never returns to the current function: the
+// current trap frame in x26 supplies the destination handler. The AArch64
+// lowering copies the exception bucket to x0, restores sp from x26, pops the
+// previous trap pointer and handler address, and branches to the handler.
+def int_aarch64_oxcaml_raise_notrace
+    : Intrinsic<[], [llvm_i64_ty],
+                [IntrHasSideEffects, IntrConvergent, IntrNoDuplicate,
+                 IntrNoMerge, IntrNoReturn, Throws, IntrNoCallback,
+                 IntrNoFree]>;
+
 }
 
 //===----------------------------------------------------------------------===//

@@ -14,6 +14,7 @@
 #define LLVM_LIB_TARGET_AARCH64_AARCH64MACHINEFUNCTIONINFO_H
 
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/CallingConvLower.h"
@@ -446,6 +447,15 @@ public:
     return OxCamlTrapRecoveryEntries.contains(&MBB);
   }
 
+  void clearOxCamlActiveTrapBytes() { OxCamlActiveTrapBytes.clear(); }
+  void setOxCamlActiveTrapBytes(const MachineInstr &MI, unsigned Bytes) {
+    OxCamlActiveTrapBytes[&MI] = Bytes;
+  }
+  unsigned getOxCamlActiveTrapBytes(const MachineInstr &MI) const {
+    auto It = OxCamlActiveTrapBytes.find(&MI);
+    return It == OxCamlActiveTrapBytes.end() ? 0 : It->second;
+  }
+
   void setSwiftAsyncContextFrameIdx(int FI) {
     SwiftAsyncContextFrameIdx = FI;
   }
@@ -460,6 +470,7 @@ private:
   SetOfInstructions LOHRelated;
 
   SmallPtrSet<MachineBasicBlock *, 4> OxCamlTrapRecoveryEntries;
+  DenseMap<const MachineInstr *, unsigned> OxCamlActiveTrapBytes;
 
   SmallVector<std::pair<unsigned, MCSymbol *>, 2> JumpTableEntryInfo;
 };

@@ -30,7 +30,6 @@
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
-#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
 #include "OxCamlTrapUtils.h"
 #include "llvm/Support/Debug.h"
@@ -271,11 +270,20 @@ void FunctionLoweringInfo::set(const Function &fn, MachineFunction &mf,
       MBB->setAddressTakenIRBlock(const_cast<BasicBlock *>(&BB));
 
     // Mark landing pad blocks.
-    bool IsOxCamlTrapRecoveryPad =
+    bool HasConcreteTrapTarget =
+        getOxCamlTrapRecoveryLandingPad(BB) &&
+        hasOxCamlPushTrapTargeting(*Fn, BB);
+    bool HasAbstractTrapTarget =
         DT && llvm::isOxCamlTrapRecoveryPad(*Fn, BB) &&
         hasDominatingOxCamlTrapPublishForRecoveryPad(*Fn, BB, *DT);
-    if (BB.isEHPad() && !IsOxCamlTrapRecoveryPad)
+    bool IsOxCamlTrapRecoveryPad = HasConcreteTrapTarget || HasAbstractTrapTarget;
+    if (BB.isEHPad())
       MBB->setIsEHPad();
+    if (IsOxCamlTrapRecoveryPad) {
+      MBB->setIsRuntimeEntered();
+      MBB->setMachineBlockAddressTaken();
+      MBB->setLabelMustBeEmitted();
+    }
 
     // Create Machine PHI nodes for LLVM PHI nodes, lowering them as
     // appropriate.

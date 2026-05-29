@@ -36,7 +36,7 @@ exn_entry:
 
 ; CHECK-LABEL: name: recovery_uses_entry_alloca
 ; CHECK: OXCAML_TRAP_PUBLISH
-; CHECK: bb.{{[0-9]+}}.exn_entry (machine-block-address-taken, ir-block-address-taken %ir-block.exn_entry, runtime-entered):
+; CHECK: bb.{{[0-9]+}}.exn_entry (machine-block-address-taken, ir-block-address-taken %ir-block.exn_entry, {{(landing-pad, )?}}runtime-entered):
 ; CHECK-NEXT: successors:
 ; CHECK-NEXT: liveins: $x0, $x26, $x27, $x28
 
