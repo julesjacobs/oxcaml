@@ -504,6 +504,16 @@ let mk_llvm_flags f =
     Arg.String f,
     " Extra flags to pass to LLVM (like -march or -mtune)" )
 
+let mk_llvm_unsafe_no_frontend_alloca_roots f =
+  ( "-llvm-unsafe-no-frontend-alloca-roots",
+    Arg.Unit f,
+    " Diagnostic only: omit frontend alloca roots from LLVM gc-live bundles" )
+
+let mk_llvm_unsafe_no_slow_path_root_slots f =
+  ( "-llvm-unsafe-no-slow-path-root-slots",
+    Arg.Unit f,
+    " Diagnostic only: omit allocation/poll slow-path root slots" )
+
 module Flambda2 = Oxcaml_flags.Flambda2
 
 let mk_flambda2_result_types_functors_only f =
@@ -1325,6 +1335,8 @@ module type Oxcaml_options = sig
   val keep_llvmir : unit -> unit
   val llvm_path : string -> unit
   val llvm_flags : string -> unit
+  val llvm_unsafe_no_frontend_alloca_roots : unit -> unit
+  val llvm_unsafe_no_slow_path_root_slots : unit -> unit
   val flambda2_debug : unit -> unit
   val no_flambda2_debug : unit -> unit
   val reaper_debug_flags : string -> unit
@@ -1510,6 +1522,10 @@ module Make_oxcaml_options (F : Oxcaml_options) = struct
       mk_keep_llvmir F.keep_llvmir;
       mk_llvm_path F.llvm_path;
       mk_llvm_flags F.llvm_flags;
+      mk_llvm_unsafe_no_frontend_alloca_roots
+        F.llvm_unsafe_no_frontend_alloca_roots;
+      mk_llvm_unsafe_no_slow_path_root_slots
+        F.llvm_unsafe_no_slow_path_root_slots;
       mk_flambda2_debug F.flambda2_debug;
       mk_no_flambda2_debug F.no_flambda2_debug;
       mk_reaper_debug_flags F.reaper_debug_flags;
@@ -1911,6 +1927,12 @@ module Oxcaml_options_impl = struct
   let keep_llvmir () = set' Oxcaml_flags.keep_llvmir ()
   let llvm_path s = Oxcaml_flags.llvm_path := Some s
   let llvm_flags s = Oxcaml_flags.llvm_flags := s
+  let llvm_unsafe_no_frontend_alloca_roots () =
+    set' Clflags.llvm_unsafe_no_frontend_alloca_roots ()
+
+  let llvm_unsafe_no_slow_path_root_slots () =
+    set' Clflags.llvm_unsafe_no_slow_path_root_slots ()
+
   let flambda2_debug = set' Oxcaml_flags.Flambda2.debug
   let no_flambda2_debug = clear' Oxcaml_flags.Flambda2.debug
 
@@ -2460,6 +2482,10 @@ module Extra_params = struct
         true
     | "keep-llvmir" -> set' Oxcaml_flags.keep_llvmir
     | "llvm-flags" -> set_string Oxcaml_flags.llvm_flags
+    | "llvm-unsafe-no-frontend-alloca-roots" ->
+        set' Clflags.llvm_unsafe_no_frontend_alloca_roots
+    | "llvm-unsafe-no-slow-path-root-slots" ->
+        set' Clflags.llvm_unsafe_no_slow_path_root_slots
     | "flambda2-debug" -> set' Oxcaml_flags.Flambda2.debug
     | "reaper-debug-flags" ->
         Oxcaml_flags.Flambda2.reaper_debug_flags :=

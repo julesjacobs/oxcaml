@@ -1,6 +1,6 @@
 # Progress
 
-Last updated: 2026-05-28.
+Last updated: 2026-05-30.
 
 ## Current state
 
@@ -12,6 +12,168 @@ Current focus: AArch64 LLVM `try`/trap performance. The fast-path-roots
 integration work and earlier compiler-benchmark work are background context.
 The active implementation now uses optimizer-visible trap recovery edges instead
 of the hot `_wrap_try` helper.
+
+Late-root diagnostic note:
+`agent-state/llvm-fast-path-roots-integration/LATE_ROOT_FAILURE_NOTES.md`.
+
+Current late-root finding: the intended end state is still late roots, but the
+naive version is unsafe. Two split unsafe flags were added for diagnosis:
+`llvm-unsafe-no-frontend-alloca-roots=1` and
+`llvm-unsafe-no-slow-path-root-slots=1`.
+
+2026-05-30 strong-mode update:
+
+- Keep the invariant strict: producers must express object-address
+  construction as `Addr`/addrspace(1) GEPs. The LLVM backend must not infer GC
+  pointer intent from arbitrary integer arithmetic.
+- `cfg_comballoc` now produces `Addr` temporaries for combined-allocation
+  object starts, and `llvmize` marks known object starts with `!is_base_value`.
+- RS4GC now locally rematerializes non-base addrspace(1) GEPs at their uses
+  before liveness/root insertion. This keeps interior field addresses from
+  becoming independently relocated values while preserving object starts as
+  movable bases.
+- RS4GC also deduplicates recovery-boundary roots when direct boundary-use
+  collection and liveness-derived boundary collection describe the same value.
+- Focused validation passed with the strongest diagnostic mode:
+  `llvm-unsafe-no-frontend-alloca-roots=1`,
+  `llvm-unsafe-no-slow-path-root-slots=1`,
+  `-mllvm -rs4gc-remat-addrspace1-derived-from-base-at-alloc`, and
+  `-mllvm -rs4gc-fail-on-oxcaml-derived-relocates=true`.
+  The passing focused cases are direct `gen_u_iarray.ml -Oclassic -S`,
+  direct `optimized.ml -Oclassic -S -c`, and five RS4GC derived-pointer lit
+  tests including the rejoin regression
+  `oxcaml-addr-derived-invoke-rejoin-remat.ll`.
+
+2026-05-30 raw-address fallback check:
+
+- The late RS4GC raw heap-address canonicalizer is now opt-in behind
+  `-mllvm -rs4gc-canonicalize-oxcaml-raw-heap-addresses`. This keeps the
+  invariant crisp: source/CFG lowering must express heap object and field
+  address arithmetic as `Addr`/addrspace(1), not depend on LLVM rediscovering
+  GC intent from arbitrary integer arithmetic.
+- With that fallback disabled, `llvm-unsafe-no-slow-path-root-slots=1` without
+  derived rematerialization fails in `typing-layouts-arrays`: RS4GC sees a
+  non-base addrspace(1) GEP such as `gep %fresh_alloc_base, 48` live across
+  `caml_call_gc` and correctly refuses to relocate it independently.
+- The same focused cases pass when the strong derived-pointer policy is
+  enabled. That policy is now the RS4GC default for OxCaml statepoints, so the
+  no-slow-root mode no longer needs users/tests to pass
+  `-mllvm -rs4gc-remat-addrspace1-derived-from-base-at-alloc` manually.
+  Passing focused coverage with only
+  `llvm-unsafe-no-slow-path-root-slots=1` and the raw fallback disabled:
+  `typing-layouts-arrays` 134/134, `typing-layouts-iarrays` 81/81,
+  `typing-layouts-products` 104/105 with one skip, `compaction` 8/11 with
+  three skips, `gc-roots` 10/10, `weak-ephe-final` 23/28 with five skips,
+  `async-exns` 5/5, `match-exception` 16/16, `runtime-C-exceptions` 2/2, and
+  `exception-extra-args` 6/6.
+- Normal `llvm-codegen` without the unsafe flags still passes with the raw
+  fallback disabled after making rematerialization default: 89 passed,
+  3 skipped. The special strong-mode
+  `llvm-codegen` run has one brittle `allocation.ml` assembly order diff
+  (`ldr x0` and `ldr x1` swapped after `caml_call_gc`), not a runtime failure.
+- Focused RS4GC lit tests pass after updating checks for the new default:
+  `oxcaml-addr-derived-remat.ll`,
+  `oxcaml-addr-derived-invoke-remat.ll`,
+  `oxcaml-addr-derived-invoke-rejoin-remat.ll`,
+  `oxcaml-addr-derived-invoke-handler-root-remat.ll`,
+  `oxcaml-addr-derived-live-negative.ll`,
+  `oxcaml-base-equivalent-phi.ll`,
+  `oxcaml-gc-aggregate-explosion.ll`, and
+  `oxcaml-gc-aggregate-explosion-negative.ll`.
+- Current conclusion: newly allocated object starts may still originate from
+  allocation-pointer integer arithmetic because that is the allocator ABI
+  boundary. Once they become OCaml values, follow-on object/field addressing
+  should be `Addr`/GEP-shaped. The late raw-address canonicalizer should remain
+  diagnostic/opt-in; derived-pointer rematerialization is now the OxCaml RS4GC
+  default.
+
+Follow-up on the strongest diagnostic mode:
+
+- `llvm-unsafe-no-frontend-alloca-roots=1` is still not a safe mode. A reduced
+  `typing-layouts-arrays/test_ignorable_product_array_2.ml` build crashes
+  reliably under the stripped ocamltest runtime environment when frontend
+  alloca roots are omitted. The source construct is
+  `let set t i e = set t i (e ())`: the closure argument `e` is still a
+  normal `ptr addrspace(1)` value stored in a frontend register alloca in the
+  LLVM IR. In the unsafe build the indirect call through `e` loses the
+  frontend `gc-live` alloca bundle, while the default build keeps it.
+- This is not the same class as the Cadda/Addr issue. The crashing value is a
+  plain closure pointer, not an interior address. The conclusion is that
+  deleting frontend alloca roots before a real late-root/materialization pass is
+  unsound whenever the frontend register allocas survive to RS4GC.
+- A separate Addr audit found one incorrect Caddi conversion in
+  `unbox_float32`; boxed-float32 field addressing is dynamic heap address
+  arithmetic and must remain `Cadda` so the LLVM backend can lower it as an
+  addrspace(1) GEP.
+
+Latest split-mode result after the RS4GC aggregate explosion pass:
+
+- `llvm-unsafe-no-slow-path-root-slots=1` now passes focused broad coverage:
+  `typing-layouts-iarrays` 81/81, `typing-layouts-arrays` 134/134,
+  `typing-zero-alloc` 5/5, `compaction` 8/8, `gc-roots` 10/10,
+  `weak-ephe-final` 23/23, `async-exns` 5/5, `match-exception` 16/16,
+  `runtime-C-exceptions` 2/2, and `exception-extra-args` 6/6.
+- `llvm-unsafe-no-frontend-alloca-roots=1` still fails
+  `typing-layouts-iarrays/test_ignoreable_or_null_product_array.ml` in the
+  `-Oclassic` native run. The failure is a real stale-root bug: the source
+  region `let a = A.init 1001 I.of_int in check_i a` keeps module/closure
+  environment values and the produced iarray value live across safepoints.
+  Without frontend alloca root bundles, codegen creates ordinary folded spill
+  copies of heap pointers at offsets such as `[sp,#24]` and `[sp,#16]`; those
+  copies are absent from the GC frame table, so moving GC can leave a stale
+  receiver pointer that is later used for an indirect call.
+
+Concrete failures found:
+
+- Omitting frontend-preserved alloca roots can leave a real heap value in a
+  machine stack slot that is absent from the frame table. In the product iarray
+  repro, a stale slot at `[sp,#24]` is later used as an indirect-call receiver
+  and jumps into static data.
+- The old `llvm-unsafe-no-slow-path-root-slots=1` failure was caused by a GC
+  pointer hidden inside a first-class aggregate across an inserted
+  `caml_call_gc`. The new RS4GC aggregate explosion pass exposes those pointer
+  fields before liveness runs. Focused broad coverage now passes with only
+  slow-path root slots omitted.
+
+Requirement update: a proper late-root implementation must materialize hidden
+memory roots and current-value slow-path roots late, after scalar optimization
+and before statepoint/codegen lowering. It must also fail closed when an
+addrspace(1) value is live across a safepoint but is neither relocated nor
+represented by an explicit root.
+
+RS4GC boundary check:
+`agent-state/llvm-fast-path-roots-integration/late_root_ir_dumps/reproduce_rs4gc_boundary.sh`
+now regenerates the before/after modules using
+`llc -stop-before=rewrite-statepoints-for-gc` and
+`llc -stop-after=rewrite-statepoints-for-gc`. For the bad
+`Make_boxed_44_185` slow-path call, unsafe mode has 24 roots before RS4GC and
+24 after; default mode has 25 before and 25 after. The missing current-value
+root is already absent from RS4GC input, so RS4GC is not dropping it.
+
+Optimized-IR detail: in the unsafe slow-path case, the value that must be
+rooted is still inside the aggregate result of the previous statepoint
+`gc.result` when the next `caml_call_gc` statepoint is reached. The direct
+`ptr addrspace(1)` is only extracted after that second statepoint. RS4GC's
+liveness only sees direct handled GC pointer SSA values, not GC pointer fields
+hidden inside first-class aggregates, so it has no root to relocate unless the
+frontend/default slow-path root slot has already forced the pointer field out.
+
+Safety tripwire: RS4GC now has recursive struct detection again plus hidden
+diagnostic option `-mllvm -rs4gc-fail-on-unhandled-gc-aggregate`. With the
+option enabled, the focused iarray compile fails immediately on an aggregate GC
+value in RS4GC liveness. The option is not globally enabled because the current
+default rooted pipeline also contains aggregate returns such as
+`caml_fresh_oo_id`; those need a real aggregate-field exposure or RS4GC
+aggregate-root design rather than an unconditional ban.
+
+LLVM IR aggregate experiment:
+`late_root_ir_dumps/aggregate_cross_safepoint_experiment.ll` compares hidden
+aggregate fields, scalar projection before a safepoint, and aggregate rebuild
+after a safepoint. RS4GC misses `baseline_hidden`, relocates
+`exposed_scalar`, and relocates rebuild-after-safepoint cases when the pointer
+field is projected before the safepoint. Rebuilding is not a complete fix by
+itself: `rebuild_then_second_safepoint` recreates the bug because the rebuilt
+aggregate hides the pointer across a later safepoint.
 
 Note: despite the agent and branch name, the active goal has shifted from the
 fast-path-root-slot optimization to native-like AArch64 trap-region handling for
@@ -1333,3 +1495,483 @@ slots:
     `compiler_binary_bench/summary_after_raw_heap_canonicalization_20260529_143216.json`,
     geomean 0.9866x, median 0.9849x, max slowdown 1.0022x.
   - Updated `NUMBERS.md` with the validation and benchmark details.
+
+2026-05-29 late ordinary-root lowering prototype:
+
+- Added `LATE_ROOT_LOWERING_PLAN.md`, with self-review iterations. Stabilized
+  direction: keep frontend safepoint facts abstract, then materialize ordinary
+  roots late after scalar optimization; use explicit late exception root slots
+  only where shared trap handlers need them.
+- Added LLVM IR prototype test
+  `vendor/llvm-project/llvm/test/Transforms/RewriteStatepointsForGC/oxcaml-late-ordinary-roots.ll`
+  for ordinary typed `addrspace(1)` values across safepoints without frontend
+  root bundles.
+- Attempted the obvious opt-in frontend mode that suppresses ordinary frontend
+  `gc-live` bundles and allocation/poll slow-path root slots. Focused testing
+  showed this is unsafe, so the frontend flag/plumbing was removed rather than
+  leaving an unsafe or no-op option:
+  - `test_float32_u_iarray.ml` exposed an ordinary-call root that survived only
+    in a frontend-preserved stack slot. The frame table omitted that slot across
+    `_caml_apply2`, and moving GC later produced a segfault.
+  - `test_scannable_product_iarray_4.ml` exposed why allocation/poll slow paths
+    still need the current-value slow-path root slots. The frontend-preserved
+    alloca is not guaranteed to contain the current value at the inserted
+    `caml_call_gc`.
+- Validation:
+  - Manual `opt -O2 | opt -passes=rewrite-statepoints-for-gc,verify | FileCheck`
+    for `oxcaml-late-ordinary-roots.ll` passes.
+  - Rebuilt the installed compiler after reverting the unsafe suppression.
+  - The reduced separated-compile/link iarray repro that previously crashed
+    now exits successfully.
+  - Before removing the no-op flag plumbing, reran focused moving-GC/exception
+    suites with conservative root emission: `typing-layouts-iarrays` 81 passed;
+    `compaction` 8 passed/3 skipped; `gc-roots` 10 passed; `weak-ephe-final`
+    23 passed/5 skipped; `ephe-c-api` 1 skipped; `async-exns` 5 passed;
+    `match-exception` 16 passed; `runtime-C-exceptions` 2 passed;
+    `raise-counts` 2 passed; `lib-systhreads` 46 passed/4 skipped;
+    `llvm-codegen` 89 passed/3 skipped.
+  - Full LLVM-backend suite with conservative root emission:
+    `full_suite_late_roots_conservative_20260529_162656.log`, 6743 passed,
+    296 skipped, 0 failed.
+  - After removing the experimental frontend flag plumbing, `make install`
+    passes, `llvm-codegen/allocation.ml` passes, and `typing-layouts-iarrays`
+    passes under the normal LLVM backend path.
+  - Full self-stage2 validation after removing the experimental flag:
+    `stage2_after_late_roots_mode_rejection_20260529_164019.log`, 6717
+    passed, 283 skipped, 0 failed.
+  - Command-line `-llvm-late-roots` is no longer accepted; `OCAMLPARAM`
+    unknown-key behavior is permissive, so use command-line checking for this.
+  - `llvm-lit` was not usable directly from this checkout path because it
+    loaded the source-tree `lit.cfg.py` without the configured build context;
+    the equivalent manual `opt`/`FileCheck` command was used instead.
+- Revised conclusion: removing frontend ordinary roots requires a real late
+  stack-slot/root recovery pass and fail-closed diagnostics first. It is not
+  safe to expose a frontend mode before that exists.
+
+2026-05-29 aggregate GC-field exposure prototype:
+
+- Added RS4GC diagnostic tripwire
+  `-mllvm -rs4gc-fail-on-unhandled-gc-aggregate` in
+  `RewriteStatepointsForGC.cpp`. With the option enabled, focused iarray
+  compilation fails on aggregate GC values such as `caml_fresh_oo_id`, which
+  confirms these values are common enough that a default unconditional assert is
+  too broad today.
+- Added LLVM IR experiments under
+  `late_root_ir_dumps/aggregate_cross_safepoint_experiment.ll` and
+  `late_root_ir_dumps/aggregate_split_rebuild_shapes.ll`.
+- Main result: an aggregate containing `ptr addrspace(1)` is unsafe if it
+  crosses a safepoint while the pointer field is hidden, but the local
+  split/rebuild rule works in representative shapes. Project GC fields before
+  each safepoint, let RS4GC relocate them, then rebuild the aggregate after the
+  safepoint if later code still wants aggregate shape.
+- Tested shapes include repeated safepoints, two GC fields, nested GC fields,
+  PHIs of rebuilt aggregates, immediate aggregate consumers, and invoke normal
+  results. RS4GC inserted relocates for the projected fields, and AArch64
+  codegen reused stack slots in the straight-line cases rather than producing a
+  duplicate-slot explosion.
+- Remaining caveat: this is not yet a proof for arbitrary cyclic aggregate PHI
+  graphs or aggregate arguments to statepoint-like calls. The real pass should
+  run the split/rebuild rule to a stable point around every relevant safepoint
+  and keep the RS4GC aggregate tripwire available as a fail-closed diagnostic.
+
+2026-05-29 GC aggregate explosion prototype:
+
+- Wrote and self-reviewed
+  `agent-state/llvm-fast-path-roots-integration/GC_AGGREGATE_EXPLOSION_PLAN.md`.
+- Implemented an OxCaml-only RS4GC prepass, enabled by default under hidden
+  option `-rs4gc-explode-gc-aggregates`, that exposes GC pointer fields hidden
+  inside first-class SSA aggregates before liveness. It handles aggregate call
+  results, invoke normal results, insertvalue/extractvalue chains, PHIs,
+  selects, and aggregate function arguments.
+- Kept a development fail-closed path under
+  `-rs4gc-fail-on-unhandled-gc-aggregate`; after explosion, unsupported
+  aggregate boundary uses such as aggregate arguments to statepoint calls report
+  a fatal diagnostic instead of silently relying on RS4GC to see inside them.
+- Added LLVM IR tests:
+  - `vendor/llvm-project/llvm/test/Transforms/RewriteStatepointsForGC/oxcaml-gc-aggregate-explosion.ll`
+  - `vendor/llvm-project/llvm/test/Transforms/RewriteStatepointsForGC/oxcaml-gc-aggregate-explosion-negative.ll`
+- Validation:
+  - Rebuilt LLVM `opt` and `llc`.
+  - Manual `opt -S -passes=rewrite-statepoints-for-gc,verify` plus
+    `FileCheck` passed with and without
+    `-rs4gc-fail-on-unhandled-gc-aggregate`.
+  - Manual negative diagnostic test passed.
+  - `llc -O3` on the rewritten prototype IR showed one stack slot for one
+    live GC field across repeated safepoints, two adjacent slots for two live
+    GC fields, and no duplicate-slot explosion in PHI/select/invoke-normal
+    shapes.
+  - Focused OxCaml test
+    `make llvm-test-one TEST=typing-layouts-iarrays/test_scannable_product_iarray_4.ml LLVM_PATH="$LLVM_PATH"`
+    passed: 5 passed, 0 failed.
+
+2026-05-29 real-compiler aggregate explosion check:
+
+- Rebuilt LLVM `clang` after the RS4GC aggregate explosion change so the real
+  compiler path used the new pass through the clang wrapper.
+- First unsafe real-compiler run exposed a prototype bug: the aggregate
+  explosion pass extracted fields from aggregate `musttail` call results,
+  inserting instructions between the `musttail` call and `ret`. LLVM then
+  failed during AArch64 ISel with `failed to perform tail call elimination on a
+  call site marked musttail`.
+- Fixed that by leaving aggregate `musttail` call results untouched and
+  allowing their direct `ret` use in the hidden fail-closed diagnostic. These
+  values are not live across a later safepoint because musttail position has no
+  intervening instruction.
+- Rebuilt LLVM `clang` and `opt` again.
+- Focused real-compiler reproducer with the formerly failing unsafe mode now
+  passes:
+  `make test-one-no-rebuild TEST=typing-layouts-iarrays/test_scannable_product_iarray_4.ml TEST_RUN_OCAMLPARAM="_,llvm-backend=1,llvm-path=$LLVM_PATH,llvm-unsafe-no-slow-path-root-slots=1"`
+  produced 5 passed, 0 failed.
+- Broader nearby real-compiler run also passes:
+  `make test-one-no-rebuild DIR=typing-layouts-iarrays TEST_RUN_OCAMLPARAM="_,llvm-backend=1,llvm-path=$LLVM_PATH,llvm-unsafe-no-slow-path-root-slots=1"`
+  produced 81 passed, 0 failed.
+
+2026-05-29 heap-derived Addr-as-GEP implementation:
+
+- Implemented the plan in `ADDR_AS_GEP_PLAN.md`: Cmm `Addr` now lowers as
+  `ptr addrspace(1)` in LLVM IR, heap-derived address arithmetic lowers as
+  `getelementptr i8`, and raw/native addresses such as bigarray data pointers
+  stay in integer/default-pointer form.
+- Added a frontend fail-closed check that rejects `Addr` registers live across
+  safepoints/calls. This keeps the current frontend honest while we still rely
+  on RS4GC to see only base heap pointers across statepoints.
+- Added an OxCaml RS4GC diagnostic
+  `-rs4gc-fail-on-oxcaml-derived-relocates` and LLVM tests for rematerializable
+  derived heap pointers versus loop-carried derived pointers that would need a
+  stronger representation.
+- Fixed real compiler fallout:
+  - `backend/cmm_helpers.ml` no longer marks bigarray raw data addresses as
+    `Addr`.
+  - static OCaml symbol addresses represented as `Int` in CFG can still feed
+    heap-derived `Addr` arithmetic by converting the integer symbol address to
+    `ptr addrspace(1)` before the GEP.
+- Focused validation:
+  - Rebuilt agent LLVM `clang`, `opt`, `llc`, and `FileCheck`.
+  - Manual RS4GC positive and negative `FileCheck` tests passed.
+  - `make install` passed.
+  - `make test-one DIR=lib-bigarray` passed: 12 passed, 0 failed.
+  - `make test-one DIR=prim-bigstring` passed: 5 passed, 0 failed.
+  - Heap and bigarray smoke programs compile and run with `-llvm-backend`.
+  - `OCAMLPARAM="_,llvm-path=$LLVM_PATH" make test-one DIR=llvm-codegen`
+    passed: 89 passed, 3 skipped, 0 failed.
+
+2026-05-29 strongest late-root flag retest after Addr-as-GEP:
+
+- The two experimental efficiency flags are:
+  - `llvm-unsafe-no-frontend-alloca-roots=1`
+  - `llvm-unsafe-no-slow-path-root-slots=1`
+- Retested the previous strongest mode with both flags enabled on
+  `typing-layouts-iarrays/test_ignoreable_or_null_product_array.ml`.
+- With the default RS4GC fail-closed check, compilation fails before codegen:
+  RS4GC finds an unrematerialized derived `ptr addrspace(1)` live across a
+  statepoint. Examples include a `freeze` of a loop-carried heap pointer PHI
+  and a `getelementptr i8` field address such as `%100 = getelementptr i8,
+  ptr addrspace(1) %95, i64 32`.
+- With the diagnostic disabled via
+  `llvm-flags=-mllvm -rs4gc-fail-on-oxcaml-derived-relocates=false`, the test
+  compiles and the default/O3 native runs pass, but the `-Oclassic` native run
+  fails at runtime with an assertion in `test_gen_u_iarray.ml`.
+- Conclusion: Addr-as-GEP fixed the hidden integer-pointer representation, but
+  the fully aggressive no-frontend-root mode is still unsafe. The remaining
+  issue is derived/interior heap pointers live across statepoints; those must be
+  rematerialized from relocated base pointers or kept out of the live root set,
+  not relocated independently.
+
+2026-05-29 RS4GC base-materialization/rematerialization check:
+
+- Confirmed that stock RS4GC already has base pointer inference/materialization:
+  `findBasePointers` computes a base for each live GC pointer and may insert
+  PHIs/selects to make that base available at the statepoint. This is not the
+  same as preventing relocation of the derived pointer.
+- The relevant OxCaml-specific experiment switch is
+  `-rs4gc-remat-addrspace1-derived-from-base-at-alloc`. It removes simple
+  derived `addrspace(1)` values from the live set and rematerializes them from
+  the relocated base on the normal continuation.
+- Fixed one bug in that experiment: the chain walker now stops when it reaches
+  the known base instead of chasing through the base's own definition.
+- Debugging `gen_product_iarray_helpers.ll` with that switch shows it accepts
+  simple `freeze(base_phi)` cases, but still rejects a PHI of such frozen
+  values:
+  `%.0499.ph.fr1024 = phi [ %.0499.ph.fr.le1092, ... ], ...`, with base
+  `%.0499.ph`.
+- Testing with both
+  `-rs4gc-remat-addrspace1-derived-from-base-at-alloc` and
+  `-rs4gc-addrspace1-phi-select-base` gets past that PHI case but still fails
+  on invoke statepoints, e.g. `%100 = getelementptr i8, ptr addrspace(1) %95,
+  i64 32` live across an invoke. The rematerialization experiment explicitly
+  rejects invokes.
+- Conclusion: RS4GC's base materialization is necessary but not sufficient for
+  OxCaml. The aggressive no-frontend-root mode needs an OCaml-specific derived
+  pointer policy: normal-call derived values can sometimes be rematerialized
+  from relocated bases, but invoke/handler-live cases need a separate sound
+  design because rematerialization on the normal continuation does not define
+  what the handler observes.
+- Wrote the follow-up plan in
+  `agent-state/llvm-fast-path-roots-integration/DERIVED_POINTER_STATEPOINT_PLAN.md`.
+  The plan separates normal-continuation rematerialization, PHI/select-derived
+  expressions, normal-only invoke rematerialization, and handler-live
+  base-plus-offset environment lowering.
+- Iterated the plan with self-review. Revisions tightened dynamic offset
+  admissibility, avoided treating arbitrary PHIs/selects as bases, added an
+  `Addr` call-boundary audit, and split handler work into "avoid handler-live
+  derived addresses first" versus "lower base-plus-offset handler state if
+  unavoidable".
+- Grounded the plan in actual generated IR. Current strongest-mode failures in
+  `typing-layouts-iarrays/test_ignoreable_or_null_product_array.ml` are simple
+  constant-offset `getelementptr` values from known bases across invokes:
+  24 accepted normal-call GEP remats and 20 rejected invoke GEPs in
+  `gen_u_iarray.ll`; 4 accepted normal-call GEP remats and 2 rejected invoke
+  GEPs in `test_ignoreable_or_null_product_array.ll`. Older saved dumps still
+  show a PHI/base-PHI `not-chain` shape, but it is not the current first
+  blocker. Updated `DERIVED_POINTER_STATEPOINT_PLAN.md` to make normal-only
+  invoke GEP rematerialization the first milestone.
+- Iterated the derived-pointer plan with another self-review. The plan now
+  explicitly says the current IR inventory is not enough to implement safely:
+  before changing RS4GC invoke rematerialization, inspect the failing `%100` and
+  `%169` candidates for use topology, normal-destination/rebuild insertion
+  shape, base provenance, and stackmap output. Milestone 1 is gated on proving
+  those candidates are normal-only; handler-live GEPs must keep failing closed
+  until base-plus-offset handler environment lowering exists.
+
+2026-05-30 derived invoke information gathering:
+
+- Gathered optimized-before-RS4GC and after-RS4GC IR under
+  `agent-state/llvm-fast-path-roots-integration/derived_invoke_info/` for
+  `gen_u_iarray` and `test_ignoreable_or_null_product_array`.
+- Confirmed the inspected `test_ignoreable` invoke GEPs are normal-continuation
+  values. The normal continuation loads through the GEPs after the invoke; the
+  shared handler recomputes its own addresses from recovered handler state.
+- Confirmed the inspected `gen_u_iarray` GEPs are also normal-continuation field
+  addresses from an allocation-derived OCaml value pointer, while the handler
+  uses explicit exception-root state for the value pointer.
+- Found that RS4GC already has generic invoke rematerialization support for
+  `Info.UsesExplicitExceptionRoots`: it rematerializes in the normal
+  destination and avoids the unwind destination. The current OxCaml-specific
+  derived-pointer check rejects all invokes before it can use that path.
+- With the fail-closed diagnostic disabled,
+  `test_ignoreable.optO3.rs4gc.ll` shows derived GEPs in `gc-live` and
+  independent `gc.relocate` results, e.g. `(%162, %163)` and `(%157, %158)`.
+  This is the exact bad shape the diagnostic should continue to reject.
+- `gen_u_iarray.optO3.rs4gc.ll` shows `%.rematNN` GEPs rebuilt after one
+  statepoint and then becoming live across a later invoke. The implementation
+  must therefore be stable across repeated statepoints, not just original
+  frontend GEPs.
+- Disabling `-rs4gc-remat-derived-at-uses` did not reduce invoke rejection
+  counts in either file. The blocker is the invoke/explicit-root interaction,
+  not only use-rematerialization.
+- Standalone `llc` on the manually rewritten RS4GC output hit
+  `LLVM ERROR: [OxCamlGCPrinter] frame size has bottom bits set: 282`, so
+  stackmap-facing validation should be done with focused LLVM tests and the
+  normal compiler/codegen path after implementation.
+- Updated
+  `agent-state/llvm-fast-path-roots-integration/DERIVED_POINTER_STATEPOINT_PLAN.md`
+  with these gathered facts. The first implementation step remains:
+  normal-only constant-offset GEP rematerialization on invoke normal
+  continuations when explicit exception roots are active, with handler-live
+  derived addresses still failing closed.
+
+2026-05-30 derived pointer plan review-revise loop:
+
+- Reviewed `DERIVED_POINTER_STATEPOINT_PLAN.md` against the new invoke GEP
+  facts and revised the plan.
+- Converted the stale "more information needed" section into an
+  information-gathering checklist with status. The inspected generated IR now
+  answers the use-topology and insertion-point questions; stackmap-facing
+  validation remains an implementation test because the ad hoc large-module
+  `opt -> llc` path hit an OxCaml GC printer assertion.
+- Added repeated-statepoint coverage to Milestone 1. `gen_u_iarray` shows
+  rebuilt `%.rematNN` GEPs becoming live across later invokes, so handling only
+  original frontend GEPs is not enough.
+- Tightened the accept rule for invoke rematerialization: require explicit
+  exception roots, require the base to be the RS4GC-selected managed base
+  relocated on the normal continuation, require all replaced post-invoke uses
+  to be dominated by the normal destination, and keep handler-live or mixed
+  uses failing closed.
+- Revised the stable plan: first add focused LLVM IR tests for normal-only,
+  repeated-statepoint, handler-live negative, and mixed-use negative shapes;
+  then implement constant-offset invoke GEP rematerialization by reusing
+  RS4GC's existing explicit-exception-root invoke rematerialization/replacement
+  machinery.
+
+2026-05-30 derived invoke implementation slice:
+
+- Implemented the first safe slice in
+  `vendor/llvm-project/llvm/lib/Transforms/Scalar/RewriteStatepointsForGC.cpp`:
+  invoke rematerialization under `Info.UsesExplicitExceptionRoots` is now gated
+  by a normal-continuation-only use check. This keeps the existing RS4GC
+  invoke rematerialization path for normal-only derived values, but refuses
+  handler-live or PHI-edge uses because the rematerialized value is inserted in
+  the normal destination only.
+- Also generalized RS4GC block liveness propagation slightly: when propagating
+  successor live-in values to a predecessor live-out set, only values available
+  at the predecessor terminator are inserted. PHI edge values are still handled
+  by the existing edge seed. This avoids propagating SSA values over CFG edges
+  where the value cannot legally be used.
+- Relaxed the OxCaml derived-from-base rematerialization filter for invokes
+  only when explicit exception roots are active and the derived value is proven
+  normal-only. Non-explicit-root invokes and mixed normal/handler uses still
+  fail closed.
+- Added focused LLVM IR tests:
+  `oxcaml-addr-derived-invoke-remat.ll` covers normal-only invoke GEP
+  rematerialization and a repeated-statepoint case where the rematerialized GEP
+  is rebuilt again after the next invoke.
+  `oxcaml-addr-derived-invoke-remat-negative.ll` covers a handler-live derived
+  GEP and expects the fail-closed diagnostic.
+- Validation:
+  rebuilt `opt`, `FileCheck`, `llc`, `count`, `not`, and `llvm-config` in
+  `/tmp/oxcaml-agent-llvm-fast-path-roots-integration/llvm-build`;
+  direct `opt | FileCheck` passed for the two new tests plus the adjacent
+  `oxcaml-addr-derived-remat.ll` and `oxcaml-addr-derived-live-negative.ll`
+  checks;
+  `llvm-lit -sv` passed for the two new tests. A broader lit invocation that
+  included the older `oxcaml-addr-derived-live-negative.ll` still fails because
+  that existing test uses `not` without `--crash` for an LLVM fatal.
+- A generated-real-IR probe on saved `test_ignoreable.optO3.ll` still reaches an
+  RS4GC liveness assertion before this rematerialization slice can be evaluated
+  there. The value printed during temporary diagnosis was an addrspace(1)
+  `inttoptr` raw heap address reaching a trap-handler branch where it does not
+  dominate. That points back to the still-open raw-address/interior-pointer
+  representation problem, not to the focused normal-only invoke GEP
+  rematerialization tests.
+
+2026-05-30 default iarray strong-mode follow-up:
+
+- Preserved `Cadda` in the AArch64 selector when `-llvm-backend` is enabled,
+  instead of selecting it into AArch64-specific shifted integer arithmetic.
+  This lets `llvmize.ml` lower `Cadda` as an addrspace(1) GEP. Rebuilt with
+  `make install`; the first reduced `test_ignorable_product_iarray_1` strong
+  `-O3` repro now compiles and runs, and its IR no longer contains the old
+  addrspace(1) pointer -> integer add -> `inttoptr` shape.
+- The remaining default-native `test_ignorable_product_iarray_2` crash is a
+  different issue. A fresh default strong repro still segfaults; the same source
+  with frontend roots enabled passes. The pre-RS4GC derived-default-pointer
+  audit is clean, so this is not the old integer-derived `Addr` bug.
+- Root cause narrowed to local stack closure siblings. In
+  `sort_37_511_code`, several local closures are allocated in one chunk. LLVM
+  keeps one closure pointer live across a safepoint, then derives a sibling
+  closure pointer afterward with a constant-offset GEP and calls it. That is
+  valid as pointer arithmetic, but it is not enough for OCaml local stack
+  scanning: rooting one local object marks/scans that object, not sibling local
+  objects in the same allocation chunk. If a GC happens before the sibling is
+  derived and called, heap fields stored in the sibling closure can remain
+  stale. `maxson_38_512_code` then loads the comparator closure from the stale
+  sibling environment field and eventually crashes in `caml_apply2`.
+- Concrete evidence:
+  - Strong failing assembly roots the local pointer at stack offset 56 around
+    the pre-call safepoint, then derives the sibling later (`add x3, x9, #128`).
+  - Post-RS4GC IR has `%remat373 = getelementptr i8, ptr addrspace(1) %55,
+    i64 128` after the preceding statepoint; the statepoint `gc-live` roots
+    `%55`, not `%remat373`.
+  - Safe frontend-root mode keeps separate roots for the underlying array and
+    comparator values and does not hit the stale sibling field.
+- Mode split for the default-native reduced repro:
+  - `llvm-unsafe-no-frontend-alloca-roots=1` plus
+    `llvm-unsafe-no-slow-path-root-slots=1` plus remat flags compiles but
+    segfaults.
+  - The same default mode without rematerialization fails closed on a derived
+    pointer in `gen_u_iarray`.
+  - The same strong mode under `-O3` passes, so the failure depends on the
+    default optimization shape that leaves sibling local closures derived after
+    a safepoint.
+- Design implication: object-start GEPs marked as OCaml base values are not
+  always interchangeable with interior-derived pointers. For heap objects,
+  rematerializing from a relocated base is fine. For local stack sibling
+  objects, each sibling object whose fields may need scanning must be visible as
+  a root at safepoints before it is used, even if its pointer can be recomputed
+  from another sibling.
+
+2026-05-30 Addr/Cadda follow-up and late-root mode split:
+
+- Fixed one real address-lowering regression found by auditing the Cmm helper
+  changes: `unbox_float32` had been changed to use `Caddi` for the default
+  boxed-float field address. That is a dynamic heap object field, so it now uses
+  `Cadda` again and lowers through the addrspace(1) GEP path.
+- Rebuilt with `make install`.
+  Log: `agent-state/llvm-fast-path-roots-integration/build_install_after_unbox_float32_addr_fix_20260530_033401.log`.
+- Focused strong diagnostics after that fix:
+  - `typing-layouts-iarrays`: passed 81/81.
+    Log: `agent-state/llvm-fast-path-roots-integration/focused_typing_layouts_iarrays_strong_after_unbox_float32_addr_fix_20260530_033621.log`.
+  - `typing-layouts-products`: passed 104, skipped 1, failed 0.
+    Log: `agent-state/llvm-fast-path-roots-integration/focused_typing_layouts_products_strong_after_unbox_float32_addr_fix_20260530_033746.log`.
+- Focused split mode with frontend alloca roots still enabled but slow-path root
+  slots disabled also passes `typing-layouts-arrays`: 134/134.
+  Log: `agent-state/llvm-fast-path-roots-integration/focused_typing_layouts_arrays_no_slow_after_unbox_float32_addr_fix_20260530_033828.log`.
+- Separately reduced the strongest `llvm-unsafe-no-frontend-alloca-roots=1`
+  crash in `typing-layouts-arrays/test_ignorable_product_array_2.ml`. The
+  crashing source shape is a plain closure argument, roughly
+  `let set t i e = set t i (e ())`; the relevant statepoint is an indirect
+  closure call where default IR keeps `"gc-live"(ptr %17)` for the closure root
+  and no-frontend-root IR drops it. This is not an Addr/interior-pointer case.
+- Conclusion: the Addr/Cadda direction is the right fix for heap address
+  arithmetic that had become integers too early. Removing frontend alloca roots
+  is a different, still unsafe mode until ordinary frontend register slots are
+  either truly promoted to SSA before RS4GC or replaced by a real late-root
+  materialization pass. The safe near-term split is to keep frontend alloca
+  roots and continue removing only slow-path root slots.
+- Broader safe split validation:
+  - `llvm-codegen` under `llvm-unsafe-no-slow-path-root-slots=1` has one
+    golden-output difference in `allocation.ml`: the slow-path `caml_call_gc`
+    IR no longer contains the explicit `"gc-live"(ptr %11, ptr %12)` bundle.
+    The AArch64 assembly still spills/reloads the two arguments across
+    `_caml_call_gc`, so this is the expected codegen shape for the flag rather
+    than a runtime failure.
+    Log: `agent-state/llvm-fast-path-roots-integration/focused_safe_no_slow_gc_dirs_after_unbox_float32_addr_fix_20260530_034124_llvm-codegen.log`.
+  - Runtime-heavy focused dirs passed with the same safe split flags:
+    `gc-roots`, `compaction`, and `weak-ephe-final`.
+    Logs:
+    `agent-state/llvm-fast-path-roots-integration/focused_safe_no_slow_runtime_dirs_after_unbox_float32_addr_fix_20260530_034222_gc-roots.log`,
+    `agent-state/llvm-fast-path-roots-integration/focused_safe_no_slow_runtime_dirs_after_unbox_float32_addr_fix_20260530_034222_compaction.log`,
+    and
+    `agent-state/llvm-fast-path-roots-integration/focused_safe_no_slow_runtime_dirs_after_unbox_float32_addr_fix_20260530_034222_weak-ephe-final.log`.
+
+2026-05-30 known-base marker experiment:
+
+- Tried tightening `addr_regs_known_base` so only heap-allocation-derived
+  `Addr` object starts were marked as base values, rather than every
+  `Addr -> Val` move. Motivation: local stack sibling objects should not be
+  treated as interchangeable with heap object starts, because rooting one local
+  object does not necessarily scan a sibling local object.
+- Result: not good enough. Safe split mode still passed
+  `typing-layouts-arrays` (134/134), but the strongest no-frontend-root iarray
+  diagnostic regressed from passing to a segfault in
+  `test_ignorable_product_iarray_2.ml`. The strongest no-frontend-root array
+  mode still had the known bus-error failures. Since this experiment did not
+  solve the no-frontend-root unsoundness and weakened an existing diagnostic, it
+  was reverted.
+- Rebuilt after reverting the experiment.
+  Log: `agent-state/llvm-fast-path-roots-integration/build_install_after_reverting_heap_only_known_base_20260530_035304.log`.
+- Revalidated the previous strong diagnostic baseline after the revert:
+  `typing-layouts-iarrays` and `typing-layouts-products` both pass with
+  `llvm-unsafe-no-frontend-alloca-roots=1`,
+  `llvm-unsafe-no-slow-path-root-slots=1`, and derived-pointer rematerialization
+  diagnostics enabled.
+  Logs:
+  `agent-state/llvm-fast-path-roots-integration/focused_strong_after_reverting_heap_only_known_base_20260530_035526_typing-layouts-iarrays.log`
+  and
+  `agent-state/llvm-fast-path-roots-integration/focused_strong_after_reverting_heap_only_known_base_20260530_035526_typing-layouts-products.log`.
+
+2026-05-30 correction to `test_ignorable_product_array_2.ml` crash diagnosis:
+
+- The earlier note that the no-frontend-root IR simply dropped the needed
+  closure root was incomplete. That is true in the raw frontend IR, but after
+  `-O3`/RS4GC the array argument in
+  `set_444_652_code` is reconstructed as an SSA root and relocated normally.
+- The actual crash is an indirect branch in `set_444_652_code` through its
+  closure argument `e`. LLDB stopped at `pc = 0x1054c3ee8`; that address is not
+  text, but data whose first word is the real closure code pointer
+  `_camlTest_ignorable_product_array_2__fn[...]_443_651_code`.
+- The caller is `loop_49_756_code`. It stores the closure returned by
+  `get_442_650_code` in a stack slot, calls `caml_apply2`, then reuses that
+  slot as the next `e` argument to `set`. In optimized no-frontend-root IR the
+  `caml_apply2` statepoint does list this SSA closure value in `"gc-live"`, and
+  the final stack map records the spill slot.
+- After the statepoint, the spill slot contains an interior-looking pointer
+  into a closure-shaped object rather than the closure object pointer. The safe
+  split mode avoids this by keeping explicit frontend alloca roots for the same
+  values.
+- Current working hypothesis: the remaining strong-mode unsoundness is in the
+  SSA root/statepoint relocation path for values returned from calls and reused
+  through loop phis, not in the source-level `set t i e = set t i (e ())`
+  construct itself. The next useful reduction is a small LLVM IR or OCaml test
+  with a call-returned closure rooted only via RS4GC SSA across a later
+  may-allocate call, then used as a closure.

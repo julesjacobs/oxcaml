@@ -2620,9 +2620,20 @@ static unsigned getPrologueDeath(MachineFunction &MF, unsigned Reg) {
   return getKillRegState(!IsLiveIn);
 }
 
+static bool isOxCamlCallingConv(CallingConv::ID CC) {
+  return CC == CallingConv::OxCaml_WithFP ||
+         CC == CallingConv::OxCaml_WithoutFP ||
+         CC == CallingConv::OxCaml_C_Call ||
+         CC == CallingConv::OxCaml_C_Call_StackArgs ||
+         CC == CallingConv::OxCaml_C_Direct_Call ||
+         CC == CallingConv::OxCaml_Alloc;
+}
+
 static bool produceCompactUnwindFrame(MachineFunction &MF) {
   const AArch64Subtarget &Subtarget = MF.getSubtarget<AArch64Subtarget>();
   AttributeList Attrs = MF.getFunction().getAttributes();
+  if (isOxCamlCallingConv(MF.getFunction().getCallingConv()))
+    return false;
   return Subtarget.isTargetMachO() &&
          !(Subtarget.getTargetLowering()->supportSwiftError() &&
            Attrs.hasAttrSomewhere(Attribute::SwiftError)) &&
