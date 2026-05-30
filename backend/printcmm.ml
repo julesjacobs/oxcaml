@@ -327,7 +327,7 @@ let operation d = function
       is_write
       (temporal_locality locality)
   | Catomic { op; size = _ } -> Printf.sprintf "atomic %s" (atomic_op op)
-  | Copaque -> "opaque"
+  | Copaque _ -> "opaque"
   | Cbeginregion -> "beginregion"
   | Cendregion -> "endregion"
   | Ctuple_field (field, _ty) -> to_string "tuple_field %i" field

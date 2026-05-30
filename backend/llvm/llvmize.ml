@@ -803,6 +803,9 @@ let collect_static_addr_regs (cfg : Cfg.t) =
     Cfg.fold_body_instructions cfg ~init:regs ~f:(fun regs i ->
       match[@ocaml.warning "-fragile-match"] i.desc, i.arg, i.res with
       | Op (Const_symbol _), _, [| dst |] -> Reg.Set.add dst regs
+      | Op (Load { memory_chunk = Word_int; _ }), [| src |], [| dst |]
+        when static regs src ->
+        Reg.Set.add dst regs
       | Op (Move | Opaque), [| src |], [| dst |] when static regs src ->
         Reg.Set.add dst regs
       | Op (Intop_imm (Iadd, _)), [| src |], [| dst |] when static regs src ->
@@ -883,10 +886,23 @@ let live_gc_root_alloca_bundles t roots =
     List.filter_map
       (fun (reg, _root) ->
         if preserve_reg_slot t reg
-        then Some (get_alloca_for_reg t reg)
+        then Some (reg, get_alloca_for_reg t reg)
         else None)
       roots
   in
+  if
+    !Clflags.llvm_unsafe_no_frontend_alloca_roots
+    && not (List.is_empty roots)
+  then (
+    let regs =
+      List.fold_left
+        (fun regs (reg, _root) -> Reg.Set.add reg regs)
+        Reg.Set.empty roots
+    in
+    fail_msg ~name:"live_gc_root_alloca_bundles"
+      "frontend register slots reached gc-live in no-frontend-root mode: %a"
+      Printreg.regset regs);
+  let roots = List.map snd roots in
   if List.is_empty roots then [] else ["gc-live", roots]
 
 let live_gc_root_slot_bundles root_slots =
@@ -988,10 +1004,7 @@ let call_operand_bundles ?alloc_info ?(slow_path_roots = []) t ~primitive_call
     ~raise_call dbg live_roots =
   let frontend_roots =
     if !Clflags.llvm_unsafe_no_frontend_alloca_roots
-    then
-      List.filter
-        (fun (reg, _) -> Reg.Set.mem reg (get_fun_info t).addr_regs_known_base)
-        live_roots
+    then []
     else live_roots
   in
   deopt_bundle ?alloc_info ~primitive_call ~raise_call dbg
@@ -1608,8 +1621,7 @@ let extcall_arg_type (ty_arg : Cmm.exttype) (arg_reg : Reg.t) =
   match ty_arg with
   | XInt -> (
     match[@warning "-fragile-match"] arg_reg.typ with
-    | Addr -> T.i64
-    | Val -> T.val_ptr
+    | Addr | Val -> T.val_ptr
     | Int -> T.i64
     | Float | Float32 | Vec128 | Vec256 | Vec512 | Valx2 -> T.i64)
   | XInt64 | XInt32 | XInt16 | XInt8 -> T.i64
@@ -2001,10 +2013,12 @@ let maybe_emit_specialized_caml_modify_extcall t (i : Cfg.terminator Cfg.instruc
     emit_fallback ();
     emit_ins_no_res t (I.br done_label);
     emit_label t inline_label;
-    let fp_raw = load_reg_to_temp ~typ:T.i64 t fp_reg in
-    let fp = cast t fp_raw T.ptr in
-    let new_val_raw = cast t (load_reg_to_temp t new_val_reg) T.i64 in
+    let fp = load_reg_to_temp ~typ:T.val_ptr t fp_reg in
+    let fp_raw = cast t fp T.i64 in
+    let new_val = load_reg_to_temp ~typ:T.val_ptr t new_val_reg in
+    let new_val_raw = cast t new_val T.i64 in
     let old_val_raw = emit_ins t (I.load ~ptr:fp ~typ:T.i64) in
+    let old_val = cast t old_val_raw T.val_ptr in
     let dest_is_young = emit_is_young_raw t fp_raw in
     let dest_is_old = emit_i1_not t dest_is_young in
     let old_is_block = emit_is_block_raw t old_val_raw in
@@ -2029,13 +2043,13 @@ let maybe_emit_specialized_caml_modify_extcall t (i : Cfg.terminator Cfg.instruc
     emit_label t slow_barrier_label;
     let wrapper_symbol =
       add_c_call_wrapper t "caml_modify_slow_barrier"
-        ~args:[T.i64; T.i64; T.i64] ~res:[]
+        ~args:[T.val_ptr; T.val_ptr; T.val_ptr] ~res:[]
     in
     add_referenced_symbol t "caml_modify_slow_barrier";
     call_simple
       ~attrs:(gc_attr ~can_call_gc:false t i @ [LL.Fn_attr.Cold])
       ~dbg:i.dbg ~primitive_call:true ~live_roots:[]
-      ~cc:Oxcaml t wrapper_symbol [fp_raw; old_val_raw; new_val_raw] []
+      ~cc:Oxcaml t wrapper_symbol [fp; old_val; new_val] []
     |> ignore;
     emit_ins_no_res t (I.br store_label);
     emit_label t store_label;
@@ -2274,24 +2288,25 @@ let raise_ t ~(exn_handler : Label.t option)
   | Raise_notrace -> (
     (* Get exn bucket *)
     let exn_bucket = load_reg_to_temp t i.arg.(0) in
+    let exn_bucket_raw = cast t exn_bucket T.i64 in
     (match Target_system.architecture () with
     | Target_system.AArch64 ->
       (match unwind_label_for_active_handler () with
       | Some unwind_label ->
         add_referenced_symbol t "caml_raise_notrace";
         call_simple ~unwind_label ~attrs:[Gc_leaf_function] ~cc:Oxcaml t
-          "caml_raise_notrace" [exn_bucket] []
+          "caml_raise_notrace" [exn_bucket_raw] []
         |> ignore
       | None ->
         if Config.tsan
         then (
           add_referenced_symbol t "caml_raise_notrace";
           call_simple ~attrs:[Gc_leaf_function] ~cc:Oxcaml t
-            "caml_raise_notrace" [exn_bucket] []
+            "caml_raise_notrace" [exn_bucket_raw] []
           |> ignore)
         else
           call_llvm_intrinsic_no_res t "aarch64.oxcaml.raise.notrace"
-            [exn_bucket])
+            [exn_bucket_raw])
     | Target_system.X86_64 ->
       (* Get sp for trap block *)
       let exn_sp_ptr = load_domainstate_addr t Domain_exn_handler in
@@ -2311,7 +2326,7 @@ let raise_ t ~(exn_handler : Label.t option)
       write_stack_pointer t new_sp;
       emit_ins_no_res t
         (I.inline_asm ~asm:"movq $0, %rax; jmpq *$1" ~constraints:"r,r,~{rax}"
-           ~args:[exn_bucket; handler_addr] ~res_type:T.Or_void.void
+           ~args:[exn_bucket_raw; handler_addr] ~res_type:T.Or_void.void
            ~sideeffect:true)
     | Target_system.IA32 | Target_system.ARM | Target_system.POWER
     | Target_system.Z | Target_system.Riscv ->
@@ -2436,9 +2451,10 @@ let emit_terminator t (block : Cfg.basic_block)
         emit_ins_no_res t I.unreachable;
         emit_unwind_landingpad_after t unwind_label exn_entry
       | Prim { op; label_after } -> (
-        reject_addr_regs i.arg "prim";
         match op with
-        | Probe _ -> not_implemented_terminator ~msg:"probe" i
+        | Probe _ ->
+          reject_addr_regs i.arg "prim";
+          not_implemented_terminator ~msg:"probe" i
         | External { func_symbol; alloc; ty_args; stack_ofs; stack_align; _ } ->
           let exn_entry = exn_entry_for_block t block in
           let unwind_label, exn_entry =
@@ -2449,6 +2465,7 @@ let emit_terminator t (block : Cfg.basic_block)
           br_label t label_after;
           emit_unwind_landingpad_after t unwind_label exn_entry)
       | Invalid { message = _; stack_ofs; stack_align; label_after = _ } ->
+        reject_addr_regs i.arg "prim";
         extcall t i ~func_symbol:Cmm.caml_flambda2_invalid ~alloc:false
           ~ty_args:[XInt] ~stack_ofs ~stack_align;
         emit_ins_no_res t I.unreachable)

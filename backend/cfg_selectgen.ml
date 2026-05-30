@@ -64,7 +64,7 @@ module Make (Target : Cfg_selectgen_target_intf.S) = struct
         List.for_all is_simple_expr args
         (* The following may have side effects *)
       | Capply _ | Cextcall _ | Calloc _ | Cstore _ | Craise _ | Catomic _
-      | Cprobe _ | Cprobe_is_enabled _ | Copaque | Cpoll | Cpause ->
+      | Cprobe _ | Cprobe_is_enabled _ | Copaque _ | Cpoll | Cpause ->
         false
       | Cprefetch _ | Cbeginregion | Cendregion ->
         false
@@ -114,7 +114,7 @@ module Make (Target : Cfg_selectgen_target_intf.S) = struct
         match op with
         | Cextcall { effects = e; coeffects = ce } ->
           EC.create (SU.select_effects e) (SU.select_coeffects ce)
-        | Capply _ | Cprobe _ | Copaque | Cpoll | Cpause -> EC.arbitrary
+        | Capply _ | Cprobe _ | Copaque _ | Cpoll | Cpause -> EC.arbitrary
         | Calloc (Heap, _) -> EC.none
         | Calloc (Local, _) -> EC.coeffect_only Arbitrary
         | Cstore _ -> EC.effect_only Arbitrary
@@ -407,7 +407,7 @@ module Make (Target : Cfg_selectgen_target_intf.S) = struct
       SU.basic_op (Probe_is_enabled { name; enabled_at_init }), []
     | Cbeginregion -> SU.basic_op Begin_region, []
     | Cendregion -> SU.basic_op End_region, args
-    | Cpackf32 | Copaque | Cbswap _ | Cprefetch _ | Craise _
+    | Cpackf32 | Copaque _ | Cbswap _ | Cprefetch _ | Craise _
     | Ctuple_field (_, _) ->
       Misc.fatal_error "Selection.select_oper"
 
@@ -460,6 +460,11 @@ module Make (Target : Cfg_selectgen_target_intf.S) = struct
     Sub_cfg.add_instruction' sub_cfg instr;
     instr.id
 
+  let loc_exn_bucket () =
+    if !Clflags.llvm_backend
+    then Reg.create_alias Proc.loc_exn_bucket ~typ:Val
+    else Proc.loc_exn_bucket
+
   let setup_catch_handler (flag : Cmm.ccatch_flag) rs sub_cfg =
     match flag with
     | Normal | Recursive -> ()
@@ -471,7 +476,7 @@ module Make (Target : Cfg_selectgen_target_intf.S) = struct
         | r :: _ -> r
       in
       Sub_cfg.add_instruction_at_start sub_cfg (Cfg.Op Move)
-        [| Proc.loc_exn_bucket |] exn_bucket_in_handler Debuginfo.none
+        [| loc_exn_bucket () |] exn_bucket_in_handler Debuginfo.none
 
   let unreachable_handler : (Operation.trap_stack * Cmm.expression) Lazy.t =
     lazy
@@ -606,11 +611,11 @@ module Make (Target : Cfg_selectgen_target_intf.S) = struct
       if !Clflags.llvm_backend
       then
         match ty_arg, src.Reg.typ, dst.Reg.typ with
-        | Cmm.XInt, Cmm.Val, Cmm.Int -> (
+        | Cmm.XInt, (Cmm.Val | Cmm.Addr), Cmm.Int -> (
           match dst.loc with
-          | Reg _ -> Reg.create_alias dst ~typ:Cmm.Val
-          | Stack _ -> Reg.create_at_location Cmm.Val dst.loc
-          | Unknown -> Reg.create Cmm.Val)
+          | Reg _ -> Reg.create_alias dst ~typ:src.Reg.typ
+          | Stack _ -> Reg.create_at_location src.Reg.typ dst.loc
+          | Unknown -> Reg.create src.Reg.typ)
         | _ -> dst
       else dst
     in
@@ -779,12 +784,20 @@ module Make (Target : Cfg_selectgen_target_intf.S) = struct
       | Never_returns -> Never_returns
       | Ok (simple_list, ext_env) -> emit_tuple ext_env sub_cfg simple_list)
     | Cop (Craise k, args, dbg) -> emit_expr_raise env sub_cfg k args dbg
-    | Cop (Copaque, args, dbg) -> (
+    | Cop (Copaque ty, args, dbg) -> (
       match emit_parts_list env sub_cfg args with
       | Never_returns -> Never_returns
       | Ok (simple_args, env) ->
         let* rs = emit_tuple env sub_cfg simple_args in
-        Ok (insert_op_debug env sub_cfg (SU.make_opaque ()) dbg rs rs))
+        let opaque_rs =
+          insert_op_debug env sub_cfg (SU.make_opaque ()) dbg rs rs
+        in
+        if Cmm.equal_machtype (Reg.typv opaque_rs) ty
+        then Ok opaque_rs
+        else
+          let rd = Reg.createv ty in
+          SU.insert_moves env sub_cfg opaque_rs rd;
+          Ok rd)
     | Cop (Ctuple_field (field, fields_layout), [arg], _dbg) -> (
       match emit_expr env sub_cfg arg ~bound_name:None with
       | Never_returns -> Never_returns
@@ -892,7 +905,7 @@ module Make (Target : Cfg_selectgen_target_intf.S) = struct
     in
     (* Populate the distinguished extra args registers, for the current
        exception handler, with the extra args for this particular raise. *)
-    let exn_bucket = [| Proc.loc_exn_bucket |] in
+    let exn_bucket = [| loc_exn_bucket () |] in
     let rd = Array.concat (exn_bucket :: extra_args_regs) in
     Array.iter2
       (fun r1 rd -> SU.insert env sub_cfg (Op Move) [| r1 |] [| rd |])
