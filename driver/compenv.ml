@@ -274,6 +274,14 @@ let read_one_param ppf position name v =
   | "nocwd" -> set "nocwd" [ no_cwd ] v
   | "linkall" -> set "linkall" [ link_everything ] v
   | "llvm-backend" -> set "llvm-backend" [ Clflags.llvm_backend ] v
+  | "llvm-unsafe-no-frontend-alloca-roots" ->
+      set "llvm-unsafe-no-frontend-alloca-roots"
+        [ Clflags.llvm_unsafe_no_frontend_alloca_roots ]
+        v
+  | "llvm-unsafe-no-slow-path-root-slots" ->
+      set "llvm-unsafe-no-slow-path-root-slots"
+        [ Clflags.llvm_unsafe_no_slow_path_root_slots ]
+        v
   | "nolabels" -> set "nolabels" [ classic ] v
   | "principal" -> set "principal"  [ principal ] v
   | "rectypes" -> set "rectypes" [ recursive_types ] v

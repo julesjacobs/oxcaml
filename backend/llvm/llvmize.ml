@@ -122,6 +122,13 @@ type fun_info =
     mutable preserved_reg_slots : Reg.Set.t;
         (* Registers whose slots must remain addressable, for example because a
            GC safepoint reports the slot through a ["gc-live"] bundle. *)
+    mutable addr_regs_known_base : Reg.Set.t;
+        (* Address-typed temporaries that are immediately reinterpreted as [Val].
+           This is an explicit frontend assertion that the address is an OCaml
+           object pointer, not an interior pointer. *)
+    mutable static_addr_regs : Reg.Set.t;
+        (* Integer/address temporaries derived from static symbols. These are
+           address values, but not moving GC roots. *)
     mutable slow_path_root_slots : LL.Value.t list;
         (* Static entry-block spill slots used only by eligible allocation and
            poll slow paths. *)
@@ -191,6 +198,8 @@ let create_fun_info ?subprogram_dbg_metadata_id emitter =
     liveness = None;
     fun_args = [||];
     preserved_reg_slots = Reg.Set.empty;
+    addr_regs_known_base = Reg.Set.empty;
+    static_addr_regs = Reg.Set.empty;
     slow_path_root_slots = [];
     active_traps = InstructionId.Tbl.create 0;
     active_trap_depths = InstructionId.Tbl.create 0;
@@ -657,9 +666,19 @@ let filter_ds_and_make_ret_type ret_machtype =
 let make_arg_types arg_types =
   List.map (fun _ -> T.i64) runtime_regs @ arg_types
 
-let emit_ins ?comment ?res_ident t op =
+let join_instruction_metadata a b =
+  match a, b with
+  | None, None -> None
+  | Some a, None -> Some a
+  | None, Some b -> Some b
+  | Some a, Some b -> Some (a ^ ", " ^ b)
+
+let emit_ins ?comment ?res_ident ?metadata t op =
   let fun_info = get_fun_info t in
-  E.ins ?comment ?dbg_metadata:fun_info.current_dbg_metadata ?res_ident
+  let dbg_metadata =
+    join_instruction_metadata fun_info.current_dbg_metadata metadata
+  in
+  E.ins ?comment ?dbg_metadata ?res_ident
     fun_info.emitter op
 
 let emit_ins_no_res ?comment t op =
@@ -695,6 +714,12 @@ let cast_to_ptr t arg =
 let do_offset ?(int_type = T.i64) t arg res_type offset =
   if offset = 0
   then cast t arg res_type
+  else if T.is_ptr (V.get_type arg) && T.is_ptr res_type
+  then
+    let base_ptr = cast t arg res_type in
+    emit_ins t
+      (I.getelementptr ~base_type:T.i8 ~base_ptr
+         ~indices:[V.of_int offset])
   else
     let base = cast t arg int_type in
     let offset_val =
@@ -739,6 +764,61 @@ let live_gc_root_regs_across t (i : 'a Cfg.instruction) =
         (fun reg ->
           Cmm.is_val reg.typ && Option.is_some (get_alloca_for_reg_opt t reg))
         across)
+
+let reject_addr_regs_across t (i : 'a Cfg.instruction) msg =
+  match (get_fun_info t).liveness with
+  | None -> ()
+  | Some liveness -> (
+    match InstructionId.Tbl.find_opt liveness i.id with
+    | None -> ()
+    | Some { Cfg_liveness.before = _; across } ->
+      let addr_regs = Reg.Set.filter (fun reg -> Cmm.is_addr reg.typ) across in
+      if not (Reg.Set.is_empty addr_regs)
+      then
+        fail_msg ~name:"reject_addr_regs_across" "%s: %a" msg Printreg.regset
+          addr_regs)
+
+let collect_addr_regs_known_base (cfg : Cfg.t) =
+  let collect_once regs =
+    Cfg.fold_body_instructions cfg ~init:regs ~f:(fun regs i ->
+      match[@ocaml.warning "-fragile-match"] i.desc, i.arg, i.res with
+      | Op Move, [| src |], [| dst |]
+        when Cmm.is_addr src.typ && Cmm.is_val dst.typ ->
+        Reg.Set.add dst (Reg.Set.add src regs)
+      | Op Move, [| src |], [| dst |] when Reg.Set.mem src regs ->
+        Reg.Set.add dst regs
+      | Op (Alloc _), _, [| dst |] when Cmm.is_val dst.typ ->
+        Reg.Set.add dst regs
+      | _ -> regs)
+  in
+  let rec fixpoint regs =
+    let regs' = collect_once regs in
+    if Reg.Set.equal regs regs' then regs else fixpoint regs'
+  in
+  fixpoint Reg.Set.empty
+
+let collect_static_addr_regs (cfg : Cfg.t) =
+  let static regs reg = Reg.Set.mem reg regs in
+  let collect_once regs =
+    Cfg.fold_body_instructions cfg ~init:regs ~f:(fun regs i ->
+      match[@ocaml.warning "-fragile-match"] i.desc, i.arg, i.res with
+      | Op (Const_symbol _), _, [| dst |] -> Reg.Set.add dst regs
+      | Op (Move | Opaque), [| src |], [| dst |] when static regs src ->
+        Reg.Set.add dst regs
+      | Op (Intop_imm (Iadd, _)), [| src |], [| dst |] when static regs src ->
+        Reg.Set.add dst regs
+      | Op (Intop Iadd), [| left; right |], [| dst |]
+        when static regs left || static regs right ->
+        Reg.Set.add dst regs
+      | Op (Intop Isub), [| left; _right |], [| dst |] when static regs left ->
+        Reg.Set.add dst regs
+      | _ -> regs)
+  in
+  let rec fixpoint regs =
+    let regs' = collect_once regs in
+    if Reg.Set.equal regs regs' then regs else fixpoint regs'
+  in
+  fixpoint Reg.Set.empty
 
 let slow_path_root_regs_across t i =
   live_gc_root_regs_across t i
@@ -906,9 +986,20 @@ let deopt_bundle ?alloc_info ~primitive_call ~raise_call dbg =
 
 let call_operand_bundles ?alloc_info ?(slow_path_roots = []) t ~primitive_call
     ~raise_call dbg live_roots =
+  let frontend_roots =
+    if !Clflags.llvm_unsafe_no_frontend_alloca_roots
+    then
+      List.filter
+        (fun (reg, _) -> Reg.Set.mem reg (get_fun_info t).addr_regs_known_base)
+        live_roots
+    else live_roots
+  in
   deopt_bundle ?alloc_info ~primitive_call ~raise_call dbg
-  @ live_gc_root_alloca_bundles t live_roots
-  @ live_gc_root_slot_bundles slow_path_roots
+  @ live_gc_root_alloca_bundles t frontend_roots
+  @
+  (if !Clflags.llvm_unsafe_no_slow_path_root_slots
+   then []
+   else live_gc_root_slot_bundles slow_path_roots)
 
 let load_domainstate_addr ?ds_loc ?(offset = 0) t ds_field =
   let typ = T.ptr in
@@ -932,9 +1023,17 @@ let load_address t addr_mode base typ =
   let offset = Arch.addressing_displacement_for_llvmize addr_mode in
   do_offset t base typ offset
 
-let load_address_from_reg t addr_mode reg =
-  let base = load_reg_to_temp t reg |> cast_to_ptr t in
-  load_address t addr_mode base T.ptr
+let load_address_from_reg t addr_mode (reg : Reg.t) =
+  if Cmm.is_val reg.typ || Cmm.is_addr reg.typ
+  then
+    let base = load_reg_to_temp ~typ:T.val_ptr t reg in
+    load_address t addr_mode base T.val_ptr
+  else if Cmm.is_int reg.typ
+  then
+    let base = load_reg_to_temp ~typ:T.i64 t reg |> cast_to_ptr t in
+    load_address t addr_mode base T.ptr
+  else
+    fail_msg ~name:"load_address_from_reg" "unsupported address register type"
 
 let assemble_struct t root_type vals_to_insert =
   let insert cur_struct (indices, to_insert) =
@@ -1324,6 +1423,7 @@ let test t (op : Operation.test) (i : _ Cfg.instruction) =
 
 let call ?(tail = false) ?unwind_label t (i : Cfg.terminator Cfg.instruction)
     (op : Cfg.func_call_operation) =
+  if not tail then reject_addr_regs_across t i "call";
   let args_begin, args_end =
     (* [Indirect] has the function in i.arg.(0) *)
     match op with
@@ -1553,8 +1653,8 @@ let header_wosize_mask =
       header_wosize_shift)
 
 let emit_ocaml_string_length t s =
-  let s = cast t s T.ptr in
-  let header_ptr = do_offset t s T.ptr (-Arch.size_addr) in
+  let s = cast t s T.val_ptr in
+  let header_ptr = do_offset t s T.val_ptr (-Arch.size_addr) in
   let header =
     emit_ins t (I.load_atomic ~ordering:Monotonic ~ptr:header_ptr ~typ:T.i64)
   in
@@ -1589,7 +1689,7 @@ let emit_min_u64 t x y =
 
 let emit_string_compare_word t s1 s2 ~offset ~count =
   let load_word s =
-    let ptr = do_offset t (cast t s T.ptr) T.ptr offset in
+    let ptr = do_offset t (cast t s T.val_ptr) T.val_ptr offset in
     let word = emit_ins t (I.load_with_align ~align:8 ~ptr ~typ:T.i64) in
     call_llvm_intrinsic t "bswap.i64" [word] T.i64
   in
@@ -1949,6 +2049,7 @@ let maybe_emit_specialized_caml_modify_extcall t (i : Cfg.terminator Cfg.instruc
 
 let extcall ?unwind_label t (i : Cfg.terminator Cfg.instruction) ~func_symbol
     ~alloc ~ty_args ~stack_ofs ~stack_align =
+  if alloc || stack_ofs > 0 then reject_addr_regs_across t i "extcall";
   let func_ptr =
     emit_ins t (I.convert Ptrtoint ~arg:(V.of_symbol func_symbol) ~to_:T.i64)
   in
@@ -2378,17 +2479,50 @@ let int_op t (i : Cfg.basic Cfg.instruction) (op : Operation.integer_operation)
   in
   let do_unary_intrinsic op_name = do_unary_intrinsic_extra_args op_name [] in
   let do_gep ~negate_arg =
-    let base_ptr = load_reg_to_temp t i.arg.(0) |> cast_to_ptr t in
+    let base_arg, offset_arg =
+      if Cmm.is_val i.arg.(0).typ || Cmm.is_addr i.arg.(0).typ
+      then i.arg.(0), (if Array.length i.arg > 1 then Some i.arg.(1) else None)
+      else if (not negate_arg)
+              && Array.length i.arg > 1
+              && (Cmm.is_val i.arg.(1).typ || Cmm.is_addr i.arg.(1).typ)
+      then i.arg.(1), Some i.arg.(0)
+      else i.arg.(0), (if Array.length i.arg > 1 then Some i.arg.(1) else None)
+    in
+    let base_ptr =
+      if Cmm.is_val base_arg.typ || Cmm.is_addr base_arg.typ
+      then load_reg_to_temp ~typ:T.val_ptr t base_arg
+      else if Reg.Set.mem base_arg (get_fun_info t).static_addr_regs
+      then load_reg_to_temp ~typ:T.val_ptr t base_arg
+      else
+        fail_msg ~name:"int_op"
+          "Addr arithmetic requires a Val, Addr, or static-symbol base \
+           register; raw Int address arithmetic must use Int/Caddi; args=%a \
+           res=%a"
+          Printreg.regset (Reg.Set.of_list (Array.to_list i.arg))
+          Printreg.regset (Reg.Set.of_list (Array.to_list i.res))
+    in
     let offset =
       match imm with
       | None ->
-        let temp = load_reg_to_temp ~typ:T.i64 t i.arg.(1) in
+        let offset_arg =
+          match offset_arg with
+          | Some offset_arg -> offset_arg
+          | None ->
+            fail_msg ~name:"int_op" "Addr arithmetic missing offset register"
+        in
+        let temp = load_reg_to_temp ~typ:T.i64 t offset_arg in
         if negate_arg
         then emit_ins t (I.binary Sub ~arg1:(V.of_int 0) ~arg2:temp)
         else temp
       | Some n -> V.of_int ~typ:T.i64 (if negate_arg then -n else n)
     in
-    emit_ins t (I.getelementptr ~base_type:T.i8 ~base_ptr ~indices:[offset])
+    let metadata =
+      if Reg.Set.mem i.res.(0) (get_fun_info t).addr_regs_known_base
+      then Some "!is_base_value !{}"
+      else None
+    in
+    emit_ins ?metadata t
+      (I.getelementptr ~base_type:T.i8 ~base_ptr ~indices:[offset])
   in
   let do_imulh ~signed =
     (* Assuming operands are i64 *)
@@ -3632,11 +3766,15 @@ let local_alloc t (i : Cfg.basic Cfg.instruction) num_bytes =
   store_into_reg t i.res.(0) res
 
 let call_gc_for_basic_safepoint ?alloc_info ?unwind_label ~attrs t i =
+  reject_addr_regs_across t i "basic safepoint";
   add_referenced_symbol t "caml_call_gc";
   let slow_path_roots, live_roots =
-    slow_path_root_slots_for_basic_safepoint ?unwind_label t i |> function
-    | Some roots -> roots, []
-    | None -> [], load_live_gc_roots_across t i
+    if !Clflags.llvm_unsafe_no_slow_path_root_slots
+    then [], load_live_gc_roots_across t i
+    else
+      slow_path_root_slots_for_basic_safepoint ?unwind_label t i |> function
+      | Some roots -> roots, []
+      | None -> [], load_live_gc_roots_across t i
   in
   store_slow_path_roots t slow_path_roots;
   call_simple ~attrs ~live_roots ~slow_path_roots ?alloc_info ?unwind_label
@@ -4746,6 +4884,8 @@ let cfg (cl : CL.t) =
   let cfg = CL.cfg cl in
   reject_addr_regs cfg.fun_args "fun args";
   let arg_regs = prepare_fun_info t cfg in
+  (get_fun_info t).addr_regs_known_base <- collect_addr_regs_known_base cfg;
+  (get_fun_info t).static_addr_regs <- collect_static_addr_regs cfg;
   let arg_values = E.get_args_as_values (get_fun_info t).emitter in
   alloca_regs t cfg arg_values arg_regs;
   DLL.iter ~f:(emit_block t cfg) layout;

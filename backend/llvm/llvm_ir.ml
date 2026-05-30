@@ -164,7 +164,7 @@ module Type = struct
     match c with
     | Int -> i64
     | Val -> val_ptr
-    | Addr -> i64
+    | Addr -> val_ptr
     | Float -> double
     | Float32 -> float
     | Vec128 -> vec128

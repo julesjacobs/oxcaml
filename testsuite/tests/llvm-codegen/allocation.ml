@@ -66,29 +66,24 @@ L105:
   %33 = inttoptr i64 %32 to ptr addrspace(1)
   store ptr addrspace(1) %33, ptr %9
   %34 = load ptr addrspace(1), ptr %9
-  %35 = ptrtoint ptr addrspace(1) %34 to i64
-  %36 = add i64 %35, -8
-  %37 = inttoptr i64 %36 to ptr
-  store volatile i64 2048, ptr %37
+  %35 = getelementptr i8, ptr addrspace(1) %34, i64 -8
+  store volatile i64 2048, ptr addrspace(1) %35
+  %36 = load ptr addrspace(1), ptr %9
+  %37 = load ptr addrspace(1), ptr %7
+  store ptr addrspace(1) %37, ptr addrspace(1) %36
   %38 = load ptr addrspace(1), ptr %9
-  %39 = addrspacecast ptr addrspace(1) %38 to ptr
-  %40 = load ptr addrspace(1), ptr %7
-  store ptr addrspace(1) %40, ptr %39
+  %39 = getelementptr i8, ptr addrspace(1) %38, i64 8
+  %40 = load ptr addrspace(1), ptr %8
+  store ptr addrspace(1) %40, ptr addrspace(1) %39
   %41 = load ptr addrspace(1), ptr %9
-  %42 = ptrtoint ptr addrspace(1) %41 to i64
-  %43 = add i64 %42, 8
-  %44 = inttoptr i64 %43 to ptr
-  %45 = load ptr addrspace(1), ptr %8
-  store ptr addrspace(1) %45, ptr %44
-  %46 = load ptr addrspace(1), ptr %9
-  store ptr addrspace(1) %46, ptr %5
-  %47 = load ptr addrspace(1), ptr %5
-  %48 = load i64, ptr %ds
-  %49 = load i64, ptr %alloc
-  %50 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %48, 0, 0
-  %51 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %50, i64 %49, 0, 1
-  %52 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %51, ptr addrspace(1) %47, 1, 0
-  ret { { i64, i64 }, { ptr addrspace(1) } } %52
+  store ptr addrspace(1) %41, ptr %5
+  %42 = load ptr addrspace(1), ptr %5
+  %43 = load i64, ptr %ds
+  %44 = load i64, ptr %alloc
+  %45 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %43, 0, 0
+  %46 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %45, i64 %44, 0, 1
+  %47 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %46, ptr addrspace(1) %42, 1, 0
+  ret { { i64, i64 }, { ptr addrspace(1) } } %47
 }|}]
 
 [%%expect_llvm_asm AArch64{|_camlTOP__make_pair_0_1_code:

@@ -1563,14 +1563,36 @@ let memory_chunk_width_in_bytes : memory_chunk -> int = function
   | Twofiftysix_unaligned | Twofiftysix_aligned -> size_vec256
   | Fivetwelve_unaligned | Fivetwelve_aligned -> size_vec512
 
-let strided_field_address ptr ~index ~stride dbg =
+let strided_field_address_with_op addr_op ptr ~index ~stride dbg =
   if index * stride = 0
   then ptr
-  else Cop (Cadda, [ptr; Cconst_int (index * stride, dbg)], dbg)
+  else Cop (addr_op, [ptr; Cconst_int (index * stride, dbg)], dbg)
+
+let strided_field_address ptr ~index ~stride dbg =
+  strided_field_address_with_op Cadda ptr ~index ~stride dbg
+
+let rec is_static_address_expression = function
+  | Cconst_symbol _ -> true
+  | Cop (Caddi, [arg; Cconst_int _], _)
+  | Cop (Caddi, [Cconst_int _; arg], _) ->
+    is_static_address_expression arg
+  | _ -> false
+
+let static_field_address ?(memory_chunk = Word_val) ptr n dbg =
+  strided_field_address_with_op Caddi ptr dbg ~index:n
+    ~stride:(memory_chunk_width_in_bytes memory_chunk)
 
 let field_address ?(memory_chunk = Word_val) ptr n dbg =
-  strided_field_address ptr dbg ~index:n
-    ~stride:(memory_chunk_width_in_bytes memory_chunk)
+  if is_static_address_expression ptr
+  then static_field_address ~memory_chunk ptr n dbg
+  else
+    strided_field_address ptr dbg ~index:n
+      ~stride:(memory_chunk_width_in_bytes memory_chunk)
+
+let field_address_for_initialize ptr n dbg =
+  if is_static_address_expression ptr
+  then static_field_address ptr n dbg
+  else field_address ptr n dbg
 
 let get_field_gen_given_memory_chunk memory_chunk mutability ptr n dbg =
   Cop
@@ -1648,6 +1670,7 @@ let addr_array_length_shifted hdr dbg = lsr_const hdr wordsize_shift dbg
 let array_indexing ?typ log2size ptr ofs dbg =
   let add =
     match typ with
+    | None when is_static_address_expression ptr -> Caddi
     | None | Some Addr -> Cadda
     | Some Int -> Caddi
     | _ -> assert false
@@ -1833,6 +1856,11 @@ let float_array_set arr ofs newval dbg =
       dbg )
 
 let addr_array_initialize arr ofs newval dbg =
+  let addr =
+    if is_static_address_expression arr
+    then array_indexing ~typ:Int log2_size_addr arr ofs dbg
+    else array_indexing log2_size_addr arr ofs dbg
+  in
   Cop
     ( Cextcall
         { func = "caml_initialize";
@@ -1844,7 +1872,7 @@ let addr_array_initialize arr ofs newval dbg =
           alloc = false;
           ty_args = []
         },
-      [array_indexing log2_size_addr arr ofs dbg; newval],
+      [addr; newval],
       dbg )
 
 (** [zero_extend ~bits dbg e] returns [e] with the most significant
@@ -4143,8 +4171,8 @@ let setfield n ptr init arg1 arg2 dbg =
                effects = Arbitrary_effects;
                coeffects = Has_coeffects;
                ty_args = []
-             },
-           [field_address arg1 n dbg; arg2],
+           },
+           [field_address_for_initialize arg1 n dbg; arg2],
            dbg ))
   | Simple init -> return_unit dbg (set_field arg1 n arg2 init dbg)
 
@@ -4361,7 +4389,7 @@ let entry_point namelist =
   let call i =
     let f =
       Cop
-        ( Cadda,
+        ( Caddi,
           [ cconst_symbol table_symbol;
             Cop (Cmuli, [Cconst_int (Arch.size_addr, dbg ()); i], dbg ()) ],
           dbg () )
@@ -4914,12 +4942,10 @@ let indirect_full_call ~dbg ty pos f ~callees args_type args =
 let bigarray_load ~dbg ~elt_kind ~elt_size ~elt_chunk ~bigarray ~index =
   let ba_data_f = field_address bigarray 1 dbg in
   let ba_data_p = load ~dbg Word_int Mutable ~addr:ba_data_f in
-  let addr =
-    array_indexing ~typ:Addr (Misc.log2 elt_size) ba_data_p index dbg
-  in
+  let addr = array_indexing ~typ:Int (Misc.log2 elt_size) ba_data_p index dbg in
   match (elt_kind : Lambda.bigarray_kind) with
   | Pbigarray_complex32 | Pbigarray_complex64 ->
-    let addr' = binary Cadda ~dbg addr (int ~dbg (elt_size / 2)) in
+    let addr' = binary Caddi ~dbg addr (int ~dbg (elt_size / 2)) in
     box_complex dbg
       (load ~dbg elt_chunk Mutable ~addr)
       (load ~dbg elt_chunk Mutable ~addr:addr')
@@ -4936,12 +4962,10 @@ let bigarray_store ~dbg ~(elt_kind : Lambda.bigarray_kind) ~elt_size ~elt_chunk
     ~bigarray ~index ~new_value =
   let ba_data_f = field_address bigarray 1 dbg in
   let ba_data_p = load ~dbg Word_int Mutable ~addr:ba_data_f in
-  let addr =
-    array_indexing ~typ:Addr (Misc.log2 elt_size) ba_data_p index dbg
-  in
+  let addr = array_indexing ~typ:Int (Misc.log2 elt_size) ba_data_p index dbg in
   match elt_kind with
   | Pbigarray_complex32 | Pbigarray_complex64 ->
-    let addr' = binary Cadda ~dbg addr (int ~dbg (elt_size / 2)) in
+    let addr' = binary Caddi ~dbg addr (int ~dbg (elt_size / 2)) in
     return_unit dbg
       (sequence
          (store ~dbg elt_chunk Assignment ~addr

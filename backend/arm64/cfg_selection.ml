@@ -155,21 +155,33 @@ let select_operation' ~generic_select_condition:_ (op : Cmm.operation)
   in
   match op with
   (* Integer addition *)
-  | Caddi | Caddv | Cadda -> (
-    match args with
-    (* Shift-add *)
-    | [arg1; Cop (Clsl, [arg2; Cconst_int (n, _)], _)] when n > 0 && n < 64 ->
-      Rewritten (specific (Ishiftarith (Ishiftadd, n)), [arg1; arg2])
-    | [arg1; Cop (Casr, [arg2; Cconst_int (n, _)], _)] when n > 0 && n < 64 ->
-      Rewritten (specific (Ishiftarith (Ishiftadd, -n)), [arg1; arg2])
-    | [Cop (Clsl, [arg1; Cconst_int (n, _)], _); arg2] when n > 0 && n < 64 ->
-      Rewritten (specific (Ishiftarith (Ishiftadd, n)), [arg2; arg1])
-    | [Cop (Casr, [arg1; Cconst_int (n, _)], _); arg2] when n > 0 && n < 64 ->
-      Rewritten (specific (Ishiftarith (Ishiftadd, -n)), [arg2; arg1])
-    (* Multiply-add *)
-    | [arg1; Cop (Cmuli, args2, dbg)] | [Cop (Cmuli, args2, dbg); arg1] ->
-      rewrite_multiply_add_or_sub Ishiftadd Imuladd ~arg1 ~args2 dbg
-    | _ -> Use_default)
+  | (Caddi | Caddv | Cadda as op) -> (
+    if !Clflags.llvm_backend
+       &&
+       match op with
+       | Cadda -> true
+       | Caddi | Caddv -> false
+       | _ -> assert false
+    then Use_default
+    else
+      match args with
+      (* Shift-add *)
+      | [arg1; Cop (Clsl, [arg2; Cconst_int (n, _)], _)] when n > 0 && n < 64
+        ->
+        Rewritten (specific (Ishiftarith (Ishiftadd, n)), [arg1; arg2])
+      | [arg1; Cop (Casr, [arg2; Cconst_int (n, _)], _)] when n > 0 && n < 64
+        ->
+        Rewritten (specific (Ishiftarith (Ishiftadd, -n)), [arg1; arg2])
+      | [Cop (Clsl, [arg1; Cconst_int (n, _)], _); arg2] when n > 0 && n < 64
+        ->
+        Rewritten (specific (Ishiftarith (Ishiftadd, n)), [arg2; arg1])
+      | [Cop (Casr, [arg1; Cconst_int (n, _)], _); arg2] when n > 0 && n < 64
+        ->
+        Rewritten (specific (Ishiftarith (Ishiftadd, -n)), [arg2; arg1])
+      (* Multiply-add *)
+      | [arg1; Cop (Cmuli, args2, dbg)] | [Cop (Cmuli, args2, dbg); arg1] ->
+        rewrite_multiply_add_or_sub Ishiftadd Imuladd ~arg1 ~args2 dbg
+      | _ -> Use_default)
   (* Integer subtraction *)
   | Csubi -> (
     match args with
