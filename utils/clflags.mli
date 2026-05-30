@@ -259,6 +259,8 @@ val emit_optimized_probes : bool ref
 val supports_optimized_probes : bool
 
 val llvm_backend : bool ref
+val llvm_unsafe_no_frontend_alloca_roots : bool ref
+val llvm_unsafe_no_slow_path_root_slots : bool ref
 
 (* Dedicated flag for the ikinds kind checker (enabled by default). *)
 val ikinds : bool ref

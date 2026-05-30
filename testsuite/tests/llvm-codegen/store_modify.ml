@@ -41,19 +41,18 @@ L110:
   %14 = load i64, ptr %6
   store i64 %14, ptr %9
   %15 = load ptr addrspace(1), ptr %8
-  %16 = addrspacecast ptr addrspace(1) %15 to ptr
   fence acquire
-  %17 = load i64, ptr %9
-  store i64 %17, ptr %16
+  %16 = load i64, ptr %9
+  store i64 %16, ptr addrspace(1) %15
   store i64 1, ptr %11
   store i64 1, ptr %7
-  %18 = load i64, ptr %7
-  %19 = load i64, ptr %ds
-  %20 = load i64, ptr %alloc
-  %21 = insertvalue { { i64, i64 }, { i64 } } poison, i64 %19, 0, 0
-  %22 = insertvalue { { i64, i64 }, { i64 } } %21, i64 %20, 0, 1
-  %23 = insertvalue { { i64, i64 }, { i64 } } %22, i64 %18, 1, 0
-  ret { { i64, i64 }, { i64 } } %23
+  %17 = load i64, ptr %7
+  %18 = load i64, ptr %ds
+  %19 = load i64, ptr %alloc
+  %20 = insertvalue { { i64, i64 }, { i64 } } poison, i64 %18, 0, 0
+  %21 = insertvalue { { i64, i64 }, { i64 } } %20, i64 %19, 0, 1
+  %22 = insertvalue { { i64, i64 }, { i64 } } %21, i64 %17, 1, 0
+  ret { { i64, i64 }, { i64 } } %22
 }|}]
 
 [%%expect_llvm_asm AArch64{|_camlTOP__set_i_0_1_code:
@@ -81,7 +80,7 @@ val set_s : r -> string -> unit = <fun>
   %7 = alloca i64
   %8 = alloca ptr addrspace(1)
   %9 = alloca ptr addrspace(1)
-  %10 = alloca i64
+  %10 = alloca ptr addrspace(1)
   %11 = alloca i64
   %12 = alloca i64
   %13 = alloca i64
@@ -95,9 +94,9 @@ L123:
   store ptr addrspace(1) %15, ptr %9
   %16 = load ptr addrspace(1), ptr %8
   %17 = getelementptr i8, ptr addrspace(1) %16, i64 8
-  %18 = ptrtoint ptr addrspace(1) %17 to i64
-  store i64 %18, ptr %10
-  %19 = load i64, ptr %10
+  store ptr addrspace(1) %17, ptr %10
+  %18 = load ptr addrspace(1), ptr %10
+  %19 = ptrtoint ptr addrspace(1) %18 to i64
   store i64 %19, ptr %7
   %20 = load ptr addrspace(1), ptr %9
   store ptr addrspace(1) %20, ptr %6

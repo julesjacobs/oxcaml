@@ -47,125 +47,111 @@ L105:
   store ptr addrspace(1) %20, ptr %5
   br label %L104
 L106:
-  %21 = addrspacecast ptr addrspace(1) %15 to ptr
-  %22 = ptrtoint ptr %21 to i64
-  %23 = add i64 %22, -8
-  %24 = inttoptr i64 %23 to ptr
-  %25 = load atomic i64, ptr %24 monotonic, align 8
-  %26 = and i64 %25, 72057594037926912
-  %27 = lshr i64 %26, 10
-  %28 = shl i64 %27, 3
-  %29 = sub i64 %28, 1
-  %30 = getelementptr i8, ptr %21, i64 %29
-  %31 = load i8, ptr %30, align 1
-  %32 = zext i8 %31 to i64
-  %33 = sub i64 %29, %32
-  %34 = addrspacecast ptr addrspace(1) %16 to ptr
-  %35 = ptrtoint ptr %34 to i64
-  %36 = add i64 %35, -8
-  %37 = inttoptr i64 %36 to ptr
-  %38 = load atomic i64, ptr %37 monotonic, align 8
-  %39 = and i64 %38, 72057594037926912
-  %40 = lshr i64 %39, 10
-  %41 = shl i64 %40, 3
-  %42 = sub i64 %41, 1
-  %43 = getelementptr i8, ptr %34, i64 %42
-  %44 = load i8, ptr %43, align 1
-  %45 = zext i8 %44 to i64
-  %46 = sub i64 %42, %45
-  %47 = icmp ult i64 %33, %46
-  %48 = select i1 %47, i64 %33, i64 %46
-  %49 = icmp ugt i64 %48, 15
-  br i1 %49, label %L107, label %L108
+  %21 = getelementptr i8, ptr addrspace(1) %15, i64 -8
+  %22 = load atomic i64, ptr addrspace(1) %21 monotonic, align 8
+  %23 = and i64 %22, 72057594037926912
+  %24 = lshr i64 %23, 10
+  %25 = shl i64 %24, 3
+  %26 = sub i64 %25, 1
+  %27 = getelementptr i8, ptr addrspace(1) %15, i64 %26
+  %28 = load i8, ptr addrspace(1) %27, align 1
+  %29 = zext i8 %28 to i64
+  %30 = sub i64 %26, %29
+  %31 = getelementptr i8, ptr addrspace(1) %16, i64 -8
+  %32 = load atomic i64, ptr addrspace(1) %31 monotonic, align 8
+  %33 = and i64 %32, 72057594037926912
+  %34 = lshr i64 %33, 10
+  %35 = shl i64 %34, 3
+  %36 = sub i64 %35, 1
+  %37 = getelementptr i8, ptr addrspace(1) %16, i64 %36
+  %38 = load i8, ptr addrspace(1) %37, align 1
+  %39 = zext i8 %38 to i64
+  %40 = sub i64 %36, %39
+  %41 = icmp ult i64 %30, %40
+  %42 = select i1 %41, i64 %30, i64 %40
+  %43 = icmp ugt i64 %42, 15
+  br i1 %43, label %L107, label %L108
 L107:
-  %50 = load ptr addrspace(1), ptr %5
-  %51 = load ptr addrspace(1), ptr %6
-  %52 = load i64, ptr %ds
-  %53 = load i64, ptr %alloc
-  %54 = call oxcaml_c_directcc { i64, i64, ptr addrspace(1) } @"\01_caml_string_compare"(i64 %52, i64 %53, ptr addrspace(1) %50, ptr addrspace(1) %51) "gc-leaf-function"="true"
-  %55 = extractvalue { i64, i64, ptr addrspace(1) } %54, 0
-  %56 = extractvalue { i64, i64, ptr addrspace(1) } %54, 1
-  store i64 %55, ptr %ds
-  store i64 %56, ptr %alloc
-  %57 = extractvalue { i64, i64, ptr addrspace(1) } %54, 2
-  store ptr addrspace(1) %57, ptr %5
+  %44 = load ptr addrspace(1), ptr %5
+  %45 = load ptr addrspace(1), ptr %6
+  %46 = load i64, ptr %ds
+  %47 = load i64, ptr %alloc
+  %48 = call oxcaml_c_directcc { i64, i64, ptr addrspace(1) } @"\01_caml_string_compare"(i64 %46, i64 %47, ptr addrspace(1) %44, ptr addrspace(1) %45) "gc-leaf-function"="true"
+  %49 = extractvalue { i64, i64, ptr addrspace(1) } %48, 0
+  %50 = extractvalue { i64, i64, ptr addrspace(1) } %48, 1
+  store i64 %49, ptr %ds
+  store i64 %50, ptr %alloc
+  %51 = extractvalue { i64, i64, ptr addrspace(1) } %48, 2
+  store ptr addrspace(1) %51, ptr %5
   br label %L104
 L108:
-  %58 = icmp eq i64 %48, 0
-  br i1 %58, label %L109, label %L110
+  %52 = icmp eq i64 %42, 0
+  br i1 %52, label %L109, label %L110
 L110:
-  %59 = icmp ugt i64 %48, 8
-  %60 = select i1 %59, i64 8, i64 %48
-  %61 = sub i64 8, %60
-  %62 = shl i64 %61, 3
-  %63 = shl i64 -1, %62
-  %64 = addrspacecast ptr addrspace(1) %15 to ptr
-  %65 = load i64, ptr %64, align 8
-  %66 = call  i64 @llvm.bswap.i64(i64 %65)
-  %67 = addrspacecast ptr addrspace(1) %16 to ptr
-  %68 = load i64, ptr %67, align 8
-  %69 = call  i64 @llvm.bswap.i64(i64 %68)
-  %70 = and i64 %66, %63
-  %71 = and i64 %69, %63
-  %72 = icmp ne i64 %70, %71
-  %73 = icmp ult i64 %70, %71
-  br i1 %72, label %L111, label %L112
+  %53 = icmp ugt i64 %42, 8
+  %54 = select i1 %53, i64 8, i64 %42
+  %55 = sub i64 8, %54
+  %56 = shl i64 %55, 3
+  %57 = shl i64 -1, %56
+  %58 = load i64, ptr addrspace(1) %15, align 8
+  %59 = call  i64 @llvm.bswap.i64(i64 %58)
+  %60 = load i64, ptr addrspace(1) %16, align 8
+  %61 = call  i64 @llvm.bswap.i64(i64 %60)
+  %62 = and i64 %59, %57
+  %63 = and i64 %61, %57
+  %64 = icmp ne i64 %62, %63
+  %65 = icmp ult i64 %62, %63
+  br i1 %64, label %L111, label %L112
 L111:
-  %74 = select i1 %73, i64 -1, i64 3
-  %75 = inttoptr i64 %74 to ptr addrspace(1)
-  store ptr addrspace(1) %75, ptr %5
+  %66 = select i1 %65, i64 -1, i64 3
+  %67 = inttoptr i64 %66 to ptr addrspace(1)
+  store ptr addrspace(1) %67, ptr %5
   br label %L104
 L112:
-  br i1 %59, label %L113, label %L109
+  br i1 %53, label %L113, label %L109
 L113:
-  %76 = sub i64 %48, 8
-  %77 = sub i64 8, %76
-  %78 = shl i64 %77, 3
-  %79 = shl i64 -1, %78
-  %80 = addrspacecast ptr addrspace(1) %15 to ptr
-  %81 = ptrtoint ptr %80 to i64
-  %82 = add i64 %81, 8
-  %83 = inttoptr i64 %82 to ptr
-  %84 = load i64, ptr %83, align 8
-  %85 = call  i64 @llvm.bswap.i64(i64 %84)
-  %86 = addrspacecast ptr addrspace(1) %16 to ptr
-  %87 = ptrtoint ptr %86 to i64
-  %88 = add i64 %87, 8
-  %89 = inttoptr i64 %88 to ptr
-  %90 = load i64, ptr %89, align 8
-  %91 = call  i64 @llvm.bswap.i64(i64 %90)
-  %92 = and i64 %85, %79
-  %93 = and i64 %91, %79
-  %94 = icmp ne i64 %92, %93
-  %95 = icmp ult i64 %92, %93
-  br i1 %94, label %L114, label %L109
+  %68 = sub i64 %42, 8
+  %69 = sub i64 8, %68
+  %70 = shl i64 %69, 3
+  %71 = shl i64 -1, %70
+  %72 = getelementptr i8, ptr addrspace(1) %15, i64 8
+  %73 = load i64, ptr addrspace(1) %72, align 8
+  %74 = call  i64 @llvm.bswap.i64(i64 %73)
+  %75 = getelementptr i8, ptr addrspace(1) %16, i64 8
+  %76 = load i64, ptr addrspace(1) %75, align 8
+  %77 = call  i64 @llvm.bswap.i64(i64 %76)
+  %78 = and i64 %74, %71
+  %79 = and i64 %77, %71
+  %80 = icmp ne i64 %78, %79
+  %81 = icmp ult i64 %78, %79
+  br i1 %80, label %L114, label %L109
 L114:
-  %96 = select i1 %95, i64 -1, i64 3
-  %97 = inttoptr i64 %96 to ptr addrspace(1)
-  store ptr addrspace(1) %97, ptr %5
+  %82 = select i1 %81, i64 -1, i64 3
+  %83 = inttoptr i64 %82 to ptr addrspace(1)
+  store ptr addrspace(1) %83, ptr %5
   br label %L104
 L109:
-  %98 = icmp ult i64 %33, %46
-  %99 = icmp ugt i64 %33, %46
-  %100 = select i1 %99, i64 3, i64 1
-  %101 = select i1 %98, i64 -1, i64 %100
-  %102 = inttoptr i64 %101 to ptr addrspace(1)
-  store ptr addrspace(1) %102, ptr %5
+  %84 = icmp ult i64 %30, %40
+  %85 = icmp ugt i64 %30, %40
+  %86 = select i1 %85, i64 3, i64 1
+  %87 = select i1 %84, i64 -1, i64 %86
+  %88 = inttoptr i64 %87 to ptr addrspace(1)
+  store ptr addrspace(1) %88, ptr %5
   br label %L104
 L104:
   br label %L103
 L103:
-  %103 = load ptr addrspace(1), ptr %5
-  store ptr addrspace(1) %103, ptr %9
-  %104 = load ptr addrspace(1), ptr %9
-  store ptr addrspace(1) %104, ptr %5
-  %105 = load i64, ptr %5
-  %106 = load i64, ptr %ds
-  %107 = load i64, ptr %alloc
-  %108 = insertvalue { { i64, i64 }, { i64 } } poison, i64 %106, 0, 0
-  %109 = insertvalue { { i64, i64 }, { i64 } } %108, i64 %107, 0, 1
-  %110 = insertvalue { { i64, i64 }, { i64 } } %109, i64 %105, 1, 0
-  ret { { i64, i64 }, { i64 } } %110
+  %89 = load ptr addrspace(1), ptr %5
+  store ptr addrspace(1) %89, ptr %9
+  %90 = load ptr addrspace(1), ptr %9
+  store ptr addrspace(1) %90, ptr %5
+  %91 = load i64, ptr %5
+  %92 = load i64, ptr %ds
+  %93 = load i64, ptr %alloc
+  %94 = insertvalue { { i64, i64 }, { i64 } } poison, i64 %92, 0, 0
+  %95 = insertvalue { { i64, i64 }, { i64 } } %94, i64 %93, 0, 1
+  %96 = insertvalue { { i64, i64 }, { i64 } } %95, i64 %91, 1, 0
+  ret { { i64, i64 }, { i64 } } %96
 }|}]
 
 [%%expect_llvm_asm AArch64{|_camlTOP__string_compare_0_1_code:
@@ -302,125 +288,111 @@ L129:
   store ptr addrspace(1) %20, ptr %5
   br label %L128
 L130:
-  %21 = addrspacecast ptr addrspace(1) %15 to ptr
-  %22 = ptrtoint ptr %21 to i64
-  %23 = add i64 %22, -8
-  %24 = inttoptr i64 %23 to ptr
-  %25 = load atomic i64, ptr %24 monotonic, align 8
-  %26 = and i64 %25, 72057594037926912
-  %27 = lshr i64 %26, 10
-  %28 = shl i64 %27, 3
-  %29 = sub i64 %28, 1
-  %30 = getelementptr i8, ptr %21, i64 %29
-  %31 = load i8, ptr %30, align 1
-  %32 = zext i8 %31 to i64
-  %33 = sub i64 %29, %32
-  %34 = addrspacecast ptr addrspace(1) %16 to ptr
-  %35 = ptrtoint ptr %34 to i64
-  %36 = add i64 %35, -8
-  %37 = inttoptr i64 %36 to ptr
-  %38 = load atomic i64, ptr %37 monotonic, align 8
-  %39 = and i64 %38, 72057594037926912
-  %40 = lshr i64 %39, 10
-  %41 = shl i64 %40, 3
-  %42 = sub i64 %41, 1
-  %43 = getelementptr i8, ptr %34, i64 %42
-  %44 = load i8, ptr %43, align 1
-  %45 = zext i8 %44 to i64
-  %46 = sub i64 %42, %45
-  %47 = icmp ult i64 %33, %46
-  %48 = select i1 %47, i64 %33, i64 %46
-  %49 = icmp ugt i64 %48, 15
-  br i1 %49, label %L131, label %L132
+  %21 = getelementptr i8, ptr addrspace(1) %15, i64 -8
+  %22 = load atomic i64, ptr addrspace(1) %21 monotonic, align 8
+  %23 = and i64 %22, 72057594037926912
+  %24 = lshr i64 %23, 10
+  %25 = shl i64 %24, 3
+  %26 = sub i64 %25, 1
+  %27 = getelementptr i8, ptr addrspace(1) %15, i64 %26
+  %28 = load i8, ptr addrspace(1) %27, align 1
+  %29 = zext i8 %28 to i64
+  %30 = sub i64 %26, %29
+  %31 = getelementptr i8, ptr addrspace(1) %16, i64 -8
+  %32 = load atomic i64, ptr addrspace(1) %31 monotonic, align 8
+  %33 = and i64 %32, 72057594037926912
+  %34 = lshr i64 %33, 10
+  %35 = shl i64 %34, 3
+  %36 = sub i64 %35, 1
+  %37 = getelementptr i8, ptr addrspace(1) %16, i64 %36
+  %38 = load i8, ptr addrspace(1) %37, align 1
+  %39 = zext i8 %38 to i64
+  %40 = sub i64 %36, %39
+  %41 = icmp ult i64 %30, %40
+  %42 = select i1 %41, i64 %30, i64 %40
+  %43 = icmp ugt i64 %42, 15
+  br i1 %43, label %L131, label %L132
 L131:
-  %50 = load ptr addrspace(1), ptr %5
-  %51 = load ptr addrspace(1), ptr %6
-  %52 = load i64, ptr %ds
-  %53 = load i64, ptr %alloc
-  %54 = call oxcaml_c_directcc { i64, i64, ptr addrspace(1) } @"\01_caml_bytes_compare"(i64 %52, i64 %53, ptr addrspace(1) %50, ptr addrspace(1) %51) "gc-leaf-function"="true"
-  %55 = extractvalue { i64, i64, ptr addrspace(1) } %54, 0
-  %56 = extractvalue { i64, i64, ptr addrspace(1) } %54, 1
-  store i64 %55, ptr %ds
-  store i64 %56, ptr %alloc
-  %57 = extractvalue { i64, i64, ptr addrspace(1) } %54, 2
-  store ptr addrspace(1) %57, ptr %5
+  %44 = load ptr addrspace(1), ptr %5
+  %45 = load ptr addrspace(1), ptr %6
+  %46 = load i64, ptr %ds
+  %47 = load i64, ptr %alloc
+  %48 = call oxcaml_c_directcc { i64, i64, ptr addrspace(1) } @"\01_caml_bytes_compare"(i64 %46, i64 %47, ptr addrspace(1) %44, ptr addrspace(1) %45) "gc-leaf-function"="true"
+  %49 = extractvalue { i64, i64, ptr addrspace(1) } %48, 0
+  %50 = extractvalue { i64, i64, ptr addrspace(1) } %48, 1
+  store i64 %49, ptr %ds
+  store i64 %50, ptr %alloc
+  %51 = extractvalue { i64, i64, ptr addrspace(1) } %48, 2
+  store ptr addrspace(1) %51, ptr %5
   br label %L128
 L132:
-  %58 = icmp eq i64 %48, 0
-  br i1 %58, label %L133, label %L134
+  %52 = icmp eq i64 %42, 0
+  br i1 %52, label %L133, label %L134
 L134:
-  %59 = icmp ugt i64 %48, 8
-  %60 = select i1 %59, i64 8, i64 %48
-  %61 = sub i64 8, %60
-  %62 = shl i64 %61, 3
-  %63 = shl i64 -1, %62
-  %64 = addrspacecast ptr addrspace(1) %15 to ptr
-  %65 = load i64, ptr %64, align 8
-  %66 = call  i64 @llvm.bswap.i64(i64 %65)
-  %67 = addrspacecast ptr addrspace(1) %16 to ptr
-  %68 = load i64, ptr %67, align 8
-  %69 = call  i64 @llvm.bswap.i64(i64 %68)
-  %70 = and i64 %66, %63
-  %71 = and i64 %69, %63
-  %72 = icmp ne i64 %70, %71
-  %73 = icmp ult i64 %70, %71
-  br i1 %72, label %L135, label %L136
+  %53 = icmp ugt i64 %42, 8
+  %54 = select i1 %53, i64 8, i64 %42
+  %55 = sub i64 8, %54
+  %56 = shl i64 %55, 3
+  %57 = shl i64 -1, %56
+  %58 = load i64, ptr addrspace(1) %15, align 8
+  %59 = call  i64 @llvm.bswap.i64(i64 %58)
+  %60 = load i64, ptr addrspace(1) %16, align 8
+  %61 = call  i64 @llvm.bswap.i64(i64 %60)
+  %62 = and i64 %59, %57
+  %63 = and i64 %61, %57
+  %64 = icmp ne i64 %62, %63
+  %65 = icmp ult i64 %62, %63
+  br i1 %64, label %L135, label %L136
 L135:
-  %74 = select i1 %73, i64 -1, i64 3
-  %75 = inttoptr i64 %74 to ptr addrspace(1)
-  store ptr addrspace(1) %75, ptr %5
+  %66 = select i1 %65, i64 -1, i64 3
+  %67 = inttoptr i64 %66 to ptr addrspace(1)
+  store ptr addrspace(1) %67, ptr %5
   br label %L128
 L136:
-  br i1 %59, label %L137, label %L133
+  br i1 %53, label %L137, label %L133
 L137:
-  %76 = sub i64 %48, 8
-  %77 = sub i64 8, %76
-  %78 = shl i64 %77, 3
-  %79 = shl i64 -1, %78
-  %80 = addrspacecast ptr addrspace(1) %15 to ptr
-  %81 = ptrtoint ptr %80 to i64
-  %82 = add i64 %81, 8
-  %83 = inttoptr i64 %82 to ptr
-  %84 = load i64, ptr %83, align 8
-  %85 = call  i64 @llvm.bswap.i64(i64 %84)
-  %86 = addrspacecast ptr addrspace(1) %16 to ptr
-  %87 = ptrtoint ptr %86 to i64
-  %88 = add i64 %87, 8
-  %89 = inttoptr i64 %88 to ptr
-  %90 = load i64, ptr %89, align 8
-  %91 = call  i64 @llvm.bswap.i64(i64 %90)
-  %92 = and i64 %85, %79
-  %93 = and i64 %91, %79
-  %94 = icmp ne i64 %92, %93
-  %95 = icmp ult i64 %92, %93
-  br i1 %94, label %L138, label %L133
+  %68 = sub i64 %42, 8
+  %69 = sub i64 8, %68
+  %70 = shl i64 %69, 3
+  %71 = shl i64 -1, %70
+  %72 = getelementptr i8, ptr addrspace(1) %15, i64 8
+  %73 = load i64, ptr addrspace(1) %72, align 8
+  %74 = call  i64 @llvm.bswap.i64(i64 %73)
+  %75 = getelementptr i8, ptr addrspace(1) %16, i64 8
+  %76 = load i64, ptr addrspace(1) %75, align 8
+  %77 = call  i64 @llvm.bswap.i64(i64 %76)
+  %78 = and i64 %74, %71
+  %79 = and i64 %77, %71
+  %80 = icmp ne i64 %78, %79
+  %81 = icmp ult i64 %78, %79
+  br i1 %80, label %L138, label %L133
 L138:
-  %96 = select i1 %95, i64 -1, i64 3
-  %97 = inttoptr i64 %96 to ptr addrspace(1)
-  store ptr addrspace(1) %97, ptr %5
+  %82 = select i1 %81, i64 -1, i64 3
+  %83 = inttoptr i64 %82 to ptr addrspace(1)
+  store ptr addrspace(1) %83, ptr %5
   br label %L128
 L133:
-  %98 = icmp ult i64 %33, %46
-  %99 = icmp ugt i64 %33, %46
-  %100 = select i1 %99, i64 3, i64 1
-  %101 = select i1 %98, i64 -1, i64 %100
-  %102 = inttoptr i64 %101 to ptr addrspace(1)
-  store ptr addrspace(1) %102, ptr %5
+  %84 = icmp ult i64 %30, %40
+  %85 = icmp ugt i64 %30, %40
+  %86 = select i1 %85, i64 3, i64 1
+  %87 = select i1 %84, i64 -1, i64 %86
+  %88 = inttoptr i64 %87 to ptr addrspace(1)
+  store ptr addrspace(1) %88, ptr %5
   br label %L128
 L128:
   br label %L127
 L127:
-  %103 = load ptr addrspace(1), ptr %5
-  store ptr addrspace(1) %103, ptr %9
-  %104 = load ptr addrspace(1), ptr %9
-  store ptr addrspace(1) %104, ptr %5
-  %105 = load i64, ptr %5
-  %106 = load i64, ptr %ds
-  %107 = load i64, ptr %alloc
-  %108 = insertvalue { { i64, i64 }, { i64 } } poison, i64 %106, 0, 0
-  %109 = insertvalue { { i64, i64 }, { i64 } } %108, i64 %107, 0, 1
-  %110 = insertvalue { { i64, i64 }, { i64 } } %109, i64 %105, 1, 0
-  ret { { i64, i64 }, { i64 } } %110
+  %89 = load ptr addrspace(1), ptr %5
+  store ptr addrspace(1) %89, ptr %9
+  %90 = load ptr addrspace(1), ptr %9
+  store ptr addrspace(1) %90, ptr %5
+  %91 = load i64, ptr %5
+  %92 = load i64, ptr %ds
+  %93 = load i64, ptr %alloc
+  %94 = insertvalue { { i64, i64 }, { i64 } } poison, i64 %92, 0, 0
+  %95 = insertvalue { { i64, i64 }, { i64 } } %94, i64 %93, 0, 1
+  %96 = insertvalue { { i64, i64 }, { i64 } } %95, i64 %91, 1, 0
+  ret { { i64, i64 }, { i64 } } %96
 }|}]
 
 [%%expect_llvm_asm AArch64{|_camlTOP__bytes_compare_2_3_code:

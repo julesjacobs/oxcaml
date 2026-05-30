@@ -55,30 +55,28 @@ L109:
   br label %L104
 L110:
   %20 = inttoptr i64 %11 to ptr
-  %21 = ptrtoint ptr %20 to i64
-  %22 = add i64 %21, -8
-  %23 = inttoptr i64 %22 to ptr
-  %24 = load atomic i64, ptr %23 acquire, align 8
-  %25 = and i64 %24, 255
-  %26 = shl i64 %25, 1
-  %27 = or i64 %26, 1
-  %28 = inttoptr i64 %27 to ptr addrspace(1)
-  store ptr addrspace(1) %28, ptr %4
+  %21 = getelementptr i8, ptr %20, i64 -8
+  %22 = load atomic i64, ptr %21 acquire, align 8
+  %23 = and i64 %22, 255
+  %24 = shl i64 %23, 1
+  %25 = or i64 %24, 1
+  %26 = inttoptr i64 %25 to ptr addrspace(1)
+  store ptr addrspace(1) %26, ptr %4
   br label %L104
 L104:
   br label %L103
 L103:
-  %29 = load ptr addrspace(1), ptr %4
-  store ptr addrspace(1) %29, ptr %6
-  %30 = load ptr addrspace(1), ptr %6
-  store ptr addrspace(1) %30, ptr %4
-  %31 = load i64, ptr %4
-  %32 = load i64, ptr %ds
-  %33 = load i64, ptr %alloc
-  %34 = insertvalue { { i64, i64 }, { i64 } } poison, i64 %32, 0, 0
-  %35 = insertvalue { { i64, i64 }, { i64 } } %34, i64 %33, 0, 1
-  %36 = insertvalue { { i64, i64 }, { i64 } } %35, i64 %31, 1, 0
-  ret { { i64, i64 }, { i64 } } %36
+  %27 = load ptr addrspace(1), ptr %4
+  store ptr addrspace(1) %27, ptr %6
+  %28 = load ptr addrspace(1), ptr %6
+  store ptr addrspace(1) %28, ptr %4
+  %29 = load i64, ptr %4
+  %30 = load i64, ptr %ds
+  %31 = load i64, ptr %alloc
+  %32 = insertvalue { { i64, i64 }, { i64 } } poison, i64 %30, 0, 0
+  %33 = insertvalue { { i64, i64 }, { i64 } } %32, i64 %31, 0, 1
+  %34 = insertvalue { { i64, i64 }, { i64 } } %33, i64 %29, 1, 0
+  ret { { i64, i64 }, { i64 } } %34
 }|}]
 
 [%%expect_llvm_asm AArch64{|_camlTOP__tag_0_1_code:

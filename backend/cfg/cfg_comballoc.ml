@@ -126,6 +126,25 @@ let find_compatible_allocations :
       previous allocation, with a different offset. *)
 let rec combine : instr_id:InstructionId.sequence -> cell option -> unit =
  fun ~instr_id cell ->
+  let addr_add_then_move (instr : Cfg.basic Cfg.instruction) ~arg ~dst ~imm =
+    let addr = Reg.create Cmm.Addr in
+    let add_instr =
+      { instr with
+        desc = Cfg.Op (Intop_imm (Operation.Iadd, imm));
+        arg = [| arg |];
+        res = [| addr |]
+      }
+    in
+    let move_instr =
+      { instr with
+        desc = Cfg.Op Move;
+        arg = [| addr |];
+        res = [| dst |];
+        id = InstructionId.get_and_incr instr_id
+      }
+    in
+    add_instr, move_instr
+  in
   let first_allocation = find_next_allocation cell in
   match first_allocation with
   | None -> ()
@@ -147,12 +166,13 @@ let rec combine : instr_id:InstructionId.sequence -> cell option -> unit =
           ~f:(fun (size, dbginfos, prev_res0) other_allocation ->
             let other_allocation_instr = DLL.value other_allocation.cell in
             let res0 = other_allocation_instr.res.(0) in
+            let add_instr, move_instr =
+              addr_add_then_move other_allocation_instr ~arg:prev_res0 ~dst:res0
+                ~imm:(-other_allocation.bytes)
+            in
             DLL.set_value other_allocation.cell
-              { other_allocation_instr with
-                desc =
-                  Cfg.Op (Intop_imm (Operation.Iadd, -other_allocation.bytes));
-                arg = [| prev_res0 |]
-              };
+              add_instr;
+            DLL.insert_after other_allocation.cell move_instr;
             ( size + other_allocation.bytes,
               other_allocation.dbginfo @ dbginfos,
               res0 ))
@@ -169,14 +189,15 @@ let rec combine : instr_id:InstructionId.sequence -> cell option -> unit =
                    mode
                  })
         };
-      DLL.insert_after cell
-        { first_allocation_instr with
-          desc =
-            Cfg.Op (Intop_imm (Operation.Iadd, total_size_of_other_allocations));
-          arg = [| first_allocation_res0 |];
-          res = [| first_allocation_res0 |];
-          id = InstructionId.get_and_incr instr_id
-        });
+      let add_instr, move_instr =
+        addr_add_then_move first_allocation_instr ~arg:first_allocation_res0
+          ~dst:first_allocation_res0 ~imm:total_size_of_other_allocations
+      in
+      let add_cell =
+        DLL.insert_and_return_after cell
+          { add_instr with id = InstructionId.get_and_incr instr_id }
+      in
+      DLL.insert_after add_cell move_instr);
     combine ~instr_id compatible_allocs.next_cell
 
 let run : Cfg_with_layout.t -> Cfg_with_layout.t =

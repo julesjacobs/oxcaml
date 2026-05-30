@@ -32,20 +32,19 @@ L101:
   %11 = load ptr addrspace(1), ptr %6
   store ptr addrspace(1) %11, ptr %8
   %12 = load ptr addrspace(1), ptr %7
-  %13 = addrspacecast ptr addrspace(1) %12 to ptr
-  %14 = load i64, ptr %13
-  store i64 %14, ptr %9
-  %15 = load ptr addrspace(1), ptr %8
-  store ptr addrspace(1) %15, ptr %5
-  %16 = load ptr addrspace(1), ptr %7
-  store ptr addrspace(1) %16, ptr %6
-  %17 = load ptr addrspace(1), ptr %5
-  %18 = load ptr addrspace(1), ptr %6
-  %19 = load i64, ptr %ds
-  %20 = load i64, ptr %alloc
-  %21 = load ptr, ptr %9
-  %22 = musttail call oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } %21(i64 %19, i64 %20, ptr addrspace(1) %17, ptr addrspace(1) %18) "statepoint-id"="0"
-  ret { { i64, i64 }, { ptr addrspace(1) } } %22
+  %13 = load i64, ptr addrspace(1) %12
+  store i64 %13, ptr %9
+  %14 = load ptr addrspace(1), ptr %8
+  store ptr addrspace(1) %14, ptr %5
+  %15 = load ptr addrspace(1), ptr %7
+  store ptr addrspace(1) %15, ptr %6
+  %16 = load ptr addrspace(1), ptr %5
+  %17 = load ptr addrspace(1), ptr %6
+  %18 = load i64, ptr %ds
+  %19 = load i64, ptr %alloc
+  %20 = load ptr, ptr %9
+  %21 = musttail call oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } %20(i64 %18, i64 %19, ptr addrspace(1) %16, ptr addrspace(1) %17) "statepoint-id"="0"
+  ret { { i64, i64 }, { ptr addrspace(1) } } %21
 }|}]
 
 [%%expect_llvm_asm AArch64{|_camlTOP__call_0_1_code:
