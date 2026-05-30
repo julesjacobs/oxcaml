@@ -28,6 +28,7 @@ if [ -z "$ocamlopt" ]; then
 fi
 
 {
+  echo '[@@@warning "-26"]'
   echo 'external opaque : int -> int = "%opaque"'
   echo 'let[@inline never] leaf x = opaque (x + 1)'
   printf 'let result = '

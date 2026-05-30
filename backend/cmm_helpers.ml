@@ -3083,7 +3083,7 @@ let unaligned_load_512 = load_chunk Fivetwelve_unaligned
 
 let unaligned_set_512 = set_chunk Fivetwelve_unaligned
 
-let opaque e dbg = Cop (Copaque, [e], dbg)
+let opaque ~ty e dbg = Cop (Copaque ty, [e], dbg)
 
 (* Build an actual switch (ie jump table) *)
 
@@ -4709,7 +4709,14 @@ let sequence x y =
   | _, _ -> Csequence (x, y)
 
 let ite ~dbg ~then_dbg ~then_ ~else_dbg ~else_ cond =
-  Cifthenelse (cond, then_dbg, then_, else_dbg, else_, dbg)
+  match cond with
+  | Cconst_int (0, _) | Cconst_natint (0n, _) -> else_
+  | Cconst_int _ | Cconst_natint _ -> then_
+  | Cconst_float32 _ | Cconst_float _ | Cconst_vec128 _ | Cconst_vec256 _
+  | Cconst_vec512 _ | Cconst_symbol _ | Cvar _ | Ctuple _ | Cop _
+  | Csequence _ | Cifthenelse _ | Cswitch _ | Ccatch _ | Cexit _ | Cinvalid _
+  | Clet _ | Cphantom_let _ ->
+    Cifthenelse (cond, then_dbg, then_, else_dbg, else_, dbg)
 
 let trywith ~dbg ~body ~exn_var ~extra_args ~handler_cont ~handler () =
   Ccatch

@@ -323,3 +323,26 @@ Treat Step 1 as a shared-backend change:
    shared Cmm cleanup.
 
 This plan is viable if Step 1 is done first and the RS4GC check fails closed.
+
+## 2026-05-30 Checkpoint
+
+The AFL instrumentation path was a real raw-address misclassification:
+`shared_mem[cur_location ^ prev_location]` is a C shared-memory buffer, not an
+OCaml heap-derived address. That code now uses `Caddi` for both the byte load
+address and byte store address.
+
+The broad temporary `raw_int_addr_base_regs` fallback was removed again. It was
+too permissive because it could treat arbitrary integer address arithmetic as a
+managed base candidate. After removing it:
+
+- `make install` completed.
+- `flambda` passes with
+  `llvm-unsafe-no-frontend-alloca-roots=1`, confirming the AFL raw-address case
+  is fixed without the broad fallback.
+- `typing-layouts-arrays` still fails in the same no-frontend-root mode. That
+  means the remaining product-array issue is separate from the AFL/Cadda raw
+  address bug and needs its own causality trace.
+
+This supports the stricter rule: fix raw address producers at the source
+(`Caddi`/raw arithmetic), and do not paper over raw integer arithmetic in the
+LLVM backend by reclassifying it as heap-derived `Addr`.

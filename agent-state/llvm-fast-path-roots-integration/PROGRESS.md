@@ -16,6 +16,52 @@ of the hot `_wrap_try` helper.
 Late-root diagnostic note:
 `agent-state/llvm-fast-path-roots-integration/LATE_ROOT_FAILURE_NOTES.md`.
 
+2026-05-30 weaktest/no-frontend follow-up:
+
+- The remaining `weak-ephe-final/weaktest.ml` failure after the GEP
+  base-boundary fix is not another `Weak.resize` base-address bug.
+- A reduced reproducer is
+  `agent-state/llvm-fast-path-roots-integration/weak_argv2_repro/weak_argv2.ml`.
+  It fails with only `llvm-unsafe-no-frontend-alloca-roots=1` and passes with
+  frontend roots enabled.
+- The trigger is `String.init` after enough top-level `Sys.argv` setup to make
+  the first random-character callback hit the Random/DLS allocation path. In
+  the no-frontend raw IR, `caml_create_bytes` returns the target string into
+  `%160`, then the callback call
+  `camlWeak_argv2__fn$5bweak_argv2.ml$3a20...` has no `gc-live` entry for
+  `%160`. The frontend-roots build has the same call with
+  `gc-live(..., ptr %160)`.
+- When that callback path allocates/collects, the target string can move while
+  the stale unrooted `%160` is still used to store characters. The later
+  `HT.add`/`Hashtbl.hash` failure reports as `String.contains` /
+  `Hashtbl.randomized_default`, but that is downstream corruption, not the
+  first missing root.
+- This reinforces the earlier conclusion: removing frontend alloca roots is
+  unsafe until the late-root implementation materializes ordinary live heap
+  SSA values across every statepoint, not just allocation slow paths or
+  addrspace(1) derived addresses.
+
+2026-05-30 RS4GC addrspace investigation follow-up:
+
+- The latest `min_loop_add` reduction shows the remaining weak failure is not
+  caused by the frontend emitting a GC heap pointer as plain integer in the
+  inspected path. The relevant live values are `ptr addrspace(1)`, and RS4GC
+  does insert `gc-live` operands plus `gc.relocate` calls.
+- At `caml_create_bytes`, the no-frontend RS4GC IR has live pairs such as
+  `%.443.base, %.443` and `%.5.base, %.5`. The later code reloads the derived
+  stack locations, but OxCaml stackmap lowering records only the base side of
+  each RS4GC base/derived pair in `GCLocations`.
+- The final assembly confirms the mismatch: before the `caml_create_bytes`
+  call the no-frontend build spills four live values at offsets
+  `80, 72, 64, 56`, while the frametable for that return address contains
+  `72, 72, 56, 56`. The derived slots at `80` and `64` are reloaded after the
+  call but are not scanned/updated by the runtime.
+- The right invariant is therefore stronger than "every GC pointer is
+  addrspace(1)": every machine location reloaded as a live OCaml value after a
+  safepoint must appear in the OxCaml frametable unless codegen rematerializes
+  it from a relocated base. Current stackmap lowering violates that invariant
+  for distinct base/derived locations.
+
 Current late-root finding: the intended end state is still late roots, but the
 naive version is unsafe. Two split unsafe flags were added for diagnosis:
 `llvm-unsafe-no-frontend-alloca-roots=1` and
@@ -1975,3 +2021,348 @@ slots:
   construct itself. The next useful reduction is a small LLVM IR or OCaml test
   with a call-returned closure rooted only via RS4GC SSA across a later
   may-allocate call, then used as a closure.
+
+2026-05-30 no-frontend-root statepoint fixes:
+
+- Fixed the `typing-layouts-arrays/test_ignorable_product_array_2.ml`
+  strong-mode crash. The final stack map had four live stack roots in MIR but
+  printed only three distinct frame-table offsets because a base-equivalent
+  addrspace(1) value used a different equivalent base in its `gc.relocate`.
+  For OxCaml statepoints, base-equivalent addrspace(1) live values now relocate
+  against themselves. This preserves the exact physical root slot that later
+  code reloads.
+- Added/updated `oxcaml-base-equivalent-phi.ll` to block that regression:
+  `%same.base` now gets `gc.relocate(token, 1, 1)` rather than sharing the
+  `%base` root entry.
+- Fixed the same base-equivalent issue for explicit trap recovery roots. A
+  base-equivalent handler-live value is now rooted as itself; only true derived
+  values are rooted by base plus rematerialized into the handler.
+- Added `invoke_base_equiv_rejoin` in
+  `oxcaml-addr-derived-invoke-rejoin-remat.ll` for that recovery-root shape.
+- Fixed the next `weak-ephe-final/weaktest.ml` strong-mode failure. The failing
+  value was a true derived PHI: a PHI of identical `gep base, 24` values with a
+  corresponding base PHI. The statepoint pass now recognizes PHIs of identical
+  rematerializable chains, roots the base PHI, and recreates the derived address
+  from the relocated base.
+- Added `derived_phi_from_base_phi` in `oxcaml-base-equivalent-phi.ll`.
+- Validation:
+  - Rebuilt LLVM tools with `ninja -C
+    /tmp/oxcaml-agent-llvm-fast-path-roots-integration/llvm-build clang opt
+    llc`.
+  - Lit passed for
+    `vendor/llvm-project/llvm/test/Transforms/RewriteStatepointsForGC/oxcaml-base-equivalent-phi.ll`
+    and
+    `vendor/llvm-project/llvm/test/Transforms/RewriteStatepointsForGC/oxcaml-addr-derived-invoke-rejoin-remat.ll`.
+  - The reduced `weaktest.ll` now compiles with `clang -x ir -O3`.
+  - With `llvm-unsafe-no-frontend-alloca-roots=1`, focused directories pass:
+    `typing-layouts-arrays`, `typing-layouts-iarrays`,
+    `typing-layouts-products`, `gc-roots`, `weak-ephe-final`,
+    `match-exception`, `runtime-C-exceptions`, `llvm-codegen`, and
+    `compaction`.
+  - Logs include
+    `focused_typing_layouts_arrays_no_frontend_base_equiv_self_root_rootmake_20260530_051437.log`,
+    `focused_typing-layouts-iarrays_no_frontend_boundary_self_root_20260530_052105.log`,
+    `focused_weak-ephe-final_no_frontend_phi_remat_20260530_053016.log`,
+    `focused_match-exception_no_frontend_phi_remat_20260530_053035.log`,
+    `focused_runtime-C-exceptions_no_frontend_phi_remat_20260530_053041.log`,
+    `focused_llvm-codegen_no_frontend_phi_remat_20260530_053042.log`, and
+    `focused_compaction_no_frontend_phi_remat_20260530_053129.log`.
+
+2026-05-30 raw `Addr` cleanup checkpoint:
+
+- Fixed AFL instrumentation's shared-memory buffer address arithmetic to use
+  `Caddi`, not `Cadda`. The AFL area is raw C memory, so this was a real source
+  violation of the intended invariant that `Cmm.Addr` means heap-derived
+  address for the LLVM backend.
+- Removed the broad temporary `raw_int_addr_base_regs` fallback from
+  `backend/llvm/llvmize.ml`. That fallback was too permissive because it could
+  reclassify arbitrary integer arithmetic as a managed base candidate.
+- Rebuilt the installed compiler after removing the fallback.
+  Log:
+  `agent-state/llvm-fast-path-roots-integration/build_install_remove_raw_int_addr_fallback_20260530_063055.log`.
+- Re-ran `flambda` with `llvm-unsafe-no-frontend-alloca-roots=1`; it passed,
+  confirming the AFL raw-address case is fixed at the source.
+  Log:
+  `agent-state/llvm-fast-path-roots-integration/focused_flambda_no_frontend_caddi_afl_20260530_063323.log`.
+- Re-ran `typing-layouts-arrays` with
+  `llvm-unsafe-no-frontend-alloca-roots=1`; it still has 20 native crashes.
+  Log:
+  `agent-state/llvm-fast-path-roots-integration/focused_typing-layouts-arrays_no_frontend_after_caddi_afl_no_raw_fallback_20260530_063345.log`.
+- Conclusion: the remaining product-array no-frontend-root unsoundness is
+  separate from the AFL/Cadda raw-address issue. The right direction remains:
+  raw/native address producers should use `Caddi`/raw arithmetic, and the LLVM
+  backend should not retroactively paper over raw integer arithmetic as managed
+  `Addr`.
+
+2026-05-30 `Addr` extcall typing checkpoint:
+
+- Traced `caml_modify` in `make_matrix`: Cmm still has an `Addr` field-pointer
+  expression, for example `(+a (+a res (<< x 2)) -4)`. The first loss of the
+  invariant was selection for default `XInt` C arguments, which moved that
+  `Addr` into an `Int` argument register.
+- Updated selection to preserve `XInt` arguments as `Val` or `Addr` when the
+  source register has that type and the C ABI location is an integer register.
+- Updated LLVMize so `XInt` + `Addr` maps to `ptr addrspace(1)`, matching
+  `Val`.
+- Updated the specialized `caml_modify` path to keep the field pointer, old
+  value, and new value as `ptr addrspace(1)` at the slow-barrier wrapper call;
+  raw `i64` conversions are now local to the fast-path tests and raw store.
+- Removed the blanket `Addr` rejection for primitive external calls, keeping it
+  for non-external primitive cases.
+- Rebuilt with `make install`.
+- Regenerated IR for `test_scannable_product_array_4.ml`; slow-barrier calls
+  now use the typed wrapper
+  `c_call_wrapper.caml_modify_slow_barrier.3.ptr_addrspace_1_.ptr_addrspace_1_.ptr_addrspace_1_.0`
+  and pass `ptr addrspace(1)` operands. The wrapper definition also calls
+  `caml_modify_slow_barrier` with `ptr addrspace(1)` arguments.
+- Focused no-frontend test still fails at native runtime with signal 10:
+  `make test-one-no-rebuild TEST=typing-layouts-arrays/test_scannable_product_array_4.ml
+  TEST_RUN_OCAMLPARAM="_,llvm-backend=1,llvm-path=$LLVM_PATH,llvm-unsafe-no-frontend-alloca-roots=1"`.
+  Bytecode passes and native compilation passes; the native run bus-errors.
+- The same focused test passes in normal frontend-root mode with
+  `TEST_RUN_OCAMLPARAM="_,llvm-backend=1,llvm-path=$LLVM_PATH"`.
+- LLDB crash location after this patch is in
+  `camlTest_gen_u_array__fn[test_gen_u_array.ml:281,25--54]_148_381_code`
+  at a closure-code load/branch, not in `caml_modify_slow_barrier`. This
+  suggests the `caml_modify` typing violation was real but not the remaining
+  product-array failure.
+- Followed the remaining crash in the no-frontend product-array run. The
+  crashing source is `fun i -> I.of_int (len + i)` inside the `concat` test.
+  The inner closure captures `len` and the `A.I` module value loaded earlier in
+  `Test_128_361_code` from the functor argument module. The IR keeps that
+  module value as `ptr addrspace(1)` in local slot `%21`.
+- Compared exact IR for the same region:
+  - default frontend-root IR roots `%21` at the calls around the `concat`
+    checks, for example
+    `"gc-live"(ptr %16, ptr %21, ptr %27, ptr %38, ptr %312)`;
+  - `llvm-unsafe-no-frontend-alloca-roots=1` omits `%21`, leaving
+    `"gc-live"(ptr %16, ptr %27, ptr %38, ptr %312)`.
+- Conclusion for this failure: the remaining product-array crash is the same
+  alloca-root unsoundness as the older iarray repro, not another `Addr`/raw
+  `i64` typing bug. The Cmm/LLVM IR value is a normal GC pointer
+  (`ptr addrspace(1)`), but the unsafe mode removes the frontend-preserved
+  alloca root that keeps it updated across moving GC. Later code uses the stale
+  captured `A.I` pointer as a module/closure receiver and crashes while loading
+  the `I.of_int` closure.
+
+2026-05-30 no-frontend alloca-root diagnostic checkpoint:
+
+- Added `agent-state/llvm-fast-path-roots-integration/NO_FRONTEND_ALLOCA_ROOTS_PLAN.md`
+  and experiment results under
+  `agent-state/llvm-fast-path-roots-integration/no_frontend_alloca_root_experiments/`.
+- Implemented the diagnostic-only first patch:
+  `live_gc_root_alloca_bundles` now fails under
+  `llvm-unsafe-no-frontend-alloca-roots=1` if any frontend register slot would
+  be emitted into a `gc-live` bundle.
+- Added LLVM debug flag `-rs4gc-debug-oxcaml-gc-pointer-allocas`, which reports
+  promotable and rejected OxCaml GC-pointer allocas plus rejected users.
+- Rebuilt local LLVM `opt`/`llc` with CMake and rebuilt the installed compiler
+  with `make install`.
+- Focused normal frontend-root test still passes:
+  `make test-one-no-rebuild TEST=typing-layouts-arrays/test_scannable_product_array_4.ml
+  TEST_RUN_OCAMLPARAM="_,llvm-backend=1,llvm-path=$LLVM_PATH"`.
+- Focused no-frontend test now fails at compile time, as intended, instead of
+  running to a bus error:
+  `Llvmize.live_gc_root_alloca_bundles: frontend register slots reached gc-live
+  in no-frontend-root mode: init:V/62 my_closure:V/63`.
+- The failure stack points through `call_operand_bundles`, `call_simple`, and
+  `extcall.emit_fallback`, confirming that the first mixed-model violation is
+  still a primitive/external-call frontend alloca root.
+
+2026-05-30 remove primitive frontend roots / PHI remat checkpoint:
+
+- Changed no-frontend mode so `call_operand_bundles` emits no frontend register
+  alloca roots at all. This removes the temporary primitive/external-call and
+  known-base fallback roots; explicit slow-path root slots remain separate.
+- Rebuilt the compiler with `make install`.
+- The focused no-frontend product-array test moved past the LLVMize diagnostic
+  and exposed an RS4GC failure:
+  `%.0157 = phi ptr addrspace(1) [ %remat198, %L11651 ], [ %47, %L11652 ]`
+  with base
+  `%.0157.base = phi ptr addrspace(1) [ %30, %L11651 ], [ %47, %L11652 ]`.
+- Root cause: the PHI rematerialization helper followed
+  `%remat198 = getelementptr ... %base, 32` through `%base` into the
+  allocation-pointer integer arithmetic, so the incoming root no longer matched
+  the incoming base. This is a valid derived-or-base PHI; the remat chain should
+  stop at the incoming base.
+- Updated `findRematerializablePhiChainToBasePhi` to trim an incoming chain
+  when it reaches the corresponding incoming base. Also kept debug output under
+  `-rs4gc-debug-oxcaml-derived-remat` for PHI-chain reject reasons.
+- Added a focused RS4GC lit case in `oxcaml-base-equivalent-phi.ll` for a
+  derived-or-base PHI where the derived incoming starts from an
+  `inttoptr(add alloc, ...)` base.
+- Rebuilt local LLVM `clang`/`opt`/`llc`.
+- Validation:
+  - `opt -S -passes=rewrite-statepoints-for-gc,verify <
+    vendor/llvm-project/llvm/test/Transforms/RewriteStatepointsForGC/oxcaml-base-equivalent-phi.ll
+    | FileCheck .../oxcaml-base-equivalent-phi.ll`
+  - focused product-array test with
+    `llvm-unsafe-no-frontend-alloca-roots=1`: passed.
+  - focused product-array test in normal frontend-root mode: passed.
+
+2026-05-30 full no-frontend suite after PHI-remat fix:
+
+- Ran the full testsuite from `_runtest/testsuite` with
+  `OCAMLPARAM="_,llvm-backend=1,llvm-path=$LLVM_PATH,llvm-unsafe-no-frontend-alloca-roots=1"`.
+  Log:
+  `agent-state/llvm-fast-path-roots-integration/full_suite_no_frontend_phi_remat_20260530_105047.log`.
+- Result: failed with exit code 2. The focused product-array PHI-remat failure
+  is gone, but the full no-frontend suite still has many failures.
+- Main failure categories from the aggregate log:
+  - corrupted exception printing/backtrace output, for example
+    `backtrace_systhreads.ml` prints `(�b()` instead of `Failure(...)`;
+    this also makes the final `make report` awk step fail with
+    `towc: multibyte conversion failure`;
+  - compile-time `Llvmize.int_op` guard failures where an `Addr` result is
+    still computed from a raw `Int` base, for example `basic/opt_variants.ml`
+    and `typing-layouts-or-null/optimized.ml`;
+  - native runtime crashes or assertion failures in GC-sensitive tests such as
+    `lib-channels/input_all.ml`, `lib-marshal/intern_final.ml`,
+    `lib-runtime-events/test_caml.ml`, `lib-systhreads/boundscheck.ml`,
+    several `statmemprof` tests, `weak-ephe-final/weaklifetime.ml`, and
+    product/iarray layout tests;
+  - long generated tests were killed by the harness/system, including
+    `basic/division_by_constant.ml`, `lib-dynarray/test.ml`, and
+    `llvm-codegen/long_frame.ml`.
+- No worker processes were left running after the suite exited.
+
+2026-05-30 raw-Int address failure root cause:
+
+- Investigated the first deterministic `Llvmize.int_op` guard failures from
+  the no-frontend full suite.
+- `basic/opt_variants.ml` was a dead Cmm branch from `Queue.add` with
+  `(+a 1 8)` in an unreachable `else`; added literal condition folding in
+  `Cmm_helpers.ite`, rebuilt, and the focused compile/run now passes.
+- `typing-layouts-or-null/optimized.ml` was not the same class. The source is
+  `Sys.opaque_identity var_a` where `var_a = This A` for a variant that may be
+  either an immediate or a block. Lambda/Flambda still represent this as a
+  value-kind `Opaque_identity`, but the argument has simplified to the constant
+  immediate.
+- Root cause: `to_cmm_primitive.ml` discarded `Opaque_identity.kind` and emitted
+  an untyped `Copaque`; `cfg_selectgen.ml` then lowered `Copaque` by reusing
+  the input register as the result register. Since the input was constant `1`,
+  the first concrete bad type was introduced during selection:
+  `opaque_var_a:I`, followed by heap-object field loads from that `Int`.
+- Implemented typed Cmm opaque:
+  `Copaque of machtype`, with `to_cmm_primitive.ml` preserving the Flambda
+  primitive kind as a Cmm machtype. Selection keeps CFG `Opaque` type-preserving
+  and inserts a normal compatible move only when the typed Cmm result differs
+  from the input type.
+- Rebuilt with `make install`.
+- Focused validation with
+  `OCAMLPARAM="_,llvm-backend=1,llvm-path=$LLVM_PATH,llvm-unsafe-no-frontend-alloca-roots=1"`:
+ - `testsuite/tests/typing-layouts-or-null/optimized.ml`: compile and run
+    passed; dump now has `opaque_var_a:V` before the address arithmetic.
+  - `testsuite/tests/basic/opt_variants.ml`: compile and run passed.
+
+2026-05-30 other no-frontend failures after typed opaque:
+
+- Reran representative failures from the full no-frontend suite:
+  `backtrace/backtrace_systhreads.ml`, `lib-channels/input_all.ml`,
+  `lib-bigarray-file/mapfile.ml`, `typing-layouts/immediates.ml`,
+  `typing-layouts-arrays/test_ignorable_product_array_2.ml`, and
+  `weak-ephe-final/weaktest.ml`.
+  Final focused log directory:
+  `agent-state/llvm-fast-path-roots-integration/focused_other_failures_after_notrace_raw_cast_20260530_114308/`.
+- Fixed the corrupted exception/backtrace bucket.
+  - Cmm was correct: the caught exception was `exn/524: val`.
+  - Selection was using `Proc.loc_exn_bucket`, which is `Int`, for LLVM CFG
+    exception handler entry and raise arguments. That converted the caught
+    exception bucket to `i64`; after calls such as `Thread.delay` and
+    `Gc.minor`, RS4GC had no `ptr addrspace(1)` value to relocate, and
+    `backtrace_systhreads.ml` printed corrupted exception values.
+  - A global `Proc.loc_exn_bucket = Val` alias breaks native bootstrap IRC
+    register allocation, so the fix is scoped to LLVM CFG selection:
+    `cfg_selectgen.ml` uses a `Val` alias of `Proc.loc_exn_bucket` only when
+    `-llvm-backend` is active, and `cfg_liveness.ml` removes the same alias at
+    exception edges.
+  - `raise_notrace` on AArch64 still has a raw `i64` intrinsic ABI, so
+    `llvmize.ml` casts only that no-trace raise argument back to `i64`.
+  - Rebuilt with `make install`; focused
+    `backtrace/backtrace_systhreads.ml` now passes in no-frontend-root mode.
+- Remaining representative failure buckets:
+  - `lib-bigarray-file/mapfile.ml` compiles to LLVM IR that LLVM rejects after
+    RS4GC: duplicate incoming PHI entries from the same block with different
+    `*.exnroot.*` values in `camlMapfile__tests_2_5_code`. This is an RS4GC
+    PHI/exnroot rewrite issue, not a Cmm frontend typing issue.
+  - `lib-channels/input_all.ml` still compiles and then segfaults. Under LLDB
+    it reaches `Hd_val(val=1)`, meaning some runtime path is treating the
+    immediate `1` as a heap block. This still needs a smaller reduction around
+    `In_channel.input_all` / the final pipe test.
+  - `typing-layouts/immediates.ml` and
+    `typing-layouts-arrays/test_ignorable_product_array_2.ml` still bus-error
+    at runtime; likely a separate layout/product-array address/root issue.
+  - `weak-ephe-final/weaktest.ml` still raises
+    `Invalid_argument("index out of bounds")`; likely a separate weak/ephemeron
+    runtime semantics or root-liveness issue.
+
+2026-05-30 RS4GC duplicate exception-root PHI fix:
+
+- Investigated the `lib-bigarray-file/mapfile.ml` verifier failure.
+  The input Cmm/LLVM IR was not the source of a bad GC pointer type. The
+  failure was introduced inside RS4GC while rewriting strict OxCaml recovery
+  boundary PHIs.
+- Root cause: legal PHIs may have multiple incoming edges from the same
+  predecessor block when every duplicate entry uses the same incoming value.
+  `materializeOxCamlExceptionRootSlots` processed each incoming index
+  independently and created a distinct `*.exnroot` slot/load for each duplicate
+  edge. That turned same-value duplicate entries into different-value duplicate
+  entries, which violates the LLVM verifier.
+- Fix: when rewriting `OxCamlRecoveryBoundaryPhi`, reuse the same materialized
+  exception-root load for repeated `(PHI, incoming block)` entries, and fail if
+  such duplicate entries do not have the same original incoming value.
+- Added a regression to
+  `vendor/llvm-project/llvm/test/Transforms/RewriteStatepointsForGC/oxcaml-addr-derived-invoke-rejoin-remat.ll`
+  covering a recovery switch with duplicate boundary edges.
+- Validation:
+  - Rebuilt local LLVM tools with
+    `ninja -C /tmp/oxcaml-agent-llvm-fast-path-roots-integration/llvm-build opt llc FileCheck clang`.
+  - `llvm-lit -v vendor/llvm-project/llvm/test/Transforms/RewriteStatepointsForGC/oxcaml-addr-derived-invoke-rejoin-remat.ll`
+    passed.
+  - Saved `mapfile.ll` compiles through the rebuilt clang without the verifier
+    failure.
+ - Focused no-frontend-root test passed:
+    `OCAMLPARAM="_,llvm-backend=1,llvm-path=$LLVM_PATH,llvm-unsafe-no-frontend-alloca-roots=1" make test-one-no-rebuild TEST=lib-bigarray-file/mapfile.ml`.
+    Log:
+    `agent-state/llvm-fast-path-roots-integration/mapfile_after_boundary_phi_reuse_20260530_115306.log`.
+
+2026-05-30 weaktest base-boundary investigation:
+
+- Investigated the remaining `weak-ephe-final/weaktest.ml` failure with
+  frontend roots disabled. The first concrete corruption was in
+  `camlWeaktest__resize_29_31_code`.
+- Root cause: raw LLVM IR was correct. It created the new weak table record as
+  a separate base-marked object:
+  `newt = gep closure, 48, !is_base_value`, then accessed `newt.hashes` as
+  `gep newt, 8`.
+- InstCombine folded that field access into `gep closure, 56`. That crosses a
+  GC base boundary: `closure` and `newt` are distinct OCaml blocks that may
+  move independently. RS4GC then rematerialized the field after
+  `Weak.iter_weak` from the relocated closure base instead of the relocated
+  `newt` base.
+- Fix in progress: InstCombine now preserves `!is_base_value` on folded outer
+  base GEPs and refuses to fold an ordinary GEP through a source GEP marked
+  `!is_base_value`.
+- Added
+  `vendor/llvm-project/llvm/test/Transforms/InstCombine/oxcaml-gep-base-metadata.ll`
+  to cover both rules:
+  - folding an outer base-marked GEP must keep `!is_base_value`;
+  - a non-base field GEP from a base-marked source must not be folded through
+    that source.
+- Validation:
+  - Rebuilt `opt`, `FileCheck`, and `clang` in the agent LLVM build. The
+    clang relink matters because OCaml invokes the clang wrapper.
+  - `llvm-lit -q vendor/llvm-project/llvm/test/Transforms/InstCombine/oxcaml-gep-base-metadata.ll`
+    passed.
+  - Regenerated optimized weaktest IR after relinking clang. The resize
+    function now loads `newt.hashes` from relocated `newt + 8`; it no longer
+    rematerializes that field from relocated `closure + 56`.
+- `weaktest.ml` still fails with frontend roots disabled, now in
+  `Stdlib__Array.sort` inside `Weak.stats`. A local instrumented repro showed
+  the weak table is internally consistent when read directly before the stats
+  call, so this is a second issue rather than the same `resize` field remat.
+  Current suspicion is a closure/global initialization or capture/rooting issue
+  around the `print_status` alarm closure; disabling the alarm changes the
+  failure to an earlier `String.contains` bounds exception in
+  `Hashtbl.randomized_default`, so startup/global-root handling needs the next
+  focused investigation.

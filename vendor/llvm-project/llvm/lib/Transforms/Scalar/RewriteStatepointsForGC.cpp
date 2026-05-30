@@ -128,6 +128,10 @@ static cl::opt<bool> DebugOxCamlDerivedRemat(
     "rs4gc-debug-oxcaml-derived-remat", cl::Hidden, cl::init(false),
     cl::desc("Print OxCaml statepoint derived/base candidates"));
 
+static cl::opt<bool> DebugOxCamlGCPointerAllocas(
+    "rs4gc-debug-oxcaml-gc-pointer-allocas", cl::Hidden, cl::init(false),
+    cl::desc("Print OxCaml GC pointer allocas that RS4GC promotes or rejects"));
+
 static cl::opt<bool> FailOnOxCamlDerivedRelocates(
     "rs4gc-fail-on-oxcaml-derived-relocates", cl::Hidden, cl::init(true),
     cl::desc("Fail if an OxCaml statepoint would relocate a derived "
@@ -351,6 +355,11 @@ struct RematerizlizationCandidateRecord {
   SmallVector<Instruction *, 3> ChainToBase;
   // Original base.
   Value *RootOfChain;
+  // If set, this value is an i1 computed before a specific statepoint. When
+  // true the rematerialized chain is used after relocation; when false the
+  // relocated base is already the right value. This handles PHIs whose incoming
+  // values are either a derived chain from the base or the base itself.
+  Value *UseRematerializedValue = nullptr;
   // Cost of chain.
   InstructionCost Cost;
 };
@@ -509,6 +518,17 @@ static bool isOxCamlBaseEquivalentGCPointer(
 static bool isOxCamlBaseEquivalentGCPointer(Value *V, Value *Base) {
   SmallVector<std::pair<Value *, Value *>, 8> Visiting;
   return isOxCamlBaseEquivalentGCPointer(V, Base, Visiting);
+}
+
+static bool isDistinctOxCamlAddrSpace1BaseEquivalentGCPointer(Value *V,
+                                                              Value *Base) {
+  if (V == Base)
+    return false;
+  auto *VTy = dyn_cast<PointerType>(V->getType());
+  auto *BaseTy = dyn_cast<PointerType>(Base->getType());
+  return VTy && BaseTy && VTy->getAddressSpace() == 1 &&
+         BaseTy->getAddressSpace() == 1 &&
+         isOxCamlBaseEquivalentGCPointer(V, Base);
 }
 
 static ArrayRef<Use> GetDeoptBundleOperands(const CallBase *Call) {
@@ -721,13 +741,31 @@ class GCPointerAggregateExploder {
     return &*BB->getFirstInsertionPt();
   }
 
+  BasicBlock *splitInvokeNormalEdgeForExtracts(InvokeInst *II) {
+    BasicBlock *NormalDest = II->getNormalDest();
+    if (NormalDest->getUniquePredecessor())
+      return NormalDest;
+
+    BasicBlock *InvokeBB = II->getParent();
+    BasicBlock *SplitBB =
+        BasicBlock::Create(F.getContext(), NormalDest->getName() + ".gcagg",
+                           &F, NormalDest);
+    BranchInst *BI = BranchInst::Create(NormalDest, SplitBB);
+    BI->setDebugLoc(NormalDest->getFirstNonPHIOrDbg()->getDebugLoc());
+    II->setNormalDest(SplitBB);
+
+    for (PHINode &PN : NormalDest->phis())
+      for (unsigned I = 0, E = PN.getNumIncomingValues(); I != E; ++I)
+        if (PN.getIncomingBlock(I) == InvokeBB)
+          PN.setIncomingBlock(I, SplitBB);
+
+    DT.recalculate(F);
+    return SplitBB;
+  }
+
   Instruction *insertionAfterDef(Instruction *I) {
     if (auto *II = dyn_cast<InvokeInst>(I)) {
-      BasicBlock *NormalDest = II->getNormalDest();
-      if (!NormalDest->getUniquePredecessor())
-        NormalDest = SplitBlockPredecessors(NormalDest, II->getParent(),
-                                            ".gcagg", &DT);
-      return firstInsertionIn(NormalDest);
+      return firstInsertionIn(splitInvokeNormalEdgeForExtracts(II));
     }
 
     assert(!I->isTerminator() && "non-invoke aggregate terminator?");
@@ -2265,7 +2303,12 @@ static void recomputeLiveInValues(
 }
 
 static Value *findRematerializableChainToBasePointer(
-    SmallVectorImpl<Instruction *> &ChainToBase, Value *CurrentValue);
+    SmallVectorImpl<Instruction *> &ChainToBase, Value *CurrentValue,
+    bool AllowIntegerAddressArithmetic = false);
+static Value *findRematerializablePhiChainToBasePhi(
+    SmallVectorImpl<Instruction *> &ChainToBase, PHINode *DerivedPhi,
+    PHINode *BasePhi, const PointerToBaseTy &PointerToBase,
+    bool AllowIntegerAddressArithmetic, bool &NeedsBaseSelect);
 
 // Utility function which clones all instructions from "ChainToBase"
 // and inserts them before "InsertBefore". Returns rematerialized value
@@ -2775,6 +2818,12 @@ static bool isRootableOxCamlExceptionValue(Value *V,
     return true;
   }
 
+  if (auto *GEP = dyn_cast<GetElementPtrInst>(V))
+    if (GEP->getMetadata("is_base_value")) {
+      Cache[V] = true;
+      return true;
+    }
+
   if (!Visiting.insert(V).second)
     return true;
 
@@ -3158,34 +3207,37 @@ static bool materializeOxCamlExceptionRootSlots(
         Value *Base = findBasePointer(V, DVCache, KnownBases);
         if (!Base || !isHandledGCPointerType(Base->getType()))
           report_fatal_error("missing base for OxCaml recovery live value");
-        if (!IsRootableExceptionValue(Base))
+        Value *RootValue = Base;
+        if (isDistinctOxCamlAddrSpace1BaseEquivalentGCPointer(V, Base))
+          RootValue = V;
+        if (!IsRootableExceptionValue(RootValue))
           report_fatal_error("unrootable GC base escapes OxCaml recovery path");
 
         LoadInst *Load = MaterializeRootSlot(
-            Base, BB, [&](OxCamlRecoveryStoreSite) { return Base; });
+            RootValue, BB, [&](OxCamlRecoveryStoreSite) { return RootValue; });
         Load->moveBefore(BoundaryUse.IncomingBlock->getTerminator());
 
         PHINode *Selector = PHINode::Create(
-            Base->getType(), pred_size(BoundaryUse.BoundaryBlock),
-            suffixed_name_or(Base, ".exnroot.select", "exnroot.select"),
+            RootValue->getType(), pred_size(BoundaryUse.BoundaryBlock),
+            suffixed_name_or(RootValue, ".exnroot.select", "exnroot.select"),
             BoundaryUse.BoundaryBlock->getFirstNonPHI());
         for (BasicBlock *Pred : predecessors(BoundaryUse.BoundaryBlock))
-          Selector->addIncoming(Pred == BoundaryUse.IncomingBlock ? Load : Base,
-                                Pred);
+          Selector->addIncoming(
+              Pred == BoundaryUse.IncomingBlock ? Load : RootValue, Pred);
 
         Value *Replacement = Selector;
-        if (V != Base) {
+        if (V != RootValue) {
           SmallVector<Instruction *, 3> ChainToBase;
           Value *RootOfChain =
               FindPointerChainToBase(FindPointerChainToBase, ChainToBase, V,
-                                     Base);
-          if (RootOfChain != Base || ChainToBase.empty())
+                                     RootValue);
+          if (RootOfChain != RootValue || ChainToBase.empty())
             report_fatal_error(
                 "unrematerializable derived GC value escapes OxCaml recovery "
                 "path");
           Instruction *InsertBefore = Selector->getNextNode();
           Replacement =
-              rematerializeChain(ChainToBase, InsertBefore, Base, Selector);
+              rematerializeChain(ChainToBase, InsertBefore, RootValue, Selector);
         }
 
         SmallVector<Use *, 8> UsesToReplace;
@@ -3237,6 +3289,8 @@ static bool materializeOxCamlExceptionRootSlots(
         Changed = true;
       }
 
+      DenseMap<PHINode *, DenseMap<BasicBlock *, std::pair<Value *, LoadInst *>>>
+          BoundaryPhiLoads;
       for (OxCamlRecoveryBoundaryPhi &BoundaryPhi : BoundaryPhis) {
         Value *Incoming = BoundaryPhi.IncomingValue;
         if (BoundaryPhi.Phi->getIncomingValue(BoundaryPhi.IncomingIndex) !=
@@ -3248,9 +3302,22 @@ static bool materializeOxCamlExceptionRootSlots(
         if (!IsRootableExceptionValue(Incoming))
           report_fatal_error("derived GC value escapes OxCaml recovery path");
 
+        auto &LoadsForPhi = BoundaryPhiLoads[BoundaryPhi.Phi];
+        auto LoadIt = LoadsForPhi.find(BoundaryPhi.IncomingBlock);
+        if (LoadIt != LoadsForPhi.end()) {
+          if (LoadIt->second.first != Incoming)
+            report_fatal_error("inconsistent OxCaml recovery PHI incoming "
+                               "value for duplicate predecessor");
+          BoundaryPhi.Phi->setIncomingValue(BoundaryPhi.IncomingIndex,
+                                            LoadIt->second.second);
+          Changed = true;
+          continue;
+        }
+
         LoadInst *Load = MaterializeRootSlot(
             Incoming, BB, [&](OxCamlRecoveryStoreSite) { return Incoming; });
         Load->moveBefore(BoundaryPhi.IncomingBlock->getTerminator());
+        LoadsForPhi[BoundaryPhi.IncomingBlock] = {Incoming, Load};
         BoundaryPhi.Phi->setIncomingValue(BoundaryPhi.IncomingIndex, Load);
         Changed = true;
       }
@@ -3662,7 +3729,29 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
     Value *RootOfChain =
         FindPointerChainToBase(FindPointerChainToBase, Record.ChainToBase,
                                Derived);
-    if (RootOfChain != Base || Record.ChainToBase.empty()) {
+    bool IsPhiChainToBasePhi = false;
+    if ((RootOfChain != Base || Record.ChainToBase.empty()) &&
+        isa<PHINode>(Derived) && isa<PHINode>(Base)) {
+      Record.ChainToBase.clear();
+      bool NeedsBaseSelect = false;
+      if (Value *PhiRoot = findRematerializablePhiChainToBasePhi(
+              Record.ChainToBase, cast<PHINode>(Derived),
+              cast<PHINode>(Base), PointerToBase,
+              /*AllowIntegerAddressArithmetic=*/true, NeedsBaseSelect)) {
+        RootOfChain = PhiRoot;
+        IsPhiChainToBasePhi = true;
+        if (NeedsBaseSelect) {
+          IRBuilder<> ConditionBuilder(Call);
+          Record.UseRematerializedValue =
+              ConditionBuilder.CreateICmpNE(Derived, Base,
+                                            suffixed_name_or(Derived,
+                                                            ".needs_remat",
+                                                            "needs_remat"));
+        }
+      }
+    }
+    if ((!IsPhiChainToBasePhi && RootOfChain != Base) ||
+        Record.ChainToBase.empty()) {
       if (DebugOxCamlDerivedRemat && IsOxCamlStatepoint) {
         errs() << "  root-of-chain: ";
         RootOfChain->print(errs());
@@ -3730,9 +3819,17 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
         }
       }
     }
+    Value *BasePtr = BasePtrs[I];
+    if (IsOxCamlStatepoint && BaseIt != PointerToBase.end()) {
+      Value *Base = BaseIt->second;
+      if (isDistinctOxCamlAddrSpace1BaseEquivalentGCPointer(LiveVariable,
+                                                            Base)) {
+        BasePtr = LiveVariable;
+      }
+    }
     FilteredLiveVariables.push_back(
         nonPoisonOxCamlGCPointerValue(LiveVariable));
-    FilteredBasePtrs.push_back(nonPoisonOxCamlGCPointerValue(BasePtrs[I]));
+    FilteredBasePtrs.push_back(nonPoisonOxCamlGCPointerValue(BasePtr));
   }
 
   SmallVector<Value *, 16> GCArgsStorage(FilteredLiveVariables.begin(),
@@ -4012,8 +4109,15 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
       Instruction *RematerializedValue =
           rematerializeChain(Record.ChainToBase, BaseRelocate->getNextNode(),
                              Record.RootOfChain, BaseRelocate);
-      Result.RematerializedValues[RematerializedValue] =
-          Derived;
+      if (Record.UseRematerializedValue) {
+        IRBuilder<> SelectBuilder(RematerializedValue->getNextNode());
+        auto *SelectedValue = cast<Instruction>(SelectBuilder.CreateSelect(
+            Record.UseRematerializedValue, RematerializedValue, BaseRelocate,
+            suffixed_name_or(Derived, ".remat.select", "remat.select")));
+        Result.RematerializedValues[SelectedValue] = Derived;
+      } else {
+        Result.RematerializedValues[RematerializedValue] = Derived;
+      }
     }
   };
 
@@ -4412,25 +4516,276 @@ static void findLiveReferences(
 // with all visited values.
 static Value* findRematerializableChainToBasePointer(
   SmallVectorImpl<Instruction*> &ChainToBase,
-  Value *CurrentValue) {
+  Value *CurrentValue,
+  bool AllowIntegerAddressArithmetic) {
   if (GetElementPtrInst *GEP = dyn_cast<GetElementPtrInst>(CurrentValue)) {
     ChainToBase.push_back(GEP);
     return findRematerializableChainToBasePointer(ChainToBase,
-                                                  GEP->getPointerOperand());
+                                                  GEP->getPointerOperand(),
+                                                  AllowIntegerAddressArithmetic);
   }
 
   if (CastInst *CI = dyn_cast<CastInst>(CurrentValue)) {
-    if (!CI->isNoopCast(CI->getModule()->getDataLayout()))
+    auto *IntToPtrDstTy = dyn_cast<PointerType>(CI->getType());
+    auto *PtrToIntSrcTy = dyn_cast<PointerType>(CI->getOperand(0)->getType());
+    bool IsAddrSpace1IntToPtr = AllowIntegerAddressArithmetic &&
+                                isa<IntToPtrInst>(CI) && IntToPtrDstTy &&
+                                IntToPtrDstTy->getAddressSpace() == 1;
+    bool IsAddrSpace1PtrToInt = AllowIntegerAddressArithmetic &&
+                                isa<PtrToIntInst>(CI) && PtrToIntSrcTy &&
+                                PtrToIntSrcTy->getAddressSpace() == 1;
+    if (!IsAddrSpace1IntToPtr && !IsAddrSpace1PtrToInt &&
+        !CI->isNoopCast(CI->getModule()->getDataLayout()))
       return CI;
 
     ChainToBase.push_back(CI);
     return findRematerializableChainToBasePointer(ChainToBase,
-                                                  CI->getOperand(0));
+                                                  CI->getOperand(0),
+                                                  AllowIntegerAddressArithmetic);
+  }
+
+  if (AllowIntegerAddressArithmetic) {
+    if (auto *BO = dyn_cast<BinaryOperator>(CurrentValue)) {
+      if (BO->getOpcode() != Instruction::Add &&
+          BO->getOpcode() != Instruction::Sub)
+        return BO;
+
+      if (isa<ConstantInt>(BO->getOperand(1))) {
+        ChainToBase.push_back(BO);
+        return findRematerializableChainToBasePointer(
+            ChainToBase, BO->getOperand(0), AllowIntegerAddressArithmetic);
+      }
+
+      if (BO->getOpcode() == Instruction::Add &&
+          isa<ConstantInt>(BO->getOperand(0))) {
+        ChainToBase.push_back(BO);
+        return findRematerializableChainToBasePointer(
+            ChainToBase, BO->getOperand(1), AllowIntegerAddressArithmetic);
+      }
+
+      return BO;
+    }
+
+    if (FreezeInst *Freeze = dyn_cast<FreezeInst>(CurrentValue)) {
+      ChainToBase.push_back(Freeze);
+      return findRematerializableChainToBasePointer(
+          ChainToBase, Freeze->getOperand(0), AllowIntegerAddressArithmetic);
+    }
   }
 
   // We have reached the root of the chain, which is either equal to the base or
   // is the first unsupported value along the use chain.
   return CurrentValue;
+}
+
+static bool areEquivalentRematerializableInstructions(Instruction *A,
+                                                      Instruction *B) {
+  if (A->getOpcode() != B->getOpcode() || A->getType() != B->getType())
+    return false;
+
+  if (auto *AGEP = dyn_cast<GetElementPtrInst>(A)) {
+    auto *BGEP = dyn_cast<GetElementPtrInst>(B);
+    if (!BGEP || AGEP->getSourceElementType() != BGEP->getSourceElementType())
+      return false;
+    if (AGEP->getNumIndices() != BGEP->getNumIndices())
+      return false;
+
+    auto AIt = AGEP->idx_begin();
+    auto BIt = BGEP->idx_begin();
+    for (auto AE = AGEP->idx_end(); AIt != AE; ++AIt, ++BIt) {
+      auto *AConst = dyn_cast<ConstantInt>(AIt->get());
+      auto *BConst = dyn_cast<ConstantInt>(BIt->get());
+      if (!AConst || !BConst || AConst->getValue() != BConst->getValue())
+        return false;
+    }
+    return true;
+  }
+
+  if (auto *ACast = dyn_cast<CastInst>(A)) {
+    auto *BCast = dyn_cast<CastInst>(B);
+    return BCast && ACast->getSrcTy() == BCast->getSrcTy() &&
+           ACast->getDestTy() == BCast->getDestTy();
+  }
+
+  if (auto *ABO = dyn_cast<BinaryOperator>(A)) {
+    auto *BBO = dyn_cast<BinaryOperator>(B);
+    if (!BBO || ABO->getOpcode() != BBO->getOpcode())
+      return false;
+    auto SameConstantOperand = [](Value *A, Value *B) {
+      auto *AConst = dyn_cast<ConstantInt>(A);
+      auto *BConst = dyn_cast<ConstantInt>(B);
+      return AConst && BConst && AConst->getValue() == BConst->getValue();
+    };
+    return SameConstantOperand(ABO->getOperand(0), BBO->getOperand(0)) ||
+           SameConstantOperand(ABO->getOperand(1), BBO->getOperand(1));
+  }
+
+  if (isa<FreezeInst>(A))
+    return isa<FreezeInst>(B);
+
+  return false;
+}
+
+static Value *findRematerializablePhiChainToBasePhi(
+    SmallVectorImpl<Instruction *> &ChainToBase, PHINode *DerivedPhi,
+    PHINode *BasePhi, const PointerToBaseTy &PointerToBase,
+    bool AllowIntegerAddressArithmetic, bool &NeedsBaseSelect) {
+  auto DebugReject = [&](StringRef Reason, unsigned IncomingIndex,
+                         Value *Incoming, Value *Root, Value *IncomingBase,
+                         ArrayRef<Instruction *> IncomingChain) {
+    if (!DebugOxCamlDerivedRemat)
+      return;
+    errs() << "rs4gc-oxcaml-phi-chain-reject " << Reason;
+    if (IncomingIndex != std::numeric_limits<unsigned>::max())
+      errs() << " incoming " << IncomingIndex;
+    errs() << "\n  derived-phi: ";
+    DerivedPhi->print(errs());
+    errs() << "\n  base-phi: ";
+    BasePhi->print(errs());
+    errs() << "\n";
+    if (Incoming) {
+      errs() << "  incoming: ";
+      Incoming->print(errs());
+      errs() << "\n";
+    }
+    if (Root) {
+      errs() << "  root: ";
+      Root->print(errs());
+      errs() << "\n";
+    }
+    if (IncomingBase) {
+      errs() << "  incoming-base: ";
+      IncomingBase->print(errs());
+      errs() << "\n";
+    }
+    errs() << "  incoming-chain-size: " << IncomingChain.size() << "\n";
+    if (Incoming) {
+      if (auto It = PointerToBase.find(Incoming); It != PointerToBase.end()) {
+        errs() << "  incoming-pointer-to-base: ";
+        It->second->print(errs());
+        errs() << "\n";
+      }
+    }
+    if (Root) {
+      if (auto It = PointerToBase.find(Root); It != PointerToBase.end()) {
+        errs() << "  root-pointer-to-base: ";
+        It->second->print(errs());
+        errs() << "\n";
+      }
+    }
+  };
+  if (DerivedPhi->getParent() != BasePhi->getParent() ||
+      DerivedPhi->getNumIncomingValues() != BasePhi->getNumIncomingValues()) {
+    DebugReject("shape", std::numeric_limits<unsigned>::max(), nullptr,
+                nullptr, nullptr, {});
+    return nullptr;
+  }
+
+  auto RootMatchesIncomingBase = [&](Value *Root, Value *IncomingBase) {
+    if (Root == IncomingBase)
+      return true;
+    auto It = PointerToBase.find(Root);
+    if (It != PointerToBase.end() && It->second == IncomingBase)
+      return true;
+    return isOxCamlBaseEquivalentGCPointer(Root, IncomingBase);
+  };
+  auto IncomingChainMatchesBase = [&](Value *Incoming, Value *Root,
+                                      Value *IncomingBase,
+                                      ArrayRef<Instruction *> IncomingChain) {
+    if (RootMatchesIncomingBase(Root, IncomingBase))
+      return true;
+    // A rematerialized incoming may be based on a relocated copy of
+    // IncomingBase.  The rematerialized value itself remains mapped to
+    // IncomingBase in PointerToBase, while the root of its syntactic chain is
+    // the relocated base value.  Accept that shape and rematerialize the same
+    // chain from the current statepoint's relocated base phi.
+    auto It = PointerToBase.find(Incoming);
+    return !IncomingChain.empty() && It != PointerToBase.end() &&
+           It->second == IncomingBase;
+  };
+  auto InstructionUsesChainOperand = [](Instruction *Instr, Value *Operand) {
+    if (auto *GEP = dyn_cast<GetElementPtrInst>(Instr))
+      return GEP->getPointerOperand() == Operand;
+    if (auto *CI = dyn_cast<CastInst>(Instr))
+      return CI->getOperand(0) == Operand;
+    if (auto *Freeze = dyn_cast<FreezeInst>(Instr))
+      return Freeze->getOperand(0) == Operand;
+    if (auto *BO = dyn_cast<BinaryOperator>(Instr))
+      return BO->getOperand(0) == Operand || BO->getOperand(1) == Operand;
+    return false;
+  };
+  auto TrimChainToIncomingBase = [&](SmallVectorImpl<Instruction *> &Chain,
+                                     Value *&Root, Value *IncomingBase) {
+    for (unsigned I = 0, E = Chain.size(); I != E; ++I) {
+      if (!InstructionUsesChainOperand(Chain[I], IncomingBase))
+        continue;
+      Chain.resize(I + 1);
+      Root = IncomingBase;
+      return true;
+    }
+    return false;
+  };
+
+  SmallVector<Instruction *, 3> RepresentativeChain;
+  Value *RepresentativeRoot = nullptr;
+  bool SawDerivedChain = false;
+  bool SawBaseValueIncoming = false;
+
+  for (unsigned I = 0, E = DerivedPhi->getNumIncomingValues(); I != E; ++I) {
+    if (DerivedPhi->getIncomingBlock(I) != BasePhi->getIncomingBlock(I)) {
+      DebugReject("incoming-block", I, DerivedPhi->getIncomingValue(I),
+                  nullptr, BasePhi->getIncomingValue(I), {});
+      return nullptr;
+    }
+
+    SmallVector<Instruction *, 3> IncomingChain;
+    Value *IncomingRoot = findRematerializableChainToBasePointer(
+        IncomingChain, DerivedPhi->getIncomingValue(I),
+        AllowIntegerAddressArithmetic);
+    if (!RootMatchesIncomingBase(IncomingRoot, BasePhi->getIncomingValue(I)))
+      TrimChainToIncomingBase(IncomingChain, IncomingRoot,
+                              BasePhi->getIncomingValue(I));
+    if (!IncomingChainMatchesBase(DerivedPhi->getIncomingValue(I),
+                                  IncomingRoot, BasePhi->getIncomingValue(I),
+                                  IncomingChain)) {
+      DebugReject("incoming-root", I, DerivedPhi->getIncomingValue(I),
+                  IncomingRoot, BasePhi->getIncomingValue(I), IncomingChain);
+      return nullptr;
+    }
+
+    if (IncomingChain.empty()) {
+      if (DerivedPhi->getIncomingValue(I) != BasePhi->getIncomingValue(I)) {
+        DebugReject("empty-chain", I, DerivedPhi->getIncomingValue(I),
+                    IncomingRoot, BasePhi->getIncomingValue(I),
+                    IncomingChain);
+        return nullptr;
+      }
+      SawBaseValueIncoming = true;
+      continue;
+    }
+
+    if (!SawDerivedChain) {
+      RepresentativeChain = IncomingChain;
+      RepresentativeRoot = IncomingRoot;
+      SawDerivedChain = true;
+      continue;
+    }
+
+    if (IncomingChain.size() != RepresentativeChain.size())
+      return nullptr;
+    for (unsigned ChainIndex = 0, ChainEnd = IncomingChain.size();
+         ChainIndex != ChainEnd; ++ChainIndex)
+      if (!areEquivalentRematerializableInstructions(
+              IncomingChain[ChainIndex], RepresentativeChain[ChainIndex]))
+        return nullptr;
+  }
+
+  if (!SawDerivedChain)
+    return nullptr;
+
+  NeedsBaseSelect = SawBaseValueIncoming;
+  llvm::append_range(ChainToBase, RepresentativeChain);
+  return RepresentativeRoot;
 }
 
 // Helper function for the "rematerializeLiveValues". Compute cost of the use
@@ -4514,6 +4869,21 @@ findRematerializationCandidates(PointerToBaseTy PointerToBase,
     SmallVector<Instruction *, 3> ChainToBase;
     Value *RootOfChain =
         findRematerializableChainToBasePointer(ChainToBase, Derived);
+    bool IsPhiChainToBasePhi = false;
+    if ((RootOfChain != Base || ChainToBase.empty()) && isa<PHINode>(Derived) &&
+        isa<PHINode>(Base)) {
+      ChainToBase.clear();
+      bool NeedsBaseSelect = false;
+      if (Value *PhiRoot = findRematerializablePhiChainToBasePhi(
+              ChainToBase, cast<PHINode>(Derived), cast<PHINode>(Base),
+              PointerToBase, /*AllowIntegerAddressArithmetic=*/false,
+              NeedsBaseSelect)) {
+        if (NeedsBaseSelect)
+          continue;
+        RootOfChain = PhiRoot;
+        IsPhiChainToBasePhi = true;
+      }
+    }
 
     // Nothing to do, or chain is too long
     if ( ChainToBase.size() == 0 ||
@@ -4522,7 +4892,7 @@ findRematerializationCandidates(PointerToBaseTy PointerToBase,
 
     // Handle the scenario where the RootOfChain is not equal to the
     // Base Value, but they are essentially the same phi values.
-    if (RootOfChain != PointerToBase[Derived]) {
+    if (!IsPhiChainToBasePhi && RootOfChain != PointerToBase[Derived]) {
       PHINode *OrigRootPhi = dyn_cast<PHINode>(RootOfChain);
       PHINode *AlternateRootPhi = dyn_cast<PHINode>(PointerToBase[Derived]);
       if (!OrigRootPhi || !AlternateRootPhi)
@@ -5255,6 +5625,123 @@ static void stripNonValidData(Module &M) {
     stripNonValidDataFromBody(F);
 }
 
+static bool promoteOxCamlGCPointerAllocas(Function &F, DominatorTree &DT) {
+  if (!isOxCamlFunction(F))
+    return false;
+
+  SmallVector<AllocaInst *, 64> PromotableAllocas;
+  unsigned RejectedAllocas = 0;
+  for (Instruction &I : instructions(F)) {
+    auto *AI = dyn_cast<AllocaInst>(&I);
+    if (!AI || !AI->isStaticAlloca())
+      continue;
+    if (!isHandledGCPointerType(AI->getAllocatedType()))
+      continue;
+    if (!isAllocaPromotable(AI)) {
+      ++RejectedAllocas;
+      if (DebugOxCamlGCPointerAllocas) {
+        errs() << "rs4gc-oxcaml-gc-pointer-alloca-reject in " << F.getName()
+               << ": ";
+        AI->print(errs());
+        errs() << "\n";
+        for (User *U : AI->users()) {
+          errs() << "  user: ";
+          U->print(errs());
+          errs() << "\n";
+        }
+      }
+      continue;
+    }
+    if (DebugOxCamlGCPointerAllocas) {
+      errs() << "rs4gc-oxcaml-gc-pointer-alloca-promote in " << F.getName()
+             << ": ";
+      AI->print(errs());
+      errs() << "\n";
+    }
+    PromotableAllocas.push_back(AI);
+  }
+
+  if (DebugOxCamlGCPointerAllocas &&
+      (!PromotableAllocas.empty() || RejectedAllocas != 0))
+    errs() << "rs4gc-oxcaml-gc-pointer-alloca-summary in " << F.getName()
+           << ": promotable=" << PromotableAllocas.size()
+           << " rejected=" << RejectedAllocas << "\n";
+
+  if (PromotableAllocas.empty())
+    return false;
+
+  PromoteMemToReg(PromotableAllocas, DT);
+  return true;
+}
+
+static bool canonicalizeOxCamlGCPointerAllocaAccesses(Function &F) {
+  if (!isOxCamlFunction(F))
+    return false;
+
+  const DataLayout &DL = F.getParent()->getDataLayout();
+  SmallVector<Instruction *, 64> MemoryInsts;
+  for (Instruction &I : instructions(F)) {
+    if (auto *LI = dyn_cast<LoadInst>(&I)) {
+      if (auto *AI = dyn_cast<AllocaInst>(LI->getPointerOperand())) {
+        Type *AllocatedTy = AI->getAllocatedType();
+        auto *AllocatedPtrTy = dyn_cast<PointerType>(AllocatedTy);
+        auto *LoadIntTy = dyn_cast<IntegerType>(LI->getType());
+        if (AI->isStaticAlloca() && isHandledGCPointerType(AllocatedTy) &&
+            AllocatedPtrTy && LoadIntTy &&
+            LoadIntTy->getBitWidth() ==
+                DL.getPointerSizeInBits(AllocatedPtrTy->getAddressSpace()))
+          MemoryInsts.push_back(LI);
+      }
+      continue;
+    }
+
+    auto *SI = dyn_cast<StoreInst>(&I);
+    if (!SI)
+      continue;
+    auto *AI = dyn_cast<AllocaInst>(SI->getPointerOperand());
+    if (!AI)
+      continue;
+    Type *AllocatedTy = AI->getAllocatedType();
+    auto *AllocatedPtrTy = dyn_cast<PointerType>(AllocatedTy);
+    auto *StoredIntTy = dyn_cast<IntegerType>(SI->getValueOperand()->getType());
+    if (AI->isStaticAlloca() && isHandledGCPointerType(AllocatedTy) &&
+        AllocatedPtrTy && StoredIntTy &&
+        StoredIntTy->getBitWidth() ==
+            DL.getPointerSizeInBits(AllocatedPtrTy->getAddressSpace()))
+      MemoryInsts.push_back(SI);
+  }
+
+  bool Changed = false;
+  for (Instruction *I : MemoryInsts) {
+    if (auto *LI = dyn_cast<LoadInst>(I)) {
+      auto *AI = cast<AllocaInst>(LI->getPointerOperand());
+      IRBuilder<> B(LI);
+      auto *PtrLoad = B.CreateAlignedLoad(
+          AI->getAllocatedType(), AI, LI->getAlign(),
+          suffixed_name_or(LI, ".gcptr.load", "gcptr.load"));
+      Value *AsInt = B.CreatePtrToInt(
+          PtrLoad, LI->getType(),
+          suffixed_name_or(LI, ".gcptr.int", "gcptr.int"));
+      LI->replaceAllUsesWith(AsInt);
+      LI->eraseFromParent();
+      Changed = true;
+      continue;
+    }
+
+    auto *SI = cast<StoreInst>(I);
+    auto *AI = cast<AllocaInst>(SI->getPointerOperand());
+    IRBuilder<> B(SI);
+    Value *AsPtr = B.CreateIntToPtr(
+        SI->getValueOperand(), AI->getAllocatedType(),
+        suffixed_name_or(SI->getValueOperand(), ".gcptr.ptr", "gcptr.ptr"));
+    B.CreateAlignedStore(AsPtr, AI, SI->getAlign());
+    SI->eraseFromParent();
+    Changed = true;
+  }
+
+  return Changed;
+}
+
 bool RewriteStatepointsForGC::runOnFunction(Function &F, DominatorTree &DT,
                                             TargetTransformInfo &TTI,
                                             const TargetLibraryInfo &TLI) {
@@ -5301,6 +5788,8 @@ bool RewriteStatepointsForGC::runOnFunction(Function &F, DominatorTree &DT,
   DTU.getDomTree();
 
   MadeChange |= sanitizeOxCamlUndefinedGCPointers(F);
+  MadeChange |= canonicalizeOxCamlGCPointerAllocaAccesses(F);
+  MadeChange |= promoteOxCamlGCPointerAllocas(F, DT);
 
   // Gather all the statepoints which need rewritten.  Be careful to only
   // consider those in reachable code since we need to ask dominance queries
