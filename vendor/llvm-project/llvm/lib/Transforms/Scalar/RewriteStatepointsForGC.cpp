@@ -72,6 +72,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <iterator>
 #include <limits>
 #include <optional>
@@ -1615,10 +1616,24 @@ static bool isDistinctOxCamlAddrSpace1AddressExpression(Value *V,
 
   auto *VTy = dyn_cast<PointerType>(V->getType());
   auto *BaseTy = dyn_cast<PointerType>(Base->getType());
-  return VTy && BaseTy && VTy->getAddressSpace() == 1 &&
-         BaseTy->getAddressSpace() == 1 &&
-         !isDistinctOxCamlAddrSpace1BaseEquivalentGCPointer(V, Base) &&
-         containsOxCamlPointerFormDerivedAddrSpace1Pointer(V);
+  if (!VTy || !BaseTy || VTy->getAddressSpace() != 1 ||
+      BaseTy->getAddressSpace() != 1 ||
+      isDistinctOxCamlAddrSpace1BaseEquivalentGCPointer(V, Base))
+    return false;
+
+  if (containsOxCamlPointerFormDerivedAddrSpace1Pointer(V))
+    return true;
+
+  if (auto *I2P = dyn_cast<IntToPtrInst>(V)) {
+    DefiningValueMapTy Cache;
+    IsKnownBaseMapTy KnownBases;
+    Value *IntBase =
+        findAddrSpace1IntBaseDefiningValue(I2P->getOperand(0), Cache,
+                                           KnownBases);
+    return IntBase && isOxCamlBaseEquivalentGCPointer(IntBase, Base);
+  }
+
+  return false;
 }
 
 /// Returns the base defining value for this value.
@@ -3304,10 +3319,12 @@ static bool materializeOxCamlExceptionRootSlots(
               suffixed_name_or(HandlerValue, ".exnroot", "exnroot"));
           Slot->setAlignment(DL.getABITypeAlign(HandlerValue->getType()));
           bool IsGCRoot = isHandledGCPointerType(HandlerValue->getType());
-          EntryBuilder.CreateAlignedStore(
+          StoreInst *InitialStore = EntryBuilder.CreateAlignedStore(
               IsGCRoot ? getOxCamlNonMovingImmediate(HandlerValue->getType())
                        : Constant::getNullValue(HandlerValue->getType()),
               Slot, DL.getABITypeAlign(HandlerValue->getType()));
+          if (IsGCRoot)
+            InitialStore->setVolatile(true);
 
           SmallVector<OxCamlRecoveryStoreSite, 8> StoreSites;
           if (&StoreSiteBB == &BB) {
@@ -3355,8 +3372,10 @@ static bool materializeOxCamlExceptionRootSlots(
               }
 
             IRBuilder<> StoreBuilder(II);
-            StoreBuilder.CreateAlignedStore(
+            StoreInst *RootStore = StoreBuilder.CreateAlignedStore(
                 EdgeValue, Slot, DL.getABITypeAlign(HandlerValue->getType()));
+            if (IsGCRoot)
+              RootStore->setVolatile(true);
             if (IsGCRoot)
               ExplicitRootSlots[II].push_back(Slot);
             ExplicitExceptionRootCalls.insert(II);
@@ -3367,6 +3386,8 @@ static bool materializeOxCamlExceptionRootSlots(
               DL.getABITypeAlign(HandlerValue->getType()),
               suffixed_name_or(HandlerValue, ".exnroot.load",
                                "exnroot.load"));
+          if (IsGCRoot)
+            Load->setVolatile(true);
           Load->setMetadata("oxcaml.exnroot.load",
                             MDNode::get(F.getContext(), {}));
           return Load;
@@ -3479,6 +3500,194 @@ static bool materializeOxCamlExceptionRootSlots(
     if (HasStrictRecoveryOnlyRegion) {
       GCPtrLivenessData BoundaryLiveness;
       computeLiveInValues(DT, F, BoundaryLiveness);
+
+      DenseMap<Value *, DenseMap<BasicBlock *, PHINode *>>
+          BoundaryRootSelectors;
+      DenseMap<Value *,
+               DenseMap<BasicBlock *, DenseMap<BasicBlock *, LoadInst *>>>
+          BoundaryRootLoads;
+
+      auto HasRecoveryIncomingBoundaryEdge = [&](BasicBlock *BoundaryBlock) {
+        for (const OxCamlRecoveryBoundaryEdge &BoundaryEdge : BoundaryEdges)
+          if (BoundaryEdge.BoundaryBlock == BoundaryBlock)
+            return true;
+        return false;
+      };
+
+      auto IsRecoveryBoundaryEdge = [&](BasicBlock *IncomingBlock,
+                                        BasicBlock *BoundaryBlock) {
+        for (const OxCamlRecoveryBoundaryEdge &BoundaryEdge : BoundaryEdges)
+          if (BoundaryEdge.IncomingBlock == IncomingBlock &&
+              BoundaryEdge.BoundaryBlock == BoundaryBlock)
+            return true;
+        return false;
+      };
+
+      auto LookupBoundaryRootSelector =
+          [&](Value *RootValue, BasicBlock *BoundaryBlock) -> PHINode * {
+        auto RootIt = BoundaryRootSelectors.find(RootValue);
+        if (RootIt == BoundaryRootSelectors.end())
+          return nullptr;
+        auto BlockIt = RootIt->second.find(BoundaryBlock);
+        if (BlockIt == RootIt->second.end())
+          return nullptr;
+        return BlockIt->second;
+      };
+
+      auto IsAvailableOnEdgeFrom = [&](Value *V, BasicBlock *Pred) {
+        auto *I = dyn_cast<Instruction>(V);
+        return !I || I == Pred->getTerminator() ||
+               DT.dominates(I, Pred->getTerminator());
+      };
+
+      auto CountPredecessorEdges = [](BasicBlock *Pred,
+                                      BasicBlock *Succ) -> unsigned {
+        unsigned Count = 0;
+        for (BasicBlock *Candidate : successors(Pred))
+          if (Candidate == Succ)
+            ++Count;
+        return Count;
+      };
+
+      auto ForEachPredecessorEdge =
+          [&](BasicBlock *Block, function_ref<void(BasicBlock *)> Fn) {
+        SmallPtrSet<BasicBlock *, 8> SeenPreds;
+        for (BasicBlock *Pred : predecessors(Block)) {
+          if (!SeenPreds.insert(Pred).second)
+            continue;
+          unsigned EdgeCount = CountPredecessorEdges(Pred, Block);
+          for (unsigned I = 0; I != EdgeCount; ++I)
+            Fn(Pred);
+        }
+      };
+
+      auto SetBoundarySelectorIncoming =
+          [&](PHINode *Selector, BasicBlock *IncomingBlock, Value *Incoming) {
+        unsigned ExistingIncoming = 0;
+        for (unsigned I = 0, E = Selector->getNumIncomingValues(); I != E;
+             ++I) {
+          if (Selector->getIncomingBlock(I) != IncomingBlock)
+            continue;
+          Selector->setIncomingValue(I, Incoming);
+          ++ExistingIncoming;
+        }
+        unsigned EdgeCount =
+            CountPredecessorEdges(IncomingBlock, Selector->getParent());
+        while (ExistingIncoming < EdgeCount) {
+          Selector->addIncoming(Incoming, IncomingBlock);
+          ++ExistingIncoming;
+        }
+      };
+
+      auto BoundarySelectorNonRecoveryIncoming =
+          [&](Value *RootValue, BasicBlock *BoundaryBlock,
+              BasicBlock *Pred) -> Value * {
+        if (auto *RootPhi = dyn_cast<PHINode>(RootValue)) {
+          if (RootPhi->getParent() == BoundaryBlock) {
+            int IncomingIndex = RootPhi->getBasicBlockIndex(Pred);
+            if (IncomingIndex < 0)
+              return nullptr;
+            Value *Incoming = RootPhi->getIncomingValue(IncomingIndex);
+            return IsAvailableOnEdgeFrom(Incoming, Pred) ? Incoming : nullptr;
+          }
+        }
+
+        return IsAvailableOnEdgeFrom(RootValue, Pred) ? RootValue : nullptr;
+      };
+
+      auto ReportInvalidBoundarySelectorIncoming =
+          [](Value *RootValue, BasicBlock *Pred, BasicBlock *BoundaryBlock) {
+        std::string Message;
+        raw_string_ostream OS(Message);
+        OS << "cannot construct OxCaml recovery boundary selector for ";
+        RootValue->printAsOperand(OS, false);
+        OS << " on non-recovery edge " << Pred->getName() << " -> "
+           << BoundaryBlock->getName();
+        report_fatal_error(Twine(OS.str()));
+      };
+
+      auto BoundarySelectorIncoming =
+          [&](Value *RootValue, BasicBlock *BoundaryBlock,
+              BasicBlock *Pred) -> Value * {
+        if (IsRecoveryBoundaryEdge(Pred, BoundaryBlock))
+          return nullptr;
+
+        Value *Incoming =
+            BoundarySelectorNonRecoveryIncoming(RootValue, BoundaryBlock, Pred);
+        if (!Incoming)
+          ReportInvalidBoundarySelectorIncoming(RootValue, Pred, BoundaryBlock);
+        return Incoming;
+      };
+
+      std::function<PHINode *(Value *, BasicBlock *)>
+          GetOrCreateBoundaryRootSelector;
+
+      auto GetBoundaryRootValueAtStoreSite =
+          [&](Value *RootValue, OxCamlRecoveryStoreSite StoreSite) -> Value * {
+        BasicBlock *StoreBlock = StoreSite.Invoke->getParent();
+        if (!HasRecoveryIncomingBoundaryEdge(StoreBlock))
+          return RootValue;
+        // A value computed inside the boundary block is not available on the
+        // incoming edges of that block, so it cannot be represented by a
+        // block-entry selector.  Store the local value itself before the
+        // invoke; any live-in GC pointer operands are repaired separately by
+        // the boundary PHI/live-use logic.
+        if (auto *RootI = dyn_cast<Instruction>(RootValue))
+          if (!isa<PHINode>(RootI) && RootI->getParent() == StoreBlock)
+            return RootValue;
+        return GetOrCreateBoundaryRootSelector(RootValue, StoreBlock);
+      };
+
+      std::function<LoadInst *(Value *, BasicBlock *, BasicBlock *)>
+          GetOrCreateBoundaryRootLoad =
+              [&](Value *RootValue, BasicBlock *BoundaryBlock,
+                  BasicBlock *IncomingBlock) -> LoadInst * {
+        auto &LoadsByBoundary = BoundaryRootLoads[RootValue];
+        auto &LoadsByIncoming = LoadsByBoundary[BoundaryBlock];
+        auto LoadIt = LoadsByIncoming.find(IncomingBlock);
+        if (LoadIt != LoadsByIncoming.end())
+          return LoadIt->second;
+
+        LoadInst *Load = MaterializeRootSlot(
+            RootValue, BB, [&](OxCamlRecoveryStoreSite StoreSite) {
+              return GetBoundaryRootValueAtStoreSite(RootValue, StoreSite);
+            });
+        Load->moveBefore(IncomingBlock->getTerminator());
+        LoadsByIncoming[IncomingBlock] = Load;
+
+        if (PHINode *Selector =
+                LookupBoundaryRootSelector(RootValue, BoundaryBlock))
+          SetBoundarySelectorIncoming(Selector, IncomingBlock, Load);
+        return Load;
+      };
+
+      GetOrCreateBoundaryRootSelector =
+          [&](Value *RootValue, BasicBlock *BoundaryBlock) -> PHINode * {
+        if (PHINode *Selector =
+                LookupBoundaryRootSelector(RootValue, BoundaryBlock))
+          return Selector;
+
+        PHINode *Selector = PHINode::Create(
+            RootValue->getType(), pred_size(BoundaryBlock),
+            suffixed_name_or(RootValue, ".exnroot.select", "exnroot.select"),
+            BoundaryBlock->getFirstNonPHI());
+        BoundaryRootSelectors[RootValue][BoundaryBlock] = Selector;
+
+        ForEachPredecessorEdge(BoundaryBlock, [&](BasicBlock *Pred) {
+          if (!IsRecoveryBoundaryEdge(Pred, BoundaryBlock)) {
+            Selector->addIncoming(
+                BoundarySelectorIncoming(RootValue, BoundaryBlock, Pred),
+                Pred);
+            return;
+          }
+
+          LoadInst *Load =
+              GetOrCreateBoundaryRootLoad(RootValue, BoundaryBlock, Pred);
+          SetBoundarySelectorIncoming(Selector, Pred, Load);
+        });
+
+        return Selector;
+      };
 
       auto FindPointerChainToBase =
           [&](auto &&Self, SmallVectorImpl<Instruction *> &ChainToBase,
@@ -3593,17 +3802,10 @@ static bool materializeOxCamlExceptionRootSlots(
         if (!IsRootableExceptionValue(RootValue))
           report_fatal_error("unrootable GC base escapes OxCaml recovery path");
 
-        LoadInst *Load = MaterializeRootSlot(
-            RootValue, BB, [&](OxCamlRecoveryStoreSite) { return RootValue; });
-        Load->moveBefore(BoundaryUse.IncomingBlock->getTerminator());
-
-        PHINode *Selector = PHINode::Create(
-            RootValue->getType(), pred_size(BoundaryUse.BoundaryBlock),
-            suffixed_name_or(RootValue, ".exnroot.select", "exnroot.select"),
-            BoundaryUse.BoundaryBlock->getFirstNonPHI());
-        for (BasicBlock *Pred : predecessors(BoundaryUse.BoundaryBlock))
-          Selector->addIncoming(
-              Pred == BoundaryUse.IncomingBlock ? Load : RootValue, Pred);
+        PHINode *Selector = GetOrCreateBoundaryRootSelector(
+            RootValue, BoundaryUse.BoundaryBlock);
+        GetOrCreateBoundaryRootLoad(RootValue, BoundaryUse.BoundaryBlock,
+                                    BoundaryUse.IncomingBlock);
 
         Value *Replacement = Selector;
         if (V != RootValue && !IsBaseEquivalent) {
@@ -3640,33 +3842,60 @@ static bool materializeOxCamlExceptionRootSlots(
 
       for (OxCamlRecoveryBoundaryUse &BoundaryUse : BoundaryUses) {
         Value *V = BoundaryUse.Value;
-        if (!IsRootableExceptionValue(V))
+        DVCache.clear();
+        KnownBases.clear();
+
+        Value *RootValue = V;
+        bool IsBaseEquivalent = false;
+        Value *Base = findBasePointer(V, DVCache, KnownBases);
+        if (Base && Base != V && isHandledGCPointerType(Base->getType())) {
+          auto *VTy = dyn_cast<PointerType>(V->getType());
+          auto *BaseTy = dyn_cast<PointerType>(Base->getType());
+          if (VTy && BaseTy && VTy->getAddressSpace() == 1 &&
+              BaseTy->getAddressSpace() == 1) {
+            IsBaseEquivalent =
+                isDistinctOxCamlAddrSpace1BaseEquivalentGCPointer(V, Base);
+            if (IsBaseEquivalent ||
+                isDistinctOxCamlAddrSpace1AddressExpression(V, Base))
+              RootValue = Base;
+          }
+        }
+
+        if (!IsRootableExceptionValue(RootValue))
           report_fatal_error("derived GC value escapes OxCaml recovery path");
 
-        LoadInst *Load =
-            MaterializeRootSlot(V, BB, [&](OxCamlRecoveryStoreSite) { return V; });
-        Load->moveBefore(BoundaryUse.IncomingBlock->getTerminator());
+        PHINode *Selector = GetOrCreateBoundaryRootSelector(
+            RootValue, BoundaryUse.BoundaryBlock);
+        GetOrCreateBoundaryRootLoad(RootValue, BoundaryUse.BoundaryBlock,
+                                    BoundaryUse.IncomingBlock);
 
-        PHINode *Selector = PHINode::Create(
-            V->getType(), pred_size(BoundaryUse.BoundaryBlock),
-            suffixed_name_or(V, ".exnroot.select", "exnroot.select"),
-            BoundaryUse.BoundaryBlock->getFirstNonPHI());
-        for (BasicBlock *Pred : predecessors(BoundaryUse.BoundaryBlock))
-          Selector->addIncoming(Pred == BoundaryUse.IncomingBlock ? Load : V,
-                                Pred);
+        Value *Replacement = Selector;
+        if (V != RootValue && !IsBaseEquivalent) {
+          SmallVector<Instruction *, 3> ChainToBase;
+          Value *RootOfChain =
+              FindPointerChainToBase(FindPointerChainToBase, ChainToBase, V,
+                                     RootValue);
+          if (RootOfChain != RootValue || ChainToBase.empty())
+            report_fatal_error(
+                "unrematerializable derived GC value escapes OxCaml recovery "
+                "path");
+          Instruction *InsertBefore = Selector->getNextNode();
+          Replacement =
+              rematerializeChain(ChainToBase, InsertBefore, RootValue, Selector);
+        }
 
         SmallVector<Use *, 8> UsesToReplace;
         for (Use &U : V->uses()) {
           auto *UserI = dyn_cast<Instruction>(U.getUser());
-          if (!UserI || UserI == Selector)
+          if (!UserI || UserI == Selector || UserI == Replacement)
             continue;
           if (isa<PHINode>(UserI))
             continue;
-          if (DT.dominates(Selector, UserI))
+          if (DT.dominates(cast<Instruction>(Replacement), UserI))
             UsesToReplace.push_back(&U);
         }
         for (Use *U : UsesToReplace)
-          U->set(Selector);
+          U->set(Replacement);
 
         Changed = true;
         DVCache.clear();
@@ -3699,7 +3928,9 @@ static bool materializeOxCamlExceptionRootSlots(
         }
 
         LoadInst *Load = MaterializeRootSlot(
-            Incoming, BB, [&](OxCamlRecoveryStoreSite) { return Incoming; });
+            Incoming, BB, [&](OxCamlRecoveryStoreSite StoreSite) {
+              return GetBoundaryRootValueAtStoreSite(Incoming, StoreSite);
+            });
         Load->moveBefore(BoundaryPhi.IncomingBlock->getTerminator());
         LoadsForPhi[BoundaryPhi.IncomingBlock] = {Incoming, Load};
         BoundaryPhi.Phi->setIncomingValue(BoundaryPhi.IncomingIndex, Load);
@@ -4187,7 +4418,7 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
       return Reject("not-as1");
     if (isDistinctOxCamlAddrSpace1BaseEquivalentGCPointer(Derived, Base))
       return Reject("base-equivalent");
-    if (!containsOxCamlPointerFormDerivedAddrSpace1Pointer(Derived))
+    if (!isDistinctOxCamlAddrSpace1AddressExpression(Derived, Base))
       return Reject("not-address-expression");
 
     auto *DerivedInst = dyn_cast<Instruction>(Derived);
@@ -4207,16 +4438,42 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
       }
 
       if (CastInst *CI = dyn_cast<CastInst>(CurrentValue)) {
-        if (!CI->getOperand(0)->getType()->isPtrOrPtrVectorTy() ||
-            !CI->isNoopCast(CI->getModule()->getDataLayout()))
+        auto *IntToPtrDstTy = dyn_cast<PointerType>(CI->getType());
+        auto *PtrToIntSrcTy =
+            dyn_cast<PointerType>(CI->getOperand(0)->getType());
+        bool IsAddrSpace1IntToPtr =
+            isa<IntToPtrInst>(CI) && IntToPtrDstTy &&
+            IntToPtrDstTy->getAddressSpace() == 1;
+        bool IsAddrSpace1PtrToInt =
+            isa<PtrToIntInst>(CI) && PtrToIntSrcTy &&
+            PtrToIntSrcTy->getAddressSpace() == 1;
+        if (!IsAddrSpace1IntToPtr && !IsAddrSpace1PtrToInt &&
+            (!CI->getOperand(0)->getType()->isPtrOrPtrVectorTy() ||
+             !CI->isNoopCast(CI->getModule()->getDataLayout())))
           return CI;
 
         ChainToBase.push_back(CI);
         return Self(Self, ChainToBase, CI->getOperand(0));
       }
 
-      if (auto *BO = dyn_cast<BinaryOperator>(CurrentValue))
+      if (auto *BO = dyn_cast<BinaryOperator>(CurrentValue)) {
+        if (BO->getOpcode() != Instruction::Add &&
+            BO->getOpcode() != Instruction::Sub)
+          return BO;
+
+        if (isa<ConstantInt>(BO->getOperand(1))) {
+          ChainToBase.push_back(BO);
+          return Self(Self, ChainToBase, BO->getOperand(0));
+        }
+
+        if (BO->getOpcode() == Instruction::Add &&
+            isa<ConstantInt>(BO->getOperand(0))) {
+          ChainToBase.push_back(BO);
+          return Self(Self, ChainToBase, BO->getOperand(1));
+        }
+
         return BO;
+      }
 
       if (FreezeInst *Freeze = dyn_cast<FreezeInst>(CurrentValue)) {
         ChainToBase.push_back(Freeze);
@@ -4240,7 +4497,7 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
       if (Value *PhiRoot = findRematerializablePhiChainToBasePhi(
               Record.ChainToBase, cast<PHINode>(Derived),
               cast<PHINode>(Base), PointerToBase,
-              /*AllowIntegerAddressArithmetic=*/false, NeedsBaseSelect)) {
+              /*AllowIntegerAddressArithmetic=*/true, NeedsBaseSelect)) {
         RootOfChain = PhiRoot;
         IsPhiChainToBasePhi = true;
         if (NeedsBaseSelect) {
@@ -4260,7 +4517,7 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
       bool NeedsBaseSelect = false;
       if (Value *PhiRoot = findRematerializablePhiChainToSingleBase(
               Record.ChainToBase, cast<PHINode>(Derived), Base, PointerToBase,
-              /*AllowIntegerAddressArithmetic=*/false, NeedsBaseSelect)) {
+              /*AllowIntegerAddressArithmetic=*/true, NeedsBaseSelect)) {
         RootOfChain = PhiRoot;
         IsPhiChainToSingleBase = true;
         if (NeedsBaseSelect) {
@@ -4428,7 +4685,7 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
         if (Incoming != IncomingBase) {
           IncomingRoot = findRematerializableChainToBasePointer(
               IncomingChain, Incoming,
-              /*AllowIntegerAddressArithmetic=*/false);
+              /*AllowIntegerAddressArithmetic=*/true);
           if (!IncomingChainMatchesBase(Incoming, IncomingRoot, IncomingBase,
                                         IncomingChain))
             return false;
@@ -4624,8 +4881,9 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
             Root->getType(), DL.getAllocaAddrSpace(), nullptr,
             suffixed_name_or(Root, ".cargroot", "cargroot"));
         Slot->setAlignment(DL.getABITypeAlign(Root->getType()));
-        StoreBuilder.CreateAlignedStore(Root, Slot,
-                                        DL.getABITypeAlign(Root->getType()));
+        StoreInst *RootStore = StoreBuilder.CreateAlignedStore(
+            Root, Slot, DL.getABITypeAlign(Root->getType()));
+        RootStore->setVolatile(true);
       }
       if (SeenSlots.insert(Slot).second)
         GCArgsStorage.push_back(Slot);
@@ -4796,6 +5054,10 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
     if (!needsCallerFrameRootsForOxCamlCArgs(Call->getCallingConv())) {
       SmallPtrSet<Value *, 32> SeenGCArgs(GCArgsStorage.begin(),
                                           GCArgsStorage.end());
+      const DataLayout &DL = Call->getModule()->getDataLayout();
+      BasicBlock &EntryBlock = Call->getFunction()->getEntryBlock();
+      IRBuilder<> EntryBuilder(&EntryBlock, EntryBlock.getFirstInsertionPt());
+      IRBuilder<> StoreBuilder(Call);
       for (Value *Arg : CallArgs) {
         auto *ArgTy = dyn_cast<PointerType>(Arg->getType());
         if (!ArgTy || ArgTy->getAddressSpace() != 1 || isa<Constant>(Arg))
@@ -4812,8 +5074,16 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
         }
 
         Root = nonPoisonOxCamlGCPointerValue(Root);
-        if (SeenGCArgs.insert(Root).second)
-          GCArgsStorage.push_back(Root);
+        if (SeenGCArgs.insert(Root).second) {
+          AllocaInst *Slot = EntryBuilder.CreateAlloca(
+              Root->getType(), DL.getAllocaAddrSpace(), nullptr,
+              suffixed_name_or(Root, ".callargroot", "callargroot"));
+          Slot->setAlignment(DL.getABITypeAlign(Root->getType()));
+          StoreInst *RootStore = StoreBuilder.CreateAlignedStore(
+              Root, Slot, DL.getABITypeAlign(Root->getType()));
+          RootStore->setVolatile(true);
+          GCArgsStorage.push_back(Slot);
+        }
       }
     }
   }
@@ -4986,6 +5256,7 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
       LoadInst *Reload = Builder.CreateAlignedLoad(
           Root->getType(), SlotIt->second, DL.getABITypeAlign(Root->getType()),
           suffixed_name_or(Root, ".cargroot.reload", "cargroot.reload"));
+      Reload->setVolatile(true);
       Result.RematerializedValues[Reload] = LiveValue;
     }
   };
