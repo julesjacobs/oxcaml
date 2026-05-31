@@ -15,7 +15,9 @@ else
 endif
 
 ifeq ($(LLVM_BACKEND),1)
-LLVM_PATH ?= /tmp/oxcaml-clang-wrapper
+ifeq ($(strip $(LLVM_PATH)),)
+$(error Set LLVM_PATH to the clang wrapper or LLVM tool path for LLVM backend builds)
+endif
 LLVM_BOOT_BACKEND ?= 1
 export PATH := $(dir $(DUNE)):$(PATH)
 LLVM_BUILD_OCAMLPARAM := $(if $(BUILD_OCAMLPARAM),$(BUILD_OCAMLPARAM),_),llvm-backend=1,llvm-path=$(LLVM_PATH)
@@ -25,7 +27,9 @@ export OCAMLPARAM
 endif
 
 ifeq ($(LLVM_BOOT_BACKEND),1)
-LLVM_PATH ?= /tmp/oxcaml-clang-wrapper
+ifeq ($(strip $(LLVM_PATH)),)
+$(error Set LLVM_PATH to the clang wrapper or LLVM tool path for LLVM boot backend builds)
+endif
 LLVM_BOOT_INSTALL ?= $(CURDIR)/_install
 BOOT_OCAMLPARAM := _,llvm-backend=1,llvm-path=$(LLVM_PATH)
 BOOT_PATHS := \
@@ -495,28 +499,36 @@ test-one: install_for_test
 	$(MAKE) test-one-no-rebuild
 
 .PHONY: llvm-compiler llvm-install llvm-test llvm-test-no-rebuild llvm-test-one llvm-test-one-no-rebuild llvm-self-stage-install llvm-self-stage2-install llvm-self-stage-test llvm-self-stage2-test
+require_llvm_path = $(if $(strip $(LLVM_PATH)),,$(error Set LLVM_PATH to the clang wrapper or LLVM tool path for LLVM backend builds))
+
 llvm-compiler:
+	$(call require_llvm_path)
 	$(MAKE) compiler LLVM_BACKEND=1
 
 llvm-install:
+	$(call require_llvm_path)
 	$(MAKE) install LLVM_BACKEND=1
 
 llvm-test:
+	$(call require_llvm_path)
 	$(MAKE) install_for_test
 	$(MAKE) test-no-rebuild TEST_RUN_OCAMLPARAM="_,llvm-backend=1,llvm-path=$(LLVM_PATH)"
 
 llvm-test-no-rebuild:
+	$(call require_llvm_path)
 	$(MAKE) test-no-rebuild TEST_RUN_OCAMLPARAM="_,llvm-backend=1,llvm-path=$(LLVM_PATH)"
 
 llvm-test-one:
+	$(call require_llvm_path)
 	$(MAKE) install_for_test
 	$(MAKE) test-one-no-rebuild TEST_RUN_OCAMLPARAM="_,llvm-backend=1,llvm-path=$(LLVM_PATH)"
 
 llvm-test-one-no-rebuild:
+	$(call require_llvm_path)
 	$(MAKE) test-one-no-rebuild TEST_RUN_OCAMLPARAM="_,llvm-backend=1,llvm-path=$(LLVM_PATH)"
 
 llvm-self-stage-install: llvm-install
-	LLVM_WRAPPER="$(or $(LLVM_PATH),/tmp/oxcaml-clang-wrapper)" \
+	LLVM_WRAPPER="$(LLVM_PATH)" \
 	  tools/build-llvm-self-stage-install.sh
 
 llvm-self-stage2-install: llvm-self-stage-install
@@ -526,16 +538,16 @@ llvm-self-stage2-install: llvm-self-stage-install
 	  SELF_RUNTIME_BUILD="$(ROOTDIR)/_llvm_self_stage2_runtime_build" \
 	  SELF_MAIN_BUILD="$(ROOTDIR)/_llvm_self_stage2_main_build" \
 	  SELF_STAGE_INSTALL="$(ROOTDIR)/_llvm_self_stage2_install" \
-	  LLVM_WRAPPER="$(or $(LLVM_PATH),/tmp/oxcaml-clang-wrapper)" \
+	  LLVM_WRAPPER="$(LLVM_PATH)" \
 	  tools/build-llvm-self-stage-install.sh
 
 llvm-self-stage-test: llvm-self-stage-install
-	SELF_STAGE=1 LLVM_WRAPPER="$(or $(LLVM_PATH),/tmp/oxcaml-clang-wrapper)" \
+	SELF_STAGE=1 LLVM_WRAPPER="$(LLVM_PATH)" \
 	  tools/run-llvm-stage5-ocamltest.sh
 
 llvm-self-stage2-test: llvm-self-stage2-install
 	SELF_STAGE=2 \
-	  LLVM_WRAPPER="$(or $(LLVM_PATH),/tmp/oxcaml-clang-wrapper)" \
+	  LLVM_WRAPPER="$(LLVM_PATH)" \
 	  tools/run-llvm-stage5-ocamltest.sh
 
 # If the TEST argument is passed as `testsuite/tests/foo` (as is invited by

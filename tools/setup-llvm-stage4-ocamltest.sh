@@ -4,11 +4,11 @@ set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
 
-fake_root=${FAKE_ROOT:-/tmp/oxcaml-stage4-ocamltest-src}
+fake_root=${FAKE_ROOT:-$repo/_llvm_stage4_ocamltest_src}
 normal_build=${NORMAL_BUILD:-$repo/_build}
 stage_build=${STAGE_BUILD:-$repo/_llvm_stage4_probe_build}
 stdlib_dir=${STDLIB_DIR:-$repo/_build/runtime_stdlib_install/lib/ocaml_runtime_stdlib}
-wrapper=${LLVM_WRAPPER:-/tmp/oxcaml-clang-wrapper}
+wrapper=${LLVM_WRAPPER:?set LLVM_WRAPPER to the clang wrapper or LLVM tool path}
 
 install_bin=${INSTALL_BIN:-$normal_build/install/main/bin}
 install_lib=${INSTALL_LIB:-$normal_build/install/main/lib/ocaml}

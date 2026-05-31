@@ -9,20 +9,20 @@ case "$self_stage" in
 0)
   default_stage_install=$repo/_llvm_stage5_install
   default_stage_build=$repo/_llvm_stage5_main_build
-  default_fake_root=/tmp/oxcaml-stage5-ocamltest-src
-  default_list=/tmp/oxcaml-stage5-all-minus-asm-list.txt
+  default_fake_root=$repo/_llvm_stage5_ocamltest_src
+  default_list=$repo/_llvm_stage5_all_minus_asm_list.txt
   ;;
 1)
   default_stage_install=$repo/_llvm_self_stage_install
   default_stage_build=$repo/_llvm_self_stage_main_build
-  default_fake_root=/tmp/oxcaml-self-stage-ocamltest-src
-  default_list=/tmp/oxcaml-self-stage-all-minus-asm-list.txt
+  default_fake_root=$repo/_llvm_self_stage_ocamltest_src
+  default_list=$repo/_llvm_self_stage_all_minus_asm_list.txt
   ;;
 2)
   default_stage_install=$repo/_llvm_self_stage2_install
   default_stage_build=$repo/_llvm_self_stage2_main_build
-  default_fake_root=/tmp/oxcaml-self-stage2-ocamltest-src
-  default_list=/tmp/oxcaml-self-stage2-all-minus-asm-list.txt
+  default_fake_root=$repo/_llvm_self_stage2_ocamltest_src
+  default_list=$repo/_llvm_self_stage2_all_minus_asm_list.txt
   ;;
 *)
   echo "SELF_STAGE must be 0, 1, or 2" >&2
@@ -35,7 +35,7 @@ stage_build=${STAGE_BUILD:-$default_stage_build}
 normal_build=${NORMAL_BUILD:-$repo/_build}
 normal_runtime_dir=${NORMAL_RUNTIME_DIR:-$normal_build/runtime_stdlib/runtime}
 fake_root=${FAKE_ROOT:-$default_fake_root}
-wrapper=${LLVM_WRAPPER:-/tmp/oxcaml-clang-wrapper}
+wrapper=${LLVM_WRAPPER:?set LLVM_WRAPPER to the clang wrapper or LLVM tool path}
 wrapper_log=${LLVM_WRAPPER_LOG:-$wrapper.log}
 list=${LIST:-$default_list}
 generate_list=${GENERATE_LIST:-1}

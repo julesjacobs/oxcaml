@@ -8,16 +8,16 @@ boot_install=${BOOT_INSTALL:-$repo/_install}
 runtime_build=${RUNTIME_BUILD:-$repo/_llvm_stage5_bootstrap_build}
 main_build=${MAIN_BUILD:-$repo/_llvm_stage5_main_build}
 stage_install=${STAGE_INSTALL:-$repo/_llvm_stage5_install}
-wrapper=${LLVM_WRAPPER:-/tmp/oxcaml-clang-wrapper}
+wrapper=${LLVM_WRAPPER:?set LLVM_WRAPPER to the clang wrapper or LLVM tool path}
 wrapper_log=${LLVM_WRAPPER_LOG:-$wrapper.log}
-runtime_ws=${RUNTIME_WS:-/tmp/oxcaml-stage5-runtime.ws}
-main_ws=${MAIN_WS:-/tmp/oxcaml-stage5-main.ws}
+runtime_ws=${RUNTIME_WS:-$repo/_llvm_stage5_runtime.ws}
+main_ws=${MAIN_WS:-$repo/_llvm_stage5_main.ws}
 arch=${ARCH:-}
 
 build_runtime=${BUILD_RUNTIME:-1}
 build_main=${BUILD_MAIN:-1}
 refresh_install=${REFRESH_INSTALL:-1}
-opam_switch_bin=${OPAM_SWITCH_BIN:-/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin}
+opam_switch_bin=${OPAM_SWITCH_BIN:-}
 dune_build_flags=()
 if [ -n "${DUNE_BUILD_FLAGS:-}" ]; then
   read -r -a dune_build_flags <<< "$DUNE_BUILD_FLAGS"
@@ -116,7 +116,10 @@ main_targets=(
   ./tools/dumpobj.bc
 )
 
-export PATH="$opam_switch_bin:$PATH"
+if [ -n "$opam_switch_bin" ]; then
+  require_path "$opam_switch_bin/dune"
+  export PATH="$opam_switch_bin:$PATH"
+fi
 
 if [ "$build_runtime" = 1 ]; then
   : > "$wrapper_log"
