@@ -901,6 +901,13 @@ let slow_path_root_slots_for_basic_safepoint ?unwind_label t i =
     |> fun roots -> Some roots
   else None
 
+let frontend_gc_roots_enabled () =
+  !Clflags.llvm_frontend_gc_roots
+
+let frontend_alloca_roots_enabled = frontend_gc_roots_enabled
+
+let slow_path_root_slots_enabled = frontend_gc_roots_enabled
+
 let refresh_live_gc_roots _t _roots = ()
 
 let live_gc_root_alloca_bundles t roots =
@@ -913,7 +920,7 @@ let live_gc_root_alloca_bundles t roots =
       roots
   in
   if
-    !Clflags.llvm_unsafe_no_frontend_alloca_roots
+    not (frontend_alloca_roots_enabled ())
     && not (List.is_empty roots)
   then (
     let regs =
@@ -1025,16 +1032,11 @@ let deopt_bundle ?alloc_info ~primitive_call ~raise_call dbg =
 let call_operand_bundles ?alloc_info ?(slow_path_roots = []) t ~primitive_call
     ~raise_call dbg live_roots =
   let frontend_roots =
-    if !Clflags.llvm_unsafe_no_frontend_alloca_roots
-    then []
-    else live_roots
+    if frontend_alloca_roots_enabled () then live_roots else []
   in
   deopt_bundle ?alloc_info ~primitive_call ~raise_call dbg
   @ live_gc_root_alloca_bundles t frontend_roots
-  @
-  (if !Clflags.llvm_unsafe_no_slow_path_root_slots
-   then []
-   else live_gc_root_slot_bundles slow_path_roots)
+  @ live_gc_root_slot_bundles slow_path_roots
 
 let load_domainstate_addr ?ds_loc ?(offset = 0) t ds_field =
   let typ = T.ptr in
@@ -3838,12 +3840,12 @@ let call_gc_for_basic_safepoint ?alloc_info ?unwind_label ~attrs t i =
   reject_addr_regs_across t i "basic safepoint";
   add_referenced_symbol t "caml_call_gc";
   let slow_path_roots, live_roots =
-    if !Clflags.llvm_unsafe_no_slow_path_root_slots
-    then [], load_live_gc_roots_across t i
-    else
+    if slow_path_root_slots_enabled ()
+    then
       slow_path_root_slots_for_basic_safepoint ?unwind_label t i |> function
       | Some roots -> roots, []
       | None -> [], load_live_gc_roots_across t i
+    else [], load_live_gc_roots_across t i
   in
   store_slow_path_roots t slow_path_roots;
   call_simple ~attrs ~live_roots ~slow_path_roots ?alloc_info ?unwind_label
@@ -4870,14 +4872,14 @@ let alloca_regs t (cfg : Cfg.t) arg_values arg_regs =
   in
   Reg.Set.iter (fun reg -> alloca_reg reg) body_regs;
   (match (get_fun_info t).liveness with
-  | None -> ()
-  | Some liveness ->
+  | Some liveness when slow_path_root_slots_enabled () ->
     let count =
       max_slow_path_root_slots liveness (get_fun_info t).active_traps cfg
     in
     (get_fun_info t).slow_path_root_slots
       <- List.init count (fun _ ->
-             emit_ins ~comment:"slow path GC root slot" t (I.alloca T.val_ptr)));
+             emit_ins ~comment:"slow path GC root slot" t (I.alloca T.val_ptr))
+  | None | Some _ -> ());
   (match Target_system.architecture () with
   | Target_system.AArch64 ->
     Cfg.fold_body_instructions cfg
