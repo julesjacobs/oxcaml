@@ -92,7 +92,7 @@ setup:
 
 try:
 ; CHECK: store ptr addrspace(1) %same.base, ptr %same.base.exnroot, align 8
-; CHECK: %statepoint_token = invoke {{.*}} [ "deopt"(), "gc-live"(ptr addrspace(1) %same.base, ptr %same.base.exnroot) ]
+; CHECK: %statepoint_token = invoke {{.*}} [ "deopt"(), "gc-live"(ptr addrspace(1) %same.base, ptr %same.base.exnroot, ptr addrspace(1) %obj) ]
   %call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee(i64 %ds, i64 %alloc, ptr addrspace(1) %obj)
       "statepoint-id"="0" [ "deopt"() ]
@@ -175,6 +175,80 @@ join:
   %ret0 = insertvalue { i64, i64, ptr addrspace(1) } poison, i64 %join_ds, 0
   %ret1 = insertvalue { i64, i64, ptr addrspace(1) } %ret0, i64 %join_alloc, 1
   %ret2 = insertvalue { i64, i64, ptr addrspace(1) } %ret1, ptr addrspace(1) %merged, 2
+  ret { i64, i64, ptr addrspace(1) } %ret2
+}
+
+define oxcaml_nofpcc { i64, i64, ptr addrspace(1) } @invoke_recovery_internal_phi_use(
+    i1 %choose,
+    i1 %which,
+    i64 %ds,
+    i64 %alloc,
+    ptr %trap_block,
+    ptr addrspace(1) %obj)
+    gc "oxcaml" personality ptr @__gxx_personality_v0 {
+; CHECK-LABEL: define oxcaml_nofpcc {{.*}} @invoke_recovery_internal_phi_use(
+; CHECK: %same.base.exnroot = alloca ptr addrspace(1), align 8
+entry:
+  br i1 %choose, label %left, label %right
+
+left:
+  br label %setup
+
+right:
+  br label %setup
+
+setup:
+  %same.base = phi ptr addrspace(1) [ %obj, %left ], [ %obj, %right ]
+  call void @llvm.aarch64.oxcaml.trap.publish(
+      ptr %trap_block,
+      i64 1,
+      ptr blockaddress(@invoke_recovery_internal_phi_use, %recover))
+  br label %try
+
+try:
+; CHECK: store ptr addrspace(1) %same.base, ptr %same.base.exnroot, align 8
+  %call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
+      @callee(i64 %ds, i64 %alloc, ptr addrspace(1) %obj)
+      "statepoint-id"="0" [ "deopt"() ]
+      to label %normal unwind label %recover
+
+normal:
+  %normal_ds = extractvalue { i64, i64, ptr addrspace(1) } %call, 0
+  %normal_alloc = extractvalue { i64, i64, ptr addrspace(1) } %call, 1
+  br label %join
+
+recover:
+; CHECK: recover:
+; CHECK: %same.base.exnroot.load = load ptr addrspace(1), ptr %same.base.exnroot, align 8
+  %lp = landingpad token cleanup
+  %rec = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %recovered_alloc = extractvalue { i64, i64, i64, i64 } %rec, 2
+  %recovered_ds = extractvalue { i64, i64, i64, i64 } %rec, 3
+  br i1 %which, label %recover.left, label %recover.right
+
+recover.left:
+  br label %recover.join
+
+recover.right:
+  br label %recover.join
+
+recover.join:
+; CHECK: recover.join:
+; CHECK: %recovered.ptr = phi ptr addrspace(1) [ %same.base.exnroot.load, %recover.left ], [ %same.base.exnroot.load, %recover.right ]
+  %recovered.ptr = phi ptr addrspace(1) [ %same.base, %recover.left ], [ %same.base, %recover.right ]
+  br label %join
+
+join:
+; CHECK: join:
+; CHECK: %merged = phi ptr addrspace(1) [ %same.base.relocated, %normal ], [ %recovered.ptr, %recover.join ]
+; CHECK: %field = load ptr addrspace(1), ptr addrspace(1) %merged, align 8
+  %join_ds = phi i64 [ %normal_ds, %normal ], [ %recovered_ds, %recover.join ]
+  %join_alloc = phi i64 [ %normal_alloc, %normal ], [ %recovered_alloc, %recover.join ]
+  %merged = phi ptr addrspace(1) [ %same.base, %normal ], [ %recovered.ptr, %recover.join ]
+  %field = load ptr addrspace(1), ptr addrspace(1) %merged, align 8
+  %ret0 = insertvalue { i64, i64, ptr addrspace(1) } poison, i64 %join_ds, 0
+  %ret1 = insertvalue { i64, i64, ptr addrspace(1) } %ret0, i64 %join_alloc, 1
+  %ret2 = insertvalue { i64, i64, ptr addrspace(1) } %ret1, ptr addrspace(1) %field, 2
   ret { i64, i64, ptr addrspace(1) } %ret2
 }
 

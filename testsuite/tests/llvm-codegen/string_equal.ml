@@ -66,13 +66,14 @@ L103:
   store ptr addrspace(1) %29, ptr %9
   %30 = load ptr addrspace(1), ptr %9
   store ptr addrspace(1) %30, ptr %5
-  %31 = load i64, ptr %5
-  %32 = load i64, ptr %ds
-  %33 = load i64, ptr %alloc
-  %34 = insertvalue { { i64, i64 }, { i64 } } poison, i64 %32, 0, 0
-  %35 = insertvalue { { i64, i64 }, { i64 } } %34, i64 %33, 0, 1
-  %36 = insertvalue { { i64, i64 }, { i64 } } %35, i64 %31, 1, 0
-  ret { { i64, i64 }, { i64 } } %36
+  %31 = load ptr addrspace(1), ptr %5
+  %32 = ptrtoint ptr addrspace(1) %31 to i64
+  %33 = load i64, ptr %ds
+  %34 = load i64, ptr %alloc
+  %35 = insertvalue { { i64, i64 }, { i64 } } poison, i64 %33, 0, 0
+  %36 = insertvalue { { i64, i64 }, { i64 } } %35, i64 %34, 0, 1
+  %37 = insertvalue { { i64, i64 }, { i64 } } %36, i64 %32, 1, 0
+  ret { { i64, i64 }, { i64 } } %37
 }|}]
 
 [%%expect_llvm_asm AArch64{|_camlTOP__string_equal_0_1_code:
@@ -164,13 +165,14 @@ L119:
   store ptr addrspace(1) %29, ptr %9
   %30 = load ptr addrspace(1), ptr %9
   store ptr addrspace(1) %30, ptr %5
-  %31 = load i64, ptr %5
-  %32 = load i64, ptr %ds
-  %33 = load i64, ptr %alloc
-  %34 = insertvalue { { i64, i64 }, { i64 } } poison, i64 %32, 0, 0
-  %35 = insertvalue { { i64, i64 }, { i64 } } %34, i64 %33, 0, 1
-  %36 = insertvalue { { i64, i64 }, { i64 } } %35, i64 %31, 1, 0
-  ret { { i64, i64 }, { i64 } } %36
+  %31 = load ptr addrspace(1), ptr %5
+  %32 = ptrtoint ptr addrspace(1) %31 to i64
+  %33 = load i64, ptr %ds
+  %34 = load i64, ptr %alloc
+  %35 = insertvalue { { i64, i64 }, { i64 } } poison, i64 %33, 0, 0
+  %36 = insertvalue { { i64, i64 }, { i64 } } %35, i64 %34, 0, 1
+  %37 = insertvalue { { i64, i64 }, { i64 } } %36, i64 %32, 1, 0
+  ret { { i64, i64 }, { i64 } } %37
 }|}]
 
 [%%expect_llvm_asm AArch64{|_camlTOP__bytes_equal_2_3_code:

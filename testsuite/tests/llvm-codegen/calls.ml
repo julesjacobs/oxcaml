@@ -42,9 +42,10 @@ L101:
   %17 = load ptr addrspace(1), ptr %6
   %18 = load i64, ptr %ds
   %19 = load i64, ptr %alloc
-  %20 = load ptr, ptr %9
-  %21 = musttail call oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } %20(i64 %18, i64 %19, ptr addrspace(1) %16, ptr addrspace(1) %17) "statepoint-id"="0"
-  ret { { i64, i64 }, { ptr addrspace(1) } } %21
+  %20 = load i64, ptr %9
+  %21 = inttoptr i64 %20 to ptr
+  %22 = musttail call oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } %21(i64 %18, i64 %19, ptr addrspace(1) %16, ptr addrspace(1) %17) "statepoint-id"="0"
+  ret { { i64, i64 }, { ptr addrspace(1) } } %22
 }|}]
 
 [%%expect_llvm_asm AArch64{|_camlTOP__call_0_1_code:
