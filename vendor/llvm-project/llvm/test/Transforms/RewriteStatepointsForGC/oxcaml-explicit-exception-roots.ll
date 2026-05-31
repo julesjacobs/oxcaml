@@ -27,7 +27,7 @@ entry:
 left:
 ; CHECK: left:
 ; CHECK-NEXT: store ptr addrspace(1) %a, ptr %handler_value.exnroot, align 8
-; CHECK-NEXT: %statepoint_token = invoke {{.*}} @llvm.experimental.gc.statepoint{{.*}} [ "gc-live"(ptr %handler_value.exnroot) ]
+; CHECK-NEXT: %statepoint_token = invoke {{.*}} @llvm.experimental.gc.statepoint{{.*}} [ "gc-live"({{.*}}ptr %handler_value.exnroot{{.*}}) ]
 ; CHECK-NEXT: to label %{{.*}} unwind label %recover
   %left_call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee_a(i64 %ds, i64 %alloc, ptr addrspace(1) %a)
@@ -39,7 +39,7 @@ normal_left:
 right:
 ; CHECK: right:
 ; CHECK-NEXT: store ptr addrspace(1) %b, ptr %handler_value.exnroot, align 8
-; CHECK-NEXT: %statepoint_token{{[0-9]*}} = invoke {{.*}} @llvm.experimental.gc.statepoint{{.*}} [ "gc-live"(ptr %handler_value.exnroot) ]
+; CHECK-NEXT: %statepoint_token{{[0-9]*}} = invoke {{.*}} @llvm.experimental.gc.statepoint{{.*}} [ "gc-live"({{.*}}ptr %handler_value.exnroot{{.*}}) ]
 ; CHECK-NEXT: to label %{{.*}} unwind label %recover
   %right_call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee_b(i64 %ds, i64 %alloc, ptr addrspace(1) %b)
@@ -81,16 +81,16 @@ entry:
       i64 1,
       ptr blockaddress(@same_value_two_statepoints, %recover))
 ; CHECK: store ptr addrspace(1) %a, ptr %a.exnroot, align 8
-; CHECK-NEXT: %statepoint_token = invoke {{.*}} [ "gc-live"(ptr addrspace(1) %a, ptr %a.exnroot) ]
+; CHECK: %statepoint_token = invoke {{.*}} [ "gc-live"({{.*}}ptr %a.exnroot{{.*}}) ]
   %call1 = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee_a(i64 %ds, i64 %alloc, ptr addrspace(1) %a)
       to label %after1 unwind label %recover
 
 after1:
 ; CHECK: after1:
-; CHECK-NEXT: %a.relocated = call coldcc ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token %statepoint_token, i32 0, i32 0)
-; CHECK-NEXT: store ptr addrspace(1) %a.relocated, ptr %a.exnroot, align 8
-; CHECK-NEXT: %statepoint_token{{[0-9]*}} = invoke {{.*}} [ "gc-live"(ptr addrspace(1) %a.relocated, ptr %a.exnroot) ]
+; CHECK: %a.relocated = call coldcc ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token %statepoint_token, i32 0, i32 0)
+; CHECK: store ptr addrspace(1) %a.relocated, ptr %a.exnroot, align 8
+; CHECK: %statepoint_token{{[0-9]*}} = invoke {{.*}} [ "gc-live"({{.*}}ptr %a.exnroot{{.*}}) ]
   %call2 = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee_b(i64 %ds, i64 %alloc, ptr addrspace(1) %a)
       to label %normal unwind label %recover
@@ -136,7 +136,7 @@ entry:
 left:
 ; CHECK: left:
 ; CHECK-NEXT: store ptr addrspace(1) %a, ptr %handler_value.exnroot, align 8
-; CHECK-NEXT: %statepoint_token{{[0-9]*}} = invoke {{.*}} [ "gc-live"(ptr %handler_value.exnroot) ]
+; CHECK-NEXT: %statepoint_token{{[0-9]*}} = invoke {{.*}} [ "gc-live"({{.*}}ptr %handler_value.exnroot{{.*}}) ]
 ; CHECK-NEXT: to label %{{.*}} unwind label %left_lpad
   %left_call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee_a(i64 %ds, i64 %alloc, ptr addrspace(1) %a)
@@ -148,7 +148,7 @@ normal_left:
 right:
 ; CHECK: right:
 ; CHECK-NEXT: store ptr addrspace(1) %b, ptr %handler_value.exnroot, align 8
-; CHECK-NEXT: %statepoint_token{{[0-9]*}} = invoke {{.*}} [ "gc-live"(ptr %handler_value.exnroot) ]
+; CHECK-NEXT: %statepoint_token{{[0-9]*}} = invoke {{.*}} [ "gc-live"({{.*}}ptr %handler_value.exnroot{{.*}}) ]
 ; CHECK-NEXT: to label %{{.*}} unwind label %right_lpad
   %right_call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee_b(i64 %ds, i64 %alloc, ptr addrspace(1) %b)
@@ -202,16 +202,16 @@ entry:
       i64 1,
       ptr blockaddress(@late_handler_use_two_statepoints, %recover))
 ; CHECK: store ptr addrspace(1) %a, ptr %a.exnroot, align 8
-; CHECK-NEXT: %statepoint_token = invoke {{.*}} [ "gc-live"(ptr addrspace(1) %a, ptr %a.exnroot) ]
+; CHECK: %statepoint_token = invoke {{.*}} [ "gc-live"({{.*}}ptr %a.exnroot{{.*}}) ]
   %call1 = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee_a(i64 %ds, i64 %alloc, ptr addrspace(1) %a)
       to label %after1 unwind label %recover
 
 after1:
 ; CHECK: after1:
-; CHECK-NEXT: %a.relocated = call coldcc ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token %statepoint_token, i32 0, i32 0)
-; CHECK-NEXT: store ptr addrspace(1) %a.relocated, ptr %a.exnroot, align 8
-; CHECK-NEXT: %statepoint_token{{[0-9]*}} = invoke {{.*}} [ "gc-live"(ptr addrspace(1) %a.relocated, ptr %a.exnroot) ]
+; CHECK: %a.relocated = call coldcc ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token %statepoint_token, i32 0, i32 0)
+; CHECK: store ptr addrspace(1) %a.relocated, ptr %a.exnroot, align 8
+; CHECK: %statepoint_token{{[0-9]*}} = invoke {{.*}} [ "gc-live"({{.*}}ptr %a.exnroot{{.*}}) ]
   %call2 = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee_b(i64 %ds, i64 %alloc, ptr addrspace(1) %a)
       to label %normal unwind label %recover
@@ -249,7 +249,7 @@ entry:
       i64 1,
       ptr blockaddress(@post_recovery_join_phi_gc, %recover))
 ; CHECK: store ptr addrspace(1) %a, ptr %a.exnroot, align 8
-; CHECK-NEXT: %statepoint_token = invoke {{.*}} @llvm.experimental.gc.statepoint{{.*}} [ "gc-live"(ptr %a.exnroot) ]
+; CHECK-NEXT: %statepoint_token = invoke {{.*}} @llvm.experimental.gc.statepoint{{.*}} [ "gc-live"({{.*}}ptr %a.exnroot{{.*}}) ]
   %call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee_a(i64 %ds, i64 %alloc, ptr addrspace(1) %a)
       to label %normal unwind label %recover
@@ -274,7 +274,7 @@ caught:
 
 join:
 ; CHECK: join:
-; CHECK-NEXT: %joined = phi ptr addrspace(1) [ %normal_value, %normal ], [ %a.exnroot.load, %recover ]
+; CHECK-NEXT: %joined = phi ptr addrspace(1) [ %{{.*}}, %normal ], [ %a.exnroot.load, %recover ]
   %joined = phi ptr addrspace(1) [ %normal_value, %normal ], [ %a, %caught ]
   %ret0 = insertvalue { i64, i64, ptr addrspace(1) } poison, i64 %ds, 0
   %ret1 = insertvalue { i64, i64, ptr addrspace(1) } %ret0, i64 %alloc, 1
@@ -312,16 +312,16 @@ recover:
 ; CHECK-NEXT: %rec = tail call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
 ; CHECK-NEXT: %b.exnroot.load = load ptr addrspace(1), ptr %b.exnroot, align 8
 ; CHECK-NEXT: br label %join
-; CHECK: join1:
-; CHECK-NEXT: %a.relocated = call coldcc ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token %statepoint_token{{[0-9]*}}, i32 0, i32 0)
-; CHECK-NEXT: br label %join
+; CHECK: join{{.*}}:
+; CHECK: %a.relocated = call coldcc ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token %statepoint_token{{[0-9]*}}, i32 0, i32 0)
+; CHECK: br label %join
   %lp = landingpad token cleanup
   %rec = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
   br label %join
 
 join:
 ; CHECK: join:
-; CHECK-NEXT: %joined = phi ptr addrspace(1) [ %b.exnroot.load, %recover ], [ %a.relocated, %join1 ]
+; CHECK-NEXT: %joined = phi ptr addrspace(1) [ %b.exnroot.load, %recover ], [ %a.relocated, %join{{.*}} ]
   %joined = phi ptr addrspace(1) [ %a, %normal ], [ %b, %recover ]
   %ret0 = insertvalue { i64, i64, ptr addrspace(1) } poison, i64 %ds, 0
   %ret1 = insertvalue { i64, i64, ptr addrspace(1) } %ret0, i64 %alloc, 1
@@ -364,7 +364,8 @@ recover:
   br label %handler
 
 handler:
-; CHECK: %field = load ptr addrspace(1), ptr addrspace(1) %ref.exnroot.load, align 8
+; CHECK: %[[REF_RAW:.*]] = addrspacecast ptr addrspace(1) %ref.exnroot.load to ptr
+; CHECK: %field = load ptr addrspace(1), ptr %[[REF_RAW]], align 8
 ; CHECK: %statepoint_token{{[0-9]*}} = invoke {{.*}} [ "gc-live"({{.*}}ptr %ref.exnroot{{.*}}) ]
   %field = load ptr addrspace(1), ptr %ref.raw, align 8
   %handler_call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }

@@ -196,7 +196,7 @@ static bool isOxCamlCallingConv(CallingConv::ID CC) {
   }
 }
 
-static bool needsCallerFrameRootsForOxCamlCArgs(CallingConv::ID CC) {
+static bool isOxCamlCWrapperCallingConv(CallingConv::ID CC) {
   return CC == CallingConv::OxCaml_C_Call ||
          CC == CallingConv::OxCaml_C_Call_StackArgs;
 }
@@ -384,11 +384,6 @@ struct PartiallyConstructedSafepointRecord {
   /// Late materialized explicit stack roots that should be listed in the
   /// statepoint's gc-live bundle but should not get gc.relocate calls.
   SmallVector<Value *, 4> ExplicitRootSlots;
-
-  /// GC pointer argument values to OxCaml C calls that must be rooted in the
-  /// caller's frame for the duration of the call, even if they are not live
-  /// after it.
-  SmallVector<Value *, 4> CallerFrameRootValues;
 
   /// This invoke unwinds to an OxCaml trap recovery landingpad whose
   /// handler-live GC values have been materialized into ExplicitRootSlots.
@@ -4431,15 +4426,7 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
   for (Value *V : LiveVariables)
     LiveVariableSet.insert(V);
 
-  DenseSet<Value *> CallerFrameRootSet;
-  for (Value *Arg : Result.CallerFrameRootValues) {
-    Value *Root = nonPoisonOxCamlGCPointerValue(Arg);
-    if (!isa<Constant>(Root))
-      CallerFrameRootSet.insert(Root);
-  }
-
   DenseSet<Value *> RematerializedDerivedValues;
-  SmallVector<Value *, 8> CallerFrameRootReloadValues;
   RematCandTy RematerializedDerivedChains;
   const bool IsOxCamlStatepoint = isOxCamlCallingConv(Call->getCallingConv());
   auto PrintOxCamlDerivedCandidate = [&](Value *Derived, Value *Base) {
@@ -4864,10 +4851,6 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
       if (BaseIt != PointerToBase.end())
         PrintOxCamlDerivedCandidate(LiveVariable, BaseIt->second);
     }
-    if (CallerFrameRootSet.contains(nonPoisonOxCamlGCPointerValue(LiveVariable))) {
-      CallerFrameRootReloadValues.push_back(LiveVariable);
-      continue;
-    }
     if (ShouldRematerializeDerivedFromBase(LiveVariable)) {
       RematerializedDerivedValues.insert(LiveVariable);
       continue;
@@ -4928,43 +4911,6 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
   uint64_t StatepointID = StatepointDirectives::DefaultStatepointID;
   uint32_t NumPatchBytes = 0;
   uint32_t Flags = uint32_t(StatepointFlags::None);
-  DenseMap<Value *, AllocaInst *> CallerFrameRootSlots;
-
-  if (!Result.CallerFrameRootValues.empty()) {
-    const DataLayout &DL = Call->getModule()->getDataLayout();
-    BasicBlock &EntryBlock = Call->getFunction()->getEntryBlock();
-    IRBuilder<> EntryBuilder(&EntryBlock, EntryBlock.getFirstInsertionPt());
-    IRBuilder<> StoreBuilder(Call);
-    SmallPtrSet<Value *, 8> SeenSlots;
-
-    for (Value *Arg : Result.CallerFrameRootValues) {
-      Value *Root = nonPoisonOxCamlGCPointerValue(Arg);
-      if (isa<Constant>(Root))
-        continue;
-
-      if (!Root->getType()->isSized()) {
-        Root->print(errs());
-        errs() << "\n";
-        report_fatal_error("cannot materialize unsized OxCaml C-call root");
-      }
-      if (auto *RootInst = dyn_cast<Instruction>(Root))
-        if (!DT.dominates(RootInst, Call))
-          report_fatal_error("OxCaml C-call root does not dominate call");
-
-      AllocaInst *&Slot = CallerFrameRootSlots[Root];
-      if (!Slot) {
-        Slot = EntryBuilder.CreateAlloca(
-            Root->getType(), DL.getAllocaAddrSpace(), nullptr,
-            suffixed_name_or(Root, ".cargroot", "cargroot"));
-        Slot->setAlignment(DL.getABITypeAlign(Root->getType()));
-        StoreInst *RootStore = StoreBuilder.CreateAlignedStore(
-            Root, Slot, DL.getABITypeAlign(Root->getType()));
-        RootStore->setVolatile(true);
-      }
-      if (SeenSlots.insert(Slot).second)
-        GCArgsStorage.push_back(Slot);
-    }
-  }
 
   SmallVector<Value *, 8> CallArgs(Call->args());
   std::optional<ArrayRef<Use>> DeoptArgs;
@@ -5276,29 +5222,6 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
     }
   };
 
-  auto AddCallerFrameRootReloads = [&]() {
-    if (CallerFrameRootReloadValues.empty())
-      return;
-
-    const DataLayout &DL = Call->getModule()->getDataLayout();
-    SmallPtrSet<Value *, 8> SeenReloads;
-    for (Value *LiveValue : CallerFrameRootReloadValues) {
-      Value *Root = nonPoisonOxCamlGCPointerValue(LiveValue);
-      if (!SeenReloads.insert(Root).second)
-        continue;
-
-      auto SlotIt = CallerFrameRootSlots.find(Root);
-      if (SlotIt == CallerFrameRootSlots.end())
-        report_fatal_error("missing OxCaml C-call caller-frame root slot");
-
-      LoadInst *Reload = Builder.CreateAlignedLoad(
-          Root->getType(), SlotIt->second, DL.getABITypeAlign(Root->getType()),
-          suffixed_name_or(Root, ".cargroot.reload", "cargroot.reload"));
-      Reload->setVolatile(true);
-      Result.RematerializedValues[Reload] = LiveValue;
-    }
-  };
-
   if (IsDeoptimize) {
     // If we're wrapping an @llvm.experimental.deoptimize in a statepoint, we
     // transform the tail-call like structure to a call to a void function
@@ -5332,7 +5255,6 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
   // Second, create a gc.relocate for every live variable
   CreateGCRelocates(FilteredLiveVariables, FilteredBasePtrs, Token, Builder);
   AddDerivedRematerializations(Token);
-  AddCallerFrameRootReloads();
 }
 
 // Replace an existing gc.statepoint with a new one and a set of gc.relocates
@@ -7125,7 +7047,7 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
     }
     Records[I].UsesExplicitExceptionRoots =
         ExplicitExceptionRootCalls.contains(ToUpdate[I]);
-    if (needsCallerFrameRootsForOxCamlCArgs(ToUpdate[I]->getCallingConv())) {
+    if (isOxCamlCWrapperCallingConv(ToUpdate[I]->getCallingConv())) {
       for (Value *Arg : ToUpdate[I]->args()) {
         checkNoUnhandledGCPointerType(Arg, "OxCaml C-call arguments");
         if (!isHandledGCPointerType(Arg->getType()))
@@ -7133,7 +7055,6 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
         if (!isGCPointerType(Arg->getType()))
           report_fatal_error(
               "OxCaml C-call GC pointer arguments must be scalar pointers");
-        Records[I].CallerFrameRootValues.push_back(Arg);
       }
     }
   }
