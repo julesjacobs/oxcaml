@@ -1608,6 +1608,19 @@ static bool containsOxCamlPointerFormDerivedAddrSpace1Pointer(Value *I) {
                                                               ActiveValues);
 }
 
+static bool isDistinctOxCamlAddrSpace1AddressExpression(Value *V,
+                                                        Value *Base) {
+  if (V == Base)
+    return false;
+
+  auto *VTy = dyn_cast<PointerType>(V->getType());
+  auto *BaseTy = dyn_cast<PointerType>(Base->getType());
+  return VTy && BaseTy && VTy->getAddressSpace() == 1 &&
+         BaseTy->getAddressSpace() == 1 &&
+         !isDistinctOxCamlAddrSpace1BaseEquivalentGCPointer(V, Base) &&
+         containsOxCamlPointerFormDerivedAddrSpace1Pointer(V);
+}
+
 /// Returns the base defining value for this value.
 static Value *findBaseDefiningValueCached(Value *I, DefiningValueMapTy &Cache,
                                           IsKnownBaseMapTy &KnownBases) {
@@ -3371,6 +3384,9 @@ static bool materializeOxCamlExceptionRootSlots(
         return V;
 
       if (!isDistinctOxCamlAddrSpace1BaseEquivalentGCPointer(V, Base)) {
+        if (!isDistinctOxCamlAddrSpace1AddressExpression(V, Base))
+          return V;
+
         V->print(errs());
         errs() << "\n";
         Base->print(errs());
@@ -3795,6 +3811,9 @@ static bool rewriteOxCamlExplicitRootStoresToBases(
         continue;
 
       if (!isOxCamlBaseRelationThroughExceptionRoots(Stored, Base)) {
+        if (!isDistinctOxCamlAddrSpace1AddressExpression(Stored, Base))
+          continue;
+
         Stored->print(errs());
         errs() << "\n";
         Base->print(errs());
@@ -4525,8 +4544,9 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
         isDistinctOxCamlAddrSpace1BaseEquivalentGCPointer(LiveVariable,
                                                           BaseIt->second);
     bool IsOxCamlAddressExpression =
-        IsOxCamlStatepoint &&
-        containsOxCamlPointerFormDerivedAddrSpace1Pointer(LiveVariable);
+        IsOxCamlStatepoint && BaseIt != PointerToBase.end() &&
+        isDistinctOxCamlAddrSpace1AddressExpression(LiveVariable,
+                                                    BaseIt->second);
     if (FailOnOxCamlDerivedRelocates && IsOxCamlStatepoint &&
         BaseIt != PointerToBase.end()) {
       Value *Base = BaseIt->second;
@@ -4534,7 +4554,7 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
       auto *BaseTy = dyn_cast<PointerType>(Base->getType());
       if (Base != LiveVariable && LiveTy && BaseTy &&
           LiveTy->getAddressSpace() == 1 && BaseTy->getAddressSpace() == 1 &&
-          !IsOxCamlSelfBaseEquivalent && IsOxCamlAddressExpression) {
+          IsOxCamlAddressExpression) {
         errs() << "OxCaml statepoint would relocate a derived addrspace(1) "
                   "pointer independently\n  call: ";
         Call->print(errs());
@@ -4787,7 +4807,7 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
           Value *Base = BaseIt->second;
           auto *BaseTy = dyn_cast<PointerType>(Base->getType());
           if (BaseTy && BaseTy->getAddressSpace() == 1 &&
-              !isDistinctOxCamlAddrSpace1BaseEquivalentGCPointer(Arg, Base))
+              isDistinctOxCamlAddrSpace1AddressExpression(Arg, Base))
             Root = Base;
         }
 
