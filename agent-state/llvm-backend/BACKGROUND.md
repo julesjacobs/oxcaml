@@ -18,6 +18,18 @@ This is the model LLVM's statepoint pipeline is built around: the IR carries
 typed GC pointer values, and RS4GC rewrites statepoints so the backend can
 lower precise GC metadata.
 
+## Cfg Registers and SSA
+
+The frontend initially translates Cfg registers through stack slots: each Cfg
+register is represented by an LLVM `alloca`, with Cfg reads and writes
+translated to loads and stores. In the normal pipeline, LLVM's `mem2reg`
+promotion then turns those allocas into SSA values.
+
+This is also the intended path for OCaml values represented as
+`ptr addrspace(1)`. If a Cfg register holds an `addrspace(1)` value, its
+alloca is still just the temporary lowering form. After `mem2reg`, the value
+should be a normal SSA `addrspace(1)` value that RS4GC can see at statepoints.
+
 ## OxCaml Value Model
 
 An OxCaml `ptr addrspace(1)` value is an OCaml value. It can be either:

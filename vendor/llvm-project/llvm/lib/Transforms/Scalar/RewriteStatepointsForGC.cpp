@@ -529,9 +529,15 @@ static bool isNormalOnlyAfterInvoke(InvokeInst *Invoke, Value *V,
   return true;
 }
 
+enum class OxCamlBaseEquivalenceState {
+  Visiting,
+  Equivalent,
+  NotEquivalent,
+};
+
 static bool isOxCamlBaseEquivalentGCPointer(
     Value *V, Value *Base,
-    SmallVectorImpl<std::pair<Value *, Value *>> &Visiting) {
+    DenseMap<std::pair<Value *, Value *>, OxCamlBaseEquivalenceState> &Cache) {
   if (V == Base)
     return true;
 
@@ -541,15 +547,24 @@ static bool isOxCamlBaseEquivalentGCPointer(
       BaseTy->getAddressSpace() != 1)
     return false;
 
-  for (auto Pair : Visiting)
-    if (Pair.first == V && Pair.second == Base)
+  auto Key = std::make_pair(V, Base);
+  auto Cached = Cache.find(Key);
+  if (Cached != Cache.end()) {
+    switch (Cached->second) {
+    case OxCamlBaseEquivalenceState::Visiting:
       return true;
-  Visiting.push_back({V, Base});
+    case OxCamlBaseEquivalenceState::Equivalent:
+      return true;
+    case OxCamlBaseEquivalenceState::NotEquivalent:
+      return false;
+    }
+  }
+  Cache[Key] = OxCamlBaseEquivalenceState::Visiting;
 
   bool Equivalent = false;
   if (auto *Freeze = dyn_cast<FreezeInst>(V)) {
     Equivalent =
-        isOxCamlBaseEquivalentGCPointer(Freeze->getOperand(0), Base, Visiting);
+        isOxCamlBaseEquivalentGCPointer(Freeze->getOperand(0), Base, Cache);
   } else if (auto *VPhi = dyn_cast<PHINode>(V)) {
     if (auto *BasePhi = dyn_cast<PHINode>(Base)) {
       Equivalent = VPhi->getNumIncomingValues() ==
@@ -562,7 +577,7 @@ static bool isOxCamlBaseEquivalentGCPointer(
             isOxCamlBaseEquivalentGCPointer(
                 VPhi->getIncomingValue(I),
                 BasePhi->getIncomingValue(static_cast<unsigned>(BaseIdx)),
-                Visiting);
+                Cache);
       }
     }
     if (!Equivalent) {
@@ -570,7 +585,7 @@ static bool isOxCamlBaseEquivalentGCPointer(
       for (unsigned I = 0; Equivalent && I < VPhi->getNumIncomingValues();
            ++I)
         Equivalent = isOxCamlBaseEquivalentGCPointer(
-            VPhi->getIncomingValue(I), Base, Visiting);
+            VPhi->getIncomingValue(I), Base, Cache);
     }
   } else if (auto *VSelect = dyn_cast<SelectInst>(V)) {
     if (auto *BaseSelect = dyn_cast<SelectInst>(Base)) {
@@ -578,26 +593,27 @@ static bool isOxCamlBaseEquivalentGCPointer(
           VSelect->getCondition() == BaseSelect->getCondition() &&
           isOxCamlBaseEquivalentGCPointer(VSelect->getTrueValue(),
                                           BaseSelect->getTrueValue(),
-                                          Visiting) &&
+                                          Cache) &&
           isOxCamlBaseEquivalentGCPointer(VSelect->getFalseValue(),
                                           BaseSelect->getFalseValue(),
-                                          Visiting);
+                                          Cache);
     } else {
       Equivalent =
           isOxCamlBaseEquivalentGCPointer(VSelect->getTrueValue(), Base,
-                                          Visiting) &&
+                                          Cache) &&
           isOxCamlBaseEquivalentGCPointer(VSelect->getFalseValue(), Base,
-                                          Visiting);
+                                          Cache);
     }
   }
 
-  Visiting.pop_back();
+  Cache[Key] = Equivalent ? OxCamlBaseEquivalenceState::Equivalent
+                          : OxCamlBaseEquivalenceState::NotEquivalent;
   return Equivalent;
 }
 
 static bool isOxCamlBaseEquivalentGCPointer(Value *V, Value *Base) {
-  SmallVector<std::pair<Value *, Value *>, 8> Visiting;
-  return isOxCamlBaseEquivalentGCPointer(V, Base, Visiting);
+  DenseMap<std::pair<Value *, Value *>, OxCamlBaseEquivalenceState> Cache;
+  return isOxCamlBaseEquivalentGCPointer(V, Base, Cache);
 }
 
 static bool isDistinctOxCamlAddrSpace1BaseEquivalentGCPointer(Value *V,
@@ -7087,32 +7103,54 @@ static void stripNonValidData(Module &M) {
     stripNonValidDataFromBody(F);
 }
 
+static void collectInputGCLiveRootAllocas(
+    Function &F, SmallPtrSetImpl<AllocaInst *> &RootAllocas) {
+  for (Instruction &I : instructions(F)) {
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (!Call)
+      continue;
+
+    for (unsigned BundleIndex = 0, E = Call->getNumOperandBundles();
+         BundleIndex != E; ++BundleIndex) {
+      OperandBundleUse Bundle = Call->getOperandBundleAt(BundleIndex);
+      if (Bundle.getTagName() != "gc-live")
+        continue;
+
+      for (Value *Input : Bundle.Inputs)
+        if (auto *AI = dyn_cast<AllocaInst>(Input->stripPointerCasts()))
+          RootAllocas.insert(AI);
+    }
+  }
+}
+
 static bool promoteOxCamlGCPointerAllocas(Function &F, DominatorTree &DT) {
   if (!isOxCamlFunction(F))
     return false;
 
+  SmallPtrSet<AllocaInst *, 32> ExplicitRootAllocas;
+  collectInputGCLiveRootAllocas(F, ExplicitRootAllocas);
   SmallVector<AllocaInst *, 64> PromotableAllocas;
-  unsigned RejectedAllocas = 0;
   for (Instruction &I : instructions(F)) {
     auto *AI = dyn_cast<AllocaInst>(&I);
-    if (!AI || !AI->isStaticAlloca())
+    if (!AI)
       continue;
     if (!isHandledGCPointerType(AI->getAllocatedType()))
       continue;
-    if (!isAllocaPromotable(AI)) {
-      ++RejectedAllocas;
-      if (DebugOxCamlGCPointerAllocas) {
-        errs() << "rs4gc-oxcaml-gc-pointer-alloca-reject in " << F.getName()
-               << ": ";
-        AI->print(errs());
+    if (!AI->isStaticAlloca() || !isAllocaPromotable(AI)) {
+      if (ExplicitRootAllocas.contains(AI))
+        continue;
+      errs() << "OxCaml GC pointer alloca is not promotable before late root "
+                "discovery in "
+             << F.getName() << "\n  alloca: ";
+      AI->print(errs());
+      errs() << "\n";
+      for (User *U : AI->users()) {
+        errs() << "  user: ";
+        U->print(errs());
         errs() << "\n";
-        for (User *U : AI->users()) {
-          errs() << "  user: ";
-          U->print(errs());
-          errs() << "\n";
-        }
       }
-      continue;
+      report_fatal_error(
+          "unpromotable ordinary OxCaml GC pointer alloca before RS4GC");
     }
     if (DebugOxCamlGCPointerAllocas) {
       errs() << "rs4gc-oxcaml-gc-pointer-alloca-promote in " << F.getName()
@@ -7123,11 +7161,9 @@ static bool promoteOxCamlGCPointerAllocas(Function &F, DominatorTree &DT) {
     PromotableAllocas.push_back(AI);
   }
 
-  if (DebugOxCamlGCPointerAllocas &&
-      (!PromotableAllocas.empty() || RejectedAllocas != 0))
+  if (DebugOxCamlGCPointerAllocas && !PromotableAllocas.empty())
     errs() << "rs4gc-oxcaml-gc-pointer-alloca-summary in " << F.getName()
-           << ": promotable=" << PromotableAllocas.size()
-           << " rejected=" << RejectedAllocas << "\n";
+           << ": promotable=" << PromotableAllocas.size() << "\n";
 
   if (PromotableAllocas.empty())
     return false;
