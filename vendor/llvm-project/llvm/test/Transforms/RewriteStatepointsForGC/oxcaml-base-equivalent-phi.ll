@@ -250,14 +250,10 @@ define oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @derived_or_immediat
     i1 %is_immediate) gc "oxcaml" {
 ; CHECK-LABEL: define oxcaml_nofpcc {{.*}} @derived_or_immediate_phi(
 ; CHECK: %derived.phi.base = phi ptr addrspace(1) [ %obj, %object ], [ inttoptr (i64 1 to ptr addrspace(1)), %immediate ], !is_base_value !0
-; CHECK: %derived.phi.needs_remat = icmp ne ptr addrspace(1) %derived.phi, %derived.phi.base
-; CHECK: %statepoint_token = call oxcaml_alloccc {{.*}} [ "deopt"(), "gc-live"(ptr addrspace(1) %derived.phi.base) ]
-; CHECK: %derived.phi.base.relocated = call {{.*}} @llvm.experimental.gc.relocate.p1(token %statepoint_token, i32 0, i32 0)
-; CHECK-NEXT: %[[BASE_INT:.*]] = ptrtoint ptr addrspace(1) %derived.phi.base.relocated to i64
-; CHECK-NEXT: %[[ADJ_INT:.*]] = add i64 %[[BASE_INT]], -2
-; CHECK-NEXT: %[[ADJ_PTR:.*]] = inttoptr i64 %[[ADJ_INT]] to ptr addrspace(1)
-; CHECK-NEXT: %[[SELECTED:.*]] = select i1 %derived.phi.needs_remat, ptr addrspace(1) %[[ADJ_PTR]], ptr addrspace(1) %derived.phi.base.relocated
-; CHECK: insertvalue {{.*}} ptr addrspace(1) %[[SELECTED]], 1, 0
+; CHECK-NOT: needs_remat
+; CHECK: %statepoint_token = call oxcaml_alloccc {{.*}} [ "deopt"(), "gc-live"(ptr addrspace(1) %derived.phi, ptr addrspace(1) %derived.phi.base) ]
+; CHECK: %[[RELOCATED:.*]] = call {{.*}} @llvm.experimental.gc.relocate.p1(token %statepoint_token, i32 0, i32 0)
+; CHECK: insertvalue {{.*}} ptr addrspace(1) %[[RELOCATED]], 1, 0
 entry:
   br i1 %is_immediate, label %immediate, label %object
 

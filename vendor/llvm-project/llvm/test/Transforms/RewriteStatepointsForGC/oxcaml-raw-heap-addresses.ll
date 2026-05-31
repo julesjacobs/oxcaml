@@ -1,4 +1,4 @@
-; RUN: opt -S -passes=rewrite-statepoints-for-gc,verify < %s | FileCheck %s
+; RUN: opt -S -passes=rewrite-statepoints-for-gc,verify -rs4gc-canonicalize-oxcaml-raw-heap-addresses < %s | FileCheck %s
 
 target triple = "arm64-apple-macosx"
 
@@ -9,8 +9,8 @@ define ptr addrspace(1) @raw_heap_address_after_statepoint(
 ; CHECK-LABEL: define ptr addrspace(1) @raw_heap_address_after_statepoint(
 ; CHECK: %statepoint_token = call {{.*}} @llvm.experimental.gc.statepoint{{.*}} [ "deopt"(), "gc-live"(ptr addrspace(1) %obj) ]
 ; CHECK-NEXT: %obj.relocated = call coldcc ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token %statepoint_token, i32 0, i32 0)
-; CHECK-NEXT: %oxcaml.heap.addr = getelementptr i8, ptr addrspace(1) %obj.relocated, i64 24
-; CHECK-NEXT: %field = load ptr addrspace(1), ptr addrspace(1) %oxcaml.heap.addr, align 8
+; CHECK-NEXT: %[[FIELD_ADDR:.*]] = getelementptr i8, ptr addrspace(1) %obj.relocated, i64 24
+; CHECK-NEXT: %field = load ptr addrspace(1), ptr addrspace(1) %[[FIELD_ADDR]], align 8
 ; CHECK-NEXT: ret ptr addrspace(1) %field
 entry:
   %field.addr.as1 = getelementptr i8, ptr addrspace(1) %obj, i64 24
@@ -27,8 +27,8 @@ define void @loop_carried_raw_heap_address(
 ; CHECK-LABEL: define void @loop_carried_raw_heap_address(
 ; CHECK: loop:
 ; CHECK-NEXT: %.0 = phi ptr addrspace(1) [ %obj, %entry ], [ %obj.relocated, %loop ]
-; CHECK-NEXT: %oxcaml.heap.addr = getelementptr i8, ptr addrspace(1) %.0, i64 24
-; CHECK-NEXT: %field = load ptr addrspace(1), ptr addrspace(1) %oxcaml.heap.addr, align 8
+; CHECK-NEXT: %[[FIELD_ADDR:.*]] = getelementptr i8, ptr addrspace(1) %.0, i64 24
+; CHECK-NEXT: %field = load ptr addrspace(1), ptr addrspace(1) %[[FIELD_ADDR]], align 8
 ; CHECK-NEXT: %statepoint_token = call {{.*}} @llvm.experimental.gc.statepoint{{.*}} [ "deopt"(), "gc-live"(ptr addrspace(1) %.0) ]
 ; CHECK-NEXT: %obj.relocated = call coldcc ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token %statepoint_token, i32 0, i32 0)
 ; CHECK-NEXT: br i1 %again, label %loop, label %exit

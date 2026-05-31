@@ -117,9 +117,9 @@ static cl::opt<bool>
 static cl::opt<bool> RematAddrSpace1DerivedFromBaseAtAlloc(
     "rs4gc-remat-addrspace1-derived-from-base-at-alloc", cl::Hidden,
     cl::init(true),
-    cl::desc("At OxCaml statepoints, rematerialize scalar "
-             "addrspace(1) derived pointers from relocated bases instead of "
-             "relocating them"));
+    cl::desc("At OxCaml statepoints, rematerialize GEP-derived "
+             "addrspace(1) address expressions from relocated bases instead "
+             "of relocating them"));
 
 static cl::opt<bool> DebugOxCamlDerivedRemat(
     "rs4gc-debug-oxcaml-derived-remat", cl::Hidden, cl::init(false),
@@ -4168,6 +4168,8 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
       return Reject("not-as1");
     if (isDistinctOxCamlAddrSpace1BaseEquivalentGCPointer(Derived, Base))
       return Reject("base-equivalent");
+    if (!containsOxCamlPointerFormDerivedAddrSpace1Pointer(Derived))
+      return Reject("not-address-expression");
 
     auto *DerivedInst = dyn_cast<Instruction>(Derived);
     if (!DerivedInst)
@@ -4186,42 +4188,16 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
       }
 
       if (CastInst *CI = dyn_cast<CastInst>(CurrentValue)) {
-        auto *IntToPtrDstTy = dyn_cast<PointerType>(CI->getType());
-        auto *PtrToIntSrcTy =
-            dyn_cast<PointerType>(CI->getOperand(0)->getType());
-        bool IsAddrSpace1IntToPtr =
-            isa<IntToPtrInst>(CI) && IntToPtrDstTy &&
-            IntToPtrDstTy->getAddressSpace() == 1;
-        bool IsAddrSpace1PtrToInt =
-            isa<PtrToIntInst>(CI) && PtrToIntSrcTy &&
-            PtrToIntSrcTy->getAddressSpace() == 1;
-        if (!IsAddrSpace1IntToPtr && !IsAddrSpace1PtrToInt &&
-            (!CI->getOperand(0)->getType()->isPtrOrPtrVectorTy() ||
-             !CI->isNoopCast(CI->getModule()->getDataLayout())))
+        if (!CI->getOperand(0)->getType()->isPtrOrPtrVectorTy() ||
+            !CI->isNoopCast(CI->getModule()->getDataLayout()))
           return CI;
 
         ChainToBase.push_back(CI);
         return Self(Self, ChainToBase, CI->getOperand(0));
       }
 
-      if (auto *BO = dyn_cast<BinaryOperator>(CurrentValue)) {
-        if (BO->getOpcode() != Instruction::Add &&
-            BO->getOpcode() != Instruction::Sub)
-          return BO;
-
-        if (isa<ConstantInt>(BO->getOperand(1))) {
-          ChainToBase.push_back(BO);
-          return Self(Self, ChainToBase, BO->getOperand(0));
-        }
-
-        if (BO->getOpcode() == Instruction::Add &&
-            isa<ConstantInt>(BO->getOperand(0))) {
-          ChainToBase.push_back(BO);
-          return Self(Self, ChainToBase, BO->getOperand(1));
-        }
-
+      if (auto *BO = dyn_cast<BinaryOperator>(CurrentValue))
         return BO;
-      }
 
       if (FreezeInst *Freeze = dyn_cast<FreezeInst>(CurrentValue)) {
         ChainToBase.push_back(Freeze);
@@ -4245,7 +4221,7 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
       if (Value *PhiRoot = findRematerializablePhiChainToBasePhi(
               Record.ChainToBase, cast<PHINode>(Derived),
               cast<PHINode>(Base), PointerToBase,
-              /*AllowIntegerAddressArithmetic=*/true, NeedsBaseSelect)) {
+              /*AllowIntegerAddressArithmetic=*/false, NeedsBaseSelect)) {
         RootOfChain = PhiRoot;
         IsPhiChainToBasePhi = true;
         if (NeedsBaseSelect) {
@@ -4265,7 +4241,7 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
       bool NeedsBaseSelect = false;
       if (Value *PhiRoot = findRematerializablePhiChainToSingleBase(
               Record.ChainToBase, cast<PHINode>(Derived), Base, PointerToBase,
-              /*AllowIntegerAddressArithmetic=*/true, NeedsBaseSelect)) {
+              /*AllowIntegerAddressArithmetic=*/false, NeedsBaseSelect)) {
         RootOfChain = PhiRoot;
         IsPhiChainToSingleBase = true;
         if (NeedsBaseSelect) {
@@ -4433,7 +4409,7 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
         if (Incoming != IncomingBase) {
           IncomingRoot = findRematerializableChainToBasePointer(
               IncomingChain, Incoming,
-              /*AllowIntegerAddressArithmetic=*/true);
+              /*AllowIntegerAddressArithmetic=*/false);
           if (!IncomingChainMatchesBase(Incoming, IncomingRoot, IncomingBase,
                                         IncomingChain))
             return false;
@@ -4548,6 +4524,9 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
         IsOxCamlStatepoint && BaseIt != PointerToBase.end() &&
         isDistinctOxCamlAddrSpace1BaseEquivalentGCPointer(LiveVariable,
                                                           BaseIt->second);
+    bool IsOxCamlAddressExpression =
+        IsOxCamlStatepoint &&
+        containsOxCamlPointerFormDerivedAddrSpace1Pointer(LiveVariable);
     if (FailOnOxCamlDerivedRelocates && IsOxCamlStatepoint &&
         BaseIt != PointerToBase.end()) {
       Value *Base = BaseIt->second;
@@ -4555,7 +4534,7 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
       auto *BaseTy = dyn_cast<PointerType>(Base->getType());
       if (Base != LiveVariable && LiveTy && BaseTy &&
           LiveTy->getAddressSpace() == 1 && BaseTy->getAddressSpace() == 1 &&
-          !IsOxCamlSelfBaseEquivalent) {
+          !IsOxCamlSelfBaseEquivalent && IsOxCamlAddressExpression) {
         errs() << "OxCaml statepoint would relocate a derived addrspace(1) "
                   "pointer independently\n  call: ";
         Call->print(errs());
@@ -4571,6 +4550,15 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
     Value *BasePtr = BasePtrs[I];
     if (IsOxCamlSelfBaseEquivalent)
       BasePtr = LiveVariable;
+    else if (IsOxCamlStatepoint && !IsOxCamlAddressExpression &&
+             BaseIt != PointerToBase.end()) {
+      Value *Base = BaseIt->second;
+      auto *LiveTy = dyn_cast<PointerType>(LiveVariable->getType());
+      auto *BaseTy = dyn_cast<PointerType>(Base->getType());
+      if (Base != LiveVariable && LiveTy && BaseTy &&
+          LiveTy->getAddressSpace() == 1 && BaseTy->getAddressSpace() == 1)
+        BasePtr = LiveVariable;
+    }
     FilteredLiveVariables.push_back(
         nonPoisonOxCamlGCPointerValue(LiveVariable));
     FilteredBasePtrs.push_back(nonPoisonOxCamlGCPointerValue(BasePtr));

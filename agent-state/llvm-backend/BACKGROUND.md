@@ -87,6 +87,25 @@ If RS4GC cannot prove and rematerialize the base relation, it should fail
 closed before stackmap lowering rather than silently producing metadata the
 runtime cannot interpret.
 
+## Address Expressions vs Value Arithmetic
+
+The operational distinction for RS4GC is:
+
+- `getelementptr` from an OCaml heap value creates an address expression. If an
+  address expression is live across a statepoint, RS4GC must rematerialize it
+  from a relocated base, or fail before stackmap lowering.
+- `ptrtoint`, integer arithmetic, and `inttoptr` on an OCaml value is value
+  arithmetic. The result is still an OCaml value for GC metadata purposes, so it
+  should be rooted or relocated as itself.
+
+Raw address-space-0 memory operands are not part of this distinction. Even if
+one can be traced back to an OCaml value, RS4GC cannot classify the runtime
+value as a heap pointer rather than an immediate from that shape alone.
+
+This rule avoids trying to classify an OCaml value as either an immediate or a
+heap pointer. RS4GC does not need to know that distinction for an ordinary root:
+the runtime tag determines what the GC does with the value.
+
 ## Allocation Pointers
 
 Allocation-pointer arithmetic is a special boundary case. Fresh object
