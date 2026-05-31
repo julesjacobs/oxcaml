@@ -196,6 +196,8 @@ let external_calling_conventions
     let (ty : Cmm.machtype_component), registers, divisor, size =
       match ty_arg with
       | XInt -> Int, int_registers, 1, size_int
+      | XValue -> Val, int_registers, 1, size_int
+      | XAddr -> Addr, int_registers, 1, size_int
       | XInt64 -> Int, int_registers, 1, size_int
       | XInt32 -> Int, int_registers, 2, size_int
       | XInt16 -> Int, int_registers, 4, size_int

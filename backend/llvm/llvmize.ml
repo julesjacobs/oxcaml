@@ -1667,13 +1667,10 @@ let return t (i : Cfg.terminator Cfg.instruction) =
     let res = assemble_return t res_type res_values in
     emit_ins_no_res t (I.ret res)
 
-let extcall_arg_type (ty_arg : Cmm.exttype) (arg_reg : Reg.t) =
+let extcall_arg_type (ty_arg : Cmm.exttype) (_arg_reg : Reg.t) =
   match ty_arg with
-  | XInt -> (
-    match[@warning "-fragile-match"] arg_reg.typ with
-    | Addr | Val -> T.val_ptr
-    | Int -> T.i64
-    | Float | Float32 | Vec128 | Vec256 | Vec512 | Valx2 -> T.i64)
+  | XInt -> T.i64
+  | XValue | XAddr -> T.val_ptr
   | XInt64 | XInt32 | XInt16 | XInt8 -> T.i64
   | XFloat -> T.double
   | XFloat32 -> T.float
@@ -2520,7 +2517,7 @@ let emit_terminator t (block : Cfg.basic_block)
       | Invalid { message = _; stack_ofs; stack_align; label_after = _ } ->
         reject_addr_regs i.arg "prim";
         extcall t i ~func_symbol:Cmm.caml_flambda2_invalid ~alloc:false
-          ~ty_args:[XInt] ~stack_ofs ~stack_align;
+          ~ty_args:[XValue] ~stack_ofs ~stack_align;
         emit_ins_no_res t I.unreachable)
 
 (* Basic instructions *)

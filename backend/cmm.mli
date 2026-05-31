@@ -89,7 +89,9 @@ val ge_component : machtype_component -> machtype_component -> bool
 (** A variant of [machtype] used to describe arguments to external C functions
 *)
 type exttype =
-  | XInt  (**r OCaml value, word-sized integer *)
+  | XInt  (**r Raw word-sized integer *)
+  | XValue  (**r OCaml value *)
+  | XAddr  (**r Address of an OCaml heap field *)
   | XInt8  (**r 8-bit integer *)
   | XInt16  (**r 16-bit integer *)
   | XInt32  (**r 32-bit integer *)

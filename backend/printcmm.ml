@@ -54,6 +54,8 @@ let machtype ppf mty =
 
 let exttype ppf = function
   | XInt -> fprintf ppf "int"
+  | XValue -> fprintf ppf "value"
+  | XAddr -> fprintf ppf "addr"
   | XInt8 -> fprintf ppf "int8"
   | XInt16 -> fprintf ppf "int16"
   | XInt32 -> fprintf ppf "int32"

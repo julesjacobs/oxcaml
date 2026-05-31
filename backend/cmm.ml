@@ -130,6 +130,8 @@ let ge_component comp1 comp2 =
 
 type exttype =
   | XInt
+  | XValue
+  | XAddr
   | XInt8
   | XInt16
   | XInt32
@@ -141,10 +143,9 @@ type exttype =
   | XVec512
 
 let machtype_of_exttype = function
-  | XInt ->
-    (* [XInt] only gets created from values, and LLVM needs to keep track of
-       them properly. *)
-    if !Clflags.llvm_backend then typ_val else typ_int
+  | XInt -> typ_int
+  | XValue -> typ_val
+  | XAddr -> typ_addr
   | XInt8 -> typ_int
   | XInt16 -> typ_int
   | XInt32 -> typ_int
@@ -901,8 +902,8 @@ let equal_machtype left right =
   Misc.Stdlib.Array.equal equal_machtype_component left right
 
 let equal_exttype
-    (( XInt | XInt8 | XInt16 | XInt32 | XInt64 | XFloat32 | XFloat | XVec128
-     | XVec256 | XVec512 ) as left) right =
+    (( XInt | XValue | XAddr | XInt8 | XInt16 | XInt32 | XInt64 | XFloat32
+     | XFloat | XVec128 | XVec256 | XVec512 ) as left) right =
   (* we can use polymorphic compare as long as exttype is all constant
      constructors *)
   Stdlib.( = ) left right

@@ -611,7 +611,7 @@ module Make (Target : Cfg_selectgen_target_intf.S) = struct
       if !Clflags.llvm_backend
       then
         match ty_arg, src.Reg.typ, dst.Reg.typ with
-        | Cmm.XInt, (Cmm.Val | Cmm.Addr), Cmm.Int -> (
+        | (Cmm.XValue | Cmm.XAddr), (Cmm.Val | Cmm.Addr), Cmm.Int -> (
           match dst.loc with
           | Reg _ -> Reg.create_alias dst ~typ:src.Reg.typ
           | Stack _ -> Reg.create_at_location src.Reg.typ dst.loc
@@ -862,7 +862,7 @@ module Make (Target : Cfg_selectgen_target_intf.S) = struct
     let arg_expr = Cmm.Cconst_symbol (symbol, Debuginfo.none) in
     let* loc_arg, stack_ofs, stack_align =
       (* Set up the argument for the call to caml_flambda2_invalid *)
-      emit_extcall_args env sub_cfg [Cmm.XInt] [arg_expr] Debuginfo.none
+      emit_extcall_args env sub_cfg [Cmm.XValue] [arg_expr] Debuginfo.none
     in
     if !SU.current_function_is_check_enabled
     then (

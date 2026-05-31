@@ -34,30 +34,31 @@ L110:
   %8 = load i64, ptr %4
   store i64 %8, ptr %6
   %9 = load i64, ptr %6
-  store i64 %9, ptr %4
-  %10 = ptrtoint ptr @"\01_caml_set_oo_id" to i64
-  %11 = load i64, ptr %4
-  %12 = load i64, ptr %ds
-  %13 = load i64, ptr %alloc
-  %14 = call oxcaml_c_directcc { i64, i64, ptr addrspace(1) } @"\01_caml_set_oo_id"(i64 %12, i64 %13, i64 %11) "gc-leaf-function"="true"
-  %15 = extractvalue { i64, i64, ptr addrspace(1) } %14, 0
-  %16 = extractvalue { i64, i64, ptr addrspace(1) } %14, 1
-  store i64 %15, ptr %ds
-  store i64 %16, ptr %alloc
-  %17 = extractvalue { i64, i64, ptr addrspace(1) } %14, 2
-  store ptr addrspace(1) %17, ptr %5
+  %10 = inttoptr i64 %9 to ptr addrspace(1)
+  store ptr addrspace(1) %10, ptr %5
+  %11 = ptrtoint ptr @"\01_caml_set_oo_id" to i64
+  %12 = load ptr addrspace(1), ptr %5
+  %13 = load i64, ptr %ds
+  %14 = load i64, ptr %alloc
+  %15 = call oxcaml_c_directcc { i64, i64, ptr addrspace(1) } @"\01_caml_set_oo_id"(i64 %13, i64 %14, ptr addrspace(1) %12) "gc-leaf-function"="true"
+  %16 = extractvalue { i64, i64, ptr addrspace(1) } %15, 0
+  %17 = extractvalue { i64, i64, ptr addrspace(1) } %15, 1
+  store i64 %16, ptr %ds
+  store i64 %17, ptr %alloc
+  %18 = extractvalue { i64, i64, ptr addrspace(1) } %15, 2
+  store ptr addrspace(1) %18, ptr %5
   br label %L112
 L112:
-  %18 = load ptr addrspace(1), ptr %5
-  store ptr addrspace(1) %18, ptr %7
-  %19 = load ptr addrspace(1), ptr %7
-  store ptr addrspace(1) %19, ptr %5
-  %20 = load ptr addrspace(1), ptr %5
-  %21 = ptrtoint ptr addrspace(1) %20 to i64
-  %22 = load i64, ptr %ds
-  %23 = load i64, ptr %alloc
-  %24 = insertvalue { { i64, i64 }, { i64 } } poison, i64 %22, 0, 0
-  %25 = insertvalue { { i64, i64 }, { i64 } } %24, i64 %23, 0, 1
-  %26 = insertvalue { { i64, i64 }, { i64 } } %25, i64 %21, 1, 0
-  ret { { i64, i64 }, { i64 } } %26
+  %19 = load ptr addrspace(1), ptr %5
+  store ptr addrspace(1) %19, ptr %7
+  %20 = load ptr addrspace(1), ptr %7
+  store ptr addrspace(1) %20, ptr %5
+  %21 = load ptr addrspace(1), ptr %5
+  %22 = ptrtoint ptr addrspace(1) %21 to i64
+  %23 = load i64, ptr %ds
+  %24 = load i64, ptr %alloc
+  %25 = insertvalue { { i64, i64 }, { i64 } } poison, i64 %23, 0, 0
+  %26 = insertvalue { { i64, i64 }, { i64 } } %25, i64 %24, 0, 1
+  %27 = insertvalue { { i64, i64 }, { i64 } } %26, i64 %22, 1, 0
+  ret { { i64, i64 }, { i64 } } %27
 }|}]

@@ -1810,7 +1810,7 @@ let caml_modify ~dbg addr newval =
           returns = true;
           effects = Arbitrary_effects;
           coeffects = Has_coeffects;
-          ty_args = []
+          ty_args = [XAddr; XValue]
         },
       [addr; newval],
       dbg )
@@ -1825,7 +1825,7 @@ let caml_modify_local ~dbg addr i newval =
           returns = true;
           effects = Arbitrary_effects;
           coeffects = Has_coeffects;
-          ty_args = []
+          ty_args = [XValue; XInt; XValue]
         },
       [addr; i; newval],
       dbg )
@@ -1870,7 +1870,7 @@ let addr_array_initialize arr ofs newval dbg =
           coeffects = Has_coeffects;
           ty = typ_void;
           alloc = false;
-          ty_args = []
+          ty_args = [XAddr; XValue]
         },
       [addr; newval],
       dbg )
@@ -2154,7 +2154,7 @@ let lookup_tag obj tag dbg =
               effects = Arbitrary_effects;
               coeffects = Has_coeffects;
               alloc = false;
-              ty_args = []
+              ty_args = [XValue; XValue]
             },
           [obj; tag],
           dbg ))
@@ -2413,7 +2413,7 @@ let make_alloc_generic ~block_kind ~mode ~alloc_block_kind dbg tag wordsize args
                 returns = true;
                 effects = Arbitrary_effects;
                 coeffects = Has_coeffects;
-                ty_args = []
+                ty_args = List.map (fun _ -> XInt) caml_alloc_args
               },
             List.map (fun arg -> Cconst_int (arg, dbg)) caml_alloc_args,
             dbg ),
@@ -4170,7 +4170,7 @@ let setfield n ptr init arg1 arg2 dbg =
                returns = true;
                effects = Arbitrary_effects;
                coeffects = Has_coeffects;
-               ty_args = []
+               ty_args = [XAddr; XValue]
            },
            [field_address_for_initialize arg1 n dbg; arg2],
            dbg ))
@@ -5081,7 +5081,7 @@ let atomic_exchange_extcall ~dbg block ~field ~new_value =
           effects = Arbitrary_effects;
           coeffects = Has_coeffects;
           ty = typ_val;
-          ty_args = [];
+          ty_args = [XValue; XValue; XValue];
           alloc = false
         },
       [block; field; new_value],
@@ -5099,6 +5099,7 @@ let atomic_exchange_field ~dbg (imm_or_ptr : Lambda.immediate_or_pointer) block
 
 let atomic_arith ~dbg ~op ~untag ~ext_name block ~field i =
   let i = if untag then decr_int i dbg else i in
+  let i_ty_arg = if untag then XInt else XValue in
   let op = Catomic { op; size = Word } in
   if Proc.operation_supported op
   then
@@ -5113,7 +5114,7 @@ let atomic_arith ~dbg ~op ~untag ~ext_name block ~field i =
             effects = Arbitrary_effects;
             coeffects = Has_coeffects;
             ty = typ_int;
-            ty_args = [];
+            ty_args = [XValue; XValue; i_ty_arg];
             alloc = false
           },
         [block; field; i],
@@ -5157,7 +5158,7 @@ let atomic_compare_and_set_extcall ~dbg block ~field ~old_value ~new_value =
           effects = Arbitrary_effects;
           coeffects = Has_coeffects;
           ty = typ_int;
-          ty_args = [];
+          ty_args = [XValue; XValue; XValue; XValue];
           alloc = false
         },
       [block; field; old_value; new_value],
@@ -5190,7 +5191,7 @@ let atomic_compare_exchange_extcall ~dbg block ~field ~old_value ~new_value =
           effects = Arbitrary_effects;
           coeffects = Has_coeffects;
           ty = typ_val;
-          ty_args = [];
+          ty_args = [XValue; XValue; XValue; XValue];
           alloc = false
         },
       [block; field; old_value; new_value],
@@ -5436,7 +5437,7 @@ let with_stack ~dbg ~valuec ~exnc ~effc ~f ~arg =
                 returns = true;
                 effects = Arbitrary_effects;
                 coeffects = Has_coeffects;
-                ty_args = [XInt; XInt; XInt]
+                ty_args = [XValue; XValue; XValue]
               },
             [valuec; exnc; effc],
             dbg );
@@ -5458,7 +5459,7 @@ let with_stack_bind ~dbg ~valuec ~exnc ~effc ~dyn ~bind ~f ~arg =
                 returns = true;
                 effects = Arbitrary_effects;
                 coeffects = Has_coeffects;
-                ty_args = [XInt; XInt; XInt; XInt; XInt]
+                ty_args = [XValue; XValue; XValue; XValue; XValue]
               },
             [valuec; exnc; effc; dyn; bind],
             dbg );
@@ -5480,7 +5481,7 @@ let with_stack_preemptible ~dbg ~valuec ~exnc ~effc ~handle_tick ~f ~arg =
                 returns = true;
                 effects = Arbitrary_effects;
                 coeffects = Has_coeffects;
-                ty_args = [XInt; XInt; XInt; XInt]
+                ty_args = [XValue; XValue; XValue; XValue]
               },
             [valuec; exnc; effc; handle_tick],
             dbg );
@@ -5503,7 +5504,7 @@ let with_stack_bind_preemptible ~dbg ~valuec ~exnc ~effc ~handle_tick ~dyn ~bind
                 returns = true;
                 effects = Arbitrary_effects;
                 coeffects = Has_coeffects;
-                ty_args = [XInt; XInt; XInt; XInt; XInt; XInt]
+                ty_args = [XValue; XValue; XValue; XValue; XValue; XValue]
               },
             [valuec; exnc; effc; handle_tick; dyn; bind],
             dbg );
