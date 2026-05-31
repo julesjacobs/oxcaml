@@ -7,9 +7,9 @@ repo=$(cd "$(dirname "$0")/.." && pwd)
 stage0_install=${STAGE0_INSTALL:-$repo/_install}
 stage0_install=$(cd "$stage0_install" && pwd)
 boot_build=${BOOT_BUILD:-$repo/_llvm_boot_context_build}
-wrapper=${LLVM_WRAPPER:-/tmp/oxcaml-clang-wrapper}
+wrapper=${LLVM_WRAPPER:?set LLVM_WRAPPER to the clang wrapper or LLVM tool path}
 wrapper_log=${LLVM_WRAPPER_LOG:-$wrapper.log}
-opam_switch_bin=${OPAM_SWITCH_BIN:-/Users/julesjacobs/.opam/oxcaml-5.4.0+oxcaml/bin}
+opam_switch_bin=${OPAM_SWITCH_BIN:-}
 arch=${ARCH:-}
 run_smoke=${RUN_SMOKE:-1}
 dune_build_flags=()
@@ -47,6 +47,9 @@ require_path "$stage0_install/bin/ocamlopt.opt"
 require_path "$stage0_install/bin/ocamlc.opt"
 require_path "$stage0_install/lib/ocaml/stdlib.cmxa"
 require_path "$wrapper"
+if [ -n "$opam_switch_bin" ]; then
+  require_path "$opam_switch_bin/dune"
+fi
 
 boot_ws=$(mktemp /tmp/oxcaml-llvm-boot.XXXXXX)
 saved_boot_ws=$(mktemp /tmp/oxcaml-llvm-saved-boot.XXXXXX)
@@ -106,13 +109,17 @@ rm -rf "$boot_build"
 : > "$wrapper_log"
 
 dune_command=(
-  "$opam_switch_bin/dune" build --root="$repo" --build-dir="$boot_build"
+  dune build --root="$repo" --build-dir="$boot_build"
   --workspace="$boot_ws"
 )
 if [ "${#dune_build_flags[@]}" -ne 0 ]; then
   dune_command+=("${dune_build_flags[@]}")
 fi
-PATH="$stage0_install/bin:$opam_switch_bin:$PATH" \
+if [ -n "$opam_switch_bin" ]; then
+  export PATH="$opam_switch_bin:$PATH"
+fi
+
+PATH="$stage0_install/bin:$PATH" \
 RUNTIME_DIR=runtime ARCH="$arch" SYSTEM="$system" MODEL="$model" \
 ASPP="$aspp" ASPPFLAGS="$asppflags" \
   "${dune_command[@]}" "${targets[@]}"

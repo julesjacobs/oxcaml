@@ -104,10 +104,12 @@ for tool in "$stage_install/bin"/*; do
   esac
 done
 
-"$stage_install/bin/ocamlopt.opt" -config >/tmp/oxcaml-stage-install-config
+stage_install_config=$(mktemp "${TMPDIR:-/tmp}/oxcaml-stage-install-config.XXXXXX")
+"$stage_install/bin/ocamlopt.opt" -config >"$stage_install_config"
 grep -q "^standard_library: $stage_install/lib/ocaml$" \
-  /tmp/oxcaml-stage-install-config
-grep -q "^native_dynlink: true$" /tmp/oxcaml-stage-install-config
+  "$stage_install_config"
+grep -q "^native_dynlink: true$" "$stage_install_config"
+rm -f "$stage_install_config"
 
 require_path "$stage_install/lib/ocaml/stdlib.cmxa"
 require_path "$stage_install/lib/ocaml/str/str.cmxs"

@@ -10,7 +10,7 @@ boot_install=${BOOT_INSTALL:-$repo/_llvm_boot_install}
 self_runtime_build=${SELF_RUNTIME_BUILD:-$repo/_llvm_self_stage_runtime_build}
 self_main_build=${SELF_MAIN_BUILD:-$repo/_llvm_self_stage_main_build}
 self_stage_install=${SELF_STAGE_INSTALL:-$repo/_llvm_self_stage_install}
-wrapper=${LLVM_WRAPPER:-/tmp/oxcaml-clang-wrapper}
+wrapper=${LLVM_WRAPPER:?set LLVM_WRAPPER to the clang wrapper or LLVM tool path}
 wrapper_log=${LLVM_WRAPPER_LOG:-$wrapper.log}
 
 require_path () {
@@ -68,10 +68,12 @@ copy_tool_file "$stage0_install/bin/ocamllex.opt" "$boot_install/bin/ocamllex.op
   done
 )
 
+boot_install_config=$(mktemp "${TMPDIR:-/tmp}/oxcaml-llvm-boot-install-config.XXXXXX")
 OCAMLLIB="$boot_install/lib/ocaml" \
-  "$boot_install/bin/ocamlopt.opt" -config >/tmp/oxcaml-llvm-boot-install-config
+  "$boot_install/bin/ocamlopt.opt" -config >"$boot_install_config"
 grep -q "^standard_library: $boot_install/lib/ocaml$" \
-  /tmp/oxcaml-llvm-boot-install-config
+  "$boot_install_config"
+rm -f "$boot_install_config"
 
 BOOT_INSTALL="$boot_install" \
 RUNTIME_BUILD="$self_runtime_build" \
