@@ -17,6 +17,7 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/MapVector.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -113,10 +114,6 @@ static cl::opt<bool>
     AllowStatepointWithNoDeoptInfo("rs4gc-allow-statepoint-with-no-deopt-info",
                                    cl::Hidden, cl::init(true));
 
-static cl::opt<bool> TreatAddrSpace1PhiSelectAsBase(
-    "rs4gc-addrspace1-phi-select-base", cl::Hidden, cl::init(false),
-    cl::desc("Treat scalar addrspace(1) phi/select values as base pointers"));
-
 static cl::opt<bool> RematAddrSpace1DerivedFromBaseAtAlloc(
     "rs4gc-remat-addrspace1-derived-from-base-at-alloc", cl::Hidden,
     cl::init(true),
@@ -131,6 +128,30 @@ static cl::opt<bool> DebugOxCamlDerivedRemat(
 static cl::opt<bool> DebugOxCamlGCPointerAllocas(
     "rs4gc-debug-oxcaml-gc-pointer-allocas", cl::Hidden, cl::init(false),
     cl::desc("Print OxCaml GC pointer allocas that RS4GC promotes or rejects"));
+
+static cl::opt<bool> HeuristicReportOxCamlStatepointCrossingIntToPtr(
+    "rs4gc-heuristic-report-oxcaml-statepoint-crossing-inttoptr", cl::Hidden,
+    cl::init(false),
+    cl::desc("Heuristically print OxCaml integer values that are live across "
+             "a statepoint and later contribute to an inttoptr to ptr "
+             "addrspace(1). This is a debugging aid, not a correctness "
+             "invariant."));
+
+static cl::opt<unsigned> HeuristicReportOxCamlStatepointCrossingIntToPtrLimit(
+    "rs4gc-heuristic-report-oxcaml-statepoint-crossing-inttoptr-limit",
+    cl::Hidden, cl::init(100),
+    cl::desc("Maximum number of OxCaml heuristic statepoint-crossing inttoptr "
+             "reports per function. 0 means unlimited."));
+
+static cl::opt<unsigned>
+    HeuristicReportOxCamlStatepointCrossingIntToPtrTotalLimit(
+        "rs4gc-heuristic-report-oxcaml-statepoint-crossing-inttoptr-total-limit",
+        cl::Hidden, cl::init(100),
+        cl::desc("Maximum number of OxCaml heuristic statepoint-crossing "
+                 "inttoptr reports per compiler process. 0 means unlimited."));
+
+static unsigned OxCamlHeuristicStatepointCrossingIntToPtrReports = 0;
+static bool OxCamlHeuristicStatepointCrossingIntToPtrLimitReported = false;
 
 static cl::opt<bool> FailOnOxCamlDerivedRelocates(
     "rs4gc-fail-on-oxcaml-derived-relocates", cl::Hidden, cl::init(true),
@@ -159,6 +180,25 @@ static cl::opt<unsigned> RematAddrSpace1DerivedFromBaseAtAllocLimit(
              "rematerialization candidates after the skip count"));
 
 static unsigned OxCamlDerivedRematAcceptedOrdinal = 0;
+
+static bool isOxCamlCallingConv(CallingConv::ID CC) {
+  switch (CC) {
+  case CallingConv::OxCaml_WithFP:
+  case CallingConv::OxCaml_WithoutFP:
+  case CallingConv::OxCaml_C_Call:
+  case CallingConv::OxCaml_C_Call_StackArgs:
+  case CallingConv::OxCaml_Alloc:
+  case CallingConv::OxCaml_C_Direct_Call:
+    return true;
+  default:
+    return false;
+  }
+}
+
+static bool needsCallerFrameRootsForOxCamlCArgs(CallingConv::ID CC) {
+  return CC == CallingConv::OxCaml_C_Call ||
+         CC == CallingConv::OxCaml_C_Call_StackArgs;
+}
 
 static cl::opt<bool> RematDerivedAtUses("rs4gc-remat-derived-at-uses",
                                         cl::Hidden, cl::init(true));
@@ -344,10 +384,21 @@ struct PartiallyConstructedSafepointRecord {
   /// statepoint's gc-live bundle but should not get gc.relocate calls.
   SmallVector<Value *, 4> ExplicitRootSlots;
 
+  /// GC pointer argument values to OxCaml C calls that must be rooted in the
+  /// caller's frame for the duration of the call, even if they are not live
+  /// after it.
+  SmallVector<Value *, 4> CallerFrameRootValues;
+
   /// This invoke unwinds to an OxCaml trap recovery landingpad whose
   /// handler-live GC values have been materialized into ExplicitRootSlots.
   /// Do not insert exceptional gc.relocate calls on that unwind path.
   bool UsesExplicitExceptionRoots = false;
+};
+
+struct RematerializationAlternative {
+  SmallVector<Instruction *, 3> ChainToBase;
+  Value *RootOfChain = nullptr;
+  unsigned Tag = 0;
 };
 
 struct RematerizlizationCandidateRecord {
@@ -360,6 +411,10 @@ struct RematerizlizationCandidateRecord {
   // relocated base is already the right value. This handles PHIs whose incoming
   // values are either a derived chain from the base or the base itself.
   Value *UseRematerializedValue = nullptr;
+  // If set, rematerialize one of several possible chains from the relocated
+  // base selected by this non-pointer case tag.
+  Value *RematerializationTag = nullptr;
+  SmallVector<RematerializationAlternative, 4> Alternatives;
   // Cost of chain.
   InstructionCost Cost;
 };
@@ -423,10 +478,25 @@ static bool isNormalOnlyAfterInvoke(InvokeInst *Invoke, Value *V,
           continue;
 
         BasicBlock *Incoming = Phi->getIncomingBlock(I);
+        if (Phi->getParent() == NormalDest &&
+            Incoming == Invoke->getParent()) {
+          PrintReject("phi-direct-normal-edge", U, Incoming);
+          return false;
+        }
+
         if (DT.dominates(NormalDest, Incoming))
           continue;
 
         if (DT.dominates(Phi->getParent(), Invoke->getParent()))
+          continue;
+
+        bool IncomingReachableFromNormal =
+            isPotentiallyReachable(NormalDest, Incoming, nullptr, &DT);
+        bool IncomingReachableFromUnwind =
+            isPotentiallyReachable(UnwindDest, Incoming, nullptr, &DT);
+        if (!IncomingReachableFromNormal && !IncomingReachableFromUnwind)
+          continue;
+        if (IncomingReachableFromNormal)
           continue;
 
         PrintReject("phi-incoming-not-normal-or-preinvoke", U, Incoming);
@@ -435,13 +505,23 @@ static bool isNormalOnlyAfterInvoke(InvokeInst *Invoke, Value *V,
       continue;
     }
 
-    if (DT.dominates(UserI, Invoke) &&
-        !isPotentiallyReachable(NormalDest, UserI->getParent(), nullptr, &DT) &&
-        !isPotentiallyReachable(UnwindDest, UserI->getParent(), nullptr, &DT))
+    // A value can have users in blocks that are not reachable after this
+    // invoke. Those users belong to earlier or disjoint dynamic control-flow
+    // paths and do not constrain where this statepoint can rematerialize the
+    // value.
+    bool ReachableFromNormal =
+        isPotentiallyReachable(NormalDest, UserI->getParent(), nullptr, &DT);
+    bool ReachableFromUnwind =
+        isPotentiallyReachable(UnwindDest, UserI->getParent(), nullptr, &DT);
+    if (!ReachableFromNormal && !ReachableFromUnwind)
       continue;
 
-    if (!DT.dominates(NormalDest, UserI->getParent())) {
-      PrintReject("user-not-dominated-by-normal", U);
+    // Relocation via allocas can merge a rematerialized normal-edge value with
+    // the original pre-invoke value, so the normal destination does not need to
+    // dominate every later use. It is enough that every later instruction use
+    // is reachable from the normal edge.
+    if (!ReachableFromNormal) {
+      PrintReject("user-not-reachable-from-normal", U);
       return false;
     }
   }
@@ -1320,14 +1400,6 @@ static Value *findBaseDefiningValue(Value *I, DefiningValueMapTy &Cache,
     return BDV;
   }
 
-  if (TreatAddrSpace1PhiSelectAsBase &&
-      (isa<PHINode>(I) || isa<SelectInst>(I)) &&
-      cast<PointerType>(I->getType())->getAddressSpace() == 1) {
-    Cache[I] = I;
-    setKnownBase(I, /* IsKnownBase */true, KnownBases);
-    return I;
-  }
-
   if (IntrinsicInst *II = dyn_cast<IntrinsicInst>(I)) {
     switch (II->getIntrinsicID()) {
     default:
@@ -1336,10 +1408,21 @@ static Value *findBaseDefiningValue(Value *I, DefiningValueMapTy &Cache,
     case Intrinsic::experimental_gc_statepoint:
       llvm_unreachable("statepoints don't produce pointers");
     case Intrinsic::experimental_gc_relocate:
-      // Rerunning safepoint insertion after safepoints are already
-      // inserted is not supported.  It could probably be made to work,
-      // but why are you doing this?  There's no good reason.
-      llvm_unreachable("repeat safepoint insertion is not supported");
+      if (auto *Relocate = dyn_cast<GCRelocateInst>(II)) {
+        Value *Base = Relocate->getBasePtr();
+        Value *Derived = Relocate->getDerivedPtr();
+        auto *BaseTy = dyn_cast<PointerType>(Base->getType());
+        auto *DerivedTy = dyn_cast<PointerType>(Derived->getType());
+        if (Base != Derived && BaseTy && DerivedTy &&
+            BaseTy->getAddressSpace() == 1 &&
+            DerivedTy->getAddressSpace() == 1)
+          report_fatal_error(
+              "OxCaml late root discovery found a derived gc.relocate");
+        Cache[II] = II;
+        setKnownBase(II, /* IsKnownBase */ true, KnownBases);
+        return II;
+      }
+      llvm_unreachable("malformed gc.relocate intrinsic");
     case Intrinsic::gcroot:
       // Currently, this mechanism hasn't been extended to work with gcroot.
       // There's no reason it couldn't be, but I haven't thought about the
@@ -2276,6 +2359,13 @@ static void findBasePointers(DominatorTree &DT, DefiningValueMapTy &DVCache,
       PotentiallyDerivedPointers.remove(V);
       PointerToBase[V] = V;
     }
+  if (isOxCamlFunction(*Call->getFunction()) &&
+      !needsCallerFrameRootsForOxCamlCArgs(Call->getCallingConv()))
+    for (Value *V : Call->args()) {
+      auto *Ty = dyn_cast<PointerType>(V->getType());
+      if (Ty && Ty->getAddressSpace() == 1 && !isa<Constant>(V))
+        PotentiallyDerivedPointers.insert(V);
+    }
   findBasePointers(PotentiallyDerivedPointers, PointerToBase, &DT, DVCache,
                    KnownBases);
 }
@@ -2309,6 +2399,17 @@ static Value *findRematerializablePhiChainToBasePhi(
     SmallVectorImpl<Instruction *> &ChainToBase, PHINode *DerivedPhi,
     PHINode *BasePhi, const PointerToBaseTy &PointerToBase,
     bool AllowIntegerAddressArithmetic, bool &NeedsBaseSelect);
+static Value *findRematerializablePhiChainToSingleBase(
+    SmallVectorImpl<Instruction *> &ChainToBase, PHINode *DerivedPhi,
+    Value *Base, const PointerToBaseTy &PointerToBase,
+    bool AllowIntegerAddressArithmetic, bool &NeedsBaseSelect);
+static bool areEquivalentRematerializableInstructions(Instruction *A,
+                                                      Instruction *B);
+static Value *findRematerializablePhiChainToBasePhiImpl(
+    SmallVectorImpl<Instruction *> &ChainToBase, PHINode *DerivedPhi,
+    PHINode *BasePhi, const PointerToBaseTy &PointerToBase,
+    bool AllowIntegerAddressArithmetic, bool &NeedsBaseSelect,
+    SmallPtrSetImpl<PHINode *> &ActiveDerivedPhis);
 
 // Utility function which clones all instructions from "ChainToBase"
 // and inserts them before "InsertBefore". Returns rematerialized value
@@ -2490,7 +2591,8 @@ collectOxCamlRecoveryStoreSites(BasicBlock &RecoveryBB, BasicBlock *IncomingBB,
     }
   }
 
-  if (!isBranchOnlyOxCamlRecoveryLandingPad(IncomingBB, &RecoveryBB))
+  if (!isBranchOnlyOxCamlRecoveryLandingPad(IncomingBB, &RecoveryBB,
+                                            /*AllowPHIs=*/true))
     return false;
 
   bool SawInvoke = false;
@@ -2572,9 +2674,112 @@ static bool isUnsupportedNestedOxCamlRecoveryInstruction(Instruction &I) {
   }
 }
 
+static bool isOxCamlRecoveryRegionBoundaryBlock(BasicBlock &BB) {
+  if (BB.getLandingPadInst())
+    return true;
+
+  for (Instruction &I : BB) {
+    if (isa<PHINode>(I) || I.isDebugOrPseudoInst())
+      continue;
+    if (isUnsupportedNestedOxCamlRecoveryInstruction(I))
+      return true;
+  }
+
+  return false;
+}
+
 static bool isOxCamlExceptionRootLoad(Value *V) {
   auto *LI = dyn_cast<LoadInst>(V);
   return LI && LI->getMetadata("oxcaml.exnroot.load");
+}
+
+static bool isOxCamlBaseRelationThroughExceptionRoots(
+    Value *V, Value *B, SmallVectorImpl<std::pair<Value *, Value *>> &Active) {
+  if (V == B)
+    return true;
+  if (isOxCamlBaseEquivalentGCPointer(V, B))
+    return true;
+
+  if (is_contained(Active, std::make_pair(V, B)))
+    return true;
+  Active.push_back({V, B});
+  auto PopActive = make_scope_exit([&]() { Active.pop_back(); });
+
+  auto CollectNonConstantStores =
+      [](Value *Slot, SmallVectorImpl<Value *> &StoredValues) {
+        for (User *U : Slot->users()) {
+          auto *Store = dyn_cast<StoreInst>(U);
+          if (!Store || Store->getPointerOperand() != Slot)
+            continue;
+          Value *Stored =
+              nonPoisonOxCamlGCPointerValue(Store->getValueOperand());
+          if (!isa<Constant>(Stored))
+            StoredValues.push_back(Stored);
+        }
+      };
+
+  if (auto *Load = dyn_cast<LoadInst>(V)) {
+    if (!isOxCamlExceptionRootLoad(Load))
+      return false;
+
+    SmallVector<Value *, 4> StoredValues;
+    CollectNonConstantStores(Load->getPointerOperand(), StoredValues);
+
+    if (auto *BaseLoad = dyn_cast<LoadInst>(B)) {
+      if (!isOxCamlExceptionRootLoad(BaseLoad))
+        return false;
+      SmallVector<Value *, 4> BaseStoredValues;
+      CollectNonConstantStores(BaseLoad->getPointerOperand(),
+                               BaseStoredValues);
+      if (StoredValues.empty() || BaseStoredValues.empty())
+        return false;
+      for (Value *Stored : StoredValues) {
+        bool FoundMatchingBaseStore = false;
+        for (Value *BaseStored : BaseStoredValues) {
+          if (Stored->getType() != BaseStored->getType())
+            continue;
+          if (isOxCamlBaseRelationThroughExceptionRoots(Stored, BaseStored,
+                                                        Active)) {
+            FoundMatchingBaseStore = true;
+            break;
+          }
+        }
+        if (!FoundMatchingBaseStore)
+          return false;
+      }
+      return true;
+    }
+
+    bool SawNonConstantStore = false;
+    for (Value *Stored : StoredValues) {
+      if (Stored->getType() != B->getType())
+        return false;
+      SawNonConstantStore = true;
+      if (!isOxCamlBaseRelationThroughExceptionRoots(Stored, B, Active))
+        return false;
+    }
+    return SawNonConstantStore;
+  }
+
+  auto *VPhi = dyn_cast<PHINode>(V);
+  auto *BPhi = dyn_cast<PHINode>(B);
+  if (!VPhi || !BPhi || VPhi->getParent() != BPhi->getParent() ||
+      VPhi->getNumIncomingValues() != BPhi->getNumIncomingValues())
+    return false;
+
+  for (unsigned I = 0, E = VPhi->getNumIncomingValues(); I != E; ++I) {
+    if (VPhi->getIncomingBlock(I) != BPhi->getIncomingBlock(I))
+      return false;
+    if (!isOxCamlBaseRelationThroughExceptionRoots(
+            VPhi->getIncomingValue(I), BPhi->getIncomingValue(I), Active))
+      return false;
+  }
+  return true;
+}
+
+static bool isOxCamlBaseRelationThroughExceptionRoots(Value *V, Value *B) {
+  SmallVector<std::pair<Value *, Value *>, 8> Active;
+  return isOxCamlBaseRelationThroughExceptionRoots(V, B, Active);
 }
 
 static Value *getOxCamlRecoveryGCPointer(Value *V) {
@@ -2619,9 +2824,8 @@ static bool collectStrictOxCamlRecoveryOnlyRegion(
       if (Region.contains(Succ))
         continue;
 
-      bool AllPredsInRegion = true;
-      if (Succ->getLandingPadInst())
-        AllPredsInRegion = false;
+      bool AllPredsInRegion =
+          !isOxCamlRecoveryRegionBoundaryBlock(*Succ);
       for (BasicBlock *Pred : predecessors(Succ)) {
         if (!Region.contains(Pred)) {
           AllPredsInRegion = false;
@@ -2697,26 +2901,36 @@ static void collectOxCamlRecoveryRegionLiveGCValues(
     BasicBlock &RecoveryBB, IntrinsicInst &Recover,
     const SmallPtrSetImpl<BasicBlock *> &Region,
     SmallVectorImpl<Value *> &LiveGCValues, DenseSet<Value *> &Seen) {
+  auto AddLiveValue = [&](Value *V) {
+    V = getOxCamlRecoveryGCPointer(V);
+    if (!V)
+      return;
+    if (!isHandledGCPointerType(V->getType()) || isa<Constant>(V) ||
+        isOxCamlExceptionRootLoad(V))
+      return;
+    if (auto *VI = dyn_cast<Instruction>(V))
+      if (Region.contains(VI->getParent()))
+        return;
+    if (Seen.insert(V).second)
+      LiveGCValues.push_back(V);
+  };
+
   for (BasicBlock *BB : Region) {
+    if (BB != &RecoveryBB) {
+      for (PHINode &PN : BB->phis()) {
+        for (Use &U : PN.incoming_values())
+          AddLiveValue(U.get());
+      }
+    }
+
     for (Instruction &I : *BB) {
       if (isa<PHINode>(I) || I.isDebugOrPseudoInst())
         continue;
       if (BB == &RecoveryBB && !Recover.comesBefore(&I))
         continue;
 
-      for (Use &U : I.operands()) {
-        Value *V = getOxCamlRecoveryGCPointer(U.get());
-        if (!V)
-          continue;
-        if (!isHandledGCPointerType(V->getType()) || isa<Constant>(V) ||
-            isOxCamlExceptionRootLoad(V))
-          continue;
-        if (auto *VI = dyn_cast<Instruction>(V))
-          if (Region.contains(VI->getParent()))
-            continue;
-        if (Seen.insert(V).second)
-          LiveGCValues.push_back(V);
-      }
+      for (Use &U : I.operands())
+        AddLiveValue(U.get());
     }
   }
 }
@@ -2893,6 +3107,9 @@ static bool materializeOxCamlExceptionRootSlots(
     if (!isOxCamlRecoveryBlockStart(BB, Recover))
       continue;
 
+    DVCache.clear();
+    KnownBases.clear();
+
     HandlerLivePhis.clear();
     for (PHINode &PN : BB.phis()) {
       HandlerLivePhis.push_back(&PN);
@@ -2953,8 +3170,11 @@ static bool materializeOxCamlExceptionRootSlots(
       BoundaryEdges.clear();
     }
 
+    bool HasPotentialBoundaryLiveUses =
+        HasStrictRecoveryOnlyRegion && !BoundaryEdges.empty();
     if (HandlerLivePhis.empty() && HandlerLiveGCValues.empty() &&
-        BoundaryPhis.empty() && BoundaryUses.empty())
+        BoundaryPhis.empty() && BoundaryUses.empty() &&
+        !HasPotentialBoundaryLiveUses)
       continue;
 
     SmallPtrSet<PHINode *, 8> HandlerLivePhiSet(HandlerLivePhis.begin(),
@@ -2967,12 +3187,11 @@ static bool materializeOxCamlExceptionRootSlots(
                         }),
         HandlerLiveGCValues.end());
 
-    bool CanMaterializeWholeBlock = true;
-    for (Value *V : HandlerLiveGCValues)
-      if (!IsRootableExceptionValue(V))
-        CanMaterializeWholeBlock = false;
-    if (!CanMaterializeWholeBlock)
-      continue;
+    HandlerLiveGCValues.erase(
+        llvm::remove_if(
+            HandlerLiveGCValues,
+            [&](Value *V) { return !IsRootableExceptionValue(V); }),
+        HandlerLiveGCValues.end());
 
     BasicBlock &EntryBlock = F.getEntryBlock();
     IRBuilder<> EntryBuilder(&EntryBlock, EntryBlock.getFirstInsertionPt());
@@ -3000,9 +3219,14 @@ static bool materializeOxCamlExceptionRootSlots(
           SmallVector<OxCamlRecoveryStoreSite, 8> StoreSites;
           if (&StoreSiteBB == &BB) {
             for (BasicBlock *Pred : predecessors(&BB)) {
-              if (!collectOxCamlRecoveryStoreSites(BB, Pred, StoreSites))
-                report_fatal_error("unsupported OxCaml recovery predecessor "
-                                   "for explicit exception roots");
+              if (!collectOxCamlRecoveryStoreSites(BB, Pred, StoreSites)) {
+                std::string Message;
+                raw_string_ostream OS(Message);
+                OS << "unsupported OxCaml recovery predecessor for explicit "
+                      "exception roots: recovery block "
+                   << BB.getName() << ", predecessor " << Pred->getName();
+                report_fatal_error(Twine(OS.str()));
+              }
             }
           } else if (!collectDirectOxCamlRecoveryStoreSites(StoreSiteBB,
                                                            StoreSites)) {
@@ -3013,11 +3237,29 @@ static bool materializeOxCamlExceptionRootSlots(
           for (OxCamlRecoveryStoreSite StoreSite : StoreSites) {
             InvokeInst *II = StoreSite.Invoke;
             Value *EdgeValue =
-                nonPoisonTrapRecoverySlotValue(EdgeValueForSite(StoreSite));
+                EdgeValueForSite(StoreSite);
+            if (auto *EdgePhi = dyn_cast<PHINode>(EdgeValue)) {
+              if (EdgePhi->getParent() == II->getUnwindDest()) {
+                int IncomingIndex =
+                    EdgePhi->getBasicBlockIndex(II->getParent());
+                if (IncomingIndex < 0)
+                  report_fatal_error(
+                      "missing OxCaml trampoline PHI incoming value");
+                EdgeValue = EdgePhi->getIncomingValue(IncomingIndex);
+              }
+            }
+            EdgeValue = nonPoisonTrapRecoverySlotValue(EdgeValue);
             if (auto *EdgeInst = dyn_cast<Instruction>(EdgeValue))
-              if (!DT.dominates(EdgeInst, II))
+              if (!DT.dominates(EdgeInst, II)) {
+                errs() << "explicit exception root value does not dominate "
+                          "invoke\n  value: ";
+                EdgeValue->print(errs());
+                errs() << "\n  invoke: ";
+                II->print(errs());
+                errs() << "\n";
                 report_fatal_error(
                     "explicit exception root value does not dominate invoke");
+              }
 
             IRBuilder<> StoreBuilder(II);
             StoreBuilder.CreateAlignedStore(
@@ -3037,26 +3279,57 @@ static bool materializeOxCamlExceptionRootSlots(
           return Load;
         };
 
+    auto FindExceptionRootValue = [&](Value *V) {
+      Value *Base = findBasePointer(V, DVCache, KnownBases);
+      if (!Base || Base == V || !isHandledGCPointerType(Base->getType()))
+        return V;
+
+      auto *VTy = dyn_cast<PointerType>(V->getType());
+      auto *BaseTy = dyn_cast<PointerType>(Base->getType());
+      if (!VTy || !BaseTy || VTy->getAddressSpace() != 1 ||
+          BaseTy->getAddressSpace() != 1)
+        return V;
+
+      if (!isDistinctOxCamlAddrSpace1BaseEquivalentGCPointer(V, Base)) {
+        V->print(errs());
+        errs() << "\n";
+        Base->print(errs());
+        errs() << "\n";
+        report_fatal_error(
+            "OxCaml exception root would store a derived GC pointer");
+      }
+
+      return Base;
+    };
+
+    SmallVector<PHINode *, 8> HandlerLivePhisToErase;
     for (PHINode *PN : HandlerLivePhis) {
-      LoadInst *Load =
-          MaterializeRootSlot(PN, *PN->getParent(), [&](OxCamlRecoveryStoreSite StoreSite) {
-        BasicBlock *IncomingBlock = StoreSite.PhiIncomingBlock;
-        for (unsigned I = 0, E = PN->getNumIncomingValues(); I != E; ++I) {
-          if (PN->getIncomingBlock(I) == IncomingBlock)
-            return PN->getIncomingValue(I);
-        }
-        report_fatal_error("missing OxCaml recovery PHI incoming value");
-      });
+      Value *RootValue = FindExceptionRootValue(PN);
+
+      auto *RootPhi = dyn_cast<PHINode>(RootValue);
+      LoadInst *Load = MaterializeRootSlot(
+          RootValue, *PN->getParent(), [&](OxCamlRecoveryStoreSite StoreSite) {
+            BasicBlock *IncomingBlock = StoreSite.PhiIncomingBlock;
+            PHINode *IncomingPhi = RootPhi ? RootPhi : PN;
+            for (unsigned I = 0, E = IncomingPhi->getNumIncomingValues();
+                 I != E; ++I) {
+              if (IncomingPhi->getIncomingBlock(I) == IncomingBlock)
+                return IncomingPhi->getIncomingValue(I);
+            }
+            report_fatal_error("missing OxCaml recovery PHI incoming value");
+          });
 
       PN->replaceAllUsesWith(Load);
-      PN->eraseFromParent();
+      HandlerLivePhisToErase.push_back(PN);
       Changed = true;
+      DVCache.clear();
+      KnownBases.clear();
     }
 
     for (Value *V : HandlerLiveGCValues) {
-      LoadInst *Load =
-          MaterializeRootSlot(V, BB,
-                              [&](OxCamlRecoveryStoreSite) { return V; });
+      Value *RootValue = FindExceptionRootValue(V);
+      LoadInst *Load = MaterializeRootSlot(
+          RootValue, BB, [&](OxCamlRecoveryStoreSite) { return RootValue; });
       for (BasicBlock *RegionBB : RecoveryOnlyRegion) {
         for (Instruction &I : *RegionBB) {
           if (RegionBB == &BB && !Recover->comesBefore(&I))
@@ -3103,6 +3376,8 @@ static bool materializeOxCamlExceptionRootSlots(
         }
       }
       Changed = true;
+      DVCache.clear();
+      KnownBases.clear();
     }
 
     if (HasStrictRecoveryOnlyRegion) {
@@ -3204,12 +3479,21 @@ static bool materializeOxCamlExceptionRootSlots(
 
       for (OxCamlRecoveryBoundaryUse &BoundaryUse : BoundaryLiveUses) {
         Value *V = BoundaryUse.Value;
+        DVCache.clear();
+        KnownBases.clear();
+        if (DebugOxCamlDerivedRemat) {
+          errs() << "rs4gc-oxcaml-boundary-live "
+                 << BoundaryUse.IncomingBlock->getName() << " -> "
+                 << BoundaryUse.BoundaryBlock->getName() << "\n  value: ";
+          V->print(errs());
+          errs() << "\n";
+        }
         Value *Base = findBasePointer(V, DVCache, KnownBases);
         if (!Base || !isHandledGCPointerType(Base->getType()))
           report_fatal_error("missing base for OxCaml recovery live value");
         Value *RootValue = Base;
-        if (isDistinctOxCamlAddrSpace1BaseEquivalentGCPointer(V, Base))
-          RootValue = V;
+        bool IsBaseEquivalent =
+            isDistinctOxCamlAddrSpace1BaseEquivalentGCPointer(V, Base);
         if (!IsRootableExceptionValue(RootValue))
           report_fatal_error("unrootable GC base escapes OxCaml recovery path");
 
@@ -3226,7 +3510,7 @@ static bool materializeOxCamlExceptionRootSlots(
               Pred == BoundaryUse.IncomingBlock ? Load : RootValue, Pred);
 
         Value *Replacement = Selector;
-        if (V != RootValue) {
+        if (V != RootValue && !IsBaseEquivalent) {
           SmallVector<Instruction *, 3> ChainToBase;
           Value *RootOfChain =
               FindPointerChainToBase(FindPointerChainToBase, ChainToBase, V,
@@ -3254,6 +3538,8 @@ static bool materializeOxCamlExceptionRootSlots(
           U->set(Replacement);
 
         Changed = true;
+        DVCache.clear();
+        KnownBases.clear();
       }
 
       for (OxCamlRecoveryBoundaryUse &BoundaryUse : BoundaryUses) {
@@ -3287,6 +3573,8 @@ static bool materializeOxCamlExceptionRootSlots(
           U->set(Selector);
 
         Changed = true;
+        DVCache.clear();
+        KnownBases.clear();
       }
 
       DenseMap<PHINode *, DenseMap<BasicBlock *, std::pair<Value *, LoadInst *>>>
@@ -3320,12 +3608,21 @@ static bool materializeOxCamlExceptionRootSlots(
         LoadsForPhi[BoundaryPhi.IncomingBlock] = {Incoming, Load};
         BoundaryPhi.Phi->setIncomingValue(BoundaryPhi.IncomingIndex, Load);
         Changed = true;
+        DVCache.clear();
+        KnownBases.clear();
       }
     }
+
+    for (PHINode *PN : HandlerLivePhisToErase)
+      if (PN->use_empty())
+        PN->eraseFromParent();
   }
 
-  if (Changed)
+  if (Changed) {
+    DVCache.clear();
+    KnownBases.clear();
     DT.recalculate(F);
+  }
   return Changed;
 }
 
@@ -3388,6 +3685,56 @@ static void collectExplicitRootSlots(const ExplicitRootSlotMapTy &RootSlots,
         Slots.push_back(Slot);
 }
 
+static bool rewriteOxCamlExplicitRootStoresToBases(
+    ArrayRef<Value *> Slots, const PointerToBaseTy &PointerToBase,
+    DominatorTree &DT) {
+  bool Changed = false;
+  for (Value *Slot : Slots) {
+    for (User *U : make_early_inc_range(Slot->users())) {
+      auto *Store = dyn_cast<StoreInst>(U);
+      if (!Store || Store->getPointerOperand() != Slot)
+        continue;
+
+      Value *Stored =
+          nonPoisonOxCamlGCPointerValue(Store->getValueOperand());
+      if (!isHandledGCPointerType(Stored->getType()) || isa<Constant>(Stored))
+        continue;
+
+      auto BaseIt = PointerToBase.find(Stored);
+      if (BaseIt == PointerToBase.end())
+        continue;
+
+      Value *Base = BaseIt->second;
+      if (Base == Stored)
+        continue;
+
+      auto *StoredTy = dyn_cast<PointerType>(Stored->getType());
+      auto *BaseTy = dyn_cast<PointerType>(Base->getType());
+      if (!StoredTy || !BaseTy || StoredTy->getAddressSpace() != 1 ||
+          BaseTy->getAddressSpace() != 1)
+        continue;
+
+      if (!isOxCamlBaseRelationThroughExceptionRoots(Stored, Base)) {
+        Stored->print(errs());
+        errs() << "\n";
+        Base->print(errs());
+        errs() << "\n";
+        report_fatal_error(
+            "OxCaml explicit root store would store a derived GC pointer");
+      }
+
+      if (auto *BaseI = dyn_cast<Instruction>(Base))
+        if (!DT.dominates(BaseI, Store))
+          report_fatal_error(
+              "OxCaml explicit root base does not dominate root store");
+
+      Store->setOperand(0, Base);
+      Changed = true;
+    }
+  }
+  return Changed;
+}
+
 static bool appendExplicitRootSlotsToAllStatepoints(
     Function &F, ArrayRef<Value *> Slots) {
   if (Slots.empty())
@@ -3402,6 +3749,79 @@ static bool appendExplicitRootSlotsToAllStatepoints(
   }
 
   return appendExplicitRootSlotsToStatepoints(RootSlotsForStatepoints);
+}
+
+static bool materializeRemainingOxCamlRecoveryPhis(
+    Function &F, DominatorTree &DT, SmallVectorImpl<Value *> &RootSlots) {
+  if (!isOxCamlFunction(F))
+    return false;
+
+  const DataLayout &DL = F.getParent()->getDataLayout();
+  BasicBlock &EntryBlock = F.getEntryBlock();
+  IRBuilder<> EntryBuilder(&EntryBlock, EntryBlock.getFirstInsertionPt());
+  bool Changed = false;
+
+  for (BasicBlock &BB : F) {
+    IntrinsicInst *Recover = getOxCamlTrapRecover(BB);
+    if (!isOxCamlRecoveryBlockStart(BB, Recover))
+      continue;
+
+    while (auto *PN = dyn_cast_or_null<PHINode>(&*BB.begin())) {
+      if (!PN->getType()->isSized()) {
+        PN->print(errs());
+        errs() << "\n";
+        report_fatal_error("cannot materialize unsized OxCaml recovery PHI");
+      }
+
+      AllocaInst *Slot = EntryBuilder.CreateAlloca(
+          PN->getType(), DL.getAllocaAddrSpace(), nullptr,
+          suffixed_name_or(PN, ".recoverphi", "recoverphi"));
+      Slot->setAlignment(DL.getABITypeAlign(PN->getType()));
+      bool IsGCRoot = isHandledGCPointerType(PN->getType());
+      EntryBuilder.CreateAlignedStore(
+          IsGCRoot ? getOxCamlNonMovingImmediate(PN->getType())
+                   : Constant::getNullValue(PN->getType()),
+          Slot, DL.getABITypeAlign(PN->getType()));
+      if (IsGCRoot)
+        RootSlots.push_back(Slot);
+
+      for (unsigned I = 0, E = PN->getNumIncomingValues(); I != E; ++I) {
+        BasicBlock *IncomingBlock = PN->getIncomingBlock(I);
+        Value *IncomingValue =
+            nonPoisonTrapRecoverySlotValue(PN->getIncomingValue(I));
+        Instruction *InsertBefore = IncomingBlock->getTerminator();
+        if (auto *II = dyn_cast<InvokeInst>(InsertBefore)) {
+          if (II->getUnwindDest() != &BB)
+            report_fatal_error(
+                "unsupported invoke predecessor for recovery PHI");
+        } else {
+          auto *BI = dyn_cast<BranchInst>(InsertBefore);
+          if (!BI || !BI->isUnconditional() || BI->getSuccessor(0) != &BB)
+            report_fatal_error(
+                "unsupported branch predecessor for recovery PHI");
+        }
+        if (auto *IncomingInst = dyn_cast<Instruction>(IncomingValue))
+          if (!DT.dominates(IncomingInst, InsertBefore))
+            report_fatal_error(
+                "recovery PHI incoming value does not dominate edge store");
+        IRBuilder<> StoreBuilder(InsertBefore);
+        StoreBuilder.CreateAlignedStore(
+            IncomingValue, Slot, DL.getABITypeAlign(PN->getType()));
+      }
+
+      IRBuilder<> LoadBuilder(Recover->getNextNode());
+      LoadInst *Load = LoadBuilder.CreateAlignedLoad(
+          PN->getType(), Slot, DL.getABITypeAlign(PN->getType()),
+          suffixed_name_or(PN, ".recoverphi.load", "recoverphi.load"));
+      PN->replaceAllUsesWith(Load);
+      PN->eraseFromParent();
+      Changed = true;
+    }
+  }
+
+  if (Changed)
+    DT.recalculate(F);
+  return Changed;
 }
 
 // List of all function attributes which must be stripped when lowering from
@@ -3605,12 +4025,17 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
   for (Value *V : LiveVariables)
     LiveVariableSet.insert(V);
 
+  DenseSet<Value *> CallerFrameRootSet;
+  for (Value *Arg : Result.CallerFrameRootValues) {
+    Value *Root = nonPoisonOxCamlGCPointerValue(Arg);
+    if (!isa<Constant>(Root))
+      CallerFrameRootSet.insert(Root);
+  }
+
   DenseSet<Value *> RematerializedDerivedValues;
+  SmallVector<Value *, 8> CallerFrameRootReloadValues;
   RematCandTy RematerializedDerivedChains;
-  const bool IsOxCamlStatepoint =
-      Call->getCallingConv() == CallingConv::OxCaml_WithFP ||
-      Call->getCallingConv() == CallingConv::OxCaml_WithoutFP ||
-      Call->getCallingConv() == CallingConv::OxCaml_Alloc;
+  const bool IsOxCamlStatepoint = isOxCamlCallingConv(Call->getCallingConv());
   auto PrintOxCamlDerivedCandidate = [&](Value *Derived, Value *Base) {
     if (!DebugOxCamlDerivedRemat || !IsOxCamlStatepoint)
       return;
@@ -3643,12 +4068,9 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
       return Reject("flag");
     if (!IsOxCamlStatepoint)
       return Reject("cc");
-    if (auto *II = dyn_cast<InvokeInst>(Call)) {
-      if (!Result.UsesExplicitExceptionRoots)
-        return Reject("invoke-without-explicit-roots");
-      if (!isNormalOnlyAfterInvoke(II, Derived, DT))
-        return Reject("invoke-not-normal-only");
-    }
+    auto *Invoke = dyn_cast<InvokeInst>(Call);
+    if (Invoke && !Result.UsesExplicitExceptionRoots)
+      return Reject("invoke-without-explicit-roots");
     auto BaseIt = PointerToBase.find(Derived);
     if (BaseIt == PointerToBase.end())
       return Reject("no-base");
@@ -3664,6 +4086,8 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
       return Reject("not-pointers");
     if (DerivedTy->getAddressSpace() != 1 || BaseTy->getAddressSpace() != 1)
       return Reject("not-as1");
+    if (isDistinctOxCamlAddrSpace1BaseEquivalentGCPointer(Derived, Base))
+      return Reject("base-equivalent");
 
     auto *DerivedInst = dyn_cast<Instruction>(Derived);
     if (!DerivedInst)
@@ -3730,8 +4154,12 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
         FindPointerChainToBase(FindPointerChainToBase, Record.ChainToBase,
                                Derived);
     bool IsPhiChainToBasePhi = false;
+    bool IsPhiChainToSingleBase = false;
+    bool IsBaseEquivalent =
+        Record.ChainToBase.empty() &&
+        isDistinctOxCamlAddrSpace1BaseEquivalentGCPointer(Derived, Base);
     if ((RootOfChain != Base || Record.ChainToBase.empty()) &&
-        isa<PHINode>(Derived) && isa<PHINode>(Base)) {
+        !IsBaseEquivalent && isa<PHINode>(Derived) && isa<PHINode>(Base)) {
       Record.ChainToBase.clear();
       bool NeedsBaseSelect = false;
       if (Value *PhiRoot = findRematerializablePhiChainToBasePhi(
@@ -3750,14 +4178,248 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
         }
       }
     }
-    if ((!IsPhiChainToBasePhi && RootOfChain != Base) ||
-        Record.ChainToBase.empty()) {
+    if (!IsPhiChainToBasePhi &&
+        (RootOfChain != Base || Record.ChainToBase.empty()) &&
+        !IsBaseEquivalent && isa<PHINode>(Derived)) {
+      Record.ChainToBase.clear();
+      bool NeedsBaseSelect = false;
+      if (Value *PhiRoot = findRematerializablePhiChainToSingleBase(
+              Record.ChainToBase, cast<PHINode>(Derived), Base, PointerToBase,
+              /*AllowIntegerAddressArithmetic=*/true, NeedsBaseSelect)) {
+        RootOfChain = PhiRoot;
+        IsPhiChainToSingleBase = true;
+        if (NeedsBaseSelect) {
+          IRBuilder<> ConditionBuilder(Call);
+          Record.UseRematerializedValue =
+              ConditionBuilder.CreateICmpNE(Derived, Base,
+                                            suffixed_name_or(Derived,
+                                                            ".needs_remat",
+                                                            "needs_remat"));
+        }
+      }
+    }
+    bool IsRootBaseEquivalent =
+        !Record.ChainToBase.empty() && RootOfChain != Base &&
+        isDistinctOxCamlAddrSpace1BaseEquivalentGCPointer(RootOfChain, Base);
+    if (IsBaseEquivalent)
+      RootOfChain = Base;
+
+    if (Invoke && !IsBaseEquivalent && !isNormalOnlyAfterInvoke(Invoke, Derived, DT))
+      return Reject("invoke-not-normal-only");
+
+    auto TryBuildAlternativePhiRemat = [&]() {
+      auto *DerivedPhi = dyn_cast<PHINode>(Derived);
+      auto *BasePhi = dyn_cast<PHINode>(Base);
+      if (!DerivedPhi || !BasePhi ||
+          DerivedPhi->getParent() != BasePhi->getParent() ||
+          DerivedPhi->getNumIncomingValues() != BasePhi->getNumIncomingValues())
+        return false;
+
+      struct PendingAlternative {
+        SmallVector<Instruction *, 3> ChainToBase;
+        Value *RootOfChain = nullptr;
+      };
+      SmallVector<PendingAlternative, 4> PendingAlternatives;
+      SmallVector<unsigned, 8> IncomingTags;
+
+      SmallVector<std::pair<Value *, Value *>, 8> ActiveBaseRelations;
+      auto IsBaseRelation = [&](auto &&Self, Value *V, Value *B) -> bool {
+        if (V == B)
+          return true;
+        if (isOxCamlBaseEquivalentGCPointer(V, B))
+          return true;
+
+        if (is_contained(ActiveBaseRelations, std::make_pair(V, B)))
+          return true;
+        ActiveBaseRelations.push_back({V, B});
+        auto PopActive =
+            make_scope_exit([&]() { ActiveBaseRelations.pop_back(); });
+
+        if (auto *Load = dyn_cast<LoadInst>(V)) {
+          if (!isOxCamlExceptionRootLoad(Load))
+            return false;
+          auto CollectNonConstantStores =
+              [&](Value *Slot, SmallVectorImpl<Value *> &StoredValues) {
+                for (User *U : Slot->users()) {
+                  auto *Store = dyn_cast<StoreInst>(U);
+                  if (!Store || Store->getPointerOperand() != Slot)
+                    continue;
+                  Value *Stored = nonPoisonOxCamlGCPointerValue(
+                      Store->getValueOperand());
+                  if (!isa<Constant>(Stored))
+                    StoredValues.push_back(Stored);
+                }
+              };
+
+          bool SawNonConstantStore = false;
+          Value *Slot = Load->getPointerOperand();
+          SmallVector<Value *, 4> StoredValues;
+          CollectNonConstantStores(Slot, StoredValues);
+
+          if (auto *BaseLoad = dyn_cast<LoadInst>(B)) {
+            if (!isOxCamlExceptionRootLoad(BaseLoad))
+              return false;
+            SmallVector<Value *, 4> BaseStoredValues;
+            CollectNonConstantStores(BaseLoad->getPointerOperand(),
+                                     BaseStoredValues);
+            if (StoredValues.empty() || BaseStoredValues.empty())
+              return false;
+            for (Value *Stored : StoredValues) {
+              bool FoundMatchingBaseStore = false;
+              for (Value *BaseStored : BaseStoredValues) {
+                if (Stored->getType() != BaseStored->getType())
+                  continue;
+                if (Self(Self, Stored, BaseStored)) {
+                  FoundMatchingBaseStore = true;
+                  break;
+                }
+              }
+              if (!FoundMatchingBaseStore)
+                return false;
+            }
+            return true;
+          }
+
+          for (Value *Stored : StoredValues) {
+            if (Stored->getType() != B->getType())
+              return false;
+            SawNonConstantStore = true;
+            if (!Self(Self, Stored, B))
+              return false;
+          }
+          return SawNonConstantStore;
+        }
+
+        auto *VPhi = dyn_cast<PHINode>(V);
+        auto *BPhi = dyn_cast<PHINode>(B);
+        if (!VPhi || !BPhi || VPhi->getParent() != BPhi->getParent() ||
+            VPhi->getNumIncomingValues() != BPhi->getNumIncomingValues())
+          return false;
+
+        for (unsigned I = 0, E = VPhi->getNumIncomingValues(); I != E; ++I) {
+          if (VPhi->getIncomingBlock(I) != BPhi->getIncomingBlock(I))
+            return false;
+          if (!Self(Self, VPhi->getIncomingValue(I),
+                    BPhi->getIncomingValue(I)))
+            return false;
+        }
+        return true;
+      };
+      auto RootMatchesIncomingBase = [&](Value *Root, Value *IncomingBase) {
+        return IsBaseRelation(IsBaseRelation, Root, IncomingBase);
+      };
+      auto IncomingChainMatchesBase =
+          [&](Value *Incoming, Value *Root, Value *IncomingBase,
+              ArrayRef<Instruction *> IncomingChain) {
+        if (Incoming == IncomingBase)
+          return true;
+        if (RootMatchesIncomingBase(Root, IncomingBase))
+          return true;
+        auto It = PointerToBase.find(Incoming);
+        return !IncomingChain.empty() && It != PointerToBase.end() &&
+               It->second == IncomingBase;
+      };
+      auto FindMatchingAlternative =
+          [&](ArrayRef<Instruction *> ChainToBase) -> std::optional<unsigned> {
+        for (unsigned Index = 0, End = PendingAlternatives.size();
+             Index != End; ++Index) {
+          ArrayRef<Instruction *> Existing =
+              PendingAlternatives[Index].ChainToBase;
+          if (Existing.size() != ChainToBase.size())
+            continue;
+          bool Match = true;
+          for (unsigned ChainIndex = 0, ChainEnd = Existing.size();
+               ChainIndex != ChainEnd; ++ChainIndex)
+            if (!areEquivalentRematerializableInstructions(
+                    Existing[ChainIndex], ChainToBase[ChainIndex])) {
+              Match = false;
+              break;
+            }
+          if (Match)
+            return Index;
+        }
+        return std::nullopt;
+      };
+
+      for (unsigned I = 0, E = DerivedPhi->getNumIncomingValues(); I != E;
+           ++I) {
+        Value *Incoming = DerivedPhi->getIncomingValue(I);
+        Value *IncomingBase = BasePhi->getIncomingValue(I);
+        if (DerivedPhi->getIncomingBlock(I) != BasePhi->getIncomingBlock(I))
+          return false;
+
+        SmallVector<Instruction *, 3> IncomingChain;
+        Value *IncomingRoot = IncomingBase;
+        if (Incoming != IncomingBase) {
+          IncomingRoot = findRematerializableChainToBasePointer(
+              IncomingChain, Incoming,
+              /*AllowIntegerAddressArithmetic=*/true);
+          if (!IncomingChainMatchesBase(Incoming, IncomingRoot, IncomingBase,
+                                        IncomingChain))
+            return false;
+        }
+
+        std::optional<unsigned> Existing =
+            FindMatchingAlternative(IncomingChain);
+        unsigned Tag;
+        if (Existing) {
+          Tag = *Existing;
+        } else {
+          Tag = PendingAlternatives.size();
+          PendingAlternative &Alt = PendingAlternatives.emplace_back();
+          Alt.ChainToBase = IncomingChain;
+          Alt.RootOfChain = IncomingRoot;
+        }
+        IncomingTags.push_back(Tag);
+      }
+
+      if (PendingAlternatives.size() == 1 &&
+          PendingAlternatives.front().ChainToBase.empty()) {
+        Record.ChainToBase.clear();
+        Record.RootOfChain = Base;
+        Record.UseRematerializedValue = nullptr;
+        Record.RematerializationTag = nullptr;
+        return true;
+      }
+
+      if (PendingAlternatives.size() <= 1)
+        return false;
+
+      auto *TagTy = Type::getInt32Ty(Call->getContext());
+      PHINode *TagPhi =
+          PHINode::Create(TagTy, DerivedPhi->getNumIncomingValues(),
+                          suffixed_name_or(DerivedPhi, ".remat.tag",
+                                           "remat.tag"),
+                          &*DerivedPhi->getParent()->getFirstInsertionPt());
+      for (unsigned I = 0, E = DerivedPhi->getNumIncomingValues(); I != E;
+           ++I)
+        TagPhi->addIncoming(ConstantInt::get(TagTy, IncomingTags[I]),
+                            DerivedPhi->getIncomingBlock(I));
+
+      Record.ChainToBase.clear();
+      Record.RootOfChain = Base;
+      Record.UseRematerializedValue = nullptr;
+      Record.RematerializationTag = TagPhi;
+      for (unsigned I = 0, E = PendingAlternatives.size(); I != E; ++I) {
+        RematerializationAlternative &Alt = Record.Alternatives.emplace_back();
+        Alt.ChainToBase = PendingAlternatives[I].ChainToBase;
+        Alt.RootOfChain = PendingAlternatives[I].RootOfChain;
+        Alt.Tag = I;
+      }
+      return true;
+    };
+
+    if ((!IsPhiChainToBasePhi && !IsPhiChainToSingleBase &&
+         !IsBaseEquivalent &&
+         !IsRootBaseEquivalent && RootOfChain != Base) ||
+        (!IsBaseEquivalent && Record.ChainToBase.empty())) {
       if (DebugOxCamlDerivedRemat && IsOxCamlStatepoint) {
         errs() << "  root-of-chain: ";
         RootOfChain->print(errs());
         errs() << "\n  chain-size: " << Record.ChainToBase.size() << "\n";
       }
-      return Reject("not-chain");
+      if (!TryBuildAlternativePhiRemat())
+        return Reject("not-chain");
     }
 
     const unsigned Ordinal = ++OxCamlDerivedRematAcceptedOrdinal;
@@ -3794,39 +4456,41 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
       if (BaseIt != PointerToBase.end())
         PrintOxCamlDerivedCandidate(LiveVariable, BaseIt->second);
     }
+    if (CallerFrameRootSet.contains(nonPoisonOxCamlGCPointerValue(LiveVariable))) {
+      CallerFrameRootReloadValues.push_back(LiveVariable);
+      continue;
+    }
     if (ShouldRematerializeDerivedFromBase(LiveVariable)) {
       RematerializedDerivedValues.insert(LiveVariable);
       continue;
     }
+    bool IsOxCamlSelfBaseEquivalent =
+        IsOxCamlStatepoint && BaseIt != PointerToBase.end() &&
+        isDistinctOxCamlAddrSpace1BaseEquivalentGCPointer(LiveVariable,
+                                                          BaseIt->second);
     if (FailOnOxCamlDerivedRelocates && IsOxCamlStatepoint &&
         BaseIt != PointerToBase.end()) {
       Value *Base = BaseIt->second;
       auto *LiveTy = dyn_cast<PointerType>(LiveVariable->getType());
       auto *BaseTy = dyn_cast<PointerType>(Base->getType());
       if (Base != LiveVariable && LiveTy && BaseTy &&
-          LiveTy->getAddressSpace() == 1 && BaseTy->getAddressSpace() == 1) {
-        if (!isOxCamlBaseEquivalentGCPointer(LiveVariable, Base)) {
-          errs() << "OxCaml statepoint would relocate a derived addrspace(1) "
-                    "pointer independently\n  call: ";
-          Call->print(errs());
-          errs() << "\n  derived: ";
-          LiveVariable->print(errs());
-          errs() << "\n  base: ";
-          Base->print(errs());
-          errs() << "\n";
-          report_fatal_error("unrematerialized OxCaml derived pointer across "
-                             "statepoint");
-        }
+          LiveTy->getAddressSpace() == 1 && BaseTy->getAddressSpace() == 1 &&
+          !IsOxCamlSelfBaseEquivalent) {
+        errs() << "OxCaml statepoint would relocate a derived addrspace(1) "
+                  "pointer independently\n  call: ";
+        Call->print(errs());
+        errs() << "\n  derived: ";
+        LiveVariable->print(errs());
+        errs() << "\n  base: ";
+        Base->print(errs());
+        errs() << "\n";
+        report_fatal_error("unrematerialized OxCaml derived pointer across "
+                           "statepoint");
       }
     }
     Value *BasePtr = BasePtrs[I];
-    if (IsOxCamlStatepoint && BaseIt != PointerToBase.end()) {
-      Value *Base = BaseIt->second;
-      if (isDistinctOxCamlAddrSpace1BaseEquivalentGCPointer(LiveVariable,
-                                                            Base)) {
-        BasePtr = LiveVariable;
-      }
-    }
+    if (IsOxCamlSelfBaseEquivalent)
+      BasePtr = LiveVariable;
     FilteredLiveVariables.push_back(
         nonPoisonOxCamlGCPointerValue(LiveVariable));
     FilteredBasePtrs.push_back(nonPoisonOxCamlGCPointerValue(BasePtr));
@@ -3840,10 +4504,45 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
         GCArgsStorage.push_back(nonPoisonOxCamlGCPointerValue(U.get()));
     }
   llvm::append_range(GCArgsStorage, Result.ExplicitRootSlots);
-  ArrayRef<Value *> GCArgs(GCArgsStorage);
   uint64_t StatepointID = StatepointDirectives::DefaultStatepointID;
   uint32_t NumPatchBytes = 0;
   uint32_t Flags = uint32_t(StatepointFlags::None);
+  DenseMap<Value *, AllocaInst *> CallerFrameRootSlots;
+
+  if (!Result.CallerFrameRootValues.empty()) {
+    const DataLayout &DL = Call->getModule()->getDataLayout();
+    BasicBlock &EntryBlock = Call->getFunction()->getEntryBlock();
+    IRBuilder<> EntryBuilder(&EntryBlock, EntryBlock.getFirstInsertionPt());
+    IRBuilder<> StoreBuilder(Call);
+    SmallPtrSet<Value *, 8> SeenSlots;
+
+    for (Value *Arg : Result.CallerFrameRootValues) {
+      Value *Root = nonPoisonOxCamlGCPointerValue(Arg);
+      if (isa<Constant>(Root))
+        continue;
+
+      if (!Root->getType()->isSized()) {
+        Root->print(errs());
+        errs() << "\n";
+        report_fatal_error("cannot materialize unsized OxCaml C-call root");
+      }
+      if (auto *RootInst = dyn_cast<Instruction>(Root))
+        if (!DT.dominates(RootInst, Call))
+          report_fatal_error("OxCaml C-call root does not dominate call");
+
+      AllocaInst *&Slot = CallerFrameRootSlots[Root];
+      if (!Slot) {
+        Slot = EntryBuilder.CreateAlloca(
+            Root->getType(), DL.getAllocaAddrSpace(), nullptr,
+            suffixed_name_or(Root, ".cargroot", "cargroot"));
+        Slot->setAlignment(DL.getABITypeAlign(Root->getType()));
+        StoreBuilder.CreateAlignedStore(Root, Slot,
+                                        DL.getABITypeAlign(Root->getType()));
+      }
+      if (SeenSlots.insert(Slot).second)
+        GCArgsStorage.push_back(Slot);
+    }
+  }
 
   SmallVector<Value *, 8> CallArgs(Call->args());
   std::optional<ArrayRef<Use>> DeoptArgs;
@@ -4005,6 +4704,34 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
     }
   }
 
+  if (IsOxCamlStatepoint) {
+    if (!needsCallerFrameRootsForOxCamlCArgs(Call->getCallingConv())) {
+      SmallPtrSet<Value *, 32> SeenGCArgs(GCArgsStorage.begin(),
+                                          GCArgsStorage.end());
+      for (Value *Arg : CallArgs) {
+        auto *ArgTy = dyn_cast<PointerType>(Arg->getType());
+        if (!ArgTy || ArgTy->getAddressSpace() != 1 || isa<Constant>(Arg))
+          continue;
+
+        Value *Root = Arg;
+        auto BaseIt = PointerToBase.find(Arg);
+        if (BaseIt != PointerToBase.end()) {
+          Value *Base = BaseIt->second;
+          auto *BaseTy = dyn_cast<PointerType>(Base->getType());
+          if (BaseTy && BaseTy->getAddressSpace() == 1 &&
+              !isDistinctOxCamlAddrSpace1BaseEquivalentGCPointer(Arg, Base))
+            Root = Base;
+        }
+
+        Root = nonPoisonOxCamlGCPointerValue(Root);
+        if (SeenGCArgs.insert(Root).second)
+          GCArgsStorage.push_back(Root);
+      }
+    }
+  }
+
+  ArrayRef<Value *> GCArgs(GCArgsStorage);
+
   // Create the statepoint given all the arguments
   GCStatepointInst *Token = nullptr;
   if (auto *CI = dyn_cast<CallInst>(Call)) {
@@ -4106,9 +4833,41 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
 
       RematerizlizationCandidateRecord &Record =
           RematerializedDerivedChains.find(Derived)->second;
-      Instruction *RematerializedValue =
-          rematerializeChain(Record.ChainToBase, BaseRelocate->getNextNode(),
-                             Record.RootOfChain, BaseRelocate);
+      Instruction *RematerializedValue = nullptr;
+      if (Record.RematerializationTag) {
+        IRBuilder<> SelectBuilder(BaseRelocate->getNextNode());
+        Value *Selected = nullptr;
+        for (const RematerializationAlternative &Alt : Record.Alternatives) {
+          Value *AlternativeValue = BaseRelocate;
+          if (!Alt.ChainToBase.empty())
+            AlternativeValue =
+                rematerializeChain(Alt.ChainToBase,
+                                   &*SelectBuilder.GetInsertPoint(),
+                                   Alt.RootOfChain, BaseRelocate);
+          if (!Selected) {
+            Selected = AlternativeValue;
+            continue;
+          }
+          Value *TagMatches = SelectBuilder.CreateICmpEQ(
+              Record.RematerializationTag,
+              ConstantInt::get(Record.RematerializationTag->getType(),
+                               Alt.Tag),
+              suffixed_name_or(Derived, ".remat.tag.match",
+                               "remat.tag.match"));
+          Selected = SelectBuilder.CreateSelect(
+              TagMatches, AlternativeValue, Selected,
+              suffixed_name_or(Derived, ".remat.select", "remat.select"));
+        }
+        RematerializedValue = cast<Instruction>(Selected);
+        if (!RematerializedValue)
+          report_fatal_error("missing OxCaml PHI rematerialization alternative");
+      } else if (Record.ChainToBase.empty()) {
+        RematerializedValue = BaseRelocate;
+      } else {
+        RematerializedValue =
+            rematerializeChain(Record.ChainToBase, BaseRelocate->getNextNode(),
+                               Record.RootOfChain, BaseRelocate);
+      }
       if (Record.UseRematerializedValue) {
         IRBuilder<> SelectBuilder(RematerializedValue->getNextNode());
         auto *SelectedValue = cast<Instruction>(SelectBuilder.CreateSelect(
@@ -4118,6 +4877,28 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
       } else {
         Result.RematerializedValues[RematerializedValue] = Derived;
       }
+    }
+  };
+
+  auto AddCallerFrameRootReloads = [&]() {
+    if (CallerFrameRootReloadValues.empty())
+      return;
+
+    const DataLayout &DL = Call->getModule()->getDataLayout();
+    SmallPtrSet<Value *, 8> SeenReloads;
+    for (Value *LiveValue : CallerFrameRootReloadValues) {
+      Value *Root = nonPoisonOxCamlGCPointerValue(LiveValue);
+      if (!SeenReloads.insert(Root).second)
+        continue;
+
+      auto SlotIt = CallerFrameRootSlots.find(Root);
+      if (SlotIt == CallerFrameRootSlots.end())
+        report_fatal_error("missing OxCaml C-call caller-frame root slot");
+
+      LoadInst *Reload = Builder.CreateAlignedLoad(
+          Root->getType(), SlotIt->second, DL.getABITypeAlign(Root->getType()),
+          suffixed_name_or(Root, ".cargroot.reload", "cargroot.reload"));
+      Result.RematerializedValues[Reload] = LiveValue;
     }
   };
 
@@ -4154,6 +4935,7 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
   // Second, create a gc.relocate for every live variable
   CreateGCRelocates(FilteredLiveVariables, FilteredBasePtrs, Token, Builder);
   AddDerivedRematerializations(Token);
+  AddCallerFrameRootReloads();
 }
 
 // Replace an existing gc.statepoint with a new one and a set of gc.relocates
@@ -4439,7 +5221,9 @@ static void relocationViaAlloca(
         Store->insertAfter(Inst);
       }
     } else {
-      assert(isa<Argument>(Def));
+      assert((isa<Argument>(Def) || isa<Constant>(Def)) &&
+             "expected non-instruction live value to be an argument or "
+             "constant");
       Store->insertAfter(cast<Instruction>(Alloca));
     }
   }
@@ -4626,10 +5410,11 @@ static bool areEquivalentRematerializableInstructions(Instruction *A,
   return false;
 }
 
-static Value *findRematerializablePhiChainToBasePhi(
+static Value *findRematerializablePhiChainToBasePhiImpl(
     SmallVectorImpl<Instruction *> &ChainToBase, PHINode *DerivedPhi,
     PHINode *BasePhi, const PointerToBaseTy &PointerToBase,
-    bool AllowIntegerAddressArithmetic, bool &NeedsBaseSelect) {
+    bool AllowIntegerAddressArithmetic, bool &NeedsBaseSelect,
+    SmallPtrSetImpl<PHINode *> &ActiveDerivedPhis) {
   auto DebugReject = [&](StringRef Reason, unsigned IncomingIndex,
                          Value *Incoming, Value *Root, Value *IncomingBase,
                          ArrayRef<Instruction *> IncomingChain) {
@@ -4674,6 +5459,15 @@ static Value *findRematerializablePhiChainToBasePhi(
       }
     }
   };
+  if (!ActiveDerivedPhis.insert(DerivedPhi).second) {
+    DebugReject("cycle", std::numeric_limits<unsigned>::max(), nullptr,
+                nullptr, nullptr, {});
+    return nullptr;
+  }
+  auto RemoveActiveDerivedPhi =
+      make_scope_exit([&]() { ActiveDerivedPhis.erase(DerivedPhi); });
+
+  NeedsBaseSelect = false;
   if (DerivedPhi->getParent() != BasePhi->getParent() ||
       DerivedPhi->getNumIncomingValues() != BasePhi->getNumIncomingValues()) {
     DebugReject("shape", std::numeric_limits<unsigned>::max(), nullptr,
@@ -4732,31 +5526,55 @@ static Value *findRematerializablePhiChainToBasePhi(
   bool SawBaseValueIncoming = false;
 
   for (unsigned I = 0, E = DerivedPhi->getNumIncomingValues(); I != E; ++I) {
+    Value *Incoming = DerivedPhi->getIncomingValue(I);
+    Value *IncomingBase = BasePhi->getIncomingValue(I);
     if (DerivedPhi->getIncomingBlock(I) != BasePhi->getIncomingBlock(I)) {
-      DebugReject("incoming-block", I, DerivedPhi->getIncomingValue(I),
-                  nullptr, BasePhi->getIncomingValue(I), {});
+      DebugReject("incoming-block", I, Incoming, nullptr, IncomingBase, {});
       return nullptr;
+    }
+
+    if (Incoming == IncomingBase) {
+      SawBaseValueIncoming = true;
+      continue;
     }
 
     SmallVector<Instruction *, 3> IncomingChain;
     Value *IncomingRoot = findRematerializableChainToBasePointer(
-        IncomingChain, DerivedPhi->getIncomingValue(I),
-        AllowIntegerAddressArithmetic);
-    if (!RootMatchesIncomingBase(IncomingRoot, BasePhi->getIncomingValue(I)))
-      TrimChainToIncomingBase(IncomingChain, IncomingRoot,
-                              BasePhi->getIncomingValue(I));
-    if (!IncomingChainMatchesBase(DerivedPhi->getIncomingValue(I),
-                                  IncomingRoot, BasePhi->getIncomingValue(I),
+        IncomingChain, Incoming, AllowIntegerAddressArithmetic);
+    if (!RootMatchesIncomingBase(IncomingRoot, IncomingBase))
+      TrimChainToIncomingBase(IncomingChain, IncomingRoot, IncomingBase);
+    bool IncomingMatchesByNestedPhi = false;
+    if (!IncomingChainMatchesBase(Incoming, IncomingRoot, IncomingBase,
                                   IncomingChain)) {
-      DebugReject("incoming-root", I, DerivedPhi->getIncomingValue(I),
-                  IncomingRoot, BasePhi->getIncomingValue(I), IncomingChain);
+      auto *IncomingDerivedPhi =
+          dyn_cast<PHINode>(Incoming);
+      auto *IncomingBasePhi = dyn_cast<PHINode>(IncomingBase);
+      if (IncomingDerivedPhi && IncomingBasePhi) {
+        SmallVector<Instruction *, 3> NestedIncomingChain;
+        bool NestedNeedsBaseSelect = false;
+        if (Value *NestedIncomingRoot =
+                findRematerializablePhiChainToBasePhiImpl(
+                    NestedIncomingChain, IncomingDerivedPhi, IncomingBasePhi,
+                    PointerToBase, AllowIntegerAddressArithmetic,
+                    NestedNeedsBaseSelect, ActiveDerivedPhis)) {
+          IncomingChain = NestedIncomingChain;
+          IncomingRoot = NestedIncomingRoot;
+          IncomingMatchesByNestedPhi = true;
+          NeedsBaseSelect |= NestedNeedsBaseSelect;
+        }
+      }
+    }
+    if (!IncomingMatchesByNestedPhi &&
+        !IncomingChainMatchesBase(Incoming, IncomingRoot, IncomingBase,
+                                  IncomingChain)) {
+      DebugReject("incoming-root", I, Incoming, IncomingRoot, IncomingBase,
+                  IncomingChain);
       return nullptr;
     }
 
     if (IncomingChain.empty()) {
-      if (DerivedPhi->getIncomingValue(I) != BasePhi->getIncomingValue(I)) {
-        DebugReject("empty-chain", I, DerivedPhi->getIncomingValue(I),
-                    IncomingRoot, BasePhi->getIncomingValue(I),
+      if (Incoming != IncomingBase) {
+        DebugReject("empty-chain", I, Incoming, IncomingRoot, IncomingBase,
                     IncomingChain);
         return nullptr;
       }
@@ -4783,9 +5601,180 @@ static Value *findRematerializablePhiChainToBasePhi(
   if (!SawDerivedChain)
     return nullptr;
 
-  NeedsBaseSelect = SawBaseValueIncoming;
+  NeedsBaseSelect |= SawBaseValueIncoming;
   llvm::append_range(ChainToBase, RepresentativeChain);
   return RepresentativeRoot;
+}
+
+static Value *findRematerializablePhiChainToBasePhi(
+    SmallVectorImpl<Instruction *> &ChainToBase, PHINode *DerivedPhi,
+    PHINode *BasePhi, const PointerToBaseTy &PointerToBase,
+    bool AllowIntegerAddressArithmetic, bool &NeedsBaseSelect) {
+  SmallPtrSet<PHINode *, 8> ActiveDerivedPhis;
+  return findRematerializablePhiChainToBasePhiImpl(
+      ChainToBase, DerivedPhi, BasePhi, PointerToBase,
+      AllowIntegerAddressArithmetic, NeedsBaseSelect, ActiveDerivedPhis);
+}
+
+static Value *findRematerializablePhiChainToSingleBase(
+    SmallVectorImpl<Instruction *> &ChainToBase, PHINode *DerivedPhi,
+    Value *Base, const PointerToBaseTy &PointerToBase,
+    bool AllowIntegerAddressArithmetic, bool &NeedsBaseSelect) {
+  SmallPtrSet<PHINode *, 8> ActiveDerivedPhis;
+
+  auto FindPhiChainToSingleBase =
+      [&](auto &&Self, SmallVectorImpl<Instruction *> &OutChainToBase,
+          PHINode *Phi, bool &OutNeedsBaseSelect) -> Value * {
+    auto DebugReject = [&](StringRef Reason, unsigned IncomingIndex,
+                           Value *Incoming, Value *Root,
+                           ArrayRef<Instruction *> IncomingChain) {
+      if (!DebugOxCamlDerivedRemat)
+        return;
+      errs() << "rs4gc-oxcaml-phi-single-base-chain-reject " << Reason;
+      if (IncomingIndex != std::numeric_limits<unsigned>::max())
+        errs() << " incoming " << IncomingIndex;
+      errs() << "\n  derived-phi: ";
+      Phi->print(errs());
+      errs() << "\n  base: ";
+      Base->print(errs());
+      errs() << "\n";
+      if (Incoming) {
+        errs() << "  incoming: ";
+        Incoming->print(errs());
+        errs() << "\n";
+      }
+      if (Root) {
+        errs() << "  root: ";
+        Root->print(errs());
+        errs() << "\n";
+      }
+      errs() << "  incoming-chain-size: " << IncomingChain.size() << "\n";
+      if (Incoming) {
+        if (auto It = PointerToBase.find(Incoming); It != PointerToBase.end()) {
+          errs() << "  incoming-pointer-to-base: ";
+          It->second->print(errs());
+          errs() << "\n";
+        }
+      }
+      if (Root) {
+        if (auto It = PointerToBase.find(Root); It != PointerToBase.end()) {
+          errs() << "  root-pointer-to-base: ";
+          It->second->print(errs());
+          errs() << "\n";
+        }
+      }
+    };
+
+    if (!ActiveDerivedPhis.insert(Phi).second) {
+      DebugReject("cycle", std::numeric_limits<unsigned>::max(), nullptr,
+                  nullptr, {});
+      return nullptr;
+    }
+    auto RemoveActiveDerivedPhi =
+        make_scope_exit([&]() { ActiveDerivedPhis.erase(Phi); });
+
+    auto IsBaseValue = [&](Value *V) {
+      return V == Base || isOxCamlBaseEquivalentGCPointer(V, Base);
+    };
+    auto RootMatchesBase = [&](Value *Root) {
+      if (IsBaseValue(Root))
+        return true;
+      auto It = PointerToBase.find(Root);
+      return It != PointerToBase.end() && It->second == Base;
+    };
+    auto IncomingChainMatchesBase =
+        [&](Value *Incoming, Value *Root,
+            ArrayRef<Instruction *> IncomingChain) {
+      if (IncomingChain.empty())
+        return IsBaseValue(Incoming);
+      if (RootMatchesBase(Root))
+        return true;
+      // Earlier statepoints can rematerialize PHI incoming values from a
+      // relocated copy of Base. The incoming rematerialized value remains
+      // mapped to Base even though its syntactic root is the earlier relocate.
+      auto It = PointerToBase.find(Incoming);
+      return It != PointerToBase.end() && It->second == Base;
+    };
+
+    SmallVector<Instruction *, 3> RepresentativeChain;
+    Value *RepresentativeRoot = nullptr;
+    bool SawDerivedChain = false;
+    bool SawBaseValueIncoming = false;
+
+    for (unsigned I = 0, E = Phi->getNumIncomingValues(); I != E; ++I) {
+      Value *Incoming = Phi->getIncomingValue(I);
+      if (IsBaseValue(Incoming)) {
+        SawBaseValueIncoming = true;
+        continue;
+      }
+
+      SmallVector<Instruction *, 3> IncomingChain;
+      Value *IncomingRoot = findRematerializableChainToBasePointer(
+          IncomingChain, Incoming, AllowIntegerAddressArithmetic);
+
+      bool IncomingMatchesByNestedPhi = false;
+      if (!IncomingChainMatchesBase(Incoming, IncomingRoot, IncomingChain)) {
+        if (auto *IncomingPhi = dyn_cast<PHINode>(Incoming)) {
+          SmallVector<Instruction *, 3> NestedIncomingChain;
+          bool NestedNeedsBaseSelect = false;
+          if (Value *NestedIncomingRoot =
+                  Self(Self, NestedIncomingChain, IncomingPhi,
+                       NestedNeedsBaseSelect)) {
+            IncomingChain = NestedIncomingChain;
+            IncomingRoot = NestedIncomingRoot;
+            IncomingMatchesByNestedPhi = true;
+            OutNeedsBaseSelect |= NestedNeedsBaseSelect;
+          }
+        }
+      }
+
+      if (!IncomingMatchesByNestedPhi &&
+          !IncomingChainMatchesBase(Incoming, IncomingRoot, IncomingChain)) {
+        DebugReject("incoming-root", I, Incoming, IncomingRoot, IncomingChain);
+        return nullptr;
+      }
+
+      if (IncomingChain.empty()) {
+        SawBaseValueIncoming = true;
+        continue;
+      }
+
+      if (!SawDerivedChain) {
+        RepresentativeChain = IncomingChain;
+        RepresentativeRoot = IncomingRoot;
+        SawDerivedChain = true;
+        continue;
+      }
+
+      if (IncomingChain.size() != RepresentativeChain.size()) {
+        DebugReject("chain-size", I, Incoming, IncomingRoot, IncomingChain);
+        return nullptr;
+      }
+      for (unsigned ChainIndex = 0, ChainEnd = IncomingChain.size();
+           ChainIndex != ChainEnd; ++ChainIndex) {
+        if (areEquivalentRematerializableInstructions(
+                IncomingChain[ChainIndex], RepresentativeChain[ChainIndex]))
+          continue;
+        DebugReject("chain-instruction", I, Incoming, IncomingRoot,
+                    IncomingChain);
+        return nullptr;
+      }
+    }
+
+    if (!SawDerivedChain) {
+      DebugReject("no-derived-chain", std::numeric_limits<unsigned>::max(),
+                  nullptr, nullptr, {});
+      return nullptr;
+    }
+
+    OutNeedsBaseSelect |= SawBaseValueIncoming;
+    llvm::append_range(OutChainToBase, RepresentativeChain);
+    return RepresentativeRoot;
+  };
+
+  NeedsBaseSelect = false;
+  return FindPhiChainToSingleBase(FindPhiChainToSingleBase, ChainToBase,
+                                  DerivedPhi, NeedsBaseSelect);
 }
 
 // Helper function for the "rematerializeLiveValues". Compute cost of the use
@@ -5203,6 +6192,459 @@ static bool inlineGetBaseAndOffset(Function &F,
   return Changed;
 }
 
+static bool canonicalizeOxCamlAddrSpace1IntToPtrAliases(Function &F,
+                                                        DominatorTree &DT) {
+  if (!isOxCamlFunction(F))
+    return false;
+
+  DenseMap<Value *, SmallVector<IntToPtrInst *, 4>> IntToPtrsByInteger;
+  for (BasicBlock &BB : F)
+    for (Instruction &I : BB)
+      if (auto *I2P = dyn_cast<IntToPtrInst>(&I))
+        if (auto *Ty = dyn_cast<PointerType>(I2P->getType()))
+          if (Ty->getAddressSpace() == 1)
+            IntToPtrsByInteger[I2P->getOperand(0)].push_back(I2P);
+
+  SmallVector<IntToPtrInst *, 16> DeadAliases;
+  bool Changed = false;
+  for (auto &Entry : IntToPtrsByInteger) {
+    SmallVector<IntToPtrInst *, 4> &IntToPtrs = Entry.second;
+    if (IntToPtrs.size() < 2)
+      continue;
+
+    for (IntToPtrInst *Alias : IntToPtrs) {
+      IntToPtrInst *NearestDominatingAlias = nullptr;
+      for (IntToPtrInst *Candidate : IntToPtrs) {
+        if (Candidate == Alias || Candidate->getType() != Alias->getType() ||
+            !DT.dominates(Candidate, Alias))
+          continue;
+
+        if (!NearestDominatingAlias ||
+            DT.dominates(NearestDominatingAlias, Candidate))
+          NearestDominatingAlias = Candidate;
+      }
+
+      if (!NearestDominatingAlias)
+        continue;
+
+      Alias->replaceAllUsesWith(NearestDominatingAlias);
+      DeadAliases.push_back(Alias);
+      Changed = true;
+    }
+  }
+
+  for (IntToPtrInst *Alias : DeadAliases)
+    if (Alias->use_empty())
+      Alias->eraseFromParent();
+
+  return Changed;
+}
+
+static void insertAvailableLiveInValues(BasicBlock *BB,
+                                        const SetVector<Value *> &SuccLiveIn,
+                                        SetVector<Value *> &LiveOut,
+                                        DominatorTree &DT);
+
+struct AddressIntegerLivenessData {
+  DenseMap<BasicBlock *, SetVector<Value *>> LiveSet;
+  DenseMap<BasicBlock *, SetVector<Value *>> LiveOut;
+  DenseMap<BasicBlock *, SetVector<Value *>> LiveIn;
+  DenseMap<BasicBlock *, SetVector<Value *>> KillSet;
+};
+
+static bool isOxCamlAddrSpace1PointerType(Type *Ty) {
+  if (!Ty->isPtrOrPtrVectorTy())
+    return false;
+  auto *PtrTy = dyn_cast<PointerType>(Ty->getScalarType());
+  return PtrTy && PtrTy->getAddressSpace() == 1;
+}
+
+static void collectOxCamlAddrSpace1IntToPtrContributingIntegers(
+    Function &F, SmallPtrSetImpl<Value *> &AddressIntegers) {
+  SmallVector<Value *, 32> Worklist;
+
+  auto Mark = [&](Value *V) {
+    if (isa<Constant>(V) || !V->getType()->isIntOrIntVectorTy())
+      return;
+    if (AddressIntegers.insert(V).second)
+      Worklist.push_back(V);
+  };
+
+  for (Instruction &I : instructions(F))
+    if (auto *I2P = dyn_cast<IntToPtrInst>(&I))
+      if (isOxCamlAddrSpace1PointerType(I2P->getType()))
+        Mark(I2P->getOperand(0));
+
+  while (!Worklist.empty()) {
+    Value *AddressInteger = Worklist.pop_back_val();
+    auto *I = dyn_cast<Instruction>(AddressInteger);
+    if (!I)
+      continue;
+
+    if (auto *BO = dyn_cast<BinaryOperator>(I)) {
+      Mark(BO->getOperand(0));
+      Mark(BO->getOperand(1));
+      continue;
+    }
+
+    if (auto *CI = dyn_cast<CastInst>(I)) {
+      Mark(CI->getOperand(0));
+      continue;
+    }
+
+    if (auto *FI = dyn_cast<FreezeInst>(I)) {
+      Mark(FI->getOperand(0));
+      continue;
+    }
+
+    if (auto *PN = dyn_cast<PHINode>(I)) {
+      for (Value *Incoming : PN->incoming_values())
+        Mark(Incoming);
+      continue;
+    }
+
+    if (auto *SI = dyn_cast<SelectInst>(I)) {
+      Mark(SI->getTrueValue());
+      Mark(SI->getFalseValue());
+      continue;
+    }
+
+    if (auto *EE = dyn_cast<ExtractElementInst>(I)) {
+      Mark(EE->getVectorOperand());
+      continue;
+    }
+
+    if (auto *IE = dyn_cast<InsertElementInst>(I)) {
+      Mark(IE->getOperand(0));
+      Mark(IE->getOperand(1));
+      continue;
+    }
+
+    if (auto *SV = dyn_cast<ShuffleVectorInst>(I)) {
+      Mark(SV->getOperand(0));
+      Mark(SV->getOperand(1));
+      continue;
+    }
+  }
+}
+
+static void computeAddressIntegerLiveInValues(
+    BasicBlock::reverse_iterator Begin, BasicBlock::reverse_iterator End,
+    const SmallPtrSetImpl<Value *> &AddressIntegers,
+    SetVector<Value *> &LiveTmp) {
+  for (auto &I : make_range(Begin, End)) {
+    LiveTmp.remove(&I);
+
+    if (isa<PHINode>(I))
+      continue;
+
+    for (Value *V : I.operands())
+      if (AddressIntegers.contains(V))
+        LiveTmp.insert(V);
+  }
+}
+
+static void computeAddressIntegerLiveOutSeed(
+    BasicBlock *BB, const SmallPtrSetImpl<Value *> &AddressIntegers,
+    SetVector<Value *> &LiveTmp) {
+  for (BasicBlock *Succ : successors(BB)) {
+    for (auto &I : *Succ) {
+      PHINode *PN = dyn_cast<PHINode>(&I);
+      if (!PN)
+        break;
+
+      Value *V = PN->getIncomingValueForBlock(BB);
+      if (AddressIntegers.contains(V))
+        LiveTmp.insert(V);
+    }
+  }
+}
+
+static SetVector<Value *> computeAddressIntegerKillSet(
+    BasicBlock *BB, const SmallPtrSetImpl<Value *> &AddressIntegers) {
+  SetVector<Value *> KillSet;
+  for (Instruction &I : *BB)
+    if (AddressIntegers.contains(&I))
+      KillSet.insert(&I);
+  return KillSet;
+}
+
+static void computeAddressIntegerLiveInValues(
+    DominatorTree &DT, Function &F,
+    const SmallPtrSetImpl<Value *> &AddressIntegers,
+    AddressIntegerLivenessData &Data) {
+  SmallSetVector<BasicBlock *, 32> Worklist;
+
+  for (BasicBlock &BB : F) {
+    Data.KillSet[&BB] = computeAddressIntegerKillSet(&BB, AddressIntegers);
+    Data.LiveSet[&BB].clear();
+    computeAddressIntegerLiveInValues(BB.rbegin(), BB.rend(), AddressIntegers,
+                                      Data.LiveSet[&BB]);
+
+    Data.LiveOut[&BB] = SetVector<Value *>();
+    computeAddressIntegerLiveOutSeed(&BB, AddressIntegers, Data.LiveOut[&BB]);
+    Data.LiveIn[&BB] = Data.LiveSet[&BB];
+    Data.LiveIn[&BB].set_union(Data.LiveOut[&BB]);
+    Data.LiveIn[&BB].set_subtract(Data.KillSet[&BB]);
+    if (!Data.LiveIn[&BB].empty())
+      Worklist.insert(pred_begin(&BB), pred_end(&BB));
+  }
+
+  while (!Worklist.empty()) {
+    BasicBlock *BB = Worklist.pop_back_val();
+
+    SetVector<Value *> LiveOut = Data.LiveOut[BB];
+    const auto OldLiveOutSize = LiveOut.size();
+    for (BasicBlock *Succ : successors(BB)) {
+      assert(Data.LiveIn.count(Succ));
+      insertAvailableLiveInValues(BB, Data.LiveIn[Succ], LiveOut, DT);
+    }
+    if (OldLiveOutSize == LiveOut.size())
+      continue;
+
+    Data.LiveOut[BB] = LiveOut;
+
+    SetVector<Value *> LiveTmp = LiveOut;
+    LiveTmp.set_union(Data.LiveSet[BB]);
+    LiveTmp.set_subtract(Data.KillSet[BB]);
+
+    assert(Data.LiveIn.count(BB));
+    const SetVector<Value *> &OldLiveIn = Data.LiveIn[BB];
+    if (OldLiveIn.size() != LiveTmp.size()) {
+      Data.LiveIn[BB] = LiveTmp;
+      Worklist.insert(pred_begin(BB), pred_end(BB));
+    }
+  }
+}
+
+static void findAddressIntegerLiveSetAtInst(
+    Instruction *Inst, const SmallPtrSetImpl<Value *> &AddressIntegers,
+    AddressIntegerLivenessData &Data, SetVector<Value *> &Out) {
+  BasicBlock *BB = Inst->getParent();
+
+  assert(Data.LiveOut.count(BB));
+  SetVector<Value *> LiveOut = Data.LiveOut[BB];
+  computeAddressIntegerLiveInValues(BB->rbegin(),
+                                    Inst->getIterator().getReverse(),
+                                    AddressIntegers, LiveOut);
+  LiveOut.remove(Inst);
+  Out.insert(LiveOut.begin(), LiveOut.end());
+}
+
+static bool isPotentiallyAfterStatepoint(CallBase *Call, Instruction *I,
+                                         DominatorTree &DT) {
+  BasicBlock *UserBB = I->getParent();
+
+  if (auto *Invoke = dyn_cast<InvokeInst>(Call)) {
+    if (UserBB == Invoke->getParent())
+      return false;
+    return isPotentiallyReachable(Invoke->getNormalDest(), UserBB, nullptr,
+                                  &DT) ||
+           isPotentiallyReachable(Invoke->getUnwindDest(), UserBB, nullptr,
+                                  &DT);
+  }
+
+  BasicBlock *CallBB = Call->getParent();
+  if (UserBB == CallBB)
+    return Call->comesBefore(I);
+
+  return isPotentiallyReachable(CallBB, UserBB, nullptr, &DT);
+}
+
+static void collectAddrSpace1IntToPtrUsers(
+    Value *V, const SmallPtrSetImpl<Value *> &AddressIntegers,
+    SmallPtrSetImpl<Value *> &Visited, SmallVectorImpl<IntToPtrInst *> &Out) {
+  for (User *U : V->users()) {
+    auto *I = dyn_cast<Instruction>(U);
+    if (!I)
+      continue;
+
+    if (auto *I2P = dyn_cast<IntToPtrInst>(I)) {
+      if (isOxCamlAddrSpace1PointerType(I2P->getType()))
+        Out.push_back(I2P);
+      continue;
+    }
+
+    if (!AddressIntegers.contains(I))
+      continue;
+
+    if (Visited.insert(I).second)
+      collectAddrSpace1IntToPtrUsers(I, AddressIntegers, Visited, Out);
+  }
+}
+
+static bool isLikelyOxCamlAllocationPointerInteger(
+    Value *V, SmallPtrSetImpl<Value *> &Active) {
+  if (!V->getType()->isIntegerTy())
+    return false;
+
+  // This is only a heuristic report filter.  Preserve the frontend's
+  // allocation-pointer naming as a fallback for optimized phis/selects whose
+  // structural origin is no longer obvious to this local walk.
+  if (V->hasName() && V->getName().starts_with("alloc"))
+    return true;
+
+  if (auto *Arg = dyn_cast<Argument>(V)) {
+    Function *F = Arg->getParent();
+    return F && isOxCamlFunction(*F) && Arg->getArgNo() == 1;
+  }
+
+  auto *I = dyn_cast<Instruction>(V);
+  if (!I)
+    return false;
+
+  if (!Active.insert(I).second)
+    return true;
+  auto PopActive = make_scope_exit([&]() { Active.erase(I); });
+
+  if (auto *EV = dyn_cast<ExtractValueInst>(I)) {
+    ArrayRef<unsigned> Indices = EV->getIndices();
+    if (Indices.size() == 2 && Indices[0] == 0 && Indices[1] == 1)
+      if (auto *Call = dyn_cast<CallBase>(EV->getAggregateOperand()))
+        return isOxCamlCallingConv(Call->getCallingConv());
+    return false;
+  }
+
+  if (auto *BO = dyn_cast<BinaryOperator>(I)) {
+    Value *LHS = BO->getOperand(0);
+    Value *RHS = BO->getOperand(1);
+    if (isa<ConstantInt>(LHS))
+      return isLikelyOxCamlAllocationPointerInteger(RHS, Active);
+    if (isa<ConstantInt>(RHS))
+      return isLikelyOxCamlAllocationPointerInteger(LHS, Active);
+    return false;
+  }
+
+  if (auto *CI = dyn_cast<CastInst>(I))
+    return isLikelyOxCamlAllocationPointerInteger(CI->getOperand(0), Active);
+
+  if (auto *FI = dyn_cast<FreezeInst>(I))
+    return isLikelyOxCamlAllocationPointerInteger(FI->getOperand(0), Active);
+
+  if (auto *PN = dyn_cast<PHINode>(I)) {
+    bool SawIncoming = false;
+    for (Value *Incoming : PN->incoming_values()) {
+      if (isa<ConstantInt>(Incoming))
+        continue;
+      SawIncoming = true;
+      if (!isLikelyOxCamlAllocationPointerInteger(Incoming, Active))
+        return false;
+    }
+    return SawIncoming;
+  }
+
+  if (auto *SI = dyn_cast<SelectInst>(I)) {
+    Value *TrueValue = SI->getTrueValue();
+    Value *FalseValue = SI->getFalseValue();
+    return isLikelyOxCamlAllocationPointerInteger(TrueValue, Active) &&
+           isLikelyOxCamlAllocationPointerInteger(FalseValue, Active);
+  }
+
+  return false;
+}
+
+static bool isLikelyOxCamlAllocationPointerInteger(Value *V) {
+  SmallPtrSet<Value *, 16> Active;
+  return isLikelyOxCamlAllocationPointerInteger(V, Active);
+}
+
+static void heuristicReportOxCamlStatepointCrossingIntToPtrs(
+    Function &F, DominatorTree &DT, ArrayRef<CallBase *> ToUpdate) {
+  if (!HeuristicReportOxCamlStatepointCrossingIntToPtr || !isOxCamlFunction(F))
+    return;
+
+  auto ReachedTotalLimit = [] {
+    return HeuristicReportOxCamlStatepointCrossingIntToPtrTotalLimit != 0 &&
+           OxCamlHeuristicStatepointCrossingIntToPtrReports >=
+               HeuristicReportOxCamlStatepointCrossingIntToPtrTotalLimit;
+  };
+  auto ReportTotalLimit = [&] {
+    if (OxCamlHeuristicStatepointCrossingIntToPtrLimitReported)
+      return;
+    errs() << "OxCaml heuristic candidate total report limit reached: "
+              "further statepoint-crossing inttoptr candidates suppressed\n";
+    OxCamlHeuristicStatepointCrossingIntToPtrLimitReported = true;
+  };
+
+  if (ReachedTotalLimit()) {
+    ReportTotalLimit();
+    return;
+  }
+
+  SmallPtrSet<Value *, 32> AddressIntegers;
+  collectOxCamlAddrSpace1IntToPtrContributingIntegers(F, AddressIntegers);
+  if (AddressIntegers.empty())
+    return;
+
+  AddressIntegerLivenessData Liveness;
+  computeAddressIntegerLiveInValues(DT, F, AddressIntegers, Liveness);
+
+  unsigned ReportedStatepoints = 0;
+  unsigned SuppressedStatepoints = 0;
+  unsigned SuppressedCandidates = 0;
+  for (CallBase *Call : ToUpdate) {
+    SetVector<Value *> LiveAddressIntegers;
+    findAddressIntegerLiveSetAtInst(Call, AddressIntegers, Liveness,
+                                    LiveAddressIntegers);
+
+    for (Value *V : Call->operands())
+      if (AddressIntegers.contains(V))
+        LiveAddressIntegers.insert(V);
+
+    SmallVector<std::pair<Value *, IntToPtrInst *>, 8> Candidates;
+    SmallPtrSet<IntToPtrInst *, 8> SeenIntToPtrs;
+    for (Value *V : LiveAddressIntegers) {
+      if (isLikelyOxCamlAllocationPointerInteger(V))
+        continue;
+      SmallPtrSet<Value *, 16> Visited;
+      SmallVector<IntToPtrInst *, 4> IntToPtrs;
+      collectAddrSpace1IntToPtrUsers(V, AddressIntegers, Visited, IntToPtrs);
+      for (IntToPtrInst *I2P : IntToPtrs)
+        if (!isLikelyOxCamlAllocationPointerInteger(I2P->getOperand(0)) &&
+            SeenIntToPtrs.insert(I2P).second &&
+            isPotentiallyAfterStatepoint(Call, I2P, DT))
+          Candidates.push_back({V, I2P});
+    }
+
+    if (Candidates.empty())
+      continue;
+
+    if (ReachedTotalLimit()) {
+      ReportTotalLimit();
+      return;
+    }
+
+    if (HeuristicReportOxCamlStatepointCrossingIntToPtrLimit != 0 &&
+        ReportedStatepoints >=
+            HeuristicReportOxCamlStatepointCrossingIntToPtrLimit) {
+      ++SuppressedStatepoints;
+      SuppressedCandidates += Candidates.size();
+      continue;
+    }
+
+    ++ReportedStatepoints;
+    ++OxCamlHeuristicStatepointCrossingIntToPtrReports;
+    errs() << "OxCaml heuristic candidate: statepoint-crossing integer "
+              "contributes to inttoptr ptr addrspace(1)\n  function: "
+           << F.getName() << "\n  statepoint: ";
+    Call->print(errs());
+    errs() << "\n";
+    for (auto [AddressInteger, IntToPtr] : Candidates) {
+      errs() << "  crossing integer: ";
+      AddressInteger->print(errs());
+      errs() << "\n  addrspace(1) inttoptr: ";
+      IntToPtr->print(errs());
+      errs() << "\n";
+    }
+  }
+
+  if (SuppressedStatepoints != 0)
+    errs() << "OxCaml heuristic candidate report limit reached in function "
+           << F.getName() << ": suppressed " << SuppressedStatepoints
+           << " statepoints with " << SuppressedCandidates
+           << " integer/inttoptr pairs\n";
+}
+
 static bool insertParsePoints(Function &F, DominatorTree &DT,
                               TargetTransformInfo &TTI,
                               SmallVectorImpl<CallBase *> &ToUpdate,
@@ -5222,6 +6664,8 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
   ExplicitExceptionRootCallSetTy ExplicitExceptionRootCalls;
   if (rematerializeOxCamlDerivedGEPsAtUses(F))
     DT.recalculate(F);
+  canonicalizeOxCamlAddrSpace1IntToPtrAliases(F, DT);
+  heuristicReportOxCamlStatepointCrossingIntToPtrs(F, DT, ToUpdate);
   materializeOxCamlExceptionRootSlots(F, DT, ExplicitRootSlots,
                                       ExplicitExceptionRootCalls, DVCache,
                                       KnownBases);
@@ -5284,6 +6728,17 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
     }
     Records[I].UsesExplicitExceptionRoots =
         ExplicitExceptionRootCalls.contains(ToUpdate[I]);
+    if (needsCallerFrameRootsForOxCamlCArgs(ToUpdate[I]->getCallingConv())) {
+      for (Value *Arg : ToUpdate[I]->args()) {
+        checkNoUnhandledGCPointerType(Arg, "OxCaml C-call arguments");
+        if (!isHandledGCPointerType(Arg->getType()))
+          continue;
+        if (!isGCPointerType(Arg->getType()))
+          report_fatal_error(
+              "OxCaml C-call GC pointer arguments must be scalar pointers");
+        Records[I].CallerFrameRootValues.push_back(Arg);
+      }
+    }
   }
 
   // A) Identify all gc pointers which are statically live at the given call
@@ -5297,6 +6752,11 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
   for (size_t i = 0; i < Records.size(); i++) {
     PartiallyConstructedSafepointRecord &info = Records[i];
     findBasePointers(DT, DVCache, ToUpdate[i], info, PointerToBase, KnownBases);
+  }
+  if (rewriteOxCamlExplicitRootStoresToBases(AllExplicitRootSlots,
+                                             PointerToBase, DT)) {
+    DVCache.clear();
+    KnownBases.clear();
   }
   if (PrintBasePointers) {
     errs() << "Base Pairs (w/o Relocation):\n";
@@ -5473,6 +6933,8 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
       KnownBases);
   SmallVector<Value *, 16> LateAllExplicitRootSlots;
   collectExplicitRootSlots(LateExplicitRootSlots, LateAllExplicitRootSlots);
+  ChangedLateRoots |=
+      materializeRemainingOxCamlRecoveryPhis(F, DT, LateAllExplicitRootSlots);
   ChangedLateRoots |=
       appendExplicitRootSlotsToAllStatepoints(F, LateAllExplicitRootSlots);
   return !Records.empty() || ChangedLateRoots;

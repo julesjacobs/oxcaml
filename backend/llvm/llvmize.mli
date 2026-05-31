@@ -31,6 +31,8 @@ val cfg : Cfg_with_layout.t -> unit
 
 val data : Cmm.data_item list -> unit
 
+val register_function_signatures : Cmm.phrase list -> unit
+
 val begin_assembly : is_startup:bool -> sourcefile:string option -> unit
 
 val end_assembly : unit -> unit

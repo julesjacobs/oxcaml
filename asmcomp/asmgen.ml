@@ -499,6 +499,12 @@ let compile_via_llvm ~ppf_dump ~funcnames cfg_with_layout =
          |> Cfg_stack_checks.cfg
          |> pass_dump_cfg_if ppf_dump Oxcaml_flags.dump_cfg
               "After cfg_stack_checks")
+  ++ (fun (cfg_with_layout : Cfg_with_layout.t) ->
+       (Cfg_with_layout.cfg cfg_with_layout).allowed_to_be_irreducible <- true;
+       cfg_with_layout)
+  ++ cfg_with_layout_profile ~accumulate:true "cfg_simplify"
+       (Cfg_simplify.run
+          ~allow_terminator_value_propagation_before_regalloc:true)
   ++ Profile.record ~accumulate:true "save_cfg" save_cfg
   ++ Profile.record ~accumulate:true "llvmize" Llvmize.cfg
 
@@ -539,6 +545,7 @@ let compile_phrases ~ppf_dump ps =
         | Cdata _ -> s)
       String.Set.empty ps
   in
+  if !Clflags.llvm_backend then Llvmize.register_function_signatures ps;
   let rec compile ~funcnames ps =
     match ps with
     | [] -> ()

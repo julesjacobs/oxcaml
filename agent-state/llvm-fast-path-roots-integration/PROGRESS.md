@@ -1,6 +1,6 @@
 # Progress
 
-Last updated: 2026-05-30.
+Last updated: 2026-05-31.
 
 ## Current state
 
@@ -15,6 +15,65 @@ of the hot `_wrap_try` helper.
 
 Late-root diagnostic note:
 `agent-state/llvm-fast-path-roots-integration/LATE_ROOT_FAILURE_NOTES.md`.
+
+2026-05-31 no-frontend-root diagnostic update:
+
+- Mental model: an OxCaml `addrspace(1)` value is an OCaml value. It can be a
+  true GC heap pointer or an immediate. Casting a true GC heap pointer to an
+  integer, carrying that integer across a statepoint, and casting it back to
+  `ptr addrspace(1)` is unsafe because the GC may have moved the object while
+  the integer kept the old address. The same shape is safe when the value was
+  an immediate in the source/Cmm program, for example an OCaml `int`; there is
+  no moved heap object that the integer needed the frametable to update.
+  Therefore this IR shape is a useful corruption-candidate heuristic, not a
+  correctness invariant by itself.
+- The broad "addrspace(1)-derived integer crosses a statepoint" check was too
+  strong. It rejected legitimate immediate-valued integers, for example
+  `matching.ml` values that are Cmm `int` but are later consumed by a callee
+  whose signature is `val`.
+- Semantic repair of pointer-to-int casts by adding `or 1` was removed. That
+  transformation changed program values and broke the product-array focused
+  test. The no-frontend-roots model must preserve value semantics and rely on
+  correct representation plus RS4GC, not local post-hoc tagging.
+- RS4GC now has an opt-in heuristic report,
+  `-mllvm -rs4gc-heuristic-report-oxcaml-statepoint-crossing-inttoptr`, for
+  debugging corruption candidates. It reports integer values live across a
+  statepoint that later contribute to `inttoptr ... to ptr addrspace(1)`, but
+  it is explicitly not a correctness invariant. The report is bounded by a
+  total default limit and filters normal allocation-pointer-derived object
+  construction.
+- With that heuristic enabled, the saved `matching.ml` reproducer compiles and
+  reports only three candidates after allocation-pointer filtering. They are
+  all in `Matching.as_interval`: Cmm types `low:int` and `high:int` cross calls
+  and are later cast for `get_edges`, whose parameters are `val`. Current
+  interpretation: useful heuristic candidate, not evidence of a rooting bug.
+
+2026-05-30 no-frontend RS4GC update:
+
+- StackMaps now fails closed for OxCaml statepoints if a base/derived pair
+  reaches stackmap lowering. The intended invariant is that RS4GC either
+  rematerializes a derived addrspace(1) value from a relocated base or reports
+  the invariant violation before frametable lowering.
+- OxCaml C-call scalar addrspace(1) arguments are now materialized as exact
+  caller-frame roots for the duration of the call. These explicit root slots
+  are different from relocation pairs: they may hold exact OCaml values,
+  including derived values, because the runtime scans the slot itself.
+- Distinct addrspace(1) base-equivalent values are now rematerialized as
+  zero-offset GEPs from the relocated base instead of being independently
+  rooted.
+- The `lib-set/testmap.ml` failure exposed an invoke rematerialization
+  predicate bug. RS4GC was rejecting a derived value because the value also had
+  users on later rejoin paths not dominated by the invoke normal destination.
+  That is valid for the alloca/mem2reg relocation rewrite: the normal-edge
+  rematerialized store is merged with other incoming definitions. The predicate
+  now rejects only direct invoke-to-normal PHI edges and uses that are not
+  reachable from the normal edge.
+- Focused validation passed after this change: RS4GC lit coverage for invoke
+  rematerialization, invoke rejoin rematerialization, invoke handler-root
+  rematerialization, derived-live negative, base-equivalent PHI, and C-call
+  argument roots; direct clang lowering of the saved `testmap.ll`; and
+  `make test-one-no-rebuild TEST=lib-set/testmap.ml` with
+  `llvm-unsafe-no-frontend-alloca-roots=1`.
 
 2026-05-30 weaktest/no-frontend follow-up:
 
@@ -2366,3 +2425,126 @@ slots:
   failure to an earlier `String.contains` bounds exception in
   `Hashtbl.randomized_default`, so startup/global-root handling needs the next
   focused investigation.
+
+2026-05-30 non-scannable Write_offset heap-address fix:
+
+- Root-caused
+  `records-and-block-indices/generated_array_idx_access_native_test.ml`
+  failing with `llvm-unsafe-no-frontend-alloca-roots=1`.
+  The line-185 `Gc.compact` statepoint correctly rooted the product array, but
+  the later line-206 depth-1 store used an `i64` copy of the array base that was
+  computed before compaction.  Frontend roots masked this by updating the
+  explicit stack slot holding the integer address; without frontend roots the
+  stale integer wrote to the old array address.
+- The stale integer was already in raw LLVM IR.  It came from
+  `Write_offset` lowering for non-scannable payloads, which used `C.add_int`
+  for heap writes.  Changed that path to use `C.add_int_ptr
+  ~ptr_out_of_heap:false` for `Into_block`, and for
+  `Into_block_or_off_heap` to branch: NULL base writes directly to the
+  off-heap address argument, non-NULL base uses address-typed heap pointer
+  arithmetic.
+- Also fixed `llvmize.ml` register-slot reloads to load using the natural
+  register type first and cast afterward.  This prevents a `ptr addrspace(1)`
+  alloca from also being loaded as `i64`, which had blocked promotion and hid
+  live GC pointers from RS4GC in earlier generated-array IR.
+- Validation:
+  - Rebuilt the installed native compiler with
+    `make install LLVM_BOOT_BACKEND=0 LLVM_BACKEND=0 OCAMLPARAM=
+    BUILD_OCAMLPARAM=`.
+  - Manual `-Oclassic -keep-llvmir` no-frontend repro for
+    `generated_array_idx_access_native_test.ml` now passes.
+  - The optimized IR for the failing line-206 store now uses
+    `getelementptr ... ptr addrspace(1)` from the relocated array value instead
+    of a pre-compact `ptrtoint`.
+  - Testsuite single no-frontend run for
+    `records-and-block-indices/generated_array_idx_access_native_test.ml`
+    passed:
+    `generated_array_no_frontend_after_non_scannable_write_fix_20260530_151953.log`.
+  - `weak-ephe-final/weaktest.ml` now passes with frontend roots disabled:
+    `weaktest_no_frontend_after_non_scannable_write_fix_20260530_152735.log`.
+  - `typing-layouts-iarrays` now passes with frontend roots disabled:
+    `focused_typing-layouts-iarrays_no_frontend_after_non_scannable_write_fix_20260530_153255.log`.
+  - `typing-layouts-arrays` improved from multiple product-array failures to
+    one remaining intermittent/harness-sensitive O3 bus error in
+    `test_ignoreable_or_null_product_array.ml` line 17:
+    `focused_typing-layouts-arrays_no_frontend_clean_after_weakpass_20260530_152749.log`.
+    The same O3 binary passes when invoked directly from the same directory and
+    with the harness environment reproduced, so this still needs a captured
+    failing run before changing code.
+
+2026-05-30 LLVM-built boot compiler small-heap blocker:
+
+- Forced-small-heap `stdlib.pp.ml` native compilation fails while the
+  LLVM-built boot compiler is running Flambda2 middle-end code, before target
+  LLVM IR is relevant. Native-built compiler controls pass the same small-heap
+  runs, so this is a rooting/codegen bug in the LLVM-built boot compiler.
+- `-O0` boot experiments are not useful evidence: the backend relies on
+  mem2reg/promotion to expose GC pointer SSA values for RS4GC.
+- Captured boot IR for crash-stack modules shows raw frontend `gc-live` bundles
+  still present before RS4GC in large functions such as
+  `Simplify_binary_primitive.simplify_3_*`.
+- Running RS4GC with `-rs4gc-debug-oxcaml-gc-pointer-allocas` shows those
+  pre-existing `gc-live` bundles make many `ptr addrspace(1)` allocas
+  unpromotable, for example
+  `simplify_3_91_code: promotable=349 rejected=36`.
+- This is the current suspected invariant violation: under the new model the
+  frontend should not emit explicit register-slot `gc-live` roots, because they
+  pin stack-form GC locals and block the promotion RS4GC needs. The next check
+  is whether the boot build is missing `llvm-unsafe-no-frontend-alloca-roots=1`
+  or whether the remaining slow-path root-slot mechanism is still being used in
+  places that must be converted to the late RS4GC model.
+
+2026-05-30 strict optimized boot IR blocker update:
+
+- Discarded the `-O0` evidence.  The useful reproducer is optimized boot IR
+  built with both `llvm-unsafe-no-frontend-alloca-roots=1` and
+  `llvm-unsafe-no-slow-path-root-slots=1`.
+- In that strict build, `cfg_to_linear.ll` and
+  `flambda2_to_cmm__To_cmm_primitive.ll` fail in StackMaps with the OxCaml
+  fail-closed derived-pointer check.  Adding diagnostics showed the first
+  `cfg_to_linear` failure is a machine statepoint base/derived pair whose base
+  and derived values are distinct stack slots.
+- The RS4GC-only snapshot for the first failing statepoint has scalar
+  self-relocates.  The full `-O3` pipeline differs because SLP vectorizes GC
+  pointer values before RS4GC.  After `SLPVectorizerPass`, the first failing
+  function contains `<2 x ptr addrspace(1)>` values; after RS4GC it has
+  derived vector relocates such as
+  `gc.relocate.v2p1(token %statepoint_token, i32 7, i32 0)` for
+  `%base_phi -> %16`.
+- Focused experiment: compiling both failing raw IR files with `-O3
+  -fno-slp-vectorize` succeeds.  This validates that the immediate blocker is
+  SLP-created vector GC pointers, not `mem2reg` or scalar frontend IR typing.
+- Upstream LLVM documents and historical review threads indicate vectors of GC
+  pointers are only partially supported by RS4GC.  That is insufficient for
+  OxCaml because the runtime stackmap consumer cannot accept derived pointer
+  entries or vector GC roots.  The next principled fix is to prevent SLP from
+  forming vector values whose element type is an OxCaml GC pointer, rather than
+  weakening the StackMaps assertion.
+
+2026-05-31 strict no-frontend/no-slow-slots update:
+
+- Added an OxCaml SLP guard so SLP does not form vector values containing
+  `ptr addrspace(1)` GC pointers in OxCaml functions.  This keeps RS4GC in the
+  scalar pointer model that StackMaps/OxCaml frametables can represent.
+- Tightened RS4GC explicit exception roots:
+  - explicit exception root slots are rewritten to final base values when the
+    stored value is base-equivalent;
+  - true derived `addrspace(1)` stores into explicit roots fail closed;
+  - base-equivalence through exception-root loads is proved from the slot's
+    non-constant stores, not from the broad `PointerToBase[V] == B` relation.
+- Fixed invoke/recovery cases exposed by the strict boot IR:
+  - recursive PHI/base-PHI relations with exception-root loads are accepted
+    only when the slot contents prove base-equivalence;
+  - explicit root stores through landingpad trampolines with PHIs are resolved
+    to the value on the original invoke unwind edge;
+  - remaining recovery-block PHIs are lowered to edge stores plus loads after
+    `llvm.aarch64.oxcaml.trap.recover`, so AArch64 codegen still sees the
+    trap-recover intrinsic as the first real instruction in runtime-entered
+    recovery blocks.
+- Direct `clang -O3` repros now pass for the preserved strict raw IR files:
+  `matching.ll`, `env.ll`, `dll.ll`, `ctype.ll`, `Owee_location.ll`, and
+  `Flambda_kind.ll`.
+- Strict optimized boot build now passes:
+  `rebuild_boot_no_frontend_no_slow_slots_after_exception_root_fixes_20260531.log`
+  (`boot_ocamlopt.exe`, workspace
+  `boot_no_frontend_no_slow_slots_20260530_2016.ws`).

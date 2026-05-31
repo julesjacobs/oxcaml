@@ -1715,13 +1715,16 @@ MachineBasicBlock *MachineBlockPlacement::selectBestCandidateBlock(
   if (WorkList.empty())
     return nullptr;
 
-  bool IsEHPad = WorkList[0]->isEHPad();
+  auto IsExceptionalEntry = [](const MachineBasicBlock *MBB) {
+    return MBB->isEHPad() || MBB->isRuntimeEntered();
+  };
+  bool IsEHLike = IsExceptionalEntry(WorkList[0]);
 
   MachineBasicBlock *BestBlock = nullptr;
   BlockFrequency BestFreq;
   for (MachineBasicBlock *MBB : WorkList) {
-    assert(MBB->isEHPad() == IsEHPad &&
-           "EHPad mismatch between block and work list.");
+    assert(IsExceptionalEntry(MBB) == IsEHLike &&
+           "exceptional-entry mismatch between block and work list.");
 
     BlockChain &SuccChain = *BlockToChain[MBB];
     if (&SuccChain == &Chain)
@@ -1734,8 +1737,9 @@ MachineBasicBlock *MachineBlockPlacement::selectBestCandidateBlock(
     LLVM_DEBUG(dbgs() << "    " << getBlockName(MBB) << " -> ";
                MBFI->printBlockFreq(dbgs(), CandidateFreq) << " (freq)\n");
 
-    // For ehpad, we layout the least probable first as to avoid jumping back
-    // from least probable landingpads to more probable ones.
+    // For EH-like entry blocks, we layout the least probable first as to avoid
+    // jumping back from least probable landingpads/runtime entries to more
+    // probable ones.
     //
     // FIXME: Using probability is probably (!) not the best way to achieve
     // this. We should probably have a more principled approach to layout
@@ -1752,7 +1756,7 @@ MachineBasicBlock *MachineBlockPlacement::selectBestCandidateBlock(
     //                 +-------------------------------------+
     //                 V                                     |
     // OuterLp -> OuterCleanup -> Resume     InnerLp -> InnerCleanup
-    if (BestBlock && (IsEHPad ^ (BestFreq >= CandidateFreq)))
+    if (BestBlock && (IsEHLike ^ (BestFreq >= CandidateFreq)))
       continue;
 
     BestBlock = MBB;

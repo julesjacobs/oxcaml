@@ -202,6 +202,20 @@ static bool isValidElementType(Type *Ty) {
          !Ty->isPPC_FP128Ty();
 }
 
+static bool isOxCamlGCFunction(const Function &F) {
+  return F.hasGC() && (F.getGC() == "oxcaml" || F.getGC() == "ocaml");
+}
+
+static bool isOxCamlGCPointerType(Type *Ty) {
+  if (auto *PT = dyn_cast<PointerType>(Ty))
+    return PT->getAddressSpace() == 1;
+
+  if (auto *VT = dyn_cast<VectorType>(Ty))
+    return isOxCamlGCPointerType(VT->getElementType());
+
+  return false;
+}
+
 /// \returns True if the value is a constant (but not globals/constant
 /// expressions).
 static bool isConstant(Value *V) {
@@ -5058,6 +5072,24 @@ void BoUpSLP::buildTree_rec(ArrayRef<Value *> VL, unsigned Depth,
     LLVM_DEBUG(dbgs() << "SLP: Gathering due to vector type.\n");
     newTreeEntry(VL, std::nullopt /*not vectorized*/, S, UserTreeIdx);
     return;
+  }
+
+  if (isOxCamlGCFunction(*F)) {
+    if (isOxCamlGCPointerType(S.OpValue->getType()) &&
+        !isa<InsertElementInst>(S.OpValue)) {
+      LLVM_DEBUG(dbgs()
+                 << "SLP: Gathering due to OxCaml GC pointer type.\n");
+      newTreeEntry(VL, std::nullopt /*not vectorized*/, S, UserTreeIdx);
+      return;
+    }
+
+    if (StoreInst *SI = dyn_cast<StoreInst>(S.OpValue))
+      if (isOxCamlGCPointerType(SI->getValueOperand()->getType())) {
+        LLVM_DEBUG(dbgs()
+                   << "SLP: Gathering due to OxCaml GC pointer store.\n");
+        newTreeEntry(VL, std::nullopt /*not vectorized*/, S, UserTreeIdx);
+        return;
+      }
   }
 
   if (StoreInst *SI = dyn_cast<StoreInst>(S.OpValue))
@@ -11598,6 +11630,9 @@ void SLPVectorizerPass::collectSeedInstructions(BasicBlock *BB) {
       if (!SI->isSimple())
         continue;
       if (!isValidElementType(SI->getValueOperand()->getType()))
+        continue;
+      if (isOxCamlGCFunction(*BB->getParent()) &&
+          isOxCamlGCPointerType(SI->getValueOperand()->getType()))
         continue;
       Stores[getUnderlyingObject(SI->getPointerOperand())].push_back(SI);
     }

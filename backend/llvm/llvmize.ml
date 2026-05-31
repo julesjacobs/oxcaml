@@ -171,6 +171,9 @@ type t =
     mutable function_decls : LL.Fundecl.t String.Map.t;
         (* Declarations for non-intrinsic functions that are referenced in LLVM
            IR-level constructs rather than ordinary calls. *)
+    mutable function_arg_types : T.t list String.Map.t;
+        (* Direct-call argument signatures for functions defined in the current
+           compilation unit, excluding the threaded runtime registers. *)
     mutable called_intrinsics : LL.Fundecl.t String.Map.t;
         (* Names + signatures (args, ret) of LLVM intrinsics called so far. Note
            that external functions are treated as symbols and are not declared
@@ -422,6 +425,7 @@ let create ~llvmir_filename ~ppf_dump =
     defined_symbols = String.Set.empty;
     referenced_symbols = String.Set.empty;
     function_decls = String.Map.empty;
+    function_arg_types = String.Map.empty;
     called_intrinsics = String.Map.empty;
     c_call_wrappers = String.Map.empty;
     all_trap_blocks = [];
@@ -601,6 +605,24 @@ let add_data_def t data_def = t.data_defs <- data_def :: t.data_defs
 
 let add_module_asm t asm_lines = t.module_asm <- asm_lines @ t.module_asm
 
+let register_function_signature t (fd : Cmm.fundecl) =
+  let arg_types =
+    List.concat_map
+      (fun (_var, ty) -> Array.to_list ty)
+      fd.fun_args
+    |> List.map T.of_machtype_component
+  in
+  t.function_arg_types
+    <- String.Map.add fd.fun_name.sym_name arg_types t.function_arg_types
+
+let register_function_signatures phrases =
+  let t = get_current_compilation_unit "register_function_signatures" in
+  List.iter
+    (function
+      | Cmm.Cfunction fd -> register_function_signature t fd
+      | Cmm.Cdata _ -> ())
+    phrases
+
 let complete_func_def t =
   add_function_def t (E.get_fun (get_fun_info t).emitter);
   t.all_trap_blocks
@@ -727,20 +749,20 @@ let do_offset ?(int_type = T.i64) t arg res_type offset =
     in
     cast t offset_val res_type
 
-(* Loading directly with the given type will put an explicit cast after the
-   mem2reg pass, so we don't need a cast here. *)
 let load_reg_to_temp ?typ t reg =
   let typ = Option.value typ ~default:(T.of_reg reg) in
   match get_const_int_for_reg t reg with
   | Some n -> cast t (V.of_nativeint n) typ
   | None ->
     let ptr = get_alloca_for_reg t reg in
-    emit_ins t (I.load ~ptr ~typ)
+    let value = emit_ins t (I.load ~ptr ~typ:(T.of_reg reg)) in
+    cast t value typ
 
-(* Although the same applies here as above, the cast happening any time later
-   for a store back would be problematic (e.g. consider setting a [ptr
-   addrspace(1)] as an [i64]. if it gets cast after a function call, it won't be
-   marked as live, which is bad). So, we put the cast explicitly. *)
+let load_reg_as_expected_arg t (reg : Reg.t) expected_type =
+  load_reg_to_temp ~typ:expected_type t reg
+
+let load_reg_as_tagged_int t (reg : Reg.t) = load_reg_to_temp ~typ:T.i64 t reg
+
 let store_into_reg ?(force_volatile = false) t reg to_store =
   if force_volatile
   then fail_msg ~name:"store_into_reg" "volatile register slots are unsupported";
@@ -1086,9 +1108,22 @@ let prepare_call_args ?(use_physical_runtime_regs = false) t args =
   in
   runtime_args @ args
 
-let prepare_call_args_from_regs ?use_physical_runtime_regs t regs =
+let prepare_call_args_from_regs ?use_physical_runtime_regs ?expected_arg_types t
+    regs =
+  let args =
+    match expected_arg_types with
+    | None -> List.map (load_reg_to_temp t) regs
+    | Some expected_arg_types ->
+      (try
+         List.map2
+           (fun reg expected_type -> load_reg_as_expected_arg t reg expected_type)
+           regs expected_arg_types
+       with Invalid_argument _ ->
+         fail_msg ~name:"prepare_call_args_from_regs"
+           "direct-call argument count mismatch")
+  in
   prepare_call_args ?use_physical_runtime_regs t
-    (List.map (load_reg_to_temp t) regs)
+    args
 
 let extract_call_res t call_res_struct num_res_values =
   (* Runtime regs *)
@@ -1402,11 +1437,11 @@ let int_comp t cond (i : _ Cfg.instruction) ~imm =
   let cond = I.icmp_cond_of_ocaml cond in
   match imm with
   | None ->
-    let arg1 = load_reg_to_temp ~typ t i.arg.(0) in
-    let arg2 = load_reg_to_temp ~typ t i.arg.(1) in
+    let arg1 = load_reg_as_tagged_int t i.arg.(0) in
+    let arg2 = load_reg_as_tagged_int t i.arg.(1) in
     emit_ins t (I.icmp cond ~arg1 ~arg2)
   | Some n ->
-    let arg1 = load_reg_to_temp ~typ t i.arg.(0) in
+    let arg1 = load_reg_as_tagged_int t i.arg.(0) in
     let arg2 = V.of_int ~typ n in
     emit_ins t (I.icmp cond ~arg1 ~arg2)
 
@@ -1444,6 +1479,16 @@ let call ?(tail = false) ?unwind_label t (i : Cfg.terminator Cfg.instruction)
     | Indirect _ -> 1, Array.length i.arg - 1
   in
   let arg_regs = Array.sub i.arg args_begin args_end |> reg_list_for_call in
+  let expected_arg_types =
+    match op with
+    | Direct { sym_name; sym_global = _ } ->
+      (match String.Map.find_opt sym_name t.function_arg_types with
+      | Some expected_arg_types
+        when List.length expected_arg_types = List.length arg_regs ->
+        Some expected_arg_types
+      | Some _ | None -> None)
+    | Indirect _ -> None
+  in
   let use_physical_runtime_regs =
     (* Design 1 keeps the domain-state and allocation pointers as SSA values
        and relies on the OxCaml calling convention to place them in x28/x27 at
@@ -1455,7 +1500,10 @@ let call ?(tail = false) ?unwind_label t (i : Cfg.terminator Cfg.instruction)
        globally reserved, so keep ordinary calls on the SSA path. *)
     false
   in
-  let args = prepare_call_args_from_regs ~use_physical_runtime_regs t arg_regs in
+  let args =
+    prepare_call_args_from_regs ~use_physical_runtime_regs ?expected_arg_types t
+      arg_regs
+  in
   let res_locs = loc_results_call i.res in
   let res_regs = reg_list_for_call res_locs in
   let res_type =
@@ -1572,7 +1620,7 @@ let tailcall_self t (i : Cfg.terminator Cfg.instruction) destination =
       (Array.length i.arg) (Array.length fun_args);
   Array.iter2
     (fun src dst ->
-      let value = load_reg_to_temp ~typ:(T.of_reg src) t src in
+      let value = load_reg_as_expected_arg t src (T.of_reg dst) in
       store_into_reg t dst value)
     i.arg fun_args;
   br_label t destination
@@ -1943,7 +1991,10 @@ let maybe_emit_specialized_string_equal_extcall t ~func_symbol ~alloc ~stack_ofs
 
 let supports_inline_caml_modify () =
   match Target_system.architecture (), Arch.size_addr with
-  | Target_system.AArch64, 8 -> not Config.tsan
+  | Target_system.AArch64, 8 ->
+    (* Keep the runtime helper as the source of truth until the inline barrier
+       is revalidated against minor-heap remembered-set tests. *)
+    false
   | ( ( Target_system.IA32 | Target_system.X86_64 | Target_system.ARM
       | Target_system.POWER | Target_system.Z | Target_system.Riscv ),
       _ )
@@ -2474,16 +2525,20 @@ let emit_terminator t (block : Cfg.basic_block)
 
 let int_op t (i : Cfg.basic Cfg.instruction) (op : Operation.integer_operation)
     ~imm =
-  let do_binary op =
+  let do_binary ?(tagged_args = false) op =
     let typ = T.i64 in
+    let load_arg reg =
+      if tagged_args then load_reg_as_tagged_int t reg
+      else load_reg_to_temp ~typ t reg
+    in
     reject_addr_regs i.res "int_op";
     match imm with
     | None ->
-      let arg1 = load_reg_to_temp ~typ t i.arg.(0) in
-      let arg2 = load_reg_to_temp ~typ t i.arg.(1) in
+      let arg1 = load_arg i.arg.(0) in
+      let arg2 = load_arg i.arg.(1) in
       emit_ins t (I.binary op ~arg1 ~arg2)
     | Some n ->
-      let arg1 = load_reg_to_temp ~typ t i.arg.(0) in
+      let arg1 = load_arg i.arg.(0) in
       let arg2 = V.of_int ~typ n in
       emit_ins t (I.binary op ~arg1 ~arg2)
   in
@@ -2569,21 +2624,21 @@ let int_op t (i : Cfg.basic Cfg.instruction) (op : Operation.integer_operation)
     | Iadd ->
       if Cmm.is_addr i.res.(0).typ
       then do_gep ~negate_arg:false
-      else do_binary Add
+      else do_binary ~tagged_args:true Add
     | Isub ->
       if Cmm.is_addr i.res.(0).typ
       then do_gep ~negate_arg:true
-      else do_binary Sub
-    | Imul -> do_binary Mul
+      else do_binary ~tagged_args:true Sub
+    | Imul -> do_binary ~tagged_args:true Mul
     | Imulh { signed } -> do_imulh ~signed
-    | Idiv -> do_binary Sdiv
-    | Imod -> do_binary Srem
+    | Idiv -> do_binary ~tagged_args:true Sdiv
+    | Imod -> do_binary ~tagged_args:true Srem
     | Iand -> do_binary And
     | Ior -> do_binary Or
     | Ixor -> do_binary Xor
-    | Ilsl -> do_binary Shl
-    | Ilsr -> do_binary Lshr
-    | Iasr -> do_binary Ashr
+    | Ilsl -> do_binary ~tagged_args:true Shl
+    | Ilsr -> do_binary ~tagged_args:true Lshr
+    | Iasr -> do_binary ~tagged_args:true Ashr
     | Icomp comp ->
       let bool_res = int_comp t comp i ~imm in
       (* convert i1 -> i64 *)

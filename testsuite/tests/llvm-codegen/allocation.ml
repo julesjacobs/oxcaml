@@ -44,46 +44,38 @@ L101:
   %21 = call  i1 @llvm.expect.i1(i1 %20, i1 1)
   br i1 %21, label %L105, label %L104
 L104:
-  %22 = load ptr addrspace(1), ptr %7
-  store ptr addrspace(1) %22, ptr %11
-  %23 = load ptr addrspace(1), ptr %8
-  store ptr addrspace(1) %23, ptr %12
-  %24 = load i64, ptr %ds
-  %25 = load i64, ptr %alloc
-  %26 = call oxcaml_alloccc { { i64, i64 }, {  } } @"\01_caml_call_gc"(i64 %24, i64 %25) "statepoint-id"="196609" cold [ "deopt"(i64 1870160737, i64 1, i64 1, i64 3, i64 1, i64 1, i64 0, i64 20, i64 24, i64 0, i64 24, i64 0, i64 14, i64 5263188, i64 7155249, i64 6646625, i64 6385759, i64 29289), "gc-live"(ptr %11, ptr %12) ]
-  %27 = extractvalue { { i64, i64 }, {  } } %26, 0, 0
-  %28 = extractvalue { { i64, i64 }, {  } } %26, 0, 1
-  store i64 %27, ptr %ds
-  store i64 %28, ptr %alloc
-  %29 = load ptr addrspace(1), ptr %11
-  store ptr addrspace(1) %29, ptr %7
-  %30 = load ptr addrspace(1), ptr %12
-  store ptr addrspace(1) %30, ptr %8
+  %22 = load i64, ptr %ds
+  %23 = load i64, ptr %alloc
+  %24 = call oxcaml_alloccc { { i64, i64 }, {  } } @"\01_caml_call_gc"(i64 %22, i64 %23) "statepoint-id"="196609" cold [ "deopt"(i64 1870160737, i64 1, i64 1, i64 3, i64 1, i64 1, i64 0, i64 20, i64 24, i64 0, i64 24, i64 0, i64 14, i64 5263188, i64 7155249, i64 6646625, i64 6385759, i64 29289) ]
+  %25 = extractvalue { { i64, i64 }, {  } } %24, 0, 0
+  %26 = extractvalue { { i64, i64 }, {  } } %24, 0, 1
+  store i64 %25, ptr %ds
+  store i64 %26, ptr %alloc
   br label %L105
 L105:
-  %31 = load i64, ptr %alloc
-  %32 = add i64 %31, 8
-  %33 = inttoptr i64 %32 to ptr addrspace(1)
-  store ptr addrspace(1) %33, ptr %9
+  %27 = load i64, ptr %alloc
+  %28 = add i64 %27, 8
+  %29 = inttoptr i64 %28 to ptr addrspace(1)
+  store ptr addrspace(1) %29, ptr %9
+  %30 = load ptr addrspace(1), ptr %9
+  %31 = getelementptr i8, ptr addrspace(1) %30, i64 -8
+  store volatile i64 2048, ptr addrspace(1) %31
+  %32 = load ptr addrspace(1), ptr %9
+  %33 = load ptr addrspace(1), ptr %7
+  store ptr addrspace(1) %33, ptr addrspace(1) %32
   %34 = load ptr addrspace(1), ptr %9
-  %35 = getelementptr i8, ptr addrspace(1) %34, i64 -8
-  store volatile i64 2048, ptr addrspace(1) %35
-  %36 = load ptr addrspace(1), ptr %9
-  %37 = load ptr addrspace(1), ptr %7
-  store ptr addrspace(1) %37, ptr addrspace(1) %36
-  %38 = load ptr addrspace(1), ptr %9
-  %39 = getelementptr i8, ptr addrspace(1) %38, i64 8
-  %40 = load ptr addrspace(1), ptr %8
-  store ptr addrspace(1) %40, ptr addrspace(1) %39
-  %41 = load ptr addrspace(1), ptr %9
-  store ptr addrspace(1) %41, ptr %5
-  %42 = load ptr addrspace(1), ptr %5
-  %43 = load i64, ptr %ds
-  %44 = load i64, ptr %alloc
-  %45 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %43, 0, 0
-  %46 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %45, i64 %44, 0, 1
-  %47 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %46, ptr addrspace(1) %42, 1, 0
-  ret { { i64, i64 }, { ptr addrspace(1) } } %47
+  %35 = getelementptr i8, ptr addrspace(1) %34, i64 8
+  %36 = load ptr addrspace(1), ptr %8
+  store ptr addrspace(1) %36, ptr addrspace(1) %35
+  %37 = load ptr addrspace(1), ptr %9
+  store ptr addrspace(1) %37, ptr %5
+  %38 = load ptr addrspace(1), ptr %5
+  %39 = load i64, ptr %ds
+  %40 = load i64, ptr %alloc
+  %41 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %39, 0, 0
+  %42 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %41, i64 %40, 0, 1
+  %43 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %42, ptr addrspace(1) %38, 1, 0
+  ret { { i64, i64 }, { ptr addrspace(1) } } %43
 }|}]
 
 [%%expect_llvm_asm AArch64{|_camlTOP__make_pair_0_1_code:
@@ -110,11 +102,11 @@ LBB0_1:                                 ; %L105
 	add	sp, sp, #32
 	ret
 LBB0_2:                                 ; %L104
-	str	x0, [sp, #8]
 	str	x1, [sp]
+	str	x0, [sp, #8]
 	bl	_caml_call_gc
 Ltmp0:
-	ldr	x0, [sp, #8]
 	ldr	x1, [sp]
+	ldr	x0, [sp, #8]
 	b	LBB0_1
 	.cfi_endproc|}]
