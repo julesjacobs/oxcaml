@@ -30,3 +30,12 @@ but `x9` points at an OCaml heap closure block (`Closure_tag`, first field
 `0x0000000100327f34`) rather than executable code. This maps to the open root
 tracking concern: an ordinary live heap value appears to survive incorrectly
 across allocation/GC in the LLVM-built boot compiler.
+
+2026-05-31 GC-root stress suite: added `testsuite/tests/llvm-gc-roots` with
+focused LLVM-backend runtime tests for ordinary live heap values across forced
+collections. The current cases cover allocation slow paths, closure calls
+shaped like `Select_utils.join_list_map`, live records/arrays/closures across
+minor/full/compact collections, and exception-handler paths with captured
+closures. Validation run from this checkout:
+`eval "$(../../../scripts/agent-tmp-env)" && make llvm-test-one DIR=testsuite/tests/llvm-gc-roots LLVM_PATH="$PWD/../clang-wrapper"`.
+Result: 12 tests passed, 0 failed.
