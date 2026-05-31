@@ -2909,18 +2909,15 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let res = emit_ins t (I.binary op ~arg1:arg ~arg2:shift) in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
-  let simd_int_variable_shift width_in_bits right_shift_op =
+  let simd_int_variable_shift width_in_bits intrinsic =
     let typ = int_vec_type ~width_in_bits in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
     let shift = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
-    let zero = V.zeroinitializer typ in
-    let left = emit_ins t (I.binary Shl ~arg1:arg ~arg2:shift) in
-    let neg_shift = emit_ins t (I.binary Sub ~arg1:zero ~arg2:shift) in
-    let right =
-      emit_ins t (I.binary right_shift_op ~arg1:arg ~arg2:neg_shift)
+    let res =
+      call_llvm_intrinsic t
+        (intrinsic ^ "." ^ llvm_intrinsic_type_suffix typ)
+        [arg; shift] typ
     in
-    let is_left = emit_ins t (I.icmp Isge ~arg1:shift ~arg2:zero) in
-    let res = emit_ins t (I.select ~cond:is_left ~ifso:left ~ifnot:right) in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
   let simd_int_dup_lane width_in_bits lane =
@@ -3454,14 +3451,14 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
   | Isimd (Simd.Shrq_n_s32 n) -> simd_int_shift_imm 32 Ashr n
   | Isimd (Simd.Shrq_n_s16 n) -> simd_int_shift_imm 16 Ashr n
   | Isimd (Simd.Shrq_n_s8 n) -> simd_int_shift_imm 8 Ashr n
-  | Isimd Simd.Shlq_u64 -> simd_int_variable_shift 64 Lshr
-  | Isimd Simd.Shlq_u32 -> simd_int_variable_shift 32 Lshr
-  | Isimd Simd.Shlq_u16 -> simd_int_variable_shift 16 Lshr
-  | Isimd Simd.Shlq_u8 -> simd_int_variable_shift 8 Lshr
-  | Isimd Simd.Shlq_s64 -> simd_int_variable_shift 64 Ashr
-  | Isimd Simd.Shlq_s32 -> simd_int_variable_shift 32 Ashr
-  | Isimd Simd.Shlq_s16 -> simd_int_variable_shift 16 Ashr
-  | Isimd Simd.Shlq_s8 -> simd_int_variable_shift 8 Ashr
+  | Isimd Simd.Shlq_u64 -> simd_int_variable_shift 64 "aarch64.neon.ushl"
+  | Isimd Simd.Shlq_u32 -> simd_int_variable_shift 32 "aarch64.neon.ushl"
+  | Isimd Simd.Shlq_u16 -> simd_int_variable_shift 16 "aarch64.neon.ushl"
+  | Isimd Simd.Shlq_u8 -> simd_int_variable_shift 8 "aarch64.neon.ushl"
+  | Isimd Simd.Shlq_s64 -> simd_int_variable_shift 64 "aarch64.neon.sshl"
+  | Isimd Simd.Shlq_s32 -> simd_int_variable_shift 32 "aarch64.neon.sshl"
+  | Isimd Simd.Shlq_s16 -> simd_int_variable_shift 16 "aarch64.neon.sshl"
+  | Isimd Simd.Shlq_s8 -> simd_int_variable_shift 8 "aarch64.neon.sshl"
   | Isimd (Simd.Dupq_lane_s64 { lane }) -> simd_int_dup_lane 64 lane
   | Isimd (Simd.Dupq_lane_s32 { lane }) -> simd_int_dup_lane 32 lane
   | Isimd (Simd.Dupq_lane_s16 { lane }) -> simd_int_dup_lane 16 lane
