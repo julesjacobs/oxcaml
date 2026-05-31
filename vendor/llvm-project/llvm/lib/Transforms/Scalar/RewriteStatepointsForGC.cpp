@@ -1202,6 +1202,8 @@ static Value *findAddrSpace1IntBaseDefiningValue(Value *I,
                                                  DefiningValueMapTy &Cache,
                                                  IsKnownBaseMapTy &KnownBases);
 
+static bool containsOxCamlPointerFormDerivedAddrSpace1Pointer(Value *I);
+
 /// Return a base defining value for the 'Index' element of the given vector
 /// instruction 'I'.  If Index is null, returns a BDV for the entire vector
 /// 'I'.  As an optimization, this method will try to determine when the
@@ -1522,8 +1524,20 @@ static Value *findAddrSpace1IntBaseDefiningValue(Value *I,
   if (auto *P2I = dyn_cast<PtrToIntInst>(I)) {
     Value *Ptr = P2I->getOperand(0);
     auto *PtrTy = dyn_cast<PointerType>(Ptr->getType());
-    if (!PtrTy || PtrTy->getAddressSpace() != 1)
+    if (!PtrTy)
       return nullptr;
+    if (PtrTy->getAddressSpace() != 1) {
+      if (isOxCamlFunction(*P2I->getFunction()) &&
+          containsOxCamlPointerFormDerivedAddrSpace1Pointer(Ptr)) {
+        errs() << "OxCaml statepoint cannot treat an integer round-trip from "
+                  "a raw pointer derived from an addrspace(1) interior "
+                  "address as an ordinary root\n  value: ";
+        P2I->print(errs());
+        errs() << "\n";
+        report_fatal_error("invalid hidden interior address through raw ptr");
+      }
+      return nullptr;
+    }
     return findBaseDefiningValue(Ptr, Cache, KnownBases);
   }
 
@@ -1542,6 +1556,56 @@ static Value *findAddrSpace1IntBaseDefiningValue(Value *I,
                                               KnownBases);
 
   return nullptr;
+}
+
+static bool containsOxCamlPointerFormDerivedAddrSpace1PointerImpl(
+    Value *V, SmallPtrSetImpl<Value *> &ActiveValues) {
+  if (!ActiveValues.insert(V).second)
+    return false;
+  auto RemoveActive = make_scope_exit([&]() { ActiveValues.erase(V); });
+
+  if (auto *GEP = dyn_cast<GetElementPtrInst>(V)) {
+    auto *Ty = dyn_cast<PointerType>(GEP->getType());
+    if (Ty && Ty->getAddressSpace() == 1 && !GEP->getMetadata("is_base_value"))
+      return true;
+  }
+
+  if (auto *ASC = dyn_cast<AddrSpaceCastInst>(V))
+    return containsOxCamlPointerFormDerivedAddrSpace1PointerImpl(
+        ASC->getPointerOperand(), ActiveValues);
+
+  if (auto *CI = dyn_cast<CastInst>(V)) {
+    if (!isa<IntToPtrInst>(CI) && !isa<PtrToIntInst>(CI))
+      return containsOxCamlPointerFormDerivedAddrSpace1PointerImpl(
+          CI->getOperand(0), ActiveValues);
+    return false;
+  }
+
+  if (auto *Freeze = dyn_cast<FreezeInst>(V))
+    return containsOxCamlPointerFormDerivedAddrSpace1PointerImpl(
+        Freeze->getOperand(0), ActiveValues);
+
+  if (auto *Phi = dyn_cast<PHINode>(V)) {
+    for (Value *Incoming : Phi->incoming_values())
+      if (containsOxCamlPointerFormDerivedAddrSpace1PointerImpl(
+              Incoming, ActiveValues))
+        return true;
+    return false;
+  }
+
+  if (auto *Select = dyn_cast<SelectInst>(V))
+    return containsOxCamlPointerFormDerivedAddrSpace1PointerImpl(
+               Select->getTrueValue(), ActiveValues) ||
+           containsOxCamlPointerFormDerivedAddrSpace1PointerImpl(
+               Select->getFalseValue(), ActiveValues);
+
+  return false;
+}
+
+static bool containsOxCamlPointerFormDerivedAddrSpace1Pointer(Value *I) {
+  SmallPtrSet<Value *, 16> ActiveValues;
+  return containsOxCamlPointerFormDerivedAddrSpace1PointerImpl(I,
+                                                              ActiveValues);
 }
 
 /// Returns the base defining value for this value.
