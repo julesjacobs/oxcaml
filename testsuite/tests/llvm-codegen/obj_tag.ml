@@ -70,13 +70,14 @@ L103:
   store ptr addrspace(1) %27, ptr %6
   %28 = load ptr addrspace(1), ptr %6
   store ptr addrspace(1) %28, ptr %4
-  %29 = load i64, ptr %4
-  %30 = load i64, ptr %ds
-  %31 = load i64, ptr %alloc
-  %32 = insertvalue { { i64, i64 }, { i64 } } poison, i64 %30, 0, 0
-  %33 = insertvalue { { i64, i64 }, { i64 } } %32, i64 %31, 0, 1
-  %34 = insertvalue { { i64, i64 }, { i64 } } %33, i64 %29, 1, 0
-  ret { { i64, i64 }, { i64 } } %34
+  %29 = load ptr addrspace(1), ptr %4
+  %30 = ptrtoint ptr addrspace(1) %29 to i64
+  %31 = load i64, ptr %ds
+  %32 = load i64, ptr %alloc
+  %33 = insertvalue { { i64, i64 }, { i64 } } poison, i64 %31, 0, 0
+  %34 = insertvalue { { i64, i64 }, { i64 } } %33, i64 %32, 0, 1
+  %35 = insertvalue { { i64, i64 }, { i64 } } %34, i64 %30, 1, 0
+  ret { { i64, i64 }, { i64 } } %35
 }|}]
 
 [%%expect_llvm_asm AArch64{|_camlTOP__tag_0_1_code:

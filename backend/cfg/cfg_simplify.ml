@@ -283,7 +283,8 @@ end = struct
     merge_blocks Label.Set.empty cfg_with_layout
 end
 
-let run cfg_with_layout =
+let run ?(allow_terminator_value_propagation_before_regalloc = false)
+    cfg_with_layout =
   let dead_labels = ref Label.Set.empty in
   let acc s = dead_labels := Label.Set.union s !dead_labels in
   Eliminate_fallthrough_blocks.run cfg_with_layout |> acc;
@@ -295,7 +296,10 @@ let run cfg_with_layout =
   (* [Simplify_terminator] should happen *after* [Merge_straightline_blocks] and
      [Eliminate_fallthrough_blocks] because merging blocks creates more
      opportunities for terminator simplification. *)
-  Simplify_terminator.run (Cfg_with_layout.cfg cfg_with_layout);
+  Simplify_terminator.run
+    ~allow_value_propagation_before_regalloc:
+      allow_terminator_value_propagation_before_regalloc
+    (Cfg_with_layout.cfg cfg_with_layout);
   Eliminate_dead_code.run cfg_with_layout |> acc;
   Cfg_with_layout.remove_blocks cfg_with_layout !dead_labels;
   cfg_with_layout
