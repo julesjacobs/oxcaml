@@ -42,6 +42,8 @@ using namespace llvm;
 namespace {
 
 class OxCamlGCMetadataPrinter : public GCMetadataPrinter {
+  bool EmittedDataEnd = false;
+
 public:
   void beginAssembly(Module &M, GCModuleInfo &Info, AsmPrinter &AP) override;
   void finishAssembly(Module &M, GCModuleInfo &Info, AsmPrinter &AP) override;
@@ -87,6 +89,8 @@ static void emitCamlGlobal(const Module &M, MCStreamer &OS, const char *Id) {
 
 void OxCamlGCMetadataPrinter::beginAssembly(Module &M, GCModuleInfo &Info,
                                            AsmPrinter &AP) {
+  EmittedDataEnd = false;
+
   AP.OutStreamer->switchSection(AP.getObjFileLowering().getTextSection());
   emitCamlGlobal(M, *(AP.OutStreamer), "code_begin");
 
@@ -100,8 +104,12 @@ void OxCamlGCMetadataPrinter::finishAssembly(Module &M, GCModuleInfo &Info,
   AP.OutStreamer->switchSection(AP.getObjFileLowering().getTextSection());
   emitCamlGlobal(M, *(AP.OutStreamer), "code_end");
 
-  AP.OutStreamer->switchSection(AP.getObjFileLowering().getDataSection());
-  emitCamlGlobal(M, *(AP.OutStreamer), "data_end");
+  if (!EmittedDataEnd) {
+    AP.OutStreamer->switchSection(AP.getObjFileLowering().getDataSection());
+    AP.OutStreamer->emitInt64(0);
+    emitCamlGlobal(M, *(AP.OutStreamer), "data_end");
+    AP.OutStreamer->emitInt64(0);
+  }
 }
 
 /// Map LLVM DWARF register numbers to OxCaml register map.
@@ -580,6 +588,12 @@ bool OxCamlGCMetadataPrinter::emitStackMaps(Module &M, StackMaps &SM, AsmPrinter
   std::vector<PendingDebugInfo> PendingDebugInfos;
   
   OS.switchSection(AP.getObjFileLowering().getDataSection());
+
+  OS.emitInt64(0);
+  emitCamlGlobal(M, OS, "data_end");
+  OS.emitInt64(0);
+  EmittedDataEnd = true;
+  OS.emitValueToAlignment(Align(PtrSize));
   
   emitCamlGlobal(M, OS, "frametable");
 

@@ -2467,13 +2467,6 @@ static void findBasePointers(DominatorTree &DT, DefiningValueMapTy &DVCache,
       PotentiallyDerivedPointers.remove(V);
       PointerToBase[V] = V;
     }
-  if (isOxCamlFunction(*Call->getFunction()) &&
-      !needsCallerFrameRootsForOxCamlCArgs(Call->getCallingConv()))
-    for (Value *V : Call->args()) {
-      auto *Ty = dyn_cast<PointerType>(V->getType());
-      if (Ty && Ty->getAddressSpace() == 1 && !isa<Constant>(V))
-        PotentiallyDerivedPointers.insert(V);
-    }
   findBasePointers(PotentiallyDerivedPointers, PointerToBase, &DT, DVCache,
                    KnownBases);
 }
@@ -2666,6 +2659,30 @@ static bool isBranchOnlyOxCamlRecoveryLandingPad(BasicBlock *BB,
   return false;
 }
 
+static bool isBranchOnlyOxCamlRecoveryForwarder(BasicBlock *BB,
+                                                BasicBlock *Target,
+                                                bool AllowPHIs = false) {
+  if (!BB || (!AllowPHIs && BB->phis().begin() != BB->phis().end()))
+    return false;
+  if (BB->getLandingPadInst())
+    return false;
+
+  for (Instruction &I : *BB) {
+    if ((AllowPHIs && isa<PHINode>(I)) || I.isDebugOrPseudoInst())
+      continue;
+    auto *Br = dyn_cast<BranchInst>(&I);
+    return Br && Br->isUnconditional() && Br->getSuccessor(0) == Target;
+  }
+  return false;
+}
+
+static bool isBranchOnlyOxCamlRecoveryTrampoline(BasicBlock *BB,
+                                                 BasicBlock *Target,
+                                                 bool AllowPHIs = false) {
+  return isBranchOnlyOxCamlRecoveryLandingPad(BB, Target, AllowPHIs) ||
+         isBranchOnlyOxCamlRecoveryForwarder(BB, Target, AllowPHIs);
+}
+
 struct OxCamlRecoveryStoreSite {
   InvokeInst *Invoke;
   BasicBlock *PhiIncomingBlock;
@@ -2692,39 +2709,45 @@ struct OxCamlRecoveryBoundaryEdge {
 static bool
 collectOxCamlRecoveryStoreSites(BasicBlock &RecoveryBB, BasicBlock *IncomingBB,
                                 SmallVectorImpl<OxCamlRecoveryStoreSite> &Out) {
-  if (auto *II = dyn_cast<InvokeInst>(IncomingBB->getTerminator())) {
-    if (II->getUnwindDest() == &RecoveryBB) {
-      Out.push_back({II, IncomingBB});
+  SmallPtrSet<BasicBlock *, 8> Visited;
+  std::function<bool(BasicBlock *, BasicBlock *, BasicBlock *)> Collect =
+      [&](BasicBlock *BB, BasicBlock *Target,
+          BasicBlock *PhiIncomingBlock) -> bool {
+    if (!BB || !Visited.insert(BB).second)
+      return false;
+
+    if (auto *II = dyn_cast<InvokeInst>(BB->getTerminator())) {
+      if (II->getUnwindDest() != Target)
+        return false;
+      Out.push_back({II, PhiIncomingBlock});
       return true;
     }
-  }
 
-  if (!isBranchOnlyOxCamlRecoveryLandingPad(IncomingBB, &RecoveryBB,
-                                            /*AllowPHIs=*/true))
-    return false;
-
-  bool SawInvoke = false;
-  for (BasicBlock *Pred : predecessors(IncomingBB)) {
-    auto *II = dyn_cast<InvokeInst>(Pred->getTerminator());
-    if (!II || II->getUnwindDest() != IncomingBB)
+    if (!isBranchOnlyOxCamlRecoveryTrampoline(BB, Target,
+                                              /*AllowPHIs=*/true))
       return false;
-    Out.push_back({II, IncomingBB});
-    SawInvoke = true;
-  }
-  return SawInvoke;
+
+    bool SawStoreSite = false;
+    for (BasicBlock *Pred : predecessors(BB)) {
+      if (!Collect(Pred, BB, PhiIncomingBlock))
+        return false;
+      SawStoreSite = true;
+    }
+    return SawStoreSite;
+  };
+
+  return Collect(IncomingBB, &RecoveryBB, IncomingBB);
 }
 
 static bool collectDirectOxCamlRecoveryStoreSites(
     BasicBlock &RecoveryBB, SmallVectorImpl<OxCamlRecoveryStoreSite> &Out) {
-  bool SawInvoke = false;
+  bool SawStoreSite = false;
   for (BasicBlock *Pred : predecessors(&RecoveryBB)) {
-    auto *II = dyn_cast<InvokeInst>(Pred->getTerminator());
-    if (!II || II->getUnwindDest() != &RecoveryBB)
+    if (!collectOxCamlRecoveryStoreSites(RecoveryBB, Pred, Out))
       return false;
-    Out.push_back({II, Pred});
-    SawInvoke = true;
+    SawStoreSite = true;
   }
-  return SawInvoke;
+  return SawStoreSite;
 }
 
 static BasicBlock *
@@ -3220,14 +3243,16 @@ static bool materializeOxCamlExceptionRootSlots(
 
     HandlerLivePhis.clear();
     for (PHINode &PN : BB.phis()) {
-      HandlerLivePhis.push_back(&PN);
+      if (isHandledGCPointerType(PN.getType()))
+        HandlerLivePhis.push_back(&PN);
     }
     for (BasicBlock *Pred : predecessors(&BB)) {
-      if (!isBranchOnlyOxCamlRecoveryLandingPad(Pred, &BB,
+      if (!isBranchOnlyOxCamlRecoveryTrampoline(Pred, &BB,
                                                 /*AllowPHIs=*/true))
         continue;
       for (PHINode &PN : Pred->phis())
-        HandlerLivePhis.push_back(&PN);
+        if (isHandledGCPointerType(PN.getType()))
+          HandlerLivePhis.push_back(&PN);
     }
 
     HandlerLiveGCValues.clear();
@@ -4091,62 +4116,113 @@ static bool materializeRemainingOxCamlRecoveryPhis(
   IRBuilder<> EntryBuilder(&EntryBlock, EntryBlock.getFirstInsertionPt());
   bool Changed = false;
 
+  auto MaterializeRecoveryPhi =
+      [&](PHINode *PN, IntrinsicInst *Recover) -> bool {
+    BasicBlock *PhiBlock = PN->getParent();
+    if (!PN->getType()->isSized()) {
+      PN->print(errs());
+      errs() << "\n";
+      report_fatal_error("cannot materialize unsized OxCaml recovery PHI");
+    }
+
+    AllocaInst *Slot = EntryBuilder.CreateAlloca(
+        PN->getType(), DL.getAllocaAddrSpace(), nullptr,
+        suffixed_name_or(PN, ".recoverphi", "recoverphi"));
+    Slot->setAlignment(DL.getABITypeAlign(PN->getType()));
+    bool IsGCRoot = isHandledGCPointerType(PN->getType());
+    EntryBuilder.CreateAlignedStore(
+        IsGCRoot ? getOxCamlNonMovingImmediate(PN->getType())
+                 : Constant::getNullValue(PN->getType()),
+        Slot, DL.getABITypeAlign(PN->getType()));
+    if (IsGCRoot)
+      RootSlots.push_back(Slot);
+
+    auto StoreForInvokeEdge = [&](InvokeInst *II, Value *IncomingValue) {
+      if (auto *IncomingPhi = dyn_cast<PHINode>(IncomingValue)) {
+        if (IncomingPhi->getParent() == II->getUnwindDest()) {
+          int IncomingIndex =
+              IncomingPhi->getBasicBlockIndex(II->getParent());
+          if (IncomingIndex < 0)
+            report_fatal_error(
+                "missing OxCaml recovery PHI incoming value");
+          IncomingValue = IncomingPhi->getIncomingValue(IncomingIndex);
+        }
+      }
+
+      IncomingValue = nonPoisonTrapRecoverySlotValue(IncomingValue);
+      if (auto *IncomingInst = dyn_cast<Instruction>(IncomingValue))
+        if (!DT.dominates(IncomingInst, II))
+          report_fatal_error(
+              "recovery PHI incoming value does not dominate edge store");
+      IRBuilder<> StoreBuilder(II);
+      StoreBuilder.CreateAlignedStore(
+          IncomingValue, Slot, DL.getABITypeAlign(PN->getType()));
+    };
+
+    for (unsigned I = 0, E = PN->getNumIncomingValues(); I != E; ++I) {
+      BasicBlock *IncomingBlock = PN->getIncomingBlock(I);
+      Value *IncomingValue = PN->getIncomingValue(I);
+      Instruction *InsertBefore = IncomingBlock->getTerminator();
+      if (auto *II = dyn_cast<InvokeInst>(InsertBefore)) {
+        if (II->getUnwindDest() != PhiBlock)
+          report_fatal_error(
+              "unsupported invoke predecessor for recovery PHI");
+        StoreForInvokeEdge(II, IncomingValue);
+        continue;
+      }
+
+      SmallVector<OxCamlRecoveryStoreSite, 8> StoreSites;
+      if (collectOxCamlRecoveryStoreSites(*PhiBlock, IncomingBlock,
+                                          StoreSites)) {
+        for (OxCamlRecoveryStoreSite StoreSite : StoreSites)
+          StoreForInvokeEdge(StoreSite.Invoke, IncomingValue);
+        continue;
+      }
+
+      auto *BI = dyn_cast<BranchInst>(InsertBefore);
+      if (!BI || !BI->isUnconditional() || BI->getSuccessor(0) != PhiBlock)
+        report_fatal_error("unsupported branch predecessor for recovery PHI");
+
+      IncomingValue = nonPoisonTrapRecoverySlotValue(IncomingValue);
+      if (auto *IncomingInst = dyn_cast<Instruction>(IncomingValue))
+        if (!DT.dominates(IncomingInst, InsertBefore))
+          report_fatal_error(
+              "recovery PHI incoming value does not dominate edge store");
+      IRBuilder<> StoreBuilder(InsertBefore);
+      StoreBuilder.CreateAlignedStore(
+          IncomingValue, Slot, DL.getABITypeAlign(PN->getType()));
+    }
+
+    IRBuilder<> LoadBuilder(Recover->getNextNode());
+    LoadInst *Load = LoadBuilder.CreateAlignedLoad(
+        PN->getType(), Slot, DL.getABITypeAlign(PN->getType()),
+        suffixed_name_or(PN, ".recoverphi.load", "recoverphi.load"));
+    PN->replaceAllUsesWith(Load);
+    PN->eraseFromParent();
+    return true;
+  };
+
   for (BasicBlock &BB : F) {
     IntrinsicInst *Recover = getOxCamlTrapRecover(BB);
     if (!isOxCamlRecoveryBlockStart(BB, Recover))
       continue;
 
-    while (auto *PN = dyn_cast_or_null<PHINode>(&*BB.begin())) {
-      if (!PN->getType()->isSized()) {
-        PN->print(errs());
-        errs() << "\n";
-        report_fatal_error("cannot materialize unsized OxCaml recovery PHI");
-      }
+    SmallVector<PHINode *, 8> DirectRecoveryPhis;
+    for (PHINode &PN : BB.phis())
+      DirectRecoveryPhis.push_back(&PN);
+    for (PHINode *PN : DirectRecoveryPhis)
+      Changed |= MaterializeRecoveryPhi(PN, Recover);
 
-      AllocaInst *Slot = EntryBuilder.CreateAlloca(
-          PN->getType(), DL.getAllocaAddrSpace(), nullptr,
-          suffixed_name_or(PN, ".recoverphi", "recoverphi"));
-      Slot->setAlignment(DL.getABITypeAlign(PN->getType()));
-      bool IsGCRoot = isHandledGCPointerType(PN->getType());
-      EntryBuilder.CreateAlignedStore(
-          IsGCRoot ? getOxCamlNonMovingImmediate(PN->getType())
-                   : Constant::getNullValue(PN->getType()),
-          Slot, DL.getABITypeAlign(PN->getType()));
-      if (IsGCRoot)
-        RootSlots.push_back(Slot);
-
-      for (unsigned I = 0, E = PN->getNumIncomingValues(); I != E; ++I) {
-        BasicBlock *IncomingBlock = PN->getIncomingBlock(I);
-        Value *IncomingValue =
-            nonPoisonTrapRecoverySlotValue(PN->getIncomingValue(I));
-        Instruction *InsertBefore = IncomingBlock->getTerminator();
-        if (auto *II = dyn_cast<InvokeInst>(InsertBefore)) {
-          if (II->getUnwindDest() != &BB)
-            report_fatal_error(
-                "unsupported invoke predecessor for recovery PHI");
-        } else {
-          auto *BI = dyn_cast<BranchInst>(InsertBefore);
-          if (!BI || !BI->isUnconditional() || BI->getSuccessor(0) != &BB)
-            report_fatal_error(
-                "unsupported branch predecessor for recovery PHI");
-        }
-        if (auto *IncomingInst = dyn_cast<Instruction>(IncomingValue))
-          if (!DT.dominates(IncomingInst, InsertBefore))
-            report_fatal_error(
-                "recovery PHI incoming value does not dominate edge store");
-        IRBuilder<> StoreBuilder(InsertBefore);
-        StoreBuilder.CreateAlignedStore(
-            IncomingValue, Slot, DL.getABITypeAlign(PN->getType()));
-      }
-
-      IRBuilder<> LoadBuilder(Recover->getNextNode());
-      LoadInst *Load = LoadBuilder.CreateAlignedLoad(
-          PN->getType(), Slot, DL.getABITypeAlign(PN->getType()),
-          suffixed_name_or(PN, ".recoverphi.load", "recoverphi.load"));
-      PN->replaceAllUsesWith(Load);
-      PN->eraseFromParent();
-      Changed = true;
+    SmallVector<PHINode *, 8> TrampolinePhis;
+    for (BasicBlock *Pred : predecessors(&BB)) {
+      if (!isBranchOnlyOxCamlRecoveryTrampoline(Pred, &BB,
+                                                /*AllowPHIs=*/true))
+        continue;
+      for (PHINode &PN : Pred->phis())
+        TrampolinePhis.push_back(&PN);
     }
+    for (PHINode *PN : TrampolinePhis)
+      Changed |= MaterializeRecoveryPhi(PN, Recover);
   }
 
   if (Changed)
@@ -5047,44 +5123,6 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
       CallTarget =
           F->getParent()
               ->getOrInsertFunction(GetFunctionName(IID, ElementSizeCI), FTy);
-    }
-  }
-
-  if (IsOxCamlStatepoint) {
-    if (!needsCallerFrameRootsForOxCamlCArgs(Call->getCallingConv())) {
-      SmallPtrSet<Value *, 32> SeenGCArgs(GCArgsStorage.begin(),
-                                          GCArgsStorage.end());
-      const DataLayout &DL = Call->getModule()->getDataLayout();
-      BasicBlock &EntryBlock = Call->getFunction()->getEntryBlock();
-      IRBuilder<> EntryBuilder(&EntryBlock, EntryBlock.getFirstInsertionPt());
-      IRBuilder<> StoreBuilder(Call);
-      for (Value *Arg : CallArgs) {
-        auto *ArgTy = dyn_cast<PointerType>(Arg->getType());
-        if (!ArgTy || ArgTy->getAddressSpace() != 1 || isa<Constant>(Arg))
-          continue;
-
-        Value *Root = Arg;
-        auto BaseIt = PointerToBase.find(Arg);
-        if (BaseIt != PointerToBase.end()) {
-          Value *Base = BaseIt->second;
-          auto *BaseTy = dyn_cast<PointerType>(Base->getType());
-          if (BaseTy && BaseTy->getAddressSpace() == 1 &&
-              isDistinctOxCamlAddrSpace1AddressExpression(Arg, Base))
-            Root = Base;
-        }
-
-        Root = nonPoisonOxCamlGCPointerValue(Root);
-        if (SeenGCArgs.insert(Root).second) {
-          AllocaInst *Slot = EntryBuilder.CreateAlloca(
-              Root->getType(), DL.getAllocaAddrSpace(), nullptr,
-              suffixed_name_or(Root, ".callargroot", "callargroot"));
-          Slot->setAlignment(DL.getABITypeAlign(Root->getType()));
-          StoreInst *RootStore = StoreBuilder.CreateAlignedStore(
-              Root, Slot, DL.getABITypeAlign(Root->getType()));
-          RootStore->setVolatile(true);
-          GCArgsStorage.push_back(Slot);
-        }
-      }
     }
   }
 
