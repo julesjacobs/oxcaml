@@ -123,9 +123,9 @@ static void init_startup_params(void)
 static void scanmult (char_os *opt, uintnat *var)
 {
   char_os mult = ' ';
-  unsigned int val = 1;
-  sscanf_os (opt, T("=%u%c"), &val, &mult);
-  sscanf_os (opt, T("=0x%x%c"), &val, &mult);
+  uintnat val = 1;
+  sscanf_os (opt, T("=%" ARCH_INTNAT_PRINTF_FORMAT "u%c"), &val, &mult);
+  sscanf_os (opt, T("=0x%" ARCH_INTNAT_PRINTF_FORMAT "x%c"), &val, &mult);
   switch (mult) {
   case 'k':   *var = (uintnat) val * 1024; break;
   case 'M':   *var = (uintnat) val * (1024 * 1024); break;

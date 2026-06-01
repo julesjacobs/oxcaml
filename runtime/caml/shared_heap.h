@@ -28,6 +28,39 @@
 
 CAMLextern atomic_uintnat caml_compactions_count;
 
+/* Debugging aids for missed frame-table roots. These are controlled by
+   OCAMLRUNPARAM GC tweaks and are disabled by default. */
+CAMLextern uintnat caml_debug_compact_every_major;
+CAMLextern uintnat caml_debug_stale_roots;
+CAMLextern uintnat caml_debug_stale_roots_abort;
+CAMLextern uintnat caml_debug_stale_roots_max_candidates;
+CAMLextern uintnat caml_debug_stale_roots_target_epoch;
+CAMLextern uintnat caml_debug_stale_roots_target_addr;
+
+enum caml_debug_stale_source {
+  CAML_DEBUG_STALE_SOURCE_UNKNOWN = 0,
+  CAML_DEBUG_STALE_SOURCE_COMPACT_UPDATE,
+  CAML_DEBUG_STALE_SOURCE_STACK_VISIT,
+  CAML_DEBUG_STALE_SOURCE_MAJOR_DARKEN,
+  CAML_DEBUG_STALE_SOURCE_MARK_SLICE,
+  CAML_DEBUG_STALE_SOURCE_MARK_QUEUE,
+};
+
+void caml_debug_check_stale_before_header_slow(
+  value v,
+  volatile value *slot,
+  enum caml_debug_stale_source source);
+
+Caml_inline void caml_debug_check_stale_before_header(
+  value v,
+  volatile value *slot,
+  enum caml_debug_stale_source source)
+{
+  if (CAMLunlikely(caml_debug_stale_roots && Is_block(v))) {
+    caml_debug_check_stale_before_header_slow(v, slot, source);
+  }
+}
+
 struct caml_heap_state;
 struct pool;
 

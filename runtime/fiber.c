@@ -475,9 +475,13 @@ static int visit(scanning_action f, void* fdata,
 
   /* major or local or external */
 
+  caml_debug_check_stale_before_header(
+    vblock, p, CAML_DEBUG_STALE_SOURCE_STACK_VISIT);
   hd = Hd_val(vblock);
   if (Tag_hd(hd) == Infix_tag) {
     vblock -= Infix_offset_val(v);
+    caml_debug_check_stale_before_header(
+      vblock, p, CAML_DEBUG_STALE_SOURCE_STACK_VISIT);
     hd = Hd_val(vblock);
   }
 

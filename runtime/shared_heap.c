@@ -17,6 +17,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "caml/addrmap.h"
@@ -36,6 +37,9 @@
 #include "caml/sizeclasses.h"
 #include "caml/startup_aux.h"
 #include "caml/weak.h"
+#ifdef NATIVE_CODE
+#include "caml/stack.h"
+#endif
 
 CAMLexport atomic_uintnat caml_compactions_count;
 uintnat caml_pool_min_chunk_bsz = 8 * 1024 * 1024; /* 8 MB */
@@ -946,10 +950,14 @@ static void verify_object(struct heap_verify_state* st, value v) {
   if (!Is_block(v)) return;
 
   CAMLassert (!Is_young(v));
+  caml_debug_check_stale_before_header(
+    v, NULL, CAML_DEBUG_STALE_SOURCE_COMPACT_UPDATE);
   CAMLassert (Hd_val(v));
 
   if (Tag_val(v) == Infix_tag) {
     v -= Infix_offset_val(v);
+    caml_debug_check_stale_before_header(
+      v, NULL, CAML_DEBUG_STALE_SOURCE_COMPACT_UPDATE);
     CAMLassert(Tag_val(v) == Closure_tag);
   }
 
@@ -996,6 +1004,333 @@ void caml_verify_heap_from_stw(caml_domain_state *domain) {
 
 /* Whether compaction should actually unmap memory. */
 uintnat caml_compact_unmap = 0;
+
+/* Debug knobs settable with OCAMLRUNPARAM. */
+uintnat caml_debug_compact_every_major = 0;
+uintnat caml_debug_stale_roots = 0;
+uintnat caml_debug_stale_roots_abort = 0;
+uintnat caml_debug_stale_roots_max_candidates = 16;
+uintnat caml_debug_stale_roots_target_epoch = 0;
+uintnat caml_debug_stale_roots_target_addr = 0;
+
+struct caml_debug_evacuated_range {
+  uintnat epoch;
+  char *pool_base;
+  char *first_block;
+  char *pool_end;
+  sizeclass_t size_class;
+  int domain_id;
+};
+
+#define CAML_DEBUG_CURRENT_RANGE_CAPACITY 16384
+#define CAML_DEBUG_COMPLETED_RANGE_CAPACITY 65536
+
+static struct caml_debug_evacuated_range
+  debug_current_ranges[CAML_DEBUG_CURRENT_RANGE_CAPACITY];
+static atomic_uintnat debug_current_range_count;
+static atomic_uintnat debug_current_range_overflow;
+static atomic_uintnat debug_raw_candidate_count;
+static uintnat debug_current_epoch;
+
+static struct caml_debug_evacuated_range
+  debug_completed_ranges[CAML_DEBUG_COMPLETED_RANGE_CAPACITY];
+static atomic_uintnat debug_completed_range_count;
+static uintnat debug_completed_range_next;
+static uintnat debug_completed_range_overwrites;
+static uintnat debug_completed_range_total;
+
+static const char *debug_stale_source_name(enum caml_debug_stale_source source)
+{
+  switch (source) {
+  case CAML_DEBUG_STALE_SOURCE_COMPACT_UPDATE:
+    return "compact update";
+  case CAML_DEBUG_STALE_SOURCE_STACK_VISIT:
+    return "stack visit";
+  case CAML_DEBUG_STALE_SOURCE_MAJOR_DARKEN:
+    return "major darken";
+  case CAML_DEBUG_STALE_SOURCE_MARK_SLICE:
+    return "mark slice";
+  case CAML_DEBUG_STALE_SOURCE_MARK_QUEUE:
+    return "mark queue";
+  default:
+    return "unknown";
+  }
+}
+
+static bool debug_stale_epoch_matches(uintnat epoch)
+{
+  return caml_debug_stale_roots_target_epoch == 0
+         || caml_debug_stale_roots_target_epoch == epoch;
+}
+
+static bool debug_stale_addr_matches(value v)
+{
+  return caml_debug_stale_roots_target_addr == 0
+         || caml_debug_stale_roots_target_addr == (uintnat)v;
+}
+
+static bool debug_range_contains_value(
+  const struct caml_debug_evacuated_range *range, value v)
+{
+  uintnat p = (uintnat)v - sizeof(header_t);
+  return p >= (uintnat)range->first_block && p < (uintnat)range->pool_end;
+}
+
+static struct caml_debug_evacuated_range *debug_find_current_range(value v)
+{
+  uintnat count = atomic_load_acquire(&debug_current_range_count);
+  if (count > CAML_DEBUG_CURRENT_RANGE_CAPACITY) {
+    count = CAML_DEBUG_CURRENT_RANGE_CAPACITY;
+  }
+  for (uintnat i = 0; i < count; i++) {
+    if (debug_range_contains_value(&debug_current_ranges[i], v)) {
+      return &debug_current_ranges[i];
+    }
+  }
+  return NULL;
+}
+
+static struct caml_debug_evacuated_range *debug_find_completed_range(value v)
+{
+  uintnat count = atomic_load_acquire(&debug_completed_range_count);
+  uintnat total = debug_completed_range_total;
+  uintnat first = total > count ? total - count : 0;
+  for (uintnat i = 0; i < count; i++) {
+    uintnat idx = (first + i) % CAML_DEBUG_COMPLETED_RANGE_CAPACITY;
+    if (debug_stale_epoch_matches(debug_completed_ranges[idx].epoch)
+        && debug_range_contains_value(&debug_completed_ranges[idx], v)) {
+      return &debug_completed_ranges[idx];
+    }
+  }
+  return NULL;
+}
+
+static void debug_report_stale_value(
+  const char *kind,
+  value v,
+  volatile value *slot,
+  enum caml_debug_stale_source source,
+  const struct caml_debug_evacuated_range *range)
+{
+  if (!debug_stale_epoch_matches(range->epoch) || !debug_stale_addr_matches(v)) {
+    return;
+  }
+
+  fprintf(stderr,
+          "OCaml stale-root debug: %s\n"
+          "  value: %p\n"
+          "  slot: %p\n"
+          "  source: %s\n"
+          "  evacuated by compaction: %"
+            ARCH_INTNAT_PRINTF_FORMAT "u\n"
+          "  range: [%p, %p) pool=%p size_class=%u domain=%d\n"
+          "  offset in range: %"
+            ARCH_INTNAT_PRINTF_FORMAT "u bytes\n",
+          kind,
+          (void*)v,
+          (void*)slot,
+          debug_stale_source_name(source),
+          range->epoch,
+          (void*)range->first_block,
+          (void*)range->pool_end,
+          (void*)range->pool_base,
+          (unsigned)range->size_class,
+          range->domain_id,
+          ((uintnat)v - sizeof(header_t)) - (uintnat)range->first_block);
+
+  if (debug_completed_range_overwrites != 0) {
+    fprintf(stderr,
+            "  completed-range ring has overwritten %"
+              ARCH_INTNAT_PRINTF_FORMAT "u old entries\n",
+            debug_completed_range_overwrites);
+  }
+  if (!caml_compact_unmap) {
+    fprintf(stderr,
+            "  note: Xcompact_unmap=0; this debug mode does not yet "
+            "quarantine or invalidate reused pool addresses\n");
+  }
+
+  if (caml_debug_stale_roots_abort) {
+    caml_fatal_error("OCaml stale-root debug abort");
+  }
+}
+
+void caml_debug_check_stale_before_header_slow(
+  value v,
+  volatile value *slot,
+  enum caml_debug_stale_source source)
+{
+  struct caml_debug_evacuated_range *range = debug_find_completed_range(v);
+  if (range != NULL) {
+    debug_report_stale_value(
+      "visible stale value before header read", v, slot, source, range);
+  }
+}
+
+static void debug_begin_evacuation_phase(bool leader)
+{
+  if (!caml_debug_stale_roots) {
+    return;
+  }
+
+  if (leader) {
+    debug_current_epoch = atomic_load(&caml_compactions_count) + 1;
+    atomic_store_release(&debug_current_range_count, 0);
+    atomic_store_release(&debug_current_range_overflow, 0);
+    atomic_store_release(&debug_raw_candidate_count, 0);
+  }
+}
+
+static void debug_record_evacuated_pool(pool *p)
+{
+  if (!caml_debug_stale_roots) {
+    return;
+  }
+
+  uintnat idx = atomic_fetch_add(&debug_current_range_count, 1);
+  if (idx >= CAML_DEBUG_CURRENT_RANGE_CAPACITY) {
+    atomic_fetch_add(&debug_current_range_overflow, 1);
+    return;
+  }
+
+  debug_current_ranges[idx].epoch = debug_current_epoch;
+  debug_current_ranges[idx].pool_base = (char*)p;
+  debug_current_ranges[idx].first_block = (char*)POOL_FIRST_BLOCK(p, p->sz);
+  debug_current_ranges[idx].pool_end = (char*)POOL_END(p);
+  debug_current_ranges[idx].size_class = p->sz;
+  debug_current_ranges[idx].domain_id = Caml_state->id;
+}
+
+static void debug_record_evacuated_pools(pool *p)
+{
+  if (!caml_debug_stale_roots) {
+    return;
+  }
+
+  while (p != NULL) {
+    debug_record_evacuated_pool(p);
+    p = p->next;
+  }
+}
+
+static void debug_report_raw_candidate(
+  value v,
+  volatile value *slot,
+  const char *storage_kind,
+  const struct caml_debug_evacuated_range *range)
+{
+  uintnat candidate_idx = atomic_fetch_add(&debug_raw_candidate_count, 1);
+  if (candidate_idx >= caml_debug_stale_roots_max_candidates) {
+    return;
+  }
+
+  fprintf(stderr,
+          "OCaml stale-root debug: stale candidate after compaction #%"
+            ARCH_INTNAT_PRINTF_FORMAT "u\n"
+          "  value: %p\n"
+          "  storage: %s at %p\n"
+          "  evacuated range: [%p, %p) pool=%p size_class=%u domain=%d\n"
+          "  offset in range: %"
+            ARCH_INTNAT_PRINTF_FORMAT "u bytes\n",
+          range->epoch,
+          (void*)v,
+          storage_kind,
+          (void*)slot,
+          (void*)range->first_block,
+          (void*)range->pool_end,
+          (void*)range->pool_base,
+          (unsigned)range->size_class,
+          range->domain_id,
+          ((uintnat)v - sizeof(header_t)) - (uintnat)range->first_block);
+}
+
+static void debug_raw_scan_word(
+  volatile value *slot,
+  const char *storage_kind)
+{
+  value v = *slot;
+  if (!Is_block(v) || !debug_stale_epoch_matches(debug_current_epoch)
+      || !debug_stale_addr_matches(v)) {
+    return;
+  }
+
+  struct caml_debug_evacuated_range *range = debug_find_current_range(v);
+  if (range != NULL) {
+    debug_report_raw_candidate(v, slot, storage_kind, range);
+  }
+}
+
+static void debug_raw_scan_current_stack(void)
+{
+  if (!caml_debug_stale_roots) {
+    return;
+  }
+
+  struct stack_info *stack = Caml_state->current_stack;
+
+  while (stack != NULL) {
+    for (value *p = (value*)stack->sp; p < Stack_high(stack); p++) {
+      debug_raw_scan_word(p, "stack word");
+    }
+
+    debug_raw_scan_word(&stack->dyn, "stack dynamic binding key");
+    debug_raw_scan_word(&stack->val, "stack dynamic binding value");
+    debug_raw_scan_word(&Stack_handle_value(stack), "stack handle value");
+    debug_raw_scan_word(&Stack_handle_exception(stack), "stack handle exception");
+    debug_raw_scan_word(&Stack_handle_effect(stack), "stack handle effect");
+    debug_raw_scan_word(&Stack_handle_tick(stack), "stack handle tick");
+
+    stack = Stack_parent(stack);
+  }
+
+#ifdef NATIVE_CODE
+  value *gc_regs = Caml_state->gc_regs;
+  if (gc_regs != NULL) {
+    for (uintnat i = 0; i < Wosize_gc_regs; i++) {
+      debug_raw_scan_word(&gc_regs[i], "saved gc_regs");
+    }
+  }
+#endif
+}
+
+static void debug_promote_current_ranges(bool leader)
+{
+  if (!caml_debug_stale_roots || !leader) {
+    return;
+  }
+
+  uintnat count = atomic_load_acquire(&debug_current_range_count);
+  uintnat overflow = atomic_load_acquire(&debug_current_range_overflow);
+  if (count > CAML_DEBUG_CURRENT_RANGE_CAPACITY) {
+    count = CAML_DEBUG_CURRENT_RANGE_CAPACITY;
+  }
+
+  for (uintnat i = 0; i < count; i++) {
+    uintnat idx = debug_completed_range_next;
+    debug_completed_ranges[idx] = debug_current_ranges[i];
+    debug_completed_range_next =
+      (debug_completed_range_next + 1) % CAML_DEBUG_COMPLETED_RANGE_CAPACITY;
+    debug_completed_range_total++;
+    if (debug_completed_range_total > CAML_DEBUG_COMPLETED_RANGE_CAPACITY) {
+      debug_completed_range_overwrites++;
+    }
+  }
+
+  uintnat published = debug_completed_range_total;
+  if (published > CAML_DEBUG_COMPLETED_RANGE_CAPACITY) {
+    published = CAML_DEBUG_COMPLETED_RANGE_CAPACITY;
+  }
+  atomic_store_release(&debug_completed_range_count, published);
+
+  if (overflow != 0) {
+    fprintf(stderr,
+            "OCaml stale-root debug: dropped %"
+              ARCH_INTNAT_PRINTF_FORMAT
+              "u evacuated ranges for compaction #%"
+              ARCH_INTNAT_PRINTF_FORMAT "u\n",
+            overflow, debug_current_epoch);
+  }
+}
 
 #ifdef DEBUG
 
@@ -1091,6 +1426,8 @@ static inline void compact_update_value(void* ignored,
 {
   if (Is_block(v)) {
     CAMLassert(!Is_young(v));
+    caml_debug_check_stale_before_header(
+      v, p, CAML_DEBUG_STALE_SOURCE_COMPACT_UPDATE);
 
     tag_t tag = Tag_val(v);
 
@@ -1101,6 +1438,8 @@ static inline void compact_update_value(void* ignored,
         The forwarding pointer we want is in the first field of the
         Closure_tag. */
       v -= infix_offset;
+      caml_debug_check_stale_before_header(
+        v, p, CAML_DEBUG_STALE_SOURCE_COMPACT_UPDATE);
       CAMLassert(Tag_val(v) == Closure_tag);
     }
 
@@ -1309,6 +1648,9 @@ static void compact_algorithm_52(caml_domain_state* domain_state,
   For the first phase we need not consider full pools, they
   cannot be evacuated to or from. */
   CAML_EV_BEGIN(EV_COMPACT_EVACUATE);
+  if (caml_debug_stale_roots) {
+    debug_begin_evacuation_phase(participants[0] == Caml_state);
+  }
   caml_global_barrier(participating_count);
 
   struct caml_heap_state* heap = Caml_state->shared_heap;
@@ -1493,9 +1835,16 @@ static void compact_algorithm_52(caml_domain_state* domain_state,
   }
   CAML_EV_END(EV_COMPACT_EVACUATE);
 
+  debug_record_evacuated_pools(evacuated_pools);
   caml_global_barrier(participating_count);
   compact_fix(participants[0] == Caml_state);
   caml_global_barrier(participating_count);
+  if (caml_debug_stale_roots) {
+    debug_raw_scan_current_stack();
+    caml_global_barrier(participating_count);
+    debug_promote_current_ranges(participants[0] == Caml_state);
+    caml_global_barrier(participating_count);
+  }
 
   CAML_EV_BEGIN(EV_COMPACT_RELEASE);
   /* Third phase: free all evacuated pools and release the mappings back to
@@ -1969,9 +2318,15 @@ static pool* acquire_pool_from_free(caml_domain_state* domain_state,
 
 void compact_run_phase(struct caml_heap_state* heap,
                          int participating_count,
-                         caml_domain_state** participants)
+                         caml_domain_state** participants,
+                         bool publish_debug_ranges)
 {
   pool* domain_evac_pools = NULL; /* all the pools evacuated by this domain */
+
+  if (caml_debug_stale_roots) {
+    debug_begin_evacuation_phase(participants[0] == Caml_state);
+    caml_global_barrier(participating_count);
+  }
 
   for (sizeclass_t sz_class = 1; sz_class < NUM_SIZECLASSES; sz_class++) {
     pool* evac_pools = NULL; /* pools to evacuate */
@@ -2120,6 +2475,7 @@ void compact_run_phase(struct caml_heap_state* heap,
   }
 
   CAML_EV_END(EV_COMPACT_EVACUATE);
+  debug_record_evacuated_pools(domain_evac_pools);
   caml_global_barrier(participating_count);
 
   compact_debug_check_heap(heap);
@@ -2127,6 +2483,14 @@ void compact_run_phase(struct caml_heap_state* heap,
   caml_global_barrier(participating_count);
   compact_fix(participants[0] == Caml_state);
   caml_global_barrier(participating_count);
+  if (caml_debug_stale_roots) {
+    debug_raw_scan_current_stack();
+    caml_global_barrier(participating_count);
+    if (publish_debug_ranges) {
+      debug_promote_current_ranges(participants[0] == Caml_state);
+      caml_global_barrier(participating_count);
+    }
+  }
 
   /* Third step: move all evacuated pools to the pool freelist */
 
@@ -2191,7 +2555,11 @@ static void compact_new_algorithm(caml_domain_state* domain_state,
   compact_phase_one_mark(heap);
 
   caml_global_barrier(participating_count);
-  compact_run_phase(heap, participating_count, participants);
+  /* If phase two runs, it may reuse phase-one evacuated pool addresses for
+     valid destination objects, so phase-one ranges are raw-scanned but not
+     published to the completed-range ring. If phase two does not run, the
+     ranges are published below. */
+  compact_run_phase(heap, participating_count, participants, false);
   /* ends EV_COMPACT_EVACUATE */
 
   CAML_EV_BEGIN(EV_COMPACT_EVACUATE);
@@ -2203,10 +2571,14 @@ static void compact_new_algorithm(caml_domain_state* domain_state,
 
   caml_global_barrier(participating_count);
   if (should_run_phase_two) {
-    compact_run_phase(heap, participating_count, participants);
+    compact_run_phase(heap, participating_count, participants, true);
       /* ends EV_COMPACT_EVACUATE */
   } else {
-  CAML_EV_END(EV_COMPACT_EVACUATE);
+    CAML_EV_END(EV_COMPACT_EVACUATE);
+    if (caml_debug_stale_roots) {
+      debug_promote_current_ranges(participants[0] == Caml_state);
+      caml_global_barrier(participating_count);
+    }
   }
   caml_global_barrier(participating_count);
 

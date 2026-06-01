@@ -1031,10 +1031,14 @@ static void mark_slice_darken(struct mark_stack* stk, value child,
   /* Annotating an acquire barrier on the header because TSan does not see the
    * happens-before relationship established by address dependencies with
    * initializing writes in shared_heap.c allocation (#12894) */
+    caml_debug_check_stale_before_header(
+      child, NULL, CAML_DEBUG_STALE_SOURCE_MARK_SLICE);
     CAML_TSAN_ANNOTATE_HAPPENS_AFTER(Hp_val(child));
     chd = Hd_val(child);
     if (Tag_hd(chd) == Infix_tag) {
       child -= Infix_offset_hd(chd);
+      caml_debug_check_stale_before_header(
+        child, NULL, CAML_DEBUG_STALE_SOURCE_MARK_SLICE);
       chd = Hd_val(child);
     }
     CAMLassert(!Has_status_hd(chd, caml_global_heap_state.GARBAGE));
@@ -1089,11 +1093,15 @@ Caml_noinline static intnat do_some_marking(struct mark_stack* stk,
       /* Annotating an acquire barrier on the header because TSan does not see
        * the happens-before relationship established by address dependencies
        * with initializing writes in shared_heap.c allocation (#12894) */
+      caml_debug_check_stale_before_header(
+        block, NULL, CAML_DEBUG_STALE_SOURCE_MARK_QUEUE);
       CAML_TSAN_ANNOTATE_HAPPENS_AFTER(Hp_val(block));
       header_t hd = Hd_val(block);
 
       if (Tag_hd(hd) == Infix_tag) {
         block -= Infix_offset_hd(hd);
+        caml_debug_check_stale_before_header(
+          block, NULL, CAML_DEBUG_STALE_SOURCE_MARK_QUEUE);
         hd = Hd_val(block);
       }
 
@@ -1171,6 +1179,8 @@ Caml_noinline static intnat do_some_marking(struct mark_stack* stk,
       if (Is_markable(child)) {
         if (pb_full(&pb))
           break;
+        caml_debug_check_stale_before_header(
+          child, me.start, CAML_DEBUG_STALE_SOURCE_MARK_SLICE);
         prefetch_block(child);
         pb_push(&pb, child);
       }
@@ -1288,9 +1298,13 @@ void caml_darken(void* state, value v, volatile value* ignored) {
   if (!Is_markable (v)) return; /* foreign stack, at least */
 
   CAMLassert(caml_marking_started());
+  caml_debug_check_stale_before_header(
+    v, ignored, CAML_DEBUG_STALE_SOURCE_MAJOR_DARKEN);
   hd = Hd_val(v);
   if (Tag_hd(hd) == Infix_tag) {
     v -= Infix_offset_hd(hd);
+    caml_debug_check_stale_before_header(
+      v, ignored, CAML_DEBUG_STALE_SOURCE_MAJOR_DARKEN);
     hd = Hd_val(v);
   }
   if (Has_status_hd(hd, caml_global_heap_state.UNMARKED)) {
@@ -1526,6 +1540,11 @@ static bool should_compact_from_stw_single(int compaction_mode)
     return true;
   }
   CAMLassert (compaction_mode == Compaction_auto);
+
+  if (caml_debug_compact_every_major) {
+    CAML_GC_MESSAGE (POLICY, "Debug compaction at every major cycle.\n");
+    return true;
+  }
 
   /* runtime 4 algorithm, as close as possible.
    * TODO: revisit this in future. */

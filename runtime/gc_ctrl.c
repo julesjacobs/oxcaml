@@ -54,6 +54,12 @@ extern uintnat caml_custom_work_max_multiplier; /* see major_gc.c */
 extern uintnat caml_prelinking_in_use;    /* see startup_nat.c */
 extern uintnat caml_compaction_algorithm; /* see shared_heap.c */
 extern uintnat caml_compact_unmap;        /* see shared_heap.c */
+extern uintnat caml_debug_compact_every_major; /* see shared_heap.c */
+extern uintnat caml_debug_stale_roots;    /* see shared_heap.c */
+extern uintnat caml_debug_stale_roots_abort; /* see shared_heap.c */
+extern uintnat caml_debug_stale_roots_max_candidates; /* see shared_heap.c */
+extern uintnat caml_debug_stale_roots_target_epoch; /* see shared_heap.c */
+extern uintnat caml_debug_stale_roots_target_addr; /* see shared_heap.c */
 extern uintnat caml_pool_min_chunk_bsz;  /* see shared_heap.c */
 extern uintnat caml_percent_sweep_per_mark; /* see major_gc.c */
 extern uintnat caml_gc_overhead_adjustment; /* see major_gc.c */
@@ -437,6 +443,15 @@ static struct gc_tweak gc_tweaks[] = {
   { "prelinking_in_use", &caml_prelinking_in_use, 0 },
   { "compaction", &caml_compaction_algorithm, 0 },
   { "compact_unmap", &caml_compact_unmap, 0 },
+  { "debug_compact_every_major", &caml_debug_compact_every_major, 0 },
+  { "debug_stale_roots", &caml_debug_stale_roots, 0 },
+  { "debug_stale_roots_abort", &caml_debug_stale_roots_abort, 0 },
+  { "debug_stale_roots_max_candidates",
+    &caml_debug_stale_roots_max_candidates, 0 },
+  { "debug_stale_roots_target_epoch",
+    &caml_debug_stale_roots_target_epoch, 0 },
+  { "debug_stale_roots_target_addr",
+    &caml_debug_stale_roots_target_addr, 0 },
   { "pool_min_chunk_size", &caml_pool_min_chunk_bsz, 0 },
   { "main_stack_size", &caml_init_main_stack_wsz, 0 },
   { "thread_stack_size", &caml_init_thread_stack_wsz, 0 },
