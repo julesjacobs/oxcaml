@@ -53,3 +53,57 @@ call arguments (`oxcaml_ccc` / `oxcaml_c_stackcc`). Focused validation:
 `oxcaml-statepoint-call-arg-root.ll`, standalone statmemprof bigarray repro,
 `SELF_STAGE=2 ... tests/statmemprof`, and the full `SELF_STAGE=2
 tools/run-llvm-stage5-ocamltest.sh`.
+
+2026-06-01 regalloc call-clobber performance note: OxCaml has no callee-saved
+GPRs, so values live across calls need stack homes at call regmasks but should
+still be register-allocated in call-free regions between calls. PR #30 showed
+the performance opportunity by leaving regmask-crossing region-split remainders
+at `RS_New`, improving `direct_call_in_try_hit` from 1.7968x to 1.0143x
+LLVM/native, but that violated Greedy RA's termination model: generated
+`misc.ll` timed out after 60s in LLVM codegen. A bounded local experiment marks
+those remainders `RS_Split2` instead, so they skip another general region split
+and can only reach block/local splitting. That preserved the direct-call speedup
+(`direct_call_in_try_hit` 1.0142x), avoided the `misc.ll` blowup (1.136s), and
+improved the compiler-binary benchmark geomean from 1.0251x to 0.9829x. See
+`agent-state/llvm-backend/NUMBERS.md` for the full table. The next cleanup is to
+make this explicit as an OxCaml call-split stage rather than overloading
+`RS_Split2`.
+
+Follow-up in the same session: implemented explicit `RS_CallSplit` in vendored
+LLVM. The hidden flag is now `-mllvm -oxcaml-regalloc-call-split-remainders`.
+`RS_CallSplit` sits below `RS_Spill` but above `RS_Split2`, so affected
+remainders skip normal region splitting and still reach the bounded block/local
+split path. The final representative micro run had geomean 0.8265x and kept
+`direct_call_in_try_hit` near parity at 1.0285x. A fresh LLVM-built compiler
+using `_llvm_self_stage2_callstage_install` benchmarked at 0.9782x geomean
+LLVM/native, with max slowdown 1.0154x. Full numbers are in `NUMBERS.md`.
+
+2026-06-01 regmask child-classification experiment: tested the extra idea of
+classifying split children by the number of call regmask crossings. The strict
+version, where a region-split remainder only gets the bounded call-split path
+if it crosses fewer regmasks than its parent, regressed
+`direct_call_in_try_hit` to 1.6607x LLVM/native. That shows ordinary region
+splitting often has not made regmask-count progress yet; the useful split still
+happens later in block/local splitting. A weaker version that sends call-free
+remainders back to `RS_New` and call-crossing remainders to `RS_CallSplit`
+slightly improved the worst nested closure case but worsened aggregate micro
+performance (0.8307x geomean versus 0.8265x for plain `RS_CallSplit`). Do not
+keep this refinement in the current hook. If we want a principled next step,
+add a dedicated regmask-aware splitter that creates call-free islands directly;
+then the regmask-count progress rule can be applied to that splitter's own
+children.
+
+TODO: investigate and fix duplicate explicit exception-root slots in RS4GC. The
+remaining large micro slowdowns are `closure_call_in_try_hit` and
+`closure_call_in_nested_try_hit`. The closure call itself is not the issue: the
+slow path is active-trap root preservation around invokes. In the nested case,
+the pre-RS4GC IR has one closure pointer live at the invoke, but custom OxCaml
+exception-root handling creates eight volatile `.exnroot` slots for the same
+logical value. Four come from one root slot per recovery boundary edge
+(`L175`, `L181`, `L187`, `L193` -> `L203`), and four more come from the late
+exception-root materialization pass after normal statepoint relocation. Some
+of the resulting selectors are unused, but the slots are appended to `gc-live`,
+so the volatile stores remain in the hot loop. A principled fix should intern
+explicit exception-root slots by equivalent store-site value/statepoint rather
+than by recovery incoming edge, and should prune unused explicit root slots
+before appending them to `gc-live`.

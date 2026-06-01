@@ -287,3 +287,76 @@ Design 1 focused old slow cases:
 | Raw heap-address canonicalization focused `llvm-codegen` | 89 passed, 3 skipped, 0 failed |
 | Raw heap-address canonicalization full normal suite | 6743 passed, 296 skipped, 0 failed |
 | Raw heap-address canonicalization full self-stage2 | 6717 passed, 283 skipped, 0 failed |
+
+## Regmask Remainder Splitting
+
+2026-06-01 local experiment on `jujacobs/llvm-backend-stage2`, using the
+representative microbenchmark harness from commit `2b789140bd` and compiler
+binary benchmark harness against installed compilers. The original PR #30
+variant left OxCaml regmask-crossing region-split remainders at `RS_New`; this
+preserved the `direct_call_in_try_hit` speedup but caused a compile-time
+pathology (`misc.ll` timed out after 60s, versus about 1s without the flag).
+
+Changing the experiment to mark those remainders `RS_Split2` instead preserves
+the speedup while avoiding the full region-splitting retry loop. The cleaned-up
+version adds an explicit `RS_CallSplit` stage with the same bounded behavior,
+so the reason is visible in the stage lattice instead of overloading
+`RS_Split2`:
+
+| measurement | baseline | PR #30 `RS_New` | bounded `RS_Split2` | explicit `RS_CallSplit` |
+| --- | ---: | ---: | ---: | ---: |
+| micro geomean LLVM/native | 0.8428 | 0.8287 | 0.8315 | 0.8265 |
+| micro median LLVM/native | 0.9534 | 0.9637 | 0.9643 | 0.9621 |
+| micro max LLVM/native | 1.7968 | 1.3484 | 1.3434 | 1.3752 |
+| `direct_call_in_try_hit` | 1.7968 | 1.0143 | 1.0142 | 1.0285 |
+| `closure_call_in_try_hit` | 1.2591 | 1.2225 | 1.2124 | 1.2315 |
+| `closure_call_in_nested_try_hit` | 1.3665 | 1.3484 | 1.3434 | 1.3752 |
+| `higher_order_fold_string_keys` | 1.0682 | 0.9897 | 0.9463 | 1.0719 |
+
+Focused compile-time check on generated `.ocamlcommon.objs/native/misc.ll`:
+
+| clang mode | time |
+| --- | ---: |
+| no flag | 2.354s |
+| PR #30 `RS_New` flag | timed out after 60s |
+| bounded `RS_Split2` flag | 1.136s |
+
+Compiler-binary benchmark, native-built compiler versus LLVM-built compiler:
+
+| compiler build | geomean | median | min | max |
+| --- | ---: | ---: | ---: | ---: |
+| existing self-stage2 LLVM compiler | 1.0251 | 1.0234 | 0.9898 | 1.0672 |
+| rebuilt with bounded `RS_Split2` flag | 0.9829 | 0.9849 | 0.9580 | 1.0053 |
+| rebuilt with explicit `RS_CallSplit` flag | 0.9782 | 0.9732 | 0.9624 | 1.0154 |
+
+Per-module compiler-binary ratios, existing LLVM-built compiler to explicit
+`RS_CallSplit` compiler:
+
+| module | before | after |
+| --- | ---: | ---: |
+| `env.ml` | 1.0099 | 0.9624 |
+| `ctype.ml` | 1.0672 | 0.9731 |
+| `typecore.ml` | 1.0420 | 0.9772 |
+| `translcore.ml` | 1.0183 | 0.9866 |
+| `typemod.ml` | 1.0234 | 0.9670 |
+| `cfg_to_linear.ml` | 1.0516 | 1.0154 |
+| `cfg_selectgen.ml` | 0.9898 | 0.9696 |
+| `llvmize.ml` | 1.0266 | 0.9718 |
+| `regalloc_irc.ml` | 0.9996 | 0.9819 |
+
+Regmask child-classification follow-up, tested and rejected:
+
+| measurement | strict regmask-progress child classification | call-free child `RS_New`, call-crossing child `RS_CallSplit` |
+| --- | ---: | ---: |
+| micro geomean LLVM/native | not run full suite | 0.8307 |
+| micro median LLVM/native | not run full suite | 0.9702 |
+| micro max LLVM/native | not run full suite | 1.3456 |
+| `direct_call_in_try_hit` | 1.6607 | 1.0170 |
+| `closure_call_in_try_hit` | 1.2413 | 1.2329 |
+| `closure_call_in_nested_try_hit` | 1.3521 | 1.3456 |
+
+Conclusion: the strict rule is wrong at the current `splitAroundRegion` hook,
+because the ordinary region split may not reduce call-regmask crossings before
+the later block/local split gets a chance to extract call-free pieces. The
+weaker child classification is neutral to slightly worse than plain
+`RS_CallSplit`, so the source was restored to plain `RS_CallSplit`.
