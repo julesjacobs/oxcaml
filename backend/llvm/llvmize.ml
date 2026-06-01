@@ -908,6 +908,15 @@ let frontend_alloca_roots_enabled = frontend_gc_roots_enabled
 
 let slow_path_root_slots_enabled = frontend_gc_roots_enabled
 
+let roots_for_basic_safepoint ?unwind_label t i msg =
+  reject_addr_regs_across t i msg;
+  if slow_path_root_slots_enabled ()
+  then
+    slow_path_root_slots_for_basic_safepoint ?unwind_label t i |> function
+    | Some roots -> roots, []
+    | None -> [], load_live_gc_roots_across t i
+  else [], load_live_gc_roots_across t i
+
 let refresh_live_gc_roots _t _roots = ()
 
 let live_gc_root_alloca_bundles t roots =
@@ -1435,16 +1444,21 @@ let llvm_landingpad_type = T.(Struct [ptr; i32])
 (* Terminator instructions *)
 
 let int_comp t cond (i : _ Cfg.instruction) ~imm =
-  let typ = T.i64 in
   let cond = I.icmp_cond_of_ocaml cond in
+  let compare_as_val =
+    Array.exists (fun (arg : Reg.t) -> Cmm.is_val arg.typ || Cmm.is_addr arg.typ)
+      i.arg
+  in
+  let typ = if compare_as_val then T.val_ptr else T.i64 in
+  let load_arg reg = load_reg_to_temp ~typ t reg in
   match imm with
   | None ->
-    let arg1 = load_reg_as_tagged_int t i.arg.(0) in
-    let arg2 = load_reg_as_tagged_int t i.arg.(1) in
+    let arg1 = load_arg i.arg.(0) in
+    let arg2 = load_arg i.arg.(1) in
     emit_ins t (I.icmp cond ~arg1 ~arg2)
   | Some n ->
-    let arg1 = load_reg_as_tagged_int t i.arg.(0) in
-    let arg2 = V.of_int ~typ n in
+    let arg1 = load_arg i.arg.(0) in
+    let arg2 = cast t (V.of_int n) typ in
     emit_ins t (I.icmp cond ~arg1 ~arg2)
 
 let float_comp t cond (i : _ Cfg.instruction) typ =
@@ -2588,7 +2602,9 @@ let int_op t (i : Cfg.basic Cfg.instruction) (op : Operation.integer_operation)
       | Some n -> V.of_int ~typ:T.i64 (if negate_arg then -n else n)
     in
     let metadata =
-      if Reg.Set.mem i.res.(0) (get_fun_info t).addr_regs_known_base
+      if
+        Cmm.is_val i.res.(0).typ
+        || Reg.Set.mem i.res.(0) (get_fun_info t).addr_regs_known_base
       then Some "!is_base_value !{}"
       else None
     in
@@ -2621,7 +2637,7 @@ let int_op t (i : Cfg.basic Cfg.instruction) (op : Operation.integer_operation)
   let res =
     match op with
     | Iadd ->
-      if Cmm.is_addr i.res.(0).typ
+      if Cmm.is_val i.res.(0).typ || Cmm.is_addr i.res.(0).typ
       then do_gep ~negate_arg:false
       else do_binary ~tagged_args:true Add
     | Isub ->
@@ -3834,15 +3850,9 @@ let local_alloc t (i : Cfg.basic Cfg.instruction) num_bytes =
   store_into_reg t i.res.(0) res
 
 let call_gc_for_basic_safepoint ?alloc_info ?unwind_label ~attrs t i =
-  reject_addr_regs_across t i "basic safepoint";
   add_referenced_symbol t "caml_call_gc";
   let slow_path_roots, live_roots =
-    if slow_path_root_slots_enabled ()
-    then
-      slow_path_root_slots_for_basic_safepoint ?unwind_label t i |> function
-      | Some roots -> roots, []
-      | None -> [], load_live_gc_roots_across t i
-    else [], load_live_gc_roots_across t i
+    roots_for_basic_safepoint ?unwind_label t i "basic safepoint"
   in
   store_slow_path_roots t slow_path_roots;
   call_simple ~attrs ~live_roots ~slow_path_roots ?alloc_info ?unwind_label

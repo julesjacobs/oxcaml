@@ -266,8 +266,8 @@ module Type = struct
       Vector { num_of_elems; elem_type = i1 }
     | Vector { num_of_elems; elem_type = Float | Double } ->
       Vector { num_of_elems; elem_type = i1 }
-    | Int _ | Float | Double -> i1
-    | Ptr _ | Struct _ | Array _ | Vector _ | Label | Token | Metadata ->
+    | Int _ | Float | Double | Ptr _ -> i1
+    | Struct _ | Array _ | Vector _ | Label | Token | Metadata ->
       fail_msg ~name:"Type.cmp_res_type"
         "expected scalar or vector comparison type"
 
@@ -1004,7 +1004,7 @@ module Instruction = struct
     let arg1_type = Value.get_type arg1 in
     let arg2_type = Value.get_type arg2 in
     assert' "icmp" (Type.equal arg1_type arg2_type);
-    assert' "icmp" (Type.is_int_or_int_vector arg1_type);
+    assert' "icmp" (Type.is_int_or_int_vector arg1_type || Type.is_ptr arg1_type);
     Icmp { cond; arg1; arg2 }
 
   let fcmp cond ~arg1 ~arg2 =
