@@ -403,10 +403,12 @@ struct RematerizlizationCandidateRecord {
   // Original base.
   Value *RootOfChain;
   // If set, this value is an i1 computed before a specific statepoint. When
-  // true the rematerialized chain is used after relocation; when false the
-  // relocated base is already the right value. This handles PHIs whose incoming
+  // it has RematerializedValueConditionSelectsRematValue's truth value, the
+  // rematerialized chain is used after relocation; otherwise the relocated
+  // base is already the right value. This handles PHIs/selects whose incoming
   // values are either a derived chain from the base or the base itself.
   Value *UseRematerializedValue = nullptr;
+  bool RematerializedValueConditionSelectsRematValue = true;
   // If set, rematerialize one of several possible chains from the relocated
   // base selected by this non-pointer case tag.
   Value *RematerializationTag = nullptr;
@@ -2491,6 +2493,9 @@ static void recomputeLiveInValues(
 static Value *findRematerializableChainToBasePointer(
     SmallVectorImpl<Instruction *> &ChainToBase, Value *CurrentValue,
     bool AllowIntegerAddressArithmetic = false);
+static bool findRematerializableChainToSpecificBase(
+    SmallVectorImpl<Instruction *> &ChainToBase, Value *CurrentValue,
+    Value *Base, bool AllowIntegerAddressArithmetic = false);
 static Value *findRematerializablePhiChainToBasePhi(
     SmallVectorImpl<Instruction *> &ChainToBase, PHINode *DerivedPhi,
     PHINode *BasePhi, const PointerToBaseTy &PointerToBase,
@@ -4602,6 +4607,97 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
     if (Invoke && !IsBaseEquivalent && !isNormalOnlyAfterInvoke(Invoke, Derived, DT))
       return Reject("invoke-not-normal-only");
 
+    auto TryBuildBaseOrDerivedSelectRemat = [&]() {
+      auto *Select = dyn_cast<SelectInst>(Derived);
+      if (!Select)
+        return false;
+
+      auto IsBaseValue = [&](Value *V) {
+        return V == Base || isOxCamlBaseEquivalentGCPointer(V, Base);
+      };
+      auto RootMatchesBase = [&](Value *Root) {
+        if (IsBaseValue(Root))
+          return true;
+        auto It = PointerToBase.find(Root);
+        return It != PointerToBase.end() && It->second == Base;
+      };
+      auto BuildChainFromArm = [&](Value *Arm,
+                                   SmallVectorImpl<Instruction *> &Chain,
+                                   Value *&ArmRoot) {
+        if (findRematerializableChainToSpecificBase(
+                Chain, Arm, Base, /*AllowIntegerAddressArithmetic=*/true)) {
+          ArmRoot = Base;
+          return !Chain.empty();
+        }
+
+        ArmRoot = findRematerializableChainToBasePointer(
+            Chain, Arm, /*AllowIntegerAddressArithmetic=*/true);
+        if (Chain.empty())
+          return false;
+        if (RootMatchesBase(ArmRoot))
+          return true;
+        auto It = PointerToBase.find(Arm);
+        return It != PointerToBase.end() && It->second == Base;
+      };
+
+      Value *TrueValue = Select->getTrueValue();
+      Value *FalseValue = Select->getFalseValue();
+      bool TrueIsBase = IsBaseValue(TrueValue);
+      bool FalseIsBase = IsBaseValue(FalseValue);
+      if (TrueIsBase != FalseIsBase) {
+        Value *DerivedArm = TrueIsBase ? FalseValue : TrueValue;
+        SmallVector<Instruction *, 3> SelectChain;
+        Value *SelectRoot = nullptr;
+        if (!BuildChainFromArm(DerivedArm, SelectChain, SelectRoot))
+          return false;
+
+        Record.ChainToBase = SelectChain;
+        RootOfChain = SelectRoot;
+        Record.UseRematerializedValue = Select->getCondition();
+        Record.RematerializedValueConditionSelectsRematValue = !TrueIsBase;
+        return true;
+      }
+
+      if (TrueIsBase || FalseIsBase)
+        return false;
+
+      SmallVector<Instruction *, 3> TrueChain;
+      SmallVector<Instruction *, 3> FalseChain;
+      Value *TrueRoot = nullptr;
+      Value *FalseRoot = nullptr;
+      if (!BuildChainFromArm(TrueValue, TrueChain, TrueRoot) ||
+          !BuildChainFromArm(FalseValue, FalseChain, FalseRoot))
+        return false;
+
+      bool SameChain = TrueChain.size() == FalseChain.size();
+      for (unsigned I = 0, E = TrueChain.size(); SameChain && I != E; ++I)
+        SameChain = areEquivalentRematerializableInstructions(TrueChain[I],
+                                                              FalseChain[I]);
+      if (SameChain) {
+        Record.ChainToBase = TrueChain;
+        RootOfChain = TrueRoot;
+        return true;
+      }
+
+      Record.ChainToBase.clear();
+      RootOfChain = Base;
+      Record.UseRematerializedValue = nullptr;
+      Record.RematerializationTag = Select->getCondition();
+
+      RematerializationAlternative &FalseAlt =
+          Record.Alternatives.emplace_back();
+      FalseAlt.ChainToBase = FalseChain;
+      FalseAlt.RootOfChain = FalseRoot;
+      FalseAlt.Tag = 0;
+
+      RematerializationAlternative &TrueAlt =
+          Record.Alternatives.emplace_back();
+      TrueAlt.ChainToBase = TrueChain;
+      TrueAlt.RootOfChain = TrueRoot;
+      TrueAlt.Tag = 1;
+      return true;
+    };
+
     auto TryBuildAlternativePhiRemat = [&]() {
       auto *DerivedPhi = dyn_cast<PHINode>(Derived);
       auto *BasePhi = dyn_cast<PHINode>(Base);
@@ -4746,9 +4842,12 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
         SmallVector<Instruction *, 3> IncomingChain;
         Value *IncomingRoot = IncomingBase;
         if (Incoming != IncomingBase) {
-          IncomingRoot = findRematerializableChainToBasePointer(
-              IncomingChain, Incoming,
-              /*AllowIntegerAddressArithmetic=*/true);
+          if (!findRematerializableChainToSpecificBase(
+                  IncomingChain, Incoming, IncomingBase,
+                  /*AllowIntegerAddressArithmetic=*/true))
+            IncomingRoot = findRematerializableChainToBasePointer(
+                IncomingChain, Incoming,
+                /*AllowIntegerAddressArithmetic=*/true);
           if (!IncomingChainMatchesBase(Incoming, IncomingRoot, IncomingBase,
                                         IncomingChain))
             return false;
@@ -4813,7 +4912,8 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
         RootOfChain->print(errs());
         errs() << "\n  chain-size: " << Record.ChainToBase.size() << "\n";
       }
-      if (!TryBuildAlternativePhiRemat())
+      if (!TryBuildBaseOrDerivedSelectRemat() &&
+          !TryBuildAlternativePhiRemat())
         return Reject("not-chain");
     }
 
@@ -5212,8 +5312,12 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
       }
       if (Record.UseRematerializedValue) {
         IRBuilder<> SelectBuilder(RematerializedValue->getNextNode());
+        Value *TrueValue = RematerializedValue;
+        Value *FalseValue = BaseRelocate;
+        if (!Record.RematerializedValueConditionSelectsRematValue)
+          std::swap(TrueValue, FalseValue);
         auto *SelectedValue = cast<Instruction>(SelectBuilder.CreateSelect(
-            Record.UseRematerializedValue, RematerializedValue, BaseRelocate,
+            Record.UseRematerializedValue, TrueValue, FalseValue,
             suffixed_name_or(Derived, ".remat.select", "remat.select")));
         Result.RematerializedValues[SelectedValue] = Derived;
       } else {
@@ -5681,6 +5785,64 @@ static Value* findRematerializableChainToBasePointer(
   return CurrentValue;
 }
 
+static bool findRematerializableChainToSpecificBase(
+    SmallVectorImpl<Instruction *> &ChainToBase, Value *CurrentValue,
+    Value *Base, bool AllowIntegerAddressArithmetic) {
+  if (CurrentValue == Base)
+    return true;
+
+  unsigned OriginalSize = ChainToBase.size();
+  auto TryAppendAndRecurse = [&](Instruction *Instr, Value *NextValue) {
+    ChainToBase.push_back(Instr);
+    if (findRematerializableChainToSpecificBase(
+            ChainToBase, NextValue, Base, AllowIntegerAddressArithmetic))
+      return true;
+    ChainToBase.resize(OriginalSize);
+    return false;
+  };
+
+  if (auto *GEP = dyn_cast<GetElementPtrInst>(CurrentValue))
+    return TryAppendAndRecurse(GEP, GEP->getPointerOperand());
+
+  if (auto *CI = dyn_cast<CastInst>(CurrentValue)) {
+    auto *IntToPtrDstTy = dyn_cast<PointerType>(CI->getType());
+    auto *PtrToIntSrcTy = dyn_cast<PointerType>(CI->getOperand(0)->getType());
+    bool IsAddrSpace1IntToPtr = AllowIntegerAddressArithmetic &&
+                                isa<IntToPtrInst>(CI) && IntToPtrDstTy &&
+                                IntToPtrDstTy->getAddressSpace() == 1;
+    bool IsAddrSpace1PtrToInt = AllowIntegerAddressArithmetic &&
+                                isa<PtrToIntInst>(CI) && PtrToIntSrcTy &&
+                                PtrToIntSrcTy->getAddressSpace() == 1;
+    if (!IsAddrSpace1IntToPtr && !IsAddrSpace1PtrToInt &&
+        !CI->isNoopCast(CI->getModule()->getDataLayout()))
+      return false;
+
+    return TryAppendAndRecurse(CI, CI->getOperand(0));
+  }
+
+  if (AllowIntegerAddressArithmetic) {
+    if (auto *BO = dyn_cast<BinaryOperator>(CurrentValue)) {
+      if (BO->getOpcode() != Instruction::Add &&
+          BO->getOpcode() != Instruction::Sub)
+        return false;
+
+      if (isa<ConstantInt>(BO->getOperand(1)))
+        return TryAppendAndRecurse(BO, BO->getOperand(0));
+
+      if (BO->getOpcode() == Instruction::Add &&
+          isa<ConstantInt>(BO->getOperand(0)))
+        return TryAppendAndRecurse(BO, BO->getOperand(1));
+
+      return false;
+    }
+
+    if (auto *Freeze = dyn_cast<FreezeInst>(CurrentValue))
+      return TryAppendAndRecurse(Freeze, Freeze->getOperand(0));
+  }
+
+  return false;
+}
+
 static bool areEquivalentRematerializableInstructions(Instruction *A,
                                                       Instruction *B) {
   if (A->getOpcode() != B->getOpcode() || A->getType() != B->getType())
@@ -5805,6 +5967,9 @@ static Value *findRematerializablePhiChainToBasePhiImpl(
   auto IncomingChainMatchesBase = [&](Value *Incoming, Value *Root,
                                       Value *IncomingBase,
                                       ArrayRef<Instruction *> IncomingChain) {
+    if (IncomingChain.empty())
+      return Incoming == IncomingBase ||
+             isOxCamlBaseEquivalentGCPointer(Incoming, IncomingBase);
     if (RootMatchesIncomingBase(Root, IncomingBase))
       return true;
     // A rematerialized incoming may be based on a relocated copy of
@@ -5858,10 +6023,15 @@ static Value *findRematerializablePhiChainToBasePhiImpl(
     }
 
     SmallVector<Instruction *, 3> IncomingChain;
-    Value *IncomingRoot = findRematerializableChainToBasePointer(
-        IncomingChain, Incoming, AllowIntegerAddressArithmetic);
-    if (!RootMatchesIncomingBase(IncomingRoot, IncomingBase))
-      TrimChainToIncomingBase(IncomingChain, IncomingRoot, IncomingBase);
+    Value *IncomingRoot = IncomingBase;
+    if (!findRematerializableChainToSpecificBase(
+            IncomingChain, Incoming, IncomingBase,
+            AllowIntegerAddressArithmetic)) {
+      IncomingRoot = findRematerializableChainToBasePointer(
+          IncomingChain, Incoming, AllowIntegerAddressArithmetic);
+      if (!RootMatchesIncomingBase(IncomingRoot, IncomingBase))
+        TrimChainToIncomingBase(IncomingChain, IncomingRoot, IncomingBase);
+    }
     bool IncomingMatchesByNestedPhi = false;
     if (!IncomingChainMatchesBase(Incoming, IncomingRoot, IncomingBase,
                                   IncomingChain)) {
@@ -5917,8 +6087,11 @@ static Value *findRematerializablePhiChainToBasePhiImpl(
         return nullptr;
   }
 
-  if (!SawDerivedChain)
+  if (!SawDerivedChain) {
+    DebugReject("no-derived-chain", std::numeric_limits<unsigned>::max(),
+                nullptr, nullptr, nullptr, {});
     return nullptr;
+  }
 
   NeedsBaseSelect |= SawBaseValueIncoming;
   llvm::append_range(ChainToBase, RepresentativeChain);
@@ -6028,8 +6201,11 @@ static Value *findRematerializablePhiChainToSingleBase(
       }
 
       SmallVector<Instruction *, 3> IncomingChain;
-      Value *IncomingRoot = findRematerializableChainToBasePointer(
-          IncomingChain, Incoming, AllowIntegerAddressArithmetic);
+      Value *IncomingRoot = Base;
+      if (!findRematerializableChainToSpecificBase(
+              IncomingChain, Incoming, Base, AllowIntegerAddressArithmetic))
+        IncomingRoot = findRematerializableChainToBasePointer(
+            IncomingChain, Incoming, AllowIntegerAddressArithmetic);
 
       bool IncomingMatchesByNestedPhi = false;
       if (!IncomingChainMatchesBase(Incoming, IncomingRoot, IncomingChain)) {
