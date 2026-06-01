@@ -122,10 +122,6 @@ type fun_info =
     mutable preserved_reg_slots : Reg.Set.t;
         (* Registers whose slots must remain addressable, for example because a
            GC safepoint reports the slot through a ["gc-live"] bundle. *)
-    mutable addr_regs_known_base : Reg.Set.t;
-        (* Address-typed temporaries that are immediately reinterpreted as [Val].
-           This is an explicit frontend assertion that the address is an OCaml
-           object pointer, not an interior pointer. *)
     mutable static_addr_regs : Reg.Set.t;
         (* Integer/address temporaries derived from static symbols. These are
            address values, but not moving GC roots. *)
@@ -201,7 +197,6 @@ let create_fun_info ?subprogram_dbg_metadata_id emitter =
     liveness = None;
     fun_args = [||];
     preserved_reg_slots = Reg.Set.empty;
-    addr_regs_known_base = Reg.Set.empty;
     static_addr_regs = Reg.Set.empty;
     slow_path_root_slots = [];
     active_traps = InstructionId.Tbl.create 0;
@@ -799,25 +794,6 @@ let reject_addr_regs_across t (i : 'a Cfg.instruction) msg =
       then
         fail_msg ~name:"reject_addr_regs_across" "%s: %a" msg Printreg.regset
           addr_regs)
-
-let collect_addr_regs_known_base (cfg : Cfg.t) =
-  let collect_once regs =
-    Cfg.fold_body_instructions cfg ~init:regs ~f:(fun regs i ->
-      match[@ocaml.warning "-fragile-match"] i.desc, i.arg, i.res with
-      | Op Move, [| src |], [| dst |]
-        when Cmm.is_addr src.typ && Cmm.is_val dst.typ ->
-        Reg.Set.add dst (Reg.Set.add src regs)
-      | Op Move, [| src |], [| dst |] when Reg.Set.mem src regs ->
-        Reg.Set.add dst regs
-      | Op (Alloc _), _, [| dst |] when Cmm.is_val dst.typ ->
-        Reg.Set.add dst regs
-      | _ -> regs)
-  in
-  let rec fixpoint regs =
-    let regs' = collect_once regs in
-    if Reg.Set.equal regs regs' then regs else fixpoint regs'
-  in
-  fixpoint Reg.Set.empty
 
 let collect_static_addr_regs (cfg : Cfg.t) =
   let static regs reg = Reg.Set.mem reg regs in
@@ -2587,13 +2563,7 @@ let int_op t (i : Cfg.basic Cfg.instruction) (op : Operation.integer_operation)
         else temp
       | Some n -> V.of_int ~typ:T.i64 (if negate_arg then -n else n)
     in
-    let metadata =
-      if Reg.Set.mem i.res.(0) (get_fun_info t).addr_regs_known_base
-      then Some "!is_base_value !{}"
-      else None
-    in
-    emit_ins ?metadata t
-      (I.getelementptr ~base_type:T.i8 ~base_ptr ~indices:[offset])
+    emit_ins t (I.getelementptr ~base_type:T.i8 ~base_ptr ~indices:[offset])
   in
   let do_imulh ~signed =
     (* Assuming operands are i64 *)
@@ -4952,7 +4922,6 @@ let cfg (cl : CL.t) =
   let cfg = CL.cfg cl in
   reject_addr_regs cfg.fun_args "fun args";
   let arg_regs = prepare_fun_info t cfg in
-  (get_fun_info t).addr_regs_known_base <- collect_addr_regs_known_base cfg;
   (get_fun_info t).static_addr_regs <- collect_static_addr_regs cfg;
   let arg_values = E.get_args_as_values (get_fun_info t).emitter in
   alloca_regs t cfg arg_values arg_regs;
