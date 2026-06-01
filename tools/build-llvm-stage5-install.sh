@@ -3,6 +3,7 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
+. "$repo/tools/llvm-backend-defaults.sh"
 
 boot_install=${BOOT_INSTALL:-$repo/_install}
 runtime_build=${RUNTIME_BUILD:-$repo/_llvm_stage5_bootstrap_build}
@@ -68,6 +69,8 @@ if [ -z "$system" ] || [ -z "$model" ] || [ -z "$aspp" ]; then
   exit 1
 fi
 
+llvm_ocamlparam=$(llvm_backend_ocamlparam "$wrapper")
+
 cat > "$runtime_ws" <<EOF
 (lang dune 2.8)
 (context (default
@@ -78,7 +81,7 @@ cat > "$runtime_ws" <<EOF
     (OCAMLLIB ("$boot_install/lib/ocaml")))
   (env (_
     (flags (:standard -directory stdlib -warn-error +A -alert -unsafe_multidomain))
-    (env-vars ("OCAMLPARAM" "_,llvm-backend=1,llvm-path=$wrapper"))))))
+    (env-vars ("OCAMLPARAM" "$llvm_ocamlparam"))))))
 EOF
 
 cat > "$main_ws" <<EOF
@@ -92,7 +95,7 @@ cat > "$main_ws" <<EOF
   (env (_
     (flags (:standard -directory compiler-distro -warn-error +A -alert -unsafe_multidomain))
     (ocamlopt_flags (:standard -fno-asan))
-    (env-vars ("OCAMLPARAM" "_,llvm-backend=1,llvm-path=$wrapper"))))))
+    (env-vars ("OCAMLPARAM" "$llvm_ocamlparam"))))))
 EOF
 
 runtime_targets=(

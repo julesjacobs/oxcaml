@@ -14,15 +14,19 @@ else
   ocaml_subdirs_to_ignore=
 endif
 
+comma := ,
+LLVM_BACKEND_FLAGS ?= -mllvm -oxcaml-regalloc-call-split-remainders
+LLVM_OCAMLPARAM_SUFFIX = llvm-backend=1$(comma)llvm-path=$(LLVM_PATH)$(if $(strip $(LLVM_BACKEND_FLAGS)),$(comma)llvm-flags=$(LLVM_BACKEND_FLAGS),)
+
 ifeq ($(LLVM_BACKEND),1)
 ifeq ($(strip $(LLVM_PATH)),)
 $(error Set LLVM_PATH to the clang wrapper or LLVM tool path for LLVM backend builds)
 endif
 LLVM_BOOT_BACKEND ?= 1
 export PATH := $(dir $(DUNE)):$(PATH)
-LLVM_BUILD_OCAMLPARAM := $(if $(BUILD_OCAMLPARAM),$(BUILD_OCAMLPARAM),_),llvm-backend=1,llvm-path=$(LLVM_PATH)
+LLVM_BUILD_OCAMLPARAM := $(if $(BUILD_OCAMLPARAM),$(BUILD_OCAMLPARAM),_),$(LLVM_OCAMLPARAM_SUFFIX)
 override BUILD_OCAMLPARAM := $(LLVM_BUILD_OCAMLPARAM)
-override OCAMLPARAM := $(if $(OCAMLPARAM),$(OCAMLPARAM),_),llvm-backend=1,llvm-path=$(LLVM_PATH)
+override OCAMLPARAM := $(if $(OCAMLPARAM),$(OCAMLPARAM),_),$(LLVM_OCAMLPARAM_SUFFIX)
 export OCAMLPARAM
 endif
 
@@ -31,7 +35,7 @@ ifeq ($(strip $(LLVM_PATH)),)
 $(error Set LLVM_PATH to the clang wrapper or LLVM tool path for LLVM boot backend builds)
 endif
 LLVM_BOOT_INSTALL ?= $(CURDIR)/_install
-BOOT_OCAMLPARAM := _,llvm-backend=1,llvm-path=$(LLVM_PATH)
+BOOT_OCAMLPARAM := _,$(LLVM_OCAMLPARAM_SUFFIX)
 BOOT_PATHS := \
   (paths \
     (PATH ("$(LLVM_BOOT_INSTALL)/bin" :standard)) \
@@ -512,20 +516,20 @@ llvm-install:
 llvm-test:
 	$(call require_llvm_path)
 	$(MAKE) install_for_test
-	$(MAKE) test-no-rebuild TEST_RUN_OCAMLPARAM="_,llvm-backend=1,llvm-path=$(LLVM_PATH)"
+	$(MAKE) test-no-rebuild TEST_RUN_OCAMLPARAM="_,$(LLVM_OCAMLPARAM_SUFFIX)"
 
 llvm-test-no-rebuild:
 	$(call require_llvm_path)
-	$(MAKE) test-no-rebuild TEST_RUN_OCAMLPARAM="_,llvm-backend=1,llvm-path=$(LLVM_PATH)"
+	$(MAKE) test-no-rebuild TEST_RUN_OCAMLPARAM="_,$(LLVM_OCAMLPARAM_SUFFIX)"
 
 llvm-test-one:
 	$(call require_llvm_path)
 	$(MAKE) install_for_test
-	$(MAKE) test-one-no-rebuild TEST_RUN_OCAMLPARAM="_,llvm-backend=1,llvm-path=$(LLVM_PATH)"
+	$(MAKE) test-one-no-rebuild TEST_RUN_OCAMLPARAM="_,$(LLVM_OCAMLPARAM_SUFFIX)"
 
 llvm-test-one-no-rebuild:
 	$(call require_llvm_path)
-	$(MAKE) test-one-no-rebuild TEST_RUN_OCAMLPARAM="_,llvm-backend=1,llvm-path=$(LLVM_PATH)"
+	$(MAKE) test-one-no-rebuild TEST_RUN_OCAMLPARAM="_,$(LLVM_OCAMLPARAM_SUFFIX)"
 
 llvm-self-stage-install: llvm-install
 	LLVM_WRAPPER="$(LLVM_PATH)" \

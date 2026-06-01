@@ -3,6 +3,7 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
+. "$repo/tools/llvm-backend-defaults.sh"
 
 stage0_install=${STAGE0_INSTALL:-$repo/_install}
 boot_build=${BOOT_BUILD:-$repo/_llvm_boot_context_build}
@@ -91,7 +92,7 @@ EOF
 
 : > "$wrapper_log"
 OCAMLLIB="$self_stage_install/lib/ocaml" \
-OCAMLPARAM="_,llvm-backend=1,llvm-path=$wrapper" \
+OCAMLPARAM="$(llvm_backend_ocamlparam "$wrapper")" \
   "$self_stage_install/bin/ocamlopt.opt" -o "$tmpdir/main.exe" "$tmpdir/main.ml"
 "$tmpdir/main.exe"
 print_wrapper_counts self-stage-smoke

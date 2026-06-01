@@ -3,6 +3,7 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
+. "$repo/tools/llvm-backend-defaults.sh"
 
 self_stage=${SELF_STAGE:-0}
 case "$self_stage" in
@@ -139,7 +140,7 @@ echo "Running testsuite target '$testsuite_target' with $testsuite_list_var=$lis
 
 OCAMLSRCDIR="$fake_root" \
 CAML_LD_LIBRARY_PATH="$fake_root/stublibs" \
-OCAMLPARAM="_,llvm-backend=1,llvm-path=$wrapper" \
+OCAMLPARAM="$(llvm_backend_ocamlparam "$wrapper")" \
 OCAMLLIB="$stage_install/lib/ocaml" \
   make "${make_args[@]}" "$testsuite_target" "$testsuite_list_var=$list" \
     ocamltest_directory=../_runtest/ocamltest

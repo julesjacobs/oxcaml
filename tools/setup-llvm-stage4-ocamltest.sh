@@ -3,12 +3,14 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
+. "$repo/tools/llvm-backend-defaults.sh"
 
 fake_root=${FAKE_ROOT:-$repo/_llvm_stage4_ocamltest_src}
 normal_build=${NORMAL_BUILD:-$repo/_build}
 stage_build=${STAGE_BUILD:-$repo/_llvm_stage4_probe_build}
 stdlib_dir=${STDLIB_DIR:-$repo/_build/runtime_stdlib_install/lib/ocaml_runtime_stdlib}
 wrapper=${LLVM_WRAPPER:?set LLVM_WRAPPER to the clang wrapper or LLVM tool path}
+llvm_ocamlparam=$(llvm_backend_ocamlparam "$wrapper")
 
 install_bin=${INSTALL_BIN:-$normal_build/install/main/bin}
 install_lib=${INSTALL_LIB:-$normal_build/install/main/lib/ocaml}
@@ -232,11 +234,11 @@ testing_dir=$fake_root/testsuite/lib
 "$ocamlc" -nostdlib -I "$stdlib_dir" -a -o "$testing_dir/lib.cma" \
   "$testing_dir/lib.cmo"
 OCAMLLIB="$stdlib_dir" \
-OCAMLPARAM="_,llvm-backend=1,llvm-path=$wrapper" \
+OCAMLPARAM="$llvm_ocamlparam" \
   "$ocamlopt" -nostdlib -I "$stdlib_dir" -I "$testing_dir" -c -o "$testing_dir/lib.cmx" \
   "$lib_src.ml"
 OCAMLLIB="$stdlib_dir" \
-OCAMLPARAM="_,llvm-backend=1,llvm-path=$wrapper" \
+OCAMLPARAM="$llvm_ocamlparam" \
   "$ocamlopt" -nostdlib -I "$stdlib_dir" -a -o "$testing_dir/lib.cmxa" \
   "$testing_dir/lib.cmx"
 
@@ -247,11 +249,11 @@ OCAMLPARAM="_,llvm-backend=1,llvm-path=$wrapper" \
 "$ocamlc" -nostdlib -I "$stdlib_dir" -a -linkall -o "$testing_dir/testing.cma" \
   "$testing_dir/testing.cmo"
 OCAMLLIB="$stdlib_dir" \
-OCAMLPARAM="_,llvm-backend=1,llvm-path=$wrapper" \
+OCAMLPARAM="$llvm_ocamlparam" \
   "$ocamlopt" -nostdlib -I "$stdlib_dir" -I "$testing_dir" -c -o "$testing_dir/testing.cmx" \
   "$testing_src.ml"
 OCAMLLIB="$stdlib_dir" \
-OCAMLPARAM="_,llvm-backend=1,llvm-path=$wrapper" \
+OCAMLPARAM="$llvm_ocamlparam" \
   "$ocamlopt" -nostdlib -I "$stdlib_dir" -a -linkall -o "$testing_dir/testing.cmxa" \
   "$testing_dir/testing.cmx"
 
@@ -262,7 +264,7 @@ Fake OCAMLSRCDIR ready:
 Use:
   OCAMLSRCDIR=$fake_root \\
   CAML_LD_LIBRARY_PATH=$fake_root/stublibs \\
-  OCAMLPARAM=_,llvm-backend=1,llvm-path=$wrapper \\
+  OCAMLPARAM='$llvm_ocamlparam' \\
   OCAMLLIB=$stdlib_dir \\
   make -C testsuite one LIST=/path/to/list ocamltest_directory=../_runtest/ocamltest
 EOF
