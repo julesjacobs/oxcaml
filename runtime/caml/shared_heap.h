@@ -31,11 +31,15 @@ CAMLextern atomic_uintnat caml_compactions_count;
 /* Debugging aids for missed frame-table roots. These are controlled by
    OCAMLRUNPARAM GC tweaks and are disabled by default. */
 CAMLextern uintnat caml_debug_compact_every_major;
+CAMLextern uintnat caml_debug_compact_major_period;
+CAMLextern uintnat caml_debug_compact_target_major;
 CAMLextern uintnat caml_debug_stale_roots;
 CAMLextern uintnat caml_debug_stale_roots_abort;
-CAMLextern uintnat caml_debug_stale_roots_max_candidates;
+CAMLextern uintnat caml_debug_stale_roots_stop;
+CAMLextern uintnat caml_debug_stale_roots_max_raw_candidates;
 CAMLextern uintnat caml_debug_stale_roots_target_epoch;
 CAMLextern uintnat caml_debug_stale_roots_target_addr;
+CAMLextern uintnat caml_debug_stale_roots_target_range_addr;
 
 enum caml_debug_stale_source {
   CAML_DEBUG_STALE_SOURCE_UNKNOWN = 0,

@@ -1545,6 +1545,25 @@ static bool should_compact_from_stw_single(int compaction_mode)
     CAML_GC_MESSAGE (POLICY, "Debug compaction at every major cycle.\n");
     return true;
   }
+  if (caml_debug_compact_target_major != 0
+      && caml_debug_compact_target_major == caml_major_cycles_completed) {
+    CAML_GC_MESSAGE (POLICY,
+                     "Debug compaction at targeted major cycle "
+                     "%" ARCH_INTNAT_PRINTF_FORMAT "u.\n",
+                     caml_major_cycles_completed);
+    return true;
+  }
+  if (caml_debug_compact_major_period != 0
+      && caml_major_cycles_completed % caml_debug_compact_major_period == 0) {
+    CAML_GC_MESSAGE (POLICY,
+                     "Debug compaction at major cycle "
+                     "%" ARCH_INTNAT_PRINTF_FORMAT
+                     "u due to period %"
+                     ARCH_INTNAT_PRINTF_FORMAT "u.\n",
+                     caml_major_cycles_completed,
+                     caml_debug_compact_major_period);
+    return true;
+  }
 
   /* runtime 4 algorithm, as close as possible.
    * TODO: revisit this in future. */

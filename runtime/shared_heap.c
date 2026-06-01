@@ -26,6 +26,7 @@
 #include "caml/fail.h"
 #include "caml/fiber.h" /* for verification */
 #include "caml/gc.h"
+#include "caml/gc_ctrl.h"
 #include "caml/globroots.h"
 #include "caml/major_gc.h"
 #include "caml/memory.h"
@@ -1007,14 +1008,19 @@ uintnat caml_compact_unmap = 0;
 
 /* Debug knobs settable with OCAMLRUNPARAM. */
 uintnat caml_debug_compact_every_major = 0;
+uintnat caml_debug_compact_major_period = 0;
+uintnat caml_debug_compact_target_major = 0;
 uintnat caml_debug_stale_roots = 0;
 uintnat caml_debug_stale_roots_abort = 0;
-uintnat caml_debug_stale_roots_max_candidates = 16;
+uintnat caml_debug_stale_roots_stop = 0;
+uintnat caml_debug_stale_roots_max_raw_candidates = 16;
 uintnat caml_debug_stale_roots_target_epoch = 0;
 uintnat caml_debug_stale_roots_target_addr = 0;
+uintnat caml_debug_stale_roots_target_range_addr = 0;
 
 struct caml_debug_evacuated_range {
   uintnat epoch;
+  uintnat major_cycle;
   char *pool_base;
   char *first_block;
   char *pool_end;
@@ -1076,6 +1082,30 @@ static bool debug_range_contains_value(
   return p >= (uintnat)range->first_block && p < (uintnat)range->pool_end;
 }
 
+static bool debug_stale_range_addr_matches(
+  const struct caml_debug_evacuated_range *range)
+{
+  uintnat p = caml_debug_stale_roots_target_range_addr;
+  return caml_debug_stale_roots_target_range_addr == 0
+         || (p >= (uintnat)range->first_block && p < (uintnat)range->pool_end);
+}
+
+static bool debug_stale_range_matches_value(
+  const struct caml_debug_evacuated_range *range, value v)
+{
+  return debug_stale_addr_matches(v) && debug_stale_range_addr_matches(range);
+}
+
+enum {
+  CAML_DEBUG_STALE_ROOTS_STOP_ON_USE = 1,
+  CAML_DEBUG_STALE_ROOTS_STOP_ON_RAW_CANDIDATE = 2,
+};
+
+static bool debug_stale_roots_should_stop(uintnat stop_reason)
+{
+  return (caml_debug_stale_roots_stop & stop_reason) != 0;
+}
+
 static struct caml_debug_evacuated_range *debug_find_current_range(value v)
 {
   uintnat count = atomic_load_acquire(&debug_current_range_count);
@@ -1084,7 +1114,10 @@ static struct caml_debug_evacuated_range *debug_find_current_range(value v)
   }
   for (uintnat i = 0; i < count; i++) {
     if (debug_range_contains_value(&debug_current_ranges[i], v)) {
-      return &debug_current_ranges[i];
+      struct caml_debug_evacuated_range *range = &debug_current_ranges[i];
+      if (debug_stale_range_addr_matches(range)) {
+        return range;
+      }
     }
   }
   return NULL;
@@ -1099,7 +1132,10 @@ static struct caml_debug_evacuated_range *debug_find_completed_range(value v)
     uintnat idx = (first + i) % CAML_DEBUG_COMPLETED_RANGE_CAPACITY;
     if (debug_stale_epoch_matches(debug_completed_ranges[idx].epoch)
         && debug_range_contains_value(&debug_completed_ranges[idx], v)) {
-      return &debug_completed_ranges[idx];
+      struct caml_debug_evacuated_range *range = &debug_completed_ranges[idx];
+      if (debug_stale_range_addr_matches(range)) {
+        return range;
+      }
     }
   }
   return NULL;
@@ -1112,7 +1148,8 @@ static void debug_report_stale_value(
   enum caml_debug_stale_source source,
   const struct caml_debug_evacuated_range *range)
 {
-  if (!debug_stale_epoch_matches(range->epoch) || !debug_stale_addr_matches(v)) {
+  if (!debug_stale_epoch_matches(range->epoch)
+      || !debug_stale_range_matches_value(range, v)) {
     return;
   }
 
@@ -1123,6 +1160,8 @@ static void debug_report_stale_value(
           "  source: %s\n"
           "  evacuated by compaction: %"
             ARCH_INTNAT_PRINTF_FORMAT "u\n"
+          "  major cycle: %"
+            ARCH_INTNAT_PRINTF_FORMAT "u\n"
           "  range: [%p, %p) pool=%p size_class=%u domain=%d\n"
           "  offset in range: %"
             ARCH_INTNAT_PRINTF_FORMAT "u bytes\n",
@@ -1131,6 +1170,7 @@ static void debug_report_stale_value(
           (void*)slot,
           debug_stale_source_name(source),
           range->epoch,
+          range->major_cycle,
           (void*)range->first_block,
           (void*)range->pool_end,
           (void*)range->pool_base,
@@ -1150,7 +1190,8 @@ static void debug_report_stale_value(
             "quarantine or invalidate reused pool addresses\n");
   }
 
-  if (caml_debug_stale_roots_abort) {
+  if (caml_debug_stale_roots_abort
+      || debug_stale_roots_should_stop(CAML_DEBUG_STALE_ROOTS_STOP_ON_USE)) {
     caml_fatal_error("OCaml stale-root debug abort");
   }
 }
@@ -1194,6 +1235,7 @@ static void debug_record_evacuated_pool(pool *p)
   }
 
   debug_current_ranges[idx].epoch = debug_current_epoch;
+  debug_current_ranges[idx].major_cycle = caml_major_cycles_completed;
   debug_current_ranges[idx].pool_base = (char*)p;
   debug_current_ranges[idx].first_block = (char*)POOL_FIRST_BLOCK(p, p->sz);
   debug_current_ranges[idx].pool_end = (char*)POOL_END(p);
@@ -1220,12 +1262,26 @@ static void debug_report_raw_candidate(
   const struct caml_debug_evacuated_range *range)
 {
   uintnat candidate_idx = atomic_fetch_add(&debug_raw_candidate_count, 1);
-  if (candidate_idx >= caml_debug_stale_roots_max_candidates) {
+  bool should_stop = debug_stale_roots_should_stop(
+    CAML_DEBUG_STALE_ROOTS_STOP_ON_RAW_CANDIDATE);
+  if (candidate_idx >= caml_debug_stale_roots_max_raw_candidates) {
+    if (should_stop) {
+      caml_fatal_error("OCaml stale-root debug abort");
+    }
+    if (candidate_idx == caml_debug_stale_roots_max_raw_candidates) {
+      fprintf(stderr,
+              "OCaml stale-root debug: suppressing further raw candidates "
+              "after %"
+                ARCH_INTNAT_PRINTF_FORMAT "u reports\n",
+              caml_debug_stale_roots_max_raw_candidates);
+    }
     return;
   }
 
   fprintf(stderr,
           "OCaml stale-root debug: stale candidate after compaction #%"
+            ARCH_INTNAT_PRINTF_FORMAT "u\n"
+          "  major cycle: %"
             ARCH_INTNAT_PRINTF_FORMAT "u\n"
           "  value: %p\n"
           "  storage: %s at %p\n"
@@ -1233,6 +1289,7 @@ static void debug_report_raw_candidate(
           "  offset in range: %"
             ARCH_INTNAT_PRINTF_FORMAT "u bytes\n",
           range->epoch,
+          range->major_cycle,
           (void*)v,
           storage_kind,
           (void*)slot,
@@ -1242,6 +1299,10 @@ static void debug_report_raw_candidate(
           (unsigned)range->size_class,
           range->domain_id,
           ((uintnat)v - sizeof(header_t)) - (uintnat)range->first_block);
+
+  if (should_stop) {
+    caml_fatal_error("OCaml stale-root debug abort");
+  }
 }
 
 static void debug_raw_scan_word(
@@ -1255,7 +1316,7 @@ static void debug_raw_scan_word(
   }
 
   struct caml_debug_evacuated_range *range = debug_find_current_range(v);
-  if (range != NULL) {
+  if (range != NULL && debug_stale_range_matches_value(range, v)) {
     debug_report_raw_candidate(v, slot, storage_kind, range);
   }
 }
