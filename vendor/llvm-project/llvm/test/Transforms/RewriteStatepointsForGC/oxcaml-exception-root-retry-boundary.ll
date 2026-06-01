@@ -3,7 +3,7 @@
 target triple = "arm64-apple-macosx"
 
 declare oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @callee(i64, i64, ptr addrspace(1))
-declare { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+declare { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
 declare ptr @personality(...)
 
 define oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @retrying_boundary_exit_uses_selected_root(
@@ -36,7 +36,7 @@ normal:
 
 recover:
   %lp = landingpad token cleanup
-  %rec = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
   br i1 %retry, label %check, label %exit.recover.direct
 
 check:

@@ -4,7 +4,7 @@
 
 declare void @llvm.aarch64.oxcaml.raise.notrace(i64)
 declare void @llvm.aarch64.oxcaml.trap.publish(ptr, i64, ptr)
-declare { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+declare { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
 declare i32 @__gxx_personality_v0(...)
 
 define oxcaml_nofpcc void @dynamic_raise_notrace(i64 %exn) gc "oxcaml" {
@@ -33,9 +33,10 @@ lpad:
   br label %recover
 
 recover:
-  %rec = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
-  %bucket = extractvalue { i64, i64, i64, i64 } %rec, 0
-  ret i64 %bucket
+  %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %bucket = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 0
+  %bucket.raw = ptrtoint ptr addrspace(1) %bucket to i64
+  ret i64 %bucket.raw
 
 normal:
   ret i64 0
@@ -51,7 +52,7 @@ normal:
 ; O2: invoke oxcaml_nofpcc void @dynamic_raise_notrace_callee
 ; O2: unwind label %lpad
 ; O2: recover:
-; O2: call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover
+; O2: call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover
 
 ; MIR-LABEL: name: dynamic_raise_notrace
 ; MIR: OXCAML_RAISE_NOTRACE

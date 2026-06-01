@@ -1,7 +1,7 @@
 ; RUN: not llc -mtriple=arm64-apple-macosx -verify-machineinstrs < %s 2>&1 | FileCheck %s
 
 declare void @llvm.aarch64.oxcaml.trap.publish(ptr, i64, ptr)
-declare { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+declare { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
 
 define oxcaml_nofpcc { i64, i64, i64 } @callbr_recovery_shape_is_not_classified(i64 %ds, i64 %alloc, ptr %trap_block, i64 %normal_value) nounwind gc "ocaml" {
 entry:
@@ -21,12 +21,13 @@ try:
   ret { i64, i64, i64 } %normal_ret2
 
 exn_entry:
-  %rec = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
-  %bucket = extractvalue { i64, i64, i64, i64 } %rec, 0
-  %prev_trap = extractvalue { i64, i64, i64, i64 } %rec, 1
-  %recovered_alloc = extractvalue { i64, i64, i64, i64 } %rec, 2
-  %recovered_ds = extractvalue { i64, i64, i64, i64 } %rec, 3
-  %bucket_plus_trap = add i64 %bucket, %prev_trap
+  %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %bucket = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 0
+  %bucket.raw = ptrtoint ptr addrspace(1) %bucket to i64
+  %prev_trap = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 1
+  %recovered_alloc = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 2
+  %recovered_ds = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 3
+  %bucket_plus_trap = add i64 %bucket.raw, %prev_trap
   %alloc_plus_domain = add i64 %recovered_alloc, %recovered_ds
   %all_recovered = add i64 %bucket_plus_trap, %alloc_plus_domain
   %exn_ret0 = insertvalue { i64, i64, i64 } poison, i64 %recovered_ds, 0

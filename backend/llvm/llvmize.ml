@@ -3805,6 +3805,19 @@ let store t (i : Cfg.basic Cfg.instruction) (memory_chunk : Cmm.memory_chunk)
     emit_ins_no_res t (I.store_with_align ~align:1 ~ptr ~to_store)
   | Fivetwelve_aligned -> basic T.vec512
 
+let call_runtime_for_basic_safepoint ?alloc_info ?unwind_label ~attrs ~cc t i
+    name args res_types msg =
+  let slow_path_roots, live_roots =
+    roots_for_basic_safepoint ?unwind_label t i msg
+  in
+  store_slow_path_roots t slow_path_roots;
+  let res =
+    call_simple ~attrs ~live_roots ~slow_path_roots ?alloc_info ?unwind_label
+      ~cc t name args res_types
+  in
+  refresh_slow_path_roots t slow_path_roots;
+  res
+
 let local_alloc t (i : Cfg.basic Cfg.instruction) num_bytes =
   (* Make space on the local stack *)
   let local_sp_ptr = load_domainstate_addr t Domain_local_sp in
@@ -3832,9 +3845,9 @@ let local_alloc t (i : Cfg.basic Cfg.instruction) num_bytes =
   emit_label t call_realloc;
   (* CR yusumez: Handle SIMD regs appropriately once we have them *)
   add_referenced_symbol t "caml_call_local_realloc";
-  call_simple
-    ~attrs:(gc_attr ~can_call_gc:false t i @ [LL.Fn_attr.Cold])
-    ~cc:Oxcaml_alloc t "caml_call_local_realloc" [] []
+  call_runtime_for_basic_safepoint
+    ~attrs:(gc_attr ~can_call_gc:true t i @ [LL.Fn_attr.Cold])
+    ~cc:Oxcaml_alloc t i "caml_call_local_realloc" [] [] "local realloc"
   |> ignore;
   emit_ins_no_res t (I.br after_realloc);
   (* After alloc *)
@@ -3966,11 +3979,10 @@ let stack_check ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction)
       (Stack_check.stack_threshold_size + Misc.align max_frame_size_bytes 8) / 8
     in
     add_referenced_symbol t "caml_llvm_call_realloc_stack";
-    call_simple
-      ~attrs:(gc_attr ~can_call_gc:false t i @ [LL.Fn_attr.Cold])
-      ?unwind_label ~cc:Oxcaml_alloc t "caml_llvm_call_realloc_stack"
-      [V.of_int required_words]
-      []
+    call_runtime_for_basic_safepoint
+      ~attrs:(gc_attr ~can_call_gc:true t i @ [LL.Fn_attr.Cold])
+      ?unwind_label ~cc:Oxcaml_alloc t i "caml_llvm_call_realloc_stack"
+      [V.of_int required_words] [] "stack check"
     |> ignore;
     emit_ins_no_res t (I.br after_realloc);
     emit_unwind_landingpad_after t unwind_label exn_entry;
@@ -3983,7 +3995,7 @@ let unwind_for_instruction t i =
   let exn_entry = exn_entry_for_instruction t i in
   unwind_label_and_landingpad_for_exn_entry exn_entry
 
-let aarch64_trap_recover_type = T.(Struct [i64; i64; i64; i64])
+let aarch64_trap_recover_type = T.(Struct [val_ptr; i64; i64; i64])
 
 let emit_aarch64_pushtrap t (i : Cfg.basic Cfg.instruction) lbl_handler =
   let try_label = V.of_label (Cmm.new_label ()) in

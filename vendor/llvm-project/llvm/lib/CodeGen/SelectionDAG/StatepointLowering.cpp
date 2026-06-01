@@ -1102,6 +1102,25 @@ SelectionDAGBuilder::LowerStatepoint(const GCStatepointInst &I,
     }
   }
 
+  // OxCaml uses rewritten statepoints to describe roots that are only needed
+  // while the callee runs.  Such roots are present in the gc-live bundle but do
+  // not necessarily have a gc.relocate in the caller.  Keep them visible to
+  // stackmap lowering by recording any gc-live value that was not already
+  // covered by a relocate or deopt operand.
+  if (I.getFunction()->hasGC() &&
+      (I.getFunction()->getGC() == "oxcaml" ||
+       I.getFunction()->getGC() == "ocaml")) {
+    for (const Use &U : make_range(I.gc_args_begin(), I.gc_args_end())) {
+      Value *V = U.get();
+      if (!isGCValue(V, *this))
+        continue;
+      if (Seen.insert(getValue(V)).second) {
+        SI.Bases.push_back(V);
+        SI.Ptrs.push_back(V);
+      }
+    }
+  }
+
   SI.GCArgs = ArrayRef<const Use>(I.gc_args_begin(), I.gc_args_end());
   SI.StatepointInstr = &I;
   SI.ID = I.getID();

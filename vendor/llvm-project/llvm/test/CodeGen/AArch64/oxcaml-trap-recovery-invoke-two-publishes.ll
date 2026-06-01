@@ -1,7 +1,7 @@
 ; RUN: not --crash llc -mtriple=arm64-apple-macosx -verify-machineinstrs < %s 2>&1 | FileCheck %s
 
 declare void @llvm.aarch64.oxcaml.trap.publish(ptr, i64, ptr)
-declare { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+declare { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
 declare oxcaml_nofpcc { i64, i64, i64 } @devil_callee(i64, i64, i64)
 declare i32 @__gxx_personality_v0(...)
 
@@ -17,8 +17,8 @@ normal_cont:
 
 exn_entry:
   %lp = landingpad token cleanup
-  %rec = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
-  %recovered_ds = extractvalue { i64, i64, i64, i64 } %rec, 3
+  %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %recovered_ds = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 3
   %ret0 = insertvalue { i64, i64, i64 } poison, i64 %recovered_ds, 0
   %ret1 = insertvalue { i64, i64, i64 } %ret0, i64 %alloc, 1
   %ret2 = insertvalue { i64, i64, i64 } %ret1, i64 %normal_value, 2

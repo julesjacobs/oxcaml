@@ -4,7 +4,7 @@ target triple = "arm64-apple-macosx"
 
 declare oxcaml_nofpcc { i64, i64, ptr addrspace(1) } @callee(i64, i64, ptr addrspace(1))
 declare void @llvm.aarch64.oxcaml.trap.publish(ptr, i64, ptr)
-declare { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+declare { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
 declare ptr @__gxx_personality_v0(...)
 
 define oxcaml_nofpcc { i64, i64, ptr addrspace(1) } @exception_root_value_arithmetic_phi(
@@ -56,13 +56,13 @@ recover:
 ; CHECK: recover:
 ; CHECK-NEXT: %lp = landingpad token
 ; CHECK-NEXT: cleanup
-; CHECK-NEXT: %rec = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+; CHECK-NEXT: %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
 ; CHECK: %handler_value.exnroot.load = load ptr addrspace(1), ptr %handler_value.exnroot, align 8
   %handler_value = phi ptr addrspace(1) [ %adjusted, %left ], [ %b, %right ]
   %lp = landingpad token cleanup
-  %rec = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
-  %recovered_alloc = extractvalue { i64, i64, i64, i64 } %rec, 2
-  %recovered_ds = extractvalue { i64, i64, i64, i64 } %rec, 3
+  %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %recovered_alloc = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 2
+  %recovered_ds = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 3
   %ret0 = insertvalue { i64, i64, ptr addrspace(1) } poison, i64 %recovered_ds, 0
   %ret1 = insertvalue { i64, i64, ptr addrspace(1) } %ret0, i64 %recovered_alloc, 1
   %ret2 = insertvalue { i64, i64, ptr addrspace(1) } %ret1, ptr addrspace(1) %handler_value, 2

@@ -4,7 +4,7 @@ target triple = "arm64-apple-macosx"
 
 declare oxcaml_nofpcc { i64, i64, i64 } @callee(i64, i64, i64)
 declare void @llvm.aarch64.oxcaml.trap.publish(ptr, i64, ptr)
-declare { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+declare { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
 declare ptr @personality(...)
 
 define oxcaml_nofpcc i64 @trampoline_phi_i64(
@@ -62,9 +62,9 @@ lpad:
 
 recover:
 ; CHECK: recover:
-; CHECK-NEXT: %rec = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+; CHECK-NEXT: %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
 ; CHECK-NEXT: %x.recoverphi.load = load i64, ptr %x.recoverphi, align
 ; CHECK: ret i64 %x.recoverphi.load
-  %rec = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
   ret i64 %x
 }

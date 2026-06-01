@@ -4,7 +4,7 @@ target triple = "arm64-apple-macosx"
 
 declare oxcaml_nofpcc { i64, i64, ptr addrspace(1) } @callee(i64, i64, ptr addrspace(1))
 declare void @llvm.aarch64.oxcaml.trap.publish(ptr, i64, ptr)
-declare { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+declare { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
 declare ptr @__gxx_personality_v0(...)
 
 define oxcaml_nofpcc { i64, i64, ptr addrspace(1) } @invoke_gep_rejoin(
@@ -43,9 +43,9 @@ recover:
 ; CHECK: recover:
 ; CHECK: %obj.exnroot.load = load volatile ptr addrspace(1), ptr %obj.exnroot, align 8
   %lp = landingpad token cleanup
-  %rec = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
-  %recovered_alloc = extractvalue { i64, i64, i64, i64 } %rec, 2
-  %recovered_ds = extractvalue { i64, i64, i64, i64 } %rec, 3
+  %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %recovered_alloc = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 2
+  %recovered_ds = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 3
   br label %join
 
 join:
@@ -108,9 +108,9 @@ recover:
 ; CHECK: recover:
 ; CHECK: %same.base.exnroot.load = load volatile ptr addrspace(1), ptr %same.base.exnroot, align 8
   %lp = landingpad token cleanup
-  %rec = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
-  %recovered_alloc = extractvalue { i64, i64, i64, i64 } %rec, 2
-  %recovered_ds = extractvalue { i64, i64, i64, i64 } %rec, 3
+  %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %recovered_alloc = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 2
+  %recovered_ds = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 3
   br label %join
 
 join:
@@ -156,9 +156,9 @@ recover:
 ; CHECK: recover:
 ; CHECK: %obj.exnroot.load = load volatile ptr addrspace(1), ptr %obj.exnroot, align 8
   %lp = landingpad token cleanup
-  %rec = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
-  %recovered_alloc = extractvalue { i64, i64, i64, i64 } %rec, 2
-  %recovered_ds = extractvalue { i64, i64, i64, i64 } %rec, 3
+  %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %recovered_alloc = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 2
+  %recovered_ds = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 3
   switch i64 %tag, label %other [
     i64 3, label %join
     i64 61, label %join
@@ -222,9 +222,9 @@ recover:
 ; CHECK: recover:
 ; CHECK: %same.base.exnroot.load = load volatile ptr addrspace(1), ptr %same.base.exnroot, align 8
   %lp = landingpad token cleanup
-  %rec = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
-  %recovered_alloc = extractvalue { i64, i64, i64, i64 } %rec, 2
-  %recovered_ds = extractvalue { i64, i64, i64, i64 } %rec, 3
+  %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %recovered_alloc = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 2
+  %recovered_ds = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 3
   br i1 %which, label %recover.left, label %recover.right
 
 recover.left:
@@ -288,9 +288,9 @@ recover:
 ; CHECK: recover:
 ; CHECK: %obj.exnroot.load = load volatile ptr addrspace(1), ptr %obj.exnroot, align 8
   %lp = landingpad token cleanup
-  %rec = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
-  %recovered_alloc = extractvalue { i64, i64, i64, i64 } %rec, 2
-  %recovered_ds = extractvalue { i64, i64, i64, i64 } %rec, 3
+  %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %recovered_alloc = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 2
+  %recovered_ds = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 3
   br label %join
 
 join:
@@ -342,9 +342,9 @@ recover:
 ; CHECK: recover:
 ; CHECK: %obj.exnroot.load = load volatile ptr addrspace(1), ptr %obj.exnroot, align 8
   %lp = landingpad token cleanup
-  %rec = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
-  %recovered_alloc = extractvalue { i64, i64, i64, i64 } %rec, 2
-  %recovered_ds = extractvalue { i64, i64, i64, i64 } %rec, 3
+  %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %recovered_alloc = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 2
+  %recovered_ds = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 3
   %recover_call = call oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee(i64 %recovered_ds, i64 %recovered_alloc, ptr addrspace(1) %obj)
       "statepoint-id"="0" [ "deopt"() ]

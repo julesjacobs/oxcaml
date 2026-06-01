@@ -4,7 +4,7 @@
 
 declare void @llvm.aarch64.oxcaml.push.trap(ptr)
 declare void @llvm.aarch64.oxcaml.pop.trap()
-declare { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+declare { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
 declare oxcaml_nofpcc { i64, i64, i64 } @devil_callee(i64, i64, i64)
 declare i32 @__gxx_personality_v0(...)
 
@@ -23,8 +23,8 @@ lpad:
   br label %recover
 
 recover:
-  %rec = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
-  %recovered_ds = extractvalue { i64, i64, i64, i64 } %rec, 3
+  %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %recovered_ds = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 3
   %bad = add i64 %recovered_ds, %normal_value
   %ret0 = insertvalue { i64, i64, i64 } poison, i64 %recovered_ds, 0
   %ret1 = insertvalue { i64, i64, i64 } %ret0, i64 %alloc, 1
@@ -50,9 +50,9 @@ lpad:
   br label %recover
 
 recover:
-  %rec = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
-  %recovered_alloc = extractvalue { i64, i64, i64, i64 } %rec, 2
-  %recovered_ds = extractvalue { i64, i64, i64, i64 } %rec, 3
+  %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %recovered_alloc = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 2
+  %recovered_ds = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 3
   %sum = add i64 %recovered_ds, %promoted
   %ret0 = insertvalue { i64, i64, i64 } poison, i64 %recovered_ds, 0
   %ret1 = insertvalue { i64, i64, i64 } %ret0, i64 %recovered_alloc, 1
@@ -66,13 +66,13 @@ recover:
 ; O2: lpad:
 ; O2: landingpad token
 ; O2: recover:
-; O2: call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover
+; O2: call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover
 ; O2: add i64 %{{.*}}, %normal_value
 
 ; O2-LABEL: define oxcaml_nofpcc { i64, i64, i64 } @promoted_local_in_recovery
 ; O2-NOT: alloca
 ; O2: recover:
-; O2: call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover
+; O2: call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover
 ; O2: add i64 %{{.*}}, %normal_value
 
 ; RUNTIME-LABEL: name: protected_ssa_in_recovery

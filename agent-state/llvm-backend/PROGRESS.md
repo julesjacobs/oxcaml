@@ -39,3 +39,17 @@ minor/full/compact collections, and exception-handler paths with captured
 closures. Validation run from this checkout:
 `eval "$(../../../scripts/agent-tmp-env)" && make llvm-test-one DIR=testsuite/tests/llvm-gc-roots LLVM_PATH="$PWD/../clang-wrapper"`.
 Result: 12 tests passed, 0 failed.
+
+2026-06-01 self-stage2 status on `jujacobs/llvm-backend-stage2`: full LLVM
+self-stage2 tests now pass with comballoc disabled: 6748 passed, 284 skipped,
+0 failed. The last failure was `tests/statmemprof/bigarray.ml`, which was not
+corruption. The reduced run showed `Gc.full_major` retained a mapped bigarray
+through a tailcall because RS4GC rooted ordinary managed-call arguments in the
+caller frame for the whole callee dynamic extent. The fix is to remove
+call-operand-only liveness for OxCaml managed calls unless the value is really
+used after the call, while still adding callee-duration roots for C-wrapper
+call arguments (`oxcaml_ccc` / `oxcaml_c_stackcc`). Focused validation:
+`llvm-lit` for `oxcaml-call-arg-root.ll` and
+`oxcaml-statepoint-call-arg-root.ll`, standalone statmemprof bigarray repro,
+`SELF_STAGE=2 ... tests/statmemprof`, and the full `SELF_STAGE=2
+tools/run-llvm-stage5-ocamltest.sh`.

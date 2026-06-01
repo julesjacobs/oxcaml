@@ -5,7 +5,7 @@ target triple = "arm64-apple-macosx"
 declare oxcaml_nofpcc { i64, i64, ptr addrspace(1) } @callee(i64, i64, ptr addrspace(1))
 declare void @llvm.aarch64.oxcaml.trap.publish(ptr, i64, ptr)
 declare void @llvm.aarch64.oxcaml.push.trap(ptr)
-declare { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+declare { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
 declare ptr @__gxx_personality_v0(...)
 
 define oxcaml_nofpcc { i64, i64, ptr addrspace(1) } @invoke_gep_handler_live(
@@ -46,9 +46,9 @@ recover:
 ; CHECK: %obj.exnroot.load = load ptr addrspace(1), ptr %obj.exnroot, align 8
 ; CHECK: %field.addr.remat{{[0-9]*}} = getelementptr i8, ptr addrspace(1) %obj.exnroot.load, i64 24
   %lp = landingpad token cleanup
-  %rec = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
-  %recovered_alloc = extractvalue { i64, i64, i64, i64 } %rec, 2
-  %recovered_ds = extractvalue { i64, i64, i64, i64 } %rec, 3
+  %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %recovered_alloc = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 2
+  %recovered_ds = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 3
   %handler_field = load ptr addrspace(1), ptr addrspace(1) %field.addr, align 8
   %ret3 = insertvalue { i64, i64, ptr addrspace(1) } poison, i64 %recovered_ds, 0
   %ret4 = insertvalue { i64, i64, ptr addrspace(1) } %ret3, i64 %recovered_alloc, 1
@@ -90,9 +90,9 @@ recover:
 ; CHECK: recover:
 ; CHECK: %obj.exnroot.load = load ptr addrspace(1), ptr %obj.exnroot, align 8
   %lp = landingpad token cleanup
-  %rec = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
-  %recovered_alloc = extractvalue { i64, i64, i64, i64 } %rec, 2
-  %recovered_ds = extractvalue { i64, i64, i64, i64 } %rec, 3
+  %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %recovered_alloc = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 2
+  %recovered_ds = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 3
   br label %nested
 
 nested:
@@ -124,9 +124,9 @@ inner_normal:
 
 inner_recover:
   %inner_lp = landingpad token cleanup
-  %inner_rec = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
-  %inner_recovered_alloc = extractvalue { i64, i64, i64, i64 } %inner_rec, 2
-  %inner_recovered_ds = extractvalue { i64, i64, i64, i64 } %inner_rec, 3
+  %inner_rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %inner_recovered_alloc = extractvalue { ptr addrspace(1), i64, i64, i64 } %inner_rec, 2
+  %inner_recovered_ds = extractvalue { ptr addrspace(1), i64, i64, i64 } %inner_rec, 3
   %ret6 = insertvalue { i64, i64, ptr addrspace(1) } poison, i64 %inner_recovered_ds, 0
   %ret7 = insertvalue { i64, i64, ptr addrspace(1) } %ret6, i64 %inner_recovered_alloc, 1
   %ret8 = insertvalue { i64, i64, ptr addrspace(1) } %ret7, ptr addrspace(1) %obj, 2

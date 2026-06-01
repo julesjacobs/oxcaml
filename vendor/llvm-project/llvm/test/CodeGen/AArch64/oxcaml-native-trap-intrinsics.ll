@@ -3,7 +3,7 @@
 
 declare void @llvm.aarch64.oxcaml.push.trap(ptr)
 declare void @llvm.aarch64.oxcaml.pop.trap()
-declare { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+declare { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
 declare oxcaml_nofpcc i64 @callee(i64, i64, i64)
 declare i32 @__gxx_personality_v0(...)
 
@@ -22,9 +22,10 @@ lpad:
   br label %recover
 
 recover:
-  %rec = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
-  %bucket = extractvalue { i64, i64, i64, i64 } %rec, 0
-  ret i64 %bucket
+  %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %bucket = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 0
+  %bucket.raw = ptrtoint ptr addrspace(1) %bucket to i64
+  ret i64 %bucket.raw
 }
 
 ; MIR-LABEL: name: native_trap_intrinsics

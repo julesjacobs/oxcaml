@@ -2,7 +2,7 @@
 ; RUN: opt -S -O2 < %s | llc -mtriple=arm64-apple-macosx -verify-machineinstrs > /dev/null
 
 declare void @llvm.aarch64.oxcaml.trap.publish(ptr, i64, ptr)
-declare { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+declare { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
 declare oxcaml_nofpcc { i64, i64, i64 } @callee(i64, i64, i64)
 declare i32 @__gxx_personality_v0(...)
 
@@ -21,12 +21,13 @@ normal:
 
 exn_entry:
   %lp = landingpad token cleanup
-  %rec = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
-  %bucket = extractvalue { i64, i64, i64, i64 } %rec, 0
-  %recovered_alloc = extractvalue { i64, i64, i64, i64 } %rec, 2
-  %recovered_ds = extractvalue { i64, i64, i64, i64 } %rec, 3
+  %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %bucket = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 0
+  %bucket.raw = ptrtoint ptr addrspace(1) %bucket to i64
+  %recovered_alloc = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 2
+  %recovered_ds = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 3
   call void asm sideeffect "; restore stack marker", ""()
-  store i64 %bucket, ptr %handler_bucket
+  store i64 %bucket.raw, ptr %handler_bucket
   %saved_bucket = load i64, ptr %handler_bucket
   %ret0 = insertvalue { i64, i64, i64 } poison, i64 %recovered_ds, 0
   %ret1 = insertvalue { i64, i64, i64 } %ret0, i64 %recovered_alloc, 1

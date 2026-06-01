@@ -4,7 +4,7 @@ target triple = "arm64-apple-macosx"
 
 declare oxcaml_nofpcc { i64, i64, ptr addrspace(1) } @callee(i64, i64, ptr addrspace(1))
 declare void @llvm.aarch64.oxcaml.trap.publish(ptr, i64, ptr)
-declare { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+declare { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
 declare ptr @personality(...)
 
 define oxcaml_nofpcc { i64, i64, ptr addrspace(1) } @duplicate_recovery_boundary_edge(
@@ -32,9 +32,9 @@ normal:
 
 recover:
   %lp = landingpad token cleanup
-  %rec = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
-  %recovered_ds = extractvalue { i64, i64, i64, i64 } %rec, 3
-  %recovered_alloc = extractvalue { i64, i64, i64, i64 } %rec, 2
+  %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %recovered_ds = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 3
+  %recovered_alloc = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 2
   switch i64 %tag, label %other [
     i64 3, label %join
     i64 61, label %join

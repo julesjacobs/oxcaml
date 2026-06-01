@@ -4,7 +4,7 @@
 ; RUN: llc -mtriple=aarch64-linux-gnu -verify-machineinstrs < %s > /dev/null
 
 declare void @llvm.aarch64.oxcaml.trap.publish(ptr, i64, ptr)
-declare { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+declare { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
 declare oxcaml_nofpcc { i64, i64, i64 } @callee_a(i64, i64, i64)
 declare oxcaml_nofpcc { i64, i64, i64 } @callee_b(i64, i64, i64)
 declare oxcaml_nofpcc { i64, i64, i64 } @callee_outer(i64, i64, i64)
@@ -45,22 +45,24 @@ normal_join:
 
 exn_a:
   %lp_a = landingpad token cleanup
-  %rec_a = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
-  %bucket_a = extractvalue { i64, i64, i64, i64 } %rec_a, 0
-  %alloc_a = extractvalue { i64, i64, i64, i64 } %rec_a, 2
-  %domain_a = extractvalue { i64, i64, i64, i64 } %rec_a, 3
+  %rec_a = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %bucket_a = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec_a, 0
+  %bucket_a.raw = ptrtoint ptr addrspace(1) %bucket_a to i64
+  %alloc_a = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec_a, 2
+  %domain_a = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec_a, 3
   br label %shared_handler
 
 exn_b:
   %lp_b = landingpad token cleanup
-  %rec_b = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
-  %bucket_b = extractvalue { i64, i64, i64, i64 } %rec_b, 0
-  %alloc_b = extractvalue { i64, i64, i64, i64 } %rec_b, 2
-  %domain_b = extractvalue { i64, i64, i64, i64 } %rec_b, 3
+  %rec_b = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %bucket_b = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec_b, 0
+  %bucket_b.raw = ptrtoint ptr addrspace(1) %bucket_b to i64
+  %alloc_b = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec_b, 2
+  %domain_b = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec_b, 3
   br label %shared_handler
 
 shared_handler:
-  %handler_bucket = phi i64 [ %bucket_a, %exn_a ], [ %bucket_b, %exn_b ]
+  %handler_bucket = phi i64 [ %bucket_a.raw, %exn_a ], [ %bucket_b.raw, %exn_b ]
   %handler_alloc = phi i64 [ %alloc_a, %exn_a ], [ %alloc_b, %exn_b ]
   %handler_domain = phi i64 [ %domain_a, %exn_a ], [ %domain_b, %exn_b ]
   %exn_ret0 = insertvalue { i64, i64, i64 } poison, i64 %handler_domain, 0
@@ -103,22 +105,24 @@ normal_join:
 
 outer_exn:
   %outer_lp = landingpad token cleanup
-  %outer_rec = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
-  %outer_bucket = extractvalue { i64, i64, i64, i64 } %outer_rec, 0
-  %outer_alloc = extractvalue { i64, i64, i64, i64 } %outer_rec, 2
-  %outer_domain = extractvalue { i64, i64, i64, i64 } %outer_rec, 3
+  %outer_rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %outer_bucket = extractvalue { ptr addrspace(1), i64, i64, i64 } %outer_rec, 0
+  %outer_bucket.raw = ptrtoint ptr addrspace(1) %outer_bucket to i64
+  %outer_alloc = extractvalue { ptr addrspace(1), i64, i64, i64 } %outer_rec, 2
+  %outer_domain = extractvalue { ptr addrspace(1), i64, i64, i64 } %outer_rec, 3
   br label %same_handler
 
 inner_exn:
   %inner_lp = landingpad token cleanup
-  %inner_rec = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
-  %inner_bucket = extractvalue { i64, i64, i64, i64 } %inner_rec, 0
-  %inner_alloc = extractvalue { i64, i64, i64, i64 } %inner_rec, 2
-  %inner_domain = extractvalue { i64, i64, i64, i64 } %inner_rec, 3
+  %inner_rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %inner_bucket = extractvalue { ptr addrspace(1), i64, i64, i64 } %inner_rec, 0
+  %inner_bucket.raw = ptrtoint ptr addrspace(1) %inner_bucket to i64
+  %inner_alloc = extractvalue { ptr addrspace(1), i64, i64, i64 } %inner_rec, 2
+  %inner_domain = extractvalue { ptr addrspace(1), i64, i64, i64 } %inner_rec, 3
   br label %same_handler
 
 same_handler:
-  %bucket = phi i64 [ %outer_bucket, %outer_exn ], [ %inner_bucket, %inner_exn ]
+  %bucket = phi i64 [ %outer_bucket.raw, %outer_exn ], [ %inner_bucket.raw, %inner_exn ]
   %recovered_alloc = phi i64 [ %outer_alloc, %outer_exn ], [ %inner_alloc, %inner_exn ]
   %recovered_domain = phi i64 [ %outer_domain, %outer_exn ], [ %inner_domain, %inner_exn ]
   %exn_ret0 = insertvalue { i64, i64, i64 } poison, i64 %recovered_domain, 0

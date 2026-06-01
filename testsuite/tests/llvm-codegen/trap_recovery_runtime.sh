@@ -158,3 +158,75 @@ EOF
 
 "$moving_out" > "$build_dir/trap_recovery_moving_finally_stdout.txt"
 grep -q "^moving-finally-ok$" "$build_dir/trap_recovery_moving_finally_stdout.txt"
+
+dynamic_src="$build_dir/trap_recovery_dynamic_finally.ml"
+dynamic_cmx="$build_dir/trap_recovery_dynamic_finally.cmx"
+dynamic_ir="$build_dir/trap_recovery_dynamic_finally.ll"
+dynamic_asm="$build_dir/trap_recovery_dynamic_finally.s"
+
+cat > "$dynamic_src" <<'EOF'
+exception E of string array
+
+let[@inline never] allocate n =
+  Array.init n (fun i -> string_of_int i)
+
+let[@inline never] cleanup () =
+  ignore (allocate 1000)
+
+let[@inline never] raise_dynamic n =
+  raise (E (allocate n))
+
+let[@inline never] protect_reraise n =
+  Printexc.record_backtrace true;
+  Fun.protect
+    ~finally:cleanup
+    (fun () -> raise_dynamic n)
+
+let () =
+  try protect_reraise 3 with E a -> print_endline a.(0)
+EOF
+
+"$ocamlopt" -O3 -g -S -c -keep-llvmir -llvm-backend \
+  -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
+  -o "$dynamic_cmx" "$dynamic_src"
+
+grep -q "declare { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()" \
+  "$dynamic_ir"
+
+cleanup_label=$(
+  awk '
+    $1 == "bl" && $2 ~ /^_camlTrap_recovery_dynamic_finally__cleanup_2_/ {
+      getline
+      sub(/:.*/, "", $1)
+      print $1
+      exit
+    }
+  ' "$dynamic_asm"
+)
+
+if [ -z "$cleanup_label" ]; then
+  echo "dynamic finally test did not find cleanup call label" >&2
+  exit 1
+fi
+
+cleanup_roots=$(
+  awk -v label="$cleanup_label" '
+    $1 == ".long" && index($2, label "-") == 1 {
+      in_entry = 1
+      short_count = 0
+      next
+    }
+    in_entry && $1 == ".short" {
+      short_count++
+      if (short_count == 2) {
+        print $2
+        exit
+      }
+    }
+  ' "$dynamic_asm"
+)
+
+if [ "$cleanup_roots" != "2" ]; then
+  echo "dynamic finally cleanup should root exception and backtrace; got ${cleanup_roots:-no frame entry}" >&2
+  exit 1
+fi

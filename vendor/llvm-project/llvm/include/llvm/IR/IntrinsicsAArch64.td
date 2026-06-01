@@ -10,6 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+def llvm_oxcaml_value_ty : LLVMQualPointerType<llvm_i8_ty, 1>;
+
 let TargetPrefix = "aarch64" in {
 
 def int_aarch64_ldxr : Intrinsic<[llvm_i64_ty], [llvm_anyptr_ty],
@@ -93,7 +95,7 @@ def int_aarch64_space : DefaultAttrsIntrinsic<[llvm_i64_ty], [llvm_i32_ty, llvm_
 // AArch64-specific: x0 is the exception bucket, x26 is the previous trap
 // pointer, x27 is the allocation pointer, and x28 is the domain state pointer.
 def int_aarch64_oxcaml_trap_recover
-    : Intrinsic<[llvm_i64_ty, llvm_i64_ty, llvm_i64_ty, llvm_i64_ty], [],
+    : Intrinsic<[llvm_oxcaml_value_ty, llvm_i64_ty, llvm_i64_ty, llvm_i64_ty], [],
                 [IntrNoMem, IntrHasSideEffects, IntrConvergent,
                  IntrNoDuplicate, IntrNoMerge, IntrWillReturn, IntrNoCallback,
                  IntrNoFree]>;

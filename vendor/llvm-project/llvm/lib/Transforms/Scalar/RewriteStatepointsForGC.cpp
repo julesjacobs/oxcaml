@@ -368,6 +368,12 @@ struct PartiallyConstructedSafepointRecord {
   /// The set of values known to be live across this safepoint
   StatepointLiveSetTy LiveSet;
 
+  /// GC pointer call arguments passed to C-wrapper calls. These arguments must
+  /// be visible to the collector while C runs, but do not need
+  /// post-statepoint gc.relocates in the caller unless they are also live after
+  /// the call.
+  StatepointLiveSetTy CallArgRoots;
+
   /// The *new* gc.statepoint instruction itself.  This produces the token
   /// that normal path gc.relocates and the gc.result are tied to.
   GCStatepointInst *StatepointToken;
@@ -1172,6 +1178,92 @@ static void analyzeParsePointLiveness(
     PartiallyConstructedSafepointRecord &Result) {
   StatepointLiveSetTy LiveSet;
   findLiveSetAtInst(Call, OriginalLivenessData, LiveSet);
+
+  SmallVector<Value *, 8> OxCamlCallArgs;
+  if (isOxCamlFunction(*Call->getFunction()) &&
+      isOxCamlCallingConv(Call->getCallingConv())) {
+    for (Value *Arg : Call->args()) {
+      if (!isHandledGCPointerType(Arg->getType()) || isa<Constant>(Arg))
+        continue;
+
+      OxCamlCallArgs.push_back(Arg);
+      if (isOxCamlCWrapperCallingConv(Call->getCallingConv()))
+        Result.CallArgRoots.insert(Arg);
+    }
+  }
+
+  auto CallOperandUseCanRecurAfterCall = [&]() -> bool {
+    if (auto *CI = dyn_cast<CallInst>(Call)) {
+      Instruction *Next = CI->getNextNode();
+      return Next && isPotentiallyReachable(Next, CI, nullptr, &DT);
+    }
+
+    if (auto *II = dyn_cast<InvokeInst>(Call)) {
+      BasicBlock *CallBB = II->getParent();
+      return isPotentiallyReachable(II->getNormalDest(), CallBB, nullptr,
+                                    &DT) ||
+             isPotentiallyReachable(II->getUnwindDest(), CallBB, nullptr,
+                                    &DT);
+    }
+
+    return true;
+  };
+
+  auto HasUseAfterCall = [&](Value *V) {
+    for (Use &U : V->uses()) {
+      auto *UserI = dyn_cast<Instruction>(U.getUser());
+      if (!UserI)
+        continue;
+      if (UserI == Call) {
+        if (CallOperandUseCanRecurAfterCall())
+          return true;
+        continue;
+      }
+
+      if (auto *PN = dyn_cast<PHINode>(UserI)) {
+        for (unsigned I = 0, E = PN->getNumIncomingValues(); I != E; ++I) {
+          if (PN->getIncomingValue(I) != V)
+            continue;
+          BasicBlock *Incoming = PN->getIncomingBlock(I);
+          Instruction *IncomingTerminator = Incoming->getTerminator();
+          if (Incoming == Call->getParent() ||
+              DT.dominates(Call, IncomingTerminator))
+            return true;
+        }
+        continue;
+      }
+
+      if (UserI->getParent() == Call->getParent()) {
+        if (Call->comesBefore(UserI))
+          return true;
+        continue;
+      }
+
+      if (DT.dominates(Call, UserI))
+        return true;
+    }
+
+    return false;
+  };
+
+  SmallPtrSet<Value *, 8> VisitedCallArgRoots;
+  auto RemoveCallArgRootOnlyLiveness = [&](auto &&Self, Value *V) -> void {
+    if (!VisitedCallArgRoots.insert(V).second)
+      return;
+    if (HasUseAfterCall(V))
+      return;
+
+    LiveSet.remove(V);
+    auto *I = dyn_cast<Instruction>(V);
+    if (!I)
+      return;
+
+    for (Value *Operand : I->operands())
+      if (isHandledGCPointerType(Operand->getType()) && !isa<Constant>(Operand))
+        Self(Self, Operand);
+  };
+  for (Value *Arg : OxCamlCallArgs)
+    RemoveCallArgRootOnlyLiveness(RemoveCallArgRootOnlyLiveness, Arg);
 
   if (PrintLiveSet) {
     dbgs() << "Live Variables:\n";
@@ -2464,6 +2556,7 @@ static void findBasePointers(DominatorTree &DT, DefiningValueMapTy &DVCache,
       PotentiallyDerivedPointers.remove(V);
       PointerToBase[V] = V;
     }
+  PotentiallyDerivedPointers.set_union(result.CallArgRoots);
   findBasePointers(PotentiallyDerivedPointers, PointerToBase, &DT, DVCache,
                    KnownBases);
 }
@@ -5007,6 +5100,21 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
       if (!RematerializedDerivedValues.contains(U.get()))
         GCArgsStorage.push_back(nonPoisonOxCamlGCPointerValue(U.get()));
     }
+
+  SmallPtrSet<Value *, 32> SeenGCArgs(GCArgsStorage.begin(),
+                                      GCArgsStorage.end());
+  for (Value *Arg : Result.CallArgRoots) {
+    auto BaseIt = PointerToBase.find(Arg);
+    assert(BaseIt != PointerToBase.end() &&
+           "Missed base for statepoint call argument");
+    Value *Root = BaseIt->second;
+    if (isa<Constant>(Root))
+      continue;
+    Root = nonPoisonOxCamlGCPointerValue(Root);
+    if (SeenGCArgs.insert(Root).second)
+      GCArgsStorage.push_back(Root);
+  }
+
   llvm::append_range(GCArgsStorage, Result.ExplicitRootSlots);
   uint64_t StatepointID = StatepointDirectives::DefaultStatepointID;
   uint32_t NumPatchBytes = 0;

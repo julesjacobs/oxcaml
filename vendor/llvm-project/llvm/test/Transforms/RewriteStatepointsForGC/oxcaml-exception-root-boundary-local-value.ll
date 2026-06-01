@@ -3,7 +3,7 @@
 target triple = "arm64-apple-macosx"
 
 declare oxcaml_nofpcc { i64, i64, ptr addrspace(1) } @callee(i64, i64, ptr addrspace(1))
-declare { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+declare { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
 declare ptr @personality(...)
 
 define oxcaml_nofpcc { i64, i64, ptr addrspace(1) } @boundary_local_root_value(
@@ -36,7 +36,7 @@ normal:
 
 recover:
   %lp = landingpad token cleanup
-  %rec = call { i64, i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
   %tag = ptrtoint ptr addrspace(1) %next to i64
   br i1 %retry, label %retry.block, label %exit
 
@@ -44,8 +44,8 @@ retry.block:
   br label %try
 
 exit:
-  %recover.ds = extractvalue { i64, i64, i64, i64 } %rec, 3
-  %recover.alloc = extractvalue { i64, i64, i64, i64 } %rec, 2
+  %recover.ds = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 3
+  %recover.alloc = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 2
   %ret0 = insertvalue { i64, i64, ptr addrspace(1) } poison, i64 %recover.ds, 0
   %ret1 = insertvalue { i64, i64, ptr addrspace(1) } %ret0, i64 %recover.alloc, 1
   %ret2 = insertvalue { i64, i64, ptr addrspace(1) } %ret1, ptr addrspace(1) %next, 2
