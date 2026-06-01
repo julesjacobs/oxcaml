@@ -7,6 +7,5 @@
  script;
 *)
 
-(* The script generates the actual stress test.  Keeping the generated source
-   out of the repository avoids checking in thousands of repetitive live-root
-   bindings. *)
+(* The script generates a small LLVM IR input that exercises long-frame
+   frametable encoding directly. *)
