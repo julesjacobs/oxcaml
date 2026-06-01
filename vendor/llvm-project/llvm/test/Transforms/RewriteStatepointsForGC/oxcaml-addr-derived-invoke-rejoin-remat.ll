@@ -92,8 +92,7 @@ setup:
 
 try:
 ; CHECK: store volatile ptr addrspace(1) %same.base, ptr %same.base.exnroot, align 8
-; CHECK: store volatile ptr addrspace(1) %obj, ptr %obj.callargroot, align 8
-; CHECK: %statepoint_token = invoke {{.*}} [ "deopt"(), "gc-live"(ptr addrspace(1) %same.base, ptr %same.base.exnroot, ptr %obj.callargroot) ]
+; CHECK: %statepoint_token = invoke {{.*}} [ "deopt"(), "gc-live"(ptr addrspace(1) %same.base, ptr %same.base.exnroot) ]
   %call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee(i64 %ds, i64 %alloc, ptr addrspace(1) %obj)
       "statepoint-id"="0" [ "deopt"() ]

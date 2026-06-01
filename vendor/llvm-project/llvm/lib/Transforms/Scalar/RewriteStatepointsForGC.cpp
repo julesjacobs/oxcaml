@@ -3423,6 +3423,51 @@ static bool materializeOxCamlExceptionRootSlots(
     IRBuilder<> EntryBuilder(&EntryBlock, EntryBlock.getFirstInsertionPt());
     IRBuilder<> RecoverBuilder(Recover->getNextNode());
 
+    struct OxCamlExceptionRootStore {
+      InvokeInst *Invoke;
+      Value *StoredValue;
+    };
+
+    struct OxCamlExceptionRootSlot {
+      Value *LogicalRoot;
+      Type *SlotType;
+      Align SlotAlign;
+      AllocaInst *Slot;
+      SmallVector<OxCamlExceptionRootStore, 8> Stores;
+    };
+
+    SmallVector<OxCamlExceptionRootSlot, 8> ExceptionRootSlots;
+
+    auto AddExplicitRootSlotForInvoke = [&](InvokeInst *II, Value *Slot) {
+      SmallVectorImpl<Value *> &Slots = ExplicitRootSlots[II];
+      if (!is_contained(Slots, Slot))
+        Slots.push_back(Slot);
+      ExplicitExceptionRootCalls.insert(II);
+    };
+
+    auto LookupStoreValue =
+        [](ArrayRef<OxCamlExceptionRootStore> Stores,
+           InvokeInst *II) -> Value * {
+      for (const OxCamlExceptionRootStore &Store : Stores)
+        if (Store.Invoke == II)
+          return Store.StoredValue;
+      return nullptr;
+    };
+
+    auto CreateRootStore = [&](AllocaInst *Slot, Value *HandlerValue,
+                               const OxCamlExceptionRootStore &Store,
+                               bool IsGCRoot) {
+      IRBuilder<> StoreBuilder(Store.Invoke);
+      StoreInst *RootStore = StoreBuilder.CreateAlignedStore(
+          Store.StoredValue, Slot, DL.getABITypeAlign(HandlerValue->getType()));
+      if (IsGCRoot)
+        RootStore->setVolatile(true);
+      if (IsGCRoot)
+        AddExplicitRootSlotForInvoke(Store.Invoke, Slot);
+      else
+        ExplicitExceptionRootCalls.insert(Store.Invoke);
+    };
+
     auto MaterializeRootSlot =
         [&](Value *HandlerValue, BasicBlock &StoreSiteBB,
             function_ref<Value *(OxCamlRecoveryStoreSite)> EdgeValueForSite) {
@@ -3432,17 +3477,10 @@ static bool materializeOxCamlExceptionRootSlots(
             report_fatal_error(
                 "cannot materialize unsized OxCaml exception value");
           }
-          auto *Slot = EntryBuilder.CreateAlloca(
-              HandlerValue->getType(), DL.getAllocaAddrSpace(), nullptr,
-              suffixed_name_or(HandlerValue, ".exnroot", "exnroot"));
-          Slot->setAlignment(DL.getABITypeAlign(HandlerValue->getType()));
+
+          Type *SlotType = HandlerValue->getType();
+          Align SlotAlign = DL.getABITypeAlign(SlotType);
           bool IsGCRoot = isHandledGCPointerType(HandlerValue->getType());
-          StoreInst *InitialStore = EntryBuilder.CreateAlignedStore(
-              IsGCRoot ? getOxCamlNonMovingImmediate(HandlerValue->getType())
-                       : Constant::getNullValue(HandlerValue->getType()),
-              Slot, DL.getABITypeAlign(HandlerValue->getType()));
-          if (IsGCRoot)
-            InitialStore->setVolatile(true);
 
           SmallVector<OxCamlRecoveryStoreSite, 8> StoreSites;
           if (&StoreSiteBB == &BB) {
@@ -3462,6 +3500,7 @@ static bool materializeOxCamlExceptionRootSlots(
                                "predecessor for explicit exception roots");
           }
 
+          SmallVector<OxCamlExceptionRootStore, 8> Stores;
           for (OxCamlRecoveryStoreSite StoreSite : StoreSites) {
             InvokeInst *II = StoreSite.Invoke;
             Value *EdgeValue =
@@ -3489,19 +3528,70 @@ static bool materializeOxCamlExceptionRootSlots(
                     "explicit exception root value does not dominate invoke");
               }
 
-            IRBuilder<> StoreBuilder(II);
-            StoreInst *RootStore = StoreBuilder.CreateAlignedStore(
-                EdgeValue, Slot, DL.getABITypeAlign(HandlerValue->getType()));
+            if (Value *Existing = LookupStoreValue(Stores, II)) {
+              if (Existing != EdgeValue)
+                report_fatal_error(
+                    "conflicting OxCaml explicit root values for invoke");
+              continue;
+            }
+            Stores.push_back({II, EdgeValue});
+          }
+
+          AllocaInst *Slot = nullptr;
+          if (IsGCRoot) {
+            for (OxCamlExceptionRootSlot &Candidate : ExceptionRootSlots) {
+              if (Candidate.LogicalRoot != HandlerValue ||
+                  Candidate.SlotType != SlotType ||
+                  Candidate.SlotAlign != SlotAlign)
+                continue;
+
+              bool Compatible = true;
+              for (const OxCamlExceptionRootStore &Store : Stores) {
+                Value *Existing = LookupStoreValue(Candidate.Stores,
+                                                   Store.Invoke);
+                if (Existing && Existing != Store.StoredValue) {
+                  Compatible = false;
+                  break;
+                }
+              }
+              if (!Compatible)
+                continue;
+
+              Slot = Candidate.Slot;
+              for (const OxCamlExceptionRootStore &Store : Stores) {
+                if (LookupStoreValue(Candidate.Stores, Store.Invoke)) {
+                  AddExplicitRootSlotForInvoke(Store.Invoke, Slot);
+                  continue;
+                }
+                CreateRootStore(Slot, HandlerValue, Store, IsGCRoot);
+                Candidate.Stores.push_back(Store);
+              }
+              break;
+            }
+          }
+
+          if (!Slot) {
+            Slot = EntryBuilder.CreateAlloca(
+                SlotType, DL.getAllocaAddrSpace(), nullptr,
+                suffixed_name_or(HandlerValue, ".exnroot", "exnroot"));
+            Slot->setAlignment(SlotAlign);
+            StoreInst *InitialStore = EntryBuilder.CreateAlignedStore(
+                IsGCRoot ? getOxCamlNonMovingImmediate(SlotType)
+                         : Constant::getNullValue(SlotType),
+                Slot, SlotAlign);
             if (IsGCRoot)
-              RootStore->setVolatile(true);
+              InitialStore->setVolatile(true);
+
+            for (const OxCamlExceptionRootStore &Store : Stores)
+              CreateRootStore(Slot, HandlerValue, Store, IsGCRoot);
+
             if (IsGCRoot)
-              ExplicitRootSlots[II].push_back(Slot);
-            ExplicitExceptionRootCalls.insert(II);
+              ExceptionRootSlots.push_back(OxCamlExceptionRootSlot{
+                  HandlerValue, SlotType, SlotAlign, Slot, Stores});
           }
 
           LoadInst *Load = RecoverBuilder.CreateAlignedLoad(
-              HandlerValue->getType(), Slot,
-              DL.getABITypeAlign(HandlerValue->getType()),
+              HandlerValue->getType(), Slot, SlotAlign,
               suffixed_name_or(HandlerValue, ".exnroot.load",
                                "exnroot.load"));
           if (IsGCRoot)

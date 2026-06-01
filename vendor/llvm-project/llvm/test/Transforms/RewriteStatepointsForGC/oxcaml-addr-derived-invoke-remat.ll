@@ -137,7 +137,7 @@ preuse:
 
 try:
 ; CHECK: try:
-; CHECK: store ptr addrspace(1) %obj, ptr %obj.exnroot, align 8
+; CHECK: store volatile ptr addrspace(1) %obj, ptr %obj.exnroot, align 8
 ; CHECK: %statepoint_token{{[0-9]*}} = invoke {{.*}} [ "deopt"(), "gc-live"(ptr addrspace(1) %obj, ptr %obj.exnroot) ]
   %call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee(i64 %ds, i64 %alloc, ptr addrspace(1) %obj)

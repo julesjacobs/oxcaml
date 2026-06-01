@@ -424,3 +424,32 @@ that an explicit requirement of the interner.
   debugging.
 - Can the first IR test be minimized without relying on AArch64 trap intrinsics,
   or does the OxCaml recovery-region recognizer require them for this shape?
+
+## Implementation status
+
+Implemented first-pass slot sharing in
+`materializeOxCamlExceptionRootSlots`.
+
+The interner is intentionally local to one recovery block materialization pass.
+It shares only GC root slots with the same logical recovered value, type, and
+alignment. A candidate slot is reused when all overlapping invoke store sites
+store the same SSA value; otherwise a separate slot is kept. When a reused slot
+is extended to a new invoke, the invoke is also updated in
+`ExplicitRootSlots`/`ExplicitExceptionRootCalls`.
+
+The adversarial baseline moved only where this design predicts:
+
+- `case08_boundary_switch_two_edges`: 4 volatile stores to 2.
+- `case11_boundary_via_trampoline`: 4 volatile stores to 2.
+- `case12_boundary_local_loaded_value`: 4 volatile stores to 2.
+
+PHI-heavy cases, independent roots, and cases with genuinely different logical
+roots did not collapse. That is the desired first patch behavior.
+
+Focused validation:
+
+- `llvm-lit -q vendor/llvm-project/llvm/test/Transforms/RewriteStatepointsForGC/oxcaml-exception-root-adversarial.ll`
+- `llvm-lit -q vendor/llvm-project/llvm/test/Transforms/RewriteStatepointsForGC/oxcaml-*.ll`
+
+Both pass with `../llvm-build/bin/llvm-lit` after updating stale CHECK lines for
+volatile exception roots and the current C-wrapper argument-root model.

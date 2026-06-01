@@ -171,7 +171,7 @@ recover:
 
 ; CASE 08: case08_boundary_switch_two_edges
 ; CHECK-LABEL: define {{.*}}@case08_boundary_switch_two_edges(
-; CHECK-COUNT-4: store volatile ptr addrspace(1)
+; CHECK-COUNT-2: store volatile ptr addrspace(1)
 define oxcaml_nofpcc void @case08_boundary_switch_two_edges(i64 %tag, i64 %ds, i64 %alloc, ptr %trap, ptr addrspace(1) %a) gc "oxcaml" personality ptr @personality {
 entry:
   call void @llvm.aarch64.oxcaml.trap.publish(ptr %trap, i64 1, ptr blockaddress(@case08_boundary_switch_two_edges, %recover))
@@ -230,7 +230,7 @@ join:
 
 ; CASE 11: case11_boundary_via_trampoline
 ; CHECK-LABEL: define {{.*}}@case11_boundary_via_trampoline(
-; CHECK-COUNT-4: store volatile ptr addrspace(1)
+; CHECK-COUNT-2: store volatile ptr addrspace(1)
 define oxcaml_nofpcc void @case11_boundary_via_trampoline(i1 %cond, i64 %ds, i64 %alloc, ptr %trap, ptr addrspace(1) %a) gc "oxcaml" personality ptr @personality {
 entry:
   call void @llvm.aarch64.oxcaml.trap.publish(ptr %trap, i64 1, ptr blockaddress(@case11_boundary_via_trampoline, %recover))
@@ -253,7 +253,7 @@ join:
 
 ; CASE 12: case12_boundary_local_loaded_value
 ; CHECK-LABEL: define {{.*}}@case12_boundary_local_loaded_value(
-; CHECK-COUNT-4: store volatile ptr addrspace(1)
+; CHECK-COUNT-2: store volatile ptr addrspace(1)
 define oxcaml_nofpcc void @case12_boundary_local_loaded_value(i1 %retry, i64 %ds, i64 %alloc, ptr %trap, ptr addrspace(1) %a) gc "oxcaml" personality ptr @personality {
 entry:
   call void @llvm.aarch64.oxcaml.trap.publish(ptr %trap, i64 1, ptr blockaddress(@case12_boundary_local_loaded_value, %recover))
