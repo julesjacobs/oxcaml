@@ -141,6 +141,12 @@ static cl::opt<bool> GreedyReverseLocalAssignment(
              "shorter local live ranges will tend to be allocated first"),
     cl::Hidden);
 
+static cl::opt<bool> OxCamlAllocateRegMaskSplitRemainders(
+    "oxcaml-regalloc-allocate-regmask-split-remainders", cl::Hidden,
+    cl::desc("Allow OxCaml global split remainders from regmask-crossing "
+             "intervals to be allocated"),
+    cl::init(false));
+
 static RegisterRegAlloc greedyRegAlloc("greedy", "greedy register allocator",
                                        createGreedyRegisterAllocator);
 
@@ -995,6 +1001,11 @@ void RAGreedy::splitAroundRegion(LiveRangeEdit &LREdit,
   DebugVars->splitRegister(Reg, LREdit.regs(), *LIS);
 
   unsigned OrigBlocks = SA->getNumLiveBlocks();
+  const Function &F = MF->getFunction();
+  const bool AllowOxCamlRegMaskSplitRemainders =
+      OxCamlAllocateRegMaskSplitRemainders && F.hasGC() &&
+      (F.getGC() == "oxcaml" || F.getGC() == "ocaml") &&
+      Matrix->checkRegMaskInterference(LREdit.getParent());
 
   // Sort out the new intervals created by splitting. We get four kinds:
   // - Remainder intervals should not be split again.
@@ -1011,6 +1022,8 @@ void RAGreedy::splitAroundRegion(LiveRangeEdit &LREdit,
     // Remainder interval. Don't try splitting again, spill if it doesn't
     // allocate.
     if (IntvMap[I] == 0) {
+      if (AllowOxCamlRegMaskSplitRemainders)
+        continue;
       ExtraInfo->setStage(Reg, RS_Spill);
       continue;
     }
