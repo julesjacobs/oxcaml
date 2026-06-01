@@ -154,17 +154,17 @@ static unsigned mapX86DwarfRegToOxCamlIndex(unsigned DwarfRegNum) {
 }
 
 static unsigned mapAArch64DwarfRegToOxCamlIndex(unsigned DwarfRegNum) {
-  // backend/arm64/regs.ml uses the following integer register order:
-  // x0-x15, x19-x28, x16-x17.
+  // runtime/arm64.S:SAVE_ALL_REGS saves ordinary root registers x0-x15 and
+  // x19-x25 in gc_regs.  Other integer registers either have runtime meaning
+  // or are AArch64 temporaries and cannot be encoded as gc_regs roots.
   if (DwarfRegNum <= 15) {
     return DwarfRegNum;
-  } else if (19 <= DwarfRegNum && DwarfRegNum <= 28) {
+  } else if (19 <= DwarfRegNum && DwarfRegNum <= 25) {
     return DwarfRegNum - 3;
-  } else if (DwarfRegNum == 16 || DwarfRegNum == 17) {
-    return DwarfRegNum + 10;
   } else {
-    report_fatal_error("[OxCamlGCPrinter] unrecognised AArch64 DWARF register: "
-      + Twine(DwarfRegNum));
+    report_fatal_error(
+        "[OxCamlGCPrinter] AArch64 register has no OxCaml gc_regs root slot: "
+        + Twine(DwarfRegNum));
   }
 }
 

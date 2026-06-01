@@ -580,7 +580,9 @@ def CSR_AArch64_OxCaml_WithoutFP : CalleeSavedRegs<(add LR)>;
 def CSR_AArch64_OxCaml_C_Call : CalleeSavedRegs<(sub CSR_AArch64_AAPCS, X27, X28)>;
 def CSR_AArch64_OxCaml_C_Call_StackArgs
     : CalleeSavedRegs<(sub CSR_AArch64_AAPCS, X20, X21, X27, X28)>;
-def CSR_AArch64_OxCaml_Alloc : CalleeSavedRegs<(sub CSR_AArch64_AllRegs, X8, X27, X28)>;
+def CSR_AArch64_OxCaml_Alloc
+    : CalleeSavedRegs<(sub CSR_AArch64_AllRegs, X8, X16, X17, X18,
+                           X26, X27, X28)>;
 
 def CSR_AArch64_RT_MostRegs :  CalleeSavedRegs<(add CSR_AArch64_AAPCS,
                                                 (sequence "X%u", 9, 15))>;

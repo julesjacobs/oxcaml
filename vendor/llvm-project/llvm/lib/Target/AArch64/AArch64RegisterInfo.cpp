@@ -444,11 +444,15 @@ bool AArch64RegisterInfo::shouldSpillStatepointGCPtr(
     return false;
 
   // The OxCaml AArch64 runtime saves only the ordinary root registers in
-  // runtime/arm64.S:SAVE_ALL_REGS. X27 is the allocation pointer and X28 is the
-  // domain state pointer at runtime boundaries; neither has an ordinary gc_regs
-  // slot. They remain allocatable for normal code, but a statepoint root in one
-  // of these registers must be described through a stack spill.
-  return MCRegisterInfo::regsOverlap(PhysReg, AArch64::X27) ||
+  // runtime/arm64.S:SAVE_ALL_REGS: x0-x15 and x19-x25.  The frame table can
+  // describe roots in those saved-register slots.  Runtime registers, platform
+  // registers and linker temporaries do not have ordinary gc_regs slots, so a
+  // statepoint root in one of them must be described through a stack spill.
+  return MCRegisterInfo::regsOverlap(PhysReg, AArch64::X16) ||
+         MCRegisterInfo::regsOverlap(PhysReg, AArch64::X17) ||
+         MCRegisterInfo::regsOverlap(PhysReg, AArch64::X18) ||
+         MCRegisterInfo::regsOverlap(PhysReg, AArch64::X26) ||
+         MCRegisterInfo::regsOverlap(PhysReg, AArch64::X27) ||
          MCRegisterInfo::regsOverlap(PhysReg, AArch64::X28);
 }
 
