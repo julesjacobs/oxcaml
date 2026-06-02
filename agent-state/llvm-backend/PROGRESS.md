@@ -194,3 +194,24 @@ chunk: `make llvm-test-no-rebuild LLVM_PATH=$PWD/../clang-wrapper` passed with
 6774 tests passed, 297 skipped, 0 failed, 0 unexpected errors, 7071 considered.
 This uses the standard installed compiler with `-llvm-backend`; self-stage2 and
 benchmark validation are still pending for the active goal.
+
+2026-06-02 self-stage2 follow-up: `make llvm-self-stage2-test
+LLVM_PATH=$PWD/../clang-wrapper` reached the main compiler LLVM install and
+then failed while compiling
+`backend/debug/dwarf/dwarf_high__Assign_abbrevs.ll` and
+`middle_end/flambda2/types/flambda2_types__Meet_env.ll` with
+`fatal error: error in backend: conflicting OxCaml EH root value for existing
+statepoint bundle`. Replaying those exact `clang -x ir -O3 -S` invocations
+reproduced the failure. The root cause was nested recovery: after entering a
+recovery-only region, the current representative of an earlier SSA value can be
+an `llvm.oxcaml.gc.eh.recover` value, and a later reraise statepoint can already
+have that recovered value in its `oxcaml-eh-live` bundle when late EH-root
+materialization tries to attach the earlier pre-recovery PHI for the same
+logical root. RS4GC now treats an EH recover as compatible with an earlier
+dominating value for an already-matched logical root and prefers the recovered
+representative. Added a reduced red-green regression,
+`oxcaml-nested-recovery-reraise-root.ll`: without the fix it aborts with the
+same fatal error; with the fix it passes. Both original failing IR replays pass
+with the rebuilt clang, and the focused `RewriteStatepointsForGC/oxcaml-*.ll`
+lit set passes with 29 passed and 1 XFAIL. The next step is to retry
+self-stage2, then run microbenchmarks and compiler benchmarks if it passes.

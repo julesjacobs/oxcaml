@@ -495,7 +495,6 @@ define oxcaml_nofpcc { i64, i64, ptr addrspace(1) } @post_recovery_raw_cast_use(
 ; CHECK-NEXT:    cleanup
 ; CHECK-NEXT:    [[REF_RAW:%.*]] = addrspacecast ptr addrspace(1) [[REF]] to ptr
 ; CHECK-NEXT:    [[REC:%.*]] = tail call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
-; CHECK-NEXT:    [[REF_EH_RECOVER21:%.*]] = call ptr addrspace(1) @llvm.oxcaml.gc.eh.recover(i32 0, i32 0), !oxcaml.exnroot.load !1
 ; CHECK-NEXT:    [[REF_EH_RECOVER:%.*]] = call ptr addrspace(1) @llvm.oxcaml.gc.eh.recover(i32 0, i32 0), !oxcaml.exnroot.load !1
 ; CHECK-NEXT:    [[REF_RAW_EXNROOT_CAST:%.*]] = addrspacecast ptr addrspace(1) [[REF_EH_RECOVER]] to ptr
 ; CHECK-NEXT:    [[REC_GCAGG:%.*]] = extractvalue { ptr addrspace(1), i64, i64, i64 } [[REC]], 0
@@ -503,7 +502,7 @@ define oxcaml_nofpcc { i64, i64, ptr addrspace(1) } @post_recovery_raw_cast_use(
 ; CHECK-NEXT:    [[REC_GCAGG6:%.*]] = extractvalue { ptr addrspace(1), i64, i64, i64 } [[REC]], 2
 ; CHECK-NEXT:    [[REC_GCAGG7:%.*]] = extractvalue { ptr addrspace(1), i64, i64, i64 } [[REC]], 3
 ; CHECK-NEXT:    [[FIELD:%.*]] = load ptr addrspace(1), ptr [[REF_RAW_EXNROOT_CAST]], align 8
-; CHECK-NEXT:    [[STATEPOINT_TOKEN19]] = invoke oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 2882400000, i32 0, ptr elementtype({ i64, i64, ptr addrspace(1) } (i64, i64, ptr addrspace(1))) @callee_b, i32 3, i32 0, i64 [[DS]], i64 [[ALLOC]], ptr addrspace(1) [[FIELD]], i32 0, i32 0) [ "oxcaml-eh-live"(i32 1, i32 0, ptr addrspace(1) [[REF_EH_RECOVER]], i32 1, i32 1, ptr addrspace(1) [[REF_EH_RECOVER21]]) ]
+; CHECK-NEXT:    [[STATEPOINT_TOKEN19]] = invoke oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 2882400000, i32 0, ptr elementtype({ i64, i64, ptr addrspace(1) } (i64, i64, ptr addrspace(1))) @callee_b, i32 3, i32 0, i64 [[DS]], i64 [[ALLOC]], ptr addrspace(1) [[FIELD]], i32 0, i32 0) [ "oxcaml-eh-live"(i32 1, i32 0, ptr addrspace(1) [[REF_EH_RECOVER]]) ]
 ; CHECK-NEXT:    to label [[COMMON_RET_GCAGG8]] unwind label [[OUTER_RECOVER]]
 ; CHECK:       outer_recover:
 ; CHECK-NEXT:    [[OUTER_LP:%.*]] = landingpad token
@@ -517,7 +516,7 @@ define oxcaml_nofpcc { i64, i64, ptr addrspace(1) } @post_recovery_raw_cast_use(
 ; CHECK-NEXT:    [[RET0:%.*]] = insertvalue { i64, i64, ptr addrspace(1) } poison, i64 [[OUTER_REC_GCAGG13]], 0
 ; CHECK-NEXT:    [[RET1:%.*]] = insertvalue { i64, i64, ptr addrspace(1) } [[RET0]], i64 [[OUTER_REC_GCAGG12]], 1
 ; CHECK-NEXT:    [[RET2]] = insertvalue { i64, i64, ptr addrspace(1) } [[RET1]], ptr addrspace(1) [[REF_EXNROOT_SELECT_EH_RECOVER]], 2
-; CHECK-NEXT:    [[REF_EH_RECOVER14]] = call ptr addrspace(1) @llvm.oxcaml.gc.eh.recover(i32 1, i32 1), !oxcaml.exnroot.load !1
+; CHECK-NEXT:    [[REF_EH_RECOVER14]] = call ptr addrspace(1) @llvm.oxcaml.gc.eh.recover(i32 1, i32 0), !oxcaml.exnroot.load !1
 ; CHECK-NEXT:    br label [[COMMON_RET]]
 ;
   i64 %ds,
