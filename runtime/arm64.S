@@ -603,7 +603,6 @@ FUNCTION(caml_llvm_call_realloc_stack)
         str     TMP2, [TMP, 0]  /* next ptr */
         str     TMP, Caml_state(gc_regs_buckets)
     /* Raise the Stack_overflow exception */
-        ldp     x29, x30, [sp], 16
         SWITCH_OCAML_TO_C
         ADDRGLOBAL(x0, caml_exn_Stack_overflow)
         b       G(caml_raise_async)

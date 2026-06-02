@@ -5,6 +5,7 @@ set -eu
 build_dir=$(pwd)
 alloc_src="$build_dir/async_allocation_try.ml"
 stack_src="$build_dir/async_stack_overflow_try.ml"
+llvm_path="${LLVM_PATH:-${LLVM_WRAPPER:-/tmp/oxcaml-clang-wrapper}}"
 
 search_dir=$build_dir
 ocamlopt=""
@@ -84,7 +85,7 @@ EOF
 grep -q '^outer$' "$build_dir/async_allocation_native.out"
 
 "$ocamlopt" -O3 -g -llvm-backend \
-  -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
+  -llvm-path "$llvm_path" \
   -o "$build_dir/async_allocation_llvm.exe" "$alloc_src"
 "$build_dir/async_allocation_llvm.exe" > "$build_dir/async_allocation_llvm.out"
 grep -q '^outer$' "$build_dir/async_allocation_llvm.out"
@@ -95,7 +96,7 @@ OCAMLRUNPARAM=l=100000 "$build_dir/async_stack_native.exe" \
 grep -q '^outer$' "$build_dir/async_stack_native.out"
 
 "$ocamlopt" -O3 -g -S -keep-llvmir -llvm-backend \
-  -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
+  -llvm-path "$llvm_path" \
   -o "$build_dir/async_stack_llvm.exe" "$stack_src"
 OCAMLRUNPARAM=l=100000 "$build_dir/async_stack_llvm.exe" \
   > "$build_dir/async_stack_llvm.out"

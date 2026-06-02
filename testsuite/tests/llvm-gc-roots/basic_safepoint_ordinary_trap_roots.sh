@@ -7,6 +7,7 @@ src="$build_dir/basic_safepoint_ordinary_trap_roots_generated.ml"
 out="$build_dir/basic_safepoint_ordinary_trap_roots_generated.o"
 ir="$build_dir/basic_safepoint_ordinary_trap_roots_generated.ll"
 cfg_dump="$build_dir/basic_safepoint_ordinary_trap_roots_generated.cmx.dump"
+llvm_path="${LLVM_PATH:-${LLVM_WRAPPER:-/tmp/oxcaml-clang-wrapper}}"
 
 search_dir=$build_dir
 ocamlopt=""
@@ -55,7 +56,7 @@ EOF
 
 "$ocamlopt" -O3 -g -S -c -keep-llvmir -llvm-backend \
   -llvm-frontend-gc-roots -dcfg -dump-into-file \
-  -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
+  -llvm-path "$llvm_path" \
   -o "$out" "$src"
 
 for generated_file in "$ir" "$cfg_dump"; do
