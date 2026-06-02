@@ -3995,6 +3995,31 @@ let unwind_for_instruction t i =
   let exn_entry = exn_entry_for_instruction t i in
   unwind_label_and_landingpad_for_exn_entry exn_entry
 
+let ordinary_trap_unwind_for_basic_safepoint t
+    (i : Cfg.basic Cfg.instruction) =
+  (* Only operations that may transfer through [Caml_state->exn_handler] should
+     unwind to the active ordinary trap. Polls, minor-heap allocation slow paths
+     and AArch64 LLVM stack-check failure use async/effect runtime transfer
+     mechanisms instead. They still need their normal safepoint statepoint IDs
+     and root metadata, but not an ordinary exception successor. *)
+  match i.desc with
+  | Op (Poll | Alloc { mode = Heap; _ }) | Stack_check _ -> None, None
+  | Op (Alloc { mode = Local; _ })
+  | Reloadretaddr | Prologue | Epilogue | Pushtrap _ | Poptrap _
+  | Op
+      ( Move | Spill | Reload | Opaque | Pause | Begin_region | End_region
+      | Dls_get | Tls_get | Domain_index | Const_int _ | Const_float32 _
+      | Const_float _ | Const_symbol _ | Const_vec128 _ | Const_vec256 _
+      | Const_vec512 _ | Stackoffset _ | Load _
+      | Store (_, _, _)
+      | Intop _ | Int128op _
+      | Intop_imm (_, _)
+      | Intop_atomic _
+      | Floatop (_, _)
+      | Csel _ | Reinterpret_cast _ | Static_cast _ | Probe_is_enabled _
+      | Specific _ | Name_for_debugger _ ) ->
+    unwind_for_instruction t i
+
 let aarch64_trap_recover_type = T.(Struct [val_ptr; i64; i64; i64])
 
 let emit_aarch64_pushtrap t (i : Cfg.basic Cfg.instruction) lbl_handler =
@@ -4105,7 +4130,7 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
     emit_ins_no_res t (I.store ~ptr:local_sp_ptr ~to_store:saved_local_sp)
   | Alloc { bytes; dbginfo = _; mode = Local } -> local_alloc t i bytes
   | Alloc { bytes; dbginfo; mode = Heap } ->
-    let unwind_label, exn_entry = unwind_for_instruction t i in
+    let unwind_label, exn_entry = ordinary_trap_unwind_for_basic_safepoint t i in
     heap_alloc ?unwind_label ?exn_entry t i bytes dbginfo
   | Csel test_op ->
     let typ = T.of_reg i.res.(0) in
@@ -4262,7 +4287,7 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
     let domain_id = emit_ins t (I.load ~ptr:domain_id_ptr ~typ:T.i64) in
     store_into_reg t i.res.(0) domain_id
   | Poll ->
-    let unwind_label, exn_entry = unwind_for_instruction t i in
+    let unwind_label, exn_entry = ordinary_trap_unwind_for_basic_safepoint t i in
     poll ?unwind_label ?exn_entry t i
   | Stackoffset _ -> () (* Handled separately via [Safepoint.attr] *)
   | Spill | Reload -> not_implemented_basic ~msg:"spill / reload" i
@@ -4283,7 +4308,9 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
       | Prologue | Epilogue | Reloadretaddr ->
         () (* LLVM handles these for us *)
       | Stack_check { max_frame_size_bytes } ->
-        let unwind_label, exn_entry = unwind_for_instruction t i in
+        let unwind_label, exn_entry =
+          ordinary_trap_unwind_for_basic_safepoint t i
+        in
         stack_check ?unwind_label ?exn_entry t i max_frame_size_bytes
       | Poptrap { lbl_handler } -> (
         let trap_block_info =
