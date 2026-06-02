@@ -1048,6 +1048,16 @@ def int_eh_sjlj_setup_dispatch  : Intrinsic<[], []>;
 
 def int_eh_ocaml_try : Intrinsic<[llvm_i32_ty], []>;
 
+// OxCaml token-independent recovery of an EH-live GC root. The result is a
+// tagged OxCaml value in address space 1 loaded from a root home selected by
+// statepoint lowering for the immediate constants.
+def llvm_oxcaml_value_ty : LLVMQualPointerType<llvm_i8_ty, 1>;
+def int_oxcaml_gc_eh_recover
+    : Intrinsic<[llvm_oxcaml_value_ty], [llvm_i32_ty, llvm_i32_ty],
+                [IntrHasSideEffects, IntrConvergent, IntrNoDuplicate,
+                 IntrNoMerge, IntrWillReturn, IntrNoCallback, IntrNoFree,
+                 ImmArg<ArgIndex<0>>, ImmArg<ArgIndex<1>>]>;
+
 //===---------------- Generic Variable Attribute Intrinsics----------------===//
 //
 def int_var_annotation : DefaultAttrsIntrinsic<

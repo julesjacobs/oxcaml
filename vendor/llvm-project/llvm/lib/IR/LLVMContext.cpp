@@ -92,6 +92,11 @@ LLVMContext::LLVMContext() : pImpl(new LLVMContextImpl(*this)) {
          "kcfi operand bundle id drifted!");
   (void)KCFIEntry;
 
+  auto *OxCamlEHLiveEntry = pImpl->getOrInsertBundleTag("oxcaml-eh-live");
+  assert(OxCamlEHLiveEntry->second == LLVMContext::OB_oxcaml_eh_live &&
+         "oxcaml-eh-live operand bundle id drifted!");
+  (void)OxCamlEHLiveEntry;
+
   SyncScope::ID SingleThreadSSID =
       pImpl->getOrInsertSyncScopeID("singlethread");
   assert(SingleThreadSSID == SyncScope::SingleThread &&

@@ -469,6 +469,14 @@ public:
     /// invoke of gc.statepoint.
     const BasicBlock *EHPadBB = nullptr;
 
+    struct OxCamlEHStackRoot {
+      unsigned RecoveryID;
+      unsigned RootID;
+      const Value *Base;
+    };
+
+    SmallVector<OxCamlEHStackRoot, 8> OxCamlEHStackRoots;
+
     explicit StatepointLoweringInfo(SelectionDAG &DAG) : CLI(DAG) {}
   };
 

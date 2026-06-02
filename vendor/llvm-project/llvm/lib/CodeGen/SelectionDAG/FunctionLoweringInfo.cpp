@@ -26,11 +26,13 @@
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/CodeGen/WasmEHFuncInfo.h"
 #include "llvm/CodeGen/WinEHFuncInfo.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Statepoint.h"
 #include "OxCamlTrapUtils.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -85,6 +87,23 @@ void FunctionLoweringInfo::set(const Function &fn, MachineFunction &mf,
   DT = DomTree;
   const TargetFrameLowering *TFI = MF->getSubtarget().getFrameLowering();
   DA = DAG->getDivergenceAnalysis();
+
+  for (const BasicBlock &BB : fn) {
+    for (const Instruction &I : BB) {
+      const auto *SP = dyn_cast<GCStatepointInst>(&I);
+      if (!SP)
+        continue;
+      for (auto It = SP->oxcaml_eh_live_begin(),
+                End = SP->oxcaml_eh_live_end();
+           It != End;) {
+        auto *RecoveryID = cast<ConstantInt>(*It++);
+        auto *RootID = cast<ConstantInt>(*It++);
+        ++It;
+        getOrCreateOxCamlEHRootFrameIndex(RecoveryID->getZExtValue(),
+                                          RootID->getZExtValue());
+      }
+    }
+  }
 
   // Check whether the function can return without sret-demotion.
   SmallVector<ISD::OutputArg, 4> Outs;
@@ -373,7 +392,45 @@ void FunctionLoweringInfo::clear() {
   RegsWithFixups.clear();
   StatepointStackSlots.clear();
   StatepointRelocationMaps.clear();
+  OxCamlEHRootFrameIndices.clear();
   PreferredExtendType.clear();
+}
+
+static uint64_t getOxCamlEHRootKey(unsigned RecoveryID, unsigned RootID) {
+  return (uint64_t(RecoveryID) << 32) | RootID;
+}
+
+int FunctionLoweringInfo::getOrCreateOxCamlEHRootFrameIndex(
+    unsigned RecoveryID, unsigned RootID) {
+  uint64_t Key = getOxCamlEHRootKey(RecoveryID, RootID);
+  auto It = OxCamlEHRootFrameIndices.find(Key);
+  if (It != OxCamlEHRootFrameIndices.end())
+    return It->second;
+
+  MachineFrameInfo &MFI = MF->getFrameInfo();
+  const DataLayout &DL = MF->getDataLayout();
+  int FI = MFI.CreateSpillStackObject(DL.getPointerSize(1),
+                                      DL.getPointerABIAlignment(1));
+  MFI.markAsStatepointSpillSlotObjectIndex(FI);
+  OxCamlEHRootFrameIndices.insert({Key, FI});
+  return FI;
+}
+
+std::optional<int>
+FunctionLoweringInfo::getOxCamlEHRootFrameIndex(unsigned RecoveryID,
+                                                unsigned RootID) const {
+  uint64_t Key = getOxCamlEHRootKey(RecoveryID, RootID);
+  auto It = OxCamlEHRootFrameIndices.find(Key);
+  if (It == OxCamlEHRootFrameIndices.end())
+    return std::nullopt;
+  return It->second;
+}
+
+bool FunctionLoweringInfo::isOxCamlEHRootFrameIndex(int FI) const {
+  for (const auto &Entry : OxCamlEHRootFrameIndices)
+    if (Entry.second == FI)
+      return true;
+  return false;
 }
 
 /// CreateReg - Allocate a single virtual register for the given type.

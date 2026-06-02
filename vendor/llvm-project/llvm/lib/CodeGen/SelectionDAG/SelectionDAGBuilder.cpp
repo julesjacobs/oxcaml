@@ -92,6 +92,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetIntrinsicInfo.h"
@@ -2963,7 +2964,8 @@ void SelectionDAGBuilder::visitInvoke(const InvokeInst &I) {
              {LLVMContext::OB_deopt, LLVMContext::OB_gc_transition,
               LLVMContext::OB_gc_live, LLVMContext::OB_funclet,
               LLVMContext::OB_cfguardtarget,
-              LLVMContext::OB_clang_arc_attachedcall}) &&
+              LLVMContext::OB_clang_arc_attachedcall,
+              LLVMContext::OB_oxcaml_eh_live}) &&
          "Cannot lower invokes with arbitrary operand bundles yet!");
 
   const Value *Callee(I.getCalledOperand());
@@ -5968,6 +5970,31 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
     // By default, turn this into a target intrinsic node.
     visitTargetIntrinsic(I, Intrinsic);
     return;
+  case Intrinsic::oxcaml_gc_eh_recover: {
+    auto *RecoveryID = cast<ConstantInt>(I.getArgOperand(0));
+    auto *RootID = cast<ConstantInt>(I.getArgOperand(1));
+    std::optional<int> MaybeFI = FuncInfo.getOxCamlEHRootFrameIndex(
+        RecoveryID->getZExtValue(), RootID->getZExtValue());
+    if (!MaybeFI)
+      report_fatal_error(
+          "llvm.oxcaml.gc.eh.recover has no matching oxcaml-eh-live root");
+    int FI = *MaybeFI;
+
+    MachineFunction &MF = DAG.getMachineFunction();
+    MachineFrameInfo &MFI = MF.getFrameInfo();
+    SDValue Slot = DAG.getTargetFrameIndex(FI, getFrameIndexTy());
+    auto PtrInfo = MachinePointerInfo::getFixedStack(MF, FI);
+    auto *MMO = MF.getMachineMemOperand(
+        PtrInfo, MachineMemOperand::MOLoad | MachineMemOperand::MOVolatile,
+        MFI.getObjectSize(FI), MFI.getObjectAlign(FI));
+
+    EVT VT = TLI.getValueType(DAG.getDataLayout(), I.getType());
+    SDValue Chain = TLI.prepareVolatileOrAtomicLoad(getRoot(), sdl, DAG);
+    SDValue Load = DAG.getLoad(VT, sdl, Chain, Slot, MMO);
+    DAG.setRoot(Load.getValue(1));
+    setValue(&I, Load);
+    return;
+  }
   case Intrinsic::vscale: {
     match(&I, m_VScale(DAG.getDataLayout()));
     EVT VT = TLI.getValueType(DAG.getDataLayout(), I.getType());

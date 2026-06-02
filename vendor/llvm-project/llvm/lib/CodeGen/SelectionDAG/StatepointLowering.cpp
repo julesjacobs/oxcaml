@@ -208,6 +208,9 @@ static std::optional<int> findPreviousSpillSlot(const Value *Val,
     if (Record.type != RecordType::Spill)
       return std::nullopt;
 
+    if (Builder.FuncInfo.isOxCamlEHRootFrameIndex(Record.payload.FI))
+      return std::nullopt;
+
     return Record.payload.FI;
   }
 
@@ -338,6 +341,27 @@ static void reservePreviousStackSlotForValue(const Value *IncomingValue,
   Builder.StatepointLowering.setLocation(Incoming, Loc);
 }
 
+static void reserveStackSlotForValueAtFrameIndex(const Value *IncomingValue,
+                                                 int FI,
+                                                 SelectionDAGBuilder &Builder) {
+  SDValue Incoming = Builder.getValue(IncomingValue);
+
+  if (willLowerDirectly(Incoming))
+    return;
+
+  if (Builder.StatepointLowering.getLocation(Incoming).getNode())
+    return;
+
+  const int LookUpDepth = 6;
+  std::optional<int> KnownFI =
+      findPreviousSpillSlot(IncomingValue, Builder, LookUpDepth);
+  if (KnownFI && *KnownFI == FI) {
+    SDValue Loc =
+        Builder.DAG.getTargetFrameIndex(FI, Builder.getFrameIndexTy());
+    Builder.StatepointLowering.setLocation(Incoming, Loc);
+  }
+}
+
 /// Extract call from statepoint, lower it and return pointer to the
 /// call node. Also update NodeMap so that getValue(statepoint) will
 /// reference lowered call result
@@ -398,15 +422,22 @@ static MachineMemOperand* getMachineMemOperand(MachineFunction &MF,
 /// emitted store
 static std::tuple<SDValue, SDValue, MachineMemOperand*>
 spillIncomingStatepointValue(SDValue Incoming, SDValue Chain,
-                             SelectionDAGBuilder &Builder) {
+                             SelectionDAGBuilder &Builder,
+                             std::optional<int> PreferredFI = std::nullopt) {
   SDValue Loc = Builder.StatepointLowering.getLocation(Incoming);
   MachineMemOperand* MMO = nullptr;
 
   // Emit new store if we didn't do it for this ptr before
   if (!Loc.getNode()) {
-    Loc = Builder.StatepointLowering.allocateStackSlot(Incoming.getValueType(),
-                                                       Builder);
-    int Index = cast<FrameIndexSDNode>(Loc)->getIndex();
+    int Index;
+    if (PreferredFI) {
+      Index = *PreferredFI;
+      Loc = Builder.DAG.getFrameIndex(Index, Builder.getFrameIndexTy());
+    } else {
+      Loc = Builder.StatepointLowering.allocateStackSlot(Incoming.getValueType(),
+                                                         Builder);
+      Index = cast<FrameIndexSDNode>(Loc)->getIndex();
+    }
     // We use TargetFrameIndex so that isel will not select it into LEA
     Loc = Builder.DAG.getTargetFrameIndex(Index, Builder.getFrameIndexTy());
 
@@ -448,9 +479,10 @@ static void
 lowerIncomingStatepointValue(SDValue Incoming, bool RequireSpillSlot,
                              SmallVectorImpl<SDValue> &Ops,
                              SmallVectorImpl<MachineMemOperand *> &MemRefs,
-                             SelectionDAGBuilder &Builder) {
+                             SelectionDAGBuilder &Builder,
+                             std::optional<int> PreferredFI = std::nullopt) {
   
-  if (willLowerDirectly(Incoming)) {
+  if (!PreferredFI && willLowerDirectly(Incoming)) {
     if (FrameIndexSDNode *FI = dyn_cast<FrameIndexSDNode>(Incoming)) {
       // This handles allocas as arguments to the statepoint (this is only
       // really meaningful for a deopt value.  For GC, we'd be trying to
@@ -511,7 +543,8 @@ lowerIncomingStatepointValue(SDValue Incoming, bool RequireSpillSlot,
     // will happily do so as needed, so doing it here would be a small compile
     // time win at most. 
     SDValue Chain = Builder.getRoot();
-    auto Res = spillIncomingStatepointValue(Incoming, Chain, Builder);
+    auto Res =
+        spillIncomingStatepointValue(Incoming, Chain, Builder, PreferredFI);
     Ops.push_back(std::get<0>(Res));
     if (auto *MMO = std::get<2>(Res))
       MemRefs.push_back(MMO);
@@ -569,6 +602,7 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
   // Pointers used on exceptional path of invoke statepoint.
   // We cannot assing them to VRegs.
   SmallSet<SDValue, 8> LPadPointers;
+  DenseMap<SDValue, int> PreferredEHRootFI;
   if (!UseRegistersForGCPointersInLandingPad)
     if (const auto *StInvoke =
             dyn_cast_or_null<InvokeInst>(SI.StatepointInstr)) {
@@ -579,6 +613,17 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
           LPadPointers.insert(Builder.getValue(Relocate->getDerivedPtr()));
         }
     }
+
+  for (const auto &Root : SI.OxCamlEHStackRoots) {
+    SDValue RootSD = Builder.getValue(Root.Base);
+    LPadPointers.insert(RootSD);
+    int FI = Builder.FuncInfo.getOrCreateOxCamlEHRootFrameIndex(
+        Root.RecoveryID, Root.RootID);
+    auto [It, Inserted] = PreferredEHRootFI.try_emplace(RootSD, FI);
+    if (!Inserted && It->second != FI)
+      report_fatal_error(
+          "distinct oxcaml-eh-live roots lowered to the same value");
+  }
 
   LLVM_DEBUG(dbgs() << "Deciding how to lower GC Pointers:\n");
 
@@ -638,20 +683,27 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
   // particular value.  This is purely an optimization over the code below and
   // doesn't change semantics at all.  It is important for performance that we
   // reserve slots for both deopt and gc values before lowering either.
+  for (const auto &Root : SI.OxCamlEHStackRoots)
+    reserveStackSlotForValueAtFrameIndex(
+        Root.Base, Builder.FuncInfo.getOrCreateOxCamlEHRootFrameIndex(
+                       Root.RecoveryID, Root.RootID),
+        Builder);
+
   for (const Value *V : SI.DeoptState) {
-    if (requireSpillSlot(V))
+    SDValue SDV = Builder.getValue(V);
+    if (requireSpillSlot(V) && !PreferredEHRootFI.count(SDV))
       reservePreviousStackSlotForValue(V, Builder);
   }
 
   for (const Value *V : SI.Ptrs) {
     SDValue SDV = Builder.getValue(V);
-    if (!LowerAsVReg.count(SDV))
+    if (!LowerAsVReg.count(SDV) && !PreferredEHRootFI.count(SDV))
       reservePreviousStackSlotForValue(V, Builder);
   }
 
   for (const Value *V : SI.Bases) {
     SDValue SDV = Builder.getValue(V);
-    if (!LowerAsVReg.count(SDV))
+    if (!LowerAsVReg.count(SDV) && !PreferredEHRootFI.count(SDV))
       reservePreviousStackSlotForValue(V, Builder);
   }
 
@@ -666,26 +718,38 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
   LLVM_DEBUG(dbgs() << "Lowering deopt state\n");
   for (const Value *V : SI.DeoptState) {
     SDValue Incoming;
+    SDValue ValueSD = Builder.getValue(V);
+    std::optional<int> PreferredFI;
+    auto PreferredIt = PreferredEHRootFI.find(ValueSD);
+    if (PreferredIt != PreferredEHRootFI.end())
+      PreferredFI = PreferredIt->second;
     // If this is a function argument at a static frame index, generate it as
     // the frame index.
-    if (const Argument *Arg = dyn_cast<Argument>(V)) {
-      int FI = Builder.FuncInfo.getArgumentFrameIndex(Arg);
-      if (FI != INT_MAX)
-        Incoming = Builder.DAG.getFrameIndex(FI, Builder.getFrameIndexTy());
+    if (!PreferredFI) {
+      if (const Argument *Arg = dyn_cast<Argument>(V)) {
+        int FI = Builder.FuncInfo.getArgumentFrameIndex(Arg);
+        if (FI != INT_MAX)
+          Incoming = Builder.DAG.getFrameIndex(FI, Builder.getFrameIndexTy());
+      }
     }
     if (!Incoming.getNode())
-      Incoming = Builder.getValue(V);
+      Incoming = ValueSD;
     LLVM_DEBUG(dbgs() << "Value " << *V
                       << " requireSpillSlot = " << requireSpillSlot(V) << "\n");
     lowerIncomingStatepointValue(Incoming, requireSpillSlot(V), Ops, MemRefs,
-                                 Builder);
+                                 Builder, PreferredFI);
   }
 
   // Finally, go ahead and lower all the gc arguments.
   pushStackMapConstant(Ops, Builder, LoweredGCPtrs.size());
-  for (SDValue SDV : LoweredGCPtrs)
+  for (SDValue SDV : LoweredGCPtrs) {
+    std::optional<int> PreferredFI;
+    auto PreferredIt = PreferredEHRootFI.find(SDV);
+    if (PreferredIt != PreferredEHRootFI.end())
+      PreferredFI = PreferredIt->second;
     lowerIncomingStatepointValue(SDV, !LowerAsVReg.count(SDV), Ops, MemRefs,
-                                 Builder);
+                                 Builder, PreferredFI);
+  }
 
   // Copy to out vector. LoweredGCPtrs will be empty after this point.
   GCPtrs = LoweredGCPtrs.takeVector();
@@ -1118,6 +1182,21 @@ SelectionDAGBuilder::LowerStatepoint(const GCStatepointInst &I,
         SI.Bases.push_back(V);
         SI.Ptrs.push_back(V);
       }
+    }
+  }
+
+  for (auto Itr = I.oxcaml_eh_live_begin(), End = I.oxcaml_eh_live_end();
+       Itr != End;) {
+    auto *RecoveryID = cast<ConstantInt>(*Itr++);
+    auto *RootID = cast<ConstantInt>(*Itr++);
+    Value *V = *Itr++;
+
+    SI.OxCamlEHStackRoots.push_back(
+        {unsigned(RecoveryID->getZExtValue()), unsigned(RootID->getZExtValue()),
+         V});
+    if (Seen.insert(getValue(V)).second) {
+      SI.Bases.push_back(V);
+      SI.Ptrs.push_back(V);
     }
   }
 

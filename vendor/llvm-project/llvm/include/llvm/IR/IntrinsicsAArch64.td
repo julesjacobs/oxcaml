@@ -10,8 +10,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-def llvm_oxcaml_value_ty : LLVMQualPointerType<llvm_i8_ty, 1>;
-
 let TargetPrefix = "aarch64" in {
 
 def int_aarch64_ldxr : Intrinsic<[llvm_i64_ty], [llvm_anyptr_ty],

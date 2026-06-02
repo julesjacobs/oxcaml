@@ -27,6 +27,8 @@
 #include "llvm/IR/Value.h"
 #include "llvm/Support/KnownBits.h"
 #include <cassert>
+#include <cstdint>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -151,6 +153,12 @@ public:
   /// basic blocks.
   SmallVector<unsigned, 50> StatepointStackSlots;
 
+  /// Stable stack homes for OxCaml EH-live roots. Unlike
+  /// StatepointStackSlots, these are not a rotating spill-slot pool: each
+  /// recovery/root id pair has one fixed frame index used by every protected
+  /// statepoint and by the corresponding recovery intrinsic.
+  DenseMap<uint64_t, int> OxCamlEHRootFrameIndices;
+
   /// MBB - The current block.
   MachineBasicBlock *MBB;
 
@@ -217,6 +225,11 @@ public:
     assert(VirtReg2Value.empty());
     return R = CreateRegs(V);
   }
+
+  int getOrCreateOxCamlEHRootFrameIndex(unsigned RecoveryID, unsigned RootID);
+  std::optional<int> getOxCamlEHRootFrameIndex(unsigned RecoveryID,
+                                               unsigned RootID) const;
+  bool isOxCamlEHRootFrameIndex(int FI) const;
 
   /// GetLiveOutRegInfo - Gets LiveOutInfo for a register, returning NULL if the
   /// register is a PHI destination and the PHI's LiveOutInfo is not valid.

@@ -3398,12 +3398,13 @@ void Verifier::visitCallBase(CallBase &Call) {
 
   // Verify that a callsite has at most one "deopt", at most one "funclet", at
   // most one "gc-transition", at most one "cfguardtarget", at most one
-  // "preallocated" operand bundle, and at most one "ptrauth" operand bundle.
+  // "preallocated" operand bundle, at most one "ptrauth" operand bundle, and
+  // at most one "oxcaml-eh-live" operand bundle.
   bool FoundDeoptBundle = false, FoundFuncletBundle = false,
        FoundGCTransitionBundle = false, FoundCFGuardTargetBundle = false,
        FoundPreallocatedBundle = false, FoundGCLiveBundle = false,
        FoundPtrauthBundle = false, FoundKCFIBundle = false,
-       FoundAttachedCallBundle = false;
+       FoundAttachedCallBundle = false, FoundOxCamlEHLiveBundle = false;
   for (unsigned i = 0, e = Call.getNumOperandBundles(); i < e; ++i) {
     OperandBundleUse BU = Call.getOperandBundleAt(i);
     uint32_t Tag = BU.getTagID();
@@ -3466,6 +3467,42 @@ void Verifier::visitCallBase(CallBase &Call) {
             "Multiple \"clang.arc.attachedcall\" operand bundles", Call);
       FoundAttachedCallBundle = true;
       verifyAttachedCallBundle(Call, BU);
+    } else if (Tag == LLVMContext::OB_oxcaml_eh_live) {
+      Check(isa<GCStatepointInst>(Call),
+            "oxcaml-eh-live operand bundle is only valid on gc.statepoint",
+            Call);
+      Check(!FoundOxCamlEHLiveBundle,
+            "Multiple oxcaml-eh-live operand bundles", Call);
+      FoundOxCamlEHLiveBundle = true;
+      Check(BU.Inputs.size() % 3 == 0,
+            "oxcaml-eh-live operand bundle requires triples", Call);
+      if (BU.Inputs.size() % 3 != 0)
+        continue;
+      SmallSet<uint64_t, 8> SeenEHLiveKeys;
+      SmallPtrSet<const Value *, 8> SeenEHLiveRoots;
+      for (unsigned I = 0, E = BU.Inputs.size(); I != E; I += 3) {
+        Check(isa<ConstantInt>(BU.Inputs[I]) &&
+                  BU.Inputs[I]->getType()->isIntegerTy(32),
+              "oxcaml-eh-live recovery id must be an i32 constant", Call);
+        Check(isa<ConstantInt>(BU.Inputs[I + 1]) &&
+                  BU.Inputs[I + 1]->getType()->isIntegerTy(32),
+              "oxcaml-eh-live root id must be an i32 constant", Call);
+        auto *RootTy = dyn_cast<PointerType>(BU.Inputs[I + 2]->getType());
+        Check(RootTy && RootTy->getAddressSpace() == 1,
+              "oxcaml-eh-live root must be an addrspace(1) pointer", Call);
+        Check(!isa<UndefValue>(BU.Inputs[I + 2]),
+              "oxcaml-eh-live root must not be undef", Call);
+        auto *RecoveryID = dyn_cast<ConstantInt>(BU.Inputs[I]);
+        auto *RootID = dyn_cast<ConstantInt>(BU.Inputs[I + 1]);
+        if (!RecoveryID || !RootID)
+          continue;
+        uint64_t Key = (RecoveryID->getZExtValue() << 32) |
+                       RootID->getZExtValue();
+        Check(SeenEHLiveKeys.insert(Key).second,
+              "Duplicate oxcaml-eh-live recovery/root id", Call);
+        Check(SeenEHLiveRoots.insert(BU.Inputs[I + 2]).second,
+              "Duplicate oxcaml-eh-live root value", Call);
+      }
     }
   }
 
@@ -5272,6 +5309,68 @@ void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
 
     verifyStatepoint(Call);
     break;
+  case Intrinsic::oxcaml_gc_eh_recover: {
+    Check(Call.getParent()->getParent()->hasGC(),
+          "Enclosing function does not use GC.", Call);
+
+    auto *RecoveryID = cast<ConstantInt>(Call.getArgOperand(0));
+    auto *RootID = cast<ConstantInt>(Call.getArgOperand(1));
+    uint64_t Key =
+        (RecoveryID->getZExtValue() << 32) | RootID->getZExtValue();
+
+    auto StatepointHasEHLiveRoot = [Key](const GCStatepointInst *SP) {
+      for (auto It = SP->oxcaml_eh_live_begin(),
+                End = SP->oxcaml_eh_live_end();
+           It != End;) {
+        auto *SPRecoveryID = dyn_cast<ConstantInt>(*It++);
+        auto *SPRootID = dyn_cast<ConstantInt>(*It++);
+        ++It;
+        if (!SPRecoveryID || !SPRootID)
+          continue;
+        uint64_t SPKey =
+            (SPRecoveryID->getZExtValue() << 32) | SPRootID->getZExtValue();
+        if (SPKey == Key)
+          return true;
+      }
+      return false;
+    };
+
+    bool FoundProtectedStatepoint = false;
+    bool MissingEHLiveRoot = false;
+    bool FoundNonEHPath = false;
+    SmallPtrSet<const BasicBlock *, 8> SeenBlocks;
+    SmallVector<const BasicBlock *, 8> Worklist;
+    SeenBlocks.insert(Call.getParent());
+    Worklist.push_back(Call.getParent());
+    while (!Worklist.empty()) {
+      const BasicBlock *BB = Worklist.pop_back_val();
+      bool FoundPred = false;
+      for (const BasicBlock *Pred : predecessors(BB)) {
+        FoundPred = true;
+        const auto *Invoke = dyn_cast<InvokeInst>(Pred->getTerminator());
+        if (Invoke && Invoke->getUnwindDest() == BB &&
+            isa<GCStatepointInst>(Invoke)) {
+          const auto *SP = cast<GCStatepointInst>(Invoke);
+          FoundProtectedStatepoint = true;
+          MissingEHLiveRoot |= !StatepointHasEHLiveRoot(SP);
+          continue;
+        }
+        if (SeenBlocks.insert(Pred).second)
+          Worklist.push_back(Pred);
+      }
+      FoundNonEHPath |= !FoundPred;
+    }
+    Check(FoundProtectedStatepoint,
+          "llvm.oxcaml.gc.eh.recover must be reached from a statepoint unwind",
+          Call);
+    Check(!FoundNonEHPath,
+          "llvm.oxcaml.gc.eh.recover must not be reachable from a non-EH path",
+          Call);
+    Check(!MissingEHLiveRoot,
+          "llvm.oxcaml.gc.eh.recover must match every protected statepoint",
+          Call);
+    break;
+  }
   case Intrinsic::experimental_gc_result: {
     Check(Call.getParent()->getParent()->hasGC(),
           "Enclosing function does not use GC.", Call);
