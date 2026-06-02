@@ -88,8 +88,8 @@ entry:
 
 after1:
 ; CHECK: after1:
-; CHECK: %a.relocated = call coldcc ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token %statepoint_token, i32 0, i32 0)
-; CHECK: store volatile ptr addrspace(1) %a.relocated, ptr %a.exnroot, align 8
+; CHECK: %a.normal = load volatile ptr addrspace(1), ptr %a.exnroot, align 8
+; CHECK: store volatile ptr addrspace(1) %a.normal, ptr %a.exnroot, align 8
 ; CHECK: %statepoint_token{{[0-9]*}} = invoke {{.*}} [ "gc-live"({{.*}}ptr %a.exnroot{{.*}}) ]
   %call2 = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee_b(i64 %ds, i64 %alloc, ptr addrspace(1) %a)
@@ -209,8 +209,8 @@ entry:
 
 after1:
 ; CHECK: after1:
-; CHECK: %a.relocated = call coldcc ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token %statepoint_token, i32 0, i32 0)
-; CHECK: store volatile ptr addrspace(1) %a.relocated, ptr %a.exnroot, align 8
+; CHECK: %a.normal = load volatile ptr addrspace(1), ptr %a.exnroot, align 8
+; CHECK: store volatile ptr addrspace(1) %a.normal, ptr %a.exnroot, align 8
 ; CHECK: %statepoint_token{{[0-9]*}} = invoke {{.*}} [ "gc-live"({{.*}}ptr %a.exnroot{{.*}}) ]
   %call2 = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee_b(i64 %ds, i64 %alloc, ptr addrspace(1) %a)

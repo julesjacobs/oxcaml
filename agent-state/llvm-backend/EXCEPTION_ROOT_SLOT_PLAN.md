@@ -1,4 +1,367 @@
-# Exception-root slot duplication plan
+# Exception recovery root design
+
+## Core problem
+
+OxCaml uses a pushtrap/poptrap exception model. A `pushtrap` installs one
+runtime recovery target, and all calls made while that trap is active may raise
+to that same recovery target. In LLVM IR, those calls are represented as
+`invoke`s with an exceptional edge to the trap recovery block.
+
+That creates a mismatch with ordinary LLVM statepoint lowering.
+
+The ordinary `gc.relocate` model assumes that an exceptional relocation block
+can identify the one statepoint token that reached it:
+
+```llvm
+invoke statepoint(...) to %normal unwind %landingpad_for_this_invoke
+
+landingpad_for_this_invoke:
+  %x.relocated = gc.relocate(token-from-this-invoke, ...)
+```
+
+This is only well-defined when the unwind block is specific to one invoke, or
+when there is some other unique token at the relocation point.
+
+With pushtrap/poptrap, several invokes can unwind to the same trap recovery
+block:
+
+```llvm
+invoke statepoint(...) to %normal_a unwind %recover
+invoke statepoint(...) to %normal_b unwind %recover
+
+recover:
+  landingpad
+  call @llvm.aarch64.oxcaml.trap.recover()
+  ...
+```
+
+A `gc.relocate` in `%recover` would need to know whether the dynamic control
+flow came from the first invoke or the second invoke. The shared recovery block
+does not have one static statepoint token. Splitting the landingpad per invoke
+also does not match the pushtrap runtime model directly, because the installed
+trap target is the shared blockaddress.
+
+Therefore the correct transform is not "put `gc.relocate` in the landingpad".
+The correct transform is to make the shared recovery block an exception
+continuation with explicit root parameters.
+
+## Correct transform
+
+A value used after trap recovery is a recovery parameter. Since the exceptional
+edge cannot carry SSA values with a usable statepoint token, each demanded
+recovery parameter is represented by a mutable root slot.
+
+For each demanded recovery value:
+
+1. Determine the value that should be seen after each raising invoke.
+2. Store that edge value into a root slot immediately before the invoke.
+3. Add the root slot to that invoke's `gc-live` bundle.
+4. Load the root slot in the shared recovery path.
+5. Use the loaded value as the recovered value.
+
+The slot is not an optimization trick. It is the representation of an
+exception-continuation parameter.
+
+Example:
+
+```llvm
+; Edge A.
+store volatile ptr addrspace(1) %x_for_a, ptr %x.exnroot
+invoke statepoint(...) to %normal_a unwind %recover
+  [ "gc-live"(ptr %x.exnroot) ]
+
+; Edge B.
+store volatile ptr addrspace(1) %x_for_b, ptr %x.exnroot
+invoke statepoint(...) to %normal_b unwind %recover
+  [ "gc-live"(ptr %x.exnroot) ]
+
+recover:
+  landingpad
+  call @llvm.aarch64.oxcaml.trap.recover()
+  %x.recovered = load volatile ptr addrspace(1), ptr %x.exnroot
+  br %handler
+```
+
+This is equivalent to an edge-sensitive recovery phi:
+
+```llvm
+%x.recovered = phi [ %x_for_a, edge-from-a ], [ %x_for_b, edge-from-b ]
+```
+
+but it is safe across a collecting invoke because the root slot is part of that
+invoke's frame table.
+
+## Base and derived values
+
+The recovery parameter must be a rootable value.
+
+If the demanded recovery value is a normal OCaml value, the slot stores that
+value.
+
+If the demanded recovery value is a derived address, the slot stores the base
+OCaml value. After recovery, the derived address is rematerialized from the
+recovered base.
+
+The transform must not store an arbitrary derived pointer as an independent
+self-root. That would let the frame table describe an interior pointer as a
+base, which the OxCaml GC cannot handle.
+
+So the recovery transform has two levels:
+
+- recovery root: the base value stored in a root slot and listed in `gc-live`;
+- recovered use value: either the recovered root itself or a rematerialized
+  derived value computed from the recovered root.
+
+## Demand-driven algorithm
+
+The algorithm should be demand-driven.
+
+Definitions:
+
+- candidate recovery value: a GC value found by scanning a recovery region or a
+  recovery boundary;
+- demanded recovery value: a candidate with a real post-recovery use that needs
+  the value recovered;
+- store program: the mapping from raising invoke to the SSA value stored before
+  that invoke;
+- physical root slot: one mutable stack cell emitted for one compatible store
+  program.
+
+The principled algorithm is:
+
+1. Discover the recovery regions and boundary edges created by OxCaml trap
+   recovery.
+2. Discover candidate recovery values in those regions.
+3. Compute demanded recovery values from real post-recovery uses. Uses created
+   by the exception-root transform itself do not count as demand.
+4. For each demanded recovery value, compute its recovery root. For a derived
+   value, this is the base value plus a rematerialization recipe.
+5. For each demanded recovery root, compute the store program: for every raising
+   invoke that may reach the recovery use, determine the edge value to store.
+6. Intern physical root slots by compatible store program, type, and alignment.
+7. Emit only the physical root slots needed by demanded recovery values.
+8. Emit recovery loads/selectors/rematerializations only where demanded uses
+   require them.
+9. Add each physical root slot to `gc-live` only for invokes whose store program
+   writes that slot.
+
+The important ordering is that the pass plans demands and store programs before
+it emits volatile stores or appends anything to `gc-live`.
+
+## Slot compatibility
+
+Two demanded recovery values can share a physical root slot when the slot would
+carry the same value on every dynamic path where both values are read.
+
+A conservative compatibility rule is:
+
+- same slot type;
+- same slot alignment;
+- for every overlapping invoke, the stored SSA value is identical;
+- for a non-overlapping invoke, sharing is allowed only if the slot is not read
+  for the other demand on paths from that invoke.
+
+In practice, this means the physical slot is keyed by the store program, not by
+the syntactic identity of the candidate value.
+
+This distinction matters. `%gcagg104` and `%.1` may be different SSA values or
+different logical candidates, but if the only demanded recovery value stores the
+same SSA value before the same invoke, the pass should emit one physical root
+slot, not two volatile slots.
+
+## Normal continuation coalescing
+
+An explicit exception-root slot can also be the normal-continuation root for
+the same value at the same invoke.
+
+If an invoke stores value `V` into an exception-root slot, and `V` is also live
+on the normal continuation of that invoke, the pass should avoid representing
+`V` twice:
+
+```llvm
+store volatile ptr addrspace(1) %v, ptr %v.exnroot
+invoke statepoint(...) to %normal unwind %recover
+  [ "gc-live"(ptr addrspace(1) %v, ptr %v.exnroot) ]
+
+normal:
+  %v.normal = gc.relocate(token, %v, %v)
+
+recover:
+  %v.recovered = load volatile ptr addrspace(1), ptr %v.exnroot
+```
+
+That shape creates two roots for the same dynamic value: the ordinary live SSA
+root `%v`, and the explicit exception-root slot `%v.exnroot`. In final
+assembly this can become two stack stores before the same invoke.
+
+The preferred shape is to make the slot the single continuation root for both
+successors:
+
+```llvm
+store volatile ptr addrspace(1) %v, ptr %v.exnroot
+invoke statepoint(...) to %normal unwind %recover
+  [ "gc-live"(ptr %v.exnroot) ]
+
+normal:
+  %v.normal = load volatile ptr addrspace(1), ptr %v.exnroot
+
+recover:
+  %v.recovered = load volatile ptr addrspace(1), ptr %v.exnroot
+```
+
+The normal load is required because a collection at the invoke may update the
+slot. This is the same root cell serving two continuation parameters: the
+normal continuation parameter and the exception continuation parameter.
+
+This coalescing is only valid for a value whose normal continuation semantics
+match the slot's store program at that invoke. It must not turn unrelated normal
+live values into explicit slots merely because they have the same type. It is a
+coalescing rule for values already forced into an explicit root slot by a real
+exception recovery demand.
+
+Do not implement this by simply deleting `%v` from the statepoint's `gc-live`
+list. Existing `gc.relocate` indices are positional. Removing a `gc-live`
+operand without replacing the corresponding `gc.relocate` uses can make the IR
+ill-typed or silently relocate the wrong operand. A correct implementation must
+either avoid creating the ordinary `gc.relocate` for `V`, or replace its normal
+continuation uses with a load from the explicit slot before changing the
+statepoint operand list.
+
+## What is wrong with the current shape
+
+The current implementation in `RewriteStatepointsForGC.cpp` is mostly built
+around `materializeOxCamlExceptionRootSlots`. It scans for handler-live values,
+boundary values, and boundary live-ins, then calls `MaterializeRootSlot`.
+
+`MaterializeRootSlot` has immediate side effects:
+
+- creates an entry-block alloca;
+- creates volatile stores before invokes;
+- creates a recovery load;
+- records the slot in `ExplicitRootSlots`;
+- causes the slot to be appended to statepoint `gc-live`.
+
+That means the current code often materializes a root slot for a candidate
+before proving that the candidate has a real demanded use.
+
+The current code also treats "need a recovery load at this boundary" as "need a
+new backing root slot". Those are different concepts. A boundary edge may need a
+load at a different program point, but the load can read the same physical root
+slot.
+
+This is why the final IR can contain dead-looking values like
+`%gcagg104.exnroot.select`: the selector is a byproduct of a speculative
+candidate, while the volatile root slot remains live because it was already
+added to `gc-live`.
+
+## Implementation direction
+
+The implementation should replace eager `MaterializeRootSlot` calls with a
+planning phase.
+
+Suggested internal objects:
+
+```c++
+struct RecoveryDemand {
+  Value *OriginalValue;
+  Value *RecoveryRoot;
+  SmallVector<Instruction *, 4> RematerializationChain;
+  SmallVector<Use *, 4> Uses;
+};
+
+struct RootStore {
+  InvokeInst *Invoke;
+  Value *StoredValue;
+};
+
+struct RootSlotPlan {
+  Type *SlotType;
+  Align SlotAlign;
+  SmallVector<RootStore, 4> Stores;
+  SmallVector<RecoveryDemand *, 4> Demands;
+};
+```
+
+The exact data structures can differ, but the pass should preserve the
+separation:
+
+- demand discovery is side-effect-free;
+- store-program construction is side-effect-free;
+- slot interning is side-effect-free;
+- IR emission happens last.
+
+Boundary selectors should be lazy. Create a boundary selector only when the pass
+is about to replace a real use or a real PHI incoming value. Do not create a
+selector just because a value is live-in to a boundary block.
+
+Late materialization after the main statepoint rewrite should obey the same
+rules. If a late pass creates new demands, it should plan and emit only those
+demands. It should not append all late explicit root slots to every statepoint
+unless that broad root lifetime is explicitly proven necessary.
+
+## Correctness checks
+
+The transform should assert these properties:
+
+- Every post-recovery use of a pre-recovery GC value is either replaced with a
+  recovered value or proven not to need recovery.
+- Every demanded derived value has a rootable base and a rematerialization
+  recipe.
+- No physical root slot stores an unrematerialized derived pointer as a
+  self-root.
+- Every stored value dominates the invoke where it is stored.
+- Shared slots have compatible store programs.
+- Every emitted root slot appears in `gc-live` for each invoke that can collect
+  after storing that slot.
+- When a slot is used as both the normal-continuation root and the
+  exception-continuation root for a value, the ordinary SSA root for that same
+  value is not also listed in `gc-live` for the same invoke.
+- Every removed ordinary `gc-live` root has its normal `gc.relocate` uses
+  replaced by a load from the explicit root slot, or no such `gc.relocate` is
+  created.
+- No root slot is emitted for a candidate with no demanded use.
+
+## Test strategy
+
+The tests should be `.ll` tests for RS4GC, because this transform is about the
+IR contract between shared OxCaml recovery blocks and statepoint lowering.
+
+Adversarial cases:
+
+- one shared recovery block reached by two invokes;
+- one demanded recovery value with different edge values from different invokes;
+- two candidate values where only one has a real post-recovery use;
+- two demanded values with identical compatible store programs;
+- two demanded values with conflicting store programs;
+- a demanded boundary PHI incoming;
+- a boundary live-in candidate with no real use;
+- a demanded derived pointer that must root the base and rematerialize the
+  derived address;
+- multiple recovery trampolines feeding the same handler;
+- early and late materialization where an early candidate becomes unused after
+  relocation;
+- a value live on both the normal and exceptional continuations of the same
+  invoke, where the explicit exception-root slot should replace the ordinary
+  normal `gc.relocate` root.
+
+The expected output should check the structural properties:
+
+- no `gc.relocate` is inserted in a shared recovery block;
+- one physical root slot is emitted for each demanded compatible store program;
+- unused candidates do not create volatile stores;
+- derived values are not stored as independent roots;
+- `gc-live` contains the physical root slots needed by the corresponding
+  invokes;
+- a coalesced normal-plus-exception root has one volatile store before the
+  invoke, one root slot in `gc-live`, and no separate `gc.relocate` for the
+  original SSA value.
+
+## Incremental notes below
+
+The rest of this file records the previous incremental slot-sharing plan and
+its implementation status. It is useful history, but the design above is the
+preferred model: explicit exception roots are recovery continuation parameters,
+and the implementation should be demand-driven.
 
 ## Problem
 
@@ -427,15 +790,25 @@ that an explicit requirement of the interner.
 
 ## Implementation status
 
-Implemented first-pass slot sharing in
+Implemented first-pass demand/slot improvements in
 `materializeOxCamlExceptionRootSlots`.
 
 The interner is intentionally local to one recovery block materialization pass.
-It shares only GC root slots with the same logical recovered value, type, and
-alignment. A candidate slot is reused when all overlapping invoke store sites
-store the same SSA value; otherwise a separate slot is kept. When a reused slot
-is extended to a new invoke, the invoke is also updated in
+It now has two sharing modes:
+
+- same logical recovered value, type, and alignment: reuse the slot when all
+  overlapping invoke store sites store the same SSA value, and extend the slot
+  with missing stores;
+- different logical recovered values with the same type and alignment: reuse
+  the slot only when the full store program is identical.
+
+When a reused slot is extended to a new invoke, the invoke is also updated in
 `ExplicitRootSlots`/`ExplicitExceptionRootCalls`.
+
+Boundary live-in and boundary-use handling now checks for real dominated
+non-PHI uses before constructing a boundary selector, recovery load, or root
+slot. Rootability/base checks happen after this demand check, so unused boundary
+candidates do not cause speculative root emission or spurious failures.
 
 The adversarial baseline moved only where this design predicts:
 
@@ -445,6 +818,11 @@ The adversarial baseline moved only where this design predicts:
 
 PHI-heavy cases, independent roots, and cases with genuinely different logical
 roots did not collapse. That is the desired first patch behavior.
+
+The cross-logical-root case now has a focused regression:
+
+- `case21_same_store_program_different_logical_roots`: two different logical
+  handler values with the same physical store program share one root slot.
 
 Focused validation:
 

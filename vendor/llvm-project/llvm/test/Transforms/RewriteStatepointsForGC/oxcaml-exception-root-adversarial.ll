@@ -445,3 +445,44 @@ recover:
   call void @use(ptr addrspace(1) %a)
   ret void
 }
+
+; CASE 21: case21_same_store_program_different_logical_roots
+; CHECK-LABEL: define {{.*}}@case21_same_store_program_different_logical_roots(
+; CHECK-COUNT-2: store volatile ptr addrspace(1)
+define oxcaml_nofpcc void @case21_same_store_program_different_logical_roots(i64 %ds, i64 %alloc, ptr %trap, ptr addrspace(1) %a) gc "oxcaml" personality ptr @personality {
+entry:
+  call void @llvm.aarch64.oxcaml.trap.publish(ptr %trap, i64 1, ptr blockaddress(@case21_same_store_program_different_logical_roots, %recover))
+  invoke oxcaml_nofpcc void @callee_v(i64 %ds, i64 %alloc, ptr addrspace(1) %a)
+      to label %normal unwind label %recover
+normal:
+  ret void
+recover:
+  %handler = phi ptr addrspace(1) [ %a, %entry ]
+  %lp = landingpad token cleanup
+  %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  call void @use2(ptr addrspace(1) %handler, ptr addrspace(1) %a)
+  ret void
+}
+
+; CASE 22: case22_normal_and_exception_use_share_root_slot
+; CHECK-LABEL: define {{.*}}@case22_normal_and_exception_use_share_root_slot(
+; CHECK: %a.exnroot = alloca ptr addrspace(1)
+; CHECK: store volatile ptr addrspace(1) %a, ptr %a.exnroot
+; CHECK: invoke {{.*}}@llvm.experimental.gc.statepoint
+; CHECK-SAME: [ "gc-live"(ptr %a.exnroot) ]
+; CHECK: load volatile ptr addrspace(1), ptr %a.exnroot
+; CHECK-NOT: gc.relocate{{.*}} ; (%a, %a)
+define oxcaml_nofpcc void @case22_normal_and_exception_use_share_root_slot(i64 %ds, i64 %alloc, ptr %trap, ptr addrspace(1) %a) gc "oxcaml" personality ptr @personality {
+entry:
+  call void @llvm.aarch64.oxcaml.trap.publish(ptr %trap, i64 1, ptr blockaddress(@case22_normal_and_exception_use_share_root_slot, %recover))
+  invoke oxcaml_nofpcc void @callee_v(i64 %ds, i64 %alloc, ptr addrspace(1) %a)
+      to label %normal unwind label %recover
+normal:
+  call void @use(ptr addrspace(1) %a)
+  ret void
+recover:
+  %lp = landingpad token cleanup
+  %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  call void @use(ptr addrspace(1) %a)
+  ret void
+}

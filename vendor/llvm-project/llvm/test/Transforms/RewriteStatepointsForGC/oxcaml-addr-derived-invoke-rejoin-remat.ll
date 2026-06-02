@@ -26,7 +26,7 @@ entry:
 
 try:
 ; CHECK: store volatile ptr addrspace(1) %obj, ptr %obj.exnroot, align 8
-; CHECK: %statepoint_token = invoke {{.*}} [ "deopt"(), "gc-live"(ptr addrspace(1) %obj, ptr %obj.exnroot) ]
+; CHECK: %statepoint_token = invoke {{.*}} [ "deopt"(), "gc-live"(ptr %obj.exnroot) ]
   %call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee(i64 %ds, i64 %alloc, ptr addrspace(1) %obj)
       "statepoint-id"="0" [ "deopt"() ]
@@ -34,7 +34,7 @@ try:
 
 normal:
 ; CHECK: normal:
-; CHECK: %obj.relocated = call coldcc ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token %statepoint_token, i32 0, i32 0)
+; CHECK: %obj.normal = load volatile ptr addrspace(1), ptr %obj.exnroot, align 8
   %normal_ds = extractvalue { i64, i64, ptr addrspace(1) } %call, 0
   %normal_alloc = extractvalue { i64, i64, ptr addrspace(1) } %call, 1
   br label %join
@@ -50,7 +50,7 @@ recover:
 
 join:
 ; CHECK: join:
-; CHECK: %obj.exnroot.select = phi ptr addrspace(1) [ %obj.exnroot.load, %recover ], [ %obj.relocated, %normal ], [ %obj, %entry ]
+; CHECK: %obj.exnroot.select = phi ptr addrspace(1) [ %obj.exnroot.load, %recover ], [ %obj.normal, %normal ], [ %obj, %entry ]
 ; CHECK: %field.addr.remat = getelementptr i8, ptr addrspace(1) %obj.exnroot.select, i64 96
 ; CHECK: %field = load ptr addrspace(1), ptr addrspace(1) %field.addr.remat, align 8
 ; CHECK-NOT: gc.relocate.p1(token %statepoint_token, i32 0, i32 1)
@@ -92,7 +92,7 @@ setup:
 
 try:
 ; CHECK: store volatile ptr addrspace(1) %same.base, ptr %same.base.exnroot, align 8
-; CHECK: %statepoint_token = invoke {{.*}} [ "deopt"(), "gc-live"(ptr addrspace(1) %same.base, ptr %same.base.exnroot) ]
+; CHECK: %statepoint_token = invoke {{.*}} [ "deopt"(), "gc-live"(ptr %same.base.exnroot) ]
   %call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee(i64 %ds, i64 %alloc, ptr addrspace(1) %obj)
       "statepoint-id"="0" [ "deopt"() ]
@@ -114,7 +114,7 @@ recover:
 
 join:
 ; CHECK: join:
-; CHECK: %same.base.exnroot.select = phi ptr addrspace(1) [ %same.base.exnroot.load, %recover ], [ %same.base.relocated, %normal ], [ %same.base, %setup ]
+; CHECK: %same.base.exnroot.select = phi ptr addrspace(1) [ %same.base.exnroot.load, %recover ], [ %same.base.normal, %normal ], [ %same.base, %setup ]
 ; CHECK: %field = load ptr addrspace(1), ptr addrspace(1) %same.base.exnroot.select, align 8
 ; CHECK-NOT: unrematerializable
   %join_ds = phi i64 [ %ds, %setup ], [ %normal_ds, %normal ], [ %recovered_ds, %recover ]
@@ -168,7 +168,7 @@ other:
 
 join:
 ; CHECK: join:
-; CHECK: %merged = phi ptr addrspace(1) [ %obj.relocated, %normal ], [ %obj.exnroot.load, %recover ], [ %obj.exnroot.load, %recover ], [ %obj.exnroot.load{{[0-9]*}}, %other ]
+; CHECK: %merged = phi ptr addrspace(1) [ %obj.normal, %normal ], [ %obj.exnroot.load, %recover ], [ %obj.exnroot.load, %recover ], [ %obj.exnroot.load{{[0-9]*}}, %other ]
   %join_ds = phi i64 [ %normal_ds, %normal ], [ %recovered_ds, %recover ], [ %recovered_ds, %recover ], [ %recovered_ds, %other ]
   %join_alloc = phi i64 [ %normal_alloc, %normal ], [ %recovered_alloc, %recover ], [ %recovered_alloc, %recover ], [ %recovered_alloc, %other ]
   %merged = phi ptr addrspace(1) [ %obj, %normal ], [ %obj, %recover ], [ %obj, %recover ], [ %obj, %other ]
@@ -240,7 +240,7 @@ recover.join:
 
 join:
 ; CHECK: join:
-; CHECK: %merged = phi ptr addrspace(1) [ %same.base.relocated, %normal ], [ %recovered.ptr, %recover.join ]
+; CHECK: %merged = phi ptr addrspace(1) [ %same.base.normal, %normal ], [ %recovered.ptr, %recover.join ]
 ; CHECK: %field = load ptr addrspace(1), ptr addrspace(1) %merged, align 8
   %join_ds = phi i64 [ %normal_ds, %normal ], [ %recovered_ds, %recover.join ]
   %join_alloc = phi i64 [ %normal_alloc, %normal ], [ %recovered_alloc, %recover.join ]
@@ -272,7 +272,7 @@ entry:
 
 try:
 ; CHECK: store volatile ptr addrspace(1) %obj, ptr %obj.exnroot, align 8
-; CHECK: %statepoint_token = invoke {{.*}} [ "deopt"(), "gc-live"(ptr addrspace(1) %obj, ptr %obj.exnroot) ]
+; CHECK: %statepoint_token = invoke {{.*}} [ "deopt"(), "gc-live"(ptr %obj.exnroot) ]
   %call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee(i64 %ds, i64 %alloc, ptr addrspace(1) %obj)
       "statepoint-id"="0" [ "deopt"() ]
@@ -294,7 +294,7 @@ recover:
 
 join:
 ; CHECK: join:
-; CHECK: %obj.exnroot.select = phi ptr addrspace(1) [ %obj.exnroot.load, %recover ], [ %obj.relocated, %normal ], [ %obj, %entry ]
+; CHECK: %obj.exnroot.select = phi ptr addrspace(1) [ %obj.exnroot.load, %recover ], [ %obj.normal, %normal ], [ %obj, %entry ]
 ; CHECK: %field.addr.remat = getelementptr i8, ptr addrspace(1) %obj.exnroot.select, i64 8
 ; CHECK: %field = load ptr addrspace(1), ptr addrspace(1) %field.addr.remat, align 8
   %join_ds = phi i64 [ %ds, %entry ], [ %normal_ds, %normal ], [ %recovered_ds, %recover ]
