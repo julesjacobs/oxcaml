@@ -428,7 +428,12 @@ spillIncomingStatepointValue(SDValue Incoming, SDValue Chain,
   MachineMemOperand* MMO = nullptr;
 
   // Emit new store if we didn't do it for this ptr before
-  if (!Loc.getNode()) {
+  bool NeedsStore = !Loc.getNode();
+  if (PreferredFI && Loc.getNode()) {
+    auto *FI = dyn_cast<FrameIndexSDNode>(Loc);
+    NeedsStore = !FI || FI->getIndex() != *PreferredFI;
+  }
+  if (NeedsStore) {
     int Index;
     if (PreferredFI) {
       Index = *PreferredFI;
@@ -465,7 +470,8 @@ spillIncomingStatepointValue(SDValue Incoming, SDValue Chain,
 
     MMO = getMachineMemOperand(MF, *cast<FrameIndexSDNode>(Loc));
 
-    Builder.StatepointLowering.setLocation(Incoming, Loc);
+    if (!Builder.StatepointLowering.getLocation(Incoming).getNode())
+      Builder.StatepointLowering.setLocation(Incoming, Loc);
   }
 
   assert(Loc.getNode());
@@ -602,7 +608,7 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
   // Pointers used on exceptional path of invoke statepoint.
   // We cannot assing them to VRegs.
   SmallSet<SDValue, 8> LPadPointers;
-  DenseMap<SDValue, int> PreferredEHRootFI;
+  DenseMap<SDValue, SmallVector<int, 2>> PreferredEHRootFIs;
   if (!UseRegistersForGCPointersInLandingPad)
     if (const auto *StInvoke =
             dyn_cast_or_null<InvokeInst>(SI.StatepointInstr)) {
@@ -619,11 +625,21 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
     LPadPointers.insert(RootSD);
     int FI = Builder.FuncInfo.getOrCreateOxCamlEHRootFrameIndex(
         Root.RecoveryID, Root.RootID);
-    auto [It, Inserted] = PreferredEHRootFI.try_emplace(RootSD, FI);
-    if (!Inserted && It->second != FI)
-      report_fatal_error(
-          "distinct oxcaml-eh-live roots lowered to the same value");
+    SmallVectorImpl<int> &FIs = PreferredEHRootFIs[RootSD];
+    if (!is_contained(FIs, FI))
+      FIs.push_back(FI);
   }
+
+  auto HasPreferredEHRootFI = [&](SDValue SDV) {
+    return PreferredEHRootFIs.find(SDV) != PreferredEHRootFIs.end();
+  };
+
+  auto FirstPreferredEHRootFI = [&](SDValue SDV) -> std::optional<int> {
+    auto It = PreferredEHRootFIs.find(SDV);
+    if (It == PreferredEHRootFIs.end() || It->second.empty())
+      return std::nullopt;
+    return It->second.front();
+  };
 
   LLVM_DEBUG(dbgs() << "Deciding how to lower GC Pointers:\n");
 
@@ -691,19 +707,19 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
 
   for (const Value *V : SI.DeoptState) {
     SDValue SDV = Builder.getValue(V);
-    if (requireSpillSlot(V) && !PreferredEHRootFI.count(SDV))
+    if (requireSpillSlot(V) && !HasPreferredEHRootFI(SDV))
       reservePreviousStackSlotForValue(V, Builder);
   }
 
   for (const Value *V : SI.Ptrs) {
     SDValue SDV = Builder.getValue(V);
-    if (!LowerAsVReg.count(SDV) && !PreferredEHRootFI.count(SDV))
+    if (!LowerAsVReg.count(SDV) && !HasPreferredEHRootFI(SDV))
       reservePreviousStackSlotForValue(V, Builder);
   }
 
   for (const Value *V : SI.Bases) {
     SDValue SDV = Builder.getValue(V);
-    if (!LowerAsVReg.count(SDV) && !PreferredEHRootFI.count(SDV))
+    if (!LowerAsVReg.count(SDV) && !HasPreferredEHRootFI(SDV))
       reservePreviousStackSlotForValue(V, Builder);
   }
 
@@ -719,10 +735,7 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
   for (const Value *V : SI.DeoptState) {
     SDValue Incoming;
     SDValue ValueSD = Builder.getValue(V);
-    std::optional<int> PreferredFI;
-    auto PreferredIt = PreferredEHRootFI.find(ValueSD);
-    if (PreferredIt != PreferredEHRootFI.end())
-      PreferredFI = PreferredIt->second;
+    std::optional<int> PreferredFI = FirstPreferredEHRootFI(ValueSD);
     // If this is a function argument at a static frame index, generate it as
     // the frame index.
     if (!PreferredFI) {
@@ -741,15 +754,31 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
   }
 
   // Finally, go ahead and lower all the gc arguments.
-  pushStackMapConstant(Ops, Builder, LoweredGCPtrs.size());
+  // A single SSA value can be live in multiple logical EH roots at the same
+  // statepoint, e.g. two handler PHIs that both receive %a on one edge but
+  // receive different values on another edge.  Keep the ordinary GC pointer
+  // table unique, and append extra stack homes for the additional EH roots.
+  SmallVector<std::pair<SDValue, int>, 4> ExtraEHRootFIs;
   for (SDValue SDV : LoweredGCPtrs) {
-    std::optional<int> PreferredFI;
-    auto PreferredIt = PreferredEHRootFI.find(SDV);
-    if (PreferredIt != PreferredEHRootFI.end())
-      PreferredFI = PreferredIt->second;
+    auto PreferredIt = PreferredEHRootFIs.find(SDV);
+    if (PreferredIt == PreferredEHRootFIs.end())
+      continue;
+    ArrayRef<int> FIs = PreferredIt->second;
+    for (int FI : FIs.drop_front())
+      ExtraEHRootFIs.push_back({SDV, FI});
+  }
+
+  const unsigned NumOrdinaryGCPtrs = LoweredGCPtrs.size();
+  pushStackMapConstant(Ops, Builder,
+                       NumOrdinaryGCPtrs + ExtraEHRootFIs.size());
+  for (SDValue SDV : LoweredGCPtrs) {
+    std::optional<int> PreferredFI = FirstPreferredEHRootFI(SDV);
     lowerIncomingStatepointValue(SDV, !LowerAsVReg.count(SDV), Ops, MemRefs,
                                  Builder, PreferredFI);
   }
+  for (auto [SDV, FI] : ExtraEHRootFIs)
+    lowerIncomingStatepointValue(SDV, /*RequireSpillSlot=*/true, Ops, MemRefs,
+                                 Builder, FI);
 
   // Copy to out vector. LoweredGCPtrs will be empty after this point.
   GCPtrs = LoweredGCPtrs.takeVector();
@@ -777,8 +806,11 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
   pushStackMapConstant(Ops, Builder, Allocas.size());
   Ops.append(Allocas.begin(), Allocas.end());
 
-  // Now construct GC base/derived map;
-  pushStackMapConstant(Ops, Builder, SI.Ptrs.size());
+  // Now construct GC base/derived map.  Extra EH root homes are independent
+  // stack-map roots, not relocation results, so add self-pairs for their
+  // appended GC pointer operands.  StackMaps only records GCLocations for
+  // operands referenced by this map.
+  pushStackMapConstant(Ops, Builder, SI.Ptrs.size() + ExtraEHRootFIs.size());
   SDLoc L = Builder.getCurSDLoc();
   for (unsigned i = 0; i < SI.Ptrs.size(); ++i) {
     SDValue Base = Builder.getValue(SI.Bases[i]);
@@ -789,6 +821,11 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
     assert(GCPtrIndexMap.count(Derived) && "derived not found in index map");
     Ops.push_back(
         Builder.DAG.getTargetConstant(GCPtrIndexMap[Derived], L, MVT::i64));
+  }
+  for (unsigned i = 0; i < ExtraEHRootFIs.size(); ++i) {
+    unsigned GCPtrIndex = NumOrdinaryGCPtrs + i;
+    Ops.push_back(Builder.DAG.getTargetConstant(GCPtrIndex, L, MVT::i64));
+    Ops.push_back(Builder.DAG.getTargetConstant(GCPtrIndex, L, MVT::i64));
   }
 }
 

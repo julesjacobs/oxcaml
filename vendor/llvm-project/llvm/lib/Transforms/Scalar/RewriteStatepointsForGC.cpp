@@ -364,6 +364,12 @@ using StatepointLiveSetTy = SetVector<Value *>;
 using RematerializedValueMapTy =
     MapVector<AssertingVH<Instruction>, AssertingVH<Value>>;
 
+struct OxCamlEHLiveRoot {
+  unsigned RecoveryID;
+  unsigned RootID;
+  Value *Root;
+};
+
 struct PartiallyConstructedSafepointRecord {
   /// The set of values known to be live across this safepoint
   StatepointLiveSetTy LiveSet;
@@ -390,6 +396,11 @@ struct PartiallyConstructedSafepointRecord {
   /// Late materialized explicit stack roots that should be listed in the
   /// statepoint's gc-live bundle but should not get gc.relocate calls.
   SmallVector<Value *, 4> ExplicitRootSlots;
+
+  /// Handler-live roots that must be available from a token-independent
+  /// recovery block.  These are real statepoint operands and force a stable
+  /// EH root home during statepoint lowering.
+  SmallVector<OxCamlEHLiveRoot, 4> OxCamlEHLiveRoots;
 
   /// Normal live values that are rooted through an explicit exception root
   /// slot at this statepoint.  These values should not also get ordinary
@@ -437,6 +448,9 @@ struct ExplicitRootValueSlot {
 using ExplicitRootValueSlotMapTy =
     DenseMap<CallBase *, SmallVector<ExplicitRootValueSlot, 4>>;
 using ExplicitExceptionRootCallSetTy = DenseSet<CallBase *>;
+
+using OxCamlEHLiveRootMapTy =
+    DenseMap<CallBase *, SmallVector<OxCamlEHLiveRoot, 4>>;
 
 } // end anonymous namespace
 
@@ -2928,6 +2942,52 @@ static bool isOxCamlExceptionRootLoad(Value *V) {
   return LI && LI->getMetadata("oxcaml.exnroot.load");
 }
 
+static unsigned getNextOxCamlEHRecoveryID(Function &F) {
+  unsigned NextID = 0;
+  for (Instruction &I : instructions(F)) {
+    auto *II = dyn_cast<IntrinsicInst>(&I);
+    if (!II || II->getIntrinsicID() != Intrinsic::oxcaml_gc_eh_recover)
+      continue;
+    auto *RecoveryID = cast<ConstantInt>(II->getArgOperand(0));
+    NextID = std::max(NextID,
+                      unsigned(RecoveryID->getZExtValue()) + 1);
+  }
+  return NextID;
+}
+
+static DenseMap<unsigned, unsigned> getNextOxCamlEHRootIDs(Function &F) {
+  DenseMap<unsigned, unsigned> NextRootIDs;
+  auto NoteRootID = [&](ConstantInt *RecoveryID, ConstantInt *RootID) {
+    if (!RecoveryID || !RootID)
+      return;
+    unsigned Recovery = unsigned(RecoveryID->getZExtValue());
+    unsigned Root = unsigned(RootID->getZExtValue());
+    unsigned &Next = NextRootIDs[Recovery];
+    Next = std::max(Next, Root + 1);
+  };
+
+  for (Instruction &I : instructions(F)) {
+    if (auto *II = dyn_cast<IntrinsicInst>(&I)) {
+      if (II->getIntrinsicID() == Intrinsic::oxcaml_gc_eh_recover)
+        NoteRootID(cast<ConstantInt>(II->getArgOperand(0)),
+                   cast<ConstantInt>(II->getArgOperand(1)));
+    }
+
+    auto *Call = dyn_cast<CallBase>(&I);
+    if (!Call)
+      continue;
+    if (auto Bundle =
+            Call->getOperandBundle(LLVMContext::OB_oxcaml_eh_live)) {
+      ArrayRef<Use> Inputs = Bundle->Inputs;
+      for (unsigned I = 0, E = Inputs.size(); I + 2 < E; I += 3)
+        NoteRootID(dyn_cast<ConstantInt>(Inputs[I]),
+                   dyn_cast<ConstantInt>(Inputs[I + 1]));
+    }
+  }
+
+  return NextRootIDs;
+}
+
 static bool isOxCamlBaseRelationThroughExceptionRoots(
     Value *V, Value *B, SmallVectorImpl<std::pair<Value *, Value *>> &Active) {
   if (V == B)
@@ -3325,6 +3385,8 @@ static bool materializeOxCamlExceptionRootSlots(
     Function &F, DominatorTree &DT, ExplicitRootSlotMapTy &ExplicitRootSlots,
     ExplicitRootValueSlotMapTy &ExplicitRootValueSlots,
     ExplicitExceptionRootCallSetTy &ExplicitExceptionRootCalls,
+    OxCamlEHLiveRootMapTy &EHLiveRoots,
+    const DenseSet<CallBase *> *CallsToRewrite,
     DefiningValueMapTy &DVCache, IsKnownBaseMapTy &KnownBases) {
   if (!isOxCamlFunction(F))
     return false;
@@ -3337,6 +3399,8 @@ static bool materializeOxCamlExceptionRootSlots(
   SmallVector<OxCamlRecoveryBoundaryPhi, 8> BoundaryPhis;
   SmallVector<OxCamlRecoveryBoundaryUse, 8> BoundaryUses;
   SmallVector<OxCamlRecoveryBoundaryEdge, 8> BoundaryEdges;
+  unsigned NextRecoveryID = getNextOxCamlEHRecoveryID(F);
+  DenseMap<unsigned, unsigned> NextRootIDs = getNextOxCamlEHRootIDs(F);
 
   for (BasicBlock &BB : F) {
     IntrinsicInst *Recover = getOxCamlTrapRecover(BB);
@@ -3433,7 +3497,10 @@ static bool materializeOxCamlExceptionRootSlots(
 
     BasicBlock &EntryBlock = F.getEntryBlock();
     IRBuilder<> EntryBuilder(&EntryBlock, EntryBlock.getFirstInsertionPt());
-    IRBuilder<> RecoverBuilder(Recover->getNextNode());
+    Instruction *RecoverInsertBefore = Recover->getNextNode();
+    IRBuilder<> RecoverBuilder(RecoverInsertBefore);
+    unsigned RecoveryID = NextRecoveryID++;
+    (void)NextRootIDs[RecoveryID];
 
     struct OxCamlExceptionRootStore {
       InvokeInst *Invoke;
@@ -3445,10 +3512,14 @@ static bool materializeOxCamlExceptionRootSlots(
       Type *SlotType;
       Align SlotAlign;
       AllocaInst *Slot;
+      Instruction *RecoveredValue;
+      unsigned RecoveryID;
+      unsigned RootID;
       SmallVector<OxCamlExceptionRootStore, 8> Stores;
     };
 
     SmallVector<OxCamlExceptionRootSlot, 8> ExceptionRootSlots;
+    SmallVector<Instruction *, 8> RecoveredEHValuesToPlace;
 
     auto AddExplicitRootSlotForInvoke = [&](InvokeInst *II, Value *StoredValue,
                                             Value *Slot) {
@@ -3463,6 +3534,26 @@ static bool materializeOxCamlExceptionRootSlots(
       if (!llvm::any_of(ValueSlots, SameStoredValue))
         ValueSlots.push_back({WeakTrackingVH(StoredValue),
                               WeakTrackingVH(Slot)});
+      ExplicitExceptionRootCalls.insert(II);
+    };
+
+    auto AddEHLiveRootForInvoke = [&](InvokeInst *II, Value *StoredValue,
+                                      unsigned RecoveryID,
+                                      unsigned RootID) {
+      SmallVectorImpl<OxCamlEHLiveRoot> &Roots = EHLiveRoots[II];
+      auto SameRootID = [&](const OxCamlEHLiveRoot &Root) {
+        return Root.RecoveryID == RecoveryID && Root.RootID == RootID;
+      };
+      if (llvm::any_of(Roots, SameRootID)) {
+        for (const OxCamlEHLiveRoot &Root : Roots) {
+          if (Root.RecoveryID != RecoveryID || Root.RootID != RootID)
+            continue;
+          if (Root.Root != StoredValue)
+            report_fatal_error("conflicting OxCaml EH root value for invoke");
+        }
+      } else {
+        Roots.push_back({RecoveryID, RootID, StoredValue});
+      }
       ExplicitExceptionRootCalls.insert(II);
     };
 
@@ -3504,7 +3595,8 @@ static bool materializeOxCamlExceptionRootSlots(
 
     auto MaterializeRootSlot =
         [&](Value *HandlerValue, BasicBlock &StoreSiteBB,
-            function_ref<Value *(OxCamlRecoveryStoreSite)> EdgeValueForSite) {
+            function_ref<Value *(OxCamlRecoveryStoreSite)> EdgeValueForSite)
+            -> Instruction * {
           if (!HandlerValue->getType()->isSized()) {
             HandlerValue->print(errs());
             errs() << "\n";
@@ -3571,9 +3663,170 @@ static bool materializeOxCamlExceptionRootSlots(
             Stores.push_back({II, EdgeValue});
           }
 
+          bool AllStoresHaveStatepoints =
+              llvm::all_of(Stores, [&](const OxCamlExceptionRootStore &Store) {
+                return isa<GCStatepointInst>(Store.Invoke) ||
+                       (CallsToRewrite &&
+                        CallsToRewrite->contains(Store.Invoke));
+              });
+          bool UseEHLiveRoot =
+              !Stores.empty() &&
+              isGCPointerType(HandlerValue->getType()) &&
+              AllStoresHaveStatepoints;
+
+          if (UseEHLiveRoot) {
+            for (OxCamlExceptionRootSlot &Candidate : ExceptionRootSlots) {
+              if (!Candidate.RecoveredValue)
+                continue;
+              if (Candidate.SlotType != SlotType ||
+                  Candidate.SlotAlign != SlotAlign)
+                continue;
+
+              bool SameLogicalRoot = Candidate.LogicalRoot == HandlerValue;
+              bool Compatible = false;
+              if (SameLogicalRoot) {
+                Compatible = true;
+                for (const OxCamlExceptionRootStore &Store : Stores) {
+                  Value *Existing = LookupStoreValue(Candidate.Stores,
+                                                     Store.Invoke);
+                  if (Existing && Existing != Store.StoredValue) {
+                    Compatible = false;
+                    break;
+                  }
+                }
+              } else {
+                Compatible = StoreProgramsEqual(Candidate.Stores, Stores);
+              }
+              if (!Compatible)
+                continue;
+
+              for (const OxCamlExceptionRootStore &Store : Stores) {
+                AddEHLiveRootForInvoke(Store.Invoke, Store.StoredValue,
+                                       Candidate.RecoveryID,
+                                       Candidate.RootID);
+                if (!LookupStoreValue(Candidate.Stores, Store.Invoke))
+                  Candidate.Stores.push_back(Store);
+              }
+              if (!is_contained(RecoveredEHValuesToPlace,
+                                Candidate.RecoveredValue))
+                RecoveredEHValuesToPlace.push_back(Candidate.RecoveredValue);
+              return Candidate.RecoveredValue;
+            }
+
+            auto ExistingRootValueForKey =
+                [&](InvokeInst *II, std::pair<unsigned, unsigned> Key)
+                    -> std::optional<Value *> {
+              std::optional<Value *> ExistingValue;
+              auto ConsiderValue = [&](Value *Root) {
+                if (!ExistingValue) {
+                  ExistingValue = Root;
+                  return;
+                }
+                if (*ExistingValue != Root)
+                  report_fatal_error(
+                      "conflicting existing OxCaml EH root values");
+              };
+
+              auto RootIt = EHLiveRoots.find(II);
+              if (RootIt != EHLiveRoots.end()) {
+                for (const OxCamlEHLiveRoot &Root : RootIt->second) {
+                  if (Root.RecoveryID == Key.first &&
+                      Root.RootID == Key.second)
+                    ConsiderValue(Root.Root);
+                }
+              }
+              if (auto Bundle =
+                      II->getOperandBundle(LLVMContext::OB_oxcaml_eh_live)) {
+                ArrayRef<Use> Inputs = Bundle->Inputs;
+                for (unsigned I = 0, E = Inputs.size(); I + 2 < E; I += 3) {
+                  auto *RecoveryID = dyn_cast<ConstantInt>(Inputs[I]);
+                  auto *RootID = dyn_cast<ConstantInt>(Inputs[I + 1]);
+                  if (!RecoveryID || !RootID)
+                    continue;
+                  if (unsigned(RecoveryID->getZExtValue()) != Key.first ||
+                      unsigned(RootID->getZExtValue()) != Key.second)
+                    continue;
+                  ConsiderValue(Inputs[I + 2].get());
+                }
+              }
+              return ExistingValue;
+            };
+
+            SmallVector<std::pair<unsigned, unsigned>, 4> CandidateKeys;
+            auto ConsiderCandidateKey = [&](std::pair<unsigned, unsigned> Key) {
+              if (!is_contained(CandidateKeys, Key))
+                CandidateKeys.push_back(Key);
+            };
+            for (const OxCamlExceptionRootStore &Store : Stores) {
+              auto RootIt = EHLiveRoots.find(Store.Invoke);
+              if (RootIt != EHLiveRoots.end()) {
+                for (const OxCamlEHLiveRoot &Root : RootIt->second)
+                  if (Root.Root == Store.StoredValue)
+                    ConsiderCandidateKey({Root.RecoveryID, Root.RootID});
+              }
+              if (auto Bundle = Store.Invoke->getOperandBundle(
+                      LLVMContext::OB_oxcaml_eh_live)) {
+                ArrayRef<Use> Inputs = Bundle->Inputs;
+                for (unsigned I = 0, E = Inputs.size(); I + 2 < E; I += 3) {
+                  auto *RecoveryID = dyn_cast<ConstantInt>(Inputs[I]);
+                  auto *RootID = dyn_cast<ConstantInt>(Inputs[I + 1]);
+                  Value *Root = Inputs[I + 2].get();
+                  if (Root != Store.StoredValue || !RecoveryID || !RootID)
+                    continue;
+                  ConsiderCandidateKey(
+                      {unsigned(RecoveryID->getZExtValue()),
+                       unsigned(RootID->getZExtValue())});
+                }
+              }
+            }
+
+            std::optional<std::pair<unsigned, unsigned>> ExistingKey;
+            for (std::pair<unsigned, unsigned> CandidateKey : CandidateKeys) {
+              bool MatchesAllStores = true;
+              for (const OxCamlExceptionRootStore &Store : Stores) {
+                std::optional<Value *> ExistingValue =
+                    ExistingRootValueForKey(Store.Invoke, CandidateKey);
+                if (!ExistingValue || *ExistingValue != Store.StoredValue) {
+                  MatchesAllStores = false;
+                  break;
+                }
+              }
+              if (MatchesAllStores) {
+                ExistingKey = CandidateKey;
+                break;
+              }
+            }
+
+            unsigned ChosenRecoveryID =
+                ExistingKey ? ExistingKey->first : RecoveryID;
+            unsigned RootID = ExistingKey ? ExistingKey->second
+                                          : NextRootIDs[ChosenRecoveryID]++;
+            for (const OxCamlExceptionRootStore &Store : Stores)
+              AddEHLiveRootForInvoke(Store.Invoke, Store.StoredValue,
+                                     ChosenRecoveryID, RootID);
+
+            Function *RecoverDecl = Intrinsic::getDeclaration(
+                F.getParent(), Intrinsic::oxcaml_gc_eh_recover);
+            CallInst *Recovered = RecoverBuilder.CreateCall(
+                RecoverDecl,
+                {RecoverBuilder.getInt32(ChosenRecoveryID),
+                 RecoverBuilder.getInt32(RootID)},
+                suffixed_name_or(HandlerValue, ".eh.recover",
+                                 "eh.recover"));
+            Recovered->setMetadata("oxcaml.exnroot.load",
+                                   MDNode::get(F.getContext(), {}));
+            RecoveredEHValuesToPlace.push_back(Recovered);
+            ExceptionRootSlots.push_back(OxCamlExceptionRootSlot{
+                HandlerValue, SlotType, SlotAlign, nullptr, Recovered,
+                ChosenRecoveryID, RootID, Stores});
+            return cast<Instruction>(Recovered);
+          }
+
           AllocaInst *Slot = nullptr;
           if (IsGCRoot) {
             for (OxCamlExceptionRootSlot &Candidate : ExceptionRootSlots) {
+              if (!Candidate.Slot)
+                continue;
               if (Candidate.SlotType != SlotType ||
                   Candidate.SlotAlign != SlotAlign)
                 continue;
@@ -3627,7 +3880,8 @@ static bool materializeOxCamlExceptionRootSlots(
 
             if (IsGCRoot)
               ExceptionRootSlots.push_back(OxCamlExceptionRootSlot{
-                  HandlerValue, SlotType, SlotAlign, Slot, Stores});
+                  HandlerValue, SlotType, SlotAlign, Slot, nullptr, 0, 0,
+                  Stores});
           }
 
           LoadInst *Load = RecoverBuilder.CreateAlignedLoad(
@@ -3667,12 +3921,67 @@ static bool materializeOxCamlExceptionRootSlots(
       return Base;
     };
 
+    auto PlaceRecoveredEHValuesBeforeUses = [&]() {
+      SmallVector<Instruction *, 16> RecoveredValues;
+      llvm::append_range(RecoveredValues, RecoveredEHValuesToPlace);
+      for (BasicBlock *RegionBB : RecoveryOnlyRegion) {
+        for (Instruction &I : *RegionBB) {
+          auto *II = dyn_cast<IntrinsicInst>(&I);
+          if (II && II->getIntrinsicID() == Intrinsic::oxcaml_gc_eh_recover &&
+              !is_contained(RecoveredValues, II))
+            RecoveredValues.push_back(II);
+        }
+      }
+
+      auto IsBeforeInBlock = [](Instruction *A, Instruction *B) {
+        assert(A->getParent() == B->getParent());
+        for (Instruction &I : *A->getParent()) {
+          if (&I == A)
+            return true;
+          if (&I == B)
+            return false;
+        }
+        return false;
+      };
+
+      for (Instruction *Recovered : RecoveredValues) {
+        Instruction *InsertBefore = nullptr;
+        SmallPtrSet<Instruction *, 8> SameBlockUsers;
+        for (User *U : Recovered->users())
+          if (auto *UserI = dyn_cast<Instruction>(U))
+            if (UserI != Recovered &&
+                UserI->getParent() == Recovered->getParent() &&
+                !isa<PHINode>(UserI))
+              SameBlockUsers.insert(UserI);
+
+        for (Instruction &I : *Recovered->getParent()) {
+          if (&I == Recovered)
+            break;
+          if (!SameBlockUsers.contains(&I))
+            continue;
+          InsertBefore = &I;
+          break;
+        }
+        if (InsertBefore) {
+          IntrinsicInst *ParentRecover =
+              getOxCamlTrapRecover(*InsertBefore->getParent());
+          Instruction *Floor =
+              ParentRecover ? ParentRecover->getNextNode() : nullptr;
+          if (Floor && InsertBefore != Floor &&
+              IsBeforeInBlock(InsertBefore, Floor))
+            InsertBefore = Floor;
+        }
+        if (InsertBefore && InsertBefore != Recovered)
+          Recovered->moveBefore(InsertBefore);
+      }
+    };
+
     SmallVector<PHINode *, 8> HandlerLivePhisToErase;
     for (PHINode *PN : HandlerLivePhis) {
       Value *RootValue = FindExceptionRootValue(PN);
 
       auto *RootPhi = dyn_cast<PHINode>(RootValue);
-      LoadInst *Load = MaterializeRootSlot(
+      Instruction *Load = MaterializeRootSlot(
           RootValue, *PN->getParent(), [&](OxCamlRecoveryStoreSite StoreSite) {
             BasicBlock *IncomingBlock = StoreSite.PhiIncomingBlock;
             PHINode *IncomingPhi = RootPhi ? RootPhi : PN;
@@ -3693,7 +4002,7 @@ static bool materializeOxCamlExceptionRootSlots(
 
     for (Value *V : HandlerLiveGCValues) {
       Value *RootValue = FindExceptionRootValue(V);
-      LoadInst *Load = MaterializeRootSlot(
+      Instruction *Load = MaterializeRootSlot(
           RootValue, BB, [&](OxCamlRecoveryStoreSite) { return RootValue; });
       for (BasicBlock *RegionBB : RecoveryOnlyRegion) {
         for (Instruction &I : *RegionBB) {
@@ -3746,13 +4055,15 @@ static bool materializeOxCamlExceptionRootSlots(
     }
 
     if (HasStrictRecoveryOnlyRegion) {
+      PlaceRecoveredEHValuesBeforeUses();
+
       GCPtrLivenessData BoundaryLiveness;
       computeLiveInValues(DT, F, BoundaryLiveness);
 
       DenseMap<Value *, DenseMap<BasicBlock *, PHINode *>>
           BoundaryRootSelectors;
       DenseMap<Value *,
-               DenseMap<BasicBlock *, DenseMap<BasicBlock *, LoadInst *>>>
+               DenseMap<BasicBlock *, DenseMap<BasicBlock *, Instruction *>>>
           BoundaryRootLoads;
 
       auto HasRecoveryIncomingBoundaryEdge = [&](BasicBlock *BoundaryBlock) {
@@ -3870,6 +4181,20 @@ static bool materializeOxCamlExceptionRootSlots(
       std::function<PHINode *(Value *, BasicBlock *)>
           GetOrCreateBoundaryRootSelector;
 
+      auto PlaceBoundaryRootValue = [&](Instruction *RootValue,
+                                        BasicBlock *IncomingBlock) {
+        auto *II = dyn_cast<IntrinsicInst>(RootValue);
+        bool IsEHRecover =
+            II && II->getIntrinsicID() == Intrinsic::oxcaml_gc_eh_recover;
+        if (IsEHRecover && RootValue->getParent() != IncomingBlock) {
+          if (!DT.dominates(RootValue, IncomingBlock->getTerminator()))
+            report_fatal_error(
+                "OxCaml EH recover does not dominate recovery edge");
+          return;
+        }
+        RootValue->moveBefore(IncomingBlock->getTerminator());
+      };
+
       auto GetBoundaryRootValueAtStoreSite =
           [&](Value *RootValue, OxCamlRecoveryStoreSite StoreSite) -> Value * {
         BasicBlock *StoreBlock = StoreSite.Invoke->getParent();
@@ -3886,21 +4211,21 @@ static bool materializeOxCamlExceptionRootSlots(
         return GetOrCreateBoundaryRootSelector(RootValue, StoreBlock);
       };
 
-      std::function<LoadInst *(Value *, BasicBlock *, BasicBlock *)>
+      std::function<Instruction *(Value *, BasicBlock *, BasicBlock *)>
           GetOrCreateBoundaryRootLoad =
               [&](Value *RootValue, BasicBlock *BoundaryBlock,
-                  BasicBlock *IncomingBlock) -> LoadInst * {
+                  BasicBlock *IncomingBlock) -> Instruction * {
         auto &LoadsByBoundary = BoundaryRootLoads[RootValue];
         auto &LoadsByIncoming = LoadsByBoundary[BoundaryBlock];
         auto LoadIt = LoadsByIncoming.find(IncomingBlock);
         if (LoadIt != LoadsByIncoming.end())
           return LoadIt->second;
 
-        LoadInst *Load = MaterializeRootSlot(
+        Instruction *Load = MaterializeRootSlot(
             RootValue, BB, [&](OxCamlRecoveryStoreSite StoreSite) {
               return GetBoundaryRootValueAtStoreSite(RootValue, StoreSite);
             });
-        Load->moveBefore(IncomingBlock->getTerminator());
+        PlaceBoundaryRootValue(Load, IncomingBlock);
         LoadsByIncoming[IncomingBlock] = Load;
 
         if (PHINode *Selector =
@@ -3929,7 +4254,7 @@ static bool materializeOxCamlExceptionRootSlots(
             return;
           }
 
-          LoadInst *Load =
+          Instruction *Load =
               GetOrCreateBoundaryRootLoad(RootValue, BoundaryBlock, Pred);
           SetBoundarySelectorIncoming(Selector, Pred, Load);
         });
@@ -4172,7 +4497,8 @@ static bool materializeOxCamlExceptionRootSlots(
         KnownBases.clear();
       }
 
-      DenseMap<PHINode *, DenseMap<BasicBlock *, std::pair<Value *, LoadInst *>>>
+      DenseMap<PHINode *,
+               DenseMap<BasicBlock *, std::pair<Value *, Instruction *>>>
           BoundaryPhiLoads;
       for (OxCamlRecoveryBoundaryPhi &BoundaryPhi : BoundaryPhis) {
         Value *Incoming = BoundaryPhi.IncomingValue;
@@ -4197,11 +4523,11 @@ static bool materializeOxCamlExceptionRootSlots(
           continue;
         }
 
-        LoadInst *Load = MaterializeRootSlot(
+        Instruction *Load = MaterializeRootSlot(
             Incoming, BB, [&](OxCamlRecoveryStoreSite StoreSite) {
               return GetBoundaryRootValueAtStoreSite(Incoming, StoreSite);
             });
-        Load->moveBefore(BoundaryPhi.IncomingBlock->getTerminator());
+        PlaceBoundaryRootValue(Load, BoundaryPhi.IncomingBlock);
         LoadsForPhi[BoundaryPhi.IncomingBlock] = {Incoming, Load};
         BoundaryPhi.Phi->setIncomingValue(BoundaryPhi.IncomingIndex, Load);
         Changed = true;
@@ -4209,6 +4535,8 @@ static bool materializeOxCamlExceptionRootSlots(
         KnownBases.clear();
       }
     }
+
+    PlaceRecoveredEHValuesBeforeUses();
 
     for (PHINode *PN : HandlerLivePhisToErase)
       if (PN->use_empty())
@@ -4258,6 +4586,82 @@ static bool appendExplicitRootSlotsToStatepoints(
 
     if (!FoundGCLive) {
       Bundles.emplace_back("gc-live", Slots);
+      ChangedThisCall = true;
+    }
+
+    if (!ChangedThisCall)
+      continue;
+
+    CallBase *NewCall = CallBase::Create(Call, Bundles, Call);
+    Call->replaceAllUsesWith(NewCall);
+    NewCall->takeName(Call);
+    Call->eraseFromParent();
+    Changed = true;
+  }
+  return Changed;
+}
+
+static bool appendOxCamlEHLiveRootsToStatepoints(
+    const OxCamlEHLiveRootMapTy &EHLiveRoots) {
+  bool Changed = false;
+  for (const auto &Pair : EHLiveRoots) {
+    CallBase *Call = Pair.first;
+    ArrayRef<OxCamlEHLiveRoot> Roots = Pair.second;
+    if (Roots.empty())
+      continue;
+
+    SmallVector<OperandBundleDef, 4> Bundles;
+    Call->getOperandBundlesAsDefs(Bundles);
+
+    bool FoundEHLive = false;
+    bool ChangedThisCall = false;
+    for (OperandBundleDef &Bundle : Bundles) {
+      if (Bundle.getTag() != "oxcaml-eh-live")
+        continue;
+
+      FoundEHLive = true;
+      SmallVector<Value *, 64> Inputs(Bundle.input_begin(),
+                                      Bundle.input_end());
+      DenseMap<std::pair<unsigned, unsigned>, Value *> Seen;
+      for (unsigned I = 0, E = Inputs.size(); I + 2 < E; I += 3) {
+        auto *RecoveryID = dyn_cast<ConstantInt>(Inputs[I]);
+        auto *RootID = dyn_cast<ConstantInt>(Inputs[I + 1]);
+        if (RecoveryID && RootID)
+          Seen[{unsigned(RecoveryID->getZExtValue()),
+                unsigned(RootID->getZExtValue())}] = Inputs[I + 2];
+      }
+
+      IRBuilder<> Builder(Call);
+      for (const OxCamlEHLiveRoot &Root : Roots) {
+        auto Key = std::make_pair(Root.RecoveryID, Root.RootID);
+        Value *RootValue = nonPoisonOxCamlGCPointerValue(Root.Root);
+        auto SeenIt = Seen.find(Key);
+        if (SeenIt != Seen.end()) {
+          if (SeenIt->second != RootValue)
+            report_fatal_error("conflicting OxCaml EH root value for "
+                               "existing statepoint bundle");
+          continue;
+        }
+        Inputs.push_back(Builder.getInt32(Root.RecoveryID));
+        Inputs.push_back(Builder.getInt32(Root.RootID));
+        Inputs.push_back(RootValue);
+        Seen[Key] = RootValue;
+        ChangedThisCall = true;
+      }
+      if (ChangedThisCall)
+        Bundle = OperandBundleDef("oxcaml-eh-live", Inputs);
+      break;
+    }
+
+    if (!FoundEHLive) {
+      SmallVector<Value *, 16> Inputs;
+      IRBuilder<> Builder(Call);
+      for (const OxCamlEHLiveRoot &Root : Roots) {
+        Inputs.push_back(Builder.getInt32(Root.RecoveryID));
+        Inputs.push_back(Builder.getInt32(Root.RootID));
+        Inputs.push_back(nonPoisonOxCamlGCPointerValue(Root.Root));
+      }
+      Bundles.emplace_back("oxcaml-eh-live", Inputs);
       ChangedThisCall = true;
     }
 
@@ -5319,6 +5723,12 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
   }
 
   llvm::append_range(GCArgsStorage, Result.ExplicitRootSlots);
+  SmallVector<Value *, 16> EHLiveArgsStorage;
+  for (const OxCamlEHLiveRoot &Root : Result.OxCamlEHLiveRoots) {
+    EHLiveArgsStorage.push_back(Builder.getInt32(Root.RecoveryID));
+    EHLiveArgsStorage.push_back(Builder.getInt32(Root.RootID));
+    EHLiveArgsStorage.push_back(nonPoisonOxCamlGCPointerValue(Root.Root));
+  }
   uint64_t StatepointID = StatepointDirectives::DefaultStatepointID;
   uint32_t NumPatchBytes = 0;
   uint32_t Flags = uint32_t(StatepointFlags::None);
@@ -5484,6 +5894,22 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
   }
 
   ArrayRef<Value *> GCArgs(GCArgsStorage);
+  auto AttachOxCamlEHLiveBundle =
+      [&](GCStatepointInst *Statepoint) -> GCStatepointInst * {
+    if (EHLiveArgsStorage.empty())
+      return Statepoint;
+
+    SmallVector<OperandBundleDef, 4> Bundles;
+    Statepoint->getOperandBundlesAsDefs(Bundles);
+    Bundles.emplace_back("oxcaml-eh-live", EHLiveArgsStorage);
+
+    CallBase *NewStatepoint = CallBase::Create(Statepoint, Bundles,
+                                               Statepoint);
+    Statepoint->replaceAllUsesWith(NewStatepoint);
+    NewStatepoint->takeName(Statepoint);
+    Statepoint->eraseFromParent();
+    return cast<GCStatepointInst>(NewStatepoint);
+  };
 
   // Create the statepoint given all the arguments
   GCStatepointInst *Token = nullptr;
@@ -5502,7 +5928,7 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
     SPCall->setAttributes(legalizeCallAttributes(
         CI->getContext(), CI->getAttributes(), SPCall->getAttributes()));
 
-    Token = cast<GCStatepointInst>(SPCall);
+    Token = AttachOxCamlEHLiveBundle(cast<GCStatepointInst>(SPCall));
 
     // Put the following gc_result and gc_relocate calls immediately after the
     // the old call (which we're about to delete)
@@ -5529,7 +5955,7 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
     SPInvoke->setAttributes(legalizeCallAttributes(
         II->getContext(), II->getAttributes(), SPInvoke->getAttributes()));
 
-    Token = cast<GCStatepointInst>(SPInvoke);
+    Token = AttachOxCamlEHLiveBundle(cast<GCStatepointInst>(SPInvoke));
 
     // Generate gc relocates in exceptional path
     BasicBlock *UnwindBlock = II->getUnwindDest();
@@ -7456,11 +7882,12 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
                               SmallVectorImpl<CallBase *> &ToUpdate,
                               DefiningValueMapTy &DVCache,
                               IsKnownBaseMapTy &KnownBases) {
+  DenseSet<CallBase *> CallsToRewrite;
+  CallsToRewrite.insert(ToUpdate.begin(), ToUpdate.end());
+
 #ifndef NDEBUG
   // Validate the input
-  std::set<CallBase *> Uniqued;
-  Uniqued.insert(ToUpdate.begin(), ToUpdate.end());
-  assert(Uniqued.size() == ToUpdate.size() && "no duplicates please!");
+  assert(CallsToRewrite.size() == ToUpdate.size() && "no duplicates please!");
 
   for (CallBase *Call : ToUpdate)
     assert(Call->getFunction() == &F);
@@ -7469,14 +7896,16 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
   ExplicitRootSlotMapTy ExplicitRootSlots;
   ExplicitRootValueSlotMapTy ExplicitRootValueSlots;
   ExplicitExceptionRootCallSetTy ExplicitExceptionRootCalls;
+  OxCamlEHLiveRootMapTy EHLiveRoots;
   if (rematerializeOxCamlDerivedGEPsAtUses(F))
     DT.recalculate(F);
   canonicalizeOxCamlAddrSpace1IntToPtrAliases(F, DT);
   heuristicReportOxCamlStatepointCrossingIntToPtrs(F, DT, ToUpdate);
   materializeOxCamlExceptionRootSlots(F, DT, ExplicitRootSlots,
                                       ExplicitRootValueSlots,
-                                      ExplicitExceptionRootCalls, DVCache,
-                                      KnownBases);
+                                      ExplicitExceptionRootCalls, EHLiveRoots,
+                                      &CallsToRewrite,
+                                      DVCache, KnownBases);
   SmallVector<Value *, 16> AllExplicitRootSlots;
   collectExplicitRootSlots(ExplicitRootSlots, AllExplicitRootSlots);
   if (isOxCamlFunction(F)) {
@@ -7534,6 +7963,9 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
         if (Seen.insert(Slot).second)
           Records[I].ExplicitRootSlots.push_back(Slot);
     }
+    auto EHLiveIt = EHLiveRoots.find(ToUpdate[I]);
+    if (EHLiveIt != EHLiveRoots.end())
+      llvm::append_range(Records[I].OxCamlEHLiveRoots, EHLiveIt->second);
     Records[I].UsesExplicitExceptionRoots =
         ExplicitExceptionRootCalls.contains(ToUpdate[I]);
     if (isOxCamlCWrapperCallingConv(ToUpdate[I]->getCallingConv())) {
@@ -7739,13 +8171,16 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
   ExplicitRootSlotMapTy LateExplicitRootSlots;
   ExplicitRootValueSlotMapTy LateExplicitRootValueSlots;
   ExplicitExceptionRootCallSetTy LateExplicitExceptionRootCalls;
+  OxCamlEHLiveRootMapTy LateEHLiveRoots;
   bool ChangedLateRoots = materializeOxCamlExceptionRootSlots(
       F, DT, LateExplicitRootSlots, LateExplicitRootValueSlots,
-      LateExplicitExceptionRootCalls, DVCache, KnownBases);
+      LateExplicitExceptionRootCalls, LateEHLiveRoots,
+      /*CallsToRewrite=*/nullptr, DVCache, KnownBases);
   SmallVector<Value *, 16> LateAllExplicitRootSlots;
   collectExplicitRootSlots(LateExplicitRootSlots, LateAllExplicitRootSlots);
   ChangedLateRoots |=
       materializeRemainingOxCamlRecoveryPhis(F, DT, LateAllExplicitRootSlots);
+  ChangedLateRoots |= appendOxCamlEHLiveRootsToStatepoints(LateEHLiveRoots);
   ChangedLateRoots |=
       appendExplicitRootSlotsToAllStatepoints(F, LateAllExplicitRootSlots);
   return !Records.empty() || ChangedLateRoots;

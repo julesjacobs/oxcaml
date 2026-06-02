@@ -3479,7 +3479,6 @@ void Verifier::visitCallBase(CallBase &Call) {
       if (BU.Inputs.size() % 3 != 0)
         continue;
       SmallSet<uint64_t, 8> SeenEHLiveKeys;
-      SmallPtrSet<const Value *, 8> SeenEHLiveRoots;
       for (unsigned I = 0, E = BU.Inputs.size(); I != E; I += 3) {
         Check(isa<ConstantInt>(BU.Inputs[I]) &&
                   BU.Inputs[I]->getType()->isIntegerTy(32),
@@ -3500,8 +3499,6 @@ void Verifier::visitCallBase(CallBase &Call) {
                        RootID->getZExtValue();
         Check(SeenEHLiveKeys.insert(Key).second,
               "Duplicate oxcaml-eh-live recovery/root id", Call);
-        Check(SeenEHLiveRoots.insert(BU.Inputs[I + 2]).second,
-              "Duplicate oxcaml-eh-live root value", Call);
       }
     }
   }

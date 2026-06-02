@@ -107,3 +107,18 @@ so the volatile stores remain in the hot loop. A principled fix should intern
 explicit exception-root slots by equivalent store-site value/statepoint rather
 than by recovery incoming edge, and should prune unused explicit root slots
 before appending them to `gc-live`.
+
+2026-06-02 EH-root statepoint lowering phase 2: implemented the Stage 1
+statepoint-level EH-root representation for shared pushtrap handlers. RS4GC now
+materializes scalar handler-live GC values as `oxcaml-eh-live` statepoint
+operands plus token-independent `llvm.oxcaml.gc.eh.recover` reloads when all
+store-site invokes are rewritten statepoints; unsupported vector and mixed
+non-statepoint cases keep the older volatile explicit-slot path. SelectionDAG
+lowering now supports multiple logical EH roots that lower to the same SDValue
+by assigning distinct EH root frame indices and adding the extra homes as
+stackmap self-pairs. Added an AArch64 codegen regression for the duplicate
+logical-root stackmap case and updated focused RS4GC tests. Validation:
+`ninja -C ../llvm-build opt llc` was up to date, focused
+`opt -passes=rewrite-statepoints-for-gc,verify` checks passed, focused
+`llvm-lit` passed for the EH-root/RS4GC tests, `git diff --check` passed, and
+`codex-review --mode local --full-access` reported no actionable findings.
