@@ -4156,6 +4156,19 @@ StackOffset AArch64FrameLowering::getFrameIndexReferencePreferSP(
   return getStackOffset(MF, MFI.getObjectOffset(FI));
 }
 
+StackOffset AArch64FrameLowering::getStatepointFrameIndexReference(
+    const MachineFunction &MF, const MachineInstr &MI, int FI,
+    Register &FrameReg) const {
+  StackOffset Offset =
+      getFrameIndexReferencePreferSP(MF, FI, FrameReg,
+                                     /*IgnoreSPUpdates=*/false);
+  if (FrameReg == AArch64::SP) {
+    const AArch64FunctionInfo *AFI = MF.getInfo<AArch64FunctionInfo>();
+    Offset += StackOffset::getFixed(AFI->getOxCamlActiveTrapBytes(MI));
+  }
+  return Offset;
+}
+
 /// The parent frame offset (aka dispFrame) is only used on X86_64 to retrieve
 /// the parent's frame pointer
 unsigned AArch64FrameLowering::getWinEHParentFrameOffset(

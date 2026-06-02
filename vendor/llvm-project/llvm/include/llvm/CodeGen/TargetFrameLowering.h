@@ -21,6 +21,7 @@ namespace llvm {
   class BitVector;
   class CalleeSavedInfo;
   class MachineFunction;
+  class MachineInstr;
   class RegScavenger;
 
 namespace TargetStackID {
@@ -327,6 +328,17 @@ public:
                                  bool IgnoreSPUpdates) const {
     // Always safe to dispatch to getFrameIndexReference.
     return getFrameIndexReference(MF, FI, FrameReg);
+  }
+
+  /// Same as \c getFrameIndexReferencePreferSP, but for STATEPOINT operands.
+  /// Targets can override this when stackmap locations need target-specific
+  /// adjustments that ordinary frame-index references do not need.
+  virtual StackOffset
+  getStatepointFrameIndexReference(const MachineFunction &MF,
+                                   const MachineInstr &MI, int FI,
+                                   Register &FrameReg) const {
+    return getFrameIndexReferencePreferSP(MF, FI, FrameReg,
+                                          /*IgnoreSPUpdates=*/false);
   }
 
   /// getNonLocalFrameIndexReference - This method returns the offset used to

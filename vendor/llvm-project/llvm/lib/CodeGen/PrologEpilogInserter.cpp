@@ -1447,8 +1447,8 @@ bool PEI::replaceFrameIndexDebugInstr(MachineFunction &MF, MachineInstr &MI,
            "DBG_VALUE machine instruction");
     Register Reg;
     MachineOperand &Offset = MI.getOperand(OpIdx + 1);
-    StackOffset refOffset = TFI->getFrameIndexReferencePreferSP(
-        MF, MI.getOperand(OpIdx).getIndex(), Reg, /*IgnoreSPUpdates*/ false);
+    StackOffset refOffset = TFI->getStatepointFrameIndexReference(
+        MF, MI, MI.getOperand(OpIdx).getIndex(), Reg);
     assert(!refOffset.getScalable() &&
            "Frame offsets with a scalable component are not supported");
     Offset.setImm(Offset.getImm() + refOffset.getFixed() + SPAdj);

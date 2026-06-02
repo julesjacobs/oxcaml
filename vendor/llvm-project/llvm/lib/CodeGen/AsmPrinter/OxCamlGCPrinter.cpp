@@ -470,6 +470,17 @@ static int64_t stackOffset(uint64_t FrameSize, unsigned PtrSize,
   return Offset;
 }
 
+static bool isStackPointerDwarfReg(const Module &M, unsigned DwarfRegNum) {
+  Triple TheTriple(M.getTargetTriple());
+  switch (TheTriple.getArch()) {
+  case Triple::aarch64:
+  case Triple::aarch64_32:
+    return DwarfRegNum == 31;
+  default:
+    return false;
+  }
+}
+
 static void checkShortStackOffset(int64_t Offset) {
   if (Offset < -(1 << 15) || Offset >= (1 << 15)) {
     report_fatal_error("[OxCamlGCPrinter] stack offset too large: "
@@ -704,8 +715,13 @@ bool OxCamlGCMetadataPrinter::emitStackMaps(Module &M, StackMaps &SM, AsmPrinter
         LiveOffsets.push_back((OxCamlIndex << 1) + 1);
       } else if (Loc.Type == StackMaps::Location::Direct ||
                  Loc.Type == StackMaps::Location::Indirect) {
+        uint64_t RootActiveTrapBytes =
+            CSI.HasGCLocations && isStackPointerDwarfReg(M, Loc.Reg)
+                ? 0
+                : ActiveTrapBytes;
         LiveOffsets.push_back(
-            stackOffset(FrameSize, PtrSize, Loc.Offset) + ActiveTrapBytes);
+            stackOffset(FrameSize, PtrSize, Loc.Offset) +
+            RootActiveTrapBytes);
       } else {
         // TODO: Do we need anything else here?
       }

@@ -95,6 +95,10 @@ public:
   getFrameIndexReferencePreferSP(const MachineFunction &MF, int FI,
                                  Register &FrameReg,
                                  bool IgnoreSPUpdates) const override;
+  StackOffset
+  getStatepointFrameIndexReference(const MachineFunction &MF,
+                                   const MachineInstr &MI, int FI,
+                                   Register &FrameReg) const override;
   StackOffset getNonLocalFrameIndexReference(const MachineFunction &MF,
                                              int FI) const override;
   int getSEHFrameIndexOffset(const MachineFunction &MF, int FI) const;

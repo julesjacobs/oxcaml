@@ -142,3 +142,25 @@ and AArch64 EH-root stackmap tests, `opt
 Codex session permission errors, so the follow-up review for this small patch
 was done manually; earlier review rounds on the same chunk had reported no
 actionable findings before the final compatibility cleanup.
+
+2026-06-02 active-trap statepoint root offset chunk: found and fixed a
+separate frametable bug while investigating the remaining product-array
+crashes. AArch64 PEI was rewriting STATEPOINT frame-index operands as offsets
+from the stack pointer before active native traps, while ordinary stack loads
+and stores under the same trap had already been adjusted to the post-trap SP.
+Added a target hook for STATEPOINT frame-index references and used it on
+AArch64 to add the active-trap byte count when the statepoint location is
+SP-relative. The OxCaml frametable printer then had to avoid adding the same
+active-trap bytes a second time for already-SP-relative statepoint
+`GCLocations`, while preserving the existing adjustment for non-SP statepoint
+locations and CSR root maps. Added
+`oxcaml-eh-root-active-trap-statepoint.ll`, which checks both the PEI
+STATEPOINT operands and the final OxCaml frametable root offsets.
+Validation: the test failed red with final offsets `40,32` instead of `24,16`,
+then passed after the printer fix; `ninja -C ../llvm-build llc`,
+`ninja -C ../llvm-build clang`, focused `llvm-lit`, and `git diff --check`
+passed; a final `codex-review --mode local` reported no actionable findings.
+The broader `make llvm-test-one DIR=testsuite/tests/typing-layouts-arrays
+LLVM_PATH=$PWD/../clang-wrapper` run still has the same 7 ignorable
+product-array native SIGBUS/SIGSEGV failures, so this fixes a real active-trap
+frametable offset bug but is not the root cause of those remaining crashes.
