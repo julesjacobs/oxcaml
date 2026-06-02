@@ -164,3 +164,27 @@ The broader `make llvm-test-one DIR=testsuite/tests/typing-layouts-arrays
 LLVM_PATH=$PWD/../clang-wrapper` run still has the same 7 ignorable
 product-array native SIGBUS/SIGSEGV failures, so this fixes a real active-trap
 frametable offset bug but is not the root cause of those remaining crashes.
+
+2026-06-02 EH-live root liveness chunk: found the root cause for the remaining
+focused product-array crash shape. `oxcaml-eh-live` operands were being appended
+after RS4GC liveness, so a value used only by a later exception handler was not
+visible to earlier safepoints. In the reduced
+`test_ignorable_product_array_2.ml` IR, two preceding safepoints had only two
+frame-table roots before this fix; after the fix they carry the additional
+handler-live root. The patch inserts temporary `__tmp_use` holders immediately
+before each invoke for early EH-live roots. This makes the roots live for
+preceding safepoints, but the reverse-iterator liveness boundary excludes the
+holder at the recording invoke, so the root is not forced into ordinary
+`gc-live` on the invoke's normal return path. Added
+`oxcaml-eh-live-root-keeps-normal-liveness.ll` and updated obsolete volatile
+exception-root expectations. Validation passed:
+focused EH/RS4GC `llvm-lit` tests, all `RewriteStatepointsForGC/oxcaml-*.ll`
+tests (28 passed, 1 XFAIL), `git diff --check`, and
+`make llvm-test-one DIR=testsuite/tests/typing-layouts-arrays
+LLVM_PATH=$PWD/../clang-wrapper` (134 passed). The direct `codex-review` helper
+could not start because nested Codex could not write its local state database,
+so the review loop used read-only reviewer agents with the actual diff and
+liveness snippets; they reported no actionable findings. One invariant to keep
+in mind for future work: late EH roots are safe only because they are expected
+to be compatible remaps of roots already handled by the early liveness pass, not
+brand-new liveness sources.

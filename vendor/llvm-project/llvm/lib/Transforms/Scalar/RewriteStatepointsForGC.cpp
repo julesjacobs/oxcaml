@@ -6621,6 +6621,20 @@ static void insertUseHolderAfter(CallBase *Call, const ArrayRef<Value *> Values,
         Func, Values, "", &*II->getUnwindDest()->getFirstInsertionPt()));
 }
 
+/// Insert a holder immediately before the call. This makes each value live up
+/// to the call without making it live through the call's normal or exceptional
+/// return paths.
+static void insertUseHolderBefore(CallBase *Call, ArrayRef<Value *> Values,
+                                  SmallVectorImpl<CallInst *> &Holders) {
+  if (Values.empty())
+    return;
+
+  Module *M = Call->getModule();
+  FunctionCallee Func = M->getOrInsertFunction(
+      "__tmp_use", FunctionType::get(Type::getVoidTy(M->getContext()), true));
+  Holders.push_back(CallInst::Create(Func, Values, "", Call));
+}
+
 static void findLiveReferences(
     Function &F, DominatorTree &DT, ArrayRef<CallBase *> toUpdate,
     MutableArrayRef<struct PartiallyConstructedSafepointRecord> records) {
@@ -8130,6 +8144,31 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
 
     insertUseHolderAfter(Call, DeoptValues, Holders,
                          !ExplicitExceptionRootCalls.contains(Call));
+  }
+
+  // EH-live roots are not appended to the statepoint IR until after liveness
+  // has been computed, but their values are nevertheless live up to the
+  // statepoint that records them. Hold them immediately before the statepoint
+  // so preceding safepoints see the values as live without also forcing
+  // ordinary gc-live relocation at the recording statepoint itself.
+  for (CallBase *Call : ToUpdate) {
+    auto EHLiveIt = EHLiveRoots.find(Call);
+    if (EHLiveIt == EHLiveRoots.end())
+      continue;
+
+    SmallVector<Value *, 64> EHLiveValues;
+    SmallPtrSet<Value *, 16> Seen;
+    for (const OxCamlEHLiveRoot &Root : EHLiveIt->second) {
+      Value *RootValue = nonPoisonOxCamlGCPointerValue(Root.Root);
+      if (!isHandledGCPointerType(RootValue->getType()))
+        continue;
+      if (isa<Constant>(RootValue))
+        continue;
+      if (Seen.insert(RootValue).second)
+        EHLiveValues.push_back(RootValue);
+    }
+
+    insertUseHolderBefore(Call, EHLiveValues, Holders);
   }
 
   SmallVector<PartiallyConstructedSafepointRecord, 64> Records(ToUpdate.size());

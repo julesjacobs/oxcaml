@@ -45,7 +45,7 @@ other:
 
 join:
 ; CHECK: join:
-; CHECK: %[[SELECT:.*]] = phi ptr addrspace(1) [ %obj.exnroot.load, %other ], [ %obj.exnroot.load{{[0-9]*}}, %recover ], [ %obj.exnroot.load{{[0-9]*}}, %recover ], [ %obj.normal, %normal ]
+; CHECK: %[[SELECT:.*]] = phi ptr addrspace(1) [ %obj.eh.recover, %other ], [ %obj.eh.recover, %recover ], [ %obj.eh.recover, %recover ], [ %obj.relocated, %normal ]
 ; CHECK: %field = load ptr addrspace(1), ptr addrspace(1) %[[SELECT]], align 8
   %join_ds = phi i64 [ %normal_ds, %normal ], [ %recovered_ds, %recover ], [ %recovered_ds, %recover ], [ %recovered_ds, %other ]
   %join_alloc = phi i64 [ %normal_alloc, %normal ], [ %recovered_alloc, %recover ], [ %recovered_alloc, %recover ], [ %recovered_alloc, %other ]

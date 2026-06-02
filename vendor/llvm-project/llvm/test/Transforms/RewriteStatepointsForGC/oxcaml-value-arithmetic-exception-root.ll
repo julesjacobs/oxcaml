@@ -16,7 +16,6 @@ define oxcaml_nofpcc { i64, i64, ptr addrspace(1) } @exception_root_value_arithm
     ptr addrspace(1) %b)
     gc "oxcaml" personality ptr @__gxx_personality_v0 {
 ; CHECK-LABEL: define oxcaml_nofpcc {{.*}} @exception_root_value_arithmetic_phi(
-; CHECK: %handler_value.exnroot = alloca ptr addrspace(1), align 8
 entry:
   call void @llvm.aarch64.oxcaml.trap.publish(
       ptr %trap_block,
@@ -30,9 +29,8 @@ entry:
 
 left:
 ; CHECK: left:
-; CHECK-NEXT: store volatile ptr addrspace(1) %adjusted, ptr %handler_value.exnroot, align 8
 ; CHECK: %statepoint_token = invoke {{.*}} @llvm.experimental.gc.statepoint
-; CHECK-SAME: ptr %handler_value.exnroot
+; CHECK-SAME: "oxcaml-eh-live"(i32 0, i32 0, ptr addrspace(1) %adjusted, i32 1, i32 0, ptr addrspace(1) %a)
   %left_call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee(i64 %ds, i64 %alloc, ptr addrspace(1) %a)
       to label %normal_left unwind label %recover
@@ -42,9 +40,8 @@ normal_left:
 
 right:
 ; CHECK: right:
-; CHECK-NEXT: store volatile ptr addrspace(1) %b, ptr %handler_value.exnroot, align 8
 ; CHECK: %statepoint_token{{[0-9]*}} = invoke {{.*}} @llvm.experimental.gc.statepoint
-; CHECK-SAME: ptr %handler_value.exnroot
+; CHECK-SAME: "oxcaml-eh-live"(i32 0, i32 0, ptr addrspace(1) %b, i32 1, i32 0, ptr addrspace(1) %b)
   %right_call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee(i64 %ds, i64 %alloc, ptr addrspace(1) %b)
       to label %normal_right unwind label %recover
@@ -57,7 +54,9 @@ recover:
 ; CHECK-NEXT: %lp = landingpad token
 ; CHECK-NEXT: cleanup
 ; CHECK-NEXT: %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
-; CHECK: %handler_value.exnroot.load = load volatile ptr addrspace(1), ptr %handler_value.exnroot, align 8
+; CHECK: %handler_value.base.eh.recover = call ptr addrspace(1) @llvm.oxcaml.gc.eh.recover(i32 1, i32 0)
+; CHECK: %handler_value.eh.recover = call ptr addrspace(1) @llvm.oxcaml.gc.eh.recover(i32 0, i32 0)
+; CHECK: insertvalue { i64, i64, ptr addrspace(1) } %{{.*}}, ptr addrspace(1) %handler_value.eh.recover, 2
   %handler_value = phi ptr addrspace(1) [ %adjusted, %left ], [ %b, %right ]
   %lp = landingpad token cleanup
   %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
