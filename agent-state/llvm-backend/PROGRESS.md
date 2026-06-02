@@ -188,3 +188,9 @@ liveness snippets; they reported no actionable findings. One invariant to keep
 in mind for future work: late EH roots are safe only because they are expected
 to be compatible remaps of roots already handled by the early liveness pass, not
 brand-new liveness sources.
+
+2026-06-02 full standard LLVM-backend testsuite after EH-live root liveness
+chunk: `make llvm-test-no-rebuild LLVM_PATH=$PWD/../clang-wrapper` passed with
+6774 tests passed, 297 skipped, 0 failed, 0 unexpected errors, 7071 considered.
+This uses the standard installed compiler with `-llvm-backend`; self-stage2 and
+benchmark validation are still pending for the active goal.
