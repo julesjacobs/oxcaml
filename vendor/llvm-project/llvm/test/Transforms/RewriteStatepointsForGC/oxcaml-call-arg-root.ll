@@ -4,6 +4,9 @@ target triple = "arm64-apple-macosx"
 
 declare oxcaml_nofpcc { { i64, i64 }, { i64 } } @callee(i64, i64, ptr addrspace(1))
 
+@"\01_caml_apply3" = external global ptr
+@"\01_caml_send3" = external global ptr
+
 declare oxcaml_ccc { { i64, i64 }, { ptr addrspace(1) } } @c_call(
     i64, i64, i64, ptr addrspace(1))
 
@@ -42,6 +45,44 @@ entry:
       i64 %ds, i64 %alloc, ptr addrspace(1) %derived)
       "statepoint-id"="0" [ "deopt"() ]
   ret { { i64, i64 }, { i64 } } %res
+}
+
+define oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @apply_helper_call_arg_root(
+    i64 %ds,
+    i64 %alloc,
+    ptr addrspace(1) %fn,
+    ptr addrspace(1) %arg0,
+    ptr addrspace(1) %arg1) gc "oxcaml" {
+; CHECK-LABEL: define oxcaml_nofpcc {{.*}} @apply_helper_call_arg_root(
+; CHECK: %statepoint_token = call oxcaml_nofpcc {{.*}} @"\01_caml_apply3"
+; CHECK-SAME: [ "deopt"(), "gc-live"(ptr addrspace(1) %fn, ptr addrspace(1) %arg0, ptr addrspace(1) %arg1) ]
+; CHECK-NOT: @llvm.experimental.gc.relocate
+; CHECK: ret
+entry:
+  %res = call oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_caml_apply3"(
+      i64 %ds, i64 %alloc, i64 1, ptr addrspace(1) %fn,
+      ptr addrspace(1) %arg0, ptr addrspace(1) %arg1)
+      "statepoint-id"="0" [ "deopt"() ]
+  ret { { i64, i64 }, { ptr addrspace(1) } } %res
+}
+
+define oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @send_helper_call_arg_root(
+    i64 %ds,
+    i64 %alloc,
+    ptr addrspace(1) %fn,
+    ptr addrspace(1) %arg0,
+    ptr addrspace(1) %arg1) gc "oxcaml" {
+; CHECK-LABEL: define oxcaml_nofpcc {{.*}} @send_helper_call_arg_root(
+; CHECK: %statepoint_token = call oxcaml_nofpcc {{.*}} @"\01_caml_send3"
+; CHECK-SAME: [ "deopt"(), "gc-live"(ptr addrspace(1) %fn, ptr addrspace(1) %arg0, ptr addrspace(1) %arg1) ]
+; CHECK-NOT: @llvm.experimental.gc.relocate
+; CHECK: ret
+entry:
+  %res = call oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_caml_send3"(
+      i64 %ds, i64 %alloc, i64 1, ptr addrspace(1) %fn,
+      ptr addrspace(1) %arg0, ptr addrspace(1) %arg1)
+      "statepoint-id"="0" [ "deopt"() ]
+  ret { { i64, i64 }, { ptr addrspace(1) } } %res
 }
 
 define oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @c_wrapper_call_arg_root(

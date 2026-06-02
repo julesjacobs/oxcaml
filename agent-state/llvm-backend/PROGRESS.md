@@ -122,3 +122,23 @@ logical-root stackmap case and updated focused RS4GC tests. Validation:
 `opt -passes=rewrite-statepoints-for-gc,verify` checks passed, focused
 `llvm-lit` passed for the EH-root/RS4GC tests, `git diff --check` passed, and
 `codex-review --mode local --full-access` reported no actionable findings.
+
+2026-06-02 follow-up focused RS4GC correctness chunk: fixed two issues found
+while reducing the next self-stage crash shape. First, apply/send helper calls
+now keep their GC pointer arguments as call-duration roots, like C-wrapper
+calls, because `caml_apply*`/`caml_send*` can allocate before the helper has
+saved ordinary managed arguments in a managed frame. A saved optimized
+`ctype` replay now shows the `caml_apply3` statepoint carrying the closure and
+argument values in `gc-live`. Second, late EH-root materialization now treats a
+raw root and the retry-boundary selector for that root as the same logical
+`oxcaml-eh-live` value, prefers the dominating selector when needed, and reuses
+the existing recovery/root id instead of creating a duplicate root. Focused
+validation passed:
+`ninja -C ../llvm-build opt FileCheck`,
+focused `llvm-lit` for the call-arg, EH-root, derived-invoke, explicit-root,
+and AArch64 EH-root stackmap tests, `opt
+-passes=rewrite-statepoints-for-gc,verify /tmp/ctype-opt-o3.ll`, and
+`git diff --check`. A final `codex-review` attempt was interrupted by local
+Codex session permission errors, so the follow-up review for this small patch
+was done manually; earlier review rounds on the same chunk had reported no
+actionable findings before the final compatibility cleanup.

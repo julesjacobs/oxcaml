@@ -201,6 +201,24 @@ static bool isOxCamlCWrapperCallingConv(CallingConv::ID CC) {
          CC == CallingConv::OxCaml_C_Call_StackArgs;
 }
 
+static bool isOxCamlApplyOrSendHelperName(StringRef Name) {
+  if (!Name.empty() && Name.front() == '\1')
+    Name = Name.drop_front();
+  if (!Name.empty() && Name.front() == '_')
+    Name = Name.drop_front();
+
+  return Name.starts_with("caml_apply") || Name.starts_with("caml_send");
+}
+
+static bool isOxCamlApplyOrSendHelperCall(const CallBase *Call) {
+  Value *Callee = Call->getCalledOperand()->stripPointerCasts();
+  auto *GV = dyn_cast<GlobalValue>(Callee);
+  if (!GV)
+    return false;
+
+  return isOxCamlApplyOrSendHelperName(GV->getName());
+}
+
 static cl::opt<bool> RematDerivedAtUses("rs4gc-remat-derived-at-uses",
                                         cl::Hidden, cl::init(true));
 
@@ -367,7 +385,7 @@ using RematerializedValueMapTy =
 struct OxCamlEHLiveRoot {
   unsigned RecoveryID;
   unsigned RootID;
-  Value *Root;
+  WeakTrackingVH Root;
 };
 
 struct PartiallyConstructedSafepointRecord {
@@ -1212,7 +1230,11 @@ static void analyzeParsePointLiveness(
         continue;
 
       OxCamlCallArgs.push_back(Arg);
-      if (isOxCamlCWrapperCallingConv(Call->getCallingConv()))
+      // Apply/send helpers may allocate before saving their Val arguments in
+      // an ordinary managed frame, so those call arguments must be visible to
+      // the collector for the duration of the helper call.
+      if (isOxCamlCWrapperCallingConv(Call->getCallingConv()) ||
+          isOxCamlApplyOrSendHelperCall(Call))
         Result.CallArgRoots.insert(Arg);
     }
   }
@@ -2988,6 +3010,82 @@ static DenseMap<unsigned, unsigned> getNextOxCamlEHRootIDs(Function &F) {
   return NextRootIDs;
 }
 
+static bool isOxCamlEHRecoverForKey(Value *V,
+                                    std::pair<unsigned, unsigned> Key) {
+  auto *II = dyn_cast<IntrinsicInst>(V);
+  if (!II || II->getIntrinsicID() != Intrinsic::oxcaml_gc_eh_recover)
+    return false;
+
+  auto *RecoveryID = dyn_cast<ConstantInt>(II->getArgOperand(0));
+  auto *RootID = dyn_cast<ConstantInt>(II->getArgOperand(1));
+  return RecoveryID && RootID &&
+         unsigned(RecoveryID->getZExtValue()) == Key.first &&
+         unsigned(RootID->getZExtValue()) == Key.second;
+}
+
+static bool isOxCamlEHRootSelectorForKey(
+    Value *SelectorValue, Value *RootValue, std::pair<unsigned, unsigned> Key) {
+  auto *Selector = dyn_cast<PHINode>(SelectorValue);
+  if (!Selector)
+    return false;
+
+  bool SawRoot = false;
+  bool SawRecover = false;
+  for (Value *Incoming : Selector->incoming_values()) {
+    Incoming = nonPoisonOxCamlGCPointerValue(Incoming);
+    if (Incoming == RootValue) {
+      SawRoot = true;
+      continue;
+    }
+    if (isOxCamlEHRecoverForKey(Incoming, Key)) {
+      SawRecover = true;
+      continue;
+    }
+    return false;
+  }
+  return SawRoot && SawRecover;
+}
+
+static bool isOxCamlEHLiveRootValueCompatible(
+    Value *ExistingValue, Value *RootValue,
+    std::pair<unsigned, unsigned> Key) {
+  ExistingValue = nonPoisonOxCamlGCPointerValue(ExistingValue);
+  RootValue = nonPoisonOxCamlGCPointerValue(RootValue);
+  return ExistingValue == RootValue ||
+         isOxCamlEHRootSelectorForKey(ExistingValue, RootValue, Key) ||
+         isOxCamlEHRootSelectorForKey(RootValue, ExistingValue, Key);
+}
+
+static bool shouldPreferOxCamlEHLiveRootValue(
+    Value *CandidateValue, Value *ExistingValue,
+    std::pair<unsigned, unsigned> Key) {
+  CandidateValue = nonPoisonOxCamlGCPointerValue(CandidateValue);
+  ExistingValue = nonPoisonOxCamlGCPointerValue(ExistingValue);
+  return isOxCamlEHRootSelectorForKey(CandidateValue, ExistingValue, Key);
+}
+
+static bool doesOxCamlEHLiveRootDominateCall(Value *Root, CallBase *Call,
+                                             DominatorTree &DT) {
+  Root = nonPoisonOxCamlGCPointerValue(Root);
+  auto *RootI = dyn_cast<Instruction>(Root);
+  return !RootI || DT.dominates(RootI, Call);
+}
+
+static bool isOxCamlEHLiveOperandBundleUse(const Use &U) {
+  auto *Call = dyn_cast<CallBase>(U.getUser());
+  if (!Call)
+    return false;
+
+  auto Bundle = Call->getOperandBundle(LLVMContext::OB_oxcaml_eh_live);
+  if (!Bundle)
+    return false;
+
+  for (const Use &Input : Bundle->Inputs)
+    if (&Input == &U)
+      return true;
+  return false;
+}
+
 static bool isOxCamlBaseRelationThroughExceptionRoots(
     Value *V, Value *B, SmallVectorImpl<std::pair<Value *, Value *>> &Active) {
   if (V == B)
@@ -3540,16 +3638,24 @@ static bool materializeOxCamlExceptionRootSlots(
     auto AddEHLiveRootForInvoke = [&](InvokeInst *II, Value *StoredValue,
                                       unsigned RecoveryID,
                                       unsigned RootID) {
+      if (auto *StoredI = dyn_cast<Instruction>(StoredValue)) {
+        if (!DT.dominates(StoredI, II))
+          report_fatal_error("non-dominating OxCaml EH root value");
+      }
       SmallVectorImpl<OxCamlEHLiveRoot> &Roots = EHLiveRoots[II];
       auto SameRootID = [&](const OxCamlEHLiveRoot &Root) {
         return Root.RecoveryID == RecoveryID && Root.RootID == RootID;
       };
       if (llvm::any_of(Roots, SameRootID)) {
-        for (const OxCamlEHLiveRoot &Root : Roots) {
+        for (OxCamlEHLiveRoot &Root : Roots) {
           if (Root.RecoveryID != RecoveryID || Root.RootID != RootID)
             continue;
-          if (Root.Root != StoredValue)
+          if (!isOxCamlEHLiveRootValueCompatible(
+                  Root.Root, StoredValue, {RecoveryID, RootID}))
             report_fatal_error("conflicting OxCaml EH root value for invoke");
+          if (shouldPreferOxCamlEHLiveRootValue(StoredValue, Root.Root,
+                                                {RecoveryID, RootID}))
+            Root.Root = StoredValue;
         }
       } else {
         Roots.push_back({RecoveryID, RootID, StoredValue});
@@ -3675,56 +3781,27 @@ static bool materializeOxCamlExceptionRootSlots(
               AllStoresHaveStatepoints;
 
           if (UseEHLiveRoot) {
-            for (OxCamlExceptionRootSlot &Candidate : ExceptionRootSlots) {
-              if (!Candidate.RecoveredValue)
-                continue;
-              if (Candidate.SlotType != SlotType ||
-                  Candidate.SlotAlign != SlotAlign)
-                continue;
-
-              bool SameLogicalRoot = Candidate.LogicalRoot == HandlerValue;
-              bool Compatible = false;
-              if (SameLogicalRoot) {
-                Compatible = true;
-                for (const OxCamlExceptionRootStore &Store : Stores) {
-                  Value *Existing = LookupStoreValue(Candidate.Stores,
-                                                     Store.Invoke);
-                  if (Existing && Existing != Store.StoredValue) {
-                    Compatible = false;
-                    break;
-                  }
-                }
-              } else {
-                Compatible = StoreProgramsEqual(Candidate.Stores, Stores);
-              }
-              if (!Compatible)
-                continue;
-
-              for (const OxCamlExceptionRootStore &Store : Stores) {
-                AddEHLiveRootForInvoke(Store.Invoke, Store.StoredValue,
-                                       Candidate.RecoveryID,
-                                       Candidate.RootID);
-                if (!LookupStoreValue(Candidate.Stores, Store.Invoke))
-                  Candidate.Stores.push_back(Store);
-              }
-              if (!is_contained(RecoveredEHValuesToPlace,
-                                Candidate.RecoveredValue))
-                RecoveredEHValuesToPlace.push_back(Candidate.RecoveredValue);
-              return Candidate.RecoveredValue;
-            }
-
             auto ExistingRootValueForKey =
                 [&](InvokeInst *II, std::pair<unsigned, unsigned> Key)
                     -> std::optional<Value *> {
               std::optional<Value *> ExistingValue;
               auto ConsiderValue = [&](Value *Root) {
+                Root = nonPoisonOxCamlGCPointerValue(Root);
+                if (!doesOxCamlEHLiveRootDominateCall(Root, II, DT))
+                  return;
                 if (!ExistingValue) {
                   ExistingValue = Root;
                   return;
                 }
-                if (*ExistingValue != Root)
-                  report_fatal_error(
-                      "conflicting existing OxCaml EH root values");
+                if (isOxCamlEHRootSelectorForKey(Root, *ExistingValue, Key)) {
+                  ExistingValue = Root;
+                  return;
+                }
+                if (isOxCamlEHLiveRootValueCompatible(*ExistingValue, Root,
+                                                      Key))
+                  return;
+                report_fatal_error(
+                    "conflicting existing OxCaml EH root values");
               };
 
               auto RootIt = EHLiveRoots.find(II);
@@ -3752,6 +3829,61 @@ static bool materializeOxCamlExceptionRootSlots(
               return ExistingValue;
             };
 
+            auto ExistingRootKeyConflictsWithStores =
+                [&](std::pair<unsigned, unsigned> Key,
+                    ArrayRef<OxCamlExceptionRootStore> CandidateStores) {
+              for (const OxCamlExceptionRootStore &Store : CandidateStores) {
+                std::optional<Value *> ExistingValue =
+                    ExistingRootValueForKey(Store.Invoke, Key);
+                if (ExistingValue &&
+                    !isOxCamlEHLiveRootValueCompatible(
+                        *ExistingValue, Store.StoredValue, Key))
+                  return true;
+              }
+              return false;
+            };
+
+            for (OxCamlExceptionRootSlot &Candidate : ExceptionRootSlots) {
+              if (!Candidate.RecoveredValue)
+                continue;
+              if (Candidate.SlotType != SlotType ||
+                  Candidate.SlotAlign != SlotAlign)
+                continue;
+
+              bool SameLogicalRoot = Candidate.LogicalRoot == HandlerValue;
+              bool Compatible = false;
+              if (SameLogicalRoot) {
+                Compatible = true;
+                for (const OxCamlExceptionRootStore &Store : Stores) {
+                  Value *Existing = LookupStoreValue(Candidate.Stores,
+                                                     Store.Invoke);
+                  if (Existing && Existing != Store.StoredValue) {
+                    Compatible = false;
+                    break;
+                  }
+                }
+              } else {
+                Compatible = StoreProgramsEqual(Candidate.Stores, Stores);
+              }
+              if (!Compatible)
+                continue;
+              if (ExistingRootKeyConflictsWithStores(
+                      {Candidate.RecoveryID, Candidate.RootID}, Stores))
+                continue;
+
+              for (const OxCamlExceptionRootStore &Store : Stores) {
+                AddEHLiveRootForInvoke(Store.Invoke, Store.StoredValue,
+                                       Candidate.RecoveryID,
+                                       Candidate.RootID);
+                if (!LookupStoreValue(Candidate.Stores, Store.Invoke))
+                  Candidate.Stores.push_back(Store);
+              }
+              if (!is_contained(RecoveredEHValuesToPlace,
+                                Candidate.RecoveredValue))
+                RecoveredEHValuesToPlace.push_back(Candidate.RecoveredValue);
+              return Candidate.RecoveredValue;
+            }
+
             SmallVector<std::pair<unsigned, unsigned>, 4> CandidateKeys;
             auto ConsiderCandidateKey = [&](std::pair<unsigned, unsigned> Key) {
               if (!is_contained(CandidateKeys, Key))
@@ -3761,7 +3893,9 @@ static bool materializeOxCamlExceptionRootSlots(
               auto RootIt = EHLiveRoots.find(Store.Invoke);
               if (RootIt != EHLiveRoots.end()) {
                 for (const OxCamlEHLiveRoot &Root : RootIt->second)
-                  if (Root.Root == Store.StoredValue)
+                  if (isOxCamlEHLiveRootValueCompatible(
+                          Root.Root, Store.StoredValue,
+                          {Root.RecoveryID, Root.RootID}))
                     ConsiderCandidateKey({Root.RecoveryID, Root.RootID});
               }
               if (auto Bundle = Store.Invoke->getOperandBundle(
@@ -3771,11 +3905,14 @@ static bool materializeOxCamlExceptionRootSlots(
                   auto *RecoveryID = dyn_cast<ConstantInt>(Inputs[I]);
                   auto *RootID = dyn_cast<ConstantInt>(Inputs[I + 1]);
                   Value *Root = Inputs[I + 2].get();
-                  if (Root != Store.StoredValue || !RecoveryID || !RootID)
+                  if (!RecoveryID || !RootID)
                     continue;
-                  ConsiderCandidateKey(
-                      {unsigned(RecoveryID->getZExtValue()),
-                       unsigned(RootID->getZExtValue())});
+                  std::pair<unsigned, unsigned> Key = {
+                      unsigned(RecoveryID->getZExtValue()),
+                      unsigned(RootID->getZExtValue())};
+                  if (isOxCamlEHLiveRootValueCompatible(Root,
+                                                        Store.StoredValue, Key))
+                    ConsiderCandidateKey(Key);
                 }
               }
             }
@@ -3786,7 +3923,9 @@ static bool materializeOxCamlExceptionRootSlots(
               for (const OxCamlExceptionRootStore &Store : Stores) {
                 std::optional<Value *> ExistingValue =
                     ExistingRootValueForKey(Store.Invoke, CandidateKey);
-                if (!ExistingValue || *ExistingValue != Store.StoredValue) {
+                if (!ExistingValue ||
+                    !isOxCamlEHLiveRootValueCompatible(
+                        *ExistingValue, Store.StoredValue, CandidateKey)) {
                   MatchesAllStores = false;
                   break;
                 }
@@ -4417,6 +4556,8 @@ static bool materializeOxCamlExceptionRootSlots(
           auto *UserI = dyn_cast<Instruction>(U.getUser());
           if (!UserI || UserI == Selector || UserI == Replacement)
             continue;
+          if (isOxCamlEHLiveOperandBundleUse(U))
+            continue;
           if (isa<PHINode>(UserI))
             continue;
           if (DT.dominates(cast<Instruction>(Replacement), UserI))
@@ -4483,6 +4624,8 @@ static bool materializeOxCamlExceptionRootSlots(
         for (Use &U : V->uses()) {
           auto *UserI = dyn_cast<Instruction>(U.getUser());
           if (!UserI || UserI == Selector || UserI == Replacement)
+            continue;
+          if (isOxCamlEHLiveOperandBundleUse(U))
             continue;
           if (isa<PHINode>(UserI))
             continue;
@@ -4602,7 +4745,7 @@ static bool appendExplicitRootSlotsToStatepoints(
 }
 
 static bool appendOxCamlEHLiveRootsToStatepoints(
-    const OxCamlEHLiveRootMapTy &EHLiveRoots) {
+    const OxCamlEHLiveRootMapTy &EHLiveRoots, DominatorTree &DT) {
   bool Changed = false;
   for (const auto &Pair : EHLiveRoots) {
     CallBase *Call = Pair.first;
@@ -4620,32 +4763,66 @@ static bool appendOxCamlEHLiveRootsToStatepoints(
         continue;
 
       FoundEHLive = true;
-      SmallVector<Value *, 64> Inputs(Bundle.input_begin(),
-                                      Bundle.input_end());
-      DenseMap<std::pair<unsigned, unsigned>, Value *> Seen;
-      for (unsigned I = 0, E = Inputs.size(); I + 2 < E; I += 3) {
-        auto *RecoveryID = dyn_cast<ConstantInt>(Inputs[I]);
-        auto *RootID = dyn_cast<ConstantInt>(Inputs[I + 1]);
-        if (RecoveryID && RootID)
-          Seen[{unsigned(RecoveryID->getZExtValue()),
-                unsigned(RootID->getZExtValue())}] = Inputs[I + 2];
+      SmallVector<Value *, 64> OldInputs(Bundle.input_begin(),
+                                         Bundle.input_end());
+      SmallVector<Value *, 64> Inputs;
+      DenseMap<std::pair<unsigned, unsigned>, unsigned> Seen;
+      for (unsigned I = 0, E = OldInputs.size(); I + 2 < E; I += 3) {
+        auto *RecoveryID = dyn_cast<ConstantInt>(OldInputs[I]);
+        auto *RootID = dyn_cast<ConstantInt>(OldInputs[I + 1]);
+        if (!RecoveryID || !RootID)
+          report_fatal_error("malformed OxCaml EH-live statepoint bundle");
+
+        auto Key = std::make_pair(unsigned(RecoveryID->getZExtValue()),
+                                  unsigned(RootID->getZExtValue()));
+        Value *RootValue = nonPoisonOxCamlGCPointerValue(OldInputs[I + 2]);
+        auto SeenIt = Seen.find(Key);
+        if (SeenIt == Seen.end()) {
+          Inputs.push_back(OldInputs[I]);
+          Inputs.push_back(OldInputs[I + 1]);
+          Inputs.push_back(RootValue);
+          Seen[Key] = Inputs.size() - 1;
+          continue;
+        }
+
+        unsigned RootIndex = SeenIt->second;
+        Value *ExistingValue = Inputs[RootIndex];
+        if (!isOxCamlEHLiveRootValueCompatible(ExistingValue, RootValue, Key))
+          report_fatal_error("conflicting OxCaml EH root value for "
+                             "existing statepoint bundle");
+        if (shouldPreferOxCamlEHLiveRootValue(RootValue, ExistingValue, Key) ||
+            (!doesOxCamlEHLiveRootDominateCall(ExistingValue, Call, DT) &&
+             doesOxCamlEHLiveRootDominateCall(RootValue, Call, DT)))
+          Inputs[RootIndex] = RootValue;
+        ChangedThisCall = true;
       }
 
       IRBuilder<> Builder(Call);
       for (const OxCamlEHLiveRoot &Root : Roots) {
         auto Key = std::make_pair(Root.RecoveryID, Root.RootID);
         Value *RootValue = nonPoisonOxCamlGCPointerValue(Root.Root);
+        if (!doesOxCamlEHLiveRootDominateCall(RootValue, Call, DT))
+          report_fatal_error("non-dominating OxCaml EH root value");
         auto SeenIt = Seen.find(Key);
         if (SeenIt != Seen.end()) {
-          if (SeenIt->second != RootValue)
+          unsigned RootIndex = SeenIt->second;
+          Value *ExistingValue = Inputs[RootIndex];
+          if (!isOxCamlEHLiveRootValueCompatible(ExistingValue, RootValue,
+                                                 Key))
             report_fatal_error("conflicting OxCaml EH root value for "
                                "existing statepoint bundle");
+          if (shouldPreferOxCamlEHLiveRootValue(RootValue, ExistingValue,
+                                                Key) ||
+              !doesOxCamlEHLiveRootDominateCall(ExistingValue, Call, DT)) {
+            Inputs[RootIndex] = RootValue;
+            ChangedThisCall = true;
+          }
           continue;
         }
         Inputs.push_back(Builder.getInt32(Root.RecoveryID));
         Inputs.push_back(Builder.getInt32(Root.RootID));
         Inputs.push_back(RootValue);
-        Seen[Key] = RootValue;
+        Seen[Key] = Inputs.size() - 1;
         ChangedThisCall = true;
       }
       if (ChangedThisCall)
@@ -4657,9 +4834,12 @@ static bool appendOxCamlEHLiveRootsToStatepoints(
       SmallVector<Value *, 16> Inputs;
       IRBuilder<> Builder(Call);
       for (const OxCamlEHLiveRoot &Root : Roots) {
+        Value *RootValue = nonPoisonOxCamlGCPointerValue(Root.Root);
+        if (!doesOxCamlEHLiveRootDominateCall(RootValue, Call, DT))
+          report_fatal_error("non-dominating OxCaml EH root value");
         Inputs.push_back(Builder.getInt32(Root.RecoveryID));
         Inputs.push_back(Builder.getInt32(Root.RootID));
-        Inputs.push_back(nonPoisonOxCamlGCPointerValue(Root.Root));
+        Inputs.push_back(RootValue);
       }
       Bundles.emplace_back("oxcaml-eh-live", Inputs);
       ChangedThisCall = true;
@@ -8180,7 +8360,7 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
   collectExplicitRootSlots(LateExplicitRootSlots, LateAllExplicitRootSlots);
   ChangedLateRoots |=
       materializeRemainingOxCamlRecoveryPhis(F, DT, LateAllExplicitRootSlots);
-  ChangedLateRoots |= appendOxCamlEHLiveRootsToStatepoints(LateEHLiveRoots);
+  ChangedLateRoots |= appendOxCamlEHLiveRootsToStatepoints(LateEHLiveRoots, DT);
   ChangedLateRoots |=
       appendExplicitRootSlotsToAllStatepoints(F, LateAllExplicitRootSlots);
   return !Records.empty() || ChangedLateRoots;
