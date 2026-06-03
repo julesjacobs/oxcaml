@@ -4005,6 +4005,13 @@ void AssemblyWriter::printInstructionLine(const Instruction &I) {
 /// intrinsic indicating base and derived pointer names.
 void AssemblyWriter::printGCRelocateComment(const GCRelocateInst &Relocate) {
   Out << " ; (";
+  if (auto *LPI = dyn_cast<LandingPadInst>(Relocate.getArgOperand(0))) {
+    if (!LPI->getParent()->getUniquePredecessor()) {
+      Out << "base index " << Relocate.getBasePtrIndex()
+          << ", derived index " << Relocate.getDerivedPtrIndex() << ")";
+      return;
+    }
+  }
   writeOperand(Relocate.getBasePtr(), false);
   Out << ", ";
   writeOperand(Relocate.getDerivedPtr(), false);

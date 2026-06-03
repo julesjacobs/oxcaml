@@ -20,16 +20,19 @@
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/CodeGen/Analysis.h"
 #include "llvm/CodeGen/FunctionLoweringInfo.h"
 #include "llvm/CodeGen/GCMetadata.h"
 #include "llvm/CodeGen/ISDOpcodes.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/CodeGen/RuntimeLibcalls.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
 #include "llvm/CodeGen/StackMaps.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetLowering.h"
 #include "llvm/CodeGen/TargetOpcodes.h"
 #include "llvm/IR/CallingConv.h"
@@ -424,6 +427,58 @@ static bool isSharedLandingPadRelocate(const GCRelocateInst &Relocate) {
   return LPI && !LPI->getParent()->getUniquePredecessor();
 }
 
+static SmallVectorImpl<MachineInstr *> &
+getOrCreateSharedLandingPadRelocatePHIs(const GCRelocateInst &Relocate,
+                                        SelectionDAGBuilder &Builder) {
+  Register &FirstReg =
+      Builder.FuncInfo.SharedLandingPadRelocatePHIRegs[&Relocate];
+  if (!FirstReg)
+    FirstReg = Builder.FuncInfo.CreateRegs(Relocate.getType());
+
+  auto &PHIs = Builder.FuncInfo.SharedLandingPadRelocatePHIs[&Relocate];
+  if (!PHIs.empty())
+    return PHIs;
+
+  auto *LPI = cast<LandingPadInst>(Relocate.getArgOperand(0));
+  MachineBasicBlock *HandlerMBB = Builder.FuncInfo.MBBMap[LPI->getParent()];
+  assert(HandlerMBB && "missing machine block for landingpad");
+  const TargetInstrInfo *TII =
+      Builder.DAG.getMachineFunction().getSubtarget().getInstrInfo();
+
+  SmallVector<EVT, 4> ValueVTs;
+  ComputeValueVTs(Builder.DAG.getTargetLoweringInfo(),
+                  Builder.DAG.getDataLayout(), Relocate.getType(), ValueVTs);
+
+  unsigned PHIRegIdx = Register::virtReg2Index(FirstReg);
+  for (EVT VT : ValueVTs) {
+    unsigned NumRegisters =
+        Builder.DAG.getTargetLoweringInfo().getNumRegisters(
+            *Builder.DAG.getContext(), VT);
+    for (unsigned I = 0; I != NumRegisters; ++I) {
+      MachineInstr *PHI =
+          BuildMI(*HandlerMBB, HandlerMBB->getFirstNonPHI(),
+                  Relocate.getDebugLoc(), TII->get(TargetOpcode::PHI),
+                  Register::index2VirtReg(PHIRegIdx++))
+              .getInstr();
+      PHIs.push_back(PHI);
+    }
+  }
+
+  return PHIs;
+}
+
+static void addSharedLandingPadRelocateIncoming(
+    const GCRelocateInst &Relocate, Register IncomingReg,
+    SelectionDAGBuilder &Builder) {
+  SmallVectorImpl<MachineInstr *> &PHIs =
+      getOrCreateSharedLandingPadRelocatePHIs(Relocate, Builder);
+
+  unsigned RegIdx = Register::virtReg2Index(IncomingReg);
+  for (MachineInstr *PHI : PHIs)
+    Builder.FuncInfo.PHINodesToUpdate.push_back(
+        std::make_pair(PHI, Register::index2VirtReg(RegIdx++)));
+}
+
 /// Spill a value incoming to the statepoint. It might be either part of
 /// vmstate
 /// or gcstate. In both cases unconditionally spill it on the stack unless it
@@ -603,6 +658,7 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
   // Pointers used on exceptional path of invoke statepoint.
   // We cannot assing them to VRegs.
   SmallSet<SDValue, 8> LPadPointers;
+  SmallSet<SDValue, 8> ForceVRegGCPtrs;
   if (!UseRegistersForGCPointersInLandingPad)
     if (const auto *StInvoke =
             dyn_cast_or_null<InvokeInst>(SI.StatepointInstr)) {
@@ -611,10 +667,16 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
         LandingPadInst *LPI = StInvoke->getLandingPadInst();
         for (const auto *Relocate : SI.GCRelocates)
           if (Relocate->getOperand(0) == LPI) {
-            LPadPointers.insert(Builder.getValue(
-                getRelocateBaseForStatepoint(*Relocate, *Statepoint)));
-            LPadPointers.insert(Builder.getValue(
-                getRelocateDerivedForStatepoint(*Relocate, *Statepoint)));
+            SDValue Base = Builder.getValue(
+                getRelocateBaseForStatepoint(*Relocate, *Statepoint));
+            SDValue Derived = Builder.getValue(
+                getRelocateDerivedForStatepoint(*Relocate, *Statepoint));
+            if (isSharedLandingPadRelocate(*Relocate)) {
+              ForceVRegGCPtrs.insert(Derived);
+            } else {
+              LPadPointers.insert(Base);
+              LPadPointers.insert(Derived);
+            }
           }
       }
     }
@@ -643,11 +705,13 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
     GCPtrIndexMap[PtrSD] = LoweredGCPtrs.size() - 1;
 
     assert(!LowerAsVReg.count(PtrSD) && "must not have been seen");
-    if (LowerAsVReg.size() == MaxVRegPtrs)
+    const bool ForceVReg =
+        ForceVRegGCPtrs.count(PtrSD) && !willLowerDirectly(PtrSD);
+    if (!ForceVReg && LowerAsVReg.size() == MaxVRegPtrs)
       return;
     assert(V->getType()->isVectorTy() == PtrSD.getValueType().isVector() &&
            "IR and SD types disagree");
-    if (!canPassGCPtrOnVReg(PtrSD)) {
+    if (!ForceVReg && !canPassGCPtrOnVReg(PtrSD)) {
       LLVM_DEBUG(dbgs() << "direct/spill "; PtrSD.dump(&Builder.DAG));
       return;
     }
@@ -1000,6 +1064,14 @@ SDValue SelectionDAGBuilder::LowerAsSTATEPOINT(
         ExportFromCurrentBlock(V);
     }
     RelocationMap[Relocate] = Record;
+    if (isSharedLandingPadRelocate(*Relocate)) {
+      if (Record.type != RecordType::VReg)
+        report_fatal_error(
+            "shared landingpad gc.relocate expected a statepoint vreg record",
+            false);
+      addSharedLandingPadRelocateIncoming(*Relocate, Record.payload.Reg,
+                                          *this);
+    }
   }
 
   
@@ -1298,10 +1370,21 @@ void SelectionDAGBuilder::visitGCResult(const GCResultInst &CI) {
 }
 
 void SelectionDAGBuilder::visitGCRelocate(const GCRelocateInst &Relocate) {
-  if (isSharedLandingPadRelocate(Relocate))
-    report_fatal_error(
-        "shared landingpad gc.relocate Machine PHI lowering not implemented",
-        false);
+  if (isSharedLandingPadRelocate(Relocate)) {
+    Register InReg = FuncInfo.SharedLandingPadRelocatePHIRegs[&Relocate];
+    if (!InReg) {
+      getOrCreateSharedLandingPadRelocatePHIs(Relocate, *this);
+      InReg = FuncInfo.SharedLandingPadRelocatePHIRegs[&Relocate];
+    }
+    RegsForValue RFV(*DAG.getContext(), DAG.getTargetLoweringInfo(),
+                     DAG.getDataLayout(), InReg, Relocate.getType(),
+                     std::nullopt);
+    SDValue Chain = DAG.getEntryNode();
+    SDValue Relocation = RFV.getCopyFromRegs(DAG, FuncInfo, getCurSDLoc(),
+                                             Chain, nullptr, &Relocate);
+    setValue(&Relocate, Relocation);
+    return;
+  }
 
   const Value *Statepoint = Relocate.getStatepoint();
 #ifndef NDEBUG

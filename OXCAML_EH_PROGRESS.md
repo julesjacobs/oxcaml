@@ -45,7 +45,7 @@ Passing/control tests:
   - Tightened to use `oxcaml_nofpcc`; branch selector arguments use `i64` plus
     `icmp` rather than `i1`, matching the OxCaml ABI shape.
 
-Current red/future-semantics test:
+Shared-handler Machine PHI test:
 
 - `vendor/llvm-project/llvm/test/CodeGen/AArch64/oxcaml-shared-landingpad-gc-relocate.ll`
   - Multiple invokes share a landingpad with handler-side landingpad-token
@@ -61,10 +61,21 @@ Current red/future-semantics test:
     - two handler-live GC values;
     - distinct normal-live and handler-live GC values;
     - GC value plus ordinary `i64` live in normal and handler paths;
-    - base/derived pointer relocate;
     - sequential versions of the multi-value cases.
-  - Current failure: lowering assumes a landingpad-token relocate has one
-    owning statepoint. Shared landingpads violate that assumption.
+  - Current result: `llc -verify-machineinstrs` passes for non-derived shared
+    handler relocates, and the `-stop-after=finalize-isel` check requires a
+    Machine PHI in the shared handler for representative alternative and
+    sequential invoke shapes.
+
+Current guardrail/future-slice test:
+
+- `vendor/llvm-project/llvm/test/CodeGen/AArch64/oxcaml-shared-landingpad-gc-relocate-derived.ll`
+  - Multiple invokes share a landingpad with a handler-side landingpad-token
+    `gc.relocate` whose derived index differs from its base index.
+  - Current result: verifier accepts the IR, but codegen still rejects it with
+    `OxCaml statepoint contains a derived GC pointer`. This preserves the
+    existing OxCaml stackmap/RS4GC constraint until derived pointers are
+    rematerialized before stackmap lowering.
 
 ## Manual IR Evidence
 
@@ -122,16 +133,24 @@ bb.handler:
   based. The generic EH prototype still demonstrates that a landingpad Machine
   PHI is accepted and PHI elimination can create one merged value.
 
-## Relevant LLVM Assumptions To Fix
+## LLVM Assumptions Changed
 
 - `lib/IR/Verifier.cpp`
-  - Current verifier requires safepoint invokes to have unique landingpads.
+  - The verifier used to require safepoint invokes to have unique landingpads.
+    It now permits the shared landingpad-token `gc.relocate` shape for OxCaml
+    when each relevant predecessor statepoint has compatible relocate indices
+    and pointer types.
 - `lib/IR/IntrinsicInst.cpp`
   - `GCProjectionInst::getStatepoint()` recovers one statepoint from the
-    landingpad's unique predecessor.
+    landingpad's unique predecessor. Shared landingpad lowering must avoid that
+    helper when it needs predecessor-specific base/derived values.
 - `lib/CodeGen/SelectionDAG/StatepointLowering.cpp`
-  - Statepoint lowering records relocates per single statepoint.
-  - `visitGCRelocate` asks a relocate for one owning statepoint.
+  - Statepoint lowering still records relocates per predecessor statepoint, but
+    shared landingpad relocates are interpreted relative to the statepoint
+    currently being lowered.
+  - `visitGCRelocate` now materializes non-derived shared landingpad relocates
+    through a Machine PHI instead of asking the relocate for one owning
+    statepoint.
 
 ## Design Direction
 
@@ -150,7 +169,7 @@ Implement OxCaml-specific support for shared landingpad-token `gc.relocate`:
 
 ## Required LLVM Changes
 
-Current first failure:
+Implemented slices:
 
 - Fixed verifier-only milestone: `opt -passes=verify` now accepts the red
   OxCaml shared-handler IR.
@@ -160,28 +179,22 @@ Current first failure:
   `vendor/llvm-project/llvm/test/Verifier/oxcaml-shared-landingpad-gc-relocate.ll`.
   It checks non-OxCaml rejection, per-predecessor index bounds, address-space
   compatibility, and pointer type compatibility.
-- Current first codegen failure after slice 1: predecessor statepoint lowering
-  accepts shared landingpad relocates, and instruction selection now stops at
-  the explicit handler-materialization diagnostic
-  `shared landingpad gc.relocate Machine PHI lowering not implemented`.
+- SelectionDAG statepoint lowering now interprets a shared landingpad relocate
+  relative to the predecessor statepoint currently being lowered.
+- SelectionDAG now materializes each non-derived shared landingpad
+  `gc.relocate` as a Machine PHI in the landingpad block. Incoming values are
+  recorded through the existing `PHINodesToUpdate` edge-update path, so the
+  later PHI-elimination and register-allocation pipeline decides where the
+  value lives.
+- `AsmWriter` now prints shared landingpad `gc.relocate` comments by indices,
+  avoiding the unique-predecessor query that is invalid for this shape.
 
-Likely implementation path:
+Remaining next slice:
 
-- verifier: done for the current test coverage.
-- IR helpers:
-  - keep `GCProjectionInst::getStatepoint()` for unique-statepoint cases;
-  - add helpers for landingpad relocates that return all predecessor
-    statepoints, or that compute base/derived values relative to a specific
-    predecessor statepoint.
-- SelectionDAG statepoint lowering:
-  - when lowering statepoint `S`, interpret a shared landingpad relocate using
-    `S`'s own `gc-live` bundle indices, instead of calling
-    `Relocate->getDerivedPtr()`. This slice is implemented in
-    `StatepointLowering.cpp`;
-  - record each predecessor statepoint's corresponding relocated value as an
-    incoming value for the shared handler relocate;
-  - in `visitGCRelocate` for the shared handler, materialize a Machine PHI over
-    those predecessor values and return that PHI value.
+- derived-pointer shared handler relocates still fail at stackmap lowering.
+  The current guardrail test pins that limitation. Fixing it likely needs the
+  same edge-dependent Machine PHI idea plus an RS4GC/stackmap path that can
+  rematerialize derived pointers before final stackmap emission.
 
 This keeps the optimization target intact: the shared handler value remains a
 machine value until register allocation, rather than being forced into a
