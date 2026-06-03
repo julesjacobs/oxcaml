@@ -390,6 +390,40 @@ static MachineMemOperand* getMachineMemOperand(MachineFunction &MF,
                                  MFI.getObjectAlign(FI.getIndex()));
 }
 
+static const Value *
+getRelocateValueForStatepoint(const GCRelocateInst &Relocate,
+                              const GCStatepointInst &Statepoint,
+                              unsigned Index) {
+  if (auto Opt = Statepoint.getOperandBundle(LLVMContext::OB_gc_live)) {
+    assert(Index < Opt->Inputs.size() &&
+           "gc.relocate index out of bounds for gc-live bundle");
+    return Opt->Inputs[Index].get();
+  }
+
+  assert(Index < Statepoint.arg_size() &&
+         "gc.relocate index out of bounds for statepoint arguments");
+  return Statepoint.getArgOperand(Index);
+}
+
+static const Value *
+getRelocateBaseForStatepoint(const GCRelocateInst &Relocate,
+                             const GCStatepointInst &Statepoint) {
+  return getRelocateValueForStatepoint(Relocate, Statepoint,
+                                       Relocate.getBasePtrIndex());
+}
+
+static const Value *
+getRelocateDerivedForStatepoint(const GCRelocateInst &Relocate,
+                                const GCStatepointInst &Statepoint) {
+  return getRelocateValueForStatepoint(Relocate, Statepoint,
+                                       Relocate.getDerivedPtrIndex());
+}
+
+static bool isSharedLandingPadRelocate(const GCRelocateInst &Relocate) {
+  auto *LPI = dyn_cast<LandingPadInst>(Relocate.getArgOperand(0));
+  return LPI && !LPI->getParent()->getUniquePredecessor();
+}
+
 /// Spill a value incoming to the statepoint. It might be either part of
 /// vmstate
 /// or gcstate. In both cases unconditionally spill it on the stack unless it
@@ -572,12 +606,17 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
   if (!UseRegistersForGCPointersInLandingPad)
     if (const auto *StInvoke =
             dyn_cast_or_null<InvokeInst>(SI.StatepointInstr)) {
-      LandingPadInst *LPI = StInvoke->getLandingPadInst();
-      for (const auto *Relocate : SI.GCRelocates)
-        if (Relocate->getOperand(0) == LPI) {
-          LPadPointers.insert(Builder.getValue(Relocate->getBasePtr()));
-          LPadPointers.insert(Builder.getValue(Relocate->getDerivedPtr()));
-        }
+      if (const auto *Statepoint =
+              dyn_cast<GCStatepointInst>(SI.StatepointInstr)) {
+        LandingPadInst *LPI = StInvoke->getLandingPadInst();
+        for (const auto *Relocate : SI.GCRelocates)
+          if (Relocate->getOperand(0) == LPI) {
+            LPadPointers.insert(Builder.getValue(
+                getRelocateBaseForStatepoint(*Relocate, *Statepoint)));
+            LPadPointers.insert(Builder.getValue(
+                getRelocateDerivedForStatepoint(*Relocate, *Statepoint)));
+          }
+      }
     }
 
   LLVM_DEBUG(dbgs() << "Deciding how to lower GC Pointers:\n");
@@ -891,8 +930,12 @@ SDValue SelectionDAGBuilder::LowerAsSTATEPOINT(
   // in other blocks. For local gc.relocate record appropriate statepoint
   // result in StatepointLoweringState.
   DenseMap<SDValue, Register> VirtRegs;
+  const auto *Statepoint = dyn_cast<GCStatepointInst>(SI.StatepointInstr);
+  assert((Statepoint || SI.GCRelocates.empty()) &&
+         "gc.relocates must be tied to a gc.statepoint");
   for (const auto *Relocate : SI.GCRelocates) {
-    Value *Derived = Relocate->getDerivedPtr();
+    const Value *Derived = getRelocateDerivedForStatepoint(*Relocate,
+                                                           *Statepoint);
     SDValue SD = getValue(Derived);
     if (!LowerAsVReg.count(SD))
       continue;
@@ -930,7 +973,7 @@ SDValue SelectionDAGBuilder::LowerAsSTATEPOINT(
   const Instruction *StatepointInstr = SI.StatepointInstr;
   auto &RelocationMap = FuncInfo.StatepointRelocationMaps[StatepointInstr];
   for (const GCRelocateInst *Relocate : SI.GCRelocates) {
-    const Value *V = Relocate->getDerivedPtr();
+    const Value *V = getRelocateDerivedForStatepoint(*Relocate, *Statepoint);
     SDValue SDV = getValue(V);
     SDValue Loc = StatepointLowering.getLocation(SDV);
 
@@ -1080,10 +1123,12 @@ SelectionDAGBuilder::LowerStatepoint(const GCStatepointInst &I,
   for (const GCRelocateInst *Relocate : I.getGCRelocates()) {
     SI.GCRelocates.push_back(Relocate);
 
-    SDValue DerivedSD = getValue(Relocate->getDerivedPtr());
+    const Value *Base = getRelocateBaseForStatepoint(*Relocate, I);
+    const Value *Derived = getRelocateDerivedForStatepoint(*Relocate, I);
+    SDValue DerivedSD = getValue(Derived);
     if (Seen.insert(DerivedSD).second) {
-      SI.Bases.push_back(Relocate->getBasePtr());
-      SI.Ptrs.push_back(Relocate->getDerivedPtr());
+      SI.Bases.push_back(Base);
+      SI.Ptrs.push_back(Derived);
     }
   }
 
@@ -1253,6 +1298,11 @@ void SelectionDAGBuilder::visitGCResult(const GCResultInst &CI) {
 }
 
 void SelectionDAGBuilder::visitGCRelocate(const GCRelocateInst &Relocate) {
+  if (isSharedLandingPadRelocate(Relocate))
+    report_fatal_error(
+        "shared landingpad gc.relocate Machine PHI lowering not implemented",
+        false);
+
   const Value *Statepoint = Relocate.getStatepoint();
 #ifndef NDEBUG
   // Consistency check
