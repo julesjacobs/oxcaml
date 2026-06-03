@@ -280,11 +280,16 @@ getBranchOnlyTrapRecoveryContinuationTarget(const Function &F,
 bool llvm::isOxCamlTrapRecoveryLandingPadTrampoline(const Function &F,
                                                     const BasicBlock &BB,
                                                     const DominatorTree &DT) {
+  return getOxCamlTrapRecoveryLandingPadTrampolineTarget(F, BB, DT) != nullptr;
+}
+
+const BasicBlock *llvm::getOxCamlTrapRecoveryLandingPadTrampolineTarget(
+    const Function &F, const BasicBlock &BB, const DominatorTree &DT) {
   if (!isOxCamlGCFunction(F))
-    return false;
+    return nullptr;
   const LandingPadInst *LP = getOxCamlTrapRecoveryLandingPad(BB);
   if (!LP || BB.phis().begin() != BB.phis().end())
-    return false;
+    return nullptr;
 
   bool SawLandingPad = false;
   for (const Instruction &I : BB) {
@@ -298,13 +303,15 @@ bool llvm::isOxCamlTrapRecoveryLandingPadTrampoline(const Function &F,
       continue;
     const auto *Br = dyn_cast<BranchInst>(&I);
     if (!SawLandingPad || !Br || !Br->isUnconditional())
-      return false;
+      return nullptr;
     const BasicBlock *Target =
         getBranchOnlyTrapRecoveryContinuationTarget(F, *Br->getSuccessor(0));
-    return Target &&
-           hasDominatingOxCamlTrapPublishForRecoveryPad(F, *Target, DT);
+    if (!Target ||
+        !hasDominatingOxCamlTrapPublishForRecoveryPad(F, *Target, DT))
+      return nullptr;
+    return Target;
   }
-  return false;
+  return nullptr;
 }
 
 static const BasicBlock *

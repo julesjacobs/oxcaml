@@ -4242,7 +4242,7 @@ void AArch64DAGToDAGISel::Select(SDNode *Node) {
       }
       if (FuncInfo->MBB->isRuntimeEntered()) {
         for (const MachineInstr &MI : *FuncInfo->MBB) {
-          if (MI.isDebugInstr() || MI.isPosition() ||
+          if (MI.isPHI() || MI.isDebugInstr() || MI.isPosition() ||
               MI.getOpcode() == TargetOpcode::EH_LABEL)
             continue;
           report_fatal_error(

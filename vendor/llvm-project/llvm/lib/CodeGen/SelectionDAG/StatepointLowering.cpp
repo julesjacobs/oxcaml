@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "StatepointLowering.h"
+#include "OxCamlTrapUtils.h"
 #include "SelectionDAGBuilder.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
@@ -427,6 +428,22 @@ static bool isSharedLandingPadRelocate(const GCRelocateInst &Relocate) {
   return LPI && !LPI->getParent()->getUniquePredecessor();
 }
 
+static MachineBasicBlock *
+getSharedLandingPadRelocatePHIBlock(const GCRelocateInst &Relocate,
+                                    SelectionDAGBuilder &Builder) {
+  auto *LPI = cast<LandingPadInst>(Relocate.getArgOperand(0));
+  const BasicBlock *PHIBB = LPI->getParent();
+  if (Builder.FuncInfo.DT)
+    if (const BasicBlock *TrapRecoveryBB =
+            getOxCamlTrapRecoveryLandingPadTrampolineTarget(
+                *Builder.FuncInfo.Fn, *PHIBB, *Builder.FuncInfo.DT))
+      PHIBB = TrapRecoveryBB;
+
+  MachineBasicBlock *MBB = Builder.FuncInfo.MBBMap[PHIBB];
+  assert(MBB && "missing machine block for shared landingpad gc.relocate");
+  return MBB;
+}
+
 static SmallVectorImpl<MachineInstr *> &
 getOrCreateSharedLandingPadRelocatePHIs(const GCRelocateInst &Relocate,
                                         SelectionDAGBuilder &Builder) {
@@ -439,9 +456,8 @@ getOrCreateSharedLandingPadRelocatePHIs(const GCRelocateInst &Relocate,
   if (!PHIs.empty())
     return PHIs;
 
-  auto *LPI = cast<LandingPadInst>(Relocate.getArgOperand(0));
-  MachineBasicBlock *HandlerMBB = Builder.FuncInfo.MBBMap[LPI->getParent()];
-  assert(HandlerMBB && "missing machine block for landingpad");
+  MachineBasicBlock *HandlerMBB =
+      getSharedLandingPadRelocatePHIBlock(Relocate, Builder);
   const TargetInstrInfo *TII =
       Builder.DAG.getMachineFunction().getSubtarget().getInstrInfo();
 
@@ -477,6 +493,24 @@ static void addSharedLandingPadRelocateIncoming(
   for (MachineInstr *PHI : PHIs)
     Builder.FuncInfo.PHINodesToUpdate.push_back(
         std::make_pair(PHI, Register::index2VirtReg(RegIdx++)));
+}
+
+static void addSharedLandingPadRelocateUndefIncomingFromCurrentBlock(
+    const GCRelocateInst &Relocate, SelectionDAGBuilder &Builder) {
+  SmallVectorImpl<MachineInstr *> &PHIs =
+      getOrCreateSharedLandingPadRelocatePHIs(Relocate, Builder);
+  Register FirstReg = Builder.FuncInfo.CreateRegs(Relocate.getType());
+  unsigned RegIdx = Register::virtReg2Index(FirstReg);
+  const TargetInstrInfo *TII =
+      Builder.DAG.getMachineFunction().getSubtarget().getInstrInfo();
+
+  for (MachineInstr *PHI : PHIs) {
+    Register UndefReg = Register::index2VirtReg(RegIdx++);
+    BuildMI(*Builder.FuncInfo.MBB, Builder.FuncInfo.MBB->getFirstTerminator(),
+            Relocate.getDebugLoc(), TII->get(TargetOpcode::IMPLICIT_DEF),
+            UndefReg);
+    Builder.FuncInfo.PHINodesToUpdate.push_back(std::make_pair(PHI, UndefReg));
+  }
 }
 
 /// Spill a value incoming to the statepoint. It might be either part of
@@ -1375,6 +1409,14 @@ void SelectionDAGBuilder::visitGCRelocate(const GCRelocateInst &Relocate) {
     if (!InReg) {
       getOrCreateSharedLandingPadRelocatePHIs(Relocate, *this);
       InReg = FuncInfo.SharedLandingPadRelocatePHIRegs[&Relocate];
+    }
+    MachineBasicBlock *PHIMBB =
+        getSharedLandingPadRelocatePHIBlock(Relocate, *this);
+    if (PHIMBB != FuncInfo.MBB) {
+      addSharedLandingPadRelocateUndefIncomingFromCurrentBlock(Relocate, *this);
+      FuncInfo.SharedLandingPadRelocateRecoveryRegs[&Relocate] = InReg;
+      FuncInfo.SharedLandingPadRelocateRecoveryMBBs[&Relocate] = PHIMBB;
+      return;
     }
     RegsForValue RFV(*DAG.getContext(), DAG.getTargetLoweringInfo(),
                      DAG.getDataLayout(), InReg, Relocate.getType(),

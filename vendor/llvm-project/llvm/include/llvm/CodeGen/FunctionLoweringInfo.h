@@ -128,6 +128,9 @@ public:
   DenseMap<const Value *, Register> SharedLandingPadRelocatePHIRegs;
   DenseMap<const Value *, SmallVector<MachineInstr *, 4>>
       SharedLandingPadRelocatePHIs;
+  DenseMap<const Value *, Register> SharedLandingPadRelocateRecoveryRegs;
+  DenseMap<const Value *, MachineBasicBlock *>
+      SharedLandingPadRelocateRecoveryMBBs;
 
   /// StaticAllocaMap - Keep track of frame indices for fixed sized allocas in
   /// the entry block.  This allows the allocas to be efficiently referenced

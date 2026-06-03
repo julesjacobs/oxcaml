@@ -30,6 +30,8 @@ bool isOxCamlTrapRecoveryContinuation(const Function &F,
 bool isOxCamlTrapRecoveryLandingPadTrampoline(const Function &F,
                                               const BasicBlock &BB,
                                               const DominatorTree &DT);
+const BasicBlock *getOxCamlTrapRecoveryLandingPadTrampolineTarget(
+    const Function &F, const BasicBlock &BB, const DominatorTree &DT);
 bool hasOxCamlPushTrapTargeting(const Function &F,
                                 const BasicBlock &RecoveryBB);
 bool hasDominatingOxCamlTrapPublishForRecoveryPad(
