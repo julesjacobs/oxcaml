@@ -3325,6 +3325,14 @@ static bool materializeOxCamlExceptionRootSlots(
   SmallVector<OxCamlRecoveryBoundaryPhi, 8> BoundaryPhis;
   SmallVector<OxCamlRecoveryBoundaryUse, 8> BoundaryUses;
   SmallVector<OxCamlRecoveryBoundaryEdge, 8> BoundaryEdges;
+  struct ExplicitExceptionRootSlotCacheEntry {
+    Type *SlotType;
+    SmallVector<OxCamlRecoveryStoreSite, 8> StoreSites;
+    SmallVector<StoreInst *, 8> Stores;
+    AllocaInst *Slot;
+  };
+  SmallVector<ExplicitExceptionRootSlotCacheEntry, 16>
+      ExplicitExceptionRootSlotCache;
 
   for (BasicBlock &BB : F) {
     IntrinsicInst *Recover = getOxCamlTrapRecover(BB);
@@ -3422,6 +3430,7 @@ static bool materializeOxCamlExceptionRootSlots(
     BasicBlock &EntryBlock = F.getEntryBlock();
     IRBuilder<> EntryBuilder(&EntryBlock, EntryBlock.getFirstInsertionPt());
     IRBuilder<> RecoverBuilder(Recover->getNextNode());
+    ExplicitExceptionRootSlotCache.clear();
 
     auto MaterializeRootSlot =
         [&](Value *HandlerValue, BasicBlock &StoreSiteBB,
@@ -3432,17 +3441,7 @@ static bool materializeOxCamlExceptionRootSlots(
             report_fatal_error(
                 "cannot materialize unsized OxCaml exception value");
           }
-          auto *Slot = EntryBuilder.CreateAlloca(
-              HandlerValue->getType(), DL.getAllocaAddrSpace(), nullptr,
-              suffixed_name_or(HandlerValue, ".exnroot", "exnroot"));
-          Slot->setAlignment(DL.getABITypeAlign(HandlerValue->getType()));
           bool IsGCRoot = isHandledGCPointerType(HandlerValue->getType());
-          StoreInst *InitialStore = EntryBuilder.CreateAlignedStore(
-              IsGCRoot ? getOxCamlNonMovingImmediate(HandlerValue->getType())
-                       : Constant::getNullValue(HandlerValue->getType()),
-              Slot, DL.getABITypeAlign(HandlerValue->getType()));
-          if (IsGCRoot)
-            InitialStore->setVolatile(true);
 
           SmallVector<OxCamlRecoveryStoreSite, 8> StoreSites;
           if (&StoreSiteBB == &BB) {
@@ -3462,6 +3461,7 @@ static bool materializeOxCamlExceptionRootSlots(
                                "predecessor for explicit exception roots");
           }
 
+          SmallVector<Value *, 8> EdgeValues;
           for (OxCamlRecoveryStoreSite StoreSite : StoreSites) {
             InvokeInst *II = StoreSite.Invoke;
             Value *EdgeValue =
@@ -3489,14 +3489,62 @@ static bool materializeOxCamlExceptionRootSlots(
                     "explicit exception root value does not dominate invoke");
               }
 
-            IRBuilder<> StoreBuilder(II);
-            StoreInst *RootStore = StoreBuilder.CreateAlignedStore(
-                EdgeValue, Slot, DL.getABITypeAlign(HandlerValue->getType()));
+            EdgeValues.push_back(EdgeValue);
+          }
+
+          auto SameStoreSitesAndValues =
+              [&](const ExplicitExceptionRootSlotCacheEntry &Entry) {
+                if (Entry.SlotType != HandlerValue->getType() ||
+                    Entry.StoreSites.size() != StoreSites.size() ||
+                    Entry.Stores.size() != EdgeValues.size())
+                  return false;
+                for (unsigned I = 0, E = StoreSites.size(); I != E; ++I) {
+                  if (Entry.StoreSites[I].Invoke != StoreSites[I].Invoke ||
+                      Entry.Stores[I]->getValueOperand() != EdgeValues[I])
+                    return false;
+                }
+                return true;
+              };
+
+          AllocaInst *Slot = nullptr;
+          if (IsGCRoot)
+            for (const ExplicitExceptionRootSlotCacheEntry &Entry :
+                 ExplicitExceptionRootSlotCache)
+              if (SameStoreSitesAndValues(Entry)) {
+                Slot = Entry.Slot;
+                break;
+              }
+
+          if (!Slot) {
+            Slot = EntryBuilder.CreateAlloca(
+                HandlerValue->getType(), DL.getAllocaAddrSpace(), nullptr,
+                suffixed_name_or(HandlerValue, ".exnroot", "exnroot"));
+            Slot->setAlignment(DL.getABITypeAlign(HandlerValue->getType()));
+            StoreInst *InitialStore = EntryBuilder.CreateAlignedStore(
+                IsGCRoot ? getOxCamlNonMovingImmediate(HandlerValue->getType())
+                         : Constant::getNullValue(HandlerValue->getType()),
+                Slot, DL.getABITypeAlign(HandlerValue->getType()));
             if (IsGCRoot)
-              RootStore->setVolatile(true);
+              InitialStore->setVolatile(true);
+
+            SmallVector<StoreInst *, 8> Stores;
+            for (auto [StoreSite, EdgeValue] :
+                 llvm::zip_equal(StoreSites, EdgeValues)) {
+              InvokeInst *II = StoreSite.Invoke;
+              IRBuilder<> StoreBuilder(II);
+              StoreInst *RootStore = StoreBuilder.CreateAlignedStore(
+                  EdgeValue, Slot, DL.getABITypeAlign(HandlerValue->getType()));
+              if (IsGCRoot)
+                RootStore->setVolatile(true);
+              Stores.push_back(RootStore);
+              if (IsGCRoot)
+                ExplicitRootSlots[II].push_back(Slot);
+              ExplicitExceptionRootCalls.insert(II);
+            }
+
             if (IsGCRoot)
-              ExplicitRootSlots[II].push_back(Slot);
-            ExplicitExceptionRootCalls.insert(II);
+              ExplicitExceptionRootSlotCache.push_back(
+                  {HandlerValue->getType(), StoreSites, Stores, Slot});
           }
 
           LoadInst *Load = RecoverBuilder.CreateAlignedLoad(
@@ -4055,6 +4103,120 @@ static bool materializeOxCamlExceptionRootSlots(
         Changed = true;
         DVCache.clear();
         KnownBases.clear();
+      }
+
+      SmallVector<PHINode *, 8> PotentiallyDeadBoundaryPhis;
+      for (auto &RootSelectors : BoundaryRootSelectors)
+        for (auto &BlockSelector : RootSelectors.second)
+          PotentiallyDeadBoundaryPhis.push_back(BlockSelector.second);
+      for (const OxCamlRecoveryBoundaryPhi &BoundaryPhi : BoundaryPhis)
+        PotentiallyDeadBoundaryPhis.push_back(BoundaryPhi.Phi);
+
+      bool ErasedDeadBoundaryValue = true;
+      while (ErasedDeadBoundaryValue) {
+        ErasedDeadBoundaryValue = false;
+        for (PHINode *PN : PotentiallyDeadBoundaryPhis) {
+          if (!PN->getParent() || !PN->use_empty())
+            continue;
+          PN->eraseFromParent();
+          Changed = true;
+          ErasedDeadBoundaryValue = true;
+        }
+
+        SmallVector<LoadInst *, 8> PotentiallyDeadLoads;
+        for (auto &RootLoads : BoundaryRootLoads)
+          for (auto &BlockLoads : RootLoads.second)
+            for (auto &IncomingLoad : BlockLoads.second)
+              PotentiallyDeadLoads.push_back(IncomingLoad.second);
+        for (auto &PhiLoads : BoundaryPhiLoads)
+          for (auto &IncomingLoad : PhiLoads.second)
+            PotentiallyDeadLoads.push_back(IncomingLoad.second.second);
+        for (LoadInst *Load : PotentiallyDeadLoads) {
+          if (!Load->getParent() || !Load->use_empty() ||
+              !isOxCamlExceptionRootLoad(Load))
+            continue;
+          Load->eraseFromParent();
+          Changed = true;
+          ErasedDeadBoundaryValue = true;
+        }
+      }
+    }
+
+    auto SameCurrentStores =
+        [](const ExplicitExceptionRootSlotCacheEntry &A,
+           const ExplicitExceptionRootSlotCacheEntry &B) {
+          if (A.SlotType != B.SlotType ||
+              A.StoreSites.size() != B.StoreSites.size() ||
+              A.Stores.size() != B.Stores.size())
+            return false;
+          for (unsigned I = 0, E = A.StoreSites.size(); I != E; ++I) {
+            StoreInst *AStore = A.Stores[I];
+            StoreInst *BStore = B.Stores[I];
+            if (!AStore->getParent() || !BStore->getParent())
+              return false;
+            if (A.StoreSites[I].Invoke != B.StoreSites[I].Invoke ||
+                AStore->getValueOperand() != BStore->getValueOperand())
+              return false;
+          }
+          return true;
+        };
+
+    auto ReplaceExplicitRootSlot = [&](AllocaInst *From, AllocaInst *To) {
+      for (auto &Pair : ExplicitRootSlots) {
+        SmallVector<Value *, 4> NewSlots;
+        SmallPtrSet<Value *, 8> SeenSlots;
+        for (Value *Slot : Pair.second) {
+          if (Slot == From)
+            Slot = To;
+          if (SeenSlots.insert(Slot).second)
+            NewSlots.push_back(Slot);
+        }
+        Pair.second = std::move(NewSlots);
+      }
+    };
+
+    SmallPtrSet<AllocaInst *, 8> RemovedExplicitExceptionRootSlots;
+    for (unsigned I = 0, E = ExplicitExceptionRootSlotCache.size(); I != E;
+         ++I) {
+      const ExplicitExceptionRootSlotCacheEntry &Canonical =
+          ExplicitExceptionRootSlotCache[I];
+      if (RemovedExplicitExceptionRootSlots.contains(Canonical.Slot))
+        continue;
+      for (unsigned J = I + 1; J != E; ++J) {
+        const ExplicitExceptionRootSlotCacheEntry &Duplicate =
+            ExplicitExceptionRootSlotCache[J];
+        AllocaInst *DuplicateSlot = Duplicate.Slot;
+        if (RemovedExplicitExceptionRootSlots.contains(DuplicateSlot))
+          continue;
+        if (!SameCurrentStores(Canonical, Duplicate))
+          continue;
+
+        for (StoreInst *Store : Duplicate.Stores)
+          if (Store->getParent())
+            Store->eraseFromParent();
+
+        SmallVector<User *, 8> Users(DuplicateSlot->users());
+        for (User *U : Users) {
+          if (auto *Load = dyn_cast<LoadInst>(U)) {
+            Load->setOperand(0, Canonical.Slot);
+            continue;
+          }
+          if (auto *Store = dyn_cast<StoreInst>(U)) {
+            Store->eraseFromParent();
+            continue;
+          }
+          DuplicateSlot->print(errs());
+          errs() << "\n";
+          U->print(errs());
+          errs() << "\n";
+          report_fatal_error("unexpected duplicate OxCaml exception root user");
+        }
+
+        ReplaceExplicitRootSlot(DuplicateSlot, Canonical.Slot);
+        if (DuplicateSlot->use_empty())
+          DuplicateSlot->eraseFromParent();
+        RemovedExplicitExceptionRootSlots.insert(DuplicateSlot);
+        Changed = true;
       }
     }
 
