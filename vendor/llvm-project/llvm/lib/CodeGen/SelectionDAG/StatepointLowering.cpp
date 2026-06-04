@@ -50,6 +50,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <limits>
 #include <tuple>
 #include <utility>
 
@@ -563,8 +564,17 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
   const bool LiveInDeopt =
     SI.StatepointFlags & (uint64_t)StatepointFlags::DeoptLiveIn;
 
-  // Decide which deriver pointers will go on VRegs
-  unsigned MaxVRegPtrs = MaxRegistersForGCPointers.getValue();
+  // Decide which derived pointers will go on VRegs.  OxCaml allocation
+  // statepoints enter runtime paths that save ordinary root registers in
+  // gc_regs, so they can describe scalar GC roots as registers by default.
+  // Keep the generic statepoint default unchanged, and let an explicit command
+  // line value override the OxCaml default for debugging.
+  const bool IsOxCamlAllocStatepoint =
+      SI.CLI.CallConv == CallingConv::OxCaml_Alloc;
+  unsigned MaxVRegPtrs =
+      MaxRegistersForGCPointers.getNumOccurrences()
+          ? MaxRegistersForGCPointers.getValue()
+          : IsOxCamlAllocStatepoint ? std::numeric_limits<unsigned>::max() : 0;
 
   // Pointers used on exceptional path of invoke statepoint.
   // We cannot assing them to VRegs.

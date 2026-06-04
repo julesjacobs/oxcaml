@@ -26,6 +26,7 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/StackMaps.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/IR/CallingConv.h"
 #include "llvm/IR/Statepoint.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Support/Debug.h"
@@ -582,15 +583,18 @@ public:
   bool process(MachineInstr &MI, bool AllowGCPtrInCSR) {
     StatepointOpers SO(&MI);
     uint64_t Flags = SO.getFlags();
+    CallingConv::ID CC = SO.getCallingConv();
     // Generic DeoptLiveIn statepoints can describe any register. Still give the
     // target a chance to force spills for registers its runtime cannot scan as
-    // GC root locations.
+    // GC root locations.  OxCaml allocation statepoints enter runtime paths
+    // that save ordinary root registers in gc_regs, so they also only need
+    // target-forced spills.
     bool OnlySpillTargetForcedRegs =
-        Flags & (uint64_t)StatepointFlags::DeoptLiveIn;
+        (Flags & (uint64_t)StatepointFlags::DeoptLiveIn) ||
+        CC == CallingConv::OxCaml_Alloc;
     LLVM_DEBUG(dbgs() << "\nMBB " << MI.getParent()->getNumber() << " "
                       << MI.getParent()->getName() << " : process statepoint "
                       << MI);
-    CallingConv::ID CC = SO.getCallingConv();
     const uint32_t *Mask = nullptr;
     for (const MachineOperand &MO : MI.operands()) {
       if (MO.isRegMask()) {
