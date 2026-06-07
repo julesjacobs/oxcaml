@@ -70,12 +70,13 @@ make this explicit as an OxCaml call-split stage rather than overloading
 `RS_Split2`.
 
 Follow-up in the same session: implemented explicit `RS_CallSplit` in vendored
-LLVM. The hidden flag is now `-mllvm -oxcaml-regalloc-call-split-remainders`.
-`RS_CallSplit` sits below `RS_Spill` but above `RS_Split2`, so affected
-remainders skip normal region splitting and still reach the bounded block/local
-split path. The final representative micro run had geomean 0.8265x and kept
-`direct_call_in_try_hit` near parity at 1.0285x. A fresh LLVM-built compiler
-using `_llvm_self_stage2_callstage_install` benchmarked at 0.9782x geomean
+LLVM and made it the default for OCaml/OxCaml GC functions whose live interval
+crosses a call regmask. `RS_CallSplit` sits below `RS_Spill` but above
+`RS_Split2`, so affected remainders skip normal region splitting and still
+reach the bounded block/local split path. The final representative micro run
+had geomean 0.8265x and kept `direct_call_in_try_hit` near parity at 1.0285x.
+A fresh LLVM-built compiler using `_llvm_self_stage2_callstage_install`
+benchmarked at 0.9782x geomean
 LLVM/native, with max slowdown 1.0154x. Full numbers are in `NUMBERS.md`.
 
 2026-06-01 regmask child-classification experiment: tested the extra idea of
