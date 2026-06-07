@@ -5,13 +5,13 @@ target triple = "arm64-apple-macosx"
 declare oxcaml_ccc { { i64, i64 }, {} } @caml_c_call(i64, i64, i64, ptr addrspace(1))
 declare void @primitive()
 
-define oxcaml_nofpcc { { i64, i64 }, {} } @c_call_arg_not_root(
+define oxcaml_nofpcc { { i64, i64 }, {} } @c_call_arg_root_not_relocated(
     i64 %ds,
     i64 %alloc,
     ptr addrspace(1) %obj) gc "oxcaml" {
-; CHECK-LABEL: define oxcaml_nofpcc {{.*}} @c_call_arg_not_root(
+; CHECK-LABEL: define oxcaml_nofpcc {{.*}} @c_call_arg_root_not_relocated(
 ; CHECK-NOT: cargroot
-; CHECK: %statepoint_token = call oxcaml_ccc {{.*}} [ "deopt"() ]
+; CHECK: %statepoint_token = call oxcaml_ccc {{.*}} [ "deopt"(), "gc-live"(ptr addrspace(1) %obj) ]
 ; CHECK-NOT: @llvm.experimental.gc.relocate
 ; CHECK: ret
 entry:
@@ -26,14 +26,14 @@ entry:
   ret { { i64, i64 }, {} } %ret1
 }
 
-define oxcaml_nofpcc { { i64, i64 }, {} } @derived_c_call_arg_not_root(
+define oxcaml_nofpcc { { i64, i64 }, {} } @derived_c_call_arg_root_not_relocated(
     i64 %ds,
     i64 %alloc,
     ptr addrspace(1) %obj) gc "oxcaml" {
-; CHECK-LABEL: define oxcaml_nofpcc {{.*}} @derived_c_call_arg_not_root(
+; CHECK-LABEL: define oxcaml_nofpcc {{.*}} @derived_c_call_arg_root_not_relocated(
 ; CHECK-NOT: cargroot
 ; CHECK: %[[DERIVED:.*]] = getelementptr i8, ptr addrspace(1) %obj, i64 8
-; CHECK: %statepoint_token = call oxcaml_ccc {{.*}} [ "deopt"() ]
+; CHECK: %statepoint_token = call oxcaml_ccc {{.*}} [ "deopt"(), "gc-live"(ptr addrspace(1) %obj) ]
 ; CHECK-NOT: @llvm.experimental.gc.relocate
 ; CHECK: ret
 entry:

@@ -2169,6 +2169,62 @@ static Value *findBasePointer(Value *I, DefiningValueMapTy &Cache,
   // reuse existing values when the derived pointer we were asked to materialize
   // a base pointer for happens to be a base pointer itself.  (Or a sub-graph
   // feeding it does.)
+  //
+  // For OxCaml addrspace(1) pointers, also prune whole PHI/select SCCs whose
+  // inputs are already base pointers.  The generic pruning below proves this
+  // for acyclic cases, but a loop-carried base pointer may be represented as a
+  // cycle of PHIs and gc.relocates.  In that case the PHI itself is still the
+  // base pointer; inserting a parallel .base PHI only creates redundant roots.
+  SmallPtrSet<Value *, 16> OxCamlSelfBaseBDVs;
+  auto IsScalarOxCamlGCPointer = [](Value *V) {
+    auto *PT = dyn_cast<PointerType>(V->getType());
+    return PT && PT->getAddressSpace() == 1;
+  };
+  auto IsOxCamlSelfBaseCandidate = [&](Value *V) {
+    return IsScalarOxCamlGCPointer(V) &&
+           (isa<PHINode>(V) || isa<SelectInst>(V));
+  };
+  for (auto Pair : States)
+    if (IsOxCamlSelfBaseCandidate(Pair.first))
+      OxCamlSelfBaseBDVs.insert(Pair.first);
+
+  bool ChangedOxCamlSelfBaseBDVs = true;
+  while (ChangedOxCamlSelfBaseBDVs) {
+    ChangedOxCamlSelfBaseBDVs = false;
+    SmallVector<Value *, 8> ToErase;
+    for (Value *BDV : OxCamlSelfBaseBDVs) {
+      bool CanPrune = true;
+      visitBDVOperands(BDV, [&](Value *Op) {
+        if (!CanPrune)
+          return;
+        if (Op->stripPointerCasts() == BDV)
+          return;
+
+        Value *OpBDV = findBaseOrBDV(Op, Cache, KnownBases);
+        if (isKnownBase(OpBDV, KnownBases) &&
+            areBothVectorOrScalar(OpBDV, Op) &&
+            isOxCamlBaseEquivalentGCPointer(Op, OpBDV))
+          return;
+        if (OxCamlSelfBaseBDVs.contains(OpBDV) &&
+            isOxCamlBaseEquivalentGCPointer(Op, OpBDV))
+          return;
+
+        CanPrune = false;
+      });
+      if (!CanPrune)
+        ToErase.push_back(BDV);
+    }
+    for (Value *BDV : ToErase) {
+      OxCamlSelfBaseBDVs.erase(BDV);
+      ChangedOxCamlSelfBaseBDVs = true;
+    }
+  }
+
+  for (Value *BDV : OxCamlSelfBaseBDVs) {
+    States.erase(BDV);
+    Cache[BDV] = BDV;
+  }
+
   SmallVector<Value *> ToRemove;
   do {
     ToRemove.clear();
