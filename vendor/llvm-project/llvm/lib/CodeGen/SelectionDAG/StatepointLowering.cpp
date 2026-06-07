@@ -190,6 +190,10 @@ static std::optional<int> findPreviousSpillSlot(const Value *Val,
   if (LookUpDepth <= 0)
     return std::nullopt;
 
+  if (auto It = Builder.FuncInfo.StatepointStableRootHomes.find(Val);
+      It != Builder.FuncInfo.StatepointStableRootHomes.end())
+    return It->second;
+
   // Spill location is known for gc relocates
   if (const auto *Relocate = dyn_cast<GCRelocateInst>(Val)) {
     const Value *Statepoint = Relocate->getStatepoint();
@@ -436,6 +440,9 @@ spillIncomingStatepointValue(SDValue Incoming, SDValue Chain,
     MMO = getMachineMemOperand(MF, *cast<FrameIndexSDNode>(Loc));
 
     Builder.StatepointLowering.setLocation(Incoming, Loc);
+  } else if (auto *FI = dyn_cast<FrameIndexSDNode>(Loc)) {
+    auto &MF = Builder.DAG.getMachineFunction();
+    MMO = getMachineMemOperand(MF, *FI);
   }
 
   assert(Loc.getNode());

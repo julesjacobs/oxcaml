@@ -78,6 +78,7 @@
 #include "llvm/IR/IntrinsicsAArch64.h"
 #include "llvm/IR/IntrinsicsWebAssembly.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Statepoint.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
@@ -10994,6 +10995,114 @@ void SelectionDAGISel::LowerArguments(const Function &F) {
   emitFunctionEntryCode();
 }
 
+static bool isManagedGCScalarPointer(const Value *V,
+                                     SelectionDAGBuilder &Builder) {
+  Type *Ty = V->getType();
+  if (!Ty->isPointerTy())
+    return false;
+
+  if (Ty->getPointerAddressSpace() == 1)
+    return true;
+
+  if (auto *GFI = Builder.GFI)
+    if (auto IsManaged = GFI->getStrategy().isGCManagedPointer(Ty))
+      return *IsManaged;
+
+  return false;
+}
+
+static bool isRelocateContinuationOfPHI(const Value *V, const PHINode &PN,
+                                        unsigned Depth = 8) {
+  if (Depth == 0)
+    return false;
+
+  if (V == &PN)
+    return true;
+
+  if (const auto *Cast = dyn_cast<BitCastInst>(V))
+    return isRelocateContinuationOfPHI(Cast->getOperand(0), PN, Depth - 1);
+
+  const auto *Relocate = dyn_cast<GCRelocateInst>(V);
+  if (!Relocate)
+    return false;
+
+  if (Relocate->getBasePtr() != Relocate->getDerivedPtr())
+    return false;
+
+  return isRelocateContinuationOfPHI(Relocate->getDerivedPtr(), PN, Depth - 1);
+}
+
+static bool shouldUseStableStatepointRootHome(const PHINode &PN,
+                                             SelectionDAGBuilder &Builder) {
+  if (!isManagedGCScalarPointer(&PN, Builder))
+    return false;
+
+  bool HasRelocateContinuation = false;
+  bool HasSeedValue = false;
+  for (const Value *Incoming : PN.incoming_values()) {
+    if (isRelocateContinuationOfPHI(Incoming, PN))
+      HasRelocateContinuation = true;
+    else
+      HasSeedValue = true;
+  }
+
+  return HasRelocateContinuation && HasSeedValue;
+}
+
+static std::optional<int>
+getOrCreateStableStatepointRootHome(const PHINode &PN,
+                                    SelectionDAGBuilder &Builder) {
+  if (!shouldUseStableStatepointRootHome(PN, Builder))
+    return std::nullopt;
+
+  auto &Homes = Builder.FuncInfo.StatepointStableRootHomes;
+  if (auto It = Homes.find(&PN); It != Homes.end())
+    return It->second;
+
+  const TargetLowering &TLI = Builder.DAG.getTargetLoweringInfo();
+  SmallVector<EVT, 4> ValueVTs;
+  ComputeValueVTs(TLI, Builder.DAG.getDataLayout(), PN.getType(), ValueVTs);
+  if (ValueVTs.size() != 1)
+    return std::nullopt;
+
+  SDValue SpillSlot = Builder.DAG.CreateStackTemporary(ValueVTs[0]);
+  int FI = cast<FrameIndexSDNode>(SpillSlot)->getIndex();
+
+  MachineFrameInfo &MFI = Builder.DAG.getMachineFunction().getFrameInfo();
+  MFI.markAsStatepointSpillSlotObjectIndex(FI);
+
+  Builder.FuncInfo.StatepointStackSlots.push_back(FI);
+  Homes[&PN] = FI;
+  return FI;
+}
+
+static void maybeStoreStableStatepointRootSeed(const PHINode &PN,
+                                               const Value *PHIOp,
+                                               SelectionDAGBuilder &Builder) {
+  if (isRelocateContinuationOfPHI(PHIOp, PN))
+    return;
+
+  std::optional<int> FI = getOrCreateStableStatepointRootHome(PN, Builder);
+  if (!FI)
+    return;
+
+  SDValue Incoming = Builder.getValue(PHIOp);
+  if (!Incoming.getNode() || Incoming.isUndef())
+    return;
+
+  auto &MF = Builder.DAG.getMachineFunction();
+  MachineFrameInfo &MFI = MF.getFrameInfo();
+  SDValue Loc = Builder.DAG.getTargetFrameIndex(*FI, Builder.getFrameIndexTy());
+  auto PtrInfo = MachinePointerInfo::getFixedStack(MF, *FI);
+  auto *StoreMMO = MF.getMachineMemOperand(
+      PtrInfo, MachineMemOperand::MOStore, MFI.getObjectSize(*FI),
+      MFI.getObjectAlign(*FI));
+  SDValue Store =
+      Builder.DAG.getStore(Builder.DAG.getRoot(), Builder.getCurSDLoc(),
+                           Incoming, Loc, StoreMMO);
+  Builder.DAG.setRoot(Store);
+}
+
 /// Handle PHI nodes in successor blocks.  Emit code into the SelectionDAG to
 /// ensure constants are generated when needed.  Remember the virtual registers
 /// that need to be added to the Machine PHI nodes as input.  We cannot just
@@ -11033,6 +11142,7 @@ SelectionDAGBuilder::HandlePHINodesInSuccessorBlocks(const BasicBlock *LLVMBB) {
 
       unsigned Reg;
       const Value *PHIOp = PN.getIncomingValueForBlock(LLVMBB);
+      maybeStoreStableStatepointRootSeed(PN, PHIOp, *this);
 
       if (const auto *C = dyn_cast<Constant>(PHIOp)) {
         unsigned &RegOut = ConstantsOut[C];
