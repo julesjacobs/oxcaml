@@ -400,9 +400,6 @@ struct PartiallyConstructedSafepointRecord {
   /// handler-live GC values have been materialized into ExplicitRootSlots.
   /// Do not insert exceptional gc.relocate calls on that unwind path.
   bool UsesExplicitExceptionRoots = false;
-
-  /// The original call or invoke uses an OxCaml calling convention.
-  bool IsOxCamlStatepoint = false;
 };
 
 struct RematerializationAlternative {
@@ -539,53 +536,6 @@ static bool isNormalOnlyAfterInvoke(InvokeInst *Invoke, Value *V,
   }
 
   return true;
-}
-
-static bool hasNormalUseAfterInvoke(InvokeInst *Invoke, Value *V,
-                                    DominatorTree &DT) {
-  BasicBlock *NormalDest = Invoke->getNormalDest();
-
-  for (User *U : V->users()) {
-    auto *UserI = dyn_cast<Instruction>(U);
-    if (!UserI)
-      return true;
-
-    if (UserI == Invoke)
-      continue;
-
-    if (UserI->getParent() == Invoke->getParent()) {
-      assert(UserI->comesBefore(Invoke) &&
-             "nothing can be placed after an invoke in the same block");
-      continue;
-    }
-
-    if (auto *Phi = dyn_cast<PHINode>(UserI)) {
-      for (unsigned I = 0, E = Phi->getNumIncomingValues(); I != E; ++I) {
-        if (Phi->getIncomingValue(I) != V)
-          continue;
-
-        BasicBlock *Incoming = Phi->getIncomingBlock(I);
-        if (Phi->getParent() == NormalDest &&
-            Incoming == Invoke->getParent())
-          return true;
-
-        if (DT.dominates(Phi->getParent(), Invoke->getParent()))
-          continue;
-
-        if (DT.dominates(NormalDest, Incoming))
-          return true;
-
-        if (isPotentiallyReachable(NormalDest, Incoming, nullptr, &DT))
-          return true;
-      }
-      continue;
-    }
-
-    if (isPotentiallyReachable(NormalDest, UserI->getParent(), nullptr, &DT))
-      return true;
-  }
-
-  return false;
 }
 
 enum class OxCamlBaseEquivalenceState {
@@ -4272,16 +4222,6 @@ static bool materializeOxCamlExceptionRootSlots(
           return true;
         };
 
-    SmallPtrSet<AllocaInst *, 16> ExplicitExceptionRootSlots;
-    auto RefreshExplicitExceptionRootSlots = [&]() {
-      ExplicitExceptionRootSlots.clear();
-      for (const auto &Pair : ExplicitRootSlots)
-        for (Value *Slot : Pair.second)
-          if (auto *AI = dyn_cast<AllocaInst>(Slot))
-            ExplicitExceptionRootSlots.insert(AI);
-    };
-    RefreshExplicitExceptionRootSlots();
-
     auto ReplaceExplicitRootSlot = [&](AllocaInst *From, AllocaInst *To) {
       for (auto &Pair : ExplicitRootSlots) {
         SmallVector<Value *, 4> NewSlots;
@@ -4294,172 +4234,6 @@ static bool materializeOxCamlExceptionRootSlots(
         }
         Pair.second = std::move(NewSlots);
       }
-      ExplicitExceptionRootSlots.erase(From);
-      ExplicitExceptionRootSlots.insert(To);
-    };
-
-    auto IsExplicitExceptionRootSlot = [&](Value *V) {
-      auto *AI = dyn_cast<AllocaInst>(V);
-      return AI && ExplicitExceptionRootSlots.contains(AI);
-    };
-
-    auto IsStoreToExplicitExceptionRootSlot = [&](Instruction *I) {
-      auto *SI = dyn_cast<StoreInst>(I);
-      return SI && IsExplicitExceptionRootSlot(SI->getPointerOperand());
-    };
-
-    struct ExplicitExceptionRootStoreKey {
-      BasicBlock *BB;
-      Instruction *Point;
-      Value *Stored;
-    };
-
-    auto StorePointAfterExceptionRootStores = [&](StoreInst *SI) {
-      Instruction *Point = SI->getNextNode();
-      while (Point &&
-             (isa<AllocaInst>(Point) ||
-              IsStoreToExplicitExceptionRootSlot(Point)))
-        Point = Point->getNextNode();
-      return Point;
-    };
-
-    auto IsLoadFromExplicitExceptionRootSlot = [](Value *V, AllocaInst *Slot) {
-      auto *LI = dyn_cast<LoadInst>(V);
-      return LI && LI->getPointerOperand() == Slot;
-    };
-
-    auto AreExplicitExceptionRootStoreValuesEquivalent =
-        [&](Value *A, Value *B, AllocaInst *ASlot, AllocaInst *BSlot) {
-          DenseSet<std::pair<Value *, Value *>> Visiting;
-          std::function<bool(Value *, Value *)> Equivalent =
-              [&](Value *A, Value *B) -> bool {
-            if (A == B)
-              return true;
-            if (IsLoadFromExplicitExceptionRootSlot(A, ASlot) &&
-                IsLoadFromExplicitExceptionRootSlot(B, BSlot))
-              return true;
-
-            std::pair<Value *, Value *> Pair(A, B);
-            if (!Visiting.insert(Pair).second)
-              return true;
-
-            auto *APhi = dyn_cast<PHINode>(A);
-            auto *BPhi = dyn_cast<PHINode>(B);
-            if (!APhi || !BPhi || APhi->getParent() != BPhi->getParent() ||
-                APhi->getNumIncomingValues() != BPhi->getNumIncomingValues())
-              return false;
-
-            SmallVector<bool, 8> Matched(BPhi->getNumIncomingValues(), false);
-            for (unsigned I = 0, E = APhi->getNumIncomingValues(); I != E;
-                 ++I) {
-              bool Found = false;
-              for (unsigned J = 0; J != E; ++J) {
-                if (Matched[J] ||
-                    APhi->getIncomingBlock(I) != BPhi->getIncomingBlock(J))
-                  continue;
-                if (!Equivalent(APhi->getIncomingValue(I),
-                                BPhi->getIncomingValue(J)))
-                  continue;
-                Matched[J] = true;
-                Found = true;
-                break;
-              }
-              if (!Found)
-                return false;
-            }
-
-            return true;
-          };
-
-          return Equivalent(A, B);
-        };
-
-    auto GetExplicitExceptionRootStoreKeys =
-        [&](AllocaInst *Slot,
-            SmallVectorImpl<ExplicitExceptionRootStoreKey> &Keys) {
-          for (User *U : Slot->users()) {
-            if (auto *LI = dyn_cast<LoadInst>(U)) {
-              if (LI->getPointerOperand() == Slot)
-                continue;
-            }
-            if (isa<CallBase>(U))
-              continue;
-            if (auto *SI = dyn_cast<StoreInst>(U)) {
-              if (SI->getPointerOperand() == Slot) {
-                Keys.push_back({SI->getParent(),
-                                StorePointAfterExceptionRootStores(SI),
-                                SI->getValueOperand()});
-                continue;
-              }
-            }
-            Slot->print(errs());
-            errs() << "\n";
-            U->print(errs());
-            errs() << "\n";
-            report_fatal_error("unexpected OxCaml exception root slot user");
-          }
-        };
-
-    auto SameExplicitExceptionRootStoreKeys =
-        [&](AllocaInst *A, AllocaInst *B) {
-          if (A->getAllocatedType() != B->getAllocatedType())
-            return false;
-
-          SmallVector<ExplicitExceptionRootStoreKey, 8> AKeys;
-          SmallVector<ExplicitExceptionRootStoreKey, 8> BKeys;
-          GetExplicitExceptionRootStoreKeys(A, AKeys);
-          GetExplicitExceptionRootStoreKeys(B, BKeys);
-          if (AKeys.size() != BKeys.size())
-            return false;
-
-          SmallVector<bool, 8> Matched(BKeys.size(), false);
-          for (const ExplicitExceptionRootStoreKey &AKey : AKeys) {
-            bool Found = false;
-            for (unsigned I = 0, E = BKeys.size(); I != E; ++I) {
-              if (Matched[I])
-                continue;
-              const ExplicitExceptionRootStoreKey &BKey = BKeys[I];
-              if (AKey.BB != BKey.BB || AKey.Point != BKey.Point ||
-                  !AreExplicitExceptionRootStoreValuesEquivalent(
-                      AKey.Stored, BKey.Stored, A, B))
-                continue;
-              Matched[I] = true;
-              Found = true;
-              break;
-            }
-            if (!Found)
-              return false;
-          }
-          return true;
-        };
-
-    auto MergeExplicitExceptionRootSlot = [&](AllocaInst *From,
-                                              AllocaInst *To) {
-      SmallVector<User *, 8> Users(From->users());
-      for (User *U : Users) {
-        if (auto *Load = dyn_cast<LoadInst>(U)) {
-          Load->setOperand(0, To);
-          continue;
-        }
-        if (auto *Store = dyn_cast<StoreInst>(U)) {
-          Store->eraseFromParent();
-          continue;
-        }
-        if (auto *I = dyn_cast<Instruction>(U)) {
-          I->replaceUsesOfWith(From, To);
-          continue;
-        }
-        From->print(errs());
-        errs() << "\n";
-        U->print(errs());
-        errs() << "\n";
-        report_fatal_error("unexpected duplicate OxCaml exception root user");
-      }
-
-      ReplaceExplicitRootSlot(From, To);
-      if (From->use_empty())
-        From->eraseFromParent();
-      Changed = true;
     };
 
     SmallPtrSet<AllocaInst *, 8> RemovedExplicitExceptionRootSlots;
@@ -4504,36 +4278,6 @@ static bool materializeOxCamlExceptionRootSlots(
           DuplicateSlot->eraseFromParent();
         RemovedExplicitExceptionRootSlots.insert(DuplicateSlot);
         Changed = true;
-      }
-    }
-
-    SmallVector<AllocaInst *, 16> CurrentExceptionRootSlots;
-    SmallPtrSet<AllocaInst *, 16> SeenExceptionRootSlots;
-    for (Instruction &I : EntryBlock) {
-      auto *Slot = dyn_cast<AllocaInst>(&I);
-      if (!Slot || !IsExplicitExceptionRootSlot(Slot))
-        continue;
-      if (RemovedExplicitExceptionRootSlots.contains(Slot))
-        continue;
-      if (SeenExceptionRootSlots.insert(Slot).second)
-        CurrentExceptionRootSlots.push_back(Slot);
-    }
-
-    for (unsigned I = 0, E = CurrentExceptionRootSlots.size(); I != E; ++I) {
-      AllocaInst *Canonical = CurrentExceptionRootSlots[I];
-      if (!Canonical->getParent() ||
-          RemovedExplicitExceptionRootSlots.contains(Canonical))
-        continue;
-      for (unsigned J = I + 1; J != E; ++J) {
-        AllocaInst *Duplicate = CurrentExceptionRootSlots[J];
-        if (!Duplicate->getParent() ||
-            RemovedExplicitExceptionRootSlots.contains(Duplicate))
-          continue;
-        if (!SameExplicitExceptionRootStoreKeys(Canonical, Duplicate))
-          continue;
-
-        MergeExplicitExceptionRootSlot(Duplicate, Canonical);
-        RemovedExplicitExceptionRootSlots.insert(Duplicate);
       }
     }
 
@@ -4702,17 +4446,12 @@ static bool materializeRemainingOxCamlRecoveryPhis(
         suffixed_name_or(PN, ".recoverphi", "recoverphi"));
     Slot->setAlignment(DL.getABITypeAlign(PN->getType()));
     bool IsGCRoot = isHandledGCPointerType(PN->getType());
-    if (IsGCRoot)
-      Slot->setMetadata("oxcaml.statepoint.root.slot",
-                        MDNode::get(F.getContext(), {}));
-    StoreInst *InitialStore = EntryBuilder.CreateAlignedStore(
+    EntryBuilder.CreateAlignedStore(
         IsGCRoot ? getOxCamlNonMovingImmediate(PN->getType())
                  : Constant::getNullValue(PN->getType()),
         Slot, DL.getABITypeAlign(PN->getType()));
-    if (IsGCRoot) {
-      InitialStore->setVolatile(true);
+    if (IsGCRoot)
       RootSlots.push_back(Slot);
-    }
 
     auto StoreForInvokeEdge = [&](InvokeInst *II, Value *IncomingValue) {
       if (auto *IncomingPhi = dyn_cast<PHINode>(IncomingValue)) {
@@ -4732,10 +4471,8 @@ static bool materializeRemainingOxCamlRecoveryPhis(
           report_fatal_error(
               "recovery PHI incoming value does not dominate edge store");
       IRBuilder<> StoreBuilder(II);
-      StoreInst *Store = StoreBuilder.CreateAlignedStore(
+      StoreBuilder.CreateAlignedStore(
           IncomingValue, Slot, DL.getABITypeAlign(PN->getType()));
-      if (IsGCRoot)
-        Store->setVolatile(true);
     };
 
     for (unsigned I = 0, E = PN->getNumIncomingValues(); I != E; ++I) {
@@ -4768,18 +4505,14 @@ static bool materializeRemainingOxCamlRecoveryPhis(
           report_fatal_error(
               "recovery PHI incoming value does not dominate edge store");
       IRBuilder<> StoreBuilder(InsertBefore);
-      StoreInst *Store = StoreBuilder.CreateAlignedStore(
+      StoreBuilder.CreateAlignedStore(
           IncomingValue, Slot, DL.getABITypeAlign(PN->getType()));
-      if (IsGCRoot)
-        Store->setVolatile(true);
     }
 
     IRBuilder<> LoadBuilder(Recover->getNextNode());
     LoadInst *Load = LoadBuilder.CreateAlignedLoad(
         PN->getType(), Slot, DL.getABITypeAlign(PN->getType()),
         suffixed_name_or(PN, ".recoverphi.load", "recoverphi.load"));
-    if (IsGCRoot)
-      Load->setVolatile(true);
     PN->replaceAllUsesWith(Load);
     PN->eraseFromParent();
     return true;
@@ -4926,9 +4659,6 @@ static bool isLiveValueSupportedByOxCamlVolatileRootAllocas(
       BaseTy->getAddressSpace() != 1)
     return true;
 
-  if (!isDistinctOxCamlAddrSpace1AddressExpression(LiveValue, Base))
-    return true;
-
   return isDistinctOxCamlAddrSpace1BaseEquivalentGCPointer(LiveValue, Base);
 }
 
@@ -5039,8 +4769,6 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
   DenseSet<Value *> RematerializedDerivedValues;
   RematCandTy RematerializedDerivedChains;
   const bool IsOxCamlStatepoint = isOxCamlCallingConv(Call->getCallingConv());
-  auto *InvokeWithExplicitRoots =
-      Result.UsesExplicitExceptionRoots ? dyn_cast<InvokeInst>(Call) : nullptr;
   auto PrintOxCamlDerivedCandidate = [&](Value *Derived, Value *Base) {
     if (!DebugOxCamlDerivedRemat || !IsOxCamlStatepoint)
       return;
@@ -5558,22 +5286,6 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
       if (BaseIt != PointerToBase.end())
         PrintOxCamlDerivedCandidate(LiveVariable, BaseIt->second);
     }
-    if (InvokeWithExplicitRoots &&
-        !hasNormalUseAfterInvoke(InvokeWithExplicitRoots, LiveVariable, DT)) {
-      if (DebugOxCamlDerivedRemat) {
-        errs() << "rs4gc-oxcaml-drop-handler-only-live in "
-               << Call->getFunction()->getName() << "\n  call: ";
-        Call->print(errs());
-        errs() << "\n  live: ";
-        LiveVariable->print(errs());
-        errs() << "\n";
-      }
-      continue;
-    }
-    if (ShouldRematerializeDerivedFromBase(LiveVariable)) {
-      RematerializedDerivedValues.insert(LiveVariable);
-      continue;
-    }
     if (UseOxCamlVolatileRootAllocas && IsOxCamlStatepoint &&
         !isLiveValueSupportedByOxCamlVolatileRootAllocas(LiveVariable,
                                                          PointerToBase)) {
@@ -5588,6 +5300,10 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
       }
       errs() << "\n";
       report_fatal_error("unsupported OxCaml volatile root alloca live value");
+    }
+    if (ShouldRematerializeDerivedFromBase(LiveVariable)) {
+      RematerializedDerivedValues.insert(LiveVariable);
+      continue;
     }
     bool IsOxCamlSelfBaseEquivalent =
         IsOxCamlStatepoint && BaseIt != PointerToBase.end() &&
@@ -6005,11 +5721,8 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
   }
 
   Result.StatepointToken = Token;
-  Result.IsOxCamlStatepoint = IsOxCamlStatepoint;
 
-  // Second, create a gc.relocate for every live variable.  In OxCaml volatile
-  // root-slot mode, the statepoint reports explicit volatile root slots instead
-  // of relocatable SSA values.
+  // Second, create a gc.relocate for every live variable
   if (!UseOxCamlVolatileRootAllocas || !IsOxCamlStatepoint) {
     CreateGCRelocates(FilteredLiveVariables, FilteredBasePtrs, Token, Builder);
     AddDerivedRematerializations(Token);
@@ -6330,51 +6043,15 @@ static void volatileRootAllocaViaStatepointLiveSet(
   BasicBlock &EntryBlock = F.getEntryBlock();
   IRBuilder<> EntryBuilder(&EntryBlock, EntryBlock.getFirstInsertionPt());
 
-  PointerToBaseTy LocalPointerToBase = PointerToBase;
   DenseMap<Value *, AllocaInst *> AllocaMap;
   DenseMap<Value *, SmallVector<Instruction *, 4>> StatepointsByRootValue;
   SmallVector<Value *, 64> RootValues;
   SmallPtrSet<Value *, 32> SeenRootValues;
 
-  auto CanRematerializeVolatileRootAddressExpression =
-      [&](Value *V, Value *Base) {
-        SmallVector<Instruction *, 4> ChainToBase;
-        if (findRematerializableChainToSpecificBase(
-                ChainToBase, V, Base,
-                /*AllowIntegerAddressArithmetic=*/false))
-          return true;
-
-        auto *ValuePhi = dyn_cast<PHINode>(V);
-        if (!ValuePhi)
-          return false;
-
-        bool NeedsBaseSelect = false;
-        if (auto *BasePhi = dyn_cast<PHINode>(Base))
-          if (findRematerializablePhiChainToBasePhi(
-                  ChainToBase, ValuePhi, BasePhi, LocalPointerToBase,
-                  /*AllowIntegerAddressArithmetic=*/false, NeedsBaseSelect) &&
-              !NeedsBaseSelect)
-            return true;
-
-        NeedsBaseSelect = false;
-        return findRematerializablePhiChainToSingleBase(
-                   ChainToBase, ValuePhi, Base, LocalPointerToBase,
-                   /*AllowIntegerAddressArithmetic=*/false, NeedsBaseSelect) &&
-               !NeedsBaseSelect;
-      };
-
   auto RootValueFor = [&](Value *V) -> Value * {
-    auto It = LocalPointerToBase.find(V);
-    if (It != LocalPointerToBase.end()) {
-      Value *Base = It->second;
-      auto *VTy = dyn_cast<PointerType>(V->getType());
-      auto *BaseTy = dyn_cast<PointerType>(Base->getType());
-      if (Base != V && VTy && BaseTy && VTy->getAddressSpace() == 1 &&
-          BaseTy->getAddressSpace() == 1 &&
-          isDistinctOxCamlAddrSpace1AddressExpression(V, Base) &&
-          CanRematerializeVolatileRootAddressExpression(V, Base))
-        return Base;
-    }
+    auto It = PointerToBase.find(V);
+    if (It != PointerToBase.end())
+      return It->second;
     return V;
   };
 
@@ -6391,119 +6068,54 @@ static void volatileRootAllocaViaStatepointLiveSet(
     StatepointsByRootValue[Root].push_back(Statepoint);
   };
 
-  for (PartiallyConstructedSafepointRecord &Info : Records) {
-    if (!Info.IsOxCamlStatepoint)
-      continue;
+  for (PartiallyConstructedSafepointRecord &Info : Records)
     for (Value *V : Info.StatepointToken->gc_args())
       RememberLiveValueAt(V, Info.StatepointToken);
-  }
 
   auto InsertVolatileStore = [&](Value *Stored, AllocaInst *Slot,
                                  Instruction *InsertBefore) {
-    if (!InsertBefore) {
-      errs() << "missing OxCaml volatile root store insertion point\n"
-             << "  stored: ";
-      Stored->print(errs());
-      errs() << "\n  slot: ";
-      Slot->print(errs());
-      errs() << "\n";
-      report_fatal_error(
-          "missing OxCaml volatile root store insertion point");
-    }
     IRBuilder<> Builder(InsertBefore);
     StoreInst *Store = Builder.CreateAlignedStore(
         Stored, Slot, DL.getABITypeAlign(Stored->getType()));
     Store->setVolatile(true);
   };
 
-  auto InsertVolatileLoad = [&](Value *Slot, Type *LoadedType,
-                                Instruction *InsertBefore,
+  auto InsertVolatileLoad = [&](AllocaInst *Slot, Instruction *InsertBefore,
                                 Twine Name = "") -> LoadInst * {
-    if (!InsertBefore) {
-      errs() << "missing OxCaml volatile root load insertion point\n"
-             << "  slot: ";
-      Slot->print(errs());
-      errs() << "\n";
-      report_fatal_error(
-          "missing OxCaml volatile root load insertion point");
-    }
     IRBuilder<> Builder(InsertBefore);
-    LoadInst *Load =
-        Builder.CreateAlignedLoad(LoadedType, Slot,
-                                  DL.getABITypeAlign(LoadedType), Name);
+    LoadInst *Load = Builder.CreateAlignedLoad(
+        Slot->getAllocatedType(), Slot, DL.getABITypeAlign(
+                                           Slot->getAllocatedType()),
+        Name);
     Load->setVolatile(true);
     return Load;
   };
 
-  struct RootSlotPointer {
-    Value *Slot;
-    Type *LoadedType;
-  };
+  auto InsertInitialStore = [&](Value *Def, AllocaInst *Slot) {
+    if (auto *Inst = dyn_cast<Instruction>(Def)) {
+      if (auto *PN = dyn_cast<PHINode>(Inst)) {
+        InsertVolatileStore(Def, Slot, &*PN->getParent()->getFirstInsertionPt());
+      } else if (auto *II = dyn_cast<InvokeInst>(Inst)) {
+        InsertVolatileStore(Def, Slot,
+                            &*II->getNormalDest()->getFirstInsertionPt());
+      } else {
+        assert(!Inst->isTerminator() &&
+               "only invoke terminators can define root values");
+        InsertVolatileStore(Def, Slot, Inst->getNextNode());
+      }
+      return;
+    }
 
-  auto RefreshInstructionRootSlot = [&](Value *RootValue,
-                                        RootSlotPointer SlotPointer,
-                                        bool UsesPhiSlotSelector,
-                                        Instruction *InsertBefore,
-                                        bool SlotIsAuthoritative) {
-    if (UsesPhiSlotSelector)
-      return;
-    if (SlotIsAuthoritative)
-      return;
-    if (!isa<Instruction>(RootValue))
-      return;
-    auto SlotIt = AllocaMap.find(RootValue);
-    if (SlotIt == AllocaMap.end())
-      return;
-    if (SlotIt->second == SlotPointer.Slot)
-      return;
-    InsertVolatileStore(RootValue, SlotIt->second, InsertBefore);
-  };
-
-  auto InsertEntryStore = [&](Value *Def, AllocaInst *Slot) {
     assert((isa<Argument>(Def) || isa<Constant>(Def)) &&
-           "entry stores are only for values already available at entry");
+           "expected root to be an argument, constant, or instruction");
     InsertVolatileStore(Def, Slot, &*EntryBuilder.GetInsertPoint());
   };
 
-  auto FirstLegalInsertionPointForRootStore = [&](BasicBlock *BB)
-      -> Instruction * {
-    if (IntrinsicInst *Recover = getOxCamlTrapRecover(*BB)) {
-      if (isOxCamlRecoveryBlockStart(*BB, Recover)) {
-        Instruction *AfterRecover = Recover->getNextNode();
-        if (!AfterRecover) {
-          errs() << "OxCaml recovery block has no insertion point after "
-                    "trap.recover\n  block: ";
-          BB->printAsOperand(errs(), false);
-          errs() << "\n";
-          report_fatal_error(
-              "missing OxCaml recovery root store insertion point");
-        }
-        return AfterRecover;
-      }
-    }
-    return &*BB->getFirstInsertionPt();
-  };
-
-  auto InstructionRootStorePoint = [&](Instruction *RootInst) -> Instruction * {
-    if (auto *PN = dyn_cast<PHINode>(RootInst))
-      return FirstLegalInsertionPointForRootStore(PN->getParent());
-
-    // The result of an invoke is only available on the normal edge.
-    if (auto *II = dyn_cast<InvokeInst>(RootInst))
-      return FirstLegalInsertionPointForRootStore(II->getNormalDest());
-
-    return RootInst->getNextNode();
-  };
-
-  auto CreateRootSlot = [&](Value *RootValue) -> AllocaInst * {
-    assert(AllocaMap.find(RootValue) == AllocaMap.end() &&
-           "root slot already exists");
+  for (Value *RootValue : RootValues) {
     AllocaInst *Slot = EntryBuilder.CreateAlloca(
         RootValue->getType(), DL.getAllocaAddrSpace(), nullptr,
         suffixed_name_or(RootValue, ".root", "root"));
     Slot->setAlignment(DL.getABITypeAlign(RootValue->getType()));
-    Slot->setMetadata("oxcaml.statepoint.root.slot",
-                      MDNode::get(F.getContext(), {}));
 
     StoreInst *InitialStore = EntryBuilder.CreateAlignedStore(
         getOxCamlNonMovingImmediate(RootValue->getType()), Slot,
@@ -6511,482 +6123,10 @@ static void volatileRootAllocaViaStatepointLiveSet(
     InitialStore->setVolatile(true);
 
     AllocaMap[RootValue] = Slot;
-    return Slot;
-  };
-
-  for (Value *RootValue : RootValues) {
-    AllocaInst *Slot = CreateRootSlot(RootValue);
-    if (isa<Argument>(RootValue) || isa<Constant>(RootValue))
-      InsertEntryStore(RootValue, Slot);
-  }
-
-  for (Value *RootValue : RootValues) {
-    if (!isa<Instruction>(RootValue))
-      continue;
-
-    auto SlotIt = AllocaMap.find(RootValue);
-    assert(SlotIt != AllocaMap.end() &&
-           "instruction root must have a volatile root slot");
-    auto StatepointIt = StatepointsByRootValue.find(RootValue);
-    if (StatepointIt == StatepointsByRootValue.end())
-      continue;
-
-    auto *RootInst = cast<Instruction>(RootValue);
-    Instruction *StorePoint = InstructionRootStorePoint(RootInst);
-    InsertVolatileStore(RootValue, SlotIt->second, StorePoint);
-
-    for (Instruction *Statepoint : StatepointIt->second) {
-      if (!DT.dominates(RootInst, Statepoint)) {
-        errs() << "OxCaml volatile root definition does not dominate "
-                  "statepoint\n  root: ";
-        RootValue->print(errs());
-        errs() << "\n  statepoint: ";
-        Statepoint->print(errs());
-        errs() << "\n";
-        report_fatal_error(
-            "misplaced OxCaml volatile root definition for statepoint");
-      }
-    }
-  }
-
-  auto StatepointCanReachItself = [&](Instruction *Statepoint) {
-    if (auto *II = dyn_cast<InvokeInst>(Statepoint)) {
-      BasicBlock *BB = II->getParent();
-      return isPotentiallyReachable(II->getNormalDest(), BB, nullptr, &DT) ||
-             isPotentiallyReachable(II->getUnwindDest(), BB, nullptr, &DT);
-    }
-
-    Instruction *Next = Statepoint->getNextNode();
-    return Next && isPotentiallyReachable(Next, Statepoint, nullptr, &DT);
-  };
-
-  auto RootRedefinitionExclusionSet = [&](Value *RootValue)
-      -> SmallPtrSet<BasicBlock *, 1> {
-    SmallPtrSet<BasicBlock *, 1> ExclusionSet;
-    auto *RootInst = dyn_cast<Instruction>(RootValue);
-    if (!RootInst || isa<PHINode>(RootInst))
-      return ExclusionSet;
-    ExclusionSet.insert(RootInst->getParent());
-    return ExclusionSet;
-  };
-
-  auto StatepointIsBeforeInstruction = [&](Value *RootValue,
-                                           Instruction *Statepoint,
-                                           Instruction *Use) {
-    if (Statepoint != Use && DT.dominates(Statepoint, Use))
-      return true;
-    if (Statepoint->getParent() == Use->getParent() &&
-        Use->comesBefore(Statepoint)) {
-      auto *RootInst = dyn_cast<Instruction>(RootValue);
-      if (RootInst && !isa<PHINode>(RootInst) &&
-          RootInst->getParent() == Use->getParent() &&
-          RootInst->comesBefore(Use))
-        return false;
-    }
-    SmallPtrSet<BasicBlock *, 1> ExclusionSet =
-        RootRedefinitionExclusionSet(RootValue);
-    auto *Exclusions =
-        ExclusionSet.empty() ? nullptr : &ExclusionSet;
-    auto *II = dyn_cast<InvokeInst>(Statepoint);
-    if (II) {
-      BasicBlock *UseBB = Use->getParent();
-      if (UseBB == II->getParent())
-        return false;
-      return isPotentiallyReachable(II->getNormalDest(), UseBB, Exclusions,
-                                    &DT) ||
-             isPotentiallyReachable(II->getUnwindDest(), UseBB, Exclusions,
-                                    &DT);
-    }
-
-    Instruction *Next = Statepoint->getNextNode();
-    return Next && isPotentiallyReachable(Next, Use, Exclusions, &DT);
-  };
-
-  auto IsUseAfterRootingStatepoint = [&](Value *RootValue, Instruction *Use) {
-    auto It = StatepointsByRootValue.find(RootValue);
-    if (It == StatepointsByRootValue.end())
-      return false;
-    for (Instruction *Statepoint : It->second)
-      if (StatepointIsBeforeInstruction(RootValue, Statepoint, Use) ||
-          (Statepoint == Use && StatepointCanReachItself(Statepoint)))
-        return true;
-    return false;
-  };
-
-  auto IsEdgeUseAfterRootingStatepoint = [&](Value *RootValue,
-                                             Instruction *EdgeTerminator) {
-    auto It = StatepointsByRootValue.find(RootValue);
-    if (It == StatepointsByRootValue.end())
-      return false;
-    for (Instruction *Statepoint : It->second)
-      if (StatepointIsBeforeInstruction(RootValue, Statepoint, EdgeTerminator))
-        return true;
-    return false;
-  };
-
-  auto IsPhiEdgeAfterRootingStatepoint = [&](Value *RootValue,
-                                             Instruction *EdgeTerminator) {
-    auto It = StatepointsByRootValue.find(RootValue);
-    if (It == StatepointsByRootValue.end())
-      return false;
-    for (Instruction *Statepoint : It->second)
-      if (Statepoint == EdgeTerminator ||
-          StatepointIsBeforeInstruction(RootValue, Statepoint, EdgeTerminator))
-        return true;
-    return false;
-  };
-
-  auto RootSlotIsAuthoritativeAtInstruction = [&](Value *RootValue,
-                                                  Instruction *Use) {
-    auto It = StatepointsByRootValue.find(RootValue);
-    if (It == StatepointsByRootValue.end())
-      return false;
-    for (Instruction *Statepoint : It->second)
-      if (Statepoint != Use && DT.dominates(Statepoint, Use))
-        return true;
-    return false;
-  };
-
-  auto RootSlotIsAuthoritativeOnPhiEdge = [&](Value *RootValue,
-                                              Instruction *EdgeTerminator) {
-    auto It = StatepointsByRootValue.find(RootValue);
-    if (It == StatepointsByRootValue.end())
-      return false;
-    for (Instruction *Statepoint : It->second) {
-      // For invoke statepoints, the incoming PHI edge is after the invoke even
-      // though the only available insertion point is before the terminator.
-      if (Statepoint == EdgeTerminator)
-        return true;
-      if (DT.dominates(Statepoint, EdgeTerminator))
-        return true;
-    }
-    return false;
-  };
-
-  DenseMap<Value *, RootSlotPointer> RootSlotPointerForValue;
-  DenseMap<PHINode *, PHINode *> RootSlotSelectorForPhi;
-
-  auto RootSlotPointerForGCLiveInput = [&](Value *Input)
-      -> RootSlotPointer {
-    if (auto *PN = dyn_cast<PHINode>(Input)) {
-      auto SelectorIt = RootSlotPointerForValue.find(PN);
-      if (SelectorIt != RootSlotPointerForValue.end())
-        return SelectorIt->second;
-    }
-
-    Value *Root = RootValueFor(Input);
-    auto SlotIt = AllocaMap.find(Root);
-    if (SlotIt == AllocaMap.end())
-      return {nullptr, nullptr};
-    return {SlotIt->second, SlotIt->second->getAllocatedType()};
-  };
-
-  auto IsVolatileLoadFromRootSlot = [&](Value *V, Value *RootValue) {
-    auto *Load = dyn_cast<LoadInst>(V);
-    if (!Load || !Load->isVolatile())
-      return false;
-    RootSlotPointer SlotPointer = RootSlotPointerForGCLiveInput(RootValue);
-    return SlotPointer.Slot && Load->getPointerOperand() == SlotPointer.Slot;
-  };
-
-  struct VolatileRootRematerialization {
-    SmallVector<Instruction *, 3> ChainToBase;
-    Value *RootOfChain = nullptr;
-  };
-
-  auto FindVolatileRootRematerialization =
-      [&](Value *ValueToRewrite,
-          Value *RootValue) -> std::optional<VolatileRootRematerialization> {
-    if (ValueToRewrite == RootValue)
-      return std::nullopt;
-    if (!isDistinctOxCamlAddrSpace1AddressExpression(ValueToRewrite,
-                                                     RootValue))
-      return std::nullopt;
-
-    VolatileRootRematerialization Result;
-    if (findRematerializableChainToSpecificBase(
-            Result.ChainToBase, ValueToRewrite, RootValue,
-            /*AllowIntegerAddressArithmetic=*/false)) {
-      Result.RootOfChain = RootValue;
-      return Result;
-    }
-
-    auto RootMatchesRootValue = [&](Value *Root) {
-      if (Root == RootValue)
-        return true;
-      if (IsVolatileLoadFromRootSlot(Root, RootValue))
-        return true;
-      auto It = LocalPointerToBase.find(Root);
-      if (It != LocalPointerToBase.end() && It->second == RootValue)
-        return true;
-      return isOxCamlBaseEquivalentGCPointer(Root, RootValue);
-    };
-
-    Result.ChainToBase.clear();
-    Value *RootOfChain = findRematerializableChainToBasePointer(
-        Result.ChainToBase, ValueToRewrite,
-        /*AllowIntegerAddressArithmetic=*/false);
-    if (!Result.ChainToBase.empty() && RootMatchesRootValue(RootOfChain)) {
-      Result.RootOfChain = RootOfChain;
-      return Result;
-    }
-
-    if (auto *ValuePhi = dyn_cast<PHINode>(ValueToRewrite)) {
-      if (auto *RootPhi = dyn_cast<PHINode>(RootValue)) {
-        bool NeedsBaseSelect = false;
-        if (Value *RootOfChain = findRematerializablePhiChainToBasePhi(
-                Result.ChainToBase, ValuePhi, RootPhi, LocalPointerToBase,
-                /*AllowIntegerAddressArithmetic=*/false, NeedsBaseSelect)) {
-          if (!NeedsBaseSelect) {
-            Result.RootOfChain = RootOfChain;
-            return Result;
-          }
-        }
-      }
-
-      bool NeedsBaseSelect = false;
-      if (Value *RootOfChain = findRematerializablePhiChainToSingleBase(
-              Result.ChainToBase, ValuePhi, RootValue, LocalPointerToBase,
-              /*AllowIntegerAddressArithmetic=*/false, NeedsBaseSelect)) {
-        if (!NeedsBaseSelect) {
-          Result.RootOfChain = RootOfChain;
-          return Result;
-        }
-      }
-    }
-
-    errs() << "OxCaml volatile root cannot rematerialize address expression "
-              "from rooted base\n  value: ";
-    ValueToRewrite->print(errs());
-    errs() << "\n  root: ";
-    RootValue->print(errs());
-    errs() << "\n";
-    report_fatal_error(
-        "unsupported OxCaml volatile root address expression");
-  };
-
-  auto LoadVolatileRootValueForUse =
-      [&](Value *ValueToRewrite, Value *RootValue,
-          RootSlotPointer SlotPointer, Instruction *InsertBefore,
-          Twine Name) -> Value * {
-    LoadInst *Load = InsertVolatileLoad(SlotPointer.Slot,
-                                        SlotPointer.LoadedType, InsertBefore,
-                                        Name);
-    LocalPointerToBase[Load] = RootValue;
-    std::optional<VolatileRootRematerialization> Remat =
-        FindVolatileRootRematerialization(ValueToRewrite, RootValue);
-    if (!Remat)
-      return Load;
-    Instruction *Rematerialized = rematerializeChain(
-        Remat->ChainToBase, InsertBefore, Remat->RootOfChain, Load);
-    LocalPointerToBase[Rematerialized] = RootValue;
-    return Rematerialized;
-  };
-
-  auto GetOrCreatePhiPrivateSlot = [&](PHINode &Phi) -> AllocaInst * {
-    auto PhiSlotIt = AllocaMap.find(&Phi);
-    if (PhiSlotIt != AllocaMap.end())
-      return PhiSlotIt->second;
-    return CreateRootSlot(&Phi);
-  };
-
-  auto EdgeCanCopyToPhiPrivateSlot = [&](BasicBlock *IncomingBlock) {
-    return !isa<InvokeInst>(IncomingBlock->getTerminator());
-  };
-
-  auto RootSlotPointerForIncoming = [&](Value *Incoming,
-                                        Value *IncomingRoot)
-      -> RootSlotPointer {
-    if (auto *IncomingPhi = dyn_cast<PHINode>(Incoming)) {
-      auto IncomingSelectorIt = RootSlotPointerForValue.find(IncomingPhi);
-      if (IncomingSelectorIt != RootSlotPointerForValue.end())
-        return IncomingSelectorIt->second;
-    }
-
-    auto SlotIt = AllocaMap.find(IncomingRoot);
-    if (SlotIt != AllocaMap.end())
-      return {SlotIt->second, SlotIt->second->getAllocatedType()};
-
-    return {nullptr, nullptr};
-  };
-
-  auto CopyIncomingToPhiPrivateSlot = [&](PHINode &Phi, Value *Incoming,
-                                          BasicBlock *IncomingBlock,
-                                          AllocaInst *PhiSlot) {
-    Instruction *IncomingTerminator = IncomingBlock->getTerminator();
-    Value *IncomingRoot = RootValueFor(Incoming);
-    bool IsAfterRootingStatepoint =
-        IsPhiEdgeAfterRootingStatepoint(IncomingRoot, IncomingTerminator);
-
-    if (!IsAfterRootingStatepoint) {
-      InsertVolatileStore(Incoming, PhiSlot, IncomingTerminator);
-      return;
-    }
-
-    if (isa<InvokeInst>(IncomingTerminator)) {
-      errs() << "OxCaml volatile root PHI edge copy would need to read after "
-                "an invoke statepoint\n  phi: ";
-      Phi.print(errs());
-      errs() << "\n  incoming: ";
-      Incoming->print(errs());
-      errs() << "\n";
-      report_fatal_error("unsupported OxCaml volatile root invoke PHI copy");
-    }
-
-    RootSlotPointer IncomingSlotPointer =
-        RootSlotPointerForIncoming(Incoming, IncomingRoot);
-    if (!IncomingSlotPointer.Slot || !IncomingSlotPointer.LoadedType) {
-      errs() << "OxCaml volatile root PHI edge copy has no rooted incoming "
-                "slot\n  phi: ";
-      Phi.print(errs());
-      errs() << "\n  incoming: ";
-      Incoming->print(errs());
-      errs() << "\n";
-      report_fatal_error("unsupported OxCaml volatile root PHI copy");
-    }
-
-    LoadInst *Loaded = InsertVolatileLoad(
-        IncomingSlotPointer.Slot, IncomingSlotPointer.LoadedType,
-        IncomingTerminator,
-        suffixed_name_or(IncomingRoot, ".root.copy", "root.copy"));
-    InsertVolatileStore(Loaded, PhiSlot, IncomingTerminator);
-  };
-
-  SmallPtrSet<PHINode *, 32> PhisNeedingRootedSlotSelector;
-  bool AddedPhiSelector = true;
-  while (AddedPhiSelector) {
-    AddedPhiSelector = false;
-    for (BasicBlock &BB : F) {
-      for (PHINode &Phi : BB.phis()) {
-        if (!isHandledGCPointerType(Phi.getType()) ||
-            PhisNeedingRootedSlotSelector.contains(&Phi))
-          continue;
-        if (StatepointsByRootValue.find(&Phi) == StatepointsByRootValue.end())
-          continue;
-        if (AllocaMap.find(&Phi) != AllocaMap.end())
-          continue;
-
-        bool NeedsRootedSlotSelector = false;
-        for (unsigned I = 0, E = Phi.getNumIncomingValues(); I != E; ++I) {
-          Value *Incoming = Phi.getIncomingValue(I);
-          if (auto *IncomingPhi = dyn_cast<PHINode>(Incoming)) {
-            if (PhisNeedingRootedSlotSelector.contains(IncomingPhi)) {
-              NeedsRootedSlotSelector = true;
-              break;
-            }
-          }
-
-          Value *IncomingRoot = RootValueFor(Incoming);
-          auto SlotIt = AllocaMap.find(IncomingRoot);
-          Instruction *IncomingTerminator =
-              Phi.getIncomingBlock(I)->getTerminator();
-          if (SlotIt != AllocaMap.end() &&
-              IsPhiEdgeAfterRootingStatepoint(IncomingRoot,
-                                              IncomingTerminator)) {
-            NeedsRootedSlotSelector = true;
-            break;
-          }
-        }
-
-        if (NeedsRootedSlotSelector) {
-          PhisNeedingRootedSlotSelector.insert(&Phi);
-          AddedPhiSelector = true;
-        }
-      }
-    }
-  }
-
-  for (BasicBlock &BB : F) {
-    for (PHINode &Phi : BB.phis()) {
-      if (!PhisNeedingRootedSlotSelector.contains(&Phi))
-        continue;
-      AllocaInst *PhiSlot = GetOrCreatePhiPrivateSlot(Phi);
-      RootSlotPointerForValue[&Phi] = {PhiSlot, Phi.getType()};
-    }
-  }
-
-  for (BasicBlock &BB : F) {
-    for (PHINode &Phi : BB.phis()) {
-      auto SelectorIt = RootSlotPointerForValue.find(&Phi);
-      if (SelectorIt == RootSlotPointerForValue.end())
-        continue;
-
-      auto *PhiSlot = cast<AllocaInst>(SelectorIt->second.Slot);
-      PHINode *SlotPhi = nullptr;
-      auto GetOrCreateSlotPhi = [&]() -> PHINode * {
-        if (SlotPhi)
-          return SlotPhi;
-        auto ExistingIt = RootSlotSelectorForPhi.find(&Phi);
-        if (ExistingIt != RootSlotSelectorForPhi.end()) {
-          SlotPhi = ExistingIt->second;
-          return SlotPhi;
-        }
-        SlotPhi = PHINode::Create(
-            PointerType::get(F.getContext(), DL.getAllocaAddrSpace()),
-            Phi.getNumIncomingValues(),
-            suffixed_name_or(&Phi, ".root.slot", "root.slot"), &Phi);
-        RootSlotSelectorForPhi[&Phi] = SlotPhi;
-        return SlotPhi;
-      };
-
-      for (unsigned I = 0, E = Phi.getNumIncomingValues(); I != E; ++I) {
-        Value *Incoming = Phi.getIncomingValue(I);
-        BasicBlock *IncomingBlock = Phi.getIncomingBlock(I);
-        if (EdgeCanCopyToPhiPrivateSlot(IncomingBlock)) {
-          CopyIncomingToPhiPrivateSlot(Phi, Incoming, IncomingBlock, PhiSlot);
-          continue;
-        }
-
-        if (auto *IncomingPhi = dyn_cast<PHINode>(Incoming)) {
-          auto IncomingSelectorIt = RootSlotSelectorForPhi.find(IncomingPhi);
-          if (IncomingSelectorIt != RootSlotSelectorForPhi.end()) {
-            GetOrCreateSlotPhi()->addIncoming(IncomingSelectorIt->second,
-                                              IncomingBlock);
-            continue;
-          }
-        }
-
-        Value *IncomingRoot = RootValueFor(Incoming);
-        auto SlotIt = AllocaMap.find(IncomingRoot);
-        if (SlotIt != AllocaMap.end()) {
-          GetOrCreateSlotPhi()->addIncoming(SlotIt->second, IncomingBlock);
-          continue;
-        }
-
-        Instruction *IncomingTerminator = IncomingBlock->getTerminator();
-        bool IsAfterRootingStatepoint =
-            IsPhiEdgeAfterRootingStatepoint(IncomingRoot, IncomingTerminator);
-        if (!IsAfterRootingStatepoint) {
-          CopyIncomingToPhiPrivateSlot(Phi, Incoming, IncomingBlock, PhiSlot);
-          continue;
-        }
-
-        errs() << "OxCaml volatile root allocas cannot materialize PHI with "
-                  "unrooted incoming value";
-        if (IsAfterRootingStatepoint)
-          errs() << " after statepoint";
-        errs() << "\n  phi: ";
-        Phi.print(errs());
-        errs() << "\n  incoming: ";
-        Incoming->print(errs());
-        errs() << "\n";
-        report_fatal_error("unsupported OxCaml volatile root PHI");
-      }
-
-      if (SlotPhi) {
-        Instruction *InsertBefore = FirstLegalInsertionPointForRootStore(&BB);
-        LoadInst *Loaded = InsertVolatileLoad(
-            SlotPhi, Phi.getType(), InsertBefore,
-            suffixed_name_or(&Phi, ".root.copy", "root.copy"));
-        InsertVolatileStore(Loaded, PhiSlot, InsertBefore);
-      }
-    }
+    InsertInitialStore(RootValue, Slot);
   }
 
   for (PartiallyConstructedSafepointRecord &Info : Records) {
-    if (!Info.IsOxCamlStatepoint)
-      continue;
-
     SmallVector<OperandBundleDef, 4> Bundles;
     Info.StatepointToken->getOperandBundlesAsDefs(Bundles);
     bool ChangedThisStatepoint = false;
@@ -6999,12 +6139,11 @@ static void volatileRootAllocaViaStatepointLiveSet(
       SmallPtrSet<Value *, 32> Seen;
       for (Value *Input : make_range(Bundle.input_begin(),
                                      Bundle.input_end())) {
-        if (isHandledGCPointerType(Input->getType())) {
-          RootSlotPointer SlotPointer = RootSlotPointerForGCLiveInput(Input);
-          if (SlotPointer.Slot) {
-            Input = SlotPointer.Slot;
-            ChangedThisStatepoint = true;
-          }
+        if (isHandledGCPointerType(Input->getType()))
+          Input = RootValueFor(Input);
+        if (auto It = AllocaMap.find(Input); It != AllocaMap.end()) {
+          Input = It->second;
+          ChangedThisStatepoint = true;
         }
         if (Seen.insert(Input).second)
           Inputs.push_back(Input);
@@ -7032,22 +6171,68 @@ static void volatileRootAllocaViaStatepointLiveSet(
     Info.StatepointToken = cast<GCStatepointInst>(NewCall);
   }
 
+  auto StatepointCanReachItself = [&](Instruction *Statepoint) {
+    if (auto *II = dyn_cast<InvokeInst>(Statepoint)) {
+      BasicBlock *BB = II->getParent();
+      return isPotentiallyReachable(II->getNormalDest(), BB, nullptr, &DT) ||
+             isPotentiallyReachable(II->getUnwindDest(), BB, nullptr, &DT);
+    }
+
+    Instruction *Next = Statepoint->getNextNode();
+    return Next && isPotentiallyReachable(Next, Statepoint, nullptr, &DT);
+  };
+
+  auto StatepointIsBeforeInstruction = [&](Instruction *Statepoint,
+                                           Instruction *Use) {
+    if (Statepoint != Use && DT.dominates(Statepoint, Use))
+      return true;
+    auto *II = dyn_cast<InvokeInst>(Statepoint);
+    if (II) {
+      BasicBlock *UseBB = Use->getParent();
+      if (UseBB == II->getParent())
+        return false;
+      return isPotentiallyReachable(II->getNormalDest(), UseBB, nullptr, &DT) ||
+             isPotentiallyReachable(II->getUnwindDest(), UseBB, nullptr, &DT);
+    }
+
+    Instruction *Next = Statepoint->getNextNode();
+    return Next && isPotentiallyReachable(Next, Use, nullptr, &DT);
+  };
+
+  auto IsUseAfterRootingStatepoint = [&](Value *RootValue, Instruction *Use) {
+    auto It = StatepointsByRootValue.find(RootValue);
+    if (It == StatepointsByRootValue.end())
+      return false;
+    for (Instruction *Statepoint : It->second)
+      if (StatepointIsBeforeInstruction(Statepoint, Use) ||
+          (Statepoint == Use && StatepointCanReachItself(Statepoint)))
+        return true;
+    return false;
+  };
+
+  auto IsEdgeUseAfterRootingStatepoint = [&](Value *RootValue,
+                                             Instruction *EdgeTerminator) {
+    auto It = StatepointsByRootValue.find(RootValue);
+    if (It == StatepointsByRootValue.end())
+      return false;
+    for (Instruction *Statepoint : It->second)
+      if (StatepointIsBeforeInstruction(Statepoint, EdgeTerminator))
+        return true;
+    return false;
+  };
+
   SmallVector<Value *, 128> RewriteValues;
   SmallPtrSet<Value *, 32> SeenRewriteValues;
-  DenseMap<Value *, Value *> RewriteRootValueForValue;
   auto MaybeAddRewriteValue = [&](Value *V) {
     if (!isHandledGCPointerType(V->getType()))
       return;
     if (isa<Constant>(V))
       return;
     Value *Root = RootValueFor(V);
-    if (AllocaMap.find(Root) == AllocaMap.end() &&
-        RootSlotPointerForValue.find(V) == RootSlotPointerForValue.end())
+    if (AllocaMap.find(Root) == AllocaMap.end())
       return;
-    if (SeenRewriteValues.insert(V).second) {
+    if (SeenRewriteValues.insert(V).second)
       RewriteValues.push_back(V);
-      RewriteRootValueForValue[V] = Root;
-    }
   };
 
   for (Argument &Arg : F.args())
@@ -7057,31 +6242,8 @@ static void volatileRootAllocaViaStatepointLiveSet(
       MaybeAddRewriteValue(&I);
 
   for (Value *Def : RewriteValues) {
-    auto RewriteRootIt = RewriteRootValueForValue.find(Def);
-    assert(RewriteRootIt != RewriteRootValueForValue.end() &&
-           "rewrite value must have a stable root value");
-    Value *RootValue = RewriteRootIt->second;
-    auto SlotPointerIt = RootSlotPointerForValue.find(Def);
-    bool UsesPhiSlotSelector =
-        SlotPointerIt != RootSlotPointerForValue.end();
-    RootSlotPointer SlotPointer = {nullptr, nullptr};
-    if (UsesPhiSlotSelector) {
-      SlotPointer = SlotPointerIt->second;
-    } else {
-      auto SlotIt = AllocaMap.find(RootValue);
-      if (SlotIt == AllocaMap.end()) {
-        errs() << "OxCaml volatile root rewrite value has no root slot\n"
-               << "  def: ";
-        Def->print(errs());
-        errs() << "\n  root: ";
-        RootValue->print(errs());
-        errs() << "\n";
-        report_fatal_error("missing OxCaml volatile root slot");
-      }
-      SlotPointer = {SlotIt->second, SlotIt->second->getAllocatedType()};
-    }
-    assert(SlotPointer.Slot && SlotPointer.LoadedType);
-
+    Value *RootValue = RootValueFor(Def);
+    AllocaInst *Slot = AllocaMap[RootValue];
     SmallVector<Instruction *, 20> Uses;
     for (User *U : Def->users())
       if (auto *I = dyn_cast<Instruction>(U))
@@ -7091,7 +6253,7 @@ static void volatileRootAllocaViaStatepointLiveSet(
 
     for (Instruction *Use : Uses) {
       if (auto *Store = dyn_cast<StoreInst>(Use))
-        if (Store->getPointerOperand() == SlotPointer.Slot)
+        if (Store->getPointerOperand() == Slot)
           continue;
 
       if (auto *Phi = dyn_cast<PHINode>(Use)) {
@@ -7099,105 +6261,25 @@ static void volatileRootAllocaViaStatepointLiveSet(
           if (Phi->getIncomingValue(I) != Def)
             continue;
           Instruction *Term = Phi->getIncomingBlock(I)->getTerminator();
-          if (!UsesPhiSlotSelector &&
-              !IsEdgeUseAfterRootingStatepoint(RootValue, Term))
+          if (!IsEdgeUseAfterRootingStatepoint(RootValue, Term))
             continue;
-          bool SlotIsAuthoritative =
-              RootSlotIsAuthoritativeOnPhiEdge(RootValue, Term);
-          RefreshInstructionRootSlot(RootValue, SlotPointer,
-                                     UsesPhiSlotSelector, Term,
-                                     SlotIsAuthoritative);
-          Value *Replacement = LoadVolatileRootValueForUse(
-              Def, RootValue, SlotPointer, Term,
-              suffixed_name_or(RootValue, ".root.load", "root.load"));
-          Phi->setIncomingValue(I, Replacement);
+          LoadInst *Load =
+              InsertVolatileLoad(Slot, Term,
+                                 suffixed_name_or(RootValue, ".root.load",
+                                                  "root.load"));
+          Phi->setIncomingValue(I, Load);
         }
         continue;
       }
 
-      if (!UsesPhiSlotSelector && !IsUseAfterRootingStatepoint(RootValue, Use))
+      if (!IsUseAfterRootingStatepoint(RootValue, Use))
         continue;
-      bool SlotIsAuthoritative =
-          RootSlotIsAuthoritativeAtInstruction(RootValue, Use);
-      RefreshInstructionRootSlot(RootValue, SlotPointer, UsesPhiSlotSelector,
-                                 Use, SlotIsAuthoritative);
-      Value *Replacement = LoadVolatileRootValueForUse(
-          Def, RootValue, SlotPointer, Use,
-          suffixed_name_or(RootValue, ".root.load", "root.load"));
-      Use->replaceUsesOfWith(Def, Replacement);
+      LoadInst *Load =
+          InsertVolatileLoad(Slot, Use,
+                             suffixed_name_or(RootValue, ".root.load",
+                                              "root.load"));
+      Use->replaceUsesOfWith(Def, Load);
     }
-  }
-
-  auto InsertRelocationStore = [&](GCRelocateInst *Relocate) {
-    Value *DerivedPtr = Relocate->getDerivedPtr();
-    Value *Slot = nullptr;
-    Type *SlotValueType = nullptr;
-
-    if (auto *Load = dyn_cast<LoadInst>(DerivedPtr)) {
-      if (Load->isVolatile() && isHandledGCPointerType(Load->getType())) {
-        Slot = Load->getPointerOperand();
-        SlotValueType = Load->getType();
-      }
-    }
-
-    if (!Slot) {
-      Value *OriginalValue = RootValueFor(DerivedPtr);
-      auto SlotIt = AllocaMap.find(OriginalValue);
-      if (SlotIt == AllocaMap.end())
-        return;
-      Slot = SlotIt->second;
-      SlotValueType = SlotIt->second->getAllocatedType();
-    }
-
-    Instruction *InsertBefore = Relocate->getNextNode();
-    if (!InsertBefore) {
-      errs() << "missing OxCaml volatile root relocation store insertion point\n"
-             << "  relocate: ";
-      Relocate->print(errs());
-      errs() << "\n";
-      report_fatal_error(
-          "missing OxCaml volatile root relocation store insertion point");
-    }
-
-    IRBuilder<> Builder(InsertBefore);
-    Value *RelocatedValue = Relocate;
-    if (RelocatedValue->getType() != SlotValueType)
-      RelocatedValue = Builder.CreateBitCast(
-          RelocatedValue, SlotValueType,
-          suffixed_name_or(Relocate, ".casted", ""));
-    StoreInst *Store = Builder.CreateAlignedStore(
-        RelocatedValue, Slot, DL.getABITypeAlign(SlotValueType));
-    Store->setVolatile(true);
-  };
-
-  auto InsertRematerializationStore = [&](Instruction *RematerializedValue,
-                                          Value *OriginalValue) {
-    Value *RootValue = RootValueFor(OriginalValue);
-    auto SlotIt = AllocaMap.find(RootValue);
-    if (SlotIt == AllocaMap.end())
-      return;
-    Instruction *InsertBefore = RematerializedValue->getNextNode();
-    InsertVolatileStore(RematerializedValue, SlotIt->second, InsertBefore);
-  };
-
-  for (const PartiallyConstructedSafepointRecord &Info : Records) {
-    if (!Info.IsOxCamlStatepoint)
-      continue;
-
-    for (User *U : Info.StatepointToken->users())
-      if (auto *Relocate = dyn_cast<GCRelocateInst>(U))
-        InsertRelocationStore(Relocate);
-
-    if (isa<InvokeInst>(Info.StatepointToken) &&
-        !Info.UsesExplicitExceptionRoots) {
-      for (User *U : Info.UnwindToken->users())
-        if (auto *Relocate = dyn_cast<GCRelocateInst>(U))
-          InsertRelocationStore(Relocate);
-    }
-
-    for (const auto &RematerializedValuePair : Info.RematerializedValues)
-      InsertRematerializationStore(RematerializedValuePair.first,
-                                   RematerializedValuePair.second);
   }
 }
 
@@ -7493,16 +6575,8 @@ static Value *findRematerializablePhiChainToBasePhiImpl(
   auto RootMatchesIncomingBase = [&](Value *Root, Value *IncomingBase) {
     if (Root == IncomingBase)
       return true;
-    auto RootIt = PointerToBase.find(Root);
-    if (RootIt != PointerToBase.end() && RootIt->second == IncomingBase)
-      return true;
-    auto IncomingBaseIt = PointerToBase.find(IncomingBase);
-    if (IncomingBaseIt != PointerToBase.end() &&
-        IncomingBaseIt->second == Root)
-      return true;
-    if (RootIt != PointerToBase.end() &&
-        IncomingBaseIt != PointerToBase.end() &&
-        RootIt->second == IncomingBaseIt->second)
+    auto It = PointerToBase.find(Root);
+    if (It != PointerToBase.end() && It->second == IncomingBase)
       return true;
     return isOxCamlBaseEquivalentGCPointer(Root, IncomingBase);
   };
@@ -7520,13 +6594,8 @@ static Value *findRematerializablePhiChainToBasePhiImpl(
     // the relocated base value.  Accept that shape and rematerialize the same
     // chain from the current statepoint's relocated base phi.
     auto It = PointerToBase.find(Incoming);
-    if (It == PointerToBase.end())
-      return false;
-    if (It->second == IncomingBase)
-      return true;
-    auto IncomingBaseIt = PointerToBase.find(IncomingBase);
-    return IncomingBaseIt != PointerToBase.end() &&
-           It->second == IncomingBaseIt->second;
+    return !IncomingChain.empty() && It != PointerToBase.end() &&
+           It->second == IncomingBase;
   };
   auto InstructionUsesChainOperand = [](Instruction *Instr, Value *Operand) {
     if (auto *GEP = dyn_cast<GetElementPtrInst>(Instr))
@@ -7713,14 +6782,7 @@ static Value *findRematerializablePhiChainToSingleBase(
         make_scope_exit([&]() { ActiveDerivedPhis.erase(Phi); });
 
     auto IsBaseValue = [&](Value *V) {
-      if (V == Base || isOxCamlBaseEquivalentGCPointer(V, Base))
-        return true;
-      auto VIt = PointerToBase.find(V);
-      if (VIt != PointerToBase.end() && VIt->second == Base)
-        return true;
-      auto BaseIt = PointerToBase.find(Base);
-      return VIt != PointerToBase.end() && BaseIt != PointerToBase.end() &&
-             VIt->second == BaseIt->second;
+      return V == Base || isOxCamlBaseEquivalentGCPointer(V, Base);
     };
     auto RootMatchesBase = [&](Value *Root) {
       if (IsBaseValue(Root))
@@ -8936,8 +7998,7 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
   }
   if (UseOxCamlVolatileRootAllocas && isOxCamlFunction(F)) {
     volatileRootAllocaViaStatepointLiveSet(F, DT, Records, PointerToBase);
-  }
-  if (!UseOxCamlVolatileRootAllocas || !isOxCamlFunction(F)) {
+  } else {
     // Do all the fixups of the original live variables to their relocated
     // selves.
     SmallVector<Value *, 128> Live;
@@ -8983,36 +8044,22 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
 #endif
 
     relocationViaAlloca(F, DT, Live, Records);
-  } else {
-    SmallVector<PartiallyConstructedSafepointRecord, 16> NonOxCamlRecords;
-    SmallVector<Value *, 128> Live;
-    for (PartiallyConstructedSafepointRecord &Info : Records) {
-      if (Info.IsOxCamlStatepoint)
-        continue;
-      NonOxCamlRecords.push_back(Info);
-      for (Value *V : Info.StatepointToken->gc_args())
-        if (isHandledGCPointerType(V->getType()))
-          Live.push_back(V);
-    }
-    unique_unsorted(Live);
-    if (!NonOxCamlRecords.empty())
-      relocationViaAlloca(F, DT, Live, NonOxCamlRecords);
   }
   PointerToBase.clear();
   bool ChangedLateRoots = false;
-  SmallVector<Value *, 16> LateAllExplicitRootSlots;
   if (!UseUnifiedOxCamlVolatileRoots) {
     ExplicitRootSlotMapTy LateExplicitRootSlots;
     ExplicitExceptionRootCallSetTy LateExplicitExceptionRootCalls;
     ChangedLateRoots = materializeOxCamlExceptionRootSlots(
         F, DT, LateExplicitRootSlots, LateExplicitExceptionRootCalls, DVCache,
         KnownBases);
+    SmallVector<Value *, 16> LateAllExplicitRootSlots;
     collectExplicitRootSlots(LateExplicitRootSlots, LateAllExplicitRootSlots);
+    ChangedLateRoots |=
+        materializeRemainingOxCamlRecoveryPhis(F, DT, LateAllExplicitRootSlots);
+    ChangedLateRoots |=
+        appendExplicitRootSlotsToAllStatepoints(F, LateAllExplicitRootSlots);
   }
-  ChangedLateRoots |=
-      materializeRemainingOxCamlRecoveryPhis(F, DT, LateAllExplicitRootSlots);
-  ChangedLateRoots |=
-      appendExplicitRootSlotsToAllStatepoints(F, LateAllExplicitRootSlots);
   return !Records.empty() || ChangedLateRoots;
 }
 
@@ -9165,27 +8212,7 @@ static void stripNonValidData(Module &M) {
 
 static void collectInputGCLiveRootAllocas(
     Function &F, SmallPtrSetImpl<AllocaInst *> &RootAllocas) {
-  auto IsPassCreatedRootAlloca = [](AllocaInst *AI) {
-    if (!isHandledGCPointerType(AI->getAllocatedType()))
-      return false;
-    StringRef Name = AI->getName();
-    return Name == "root" || Name.starts_with("root") ||
-           Name.contains(".root");
-  };
-
   for (Instruction &I : instructions(F)) {
-    if (auto *AI = dyn_cast<AllocaInst>(&I))
-      if (IsPassCreatedRootAlloca(AI))
-        RootAllocas.insert(AI);
-
-    if (auto *PN = dyn_cast<PHINode>(&I)) {
-      if (PN->getName().contains("root.slot"))
-        for (Value *Incoming : PN->incoming_values())
-          if (auto *AI = dyn_cast<AllocaInst>(Incoming->stripPointerCasts()))
-            RootAllocas.insert(AI);
-      continue;
-    }
-
     auto *Call = dyn_cast<CallBase>(&I);
     if (!Call)
       continue;
