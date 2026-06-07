@@ -12,6 +12,7 @@ self_main_build=${SELF_MAIN_BUILD:-$repo/_llvm_self_stage_main_build}
 self_stage_install=${SELF_STAGE_INSTALL:-$repo/_llvm_self_stage_install}
 wrapper=${LLVM_WRAPPER:?set LLVM_WRAPPER to the clang wrapper or LLVM tool path}
 wrapper_log=${LLVM_WRAPPER_LOG:-$wrapper.log}
+llvm_extra_flags=${LLVM_EXTRA_FLAGS:-}
 
 require_path () {
   if [ ! -e "$1" ]; then
@@ -42,6 +43,12 @@ print_wrapper_counts () {
   printf '%s wrapper lines: %s\n' "$1" "$(wc -l < "$wrapper_log")"
   printf '%s fresh ir: %s\n' "$1" "$fresh_ir"
 }
+
+llvm_flags_param=
+if [ -n "$llvm_extra_flags" ]; then
+  llvm_flags_param=",llvm-flags=$llvm_extra_flags"
+fi
+llvm_ocamlparam="_,llvm-backend=1,llvm-path=$wrapper$llvm_flags_param"
 
 STAGE0_INSTALL="$stage0_install" \
 BOOT_BUILD="$boot_build" \
@@ -91,7 +98,7 @@ EOF
 
 : > "$wrapper_log"
 OCAMLLIB="$self_stage_install/lib/ocaml" \
-OCAMLPARAM="_,llvm-backend=1,llvm-path=$wrapper" \
+OCAMLPARAM="$llvm_ocamlparam" \
   "$self_stage_install/bin/ocamlopt.opt" -o "$tmpdir/main.exe" "$tmpdir/main.ml"
 "$tmpdir/main.exe"
 print_wrapper_counts self-stage-smoke

@@ -10,6 +10,7 @@ main_build=${MAIN_BUILD:-$repo/_llvm_stage5_main_build}
 stage_install=${STAGE_INSTALL:-$repo/_llvm_stage5_install}
 wrapper=${LLVM_WRAPPER:?set LLVM_WRAPPER to the clang wrapper or LLVM tool path}
 wrapper_log=${LLVM_WRAPPER_LOG:-$wrapper.log}
+llvm_extra_flags=${LLVM_EXTRA_FLAGS:-}
 runtime_ws=${RUNTIME_WS:-$repo/_llvm_stage5_runtime.ws}
 main_ws=${MAIN_WS:-$repo/_llvm_stage5_main.ws}
 arch=${ARCH:-}
@@ -68,6 +69,12 @@ if [ -z "$system" ] || [ -z "$model" ] || [ -z "$aspp" ]; then
   exit 1
 fi
 
+llvm_flags_param=
+if [ -n "$llvm_extra_flags" ]; then
+  llvm_flags_param=",llvm-flags=$llvm_extra_flags"
+fi
+llvm_ocamlparam="_,llvm-backend=1,llvm-path=$wrapper$llvm_flags_param"
+
 cat > "$runtime_ws" <<EOF
 (lang dune 2.8)
 (context (default
@@ -78,7 +85,7 @@ cat > "$runtime_ws" <<EOF
     (OCAMLLIB ("$boot_install/lib/ocaml")))
   (env (_
     (flags (:standard -directory stdlib -warn-error +A -alert -unsafe_multidomain))
-    (env-vars ("OCAMLPARAM" "_,llvm-backend=1,llvm-path=$wrapper"))))))
+    (env-vars ("OCAMLPARAM" "$llvm_ocamlparam"))))))
 EOF
 
 cat > "$main_ws" <<EOF
@@ -92,7 +99,7 @@ cat > "$main_ws" <<EOF
   (env (_
     (flags (:standard -directory compiler-distro -warn-error +A -alert -unsafe_multidomain))
     (ocamlopt_flags (:standard -fno-asan))
-    (env-vars ("OCAMLPARAM" "_,llvm-backend=1,llvm-path=$wrapper"))))))
+    (env-vars ("OCAMLPARAM" "$llvm_ocamlparam"))))))
 EOF
 
 runtime_targets=(

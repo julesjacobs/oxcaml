@@ -41,7 +41,7 @@ fi
   echo 'let () = Printf.printf "%d\n" result'
 } > "$src"
 
-OCAMLRUNPARAM=b,l=1000000 \
+OCAMLRUNPARAM=b,l=2000000 \
   "$ocamlopt" -O3 -g -llvm-backend \
   $extra_ocamlopt_flags \
   -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \

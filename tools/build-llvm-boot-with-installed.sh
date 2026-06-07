@@ -9,6 +9,7 @@ stage0_install=$(cd "$stage0_install" && pwd)
 boot_build=${BOOT_BUILD:-$repo/_llvm_boot_context_build}
 wrapper=${LLVM_WRAPPER:?set LLVM_WRAPPER to the clang wrapper or LLVM tool path}
 wrapper_log=${LLVM_WRAPPER_LOG:-$wrapper.log}
+llvm_extra_flags=${LLVM_EXTRA_FLAGS:-}
 opam_switch_bin=${OPAM_SWITCH_BIN:-}
 arch=${ARCH:-}
 run_smoke=${RUN_SMOKE:-1}
@@ -90,8 +91,21 @@ if [ -z "$system" ] || [ -z "$model" ] || [ -z "$aspp" ]; then
   exit 1
 fi
 
+llvm_flags_param=
+if [ -n "$llvm_extra_flags" ]; then
+  llvm_flags_param=",llvm-flags=$llvm_extra_flags"
+fi
+llvm_ocamlparam="_,llvm-backend=1,llvm-path=$wrapper$llvm_flags_param"
+
 make -C "$repo" LLVM_BOOT_BACKEND=1 LLVM_BOOT_INSTALL="$stage0_install" \
   LLVM_PATH="$wrapper" duneconf/boot.ws >/dev/null
+
+if [ -n "$llvm_extra_flags" ]; then
+  WRAPPER="$wrapper" LLVM_FLAGS_PARAM="$llvm_flags_param" \
+    perl -0pi -e \
+      '$w = $ENV{"WRAPPER"}; $p = $ENV{"LLVM_FLAGS_PARAM"}; s/llvm-path=\Q$w\E/llvm-path=$w$p/g' \
+      "$repo/duneconf/boot.ws"
+fi
 
 cp "$repo/duneconf/boot.ws" "$boot_ws"
 
@@ -132,7 +146,7 @@ if [ "$run_smoke" = 1 ]; then
     > "$tmpdir/main.ml"
   : > "$wrapper_log"
   OCAMLLIB="$stage0_install/lib/ocaml" \
-  OCAMLPARAM="_,llvm-backend=1,llvm-path=$wrapper" \
+  OCAMLPARAM="$llvm_ocamlparam" \
     "$boot_build/default/boot_ocamlopt.exe" -o "$tmpdir/main.exe" "$tmpdir/main.ml"
   "$tmpdir/main.exe"
   print_wrapper_counts smoke

@@ -84,7 +84,7 @@ make -C "$repo" install \
   LLVM_BACKEND=0 \
   OCAMLPARAM= \
   BUILD_OCAMLPARAM= \
-  "${make_args[@]}"
+  ${make_args[@]+"${make_args[@]}"}
 
 log="$repo/_build/log"
 if ! log_is_clean "$log"; then

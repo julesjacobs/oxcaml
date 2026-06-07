@@ -4,44 +4,52 @@ Last updated: 2026-06-07.
 
 ## Current Goal
 
-Make the volatile-root RS4GC mode correct enough for self-stage2, then keep
-optimizing until LLVM beats both native and the previous LLVM mode on micros,
-minis, and compiler benchmarks.
+Keep the LLVM backend self-stage2-clean, then improve runtime performance until
+the LLVM-built compiler beats both native and the older LLVM baseline on total
+microbench, minibench, and compiler benchmark time.
 
 ## Current Change
 
-- Added `-rs4gc-oxcaml-volatile-root-allocas` in
-  `RewriteStatepointsForGC.cpp`.
-- In that mode, OxCaml statepoints list volatile root slots in `gc-live` and do
-  not emit `gc.relocate` or separate exception-root allocas.
-- Fixed a correctness bug found by `array_set_young_values`: when a statepoint
-  is on one predecessor of a join, later uses of a base-equivalent value must
-  reload from the root slot. The pass now chooses root slots by `PointerToBase`
-  and rewrites all base-equivalent SSA names after a relevant statepoint.
-- Added `oxcaml-volatile-root-allocas.ll`, including the join-predecessor
-  regression shape.
+- Committed as `0067a378da` and currently being review-revised.
+- Default mode is back to normal RS4GC/gc.relocate lowering; the global
+  all-volatile-root-slot experiment is not the active path.
+- `RewriteStatepointsForGC.cpp` now deduplicates equivalent OxCaml explicit
+  exception root slots. This removes redundant handler-root stack slots and
+  duplicate stores when multiple generated slots carry the same value.
+- Review fix: dedupe now classifies explicit exception root slots from the
+  actual `ExplicitRootSlots` map, not by matching `exnroot` in alloca names.
+- Handler-only values for invokes with explicit exception roots are not also
+  added to the normal `gc-live` set.
+- GC recovery PHI root slots are marked as statepoint spill slots and use
+  volatile accesses, so the statepoint frame-table lowering treats them as
+  indirect roots.
+- The self-stage scripts now allow explicit `LLVM_EXTRA_FLAGS` when needed and
+  preserve clean native/LLVM separation.
 
 ## Evidence
 
 - Rebuilt custom LLVM `opt` and `clang` in `../llvm-build`.
-- Focused tests pass:
-  `../llvm-build/bin/llvm-lit -q vendor/llvm-project/llvm/test/Transforms/RewriteStatepointsForGC/oxcaml-*.ll`.
-- Full representative micros with
-  `LLVM_EXTRA_FLAGS='-mllvm -rs4gc-oxcaml-volatile-root-allocas'` complete:
-  44 cases, total LLVM/native ratio `0.903568`, about `10.67%` faster by total
-  time. Worst case is `array_fold_tuple_sum_squares` at `1.6113x`.
-- The previous wrong-code case `array_set_young_values` now passes and is
-  faster than native: ratio `0.8479x`.
-- Minibenches complete, but do not yet beat native overall: 10 cases, total
-  LLVM/native ratio `1.015214`. Worst group is `boyer_no_exc`, `kb`, `bdd`,
-  `kb_no_exc`, `raytrace`, and `boyer` around `1.25x` to `1.28x`.
+- Focused LLVM test passes:
+  `../llvm-build/bin/llvm-lit -v vendor/llvm-project/llvm/test/Transforms/RewriteStatepointsForGC/oxcaml-volatile-root-allocas.ll`.
+- Full self-stage2 passes:
+  `6756 passed`, `284 skipped`, `0 failed`,
+  log `agent-state/test-suite-29e4cd/ocamltest_self_stage_after_filter_20260607_095720.log`.
+- Current vs native totals:
+  - Micro: LLVM/native `0.944033`, `5.93%` speedup.
+  - Minibench: LLVM/native `0.928584`, `7.69%` speedup.
+  - Compiler module medians: LLVM/native `0.977002`, `2.35%` speedup.
+- Current vs old LLVM baseline at `57e9764b3c`:
+  - Old micro ratio was `0.982986`.
+  - Old minibench ratio was `0.932000`.
+  - Old compiler module-median ratio was `0.981823`.
 
-## Next Steps
+## Remaining Work
 
-1. Commit the current correctness/performance improvement and review it.
-2. Run self-stage2 with the fixed custom LLVM.
-3. If self-stage2 fails, reduce the first failing invocation or source shape.
-4. After self-stage2 passes, benchmark compiler and compare against native and
-   old LLVM mode.
-5. Continue optimizing remaining slowdowns, starting with
-   `array_fold_tuple_sum_squares` for micros and `boyer`/`kb`/`bdd` for minis.
+- Finish the code-review-revise loop on `0067a378da`; amend if no more issues
+  are found.
+- Remaining individual slowdowns are still worth investigating:
+  `boyer_like_failed_unify` about `1.24x`,
+  `catch_failure_then_unify` about `1.23x`,
+  `closure_env_in_try_hit` about `1.09x`, and minibench `boyer` about `1.10x`.
+- Do not resurrect the global all-volatile-root-slot mode as the default without
+  fresh evidence; it regressed total micro time in the latest run.

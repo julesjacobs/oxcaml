@@ -165,6 +165,8 @@ void FunctionLoweringInfo::set(const Function &fn, MachineFunction &mf,
             FrameIndex = MF->getFrameInfo().CreateStackObject(TySize, Alignment,
                                                               false, AI);
           }
+          if (AI->getMetadata("oxcaml.statepoint.root.slot"))
+            MF->getFrameInfo().markAsStatepointSpillSlotObjectIndex(FrameIndex);
 
           // Scalable vectors may need a special StackID to distinguish
           // them from other (fixed size) stack objects.
