@@ -644,8 +644,6 @@ MachineVerifier::visitMachineBasicBlockBefore(const MachineBasicBlock *MBB) {
   }
 
   if (MBB->isRuntimeEntered()) {
-    for (const MachineInstr &MI : MBB->phis())
-      report("runtime-entered block must not contain PHIs.", &MI);
     for (const auto &LI : MBB->liveins()) {
       if (!TRI->isRuntimeEnteredLiveIn(*MF, LI.PhysReg)) {
         report("runtime-entered block has invalid ABI live-in.", MBB);

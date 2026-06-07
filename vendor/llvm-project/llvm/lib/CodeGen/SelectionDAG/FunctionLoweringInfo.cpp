@@ -373,6 +373,10 @@ void FunctionLoweringInfo::clear() {
   RegsWithFixups.clear();
   StatepointStackSlots.clear();
   StatepointRelocationMaps.clear();
+  SharedLandingPadRelocatePHIRegs.clear();
+  SharedLandingPadRelocatePHIs.clear();
+  SharedLandingPadRelocateRecoveryRegs.clear();
+  SharedLandingPadRelocateRecoveryMBBs.clear();
   PreferredExtendType.clear();
 }
 

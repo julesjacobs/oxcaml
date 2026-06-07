@@ -5304,6 +5304,9 @@ void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
           "gc.relocate must return a pointer or a vector of pointers", Call);
 
     // Check that this relocate is correctly tied to the statepoint
+    SmallVector<const GCStatepointInst *, 4> Statepoints;
+    bool IsUndefStatepoint = false;
+    bool IsSharedLandingPadRelocate = false;
 
     // This is case for relocate on the unwinding path of an invoke statepoint
     if (LandingPadInst *LandingPad =
@@ -5311,15 +5314,29 @@ void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
 
       const BasicBlock *InvokeBB =
           LandingPad->getParent()->getUniquePredecessor();
+      const Function *ParentFn = Call.getFunction();
+      bool IsOxCaml = ParentFn && ParentFn->hasGC() &&
+                      ParentFn->getGC() == "oxcaml";
 
       // Landingpad relocates should have only one predecessor with invoke
-      // statepoint terminator
-      Check(InvokeBB, "safepoints should have unique landingpads",
+      // statepoint terminator, except for OxCaml where push/poptrap
+      // exceptional control transfer can use a shared landingpad.  In that
+      // case, the landingpad relocate is PHI-like over the predecessor
+      // statepoints and must type-check against all of them.
+      IsSharedLandingPadRelocate = !InvokeBB;
+      Check(InvokeBB || IsOxCaml, "safepoints should have unique landingpads",
             LandingPad->getParent());
-      Check(InvokeBB->getTerminator(), "safepoint block should be well formed",
-            InvokeBB);
-      Check(isa<GCStatepointInst>(InvokeBB->getTerminator()),
-            "gc relocate should be linked to a statepoint", InvokeBB);
+      for (const BasicBlock *Pred : predecessors(LandingPad->getParent())) {
+        Check(Pred->getTerminator(), "safepoint block should be well formed",
+              Pred);
+        auto *Statepoint =
+            Pred->getTerminator()
+                ? dyn_cast<GCStatepointInst>(Pred->getTerminator())
+                : nullptr;
+        Check(Statepoint, "gc relocate should be linked to a statepoint", Pred);
+        if (Statepoint)
+          Statepoints.push_back(Statepoint);
+      }
     } else {
       // In all other cases relocate should be tied to the statepoint directly.
       // This covers relocates on a normal return path of invoke statepoint and
@@ -5327,10 +5344,11 @@ void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
       auto *Token = Call.getArgOperand(0);
       Check(isa<GCStatepointInst>(Token) || isa<UndefValue>(Token),
             "gc relocate is incorrectly tied to the statepoint", Call, Token);
+      if (isa<UndefValue>(Token))
+        IsUndefStatepoint = true;
+      else if (auto *Statepoint = dyn_cast<GCStatepointInst>(Token))
+        Statepoints.push_back(Statepoint);
     }
-
-    // Verify rest of the relocate arguments.
-    const Value &StatepointCall = *cast<GCRelocateInst>(Call).getStatepoint();
 
     // Both the base and derived must be piped through the safepoint.
     Value *Base = Call.getArgOperand(1);
@@ -5344,16 +5362,8 @@ void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
     const uint64_t BaseIndex = cast<ConstantInt>(Base)->getZExtValue();
     const uint64_t DerivedIndex = cast<ConstantInt>(Derived)->getZExtValue();
 
-    // Check the bounds
-    if (isa<UndefValue>(StatepointCall))
+    if (IsUndefStatepoint)
       break;
-    if (auto Opt = cast<GCStatepointInst>(StatepointCall)
-                       .getOperandBundle(LLVMContext::OB_gc_live)) {
-      Check(BaseIndex < Opt->Inputs.size(),
-            "gc.relocate: statepoint base index out of bounds", Call);
-      Check(DerivedIndex < Opt->Inputs.size(),
-            "gc.relocate: statepoint derived index out of bounds", Call);
-    }
 
     // Relocated value must be either a pointer type or vector-of-pointer type,
     // but gc_relocate does not need to return the same pointer type as the
@@ -5361,35 +5371,83 @@ void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
     // desired. However, they must have the same address space and 'vectorness'
     GCRelocateInst &Relocate = cast<GCRelocateInst>(Call);
     auto *ResultType = Call.getType();
-    auto *DerivedType = Relocate.getDerivedPtr()->getType();
-    auto *BaseType = Relocate.getBasePtr()->getType();
-
-    Check(BaseType->isPtrOrPtrVectorTy(),
-          "gc.relocate: relocated value must be a pointer", Call);
-    Check(DerivedType->isPtrOrPtrVectorTy(),
-          "gc.relocate: relocated value must be a pointer", Call);
-
-    Check(ResultType->isVectorTy() == DerivedType->isVectorTy(),
-          "gc.relocate: vector relocates to vector and pointer to pointer",
-          Call);
-    Check(
-        ResultType->getPointerAddressSpace() ==
-            DerivedType->getPointerAddressSpace(),
-        "gc.relocate: relocating a pointer shouldn't change its address space",
-        Call);
-
     auto GC = llvm::getGCStrategy(Relocate.getFunction()->getGC());
     Check(GC, "gc.relocate: calling function must have GCStrategy",
           Call.getFunction());
-    if (GC) {
-      auto isGCPtr = [&GC](Type *PTy) {
-        return GC->isGCManagedPointer(PTy->getScalarType()).value_or(true);
-      };
-      Check(isGCPtr(ResultType), "gc.relocate: must return gc pointer", Call);
-      Check(isGCPtr(BaseType),
-            "gc.relocate: relocated value must be a gc pointer", Call);
-      Check(isGCPtr(DerivedType),
-            "gc.relocate: relocated value must be a gc pointer", Call);
+
+    auto isGCPtr = [&GC](Type *PTy) {
+      return GC ? GC->isGCManagedPointer(PTy->getScalarType()).value_or(true)
+                : true;
+    };
+    auto getRelocatePtr = [&](const GCStatepointInst *Statepoint,
+                              uint64_t Index) -> Value * {
+      if (auto Opt = Statepoint->getOperandBundle(LLVMContext::OB_gc_live)) {
+        if (Index < Opt->Inputs.size())
+          return Opt->Inputs[Index].get();
+        return nullptr;
+      }
+
+      if (Index < Statepoint->arg_size())
+        return Statepoint->getArgOperand(Index);
+      return nullptr;
+    };
+
+    for (const GCStatepointInst *Statepoint : Statepoints) {
+      uint64_t NumStatepointGCArgs =
+          Statepoint->getOperandBundle(LLVMContext::OB_gc_live)
+              ? Statepoint->getOperandBundle(LLVMContext::OB_gc_live)
+                    ->Inputs.size()
+              : Statepoint->arg_size();
+      Check(BaseIndex < NumStatepointGCArgs,
+            "gc.relocate: statepoint base index out of bounds");
+      Check(DerivedIndex < NumStatepointGCArgs,
+            "gc.relocate: statepoint derived index out of bounds");
+
+      Value *BasePtr = getRelocatePtr(Statepoint, BaseIndex);
+      Value *DerivedPtr = getRelocatePtr(Statepoint, DerivedIndex);
+      if (!BasePtr || !DerivedPtr)
+        continue;
+
+      auto *BaseType = BasePtr->getType();
+      auto *DerivedType = DerivedPtr->getType();
+
+      if (IsSharedLandingPadRelocate) {
+        Check(BaseType->isPtrOrPtrVectorTy(),
+              "gc.relocate: relocated value must be a pointer");
+        Check(DerivedType->isPtrOrPtrVectorTy(),
+              "gc.relocate: relocated value must be a pointer");
+        Check(ResultType->isVectorTy() == DerivedType->isVectorTy(),
+              "gc.relocate: vector relocates to vector and pointer to "
+              "pointer");
+        Check(ResultType->getPointerAddressSpace() ==
+                  DerivedType->getPointerAddressSpace(),
+              "gc.relocate: relocating a pointer shouldn't change its address "
+              "space");
+        Check(isGCPtr(ResultType), "gc.relocate: must return gc pointer");
+        Check(isGCPtr(BaseType),
+              "gc.relocate: relocated value must be a gc pointer");
+        Check(isGCPtr(DerivedType),
+              "gc.relocate: relocated value must be a gc pointer");
+      } else {
+        Check(BaseType->isPtrOrPtrVectorTy(),
+              "gc.relocate: relocated value must be a pointer", Call);
+        Check(DerivedType->isPtrOrPtrVectorTy(),
+              "gc.relocate: relocated value must be a pointer", Call);
+        Check(ResultType->isVectorTy() == DerivedType->isVectorTy(),
+              "gc.relocate: vector relocates to vector and pointer to pointer",
+              Call);
+        Check(ResultType->getPointerAddressSpace() ==
+                  DerivedType->getPointerAddressSpace(),
+              "gc.relocate: relocating a pointer shouldn't change its address "
+              "space",
+              Call);
+        Check(isGCPtr(ResultType), "gc.relocate: must return gc pointer",
+              Call);
+        Check(isGCPtr(BaseType),
+              "gc.relocate: relocated value must be a gc pointer", Call);
+        Check(isGCPtr(DerivedType),
+              "gc.relocate: relocated value must be a gc pointer", Call);
+      }
     }
     break;
   }

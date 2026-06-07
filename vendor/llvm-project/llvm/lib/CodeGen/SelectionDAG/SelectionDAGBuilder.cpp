@@ -4912,6 +4912,15 @@ void SelectionDAGBuilder::visitTargetIntrinsic(const CallInst &I,
     FuncInfo.MBB->setLabelMustBeEmitted();
   }
 
+  if (Intrinsic == llvm::Intrinsic::aarch64_oxcaml_trap_recover) {
+    for (const auto &Entry : FuncInfo.SharedLandingPadRelocateRecoveryRegs) {
+      auto MBB = FuncInfo.SharedLandingPadRelocateRecoveryMBBs.find(Entry.first);
+      if (MBB != FuncInfo.SharedLandingPadRelocateRecoveryMBBs.end() &&
+          MBB->second == FuncInfo.MBB)
+        FuncInfo.ValueMap[Entry.first] = Entry.second;
+    }
+  }
+
   // Ignore the callsite's attributes. A specific call site may be marked with
   // readnone, but the lowering code will expect the chain based on the
   // definition.
