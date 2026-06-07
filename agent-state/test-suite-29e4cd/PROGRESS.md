@@ -10,46 +10,44 @@ microbench, minibench, and compiler benchmark time.
 
 ## Current Change
 
-- Committed as `0067a378da` and currently being review-revised.
+- Current HEAD is `9f38c181d9` (`Revert unsafe OxCaml exception root merging`).
 - Default mode is back to normal RS4GC/gc.relocate lowering; the global
   all-volatile-root-slot experiment is not the active path.
-- `RewriteStatepointsForGC.cpp` now deduplicates equivalent OxCaml explicit
-  exception root slots. This removes redundant handler-root stack slots and
-  duplicate stores when multiple generated slots carry the same value.
-- Review fix: dedupe now classifies explicit exception root slots from the
-  actual `ExplicitRootSlots` map, not by matching `exnroot` in alloca names.
-- Handler-only values for invokes with explicit exception roots are not also
-  added to the normal `gc-live` set.
-- GC recovery PHI root slots are marked as statepoint spill slots and use
-  volatile accesses, so the statepoint frame-table lowering treats them as
-  indirect roots.
+- `685d252ac0` was unsafe: the exception-root merge/filtering change let the
+  LLVM self-stage compiler segfault while compiling `stdlib/bytes.ml`.
+- `9f38c181d9` reverts the unsafe LLVM source/test changes from `685d252ac0`,
+  while keeping the useful self-stage script fixes.
 - The self-stage scripts now allow explicit `LLVM_EXTRA_FLAGS` when needed and
   preserve clean native/LLVM separation.
 
 ## Evidence
 
 - Rebuilt custom LLVM `opt` and `clang` in `../llvm-build`.
-- Focused LLVM test passes:
-  `../llvm-build/bin/llvm-lit -v vendor/llvm-project/llvm/test/Transforms/RewriteStatepointsForGC/oxcaml-volatile-root-allocas.ll`.
-- Full self-stage2 passes:
+- Focused LLVM tests pass:
+  `oxcaml-volatile-root-allocas.ll`,
+  `oxcaml-self-base-phi-exception-root.ll`, and
+  `oxcaml-statepoint-stable-phi-root-home.ll`.
+- Full self-stage2 now passes:
   `6756 passed`, `284 skipped`, `0 failed`,
-  log `agent-state/test-suite-29e4cd/ocamltest_self_stage_after_filter_20260607_095720.log`.
-- Current vs native totals:
-  - Micro: LLVM/native `0.944033`, `5.93%` speedup.
-  - Minibench: LLVM/native `0.928584`, `7.69%` speedup.
-  - Compiler module medians: LLVM/native `0.977002`, `2.35%` speedup.
-- Current vs old LLVM baseline at `57e9764b3c`:
-  - Old micro ratio was `0.982986`.
-  - Old minibench ratio was `0.932000`.
-  - Old compiler module-median ratio was `0.981823`.
+  log `agent-state/test-suite-29e4cd/ocamltest_self_stage_after_rollback_rerun_20260607_105819.log`.
+- Current vs native totals after the rollback:
+  - Micro: LLVM/native `0.971072`, `2.98%` speedup,
+    log `agent-state/test-suite-29e4cd/micro_after_rollback_20260607_110522.log`.
+  - Minibench: LLVM/native `0.927656`, `7.80%` speedup,
+    results `agent-state/test-suite-29e4cd/minibench_after_rollback_results.json`.
+  - Compiler module medians: LLVM/native `0.965285`, `3.60%` speedup,
+    results `agent-state/test-suite-29e4cd/compiler_bench_current_vs_native_20260607_110910.json`.
+- This beats the saved old LLVM baseline at `57e9764b3c` on all three totals:
+  - Old micro ratio was `0.982986` (`1.73%` speedup).
+  - Old minibench ratio was `0.932000` (`7.30%` speedup).
+  - Old compiler module-median ratio was `0.981823` (`1.85%` speedup).
 
 ## Remaining Work
 
-- Finish the code-review-revise loop on `0067a378da`; amend if no more issues
-  are found.
 - Remaining individual slowdowns are still worth investigating:
-  `boyer_like_failed_unify` about `1.24x`,
-  `catch_failure_then_unify` about `1.23x`,
-  `closure_env_in_try_hit` about `1.09x`, and minibench `boyer` about `1.10x`.
+  `closure_env_in_try_hit` about `1.29x`,
+  `closure_env_in_try_no_raise` about `1.25x`,
+  `catch_failure_then_unify` about `1.24x`,
+  `boyer_like_failed_unify` about `1.23x`, and minibench `boyer` about `1.13x`.
 - Do not resurrect the global all-volatile-root-slot mode as the default without
   fresh evidence; it regressed total micro time in the latest run.
