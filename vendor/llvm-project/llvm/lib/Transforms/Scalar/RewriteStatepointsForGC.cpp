@@ -130,6 +130,11 @@ static cl::opt<bool> DebugOxCamlGCPointerAllocas(
     "rs4gc-debug-oxcaml-gc-pointer-allocas", cl::Hidden, cl::init(false),
     cl::desc("Print OxCaml GC pointer allocas that RS4GC promotes or rejects"));
 
+static cl::opt<bool> UseOxCamlVolatileRootAllocas(
+    "rs4gc-oxcaml-volatile-root-allocas", cl::Hidden, cl::init(false),
+    cl::desc("For OxCaml statepoints, materialize live GC pointers through "
+             "volatile root allocas instead of gc.relocate"));
+
 static cl::opt<bool> HeuristicReportOxCamlStatepointCrossingIntToPtr(
     "rs4gc-heuristic-report-oxcaml-statepoint-crossing-inttoptr", cl::Hidden,
     cl::init(false),
@@ -4638,6 +4643,25 @@ static void CreateGCRelocates(ArrayRef<Value *> LiveVariables,
   }
 }
 
+static bool isLiveValueSupportedByOxCamlVolatileRootAllocas(
+    Value *LiveValue, const PointerToBaseTy &PointerToBase) {
+  auto It = PointerToBase.find(LiveValue);
+  if (It == PointerToBase.end())
+    return false;
+
+  Value *Base = It->second;
+  if (Base == LiveValue)
+    return true;
+
+  auto *LiveTy = dyn_cast<PointerType>(LiveValue->getType());
+  auto *BaseTy = dyn_cast<PointerType>(Base->getType());
+  if (!LiveTy || !BaseTy || LiveTy->getAddressSpace() != 1 ||
+      BaseTy->getAddressSpace() != 1)
+    return true;
+
+  return isDistinctOxCamlAddrSpace1BaseEquivalentGCPointer(LiveValue, Base);
+}
+
 namespace {
 
 /// This struct is used to defer RAUWs and `eraseFromParent` s.  Using this
@@ -5262,6 +5286,21 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
       if (BaseIt != PointerToBase.end())
         PrintOxCamlDerivedCandidate(LiveVariable, BaseIt->second);
     }
+    if (UseOxCamlVolatileRootAllocas && IsOxCamlStatepoint &&
+        !isLiveValueSupportedByOxCamlVolatileRootAllocas(LiveVariable,
+                                                         PointerToBase)) {
+      errs() << "OxCaml volatile root allocas cannot materialize a derived "
+                "addrspace(1) pointer\n  call: ";
+      Call->print(errs());
+      errs() << "\n  live: ";
+      LiveVariable->print(errs());
+      if (BaseIt != PointerToBase.end()) {
+        errs() << "\n  base: ";
+        BaseIt->second->print(errs());
+      }
+      errs() << "\n";
+      report_fatal_error("unsupported OxCaml volatile root alloca live value");
+    }
     if (ShouldRematerializeDerivedFromBase(LiveVariable)) {
       RematerializedDerivedValues.insert(LiveVariable);
       continue;
@@ -5564,8 +5603,9 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
       Instruction *ExceptionalToken = UnwindBlock->getLandingPadInst();
       Result.UnwindToken = ExceptionalToken;
 
-      CreateGCRelocates(FilteredLiveVariables, FilteredBasePtrs,
-                        ExceptionalToken, Builder);
+      if (!UseOxCamlVolatileRootAllocas || !IsOxCamlStatepoint)
+        CreateGCRelocates(FilteredLiveVariables, FilteredBasePtrs,
+                          ExceptionalToken, Builder);
     }
 
     // Generate gc relocates and returns for normal block
@@ -5683,8 +5723,10 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
   Result.StatepointToken = Token;
 
   // Second, create a gc.relocate for every live variable
-  CreateGCRelocates(FilteredLiveVariables, FilteredBasePtrs, Token, Builder);
-  AddDerivedRematerializations(Token);
+  if (!UseOxCamlVolatileRootAllocas || !IsOxCamlStatepoint) {
+    CreateGCRelocates(FilteredLiveVariables, FilteredBasePtrs, Token, Builder);
+    AddDerivedRematerializations(Token);
+  }
 }
 
 // Replace an existing gc.statepoint with a new one and a set of gc.relocates
@@ -5991,6 +6033,254 @@ static void relocationViaAlloca(
       InitialAllocaNum--;
   assert(InitialAllocaNum == 0 && "We must not introduce any extra allocas");
 #endif
+}
+
+static void volatileRootAllocaViaStatepointLiveSet(
+    Function &F, DominatorTree &DT,
+    MutableArrayRef<PartiallyConstructedSafepointRecord> Records,
+    const PointerToBaseTy &PointerToBase) {
+  const DataLayout &DL = F.getParent()->getDataLayout();
+  BasicBlock &EntryBlock = F.getEntryBlock();
+  IRBuilder<> EntryBuilder(&EntryBlock, EntryBlock.getFirstInsertionPt());
+
+  DenseMap<Value *, AllocaInst *> AllocaMap;
+  DenseMap<Value *, SmallVector<Instruction *, 4>> StatepointsByRootValue;
+  SmallVector<Value *, 64> RootValues;
+  SmallPtrSet<Value *, 32> SeenRootValues;
+
+  auto RootValueFor = [&](Value *V) -> Value * {
+    auto It = PointerToBase.find(V);
+    if (It != PointerToBase.end())
+      return It->second;
+    return V;
+  };
+
+  auto RememberLiveValueAt = [&](Value *V, Instruction *Statepoint) {
+    if (!isHandledGCPointerType(V->getType()))
+      return;
+    if (isa<Constant>(V))
+      return;
+    Value *Root = RootValueFor(V);
+    if (isa<Constant>(Root))
+      return;
+    if (SeenRootValues.insert(Root).second)
+      RootValues.push_back(Root);
+    StatepointsByRootValue[Root].push_back(Statepoint);
+  };
+
+  for (PartiallyConstructedSafepointRecord &Info : Records)
+    for (Value *V : Info.StatepointToken->gc_args())
+      RememberLiveValueAt(V, Info.StatepointToken);
+
+  auto InsertVolatileStore = [&](Value *Stored, AllocaInst *Slot,
+                                 Instruction *InsertBefore) {
+    IRBuilder<> Builder(InsertBefore);
+    StoreInst *Store = Builder.CreateAlignedStore(
+        Stored, Slot, DL.getABITypeAlign(Stored->getType()));
+    Store->setVolatile(true);
+  };
+
+  auto InsertVolatileLoad = [&](AllocaInst *Slot, Instruction *InsertBefore,
+                                Twine Name = "") -> LoadInst * {
+    IRBuilder<> Builder(InsertBefore);
+    LoadInst *Load = Builder.CreateAlignedLoad(
+        Slot->getAllocatedType(), Slot, DL.getABITypeAlign(
+                                           Slot->getAllocatedType()),
+        Name);
+    Load->setVolatile(true);
+    return Load;
+  };
+
+  auto InsertInitialStore = [&](Value *Def, AllocaInst *Slot) {
+    if (auto *Inst = dyn_cast<Instruction>(Def)) {
+      if (auto *PN = dyn_cast<PHINode>(Inst)) {
+        InsertVolatileStore(Def, Slot, &*PN->getParent()->getFirstInsertionPt());
+      } else if (auto *II = dyn_cast<InvokeInst>(Inst)) {
+        InsertVolatileStore(Def, Slot,
+                            &*II->getNormalDest()->getFirstInsertionPt());
+      } else {
+        assert(!Inst->isTerminator() &&
+               "only invoke terminators can define root values");
+        InsertVolatileStore(Def, Slot, Inst->getNextNode());
+      }
+      return;
+    }
+
+    assert((isa<Argument>(Def) || isa<Constant>(Def)) &&
+           "expected root to be an argument, constant, or instruction");
+    InsertVolatileStore(Def, Slot, &*EntryBuilder.GetInsertPoint());
+  };
+
+  for (Value *RootValue : RootValues) {
+    AllocaInst *Slot = EntryBuilder.CreateAlloca(
+        RootValue->getType(), DL.getAllocaAddrSpace(), nullptr,
+        suffixed_name_or(RootValue, ".root", "root"));
+    Slot->setAlignment(DL.getABITypeAlign(RootValue->getType()));
+
+    StoreInst *InitialStore = EntryBuilder.CreateAlignedStore(
+        getOxCamlNonMovingImmediate(RootValue->getType()), Slot,
+        DL.getABITypeAlign(RootValue->getType()));
+    InitialStore->setVolatile(true);
+
+    AllocaMap[RootValue] = Slot;
+    InsertInitialStore(RootValue, Slot);
+  }
+
+  for (PartiallyConstructedSafepointRecord &Info : Records) {
+    SmallVector<OperandBundleDef, 4> Bundles;
+    Info.StatepointToken->getOperandBundlesAsDefs(Bundles);
+    bool ChangedThisStatepoint = false;
+
+    for (OperandBundleDef &Bundle : Bundles) {
+      if (Bundle.getTag() != "gc-live")
+        continue;
+
+      SmallVector<Value *, 64> Inputs;
+      SmallPtrSet<Value *, 32> Seen;
+      for (Value *Input : make_range(Bundle.input_begin(),
+                                     Bundle.input_end())) {
+        if (isHandledGCPointerType(Input->getType()))
+          Input = RootValueFor(Input);
+        if (auto It = AllocaMap.find(Input); It != AllocaMap.end()) {
+          Input = It->second;
+          ChangedThisStatepoint = true;
+        }
+        if (Seen.insert(Input).second)
+          Inputs.push_back(Input);
+      }
+      Bundle = OperandBundleDef("gc-live", Inputs);
+      break;
+    }
+
+    if (!ChangedThisStatepoint)
+      continue;
+
+    CallBase *OldCall = Info.StatepointToken;
+    CallBase *NewCall = CallBase::Create(OldCall, Bundles, OldCall);
+    OldCall->replaceAllUsesWith(NewCall);
+    NewCall->takeName(OldCall);
+    for (Value *RootValue : RootValues) {
+      auto It = StatepointsByRootValue.find(RootValue);
+      if (It == StatepointsByRootValue.end())
+        continue;
+      for (Instruction *&Statepoint : It->second)
+        if (Statepoint == OldCall)
+          Statepoint = NewCall;
+    }
+    OldCall->eraseFromParent();
+    Info.StatepointToken = cast<GCStatepointInst>(NewCall);
+  }
+
+  auto StatepointCanReachItself = [&](Instruction *Statepoint) {
+    if (auto *II = dyn_cast<InvokeInst>(Statepoint)) {
+      BasicBlock *BB = II->getParent();
+      return isPotentiallyReachable(II->getNormalDest(), BB, nullptr, &DT) ||
+             isPotentiallyReachable(II->getUnwindDest(), BB, nullptr, &DT);
+    }
+
+    Instruction *Next = Statepoint->getNextNode();
+    return Next && isPotentiallyReachable(Next, Statepoint, nullptr, &DT);
+  };
+
+  auto StatepointIsBeforeInstruction = [&](Instruction *Statepoint,
+                                           Instruction *Use) {
+    if (Statepoint != Use && DT.dominates(Statepoint, Use))
+      return true;
+    auto *II = dyn_cast<InvokeInst>(Statepoint);
+    if (II) {
+      BasicBlock *UseBB = Use->getParent();
+      if (UseBB == II->getParent())
+        return false;
+      return isPotentiallyReachable(II->getNormalDest(), UseBB, nullptr, &DT) ||
+             isPotentiallyReachable(II->getUnwindDest(), UseBB, nullptr, &DT);
+    }
+
+    Instruction *Next = Statepoint->getNextNode();
+    return Next && isPotentiallyReachable(Next, Use, nullptr, &DT);
+  };
+
+  auto IsUseAfterRootingStatepoint = [&](Value *RootValue, Instruction *Use) {
+    auto It = StatepointsByRootValue.find(RootValue);
+    if (It == StatepointsByRootValue.end())
+      return false;
+    for (Instruction *Statepoint : It->second)
+      if (StatepointIsBeforeInstruction(Statepoint, Use) ||
+          (Statepoint == Use && StatepointCanReachItself(Statepoint)))
+        return true;
+    return false;
+  };
+
+  auto IsEdgeUseAfterRootingStatepoint = [&](Value *RootValue,
+                                             Instruction *EdgeTerminator) {
+    auto It = StatepointsByRootValue.find(RootValue);
+    if (It == StatepointsByRootValue.end())
+      return false;
+    for (Instruction *Statepoint : It->second)
+      if (StatepointIsBeforeInstruction(Statepoint, EdgeTerminator))
+        return true;
+    return false;
+  };
+
+  SmallVector<Value *, 128> RewriteValues;
+  SmallPtrSet<Value *, 32> SeenRewriteValues;
+  auto MaybeAddRewriteValue = [&](Value *V) {
+    if (!isHandledGCPointerType(V->getType()))
+      return;
+    if (isa<Constant>(V))
+      return;
+    Value *Root = RootValueFor(V);
+    if (AllocaMap.find(Root) == AllocaMap.end())
+      return;
+    if (SeenRewriteValues.insert(V).second)
+      RewriteValues.push_back(V);
+  };
+
+  for (Argument &Arg : F.args())
+    MaybeAddRewriteValue(&Arg);
+  for (BasicBlock &BB : F)
+    for (Instruction &I : BB)
+      MaybeAddRewriteValue(&I);
+
+  for (Value *Def : RewriteValues) {
+    Value *RootValue = RootValueFor(Def);
+    AllocaInst *Slot = AllocaMap[RootValue];
+    SmallVector<Instruction *, 20> Uses;
+    for (User *U : Def->users())
+      if (auto *I = dyn_cast<Instruction>(U))
+        Uses.push_back(I);
+    llvm::sort(Uses);
+    Uses.erase(std::unique(Uses.begin(), Uses.end()), Uses.end());
+
+    for (Instruction *Use : Uses) {
+      if (auto *Store = dyn_cast<StoreInst>(Use))
+        if (Store->getPointerOperand() == Slot)
+          continue;
+
+      if (auto *Phi = dyn_cast<PHINode>(Use)) {
+        for (unsigned I = 0, E = Phi->getNumIncomingValues(); I != E; ++I) {
+          if (Phi->getIncomingValue(I) != Def)
+            continue;
+          Instruction *Term = Phi->getIncomingBlock(I)->getTerminator();
+          if (!IsEdgeUseAfterRootingStatepoint(RootValue, Term))
+            continue;
+          LoadInst *Load =
+              InsertVolatileLoad(Slot, Term,
+                                 suffixed_name_or(RootValue, ".root.load",
+                                                  "root.load"));
+          Phi->setIncomingValue(I, Load);
+        }
+        continue;
+      }
+
+      if (!IsUseAfterRootingStatepoint(RootValue, Use))
+        continue;
+      LoadInst *Load =
+          InsertVolatileLoad(Slot, Use,
+                             suffixed_name_or(RootValue, ".root.load",
+                                              "root.load"));
+      Use->replaceUsesOfWith(Def, Load);
+    }
+  }
 }
 
 /// Implement a unique function which doesn't require we sort the input
@@ -7483,13 +7773,16 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
 
   ExplicitRootSlotMapTy ExplicitRootSlots;
   ExplicitExceptionRootCallSetTy ExplicitExceptionRootCalls;
+  bool UseUnifiedOxCamlVolatileRoots =
+      UseOxCamlVolatileRootAllocas && isOxCamlFunction(F);
   if (rematerializeOxCamlDerivedGEPsAtUses(F))
     DT.recalculate(F);
   canonicalizeOxCamlAddrSpace1IntToPtrAliases(F, DT);
   heuristicReportOxCamlStatepointCrossingIntToPtrs(F, DT, ToUpdate);
-  materializeOxCamlExceptionRootSlots(F, DT, ExplicitRootSlots,
-                                      ExplicitExceptionRootCalls, DVCache,
-                                      KnownBases);
+  if (!UseUnifiedOxCamlVolatileRoots)
+    materializeOxCamlExceptionRootSlots(F, DT, ExplicitRootSlots,
+                                        ExplicitExceptionRootCalls, DVCache,
+                                        KnownBases);
   SmallVector<Value *, 16> AllExplicitRootSlots;
   collectExplicitRootSlots(ExplicitRootSlots, AllExplicitRootSlots);
   if (isOxCamlFunction(F)) {
@@ -7653,19 +7946,22 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
 
   Holders.clear();
 
-  // Compute the cost of possible re-materialization of derived pointers.
-  RematCandTy RematerizationCandidates;
-  findRematerializationCandidates(PointerToBase, RematerizationCandidates, TTI);
+  if (!UseOxCamlVolatileRootAllocas || !isOxCamlFunction(F)) {
+    // Compute the cost of possible re-materialization of derived pointers.
+    RematCandTy RematerizationCandidates;
+    findRematerializationCandidates(PointerToBase, RematerizationCandidates,
+                                    TTI);
 
-  // In order to reduce live set of statepoint we might choose to rematerialize
-  // some values instead of relocating them. This is purely an optimization and
-  // does not influence correctness.
-  // First try rematerialization at uses, then after statepoints.
-  rematerializeLiveValuesAtUses(RematerizationCandidates, Records,
-                                PointerToBase);
-  for (size_t i = 0; i < Records.size(); i++)
-    rematerializeLiveValues(ToUpdate[i], Records[i], PointerToBase,
-                            RematerizationCandidates, TTI, DT);
+    // In order to reduce live set of statepoint we might choose to
+    // rematerialize some values instead of relocating them. This is purely an
+    // optimization and does not influence correctness.
+    // First try rematerialization at uses, then after statepoints.
+    rematerializeLiveValuesAtUses(RematerizationCandidates, Records,
+                                  PointerToBase);
+    for (size_t i = 0; i < Records.size(); i++)
+      rematerializeLiveValues(ToUpdate[i], Records[i], PointerToBase,
+                              RematerizationCandidates, TTI, DT);
+  }
 
   // We need this to safely RAUW and delete call or invoke return values that
   // may themselves be live over a statepoint.  For details, please see usage in
@@ -7700,63 +7996,70 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
     // onward.
     Info.LiveSet.clear();
   }
-  PointerToBase.clear();
+  if (UseOxCamlVolatileRootAllocas && isOxCamlFunction(F)) {
+    volatileRootAllocaViaStatepointLiveSet(F, DT, Records, PointerToBase);
+  } else {
+    // Do all the fixups of the original live variables to their relocated
+    // selves.
+    SmallVector<Value *, 128> Live;
+    for (size_t i = 0; i < Records.size(); i++) {
+      PartiallyConstructedSafepointRecord &Info = Records[i];
 
-  // Do all the fixups of the original live variables to their relocated selves
-  SmallVector<Value *, 128> Live;
-  for (size_t i = 0; i < Records.size(); i++) {
-    PartiallyConstructedSafepointRecord &Info = Records[i];
-
-    // We can't simply save the live set from the original insertion.  One of
-    // the live values might be the result of a call which needs a safepoint.
-    // That Value* no longer exists and we need to use the new gc_result.
-    // Thankfully, the live set is embedded in the statepoint (and updated), so
-    // we just grab that.
-    for (Value *V : Info.StatepointToken->gc_args())
-      if (isHandledGCPointerType(V->getType()))
-        Live.push_back(V);
+      // We can't simply save the live set from the original insertion.  One of
+      // the live values might be the result of a call which needs a safepoint.
+      // That Value* no longer exists and we need to use the new gc_result.
+      // Thankfully, the live set is embedded in the statepoint (and updated),
+      // so we just grab that.
+      for (Value *V : Info.StatepointToken->gc_args())
+        if (isHandledGCPointerType(V->getType()))
+          Live.push_back(V);
 #ifndef NDEBUG
-    // Do some basic validation checking on our liveness results before
-    // performing relocation.  Relocation can and will turn mistakes in liveness
-    // results into non-sensical code which is must harder to debug.
-    // TODO: It would be nice to test consistency as well
-    assert(DT.isReachableFromEntry(Info.StatepointToken->getParent()) &&
-           "statepoint must be reachable or liveness is meaningless");
-    for (Value *V : Info.StatepointToken->gc_args()) {
-      if (!isHandledGCPointerType(V->getType()))
-        continue;
-      if (!isa<Instruction>(V))
-        // Non-instruction values trivial dominate all possible uses
-        continue;
-      auto *LiveInst = cast<Instruction>(V);
-      assert(DT.isReachableFromEntry(LiveInst->getParent()) &&
-             "unreachable values should never be live");
-      assert(DT.dominates(LiveInst, Info.StatepointToken) &&
-             "basic SSA liveness expectation violated by liveness analysis");
+      // Do some basic validation checking on our liveness results before
+      // performing relocation.  Relocation can and will turn mistakes in
+      // liveness results into non-sensical code which is must harder to debug.
+      // TODO: It would be nice to test consistency as well
+      assert(DT.isReachableFromEntry(Info.StatepointToken->getParent()) &&
+             "statepoint must be reachable or liveness is meaningless");
+      for (Value *V : Info.StatepointToken->gc_args()) {
+        if (!isHandledGCPointerType(V->getType()))
+          continue;
+        if (!isa<Instruction>(V))
+          // Non-instruction values trivial dominate all possible uses
+          continue;
+        auto *LiveInst = cast<Instruction>(V);
+        assert(DT.isReachableFromEntry(LiveInst->getParent()) &&
+               "unreachable values should never be live");
+        assert(DT.dominates(LiveInst, Info.StatepointToken) &&
+               "basic SSA liveness expectation violated by liveness analysis");
+      }
+#endif
     }
-#endif
-  }
-  unique_unsorted(Live);
+    unique_unsorted(Live);
 
 #ifndef NDEBUG
-  // Validation check
-  for (auto *Ptr : Live)
-    assert(isHandledGCPointerType(Ptr->getType()) &&
-           "must be a gc pointer type");
+    // Validation check
+    for (auto *Ptr : Live)
+      assert(isHandledGCPointerType(Ptr->getType()) &&
+             "must be a gc pointer type");
 #endif
 
-  relocationViaAlloca(F, DT, Live, Records);
-  ExplicitRootSlotMapTy LateExplicitRootSlots;
-  ExplicitExceptionRootCallSetTy LateExplicitExceptionRootCalls;
-  bool ChangedLateRoots = materializeOxCamlExceptionRootSlots(
-      F, DT, LateExplicitRootSlots, LateExplicitExceptionRootCalls, DVCache,
-      KnownBases);
-  SmallVector<Value *, 16> LateAllExplicitRootSlots;
-  collectExplicitRootSlots(LateExplicitRootSlots, LateAllExplicitRootSlots);
-  ChangedLateRoots |=
-      materializeRemainingOxCamlRecoveryPhis(F, DT, LateAllExplicitRootSlots);
-  ChangedLateRoots |=
-      appendExplicitRootSlotsToAllStatepoints(F, LateAllExplicitRootSlots);
+    relocationViaAlloca(F, DT, Live, Records);
+  }
+  PointerToBase.clear();
+  bool ChangedLateRoots = false;
+  if (!UseUnifiedOxCamlVolatileRoots) {
+    ExplicitRootSlotMapTy LateExplicitRootSlots;
+    ExplicitExceptionRootCallSetTy LateExplicitExceptionRootCalls;
+    ChangedLateRoots = materializeOxCamlExceptionRootSlots(
+        F, DT, LateExplicitRootSlots, LateExplicitExceptionRootCalls, DVCache,
+        KnownBases);
+    SmallVector<Value *, 16> LateAllExplicitRootSlots;
+    collectExplicitRootSlots(LateExplicitRootSlots, LateAllExplicitRootSlots);
+    ChangedLateRoots |=
+        materializeRemainingOxCamlRecoveryPhis(F, DT, LateAllExplicitRootSlots);
+    ChangedLateRoots |=
+        appendExplicitRootSlotsToAllStatepoints(F, LateAllExplicitRootSlots);
+  }
   return !Records.empty() || ChangedLateRoots;
 }
 
