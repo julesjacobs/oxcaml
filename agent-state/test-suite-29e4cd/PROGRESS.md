@@ -10,7 +10,8 @@ microbench, minibench, and compiler benchmark time.
 
 ## Current Change
 
-- Current HEAD is `9f38c181d9` (`Revert unsafe OxCaml exception root merging`).
+- Current branch HEAD includes the progress update; the last source change is
+  `9f38c181d9` (`Revert unsafe OxCaml exception root merging`).
 - Default mode is back to normal RS4GC/gc.relocate lowering; the global
   all-volatile-root-slot experiment is not the active path.
 - `685d252ac0` was unsafe: the exception-root merge/filtering change let the
@@ -41,10 +42,16 @@ microbench, minibench, and compiler benchmark time.
   - Old micro ratio was `0.982986` (`1.73%` speedup).
   - Old minibench ratio was `0.932000` (`7.30%` speedup).
   - Old compiler module-median ratio was `0.981823` (`1.85%` speedup).
+- Code-review-revise loop on the net improvement stack:
+  - `git diff --check 57e9764b3c..HEAD` passed.
+  - Focused LLVM tests above passed again.
+  - Reviewed stable root home lowering, statepoint slot allocation, regmask
+    call-splitting default, and the inactive volatile-root mode. No source fix
+    was needed after the rollback.
 
-## Remaining Work
+## Follow-up Opportunities
 
-- Remaining individual slowdowns are still worth investigating:
+- Individual slowdowns are still worth investigating:
   `closure_env_in_try_hit` about `1.29x`,
   `closure_env_in_try_no_raise` about `1.25x`,
   `catch_failure_then_unify` about `1.24x`,
