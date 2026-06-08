@@ -1,6 +1,6 @@
 # Progress
 
-Last updated: 2026-06-07.
+Last updated: 2026-06-08.
 
 ## Current Goal
 
@@ -10,8 +10,8 @@ microbench, minibench, and compiler benchmark time.
 
 ## Current Change
 
-- Current branch HEAD includes the progress update; the last source change is
-  `9f38c181d9` (`Revert unsafe OxCaml exception root merging`).
+- Current branch HEAD includes `dbffad1ba3` (`Model raise_notrace trap edges in
+  LLVM`).
 - Default mode is back to normal RS4GC/gc.relocate lowering; the global
   all-volatile-root-slot experiment is not the active path.
 - `685d252ac0` was unsafe: the exception-root merge/filtering change let the
@@ -20,6 +20,15 @@ microbench, minibench, and compiler benchmark time.
   while keeping the useful self-stage script fixes.
 - The self-stage scripts now allow explicit `LLVM_EXTRA_FLAGS` when needed and
   preserve clean native/LLVM separation.
+- Boyer remains a useful slowdown case. A fresh run showed native median
+  `0.08898s`, LLVM median `0.09533s`, ratio `1.0714x`.
+- In `rewrite_with_lemmas`, pre-RS4GC has one source value `%2` (`term`) live
+  through several handler roles: returned when lemmas are exhausted and reused
+  when caught `Unify` retries the loop. RS4GC materializes those roles as
+  separate exception-root slots (`%exnroot`, `%exnroot124`, and related PHI
+  roots), so the first protected call stores the same `%2`-derived value into
+  multiple volatile exnroots. This is a conservative artifact of the current
+  handler-boundary materialization, not a distinct source value.
 
 ## Evidence
 
