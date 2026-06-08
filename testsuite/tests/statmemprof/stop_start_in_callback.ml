@@ -2,7 +2,7 @@
    runtime5;
    { arguments = "separate-f33"; bytecode; }
    { not-llvm-backend; arguments = "combined-f33"; native; }
-   { llvm-backend; arguments = "separate-f33"; native; }
+   { llvm-backend; arguments = "combined-f33"; native; }
 *)
 
 (* Tests the effects of stopping and starting profiles in allocation

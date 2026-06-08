@@ -189,7 +189,15 @@ rm -rf \
 for lib in unix threads str; do
   ln -sfn "$install_lib/$lib" "$fake_root/otherlibs/$lib"
 done
-ln -sfn "$install_lib/threads" "$fake_root/otherlibs/systhreads"
+mkdir -p "$fake_root/otherlibs/systhreads"
+for file in "$install_lib"/threads/*; do
+  ln -sfn "$file" "$fake_root/otherlibs/systhreads/$(basename "$file")"
+done
+for file in "$stage_build"/main/otherlibs/systhreads/{threads.h,st_pthreads.h}; do
+  if [ -e "$file" ]; then
+    ln -sfn "$file" "$fake_root/otherlibs/systhreads/$(basename "$file")"
+  fi
+done
 ln -sfn "$install_lib/stublibs" "$fake_root/stublibs"
 
 rm -rf "$fake_root/otherlibs/dynlink"

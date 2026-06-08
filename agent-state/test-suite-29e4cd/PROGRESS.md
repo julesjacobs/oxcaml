@@ -10,10 +10,18 @@ microbench, minibench, and compiler benchmark time.
 
 ## Current Change
 
-- Current branch HEAD includes `dbffad1ba3` (`Model raise_notrace trap edges in
-  LLVM`).
+- Current branch HEAD includes `b6c22b9142` (`Enable comballoc for LLVM
+  backend`).
 - Default mode is back to normal RS4GC/gc.relocate lowering; the global
   all-volatile-root-slot experiment is not the active path.
+- Pending validation fixes:
+  - LLVM-backend statmemprof native variants for
+    `discard_in_callback.ml` and `stop_start_in_callback.ml` now expect the
+    `combined-f33` profile shape, matching LLVM comballoc.
+  - `tools/setup-llvm-stage4-ocamltest.sh` now builds a real fake-root
+    `otherlibs/systhreads` directory and links generated `threads.h` and
+    `st_pthreads.h` into it when present. This fixes self-stage2 ocamltest
+    compilation of `tests/lib-systhreads/swapgil.ml`.
 - `685d252ac0` was unsafe: the exception-root merge/filtering change let the
   LLVM self-stage compiler segfault while compiling `stdlib/bytes.ml`.
 - `9f38c181d9` reverts the unsafe LLVM source/test changes from `685d252ac0`,
@@ -32,6 +40,21 @@ microbench, minibench, and compiler benchmark time.
 
 ## Evidence
 
+- Full installed-compiler LLVM-backend tests passed after the comballoc test
+  fixes:
+  `6756 passed`, `284 skipped`, `0 failed`,
+  log `agent-state/test-suite-29e4cd/ocamltest_current_install_llvm_backend_comballoc_fixed_20260608_153338.log`.
+- Self-stage build using `_install` as stage 0 passed:
+  log `agent-state/test-suite-29e4cd/self_stage2_comballoc_fixed_20260608_153957.log`.
+- Second self-stage build using `_llvm_self_stage_install` as stage 0 passed
+  and produced `_llvm_self_stage2_install`:
+  log `agent-state/test-suite-29e4cd/self_stage2_second_comballoc_fixed_20260608_154430.log`.
+- Full self-stage2 ocamltest rerun passed:
+  `6756 passed`, `284 skipped`, `0 failed`,
+  log `agent-state/test-suite-29e4cd/ocamltest_self_stage2_comballoc_fixed_rerun_20260608_155852.log`.
+  The previous full run hit a one-off `tests/lib-threads/signal.ml` native
+  output miss; focused `tests/lib-threads` rerun and the full rerun both passed
+  that test.
 - Rebuilt custom LLVM `opt` and `clang` in `../llvm-build`.
 - Focused LLVM tests pass:
   `oxcaml-volatile-root-allocas.ll`,
