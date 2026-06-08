@@ -1382,12 +1382,21 @@ void AArch64AsmPrinter::emitInstruction(const MachineInstr *MI) {
                        .addReg(AArch64::X16)
                        .addExpr(RecoveryExpr));
     EmitToStreamer(*OutStreamer,
-                   MCInstBuilder(AArch64::STPXpre)
+                   MCInstBuilder(AArch64::SUBXri)
                        .addReg(AArch64::SP)
+                       .addReg(AArch64::SP)
+                       .addImm(16)
+                       .addImm(0));
+    EmitToStreamer(*OutStreamer,
+                   MCInstBuilder(AArch64::STRXui)
                        .addReg(AArch64::X26)
+                       .addReg(AArch64::SP)
+                       .addImm(0));
+    EmitToStreamer(*OutStreamer,
+                   MCInstBuilder(AArch64::STRXui)
                        .addReg(AArch64::X16)
                        .addReg(AArch64::SP)
-                       .addImm(-2));
+                       .addImm(1));
     EmitToStreamer(*OutStreamer,
                    MCInstBuilder(AArch64::ADDXri)
                        .addReg(AArch64::X26)
@@ -1406,12 +1415,21 @@ void AArch64AsmPrinter::emitInstruction(const MachineInstr *MI) {
                        .addReg(AArch64::X16)
                        .addExpr(RecoveryExpr));
     EmitToStreamer(*OutStreamer,
-                   MCInstBuilder(AArch64::STPXpre)
+                   MCInstBuilder(AArch64::SUBXri)
                        .addReg(AArch64::SP)
+                       .addReg(AArch64::SP)
+                       .addImm(16)
+                       .addImm(0));
+    EmitToStreamer(*OutStreamer,
+                   MCInstBuilder(AArch64::STRXui)
                        .addReg(AArch64::X26)
+                       .addReg(AArch64::SP)
+                       .addImm(0));
+    EmitToStreamer(*OutStreamer,
+                   MCInstBuilder(AArch64::STRXui)
                        .addReg(AArch64::X16)
                        .addReg(AArch64::SP)
-                       .addImm(-2));
+                       .addImm(1));
     EmitToStreamer(*OutStreamer,
                    MCInstBuilder(AArch64::ADDXri)
                        .addReg(AArch64::X26)

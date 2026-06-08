@@ -119,6 +119,8 @@ body:             |
 
 # ASM-LABEL: _single_trap_frame_index:
 # ASM: adr x16,
-# ASM-NEXT: stp x26, x16, [sp, #-16]!
+# ASM-NEXT: sub sp, sp, #16
+# ASM-NEXT: str x26, [sp]
+# ASM-NEXT: str x16, [sp, #8]
 # ASM-NEXT: mov x26, sp
 # ASM: ldr x26, [sp], #16

@@ -984,13 +984,13 @@ def OXCAML_RAISE_NOTRACE_EDGE
       Sched<[]>;
 
 let hasSideEffects = 1, mayStore = 1, isCodeGenOnly = 1, Uses = [SP, X26],
-    Defs = [SP, X16, X26], Size = 12 in
+    Defs = [SP, X16, X26], Size = 16 in
 def OXCAML_PUSH_TRAP
     : Pseudo<(outs), (ins brtarget:$recovery_target), []>,
       Sched<[]>;
 
 let hasSideEffects = 1, mayStore = 1, isCodeGenOnly = 1, Uses = [SP, X26],
-    Defs = [SP, X16, X26], Size = 12 in
+    Defs = [SP, X16, X26], Size = 16 in
 def OXCAML_PUSH_TRAP_DEAD
     : Pseudo<(outs), (ins), []>,
       Sched<[]>;
