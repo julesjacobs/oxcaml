@@ -25,6 +25,7 @@ debugger_dir=${DEBUGGER_DIR:-$stage_build/main/debugger/.ocamldebug.objs/byte}
 debugger_exe=${DEBUGGER_EXE:-$install_bin/ocamldebug}
 fexprc_exe=${FEXPRC_EXE:-$stage_build/main/middle_end/flambda2/tests/tools/fexprc.exe}
 config_obj=${CONFIG_OBJ:-$stage_build/main/.ocamlcommon.objs/native/config.o}
+common_byte_dir=${COMMON_BYTE_DIR:-$stage_build/main/.ocamlcommon.objs/byte}
 
 require_path () {
   if [ ! -e "$1" ]; then
@@ -57,6 +58,7 @@ require_path "$install_bin/ocamlyacc"
 require_path "$install_lib/compiler-libs/ocamlcommon.cma"
 require_path "$install_lib/compiler-libs/ocamlcommon.cmxa"
 require_path "$config_obj"
+require_path "$common_byte_dir/config.cmo"
 
 shopt -s nullglob
 
@@ -150,6 +152,9 @@ for file in "$install_lib"/compiler-libs/*; do
   ln -sfn "$file" "$fake_root/utils/$(basename "$file")"
 done
 ln -sfn "$config_obj" "$fake_root/utils/config.o"
+for file in "$common_byte_dir"/*.cmi "$common_byte_dir"/*.cmo; do
+  ln -sfn "$file" "$fake_root/utils/$(basename "$file")"
+done
 
 for dir in asmcomp bytecomp driver file_formats lambda middle_end parsing typing; do
   mkdir -p "$fake_root/$dir"

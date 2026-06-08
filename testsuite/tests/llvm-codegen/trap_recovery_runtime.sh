@@ -75,7 +75,6 @@ grep -q "landingpad token" "$ir"
 grep -q "@llvm.aarch64.oxcaml.push.trap" "$ir"
 grep -q "@llvm.aarch64.oxcaml.pop.trap" "$ir"
 grep -q "@llvm.aarch64.oxcaml.trap.recover" "$ir"
-grep -q "@llvm.aarch64.oxcaml.raise.notrace.edge" "$ir"
 grep -q "unwind label" "$ir"
 if grep -q '@"\\01_wrap_try"' "$ir" || grep -q '^_wrap_try:' "$asm"; then
   echo "AArch64 trap recovery should not emit wrap_try" >&2

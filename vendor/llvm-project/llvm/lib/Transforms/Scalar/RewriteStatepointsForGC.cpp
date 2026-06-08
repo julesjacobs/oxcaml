@@ -400,6 +400,12 @@ struct PartiallyConstructedSafepointRecord {
   /// handler-live GC values have been materialized into ExplicitRootSlots.
   /// Do not insert exceptional gc.relocate calls on that unwind path.
   bool UsesExplicitExceptionRoots = false;
+
+  /// Values whose live-through state at this statepoint is represented by an
+  /// explicit root slot.  If the value is still needed on the normal
+  /// continuation, the slot is loaded after the statepoint and fed through the
+  /// normal relocationViaAlloca SSA repair path.
+  SmallVector<std::pair<Value *, AllocaInst *>, 4> ExplicitRootHomes;
 };
 
 struct RematerializationAlternative {
@@ -431,6 +437,8 @@ using RematCandTy = MapVector<Value *, RematerizlizationCandidateRecord>;
 
 using ExplicitRootSlotMapTy = DenseMap<CallBase *, SmallVector<Value *, 4>>;
 using ExplicitExceptionRootCallSetTy = DenseSet<CallBase *>;
+using ExplicitRootHomeMapTy =
+    DenseMap<CallBase *, SmallVector<std::pair<Value *, AllocaInst *>, 4>>;
 
 } // end anonymous namespace
 
@@ -2842,6 +2850,13 @@ struct OxCamlRecoveryStoreSite {
   BasicBlock *PhiIncomingBlock;
 };
 
+struct ExplicitExceptionRootSlotCacheEntry {
+  Type *SlotType;
+  SmallVector<OxCamlRecoveryStoreSite, 8> StoreSites;
+  SmallVector<StoreInst *, 8> Stores;
+  AllocaInst *Slot;
+};
+
 struct OxCamlRecoveryBoundaryPhi {
   PHINode *Phi;
   unsigned IncomingIndex;
@@ -3374,7 +3389,10 @@ static bool isRootableOxCamlExceptionValue(Value *V,
 static bool materializeOxCamlExceptionRootSlots(
     Function &F, DominatorTree &DT, ExplicitRootSlotMapTy &ExplicitRootSlots,
     ExplicitExceptionRootCallSetTy &ExplicitExceptionRootCalls,
-    DefiningValueMapTy &DVCache, IsKnownBaseMapTy &KnownBases) {
+    ExplicitRootHomeMapTy &ExplicitRootHomes, DefiningValueMapTy &DVCache,
+    IsKnownBaseMapTy &KnownBases,
+    SmallVectorImpl<ExplicitExceptionRootSlotCacheEntry>
+        &ExplicitExceptionRootSlotCache) {
   if (!isOxCamlFunction(F))
     return false;
 
@@ -3386,15 +3404,6 @@ static bool materializeOxCamlExceptionRootSlots(
   SmallVector<OxCamlRecoveryBoundaryPhi, 8> BoundaryPhis;
   SmallVector<OxCamlRecoveryBoundaryUse, 8> BoundaryUses;
   SmallVector<OxCamlRecoveryBoundaryEdge, 8> BoundaryEdges;
-  struct ExplicitExceptionRootSlotCacheEntry {
-    Type *SlotType;
-    SmallVector<OxCamlRecoveryStoreSite, 8> StoreSites;
-    SmallVector<StoreInst *, 8> Stores;
-    AllocaInst *Slot;
-  };
-  SmallVector<ExplicitExceptionRootSlotCacheEntry, 16>
-      ExplicitExceptionRootSlotCache;
-
   for (BasicBlock &BB : F) {
     IntrinsicInst *Recover = getOxCamlTrapRecover(BB);
     if (!isOxCamlRecoveryBlockStart(BB, Recover))
@@ -3491,8 +3500,6 @@ static bool materializeOxCamlExceptionRootSlots(
     BasicBlock &EntryBlock = F.getEntryBlock();
     IRBuilder<> EntryBuilder(&EntryBlock, EntryBlock.getFirstInsertionPt());
     IRBuilder<> RecoverBuilder(Recover->getNextNode());
-    ExplicitExceptionRootSlotCache.clear();
-
     auto MaterializeRootSlot =
         [&](Value *HandlerValue, BasicBlock &StoreSiteBB,
             function_ref<Value *(OxCamlRecoveryStoreSite)> EdgeValueForSite) {
@@ -3606,6 +3613,17 @@ static bool materializeOxCamlExceptionRootSlots(
             if (IsGCRoot)
               ExplicitExceptionRootSlotCache.push_back(
                   {HandlerValue->getType(), StoreSites, Stores, Slot});
+          }
+
+          if (IsGCRoot) {
+            for (auto [StoreSite, EdgeValue] :
+                 llvm::zip_equal(StoreSites, EdgeValues)) {
+              Value *RootHomeValue = nonPoisonOxCamlGCPointerValue(EdgeValue);
+              if (isa<Constant>(RootHomeValue))
+                continue;
+              ExplicitRootHomes[StoreSite.Invoke].push_back(
+                  {RootHomeValue, Slot});
+            }
           }
 
           LoadInst *Load = RecoverBuilder.CreateAlignedLoad(
@@ -4203,84 +4221,6 @@ static bool materializeOxCamlExceptionRootSlots(
       }
     }
 
-    auto SameCurrentStores =
-        [](const ExplicitExceptionRootSlotCacheEntry &A,
-           const ExplicitExceptionRootSlotCacheEntry &B) {
-          if (A.SlotType != B.SlotType ||
-              A.StoreSites.size() != B.StoreSites.size() ||
-              A.Stores.size() != B.Stores.size())
-            return false;
-          for (unsigned I = 0, E = A.StoreSites.size(); I != E; ++I) {
-            StoreInst *AStore = A.Stores[I];
-            StoreInst *BStore = B.Stores[I];
-            if (!AStore->getParent() || !BStore->getParent())
-              return false;
-            if (A.StoreSites[I].Invoke != B.StoreSites[I].Invoke ||
-                AStore->getValueOperand() != BStore->getValueOperand())
-              return false;
-          }
-          return true;
-        };
-
-    auto ReplaceExplicitRootSlot = [&](AllocaInst *From, AllocaInst *To) {
-      for (auto &Pair : ExplicitRootSlots) {
-        SmallVector<Value *, 4> NewSlots;
-        SmallPtrSet<Value *, 8> SeenSlots;
-        for (Value *Slot : Pair.second) {
-          if (Slot == From)
-            Slot = To;
-          if (SeenSlots.insert(Slot).second)
-            NewSlots.push_back(Slot);
-        }
-        Pair.second = std::move(NewSlots);
-      }
-    };
-
-    SmallPtrSet<AllocaInst *, 8> RemovedExplicitExceptionRootSlots;
-    for (unsigned I = 0, E = ExplicitExceptionRootSlotCache.size(); I != E;
-         ++I) {
-      const ExplicitExceptionRootSlotCacheEntry &Canonical =
-          ExplicitExceptionRootSlotCache[I];
-      if (RemovedExplicitExceptionRootSlots.contains(Canonical.Slot))
-        continue;
-      for (unsigned J = I + 1; J != E; ++J) {
-        const ExplicitExceptionRootSlotCacheEntry &Duplicate =
-            ExplicitExceptionRootSlotCache[J];
-        AllocaInst *DuplicateSlot = Duplicate.Slot;
-        if (RemovedExplicitExceptionRootSlots.contains(DuplicateSlot))
-          continue;
-        if (!SameCurrentStores(Canonical, Duplicate))
-          continue;
-
-        for (StoreInst *Store : Duplicate.Stores)
-          if (Store->getParent())
-            Store->eraseFromParent();
-
-        SmallVector<User *, 8> Users(DuplicateSlot->users());
-        for (User *U : Users) {
-          if (auto *Load = dyn_cast<LoadInst>(U)) {
-            Load->setOperand(0, Canonical.Slot);
-            continue;
-          }
-          if (auto *Store = dyn_cast<StoreInst>(U)) {
-            Store->eraseFromParent();
-            continue;
-          }
-          DuplicateSlot->print(errs());
-          errs() << "\n";
-          U->print(errs());
-          errs() << "\n";
-          report_fatal_error("unexpected duplicate OxCaml exception root user");
-        }
-
-        ReplaceExplicitRootSlot(DuplicateSlot, Canonical.Slot);
-        if (DuplicateSlot->use_empty())
-          DuplicateSlot->eraseFromParent();
-        RemovedExplicitExceptionRootSlots.insert(DuplicateSlot);
-        Changed = true;
-      }
-    }
-
     for (PHINode *PN : HandlerLivePhisToErase)
       if (PN->use_empty())
         PN->eraseFromParent();
@@ -4351,6 +4291,79 @@ static void collectExplicitRootSlots(const ExplicitRootSlotMapTy &RootSlots,
     for (Value *Slot : Pair.second)
       if (Seen.insert(Slot).second)
         Slots.push_back(Slot);
+}
+
+static bool hasOxCamlNormalContinuationUse(Value *RootValue,
+                                           Instruction *Statepoint,
+                                           DominatorTree &DT) {
+  auto *Invoke = dyn_cast<InvokeInst>(Statepoint);
+  if (!Invoke)
+    return true;
+
+  BasicBlock *NormalDest = Invoke->getNormalDest();
+  for (User *U : RootValue->users()) {
+    auto *UseInst = dyn_cast<Instruction>(U);
+    if (!UseInst || UseInst == Statepoint)
+      continue;
+
+    if (auto *Phi = dyn_cast<PHINode>(UseInst)) {
+      for (unsigned I = 0, E = Phi->getNumIncomingValues(); I != E; ++I) {
+        if (Phi->getIncomingValue(I) != RootValue)
+          continue;
+        if (isPotentiallyReachable(NormalDest, Phi->getIncomingBlock(I),
+                                   nullptr, &DT))
+          return true;
+      }
+      continue;
+    }
+
+    if (isPotentiallyReachable(NormalDest, UseInst->getParent(), nullptr, &DT))
+      return true;
+  }
+
+  return false;
+}
+
+static bool canonicalizeExplicitRootHomesAndFilterLiveSets(
+    MutableArrayRef<PartiallyConstructedSafepointRecord> Records,
+    DominatorTree &DT) {
+  DenseMap<Value *, AllocaInst *> CanonicalSlotForRootValue;
+  for (PartiallyConstructedSafepointRecord &Info : Records)
+    for (auto [RootValue, Slot] : Info.ExplicitRootHomes) {
+      if (!RootValue || !Slot || isa<Constant>(RootValue))
+        continue;
+      if (!isHandledGCPointerType(RootValue->getType()))
+        continue;
+      CanonicalSlotForRootValue.try_emplace(RootValue, Slot);
+    }
+
+  bool Changed = false;
+  for (PartiallyConstructedSafepointRecord &Info : Records) {
+    SmallVector<std::pair<Value *, AllocaInst *>, 4> CanonicalHomes;
+    SmallPtrSet<Value *, 8> SeenRootValues;
+    SmallPtrSet<Value *, 8> SeenSlots(Info.ExplicitRootSlots.begin(),
+                                      Info.ExplicitRootSlots.end());
+
+    for (auto [RootValue, Slot] : Info.ExplicitRootHomes) {
+      auto It = CanonicalSlotForRootValue.find(RootValue);
+      if (It == CanonicalSlotForRootValue.end() || It->second != Slot)
+        continue;
+
+      if (!Info.LiveSet.remove(RootValue))
+        continue;
+      Changed = true;
+
+      if (SeenSlots.insert(Slot).second)
+        Info.ExplicitRootSlots.push_back(Slot);
+      if (hasOxCamlNormalContinuationUse(RootValue, Info.StatepointToken, DT) &&
+          SeenRootValues.insert(RootValue).second)
+        CanonicalHomes.push_back({RootValue, Slot});
+    }
+
+    Info.ExplicitRootHomes = std::move(CanonicalHomes);
+  }
+
+  return Changed;
 }
 
 static bool rewriteOxCamlExplicitRootStoresToBases(
@@ -5820,6 +5833,79 @@ static void insertRematerializationStores(
   }
 }
 
+static bool isStatepointResultOrRelocateFor(Instruction *I,
+                                            Instruction *Statepoint) {
+  auto *Intrinsic = dyn_cast<IntrinsicInst>(I);
+  if (!Intrinsic)
+    return false;
+
+  switch (Intrinsic->getIntrinsicID()) {
+  case Intrinsic::experimental_gc_result:
+  case Intrinsic::experimental_gc_relocate:
+    return Intrinsic->getArgOperand(0) == Statepoint;
+  default:
+    return false;
+  }
+}
+
+static Instruction *
+getPostStatepointNormalInsertBefore(Instruction *Statepoint) {
+  Instruction *InsertBefore = nullptr;
+  if (auto *Invoke = dyn_cast<InvokeInst>(Statepoint))
+    InsertBefore = &*Invoke->getNormalDest()->getFirstInsertionPt();
+  else
+    InsertBefore = Statepoint->getNextNode();
+
+  while (InsertBefore &&
+         isStatepointResultOrRelocateFor(InsertBefore, Statepoint))
+    InsertBefore = InsertBefore->getNextNode();
+
+  assert(InsertBefore && "statepoint must have a normal insertion point");
+  return InsertBefore;
+}
+
+static void insertExplicitRootHomeStores(
+    ArrayRef<std::pair<Value *, AllocaInst *>> ExplicitRootHomes,
+    Instruction *Statepoint, DenseMap<Value *, AllocaInst *> &AllocaMap,
+    DenseSet<Value *> &VisitedLiveValues) {
+  if (ExplicitRootHomes.empty())
+    return;
+
+  const DataLayout &DL = Statepoint->getModule()->getDataLayout();
+  Instruction *InsertBefore = getPostStatepointNormalInsertBefore(Statepoint);
+  IRBuilder<> Builder(InsertBefore);
+
+  for (auto [RootValue, Slot] : ExplicitRootHomes) {
+    auto AllocaIt = AllocaMap.find(RootValue);
+    assert(AllocaIt != AllocaMap.end() &&
+           "missing SSA repair alloca for explicit root home");
+    AllocaInst *Alloca = AllocaIt->second;
+
+    LoadInst *Load = Builder.CreateAlignedLoad(
+        Slot->getAllocatedType(), Slot,
+        DL.getABITypeAlign(Slot->getAllocatedType()),
+        suffixed_name_or(RootValue, ".exnroot.normal.load",
+                         "exnroot.normal.load"));
+    Load->setVolatile(true);
+    Load->setMetadata("oxcaml.exnroot.load",
+                      MDNode::get(Statepoint->getContext(), {}));
+
+    Value *Reloaded = Load;
+    if (Reloaded->getType() != Alloca->getAllocatedType())
+      Reloaded = Builder.CreateBitCast(
+          Reloaded, Alloca->getAllocatedType(),
+          suffixed_name_or(RootValue, ".exnroot.normal.cast",
+                           "exnroot.normal.cast"));
+
+    Builder.CreateAlignedStore(
+        Reloaded, Alloca, DL.getABITypeAlign(Alloca->getAllocatedType()));
+
+#ifndef NDEBUG
+    VisitedLiveValues.insert(RootValue);
+#endif
+  }
+}
+
 /// Do all the relocation update via allocas and mem2reg
 static void relocationViaAlloca(
     Function &F, DominatorTree &DT, ArrayRef<Value *> Live,
@@ -5905,6 +5991,10 @@ static void relocationViaAlloca(
     // Do similar thing with rematerialized values
     insertRematerializationStores(Info.RematerializedValues, AllocaMap,
                                   VisitedLiveValues);
+
+    insertExplicitRootHomeStores(Info.ExplicitRootHomes,
+                                 cast<Instruction>(Statepoint), AllocaMap,
+                                 VisitedLiveValues);
 
     if (ClobberNonLive) {
       // As a debugging aid, pretend that an unrelocated pointer becomes null at
@@ -6000,7 +6090,9 @@ static void relocationViaAlloca(
     StoreInst *Store = new StoreInst(Def, Alloca, /*volatile*/ false,
                                      DL.getABITypeAlign(Def->getType()));
     if (Instruction *Inst = dyn_cast<Instruction>(Def)) {
-      if (InvokeInst *Invoke = dyn_cast<InvokeInst>(Inst)) {
+      if (auto *PN = dyn_cast<PHINode>(Inst)) {
+        Store->insertBefore(PN->getParent()->getFirstNonPHI());
+      } else if (InvokeInst *Invoke = dyn_cast<InvokeInst>(Inst)) {
         // InvokeInst is a terminator so the store need to be inserted into its
         // normal destination block.
         BasicBlock *NormalDest = Invoke->getNormalDest();
@@ -7773,6 +7865,9 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
 
   ExplicitRootSlotMapTy ExplicitRootSlots;
   ExplicitExceptionRootCallSetTy ExplicitExceptionRootCalls;
+  ExplicitRootHomeMapTy ExplicitRootHomes;
+  SmallVector<ExplicitExceptionRootSlotCacheEntry, 16>
+      ExplicitExceptionRootSlotCache;
   bool UseUnifiedOxCamlVolatileRoots =
       UseOxCamlVolatileRootAllocas && isOxCamlFunction(F);
   if (rematerializeOxCamlDerivedGEPsAtUses(F))
@@ -7781,8 +7876,9 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
   heuristicReportOxCamlStatepointCrossingIntToPtrs(F, DT, ToUpdate);
   if (!UseUnifiedOxCamlVolatileRoots)
     materializeOxCamlExceptionRootSlots(F, DT, ExplicitRootSlots,
-                                        ExplicitExceptionRootCalls, DVCache,
-                                        KnownBases);
+                                        ExplicitExceptionRootCalls,
+                                        ExplicitRootHomes, DVCache, KnownBases,
+                                        ExplicitExceptionRootSlotCache);
   SmallVector<Value *, 16> AllExplicitRootSlots;
   collectExplicitRootSlots(ExplicitRootSlots, AllExplicitRootSlots);
   if (isOxCamlFunction(F)) {
@@ -7840,6 +7936,9 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
         if (Seen.insert(Slot).second)
           Records[I].ExplicitRootSlots.push_back(Slot);
     }
+    auto HomeIt = ExplicitRootHomes.find(ToUpdate[I]);
+    if (HomeIt != ExplicitRootHomes.end())
+      llvm::append_range(Records[I].ExplicitRootHomes, HomeIt->second);
     Records[I].UsesExplicitExceptionRoots =
         ExplicitExceptionRootCalls.contains(ToUpdate[I]);
     if (isOxCamlCWrapperCallingConv(ToUpdate[I]->getCallingConv())) {
@@ -7941,6 +8040,9 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
     });
   }
 
+  if (!UseUnifiedOxCamlVolatileRoots)
+    canonicalizeExplicitRootHomesAndFilterLiveSets(Records, DT);
+
   for (CallInst *CI : Holders)
     CI->eraseFromParent();
 
@@ -7978,12 +8080,28 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
     makeStatepointExplicit(DT, ToUpdate[i], Records[i], Replacements,
                            PointerToBase);
 
+  DenseMap<InvokeInst *, InvokeInst *> ReplacementInvokeForOriginalInvoke;
+  for (size_t I = 0; I < Records.size(); ++I) {
+    auto *OriginalInvoke = dyn_cast<InvokeInst>(ToUpdate[I]);
+    auto *ReplacementInvoke = dyn_cast<InvokeInst>(Records[I].StatepointToken);
+    if (OriginalInvoke && ReplacementInvoke)
+      ReplacementInvokeForOriginalInvoke[OriginalInvoke] = ReplacementInvoke;
+  }
+
   ToUpdate.clear(); // prevent accident use of invalid calls.
 
   for (auto &PR : Replacements)
     PR.doReplacement();
 
   Replacements.clear();
+
+  for (ExplicitExceptionRootSlotCacheEntry &Entry :
+       ExplicitExceptionRootSlotCache)
+    for (OxCamlRecoveryStoreSite &StoreSite : Entry.StoreSites)
+      if (auto It =
+              ReplacementInvokeForOriginalInvoke.find(StoreSite.Invoke);
+          It != ReplacementInvokeForOriginalInvoke.end())
+        StoreSite.Invoke = It->second;
 
   for (auto &Info : Records) {
     // These live sets may contain state Value pointers, since we replaced calls
@@ -8013,6 +8131,8 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
       for (Value *V : Info.StatepointToken->gc_args())
         if (isHandledGCPointerType(V->getType()))
           Live.push_back(V);
+      for (auto [RootValue, Slot] : Info.ExplicitRootHomes)
+        Live.push_back(RootValue);
 #ifndef NDEBUG
       // Do some basic validation checking on our liveness results before
       // performing relocation.  Relocation can and will turn mistakes in
@@ -8050,9 +8170,11 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
   if (!UseUnifiedOxCamlVolatileRoots) {
     ExplicitRootSlotMapTy LateExplicitRootSlots;
     ExplicitExceptionRootCallSetTy LateExplicitExceptionRootCalls;
+    ExplicitRootHomeMapTy LateExplicitRootHomes;
     ChangedLateRoots = materializeOxCamlExceptionRootSlots(
-        F, DT, LateExplicitRootSlots, LateExplicitExceptionRootCalls, DVCache,
-        KnownBases);
+        F, DT, LateExplicitRootSlots, LateExplicitExceptionRootCalls,
+        LateExplicitRootHomes, DVCache, KnownBases,
+        ExplicitExceptionRootSlotCache);
     SmallVector<Value *, 16> LateAllExplicitRootSlots;
     collectExplicitRootSlots(LateExplicitRootSlots, LateAllExplicitRootSlots);
     ChangedLateRoots |=

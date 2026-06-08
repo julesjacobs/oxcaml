@@ -18,8 +18,11 @@ define oxcaml_nofpcc { i64, i64, ptr addrspace(1) } @loop_carried_self_base_phi_
 ; CHECK-NOT: .base.exnroot
 ; CHECK-NOT: .base.recoverphi
 ; CHECK: %root.exnroot = alloca ptr addrspace(1), align 8
-; CHECK: %statepoint_token = invoke {{.*}} [ "deopt"(), "gc-live"(ptr addrspace(1) %root, ptr %root.exnroot) ]
-; CHECK: %root.relocated = call coldcc ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token %statepoint_token, i32 0, i32 0)
+; CHECK: store volatile ptr addrspace(1) %root, ptr %root.exnroot, align 8
+; CHECK: %statepoint_token = invoke {{.*}} [ "deopt"(), "gc-live"(ptr %root.exnroot) ]
+; CHECK: %root.exnroot.normal.load = load volatile ptr addrspace(1), ptr %root.exnroot, align 8
+; CHECK: %root.exnroot.load = load volatile ptr addrspace(1), ptr %root.exnroot, align 8
+; CHECK: %root.exnroot.select = phi ptr addrspace(1) [ %root.exnroot.load, %recover ], [ %root.exnroot.normal.load, %normal ]
 ; CHECK-NOT: .base.exnroot
 ; CHECK-NOT: .base.recoverphi
 entry:

@@ -44,8 +44,12 @@ other:
   br label %join
 
 join:
+; CHECK: %obj.exnroot = alloca ptr addrspace(1), align 8
+; CHECK-NOT: .exnroot = alloca ptr addrspace(1)
+; CHECK: %statepoint_token = invoke {{.*}} [ "deopt"(), "gc-live"(ptr %obj.exnroot) ]
+; CHECK: %obj.exnroot.normal.load = load volatile ptr addrspace(1), ptr %obj.exnroot, align 8
 ; CHECK: join:
-; CHECK: %[[SELECT:.*]] = phi ptr addrspace(1) [ %obj.exnroot.load, %other ], [ %obj.exnroot.load{{[0-9]*}}, %recover ], [ %obj.exnroot.load{{[0-9]*}}, %recover ], [ %obj.relocated, %normal ]
+; CHECK: %[[SELECT:.*]] = phi ptr addrspace(1) [ %obj.exnroot.load, %other ], [ %obj.exnroot.load{{[0-9]*}}, %recover ], [ %obj.exnroot.load{{[0-9]*}}, %recover ], [ %obj.exnroot.normal.load, %normal ]
 ; CHECK: %field = load ptr addrspace(1), ptr addrspace(1) %[[SELECT]], align 8
   %join_ds = phi i64 [ %normal_ds, %normal ], [ %recovered_ds, %recover ], [ %recovered_ds, %recover ], [ %recovered_ds, %other ]
   %join_alloc = phi i64 [ %normal_alloc, %normal ], [ %recovered_alloc, %recover ], [ %recovered_alloc, %recover ], [ %recovered_alloc, %other ]
