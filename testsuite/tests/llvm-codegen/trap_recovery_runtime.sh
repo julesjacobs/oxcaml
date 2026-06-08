@@ -75,16 +75,23 @@ grep -q "landingpad token" "$ir"
 grep -q "@llvm.aarch64.oxcaml.push.trap" "$ir"
 grep -q "@llvm.aarch64.oxcaml.pop.trap" "$ir"
 grep -q "@llvm.aarch64.oxcaml.trap.recover" "$ir"
+grep -q "@llvm.aarch64.oxcaml.raise.notrace.edge" "$ir"
 grep -q "unwind label" "$ir"
 if grep -q '@"\\01_wrap_try"' "$ir" || grep -q '^_wrap_try:' "$asm"; then
   echo "AArch64 trap recovery should not emit wrap_try" >&2
+  exit 1
+fi
+if grep -q "_caml_raise_notrace" "$asm"; then
+  echo "AArch64 raise_notrace with an active trap should not call caml_raise_notrace" >&2
   exit 1
 fi
 if grep -q "llvm.aarch64.oxcaml.trap" "$asm"; then
   echo "trap intrinsics leaked to assembly" >&2
   exit 1
 fi
-grep -q "stp	x26, x16, \\[sp, #-16\\]!" "$asm"
+grep -q "sub	sp, sp, #16" "$asm"
+grep -q "str	x26, \\[sp\\]" "$asm"
+grep -q "str	x16, \\[sp, #8\\]" "$asm"
 grep -q "ldr	x26, \\[sp\\], #16" "$asm"
 
 hot_src="$build_dir/trap_recovery_hot_push_pop.ml"

@@ -2357,10 +2357,21 @@ let raise_ t ~(exn_handler : Label.t option)
     | Target_system.AArch64 ->
       (match unwind_label_for_active_handler () with
       | Some unwind_label ->
-        add_referenced_symbol t "caml_raise_notrace";
-        call_simple ~unwind_label ~attrs:[Gc_leaf_function] ~cc:Oxcaml t
-          "caml_raise_notrace" [exn_bucket_raw] []
-        |> ignore
+        let intrinsic_name = "llvm.aarch64.oxcaml.raise.notrace.edge" in
+        let fun_ident = E.get_fun_ident (get_fun_info t).emitter in
+        let recovery_target =
+          V.blockaddress ~func:fun_ident ~block:(V.get_ident_exn unwind_label)
+        in
+        add_called_intrinsic t intrinsic_name
+          ~args:[T.i64; T.ptr]
+          ~res:None;
+        let normal_label = V.of_label (Cmm.new_label ()) in
+        emit_ins_no_res t
+          (I.invoke ~func:(LL.Ident.global intrinsic_name)
+             ~args:[exn_bucket_raw; recovery_target] ~res_type:T.Or_void.void
+             ~attrs:[] ~operand_bundles:[] ~cc:Default ~normal:normal_label
+             ~unwind:unwind_label);
+        emit_label t normal_label
       | None ->
         if Config.tsan
         then (

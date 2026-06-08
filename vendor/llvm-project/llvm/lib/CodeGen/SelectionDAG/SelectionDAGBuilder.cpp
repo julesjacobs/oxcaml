@@ -2955,6 +2955,7 @@ void SelectionDAGBuilder::visitInvoke(const InvokeInst &I) {
   const BasicBlock *OxCamlTrapRecoveryBB =
       getOxCamlTrapRecoveryInvokeTarget(I, *FuncInfo.DT);
   bool IsOxCamlTrapRecoveryInvoke = OxCamlTrapRecoveryBB != nullptr;
+  bool IsOxCamlRaiseNotraceEdge = false;
   const BasicBlock *CodegenEHPadBB =
       IsOxCamlTrapRecoveryInvoke ? nullptr : EHPadBB;
 
@@ -2989,6 +2990,25 @@ void SelectionDAGBuilder::visitInvoke(const InvokeInst &I) {
     case Intrinsic::experimental_gc_statepoint:
       LowerStatepoint(cast<GCStatepointInst>(I), CodegenEHPadBB);
       break;
+    case Intrinsic::aarch64_oxcaml_raise_notrace_edge: {
+      if (!IsOxCamlTrapRecoveryInvoke)
+        report_fatal_error("OxCaml raise-notrace edge must unwind to an active "
+                           "runtime-entered trap recovery block");
+      IsOxCamlRaiseNotraceEdge = true;
+      MachineBasicBlock *RecoveryMBB =
+          FuncInfo.MBBMap[OxCamlTrapRecoveryBB];
+      SmallVector<SDValue, 4> Ops;
+      Ops.push_back(getRoot());
+      const TargetLowering &TLI = DAG.getTargetLoweringInfo();
+      Ops.push_back(DAG.getTargetConstant(
+          Intrinsic::aarch64_oxcaml_raise_notrace_edge, getCurSDLoc(),
+          TLI.getPointerTy(DAG.getDataLayout())));
+      Ops.push_back(getValue(I.getArgOperand(0)));
+      Ops.push_back(DAG.getBasicBlock(RecoveryMBB));
+      SDVTList VTs = DAG.getVTList(ArrayRef<EVT>({MVT::Other}));
+      DAG.setRoot(DAG.getNode(ISD::INTRINSIC_VOID, getCurSDLoc(), VTs, Ops));
+      break;
+    }
     case Intrinsic::wasm_rethrow: {
       // This is usually done in visitTargetIntrinsic, but this intrinsic is
       // special because it can be invoked, so we manually lower it to a DAG
@@ -3030,8 +3050,15 @@ void SelectionDAGBuilder::visitInvoke(const InvokeInst &I) {
   findUnwindDestinations(FuncInfo, EHPadBB, EHPadBBProb, UnwindDests);
 
   // Update successor info.
-  addSuccessorWithProb(InvokeMBB, Return);
-  if (IsOxCamlTrapRecoveryInvoke) {
+  if (IsOxCamlRaiseNotraceEdge) {
+    MachineBasicBlock *Target = FuncInfo.MBBMap[OxCamlTrapRecoveryBB];
+    Target->setIsRuntimeEntered();
+    Target->setMachineBlockAddressTaken();
+    Target->setLabelMustBeEmitted();
+  } else {
+    addSuccessorWithProb(InvokeMBB, Return);
+  }
+  if (IsOxCamlTrapRecoveryInvoke && !IsOxCamlRaiseNotraceEdge) {
     MachineBasicBlock *Target = FuncInfo.MBBMap[OxCamlTrapRecoveryBB];
     Target->setIsRuntimeEntered();
     Target->setMachineBlockAddressTaken();
@@ -3046,8 +3073,9 @@ void SelectionDAGBuilder::visitInvoke(const InvokeInst &I) {
   InvokeMBB->normalizeSuccProbs();
 
   // Drop into normal successor.
-  DAG.setRoot(DAG.getNode(ISD::BR, getCurSDLoc(), MVT::Other, getControlRoot(),
-                          DAG.getBasicBlock(Return)));
+  if (!IsOxCamlRaiseNotraceEdge)
+    DAG.setRoot(DAG.getNode(ISD::BR, getCurSDLoc(), MVT::Other,
+                            getControlRoot(), DAG.getBasicBlock(Return)));
 }
 
 void SelectionDAGBuilder::visitCallBr(const CallBrInst &I) {

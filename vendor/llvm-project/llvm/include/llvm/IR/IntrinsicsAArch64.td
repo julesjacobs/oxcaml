@@ -131,6 +131,15 @@ def int_aarch64_oxcaml_raise_notrace
                  IntrNoMerge, IntrNoReturn, Throws, IntrNoCallback,
                  IntrNoFree]>;
 
+// OxCaml raise-notrace with a statically known runtime-entered recovery edge.
+// This has the same runtime semantics as int_aarch64_oxcaml_raise_notrace, but
+// the blockaddress records the active handler for machine CFG construction.
+def int_aarch64_oxcaml_raise_notrace_edge
+    : Intrinsic<[], [llvm_i64_ty, llvm_ptr_ty],
+                [IntrHasSideEffects, IntrConvergent, IntrNoDuplicate,
+                 IntrNoMerge, IntrNoReturn, Throws, IntrNoCallback,
+                 IntrNoFree]>;
+
 }
 
 //===----------------------------------------------------------------------===//

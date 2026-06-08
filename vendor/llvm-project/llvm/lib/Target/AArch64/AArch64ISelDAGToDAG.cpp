@@ -4875,6 +4875,22 @@ void AArch64DAGToDAGISel::Select(SDNode *Node) {
                            Ops);
       return;
     }
+    case Intrinsic::aarch64_oxcaml_raise_notrace_edge: {
+      SDValue Chain = Node->getOperand(0);
+      SDValue ExnBucket = Node->getOperand(2);
+      SDValue RecoveryTarget = Node->getOperand(3);
+      if (auto *RecoveryBB = dyn_cast<BasicBlockSDNode>(RecoveryTarget)) {
+        SDValue Ops[] = { ExnBucket,
+                          CurDAG->getBasicBlock(RecoveryBB->getBasicBlock()),
+                          Chain };
+        CurDAG->SelectNodeTo(Node, AArch64::OXCAML_RAISE_NOTRACE_EDGE,
+                             MVT::Other, Ops);
+        return;
+      }
+      report_fatal_error(
+          "OxCaml raise-notrace edge target must be a machine basic block");
+      return;
+    }
     case Intrinsic::aarch64_neon_st1x2: {
       if (VT == MVT::v8i8) {
         SelectStore(Node, 2, AArch64::ST1Twov8b);
