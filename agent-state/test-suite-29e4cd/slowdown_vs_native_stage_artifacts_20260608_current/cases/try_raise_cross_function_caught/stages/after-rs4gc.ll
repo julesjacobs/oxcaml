@@ -1,0 +1,1415 @@
+; ModuleID = '/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/try_raise_cross_function_caught/raw/input.ll'
+source_filename = "try_raise_cross_function_caught.ml"
+target datalayout = "e-m:o-i64:64-i128:128-n32:64-S128"
+target triple = "arm64-apple-macosx16.0.0"
+
+@"\01_camlTry_raise_cross_function_caught__gc_roots" = local_unnamed_addr global { ptr, ptr, i64 } { ptr @"\01_camlTry_raise_cross_function_caught", ptr @"\01_camlTry_raise_cross_function_caught__Miss245", i64 0 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught" = local_unnamed_addr global i64 11008, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught" = global { ptr, ptr, ptr, i64, i64, ptr, ptr, ptr, ptr, ptr } { ptr @"\01_camlTry_raise_cross_function_caught__black_box_int_7", ptr @"\01_camlTry_raise_cross_function_caught__black_box_string_8", ptr @"\01_camlTry_raise_cross_function_caught__black_box_9", i64 1, i64 1, ptr @"\01_camlTry_raise_cross_function_caught__print_result_10", ptr @"\01_camlTry_raise_cross_function_caught__Miss245", ptr @"\01_camlTry_raise_cross_function_caught__probe_11", ptr @"\01_camlTry_raise_cross_function_caught__find_12", ptr @"\01_camlTry_raise_cross_function_caught__run_13" }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__run_13" = local_unnamed_addr global i64 4087, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__run_13" = global { ptr, i64, ptr } { ptr @"\01_caml_curry2", i64 180143985094819847, ptr @"\01_camlTry_raise_cross_function_caught__run_6_13_code" }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__find_12" = local_unnamed_addr global i64 3063, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__find_12" = global { ptr, i64 } { ptr @"\01_camlTry_raise_cross_function_caught__find_5_12_code", i64 108086391056891909 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__probe_11" = local_unnamed_addr global i64 3063, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__probe_11" = global { ptr, i64 } { ptr @"\01_camlTry_raise_cross_function_caught__probe_4_11_code", i64 108086391056891909 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__Miss245" = local_unnamed_addr global i64 3064, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__Miss245" = global { ptr, i64 } { ptr @"\01_camlTry_raise_cross_function_caught__immstring74", i64 1 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__print_result_10" = local_unnamed_addr global i64 3063, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__print_result_10" = global { ptr, i64 } { ptr @"\01_camlTry_raise_cross_function_caught__print_result_3_10_code", i64 108086391056891909 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__black_box_9" = local_unnamed_addr global i64 3063, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__black_box_9" = global { ptr, i64 } { ptr @"\01_camlTry_raise_cross_function_caught__black_box_2_9_code", i64 108086391056891909 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__black_box_string_8" = local_unnamed_addr global i64 3063, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__black_box_string_8" = global { ptr, i64 } { ptr @"\01_camlTry_raise_cross_function_caught__black_box_string_1_8_code", i64 108086391056891909 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__black_box_int_7" = local_unnamed_addr global i64 3063, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__black_box_int_7" = global { ptr, i64 } { ptr @"\01_camlTry_raise_cross_function_caught__black_box_int_0_7_code", i64 108086391056891909 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__block35" = local_unnamed_addr global i64 2816, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__block35" = global { ptr, ptr } { ptr @"\01_caml_exn_Invalid_argument", ptr @"\01_camlTry_raise_cross_function_caught__string33" }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__string33" = local_unnamed_addr global i64 4092, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__string33" = global { [19 x i8], [4 x i8], i8 } { [19 x i8] c"index out of bounds", [4 x i8] zeroinitializer, i8 4 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__immstring74" = local_unnamed_addr global i64 6140, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__immstring74" = global { [36 x i8], [3 x i8], i8 } { [36 x i8] c"Try_raise_cross_function_caught.Miss", [3 x i8] zeroinitializer, i8 3 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__const_block66" = local_unnamed_addr global i64 4868, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__const_block66" = global { i64, i64, i64, ptr } { i64 1, i64 1, i64 1, ptr @"\01_camlTry_raise_cross_function_caught__const_block64" }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__const_block64" = local_unnamed_addr global i64 2828, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__const_block64" = global { i64, ptr } { i64 21, ptr @"\01_camlTry_raise_cross_function_caught__const_block62" }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__const_block62" = local_unnamed_addr global i64 1802, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__const_block62" = global { i64 } { i64 1 }, section "__DATA,__data", align 8
+@"\01_camlCamlinternalFormat__make_printf_120_401_code" = external local_unnamed_addr global ptr
+@"\01_camlStdlib__Printf__fn$5b$2fworkspace_root$2fprintf.ml$3a27$2c14$2d$2d48$5d_31" = external global ptr
+@"\01_caml_c_call" = external local_unnamed_addr global ptr
+@"\01_caml_curry2" = external global ptr
+@"\01_caml_exn_Invalid_argument" = external global ptr
+@"\01_caml_fresh_oo_id" = external local_unnamed_addr global ptr
+@"\01_caml_initialize" = external local_unnamed_addr global ptr
+@"\01_caml_int_of_string" = external global ptr
+@"\01_caml_llvm_call_realloc_stack" = external local_unnamed_addr global ptr
+@"\01_caml_sys_argv" = external global ptr
+
+; Function Attrs: noinline
+define oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_camlTry_raise_cross_function_caught__black_box_int_0_7_code"(i64 %0, i64 %1, i64 %2) #0 gc "oxcaml" {
+L1:
+  %3 = tail call i64 asm "", "=r,0"(i64 %2) #6
+  %4 = insertvalue { { i64, i64 }, { i64 } } poison, i64 %0, 0, 0
+  %5 = insertvalue { { i64, i64 }, { i64 } } %4, i64 %1, 0, 1
+  %6 = insertvalue { { i64, i64 }, { i64 } } %5, i64 %3, 1, 0
+  ret { { i64, i64 }, { i64 } } %6
+}
+
+; Function Attrs: noinline
+define oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTry_raise_cross_function_caught__black_box_string_1_8_code"(i64 %0, i64 %1, ptr addrspace(1) %2) #0 gc "oxcaml" {
+L1:
+  %3 = tail call ptr addrspace(1) asm "", "=r,0"(ptr addrspace(1) %2) #6
+  %4 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %0, 0, 0
+  %5 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %4, i64 %1, 0, 1
+  %6 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %5, ptr addrspace(1) %3, 1, 0
+  ret { { i64, i64 }, { ptr addrspace(1) } } %6
+}
+
+; Function Attrs: noinline
+define oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTry_raise_cross_function_caught__black_box_2_9_code"(i64 %0, i64 %1, ptr addrspace(1) %2) #0 gc "oxcaml" {
+L1:
+  %3 = tail call ptr addrspace(1) asm "", "=r,0"(ptr addrspace(1) %2) #6
+  %4 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %0, 0, 0
+  %5 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %4, i64 %1, 0, 1
+  %6 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %5, ptr addrspace(1) %3, 1, 0
+  ret { { i64, i64 }, { ptr addrspace(1) } } %6
+}
+
+; Function Attrs: noinline
+define oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_camlTry_raise_cross_function_caught__print_result_3_10_code"(i64 %0, i64 %1, i64 %2) #1 gc "oxcaml" {
+L1:
+  %3 = add i64 %0, 40
+  %4 = inttoptr i64 %3 to ptr
+  %5 = load i64, ptr %4, align 4
+  %6 = add i64 %5, 376
+  %7 = tail call i64 asm sideeffect "mov $0, sp", "=r"() #6
+  %.not = icmp ult i64 %7, %6
+  br i1 %.not, label %L116, label %L117, !prof !1
+
+L116:                                             ; preds = %L1
+  %statepoint_token = tail call oxcaml_alloccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, {} } (i64, i64, i64)) @"\01_caml_llvm_call_realloc_stack", i32 3, i32 0, i64 %0, i64 %1, i64 34, i32 0, i32 0) #7
+  %8 = call { { i64, i64 }, {} } @llvm.experimental.gc.result.sl_sl_i64i64ssl_ss(token %statepoint_token)
+  %9 = extractvalue { { i64, i64 }, {} } %8, 0, 0
+  %10 = extractvalue { { i64, i64 }, {} } %8, 0, 1
+  br label %L117
+
+L117:                                             ; preds = %L116, %L1
+  %alloc.0 = phi i64 [ %1, %L1 ], [ %10, %L116 ]
+  %ds.0 = phi i64 [ %0, %L1 ], [ %9, %L116 ]
+  %statepoint_token21 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, i64, i64)) @"\01_camlCamlinternalFormat__make_printf_120_401_code", i32 5, i32 0, i64 %ds.0, i64 %alloc.0, i64 ptrtoint (ptr @"\01_camlStdlib__Printf__fn$5b$2fworkspace_root$2fprintf.ml$3a27$2c14$2d$2d48$5d_31" to i64), i64 1, i64 ptrtoint (ptr @"\01_camlTry_raise_cross_function_caught__const_block66" to i64), i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 4, i64 27, i64 0, i64 2, i64 63, i64 0, i64 63, i64 9, i64 6910576, i64 6714478, i64 7105838, i64 23, i64 6583379, i64 6449516, i64 5267295, i64 7235954, i64 3040884, i64 7366251, i64 7235954, i64 26228, i64 34, i64 0, i64 21, i64 43, i64 0, i64 43, i64 9, i64 6910576, i64 6714478, i64 7105838, i64 22, i64 6583379, i64 6449516, i64 5267295, i64 7235954, i64 3040884, i64 7499878, i64 7630441, i64 102, i64 38, i64 0, i64 17, i64 35, i64 0, i64 35, i64 9, i64 6910576, i64 6714478, i64 7105838, i64 21, i64 6583379, i64 6449516, i64 5267295, i64 7235954, i64 3040884, i64 6910576, i64 6714478, i64 11, i64 0, i64 21, i64 63, i64 0, i64 63, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 44, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7351924, i64 7235954, i64 7495540, i64 7697253, i64 29804) ]
+  %11 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token21)
+  %gcagg = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %11, 0, 0
+  %gcagg19 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %11, 0, 1
+  %gcagg20 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %11, 1, 0
+  %12 = and i64 %2, 2147483647
+  %13 = load i64, ptr addrspace(1) %gcagg20, align 4
+  %14 = inttoptr i64 %13 to ptr
+  %15 = musttail call oxcaml_nofpcc { { i64, i64 }, { i64 } } %14(i64 %gcagg, i64 %gcagg19, i64 %12, ptr addrspace(1) %gcagg20) #8
+  ret { { i64, i64 }, { i64 } } %15
+}
+
+; Function Attrs: noinline
+define oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_camlTry_raise_cross_function_caught__probe_4_11_code"(i64 %0, i64 %1, i64 %2) #0 gc "oxcaml" {
+L1:
+  %or.cond.not = icmp eq i64 %2, 1
+  br i1 %or.cond.not, label %L121, label %L123
+
+L121:                                             ; preds = %L1
+  tail call void @llvm.aarch64.oxcaml.raise.notrace(i64 ptrtoint (ptr @"\01_camlTry_raise_cross_function_caught__Miss245" to i64))
+  unreachable
+
+L123:                                             ; preds = %L1
+  %3 = insertvalue { { i64, i64 }, { i64 } } poison, i64 %0, 0, 0
+  %4 = insertvalue { { i64, i64 }, { i64 } } %3, i64 %1, 0, 1
+  %5 = insertvalue { { i64, i64 }, { i64 } } %4, i64 %2, 1, 0
+  ret { { i64, i64 }, { i64 } } %5
+}
+
+; Function Attrs: noinline
+define oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_camlTry_raise_cross_function_caught__find_5_12_code"(i64 %0, i64 %1, i64 %2) #2 gc "oxcaml" personality ptr @"\01_caml_llvm_eh_personality" {
+L1:
+  %3 = add i64 %0, 40
+  %4 = inttoptr i64 %3 to ptr
+  %5 = load i64, ptr %4, align 4
+  %6 = add i64 %5, 408
+  %7 = tail call i64 asm sideeffect "mov $0, sp", "=r"() #6
+  %.not = icmp ult i64 %7, %6
+  br i1 %.not, label %L150, label %L151, !prof !1
+
+L150:                                             ; preds = %L1
+  %statepoint_token = tail call oxcaml_alloccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, {} } (i64, i64, i64)) @"\01_caml_llvm_call_realloc_stack", i32 3, i32 0, i64 %0, i64 %1, i64 38, i32 0, i32 0) #7
+  %8 = call { { i64, i64 }, {} } @llvm.experimental.gc.result.sl_sl_i64i64ssl_ss(token %statepoint_token)
+  %9 = extractvalue { { i64, i64 }, {} } %8, 0, 0
+  %10 = extractvalue { { i64, i64 }, {} } %8, 0, 1
+  br label %L151
+
+L151:                                             ; preds = %L150, %L1
+  %alloc.0 = phi i64 [ %1, %L1 ], [ %10, %L150 ]
+  %ds.0 = phi i64 [ %0, %L1 ], [ %9, %L150 ]
+  %11 = add i64 %ds.0, 64
+  %12 = inttoptr i64 %11 to ptr
+  %13 = load i64, ptr %12, align 4
+  tail call void @llvm.aarch64.oxcaml.push.trap(ptr blockaddress(@"\01_camlTry_raise_cross_function_caught__find_5_12_code", %L153))
+  %statepoint_token30 = invoke oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 18, i32 0, ptr elementtype({ { i64, i64 }, { i64 } } (i64, i64, i64)) @"\01_camlTry_raise_cross_function_caught__probe_4_11_code", i32 3, i32 0, i64 %ds.0, i64 %alloc.0, i64 %2, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 20, i64 0, i64 6, i64 13, i64 0, i64 13, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 36, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 6696564, i64 6581865) ]
+          to label %L154 unwind label %L153
+
+L153:                                             ; preds = %L151
+  %14 = landingpad token
+          cleanup
+  %15 = tail call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %gcagg = extractvalue { ptr addrspace(1), i64, i64, i64 } %15, 0
+  %gcagg26 = extractvalue { ptr addrspace(1), i64, i64, i64 } %15, 1
+  %gcagg27 = extractvalue { ptr addrspace(1), i64, i64, i64 } %15, 2
+  %gcagg28 = extractvalue { ptr addrspace(1), i64, i64, i64 } %15, 3
+  %16 = add i64 %gcagg28, 64
+  %17 = inttoptr i64 %16 to ptr
+  store i64 %13, ptr %17, align 4
+  %or.cond.not = icmp eq ptr addrspace(1) %gcagg, inttoptr (i64 ptrtoint (ptr @"\01_camlTry_raise_cross_function_caught__Miss245" to i64) to ptr addrspace(1))
+  br i1 %or.cond.not, label %L144, label %L146
+
+L154:                                             ; preds = %L151
+  %18 = call { { i64, i64 }, { i64 } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_i64ss(token %statepoint_token30)
+  tail call void @llvm.aarch64.oxcaml.pop.trap()
+  br label %common.ret
+
+common.ret:                                       ; preds = %L144, %L154
+  %common.ret.op = phi { { i64, i64 }, { i64 } } [ %18, %L154 ], [ %21, %L144 ]
+  ret { { i64, i64 }, { i64 } } %common.ret.op
+
+L144:                                             ; preds = %L153
+  %19 = insertvalue { { i64, i64 }, { i64 } } poison, i64 %gcagg28, 0, 0
+  %20 = insertvalue { { i64, i64 }, { i64 } } %19, i64 %gcagg27, 0, 1
+  %21 = insertvalue { { i64, i64 }, { i64 } } %20, i64 3, 1, 0
+  br label %common.ret
+
+L146:                                             ; preds = %L153
+  %22 = ptrtoint ptr addrspace(1) %gcagg to i64
+  tail call void @llvm.aarch64.oxcaml.raise.notrace(i64 %22)
+  unreachable
+}
+
+; Function Attrs: noinline
+define oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_camlTry_raise_cross_function_caught__run_6_13_code"(i64 %0, i64 %1, i64 %2, i64 %3) #1 gc "oxcaml" {
+L1:
+  %4 = icmp slt i64 %3, 3
+  br i1 %4, label %common.ret, label %L159
+
+L159:                                             ; preds = %L1
+  %5 = add i64 %0, 40
+  %6 = inttoptr i64 %5 to ptr
+  %7 = load i64, ptr %6, align 4
+  %8 = add i64 %7, 376
+  %9 = tail call i64 asm sideeffect "mov $0, sp", "=r"() #6
+  %.not = icmp ult i64 %9, %8
+  br i1 %.not, label %L205, label %L206, !prof !1
+
+L205:                                             ; preds = %L159
+  %statepoint_token = tail call oxcaml_alloccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, {} } (i64, i64, i64)) @"\01_caml_llvm_call_realloc_stack", i32 3, i32 0, i64 %0, i64 %1, i64 34, i32 0, i32 0) #7
+  %10 = call { { i64, i64 }, {} } @llvm.experimental.gc.result.sl_sl_i64i64ssl_ss(token %statepoint_token)
+  %11 = extractvalue { { i64, i64 }, {} } %10, 0, 0
+  %12 = extractvalue { { i64, i64 }, {} } %10, 0, 1
+  br label %L206
+
+L206:                                             ; preds = %L205, %L159
+  %alloc.0 = phi i64 [ %1, %L159 ], [ %12, %L205 ]
+  %ds.0 = phi i64 [ %0, %L159 ], [ %11, %L205 ]
+  %13 = lshr i64 %3, 1
+  %14 = icmp slt i64 %2, 3
+  br i1 %14, label %L191.preheader, label %L170
+
+L170:                                             ; preds = %L194, %L206
+  %.055 = phi i64 [ 1, %L206 ], [ %.057.ph, %L194 ]
+  %.0 = phi i64 [ 1, %L206 ], [ %26, %L194 ]
+  %alloc.1 = phi i64 [ %alloc.0, %L206 ], [ %alloc.4.ph, %L194 ]
+  %ds.1 = phi i64 [ %ds.0, %L206 ], [ %ds.4.ph, %L194 ]
+  %15 = lshr i64 %2, 1
+  br label %L176
+
+L176:                                             ; preds = %L176, %L170
+  %.059 = phi i64 [ %.055, %L170 ], [ %21, %L176 ]
+  %.058 = phi i64 [ 1, %L170 ], [ %22, %L176 ]
+  %alloc.2 = phi i64 [ %alloc.1, %L170 ], [ %18, %L176 ]
+  %ds.2 = phi i64 [ %ds.1, %L170 ], [ %17, %L176 ]
+  %statepoint_token84 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { i64 } } (i64, i64, i64)) @"\01_camlTry_raise_cross_function_caught__find_5_12_code", i32 3, i32 0, i64 %ds.2, i64 %alloc.2, i64 1, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 26, i64 0, i64 20, i64 26, i64 0, i64 26, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 35, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7482996, i64 28277) ]
+  %16 = call { { i64, i64 }, { i64 } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_i64ss(token %statepoint_token84)
+  %17 = extractvalue { { i64, i64 }, { i64 } } %16, 0, 0
+  %18 = extractvalue { { i64, i64 }, { i64 } } %16, 0, 1
+  %19 = extractvalue { { i64, i64 }, { i64 } } %16, 1, 0
+  %20 = add i64 %.059, -1
+  %21 = add i64 %20, %19
+  %22 = add i64 %.058, 1
+  %23 = icmp sgt i64 %22, %15
+  br i1 %23, label %L191.loopexit, label %L176
+
+L191.loopexit:                                    ; preds = %L176
+  %24 = extractvalue { { i64, i64 }, { i64 } } %16, 0, 0
+  %25 = extractvalue { { i64, i64 }, { i64 } } %16, 0, 1
+  br label %L191.preheader
+
+L191.preheader:                                   ; preds = %L191.loopexit, %L206
+  %.057.ph = phi i64 [ 1, %L206 ], [ %21, %L191.loopexit ]
+  %.2.ph = phi i64 [ 1, %L206 ], [ %.0, %L191.loopexit ]
+  %alloc.4.ph = phi i64 [ %alloc.0, %L206 ], [ %25, %L191.loopexit ]
+  %ds.4.ph = phi i64 [ %ds.0, %L206 ], [ %24, %L191.loopexit ]
+  br label %L191
+
+L191:                                             ; preds = %L191.preheader, %L194
+  %.2 = phi i64 [ %26, %L194 ], [ %.2.ph, %L191.preheader ]
+  %26 = add i64 %.2, 1
+  %27 = icmp sgt i64 %26, %13
+  br i1 %27, label %common.ret, label %L194
+
+L194:                                             ; preds = %L191
+  br i1 %14, label %L191, label %L170
+
+common.ret:                                       ; preds = %L191, %L1
+  %ds.4.pn = phi i64 [ %0, %L1 ], [ %ds.4.ph, %L191 ]
+  %alloc.4.pn = phi i64 [ %1, %L1 ], [ %alloc.4.ph, %L191 ]
+  %.057.pn = phi i64 [ 1, %L1 ], [ %.057.ph, %L191 ]
+  %.pn65 = insertvalue { { i64, i64 }, { i64 } } undef, i64 %ds.4.pn, 0, 0
+  %.pn = insertvalue { { i64, i64 }, { i64 } } %.pn65, i64 %alloc.4.pn, 0, 1
+  %common.ret.op = insertvalue { { i64, i64 }, { i64 } } %.pn, i64 %.057.pn, 1, 0
+  ret { { i64, i64 }, { i64 } } %common.ret.op
+}
+
+; Function Attrs: noinline
+define oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTry_raise_cross_function_caught__entry"(i64 %0, i64 %1) local_unnamed_addr #1 gc "oxcaml" {
+L1:
+  %statepoint_token = call oxcaml_ccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, ptr addrspace(1))) @"\01_caml_c_call", i32 4, i32 0, i64 %0, i64 %1, i64 ptrtoint (ptr @"\01_caml_sys_argv" to i64), ptr addrspace(1) inttoptr (i64 1 to ptr addrspace(1)), i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 1, i64 1, i64 6, i64 0, i64 18, i64 26, i64 0, i64 26, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 33, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7220852) ]
+  %2 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token)
+  %gcagg = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %2, 0, 0
+  %gcagg151 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %2, 0, 1
+  %gcagg152 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %2, 1, 0
+  %remat = getelementptr i8, ptr addrspace(1) %gcagg152, i64 -8
+  %3 = load i64, ptr addrspace(1) %remat, align 4
+  %4 = and i64 %3, 72057594037925888
+  %.not = icmp eq i64 %4, 0
+  br i1 %.not, label %L249, label %L225
+
+L225:                                             ; preds = %L1
+  %statepoint_token179 = call oxcaml_ccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, ptr addrspace(1))) @"\01_caml_c_call", i32 4, i32 0, i64 %gcagg, i64 %gcagg151, i64 ptrtoint (ptr @"\01_caml_sys_argv" to i64), ptr addrspace(1) inttoptr (i64 1 to ptr addrspace(1)), i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 1, i64 1, i64 6, i64 0, i64 50, i64 58, i64 0, i64 58, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 33, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7220852) ]
+  %5 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token179)
+  %gcagg153 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %5, 0, 0
+  %gcagg154 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %5, 0, 1
+  %gcagg155 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %5, 1, 0
+  %remat174 = getelementptr i8, ptr addrspace(1) %gcagg155, i64 -8
+  %6 = load i64, ptr addrspace(1) %remat174, align 4
+  %7 = and i64 %6, 72057594037925888
+  %.not150 = icmp eq i64 %7, 0
+  br i1 %.not150, label %L243, label %L235
+
+L235:                                             ; preds = %L225
+  %remat175 = getelementptr i8, ptr addrspace(1) %gcagg155, i64 8
+  %8 = load ptr addrspace(1), ptr addrspace(1) %remat175, align 8
+  %statepoint_token180 = call oxcaml_ccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, ptr addrspace(1))) @"\01_caml_c_call", i32 4, i32 0, i64 %gcagg153, i64 %gcagg154, i64 ptrtoint (ptr @"\01_caml_int_of_string" to i64), ptr addrspace(1) %8, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 1, i64 1, i64 6, i64 0, i64 36, i64 62, i64 0, i64 62, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 33, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7220852), "gc-live"(ptr addrspace(1) %8) ]
+  %9 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token180)
+  %gcagg156 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %9, 0, 0
+  %gcagg157 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %9, 0, 1
+  %gcagg158 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %9, 1, 0
+  %10 = ptrtoint ptr addrspace(1) %gcagg158 to i64
+  br label %L249
+
+L243:                                             ; preds = %L225
+  tail call void @llvm.aarch64.oxcaml.raise.notrace(i64 ptrtoint (ptr @"\01_camlTry_raise_cross_function_caught__block35" to i64))
+  unreachable
+
+L249:                                             ; preds = %L1, %L235
+  %.0 = phi i64 [ %10, %L235 ], [ 200001, %L1 ]
+  %alloc.0 = phi i64 [ %gcagg157, %L235 ], [ %gcagg151, %L1 ]
+  %ds.0 = phi i64 [ %gcagg156, %L235 ], [ %gcagg, %L1 ]
+  %11 = inttoptr i64 %.0 to ptr addrspace(1)
+  %12 = tail call oxcaml_c_directcc { i64, i64 } @"\01_caml_initialize"(i64 %ds.0, i64 %alloc.0, ptr addrspace(1) inttoptr (i64 add (i64 ptrtoint (ptr @"\01_camlTry_raise_cross_function_caught" to i64), i64 24) to ptr addrspace(1)), ptr addrspace(1) %11) #9
+  %13 = extractvalue { i64, i64 } %12, 0
+  %14 = extractvalue { i64, i64 } %12, 1
+  %statepoint_token181 = call oxcaml_ccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, ptr addrspace(1))) @"\01_caml_c_call", i32 4, i32 0, i64 %13, i64 %14, i64 ptrtoint (ptr @"\01_caml_sys_argv" to i64), ptr addrspace(1) inttoptr (i64 1 to ptr addrspace(1)), i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 1, i64 1, i64 9, i64 0, i64 18, i64 26, i64 0, i64 26, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 36, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7482996, i64 7565413) ]
+  %15 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token181)
+  %gcagg159 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %15, 0, 0
+  %gcagg160 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %15, 0, 1
+  %gcagg161 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %15, 1, 0
+  %remat176 = getelementptr i8, ptr addrspace(1) %gcagg161, i64 -8
+  %16 = load i64, ptr addrspace(1) %remat176, align 4
+  %17 = and i64 %16, 72057594037926912
+  %18 = icmp ugt i64 %17, 2560
+  br i1 %18, label %L261, label %L285
+
+L261:                                             ; preds = %L249
+  %statepoint_token182 = call oxcaml_ccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, ptr addrspace(1))) @"\01_caml_c_call", i32 4, i32 0, i64 %gcagg159, i64 %gcagg160, i64 ptrtoint (ptr @"\01_caml_sys_argv" to i64), ptr addrspace(1) inttoptr (i64 1 to ptr addrspace(1)), i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 1, i64 1, i64 9, i64 0, i64 50, i64 58, i64 0, i64 58, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 36, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7482996, i64 7565413) ]
+  %19 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token182)
+  %gcagg162 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %19, 0, 0
+  %gcagg163 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %19, 0, 1
+  %gcagg164 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %19, 1, 0
+  %remat177 = getelementptr i8, ptr addrspace(1) %gcagg164, i64 -8
+  %20 = load i64, ptr addrspace(1) %remat177, align 4
+  %21 = and i64 %20, 72057594037926912
+  %22 = icmp ugt i64 %21, 2560
+  br i1 %22, label %L271, label %L279
+
+L271:                                             ; preds = %L261
+  %remat178 = getelementptr i8, ptr addrspace(1) %gcagg164, i64 16
+  %23 = load ptr addrspace(1), ptr addrspace(1) %remat178, align 8
+  %statepoint_token183 = call oxcaml_ccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, ptr addrspace(1))) @"\01_caml_c_call", i32 4, i32 0, i64 %gcagg162, i64 %gcagg163, i64 ptrtoint (ptr @"\01_caml_int_of_string" to i64), ptr addrspace(1) %23, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 1, i64 1, i64 9, i64 0, i64 36, i64 62, i64 0, i64 62, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 36, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7482996, i64 7565413), "gc-live"(ptr addrspace(1) %23) ]
+  %24 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token183)
+  %gcagg165 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %24, 0, 0
+  %gcagg166 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %24, 0, 1
+  %gcagg167 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %24, 1, 0
+  %25 = ptrtoint ptr addrspace(1) %gcagg167 to i64
+  br label %L285
+
+L279:                                             ; preds = %L261
+  tail call void @llvm.aarch64.oxcaml.raise.notrace(i64 ptrtoint (ptr @"\01_camlTry_raise_cross_function_caught__block35" to i64))
+  unreachable
+
+L285:                                             ; preds = %L249, %L271
+  %.0148 = phi i64 [ %25, %L271 ], [ 21, %L249 ]
+  %alloc.1 = phi i64 [ %gcagg166, %L271 ], [ %gcagg160, %L249 ]
+  %ds.1 = phi i64 [ %gcagg165, %L271 ], [ %gcagg159, %L249 ]
+  %26 = inttoptr i64 %.0148 to ptr addrspace(1)
+  %27 = tail call oxcaml_c_directcc { i64, i64 } @"\01_caml_initialize"(i64 %ds.1, i64 %alloc.1, ptr addrspace(1) inttoptr (i64 add (i64 ptrtoint (ptr @"\01_camlTry_raise_cross_function_caught" to i64), i64 32) to ptr addrspace(1)), ptr addrspace(1) %26) #9
+  %28 = extractvalue { i64, i64 } %27, 0
+  %29 = extractvalue { i64, i64 } %27, 1
+  %30 = tail call oxcaml_c_directcc { i64, i64, ptr addrspace(1) } @"\01_caml_fresh_oo_id"(i64 %28, i64 %29, ptr addrspace(1) nonnull inttoptr (i64 1 to ptr addrspace(1))) #9
+  %gcagg168 = extractvalue { i64, i64, ptr addrspace(1) } %30, 0
+  %gcagg169 = extractvalue { i64, i64, ptr addrspace(1) } %30, 1
+  %gcagg170 = extractvalue { i64, i64, ptr addrspace(1) } %30, 2
+  %31 = tail call oxcaml_c_directcc { i64, i64 } @"\01_caml_initialize"(i64 %gcagg168, i64 %gcagg169, ptr addrspace(1) inttoptr (i64 add (i64 ptrtoint (ptr @"\01_camlTry_raise_cross_function_caught__Miss245" to i64), i64 8) to ptr addrspace(1)), ptr addrspace(1) %gcagg170) #9
+  %32 = extractvalue { i64, i64 } %31, 0
+  %33 = extractvalue { i64, i64 } %31, 1
+  %34 = add i64 %32, 40
+  %35 = inttoptr i64 %34 to ptr
+  %36 = load i64, ptr %35, align 4
+  %37 = add i64 %36, 376
+  %38 = tail call i64 asm sideeffect "mov $0, sp", "=r"() #6
+  %.not149 = icmp ult i64 %38, %37
+  br i1 %.not149, label %L308, label %L309, !prof !1
+
+L308:                                             ; preds = %L285
+  %statepoint_token184 = tail call oxcaml_alloccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, {} } (i64, i64, i64)) @"\01_caml_llvm_call_realloc_stack", i32 3, i32 0, i64 %32, i64 %33, i64 34, i32 0, i32 0) #7
+  %39 = call { { i64, i64 }, {} } @llvm.experimental.gc.result.sl_sl_i64i64ssl_ss(token %statepoint_token184)
+  %40 = extractvalue { { i64, i64 }, {} } %39, 0, 0
+  %41 = extractvalue { { i64, i64 }, {} } %39, 0, 1
+  br label %L309
+
+L309:                                             ; preds = %L308, %L285
+  %alloc.2 = phi i64 [ %33, %L285 ], [ %41, %L308 ]
+  %ds.2 = phi i64 [ %32, %L285 ], [ %40, %L308 ]
+  %statepoint_token185 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { i64 } } (i64, i64, i64)) @"\01_camlTry_raise_cross_function_caught__black_box_int_0_7_code", i32 3, i32 0, i64 %ds.2, i64 %alloc.2, i64 %.0148, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 31, i64 0, i64 45, i64 65, i64 0, i64 65, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 31, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 116) ]
+  %42 = call { { i64, i64 }, { i64 } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_i64ss(token %statepoint_token185)
+  %43 = extractvalue { { i64, i64 }, { i64 } } %42, 0, 0
+  %44 = extractvalue { { i64, i64 }, { i64 } } %42, 0, 1
+  %45 = extractvalue { { i64, i64 }, { i64 } } %42, 1, 0
+  %statepoint_token186 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { i64 } } (i64, i64, i64)) @"\01_camlTry_raise_cross_function_caught__black_box_int_0_7_code", i32 3, i32 0, i64 %43, i64 %44, i64 %.0, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 31, i64 0, i64 27, i64 44, i64 0, i64 44, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 31, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 116) ]
+  %46 = call { { i64, i64 }, { i64 } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_i64ss(token %statepoint_token186)
+  %47 = extractvalue { { i64, i64 }, { i64 } } %46, 0, 0
+  %48 = extractvalue { { i64, i64 }, { i64 } } %46, 0, 1
+  %49 = extractvalue { { i64, i64 }, { i64 } } %46, 1, 0
+  %statepoint_token187 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { i64 } } (i64, i64, i64, i64)) @"\01_camlTry_raise_cross_function_caught__run_6_13_code", i32 4, i32 0, i64 %47, i64 %48, i64 %49, i64 %45, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 31, i64 0, i64 22, i64 66, i64 0, i64 66, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 31, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 116) ]
+  %50 = call { { i64, i64 }, { i64 } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_i64ss(token %statepoint_token187)
+  %51 = extractvalue { { i64, i64 }, { i64 } } %50, 0, 0
+  %52 = extractvalue { { i64, i64 }, { i64 } } %50, 0, 1
+  %53 = extractvalue { { i64, i64 }, { i64 } } %50, 1, 0
+  %statepoint_token188 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, i64, i64)) @"\01_camlCamlinternalFormat__make_printf_120_401_code", i32 5, i32 0, i64 %51, i64 %52, i64 ptrtoint (ptr @"\01_camlStdlib__Printf__fn$5b$2fworkspace_root$2fprintf.ml$3a27$2c14$2d$2d48$5d_31" to i64), i64 1, i64 ptrtoint (ptr @"\01_camlTry_raise_cross_function_caught__const_block66" to i64), i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 5, i64 27, i64 0, i64 2, i64 63, i64 0, i64 63, i64 9, i64 6910576, i64 6714478, i64 7105838, i64 23, i64 6583379, i64 6449516, i64 5267295, i64 7235954, i64 3040884, i64 7366251, i64 7235954, i64 26228, i64 34, i64 0, i64 21, i64 43, i64 0, i64 43, i64 9, i64 6910576, i64 6714478, i64 7105838, i64 22, i64 6583379, i64 6449516, i64 5267295, i64 7235954, i64 3040884, i64 7499878, i64 7630441, i64 102, i64 38, i64 0, i64 17, i64 35, i64 0, i64 35, i64 9, i64 6910576, i64 6714478, i64 7105838, i64 21, i64 6583379, i64 6449516, i64 5267295, i64 7235954, i64 3040884, i64 6910576, i64 6714478, i64 11, i64 0, i64 21, i64 63, i64 0, i64 63, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 44, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7351924, i64 7235954, i64 7495540, i64 7697253, i64 29804, i64 31, i64 0, i64 9, i64 66, i64 0, i64 66, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 31, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 116) ]
+  %54 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token188)
+  %gcagg171 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %54, 0, 0
+  %gcagg172 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %54, 0, 1
+  %gcagg173 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %54, 1, 0
+  %55 = and i64 %53, 2147483647
+  %56 = load i64, ptr addrspace(1) %gcagg173, align 4
+  %57 = inttoptr i64 %56 to ptr
+  %statepoint_token189 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { i64 } } (i64, i64, i64, ptr addrspace(1))) %57, i32 4, i32 0, i64 %gcagg171, i64 %gcagg172, i64 %55, ptr addrspace(1) %gcagg173, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 2, i64 11, i64 0, i64 21, i64 63, i64 0, i64 63, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 44, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7351924, i64 7235954, i64 7495540, i64 7697253, i64 29804, i64 31, i64 0, i64 9, i64 66, i64 0, i64 66, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 31, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 116) ]
+  %58 = call { { i64, i64 }, { i64 } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_i64ss(token %statepoint_token189)
+  %59 = extractvalue { { i64, i64 }, { i64 } } %58, 0, 0
+  %60 = extractvalue { { i64, i64 }, { i64 } } %58, 0, 1
+  %61 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %59, 0, 0
+  %62 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %61, i64 %60, 0, 1
+  %63 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %62, ptr addrspace(1) inttoptr (i64 1 to ptr addrspace(1)), 1, 0
+  ret { { i64, i64 }, { ptr addrspace(1) } } %63
+}
+
+declare i32 @"\01_caml_llvm_eh_personality"(...)
+
+; Function Attrs: convergent nocallback noduplicate nofree nomerge nounwind willreturn
+declare void @llvm.aarch64.oxcaml.pop.trap() #3
+
+; Function Attrs: convergent nocallback noduplicate nofree nomerge nounwind willreturn
+declare void @llvm.aarch64.oxcaml.push.trap(ptr) #3
+
+; Function Attrs: convergent nocallback noduplicate nofree nomerge noreturn
+declare void @llvm.aarch64.oxcaml.raise.notrace(i64) #4
+
+; Function Attrs: convergent nocallback noduplicate nofree nomerge nounwind willreturn
+declare { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover() #3
+
+declare token @llvm.experimental.gc.statepoint.p0(i64 immarg, i32 immarg, ptr, i32 immarg, i32 immarg, ...)
+
+; Function Attrs: nocallback nofree nosync nounwind willreturn memory(none)
+declare { { i64, i64 }, {} } @llvm.experimental.gc.result.sl_sl_i64i64ssl_ss(token) #5
+
+; Function Attrs: nocallback nofree nosync nounwind willreturn memory(none)
+declare { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token) #5
+
+; Function Attrs: nocallback nofree nosync nounwind willreturn memory(none)
+declare { { i64, i64 }, { i64 } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_i64ss(token) #5
+
+attributes #0 = { noinline "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" }
+attributes #1 = { noinline "oxcaml-stack-check"="true" "oxcaml-stack-check-before-bytes"="0" "oxcaml-stack-check-bytes"="16" }
+attributes #2 = { noinline "oxcaml-stack-check"="true" "oxcaml-stack-check-before-bytes"="0" "oxcaml-stack-check-bytes"="48" }
+attributes #3 = { convergent nocallback noduplicate nofree nomerge nounwind willreturn }
+attributes #4 = { convergent nocallback noduplicate nofree nomerge noreturn }
+attributes #5 = { nocallback nofree nosync nounwind willreturn memory(none) }
+attributes #6 = { nounwind "gc-leaf-function"="true" }
+attributes #7 = { cold }
+attributes #8 = { "statepoint-id"="0" }
+attributes #9 = { "gc-leaf-function"="true" }
+
+!llvm.module.flags = !{!0}
+
+!0 = !{i32 1, !"oxcaml_module", !"Try_raise_cross_function_caught"}
+!1 = !{!"branch_weights", i32 1, i32 2000}
+*** IR Dump Before Make relocations explicit at statepoints (rewrite-statepoints-for-gc) ***
+; ModuleID = '/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/try_raise_cross_function_caught/raw/input.ll'
+source_filename = "try_raise_cross_function_caught.ml"
+target datalayout = "e-m:o-i64:64-i128:128-n32:64-S128"
+target triple = "arm64-apple-macosx16.0.0"
+
+@"\01_camlTry_raise_cross_function_caught__gc_roots" = local_unnamed_addr global { ptr, ptr, i64 } { ptr @"\01_camlTry_raise_cross_function_caught", ptr @"\01_camlTry_raise_cross_function_caught__Miss245", i64 0 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught" = local_unnamed_addr global i64 11008, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught" = global { ptr, ptr, ptr, i64, i64, ptr, ptr, ptr, ptr, ptr } { ptr @"\01_camlTry_raise_cross_function_caught__black_box_int_7", ptr @"\01_camlTry_raise_cross_function_caught__black_box_string_8", ptr @"\01_camlTry_raise_cross_function_caught__black_box_9", i64 1, i64 1, ptr @"\01_camlTry_raise_cross_function_caught__print_result_10", ptr @"\01_camlTry_raise_cross_function_caught__Miss245", ptr @"\01_camlTry_raise_cross_function_caught__probe_11", ptr @"\01_camlTry_raise_cross_function_caught__find_12", ptr @"\01_camlTry_raise_cross_function_caught__run_13" }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__run_13" = local_unnamed_addr global i64 4087, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__run_13" = global { ptr, i64, ptr } { ptr @"\01_caml_curry2", i64 180143985094819847, ptr @"\01_camlTry_raise_cross_function_caught__run_6_13_code" }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__find_12" = local_unnamed_addr global i64 3063, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__find_12" = global { ptr, i64 } { ptr @"\01_camlTry_raise_cross_function_caught__find_5_12_code", i64 108086391056891909 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__probe_11" = local_unnamed_addr global i64 3063, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__probe_11" = global { ptr, i64 } { ptr @"\01_camlTry_raise_cross_function_caught__probe_4_11_code", i64 108086391056891909 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__Miss245" = local_unnamed_addr global i64 3064, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__Miss245" = global { ptr, i64 } { ptr @"\01_camlTry_raise_cross_function_caught__immstring74", i64 1 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__print_result_10" = local_unnamed_addr global i64 3063, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__print_result_10" = global { ptr, i64 } { ptr @"\01_camlTry_raise_cross_function_caught__print_result_3_10_code", i64 108086391056891909 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__black_box_9" = local_unnamed_addr global i64 3063, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__black_box_9" = global { ptr, i64 } { ptr @"\01_camlTry_raise_cross_function_caught__black_box_2_9_code", i64 108086391056891909 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__black_box_string_8" = local_unnamed_addr global i64 3063, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__black_box_string_8" = global { ptr, i64 } { ptr @"\01_camlTry_raise_cross_function_caught__black_box_string_1_8_code", i64 108086391056891909 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__black_box_int_7" = local_unnamed_addr global i64 3063, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__black_box_int_7" = global { ptr, i64 } { ptr @"\01_camlTry_raise_cross_function_caught__black_box_int_0_7_code", i64 108086391056891909 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__block35" = local_unnamed_addr global i64 2816, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__block35" = global { ptr, ptr } { ptr @"\01_caml_exn_Invalid_argument", ptr @"\01_camlTry_raise_cross_function_caught__string33" }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__string33" = local_unnamed_addr global i64 4092, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__string33" = global { [19 x i8], [4 x i8], i8 } { [19 x i8] c"index out of bounds", [4 x i8] zeroinitializer, i8 4 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__immstring74" = local_unnamed_addr global i64 6140, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__immstring74" = global { [36 x i8], [3 x i8], i8 } { [36 x i8] c"Try_raise_cross_function_caught.Miss", [3 x i8] zeroinitializer, i8 3 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__const_block66" = local_unnamed_addr global i64 4868, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__const_block66" = global { i64, i64, i64, ptr } { i64 1, i64 1, i64 1, ptr @"\01_camlTry_raise_cross_function_caught__const_block64" }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__const_block64" = local_unnamed_addr global i64 2828, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__const_block64" = global { i64, ptr } { i64 21, ptr @"\01_camlTry_raise_cross_function_caught__const_block62" }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__const_block62" = local_unnamed_addr global i64 1802, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__const_block62" = global { i64 } { i64 1 }, section "__DATA,__data", align 8
+@"\01_camlCamlinternalFormat__make_printf_120_401_code" = external local_unnamed_addr global ptr
+@"\01_camlStdlib__Printf__fn$5b$2fworkspace_root$2fprintf.ml$3a27$2c14$2d$2d48$5d_31" = external global ptr
+@"\01_caml_c_call" = external local_unnamed_addr global ptr
+@"\01_caml_curry2" = external global ptr
+@"\01_caml_exn_Invalid_argument" = external global ptr
+@"\01_caml_fresh_oo_id" = external local_unnamed_addr global ptr
+@"\01_caml_initialize" = external local_unnamed_addr global ptr
+@"\01_caml_int_of_string" = external global ptr
+@"\01_caml_llvm_call_realloc_stack" = external local_unnamed_addr global ptr
+@"\01_caml_sys_argv" = external global ptr
+
+; Function Attrs: noinline
+define oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_camlTry_raise_cross_function_caught__black_box_int_0_7_code"(i64 %0, i64 %1, i64 %2) #0 gc "oxcaml" {
+L1:
+  %3 = tail call i64 asm "", "=r,0"(i64 %2) #6
+  %4 = insertvalue { { i64, i64 }, { i64 } } poison, i64 %0, 0, 0
+  %5 = insertvalue { { i64, i64 }, { i64 } } %4, i64 %1, 0, 1
+  %6 = insertvalue { { i64, i64 }, { i64 } } %5, i64 %3, 1, 0
+  ret { { i64, i64 }, { i64 } } %6
+}
+
+; Function Attrs: noinline
+define oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTry_raise_cross_function_caught__black_box_string_1_8_code"(i64 %0, i64 %1, ptr addrspace(1) %2) #0 gc "oxcaml" {
+L1:
+  %3 = tail call ptr addrspace(1) asm "", "=r,0"(ptr addrspace(1) %2) #6
+  %4 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %0, 0, 0
+  %5 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %4, i64 %1, 0, 1
+  %6 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %5, ptr addrspace(1) %3, 1, 0
+  ret { { i64, i64 }, { ptr addrspace(1) } } %6
+}
+
+; Function Attrs: noinline
+define oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTry_raise_cross_function_caught__black_box_2_9_code"(i64 %0, i64 %1, ptr addrspace(1) %2) #0 gc "oxcaml" {
+L1:
+  %3 = tail call ptr addrspace(1) asm "", "=r,0"(ptr addrspace(1) %2) #6
+  %4 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %0, 0, 0
+  %5 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %4, i64 %1, 0, 1
+  %6 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %5, ptr addrspace(1) %3, 1, 0
+  ret { { i64, i64 }, { ptr addrspace(1) } } %6
+}
+
+; Function Attrs: noinline
+define oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_camlTry_raise_cross_function_caught__print_result_3_10_code"(i64 %0, i64 %1, i64 %2) #1 gc "oxcaml" {
+L1:
+  %3 = add i64 %0, 40
+  %4 = inttoptr i64 %3 to ptr
+  %5 = load i64, ptr %4, align 4
+  %6 = add i64 %5, 376
+  %7 = tail call i64 asm sideeffect "mov $0, sp", "=r"() #6
+  %.not = icmp ult i64 %7, %6
+  br i1 %.not, label %L116, label %L117, !prof !1
+
+L116:                                             ; preds = %L1
+  %statepoint_token = tail call oxcaml_alloccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, {} } (i64, i64, i64)) @"\01_caml_llvm_call_realloc_stack", i32 3, i32 0, i64 %0, i64 %1, i64 34, i32 0, i32 0) #7
+  %8 = call { { i64, i64 }, {} } @llvm.experimental.gc.result.sl_sl_i64i64ssl_ss(token %statepoint_token)
+  %9 = extractvalue { { i64, i64 }, {} } %8, 0, 0
+  %10 = extractvalue { { i64, i64 }, {} } %8, 0, 1
+  br label %L117
+
+L117:                                             ; preds = %L116, %L1
+  %alloc.0 = phi i64 [ %1, %L1 ], [ %10, %L116 ]
+  %ds.0 = phi i64 [ %0, %L1 ], [ %9, %L116 ]
+  %statepoint_token21 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, i64, i64)) @"\01_camlCamlinternalFormat__make_printf_120_401_code", i32 5, i32 0, i64 %ds.0, i64 %alloc.0, i64 ptrtoint (ptr @"\01_camlStdlib__Printf__fn$5b$2fworkspace_root$2fprintf.ml$3a27$2c14$2d$2d48$5d_31" to i64), i64 1, i64 ptrtoint (ptr @"\01_camlTry_raise_cross_function_caught__const_block66" to i64), i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 4, i64 27, i64 0, i64 2, i64 63, i64 0, i64 63, i64 9, i64 6910576, i64 6714478, i64 7105838, i64 23, i64 6583379, i64 6449516, i64 5267295, i64 7235954, i64 3040884, i64 7366251, i64 7235954, i64 26228, i64 34, i64 0, i64 21, i64 43, i64 0, i64 43, i64 9, i64 6910576, i64 6714478, i64 7105838, i64 22, i64 6583379, i64 6449516, i64 5267295, i64 7235954, i64 3040884, i64 7499878, i64 7630441, i64 102, i64 38, i64 0, i64 17, i64 35, i64 0, i64 35, i64 9, i64 6910576, i64 6714478, i64 7105838, i64 21, i64 6583379, i64 6449516, i64 5267295, i64 7235954, i64 3040884, i64 6910576, i64 6714478, i64 11, i64 0, i64 21, i64 63, i64 0, i64 63, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 44, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7351924, i64 7235954, i64 7495540, i64 7697253, i64 29804) ]
+  %11 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token21)
+  %gcagg = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %11, 0, 0
+  %gcagg19 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %11, 0, 1
+  %gcagg20 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %11, 1, 0
+  %12 = and i64 %2, 2147483647
+  %13 = load i64, ptr addrspace(1) %gcagg20, align 4
+  %14 = inttoptr i64 %13 to ptr
+  %15 = musttail call oxcaml_nofpcc { { i64, i64 }, { i64 } } %14(i64 %gcagg, i64 %gcagg19, i64 %12, ptr addrspace(1) %gcagg20) #8
+  ret { { i64, i64 }, { i64 } } %15
+}
+
+; Function Attrs: noinline
+define oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_camlTry_raise_cross_function_caught__probe_4_11_code"(i64 %0, i64 %1, i64 %2) #0 gc "oxcaml" {
+L1:
+  %or.cond.not = icmp eq i64 %2, 1
+  br i1 %or.cond.not, label %L121, label %L123
+
+L121:                                             ; preds = %L1
+  tail call void @llvm.aarch64.oxcaml.raise.notrace(i64 ptrtoint (ptr @"\01_camlTry_raise_cross_function_caught__Miss245" to i64))
+  unreachable
+
+L123:                                             ; preds = %L1
+  %3 = insertvalue { { i64, i64 }, { i64 } } poison, i64 %0, 0, 0
+  %4 = insertvalue { { i64, i64 }, { i64 } } %3, i64 %1, 0, 1
+  %5 = insertvalue { { i64, i64 }, { i64 } } %4, i64 %2, 1, 0
+  ret { { i64, i64 }, { i64 } } %5
+}
+
+; Function Attrs: noinline
+define oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_camlTry_raise_cross_function_caught__find_5_12_code"(i64 %0, i64 %1, i64 %2) #2 gc "oxcaml" personality ptr @"\01_caml_llvm_eh_personality" {
+L1:
+  %3 = add i64 %0, 40
+  %4 = inttoptr i64 %3 to ptr
+  %5 = load i64, ptr %4, align 4
+  %6 = add i64 %5, 408
+  %7 = tail call i64 asm sideeffect "mov $0, sp", "=r"() #6
+  %.not = icmp ult i64 %7, %6
+  br i1 %.not, label %L150, label %L151, !prof !1
+
+L150:                                             ; preds = %L1
+  %statepoint_token = tail call oxcaml_alloccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, {} } (i64, i64, i64)) @"\01_caml_llvm_call_realloc_stack", i32 3, i32 0, i64 %0, i64 %1, i64 38, i32 0, i32 0) #7
+  %8 = call { { i64, i64 }, {} } @llvm.experimental.gc.result.sl_sl_i64i64ssl_ss(token %statepoint_token)
+  %9 = extractvalue { { i64, i64 }, {} } %8, 0, 0
+  %10 = extractvalue { { i64, i64 }, {} } %8, 0, 1
+  br label %L151
+
+L151:                                             ; preds = %L150, %L1
+  %alloc.0 = phi i64 [ %1, %L1 ], [ %10, %L150 ]
+  %ds.0 = phi i64 [ %0, %L1 ], [ %9, %L150 ]
+  %11 = add i64 %ds.0, 64
+  %12 = inttoptr i64 %11 to ptr
+  %13 = load i64, ptr %12, align 4
+  tail call void @llvm.aarch64.oxcaml.push.trap(ptr blockaddress(@"\01_camlTry_raise_cross_function_caught__find_5_12_code", %L153))
+  %statepoint_token30 = invoke oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 18, i32 0, ptr elementtype({ { i64, i64 }, { i64 } } (i64, i64, i64)) @"\01_camlTry_raise_cross_function_caught__probe_4_11_code", i32 3, i32 0, i64 %ds.0, i64 %alloc.0, i64 %2, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 20, i64 0, i64 6, i64 13, i64 0, i64 13, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 36, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 6696564, i64 6581865) ]
+          to label %L154 unwind label %L153
+
+L153:                                             ; preds = %L151
+  %14 = landingpad token
+          cleanup
+  %15 = tail call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %gcagg = extractvalue { ptr addrspace(1), i64, i64, i64 } %15, 0
+  %gcagg26 = extractvalue { ptr addrspace(1), i64, i64, i64 } %15, 1
+  %gcagg27 = extractvalue { ptr addrspace(1), i64, i64, i64 } %15, 2
+  %gcagg28 = extractvalue { ptr addrspace(1), i64, i64, i64 } %15, 3
+  %16 = add i64 %gcagg28, 64
+  %17 = inttoptr i64 %16 to ptr
+  store i64 %13, ptr %17, align 4
+  %or.cond.not = icmp eq ptr addrspace(1) %gcagg, inttoptr (i64 ptrtoint (ptr @"\01_camlTry_raise_cross_function_caught__Miss245" to i64) to ptr addrspace(1))
+  br i1 %or.cond.not, label %L144, label %L146
+
+L154:                                             ; preds = %L151
+  %18 = call { { i64, i64 }, { i64 } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_i64ss(token %statepoint_token30)
+  tail call void @llvm.aarch64.oxcaml.pop.trap()
+  br label %common.ret
+
+common.ret:                                       ; preds = %L144, %L154
+  %common.ret.op = phi { { i64, i64 }, { i64 } } [ %18, %L154 ], [ %21, %L144 ]
+  ret { { i64, i64 }, { i64 } } %common.ret.op
+
+L144:                                             ; preds = %L153
+  %19 = insertvalue { { i64, i64 }, { i64 } } poison, i64 %gcagg28, 0, 0
+  %20 = insertvalue { { i64, i64 }, { i64 } } %19, i64 %gcagg27, 0, 1
+  %21 = insertvalue { { i64, i64 }, { i64 } } %20, i64 3, 1, 0
+  br label %common.ret
+
+L146:                                             ; preds = %L153
+  %22 = ptrtoint ptr addrspace(1) %gcagg to i64
+  tail call void @llvm.aarch64.oxcaml.raise.notrace(i64 %22)
+  unreachable
+}
+
+; Function Attrs: noinline
+define oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_camlTry_raise_cross_function_caught__run_6_13_code"(i64 %0, i64 %1, i64 %2, i64 %3) #1 gc "oxcaml" {
+L1:
+  %4 = icmp slt i64 %3, 3
+  br i1 %4, label %common.ret, label %L159
+
+L159:                                             ; preds = %L1
+  %5 = add i64 %0, 40
+  %6 = inttoptr i64 %5 to ptr
+  %7 = load i64, ptr %6, align 4
+  %8 = add i64 %7, 376
+  %9 = tail call i64 asm sideeffect "mov $0, sp", "=r"() #6
+  %.not = icmp ult i64 %9, %8
+  br i1 %.not, label %L205, label %L206, !prof !1
+
+L205:                                             ; preds = %L159
+  %statepoint_token = tail call oxcaml_alloccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, {} } (i64, i64, i64)) @"\01_caml_llvm_call_realloc_stack", i32 3, i32 0, i64 %0, i64 %1, i64 34, i32 0, i32 0) #7
+  %10 = call { { i64, i64 }, {} } @llvm.experimental.gc.result.sl_sl_i64i64ssl_ss(token %statepoint_token)
+  %11 = extractvalue { { i64, i64 }, {} } %10, 0, 0
+  %12 = extractvalue { { i64, i64 }, {} } %10, 0, 1
+  br label %L206
+
+L206:                                             ; preds = %L205, %L159
+  %alloc.0 = phi i64 [ %1, %L159 ], [ %12, %L205 ]
+  %ds.0 = phi i64 [ %0, %L159 ], [ %11, %L205 ]
+  %13 = lshr i64 %3, 1
+  %14 = icmp slt i64 %2, 3
+  br i1 %14, label %L191.preheader, label %L170
+
+L170.loopexit:                                    ; preds = %L194
+  br label %L170
+
+L170:                                             ; preds = %L170.loopexit, %L206
+  %.055 = phi i64 [ 1, %L206 ], [ %.057.ph, %L170.loopexit ]
+  %.0 = phi i64 [ 1, %L206 ], [ %26, %L170.loopexit ]
+  %alloc.1 = phi i64 [ %alloc.0, %L206 ], [ %alloc.4.ph, %L170.loopexit ]
+  %ds.1 = phi i64 [ %ds.0, %L206 ], [ %ds.4.ph, %L170.loopexit ]
+  %15 = lshr i64 %2, 1
+  br label %L176
+
+L176:                                             ; preds = %L176, %L170
+  %.059 = phi i64 [ %.055, %L170 ], [ %21, %L176 ]
+  %.058 = phi i64 [ 1, %L170 ], [ %22, %L176 ]
+  %alloc.2 = phi i64 [ %alloc.1, %L170 ], [ %18, %L176 ]
+  %ds.2 = phi i64 [ %ds.1, %L170 ], [ %17, %L176 ]
+  %statepoint_token84 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { i64 } } (i64, i64, i64)) @"\01_camlTry_raise_cross_function_caught__find_5_12_code", i32 3, i32 0, i64 %ds.2, i64 %alloc.2, i64 1, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 26, i64 0, i64 20, i64 26, i64 0, i64 26, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 35, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7482996, i64 28277) ]
+  %16 = call { { i64, i64 }, { i64 } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_i64ss(token %statepoint_token84)
+  %17 = extractvalue { { i64, i64 }, { i64 } } %16, 0, 0
+  %18 = extractvalue { { i64, i64 }, { i64 } } %16, 0, 1
+  %19 = extractvalue { { i64, i64 }, { i64 } } %16, 1, 0
+  %20 = add i64 %.059, -1
+  %21 = add i64 %20, %19
+  %22 = add i64 %.058, 1
+  %23 = icmp sgt i64 %22, %15
+  br i1 %23, label %L191.loopexit, label %L176
+
+L191.loopexit:                                    ; preds = %L176
+  %24 = extractvalue { { i64, i64 }, { i64 } } %16, 0, 0
+  %25 = extractvalue { { i64, i64 }, { i64 } } %16, 0, 1
+  br label %L191.preheader
+
+L191.preheader:                                   ; preds = %L191.loopexit, %L206
+  %.057.ph = phi i64 [ 1, %L206 ], [ %21, %L191.loopexit ]
+  %.2.ph = phi i64 [ 1, %L206 ], [ %.0, %L191.loopexit ]
+  %alloc.4.ph = phi i64 [ %alloc.0, %L206 ], [ %25, %L191.loopexit ]
+  %ds.4.ph = phi i64 [ %ds.0, %L206 ], [ %24, %L191.loopexit ]
+  br label %L191
+
+L191:                                             ; preds = %L191.preheader, %L194
+  %.2 = phi i64 [ %26, %L194 ], [ %.2.ph, %L191.preheader ]
+  %26 = add i64 %.2, 1
+  %27 = icmp sgt i64 %26, %13
+  br i1 %27, label %common.ret.loopexit, label %L194
+
+L194:                                             ; preds = %L191
+  br i1 %14, label %L191, label %L170.loopexit
+
+common.ret.loopexit:                              ; preds = %L191
+  br label %common.ret
+
+common.ret:                                       ; preds = %common.ret.loopexit, %L1
+  %ds.4.pn = phi i64 [ %0, %L1 ], [ %ds.4.ph, %common.ret.loopexit ]
+  %alloc.4.pn = phi i64 [ %1, %L1 ], [ %alloc.4.ph, %common.ret.loopexit ]
+  %.057.pn = phi i64 [ 1, %L1 ], [ %.057.ph, %common.ret.loopexit ]
+  %.pn65 = insertvalue { { i64, i64 }, { i64 } } undef, i64 %ds.4.pn, 0, 0
+  %.pn = insertvalue { { i64, i64 }, { i64 } } %.pn65, i64 %alloc.4.pn, 0, 1
+  %common.ret.op = insertvalue { { i64, i64 }, { i64 } } %.pn, i64 %.057.pn, 1, 0
+  ret { { i64, i64 }, { i64 } } %common.ret.op
+}
+
+; Function Attrs: noinline
+define oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTry_raise_cross_function_caught__entry"(i64 %0, i64 %1) local_unnamed_addr #1 gc "oxcaml" {
+L1:
+  %statepoint_token = call oxcaml_ccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, ptr addrspace(1))) @"\01_caml_c_call", i32 4, i32 0, i64 %0, i64 %1, i64 ptrtoint (ptr @"\01_caml_sys_argv" to i64), ptr addrspace(1) inttoptr (i64 1 to ptr addrspace(1)), i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 1, i64 1, i64 6, i64 0, i64 18, i64 26, i64 0, i64 26, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 33, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7220852) ]
+  %2 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token)
+  %gcagg = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %2, 0, 0
+  %gcagg151 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %2, 0, 1
+  %gcagg152 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %2, 1, 0
+  %remat = getelementptr i8, ptr addrspace(1) %gcagg152, i64 -8
+  %3 = load i64, ptr addrspace(1) %remat, align 4
+  %4 = and i64 %3, 72057594037925888
+  %.not = icmp eq i64 %4, 0
+  br i1 %.not, label %L249, label %L225
+
+L225:                                             ; preds = %L1
+  %statepoint_token179 = call oxcaml_ccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, ptr addrspace(1))) @"\01_caml_c_call", i32 4, i32 0, i64 %gcagg, i64 %gcagg151, i64 ptrtoint (ptr @"\01_caml_sys_argv" to i64), ptr addrspace(1) inttoptr (i64 1 to ptr addrspace(1)), i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 1, i64 1, i64 6, i64 0, i64 50, i64 58, i64 0, i64 58, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 33, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7220852) ]
+  %5 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token179)
+  %gcagg153 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %5, 0, 0
+  %gcagg154 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %5, 0, 1
+  %gcagg155 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %5, 1, 0
+  %remat174 = getelementptr i8, ptr addrspace(1) %gcagg155, i64 -8
+  %6 = load i64, ptr addrspace(1) %remat174, align 4
+  %7 = and i64 %6, 72057594037925888
+  %.not150 = icmp eq i64 %7, 0
+  br i1 %.not150, label %L243, label %L235
+
+L235:                                             ; preds = %L225
+  %remat175 = getelementptr i8, ptr addrspace(1) %gcagg155, i64 8
+  %8 = load ptr addrspace(1), ptr addrspace(1) %remat175, align 8
+  %statepoint_token180 = call oxcaml_ccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, ptr addrspace(1))) @"\01_caml_c_call", i32 4, i32 0, i64 %gcagg153, i64 %gcagg154, i64 ptrtoint (ptr @"\01_caml_int_of_string" to i64), ptr addrspace(1) %8, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 1, i64 1, i64 6, i64 0, i64 36, i64 62, i64 0, i64 62, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 33, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7220852), "gc-live"(ptr addrspace(1) %8) ]
+  %9 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token180)
+  %gcagg156 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %9, 0, 0
+  %gcagg157 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %9, 0, 1
+  %gcagg158 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %9, 1, 0
+  %10 = ptrtoint ptr addrspace(1) %gcagg158 to i64
+  br label %L249
+
+L243:                                             ; preds = %L225
+  tail call void @llvm.aarch64.oxcaml.raise.notrace(i64 ptrtoint (ptr @"\01_camlTry_raise_cross_function_caught__block35" to i64))
+  unreachable
+
+L249:                                             ; preds = %L1, %L235
+  %.0 = phi i64 [ %10, %L235 ], [ 200001, %L1 ]
+  %alloc.0 = phi i64 [ %gcagg157, %L235 ], [ %gcagg151, %L1 ]
+  %ds.0 = phi i64 [ %gcagg156, %L235 ], [ %gcagg, %L1 ]
+  %11 = inttoptr i64 %.0 to ptr addrspace(1)
+  %12 = tail call oxcaml_c_directcc { i64, i64 } @"\01_caml_initialize"(i64 %ds.0, i64 %alloc.0, ptr addrspace(1) inttoptr (i64 add (i64 ptrtoint (ptr @"\01_camlTry_raise_cross_function_caught" to i64), i64 24) to ptr addrspace(1)), ptr addrspace(1) %11) #9
+  %13 = extractvalue { i64, i64 } %12, 0
+  %14 = extractvalue { i64, i64 } %12, 1
+  %statepoint_token181 = call oxcaml_ccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, ptr addrspace(1))) @"\01_caml_c_call", i32 4, i32 0, i64 %13, i64 %14, i64 ptrtoint (ptr @"\01_caml_sys_argv" to i64), ptr addrspace(1) inttoptr (i64 1 to ptr addrspace(1)), i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 1, i64 1, i64 9, i64 0, i64 18, i64 26, i64 0, i64 26, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 36, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7482996, i64 7565413) ]
+  %15 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token181)
+  %gcagg159 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %15, 0, 0
+  %gcagg160 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %15, 0, 1
+  %gcagg161 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %15, 1, 0
+  %remat176 = getelementptr i8, ptr addrspace(1) %gcagg161, i64 -8
+  %16 = load i64, ptr addrspace(1) %remat176, align 4
+  %17 = and i64 %16, 72057594037926912
+  %18 = icmp ugt i64 %17, 2560
+  br i1 %18, label %L261, label %L285
+
+L261:                                             ; preds = %L249
+  %statepoint_token182 = call oxcaml_ccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, ptr addrspace(1))) @"\01_caml_c_call", i32 4, i32 0, i64 %gcagg159, i64 %gcagg160, i64 ptrtoint (ptr @"\01_caml_sys_argv" to i64), ptr addrspace(1) inttoptr (i64 1 to ptr addrspace(1)), i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 1, i64 1, i64 9, i64 0, i64 50, i64 58, i64 0, i64 58, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 36, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7482996, i64 7565413) ]
+  %19 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token182)
+  %gcagg162 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %19, 0, 0
+  %gcagg163 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %19, 0, 1
+  %gcagg164 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %19, 1, 0
+  %remat177 = getelementptr i8, ptr addrspace(1) %gcagg164, i64 -8
+  %20 = load i64, ptr addrspace(1) %remat177, align 4
+  %21 = and i64 %20, 72057594037926912
+  %22 = icmp ugt i64 %21, 2560
+  br i1 %22, label %L271, label %L279
+
+L271:                                             ; preds = %L261
+  %remat178 = getelementptr i8, ptr addrspace(1) %gcagg164, i64 16
+  %23 = load ptr addrspace(1), ptr addrspace(1) %remat178, align 8
+  %statepoint_token183 = call oxcaml_ccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, ptr addrspace(1))) @"\01_caml_c_call", i32 4, i32 0, i64 %gcagg162, i64 %gcagg163, i64 ptrtoint (ptr @"\01_caml_int_of_string" to i64), ptr addrspace(1) %23, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 1, i64 1, i64 9, i64 0, i64 36, i64 62, i64 0, i64 62, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 36, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7482996, i64 7565413), "gc-live"(ptr addrspace(1) %23) ]
+  %24 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token183)
+  %gcagg165 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %24, 0, 0
+  %gcagg166 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %24, 0, 1
+  %gcagg167 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %24, 1, 0
+  %25 = ptrtoint ptr addrspace(1) %gcagg167 to i64
+  br label %L285
+
+L279:                                             ; preds = %L261
+  tail call void @llvm.aarch64.oxcaml.raise.notrace(i64 ptrtoint (ptr @"\01_camlTry_raise_cross_function_caught__block35" to i64))
+  unreachable
+
+L285:                                             ; preds = %L249, %L271
+  %.0148 = phi i64 [ %25, %L271 ], [ 21, %L249 ]
+  %alloc.1 = phi i64 [ %gcagg166, %L271 ], [ %gcagg160, %L249 ]
+  %ds.1 = phi i64 [ %gcagg165, %L271 ], [ %gcagg159, %L249 ]
+  %26 = inttoptr i64 %.0148 to ptr addrspace(1)
+  %27 = tail call oxcaml_c_directcc { i64, i64 } @"\01_caml_initialize"(i64 %ds.1, i64 %alloc.1, ptr addrspace(1) inttoptr (i64 add (i64 ptrtoint (ptr @"\01_camlTry_raise_cross_function_caught" to i64), i64 32) to ptr addrspace(1)), ptr addrspace(1) %26) #9
+  %28 = extractvalue { i64, i64 } %27, 0
+  %29 = extractvalue { i64, i64 } %27, 1
+  %30 = tail call oxcaml_c_directcc { i64, i64, ptr addrspace(1) } @"\01_caml_fresh_oo_id"(i64 %28, i64 %29, ptr addrspace(1) nonnull inttoptr (i64 1 to ptr addrspace(1))) #9
+  %gcagg168 = extractvalue { i64, i64, ptr addrspace(1) } %30, 0
+  %gcagg169 = extractvalue { i64, i64, ptr addrspace(1) } %30, 1
+  %gcagg170 = extractvalue { i64, i64, ptr addrspace(1) } %30, 2
+  %31 = tail call oxcaml_c_directcc { i64, i64 } @"\01_caml_initialize"(i64 %gcagg168, i64 %gcagg169, ptr addrspace(1) inttoptr (i64 add (i64 ptrtoint (ptr @"\01_camlTry_raise_cross_function_caught__Miss245" to i64), i64 8) to ptr addrspace(1)), ptr addrspace(1) %gcagg170) #9
+  %32 = extractvalue { i64, i64 } %31, 0
+  %33 = extractvalue { i64, i64 } %31, 1
+  %34 = add i64 %32, 40
+  %35 = inttoptr i64 %34 to ptr
+  %36 = load i64, ptr %35, align 4
+  %37 = add i64 %36, 376
+  %38 = tail call i64 asm sideeffect "mov $0, sp", "=r"() #6
+  %.not149 = icmp ult i64 %38, %37
+  br i1 %.not149, label %L308, label %L309, !prof !1
+
+L308:                                             ; preds = %L285
+  %statepoint_token184 = tail call oxcaml_alloccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, {} } (i64, i64, i64)) @"\01_caml_llvm_call_realloc_stack", i32 3, i32 0, i64 %32, i64 %33, i64 34, i32 0, i32 0) #7
+  %39 = call { { i64, i64 }, {} } @llvm.experimental.gc.result.sl_sl_i64i64ssl_ss(token %statepoint_token184)
+  %40 = extractvalue { { i64, i64 }, {} } %39, 0, 0
+  %41 = extractvalue { { i64, i64 }, {} } %39, 0, 1
+  br label %L309
+
+L309:                                             ; preds = %L308, %L285
+  %alloc.2 = phi i64 [ %33, %L285 ], [ %41, %L308 ]
+  %ds.2 = phi i64 [ %32, %L285 ], [ %40, %L308 ]
+  %statepoint_token185 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { i64 } } (i64, i64, i64)) @"\01_camlTry_raise_cross_function_caught__black_box_int_0_7_code", i32 3, i32 0, i64 %ds.2, i64 %alloc.2, i64 %.0148, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 31, i64 0, i64 45, i64 65, i64 0, i64 65, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 31, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 116) ]
+  %42 = call { { i64, i64 }, { i64 } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_i64ss(token %statepoint_token185)
+  %43 = extractvalue { { i64, i64 }, { i64 } } %42, 0, 0
+  %44 = extractvalue { { i64, i64 }, { i64 } } %42, 0, 1
+  %45 = extractvalue { { i64, i64 }, { i64 } } %42, 1, 0
+  %statepoint_token186 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { i64 } } (i64, i64, i64)) @"\01_camlTry_raise_cross_function_caught__black_box_int_0_7_code", i32 3, i32 0, i64 %43, i64 %44, i64 %.0, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 31, i64 0, i64 27, i64 44, i64 0, i64 44, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 31, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 116) ]
+  %46 = call { { i64, i64 }, { i64 } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_i64ss(token %statepoint_token186)
+  %47 = extractvalue { { i64, i64 }, { i64 } } %46, 0, 0
+  %48 = extractvalue { { i64, i64 }, { i64 } } %46, 0, 1
+  %49 = extractvalue { { i64, i64 }, { i64 } } %46, 1, 0
+  %statepoint_token187 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { i64 } } (i64, i64, i64, i64)) @"\01_camlTry_raise_cross_function_caught__run_6_13_code", i32 4, i32 0, i64 %47, i64 %48, i64 %49, i64 %45, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 31, i64 0, i64 22, i64 66, i64 0, i64 66, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 31, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 116) ]
+  %50 = call { { i64, i64 }, { i64 } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_i64ss(token %statepoint_token187)
+  %51 = extractvalue { { i64, i64 }, { i64 } } %50, 0, 0
+  %52 = extractvalue { { i64, i64 }, { i64 } } %50, 0, 1
+  %53 = extractvalue { { i64, i64 }, { i64 } } %50, 1, 0
+  %statepoint_token188 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, i64, i64)) @"\01_camlCamlinternalFormat__make_printf_120_401_code", i32 5, i32 0, i64 %51, i64 %52, i64 ptrtoint (ptr @"\01_camlStdlib__Printf__fn$5b$2fworkspace_root$2fprintf.ml$3a27$2c14$2d$2d48$5d_31" to i64), i64 1, i64 ptrtoint (ptr @"\01_camlTry_raise_cross_function_caught__const_block66" to i64), i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 5, i64 27, i64 0, i64 2, i64 63, i64 0, i64 63, i64 9, i64 6910576, i64 6714478, i64 7105838, i64 23, i64 6583379, i64 6449516, i64 5267295, i64 7235954, i64 3040884, i64 7366251, i64 7235954, i64 26228, i64 34, i64 0, i64 21, i64 43, i64 0, i64 43, i64 9, i64 6910576, i64 6714478, i64 7105838, i64 22, i64 6583379, i64 6449516, i64 5267295, i64 7235954, i64 3040884, i64 7499878, i64 7630441, i64 102, i64 38, i64 0, i64 17, i64 35, i64 0, i64 35, i64 9, i64 6910576, i64 6714478, i64 7105838, i64 21, i64 6583379, i64 6449516, i64 5267295, i64 7235954, i64 3040884, i64 6910576, i64 6714478, i64 11, i64 0, i64 21, i64 63, i64 0, i64 63, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 44, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7351924, i64 7235954, i64 7495540, i64 7697253, i64 29804, i64 31, i64 0, i64 9, i64 66, i64 0, i64 66, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 31, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 116) ]
+  %54 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token188)
+  %gcagg171 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %54, 0, 0
+  %gcagg172 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %54, 0, 1
+  %gcagg173 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %54, 1, 0
+  %55 = and i64 %53, 2147483647
+  %56 = load i64, ptr addrspace(1) %gcagg173, align 4
+  %57 = inttoptr i64 %56 to ptr
+  %statepoint_token189 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { i64 } } (i64, i64, i64, ptr addrspace(1))) %57, i32 4, i32 0, i64 %gcagg171, i64 %gcagg172, i64 %55, ptr addrspace(1) %gcagg173, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 2, i64 11, i64 0, i64 21, i64 63, i64 0, i64 63, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 44, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7351924, i64 7235954, i64 7495540, i64 7697253, i64 29804, i64 31, i64 0, i64 9, i64 66, i64 0, i64 66, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 31, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 116) ]
+  %58 = call { { i64, i64 }, { i64 } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_i64ss(token %statepoint_token189)
+  %59 = extractvalue { { i64, i64 }, { i64 } } %58, 0, 0
+  %60 = extractvalue { { i64, i64 }, { i64 } } %58, 0, 1
+  %61 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %59, 0, 0
+  %62 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %61, i64 %60, 0, 1
+  %63 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %62, ptr addrspace(1) inttoptr (i64 1 to ptr addrspace(1)), 1, 0
+  ret { { i64, i64 }, { ptr addrspace(1) } } %63
+}
+
+declare i32 @"\01_caml_llvm_eh_personality"(...)
+
+; Function Attrs: convergent nocallback noduplicate nofree nomerge nounwind willreturn
+declare void @llvm.aarch64.oxcaml.pop.trap() #3
+
+; Function Attrs: convergent nocallback noduplicate nofree nomerge nounwind willreturn
+declare void @llvm.aarch64.oxcaml.push.trap(ptr) #3
+
+; Function Attrs: convergent nocallback noduplicate nofree nomerge noreturn
+declare void @llvm.aarch64.oxcaml.raise.notrace(i64) #4
+
+; Function Attrs: convergent nocallback noduplicate nofree nomerge nounwind willreturn
+declare { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover() #3
+
+declare token @llvm.experimental.gc.statepoint.p0(i64 immarg, i32 immarg, ptr, i32 immarg, i32 immarg, ...)
+
+; Function Attrs: nocallback nofree nosync nounwind willreturn memory(none)
+declare { { i64, i64 }, {} } @llvm.experimental.gc.result.sl_sl_i64i64ssl_ss(token) #5
+
+; Function Attrs: nocallback nofree nosync nounwind willreturn memory(none)
+declare { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token) #5
+
+; Function Attrs: nocallback nofree nosync nounwind willreturn memory(none)
+declare { { i64, i64 }, { i64 } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_i64ss(token) #5
+
+attributes #0 = { noinline "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" }
+attributes #1 = { noinline "oxcaml-stack-check"="true" "oxcaml-stack-check-before-bytes"="0" "oxcaml-stack-check-bytes"="16" }
+attributes #2 = { noinline "oxcaml-stack-check"="true" "oxcaml-stack-check-before-bytes"="0" "oxcaml-stack-check-bytes"="48" }
+attributes #3 = { convergent nocallback noduplicate nofree nomerge nounwind willreturn }
+attributes #4 = { convergent nocallback noduplicate nofree nomerge noreturn }
+attributes #5 = { nocallback nofree nosync nounwind willreturn memory(none) }
+attributes #6 = { nounwind "gc-leaf-function"="true" }
+attributes #7 = { cold }
+attributes #8 = { "statepoint-id"="0" }
+attributes #9 = { "gc-leaf-function"="true" }
+
+!llvm.module.flags = !{!0}
+
+!0 = !{i32 1, !"oxcaml_module", !"Try_raise_cross_function_caught"}
+!1 = !{!"branch_weights", i32 1, i32 2000}
+*** IR Dump After Make relocations explicit at statepoints (rewrite-statepoints-for-gc) ***
+; ModuleID = '/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/try_raise_cross_function_caught/raw/input.ll'
+source_filename = "try_raise_cross_function_caught.ml"
+target datalayout = "e-m:o-i64:64-i128:128-n32:64-S128"
+target triple = "arm64-apple-macosx16.0.0"
+
+@"\01_camlTry_raise_cross_function_caught__gc_roots" = local_unnamed_addr global { ptr, ptr, i64 } { ptr @"\01_camlTry_raise_cross_function_caught", ptr @"\01_camlTry_raise_cross_function_caught__Miss245", i64 0 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught" = local_unnamed_addr global i64 11008, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught" = global { ptr, ptr, ptr, i64, i64, ptr, ptr, ptr, ptr, ptr } { ptr @"\01_camlTry_raise_cross_function_caught__black_box_int_7", ptr @"\01_camlTry_raise_cross_function_caught__black_box_string_8", ptr @"\01_camlTry_raise_cross_function_caught__black_box_9", i64 1, i64 1, ptr @"\01_camlTry_raise_cross_function_caught__print_result_10", ptr @"\01_camlTry_raise_cross_function_caught__Miss245", ptr @"\01_camlTry_raise_cross_function_caught__probe_11", ptr @"\01_camlTry_raise_cross_function_caught__find_12", ptr @"\01_camlTry_raise_cross_function_caught__run_13" }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__run_13" = local_unnamed_addr global i64 4087, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__run_13" = global { ptr, i64, ptr } { ptr @"\01_caml_curry2", i64 180143985094819847, ptr @"\01_camlTry_raise_cross_function_caught__run_6_13_code" }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__find_12" = local_unnamed_addr global i64 3063, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__find_12" = global { ptr, i64 } { ptr @"\01_camlTry_raise_cross_function_caught__find_5_12_code", i64 108086391056891909 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__probe_11" = local_unnamed_addr global i64 3063, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__probe_11" = global { ptr, i64 } { ptr @"\01_camlTry_raise_cross_function_caught__probe_4_11_code", i64 108086391056891909 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__Miss245" = local_unnamed_addr global i64 3064, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__Miss245" = global { ptr, i64 } { ptr @"\01_camlTry_raise_cross_function_caught__immstring74", i64 1 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__print_result_10" = local_unnamed_addr global i64 3063, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__print_result_10" = global { ptr, i64 } { ptr @"\01_camlTry_raise_cross_function_caught__print_result_3_10_code", i64 108086391056891909 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__black_box_9" = local_unnamed_addr global i64 3063, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__black_box_9" = global { ptr, i64 } { ptr @"\01_camlTry_raise_cross_function_caught__black_box_2_9_code", i64 108086391056891909 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__black_box_string_8" = local_unnamed_addr global i64 3063, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__black_box_string_8" = global { ptr, i64 } { ptr @"\01_camlTry_raise_cross_function_caught__black_box_string_1_8_code", i64 108086391056891909 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__black_box_int_7" = local_unnamed_addr global i64 3063, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__black_box_int_7" = global { ptr, i64 } { ptr @"\01_camlTry_raise_cross_function_caught__black_box_int_0_7_code", i64 108086391056891909 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__block35" = local_unnamed_addr global i64 2816, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__block35" = global { ptr, ptr } { ptr @"\01_caml_exn_Invalid_argument", ptr @"\01_camlTry_raise_cross_function_caught__string33" }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__string33" = local_unnamed_addr global i64 4092, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__string33" = global { [19 x i8], [4 x i8], i8 } { [19 x i8] c"index out of bounds", [4 x i8] zeroinitializer, i8 4 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__immstring74" = local_unnamed_addr global i64 6140, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__immstring74" = global { [36 x i8], [3 x i8], i8 } { [36 x i8] c"Try_raise_cross_function_caught.Miss", [3 x i8] zeroinitializer, i8 3 }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__const_block66" = local_unnamed_addr global i64 4868, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__const_block66" = global { i64, i64, i64, ptr } { i64 1, i64 1, i64 1, ptr @"\01_camlTry_raise_cross_function_caught__const_block64" }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__const_block64" = local_unnamed_addr global i64 2828, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__const_block64" = global { i64, ptr } { i64 21, ptr @"\01_camlTry_raise_cross_function_caught__const_block62" }, section "__DATA,__data", align 8
+@"\01_header.camlTry_raise_cross_function_caught__const_block62" = local_unnamed_addr global i64 1802, section "__DATA,__data", align 8
+@"\01_camlTry_raise_cross_function_caught__const_block62" = global { i64 } { i64 1 }, section "__DATA,__data", align 8
+@"\01_camlCamlinternalFormat__make_printf_120_401_code" = external local_unnamed_addr global ptr
+@"\01_camlStdlib__Printf__fn$5b$2fworkspace_root$2fprintf.ml$3a27$2c14$2d$2d48$5d_31" = external global ptr
+@"\01_caml_c_call" = external local_unnamed_addr global ptr
+@"\01_caml_curry2" = external global ptr
+@"\01_caml_exn_Invalid_argument" = external global ptr
+@"\01_caml_fresh_oo_id" = external local_unnamed_addr global ptr
+@"\01_caml_initialize" = external local_unnamed_addr global ptr
+@"\01_caml_int_of_string" = external global ptr
+@"\01_caml_llvm_call_realloc_stack" = external local_unnamed_addr global ptr
+@"\01_caml_sys_argv" = external global ptr
+
+; Function Attrs: noinline
+define oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_camlTry_raise_cross_function_caught__black_box_int_0_7_code"(i64 %0, i64 %1, i64 %2) #0 gc "oxcaml" {
+L1:
+  %3 = tail call i64 asm "", "=r,0"(i64 %2) #6
+  %4 = insertvalue { { i64, i64 }, { i64 } } poison, i64 %0, 0, 0
+  %5 = insertvalue { { i64, i64 }, { i64 } } %4, i64 %1, 0, 1
+  %6 = insertvalue { { i64, i64 }, { i64 } } %5, i64 %3, 1, 0
+  ret { { i64, i64 }, { i64 } } %6
+}
+
+; Function Attrs: noinline
+define oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTry_raise_cross_function_caught__black_box_string_1_8_code"(i64 %0, i64 %1, ptr addrspace(1) %2) #0 gc "oxcaml" {
+L1:
+  %3 = tail call ptr addrspace(1) asm "", "=r,0"(ptr addrspace(1) %2) #6
+  %4 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %0, 0, 0
+  %5 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %4, i64 %1, 0, 1
+  %6 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %5, ptr addrspace(1) %3, 1, 0
+  ret { { i64, i64 }, { ptr addrspace(1) } } %6
+}
+
+; Function Attrs: noinline
+define oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTry_raise_cross_function_caught__black_box_2_9_code"(i64 %0, i64 %1, ptr addrspace(1) %2) #0 gc "oxcaml" {
+L1:
+  %3 = tail call ptr addrspace(1) asm "", "=r,0"(ptr addrspace(1) %2) #6
+  %4 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %0, 0, 0
+  %5 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %4, i64 %1, 0, 1
+  %6 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %5, ptr addrspace(1) %3, 1, 0
+  ret { { i64, i64 }, { ptr addrspace(1) } } %6
+}
+
+; Function Attrs: noinline
+define oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_camlTry_raise_cross_function_caught__print_result_3_10_code"(i64 %0, i64 %1, i64 %2) #1 gc "oxcaml" {
+L1:
+  %3 = add i64 %0, 40
+  %4 = inttoptr i64 %3 to ptr
+  %5 = load i64, ptr %4, align 4
+  %6 = add i64 %5, 376
+  %7 = tail call i64 asm sideeffect "mov $0, sp", "=r"() #6
+  %.not = icmp ult i64 %7, %6
+  br i1 %.not, label %L116, label %L117, !prof !1
+
+L116:                                             ; preds = %L1
+  %statepoint_token = tail call oxcaml_alloccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, {} } (i64, i64, i64)) @"\01_caml_llvm_call_realloc_stack", i32 3, i32 0, i64 %0, i64 %1, i64 34, i32 0, i32 0) #7
+  %8 = call { { i64, i64 }, {} } @llvm.experimental.gc.result.sl_sl_i64i64ssl_ss(token %statepoint_token)
+  %9 = extractvalue { { i64, i64 }, {} } %8, 0, 0
+  %10 = extractvalue { { i64, i64 }, {} } %8, 0, 1
+  br label %L117
+
+L117:                                             ; preds = %L116, %L1
+  %alloc.0 = phi i64 [ %1, %L1 ], [ %10, %L116 ]
+  %ds.0 = phi i64 [ %0, %L1 ], [ %9, %L116 ]
+  %statepoint_token21 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, i64, i64)) @"\01_camlCamlinternalFormat__make_printf_120_401_code", i32 5, i32 0, i64 %ds.0, i64 %alloc.0, i64 ptrtoint (ptr @"\01_camlStdlib__Printf__fn$5b$2fworkspace_root$2fprintf.ml$3a27$2c14$2d$2d48$5d_31" to i64), i64 1, i64 ptrtoint (ptr @"\01_camlTry_raise_cross_function_caught__const_block66" to i64), i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 4, i64 27, i64 0, i64 2, i64 63, i64 0, i64 63, i64 9, i64 6910576, i64 6714478, i64 7105838, i64 23, i64 6583379, i64 6449516, i64 5267295, i64 7235954, i64 3040884, i64 7366251, i64 7235954, i64 26228, i64 34, i64 0, i64 21, i64 43, i64 0, i64 43, i64 9, i64 6910576, i64 6714478, i64 7105838, i64 22, i64 6583379, i64 6449516, i64 5267295, i64 7235954, i64 3040884, i64 7499878, i64 7630441, i64 102, i64 38, i64 0, i64 17, i64 35, i64 0, i64 35, i64 9, i64 6910576, i64 6714478, i64 7105838, i64 21, i64 6583379, i64 6449516, i64 5267295, i64 7235954, i64 3040884, i64 6910576, i64 6714478, i64 11, i64 0, i64 21, i64 63, i64 0, i64 63, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 44, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7351924, i64 7235954, i64 7495540, i64 7697253, i64 29804) ]
+  %11 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token21)
+  %gcagg = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %11, 0, 0
+  %gcagg19 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %11, 0, 1
+  %gcagg20 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %11, 1, 0
+  %12 = and i64 %2, 2147483647
+  %13 = load i64, ptr addrspace(1) %gcagg20, align 4
+  %14 = inttoptr i64 %13 to ptr
+  %15 = musttail call oxcaml_nofpcc { { i64, i64 }, { i64 } } %14(i64 %gcagg, i64 %gcagg19, i64 %12, ptr addrspace(1) %gcagg20) #8
+  ret { { i64, i64 }, { i64 } } %15
+}
+
+; Function Attrs: noinline
+define oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_camlTry_raise_cross_function_caught__probe_4_11_code"(i64 %0, i64 %1, i64 %2) #0 gc "oxcaml" {
+L1:
+  %or.cond.not = icmp eq i64 %2, 1
+  br i1 %or.cond.not, label %L121, label %L123
+
+L121:                                             ; preds = %L1
+  tail call void @llvm.aarch64.oxcaml.raise.notrace(i64 ptrtoint (ptr @"\01_camlTry_raise_cross_function_caught__Miss245" to i64))
+  unreachable
+
+L123:                                             ; preds = %L1
+  %3 = insertvalue { { i64, i64 }, { i64 } } poison, i64 %0, 0, 0
+  %4 = insertvalue { { i64, i64 }, { i64 } } %3, i64 %1, 0, 1
+  %5 = insertvalue { { i64, i64 }, { i64 } } %4, i64 %2, 1, 0
+  ret { { i64, i64 }, { i64 } } %5
+}
+
+; Function Attrs: noinline
+define oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_camlTry_raise_cross_function_caught__find_5_12_code"(i64 %0, i64 %1, i64 %2) #2 gc "oxcaml" personality ptr @"\01_caml_llvm_eh_personality" {
+L1:
+  %3 = add i64 %0, 40
+  %4 = inttoptr i64 %3 to ptr
+  %5 = load i64, ptr %4, align 4
+  %6 = add i64 %5, 408
+  %7 = tail call i64 asm sideeffect "mov $0, sp", "=r"() #6
+  %.not = icmp ult i64 %7, %6
+  br i1 %.not, label %L150, label %L151, !prof !1
+
+L150:                                             ; preds = %L1
+  %statepoint_token = tail call oxcaml_alloccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, {} } (i64, i64, i64)) @"\01_caml_llvm_call_realloc_stack", i32 3, i32 0, i64 %0, i64 %1, i64 38, i32 0, i32 0) #7
+  %8 = call { { i64, i64 }, {} } @llvm.experimental.gc.result.sl_sl_i64i64ssl_ss(token %statepoint_token)
+  %9 = extractvalue { { i64, i64 }, {} } %8, 0, 0
+  %10 = extractvalue { { i64, i64 }, {} } %8, 0, 1
+  br label %L151
+
+L151:                                             ; preds = %L150, %L1
+  %alloc.0 = phi i64 [ %1, %L1 ], [ %10, %L150 ]
+  %ds.0 = phi i64 [ %0, %L1 ], [ %9, %L150 ]
+  %11 = add i64 %ds.0, 64
+  %12 = inttoptr i64 %11 to ptr
+  %13 = load i64, ptr %12, align 4
+  tail call void @llvm.aarch64.oxcaml.push.trap(ptr blockaddress(@"\01_camlTry_raise_cross_function_caught__find_5_12_code", %L153))
+  %statepoint_token30 = invoke oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 18, i32 0, ptr elementtype({ { i64, i64 }, { i64 } } (i64, i64, i64)) @"\01_camlTry_raise_cross_function_caught__probe_4_11_code", i32 3, i32 0, i64 %ds.0, i64 %alloc.0, i64 %2, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 20, i64 0, i64 6, i64 13, i64 0, i64 13, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 36, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 6696564, i64 6581865) ]
+          to label %L154 unwind label %L153
+
+L153:                                             ; preds = %L151
+  %14 = landingpad token
+          cleanup
+  %15 = tail call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
+  %gcagg = extractvalue { ptr addrspace(1), i64, i64, i64 } %15, 0
+  %gcagg26 = extractvalue { ptr addrspace(1), i64, i64, i64 } %15, 1
+  %gcagg27 = extractvalue { ptr addrspace(1), i64, i64, i64 } %15, 2
+  %gcagg28 = extractvalue { ptr addrspace(1), i64, i64, i64 } %15, 3
+  %16 = add i64 %gcagg28, 64
+  %17 = inttoptr i64 %16 to ptr
+  store i64 %13, ptr %17, align 4
+  %or.cond.not = icmp eq ptr addrspace(1) %gcagg, inttoptr (i64 ptrtoint (ptr @"\01_camlTry_raise_cross_function_caught__Miss245" to i64) to ptr addrspace(1))
+  br i1 %or.cond.not, label %L144, label %L146
+
+L154:                                             ; preds = %L151
+  %18 = call { { i64, i64 }, { i64 } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_i64ss(token %statepoint_token30)
+  tail call void @llvm.aarch64.oxcaml.pop.trap()
+  br label %common.ret
+
+common.ret:                                       ; preds = %L144, %L154
+  %common.ret.op = phi { { i64, i64 }, { i64 } } [ %18, %L154 ], [ %21, %L144 ]
+  ret { { i64, i64 }, { i64 } } %common.ret.op
+
+L144:                                             ; preds = %L153
+  %19 = insertvalue { { i64, i64 }, { i64 } } poison, i64 %gcagg28, 0, 0
+  %20 = insertvalue { { i64, i64 }, { i64 } } %19, i64 %gcagg27, 0, 1
+  %21 = insertvalue { { i64, i64 }, { i64 } } %20, i64 3, 1, 0
+  br label %common.ret
+
+L146:                                             ; preds = %L153
+  %22 = ptrtoint ptr addrspace(1) %gcagg to i64
+  tail call void @llvm.aarch64.oxcaml.raise.notrace(i64 %22)
+  unreachable
+}
+
+; Function Attrs: noinline
+define oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_camlTry_raise_cross_function_caught__run_6_13_code"(i64 %0, i64 %1, i64 %2, i64 %3) #1 gc "oxcaml" {
+L1:
+  %4 = icmp slt i64 %3, 3
+  br i1 %4, label %common.ret, label %L159
+
+L159:                                             ; preds = %L1
+  %5 = add i64 %0, 40
+  %6 = inttoptr i64 %5 to ptr
+  %7 = load i64, ptr %6, align 4
+  %8 = add i64 %7, 376
+  %9 = tail call i64 asm sideeffect "mov $0, sp", "=r"() #6
+  %.not = icmp ult i64 %9, %8
+  br i1 %.not, label %L205, label %L206, !prof !1
+
+L205:                                             ; preds = %L159
+  %statepoint_token = tail call oxcaml_alloccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, {} } (i64, i64, i64)) @"\01_caml_llvm_call_realloc_stack", i32 3, i32 0, i64 %0, i64 %1, i64 34, i32 0, i32 0) #7
+  %10 = call { { i64, i64 }, {} } @llvm.experimental.gc.result.sl_sl_i64i64ssl_ss(token %statepoint_token)
+  %11 = extractvalue { { i64, i64 }, {} } %10, 0, 0
+  %12 = extractvalue { { i64, i64 }, {} } %10, 0, 1
+  br label %L206
+
+L206:                                             ; preds = %L205, %L159
+  %alloc.0 = phi i64 [ %1, %L159 ], [ %12, %L205 ]
+  %ds.0 = phi i64 [ %0, %L159 ], [ %11, %L205 ]
+  %13 = lshr i64 %3, 1
+  %14 = icmp slt i64 %2, 3
+  br i1 %14, label %L191.preheader, label %L170
+
+L170.loopexit:                                    ; preds = %L194
+  br label %L170
+
+L170:                                             ; preds = %L170.loopexit, %L206
+  %.055 = phi i64 [ 1, %L206 ], [ %.057.ph, %L170.loopexit ]
+  %.0 = phi i64 [ 1, %L206 ], [ %26, %L170.loopexit ]
+  %alloc.1 = phi i64 [ %alloc.0, %L206 ], [ %alloc.4.ph, %L170.loopexit ]
+  %ds.1 = phi i64 [ %ds.0, %L206 ], [ %ds.4.ph, %L170.loopexit ]
+  %15 = lshr i64 %2, 1
+  br label %L176
+
+L176:                                             ; preds = %L176, %L170
+  %.059 = phi i64 [ %.055, %L170 ], [ %21, %L176 ]
+  %.058 = phi i64 [ 1, %L170 ], [ %22, %L176 ]
+  %alloc.2 = phi i64 [ %alloc.1, %L170 ], [ %18, %L176 ]
+  %ds.2 = phi i64 [ %ds.1, %L170 ], [ %17, %L176 ]
+  %statepoint_token84 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { i64 } } (i64, i64, i64)) @"\01_camlTry_raise_cross_function_caught__find_5_12_code", i32 3, i32 0, i64 %ds.2, i64 %alloc.2, i64 1, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 26, i64 0, i64 20, i64 26, i64 0, i64 26, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 35, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7482996, i64 28277) ]
+  %16 = call { { i64, i64 }, { i64 } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_i64ss(token %statepoint_token84)
+  %17 = extractvalue { { i64, i64 }, { i64 } } %16, 0, 0
+  %18 = extractvalue { { i64, i64 }, { i64 } } %16, 0, 1
+  %19 = extractvalue { { i64, i64 }, { i64 } } %16, 1, 0
+  %20 = add i64 %.059, -1
+  %21 = add i64 %20, %19
+  %22 = add i64 %.058, 1
+  %23 = icmp sgt i64 %22, %15
+  br i1 %23, label %L191.loopexit, label %L176
+
+L191.loopexit:                                    ; preds = %L176
+  %24 = extractvalue { { i64, i64 }, { i64 } } %16, 0, 0
+  %25 = extractvalue { { i64, i64 }, { i64 } } %16, 0, 1
+  br label %L191.preheader
+
+L191.preheader:                                   ; preds = %L191.loopexit, %L206
+  %.057.ph = phi i64 [ 1, %L206 ], [ %21, %L191.loopexit ]
+  %.2.ph = phi i64 [ 1, %L206 ], [ %.0, %L191.loopexit ]
+  %alloc.4.ph = phi i64 [ %alloc.0, %L206 ], [ %25, %L191.loopexit ]
+  %ds.4.ph = phi i64 [ %ds.0, %L206 ], [ %24, %L191.loopexit ]
+  br label %L191
+
+L191:                                             ; preds = %L191.preheader, %L194
+  %.2 = phi i64 [ %26, %L194 ], [ %.2.ph, %L191.preheader ]
+  %26 = add i64 %.2, 1
+  %27 = icmp sgt i64 %26, %13
+  br i1 %27, label %common.ret.loopexit, label %L194
+
+L194:                                             ; preds = %L191
+  br i1 %14, label %L191, label %L170.loopexit
+
+common.ret.loopexit:                              ; preds = %L191
+  br label %common.ret
+
+common.ret:                                       ; preds = %common.ret.loopexit, %L1
+  %ds.4.pn = phi i64 [ %0, %L1 ], [ %ds.4.ph, %common.ret.loopexit ]
+  %alloc.4.pn = phi i64 [ %1, %L1 ], [ %alloc.4.ph, %common.ret.loopexit ]
+  %.057.pn = phi i64 [ 1, %L1 ], [ %.057.ph, %common.ret.loopexit ]
+  %.pn65 = insertvalue { { i64, i64 }, { i64 } } undef, i64 %ds.4.pn, 0, 0
+  %.pn = insertvalue { { i64, i64 }, { i64 } } %.pn65, i64 %alloc.4.pn, 0, 1
+  %common.ret.op = insertvalue { { i64, i64 }, { i64 } } %.pn, i64 %.057.pn, 1, 0
+  ret { { i64, i64 }, { i64 } } %common.ret.op
+}
+
+; Function Attrs: noinline
+define oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlTry_raise_cross_function_caught__entry"(i64 %0, i64 %1) local_unnamed_addr #1 gc "oxcaml" {
+L1:
+  %statepoint_token = call oxcaml_ccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, ptr addrspace(1))) @"\01_caml_c_call", i32 4, i32 0, i64 %0, i64 %1, i64 ptrtoint (ptr @"\01_caml_sys_argv" to i64), ptr addrspace(1) inttoptr (i64 1 to ptr addrspace(1)), i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 1, i64 1, i64 6, i64 0, i64 18, i64 26, i64 0, i64 26, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 33, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7220852) ]
+  %2 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token)
+  %gcagg = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %2, 0, 0
+  %gcagg151 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %2, 0, 1
+  %gcagg152 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %2, 1, 0
+  %remat = getelementptr i8, ptr addrspace(1) %gcagg152, i64 -8
+  %3 = load i64, ptr addrspace(1) %remat, align 4
+  %4 = and i64 %3, 72057594037925888
+  %.not = icmp eq i64 %4, 0
+  br i1 %.not, label %L249, label %L225
+
+L225:                                             ; preds = %L1
+  %statepoint_token179 = call oxcaml_ccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, ptr addrspace(1))) @"\01_caml_c_call", i32 4, i32 0, i64 %gcagg, i64 %gcagg151, i64 ptrtoint (ptr @"\01_caml_sys_argv" to i64), ptr addrspace(1) inttoptr (i64 1 to ptr addrspace(1)), i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 1, i64 1, i64 6, i64 0, i64 50, i64 58, i64 0, i64 58, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 33, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7220852) ]
+  %5 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token179)
+  %gcagg153 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %5, 0, 0
+  %gcagg154 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %5, 0, 1
+  %gcagg155 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %5, 1, 0
+  %remat174 = getelementptr i8, ptr addrspace(1) %gcagg155, i64 -8
+  %6 = load i64, ptr addrspace(1) %remat174, align 4
+  %7 = and i64 %6, 72057594037925888
+  %.not150 = icmp eq i64 %7, 0
+  br i1 %.not150, label %L243, label %L235
+
+L235:                                             ; preds = %L225
+  %remat175 = getelementptr i8, ptr addrspace(1) %gcagg155, i64 8
+  %8 = load ptr addrspace(1), ptr addrspace(1) %remat175, align 8
+  %statepoint_token180 = call oxcaml_ccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, ptr addrspace(1))) @"\01_caml_c_call", i32 4, i32 0, i64 %gcagg153, i64 %gcagg154, i64 ptrtoint (ptr @"\01_caml_int_of_string" to i64), ptr addrspace(1) %8, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 1, i64 1, i64 6, i64 0, i64 36, i64 62, i64 0, i64 62, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 33, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7220852), "gc-live"(ptr addrspace(1) %8) ]
+  %9 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token180)
+  %gcagg156 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %9, 0, 0
+  %gcagg157 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %9, 0, 1
+  %gcagg158 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %9, 1, 0
+  %10 = ptrtoint ptr addrspace(1) %gcagg158 to i64
+  br label %L249
+
+L243:                                             ; preds = %L225
+  tail call void @llvm.aarch64.oxcaml.raise.notrace(i64 ptrtoint (ptr @"\01_camlTry_raise_cross_function_caught__block35" to i64))
+  unreachable
+
+L249:                                             ; preds = %L1, %L235
+  %.0 = phi i64 [ %10, %L235 ], [ 200001, %L1 ]
+  %alloc.0 = phi i64 [ %gcagg157, %L235 ], [ %gcagg151, %L1 ]
+  %ds.0 = phi i64 [ %gcagg156, %L235 ], [ %gcagg, %L1 ]
+  %11 = inttoptr i64 %.0 to ptr addrspace(1)
+  %12 = tail call oxcaml_c_directcc { i64, i64 } @"\01_caml_initialize"(i64 %ds.0, i64 %alloc.0, ptr addrspace(1) inttoptr (i64 add (i64 ptrtoint (ptr @"\01_camlTry_raise_cross_function_caught" to i64), i64 24) to ptr addrspace(1)), ptr addrspace(1) %11) #9
+  %13 = extractvalue { i64, i64 } %12, 0
+  %14 = extractvalue { i64, i64 } %12, 1
+  %statepoint_token181 = call oxcaml_ccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, ptr addrspace(1))) @"\01_caml_c_call", i32 4, i32 0, i64 %13, i64 %14, i64 ptrtoint (ptr @"\01_caml_sys_argv" to i64), ptr addrspace(1) inttoptr (i64 1 to ptr addrspace(1)), i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 1, i64 1, i64 9, i64 0, i64 18, i64 26, i64 0, i64 26, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 36, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7482996, i64 7565413) ]
+  %15 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token181)
+  %gcagg159 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %15, 0, 0
+  %gcagg160 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %15, 0, 1
+  %gcagg161 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %15, 1, 0
+  %remat176 = getelementptr i8, ptr addrspace(1) %gcagg161, i64 -8
+  %16 = load i64, ptr addrspace(1) %remat176, align 4
+  %17 = and i64 %16, 72057594037926912
+  %18 = icmp ugt i64 %17, 2560
+  br i1 %18, label %L261, label %L285
+
+L261:                                             ; preds = %L249
+  %statepoint_token182 = call oxcaml_ccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, ptr addrspace(1))) @"\01_caml_c_call", i32 4, i32 0, i64 %gcagg159, i64 %gcagg160, i64 ptrtoint (ptr @"\01_caml_sys_argv" to i64), ptr addrspace(1) inttoptr (i64 1 to ptr addrspace(1)), i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 1, i64 1, i64 9, i64 0, i64 50, i64 58, i64 0, i64 58, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 36, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7482996, i64 7565413) ]
+  %19 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token182)
+  %gcagg162 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %19, 0, 0
+  %gcagg163 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %19, 0, 1
+  %gcagg164 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %19, 1, 0
+  %remat177 = getelementptr i8, ptr addrspace(1) %gcagg164, i64 -8
+  %20 = load i64, ptr addrspace(1) %remat177, align 4
+  %21 = and i64 %20, 72057594037926912
+  %22 = icmp ugt i64 %21, 2560
+  br i1 %22, label %L271, label %L279
+
+L271:                                             ; preds = %L261
+  %remat178 = getelementptr i8, ptr addrspace(1) %gcagg164, i64 16
+  %23 = load ptr addrspace(1), ptr addrspace(1) %remat178, align 8
+  %statepoint_token183 = call oxcaml_ccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, ptr addrspace(1))) @"\01_caml_c_call", i32 4, i32 0, i64 %gcagg162, i64 %gcagg163, i64 ptrtoint (ptr @"\01_caml_int_of_string" to i64), ptr addrspace(1) %23, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 1, i64 1, i64 9, i64 0, i64 36, i64 62, i64 0, i64 62, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 36, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7482996, i64 7565413), "gc-live"(ptr addrspace(1) %23) ]
+  %24 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token183)
+  %gcagg165 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %24, 0, 0
+  %gcagg166 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %24, 0, 1
+  %gcagg167 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %24, 1, 0
+  %25 = ptrtoint ptr addrspace(1) %gcagg167 to i64
+  br label %L285
+
+L279:                                             ; preds = %L261
+  tail call void @llvm.aarch64.oxcaml.raise.notrace(i64 ptrtoint (ptr @"\01_camlTry_raise_cross_function_caught__block35" to i64))
+  unreachable
+
+L285:                                             ; preds = %L249, %L271
+  %.0148 = phi i64 [ %25, %L271 ], [ 21, %L249 ]
+  %alloc.1 = phi i64 [ %gcagg166, %L271 ], [ %gcagg160, %L249 ]
+  %ds.1 = phi i64 [ %gcagg165, %L271 ], [ %gcagg159, %L249 ]
+  %26 = inttoptr i64 %.0148 to ptr addrspace(1)
+  %27 = tail call oxcaml_c_directcc { i64, i64 } @"\01_caml_initialize"(i64 %ds.1, i64 %alloc.1, ptr addrspace(1) inttoptr (i64 add (i64 ptrtoint (ptr @"\01_camlTry_raise_cross_function_caught" to i64), i64 32) to ptr addrspace(1)), ptr addrspace(1) %26) #9
+  %28 = extractvalue { i64, i64 } %27, 0
+  %29 = extractvalue { i64, i64 } %27, 1
+  %30 = tail call oxcaml_c_directcc { i64, i64, ptr addrspace(1) } @"\01_caml_fresh_oo_id"(i64 %28, i64 %29, ptr addrspace(1) nonnull inttoptr (i64 1 to ptr addrspace(1))) #9
+  %gcagg168 = extractvalue { i64, i64, ptr addrspace(1) } %30, 0
+  %gcagg169 = extractvalue { i64, i64, ptr addrspace(1) } %30, 1
+  %gcagg170 = extractvalue { i64, i64, ptr addrspace(1) } %30, 2
+  %31 = tail call oxcaml_c_directcc { i64, i64 } @"\01_caml_initialize"(i64 %gcagg168, i64 %gcagg169, ptr addrspace(1) inttoptr (i64 add (i64 ptrtoint (ptr @"\01_camlTry_raise_cross_function_caught__Miss245" to i64), i64 8) to ptr addrspace(1)), ptr addrspace(1) %gcagg170) #9
+  %32 = extractvalue { i64, i64 } %31, 0
+  %33 = extractvalue { i64, i64 } %31, 1
+  %34 = add i64 %32, 40
+  %35 = inttoptr i64 %34 to ptr
+  %36 = load i64, ptr %35, align 4
+  %37 = add i64 %36, 376
+  %38 = tail call i64 asm sideeffect "mov $0, sp", "=r"() #6
+  %.not149 = icmp ult i64 %38, %37
+  br i1 %.not149, label %L308, label %L309, !prof !1
+
+L308:                                             ; preds = %L285
+  %statepoint_token184 = tail call oxcaml_alloccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, {} } (i64, i64, i64)) @"\01_caml_llvm_call_realloc_stack", i32 3, i32 0, i64 %32, i64 %33, i64 34, i32 0, i32 0) #7
+  %39 = call { { i64, i64 }, {} } @llvm.experimental.gc.result.sl_sl_i64i64ssl_ss(token %statepoint_token184)
+  %40 = extractvalue { { i64, i64 }, {} } %39, 0, 0
+  %41 = extractvalue { { i64, i64 }, {} } %39, 0, 1
+  br label %L309
+
+L309:                                             ; preds = %L308, %L285
+  %alloc.2 = phi i64 [ %33, %L285 ], [ %41, %L308 ]
+  %ds.2 = phi i64 [ %32, %L285 ], [ %40, %L308 ]
+  %statepoint_token185 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { i64 } } (i64, i64, i64)) @"\01_camlTry_raise_cross_function_caught__black_box_int_0_7_code", i32 3, i32 0, i64 %ds.2, i64 %alloc.2, i64 %.0148, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 31, i64 0, i64 45, i64 65, i64 0, i64 65, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 31, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 116) ]
+  %42 = call { { i64, i64 }, { i64 } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_i64ss(token %statepoint_token185)
+  %43 = extractvalue { { i64, i64 }, { i64 } } %42, 0, 0
+  %44 = extractvalue { { i64, i64 }, { i64 } } %42, 0, 1
+  %45 = extractvalue { { i64, i64 }, { i64 } } %42, 1, 0
+  %statepoint_token186 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { i64 } } (i64, i64, i64)) @"\01_camlTry_raise_cross_function_caught__black_box_int_0_7_code", i32 3, i32 0, i64 %43, i64 %44, i64 %.0, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 31, i64 0, i64 27, i64 44, i64 0, i64 44, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 31, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 116) ]
+  %46 = call { { i64, i64 }, { i64 } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_i64ss(token %statepoint_token186)
+  %47 = extractvalue { { i64, i64 }, { i64 } } %46, 0, 0
+  %48 = extractvalue { { i64, i64 }, { i64 } } %46, 0, 1
+  %49 = extractvalue { { i64, i64 }, { i64 } } %46, 1, 0
+  %statepoint_token187 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { i64 } } (i64, i64, i64, i64)) @"\01_camlTry_raise_cross_function_caught__run_6_13_code", i32 4, i32 0, i64 %47, i64 %48, i64 %49, i64 %45, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 31, i64 0, i64 22, i64 66, i64 0, i64 66, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 31, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 116) ]
+  %50 = call { { i64, i64 }, { i64 } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_i64ss(token %statepoint_token187)
+  %51 = extractvalue { { i64, i64 }, { i64 } } %50, 0, 0
+  %52 = extractvalue { { i64, i64 }, { i64 } } %50, 0, 1
+  %53 = extractvalue { { i64, i64 }, { i64 } } %50, 1, 0
+  %statepoint_token188 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, i64, i64)) @"\01_camlCamlinternalFormat__make_printf_120_401_code", i32 5, i32 0, i64 %51, i64 %52, i64 ptrtoint (ptr @"\01_camlStdlib__Printf__fn$5b$2fworkspace_root$2fprintf.ml$3a27$2c14$2d$2d48$5d_31" to i64), i64 1, i64 ptrtoint (ptr @"\01_camlTry_raise_cross_function_caught__const_block66" to i64), i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 5, i64 27, i64 0, i64 2, i64 63, i64 0, i64 63, i64 9, i64 6910576, i64 6714478, i64 7105838, i64 23, i64 6583379, i64 6449516, i64 5267295, i64 7235954, i64 3040884, i64 7366251, i64 7235954, i64 26228, i64 34, i64 0, i64 21, i64 43, i64 0, i64 43, i64 9, i64 6910576, i64 6714478, i64 7105838, i64 22, i64 6583379, i64 6449516, i64 5267295, i64 7235954, i64 3040884, i64 7499878, i64 7630441, i64 102, i64 38, i64 0, i64 17, i64 35, i64 0, i64 35, i64 9, i64 6910576, i64 6714478, i64 7105838, i64 21, i64 6583379, i64 6449516, i64 5267295, i64 7235954, i64 3040884, i64 6910576, i64 6714478, i64 11, i64 0, i64 21, i64 63, i64 0, i64 63, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 44, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7351924, i64 7235954, i64 7495540, i64 7697253, i64 29804, i64 31, i64 0, i64 9, i64 66, i64 0, i64 66, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 31, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 116) ]
+  %54 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token188)
+  %gcagg171 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %54, 0, 0
+  %gcagg172 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %54, 0, 1
+  %gcagg173 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %54, 1, 0
+  %55 = and i64 %53, 2147483647
+  %56 = load i64, ptr addrspace(1) %gcagg173, align 4
+  %57 = inttoptr i64 %56 to ptr
+  %statepoint_token189 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { i64 } } (i64, i64, i64, ptr addrspace(1))) %57, i32 4, i32 0, i64 %gcagg171, i64 %gcagg172, i64 %55, ptr addrspace(1) %gcagg173, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 2, i64 11, i64 0, i64 21, i64 63, i64 0, i64 63, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 44, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7351924, i64 7235954, i64 7495540, i64 7697253, i64 29804, i64 31, i64 0, i64 9, i64 66, i64 0, i64 66, i64 34, i64 7959156, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 7155316, i64 108, i64 31, i64 7959124, i64 6386271, i64 6648681, i64 7496543, i64 7566191, i64 7693919, i64 7627630, i64 7237481, i64 6382431, i64 6842229, i64 116) ]
+  %58 = call { { i64, i64 }, { i64 } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_i64ss(token %statepoint_token189)
+  %59 = extractvalue { { i64, i64 }, { i64 } } %58, 0, 0
+  %60 = extractvalue { { i64, i64 }, { i64 } } %58, 0, 1
+  %61 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %59, 0, 0
+  %62 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %61, i64 %60, 0, 1
+  %63 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %62, ptr addrspace(1) inttoptr (i64 1 to ptr addrspace(1)), 1, 0
+  ret { { i64, i64 }, { ptr addrspace(1) } } %63
+}
+
+declare i32 @"\01_caml_llvm_eh_personality"(...)
+
+; Function Attrs: convergent nocallback noduplicate nofree nomerge nounwind willreturn
+declare void @llvm.aarch64.oxcaml.pop.trap() #3
+
+; Function Attrs: convergent nocallback noduplicate nofree nomerge nounwind willreturn
+declare void @llvm.aarch64.oxcaml.push.trap(ptr) #3
+
+; Function Attrs: convergent nocallback noduplicate nofree nomerge noreturn
+declare void @llvm.aarch64.oxcaml.raise.notrace(i64) #4
+
+; Function Attrs: convergent nocallback noduplicate nofree nomerge nounwind willreturn
+declare { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover() #3
+
+declare token @llvm.experimental.gc.statepoint.p0(i64 immarg, i32 immarg, ptr, i32 immarg, i32 immarg, ...)
+
+; Function Attrs: nocallback nofree nosync nounwind willreturn memory(none)
+declare { { i64, i64 }, {} } @llvm.experimental.gc.result.sl_sl_i64i64ssl_ss(token) #5
+
+; Function Attrs: nocallback nofree nosync nounwind willreturn memory(none)
+declare { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token) #5
+
+; Function Attrs: nocallback nofree nosync nounwind willreturn memory(none)
+declare { { i64, i64 }, { i64 } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_i64ss(token) #5
+
+attributes #0 = { noinline "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" }
+attributes #1 = { noinline "oxcaml-stack-check"="true" "oxcaml-stack-check-before-bytes"="0" "oxcaml-stack-check-bytes"="16" }
+attributes #2 = { noinline "oxcaml-stack-check"="true" "oxcaml-stack-check-before-bytes"="0" "oxcaml-stack-check-bytes"="48" }
+attributes #3 = { convergent nocallback noduplicate nofree nomerge nounwind willreturn }
+attributes #4 = { convergent nocallback noduplicate nofree nomerge noreturn }
+attributes #5 = { nocallback nofree nosync nounwind willreturn memory(none) }
+attributes #6 = { nounwind "gc-leaf-function"="true" }
+attributes #7 = { cold }
+attributes #8 = { "statepoint-id"="0" }
+attributes #9 = { "gc-leaf-function"="true" }
+
+!llvm.module.flags = !{!0}
+
+!0 = !{i32 1, !"oxcaml_module", !"Try_raise_cross_function_caught"}
+!1 = !{!"branch_weights", i32 1, i32 2000}

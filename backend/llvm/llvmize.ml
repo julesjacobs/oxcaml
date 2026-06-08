@@ -1848,6 +1848,18 @@ let emit_string_compare_memcmp_suffix t res_reg s1 s2 ~offset ~count ~len1 ~len2
   store_into_reg t res_reg result;
   emit_ins_no_res t (I.br done_label)
 
+let emit_string_equal_memcmp_suffix t res_reg s1 s2 ~offset ~count ~done_label =
+  let memcmp_result = emit_memcmp_direct_call t s1 s2 ~offset ~count in
+  let memcmp_eq =
+    emit_ins t
+      (I.icmp Ieq ~arg1:memcmp_result ~arg2:(V.of_int ~typ:T.i32 0))
+  in
+  let result =
+    emit_ins t (I.select ~cond:memcmp_eq ~ifso:(V.of_int 3) ~ifnot:(V.of_int 1))
+  in
+  store_into_reg t res_reg result;
+  emit_ins_no_res t (I.br done_label)
+
 let string_compare_symbol = function
   | "caml_string_compare" | "caml_bytes_compare" -> true
   | _ -> false
@@ -2031,7 +2043,7 @@ let maybe_emit_specialized_string_compare_extcall t ~func_symbol ~alloc
   | _ -> false
 
 let maybe_emit_specialized_string_equal_extcall t ~func_symbol ~alloc ~stack_ofs
-    arg_regs res_regs emit_fallback =
+    arg_regs res_regs _emit_fallback =
   match arg_regs, res_regs with
   | [arg1; arg2], [res_reg]
     when (not alloc)
@@ -2040,9 +2052,20 @@ let maybe_emit_specialized_string_equal_extcall t ~func_symbol ~alloc ~stack_ofs
          && supports_inline_string_compare ()
          && (T.equal (T.of_reg res_reg) T.i64
             || T.equal (T.of_reg res_reg) T.val_ptr) ->
+    add_referenced_symbol t func_symbol;
     let done_label = V.of_label (Cmm.new_label ()) in
     let true_label = V.of_label (Cmm.new_label ()) in
-    let fallback_label = V.of_label (Cmm.new_label ()) in
+    let not_pointer_equal_label = V.of_label (Cmm.new_label ()) in
+    let false_label = V.of_label (Cmm.new_label ()) in
+    let length_equal_label = V.of_label (Cmm.new_label ()) in
+    let memcmp_compare_label = V.of_label (Cmm.new_label ()) in
+    let memcmp_word1_equal_label = V.of_label (Cmm.new_label ()) in
+    let short_compare_label = V.of_label (Cmm.new_label ()) in
+    let word1_label = V.of_label (Cmm.new_label ()) in
+    let word1_equal_label = V.of_label (Cmm.new_label ()) in
+    let word2_label = V.of_label (Cmm.new_label ()) in
+    let word2_equal_label = V.of_label (Cmm.new_label ()) in
+    let word3_label = V.of_label (Cmm.new_label ()) in
     let s1 = load_reg_to_temp ~typ:T.val_ptr t arg1 in
     let s2 = load_reg_to_temp ~typ:T.val_ptr t arg2 in
     let s1_int = cast t s1 T.i64 in
@@ -2050,9 +2073,82 @@ let maybe_emit_specialized_string_equal_extcall t ~func_symbol ~alloc ~stack_ofs
     let pointer_equal = emit_ins t (I.icmp Ieq ~arg1:s1_int ~arg2:s2_int) in
     emit_ins_no_res t
       (I.br_cond ~cond:pointer_equal ~ifso:true_label
-         ~ifnot:fallback_label);
-    emit_label t fallback_label;
-    emit_fallback ();
+         ~ifnot:not_pointer_equal_label);
+    emit_label t not_pointer_equal_label;
+    let len1 = emit_ocaml_string_length t s1 in
+    let len2 = emit_ocaml_string_length t s2 in
+    let lengths_equal = emit_ins t (I.icmp Ieq ~arg1:len1 ~arg2:len2) in
+    emit_ins_no_res t
+      (I.br_cond ~cond:lengths_equal ~ifso:length_equal_label
+         ~ifnot:false_label);
+    emit_label t length_equal_label;
+    let len_is_zero = emit_ins t (I.icmp Ieq ~arg1:len1 ~arg2:(V.of_int 0)) in
+    emit_ins_no_res t
+      (I.br_cond ~cond:len_is_zero ~ifso:true_label
+         ~ifnot:short_compare_label);
+    emit_label t short_compare_label;
+    let len_gt_24 = emit_ins t (I.icmp Iugt ~arg1:len1 ~arg2:(V.of_int 24)) in
+    emit_ins_no_res t
+      (I.br_cond ~cond:len_gt_24 ~ifso:memcmp_compare_label
+         ~ifnot:word1_label);
+    emit_label t memcmp_compare_label;
+    let long_word1_neq, _long_word1_lt =
+      emit_string_compare_word t s1 s2 ~offset:0 ~count:(V.of_int 8)
+    in
+    emit_ins_no_res t
+      (I.br_cond ~cond:long_word1_neq ~ifso:false_label
+         ~ifnot:memcmp_word1_equal_label);
+    emit_label t memcmp_word1_equal_label;
+    let suffix_len =
+      emit_ins t (I.binary Sub ~arg1:len1 ~arg2:(V.of_int 8))
+    in
+    emit_string_equal_memcmp_suffix t res_reg s1 s2 ~offset:8 ~count:suffix_len
+      ~done_label;
+    emit_label t word1_label;
+    let len_gt_8 = emit_ins t (I.icmp Iugt ~arg1:len1 ~arg2:(V.of_int 8)) in
+    let word1_count =
+      emit_ins t
+        (I.select ~cond:len_gt_8 ~ifso:(V.of_int 8) ~ifnot:len1)
+    in
+    let word1_neq, _word1_lt =
+      emit_string_compare_word t s1 s2 ~offset:0 ~count:word1_count
+    in
+    emit_ins_no_res t
+      (I.br_cond ~cond:word1_neq ~ifso:false_label
+         ~ifnot:word1_equal_label);
+    emit_label t word1_equal_label;
+    emit_ins_no_res t
+      (I.br_cond ~cond:len_gt_8 ~ifso:word2_label ~ifnot:true_label);
+    emit_label t word2_label;
+    let len_gt_16 = emit_ins t (I.icmp Iugt ~arg1:len1 ~arg2:(V.of_int 16)) in
+    let word2_tail_count =
+      emit_ins t (I.binary Sub ~arg1:len1 ~arg2:(V.of_int 8))
+    in
+    let word2_count =
+      emit_ins t
+        (I.select ~cond:len_gt_16 ~ifso:(V.of_int 8)
+           ~ifnot:word2_tail_count)
+    in
+    let word2_neq, _word2_lt =
+      emit_string_compare_word t s1 s2 ~offset:8 ~count:word2_count
+    in
+    emit_ins_no_res t
+      (I.br_cond ~cond:word2_neq ~ifso:false_label
+         ~ifnot:word2_equal_label);
+    emit_label t word2_equal_label;
+    emit_ins_no_res t
+      (I.br_cond ~cond:len_gt_16 ~ifso:word3_label ~ifnot:true_label);
+    emit_label t word3_label;
+    let word3_count =
+      emit_ins t (I.binary Sub ~arg1:len1 ~arg2:(V.of_int 16))
+    in
+    let word3_neq, _word3_lt =
+      emit_string_compare_word t s1 s2 ~offset:16 ~count:word3_count
+    in
+    emit_ins_no_res t
+      (I.br_cond ~cond:word3_neq ~ifso:false_label ~ifnot:true_label);
+    emit_label t false_label;
+    store_into_reg t res_reg (V.of_int 1);
     emit_ins_no_res t (I.br done_label);
     emit_label t true_label;
     store_into_reg t res_reg (V.of_int 3);

@@ -1,0 +1,68 @@
+---
+name:            "\x01_camlHash_lookup_string_equal__fn$5bhash_lookup_string_equal.ml$3a27$2c37$2d$2d40$5d_8_8_code"
+alignment:       4
+exposesReturnsTwice: false
+legalized:       false
+regBankSelected: false
+selected:        false
+failedISel:      false
+tracksRegLiveness: true
+hasWinCFI:       false
+callsEHReturn:   false
+callsUnwindInit: false
+hasEHCatchret:   false
+hasEHScopes:     false
+hasEHFunclets:   false
+debugInstrRef:   false
+failsVerification: false
+tracksDebugUserValues: false
+registers:
+  - { id: 0, class: gpr64, preferred-register: '' }
+  - { id: 1, class: gpr64, preferred-register: '' }
+  - { id: 2, class: gpr64common, preferred-register: '' }
+  - { id: 3, class: gpr64, preferred-register: '' }
+liveins:
+  - { reg: '$x28', virtual-reg: '%0' }
+  - { reg: '$x27', virtual-reg: '%1' }
+  - { reg: '$x0', virtual-reg: '%2' }
+frameInfo:
+  isFrameAddressTaken: false
+  isReturnAddressTaken: false
+  hasStackMap:     false
+  hasPatchPoint:   false
+  stackSize:       0
+  offsetAdjustment: 0
+  maxAlignment:    1
+  adjustsStack:    false
+  hasCalls:        false
+  stackProtector:  ''
+  functionContext: ''
+  maxCallFrameSize: 0
+  cvBytesOfCalleeSavedRegisters: 0
+  hasOpaqueSPAdjustment: false
+  hasVAStart:      false
+  hasMustTailInVarArgFunc: false
+  hasTailCall:     false
+  localFrameSize:  0
+  savePoint:       ''
+  restorePoint:    ''
+fixedStack:      []
+stack:           []
+callSites:       []
+debugValueSubstitutions: []
+constants:       []
+machineFunctionInfo: {}
+body:             |
+  bb.0.L1:
+    liveins: $x28, $x27, $x0
+  
+    %2:gpr64common = COPY $x0
+    %1:gpr64 = COPY $x27
+    %0:gpr64 = COPY $x28
+    %3:gpr64 = LDRXui %2, 0 :: (load (s64) from %ir.2, addrspace 1)
+    $x28 = COPY %0
+    $x27 = COPY %1
+    $x0 = COPY %3
+    RET_ReallyLR implicit $x28, implicit $x27, implicit $x0
+
+...

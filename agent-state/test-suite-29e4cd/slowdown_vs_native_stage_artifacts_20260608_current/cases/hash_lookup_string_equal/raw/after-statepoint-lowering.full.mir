@@ -1,0 +1,2535 @@
+--- |
+  ; ModuleID = '/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/hash_lookup_string_equal/raw/input.ll'
+  source_filename = "hash_lookup_string_equal.ml"
+  target datalayout = "e-m:o-i64:64-i128:128-n32:64-S128"
+  target triple = "arm64-apple-macosx16.0.0"
+  
+  @"\01_camlHash_lookup_string_equal__gc_roots" = local_unnamed_addr global { ptr, i64 } { ptr @"\01_camlHash_lookup_string_equal", i64 0 }, section "__DATA,__data", align 8
+  @"\01_header.camlHash_lookup_string_equal" = local_unnamed_addr global i64 8960, section "__DATA,__data", align 8
+  @"\01_camlHash_lookup_string_equal" = global { ptr, ptr, ptr, i64, i64, ptr, ptr, ptr } { ptr @"\01_camlHash_lookup_string_equal__black_box_int_9", ptr @"\01_camlHash_lookup_string_equal__black_box_string_10", ptr @"\01_camlHash_lookup_string_equal__black_box_11", i64 1, i64 1, ptr @"\01_camlHash_lookup_string_equal__print_result_12", ptr @"\01_camlHash_lookup_string_equal__find_13", ptr @"\01_camlHash_lookup_string_equal__run_14" }, section "__DATA,__data", align 8
+  @"\01_header.camlHash_lookup_string_equal__run_14" = local_unnamed_addr global i64 4087, section "__DATA,__data", align 8
+  @"\01_camlHash_lookup_string_equal__run_14" = global { ptr, i64, ptr } { ptr @"\01_caml_curry2", i64 180143985094819847, ptr @"\01_camlHash_lookup_string_equal__run_6_15_code" }, section "__DATA,__data", align 8
+  @"\01_header.camlHash_lookup_string_equal__fn$5bhash_lookup_string_equal.ml$3a24$2c17$2d$2d70$5d_15" = local_unnamed_addr global i64 3063, section "__DATA,__data", align 8
+  @"\01_camlHash_lookup_string_equal__fn$5bhash_lookup_string_equal.ml$3a24$2c17$2d$2d70$5d_15" = global { ptr, i64 } { ptr @"\01_camlHash_lookup_string_equal__fn$5bhash_lookup_string_equal.ml$3a24$2c17$2d$2d70$5d_7_16_code", i64 108086391056891909 }, section "__DATA,__data", align 8
+  @"\01_header.camlHash_lookup_string_equal__fn$5bhash_lookup_string_equal.ml$3a27$2c37$2d$2d40$5d_16" = local_unnamed_addr global i64 3063, section "__DATA,__data", align 8
+  @"\01_camlHash_lookup_string_equal__fn$5bhash_lookup_string_equal.ml$3a27$2c37$2d$2d40$5d_16" = global { ptr, i64 } { ptr @"\01_camlHash_lookup_string_equal__fn$5bhash_lookup_string_equal.ml$3a27$2c37$2d$2d40$5d_8_8_code", i64 108086391056891909 }, section "__DATA,__data", align 8
+  @"\01_header.camlHash_lookup_string_equal__find_13" = local_unnamed_addr global i64 4087, section "__DATA,__data", align 8
+  @"\01_camlHash_lookup_string_equal__find_13" = global { ptr, i64, ptr } { ptr @"\01_caml_curry2", i64 180143985094819847, ptr @"\01_camlHash_lookup_string_equal__find_4_13_code" }, section "__DATA,__data", align 8
+  @"\01_header.camlHash_lookup_string_equal__print_result_12" = local_unnamed_addr global i64 3063, section "__DATA,__data", align 8
+  @"\01_camlHash_lookup_string_equal__print_result_12" = global { ptr, i64 } { ptr @"\01_camlHash_lookup_string_equal__print_result_3_12_code", i64 108086391056891909 }, section "__DATA,__data", align 8
+  @"\01_header.camlHash_lookup_string_equal__black_box_11" = local_unnamed_addr global i64 3063, section "__DATA,__data", align 8
+  @"\01_camlHash_lookup_string_equal__black_box_11" = global { ptr, i64 } { ptr @"\01_camlHash_lookup_string_equal__black_box_2_11_code", i64 108086391056891909 }, section "__DATA,__data", align 8
+  @"\01_header.camlHash_lookup_string_equal__black_box_string_10" = local_unnamed_addr global i64 3063, section "__DATA,__data", align 8
+  @"\01_camlHash_lookup_string_equal__black_box_string_10" = global { ptr, i64 } { ptr @"\01_camlHash_lookup_string_equal__black_box_string_1_10_code", i64 108086391056891909 }, section "__DATA,__data", align 8
+  @"\01_header.camlHash_lookup_string_equal__black_box_int_9" = local_unnamed_addr global i64 3063, section "__DATA,__data", align 8
+  @"\01_camlHash_lookup_string_equal__black_box_int_9" = global { ptr, i64 } { ptr @"\01_camlHash_lookup_string_equal__black_box_int_0_9_code", i64 108086391056891909 }, section "__DATA,__data", align 8
+  @"\01_header.camlHash_lookup_string_equal__block35" = local_unnamed_addr global i64 2816, section "__DATA,__data", align 8
+  @"\01_camlHash_lookup_string_equal__block35" = global { ptr, ptr } { ptr @"\01_caml_exn_Invalid_argument", ptr @"\01_camlHash_lookup_string_equal__string33" }, section "__DATA,__data", align 8
+  @"\01_header.camlHash_lookup_string_equal__string33" = local_unnamed_addr global i64 4092, section "__DATA,__data", align 8
+  @"\01_camlHash_lookup_string_equal__string33" = global { [19 x i8], [4 x i8], i8 } { [19 x i8] c"index out of bounds", [4 x i8] zeroinitializer, i8 4 }, section "__DATA,__data", align 8
+  @"\01_header.camlHash_lookup_string_equal__immstring117" = local_unnamed_addr global i64 4092, section "__DATA,__data", align 8
+  @"\01_camlHash_lookup_string_equal__immstring117" = global { [19 x i8], [4 x i8], i8 } { [19 x i8] c"hash_collision_key_", [4 x i8] zeroinitializer, i8 4 }, section "__DATA,__data", align 8
+  @"\01_header.camlHash_lookup_string_equal__const_block66" = local_unnamed_addr global i64 4868, section "__DATA,__data", align 8
+  @"\01_camlHash_lookup_string_equal__const_block66" = global { i64, i64, i64, ptr } { i64 1, i64 1, i64 1, ptr @"\01_camlHash_lookup_string_equal__const_block64" }, section "__DATA,__data", align 8
+  @"\01_header.camlHash_lookup_string_equal__const_block64" = local_unnamed_addr global i64 2828, section "__DATA,__data", align 8
+  @"\01_camlHash_lookup_string_equal__const_block64" = global { i64, ptr } { i64 21, ptr @"\01_camlHash_lookup_string_equal__const_block62" }, section "__DATA,__data", align 8
+  @"\01_header.camlHash_lookup_string_equal__const_block62" = local_unnamed_addr global i64 1802, section "__DATA,__data", align 8
+  @"\01_camlHash_lookup_string_equal__const_block62" = global { i64 } { i64 1 }, section "__DATA,__data", align 8
+  @"\01_camlCamlinternalFormat__make_printf_120_401_code" = external local_unnamed_addr global ptr
+  @"\01_camlStdlib__Array__empty_array50" = external global ptr
+  @"\01_camlStdlib__List__init_11_109_code" = external local_unnamed_addr global ptr
+  @"\01_camlStdlib__List__map_15_113_code" = external local_unnamed_addr global ptr
+  @"\01_camlStdlib__Printf__fn$5b$2fworkspace_root$2fprintf.ml$3a27$2c14$2d$2d48$5d_31" = external global ptr
+  @"\01_camlStdlib__immstring191" = external global ptr
+  @"\01_caml_array_make" = external global ptr
+  @"\01_caml_blit_string" = external local_unnamed_addr global ptr
+  @"\01_caml_c_call" = external local_unnamed_addr global ptr
+  @"\01_caml_call_gc" = external local_unnamed_addr global ptr
+  @"\01_caml_create_bytes" = external global ptr
+  @"\01_caml_curry2" = external global ptr
+  @"\01_caml_exn_Invalid_argument" = external global ptr
+  @"\01_caml_format_int" = external global ptr
+  @"\01_caml_initialize" = external local_unnamed_addr global ptr
+  @"\01_caml_int_of_string" = external global ptr
+  @"\01_caml_llvm_call_realloc_stack" = external local_unnamed_addr global ptr
+  @"\01_caml_modify" = external local_unnamed_addr global ptr
+  @"\01_caml_string_equal" = external local_unnamed_addr global ptr
+  @"\01_caml_sys_argv" = external global ptr
+  
+  ; Function Attrs: noinline
+  define oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_camlHash_lookup_string_equal__black_box_int_0_9_code"(i64 %0, i64 %1, i64 %2) #0 gc "oxcaml" {
+  L1:
+    %3 = tail call i64 asm "", "=r,0"(i64 %2) #5
+    %4 = insertvalue { { i64, i64 }, { i64 } } poison, i64 %0, 0, 0
+    %5 = insertvalue { { i64, i64 }, { i64 } } %4, i64 %1, 0, 1
+    %6 = insertvalue { { i64, i64 }, { i64 } } %5, i64 %3, 1, 0
+    ret { { i64, i64 }, { i64 } } %6
+  }
+  
+  ; Function Attrs: noinline
+  define oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlHash_lookup_string_equal__black_box_string_1_10_code"(i64 %0, i64 %1, ptr addrspace(1) %2) #0 gc "oxcaml" {
+  L1:
+    %3 = tail call ptr addrspace(1) asm "", "=r,0"(ptr addrspace(1) %2) #5
+    %4 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %0, 0, 0
+    %5 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %4, i64 %1, 0, 1
+    %6 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %5, ptr addrspace(1) %3, 1, 0
+    ret { { i64, i64 }, { ptr addrspace(1) } } %6
+  }
+  
+  ; Function Attrs: noinline
+  define oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlHash_lookup_string_equal__black_box_2_11_code"(i64 %0, i64 %1, ptr addrspace(1) %2) #0 gc "oxcaml" {
+  L1:
+    %3 = tail call ptr addrspace(1) asm "", "=r,0"(ptr addrspace(1) %2) #5
+    %4 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %0, 0, 0
+    %5 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %4, i64 %1, 0, 1
+    %6 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %5, ptr addrspace(1) %3, 1, 0
+    ret { { i64, i64 }, { ptr addrspace(1) } } %6
+  }
+  
+  ; Function Attrs: noinline
+  define oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_camlHash_lookup_string_equal__print_result_3_12_code"(i64 %0, i64 %1, i64 %2) #1 gc "oxcaml" {
+  L1:
+    %3 = add i64 %0, 40
+    %4 = inttoptr i64 %3 to ptr
+    %5 = load i64, ptr %4, align 4
+    %6 = add i64 %5, 376
+    %7 = tail call i64 asm sideeffect "mov $0, sp", "=r"() #5
+    %.not = icmp ult i64 %7, %6
+    br i1 %.not, label %L116, label %L117, !prof !1
+  
+  L116:                                             ; preds = %L1
+    %statepoint_token = tail call oxcaml_alloccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, {} } (i64, i64, i64)) @"\01_caml_llvm_call_realloc_stack", i32 3, i32 0, i64 %0, i64 %1, i64 34, i32 0, i32 0) #6
+    %8 = call { { i64, i64 }, {} } @llvm.experimental.gc.result.sl_sl_i64i64ssl_ss(token %statepoint_token)
+    %9 = extractvalue { { i64, i64 }, {} } %8, 0, 0
+    %10 = extractvalue { { i64, i64 }, {} } %8, 0, 1
+    br label %L117
+  
+  L117:                                             ; preds = %L116, %L1
+    %alloc.0 = phi i64 [ %1, %L1 ], [ %10, %L116 ]
+    %ds.0 = phi i64 [ %0, %L1 ], [ %9, %L116 ]
+    %statepoint_token21 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, i64, i64)) @"\01_camlCamlinternalFormat__make_printf_120_401_code", i32 5, i32 0, i64 %ds.0, i64 %alloc.0, i64 ptrtoint (ptr @"\01_camlStdlib__Printf__fn$5b$2fworkspace_root$2fprintf.ml$3a27$2c14$2d$2d48$5d_31" to i64), i64 1, i64 ptrtoint (ptr @"\01_camlHash_lookup_string_equal__const_block66" to i64), i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 4, i64 27, i64 0, i64 2, i64 63, i64 0, i64 63, i64 9, i64 6910576, i64 6714478, i64 7105838, i64 23, i64 6583379, i64 6449516, i64 5267295, i64 7235954, i64 3040884, i64 7366251, i64 7235954, i64 26228, i64 34, i64 0, i64 21, i64 43, i64 0, i64 43, i64 9, i64 6910576, i64 6714478, i64 7105838, i64 22, i64 6583379, i64 6449516, i64 5267295, i64 7235954, i64 3040884, i64 7499878, i64 7630441, i64 102, i64 38, i64 0, i64 17, i64 35, i64 0, i64 35, i64 9, i64 6910576, i64 6714478, i64 7105838, i64 21, i64 6583379, i64 6449516, i64 5267295, i64 7235954, i64 3040884, i64 6910576, i64 6714478, i64 11, i64 0, i64 21, i64 63, i64 0, i64 63, i64 27, i64 7561576, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7105838, i64 37, i64 7561544, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7499822, i64 7630441, i64 6648415, i64 7107955, i64 116) ]
+    %11 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token21)
+    %gcagg = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %11, 0, 0
+    %gcagg19 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %11, 0, 1
+    %gcagg20 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %11, 1, 0
+    %12 = and i64 %2, 2147483647
+    %13 = load i64, ptr addrspace(1) %gcagg20, align 4
+    %14 = inttoptr i64 %13 to ptr
+    %15 = musttail call oxcaml_nofpcc { { i64, i64 }, { i64 } } %14(i64 %gcagg, i64 %gcagg19, i64 %12, ptr addrspace(1) %gcagg20) #7
+    ret { { i64, i64 }, { i64 } } %15
+  }
+  
+  ; Function Attrs: noinline
+  define oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_camlHash_lookup_string_equal__find_4_13_code"(i64 %0, i64 %1, ptr addrspace(1) %2, ptr addrspace(1) nocapture %3) #0 gc "oxcaml" {
+  L1:
+    %4 = load ptr addrspace(1), ptr addrspace(1) %3, align 8
+    %5 = ptrtoint ptr addrspace(1) %4 to i64
+    %6 = and i64 %5, 1
+    %.not = icmp eq i64 %6, 0
+    br i1 %.not, label %L129.preheader, label %common.ret
+  
+  L129.preheader:                                   ; preds = %L1
+    br label %L129
+  
+  common.ret.loopexit:                              ; preds = %L134
+    %7 = extractvalue { i64, i64, ptr addrspace(1) } %12, 1
+    %8 = extractvalue { i64, i64, ptr addrspace(1) } %12, 0
+    br label %common.ret
+  
+  common.ret:                                       ; preds = %common.ret.loopexit, %L1, %L138
+    %ds.0.pn = phi i64 [ %ds.245, %L138 ], [ %0, %L1 ], [ %8, %common.ret.loopexit ]
+    %alloc.0.pn = phi i64 [ %alloc.244, %L138 ], [ %1, %L1 ], [ %7, %common.ret.loopexit ]
+    %.pn37 = phi i64 [ %24, %L138 ], [ -1, %L1 ], [ -1, %common.ret.loopexit ]
+    %.pn38 = insertvalue { { i64, i64 }, { i64 } } undef, i64 %ds.0.pn, 0, 0
+    %.pn = insertvalue { { i64, i64 }, { i64 } } %.pn38, i64 %alloc.0.pn, 0, 1
+    %common.ret.op = insertvalue { { i64, i64 }, { i64 } } %.pn, i64 %.pn37, 1, 0
+    ret { { i64, i64 }, { i64 } } %common.ret.op
+  
+  L129:                                             ; preds = %L129.preheader, %L134
+    %.035 = phi ptr addrspace(1) [ %17, %L134 ], [ %4, %L129.preheader ]
+    %alloc.1 = phi i64 [ %14, %L134 ], [ %1, %L129.preheader ]
+    %ds.1 = phi i64 [ %15, %L134 ], [ %0, %L129.preheader ]
+    %9 = load ptr addrspace(1), ptr addrspace(1) %.035, align 8
+    %10 = load ptr addrspace(1), ptr addrspace(1) %9, align 8
+    %11 = icmp eq ptr addrspace(1) %10, %2
+    br i1 %11, label %L138, label %L132
+  
+  L132:                                             ; preds = %L129
+    %12 = tail call oxcaml_c_directcc { i64, i64, ptr addrspace(1) } @"\01_caml_string_equal"(i64 %ds.1, i64 %alloc.1, ptr addrspace(1) %2, ptr addrspace(1) %10) #8
+    %13 = extractvalue { i64, i64, ptr addrspace(1) } %12, 2
+    %or.cond.not = icmp eq ptr addrspace(1) %13, inttoptr (i64 1 to ptr addrspace(1))
+    br i1 %or.cond.not, label %L134, label %L138.split.loop.exit49
+  
+  L134:                                             ; preds = %L132
+    %14 = extractvalue { i64, i64, ptr addrspace(1) } %12, 1
+    %15 = extractvalue { i64, i64, ptr addrspace(1) } %12, 0
+    %16 = getelementptr i8, ptr addrspace(1) %.035, i64 8
+    %17 = load ptr addrspace(1), ptr addrspace(1) %16, align 8
+    %18 = ptrtoint ptr addrspace(1) %17 to i64
+    %19 = and i64 %18, 1
+    %.not36 = icmp eq i64 %19, 0
+    br i1 %.not36, label %L129, label %common.ret.loopexit
+  
+  L138.split.loop.exit49:                           ; preds = %L132
+    %20 = extractvalue { i64, i64, ptr addrspace(1) } %12, 0
+    %21 = extractvalue { i64, i64, ptr addrspace(1) } %12, 1
+    br label %L138
+  
+  L138:                                             ; preds = %L129, %L138.split.loop.exit49
+    %ds.245 = phi i64 [ %20, %L138.split.loop.exit49 ], [ %ds.1, %L129 ]
+    %alloc.244 = phi i64 [ %21, %L138.split.loop.exit49 ], [ %alloc.1, %L129 ]
+    %22 = getelementptr i8, ptr addrspace(1) %9, i64 8
+    %23 = load ptr addrspace(1), ptr addrspace(1) %22, align 8
+    %24 = ptrtoint ptr addrspace(1) %23 to i64
+    br label %common.ret
+  }
+  
+  ; Function Attrs: noinline
+  define oxcaml_nofpcc { { i64, i64 }, { i64 } } @"\01_camlHash_lookup_string_equal__run_6_15_code"(i64 %0, i64 %1, i64 %2, i64 %3) #1 gc "oxcaml" {
+  L1:
+    %4 = add i64 %0, 40
+    %5 = inttoptr i64 %4 to ptr
+    %6 = load i64, ptr %5, align 4
+    %7 = add i64 %6, 376
+    %8 = tail call i64 asm sideeffect "mov $0, sp", "=r"() #5
+    %.not = icmp ult i64 %8, %7
+    br i1 %.not, label %L279, label %L280, !prof !1
+  
+  L279:                                             ; preds = %L1
+    %statepoint_token = tail call oxcaml_alloccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, {} } (i64, i64, i64)) @"\01_caml_llvm_call_realloc_stack", i32 3, i32 0, i64 %0, i64 %1, i64 34, i32 0, i32 0) #6
+    %9 = call { { i64, i64 }, {} } @llvm.experimental.gc.result.sl_sl_i64i64ssl_ss(token %statepoint_token)
+    %10 = extractvalue { { i64, i64 }, {} } %9, 0, 0
+    %11 = extractvalue { { i64, i64 }, {} } %9, 0, 1
+    br label %L280
+  
+  L280:                                             ; preds = %L279, %L1
+    %alloc.0 = phi i64 [ %1, %L1 ], [ %11, %L279 ]
+    %ds.0 = phi i64 [ %0, %L1 ], [ %10, %L279 ]
+    %statepoint_token222 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, i64, i64)) @"\01_camlStdlib__List__init_11_109_code", i32 5, i32 0, i64 %ds.0, i64 %alloc.0, i64 1, i64 63, i64 ptrtoint (ptr @"\01_camlHash_lookup_string_equal__fn$5bhash_lookup_string_equal.ml$3a24$2c17$2d$2d70$5d_15" to i64), i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 2, i64 77, i64 0, i64 2, i64 20, i64 0, i64 20, i64 7, i64 7563628, i64 7155316, i64 108, i64 17, i64 6583379, i64 6449516, i64 5005151, i64 7631721, i64 7235886, i64 29801, i64 24, i64 0, i64 4, i64 70, i64 0, i64 70, i64 27, i64 7561576, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7105838, i64 28, i64 7561544, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7696942, i64 110) ]
+    %12 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token222)
+    %gcagg = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %12, 0, 0
+    %gcagg204 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %12, 0, 1
+    %gcagg205 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %12, 1, 0
+    %13 = add i64 %gcagg204, -16
+    %14 = inttoptr i64 %gcagg to ptr
+    %15 = load i64, ptr %14, align 4
+    %.not175 = icmp ugt i64 %15, %13
+    br i1 %.not175, label %L281, label %L282, !prof !1
+  
+  L281:                                             ; preds = %L280
+    %statepoint_token223 = call oxcaml_alloccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 131073, i32 0, ptr elementtype({ { i64, i64 }, {} } (i64, i64)) @"\01_caml_call_gc", i32 2, i32 0, i64 %gcagg, i64 %13, i32 0, i32 0) #6 [ "deopt"(i64 1870160737, i64 1, i64 1, i64 2, i64 1, i64 26, i64 0, i64 16, i64 29, i64 0, i64 29, i64 27, i64 7561576, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7105838, i64 28, i64 7561544, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7696942, i64 110), "gc-live"(ptr addrspace(1) %gcagg205) ]
+    %16 = call { { i64, i64 }, {} } @llvm.experimental.gc.result.sl_sl_i64i64ssl_ss(token %statepoint_token223)
+    %gcagg205.relocated = call coldcc ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token %statepoint_token223, i32 0, i32 0) ; (%gcagg205, %gcagg205)
+    %17 = extractvalue { { i64, i64 }, {} } %16, 0, 0
+    %18 = extractvalue { { i64, i64 }, {} } %16, 0, 1
+    br label %L282
+  
+  L282:                                             ; preds = %L281, %L280
+    %.0227 = phi ptr addrspace(1) [ %gcagg205.relocated, %L281 ], [ %gcagg205, %L280 ]
+    %alloc.1 = phi i64 [ %13, %L280 ], [ %18, %L281 ]
+    %ds.1 = phi i64 [ %gcagg, %L280 ], [ %17, %L281 ]
+    %19 = add i64 %alloc.1, 8
+    %20 = inttoptr i64 %19 to ptr addrspace(1)
+    %remat = getelementptr i8, ptr addrspace(1) %20, i64 -8
+    store volatile i64 1024, ptr addrspace(1) %remat, align 4
+    store ptr addrspace(1) %.0227, ptr addrspace(1) %20, align 8
+    %statepoint_token224 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, ptr addrspace(1))) @"\01_camlStdlib__List__map_15_113_code", i32 4, i32 0, i64 %ds.1, i64 %alloc.1, i64 ptrtoint (ptr @"\01_camlHash_lookup_string_equal__fn$5bhash_lookup_string_equal.ml$3a27$2c37$2d$2d40$5d_16" to i64), ptr addrspace(1) %.0227, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 27, i64 0, i64 27, i64 49, i64 0, i64 49, i64 27, i64 7561576, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7105838, i64 28, i64 7561544, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7696942, i64 110), "gc-live"(ptr addrspace(1) %20) ]
+    %21 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token224)
+    %22 = call coldcc ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token %statepoint_token224, i32 0, i32 0) ; (%20, %20)
+    %gcagg206 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %21, 0, 0
+    %gcagg207 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %21, 0, 1
+    %gcagg208 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %21, 1, 0
+    %23 = ptrtoint ptr addrspace(1) %gcagg208 to i64
+    %24 = and i64 %23, 1
+    %.not176 = icmp eq i64 %24, 0
+    br i1 %.not176, label %L172.preheader, label %L158
+  
+  L172.preheader:                                   ; preds = %L282
+    br label %L172
+  
+  L158:                                             ; preds = %L282
+    %25 = icmp slt i64 %3, 3
+    br i1 %25, label %common.ret, label %L226
+  
+  L170:                                             ; preds = %L172
+    %26 = inttoptr i64 %34 to ptr addrspace(1)
+    %27 = load ptr addrspace(1), ptr addrspace(1) %gcagg208, align 8
+    %statepoint_token225 = call oxcaml_ccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, ptr addrspace(1), ptr addrspace(1))) @"\01_caml_c_call", i32 5, i32 0, i64 %gcagg206, i64 %gcagg207, i64 ptrtoint (ptr @"\01_caml_array_make" to i64), ptr addrspace(1) %26, ptr addrspace(1) %27, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 1, i64 2, i64 213, i64 0, i64 14, i64 41, i64 0, i64 41, i64 8, i64 7500385, i64 3045729, i64 27757, i64 21, i64 6583379, i64 6449516, i64 4284255, i64 6386290, i64 7286393, i64 7102310, i64 7631721, i64 27, i64 0, i64 13, i64 49, i64 0, i64 49, i64 27, i64 7561576, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7105838, i64 28, i64 7561544, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7696942, i64 110), "gc-live"(ptr addrspace(1) %22, ptr addrspace(1) %gcagg208, ptr addrspace(1) %26, ptr addrspace(1) %27) ]
+    %28 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token225)
+    %29 = call coldcc ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token %statepoint_token225, i32 0, i32 0) ; (%22, %22)
+    %gcagg208.relocated = call coldcc ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token %statepoint_token225, i32 1, i32 1) ; (%gcagg208, %gcagg208)
+    %gcagg209 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %28, 0, 0
+    %gcagg210 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %28, 0, 1
+    %gcagg211 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %28, 1, 0
+    %remat212 = getelementptr i8, ptr addrspace(1) %gcagg208.relocated, i64 8
+    %30 = load ptr addrspace(1), ptr addrspace(1) %remat212, align 8
+    %31 = ptrtoint ptr addrspace(1) %30 to i64
+    %32 = and i64 %31, 1
+    %.not178 = icmp eq i64 %32, 0
+    br i1 %.not178, label %L192.preheader, label %L190
+  
+  L192.preheader:                                   ; preds = %L170
+    %uglygep = getelementptr i8, ptr addrspace(1) %gcagg211, i64 8
+    br label %L192
+  
+  L172:                                             ; preds = %L172.preheader, %L172
+    %.0160 = phi ptr addrspace(1) [ %33, %L172 ], [ %gcagg208, %L172.preheader ]
+    %.1 = phi i64 [ %34, %L172 ], [ 1, %L172.preheader ]
+    %remat216 = getelementptr i8, ptr addrspace(1) %.0160, i64 8
+    %33 = load ptr addrspace(1), ptr addrspace(1) %remat216, align 8
+    %34 = add i64 %.1, 2
+    %35 = ptrtoint ptr addrspace(1) %33 to i64
+    %36 = and i64 %35, 1
+    %.not177 = icmp eq i64 %36, 0
+    br i1 %.not177, label %L172, label %L170
+  
+  L190:                                             ; preds = %L214, %L170
+    %alloc.2 = phi i64 [ %gcagg210, %L170 ], [ %alloc.4, %L214 ]
+    %ds.2 = phi i64 [ %gcagg209, %L170 ], [ %ds.4, %L214 ]
+    %37 = icmp slt i64 %3, 3
+    br i1 %37, label %common.ret, label %L226
+  
+  L192:                                             ; preds = %L192.preheader, %L214
+    %lsr.iv = phi ptr addrspace(1) [ %uglygep, %L192.preheader ], [ %uglygep232, %L214 ]
+    %.0162 = phi ptr addrspace(1) [ %44, %L214 ], [ %30, %L192.preheader ]
+    %alloc.3 = phi i64 [ %alloc.4, %L214 ], [ %gcagg210, %L192.preheader ]
+    %ds.3 = phi i64 [ %ds.4, %L214 ], [ %gcagg209, %L192.preheader ]
+    %38 = load ptr addrspace(1), ptr addrspace(1) %.0162, align 8
+    %remat213 = getelementptr i8, ptr addrspace(1) %gcagg211, i64 -8
+    %39 = load i8, ptr addrspace(1) %remat213, align 1
+    %or.cond.not = icmp eq i8 %39, -2
+    br i1 %or.cond.not, label %L200, label %L207
+  
+  L200:                                             ; preds = %L192
+    %40 = load double, ptr addrspace(1) %38, align 8
+    store double %40, ptr addrspace(1) %lsr.iv, align 8
+    br label %L214
+  
+  L207:                                             ; preds = %L192
+    %41 = tail call oxcaml_c_directcc { i64, i64 } @"\01_caml_modify"(i64 %ds.3, i64 %alloc.3, ptr addrspace(1) %lsr.iv, ptr addrspace(1) %38) #8
+    %42 = extractvalue { i64, i64 } %41, 0
+    %43 = extractvalue { i64, i64 } %41, 1
+    br label %L214
+  
+  L214:                                             ; preds = %L207, %L200
+    %alloc.4 = phi i64 [ %43, %L207 ], [ %alloc.3, %L200 ]
+    %ds.4 = phi i64 [ %42, %L207 ], [ %ds.3, %L200 ]
+    %remat219 = getelementptr i8, ptr addrspace(1) %.0162, i64 8
+    %44 = load ptr addrspace(1), ptr addrspace(1) %remat219, align 8
+    %45 = ptrtoint ptr addrspace(1) %44 to i64
+    %46 = and i64 %45, 1
+    %.not179 = icmp eq i64 %46, 0
+    %uglygep232 = getelementptr i8, ptr addrspace(1) %lsr.iv, i64 8
+    br i1 %.not179, label %L192, label %L190
+  
+  L226:                                             ; preds = %L190, %L158
+    %.0228 = phi ptr addrspace(1) [ %29, %L190 ], [ %22, %L158 ]
+    %.0 = phi ptr addrspace(1) [ inttoptr (i64 ptrtoint (ptr @"\01_camlStdlib__Array__empty_array50" to i64) to ptr addrspace(1)), %L158 ], [ %gcagg211, %L190 ]
+    %alloc.5 = phi i64 [ %gcagg207, %L158 ], [ %alloc.2, %L190 ]
+    %ds.5 = phi i64 [ %gcagg206, %L158 ], [ %ds.2, %L190 ]
+    %47 = lshr i64 %3, 1
+    %48 = lshr i64 %2, 1
+    %49 = icmp slt i64 %2, 3
+    br i1 %49, label %L232.us.preheader, label %L232.preheader
+  
+  L232.preheader:                                   ; preds = %L226
+    br label %L232
+  
+  L232.us.preheader:                                ; preds = %L226
+    br label %L232.us
+  
+  L232.us:                                          ; preds = %L232.us.preheader, %L232.us
+    %.0163.us = phi i64 [ %50, %L232.us ], [ 1, %L232.us.preheader ]
+    %50 = add i64 %.0163.us, 1
+    %51 = icmp sgt i64 %50, %47
+    br i1 %51, label %common.ret, label %L232.us
+  
+  L232:                                             ; preds = %L232.preheader, %L265.loopexit
+    %.0230 = phi ptr addrspace(1) [ %.0.relocated, %L265.loopexit ], [ %.0, %L232.preheader ]
+    %.1229 = phi ptr addrspace(1) [ %60, %L265.loopexit ], [ %.0228, %L232.preheader ]
+    %.0164 = phi i64 [ %65, %L265.loopexit ], [ 1, %L232.preheader ]
+    %.0163 = phi i64 [ %70, %L265.loopexit ], [ 1, %L232.preheader ]
+    %alloc.6 = phi i64 [ %69, %L265.loopexit ], [ %alloc.5, %L232.preheader ]
+    %ds.6 = phi i64 [ %68, %L265.loopexit ], [ %ds.5, %L232.preheader ]
+    %52 = shl i64 %.0163, 1
+    %53 = or i64 %52, 1
+    br label %L244
+  
+  L244:                                             ; preds = %L244, %L232
+    %.1231 = phi ptr addrspace(1) [ %.0230, %L232 ], [ %.0.relocated, %L244 ]
+    %.2 = phi ptr addrspace(1) [ %.1229, %L232 ], [ %60, %L244 ]
+    %.0167 = phi i64 [ %.0164, %L232 ], [ %65, %L244 ]
+    %.0166 = phi i64 [ 1, %L232 ], [ %66, %L244 ]
+    %alloc.7 = phi i64 [ %alloc.6, %L232 ], [ %62, %L244 ]
+    %ds.7 = phi i64 [ %ds.6, %L232 ], [ %61, %L244 ]
+    %54 = shl i64 %.0166, 1
+    %55 = add i64 %53, %54
+    %56 = shl i64 %55, 2
+    %57 = and i64 %56, 252
+    %remat220 = getelementptr i8, ptr addrspace(1) %.1231, i64 -4
+    %remat221 = getelementptr i8, ptr addrspace(1) %remat220, i64 %57
+    %58 = load ptr addrspace(1), ptr addrspace(1) %remat221, align 8
+    %statepoint_token226 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { i64 } } (i64, i64, ptr addrspace(1), ptr addrspace(1))) @"\01_camlHash_lookup_string_equal__find_4_13_code", i32 4, i32 0, i64 %ds.7, i64 %alloc.7, ptr addrspace(1) %58, ptr addrspace(1) %.2, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 31, i64 0, i64 20, i64 74, i64 0, i64 74, i64 27, i64 7561576, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7105838, i64 28, i64 7561544, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7696942, i64 110), "gc-live"(ptr addrspace(1) %.2, ptr addrspace(1) %.1231) ]
+    %59 = call { { i64, i64 }, { i64 } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_i64ss(token %statepoint_token226)
+    %60 = call coldcc ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token %statepoint_token226, i32 0, i32 0) ; (%.2, %.2)
+    %.0.relocated = call coldcc ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token %statepoint_token226, i32 1, i32 1) ; (%.1231, %.1231)
+    %61 = extractvalue { { i64, i64 }, { i64 } } %59, 0, 0
+    %62 = extractvalue { { i64, i64 }, { i64 } } %59, 0, 1
+    %63 = extractvalue { { i64, i64 }, { i64 } } %59, 1, 0
+    %64 = add i64 %.0167, -1
+    %65 = add i64 %64, %63
+    %66 = add i64 %.0166, 1
+    %67 = icmp sgt i64 %66, %48
+    br i1 %67, label %L265.loopexit, label %L244
+  
+  L265.loopexit:                                    ; preds = %L244
+    %68 = extractvalue { { i64, i64 }, { i64 } } %59, 0, 0
+    %69 = extractvalue { { i64, i64 }, { i64 } } %59, 0, 1
+    %70 = add i64 %.0163, 1
+    %71 = icmp sgt i64 %70, %47
+    br i1 %71, label %common.ret.loopexit192, label %L232
+  
+  common.ret.loopexit192:                           ; preds = %L265.loopexit
+    %72 = extractvalue { { i64, i64 }, { i64 } } %59, 0, 0
+    %73 = extractvalue { { i64, i64 }, { i64 } } %59, 0, 1
+    br label %common.ret
+  
+  common.ret:                                       ; preds = %L232.us, %common.ret.loopexit192, %L158, %L190
+    %ds.8.pn = phi i64 [ %gcagg206, %L158 ], [ %ds.2, %L190 ], [ %72, %common.ret.loopexit192 ], [ %ds.5, %L232.us ]
+    %alloc.8.pn = phi i64 [ %gcagg207, %L158 ], [ %alloc.2, %L190 ], [ %73, %common.ret.loopexit192 ], [ %alloc.5, %L232.us ]
+    %.0165.pn = phi i64 [ 1, %L158 ], [ 1, %L190 ], [ %65, %common.ret.loopexit192 ], [ 1, %L232.us ]
+    %.pn180 = insertvalue { { i64, i64 }, { i64 } } undef, i64 %ds.8.pn, 0, 0
+    %.pn = insertvalue { { i64, i64 }, { i64 } } %.pn180, i64 %alloc.8.pn, 0, 1
+    %common.ret.op = insertvalue { { i64, i64 }, { i64 } } %.pn, i64 %.0165.pn, 1, 0
+    ret { { i64, i64 }, { i64 } } %common.ret.op
+  }
+  
+  ; Function Attrs: noinline
+  define oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlHash_lookup_string_equal__fn$5bhash_lookup_string_equal.ml$3a24$2c17$2d$2d70$5d_7_16_code"(i64 %0, i64 %1, i64 %2) #0 gc "oxcaml" {
+  L1:
+    %3 = inttoptr i64 %2 to ptr addrspace(1)
+    %statepoint_token = call oxcaml_ccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, ptr addrspace(1), ptr addrspace(1))) @"\01_caml_c_call", i32 5, i32 0, i64 %0, i64 %1, i64 ptrtoint (ptr @"\01_caml_format_int" to i64), ptr addrspace(1) inttoptr (i64 ptrtoint (ptr @"\01_camlStdlib__immstring191" to i64) to ptr addrspace(1)), ptr addrspace(1) %3, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 1, i64 2, i64 280, i64 0, i64 2, i64 19, i64 0, i64 19, i64 9, i64 6583411, i64 6449516, i64 7105838, i64 20, i64 6583379, i64 6449516, i64 7631662, i64 7235954, i64 7298919, i64 6905702, i64 29806, i64 24, i64 0, i64 51, i64 66, i64 0, i64 66, i64 27, i64 7561576, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7105838, i64 34, i64 7561544, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7696942, i64 2633326, i64 7239014, i64 41), "gc-live"(ptr addrspace(1) %3) ]
+    %4 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token)
+    %gcagg = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %4, 0, 0
+    %gcagg64 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %4, 0, 1
+    %gcagg65 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %4, 1, 0
+    %remat = getelementptr i8, ptr addrspace(1) %gcagg65, i64 -8
+    %5 = load i64, ptr addrspace(1) %remat, align 4
+    %6 = lshr i64 %5, 7
+    %7 = and i64 %6, 562949953421304
+    %8 = add nsw i64 %7, -1
+    %remat75 = getelementptr i8, ptr addrspace(1) %gcagg65, i64 %8
+    %9 = load i8, ptr addrspace(1) %remat75, align 1
+    %10 = zext i8 %9 to i64
+    %11 = sub nsw i64 %8, %10
+    %12 = shl nsw i64 %11, 1
+    %13 = or i64 %12, 1
+    %14 = add nsw i64 %12, 39
+    %15 = inttoptr i64 %14 to ptr addrspace(1)
+    %statepoint_token78 = call oxcaml_ccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, ptr addrspace(1))) @"\01_caml_c_call", i32 4, i32 0, i64 %gcagg, i64 %gcagg64, i64 ptrtoint (ptr @"\01_caml_create_bytes" to i64), ptr addrspace(1) %15, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 1, i64 2, i64 226, i64 0, i64 10, i64 32, i64 0, i64 32, i64 9, i64 6583411, i64 6449516, i64 7105838, i64 10, i64 6583379, i64 6449516, i64 6170670, i64 41, i64 24, i64 0, i64 27, i64 66, i64 0, i64 66, i64 27, i64 7561576, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7105838, i64 34, i64 7561544, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7696942, i64 2633326, i64 7239014, i64 41), "gc-live"(ptr addrspace(1) %gcagg65, ptr addrspace(1) %15) ]
+    %16 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token78)
+    %gcagg65.relocated = call coldcc ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token %statepoint_token78, i32 0, i32 0) ; (%gcagg65, %gcagg65)
+    %gcagg66 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %16, 0, 0
+    %gcagg67 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %16, 0, 1
+    %gcagg68 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %16, 1, 0
+    %17 = tail call oxcaml_c_directcc { i64, i64, ptr addrspace(1) } @"\01_caml_blit_string"(i64 %gcagg66, i64 %gcagg67, ptr addrspace(1) nonnull inttoptr (i64 ptrtoint (ptr @"\01_camlHash_lookup_string_equal__immstring117" to i64) to ptr addrspace(1)), ptr addrspace(1) nonnull inttoptr (i64 1 to ptr addrspace(1)), ptr addrspace(1) %gcagg68, ptr addrspace(1) nonnull inttoptr (i64 1 to ptr addrspace(1)), ptr addrspace(1) nonnull inttoptr (i64 39 to ptr addrspace(1))) #8
+    %gcagg69 = extractvalue { i64, i64, ptr addrspace(1) } %17, 0
+    %gcagg70 = extractvalue { i64, i64, ptr addrspace(1) } %17, 1
+    %gcagg71 = extractvalue { i64, i64, ptr addrspace(1) } %17, 2
+    %18 = inttoptr i64 %13 to ptr addrspace(1)
+    %19 = tail call oxcaml_c_directcc { i64, i64, ptr addrspace(1) } @"\01_caml_blit_string"(i64 %gcagg69, i64 %gcagg70, ptr addrspace(1) %gcagg65.relocated, ptr addrspace(1) nonnull inttoptr (i64 1 to ptr addrspace(1)), ptr addrspace(1) %gcagg68, ptr addrspace(1) nonnull inttoptr (i64 39 to ptr addrspace(1)), ptr addrspace(1) nonnull %18) #8
+    %gcagg72 = extractvalue { i64, i64, ptr addrspace(1) } %19, 0
+    %gcagg73 = extractvalue { i64, i64, ptr addrspace(1) } %19, 1
+    %gcagg74 = extractvalue { i64, i64, ptr addrspace(1) } %19, 2
+    %20 = add i64 %gcagg73, -24
+    %21 = inttoptr i64 %gcagg72 to ptr
+    %22 = load i64, ptr %21, align 4
+    %.not = icmp ugt i64 %22, %20
+    br i1 %.not, label %L308, label %L309, !prof !1
+  
+  L308:                                             ; preds = %L1
+    %statepoint_token79 = call oxcaml_alloccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 196609, i32 0, ptr elementtype({ { i64, i64 }, {} } (i64, i64)) @"\01_caml_call_gc", i32 2, i32 0, i64 %gcagg72, i64 %20, i32 0, i32 0) #6 [ "deopt"(i64 1870160737, i64 1, i64 1, i64 3, i64 1, i64 24, i64 0, i64 27, i64 69, i64 0, i64 69, i64 27, i64 7561576, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7105838, i64 34, i64 7561544, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7696942, i64 2633326, i64 7239014, i64 41), "gc-live"(ptr addrspace(1) %gcagg68) ]
+    %23 = call { { i64, i64 }, {} } @llvm.experimental.gc.result.sl_sl_i64i64ssl_ss(token %statepoint_token79)
+    %gcagg68.relocated = call coldcc ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token %statepoint_token79, i32 0, i32 0) ; (%gcagg68, %gcagg68)
+    %24 = extractvalue { { i64, i64 }, {} } %23, 0, 0
+    %25 = extractvalue { { i64, i64 }, {} } %23, 0, 1
+    br label %L309
+  
+  L309:                                             ; preds = %L308, %L1
+    %.0 = phi ptr addrspace(1) [ %gcagg68.relocated, %L308 ], [ %gcagg68, %L1 ]
+    %alloc.0 = phi i64 [ %20, %L1 ], [ %25, %L308 ]
+    %ds.0 = phi i64 [ %gcagg72, %L1 ], [ %24, %L308 ]
+    %26 = add i64 %alloc.0, 8
+    %27 = inttoptr i64 %26 to ptr addrspace(1)
+    %remat76 = getelementptr i8, ptr addrspace(1) %27, i64 -8
+    store volatile i64 2048, ptr addrspace(1) %remat76, align 4
+    store ptr addrspace(1) %.0, ptr addrspace(1) %27, align 8
+    %remat77 = getelementptr i8, ptr addrspace(1) %27, i64 8
+    store volatile i64 %2, ptr addrspace(1) %remat77, align 4
+    %28 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %ds.0, 0, 0
+    %29 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %28, i64 %alloc.0, 0, 1
+    %30 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %29, ptr addrspace(1) %27, 1, 0
+    ret { { i64, i64 }, { ptr addrspace(1) } } %30
+  }
+  
+  ; Function Attrs: mustprogress noinline norecurse nounwind willreturn
+  define oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlHash_lookup_string_equal__fn$5bhash_lookup_string_equal.ml$3a27$2c37$2d$2d40$5d_8_8_code"(i64 %0, i64 %1, ptr addrspace(1) nocapture %2) #2 gc "oxcaml" {
+  L1:
+    %3 = load ptr addrspace(1), ptr addrspace(1) %2, align 8
+    %4 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %0, 0, 0
+    %5 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %4, i64 %1, 0, 1
+    %6 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %5, ptr addrspace(1) %3, 1, 0
+    ret { { i64, i64 }, { ptr addrspace(1) } } %6
+  }
+  
+  ; Function Attrs: noinline
+  define oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @"\01_camlHash_lookup_string_equal__entry"(i64 %0, i64 %1) local_unnamed_addr #1 gc "oxcaml" {
+  L1:
+    %statepoint_token = call oxcaml_ccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, ptr addrspace(1))) @"\01_caml_c_call", i32 4, i32 0, i64 %0, i64 %1, i64 ptrtoint (ptr @"\01_caml_sys_argv" to i64), ptr addrspace(1) inttoptr (i64 1 to ptr addrspace(1)), i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 1, i64 1, i64 6, i64 0, i64 18, i64 26, i64 0, i64 26, i64 27, i64 7561576, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7105838, i64 26, i64 7561544, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 28206) ]
+    %2 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token)
+    %gcagg = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %2, 0, 0
+    %gcagg139 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %2, 0, 1
+    %gcagg140 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %2, 1, 0
+    %remat = getelementptr i8, ptr addrspace(1) %gcagg140, i64 -8
+    %3 = load i64, ptr addrspace(1) %remat, align 4
+    %4 = and i64 %3, 72057594037925888
+    %.not = icmp eq i64 %4, 0
+    br i1 %.not, label %L352, label %L328
+  
+  L328:                                             ; preds = %L1
+    %statepoint_token164 = call oxcaml_ccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, ptr addrspace(1))) @"\01_caml_c_call", i32 4, i32 0, i64 %gcagg, i64 %gcagg139, i64 ptrtoint (ptr @"\01_caml_sys_argv" to i64), ptr addrspace(1) inttoptr (i64 1 to ptr addrspace(1)), i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 1, i64 1, i64 6, i64 0, i64 50, i64 58, i64 0, i64 58, i64 27, i64 7561576, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7105838, i64 26, i64 7561544, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 28206) ]
+    %5 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token164)
+    %gcagg141 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %5, 0, 0
+    %gcagg142 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %5, 0, 1
+    %gcagg143 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %5, 1, 0
+    %remat159 = getelementptr i8, ptr addrspace(1) %gcagg143, i64 -8
+    %6 = load i64, ptr addrspace(1) %remat159, align 4
+    %7 = and i64 %6, 72057594037925888
+    %.not138 = icmp eq i64 %7, 0
+    br i1 %.not138, label %L346, label %L338
+  
+  L338:                                             ; preds = %L328
+    %remat160 = getelementptr i8, ptr addrspace(1) %gcagg143, i64 8
+    %8 = load ptr addrspace(1), ptr addrspace(1) %remat160, align 8
+    %statepoint_token165 = call oxcaml_ccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, ptr addrspace(1))) @"\01_caml_c_call", i32 4, i32 0, i64 %gcagg141, i64 %gcagg142, i64 ptrtoint (ptr @"\01_caml_int_of_string" to i64), ptr addrspace(1) %8, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 1, i64 1, i64 6, i64 0, i64 36, i64 62, i64 0, i64 62, i64 27, i64 7561576, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7105838, i64 26, i64 7561544, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 28206), "gc-live"(ptr addrspace(1) %8) ]
+    %9 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token165)
+    %gcagg144 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %9, 0, 0
+    %gcagg145 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %9, 0, 1
+    %gcagg146 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %9, 1, 0
+    %10 = ptrtoint ptr addrspace(1) %gcagg146 to i64
+    br label %L352
+  
+  L346:                                             ; preds = %L328
+    tail call void @llvm.aarch64.oxcaml.raise.notrace(i64 ptrtoint (ptr @"\01_camlHash_lookup_string_equal__block35" to i64))
+    unreachable
+  
+  L352:                                             ; preds = %L1, %L338
+    %.0 = phi i64 [ %10, %L338 ], [ 200001, %L1 ]
+    %alloc.0 = phi i64 [ %gcagg145, %L338 ], [ %gcagg139, %L1 ]
+    %ds.0 = phi i64 [ %gcagg144, %L338 ], [ %gcagg, %L1 ]
+    %11 = inttoptr i64 %.0 to ptr addrspace(1)
+    %12 = tail call oxcaml_c_directcc { i64, i64 } @"\01_caml_initialize"(i64 %ds.0, i64 %alloc.0, ptr addrspace(1) inttoptr (i64 add (i64 ptrtoint (ptr @"\01_camlHash_lookup_string_equal" to i64), i64 24) to ptr addrspace(1)), ptr addrspace(1) %11) #8
+    %13 = extractvalue { i64, i64 } %12, 0
+    %14 = extractvalue { i64, i64 } %12, 1
+    %statepoint_token166 = call oxcaml_ccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, ptr addrspace(1))) @"\01_caml_c_call", i32 4, i32 0, i64 %13, i64 %14, i64 ptrtoint (ptr @"\01_caml_sys_argv" to i64), ptr addrspace(1) inttoptr (i64 1 to ptr addrspace(1)), i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 1, i64 1, i64 9, i64 0, i64 18, i64 26, i64 0, i64 26, i64 27, i64 7561576, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7105838, i64 29, i64 7561544, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 6648366, i64 29552) ]
+    %15 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token166)
+    %gcagg147 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %15, 0, 0
+    %gcagg148 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %15, 0, 1
+    %gcagg149 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %15, 1, 0
+    %remat161 = getelementptr i8, ptr addrspace(1) %gcagg149, i64 -8
+    %16 = load i64, ptr addrspace(1) %remat161, align 4
+    %17 = and i64 %16, 72057594037926912
+    %18 = icmp ugt i64 %17, 2560
+    br i1 %18, label %L364, label %L388
+  
+  L364:                                             ; preds = %L352
+    %statepoint_token167 = call oxcaml_ccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, ptr addrspace(1))) @"\01_caml_c_call", i32 4, i32 0, i64 %gcagg147, i64 %gcagg148, i64 ptrtoint (ptr @"\01_caml_sys_argv" to i64), ptr addrspace(1) inttoptr (i64 1 to ptr addrspace(1)), i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 1, i64 1, i64 9, i64 0, i64 50, i64 58, i64 0, i64 58, i64 27, i64 7561576, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7105838, i64 29, i64 7561544, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 6648366, i64 29552) ]
+    %19 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token167)
+    %gcagg150 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %19, 0, 0
+    %gcagg151 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %19, 0, 1
+    %gcagg152 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %19, 1, 0
+    %remat162 = getelementptr i8, ptr addrspace(1) %gcagg152, i64 -8
+    %20 = load i64, ptr addrspace(1) %remat162, align 4
+    %21 = and i64 %20, 72057594037926912
+    %22 = icmp ugt i64 %21, 2560
+    br i1 %22, label %L374, label %L382
+  
+  L374:                                             ; preds = %L364
+    %remat163 = getelementptr i8, ptr addrspace(1) %gcagg152, i64 16
+    %23 = load ptr addrspace(1), ptr addrspace(1) %remat163, align 8
+    %statepoint_token168 = call oxcaml_ccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, ptr addrspace(1))) @"\01_caml_c_call", i32 4, i32 0, i64 %gcagg150, i64 %gcagg151, i64 ptrtoint (ptr @"\01_caml_int_of_string" to i64), ptr addrspace(1) %23, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 1, i64 1, i64 9, i64 0, i64 36, i64 62, i64 0, i64 62, i64 27, i64 7561576, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7105838, i64 29, i64 7561544, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 6648366, i64 29552), "gc-live"(ptr addrspace(1) %23) ]
+    %24 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token168)
+    %gcagg153 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %24, 0, 0
+    %gcagg154 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %24, 0, 1
+    %gcagg155 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %24, 1, 0
+    %25 = ptrtoint ptr addrspace(1) %gcagg155 to i64
+    br label %L388
+  
+  L382:                                             ; preds = %L364
+    tail call void @llvm.aarch64.oxcaml.raise.notrace(i64 ptrtoint (ptr @"\01_camlHash_lookup_string_equal__block35" to i64))
+    unreachable
+  
+  L388:                                             ; preds = %L352, %L374
+    %.0136 = phi i64 [ %25, %L374 ], [ 21, %L352 ]
+    %alloc.1 = phi i64 [ %gcagg154, %L374 ], [ %gcagg148, %L352 ]
+    %ds.1 = phi i64 [ %gcagg153, %L374 ], [ %gcagg147, %L352 ]
+    %26 = inttoptr i64 %.0136 to ptr addrspace(1)
+    %27 = tail call oxcaml_c_directcc { i64, i64 } @"\01_caml_initialize"(i64 %ds.1, i64 %alloc.1, ptr addrspace(1) inttoptr (i64 add (i64 ptrtoint (ptr @"\01_camlHash_lookup_string_equal" to i64), i64 32) to ptr addrspace(1)), ptr addrspace(1) %26) #8
+    %28 = extractvalue { i64, i64 } %27, 0
+    %29 = extractvalue { i64, i64 } %27, 1
+    %30 = add i64 %28, 40
+    %31 = inttoptr i64 %30 to ptr
+    %32 = load i64, ptr %31, align 4
+    %33 = add i64 %32, 376
+    %34 = tail call i64 asm sideeffect "mov $0, sp", "=r"() #5
+    %.not137 = icmp ult i64 %34, %33
+    br i1 %.not137, label %L408, label %L409, !prof !1
+  
+  L408:                                             ; preds = %L388
+    %statepoint_token169 = tail call oxcaml_alloccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, {} } (i64, i64, i64)) @"\01_caml_llvm_call_realloc_stack", i32 3, i32 0, i64 %28, i64 %29, i64 34, i32 0, i32 0) #6
+    %35 = call { { i64, i64 }, {} } @llvm.experimental.gc.result.sl_sl_i64i64ssl_ss(token %statepoint_token169)
+    %36 = extractvalue { { i64, i64 }, {} } %35, 0, 0
+    %37 = extractvalue { { i64, i64 }, {} } %35, 0, 1
+    br label %L409
+  
+  L409:                                             ; preds = %L408, %L388
+    %alloc.2 = phi i64 [ %29, %L388 ], [ %37, %L408 ]
+    %ds.2 = phi i64 [ %28, %L388 ], [ %36, %L408 ]
+    %statepoint_token170 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { i64 } } (i64, i64, i64)) @"\01_camlHash_lookup_string_equal__black_box_int_0_9_code", i32 3, i32 0, i64 %ds.2, i64 %alloc.2, i64 %.0136, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 36, i64 0, i64 45, i64 65, i64 0, i64 65, i64 27, i64 7561576, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7105838, i64 24, i64 7561544, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837) ]
+    %38 = call { { i64, i64 }, { i64 } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_i64ss(token %statepoint_token170)
+    %39 = extractvalue { { i64, i64 }, { i64 } } %38, 0, 0
+    %40 = extractvalue { { i64, i64 }, { i64 } } %38, 0, 1
+    %41 = extractvalue { { i64, i64 }, { i64 } } %38, 1, 0
+    %statepoint_token171 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { i64 } } (i64, i64, i64)) @"\01_camlHash_lookup_string_equal__black_box_int_0_9_code", i32 3, i32 0, i64 %39, i64 %40, i64 %.0, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 36, i64 0, i64 27, i64 44, i64 0, i64 44, i64 27, i64 7561576, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7105838, i64 24, i64 7561544, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837) ]
+    %42 = call { { i64, i64 }, { i64 } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_i64ss(token %statepoint_token171)
+    %43 = extractvalue { { i64, i64 }, { i64 } } %42, 0, 0
+    %44 = extractvalue { { i64, i64 }, { i64 } } %42, 0, 1
+    %45 = extractvalue { { i64, i64 }, { i64 } } %42, 1, 0
+    %statepoint_token172 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { i64 } } (i64, i64, i64, i64)) @"\01_camlHash_lookup_string_equal__run_6_15_code", i32 4, i32 0, i64 %43, i64 %44, i64 %45, i64 %41, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 1, i64 36, i64 0, i64 22, i64 66, i64 0, i64 66, i64 27, i64 7561576, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7105838, i64 24, i64 7561544, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837) ]
+    %46 = call { { i64, i64 }, { i64 } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_i64ss(token %statepoint_token172)
+    %47 = extractvalue { { i64, i64 }, { i64 } } %46, 0, 0
+    %48 = extractvalue { { i64, i64 }, { i64 } } %46, 0, 1
+    %49 = extractvalue { { i64, i64 }, { i64 } } %46, 1, 0
+    %statepoint_token173 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { ptr addrspace(1) } } (i64, i64, i64, i64, i64)) @"\01_camlCamlinternalFormat__make_printf_120_401_code", i32 5, i32 0, i64 %47, i64 %48, i64 ptrtoint (ptr @"\01_camlStdlib__Printf__fn$5b$2fworkspace_root$2fprintf.ml$3a27$2c14$2d$2d48$5d_31" to i64), i64 1, i64 ptrtoint (ptr @"\01_camlHash_lookup_string_equal__const_block66" to i64), i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 5, i64 27, i64 0, i64 2, i64 63, i64 0, i64 63, i64 9, i64 6910576, i64 6714478, i64 7105838, i64 23, i64 6583379, i64 6449516, i64 5267295, i64 7235954, i64 3040884, i64 7366251, i64 7235954, i64 26228, i64 34, i64 0, i64 21, i64 43, i64 0, i64 43, i64 9, i64 6910576, i64 6714478, i64 7105838, i64 22, i64 6583379, i64 6449516, i64 5267295, i64 7235954, i64 3040884, i64 7499878, i64 7630441, i64 102, i64 38, i64 0, i64 17, i64 35, i64 0, i64 35, i64 9, i64 6910576, i64 6714478, i64 7105838, i64 21, i64 6583379, i64 6449516, i64 5267295, i64 7235954, i64 3040884, i64 6910576, i64 6714478, i64 11, i64 0, i64 21, i64 63, i64 0, i64 63, i64 27, i64 7561576, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7105838, i64 37, i64 7561544, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7499822, i64 7630441, i64 6648415, i64 7107955, i64 116, i64 36, i64 0, i64 9, i64 66, i64 0, i64 66, i64 27, i64 7561576, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7105838, i64 24, i64 7561544, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837) ]
+    %50 = call { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token %statepoint_token173)
+    %gcagg156 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %50, 0, 0
+    %gcagg157 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %50, 0, 1
+    %gcagg158 = extractvalue { { i64, i64 }, { ptr addrspace(1) } } %50, 1, 0
+    %51 = and i64 %49, 2147483647
+    %52 = load i64, ptr addrspace(1) %gcagg158, align 4
+    %53 = inttoptr i64 %52 to ptr
+    %statepoint_token174 = call oxcaml_nofpcc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype({ { i64, i64 }, { i64 } } (i64, i64, i64, ptr addrspace(1))) %53, i32 4, i32 0, i64 %gcagg156, i64 %gcagg157, i64 %51, ptr addrspace(1) %gcagg158, i32 0, i32 0) [ "deopt"(i64 1870160740, i64 1, i64 0, i64 2, i64 11, i64 0, i64 21, i64 63, i64 0, i64 63, i64 27, i64 7561576, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7105838, i64 37, i64 7561544, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7499822, i64 7630441, i64 6648415, i64 7107955, i64 116, i64 36, i64 0, i64 9, i64 66, i64 0, i64 66, i64 27, i64 7561576, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837, i64 7105838, i64 24, i64 7561544, i64 7102312, i64 7040879, i64 6254709, i64 7500915, i64 6778473, i64 7431519, i64 7102837) ]
+    %54 = call { { i64, i64 }, { i64 } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_i64ss(token %statepoint_token174)
+    %55 = extractvalue { { i64, i64 }, { i64 } } %54, 0, 0
+    %56 = extractvalue { { i64, i64 }, { i64 } } %54, 0, 1
+    %57 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %55, 0, 0
+    %58 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %57, i64 %56, 0, 1
+    %59 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %58, ptr addrspace(1) inttoptr (i64 1 to ptr addrspace(1)), 1, 0
+    ret { { i64, i64 }, { ptr addrspace(1) } } %59
+  }
+  
+  ; Function Attrs: convergent nocallback noduplicate nofree nomerge noreturn
+  declare void @llvm.aarch64.oxcaml.raise.notrace(i64) #3
+  
+  declare token @llvm.experimental.gc.statepoint.p0(i64 immarg, i32 immarg, ptr, i32 immarg, i32 immarg, ...)
+  
+  ; Function Attrs: nocallback nofree nosync nounwind willreturn memory(none)
+  declare { { i64, i64 }, {} } @llvm.experimental.gc.result.sl_sl_i64i64ssl_ss(token) #4
+  
+  ; Function Attrs: nocallback nofree nosync nounwind willreturn memory(none)
+  declare { { i64, i64 }, { ptr addrspace(1) } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_p1ss(token) #4
+  
+  ; Function Attrs: nocallback nofree nosync nounwind willreturn memory(none)
+  declare ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token, i32 immarg, i32 immarg) #4
+  
+  ; Function Attrs: nocallback nofree nosync nounwind willreturn memory(none)
+  declare { { i64, i64 }, { i64 } } @llvm.experimental.gc.result.sl_sl_i64i64ssl_i64ss(token) #4
+  
+  attributes #0 = { noinline "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" }
+  attributes #1 = { noinline "oxcaml-stack-check"="true" "oxcaml-stack-check-before-bytes"="0" "oxcaml-stack-check-bytes"="16" }
+  attributes #2 = { mustprogress noinline norecurse nounwind willreturn "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" }
+  attributes #3 = { convergent nocallback noduplicate nofree nomerge noreturn }
+  attributes #4 = { nocallback nofree nosync nounwind willreturn memory(none) }
+  attributes #5 = { nounwind "gc-leaf-function"="true" }
+  attributes #6 = { cold }
+  attributes #7 = { "statepoint-id"="0" }
+  attributes #8 = { "gc-leaf-function"="true" }
+  
+  !llvm.module.flags = !{!0}
+  
+  !0 = !{i32 1, !"oxcaml_module", !"Hash_lookup_string_equal"}
+  !1 = !{!"branch_weights", i32 1, i32 2000}
+
+...
+---
+name:            "\x01_camlHash_lookup_string_equal__black_box_int_0_9_code"
+alignment:       4
+exposesReturnsTwice: false
+legalized:       false
+regBankSelected: false
+selected:        false
+failedISel:      false
+tracksRegLiveness: true
+hasWinCFI:       false
+callsEHReturn:   false
+callsUnwindInit: false
+hasEHCatchret:   false
+hasEHScopes:     false
+hasEHFunclets:   false
+debugInstrRef:   false
+failsVerification: false
+tracksDebugUserValues: false
+registers:
+  - { id: 0, class: gpr64, preferred-register: '' }
+  - { id: 1, class: gpr64, preferred-register: '' }
+  - { id: 2, class: gpr64, preferred-register: '' }
+  - { id: 3, class: gpr64common, preferred-register: '' }
+  - { id: 4, class: gpr64common, preferred-register: '' }
+liveins:
+  - { reg: '$x28', virtual-reg: '%0' }
+  - { reg: '$x27', virtual-reg: '%1' }
+  - { reg: '$x0', virtual-reg: '%2' }
+frameInfo:
+  isFrameAddressTaken: false
+  isReturnAddressTaken: false
+  hasStackMap:     false
+  hasPatchPoint:   false
+  stackSize:       0
+  offsetAdjustment: 0
+  maxAlignment:    1
+  adjustsStack:    false
+  hasCalls:        false
+  stackProtector:  ''
+  functionContext: ''
+  maxCallFrameSize: 0
+  cvBytesOfCalleeSavedRegisters: 0
+  hasOpaqueSPAdjustment: false
+  hasVAStart:      false
+  hasMustTailInVarArgFunc: false
+  hasTailCall:     false
+  localFrameSize:  0
+  savePoint:       ''
+  restorePoint:    ''
+fixedStack:      []
+stack:           []
+callSites:       []
+debugValueSubstitutions: []
+constants:       []
+machineFunctionInfo: {}
+body:             |
+  bb.0.L1:
+    liveins: $x28, $x27, $x0
+  
+    %2:gpr64 = COPY $x0
+    %1:gpr64 = COPY $x27
+    %0:gpr64 = COPY $x28
+    %4:gpr64common = COPY %2
+    INLINEASM &"", 0 /* attdialect */, 2555914 /* regdef:GPR64common */, def %3, 2147483657 /* reguse tiedto:$0 */, %4(tied-def 3)
+    $x28 = COPY %0
+    $x27 = COPY %1
+    $x0 = COPY %3
+    RET_ReallyLR implicit $x28, implicit $x27, implicit $x0
+
+...
+---
+name:            "\x01_camlHash_lookup_string_equal__black_box_string_1_10_code"
+alignment:       4
+exposesReturnsTwice: false
+legalized:       false
+regBankSelected: false
+selected:        false
+failedISel:      false
+tracksRegLiveness: true
+hasWinCFI:       false
+callsEHReturn:   false
+callsUnwindInit: false
+hasEHCatchret:   false
+hasEHScopes:     false
+hasEHFunclets:   false
+debugInstrRef:   false
+failsVerification: false
+tracksDebugUserValues: false
+registers:
+  - { id: 0, class: gpr64, preferred-register: '' }
+  - { id: 1, class: gpr64, preferred-register: '' }
+  - { id: 2, class: gpr64, preferred-register: '' }
+  - { id: 3, class: gpr64common, preferred-register: '' }
+  - { id: 4, class: gpr64common, preferred-register: '' }
+liveins:
+  - { reg: '$x28', virtual-reg: '%0' }
+  - { reg: '$x27', virtual-reg: '%1' }
+  - { reg: '$x0', virtual-reg: '%2' }
+frameInfo:
+  isFrameAddressTaken: false
+  isReturnAddressTaken: false
+  hasStackMap:     false
+  hasPatchPoint:   false
+  stackSize:       0
+  offsetAdjustment: 0
+  maxAlignment:    1
+  adjustsStack:    false
+  hasCalls:        false
+  stackProtector:  ''
+  functionContext: ''
+  maxCallFrameSize: 0
+  cvBytesOfCalleeSavedRegisters: 0
+  hasOpaqueSPAdjustment: false
+  hasVAStart:      false
+  hasMustTailInVarArgFunc: false
+  hasTailCall:     false
+  localFrameSize:  0
+  savePoint:       ''
+  restorePoint:    ''
+fixedStack:      []
+stack:           []
+callSites:       []
+debugValueSubstitutions: []
+constants:       []
+machineFunctionInfo: {}
+body:             |
+  bb.0.L1:
+    liveins: $x28, $x27, $x0
+  
+    %2:gpr64 = COPY $x0
+    %1:gpr64 = COPY $x27
+    %0:gpr64 = COPY $x28
+    %4:gpr64common = COPY %2
+    INLINEASM &"", 0 /* attdialect */, 2555914 /* regdef:GPR64common */, def %3, 2147483657 /* reguse tiedto:$0 */, %4(tied-def 3)
+    $x28 = COPY %0
+    $x27 = COPY %1
+    $x0 = COPY %3
+    RET_ReallyLR implicit $x28, implicit $x27, implicit $x0
+
+...
+---
+name:            "\x01_camlHash_lookup_string_equal__black_box_2_11_code"
+alignment:       4
+exposesReturnsTwice: false
+legalized:       false
+regBankSelected: false
+selected:        false
+failedISel:      false
+tracksRegLiveness: true
+hasWinCFI:       false
+callsEHReturn:   false
+callsUnwindInit: false
+hasEHCatchret:   false
+hasEHScopes:     false
+hasEHFunclets:   false
+debugInstrRef:   false
+failsVerification: false
+tracksDebugUserValues: false
+registers:
+  - { id: 0, class: gpr64, preferred-register: '' }
+  - { id: 1, class: gpr64, preferred-register: '' }
+  - { id: 2, class: gpr64, preferred-register: '' }
+  - { id: 3, class: gpr64common, preferred-register: '' }
+  - { id: 4, class: gpr64common, preferred-register: '' }
+liveins:
+  - { reg: '$x28', virtual-reg: '%0' }
+  - { reg: '$x27', virtual-reg: '%1' }
+  - { reg: '$x0', virtual-reg: '%2' }
+frameInfo:
+  isFrameAddressTaken: false
+  isReturnAddressTaken: false
+  hasStackMap:     false
+  hasPatchPoint:   false
+  stackSize:       0
+  offsetAdjustment: 0
+  maxAlignment:    1
+  adjustsStack:    false
+  hasCalls:        false
+  stackProtector:  ''
+  functionContext: ''
+  maxCallFrameSize: 0
+  cvBytesOfCalleeSavedRegisters: 0
+  hasOpaqueSPAdjustment: false
+  hasVAStart:      false
+  hasMustTailInVarArgFunc: false
+  hasTailCall:     false
+  localFrameSize:  0
+  savePoint:       ''
+  restorePoint:    ''
+fixedStack:      []
+stack:           []
+callSites:       []
+debugValueSubstitutions: []
+constants:       []
+machineFunctionInfo: {}
+body:             |
+  bb.0.L1:
+    liveins: $x28, $x27, $x0
+  
+    %2:gpr64 = COPY $x0
+    %1:gpr64 = COPY $x27
+    %0:gpr64 = COPY $x28
+    %4:gpr64common = COPY %2
+    INLINEASM &"", 0 /* attdialect */, 2555914 /* regdef:GPR64common */, def %3, 2147483657 /* reguse tiedto:$0 */, %4(tied-def 3)
+    $x28 = COPY %0
+    $x27 = COPY %1
+    $x0 = COPY %3
+    RET_ReallyLR implicit $x28, implicit $x27, implicit $x0
+
+...
+---
+name:            "\x01_camlHash_lookup_string_equal__print_result_3_12_code"
+alignment:       4
+exposesReturnsTwice: false
+legalized:       false
+regBankSelected: false
+selected:        false
+failedISel:      false
+tracksRegLiveness: true
+hasWinCFI:       false
+callsEHReturn:   false
+callsUnwindInit: false
+hasEHCatchret:   false
+hasEHScopes:     false
+hasEHFunclets:   false
+debugInstrRef:   false
+failsVerification: false
+tracksDebugUserValues: false
+registers:
+  - { id: 0, class: gpr64all, preferred-register: '' }
+  - { id: 1, class: gpr64all, preferred-register: '' }
+  - { id: 2, class: gpr64all, preferred-register: '' }
+  - { id: 3, class: gpr64all, preferred-register: '' }
+  - { id: 4, class: gpr64common, preferred-register: '' }
+  - { id: 5, class: gpr64, preferred-register: '' }
+  - { id: 6, class: gpr64, preferred-register: '' }
+  - { id: 7, class: gpr64common, preferred-register: '' }
+  - { id: 8, class: gpr64common, preferred-register: '' }
+  - { id: 9, class: gpr64common, preferred-register: '' }
+  - { id: 10, class: gpr64, preferred-register: '' }
+  - { id: 11, class: gpr32, preferred-register: '' }
+  - { id: 12, class: gpr64all, preferred-register: '' }
+  - { id: 13, class: gpr64all, preferred-register: '' }
+  - { id: 14, class: gpr64all, preferred-register: '' }
+  - { id: 15, class: gpr64common, preferred-register: '' }
+  - { id: 16, class: gpr64common, preferred-register: '' }
+  - { id: 17, class: gpr32, preferred-register: '' }
+  - { id: 18, class: gpr64all, preferred-register: '' }
+  - { id: 19, class: gpr64all, preferred-register: '' }
+  - { id: 20, class: gpr64all, preferred-register: '' }
+  - { id: 21, class: gpr64sp, preferred-register: '' }
+  - { id: 22, class: gpr64sp, preferred-register: '' }
+  - { id: 23, class: tcgpr64, preferred-register: '' }
+liveins:
+  - { reg: '$x28', virtual-reg: '%4' }
+  - { reg: '$x27', virtual-reg: '%5' }
+  - { reg: '$x0', virtual-reg: '%6' }
+frameInfo:
+  isFrameAddressTaken: false
+  isReturnAddressTaken: false
+  hasStackMap:     false
+  hasPatchPoint:   false
+  stackSize:       0
+  offsetAdjustment: 0
+  maxAlignment:    1
+  adjustsStack:    true
+  hasCalls:        true
+  stackProtector:  ''
+  functionContext: ''
+  maxCallFrameSize: 0
+  cvBytesOfCalleeSavedRegisters: 0
+  hasOpaqueSPAdjustment: false
+  hasVAStart:      false
+  hasMustTailInVarArgFunc: false
+  hasTailCall:     true
+  localFrameSize:  0
+  savePoint:       ''
+  restorePoint:    ''
+fixedStack:      []
+stack:           []
+callSites:       []
+debugValueSubstitutions: []
+constants:       []
+machineFunctionInfo: {}
+body:             |
+  bb.0.L1:
+    successors: %bb.1(0x00106035), %bb.2(0x7fef9fcb)
+    liveins: $x28, $x27, $x0
+  
+    %6:gpr64 = COPY $x0
+    %5:gpr64 = COPY $x27
+    %4:gpr64common = COPY $x28
+    %8:gpr64common = LDRXui %4, 5 :: (load (s64) from %ir.4, align 4)
+    %9:gpr64common = ADDXri killed %8, 376, 0
+    INLINEASM &"mov $0, sp", 1 /* sideeffect attdialect */, 2555914 /* regdef:GPR64common */, def %7
+    %10:gpr64 = SUBSXrr %7, killed %9, implicit-def $nzcv
+    Bcc 2, %bb.2, implicit $nzcv
+    B %bb.1
+  
+  bb.1.L116:
+    successors: %bb.2(0x80000000)
+  
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %11:gpr32 = MOVi32imm 34
+    %12:gpr64all = SUBREG_TO_REG 0, killed %11, %subreg.sub_32
+    $x28 = COPY %4
+    $x27 = COPY %5
+    $x0 = COPY %12
+    STATEPOINT 0, 0, 3, @"\01_caml_llvm_call_realloc_stack", $x28, $x27, $x0, 2, 108, 2, 0, 2, 0, 2, 0, 2, 0, 2, 0, csr_aarch64_oxcaml_alloc, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def dead early-clobber $lr
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %13:gpr64all = COPY $x28
+    %14:gpr64all = COPY $x27
+    %0:gpr64all = COPY %13
+    %1:gpr64all = COPY %14
+  
+  bb.2.L117:
+    %2:gpr64all = PHI %5, %bb.0, %1, %bb.1
+    %3:gpr64all = PHI %4, %bb.0, %0, %bb.1
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %15:gpr64common = LOADgot target-flags(aarch64-got) @"\01_camlStdlib__Printf__fn$5b$2fworkspace_root$2fprintf.ml$3a27$2c14$2d$2d48$5d_31"
+    %16:gpr64common = MOVaddr target-flags(aarch64-page) @"\01_camlHash_lookup_string_equal__const_block66", target-flags(aarch64-pageoff, aarch64-nc) @"\01_camlHash_lookup_string_equal__const_block66"
+    %17:gpr32 = MOVi32imm 1
+    %18:gpr64all = SUBREG_TO_REG 0, killed %17, %subreg.sub_32
+    $x28 = COPY %3
+    $x27 = COPY %2
+    $x0 = COPY %15
+    $x1 = COPY %18
+    $x2 = COPY %16
+    STATEPOINT 0, 0, 5, @"\01_camlCamlinternalFormat__make_printf_120_401_code", $x28, $x27, $x0, $x1, $x2, 2, 105, 2, 0, 2, 90, 2, 1870160740, 2, 1, 2, 0, 2, 4, 2, 27, 2, 0, 2, 2, 2, 63, 2, 0, 2, 63, 2, 9, 2, 6910576, 2, 6714478, 2, 7105838, 2, 23, 2, 6583379, 2, 6449516, 2, 5267295, 2, 7235954, 2, 3040884, 2, 7366251, 2, 7235954, 2, 26228, 2, 34, 2, 0, 2, 21, 2, 43, 2, 0, 2, 43, 2, 9, 2, 6910576, 2, 6714478, 2, 7105838, 2, 22, 2, 6583379, 2, 6449516, 2, 5267295, 2, 7235954, 2, 3040884, 2, 7499878, 2, 7630441, 2, 102, 2, 38, 2, 0, 2, 17, 2, 35, 2, 0, 2, 35, 2, 9, 2, 6910576, 2, 6714478, 2, 7105838, 2, 21, 2, 6583379, 2, 6449516, 2, 5267295, 2, 7235954, 2, 3040884, 2, 6910576, 2, 6714478, 2, 11, 2, 0, 2, 21, 2, 63, 2, 0, 2, 63, 2, 27, 2, 7561576, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7105838, 2, 37, 2, 7561544, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7499822, 2, 7630441, 2, 6648415, 2, 7107955, 2, 116, 2, 0, 2, 0, 2, 0, csr_aarch64_oxcaml_withoutfp, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %19:gpr64all = COPY $x28
+    %20:gpr64all = COPY $x27
+    %21:gpr64sp = COPY $x0
+    %22:gpr64sp = ANDXri %6, 4126
+    %23:tcgpr64 = LDRXui %21, 0 :: (load (s64) from %ir.gcagg20, align 4, addrspace 1)
+    $x28 = COPY %19
+    $x27 = COPY %20
+    $x0 = COPY %22
+    $x1 = COPY %21
+    TCRETURNri killed %23, 0, csr_aarch64_oxcaml_withoutfp, implicit $sp, implicit $x28, implicit $x27, implicit $x0, implicit $x1
+
+...
+---
+name:            "\x01_camlHash_lookup_string_equal__find_4_13_code"
+alignment:       4
+exposesReturnsTwice: false
+legalized:       false
+regBankSelected: false
+selected:        false
+failedISel:      false
+tracksRegLiveness: true
+hasWinCFI:       false
+callsEHReturn:   false
+callsUnwindInit: false
+hasEHCatchret:   false
+hasEHScopes:     false
+hasEHFunclets:   false
+debugInstrRef:   false
+failsVerification: false
+tracksDebugUserValues: false
+registers:
+  - { id: 0, class: gpr64all, preferred-register: '' }
+  - { id: 1, class: gpr64all, preferred-register: '' }
+  - { id: 2, class: gpr64all, preferred-register: '' }
+  - { id: 3, class: gpr64all, preferred-register: '' }
+  - { id: 4, class: gpr64all, preferred-register: '' }
+  - { id: 5, class: gpr64all, preferred-register: '' }
+  - { id: 6, class: gpr64sp, preferred-register: '' }
+  - { id: 7, class: gpr64all, preferred-register: '' }
+  - { id: 8, class: gpr64all, preferred-register: '' }
+  - { id: 9, class: gpr64sp, preferred-register: '' }
+  - { id: 10, class: gpr64all, preferred-register: '' }
+  - { id: 11, class: gpr64all, preferred-register: '' }
+  - { id: 12, class: gpr64all, preferred-register: '' }
+  - { id: 13, class: gpr64all, preferred-register: '' }
+  - { id: 14, class: gpr64all, preferred-register: '' }
+  - { id: 15, class: gpr64all, preferred-register: '' }
+  - { id: 16, class: gpr64all, preferred-register: '' }
+  - { id: 17, class: gpr64all, preferred-register: '' }
+  - { id: 18, class: gpr64all, preferred-register: '' }
+  - { id: 19, class: gpr64all, preferred-register: '' }
+  - { id: 20, class: gpr64all, preferred-register: '' }
+  - { id: 21, class: gpr64all, preferred-register: '' }
+  - { id: 22, class: gpr64, preferred-register: '' }
+  - { id: 23, class: gpr64, preferred-register: '' }
+  - { id: 24, class: gpr64, preferred-register: '' }
+  - { id: 25, class: gpr64common, preferred-register: '' }
+  - { id: 26, class: gpr64all, preferred-register: '' }
+  - { id: 27, class: gpr64, preferred-register: '' }
+  - { id: 28, class: gpr64, preferred-register: '' }
+  - { id: 29, class: gpr32, preferred-register: '' }
+  - { id: 30, class: gpr64common, preferred-register: '' }
+  - { id: 31, class: gpr64, preferred-register: '' }
+  - { id: 32, class: gpr64, preferred-register: '' }
+  - { id: 33, class: gpr64all, preferred-register: '' }
+  - { id: 34, class: gpr64all, preferred-register: '' }
+  - { id: 35, class: gpr64sp, preferred-register: '' }
+  - { id: 36, class: gpr64, preferred-register: '' }
+  - { id: 37, class: gpr64, preferred-register: '' }
+  - { id: 38, class: gpr32, preferred-register: '' }
+  - { id: 39, class: gpr64all, preferred-register: '' }
+  - { id: 40, class: gpr64, preferred-register: '' }
+  - { id: 41, class: gpr64, preferred-register: '' }
+liveins:
+  - { reg: '$x28', virtual-reg: '%22' }
+  - { reg: '$x27', virtual-reg: '%23' }
+  - { reg: '$x0', virtual-reg: '%24' }
+  - { reg: '$x1', virtual-reg: '%25' }
+frameInfo:
+  isFrameAddressTaken: false
+  isReturnAddressTaken: false
+  hasStackMap:     false
+  hasPatchPoint:   false
+  stackSize:       0
+  offsetAdjustment: 0
+  maxAlignment:    1
+  adjustsStack:    true
+  hasCalls:        true
+  stackProtector:  ''
+  functionContext: ''
+  maxCallFrameSize: 0
+  cvBytesOfCalleeSavedRegisters: 0
+  hasOpaqueSPAdjustment: false
+  hasVAStart:      false
+  hasMustTailInVarArgFunc: false
+  hasTailCall:     false
+  localFrameSize:  0
+  savePoint:       ''
+  restorePoint:    ''
+fixedStack:      []
+stack:           []
+callSites:       []
+debugValueSubstitutions: []
+constants:       []
+machineFunctionInfo: {}
+body:             |
+  bb.0.L1:
+    successors: %bb.1(0x40000000), %bb.3(0x40000000)
+    liveins: $x28, $x27, $x0, $x1
+  
+    %25:gpr64common = COPY $x1
+    %24:gpr64 = COPY $x0
+    %23:gpr64 = COPY $x27
+    %22:gpr64 = COPY $x28
+    %27:gpr64 = LDRXui %25, 0 :: (load (s64) from %ir.3, addrspace 1)
+    %0:gpr64all = COPY %27
+    %28:gpr64 = MOVi64imm -1
+    %26:gpr64all = COPY %28
+    %29:gpr32 = COPY %27.sub_32
+    TBNZW killed %29, 0, %bb.3
+    B %bb.1
+  
+  bb.1.L129.preheader:
+    successors: %bb.4(0x80000000)
+  
+    B %bb.4
+  
+  bb.2.common.ret.loopexit:
+    successors: %bb.3(0x80000000)
+  
+    %1:gpr64all = COPY %12
+    %40:gpr64 = MOVi64imm -1
+    %39:gpr64all = COPY %40
+    %2:gpr64all = COPY %11
+  
+  bb.3.common.ret:
+    %3:gpr64all = PHI %22, %bb.0, %2, %bb.2, %19, %bb.8
+    %4:gpr64all = PHI %23, %bb.0, %1, %bb.2, %20, %bb.8
+    %5:gpr64all = PHI %26, %bb.0, %39, %bb.2, %21, %bb.8
+    $x28 = COPY %3
+    $x27 = COPY %4
+    $x0 = COPY %5
+    RET_ReallyLR implicit $x28, implicit $x27, implicit $x0
+  
+  bb.4.L129:
+    successors: %bb.8(0x04000000), %bb.5(0x7c000000)
+  
+    %6:gpr64sp = PHI %0, %bb.1, %16, %bb.6
+    %7:gpr64all = PHI %23, %bb.1, %14, %bb.6
+    %8:gpr64all = PHI %22, %bb.1, %15, %bb.6
+    %30:gpr64common = LDRXui %6, 0 :: (load (s64) from %ir..035, addrspace 1)
+    %9:gpr64sp = COPY %30
+    %31:gpr64 = LDRXui %30, 0 :: (load (s64) from %ir.9, addrspace 1)
+    %10:gpr64all = COPY %31
+    %32:gpr64 = SUBSXrr %31, %24, implicit-def $nzcv
+    Bcc 0, %bb.8, implicit $nzcv
+    B %bb.5
+  
+  bb.5.L132:
+    successors: %bb.6(0x7c000000), %bb.7(0x04000000)
+  
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    $x28 = COPY %8
+    $x27 = COPY %7
+    $x0 = COPY %24
+    $x1 = COPY %10
+    OXCAML_C_DIRECT_CALL @"\01_caml_string_equal", $x28, $x27, $x0, $x1, csr_aarch64_aapcs, implicit-def dead $lr, implicit $sp, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %33:gpr64all = COPY $x28
+    %34:gpr64all = COPY $x27
+    %35:gpr64sp = COPY $x0
+    %13:gpr64all = COPY %35
+    %12:gpr64all = COPY %34
+    %11:gpr64all = COPY %33
+    %36:gpr64 = SUBSXri %35, 1, 0, implicit-def $nzcv
+    Bcc 1, %bb.7, implicit $nzcv
+    B %bb.6
+  
+  bb.6.L134:
+    successors: %bb.4(0x7c000000), %bb.2(0x04000000)
+  
+    %14:gpr64all = COPY %12
+    %15:gpr64all = COPY %11
+    %37:gpr64 = LDRXui %6, 1 :: (load (s64) from %ir.16, addrspace 1)
+    %16:gpr64all = COPY %37
+    %38:gpr32 = COPY %37.sub_32
+    TBZW killed %38, 0, %bb.4
+    B %bb.2
+  
+  bb.7.L138.split.loop.exit49:
+    successors: %bb.8(0x80000000)
+  
+    %17:gpr64all = COPY %11
+    %18:gpr64all = COPY %12
+  
+  bb.8.L138:
+    successors: %bb.3(0x80000000)
+  
+    %19:gpr64all = PHI %8, %bb.4, %17, %bb.7
+    %20:gpr64all = PHI %7, %bb.4, %18, %bb.7
+    %41:gpr64 = LDRXui %9, 1 :: (load (s64) from %ir.22, addrspace 1)
+    %21:gpr64all = COPY %41
+    B %bb.3
+
+...
+---
+name:            "\x01_camlHash_lookup_string_equal__run_6_15_code"
+alignment:       4
+exposesReturnsTwice: false
+legalized:       false
+regBankSelected: false
+selected:        false
+failedISel:      false
+tracksRegLiveness: true
+hasWinCFI:       false
+callsEHReturn:   false
+callsUnwindInit: false
+hasEHCatchret:   false
+hasEHScopes:     false
+hasEHFunclets:   false
+debugInstrRef:   false
+failsVerification: false
+tracksDebugUserValues: false
+registers:
+  - { id: 0, class: gpr64all, preferred-register: '' }
+  - { id: 1, class: gpr64all, preferred-register: '' }
+  - { id: 2, class: gpr64all, preferred-register: '' }
+  - { id: 3, class: gpr64all, preferred-register: '' }
+  - { id: 4, class: gpr64all, preferred-register: '' }
+  - { id: 5, class: gpr64all, preferred-register: '' }
+  - { id: 6, class: gpr64all, preferred-register: '' }
+  - { id: 7, class: gpr64all, preferred-register: '' }
+  - { id: 8, class: gpr64all, preferred-register: '' }
+  - { id: 9, class: gpr64all, preferred-register: '' }
+  - { id: 10, class: gpr64, preferred-register: '' }
+  - { id: 11, class: gpr64sp, preferred-register: '' }
+  - { id: 12, class: gpr64all, preferred-register: '' }
+  - { id: 13, class: gpr64all, preferred-register: '' }
+  - { id: 14, class: gpr64all, preferred-register: '' }
+  - { id: 15, class: gpr64all, preferred-register: '' }
+  - { id: 16, class: gpr64common, preferred-register: '' }
+  - { id: 17, class: gpr64all, preferred-register: '' }
+  - { id: 18, class: gpr64all, preferred-register: '' }
+  - { id: 19, class: gpr64all, preferred-register: '' }
+  - { id: 20, class: gpr64sp, preferred-register: '' }
+  - { id: 21, class: gpr64all, preferred-register: '' }
+  - { id: 22, class: gpr64all, preferred-register: '' }
+  - { id: 23, class: gpr64sp, preferred-register: '' }
+  - { id: 24, class: gpr64sp, preferred-register: '' }
+  - { id: 25, class: gpr64all, preferred-register: '' }
+  - { id: 26, class: gpr64, preferred-register: '' }
+  - { id: 27, class: gpr64all, preferred-register: '' }
+  - { id: 28, class: gpr64all, preferred-register: '' }
+  - { id: 29, class: gpr64sp, preferred-register: '' }
+  - { id: 30, class: gpr64sp, preferred-register: '' }
+  - { id: 31, class: gpr64all, preferred-register: '' }
+  - { id: 32, class: gpr64all, preferred-register: '' }
+  - { id: 33, class: gpr64sp, preferred-register: '' }
+  - { id: 34, class: gpr64all, preferred-register: '' }
+  - { id: 35, class: gpr64all, preferred-register: '' }
+  - { id: 36, class: gpr64all, preferred-register: '' }
+  - { id: 37, class: gpr64all, preferred-register: '' }
+  - { id: 38, class: gpr64all, preferred-register: '' }
+  - { id: 39, class: gpr64all, preferred-register: '' }
+  - { id: 40, class: gpr64all, preferred-register: '' }
+  - { id: 41, class: gpr64all, preferred-register: '' }
+  - { id: 42, class: gpr64all, preferred-register: '' }
+  - { id: 43, class: gpr64all, preferred-register: '' }
+  - { id: 44, class: gpr64, preferred-register: '' }
+  - { id: 45, class: gpr64, preferred-register: '' }
+  - { id: 46, class: gpr64sp, preferred-register: '' }
+  - { id: 47, class: gpr64all, preferred-register: '' }
+  - { id: 48, class: gpr64, preferred-register: '' }
+  - { id: 49, class: gpr64, preferred-register: '' }
+  - { id: 50, class: gpr64all, preferred-register: '' }
+  - { id: 51, class: gpr64common, preferred-register: '' }
+  - { id: 52, class: gpr64all, preferred-register: '' }
+  - { id: 53, class: gpr64all, preferred-register: '' }
+  - { id: 54, class: gpr64all, preferred-register: '' }
+  - { id: 55, class: gpr64, preferred-register: '' }
+  - { id: 56, class: gpr64all, preferred-register: '' }
+  - { id: 57, class: gpr64, preferred-register: '' }
+  - { id: 58, class: gpr64sp, preferred-register: '' }
+  - { id: 59, class: gpr64all, preferred-register: '' }
+  - { id: 60, class: gpr64all, preferred-register: '' }
+  - { id: 61, class: gpr64all, preferred-register: '' }
+  - { id: 62, class: gpr64all, preferred-register: '' }
+  - { id: 63, class: gpr64all, preferred-register: '' }
+  - { id: 64, class: gpr64all, preferred-register: '' }
+  - { id: 65, class: gpr64all, preferred-register: '' }
+  - { id: 66, class: gpr64all, preferred-register: '' }
+  - { id: 67, class: gpr64all, preferred-register: '' }
+  - { id: 68, class: gpr64all, preferred-register: '' }
+  - { id: 69, class: gpr64all, preferred-register: '' }
+  - { id: 70, class: gpr64all, preferred-register: '' }
+  - { id: 71, class: gpr64all, preferred-register: '' }
+  - { id: 72, class: gpr64all, preferred-register: '' }
+  - { id: 73, class: gpr64all, preferred-register: '' }
+  - { id: 74, class: gpr64all, preferred-register: '' }
+  - { id: 75, class: gpr64all, preferred-register: '' }
+  - { id: 76, class: gpr64all, preferred-register: '' }
+  - { id: 77, class: gpr64all, preferred-register: '' }
+  - { id: 78, class: gpr64common, preferred-register: '' }
+  - { id: 79, class: gpr64, preferred-register: '' }
+  - { id: 80, class: gpr64common, preferred-register: '' }
+  - { id: 81, class: gpr64common, preferred-register: '' }
+  - { id: 82, class: gpr64common, preferred-register: '' }
+  - { id: 83, class: gpr64common, preferred-register: '' }
+  - { id: 84, class: gpr64common, preferred-register: '' }
+  - { id: 85, class: gpr64, preferred-register: '' }
+  - { id: 86, class: gpr32, preferred-register: '' }
+  - { id: 87, class: gpr64all, preferred-register: '' }
+  - { id: 88, class: gpr64all, preferred-register: '' }
+  - { id: 89, class: gpr64all, preferred-register: '' }
+  - { id: 90, class: gpr64common, preferred-register: '' }
+  - { id: 91, class: gpr32, preferred-register: '' }
+  - { id: 92, class: gpr64all, preferred-register: '' }
+  - { id: 93, class: gpr32, preferred-register: '' }
+  - { id: 94, class: gpr64all, preferred-register: '' }
+  - { id: 95, class: gpr64sp, preferred-register: '' }
+  - { id: 96, class: gpr64sp, preferred-register: '' }
+  - { id: 97, class: gpr64all, preferred-register: '' }
+  - { id: 98, class: gpr64, preferred-register: '' }
+  - { id: 99, class: gpr64, preferred-register: '' }
+  - { id: 100, class: gpr64, preferred-register: '' }
+  - { id: 101, class: gpr64all, preferred-register: '' }
+  - { id: 102, class: gpr64all, preferred-register: '' }
+  - { id: 103, class: gpr32, preferred-register: '' }
+  - { id: 104, class: gpr64, preferred-register: '' }
+  - { id: 105, class: gpr64common, preferred-register: '' }
+  - { id: 106, class: gpr64common, preferred-register: '' }
+  - { id: 107, class: gpr64all, preferred-register: '' }
+  - { id: 108, class: gpr64all, preferred-register: '' }
+  - { id: 109, class: gpr64all, preferred-register: '' }
+  - { id: 110, class: gpr64, preferred-register: '' }
+  - { id: 111, class: gpr32, preferred-register: '' }
+  - { id: 112, class: gpr64all, preferred-register: '' }
+  - { id: 113, class: gpr64all, preferred-register: '' }
+  - { id: 114, class: gpr64common, preferred-register: '' }
+  - { id: 115, class: gpr32, preferred-register: '' }
+  - { id: 116, class: gpr64, preferred-register: '' }
+  - { id: 117, class: gpr64all, preferred-register: '' }
+  - { id: 118, class: gpr32, preferred-register: '' }
+  - { id: 119, class: gpr64, preferred-register: '' }
+  - { id: 120, class: gpr64sp, preferred-register: '' }
+  - { id: 121, class: gpr32, preferred-register: '' }
+  - { id: 122, class: gpr64, preferred-register: '' }
+  - { id: 123, class: gpr64common, preferred-register: '' }
+  - { id: 124, class: gpr64all, preferred-register: '' }
+  - { id: 125, class: gpr64all, preferred-register: '' }
+  - { id: 126, class: gpr64all, preferred-register: '' }
+  - { id: 127, class: gpr64, preferred-register: '' }
+  - { id: 128, class: gpr64common, preferred-register: '' }
+  - { id: 129, class: gpr64, preferred-register: '' }
+  - { id: 130, class: gpr32, preferred-register: '' }
+  - { id: 131, class: gpr64sp, preferred-register: '' }
+  - { id: 132, class: gpr64, preferred-register: '' }
+  - { id: 133, class: gpr32common, preferred-register: '' }
+  - { id: 134, class: gpr32, preferred-register: '' }
+  - { id: 135, class: gpr64all, preferred-register: '' }
+  - { id: 136, class: gpr64all, preferred-register: '' }
+  - { id: 137, class: fpr64, preferred-register: '' }
+  - { id: 138, class: gpr64, preferred-register: '' }
+  - { id: 139, class: gpr64sp, preferred-register: '' }
+  - { id: 140, class: gpr32, preferred-register: '' }
+  - { id: 141, class: gpr64all, preferred-register: '' }
+  - { id: 142, class: gpr32, preferred-register: '' }
+  - { id: 143, class: gpr64, preferred-register: '' }
+  - { id: 144, class: gpr64, preferred-register: '' }
+  - { id: 145, class: gpr64, preferred-register: '' }
+  - { id: 146, class: gpr64, preferred-register: '' }
+  - { id: 147, class: gpr64all, preferred-register: '' }
+  - { id: 148, class: gpr32, preferred-register: '' }
+  - { id: 149, class: gpr64, preferred-register: '' }
+  - { id: 150, class: gpr32, preferred-register: '' }
+  - { id: 151, class: gpr64, preferred-register: '' }
+  - { id: 152, class: gpr32, preferred-register: '' }
+  - { id: 153, class: gpr32, preferred-register: '' }
+  - { id: 154, class: gpr32, preferred-register: '' }
+  - { id: 155, class: gpr64, preferred-register: '' }
+  - { id: 156, class: gpr64all, preferred-register: '' }
+  - { id: 157, class: gpr64, preferred-register: '' }
+  - { id: 158, class: gpr64common, preferred-register: '' }
+  - { id: 159, class: gpr64, preferred-register: '' }
+  - { id: 160, class: gpr64all, preferred-register: '' }
+  - { id: 161, class: gpr64all, preferred-register: '' }
+  - { id: 162, class: gpr64, preferred-register: '' }
+  - { id: 163, class: gpr64, preferred-register: '' }
+  - { id: 164, class: gpr64, preferred-register: '' }
+  - { id: 165, class: gpr64common, preferred-register: '' }
+  - { id: 166, class: gpr64, preferred-register: '' }
+  - { id: 167, class: gpr64common, preferred-register: '' }
+  - { id: 168, class: gpr64, preferred-register: '' }
+  - { id: 169, class: gpr64common, preferred-register: '' }
+  - { id: 170, class: gpr64, preferred-register: '' }
+  - { id: 171, class: gpr64all, preferred-register: '' }
+  - { id: 172, class: gpr32, preferred-register: '' }
+  - { id: 173, class: gpr64all, preferred-register: '' }
+  - { id: 174, class: gpr64common, preferred-register: '' }
+  - { id: 175, class: gpr32, preferred-register: '' }
+  - { id: 176, class: gpr64, preferred-register: '' }
+liveins:
+  - { reg: '$x28', virtual-reg: '%78' }
+  - { reg: '$x27', virtual-reg: '%79' }
+  - { reg: '$x0', virtual-reg: '%80' }
+  - { reg: '$x1', virtual-reg: '%81' }
+frameInfo:
+  isFrameAddressTaken: false
+  isReturnAddressTaken: false
+  hasStackMap:     false
+  hasPatchPoint:   false
+  stackSize:       0
+  offsetAdjustment: 0
+  maxAlignment:    8
+  adjustsStack:    true
+  hasCalls:        true
+  stackProtector:  ''
+  functionContext: ''
+  maxCallFrameSize: 0
+  cvBytesOfCalleeSavedRegisters: 0
+  hasOpaqueSPAdjustment: false
+  hasVAStart:      false
+  hasMustTailInVarArgFunc: false
+  hasTailCall:     false
+  localFrameSize:  0
+  savePoint:       ''
+  restorePoint:    ''
+fixedStack:      []
+stack:
+  - { id: 0, name: '', type: default, offset: 0, size: 8, alignment: 8, 
+      stack-id: default, callee-saved-register: '', callee-saved-restored: true, 
+      debug-info-variable: '', debug-info-expression: '', debug-info-location: '' }
+  - { id: 1, name: '', type: default, offset: 0, size: 8, alignment: 8, 
+      stack-id: default, callee-saved-register: '', callee-saved-restored: true, 
+      debug-info-variable: '', debug-info-expression: '', debug-info-location: '' }
+  - { id: 2, name: '', type: default, offset: 0, size: 8, alignment: 8, 
+      stack-id: default, callee-saved-register: '', callee-saved-restored: true, 
+      debug-info-variable: '', debug-info-expression: '', debug-info-location: '' }
+  - { id: 3, name: '', type: default, offset: 0, size: 8, alignment: 8, 
+      stack-id: default, callee-saved-register: '', callee-saved-restored: true, 
+      debug-info-variable: '', debug-info-expression: '', debug-info-location: '' }
+  - { id: 4, name: '', type: default, offset: 0, size: 8, alignment: 8, 
+      stack-id: default, callee-saved-register: '', callee-saved-restored: true, 
+      debug-info-variable: '', debug-info-expression: '', debug-info-location: '' }
+  - { id: 5, name: '', type: default, offset: 0, size: 8, alignment: 8, 
+      stack-id: default, callee-saved-register: '', callee-saved-restored: true, 
+      debug-info-variable: '', debug-info-expression: '', debug-info-location: '' }
+callSites:       []
+debugValueSubstitutions: []
+constants:       []
+machineFunctionInfo: {}
+body:             |
+  bb.0.L1:
+    successors: %bb.1(0x00106035), %bb.2(0x7fef9fcb)
+    liveins: $x28, $x27, $x0, $x1
+  
+    %81:gpr64common = COPY $x1
+    %80:gpr64common = COPY $x0
+    %79:gpr64 = COPY $x27
+    %78:gpr64common = COPY $x28
+    %83:gpr64common = LDRXui %78, 5 :: (load (s64) from %ir.5, align 4)
+    %84:gpr64common = ADDXri killed %83, 376, 0
+    INLINEASM &"mov $0, sp", 1 /* sideeffect attdialect */, 2555914 /* regdef:GPR64common */, def %82
+    %85:gpr64 = SUBSXrr %82, killed %84, implicit-def $nzcv
+    Bcc 2, %bb.2, implicit $nzcv
+    B %bb.1
+  
+  bb.1.L279:
+    successors: %bb.2(0x80000000)
+  
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %86:gpr32 = MOVi32imm 34
+    %87:gpr64all = SUBREG_TO_REG 0, killed %86, %subreg.sub_32
+    $x28 = COPY %78
+    $x27 = COPY %79
+    $x0 = COPY %87
+    STATEPOINT 0, 0, 3, @"\01_caml_llvm_call_realloc_stack", $x28, $x27, $x0, 2, 108, 2, 0, 2, 0, 2, 0, 2, 0, 2, 0, csr_aarch64_oxcaml_alloc, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def dead early-clobber $lr
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %88:gpr64all = COPY $x28
+    %89:gpr64all = COPY $x27
+    %0:gpr64all = COPY %88
+    %1:gpr64all = COPY %89
+  
+  bb.2.L280:
+    successors: %bb.3(0x00106035), %bb.4(0x7fef9fcb)
+  
+    %2:gpr64all = PHI %79, %bb.0, %1, %bb.1
+    %3:gpr64all = PHI %78, %bb.0, %0, %bb.1
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %90:gpr64common = MOVaddr target-flags(aarch64-page) @"\01_camlHash_lookup_string_equal__fn$5bhash_lookup_string_equal.ml$3a24$2c17$2d$2d70$5d_15", target-flags(aarch64-pageoff, aarch64-nc) @"\01_camlHash_lookup_string_equal__fn$5bhash_lookup_string_equal.ml$3a24$2c17$2d$2d70$5d_15"
+    %91:gpr32 = MOVi32imm 1
+    %92:gpr64all = SUBREG_TO_REG 0, killed %91, %subreg.sub_32
+    %93:gpr32 = MOVi32imm 63
+    %94:gpr64all = SUBREG_TO_REG 0, killed %93, %subreg.sub_32
+    $x28 = COPY %3
+    $x27 = COPY %2
+    $x0 = COPY %92
+    $x1 = COPY %94
+    $x2 = COPY %90
+    STATEPOINT 0, 0, 5, @"\01_camlStdlib__List__init_11_109_code", $x28, $x27, $x0, $x1, $x2, 2, 105, 2, 0, 2, 48, 2, 1870160740, 2, 1, 2, 0, 2, 2, 2, 77, 2, 0, 2, 2, 2, 20, 2, 0, 2, 20, 2, 7, 2, 7563628, 2, 7155316, 2, 108, 2, 17, 2, 6583379, 2, 6449516, 2, 5005151, 2, 7631721, 2, 7235886, 2, 29801, 2, 24, 2, 0, 2, 4, 2, 70, 2, 0, 2, 70, 2, 27, 2, 7561576, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7105838, 2, 28, 2, 7561544, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7696942, 2, 110, 2, 0, 2, 0, 2, 0, csr_aarch64_oxcaml_withoutfp, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %95:gpr64sp = COPY $x28
+    %96:gpr64sp = COPY $x27
+    %97:gpr64all = COPY $x0
+    %4:gpr64all = COPY %95
+    %5:gpr64all = COPY %97
+    %98:gpr64 = SUBSXri %96, 16, 0, implicit-def dead $nzcv
+    %6:gpr64all = COPY %98
+    %99:gpr64 = LDRXui %95, 0 :: (load (s64) from %ir.14, align 4)
+    %100:gpr64 = SUBSXrr killed %99, %98, implicit-def $nzcv
+    Bcc 9, %bb.4, implicit $nzcv
+    B %bb.3
+  
+  bb.3.L281:
+    successors: %bb.4(0x80000000)
+  
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    $x28 = COPY %4
+    $x27 = COPY %6
+    %7:gpr64all = STATEPOINT 131073, 0, 2, @"\01_caml_call_gc", $x28, $x27, 2, 108, 2, 0, 2, 32, 2, 1870160737, 2, 1, 2, 1, 2, 2, 2, 1, 2, 26, 2, 0, 2, 16, 2, 29, 2, 0, 2, 29, 2, 27, 2, 7561576, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7105838, 2, 28, 2, 7561544, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7696942, 2, 110, 2, 1, %5(tied-def 0), 2, 0, 2, 1, 0, 0, csr_aarch64_oxcaml_alloc, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def dead early-clobber $lr
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %101:gpr64all = COPY $x28
+    %102:gpr64all = COPY $x27
+    %8:gpr64all = COPY %101
+    %9:gpr64all = COPY %102
+  
+  bb.4.L282:
+    successors: %bb.5(0x40000000), %bb.6(0x40000000)
+  
+    %10:gpr64 = PHI %5, %bb.2, %7, %bb.3
+    %11:gpr64sp = PHI %6, %bb.2, %9, %bb.3
+    %12:gpr64all = PHI %4, %bb.2, %8, %bb.3
+    %103:gpr32 = MOVi32imm 1024
+    %104:gpr64 = SUBREG_TO_REG 0, killed %103, %subreg.sub_32
+    STRXui killed %104, %11, 0 :: (volatile store (s64) into %ir.remat, align 4, addrspace 1)
+    early-clobber %105:gpr64common = STRXpre %10, %11, 8 :: (store (s64) into %ir.20, addrspace 1)
+    STRXui killed %105, %stack.0, 0 :: (store (s64) into %stack.0)
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %106:gpr64common = MOVaddr target-flags(aarch64-page) @"\01_camlHash_lookup_string_equal__fn$5bhash_lookup_string_equal.ml$3a27$2c37$2d$2d40$5d_16", target-flags(aarch64-pageoff, aarch64-nc) @"\01_camlHash_lookup_string_equal__fn$5bhash_lookup_string_equal.ml$3a27$2c37$2d$2d40$5d_16"
+    $x28 = COPY %12
+    $x27 = COPY %11
+    $x0 = COPY %106
+    $x1 = COPY %10
+    STATEPOINT 0, 0, 4, @"\01_camlStdlib__List__map_15_113_code", $x28, $x27, $x0, $x1, 2, 105, 2, 0, 2, 31, 2, 1870160740, 2, 1, 2, 0, 2, 1, 2, 27, 2, 0, 2, 27, 2, 49, 2, 0, 2, 49, 2, 27, 2, 7561576, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7105838, 2, 28, 2, 7561544, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7696942, 2, 110, 2, 1, 1, 8, %stack.0, 0, 2, 0, 2, 1, 0, 0, csr_aarch64_oxcaml_withoutfp, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr :: (volatile load store (s64) on %stack.0)
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %107:gpr64all = COPY $x28
+    %108:gpr64all = COPY $x27
+    %109:gpr64all = COPY $x0
+    %110:gpr64 = LDRXui %stack.0, 0 :: (load (s64) from %stack.0)
+    %13:gpr64all = COPY %110
+    %14:gpr64all = COPY %107
+    %15:gpr64all = COPY %108
+    %16:gpr64common = COPY %109
+    %111:gpr32 = COPY %109.sub_32
+    TBNZW killed %111, 0, %bb.6
+    B %bb.5
+  
+  bb.5.L172.preheader:
+    successors: %bb.9(0x80000000)
+  
+    %118:gpr32 = MOVi32imm 1
+    %117:gpr64all = SUBREG_TO_REG 0, killed %118, %subreg.sub_32
+    B %bb.9
+  
+  bb.6.L158:
+    successors: %bb.23(0x40000000), %bb.15(0x40000000)
+  
+    %114:gpr64common = LOADgot target-flags(aarch64-got) @"\01_camlStdlib__Array__empty_array50"
+    %113:gpr64all = COPY %114
+    %115:gpr32 = MOVi32imm 1
+    %112:gpr64all = SUBREG_TO_REG 0, killed %115, %subreg.sub_32
+    %116:gpr64 = SUBSXri %81, 3, 0, implicit-def $nzcv
+    Bcc 11, %bb.23, implicit $nzcv
+    B %bb.15
+  
+  bb.7.L170:
+    successors: %bb.8(0x40000000), %bb.10(0x40000000)
+  
+    %122:gpr64 = LDRXui %16, 0 :: (load (s64) from %ir.gcagg208, addrspace 1)
+    STRXui %26, %stack.2, 0 :: (store (s64) into %stack.2)
+    STRXui %16, %stack.1, 0 :: (store (s64) into %stack.1)
+    STRXui %122, %stack.3, 0 :: (store (s64) into %stack.3)
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %123:gpr64common = LOADgot target-flags(aarch64-got) @"\01_caml_array_make"
+    $x28 = COPY %14
+    $x27 = COPY %15
+    $x8 = COPY %123
+    $x0 = COPY %26
+    $x1 = COPY %122
+    STATEPOINT 0, 0, 5, @"\01_caml_c_call", $x28, $x27, $x8, $x0, $x1, 2, 106, 2, 0, 2, 49, 2, 1870160740, 2, 1, 2, 1, 2, 2, 2, 213, 2, 0, 2, 14, 2, 41, 2, 0, 2, 41, 2, 8, 2, 7500385, 2, 3045729, 2, 27757, 2, 21, 2, 6583379, 2, 6449516, 2, 4284255, 2, 6386290, 2, 7286393, 2, 7102310, 2, 7631721, 2, 27, 2, 0, 2, 13, 2, 49, 2, 0, 2, 49, 2, 27, 2, 7561576, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7105838, 2, 28, 2, 7561544, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7696942, 2, 110, 2, 4, 1, 8, %stack.1, 0, 1, 8, %stack.0, 0, 1, 8, %stack.2, 0, 1, 8, %stack.3, 0, 2, 0, 2, 4, 0, 0, 1, 1, 2, 2, 3, 3, csr_aarch64_oxcaml_c_call, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr :: (volatile load store (s64) on %stack.1), (volatile load store (s64) on %stack.0), (volatile load store (s64) on %stack.2), (volatile load store (s64) on %stack.3)
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %124:gpr64all = COPY $x28
+    %125:gpr64all = COPY $x27
+    %126:gpr64all = COPY $x0
+    %127:gpr64 = LDRXui %stack.0, 0 :: (load (s64) from %stack.0)
+    %17:gpr64all = COPY %127
+    %128:gpr64common = LDRXui %stack.1, 0 :: (load (s64) from %stack.1)
+    %18:gpr64all = COPY %124
+    %19:gpr64all = COPY %125
+    %20:gpr64sp = COPY %126
+    %129:gpr64 = LDRXui killed %128, 1 :: (load (s64) from %ir.remat212, addrspace 1)
+    %21:gpr64all = COPY %129
+    %130:gpr32 = COPY %129.sub_32
+    TBNZW killed %130, 0, %bb.10
+    B %bb.8
+  
+  bb.8.L192.preheader:
+    successors: %bb.11(0x80000000)
+  
+    %131:gpr64sp = ADDXri %20, 8, 0
+    %22:gpr64all = COPY %131
+    B %bb.11
+  
+  bb.9.L172:
+    successors: %bb.9(0x7c000000), %bb.7(0x04000000)
+  
+    %23:gpr64sp = PHI %16, %bb.5, %25, %bb.9
+    %24:gpr64sp = PHI %117, %bb.5, %26, %bb.9
+    %119:gpr64 = LDRXui %23, 1 :: (load (s64) from %ir.remat216, addrspace 1)
+    %25:gpr64all = COPY %119
+    %120:gpr64sp = ADDXri %24, 2, 0
+    %26:gpr64 = COPY %120
+    %121:gpr32 = COPY %119.sub_32
+    TBZW killed %121, 0, %bb.9
+    B %bb.7
+  
+  bb.10.L190:
+    successors: %bb.23(0x40000000), %bb.15(0x40000000)
+  
+    %27:gpr64all = PHI %19, %bb.7, %36, %bb.14
+    %28:gpr64all = PHI %18, %bb.7, %37, %bb.14
+    %142:gpr32 = MOVi32imm 1
+    %141:gpr64all = SUBREG_TO_REG 0, killed %142, %subreg.sub_32
+    %143:gpr64 = SUBSXri %81, 3, 0, implicit-def $nzcv
+    Bcc 11, %bb.23, implicit $nzcv
+    B %bb.15
+  
+  bb.11.L192:
+    successors: %bb.12(0x40000000), %bb.13(0x40000000)
+  
+    %29:gpr64sp = PHI %22, %bb.8, %39, %bb.14
+    %30:gpr64sp = PHI %21, %bb.8, %38, %bb.14
+    %31:gpr64all = PHI %19, %bb.8, %36, %bb.14
+    %32:gpr64all = PHI %18, %bb.8, %37, %bb.14
+    %132:gpr64 = LDRXui %30, 0 :: (load (s64) from %ir..0162, addrspace 1)
+    %33:gpr64sp = COPY %132
+    %133:gpr32common = LDURBBi %20, -8 :: (load (s8) from %ir.remat213, addrspace 1)
+    %134:gpr32 = SUBSWri killed %133, 254, 0, implicit-def $nzcv
+    Bcc 1, %bb.13, implicit $nzcv
+    B %bb.12
+  
+  bb.12.L200:
+    successors: %bb.14(0x80000000)
+  
+    %137:fpr64 = LDRDui %33, 0 :: (load (s64) from %ir.38, addrspace 1)
+    STRDui killed %137, %29, 0 :: (store (s64) into %ir.lsr.iv, addrspace 1)
+    B %bb.14
+  
+  bb.13.L207:
+    successors: %bb.14(0x80000000)
+  
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    $x28 = COPY %32
+    $x27 = COPY %31
+    $x0 = COPY %29
+    $x1 = COPY %33
+    OXCAML_C_DIRECT_CALL @"\01_caml_modify", $x28, $x27, $x0, $x1, csr_aarch64_aapcs, implicit-def dead $lr, implicit $sp, implicit-def $sp, implicit-def $x28, implicit-def $x27
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %135:gpr64all = COPY $x28
+    %136:gpr64all = COPY $x27
+    %34:gpr64all = COPY %135
+    %35:gpr64all = COPY %136
+  
+  bb.14.L214:
+    successors: %bb.11(0x7c000000), %bb.10(0x04000000)
+  
+    %36:gpr64all = PHI %35, %bb.13, %31, %bb.12
+    %37:gpr64all = PHI %34, %bb.13, %32, %bb.12
+    %138:gpr64 = LDRXui %30, 1 :: (load (s64) from %ir.remat219, addrspace 1)
+    %38:gpr64all = COPY %138
+    %139:gpr64sp = ADDXri %29, 8, 0
+    %39:gpr64all = COPY %139
+    %140:gpr32 = COPY %138.sub_32
+    TBZW killed %140, 0, %bb.11
+    B %bb.10
+  
+  bb.15.L226:
+    successors: %bb.17(0x40000000), %bb.16(0x40000000)
+  
+    %40:gpr64all = PHI %13, %bb.6, %17, %bb.10
+    %41:gpr64all = PHI %113, %bb.6, %20, %bb.10
+    %42:gpr64all = PHI %15, %bb.6, %27, %bb.10
+    %43:gpr64all = PHI %14, %bb.6, %28, %bb.10
+    %144:gpr64 = UBFMXri %81, 1, 63
+    %44:gpr64 = COPY %144
+    %145:gpr64 = UBFMXri %80, 1, 63
+    %45:gpr64 = COPY %145
+    %146:gpr64 = SUBSXri %80, 3, 0, implicit-def $nzcv
+    Bcc 11, %bb.17, implicit $nzcv
+    B %bb.16
+  
+  bb.16.L232.preheader:
+    successors: %bb.19(0x80000000)
+  
+    %148:gpr32 = MOVi32imm 1
+    %147:gpr64all = SUBREG_TO_REG 0, killed %148, %subreg.sub_32
+    B %bb.19
+  
+  bb.17.L232.us.preheader:
+    successors: %bb.18(0x80000000)
+  
+    %172:gpr32 = MOVi32imm 1
+    %171:gpr64all = SUBREG_TO_REG 0, killed %172, %subreg.sub_32
+  
+  bb.18.L232.us:
+    successors: %bb.23(0x04000000), %bb.18(0x7c000000)
+  
+    %46:gpr64sp = PHI %171, %bb.17, %47, %bb.18
+    %174:gpr64common = ADDXri %46, 1, 0
+    %47:gpr64all = COPY %174
+    %175:gpr32 = MOVi32imm 1
+    %173:gpr64all = SUBREG_TO_REG 0, killed %175, %subreg.sub_32
+    %176:gpr64 = SUBSXrr %174, %44, implicit-def $nzcv
+    Bcc 12, %bb.23, implicit $nzcv
+    B %bb.18
+  
+  bb.19.L232:
+    successors: %bb.20(0x80000000)
+  
+    %48:gpr64 = PHI %41, %bb.16, %65, %bb.21
+    %49:gpr64 = PHI %40, %bb.16, %64, %bb.21
+    %50:gpr64all = PHI %147, %bb.16, %68, %bb.21
+    %51:gpr64common = PHI %147, %bb.16, %72, %bb.21
+    %52:gpr64all = PHI %42, %bb.16, %71, %bb.21
+    %53:gpr64all = PHI %43, %bb.16, %70, %bb.21
+    STRXui %49, %stack.5, 0 :: (store (s64) into %stack.5)
+    STRXui %48, %stack.4, 0 :: (store (s64) into %stack.4)
+    %150:gpr32 = MOVi32imm 1
+    %149:gpr64 = SUBREG_TO_REG 0, killed %150, %subreg.sub_32
+    %151:gpr64 = ORRXrs %149, %51, 1
+    %54:gpr64all = COPY %151
+  
+  bb.20.L244:
+    successors: %bb.21(0x04000000), %bb.20(0x7c000000)
+  
+    %55:gpr64 = PHI %48, %bb.19, %65, %bb.20
+    %56:gpr64all = PHI %49, %bb.19, %64, %bb.20
+    %57:gpr64 = PHI %50, %bb.19, %68, %bb.20
+    %58:gpr64sp = PHI %149, %bb.19, %69, %bb.20
+    %59:gpr64all = PHI %52, %bb.19, %67, %bb.20
+    %60:gpr64all = PHI %53, %bb.19, %66, %bb.20
+    %152:gpr32 = COPY %58.sub_32
+    %153:gpr32 = COPY %54.sub_32
+    %154:gpr32 = ADDWrs killed %153, killed %152, 1
+    %156:gpr64all = IMPLICIT_DEF
+    %155:gpr64 = INSERT_SUBREG %156, killed %154, %subreg.sub_32
+    %157:gpr64 = UBFMXri killed %155, 62, 5
+    %158:gpr64common = ADDXrr %55, killed %157
+    %159:gpr64 = LDURXi killed %158, -4 :: (load (s64) from %ir.remat221, addrspace 1)
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    $x28 = COPY %60
+    $x27 = COPY %59
+    $x0 = COPY %159
+    $x1 = COPY %56
+    STATEPOINT 0, 0, 4, @"\01_camlHash_lookup_string_equal__find_4_13_code", $x28, $x27, $x0, $x1, 2, 105, 2, 0, 2, 31, 2, 1870160740, 2, 1, 2, 0, 2, 1, 2, 31, 2, 0, 2, 20, 2, 74, 2, 0, 2, 74, 2, 27, 2, 7561576, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7105838, 2, 28, 2, 7561544, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7696942, 2, 110, 2, 2, 1, 8, %stack.4, 0, 1, 8, %stack.5, 0, 2, 0, 2, 2, 0, 0, 1, 1, csr_aarch64_oxcaml_withoutfp, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr :: (volatile load store (s64) on %stack.4), (volatile load store (s64) on %stack.5)
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %160:gpr64all = COPY $x28
+    %161:gpr64all = COPY $x27
+    %162:gpr64 = COPY $x0
+    %63:gpr64all = COPY %162
+    %62:gpr64all = COPY %161
+    %61:gpr64all = COPY %160
+    %163:gpr64 = LDRXui %stack.5, 0 :: (load (s64) from %stack.5)
+    %64:gpr64all = COPY %163
+    %164:gpr64 = LDRXui %stack.4, 0 :: (load (s64) from %stack.4)
+    %65:gpr64all = COPY %164
+    %66:gpr64all = COPY %160
+    %67:gpr64all = COPY %161
+    %165:gpr64common = ADDXrr %57, %162
+    %166:gpr64 = SUBSXri killed %165, 1, 0, implicit-def dead $nzcv
+    %68:gpr64all = COPY %166
+    %167:gpr64common = ADDXri %58, 1, 0
+    %69:gpr64all = COPY %167
+    %168:gpr64 = SUBSXrr %167, %45, implicit-def $nzcv
+    Bcc 13, %bb.20, implicit $nzcv
+    B %bb.21
+  
+  bb.21.L265.loopexit:
+    successors: %bb.22(0x04000000), %bb.19(0x7c000000)
+  
+    %70:gpr64all = COPY %61
+    %71:gpr64all = COPY %62
+    %169:gpr64common = ADDXri %51, 1, 0
+    %72:gpr64all = COPY %169
+    %170:gpr64 = SUBSXrr %169, %44, implicit-def $nzcv
+    Bcc 13, %bb.19, implicit $nzcv
+    B %bb.22
+  
+  bb.22.common.ret.loopexit192:
+    successors: %bb.23(0x80000000)
+  
+    %73:gpr64all = COPY %61
+    %74:gpr64all = COPY %62
+  
+  bb.23.common.ret:
+    %75:gpr64all = PHI %14, %bb.6, %28, %bb.10, %73, %bb.22, %43, %bb.18
+    %76:gpr64all = PHI %15, %bb.6, %27, %bb.10, %74, %bb.22, %42, %bb.18
+    %77:gpr64all = PHI %112, %bb.6, %141, %bb.10, %68, %bb.22, %173, %bb.18
+    $x28 = COPY %75
+    $x27 = COPY %76
+    $x0 = COPY %77
+    RET_ReallyLR implicit $x28, implicit $x27, implicit $x0
+
+...
+---
+name:            "\x01_camlHash_lookup_string_equal__fn$5bhash_lookup_string_equal.ml$3a24$2c17$2d$2d70$5d_7_16_code"
+alignment:       4
+exposesReturnsTwice: false
+legalized:       false
+regBankSelected: false
+selected:        false
+failedISel:      false
+tracksRegLiveness: true
+hasWinCFI:       false
+callsEHReturn:   false
+callsUnwindInit: false
+hasEHCatchret:   false
+hasEHScopes:     false
+hasEHFunclets:   false
+debugInstrRef:   false
+failsVerification: false
+tracksDebugUserValues: false
+registers:
+  - { id: 0, class: gpr64all, preferred-register: '' }
+  - { id: 1, class: gpr64all, preferred-register: '' }
+  - { id: 2, class: gpr64all, preferred-register: '' }
+  - { id: 3, class: gpr64all, preferred-register: '' }
+  - { id: 4, class: gpr64all, preferred-register: '' }
+  - { id: 5, class: gpr64all, preferred-register: '' }
+  - { id: 6, class: gpr64, preferred-register: '' }
+  - { id: 7, class: gpr64sp, preferred-register: '' }
+  - { id: 8, class: gpr64all, preferred-register: '' }
+  - { id: 9, class: gpr64, preferred-register: '' }
+  - { id: 10, class: gpr64, preferred-register: '' }
+  - { id: 11, class: gpr64, preferred-register: '' }
+  - { id: 12, class: gpr64common, preferred-register: '' }
+  - { id: 13, class: gpr64common, preferred-register: '' }
+  - { id: 14, class: gpr64all, preferred-register: '' }
+  - { id: 15, class: gpr64all, preferred-register: '' }
+  - { id: 16, class: gpr64common, preferred-register: '' }
+  - { id: 17, class: gpr64, preferred-register: '' }
+  - { id: 18, class: gpr64, preferred-register: '' }
+  - { id: 19, class: gpr64sp, preferred-register: '' }
+  - { id: 20, class: gpr64, preferred-register: '' }
+  - { id: 21, class: gpr32, preferred-register: '' }
+  - { id: 22, class: gpr64, preferred-register: '' }
+  - { id: 23, class: gpr64, preferred-register: '' }
+  - { id: 24, class: gpr64common, preferred-register: '' }
+  - { id: 25, class: gpr32, preferred-register: '' }
+  - { id: 26, class: gpr64, preferred-register: '' }
+  - { id: 27, class: gpr64, preferred-register: '' }
+  - { id: 28, class: gpr64common, preferred-register: '' }
+  - { id: 29, class: gpr64common, preferred-register: '' }
+  - { id: 30, class: gpr64all, preferred-register: '' }
+  - { id: 31, class: gpr64all, preferred-register: '' }
+  - { id: 32, class: gpr64all, preferred-register: '' }
+  - { id: 33, class: gpr64, preferred-register: '' }
+  - { id: 34, class: gpr64common, preferred-register: '' }
+  - { id: 35, class: gpr32, preferred-register: '' }
+  - { id: 36, class: gpr64all, preferred-register: '' }
+  - { id: 37, class: gpr64all, preferred-register: '' }
+  - { id: 38, class: gpr64all, preferred-register: '' }
+  - { id: 39, class: gpr64all, preferred-register: '' }
+  - { id: 40, class: gpr64sp, preferred-register: '' }
+  - { id: 41, class: gpr64sp, preferred-register: '' }
+  - { id: 42, class: gpr64all, preferred-register: '' }
+  - { id: 43, class: gpr64, preferred-register: '' }
+  - { id: 44, class: gpr64, preferred-register: '' }
+  - { id: 45, class: gpr64, preferred-register: '' }
+  - { id: 46, class: gpr64all, preferred-register: '' }
+  - { id: 47, class: gpr64all, preferred-register: '' }
+  - { id: 48, class: gpr32, preferred-register: '' }
+  - { id: 49, class: gpr64, preferred-register: '' }
+  - { id: 50, class: gpr64sp, preferred-register: '' }
+liveins:
+  - { reg: '$x28', virtual-reg: '%9' }
+  - { reg: '$x27', virtual-reg: '%10' }
+  - { reg: '$x0', virtual-reg: '%11' }
+frameInfo:
+  isFrameAddressTaken: false
+  isReturnAddressTaken: false
+  hasStackMap:     false
+  hasPatchPoint:   false
+  stackSize:       0
+  offsetAdjustment: 0
+  maxAlignment:    8
+  adjustsStack:    true
+  hasCalls:        true
+  stackProtector:  ''
+  functionContext: ''
+  maxCallFrameSize: 0
+  cvBytesOfCalleeSavedRegisters: 0
+  hasOpaqueSPAdjustment: false
+  hasVAStart:      false
+  hasMustTailInVarArgFunc: false
+  hasTailCall:     false
+  localFrameSize:  0
+  savePoint:       ''
+  restorePoint:    ''
+fixedStack:      []
+stack:
+  - { id: 0, name: '', type: default, offset: 0, size: 8, alignment: 8, 
+      stack-id: default, callee-saved-register: '', callee-saved-restored: true, 
+      debug-info-variable: '', debug-info-expression: '', debug-info-location: '' }
+  - { id: 1, name: '', type: default, offset: 0, size: 8, alignment: 8, 
+      stack-id: default, callee-saved-register: '', callee-saved-restored: true, 
+      debug-info-variable: '', debug-info-expression: '', debug-info-location: '' }
+callSites:       []
+debugValueSubstitutions: []
+constants:       []
+machineFunctionInfo: {}
+body:             |
+  bb.0.L1:
+    successors: %bb.1(0x00106035), %bb.2(0x7fef9fcb)
+    liveins: $x28, $x27, $x0
+  
+    %11:gpr64 = COPY $x0
+    %10:gpr64 = COPY $x27
+    %9:gpr64 = COPY $x28
+    STRXui %11, %stack.0, 0 :: (store (s64) into %stack.0)
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %12:gpr64common = LOADgot target-flags(aarch64-got) @"\01_caml_format_int"
+    %13:gpr64common = LOADgot target-flags(aarch64-got) @"\01_camlStdlib__immstring191"
+    $x28 = COPY %9
+    $x27 = COPY %10
+    $x8 = COPY %12
+    $x0 = COPY %13
+    $x1 = COPY %11
+    STATEPOINT 0, 0, 5, @"\01_caml_c_call", $x28, $x27, $x8, $x0, $x1, 2, 106, 2, 0, 2, 51, 2, 1870160740, 2, 1, 2, 1, 2, 2, 2, 280, 2, 0, 2, 2, 2, 19, 2, 0, 2, 19, 2, 9, 2, 6583411, 2, 6449516, 2, 7105838, 2, 20, 2, 6583379, 2, 6449516, 2, 7631662, 2, 7235954, 2, 7298919, 2, 6905702, 2, 29806, 2, 24, 2, 0, 2, 51, 2, 66, 2, 0, 2, 66, 2, 27, 2, 7561576, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7105838, 2, 34, 2, 7561544, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7696942, 2, 2633326, 2, 7239014, 2, 41, 2, 1, 1, 8, %stack.0, 0, 2, 0, 2, 1, 0, 0, csr_aarch64_oxcaml_c_call, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr :: (volatile load store (s64) on %stack.0)
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %14:gpr64all = COPY $x28
+    %15:gpr64all = COPY $x27
+    %16:gpr64common = COPY $x0
+    %17:gpr64 = LDURXi %16, -8 :: (load (s64) from %ir.remat, align 4, addrspace 1)
+    %18:gpr64 = UBFMXri killed %17, 7, 63
+    %19:gpr64sp = ANDXri killed %18, 8045
+    %20:gpr64 = nsw SUBSXri killed %19, 1, 0, implicit-def dead $nzcv
+    %21:gpr32 = LDRBBroX %16, %20, 0, 0 :: (load (s8) from %ir.remat75, addrspace 1)
+    %22:gpr64 = SUBREG_TO_REG 0, killed %21, %subreg.sub_32
+    %23:gpr64 = nsw SUBSXrr %20, killed %22, implicit-def dead $nzcv
+    %24:gpr64common = nsw UBFMXri %23, 63, 62
+    %25:gpr32 = MOVi32imm 1
+    %26:gpr64 = SUBREG_TO_REG 0, killed %25, %subreg.sub_32
+    %27:gpr64 = BFMXri %26, %23, 63, 62
+    %28:gpr64common = nsw ADDXri killed %24, 39, 0
+    STRXui %16, %stack.0, 0 :: (store (s64) into %stack.0)
+    STRXui %28, %stack.1, 0 :: (store (s64) into %stack.1)
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %29:gpr64common = LOADgot target-flags(aarch64-got) @"\01_caml_create_bytes"
+    $x28 = COPY %14
+    $x27 = COPY %15
+    $x8 = COPY %29
+    $x0 = COPY %28
+    STATEPOINT 0, 0, 4, @"\01_caml_c_call", $x28, $x27, $x8, $x0, 2, 106, 2, 0, 2, 48, 2, 1870160740, 2, 1, 2, 1, 2, 2, 2, 226, 2, 0, 2, 10, 2, 32, 2, 0, 2, 32, 2, 9, 2, 6583411, 2, 6449516, 2, 7105838, 2, 10, 2, 6583379, 2, 6449516, 2, 6170670, 2, 41, 2, 24, 2, 0, 2, 27, 2, 66, 2, 0, 2, 66, 2, 27, 2, 7561576, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7105838, 2, 34, 2, 7561544, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7696942, 2, 2633326, 2, 7239014, 2, 41, 2, 2, 1, 8, %stack.0, 0, 1, 8, %stack.1, 0, 2, 0, 2, 2, 0, 0, 1, 1, csr_aarch64_oxcaml_c_call, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr :: (volatile load store (s64) on %stack.0), (volatile load store (s64) on %stack.1)
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %30:gpr64all = COPY $x28
+    %31:gpr64all = COPY $x27
+    %32:gpr64all = COPY $x0
+    %33:gpr64 = LDRXui %stack.0, 0 :: (load (s64) from %stack.0)
+    %0:gpr64all = COPY %32
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %34:gpr64common = MOVaddr target-flags(aarch64-page) @"\01_camlHash_lookup_string_equal__immstring117", target-flags(aarch64-pageoff, aarch64-nc) @"\01_camlHash_lookup_string_equal__immstring117"
+    %35:gpr32 = MOVi32imm 39
+    %36:gpr64all = SUBREG_TO_REG 0, killed %35, %subreg.sub_32
+    $x28 = COPY %30
+    $x27 = COPY %31
+    $x0 = COPY %34
+    $x1 = COPY %26
+    $x2 = COPY %32
+    $x3 = COPY %26
+    $x4 = COPY %36
+    OXCAML_C_DIRECT_CALL @"\01_caml_blit_string", $x28, $x27, $x0, $x1, $x2, $x3, $x4, csr_aarch64_aapcs, implicit-def dead $lr, implicit $sp, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %37:gpr64all = COPY $x28
+    %38:gpr64all = COPY $x27
+    %39:gpr64all = COPY $x0
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    $x28 = COPY %37
+    $x27 = COPY %38
+    $x0 = COPY %33
+    $x1 = COPY %26
+    $x2 = COPY %32
+    $x3 = COPY %36
+    $x4 = COPY %27
+    OXCAML_C_DIRECT_CALL @"\01_caml_blit_string", $x28, $x27, $x0, $x1, $x2, $x3, $x4, csr_aarch64_aapcs, implicit-def dead $lr, implicit $sp, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %40:gpr64sp = COPY $x28
+    %41:gpr64sp = COPY $x27
+    %42:gpr64all = COPY $x0
+    %1:gpr64all = COPY %40
+    %43:gpr64 = SUBSXri %41, 24, 0, implicit-def dead $nzcv
+    %2:gpr64all = COPY %43
+    %44:gpr64 = LDRXui %40, 0 :: (load (s64) from %ir.21, align 4)
+    %45:gpr64 = SUBSXrr killed %44, %43, implicit-def $nzcv
+    Bcc 9, %bb.2, implicit $nzcv
+    B %bb.1
+  
+  bb.1.L308:
+    successors: %bb.2(0x80000000)
+  
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    $x28 = COPY %1
+    $x27 = COPY %2
+    %3:gpr64all = STATEPOINT 196609, 0, 2, @"\01_caml_call_gc", $x28, $x27, 2, 108, 2, 0, 2, 34, 2, 1870160737, 2, 1, 2, 1, 2, 3, 2, 1, 2, 24, 2, 0, 2, 27, 2, 69, 2, 0, 2, 69, 2, 27, 2, 7561576, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7105838, 2, 34, 2, 7561544, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7696942, 2, 2633326, 2, 7239014, 2, 41, 2, 1, %0(tied-def 0), 2, 0, 2, 1, 0, 0, csr_aarch64_oxcaml_alloc, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def dead early-clobber $lr
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %46:gpr64all = COPY $x28
+    %47:gpr64all = COPY $x27
+    %4:gpr64all = COPY %46
+    %5:gpr64all = COPY %47
+  
+  bb.2.L309:
+    %6:gpr64 = PHI %0, %bb.0, %3, %bb.1
+    %7:gpr64sp = PHI %2, %bb.0, %5, %bb.1
+    %8:gpr64all = PHI %1, %bb.0, %4, %bb.1
+    %48:gpr32 = MOVi32imm 2048
+    %49:gpr64 = SUBREG_TO_REG 0, killed %48, %subreg.sub_32
+    STRXui killed %49, %7, 0 :: (volatile store (s64) into %ir.remat76, align 4, addrspace 1)
+    early-clobber %50:gpr64sp = STRXpre %6, %7, 8 :: (store (s64) into %ir.27, addrspace 1)
+    STRXui %11, %7, 2 :: (volatile store (s64) into %ir.remat77, align 4, addrspace 1)
+    $x28 = COPY %8
+    $x27 = COPY %7
+    $x0 = COPY %50
+    RET_ReallyLR implicit $x28, implicit $x27, implicit $x0
+
+...
+---
+name:            "\x01_camlHash_lookup_string_equal__fn$5bhash_lookup_string_equal.ml$3a27$2c37$2d$2d40$5d_8_8_code"
+alignment:       4
+exposesReturnsTwice: false
+legalized:       false
+regBankSelected: false
+selected:        false
+failedISel:      false
+tracksRegLiveness: true
+hasWinCFI:       false
+callsEHReturn:   false
+callsUnwindInit: false
+hasEHCatchret:   false
+hasEHScopes:     false
+hasEHFunclets:   false
+debugInstrRef:   false
+failsVerification: false
+tracksDebugUserValues: false
+registers:
+  - { id: 0, class: gpr64, preferred-register: '' }
+  - { id: 1, class: gpr64, preferred-register: '' }
+  - { id: 2, class: gpr64common, preferred-register: '' }
+  - { id: 3, class: gpr64, preferred-register: '' }
+liveins:
+  - { reg: '$x28', virtual-reg: '%0' }
+  - { reg: '$x27', virtual-reg: '%1' }
+  - { reg: '$x0', virtual-reg: '%2' }
+frameInfo:
+  isFrameAddressTaken: false
+  isReturnAddressTaken: false
+  hasStackMap:     false
+  hasPatchPoint:   false
+  stackSize:       0
+  offsetAdjustment: 0
+  maxAlignment:    1
+  adjustsStack:    false
+  hasCalls:        false
+  stackProtector:  ''
+  functionContext: ''
+  maxCallFrameSize: 0
+  cvBytesOfCalleeSavedRegisters: 0
+  hasOpaqueSPAdjustment: false
+  hasVAStart:      false
+  hasMustTailInVarArgFunc: false
+  hasTailCall:     false
+  localFrameSize:  0
+  savePoint:       ''
+  restorePoint:    ''
+fixedStack:      []
+stack:           []
+callSites:       []
+debugValueSubstitutions: []
+constants:       []
+machineFunctionInfo: {}
+body:             |
+  bb.0.L1:
+    liveins: $x28, $x27, $x0
+  
+    %2:gpr64common = COPY $x0
+    %1:gpr64 = COPY $x27
+    %0:gpr64 = COPY $x28
+    %3:gpr64 = LDRXui %2, 0 :: (load (s64) from %ir.2, addrspace 1)
+    $x28 = COPY %0
+    $x27 = COPY %1
+    $x0 = COPY %3
+    RET_ReallyLR implicit $x28, implicit $x27, implicit $x0
+
+...
+---
+name:            "\x01_camlHash_lookup_string_equal__entry"
+alignment:       4
+exposesReturnsTwice: false
+legalized:       false
+regBankSelected: false
+selected:        false
+failedISel:      false
+tracksRegLiveness: true
+hasWinCFI:       false
+callsEHReturn:   false
+callsUnwindInit: false
+hasEHCatchret:   false
+hasEHScopes:     false
+hasEHFunclets:   false
+debugInstrRef:   false
+failsVerification: false
+tracksDebugUserValues: false
+registers:
+  - { id: 0, class: gpr64all, preferred-register: '' }
+  - { id: 1, class: gpr64all, preferred-register: '' }
+  - { id: 2, class: gpr64all, preferred-register: '' }
+  - { id: 3, class: gpr64all, preferred-register: '' }
+  - { id: 4, class: gpr64sp, preferred-register: '' }
+  - { id: 5, class: gpr64all, preferred-register: '' }
+  - { id: 6, class: gpr64all, preferred-register: '' }
+  - { id: 7, class: gpr64all, preferred-register: '' }
+  - { id: 8, class: gpr64all, preferred-register: '' }
+  - { id: 9, class: gpr64all, preferred-register: '' }
+  - { id: 10, class: gpr64all, preferred-register: '' }
+  - { id: 11, class: gpr64all, preferred-register: '' }
+  - { id: 12, class: gpr64all, preferred-register: '' }
+  - { id: 13, class: gpr64all, preferred-register: '' }
+  - { id: 14, class: gpr64all, preferred-register: '' }
+  - { id: 15, class: gpr64sp, preferred-register: '' }
+  - { id: 16, class: gpr64all, preferred-register: '' }
+  - { id: 17, class: gpr64all, preferred-register: '' }
+  - { id: 18, class: gpr64all, preferred-register: '' }
+  - { id: 19, class: gpr64all, preferred-register: '' }
+  - { id: 20, class: gpr64all, preferred-register: '' }
+  - { id: 21, class: gpr64all, preferred-register: '' }
+  - { id: 22, class: gpr64all, preferred-register: '' }
+  - { id: 23, class: gpr64all, preferred-register: '' }
+  - { id: 24, class: gpr64all, preferred-register: '' }
+  - { id: 25, class: gpr64all, preferred-register: '' }
+  - { id: 26, class: gpr64all, preferred-register: '' }
+  - { id: 27, class: gpr64all, preferred-register: '' }
+  - { id: 28, class: gpr64, preferred-register: '' }
+  - { id: 29, class: gpr64, preferred-register: '' }
+  - { id: 30, class: gpr64all, preferred-register: '' }
+  - { id: 31, class: gpr64common, preferred-register: '' }
+  - { id: 32, class: gpr32, preferred-register: '' }
+  - { id: 33, class: gpr64all, preferred-register: '' }
+  - { id: 34, class: gpr64all, preferred-register: '' }
+  - { id: 35, class: gpr64all, preferred-register: '' }
+  - { id: 36, class: gpr64sp, preferred-register: '' }
+  - { id: 37, class: gpr64, preferred-register: '' }
+  - { id: 38, class: gpr64common, preferred-register: '' }
+  - { id: 39, class: gpr32, preferred-register: '' }
+  - { id: 40, class: gpr64common, preferred-register: '' }
+  - { id: 41, class: gpr32, preferred-register: '' }
+  - { id: 42, class: gpr64all, preferred-register: '' }
+  - { id: 43, class: gpr64all, preferred-register: '' }
+  - { id: 44, class: gpr64all, preferred-register: '' }
+  - { id: 45, class: gpr64sp, preferred-register: '' }
+  - { id: 46, class: gpr64, preferred-register: '' }
+  - { id: 47, class: gpr64common, preferred-register: '' }
+  - { id: 48, class: gpr64, preferred-register: '' }
+  - { id: 49, class: gpr64common, preferred-register: '' }
+  - { id: 50, class: gpr64all, preferred-register: '' }
+  - { id: 51, class: gpr64all, preferred-register: '' }
+  - { id: 52, class: gpr64all, preferred-register: '' }
+  - { id: 53, class: gpr64common, preferred-register: '' }
+  - { id: 54, class: gpr64all, preferred-register: '' }
+  - { id: 55, class: gpr64common, preferred-register: '' }
+  - { id: 56, class: gpr64all, preferred-register: '' }
+  - { id: 57, class: gpr64all, preferred-register: '' }
+  - { id: 58, class: gpr64common, preferred-register: '' }
+  - { id: 59, class: gpr32, preferred-register: '' }
+  - { id: 60, class: gpr64all, preferred-register: '' }
+  - { id: 61, class: gpr64all, preferred-register: '' }
+  - { id: 62, class: gpr64all, preferred-register: '' }
+  - { id: 63, class: gpr64sp, preferred-register: '' }
+  - { id: 64, class: gpr64, preferred-register: '' }
+  - { id: 65, class: gpr64sp, preferred-register: '' }
+  - { id: 66, class: gpr32, preferred-register: '' }
+  - { id: 67, class: gpr64, preferred-register: '' }
+  - { id: 68, class: gpr64common, preferred-register: '' }
+  - { id: 69, class: gpr32, preferred-register: '' }
+  - { id: 70, class: gpr64all, preferred-register: '' }
+  - { id: 71, class: gpr64all, preferred-register: '' }
+  - { id: 72, class: gpr64all, preferred-register: '' }
+  - { id: 73, class: gpr64sp, preferred-register: '' }
+  - { id: 74, class: gpr64, preferred-register: '' }
+  - { id: 75, class: gpr64sp, preferred-register: '' }
+  - { id: 76, class: gpr64, preferred-register: '' }
+  - { id: 77, class: gpr64common, preferred-register: '' }
+  - { id: 78, class: gpr64, preferred-register: '' }
+  - { id: 79, class: gpr64common, preferred-register: '' }
+  - { id: 80, class: gpr64all, preferred-register: '' }
+  - { id: 81, class: gpr64all, preferred-register: '' }
+  - { id: 82, class: gpr64all, preferred-register: '' }
+  - { id: 83, class: gpr64common, preferred-register: '' }
+  - { id: 84, class: gpr64common, preferred-register: '' }
+  - { id: 85, class: gpr64sp, preferred-register: '' }
+  - { id: 86, class: gpr64all, preferred-register: '' }
+  - { id: 87, class: gpr64common, preferred-register: '' }
+  - { id: 88, class: gpr64common, preferred-register: '' }
+  - { id: 89, class: gpr64, preferred-register: '' }
+  - { id: 90, class: gpr32, preferred-register: '' }
+  - { id: 91, class: gpr64all, preferred-register: '' }
+  - { id: 92, class: gpr64all, preferred-register: '' }
+  - { id: 93, class: gpr64all, preferred-register: '' }
+  - { id: 94, class: gpr64all, preferred-register: '' }
+  - { id: 95, class: gpr64all, preferred-register: '' }
+  - { id: 96, class: gpr64all, preferred-register: '' }
+  - { id: 97, class: gpr64all, preferred-register: '' }
+  - { id: 98, class: gpr64all, preferred-register: '' }
+  - { id: 99, class: gpr64all, preferred-register: '' }
+  - { id: 100, class: gpr64all, preferred-register: '' }
+  - { id: 101, class: gpr64all, preferred-register: '' }
+  - { id: 102, class: gpr64, preferred-register: '' }
+  - { id: 103, class: gpr64common, preferred-register: '' }
+  - { id: 104, class: gpr64common, preferred-register: '' }
+  - { id: 105, class: gpr32, preferred-register: '' }
+  - { id: 106, class: gpr64all, preferred-register: '' }
+  - { id: 107, class: gpr64all, preferred-register: '' }
+  - { id: 108, class: gpr64all, preferred-register: '' }
+  - { id: 109, class: gpr64sp, preferred-register: '' }
+  - { id: 110, class: gpr64sp, preferred-register: '' }
+  - { id: 111, class: gpr64, preferred-register: '' }
+  - { id: 112, class: gpr64all, preferred-register: '' }
+  - { id: 113, class: gpr64all, preferred-register: '' }
+  - { id: 114, class: gpr64all, preferred-register: '' }
+liveins:
+  - { reg: '$x28', virtual-reg: '%28' }
+  - { reg: '$x27', virtual-reg: '%29' }
+frameInfo:
+  isFrameAddressTaken: false
+  isReturnAddressTaken: false
+  hasStackMap:     false
+  hasPatchPoint:   false
+  stackSize:       0
+  offsetAdjustment: 0
+  maxAlignment:    8
+  adjustsStack:    true
+  hasCalls:        true
+  stackProtector:  ''
+  functionContext: ''
+  maxCallFrameSize: 0
+  cvBytesOfCalleeSavedRegisters: 0
+  hasOpaqueSPAdjustment: false
+  hasVAStart:      false
+  hasMustTailInVarArgFunc: false
+  hasTailCall:     false
+  localFrameSize:  0
+  savePoint:       ''
+  restorePoint:    ''
+fixedStack:      []
+stack:
+  - { id: 0, name: '', type: default, offset: 0, size: 8, alignment: 8, 
+      stack-id: default, callee-saved-register: '', callee-saved-restored: true, 
+      debug-info-variable: '', debug-info-expression: '', debug-info-location: '' }
+callSites:       []
+debugValueSubstitutions: []
+constants:       []
+machineFunctionInfo: {}
+body:             |
+  bb.0.L1:
+    successors: %bb.4(0x30000000), %bb.1(0x50000000)
+    liveins: $x28, $x27
+  
+    %29:gpr64 = COPY $x27
+    %28:gpr64 = COPY $x28
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %31:gpr64common = LOADgot target-flags(aarch64-got) @"\01_caml_sys_argv"
+    %32:gpr32 = MOVi32imm 1
+    %33:gpr64all = SUBREG_TO_REG 0, killed %32, %subreg.sub_32
+    $x28 = COPY %28
+    $x27 = COPY %29
+    $x8 = COPY %31
+    $x0 = COPY %33
+    STATEPOINT 0, 0, 4, @"\01_caml_c_call", $x28, $x27, $x8, $x0, 2, 106, 2, 0, 2, 30, 2, 1870160740, 2, 1, 2, 1, 2, 1, 2, 6, 2, 0, 2, 18, 2, 26, 2, 0, 2, 26, 2, 27, 2, 7561576, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7105838, 2, 26, 2, 7561544, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 28206, 2, 0, 2, 0, 2, 0, csr_aarch64_oxcaml_c_call, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %34:gpr64all = COPY $x28
+    %35:gpr64all = COPY $x27
+    %36:gpr64sp = COPY $x0
+    %0:gpr64all = COPY %34
+    %1:gpr64all = COPY %35
+    %37:gpr64 = LDURXi %36, -8 :: (load (s64) from %ir.remat, align 4, addrspace 1)
+    %38:gpr64common = ANDXri killed %37, 7532
+    %39:gpr32 = MOVi32imm 200001
+    %30:gpr64all = SUBREG_TO_REG 0, killed %39, %subreg.sub_32
+    CBZX killed %38, %bb.4
+    B %bb.1
+  
+  bb.1.L328:
+    successors: %bb.3(0x00000800), %bb.2(0x7ffff800)
+  
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %40:gpr64common = LOADgot target-flags(aarch64-got) @"\01_caml_sys_argv"
+    %41:gpr32 = MOVi32imm 1
+    %42:gpr64all = SUBREG_TO_REG 0, killed %41, %subreg.sub_32
+    $x28 = COPY %0
+    $x27 = COPY %1
+    $x8 = COPY %40
+    $x0 = COPY %42
+    STATEPOINT 0, 0, 4, @"\01_caml_c_call", $x28, $x27, $x8, $x0, 2, 106, 2, 0, 2, 30, 2, 1870160740, 2, 1, 2, 1, 2, 1, 2, 6, 2, 0, 2, 50, 2, 58, 2, 0, 2, 58, 2, 27, 2, 7561576, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7105838, 2, 26, 2, 7561544, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 28206, 2, 0, 2, 0, 2, 0, csr_aarch64_oxcaml_c_call, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %43:gpr64all = COPY $x28
+    %44:gpr64all = COPY $x27
+    %45:gpr64sp = COPY $x0
+    %2:gpr64all = COPY %43
+    %3:gpr64all = COPY %44
+    %4:gpr64sp = COPY %45
+    %46:gpr64 = LDURXi %45, -8 :: (load (s64) from %ir.remat159, align 4, addrspace 1)
+    %47:gpr64common = ANDXri killed %46, 7532
+    CBZX killed %47, %bb.3
+    B %bb.2
+  
+  bb.2.L338:
+    successors: %bb.4(0x80000000)
+  
+    %48:gpr64 = LDRXui %4, 1 :: (load (s64) from %ir.remat160, addrspace 1)
+    STRXui %48, %stack.0, 0 :: (store (s64) into %stack.0)
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %49:gpr64common = LOADgot target-flags(aarch64-got) @"\01_caml_int_of_string"
+    $x28 = COPY %2
+    $x27 = COPY %3
+    $x8 = COPY %49
+    $x0 = COPY %48
+    STATEPOINT 0, 0, 4, @"\01_caml_c_call", $x28, $x27, $x8, $x0, 2, 106, 2, 0, 2, 30, 2, 1870160740, 2, 1, 2, 1, 2, 1, 2, 6, 2, 0, 2, 36, 2, 62, 2, 0, 2, 62, 2, 27, 2, 7561576, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7105838, 2, 26, 2, 7561544, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 28206, 2, 1, 1, 8, %stack.0, 0, 2, 0, 2, 1, 0, 0, csr_aarch64_oxcaml_c_call, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr :: (volatile load store (s64) on %stack.0)
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %50:gpr64all = COPY $x28
+    %51:gpr64all = COPY $x27
+    %52:gpr64all = COPY $x0
+    %5:gpr64all = COPY %50
+    %6:gpr64all = COPY %51
+    %7:gpr64all = COPY %52
+    B %bb.4
+  
+  bb.3.L346:
+    %53:gpr64common = MOVaddr target-flags(aarch64-page) @"\01_camlHash_lookup_string_equal__block35", target-flags(aarch64-pageoff, aarch64-nc) @"\01_camlHash_lookup_string_equal__block35"
+    OXCAML_RAISE_NOTRACE killed %53, implicit-def dead $x0, implicit-def dead $x16, implicit-def dead $x26, implicit-def dead $sp, implicit $x26
+  
+  bb.4.L352:
+    successors: %bb.5(0x40000000), %bb.8(0x40000000)
+  
+    %8:gpr64all = PHI %30, %bb.0, %7, %bb.2
+    %9:gpr64all = PHI %1, %bb.0, %6, %bb.2
+    %10:gpr64all = PHI %0, %bb.0, %5, %bb.2
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %55:gpr64common = MOVaddr target-flags(aarch64-page) @"\01_camlHash_lookup_string_equal" + 24, target-flags(aarch64-pageoff, aarch64-nc) @"\01_camlHash_lookup_string_equal" + 24
+    $x28 = COPY %10
+    $x27 = COPY %9
+    $x0 = COPY %55
+    $x1 = COPY %8
+    OXCAML_C_DIRECT_CALL @"\01_caml_initialize", $x28, $x27, $x0, $x1, csr_aarch64_aapcs, implicit-def dead $lr, implicit $sp, implicit-def $sp, implicit-def $x28, implicit-def $x27
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %56:gpr64all = COPY $x28
+    %57:gpr64all = COPY $x27
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %58:gpr64common = LOADgot target-flags(aarch64-got) @"\01_caml_sys_argv"
+    %59:gpr32 = MOVi32imm 1
+    %60:gpr64all = SUBREG_TO_REG 0, killed %59, %subreg.sub_32
+    $x28 = COPY %56
+    $x27 = COPY %57
+    $x8 = COPY %58
+    $x0 = COPY %60
+    STATEPOINT 0, 0, 4, @"\01_caml_c_call", $x28, $x27, $x8, $x0, 2, 106, 2, 0, 2, 31, 2, 1870160740, 2, 1, 2, 1, 2, 1, 2, 9, 2, 0, 2, 18, 2, 26, 2, 0, 2, 26, 2, 27, 2, 7561576, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7105838, 2, 29, 2, 7561544, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 6648366, 2, 29552, 2, 0, 2, 0, 2, 0, csr_aarch64_oxcaml_c_call, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %61:gpr64all = COPY $x28
+    %62:gpr64all = COPY $x27
+    %63:gpr64sp = COPY $x0
+    %11:gpr64all = COPY %61
+    %12:gpr64all = COPY %62
+    %64:gpr64 = LDURXi %63, -8 :: (load (s64) from %ir.remat161, align 4, addrspace 1)
+    %65:gpr64sp = ANDXri killed %64, 7597
+    %66:gpr32 = MOVi32imm 21
+    %54:gpr64all = SUBREG_TO_REG 0, killed %66, %subreg.sub_32
+    %67:gpr64 = SUBSXri killed %65, 2561, 0, implicit-def $nzcv
+    Bcc 3, %bb.8, implicit $nzcv
+    B %bb.5
+  
+  bb.5.L364:
+    successors: %bb.6(0x7ffff800), %bb.7(0x00000800)
+  
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %68:gpr64common = LOADgot target-flags(aarch64-got) @"\01_caml_sys_argv"
+    %69:gpr32 = MOVi32imm 1
+    %70:gpr64all = SUBREG_TO_REG 0, killed %69, %subreg.sub_32
+    $x28 = COPY %11
+    $x27 = COPY %12
+    $x8 = COPY %68
+    $x0 = COPY %70
+    STATEPOINT 0, 0, 4, @"\01_caml_c_call", $x28, $x27, $x8, $x0, 2, 106, 2, 0, 2, 31, 2, 1870160740, 2, 1, 2, 1, 2, 1, 2, 9, 2, 0, 2, 50, 2, 58, 2, 0, 2, 58, 2, 27, 2, 7561576, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7105838, 2, 29, 2, 7561544, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 6648366, 2, 29552, 2, 0, 2, 0, 2, 0, csr_aarch64_oxcaml_c_call, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %71:gpr64all = COPY $x28
+    %72:gpr64all = COPY $x27
+    %73:gpr64sp = COPY $x0
+    %13:gpr64all = COPY %71
+    %14:gpr64all = COPY %72
+    %15:gpr64sp = COPY %73
+    %74:gpr64 = LDURXi %73, -8 :: (load (s64) from %ir.remat162, align 4, addrspace 1)
+    %75:gpr64sp = ANDXri killed %74, 7597
+    %76:gpr64 = SUBSXri killed %75, 2561, 0, implicit-def $nzcv
+    Bcc 3, %bb.7, implicit $nzcv
+    B %bb.6
+  
+  bb.6.L374:
+    successors: %bb.8(0x80000000)
+  
+    %78:gpr64 = LDRXui %15, 2 :: (load (s64) from %ir.remat163, addrspace 1)
+    STRXui %78, %stack.0, 0 :: (store (s64) into %stack.0)
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %79:gpr64common = LOADgot target-flags(aarch64-got) @"\01_caml_int_of_string"
+    $x28 = COPY %13
+    $x27 = COPY %14
+    $x8 = COPY %79
+    $x0 = COPY %78
+    STATEPOINT 0, 0, 4, @"\01_caml_c_call", $x28, $x27, $x8, $x0, 2, 106, 2, 0, 2, 31, 2, 1870160740, 2, 1, 2, 1, 2, 1, 2, 9, 2, 0, 2, 36, 2, 62, 2, 0, 2, 62, 2, 27, 2, 7561576, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7105838, 2, 29, 2, 7561544, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 6648366, 2, 29552, 2, 1, 1, 8, %stack.0, 0, 2, 0, 2, 1, 0, 0, csr_aarch64_oxcaml_c_call, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr :: (volatile load store (s64) on %stack.0)
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %80:gpr64all = COPY $x28
+    %81:gpr64all = COPY $x27
+    %82:gpr64all = COPY $x0
+    %16:gpr64all = COPY %80
+    %17:gpr64all = COPY %81
+    %18:gpr64all = COPY %82
+    B %bb.8
+  
+  bb.7.L382:
+    %77:gpr64common = MOVaddr target-flags(aarch64-page) @"\01_camlHash_lookup_string_equal__block35", target-flags(aarch64-pageoff, aarch64-nc) @"\01_camlHash_lookup_string_equal__block35"
+    OXCAML_RAISE_NOTRACE killed %77, implicit-def dead $x0, implicit-def dead $x16, implicit-def dead $x26, implicit-def dead $sp, implicit $x26
+  
+  bb.8.L388:
+    successors: %bb.9(0x00106035), %bb.10(0x7fef9fcb)
+  
+    %19:gpr64all = PHI %54, %bb.4, %18, %bb.6
+    %20:gpr64all = PHI %12, %bb.4, %17, %bb.6
+    %21:gpr64all = PHI %11, %bb.4, %16, %bb.6
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %84:gpr64common = MOVaddr target-flags(aarch64-page) @"\01_camlHash_lookup_string_equal" + 32, target-flags(aarch64-pageoff, aarch64-nc) @"\01_camlHash_lookup_string_equal" + 32
+    $x28 = COPY %21
+    $x27 = COPY %20
+    $x0 = COPY %84
+    $x1 = COPY %19
+    OXCAML_C_DIRECT_CALL @"\01_caml_initialize", $x28, $x27, $x0, $x1, csr_aarch64_aapcs, implicit-def dead $lr, implicit $sp, implicit-def $sp, implicit-def $x28, implicit-def $x27
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %85:gpr64sp = COPY $x28
+    %86:gpr64all = COPY $x27
+    %22:gpr64all = COPY %85
+    %23:gpr64all = COPY %86
+    %87:gpr64common = LDRXui %85, 5 :: (load (s64) from %ir.31, align 4)
+    %88:gpr64common = ADDXri killed %87, 376, 0
+    INLINEASM &"mov $0, sp", 1 /* sideeffect attdialect */, 2555914 /* regdef:GPR64common */, def %83
+    %89:gpr64 = SUBSXrr %83, killed %88, implicit-def $nzcv
+    Bcc 2, %bb.10, implicit $nzcv
+    B %bb.9
+  
+  bb.9.L408:
+    successors: %bb.10(0x80000000)
+  
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %90:gpr32 = MOVi32imm 34
+    %91:gpr64all = SUBREG_TO_REG 0, killed %90, %subreg.sub_32
+    $x28 = COPY %22
+    $x27 = COPY %23
+    $x0 = COPY %91
+    STATEPOINT 0, 0, 3, @"\01_caml_llvm_call_realloc_stack", $x28, $x27, $x0, 2, 108, 2, 0, 2, 0, 2, 0, 2, 0, 2, 0, csr_aarch64_oxcaml_alloc, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def dead early-clobber $lr
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %92:gpr64all = COPY $x28
+    %93:gpr64all = COPY $x27
+    %24:gpr64all = COPY %92
+    %25:gpr64all = COPY %93
+  
+  bb.10.L409:
+    %26:gpr64all = PHI %23, %bb.8, %25, %bb.9
+    %27:gpr64all = PHI %22, %bb.8, %24, %bb.9
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    $x28 = COPY %27
+    $x27 = COPY %26
+    $x0 = COPY %19
+    STATEPOINT 0, 0, 3, @"\01_camlHash_lookup_string_equal__black_box_int_0_9_code", $x28, $x27, $x0, 2, 105, 2, 0, 2, 29, 2, 1870160740, 2, 1, 2, 0, 2, 1, 2, 36, 2, 0, 2, 45, 2, 65, 2, 0, 2, 65, 2, 27, 2, 7561576, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7105838, 2, 24, 2, 7561544, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 0, 2, 0, 2, 0, csr_aarch64_oxcaml_withoutfp, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %94:gpr64all = COPY $x28
+    %95:gpr64all = COPY $x27
+    %96:gpr64all = COPY $x0
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    $x28 = COPY %94
+    $x27 = COPY %95
+    $x0 = COPY %8
+    STATEPOINT 0, 0, 3, @"\01_camlHash_lookup_string_equal__black_box_int_0_9_code", $x28, $x27, $x0, 2, 105, 2, 0, 2, 29, 2, 1870160740, 2, 1, 2, 0, 2, 1, 2, 36, 2, 0, 2, 27, 2, 44, 2, 0, 2, 44, 2, 27, 2, 7561576, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7105838, 2, 24, 2, 7561544, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 0, 2, 0, 2, 0, csr_aarch64_oxcaml_withoutfp, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %97:gpr64all = COPY $x28
+    %98:gpr64all = COPY $x27
+    %99:gpr64all = COPY $x0
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    $x28 = COPY %97
+    $x27 = COPY %98
+    $x0 = COPY %99
+    $x1 = COPY %96
+    STATEPOINT 0, 0, 4, @"\01_camlHash_lookup_string_equal__run_6_15_code", $x28, $x27, $x0, $x1, 2, 105, 2, 0, 2, 29, 2, 1870160740, 2, 1, 2, 0, 2, 1, 2, 36, 2, 0, 2, 22, 2, 66, 2, 0, 2, 66, 2, 27, 2, 7561576, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7105838, 2, 24, 2, 7561544, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 0, 2, 0, 2, 0, csr_aarch64_oxcaml_withoutfp, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %100:gpr64all = COPY $x28
+    %101:gpr64all = COPY $x27
+    %102:gpr64 = COPY $x0
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %103:gpr64common = LOADgot target-flags(aarch64-got) @"\01_camlStdlib__Printf__fn$5b$2fworkspace_root$2fprintf.ml$3a27$2c14$2d$2d48$5d_31"
+    %104:gpr64common = MOVaddr target-flags(aarch64-page) @"\01_camlHash_lookup_string_equal__const_block66", target-flags(aarch64-pageoff, aarch64-nc) @"\01_camlHash_lookup_string_equal__const_block66"
+    %105:gpr32 = MOVi32imm 1
+    %106:gpr64all = SUBREG_TO_REG 0, killed %105, %subreg.sub_32
+    $x28 = COPY %100
+    $x27 = COPY %101
+    $x0 = COPY %103
+    $x1 = COPY %106
+    $x2 = COPY %104
+    STATEPOINT 0, 0, 5, @"\01_camlCamlinternalFormat__make_printf_120_401_code", $x28, $x27, $x0, $x1, $x2, 2, 105, 2, 0, 2, 115, 2, 1870160740, 2, 1, 2, 0, 2, 5, 2, 27, 2, 0, 2, 2, 2, 63, 2, 0, 2, 63, 2, 9, 2, 6910576, 2, 6714478, 2, 7105838, 2, 23, 2, 6583379, 2, 6449516, 2, 5267295, 2, 7235954, 2, 3040884, 2, 7366251, 2, 7235954, 2, 26228, 2, 34, 2, 0, 2, 21, 2, 43, 2, 0, 2, 43, 2, 9, 2, 6910576, 2, 6714478, 2, 7105838, 2, 22, 2, 6583379, 2, 6449516, 2, 5267295, 2, 7235954, 2, 3040884, 2, 7499878, 2, 7630441, 2, 102, 2, 38, 2, 0, 2, 17, 2, 35, 2, 0, 2, 35, 2, 9, 2, 6910576, 2, 6714478, 2, 7105838, 2, 21, 2, 6583379, 2, 6449516, 2, 5267295, 2, 7235954, 2, 3040884, 2, 6910576, 2, 6714478, 2, 11, 2, 0, 2, 21, 2, 63, 2, 0, 2, 63, 2, 27, 2, 7561576, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7105838, 2, 37, 2, 7561544, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7499822, 2, 7630441, 2, 6648415, 2, 7107955, 2, 116, 2, 36, 2, 0, 2, 9, 2, 66, 2, 0, 2, 66, 2, 27, 2, 7561576, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7105838, 2, 24, 2, 7561544, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 0, 2, 0, 2, 0, csr_aarch64_oxcaml_withoutfp, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %107:gpr64all = COPY $x28
+    %108:gpr64all = COPY $x27
+    %109:gpr64sp = COPY $x0
+    %110:gpr64sp = ANDXri %102, 4126
+    %111:gpr64 = LDRXui %109, 0 :: (load (s64) from %ir.gcagg158, align 4, addrspace 1)
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    $x28 = COPY %107
+    $x27 = COPY %108
+    $x0 = COPY %110
+    $x1 = COPY %109
+    STATEPOINT 0, 0, 4, killed %111, $x28, $x27, $x0, $x1, 2, 105, 2, 0, 2, 59, 2, 1870160740, 2, 1, 2, 0, 2, 2, 2, 11, 2, 0, 2, 21, 2, 63, 2, 0, 2, 63, 2, 27, 2, 7561576, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7105838, 2, 37, 2, 7561544, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7499822, 2, 7630441, 2, 6648415, 2, 7107955, 2, 116, 2, 36, 2, 0, 2, 9, 2, 66, 2, 0, 2, 66, 2, 27, 2, 7561576, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 7105838, 2, 24, 2, 7561544, 2, 7102312, 2, 7040879, 2, 6254709, 2, 7500915, 2, 6778473, 2, 7431519, 2, 7102837, 2, 0, 2, 0, 2, 0, csr_aarch64_oxcaml_withoutfp, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %112:gpr64all = COPY $x28
+    %113:gpr64all = COPY $x27
+    %114:gpr64all = COPY $x0
+    $x28 = COPY %112
+    $x27 = COPY %113
+    $x0 = COPY %106
+    RET_ReallyLR implicit $x28, implicit $x27, implicit $x0
+
+...

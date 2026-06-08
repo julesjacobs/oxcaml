@@ -1,0 +1,204 @@
+{
+  "timestamp": "20260608_173120",
+  "cwd": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml",
+  "native": {
+    "compiler": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/_native_install/bin/ocamlopt.opt",
+    "ocamllib": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/_native_install/lib/ocaml",
+    "log": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/_native_build/log",
+    "cwd": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/_native_build/main"
+  },
+  "llvm": {
+    "compiler": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/_llvm_self_stage_install/bin/ocamlopt.opt",
+    "real_compiler": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/_llvm_self_stage_install/bin/ocamlopt.opt.real",
+    "ocamllib": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/_llvm_self_stage_install/lib/ocaml",
+    "log": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/_llvm_self_stage_main_build/log",
+    "cwd": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/_llvm_self_stage_main_build/main"
+  },
+  "native_sha1": "56087c2d8ce22021b3411d58cf6ed55034f51636",
+  "llvm_wrapper_sha1": "44e7920d9f60a2d0f9472d80a802454b8410c88d",
+  "llvm_real_sha1": "65a0859b00d1c6cbacdba23eb578eb72bf549eac",
+  "repetitions": 5,
+  "extra_ocamlopt_flags": [],
+  "modules": [
+    {
+      "source": "backend/cfg_selectgen.ml",
+      "module": "cfg_selectgen",
+      "native_median_s": 0.5543005000799894,
+      "llvm_median_s": 0.531779333949089,
+      "llvm_over_native_ratio": 0.9593701139947548,
+      "llvm_speedup_pct": 4.235058546494108,
+      "native_samples_s": [
+        0.5553620411083102,
+        0.5471412499900907,
+        0.5543005000799894,
+        0.5577895420137793,
+        0.53846774995327
+      ],
+      "llvm_samples_s": [
+        0.5463102920912206,
+        0.5242195830214769,
+        0.5402577919885516,
+        0.5299646249040961,
+        0.531779333949089
+      ]
+    },
+    {
+      "source": "backend/llvm/llvmize.ml",
+      "module": "llvmize",
+      "native_median_s": 1.733879917068407,
+      "llvm_median_s": 1.73139458312653,
+      "llvm_over_native_ratio": 0.9985666054970641,
+      "llvm_speedup_pct": 0.1435452072045207,
+      "native_samples_s": [
+        1.7317179159726948,
+        1.7941785829607397,
+        1.747830874985084,
+        1.733879917068407,
+        1.7243550838902593
+      ],
+      "llvm_samples_s": [
+        1.6934654170181602,
+        1.7532760410103947,
+        1.73139458312653,
+        1.7217192908283323,
+        1.763001374900341
+      ]
+    },
+    {
+      "source": "lambda/translcore.ml",
+      "module": "translcore",
+      "native_median_s": 1.3407051251269877,
+      "llvm_median_s": 1.3318508330266923,
+      "llvm_over_native_ratio": 0.9933957945454585,
+      "llvm_speedup_pct": 0.6648110945107533,
+      "native_samples_s": [
+        1.4096967920195311,
+        1.3407051251269877,
+        1.3256825841963291,
+        1.324322875123471,
+        1.3762463331222534
+      ],
+      "llvm_samples_s": [
+        1.291070792125538,
+        1.3470094171352684,
+        1.3382790838368237,
+        1.3318508330266923,
+        1.3167486670427024
+      ]
+    },
+    {
+      "source": "typing/ctype.ml",
+      "module": "ctype",
+      "native_median_s": 2.530229999916628,
+      "llvm_median_s": 2.479072584072128,
+      "llvm_over_native_ratio": 0.9797815155751906,
+      "llvm_speedup_pct": 2.063570714838403,
+      "native_samples_s": [
+        2.4958879579789937,
+        2.4940397089812905,
+        2.532980917021632,
+        2.547856792109087,
+        2.530229999916628
+      ],
+      "llvm_samples_s": [
+        2.469964083051309,
+        2.4214509590528905,
+        2.5499958340078592,
+        2.479072584072128,
+        2.4988599580246955
+      ]
+    },
+    {
+      "source": "typing/env.ml",
+      "module": "env",
+      "native_median_s": 1.6619670409709215,
+      "llvm_median_s": 1.6413121251389384,
+      "llvm_over_native_ratio": 0.9875720063498272,
+      "llvm_speedup_pct": 1.2584392398998778,
+      "native_samples_s": [
+        1.659456165973097,
+        1.6619670409709215,
+        1.6940383329056203,
+        1.671547417063266,
+        1.6593282918911427
+      ],
+      "llvm_samples_s": [
+        1.6429684159811586,
+        1.659246874973178,
+        1.617958834161982,
+        1.6299843329470605,
+        1.6413121251389384
+      ]
+    },
+    {
+      "source": "typing/typecore.ml",
+      "module": "typecore",
+      "native_median_s": 4.901565084001049,
+      "llvm_median_s": 4.716877875151113,
+      "llvm_over_native_ratio": 0.962320767819086,
+      "llvm_speedup_pct": 3.9154545387507955,
+      "native_samples_s": [
+        4.841915457975119,
+        4.914639208000153,
+        4.979578417027369,
+        4.795246792025864,
+        4.901565084001049
+      ],
+      "llvm_samples_s": [
+        4.670195125043392,
+        4.696809583110735,
+        4.7922635830473155,
+        4.716877875151113,
+        4.870359957916662
+      ]
+    },
+    {
+      "source": "typing/typemod.ml",
+      "module": "typemod",
+      "native_median_s": 1.491517333080992,
+      "llvm_median_s": 1.4374587920028716,
+      "llvm_over_native_ratio": 0.9637560088112064,
+      "llvm_speedup_pct": 3.7607019678663978,
+      "native_samples_s": [
+        1.491517333080992,
+        1.4574960418976843,
+        1.5013066669926047,
+        1.5068943749647588,
+        1.4841699171811342
+      ],
+      "llvm_samples_s": [
+        1.4372567918617278,
+        1.4382466659881175,
+        1.4374587920028716,
+        1.4109964170493186,
+        1.4747570420149714
+      ]
+    }
+  ],
+  "sum_of_module_medians": {
+    "native_s": 14.214165000244975,
+    "llvm_s": 13.869746126467362,
+    "llvm_over_native_ratio": 0.9757693206901934,
+    "llvm_speedup_pct": 2.483238486394246
+  },
+  "round_total_medians": {
+    "native_s": 14.210166957927868,
+    "llvm_s": 13.84025912429206,
+    "llvm_over_native_ratio": 0.9739687904631243,
+    "llvm_speedup_pct": 2.672694422220423,
+    "native_round_totals_s": [
+      14.185553664108738,
+      14.210166957927868,
+      14.335718293208629,
+      14.137537710368633,
+      14.214362459955737
+    ],
+    "llvm_round_totals_s": [
+      13.751230917172506,
+      13.84025912429206,
+      14.007608502171934,
+      13.82046595797874,
+      14.0968184589874
+    ]
+  }
+}
