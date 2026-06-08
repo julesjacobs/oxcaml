@@ -488,17 +488,7 @@ let compile_via_llvm ~ppf_dump ~funcnames cfg_with_layout =
        (Cfg_polling.instrument_fundecl ~future_funcnames:funcnames)
   ++ cfg_with_layout_profile ~accumulate:true "cfg_zero_alloc_checker"
        (Zero_alloc_checker.cfg ~future_funcnames:funcnames ppf_dump)
-  (* Combined allocations create several OCaml object starts from one allocation
-     pointer. In LLVM IR those secondary object starts currently look like
-     derived GEPs from the first object, but RS4GC must treat them as independent
-     base values. Disable this pass for the LLVM backend until llvmize encodes
-     that object-start provenance explicitly. *)
-  ++ (fun cfg_with_layout ->
-       if !Clflags.llvm_backend
-       then cfg_with_layout
-       else
-         cfg_with_layout_profile ~accumulate:true "cfg_comballoc"
-           Cfg_comballoc.run cfg_with_layout)
+  ++ cfg_with_layout_profile ~accumulate:true "cfg_comballoc" Cfg_comballoc.run
   ++ Compiler_hooks.execute_and_pipe Compiler_hooks.Cfg_combine
   ++ pass_dump_cfg_if ppf_dump Oxcaml_flags.dump_cfg "After comballoc"
   ++ (fun (cfg_with_layout : Cfg_with_layout.t) ->

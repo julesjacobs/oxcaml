@@ -47,18 +47,13 @@ EOF
 grep -q "^ok$" "$stdout_file"
 
 # The allocation slow path for [f] records the three allocation sizes as
-# alloc_words - 2, matching the native frame table format.  Comballoc-capable
-# compilers may encode them as one count-3 record; LLVM backend builds that
-# deliberately disable comballoc encode the same sizes as separate count-1
-# records.
+# alloc_words - 2, matching the native frame table format.  The LLVM backend
+# runs comballoc, so these adjacent allocations should be encoded as one
+# count-3 record.
 awk '
   BEGIN {
     combined_len = 4
     combined[1] = 3; combined[2] = 1; combined[3] = 2; combined[4] = 1
-    separate_len = 6
-    separate[1] = 1; separate[2] = 1
-    separate[3] = 1; separate[4] = 2
-    separate[5] = 1; separate[6] = 1
   }
 
   function advance(value, pattern, idx) {
@@ -74,8 +69,7 @@ awk '
     value = $2
     sub(/[^0-9-].*/, "", value)
     combined_i = advance(value, combined, combined_i)
-    separate_i = advance(value, separate, separate_i)
-    if (combined_i == combined_len || separate_i == separate_len) {
+    if (combined_i == combined_len) {
       found = 1
       exit
     }
