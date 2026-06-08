@@ -1783,23 +1783,67 @@ let emit_string_compare_word t s1 s2 ~offset ~count =
   let lt = emit_ins t (I.icmp Iult ~arg1:word1_masked ~arg2:word2_masked) in
   neq, lt
 
+let emit_string_compare_result_value t ~lt =
+  emit_ins t (I.select ~cond:lt ~ifso:(V.of_int (-1)) ~ifnot:(V.of_int 3))
+
 let emit_string_compare_result t res_reg ~lt ~done_label =
-  let result =
-    emit_ins t (I.select ~cond:lt ~ifso:(V.of_int (-1)) ~ifnot:(V.of_int 3))
-  in
+  let result = emit_string_compare_result_value t ~lt in
   store_into_reg t res_reg result;
   emit_ins_no_res t (I.br done_label)
 
-let emit_string_compare_length_tiebreak t res_reg ~len1 ~len2 ~done_label =
+let emit_string_compare_length_tiebreak_value t ~len1 ~len2 =
   let len1_lt_len2 = emit_ins t (I.icmp Iult ~arg1:len1 ~arg2:len2) in
   let len1_gt_len2 = emit_ins t (I.icmp Iugt ~arg1:len1 ~arg2:len2) in
   let gt_or_eq =
     emit_ins t
       (I.select ~cond:len1_gt_len2 ~ifso:(V.of_int 3) ~ifnot:(V.of_int 1))
   in
-  let result =
+  emit_ins t
+    (I.select ~cond:len1_lt_len2 ~ifso:(V.of_int (-1)) ~ifnot:gt_or_eq)
+
+let emit_string_compare_length_tiebreak t res_reg ~len1 ~len2 ~done_label =
+  let result = emit_string_compare_length_tiebreak_value t ~len1 ~len2 in
+  store_into_reg t res_reg result;
+  emit_ins_no_res t (I.br done_label)
+
+let emit_memcmp_direct_call t s1 s2 ~offset ~count =
+  add_referenced_symbol t "memcmp";
+  let s1_arg = do_offset t (cast t s1 T.ptr) T.ptr offset in
+  let s2_arg = do_offset t (cast t s2 T.ptr) T.ptr offset in
+  let args = prepare_call_args t [s1_arg; s2_arg; count] in
+  let direct_res_types = List.map (fun _ -> T.i64) runtime_regs @ [T.i32] in
+  let c_res =
     emit_ins t
-      (I.select ~cond:len1_lt_len2 ~ifso:(V.of_int (-1)) ~ifnot:gt_or_eq)
+      (I.call ~func:(LL.Ident.global "memcmp") ~args
+         ~res_type:(Some (T.Struct direct_res_types))
+         ~attrs:[LL.Fn_attr.Gc_leaf_function] ~operand_bundles:[]
+         ~cc:Oxcaml_c_direct_call ~musttail:false)
+  in
+  let runtime_values =
+    extract_struct t c_res (List.init (List.length runtime_regs) (fun i -> [i]))
+  in
+  List.iter2
+    (fun ptr to_store -> emit_ins_no_res t (I.store ~ptr ~to_store))
+    runtime_regs runtime_values;
+  match extract_struct t c_res [[List.length runtime_regs]] with
+  | [memcmp_result] -> memcmp_result
+  | _ -> Misc.fatal_error "unexpected memcmp direct call result shape"
+
+let emit_string_compare_memcmp_suffix t res_reg s1 s2 ~offset ~count ~len1 ~len2
+    ~done_label =
+  let memcmp_result = emit_memcmp_direct_call t s1 s2 ~offset ~count in
+  let memcmp_lt =
+    emit_ins t
+      (I.icmp Islt ~arg1:memcmp_result ~arg2:(V.of_int ~typ:T.i32 0))
+  in
+  let memcmp_neq =
+    emit_ins t
+      (I.icmp Ine ~arg1:memcmp_result ~arg2:(V.of_int ~typ:T.i32 0))
+  in
+  let neq_result = emit_string_compare_result_value t ~lt:memcmp_lt in
+  let eq_result = emit_string_compare_length_tiebreak_value t ~len1 ~len2 in
+  let result =
+    emit_ins t (I.select ~cond:memcmp_neq ~ifso:neq_result ~ifnot:eq_result)
   in
   store_into_reg t res_reg result;
   emit_ins_no_res t (I.br done_label)
@@ -1882,7 +1926,7 @@ let maybe_emit_specialized_obj_tag_extcall t ~func_symbol ~alloc ~stack_ofs
   | _ -> false
 
 let maybe_emit_specialized_string_compare_extcall t ~func_symbol ~alloc
-    ~stack_ofs arg_regs res_regs emit_fallback =
+    ~stack_ofs arg_regs res_regs _emit_fallback =
   match arg_regs, res_regs with
   | [arg1; arg2], [res_reg]
     when (not alloc)
@@ -1891,10 +1935,13 @@ let maybe_emit_specialized_string_compare_extcall t ~func_symbol ~alloc
          && supports_inline_string_compare ()
          && (T.equal (T.of_reg res_reg) T.i64
             || T.equal (T.of_reg res_reg) T.val_ptr) ->
+    add_referenced_symbol t func_symbol;
     let done_label = V.of_label (Cmm.new_label ()) in
     let pointer_equal_label = V.of_label (Cmm.new_label ()) in
     let not_pointer_equal_label = V.of_label (Cmm.new_label ()) in
     let long_fallback_label = V.of_label (Cmm.new_label ()) in
+    let long_word1_mismatch_label = V.of_label (Cmm.new_label ()) in
+    let long_word1_equal_label = V.of_label (Cmm.new_label ()) in
     let short_compare_label = V.of_label (Cmm.new_label ()) in
     let length_tiebreak_label = V.of_label (Cmm.new_label ()) in
     let word1_label = V.of_label (Cmm.new_label ()) in
@@ -1917,15 +1964,27 @@ let maybe_emit_specialized_string_compare_extcall t ~func_symbol ~alloc
     let len1 = emit_ocaml_string_length t s1 in
     let len2 = emit_ocaml_string_length t s2 in
     let min_len = emit_min_u64 t len1 len2 in
-    let min_len_gt_15 =
-      emit_ins t (I.icmp Iugt ~arg1:min_len ~arg2:(V.of_int 15))
+    let min_len_gt_16 =
+      emit_ins t (I.icmp Iugt ~arg1:min_len ~arg2:(V.of_int 16))
     in
     emit_ins_no_res t
-      (I.br_cond ~cond:min_len_gt_15 ~ifso:long_fallback_label
+      (I.br_cond ~cond:min_len_gt_16 ~ifso:long_fallback_label
          ~ifnot:short_compare_label);
     emit_label t long_fallback_label;
-    emit_fallback ();
-    emit_ins_no_res t (I.br done_label);
+    let word1_neq, word1_lt =
+      emit_string_compare_word t s1 s2 ~offset:0 ~count:(V.of_int 8)
+    in
+    emit_ins_no_res t
+      (I.br_cond ~cond:word1_neq ~ifso:long_word1_mismatch_label
+         ~ifnot:long_word1_equal_label);
+    emit_label t long_word1_mismatch_label;
+    emit_string_compare_result t res_reg ~lt:word1_lt ~done_label;
+    emit_label t long_word1_equal_label;
+    let suffix_len =
+      emit_ins t (I.binary Sub ~arg1:min_len ~arg2:(V.of_int 8))
+    in
+    emit_string_compare_memcmp_suffix t res_reg s1 s2 ~offset:8
+      ~count:suffix_len ~len1 ~len2 ~done_label;
     emit_label t short_compare_label;
     let min_len_is_zero =
       emit_ins t (I.icmp Ieq ~arg1:min_len ~arg2:(V.of_int 0))
