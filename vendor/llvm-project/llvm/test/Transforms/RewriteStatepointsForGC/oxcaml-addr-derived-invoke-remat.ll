@@ -15,13 +15,17 @@ define oxcaml_nofpcc { i64, i64, ptr addrspace(1) } @invoke_gep_normal_only(
     ptr addrspace(1) %obj)
     gc "oxcaml" personality ptr @__gxx_personality_v0 {
 ; CHECK-LABEL: define oxcaml_nofpcc {{.*}} @invoke_gep_normal_only(
+; The handler-live base is rooted in its slot at its definition and crosses
+; the statepoint through the slot, not through gc.relocate.
+; CHECK: %obj.exnroot = alloca ptr addrspace(1), align 8
+; CHECK-NEXT: store volatile ptr addrspace(1) %obj, ptr %obj.exnroot, align 8
 entry:
   call void @llvm.aarch64.oxcaml.trap.publish(
       ptr %trap_block,
       i64 1,
       ptr blockaddress(@invoke_gep_normal_only, %recover))
   %field.addr = getelementptr i8, ptr addrspace(1) %obj, i64 24
-; CHECK: %statepoint_token = invoke {{.*}} @llvm.experimental.gc.statepoint{{.*}} [ "deopt"(), "gc-live"(ptr addrspace(1) %obj, ptr %obj.exnroot) ]
+; CHECK: %statepoint_token = invoke {{.*}} @llvm.experimental.gc.statepoint{{.*}} [ "deopt"(), "gc-live"(ptr %obj.exnroot) ]
 ; CHECK-NEXT: to label %normal unwind label %recover
   %call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee(i64 %ds, i64 %alloc, ptr addrspace(1) %obj)
@@ -30,10 +34,10 @@ entry:
 
 normal:
 ; CHECK: normal:
-; CHECK: %obj.relocated = call coldcc ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token %statepoint_token, i32 0, i32 0)
-; CHECK: %field.addr.remat = getelementptr i8, ptr addrspace(1) %obj.relocated, i64 24
+; CHECK-NOT: gc.relocate
+; CHECK: %obj.exnroot.normal.load = load volatile ptr addrspace(1), ptr %obj.exnroot, align 8
+; CHECK: %field.addr.remat = getelementptr i8, ptr addrspace(1) %obj.exnroot.normal.load, i64 24
 ; CHECK: %field = load ptr addrspace(1), ptr addrspace(1) %field.addr.remat
-; CHECK-NOT: gc.relocate.p1(token %statepoint_token, i32 0, i32 1)
   %field = load ptr addrspace(1), ptr addrspace(1) %field.addr, align 8
   %pair = extractvalue { i64, i64, ptr addrspace(1) } %call, 0
   %alloc2 = extractvalue { i64, i64, ptr addrspace(1) } %call, 1
@@ -70,18 +74,22 @@ entry:
       i64 1,
       ptr blockaddress(@invoke_gep_repeated_statepoints, %recover))
   %field.addr = getelementptr i8, ptr addrspace(1) %obj, i64 32
-; CHECK: %statepoint_token = invoke {{.*}} [ "deopt"(), "gc-live"(ptr addrspace(1) %obj, ptr %obj.exnroot) ]
+; CHECK: %statepoint_token = invoke {{.*}} [ "deopt"(), "gc-live"(ptr %obj.exnroot) ]
   %call1 = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee(i64 %ds, i64 %alloc, ptr addrspace(1) %obj)
       "statepoint-id"="0" [ "deopt"() ]
       to label %after1 unwind label %recover
 
 after1:
+; The reload feeds both the remat and the next protected call; the slot is
+; not stored again.
 ; CHECK: after1:
-; CHECK: %obj.relocated = call coldcc ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token %statepoint_token, i32 0, i32 0)
-; CHECK: %field.addr.remat{{[0-9]*}} = getelementptr i8, ptr addrspace(1) %obj.relocated, i64 32
+; CHECK-NOT: gc.relocate
+; CHECK: %obj.exnroot.normal.load = load volatile ptr addrspace(1), ptr %obj.exnroot, align 8
+; CHECK: %field.addr.remat{{[0-9]*}} = getelementptr i8, ptr addrspace(1) %obj.exnroot.normal.load, i64 32
 ; CHECK: %field1 = load ptr addrspace(1), ptr addrspace(1) %field.addr.remat{{[0-9]*}}
-; CHECK: %statepoint_token{{[0-9]*}} = invoke {{.*}} [ "deopt"(), "gc-live"(ptr addrspace(1) %obj.relocated, ptr %obj.exnroot) ]
+; CHECK-NOT: store volatile
+; CHECK: %statepoint_token{{[0-9]*}} = invoke {{.*}} ptr addrspace(1) %obj.exnroot.normal.load, {{.*}} [ "deopt"(), "gc-live"(ptr %obj.exnroot) ]
   %field1 = load ptr addrspace(1), ptr addrspace(1) %field.addr, align 8
   call void @consume(ptr addrspace(1) %field1) "gc-leaf-function"
   %call2 = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
@@ -91,7 +99,8 @@ after1:
 
 normal:
 ; CHECK: normal:
-; CHECK: %field.addr.remat{{[0-9]*}} = getelementptr i8, ptr addrspace(1) %obj.relocated{{[0-9]*}}, i64 32
+; CHECK: %obj.exnroot.normal.load{{[0-9]*}} = load volatile ptr addrspace(1), ptr %obj.exnroot, align 8
+; CHECK: %field.addr.remat{{[0-9]*}} = getelementptr i8, ptr addrspace(1) %obj.exnroot.normal.load{{[0-9]*}}, i64 32
   %field = load ptr addrspace(1), ptr addrspace(1) %field.addr, align 8
   %pair = extractvalue { i64, i64, ptr addrspace(1) } %call2, 0
   %alloc2 = extractvalue { i64, i64, ptr addrspace(1) } %call2, 1
@@ -136,9 +145,11 @@ preuse:
   br label %try
 
 try:
+; The slot was stored at the argument's definition in the entry block; no
+; store precedes the invoke.
 ; CHECK: try:
-; CHECK: store volatile ptr addrspace(1) %obj, ptr %obj.exnroot, align 8
-; CHECK: %statepoint_token{{[0-9]*}} = invoke {{.*}} [ "deopt"(), "gc-live"(ptr addrspace(1) %obj, ptr %obj.exnroot) ]
+; CHECK-NOT: store volatile
+; CHECK: %statepoint_token{{[0-9]*}} = invoke {{.*}} [ "deopt"(), "gc-live"(ptr %obj.exnroot) ]
   %call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee(i64 %ds, i64 %alloc, ptr addrspace(1) %obj)
       "statepoint-id"="0" [ "deopt"() ]
@@ -146,10 +157,10 @@ try:
 
 normal:
 ; CHECK: normal:
-; CHECK: %obj.relocated{{[0-9]*}} = call coldcc ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token %statepoint_token{{[0-9]*}}, i32 0, i32 0)
-; CHECK: %field.addr.remat{{[0-9]*}} = getelementptr i8, ptr addrspace(1) %obj.relocated{{[0-9]*}}, i64 40
+; CHECK-NOT: gc.relocate
+; CHECK: %obj.exnroot.normal.load{{[0-9]*}} = load volatile ptr addrspace(1), ptr %obj.exnroot, align 8
+; CHECK: %field.addr.remat{{[0-9]*}} = getelementptr i8, ptr addrspace(1) %obj.exnroot.normal.load{{[0-9]*}}, i64 40
 ; CHECK: %field = load ptr addrspace(1), ptr addrspace(1) %field.addr.remat{{[0-9]*}}, align 8
-; CHECK-NOT: gc.relocate.p1(token %statepoint_token{{[0-9]*}}, i32 0, i32 1)
   %field = load ptr addrspace(1), ptr addrspace(1) %field.addr, align 8
   %pair = extractvalue { i64, i64, ptr addrspace(1) } %call, 0
   %alloc2 = extractvalue { i64, i64, ptr addrspace(1) } %call, 1

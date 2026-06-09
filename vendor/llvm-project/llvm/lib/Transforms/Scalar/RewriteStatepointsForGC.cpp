@@ -56,6 +56,7 @@
 #include "llvm/IR/User.h"
 #include "llvm/IR/Value.h"
 #include "llvm/IR/ValueHandle.h"
+#include "llvm/IR/ValueMap.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Casting.h"
@@ -129,6 +130,22 @@ static cl::opt<bool> DebugOxCamlDerivedRemat(
 static cl::opt<bool> DebugOxCamlGCPointerAllocas(
     "rs4gc-debug-oxcaml-gc-pointer-allocas", cl::Hidden, cl::init(false),
     cl::desc("Print OxCaml GC pointer allocas that RS4GC promotes or rejects"));
+
+static cl::opt<bool> OxCamlRootSlotAliasing(
+    "rs4gc-oxcaml-root-slot-aliasing", cl::Hidden, cl::init(true),
+    cl::desc("Let reloads/selectors of a stable root slot share that slot"));
+
+// Homing at call statepoints (2/3) miscompiles under GC pressure (boot
+// compiler heap corruption, see PROGRESS); calls keep full relocation until
+// the call-statepoint lowering of slot-only frames is understood.
+static cl::opt<unsigned> OxCamlValueSlotHomes(
+    "rs4gc-oxcaml-value-slot-homes", cl::Hidden, cl::init(1),
+    cl::desc("Home live handler-rooted values through their slot instead of "
+             "relocating them (0=off, 1=invokes only, 2=calls only, 3=all)"));
+
+static cl::opt<bool> OxCamlLazyBoundaryLoads(
+    "rs4gc-oxcaml-lazy-boundary-loads", cl::Hidden, cl::init(true),
+    cl::desc("Reload boundary-only recovery values on their own edge"));
 
 static cl::opt<bool> UseOxCamlVolatileRootAllocas(
     "rs4gc-oxcaml-volatile-root-allocas", cl::Hidden, cl::init(false),
@@ -404,8 +421,10 @@ struct PartiallyConstructedSafepointRecord {
   /// Values whose live-through state at this statepoint is represented by an
   /// explicit root slot.  If the value is still needed on the normal
   /// continuation, the slot is loaded after the statepoint and fed through the
-  /// normal relocationViaAlloca SSA repair path.
-  SmallVector<std::pair<Value *, AllocaInst *>, 4> ExplicitRootHomes;
+  /// normal relocationViaAlloca SSA repair path.  Statepoint rewriting RAUWs
+  /// earlier call results to fresh gc.results, so the tracked handle must
+  /// follow that replacement or the new value would never be repaired.
+  SmallVector<std::pair<WeakTrackingVH, AllocaInst *>, 4> ExplicitRootHomes;
 };
 
 struct RematerializationAlternative {
@@ -439,6 +458,13 @@ using ExplicitRootSlotMapTy = DenseMap<CallBase *, SmallVector<Value *, 4>>;
 using ExplicitExceptionRootCallSetTy = DenseSet<CallBase *>;
 using ExplicitRootHomeMapTy =
     DenseMap<CallBase *, SmallVector<std::pair<Value *, AllocaInst *>, 4>>;
+
+/// One explicit root slot per handler-live SSA value.  The slot is stored
+/// exactly once, at the value's definition, and reloaded after each
+/// safepoint the value crosses and at each trap recovery entry that needs
+/// it.  A ValueMap keeps entries coherent across the RAUWs and deletions of
+/// statepoint rewriting, so the mapping stays usable in the late pass.
+using OxCamlValueRootSlotMapTy = ValueMap<Value *, AllocaInst *>;
 
 } // end anonymous namespace
 
@@ -2850,13 +2876,6 @@ struct OxCamlRecoveryStoreSite {
   BasicBlock *PhiIncomingBlock;
 };
 
-struct ExplicitExceptionRootSlotCacheEntry {
-  Type *SlotType;
-  SmallVector<OxCamlRecoveryStoreSite, 8> StoreSites;
-  SmallVector<StoreInst *, 8> Stores;
-  AllocaInst *Slot;
-};
-
 struct OxCamlRecoveryBoundaryPhi {
   PHINode *Phi;
   unsigned IncomingIndex;
@@ -3386,13 +3405,31 @@ static bool isRootableOxCamlExceptionValue(Value *V,
   return Finish(false);
 }
 
+/// A slot whose content is defined by at most one store outside the entry
+/// block always holds the same object (modulo GC moves) from that store
+/// onward, so other SSA names for that object may share it.  Per-invoke
+/// phi-edge slots have several defining stores and must not be shared.
+static bool oxcamlRootSlotHasSingleDefiningStore(const AllocaInst *Slot) {
+  const BasicBlock &EntryBlock = Slot->getFunction()->getEntryBlock();
+  unsigned NonEntryStores = 0;
+  for (const User *U : Slot->users()) {
+    auto *Store = dyn_cast<StoreInst>(U);
+    if (!Store || Store->getPointerOperand() != Slot)
+      continue;
+    if (Store->getParent() == &EntryBlock)
+      continue;
+    if (++NonEntryStores > 1)
+      return false;
+  }
+  return true;
+}
+
 static bool materializeOxCamlExceptionRootSlots(
     Function &F, DominatorTree &DT, ExplicitRootSlotMapTy &ExplicitRootSlots,
     ExplicitExceptionRootCallSetTy &ExplicitExceptionRootCalls,
-    ExplicitRootHomeMapTy &ExplicitRootHomes, DefiningValueMapTy &DVCache,
-    IsKnownBaseMapTy &KnownBases,
-    SmallVectorImpl<ExplicitExceptionRootSlotCacheEntry>
-        &ExplicitExceptionRootSlotCache) {
+    ExplicitRootHomeMapTy &ExplicitRootHomes,
+    OxCamlValueRootSlotMapTy &SlotForValue, DefiningValueMapTy &DVCache,
+    IsKnownBaseMapTy &KnownBases) {
   if (!isOxCamlFunction(F))
     return false;
 
@@ -3500,143 +3537,330 @@ static bool materializeOxCamlExceptionRootSlots(
     BasicBlock &EntryBlock = F.getEntryBlock();
     IRBuilder<> EntryBuilder(&EntryBlock, EntryBlock.getFirstInsertionPt());
     IRBuilder<> RecoverBuilder(Recover->getNextNode());
-    auto MaterializeRootSlot =
-        [&](Value *HandlerValue, BasicBlock &StoreSiteBB,
-            function_ref<Value *(OxCamlRecoveryStoreSite)> EdgeValueForSite) {
-          if (!HandlerValue->getType()->isSized()) {
-            HandlerValue->print(errs());
+
+    SmallVector<OxCamlRecoveryStoreSite, 8> RegionStoreSites;
+    if (!collectDirectOxCamlRecoveryStoreSites(BB, RegionStoreSites)) {
+      std::string Message;
+      raw_string_ostream OS(Message);
+      OS << "unsupported OxCaml recovery predecessor for explicit "
+            "exception roots: recovery block "
+         << BB.getName();
+      report_fatal_error(Twine(OS.str()));
+    }
+
+    auto RegisterSlotAtStoreSites =
+        [&](AllocaInst *Slot, ArrayRef<OxCamlRecoveryStoreSite> StoreSites) {
+          for (const OxCamlRecoveryStoreSite &StoreSite : StoreSites) {
+            SmallVectorImpl<Value *> &Slots =
+                ExplicitRootSlots[StoreSite.Invoke];
+            if (!llvm::is_contained(Slots, Slot))
+              Slots.push_back(Slot);
+            ExplicitExceptionRootCalls.insert(StoreSite.Invoke);
+          }
+        };
+
+    auto CreateRootSlotAlloca = [&](Value *HandlerValue) -> AllocaInst * {
+      if (!HandlerValue->getType()->isSized()) {
+        HandlerValue->print(errs());
+        errs() << "\n";
+        report_fatal_error(
+            "cannot materialize unsized OxCaml exception value");
+      }
+      AllocaInst *Slot = EntryBuilder.CreateAlloca(
+          HandlerValue->getType(), DL.getAllocaAddrSpace(), nullptr,
+          suffixed_name_or(HandlerValue, ".exnroot", "exnroot"));
+      Slot->setAlignment(DL.getABITypeAlign(HandlerValue->getType()));
+      return Slot;
+    };
+
+    auto CreateRecoverLoadAt = [&](Value *HandlerValue, AllocaInst *Slot,
+                                   IRBuilder<> &Builder) -> LoadInst * {
+      LoadInst *Load = Builder.CreateAlignedLoad(
+          HandlerValue->getType(), Slot,
+          DL.getABITypeAlign(HandlerValue->getType()),
+          suffixed_name_or(HandlerValue, ".exnroot.load", "exnroot.load"));
+      if (isHandledGCPointerType(HandlerValue->getType()))
+        Load->setVolatile(true);
+      Load->setMetadata("oxcaml.exnroot.load",
+                        MDNode::get(F.getContext(), {}));
+      return Load;
+    };
+    auto CreateRecoverLoad = [&](Value *HandlerValue,
+                                 AllocaInst *Slot) -> LoadInst * {
+      return CreateRecoverLoadAt(HandlerValue, Slot, RecoverBuilder);
+    };
+
+    // A PHI at a recovery entry or trampoline takes its value across unwind
+    // edges, so its slot cannot be stored at the definition; the edge value
+    // is stored before each protected invoke instead.  The trampoline shape
+    // alone is not enough: a plain phis-plus-branch block matches it, so the
+    // branch target must actually lead to a trap recovery block.
+    auto IsUnwindEdgeDefinedPhi = [&](PHINode *PN) -> bool {
+      BasicBlock *Parent = PN->getParent();
+      if (IntrinsicInst *ParentRecover = getOxCamlTrapRecover(*Parent))
+        if (isOxCamlRecoveryBlockStart(*Parent, ParentRecover))
+          return true;
+      // Landing pads are direct unwind targets.
+      if (Parent->isLandingPad())
+        return true;
+      if (auto *Br = dyn_cast<BranchInst>(Parent->getTerminator()))
+        if (Br->isUnconditional() &&
+            isBranchOnlyOxCamlRecoveryTrampoline(Parent, Br->getSuccessor(0),
+                                                 /*AllowPHIs=*/true) &&
+            getOxCamlTrapRecoveryTargetShapeOnly(Br->getSuccessor(0)))
+          return true;
+      return false;
+    };
+
+    auto GetOrCreatePhiEdgeSlot = [&](PHINode *SlotPhi) -> AllocaInst * {
+      if (AllocaInst *Slot = SlotForValue.lookup(SlotPhi))
+        return Slot;
+
+      bool IsGCRoot = isHandledGCPointerType(SlotPhi->getType());
+      SmallVector<OxCamlRecoveryStoreSite, 8> StoreSites;
+      if (SlotPhi->getParent() == &BB)
+        llvm::append_range(StoreSites, RegionStoreSites);
+      else if (!collectDirectOxCamlRecoveryStoreSites(*SlotPhi->getParent(),
+                                                      StoreSites)) {
+        errs() << "phi: ";
+        SlotPhi->print(errs());
+        errs() << "\nparent: " << SlotPhi->getParent()->getName()
+               << "\nfunction: " << F.getName() << "\npreds:";
+        for (BasicBlock *Pred : predecessors(SlotPhi->getParent()))
+          errs() << " " << Pred->getName();
+        errs() << "\n";
+        report_fatal_error("unsupported OxCaml recovery trampoline "
+                           "predecessor for explicit exception roots");
+      }
+
+      AllocaInst *Slot = CreateRootSlotAlloca(SlotPhi);
+      StoreInst *InitialStore = EntryBuilder.CreateAlignedStore(
+          IsGCRoot
+              ? cast<Value>(getOxCamlNonMovingImmediate(SlotPhi->getType()))
+              : Constant::getNullValue(SlotPhi->getType()),
+          Slot, DL.getABITypeAlign(SlotPhi->getType()));
+      if (IsGCRoot)
+        InitialStore->setVolatile(true);
+
+      for (const OxCamlRecoveryStoreSite &StoreSite : StoreSites) {
+        InvokeInst *II = StoreSite.Invoke;
+        Value *EdgeValue = nullptr;
+        for (unsigned I = 0, E = SlotPhi->getNumIncomingValues(); I != E;
+             ++I) {
+          if (SlotPhi->getIncomingBlock(I) == StoreSite.PhiIncomingBlock) {
+            EdgeValue = SlotPhi->getIncomingValue(I);
+            break;
+          }
+        }
+        if (!EdgeValue)
+          report_fatal_error("missing OxCaml recovery PHI incoming value");
+        if (auto *EdgePhi = dyn_cast<PHINode>(EdgeValue)) {
+          if (EdgePhi->getParent() == II->getUnwindDest()) {
+            int IncomingIndex = EdgePhi->getBasicBlockIndex(II->getParent());
+            if (IncomingIndex < 0)
+              report_fatal_error(
+                  "missing OxCaml trampoline PHI incoming value");
+            EdgeValue = EdgePhi->getIncomingValue(IncomingIndex);
+          }
+        }
+        EdgeValue = nonPoisonTrapRecoverySlotValue(EdgeValue);
+        if (auto *EdgeInst = dyn_cast<Instruction>(EdgeValue))
+          if (!DT.dominates(EdgeInst, II)) {
+            errs() << "explicit exception root value does not dominate "
+                      "invoke\n  value: ";
+            EdgeValue->print(errs());
+            errs() << "\n  invoke: ";
+            II->print(errs());
             errs() << "\n";
             report_fatal_error(
-                "cannot materialize unsized OxCaml exception value");
-          }
-          bool IsGCRoot = isHandledGCPointerType(HandlerValue->getType());
-
-          SmallVector<OxCamlRecoveryStoreSite, 8> StoreSites;
-          if (&StoreSiteBB == &BB) {
-            for (BasicBlock *Pred : predecessors(&BB)) {
-              if (!collectOxCamlRecoveryStoreSites(BB, Pred, StoreSites)) {
-                std::string Message;
-                raw_string_ostream OS(Message);
-                OS << "unsupported OxCaml recovery predecessor for explicit "
-                      "exception roots: recovery block "
-                   << BB.getName() << ", predecessor " << Pred->getName();
-                report_fatal_error(Twine(OS.str()));
-              }
-            }
-          } else if (!collectDirectOxCamlRecoveryStoreSites(StoreSiteBB,
-                                                           StoreSites)) {
-            report_fatal_error("unsupported OxCaml recovery trampoline "
-                               "predecessor for explicit exception roots");
+                "explicit exception root value does not dominate invoke");
           }
 
-          SmallVector<Value *, 8> EdgeValues;
-          for (OxCamlRecoveryStoreSite StoreSite : StoreSites) {
-            InvokeInst *II = StoreSite.Invoke;
-            Value *EdgeValue =
-                EdgeValueForSite(StoreSite);
-            if (auto *EdgePhi = dyn_cast<PHINode>(EdgeValue)) {
-              if (EdgePhi->getParent() == II->getUnwindDest()) {
-                int IncomingIndex =
-                    EdgePhi->getBasicBlockIndex(II->getParent());
-                if (IncomingIndex < 0)
-                  report_fatal_error(
-                      "missing OxCaml trampoline PHI incoming value");
-                EdgeValue = EdgePhi->getIncomingValue(IncomingIndex);
-              }
-            }
-            EdgeValue = nonPoisonTrapRecoverySlotValue(EdgeValue);
-            if (auto *EdgeInst = dyn_cast<Instruction>(EdgeValue))
-              if (!DT.dominates(EdgeInst, II)) {
-                errs() << "explicit exception root value does not dominate "
-                          "invoke\n  value: ";
-                EdgeValue->print(errs());
-                errs() << "\n  invoke: ";
-                II->print(errs());
-                errs() << "\n";
-                report_fatal_error(
-                    "explicit exception root value does not dominate invoke");
-              }
+        IRBuilder<> StoreBuilder(II);
+        StoreInst *RootStore = StoreBuilder.CreateAlignedStore(
+            EdgeValue, Slot, DL.getABITypeAlign(SlotPhi->getType()));
+        if (IsGCRoot) {
+          RootStore->setVolatile(true);
+          Value *RootHomeValue = nonPoisonOxCamlGCPointerValue(EdgeValue);
+          if (!isa<Constant>(RootHomeValue))
+            ExplicitRootHomes[II].push_back({RootHomeValue, Slot});
+        }
+      }
 
-            EdgeValues.push_back(EdgeValue);
+      if (IsGCRoot)
+        RegisterSlotAtStoreSites(Slot, StoreSites);
+      SlotForValue[SlotPhi] = Slot;
+      return Slot;
+    };
+
+    // Sharing a slot is only sound while the slot still holds the value: the
+    // slot's defining store must dominate the aliasing value's definition and
+    // must not be able to execute again during its lifetime.  A loop-carried
+    // PHI of reloads, for example, holds the previous iteration's value while
+    // the re-executed store rebinds the slot to the current one.
+    auto CanAliasToSlot = [&](Instruction *AliasDef,
+                              AllocaInst *Slot) -> bool {
+      StoreInst *DefStore = nullptr;
+      for (User *U : Slot->users()) {
+        auto *Store = dyn_cast<StoreInst>(U);
+        if (!Store || Store->getPointerOperand() != Slot)
+          continue;
+        if (Store->getParent() == &F.getEntryBlock())
+          continue;
+        if (DefStore)
+          return false;
+        DefStore = Store;
+      }
+      if (!DefStore)
+        return true;
+      if (!DT.dominates(DefStore, AliasDef))
+        return false;
+      return !isPotentiallyReachable(AliasDef->getParent(),
+                                     DefStore->getParent(), nullptr, &DT);
+    };
+
+    // A value that is provably a reload of a single-store root slot, or a
+    // PHI merging such reloads, names the same object the slot tracks and
+    // can simply share that slot.
+    auto ResolveCommonRootSlot = [&](Value *Root) -> AllocaInst * {
+      SmallPtrSet<Value *, 8> Visited;
+      SmallVector<Value *, 8> Worklist;
+      Worklist.push_back(Root);
+      AllocaInst *Common = nullptr;
+      while (!Worklist.empty()) {
+        Value *V = Worklist.pop_back_val();
+        if (!Visited.insert(V).second)
+          continue;
+        if (isa<UndefValue>(V) || isa<PoisonValue>(V))
+          continue;
+
+        AllocaInst *Slot = SlotForValue.lookup(V);
+        if (!Slot)
+          if (auto *LI = dyn_cast<LoadInst>(V))
+            if (isOxCamlExceptionRootLoad(LI))
+              Slot = dyn_cast<AllocaInst>(LI->getPointerOperand());
+        if (Slot) {
+          if (!oxcamlRootSlotHasSingleDefiningStore(Slot))
+            return nullptr;
+          if (Common && Slot != Common)
+            return nullptr;
+          Common = Slot;
+          continue;
+        }
+
+        auto *PN = dyn_cast<PHINode>(V);
+        if (!PN)
+          return nullptr;
+        for (Value *Incoming : PN->incoming_values())
+          Worklist.push_back(Incoming);
+      }
+      return Common;
+    };
+
+    // One root slot per handler-live SSA value, stored exactly once at the
+    // value's definition.  The collector keeps the slot current at every
+    // statepoint the slot is registered on, so no per-invoke re-stores are
+    // needed.
+    auto GetOrCreateValueRootSlot = [&](Value *RootValue) -> AllocaInst * {
+      if (AllocaInst *Slot = SlotForValue.lookup(RootValue))
+        return Slot;
+
+      if (auto *RootI = dyn_cast<Instruction>(RootValue); RootI && OxCamlRootSlotAliasing)
+        if (AllocaInst *Common = ResolveCommonRootSlot(RootValue))
+          if (CanAliasToSlot(RootI, Common)) {
+            SlotForValue[RootValue] = Common;
+            return Common;
           }
 
-          auto SameStoreSitesAndValues =
-              [&](const ExplicitExceptionRootSlotCacheEntry &Entry) {
-                if (Entry.SlotType != HandlerValue->getType() ||
-                    Entry.StoreSites.size() != StoreSites.size() ||
-                    Entry.Stores.size() != EdgeValues.size())
-                  return false;
-                for (unsigned I = 0, E = StoreSites.size(); I != E; ++I) {
-                  if (Entry.StoreSites[I].Invoke != StoreSites[I].Invoke ||
-                      Entry.Stores[I]->getValueOperand() != EdgeValues[I])
-                    return false;
-                }
-                return true;
-              };
+      if (auto *PN = dyn_cast<PHINode>(RootValue))
+        if (IsUnwindEdgeDefinedPhi(PN))
+          return GetOrCreatePhiEdgeSlot(PN);
 
-          AllocaInst *Slot = nullptr;
-          if (IsGCRoot)
-            for (const ExplicitExceptionRootSlotCacheEntry &Entry :
-                 ExplicitExceptionRootSlotCache)
-              if (SameStoreSitesAndValues(Entry)) {
-                Slot = Entry.Slot;
-                break;
-              }
+      bool IsGCRoot = isHandledGCPointerType(RootValue->getType());
+      AllocaInst *Slot = CreateRootSlotAlloca(RootValue);
 
-          if (!Slot) {
-            Slot = EntryBuilder.CreateAlloca(
-                HandlerValue->getType(), DL.getAllocaAddrSpace(), nullptr,
-                suffixed_name_or(HandlerValue, ".exnroot", "exnroot"));
-            Slot->setAlignment(DL.getABITypeAlign(HandlerValue->getType()));
-            StoreInst *InitialStore = EntryBuilder.CreateAlignedStore(
-                IsGCRoot ? getOxCamlNonMovingImmediate(HandlerValue->getType())
-                         : Constant::getNullValue(HandlerValue->getType()),
-                Slot, DL.getABITypeAlign(HandlerValue->getType()));
-            if (IsGCRoot)
-              InitialStore->setVolatile(true);
+      // The slot must never contain garbage when the collector scans it.  An
+      // argument's defining store doubles as the initialization.
+      Value *InitValue = RootValue;
+      if (!isa<Argument>(RootValue))
+        InitValue =
+            IsGCRoot
+                ? cast<Value>(
+                      getOxCamlNonMovingImmediate(RootValue->getType()))
+                : Constant::getNullValue(RootValue->getType());
+      StoreInst *InitialStore = EntryBuilder.CreateAlignedStore(
+          InitValue, Slot, DL.getABITypeAlign(RootValue->getType()));
+      if (IsGCRoot)
+        InitialStore->setVolatile(true);
 
-            SmallVector<StoreInst *, 8> Stores;
-            for (auto [StoreSite, EdgeValue] :
-                 llvm::zip_equal(StoreSites, EdgeValues)) {
-              InvokeInst *II = StoreSite.Invoke;
-              IRBuilder<> StoreBuilder(II);
-              StoreInst *RootStore = StoreBuilder.CreateAlignedStore(
-                  EdgeValue, Slot, DL.getABITypeAlign(HandlerValue->getType()));
-              if (IsGCRoot)
-                RootStore->setVolatile(true);
-              Stores.push_back(RootStore);
-              if (IsGCRoot)
-                ExplicitRootSlots[II].push_back(Slot);
-              ExplicitExceptionRootCalls.insert(II);
-            }
+      if (auto *RootI = dyn_cast<Instruction>(RootValue)) {
+        Instruction *InsertPt = nullptr;
+        if (auto *II = dyn_cast<InvokeInst>(RootI)) {
+          BasicBlock *NormalDest = II->getNormalDest();
+          if (!NormalDest->getUniquePredecessor())
+            NormalDest =
+                normalizeForInvokeSafepoint(NormalDest, II->getParent(), DT);
+          InsertPt = &*NormalDest->getFirstInsertionPt();
+        } else if (auto *PN = dyn_cast<PHINode>(RootI)) {
+          InsertPt = &*PN->getParent()->getFirstInsertionPt();
+        } else if (RootI->isTerminator()) {
+          RootI->print(errs());
+          errs() << "\n";
+          report_fatal_error(
+              "unsupported terminator definition for OxCaml exception root");
+        } else {
+          InsertPt = RootI->getNextNode();
+        }
+        new StoreInst(RootValue, Slot, /*isVolatile=*/IsGCRoot,
+                      DL.getABITypeAlign(RootValue->getType()), InsertPt);
+      }
 
-            if (IsGCRoot)
-              ExplicitExceptionRootSlotCache.push_back(
-                  {HandlerValue->getType(), StoreSites, Stores, Slot});
-          }
+      SlotForValue[RootValue] = Slot;
+      return Slot;
+    };
 
-          if (IsGCRoot) {
-            for (auto [StoreSite, EdgeValue] :
-                 llvm::zip_equal(StoreSites, EdgeValues)) {
-              Value *RootHomeValue = nonPoisonOxCamlGCPointerValue(EdgeValue);
-              if (isa<Constant>(RootHomeValue))
-                continue;
-              ExplicitRootHomes[StoreSite.Invoke].push_back(
-                  {RootHomeValue, Slot});
-            }
-          }
+    DenseMap<Value *, LoadInst *> RecoveryLoadForValue;
+    auto GetOrCreateRecoveryLoad = [&](Value *RootValue) -> LoadInst * {
+      if (LoadInst *Load = RecoveryLoadForValue.lookup(RootValue))
+        return Load;
+      AllocaInst *Slot = GetOrCreateValueRootSlot(RootValue);
+      if (isHandledGCPointerType(RootValue->getType()))
+        RegisterSlotAtStoreSites(Slot, RegionStoreSites);
+      LoadInst *Load = CreateRecoverLoad(RootValue, Slot);
+      RecoveryLoadForValue[RootValue] = Load;
+      // The load yields the slot's current content, so the slot is also the
+      // load's home across later safepoints when the content cannot change
+      // under it; no defining store is needed then.
+      if (OxCamlRootSlotAliasing && oxcamlRootSlotHasSingleDefiningStore(Slot) &&
+          CanAliasToSlot(Load, Slot))
+        SlotForValue[Load] = Slot;
+      return Load;
+    };
 
-          LoadInst *Load = RecoverBuilder.CreateAlignedLoad(
-              HandlerValue->getType(), Slot,
-              DL.getABITypeAlign(HandlerValue->getType()),
-              suffixed_name_or(HandlerValue, ".exnroot.load",
-                               "exnroot.load"));
-          if (IsGCRoot)
-            Load->setVolatile(true);
-          Load->setMetadata("oxcaml.exnroot.load",
-                            MDNode::get(F.getContext(), {}));
-          return Load;
-        };
+    // Values consumed only when control leaves the recovery region are
+    // reloaded lazily on the specific boundary edge, so handlers that do not
+    // exit that way never pay for the load.
+    DenseMap<std::pair<Value *, BasicBlock *>, LoadInst *>
+        BoundaryEdgeLoadForValue;
+    auto GetOrCreateBoundaryEdgeLoad =
+        [&](Value *RootValue, BasicBlock *IncomingBlock) -> LoadInst * {
+      if (!OxCamlLazyBoundaryLoads)
+        return GetOrCreateRecoveryLoad(RootValue);
+      if (LoadInst *Load = RecoveryLoadForValue.lookup(RootValue))
+        return Load;
+      auto Key = std::make_pair(RootValue, IncomingBlock);
+      if (LoadInst *Load = BoundaryEdgeLoadForValue.lookup(Key))
+        return Load;
+      AllocaInst *Slot = GetOrCreateValueRootSlot(RootValue);
+      if (isHandledGCPointerType(RootValue->getType()))
+        RegisterSlotAtStoreSites(Slot, RegionStoreSites);
+      IRBuilder<> EdgeBuilder(IncomingBlock->getTerminator());
+      LoadInst *Load = CreateRecoverLoadAt(RootValue, Slot, EdgeBuilder);
+      BoundaryEdgeLoadForValue[Key] = Load;
+      if (oxcamlRootSlotHasSingleDefiningStore(Slot))
+        SlotForValue[Load] = Slot;
+      return Load;
+    };
 
     auto FindExceptionRootValue = [&](Value *V) {
       Value *Base = findBasePointer(V, DVCache, KnownBases);
@@ -3667,19 +3891,7 @@ static bool materializeOxCamlExceptionRootSlots(
     SmallVector<PHINode *, 8> HandlerLivePhisToErase;
     for (PHINode *PN : HandlerLivePhis) {
       Value *RootValue = FindExceptionRootValue(PN);
-
-      auto *RootPhi = dyn_cast<PHINode>(RootValue);
-      LoadInst *Load = MaterializeRootSlot(
-          RootValue, *PN->getParent(), [&](OxCamlRecoveryStoreSite StoreSite) {
-            BasicBlock *IncomingBlock = StoreSite.PhiIncomingBlock;
-            PHINode *IncomingPhi = RootPhi ? RootPhi : PN;
-            for (unsigned I = 0, E = IncomingPhi->getNumIncomingValues();
-                 I != E; ++I) {
-              if (IncomingPhi->getIncomingBlock(I) == IncomingBlock)
-                return IncomingPhi->getIncomingValue(I);
-            }
-            report_fatal_error("missing OxCaml recovery PHI incoming value");
-          });
+      LoadInst *Load = GetOrCreateRecoveryLoad(RootValue);
 
       PN->replaceAllUsesWith(Load);
       HandlerLivePhisToErase.push_back(PN);
@@ -3690,8 +3902,7 @@ static bool materializeOxCamlExceptionRootSlots(
 
     for (Value *V : HandlerLiveGCValues) {
       Value *RootValue = FindExceptionRootValue(V);
-      LoadInst *Load = MaterializeRootSlot(
-          RootValue, BB, [&](OxCamlRecoveryStoreSite) { return RootValue; });
+      LoadInst *Load = GetOrCreateRecoveryLoad(RootValue);
       for (BasicBlock *RegionBB : RecoveryOnlyRegion) {
         for (Instruction &I : *RegionBB) {
           if (RegionBB == &BB && !Recover->comesBefore(&I))
@@ -3748,16 +3959,6 @@ static bool materializeOxCamlExceptionRootSlots(
 
       DenseMap<Value *, DenseMap<BasicBlock *, PHINode *>>
           BoundaryRootSelectors;
-      DenseMap<Value *,
-               DenseMap<BasicBlock *, DenseMap<BasicBlock *, LoadInst *>>>
-          BoundaryRootLoads;
-
-      auto HasRecoveryIncomingBoundaryEdge = [&](BasicBlock *BoundaryBlock) {
-        for (const OxCamlRecoveryBoundaryEdge &BoundaryEdge : BoundaryEdges)
-          if (BoundaryEdge.BoundaryBlock == BoundaryBlock)
-            return true;
-        return false;
-      };
 
       auto IsRecoveryBoundaryEdge = [&](BasicBlock *IncomingBlock,
                                         BasicBlock *BoundaryBlock) {
@@ -3864,49 +4065,7 @@ static bool materializeOxCamlExceptionRootSlots(
         return Incoming;
       };
 
-      std::function<PHINode *(Value *, BasicBlock *)>
-          GetOrCreateBoundaryRootSelector;
-
-      auto GetBoundaryRootValueAtStoreSite =
-          [&](Value *RootValue, OxCamlRecoveryStoreSite StoreSite) -> Value * {
-        BasicBlock *StoreBlock = StoreSite.Invoke->getParent();
-        if (!HasRecoveryIncomingBoundaryEdge(StoreBlock))
-          return RootValue;
-        // A value computed inside the boundary block is not available on the
-        // incoming edges of that block, so it cannot be represented by a
-        // block-entry selector.  Store the local value itself before the
-        // invoke; any live-in GC pointer operands are repaired separately by
-        // the boundary PHI/live-use logic.
-        if (auto *RootI = dyn_cast<Instruction>(RootValue))
-          if (!isa<PHINode>(RootI) && RootI->getParent() == StoreBlock)
-            return RootValue;
-        return GetOrCreateBoundaryRootSelector(RootValue, StoreBlock);
-      };
-
-      std::function<LoadInst *(Value *, BasicBlock *, BasicBlock *)>
-          GetOrCreateBoundaryRootLoad =
-              [&](Value *RootValue, BasicBlock *BoundaryBlock,
-                  BasicBlock *IncomingBlock) -> LoadInst * {
-        auto &LoadsByBoundary = BoundaryRootLoads[RootValue];
-        auto &LoadsByIncoming = LoadsByBoundary[BoundaryBlock];
-        auto LoadIt = LoadsByIncoming.find(IncomingBlock);
-        if (LoadIt != LoadsByIncoming.end())
-          return LoadIt->second;
-
-        LoadInst *Load = MaterializeRootSlot(
-            RootValue, BB, [&](OxCamlRecoveryStoreSite StoreSite) {
-              return GetBoundaryRootValueAtStoreSite(RootValue, StoreSite);
-            });
-        Load->moveBefore(IncomingBlock->getTerminator());
-        LoadsByIncoming[IncomingBlock] = Load;
-
-        if (PHINode *Selector =
-                LookupBoundaryRootSelector(RootValue, BoundaryBlock))
-          SetBoundarySelectorIncoming(Selector, IncomingBlock, Load);
-        return Load;
-      };
-
-      GetOrCreateBoundaryRootSelector =
+      auto GetOrCreateBoundaryRootSelector =
           [&](Value *RootValue, BasicBlock *BoundaryBlock) -> PHINode * {
         if (PHINode *Selector =
                 LookupBoundaryRootSelector(RootValue, BoundaryBlock))
@@ -3926,10 +4085,18 @@ static bool materializeOxCamlExceptionRootSlots(
             return;
           }
 
-          LoadInst *Load =
-              GetOrCreateBoundaryRootLoad(RootValue, BoundaryBlock, Pred);
+          LoadInst *Load = GetOrCreateBoundaryEdgeLoad(RootValue, Pred);
           SetBoundarySelectorIncoming(Selector, Pred, Load);
         });
+
+        // Every selector incoming is the root value or its slot reload, so
+        // the selector shares the root's slot across later safepoints when
+        // the slot's content cannot change under it.
+        if (AllocaInst *Slot = SlotForValue.lookup(RootValue))
+          if (OxCamlRootSlotAliasing &&
+              oxcamlRootSlotHasSingleDefiningStore(Slot) &&
+              CanAliasToSlot(Selector, Slot))
+            SlotForValue[Selector] = Slot;
 
         return Selector;
       };
@@ -4049,8 +4216,6 @@ static bool materializeOxCamlExceptionRootSlots(
 
         PHINode *Selector = GetOrCreateBoundaryRootSelector(
             RootValue, BoundaryUse.BoundaryBlock);
-        GetOrCreateBoundaryRootLoad(RootValue, BoundaryUse.BoundaryBlock,
-                                    BoundaryUse.IncomingBlock);
 
         Value *Replacement = Selector;
         if (V != RootValue && !IsBaseEquivalent) {
@@ -4111,8 +4276,6 @@ static bool materializeOxCamlExceptionRootSlots(
 
         PHINode *Selector = GetOrCreateBoundaryRootSelector(
             RootValue, BoundaryUse.BoundaryBlock);
-        GetOrCreateBoundaryRootLoad(RootValue, BoundaryUse.BoundaryBlock,
-                                    BoundaryUse.IncomingBlock);
 
         Value *Replacement = Selector;
         if (V != RootValue && !IsBaseEquivalent) {
@@ -4147,8 +4310,8 @@ static bool materializeOxCamlExceptionRootSlots(
         KnownBases.clear();
       }
 
-      DenseMap<PHINode *, DenseMap<BasicBlock *, std::pair<Value *, LoadInst *>>>
-          BoundaryPhiLoads;
+      DenseMap<std::pair<PHINode *, BasicBlock *>, Value *>
+          BoundaryPhiIncomings;
       for (OxCamlRecoveryBoundaryPhi &BoundaryPhi : BoundaryPhis) {
         Value *Incoming = BoundaryPhi.IncomingValue;
         if (BoundaryPhi.Phi->getIncomingValue(BoundaryPhi.IncomingIndex) !=
@@ -4160,24 +4323,15 @@ static bool materializeOxCamlExceptionRootSlots(
         if (!IsRootableExceptionValue(Incoming))
           report_fatal_error("derived GC value escapes OxCaml recovery path");
 
-        auto &LoadsForPhi = BoundaryPhiLoads[BoundaryPhi.Phi];
-        auto LoadIt = LoadsForPhi.find(BoundaryPhi.IncomingBlock);
-        if (LoadIt != LoadsForPhi.end()) {
-          if (LoadIt->second.first != Incoming)
-            report_fatal_error("inconsistent OxCaml recovery PHI incoming "
-                               "value for duplicate predecessor");
-          BoundaryPhi.Phi->setIncomingValue(BoundaryPhi.IncomingIndex,
-                                            LoadIt->second.second);
-          Changed = true;
-          continue;
-        }
+        auto Key = std::make_pair(BoundaryPhi.Phi, BoundaryPhi.IncomingBlock);
+        auto It = BoundaryPhiIncomings.find(Key);
+        if (It != BoundaryPhiIncomings.end() && It->second != Incoming)
+          report_fatal_error("inconsistent OxCaml recovery PHI incoming "
+                             "value for duplicate predecessor");
+        BoundaryPhiIncomings[Key] = Incoming;
 
-        LoadInst *Load = MaterializeRootSlot(
-            Incoming, BB, [&](OxCamlRecoveryStoreSite StoreSite) {
-              return GetBoundaryRootValueAtStoreSite(Incoming, StoreSite);
-            });
-        Load->moveBefore(BoundaryPhi.IncomingBlock->getTerminator());
-        LoadsForPhi[BoundaryPhi.IncomingBlock] = {Incoming, Load};
+        LoadInst *Load =
+            GetOrCreateBoundaryEdgeLoad(Incoming, BoundaryPhi.IncomingBlock);
         BoundaryPhi.Phi->setIncomingValue(BoundaryPhi.IncomingIndex, Load);
         Changed = true;
         DVCache.clear();
@@ -4191,30 +4345,41 @@ static bool materializeOxCamlExceptionRootSlots(
       for (const OxCamlRecoveryBoundaryPhi &BoundaryPhi : BoundaryPhis)
         PotentiallyDeadBoundaryPhis.push_back(BoundaryPhi.Phi);
 
+      SmallPtrSet<PHINode *, 8> ErasedBoundaryPhis;
       bool ErasedDeadBoundaryValue = true;
       while (ErasedDeadBoundaryValue) {
         ErasedDeadBoundaryValue = false;
         for (PHINode *PN : PotentiallyDeadBoundaryPhis) {
-          if (!PN->getParent() || !PN->use_empty())
+          if (ErasedBoundaryPhis.contains(PN) || !PN->use_empty())
             continue;
+          ErasedBoundaryPhis.insert(PN);
           PN->eraseFromParent();
           Changed = true;
           ErasedDeadBoundaryValue = true;
         }
 
-        SmallVector<LoadInst *, 8> PotentiallyDeadLoads;
-        for (auto &RootLoads : BoundaryRootLoads)
-          for (auto &BlockLoads : RootLoads.second)
-            for (auto &IncomingLoad : BlockLoads.second)
-              PotentiallyDeadLoads.push_back(IncomingLoad.second);
-        for (auto &PhiLoads : BoundaryPhiLoads)
-          for (auto &IncomingLoad : PhiLoads.second)
-            PotentiallyDeadLoads.push_back(IncomingLoad.second.second);
-        for (LoadInst *Load : PotentiallyDeadLoads) {
-          if (!Load->getParent() || !Load->use_empty() ||
-              !isOxCamlExceptionRootLoad(Load))
-            continue;
-          Load->eraseFromParent();
+        SmallVector<Value *, 8> DeadLoadKeys;
+        for (auto &Entry : RecoveryLoadForValue) {
+          LoadInst *Load = Entry.second;
+          if (Load->use_empty() && isOxCamlExceptionRootLoad(Load))
+            DeadLoadKeys.push_back(Entry.first);
+        }
+        for (Value *Key : DeadLoadKeys) {
+          RecoveryLoadForValue.lookup(Key)->eraseFromParent();
+          RecoveryLoadForValue.erase(Key);
+          Changed = true;
+          ErasedDeadBoundaryValue = true;
+        }
+
+        SmallVector<std::pair<Value *, BasicBlock *>, 8> DeadEdgeLoadKeys;
+        for (auto &Entry : BoundaryEdgeLoadForValue) {
+          LoadInst *Load = Entry.second;
+          if (Load->use_empty() && isOxCamlExceptionRootLoad(Load))
+            DeadEdgeLoadKeys.push_back(Entry.first);
+        }
+        for (auto &Key : DeadEdgeLoadKeys) {
+          BoundaryEdgeLoadForValue.lookup(Key)->eraseFromParent();
+          BoundaryEdgeLoadForValue.erase(Key);
           Changed = true;
           ErasedDeadBoundaryValue = true;
         }
@@ -4324,43 +4489,73 @@ static bool hasOxCamlNormalContinuationUse(Value *RootValue,
   return false;
 }
 
-static bool canonicalizeExplicitRootHomesAndFilterLiveSets(
+/// Route every live handler-rooted value through its explicit root slot
+/// instead of gc.relocate, at every statepoint it crosses.  The value is
+/// removed from the live set (no relocates anywhere), the slot is listed in
+/// the statepoint's gc-live bundle, and a post-statepoint volatile reload
+/// feeds the normal relocationViaAlloca SSA repair when the value is still
+/// needed on the normal continuation.
+static bool assignExplicitRootHomesAndFilterLiveSets(
     MutableArrayRef<PartiallyConstructedSafepointRecord> Records,
-    DominatorTree &DT) {
-  DenseMap<Value *, AllocaInst *> CanonicalSlotForRootValue;
-  for (PartiallyConstructedSafepointRecord &Info : Records)
-    for (auto [RootValue, Slot] : Info.ExplicitRootHomes) {
-      if (!RootValue || !Slot || isa<Constant>(RootValue))
-        continue;
-      if (!isHandledGCPointerType(RootValue->getType()))
-        continue;
-      CanonicalSlotForRootValue.try_emplace(RootValue, Slot);
+    ArrayRef<CallBase *> ToUpdate,
+    const OxCamlValueRootSlotMapTy &SlotForValue,
+    const PointerToBaseTy &PointerToBase, DominatorTree &DT) {
+  bool Changed = false;
+  for (size_t I = 0; I < Records.size(); ++I) {
+    PartiallyConstructedSafepointRecord &Info = Records[I];
+    CallBase *Call = ToUpdate[I];
+
+    // A base that some other live derived pointer relocates against must stay
+    // in the live set; relocation needs the base relocated alongside.
+    SmallPtrSet<Value *, 8> RequiredBases;
+    for (Value *LiveV : Info.LiveSet) {
+      auto BaseIt = PointerToBase.find(LiveV);
+      if (BaseIt != PointerToBase.end() && BaseIt->second != LiveV)
+        RequiredBases.insert(BaseIt->second);
     }
 
-  bool Changed = false;
-  for (PartiallyConstructedSafepointRecord &Info : Records) {
-    SmallVector<std::pair<Value *, AllocaInst *>, 4> CanonicalHomes;
+    SmallVector<std::pair<WeakTrackingVH, AllocaInst *>, 4> Homes;
     SmallPtrSet<Value *, 8> SeenRootValues;
     SmallPtrSet<Value *, 8> SeenSlots(Info.ExplicitRootSlots.begin(),
                                       Info.ExplicitRootSlots.end());
 
-    for (auto [RootValue, Slot] : Info.ExplicitRootHomes) {
-      auto It = CanonicalSlotForRootValue.find(RootValue);
-      if (It == CanonicalSlotForRootValue.end() || It->second != Slot)
-        continue;
-
+    auto TryHome = [&](Value *RootValue, AllocaInst *Slot) {
+      if (!RootValue || !Slot || isa<Constant>(RootValue))
+        return;
+      if (!isHandledGCPointerType(RootValue->getType()))
+        return;
+      if (RequiredBases.contains(RootValue))
+        return;
       if (!Info.LiveSet.remove(RootValue))
-        continue;
+        return;
       Changed = true;
 
       if (SeenSlots.insert(Slot).second)
         Info.ExplicitRootSlots.push_back(Slot);
-      if (hasOxCamlNormalContinuationUse(RootValue, Info.StatepointToken, DT) &&
+      if (hasOxCamlNormalContinuationUse(RootValue, Call, DT) &&
           SeenRootValues.insert(RootValue).second)
-        CanonicalHomes.push_back({RootValue, Slot});
+        Homes.push_back({RootValue, Slot});
+    };
+
+    // Per-edge PHI slot homes recorded at materialization time are only
+    // meaningful at their own invoke.
+    for (auto [RootValue, Slot] : Info.ExplicitRootHomes)
+      TryHome(RootValue, Slot);
+
+    // Function-wide value slots cover every statepoint the value crosses.
+    // Multi-store phi-edge slots only match their value at their own invoke,
+    // which the per-record homes above already cover.
+    unsigned HomeMask = isa<InvokeInst>(Call) ? 1u : 2u;
+    if (OxCamlValueSlotHomes & HomeMask) {
+      SmallVector<Value *, 8> LiveValues(Info.LiveSet.begin(),
+                                         Info.LiveSet.end());
+      for (Value *LiveV : LiveValues)
+        if (AllocaInst *Slot = SlotForValue.lookup(LiveV))
+          if (oxcamlRootSlotHasSingleDefiningStore(Slot))
+            TryHome(LiveV, Slot);
     }
 
-    Info.ExplicitRootHomes = std::move(CanonicalHomes);
+    Info.ExplicitRootHomes = std::move(Homes);
   }
 
   return Changed;
@@ -5865,7 +6060,7 @@ getPostStatepointNormalInsertBefore(Instruction *Statepoint) {
 }
 
 static void insertExplicitRootHomeStores(
-    ArrayRef<std::pair<Value *, AllocaInst *>> ExplicitRootHomes,
+    ArrayRef<std::pair<WeakTrackingVH, AllocaInst *>> ExplicitRootHomes,
     Instruction *Statepoint, DenseMap<Value *, AllocaInst *> &AllocaMap,
     DenseSet<Value *> &VisitedLiveValues) {
   if (ExplicitRootHomes.empty())
@@ -5875,7 +6070,10 @@ static void insertExplicitRootHomeStores(
   Instruction *InsertBefore = getPostStatepointNormalInsertBefore(Statepoint);
   IRBuilder<> Builder(InsertBefore);
 
-  for (auto [RootValue, Slot] : ExplicitRootHomes) {
+  for (auto [RootHandle, Slot] : ExplicitRootHomes) {
+    Value *RootValue = RootHandle;
+    if (!RootValue)
+      continue;
     auto AllocaIt = AllocaMap.find(RootValue);
     assert(AllocaIt != AllocaMap.end() &&
            "missing SSA repair alloca for explicit root home");
@@ -7866,8 +8064,7 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
   ExplicitRootSlotMapTy ExplicitRootSlots;
   ExplicitExceptionRootCallSetTy ExplicitExceptionRootCalls;
   ExplicitRootHomeMapTy ExplicitRootHomes;
-  SmallVector<ExplicitExceptionRootSlotCacheEntry, 16>
-      ExplicitExceptionRootSlotCache;
+  OxCamlValueRootSlotMapTy SlotForValue;
   bool UseUnifiedOxCamlVolatileRoots =
       UseOxCamlVolatileRootAllocas && isOxCamlFunction(F);
   if (rematerializeOxCamlDerivedGEPsAtUses(F))
@@ -7877,8 +8074,8 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
   if (!UseUnifiedOxCamlVolatileRoots)
     materializeOxCamlExceptionRootSlots(F, DT, ExplicitRootSlots,
                                         ExplicitExceptionRootCalls,
-                                        ExplicitRootHomes, DVCache, KnownBases,
-                                        ExplicitExceptionRootSlotCache);
+                                        ExplicitRootHomes, SlotForValue,
+                                        DVCache, KnownBases);
   SmallVector<Value *, 16> AllExplicitRootSlots;
   collectExplicitRootSlots(ExplicitRootSlots, AllExplicitRootSlots);
   if (isOxCamlFunction(F)) {
@@ -8041,7 +8238,8 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
   }
 
   if (!UseUnifiedOxCamlVolatileRoots)
-    canonicalizeExplicitRootHomesAndFilterLiveSets(Records, DT);
+    assignExplicitRootHomesAndFilterLiveSets(Records, ToUpdate, SlotForValue,
+                                             PointerToBase, DT);
 
   for (CallInst *CI : Holders)
     CI->eraseFromParent();
@@ -8095,14 +8293,6 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
 
   Replacements.clear();
 
-  for (ExplicitExceptionRootSlotCacheEntry &Entry :
-       ExplicitExceptionRootSlotCache)
-    for (OxCamlRecoveryStoreSite &StoreSite : Entry.StoreSites)
-      if (auto It =
-              ReplacementInvokeForOriginalInvoke.find(StoreSite.Invoke);
-          It != ReplacementInvokeForOriginalInvoke.end())
-        StoreSite.Invoke = It->second;
-
   for (auto &Info : Records) {
     // These live sets may contain state Value pointers, since we replaced calls
     // with operand bundles with calls wrapped in gc.statepoint, and some of
@@ -8131,8 +8321,9 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
       for (Value *V : Info.StatepointToken->gc_args())
         if (isHandledGCPointerType(V->getType()))
           Live.push_back(V);
-      for (auto [RootValue, Slot] : Info.ExplicitRootHomes)
-        Live.push_back(RootValue);
+      for (auto [RootHandle, Slot] : Info.ExplicitRootHomes)
+        if (Value *RootValue = RootHandle)
+          Live.push_back(RootValue);
 #ifndef NDEBUG
       // Do some basic validation checking on our liveness results before
       // performing relocation.  Relocation can and will turn mistakes in
@@ -8171,10 +8362,12 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
     ExplicitRootSlotMapTy LateExplicitRootSlots;
     ExplicitExceptionRootCallSetTy LateExplicitExceptionRootCalls;
     ExplicitRootHomeMapTy LateExplicitRootHomes;
+    // SlotForValue is a ValueMap, so its entries followed the RAUWs and
+    // deletions of statepoint rewriting; SSA repair values that merge
+    // reloads of an existing slot resolve back to it here.
     ChangedLateRoots = materializeOxCamlExceptionRootSlots(
         F, DT, LateExplicitRootSlots, LateExplicitExceptionRootCalls,
-        LateExplicitRootHomes, DVCache, KnownBases,
-        ExplicitExceptionRootSlotCache);
+        LateExplicitRootHomes, SlotForValue, DVCache, KnownBases);
     SmallVector<Value *, 16> LateAllExplicitRootSlots;
     collectExplicitRootSlots(LateExplicitRootSlots, LateAllExplicitRootSlots);
     ChangedLateRoots |=

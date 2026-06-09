@@ -23,7 +23,7 @@ entry:
       ptr blockaddress(@invoke_gep_handler_live, %recover))
   %field.addr = getelementptr i8, ptr addrspace(1) %obj, i64 24
 ; CHECK: store volatile ptr addrspace(1) %obj, ptr %obj.exnroot, align 8
-; CHECK: %statepoint_token = invoke {{.*}} [ "deopt"(), "gc-live"(ptr addrspace(1) %obj, ptr %obj.exnroot{{.*}}) ]
+; CHECK: %statepoint_token = invoke {{.*}} [ "deopt"(), "gc-live"(ptr %obj.exnroot{{.*}}) ]
   %call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee(i64 %ds, i64 %alloc, ptr addrspace(1) %obj)
       "statepoint-id"="0" [ "deopt"() ]
@@ -31,8 +31,9 @@ entry:
 
 normal:
 ; CHECK: normal:
-; CHECK: %obj.relocated = call coldcc ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token %statepoint_token, i32 0, i32 0)
-; CHECK: %field.addr.remat{{[0-9]*}} = getelementptr i8, ptr addrspace(1) %obj.relocated, i64 24
+; CHECK-NOT: gc.relocate
+; CHECK: %obj.exnroot.normal.load = load volatile ptr addrspace(1), ptr %obj.exnroot, align 8
+; CHECK: %field.addr.remat{{[0-9]*}} = getelementptr i8, ptr addrspace(1) %obj.exnroot.normal.load, i64 24
   %normal_field = load ptr addrspace(1), ptr addrspace(1) %field.addr, align 8
   %pair = extractvalue { i64, i64, ptr addrspace(1) } %call, 0
   %alloc2 = extractvalue { i64, i64, ptr addrspace(1) } %call, 1
@@ -71,7 +72,7 @@ entry:
       ptr blockaddress(@invoke_gep_nested_recovery_trap, %recover))
   %field.addr = getelementptr i8, ptr addrspace(1) %obj, i64 24
 ; CHECK: store volatile ptr addrspace(1) %obj, ptr %obj.exnroot, align 8
-; CHECK: %statepoint_token = invoke {{.*}} [ "deopt"(), "gc-live"(ptr addrspace(1) %obj, ptr %obj.exnroot{{.*}}) ]
+; CHECK: %statepoint_token = invoke {{.*}} [ "deopt"(), "gc-live"(ptr %obj.exnroot{{.*}}) ]
   %call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee(i64 %ds, i64 %alloc, ptr addrspace(1) %obj)
       "statepoint-id"="0" [ "deopt"() ]
@@ -98,9 +99,11 @@ recover:
 nested:
 ; CHECK: nested:
 ; CHECK: %obj.exnroot.select = phi ptr addrspace(1) [ %obj.exnroot.load, %recover ]
+; The inner protected region reuses the outer value's slot; no second slot
+; or store is materialized for the selector.
 ; CHECK: call void @llvm.aarch64.oxcaml.push.trap
-; CHECK: store volatile ptr addrspace(1) %obj.exnroot.select, ptr %obj.exnroot.select.exnroot, align 8
-; CHECK: %statepoint_token{{[0-9]*}} = invoke {{.*}} [ "deopt"(), "gc-live"(ptr addrspace(1) %obj.exnroot.select, ptr %obj.exnroot{{.*}}) ]
+; CHECK-NOT: store volatile
+; CHECK: %statepoint_token{{[0-9]*}} = invoke {{.*}} [ "deopt"(), "gc-live"(ptr %obj.exnroot) ]
   call void @llvm.aarch64.oxcaml.push.trap(
       ptr blockaddress(@invoke_gep_nested_recovery_trap, %inner_recover))
   %inner_call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
@@ -111,8 +114,9 @@ nested:
 
 inner_normal:
 ; CHECK: inner_normal:
-; CHECK: %obj.exnroot.select.relocated = call coldcc ptr addrspace(1) @llvm.experimental.gc.relocate.p1
-; CHECK: %field.addr.remat{{[0-9]*}} = getelementptr i8, ptr addrspace(1) %obj.exnroot.select.relocated, i64 24
+; CHECK-NOT: gc.relocate
+; CHECK: %obj.exnroot.select.exnroot.normal.load = load volatile ptr addrspace(1), ptr %obj.exnroot, align 8
+; CHECK: %field.addr.remat{{[0-9]*}} = getelementptr i8, ptr addrspace(1) %obj.exnroot.select.exnroot.normal.load, i64 24
 ; CHECK: %inner_field = load ptr addrspace(1), ptr addrspace(1) %field.addr.remat{{[0-9]*}}, align 8
   %inner_field = load ptr addrspace(1), ptr addrspace(1) %field.addr, align 8
   %inner_pair = extractvalue { i64, i64, ptr addrspace(1) } %inner_call, 0

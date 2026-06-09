@@ -1,6 +1,6 @@
 # Progress
 
-Last updated: 2026-06-08.
+Last updated: 2026-06-09.
 
 ## Current Goal
 
@@ -9,6 +9,60 @@ the LLVM-built compiler beats both native and the older LLVM baseline on total
 microbench, minibench, and compiler benchmark time.
 
 ## Current Change
+
+- RS4GC now classifies each pre-RS4GC addrspace(1) value live over a
+  safepoint into exactly two categories: handler-live values get one volatile
+  root slot stored once at the value's definition (per-invoke stores remain
+  only for PHIs defined on unwind edges), reloaded after each safepoint and at
+  recovery entries, with the slot registered on the statepoints; everything
+  else uses standard gc.relocate.  This replaces the per-role slot
+  materialization that gave boyer's `rewrite_with_lemmas` three duplicate term
+  slots re-stored before every protected invoke (now: 2 slots, 1 store each
+  per definition, none per invoke).
+- Boundary rejoins use lazy per-edge reloads of the single slot; selectors and
+  recovery loads alias the underlying slot (single-defining-store slots only),
+  so SSA repair does not resurrect relocates or per-invoke stores.
+- Fixed a latent null `Info.StatepointToken` read in the old
+  `canonicalizeExplicitRootHomesAndFilterLiveSets`; homes are now assigned per
+  record from the function-wide value→slot map against the original call.
+- Benchmarks (this machine, medians): boyer native `0.0854s`, old-HEAD LLVM
+  `0.0933s` (1.093x), new LLVM `0.0869s` (1.018x).  `many_handler_live_roots_raise`
+  0.66x vs native.  `boyer_like_failed_unify`/`catch_failure_then_unify`
+  (synthetic always-raise loops) are ~4-7% slower than old HEAD because the
+  old per-invoke stores fed store-to-load forwarding into the handler reload;
+  accepted trade for the normal-path win.
+- Lit: all oxcaml RS4GC tests pass incl. new
+  `oxcaml-exception-root-single-slot-per-value.ll`; the 13 generic RS4GC and
+  7 AArch64 oxcaml failures are pre-existing (identical sets at 57e9764b3c).
+- The first self-stage run hit two real bugs, found with a deterministic
+  reproducer (`_llvm_boot_*` boot compiler compiling `stdlib.pp.ml` under
+  `OCAMLRUNPARAM=s=4k`) and an object-level bisect harness (`../llstash`,
+  swaps per-module `.o` between head-clang and new-clang dune trees, re-ars
+  archives, relinks, reruns the repro):
+  - `Info.ExplicitRootHomes` held raw `Value*`; when a homed value was the
+    result of an earlier statepoint-rewritten call, the deferred RAUW left
+    the home dangling and the replacement gc.result was never SSA-repaired.
+    Fixed with `WeakTrackingVH` handles.
+  - Slot aliasing (selector/reload sharing a root slot) is unsound when the
+    slot's defining store can re-execute during the alias's lifetime; guarded
+    by `CanAliasToSlot` (defining store must dominate the alias and not be
+    reachable from it).
+  - After those fixes, homing live slot values at CALL statepoints (removing
+    them from gc-live in favor of the slot) still corrupts the heap under GC
+    pressure even though IR-level SSA repair is provably complete; the
+    miscompiled module was `lambda_to_flambda` (`cps` function) and the
+    failure is below the IR (call-statepoint lowering of slot-homed frames is
+    suspected, possibly the CSR root map).  Homes default to INVOKE
+    statepoints only (`-rs4gc-oxcaml-value-slot-homes`, 0=off 1=invokes
+    2=calls 3=all); calls keep full relocation.  Investigating `=2` with the
+    bisect harness is the open follow-up.
+- With invokes-only homes: boyer `1.020x` vs HEAD `1.048x` on the same
+  machine/run; the boot compiler passes the `s=4k` GC-stress repro at 4k/16k/
+  256k minor heaps (head-clang boots pass it too; the fully-homed build did
+  not).
+- Self-stage validation of the invokes-only configuration: in progress.
+
+## Previous Change
 
 - Current branch HEAD includes `b6c22b9142` (`Enable comballoc for LLVM
   backend`).
