@@ -138,6 +138,19 @@ static cl::opt<bool> OxCamlRootSlotAliasing(
 // Homing at call statepoints (2/3) miscompiles under GC pressure (boot
 // compiler heap corruption, see PROGRESS); calls keep full relocation until
 // the call-statepoint lowering of slot-only frames is understood.
+static cl::opt<unsigned> OxCamlCallHomeBudget(
+    "rs4gc-oxcaml-call-home-budget", cl::Hidden,
+    cl::init(std::numeric_limits<unsigned>::max()),
+    cl::desc("Debug: only home values at this many call statepoints"));
+static cl::opt<unsigned> OxCamlCallHomeSkip(
+    "rs4gc-oxcaml-call-home-skip", cl::Hidden, cl::init(0),
+    cl::desc("Debug: do not home values at the first N call statepoints"));
+static cl::opt<unsigned> OxCamlCallHomeDump(
+    "rs4gc-oxcaml-call-home-dump", cl::Hidden,
+    cl::init(std::numeric_limits<unsigned>::max()),
+    cl::desc("Debug: dump the call statepoint with this home ordinal"));
+static unsigned OxCamlCallHomesUsed = 0;
+
 static cl::opt<unsigned> OxCamlValueSlotHomes(
     "rs4gc-oxcaml-value-slot-homes", cl::Hidden, cl::init(1),
     cl::desc("Home live handler-rooted values through their slot instead of "
@@ -3441,6 +3454,9 @@ static bool materializeOxCamlExceptionRootSlots(
   SmallVector<OxCamlRecoveryBoundaryPhi, 8> BoundaryPhis;
   SmallVector<OxCamlRecoveryBoundaryUse, 8> BoundaryUses;
   SmallVector<OxCamlRecoveryBoundaryEdge, 8> BoundaryEdges;
+  // The single defining store of each value root slot; it migrates towards
+  // the entry as more regions come to share the slot.
+  DenseMap<AllocaInst *, StoreInst *> SlotDefStore;
   for (BasicBlock &BB : F) {
     IntrinsicInst *Recover = getOxCamlTrapRecover(BB);
     if (!isOxCamlRecoveryBlockStart(BB, Recover))
@@ -3757,17 +3773,93 @@ static bool materializeOxCamlExceptionRootSlots(
       return Common;
     };
 
-    // One root slot per handler-live SSA value, stored exactly once at the
-    // value's definition.  The collector keeps the slot current at every
-    // statepoint the slot is registered on, so no per-invoke re-stores are
-    // needed.
-    auto GetOrCreateValueRootSlot = [&](Value *RootValue) -> AllocaInst * {
-      if (AllocaInst *Slot = SlotForValue.lookup(RootValue))
-        return Slot;
+    // Insertion point for the value's defining store right after its
+    // definition; used when no later dominating position exists.
+    auto DefAdjacentInsertPt = [&](Instruction *RootI) -> Instruction * {
+      if (auto *II = dyn_cast<InvokeInst>(RootI)) {
+        BasicBlock *NormalDest = II->getNormalDest();
+        if (!NormalDest->getUniquePredecessor())
+          NormalDest =
+              normalizeForInvokeSafepoint(NormalDest, II->getParent(), DT);
+        return &*NormalDest->getFirstInsertionPt();
+      }
+      if (auto *PN = dyn_cast<PHINode>(RootI))
+        return &*PN->getParent()->getFirstInsertionPt();
+      if (RootI->isTerminator()) {
+        RootI->print(errs());
+        errs() << "\n";
+        report_fatal_error(
+            "unsupported terminator definition for OxCaml exception root");
+      }
+      return RootI->getNextNode();
+    };
 
-      if (auto *RootI = dyn_cast<Instruction>(RootValue); RootI && OxCamlRootSlotAliasing)
+    // The defining store goes to the latest point that dominates every
+    // protected invoke of the regions sharing the slot, so paths that never
+    // reach a protected region pay nothing.  It is hoisted out of cycles
+    // while the value stays available so loop-invariant values are stored
+    // once.  Falls back to the definition itself when the value does not
+    // dominate that position.
+    auto ComputeDefStorePos = [&](Value *StoredVal,
+                                  BasicBlock *Seed) -> Instruction * {
+      BasicBlock *Pos = Seed;
+      for (const OxCamlRecoveryStoreSite &Site : RegionStoreSites) {
+        BasicBlock *SB = Site.Invoke->getParent();
+        Pos = Pos ? DT.findNearestCommonDominator(Pos, SB) : SB;
+      }
+      if (!Pos)
+        return nullptr;
+      auto InCycle = [&](BasicBlock *Block) {
+        for (BasicBlock *Succ : successors(Block))
+          if (Succ == Block ||
+              isPotentiallyReachable(Succ, Block, nullptr, &DT))
+            return true;
+        return false;
+      };
+      while (InCycle(Pos)) {
+        auto *Node = DT.getNode(Pos);
+        auto *IDom = Node ? Node->getIDom() : nullptr;
+        if (!IDom)
+          break;
+        BasicBlock *Up = IDom->getBlock();
+        if (auto *I = dyn_cast<Instruction>(StoredVal))
+          if (!DT.dominates(I, Up->getTerminator()))
+            break;
+        Pos = Up;
+      }
+      Instruction *Pt = Pos->getTerminator();
+      if (auto *I = dyn_cast<Instruction>(StoredVal))
+        if (!DT.dominates(I, Pt))
+          return nullptr;
+      return Pt;
+    };
+
+    // A shared slot must keep its store dominating the new region's invokes.
+    auto EnsureDefStoreCovers = [&](AllocaInst *Slot) {
+      auto It = SlotDefStore.find(Slot);
+      if (It == SlotDefStore.end())
+        return;
+      StoreInst *Store = It->second;
+      Instruction *NewPt =
+          ComputeDefStorePos(Store->getValueOperand(), Store->getParent());
+      if (NewPt && NewPt->getParent() != Store->getParent())
+        Store->moveBefore(NewPt);
+    };
+
+    // One root slot per handler-live SSA value, with a single defining
+    // store.  The collector keeps the slot current at every statepoint the
+    // slot is registered on, so no per-invoke re-stores are needed.
+    auto GetOrCreateValueRootSlot = [&](Value *RootValue) -> AllocaInst * {
+      if (AllocaInst *Slot = SlotForValue.lookup(RootValue)) {
+        EnsureDefStoreCovers(Slot);
+        return Slot;
+      }
+
+      if (auto *RootI = dyn_cast<Instruction>(RootValue);
+          RootI && OxCamlRootSlotAliasing)
         if (AllocaInst *Common = ResolveCommonRootSlot(RootValue))
           if (CanAliasToSlot(RootI, Common)) {
+            EnsureDefStoreCovers(Common);
             SlotForValue[RootValue] = Common;
             return Common;
           }
@@ -3779,10 +3871,17 @@ static bool materializeOxCamlExceptionRootSlots(
       bool IsGCRoot = isHandledGCPointerType(RootValue->getType());
       AllocaInst *Slot = CreateRootSlotAlloca(RootValue);
 
-      // The slot must never contain garbage when the collector scans it.  An
-      // argument's defining store doubles as the initialization.
+      Instruction *StorePt = ComputeDefStorePos(RootValue, nullptr);
+      bool FuseEntryInit =
+          StorePt && isa<Argument>(RootValue) &&
+          StorePt->getParent() == &F.getEntryBlock();
+      if (!StorePt && !isa<Instruction>(RootValue))
+        FuseEntryInit = true;
+
+      // The slot must never contain garbage when the collector scans it.  A
+      // store fully hoisted to the entry doubles as the initialization.
       Value *InitValue = RootValue;
-      if (!isa<Argument>(RootValue))
+      if (!FuseEntryInit)
         InitValue =
             IsGCRoot
                 ? cast<Value>(
@@ -3793,26 +3892,13 @@ static bool materializeOxCamlExceptionRootSlots(
       if (IsGCRoot)
         InitialStore->setVolatile(true);
 
-      if (auto *RootI = dyn_cast<Instruction>(RootValue)) {
-        Instruction *InsertPt = nullptr;
-        if (auto *II = dyn_cast<InvokeInst>(RootI)) {
-          BasicBlock *NormalDest = II->getNormalDest();
-          if (!NormalDest->getUniquePredecessor())
-            NormalDest =
-                normalizeForInvokeSafepoint(NormalDest, II->getParent(), DT);
-          InsertPt = &*NormalDest->getFirstInsertionPt();
-        } else if (auto *PN = dyn_cast<PHINode>(RootI)) {
-          InsertPt = &*PN->getParent()->getFirstInsertionPt();
-        } else if (RootI->isTerminator()) {
-          RootI->print(errs());
-          errs() << "\n";
-          report_fatal_error(
-              "unsupported terminator definition for OxCaml exception root");
-        } else {
-          InsertPt = RootI->getNextNode();
-        }
-        new StoreInst(RootValue, Slot, /*isVolatile=*/IsGCRoot,
-                      DL.getABITypeAlign(RootValue->getType()), InsertPt);
+      if (!FuseEntryInit) {
+        if (!StorePt)
+          StorePt = DefAdjacentInsertPt(cast<Instruction>(RootValue));
+        StoreInst *DefStore =
+            new StoreInst(RootValue, Slot, /*isVolatile=*/IsGCRoot,
+                          DL.getABITypeAlign(RootValue->getType()), StorePt);
+        SlotDefStore[Slot] = DefStore;
       }
 
       SlotForValue[RootValue] = Slot;
@@ -4542,16 +4628,49 @@ static bool assignExplicitRootHomesAndFilterLiveSets(
     for (auto [RootValue, Slot] : Info.ExplicitRootHomes)
       TryHome(RootValue, Slot);
 
-    // Function-wide value slots cover every statepoint the value crosses.
-    // Multi-store phi-edge slots only match their value at their own invoke,
-    // which the per-record homes above already cover.
+    // Function-wide value slots cover every statepoint the value crosses
+    // once their defining store has executed; a statepoint not dominated by
+    // the store keeps plain relocation.  Multi-store phi-edge slots only
+    // match their value at their own invoke, which the per-record homes
+    // above already cover.
+    auto SlotDefStoreDominates = [&](AllocaInst *Slot) {
+      const BasicBlock &EntryBlock =
+          Slot->getFunction()->getEntryBlock();
+      for (User *U : Slot->users()) {
+        auto *Store = dyn_cast<StoreInst>(U);
+        if (!Store || Store->getPointerOperand() != Slot)
+          continue;
+        if (Store->getParent() == &EntryBlock)
+          continue;
+        return DT.dominates(Store, Call);
+      }
+      return true;
+    };
     unsigned HomeMask = isa<InvokeInst>(Call) ? 1u : 2u;
-    if (OxCamlValueSlotHomes & HomeMask) {
+    bool BudgetOk = isa<InvokeInst>(Call) ||
+                    (OxCamlCallHomesUsed >= OxCamlCallHomeSkip &&
+                     OxCamlCallHomesUsed < OxCamlCallHomeBudget);
+    if (!isa<InvokeInst>(Call) && OxCamlCallHomesUsed < OxCamlCallHomeSkip)
+      ++OxCamlCallHomesUsed;
+    bool DumpThis = !isa<InvokeInst>(Call) &&
+                    OxCamlCallHomesUsed == OxCamlCallHomeDump;
+    if ((OxCamlValueSlotHomes & HomeMask) && BudgetOk) {
+      if (!isa<InvokeInst>(Call))
+        ++OxCamlCallHomesUsed;
+      if (DumpThis) {
+        errs() << "CALL-HOME[" << (OxCamlCallHomesUsed - 1) << "] in "
+               << Call->getFunction()->getName() << "\n  call: " << *Call
+               << "\n  live:";
+        for (Value *LV : Info.LiveSet)
+          errs() << " " << LV->getName();
+        errs() << "\n";
+      }
       SmallVector<Value *, 8> LiveValues(Info.LiveSet.begin(),
                                          Info.LiveSet.end());
       for (Value *LiveV : LiveValues)
         if (AllocaInst *Slot = SlotForValue.lookup(LiveV))
-          if (oxcamlRootSlotHasSingleDefiningStore(Slot))
+          if (oxcamlRootSlotHasSingleDefiningStore(Slot) &&
+              SlotDefStoreDominates(Slot))
             TryHome(LiveV, Slot);
     }
 

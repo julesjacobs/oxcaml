@@ -8,7 +8,37 @@ Keep the LLVM backend self-stage2-clean, then improve runtime performance until
 the LLVM-built compiler beats both native and the older LLVM baseline on total
 microbench, minibench, and compiler benchmark time.
 
-## Current Change
+## Current Change (v2: consumer-NCD store placement)
+
+- Refined the uniform root design: the slot's single defining store now sits
+  at the latest point that dominates every protected invoke of the regions
+  sharing the slot (nearest common dominator of the consumers), hoisted out
+  of cycles while the value stays available, falling back to the definition
+  when the value does not dominate that point.  This fixes a 35% regression
+  on `nested_failed_unify`: store-at-def had hoisted argument slot stores to
+  the function entry, taxing every call of functions like `unify1` whose
+  protected region sits on a conditional path.  Shared slots migrate their
+  store upward as later regions join (`EnsureDefStoreCovers`), and
+  value-slot homes only apply at statepoints dominated by the store.
+- Probes after the change (medians, same machine/run, ratio vs native):
+  `nested_failed_unify` 1.252x (head 1.250x), `boyer_like_failed_unify`
+  1.251x (head 1.228x), `catch_failure_then_unify` 1.224x (head 1.245x),
+  `closure_env_in_try_hit` 1.088x (head 1.089x),
+  `many_handler_live_roots_raise` 0.666x (head 0.670x), boyer 1.038x (head
+  1.052x).  No bad regressions remain; boyer's win is retained.
+- Debug tooling added behind flags: `-rs4gc-oxcaml-call-home-budget/-skip/
+  -dump` to bisect call-statepoint homing by ordinal.  Using them, the
+  call-homes failure was narrowed to a SINGLE homed call statepoint in
+  `Lambda_to_flambda.cps` (skip=304 budget=305 with the llstash harness
+  reproduces in ~10s); its IR, frametable record, regalloc slot sharing and
+  backedge wiring all audit as consistent, so the residual bug is deeper in
+  call-statepoint lowering.  Homes stay invoke-only by default.
+- Validation: full RS4GC + AArch64 oxcaml lit suites at the pre-existing
+  known-failure sets; fresh boot passes the stdlib.pp.ml GC-stress repro at
+  s=1k/4k/64k; self-stage log
+  `agent-state/test-suite-29e4cd/self_stage_uniform_roots_v4.log`.
+
+## Previous Change
 
 - RS4GC now classifies each pre-RS4GC addrspace(1) value live over a
   safepoint into exactly two categories: handler-live values get one volatile

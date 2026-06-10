@@ -16,8 +16,8 @@ define oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @retrying_boundary_e
 ; The argument's root slot is stored once at entry; retries reuse the slot,
 ; whose content the collector keeps current, so no store precedes the invoke.
 ; CHECK: entry:
-; CHECK-NEXT: %f.exnroot = alloca ptr addrspace(1), align 8
-; CHECK-NEXT: store volatile ptr addrspace(1) %f, ptr %f.exnroot, align 8
+; CHECK: %f.exnroot = alloca ptr addrspace(1), align 8
+; CHECK: store volatile ptr addrspace(1) %f, ptr %f.exnroot, align 8
 entry:
   br i1 %take_try, label %try.preheader, label %exit
 

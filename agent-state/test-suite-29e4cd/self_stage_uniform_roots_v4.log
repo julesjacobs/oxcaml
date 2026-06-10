@@ -1,0 +1,52 @@
+Read 236 sample input sentences and 236 error messages.
+  GEN runtime/caml/opnames.h
+gcc -c -O2 -fno-strict-aliasing -fwrapv -g -fno-omit-frame-pointer -g -Wall -Wno-pragmas -Wint-conversion -Wstrict-prototypes -Wold-style-definition -Wundef -Werror -fno-common  -I./runtime  -D_FILE_OFFSET_BITS=64  -DCAMLDLLIMPORT= -DIN_CAML_RUNTIME  -o runtime/sak.o runtime/sak.c
+cc -o runtime/sak runtime/sak.o 
+echo '/* This file is generated from ./Makefile.config */' > runtime/build_config.h && \
+	echo '#define OCAML_STDLIB_DIR "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/_install/lib/ocaml"' >> runtime/build_config.h && \
+	echo '#define HOST "aarch64-apple-darwin25.3.0"' >> runtime/build_config.h
+clang: warning: caml/domain_state.tbl: 'linker' input unused [-Wunused-command-line-argument]
+clang: warning: argument unused during compilation: '-O2' [-Wunused-command-line-argument]
+clang: warning: argument unused during compilation: '-fno-strict-aliasing' [-Wunused-command-line-argument]
+clang: warning: argument unused during compilation: '-fwrapv' [-Wunused-command-line-argument]
+clang: warning: argument unused during compilation: '-g' [-Wunused-command-line-argument]
+clang: warning: argument unused during compilation: '-fno-omit-frame-pointer' [-Wunused-command-line-argument]
+clang: warning: argument unused during compilation: '-I /Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/_llvm_boot_context_build/default/runtime' [-Wunused-command-line-argument]
+clang: warning: argument unused during compilation: '-D CAML_NO_DEFINE_CAMLprim' [-Wunused-command-line-argument]
+  CC closure.o
+  CC error.o
+  CC lalr.o
+  CC lr0.o
+  CC main.o
+  CC mkpar.o
+  CC output.o
+  CC reader.o
+  CC skeleton.o
+  CC symtab.o
+  CC verbose.o
+  CC warshall.o
+boot wrapper lines:     1678
+boot fresh ir: 824
+55
+smoke wrapper lines:        4
+smoke fresh ir: 2
+runtime wrapper lines:      148
+runtime fresh ir: 72
+main wrapper lines:     2224
+main fresh ir: 1101
+Stage LLVM install ready:
+  /Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/_llvm_self_stage_install
+
+Compiler:
+  /Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/_llvm_self_stage_install/bin/ocamlopt.opt
+
+Stdlib:
+  /Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/_llvm_self_stage_install/lib/ocaml
+55
+self-stage-smoke wrapper lines:        4
+self-stage-smoke fresh ir: 2
+Self-stage LLVM install ready:
+  /Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/_llvm_self_stage_install
+
+Compiler:
+  /Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/_llvm_self_stage_install/bin/ocamlopt.opt
