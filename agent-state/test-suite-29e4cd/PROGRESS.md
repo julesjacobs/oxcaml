@@ -114,6 +114,57 @@ miscompile that PRE-EXISTS this work entirely:
 - The `parser.pp.ml` s=1k repro should be added to the standard validation
   gate once fixed; the stdlib.pp.ml sweep alone does NOT catch it.
 
+### ROOT CAUSE FOUND (2026-06-10, round 4)
+
+The mechanism is proven with a new debug instrument, OXCAML_YOUNG_FLIP
+(runtime/minor_gc.c + domain.c, env-gated): the minor heap alternates
+between two locations each collection and the retired space is
+PROT_NONE'd, so any dereference of a stale young pointer faults AT THE
+GUILTY INSTRUCTION.  Requires s>=4k (16K pages).  With it:
+
+- The crash chain is: an LLVM-compiled statepoint in
+  `Closure_conversion.cont` leaves a STALE young pointer in a frame slot;
+  cont passes the stale `simple` to `Env.add_simple_to_substitute`
+  (closure_conversion.ml:1467); the pair is stored in the substitute map;
+  `Lambda_to_flambda.cps` (Lvar case) immediately looks it up and
+  dereferences -> fault at cps+396 (or, unprotected, reads recycled
+  memory -> the Ident.compare(0,1) crash).
+- Guilty statepoint #1 (default config): the alloc statepoint at
+  cont+2240 (Ltmp951).  Its descriptor lists the values as REGISTER
+  roots (gc_regs) plus slots 192/200 - but the code after it reloads the
+  same values from RA SPILL SLOTS 168/176, which are NOT in the
+  descriptor.  The GC updates the registers; the spill slots keep the
+  pre-GC pointers; the post-GC reloads resurrect them.
+- With -max-registers-for-gc-values=0 (zero register roots), the SAME
+  fault occurs via a different cont alloc statepoint (cont+1620,
+  Ltmp1031): an RA spill slot (~offset 32-48) carrying the value across
+  the statepoint is again absent from the descriptor's root list.
+
+UNIFIED ROOT CAUSE: LLVM's register allocator (greedy/InlineSpiller/
+split machinery) carries GC values across STATEPOINTs in locations the
+statepoint operand list does not reference - sibling registers kept live
+because the oxcaml alloc calling convention PRESERVES registers, and RA
+spill slots whose live range crosses the statepoint.  The frametable
+only describes the operands' locations at the statepoint, so the GC
+updates those and every other copy goes stale.  Stock LLVM avoids this
+because (a) caller-saved registers die at calls, (b) gc pointers in
+callee-saved registers are force-spilled (AllowGCPtrInCSR=false), and
+(c) relocate defs end the input interval at the statepoint.  The oxcaml
+register-preserving alloc CC re-opens the hole.  Relevant code:
+FixupStatepointCallerSaved.cpp + AArch64RegisterInfo::
+shouldSpillStatepointGCPtr (only forces x16-x18/x26-x28 today).
+
+FIX DIRECTION (next session): make statepoint-crossing GC live ranges
+single-location.  Candidates: (1) make RA statepoint-aware so a GC vreg
+live across a statepoint is forced fully into its statepoint-listed
+location (fold + no sibling copies); (2) have the statepoint CLOBBER
+GC-holding registers from RA's perspective (kill dual residency, accept
+spills); (3) at MIR fixup time, enumerate LiveStacks intervals crossing
+each statepoint whose original vreg was a GC pointer and append their
+slots to the stackmap.  (3) is likely the least invasive and matches the
+frametable design.  Verify any fix with OXCAML_YOUNG_FLIP=1 s=4k on the
+parser repro, then the stdlib sweep and full stages.
+
 ### Second investigation round (2026-06-10, bug still open)
 
 Two REAL adjacent holes were found and fixed (neither is the parser crash):
