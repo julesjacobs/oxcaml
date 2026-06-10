@@ -114,6 +114,41 @@ miscompile that PRE-EXISTS this work entirely:
 - The `parser.pp.ml` s=1k repro should be added to the standard validation
   gate once fixed; the stdlib.pp.ml sweep alone does NOT catch it.
 
+### Round 5 (2026-06-10): frametable offset semantics, synth harness
+
+The fix candidates from round 4 were tested and REFUTED for this crash:
+SP-relative resolution for statepoint stackmap operands (PreferFP=false -
+kept as hardening with a fatal on non-SP resolution, but descriptors were
+already SP-resolved), registering all exnroot slots on all statepoints
+(cont has NO exnroot slots - no trap regions), and register-coalescer
+involvement (-join-liveintervals=0 still crashes).  The corrupting GC
+suspends cont at an ALLOC statepoint whose IR carries proper relocates;
+the stale value (`simple`) is read after the GC from a frame slot the
+descriptor does not cover, flows through add_simple_to_substitute
+(closure_conversion.ml:1467) into the substitute map, and cps faults on
+it (young-flip, deterministic, cps+396).
+
+NEW INSTRUMENT: llstash/synth-statepoint-offsets*.ll - tiny synthetic
+oxcaml modules whose emitted frametables can be diffed against the
+actual frame layout by eye, no GC runs needed.  Findings so far:
+- The "statepoint-id" attribute ENCODES trap depth: bit0 = alloc,
+  ((id>>1)&7)*16 = ActiveTrapBytes which OxCamlGCPrinter ADDS to every
+  stack root and to nothing else; a synthetic id of 18/19 silently
+  shifts roots by +16.
+- AArch64RegisterInfo::eliminateFrameIndex (statepoint case) ALSO adds
+  AFI->getOxCamlActiveTrapBytes(MI) (computed from real MIR trap pushes)
+  into the operand offset.  RS4GC-converted statepoints (default IDs, no
+  trap bits) therefore get the +16-per-trap exactly once (verified
+  consistent in find_value_approximation); LLVMIZE-EMITTED statepoints
+  with explicit IDs inside trap regions are suspected of DOUBLE-counting
+  (ID bits + AFI bytes) - shifting every stack root by +16 per depth.
+- The guilty cont statepoint has ID 196609 (alloc, ID-depth 0); its
+  emitted stack roots are 192/200 while the MIR-listed slots sit at
+  +24 less - the remaining unexplained delta.  Next: replicate cont's
+  exact shape in the synth harness (alloc id, several relocated values,
+  448-byte frame, split prologue) and diff descriptor vs actual slots;
+  each iteration is a pure compile, minutes.
+
 ### ROOT CAUSE FOUND (2026-06-10, round 4)
 
 The mechanism is proven with a new debug instrument, OXCAML_YOUNG_FLIP

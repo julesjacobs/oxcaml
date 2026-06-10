@@ -954,14 +954,26 @@ bool AArch64RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   if (MI.getOpcode() == TargetOpcode::STACKMAP ||
       MI.getOpcode() == TargetOpcode::PATCHPOINT ||
       MI.getOpcode() == TargetOpcode::STATEPOINT) {
+    // OxCaml frametables describe roots relative to the SP at the call
+    // site: the runtime walks frames by SP and OxCamlGCPrinter emits
+    // SP-relative offsets verbatim.  An FP-relative location would be
+    // reverse-engineered by the printer under standard-frame assumptions
+    // (FP pair at the top of the frame) that the OxCaml prologue does not
+    // satisfy, silently shifting every stack root of the affected
+    // statepoint, so force SP-relative resolution here.
+    bool IsOxCaml = isOxCamlCallingConv(MF.getFunction().getCallingConv());
     StackOffset Offset =
         TFI->resolveFrameIndexReference(MF, FrameIndex, FrameReg,
-                                        /*PreferFP=*/true,
+                                        /*PreferFP=*/!IsOxCaml,
                                         /*ForSimm=*/false);
     Offset += StackOffset::getFixed(MI.getOperand(FIOperandNum + 1).getImm());
     if (FrameReg == AArch64::SP) {
       const AArch64FunctionInfo *AFI = MF.getInfo<AArch64FunctionInfo>();
       Offset += StackOffset::getFixed(AFI->getOxCamlActiveTrapBytes(MI));
+    } else if (IsOxCaml) {
+      report_fatal_error("[OxCaml] statepoint stack location did not "
+                         "resolve SP-relative; the frametable cannot "
+                         "describe it");
     }
     MI.getOperand(FIOperandNum).ChangeToRegister(FrameReg, false /*isDef*/);
     MI.getOperand(FIOperandNum + 1).ChangeToImmediate(Offset.getFixed());
