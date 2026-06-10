@@ -153,10 +153,24 @@ table ids).
 Repro status: FULLY DETERMINISTIC under lldb (no ASLR): identical crash
 pc (`Ident.compare+48`) and registers (x0=0, x1=1) every run, with the
 fp-chain compare <- List.map+172 <- classify_fields_of_block+152 <-
-curry2 <- cont_96_350+5052.  Next session: hardware watchpoint hunt -
-walk back from the deterministic crash to the corrupt cell's address in
-a scout run, then watchpoint that address in a second run to catch the
-corrupting writer (mutator store or GC).
+curry2 <- cont_96_350+5052.  (Watchpoints perturb signal timing and
+change pool-reuse history; use content/condition triggers, not hit
+indexes.)
+
+Watchpoint findings: the corrupt cells' last writers are the GC itself
+copying the young original verbatim during promotion
+(oldify_one <- caml_scan_stack, then oldify_mopup) - so the corruption
+predates promotion and the heap/frametable/GC are clean as writers.
+Crash-state decode: List.map was invoked by LLVM-compiled
+classify_fields_of_block with `f` = a TAG-0 ordinary block whose field0
+happens to be Ident.compare's code pointer - NOT a closure (tag 247);
+map blindly entered compare with junk args.  A well-formed-but-WRONG
+value therefore flows into the f/list arguments inside cont/classify on
+a GC-timing-dependent path: prime suspect is SSA-repair /
+exnroot-reload / relocation WIRING selecting the wrong value on a rare
+statepoint path.  Next: breakpoint at classify's map callsite on the
+crash iteration (no watchpoints) and trace f/list register provenance
+back through cont's statepoint reloads against the stashed RS4GC IR.
 
 ## Previous Change (v2: consumer-NCD store placement)
 
