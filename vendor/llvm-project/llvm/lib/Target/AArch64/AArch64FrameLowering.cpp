@@ -998,7 +998,7 @@ static void emitOxCamlStackCheck(MachineBasicBlock &MBB,
       std::to_string(RequiredWords) +
       "\n\t"
       "stp x16, x17, [sp, #-16]!\n\t"
-      "bl _caml_call_realloc_stack\n\t"
+      "bl _caml_llvm_call_realloc_stack_stkarg\n\t"
       "ldp x16, x17, [sp], #16\n"
       "9:\n\t"
       "mov x30, x17";

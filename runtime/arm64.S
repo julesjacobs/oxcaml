@@ -573,6 +573,47 @@ FUNCTION(caml_call_realloc_stack)
         CFI_ENDPROC
 END_FUNCTION(caml_call_realloc_stack)
 
+/* Same protocol as caml_call_realloc_stack (required space in words pushed
+   at [sp, 16] by the caller), but for LLVM OxCaml prologue stack checks:
+   the frame-pointer chain must be terminated here, exactly as in
+   caml_llvm_call_realloc_stack below.  Routing these checks through
+   caml_call_realloc_stack saves the stale incoming x29, and stack growth
+   then follows it into LLVM frames and rewrites spilled words that happen
+   to look like old-stack addresses. */
+FUNCTION(caml_llvm_call_realloc_stack_stkarg)
+        CFI_STARTPROC
+        CFI_SIGNAL_FRAME
+        CFI_OFFSET(30, -8)
+        stp     xzr, x30, [sp, -16]!
+        CFI_ADJUST(16)
+        CFI_UNDEFINED(29)
+        add     x29, sp, #0
+    /* Save all registers (including ALLOC_PTR & TRAP_PTR) */
+        SAVE_ALL_REGS
+        ldr     C_ARG_1, [sp, 16] /* argument */
+        SWITCH_OCAML_TO_C
+        bl      G(caml_try_realloc_stack)
+        SWITCH_C_TO_OCAML
+        cbz     x0, 1f
+        RESTORE_ALL_REGS
+    /* Free stack space and return to caller */
+        ldp     x29, x30, [sp], 16
+        ret
+1:  /* Restore the gc_regs bucket popped by SAVE_ALL_REGS */
+        ldr     TMP, Caml_state(gc_regs)
+        sub     TMP, TMP, #16
+        ldr     TMP2, Caml_state(gc_regs_buckets)
+        str     TMP2, [TMP, 0]  /* next ptr */
+        str     TMP, Caml_state(gc_regs_buckets)
+    /* Raise the Stack_overflow exception */
+        ldp     x29, x30, [sp], 16
+        add     sp, sp, 16 /* pop argument */
+        SWITCH_OCAML_TO_C
+        ADDRGLOBAL(x0, caml_exn_Stack_overflow)
+        b       G(caml_raise_async)
+        CFI_ENDPROC
+END_FUNCTION(caml_llvm_call_realloc_stack_stkarg)
+
 FUNCTION(caml_llvm_call_realloc_stack)
         CFI_STARTPROC
         CFI_SIGNAL_FRAME

@@ -158,6 +158,11 @@ static cl::opt<unsigned> OxCamlValueSlotHomes(
     cl::desc("Home live handler-rooted values through their slot instead of "
              "relocating them (0=off, 1=invokes only, 2=calls only, 3=all)"));
 
+static cl::opt<bool> OxCamlVerifyObjectStarts(
+    "rs4gc-oxcaml-verify-object-starts", cl::Hidden, cl::init(false),
+    cl::desc("Report live values whose base-pointer chain walks through an "
+             "is_base_value GEP without stopping at it"));
+
 static cl::opt<bool> OxCamlPruneRootSlotInitStores(
     "rs4gc-oxcaml-prune-root-slot-init-stores", cl::Hidden, cl::init(true),
     cl::desc("Drop entry-block init stores of OxCaml root slots whose single "
@@ -2651,6 +2656,27 @@ static void findBasePointers(const StatepointLiveSetTy &live,
     Value *base = findBasePointer(ptr, DVCache, KnownBases);
     assert(base && "failed to find base pointer");
     PointerToBase[ptr] = base;
+    if (OxCamlVerifyObjectStarts) {
+      Value *V = ptr;
+      while (V != base) {
+        if (auto *GEP = dyn_cast<GetElementPtrInst>(V)) {
+          if (GEP->getMetadata("is_base_value")) {
+            errs() << "[rs4gc-object-start] base crosses object start in "
+                   << GEP->getFunction()->getName() << ":\n  derived: " << *ptr
+                   << "\n  object start: " << *GEP << "\n  base: " << *base
+                   << "\n";
+            break;
+          }
+          V = GEP->getPointerOperand();
+          continue;
+        }
+        if (auto *CI = dyn_cast<CastInst>(V)) {
+          V = CI->getOperand(0);
+          continue;
+        }
+        break;
+      }
+    }
     assert((!isa<Instruction>(base) || !isa<Instruction>(ptr) ||
             DT->dominates(cast<Instruction>(base)->getParent(),
                           cast<Instruction>(ptr)->getParent())) &&
@@ -6780,6 +6806,12 @@ static Value* findRematerializableChainToBasePointer(
   Value *CurrentValue,
   bool AllowIntegerAddressArithmetic) {
   if (GetElementPtrInst *GEP = dyn_cast<GetElementPtrInst>(CurrentValue)) {
+    // An is_base_value GEP is an independent object start (e.g. a comballoc
+    // secondary object).  The collector moves it independently of its
+    // pointer operand, so it is the root of any chain: re-deriving it from
+    // its operand's relocation would rebuild a dangling pointer.
+    if (GEP->getMetadata("is_base_value"))
+      return GEP;
     ChainToBase.push_back(GEP);
     return findRematerializableChainToBasePointer(ChainToBase,
                                                   GEP->getPointerOperand(),
@@ -6855,8 +6887,14 @@ static bool findRematerializableChainToSpecificBase(
     return false;
   };
 
-  if (auto *GEP = dyn_cast<GetElementPtrInst>(CurrentValue))
+  if (auto *GEP = dyn_cast<GetElementPtrInst>(CurrentValue)) {
+    // Never walk through an independent object start (see the matching check
+    // in findRematerializableChainToBasePointer); reaching Base through one
+    // would re-derive it from a different object's relocation.
+    if (GEP->getMetadata("is_base_value"))
+      return false;
     return TryAppendAndRecurse(GEP, GEP->getPointerOperand());
+  }
 
   if (auto *CI = dyn_cast<CastInst>(CurrentValue)) {
     auto *IntToPtrDstTy = dyn_cast<PointerType>(CI->getType());

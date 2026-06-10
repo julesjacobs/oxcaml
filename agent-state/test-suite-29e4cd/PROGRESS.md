@@ -114,6 +114,50 @@ miscompile that PRE-EXISTS this work entirely:
 - The `parser.pp.ml` s=1k repro should be added to the standard validation
   gate once fixed; the stdlib.pp.ml sweep alone does NOT catch it.
 
+### Second investigation round (2026-06-10, bug still open)
+
+Two REAL adjacent holes were found and fixed (neither is the parser crash):
+
+- RS4GC rematerialization walked GEP chains THROUGH `!is_base_value` GEPs
+  (comballoc secondary object starts), so a derived pointer could be
+  rebuilt after a statepoint from a DIFFERENT object's relocation.  Both
+  chain walkers now stop at marked GEPs (they are the chain root); the
+  comballoc-object-starts test now rematerializes fields from their own
+  object's relocation.  This path is real but unexercised in
+  closure_conversion (objects byte-identical before/after the fix).
+- The inline-asm prologue stack checks emitted by `emitOxCamlStackCheck`
+  (AArch64FrameLowering.cpp) called the NATIVE `caml_call_realloc_stack`,
+  which saves the live x29; stack growth then walks the frame-pointer
+  chain from it (fiber.c WITH_FRAME_POINTERS rewrite) into LLVM frames,
+  rewriting any spilled word that looks like an old-stack address.  Added
+  `caml_llvm_call_realloc_stack_stkarg` (runtime/arm64.S): same stack-arg
+  protocol but stores xzr to terminate the chain, exactly like
+  `caml_llvm_call_realloc_stack`.  NOTE: runtimes must be rebuilt from the
+  new arm64.S before linking code from the new clang (stage0
+  `_install/lib/ocaml/libasmrun.a` was patched in place with the new
+  arm64.o).
+- Also added: `-rs4gc-oxcaml-verify-object-starts` (reports base-pointer
+  chains crossing object-start GEPs) and an `OXCAML_LLVM_NO_COMBALLOC`
+  env-var gate in asmgen.ml for bisection.
+
+Additional EXCLUSIONS for the parser crash (each tested directly):
+comballoc entirely off (module IR regenerated without it - still crashes),
+`-O1` (still crashes; not an -O3-only pass), GC values forced to spill
+slots (`-max-registers-for-gc-values=0`), the realloc fp-chain rewrite
+(disabled in fiber.c - still crashes), ALL stack reallocation (64M-word
+initial main stack - still crashes), i64-laundered GC pointers (the
+`-rs4gc-heuristic-report-oxcaml-statepoint-crossing-inttoptr` hits all
+triage to immediates: or-tag patterns, local_sp arena offsets, Int_ids
+table ids).
+
+Repro status: FULLY DETERMINISTIC under lldb (no ASLR): identical crash
+pc (`Ident.compare+48`) and registers (x0=0, x1=1) every run, with the
+fp-chain compare <- List.map+172 <- classify_fields_of_block+152 <-
+curry2 <- cont_96_350+5052.  Next session: hardware watchpoint hunt -
+walk back from the deterministic crash to the corrupt cell's address in
+a scout run, then watchpoint that address in a second run to catch the
+corrupting writer (mutator store or GC).
+
 ## Previous Change (v2: consumer-NCD store placement)
 
 - Refined the uniform root design: the slot's single defining store now sits

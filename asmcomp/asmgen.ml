@@ -488,7 +488,13 @@ let compile_via_llvm ~ppf_dump ~funcnames cfg_with_layout =
        (Cfg_polling.instrument_fundecl ~future_funcnames:funcnames)
   ++ cfg_with_layout_profile ~accumulate:true "cfg_zero_alloc_checker"
        (Zero_alloc_checker.cfg ~future_funcnames:funcnames ppf_dump)
-  ++ cfg_with_layout_profile ~accumulate:true "cfg_comballoc" Cfg_comballoc.run
+  ++ (fun cfg_with_layout ->
+       (* Debug escape hatch for bisecting comballoc-related miscompiles. *)
+       if Sys.getenv_opt "OXCAML_LLVM_NO_COMBALLOC" <> None
+       then cfg_with_layout
+       else
+         cfg_with_layout_profile ~accumulate:true "cfg_comballoc"
+           Cfg_comballoc.run cfg_with_layout)
   ++ Compiler_hooks.execute_and_pipe Compiler_hooks.Cfg_combine
   ++ pass_dump_cfg_if ppf_dump Oxcaml_flags.dump_cfg "After comballoc"
   ++ (fun (cfg_with_layout : Cfg_with_layout.t) ->

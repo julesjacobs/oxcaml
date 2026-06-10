@@ -28,12 +28,15 @@ define ptr addrspace(1) @one_object_start_one_derived_field(ptr addrspace(1) %al
 ; CHECK-LABEL: define ptr addrspace(1) @one_object_start_one_derived_field
 ; CHECK-SAME: (ptr addrspace(1) [[ALLOC:%.*]]) gc "statepoint-example" {
 ; CHECK-NEXT:  entry:
+; The field is rematerialized from its own object start's relocation: the
+; remat chain stops at the is_base_value GEP (the object start), never
+; walking through it to a different object's relocation.
 ; CHECK-NEXT:    [[OBJ:%.*]] = getelementptr i8, ptr addrspace(1) [[ALLOC]], i64 16, !is_base_value !0
 ; CHECK-NEXT:    [[FIELD:%.*]] = getelementptr i8, ptr addrspace(1) [[OBJ]], i64 8
-; CHECK-NEXT:    [[STATEPOINT_TOKEN:%.*]] = call token {{.*}} @llvm.experimental.gc.statepoint.p0({{.*}}) [ "deopt"(), "gc-live"(ptr addrspace(1) [[FIELD]], ptr addrspace(1) [[OBJ]]) ]
-; CHECK-NEXT:    [[FIELD_RELOCATED:%.*]] = call coldcc ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token [[STATEPOINT_TOKEN]], i32 1, i32 0)
-; CHECK-NEXT:    [[OBJ_RELOCATED:%.*]] = call coldcc ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token [[STATEPOINT_TOKEN]], i32 1, i32 1)
-; CHECK-NEXT:    ret ptr addrspace(1) [[FIELD_RELOCATED]]
+; CHECK-NEXT:    [[STATEPOINT_TOKEN:%.*]] = call token {{.*}} @llvm.experimental.gc.statepoint.p0({{.*}}) [ "deopt"(), "gc-live"(ptr addrspace(1) [[OBJ]]) ]
+; CHECK-NEXT:    [[OBJ_RELOCATED:%.*]] = call coldcc ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token [[STATEPOINT_TOKEN]], i32 0, i32 0)
+; CHECK-NEXT:    [[FIELD_REMAT:%.*]] = getelementptr i8, ptr addrspace(1) [[OBJ_RELOCATED]], i64 8
+; CHECK-NEXT:    ret ptr addrspace(1) [[FIELD_REMAT]]
 ;
 entry:
   %obj = getelementptr i8, ptr addrspace(1) %alloc, i64 16, !is_base_value !0
