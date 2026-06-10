@@ -754,11 +754,26 @@ static bool isHandledGCPointerType(Type *T) {
 
 static bool isOxCamlFunction(const Function &F);
 
+// Debug aid: make each slot's init placeholder a unique odd immediate
+// ((id << 16) | 1) and print the id so a leaked placeholder observed at
+// runtime identifies its slot.
+static cl::opt<bool> OxCamlTagInitPlaceholders(
+    "rs4gc-oxcaml-tag-init-placeholders", cl::Hidden, cl::init(false),
+    cl::desc("Use unique odd immediates for OxCaml slot init placeholders"));
+static unsigned OxCamlInitPlaceholderCounter = 0;
+
 static Constant *getOxCamlNonMovingImmediate(Type *Ty) {
   assert(isHandledGCPointerType(Ty) &&
          "expected a GC pointer or vector of GC pointers");
 
-  auto *One = ConstantInt::get(Type::getInt64Ty(Ty->getContext()), 1);
+  uint64_t Imm = 1;
+  if (OxCamlTagInitPlaceholders) {
+    unsigned Id = ++OxCamlInitPlaceholderCounter;
+    Imm = (static_cast<uint64_t>(Id) << 16) | 1;
+    errs() << "[init-placeholder] id=" << Id << " imm=0x"
+           << Twine::utohexstr(Imm) << "\n";
+  }
+  auto *One = ConstantInt::get(Type::getInt64Ty(Ty->getContext()), Imm);
   if (isGCPointerType(Ty))
     return ConstantExpr::getIntToPtr(One, Ty);
 

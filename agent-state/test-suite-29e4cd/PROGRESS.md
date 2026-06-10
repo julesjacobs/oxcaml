@@ -157,6 +157,24 @@ curry2 <- cont_96_350+5052.  (Watchpoints perturb signal timing and
 change pool-reuse history; use content/condition triggers, not hit
 indexes.)
 
+Round-3 narrowing (same day): the crash is `CCenv.find_var` called from
+`Lambda_to_flambda.cps` on `Lvar` (lambda_to_flambda.ml:480) walking the
+closure_conversion_aux VARIABLES map into a node pointer that lands in
+RECLAIMED major-pool memory (recycled small values such as 1, 3, 0x1500).
+Refuted by direct experiment: init-placeholder leaks (new debug flag
+`-rs4gc-oxcaml-tag-init-placeholders` gives every slot placeholder a
+unique odd immediate; the crash value stays plain 1 = Val_long 0),
+immediate idents inserted through any aux Env add path (conditional
+breakpoints never fire), missing write barriers (caml_modify relocation
+count differences are sound MIR tail-merging; all calls survive post-opt
+IR), and major-GC starvation (o=10000 still crashes).  Remaining
+mechanisms: a frametable liveness hole at a closure_conversion statepoint
+(live env/map collected) or relocation/SSA wiring handing code a stale or
+wrong pointer.  Next experiment documented in the memory note: walk the
+map from its root at the deterministic crash and classify the dead node's
+parent (header color/generation, sibling fields) to separate
+collected-while-reachable from wrong-value-at-construction.
+
 Watchpoint findings: the corrupt cells' last writers are the GC itself
 copying the young original verbatim during promotion
 (oldify_one <- caml_scan_stack, then oldify_mopup) - so the corruption
