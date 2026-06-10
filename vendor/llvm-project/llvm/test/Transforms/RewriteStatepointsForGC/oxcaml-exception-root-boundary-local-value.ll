@@ -21,7 +21,7 @@ try:
 ; CHECK: %[[CUR:.*]] = phi ptr addrspace(1)
 ; CHECK: %[[FIELD_ADDR:.*]] = getelementptr i8, ptr addrspace(1) %[[CUR]], i64 8
 ; CHECK: %[[FIELD:.*]] = load ptr addrspace(1), ptr addrspace(1) %[[FIELD_ADDR]], align 8
-; CHECK: store volatile ptr addrspace(1) %[[FIELD]],
+; CHECK: store ptr addrspace(1) %[[FIELD]],
 ; CHECK: %statepoint_token = invoke
   %cur = phi ptr addrspace(1) [ %obj, %entry ], [ %next, %retry.block ]
   %field.addr = getelementptr i8, ptr addrspace(1) %cur, i64 8

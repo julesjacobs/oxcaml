@@ -17,7 +17,7 @@ define oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @retrying_boundary_e
 ; whose content the collector keeps current, so no store precedes the invoke.
 ; CHECK: entry:
 ; CHECK: %f.exnroot = alloca ptr addrspace(1), align 8
-; CHECK: store volatile ptr addrspace(1) %f, ptr %f.exnroot, align 8
+; CHECK: store ptr addrspace(1) %f, ptr %f.exnroot, align 8
 entry:
   br i1 %take_try, label %try.preheader, label %exit
 
@@ -39,7 +39,7 @@ normal:
 
 recover:
 ; CHECK: recover:
-; CHECK: %f.exnroot.load = load volatile ptr addrspace(1), ptr %f.exnroot, align 8
+; CHECK: %f.exnroot.load = load ptr addrspace(1), ptr %f.exnroot, align 8
   %lp = landingpad token cleanup
   %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
   br i1 %retry, label %check, label %exit.recover.direct

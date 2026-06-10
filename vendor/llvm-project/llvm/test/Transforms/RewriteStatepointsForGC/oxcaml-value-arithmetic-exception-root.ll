@@ -30,7 +30,7 @@ entry:
 
 left:
 ; CHECK: left:
-; CHECK-NEXT: store volatile ptr addrspace(1) %adjusted, ptr %handler_value.exnroot, align 8
+; CHECK-NEXT: store ptr addrspace(1) %adjusted, ptr %handler_value.exnroot, align 8
 ; CHECK: %statepoint_token = invoke {{.*}} @llvm.experimental.gc.statepoint
 ; CHECK-SAME: ptr %handler_value.exnroot
   %left_call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
@@ -42,7 +42,7 @@ normal_left:
 
 right:
 ; CHECK: right:
-; CHECK-NEXT: store volatile ptr addrspace(1) %b, ptr %handler_value.exnroot, align 8
+; CHECK-NEXT: store ptr addrspace(1) %b, ptr %handler_value.exnroot, align 8
 ; CHECK: %statepoint_token{{[0-9]*}} = invoke {{.*}} @llvm.experimental.gc.statepoint
 ; CHECK-SAME: ptr %handler_value.exnroot
   %right_call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
@@ -57,7 +57,7 @@ recover:
 ; CHECK-NEXT: %lp = landingpad token
 ; CHECK-NEXT: cleanup
 ; CHECK-NEXT: %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
-; CHECK: %handler_value.exnroot.load = load volatile ptr addrspace(1), ptr %handler_value.exnroot, align 8
+; CHECK: %handler_value.exnroot.load = load ptr addrspace(1), ptr %handler_value.exnroot, align 8
   %handler_value = phi ptr addrspace(1) [ %adjusted, %left ], [ %b, %right ]
   %lp = landingpad token cleanup
   %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()

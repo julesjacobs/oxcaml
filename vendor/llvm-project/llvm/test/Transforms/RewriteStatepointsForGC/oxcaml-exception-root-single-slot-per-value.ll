@@ -19,12 +19,14 @@ define oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @retry_loop_single_s
     ptr addrspace(1) %lemmas)
     gc "oxcaml" personality ptr @personality {
 ; CHECK-LABEL: define {{.*}} @retry_loop_single_slot(
+; The lemma slot's init store is pruned: its defining store dominates every
+; load and registered statepoint of the slot.
 ; CHECK: entry:
 ; CHECK-NEXT: %lemmas.iter.exnroot = alloca ptr addrspace(1), align 8
-; CHECK-NEXT: store volatile ptr addrspace(1) inttoptr (i64 1 to ptr addrspace(1)), ptr %lemmas.iter.exnroot, align 8
 ; CHECK-NEXT: %term.exnroot = alloca ptr addrspace(1), align 8
-; CHECK-NEXT: store volatile ptr addrspace(1) %term, ptr %term.exnroot, align 8
+; CHECK-NEXT: store ptr addrspace(1) %term, ptr %term.exnroot, align 8
 ; CHECK-NOT: = alloca
+; CHECK-NOT: store ptr addrspace(1) inttoptr (i64 1 to ptr addrspace(1)), ptr %lemmas.iter.exnroot
 entry:
   br label %loop
 
@@ -33,7 +35,7 @@ loop:
 ; iteration; the term argument's slot was stored once at entry.  No store
 ; precedes the invoke.
 ; CHECK: loop:
-; CHECK: store volatile ptr addrspace(1) %lemmas.iter, ptr %lemmas.iter.exnroot, align 8
+; CHECK: store ptr addrspace(1) %lemmas.iter, ptr %lemmas.iter.exnroot, align 8
 ; CHECK-NOT: store volatile
 ; CHECK: %statepoint_token = invoke {{.*}} [ "gc-live"(ptr %lemmas.iter.exnroot, ptr %term.exnroot) ]
   %lemmas.iter = phi ptr addrspace(1) [ %lemmas, %entry ], [ %next, %retry ]
@@ -48,8 +50,8 @@ normal:
 recover:
 ; Both values are reloaded from their single slots at the recovery entry.
 ; CHECK: recover:
-; CHECK-DAG: %lemmas.iter.exnroot.load = load volatile ptr addrspace(1), ptr %lemmas.iter.exnroot, align 8
-; CHECK-DAG: %term.exnroot.load = load volatile ptr addrspace(1), ptr %term.exnroot, align 8
+; CHECK-DAG: %lemmas.iter.exnroot.load = load ptr addrspace(1), ptr %lemmas.iter.exnroot, align 8
+; CHECK-DAG: %term.exnroot.load = load ptr addrspace(1), ptr %term.exnroot, align 8
   %lp = landingpad token cleanup
   %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
   %tail.addr = getelementptr i8, ptr addrspace(1) %lemmas.iter, i64 8

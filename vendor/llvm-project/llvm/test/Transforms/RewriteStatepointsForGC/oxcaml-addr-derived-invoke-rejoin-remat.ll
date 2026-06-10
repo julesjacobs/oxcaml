@@ -25,7 +25,7 @@ entry:
   br i1 %skip, label %join, label %try
 
 try:
-; CHECK: store volatile ptr addrspace(1) %obj, ptr %obj.exnroot, align 8
+; CHECK: store ptr addrspace(1) %obj, ptr %obj.exnroot, align 8
 ; CHECK: %statepoint_token = invoke {{.*}} [ "deopt"(), "gc-live"(ptr %obj.exnroot) ]
   %call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee(i64 %ds, i64 %alloc, ptr addrspace(1) %obj)
@@ -35,14 +35,14 @@ try:
 normal:
 ; CHECK: normal:
 ; CHECK-NOT: gc.relocate
-; CHECK: %obj.exnroot.normal.load = load volatile ptr addrspace(1), ptr %obj.exnroot, align 8
+; CHECK: %obj.exnroot.normal.load = load ptr addrspace(1), ptr %obj.exnroot, align 8
   %normal_ds = extractvalue { i64, i64, ptr addrspace(1) } %call, 0
   %normal_alloc = extractvalue { i64, i64, ptr addrspace(1) } %call, 1
   br label %join
 
 recover:
 ; CHECK: recover:
-; CHECK: %obj.exnroot.load = load volatile ptr addrspace(1), ptr %obj.exnroot, align 8
+; CHECK: %obj.exnroot.load = load ptr addrspace(1), ptr %obj.exnroot, align 8
   %lp = landingpad token cleanup
   %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
   %recovered_alloc = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 2
@@ -92,7 +92,7 @@ setup:
   br i1 %skip, label %join, label %try
 
 try:
-; CHECK: store volatile ptr addrspace(1) %same.base, ptr %same.base.exnroot, align 8
+; CHECK: store ptr addrspace(1) %same.base, ptr %same.base.exnroot, align 8
 ; CHECK: %statepoint_token = invoke {{.*}} [ "deopt"(), "gc-live"(ptr %same.base.exnroot) ]
   %call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee(i64 %ds, i64 %alloc, ptr addrspace(1) %obj)
@@ -106,7 +106,7 @@ normal:
 
 recover:
 ; CHECK: recover:
-; CHECK: %same.base.exnroot.load = load volatile ptr addrspace(1), ptr %same.base.exnroot, align 8
+; CHECK: %same.base.exnroot.load = load ptr addrspace(1), ptr %same.base.exnroot, align 8
   %lp = landingpad token cleanup
   %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
   %recovered_alloc = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 2
@@ -141,7 +141,7 @@ entry:
       ptr %trap_block,
       i64 1,
       ptr blockaddress(@invoke_recovery_duplicate_phi_edges, %recover))
-; CHECK: store volatile ptr addrspace(1) %obj, ptr %obj.exnroot, align 8
+; CHECK: store ptr addrspace(1) %obj, ptr %obj.exnroot, align 8
   %call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee(i64 %ds, i64 %alloc, ptr addrspace(1) %obj)
       "statepoint-id"="0" [ "deopt"() ]
@@ -154,7 +154,7 @@ normal:
 
 recover:
 ; CHECK: recover:
-; CHECK: %obj.exnroot.load = load volatile ptr addrspace(1), ptr %obj.exnroot, align 8
+; CHECK: %obj.exnroot.load = load ptr addrspace(1), ptr %obj.exnroot, align 8
   %lp = landingpad token cleanup
   %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
   %recovered_alloc = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 2
@@ -207,7 +207,7 @@ setup:
   br label %try
 
 try:
-; CHECK: store volatile ptr addrspace(1) %same.base, ptr %same.base.exnroot, align 8
+; CHECK: store ptr addrspace(1) %same.base, ptr %same.base.exnroot, align 8
   %call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee(i64 %ds, i64 %alloc, ptr addrspace(1) %obj)
       "statepoint-id"="0" [ "deopt"() ]
@@ -220,7 +220,7 @@ normal:
 
 recover:
 ; CHECK: recover:
-; CHECK: %same.base.exnroot.load = load volatile ptr addrspace(1), ptr %same.base.exnroot, align 8
+; CHECK: %same.base.exnroot.load = load ptr addrspace(1), ptr %same.base.exnroot, align 8
   %lp = landingpad token cleanup
   %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
   %recovered_alloc = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 2
@@ -272,7 +272,7 @@ entry:
   br i1 %skip, label %join, label %try
 
 try:
-; CHECK: store volatile ptr addrspace(1) %obj, ptr %obj.exnroot, align 8
+; CHECK: store ptr addrspace(1) %obj, ptr %obj.exnroot, align 8
 ; CHECK: %statepoint_token = invoke {{.*}} [ "deopt"(), "gc-live"(ptr %obj.exnroot) ]
   %call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee(i64 %ds, i64 %alloc, ptr addrspace(1) %obj)
@@ -286,7 +286,7 @@ normal:
 
 recover:
 ; CHECK: recover:
-; CHECK: %obj.exnroot.load = load volatile ptr addrspace(1), ptr %obj.exnroot, align 8
+; CHECK: %obj.exnroot.load = load ptr addrspace(1), ptr %obj.exnroot, align 8
   %lp = landingpad token cleanup
   %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
   %recovered_alloc = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 2
@@ -327,7 +327,7 @@ entry:
   br i1 %skip, label %join, label %try
 
 try:
-; CHECK: store volatile ptr addrspace(1) %obj, ptr %obj.exnroot, align 8
+; CHECK: store ptr addrspace(1) %obj, ptr %obj.exnroot, align 8
   %call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee(i64 %ds, i64 %alloc, ptr addrspace(1) %obj)
       "statepoint-id"="0" [ "deopt"() ]
@@ -340,7 +340,7 @@ normal:
 
 recover:
 ; CHECK: recover:
-; CHECK: %obj.exnroot.load = load volatile ptr addrspace(1), ptr %obj.exnroot, align 8
+; CHECK: %obj.exnroot.load = load ptr addrspace(1), ptr %obj.exnroot, align 8
   %lp = landingpad token cleanup
   %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
   %recovered_alloc = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 2

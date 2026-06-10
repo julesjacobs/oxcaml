@@ -18,7 +18,7 @@ define oxcaml_nofpcc { i64, i64, ptr addrspace(1) } @invoke_gep_normal_only(
 ; The handler-live base is rooted in its slot at its definition and crosses
 ; the statepoint through the slot, not through gc.relocate.
 ; CHECK: %obj.exnroot = alloca ptr addrspace(1), align 8
-; CHECK-NEXT: store volatile ptr addrspace(1) %obj, ptr %obj.exnroot, align 8
+; CHECK-NEXT: store ptr addrspace(1) %obj, ptr %obj.exnroot, align 8
 entry:
   call void @llvm.aarch64.oxcaml.trap.publish(
       ptr %trap_block,
@@ -35,7 +35,7 @@ entry:
 normal:
 ; CHECK: normal:
 ; CHECK-NOT: gc.relocate
-; CHECK: %obj.exnroot.normal.load = load volatile ptr addrspace(1), ptr %obj.exnroot, align 8
+; CHECK: %obj.exnroot.normal.load = load ptr addrspace(1), ptr %obj.exnroot, align 8
 ; CHECK: %field.addr.remat = getelementptr i8, ptr addrspace(1) %obj.exnroot.normal.load, i64 24
 ; CHECK: %field = load ptr addrspace(1), ptr addrspace(1) %field.addr.remat
   %field = load ptr addrspace(1), ptr addrspace(1) %field.addr, align 8
@@ -85,7 +85,7 @@ after1:
 ; not stored again.
 ; CHECK: after1:
 ; CHECK-NOT: gc.relocate
-; CHECK: %obj.exnroot.normal.load = load volatile ptr addrspace(1), ptr %obj.exnroot, align 8
+; CHECK: %obj.exnroot.normal.load = load ptr addrspace(1), ptr %obj.exnroot, align 8
 ; CHECK: %field.addr.remat{{[0-9]*}} = getelementptr i8, ptr addrspace(1) %obj.exnroot.normal.load, i64 32
 ; CHECK: %field1 = load ptr addrspace(1), ptr addrspace(1) %field.addr.remat{{[0-9]*}}
 ; CHECK-NOT: store volatile
@@ -99,7 +99,7 @@ after1:
 
 normal:
 ; CHECK: normal:
-; CHECK: %obj.exnroot.normal.load{{[0-9]*}} = load volatile ptr addrspace(1), ptr %obj.exnroot, align 8
+; CHECK: %obj.exnroot.normal.load{{[0-9]*}} = load ptr addrspace(1), ptr %obj.exnroot, align 8
 ; CHECK: %field.addr.remat{{[0-9]*}} = getelementptr i8, ptr addrspace(1) %obj.exnroot.normal.load{{[0-9]*}}, i64 32
   %field = load ptr addrspace(1), ptr addrspace(1) %field.addr, align 8
   %pair = extractvalue { i64, i64, ptr addrspace(1) } %call2, 0
@@ -148,7 +148,7 @@ try:
 ; The defining store sits at the latest point dominating the protected
 ; invokes, so the preuse path pays nothing.
 ; CHECK: try:
-; CHECK: store volatile ptr addrspace(1) %obj, ptr %obj.exnroot, align 8
+; CHECK: store ptr addrspace(1) %obj, ptr %obj.exnroot, align 8
 ; CHECK: %statepoint_token{{[0-9]*}} = invoke {{.*}} [ "deopt"(), "gc-live"(ptr %obj.exnroot) ]
   %call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee(i64 %ds, i64 %alloc, ptr addrspace(1) %obj)
@@ -158,7 +158,7 @@ try:
 normal:
 ; CHECK: normal:
 ; CHECK-NOT: gc.relocate
-; CHECK: %obj.exnroot.normal.load{{[0-9]*}} = load volatile ptr addrspace(1), ptr %obj.exnroot, align 8
+; CHECK: %obj.exnroot.normal.load{{[0-9]*}} = load ptr addrspace(1), ptr %obj.exnroot, align 8
 ; CHECK: %field.addr.remat{{[0-9]*}} = getelementptr i8, ptr addrspace(1) %obj.exnroot.normal.load{{[0-9]*}}, i64 40
 ; CHECK: %field = load ptr addrspace(1), ptr addrspace(1) %field.addr.remat{{[0-9]*}}, align 8
   %field = load ptr addrspace(1), ptr addrspace(1) %field.addr, align 8

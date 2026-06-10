@@ -22,7 +22,7 @@ entry:
       i64 1,
       ptr blockaddress(@invoke_gep_handler_live, %recover))
   %field.addr = getelementptr i8, ptr addrspace(1) %obj, i64 24
-; CHECK: store volatile ptr addrspace(1) %obj, ptr %obj.exnroot, align 8
+; CHECK: store ptr addrspace(1) %obj, ptr %obj.exnroot, align 8
 ; CHECK: %statepoint_token = invoke {{.*}} [ "deopt"(), "gc-live"(ptr %obj.exnroot{{.*}}) ]
   %call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee(i64 %ds, i64 %alloc, ptr addrspace(1) %obj)
@@ -32,7 +32,7 @@ entry:
 normal:
 ; CHECK: normal:
 ; CHECK-NOT: gc.relocate
-; CHECK: %obj.exnroot.normal.load = load volatile ptr addrspace(1), ptr %obj.exnroot, align 8
+; CHECK: %obj.exnroot.normal.load = load ptr addrspace(1), ptr %obj.exnroot, align 8
 ; CHECK: %field.addr.remat{{[0-9]*}} = getelementptr i8, ptr addrspace(1) %obj.exnroot.normal.load, i64 24
   %normal_field = load ptr addrspace(1), ptr addrspace(1) %field.addr, align 8
   %pair = extractvalue { i64, i64, ptr addrspace(1) } %call, 0
@@ -44,7 +44,7 @@ normal:
 
 recover:
 ; CHECK: recover:
-; CHECK: %obj.exnroot.load = load volatile ptr addrspace(1), ptr %obj.exnroot, align 8
+; CHECK: %obj.exnroot.load = load ptr addrspace(1), ptr %obj.exnroot, align 8
 ; CHECK: %field.addr.remat{{[0-9]*}} = getelementptr i8, ptr addrspace(1) %obj.exnroot.load, i64 24
   %lp = landingpad token cleanup
   %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
@@ -71,7 +71,7 @@ entry:
       i64 1,
       ptr blockaddress(@invoke_gep_nested_recovery_trap, %recover))
   %field.addr = getelementptr i8, ptr addrspace(1) %obj, i64 24
-; CHECK: store volatile ptr addrspace(1) %obj, ptr %obj.exnroot, align 8
+; CHECK: store ptr addrspace(1) %obj, ptr %obj.exnroot, align 8
 ; CHECK: %statepoint_token = invoke {{.*}} [ "deopt"(), "gc-live"(ptr %obj.exnroot{{.*}}) ]
   %call = invoke oxcaml_nofpcc { i64, i64, ptr addrspace(1) }
       @callee(i64 %ds, i64 %alloc, ptr addrspace(1) %obj)
@@ -89,7 +89,7 @@ normal:
 
 recover:
 ; CHECK: recover:
-; CHECK: %obj.exnroot.load = load volatile ptr addrspace(1), ptr %obj.exnroot, align 8
+; CHECK: %obj.exnroot.load = load ptr addrspace(1), ptr %obj.exnroot, align 8
   %lp = landingpad token cleanup
   %rec = call { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
   %recovered_alloc = extractvalue { ptr addrspace(1), i64, i64, i64 } %rec, 2
@@ -115,7 +115,7 @@ nested:
 inner_normal:
 ; CHECK: inner_normal:
 ; CHECK-NOT: gc.relocate
-; CHECK: %obj.exnroot.select.exnroot.normal.load = load volatile ptr addrspace(1), ptr %obj.exnroot, align 8
+; CHECK: %obj.exnroot.select.exnroot.normal.load = load ptr addrspace(1), ptr %obj.exnroot, align 8
 ; CHECK: %field.addr.remat{{[0-9]*}} = getelementptr i8, ptr addrspace(1) %obj.exnroot.select.exnroot.normal.load, i64 24
 ; CHECK: %inner_field = load ptr addrspace(1), ptr addrspace(1) %field.addr.remat{{[0-9]*}}, align 8
   %inner_field = load ptr addrspace(1), ptr addrspace(1) %field.addr, align 8

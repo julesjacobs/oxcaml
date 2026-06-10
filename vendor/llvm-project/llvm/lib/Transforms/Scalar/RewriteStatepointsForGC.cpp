@@ -135,9 +135,11 @@ static cl::opt<bool> OxCamlRootSlotAliasing(
     "rs4gc-oxcaml-root-slot-aliasing", cl::Hidden, cl::init(true),
     cl::desc("Let reloads/selectors of a stable root slot share that slot"));
 
-// Homing at call statepoints (2/3) miscompiles under GC pressure (boot
-// compiler heap corruption, see PROGRESS); calls keep full relocation until
-// the call-statepoint lowering of slot-only frames is understood.
+static cl::opt<bool> OxCamlVerifyRootSlots(
+    "rs4gc-oxcaml-verify-root-slots", cl::Hidden, cl::init(false),
+    cl::desc("Verify that every root slot reload is dominated by the slot's "
+             "defining store"));
+
 static cl::opt<unsigned> OxCamlCallHomeBudget(
     "rs4gc-oxcaml-call-home-budget", cl::Hidden,
     cl::init(std::numeric_limits<unsigned>::max()),
@@ -152,9 +154,21 @@ static cl::opt<unsigned> OxCamlCallHomeDump(
 static unsigned OxCamlCallHomesUsed = 0;
 
 static cl::opt<unsigned> OxCamlValueSlotHomes(
-    "rs4gc-oxcaml-value-slot-homes", cl::Hidden, cl::init(1),
+    "rs4gc-oxcaml-value-slot-homes", cl::Hidden, cl::init(3),
     cl::desc("Home live handler-rooted values through their slot instead of "
              "relocating them (0=off, 1=invokes only, 2=calls only, 3=all)"));
+
+static cl::opt<bool> OxCamlPruneRootSlotInitStores(
+    "rs4gc-oxcaml-prune-root-slot-init-stores", cl::Hidden, cl::init(true),
+    cl::desc("Drop entry-block init stores of OxCaml root slots whose single "
+             "defining store dominates every load and registered statepoint "
+             "of the slot"));
+
+static cl::opt<bool> OxCamlVolatileExnRootSlots(
+    "rs4gc-oxcaml-volatile-exnroot-slots", cl::Hidden, cl::init(false),
+    cl::desc("Use volatile accesses for OxCaml exception root slots instead "
+             "of relying on the slots escaping into statepoint gc-live "
+             "bundles"));
 
 static cl::opt<bool> OxCamlLazyBoundaryLoads(
     "rs4gc-oxcaml-lazy-boundary-loads", cl::Hidden, cl::init(true),
@@ -3418,20 +3432,28 @@ static bool isRootableOxCamlExceptionValue(Value *V,
   return Finish(false);
 }
 
-/// A slot whose content is defined by at most one store outside the entry
-/// block always holds the same object (modulo GC moves) from that store
-/// onward, so other SSA names for that object may share it.  Per-invoke
-/// phi-edge slots have several defining stores and must not be shared.
+/// The constant initialization in the entry block is not a defining store;
+/// everything else is.  Defining stores must be identified by their value,
+/// not their block: a consumer-placed defining store can legitimately sit in
+/// the entry block below interior call statepoints.
+static bool isOxCamlRootSlotInitStore(const StoreInst *Store) {
+  return isa<Constant>(Store->getValueOperand()) &&
+         Store->getParent() == &Store->getFunction()->getEntryBlock();
+}
+
+/// A slot with at most one defining store always holds the same object
+/// (modulo GC moves) from that store onward, so other SSA names for that
+/// object may share it.  Per-invoke phi-edge slots have several defining
+/// stores and must not be shared.
 static bool oxcamlRootSlotHasSingleDefiningStore(const AllocaInst *Slot) {
-  const BasicBlock &EntryBlock = Slot->getFunction()->getEntryBlock();
-  unsigned NonEntryStores = 0;
+  unsigned DefStores = 0;
   for (const User *U : Slot->users()) {
     auto *Store = dyn_cast<StoreInst>(U);
     if (!Store || Store->getPointerOperand() != Slot)
       continue;
-    if (Store->getParent() == &EntryBlock)
+    if (isOxCamlRootSlotInitStore(Store))
       continue;
-    if (++NonEntryStores > 1)
+    if (++DefStores > 1)
       return false;
   }
   return true;
@@ -3595,7 +3617,8 @@ static bool materializeOxCamlExceptionRootSlots(
           HandlerValue->getType(), Slot,
           DL.getABITypeAlign(HandlerValue->getType()),
           suffixed_name_or(HandlerValue, ".exnroot.load", "exnroot.load"));
-      if (isHandledGCPointerType(HandlerValue->getType()))
+      if (OxCamlVolatileExnRootSlots &&
+          isHandledGCPointerType(HandlerValue->getType()))
         Load->setVolatile(true);
       Load->setMetadata("oxcaml.exnroot.load",
                         MDNode::get(F.getContext(), {}));
@@ -3655,7 +3678,7 @@ static bool materializeOxCamlExceptionRootSlots(
               ? cast<Value>(getOxCamlNonMovingImmediate(SlotPhi->getType()))
               : Constant::getNullValue(SlotPhi->getType()),
           Slot, DL.getABITypeAlign(SlotPhi->getType()));
-      if (IsGCRoot)
+      if (IsGCRoot && OxCamlVolatileExnRootSlots)
         InitialStore->setVolatile(true);
 
       for (const OxCamlRecoveryStoreSite &StoreSite : StoreSites) {
@@ -3696,7 +3719,8 @@ static bool materializeOxCamlExceptionRootSlots(
         StoreInst *RootStore = StoreBuilder.CreateAlignedStore(
             EdgeValue, Slot, DL.getABITypeAlign(SlotPhi->getType()));
         if (IsGCRoot) {
-          RootStore->setVolatile(true);
+          if (OxCamlVolatileExnRootSlots)
+            RootStore->setVolatile(true);
           Value *RootHomeValue = nonPoisonOxCamlGCPointerValue(EdgeValue);
           if (!isa<Constant>(RootHomeValue))
             ExplicitRootHomes[II].push_back({RootHomeValue, Slot});
@@ -3721,7 +3745,7 @@ static bool materializeOxCamlExceptionRootSlots(
         auto *Store = dyn_cast<StoreInst>(U);
         if (!Store || Store->getPointerOperand() != Slot)
           continue;
-        if (Store->getParent() == &F.getEntryBlock())
+        if (isOxCamlRootSlotInitStore(Store))
           continue;
         if (DefStore)
           return false;
@@ -3889,15 +3913,16 @@ static bool materializeOxCamlExceptionRootSlots(
                 : Constant::getNullValue(RootValue->getType());
       StoreInst *InitialStore = EntryBuilder.CreateAlignedStore(
           InitValue, Slot, DL.getABITypeAlign(RootValue->getType()));
-      if (IsGCRoot)
+      if (IsGCRoot && OxCamlVolatileExnRootSlots)
         InitialStore->setVolatile(true);
 
       if (!FuseEntryInit) {
         if (!StorePt)
           StorePt = DefAdjacentInsertPt(cast<Instruction>(RootValue));
-        StoreInst *DefStore =
-            new StoreInst(RootValue, Slot, /*isVolatile=*/IsGCRoot,
-                          DL.getABITypeAlign(RootValue->getType()), StorePt);
+        StoreInst *DefStore = new StoreInst(
+            RootValue, Slot,
+            /*isVolatile=*/IsGCRoot && OxCamlVolatileExnRootSlots,
+            DL.getABITypeAlign(RootValue->getType()), StorePt);
         SlotDefStore[Slot] = DefStore;
       }
 
@@ -4634,13 +4659,11 @@ static bool assignExplicitRootHomesAndFilterLiveSets(
     // match their value at their own invoke, which the per-record homes
     // above already cover.
     auto SlotDefStoreDominates = [&](AllocaInst *Slot) {
-      const BasicBlock &EntryBlock =
-          Slot->getFunction()->getEntryBlock();
       for (User *U : Slot->users()) {
         auto *Store = dyn_cast<StoreInst>(U);
         if (!Store || Store->getPointerOperand() != Slot)
           continue;
-        if (Store->getParent() == &EntryBlock)
+        if (isOxCamlRootSlotInitStore(Store))
           continue;
         return DT.dominates(Store, Call);
       }
@@ -6191,8 +6214,13 @@ static void insertExplicitRootHomeStores(
 
   for (auto [RootHandle, Slot] : ExplicitRootHomes) {
     Value *RootValue = RootHandle;
-    if (!RootValue)
+    if (!RootValue) {
+      errs() << "[rs4gc-root-verify] "
+             << Statepoint->getFunction()->getName()
+             << ": explicit root home handle died before SSA repair; the "
+                "replacement value is unrepaired\n";
       continue;
+    }
     auto AllocaIt = AllocaMap.find(RootValue);
     assert(AllocaIt != AllocaMap.end() &&
            "missing SSA repair alloca for explicit root home");
@@ -6203,7 +6231,8 @@ static void insertExplicitRootHomeStores(
         DL.getABITypeAlign(Slot->getAllocatedType()),
         suffixed_name_or(RootValue, ".exnroot.normal.load",
                          "exnroot.normal.load"));
-    Load->setVolatile(true);
+    if (OxCamlVolatileExnRootSlots)
+      Load->setVolatile(true);
     Load->setMetadata("oxcaml.exnroot.load",
                       MDNode::get(Statepoint->getContext(), {}));
 
@@ -8493,6 +8522,109 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
         materializeRemainingOxCamlRecoveryPhis(F, DT, LateAllExplicitRootSlots);
     ChangedLateRoots |=
         appendExplicitRootSlotsToAllStatepoints(F, LateAllExplicitRootSlots);
+  }
+
+  // An entry-block init store only matters on paths that reach a slot read
+  // (a reload or a statepoint scanning the slot) without passing the
+  // defining store.  When the single defining store dominates every load
+  // and every statepoint that lists the slot, no such path exists and the
+  // init store is dead weight on the hot path.
+  if (OxCamlPruneRootSlotInitStores && isOxCamlFunction(F)) {
+    DT.recalculate(F);
+    for (Instruction &I : F.getEntryBlock()) {
+      auto *Slot = dyn_cast<AllocaInst>(&I);
+      if (!Slot)
+        continue;
+      SmallVector<StoreInst *, 2> InitStores;
+      StoreInst *DefStore = nullptr;
+      bool Prunable = true;
+      SmallVector<Instruction *, 8> MustBeDominated;
+      for (User *U : Slot->users()) {
+        if (auto *Store = dyn_cast<StoreInst>(U)) {
+          if (Store->getPointerOperand() != Slot ||
+              Store->getValueOperand() == Slot) {
+            Prunable = false;
+            break;
+          }
+          if (isOxCamlRootSlotInitStore(Store)) {
+            InitStores.push_back(Store);
+            continue;
+          }
+          if (DefStore) {
+            Prunable = false; // phi-edge slots store per unwind edge
+            break;
+          }
+          DefStore = Store;
+          continue;
+        }
+        if (auto *Load = dyn_cast<LoadInst>(U)) {
+          if (Load->getPointerOperand() != Slot) {
+            Prunable = false;
+            break;
+          }
+          MustBeDominated.push_back(Load);
+          continue;
+        }
+        if (auto *Call = dyn_cast<CallBase>(U)) {
+          // The collector reads and updates the slot at every statepoint
+          // whose gc-live bundle lists it.
+          MustBeDominated.push_back(Call);
+          continue;
+        }
+        Prunable = false;
+        break;
+      }
+      if (!Prunable || InitStores.empty() || !DefStore)
+        continue;
+      if (!llvm::all_of(MustBeDominated, [&](Instruction *Use) {
+            return DT.dominates(DefStore, Use);
+          }))
+        continue;
+      for (StoreInst *Store : InitStores)
+        Store->eraseFromParent();
+    }
+  }
+
+  if (OxCamlVerifyRootSlots && isOxCamlFunction(F)) {
+    DT.recalculate(F);
+    for (Instruction &I : F.getEntryBlock()) {
+      auto *Slot = dyn_cast<AllocaInst>(&I);
+      if (!Slot)
+        continue;
+      StoreInst *DefStore = nullptr;
+      bool MultipleStores = false;
+      for (User *U : Slot->users()) {
+        auto *Store = dyn_cast<StoreInst>(U);
+        if (!Store || Store->getPointerOperand() != Slot)
+          continue;
+        if (isOxCamlRootSlotInitStore(Store))
+          continue;
+        if (DefStore)
+          MultipleStores = true;
+        DefStore = Store;
+      }
+      if (MultipleStores)
+        continue; // phi-edge slots
+      for (User *U : Slot->users()) {
+        auto *Load = dyn_cast<LoadInst>(U);
+        if (!Load || !Load->getMetadata("oxcaml.exnroot.load"))
+          continue;
+        bool IsHomeReload = Load->getName().contains(".normal.load");
+        if (!DefStore) {
+          errs() << "[rs4gc-root-verify] " << F.getName() << ": slot "
+                 << Slot->getName() << " has no defining store but load "
+                 << Load->getName() << (IsHomeReload ? " (HOME)" : "")
+                 << "\n";
+          continue;
+        }
+        if (!DT.dominates(DefStore, Load))
+          errs() << "[rs4gc-root-verify] " << F.getName() << ": load "
+                 << Load->getName() << (IsHomeReload ? " (HOME)" : "")
+                 << " of slot " << Slot->getName()
+                 << " not dominated by its defining store in block "
+                 << DefStore->getParent()->getName() << "\n";
+      }
+    }
   }
   return !Records.empty() || ChangedLateRoots;
 }

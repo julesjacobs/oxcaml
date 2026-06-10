@@ -1,6 +1,6 @@
 # Progress
 
-Last updated: 2026-06-09.
+Last updated: 2026-06-10.
 
 ## Current Goal
 
@@ -8,7 +8,113 @@ Keep the LLVM backend self-stage2-clean, then improve runtime performance until
 the LLVM-built compiler beats both native and the older LLVM baseline on total
 microbench, minibench, and compiler benchmark time.
 
-## Current Change (v2: consumer-NCD store placement)
+## Current Change (v3: full call homes, non-volatile slots, init-store pruning)
+
+- Root-caused and fixed the call-statepoint homes miscompile: init stores were
+  classified by BLOCK (any entry-block store was treated as initialization),
+  so a consumer-NCD defining store that legitimately sits in the entry block
+  below interior call statepoints (call statepoints do not split blocks) was
+  skipped by `SlotDefStoreDominates`/`oxcamlRootSlotHasSingleDefiningStore`/
+  `CanAliasToSlot`.  A channel in `Cmi_format.read_cmi_lazy` was homed at a
+  statepoint above its defining store, the reload read the init immediate `1`,
+  and SSA repair rewired the defining store to that reload.  Init stores are
+  now classified by VALUE: constant operand and entry block
+  (`isOxCamlRootSlotInitStore`).  Verified on the isolated cmi_format repro
+  (exit 139 -> 0), the exact culprit ordinal (budget=67 skip=66), and an
+  829-module object swap of the whole boot compiler.
+- `-rs4gc-oxcaml-value-slot-homes` default is now `3` (invokes AND calls).
+- Exception-root slot accesses are now NON-volatile by default
+  (`-rs4gc-oxcaml-volatile-exnroot-slots`, default false).  Slots escape into
+  statepoint gc-live bundles, so alias analysis already forbids forwarding
+  across registered statepoints; RS4GC runs in `addIRPasses` before
+  CodeGenPrepare/ISel, and non-volatility lets ISel drop dead reloads and
+  forward between statepoints.
+- Entry-block init stores are pruned when the slot's single defining store
+  dominates every load and every statepoint listing the slot
+  (`-rs4gc-oxcaml-prune-root-slot-init-stores`, default true).  This removes
+  3 dead stores + an immediate materialization from `unify1`-shaped hot
+  paths (probes had been paying them on every call).
+- Static verifier added: `-rs4gc-oxcaml-verify-root-slots` checks every slot
+  reload is dominated by the slot's defining store; clean across all 839
+  stashed modules with the final configuration.
+- Probes (medians, ratio vs native; layout-luck caveat below): boyer 0.99x
+  (was 1.038x committed, 1.052x at head), `catch_failure_then_unify`
+  1.256x -> ~1.08-1.11x, `nested_failed_unify` ~1.0-1.2x depending on code
+  layout.  NOTE: these tiny probes swing +/-15% from function-alignment
+  layout luck alone (verified: same binary +64B alignment moved
+  nested_failed_unify 1.398x -> 1.025x); `-align-all-functions` was tested
+  and rejected (helps one probe, hurts another).  Only
+  `boyer_like_failed_unify` keeps a layout-stable residual (~1.24x).
+- Validation of the final configuration: lit at the known pre-existing
+  failure sets; cmi_format + 829-module swap repros clean; three fresh boots
+  (homes=3, +non-volatile, +pruning) each with the stdlib.pp.ml GC-stress
+  sweep s=1k..256k clean, with an always-on young-root checker runtime
+  installed during the sweeps; self-stage1 clean
+  (`self_stage_v5.log`).
+- Stage2 is currently BLOCKED by the pre-existing bug below: the v5 stage1
+  compiler hit the latent parser.pp.ml SEGV during the stage2 boot phase in
+  two consecutive builds (`self_stage2_v5.log`, `self_stage2_v5_retry.log`),
+  while the committed-state stage2-v4 run had passed by luck (its compiler
+  crashes on the same repro at s=1k).  Re-running the exact failing command
+  standalone passes at default heap params - the in-build trigger is
+  layout/timing sensitive.  The full ocamltest suite was therefore run
+  against the v5 STAGE1 install instead (`SELF_STAGE=1`):
+  `6756 passed`, `284 skipped`, `0 failed`
+  (`ocamltest_stage1_v5.log`).
+- Final benchmark totals for the v5 configuration (2026-06-10, this machine):
+  - Compiler module medians: LLVM/native `0.9732`, `2.75%` speedup
+    (`compiler_bench_current_vs_native_20260610_002708.json`).
+  - Micro (44 cases): total-time ratio `0.707`, geomean `0.658`, worst case
+    `1.13` (`micro_v5_20260610.log`).
+  - Minibench: total-time ratio `0.885` (`11.5%` speedup), boyer `1.012x`
+    (was ~1.13x), worst case binary_trees `1.117x`
+    (`minibench_v5_20260610.log`).
+
+## Known Pre-existing Bug (discovered 2026-06-10, NOT caused by v3)
+
+The stage2-v5 build initially failed: the stage1 compiler segfaulted
+compiling `parser.pp.ml`.  Investigation showed a LATENT GC-stress
+miscompile that PRE-EXISTS this work entirely:
+
+- Deterministic repro: any LLVM-built stage1/stage2 `ocamlopt` compiling
+  `parser.pp.ml` (cwd `_llvm_self_stage2_boot_build/default`) with
+  `OCAMLRUNPARAM=s=1k..64k` segfaults 100%; at default heap params it is
+  flaky (this is why stage2 builds usually pass and occasionally die).
+- Crash: `Ident.compare` receives corrupt arguments (`0` and `1`) via
+  `find_value_approximation`'s map lookup; fp-chain:
+  `Closure_conversion.cont_96_350+5052` -> `classify_fields_of_block+152`
+  -> `List.map` -> `compare`.
+- Pre-existence proven: the committed-state stage2-v4 compiler crashes
+  identically; so do stage1 builds with EVERY feature combination including
+  homes=0/volatile/no-pruning; so does the BASELINE-era clang
+  (`llvm-build-clean-head`, 57e9764b3c) and the pre-redesign clang
+  (`llvm-build-old-rs4gc`).  The native compiler is clean at s=1k.
+  This is very likely the same deep bug previously blamed on call homes via
+  the `Lambda_to_flambda.cps` ordinal-304 repro.
+- Module isolated: with ONLY `flambda2_from_lambda__Closure_conversion.o`
+  LLVM-built (every other object native), the crash reproduces; all-native
+  is clean.  Repro loop ~90s: `llstash/test-cc.sh "<extra clang flags>"`
+  (stashed IR `/tmp/ccstash/flambda2_from_lambda__Closure_conversion.*.ll`,
+  object swap + relink via `llstash/driver5.py <module-list-file>`, good
+  tree `_native_build/main`, bad tree `_llvm_self_stage_main_build/main`).
+- Ruled out: value-slot homes (crashes at homes=0), slot aliasing, lazy
+  boundary loads, volatile vs non-volatile slots, init-store pruning,
+  register roots at non-alloc callsites (only at realloc_stack /
+  local_realloc / caml_call_gc sites, which save all regs), trap-byte
+  offset mismatches in `find_value_approximation` (descriptors audited
+  consistent: framesize 64 / offset 40 under active trap vs 48/24 outside),
+  missed-young-root scanning (always-on checker runtime silent - though it
+  shares the frametable, so it is blind to frametable holes).
+- The DEBUG runtime (`-runtime-variant d`) does NOT reproduce (compile
+  succeeds at s=1k) - the bug needs the stock runtime's exact allocation
+  pattern.
+- Remaining suspects: statepoint live-set hole or stack-slot sharing in one
+  of `Closure_conversion`'s large functions, or a runtime/frametable scan
+  disagreement only visible under precise minor-GC timing.
+- The `parser.pp.ml` s=1k repro should be added to the standard validation
+  gate once fixed; the stdlib.pp.ml sweep alone does NOT catch it.
+
+## Previous Change (v2: consumer-NCD store placement)
 
 - Refined the uniform root design: the slot's single defining store now sits
   at the latest point that dominates every protected invoke of the regions
