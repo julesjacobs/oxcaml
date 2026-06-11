@@ -190,11 +190,13 @@ function_ir() {
 }
 
 has_prologue_realloc() {
-  function_asm "$1" | grep -q '_caml_call_realloc_stack'
+  function_asm "$1" \
+    | grep -qE '_caml_call_realloc_stack|_caml_llvm_call_realloc_stack_stkarg'
 }
 
 has_ordinary_realloc() {
-  function_asm "$1" | grep -q '_caml_llvm_call_realloc_stack'
+  function_asm "$1" | grep '_caml_llvm_call_realloc_stack' \
+    | grep -qv '_stkarg'
 }
 
 assert_has_prologue_realloc() {
@@ -246,7 +248,8 @@ boundary_function_asm() {
 }
 
 boundary_has_prologue_realloc() {
-  boundary_function_asm "$1" | grep -q '_caml_call_realloc_stack'
+  boundary_function_asm "$1" \
+    | grep -qE '_caml_call_realloc_stack|_caml_llvm_call_realloc_stack_stkarg'
 }
 
 check_zero_byte_prologue_boundary() {

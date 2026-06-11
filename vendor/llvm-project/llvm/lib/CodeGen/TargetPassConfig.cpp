@@ -1404,6 +1404,10 @@ bool TargetPassConfig::addRegAssignAndRewriteOptimized() {
   // Add the selected register allocation pass.
   addPass(createRegAllocPass(true));
 
+  // OxCaml: append statepoint-crossing sibling spill slots of gc values to
+  // the statepoint gc operand lists while VirtRegMap/LiveStacks are alive.
+  addPass(&OxCamlStatepointSpillRootsID);
+
   // Allow targets to change the register assignments before rewriting.
   addPreRewrite();
 

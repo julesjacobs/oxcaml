@@ -261,12 +261,12 @@ if ! grep -q '"oxcaml-stack-check-bytes"="[1-9]' "$ir"; then
   exit 1
 fi
 
-if ! grep -q '_caml_llvm_call_realloc_stack' "$asm"; then
+if ! grep '_caml_llvm_call_realloc_stack' "$asm" | grep -qv '_stkarg'; then
   echo "expected ordinary LLVM stack-check slow path in stress program" >&2
   exit 1
 fi
 
-if ! grep -q '_caml_call_realloc_stack' "$asm"; then
+if ! grep -qE '_caml_call_realloc_stack|_caml_llvm_call_realloc_stack_stkarg' "$asm"; then
   echo "expected prologue LLVM stack-check slow path for pre-CFG-check stack use in stress program" >&2
   exit 1
 fi

@@ -1,12 +1,46 @@
 # Progress
 
-Last updated: 2026-06-10.
+Last updated: 2026-06-10 (late: latent parser.pp.ml GC bug FIXED, stage2 green).
 
 ## Current Goal
 
 Keep the LLVM backend self-stage2-clean, then improve runtime performance until
 the LLVM-built compiler beats both native and the older LLVM baseline on total
 microbench, minibench, and compiler benchmark time.
+
+## Latent parser.pp.ml GC miscompile: FIXED (2026-06-10)
+
+See FINDINGS.md (repo root) for the compact full story. Summary:
+
+- Root cause: with the register-preserving alloc calling conventions, greedy
+  RA live-range splitting leaves spill-slot copies of GC values whose
+  LiveStacks intervals cross statepoints where that value family is not an
+  operand. The GC relocates all listed roots; the unlisted crossing slots go
+  stale and the merged home store-back block reloads them into RS4GC home
+  slots. InlineSpiller statepoint-operand folding only covers slots that are
+  the value's active location AT the statepoint. (The "+24 descriptor
+  arithmetic" theory was disproven: statepoint FI operands and spill
+  instructions are remapped consistently by StackSlotColoring.)
+- Fix (metadata-only, zero mutator instructions): new machine pass
+  `OxCamlStatepointSpillRoots`
+  (vendor/llvm-project/llvm/lib/CodeGen/OxCamlStatepointSpillRoots.cpp),
+  between RA and VirtRegRewriter. Collects GC slot families globally
+  (folded gc operands + VRM original slots of gc reg operands), appends each
+  slot live into-and-across a statepoint as a folded gc operand + gc-map
+  pair + FixedStack MMO. Gated on gc "oxcaml"/"ocaml";
+  `-oxcaml-statepoint-spill-roots[-verbose]`.
+- Validation: -verify-machineinstrs clean; single-module swap repro exit 0
+  (was deterministic SIGSEGV); OXCAML_YOUNG_FLIP s=1k/4k clean; fresh
+  self-stage1 AND self-stage2 builds pass (stage2 had failed twice on this
+  bug); parser.pp.ml s=1k..64k clean on both fresh stage compilers + flip
+  on stage2; lit = the 20 known pre-existing failures only;
+  SELF_STAGE=2 ocamltest `6756 passed / 284 skipped / 0 failed`
+  (`ocamltest_stage2_spillroots_clean_20260610.log`) — the stage2 bar.
+- Testsuite fallout fixed along the way (from the earlier committed
+  prologue-entry rename to `caml_llvm_call_realloc_stack_stkarg`, not from
+  this fix): `_build` runtime needed `make -s runtime-stdlib` for the
+  ocamltest fake root, and `stack_check_size_contract.sh`/`challenges.sh`
+  now accept the new prologue slow-path symbol.
 
 ## Current Change (v3: full call homes, non-volatile slots, init-store pruning)
 

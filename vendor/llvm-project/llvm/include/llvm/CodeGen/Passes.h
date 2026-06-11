@@ -571,6 +571,10 @@ namespace llvm {
   /// caller saved registers with stack slots.
   extern char &FixupStatepointCallerSavedID;
 
+  /// For OxCaml GC functions, append statepoint-crossing sibling spill slots
+  /// of gc values to the statepoint gc operand list so the GC updates them.
+  extern char &OxCamlStatepointSpillRootsID;
+
   /// The pass transforms load/store <256 x i32> to AMX load/store intrinsics
   /// or split the data to two <128 x i32>.
   FunctionPass *createX86LowerAMXTypePass();
