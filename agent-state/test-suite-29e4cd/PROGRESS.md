@@ -37,6 +37,10 @@ native baseline binary. Validation: fresh stage1+stage2 builds, SELF_STAGE=2
 ocamltest `6756 passed / 0 failed`, lit at the known pre-existing set,
 parser.pp.ml repro + OXCAML_YOUNG_FLIP gates clean.
 
+Full investigation + staged plan for RA-derived GC roots (in-place
+statepoint lowering, gc bit on vregs, verifier): see
+`agent-state/test-suite-29e4cd/RA_DERIVED_ROOTS_PLAN.md`.
+
 Identified but NOT yet implemented (next): redundant statepoint re-spills of
 loop-carried GC values - ISel's `findPreviousSpillSlot` gives up on PHIs
 whose inputs map to different slots (upstream TODO in StatepointLowering);
