@@ -1696,7 +1696,13 @@ void AArch64FrameLowering::emitPrologue(MachineFunction &MF,
   if (NeedsOxCamlPrologueStackCheck)
     emitOxCamlStackCheck(MBB, MBBI, DL, TII,
                          OxCamlPrologueStackCheckBytes);
-  bool CombineSPBump = !hasOxCamlStackCheckProtocol(MF) &&
+  // OxCaml: combining the callee-save and local SP bumps is fine as long as
+  // no prologue stack check is required; the check must observe SP before
+  // any of the frame has been allocated. The combined form keeps LR at the
+  // top of the frame (the CSR save offsets are fixed up below), which is
+  // what the OCaml stack walk requires; the epilogue already combines.
+  bool CombineSPBump = (!hasOxCamlStackCheckProtocol(MF) ||
+                        !NeedsOxCamlPrologueStackCheck) &&
                        shouldCombineCSRLocalStackBump(MF, NumBytes);
   bool HomPrologEpilog = homogeneousPrologEpilog(MF);
   if (CombineSPBump) {

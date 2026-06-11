@@ -1,4 +1,8 @@
-; RUN: opt -S -passes=rewrite-statepoints-for-gc,verify < %s | FileCheck %s
+; RUN: opt -S -passes=rewrite-statepoints-for-gc,verify < %s \
+; RUN:   | FileCheck %s --check-prefixes=CHECK,DEFAULT
+; RUN: opt -S -passes=rewrite-statepoints-for-gc,verify \
+; RUN:   -rs4gc-oxcaml-root-dead-c-call-args < %s \
+; RUN:   | FileCheck %s --check-prefixes=CHECK,ROOTED
 
 target triple = "arm64-apple-macosx"
 
@@ -50,7 +54,8 @@ define oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @c_wrapper_call_arg_
     ptr addrspace(1) %arg) gc "oxcaml" {
 ; CHECK-LABEL: define oxcaml_nofpcc {{.*}} @c_wrapper_call_arg_root(
 ; CHECK: %statepoint_token = call oxcaml_ccc {{.*}} @c_call
-; CHECK-SAME: [ "deopt"(), "gc-live"(ptr addrspace(1) %arg) ]
+; DEFAULT-SAME: [ "deopt"() ]
+; ROOTED-SAME: [ "deopt"(), "gc-live"(ptr addrspace(1) %arg) ]
 ; CHECK-NOT: @llvm.experimental.gc.relocate
 ; CHECK: ret
 entry:

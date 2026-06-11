@@ -1,4 +1,8 @@
-; RUN: opt -S -passes=rewrite-statepoints-for-gc,verify < %s | FileCheck %s
+; RUN: opt -S -passes=rewrite-statepoints-for-gc,verify < %s \
+; RUN:   | FileCheck %s --check-prefixes=CHECK,DEFAULT
+; RUN: opt -S -passes=rewrite-statepoints-for-gc,verify \
+; RUN:   -rs4gc-oxcaml-root-dead-c-call-args < %s \
+; RUN:   | FileCheck %s --check-prefixes=CHECK,ROOTED
 
 target triple = "arm64-apple-macosx"
 
@@ -11,7 +15,8 @@ define oxcaml_nofpcc { { i64, i64 }, {} } @c_call_arg_root_not_relocated(
     ptr addrspace(1) %obj) gc "oxcaml" {
 ; CHECK-LABEL: define oxcaml_nofpcc {{.*}} @c_call_arg_root_not_relocated(
 ; CHECK-NOT: cargroot
-; CHECK: %statepoint_token = call oxcaml_ccc {{.*}} [ "deopt"(), "gc-live"(ptr addrspace(1) %obj) ]
+; DEFAULT: %statepoint_token = call oxcaml_ccc {{.*}} [ "deopt"() ]
+; ROOTED: %statepoint_token = call oxcaml_ccc {{.*}} [ "deopt"(), "gc-live"(ptr addrspace(1) %obj) ]
 ; CHECK-NOT: @llvm.experimental.gc.relocate
 ; CHECK: ret
 entry:
@@ -33,7 +38,8 @@ define oxcaml_nofpcc { { i64, i64 }, {} } @derived_c_call_arg_root_not_relocated
 ; CHECK-LABEL: define oxcaml_nofpcc {{.*}} @derived_c_call_arg_root_not_relocated(
 ; CHECK-NOT: cargroot
 ; CHECK: %[[DERIVED:.*]] = getelementptr i8, ptr addrspace(1) %obj, i64 8
-; CHECK: %statepoint_token = call oxcaml_ccc {{.*}} [ "deopt"(), "gc-live"(ptr addrspace(1) %obj) ]
+; DEFAULT: %statepoint_token = call oxcaml_ccc {{.*}} [ "deopt"() ]
+; ROOTED: %statepoint_token = call oxcaml_ccc {{.*}} [ "deopt"(), "gc-live"(ptr addrspace(1) %obj) ]
 ; CHECK-NOT: @llvm.experimental.gc.relocate
 ; CHECK: ret
 entry:

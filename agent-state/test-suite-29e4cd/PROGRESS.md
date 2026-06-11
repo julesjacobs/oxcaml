@@ -1,6 +1,54 @@
 # Progress
 
-Last updated: 2026-06-10 (late: latent parser.pp.ml GC bug FIXED, stage2 green).
+Last updated: 2026-06-11 (entry-cost codegen fixes landed; stage2 + ocamltest
+green; compiler bench 0.9715).
+
+## Entry-cost codegen fixes (2026-06-11)
+
+Three systematic per-function/per-callsite costs found by reading hot asm vs
+native (boyer truep, kb match_rec, micro try/raise probes), all fixed:
+
+1. Split prologue (`sub sp,#16; str x30; sub sp,#N` -> one
+   `sub sp,#16+N; str x30,[sp,#N+8]`): `CombineSPBump` is now allowed for
+   OxCaml functions that need no PROLOGUE stack check (the check must see SP
+   before any allocation). LR stays at the frame top via the existing CSR
+   offset fixup; the epilogue already combined.
+   (AArch64FrameLowering.cpp)
+2. Ordinary stack checks read SP via `llvm.read_register` instead of inline
+   asm (llvmize.ml, AArch64 now matches x86), and a new
+   `AArch64MIPeepholeOpt::visitCmpWithSPCopy` folds `COPY $sp` + `SUBS` into
+   `cmp sp, xN` (guarded: same block, no SP writes/calls between). Saves an
+   instruction plus an inline-asm scheduling barrier at ~every function
+   entry (372/725 functions in the minibench suite).
+3. C-wrapper call arguments with no use after the call are no longer
+   caller-rooted (`-rs4gc-oxcaml-root-dead-c-call-args` restores the old
+   behaviour). Callees root their own parameters per the OCaml FFI contract
+   (CAMLparam), exactly as with the native compiler; caller-rooting forced a
+   dead stack store per C call site (visible in every compare/hash loop).
+   `HasUseAfterCall` also refined: a value defined in the call's own block
+   before the call is dead along the back edge (single-entry blocks),
+   removing the loop-recurrence false positive. Two RS4GC lit tests updated
+   to check both modes.
+
+Results: micro 44-case geomean 0.662 -> 0.652, minibench geomean
+0.906 -> 0.886 (no case above bdd's 1.001), compiler bench module-median
+ratio 0.9732 -> 0.9715 (round-total 0.9740 -> 0.9699) against the identical
+native baseline binary. Validation: fresh stage1+stage2 builds, SELF_STAGE=2
+ocamltest `6756 passed / 0 failed`, lit at the known pre-existing set,
+parser.pp.ml repro + OXCAML_YOUNG_FLIP gates clean.
+
+Identified but NOT yet implemented (next): redundant statepoint re-spills of
+loop-carried GC values - ISel's `findPreviousSpillSlot` gives up on PHIs
+whose inputs map to different slots (upstream TODO in StatepointLowering);
+the OxCaml `StatepointStableRootHomes` mechanism handles only
+`phi(seed, relocate-of-self)`. Generalizing it to arbitrary GC phis with
+per-edge seed stores would remove per-iteration stores + join-block slot
+shuffling (boyer tautologyp, kb rporec). Longer-term direction discussed:
+derive frametables entirely from RA state (gc-ness bit on vregs,
+LiveStacks/VRM as source of truth, in-place root updates) - yesterday's
+OxCamlStatepointSpillRoots pass is the seed of that design.
+
+## Latent parser.pp.ml GC miscompile: FIXED (2026-06-10)
 
 ## Current Goal
 

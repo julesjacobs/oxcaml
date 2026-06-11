@@ -158,6 +158,13 @@ static cl::opt<unsigned> OxCamlValueSlotHomes(
     cl::desc("Home live handler-rooted values through their slot instead of "
              "relocating them (0=off, 1=invokes only, 2=calls only, 3=all)"));
 
+static cl::opt<bool> OxCamlRootDeadCCallArgs(
+    "rs4gc-oxcaml-root-dead-c-call-args", cl::Hidden, cl::init(false),
+    cl::desc("Caller-root C-call pointer arguments even when they have no "
+             "use after the call. The OCaml FFI contract makes C stubs root "
+             "their own parameters (CAMLparam), matching the native "
+             "compiler, so this is off by default."));
+
 static cl::opt<bool> OxCamlVerifyObjectStarts(
     "rs4gc-oxcaml-verify-object-starts", cl::Hidden, cl::init(false),
     cl::desc("Report live values whose base-pointer chain walks through an "
@@ -1273,8 +1280,6 @@ static void analyzeParsePointLiveness(
         continue;
 
       OxCamlCallArgs.push_back(Arg);
-      if (isOxCamlCWrapperCallingConv(Call->getCallingConv()))
-        Result.CallArgRoots.insert(Arg);
     }
   }
 
@@ -1301,6 +1306,13 @@ static void analyzeParsePointLiveness(
       if (!UserI)
         continue;
       if (UserI == Call) {
+        // A re-execution of the call can only observe V's current value if
+        // V is not recomputed first. A definition in the call's own block
+        // always re-executes before the call (blocks are single-entry), so
+        // such a V is dead along the back edge.
+        if (auto *VI = dyn_cast<Instruction>(V))
+          if (VI->getParent() == Call->getParent() && VI->comesBefore(Call))
+            continue;
         if (CallOperandUseCanRecurAfterCall())
           return true;
         continue;
@@ -1350,6 +1362,17 @@ static void analyzeParsePointLiveness(
   };
   for (Value *Arg : OxCamlCallArgs)
     RemoveCallArgRootOnlyLiveness(RemoveCallArgRootOnlyLiveness, Arg);
+
+  // C-wrapper call arguments: keep the callee's view of its arguments
+  // rooted while they remain live in the caller. An argument with no use
+  // after the call is the callee's responsibility per the OCaml FFI
+  // contract (CAMLparam), exactly as with the native compiler — rooting it
+  // here would force a dead stack store at every such call site.
+  if (isOxCamlFunction(*Call->getFunction()) &&
+      isOxCamlCWrapperCallingConv(Call->getCallingConv()))
+    for (Value *Arg : OxCamlCallArgs)
+      if (OxCamlRootDeadCCallArgs || HasUseAfterCall(Arg))
+        Result.CallArgRoots.insert(Arg);
 
   if (PrintLiveSet) {
     dbgs() << "Live Variables:\n";

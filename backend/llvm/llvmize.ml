@@ -1386,16 +1386,14 @@ let stack_pointer_register_metadata () =
   F.sprintf {|!{!"%s\00"}|} (stack_pointer_register_name ())
 
 let read_stack_pointer t =
-  match Target_system.architecture () with
-  | Target_system.AArch64 ->
-    emit_ins t
-      (I.inline_asm ~asm:"mov $0, sp" ~constraints:"=r" ~args:[]
-         ~res_type:(Some T.i64) ~sideeffect:true)
-  | Target_system.X86_64 | Target_system.IA32 | Target_system.ARM
-  | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
-    call_llvm_intrinsic t "read_register.i64"
-      [V.imm T.metadata (stack_pointer_register_metadata ())]
-      T.i64
+  (* [read_register] (rather than inline asm) lets the backend fold the read
+     into the limit comparison ([cmp sp, xN]) and removes the inline asm
+     scheduling barrier. Ordering with respect to SP updates is preserved:
+     the surrounding stack-check sequences read SP in the block that uses it,
+     with no SP-modifying instructions in between. *)
+  call_llvm_intrinsic t "read_register.i64"
+    [V.imm T.metadata (stack_pointer_register_metadata ())]
+    T.i64
 
 let write_stack_pointer t v =
   let v = cast t v T.i64 in
