@@ -9022,6 +9022,11 @@ bool RewriteStatepointsForGC::runOnFunction(Function &F, DominatorTree &DT,
     if (const auto *Call = dyn_cast<CallBase>(&I)) {
       if (isa<GCStatepointInst>(Call))
         return false;
+      // Inline asm cannot be a safepoint: a statepoint takes the callee's
+      // address, which does not exist for asm (the IR verifier rejects
+      // it). llvmize marks its asm gc-leaf-function, but be robust.
+      if (Call->isInlineAsm())
+        return false;
       if (callsGCLeafFunction(Call, TLI))
         return false;
 

@@ -967,6 +967,38 @@ out; candidates for runtime probing, not gate blockers) + datarepr 1
 lit 20 known, test-cc 0 after the pass extensions; cascade re-run
 launched.
 
+## Exnroot retirement (started 2026-06-12, user-approved plan)
+
+Design (from the llvmize/RS4GC investigation): exnroots are created by
+RS4GC's handler-value demotion (not llvmize); the exception CFG is
+already single-entry (push.trap publishes ONE blockaddress; all
+invokes unwind to the shared token-landingpad recovery block where
+trap.recover restores exn/alloc/ds). Retirement = leave handler-live
+values in SSA (phis legal in the token landingpad), opacity via
+value-keyed aarch64.oxcaml.relocated barriers after trap.recover (NO
+gc.relocate/token machinery needed), RA spilling provides the stable
+slot (VRM one-slot-per-original), listing machinery covers it.
+Phases: 0 revive trap tests; 1 in-place for invoke statepoints
+(normal edge); 2 retire demotion; 3 measure + delete.
+
+PHASE 0 DONE: all 7 oxcaml-owned lit failures revived — suite at
+exactly the 13 upstream RS4GC imports. (a) RS4GC now skips inline-asm
+callsites in NeedsRewrite (statepoint-wrapping asm is invalid IR;
+llvmize marks asm gc-leaf so this is robustness, no codegen change);
+fixed invoke-alloca-operands. (b) callbr-rejected + both .mir tests:
+`not` -> `not --crash` (report_fatal_error aborts). (c) two-publishes
+rewritten for the dominance-based classification (non-dominating
+publishes in diamond arms -> rejection; dominating re-publication is
+now legal). (d) recover-after-setup: register-kill modeling moved
+onto the protected call's STATEPOINT (implicit-def dead x1-x25,
+q0-q31), not IMPLICIT_DEFs in the recovery block. (e) calling-conv:
+prologue expectations updated to the sub+str form (stp measured worse,
+June 8) and frametable counts 1 -> 4.
+Current contract notes for phase 1-2: runtime-entered = push.trap
+blockaddress target OR dominating trap.publish; recovery ABI liveins
+= x0/x26/x27/x28; ISel rejects trap.recover outside runtime-entered
+blocks and non-first in block.
+
 ## Validation gate (the full checklist used for the two landed commits)
 
 1. lit: `llvm-build/bin/llvm-lit -j8 test/CodeGen/AArch64/oxcaml*

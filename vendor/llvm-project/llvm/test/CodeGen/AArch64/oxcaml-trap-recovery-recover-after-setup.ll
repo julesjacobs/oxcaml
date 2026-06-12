@@ -48,18 +48,19 @@ normal:
 ; CHECK-NEXT: successors:
 ; CHECK-NEXT: liveins: $x0, $x26, $x27, $x28
 
+; The registers invalid across the runtime re-entry are modeled as
+; implicit-defs on the protected call's STATEPOINT itself (dead defs of
+; every non-recovery-ABI register), not as IMPLICIT_DEFs in the
+; recovery block.
 ; RUNTIME-LABEL: name: recover_after_setup
-; RUNTIME: BL @callee
+; RUNTIME: STATEPOINT
+; RUNTIME-SAME: @callee
 ; RUNTIME-SAME: implicit-def dead $x22
+; RUNTIME-SAME: implicit-def dead $x25
+; RUNTIME-SAME: implicit-def dead $q0
+; RUNTIME-SAME: implicit-def dead $q31
 ; RUNTIME: bb.{{[0-9]+}}.exn_entry (machine-block-address-taken, ir-block-address-taken %ir-block.exn_entry, {{(landing-pad, )?}}runtime-entered):
 ; RUNTIME: liveins: $x0, $x26, $x27, $x28
-; RUNTIME: $q0 = IMPLICIT_DEF
-; RUNTIME: $q31 = IMPLICIT_DEF
-; RUNTIME: $x1 = IMPLICIT_DEF
-; RUNTIME: $x25 = IMPLICIT_DEF
-; RUNTIME-NOT: $x0 = IMPLICIT_DEF
-; RUNTIME-NOT: $x26 = IMPLICIT_DEF
-; RUNTIME-NOT: $x27 = IMPLICIT_DEF
 ; RUNTIME-NOT: $x28 = IMPLICIT_DEF
 ; RUNTIME: COPY $x0
 

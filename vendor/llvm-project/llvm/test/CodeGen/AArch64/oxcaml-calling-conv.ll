@@ -72,15 +72,15 @@ declare { { i64, i64 }, {} } @llvm.experimental.gc.result.sl_sl_i64i64ssl_ss(tok
 ; DARWIN:       bl _caml_call_gc
 ; DARWIN:       ret
 ; DARWIN-LABEL: _nofp_with_dynamic_alloca:
-; DARWIN:       stp x29, x30, [sp, #-16]!
+; DARWIN:       str x30, [sp, #8]
 ; DARWIN:       mov x29, sp
-; DARWIN:       ldp x29, x30, [sp], #16
+; DARWIN:       ldr x30, [sp, #8]
 ; DARWIN-LABEL: _nofp_large_frame_dynamic_alloca:
 ; DARWIN-NOT:   mov x19, sp
 ; DARWIN:       bl _use
 ; DARWIN:       bl _use
 ; DARWIN-LABEL: _camlAarch64__frametable:
-; DARWIN-NEXT:  .quad 1
+; DARWIN-NEXT:  .quad 4
 ; DARWIN:       .byte 0
 
 ; LINUX-LABEL: call_oxcaml:
@@ -97,13 +97,13 @@ declare { { i64, i64 }, {} } @llvm.experimental.gc.result.sl_sl_i64i64ssl_ss(tok
 ; LINUX:       bl caml_call_gc
 ; LINUX:       ret
 ; LINUX-LABEL: nofp_with_dynamic_alloca:
-; LINUX:       stp x29, x30, [sp, #-16]!
+; LINUX:       str x30, [sp, #8]
 ; LINUX:       mov x29, sp
-; LINUX:       ldp x29, x30, [sp], #16
+; LINUX:       ldr x30, [sp, #8]
 ; LINUX-LABEL: nofp_large_frame_dynamic_alloca:
 ; LINUX-NOT:   mov x19, sp
 ; LINUX:       bl use
 ; LINUX:       bl use
 ; LINUX-LABEL: camlAarch64__frametable:
-; LINUX-NEXT:  .xword 1
+; LINUX-NEXT:  .xword 4
 ; LINUX:       .byte 0

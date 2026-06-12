@@ -1,4 +1,4 @@
-; RUN: not llc -mtriple=arm64-apple-macosx -verify-machineinstrs < %s 2>&1 | FileCheck %s
+; RUN: not --crash llc -mtriple=arm64-apple-macosx -verify-machineinstrs < %s 2>&1 | FileCheck %s
 
 declare void @llvm.aarch64.oxcaml.trap.publish(ptr, i64, ptr)
 declare { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
