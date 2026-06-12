@@ -994,6 +994,14 @@ onto the protected call's STATEPOINT (implicit-def dead x1-x25,
 q0-q31), not IMPLICIT_DEFs in the recovery block. (e) calling-conv:
 prologue expectations updated to the sub+str form (stp measured worse,
 June 8) and frametable counts 1 -> 4.
+PHASE 1 DONE (pending soak): the in-place gate accepts InvokeInst
+for the OxCaml CCs — invoke statepoints lower in place on the normal
+edge; handler-live values keep the exnroot machinery (independent of
+operand lowering). Quick gates green (lit 13 = upstream-only,
+test-cc 0); verifier corpus unchanged except one more instance of the
+documented bit-propagation-gap FP class at an invoke statepoint
+(type_send), benign under the identity-based sibling rule. translcore
+-25 instrs / -8 sp-stores (pool double-spills at invokes gone).
 Current contract notes for phase 1-2: runtime-entered = push.trap
 blockaddress target OR dominating trap.publish; recovery ABI liveins
 = x0/x26/x27/x28; ISel rejects trap.recover outside runtime-entered

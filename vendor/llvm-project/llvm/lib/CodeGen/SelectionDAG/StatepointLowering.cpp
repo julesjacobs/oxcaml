@@ -632,8 +632,11 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
   // statepoint operands fold to and the frametable lists directly —
   // one slot per value, no pool double-spill. C calls are excluded
   // (their convention preserves x19-x26, and a gc value parked there
-  // is invisible to the runtime — the BUG 7 hazard); invokes keep the
-  // exnroot machinery.
+  // is invisible to the runtime — the BUG 7 hazard). Invokes lower
+  // in place on the NORMAL edge: handler-live values still travel
+  // through the exnroot machinery (RS4GC's handler-value demotion),
+  // which is independent of how the statepoint's own gc operands are
+  // lowered.
   bool InPlaceCC =
       SI.CLI.CallConv == CallingConv::OxCaml_Alloc
           ? OxCamlStatepointInPlace.getValue()
@@ -641,7 +644,8 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
               SI.CLI.CallConv == CallingConv::OxCaml_WithoutFP) &&
              OxCamlStatepointInPlaceCalls);
   bool InPlace = false;
-  if (InPlaceCC && isa_and_nonnull<CallInst>(SI.StatepointInstr)) {
+  if (InPlaceCC && (isa_and_nonnull<CallInst>(SI.StatepointInstr) ||
+                    isa_and_nonnull<InvokeInst>(SI.StatepointInstr))) {
     const Function &F = Builder.DAG.getMachineFunction().getFunction();
     if (F.hasGC() && (F.getGC() == "oxcaml" || F.getGC() == "ocaml")) {
       InPlace = true;
