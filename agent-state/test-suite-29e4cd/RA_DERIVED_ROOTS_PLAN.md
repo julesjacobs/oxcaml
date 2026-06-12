@@ -708,9 +708,10 @@ Flag: `-oxcaml-statepoint-inplace` (ISel-level), default off until proven.
   REGISTER entries (1 operand) with FI quads (4 operands) — a skewed
   gc-map would make the runtime read/write relocated values at wrong
   frame offsets, producing exactly this immediate-for-pointer
-  confusion; audit PairsEndInTail/MapCountIdx arithmetic against a
-  mixed-section statepoint, and compare a frametable descriptor decoded
-  from the binary against the MIR listing. (b) an over-listing whereby
+  confusion — AUDITED CLEAN (gc-map pairs use logical entry ordinals,
+  not operand offsets; the count fix-up models 4-op quads vs 1-op
+  registers; FixupStatepointCallerSaved rebuilds consistently). Still
+  worth one binary-vs-MIR descriptor diff for belt and braces. (b) an over-listing whereby
   the GC rewrote a slot the program used as raw data. Forensic entry:
   GC-count the round-9 boot binary, gcwalk the last GC, decode the
   Types frames' descriptors for implausible offsets. Toolchain = HEAD
