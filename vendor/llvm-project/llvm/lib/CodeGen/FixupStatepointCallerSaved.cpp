@@ -279,6 +279,16 @@ public:
         MFI.setObjectAlignment(FI, Align(Size));
         NumSpillSlotsExtended++;
       }
+      // Record the assignment for the landing pad on the reuse path too:
+      // without this, the next statepoint sharing the pad picks a
+      // DIFFERENT slot for the same register, and the pad's reloads
+      // (deduplicated per (reg, slot)) read the other path's slot.
+      if (EHPad) {
+        GlobalIndices[EHPad].push_back(std::make_pair(Reg, FI));
+        LLVM_DEBUG(dbgs() << "Reserved (reused) FI " << FI << " for reg "
+                          << printReg(Reg, &TRI) << " at landing pad "
+                          << printMBBReference(*EHPad) << "\n");
+      }
       return FI;
     }
     int FI = MFI.CreateSpillStackObject(Size, Align(Size));
