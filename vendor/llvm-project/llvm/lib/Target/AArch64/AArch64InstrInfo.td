@@ -983,14 +983,17 @@ def OXCAML_RAISE_NOTRACE_EDGE
     : Pseudo<(outs), (ins GPR64:$exn_bucket, brtarget:$recovery_target), []>,
       Sched<[]>;
 
+// The expansion is 5 instructions (adr, sub, str, str, add); an
+// understated Size makes AArch64CompressJumpTables pick byte-sized
+// tables whose label differences then overflow at assembly time.
 let hasSideEffects = 1, mayStore = 1, isCodeGenOnly = 1, Uses = [SP, X26],
-    Defs = [SP, X16, X26], Size = 16 in
+    Defs = [SP, X16, X26], Size = 20 in
 def OXCAML_PUSH_TRAP
     : Pseudo<(outs), (ins brtarget:$recovery_target), []>,
       Sched<[]>;
 
 let hasSideEffects = 1, mayStore = 1, isCodeGenOnly = 1, Uses = [SP, X26],
-    Defs = [SP, X16, X26], Size = 16 in
+    Defs = [SP, X16, X26], Size = 20 in
 def OXCAML_PUSH_TRAP_DEAD
     : Pseudo<(outs), (ins), []>,
       Sched<[]>;
