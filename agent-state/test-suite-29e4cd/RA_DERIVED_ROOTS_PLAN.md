@@ -767,6 +767,27 @@ Flag: `-oxcaml-statepoint-inplace` (ISel-level), default off until proven.
   with no pins; free_vars reads the relocated root at +0. Soak (round
   10, the first of the new design) in flight.
 
+  PIVOT SOAK ROUND 10 (2026-06-12): STAGE1 BUILT GREEN under step 2
+  for the first time (the previous design never got the boot compiler
+  through the main build). Remaining failure class is uniform 138
+  staleness in boot-flip and stage1-flip, now ENV-SENSITIVE (exits 0
+  under lldb launch — use the attach --waitfor recipe, /tmp/attach.sh).
+  Crash captured: the GC dies in get_header_val during
+  scan_local_allocations — a LOCAL-ARENA block holds a stale young
+  field, i.e. the pointer to that local block crossed the previous GC
+  unlisted, the block went unmarked, its young fields were not
+  forwarded, and the next GC chokes scanning it. LOCAL ALLOCATIONS are
+  a fresh subsystem for this hunt: llvmize local_alloc results are
+  inttoptr-derived from raw local_sp/local_top i64s (same shape as
+  young allocs); local pointers are AS1 and should be gc-live/listed,
+  and the local-arena scan is reachability-based (only blocks marked
+  via listed roots get their young fields forwarded — see the BUG-6-era
+  notes on scan_local_allocations in fiber.c). Forensic entry: the
+  gca/gcl tooling already classifies local-arena holders; find the
+  unmarked block's pointer holder at GC N (count first), then which
+  statepoint failed to list it. NOTE the env-sensitivity: run scans via
+  attach --waitfor, not lldb launch.
+
 - Step 3: delete dead machinery; THEN revisit exnroots/homes on the
   simplified base (gc-ness + RA could subsume exnroot slots later by
   modeling raise edges as clobber-all, forcing handler-live values into
