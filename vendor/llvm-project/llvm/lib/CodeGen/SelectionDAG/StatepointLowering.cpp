@@ -76,6 +76,12 @@ cl::opt<unsigned> MaxRegistersForGCPointers(
     "max-registers-for-gc-values", cl::Hidden, cl::init(0),
     cl::desc("Max number of VRegs allowed to pass GC pointer meta args in"));
 
+static cl::opt<bool> OxCamlStatepointInPlace(
+    "oxcaml-statepoint-inplace", cl::Hidden, cl::init(false),
+    cl::desc("Lower OxCaml alloc-family statepoints with in-place root "
+             "semantics: gc values stay plain (untied) operands wherever "
+             "the register allocator put them; relocates are identity"));
+
 typedef FunctionLoweringInfo::StatepointRelocationRecord RecordType;
 
 static SDNode *findCallSeqEnd(SDNode *N, SmallPtrSetImpl<SDNode *> &Seen) {
@@ -605,6 +611,37 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
         MaxVRegPtrs = std::numeric_limits<unsigned>::max();
   }
 
+  // In-place lowering (RA-derived roots plan, step 1): at alloc-family
+  // statepoints (caml_call_gc / realloc — the OxCaml_Alloc convention
+  // preserves every register and the runtime saves and rewrites the full
+  // register file through the gc_regs bucket), gc values need no
+  // canonical spill slot. They are passed as plain untied operands and
+  // stay wherever the register allocator put them: a register operand
+  // becomes a frametable register root (the GC updates the register in
+  // place, so later uses of the same vreg read the relocated value); a
+  // spilled operand folds to its slot and becomes a stack root.
+  // Relocates lower to identity (RecordType::NoRelocate). CallInst
+  // statepoints only, and only when every entry is its own base
+  // (llvmize keeps interior pointers away from safepoints; an interior
+  // pointer listed as an independent root would corrupt the heap).
+  bool InPlace = false;
+  if (OxCamlStatepointInPlace &&
+      SI.CLI.CallConv == CallingConv::OxCaml_Alloc &&
+      isa_and_nonnull<CallInst>(SI.StatepointInstr)) {
+    const Function &F = Builder.DAG.getMachineFunction().getFunction();
+    if (F.hasGC() && (F.getGC() == "oxcaml" || F.getGC() == "ocaml")) {
+      InPlace = true;
+      for (unsigned I = 0, E = SI.Bases.size(); I != E; ++I)
+        if (Builder.getValue(SI.Bases[I]) !=
+            Builder.getValue(SI.Ptrs[I])) {
+          InPlace = false;
+          break;
+        }
+    }
+  }
+  if (InPlace)
+    MaxVRegPtrs = 0;
+
   // Pointers used on exceptional path of invoke statepoint.
   // We cannot assing them to VRegs.
   SmallSet<SDValue, 8> LPadPointers;
@@ -668,7 +705,7 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
              Builder.getValue(V).getValueType()))
       return true;
     if (isGCValue(V, Builder))
-      return !LowerAsVReg.count(Builder.getValue(V));
+      return !InPlace && !LowerAsVReg.count(Builder.getValue(V));
     return !(LiveInDeopt || UseRegistersForDeoptValues);
   };
 
@@ -682,16 +719,21 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
       reservePreviousStackSlotForValue(V, Builder);
   }
 
-  for (const Value *V : SI.Ptrs) {
-    SDValue SDV = Builder.getValue(V);
-    if (!LowerAsVReg.count(SDV))
-      reservePreviousStackSlotForValue(V, Builder);
-  }
+  // In-place statepoints must not pre-assign pool slot locations to gc
+  // values: a location set here would route the relocate record to
+  // RecordType::Spill, reloading a slot this statepoint never updates.
+  if (!InPlace) {
+    for (const Value *V : SI.Ptrs) {
+      SDValue SDV = Builder.getValue(V);
+      if (!LowerAsVReg.count(SDV))
+        reservePreviousStackSlotForValue(V, Builder);
+    }
 
-  for (const Value *V : SI.Bases) {
-    SDValue SDV = Builder.getValue(V);
-    if (!LowerAsVReg.count(SDV))
-      reservePreviousStackSlotForValue(V, Builder);
+    for (const Value *V : SI.Bases) {
+      SDValue SDV = Builder.getValue(V);
+      if (!LowerAsVReg.count(SDV))
+        reservePreviousStackSlotForValue(V, Builder);
+    }
   }
 
   // First, prefix the list with the number of unique values to be
@@ -723,8 +765,8 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
   // Finally, go ahead and lower all the gc arguments.
   pushStackMapConstant(Ops, Builder, LoweredGCPtrs.size());
   for (SDValue SDV : LoweredGCPtrs)
-    lowerIncomingStatepointValue(SDV, !LowerAsVReg.count(SDV), Ops, MemRefs,
-                                 Builder);
+    lowerIncomingStatepointValue(
+        SDV, !InPlace && !LowerAsVReg.count(SDV), Ops, MemRefs, Builder);
 
   // Copy to out vector. LoweredGCPtrs will be empty after this point.
   GCPtrs = LoweredGCPtrs.takeVector();

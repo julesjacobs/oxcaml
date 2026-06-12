@@ -547,10 +547,27 @@ verifier check could assert the former invariant.
 Flag: `-oxcaml-statepoint-inplace` (ISel-level), default off until proven.
 
 - Step 0: gc/derived bits on vregs + verifier. No behavior change. ~2-3d.
+  DONE 2026-06-11/12 (commit eec19e164c, plus the seven-bug fallout).
 - Step 1: in-place lowering for ALLOC statepoints only (preserving CC =
   smallest semantic delta; relocates identity; tied defs gone; operands
   foldable). Expected win: cont-class forced-reload blocks disappear.
   ~3-5d + validation.
+  BUILT 2026-06-12 (default off): in lowerStatepointMetaArgs, alloc-CC
+  CallInst statepoints with base==derived for every entry lower gc
+  values as plain untied operands (requireSpillSlot=false, pool-slot
+  reservation skipped so records fall through to NoRelocate = identity
+  relocates + cross-block export). Confirmed end to end on the
+  register-roots lit test (now dual-mode): no spill/reload around
+  caml_call_gc, frametable emits the odd register entry, machine
+  verifier + gc-root verifier clean. Corpus smoke (ccmain2/ltf/
+  parmatch/typecore, build flags + -oxcaml-statepoint-inplace):
+  compiles clean, machine verifier clean; gc-root verifier findings are
+  100% the two known noise classes — every "slot live across not
+  listed" sits on an entry-init'd slot (the LiveStacks extension FP),
+  and "gc bit missing (bit-propagation gap)" is the known
+  TwoAddress/PHIElim class, just more visible with more listed register
+  operands. Flag-on validation: ../clang-wrapper-inplace (adds the
+  -mllvm flag for `-x ir` compiles only) + /tmp/full-cascade-inplace.sh.
 - Step 2: ordinary calls (drop ISel spilling + stable-home machinery from
   the path; slots via OxCamlStatepointSpillRoots; LICM/CSE/copy-prop/remat
   gates active for gc vregs). Expected win: loop re-spills + join
