@@ -406,8 +406,14 @@ public:
       LLVM_DEBUG(dbgs() << "Will spill " << printReg(Reg, &TRI) << " at index "
                         << Idx << "\n");
 
-      if (VisitedRegs.insert(Reg).second)
+      if (VisitedRegs.insert(Reg).second) {
         RegsToSpill.push_back(Reg);
+        // A preserved register keeps its value across the call, but once
+        // its slot is the listed root the GC updates the SLOT: post-call
+        // uses must read the slot or they see the pre-GC pointer.
+        if (SpillAllRegOperands && isCalleeSaved(Reg))
+          RegsToReload.push_back(Reg);
+      }
       OpsToSpill.push_back(Idx);
     }
     CacheFI.sortRegisters(RegsToSpill);
