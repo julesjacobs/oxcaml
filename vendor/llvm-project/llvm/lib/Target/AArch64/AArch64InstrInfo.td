@@ -969,15 +969,18 @@ def OXCAML_TRAP_PUBLISH
              []>,
       Sched<[]>;
 
+// The destination handler is runtime-entered: it reads the domain state
+// and allocation cursor from x28/x27, so both must hold the current SSA
+// values at the raise (ISel pins them with glued copies).
 let hasSideEffects = 1, mayLoad = 1, isCodeGenOnly = 1, isTerminator = 1,
-    isBarrier = 1, isIndirectBranch = 1, Uses = [X26],
+    isBarrier = 1, isIndirectBranch = 1, Uses = [X26, X27, X28],
     Defs = [X0, X16, X26, SP], Size = 16 in
 def OXCAML_RAISE_NOTRACE
     : Pseudo<(outs), (ins GPR64:$exn_bucket), []>,
       Sched<[]>;
 
 let hasSideEffects = 1, mayLoad = 1, isCodeGenOnly = 1, isTerminator = 1,
-    isBarrier = 1, isBranch = 1, isIndirectBranch = 1, Uses = [X26],
+    isBarrier = 1, isBranch = 1, isIndirectBranch = 1, Uses = [X26, X27, X28],
     Defs = [X0, X16, X26, SP], Size = 16 in
 def OXCAML_RAISE_NOTRACE_EDGE
     : Pseudo<(outs), (ins GPR64:$exn_bucket, brtarget:$recovery_target), []>,

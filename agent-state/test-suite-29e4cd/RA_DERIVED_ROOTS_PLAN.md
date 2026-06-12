@@ -1096,22 +1096,45 @@ this hazard — promote it to a violation at in-place C-call sites).
 the fresh-allocation path; reused slots rotated per statepoint and
 shared-pad reloads read the other path's slot (FIXED: record on the
 reuse path too).
-OPEN (task-11 blocker): async_exns_2 segfaults (pool_sweep heap
-corruption) ONLY under -all + c-calls (each subset passes; v2+ccalls
-passes). Verifier clean on the module. Codegen diff localizes the
-divergence to test1's pushed-trap region: under -all a gc slot
-reload/re-store straddles an allocation inside the trap frame
-(sub sp, #16 active), where descriptor offsets need the trap-byte
-adjustment — suspect: a listed slot with wrong/missing trap bytes at
-statepoints inside the active-trap region, GC writes 16 bytes off.
-NEXT FORENSIC: decode the descriptors of test1's statepoints inside
-the trap region under both configs and check trap-byte handling for
-appended/sibling slots vs ISel-listed ones.
-Repro: /tmp/asyncrepro (async_exns_2.ml; stage install compiler with
-OCAMLPARAM llvm-path=clang-wrapper-exnssa-full -> exit 138;
-clang-wrapper-v2cc -> exit 0). Minibench full config: geomean 0.8917
-vs base 0.8962 (clean); cascade green; ocamltest 6761 passed / 7
-failed (the async cluster = this bug).
+RESOLVED PART 1 (2026-06-12): async_exns_2 root cause was NOT descriptors —
+it was a LATENT ALL-MODES design gap in the raise-notrace contract.
+OXCAML_RAISE_NOTRACE[_EDGE] restore the trap frame and `br x16` into a
+runtime-entered handler that reads x27/x28 (alloc cursor / domain
+state) as liveins, but nothing sourced those registers from the
+current SSA values at the raise site: statepoint calls thread ds/alloc
+explicitly ($x28,$x27 copies), while the raise intrinsics carried only
+the bucket. Correctness relied on the coalescer happening to keep the
+cursor chain in x27. Under -all + c-calls, register pressure at pad
+L184 made greedy use x27 as scratch for a spilled vreg
+(`ldr x27,[sp,#40]` at pad entry — RA-born, FixupSCS exonerated), and
+the stale cursor flowed through the local raise edge into pad L179 →
+musttail with a stale x27 → mutator young-header store through freed
+cursor (make_new_stacks crash; pool_sweep corruption in plain mode).
+Forensic chain: print-after-all (filter-print-funcs with \x01 prefix)
+showed the reload born at virtregrewriter; pre-greedy MIR showed pad
+bb.7.L184 copies x0/x28 but NOT x27 (recovered alloc legitimately dead
+in IR: the path re-raises, no alloc before the edge), successors lower
+raise.notrace.edge to a DIRECT BRANCH to pad bb.3 whose liveins are
+modeled as fresh runtime defs — so x27 had no liveness on the raising
+path and the fresh-cursor handoff raise→pad was completely unmodeled.
+FIX (all modes, not flag-gated): raise.notrace and raise.notrace.edge
+intrinsics now carry (exn, ds, alloc); ISel pins ds/alloc into
+x28/x27 with glued CopyToReg; both pseudos gained
+Uses=[X26,X27,X28]; llvmize.ml raise_ passes the current
+ds/alloc cell loads (mem2reg makes them the right per-path SSA values
+— at L184-path raises that IS the freshly recovered cursor).
+Files: IntrinsicsAArch64.td, AArch64InstrInfo.td (Uses),
+AArch64ISelDAGToDAG.cpp (glued copies), SelectionDAGBuilder.cpp
+(invoke path passes 2 extra args), backend/llvm/llvmize.ml; tests
+updated: oxcaml-raise-notrace{,-edge,-edge-intrinsic}.{ll,mir},
+oxcaml-native-trap-call-frame.mir (BL defs x27/x28 not-dead),
+RS4GC/oxcaml-volatile-root-allocas.ll. Repro /tmp/asyncrepro: all six
+wrappers exit 0, flip-mode (OXCAML_YOUNG_FLIP=1 s=4k) clean; lit:
+AArch64 oxcaml all pass, RS4GC at exactly 13 known. NOTE x27 at the
+raises coalesces to no-op movs when RA already chose x27/x28 — the
+win is the CONSTRAINT, not extra code.
+Pre-fix status for the record: minibench full config geomean 0.8917
+vs base 0.8962 (clean); ocamltest 6761/7 (all 7 = this bug).
 
 ## Validation gate (the full checklist used for the two landed commits)
 
@@ -1161,3 +1184,33 @@ failed (the async cluster = this bug).
   run — use these instead of recompiling by hand. Frametable decoder:
   /tmp/ftparse.py pattern (parse `.long LtmpN-...` + `.short` framesize/
   numlive/roots; odd root = register, even = sp offset).
+
+## Raise-fix cascade fallout: C-call CSR hazard (2026-06-12)
+
+First-ever full-config (-all + c-calls) CASCADE run (previous "full-
+config green" cascades had LLVM_WRAPPER=clang-wrapper-exnssa, NOT
+-full — the stage builds never exercised in-place C-calls) came back
+stage1/boot-flip/stage2 green but stage1-flip 3/10 (138s on typecore
+r2/ctype/typedecl/env). Forensic: crash in the stage1 BINARY's
+camlPath__print at `ldr x8,[x20]` on the young-alloc fast path; static
+frametable decode showed the caml_call_gc descriptor correctly lists
+{x19,x20,x22} — the staleness predates it: x20 = `mov x20,x10` copy
+held LIVE ACROSS the preceding caml_c_call statepoint while FixupSCS
+spilled the OPERAND x10 to sp+8 (slot listed, correct). The C-call
+preserved mask says x20 survives, so greedy parks the value there; GC
+during the C call updates only the slot; registers are NOT roots at
+C-call safepoints (BUG 7: no gc_regs bucket). This is exactly the
+parked "preserved across non-alloc statepoint" verifier info class —
+it is REAL, not noise. FixupSCS force-spill+reload only covers
+statepoint OPERANDS; RA-created sibling copies are invisible to it.
+FIX: CSR_AArch64_OxCaml_C_Call_InPlace (AAPCS minus x19-x25, x27,
+x28; keeps FP CSRs + x26 which cannot hold gc refs);
+getCallPreservedMask + getDarwinCallPreservedMask return it for CC
+106/107 when -oxcaml-statepoint-inplace-c-calls is set (flag made
+non-static in StatepointLowering.cpp). No gc value can now survive an
+in-place C call in a register — the hazard class is structurally
+closed. Follow-ups: promote the verifier info class to violation at
+in-place C-call sites (should now be zero); FixupSCS RegsToReload for
+CSR operands is now vestigial under the new mask (harmless dead
+reloads — clean up with the step-3 deletions); re-measure boyer
+(non-gc values across C calls lose x19-x25 — watch minibench).

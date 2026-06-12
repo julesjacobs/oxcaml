@@ -2,7 +2,7 @@
 ; RUN: llc -mtriple=arm64-apple-macosx -verify-machineinstrs < %s | FileCheck %s --check-prefix=ASM
 
 declare void @llvm.aarch64.oxcaml.push.trap(ptr)
-declare void @llvm.aarch64.oxcaml.raise.notrace.edge(i64, ptr)
+declare void @llvm.aarch64.oxcaml.raise.notrace.edge(i64, i64, i64, ptr)
 declare { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
 declare i32 @__gxx_personality_v0(...)
 
@@ -10,7 +10,7 @@ define oxcaml_nofpcc i64 @raise_notrace_edge_intrinsic(i64 %ds, i64 %alloc, i64 
 entry:
   call void @llvm.aarch64.oxcaml.push.trap(ptr blockaddress(@raise_notrace_edge_intrinsic, %recover))
   invoke void @llvm.aarch64.oxcaml.raise.notrace.edge(
-      i64 %exn,
+      i64 %exn, i64 %ds, i64 %alloc,
       ptr blockaddress(@raise_notrace_edge_intrinsic, %recover))
           to label %dead unwind label %recover
 

@@ -580,6 +580,15 @@ def CSR_AArch64_OxCaml_WithoutFP : CalleeSavedRegs<(add LR)>;
 def CSR_AArch64_OxCaml_C_Call : CalleeSavedRegs<(sub CSR_AArch64_AAPCS, X27, X28)>;
 def CSR_AArch64_OxCaml_C_Call_StackArgs
     : CalleeSavedRegs<(sub CSR_AArch64_AAPCS, X20, X21, X27, X28)>;
+// In-place C-call statepoints: registers cannot be gc roots at C-call
+// safepoints (no gc_regs bucket), so a gc value surviving the call in a
+// callee-saved register goes stale when the GC moves the object (only
+// its spill slot is updated). Clobber the integer CSRs so the allocator
+// keeps everything live across in slots; x26 (trap pointer) and the FP
+// CSRs cannot hold gc references and stay preserved.
+def CSR_AArch64_OxCaml_C_Call_InPlace
+    : CalleeSavedRegs<(sub CSR_AArch64_AAPCS, X19, X20, X21, X22, X23, X24,
+                           X25, X27, X28)>;
 def CSR_AArch64_OxCaml_Alloc
     : CalleeSavedRegs<(sub CSR_AArch64_AllRegs, X8, X16, X17, X18,
                            X26, X27, X28)>;

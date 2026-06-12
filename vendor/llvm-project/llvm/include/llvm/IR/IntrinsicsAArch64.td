@@ -148,8 +148,11 @@ def int_aarch64_oxcaml_pop_trap
 // current trap frame in x26 supplies the destination handler. The AArch64
 // lowering copies the exception bucket to x0, restores sp from x26, pops the
 // previous trap pointer and handler address, and branches to the handler.
+// The handler is runtime-entered: it reads the domain state and allocation
+// cursor from x28/x27, so the raise carries the current SSA values of both
+// and the lowering pins them into those registers (args: exn, ds, alloc).
 def int_aarch64_oxcaml_raise_notrace
-    : Intrinsic<[], [llvm_i64_ty],
+    : Intrinsic<[], [llvm_i64_ty, llvm_i64_ty, llvm_i64_ty],
                 [IntrHasSideEffects, IntrConvergent, IntrNoDuplicate,
                  IntrNoMerge, IntrNoReturn, Throws, IntrNoCallback,
                  IntrNoFree]>;
@@ -157,8 +160,9 @@ def int_aarch64_oxcaml_raise_notrace
 // OxCaml raise-notrace with a statically known runtime-entered recovery edge.
 // This has the same runtime semantics as int_aarch64_oxcaml_raise_notrace, but
 // the blockaddress records the active handler for machine CFG construction.
+// Args: exn, ds, alloc, recovery blockaddress.
 def int_aarch64_oxcaml_raise_notrace_edge
-    : Intrinsic<[], [llvm_i64_ty, llvm_ptr_ty],
+    : Intrinsic<[], [llvm_i64_ty, llvm_i64_ty, llvm_i64_ty, llvm_ptr_ty],
                 [IntrHasSideEffects, IntrConvergent, IntrNoDuplicate,
                  IntrNoMerge, IntrNoReturn, Throws, IntrNoCallback,
                  IntrNoFree]>;

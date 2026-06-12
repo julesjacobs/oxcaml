@@ -35,9 +35,9 @@ body:             |
     OXCAML_PUSH_TRAP %bb.1, implicit-def dead $sp, implicit-def dead $x16, implicit-def $x26, implicit $sp, implicit $x26
     ADJCALLSTACKDOWN 8, 0, implicit-def dead $sp, implicit $sp
     STRXui killed $x10, $sp, 0 :: (store (s64) into stack)
-    BL @callee_many, csr_aarch64_oxcaml_withoutfp, implicit-def dead $lr, implicit $sp, implicit $x28, implicit $x27, implicit $x0, implicit $x1, implicit $x2, implicit $x3, implicit $x4, implicit $x5, implicit $x6, implicit $x7, implicit-def $sp, implicit-def dead $x28, implicit-def dead $x27, implicit-def $x0
+    BL @callee_many, csr_aarch64_oxcaml_withoutfp, implicit-def dead $lr, implicit $sp, implicit $x28, implicit $x27, implicit $x0, implicit $x1, implicit $x2, implicit $x3, implicit $x4, implicit $x5, implicit $x6, implicit $x7, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0
     ADJCALLSTACKUP 8, 0, implicit-def dead $sp, implicit $sp
-    OXCAML_RAISE_NOTRACE_EDGE $x0, %bb.1, implicit-def dead $x0, implicit-def dead $x16, implicit-def dead $x26, implicit-def dead $sp, implicit $x26
+    OXCAML_RAISE_NOTRACE_EDGE $x0, %bb.1, implicit-def dead $x0, implicit-def dead $x16, implicit-def dead $x26, implicit-def dead $sp, implicit $x26, implicit $x27, implicit $x28
 
   bb.1.recover (machine-block-address-taken, runtime-entered):
     liveins: $x0, $x26, $x27, $x28

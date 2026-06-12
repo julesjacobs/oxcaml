@@ -86,14 +86,19 @@ static cl::opt<bool> OxCamlStatepointInPlace(
 // Non-static: SelectionDAGBuilder consults this to bypass stable
 // statepoint root homes, which exist only to give phis a fixed slot
 // across the ISel pool-spilling scheme that this flag removes.
-static cl::opt<bool> OxCamlStatepointInPlaceCCalls(
+// Non-static: AArch64RegisterInfo consults this to clobber the integer
+// CSRs in the C-call preserved mask (a gc value surviving an in-place
+// C-call statepoint in a callee-saved register goes stale when the GC
+// moves the object - registers are not roots at C-call safepoints).
+cl::opt<bool> OxCamlStatepointInPlaceCCalls(
     "oxcaml-statepoint-inplace-c-calls", cl::Hidden, cl::init(false),
     cl::desc("Extend in-place statepoint lowering to OxCaml C calls. "
              "Sound only with FixupStatepointCallerSaved force-spilling "
              "callee-saved gc operands at these statepoints (their CSR set "
              "preserves x19-x26, and a gc value parked there is invisible "
              "to the runtime - the BUG 7 hazard); the fixup pass does this "
-             "unconditionally for the OxCaml C-call conventions."));
+             "unconditionally for the OxCaml C-call conventions, and the "
+             "AArch64 call preserved mask drops x19-x25 under this flag."));
 
 cl::opt<bool> OxCamlStatepointInPlaceCalls(
     "oxcaml-statepoint-inplace-calls", cl::Hidden, cl::init(true),

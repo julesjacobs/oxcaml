@@ -35,6 +35,11 @@
 
 using namespace llvm;
 
+// Defined in StatepointLowering.cpp. Under in-place C-call statepoints,
+// registers are not gc roots at C-call safepoints, so the preserved mask
+// must clobber the integer CSRs (see CSR_AArch64_OxCaml_C_Call_InPlace).
+extern cl::opt<bool> OxCamlStatepointInPlaceCCalls;
+
 #define GET_CC_REGISTER_LISTS
 #include "AArch64GenCallingConv.inc"
 #define GET_REGINFO_TARGET_DESC
@@ -270,9 +275,13 @@ AArch64RegisterInfo::getDarwinCallPreservedMask(const MachineFunction &MF,
   case CallingConv::OxCaml_WithoutFP:
     return CSR_AArch64_OxCaml_WithoutFP_RegMask;
   case CallingConv::OxCaml_C_Call:
-    return CSR_AArch64_OxCaml_C_Call_RegMask;
+    return OxCamlStatepointInPlaceCCalls
+               ? CSR_AArch64_OxCaml_C_Call_InPlace_RegMask
+               : CSR_AArch64_OxCaml_C_Call_RegMask;
   case CallingConv::OxCaml_C_Call_StackArgs:
-    return CSR_AArch64_OxCaml_C_Call_StackArgs_RegMask;
+    return OxCamlStatepointInPlaceCCalls
+               ? CSR_AArch64_OxCaml_C_Call_InPlace_RegMask
+               : CSR_AArch64_OxCaml_C_Call_StackArgs_RegMask;
   case CallingConv::OxCaml_C_Direct_Call:
     return CSR_AArch64_AAPCS_RegMask;
   case CallingConv::OxCaml_Alloc:
@@ -321,9 +330,13 @@ AArch64RegisterInfo::getCallPreservedMask(const MachineFunction &MF,
   case CallingConv::OxCaml_WithoutFP:
     return CSR_AArch64_OxCaml_WithoutFP_RegMask;
   case CallingConv::OxCaml_C_Call:
-    return CSR_AArch64_OxCaml_C_Call_RegMask;
+    return OxCamlStatepointInPlaceCCalls
+               ? CSR_AArch64_OxCaml_C_Call_InPlace_RegMask
+               : CSR_AArch64_OxCaml_C_Call_RegMask;
   case CallingConv::OxCaml_C_Call_StackArgs:
-    return CSR_AArch64_OxCaml_C_Call_StackArgs_RegMask;
+    return OxCamlStatepointInPlaceCCalls
+               ? CSR_AArch64_OxCaml_C_Call_InPlace_RegMask
+               : CSR_AArch64_OxCaml_C_Call_StackArgs_RegMask;
   case CallingConv::OxCaml_C_Direct_Call:
     return CSR_AArch64_AAPCS_RegMask;
   case CallingConv::OxCaml_Alloc:

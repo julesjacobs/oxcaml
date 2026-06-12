@@ -3004,6 +3004,8 @@ void SelectionDAGBuilder::visitInvoke(const InvokeInst &I) {
           Intrinsic::aarch64_oxcaml_raise_notrace_edge, getCurSDLoc(),
           TLI.getPointerTy(DAG.getDataLayout())));
       Ops.push_back(getValue(I.getArgOperand(0)));
+      Ops.push_back(getValue(I.getArgOperand(1)));
+      Ops.push_back(getValue(I.getArgOperand(2)));
       Ops.push_back(DAG.getBasicBlock(RecoveryMBB));
       SDVTList VTs = DAG.getVTList(ArrayRef<EVT>({MVT::Other}));
       DAG.setRoot(DAG.getNode(ISD::INTRINSIC_VOID, getCurSDLoc(), VTs, Ops));

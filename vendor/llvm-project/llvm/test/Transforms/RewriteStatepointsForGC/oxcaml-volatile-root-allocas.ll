@@ -8,7 +8,7 @@ declare oxcaml_nofpcc { { i64, i64 }, { i64 } } @callee(
 declare void @llvm.aarch64.oxcaml.push.trap(ptr)
 declare void @llvm.aarch64.oxcaml.pop.trap()
 declare { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()
-declare void @llvm.aarch64.oxcaml.raise.notrace(i64)
+declare void @llvm.aarch64.oxcaml.raise.notrace(i64, i64, i64)
 declare i32 @personality(...)
 
 define oxcaml_nofpcc { { i64, i64 }, { ptr addrspace(1) } } @arg_live_after_call(
@@ -166,7 +166,7 @@ lpad:
 
 reraise:
   %exn.int = ptrtoint ptr addrspace(1) %exn to i64
-  call void @llvm.aarch64.oxcaml.raise.notrace(i64 %exn.int)
+  call void @llvm.aarch64.oxcaml.raise.notrace(i64 %exn.int, i64 %ds.exn, i64 %alloc.exn)
   unreachable
 
 join:

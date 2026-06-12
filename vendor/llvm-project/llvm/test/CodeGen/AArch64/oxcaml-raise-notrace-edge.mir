@@ -29,9 +29,9 @@ frameInfo:
 body:             |
   bb.0.entry:
     successors: %bb.1(0x80000000)
-    liveins: $x0
+    liveins: $x0, $x27, $x28
 
-    OXCAML_RAISE_NOTRACE_EDGE $x0, %bb.1, implicit-def dead $x0, implicit-def dead $x16, implicit-def dead $x26, implicit-def dead $sp, implicit $x26
+    OXCAML_RAISE_NOTRACE_EDGE $x0, %bb.1, implicit-def dead $x0, implicit-def dead $x16, implicit-def dead $x26, implicit-def dead $sp, implicit $x26, implicit $x27, implicit $x28
 
   bb.1.recover (machine-block-address-taken, runtime-entered):
     liveins: $x0, $x26, $x27, $x28

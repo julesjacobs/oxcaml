@@ -2508,6 +2508,11 @@ let raise_ t ~(exn_handler : Label.t option)
     let exn_bucket_raw = cast t exn_bucket T.i64 in
     (match Target_system.architecture () with
     | Target_system.AArch64 ->
+      (* The destination handler is runtime-entered and reads the domain
+         state and allocation cursor from x28/x27; pass the current values
+         so the backend can pin them into those registers. *)
+      let ds = emit_ins t (I.load ~ptr:domainstate_ptr ~typ:T.i64) in
+      let alloc = emit_ins t (I.load ~ptr:allocation_ptr ~typ:T.i64) in
       (match unwind_label_for_active_handler () with
       | Some unwind_label ->
         let intrinsic_name = "llvm.aarch64.oxcaml.raise.notrace.edge" in
@@ -2516,14 +2521,14 @@ let raise_ t ~(exn_handler : Label.t option)
           V.blockaddress ~func:fun_ident ~block:(V.get_ident_exn unwind_label)
         in
         add_called_intrinsic t intrinsic_name
-          ~args:[T.i64; T.ptr]
+          ~args:[T.i64; T.i64; T.i64; T.ptr]
           ~res:None;
         let normal_label = V.of_label (Cmm.new_label ()) in
         emit_ins_no_res t
           (I.invoke ~func:(LL.Ident.global intrinsic_name)
-             ~args:[exn_bucket_raw; recovery_target] ~res_type:T.Or_void.void
-             ~attrs:[] ~operand_bundles:[] ~cc:Default ~normal:normal_label
-             ~unwind:unwind_label);
+             ~args:[exn_bucket_raw; ds; alloc; recovery_target]
+             ~res_type:T.Or_void.void ~attrs:[] ~operand_bundles:[]
+             ~cc:Default ~normal:normal_label ~unwind:unwind_label);
         emit_label t normal_label
       | None ->
         if Config.tsan
@@ -2534,7 +2539,7 @@ let raise_ t ~(exn_handler : Label.t option)
           |> ignore)
         else
           call_llvm_intrinsic_no_res t "aarch64.oxcaml.raise.notrace"
-            [exn_bucket_raw])
+            [exn_bucket_raw; ds; alloc])
     | Target_system.X86_64 ->
       (* Get sp for trap block *)
       let exn_sp_ptr = load_domainstate_addr t Domain_exn_handler in

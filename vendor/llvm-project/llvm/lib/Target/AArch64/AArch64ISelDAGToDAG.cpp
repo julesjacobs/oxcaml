@@ -4868,9 +4868,17 @@ void AArch64DAGToDAGISel::Select(SDNode *Node) {
       return;
     }
     case Intrinsic::aarch64_oxcaml_raise_notrace: {
+      // The handler reads the domain state and allocation cursor from
+      // x28/x27; pin the current SSA values into those registers.
       SDValue Chain = Node->getOperand(0);
       SDValue ExnBucket = Node->getOperand(2);
-      SDValue Ops[] = { ExnBucket, Chain };
+      SDValue Ds = Node->getOperand(3);
+      SDValue Alloc = Node->getOperand(4);
+      SDLoc DL(Node);
+      Chain = CurDAG->getCopyToReg(Chain, DL, AArch64::X28, Ds, SDValue());
+      Chain = CurDAG->getCopyToReg(Chain, DL, AArch64::X27, Alloc,
+                                   Chain.getValue(1));
+      SDValue Ops[] = { ExnBucket, Chain, Chain.getValue(1) };
       CurDAG->SelectNodeTo(Node, AArch64::OXCAML_RAISE_NOTRACE, MVT::Other,
                            Ops);
       return;
@@ -4878,11 +4886,17 @@ void AArch64DAGToDAGISel::Select(SDNode *Node) {
     case Intrinsic::aarch64_oxcaml_raise_notrace_edge: {
       SDValue Chain = Node->getOperand(0);
       SDValue ExnBucket = Node->getOperand(2);
-      SDValue RecoveryTarget = Node->getOperand(3);
+      SDValue Ds = Node->getOperand(3);
+      SDValue Alloc = Node->getOperand(4);
+      SDValue RecoveryTarget = Node->getOperand(5);
       if (auto *RecoveryBB = dyn_cast<BasicBlockSDNode>(RecoveryTarget)) {
+        SDLoc DL(Node);
+        Chain = CurDAG->getCopyToReg(Chain, DL, AArch64::X28, Ds, SDValue());
+        Chain = CurDAG->getCopyToReg(Chain, DL, AArch64::X27, Alloc,
+                                     Chain.getValue(1));
         SDValue Ops[] = { ExnBucket,
                           CurDAG->getBasicBlock(RecoveryBB->getBasicBlock()),
-                          Chain };
+                          Chain, Chain.getValue(1) };
         CurDAG->SelectNodeTo(Node, AArch64::OXCAML_RAISE_NOTRACE_EDGE,
                              MVT::Other, Ops);
         return;
