@@ -82,6 +82,17 @@ static cl::opt<bool> OxCamlStatepointInPlace(
              "semantics: gc values stay plain (untied) operands wherever "
              "the register allocator put them; relocates are identity"));
 
+// Non-static: SelectionDAGBuilder consults this to bypass stable
+// statepoint root homes, which exist only to give phis a fixed slot
+// across the ISel pool-spilling scheme that this flag removes.
+cl::opt<bool> OxCamlStatepointInPlaceCalls(
+    "oxcaml-statepoint-inplace-calls", cl::Hidden, cl::init(false),
+    cl::desc("Extend in-place statepoint lowering to ordinary OxCaml "
+             "calls (clobber-all conventions): no ISel pool spilling; "
+             "values live across land in register-allocator spill slots, "
+             "which the statepoint operands fold to and the frametable "
+             "lists. C calls and invokes keep the spilling scheme."));
+
 typedef FunctionLoweringInfo::StatepointRelocationRecord RecordType;
 
 static SDNode *findCallSeqEnd(SDNode *N, SmallPtrSetImpl<SDNode *> &Seen) {
@@ -624,10 +635,22 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
   // statepoints only, and only when every entry is its own base
   // (llvmize keeps interior pointers away from safepoints; an interior
   // pointer listed as an independent root would corrupt the heap).
+  // Ordinary OxCaml calls (step 2) extend the same scheme: their
+  // conventions clobber every register, so anything live across is
+  // forced into register-allocator spill slots, which the (untied)
+  // statepoint operands fold to and the frametable lists directly —
+  // one slot per value, no pool double-spill. C calls are excluded
+  // (their convention preserves x19-x26, and a gc value parked there
+  // is invisible to the runtime — the BUG 7 hazard); invokes keep the
+  // exnroot machinery.
+  bool InPlaceCC =
+      SI.CLI.CallConv == CallingConv::OxCaml_Alloc
+          ? OxCamlStatepointInPlace.getValue()
+          : ((SI.CLI.CallConv == CallingConv::OxCaml_WithFP ||
+              SI.CLI.CallConv == CallingConv::OxCaml_WithoutFP) &&
+             OxCamlStatepointInPlaceCalls);
   bool InPlace = false;
-  if (OxCamlStatepointInPlace &&
-      SI.CLI.CallConv == CallingConv::OxCaml_Alloc &&
-      isa_and_nonnull<CallInst>(SI.StatepointInstr)) {
+  if (InPlaceCC && isa_and_nonnull<CallInst>(SI.StatepointInstr)) {
     const Function &F = Builder.DAG.getMachineFunction().getFunction();
     if (F.hasGC() && (F.getGC() == "oxcaml" || F.getGC() == "ocaml")) {
       InPlace = true;

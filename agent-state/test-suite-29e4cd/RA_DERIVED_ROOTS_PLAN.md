@@ -590,6 +590,32 @@ Flag: `-oxcaml-statepoint-inplace` (ISel-level), default off until proven.
   gates active for gc vregs). Expected win: loop re-spills + join
   shuffling gone (boyer tautologyp: 3 stores/iteration; kb rporec/unify).
   Riskiest step. ~1-2w incl. soak.
+  BUILT 2026-06-12 (`-oxcaml-statepoint-inplace-calls`, default off):
+  ordinary OxCaml-CC CallInst statepoints lower gc values as plain
+  untied operands; the clobber-all regmask forces live-across values
+  into RA spill slots, the operands fold to them (fixup-statepoint-
+  caller-saved as backstop for unfolded register operands), relocates
+  identity; stable phi homes bypassed under the flag. C calls and
+  invokes excluded. NO code-motion gates were needed so far: at
+  clobber-all sites values cannot cross in registers, the listed RA
+  slots are updated by the GC, and remat/sink recompute from updated
+  sources — the only true hazard is a DERIVED computation crossing a
+  statepoint, which the verifier checks (1 standing finding, fn_101,
+  needs triage). The grind was VALUE-EVIDENCE for the pass, since pool
+  stores (the old ValueHome seed) vanish: added copy-source transitive
+  seeding of listed operands, statepoint-result typing reused for
+  regValue (physRegHoldsValueAt), formal-arg typing by convention
+  mapping (livein vregs are not the marked arg vregs!), the alloc
+  STRXpre write-back shape, caml static GlobalVariable addresses, and
+  narrow bit-trust for copies from x0-x15 after indirect calls (the
+  FunctionLoweringInfo p1-marking is the bit's root; PHIElimination now
+  propagates bits to phi-join vregs). Corpus after: machine verifier
+  clean; non-entry-init verifier findings ccmain 35 / typecore 14 /
+  ltf 51 / parmatch 0, every audited cluster benign (i64-immediate
+  Int_ids/Continuation results in family slots — verifier family FP).
+  Soak running. NOTE: the bit-marking + new value rules also apply in
+  default mode (more listed roots, soundness-positive); default-mode
+  cascade should be re-run before the next default-mode release.
 - Step 3: delete dead machinery; THEN revisit exnroots/homes on the
   simplified base (gc-ness + RA could subsume exnroot slots later by
   modeling raise edges as clobber-all, forcing handler-live values into

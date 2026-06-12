@@ -408,8 +408,21 @@ Register FunctionLoweringInfo::CreateRegs(Type *Ty, bool isDivergent) {
 }
 
 Register FunctionLoweringInfo::CreateRegs(const Value *V) {
-  return CreateRegs(V->getType(), DA && DA->isDivergent(V) &&
-                    !TLI->requiresUniformRegister(*MF, V));
+  Register R = CreateRegs(V->getType(), DA && DA->isDivergent(V) &&
+                          !TLI->requiresUniformRegister(*MF, V));
+  // OxCaml: vregs that carry a gc value (ptr addrspace(1)) get the gc
+  // bit at creation. This is the root of the bit lattice: it covers phi
+  // destinations, gc.results and every other cross-block value that
+  // never appears directly in a statepoint gc section; InstrEmitter,
+  // PHIElimination, the coalescer and cloneVirtualRegister propagate it
+  // from here.
+  if (V->getType()->isPointerTy() &&
+      V->getType()->getPointerAddressSpace() == 1) {
+    const Function &F = MF->getFunction();
+    if (F.hasGC() && (F.getGC() == "oxcaml" || F.getGC() == "ocaml"))
+      MF->getRegInfo().setOxCamlGCPtr(R);
+  }
+  return R;
 }
 
 /// GetLiveOutRegInfo - Gets LiveOutInfo for a register, returning NULL if the

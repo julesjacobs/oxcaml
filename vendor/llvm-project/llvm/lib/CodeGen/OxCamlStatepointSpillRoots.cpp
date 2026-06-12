@@ -51,6 +51,7 @@
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/CodeGen/VirtRegMap.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalVariable.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Support/Debug.h"
 
@@ -419,6 +420,7 @@ class GCValueness {
 
   bool regValue(Register R, const VNInfo *VNI);
   bool storeValue(int FI, Register Src, SlotIndex StIdx);
+  bool physRegHoldsValueAt(Register Src, MachineInstr *At);
   const std::pair<Register, SlotIndex> *
   lastStoreBefore(int FI, const MachineBasicBlock *MBB, SlotIndex Before);
   bool slotExitValue(int FI, const MachineBasicBlock *MBB);
@@ -463,11 +465,32 @@ GCValueness::GCValueness(MachineFunction &MF,
     SmallVector<Register, 16> ListedRegs;
     walkGCPtrSection(*MI, ListedSlots, &ListedRegs);
     SlotIndex Idx = Indexes.getInstructionIndex(*MI);
-    for (Register R : ListedRegs)
-      if (LIS.hasInterval(R))
-        if (const VNInfo *VNI =
-                LIS.getInterval(R).getVNInfoAt(Idx.getRegSlot(true)))
-          Seeds.insert({(int64_t)R.id(), VNI->id});
+    for (Register R : ListedRegs) {
+      // Seed the listed operand's value, and follow COPY defs backward:
+      // the copy SOURCE holds the same runtime value at that point, and
+      // its other locations (e.g. its spill slot, stored before the
+      // copy) are only provable through it. This matters for values
+      // whose producing instruction the structural rules cannot read,
+      // e.g. an allocation's STRXpre write-back: with in-place lowering
+      // the listed operand is often a spiller copy of it.
+      Register Cur = R;
+      SlotIndex At = Idx.getRegSlot(true);
+      for (unsigned Hops = 0; Hops < 8 && Cur.isVirtual(); ++Hops) {
+        if (!LIS.hasInterval(Cur))
+          break;
+        const VNInfo *VNI = LIS.getInterval(Cur).getVNInfoAt(At);
+        if (!VNI)
+          break;
+        if (!Seeds.insert({(int64_t)Cur.id(), VNI->id}).second)
+          break;
+        MachineInstr *D = Indexes.getInstructionFromIndex(VNI->def);
+        if (!D || !D->isCopy() || D->getOperand(0).getSubReg() ||
+            D->getOperand(1).getSubReg())
+          break;
+        Cur = D->getOperand(1).getReg();
+        At = VNI->def.getRegSlot(true);
+      }
+    }
   }
   for (MachineBasicBlock &MBB : MF)
     for (MachineInstr &MI : MBB) {
@@ -568,10 +591,26 @@ bool GCValueness::regValue(Register R, const VNInfo *VNI) {
           V = Q && regValue(Src, Q);
         }
       } else {
-        // Copy from a physical register: an ABI argument copy in the
-        // entry block of an addrspace(1) formal argument is a value.
-        V = D->getParent() == &MF.front() &&
-            MF.getRegInfo().isOxCamlGCArg(R);
+        // Copy from a physical register: an incoming gc argument or an
+        // in-place statepoint call's p1-typed result. Indirect callees
+        // (closure calls) have no symbol to type, so additionally trust
+        // the gc bit on the destination when copying from an ordinary
+        // result/argument register (x0-x15; never the runtime registers
+        // x26-x28, whose raw copies can share a coalesced family with
+        // gc vregs): the bit on such copies comes from the IR result
+        // type via FunctionLoweringInfo.
+        bool BitTrust = false;
+        if (MF.getRegInfo().isOxCamlGCPtr(R)) {
+          StringRef SrcName = MF.getSubtarget()
+                                  .getRegisterInfo()
+                                  ->getName(Src.asMCReg());
+          unsigned K;
+          BitTrust = SrcName.consume_front("X") &&
+                     !SrcName.getAsInteger(10, K) && K <= 15;
+        }
+        V = (D->getParent() == &MF.front() &&
+             MF.getRegInfo().isOxCamlGCArg(R)) ||
+            BitTrust || physRegHoldsValueAt(Src, D);
       }
     } else {
       int FI;
@@ -582,6 +621,38 @@ bool GCValueness::regValue(Register R, const VNInfo *VNI) {
           else if (LS.hasInterval(FI))
             V = slotValueAt(FI, VNI->def);
         }
+      } else if (D->mayStore() && D->hasOneMemOperand() &&
+                 D->memoperands().front()->getAddrSpace() == 1 &&
+                 D->getNumExplicitDefs() == 1 &&
+                 D->getOperand(0).isReg() &&
+                 D->getOperand(0).getReg() == R &&
+                 D->getNumExplicitOperands() >= 4 &&
+                 D->getOperand(2).isReg() &&
+                 D->getOperand(2).getReg() == R &&
+                 D->getOperand(3).isImm() &&
+                 D->getOperand(3).getImm() == 8) {
+        // Allocation write-back: llvmize forms the block value pointer
+        // by storing the first field with a pre-indexed store at +8
+        // from the header pointer (str xV, [xH, #8]!); the written-back
+        // register IS the new block pointer. llvmize emits no other
+        // tied write-back addrspace(1) stores at +8 (field stores use
+        // absolute offsets), so the shape identifies the alloc result.
+        V = true;
+      } else if (D->getNumExplicitOperands() >= 2 &&
+                 D->getNumExplicitDefs() == 1 &&
+                 D->getOperand(0).isReg() &&
+                 D->getOperand(0).getReg() == R &&
+                 D->getOperand(1).isGlobal() &&
+                 isa<GlobalVariable>(D->getOperand(1).getGlobal()) &&
+                 D->getOperand(1).getGlobal()->getName().contains(
+                     "caml")) {
+        // Materialized address of an OCaml static data block (MOVaddr /
+        // LOADgot of a caml data symbol). Statics are values: the GC
+        // classifies them NOT_MARKABLE and leaves them alone, and they
+        // never move, so listing such a root is sound. Rejecting them
+        // would poison every phi mixing a static default with heap
+        // values. Functions (code pointers) are excluded.
+        V = true;
       } else if (D->isMoveImmediate() &&
                  D->getNumExplicitOperands() == 2 &&
                  D->getOperand(1).isImm() &&
@@ -605,7 +676,113 @@ bool GCValueness::regValue(Register R, const VNInfo *VNI) {
     }
   }
   Memo[K] = V ? 1 : 2;
+  if (!V)
+    if (const char *FN = getenv("OXSR_DEBUG_VAL"))
+      if (MF.getName().contains(FN)) {
+        errs() << "[oxsr-val] " << printReg(R) << " vni" << VNI->id
+               << " NOT value; def=";
+        if (VNI->isPHIDef())
+          errs() << "phi at " << VNI->def << "\n";
+        else if (MachineInstr *D = Indexes.getInstructionFromIndex(VNI->def))
+          errs() << *D;
+        else
+          errs() << "unknown\n";
+      }
   return V;
+}
+
+// Whether physical register \p Src holds an OCaml gc value when read by
+// \p At. Physreg reads with no defining instruction of their own come
+// from two producers: an incoming argument (no definition between entry
+// and the read) or a statepoint call's result (the most recent
+// definition is a STATEPOINT that implicit-defs the register). For the
+// latter, a direct callee's llvmize signature {{i64,i64},{results...}}
+// says whether the element riding this x-register (integer/pointer
+// results take x0,x1,... in element order; float results use d-regs) is
+// ptr addrspace(1).
+bool GCValueness::physRegHoldsValueAt(Register Src, MachineInstr *At) {
+  if (!At)
+    return false;
+  const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+  MachineBasicBlock *MBB = At->getParent();
+  MachineBasicBlock::iterator I(At);
+  while (I != MBB->begin()) {
+    --I;
+    if (!I->modifiesRegister(Src, TRI))
+      continue;
+    if (I->getOpcode() != TargetOpcode::STATEPOINT)
+      return false;
+    // Regmask-clobbered is not a result; require an implicit def.
+    bool IsResultReg = false;
+    for (const MachineOperand &MO : I->operands())
+      if (MO.isReg() && MO.isDef() && MO.isImplicit() &&
+          MO.getReg() == Src)
+        IsResultReg = true;
+    if (!IsResultReg)
+      return false;
+    const MachineOperand &Target = StatepointOpers(&*I).getCallTarget();
+    if (!Target.isGlobal())
+      return false;
+    const auto *Callee = dyn_cast<Function>(Target.getGlobal());
+    if (!Callee)
+      return false;
+    StringRef RName = TRI->getName(Src.asMCReg());
+    unsigned K;
+    if (!RName.consume_front("X") || RName.getAsInteger(10, K))
+      return false;
+    const auto *Outer = dyn_cast<StructType>(Callee->getReturnType());
+    if (!Outer || Outer->getNumElements() != 2)
+      return false;
+    const auto *Res = dyn_cast<StructType>(Outer->getElementType(1));
+    if (!Res)
+      return false;
+    unsigned XIdx = 0;
+    for (Type *ET : Res->elements()) {
+      if (ET->isFloatingPointTy() || ET->isVectorTy())
+        continue;
+      if (XIdx++ == K) {
+        if (const auto *PT = dyn_cast<PointerType>(ET))
+          if (PT->getAddressSpace() == 1)
+            return true;
+        return false;
+      }
+    }
+    return false;
+  }
+  // No definition before the read: the register still carries its value
+  // from function entry; a gc formal argument is a value.
+  if (MBB != &MF.front())
+    return false;
+  Register ArgV = MF.getRegInfo().getLiveInVirtReg(Src.asMCReg());
+  if (ArgV.isValid() && MF.getRegInfo().isOxCamlGCArg(ArgV))
+    return true;
+  // The livein vreg is ISel's raw copy target and usually not the
+  // marked argument vreg; map the register to its formal directly. The
+  // OxCaml conventions pass integer/pointer arguments in x28, x27, x0,
+  // x1, ... in declaration order (floats ride d-regs separately).
+  StringRef RName = TRI->getName(Src.asMCReg());
+  unsigned Ordinal;
+  if (RName == "X28")
+    Ordinal = 0;
+  else if (RName == "X27")
+    Ordinal = 1;
+  else {
+    unsigned K;
+    if (!RName.consume_front("X") || RName.getAsInteger(10, K) || K > 15)
+      return false;
+    Ordinal = K + 2;
+  }
+  unsigned Idx = 0;
+  for (Type *PT : MF.getFunction().getFunctionType()->params()) {
+    if (PT->isFloatingPointTy() || PT->isVectorTy())
+      continue;
+    if (Idx++ == Ordinal) {
+      if (const auto *P = dyn_cast<PointerType>(PT))
+        return P->getAddressSpace() == 1;
+      return false;
+    }
+  }
+  return false;
 }
 
 bool GCValueness::storeValue(int FI, Register Src, SlotIndex StIdx) {
@@ -620,75 +797,10 @@ bool GCValueness::storeValue(int FI, Register Src, SlotIndex StIdx) {
       return true;
   } else {
     // Spills of physical registers are spiller foldings of values that
-    // never got their own instruction: an incoming argument spilled at
-    // function entry, or a statepoint call's result spilled right after
-    // the call. Walk back to the register's most recent definition.
-    MachineInstr *St = Indexes.getInstructionFromIndex(StIdx);
-    if (St) {
-      const TargetRegisterInfo *TRI =
-          MF.getSubtarget().getRegisterInfo();
-      MachineBasicBlock *MBB = St->getParent();
-      MachineBasicBlock::iterator I(St);
-      bool Resolved = false;
-      while (I != MBB->begin() && !Resolved) {
-        --I;
-        if (!I->modifiesRegister(Src, TRI))
-          continue;
-        Resolved = true;
-        if (I->getOpcode() != TargetOpcode::STATEPOINT)
-          break;
-        // Regmask-clobbered is not a result; require an implicit def.
-        bool IsResultReg = false;
-        for (const MachineOperand &MO : I->operands())
-          if (MO.isReg() && MO.isDef() && MO.isImplicit() &&
-              MO.getReg() == Src)
-            IsResultReg = true;
-        if (!IsResultReg)
-          break;
-        // Direct callee: llvmize signatures return
-        // {{i64,i64},{results...}} with the integer/pointer results
-        // riding x0,x1,... in element order (float results use d-regs).
-        // The matching element's IR type says whether Src holds a gc
-        // value.
-        const MachineOperand &Target =
-            StatepointOpers(&*I).getCallTarget();
-        if (!Target.isGlobal())
-          break;
-        const auto *Callee = dyn_cast<Function>(Target.getGlobal());
-        if (!Callee)
-          break;
-        StringRef RName = TRI->getName(Src.asMCReg());
-        unsigned K;
-        if (!RName.consume_front("X") || RName.getAsInteger(10, K))
-          break;
-        const auto *Outer =
-            dyn_cast<StructType>(Callee->getReturnType());
-        if (!Outer || Outer->getNumElements() != 2)
-          break;
-        const auto *Res = dyn_cast<StructType>(Outer->getElementType(1));
-        if (!Res)
-          break;
-        unsigned XIdx = 0;
-        for (Type *ET : Res->elements()) {
-          if (ET->isFloatingPointTy() || ET->isVectorTy())
-            continue;
-          if (XIdx++ == K) {
-            if (const auto *PT = dyn_cast<PointerType>(ET))
-              if (PT->getAddressSpace() == 1)
-                return true;
-            break;
-          }
-        }
-        break;
-      }
-      if (!Resolved && MBB == &MF.front()) {
-        // No definition before the store: the register still carries its
-        // value from function entry; a gc formal argument is a value.
-        Register ArgV = MF.getRegInfo().getLiveInVirtReg(Src.asMCReg());
-        if (ArgV.isValid() && MF.getRegInfo().isOxCamlGCArg(ArgV))
-          return true;
-      }
-    }
+    // never got their own instruction (incoming arguments, statepoint
+    // call results).
+    if (physRegHoldsValueAt(Src, Indexes.getInstructionFromIndex(StIdx)))
+      return true;
   }
   // Consumer evidence: the spiller can fold a statepoint call's returned
   // gc value into a direct physreg store (STRXui $x0, slot), leaving no
@@ -955,14 +1067,24 @@ static bool processStatepoint(MachineInstr &MI, MachineFunction &MF,
   SlotIndex InSlot = Idx.getRegSlot(true);
   SlotIndex OutSlot = Idx.getRegSlot();
   SmallVector<int, 8> SlotsToAdd;
+  bool DebugSlots =
+      VerboseOxCamlStatepointSpillRoots && getenv("OXSR_DEBUG_SLOTS");
   for (int Slot : GCSlots) {
     if (ListedSlots.count(Slot))
       continue;
-    if (!LS.hasInterval(Slot))
+    if (!LS.hasInterval(Slot)) {
+      if (DebugSlots)
+        errs() << "[oxsr] " << MF.getName() << " at " << Idx
+               << ": no LiveStacks interval %stack." << Slot << "\n";
       continue;
+    }
     const LiveInterval &LI = LS.getInterval(Slot);
-    if (!LI.liveAt(InSlot) || !LI.liveAt(OutSlot))
+    if (!LI.liveAt(InSlot) || !LI.liveAt(OutSlot)) {
+      if (DebugSlots)
+        errs() << "[oxsr] " << MF.getName() << " at " << Idx
+               << ": not live across %stack." << Slot << "\n";
       continue;
+    }
     // Only list the slot if the value it holds HERE provably is an OCaml
     // value; family membership alone is per-register and can cover raw
     // ranges of coalesced registers.

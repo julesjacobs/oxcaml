@@ -11080,8 +11080,17 @@ static bool isRelocateContinuationOfPHI(const Value *V, const PHINode &PN,
   return isRelocateContinuationOfPHI(Relocate->getDerivedPtr(), PN, Depth - 1);
 }
 
+// Defined in StatepointLowering.cpp.
+extern cl::opt<bool> OxCamlStatepointInPlaceCalls;
+
 static bool shouldUseStableStatepointRootHome(const PHINode &PN,
                                              SelectionDAGBuilder &Builder) {
+  // Stable homes give a relocate-continuation phi one fixed slot across
+  // the ISel pool-spilling scheme. With in-place call statepoints there
+  // is no pool spilling: the phi's vreg crosses the statepoints and the
+  // register allocator's own spill slot becomes the listed root.
+  if (OxCamlStatepointInPlaceCalls)
+    return false;
   if (!isManagedGCScalarPointer(&PN, Builder))
     return false;
 
