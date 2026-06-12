@@ -788,6 +788,71 @@ Flag: `-oxcaml-statepoint-inplace` (ISel-level), default off until proven.
   statepoint failed to list it. NOTE the env-sensitivity: run scans via
   attach --waitfor, not lldb launch.
 
+  ROUND 11 FORENSIC (2026-06-12, in progress): GC crash count is NOT
+  stable across runs (47525 one run, <=47514 the next; ~10-50 GC
+  drift), so single-stop time travel fails. Tooling: /tmp/gcsnap.py +
+  /tmp/f11-run.sh — attach --waitfor, breakpoint on
+  caml_stw_empty_minor_heap_no_major_slice with a python callback that
+  snapshots EVERY GC entry from #47000 (raw blobs of ML stacks, local
+  arenas, gc_regs bucket, C stack, registers, young/arena ranges to
+  /tmp/f11-blobs + /tmp/f11-index.jsonl, ring-keeping last 6 GCs), and
+  on crash `gccrash` finds the stale v's holders in the snapshot whose
+  young range owns v (= crash-1); `gcstackwalk <hit> <needles>` walks
+  the SAVED stack blob against live descriptors (inferior
+  caml_find_frame_descr calls) flagging unlisted needle slots.
+  Second crash surfacing observed: oldify_mopup/oldify_one on a
+  promoted block's stale young field — same class, the stale value got
+  STORED into a live block after crossing GC unlisted.
+  ROUND 11 ROOT CAUSE FOUND AND FIXED (2026-06-12). Forensic result
+  (NOT local-alloc specific after all — local arenas were only the
+  surfacing): at GC #46905 stale v had 3 holders; the gcwalk2
+  cross-process descriptor walk (fresh lldb launch, slide-translated
+  ret addrs, saved-stack blob) showed the SAME value in TWO slots of
+  ONE frame at ONE statepoint — camlTranslcore__transl_exp0+20724
+  (bl caml_apply2, translcore.ml:612): sp+0x30 LISTED, sp+0xb8
+  UNLISTED. The 0xb8 slot is the young block pointer of the inline
+  alloc at 602:20, spilled at the alloc, reloaded for init, reloaded
+  AGAIN after the call (stale). MIR: the statepoint's gc operand is
+  %9661 = reload of %stack.154 — RA satisfies the operand from a
+  register copy while the SLOT carries the value across; GC updates
+  only the operand's location. THREE pass gaps fixed in
+  OxCamlStatepointSpillRoots.cpp:
+  (1) seed closure: listed-slot operands now seed their must-reach
+  store source; backward walk extended through reload<-store edges
+  (same-MBB lastStoreBefore); collectAccesses() hoisted before the
+  statepoint walk; budget scales with operand count.
+  (2) producer rule isAllocCursor: ADDXri(cursor, 8) where cursor is
+  X27 through COPY/SUBXri/PHI(all-preds) chains = young block value
+  (the optimizer rewrites the STRXpre write-back alloc shape into
+  plain adds off the coalesced cursor vreg).
+  (3) THE DECISIVE FIX — sibling-location listing in processStatepoint:
+  a listed register operand defined by a same-block reload from slot F
+  (no intervening store), or stored same-block into F before the
+  statepoint (same VNI, no later store), proves F holds the listed gc
+  value on entry — list F too, NO value analysis needed. Producer
+  shapes are an arms race (the optimizer builds block pointers from
+  arbitrary write-back/add/sub combos off the cursor: saw
+  SUBXri(STRXpre-writeback(cursor,48),40) = net +8); operand identity
+  is not.
+  Verified: clang-pipeline descriptor at the crash site gains exactly
+  sp+0xb8 (numlive 35->36); llc-on-opt-IR debug shows %stack.154
+  appended at the 75312B statepoint. lit: 7 known oxcaml CodeGen fails
+  unchanged; RS4GC now 19 (was 13 in the old memory list) — the 6 new
+  ones (rematerialize-derived-pointers*, oxcaml-comballoc-object-starts,
+  deopt-intrinsic, statepoint-attrs, unordered-atomic-memcpy*) are
+  CHECK drift from the e9d86fe1aa pivot (remat attr + GEP placement),
+  NOT round-11 changes (opt-only tests; round 11 touched only the
+  MachineFunction pass). Re-baseline during hardening. test-cc.sh
+  REPRO-EXIT 0.
+  Forensic tooling kept: /tmp/gcsnap.py (in-memory ring snapshots of
+  every GC from #40001 — crash GC count is nondeterministic across
+  runs by ~600!), /tmp/f11-run.sh, gcwalk2 (cross-process descriptor
+  walk: launch fresh binary, stop at caml_program, translate by slide
+  delta from the recorded anchor). Frame-2 descriptor duplicates (most
+  slots listed twice) traced to exnroot operands being Direct entries
+  that walkGCPtrSection's ListedSlots misses while the ValueHome path
+  re-appends them — harmless, fix during cleanup.
+
 - Step 3: delete dead machinery; THEN revisit exnroots/homes on the
   simplified base (gc-ness + RA could subsume exnroot slots later by
   modeling raise edges as clobber-all, forcing handler-live values into

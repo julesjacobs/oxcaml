@@ -418,6 +418,8 @@ class GCValueness {
   // 1 = value, 2 = not a value, 3 = in progress (optimistic).
   DenseMap<std::pair<int, int>, unsigned char> SlotExitMemo;
 
+  void collectAccesses();
+  bool isAllocCursor(Register Src, SlotIndex At);
   bool regValue(Register R, const VNInfo *VNI);
   bool storeValue(int FI, Register Src, SlotIndex StIdx);
   bool physRegHoldsValueAt(Register Src, MachineInstr *At);
@@ -449,6 +451,11 @@ public:
                ? ArrayRef<std::pair<Register, SlotIndex>>()
                : ArrayRef<std::pair<Register, SlotIndex>>(It->second);
   }
+
+  const DenseMap<int, SmallVector<std::pair<Register, SlotIndex>, 4>> &
+  allStores() const {
+    return SlotStores;
+  }
 };
 
 } // end anonymous namespace
@@ -460,62 +467,92 @@ GCValueness::GCValueness(MachineFunction &MF,
                          SlotIndexes &Indexes, const TargetInstrInfo *TII)
     : MF(MF), LIS(LIS), LS(LS), Indexes(Indexes), TII(TII),
       ValueHomeFIs(ValueHomeFIs) {
+  // Collect slot accesses first: the listed-operand seed walk below flows
+  // backward through reload<-store memory edges and needs SlotStores.
+  collectAccesses();
   for (const MachineInstr *MI : Statepoints) {
     SmallSet<int, 16> ListedSlots;
     SmallVector<Register, 16> ListedRegs;
     walkGCPtrSection(*MI, ListedSlots, &ListedRegs);
     SlotIndex Idx = Indexes.getInstructionIndex(*MI);
+    // Seed each listed operand's value, and follow value-preserving defs
+    // backward: the source of a COPY, every predecessor's incoming VNI of
+    // a PHI, and the must-reach store feeding a spill-slot reload all hold
+    // the same runtime value at their point, and their other locations
+    // (e.g. a spill slot stored long before the statepoint) are only
+    // provable through them. This matters for values whose producing
+    // instruction the structural rules cannot read, e.g. an allocation's
+    // STRXpre write-back or a local_alloc's raw local_sp/local_top
+    // arithmetic: with in-place lowering the listed operand is often a
+    // spiller copy or reload of it. Listed FOLDED slot operands seed the
+    // same way through their own must-reach store: RS4GC's listing is the
+    // type evidence, whatever location it ended up in. Bounded for safety.
+    SmallVector<std::pair<Register, const VNInfo *>, 8> Work;
+    auto PushStoreSrc = [&](Register Src, SlotIndex StIdx) {
+      if (!Src.isVirtual() || !LIS.hasInterval(Src))
+        return;
+      const LiveInterval &LI = LIS.getInterval(Src);
+      const VNInfo *Q = LI.getVNInfoAt(StIdx.getRegSlot(true));
+      if (!Q)
+        Q = LI.getVNInfoBefore(StIdx.getRegSlot());
+      if (Q)
+        Work.push_back({Src, Q});
+    };
     for (Register R : ListedRegs) {
-      // Seed the listed operand's value, and follow COPY defs backward:
-      // the copy SOURCE holds the same runtime value at that point, and
-      // its other locations (e.g. its spill slot, stored before the
-      // copy) are only provable through it. This matters for values
-      // whose producing instruction the structural rules cannot read,
-      // e.g. an allocation's STRXpre write-back: with in-place lowering
-      // the listed operand is often a spiller copy of it.
-      // Worklist over (reg, VNI): through COPY defs the source's VNI at
-      // the copy carries the same runtime value; through PHI defs every
-      // predecessor's incoming VNI does (each path's value IS the value
-      // that was listed). Bounded for safety.
       if (!R.isVirtual() || !LIS.hasInterval(R))
         continue;
-      SmallVector<std::pair<Register, const VNInfo *>, 8> Work;
       if (const VNInfo *VNI =
               LIS.getInterval(R).getVNInfoAt(Idx.getRegSlot(true)))
         Work.push_back({R, VNI});
-      unsigned Budget = 64;
-      while (!Work.empty() && Budget--) {
-        auto [Cur, VNI] = Work.pop_back_val();
-        if (!Seeds.insert({(int64_t)Cur.id(), VNI->id}).second)
+    }
+    for (int FI : ListedSlots)
+      if (const auto *LB =
+              lastStoreBefore(FI, MI->getParent(), Idx))
+        PushStoreSrc(LB->first, LB->second);
+    unsigned Budget = std::max<unsigned>(256, 64 * Work.size());
+    while (!Work.empty() && Budget--) {
+      auto [Cur, VNI] = Work.pop_back_val();
+      if (!Seeds.insert({(int64_t)Cur.id(), VNI->id}).second)
+        continue;
+      if (const char *FN = getenv("OXSR_DEBUG_VAL"))
+        if (MF.getName().contains(FN))
+          errs() << "[oxsr-seed] " << printReg(Cur) << " vni" << VNI->id
+                 << "\n";
+      if (VNI->isPHIDef()) {
+        MachineBasicBlock *MBB = Indexes.getMBBFromIndex(VNI->def);
+        if (!MBB)
           continue;
-        if (const char *FN = getenv("OXSR_DEBUG_VAL"))
-          if (MF.getName().contains(FN))
-            errs() << "[oxsr-seed] " << printReg(Cur) << " vni" << VNI->id
-                   << "\n";
-        if (VNI->isPHIDef()) {
-          MachineBasicBlock *MBB = Indexes.getMBBFromIndex(VNI->def);
-          if (!MBB)
-            continue;
-          const LiveInterval &LI = LIS.getInterval(Cur);
-          for (MachineBasicBlock *Pred : MBB->predecessors())
-            if (const VNInfo *Q =
-                    LI.getVNInfoBefore(Indexes.getMBBEndIdx(Pred)))
-              Work.push_back({Cur, Q});
-          continue;
-        }
-        MachineInstr *D = Indexes.getInstructionFromIndex(VNI->def);
-        if (!D || !D->isCopy() || D->getOperand(0).getSubReg() ||
-            D->getOperand(1).getSubReg())
-          continue;
+        const LiveInterval &LI = LIS.getInterval(Cur);
+        for (MachineBasicBlock *Pred : MBB->predecessors())
+          if (const VNInfo *Q =
+                  LI.getVNInfoBefore(Indexes.getMBBEndIdx(Pred)))
+            Work.push_back({Cur, Q});
+        continue;
+      }
+      MachineInstr *D = Indexes.getInstructionFromIndex(VNI->def);
+      if (!D)
+        continue;
+      if (D->isCopy() && !D->getOperand(0).getSubReg() &&
+          !D->getOperand(1).getSubReg()) {
         Register Src = D->getOperand(1).getReg();
         if (!Src.isVirtual() || !LIS.hasInterval(Src))
           continue;
         if (const VNInfo *Q = LIS.getInterval(Src).getVNInfoAt(
                 VNI->def.getRegSlot(true)))
           Work.push_back({Src, Q});
+        continue;
       }
+      int FI;
+      if (Register LR = TII->isLoadFromStackSlot(*D, FI))
+        if (LR == Cur && LS.hasInterval(FI))
+          if (const auto *LB =
+                  lastStoreBefore(FI, D->getParent(), VNI->def))
+            PushStoreSrc(LB->first, LB->second);
     }
   }
+}
+
+void GCValueness::collectAccesses() {
   for (MachineBasicBlock &MBB : MF)
     for (MachineInstr &MI : MBB) {
       // A store the IR typed as writing a ptr addrspace(1) value (see
@@ -569,6 +606,86 @@ GCValueness::GCValueness(MachineFunction &MF,
         }
       }
     }
+}
+
+// Whether \p Src read at \p At is the OxCaml allocation cursor: the
+// reserved physical register X27, reached through value-preserving or
+// cursor-preserving steps only — plain COPYs (ISel materializes reads of
+// the reserved register through CopyFromReg vregs; post-call re-reads
+// are COPY $x27), SUBXri decrements (the allocation step itself; the
+// post-decrement cursor still points at the youngest block's header),
+// and PHIs whose every incoming value is itself the cursor (the
+// fast-path/realloc-path join). All paths must root at X27; any
+// unprovable step rejects.
+bool GCValueness::isAllocCursor(Register Src, SlotIndex At) {
+  const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+  auto IsX27 = [&](Register R) {
+    return StringRef(TRI->getName(R.asMCReg())) == "X27";
+  };
+  if (Src.isPhysical())
+    return IsX27(Src);
+  if (!LIS.hasInterval(Src))
+    return false;
+  const VNInfo *V0 = LIS.getInterval(Src).getVNInfoAt(At.getRegSlot(true));
+  if (!V0)
+    V0 = LIS.getInterval(Src).getVNInfoBefore(At.getRegSlot());
+  if (!V0)
+    return false;
+  SmallVector<std::pair<Register, const VNInfo *>, 8> Work;
+  SmallSet<std::pair<int64_t, unsigned>, 16> Seen;
+  Work.push_back({Src, V0});
+  unsigned Budget = 64;
+  while (!Work.empty()) {
+    if (!Budget--)
+      return false;
+    auto [R, VNI] = Work.pop_back_val();
+    if (!Seen.insert({(int64_t)R.id(), VNI->id}).second)
+      continue;
+    if (VNI->isPHIDef()) {
+      MachineBasicBlock *MBB = Indexes.getMBBFromIndex(VNI->def);
+      if (!MBB || MBB->pred_empty())
+        return false;
+      const LiveInterval &LI = LIS.getInterval(R);
+      for (MachineBasicBlock *Pred : MBB->predecessors()) {
+        const VNInfo *Q = LI.getVNInfoBefore(Indexes.getMBBEndIdx(Pred));
+        if (!Q)
+          return false;
+        Work.push_back({R, Q});
+      }
+      continue;
+    }
+    MachineInstr *D = Indexes.getInstructionFromIndex(VNI->def);
+    if (!D)
+      return false;
+    Register Next;
+    if (D->isCopy() && !D->getOperand(0).getSubReg() &&
+        !D->getOperand(1).getSubReg()) {
+      Next = D->getOperand(1).getReg();
+    } else if (StringRef(TII->getName(D->getOpcode())) == "SUBXri" &&
+               D->getNumExplicitOperands() >= 4 &&
+               D->getOperand(1).isReg() && D->getOperand(2).isImm() &&
+               D->getOperand(3).isImm() &&
+               D->getOperand(3).getImm() == 0) {
+      Next = D->getOperand(1).getReg();
+    } else {
+      return false;
+    }
+    if (Next.isPhysical()) {
+      if (!IsX27(Next))
+        return false;
+      continue; // this path roots at the cursor register
+    }
+    if (!LIS.hasInterval(Next))
+      return false;
+    const VNInfo *Q =
+        LIS.getInterval(Next).getVNInfoAt(VNI->def.getRegSlot(true));
+    if (!Q)
+      Q = LIS.getInterval(Next).getVNInfoBefore(VNI->def);
+    if (!Q)
+      return false;
+    Work.push_back({Next, Q});
+  }
+  return true; // every path rooted at X27
 }
 
 bool GCValueness::phiValue(Register R, const LiveInterval &LI,
@@ -688,6 +805,25 @@ bool GCValueness::regValue(Register R, const VNInfo *VNI) {
         // register IS the new block pointer. llvmize emits no other
         // tied write-back addrspace(1) stores at +8 (field stores use
         // absolute offsets), so the shape identifies the alloc result.
+        V = true;
+      } else if (StringRef(TII->getName(D->getOpcode())) == "ADDXri" &&
+                 D->getNumExplicitOperands() >= 4 &&
+                 D->getOperand(0).isReg() &&
+                 D->getOperand(0).getReg() == R &&
+                 D->getOperand(1).isReg() &&
+                 D->getOperand(2).isImm() &&
+                 D->getOperand(2).getImm() == 8 &&
+                 D->getOperand(3).isImm() &&
+                 D->getOperand(3).getImm() == 0 &&
+                 isAllocCursor(D->getOperand(1).getReg(), VNI->def)) {
+        // Young-allocation fast path without write-back: the block value
+        // pointer formed as allocation-cursor + 8 (add xV, x27, #8). In a
+        // gc'd function x27 is the reserved allocation cursor, and +8
+        // past the fresh block's header is by construction the new block
+        // pointer. Between this def and the block's header/field
+        // initialization llvmize emits no safepoint, so wherever a
+        // statepoint can observe the value it is an initialized young
+        // block pointer the GC must forward.
         V = true;
       } else if (D->getNumExplicitOperands() >= 2 &&
                  D->getNumExplicitDefs() == 1 &&
@@ -1174,6 +1310,87 @@ static bool processStatepoint(MachineInstr &MI, MachineFunction &MF,
       SlotsNeedingInit.insert(Slot);
     }
     SlotsToAdd.push_back(Slot);
+  }
+
+  // Sibling locations of listed register operands. RA satisfies a
+  // statepoint's gc operand from whatever copy of the value is cheapest —
+  // often a register reloaded from (or about to be spilled to) a stack
+  // slot that also carries the value ACROSS the statepoint for later
+  // reads. The GC updates only listed locations, so the slot copy goes
+  // stale: list it too. The identity argument needs no value analysis:
+  // a listed operand defined by a reload from slot F with no intervening
+  // store to F means F holds exactly the listed (gc) value on entry to
+  // the statepoint; likewise a pre-statepoint store to F whose source is
+  // the operand (or its copy source). Producer-shape rules cannot cover
+  // this: the optimizer forms block pointers from arbitrary write-back /
+  // add / sub combinations off the allocation cursor.
+  {
+    const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
+    SlotIndex Idx2 = Indexes.getInstructionIndex(MI);
+    SmallSet<int, 8> Added;
+    for (int S : SlotsToAdd)
+      Added.insert(S);
+    auto TryAddSlot = [&](int FI) {
+      if (FI < 0 || ListedSlots.count(FI) || Added.count(FI))
+        return;
+      if (!LS.hasInterval(FI))
+        return;
+      const LiveInterval &LI = LS.getInterval(FI);
+      if (!LI.liveAt(InSlot) || !LI.liveAt(OutSlot))
+        return;
+      Added.insert(FI);
+      SlotsToAdd.push_back(FI);
+    };
+    auto NoStoreBetween = [&](int FI, SlotIndex Lo, SlotIndex Hi) {
+      for (const auto &[Src, StIdx] : GCV.storesOf(FI))
+        if (Lo < StIdx && StIdx < Hi)
+          return false;
+      return true;
+    };
+    for (Register R : ListedRegsVec) {
+      if (!R.isVirtual() || !LIS.hasInterval(R))
+        continue;
+      const VNInfo *VNI =
+          LIS.getInterval(R).getVNInfoAt(Idx2.getRegSlot(true));
+      // Walk through same-block COPY defs (spiller-materialized copies).
+      for (unsigned Hop = 0; VNI && Hop < 3; ++Hop) {
+        MachineInstr *D = Indexes.getInstructionFromIndex(VNI->def);
+        if (!D || D->getParent() != MI.getParent())
+          break;
+        int FI;
+        if (Register LR = TII->isLoadFromStackSlot(*D, FI)) {
+          // Reload-fed operand: slot holds the listed value unless
+          // overwritten between the reload and the statepoint.
+          if (LR == R && NoStoreBetween(FI, VNI->def, Idx2))
+            TryAddSlot(FI);
+          break;
+        }
+        if (!D->isCopy() || D->getOperand(0).getSubReg() ||
+            D->getOperand(1).getSubReg())
+          break;
+        Register Src = D->getOperand(1).getReg();
+        if (!Src.isVirtual() || !LIS.hasInterval(Src))
+          break;
+        R = Src;
+        VNI = LIS.getInterval(R).getVNInfoAt(VNI->def.getRegSlot(true));
+      }
+      // Spilled operand: a same-block pre-statepoint store of this
+      // operand's value into a slot, not overwritten before the
+      // statepoint. R/VNI now name the operand's earliest same-block
+      // copy-chain source.
+      if (!VNI)
+        continue;
+      for (const auto &[FI2, Stores] : GCV.allStores())
+        for (const auto &[Src, StIdx] : Stores)
+          if (Src == R && StIdx < Idx2 &&
+              Indexes.getMBBFromIndex(StIdx) == MI.getParent() &&
+              NoStoreBetween(FI2, StIdx, Idx2)) {
+            const VNInfo *Q = LIS.getInterval(Src).getVNInfoAt(
+                StIdx.getRegSlot(true));
+            if (Q == VNI)
+              TryAddSlot(FI2);
+          }
+    }
   }
 
   // Value-home slots (ISel statepoint pool slots, exnroot allocas) have no
