@@ -1042,6 +1042,42 @@ blockaddress target OR dominating trap.publish; recovery ABI liveins
 = x0/x26/x27/x28; ISel rejects trap.recover outside runtime-entered
 blocks and non-first in block.
 
+## Full-fix investigation: one slot per value (2026-06-12, fec5f043e3)
+
+User question: why can't the clean SSA model match the demotion's
+single-store codegen? Grounded attribution traced unify1's 16-vs-4
+stores to THREE layers, each now fixed:
+(1) spurious phi diversity — same object under relocate/barrier
+renames routed recovery phis to per-invoke edge stores;
+CollapseBarrierPhi unwraps both (also helps base mode). 16->7.
+(2) double memory homes — one-home rule + collapsed entry phis take
+barriers; verified the per-edge materialization of true runtime-
+entered crossings is PHIElimination policy (copies before each call;
+registers cannot cross), which memory cells collapse naturally.
+(3) C-CALL POOL SPILLS — the last spill-lowered statepoint class:
+SSA-live handler values crossing caml_c_call got ISel pool slots on
+top of RA slots. -oxcaml-statepoint-inplace-c-calls lowers them in
+place; the BUG-7 hazard (gc values parked in preserved x19-x26) is
+closed by FixupStatepointCallerSaved force-spilling EVERY register
+operand of OxCaml C-call statepoints (no-op under spill lowering,
+load-bearing under in-place). 7->4 = EXACT base parity under full
+all-SSA: one RA slot per value serving normal, C-call, and handler
+edges. boyer ratios back in noise (0.98-1.02, stores 97 vs 93);
+lit 13 upstream-only; test-cc 0; FULL-CONFIG CASCADE GREEN
+(exn-ssa + all + c-calls: stage1, boot-flip 3/3, stage2,
+stage1-flip 10/10).
+
+REMAINING to the end state (in-place everywhere + SSA exn roots
+default, demotion machinery deleted):
+- cross-region/cross-invocation barrier map (one-home airtight);
+- broader gates flag-on: ocamltest, full minibench, compiler bench;
+- flip -oxcaml-statepoint-inplace-c-calls default (re-gate default
+  mode: the FixupSCS force-spill is unconditional and cascade-green,
+  but C-call in-place itself is the behavior change);
+- then drop the v2 heuristic (HasNormalPathUse) and -all (make SSA
+  the only path), retire the demotion + boundary/trampoline machinery
+  and the exnroot double-listing special cases.
+
 ## Validation gate (the full checklist used for the two landed commits)
 
 1. lit: `llvm-build/bin/llvm-lit -j8 test/CodeGen/AArch64/oxcaml*
