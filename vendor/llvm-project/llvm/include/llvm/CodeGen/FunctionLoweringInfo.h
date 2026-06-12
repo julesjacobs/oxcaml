@@ -156,12 +156,6 @@ public:
   /// basic blocks.
   SmallVector<unsigned, 50> StatepointStackSlots;
 
-  /// StatepointStableRootHomes - Preferred statepoint stack slots for a small
-  /// class of GC pointer PHI recurrences.  The key is an IR value whose current
-  /// contents are known to be in the frame index.  This is populated during
-  /// SelectionDAG construction and consumed by statepoint lowering.
-  DenseMap<const Value *, int> StatepointStableRootHomes;
-
   /// MBB - The current block.
   MachineBasicBlock *MBB;
 

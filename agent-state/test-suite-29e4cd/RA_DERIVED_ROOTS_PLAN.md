@@ -96,8 +96,13 @@ first.
 5. `FixupStatepointCallerSaved.cpp`: post-RA, spills caller-saved regs
    across statepoints, rewrites reg operands to FI tuples in place (record
    counts unchanged); AArch64 `shouldSpillStatepointGCPtr` forces only
-   x16-x18/x26-x28 for oxcaml. Becomes redundant for oxcaml under the new
-   design.
+   x16-x18/x26-x28 for oxcaml. CORRECTION (2026-06-12 audit): NOT
+   redundant under in-place — it is LOAD-BEARING: register gc operands
+   at full-clobber statepoints (read-before-clobber) are only sound
+   because this pass spills them to FIs; without it they would emit as
+   frametable register entries at non-alloc sites (unresolvable, BUG-7
+   class). OnlySpillTargetForcedRegs applies only at OxCaml_Alloc,
+   where the gc_regs bucket resolves registers. DO NOT DELETE.
 
 ## The in-place design (scoped)
 
@@ -909,6 +914,25 @@ Flag: `-oxcaml-statepoint-inplace` (ISel-level), default off until proven.
   simplified base (gc-ness + RA could subsume exnroot slots later by
   modeling raise edges as clobber-all, forcing handler-live values into
   listed family slots — out of scope for now).
+
+## Step 3 progress (2026-06-12)
+
+Landed: (a) retired rederive PINS machinery deleted from RS4GC
+(flag + inttoptr/is_base_value pinning + rederive-form remat; the
+intrinsic/pseudo and the listing pass's producer rule stay); (b)
+exnroot double-listing fixed (gc-alloca section counts as listed in
+OxCamlStatepointSpillRoots; frametables shrink ~29% on translcore,
+GC scans half the entries per frame); (c) StatepointStableRootHomes
+deleted entirely (SelectionDAGBuilder helpers + FunctionLoweringInfo
+field + StatepointLowering consultation + its lit test) — it existed
+only to give phi recurrences stable slots under the ordinary-call
+pool-spilling scheme, unreachable under default in-place.
+DEFERRED by one soak period: removing the
+-oxcaml-statepoint-inplace[-calls] flags + the oxcaml ordinary-call
+pool-spilling branches (the bisection escape hatch; pool machinery
+itself stays regardless for C-calls/invokes/non-oxcaml strategies).
+KEEP: FixupStatepointCallerSaved (see CORRECTION above), MachineLICM
+gate, MOOxCamlGCValue, typed-p1, all GCValueness analyses.
 
 ## Verifier hardening (2026-06-12, after the default flip)
 

@@ -372,7 +372,6 @@ void FunctionLoweringInfo::clear() {
   RegFixups.clear();
   RegsWithFixups.clear();
   StatepointStackSlots.clear();
-  StatepointStableRootHomes.clear();
   StatepointRelocationMaps.clear();
   PreferredExtendType.clear();
 }

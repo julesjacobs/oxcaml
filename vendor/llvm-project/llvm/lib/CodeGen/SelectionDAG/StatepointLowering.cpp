@@ -208,10 +208,6 @@ static std::optional<int> findPreviousSpillSlot(const Value *Val,
   if (LookUpDepth <= 0)
     return std::nullopt;
 
-  if (auto It = Builder.FuncInfo.StatepointStableRootHomes.find(Val);
-      It != Builder.FuncInfo.StatepointStableRootHomes.end())
-    return It->second;
-
   // Spill location is known for gc relocates
   if (const auto *Relocate = dyn_cast<GCRelocateInst>(Val)) {
     const Value *Statepoint = Relocate->getStatepoint();
@@ -337,15 +333,8 @@ static void reservePreviousStackSlotForValue(const Value *IncomingValue,
   const auto &StatepointSlots = Builder.FuncInfo.StatepointStackSlots;
 
   auto SlotIt = find(StatepointSlots, *Index);
-  if (SlotIt == StatepointSlots.end()) {
-    // A stable statepoint root home (see getOrCreateStableStatepointRootHome):
-    // dedicated to a single phi for the whole function and never handed out
-    // by the slot allocator, so no per-statepoint reservation is needed.
-    SDValue Loc =
-        Builder.DAG.getTargetFrameIndex(*Index, Builder.getFrameIndexTy());
-    Builder.StatepointLowering.setLocation(Incoming, Loc);
-    return;
-  }
+  assert(SlotIt != StatepointSlots.end() &&
+         "Value spilled to the unknown stack slot");
 
   // This is one of our dedicated lowering slots
   const int Offset = std::distance(StatepointSlots.begin(), SlotIt);
