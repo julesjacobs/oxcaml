@@ -844,6 +844,28 @@ Flag: `-oxcaml-statepoint-inplace` (ISel-level), default off until proven.
   NOT round-11 changes (opt-only tests; round 11 touched only the
   MachineFunction pass). Re-baseline during hardening. test-cc.sh
   REPRO-EXIT 0.
+  ROUND 11 SOAK: boot-flip 3/3 GREEN, stage2 GREEN, stage1-flip 8/10
+  (was 0/13 in round 10). Residual: env module 138x2 deterministic.
+  ROUND 12 (2026-06-12): env forensic (attach name must be
+  ocamlopt.opt.real — the install's ocamlopt.opt is a sh wrapper!).
+  Crash in the MUTATOR (Flambda2 Join_points.compute_handler_env,
+  join_points.ml:181) dereferencing freed-young x9 right after GC
+  #50782; registers showed the partial-relocation signature (x20-x24
+  current young, x7/x9/x25 stale). gcwalk2 with stale needles found
+  TWO cross-block sibling instances: compute_handler_env frame listed
+  sp+0x0 but not sp+0x48 (same value), prepare_dacc_for_handlers
+  missed sp+0x70. FIX: generalized the sibling rule with two
+  path-insensitive analyses in GCValueness: mustReachStoreAt (4-value
+  lattice Any/None/One/Bottom over per-block exit stores, optimistic
+  cycles) for spill-fed identity, and noStoreBetween (backward BFS,
+  whole-block checks, cycle-aware) for reload-fed identity — the
+  reload direction MUST NOT require a unique store (the round-11
+  translcore case fills the slot from two different per-path vregs of
+  the same logical value; the reload proves content equality
+  regardless). Operand names normalized backward through COPYs and
+  through reloads via the must-reach store. translcore Ltmp507 keeps
+  0xb8 (numlive 36) and the module gains 2 more roots; lit 20 known;
+  test-cc.sh 0. Round-12 cascade soak launched.
   Forensic tooling kept: /tmp/gcsnap.py (in-memory ring snapshots of
   every GC from #40001 — crash GC count is nondeterministic across
   runs by ~600!), /tmp/f11-run.sh, gcwalk2 (cross-process descriptor

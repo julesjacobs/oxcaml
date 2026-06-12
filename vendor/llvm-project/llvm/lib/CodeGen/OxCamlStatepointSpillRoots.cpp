@@ -418,6 +418,31 @@ class GCValueness {
   // 1 = value, 2 = not a value, 3 = in progress (optimistic).
   DenseMap<std::pair<int, int>, unsigned char> SlotExitMemo;
 
+  // Must-reaching-store lattice for mustReachStoreAt: Any agrees with
+  // everything (cycle-optimistic), None means an uninitialized path
+  // reaches (kills must), One is a unique store, Bottom is a conflict.
+  struct ReachVal {
+    enum Kind { Any, None, One, Bottom, InProgress } K = Any;
+    const std::pair<Register, SlotIndex> *St = nullptr;
+  };
+  DenseMap<std::pair<int, int>, ReachVal> ReachMemo;
+
+  static ReachVal meetReach(ReachVal A, ReachVal B) {
+    if (A.K == ReachVal::Any)
+      return B;
+    if (B.K == ReachVal::Any)
+      return A;
+    if (A.K == ReachVal::Bottom || B.K == ReachVal::Bottom)
+      return {ReachVal::Bottom, nullptr};
+    if (A.K == ReachVal::None && B.K == ReachVal::None)
+      return A;
+    if (A.K == ReachVal::One && B.K == ReachVal::One && A.St == B.St)
+      return A;
+    return {ReachVal::Bottom, nullptr};
+  }
+
+  ReachVal exitStore(int FI, const MachineBasicBlock *MBB);
+
   void collectAccesses();
   bool isAllocCursor(Register Src, SlotIndex At);
   bool regValue(Register R, const VNInfo *VNI);
@@ -456,6 +481,21 @@ public:
   allStores() const {
     return SlotStores;
   }
+
+  /// The unique store to \p FI that reaches \p Idx on EVERY path (or
+  /// nullptr if no single store must-reaches: conflicting stores, or an
+  /// uninitialized path). Sound across loops: the per-block exit values
+  /// are computed with optimistic cycle handling; a conflicting store
+  /// anywhere on a cycle reaches the meet through its block's exit value.
+  const std::pair<Register, SlotIndex> *mustReachStoreAt(int FI,
+                                                         SlotIndex Idx);
+
+  /// True if no store to \p FI can execute strictly between \p From and
+  /// \p To on ANY path, where From's instruction dominates To's (a
+  /// reload feeding a statepoint operand). Checks From's block suffix,
+  /// To's block prefix, and every block on any in-between path,
+  /// including cycles re-entering To's block. Bounded; bails false.
+  bool noStoreBetween(int FI, SlotIndex From, SlotIndex To);
 };
 
 } // end anonymous namespace
@@ -1068,6 +1108,100 @@ bool GCValueness::slotExitValue(int FI, const MachineBasicBlock *MBB) {
   return V;
 }
 
+GCValueness::ReachVal GCValueness::exitStore(int FI,
+                                             const MachineBasicBlock *MBB) {
+  auto Key = std::make_pair(FI, MBB->getNumber());
+  auto It = ReachMemo.find(Key);
+  if (It != ReachMemo.end()) {
+    if (It->second.K == ReachVal::InProgress)
+      return {ReachVal::Any, nullptr};
+    return It->second;
+  }
+  ReachMemo[Key] = {ReachVal::InProgress, nullptr};
+  ReachVal V{ReachVal::Any, nullptr};
+  if (const auto *Last =
+          lastStoreBefore(FI, MBB, Indexes.getMBBEndIdx(MBB))) {
+    V = {ReachVal::One, Last};
+  } else if (MBB->pred_empty()) {
+    V = {ReachVal::None, nullptr};
+  } else {
+    for (const MachineBasicBlock *Pred : MBB->predecessors()) {
+      V = meetReach(V, exitStore(FI, Pred));
+      if (V.K == ReachVal::Bottom)
+        break;
+    }
+  }
+  ReachMemo[Key] = V;
+  return V;
+}
+
+const std::pair<Register, SlotIndex> *
+GCValueness::mustReachStoreAt(int FI, SlotIndex Idx) {
+  const MachineBasicBlock *MBB = Indexes.getMBBFromIndex(Idx);
+  if (!MBB)
+    return nullptr;
+  if (const auto *Last = lastStoreBefore(FI, MBB, Idx))
+    return Last;
+  if (MBB->pred_empty())
+    return nullptr;
+  ReachVal V{ReachVal::Any, nullptr};
+  for (const MachineBasicBlock *Pred : MBB->predecessors()) {
+    V = meetReach(V, exitStore(FI, Pred));
+    if (V.K == ReachVal::Bottom)
+      return nullptr;
+  }
+  return V.K == ReachVal::One ? V.St : nullptr;
+}
+
+bool GCValueness::noStoreBetween(int FI, SlotIndex From, SlotIndex To) {
+  auto Stores = storesOf(FI);
+  const MachineBasicBlock *FromBB = Indexes.getMBBFromIndex(From);
+  const MachineBasicBlock *ToBB = Indexes.getMBBFromIndex(To);
+  if (!FromBB || !ToBB)
+    return false;
+  auto AnyStoreIn = [&](const MachineBasicBlock *B, bool WholeBlock,
+                        SlotIndex Lo, SlotIndex Hi) {
+    for (const auto &[Src, StIdx] : Stores) {
+      if (Indexes.getMBBFromIndex(StIdx) != B)
+        continue;
+      if (WholeBlock || (Lo < StIdx && StIdx < Hi))
+        return true;
+    }
+    return false;
+  };
+  if (FromBB == ToBB) {
+    if (From < To)
+      return !AnyStoreIn(FromBB, false, From, To);
+    // Reload after the statepoint in the same block: between them only
+    // via a cycle; treat conservatively.
+    return false;
+  }
+  SlotIndex FromEnd = Indexes.getMBBEndIdx(FromBB);
+  SlotIndex ToBegin = Indexes.getMBBStartIdx(ToBB);
+  if (AnyStoreIn(FromBB, false, From, FromEnd) ||
+      AnyStoreIn(ToBB, false, ToBegin, To))
+    return false;
+  SmallPtrSet<const MachineBasicBlock *, 32> Visited;
+  SmallVector<const MachineBasicBlock *, 16> Work(ToBB->pred_begin(),
+                                                  ToBB->pred_end());
+  unsigned Budget = 128;
+  while (!Work.empty()) {
+    if (!Budget--)
+      return false;
+    const MachineBasicBlock *B = Work.pop_back_val();
+    if (B == FromBB || !Visited.insert(B).second)
+      continue;
+    // Whole-block check; a cycle re-entering To's block exposes its
+    // post-To stores too.
+    if (AnyStoreIn(B, /*WholeBlock=*/true, SlotIndex(), SlotIndex()))
+      return false;
+    if (B->pred_empty())
+      return false; // path to To bypassing From: shouldn't happen
+    Work.append(B->pred_begin(), B->pred_end());
+  }
+  return true;
+}
+
 bool GCValueness::slotValueAt(int FI, SlotIndex Idx) {
   const MachineBasicBlock *MBB = Indexes.getMBBFromIndex(Idx);
   if (!MBB)
@@ -1330,67 +1464,88 @@ static bool processStatepoint(MachineInstr &MI, MachineFunction &MF,
     SmallSet<int, 8> Added;
     for (int S : SlotsToAdd)
       Added.insert(S);
-    auto TryAddSlot = [&](int FI) {
+    // Normalize each listed operand backward to every (vreg, VNI) name
+    // the same runtime value goes by: through COPY defs, and through
+    // reload defs to the unique must-reaching store's source. Then any
+    // slot whose unique must-reaching store at this statepoint wrote one
+    // of those names provably holds the listed (gc) value on entry.
+    auto SlotLiveAcross = [&](int FI) {
       if (FI < 0 || ListedSlots.count(FI) || Added.count(FI))
-        return;
+        return false;
       if (!LS.hasInterval(FI))
-        return;
+        return false;
       const LiveInterval &LI = LS.getInterval(FI);
-      if (!LI.liveAt(InSlot) || !LI.liveAt(OutSlot))
-        return;
-      Added.insert(FI);
-      SlotsToAdd.push_back(FI);
+      return LI.liveAt(InSlot) && LI.liveAt(OutSlot);
     };
-    auto NoStoreBetween = [&](int FI, SlotIndex Lo, SlotIndex Hi) {
-      for (const auto &[Src, StIdx] : GCV.storesOf(FI))
-        if (Lo < StIdx && StIdx < Hi)
-          return false;
-      return true;
-    };
+    SmallSet<std::pair<int64_t, unsigned>, 16> Names;
     for (Register R : ListedRegsVec) {
       if (!R.isVirtual() || !LIS.hasInterval(R))
         continue;
       const VNInfo *VNI =
           LIS.getInterval(R).getVNInfoAt(Idx2.getRegSlot(true));
-      // Walk through same-block COPY defs (spiller-materialized copies).
-      for (unsigned Hop = 0; VNI && Hop < 3; ++Hop) {
-        MachineInstr *D = Indexes.getInstructionFromIndex(VNI->def);
-        if (!D || D->getParent() != MI.getParent())
+      for (unsigned Hop = 0; VNI && Hop < 6; ++Hop) {
+        if (!Names.insert({(int64_t)R.id(), VNI->id}).second)
           break;
+        MachineInstr *D = Indexes.getInstructionFromIndex(VNI->def);
+        if (!D)
+          break;
+        Register Src;
+        SlotIndex At = VNI->def;
         int FI;
-        if (Register LR = TII->isLoadFromStackSlot(*D, FI)) {
-          // Reload-fed operand: slot holds the listed value unless
-          // overwritten between the reload and the statepoint.
-          if (LR == R && NoStoreBetween(FI, VNI->def, Idx2))
-            TryAddSlot(FI);
+        if (D->isCopy() && !D->getOperand(0).getSubReg() &&
+            !D->getOperand(1).getSubReg()) {
+          Src = D->getOperand(1).getReg();
+        } else if (Register LR = TII->isLoadFromStackSlot(*D, FI)) {
+          if (LR != R)
+            break;
+          // Reload-fed operand: regardless of WHICH store filled the
+          // slot, its content still equals the operand at the
+          // statepoint if no store can intervene on any path.
+          if (SlotLiveAcross(FI) &&
+              GCV.noStoreBetween(FI, VNI->def, Idx2)) {
+            Added.insert(FI);
+            SlotsToAdd.push_back(FI);
+          }
+          const auto *St = GCV.mustReachStoreAt(FI, VNI->def);
+          if (!St)
+            break;
+          Src = St->first;
+          At = St->second;
+        } else {
           break;
         }
-        if (!D->isCopy() || D->getOperand(0).getSubReg() ||
-            D->getOperand(1).getSubReg())
-          break;
-        Register Src = D->getOperand(1).getReg();
         if (!Src.isVirtual() || !LIS.hasInterval(Src))
           break;
         R = Src;
-        VNI = LIS.getInterval(R).getVNInfoAt(VNI->def.getRegSlot(true));
+        const LiveInterval &LI = LIS.getInterval(R);
+        VNI = LI.getVNInfoAt(At.getRegSlot(true));
+        if (!VNI)
+          VNI = LI.getVNInfoBefore(At.getRegSlot());
       }
-      // Spilled operand: a same-block pre-statepoint store of this
-      // operand's value into a slot, not overwritten before the
-      // statepoint. R/VNI now name the operand's earliest same-block
-      // copy-chain source.
-      if (!VNI)
-        continue;
-      for (const auto &[FI2, Stores] : GCV.allStores())
-        for (const auto &[Src, StIdx] : Stores)
-          if (Src == R && StIdx < Idx2 &&
-              Indexes.getMBBFromIndex(StIdx) == MI.getParent() &&
-              NoStoreBetween(FI2, StIdx, Idx2)) {
-            const VNInfo *Q = LIS.getInterval(Src).getVNInfoAt(
-                StIdx.getRegSlot(true));
-            if (Q == VNI)
-              TryAddSlot(FI2);
-          }
     }
+    if (!Names.empty())
+      for (const auto &[FI2, Stores] : GCV.allStores()) {
+        (void)Stores;
+        if (FI2 < 0 || ListedSlots.count(FI2) || Added.count(FI2))
+          continue;
+        if (!LS.hasInterval(FI2))
+          continue;
+        const LiveInterval &LI = LS.getInterval(FI2);
+        if (!LI.liveAt(InSlot) || !LI.liveAt(OutSlot))
+          continue;
+        const auto *St = GCV.mustReachStoreAt(FI2, Idx2);
+        if (!St || !St->first.isVirtual() ||
+            !LIS.hasInterval(St->first))
+          continue;
+        const LiveInterval &SLI = LIS.getInterval(St->first);
+        const VNInfo *Q = SLI.getVNInfoAt(St->second.getRegSlot(true));
+        if (!Q)
+          Q = SLI.getVNInfoBefore(St->second.getRegSlot());
+        if (Q && Names.contains({(int64_t)St->first.id(), Q->id})) {
+          Added.insert(FI2);
+          SlotsToAdd.push_back(FI2);
+        }
+      }
   }
 
   // Value-home slots (ISel statepoint pool slots, exnroot allocas) have no
