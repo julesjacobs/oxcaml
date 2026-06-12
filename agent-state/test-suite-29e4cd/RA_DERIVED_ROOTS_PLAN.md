@@ -743,6 +743,30 @@ Flag: `-oxcaml-statepoint-inplace` (ISel-level), default off until proven.
   /tmp/repro-boot.args0). Also pending: describe_constructor verifier
   findings triage; rederive(v,0)->MOV peephole; the round-8 toolchain
   is HEAD of jujacobs/llvm-backend with all step-2 fixes committed.
+  STEP-2 REDESIGN (2026-06-12, commit e9d86fe1aa) after nine soak
+  rounds: IDENTITY RELOCATES ARE STRUCTURALLY UNSOUND — they erase the
+  statepoint as a value boundary at ISel, and the optimizer is designed
+  to find exactly the value equivalences that in-place updates
+  invalidate; patching leak-by-leak (LICM gate, rederive pins, remat
+  tags) is a blocklist against an allowlist problem. THE SOUND BOUNDARY
+  IS THE REGISTER COALESCER: before it, passes reason about VALUES
+  (need distinct SSA names across statepoints); from it on, the backend
+  reasons about LOCATIONS (where in-place is naturally correct). New
+  scheme: gc.relocate -> OXCAML_RELOCATE side-effecting pseudo
+  (RecordType::InPlace, llvm.aarch64.oxcaml.relocated); the new
+  OxCamlLowerRelocate pass converts it to a plain COPY right after
+  TwoAddress / before RegisterCoalescer; ranges never interfere (old
+  value dies where the new is born) so the coalescer merges them =
+  identical final code, zero cost, no hazards. The rederive PINS are
+  retired (wrapper no longer passes -rs4gc-oxcaml-inplace-rederive;
+  plain clone-sinking works again since clones reference the distinct
+  relocate). The rederive intrinsic itself, the LICM gate, and the
+  derived-remat attr fallback are kept as belt-and-braces. Verified on
+  all four historical crash-module replays: Regs' Array.init loop
+  recomputes its derived address in-loop from the slot-reloaded base
+  with no pins; free_vars reads the relocated root at +0. Soak (round
+  10, the first of the new design) in flight.
+
 - Step 3: delete dead machinery; THEN revisit exnroots/homes on the
   simplified base (gc-ness + RA could subsume exnroot slots later by
   modeling raise edges as clobber-all, forcing handler-live values into
