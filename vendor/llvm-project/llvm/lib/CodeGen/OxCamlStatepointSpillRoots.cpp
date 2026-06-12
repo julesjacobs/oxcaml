@@ -599,8 +599,14 @@ bool GCValueness::regValue(Register R, const VNInfo *VNI) {
         // x26-x28, whose raw copies can share a coalesced family with
         // gc vregs): the bit on such copies comes from the IR result
         // type via FunctionLoweringInfo.
+        // Only when the vreg has a single value number: the bit is
+        // per-register and ORs across coalescing, so on a merged
+        // register it may describe the OTHER range — a raw call result
+        // (untagged machine int) judged "value" gets forwarded by the
+        // GC if its bits alias the young space, corrupting it.
         bool BitTrust = false;
-        if (MF.getRegInfo().isOxCamlGCPtr(R)) {
+        if (MF.getRegInfo().isOxCamlGCPtr(R) &&
+            LIS.getInterval(R).getNumValNums() == 1) {
           StringRef SrcName = MF.getSubtarget()
                                   .getRegisterInfo()
                                   ->getName(Src.asMCReg());
@@ -650,7 +656,11 @@ bool GCValueness::regValue(Register R, const VNInfo *VNI) {
                  D->getOperand(1).isGlobal() &&
                  isa<GlobalVariable>(D->getOperand(1).getGlobal()) &&
                  D->getOperand(1).getGlobal()->getName().contains(
-                     "caml")) {
+                     "caml") &&
+                 !D->getOperand(1).getGlobal()->getName().contains(
+                     "header") &&
+                 !D->getOperand(1).getGlobal()->getName().contains(
+                     "frametable")) {
         // Materialized address of an OCaml static data block (MOVaddr /
         // LOADgot of a caml data symbol). Statics are values: the GC
         // classifies them NOT_MARKABLE and leaves them alone, and they

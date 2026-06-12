@@ -695,11 +695,23 @@ Flag: `-oxcaml-statepoint-inplace` (ISel-level), default off until proven.
   as a value, the GC forwarding it, and the program consuming the
   corrupted bits. Also still open: Datarepr.describe_constructor's 14
   slot findings + 1 derived finding from the verifier corpus run.
-  Next: forensic on the round-7 boot binary (the gca/gcb scan won't
-  work directly — the corrupted value is not a stale young pointer;
-  instead breakpoint the last GC and diff the LISTED slot contents
-  against value-plausibility, or bisect the new GCValueness rules via
-  flags/env).
+  ROUND 8: round 7's corruption FIXED by two over-listing narrowings
+  (bit-trust now requires a SINGLE-VNI vreg — the gc bit ORs across
+  coalescing and can describe the other merged range, so a raw call
+  result could be forwarded by the GC; the static-MOVaddr rule now
+  excludes "header"/"frametable" symbol names). New instance, back to
+  the staleness class (code=2 flip guard): Typedecl
+  fn[typedecl.ml:3519]_225_587 dies at ENTRY (+44) dereferencing a
+  STALE value loaded from its own closure environment ([x2+0x20]) —
+  PROPAGATED staleness; the origin is wherever the closure (or the env
+  value) crossed a GC unlisted, in some caller. Needs the full
+  forensic pipeline on the round-8 boot binary: GC count to the last
+  collection, gca/gcb memory scan for the stale value, gcwalk; tooling
+  in /tmp/gcscan2.py + /tmp/forensic-all.sh (adapt BIN/cwd to
+  _llvm_boot_context_build/default/boot_ocamlopt.exe, args
+  /tmp/repro-boot.args0). Also pending: describe_constructor verifier
+  findings triage; rederive(v,0)->MOV peephole; the round-8 toolchain
+  is HEAD of jujacobs/llvm-backend with all step-2 fixes committed.
 - Step 3: delete dead machinery; THEN revisit exnroots/homes on the
   simplified base (gc-ness + RA could subsume exnroot slots later by
   modeling raise edges as clobber-all, forcing handler-live values into
