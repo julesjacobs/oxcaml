@@ -910,6 +910,37 @@ Flag: `-oxcaml-statepoint-inplace` (ISel-level), default off until proven.
   modeling raise edges as clobber-all, forcing handler-live values into
   listed family slots — out of scope for now).
 
+## Verifier hardening (2026-06-12, after the default flip)
+
+GCValueness extracted to lib/CodeGen/OxCamlStatepointGCValueness.h
+(shared by the listing pass and OxCamlGCRootVerifier; definitions stay
+in OxCamlStatepointSpillRoots.cpp). The verifier's family-slot check
+now reuses the pass's exact value analysis plus three precision
+conditions: store dominance (slotValueAt is deliberately optimistic on
+storeless paths), and mayObserveContent — a forward may-analysis (does
+any load read the content crossing THIS statepoint, i.e. a store-free
+path statepoint->load exists). Kills the two big FP classes: entry-init
+liveness extensions (the init copy is dead in the gap) and
+entry-argument spills whose later loads are re-fed per-path.
+Corpus sweep: translcore/typedecl/parmatch/regs/consistbl 0 violations;
+typecore 1462 -> 12; datarepr 1 (the parked derived-vreg finding).
+The pass's sibling rule also gained three sound extensions en route:
+physical store-source matching (entry-argument spills: store of $xN
+matches an operand name defined by COPY $xN with no redefinition
+between), phys-to-phys matching (two spills of the same incoming
+register), and operand-name seeding from listed FOLDED slots and the
+gc-alloca section (root allocas are as authoritative as the pointer
+section).
+RESIDUAL TRIAGE (parked): the typecore 12 are five slots at the entry
+stack-check (caml_llvm_call_realloc_stack) and an early caml_call_gc in
+type_expect_ + two in report_error (cold error path). Key open
+question: does realloc_stack ever run a heap GC? Its statepoint lists
+only exnroots/trap state (stack-rebase semantics); if it cannot
+collect, unlisted heap values across it are benign by construction.
+The datarepr derived-vreg finding keeps its own parked context.
+lit 20 known, test-cc 0 after the pass extensions; cascade re-run
+launched.
+
 ## Validation gate (the full checklist used for the two landed commits)
 
 1. lit: `llvm-build/bin/llvm-lit -j8 test/CodeGen/AArch64/oxcaml*

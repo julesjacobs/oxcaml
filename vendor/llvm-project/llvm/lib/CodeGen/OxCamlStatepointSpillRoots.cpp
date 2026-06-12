@@ -53,9 +53,12 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/InitializePasses.h"
+
+#include "OxCamlStatepointGCValueness.h"
 #include "llvm/Support/Debug.h"
 
 using namespace llvm;
+using namespace llvm::oxcamlroots;
 
 #define DEBUG_TYPE "oxcaml-statepoint-spill-roots"
 
@@ -206,9 +209,9 @@ static void appendRootsToStatepoint(MachineInstr &MI, MachineFunction &MF,
 /// Walk the gc-pointer section of \p MI, recording stack slots that are
 /// already listed (folded operands) into \p ListedSlots and virtual-register
 /// gc operands into \p GCRegs (if non-null).
-static void walkGCPtrSection(const MachineInstr &MI,
-                             SmallSet<int, 16> &ListedSlots,
-                             SmallVectorImpl<Register> *GCRegs) {
+void llvm::oxcamlroots::walkGCPtrSection(
+    const MachineInstr &MI, SmallSet<int, 16> &ListedSlots,
+    SmallVectorImpl<Register> *GCRegs) {
   StatepointOpers SO(&MI);
   int FirstGCPtrIdx = SO.getFirstGCPtrIdx();
   if (FirstGCPtrIdx == -1)
@@ -231,8 +234,8 @@ static void walkGCPtrSection(const MachineInstr &MI,
 
 /// Walk the gc-alloca section of \p MI (exnroot slots and friends),
 /// recording the frame indices into \p AllocaFIs.
-static void walkAllocaSection(const MachineInstr &MI,
-                              SmallSet<int, 16> &AllocaFIs) {
+void llvm::oxcamlroots::walkAllocaSection(
+    const MachineInstr &MI, SmallSet<int, 16> &AllocaFIs) {
   StatepointOpers SO(&MI);
   unsigned AllocaCountIdx = SO.getNumAllocaIdx();
   unsigned NumAllocas = MI.getOperand(AllocaCountIdx).getImm();
@@ -259,10 +262,10 @@ static void walkAllocaSection(const MachineInstr &MI,
 /// never appears as a statepoint gc operand — the exnroot-only case is
 /// how values cross try-wrapped calls, and allocator re-spills of those
 /// loads were the unlisted-root miscompile found via typecore+young-flip.
-static void collectValueHomeFIs(ArrayRef<MachineInstr *> Statepoints,
-                                LiveStacks &LS,
-                                SmallSet<int, 16> &ListedSlotsAnywhere,
-                                SmallSet<int, 16> &ValueHomeFIs) {
+void llvm::oxcamlroots::collectValueHomeFIs(
+    ArrayRef<MachineInstr *> Statepoints, LiveStacks &LS,
+    SmallSet<int, 16> &ListedSlotsAnywhere,
+    SmallSet<int, 16> &ValueHomeFIs) {
   for (const MachineInstr *MI : Statepoints) {
     walkGCPtrSection(*MI, ListedSlotsAnywhere, nullptr);
     walkAllocaSection(*MI, ValueHomeFIs);
@@ -369,136 +372,6 @@ static bool isAllocFamilyStatepoint(const MachineInstr &MI,
       return !MachineOperand::clobbersPhysReg(RegMask, R);
   return false;
 }
-
-namespace {
-
-/// Flow-sensitive value identity. The gc bit and its COPY closure are
-/// per-register and therefore per-FAMILY: after coalescing and phi
-/// elimination one register can hold a gc value in one live range and an
-/// unrelated raw integer in another. Listing a location whose content at
-/// the statepoint is raw hands the GC a garbage root; if the bits alias a
-/// young-heap address the GC forwards garbage and corrupts the heap. This
-/// analysis decides VALUE-ness per live-range value (VNInfo): a location
-/// may be listed at a statepoint only if the value it holds THERE provably
-/// is an OCaml value.
-///
-/// Value sources (seeds): statepoint defs (relocated values, both register
-/// tied-defs and folded spill-slot defs); listed statepoint gc operands at
-/// their statepoint (RS4GC vouches for the content); loads from ISel
-/// statepoint pool slots (those slots only ever hold spilled gc values);
-/// entry-block copies of addrspace(1) formal arguments. Value-ness is
-/// inherited through COPYs, spill stores and reloads, and through phi
-/// joins when every incoming value is a value. Everything else (arithmetic
-/// results, immediates, ordinary loads) is not a value. Cycles are
-/// resolved optimistically, which is exact because every live cycle is
-/// entered through a dominating definition.
-class GCValueness {
-  using Key = std::pair<int64_t, unsigned>; // (reg id, VNI id)
-
-  MachineFunction &MF;
-  LiveIntervals &LIS;
-  LiveStacks &LS;
-  SlotIndexes &Indexes;
-  const TargetInstrInfo *TII;
-  const SmallSet<int, 16> &ValueHomeFIs;
-  DenseSet<Key> Seeds;
-  // 1 = value, 2 = not a value, 3 = in progress (optimistic).
-  DenseMap<Key, unsigned char> Memo;
-  // All explicit stores to each LiveStacks slot. Slot contents are judged
-  // per query point by REACHING stores, not per-FI: stack slot coloring
-  // runs before this pass and merges disjoint live ranges of different
-  // vregs into one frame index, so a single slot routinely holds gc values
-  // on some ranges and raw data on others. The whole-slot summary both
-  // under-lists (a live gc value skipped because an unrelated range stored
-  // raw data — a missed root, stale after GC) and over-lists.
-  DenseMap<int, SmallVector<std::pair<Register, SlotIndex>, 4>> SlotStores;
-  // All reloads from each LiveStacks slot, for consumer evidence.
-  DenseMap<int, SmallVector<std::pair<Register, SlotIndex>, 4>> SlotLoads;
-  // (FI, MBB number) -> value-ness of the slot content at block exit.
-  // 1 = value, 2 = not a value, 3 = in progress (optimistic).
-  DenseMap<std::pair<int, int>, unsigned char> SlotExitMemo;
-
-  // Must-reaching-store lattice for mustReachStoreAt: Any agrees with
-  // everything (cycle-optimistic), None means an uninitialized path
-  // reaches (kills must), One is a unique store, Bottom is a conflict.
-  struct ReachVal {
-    enum Kind { Any, None, One, Bottom, InProgress } K = Any;
-    const std::pair<Register, SlotIndex> *St = nullptr;
-  };
-  DenseMap<std::pair<int, int>, ReachVal> ReachMemo;
-
-  static ReachVal meetReach(ReachVal A, ReachVal B) {
-    if (A.K == ReachVal::Any)
-      return B;
-    if (B.K == ReachVal::Any)
-      return A;
-    if (A.K == ReachVal::Bottom || B.K == ReachVal::Bottom)
-      return {ReachVal::Bottom, nullptr};
-    if (A.K == ReachVal::None && B.K == ReachVal::None)
-      return A;
-    if (A.K == ReachVal::One && B.K == ReachVal::One && A.St == B.St)
-      return A;
-    return {ReachVal::Bottom, nullptr};
-  }
-
-  ReachVal exitStore(int FI, const MachineBasicBlock *MBB);
-
-  void collectAccesses();
-  bool isAllocCursor(Register Src, SlotIndex At);
-  bool regValue(Register R, const VNInfo *VNI);
-  bool storeValue(int FI, Register Src, SlotIndex StIdx);
-  bool physRegHoldsValueAt(Register Src, MachineInstr *At);
-  const std::pair<Register, SlotIndex> *
-  lastStoreBefore(int FI, const MachineBasicBlock *MBB, SlotIndex Before);
-  bool slotExitValue(int FI, const MachineBasicBlock *MBB);
-
-  /// All-predecessors-are-values for a phi-defined VNI of \p R.
-  bool phiValue(Register R, const LiveInterval &LI, const VNInfo *VNI);
-
-public:
-  GCValueness(MachineFunction &MF, ArrayRef<MachineInstr *> Statepoints,
-              const SmallSet<int, 16> &ValueHomeFIs, LiveIntervals &LIS,
-              LiveStacks &LS, SlotIndexes &Indexes,
-              const TargetInstrInfo *TII);
-
-  bool regValueAt(Register R, SlotIndex Idx) {
-    if (!LIS.hasInterval(R))
-      return false;
-    const VNInfo *VNI = LIS.getInterval(R).getVNInfoAt(Idx);
-    return VNI && regValue(R, VNI);
-  }
-
-  bool slotValueAt(int FI, SlotIndex Idx);
-
-  ArrayRef<std::pair<Register, SlotIndex>> storesOf(int FI) const {
-    auto It = SlotStores.find(FI);
-    return It == SlotStores.end()
-               ? ArrayRef<std::pair<Register, SlotIndex>>()
-               : ArrayRef<std::pair<Register, SlotIndex>>(It->second);
-  }
-
-  const DenseMap<int, SmallVector<std::pair<Register, SlotIndex>, 4>> &
-  allStores() const {
-    return SlotStores;
-  }
-
-  /// The unique store to \p FI that reaches \p Idx on EVERY path (or
-  /// nullptr if no single store must-reaches: conflicting stores, or an
-  /// uninitialized path). Sound across loops: the per-block exit values
-  /// are computed with optimistic cycle handling; a conflicting store
-  /// anywhere on a cycle reaches the meet through its block's exit value.
-  const std::pair<Register, SlotIndex> *mustReachStoreAt(int FI,
-                                                         SlotIndex Idx);
-
-  /// True if no store to \p FI can execute strictly between \p From and
-  /// \p To on ANY path, where From's instruction dominates To's (a
-  /// reload feeding a statepoint operand). Checks From's block suffix,
-  /// To's block prefix, and every block on any in-between path,
-  /// including cycles re-entering To's block. Bounded; bails false.
-  bool noStoreBetween(int FI, SlotIndex From, SlotIndex To);
-};
-
-} // end anonymous namespace
 
 GCValueness::GCValueness(MachineFunction &MF,
                          ArrayRef<MachineInstr *> Statepoints,
@@ -1153,6 +1026,58 @@ GCValueness::mustReachStoreAt(int FI, SlotIndex Idx) {
   return V.K == ReachVal::One ? V.St : nullptr;
 }
 
+bool GCValueness::mayObserveContent(int FI, SlotIndex At) {
+  auto Stores = storesOf(FI);
+  auto Loads = SlotLoads.find(FI);
+  if (Loads == SlotLoads.end())
+    return false;
+  const MachineBasicBlock *AtBB = Indexes.getMBBFromIndex(At);
+  if (!AtBB)
+    return true;
+  auto FirstStoreAfterIn = [&](const MachineBasicBlock *B, SlotIndex Lo) {
+    SlotIndex Best;
+    for (const auto &[Src, StIdx] : Stores)
+      if (Indexes.getMBBFromIndex(StIdx) == B && Lo < StIdx &&
+          (!Best.isValid() || StIdx < Best))
+        Best = StIdx;
+    return Best;
+  };
+  auto LoadIn = [&](const MachineBasicBlock *B, SlotIndex Lo,
+                    SlotIndex Hi) {
+    for (const auto &[Dst, LIdx] : Loads->second)
+      if (Indexes.getMBBFromIndex(LIdx) == B && Lo < LIdx &&
+          (!Hi.isValid() || LIdx < Hi))
+        return true;
+    return false;
+  };
+  // In At's block: a load before the next store observes the content.
+  SlotIndex Kill = FirstStoreAfterIn(AtBB, At);
+  if (LoadIn(AtBB, At, Kill))
+    return true;
+  if (Kill.isValid())
+    return false; // killed in this block before any load; no escape
+  // Forward BFS through store-free prefixes.
+  SmallPtrSet<const MachineBasicBlock *, 32> Visited;
+  SmallVector<const MachineBasicBlock *, 16> Work(AtBB->succ_begin(),
+                                                  AtBB->succ_end());
+  unsigned Budget = 256;
+  while (!Work.empty()) {
+    if (!Budget--)
+      return true; // bail conservative: assume observable
+    const MachineBasicBlock *B = Work.pop_back_val();
+    if (!Visited.insert(B).second)
+      continue;
+    SlotIndex Start = Indexes.getMBBStartIdx(B);
+    SlotIndex BKill = FirstStoreAfterIn(B, Start);
+    if (LoadIn(B, Start, BKill))
+      return true;
+    if (BKill.isValid())
+      continue; // content killed in B before any load
+    Work.append(B->succ_begin(), B->succ_end());
+  }
+  return false;
+}
+
 bool GCValueness::noStoreBetween(int FI, SlotIndex From, SlotIndex To) {
   auto Stores = storesOf(FI);
   const MachineBasicBlock *FromBB = Indexes.getMBBFromIndex(From);
@@ -1478,14 +1403,16 @@ static bool processStatepoint(MachineInstr &MI, MachineFunction &MF,
       return LI.liveAt(InSlot) && LI.liveAt(OutSlot);
     };
     SmallSet<std::pair<int64_t, unsigned>, 16> Names;
-    for (Register R : ListedRegsVec) {
-      if (!R.isVirtual() || !LIS.hasInterval(R))
-        continue;
-      const VNInfo *VNI =
-          LIS.getInterval(R).getVNInfoAt(Idx2.getRegSlot(true));
+    SmallVector<const VNInfo *, 8> NameVNIs;
+    // Physical registers known to carry a listed value into a store:
+    // (physreg, store index) of listed slots' must-reach stores whose
+    // source never got a vreg (entry-argument spills).
+    SmallVector<std::pair<Register, SlotIndex>, 4> PhysNames;
+    auto AddNameChain = [&](Register R, const VNInfo *VNI) {
       for (unsigned Hop = 0; VNI && Hop < 6; ++Hop) {
         if (!Names.insert({(int64_t)R.id(), VNI->id}).second)
           break;
+        NameVNIs.push_back(VNI);
         MachineInstr *D = Indexes.getInstructionFromIndex(VNI->def);
         if (!D)
           break;
@@ -1522,6 +1449,33 @@ static bool processStatepoint(MachineInstr &MI, MachineFunction &MF,
         if (!VNI)
           VNI = LI.getVNInfoBefore(At.getRegSlot());
       }
+    };
+    for (Register R : ListedRegsVec) {
+      if (!R.isVirtual() || !LIS.hasInterval(R))
+        continue;
+      AddNameChain(R, LIS.getInterval(R).getVNInfoAt(Idx2.getRegSlot(true)));
+    }
+    // Listed FOLDED slot operands name their content too: RS4GC vouches
+    // for whatever the slot's must-reach store wrote. The gc-alloca
+    // section (volatile root allocas, exnroot homes) is equally
+    // authoritative: argument values live there from function entry
+    // while RA spill slots duplicate them as unlisted siblings.
+    SmallSet<int, 16> NamedSlots = ListedSlots;
+    walkAllocaSection(MI, NamedSlots);
+    for (int FI : NamedSlots) {
+      const auto *St = GCV.mustReachStoreAt(FI, Idx2);
+      if (!St)
+        continue;
+      if (St->first.isVirtual() && LIS.hasInterval(St->first)) {
+        const LiveInterval &LI = LIS.getInterval(St->first);
+        const VNInfo *Q = LI.getVNInfoAt(St->second.getRegSlot(true));
+        if (!Q)
+          Q = LI.getVNInfoBefore(St->second.getRegSlot());
+        if (Q)
+          AddNameChain(St->first, Q);
+      } else if (St->first.isPhysical()) {
+        PhysNames.push_back(*St);
+      }
     }
     if (!Names.empty())
       for (const auto &[FI2, Stores] : GCV.allStores()) {
@@ -1534,14 +1488,83 @@ static bool processStatepoint(MachineInstr &MI, MachineFunction &MF,
         if (!LI.liveAt(InSlot) || !LI.liveAt(OutSlot))
           continue;
         const auto *St = GCV.mustReachStoreAt(FI2, Idx2);
-        if (!St || !St->first.isVirtual() ||
-            !LIS.hasInterval(St->first))
+        if (!St)
           continue;
-        const LiveInterval &SLI = LIS.getInterval(St->first);
-        const VNInfo *Q = SLI.getVNInfoAt(St->second.getRegSlot(true));
-        if (!Q)
-          Q = SLI.getVNInfoBefore(St->second.getRegSlot());
-        if (Q && Names.contains({(int64_t)St->first.id(), Q->id})) {
+        bool Match = false;
+        if (St->first.isVirtual() && LIS.hasInterval(St->first)) {
+          const LiveInterval &SLI = LIS.getInterval(St->first);
+          const VNInfo *Q = SLI.getVNInfoAt(St->second.getRegSlot(true));
+          if (!Q)
+            Q = SLI.getVNInfoBefore(St->second.getRegSlot());
+          Match = Q && Names.contains({(int64_t)St->first.id(), Q->id});
+        } else if (St->first.isPhysical()) {
+          // Raw physreg store source: the spiller's fold of an incoming
+          // argument (str $xN at function entry). It carries the listed
+          // value if some operand name's def is a COPY of the same
+          // physical register in the same block with no redefinition of
+          // that register in between.
+          MachineInstr *StMI = Indexes.getInstructionFromIndex(St->second);
+          const TargetRegisterInfo *TRI =
+              MF.getSubtarget().getRegisterInfo();
+          for (const VNInfo *NV : NameVNIs) {
+            if (NV->isPHIDef())
+              continue;
+            MachineInstr *D = Indexes.getInstructionFromIndex(NV->def);
+            if (!D || !D->isCopy() || !StMI ||
+                D->getParent() != StMI->getParent())
+              continue;
+            if (D->getOperand(1).getReg() != St->first ||
+                D->getOperand(1).getSubReg())
+              continue;
+            MachineInstr *Lo = D, *Hi = StMI;
+            if (Indexes.getInstructionIndex(*Hi) <
+                Indexes.getInstructionIndex(*Lo))
+              std::swap(Lo, Hi);
+            bool Redefined = false;
+            unsigned Steps = 0;
+            for (auto It = std::next(Lo->getIterator());
+                 It != Hi->getIterator() && Steps < 64; ++It, ++Steps)
+              if (It->modifiesRegister(St->first, TRI)) {
+                Redefined = true;
+                break;
+              }
+            if (Steps >= 64)
+              continue;
+            if (!Redefined) {
+              Match = true;
+              break;
+            }
+          }
+          if (!Match) {
+            // Two spills of the same incoming physreg (e.g. an argument
+            // stored to a listed slot AND this one): same value when no
+            // redefinition separates the stores in their shared block.
+            for (const auto &[P, PIdx] : PhysNames) {
+              if (P != St->first)
+                continue;
+              MachineInstr *A = Indexes.getInstructionFromIndex(PIdx);
+              if (!A || !StMI || A->getParent() != StMI->getParent())
+                continue;
+              MachineInstr *Lo = A, *Hi = StMI;
+              if (Indexes.getInstructionIndex(*Hi) <
+                  Indexes.getInstructionIndex(*Lo))
+                std::swap(Lo, Hi);
+              bool Redefined = false;
+              unsigned Steps = 0;
+              for (auto It = std::next(Lo->getIterator());
+                   It != Hi->getIterator() && Steps < 64; ++It, ++Steps)
+                if (It->modifiesRegister(P, TRI)) {
+                  Redefined = true;
+                  break;
+                }
+              if (Steps < 64 && !Redefined) {
+                Match = true;
+                break;
+              }
+            }
+          }
+        }
+        if (Match) {
           Added.insert(FI2);
           SlotsToAdd.push_back(FI2);
         }

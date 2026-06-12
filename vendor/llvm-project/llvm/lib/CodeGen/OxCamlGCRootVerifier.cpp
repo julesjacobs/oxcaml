@@ -52,6 +52,9 @@
 #include "llvm/CodeGen/VirtRegMap.h"
 #include "llvm/IR/Function.h"
 #include "llvm/InitializePasses.h"
+
+#include "OxCamlStatepointGCValueness.h"
+#include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/Support/Debug.h"
 
 using namespace llvm;
@@ -98,6 +101,7 @@ public:
     AU.addRequired<LiveIntervals>();
     AU.addRequired<LiveStacks>();
     AU.addRequired<VirtRegMap>();
+    AU.addRequired<MachineDominatorTree>();
     AU.setPreservesAll();
     MachineFunctionPass::getAnalysisUsage(AU);
   }
@@ -300,11 +304,22 @@ bool OxCamlGCRootVerifier::runOnMachineFunction(MachineFunction &MF) {
   LiveStacks &LS = getAnalysis<LiveStacks>();
   VirtRegMap &VRM = getAnalysis<VirtRegMap>();
   SlotIndexes &Indexes = getAnalysis<SlotIndexes>();
+  MachineDominatorTree &MDT = getAnalysis<MachineDominatorTree>();
   const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
   const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
 
   DenseSet<Register> GCRegs, DerivedRegs;
   computeGCAndDerivedSets(MF, Statepoints, LS, TII, GCRegs, DerivedRegs);
+
+  // The same flow-sensitive value identity the listing pass uses: a
+  // family slot's content at a specific statepoint may be a raw range of
+  // a colored slot, which the pass deliberately does not list. Only a
+  // PROVABLE gc value left unlisted is a real violation.
+  SmallSet<int, 16> VHListedAnywhere, ValueHomeFIs;
+  oxcamlroots::collectValueHomeFIs(Statepoints, LS, VHListedAnywhere,
+                                   ValueHomeFIs);
+  oxcamlroots::GCValueness GCV(MF, Statepoints, ValueHomeFIs, LIS, LS,
+                               Indexes, TII);
 
   // Value connectivity: virtual registers and spill slots that hold copies
   // of the same value, connected by COPYs, spill stores/reloads, and the
@@ -453,9 +468,39 @@ bool OxCamlGCRootVerifier::runOnMachineFunction(MachineFunction &MF) {
         continue;
       if (!LiveAcross(LS.getInterval(Slot)))
         continue;
+      bool Dominated = false;
+      for (const auto &[Src, StIdx] : GCV.storesOf(Slot)) {
+        MachineInstr *St = Indexes.getInstructionFromIndex(StIdx);
+        if (St && MDT.dominates(St, MI)) {
+          Dominated = true;
+          break;
+        }
+      }
+      // A slot whose content crossing THIS statepoint is never read is
+      // not a hazard even when unlisted: the entry-init machinery makes
+      // slots live from function entry, but the init copy is dead in
+      // the gap before the first real store. Benign when every load of
+      // the slot must-reads a store sequenced after this statepoint.
+      bool ContentObserved = GCV.mayObserveContent(Slot, Idx);
+      // The listing pass requires a dominating store (or an entry
+      // init); slotValueAt is deliberately optimistic on storeless
+      // paths, so an undominated slot is not provably-value-on-entry.
+      if (!ContentObserved || !Dominated ||
+          !GCV.slotValueAt(Slot, InSlot)) {
+        // Content here is not provably a gc value (raw range of a
+        // colored slot, or an unprovable producer): the listing pass
+        // skips these deliberately. Visibility without the violation.
+        errs() << "[oxgc-verify-info] " << MF.getName()
+               << ": statepoint ID " << StatepointOpers(MI).getID()
+               << " at " << Idx << ": family slot %stack." << Slot
+               << " live across, unlisted, content not provably a"
+               << " value\n";
+        continue;
+      }
       ++NumUnlistedSlotRoots;
       Report(*MI) << "gc family spill slot %stack." << Slot
-                  << " live across but not listed\n";
+                  << " live across holding a provable gc value but not"
+                  << " listed\n";
     }
 
     for (Register R : DerivedRegs) {
