@@ -695,6 +695,27 @@ Flag: `-oxcaml-statepoint-inplace` (ISel-level), default off until proven.
   as a value, the GC forwarding it, and the program consuming the
   corrupted bits. Also still open: Datarepr.describe_constructor's 14
   slot findings + 1 derived finding from the verifier corpus run.
+  ROUND 9 (open): round 8's fixes (typed-p1 provenance bit replacing
+  the single-VNI narrowing + phi-aware seeding of listed operands,
+  commit e1ae80bb88; verified fixing Typedecl.transl_type_decl's
+  unlisted loop-carried family slot) RE-EXPOSED the round-7 corruption:
+  Types.sort_of_signature_item (types.ml:743), wild ODD address
+  0x67fffffffffffff, EXC code=1 — the program dereferenced a tagged
+  immediate where a pointer was expected. The round-7 narrowings had
+  DODGED this, not fixed it (listing patterns shifted). Hypotheses, in
+  order: (a) appendRootsToStatepoint's operand-index arithmetic is
+  wrong for IN-PLACE statepoints whose existing gc sections mix plain
+  REGISTER entries (1 operand) with FI quads (4 operands) — a skewed
+  gc-map would make the runtime read/write relocated values at wrong
+  frame offsets, producing exactly this immediate-for-pointer
+  confusion; audit PairsEndInTail/MapCountIdx arithmetic against a
+  mixed-section statepoint, and compare a frametable descriptor decoded
+  from the binary against the MIR listing. (b) an over-listing whereby
+  the GC rewrote a slot the program used as raw data. Forensic entry:
+  GC-count the round-9 boot binary, gcwalk the last GC, decode the
+  Types frames' descriptors for implausible offsets. Toolchain = HEAD
+  (e1ae80bb88).
+
   ROUND 8: round 7's corruption FIXED by two over-listing narrowings
   (bit-trust now requires a SINGLE-VNI vreg — the gc bit ORs across
   coalescing and can describe the other merged range, so a raw call
