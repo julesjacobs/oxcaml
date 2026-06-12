@@ -712,9 +712,18 @@ Flag: `-oxcaml-statepoint-inplace` (ISel-level), default off until proven.
   not operand offsets; the count fix-up models 4-op quads vs 1-op
   registers; FixupStatepointCallerSaved rebuilds consistently). Still
   worth one binary-vs-MIR descriptor diff for belt and braces. (b) an over-listing whereby
-  the GC rewrote a slot the program used as raw data. Forensic entry:
-  GC-count the round-9 boot binary, gcwalk the last GC, decode the
-  Types frames' descriptors for implausible offsets. Toolchain = HEAD
+  the GC rewrote a slot the program used as raw data. Forensic so far:
+  10242 GCs to the crash. CRASH DECODED: sort_of_signature_item's
+  ARGUMENT x0 = 0x0680000000000007 — a tagged immediate with a
+  jkind/sort-style payload where a Sig_* block pointer belonged; the
+  fault is the Tag_val read at x0-8. The corruption is UPSTREAM: a
+  sort-encoded immediate sits where a pointer should be (a signature
+  list cell or record field), consistent with a GC relocation landing
+  in a wrong slot or a mislisted root holding raw sort data that the
+  GC rewrote. Next: locate where the bad immediate enters — walk the
+  OCaml stack at the crash for the caller chain (the C-level caller is
+  a heap closure), find the corrupted structure, then bisect the GC
+  number where it goes bad / watchpoint the field. Toolchain = HEAD
   (e1ae80bb88).
 
   ROUND 8: round 7's corruption FIXED by two over-listing narrowings
