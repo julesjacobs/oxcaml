@@ -675,9 +675,31 @@ Flag: `-oxcaml-statepoint-inplace` (ISel-level), default off until proven.
   (sp+8) crossed the statepoint UNLISTED because GCValueness did not
   recognize OXCAML_REDERIVE defs as values (the pin made producer
   evidence WORSE). Fixed: regValue accepts OXCAML_REDERIVE defs (by
-  TII opcode name; lib/CodeGen cannot name AArch64 opcodes). Round 6
-  soaking. PERF NOTE before benchmarking: rederive(v,0) expands to
+  TII opcode name; lib/CodeGen cannot name AArch64 opcodes).
+  PERF NOTE before benchmarking: rederive(v,0) expands to
   MOV #0 + ADD; fold the zero-offset case to a plain MOV.
+  ROUND 6 (was symbolized as "Consistbl__code_end" — the crash actually
+  lived in DATAREPR; image lookup past code_end lies, check `nm` for
+  the enclosing function): Datarepr.free_vars — COMBINED-ALLOCATION
+  sub-blocks (is_base_value geps over a sibling pointer) re-derived
+  from the unlisted sibling after the call (post-call load addressed
+  pin+48 over the dead closure). Fixed: is_base_value geps are pinned
+  via rederive(v,0) exactly like inttoptr alloc results (commit
+  f7f57ff5e7). Verified: free_vars loads the relocated root at +0.
+  ROUND 7 (open, NEW FAILURE CLASS): boot-flip now dies in
+  Types.sort_of_signature_item (types.ml:743) on a WILD address
+  (0x67fffffffffffff, EXC code=1 — NOT the flip guard). This is
+  CORRUPTION, not staleness: suspect OVER-LISTING — one of the new
+  value-evidence rules (odd immediates / static MOVaddr / rederive
+  trust / copy-source seeding / x0-x15 bit trust) classifying RAW data
+  as a value, the GC forwarding it, and the program consuming the
+  corrupted bits. Also still open: Datarepr.describe_constructor's 14
+  slot findings + 1 derived finding from the verifier corpus run.
+  Next: forensic on the round-7 boot binary (the gca/gcb scan won't
+  work directly — the corrupted value is not a stale young pointer;
+  instead breakpoint the last GC and diff the LISTED slot contents
+  against value-plausibility, or bisect the new GCValueness rules via
+  flags/env).
 - Step 3: delete dead machinery; THEN revisit exnroots/homes on the
   simplified base (gc-ness + RA could subsume exnroot slots later by
   modeling raise edges as clobber-all, forcing handler-live values into
