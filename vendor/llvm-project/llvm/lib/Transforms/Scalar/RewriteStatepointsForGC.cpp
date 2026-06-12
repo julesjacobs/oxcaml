@@ -521,6 +521,12 @@ using ExplicitRootHomeMapTy =
 /// it.  A ValueMap keeps entries coherent across the RAUWs and deletions of
 /// statepoint rewriting, so the mapping stays usable in the late pass.
 using OxCamlValueRootSlotMapTy = ValueMap<Value *, AllocaInst *>;
+// Opacity barriers created for SSA exception roots, by rooted value. A
+// value may have one barrier per recovery region; reuse requires the
+// barrier's block to dominate the consuming region. ValueMap so entries
+// follow statepoint rewriting like SlotForValue.
+using OxCamlValueBarrierMapTy =
+    ValueMap<Value *, SmallVector<Instruction *, 2>>;
 
 } // end anonymous namespace
 
@@ -3541,11 +3547,24 @@ static bool oxcamlRootSlotHasSingleDefiningStore(const AllocaInst *Slot) {
   return true;
 }
 
+static void oxcamlCheckSelfBarriers(Function &F, const char *Tag) {
+  if (!getenv("OXSR_DEBUG_EXNPHI"))
+    return;
+  for (Instruction &I : instructions(F))
+    if (auto *CI = dyn_cast<CallInst>(&I))
+      if (CI->getIntrinsicID() == Intrinsic::aarch64_oxcaml_relocated &&
+          CI->getArgOperand(0) == CI) {
+        errs() << "[exnphi] SELF barrier after " << Tag << " in "
+               << F.getName() << "\n";
+      }
+}
+
 static bool materializeOxCamlExceptionRootSlots(
     Function &F, DominatorTree &DT, ExplicitRootSlotMapTy &ExplicitRootSlots,
     ExplicitExceptionRootCallSetTy &ExplicitExceptionRootCalls,
     ExplicitRootHomeMapTy &ExplicitRootHomes,
-    OxCamlValueRootSlotMapTy &SlotForValue, DefiningValueMapTy &DVCache,
+    OxCamlValueRootSlotMapTy &SlotForValue,
+    OxCamlValueBarrierMapTy &BarrierForValue, DefiningValueMapTy &DVCache,
     IsKnownBaseMapTy &KnownBases) {
   if (!isOxCamlFunction(F))
     return false;
@@ -4138,17 +4157,31 @@ static bool materializeOxCamlExceptionRootSlots(
       return Base;
     };
 
-    DenseMap<Value *, Instruction *> RecoveryBarrierForValue;
+    auto FindDominatingBarrier = [&](Value *RootValue) -> Instruction * {
+      auto It = BarrierForValue.find(RootValue);
+      if (It == BarrierForValue.end())
+        return nullptr;
+      for (Instruction *B : It->second) {
+        // Region rewrites can retarget a barrier's operand while the
+        // map key stays: such an entry no longer barriers this value
+        // (reusing it can even make a phi replacement self-referential).
+        if (cast<CallInst>(B)->getArgOperand(0) != RootValue)
+          continue;
+        if (B->getParent() == &BB || DT.dominates(B->getParent(), &BB))
+          return B;
+      }
+      return nullptr;
+    };
     auto GetOrCreateRecoveryBarrier =
         [&](Value *RootValue) -> Instruction * {
-      if (Instruction *B = RecoveryBarrierForValue.lookup(RootValue))
+      if (Instruction *B = FindDominatingBarrier(RootValue))
         return B;
       Function *Decl = Intrinsic::getDeclaration(
           F.getParent(), Intrinsic::aarch64_oxcaml_relocated);
       CallInst *Barrier = RecoverBuilder.CreateCall(
           Decl, {RootValue},
           suffixed_name_or(RootValue, ".exnssa", "exnssa"));
-      RecoveryBarrierForValue[RootValue] = Barrier;
+      BarrierForValue[RootValue].push_back(Barrier);
       return Barrier;
     };
 
@@ -4207,6 +4240,7 @@ static bool materializeOxCamlExceptionRootSlots(
     };
 
     SmallVector<PHINode *, 8> HandlerLivePhisToErase;
+    oxcamlCheckSelfBarriers(F, "pre-phi-loop");
     for (PHINode *PN : HandlerLivePhis) {
       Value *RootValue;
       if (Value *Common = CollapseBarrierPhi(PN)) {
@@ -4218,6 +4252,7 @@ static bool materializeOxCamlExceptionRootSlots(
         // a barrier in the recovery block does not dominate a
         // trampoline phi's uses.
         if (OxCamlExnSSARoots && PN->getParent() == &BB &&
+            RootValue != PN &&
             isHandledGCPointerType(RootValue->getType()) &&
             RootValue->getType()->isPointerTy() &&
             !SlotForValue.lookup(RootValue)) {
@@ -4281,7 +4316,8 @@ static bool materializeOxCamlExceptionRootSlots(
       // memory homes, and the barrier-extended live range makes the
       // register allocator spill it AGAIN next to its own slot.
       bool UseSSA = OxCamlExnSSARoots &&
-                    (HasNormalPathUse || OxCamlExnSSARootsAll) &&
+                    (HasNormalPathUse || OxCamlExnSSARootsAll ||
+                     FindDominatingBarrier(RootValue)) &&
                     !SlotForValue.lookup(RootValue) &&
                     isHandledGCPointerType(RootValue->getType()) &&
                     RootValue->getType()->isPointerTy();
@@ -4339,6 +4375,7 @@ static bool materializeOxCamlExceptionRootSlots(
       DVCache.clear();
       KnownBases.clear();
     }
+    oxcamlCheckSelfBarriers(F, "values-loop");
 
     if (HasStrictRecoveryOnlyRegion) {
       GCPtrLivenessData BoundaryLiveness;
@@ -4773,9 +4810,11 @@ static bool materializeOxCamlExceptionRootSlots(
       }
     }
 
+    oxcamlCheckSelfBarriers(F, "region-end");
     for (PHINode *PN : HandlerLivePhisToErase)
       if (PN->use_empty())
         PN->eraseFromParent();
+    oxcamlCheckSelfBarriers(F, "phi-erase");
   }
 
   if (Changed) {
@@ -8520,6 +8559,7 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
   ExplicitExceptionRootCallSetTy ExplicitExceptionRootCalls;
   ExplicitRootHomeMapTy ExplicitRootHomes;
   OxCamlValueRootSlotMapTy SlotForValue;
+  OxCamlValueBarrierMapTy BarrierForValue;
   bool UseUnifiedOxCamlVolatileRoots =
       UseOxCamlVolatileRootAllocas && isOxCamlFunction(F);
   if (rematerializeOxCamlDerivedGEPsAtUses(F))
@@ -8530,7 +8570,7 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
     materializeOxCamlExceptionRootSlots(F, DT, ExplicitRootSlots,
                                         ExplicitExceptionRootCalls,
                                         ExplicitRootHomes, SlotForValue,
-                                        DVCache, KnownBases);
+                                        BarrierForValue, DVCache, KnownBases);
   SmallVector<Value *, 16> AllExplicitRootSlots;
   collectExplicitRootSlots(ExplicitRootSlots, AllExplicitRootSlots);
   if (isOxCamlFunction(F)) {
@@ -8822,7 +8862,8 @@ static bool insertParsePoints(Function &F, DominatorTree &DT,
     // reloads of an existing slot resolve back to it here.
     ChangedLateRoots = materializeOxCamlExceptionRootSlots(
         F, DT, LateExplicitRootSlots, LateExplicitExceptionRootCalls,
-        LateExplicitRootHomes, SlotForValue, DVCache, KnownBases);
+        LateExplicitRootHomes, SlotForValue, BarrierForValue, DVCache,
+        KnownBases);
     SmallVector<Value *, 16> LateAllExplicitRootSlots;
     collectExplicitRootSlots(LateExplicitRootSlots, LateAllExplicitRootSlots);
     ChangedLateRoots |=
