@@ -568,6 +568,23 @@ Flag: `-oxcaml-statepoint-inplace` (ISel-level), default off until proven.
   TwoAddress/PHIElim class, just more visible with more listed register
   operands. Flag-on validation: ../clang-wrapper-inplace (adds the
   -mllvm flag for `-x ir` compiles only) + /tmp/full-cascade-inplace.sh.
+  FLAG-ON GATE GREEN 2026-06-12: stage1+stage2 builds, boot-flip 3/3,
+  stage1-binary flip-stress 16/16 modules. First soak attempt exposed a
+  PRE-EXISTING latent bug instead: OXCAML_PUSH_TRAP[_DEAD] declared
+  Size=16 for a 5-instruction (20-byte) expansion, so
+  AArch64CompressJumpTables undercounted and picked byte jump tables
+  that overflowed at assembly ("value evaluated as 256 out of range",
+  simplify_named.ml) — fixed (commit 0b10cf2f64), benefits default mode
+  too. Perf: statistically neutral, as predicted once slot-only itself
+  proved nearly free — compiler bench round-total 0.9580 vs 0.9633
+  slot-only (sub-1% better), minibench geomean 0.8934 vs 0.8870
+  (sub-1% worse, individual swings are layout noise: fft/bdd -9%,
+  quicksort +4%). Step 1's value is the proven in-place semantics and
+  the deleted hot-path slot residency, not throughput; the structural
+  win (pool machinery deletion, double-spill elimination) is step 2.
+  NOT yet default: ocamltest under the flag not run, and the
+  allocation.ml expect output differs (no spills) — flipping the
+  default needs re-promotion + the full ocamltest bar.
 - Step 2: ordinary calls (drop ISel spilling + stable-home machinery from
   the path; slots via OxCamlStatepointSpillRoots; LICM/CSE/copy-prop/remat
   gates active for gc vregs). Expected win: loop re-spills + join
