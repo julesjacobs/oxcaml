@@ -463,7 +463,20 @@ bool OxCamlGCRootVerifier::runOnMachineFunction(MachineFunction &MF) {
       }
     }
 
+    // Stack-growth statepoints never collect: caml_try_realloc_stack is
+    // CAMLnoalloc and the frame is copied verbatim to the new stack, so
+    // heap values in unlisted slots survive unchanged. Their listings
+    // exist for stack-internal state (trap pointers), not heap roots.
+    bool IsStackRealloc = false;
+    if (const MachineOperand &Callee =
+            StatepointOpers(MI).getCallTarget();
+        Callee.isGlobal() && Callee.getGlobal()->getName().contains(
+                                 "call_realloc_stack"))
+      IsStackRealloc = true;
+
     for (int Slot : FamilySlots) {
+      if (IsStackRealloc)
+        break;
       if (ListedSlots.count(Slot) || !LS.hasInterval(Slot))
         continue;
       if (!LiveAcross(LS.getInterval(Slot)))

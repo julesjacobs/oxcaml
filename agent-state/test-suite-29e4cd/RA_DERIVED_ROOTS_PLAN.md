@@ -931,13 +931,15 @@ between), phys-to-phys matching (two spills of the same incoming
 register), and operand-name seeding from listed FOLDED slots and the
 gc-alloca section (root allocas are as authoritative as the pointer
 section).
-RESIDUAL TRIAGE (parked): the typecore 12 are five slots at the entry
-stack-check (caml_llvm_call_realloc_stack) and an early caml_call_gc in
-type_expect_ + two in report_error (cold error path). Key open
-question: does realloc_stack ever run a heap GC? Its statepoint lists
-only exnroots/trap state (stack-rebase semantics); if it cannot
-collect, unlisted heap values across it are benign by construction.
-The datarepr derived-vreg finding keeps its own parked context.
+RESIDUAL TRIAGE: ANSWERED — caml_try_realloc_stack is CAMLnoalloc
+(fiber.c:944) and the frame is copied verbatim on stack growth, so
+realloc-stack statepoints can never move heap objects; the verifier
+now exempts them (callee name contains call_realloc_stack). Corpus
+residue: typecore 5 (early caml_call_gc in type_expect_ + report_error
+cold paths — CFG-real store-free paths to loads whose execution
+feasibility is unproven; path-insensitive analyses cannot rule them
+out; candidates for runtime probing, not gate blockers) + datarepr 1
+(the parked derived-vreg finding).
 lit 20 known, test-cc 0 after the pass extensions; cascade re-run
 launched.
 
