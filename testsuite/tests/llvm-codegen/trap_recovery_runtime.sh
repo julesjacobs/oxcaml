@@ -88,10 +88,8 @@ if grep -q "llvm.aarch64.oxcaml.trap" "$asm"; then
   echo "trap intrinsics leaked to assembly" >&2
   exit 1
 fi
-grep -q "sub	sp, sp, #16" "$asm"
-grep -q "str	x26, \\[sp\\]" "$asm"
-grep -q "str	x16, \\[sp, #8\\]" "$asm"
-grep -q "ldr	x26, \\[sp\\], #16" "$asm"
+grep -q "stp	x26, x16, \\[sp, #-16\\]!" "$asm"
+grep -q "ldp	x26, x16, \\[sp\\], #16" "$asm"
 
 hot_src="$build_dir/trap_recovery_hot_push_pop.ml"
 hot_cmx="$build_dir/trap_recovery_hot_push_pop.cmx"
