@@ -473,22 +473,46 @@ GCValueness::GCValueness(MachineFunction &MF,
       // whose producing instruction the structural rules cannot read,
       // e.g. an allocation's STRXpre write-back: with in-place lowering
       // the listed operand is often a spiller copy of it.
-      Register Cur = R;
-      SlotIndex At = Idx.getRegSlot(true);
-      for (unsigned Hops = 0; Hops < 8 && Cur.isVirtual(); ++Hops) {
-        if (!LIS.hasInterval(Cur))
-          break;
-        const VNInfo *VNI = LIS.getInterval(Cur).getVNInfoAt(At);
-        if (!VNI)
-          break;
+      // Worklist over (reg, VNI): through COPY defs the source's VNI at
+      // the copy carries the same runtime value; through PHI defs every
+      // predecessor's incoming VNI does (each path's value IS the value
+      // that was listed). Bounded for safety.
+      if (!R.isVirtual() || !LIS.hasInterval(R))
+        continue;
+      SmallVector<std::pair<Register, const VNInfo *>, 8> Work;
+      if (const VNInfo *VNI =
+              LIS.getInterval(R).getVNInfoAt(Idx.getRegSlot(true)))
+        Work.push_back({R, VNI});
+      unsigned Budget = 64;
+      while (!Work.empty() && Budget--) {
+        auto [Cur, VNI] = Work.pop_back_val();
         if (!Seeds.insert({(int64_t)Cur.id(), VNI->id}).second)
-          break;
+          continue;
+        if (const char *FN = getenv("OXSR_DEBUG_VAL"))
+          if (MF.getName().contains(FN))
+            errs() << "[oxsr-seed] " << printReg(Cur) << " vni" << VNI->id
+                   << "\n";
+        if (VNI->isPHIDef()) {
+          MachineBasicBlock *MBB = Indexes.getMBBFromIndex(VNI->def);
+          if (!MBB)
+            continue;
+          const LiveInterval &LI = LIS.getInterval(Cur);
+          for (MachineBasicBlock *Pred : MBB->predecessors())
+            if (const VNInfo *Q =
+                    LI.getVNInfoBefore(Indexes.getMBBEndIdx(Pred)))
+              Work.push_back({Cur, Q});
+          continue;
+        }
         MachineInstr *D = Indexes.getInstructionFromIndex(VNI->def);
         if (!D || !D->isCopy() || D->getOperand(0).getSubReg() ||
             D->getOperand(1).getSubReg())
-          break;
-        Cur = D->getOperand(1).getReg();
-        At = VNI->def.getRegSlot(true);
+          continue;
+        Register Src = D->getOperand(1).getReg();
+        if (!Src.isVirtual() || !LIS.hasInterval(Src))
+          continue;
+        if (const VNInfo *Q = LIS.getInterval(Src).getVNInfoAt(
+                VNI->def.getRegSlot(true)))
+          Work.push_back({Src, Q});
       }
     }
   }
@@ -599,20 +623,36 @@ bool GCValueness::regValue(Register R, const VNInfo *VNI) {
         // x26-x28, whose raw copies can share a coalesced family with
         // gc vregs): the bit on such copies comes from the IR result
         // type via FunctionLoweringInfo.
-        // Only when the vreg has a single value number: the bit is
-        // per-register and ORs across coalescing, so on a merged
-        // register it may describe the OTHER range — a raw call result
-        // (untagged machine int) judged "value" gets forwarded by the
-        // GC if its bits alias the young space, corrupting it.
+        // Trust requires TYPE provenance, not the coalescer-OR'd gc
+        // bit: on a merged register the gc bit may describe the OTHER
+        // range, and a raw (untagged) call result judged "value" gets
+        // forwarded by the GC if its bits alias the young space. The
+        // typed-p1 bit is set only at vreg creation from the IR type
+        // and never merged; a copy-from-result-register def of such a
+        // vreg is the p1 value's own definition. The local InstrEmitter
+        // copy often is not the typed vreg itself, so also accept a
+        // one-hop forward COPY into a typed vreg.
         bool BitTrust = false;
-        if (MF.getRegInfo().isOxCamlGCPtr(R) &&
-            LIS.getInterval(R).getNumValNums() == 1) {
+        {
           StringRef SrcName = MF.getSubtarget()
                                   .getRegisterInfo()
                                   ->getName(Src.asMCReg());
           unsigned K;
-          BitTrust = SrcName.consume_front("X") &&
-                     !SrcName.getAsInteger(10, K) && K <= 15;
+          if (SrcName.consume_front("X") && !SrcName.getAsInteger(10, K) &&
+              K <= 15) {
+            if (MF.getRegInfo().isOxCamlTypedP1(R))
+              BitTrust = true;
+            else
+              for (const MachineInstr &U :
+                   MF.getRegInfo().use_instructions(R))
+                if (U.isCopy() &&
+                    U.getOperand(0).getReg().isVirtual() &&
+                    MF.getRegInfo().isOxCamlTypedP1(
+                        U.getOperand(0).getReg())) {
+                  BitTrust = true;
+                  break;
+                }
+          }
         }
         V = (D->getParent() == &MF.front() &&
              MF.getRegInfo().isOxCamlGCArg(R)) ||

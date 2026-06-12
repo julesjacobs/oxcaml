@@ -94,6 +94,14 @@ private:
   /// analysis, where the gc bit alone is too coarse).
   DenseSet<unsigned> OxCamlGCArgVRegs;
 
+  /// Vregs created for IR values of type ptr addrspace(1) — pure TYPE
+  /// provenance, set only at creation (FunctionLoweringInfo) and NEVER
+  /// merged by the register coalescer, unlike OxCamlGCVRegs whose OR'd
+  /// bits can describe another coalesced range. A def of such a vreg
+  /// that copies a call's result register is the p1 IR value's own
+  /// definition.
+  DenseSet<unsigned> OxCamlTypedP1VRegs;
+
   /// Map for recovering vreg name from vreg number.
   /// This map is used by the MIR Printer.
   IndexedMap<std::string, VirtReg2IndexFunctor> VReg2Name;
@@ -790,6 +798,17 @@ public:
   /// Whether \p Reg holds an addrspace(1) formal argument.
   bool isOxCamlGCArg(Register Reg) const {
     return Reg.isVirtual() && OxCamlGCArgVRegs.contains(Reg.id());
+  }
+
+  /// Mark \p Reg as created for a ptr addrspace(1) IR value.
+  void setOxCamlTypedP1(Register Reg) {
+    assert(Reg.isVirtual());
+    OxCamlTypedP1VRegs.insert(Reg.id());
+  }
+
+  /// Whether \p Reg was created for a ptr addrspace(1) IR value.
+  bool isOxCamlTypedP1(Register Reg) const {
+    return Reg.isVirtual() && OxCamlTypedP1VRegs.contains(Reg.id());
   }
 
   /// Get the low-level type of \p Reg or LLT{} if Reg is not a generic

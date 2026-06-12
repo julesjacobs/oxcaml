@@ -419,8 +419,10 @@ Register FunctionLoweringInfo::CreateRegs(const Value *V) {
   if (V->getType()->isPointerTy() &&
       V->getType()->getPointerAddressSpace() == 1) {
     const Function &F = MF->getFunction();
-    if (F.hasGC() && (F.getGC() == "oxcaml" || F.getGC() == "ocaml"))
+    if (F.hasGC() && (F.getGC() == "oxcaml" || F.getGC() == "ocaml")) {
       MF->getRegInfo().setOxCamlGCPtr(R);
+      MF->getRegInfo().setOxCamlTypedP1(R);
+    }
   }
   return R;
 }
