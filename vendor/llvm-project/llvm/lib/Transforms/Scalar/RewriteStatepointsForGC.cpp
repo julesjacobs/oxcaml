@@ -6237,8 +6237,14 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
   // array element address out of a caml_modify loop). The attribute
   // makes ISel fall back to spill lowering here, whose reloaded base
   // keeps the rematerialized chain distinct.
-  if (!Result.RematerializedValues.empty() ||
-      !RematerializedDerivedValues.empty())
+  // Only the OxCaml in-place lowering consumes the attribute; do not
+  // perturb call-site attributes under other gc strategies (it breaks
+  // their FileCheck expectations and carries no meaning there).
+  if ((!Result.RematerializedValues.empty() ||
+       !RematerializedDerivedValues.empty()) &&
+      Token->getFunction()->hasGC() &&
+      (Token->getFunction()->getGC() == "oxcaml" ||
+       Token->getFunction()->getGC() == "ocaml"))
     Token->addFnAttr(Attribute::get(Token->getContext(),
                                     "oxcaml-statepoint-derived-remat"));
 }
