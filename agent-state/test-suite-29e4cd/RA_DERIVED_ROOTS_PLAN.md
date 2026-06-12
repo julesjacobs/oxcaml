@@ -883,10 +883,16 @@ Flag: `-oxcaml-statepoint-inplace` (ISel-level), default off until proven.
   are mode-independent). DEFAULT-MODE CASCADE FULL GREEN 2026-06-12
   (stage1, boot-flip 3/3, stage2, stage1-flip 10/10): both
   configurations validate with the new listing machinery. STEP 2
-  VALIDATION COMPLETE. Open decisions: flip the in-place flags to
-  default (requires re-promoting llvm-codegen/allocation.ml expects);
-  then step 3 (delete the ISel spill machinery, stable root homes,
-  FixupStatepointCallerSaved-for-oxcaml). Parked cleanups: exnroot
+  VALIDATION COMPLETE. DEFAULT FLIP LANDED (ceaf20bcb2, 2026-06-12):
+  -oxcaml-statepoint-inplace[-calls] cl::init(true); slot-mode-only
+  lit tests pinned with =0 (register-roots dual test, stable phi root
+  home); allocation.ml expect re-promoted (gc slow path no longer
+  spills/reloads around caml_call_gc, frame 32->16). FLIP GATE GREEN:
+  plain-wrapper cascade (stage1, boot-flip 3/3, stage2, stage1-flip
+  10/10) + ocamltest 6756 passed / 0 failed (the full bar) + lit 20
+  known + test-cc.sh 0. The in-place model is now THE default
+  lowering. NEXT: step 3 (delete the ISel spill machinery, stable
+  root homes, FixupStatepointCallerSaved-for-oxcaml). Parked cleanups: exnroot
   alloca-section operands double-listed in descriptors (walkGCPtrSection
   only reads the pointer section, the ValueHome path re-appends;
   harmless but bloats frametables), verifier GCValueness port.
