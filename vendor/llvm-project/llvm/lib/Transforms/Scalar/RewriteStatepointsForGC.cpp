@@ -129,6 +129,12 @@ static cl::opt<bool> DebugOxCamlDerivedRemat(
     "rs4gc-debug-oxcaml-derived-remat", cl::Hidden, cl::init(false),
     cl::desc("Print OxCaml statepoint derived/base candidates"));
 
+static cl::opt<bool> OxCamlExnSSARootsAll(
+    "rs4gc-oxcaml-exn-ssa-all", cl::Hidden, cl::init(false),
+    cl::desc("With -rs4gc-oxcaml-exn-ssa-roots, SSA-root every eligible "
+             "handler-live value regardless of normal-path liveness "
+             "(measurement/experiment aid)."));
+
 static cl::opt<bool> OxCamlExnSSARoots(
     "rs4gc-oxcaml-exn-ssa-roots", cl::Hidden, cl::init(false),
     cl::desc("Keep non-phi handler-live GC values in SSA instead of "
@@ -3730,6 +3736,16 @@ static bool materializeOxCamlExceptionRootSlots(
     auto GetOrCreatePhiEdgeSlot = [&](PHINode *SlotPhi) -> AllocaInst * {
       if (AllocaInst *Slot = SlotForValue.lookup(SlotPhi))
         return Slot;
+      if (getenv("OXSR_DEBUG_EXNPHI")) {
+        errs() << "[exnphi] edge-slot in " << F.getName() << " for: ";
+        SlotPhi->print(errs());
+        errs() << "\n";
+        for (Value *In : SlotPhi->incoming_values()) {
+          errs() << "    in: ";
+          In->print(errs());
+          errs() << "\n";
+        }
+      }
 
       bool IsGCRoot = isHandledGCPointerType(SlotPhi->getType());
       SmallVector<OxCamlRecoveryStoreSite, 8> StoreSites;
@@ -4122,18 +4138,6 @@ static bool materializeOxCamlExceptionRootSlots(
       return Base;
     };
 
-    SmallVector<PHINode *, 8> HandlerLivePhisToErase;
-    for (PHINode *PN : HandlerLivePhis) {
-      Value *RootValue = FindExceptionRootValue(PN);
-      LoadInst *Load = GetOrCreateRecoveryLoad(RootValue);
-
-      PN->replaceAllUsesWith(Load);
-      HandlerLivePhisToErase.push_back(PN);
-      Changed = true;
-      DVCache.clear();
-      KnownBases.clear();
-    }
-
     DenseMap<Value *, Instruction *> RecoveryBarrierForValue;
     auto GetOrCreateRecoveryBarrier =
         [&](Value *RootValue) -> Instruction * {
@@ -4147,6 +4151,94 @@ static bool materializeOxCamlExceptionRootSlots(
       RecoveryBarrierForValue[RootValue] = Barrier;
       return Barrier;
     };
+
+    // A phi whose incomings all unwrap (through opacity barriers) to one
+    // value carrying across every edge is spurious diversity: barriers
+    // are opaque calls and so defeat the base-pointer collapse that
+    // would otherwise resolve the phi to its single root. Without this,
+    // SSA exception roots downgrade such phis to the per-invoke
+    // edge-store path (measured on boyer: 4 -> 16 stores in unify1).
+    auto CollapseBarrierPhi = [&](PHINode *PN) -> Value * {
+      Value *Common = nullptr;
+      for (Value *In : PN->incoming_values()) {
+        Value *X = In;
+        unsigned Hops = 0;
+        for (bool Stripped = true; Stripped && ++Hops <= 8;) {
+          Stripped = false;
+          if (auto *CI = dyn_cast<CallInst>(X))
+            if (CI->getIntrinsicID() ==
+                Intrinsic::aarch64_oxcaml_relocated) {
+              X = CI->getArgOperand(0);
+              Stripped = true;
+              continue;
+            }
+          // A base==derived gc.relocate is the same object renamed by a
+          // statepoint that the listed slot crosses; the GC's in-place
+          // rewrite of the slot reproduces exactly the relocated value,
+          // so the pre-statepoint name roots the slot soundly.
+          if (auto *Reloc = dyn_cast<GCRelocateInst>(X))
+            if (Reloc->getBasePtr() == Reloc->getDerivedPtr()) {
+              X = Reloc->getDerivedPtr();
+              Stripped = true;
+            }
+        }
+        if (!Common)
+          Common = X;
+        else if (Common != X)
+          return nullptr;
+      }
+      if (!Common || Common == PN) {
+        if (getenv("OXSR_DEBUG_EXNPHI")) {
+          errs() << "[exnphi] no-collapse in " << F.getName() << ": ";
+          PN->print(errs());
+          errs() << "\n";
+          for (Value *In : PN->incoming_values()) {
+            errs() << "    in: ";
+            In->print(errs());
+            errs() << "\n";
+          }
+        }
+        return nullptr;
+      }
+      if (auto *CI2 = dyn_cast<Instruction>(Common))
+        if (!DT.dominates(CI2->getParent(), PN->getParent()))
+          return nullptr;
+      return Common;
+    };
+
+    SmallVector<PHINode *, 8> HandlerLivePhisToErase;
+    for (PHINode *PN : HandlerLivePhis) {
+      Value *RootValue;
+      if (Value *Common = CollapseBarrierPhi(PN)) {
+        RootValue = FindExceptionRootValue(Common);
+        // The collapsed root is one SSA value: under SSA exception
+        // roots, give it the barrier treatment (its single memory home
+        // is then the register allocator's slot, listed by the backend)
+        // instead of minting a root slot beside it. Entry phis only:
+        // a barrier in the recovery block does not dominate a
+        // trampoline phi's uses.
+        if (OxCamlExnSSARoots && PN->getParent() == &BB &&
+            isHandledGCPointerType(RootValue->getType()) &&
+            RootValue->getType()->isPointerTy() &&
+            !SlotForValue.lookup(RootValue)) {
+          Instruction *Barrier = GetOrCreateRecoveryBarrier(RootValue);
+          PN->replaceAllUsesWith(Barrier);
+          HandlerLivePhisToErase.push_back(PN);
+          Changed = true;
+          DVCache.clear();
+          KnownBases.clear();
+          continue;
+        }
+      } else
+        RootValue = FindExceptionRootValue(PN);
+      LoadInst *Load = GetOrCreateRecoveryLoad(RootValue);
+
+      PN->replaceAllUsesWith(Load);
+      HandlerLivePhisToErase.push_back(PN);
+      Changed = true;
+      DVCache.clear();
+      KnownBases.clear();
+    }
 
     for (Value *V : HandlerLiveGCValues) {
       Value *RootValue = FindExceptionRootValue(V);
@@ -4183,7 +4275,14 @@ static bool materializeOxCamlExceptionRootSlots(
         if (HasNormalPathUse)
           break;
       }
-      bool UseSSA = OxCamlExnSSARoots && HasNormalPathUse &&
+      // One mechanism per logical value: a value that already has a
+      // root slot (from a phi collapse, another region, or the late
+      // pass) keeps the slot — SSA-rooting it too would give it two
+      // memory homes, and the barrier-extended live range makes the
+      // register allocator spill it AGAIN next to its own slot.
+      bool UseSSA = OxCamlExnSSARoots &&
+                    (HasNormalPathUse || OxCamlExnSSARootsAll) &&
+                    !SlotForValue.lookup(RootValue) &&
                     isHandledGCPointerType(RootValue->getType()) &&
                     RootValue->getType()->isPointerTy();
       Instruction *Load = UseSSA ? GetOrCreateRecoveryBarrier(RootValue)
