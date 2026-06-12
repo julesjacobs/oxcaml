@@ -983,6 +983,17 @@ def OXCAML_RAISE_NOTRACE_EDGE
     : Pseudo<(outs), (ins GPR64:$exn_bucket, brtarget:$recovery_target), []>,
       Sched<[]>;
 
+// Derived-pointer recompute for in-place statepoints: base + byteoff,
+// kept opaque (side-effecting, unduplicable) so no CSE/LICM/sink can
+// merge or move it across a statepoint; expanded to a plain add after
+// register allocation.
+let hasSideEffects = 1, isCodeGenOnly = 1, Size = 4 in
+def OXCAML_REDERIVE
+    : Pseudo<(outs GPR64:$dst), (ins GPR64:$base, GPR64:$off),
+             [(set GPR64:$dst,
+                   (int_aarch64_oxcaml_rederive GPR64:$base, GPR64:$off))]>,
+      Sched<[]>;
+
 // The expansion is 5 instructions (adr, sub, str, str, add); an
 // understated Size makes AArch64CompressJumpTables pick byte-sized
 // tables whose label differences then overflow at assembly time.

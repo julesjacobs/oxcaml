@@ -110,6 +110,18 @@ def int_aarch64_oxcaml_trap_publish
 
 // OxCaml native-shaped trap frame push. The argument is a blockaddress for the
 // runtime-entered recovery block stored in the trap frame.
+// Recompute a derived (interior) pointer from its base after a
+// statepoint with in-place root semantics. Semantically just
+// base + byteoff, but opaque to CSE/LICM/sinking: the base register's
+// VALUE changes at statepoints (the GC rewrites roots in place), so the
+// addition must execute at this program point and must never merge with
+// a syntactically identical computation on the other side of a call.
+// Expanded to a plain add after register allocation.
+def int_aarch64_oxcaml_rederive
+    : Intrinsic<[llvm_oxcaml_value_ty], [llvm_oxcaml_value_ty, llvm_i64_ty],
+                [IntrHasSideEffects, IntrNoDuplicate, IntrNoMerge,
+                 IntrWillReturn, IntrNoCallback, IntrNoFree]>;
+
 def int_aarch64_oxcaml_push_trap
     : Intrinsic<[], [llvm_ptr_ty],
                 [IntrHasSideEffects, IntrConvergent, IntrNoDuplicate,

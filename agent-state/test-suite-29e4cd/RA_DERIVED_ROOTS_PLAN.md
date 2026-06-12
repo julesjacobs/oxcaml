@@ -616,6 +616,56 @@ Flag: `-oxcaml-statepoint-inplace` (ISel-level), default off until proven.
   Soak running. NOTE: the bit-marking + new value rules also apply in
   default mode (more listed roots, soundness-positive); default-mode
   cascade should be re-run before the next default-mode release.
+
+  STEP-2 SOAK ROUND 1 (2026-06-12): boot compiler SIGBUS'd in
+  caml_modify — THE DERIVED-POINTER HAZARD, exactly as the hazards
+  section predicted, in three escalating shapes (each fix exposed the
+  next):
+  (1) Regs__entry: IR-level RS4GC derived-gep sinking is voided by
+      identity relocates — the relocate IS the base SSA value, so the
+      relocate-of-self loop phi collapses at ISel and the sunk
+      recompute's operand becomes the loop-invariant preheader base;
+      early MachineLICM hoists `add base, -4` out of the
+      Array.init-style fill loop. Fixes: RS4GC tags statepoints with
+      rematerialized derived values ("oxcaml-statepoint-derived-remat",
+      both relocate and volatile-alloca paths; ISel falls back to spill
+      lowering there) and a MachineLICM gate refusing to hoist
+      non-load/non-copy computations on gc vregs out of
+      statepoint-bearing loops (with bidirectional COPY-chain chasing,
+      since ISel's raw copy-from-physreg chains carry no gc bit).
+  (2) Ldd.make_var: the BLOCK-LOCAL variant — `v.var_node <- node_raw
+      v ...`: the field address v+16 computed for the initializing
+      store CSEs (DAG CSE, same node under identity) with the
+      post-statepoint recompute. Pass-by-pass gating cannot close this:
+      CSE is foundational and block-local.
+  (3) STRUCTURAL FIX: llvm.aarch64.oxcaml.rederive(base, byteoff) — an
+      opaque (side-effecting, noduplicate) intrinsic semantically equal
+      to base+byteoff. RS4GC's derived-gep sinking emits it at each use
+      under -rs4gc-oxcaml-inplace-rederive; the byte offset itself is
+      plain integer math (move-invariant, freely hoistable/CSE-able);
+      only the final add is pinned. Lowered to the OXCAML_REDERIVE
+      pseudo (Size=4) and expanded to ADDXrs (NOT ADDXrr, which is an
+      ISel-only pseudo with no MC lowering — it emitted BLANK asm lines
+      and crashed object emission, a fun way to discover that) after
+      RA. Verified on the Regs repro: per-iteration `add x8, x9(fresh
+      reloaded base), x8(offset)` inside the loop. This is the same
+      cost the native compiler pays for derived addressing.
+  The three-flag soak wrapper: clang-wrapper-inplace2 (inplace,
+  inplace-calls, rs4gc-oxcaml-inplace-rederive).
+
+  SOAK ROUND 4 (open): with rederive in place, the boot crash moved to
+  a fourth instance — camlConsistbl__code_end+212, a CROSSED
+  spill/reload pair around an in-place indirect-call statepoint:
+    str x27,[sp,#8]; str x8,[sp]; blr x9; ldr x8,[sp,#8]; ldr x0,[x8,#0x38]
+  The post-call reload reads the slot holding the SAVED PRE-CALL ALLOC
+  POINTER instead of the gc value (sp+0) and dereferences it. Suspect:
+  FixupStatepointCallerSaved's spill-slot caching (RegReloadCache /
+  CacheFI) interacting with plain in-place register operands — it
+  creates exactly such save/reload pairs around statepoints. Next:
+  replay consistbl.ml with the three flags, find the function in MIR
+  after fixup-statepoint-caller-saved, and check the slot assignment
+  it produced. Deterministic repro: the boot-flip typecore run
+  (exit 138) with the round-4 toolchain.
 - Step 3: delete dead machinery; THEN revisit exnroots/homes on the
   simplified base (gc-ness + RA could subsume exnroot slots later by
   modeling raise edges as clobber-all, forcing handler-live values into

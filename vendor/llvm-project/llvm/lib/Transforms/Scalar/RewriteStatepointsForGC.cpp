@@ -26,6 +26,8 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/Analysis/DomTreeUpdater.h"
+#include "llvm/Analysis/Utils/Local.h"
+#include "llvm/IR/IntrinsicsAArch64.h"
 #include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
@@ -126,6 +128,13 @@ static cl::opt<bool> RematAddrSpace1DerivedFromBaseAtAlloc(
 static cl::opt<bool> DebugOxCamlDerivedRemat(
     "rs4gc-debug-oxcaml-derived-remat", cl::Hidden, cl::init(false),
     cl::desc("Print OxCaml statepoint derived/base candidates"));
+
+static cl::opt<bool> OxCamlInPlaceRederive(
+    "rs4gc-oxcaml-inplace-rederive", cl::Hidden, cl::init(false),
+    cl::desc("Sink derived geps to uses as llvm.aarch64.oxcaml.rederive "
+             "(opaque base+offset adds). Required with in-place statepoint "
+             "lowering, where identity relocates would let CSE/LICM merge a "
+             "post-statepoint recompute with its pre-statepoint twin."));
 
 static cl::opt<bool> DebugOxCamlGCPointerAllocas(
     "rs4gc-debug-oxcaml-gc-pointer-allocas", cl::Hidden, cl::init(false),
@@ -3387,6 +3396,20 @@ static bool rematerializeOxCamlDerivedGEPsAtUses(Function &F) {
       for (Use &U : GEP->uses())
         Uses.push_back(&U);
 
+      // With in-place statepoint lowering, compute the gep's byte offset
+      // once (raw integer math: move-invariant, freely CSE/hoistable)
+      // and recompute the address at each use through the opaque
+      // rederive intrinsic, which nothing merges across a statepoint.
+      Value *ByteOff = nullptr;
+      Function *RederiveDecl = nullptr;
+      if (OxCamlInPlaceRederive) {
+        IRBuilder<> OffBuilder(GEP->getNextNode());
+        ByteOff = emitGEPOffset(&OffBuilder, F.getParent()->getDataLayout(),
+                                GEP);
+        RederiveDecl = Intrinsic::getDeclaration(
+            F.getParent(), Intrinsic::aarch64_oxcaml_rederive);
+      }
+
       for (Use *U : Uses) {
         auto *UserI = dyn_cast<Instruction>(U->getUser());
         if (!UserI)
@@ -3398,6 +3421,18 @@ static bool rematerializeOxCamlDerivedGEPsAtUses(Function &F) {
           InsertBefore = PN->getIncomingBlock(IncomingIndex)->getTerminator();
         } else {
           InsertBefore = UserI;
+        }
+
+        if (OxCamlInPlaceRederive) {
+          IRBuilder<> B(InsertBefore);
+          auto *Re = B.CreateCall(RederiveDecl,
+                                  {GEP->getPointerOperand(), ByteOff},
+                                  suffixed_name_or(GEP, ".rederive",
+                                                   "rederive"));
+          Re->setMetadata("oxcaml.local.remat",
+                          MDNode::get(F.getContext(), {}));
+          U->set(Re);
+          continue;
         }
 
         auto *Clone = cast<GetElementPtrInst>(GEP->clone());
@@ -6141,6 +6176,19 @@ makeStatepointExplicitImpl(CallBase *Call, /* to replace */
     CreateGCRelocates(FilteredLiveVariables, FilteredBasePtrs, Token, Builder);
     AddDerivedRematerializations(Token);
   }
+  // In-place statepoint lowering must not apply where derived values
+  // were rematerialized (either relocate- or alloca-based paths): with
+  // identity relocates the rematerialized chain computes from the SAME
+  // SSA base and ISel CSEs it with the pre-statepoint original, so the
+  // derived value crosses the statepoint after all (stale interior
+  // pointer after a GC; first seen as Regs' module init hoisting an
+  // array element address out of a caml_modify loop). The attribute
+  // makes ISel fall back to spill lowering here, whose reloaded base
+  // keeps the rematerialized chain distinct.
+  if (!Result.RematerializedValues.empty() ||
+      !RematerializedDerivedValues.empty())
+    Token->addFnAttr(Attribute::get(Token->getContext(),
+                                    "oxcaml-statepoint-derived-remat"));
 }
 
 // Replace an existing gc.statepoint with a new one and a set of gc.relocates

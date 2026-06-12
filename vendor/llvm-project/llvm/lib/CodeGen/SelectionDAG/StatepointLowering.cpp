@@ -654,12 +654,18 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
     const Function &F = Builder.DAG.getMachineFunction().getFunction();
     if (F.hasGC() && (F.getGC() == "oxcaml" || F.getGC() == "ocaml")) {
       InPlace = true;
-      for (unsigned I = 0, E = SI.Bases.size(); I != E; ++I)
+      // RS4GC rematerializes derived pointers (interior addresses) after
+      // statepoints. With identity relocates the rematerialized chain
+      // would CSE with the pre-statepoint original and cross the
+      // statepoint stale; such statepoints keep the spill lowering,
+      // whose reloaded base keeps the rematerialization distinct.
+      if (cast<CallBase>(SI.StatepointInstr)
+              ->hasFnAttr("oxcaml-statepoint-derived-remat"))
+        InPlace = false;
+      for (unsigned I = 0; InPlace && I != SI.Bases.size(); ++I)
         if (Builder.getValue(SI.Bases[I]) !=
-            Builder.getValue(SI.Ptrs[I])) {
+            Builder.getValue(SI.Ptrs[I]))
           InPlace = false;
-          break;
-        }
     }
   }
   if (InPlace)

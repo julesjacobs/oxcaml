@@ -1513,6 +1513,19 @@ bool AArch64ExpandPseudo::expandMI(MachineBasicBlock &MBB,
      return expandCALL_BTI(MBB, MBBI);
    case AArch64::OXCAML_C_DIRECT_CALL:
      return expandOXCAML_C_DIRECT_CALL(MBB, MBBI);
+   case AArch64::OXCAML_REDERIVE: {
+     // Derived-pointer recompute: now that register allocation is done,
+     // it is just an add (the shifted-register form; plain ADDXrr is an
+     // ISel-only pseudo with no MC lowering).
+     MachineInstr &MI = *MBBI;
+     BuildMI(MBB, MBBI, MI.getDebugLoc(), TII->get(AArch64::ADDXrs))
+         .add(MI.getOperand(0))
+         .add(MI.getOperand(1))
+         .add(MI.getOperand(2))
+         .addImm(0);
+     MI.eraseFromParent();
+     return true;
+   }
    case AArch64::StoreSwiftAsyncContext:
      return expandStoreSwiftAsyncContext(MBB, MBBI);
    case AArch64::RestoreZAPseudo: {
