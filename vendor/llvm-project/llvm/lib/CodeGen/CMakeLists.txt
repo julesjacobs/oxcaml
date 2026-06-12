@@ -159,6 +159,7 @@ add_llvm_component_library(LLVMCodeGen
   NonRelocatableStringpool.cpp
   OptimizePHIs.cpp
   OxCamlGCRootVerifier.cpp
+  OxCamlLowerRelocate.cpp
   OxCamlStatepointSpillRoots.cpp
   ParallelCG.cpp
   PeepholeOptimizer.cpp

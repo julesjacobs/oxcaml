@@ -122,6 +122,17 @@ def int_aarch64_oxcaml_rederive
                 [IntrHasSideEffects, IntrNoDuplicate, IntrNoMerge,
                  IntrWillReturn, IntrNoCallback, IntrNoFree]>;
 
+// The post-statepoint incarnation of a gc value under in-place root
+// semantics. Opaque before register allocation so no value-based pass
+// (CSE/LICM/sinking/folding) can identify the pre- and post-statepoint
+// worlds; converted to a plain COPY right before register coalescing,
+// which merges it away (the old value dies at the statepoint where the
+// new one is born), yielding in-place final code at zero cost.
+def int_aarch64_oxcaml_relocated
+    : Intrinsic<[llvm_oxcaml_value_ty], [llvm_oxcaml_value_ty],
+                [IntrHasSideEffects, IntrNoDuplicate, IntrNoMerge,
+                 IntrWillReturn, IntrNoCallback, IntrNoFree]>;
+
 def int_aarch64_oxcaml_push_trap
     : Intrinsic<[], [llvm_ptr_ty],
                 [IntrHasSideEffects, IntrConvergent, IntrNoDuplicate,

@@ -994,6 +994,17 @@ def OXCAML_REDERIVE
                    (int_aarch64_oxcaml_rederive GPR64:$base, GPR64:$off))]>,
       Sched<[]>;
 
+// In-place statepoint relocate: the post-statepoint incarnation of a gc
+// value. Opaque through the machine-SSA optimizers; rewritten to a COPY
+// just before register coalescing (OxCamlLowerRelocate), which then
+// merges it with its source. See int_aarch64_oxcaml_relocated.
+let hasSideEffects = 1, isCodeGenOnly = 1, Size = 4 in
+def OXCAML_RELOCATE
+    : Pseudo<(outs GPR64:$dst), (ins GPR64:$src),
+             [(set GPR64:$dst,
+                   (int_aarch64_oxcaml_relocated GPR64:$src))]>,
+      Sched<[]>;
+
 // The expansion is 5 instructions (adr, sub, str, str, add); an
 // understated Size makes AArch64CompressJumpTables pick byte-sized
 // tables whose label differences then overflow at assembly time.

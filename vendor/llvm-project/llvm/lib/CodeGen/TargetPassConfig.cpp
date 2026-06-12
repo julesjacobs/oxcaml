@@ -1469,6 +1469,10 @@ void TargetPassConfig::addOptimizedRegAlloc() {
     addPass(&LiveIntervalsID);
 
   addPass(&TwoAddressInstructionPassID);
+  // OxCaml in-place relocate pseudos become plain COPYs here, after the
+  // last value-based optimizer and immediately before coalescing merges
+  // them with their sources (see OxCamlLowerRelocate.cpp).
+  addPass(&OxCamlLowerRelocateID);
   addPass(&RegisterCoalescerID);
 
   // The machine scheduler may accidentally create disconnected components

@@ -1513,6 +1513,19 @@ bool AArch64ExpandPseudo::expandMI(MachineBasicBlock &MBB,
      return expandCALL_BTI(MBB, MBBI);
    case AArch64::OXCAML_C_DIRECT_CALL:
      return expandOXCAML_C_DIRECT_CALL(MBB, MBBI);
+   case AArch64::OXCAML_RELOCATE: {
+     // Normally rewritten to a COPY before register coalescing
+     // (OxCamlLowerRelocate); this is the fallback for pipelines that
+     // skip the optimized-regalloc path.
+     MachineInstr &MI = *MBBI;
+     BuildMI(MBB, MBBI, MI.getDebugLoc(), TII->get(AArch64::ORRXrs))
+         .add(MI.getOperand(0))
+         .addReg(AArch64::XZR)
+         .add(MI.getOperand(1))
+         .addImm(0);
+     MI.eraseFromParent();
+     return true;
+   }
    case AArch64::OXCAML_REDERIVE: {
      // Derived-pointer recompute: now that register allocation is done,
      // it is just an add (the shifted-register form; plain ADDXrr is an

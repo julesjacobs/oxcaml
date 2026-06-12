@@ -30,6 +30,7 @@
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
 #include "llvm/CodeGen/StackMaps.h"
+#include "llvm/IR/IntrinsicsAArch64.h"
 #include "llvm/CodeGen/TargetLowering.h"
 #include "llvm/CodeGen/TargetOpcodes.h"
 #include "llvm/IR/CallingConv.h"
@@ -577,6 +578,7 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
                         SmallVectorImpl<MachineMemOperand *> &MemRefs,
                         SmallVectorImpl<SDValue> &GCPtrs,
                         DenseMap<SDValue, int> &LowerAsVReg,
+                        bool &InPlaceOut,
                         SelectionDAGBuilder::StatepointLoweringInfo &SI,
                         SelectionDAGBuilder &Builder) {
   // Lower the deopt and gc arguments for this statepoint.  Layout will be:
@@ -670,6 +672,7 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
   }
   if (InPlace)
     MaxVRegPtrs = 0;
+  InPlaceOut = InPlace;
 
   // Pointers used on exceptional path of invoke statepoint.
   // We cannot assing them to VRegs.
@@ -867,8 +870,9 @@ SDValue SelectionDAGBuilder::LowerAsSTATEPOINT(
   SmallVector<MachineMemOperand*, 16> MemRefs;
   // Maps derived pointer SDValue to statepoint result of relocated pointer.
   DenseMap<SDValue, int> LowerAsVReg;
+  bool InPlaceStatepoint = false;
   lowerStatepointMetaArgs(LoweredMetaArgs, MemRefs, LoweredGCArgs, LowerAsVReg,
-                          SI, *this);
+                          InPlaceStatepoint, SI, *this);
 
   // Now that we've emitted the spills, we need to update the root so that the
   // call sequence is ordered correctly.
@@ -1058,11 +1062,13 @@ SDValue SelectionDAGBuilder::LowerAsSTATEPOINT(
       Record.type = RecordType::Spill;
       Record.payload.FI = cast<FrameIndexSDNode>(Loc)->getIndex();
     } else {
-      Record.type = RecordType::NoRelocate;
-      // If we didn't relocate a value, we'll essentialy end up inserting an
-      // additional use of the original value when lowering the gc.relocate.
-      // We need to make sure the value is available at the new use, which
-      // might be in another block.
+      // In-place statepoints relocate through an opaque pseudo of the
+      // original value (see RecordType::InPlace); everything else uses
+      // the value directly.
+      Record.type = InPlaceStatepoint ? RecordType::InPlace
+                                      : RecordType::NoRelocate;
+      // Either way the lowering inserts a use of the original value at
+      // the gc.relocate, which might be in another block.
       if (Relocate->getParent() != StatepointInstr->getParent())
         ExportFromCurrentBlock(V);
     }
@@ -1447,6 +1453,34 @@ void SelectionDAGBuilder::visitGCRelocate(const GCRelocateInst &Relocate) {
 
     assert(SpillLoad.getNode());
     setValue(&Relocate, SpillLoad);
+    return;
+  }
+
+  if (Record.type == RecordType::InPlace) {
+    // The post-statepoint incarnation: an opaque pseudo of the original
+    // value. Constants do not relocate and pass through directly (with
+    // the oxcaml-safe undef immediate, as below).
+    SDValue SD = getValue(DerivedPtr);
+    if (SD.isUndef() && SD.getValueType().getSizeInBits() <= 64) {
+      setValue(&Relocate, DAG.getConstant(1, SDLoc(SD), MVT::i64));
+      return;
+    }
+    if (isa<ConstantSDNode>(SD) || isa<FrameIndexSDNode>(SD)) {
+      setValue(&Relocate, SD);
+      return;
+    }
+    SDLoc DL = getCurSDLoc();
+    SDValue Chain = DAG.getRoot();
+    SDValue Ops[] = {
+        Chain,
+        DAG.getTargetConstant(Intrinsic::aarch64_oxcaml_relocated, DL,
+                              MVT::i64),
+        SD};
+    SDValue Node =
+        DAG.getNode(ISD::INTRINSIC_W_CHAIN, DL,
+                    DAG.getVTList(SD.getValueType(), MVT::Other), Ops);
+    DAG.setRoot(Node.getValue(1));
+    setValue(&Relocate, Node);
     return;
   }
 

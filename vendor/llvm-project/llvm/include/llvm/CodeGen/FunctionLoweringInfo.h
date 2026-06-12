@@ -107,6 +107,11 @@ public:
       // SDValue kept in StatepointLoweringInfo structure. This valid for local
       // relocates only.
       SDValueNode,
+      // OxCaml in-place statepoint: the gc.relocate lowers to an opaque
+      // pseudo (OXCAML_RELOCATE) of the original value, severing value
+      // identity across the statepoint for every pre-coalescing pass;
+      // the pseudo becomes a COPY before coalescing and merges away.
+      InPlace,
     } type = NoRelocate;
     // Payload contains either frame index of the stack slot in which the value
     // was spilled, or virtual register which contains the re-definition.

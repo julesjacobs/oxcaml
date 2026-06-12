@@ -141,6 +141,7 @@ void initializeFixIrreduciblePass(PassRegistry &);
 void initializeFixupStatepointCallerSavedPass(PassRegistry&);
 void initializeOxCamlStatepointSpillRootsPass(PassRegistry&);
 void initializeOxCamlGCRootVerifierPass(PassRegistry&);
+void initializeOxCamlLowerRelocatePass(PassRegistry&);
 void initializeFlattenCFGLegacyPassPass(PassRegistry &);
 void initializeFloat2IntLegacyPassPass(PassRegistry&);
 void initializeForceFunctionAttrsLegacyPassPass(PassRegistry&);

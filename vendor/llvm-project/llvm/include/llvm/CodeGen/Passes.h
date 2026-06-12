@@ -579,6 +579,11 @@ namespace llvm {
   /// across a statepoint is listed as a root (flag-gated, report only).
   extern char &OxCamlGCRootVerifierID;
 
+  /// For OxCaml GC functions, rewrite OXCAML_RELOCATE pseudos (the
+  /// opaque post-statepoint incarnations of gc values under in-place
+  /// lowering) into plain COPYs immediately before register coalescing.
+  extern char &OxCamlLowerRelocateID;
+
   /// The pass transforms load/store <256 x i32> to AMX load/store intrinsics
   /// or split the data to two <128 x i32>.
   FunctionPass *createX86LowerAMXTypePass();
