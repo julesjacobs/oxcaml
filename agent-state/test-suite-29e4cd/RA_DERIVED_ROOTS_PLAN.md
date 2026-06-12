@@ -880,8 +880,16 @@ Flag: `-oxcaml-statepoint-inplace` (ISel-level), default off until proven.
   frames, no pool spills).
   NOTE: rounds 11-12 pass changes are NOT flag-gated — they also run
   in default slot mode (they only ADD listed roots, soundness args
-  are mode-independent). Default-mode cascade revalidation launched
-  (full-cascade-default-r12).
+  are mode-independent). DEFAULT-MODE CASCADE FULL GREEN 2026-06-12
+  (stage1, boot-flip 3/3, stage2, stage1-flip 10/10): both
+  configurations validate with the new listing machinery. STEP 2
+  VALIDATION COMPLETE. Open decisions: flip the in-place flags to
+  default (requires re-promoting llvm-codegen/allocation.ml expects);
+  then step 3 (delete the ISel spill machinery, stable root homes,
+  FixupStatepointCallerSaved-for-oxcaml). Parked cleanups: exnroot
+  alloca-section operands double-listed in descriptors (walkGCPtrSection
+  only reads the pointer section, the ValueHome path re-appends;
+  harmless but bloats frametables), verifier GCValueness port.
   Forensic tooling kept: /tmp/gcsnap.py (in-memory ring snapshots of
   every GC from #40001 — crash GC count is nondeterministic across
   runs by ~600!), /tmp/f11-run.sh, gcwalk2 (cross-process descriptor
