@@ -1002,6 +1002,25 @@ test-cc 0); verifier corpus unchanged except one more instance of the
 documented bit-propagation-gap FP class at an invoke statepoint
 (type_send), benign under the identity-based sibling rule. translcore
 -25 instrs / -8 sp-stores (pool double-spills at invokes gone).
+PHASE 2 SOAKING GREEN (flag-on cascade full green, round 4): SSA
+exception roots behind -rs4gc-oxcaml-exn-ssa-roots. Non-phi
+handler-live gc pointers stay in SSA; opacity via oxcaml.relocated
+barriers after trap.recover; phis/non-pointers/boundary keep slots.
+Soak rounds fixed two edge-resolution gaps in the remaining slot-phi
+machinery (both arise because SSA now flows on unwind edges, so loop
+transforms split shared pads into trampoline chains): (1) the phi
+edge-value walk generalized from single-hop to the full branch-only
+trampoline path from each protected invoke (chains of .split-lp pads
+with phis at every hop); (2) values bottoming at an exceptional-path
+gc.relocate of the invoke itself (C-call statepoints are
+spill-lowered and create them) unwrap to the relocate's source — the
+listed slot is rewritten by the GC at the statepoint, so the
+pre-invoke store matches what the relocate describes. Also barriers
+from enclosing regions unwrap to their operand at nested store sites.
+typecore: 992 barriers, exnroot allocas 168->127, verifier improves
+(bit-gap finding resolves). REMAINING for default flip: phi coverage,
+non-pointer values, boundary machinery retirement, ocamltest +
+try/raise perf probes flag-on.
 Current contract notes for phase 1-2: runtime-entered = push.trap
 blockaddress target OR dominating trap.publish; recovery ABI liveins
 = x0/x26/x27/x28; ISel rejects trap.recover outside runtime-entered

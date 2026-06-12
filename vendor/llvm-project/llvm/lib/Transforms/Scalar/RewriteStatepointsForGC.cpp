@@ -3769,14 +3769,61 @@ static bool materializeOxCamlExceptionRootSlots(
         }
         if (!EdgeValue)
           report_fatal_error("missing OxCaml recovery PHI incoming value");
-        if (auto *EdgePhi = dyn_cast<PHINode>(EdgeValue)) {
-          if (EdgePhi->getParent() == II->getUnwindDest()) {
-            int IncomingIndex = EdgePhi->getBasicBlockIndex(II->getParent());
-            if (IncomingIndex < 0)
-              report_fatal_error(
-                  "missing OxCaml trampoline PHI incoming value");
-            EdgeValue = EdgePhi->getIncomingValue(IncomingIndex);
+        // Resolve the value carried on THIS invoke's unwind path. The
+        // path from the invoke to the slot phi's block is a chain of
+        // branch-only trampolines (loop transforms split shared landing
+        // pads, and with SSA exception roots the splits carry phis at
+        // every hop): walk the chain and select each phi's incoming for
+        // the path predecessor. Opacity barriers from enclosing recovery
+        // blocks unwrap to their operand — the runtime value at this
+        // edge is the operand's current location content, and the
+        // operand dominates everything the barrier dominates.
+        SmallVector<BasicBlock *, 8> UnwindPath;
+        {
+          BasicBlock *PathBB = II->getUnwindDest();
+          while (PathBB != SlotPhi->getParent() && UnwindPath.size() < 64) {
+            UnwindPath.push_back(PathBB);
+            auto *Br = dyn_cast<BranchInst>(PathBB->getTerminator());
+            if (!Br || !Br->isUnconditional())
+              break;
+            PathBB = Br->getSuccessor(0);
           }
+        }
+        for (bool Progress = true; Progress;) {
+          Progress = false;
+          if (auto *EdgePhi = dyn_cast<PHINode>(EdgeValue)) {
+            auto It = llvm::find(UnwindPath, EdgePhi->getParent());
+            if (It != UnwindPath.end()) {
+              BasicBlock *PathPred =
+                  It == UnwindPath.begin() ? II->getParent() : *(It - 1);
+              int IncomingIndex = EdgePhi->getBasicBlockIndex(PathPred);
+              if (IncomingIndex < 0)
+                report_fatal_error(
+                    "missing OxCaml trampoline PHI incoming value");
+              EdgeValue = EdgePhi->getIncomingValue(IncomingIndex);
+              Progress = true;
+              continue;
+            }
+          }
+          if (auto *BarrierCI = dyn_cast<CallInst>(EdgeValue))
+            if (BarrierCI->getIntrinsicID() ==
+                Intrinsic::aarch64_oxcaml_relocated) {
+              EdgeValue = BarrierCI->getArgOperand(0);
+              Progress = true;
+              continue;
+            }
+          // An exceptional-path relocate of THIS invoke (spill-lowered
+          // C-call statepoints create them; the token is the landing
+          // pad): before the invoke the value is the relocate's source.
+          // The slot is listed at the statepoint, so the GC rewrites the
+          // stored copy exactly as the relocate describes.
+          if (auto *Reloc = dyn_cast<GCRelocateInst>(EdgeValue))
+            if (auto *LP = dyn_cast<LandingPadInst>(Reloc->getArgOperand(0)))
+              if (LP->getParent() == II->getUnwindDest() ||
+                  llvm::is_contained(UnwindPath, LP->getParent())) {
+                EdgeValue = Reloc->getDerivedPtr();
+                Progress = true;
+              }
         }
         EdgeValue = nonPoisonTrapRecoverySlotValue(EdgeValue);
         if (auto *EdgeInst = dyn_cast<Instruction>(EdgeValue))
