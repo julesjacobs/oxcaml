@@ -10981,6 +10981,24 @@ void SelectionDAGISel::LowerArguments(const Function &F) {
                                    Reg);
     }
 
+    // OxCaml: vregs holding addrspace(1) formal arguments are known gc
+    // value seeds for the post-RA root analyses.
+    auto MarkOxCamlGCArg = [&](Register Reg) {
+      const Function &Fn = *FuncInfo->Fn;
+      if (!Reg.isVirtual() || !Fn.hasGC() ||
+          (Fn.getGC() != "oxcaml" && Fn.getGC() != "ocaml"))
+        return;
+      if (auto *PT = dyn_cast<PointerType>(Arg.getType()))
+        if (PT->getAddressSpace() == 1) {
+          MachineRegisterInfo &MRI = FuncInfo->MF->getRegInfo();
+          MRI.setOxCamlGCPtr(Reg);
+          MRI.setOxCamlGCArg(Reg);
+          if (getenv("OXSR_DEBUG_ARGS"))
+            errs() << "[oxsr-arg] " << FuncInfo->MF->getName() << ": arg "
+                   << Arg.getArgNo() << " -> " << printReg(Reg) << "\n";
+        }
+    };
+
     // If this argument is live outside of the entry block, insert a copy from
     // wherever we got it to the vreg that other BB's will reference it as.
     if (Res.getOpcode() == ISD::CopyFromReg) {
@@ -10990,12 +11008,14 @@ void SelectionDAGISel::LowerArguments(const Function &F) {
       unsigned Reg = cast<RegisterSDNode>(Res.getOperand(1))->getReg();
       if (Register::isVirtualRegister(Reg)) {
         FuncInfo->ValueMap[&Arg] = Reg;
+        MarkOxCamlGCArg(Reg);
         continue;
       }
     }
     if (!isOnlyUsedInEntryBlock(&Arg, TM.Options.EnableFastISel)) {
-      FuncInfo->InitializeRegForValue(&Arg);
+      Register Reg = FuncInfo->InitializeRegForValue(&Arg);
       SDB->CopyToExportRegsIfNeeded(&Arg);
+      MarkOxCamlGCArg(Reg);
     }
   }
 
@@ -11067,11 +11087,22 @@ static bool shouldUseStableStatepointRootHome(const PHINode &PN,
 
   bool HasRelocateContinuation = false;
   bool HasSeedValue = false;
-  for (const Value *Incoming : PN.incoming_values()) {
-    if (isRelocateContinuationOfPHI(Incoming, PN))
+  for (unsigned I = 0, E = PN.getNumIncomingValues(); I != E; ++I) {
+    if (isRelocateContinuationOfPHI(PN.getIncomingValue(I), PN)) {
       HasRelocateContinuation = true;
-    else
-      HasSeedValue = true;
+      continue;
+    }
+    HasSeedValue = true;
+    // Seed stores are emitted at the END of the incoming block (phi-copy
+    // placement), not on the edge. On a critical edge the store would also
+    // execute on the paths to the block's other successors, clobbering the
+    // home while older values of the phi are still read from it (found as
+    // a deterministic miscompile of Parmatch.pressure_variants: a loop
+    // exit path read the next iteration's seed). Only use a home when
+    // every seed edge is the incoming block's sole outgoing edge.
+    const Instruction *Term = PN.getIncomingBlock(I)->getTerminator();
+    if (Term->getNumSuccessors() != 1)
+      return false;
   }
 
   return HasRelocateContinuation && HasSeedValue;
@@ -11099,7 +11130,12 @@ getOrCreateStableStatepointRootHome(const PHINode &PN,
   MachineFrameInfo &MFI = Builder.DAG.getMachineFunction().getFrameInfo();
   MFI.markAsStatepointSpillSlotObjectIndex(FI);
 
-  Builder.FuncInfo.StatepointStackSlots.push_back(FI);
+  // Deliberately NOT added to FuncInfo.StatepointStackSlots: the home is
+  // dedicated to this phi for the whole function. Pool membership would
+  // let StatepointLoweringState::allocateStackSlot hand the slot to an
+  // unrelated value at any statepoint that does not itself use the home,
+  // silently clobbering the live phi (found as a deterministic
+  // miscompile of Parmatch.pressure_variants under slot-only lowering).
   Homes[&PN] = FI;
   return FI;
 }

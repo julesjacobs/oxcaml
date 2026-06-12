@@ -1,4 +1,6 @@
-; RUN: llc -mtriple=aarch64-apple-macosx -stop-after=fixup-statepoint-caller-saved -o - %s | FileCheck %s
+; Register-root lowering is opt-in until statepoints have in-place root
+; semantics (the tied-def form creates unlisted secondary locations).
+; RUN: llc -mtriple=aarch64-apple-macosx -max-registers-for-gc-values=1000 -stop-after=fixup-statepoint-caller-saved -o - %s | FileCheck %s
 
 @caml_call_gc = external global ptr
 

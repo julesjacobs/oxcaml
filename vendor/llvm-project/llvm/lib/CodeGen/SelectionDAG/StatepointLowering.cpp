@@ -319,8 +319,15 @@ static void reservePreviousStackSlotForValue(const Value *IncomingValue,
   const auto &StatepointSlots = Builder.FuncInfo.StatepointStackSlots;
 
   auto SlotIt = find(StatepointSlots, *Index);
-  assert(SlotIt != StatepointSlots.end() &&
-         "Value spilled to the unknown stack slot");
+  if (SlotIt == StatepointSlots.end()) {
+    // A stable statepoint root home (see getOrCreateStableStatepointRootHome):
+    // dedicated to a single phi for the whole function and never handed out
+    // by the slot allocator, so no per-statepoint reservation is needed.
+    SDValue Loc =
+        Builder.DAG.getTargetFrameIndex(*Index, Builder.getFrameIndexTy());
+    Builder.StatepointLowering.setLocation(Incoming, Loc);
+    return;
+  }
 
   // This is one of our dedicated lowering slots
   const int Offset = std::distance(StatepointSlots.begin(), SlotIt);
@@ -573,15 +580,30 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
 
   // Decide which derived pointers will go on VRegs.  OxCaml allocation
   // statepoints enter runtime paths that save ordinary root registers in
-  // gc_regs, so they can describe scalar GC roots as registers by default.
-  // Keep the generic statepoint default unchanged, and let an explicit command
-  // line value override the OxCaml default for debugging.
-  const bool IsOxCamlAllocStatepoint =
-      SI.CLI.CallConv == CallingConv::OxCaml_Alloc;
-  unsigned MaxVRegPtrs =
-      MaxRegistersForGCPointers.getNumOccurrences()
-          ? MaxRegistersForGCPointers.getValue()
-          : IsOxCamlAllocStatepoint ? std::numeric_limits<unsigned>::max() : 0;
+  // gc_regs, so they COULD describe scalar GC roots as registers; however
+  // the tied-def vreg lowering makes every live gc value multi-located
+  // (forced into a register at the statepoint while its spill-slot homes
+  // stay live and are reloaded afterwards), and the post-RA root listing
+  // machinery cannot soundly enumerate all the secondary locations (found
+  // via OXCAML_YOUNG_FLIP: cont-pattern frames with ~18 reloaded values
+  // whose slot copies went stale). Until statepoints use in-place root
+  // semantics (no tied defs), keep every gc value in its ISel spill slot
+  // at every statepoint: single canonical location per value, which the
+  // frametable lists and the GC updates. Override for experiments with
+  // -max-registers-for-gc-values.
+  unsigned MaxVRegPtrs = MaxRegistersForGCPointers.getNumOccurrences()
+                             ? MaxRegistersForGCPointers.getValue()
+                             : 0;
+  // Debug hook: comma-separated function-name substrings that use the vreg
+  // lowering regardless of the default (bisecting miscompiles).
+  if (const char *FL = getenv("OXSR_VREG_FUNCS")) {
+    StringRef Name = Builder.DAG.getMachineFunction().getName();
+    SmallVector<StringRef, 8> Parts;
+    StringRef(FL).split(Parts, ',', -1, false);
+    for (StringRef P : Parts)
+      if (!P.empty() && Name.contains(P))
+        MaxVRegPtrs = std::numeric_limits<unsigned>::max();
+  }
 
   // Pointers used on exceptional path of invoke statepoint.
   // We cannot assing them to VRegs.

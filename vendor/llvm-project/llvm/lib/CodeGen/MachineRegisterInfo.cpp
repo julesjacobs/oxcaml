@@ -172,6 +172,10 @@ Register MachineRegisterInfo::cloneVirtualRegister(Register VReg,
   Register Reg = createIncompleteVirtualRegister(Name);
   VRegInfo[Reg].first = VRegInfo[VReg].first;
   setType(Reg, getType(VReg));
+  if (isOxCamlGCPtr(VReg))
+    setOxCamlGCPtr(Reg);
+  if (isOxCamlGCArg(VReg))
+    setOxCamlGCArg(Reg);
   noteCloneVirtualRegister(Reg, VReg);
   return Reg;
 }
@@ -210,6 +214,8 @@ void MachineRegisterInfo::clearVirtRegs() {
   }
 #endif
   VRegInfo.clear();
+  OxCamlGCVRegs.clear();
+  OxCamlGCArgVRegs.clear();
   for (auto &I : LiveIns)
     I.second = 0;
 }

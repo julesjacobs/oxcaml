@@ -1181,6 +1181,32 @@ EmitMachineNode(SDNode *Node, bool IsClone, bool IsCloned,
     }
   }
 
+  // OxCaml: seed the gc bit on statepoint gc-operand vregs and relocate
+  // result vregs. Split/spill siblings inherit the bit through
+  // cloneVirtualRegister and the register coalescer merges it; the gc-root
+  // verifier (and, later, code-motion gates) consume it.
+  if (Opc == TargetOpcode::STATEPOINT) {
+    const Function &F = MF->getFunction();
+    if (F.hasGC() && (F.getGC() == "oxcaml" || F.getGC() == "ocaml")) {
+      MachineInstr *MI = MIB;
+      for (unsigned I = 0; I < NumDefs; ++I)
+        if (MI->getOperand(I).isReg() && MI->getOperand(I).getReg().isVirtual())
+          MRI->setOxCamlGCPtr(MI->getOperand(I).getReg());
+      StatepointOpers SO(MI);
+      int First = SO.getFirstGCPtrIdx();
+      if (First > 0) {
+        unsigned NumGCPtrs = MI->getOperand(SO.getNumGCPtrIdx()).getImm();
+        unsigned Use = (unsigned)First;
+        for (unsigned N = 0; N < NumGCPtrs; ++N) {
+          const MachineOperand &MO = MI->getOperand(Use);
+          if (MO.isReg() && MO.getReg().isVirtual())
+            MRI->setOxCamlGCPtr(MO.getReg());
+          Use = StackMaps::getNextMetaArgIdx(MI, Use);
+        }
+      }
+    }
+  }
+
   // Run post-isel target hook to adjust this instruction if needed.
   if (II.hasPostISelHook())
     TLI->AdjustInstrPostInstrSelection(*MIB, Node);

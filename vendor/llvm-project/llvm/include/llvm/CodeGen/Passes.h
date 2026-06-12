@@ -575,6 +575,10 @@ namespace llvm {
   /// of gc values to the statepoint gc operand list so the GC updates them.
   extern char &OxCamlStatepointSpillRootsID;
 
+  /// For OxCaml GC functions, verify that every gc value location live
+  /// across a statepoint is listed as a root (flag-gated, report only).
+  extern char &OxCamlGCRootVerifierID;
+
   /// The pass transforms load/store <256 x i32> to AMX load/store intrinsics
   /// or split the data to two <128 x i32>.
   FunctionPass *createX86LowerAMXTypePass();

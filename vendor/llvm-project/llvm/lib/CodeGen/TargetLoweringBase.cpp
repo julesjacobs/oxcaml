@@ -2266,6 +2266,15 @@ MachineMemOperand::Flags TargetLoweringBase::getLoadMemOperandFlags(
                                          /*DT=*/nullptr, LibInfo))
     Flags |= MachineMemOperand::MODereferenceable;
 
+  // OxCaml: record that this load produces a gc value; the pointer type
+  // is otherwise lost when it lowers to i64. See MOOxCamlGCValue.
+  if (LI.getType()->isPointerTy() &&
+      LI.getType()->getPointerAddressSpace() == 1) {
+    const Function *F = LI.getFunction();
+    if (F->hasGC() && (F->getGC() == "oxcaml" || F->getGC() == "ocaml"))
+      Flags |= MOOxCamlGCValue;
+  }
+
   Flags |= getTargetMMOFlags(LI);
   return Flags;
 }
@@ -2280,6 +2289,15 @@ TargetLoweringBase::getStoreMemOperandFlags(const StoreInst &SI,
 
   if (SI.hasMetadata(LLVMContext::MD_nontemporal))
     Flags |= MachineMemOperand::MONonTemporal;
+
+  // OxCaml: record that this store writes a gc value. See
+  // MOOxCamlGCValue.
+  Type *STy = SI.getValueOperand()->getType();
+  if (STy->isPointerTy() && STy->getPointerAddressSpace() == 1) {
+    const Function *F = SI.getFunction();
+    if (F->hasGC() && (F->getGC() == "oxcaml" || F->getGC() == "ocaml"))
+      Flags |= MOOxCamlGCValue;
+  }
 
   // FIXME: Not preserving dereferenceable
   Flags |= getTargetMMOFlags(SI);

@@ -1,7 +1,97 @@
 # Progress
 
-Last updated: 2026-06-11 (entry-cost codegen fixes landed; stage2 + ocamltest
-green; compiler bench 0.9715).
+Last updated: 2026-06-12. THE LATENT FLIP MISCOMPILE IS FIXED (7 bugs
+total) AND THE FULL GATE IS GREEN: stage1+stage2 builds, boot-flip 3/3,
+stage1-binary flip-stress 16/16 module runs (typecore ctype typedecl
+env typeclass parmatch matching translcore btype subst printtyp),
+SELF_STAGE=2 ocamltest 6756/0 (allocation.ml expect promoted for
+slot-only spill codegen), lit = known pre-existing failures only
+(statepoint-call-lowering.ll verified failing at baseline 57e9764b3c
+too), minibench geomean 0.8870 vs native (no regression vs 0.9064
+prior slot-only / 0.886 vreg-era). All changes uncommitted.
+
+## BUG 6: mixed spill slots after StackSlotColoring (2026-06-12)
+
+The stage1-binary flip-stress failures (typecore/ctype/typedecl/env)
+survived the five fixes below. Forensics (watchpoint-grade, see
+/tmp/gcscan2.py `gcl`/`gcwatch`) pinned the stale root to
+Closure_conversion.cont_96_350: the same young value V0 sat in listed
+sp+0x80 (GC updated it), in UNLISTED RA family slots sp+0x20/sp+0x70
+(%stack.32 — read later, the crash chain), and in the gc_regs bucket
+slot of dead x1 (the earlier "heap holder" red herring — buckets are
+malloc'd near the domain). The pass skipped %stack.32 as "non-value"
+because ONE of the slot's stores was raw: StackSlotColoring runs before
+the pass and merges different vregs' disjoint ranges into one FI (and
+collapses LiveStacks VNIs), so the per-FI "all stores are values"
+summary is structurally wrong. Fixed in OxCamlStatepointSpillRoots:
+per-query REACHING-STORE value-ness (block-local last store, else AND
+over pred-exit states, memoized/optimistic on cycles), with new value
+evidence: ValueHome-store seeding (covers STRXpre alloc write-backs),
+a new MOOxCamlGCValue MMO flag set by TargetLoweringBase for IR
+ptr-addrspace(1) loads/stores, entry physreg arg spills via MRI
+liveins, direct-callee statepoint-result return-type lookup, consumer
+evidence via seeded reloads, and odd immediates as tagged scalars.
+Corpus (ccmain2/ltf/parmatch/typecore IR with EXACT build flags from
+clang-wrapper.log — llc without -ffixed-x15/x26 hides everything):
+remaining skips all verified benign (i64-typed immediates, LOADgot
+statics). Parked: port GCValueness into the verifier (it now FPs on
+entry-init-extended live ranges); statepoint-call-lowering.ll lit
+failure needs a pre/post check.
+
+BUG 7 (same day): the BUG 6 fix moved the crash INTO the GC and
+exposed that register roots had been appended at C-CALL statepoints,
+where they are unresolvable: only the alloc-family runtime entries run
+SAVE_ALL_REGS, and RESTORE frees the bucket without clearing
+Caml_state->gc_regs, so the walk reads a FREED bucket (crash:
+Regalloc_irc.run's `bl caml_c_call` descriptor listed reg16=x19; an
+allocating C primitive GC'd; oldify(stale residue) SIGBUS'd in
+get_header_val). Fixed: register appends and the verifier's real
+register findings are gated on alloc-family statepoints (regmask
+preserves X0). Validation cascade running.
+
+## RA-derived roots, step 0 + residual root fixes (2026-06-11, uncommitted)
+
+Built the gc bit on virtual registers (MachineRegisterInfo, seeded at
+statepoint emission, inherited through splits, OR'd by the coalescer) and
+the flag-gated post-RA `OxCamlGCRootVerifier` pass. First corpus run (841
+stashed modules) found residual root-listing bugs; both classes fixed in
+OxCamlStatepointSpillRoots the same metadata-only way:
+- gc-bit-based slot families (RA re-spills of ISel-slot-resident values
+  created unlisted second slots): 198 violations -> 0.
+- register second locations (an RA/pre-RA copy of a value that IS listed
+  at the statepoint survives in a preserved register unlisted, e.g.
+  Misc.loop_77 %173/$x13): now appended as in-place register roots
+  (`-oxcaml-statepoint-register-roots`): 94 violations -> 0.
+The earlier "llvmize ptrtoint store" suspicion was RETRACTED: that value
+is statically a tagged immediate; the verifier now separates that shape
+(value-connectivity union-find) and reports it as info only.
+Corpus after fixes: 0 slot / 0 register / 0 clobbered violations.
+LATER THE SAME DAY: per-register taint proved unsound for LISTING (raw
+ranges of coalesced vregs would be handed to the GC as roots), so the
+pass gained a flow-sensitive per-VNI value analysis (GCValueness) — only
+provably-value contents are listed. AND: stage builds exposed a
+DETERMINISTIC PRE-EXISTING latent miscompile (typecore + young-flip
+SIGBUS, crashes with baseline/before-5/current clang alike, native
+passes — NOT caused by this week's work; every earlier green gate
+shipped it). Root cause open; this now gates landing. Details:
+RA_DERIVED_ROOTS_PLAN.md (step 0 sections + "LATENT PRE-EXISTING
+MISCOMPILE FOUND").
+CONTINUED (same day, root-cause marathon): the latent crash decomposed
+into FIVE compiler bugs, all root-caused: (1) exnroot-homed values
+RA-re-spilled into unlisted slots [fixed: value-home FIs seed family +
+value-ness]; (2) loop-carried listed slots uninitialized on iteration 1
+[fixed: dominance check + entry init]; (3) the cont pattern — tied-def
+vreg lowering at alloc statepoints creates unlisted live pool-slot
+copies, unfixable post hoc [decision: MaxVRegPtrs=0 default for oxcaml
+until in-place statepoints (plan step 1-2); register lowering stays
+available via -max-registers-for-gc-values]; (4) DETERMINISTIC:
+StatepointStableRootHomes seed stores on critical edges clobber the
+home (Parmatch.pressure_variants -> bogus non-exhaustiveness errors;
+broke every -warn-error build under slot-only mode) [fixed: homes
+require non-critical seed edges]; (5) home FIs were in the statepoint
+slot pool and could be handed to unrelated values [fixed: not pooled].
+Full forensics, repro recipes and hunt methods in
+RA_DERIVED_ROOTS_PLAN.md.
 
 ## Entry-cost codegen fixes (2026-06-11)
 

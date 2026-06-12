@@ -1408,6 +1408,10 @@ bool TargetPassConfig::addRegAssignAndRewriteOptimized() {
   // the statepoint gc operand lists while VirtRegMap/LiveStacks are alive.
   addPass(&OxCamlStatepointSpillRootsID);
 
+  // OxCaml: verify root completeness at statepoints (flag-gated, reports
+  // only; runs after the spill-slot roots pass so its additions count).
+  addPass(&OxCamlGCRootVerifierID);
+
   // Allow targets to change the register assignments before rewriting.
   addPreRewrite();
 

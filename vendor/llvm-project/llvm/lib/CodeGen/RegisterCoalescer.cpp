@@ -2099,6 +2099,14 @@ bool RegisterCoalescer::joinCopy(MachineInstr *CopyMI, bool &Again) {
     updateRegDefsUses(CP.getDstReg(), CP.getDstReg(), CP.getDstIdx());
   updateRegDefsUses(CP.getSrcReg(), CP.getDstReg(), CP.getSrcIdx());
 
+  // OxCaml: the merged register holds a gc pointer if either side did.
+  if (CP.getDstReg().isVirtual()) {
+    if (MRI->isOxCamlGCPtr(CP.getSrcReg()))
+      MRI->setOxCamlGCPtr(CP.getDstReg());
+    if (MRI->isOxCamlGCArg(CP.getSrcReg()))
+      MRI->setOxCamlGCArg(CP.getDstReg());
+  }
+
   // Shrink subregister ranges if necessary.
   if (ShrinkMask.any()) {
     LiveInterval &LI = LIS->getInterval(CP.getDstReg());

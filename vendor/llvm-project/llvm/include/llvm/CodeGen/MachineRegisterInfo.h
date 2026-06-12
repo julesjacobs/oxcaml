@@ -15,6 +15,7 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/BitVector.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/IndexedMap.h"
 #include "llvm/ADT/PointerUnion.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -77,6 +78,21 @@ private:
   IndexedMap<std::pair<RegClassOrRegBank, MachineOperand *>,
              VirtReg2IndexFunctor>
       VRegInfo;
+
+  /// Virtual registers known to hold OxCaml GC pointers: statepoint
+  /// gc-operand and relocate-result vregs (seeded by the instruction
+  /// emitter), addrspace(1) formal arguments, their coalesced partners,
+  /// and their split/spill siblings (inherited via cloneVirtualRegister).
+  /// Conservative: the bit survives coalescing with non-gc values.
+  /// Consumed by the OxCaml gc-root verifier and (later) by code-motion
+  /// gates; not serialized to MIR.
+  DenseSet<unsigned> OxCamlGCVRegs;
+
+  /// The subset of OxCamlGCVRegs that hold addrspace(1) formal arguments:
+  /// the value defined by their entry-block copy from the ABI register is
+  /// known to be a gc VALUE (used as a seed by the per-value root
+  /// analysis, where the gc bit alone is too coarse).
+  DenseSet<unsigned> OxCamlGCArgVRegs;
 
   /// Map for recovering vreg name from vreg number.
   /// This map is used by the MIR Printer.
@@ -753,6 +769,28 @@ public:
   /// Create and return a new virtual register in the function with the same
   /// attributes as the given register.
   Register cloneVirtualRegister(Register VReg, StringRef Name = "");
+
+  /// Mark \p Reg as holding an OxCaml GC pointer (see OxCamlGCVRegs).
+  void setOxCamlGCPtr(Register Reg) {
+    assert(Reg.isVirtual());
+    OxCamlGCVRegs.insert(Reg.id());
+  }
+
+  /// Whether \p Reg is known to hold an OxCaml GC pointer.
+  bool isOxCamlGCPtr(Register Reg) const {
+    return Reg.isVirtual() && OxCamlGCVRegs.contains(Reg.id());
+  }
+
+  /// Mark \p Reg as holding an addrspace(1) formal argument.
+  void setOxCamlGCArg(Register Reg) {
+    assert(Reg.isVirtual());
+    OxCamlGCArgVRegs.insert(Reg.id());
+  }
+
+  /// Whether \p Reg holds an addrspace(1) formal argument.
+  bool isOxCamlGCArg(Register Reg) const {
+    return Reg.isVirtual() && OxCamlGCArgVRegs.contains(Reg.id());
+  }
 
   /// Get the low-level type of \p Reg or LLT{} if Reg is not a generic
   /// (target independent) virtual register.
