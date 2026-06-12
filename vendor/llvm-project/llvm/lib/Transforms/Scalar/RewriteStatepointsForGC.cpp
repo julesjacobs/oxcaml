@@ -129,6 +129,15 @@ static cl::opt<bool> DebugOxCamlDerivedRemat(
     "rs4gc-debug-oxcaml-derived-remat", cl::Hidden, cl::init(false),
     cl::desc("Print OxCaml statepoint derived/base candidates"));
 
+static cl::opt<bool> OxCamlExnSSARoots(
+    "rs4gc-oxcaml-exn-ssa-roots", cl::Hidden, cl::init(false),
+    cl::desc("Keep non-phi handler-live GC values in SSA instead of "
+             "demoting them to exnroot slots: handler uses go through an "
+             "opaque aarch64.oxcaml.relocated barrier inserted after the "
+             "trap recovery intrinsic; the protected statepoints list the "
+             "live value and the register allocator's spill slot is its "
+             "stable location across the region."));
+
 static cl::opt<bool> DebugOxCamlGCPointerAllocas(
     "rs4gc-debug-oxcaml-gc-pointer-allocas", cl::Hidden, cl::init(false),
     cl::desc("Print OxCaml GC pointer allocas that RS4GC promotes or rejects"));
@@ -4078,14 +4087,41 @@ static bool materializeOxCamlExceptionRootSlots(
       KnownBases.clear();
     }
 
+    DenseMap<Value *, Instruction *> RecoveryBarrierForValue;
+    auto GetOrCreateRecoveryBarrier =
+        [&](Value *RootValue) -> Instruction * {
+      if (Instruction *B = RecoveryBarrierForValue.lookup(RootValue))
+        return B;
+      Function *Decl = Intrinsic::getDeclaration(
+          F.getParent(), Intrinsic::aarch64_oxcaml_relocated);
+      CallInst *Barrier = RecoverBuilder.CreateCall(
+          Decl, {RootValue},
+          suffixed_name_or(RootValue, ".exnssa", "exnssa"));
+      RecoveryBarrierForValue[RootValue] = Barrier;
+      return Barrier;
+    };
+
     for (Value *V : HandlerLiveGCValues) {
       Value *RootValue = FindExceptionRootValue(V);
-      LoadInst *Load = GetOrCreateRecoveryLoad(RootValue);
+      // SSA form with an opacity barrier: the value stays live into the
+      // recovery block via the unwind edges (so the protected
+      // statepoints list it and the GC updates its RA slot in place);
+      // handler uses flow through the opaque relocate so no later pass
+      // can identify them with a pre-statepoint copy. Restricted to
+      // plain gc pointers; everything else keeps the slot demotion.
+      bool UseSSA = OxCamlExnSSARoots &&
+                    isHandledGCPointerType(RootValue->getType()) &&
+                    RootValue->getType()->isPointerTy();
+      Instruction *Load = UseSSA ? GetOrCreateRecoveryBarrier(RootValue)
+                                 : cast<Instruction>(
+                                       GetOrCreateRecoveryLoad(RootValue));
       for (BasicBlock *RegionBB : RecoveryOnlyRegion) {
         for (Instruction &I : *RegionBB) {
           if (RegionBB == &BB && !Recover->comesBefore(&I))
             continue;
           if (&I == Load)
+            continue;
+          if (UseSSA && &I == RootValue)
             continue;
           I.replaceUsesOfWith(V, Load);
         }
