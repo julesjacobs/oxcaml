@@ -621,6 +621,11 @@ bool GCValueness::regValue(Register R, const VNInfo *VNI) {
           else if (LS.hasInterval(FI))
             V = slotValueAt(FI, VNI->def);
         }
+      } else if (StringRef(TII->getName(D->getOpcode())) ==
+                 "OXCAML_REDERIVE") {
+        // The opaque derived-pointer/allocation-result pin: its result
+        // is a gc value by construction.
+        V = true;
       } else if (D->mayStore() && D->hasOneMemOperand() &&
                  D->memoperands().front()->getAddrSpace() == 1 &&
                  D->getNumExplicitDefs() == 1 &&

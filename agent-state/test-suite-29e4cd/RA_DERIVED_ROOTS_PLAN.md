@@ -658,14 +658,26 @@ Flag: `-oxcaml-statepoint-inplace` (ISel-level), default off until proven.
   spill/reload pair around an in-place indirect-call statepoint:
     str x27,[sp,#8]; str x8,[sp]; blr x9; ldr x8,[sp,#8]; ldr x0,[x8,#0x38]
   The post-call reload reads the slot holding the SAVED PRE-CALL ALLOC
-  POINTER instead of the gc value (sp+0) and dereferences it. Suspect:
-  FixupStatepointCallerSaved's spill-slot caching (RegReloadCache /
-  CacheFI) interacting with plain in-place register operands — it
-  creates exactly such save/reload pairs around statepoints. Next:
-  replay consistbl.ml with the three flags, find the function in MIR
-  after fixup-statepoint-caller-saved, and check the slot assignment
-  it produced. Deterministic repro: the boot-flip typecore run
-  (exit 138) with the round-4 toolchain.
+  POINTER instead of the gc value (sp+0) and dereferences it.
+  ROOT-CAUSED (the fixup suspicion was wrong — the spill/reload was
+  value-consistent from RA's view): llvmize ALLOCATION RESULTS are
+  inttoptr(alloc_frontier +- k), arithmetic functions of the RAW i64
+  frontier, which crosses calls freely as plain data. With identity
+  relocates ISel folds the "relocated" block address back onto the
+  stale frontier (frontier+56 addressing). No AS1-derived machinery
+  can see it — the base is raw. FIX (same opacity principle): the
+  RS4GC pre-pass pins every gc-typed IntToPtrInst through
+  rederive(v, 0) at its definition; uses flow through the pinned vreg,
+  a listed root the GC updates in place, and the opaque pin severs the
+  arithmetic link. Verified: zero `str x27,[sp,...]` spills remain in
+  consistbl.
+  ROUND 5: same function, new shape — the PINNED block's RA spill slot
+  (sp+8) crossed the statepoint UNLISTED because GCValueness did not
+  recognize OXCAML_REDERIVE defs as values (the pin made producer
+  evidence WORSE). Fixed: regValue accepts OXCAML_REDERIVE defs (by
+  TII opcode name; lib/CodeGen cannot name AArch64 opcodes). Round 6
+  soaking. PERF NOTE before benchmarking: rederive(v,0) expands to
+  MOV #0 + ADD; fold the zero-offset case to a plain MOV.
 - Step 3: delete dead machinery; THEN revisit exnroots/homes on the
   simplified base (gc-ness + RA could subsume exnroot slots later by
   modeling raise edges as clobber-all, forcing handler-live values into
