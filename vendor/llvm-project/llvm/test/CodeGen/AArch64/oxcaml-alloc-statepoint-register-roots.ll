@@ -1,11 +1,11 @@
 ; Register-root lowering is opt-in until statepoints have in-place root
 ; semantics (the tied-def form creates unlisted secondary locations).
-; RUN: llc -mtriple=aarch64-apple-macosx -max-registers-for-gc-values=1000 -stop-after=fixup-statepoint-caller-saved -o - %s | FileCheck %s
+; RUN: llc -mtriple=aarch64-apple-macosx -oxcaml-statepoint-inplace=0 -oxcaml-statepoint-inplace-calls=0 -max-registers-for-gc-values=1000 -stop-after=fixup-statepoint-caller-saved -o - %s | FileCheck %s
 ;
 ; In-place lowering (-oxcaml-statepoint-inplace): at alloc-family
 ; statepoints gc values are plain untied operands (no spill, no reload,
 ; no tied def); relocates are identity. Ordinary calls still spill.
-; RUN: llc -mtriple=aarch64-apple-macosx -oxcaml-statepoint-inplace -verify-machineinstrs -stop-after=fixup-statepoint-caller-saved -o - %s | FileCheck --check-prefix=INPLACE %s
+; RUN: llc -mtriple=aarch64-apple-macosx -oxcaml-statepoint-inplace -oxcaml-statepoint-inplace-calls=0 -verify-machineinstrs -stop-after=fixup-statepoint-caller-saved -o - %s | FileCheck --check-prefix=INPLACE %s
 
 @caml_call_gc = external global ptr
 

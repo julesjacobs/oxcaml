@@ -1,4 +1,7 @@
-; RUN: llc -mtriple=arm64-apple-macosx -verify-machineinstrs -stop-before=greedy < %s | FileCheck %s
+; The stable-root-home machinery exists only for the ISel pool-spilling
+; scheme; in-place statepoint lowering (the default) bypasses it. Pin to
+; the slot scheme while it remains supported.
+; RUN: llc -mtriple=arm64-apple-macosx -oxcaml-statepoint-inplace=0 -oxcaml-statepoint-inplace-calls=0 -verify-machineinstrs -stop-before=greedy < %s | FileCheck %s
 
 @callee = external global ptr
 

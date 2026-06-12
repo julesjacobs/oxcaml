@@ -78,7 +78,7 @@ cl::opt<unsigned> MaxRegistersForGCPointers(
     cl::desc("Max number of VRegs allowed to pass GC pointer meta args in"));
 
 static cl::opt<bool> OxCamlStatepointInPlace(
-    "oxcaml-statepoint-inplace", cl::Hidden, cl::init(false),
+    "oxcaml-statepoint-inplace", cl::Hidden, cl::init(true),
     cl::desc("Lower OxCaml alloc-family statepoints with in-place root "
              "semantics: gc values stay plain (untied) operands wherever "
              "the register allocator put them; relocates are identity"));
@@ -87,7 +87,7 @@ static cl::opt<bool> OxCamlStatepointInPlace(
 // statepoint root homes, which exist only to give phis a fixed slot
 // across the ISel pool-spilling scheme that this flag removes.
 cl::opt<bool> OxCamlStatepointInPlaceCalls(
-    "oxcaml-statepoint-inplace-calls", cl::Hidden, cl::init(false),
+    "oxcaml-statepoint-inplace-calls", cl::Hidden, cl::init(true),
     cl::desc("Extend in-place statepoint lowering to ordinary OxCaml "
              "calls (clobber-all conventions): no ISel pool spilling; "
              "values live across land in register-allocator spill slots, "
