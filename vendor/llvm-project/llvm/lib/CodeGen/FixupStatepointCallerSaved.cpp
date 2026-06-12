@@ -326,6 +326,7 @@ private:
   FrameIndexesCache &CacheFI;
   bool AllowGCPtrInCSR;
   bool OnlySpillTargetForcedRegs;
+  bool SpillAllRegOperands;
   // Operands with physical registers requiring spilling.
   SmallVector<unsigned, 8> OpsToSpill;
   // Set of register to spill.
@@ -338,11 +339,12 @@ private:
 public:
   StatepointState(MachineInstr &MI, const uint32_t *Mask,
                   FrameIndexesCache &CacheFI, bool AllowGCPtrInCSR,
-                  bool OnlySpillTargetForcedRegs)
+                  bool OnlySpillTargetForcedRegs, bool SpillAllRegOperands)
       : MI(MI), MF(*MI.getMF()), TRI(*MF.getSubtarget().getRegisterInfo()),
         TII(*MF.getSubtarget().getInstrInfo()), MFI(MF.getFrameInfo()),
         Mask(Mask), CacheFI(CacheFI), AllowGCPtrInCSR(AllowGCPtrInCSR),
-        OnlySpillTargetForcedRegs(OnlySpillTargetForcedRegs) {
+        OnlySpillTargetForcedRegs(OnlySpillTargetForcedRegs),
+        SpillAllRegOperands(SpillAllRegOperands) {
 
     // Find statepoint's landing pad, if any.
     EHPad = nullptr;
@@ -396,7 +398,8 @@ public:
       if (OnlySpillTargetForcedRegs && !MustSpillForTarget)
         continue;
 
-      if (!MustSpillForTarget && isCalleeSaved(Reg) &&
+      if (!MustSpillForTarget && !SpillAllRegOperands &&
+          isCalleeSaved(Reg) &&
           (AllowGCPtrInCSR || !is_contained(GCRegs, Reg)))
         continue;
 
@@ -592,6 +595,16 @@ public:
     bool OnlySpillTargetForcedRegs =
         (Flags & (uint64_t)StatepointFlags::DeoptLiveIn) ||
         CC == CallingConv::OxCaml_Alloc;
+    // OxCaml C calls preserve x19-x26, so the register allocator may
+    // legally park a gc value there across the call - but a register
+    // root at a non-alloc statepoint is invisible to the runtime (only
+    // the alloc family populates gc_regs). Force EVERY register operand
+    // of these statepoints into a stack slot; the frame table can then
+    // describe it. A no-op under spill lowering (no register operands
+    // survive ISel there); load-bearing under in-place lowering.
+    bool SpillAllRegOperands =
+        CC == CallingConv::OxCaml_C_Call ||
+        CC == CallingConv::OxCaml_C_Call_StackArgs;
     LLVM_DEBUG(dbgs() << "\nMBB " << MI.getParent()->getNumber() << " "
                       << MI.getParent()->getName() << " : process statepoint "
                       << MI);
@@ -605,7 +618,7 @@ public:
     if (!Mask)
       Mask = TRI.getCallPreservedMask(MF, CC);
     StatepointState SS(MI, Mask, CacheFI, AllowGCPtrInCSR,
-                       OnlySpillTargetForcedRegs);
+                       OnlySpillTargetForcedRegs, SpillAllRegOperands);
     CacheFI.reset(SS.getEHPad());
 
     if (!SS.findRegistersToSpill())
