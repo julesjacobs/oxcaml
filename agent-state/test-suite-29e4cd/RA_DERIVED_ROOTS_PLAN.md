@@ -866,6 +866,22 @@ Flag: `-oxcaml-statepoint-inplace` (ISel-level), default off until proven.
   through reloads via the must-reach store. translcore Ltmp507 keeps
   0xb8 (numlive 36) and the module gains 2 more roots; lit 20 known;
   test-cc.sh 0. Round-12 cascade soak launched.
+  ROUND-12 CASCADE FULL GREEN (2026-06-12): stage1, boot-flip 3/3,
+  stage2, stage1-flip 10/10 incl env — FIRST fully green flip gate
+  under step 2. ocamltest (SELF_STAGE=2, inplace2 wrapper):
+  6755 passed / 1 failed = llvm-codegen/allocation.ml expect drift,
+  the EXPECTED in-place improvement (frame 32->16, statepoint spills
+  gone); re-promote only when in-place becomes default. Minibench
+  back-to-back (SAMPLES=3): slot geomean 0.8906 vs in-place 0.8983 —
+  PERF NEUTRAL (all per-case deltas -2.1%..+4.1%, inside layout
+  noise; boyer -0.5%, kb +1.2%: the loop re-spill elimination does
+  not move wall clock on these kernels). Step-2 verdict: correctness
+  achieved, perf neutral, structural code quality better (smaller
+  frames, no pool spills).
+  NOTE: rounds 11-12 pass changes are NOT flag-gated — they also run
+  in default slot mode (they only ADD listed roots, soundness args
+  are mode-independent). Default-mode cascade revalidation launched
+  (full-cascade-default-r12).
   Forensic tooling kept: /tmp/gcsnap.py (in-memory ring snapshots of
   every GC from #40001 — crash GC count is nondeterministic across
   runs by ~600!), /tmp/f11-run.sh, gcwalk2 (cross-process descriptor
