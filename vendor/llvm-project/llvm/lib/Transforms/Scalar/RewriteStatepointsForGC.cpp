@@ -4155,8 +4155,35 @@ static bool materializeOxCamlExceptionRootSlots(
       // statepoints list it and the GC updates its RA slot in place);
       // handler uses flow through the opaque relocate so no later pass
       // can identify them with a pre-statepoint copy. Restricted to
-      // plain gc pointers; everything else keeps the slot demotion.
-      bool UseSSA = OxCamlExnSSARoots &&
+      // plain gc pointers WITH normal-path uses: for those the SSA form
+      // costs nothing extra (the value crosses the statepoints anyway)
+      // and saves the demotion's duplicate store. A handler-ONLY value
+      // keeps the slot demotion — its write-once cell at the definition
+      // is strictly cheaper than stretching an SSA live range across
+      // the whole region (measured on boyer: the artificial range
+      // draws entry-init stores and frame growth in the hot loop).
+      bool HasNormalPathUse = false;
+      for (User *U : V->users()) {
+        auto *UI = dyn_cast<Instruction>(U);
+        if (!UI || isa<PHINode>(UI))
+          continue;
+        if (RecoveryOnlyRegion.contains(UI->getParent()))
+          continue;
+        // Only a use on the far side of a protected call makes the value
+        // live across statepoints for normal-path reasons (feeding the
+        // protected call itself, or anything before it, does not).
+        for (const OxCamlRecoveryStoreSite &StoreSite : RegionStoreSites) {
+          if (UI == StoreSite.Invoke)
+            continue;
+          if (DT.dominates(StoreSite.Invoke, UI->getParent())) {
+            HasNormalPathUse = true;
+            break;
+          }
+        }
+        if (HasNormalPathUse)
+          break;
+      }
+      bool UseSSA = OxCamlExnSSARoots && HasNormalPathUse &&
                     isHandledGCPointerType(RootValue->getType()) &&
                     RootValue->getType()->isPointerTy();
       Instruction *Load = UseSSA ? GetOrCreateRecoveryBarrier(RootValue)

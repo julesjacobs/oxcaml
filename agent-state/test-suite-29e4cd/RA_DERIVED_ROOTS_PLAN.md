@@ -1018,9 +1018,25 @@ listed slot is rewritten by the GC at the statepoint, so the
 pre-invoke store matches what the relocate describes. Also barriers
 from enclosing regions unwrap to their operand at nested store sites.
 typecore: 992 barriers, exnroot allocas 168->127, verifier improves
-(bit-gap finding resolves). REMAINING for default flip: phi coverage,
-non-pointer values, boundary machinery retirement, ocamltest +
-try/raise perf probes flag-on.
+(bit-gap finding resolves). PERF VERDICT (4x alternating boyer/kb runs): the v0 all-SSA form
+REGRESSED boyer +5% stable (every SSA sample worse than every base
+sample; boyer_no_exc unaffected) — handler-ONLY values' artificial
+SSA live ranges drew entry-init stores + frame growth in unify1's hot
+loop (sp-stores 93->109). The demotion's write-once def-point alloca
+is LOCALLY OPTIMAL for the handler-only class. HYBRID v2: SSA-root
+only values with a non-phi use dominated by a protected invoke
+(genuinely live across for normal-path reasons; the alloca store is
+the duplicate then); handler-only values keep demotion. v2: boyer
+reverts exactly to base codegen (93 stores, ratios in noise), kb
+neutral, cascade FULL GREEN, typecore 383 barriers / allocas ~equal.
+HONEST CONCLUSION: full exnroot retirement is NOT the win hoped for —
+the demotion design earned its keep under measurement for the
+dominant handler-only class; v2 is a modest free improvement for
+live-across values. The boundary/trampoline machinery must stay.
+Park the flag default-off; do not pursue phi/boundary retirement.
+The phase-0/1 wins stand on their own (tests revived, invoke
+statepoints in-place). CSR remains the perf lever and does not
+depend on this.
 Current contract notes for phase 1-2: runtime-entered = push.trap
 blockaddress target OR dominating trap.publish; recovery ABI liveins
 = x0/x26/x27/x28; ISel rejects trap.recover outside runtime-entered
