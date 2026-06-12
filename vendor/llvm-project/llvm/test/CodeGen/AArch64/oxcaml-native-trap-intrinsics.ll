@@ -37,12 +37,10 @@ recover:
 
 ; ASM-LABEL: _native_trap_intrinsics:
 ; ASM: adr x16, [[RECOVER:LBB[0-9]+_[0-9]+]]
-; ASM-NEXT: sub sp, sp, #16
-; ASM-NEXT: str x26, [sp]
-; ASM-NEXT: str x16, [sp, #8]
+; ASM-NEXT: stp x26, x16, [sp, #-16]!
 ; ASM-NEXT: mov x26, sp
 ; ASM: bl _callee
-; ASM: ldr x26, [sp], #16
+; ASM: ldp x26, x16, [sp], #16
 ; ASM-NOT: OxCaml trap recovery stack restore
 ; ASM: [[RECOVER]]:
 
@@ -60,12 +58,10 @@ entry:
 
 ; ASM-LABEL: _native_trap_deleted_target:
 ; ASM: adr x16, [[DEAD:Ltmp[0-9]+]]
-; ASM-NEXT: sub sp, sp, #16
-; ASM-NEXT: str x26, [sp]
-; ASM-NEXT: str x16, [sp, #8]
+; ASM-NEXT: stp x26, x16, [sp, #-16]!
 ; ASM-NEXT: mov x26, sp
 ; ASM-NEXT: [[DEAD]]:
-; ASM: ldr x26, [sp], #16
+; ASM: ldp x26, x16, [sp], #16
 
 !llvm.module.flags = !{!0}
 !0 = !{i32 1, !"oxcaml_module", !"NativeTrapIntrinsics"}

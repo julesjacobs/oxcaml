@@ -1382,21 +1382,12 @@ void AArch64AsmPrinter::emitInstruction(const MachineInstr *MI) {
                        .addReg(AArch64::X16)
                        .addExpr(RecoveryExpr));
     EmitToStreamer(*OutStreamer,
-                   MCInstBuilder(AArch64::SUBXri)
+                   MCInstBuilder(AArch64::STPXpre)
                        .addReg(AArch64::SP)
-                       .addReg(AArch64::SP)
-                       .addImm(16)
-                       .addImm(0));
-    EmitToStreamer(*OutStreamer,
-                   MCInstBuilder(AArch64::STRXui)
                        .addReg(AArch64::X26)
-                       .addReg(AArch64::SP)
-                       .addImm(0));
-    EmitToStreamer(*OutStreamer,
-                   MCInstBuilder(AArch64::STRXui)
                        .addReg(AArch64::X16)
                        .addReg(AArch64::SP)
-                       .addImm(1));
+                       .addImm(-2));
     EmitToStreamer(*OutStreamer,
                    MCInstBuilder(AArch64::ADDXri)
                        .addReg(AArch64::X26)
@@ -1415,21 +1406,12 @@ void AArch64AsmPrinter::emitInstruction(const MachineInstr *MI) {
                        .addReg(AArch64::X16)
                        .addExpr(RecoveryExpr));
     EmitToStreamer(*OutStreamer,
-                   MCInstBuilder(AArch64::SUBXri)
+                   MCInstBuilder(AArch64::STPXpre)
                        .addReg(AArch64::SP)
-                       .addReg(AArch64::SP)
-                       .addImm(16)
-                       .addImm(0));
-    EmitToStreamer(*OutStreamer,
-                   MCInstBuilder(AArch64::STRXui)
                        .addReg(AArch64::X26)
-                       .addReg(AArch64::SP)
-                       .addImm(0));
-    EmitToStreamer(*OutStreamer,
-                   MCInstBuilder(AArch64::STRXui)
                        .addReg(AArch64::X16)
                        .addReg(AArch64::SP)
-                       .addImm(1));
+                       .addImm(-2));
     EmitToStreamer(*OutStreamer,
                    MCInstBuilder(AArch64::ADDXri)
                        .addReg(AArch64::X26)
@@ -1440,12 +1422,17 @@ void AArch64AsmPrinter::emitInstruction(const MachineInstr *MI) {
     return;
   }
   case AArch64::OXCAML_POP_TRAP:
+    // Pop with a pair load matching OXCAML_PUSH_TRAP's pair store: on Apple
+    // cores a single ldr reading one element of an stp pays a
+    // store-forwarding penalty, while ldp forwards cleanly. X16 is dead here
+    // (scratch); the .td marks it as a def.
     EmitToStreamer(*OutStreamer,
-                   MCInstBuilder(AArch64::LDRXpost)
+                   MCInstBuilder(AArch64::LDPXpost)
                        .addReg(AArch64::SP)
                        .addReg(AArch64::X26)
+                       .addReg(AArch64::X16)
                        .addReg(AArch64::SP)
-                       .addImm(16));
+                       .addImm(2));
     return;
   case AArch64::HINT: {
     // CurrentPatchableFunctionEntrySym can be CurrentFnBegin only for

@@ -1008,23 +1008,27 @@ def OXCAML_RELOCATE
                    (int_aarch64_oxcaml_relocated GPR64:$src))]>,
       Sched<[]>;
 
-// The expansion is 5 instructions (adr, sub, str, str, add); an
-// understated Size makes AArch64CompressJumpTables pick byte-sized
-// tables whose label differences then overflow at assembly time.
+// The expansion is 3 instructions (adr, stp-pre, add); an understated
+// Size makes AArch64CompressJumpTables pick byte-sized tables whose
+// label differences then overflow at assembly time.
 let hasSideEffects = 1, mayStore = 1, isCodeGenOnly = 1, Uses = [SP, X26],
-    Defs = [SP, X16, X26], Size = 20 in
+    Defs = [SP, X16, X26], Size = 12 in
 def OXCAML_PUSH_TRAP
     : Pseudo<(outs), (ins brtarget:$recovery_target), []>,
       Sched<[]>;
 
 let hasSideEffects = 1, mayStore = 1, isCodeGenOnly = 1, Uses = [SP, X26],
-    Defs = [SP, X16, X26], Size = 20 in
+    Defs = [SP, X16, X26], Size = 12 in
 def OXCAML_PUSH_TRAP_DEAD
     : Pseudo<(outs), (ins), []>,
       Sched<[]>;
 
+// Expands to a pair load (ldp x26, x16) mirroring OXCAML_PUSH_TRAP's pair
+// store: on Apple cores a single ldr that reads one element of an stp pays
+// a store-forwarding stall when the push is still in flight (tight
+// try-around-call loops). X16 is a dead scratch def.
 let hasSideEffects = 1, mayLoad = 1, isCodeGenOnly = 1, Uses = [SP],
-    Defs = [SP, X26], Size = 4 in
+    Defs = [SP, X16, X26], Size = 4 in
 def OXCAML_POP_TRAP
     : Pseudo<(outs), (ins), []>,
       Sched<[]>;
