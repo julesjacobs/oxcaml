@@ -1078,6 +1078,41 @@ default, demotion machinery deleted):
   the only path), retire the demotion + boundary/trampoline machinery
   and the exnroot double-listing special cases.
 
+## One-slot campaign gate status (2026-06-12, tasks 10-13)
+
+Task 10 DONE (9b3901da71): barrier map threaded across regions and
+both RS4GC invocations; reuse requires operand-consistency (region
+rewrites can retarget a barrier's operand while its ValueMap key
+stays — reusing a diverged entry made phi replacements
+self-referential). unify1 4 stores.
+Task 11 gates found two REAL bugs the flip-stress never reaches:
+(a) almabench SIGSEGV: the C-call force-spill listed the slot but
+never RELOADED the preserved register after the call — GC moved the
+object, slot updated, register stale (FIXED 851e71c96e: spilled
+callee-saved operands of C-call statepoints also reload; the
+verifier's 'preserved across non-alloc statepoint' info class named
+this hazard — promote it to a violation at in-place C-call sites).
+(b) FixupSCS FrameIndexesCache recorded pad slot assignments only on
+the fresh-allocation path; reused slots rotated per statepoint and
+shared-pad reloads read the other path's slot (FIXED: record on the
+reuse path too).
+OPEN (task-11 blocker): async_exns_2 segfaults (pool_sweep heap
+corruption) ONLY under -all + c-calls (each subset passes; v2+ccalls
+passes). Verifier clean on the module. Codegen diff localizes the
+divergence to test1's pushed-trap region: under -all a gc slot
+reload/re-store straddles an allocation inside the trap frame
+(sub sp, #16 active), where descriptor offsets need the trap-byte
+adjustment — suspect: a listed slot with wrong/missing trap bytes at
+statepoints inside the active-trap region, GC writes 16 bytes off.
+NEXT FORENSIC: decode the descriptors of test1's statepoints inside
+the trap region under both configs and check trap-byte handling for
+appended/sibling slots vs ISel-listed ones.
+Repro: /tmp/asyncrepro (async_exns_2.ml; stage install compiler with
+OCAMLPARAM llvm-path=clang-wrapper-exnssa-full -> exit 138;
+clang-wrapper-v2cc -> exit 0). Minibench full config: geomean 0.8917
+vs base 0.8962 (clean); cascade green; ocamltest 6761 passed / 7
+failed (the async cluster = this bug).
+
 ## Validation gate (the full checklist used for the two landed commits)
 
 1. lit: `llvm-build/bin/llvm-lit -j8 test/CodeGen/AArch64/oxcaml*
