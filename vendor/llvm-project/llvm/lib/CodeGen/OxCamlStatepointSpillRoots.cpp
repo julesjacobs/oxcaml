@@ -1304,6 +1304,10 @@ static bool processStatepoint(MachineInstr &MI, MachineFunction &MF,
   SmallSet<int, 16> ListedSlots;
   SmallVector<Register, 16> ListedRegsVec;
   walkGCPtrSection(MI, ListedSlots, &ListedRegsVec);
+  // The gc-alloca section lists roots just as authoritatively as the
+  // pointer section; without this the value-home path re-appends
+  // exnroot slots and every descriptor lists them twice.
+  walkAllocaSection(MI, ListedSlots);
   SmallSet<Register, 16> ListedRegs;
   ListedRegs.insert(ListedRegsVec.begin(), ListedRegsVec.end());
 
@@ -1460,9 +1464,7 @@ static bool processStatepoint(MachineInstr &MI, MachineFunction &MF,
     // section (volatile root allocas, exnroot homes) is equally
     // authoritative: argument values live there from function entry
     // while RA spill slots duplicate them as unlisted siblings.
-    SmallSet<int, 16> NamedSlots = ListedSlots;
-    walkAllocaSection(MI, NamedSlots);
-    for (int FI : NamedSlots) {
+    for (int FI : ListedSlots) {
       const auto *St = GCV.mustReachStoreAt(FI, Idx2);
       if (!St)
         continue;

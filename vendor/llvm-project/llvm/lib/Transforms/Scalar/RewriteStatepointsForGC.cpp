@@ -129,13 +129,6 @@ static cl::opt<bool> DebugOxCamlDerivedRemat(
     "rs4gc-debug-oxcaml-derived-remat", cl::Hidden, cl::init(false),
     cl::desc("Print OxCaml statepoint derived/base candidates"));
 
-static cl::opt<bool> OxCamlInPlaceRederive(
-    "rs4gc-oxcaml-inplace-rederive", cl::Hidden, cl::init(false),
-    cl::desc("Sink derived geps to uses as llvm.aarch64.oxcaml.rederive "
-             "(opaque base+offset adds). Required with in-place statepoint "
-             "lowering, where identity relocates would let CSE/LICM merge a "
-             "post-statepoint recompute with its pre-statepoint twin."));
-
 static cl::opt<bool> DebugOxCamlGCPointerAllocas(
     "rs4gc-debug-oxcaml-gc-pointer-allocas", cl::Hidden, cl::init(false),
     cl::desc("Print OxCaml GC pointer allocas that RS4GC promotes or rejects"));
@@ -3370,57 +3363,6 @@ static bool rematerializeOxCamlDerivedGEPsAtUses(Function &F) {
 
   bool Changed = false;
 
-  // In-place statepoints rely on a gc value's SSA identity being
-  // position-independent: the GC rewrites the value's locations, and
-  // identity relocates assume nothing can recompute it from raw data.
-  // llvmize's allocation results break that — they are
-  // inttoptr(alloc_frontier +- k), an arithmetic function of the RAW
-  // i64 allocation pointer, which crosses calls freely as plain data;
-  // after a collection ISel happily re-derives the "relocated" block
-  // address from the STALE frontier (folded as frontier+off
-  // addressing). Pin every gc-typed inttoptr through an opaque
-  // rederive(v, 0) at its definition: all uses flow through the pinned
-  // vreg, which IS a listed root the GC updates in place.
-  if (OxCamlInPlaceRederive) {
-    // Pin allocation results (inttoptr of the raw frontier) AND
-    // combined-allocation sub-block pointers (is_base_value geps over a
-    // sibling block): both are independent ROOTS whose identity-relocated
-    // values must not be recomputable from raw data or from an unlisted
-    // sibling pointer.
-    SmallVector<Instruction *, 16> Pins;
-    for (Instruction &I : instructions(F)) {
-      if (I.getMetadata("oxcaml.local.remat"))
-        continue;
-      if (auto *ITP = dyn_cast<IntToPtrInst>(&I)) {
-        if (isHandledGCPointerType(ITP->getType()))
-          Pins.push_back(ITP);
-      } else if (auto *GEP = dyn_cast<GetElementPtrInst>(&I)) {
-        if (GEP->getMetadata("is_base_value") &&
-            isHandledGCPointerType(GEP->getType()))
-          Pins.push_back(GEP);
-      }
-    }
-    if (!Pins.empty()) {
-      Function *RederiveDecl = Intrinsic::getDeclaration(
-          F.getParent(), Intrinsic::aarch64_oxcaml_rederive);
-      Type *I64 = Type::getInt64Ty(F.getContext());
-      for (Instruction *Root : Pins) {
-        IRBuilder<> B(Root->getNextNode());
-        auto *Pinned =
-            B.CreateCall(RederiveDecl, {Root, ConstantInt::get(I64, 0)},
-                         suffixed_name_or(Root, ".pin", "pin"));
-        Pinned->setMetadata("oxcaml.local.remat",
-                            MDNode::get(F.getContext(), {}));
-        Root->setMetadata("oxcaml.local.remat",
-                          MDNode::get(F.getContext(), {}));
-        Root->replaceUsesWithIf(Pinned, [&](Use &U) {
-          return U.getUser() != Pinned;
-        });
-        Changed = true;
-      }
-    }
-  }
-
   bool ChangedThisRound = true;
   while (ChangedThisRound) {
     ChangedThisRound = false;
@@ -3448,20 +3390,6 @@ static bool rematerializeOxCamlDerivedGEPsAtUses(Function &F) {
       for (Use &U : GEP->uses())
         Uses.push_back(&U);
 
-      // With in-place statepoint lowering, compute the gep's byte offset
-      // once (raw integer math: move-invariant, freely CSE/hoistable)
-      // and recompute the address at each use through the opaque
-      // rederive intrinsic, which nothing merges across a statepoint.
-      Value *ByteOff = nullptr;
-      Function *RederiveDecl = nullptr;
-      if (OxCamlInPlaceRederive) {
-        IRBuilder<> OffBuilder(GEP->getNextNode());
-        ByteOff = emitGEPOffset(&OffBuilder, F.getParent()->getDataLayout(),
-                                GEP);
-        RederiveDecl = Intrinsic::getDeclaration(
-            F.getParent(), Intrinsic::aarch64_oxcaml_rederive);
-      }
-
       for (Use *U : Uses) {
         auto *UserI = dyn_cast<Instruction>(U->getUser());
         if (!UserI)
@@ -3473,18 +3401,6 @@ static bool rematerializeOxCamlDerivedGEPsAtUses(Function &F) {
           InsertBefore = PN->getIncomingBlock(IncomingIndex)->getTerminator();
         } else {
           InsertBefore = UserI;
-        }
-
-        if (OxCamlInPlaceRederive) {
-          IRBuilder<> B(InsertBefore);
-          auto *Re = B.CreateCall(RederiveDecl,
-                                  {GEP->getPointerOperand(), ByteOff},
-                                  suffixed_name_or(GEP, ".rederive",
-                                                   "rederive"));
-          Re->setMetadata("oxcaml.local.remat",
-                          MDNode::get(F.getContext(), {}));
-          U->set(Re);
-          continue;
         }
 
         auto *Clone = cast<GetElementPtrInst>(GEP->clone());
