@@ -34,6 +34,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -535,6 +536,10 @@ static void emitDebugInfoRecord(MCStreamer &OS, const MCSymbol *NameLabel,
   OS.emitInt32(InfoHigh);
 }
 
+// The filename is not stored inline: filename_offs is a signed 32-bit
+// offset precisely so that records can share one string per file (see
+// struct name_info in runtime/backtrace_nat.c). File strings are interned
+// per module and emitted after all records.
 static void emitNameAndLocInfo(MCStreamer &OS, const PendingDebugItem &Item) {
   OS.emitValueToAlignment(Align(4));
   OS.emitLabel(Item.NameLabel);
@@ -552,18 +557,93 @@ static void emitNameAndLocInfo(MCStreamer &OS, const PendingDebugItem &Item) {
         std::min<uint32_t>(Item.Info.EndOffset, 0x3fffffff)));
   }
   emitStringz(OS, Item.Info.FunctionName);
-
-  OS.emitLabel(Item.FileLabel);
-  emitStringz(OS, Item.Info.FileName);
 }
 
+// Name/loc records are interned per module: many call sites share the same
+// (function, file) pair, so re-emitting the strings per descriptor bloats
+// the frametable severalfold. The key covers exactly the bytes
+// emitNameAndLocInfo produces: the loc fields only when the record is not
+// fully packable (a packable record omits them).
+static std::string nameRecordKey(const OxCamlDebugItem &Info) {
+  std::string Key;
+  bool Packable = isFullyPackable(Info);
+  Key += Packable ? '\1' : '\0';
+  if (!Packable) {
+    Key += std::to_string(std::min<uint32_t>(Info.StartChr, 0xffff));
+    Key += ':';
+    Key += std::to_string(std::min<uint32_t>(Info.EndChr, 0xffff));
+    Key += ':';
+    Key += std::to_string(std::min<uint32_t>(Info.EndOffset, 0x3fffffff));
+  }
+  Key += ':';
+  Key += std::to_string(Info.FunctionName.size());
+  Key += ':';
+  Key += Info.FunctionName;
+  Key += Info.FileName;
+  return Key;
+}
+
+using NameRecordMap = std::map<std::string, MCSymbol *>;
+
+// Whole debug blobs (the chain of packed records a descriptor points at) are
+// also interned: distinct call sites frequently carry byte-identical debug
+// info (same inlining stack and location class). The key covers everything
+// that affects the emitted chain words and the records they reference.
+static std::string debugBlobKey(const OxCamlDebugInfo &Info) {
+  std::string Key = Info.RaiseCall ? "R" : "-";
+  for (const OxCamlDebugItem &Item : Info.Items) {
+    Key += std::to_string(Item.Line);
+    Key += ',';
+    Key += std::to_string(Item.EndLineDelta);
+    Key += ',';
+    Key += std::to_string(Item.StartChr);
+    Key += ',';
+    Key += std::to_string(Item.EndChr);
+    Key += ',';
+    Key += std::to_string(Item.CharEndOffset);
+    Key += ',';
+    Key += nameRecordKey(Item);
+    Key += ';';
+  }
+  return Key;
+}
+
+static MCSymbol *internDebugBlob(MCStreamer &OS,
+                                 std::vector<PendingDebugInfo> &Pending,
+                                 std::map<std::string, MCSymbol *> &Blobs,
+                                 OxCamlDebugInfo &&Info) {
+  auto [It, Inserted] = Blobs.try_emplace(debugBlobKey(Info), nullptr);
+  if (Inserted) {
+    It->second = OS.getContext().createTempSymbol();
+    Pending.push_back({It->second, std::move(Info)});
+  }
+  return It->second;
+}
+
+// Emits one blob's chain words. Name/loc records are interned and queued on
+// PendingNameRecords; the caller emits them after ALL chains, because the
+// runtime decodes the record offset as unsigned ((info1 & 0x3FFFFFC), see
+// caml_debuginfo_location) — a shared record must sit after every chain word
+// that references it.
 static void emitPendingDebugInfo(MCStreamer &OS,
-                                 const PendingDebugInfo &DebugInfo) {
+                                 const PendingDebugInfo &DebugInfo,
+                                 NameRecordMap &NameRecords,
+                                 NameRecordMap &FileLabels,
+                                 std::vector<PendingDebugItem> &PendingNameRecords) {
   const OxCamlDebugInfo &Info = DebugInfo.Info;
   std::vector<PendingDebugItem> Items;
   for (const OxCamlDebugItem &Item : Info.Items) {
-    Items.push_back({OS.getContext().createTempSymbol(),
-                     OS.getContext().createTempSymbol(), Item});
+    auto [It, Inserted] =
+        NameRecords.try_emplace(nameRecordKey(Item), nullptr);
+    if (Inserted) {
+      It->second = OS.getContext().createTempSymbol();
+      auto [FileIt, FileInserted] =
+          FileLabels.try_emplace(Item.FileName, nullptr);
+      if (FileInserted)
+        FileIt->second = OS.getContext().createTempSymbol();
+      PendingNameRecords.push_back({It->second, FileIt->second, Item});
+    }
+    Items.push_back({It->second, nullptr, Item});
   }
 
   OS.emitValueToAlignment(Align(4));
@@ -577,15 +657,15 @@ static void emitPendingDebugInfo(MCStreamer &OS,
       emitDebugInfoRecord(OS, Items[I].NameLabel, Items[I].Info, false,
                           I + 1 < Items.size());
   }
-
-  for (const PendingDebugItem &Item : Items)
-    emitNameAndLocInfo(OS, Item);
 }
 
 bool OxCamlGCMetadataPrinter::emitStackMaps(Module &M, StackMaps &SM, AsmPrinter &AP) {
   MCStreamer &OS = *AP.OutStreamer;
   unsigned PtrSize = M.getDataLayout().getPointerSize(); // Can only be 8 for now
   std::vector<PendingDebugInfo> PendingDebugInfos;
+  std::map<std::string, MCSymbol *> DebugBlobs;
+  NameRecordMap NameRecords;
+  NameRecordMap FileLabels;
   
   OS.switchSection(AP.getObjFileLowering().getDataSection());
 
@@ -667,17 +747,15 @@ bool OxCamlGCMetadataPrinter::emitStackMaps(Module &M, StackMaps &SM, AsmPrinter
     if (HasAlloc && HasAllocDebug) {
       for (OxCamlAllocInfoItem &Item : AllocInfo.Items) {
         if (Item.DebugInfo.Valid) {
-          MCSymbol *AllocDebugLabel = OS.getContext().createTempSymbol();
-          AllocDebugLabels.push_back(AllocDebugLabel);
-          PendingDebugInfos.push_back(
-              {AllocDebugLabel, std::move(Item.DebugInfo)});
+          AllocDebugLabels.push_back(internDebugBlob(
+              OS, PendingDebugInfos, DebugBlobs, std::move(Item.DebugInfo)));
         } else {
           AllocDebugLabels.push_back(nullptr);
         }
       }
     } else if (HasDebug) {
-      DebugLabel = OS.getContext().createTempSymbol();
-      PendingDebugInfos.push_back({DebugLabel, std::move(DebugInfo)});
+      DebugLabel =
+          internDebugBlob(OS, PendingDebugInfos, DebugBlobs, std::move(DebugInfo));
     }
 
     uint64_t FrameData = FrameSize;
@@ -813,8 +891,16 @@ bool OxCamlGCMetadataPrinter::emitStackMaps(Module &M, StackMaps &SM, AsmPrinter
     OS.emitValueToAlignment(Align(PtrSize));
   }
 
+  std::vector<PendingDebugItem> PendingNameRecords;
   for (const PendingDebugInfo &DebugInfo : PendingDebugInfos)
-    emitPendingDebugInfo(OS, DebugInfo);
+    emitPendingDebugInfo(OS, DebugInfo, NameRecords, FileLabels,
+                         PendingNameRecords);
+  for (const PendingDebugItem &Item : PendingNameRecords)
+    emitNameAndLocInfo(OS, Item);
+  for (const auto &[FileName, FileLabel] : FileLabels) {
+    OS.emitLabel(FileLabel);
+    emitStringz(OS, FileName);
+  }
 
   OS.addBlankLine();
   return true;
