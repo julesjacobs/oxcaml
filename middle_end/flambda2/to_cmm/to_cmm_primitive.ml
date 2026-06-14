@@ -46,6 +46,21 @@ let value_slot_offset env value_slot =
     Misc.fatal_errorf "Missing offset for value slot %a" Value_slot.print
       value_slot
 
+let machtype_of_opaque_kind (kind : K.t) =
+  match kind with
+  | Value -> Cmm.typ_val
+  | Naked_number Naked_float -> Cmm.typ_float
+  | Naked_number Naked_float32 -> Cmm.typ_float32
+  | Naked_number Naked_vec128 -> Cmm.typ_vec128
+  | Naked_number Naked_vec256 -> Cmm.typ_vec256
+  | Naked_number Naked_vec512 -> Cmm.typ_vec512
+  | Naked_number
+      ( Naked_immediate | Naked_int8 | Naked_int16 | Naked_int32 | Naked_int64
+      | Naked_nativeint ) ->
+    Cmm.typ_int
+  | Region -> Cmm.typ_int
+  | Rec_info -> Misc.fatal_error "[Rec_info] kind not expected here"
+
 (* Boxed numbers *)
 
 let unbox_number ~dbg kind arg =
@@ -1127,8 +1142,8 @@ let unary_primitive env res dbg f arg =
     ( None,
       res,
       (C.extcall ~dbg ~alloc:true ~returns:true ~is_c_builtin:false
-         ~effects:No_effects ~coeffects:Has_coeffects ~ty_args:[] "caml_obj_dup"
-         Cmm.typ_val [arg])
+         ~effects:No_effects ~coeffects:Has_coeffects ~ty_args:[XValue]
+         "caml_obj_dup" Cmm.typ_val [arg])
         .extcall )
   | Is_int _ -> None, res, C.and_int arg (C.int ~dbg 1) dbg
   | Is_null -> None, res, C.eq ~dbg arg (C.nativeint ~dbg 0n)
@@ -1146,8 +1161,8 @@ let unary_primitive env res dbg f arg =
   | String_length _ -> None, res, C.string_length arg dbg
   | Int_as_pointer _ -> None, res, C.int_as_pointer arg dbg
   | Opaque_identity { middle_end_only = true; kind = _ } -> None, res, arg
-  | Opaque_identity { middle_end_only = false; kind = _ } ->
-    None, res, C.opaque arg dbg
+  | Opaque_identity { middle_end_only = false; kind } ->
+    None, res, C.opaque ~ty:(machtype_of_opaque_kind kind) arg dbg
   | Int_arith (kind, op) ->
     None, res, unary_int_arith_primitive env dbg kind op arg
   | Float_arith (width, op) ->
@@ -1283,7 +1298,7 @@ let binary_primitive env dbg f x y =
     C.store ~dbg memory_chunk Assignment ~addr:x ~new_value:y
     |> C.return_unit dbg
   | Read_offset (kind, mut) ->
-    let addr = C.add_int x y dbg in
+    let addr = C.add_int_ptr ~ptr_out_of_heap:false x y dbg in
     let memory_chunk = C.memory_chunk_of_kind kind in
     C.load ~dbg memory_chunk mut ~addr
 
@@ -1321,7 +1336,7 @@ let ternary_primitive _env dbg f x y z =
         let write_into_block =
           match mode with
           | Heap ->
-            let addr = C.add_int x y dbg in
+            let addr = C.add_int_ptr ~ptr_out_of_heap:false x y dbg in
             C.caml_modify ~dbg addr z
           | Local ->
             (* divide to convert offset from bytes to field number *)
@@ -1340,8 +1355,18 @@ let ternary_primitive _env dbg f x y z =
             ~then_:(C.store ~dbg memory_chunk Assignment ~addr:y ~new_value:z)
             ~else_:write_into_block ~then_dbg:dbg ~else_dbg:dbg
       else
-        let addr = C.add_int x y dbg in
-        C.store ~dbg memory_chunk Assignment ~addr ~new_value:z
+        (* x = base, y = byte offset, z = new value *)
+        let write_into_block =
+          let addr = C.add_int_ptr ~ptr_out_of_heap:false x y dbg in
+          C.store ~dbg memory_chunk Assignment ~addr ~new_value:z
+        in
+        match write_offset_kind with
+        | Into_block -> write_into_block
+        | Into_block_or_off_heap ->
+          let base_is_null = C.eq ~dbg x (C.nativeint ~dbg 0n) in
+          C.ite ~dbg base_is_null
+            ~then_:(C.store ~dbg memory_chunk Assignment ~addr:y ~new_value:z)
+            ~else_:write_into_block ~then_dbg:dbg ~else_dbg:dbg
     in
     C.return_unit dbg store
 

@@ -483,15 +483,34 @@ let compile_cfg ppf_dump ~funcnames fd_cmm cfg_with_layout =
   ++ Profile.record ~accumulate:true "cfg_to_linear" Cfg_to_linear.run
 
 let compile_via_llvm ~ppf_dump ~funcnames cfg_with_layout =
-  (* missing pass: stack checks *)
   cfg_with_layout
   ++ cfg_with_layout_profile ~accumulate:true "cfg_polling"
        (Cfg_polling.instrument_fundecl ~future_funcnames:funcnames)
   ++ cfg_with_layout_profile ~accumulate:true "cfg_zero_alloc_checker"
        (Zero_alloc_checker.cfg ~future_funcnames:funcnames ppf_dump)
-  ++ cfg_with_layout_profile ~accumulate:true "cfg_comballoc" Cfg_comballoc.run
+  ++ (fun cfg_with_layout ->
+       (* Debug escape hatch for bisecting comballoc-related miscompiles. *)
+       if Sys.getenv_opt "OXCAML_LLVM_NO_COMBALLOC" <> None
+       then cfg_with_layout
+       else
+         cfg_with_layout_profile ~accumulate:true "cfg_comballoc"
+           Cfg_comballoc.run cfg_with_layout)
   ++ Compiler_hooks.execute_and_pipe Compiler_hooks.Cfg_combine
   ++ pass_dump_cfg_if ppf_dump Oxcaml_flags.dump_cfg "After comballoc"
+  ++ (fun (cfg_with_layout : Cfg_with_layout.t) ->
+       match !Oxcaml_flags.cfg_stack_checks with
+       | false -> cfg_with_layout
+       | true ->
+         cfg_with_layout
+         |> Cfg_stack_checks.cfg
+         |> pass_dump_cfg_if ppf_dump Oxcaml_flags.dump_cfg
+              "After cfg_stack_checks")
+  ++ (fun (cfg_with_layout : Cfg_with_layout.t) ->
+       (Cfg_with_layout.cfg cfg_with_layout).allowed_to_be_irreducible <- true;
+       cfg_with_layout)
+  ++ cfg_with_layout_profile ~accumulate:true "cfg_simplify"
+       (Cfg_simplify.run
+          ~allow_terminator_value_propagation_before_regalloc:true)
   ++ Profile.record ~accumulate:true "save_cfg" save_cfg
   ++ Profile.record ~accumulate:true "llvmize" Llvmize.cfg
 
@@ -532,6 +551,7 @@ let compile_phrases ~ppf_dump ps =
         | Cdata _ -> s)
       String.Set.empty ps
   in
+  if !Clflags.llvm_backend then Llvmize.register_function_signatures ps;
   let rec compile ~funcnames ps =
     match ps with
     | [] -> ()
@@ -599,7 +619,10 @@ let compile_unit unix ~output_prefix ~asm_filename ~keep_asm ~obj_filename
   in
   let assemble_file () =
     if !Clflags.llvm_backend
-    then Llvmize.assemble_file ~asm_filename ~obj_filename
+    then
+      if not (should_emit ())
+      then 0
+      else Llvmize.assemble_file ~asm_filename ~obj_filename
     else if not (should_emit ())
     then 0
     else (

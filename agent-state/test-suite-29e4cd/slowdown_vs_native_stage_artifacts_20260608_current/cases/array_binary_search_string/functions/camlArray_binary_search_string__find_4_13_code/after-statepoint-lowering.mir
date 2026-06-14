@@ -1,0 +1,445 @@
+---
+name:            "\x01_camlArray_binary_search_string__find_4_13_code"
+alignment:       4
+exposesReturnsTwice: false
+legalized:       false
+regBankSelected: false
+selected:        false
+failedISel:      false
+tracksRegLiveness: true
+hasWinCFI:       false
+callsEHReturn:   false
+callsUnwindInit: false
+hasEHCatchret:   false
+hasEHScopes:     false
+hasEHFunclets:   false
+debugInstrRef:   false
+failsVerification: false
+tracksDebugUserValues: false
+registers:
+  - { id: 0, class: gpr64sp, preferred-register: '' }
+  - { id: 1, class: gpr64all, preferred-register: '' }
+  - { id: 2, class: gpr64all, preferred-register: '' }
+  - { id: 3, class: gpr64sp, preferred-register: '' }
+  - { id: 4, class: gpr64all, preferred-register: '' }
+  - { id: 5, class: gpr64all, preferred-register: '' }
+  - { id: 6, class: gpr64all, preferred-register: '' }
+  - { id: 7, class: gpr64, preferred-register: '' }
+  - { id: 8, class: gpr64all, preferred-register: '' }
+  - { id: 9, class: gpr64all, preferred-register: '' }
+  - { id: 10, class: gpr64sp, preferred-register: '' }
+  - { id: 11, class: gpr64sp, preferred-register: '' }
+  - { id: 12, class: gpr64sp, preferred-register: '' }
+  - { id: 13, class: gpr64, preferred-register: '' }
+  - { id: 14, class: gpr64, preferred-register: '' }
+  - { id: 15, class: gpr64common, preferred-register: '' }
+  - { id: 16, class: gpr64all, preferred-register: '' }
+  - { id: 17, class: gpr64all, preferred-register: '' }
+  - { id: 18, class: gpr64all, preferred-register: '' }
+  - { id: 19, class: gpr64, preferred-register: '' }
+  - { id: 20, class: gpr64, preferred-register: '' }
+  - { id: 21, class: gpr64all, preferred-register: '' }
+  - { id: 22, class: gpr64, preferred-register: '' }
+  - { id: 23, class: gpr64, preferred-register: '' }
+  - { id: 24, class: gpr64all, preferred-register: '' }
+  - { id: 25, class: gpr64all, preferred-register: '' }
+  - { id: 26, class: gpr64sp, preferred-register: '' }
+  - { id: 27, class: gpr64all, preferred-register: '' }
+  - { id: 28, class: gpr64all, preferred-register: '' }
+  - { id: 29, class: gpr64all, preferred-register: '' }
+  - { id: 30, class: gpr64all, preferred-register: '' }
+  - { id: 31, class: gpr64all, preferred-register: '' }
+  - { id: 32, class: gpr64all, preferred-register: '' }
+  - { id: 33, class: gpr64common, preferred-register: '' }
+  - { id: 34, class: gpr64all, preferred-register: '' }
+  - { id: 35, class: gpr64all, preferred-register: '' }
+  - { id: 36, class: gpr64all, preferred-register: '' }
+  - { id: 37, class: gpr64, preferred-register: '' }
+  - { id: 38, class: gpr64all, preferred-register: '' }
+  - { id: 39, class: gpr64, preferred-register: '' }
+  - { id: 40, class: gpr64, preferred-register: '' }
+  - { id: 41, class: gpr64common, preferred-register: '' }
+  - { id: 42, class: gpr64common, preferred-register: '' }
+  - { id: 43, class: gpr64, preferred-register: '' }
+  - { id: 44, class: gpr64, preferred-register: '' }
+  - { id: 45, class: gpr64sp, preferred-register: '' }
+  - { id: 46, class: gpr64, preferred-register: '' }
+  - { id: 47, class: gpr64, preferred-register: '' }
+  - { id: 48, class: gpr64all, preferred-register: '' }
+  - { id: 49, class: gpr64all, preferred-register: '' }
+  - { id: 50, class: gpr64, preferred-register: '' }
+  - { id: 51, class: gpr32, preferred-register: '' }
+  - { id: 52, class: gpr64, preferred-register: '' }
+  - { id: 53, class: gpr64all, preferred-register: '' }
+  - { id: 54, class: gpr64, preferred-register: '' }
+  - { id: 55, class: gpr32, preferred-register: '' }
+  - { id: 56, class: gpr64, preferred-register: '' }
+  - { id: 57, class: gpr64, preferred-register: '' }
+  - { id: 58, class: gpr64, preferred-register: '' }
+  - { id: 59, class: gpr64common, preferred-register: '' }
+  - { id: 60, class: gpr64, preferred-register: '' }
+  - { id: 61, class: gpr64common, preferred-register: '' }
+  - { id: 62, class: gpr64, preferred-register: '' }
+  - { id: 63, class: gpr64, preferred-register: '' }
+  - { id: 64, class: gpr64, preferred-register: '' }
+  - { id: 65, class: gpr64, preferred-register: '' }
+  - { id: 66, class: gpr64sp, preferred-register: '' }
+  - { id: 67, class: gpr64, preferred-register: '' }
+  - { id: 68, class: gpr32, preferred-register: '' }
+  - { id: 69, class: gpr64, preferred-register: '' }
+  - { id: 70, class: gpr64, preferred-register: '' }
+  - { id: 71, class: gpr64, preferred-register: '' }
+  - { id: 72, class: gpr64, preferred-register: '' }
+  - { id: 73, class: gpr64sp, preferred-register: '' }
+  - { id: 74, class: gpr64, preferred-register: '' }
+  - { id: 75, class: gpr32, preferred-register: '' }
+  - { id: 76, class: gpr64, preferred-register: '' }
+  - { id: 77, class: gpr64, preferred-register: '' }
+  - { id: 78, class: gpr64, preferred-register: '' }
+  - { id: 79, class: gpr64common, preferred-register: '' }
+  - { id: 80, class: gpr64, preferred-register: '' }
+  - { id: 81, class: gpr32, preferred-register: '' }
+  - { id: 82, class: gpr64, preferred-register: '' }
+  - { id: 83, class: gpr64, preferred-register: '' }
+  - { id: 84, class: gpr64, preferred-register: '' }
+  - { id: 85, class: gpr64, preferred-register: '' }
+  - { id: 86, class: gpr64, preferred-register: '' }
+  - { id: 87, class: gpr64, preferred-register: '' }
+  - { id: 88, class: gpr64, preferred-register: '' }
+  - { id: 89, class: gpr64, preferred-register: '' }
+  - { id: 90, class: gpr64, preferred-register: '' }
+  - { id: 91, class: gpr64, preferred-register: '' }
+  - { id: 92, class: gpr64, preferred-register: '' }
+  - { id: 93, class: gpr64, preferred-register: '' }
+  - { id: 94, class: gpr64, preferred-register: '' }
+  - { id: 95, class: gpr64, preferred-register: '' }
+  - { id: 96, class: gpr64, preferred-register: '' }
+  - { id: 97, class: gpr32, preferred-register: '' }
+  - { id: 98, class: gpr64, preferred-register: '' }
+  - { id: 99, class: gpr64, preferred-register: '' }
+  - { id: 100, class: gpr64, preferred-register: '' }
+  - { id: 101, class: gpr64, preferred-register: '' }
+  - { id: 102, class: gpr64, preferred-register: '' }
+  - { id: 103, class: gpr64, preferred-register: '' }
+  - { id: 104, class: gpr64, preferred-register: '' }
+  - { id: 105, class: gpr64, preferred-register: '' }
+  - { id: 106, class: gpr64, preferred-register: '' }
+  - { id: 107, class: gpr64, preferred-register: '' }
+  - { id: 108, class: gpr64, preferred-register: '' }
+  - { id: 109, class: gpr64, preferred-register: '' }
+  - { id: 110, class: gpr64, preferred-register: '' }
+  - { id: 111, class: gpr64, preferred-register: '' }
+  - { id: 112, class: gpr64, preferred-register: '' }
+  - { id: 113, class: gpr64, preferred-register: '' }
+  - { id: 114, class: gpr32, preferred-register: '' }
+  - { id: 115, class: gpr64, preferred-register: '' }
+  - { id: 116, class: gpr64, preferred-register: '' }
+  - { id: 117, class: gpr64, preferred-register: '' }
+  - { id: 118, class: gpr32, preferred-register: '' }
+  - { id: 119, class: gpr64, preferred-register: '' }
+  - { id: 120, class: gpr64, preferred-register: '' }
+  - { id: 121, class: gpr64, preferred-register: '' }
+  - { id: 122, class: gpr64all, preferred-register: '' }
+  - { id: 123, class: gpr64all, preferred-register: '' }
+  - { id: 124, class: gpr64all, preferred-register: '' }
+  - { id: 125, class: gpr64, preferred-register: '' }
+  - { id: 126, class: gpr64, preferred-register: '' }
+  - { id: 127, class: gpr64all, preferred-register: '' }
+  - { id: 128, class: gpr64common, preferred-register: '' }
+  - { id: 129, class: gpr64, preferred-register: '' }
+  - { id: 130, class: gpr64, preferred-register: '' }
+  - { id: 131, class: gpr64all, preferred-register: '' }
+  - { id: 132, class: gpr64, preferred-register: '' }
+  - { id: 133, class: gpr64, preferred-register: '' }
+  - { id: 134, class: gpr64, preferred-register: '' }
+  - { id: 135, class: gpr64, preferred-register: '' }
+liveins:
+  - { reg: '$x28', virtual-reg: '%39' }
+  - { reg: '$x27', virtual-reg: '%40' }
+  - { reg: '$x0', virtual-reg: '%41' }
+  - { reg: '$x1', virtual-reg: '%42' }
+frameInfo:
+  isFrameAddressTaken: false
+  isReturnAddressTaken: false
+  hasStackMap:     false
+  hasPatchPoint:   false
+  stackSize:       0
+  offsetAdjustment: 0
+  maxAlignment:    1
+  adjustsStack:    true
+  hasCalls:        true
+  stackProtector:  ''
+  functionContext: ''
+  maxCallFrameSize: 0
+  cvBytesOfCalleeSavedRegisters: 0
+  hasOpaqueSPAdjustment: false
+  hasVAStart:      false
+  hasMustTailInVarArgFunc: false
+  hasTailCall:     false
+  localFrameSize:  0
+  savePoint:       ''
+  restorePoint:    ''
+fixedStack:      []
+stack:           []
+callSites:       []
+debugValueSubstitutions: []
+constants:       []
+machineFunctionInfo: {}
+body:             |
+  bb.0.L1:
+    successors: %bb.2(0x40000000), %bb.1(0x40000000)
+    liveins: $x28, $x27, $x0, $x1
+  
+    %42:gpr64common = COPY $x1
+    %41:gpr64common = COPY $x0
+    %40:gpr64 = COPY $x27
+    %39:gpr64 = COPY $x28
+    %43:gpr64 = LDURXi %42, -8 :: (load (s64) from %ir.4, align 4, addrspace 1)
+    %44:gpr64 = UBFMXri killed %43, 9, 63
+    %45:gpr64sp = ANDXri killed %44, 8173
+    %0:gpr64sp = COPY %45
+    %46:gpr64 = nsw SUBSXri %45, 1, 0, implicit-def dead $nzcv
+    %1:gpr64all = COPY %46
+    %47:gpr64 = SUBSXri %45, 2, 0, implicit-def $nzcv
+    Bcc 8, %bb.2, implicit $nzcv
+    B %bb.1
+  
+  bb.1.L162:
+    successors: %bb.2(0x40000000), %bb.3(0x40000000)
+  
+    %50:gpr64 = MOVi64imm -1
+    %49:gpr64all = COPY %50
+    %51:gpr32 = MOVi32imm 1
+    %48:gpr64all = SUBREG_TO_REG 0, killed %51, %subreg.sub_32
+    %52:gpr64 = SUBSXri %0, 2, 0, implicit-def $nzcv
+    Bcc 1, %bb.3, implicit $nzcv
+    B %bb.2
+  
+  bb.2.L134.preheader:
+    successors: %bb.18(0x80000000)
+  
+    %2:gpr64all = PHI %1, %bb.0, %48, %bb.1
+    %54:gpr64 = SUBSXri %42, 4, 0, implicit-def dead $nzcv
+    %55:gpr32 = MOVi32imm 1
+    %53:gpr64all = SUBREG_TO_REG 0, killed %55, %subreg.sub_32
+    %3:gpr64sp = COPY %54
+    B %bb.18
+  
+  bb.3.common.ret:
+    %4:gpr64all = PHI %39, %bb.1, %28, %bb.19, %28, %bb.17, %29, %bb.15
+    %5:gpr64all = PHI %40, %bb.1, %27, %bb.19, %27, %bb.17, %30, %bb.15
+    %6:gpr64all = PHI %49, %bb.1, %127, %bb.19, %131, %bb.17, %31, %bb.15
+    $x28 = COPY %4
+    $x27 = COPY %5
+    $x0 = COPY %6
+    RET_ReallyLR implicit $x28, implicit $x27, implicit $x0
+  
+  bb.4.L134:
+    successors: %bb.15(0x04000000), %bb.5(0x7c000000)
+  
+    %7:gpr64 = PHI %34, %bb.18, %38, %bb.19
+    %8:gpr64all = PHI %35, %bb.18, %27, %bb.19
+    %9:gpr64all = PHI %36, %bb.18, %28, %bb.19
+    %57:gpr64 = ADDXrr %37, %7
+    %58:gpr64 = UBFMXri killed %57, 1, 63
+    %59:gpr64common = ORRXri killed %58, 4096
+    %10:gpr64sp = COPY %59
+    %60:gpr64 = UBFMXri %59, 62, 61
+    %61:gpr64common = LDRXroX %3, killed %60, 0, 0 :: (load (s64) from %ir.15, addrspace 1)
+    %11:gpr64sp = COPY %61
+    %62:gpr64 = LDRXui %61, 0 :: (load (s64) from %ir.16, addrspace 1)
+    %12:gpr64sp = COPY %62
+    %63:gpr64 = SUBSXrr %62, %41, implicit-def $nzcv
+    Bcc 0, %bb.15, implicit $nzcv
+    B %bb.5
+  
+  bb.5.L165:
+    successors: %bb.6(0x40000000), %bb.7(0x40000000)
+  
+    %64:gpr64 = LDURXi %41, -8 :: (load monotonic (s64) from %ir.sunkaddr, addrspace 1)
+    %65:gpr64 = UBFMXri killed %64, 7, 63
+    %66:gpr64sp = ANDXri killed %65, 8045
+    %67:gpr64 = nsw SUBSXri killed %66, 1, 0, implicit-def dead $nzcv
+    %68:gpr32 = LDRBBroX %41, %67, 0, 0 :: (load (s8) from %ir.23, addrspace 1)
+    %69:gpr64 = SUBREG_TO_REG 0, killed %68, %subreg.sub_32
+    %70:gpr64 = nsw SUBSXrr %67, killed %69, implicit-def dead $nzcv
+    %13:gpr64 = COPY %70
+    %71:gpr64 = LDURXi %12, -8 :: (load monotonic (s64) from %ir.27, addrspace 1)
+    %72:gpr64 = UBFMXri killed %71, 7, 63
+    %73:gpr64sp = ANDXri killed %72, 8045
+    %74:gpr64 = nsw SUBSXri killed %73, 1, 0, implicit-def dead $nzcv
+    %75:gpr32 = LDRBBroX %12, %74, 0, 0 :: (load (s8) from %ir.32, addrspace 1)
+    %76:gpr64 = SUBREG_TO_REG 0, killed %75, %subreg.sub_32
+    %77:gpr64 = nsw SUBSXrr %74, killed %76, implicit-def dead $nzcv
+    %14:gpr64 = COPY %77
+    %78:gpr64 = SUBSXrr %70, %77, implicit-def $nzcv
+    %79:gpr64common = CSELXr %70, %77, 3, implicit $nzcv
+    %15:gpr64common = COPY %79
+    %80:gpr64 = SUBSXri %79, 16, 0, implicit-def $nzcv
+    Bcc 3, %bb.7, implicit $nzcv
+    B %bb.6
+  
+  bb.6.L166:
+    successors: %bb.14(0x80000000)
+  
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    $x28 = COPY %9
+    $x27 = COPY %8
+    $x0 = COPY %41
+    $x1 = COPY %12
+    OXCAML_C_DIRECT_CALL @"\01_caml_string_compare", $x28, $x27, $x0, $x1, csr_aarch64_aapcs, implicit-def dead $lr, implicit $sp, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %122:gpr64all = COPY $x28
+    %123:gpr64all = COPY $x27
+    %124:gpr64all = COPY $x0
+    %16:gpr64all = COPY %122
+    %17:gpr64all = COPY %123
+    %18:gpr64all = COPY %124
+    B %bb.14
+  
+  bb.7.L167:
+    successors: %bb.13(0x30000000), %bb.8(0x50000000)
+  
+    CBZX %15, %bb.13
+    B %bb.8
+  
+  bb.8.L169:
+    successors: %bb.10(0x40000000), %bb.9(0x40000000)
+  
+    %81:gpr32 = MOVi32imm 8
+    %82:gpr64 = SUBREG_TO_REG 0, killed %81, %subreg.sub_32
+    %83:gpr64 = SUBSXrr killed %82, %15, implicit-def $nzcv
+    %84:gpr64 = COPY $xzr
+    %85:gpr64 = CSELXr %84, killed %83, 3, implicit $nzcv
+    %86:gpr64 = nuw nsw UBFMXri killed %85, 61, 60
+    %87:gpr64 = MOVi64imm -1
+    %88:gpr64 = nsw LSLVXr killed %87, killed %86
+    %89:gpr64 = LDRXui %41, 0 :: (load (s64) from %ir.2, addrspace 1)
+    %90:gpr64 = REVXr killed %89
+    %91:gpr64 = LDRXui %12, 0 :: (load (s64) from %ir.17, addrspace 1)
+    %92:gpr64 = REVXr killed %91
+    %93:gpr64 = ANDXrr killed %90, %88
+    %19:gpr64 = COPY %93
+    %94:gpr64 = ANDXrr killed %92, %88
+    %20:gpr64 = COPY %94
+    %95:gpr64 = SUBSXrr %93, %94, implicit-def $nzcv
+    Bcc 0, %bb.10, implicit $nzcv
+    B %bb.9
+  
+  bb.9.L170:
+    successors: %bb.14(0x80000000)
+  
+    %96:gpr64 = SUBSXrr %19, %20, implicit-def $nzcv
+    %97:gpr32 = MOVi32imm 3
+    %98:gpr64 = SUBREG_TO_REG 0, killed %97, %subreg.sub_32
+    %99:gpr64 = CSINVXr killed %98, $xzr, 2, implicit $nzcv
+    %21:gpr64all = COPY %99
+    B %bb.14
+  
+  bb.10.L171:
+    successors: %bb.11(0x40000000), %bb.13(0x40000000)
+  
+    %100:gpr64 = SUBSXri %15, 9, 0, implicit-def $nzcv
+    Bcc 3, %bb.13, implicit $nzcv
+    B %bb.11
+  
+  bb.11.L172:
+    successors: %bb.13(0x40000000), %bb.12(0x40000000)
+  
+    %101:gpr64 = nuw nsw UBFMXri %15, 61, 60
+    %102:gpr64 = COPY $xzr
+    %103:gpr64 = SUBXrr %102, killed %101
+    %104:gpr64 = MOVi64imm -1
+    %105:gpr64 = nsw LSLVXr killed %104, killed %103
+    %106:gpr64 = LDRXui %41, 1 :: (load (s64) from %ir.sunkaddr151, addrspace 1)
+    %107:gpr64 = REVXr killed %106
+    %108:gpr64 = LDRXui %12, 1 :: (load (s64) from %ir.61, addrspace 1)
+    %109:gpr64 = REVXr killed %108
+    %110:gpr64 = ANDXrr killed %107, %105
+    %22:gpr64 = COPY %110
+    %111:gpr64 = ANDXrr killed %109, %105
+    %23:gpr64 = COPY %111
+    %112:gpr64 = SUBSXrr %110, %111, implicit-def $nzcv
+    Bcc 0, %bb.13, implicit $nzcv
+    B %bb.12
+  
+  bb.12.L173:
+    successors: %bb.14(0x80000000)
+  
+    %113:gpr64 = SUBSXrr %22, %23, implicit-def $nzcv
+    %114:gpr32 = MOVi32imm 3
+    %115:gpr64 = SUBREG_TO_REG 0, killed %114, %subreg.sub_32
+    %116:gpr64 = CSINVXr killed %115, $xzr, 2, implicit $nzcv
+    %24:gpr64all = COPY %116
+    B %bb.14
+  
+  bb.13.L168:
+    successors: %bb.14(0x80000000)
+  
+    %117:gpr64 = SUBSXrr %13, %14, implicit-def $nzcv
+    %118:gpr32 = MOVi32imm 3
+    %119:gpr64 = SUBREG_TO_REG 0, killed %118, %subreg.sub_32
+    %120:gpr64 = CSINCXr killed %119, $xzr, 8, implicit $nzcv
+    %121:gpr64 = CSINVXr killed %120, $xzr, 2, implicit $nzcv
+    %25:gpr64all = COPY %121
+  
+  bb.14.L144:
+    successors: %bb.15(0x04000000), %bb.16(0x7c000000)
+  
+    %26:gpr64sp = PHI %21, %bb.9, %24, %bb.12, %25, %bb.13, %18, %bb.6
+    %27:gpr64all = PHI %8, %bb.9, %8, %bb.12, %8, %bb.13, %17, %bb.6
+    %28:gpr64all = PHI %9, %bb.9, %9, %bb.12, %9, %bb.13, %16, %bb.6
+    %125:gpr64 = SUBSXri %26, 1, 0, implicit-def $nzcv
+    Bcc 1, %bb.16, implicit $nzcv
+    B %bb.15
+  
+  bb.15.L146:
+    successors: %bb.3(0x80000000)
+  
+    %29:gpr64all = PHI %9, %bb.4, %28, %bb.14
+    %30:gpr64all = PHI %8, %bb.4, %27, %bb.14
+    %135:gpr64 = LDRXui %11, 1 :: (load (s64) from %ir.74, addrspace 1)
+    %31:gpr64all = COPY %135
+    B %bb.3
+  
+  bb.16.L150:
+    successors: %bb.17(0x04000000), %bb.19(0x7c000000)
+  
+    %126:gpr64 = SUBSXri %26, 0, 0, implicit-def $nzcv
+    Bcc 12, %bb.19, implicit $nzcv
+    B %bb.17
+  
+  bb.17.L152:
+    successors: %bb.3(0x04000000), %bb.18(0x7c000000)
+  
+    %132:gpr64 = nsw SUBSXri %10, 2, 0, implicit-def dead $nzcv
+    %32:gpr64all = COPY %132
+    %133:gpr64 = MOVi64imm -1
+    %131:gpr64all = COPY %133
+    %134:gpr64 = SUBSXrr %7, %132, implicit-def $nzcv
+    Bcc 12, %bb.3, implicit $nzcv
+    B %bb.18
+  
+  bb.18.L134.outer:
+    successors: %bb.4(0x80000000)
+  
+    %33:gpr64common = PHI %2, %bb.2, %32, %bb.17
+    %34:gpr64all = PHI %53, %bb.2, %7, %bb.17
+    %35:gpr64all = PHI %40, %bb.2, %27, %bb.17
+    %36:gpr64all = PHI %39, %bb.2, %28, %bb.17
+    %56:gpr64 = nsw SUBSXri %33, 1, 0, implicit-def dead $nzcv
+    %37:gpr64 = COPY %56
+    B %bb.4
+  
+  bb.19.L155:
+    successors: %bb.3(0x04000000), %bb.4(0x7c000000)
+  
+    %128:gpr64common = nuw ADDXri %10, 2, 0
+    %38:gpr64all = COPY %128
+    %129:gpr64 = MOVi64imm -1
+    %127:gpr64all = COPY %129
+    %130:gpr64 = SUBSXrr %128, %33, implicit-def $nzcv
+    Bcc 12, %bb.3, implicit $nzcv
+    B %bb.4
+
+...

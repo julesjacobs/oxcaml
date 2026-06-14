@@ -328,10 +328,10 @@ let operation_is_pure : specific_operation -> bool = function
   | Imove32 -> true
   | Isignext _ -> true
   | Isimd op -> Simd.operation_is_pure op
+  | Illvm_intrinsic ("caml_sse2_float64_min" | "caml_sse2_float64_max") -> true
+  | Illvm_intrinsic ("caml_rdtsc_unboxed" | "caml_rdpmc_unboxed") -> false
   | Illvm_intrinsic intr ->
-      Misc.fatal_errorf "Arch.operation_is_pure: Unexpected llvm_intrinsic %s: \
-                                                  not using LLVM backend"
-      intr
+      Misc.fatal_errorf "Arch.operation_is_pure: unknown llvm_intrinsic %s" intr
 
 (* Specific operations that can raise *)
 

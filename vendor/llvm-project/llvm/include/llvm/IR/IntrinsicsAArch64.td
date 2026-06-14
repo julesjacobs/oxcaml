@@ -10,6 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+def llvm_oxcaml_value_ty : LLVMQualPointerType<llvm_i8_ty, 1>;
+
 let TargetPrefix = "aarch64" in {
 
 def int_aarch64_ldxr : Intrinsic<[llvm_i64_ty], [llvm_anyptr_ty],
@@ -88,6 +90,82 @@ def int_aarch64_isb : ClangBuiltin<"__builtin_arm_isb">, MSBuiltin<"__isb">,
 // takes up, the second and return value are essentially chains, used to force
 // ordering during ISel.
 def int_aarch64_space : DefaultAttrsIntrinsic<[llvm_i64_ty], [llvm_i32_ty, llvm_i64_ty], []>;
+
+// OxCaml trap recovery state at a runtime-entered trap recovery block. This is
+// AArch64-specific: x0 is the exception bucket, x26 is the previous trap
+// pointer, x27 is the allocation pointer, and x28 is the domain state pointer.
+def int_aarch64_oxcaml_trap_recover
+    : Intrinsic<[llvm_oxcaml_value_ty, llvm_i64_ty, llvm_i64_ty, llvm_i64_ty], [],
+                [IntrNoMem, IntrHasSideEffects, IntrConvergent,
+                 IntrNoDuplicate, IntrNoMerge, IntrWillReturn, IntrNoCallback,
+                 IntrNoFree]>;
+
+// OxCaml trap publication. The third argument is the recovery block address to
+// store in the trap block. The explicit invoke unwind edge carries the modeled
+// recovery control-flow edge for calls while the trap is active.
+def int_aarch64_oxcaml_trap_publish
+    : Intrinsic<[], [llvm_ptr_ty, llvm_i64_ty, llvm_ptr_ty],
+                [IntrHasSideEffects, IntrConvergent, IntrNoDuplicate,
+                 IntrNoMerge, IntrWillReturn, IntrNoCallback, IntrNoFree]>;
+
+// OxCaml native-shaped trap frame push. The argument is a blockaddress for the
+// runtime-entered recovery block stored in the trap frame.
+// Recompute a derived (interior) pointer from its base after a
+// statepoint with in-place root semantics. Semantically just
+// base + byteoff, but opaque to CSE/LICM/sinking: the base register's
+// VALUE changes at statepoints (the GC rewrites roots in place), so the
+// addition must execute at this program point and must never merge with
+// a syntactically identical computation on the other side of a call.
+// Expanded to a plain add after register allocation.
+def int_aarch64_oxcaml_rederive
+    : Intrinsic<[llvm_oxcaml_value_ty], [llvm_oxcaml_value_ty, llvm_i64_ty],
+                [IntrHasSideEffects, IntrNoDuplicate, IntrNoMerge,
+                 IntrWillReturn, IntrNoCallback, IntrNoFree]>;
+
+// The post-statepoint incarnation of a gc value under in-place root
+// semantics. Opaque before register allocation so no value-based pass
+// (CSE/LICM/sinking/folding) can identify the pre- and post-statepoint
+// worlds; converted to a plain COPY right before register coalescing,
+// which merges it away (the old value dies at the statepoint where the
+// new one is born), yielding in-place final code at zero cost.
+def int_aarch64_oxcaml_relocated
+    : Intrinsic<[llvm_oxcaml_value_ty], [llvm_oxcaml_value_ty],
+                [IntrHasSideEffects, IntrNoDuplicate, IntrNoMerge,
+                 IntrWillReturn, IntrNoCallback, IntrNoFree]>;
+
+def int_aarch64_oxcaml_push_trap
+    : Intrinsic<[], [llvm_ptr_ty],
+                [IntrHasSideEffects, IntrConvergent, IntrNoDuplicate,
+                 IntrNoMerge, IntrWillReturn, IntrNoCallback, IntrNoFree]>;
+
+// OxCaml native-shaped trap frame pop on the normal exit path.
+def int_aarch64_oxcaml_pop_trap
+    : Intrinsic<[], [],
+                [IntrHasSideEffects, IntrConvergent, IntrNoDuplicate,
+                 IntrNoMerge, IntrWillReturn, IntrNoCallback, IntrNoFree]>;
+
+// OxCaml dynamic raise-notrace. This never returns to the current function: the
+// current trap frame in x26 supplies the destination handler. The AArch64
+// lowering copies the exception bucket to x0, restores sp from x26, pops the
+// previous trap pointer and handler address, and branches to the handler.
+// The handler is runtime-entered: it reads the domain state and allocation
+// cursor from x28/x27, so the raise carries the current SSA values of both
+// and the lowering pins them into those registers (args: exn, ds, alloc).
+def int_aarch64_oxcaml_raise_notrace
+    : Intrinsic<[], [llvm_i64_ty, llvm_i64_ty, llvm_i64_ty],
+                [IntrHasSideEffects, IntrConvergent, IntrNoDuplicate,
+                 IntrNoMerge, IntrNoReturn, Throws, IntrNoCallback,
+                 IntrNoFree]>;
+
+// OxCaml raise-notrace with a statically known runtime-entered recovery edge.
+// This has the same runtime semantics as int_aarch64_oxcaml_raise_notrace, but
+// the blockaddress records the active handler for machine CFG construction.
+// Args: exn, ds, alloc, recovery blockaddress.
+def int_aarch64_oxcaml_raise_notrace_edge
+    : Intrinsic<[], [llvm_i64_ty, llvm_i64_ty, llvm_i64_ty, llvm_ptr_ty],
+                [IntrHasSideEffects, IntrConvergent, IntrNoDuplicate,
+                 IntrNoMerge, IntrNoReturn, Throws, IntrNoCallback,
+                 IntrNoFree]>;
 
 }
 

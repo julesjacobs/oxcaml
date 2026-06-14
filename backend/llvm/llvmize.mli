@@ -31,6 +31,8 @@ val cfg : Cfg_with_layout.t -> unit
 
 val data : Cmm.data_item list -> unit
 
+val register_function_signatures : Cmm.phrase list -> unit
+
 val begin_assembly : is_startup:bool -> sourcefile:string option -> unit
 
 val end_assembly : unit -> unit
@@ -42,3 +44,7 @@ val open_out : asm_filename:string -> unit
 val assemble_file : asm_filename:string -> obj_filename:string -> int
 
 val init : output_prefix:string -> ppf_dump:Format.formatter -> unit
+
+val register_expect_llvm_ir_callback : (string -> unit) -> unit
+
+val register_expect_llvm_asm_callback : (string -> unit) -> unit

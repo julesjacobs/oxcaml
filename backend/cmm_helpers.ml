@@ -1563,14 +1563,36 @@ let memory_chunk_width_in_bytes : memory_chunk -> int = function
   | Twofiftysix_unaligned | Twofiftysix_aligned -> size_vec256
   | Fivetwelve_unaligned | Fivetwelve_aligned -> size_vec512
 
-let strided_field_address ptr ~index ~stride dbg =
+let strided_field_address_with_op addr_op ptr ~index ~stride dbg =
   if index * stride = 0
   then ptr
-  else Cop (Cadda, [ptr; Cconst_int (index * stride, dbg)], dbg)
+  else Cop (addr_op, [ptr; Cconst_int (index * stride, dbg)], dbg)
+
+let strided_field_address ptr ~index ~stride dbg =
+  strided_field_address_with_op Cadda ptr ~index ~stride dbg
+
+let rec is_static_address_expression = function
+  | Cconst_symbol _ -> true
+  | Cop (Caddi, [arg; Cconst_int _], _)
+  | Cop (Caddi, [Cconst_int _; arg], _) ->
+    is_static_address_expression arg
+  | _ -> false
+
+let static_field_address ?(memory_chunk = Word_val) ptr n dbg =
+  strided_field_address_with_op Caddi ptr dbg ~index:n
+    ~stride:(memory_chunk_width_in_bytes memory_chunk)
 
 let field_address ?(memory_chunk = Word_val) ptr n dbg =
-  strided_field_address ptr dbg ~index:n
-    ~stride:(memory_chunk_width_in_bytes memory_chunk)
+  if is_static_address_expression ptr
+  then static_field_address ~memory_chunk ptr n dbg
+  else
+    strided_field_address ptr dbg ~index:n
+      ~stride:(memory_chunk_width_in_bytes memory_chunk)
+
+let field_address_for_initialize ptr n dbg =
+  if is_static_address_expression ptr
+  then static_field_address ptr n dbg
+  else field_address ptr n dbg
 
 let get_field_gen_given_memory_chunk memory_chunk mutability ptr n dbg =
   Cop
@@ -1648,6 +1670,7 @@ let addr_array_length_shifted hdr dbg = lsr_const hdr wordsize_shift dbg
 let array_indexing ?typ log2size ptr ofs dbg =
   let add =
     match typ with
+    | None when is_static_address_expression ptr -> Caddi
     | None | Some Addr -> Cadda
     | Some Int -> Caddi
     | _ -> assert false
@@ -1787,7 +1810,7 @@ let caml_modify ~dbg addr newval =
           returns = true;
           effects = Arbitrary_effects;
           coeffects = Has_coeffects;
-          ty_args = []
+          ty_args = [XAddr; XValue]
         },
       [addr; newval],
       dbg )
@@ -1802,7 +1825,7 @@ let caml_modify_local ~dbg addr i newval =
           returns = true;
           effects = Arbitrary_effects;
           coeffects = Has_coeffects;
-          ty_args = []
+          ty_args = [XValue; XInt; XValue]
         },
       [addr; i; newval],
       dbg )
@@ -1833,6 +1856,11 @@ let float_array_set arr ofs newval dbg =
       dbg )
 
 let addr_array_initialize arr ofs newval dbg =
+  let addr =
+    if is_static_address_expression arr
+    then array_indexing ~typ:Int log2_size_addr arr ofs dbg
+    else array_indexing log2_size_addr arr ofs dbg
+  in
   Cop
     ( Cextcall
         { func = "caml_initialize";
@@ -1842,9 +1870,9 @@ let addr_array_initialize arr ofs newval dbg =
           coeffects = Has_coeffects;
           ty = typ_void;
           alloc = false;
-          ty_args = []
+          ty_args = [XAddr; XValue]
         },
-      [array_indexing log2_size_addr arr ofs dbg; newval],
+      [addr; newval],
       dbg )
 
 (** [zero_extend ~bits dbg e] returns [e] with the most significant
@@ -2126,7 +2154,7 @@ let lookup_tag obj tag dbg =
               effects = Arbitrary_effects;
               coeffects = Has_coeffects;
               alloc = false;
-              ty_args = []
+              ty_args = [XValue; XValue]
             },
           [obj; tag],
           dbg ))
@@ -2385,7 +2413,7 @@ let make_alloc_generic ~block_kind ~mode ~alloc_block_kind dbg tag wordsize args
                 returns = true;
                 effects = Arbitrary_effects;
                 coeffects = Has_coeffects;
-                ty_args = []
+                ty_args = List.map (fun _ -> XInt) caml_alloc_args
               },
             List.map (fun arg -> Cconst_int (arg, dbg)) caml_alloc_args,
             dbg ),
@@ -3055,7 +3083,7 @@ let unaligned_load_512 = load_chunk Fivetwelve_unaligned
 
 let unaligned_set_512 = set_chunk Fivetwelve_unaligned
 
-let opaque e dbg = Cop (Copaque, [e], dbg)
+let opaque ~ty e dbg = Cop (Copaque ty, [e], dbg)
 
 (* Build an actual switch (ie jump table) *)
 
@@ -4001,7 +4029,7 @@ let intermediate_curry_functions ~nlocal ~arity result =
           fun_codegen_options = [];
           fun_dbg;
           fun_poll = Default_poll;
-          fun_ret_type = result
+          fun_ret_type = typ_val
         }
       ::
       (if has_nary
@@ -4142,9 +4170,9 @@ let setfield n ptr init arg1 arg2 dbg =
                returns = true;
                effects = Arbitrary_effects;
                coeffects = Has_coeffects;
-               ty_args = []
-             },
-           [field_address arg1 n dbg; arg2],
+               ty_args = [XAddr; XValue]
+           },
+           [field_address_for_initialize arg1 n dbg; arg2],
            dbg ))
   | Simple init -> return_unit dbg (set_field arg1 n arg2 init dbg)
 
@@ -4361,7 +4389,7 @@ let entry_point namelist =
   let call i =
     let f =
       Cop
-        ( Cadda,
+        ( Caddi,
           [ cconst_symbol table_symbol;
             Cop (Cmuli, [Cconst_int (Arch.size_addr, dbg ()); i], dbg ()) ],
           dbg () )
@@ -4681,7 +4709,14 @@ let sequence x y =
   | _, _ -> Csequence (x, y)
 
 let ite ~dbg ~then_dbg ~then_ ~else_dbg ~else_ cond =
-  Cifthenelse (cond, then_dbg, then_, else_dbg, else_, dbg)
+  match cond with
+  | Cconst_int (0, _) | Cconst_natint (0n, _) -> else_
+  | Cconst_int _ | Cconst_natint _ -> then_
+  | Cconst_float32 _ | Cconst_float _ | Cconst_vec128 _ | Cconst_vec256 _
+  | Cconst_vec512 _ | Cconst_symbol _ | Cvar _ | Ctuple _ | Cop _
+  | Csequence _ | Cifthenelse _ | Cswitch _ | Ccatch _ | Cexit _ | Cinvalid _
+  | Clet _ | Cphantom_let _ ->
+    Cifthenelse (cond, then_dbg, then_, else_dbg, else_, dbg)
 
 let trywith ~dbg ~body ~exn_var ~extra_args ~handler_cont ~handler () =
   Ccatch
@@ -4914,12 +4949,10 @@ let indirect_full_call ~dbg ty pos f ~callees args_type args =
 let bigarray_load ~dbg ~elt_kind ~elt_size ~elt_chunk ~bigarray ~index =
   let ba_data_f = field_address bigarray 1 dbg in
   let ba_data_p = load ~dbg Word_int Mutable ~addr:ba_data_f in
-  let addr =
-    array_indexing ~typ:Addr (Misc.log2 elt_size) ba_data_p index dbg
-  in
+  let addr = array_indexing ~typ:Int (Misc.log2 elt_size) ba_data_p index dbg in
   match (elt_kind : Lambda.bigarray_kind) with
   | Pbigarray_complex32 | Pbigarray_complex64 ->
-    let addr' = binary Cadda ~dbg addr (int ~dbg (elt_size / 2)) in
+    let addr' = binary Caddi ~dbg addr (int ~dbg (elt_size / 2)) in
     box_complex dbg
       (load ~dbg elt_chunk Mutable ~addr)
       (load ~dbg elt_chunk Mutable ~addr:addr')
@@ -4936,12 +4969,10 @@ let bigarray_store ~dbg ~(elt_kind : Lambda.bigarray_kind) ~elt_size ~elt_chunk
     ~bigarray ~index ~new_value =
   let ba_data_f = field_address bigarray 1 dbg in
   let ba_data_p = load ~dbg Word_int Mutable ~addr:ba_data_f in
-  let addr =
-    array_indexing ~typ:Addr (Misc.log2 elt_size) ba_data_p index dbg
-  in
+  let addr = array_indexing ~typ:Int (Misc.log2 elt_size) ba_data_p index dbg in
   match elt_kind with
   | Pbigarray_complex32 | Pbigarray_complex64 ->
-    let addr' = binary Cadda ~dbg addr (int ~dbg (elt_size / 2)) in
+    let addr' = binary Caddi ~dbg addr (int ~dbg (elt_size / 2)) in
     return_unit dbg
       (sequence
          (store ~dbg elt_chunk Assignment ~addr
@@ -5050,7 +5081,7 @@ let atomic_exchange_extcall ~dbg block ~field ~new_value =
           effects = Arbitrary_effects;
           coeffects = Has_coeffects;
           ty = typ_val;
-          ty_args = [];
+          ty_args = [XValue; XValue; XValue];
           alloc = false
         },
       [block; field; new_value],
@@ -5068,6 +5099,7 @@ let atomic_exchange_field ~dbg (imm_or_ptr : Lambda.immediate_or_pointer) block
 
 let atomic_arith ~dbg ~op ~untag ~ext_name block ~field i =
   let i = if untag then decr_int i dbg else i in
+  let i_ty_arg = if untag then XInt else XValue in
   let op = Catomic { op; size = Word } in
   if Proc.operation_supported op
   then
@@ -5082,7 +5114,7 @@ let atomic_arith ~dbg ~op ~untag ~ext_name block ~field i =
             effects = Arbitrary_effects;
             coeffects = Has_coeffects;
             ty = typ_int;
-            ty_args = [];
+            ty_args = [XValue; XValue; i_ty_arg];
             alloc = false
           },
         [block; field; i],
@@ -5126,7 +5158,7 @@ let atomic_compare_and_set_extcall ~dbg block ~field ~old_value ~new_value =
           effects = Arbitrary_effects;
           coeffects = Has_coeffects;
           ty = typ_int;
-          ty_args = [];
+          ty_args = [XValue; XValue; XValue; XValue];
           alloc = false
         },
       [block; field; old_value; new_value],
@@ -5159,7 +5191,7 @@ let atomic_compare_exchange_extcall ~dbg block ~field ~old_value ~new_value =
           effects = Arbitrary_effects;
           coeffects = Has_coeffects;
           ty = typ_val;
-          ty_args = [];
+          ty_args = [XValue; XValue; XValue; XValue];
           alloc = false
         },
       [block; field; old_value; new_value],
@@ -5405,7 +5437,7 @@ let with_stack ~dbg ~valuec ~exnc ~effc ~f ~arg =
                 returns = true;
                 effects = Arbitrary_effects;
                 coeffects = Has_coeffects;
-                ty_args = [XInt; XInt; XInt]
+                ty_args = [XValue; XValue; XValue]
               },
             [valuec; exnc; effc],
             dbg );
@@ -5427,7 +5459,7 @@ let with_stack_bind ~dbg ~valuec ~exnc ~effc ~dyn ~bind ~f ~arg =
                 returns = true;
                 effects = Arbitrary_effects;
                 coeffects = Has_coeffects;
-                ty_args = [XInt; XInt; XInt; XInt; XInt]
+                ty_args = [XValue; XValue; XValue; XValue; XValue]
               },
             [valuec; exnc; effc; dyn; bind],
             dbg );
@@ -5449,7 +5481,7 @@ let with_stack_preemptible ~dbg ~valuec ~exnc ~effc ~handle_tick ~f ~arg =
                 returns = true;
                 effects = Arbitrary_effects;
                 coeffects = Has_coeffects;
-                ty_args = [XInt; XInt; XInt; XInt]
+                ty_args = [XValue; XValue; XValue; XValue]
               },
             [valuec; exnc; effc; handle_tick],
             dbg );
@@ -5472,7 +5504,7 @@ let with_stack_bind_preemptible ~dbg ~valuec ~exnc ~effc ~handle_tick ~dyn ~bind
                 returns = true;
                 effects = Arbitrary_effects;
                 coeffects = Has_coeffects;
-                ty_args = [XInt; XInt; XInt; XInt; XInt; XInt]
+                ty_args = [XValue; XValue; XValue; XValue; XValue; XValue]
               },
             [valuec; exnc; effc; handle_tick; dyn; bind],
             dbg );

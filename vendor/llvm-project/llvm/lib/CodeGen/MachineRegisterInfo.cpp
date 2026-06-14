@@ -172,6 +172,15 @@ Register MachineRegisterInfo::cloneVirtualRegister(Register VReg,
   Register Reg = createIncompleteVirtualRegister(Name);
   VRegInfo[Reg].first = VRegInfo[VReg].first;
   setType(Reg, getType(VReg));
+  if (isOxCamlGCPtr(VReg))
+    setOxCamlGCPtr(Reg);
+  if (isOxCamlGCArg(VReg))
+    setOxCamlGCArg(Reg);
+  // Clones (spill/split siblings) carry the same runtime value, so the
+  // type-provenance bit transfers; coalescer JOINS must not (see the
+  // OxCamlTypedP1VRegs comment).
+  if (isOxCamlTypedP1(VReg))
+    setOxCamlTypedP1(Reg);
   noteCloneVirtualRegister(Reg, VReg);
   return Reg;
 }
@@ -210,6 +219,9 @@ void MachineRegisterInfo::clearVirtRegs() {
   }
 #endif
   VRegInfo.clear();
+  OxCamlGCVRegs.clear();
+  OxCamlGCArgVRegs.clear();
+  OxCamlTypedP1VRegs.clear();
   for (auto &I : LiveIns)
     I.second = 0;
 }

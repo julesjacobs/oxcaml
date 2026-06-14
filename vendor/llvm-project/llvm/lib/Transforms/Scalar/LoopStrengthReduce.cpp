@@ -153,6 +153,16 @@ static cl::opt<bool> InsnsCost(
   "lsr-insns-cost", cl::Hidden, cl::init(true),
   cl::desc("Add instruction count to a LSR cost model"));
 
+static cl::opt<bool> OxcamlSkipStatepointCallArgLSR(
+    "oxcaml-skip-statepoint-call-arg-lsr", cl::Hidden, cl::init(false),
+    cl::desc("Prototype: do not strength-reduce IV operands used by GC "
+             "statepoint calls"));
+
+static cl::opt<bool> OxcamlDisableStatepointLoopLSR(
+    "oxcaml-disable-statepoint-loop-lsr", cl::Hidden, cl::init(true),
+    cl::desc("Skip loop strength reduction for OxCaml loops containing GC "
+             "statepoints"));
+
 // Flag to choose how to narrow complex lsr solution
 static cl::opt<bool> LSRExpNarrow(
   "lsr-exp-narrow", cl::Hidden, cl::init(false),
@@ -3303,6 +3313,14 @@ void LSRInstance::CollectFixupsAndInitialFormulae() {
 
   for (const IVStrideUse &U : IU) {
     Instruction *UserInst = U.getUser();
+    if (OxcamlSkipStatepointCallArgLSR)
+      if (auto *II = dyn_cast<IntrinsicInst>(UserInst))
+        if (II->getIntrinsicID() == Intrinsic::experimental_gc_statepoint) {
+          LLVM_DEBUG(dbgs() << "Skipping statepoint IV user: " << *UserInst
+                            << '\n');
+          continue;
+        }
+
     // Skip IV users that are part of profitable IV Chains.
     User::op_iterator UseI =
         find(UserInst->operands(), U.getOperandValToReplace());
@@ -6900,9 +6918,30 @@ static bool ReduceLoopStrength(Loop *L, IVUsers &IU, ScalarEvolution &SE,
   return Changed;
 }
 
+static bool isOxcamlGCFunction(const Function &F) {
+  return F.hasGC() && F.getGC() == "oxcaml";
+}
+
+static bool containsStatepoint(const Loop &L) {
+  for (const BasicBlock *BB : L.blocks())
+    for (const Instruction &I : *BB)
+      if (const auto *II = dyn_cast<IntrinsicInst>(&I))
+        if (II->getIntrinsicID() == Intrinsic::experimental_gc_statepoint)
+          return true;
+  return false;
+}
+
 bool LoopStrengthReduce::runOnLoop(Loop *L, LPPassManager & /*LPM*/) {
   if (skipLoop(L))
     return false;
+
+  if (OxcamlDisableStatepointLoopLSR &&
+      isOxcamlGCFunction(*L->getHeader()->getParent()) &&
+      containsStatepoint(*L)) {
+    LLVM_DEBUG(dbgs() << "Skipping LSR for statepoint-containing loop: "
+                      << L->getHeader()->getName() << '\n');
+    return false;
+  }
 
   auto &IU = getAnalysis<IVUsersWrapperPass>().getIU();
   auto &SE = getAnalysis<ScalarEvolutionWrapperPass>().getSE();
@@ -6924,6 +6963,10 @@ bool LoopStrengthReduce::runOnLoop(Loop *L, LPPassManager & /*LPM*/) {
 PreservedAnalyses LoopStrengthReducePass::run(Loop &L, LoopAnalysisManager &AM,
                                               LoopStandardAnalysisResults &AR,
                                               LPMUpdater &) {
+  if (OxcamlDisableStatepointLoopLSR &&
+      isOxcamlGCFunction(*L.getHeader()->getParent()) && containsStatepoint(L))
+    return PreservedAnalyses::all();
+
   if (!ReduceLoopStrength(&L, AM.getResult<IVUsersAnalysis>(L, AR), AR.SE,
                           AR.DT, AR.LI, AR.TTI, AR.AC, AR.TLI, AR.MSSA))
     return PreservedAnalyses::all();

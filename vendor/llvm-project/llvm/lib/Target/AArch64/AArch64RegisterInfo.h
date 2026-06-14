@@ -77,6 +77,10 @@ public:
   // Unwinders may not preserve all Neon and SVE registers.
   const uint32_t *
   getCustomEHPadPreservedMask(const MachineFunction &MF) const override;
+  bool isRuntimeEnteredLiveIn(const MachineFunction &MF,
+                              MCRegister PhysReg) const override;
+  ArrayRef<MCPhysReg>
+  getRuntimeEnteredLiveIns(const MachineFunction &MF) const override;
 
   /// getThisReturnPreservedMask - Returns a call preserved mask specific to the
   /// case that 'returned' is on an i64 first argument if the calling convention
@@ -91,6 +95,9 @@ public:
 
   /// Stack probing calls preserve different CSRs to the normal CC.
   const uint32_t *getWindowsStackProbePreservedMask() const;
+
+  bool shouldSpillStatepointGCPtr(const MachineFunction &MF,
+                                  MCRegister PhysReg) const override;
 
   BitVector getStrictlyReservedRegs(const MachineFunction &MF) const;
   BitVector getReservedRegs(const MachineFunction &MF) const override;

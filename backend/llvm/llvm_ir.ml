@@ -148,6 +148,12 @@ module Type = struct
 
   let doublex2 = Vector { num_of_elems = 2; elem_type = double }
 
+  let vec128 = Vector { num_of_elems = 2; elem_type = i64 }
+
+  let vec256 = Vector { num_of_elems = 4; elem_type = i64 }
+
+  let vec512 = Vector { num_of_elems = 8; elem_type = i64 }
+
   let label = Label
 
   let metadata = Metadata
@@ -158,14 +164,13 @@ module Type = struct
     match c with
     | Int -> i64
     | Val -> val_ptr
-    | Addr ->
-      val_ptr
-      (* We interpret [Addr]s as [val_ptr]s to let the RS4GC pass in LLVM to
-         handle derived pointers for us. *)
+    | Addr -> val_ptr
     | Float -> double
     | Float32 -> float
-    | Vec128 | Vec256 | Vec512 | Valx2 ->
-      fail_msg ~name:"Type.of_machtype_component" "not_implemented"
+    | Vec128 -> vec128
+    | Vec256 -> vec256
+    | Vec512 -> vec512
+    | Valx2 -> vec128
 
   let of_reg (reg : Reg.t) = of_machtype_component reg.typ
 
@@ -249,8 +254,39 @@ module Type = struct
     | Metadata ->
       false
 
+  let is_int_or_int_vector = function
+    | Int _ -> true
+    | Vector { elem_type = Int _; _ } -> true
+    | Ptr _ | Float | Double | Struct _ | Array _ | Vector _ | Label | Token
+    | Metadata ->
+      false
+
+  let cmp_res_type = function
+    | Vector { num_of_elems; elem_type = Int _ } ->
+      Vector { num_of_elems; elem_type = i1 }
+    | Vector { num_of_elems; elem_type = Float | Double } ->
+      Vector { num_of_elems; elem_type = i1 }
+    | Int _ | Float | Double | Ptr _ -> i1
+    | Struct _ | Array _ | Vector _ | Label | Token | Metadata ->
+      fail_msg ~name:"Type.cmp_res_type"
+        "expected scalar or vector comparison type"
+
+  let is_i1_or_i1_vector = function
+    | Int { width_in_bits = 1 } -> true
+    | Vector { elem_type = Int { width_in_bits = 1 }; _ } -> true
+    | Int _ | Ptr _ | Float | Double | Struct _ | Array _ | Vector _ | Label
+    | Token | Metadata ->
+      false
+
   let is_floating_point = function
     | Float | Double -> true
+    | Ptr _ | Int _ | Struct _ | Array _ | Vector _ | Label | Token | Metadata
+      ->
+      false
+
+  let is_floating_point_or_vector = function
+    | Float | Double -> true
+    | Vector { elem_type = Float | Double; _ } -> true
     | Ptr _ | Int _ | Struct _ | Array _ | Vector _ | Label | Token | Metadata
       ->
       false
@@ -278,15 +314,31 @@ module Ident = struct
 
   let of_label label = local ("L" ^ Label.to_string label)
 
+  let escape_quoted_global s =
+    let b = Buffer.create (String.length s) in
+    String.iter
+      (fun c ->
+        match c with
+        | '"' -> Buffer.add_string b {|\22|}
+        | '\\' -> Buffer.add_string b {|\5C|}
+        | c when Char.code c < 32 || Char.code c >= 127 ->
+          Buffer.add_string b (Printf.sprintf {|\%02X|} (Char.code c))
+        | c -> Buffer.add_char b c)
+      s;
+    Buffer.contents b
+
+  let asm_name s =
+    let encoded =
+      Asm_targets.(Asm_symbol.create_global s |> Asm_symbol.encode)
+    in
+    "\001" ^ encoded
+
   let pp_t ppf t =
     let open Format in
     match t with
     | Local s -> fprintf ppf "%%%s" s
-    | Global s ->
-      let encoded =
-        Asm_targets.(Asm_symbol.create_global s |> Asm_symbol.encode)
-      in
-      fprintf ppf "@%s" encoded
+    | Global s when String.begins_with ~prefix:"llvm." s -> fprintf ppf "@%s" s
+    | Global s -> fprintf ppf {|@"%s"|} (escape_quoted_global (asm_name s))
 
   let to_label_string_exn = function
     | Local s -> s ^ ":"
@@ -296,6 +348,7 @@ module Ident = struct
 
   let to_string_encoded = function
     | Local s -> s
+    | Global s when String.begins_with ~prefix:"llvm." s -> s
     | Global s -> Asm_targets.(Asm_symbol.create_global s |> Asm_symbol.encode)
 
   module Gen = struct
@@ -416,17 +469,27 @@ end
 module Fn_attr = struct
   type t =
     | Cold
+    | Frame_pointer_all
     | Gc of string
     | Gc_leaf_function
     | Noinline
+    | Oxcaml_stack_check
+    | Oxcaml_stack_check_bytes of int
+    | Oxcaml_stack_check_before_bytes of int
     | Returns_twice
     | Statepoint_id of int
 
   let to_string = function
     | Cold -> "cold"
+    | Frame_pointer_all -> {|"frame-pointer"="all"|}
     | Gc s -> Format.sprintf {|gc "%s"|} s
     | Gc_leaf_function -> {|"gc-leaf-function"="true"|}
     | Noinline -> "noinline"
+    | Oxcaml_stack_check -> {|"oxcaml-stack-check"="true"|}
+    | Oxcaml_stack_check_bytes i ->
+      Format.sprintf {|"oxcaml-stack-check-bytes"="%d"|} i
+    | Oxcaml_stack_check_before_bytes i ->
+      Format.sprintf {|"oxcaml-stack-check-before-bytes"="%d"|} i
     | Returns_twice -> "returns_twice"
     | Statepoint_id i -> Format.sprintf {|"statepoint-id"="%d"|} i
 
@@ -437,7 +500,10 @@ module Fn_attr = struct
   let to_string t = Format.asprintf "%a" pp_t t
 
   let order = function
-    | Cold | Gc_leaf_function | Noinline | Returns_twice | Statepoint_id _ -> 0
+    | Cold | Frame_pointer_all | Gc_leaf_function | Noinline
+    | Oxcaml_stack_check | Oxcaml_stack_check_bytes _
+    | Oxcaml_stack_check_before_bytes _ | Returns_twice | Statepoint_id _ ->
+      0
     | Gc _ -> 10
   (* [Gc] is not really an attribute, so it must occur after all attributes. It
      is included here because it basically behaves like one. *)
@@ -452,7 +518,14 @@ end
 module Calling_conventions = struct
   type t =
     | Default (* Default C calling convention *)
-    | Oxcaml (* See backend/<arch>/proc.ml for details *)
+    | Oxcaml
+      (* Ordinary OxCaml calling convention. Runtime registers are explicit in
+         the LLVM IR signature: domain state and allocation pointer are threaded
+         as leading i64 arguments and leading i64 return values. The target
+         calling convention assigns those slots to the physical runtime
+         registers, so for AArch64 they should become x28/x27 at the call
+         boundary without extra copy code. See backend/<arch>/proc.ml and the
+         target calling convention for details. *)
     | Oxcaml_c_call
       (* Same as [Default] but threads runtime registers through and passes the
          function address through RAX. Used for [caml_c_call] *)
@@ -460,6 +533,10 @@ module Calling_conventions = struct
       (* Passes the number of bytes on the stack to be transferred in R12 in
          addition to [Ocaml_c_call]. Used for
          [caml_c_call_stack_args_llvm_backend] *)
+    | Oxcaml_c_direct_call
+      (* Ordinary C ABI arguments/results, but the AArch64 backend switches
+         from the OCaml stack to the C stack immediately around the call. Used
+         only for noalloc external calls with no stack arguments. *)
     | Oxcaml_alloc
   (* Saves almost all registers (see [Proc.destroyed_at_alloc_or_poll]),
      otherwise behaves like [Ocaml]. Used for [caml_call_gc] and
@@ -467,10 +544,14 @@ module Calling_conventions = struct
 
   let to_string = function
     | Default -> ""
-    | Oxcaml ->
-      if Config.with_frame_pointers then "oxcaml_fpcc" else "oxcaml_nofpcc"
+    | Oxcaml -> (
+      match Target_system.architecture () with
+      | AArch64 -> "oxcaml_nofpcc"
+      | IA32 | X86_64 | ARM | POWER | Z | Riscv ->
+        if Config.with_frame_pointers then "oxcaml_fpcc" else "oxcaml_nofpcc")
     | Oxcaml_c_call -> "oxcaml_ccc"
     | Oxcaml_c_call_stack_args -> "oxcaml_c_stackcc"
+    | Oxcaml_c_direct_call -> "oxcaml_c_directcc"
     | Oxcaml_alloc -> "oxcaml_alloccc"
 
   let pp_t ppf t = Format.pp_print_string ppf (to_string t)
@@ -514,6 +595,12 @@ module Instruction = struct
     | Atomicrmw_or
     | Atomicrmw_xor
     | Atomicrmw_xchg
+
+  type atomic_ordering =
+    | Monotonic
+    | Acquire
+    | Release
+    | Seq_cst
 
   type convert_op =
     (* Int *)
@@ -668,6 +755,12 @@ module Instruction = struct
     | Atomicrmw_xor -> "xor"
     | Atomicrmw_xchg -> "xchg"
 
+  let atomic_ordering_to_string = function
+    | Monotonic -> "monotonic"
+    | Acquire -> "acquire"
+    | Release -> "release"
+    | Seq_cst -> "seq_cst"
+
   type op =
     (* Terminator *)
     | Ret of Value.t
@@ -683,6 +776,16 @@ module Instruction = struct
           branches : switch_branch list
         }
     | Unreachable
+    | Invoke of
+        { func : Ident.t;
+          args : Value.t list;
+          res_type : Type.Or_void.t;
+          attrs : Fn_attr.t list;
+          operand_bundles : (string * Value.t list) list;
+          cc : Calling_conventions.t;
+          normal : Value.t;
+          unwind : Value.t
+        }
     (* Basic *)
     | Unary of
         { op : unary_op;
@@ -691,7 +794,8 @@ module Instruction = struct
     | Binary of
         { op : binary_op;
           arg1 : Value.t;
-          arg2 : Value.t
+          arg2 : Value.t;
+          contract : bool
         }
     | Convert of
         { op : convert_op;
@@ -731,15 +835,22 @@ module Instruction = struct
     (* Memory *)
     | Alloca of
         { typ : Type.t;
-          count : Value.t option
+          count : Value.t option;
+          align : int option
         }
     | Load of
         { ptr : Value.t;
-          typ : Type.t
+          typ : Type.t;
+          volatile_ : bool;
+          atomic : atomic_ordering option;
+          align : int option
         }
     | Store of
         { ptr : Value.t;
-          to_store : Value.t
+          to_store : Value.t;
+          volatile_ : bool;
+          atomic : atomic_ordering option;
+          align : int option
         }
     | Getelementptr of
         { base_type : Type.t;
@@ -748,6 +859,7 @@ module Instruction = struct
         }
     (* Atomics *)
     (* CR yusumez: Implement ordering constraints instead of hard-coding them *)
+    | Fence of atomic_ordering
     | Cmpxchg of
         { ptr : Value.t;
           compare_with : Value.t;
@@ -769,6 +881,7 @@ module Instruction = struct
           args : Value.t list;
           res_type : Type.Or_void.t;
           attrs : Fn_attr.t list;
+          operand_bundles : (string * Value.t list) list;
           cc : Calling_conventions.t;
           musttail : bool
         }
@@ -779,6 +892,11 @@ module Instruction = struct
           res_type : Type.Or_void.t;
           sideeffect : bool;
           attrs : Fn_attr.t list
+        }
+    (* Exception handling *)
+    | Landingpad of
+        { typ : Type.t;
+          cleanup : bool
         }
 
   type t =
@@ -792,11 +910,13 @@ module Instruction = struct
   let op_res_type = function
     (* Terminators return no value *)
     | Ret _ | Br _ | Br_cond _ | Switch _ | Unreachable -> None
+    | Invoke { res_type; _ } -> res_type
     (* Basic operations *)
     | Unary { arg; _ } -> Some (Value.get_type arg)
     | Binary { arg1; _ } -> Some (Value.get_type arg1)
     | Convert { to_; _ } -> Some to_
-    | Icmp _ | Fcmp _ -> Some Type.i1
+    | Icmp { arg1; _ } | Fcmp { arg1; _ } ->
+      Some (Type.cmp_res_type (Value.get_type arg1))
     (* Vector operations *)
     | Extractelement { vector; _ } -> Type.elem_type (Value.get_type vector)
     | Insertelement { vector; _ } -> Some (Value.get_type vector)
@@ -812,6 +932,7 @@ module Instruction = struct
     | Store _ -> None
     | Getelementptr { base_ptr; _ } -> Some (Value.get_type base_ptr)
     (* Atomics *)
+    | Fence _ -> None
     | Cmpxchg { compare_with; _ } ->
       let elem_type = Value.get_type compare_with in
       Some (Type.Struct [elem_type; Type.i1])
@@ -820,6 +941,8 @@ module Instruction = struct
     | Select { ifso; _ } -> Some (Value.get_type ifso)
     | Call { res_type; _ } -> res_type
     | Inline_asm { res_type; _ } -> res_type
+    (* Exception handling *)
+    | Landingpad { typ; _ } -> Some typ
 
   let with_res op ident =
     assert' "with_res" (Option.is_some (op_res_type op));
@@ -862,9 +985,18 @@ module Instruction = struct
 
   let unreachable = Unreachable
 
+  let invoke ~func ~args ~res_type ~attrs ~operand_bundles ~cc ~normal ~unwind =
+    assert' "invoke" (Value.get_type normal |> Type.(equal label));
+    assert' "invoke" (Value.get_type unwind |> Type.(equal label));
+    Invoke { func; args; res_type; attrs; operand_bundles; cc; normal; unwind }
+
   let unary op ~arg = Unary { op; arg }
 
-  let binary op ~arg1 ~arg2 = Binary { op; arg1; arg2 }
+  let binary op ~arg1 ~arg2 = Binary { op; arg1; arg2; contract = false }
+
+  let binary_contract op ~arg1 ~arg2 =
+    assert' "binary_contract" (op = Fadd || op = Fsub || op = Fmul);
+    Binary { op; arg1; arg2; contract = true }
 
   let convert op ~arg ~to_ = Convert { op; arg; to_ }
 
@@ -872,14 +1004,14 @@ module Instruction = struct
     let arg1_type = Value.get_type arg1 in
     let arg2_type = Value.get_type arg2 in
     assert' "icmp" (Type.equal arg1_type arg2_type);
-    assert' "icmp" (Type.is_int arg1_type);
+    assert' "icmp" (Type.is_int_or_int_vector arg1_type || Type.is_ptr arg1_type);
     Icmp { cond; arg1; arg2 }
 
   let fcmp cond ~arg1 ~arg2 =
     let arg1_type = Value.get_type arg1 in
     let arg2_type = Value.get_type arg2 in
     assert' "fcmp" (Type.equal arg1_type arg2_type);
-    assert' "fcmp" (Type.is_floating_point arg1_type);
+    assert' "fcmp" (Type.is_floating_point_or_vector arg1_type);
     Fcmp { cond; arg1; arg2 }
 
   let extractelement ~vector ~index =
@@ -895,15 +1027,40 @@ module Instruction = struct
   let insertvalue ~aggregate ~indices ~to_insert =
     Insertvalue { aggregate; indices; to_insert }
 
-  let alloca ?count typ = Alloca { typ; count }
+  let alloca ?count ?align typ = Alloca { typ; count; align }
 
   let load ~ptr ~typ =
     assert' "load" (Value.get_type ptr |> Type.is_ptr);
-    Load { ptr; typ }
+    Load { ptr; typ; volatile_ = false; atomic = None; align = None }
+
+  let load_with_align ~align ~ptr ~typ =
+    assert' "load_with_align" (Value.get_type ptr |> Type.is_ptr);
+    Load { ptr; typ; volatile_ = false; atomic = None; align = Some align }
+
+  let load_volatile ~ptr ~typ =
+    assert' "load_volatile" (Value.get_type ptr |> Type.is_ptr);
+    Load { ptr; typ; volatile_ = true; atomic = None; align = None }
+
+  let load_atomic ~ordering ~ptr ~typ =
+    assert' "load_atomic" (Value.get_type ptr |> Type.is_ptr);
+    Load { ptr; typ; volatile_ = false; atomic = Some ordering; align = Some 8 }
 
   let store ~ptr ~to_store =
     assert' "store" (Value.get_type ptr |> Type.is_ptr);
-    Store { ptr; to_store }
+    Store { ptr; to_store; volatile_ = false; atomic = None; align = None }
+
+  let store_with_align ~align ~ptr ~to_store =
+    assert' "store_with_align" (Value.get_type ptr |> Type.is_ptr);
+    Store { ptr; to_store; volatile_ = false; atomic = None; align = Some align }
+
+  let store_volatile ~ptr ~to_store =
+    assert' "store_volatile" (Value.get_type ptr |> Type.is_ptr);
+    Store { ptr; to_store; volatile_ = true; atomic = None; align = None }
+
+  let store_atomic ~ordering ~ptr ~to_store =
+    assert' "store_atomic" (Value.get_type ptr |> Type.is_ptr);
+    Store
+      { ptr; to_store; volatile_ = false; atomic = Some ordering; align = Some 8 }
 
   let getelementptr ~base_type ~base_ptr ~indices =
     assert' "getelementptr" (Value.get_type base_ptr |> Type.is_ptr);
@@ -922,19 +1079,21 @@ module Instruction = struct
     assert' "atomicrmw" (Value.get_type ptr |> Type.is_ptr);
     Atomicrmw { op; ptr; arg }
 
+  let fence ordering = Fence ordering
+
   let select ~cond ~ifso ~ifnot =
-    assert' "select" (Value.get_type cond |> Type.(equal i1));
+    assert' "select" (Value.get_type cond |> Type.is_i1_or_i1_vector);
     let ifso_type = Value.get_type ifso in
     let ifnot_type = Value.get_type ifnot in
     assert' "select" (Type.equal ifso_type ifnot_type);
     Select { cond; ifso; ifnot }
 
-  let call ~func ~args ~res_type ~attrs ~cc ~musttail =
+  let call ~func ~args ~res_type ~attrs ~operand_bundles ~cc ~musttail =
     (* Statepoint insertion breaks musttail checks. We can't mark them as GC
        leaves here, as LLVM might inline them to a position where they aren't
        tail calls anymore and we'd need a statepoint there. So, we make LLVM
        skip `musttail` calls instead. *)
-    Call { func; args; res_type; attrs; cc; musttail }
+    Call { func; args; res_type; attrs; operand_bundles; cc; musttail }
 
   let inline_asm ~args ~res_type ~asm ~constraints ~sideeffect =
     (* Similarly, it makes no sense to put statepoints for inline asm. *)
@@ -947,18 +1106,32 @@ module Instruction = struct
         attrs = [Fn_attr.Gc_leaf_function]
       }
 
+  let landingpad ~typ ~cleanup = Landingpad { typ; cleanup }
+
   (* Note: this function handles indentation and newlines itself *)
-  let pp_t ?comment ppf { op; res } =
+  let pp_t ?comment ?dbg_metadata ppf { op; res } =
     let open Format in
+    let dbg_metadata =
+      match dbg_metadata with
+      | None -> ""
+      | Some dbg_metadata -> ", " ^ dbg_metadata
+    in
     let append =
       match comment with
       | Some str -> Some (string_of_pp (fun ppf -> pp_comment ppf "%s" str))
       | None -> None
     in
-    let ins ?(num_indents = 1) fmt = pp_line ~num_indents ?append ppf fmt in
+    let ins ?(num_indents = 1) fmt =
+      kasprintf
+        (fun body -> pp_line ~num_indents ?append ppf "%s%s" body dbg_metadata)
+        fmt
+    in
     let ins_res ?(num_indents = 1) fmt =
-      pp_line ~num_indents ?append ppf ("%a = " ^^ fmt) Ident.pp_t
-        (Option.get res)
+      kasprintf
+        (fun body ->
+          pp_line ~num_indents ?append ppf "%a = %s%s" Ident.pp_t
+            (Option.get res) body dbg_metadata)
+        fmt
     in
     match op with
     | Ret v -> ins "ret %a" Value.pp_t v
@@ -966,6 +1139,12 @@ module Instruction = struct
     | Br_cond { cond; ifso; ifnot } ->
       ins "br %a, %a, %a" Value.pp_t cond Value.pp_t ifso Value.pp_t ifnot
     | Switch { discr; default; branches } ->
+      (* The multiline switch syntax needs instruction metadata after the
+         closing bracket. Leave it off for now rather than emitting malformed
+         IR; calls in switch arms still carry their own locations. *)
+      let ins ?(num_indents = 1) fmt =
+        kasprintf (fun body -> pp_line ~num_indents ?append ppf "%s" body) fmt
+      in
       ins "switch %a, %a [" Value.pp_t discr Value.pp_t default;
       List.iter
         (fun { index; label } ->
@@ -973,10 +1152,36 @@ module Instruction = struct
         branches;
       ins "]"
     | Unreachable -> ins "unreachable"
+    | Invoke
+        { func; args; res_type; attrs; operand_bundles; cc; normal; unwind }
+      -> (
+      let pp_operand_bundle ppf (name, args) =
+        fprintf ppf {|"%s"(%a)|} name
+          (pp_print_list ~pp_sep:pp_comma Value.pp_t)
+          args
+      in
+      let pp_operand_bundles ppf = function
+        | [] -> ()
+        | bundles ->
+          fprintf ppf " [ %a ]"
+            (pp_print_list ~pp_sep:pp_comma pp_operand_bundle)
+            bundles
+      in
+      let pp_invoke ppf () =
+        fprintf ppf "invoke %a %a %a(%a) %a%a to %a unwind %a"
+          Calling_conventions.pp_t cc Type.Or_void.pp_t res_type Ident.pp_t func
+          (pp_print_list ~pp_sep:pp_comma Value.pp_t)
+          args Fn_attr.pp_t_list attrs pp_operand_bundles operand_bundles
+          Value.pp_t normal Value.pp_t unwind
+      in
+      match res with
+      | Some _ -> ins_res "%a" pp_invoke ()
+      | None -> ins "%a" pp_invoke ())
     | Unary { op; arg } ->
       ins_res "%s %a" (unary_op_to_string op) Value.pp_t arg
-    | Binary { op; arg1; arg2 } ->
-      ins_res "%s %a, %a" (binary_op_to_string op) Value.pp_t arg1
+    | Binary { op; arg1; arg2; contract } ->
+      let flags = if contract then " contract" else "" in
+      ins_res "%s%s %a, %a" (binary_op_to_string op) flags Value.pp_t arg1
         Value.pp_contents (Value.get_contents arg2)
     | Convert { op; arg; to_ } ->
       ins_res "%s %a to %a" (convert_op_to_string op) Value.pp_t arg Type.pp_t
@@ -1000,20 +1205,55 @@ module Instruction = struct
       ins_res "insertvalue %a, %a, %a" Value.pp_t aggregate Value.pp_t to_insert
         (pp_print_list ~pp_sep:pp_comma pp_print_int)
         indices
-    | Alloca { typ; count } ->
+    | Alloca { typ; count; align } ->
       let pp_count ppf () =
         match count with
         | Some count -> fprintf ppf ", %a" Value.pp_t count
         | None -> ()
       in
-      ins_res "alloca %a%a" Type.pp_t typ pp_count ()
-    | Load { ptr; typ } -> ins_res "load %a, %a" Type.pp_t typ Value.pp_t ptr
-    | Store { ptr; to_store } ->
-      ins "store %a, %a" Value.pp_t to_store Value.pp_t ptr
+      let pp_align ppf () =
+        match align with
+        | Some align -> fprintf ppf ", align %d" align
+        | None -> ()
+      in
+      ins_res "alloca %a%a%a" Type.pp_t typ pp_count () pp_align ()
+    | Load { ptr; typ; volatile_; atomic; align } ->
+      let pp_align ppf = function
+        | None -> ()
+        | Some align -> fprintf ppf ", align %d" align
+      in
+      let pp_atomic ppf = function
+        | None -> ()
+        | Some _ -> fprintf ppf "atomic "
+      in
+      let pp_ordering ppf = function
+        | None -> ()
+        | Some ordering ->
+          fprintf ppf " %s" (atomic_ordering_to_string ordering)
+      in
+      ins_res "load %a%a%a, %a%a%a" (pp_str_if "volatile ") volatile_ pp_atomic
+        atomic Type.pp_t typ Value.pp_t ptr pp_ordering atomic pp_align align
+    | Store { ptr; to_store; volatile_; atomic; align } ->
+      let pp_atomic ppf = function
+        | None -> ()
+        | Some _ -> fprintf ppf "atomic "
+      in
+      let pp_ordering ppf = function
+        | None -> ()
+        | Some ordering -> fprintf ppf " %s" (atomic_ordering_to_string ordering)
+      in
+      let pp_align ppf = function
+        | None -> ()
+        | Some align -> fprintf ppf ", align %d" align
+      in
+      ins "store %a%a%a, %a%a%a" (pp_str_if "volatile ") volatile_ pp_atomic
+        atomic Value.pp_t to_store Value.pp_t ptr pp_ordering atomic pp_align
+        align
     | Getelementptr { base_type; base_ptr; indices } ->
       ins_res "getelementptr %a, %a, %a" Type.pp_t base_type Value.pp_t base_ptr
         (pp_print_list ~pp_sep:pp_comma Value.pp_t)
         indices
+    | Fence ordering -> ins "fence %s" (atomic_ordering_to_string ordering)
     | Cmpxchg { ptr; compare_with; set_if_equal } ->
       ins_res "cmpxchg %a, %a, %a acq_rel monotonic" Value.pp_t ptr Value.pp_t
         compare_with Value.pp_t set_if_equal
@@ -1024,12 +1264,24 @@ module Instruction = struct
     | Select { cond; ifso; ifnot } ->
       ins_res "select %a, %a, %a" Value.pp_t cond Value.pp_t ifso Value.pp_t
         ifnot
-    | Call { func; args; res_type; attrs; cc; musttail } -> (
+    | Call { func; args; res_type; attrs; operand_bundles; cc; musttail } -> (
+      let pp_operand_bundle ppf (name, args) =
+        fprintf ppf {|"%s"(%a)|} name
+          (pp_print_list ~pp_sep:pp_comma Value.pp_t)
+          args
+      in
+      let pp_operand_bundles ppf = function
+        | [] -> ()
+        | bundles ->
+          fprintf ppf " [ %a ]"
+            (pp_print_list ~pp_sep:pp_comma pp_operand_bundle)
+            bundles
+      in
       let pp_call ppf () =
-        fprintf ppf "%acall %a %a %a(%a) %a" (pp_str_if "musttail ") musttail
+        fprintf ppf "%acall %a %a %a(%a) %a%a" (pp_str_if "musttail ") musttail
           Calling_conventions.pp_t cc Type.Or_void.pp_t res_type Ident.pp_t func
           (pp_print_list ~pp_sep:pp_comma Value.pp_t)
-          args Fn_attr.pp_t_list attrs
+          args Fn_attr.pp_t_list attrs pp_operand_bundles operand_bundles
       in
       match res with
       | Some _ -> ins_res "%a" pp_call ()
@@ -1044,6 +1296,8 @@ module Instruction = struct
       match res with
       | Some _ -> ins_res "%a" pp_call ()
       | None -> ins "%a" pp_call ())
+    | Landingpad { typ; cleanup } ->
+      ins_res "landingpad %a%a" Type.pp_t typ (pp_str_if " cleanup") cleanup
 end
 
 module Function = struct
@@ -1053,7 +1307,8 @@ module Function = struct
     | Label_def of Ident.t
     | Instruction of
         { instr : Instruction.t;
-          comment : string option
+          comment : string option;
+          dbg_metadata : string option
         }
 
   type t =
@@ -1063,19 +1318,32 @@ module Function = struct
       res : Type.Or_void.t;
       cc : Calling_conventions.t;
       attrs : Fn_attr.t list;
+      personality : Ident.t option;
       private_ : bool;
       dbg : Debuginfo.t;
+      dbg_metadata : string option;
       mutable body_rev : slot list
     }
 
-  let add_instruction ?comment t instr =
-    t.body_rev <- Instruction { instr; comment } :: t.body_rev
+  let add_instruction ?comment ?dbg_metadata t instr =
+    t.body_rev <- Instruction { instr; comment; dbg_metadata } :: t.body_rev
 
   let add_label_def t label = t.body_rev <- Label_def label :: t.body_rev
 
   let add_comment t comment = t.body_rev <- Comment comment :: t.body_rev
 
-  let pp_t ppf { name; args; res; cc; attrs; private_; dbg; body_rev } =
+  let pp_t ppf
+      { name;
+        args;
+        res;
+        cc;
+        attrs;
+        personality;
+        private_;
+        dbg;
+        dbg_metadata;
+        body_rev
+      } =
     let open Format in
     (* Definition line *)
     do_if_comments_enabled (fun () ->
@@ -1086,14 +1354,25 @@ module Function = struct
       pp_print_list ~pp_sep:pp_comma (fun ppf (typ, ident) ->
           fprintf ppf "%a %a" Type.pp_t typ Ident.pp_t ident)
     in
-    pp_line ppf "define %a %a %a %a(%a) %a {" pp_private ()
+    let pp_personality ppf = function
+      | None -> ()
+      | Some personality ->
+        fprintf ppf " personality ptr %a" Ident.pp_t personality
+    in
+    let pp_dbg_metadata ppf = function
+      | None -> ()
+      | Some dbg_metadata -> fprintf ppf " %s" dbg_metadata
+    in
+    pp_line ppf "define %a %a %a %a(%a) %a%a%a {" pp_private ()
       Calling_conventions.pp_t cc Type.Or_void.pp_t res Ident.pp_t name pp_args
-      args Fn_attr.pp_t_list attrs;
+      args Fn_attr.pp_t_list attrs pp_personality personality pp_dbg_metadata
+      dbg_metadata;
     (* Body *)
     let body = List.rev body_rev in
     List.iter
       (function
-        | Instruction { instr; comment } -> Instruction.pp_t ?comment ppf instr
+        | Instruction { instr; comment; dbg_metadata } ->
+          Instruction.pp_t ?comment ?dbg_metadata ppf instr
         | Comment s -> do_if_comments_enabled (fun () -> pp_ins ppf "%s" s)
         | Label_def ident -> pp_line ppf "%s" (Ident.to_label_string_exn ident))
       body;
@@ -1109,7 +1388,8 @@ module Function = struct
         funcdef : funcdef
       }
 
-    let create ~name ~args ~res ~cc ~attrs ~dbg ~private_ =
+    let create ~dbg_metadata ~personality ~name ~args ~res ~cc ~attrs ~dbg
+        ~private_ =
       let ident_gen = Ident.Gen.create () in
       let name = Ident.global name in
       let args =
@@ -1119,7 +1399,17 @@ module Function = struct
          entry label. *)
       Ident.Gen.get_fresh ident_gen |> ignore;
       let funcdef =
-        { name; args; res; cc; attrs; private_; dbg; body_rev = [] }
+        { name;
+          args;
+          res;
+          cc;
+          attrs;
+          personality;
+          private_;
+          dbg;
+          dbg_metadata;
+          body_rev = []
+        }
       in
       { ident_gen; funcdef }
 
@@ -1132,19 +1422,19 @@ module Function = struct
 
     let get_fun_ident t = t.funcdef.name
 
-    let ins ?comment ?res_ident t op =
+    let ins ?comment ?dbg_metadata ?res_ident t op =
       let res_ident =
         match res_ident with
         | Some ident -> ident
         | None -> Ident.Gen.get_fresh t.ident_gen
       in
       let instr = Instruction.with_res op res_ident in
-      add_instruction ?comment t.funcdef instr;
+      add_instruction ?comment ?dbg_metadata t.funcdef instr;
       Instruction.get_res_value instr |> Option.get
 
-    let ins_no_res ?comment t op =
+    let ins_no_res ?comment ?dbg_metadata t op =
       let instr = Instruction.without_res op in
-      add_instruction ?comment t.funcdef instr
+      add_instruction ?comment ?dbg_metadata t.funcdef instr
 
     let comment t s = add_comment t.funcdef s
 
@@ -1157,22 +1447,33 @@ module Fundecl = struct
   type t =
     { name : string;
       args : Type.t list; (* Not using [Value.t] to have explicit identifiers *)
-      res : Type.Or_void.t
+      res : Type.Or_void.t;
+      varargs : bool
     }
 
-  let create name args res = { name; args; res }
+  let create name args res = { name; args; res; varargs = false }
 
-  let pp_t ppf { name; args; res } =
+  let create_varargs name args res = { name; args; res; varargs = true }
+
+  let pp_t ppf { name; args; res; varargs } =
     let open Format in
     let ident = Ident.global name in
-    let pp_args = pp_print_list ~pp_sep:pp_comma Type.pp_t in
+    let pp_args ppf args =
+      match args, varargs with
+      | [], true -> fprintf ppf "..."
+      | _, false -> (pp_print_list ~pp_sep:pp_comma Type.pp_t) ppf args
+      | _ :: _, true ->
+        fprintf ppf "%a, ..." (pp_print_list ~pp_sep:pp_comma Type.pp_t) args
+    in
     pp_line ppf "declare %a %a(%a)" Type.Or_void.pp_t res Ident.pp_t ident
       pp_args args
 
-  let equal { name; args; res } { name = name'; args = args'; res = res' } =
+  let equal { name; args; res; varargs }
+      { name = name'; args = args'; res = res'; varargs = varargs' } =
     String.equal name name'
     && List.equal Type.equal args args'
     && Type.Or_void.equal res res'
+    && Bool.equal varargs varargs'
 end
 
 module Data = struct
@@ -1186,8 +1487,24 @@ module Data = struct
         }
     | External of string
 
-  let constant ?(section = Some ".data") ?(align = Some Arch.size_addr)
+  let default_data_section () =
+    match Target_system.derived_system () with
+    | Target_system.MacOS_like -> "__DATA,__data"
+    | Target_system.Linux | Target_system.MinGW_32 | Target_system.MinGW_64
+    | Target_system.Win32 | Target_system.Win64 | Target_system.Cygwin
+    | Target_system.FreeBSD | Target_system.NetBSD | Target_system.OpenBSD
+    | Target_system.Generic_BSD | Target_system.Solaris
+    | Target_system.Dragonfly | Target_system.GNU | Target_system.BeOS
+    | Target_system.Unknown ->
+      ".data"
+
+  let constant ?(section = None) ?(align = Some Arch.size_addr)
       ?(private_ = false) name value =
+    let section =
+      match section with
+      | Some section -> Some section
+      | None -> Some (default_data_section ())
+    in
     Constant { name; value; section; align; private_ }
 
   let external_ name = External name

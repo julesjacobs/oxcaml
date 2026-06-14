@@ -16,6 +16,7 @@
 #define CAML_INTERNALS
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 #include "caml/addrmap.h"

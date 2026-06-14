@@ -1,0 +1,620 @@
+# Progress
+
+Last updated: 2026-06-12. THE LATENT FLIP MISCOMPILE IS FIXED (7 bugs
+total) AND THE FULL GATE IS GREEN: stage1+stage2 builds, boot-flip 3/3,
+stage1-binary flip-stress 16/16 module runs (typecore ctype typedecl
+env typeclass parmatch matching translcore btype subst printtyp),
+SELF_STAGE=2 ocamltest 6756/0 (allocation.ml expect promoted for
+slot-only spill codegen), lit = known pre-existing failures only
+(statepoint-call-lowering.ll verified failing at baseline 57e9764b3c
+too), minibench geomean 0.8870 vs native (no regression vs 0.9064
+prior slot-only / 0.886 vreg-era). All changes uncommitted.
+
+## BUG 6: mixed spill slots after StackSlotColoring (2026-06-12)
+
+The stage1-binary flip-stress failures (typecore/ctype/typedecl/env)
+survived the five fixes below. Forensics (watchpoint-grade, see
+/tmp/gcscan2.py `gcl`/`gcwatch`) pinned the stale root to
+Closure_conversion.cont_96_350: the same young value V0 sat in listed
+sp+0x80 (GC updated it), in UNLISTED RA family slots sp+0x20/sp+0x70
+(%stack.32 — read later, the crash chain), and in the gc_regs bucket
+slot of dead x1 (the earlier "heap holder" red herring — buckets are
+malloc'd near the domain). The pass skipped %stack.32 as "non-value"
+because ONE of the slot's stores was raw: StackSlotColoring runs before
+the pass and merges different vregs' disjoint ranges into one FI (and
+collapses LiveStacks VNIs), so the per-FI "all stores are values"
+summary is structurally wrong. Fixed in OxCamlStatepointSpillRoots:
+per-query REACHING-STORE value-ness (block-local last store, else AND
+over pred-exit states, memoized/optimistic on cycles), with new value
+evidence: ValueHome-store seeding (covers STRXpre alloc write-backs),
+a new MOOxCamlGCValue MMO flag set by TargetLoweringBase for IR
+ptr-addrspace(1) loads/stores, entry physreg arg spills via MRI
+liveins, direct-callee statepoint-result return-type lookup, consumer
+evidence via seeded reloads, and odd immediates as tagged scalars.
+Corpus (ccmain2/ltf/parmatch/typecore IR with EXACT build flags from
+clang-wrapper.log — llc without -ffixed-x15/x26 hides everything):
+remaining skips all verified benign (i64-typed immediates, LOADgot
+statics). Parked: port GCValueness into the verifier (it now FPs on
+entry-init-extended live ranges); statepoint-call-lowering.ll lit
+failure needs a pre/post check.
+
+BUG 7 (same day): the BUG 6 fix moved the crash INTO the GC and
+exposed that register roots had been appended at C-CALL statepoints,
+where they are unresolvable: only the alloc-family runtime entries run
+SAVE_ALL_REGS, and RESTORE frees the bucket without clearing
+Caml_state->gc_regs, so the walk reads a FREED bucket (crash:
+Regalloc_irc.run's `bl caml_c_call` descriptor listed reg16=x19; an
+allocating C primitive GC'd; oldify(stale residue) SIGBUS'd in
+get_header_val). Fixed: register appends and the verifier's real
+register findings are gated on alloc-family statepoints (regmask
+preserves X0). Validation cascade running.
+
+## RA-derived roots, step 0 + residual root fixes (2026-06-11, uncommitted)
+
+Built the gc bit on virtual registers (MachineRegisterInfo, seeded at
+statepoint emission, inherited through splits, OR'd by the coalescer) and
+the flag-gated post-RA `OxCamlGCRootVerifier` pass. First corpus run (841
+stashed modules) found residual root-listing bugs; both classes fixed in
+OxCamlStatepointSpillRoots the same metadata-only way:
+- gc-bit-based slot families (RA re-spills of ISel-slot-resident values
+  created unlisted second slots): 198 violations -> 0.
+- register second locations (an RA/pre-RA copy of a value that IS listed
+  at the statepoint survives in a preserved register unlisted, e.g.
+  Misc.loop_77 %173/$x13): now appended as in-place register roots
+  (`-oxcaml-statepoint-register-roots`): 94 violations -> 0.
+The earlier "llvmize ptrtoint store" suspicion was RETRACTED: that value
+is statically a tagged immediate; the verifier now separates that shape
+(value-connectivity union-find) and reports it as info only.
+Corpus after fixes: 0 slot / 0 register / 0 clobbered violations.
+LATER THE SAME DAY: per-register taint proved unsound for LISTING (raw
+ranges of coalesced vregs would be handed to the GC as roots), so the
+pass gained a flow-sensitive per-VNI value analysis (GCValueness) — only
+provably-value contents are listed. AND: stage builds exposed a
+DETERMINISTIC PRE-EXISTING latent miscompile (typecore + young-flip
+SIGBUS, crashes with baseline/before-5/current clang alike, native
+passes — NOT caused by this week's work; every earlier green gate
+shipped it). Root cause open; this now gates landing. Details:
+RA_DERIVED_ROOTS_PLAN.md (step 0 sections + "LATENT PRE-EXISTING
+MISCOMPILE FOUND").
+CONTINUED (same day, root-cause marathon): the latent crash decomposed
+into FIVE compiler bugs, all root-caused: (1) exnroot-homed values
+RA-re-spilled into unlisted slots [fixed: value-home FIs seed family +
+value-ness]; (2) loop-carried listed slots uninitialized on iteration 1
+[fixed: dominance check + entry init]; (3) the cont pattern — tied-def
+vreg lowering at alloc statepoints creates unlisted live pool-slot
+copies, unfixable post hoc [decision: MaxVRegPtrs=0 default for oxcaml
+until in-place statepoints (plan step 1-2); register lowering stays
+available via -max-registers-for-gc-values]; (4) DETERMINISTIC:
+StatepointStableRootHomes seed stores on critical edges clobber the
+home (Parmatch.pressure_variants -> bogus non-exhaustiveness errors;
+broke every -warn-error build under slot-only mode) [fixed: homes
+require non-critical seed edges]; (5) home FIs were in the statepoint
+slot pool and could be handed to unrelated values [fixed: not pooled].
+Full forensics, repro recipes and hunt methods in
+RA_DERIVED_ROOTS_PLAN.md.
+
+## Entry-cost codegen fixes (2026-06-11)
+
+Three systematic per-function/per-callsite costs found by reading hot asm vs
+native (boyer truep, kb match_rec, micro try/raise probes), all fixed:
+
+1. Split prologue (`sub sp,#16; str x30; sub sp,#N` -> one
+   `sub sp,#16+N; str x30,[sp,#N+8]`): `CombineSPBump` is now allowed for
+   OxCaml functions that need no PROLOGUE stack check (the check must see SP
+   before any allocation). LR stays at the frame top via the existing CSR
+   offset fixup; the epilogue already combined.
+   (AArch64FrameLowering.cpp)
+2. Ordinary stack checks read SP via `llvm.read_register` instead of inline
+   asm (llvmize.ml, AArch64 now matches x86), and a new
+   `AArch64MIPeepholeOpt::visitCmpWithSPCopy` folds `COPY $sp` + `SUBS` into
+   `cmp sp, xN` (guarded: same block, no SP writes/calls between). Saves an
+   instruction plus an inline-asm scheduling barrier at ~every function
+   entry (372/725 functions in the minibench suite).
+3. C-wrapper call arguments with no use after the call are no longer
+   caller-rooted (`-rs4gc-oxcaml-root-dead-c-call-args` restores the old
+   behaviour). Callees root their own parameters per the OCaml FFI contract
+   (CAMLparam), exactly as with the native compiler; caller-rooting forced a
+   dead stack store per C call site (visible in every compare/hash loop).
+   `HasUseAfterCall` also refined: a value defined in the call's own block
+   before the call is dead along the back edge (single-entry blocks),
+   removing the loop-recurrence false positive. Two RS4GC lit tests updated
+   to check both modes.
+
+Results: micro 44-case geomean 0.662 -> 0.652, minibench geomean
+0.906 -> 0.886 (no case above bdd's 1.001), compiler bench module-median
+ratio 0.9732 -> 0.9715 (round-total 0.9740 -> 0.9699) against the identical
+native baseline binary. Validation: fresh stage1+stage2 builds, SELF_STAGE=2
+ocamltest `6756 passed / 0 failed`, lit at the known pre-existing set,
+parser.pp.ml repro + OXCAML_YOUNG_FLIP gates clean.
+
+Full investigation + staged plan for RA-derived GC roots (in-place
+statepoint lowering, gc bit on vregs, verifier): see
+`agent-state/test-suite-29e4cd/RA_DERIVED_ROOTS_PLAN.md`.
+
+Identified but NOT yet implemented (next): redundant statepoint re-spills of
+loop-carried GC values - ISel's `findPreviousSpillSlot` gives up on PHIs
+whose inputs map to different slots (upstream TODO in StatepointLowering);
+the OxCaml `StatepointStableRootHomes` mechanism handles only
+`phi(seed, relocate-of-self)`. Generalizing it to arbitrary GC phis with
+per-edge seed stores would remove per-iteration stores + join-block slot
+shuffling (boyer tautologyp, kb rporec). Longer-term direction discussed:
+derive frametables entirely from RA state (gc-ness bit on vregs,
+LiveStacks/VRM as source of truth, in-place root updates) - yesterday's
+OxCamlStatepointSpillRoots pass is the seed of that design.
+
+## Latent parser.pp.ml GC miscompile: FIXED (2026-06-10)
+
+## Current Goal
+
+Keep the LLVM backend self-stage2-clean, then improve runtime performance until
+the LLVM-built compiler beats both native and the older LLVM baseline on total
+microbench, minibench, and compiler benchmark time.
+
+## Latent parser.pp.ml GC miscompile: FIXED (2026-06-10)
+
+See FINDINGS.md (repo root) for the compact full story. Summary:
+
+- Root cause: with the register-preserving alloc calling conventions, greedy
+  RA live-range splitting leaves spill-slot copies of GC values whose
+  LiveStacks intervals cross statepoints where that value family is not an
+  operand. The GC relocates all listed roots; the unlisted crossing slots go
+  stale and the merged home store-back block reloads them into RS4GC home
+  slots. InlineSpiller statepoint-operand folding only covers slots that are
+  the value's active location AT the statepoint. (The "+24 descriptor
+  arithmetic" theory was disproven: statepoint FI operands and spill
+  instructions are remapped consistently by StackSlotColoring.)
+- Fix (metadata-only, zero mutator instructions): new machine pass
+  `OxCamlStatepointSpillRoots`
+  (vendor/llvm-project/llvm/lib/CodeGen/OxCamlStatepointSpillRoots.cpp),
+  between RA and VirtRegRewriter. Collects GC slot families globally
+  (folded gc operands + VRM original slots of gc reg operands), appends each
+  slot live into-and-across a statepoint as a folded gc operand + gc-map
+  pair + FixedStack MMO. Gated on gc "oxcaml"/"ocaml";
+  `-oxcaml-statepoint-spill-roots[-verbose]`.
+- Validation: -verify-machineinstrs clean; single-module swap repro exit 0
+  (was deterministic SIGSEGV); OXCAML_YOUNG_FLIP s=1k/4k clean; fresh
+  self-stage1 AND self-stage2 builds pass (stage2 had failed twice on this
+  bug); parser.pp.ml s=1k..64k clean on both fresh stage compilers + flip
+  on stage2; lit = the 20 known pre-existing failures only;
+  SELF_STAGE=2 ocamltest `6756 passed / 284 skipped / 0 failed`
+  (`ocamltest_stage2_spillroots_clean_20260610.log`) — the stage2 bar.
+- Testsuite fallout fixed along the way (from the earlier committed
+  prologue-entry rename to `caml_llvm_call_realloc_stack_stkarg`, not from
+  this fix): `_build` runtime needed `make -s runtime-stdlib` for the
+  ocamltest fake root, and `stack_check_size_contract.sh`/`challenges.sh`
+  now accept the new prologue slow-path symbol.
+
+## Current Change (v3: full call homes, non-volatile slots, init-store pruning)
+
+- Root-caused and fixed the call-statepoint homes miscompile: init stores were
+  classified by BLOCK (any entry-block store was treated as initialization),
+  so a consumer-NCD defining store that legitimately sits in the entry block
+  below interior call statepoints (call statepoints do not split blocks) was
+  skipped by `SlotDefStoreDominates`/`oxcamlRootSlotHasSingleDefiningStore`/
+  `CanAliasToSlot`.  A channel in `Cmi_format.read_cmi_lazy` was homed at a
+  statepoint above its defining store, the reload read the init immediate `1`,
+  and SSA repair rewired the defining store to that reload.  Init stores are
+  now classified by VALUE: constant operand and entry block
+  (`isOxCamlRootSlotInitStore`).  Verified on the isolated cmi_format repro
+  (exit 139 -> 0), the exact culprit ordinal (budget=67 skip=66), and an
+  829-module object swap of the whole boot compiler.
+- `-rs4gc-oxcaml-value-slot-homes` default is now `3` (invokes AND calls).
+- Exception-root slot accesses are now NON-volatile by default
+  (`-rs4gc-oxcaml-volatile-exnroot-slots`, default false).  Slots escape into
+  statepoint gc-live bundles, so alias analysis already forbids forwarding
+  across registered statepoints; RS4GC runs in `addIRPasses` before
+  CodeGenPrepare/ISel, and non-volatility lets ISel drop dead reloads and
+  forward between statepoints.
+- Entry-block init stores are pruned when the slot's single defining store
+  dominates every load and every statepoint listing the slot
+  (`-rs4gc-oxcaml-prune-root-slot-init-stores`, default true).  This removes
+  3 dead stores + an immediate materialization from `unify1`-shaped hot
+  paths (probes had been paying them on every call).
+- Static verifier added: `-rs4gc-oxcaml-verify-root-slots` checks every slot
+  reload is dominated by the slot's defining store; clean across all 839
+  stashed modules with the final configuration.
+- Probes (medians, ratio vs native; layout-luck caveat below): boyer 0.99x
+  (was 1.038x committed, 1.052x at head), `catch_failure_then_unify`
+  1.256x -> ~1.08-1.11x, `nested_failed_unify` ~1.0-1.2x depending on code
+  layout.  NOTE: these tiny probes swing +/-15% from function-alignment
+  layout luck alone (verified: same binary +64B alignment moved
+  nested_failed_unify 1.398x -> 1.025x); `-align-all-functions` was tested
+  and rejected (helps one probe, hurts another).  Only
+  `boyer_like_failed_unify` keeps a layout-stable residual (~1.24x).
+- Validation of the final configuration: lit at the known pre-existing
+  failure sets; cmi_format + 829-module swap repros clean; three fresh boots
+  (homes=3, +non-volatile, +pruning) each with the stdlib.pp.ml GC-stress
+  sweep s=1k..256k clean, with an always-on young-root checker runtime
+  installed during the sweeps; self-stage1 clean
+  (`self_stage_v5.log`).
+- Stage2 is currently BLOCKED by the pre-existing bug below: the v5 stage1
+  compiler hit the latent parser.pp.ml SEGV during the stage2 boot phase in
+  two consecutive builds (`self_stage2_v5.log`, `self_stage2_v5_retry.log`),
+  while the committed-state stage2-v4 run had passed by luck (its compiler
+  crashes on the same repro at s=1k).  Re-running the exact failing command
+  standalone passes at default heap params - the in-build trigger is
+  layout/timing sensitive.  The full ocamltest suite was therefore run
+  against the v5 STAGE1 install instead (`SELF_STAGE=1`):
+  `6756 passed`, `284 skipped`, `0 failed`
+  (`ocamltest_stage1_v5.log`).
+- Final benchmark totals for the v5 configuration (2026-06-10, this machine):
+  - Compiler module medians: LLVM/native `0.9732`, `2.75%` speedup
+    (`compiler_bench_current_vs_native_20260610_002708.json`).
+  - Micro (44 cases): total-time ratio `0.707`, geomean `0.658`, worst case
+    `1.13` (`micro_v5_20260610.log`).
+  - Minibench: total-time ratio `0.885` (`11.5%` speedup), boyer `1.012x`
+    (was ~1.13x), worst case binary_trees `1.117x`
+    (`minibench_v5_20260610.log`).
+
+## Known Pre-existing Bug (discovered 2026-06-10, NOT caused by v3)
+
+The stage2-v5 build initially failed: the stage1 compiler segfaulted
+compiling `parser.pp.ml`.  Investigation showed a LATENT GC-stress
+miscompile that PRE-EXISTS this work entirely:
+
+- Deterministic repro: any LLVM-built stage1/stage2 `ocamlopt` compiling
+  `parser.pp.ml` (cwd `_llvm_self_stage2_boot_build/default`) with
+  `OCAMLRUNPARAM=s=1k..64k` segfaults 100%; at default heap params it is
+  flaky (this is why stage2 builds usually pass and occasionally die).
+- Crash: `Ident.compare` receives corrupt arguments (`0` and `1`) via
+  `find_value_approximation`'s map lookup; fp-chain:
+  `Closure_conversion.cont_96_350+5052` -> `classify_fields_of_block+152`
+  -> `List.map` -> `compare`.
+- Pre-existence proven: the committed-state stage2-v4 compiler crashes
+  identically; so do stage1 builds with EVERY feature combination including
+  homes=0/volatile/no-pruning; so does the BASELINE-era clang
+  (`llvm-build-clean-head`, 57e9764b3c) and the pre-redesign clang
+  (`llvm-build-old-rs4gc`).  The native compiler is clean at s=1k.
+  This is very likely the same deep bug previously blamed on call homes via
+  the `Lambda_to_flambda.cps` ordinal-304 repro.
+- Module isolated: with ONLY `flambda2_from_lambda__Closure_conversion.o`
+  LLVM-built (every other object native), the crash reproduces; all-native
+  is clean.  Repro loop ~90s: `llstash/test-cc.sh "<extra clang flags>"`
+  (stashed IR `/tmp/ccstash/flambda2_from_lambda__Closure_conversion.*.ll`,
+  object swap + relink via `llstash/driver5.py <module-list-file>`, good
+  tree `_native_build/main`, bad tree `_llvm_self_stage_main_build/main`).
+- Ruled out: value-slot homes (crashes at homes=0), slot aliasing, lazy
+  boundary loads, volatile vs non-volatile slots, init-store pruning,
+  register roots at non-alloc callsites (only at realloc_stack /
+  local_realloc / caml_call_gc sites, which save all regs), trap-byte
+  offset mismatches in `find_value_approximation` (descriptors audited
+  consistent: framesize 64 / offset 40 under active trap vs 48/24 outside),
+  missed-young-root scanning (always-on checker runtime silent - though it
+  shares the frametable, so it is blind to frametable holes).
+- The DEBUG runtime (`-runtime-variant d`) does NOT reproduce (compile
+  succeeds at s=1k) - the bug needs the stock runtime's exact allocation
+  pattern.
+- Remaining suspects: statepoint live-set hole or stack-slot sharing in one
+  of `Closure_conversion`'s large functions, or a runtime/frametable scan
+  disagreement only visible under precise minor-GC timing.
+- The `parser.pp.ml` s=1k repro should be added to the standard validation
+  gate once fixed; the stdlib.pp.ml sweep alone does NOT catch it.
+
+### Round 5 (2026-06-10): frametable offset semantics, synth harness
+
+The fix candidates from round 4 were tested and REFUTED for this crash:
+SP-relative resolution for statepoint stackmap operands (PreferFP=false -
+kept as hardening with a fatal on non-SP resolution, but descriptors were
+already SP-resolved), registering all exnroot slots on all statepoints
+(cont has NO exnroot slots - no trap regions), and register-coalescer
+involvement (-join-liveintervals=0 still crashes).  The corrupting GC
+suspends cont at an ALLOC statepoint whose IR carries proper relocates;
+the stale value (`simple`) is read after the GC from a frame slot the
+descriptor does not cover, flows through add_simple_to_substitute
+(closure_conversion.ml:1467) into the substitute map, and cps faults on
+it (young-flip, deterministic, cps+396).
+
+NEW INSTRUMENT: llstash/synth-statepoint-offsets*.ll - tiny synthetic
+oxcaml modules whose emitted frametables can be diffed against the
+actual frame layout by eye, no GC runs needed.  Findings so far:
+- The "statepoint-id" attribute ENCODES trap depth: bit0 = alloc,
+  ((id>>1)&7)*16 = ActiveTrapBytes which OxCamlGCPrinter ADDS to every
+  stack root and to nothing else; a synthetic id of 18/19 silently
+  shifts roots by +16.
+- AArch64RegisterInfo::eliminateFrameIndex (statepoint case) ALSO adds
+  AFI->getOxCamlActiveTrapBytes(MI) (computed from real MIR trap pushes)
+  into the operand offset.  RS4GC-converted statepoints (default IDs, no
+  trap bits) therefore get the +16-per-trap exactly once (verified
+  consistent in find_value_approximation); LLVMIZE-EMITTED statepoints
+  with explicit IDs inside trap regions are suspected of DOUBLE-counting
+  (ID bits + AFI bytes) - shifting every stack root by +16 per depth.
+- The guilty cont statepoint has ID 196609 (alloc, ID-depth 0); its
+  emitted stack roots are 192/200 while the MIR-listed slots sit at
+  +24 less - the remaining unexplained delta.  Next: replicate cont's
+  exact shape in the synth harness (alloc id, several relocated values,
+  448-byte frame, split prologue) and diff descriptor vs actual slots;
+  each iteration is a pure compile, minutes.
+
+### ROOT CAUSE FOUND (2026-06-10, round 4)
+
+The mechanism is proven with a new debug instrument, OXCAML_YOUNG_FLIP
+(runtime/minor_gc.c + domain.c, env-gated): the minor heap alternates
+between two locations each collection and the retired space is
+PROT_NONE'd, so any dereference of a stale young pointer faults AT THE
+GUILTY INSTRUCTION.  Requires s>=4k (16K pages).  With it:
+
+- The crash chain is: an LLVM-compiled statepoint in
+  `Closure_conversion.cont` leaves a STALE young pointer in a frame slot;
+  cont passes the stale `simple` to `Env.add_simple_to_substitute`
+  (closure_conversion.ml:1467); the pair is stored in the substitute map;
+  `Lambda_to_flambda.cps` (Lvar case) immediately looks it up and
+  dereferences -> fault at cps+396 (or, unprotected, reads recycled
+  memory -> the Ident.compare(0,1) crash).
+- Guilty statepoint #1 (default config): the alloc statepoint at
+  cont+2240 (Ltmp951).  Its descriptor lists the values as REGISTER
+  roots (gc_regs) plus slots 192/200 - but the code after it reloads the
+  same values from RA SPILL SLOTS 168/176, which are NOT in the
+  descriptor.  The GC updates the registers; the spill slots keep the
+  pre-GC pointers; the post-GC reloads resurrect them.
+- With -max-registers-for-gc-values=0 (zero register roots), the SAME
+  fault occurs via a different cont alloc statepoint (cont+1620,
+  Ltmp1031): an RA spill slot (~offset 32-48) carrying the value across
+  the statepoint is again absent from the descriptor's root list.
+
+UNIFIED ROOT CAUSE: LLVM's register allocator (greedy/InlineSpiller/
+split machinery) carries GC values across STATEPOINTs in locations the
+statepoint operand list does not reference - sibling registers kept live
+because the oxcaml alloc calling convention PRESERVES registers, and RA
+spill slots whose live range crosses the statepoint.  The frametable
+only describes the operands' locations at the statepoint, so the GC
+updates those and every other copy goes stale.  Stock LLVM avoids this
+because (a) caller-saved registers die at calls, (b) gc pointers in
+callee-saved registers are force-spilled (AllowGCPtrInCSR=false), and
+(c) relocate defs end the input interval at the statepoint.  The oxcaml
+register-preserving alloc CC re-opens the hole.  Relevant code:
+FixupStatepointCallerSaved.cpp + AArch64RegisterInfo::
+shouldSpillStatepointGCPtr (only forces x16-x18/x26-x28 today).
+
+FIX DIRECTION (next session): make statepoint-crossing GC live ranges
+single-location.  Candidates: (1) make RA statepoint-aware so a GC vreg
+live across a statepoint is forced fully into its statepoint-listed
+location (fold + no sibling copies); (2) have the statepoint CLOBBER
+GC-holding registers from RA's perspective (kill dual residency, accept
+spills); (3) at MIR fixup time, enumerate LiveStacks intervals crossing
+each statepoint whose original vreg was a GC pointer and append their
+slots to the stackmap.  (3) is likely the least invasive and matches the
+frametable design.  Verify any fix with OXCAML_YOUNG_FLIP=1 s=4k on the
+parser repro, then the stdlib sweep and full stages.
+
+### Second investigation round (2026-06-10, bug still open)
+
+Two REAL adjacent holes were found and fixed (neither is the parser crash):
+
+- RS4GC rematerialization walked GEP chains THROUGH `!is_base_value` GEPs
+  (comballoc secondary object starts), so a derived pointer could be
+  rebuilt after a statepoint from a DIFFERENT object's relocation.  Both
+  chain walkers now stop at marked GEPs (they are the chain root); the
+  comballoc-object-starts test now rematerializes fields from their own
+  object's relocation.  This path is real but unexercised in
+  closure_conversion (objects byte-identical before/after the fix).
+- The inline-asm prologue stack checks emitted by `emitOxCamlStackCheck`
+  (AArch64FrameLowering.cpp) called the NATIVE `caml_call_realloc_stack`,
+  which saves the live x29; stack growth then walks the frame-pointer
+  chain from it (fiber.c WITH_FRAME_POINTERS rewrite) into LLVM frames,
+  rewriting any spilled word that looks like an old-stack address.  Added
+  `caml_llvm_call_realloc_stack_stkarg` (runtime/arm64.S): same stack-arg
+  protocol but stores xzr to terminate the chain, exactly like
+  `caml_llvm_call_realloc_stack`.  NOTE: runtimes must be rebuilt from the
+  new arm64.S before linking code from the new clang (stage0
+  `_install/lib/ocaml/libasmrun.a` was patched in place with the new
+  arm64.o).
+- Also added: `-rs4gc-oxcaml-verify-object-starts` (reports base-pointer
+  chains crossing object-start GEPs) and an `OXCAML_LLVM_NO_COMBALLOC`
+  env-var gate in asmgen.ml for bisection.
+
+Additional EXCLUSIONS for the parser crash (each tested directly):
+comballoc entirely off (module IR regenerated without it - still crashes),
+`-O1` (still crashes; not an -O3-only pass), GC values forced to spill
+slots (`-max-registers-for-gc-values=0`), the realloc fp-chain rewrite
+(disabled in fiber.c - still crashes), ALL stack reallocation (64M-word
+initial main stack - still crashes), i64-laundered GC pointers (the
+`-rs4gc-heuristic-report-oxcaml-statepoint-crossing-inttoptr` hits all
+triage to immediates: or-tag patterns, local_sp arena offsets, Int_ids
+table ids).
+
+Repro status: FULLY DETERMINISTIC under lldb (no ASLR): identical crash
+pc (`Ident.compare+48`) and registers (x0=0, x1=1) every run, with the
+fp-chain compare <- List.map+172 <- classify_fields_of_block+152 <-
+curry2 <- cont_96_350+5052.  (Watchpoints perturb signal timing and
+change pool-reuse history; use content/condition triggers, not hit
+indexes.)
+
+Round-3 narrowing (same day): the crash is `CCenv.find_var` called from
+`Lambda_to_flambda.cps` on `Lvar` (lambda_to_flambda.ml:480) walking the
+closure_conversion_aux VARIABLES map into a node pointer that lands in
+RECLAIMED major-pool memory (recycled small values such as 1, 3, 0x1500).
+Refuted by direct experiment: init-placeholder leaks (new debug flag
+`-rs4gc-oxcaml-tag-init-placeholders` gives every slot placeholder a
+unique odd immediate; the crash value stays plain 1 = Val_long 0),
+immediate idents inserted through any aux Env add path (conditional
+breakpoints never fire), missing write barriers (caml_modify relocation
+count differences are sound MIR tail-merging; all calls survive post-opt
+IR), and major-GC starvation (o=10000 still crashes).  Remaining
+mechanisms: a frametable liveness hole at a closure_conversion statepoint
+(live env/map collected) or relocation/SSA wiring handing code a stale or
+wrong pointer.  Next experiment documented in the memory note: walk the
+map from its root at the deterministic crash and classify the dead node's
+parent (header color/generation, sibling fields) to separate
+collected-while-reachable from wrong-value-at-construction.
+
+Watchpoint findings: the corrupt cells' last writers are the GC itself
+copying the young original verbatim during promotion
+(oldify_one <- caml_scan_stack, then oldify_mopup) - so the corruption
+predates promotion and the heap/frametable/GC are clean as writers.
+Crash-state decode: List.map was invoked by LLVM-compiled
+classify_fields_of_block with `f` = a TAG-0 ordinary block whose field0
+happens to be Ident.compare's code pointer - NOT a closure (tag 247);
+map blindly entered compare with junk args.  A well-formed-but-WRONG
+value therefore flows into the f/list arguments inside cont/classify on
+a GC-timing-dependent path: prime suspect is SSA-repair /
+exnroot-reload / relocation WIRING selecting the wrong value on a rare
+statepoint path.  Next: breakpoint at classify's map callsite on the
+crash iteration (no watchpoints) and trace f/list register provenance
+back through cont's statepoint reloads against the stashed RS4GC IR.
+
+## Previous Change (v2: consumer-NCD store placement)
+
+- Refined the uniform root design: the slot's single defining store now sits
+  at the latest point that dominates every protected invoke of the regions
+  sharing the slot (nearest common dominator of the consumers), hoisted out
+  of cycles while the value stays available, falling back to the definition
+  when the value does not dominate that point.  This fixes a 35% regression
+  on `nested_failed_unify`: store-at-def had hoisted argument slot stores to
+  the function entry, taxing every call of functions like `unify1` whose
+  protected region sits on a conditional path.  Shared slots migrate their
+  store upward as later regions join (`EnsureDefStoreCovers`), and
+  value-slot homes only apply at statepoints dominated by the store.
+- Probes after the change (medians, same machine/run, ratio vs native):
+  `nested_failed_unify` 1.252x (head 1.250x), `boyer_like_failed_unify`
+  1.251x (head 1.228x), `catch_failure_then_unify` 1.224x (head 1.245x),
+  `closure_env_in_try_hit` 1.088x (head 1.089x),
+  `many_handler_live_roots_raise` 0.666x (head 0.670x), boyer 1.038x (head
+  1.052x).  No bad regressions remain; boyer's win is retained.
+- Debug tooling added behind flags: `-rs4gc-oxcaml-call-home-budget/-skip/
+  -dump` to bisect call-statepoint homing by ordinal.  Using them, the
+  call-homes failure was narrowed to a SINGLE homed call statepoint in
+  `Lambda_to_flambda.cps` (skip=304 budget=305 with the llstash harness
+  reproduces in ~10s); its IR, frametable record, regalloc slot sharing and
+  backedge wiring all audit as consistent, so the residual bug is deeper in
+  call-statepoint lowering.  Homes stay invoke-only by default.
+- Validation: full RS4GC + AArch64 oxcaml lit suites at the pre-existing
+  known-failure sets; fresh boot passes the stdlib.pp.ml GC-stress repro at
+  s=1k/4k/64k; self-stage log
+  `agent-state/test-suite-29e4cd/self_stage_uniform_roots_v4.log`.
+
+## Previous Change
+
+- RS4GC now classifies each pre-RS4GC addrspace(1) value live over a
+  safepoint into exactly two categories: handler-live values get one volatile
+  root slot stored once at the value's definition (per-invoke stores remain
+  only for PHIs defined on unwind edges), reloaded after each safepoint and at
+  recovery entries, with the slot registered on the statepoints; everything
+  else uses standard gc.relocate.  This replaces the per-role slot
+  materialization that gave boyer's `rewrite_with_lemmas` three duplicate term
+  slots re-stored before every protected invoke (now: 2 slots, 1 store each
+  per definition, none per invoke).
+- Boundary rejoins use lazy per-edge reloads of the single slot; selectors and
+  recovery loads alias the underlying slot (single-defining-store slots only),
+  so SSA repair does not resurrect relocates or per-invoke stores.
+- Fixed a latent null `Info.StatepointToken` read in the old
+  `canonicalizeExplicitRootHomesAndFilterLiveSets`; homes are now assigned per
+  record from the function-wide value→slot map against the original call.
+- Benchmarks (this machine, medians): boyer native `0.0854s`, old-HEAD LLVM
+  `0.0933s` (1.093x), new LLVM `0.0869s` (1.018x).  `many_handler_live_roots_raise`
+  0.66x vs native.  `boyer_like_failed_unify`/`catch_failure_then_unify`
+  (synthetic always-raise loops) are ~4-7% slower than old HEAD because the
+  old per-invoke stores fed store-to-load forwarding into the handler reload;
+  accepted trade for the normal-path win.
+- Lit: all oxcaml RS4GC tests pass incl. new
+  `oxcaml-exception-root-single-slot-per-value.ll`; the 13 generic RS4GC and
+  7 AArch64 oxcaml failures are pre-existing (identical sets at 57e9764b3c).
+- The first self-stage run hit two real bugs, found with a deterministic
+  reproducer (`_llvm_boot_*` boot compiler compiling `stdlib.pp.ml` under
+  `OCAMLRUNPARAM=s=4k`) and an object-level bisect harness (`../llstash`,
+  swaps per-module `.o` between head-clang and new-clang dune trees, re-ars
+  archives, relinks, reruns the repro):
+  - `Info.ExplicitRootHomes` held raw `Value*`; when a homed value was the
+    result of an earlier statepoint-rewritten call, the deferred RAUW left
+    the home dangling and the replacement gc.result was never SSA-repaired.
+    Fixed with `WeakTrackingVH` handles.
+  - Slot aliasing (selector/reload sharing a root slot) is unsound when the
+    slot's defining store can re-execute during the alias's lifetime; guarded
+    by `CanAliasToSlot` (defining store must dominate the alias and not be
+    reachable from it).
+  - After those fixes, homing live slot values at CALL statepoints (removing
+    them from gc-live in favor of the slot) still corrupts the heap under GC
+    pressure even though IR-level SSA repair is provably complete; the
+    miscompiled module was `lambda_to_flambda` (`cps` function) and the
+    failure is below the IR (call-statepoint lowering of slot-homed frames is
+    suspected, possibly the CSR root map).  Homes default to INVOKE
+    statepoints only (`-rs4gc-oxcaml-value-slot-homes`, 0=off 1=invokes
+    2=calls 3=all); calls keep full relocation.  Investigating `=2` with the
+    bisect harness is the open follow-up.
+- With invokes-only homes: boyer `1.020x` vs HEAD `1.048x` on the same
+  machine/run; the boot compiler passes the `s=4k` GC-stress repro at 4k/16k/
+  256k minor heaps (head-clang boots pass it too; the fully-homed build did
+  not).
+- Self-stage validation of the invokes-only configuration: in progress.
+
+## Previous Change
+
+- Current branch HEAD includes `b6c22b9142` (`Enable comballoc for LLVM
+  backend`).
+- Default mode is back to normal RS4GC/gc.relocate lowering; the global
+  all-volatile-root-slot experiment is not the active path.
+- Pending validation fixes:
+  - LLVM-backend statmemprof native variants for
+    `discard_in_callback.ml` and `stop_start_in_callback.ml` now expect the
+    `combined-f33` profile shape, matching LLVM comballoc.
+  - `tools/setup-llvm-stage4-ocamltest.sh` now builds a real fake-root
+    `otherlibs/systhreads` directory and links generated `threads.h` and
+    `st_pthreads.h` into it when present. This fixes self-stage2 ocamltest
+    compilation of `tests/lib-systhreads/swapgil.ml`.
+- `685d252ac0` was unsafe: the exception-root merge/filtering change let the
+  LLVM self-stage compiler segfault while compiling `stdlib/bytes.ml`.
+- `9f38c181d9` reverts the unsafe LLVM source/test changes from `685d252ac0`,
+  while keeping the useful self-stage script fixes.
+- The self-stage scripts now allow explicit `LLVM_EXTRA_FLAGS` when needed and
+  preserve clean native/LLVM separation.
+- Boyer remains a useful slowdown case. A fresh run showed native median
+  `0.08898s`, LLVM median `0.09533s`, ratio `1.0714x`.
+- In `rewrite_with_lemmas`, pre-RS4GC has one source value `%2` (`term`) live
+  through several handler roles: returned when lemmas are exhausted and reused
+  when caught `Unify` retries the loop. RS4GC materializes those roles as
+  separate exception-root slots (`%exnroot`, `%exnroot124`, and related PHI
+  roots), so the first protected call stores the same `%2`-derived value into
+  multiple volatile exnroots. This is a conservative artifact of the current
+  handler-boundary materialization, not a distinct source value.
+
+## Evidence
+
+- Full installed-compiler LLVM-backend tests passed after the comballoc test
+  fixes:
+  `6756 passed`, `284 skipped`, `0 failed`,
+  log `agent-state/test-suite-29e4cd/ocamltest_current_install_llvm_backend_comballoc_fixed_20260608_153338.log`.
+- Self-stage build using `_install` as stage 0 passed:
+  log `agent-state/test-suite-29e4cd/self_stage2_comballoc_fixed_20260608_153957.log`.
+- Second self-stage build using `_llvm_self_stage_install` as stage 0 passed
+  and produced `_llvm_self_stage2_install`:
+  log `agent-state/test-suite-29e4cd/self_stage2_second_comballoc_fixed_20260608_154430.log`.
+- Full self-stage2 ocamltest rerun passed:
+  `6756 passed`, `284 skipped`, `0 failed`,
+  log `agent-state/test-suite-29e4cd/ocamltest_self_stage2_comballoc_fixed_rerun_20260608_155852.log`.
+  The previous full run hit a one-off `tests/lib-threads/signal.ml` native
+  output miss; focused `tests/lib-threads` rerun and the full rerun both passed
+  that test.
+- Rebuilt custom LLVM `opt` and `clang` in `../llvm-build`.
+- Focused LLVM tests pass:
+  `oxcaml-volatile-root-allocas.ll`,
+  `oxcaml-self-base-phi-exception-root.ll`, and
+  `oxcaml-statepoint-stable-phi-root-home.ll`.
+- Full self-stage2 now passes:
+  `6756 passed`, `284 skipped`, `0 failed`,
+  log `agent-state/test-suite-29e4cd/ocamltest_self_stage_after_rollback_rerun_20260607_105819.log`.
+- Current vs native totals after the rollback:
+  - Micro: LLVM/native `0.971072`, `2.98%` speedup,
+    log `agent-state/test-suite-29e4cd/micro_after_rollback_20260607_110522.log`.
+  - Minibench: LLVM/native `0.927656`, `7.80%` speedup,
+    results `agent-state/test-suite-29e4cd/minibench_after_rollback_results.json`.
+  - Compiler module medians: LLVM/native `0.965285`, `3.60%` speedup,
+    results `agent-state/test-suite-29e4cd/compiler_bench_current_vs_native_20260607_110910.json`.
+- This beats the saved old LLVM baseline at `57e9764b3c` on all three totals:
+  - Old micro ratio was `0.982986` (`1.73%` speedup).
+  - Old minibench ratio was `0.932000` (`7.30%` speedup).
+  - Old compiler module-median ratio was `0.981823` (`1.85%` speedup).
+- Code-review-revise loop on the net improvement stack:
+  - `git diff --check 57e9764b3c..HEAD` passed.
+  - Focused LLVM tests above passed again.
+  - Reviewed stable root home lowering, statepoint slot allocation, regmask
+    call-splitting default, and the inactive volatile-root mode. No source fix
+    was needed after the rollback.
+
+## Follow-up Opportunities
+
+- Individual slowdowns are still worth investigating:
+  `closure_env_in_try_hit` about `1.29x`,
+  `closure_env_in_try_no_raise` about `1.25x`,
+  `catch_failure_then_unify` about `1.24x`,
+  `boyer_like_failed_unify` about `1.23x`, and minibench `boyer` about `1.13x`.
+- Do not resurrect the global all-volatile-root-slot mode as the default without
+  fresh evidence; it regressed total micro time in the latest run.

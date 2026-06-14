@@ -32,13 +32,25 @@ module Options = Oxcaml_args.Make_opttop_options (struct
   let anonymous s = read_anonymous_arg s
 end);;
 
+external llvm_personality_anchor : unit -> unit
+  = "caml_expectnat_llvm_personality_anchor"
+
 let () =
+  llvm_personality_anchor ();
   Expectcommon.register_assembly_callback :=
     Some Emit.register_expect_asm_callback;
+  Expectcommon.register_llvm_ir_callback :=
+    Some Llvmize.register_expect_llvm_ir_callback;
+  Expectcommon.register_llvm_asm_callback :=
+    Some Llvmize.register_expect_llvm_asm_callback;
   Expectcommon.run
     ~read_anonymous_arg
     ~extra_args:Options.list
     ~extra_init:(fun () ->
-      Clflags.native_code := true;
-      Clflags.Opt_flag_handler.set Oxcaml_flags.opt_flag_handler)
+      Clflags.Opt_flag_handler.set Oxcaml_flags.opt_flag_handler;
+      Compenv.set_extra_params (Some Oxcaml_args.Extra_params.read_param);
+      Compenv.readenv Format.err_formatter Before_args;
+      Clflags.native_code := true)
+    ~extra_after_args:(fun () ->
+      Compenv.readenv Format.err_formatter Before_link)
     (module Toplevel)

@@ -15,9 +15,11 @@
 
 #define CAML_INTERNALS
 
+#include <sys/mman.h>
 #include <stdbool.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "caml/config.h"
 #include "caml/custom.h"
@@ -1053,6 +1055,41 @@ caml_stw_empty_minor_heap_no_major_slice(caml_domain_state* domain,
   CAML_EV_END(EV_MINOR_CLEAR);
 
   CAMLassert(domain->young_ptr == domain->young_end);
+  /* OXCAML_YOUNG_FLIP debug aid: alternate the young space between two
+     locations each minor collection and PROT_NONE the retired one, so any
+     dereference of a stale young pointer (a root the collector missed)
+     faults at the guilty instruction instead of silently reading recycled
+     memory.  Requires a page-aligned minor heap (s >= 4k on 16K-page
+     hosts) and the spare reservation made in domain.c.  Single-domain
+     debugging aid only. */
+  {
+    extern uintnat caml_minor_heaps_start, caml_minor_heaps_end;
+    extern uintnat caml_minor_heap_max_wsz;
+    static int dbg_flip_on = -1;
+    static int dbg_flip = 0;
+    static char* orig_base = NULL;
+    if (dbg_flip_on == -1)
+      dbg_flip_on = getenv("OXCAML_YOUNG_FLIP") ? 1 : 0;
+    uintnat hbytes = domain->minor_heap_wsz * sizeof(value);
+    uintnat max_bsz = caml_minor_heap_max_wsz * sizeof(value);
+    char* spare = (char*)caml_minor_heaps_end - max_bsz;
+    if (dbg_flip_on && (hbytes % 16384) == 0 &&
+        (uintnat)spare >= caml_minor_heaps_start + hbytes) {
+      if (!orig_base) orig_base = (char*)domain->young_start;
+      dbg_flip ^= 1;
+      char* act = dbg_flip ? spare : orig_base;
+      char* inact = dbg_flip ? orig_base : spare;
+      mprotect(act, hbytes, PROT_READ | PROT_WRITE);
+      domain->young_start = (value*)act;
+      domain->young_end = (value*)(act + hbytes);
+      domain->young_ptr = domain->young_end;
+      domain->young_trigger = domain->young_start
+          + domain->minor_heap_wsz / 2;
+      caml_memprof_set_trigger(domain);
+      caml_reset_young_limit(domain);
+      mprotect(inact, hbytes, PROT_NONE);
+    }
+  }
   CAML_GC_MESSAGE(MINOR, "Minor collection done.\n");
   Caml_state->in_minor_collection = 0;
 }

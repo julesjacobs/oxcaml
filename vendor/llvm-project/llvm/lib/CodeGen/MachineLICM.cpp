@@ -993,6 +993,59 @@ bool MachineLICMBase::IsLICMCandidate(MachineInstr &I) {
   if (I.isConvergent())
     return false;
 
+  // OxCaml: do not hoist computations on gc values (address arithmetic
+  // deriving an interior pointer from a block pointer) out of loops that
+  // contain statepoints. With in-place statepoint semantics the base
+  // register's value changes at every collection while the hoisted
+  // derived copy would not. Loads and copies are fine: the loaded or
+  // copied VALUE is itself a root the GC tracks through the usual slot
+  // and register listings.
+  if (!I.isCopy() && !I.mayLoad() && PreRegAlloc) {
+    const Function &F = I.getMF()->getFunction();
+    if (F.hasGC() && (F.getGC() == "oxcaml" || F.getGC() == "ocaml")) {
+      // The bit lives on the FuncInfo vreg for the IR value; ISel's raw
+      // copy-from-physreg chains (call results) are unmarked, so chase
+      // COPY defs backward and COPY users forward a few hops.
+      auto IsGCReg = [&](Register R) {
+        Register Cur = R;
+        for (unsigned Hop = 0; Hop < 4 && Cur.isVirtual(); ++Hop) {
+          if (MRI->isOxCamlGCPtr(Cur))
+            return true;
+          MachineInstr *D = MRI->getVRegDef(Cur);
+          if (!D || !D->isCopy() || !D->getOperand(1).getReg().isVirtual())
+            break;
+          Cur = D->getOperand(1).getReg();
+        }
+        for (const MachineInstr &U : MRI->use_instructions(R))
+          if (U.isCopy() && U.getOperand(0).getReg().isVirtual() &&
+              MRI->isOxCamlGCPtr(U.getOperand(0).getReg()))
+            return true;
+        return false;
+      };
+      bool UsesGCValue = false;
+      for (const MachineOperand &MO : I.uses())
+        if (MO.isReg() && MO.getReg().isVirtual() && IsGCReg(MO.getReg()))
+          UsesGCValue = true;
+      if (UsesGCValue) {
+        bool LoopHasStatepoint = false;
+        for (MachineBasicBlock *MBB : CurLoop->getBlocks()) {
+          for (const MachineInstr &MI : *MBB)
+            if (MI.getOpcode() == TargetOpcode::STATEPOINT) {
+              LoopHasStatepoint = true;
+              break;
+            }
+          if (LoopHasStatepoint)
+            break;
+        }
+        if (LoopHasStatepoint) {
+          LLVM_DEBUG(dbgs() << "LICM: gc-derived computation in a "
+                               "statepoint loop.\n");
+          return false;
+        }
+      }
+    }
+  }
+
   if (!TII->shouldHoist(I, CurLoop))
     return false;
 

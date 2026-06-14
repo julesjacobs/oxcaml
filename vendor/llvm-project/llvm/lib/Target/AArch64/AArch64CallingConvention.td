@@ -159,11 +159,16 @@ def RetCC_AArch64_AAPCS : CallingConv<[
            CCAssignToReg<[P0, P1, P2, P3]>>
 ]>;
 
-// OxCaml runtime registers are threaded through calls and pinned by the calling
-// convention. On arm64, x28 is the domain state pointer and x27 is the
-// allocation pointer. x26 is the trap pointer, and x16/x17 are runtime/linker
-// temporaries. AArch64RegisterInfo reserves these registers for OxCaml
-// functions; see backend/arm64/proc.ml and runtime/arm64.S.
+// OxCaml runtime registers are threaded through ordinary OxCaml calls in LLVM
+// IR, then pinned by this calling convention. On arm64, x28 is the domain state
+// pointer and x27 is the allocation pointer. The LLVM IR models these as the
+// first two i64 arguments and the first two i64 return values so optimizations
+// and statepoints can see the dependency. The register assignment below maps
+// those slots directly to x28/x27; when caller and callee both use this
+// convention, register allocation should not need any extra copies just to pass
+// the domain state pointer or allocation pointer through the call. x26 is the
+// trap pointer, and x16/x17 are runtime/linker temporaries. See
+// backend/arm64/proc.ml and runtime/arm64.S.
 def RetCC_AArch64_OxCaml : CallingConv<[
   CCIfType<[i8, i16, i32], CCPromoteToType<i64>>,
 
@@ -183,6 +188,14 @@ def RetCC_AArch64_OxCaml : CallingConv<[
 ]>;
 
 def RetCC_AArch64_OxCaml_C_Call : CallingConv<[
+  CCIfType<[i64], CCAssignToReg<[X28, X27]>>,
+  CCDelegateTo<RetCC_AArch64_AAPCS>
+]>;
+
+def RetCC_AArch64_OxCaml_C_Direct_Call : CallingConv<[
+  // Hidden runtime-register results: x28 is domain state, x27 is allocation
+  // pointer. The C callee preserves both under the AAPCS, so these model the
+  // dependency without requiring real data movement.
   CCIfType<[i64], CCAssignToReg<[X28, X27]>>,
   CCDelegateTo<RetCC_AArch64_AAPCS>
 ]>;
@@ -454,6 +467,13 @@ def CC_AArch64_OxCaml_C_Call_StackArgs : CallingConv<[
   CCDelegateTo<CC_AArch64_AAPCS>
 ]>;
 
+def CC_AArch64_OxCaml_C_Direct_Call : CallingConv<[
+  // Hidden runtime-register arguments: x28 is domain state, x27 is allocation
+  // pointer. Ordinary C arguments start after these and follow the C ABI.
+  CCIfType<[i64], CCAssignToReg<[X28, X27]>>,
+  CCDelegateTo<CC_AArch64_AAPCS>
+]>;
+
 // The order of the callee-saves in this file is important, because the
 // FrameLowering code will use this order to determine the layout the
 // callee-save area in the stack frame. As can be observed below, Darwin
@@ -560,7 +580,18 @@ def CSR_AArch64_OxCaml_WithoutFP : CalleeSavedRegs<(add LR)>;
 def CSR_AArch64_OxCaml_C_Call : CalleeSavedRegs<(sub CSR_AArch64_AAPCS, X27, X28)>;
 def CSR_AArch64_OxCaml_C_Call_StackArgs
     : CalleeSavedRegs<(sub CSR_AArch64_AAPCS, X20, X21, X27, X28)>;
-def CSR_AArch64_OxCaml_Alloc : CalleeSavedRegs<(sub CSR_AArch64_AllRegs, X8, X27, X28)>;
+// In-place C-call statepoints: registers cannot be gc roots at C-call
+// safepoints (no gc_regs bucket), so a gc value surviving the call in a
+// callee-saved register goes stale when the GC moves the object (only
+// its spill slot is updated). Clobber the integer CSRs so the allocator
+// keeps everything live across in slots; x26 (trap pointer) and the FP
+// CSRs cannot hold gc references and stay preserved.
+def CSR_AArch64_OxCaml_C_Call_InPlace
+    : CalleeSavedRegs<(sub CSR_AArch64_AAPCS, X19, X20, X21, X22, X23, X24,
+                           X25, X27, X28)>;
+def CSR_AArch64_OxCaml_Alloc
+    : CalleeSavedRegs<(sub CSR_AArch64_AllRegs, X8, X16, X17, X18,
+                           X26, X27, X28)>;
 
 def CSR_AArch64_RT_MostRegs :  CalleeSavedRegs<(add CSR_AArch64_AAPCS,
                                                 (sequence "X%u", 9, 15))>;

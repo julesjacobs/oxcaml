@@ -1,0 +1,105 @@
+source_filename = "poll.ml"
+
+define  oxcamlcc { { i64, i64 }, { i64 } } @camlPoll__run_HIDE_STAMP(i64 %0, i64 %1, i64 %2) gc "oxcaml" {
+  %ds = alloca i64
+  store i64 %0, ptr %ds
+  %alloc = alloca i64
+  store i64 %1, ptr %alloc
+  %4 = alloca i64
+  store i64 %2, ptr %4
+  %5 = alloca i64
+  %6 = alloca i64
+  %7 = alloca i64
+  %8 = alloca i64
+  br label %L1
+L1:
+  br label %L101
+L101:
+  %9 = load i64, ptr %4
+  store i64 %9, ptr %5
+  %10 = load i64, ptr %alloc
+  %11 = load i64, ptr %ds
+  %12 = inttoptr i64 %11 to ptr
+  %13 = load i64, ptr %12
+  %14 = icmp ult i64 %13, %10
+  %15 = call  i1 @llvm.expect.i1(i1 %14, i1 1)
+  br i1 %15, label %L106, label %L105
+L105:
+  %16 = load i64, ptr %ds
+  %17 = load i64, ptr %alloc
+  %18 = call oxcaml_alloccc { { i64, i64 }, {  } } @caml_call_gc(i64 %16, i64 %17) "statepoint-id"="1" cold
+  %19 = extractvalue { { i64, i64 }, {  } } %18, 0, 0
+  %20 = extractvalue { { i64, i64 }, {  } } %18, 0, 1
+  store i64 %19, ptr %ds
+  store i64 %20, ptr %alloc
+  br label %L106
+L106:
+  store i64 1, ptr %6
+  %21 = load i64, ptr %6
+  store i64 %21, ptr %7
+  %22 = load i64, ptr %5
+  %23 = add i64 %22, 2
+  store i64 %23, ptr %8
+  %24 = load i64, ptr %8
+  store i64 %24, ptr %4
+  %25 = load i64, ptr %4
+  %26 = load i64, ptr %ds
+  %27 = load i64, ptr %alloc
+  %28 = insertvalue { { i64, i64 }, { i64 } } poison, i64 %26, 0, 0
+  %29 = insertvalue { { i64, i64 }, { i64 } } %28, i64 %27, 0, 1
+  %30 = insertvalue { { i64, i64 }, { i64 } } %29, i64 %25, 1, 0
+  ret { { i64, i64 }, { i64 } } %30
+}
+
+define  oxcamlcc { { i64, i64 }, { ptr addrspace(1) } } @camlPoll__entry(i64 %0, i64 %1) gc "oxcaml" {
+  %ds = alloca i64
+  store i64 %0, ptr %ds
+  %alloc = alloca i64
+  store i64 %1, ptr %alloc
+  %3 = alloca i64
+  %4 = alloca ptr addrspace(1)
+  %5 = alloca i64
+  %6 = alloca i64
+  %7 = alloca i64
+  br label %L1
+L1:
+  br label %L111
+L111:
+  %8 = ptrtoint ptr @camlPoll to i64
+  store i64 %8, ptr %5
+  %9 = load i64, ptr %5
+  store i64 %9, ptr %6
+  %10 = load i64, ptr %6
+  %11 = inttoptr i64 %10 to ptr addrspace(1)
+  store ptr addrspace(1) %11, ptr %4
+  store i64 1, ptr %7
+  %12 = load i64, ptr %7
+  store i64 %12, ptr %3
+  %13 = load ptr addrspace(1), ptr %3
+  %14 = load i64, ptr %ds
+  %15 = load i64, ptr %alloc
+  %16 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %14, 0, 0
+  %17 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %16, i64 %15, 0, 1
+  %18 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %17, ptr addrspace(1) %13, 1, 0
+  ret { { i64, i64 }, { ptr addrspace(1) } } %18
+}
+
+define private oxcamlcc { { i64, i64 }, { i64 } } @wrap_try(i64 %0, i64 %1) returns_twice noinline {
+  %3 = insertvalue { { i64, i64 }, { i64 } } poison, i64 0, 1, 0
+  %4 = insertvalue { { i64, i64 }, { i64 } } %3, i64 %0, 0, 0
+  %5 = insertvalue { { i64, i64 }, { i64 } } %4, i64 %1, 0, 1
+  ret { { i64, i64 }, { i64 } } %5
+}
+
+@camlPoll__gc_roots = global { i64 } { i64 0 }, section ".data", align 8
+@header.camlPoll = global i64 1792, section ".data", align 8
+@camlPoll = global { ptr } { ptr @camlPoll__run_1 }, section ".data", align 8
+@header.camlPoll__run_1 = global i64 3063, section ".data", align 8
+@camlPoll__run_1 = global { ptr, i64 } { ptr @camlPoll__run_HIDE_STAMP, i64 108086391056891909 }, section ".data", align 8
+@caml_call_gc = external global ptr
+
+declare i1 @llvm.expect.i1(i1, i1)
+
+
+!0 = !{ i32 1, !"oxcaml_module", !"Poll" }
+!llvm.module.flags = !{ !0 }

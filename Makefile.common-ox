@@ -14,16 +14,41 @@ else
   ocaml_subdirs_to_ignore=
 endif
 
+ifeq ($(LLVM_BACKEND),1)
+ifeq ($(strip $(LLVM_PATH)),)
+$(error Set LLVM_PATH to the clang wrapper or LLVM tool path for LLVM backend builds)
+endif
+LLVM_BOOT_BACKEND ?= 1
+export PATH := $(dir $(DUNE)):$(PATH)
+LLVM_BUILD_OCAMLPARAM := $(if $(BUILD_OCAMLPARAM),$(BUILD_OCAMLPARAM),_),llvm-backend=1,llvm-path=$(LLVM_PATH)
+override BUILD_OCAMLPARAM := $(LLVM_BUILD_OCAMLPARAM)
+override OCAMLPARAM := $(if $(OCAMLPARAM),$(OCAMLPARAM),_),llvm-backend=1,llvm-path=$(LLVM_PATH)
+export OCAMLPARAM
+endif
+
+ifeq ($(LLVM_BOOT_BACKEND),1)
+ifeq ($(strip $(LLVM_PATH)),)
+$(error Set LLVM_PATH to the clang wrapper or LLVM tool path for LLVM boot backend builds)
+endif
+LLVM_BOOT_INSTALL ?= $(CURDIR)/_install
+BOOT_OCAMLPARAM := _,llvm-backend=1,llvm-path=$(LLVM_PATH)
+BOOT_PATHS := \
+  (paths \
+    (PATH ("$(LLVM_BOOT_INSTALL)/bin" :standard)) \
+    (OCAMLLIB ("$(LLVM_BOOT_INSTALL)/lib/ocaml")))
+endif
+
 define dune_boot_context
 (lang dune 2.8)
 ; We need to call the boot context "default" so that dune selects it for merlin
 (context (default
   (name default)
   (profile dev)
+  $(BOOT_PATHS)
   (env (_
     (flags (:standard -warn-error +A -alert -unsafe_multidomain))
     (env-vars
-      ("OCAMLPARAM" "")
+      ("OCAMLPARAM" "$(BOOT_OCAMLPARAM)")
 
       ; Avoid using the full OC_CFLAGS for C code compiled during the boot
       ; In particular, we should avoid using ASan here even if it is otherwise
@@ -37,6 +62,12 @@ ifneq ($(origin BUILD_OCAMLPARAM), undefined)
 ENV_VARS := (env-vars ("OCAMLPARAM" "$(BUILD_OCAMLPARAM)"))
 else
 ENV_VARS :=
+endif
+
+ifneq ($(findstring llvm-backend=1,$(BUILD_OCAMLPARAM)),)
+ifneq ($(WITH_FRAME_POINTERS),true)
+$(error BUILD_OCAMLPARAM enables llvm-backend=1, but this tree was configured without frame pointers. Re-run configure with --enable-frame-pointers)
+endif
 endif
 
 define dune_runtime_stdlib_context
@@ -159,8 +190,20 @@ runtest-dwarf: compiler
 duneconf/boot.ws: export contents = $(dune_boot_context)
 duneconf/runtime_stdlib.ws: export contents = $(dune_runtime_stdlib_context)
 duneconf/main.ws: export contents = $(dune_main_context)
-duneconf/%.ws:
-	echo "$$contents" > $@
+.PHONY: FORCE
+FORCE:
+
+duneconf/%.ws: FORCE
+	@tmp="$@.tmp"; \
+	echo "$$contents" > "$$tmp"; \
+	if [ -f "$@" ] && cmp -s "$$tmp" "$@"; then \
+	  rm "$$tmp"; \
+	else \
+	  mv "$$tmp" "$@"; \
+	  if [ "$@" = "duneconf/boot.ws" ]; then \
+	    rm -rf _build/default _build/_bootinstall; \
+	  fi; \
+	fi
 
 # We need to disable ocaml/otherlibs when compiling with coverage, because we
 # need to compile against the user's opam instead. Unfortunately, Dune gives us
@@ -286,13 +329,14 @@ boot_build = _build/default
 
 # The following horror will be removed when work to allow the testsuite to
 # run on an installed tree (led by David Allsopp) is completed.
-.PHONY: runtest-upstream test install_for_test
+.PHONY: runtest-upstream test test-no-rebuild install_for_test
 install_for_test: install
 	rm -rf _runtest
 	mkdir _runtest
 	ln -s ../_install _runtest/_install
 	# Use rsync to ensure hardlinks are created on both Linux and macOS
 	rsync --link-dest=../../$(ocamldir)/testsuite/ -a $(ocamldir)/testsuite/ _runtest/testsuite/
+	find _runtest/testsuite/tests -name '*.corrected' -delete
 	 # replace backend-specific testsuite/tools with their new versions
 	rm -f _runtest/testsuite/tools/*
 	cp -a oxcaml/testsuite/tools/* _runtest/testsuite/tools/
@@ -320,13 +364,13 @@ install_for_test: install
 	cp $(main_build)/testsuite/lib/.testing.objs/native/testing.cm* \
           _runtest/testsuite/lib/
 	 # replace backend-specific testsuite/tests/asmcomp with their new versions
-	rm _runtest/testsuite/tests/asmcomp/*
+	rm -rf _runtest/testsuite/tests/asmcomp/*
 	cp -a oxcaml/testsuite/tests/asmcomp/* _runtest/testsuite/tests/asmcomp/
 	 # replace backend-specific testsuite/tests/asmgen with their new versions
-	rm _runtest/testsuite/tests/asmgen/*
+	rm -rf _runtest/testsuite/tests/asmgen/*
 	cp -a oxcaml/testsuite/tests/asmgen/* _runtest/testsuite/tests/asmgen/
 	 # add extension library tests that are not supported by the upstream compiler
-	rm _runtest/testsuite/tests/lib-extensions/*
+	rm -rf _runtest/testsuite/tests/lib-extensions/*
 	cp -a oxcaml/testsuite/tests/lib-extensions/* _runtest/testsuite/tests/lib-extensions
 
 	cp $(ocamldir)/Makefile.* _runtest/
@@ -406,6 +450,9 @@ install_for_test: install
 	mkdir _runtest/ocamltest
 	cp $(boot_build)/ocamltest/ocamltest.native _runtest/ocamltest/ocamltest
 test: install_for_test
+	$(MAKE) test-no-rebuild
+
+test-no-rebuild:
 	if [ "$(middle_end)" = "flambda2" ]; then \
 	  for path in `cd testsuite; ls -1 -d tests/*`; do \
 	    if [[ -d "testsuite/$$path" ]] && ! grep -q "^  $$path " oxcaml/testsuite/flambda2-test-list; then \
@@ -413,8 +460,10 @@ test: install_for_test
 	    fi; \
 	  done > _runtest/flambda2-test-list; \
 	fi
+	find _runtest/testsuite/tests -name '*.corrected' -delete
 	(export OCAMLSRCDIR=$$(pwd)/_runtest; \
 	 export CAML_LD_LIBRARY_PATH=$$(pwd)/_runtest/lib/ocaml/stublibs; \
+	 $(if $(TEST_RUN_OCAMLPARAM),export OCAMLPARAM="$(TEST_RUN_OCAMLPARAM)";) \
 	 if $$(which gfortran > /dev/null 2>&1); then \
 	   export LIBRARY_PATH=$$(dirname $$(gfortran -print-file-name=libgfortran.a)); \
 	 fi; \
@@ -449,6 +498,58 @@ runtest-upstream: test
 test-one: install_for_test
 	$(MAKE) test-one-no-rebuild
 
+.PHONY: llvm-compiler llvm-install llvm-test llvm-test-no-rebuild llvm-test-one llvm-test-one-no-rebuild llvm-self-stage-install llvm-self-stage2-install llvm-self-stage-test llvm-self-stage2-test
+require_llvm_path = $(if $(strip $(LLVM_PATH)),,$(error Set LLVM_PATH to the clang wrapper or LLVM tool path for LLVM backend builds))
+
+llvm-compiler:
+	$(call require_llvm_path)
+	$(MAKE) compiler LLVM_BACKEND=1
+
+llvm-install:
+	$(call require_llvm_path)
+	$(MAKE) install LLVM_BACKEND=1
+
+llvm-test:
+	$(call require_llvm_path)
+	$(MAKE) install_for_test
+	$(MAKE) test-no-rebuild TEST_RUN_OCAMLPARAM="_,llvm-backend=1,llvm-path=$(LLVM_PATH)"
+
+llvm-test-no-rebuild:
+	$(call require_llvm_path)
+	$(MAKE) test-no-rebuild TEST_RUN_OCAMLPARAM="_,llvm-backend=1,llvm-path=$(LLVM_PATH)"
+
+llvm-test-one:
+	$(call require_llvm_path)
+	$(MAKE) install_for_test
+	$(MAKE) test-one-no-rebuild TEST_RUN_OCAMLPARAM="_,llvm-backend=1,llvm-path=$(LLVM_PATH)"
+
+llvm-test-one-no-rebuild:
+	$(call require_llvm_path)
+	$(MAKE) test-one-no-rebuild TEST_RUN_OCAMLPARAM="_,llvm-backend=1,llvm-path=$(LLVM_PATH)"
+
+llvm-self-stage-install: llvm-install
+	LLVM_WRAPPER="$(LLVM_PATH)" \
+	  tools/build-llvm-self-stage-install.sh
+
+llvm-self-stage2-install: llvm-self-stage-install
+	STAGE0_INSTALL="$(ROOTDIR)/_llvm_self_stage_install" \
+	  BOOT_BUILD="$(ROOTDIR)/_llvm_self_stage2_boot_context_build" \
+	  BOOT_INSTALL="$(ROOTDIR)/_llvm_self_stage2_boot_install" \
+	  SELF_RUNTIME_BUILD="$(ROOTDIR)/_llvm_self_stage2_runtime_build" \
+	  SELF_MAIN_BUILD="$(ROOTDIR)/_llvm_self_stage2_main_build" \
+	  SELF_STAGE_INSTALL="$(ROOTDIR)/_llvm_self_stage2_install" \
+	  LLVM_WRAPPER="$(LLVM_PATH)" \
+	  tools/build-llvm-self-stage-install.sh
+
+llvm-self-stage-test: llvm-self-stage-install
+	SELF_STAGE=1 LLVM_WRAPPER="$(LLVM_PATH)" \
+	  tools/run-llvm-stage5-ocamltest.sh
+
+llvm-self-stage2-test: llvm-self-stage2-install
+	SELF_STAGE=2 \
+	  LLVM_WRAPPER="$(LLVM_PATH)" \
+	  tools/run-llvm-stage5-ocamltest.sh
+
 # If the TEST argument is passed as `testsuite/tests/foo` (as is invited by
 # tab completion) then look for it in `tests/foo`. Otherwise, if it's passed as
 # just `foo`, then look for it in `tests/foo` for backward compatibility.
@@ -458,13 +559,22 @@ locate_test = \
     echo "tests/$${test}"; \
   )
 
+one_test_selector = \
+  $(if $(filter command line,$(origin TEST)),TEST=$(call locate_test,$(TEST)),TEST=)
+one_dir_selector = \
+  $(if $(filter command line,$(origin DIR)),DIR=$(call locate_test,$(DIR)),DIR=)
+one_list_selector = \
+  $(if $(filter command line,$(origin LIST)),LIST=$(LIST),LIST=)
+
 test-one-no-rebuild:
+	find _runtest/testsuite/tests -name '*.corrected' -delete
 	(export OCAMLSRCDIR=$$(pwd)/_runtest; \
 	 export CAML_LD_LIBRARY_PATH=$$(pwd)/_runtest/lib/ocaml/stublibs; \
+	 $(if $(TEST_RUN_OCAMLPARAM),export OCAMLPARAM="$(TEST_RUN_OCAMLPARAM)";) \
 	 if $$(which gfortran > /dev/null 2>&1); then \
 	   export LIBRARY_PATH=$$(dirname $$(gfortran -print-file-name=libgfortran.a)); \
 	 fi; \
-	 cd _runtest/testsuite && make one $(if $(TEST),TEST=$(call locate_test,$(TEST))) $(if $(DIR),DIR=$(call locate_test,$(DIR))))
+	 cd _runtest/testsuite && make one $(one_test_selector) $(one_dir_selector) $(one_list_selector))
 
 promote-one: install_for_test
 	$(MAKE) promote-one-no-rebuild
@@ -475,7 +585,7 @@ promote-one-no-rebuild:
 	 if $$(which gfortran > /dev/null 2>&1); then \
 	   export LIBRARY_PATH=$$(dirname $$(gfortran -print-file-name=libgfortran.a)); \
 	 fi; \
-	 cd _runtest/testsuite && make promote $(if $(TEST),TEST=$(call locate_test,$(TEST))) $(if $(DIR),DIR=$(call locate_test,$(DIR))))
+	 cd _runtest/testsuite && make promote $(one_test_selector) $(one_dir_selector) $(one_list_selector))
 
 # This target is like a polling version of upstream "make ocamlopt"
 .PHONY: hacking

@@ -1,0 +1,11 @@
+almabench: native=0.6983s llvm=0.6007s ratio=0.8603 compile_ratio=1.6093
+bdd: native=0.1048s llvm=0.1044s ratio=0.9960 compile_ratio=1.8576
+boyer: native=0.0879s llvm=0.0913s ratio=1.0387 compile_ratio=1.8004
+boyer_no_exc: native=0.0697s llvm=0.0671s ratio=0.9630 compile_ratio=1.9194
+fft: native=1.0562s llvm=1.0323s ratio=0.9774 compile_ratio=1.7824
+kb: native=0.1302s llvm=0.1281s ratio=0.9840 compile_ratio=2.1704
+kb_no_exc: native=0.1337s llvm=0.1271s ratio=0.9505 compile_ratio=2.2546
+nucleic: native=0.0992s llvm=0.0816s ratio=0.8225 compile_ratio=1.7581
+raytrace: native=0.1618s llvm=0.1449s ratio=0.8952 compile_ratio=1.6838
+splay: native=0.0532s llvm=0.0520s ratio=0.9774 compile_ratio=1.8495
+RESULTS_JSON=/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/minibench_suite/results.json

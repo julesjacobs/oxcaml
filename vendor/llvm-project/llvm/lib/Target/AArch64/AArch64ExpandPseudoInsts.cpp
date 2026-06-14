@@ -29,11 +29,14 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineOperand.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/DebugLoc.h"
+#include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCInstrDesc.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CodeGen.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Target/TargetMachine.h"
 #include <cassert>
@@ -45,6 +48,7 @@
 using namespace llvm;
 
 #define AARCH64_EXPAND_PSEUDO_NAME "AArch64 pseudo instruction expansion pass"
+#define DEBUG_TYPE "aarch64-expand-pseudo"
 
 namespace {
 
@@ -87,6 +91,8 @@ private:
   bool expandCALL_RVMARKER(MachineBasicBlock &MBB,
                            MachineBasicBlock::iterator MBBI);
   bool expandCALL_BTI(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI);
+  bool expandOXCAML_C_DIRECT_CALL(MachineBasicBlock &MBB,
+                                  MachineBasicBlock::iterator MBBI);
   bool expandStoreSwiftAsyncContext(MachineBasicBlock &MBB,
                                     MachineBasicBlock::iterator MBBI);
   MachineBasicBlock *expandRestoreZA(MachineBasicBlock &MBB,
@@ -811,6 +817,83 @@ bool AArch64ExpandPseudo::expandCALL_BTI(MachineBasicBlock &MBB,
   return true;
 }
 
+bool AArch64ExpandPseudo::expandOXCAML_C_DIRECT_CALL(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI) {
+  MachineInstr &MI = *MBBI;
+  DebugLoc DL = MI.getDebugLoc();
+  MachineOperand &CallTarget = MI.getOperand(0);
+  assert((CallTarget.isGlobal() || CallTarget.isSymbol() ||
+          CallTarget.isReg()) &&
+         "invalid operand for direct OxCaml C call");
+
+  MachineInstr *First =
+      BuildMI(MBB, MBBI, DL, TII->get(AArch64::ADDXri), AArch64::FP)
+          .addReg(AArch64::SP)
+          .addImm(0)
+          .addImm(AArch64_AM::getShifterImm(AArch64_AM::LSL, 0))
+          .getInstr();
+
+  MachineFunction &MF = *MBB.getParent();
+  unsigned RememberState =
+      MF.addFrameInst(MCCFIInstruction::createRememberState(nullptr));
+  BuildMI(MBB, MBBI, DL, TII->get(TargetOpcode::CFI_INSTRUCTION))
+      .addCFIIndex(RememberState);
+  unsigned DwarfFP =
+      TII->getRegisterInfo().getDwarfRegNum(AArch64::FP, true);
+  unsigned DefCfaFP =
+      MF.addFrameInst(MCCFIInstruction::createDefCfaRegister(nullptr, DwarfFP));
+  BuildMI(MBB, MBBI, DL, TII->get(TargetOpcode::CFI_INSTRUCTION))
+      .addCFIIndex(DefCfaFP);
+
+  // Domain_c_stack is field 13 in runtime/caml/domain_state.tbl. LDRXui uses
+  // a scaled immediate, so the operand is the field index rather than bytes.
+  BuildMI(MBB, MBBI, DL, TII->get(AArch64::LDRXui), AArch64::X16)
+      .addReg(AArch64::X28)
+      .addImm(13);
+
+  BuildMI(MBB, MBBI, DL, TII->get(AArch64::ADDXri), AArch64::SP)
+      .addReg(AArch64::X16)
+      .addImm(0)
+      .addImm(AArch64_AM::getShifterImm(AArch64_AM::LSL, 0));
+
+  unsigned Opc =
+      (CallTarget.isGlobal() || CallTarget.isSymbol()) ? AArch64::BL
+                                                       : AArch64::BLR;
+  MachineInstr *Call = BuildMI(MBB, MBBI, DL, TII->get(Opc)).getInstr();
+  Call->addOperand(CallTarget);
+
+  unsigned RegMaskStartIdx = 1;
+  while (!MI.getOperand(RegMaskStartIdx).isRegMask()) {
+    MachineOperand MOP = MI.getOperand(RegMaskStartIdx);
+    assert(MOP.isReg() && "can only add register operands");
+    Call->addOperand(MachineOperand::CreateReg(
+        MOP.getReg(), /*Def=*/false, /*Implicit=*/true));
+    RegMaskStartIdx++;
+  }
+  for (const MachineOperand &MO :
+       llvm::drop_begin(MI.operands(), RegMaskStartIdx))
+    Call->addOperand(MO);
+
+  MachineInstr *Last =
+      BuildMI(MBB, MBBI, DL, TII->get(AArch64::ADDXri), AArch64::SP)
+          .addReg(AArch64::FP)
+          .addImm(0)
+          .addImm(AArch64_AM::getShifterImm(AArch64_AM::LSL, 0))
+          .getInstr();
+
+  unsigned RestoreState =
+      MF.addFrameInst(MCCFIInstruction::createRestoreState(nullptr));
+  BuildMI(MBB, MBBI, DL, TII->get(TargetOpcode::CFI_INSTRUCTION))
+      .addCFIIndex(RestoreState);
+
+  if (MI.shouldUpdateCallSiteInfo())
+    MBB.getParent()->moveCallSiteInfo(&MI, Call);
+
+  MI.eraseFromParent();
+  finalizeBundle(MBB, First->getIterator(), std::next(Last->getIterator()));
+  return true;
+}
+
 bool AArch64ExpandPseudo::expandStoreSwiftAsyncContext(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI) {
   Register CtxReg = MBBI->getOperand(0).getReg();
@@ -1428,6 +1511,34 @@ bool AArch64ExpandPseudo::expandMI(MachineBasicBlock &MBB,
      return expandCALL_RVMARKER(MBB, MBBI);
    case AArch64::BLR_BTI:
      return expandCALL_BTI(MBB, MBBI);
+   case AArch64::OXCAML_C_DIRECT_CALL:
+     return expandOXCAML_C_DIRECT_CALL(MBB, MBBI);
+   case AArch64::OXCAML_RELOCATE: {
+     // Normally rewritten to a COPY before register coalescing
+     // (OxCamlLowerRelocate); this is the fallback for pipelines that
+     // skip the optimized-regalloc path.
+     MachineInstr &MI = *MBBI;
+     BuildMI(MBB, MBBI, MI.getDebugLoc(), TII->get(AArch64::ORRXrs))
+         .add(MI.getOperand(0))
+         .addReg(AArch64::XZR)
+         .add(MI.getOperand(1))
+         .addImm(0);
+     MI.eraseFromParent();
+     return true;
+   }
+   case AArch64::OXCAML_REDERIVE: {
+     // Derived-pointer recompute: now that register allocation is done,
+     // it is just an add (the shifted-register form; plain ADDXrr is an
+     // ISel-only pseudo with no MC lowering).
+     MachineInstr &MI = *MBBI;
+     BuildMI(MBB, MBBI, MI.getDebugLoc(), TII->get(AArch64::ADDXrs))
+         .add(MI.getOperand(0))
+         .add(MI.getOperand(1))
+         .add(MI.getOperand(2))
+         .addImm(0);
+     MI.eraseFromParent();
+     return true;
+   }
    case AArch64::StoreSwiftAsyncContext:
      return expandStoreSwiftAsyncContext(MBB, MBBI);
    case AArch64::RestoreZAPseudo: {

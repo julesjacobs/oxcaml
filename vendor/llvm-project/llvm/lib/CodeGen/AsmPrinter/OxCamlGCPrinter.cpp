@@ -34,6 +34,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -42,6 +43,8 @@ using namespace llvm;
 namespace {
 
 class OxCamlGCMetadataPrinter : public GCMetadataPrinter {
+  bool EmittedDataEnd = false;
+
 public:
   void beginAssembly(Module &M, GCModuleInfo &Info, AsmPrinter &AP) override;
   void finishAssembly(Module &M, GCModuleInfo &Info, AsmPrinter &AP) override;
@@ -87,6 +90,8 @@ static void emitCamlGlobal(const Module &M, MCStreamer &OS, const char *Id) {
 
 void OxCamlGCMetadataPrinter::beginAssembly(Module &M, GCModuleInfo &Info,
                                            AsmPrinter &AP) {
+  EmittedDataEnd = false;
+
   AP.OutStreamer->switchSection(AP.getObjFileLowering().getTextSection());
   emitCamlGlobal(M, *(AP.OutStreamer), "code_begin");
 
@@ -100,8 +105,12 @@ void OxCamlGCMetadataPrinter::finishAssembly(Module &M, GCModuleInfo &Info,
   AP.OutStreamer->switchSection(AP.getObjFileLowering().getTextSection());
   emitCamlGlobal(M, *(AP.OutStreamer), "code_end");
 
-  AP.OutStreamer->switchSection(AP.getObjFileLowering().getDataSection());
-  emitCamlGlobal(M, *(AP.OutStreamer), "data_end");
+  if (!EmittedDataEnd) {
+    AP.OutStreamer->switchSection(AP.getObjFileLowering().getDataSection());
+    AP.OutStreamer->emitInt64(0);
+    emitCamlGlobal(M, *(AP.OutStreamer), "data_end");
+    AP.OutStreamer->emitInt64(0);
+  }
 }
 
 /// Map LLVM DWARF register numbers to OxCaml register map.
@@ -146,17 +155,17 @@ static unsigned mapX86DwarfRegToOxCamlIndex(unsigned DwarfRegNum) {
 }
 
 static unsigned mapAArch64DwarfRegToOxCamlIndex(unsigned DwarfRegNum) {
-  // backend/arm64/regs.ml uses the following integer register order:
-  // x0-x15, x19-x28, x16-x17.
+  // runtime/arm64.S:SAVE_ALL_REGS saves ordinary root registers x0-x15 and
+  // x19-x25 in gc_regs.  Other integer registers either have runtime meaning
+  // or are AArch64 temporaries and cannot be encoded as gc_regs roots.
   if (DwarfRegNum <= 15) {
     return DwarfRegNum;
-  } else if (19 <= DwarfRegNum && DwarfRegNum <= 28) {
+  } else if (19 <= DwarfRegNum && DwarfRegNum <= 25) {
     return DwarfRegNum - 3;
-  } else if (DwarfRegNum == 16 || DwarfRegNum == 17) {
-    return DwarfRegNum + 10;
   } else {
-    report_fatal_error("[OxCamlGCPrinter] unrecognised AArch64 DWARF register: "
-      + Twine(DwarfRegNum));
+    report_fatal_error(
+        "[OxCamlGCPrinter] AArch64 register has no OxCaml gc_regs root slot: "
+        + Twine(DwarfRegNum));
   }
 }
 
@@ -175,19 +184,28 @@ static unsigned mapLLVMDwarfRegToOxCamlIndex(const Module &M,
   }
 }
 
-// note that although `StackMaps` keeps `ID` as a 64-bit integer, anything
-// above 32 bits gets truncated, so we can't use them.
+static uint64_t stackOffsetOfID(uint64_t ID, bool IsAArch64) {
+  uint64_t Mask = IsAArch64 ? ~15ull : ~1ull;
+  return ID & ((1ull << 16) - 1) & Mask;
+}
 
-static uint64_t stackOffsetOfID(uint64_t ID) {
-  return ID & ((1ull << 16) - 1) & ~(1ull);
+static uint64_t activeTrapBytesOfID(uint64_t ID, bool IsAArch64) {
+  if (!IsAArch64)
+    return 0;
+  return ((ID >> 1) & 7ull) * 16;
 }
 
 static uint64_t allocSizeOfID(uint64_t ID) {
-  return ID >> 16;
+  return (ID >> 16) & ((1ull << 16) - 1);
 }
 
 static bool IDHasAlloc(uint64_t ID) {
   return ID & 1ull;
+}
+
+static bool isOxCamlEncodedStatepointID(uint64_t ID) {
+  return ID != StatepointDirectives::DefaultStatepointID &&
+         ID != StatepointDirectives::DeoptBundleStatepointID;
 }
 
 // Every 8-bit entry emitted in the frametable is offset by 2 (since that is the
@@ -518,6 +536,10 @@ static void emitDebugInfoRecord(MCStreamer &OS, const MCSymbol *NameLabel,
   OS.emitInt32(InfoHigh);
 }
 
+// The filename is not stored inline: filename_offs is a signed 32-bit
+// offset precisely so that records can share one string per file (see
+// struct name_info in runtime/backtrace_nat.c). File strings are interned
+// per module and emitted after all records.
 static void emitNameAndLocInfo(MCStreamer &OS, const PendingDebugItem &Item) {
   OS.emitValueToAlignment(Align(4));
   OS.emitLabel(Item.NameLabel);
@@ -535,18 +557,93 @@ static void emitNameAndLocInfo(MCStreamer &OS, const PendingDebugItem &Item) {
         std::min<uint32_t>(Item.Info.EndOffset, 0x3fffffff)));
   }
   emitStringz(OS, Item.Info.FunctionName);
-
-  OS.emitLabel(Item.FileLabel);
-  emitStringz(OS, Item.Info.FileName);
 }
 
+// Name/loc records are interned per module: many call sites share the same
+// (function, file) pair, so re-emitting the strings per descriptor bloats
+// the frametable severalfold. The key covers exactly the bytes
+// emitNameAndLocInfo produces: the loc fields only when the record is not
+// fully packable (a packable record omits them).
+static std::string nameRecordKey(const OxCamlDebugItem &Info) {
+  std::string Key;
+  bool Packable = isFullyPackable(Info);
+  Key += Packable ? '\1' : '\0';
+  if (!Packable) {
+    Key += std::to_string(std::min<uint32_t>(Info.StartChr, 0xffff));
+    Key += ':';
+    Key += std::to_string(std::min<uint32_t>(Info.EndChr, 0xffff));
+    Key += ':';
+    Key += std::to_string(std::min<uint32_t>(Info.EndOffset, 0x3fffffff));
+  }
+  Key += ':';
+  Key += std::to_string(Info.FunctionName.size());
+  Key += ':';
+  Key += Info.FunctionName;
+  Key += Info.FileName;
+  return Key;
+}
+
+using NameRecordMap = std::map<std::string, MCSymbol *>;
+
+// Whole debug blobs (the chain of packed records a descriptor points at) are
+// also interned: distinct call sites frequently carry byte-identical debug
+// info (same inlining stack and location class). The key covers everything
+// that affects the emitted chain words and the records they reference.
+static std::string debugBlobKey(const OxCamlDebugInfo &Info) {
+  std::string Key = Info.RaiseCall ? "R" : "-";
+  for (const OxCamlDebugItem &Item : Info.Items) {
+    Key += std::to_string(Item.Line);
+    Key += ',';
+    Key += std::to_string(Item.EndLineDelta);
+    Key += ',';
+    Key += std::to_string(Item.StartChr);
+    Key += ',';
+    Key += std::to_string(Item.EndChr);
+    Key += ',';
+    Key += std::to_string(Item.CharEndOffset);
+    Key += ',';
+    Key += nameRecordKey(Item);
+    Key += ';';
+  }
+  return Key;
+}
+
+static MCSymbol *internDebugBlob(MCStreamer &OS,
+                                 std::vector<PendingDebugInfo> &Pending,
+                                 std::map<std::string, MCSymbol *> &Blobs,
+                                 OxCamlDebugInfo &&Info) {
+  auto [It, Inserted] = Blobs.try_emplace(debugBlobKey(Info), nullptr);
+  if (Inserted) {
+    It->second = OS.getContext().createTempSymbol();
+    Pending.push_back({It->second, std::move(Info)});
+  }
+  return It->second;
+}
+
+// Emits one blob's chain words. Name/loc records are interned and queued on
+// PendingNameRecords; the caller emits them after ALL chains, because the
+// runtime decodes the record offset as unsigned ((info1 & 0x3FFFFFC), see
+// caml_debuginfo_location) — a shared record must sit after every chain word
+// that references it.
 static void emitPendingDebugInfo(MCStreamer &OS,
-                                 const PendingDebugInfo &DebugInfo) {
+                                 const PendingDebugInfo &DebugInfo,
+                                 NameRecordMap &NameRecords,
+                                 NameRecordMap &FileLabels,
+                                 std::vector<PendingDebugItem> &PendingNameRecords) {
   const OxCamlDebugInfo &Info = DebugInfo.Info;
   std::vector<PendingDebugItem> Items;
   for (const OxCamlDebugItem &Item : Info.Items) {
-    Items.push_back({OS.getContext().createTempSymbol(),
-                     OS.getContext().createTempSymbol(), Item});
+    auto [It, Inserted] =
+        NameRecords.try_emplace(nameRecordKey(Item), nullptr);
+    if (Inserted) {
+      It->second = OS.getContext().createTempSymbol();
+      auto [FileIt, FileInserted] =
+          FileLabels.try_emplace(Item.FileName, nullptr);
+      if (FileInserted)
+        FileIt->second = OS.getContext().createTempSymbol();
+      PendingNameRecords.push_back({It->second, FileIt->second, Item});
+    }
+    Items.push_back({It->second, nullptr, Item});
   }
 
   OS.emitValueToAlignment(Align(4));
@@ -560,17 +657,23 @@ static void emitPendingDebugInfo(MCStreamer &OS,
       emitDebugInfoRecord(OS, Items[I].NameLabel, Items[I].Info, false,
                           I + 1 < Items.size());
   }
-
-  for (const PendingDebugItem &Item : Items)
-    emitNameAndLocInfo(OS, Item);
 }
 
 bool OxCamlGCMetadataPrinter::emitStackMaps(Module &M, StackMaps &SM, AsmPrinter &AP) {
   MCStreamer &OS = *AP.OutStreamer;
   unsigned PtrSize = M.getDataLayout().getPointerSize(); // Can only be 8 for now
   std::vector<PendingDebugInfo> PendingDebugInfos;
+  std::map<std::string, MCSymbol *> DebugBlobs;
+  NameRecordMap NameRecords;
+  NameRecordMap FileLabels;
   
   OS.switchSection(AP.getObjFileLowering().getDataSection());
+
+  OS.emitInt64(0);
+  emitCamlGlobal(M, OS, "data_end");
+  OS.emitInt64(0);
+  EmittedDataEnd = true;
+  OS.emitValueToAlignment(Align(PtrSize));
   
   emitCamlGlobal(M, OS, "frametable");
 
@@ -603,19 +706,17 @@ bool OxCamlGCMetadataPrinter::emitStackMaps(Module &M, StackMaps &SM, AsmPrinter
     if (!IsAArch64)
       FrameSize += PtrSize; // Return address
 
-    // The LLVM IR emitted from OxCaml will always set the statepoint ID for
-    // calls to be wrapped in a statepoint. Also, note that DefaultStatepointID
-    // (= 0xABCDEF00 as of now) does not clash with the encoding we use since
-    // anything that sets the upper 16 bits will also set the bottom bit.
-    if (CSI.ID != StatepointDirectives::DefaultStatepointID) {
+    // The LLVM IR emitted from OxCaml sets an encoded statepoint ID for calls
+    // that need OxCaml frame metadata. LLVM's own default statepoint IDs are
+    // not part of this encoding.
+    uint64_t ActiveTrapBytes = 0;
+    if (isOxCamlEncodedStatepointID(CSI.ID)) {
       // Stack offset from OxCaml for active trap blocks and explicit stack
       // adjustments. LLVM does not model this as part of the static frame size
       // consistently across call sites, so apply the OxCaml offset directly.
-      uint64_t StackOffset = stackOffsetOfID(CSI.ID);
-      bool HasDynamicFrameSize =
-          CSI.CSFunctionInfo.StackSize == std::numeric_limits<uint64_t>::max();
-      if (!IsAArch64 || HasDynamicFrameSize)
-        FrameSize += StackOffset;
+      uint64_t StackOffset = stackOffsetOfID(CSI.ID, IsAArch64);
+      ActiveTrapBytes = activeTrapBytesOfID(CSI.ID, IsAArch64);
+      FrameSize += StackOffset;
 
       if (FrameSize & FrameSizeReservedMask) {
         report_fatal_error("[OxCamlGCPrinter] frame size has bottom bits set: "
@@ -626,8 +727,7 @@ bool OxCamlGCMetadataPrinter::emitStackMaps(Module &M, StackMaps &SM, AsmPrinter
 
     OxCamlDebugInfo DebugInfo = debugInfoForCallsite(CSI);
     OxCamlAllocInfo AllocInfo = allocInfoForCallsite(CSI);
-    bool HasAlloc = CSI.ID != StatepointDirectives::DefaultStatepointID &&
-                    IDHasAlloc(CSI.ID);
+    bool HasAlloc = isOxCamlEncodedStatepointID(CSI.ID) && IDHasAlloc(CSI.ID);
     uint64_t AllocSize = HasAlloc ? allocSizeOfID(CSI.ID) : 0;
     std::vector<uint8_t> AllocSizes;
     if (HasAlloc && AllocInfo.Valid) {
@@ -647,17 +747,15 @@ bool OxCamlGCMetadataPrinter::emitStackMaps(Module &M, StackMaps &SM, AsmPrinter
     if (HasAlloc && HasAllocDebug) {
       for (OxCamlAllocInfoItem &Item : AllocInfo.Items) {
         if (Item.DebugInfo.Valid) {
-          MCSymbol *AllocDebugLabel = OS.getContext().createTempSymbol();
-          AllocDebugLabels.push_back(AllocDebugLabel);
-          PendingDebugInfos.push_back(
-              {AllocDebugLabel, std::move(Item.DebugInfo)});
+          AllocDebugLabels.push_back(internDebugBlob(
+              OS, PendingDebugInfos, DebugBlobs, std::move(Item.DebugInfo)));
         } else {
           AllocDebugLabels.push_back(nullptr);
         }
       }
     } else if (HasDebug) {
-      DebugLabel = OS.getContext().createTempSymbol();
-      PendingDebugInfos.push_back({DebugLabel, std::move(DebugInfo)});
+      DebugLabel =
+          internDebugBlob(OS, PendingDebugInfos, DebugBlobs, std::move(DebugInfo));
     }
 
     uint64_t FrameData = FrameSize;
@@ -684,7 +782,8 @@ bool OxCamlGCMetadataPrinter::emitStackMaps(Module &M, StackMaps &SM, AsmPrinter
         LiveOffsets.push_back((OxCamlIndex << 1) + 1);
       } else if (Loc.Type == StackMaps::Location::Direct ||
                  Loc.Type == StackMaps::Location::Indirect) {
-        LiveOffsets.push_back(stackOffset(FrameSize, PtrSize, Loc.Offset));
+        LiveOffsets.push_back(
+            stackOffset(FrameSize, PtrSize, Loc.Offset) + ActiveTrapBytes);
       } else {
         // TODO: Do we need anything else here?
       }
@@ -753,7 +852,8 @@ bool OxCamlGCMetadataPrinter::emitStackMaps(Module &M, StackMaps &SM, AsmPrinter
                              "large: " +
                              Twine(OxCamlIndex));
         OS.emitInt16(OxCamlIndex);
-        int64_t Offset = stackOffset(FrameSize, PtrSize, Entry.Offset);
+        int64_t Offset =
+            stackOffset(FrameSize, PtrSize, Entry.Offset) + ActiveTrapBytes;
         checkShortStackOffset(Offset);
         OS.emitInt16(static_cast<uint16_t>(Offset));
       }
@@ -791,8 +891,16 @@ bool OxCamlGCMetadataPrinter::emitStackMaps(Module &M, StackMaps &SM, AsmPrinter
     OS.emitValueToAlignment(Align(PtrSize));
   }
 
+  std::vector<PendingDebugItem> PendingNameRecords;
   for (const PendingDebugInfo &DebugInfo : PendingDebugInfos)
-    emitPendingDebugInfo(OS, DebugInfo);
+    emitPendingDebugInfo(OS, DebugInfo, NameRecords, FileLabels,
+                         PendingNameRecords);
+  for (const PendingDebugItem &Item : PendingNameRecords)
+    emitNameAndLocInfo(OS, Item);
+  for (const auto &[FileName, FileLabel] : FileLabels) {
+    OS.emitLabel(FileLabel);
+    emitStringz(OS, FileName);
+  }
 
   OS.addBlankLine();
   return true;

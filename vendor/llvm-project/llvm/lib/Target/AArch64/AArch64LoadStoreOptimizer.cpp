@@ -36,6 +36,7 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/IR/DebugLoc.h"
+#include "llvm/IR/Function.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCRegisterInfo.h"
@@ -79,6 +80,10 @@ static cl::opt<unsigned> UpdateLimit("aarch64-update-scan-limit", cl::init(100),
 // Enable register renaming to find additional store pairing opportunities.
 static cl::opt<bool> EnableRenaming("aarch64-load-store-renaming",
                                     cl::init(true), cl::Hidden);
+
+static cl::opt<bool> OxcamlSuppressStackPairs(
+    "oxcaml-suppress-statepoint-stack-pairs", cl::Hidden, cl::init(true),
+    cl::desc("Suppress OxCaml stack load/store pairs"));
 
 #define AARCH64_LOAD_STORE_OPT_NAME "AArch64 load / store optimization pass"
 
@@ -1281,6 +1286,36 @@ static bool needsWinCFI(const MachineFunction *MF) {
          MF->getFunction().needsUnwindTableEntry();
 }
 
+static bool isSPBasedLdSt(const MachineInstr &MI) {
+  const MachineOperand &BaseOp = AArch64InstrInfo::getLdStBaseOp(MI);
+  return BaseOp.isReg() && BaseOp.getReg() == AArch64::SP;
+}
+
+static bool isOxcamlGCFunction(const MachineFunction &MF) {
+  const Function &F = MF.getFunction();
+  return F.hasGC() && F.getGC() == "oxcaml";
+}
+
+static bool shouldSuppressOxcamlStackPair(const MachineInstr &FirstMI,
+                                          const MachineInstr &MI) {
+  if (!OxcamlSuppressStackPairs)
+    return false;
+  if (FirstMI.getParent() != MI.getParent())
+    return false;
+  if (!isOxcamlGCFunction(*MI.getParent()->getParent()))
+    return false;
+  if (!isSPBasedLdSt(FirstMI) || !isSPBasedLdSt(MI))
+    return false;
+
+  // Pairing OxCaml stack spills can turn two scalar stack stores/reloads around
+  // hot call boundaries into costly STP/LDP traffic. The old boundary-window
+  // heuristic was too brittle: a pair just outside the window caused a 10x
+  // microbenchmark regression. Suppress SP-based pairs in OxCaml GC functions
+  // for now; we can reintroduce narrower STP/LDP formation once it has a
+  // positive profitability model for these stack slots.
+  return true;
+}
+
 // Returns true if FirstMI and MI are candidates for merging or pairing.
 // Otherwise, returns false.
 static bool areCandidatesToMergeOrPair(MachineInstr &FirstMI, MachineInstr &MI,
@@ -1565,6 +1600,10 @@ AArch64LoadStoreOpt::findMatchingInsn(MachineBasicBlock::iterator I,
     if (areCandidatesToMergeOrPair(FirstMI, MI, Flags, TII) &&
         AArch64InstrInfo::getLdStOffsetOp(MI).isImm()) {
       assert(MI.mayLoadOrStore() && "Expected memory operation.");
+      if (!FindNarrowMerge &&
+          shouldSuppressOxcamlStackPair(FirstMI, MI))
+        continue;
+
       // If we've found another instruction with the same opcode, check to see
       // if the base and offset are compatible with our starting instruction.
       // These instructions all have scaled immediate operands, so we just

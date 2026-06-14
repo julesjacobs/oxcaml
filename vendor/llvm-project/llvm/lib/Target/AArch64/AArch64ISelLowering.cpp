@@ -121,6 +121,11 @@ EnableOptimizeLogicalImm("aarch64-enable-logical-imm", cl::Hidden,
                                   "optimization"),
                          cl::init(true));
 
+static cl::opt<bool> OxcamlAvoidI64LoadNarrowing(
+    "oxcaml-avoid-i64-load-narrowing", cl::Hidden, cl::init(false),
+    cl::desc("Avoid reducing plain i64 loads to i32 loads for OxCaml tagged "
+             "integer code"));
+
 // Temporary option added for the purpose of testing functionality added
 // to DAGCombiner.cpp in D92230. It is expected that this can be removed
 // in future when both implementations will be based off MGATHER rather
@@ -2293,6 +2298,7 @@ const char *AArch64TargetLowering::getTargetNodeName(unsigned Opcode) const {
     MAKE_CASE(AArch64ISD::SMSTOP)
     MAKE_CASE(AArch64ISD::RESTORE_ZA)
     MAKE_CASE(AArch64ISD::CALL)
+    MAKE_CASE(AArch64ISD::OXCAML_C_DIRECT_CALL)
     MAKE_CASE(AArch64ISD::ADRP)
     MAKE_CASE(AArch64ISD::ADR)
     MAKE_CASE(AArch64ISD::ADDlow)
@@ -6213,6 +6219,8 @@ CCAssignFn *AArch64TargetLowering::CCAssignFnForCall(CallingConv::ID CC,
     return CC_AArch64_OxCaml_C_Call;
   case CallingConv::OxCaml_C_Call_StackArgs:
     return CC_AArch64_OxCaml_C_Call_StackArgs;
+  case CallingConv::OxCaml_C_Direct_Call:
+    return CC_AArch64_OxCaml_C_Direct_Call;
   case CallingConv::C:
   case CallingConv::Fast:
   case CallingConv::PreserveMost:
@@ -6260,6 +6268,8 @@ AArch64TargetLowering::CCAssignFnForReturn(CallingConv::ID CC) const {
   case CallingConv::OxCaml_C_Call:
   case CallingConv::OxCaml_C_Call_StackArgs:
     return RetCC_AArch64_OxCaml_C_Call;
+  case CallingConv::OxCaml_C_Direct_Call:
+    return RetCC_AArch64_OxCaml_C_Direct_Call;
   default:
     return RetCC_AArch64_AAPCS;
   }
@@ -7667,6 +7677,10 @@ AArch64TargetLowering::LowerCall(CallLoweringInfo &CLI,
   }
 
   unsigned CallOpc = AArch64ISD::CALL;
+  if (CallConv == CallingConv::OxCaml_C_Direct_Call) {
+    assert(!IsTailCall && "direct OxCaml C calls cannot be tail calls");
+    CallOpc = AArch64ISD::OXCAML_C_DIRECT_CALL;
+  }
   // Calls with operand bundle "clang.arc.attachedcall" are special. They should
   // be expanded to the call, directly followed by a special marker sequence and
   // a call to an ObjC library function.  Use CALL_RVMARKER to do that.
@@ -9666,6 +9680,20 @@ SDValue AArch64TargetLowering::LowerSPONENTRY(SDValue Op,
 #define GET_REGISTER_MATCHER
 #include "AArch64GenAsmMatcher.inc"
 
+static bool isOxCamlCallingConv(CallingConv::ID CC) {
+  switch (CC) {
+  case CallingConv::OxCaml_WithFP:
+  case CallingConv::OxCaml_WithoutFP:
+  case CallingConv::OxCaml_C_Call:
+  case CallingConv::OxCaml_C_Call_StackArgs:
+  case CallingConv::OxCaml_C_Direct_Call:
+  case CallingConv::OxCaml_Alloc:
+    return true;
+  default:
+    return false;
+  }
+}
+
 // FIXME? Maybe this could be a TableGen attribute on some registers and
 // this table could be generated automatically from RegInfo.
 Register AArch64TargetLowering::
@@ -9674,7 +9702,10 @@ getRegisterByName(const char* RegName, LLT VT, const MachineFunction &MF) const 
   if (AArch64::X1 <= Reg && Reg <= AArch64::X28) {
     const MCRegisterInfo *MRI = Subtarget->getRegisterInfo();
     unsigned DwarfRegNum = MRI->getDwarfRegNum(Reg, false);
-    if (!Subtarget->isXRegisterReserved(DwarfRegNum))
+    bool IsOxCamlRuntimeReg =
+        isOxCamlCallingConv(MF.getFunction().getCallingConv()) &&
+        (Reg == AArch64::X27 || Reg == AArch64::X28);
+    if (!Subtarget->isXRegisterReserved(DwarfRegNum) && !IsOxCamlRuntimeReg)
       Reg = 0;
   }
   if (Reg)
@@ -13603,6 +13634,17 @@ bool AArch64TargetLowering::shouldReduceLoadWidth(SDNode *Load,
   // instruction to do extension then it's probably a good idea.
   if (ExtTy != ISD::NON_EXTLOAD)
     return true;
+
+  // OxCaml tagged-integer code commonly masks after arithmetic. SelectionDAG
+  // can then decide only the low 32 bits of a 64-bit OCaml value are demanded
+  // and shrink heap-field loads to 32-bit loads. On the allocation fast path
+  // this loses the better tagged-integer shape, because the generated code
+  // materializes large 32-bit constants instead of using a small 64-bit
+  // subtract before the final mask.
+  if (OxcamlAvoidI64LoadNarrowing && Load->getValueType(0) == MVT::i64 &&
+      NewVT == MVT::i32)
+    return false;
+
   // Don't reduce load width if it would prevent us from combining a shift into
   // the offset.
   MemSDNode *Mem = dyn_cast<MemSDNode>(Load);

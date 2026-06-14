@@ -45,6 +45,7 @@
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
+#include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstBuilder.h"
 #include "llvm/MC/MCSectionELF.h"
@@ -123,6 +124,8 @@ public:
 
   void emitInstruction(const MachineInstr *MI) override;
 
+  void emitBasicBlockStart(const MachineBasicBlock &MBB) override;
+
   void emitFunctionHeaderComment() override;
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
@@ -196,6 +199,17 @@ private:
 };
 
 } // end anonymous namespace
+
+void AArch64AsmPrinter::emitBasicBlockStart(const MachineBasicBlock &MBB) {
+  AsmPrinter::emitBasicBlockStart(MBB);
+
+  const auto *AFI = MBB.getParent()->getInfo<AArch64FunctionInfo>();
+  if (!AFI->isOxCamlTrapRecoveryEntry(MBB))
+    return;
+
+  assert(MBB.isRuntimeEntered() &&
+         "OxCaml trap recovery entry must be runtime-entered");
+}
 
 void AArch64AsmPrinter::emitStartOfAsmFile(Module &M) {
   const Triple &TT = TM.getTargetTriple();
@@ -1307,6 +1321,119 @@ void AArch64AsmPrinter::emitInstruction(const MachineInstr *MI) {
   switch (MI->getOpcode()) {
   default:
     break;
+  case AArch64::OXCAML_TRAP_PUBLISH: {
+    Register TrapBlock = MI->getOperand(0).getReg();
+    Register PreviousTrap = MI->getOperand(1).getReg();
+    Register RecoveryTarget = MI->getOperand(2).getReg();
+
+    EmitToStreamer(*OutStreamer,
+                   MCInstBuilder(AArch64::STRXui)
+                       .addReg(PreviousTrap)
+                       .addReg(TrapBlock)
+                       .addImm(0));
+    EmitToStreamer(*OutStreamer,
+                   MCInstBuilder(AArch64::STRXui)
+                       .addReg(RecoveryTarget)
+                       .addReg(TrapBlock)
+                       .addImm(1));
+    EmitToStreamer(*OutStreamer,
+                   MCInstBuilder(AArch64::ORRXrs)
+                       .addReg(AArch64::X26)
+                       .addReg(AArch64::XZR)
+                       .addReg(TrapBlock)
+                       .addImm(0));
+    return;
+  }
+  case AArch64::OXCAML_RAISE_NOTRACE:
+  case AArch64::OXCAML_RAISE_NOTRACE_EDGE: {
+    Register ExnBucket = MI->getOperand(0).getReg();
+
+    if (ExnBucket != AArch64::X0)
+      EmitToStreamer(*OutStreamer,
+                     MCInstBuilder(AArch64::ORRXrs)
+                         .addReg(AArch64::X0)
+                         .addReg(AArch64::XZR)
+                         .addReg(ExnBucket)
+                         .addImm(0));
+    EmitToStreamer(*OutStreamer,
+                   MCInstBuilder(AArch64::ADDXri)
+                       .addReg(AArch64::SP)
+                       .addReg(AArch64::X26)
+                       .addImm(0)
+                       .addImm(0));
+    EmitToStreamer(*OutStreamer,
+                   MCInstBuilder(AArch64::LDPXpost)
+                       .addReg(AArch64::SP)
+                       .addReg(AArch64::X26)
+                       .addReg(AArch64::X16)
+                       .addReg(AArch64::SP)
+                       .addImm(2));
+    EmitToStreamer(*OutStreamer,
+                   MCInstBuilder(AArch64::BR).addReg(AArch64::X16));
+    return;
+  }
+  case AArch64::OXCAML_PUSH_TRAP: {
+    MCSymbol *RecoverySym = MI->getOperand(0).getMBB()->getSymbol();
+    const MCExpr *RecoveryExpr =
+        MCSymbolRefExpr::create(RecoverySym, OutContext);
+
+    EmitToStreamer(*OutStreamer,
+                   MCInstBuilder(AArch64::ADR)
+                       .addReg(AArch64::X16)
+                       .addExpr(RecoveryExpr));
+    EmitToStreamer(*OutStreamer,
+                   MCInstBuilder(AArch64::STPXpre)
+                       .addReg(AArch64::SP)
+                       .addReg(AArch64::X26)
+                       .addReg(AArch64::X16)
+                       .addReg(AArch64::SP)
+                       .addImm(-2));
+    EmitToStreamer(*OutStreamer,
+                   MCInstBuilder(AArch64::ADDXri)
+                       .addReg(AArch64::X26)
+                       .addReg(AArch64::SP)
+                       .addImm(0)
+                       .addImm(0));
+    return;
+  }
+  case AArch64::OXCAML_PUSH_TRAP_DEAD: {
+    MCSymbol *RecoverySym = OutContext.createTempSymbol();
+    const MCExpr *RecoveryExpr =
+        MCSymbolRefExpr::create(RecoverySym, OutContext);
+
+    EmitToStreamer(*OutStreamer,
+                   MCInstBuilder(AArch64::ADR)
+                       .addReg(AArch64::X16)
+                       .addExpr(RecoveryExpr));
+    EmitToStreamer(*OutStreamer,
+                   MCInstBuilder(AArch64::STPXpre)
+                       .addReg(AArch64::SP)
+                       .addReg(AArch64::X26)
+                       .addReg(AArch64::X16)
+                       .addReg(AArch64::SP)
+                       .addImm(-2));
+    EmitToStreamer(*OutStreamer,
+                   MCInstBuilder(AArch64::ADDXri)
+                       .addReg(AArch64::X26)
+                       .addReg(AArch64::SP)
+                       .addImm(0)
+                       .addImm(0));
+    OutStreamer->emitLabel(RecoverySym);
+    return;
+  }
+  case AArch64::OXCAML_POP_TRAP:
+    // Pop with a pair load matching OXCAML_PUSH_TRAP's pair store: on Apple
+    // cores a single ldr reading one element of an stp pays a
+    // store-forwarding penalty, while ldp forwards cleanly. X16 is dead here
+    // (scratch); the .td marks it as a def.
+    EmitToStreamer(*OutStreamer,
+                   MCInstBuilder(AArch64::LDPXpost)
+                       .addReg(AArch64::SP)
+                       .addReg(AArch64::X26)
+                       .addReg(AArch64::X16)
+                       .addReg(AArch64::SP)
+                       .addImm(2));
+    return;
   case AArch64::HINT: {
     // CurrentPatchableFunctionEntrySym can be CurrentFnBegin only for
     // -fpatchable-function-entry=N,0. The entry MBB is guaranteed to be

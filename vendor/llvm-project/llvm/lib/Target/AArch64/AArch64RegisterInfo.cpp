@@ -19,6 +19,7 @@
 #include "MCTargetDesc/AArch64AddressingModes.h"
 #include "MCTargetDesc/AArch64InstPrinter.h"
 #include "llvm/ADT/BitVector.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -33,6 +34,11 @@
 #include "llvm/Target/TargetOptions.h"
 
 using namespace llvm;
+
+// Defined in StatepointLowering.cpp. Under in-place C-call statepoints,
+// registers are not gc roots at C-call safepoints, so the preserved mask
+// must clobber the integer CSRs (see CSR_AArch64_OxCaml_C_Call_InPlace).
+extern cl::opt<bool> OxCamlStatepointInPlaceCCalls;
 
 #define GET_CC_REGISTER_LISTS
 #include "AArch64GenCallingConv.inc"
@@ -51,6 +57,7 @@ static bool isOxCamlCallingConv(CallingConv::ID CC) {
   case CallingConv::OxCaml_C_Call:
   case CallingConv::OxCaml_C_Call_StackArgs:
   case CallingConv::OxCaml_Alloc:
+  case CallingConv::OxCaml_C_Direct_Call:
     return true;
   default:
     return false;
@@ -97,6 +104,8 @@ AArch64RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
     return CSR_AArch64_OxCaml_C_Call_SaveList;
   case CallingConv::OxCaml_C_Call_StackArgs:
     return CSR_AArch64_OxCaml_C_Call_StackArgs_SaveList;
+  case CallingConv::OxCaml_C_Direct_Call:
+    return CSR_AArch64_AAPCS_SaveList;
   case CallingConv::OxCaml_Alloc:
     return CSR_AArch64_OxCaml_Alloc_SaveList;
   default:
@@ -146,6 +155,27 @@ AArch64RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   if (MF->getInfo<AArch64FunctionInfo>()->isSVECC())
     return CSR_AArch64_SVE_AAPCS_SaveList;
   return CSR_AArch64_AAPCS_SaveList;
+}
+
+static constexpr MCPhysReg OxCamlRuntimeEnteredLiveIns[] = {
+    AArch64::X0, AArch64::X26, AArch64::X27, AArch64::X28};
+
+bool AArch64RegisterInfo::isRuntimeEnteredLiveIn(
+    const MachineFunction &MF, MCRegister PhysReg) const {
+  if (!MF.getFunction().hasGC() ||
+      (MF.getFunction().getGC() != "oxcaml" &&
+       MF.getFunction().getGC() != "ocaml"))
+    return false;
+  return is_contained(OxCamlRuntimeEnteredLiveIns, PhysReg);
+}
+
+ArrayRef<MCPhysReg>
+AArch64RegisterInfo::getRuntimeEnteredLiveIns(const MachineFunction &MF) const {
+  if (!MF.getFunction().hasGC() ||
+      (MF.getFunction().getGC() != "oxcaml" &&
+       MF.getFunction().getGC() != "ocaml"))
+    return {};
+  return OxCamlRuntimeEnteredLiveIns;
 }
 
 const MCPhysReg *
@@ -245,9 +275,15 @@ AArch64RegisterInfo::getDarwinCallPreservedMask(const MachineFunction &MF,
   case CallingConv::OxCaml_WithoutFP:
     return CSR_AArch64_OxCaml_WithoutFP_RegMask;
   case CallingConv::OxCaml_C_Call:
-    return CSR_AArch64_OxCaml_C_Call_RegMask;
+    return OxCamlStatepointInPlaceCCalls
+               ? CSR_AArch64_OxCaml_C_Call_InPlace_RegMask
+               : CSR_AArch64_OxCaml_C_Call_RegMask;
   case CallingConv::OxCaml_C_Call_StackArgs:
-    return CSR_AArch64_OxCaml_C_Call_StackArgs_RegMask;
+    return OxCamlStatepointInPlaceCCalls
+               ? CSR_AArch64_OxCaml_C_Call_InPlace_RegMask
+               : CSR_AArch64_OxCaml_C_Call_StackArgs_RegMask;
+  case CallingConv::OxCaml_C_Direct_Call:
+    return CSR_AArch64_AAPCS_RegMask;
   case CallingConv::OxCaml_Alloc:
     return CSR_AArch64_OxCaml_Alloc_RegMask;
   default:
@@ -294,9 +330,15 @@ AArch64RegisterInfo::getCallPreservedMask(const MachineFunction &MF,
   case CallingConv::OxCaml_WithoutFP:
     return CSR_AArch64_OxCaml_WithoutFP_RegMask;
   case CallingConv::OxCaml_C_Call:
-    return CSR_AArch64_OxCaml_C_Call_RegMask;
+    return OxCamlStatepointInPlaceCCalls
+               ? CSR_AArch64_OxCaml_C_Call_InPlace_RegMask
+               : CSR_AArch64_OxCaml_C_Call_RegMask;
   case CallingConv::OxCaml_C_Call_StackArgs:
-    return CSR_AArch64_OxCaml_C_Call_StackArgs_RegMask;
+    return OxCamlStatepointInPlaceCCalls
+               ? CSR_AArch64_OxCaml_C_Call_InPlace_RegMask
+               : CSR_AArch64_OxCaml_C_Call_StackArgs_RegMask;
+  case CallingConv::OxCaml_C_Direct_Call:
+    return CSR_AArch64_AAPCS_RegMask;
   case CallingConv::OxCaml_Alloc:
     return CSR_AArch64_OxCaml_Alloc_RegMask;
   default:
@@ -409,6 +451,24 @@ const uint32_t *AArch64RegisterInfo::getWindowsStackProbePreservedMask() const {
   return CSR_AArch64_StackProbe_Windows_RegMask;
 }
 
+bool AArch64RegisterInfo::shouldSpillStatepointGCPtr(
+    const MachineFunction &MF, MCRegister PhysReg) const {
+  if (!isOxCamlCallingConv(MF.getFunction().getCallingConv()))
+    return false;
+
+  // The OxCaml AArch64 runtime saves only the ordinary root registers in
+  // runtime/arm64.S:SAVE_ALL_REGS: x0-x15 and x19-x25.  The frame table can
+  // describe roots in those saved-register slots.  Runtime registers, platform
+  // registers and linker temporaries do not have ordinary gc_regs slots, so a
+  // statepoint root in one of them must be described through a stack spill.
+  return MCRegisterInfo::regsOverlap(PhysReg, AArch64::X16) ||
+         MCRegisterInfo::regsOverlap(PhysReg, AArch64::X17) ||
+         MCRegisterInfo::regsOverlap(PhysReg, AArch64::X18) ||
+         MCRegisterInfo::regsOverlap(PhysReg, AArch64::X26) ||
+         MCRegisterInfo::regsOverlap(PhysReg, AArch64::X27) ||
+         MCRegisterInfo::regsOverlap(PhysReg, AArch64::X28);
+}
+
 std::optional<std::string>
 AArch64RegisterInfo::explainReservedReg(const MachineFunction &MF,
                                         MCRegister PhysReg) const {
@@ -464,8 +524,7 @@ AArch64RegisterInfo::getStrictlyReservedRegs(const MachineFunction &MF) const {
     markSuperRegs(Reserved, AArch64::W16);
     markSuperRegs(Reserved, AArch64::W17);
     markSuperRegs(Reserved, AArch64::W26);
-    markSuperRegs(Reserved, AArch64::W27);
-    markSuperRegs(Reserved, AArch64::W28);
+    markSuperRegs(Reserved, AArch64::W30);
   }
 
   for (size_t i = 0; i < AArch64::GPR32commonRegClass.getNumRegs(); ++i) {
@@ -908,11 +967,27 @@ bool AArch64RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   if (MI.getOpcode() == TargetOpcode::STACKMAP ||
       MI.getOpcode() == TargetOpcode::PATCHPOINT ||
       MI.getOpcode() == TargetOpcode::STATEPOINT) {
+    // OxCaml frametables describe roots relative to the SP at the call
+    // site: the runtime walks frames by SP and OxCamlGCPrinter emits
+    // SP-relative offsets verbatim.  An FP-relative location would be
+    // reverse-engineered by the printer under standard-frame assumptions
+    // (FP pair at the top of the frame) that the OxCaml prologue does not
+    // satisfy, silently shifting every stack root of the affected
+    // statepoint, so force SP-relative resolution here.
+    bool IsOxCaml = isOxCamlCallingConv(MF.getFunction().getCallingConv());
     StackOffset Offset =
         TFI->resolveFrameIndexReference(MF, FrameIndex, FrameReg,
-                                        /*PreferFP=*/true,
+                                        /*PreferFP=*/!IsOxCaml,
                                         /*ForSimm=*/false);
     Offset += StackOffset::getFixed(MI.getOperand(FIOperandNum + 1).getImm());
+    if (FrameReg == AArch64::SP) {
+      const AArch64FunctionInfo *AFI = MF.getInfo<AArch64FunctionInfo>();
+      Offset += StackOffset::getFixed(AFI->getOxCamlActiveTrapBytes(MI));
+    } else if (IsOxCaml) {
+      report_fatal_error("[OxCaml] statepoint stack location did not "
+                         "resolve SP-relative; the frametable cannot "
+                         "describe it");
+    }
     MI.getOperand(FIOperandNum).ChangeToRegister(FrameReg, false /*isDef*/);
     MI.getOperand(FIOperandNum + 1).ChangeToImmediate(Offset.getFixed());
     return false;
@@ -962,6 +1037,11 @@ bool AArch64RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   } else {
     Offset = TFI->resolveFrameIndexReference(
         MF, FrameIndex, FrameReg, /*PreferFP=*/false, /*ForSimm=*/true);
+  }
+
+  if (FrameReg == AArch64::SP) {
+    const AArch64FunctionInfo *AFI = MF.getInfo<AArch64FunctionInfo>();
+    Offset += StackOffset::getFixed(AFI->getOxCamlActiveTrapBytes(MI));
   }
 
   // Modify MI as necessary to handle as much of 'Offset' as possible

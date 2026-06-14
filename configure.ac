@@ -2866,7 +2866,7 @@ AC_ARG_WITH([objcopy],
 
 AS_IF([test x"$enable_frame_pointers" = "xyes" -o x"$enable_address_sanitizer" = "xyes"],
   [AS_CASE(["$host,$ocaml_cc_vendor"],
-    [x86_64-*-linux*,gcc-*|x86_64-*-linux*,clang-*],
+    [x86_64-*-linux*,gcc-*|x86_64-*-linux*,clang-*|aarch64-*-linux*,gcc-*|aarch64-*-linux*,clang-*|aarch64-*-darwin*,clang-*],
       [common_cflags="$common_cflags -g -fno-omit-frame-pointer"
       frame_pointers=true
       AC_DEFINE([WITH_FRAME_POINTERS])

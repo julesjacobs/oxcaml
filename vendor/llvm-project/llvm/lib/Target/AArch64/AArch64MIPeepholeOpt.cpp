@@ -99,6 +99,7 @@ struct AArch64MIPeepholeOpt : public MachineFunctionPass {
   bool visitAND(unsigned Opc, MachineInstr &MI);
   bool visitORR(MachineInstr &MI);
   bool visitINSERT(MachineInstr &MI);
+  bool visitCmpWithSPCopy(MachineInstr &MI);
   bool runOnMachineFunction(MachineFunction &MF) override;
 
   StringRef getPassName() const override {
@@ -523,6 +524,52 @@ bool AArch64MIPeepholeOpt::splitTwoPartImm(
   return true;
 }
 
+// OxCaml stack-limit checks read SP into a GPR and compare it against the
+// limit. Fold the SP copy into the flag-setting compare so it reads SP
+// directly:
+//   %v = COPY $sp
+//   SUBS{Xrr|Xrs #0} %d, %v, %m
+// becomes
+//   SUBSXrx64 %d, $sp, %m, uxtx #0       (i.e. cmp sp, xM)
+// This is only sound while SP cannot change between the copy and the
+// compare, so both must be in the same block with no SP-modifying
+// instructions (or calls) in between.
+bool AArch64MIPeepholeOpt::visitCmpWithSPCopy(MachineInstr &MI) {
+  if (MI.getOpcode() == AArch64::SUBSXrs) {
+    unsigned Imm = MI.getOperand(3).getImm();
+    if (AArch64_AM::getShiftType(Imm) != AArch64_AM::LSL ||
+        AArch64_AM::getShiftValue(Imm) != 0)
+      return false;
+  }
+  Register Src1 = MI.getOperand(1).getReg();
+  if (!Src1.isVirtual())
+    return false;
+  MachineInstr *Def = MRI->getUniqueVRegDef(Src1);
+  if (!Def || !Def->isCopy() || Def->getParent() != MI.getParent())
+    return false;
+  Register CopySrc = Def->getOperand(1).getReg();
+  if (!CopySrc.isPhysical() || CopySrc != AArch64::SP)
+    return false;
+  for (auto It = std::next(Def->getIterator()), E = MI.getIterator(); It != E;
+       ++It)
+    if (It->isCall() || It->isInlineAsm() ||
+        It->modifiesRegister(AArch64::SP, TRI))
+      return false;
+  Register Src2 = MI.getOperand(2).getReg();
+  if (!Src2.isVirtual())
+    return false;
+  BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
+          TII->get(AArch64::SUBSXrx64))
+      .add(MI.getOperand(0))
+      .addReg(AArch64::SP)
+      .addReg(Src2)
+      .addImm(AArch64_AM::getArithExtendImm(AArch64_AM::UXTX, 0));
+  MI.eraseFromParent();
+  if (MRI->use_nodbg_empty(Src1))
+    Def->eraseFromParent();
+  return true;
+}
+
 bool AArch64MIPeepholeOpt::runOnMachineFunction(MachineFunction &MF) {
   if (skipFunction(MF.getFunction()))
     return false;
@@ -581,10 +628,17 @@ bool AArch64MIPeepholeOpt::runOnMachineFunction(MachineFunction &MF) {
                                           {AArch64::SUBXri, AArch64::SUBSXri},
                                           MI);
         break;
-      case AArch64::SUBSXrr:
-        Changed = visitADDSSUBS<uint64_t>({AArch64::SUBXri, AArch64::SUBSXri},
-                                          {AArch64::ADDXri, AArch64::ADDSXri},
-                                          MI);
+      case AArch64::SUBSXrr: {
+        bool C = visitADDSSUBS<uint64_t>({AArch64::SUBXri, AArch64::SUBSXri},
+                                         {AArch64::ADDXri, AArch64::ADDSXri},
+                                         MI);
+        if (!C)
+          C = visitCmpWithSPCopy(MI);
+        Changed |= C;
+        break;
+      }
+      case AArch64::SUBSXrs:
+        Changed |= visitCmpWithSPCopy(MI);
         break;
       }
     }

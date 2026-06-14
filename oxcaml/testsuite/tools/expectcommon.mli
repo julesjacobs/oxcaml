@@ -44,11 +44,18 @@ end
     set by expectnat.ml. *)
 val register_assembly_callback : ((string -> unit) -> unit) option ref
 
+(** Hooks to capture LLVM backend output for [%%expect_llvm_ir] and
+    [%%expect_llvm_asm]. These functions should be set by expectnat.ml. *)
+val register_llvm_ir_callback : ((string -> unit) -> unit) option ref
+
+val register_llvm_asm_callback : ((string -> unit) -> unit) option ref
+
 val read_anonymous_arg : object_extensions:string list -> string -> unit
 
 val run
   :  read_anonymous_arg:(string -> unit)
   -> extra_args:(Arg.key * Arg.spec * Arg.doc) list
   -> extra_init:(unit -> unit)
+  -> ?extra_after_args:(unit -> unit)
   -> (module Toplevel)
   -> unit

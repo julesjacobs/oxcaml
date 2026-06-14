@@ -1,0 +1,1866 @@
+{
+  "agent_checkout": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml",
+  "cases": {
+    "array_binary_search_string": {
+      "functions": {
+        "camlArray_binary_search_string__find_4_13_code": {
+          "counts": {
+            "after-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 20,
+              "lines": 166,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "after-statepoint-lowering.mir": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 0,
+              "lines": 445,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "before-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 20,
+              "lines": 166,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "llvm.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 107,
+              "lines": 155,
+              "loads": 10,
+              "sp_refs": 7,
+              "statepoint": 0,
+              "stores": 1
+            },
+            "native.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 43,
+              "lines": 83,
+              "loads": 7,
+              "sp_refs": 7,
+              "statepoint": 0,
+              "stores": 1
+            }
+          },
+          "dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/array_binary_search_string/functions/camlArray_binary_search_string__find_4_13_code"
+        },
+        "camlArray_binary_search_string__run_6_15_code": {
+          "counts": {
+            "after-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 9,
+              "gc_relocate": 11,
+              "instr": 30,
+              "lines": 306,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 10,
+              "stores": 0
+            },
+            "after-statepoint-lowering.mir": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 0,
+              "lines": 855,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 10,
+              "stores": 0
+            },
+            "before-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 30,
+              "lines": 274,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "llvm.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 348,
+              "lines": 1485,
+              "loads": 56,
+              "sp_refs": 63,
+              "statepoint": 0,
+              "stores": 33
+            },
+            "native.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 361,
+              "lines": 906,
+              "loads": 78,
+              "sp_refs": 75,
+              "statepoint": 0,
+              "stores": 34
+            }
+          },
+          "dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/array_binary_search_string/functions/camlArray_binary_search_string__run_6_15_code"
+        }
+      },
+      "llvm_s": 0.44713895907625556,
+      "native_s": 0.41454124986194074,
+      "paths": {
+        "case_dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/array_binary_search_string",
+        "functions": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/array_binary_search_string/functions",
+        "raw": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/array_binary_search_string/raw",
+        "stages": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/array_binary_search_string/stages"
+      },
+      "ratio": 1.0786356224505311,
+      "suite": "micro",
+      "symbols": [
+        "camlArray_binary_search_string__find_4_13_code",
+        "camlArray_binary_search_string__run_6_15_code"
+      ]
+    },
+    "boyer": {
+      "functions": {
+        "camlBoyer__rewrite_12_32_code": {
+          "counts": {
+            "after-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 3,
+              "gc_relocate": 6,
+              "instr": 10,
+              "lines": 79,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 3,
+              "stores": 0
+            },
+            "after-statepoint-lowering.mir": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 0,
+              "lines": 216,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 3,
+              "stores": 0
+            },
+            "before-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 10,
+              "lines": 66,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "llvm.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 41,
+              "lines": 67,
+              "loads": 8,
+              "sp_refs": 12,
+              "statepoint": 0,
+              "stores": 6
+            },
+            "native.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 40,
+              "lines": 74,
+              "loads": 11,
+              "sp_refs": 13,
+              "statepoint": 0,
+              "stores": 7
+            }
+          },
+          "dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/boyer/functions/camlBoyer__rewrite_12_32_code"
+        },
+        "camlBoyer__rewrite_with_lemmas_13_33_code": {
+          "counts": {
+            "after-rs4gc.ll": {
+              "alloca": 4,
+              "exnroot": 89,
+              "gc_live": 5,
+              "gc_relocate": 10,
+              "instr": 39,
+              "lines": 187,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 5,
+              "stores": 0
+            },
+            "after-statepoint-lowering.mir": {
+              "alloca": 0,
+              "exnroot": 94,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 0,
+              "lines": 457,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 5,
+              "stores": 0
+            },
+            "before-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 23,
+              "lines": 128,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "llvm.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 95,
+              "lines": 217,
+              "loads": 22,
+              "sp_refs": 45,
+              "statepoint": 0,
+              "stores": 28
+            },
+            "native.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 64,
+              "lines": 111,
+              "loads": 17,
+              "sp_refs": 21,
+              "statepoint": 0,
+              "stores": 13
+            }
+          },
+          "dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/boyer/functions/camlBoyer__rewrite_with_lemmas_13_33_code"
+        },
+        "camlBoyer__unify1_10_30_code": {
+          "counts": {
+            "after-rs4gc.ll": {
+              "alloca": 3,
+              "exnroot": 55,
+              "gc_live": 2,
+              "gc_relocate": 3,
+              "instr": 43,
+              "lines": 184,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 2,
+              "stores": 0
+            },
+            "after-statepoint-lowering.mir": {
+              "alloca": 0,
+              "exnroot": 51,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 0,
+              "lines": 416,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 2,
+              "stores": 0
+            },
+            "before-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 31,
+              "lines": 149,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "llvm.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 110,
+              "lines": 236,
+              "loads": 29,
+              "sp_refs": 40,
+              "statepoint": 0,
+              "stores": 25
+            },
+            "native.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 103,
+              "lines": 167,
+              "loads": 32,
+              "sp_refs": 29,
+              "statepoint": 0,
+              "stores": 17
+            }
+          },
+          "dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/boyer/functions/camlBoyer__unify1_10_30_code"
+        }
+      },
+      "llvm_s": 0.09132875013165176,
+      "native_s": 0.0879294159822166,
+      "paths": {
+        "case_dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/boyer",
+        "functions": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/boyer/functions",
+        "raw": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/boyer/raw",
+        "stages": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/boyer/stages"
+      },
+      "ratio": 1.0386598058392957,
+      "suite": "mini",
+      "symbols": [
+        "camlBoyer__rewrite_with_lemmas_13_33_code",
+        "camlBoyer__rewrite_12_32_code",
+        "camlBoyer__unify1_10_30_code"
+      ]
+    },
+    "env_find_same_layered_int_key": {
+      "functions": {
+        "camlEnv_find_same_layered_int_key__find_same_without_locks_5_13_code": {
+          "counts": {
+            "after-rs4gc.ll": {
+              "alloca": 2,
+              "exnroot": 20,
+              "gc_live": 2,
+              "gc_relocate": 2,
+              "instr": 17,
+              "lines": 88,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 2,
+              "stores": 0
+            },
+            "after-statepoint-lowering.mir": {
+              "alloca": 0,
+              "exnroot": 23,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 0,
+              "lines": 234,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 2,
+              "stores": 0
+            },
+            "before-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 13,
+              "lines": 73,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "llvm.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 51,
+              "lines": 161,
+              "loads": 11,
+              "sp_refs": 21,
+              "statepoint": 0,
+              "stores": 9
+            },
+            "native.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 47,
+              "lines": 73,
+              "loads": 16,
+              "sp_refs": 18,
+              "statepoint": 0,
+              "stores": 7
+            }
+          },
+          "dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/env_find_same_layered_int_key/functions/camlEnv_find_same_layered_int_key__find_same_without_locks_5_13_code"
+        },
+        "camlEnv_find_same_layered_int_key__open_layers_6_14_code": {
+          "counts": {
+            "after-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 4,
+              "gc_relocate": 4,
+              "instr": 21,
+              "lines": 134,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 6,
+              "stores": 0
+            },
+            "after-statepoint-lowering.mir": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 0,
+              "lines": 339,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 6,
+              "stores": 0
+            },
+            "before-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 21,
+              "lines": 120,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "llvm.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 56,
+              "lines": 90,
+              "loads": 5,
+              "sp_refs": 5,
+              "statepoint": 0,
+              "stores": 7
+            },
+            "native.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 58,
+              "lines": 106,
+              "loads": 7,
+              "sp_refs": 9,
+              "statepoint": 0,
+              "stores": 9
+            }
+          },
+          "dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/env_find_same_layered_int_key/functions/camlEnv_find_same_layered_int_key__open_layers_6_14_code"
+        },
+        "camlEnv_find_same_layered_int_key__run_7_15_code": {
+          "counts": {
+            "after-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 1,
+              "gc_relocate": 1,
+              "instr": 11,
+              "lines": 92,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 3,
+              "stores": 0
+            },
+            "after-statepoint-lowering.mir": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 0,
+              "lines": 294,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 3,
+              "stores": 0
+            },
+            "before-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 11,
+              "lines": 85,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "llvm.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 179,
+              "lines": 1094,
+              "loads": 31,
+              "sp_refs": 42,
+              "statepoint": 0,
+              "stores": 15
+            },
+            "native.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 201,
+              "lines": 582,
+              "loads": 46,
+              "sp_refs": 51,
+              "statepoint": 0,
+              "stores": 18
+            }
+          },
+          "dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/env_find_same_layered_int_key/functions/camlEnv_find_same_layered_int_key__run_7_15_code"
+        }
+      },
+      "llvm_s": 0.4084308750461787,
+      "native_s": 0.37701604212634265,
+      "paths": {
+        "case_dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/env_find_same_layered_int_key",
+        "functions": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/env_find_same_layered_int_key/functions",
+        "raw": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/env_find_same_layered_int_key/raw",
+        "stages": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/env_find_same_layered_int_key/stages"
+      },
+      "ratio": 1.083324923636296,
+      "suite": "micro",
+      "symbols": [
+        "camlEnv_find_same_layered_int_key__run_7_15_code",
+        "camlEnv_find_same_layered_int_key__open_layers_6_14_code",
+        "camlEnv_find_same_layered_int_key__find_same_without_locks_5_13_code"
+      ]
+    },
+    "hash_lookup_string_equal": {
+      "functions": {
+        "camlHash_lookup_string_equal__find_4_13_code": {
+          "counts": {
+            "after-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 8,
+              "lines": 61,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "after-statepoint-lowering.mir": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 0,
+              "lines": 193,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "before-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 8,
+              "lines": 61,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "llvm.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 25,
+              "lines": 49,
+              "loads": 8,
+              "sp_refs": 7,
+              "statepoint": 0,
+              "stores": 1
+            },
+            "native.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 24,
+              "lines": 53,
+              "loads": 8,
+              "sp_refs": 7,
+              "statepoint": 0,
+              "stores": 1
+            }
+          },
+          "dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/hash_lookup_string_equal/functions/camlHash_lookup_string_equal__find_4_13_code"
+        },
+        "camlHash_lookup_string_equal__fn$5bhash_lookup_string_equal.ml$3a27$2c37$2d$2d40$5d_8_8_code": {
+          "counts": {
+            "after-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 1,
+              "lines": 9,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "after-statepoint-lowering.mir": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 0,
+              "lines": 68,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "before-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 1,
+              "lines": 9,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "llvm.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 104,
+              "lines": 965,
+              "loads": 19,
+              "sp_refs": 17,
+              "statepoint": 0,
+              "stores": 6
+            },
+            "native.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 124,
+              "lines": 501,
+              "loads": 31,
+              "sp_refs": 23,
+              "statepoint": 0,
+              "stores": 8
+            }
+          },
+          "dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/hash_lookup_string_equal/functions/camlHash_lookup_string_equal__fn$5bhash_lookup_string_equal.ml$3a27$2c37$2d$2d40$5d_8_8_code"
+        },
+        "camlHash_lookup_string_equal__run_6_15_code": {
+          "counts": {
+            "after-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 4,
+              "gc_relocate": 6,
+              "instr": 25,
+              "lines": 217,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 6,
+              "stores": 0
+            },
+            "after-statepoint-lowering.mir": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 0,
+              "lines": 609,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 6,
+              "stores": 0
+            },
+            "before-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 25,
+              "lines": 199,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "llvm.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 133,
+              "lines": 203,
+              "loads": 28,
+              "sp_refs": 37,
+              "statepoint": 0,
+              "stores": 18
+            },
+            "native.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 131,
+              "lines": 217,
+              "loads": 31,
+              "sp_refs": 37,
+              "statepoint": 0,
+              "stores": 16
+            }
+          },
+          "dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/hash_lookup_string_equal/functions/camlHash_lookup_string_equal__run_6_15_code"
+        }
+      },
+      "llvm_s": 0.8134472081437707,
+      "native_s": 0.7277160831727087,
+      "paths": {
+        "case_dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/hash_lookup_string_equal",
+        "functions": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/hash_lookup_string_equal/functions",
+        "raw": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/hash_lookup_string_equal/raw",
+        "stages": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/hash_lookup_string_equal/stages"
+      },
+      "ratio": 1.117808479094333,
+      "suite": "micro",
+      "symbols": [
+        "camlHash_lookup_string_equal__find_4_13_code",
+        "camlHash_lookup_string_equal__run_6_15_code",
+        "camlHash_lookup_string_equal__fn$5bhash_lookup_string_equal.ml$3a27$2c37$2d$2d40$5d_8_8_code"
+      ]
+    },
+    "layered_try_raise_hit_only": {
+      "functions": {
+        "camlLayered_try_raise_hit_only__find_5_13_code": {
+          "counts": {
+            "after-rs4gc.ll": {
+              "alloca": 1,
+              "exnroot": 9,
+              "gc_live": 2,
+              "gc_relocate": 1,
+              "instr": 15,
+              "lines": 80,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 2,
+              "stores": 0
+            },
+            "after-statepoint-lowering.mir": {
+              "alloca": 0,
+              "exnroot": 12,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 0,
+              "lines": 214,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 2,
+              "stores": 0
+            },
+            "before-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 13,
+              "lines": 72,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "llvm.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 48,
+              "lines": 158,
+              "loads": 10,
+              "sp_refs": 18,
+              "statepoint": 0,
+              "stores": 7
+            },
+            "native.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 40,
+              "lines": 66,
+              "loads": 13,
+              "sp_refs": 16,
+              "statepoint": 0,
+              "stores": 6
+            }
+          },
+          "dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/layered_try_raise_hit_only/functions/camlLayered_try_raise_hit_only__find_5_13_code"
+        },
+        "camlLayered_try_raise_hit_only__open_layers_6_14_code": {
+          "counts": {
+            "after-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 4,
+              "gc_relocate": 4,
+              "instr": 21,
+              "lines": 134,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 6,
+              "stores": 0
+            },
+            "after-statepoint-lowering.mir": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 0,
+              "lines": 339,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 6,
+              "stores": 0
+            },
+            "before-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 21,
+              "lines": 120,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "llvm.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 56,
+              "lines": 90,
+              "loads": 5,
+              "sp_refs": 5,
+              "statepoint": 0,
+              "stores": 7
+            },
+            "native.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 58,
+              "lines": 106,
+              "loads": 7,
+              "sp_refs": 9,
+              "statepoint": 0,
+              "stores": 9
+            }
+          },
+          "dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/layered_try_raise_hit_only/functions/camlLayered_try_raise_hit_only__open_layers_6_14_code"
+        },
+        "camlLayered_try_raise_hit_only__run_7_15_code": {
+          "counts": {
+            "after-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 1,
+              "gc_relocate": 1,
+              "instr": 11,
+              "lines": 92,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 3,
+              "stores": 0
+            },
+            "after-statepoint-lowering.mir": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 0,
+              "lines": 291,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 3,
+              "stores": 0
+            },
+            "before-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 11,
+              "lines": 85,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "llvm.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 178,
+              "lines": 1062,
+              "loads": 31,
+              "sp_refs": 42,
+              "statepoint": 0,
+              "stores": 15
+            },
+            "native.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 200,
+              "lines": 580,
+              "loads": 46,
+              "sp_refs": 51,
+              "statepoint": 0,
+              "stores": 18
+            }
+          },
+          "dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/layered_try_raise_hit_only/functions/camlLayered_try_raise_hit_only__run_7_15_code"
+        }
+      },
+      "llvm_s": 0.6798413328360766,
+      "native_s": 0.6243852921761572,
+      "paths": {
+        "case_dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/layered_try_raise_hit_only",
+        "functions": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/layered_try_raise_hit_only/functions",
+        "raw": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/layered_try_raise_hit_only/raw",
+        "stages": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/layered_try_raise_hit_only/stages"
+      },
+      "ratio": 1.0888170194826972,
+      "suite": "micro",
+      "symbols": [
+        "camlLayered_try_raise_hit_only__find_5_13_code",
+        "camlLayered_try_raise_hit_only__run_7_15_code",
+        "camlLayered_try_raise_hit_only__open_layers_6_14_code"
+      ]
+    },
+    "string_map_equal_content": {
+      "functions": {
+        "camlString_map_equal_content__find_7_33_code": {
+          "counts": {
+            "after-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 19,
+              "lines": 155,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "after-statepoint-lowering.mir": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 0,
+              "lines": 378,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "before-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 19,
+              "lines": 155,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "llvm.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 90,
+              "lines": 135,
+              "loads": 13,
+              "sp_refs": 6,
+              "statepoint": 0,
+              "stores": 1
+            },
+            "native.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 30,
+              "lines": 57,
+              "loads": 8,
+              "sp_refs": 6,
+              "statepoint": 0,
+              "stores": 1
+            }
+          },
+          "dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/string_map_equal_content/functions/camlString_map_equal_content__find_7_33_code"
+        },
+        "camlString_map_equal_content__find_opt_16_34_code": {
+          "counts": {
+            "after-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 1,
+              "gc_relocate": 1,
+              "instr": 23,
+              "lines": 180,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 1,
+              "stores": 0
+            },
+            "after-statepoint-lowering.mir": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 0,
+              "lines": 443,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 1,
+              "stores": 0
+            },
+            "before-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 23,
+              "lines": 177,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "llvm.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 103,
+              "lines": 151,
+              "loads": 14,
+              "sp_refs": 9,
+              "statepoint": 0,
+              "stores": 3
+            },
+            "native.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 38,
+              "lines": 73,
+              "loads": 8,
+              "sp_refs": 7,
+              "statepoint": 0,
+              "stores": 3
+            }
+          },
+          "dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/string_map_equal_content/functions/camlString_map_equal_content__find_opt_16_34_code"
+        },
+        "camlString_map_equal_content__run_6_52_code": {
+          "counts": {
+            "after-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 10,
+              "gc_relocate": 14,
+              "instr": 42,
+              "lines": 463,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 11,
+              "stores": 0
+            },
+            "after-statepoint-lowering.mir": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 0,
+              "lines": 1187,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 11,
+              "stores": 0
+            },
+            "before-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 42,
+              "lines": 417,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "llvm.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 439,
+              "lines": 4305,
+              "loads": 67,
+              "sp_refs": 74,
+              "statepoint": 0,
+              "stores": 33
+            },
+            "native.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 377,
+              "lines": 1900,
+              "loads": 84,
+              "sp_refs": 80,
+              "statepoint": 0,
+              "stores": 32
+            }
+          },
+          "dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/string_map_equal_content/functions/camlString_map_equal_content__run_6_52_code"
+        }
+      },
+      "llvm_s": 0.26654916699044406,
+      "native_s": 0.2551261249464005,
+      "paths": {
+        "case_dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/string_map_equal_content",
+        "functions": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/string_map_equal_content/functions",
+        "raw": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/string_map_equal_content/raw",
+        "stages": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/string_map_equal_content/stages"
+      },
+      "ratio": 1.0447740976994944,
+      "suite": "micro",
+      "symbols": [
+        "camlString_map_equal_content__find_opt_16_34_code",
+        "camlString_map_equal_content__find_7_33_code",
+        "camlString_map_equal_content__run_6_52_code"
+      ]
+    },
+    "string_tree_first_byte_diff": {
+      "functions": {
+        "camlString_tree_first_byte_diff__find_6_14_code": {
+          "counts": {
+            "after-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 19,
+              "lines": 158,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "after-statepoint-lowering.mir": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 0,
+              "lines": 398,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "before-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 19,
+              "lines": 158,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "llvm.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 87,
+              "lines": 130,
+              "loads": 12,
+              "sp_refs": 7,
+              "statepoint": 0,
+              "stores": 1
+            },
+            "native.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 28,
+              "lines": 57,
+              "loads": 7,
+              "sp_refs": 7,
+              "statepoint": 0,
+              "stores": 1
+            }
+          },
+          "dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/string_tree_first_byte_diff/functions/camlString_tree_first_byte_diff__find_6_14_code"
+        },
+        "camlString_tree_first_byte_diff__key_4_12_code": {
+          "counts": {
+            "after-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 4,
+              "gc_relocate": 4,
+              "instr": 1,
+              "lines": 96,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 4,
+              "stores": 0
+            },
+            "after-statepoint-lowering.mir": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 0,
+              "lines": 305,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 4,
+              "stores": 0
+            },
+            "before-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 1,
+              "lines": 83,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "llvm.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 115,
+              "lines": 158,
+              "loads": 13,
+              "sp_refs": 20,
+              "statepoint": 0,
+              "stores": 7
+            },
+            "native.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 135,
+              "lines": 222,
+              "loads": 28,
+              "sp_refs": 28,
+              "statepoint": 0,
+              "stores": 9
+            }
+          },
+          "dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/string_tree_first_byte_diff/functions/camlString_tree_first_byte_diff__key_4_12_code"
+        },
+        "camlString_tree_first_byte_diff__run_7_15_code": {
+          "counts": {
+            "after-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 7,
+              "gc_relocate": 13,
+              "instr": 17,
+              "lines": 243,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 9,
+              "stores": 0
+            },
+            "after-statepoint-lowering.mir": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 0,
+              "lines": 713,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 9,
+              "stores": 0
+            },
+            "before-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 17,
+              "lines": 210,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "llvm.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 318,
+              "lines": 1625,
+              "loads": 51,
+              "sp_refs": 70,
+              "statepoint": 0,
+              "stores": 29
+            },
+            "native.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 334,
+              "lines": 979,
+              "loads": 74,
+              "sp_refs": 79,
+              "statepoint": 0,
+              "stores": 30
+            }
+          },
+          "dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/string_tree_first_byte_diff/functions/camlString_tree_first_byte_diff__run_7_15_code"
+        }
+      },
+      "llvm_s": 0.4274762498680502,
+      "native_s": 0.4069447920192033,
+      "paths": {
+        "case_dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/string_tree_first_byte_diff",
+        "functions": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/string_tree_first_byte_diff/functions",
+        "raw": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/string_tree_first_byte_diff/raw",
+        "stages": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/string_tree_first_byte_diff/stages"
+      },
+      "ratio": 1.0504526860928056,
+      "suite": "micro",
+      "symbols": [
+        "camlString_tree_first_byte_diff__find_6_14_code",
+        "camlString_tree_first_byte_diff__run_7_15_code",
+        "camlString_tree_first_byte_diff__key_4_12_code"
+      ]
+    },
+    "try_find_miss_rare": {
+      "functions": {
+        "camlTry_find_miss_rare__run_5_12_code": {
+          "counts": {
+            "after-rs4gc.ll": {
+              "alloca": 1,
+              "exnroot": 12,
+              "gc_live": 3,
+              "gc_relocate": 1,
+              "instr": 36,
+              "lines": 306,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 3,
+              "stores": 0
+            },
+            "after-statepoint-lowering.mir": {
+              "alloca": 0,
+              "exnroot": 15,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 0,
+              "lines": 918,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 3,
+              "stores": 0
+            },
+            "before-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 34,
+              "lines": 278,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "llvm.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 389,
+              "lines": 1327,
+              "loads": 60,
+              "sp_refs": 79,
+              "statepoint": 0,
+              "stores": 26
+            },
+            "native.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 273,
+              "lines": 657,
+              "loads": 65,
+              "sp_refs": 71,
+              "statepoint": 0,
+              "stores": 25
+            }
+          },
+          "dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/try_find_miss_rare/functions/camlTry_find_miss_rare__run_5_12_code"
+        },
+        "camlTry_find_miss_rare__scan_4_11_code": {
+          "counts": {
+            "after-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 2,
+              "gc_relocate": 4,
+              "instr": 13,
+              "lines": 100,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 2,
+              "stores": 0
+            },
+            "after-statepoint-lowering.mir": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 0,
+              "lines": 270,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 2,
+              "stores": 0
+            },
+            "before-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 13,
+              "lines": 89,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "llvm.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 58,
+              "lines": 95,
+              "loads": 6,
+              "sp_refs": 11,
+              "statepoint": 0,
+              "stores": 6
+            },
+            "native.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 51,
+              "lines": 89,
+              "loads": 11,
+              "sp_refs": 11,
+              "statepoint": 0,
+              "stores": 6
+            }
+          },
+          "dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/try_find_miss_rare/functions/camlTry_find_miss_rare__scan_4_11_code"
+        }
+      },
+      "llvm_s": 0.9951940421015024,
+      "native_s": 0.95584104093723,
+      "paths": {
+        "case_dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/try_find_miss_rare",
+        "functions": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/try_find_miss_rare/functions",
+        "raw": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/try_find_miss_rare/raw",
+        "stages": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/try_find_miss_rare/stages"
+      },
+      "ratio": 1.0411710728864347,
+      "suite": "micro",
+      "symbols": [
+        "camlTry_find_miss_rare__run_5_12_code",
+        "camlTry_find_miss_rare__scan_4_11_code"
+      ]
+    },
+    "try_raise_cross_function_caught": {
+      "functions": {
+        "camlTry_raise_cross_function_caught__find_5_12_code": {
+          "counts": {
+            "after-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 11,
+              "lines": 62,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 2,
+              "stores": 0
+            },
+            "after-statepoint-lowering.mir": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 0,
+              "lines": 193,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 2,
+              "stores": 0
+            },
+            "before-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 11,
+              "lines": 59,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "llvm.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 45,
+              "lines": 148,
+              "loads": 8,
+              "sp_refs": 21,
+              "statepoint": 0,
+              "stores": 8
+            },
+            "native.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 32,
+              "lines": 57,
+              "loads": 9,
+              "sp_refs": 15,
+              "statepoint": 0,
+              "stores": 5
+            }
+          },
+          "dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/try_raise_cross_function_caught/functions/camlTry_raise_cross_function_caught__find_5_12_code"
+        },
+        "camlTry_raise_cross_function_caught__probe_4_11_code": {
+          "counts": {
+            "after-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 3,
+              "lines": 16,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "after-statepoint-lowering.mir": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 0,
+              "lines": 78,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "before-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 3,
+              "lines": 16,
+              "loads": 0,
+              "sp_refs": 0,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "llvm.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 8,
+              "lines": 22,
+              "loads": 1,
+              "sp_refs": 1,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "native.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 7,
+              "lines": 19,
+              "loads": 2,
+              "sp_refs": 1,
+              "statepoint": 0,
+              "stores": 0
+            }
+          },
+          "dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/try_raise_cross_function_caught/functions/camlTry_raise_cross_function_caught__probe_4_11_code"
+        },
+        "camlTry_raise_cross_function_caught__run_6_13_code": {
+          "counts": {
+            "after-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 11,
+              "lines": 83,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 2,
+              "stores": 0
+            },
+            "after-statepoint-lowering.mir": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 0,
+              "lines": 256,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 2,
+              "stores": 0
+            },
+            "before-rs4gc.ll": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 11,
+              "lines": 81,
+              "loads": 0,
+              "sp_refs": 1,
+              "statepoint": 0,
+              "stores": 0
+            },
+            "llvm.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 169,
+              "lines": 901,
+              "loads": 28,
+              "sp_refs": 37,
+              "statepoint": 0,
+              "stores": 13
+            },
+            "native.s": {
+              "alloca": 0,
+              "exnroot": 0,
+              "gc_live": 0,
+              "gc_relocate": 0,
+              "instr": 190,
+              "lines": 511,
+              "loads": 43,
+              "sp_refs": 46,
+              "statepoint": 0,
+              "stores": 16
+            }
+          },
+          "dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/try_raise_cross_function_caught/functions/camlTry_raise_cross_function_caught__run_6_13_code"
+        }
+      },
+      "llvm_s": 0.5396291671786457,
+      "native_s": 0.4864535841625184,
+      "paths": {
+        "case_dir": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/try_raise_cross_function_caught",
+        "functions": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/try_raise_cross_function_caught/functions",
+        "raw": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/try_raise_cross_function_caught/raw",
+        "stages": "/Users/julesjacobs/git/oxcaml-llvm/agents/test-suite-29e4cd/oxcaml/agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases/try_raise_cross_function_caught/stages"
+      },
+      "ratio": 1.1093127581898174,
+      "suite": "micro",
+      "symbols": [
+        "camlTry_raise_cross_function_caught__find_5_12_code",
+        "camlTry_raise_cross_function_caught__run_6_13_code",
+        "camlTry_raise_cross_function_caught__probe_4_11_code"
+      ]
+    }
+  },
+  "generated_at": "2026-06-08 16:17:09 -0400",
+  "git_head": "0d68a665d2f89920bc656f495a73c75e84e4617a",
+  "selected": [
+    {
+      "case": "hash_lookup_string_equal",
+      "llvm_s": 0.8134472081437707,
+      "native_s": 0.7277160831727087,
+      "ratio": 1.117808479094333,
+      "suite": "micro"
+    },
+    {
+      "case": "try_raise_cross_function_caught",
+      "llvm_s": 0.5396291671786457,
+      "native_s": 0.4864535841625184,
+      "ratio": 1.1093127581898174,
+      "suite": "micro"
+    },
+    {
+      "case": "layered_try_raise_hit_only",
+      "llvm_s": 0.6798413328360766,
+      "native_s": 0.6243852921761572,
+      "ratio": 1.0888170194826972,
+      "suite": "micro"
+    },
+    {
+      "case": "env_find_same_layered_int_key",
+      "llvm_s": 0.4084308750461787,
+      "native_s": 0.37701604212634265,
+      "ratio": 1.083324923636296,
+      "suite": "micro"
+    },
+    {
+      "case": "array_binary_search_string",
+      "llvm_s": 0.44713895907625556,
+      "native_s": 0.41454124986194074,
+      "ratio": 1.0786356224505311,
+      "suite": "micro"
+    },
+    {
+      "case": "string_tree_first_byte_diff",
+      "llvm_s": 0.4274762498680502,
+      "native_s": 0.4069447920192033,
+      "ratio": 1.0504526860928056,
+      "suite": "micro"
+    },
+    {
+      "case": "string_map_equal_content",
+      "llvm_s": 0.26654916699044406,
+      "native_s": 0.2551261249464005,
+      "ratio": 1.0447740976994944,
+      "suite": "micro"
+    },
+    {
+      "case": "try_find_miss_rare",
+      "llvm_s": 0.9951940421015024,
+      "native_s": 0.95584104093723,
+      "ratio": 1.0411710728864347,
+      "suite": "micro"
+    },
+    {
+      "case": "boyer",
+      "llvm_s": 0.09132875013165176,
+      "native_s": 0.0879294159822166,
+      "ratio": 1.0386598058392957,
+      "suite": "mini"
+    }
+  ]
+}

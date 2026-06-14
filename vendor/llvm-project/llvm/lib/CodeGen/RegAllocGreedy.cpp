@@ -173,6 +173,7 @@ const char *const RAGreedy::StageName[] = {
     "RS_Assign",
     "RS_Split",
     "RS_Split2",
+    "RS_CallSplit",
     "RS_Spill",
     "RS_Memory",
     "RS_Done"
@@ -995,6 +996,10 @@ void RAGreedy::splitAroundRegion(LiveRangeEdit &LREdit,
   DebugVars->splitRegister(Reg, LREdit.regs(), *LIS);
 
   unsigned OrigBlocks = SA->getNumLiveBlocks();
+  const Function &F = MF->getFunction();
+  const bool AllowOxCamlCallSplitRemainders =
+      F.hasGC() && (F.getGC() == "oxcaml" || F.getGC() == "ocaml") &&
+      Matrix->checkRegMaskInterference(LREdit.getParent());
 
   // Sort out the new intervals created by splitting. We get four kinds:
   // - Remainder intervals should not be split again.
@@ -1011,6 +1016,15 @@ void RAGreedy::splitAroundRegion(LiveRangeEdit &LREdit,
     // Remainder interval. Don't try splitting again, spill if it doesn't
     // allocate.
     if (IntvMap[I] == 0) {
+      if (AllowOxCamlCallSplitRemainders) {
+        // OxCaml has no callee-saved GPRs, so values that cross call regmasks
+        // need stack homes at the calls. Still, the call-free regions of those
+        // live ranges should be allowed to use registers. Give such remainders
+        // one bounded block/local splitting path, but do not put them back at
+        // RS_New where they would re-enter general region splitting.
+        ExtraInfo->setStage(Reg, RS_CallSplit);
+        continue;
+      }
       ExtraInfo->setStage(Reg, RS_Spill);
       continue;
     }

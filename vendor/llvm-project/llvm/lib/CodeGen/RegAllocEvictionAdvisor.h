@@ -58,6 +58,11 @@ enum LiveRangeStage {
   /// progress.
   RS_Split2,
 
+  /// Attempt bounded block/local splitting for OxCaml live ranges split around
+  /// call regmasks. This skips general region splitting like RS_Split2, but
+  /// records the reason separately from ordinary non-progress split products.
+  RS_CallSplit,
+
   /// Live range will be spilled.  No more splitting will be attempted.
   RS_Spill,
 

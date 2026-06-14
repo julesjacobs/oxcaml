@@ -111,7 +111,14 @@ MachineFunctionInfo *AArch64FunctionInfo::clone(
     BumpPtrAllocator &Allocator, MachineFunction &DestMF,
     const DenseMap<MachineBasicBlock *, MachineBasicBlock *> &Src2DstMBB)
     const {
-  return DestMF.cloneInfo<AArch64FunctionInfo>(*this);
+  auto *Clone = DestMF.cloneInfo<AArch64FunctionInfo>(*this);
+  Clone->OxCamlTrapRecoveryEntries.clear();
+  for (MachineBasicBlock *MBB : OxCamlTrapRecoveryEntries) {
+    auto It = Src2DstMBB.find(MBB);
+    if (It != Src2DstMBB.end())
+      Clone->OxCamlTrapRecoveryEntries.insert(It->second);
+  }
+  return Clone;
 }
 
 bool AArch64FunctionInfo::shouldSignReturnAddress(bool SpillsLR) const {

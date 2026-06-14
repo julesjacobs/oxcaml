@@ -177,6 +177,7 @@ enum Kind {
   kw_oxcaml_nofpcc,
   kw_oxcaml_ccc,
   kw_oxcaml_c_stackcc,
+  kw_oxcaml_c_directcc,
   kw_oxcaml_alloccc,
 
   // Attributes:

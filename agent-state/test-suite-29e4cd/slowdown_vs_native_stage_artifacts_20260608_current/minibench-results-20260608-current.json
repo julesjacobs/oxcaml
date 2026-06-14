@@ -1,0 +1,444 @@
+{
+  "almabench": {
+    "args": [],
+    "compile_seconds": {
+      "native": 0.9538924591615796,
+      "llvm": 0.45135537488386035,
+      "llvm_over_native": 0.4731721805208289
+    },
+    "run_median_seconds": {
+      "native": 0.6860063751228154,
+      "llvm": 0.5925990410614759
+    },
+    "run_ratio_llvm_over_native": 0.8638389708191606,
+    "samples": {
+      "native": [
+        0.6849833750165999,
+        0.6863127909600735,
+        0.6860063751228154
+      ],
+      "llvm": [
+        0.590200207894668,
+        0.5925990410614759,
+        0.6002431251108646
+      ]
+    },
+    "output": "",
+    "asm": {
+      "native": {
+        "lines": 6359,
+        "branches": 86,
+        "calls": 127,
+        "loads": 716,
+        "stores": 459
+      },
+      "llvm": {
+        "lines": 7734,
+        "branches": 85,
+        "calls": 157,
+        "loads": 340,
+        "stores": 325
+      }
+    }
+  },
+  "bdd": {
+    "args": [
+      "22",
+      "100"
+    ],
+    "compile_seconds": {
+      "native": 0.2387509581167251,
+      "llvm": 0.4088742081075907,
+      "llvm_over_native": 1.7125552556220214
+    },
+    "run_median_seconds": {
+      "native": 0.10159816616214812,
+      "llvm": 0.1007124581374228
+    },
+    "run_ratio_llvm_over_native": 0.9912822439795641,
+    "samples": {
+      "native": [
+        0.10253595816902816,
+        0.10111841605976224,
+        0.10159816616214812
+      ],
+      "llvm": [
+        0.10059304186142981,
+        0.1007124581374228,
+        0.10124954208731651
+      ]
+    },
+    "output": "",
+    "asm": {
+      "native": {
+        "lines": 4175,
+        "branches": 135,
+        "calls": 123,
+        "loads": 453,
+        "stores": 165
+      },
+      "llvm": {
+        "lines": 4840,
+        "branches": 126,
+        "calls": 126,
+        "loads": 325,
+        "stores": 148
+      }
+    }
+  },
+  "boyer": {
+    "args": [],
+    "compile_seconds": {
+      "native": 0.420684166951105,
+      "llvm": 0.7762131670024246,
+      "llvm_over_native": 1.8451209434098854
+    },
+    "run_median_seconds": {
+      "native": 0.08629720797762275,
+      "llvm": 0.09029625006951392
+    },
+    "run_ratio_llvm_over_native": 1.0463403415430095,
+    "samples": {
+      "native": [
+        0.08629720797762275,
+        0.08631037501618266,
+        0.08609037497080863
+      ],
+      "llvm": [
+        0.09249945916235447,
+        0.08984974981285632,
+        0.09029625006951392
+      ]
+    },
+    "output": "",
+    "asm": {
+      "native": {
+        "lines": 26548,
+        "branches": 97,
+        "calls": 615,
+        "loads": 2590,
+        "stores": 157
+      },
+      "llvm": {
+        "lines": 33033,
+        "branches": 128,
+        "calls": 619,
+        "loads": 1394,
+        "stores": 171
+      }
+    }
+  },
+  "boyer_no_exc": {
+    "args": [],
+    "compile_seconds": {
+      "native": 0.4229748749639839,
+      "llvm": 0.8226517080329359,
+      "llvm_over_native": 1.94491861509028
+    },
+    "run_median_seconds": {
+      "native": 0.06734991702251136,
+      "llvm": 0.06489358399994671
+    },
+    "run_ratio_llvm_over_native": 0.9635287891781124,
+    "samples": {
+      "native": [
+        0.06673170905560255,
+        0.06751458393409848,
+        0.06734991702251136
+      ],
+      "llvm": [
+        0.06489358399994671,
+        0.06520662503316998,
+        0.06307362485677004
+      ]
+    },
+    "output": "",
+    "asm": {
+      "native": {
+        "lines": 26568,
+        "branches": 112,
+        "calls": 617,
+        "loads": 2572,
+        "stores": 151
+      },
+      "llvm": {
+        "lines": 32837,
+        "branches": 131,
+        "calls": 621,
+        "loads": 1377,
+        "stores": 146
+      }
+    }
+  },
+  "fft": {
+    "args": [],
+    "compile_seconds": {
+      "native": 0.2041309999767691,
+      "llvm": 0.3550296248868108,
+      "llvm_over_native": 1.739224443750408
+    },
+    "run_median_seconds": {
+      "native": 0.9704068750143051,
+      "llvm": 0.9846565828192979
+    },
+    "run_ratio_llvm_over_native": 1.0146842609753592,
+    "samples": {
+      "native": [
+        0.9704068750143051,
+        0.9753900419455022,
+        0.9701348331291229
+      ],
+      "llvm": [
+        0.9398286661598831,
+        0.9846565828192979,
+        0.9973035000730306
+      ]
+    },
+    "output": "",
+    "asm": {
+      "native": {
+        "lines": 1267,
+        "branches": 67,
+        "calls": 12,
+        "loads": 131,
+        "stores": 54
+      },
+      "llvm": {
+        "lines": 1479,
+        "branches": 67,
+        "calls": 30,
+        "loads": 61,
+        "stores": 52
+      }
+    }
+  },
+  "kb": {
+    "args": [],
+    "compile_seconds": {
+      "native": 0.29194670892320573,
+      "llvm": 0.6074860829394311,
+      "llvm_over_native": 2.080811546669038
+    },
+    "run_median_seconds": {
+      "native": 0.12934941705316305,
+      "llvm": 0.11427345778793097
+    },
+    "run_ratio_llvm_over_native": 0.8834477989256355,
+    "samples": {
+      "native": [
+        0.12538220803253353,
+        0.12934941705316305,
+        0.12944620894268155
+      ],
+      "llvm": [
+        0.1135525421705097,
+        0.11427345778793097,
+        0.11476483382284641
+      ]
+    },
+    "output": "",
+    "asm": {
+      "native": {
+        "lines": 12273,
+        "branches": 481,
+        "calls": 316,
+        "loads": 1115,
+        "stores": 822
+      },
+      "llvm": {
+        "lines": 18404,
+        "branches": 438,
+        "calls": 319,
+        "loads": 1047,
+        "stores": 874
+      }
+    }
+  },
+  "kb_no_exc": {
+    "args": [],
+    "compile_seconds": {
+      "native": 0.28572024987079203,
+      "llvm": 0.6457263329066336,
+      "llvm_over_native": 2.259994988799859
+    },
+    "run_median_seconds": {
+      "native": 0.13159466697834432,
+      "llvm": 0.11340345907956362
+    },
+    "run_ratio_llvm_over_native": 0.861763334970297,
+    "samples": {
+      "native": [
+        0.132555624935776,
+        0.13050299999304116,
+        0.13159466697834432
+      ],
+      "llvm": [
+        0.11340345907956362,
+        0.11266999994404614,
+        0.1256587919779122
+      ]
+    },
+    "output": "",
+    "asm": {
+      "native": {
+        "lines": 13202,
+        "branches": 516,
+        "calls": 351,
+        "loads": 1191,
+        "stores": 858
+      },
+      "llvm": {
+        "lines": 19541,
+        "branches": 458,
+        "calls": 355,
+        "loads": 1095,
+        "stores": 894
+      }
+    }
+  },
+  "nucleic": {
+    "args": [],
+    "compile_seconds": {
+      "native": 0.40104070911183953,
+      "llvm": 0.6480327500030398,
+      "llvm_over_native": 1.6158777283188994
+    },
+    "run_median_seconds": {
+      "native": 0.09812708315439522,
+      "llvm": 0.08026691596023738
+    },
+    "run_ratio_llvm_over_native": 0.8179894212685781,
+    "samples": {
+      "native": [
+        0.0973666668869555,
+        0.09812708315439522,
+        0.098440500209108
+      ],
+      "llvm": [
+        0.08026691596023738,
+        0.07990529201924801,
+        0.09209574991837144
+      ]
+    },
+    "output": "",
+    "asm": {
+      "native": {
+        "lines": 28388,
+        "branches": 214,
+        "calls": 123,
+        "loads": 1045,
+        "stores": 560
+      },
+      "llvm": {
+        "lines": 35589,
+        "branches": 163,
+        "calls": 126,
+        "loads": 714,
+        "stores": 426
+      }
+    }
+  },
+  "raytrace": {
+    "args": [],
+    "compile_seconds": {
+      "native": 0.2924350840039551,
+      "llvm": 0.4752660421654582,
+      "llvm_over_native": 1.625201859018497
+    },
+    "run_median_seconds": {
+      "native": 0.15880950004793704,
+      "llvm": 0.1473200828768313
+    },
+    "run_ratio_llvm_over_native": 0.9276528345745209,
+    "samples": {
+      "native": [
+        0.1571256669703871,
+        0.15897470782510936,
+        0.15880950004793704
+      ],
+      "llvm": [
+        0.14852016605436802,
+        0.1464833749923855,
+        0.1473200828768313
+      ]
+    },
+    "output": "",
+    "asm": {
+      "native": {
+        "lines": 6348,
+        "branches": 197,
+        "calls": 78,
+        "loads": 703,
+        "stores": 562
+      },
+      "llvm": {
+        "lines": 7473,
+        "branches": 188,
+        "calls": 79,
+        "loads": 531,
+        "stores": 457
+      }
+    }
+  },
+  "splay": {
+    "args": [],
+    "compile_seconds": {
+      "native": 0.23851920804008842,
+      "llvm": 0.41207362501882017,
+      "llvm_over_native": 1.727632874537979
+    },
+    "run_median_seconds": {
+      "native": 0.049754083855077624,
+      "llvm": 0.04939191695302725
+    },
+    "run_ratio_llvm_over_native": 0.992720860801994,
+    "samples": {
+      "native": [
+        0.049754083855077624,
+        0.050685291877016425,
+        0.04963341588154435
+      ],
+      "llvm": [
+        0.04939191695302725,
+        0.05014079203829169,
+        0.04927695891819894
+      ]
+    },
+    "output": "",
+    "asm": {
+      "native": {
+        "lines": 4496,
+        "branches": 135,
+        "calls": 109,
+        "loads": 350,
+        "stores": 352
+      },
+      "llvm": {
+        "lines": 6482,
+        "branches": 126,
+        "calls": 110,
+        "loads": 277,
+        "stores": 247
+      }
+    }
+  },
+  "_aggregate": {
+    "cases": 10,
+    "total_run_seconds": {
+      "native": 2.47929329238832,
+      "llvm": 2.3378137487452477
+    },
+    "total_run_ratio_llvm_over_native": 0.9429355356716251,
+    "total_run_llvm_speedup_percent": 6.051788501928668,
+    "geomean_run_ratio_llvm_over_native": 0.9334752176411877,
+    "median_run_ratio_llvm_over_native": 0.9455908118763166,
+    "max_run_ratio_llvm_over_native": 1.0463403415430095,
+    "min_run_ratio_llvm_over_native": 0.8179894212685781,
+    "total_compile_seconds": {
+      "native": 3.7500954191200435,
+      "llvm": 5.602708915947005
+    },
+    "total_compile_ratio_llvm_over_native": 1.4940176954915125,
+    "geomean_compile_ratio_llvm_over_native": 1.59700148076229
+  }
+}

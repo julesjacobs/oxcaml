@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/CodeGen/SelectionDAGISel.h"
+#include "OxCamlTrapUtils.h"
 #include "ScheduleDAGSDNodes.h"
 #include "SelectionDAGBuilder.h"
 #include "llvm/ADT/APInt.h"
@@ -67,6 +68,7 @@
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/DiagnosticInfo.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/InstIterator.h"
@@ -324,6 +326,7 @@ SelectionDAGISel::SelectionDAGISel(char &ID, TargetMachine &tm,
   initializeGCModuleInfoPass(*PassRegistry::getPassRegistry());
   initializeBranchProbabilityInfoWrapperPassPass(
       *PassRegistry::getPassRegistry());
+  initializeDominatorTreeWrapperPassPass(*PassRegistry::getPassRegistry());
   initializeAAResultsWrapperPassPass(*PassRegistry::getPassRegistry());
   initializeTargetLibraryInfoWrapperPassPass(*PassRegistry::getPassRegistry());
 }
@@ -341,6 +344,8 @@ void SelectionDAGISel::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addPreserved<GCModuleInfo>();
   AU.addRequired<TargetLibraryInfoWrapperPass>();
   AU.addRequired<TargetTransformInfoWrapperPass>();
+  AU.addRequired<DominatorTreeWrapperPass>();
+  AU.addPreserved<DominatorTreeWrapperPass>();
   AU.addRequired<AssumptionCacheTracker>();
   if (UseMBPI && OptLevel != CodeGenOpt::None)
     AU.addRequired<BranchProbabilityInfoWrapperPass>();
@@ -428,7 +433,8 @@ bool SelectionDAGISel::runOnMachineFunction(MachineFunction &mf) {
   CurDAG->init(*MF, *ORE, this, LibInfo,
                getAnalysisIfAvailable<LegacyDivergenceAnalysis>(), PSI, BFI,
                FnVarLocs);
-  FuncInfo->set(Fn, *MF, CurDAG);
+  DominatorTree &DT = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
+  FuncInfo->set(Fn, *MF, CurDAG, &DT);
   SwiftError->setFunction(*MF);
 
   // Now get the optional analyzes if we want to.
@@ -1239,6 +1245,20 @@ bool SelectionDAGISel::PrepareEHLandingPad() {
   const TargetRegisterClass *PtrRC =
       TLI->getRegClassFor(TLI->getPointerTy(CurDAG->getDataLayout()));
 
+  bool HasConcreteTrapTarget =
+      getOxCamlTrapRecoveryLandingPad(*LLVMBB) &&
+      hasOxCamlPushTrapTargeting(*FuncInfo->Fn, *LLVMBB);
+  bool HasAbstractTrapTarget =
+      FuncInfo->DT && isOxCamlTrapRecoveryPad(*FuncInfo->Fn, *LLVMBB) &&
+      hasDominatingOxCamlTrapPublishForRecoveryPad(*FuncInfo->Fn, *LLVMBB,
+                                                   *FuncInfo->DT);
+  if (!MBB->isRuntimeEntered() &&
+      (HasConcreteTrapTarget || HasAbstractTrapTarget)) {
+    MBB->setIsRuntimeEntered();
+    MBB->setMachineBlockAddressTaken();
+    MBB->setLabelMustBeEmitted();
+  }
+
   auto Pers = classifyEHPersonality(PersonalityFn);
 
   // Catchpads have one live-in register, which typically holds the exception
@@ -1280,6 +1300,10 @@ bool SelectionDAGISel::PrepareEHLandingPad() {
   } else {
     // Assign the call site to the landing pad's begin label.
     MF->setCallSiteLandingPad(Label, SDB->LPadToCallSiteMap[MBB]);
+    // OxCaml runtime-entered trap recovery blocks use a target-specific
+    // recovery ABI, not the platform EH exception pointer/selector ABI.
+    if (MBB->isRuntimeEntered())
+      return true;
     // Mark exception register as live in.
     if (unsigned Reg = TLI->getExceptionPointerRegister(PersonalityFn))
       FuncInfo->ExceptionPointerVirtReg = MBB->addLiveIn(Reg, PtrRC);
@@ -1478,7 +1502,7 @@ void SelectionDAGISel::SelectAllBasicBlocks(const Function &Fn) {
     // Setup an EH landing-pad block.
     FuncInfo->ExceptionPointerVirtReg = 0;
     FuncInfo->ExceptionSelectorVirtReg = 0;
-    if (LLVMBB->isEHPad())
+    if (FuncInfo->MBB->isEHPad())
       if (!PrepareEHLandingPad())
         continue;
 

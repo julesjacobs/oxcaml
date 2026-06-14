@@ -353,6 +353,15 @@ public:
   }
 };
 
+/// OxCaml: marks an access that moves a gc value (IR type ptr
+/// addrspace(1)) in a function using the "oxcaml"/"ocaml" GC strategy.
+/// Pointer types lower to plain i64 in SelectionDAG, so this is the only
+/// record of value-ness that survives to MIR; set in
+/// TargetLoweringBase::get{Load,Store}MemOperandFlags and consumed by the
+/// OxCaml gc root passes. AArch64 only uses MOTargetFlag1/2.
+constexpr MachineMemOperand::Flags MOOxCamlGCValue =
+    MachineMemOperand::MOTargetFlag3;
+
 } // End llvm namespace
 
 #endif

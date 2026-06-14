@@ -126,6 +126,37 @@ exit:
   ret void
 }
 
+; Non-trivial unswitching may clone loop exit blocks.  If the exit block starts
+; with an unused landingpad token, the token must not be merged with a PHI.
+define void @test_unused_landingpad_token_exit(i1 %cond, i1 %exit) personality ptr @__CxxFrameHandler3 {
+; CHECK-LABEL: @test_unused_landingpad_token_exit(
+; CHECK-NOT: phi token
+entry:
+  br label %loop_begin
+
+loop_begin:
+  br i1 %cond, label %loop_left, label %loop_right
+
+loop_left:
+  invoke i32 @a()
+          to label %loop_latch unwind label %loop_handler
+
+loop_right:
+  invoke i32 @b()
+          to label %loop_latch unwind label %loop_handler
+
+loop_latch:
+  br i1 %exit, label %done, label %loop_begin
+
+loop_handler:
+  %lp = landingpad token
+          cleanup
+  ret void
+
+done:
+  ret void
+}
+
 
 ; Non-trivial loop unswitching where there are two distinct trivial conditions
 ; to unswitch within the loop.

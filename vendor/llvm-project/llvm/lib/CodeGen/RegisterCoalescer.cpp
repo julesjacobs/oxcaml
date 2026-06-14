@@ -2099,6 +2099,14 @@ bool RegisterCoalescer::joinCopy(MachineInstr *CopyMI, bool &Again) {
     updateRegDefsUses(CP.getDstReg(), CP.getDstReg(), CP.getDstIdx());
   updateRegDefsUses(CP.getSrcReg(), CP.getDstReg(), CP.getSrcIdx());
 
+  // OxCaml: the merged register holds a gc pointer if either side did.
+  if (CP.getDstReg().isVirtual()) {
+    if (MRI->isOxCamlGCPtr(CP.getSrcReg()))
+      MRI->setOxCamlGCPtr(CP.getDstReg());
+    if (MRI->isOxCamlGCArg(CP.getSrcReg()))
+      MRI->setOxCamlGCArg(CP.getDstReg());
+  }
+
   // Shrink subregister ranges if necessary.
   if (ShrinkMask.any()) {
     LiveInterval &LI = LIS->getInterval(CP.getDstReg());
@@ -3523,6 +3531,20 @@ bool RegisterCoalescer::isHighCostLiveInterval(LiveInterval &LI) {
   return true;
 }
 
+static bool hasDuplicateValueDefs(const LiveInterval &LI) {
+  for (unsigned I = 0, E = LI.getNumValNums(); I != E; ++I) {
+    const VNInfo *A = LI.getValNumInfo(I);
+    if (A->isUnused())
+      continue;
+    for (unsigned J = I + 1; J != E; ++J) {
+      const VNInfo *B = LI.getValNumInfo(J);
+      if (!B->isUnused() && A->def == B->def)
+        return true;
+    }
+  }
+  return false;
+}
+
 bool RegisterCoalescer::joinVirtRegs(CoalescerPair &CP) {
   SmallVector<VNInfo*, 16> NewVNInfo;
   LiveInterval &RHS = LIS->getInterval(CP.getSrcReg());
@@ -3536,6 +3558,9 @@ bool RegisterCoalescer::joinVirtRegs(CoalescerPair &CP) {
   LLVM_DEBUG(dbgs() << "\t\tRHS = " << RHS << "\n\t\tLHS = " << LHS << '\n');
 
   if (isHighCostLiveInterval(LHS) || isHighCostLiveInterval(RHS))
+    return false;
+
+  if (hasDuplicateValueDefs(LHS) || hasDuplicateValueDefs(RHS))
     return false;
 
   // First compute NewVNInfo and the simple value mappings.

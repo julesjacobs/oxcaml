@@ -51,6 +51,7 @@ enum NodeType : unsigned {
   FIRST_NUMBER = ISD::BUILTIN_OP_END,
   WrapperLarge, // 4-instruction MOVZ/MOVK sequence for 64-bit addresses.
   CALL,         // Function call.
+  OXCAML_C_DIRECT_CALL, // noalloc C call with an inline C stack switch.
 
   // Pseudo for a OBJC call that gets emitted together with a special `mov
   // x29, x29` marker instruction.

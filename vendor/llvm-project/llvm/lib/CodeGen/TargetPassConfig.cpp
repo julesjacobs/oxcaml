@@ -871,6 +871,7 @@ void TargetPassConfig::addIRPasses() {
 
   // Run GC lowering passes for builtin collectors
   // TODO: add a pass insertion point here
+  addPass(createRewriteStatepointsForGCLegacyPass());
   addPass(&GCLoweringID);
   addPass(&ShadowStackGCLoweringID);
   addPass(createLowerConstantIntrinsicsPass());
@@ -1403,6 +1404,14 @@ bool TargetPassConfig::addRegAssignAndRewriteOptimized() {
   // Add the selected register allocation pass.
   addPass(createRegAllocPass(true));
 
+  // OxCaml: append statepoint-crossing sibling spill slots of gc values to
+  // the statepoint gc operand lists while VirtRegMap/LiveStacks are alive.
+  addPass(&OxCamlStatepointSpillRootsID);
+
+  // OxCaml: verify root completeness at statepoints (flag-gated, reports
+  // only; runs after the spill-slot roots pass so its additions count).
+  addPass(&OxCamlGCRootVerifierID);
+
   // Allow targets to change the register assignments before rewriting.
   addPreRewrite();
 
@@ -1460,6 +1469,10 @@ void TargetPassConfig::addOptimizedRegAlloc() {
     addPass(&LiveIntervalsID);
 
   addPass(&TwoAddressInstructionPassID);
+  // OxCaml in-place relocate pseudos become plain COPYs here, after the
+  // last value-based optimizer and immediately before coalescing merges
+  // them with their sources (see OxCamlLowerRelocate.cpp).
+  addPass(&OxCamlLowerRelocateID);
   addPass(&RegisterCoalescerID);
 
   // The machine scheduler may accidentally create disconnected components
