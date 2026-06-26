@@ -82,18 +82,18 @@ run_ocamlopt_with_test_stdlib() {
 cat > "$src" <<'EOF'
 external stack_args_gc :
   int -> int -> int -> int -> int -> int ->
-  int -> int -> int -> int -> int -> int -> int =
+  int -> int -> int -> int -> int -> int -> bytes -> int =
   "amd64_stack_args_gc_bytecode" "amd64_stack_args_gc_native"
 
 let[@inline never] call keep =
-  let r = stack_args_gc 1 2 3 4 5 6 7 8 9 10 11 12 in
+  let r = stack_args_gc 1 2 3 4 5 6 7 8 9 10 11 12 keep in
   if Bytes.get keep 0 <> 'z' then failwith "root changed";
   r + Bytes.length keep
 
 let () =
   let keep = Bytes.make 17 'z' in
   let r = call keep in
-  if r <> 95 then Printf.ksprintf failwith "expected 95, got %d" r;
+  if r <> 667 then Printf.ksprintf failwith "expected 667, got %d" r;
   print_endline "ok"
 EOF
 
@@ -106,11 +106,12 @@ cat > "$stub_src" <<'EOF'
 CAMLprim value amd64_stack_args_gc_native(value a1, value a2, value a3,
                                           value a4, value a5, value a6,
                                           value a7, value a8, value a9,
-                                          value a10, value a11, value a12)
+                                          value a10, value a11, value a12,
+                                          value keep)
 {
   CAMLparam5(a1, a2, a3, a4, a5);
   CAMLxparam5(a6, a7, a8, a9, a10);
-  CAMLxparam2(a11, a12);
+  CAMLxparam3(a11, a12, keep);
   CAMLlocal1(block);
   for (int i = 0; i < 10000; i++) {
     block = caml_alloc(2, 0);
@@ -123,9 +124,14 @@ CAMLprim value amd64_stack_args_gc_native(value a1, value a2, value a3,
     Field(block, 0) = Val_long(10000 + i);
     Field(block, 1) = Val_long(10001 + i);
   }
-  intnat sum = Long_val(a1) + Long_val(a2) + Long_val(a3) + Long_val(a4)
-             + Long_val(a5) + Long_val(a6) + Long_val(a7) + Long_val(a8)
-             + Long_val(a9) + Long_val(a10) + Long_val(a11) + Long_val(a12);
+  if (Byte(keep, 0) != 'z') {
+    CAMLreturn(Val_long(-1));
+  }
+  intnat sum = 1 * Long_val(a1) + 2 * Long_val(a2) + 3 * Long_val(a3)
+             + 4 * Long_val(a4) + 5 * Long_val(a5) + 6 * Long_val(a6)
+             + 7 * Long_val(a7) + 8 * Long_val(a8) + 9 * Long_val(a9)
+             + 10 * Long_val(a10) + 11 * Long_val(a11)
+             + 12 * Long_val(a12);
   CAMLreturn(Val_long(sum));
 }
 
@@ -134,7 +140,8 @@ CAMLprim value amd64_stack_args_gc_bytecode(value *argv, int argn)
   (void) argn;
   return amd64_stack_args_gc_native(argv[0], argv[1], argv[2], argv[3],
                                     argv[4], argv[5], argv[6], argv[7],
-                                    argv[8], argv[9], argv[10], argv[11]);
+                                    argv[8], argv[9], argv[10], argv[11],
+                                    argv[12]);
 }
 EOF
 
@@ -164,3 +171,39 @@ grep -q '@llvm.stacksave' "$ir"
 grep -q '@llvm.stackrestore' "$ir"
 grep -Eq '@"\\01_?amd64_stack_args_gc_native"' "$ir"
 grep -Eq 'callq?[[:space:]]+_?caml_c_call_stack_args' "$asm"
+
+awk '
+  /^_?caml.*__call_.*_code:/ {
+    in_call = 1
+    found = 1
+    checked = 0
+    state = "entry"
+    saw_stack_save = 0
+    next
+  }
+  in_call && !saw_stack_save && /^[[:space:]]*movq[[:space:]]+%rsp,[[:space:]]+%r[a-z0-9]+/ {
+    stack_save_reg = $0
+    sub(/^.*%rsp,[[:space:]]*/, "", stack_save_reg)
+    sub(/[[:space:]].*$/, "", stack_save_reg)
+    if (stack_save_reg == "%rbp") {
+      next
+    }
+    saw_stack_save = 1
+    next
+  }
+  in_call && saw_stack_save && /^[[:space:]]*callq?[[:space:]]+_?caml_c_call_stack_args/ {
+    state = "called_helper"
+    next
+  }
+  in_call && state == "called_helper" && $0 ~ "^[[:space:]]*movq[[:space:]]+" stack_save_reg ",[[:space:]]+%rsp" {
+    checked = 1
+    in_call = 0
+    next
+  }
+  in_call && /^[[:space:]]*\.cfi_endproc/ {
+    in_call = 0
+  }
+  END {
+    exit found && checked ? 0 : 1
+  }
+' "$asm"
