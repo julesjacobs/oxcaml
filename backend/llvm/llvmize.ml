@@ -3049,6 +3049,12 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
         elem_type = T.Int { width_in_bits }
       }
   in
+  let wide_int_vec_type ~vector_width_in_bits ~width_in_bits =
+    T.Vector
+      { num_of_elems = vector_width_in_bits / width_in_bits;
+        elem_type = T.Int { width_in_bits }
+      }
+  in
   let float_vec_type ~width =
     let elem_type, num_of_elems =
       match width with Cmm.Float32 -> T.float, 4 | Cmm.Float64 -> T.double, 2
@@ -3105,11 +3111,20 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let res = call_llvm_intrinsic t name [arg] typ in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
-  let simd_int_binary width_in_bits op =
-    let typ = int_vec_type ~width_in_bits in
+  let simd_int_binary ?(vector_width_in_bits = 128) width_in_bits op =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits in
     let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
     let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
     let res = emit_ins t (I.binary op ~arg1 ~arg2) in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_int_andnot ?(vector_width_in_bits = 128) width_in_bits =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let all_ones = int_vector_constant_like typ (-1) in
+    let not_arg1 = emit_ins t (I.binary Xor ~arg1 ~arg2:all_ones) in
+    let res = emit_ins t (I.binary And ~arg1:not_arg1 ~arg2) in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
   let simd_binary_intrinsic typ intrinsic =
@@ -3581,7 +3596,78 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
   | Amd64_prefetch { is_write; locality; addr } ->
     prefetch ~is_write ~locality addr
   | Amd64_cldemote addr -> cldemote addr
-  | Amd64_simd _ | Amd64_simd_mem _ ->
+  | Amd64_simd (instr_id, _imm) -> (
+    match[@warning "-4"] instr_id with
+    | Amd64_simd_instrs.Paddb | Amd64_simd_instrs.Vpaddb_X_X_Xm128 ->
+      simd_int_binary 8 Add
+    | Amd64_simd_instrs.Paddw | Amd64_simd_instrs.Vpaddw_X_X_Xm128 ->
+      simd_int_binary 16 Add
+    | Amd64_simd_instrs.Paddd | Amd64_simd_instrs.Vpaddd_X_X_Xm128 ->
+      simd_int_binary 32 Add
+    | Amd64_simd_instrs.Paddq | Amd64_simd_instrs.Vpaddq_X_X_Xm128 ->
+      simd_int_binary 64 Add
+    | Amd64_simd_instrs.Vpaddb_Y_Y_Ym256 ->
+      simd_int_binary ~vector_width_in_bits:256 8 Add
+    | Amd64_simd_instrs.Vpaddw_Y_Y_Ym256 ->
+      simd_int_binary ~vector_width_in_bits:256 16 Add
+    | Amd64_simd_instrs.Vpaddd_Y_Y_Ym256 ->
+      simd_int_binary ~vector_width_in_bits:256 32 Add
+    | Amd64_simd_instrs.Vpaddq_Y_Y_Ym256 ->
+      simd_int_binary ~vector_width_in_bits:256 64 Add
+    | Amd64_simd_instrs.Psubb | Amd64_simd_instrs.Vpsubb_X_X_Xm128 ->
+      simd_int_binary 8 Sub
+    | Amd64_simd_instrs.Psubw | Amd64_simd_instrs.Vpsubw_X_X_Xm128 ->
+      simd_int_binary 16 Sub
+    | Amd64_simd_instrs.Psubd | Amd64_simd_instrs.Vpsubd_X_X_Xm128 ->
+      simd_int_binary 32 Sub
+    | Amd64_simd_instrs.Psubq_X_Xm128 | Amd64_simd_instrs.Vpsubq_X_X_Xm128 ->
+      simd_int_binary 64 Sub
+    | Amd64_simd_instrs.Vpsubb_Y_Y_Ym256 ->
+      simd_int_binary ~vector_width_in_bits:256 8 Sub
+    | Amd64_simd_instrs.Vpsubw_Y_Y_Ym256 ->
+      simd_int_binary ~vector_width_in_bits:256 16 Sub
+    | Amd64_simd_instrs.Vpsubd_Y_Y_Ym256 ->
+      simd_int_binary ~vector_width_in_bits:256 32 Sub
+    | Amd64_simd_instrs.Vpsubq_Y_Y_Ym256 ->
+      simd_int_binary ~vector_width_in_bits:256 64 Sub
+    | Amd64_simd_instrs.Andps | Amd64_simd_instrs.Andpd
+    | Amd64_simd_instrs.Pand | Amd64_simd_instrs.Vandps_X_X_Xm128
+    | Amd64_simd_instrs.Vandpd_X_X_Xm128
+    | Amd64_simd_instrs.Vpand_X_X_Xm128 ->
+      simd_int_binary 64 And
+    | Amd64_simd_instrs.Andnps | Amd64_simd_instrs.Andnpd
+    | Amd64_simd_instrs.Pandn | Amd64_simd_instrs.Vandnps_X_X_Xm128
+    | Amd64_simd_instrs.Vandnpd_X_X_Xm128
+    | Amd64_simd_instrs.Vpandn_X_X_Xm128 ->
+      simd_int_andnot 64
+    | Amd64_simd_instrs.Orps | Amd64_simd_instrs.Orpd
+    | Amd64_simd_instrs.Por | Amd64_simd_instrs.Vorps_X_X_Xm128
+    | Amd64_simd_instrs.Vorpd_X_X_Xm128
+    | Amd64_simd_instrs.Vpor_X_X_Xm128 ->
+      simd_int_binary 64 Or
+    | Amd64_simd_instrs.Xorps | Amd64_simd_instrs.Xorpd
+    | Amd64_simd_instrs.Pxor | Amd64_simd_instrs.Vxorps_X_X_Xm128
+    | Amd64_simd_instrs.Vxorpd_X_X_Xm128
+    | Amd64_simd_instrs.Vpxor_X_X_Xm128 ->
+      simd_int_binary 64 Xor
+    | Amd64_simd_instrs.Vandps_Y_Y_Ym256
+    | Amd64_simd_instrs.Vandpd_Y_Y_Ym256
+    | Amd64_simd_instrs.Vpand_Y_Y_Ym256 ->
+      simd_int_binary ~vector_width_in_bits:256 64 And
+    | Amd64_simd_instrs.Vandnps_Y_Y_Ym256
+    | Amd64_simd_instrs.Vandnpd_Y_Y_Ym256
+    | Amd64_simd_instrs.Vpandn_Y_Y_Ym256 ->
+      simd_int_andnot ~vector_width_in_bits:256 64
+    | Amd64_simd_instrs.Vorps_Y_Y_Ym256
+    | Amd64_simd_instrs.Vorpd_Y_Y_Ym256
+    | Amd64_simd_instrs.Vpor_Y_Y_Ym256 ->
+      simd_int_binary ~vector_width_in_bits:256 64 Or
+    | Amd64_simd_instrs.Vxorps_Y_Y_Ym256
+    | Amd64_simd_instrs.Vxorpd_Y_Y_Ym256
+    | Amd64_simd_instrs.Vpxor_Y_Y_Ym256 ->
+      simd_int_binary ~vector_width_in_bits:256 64 Xor
+    | _ -> not_implemented_basic ~msg:"amd64 SIMD-specific operation" i)
+  | Amd64_simd_mem _ ->
     not_implemented_basic ~msg:"amd64 SIMD-specific operation" i
   | Bswap bitwidth -> bswap t i bitwidth
   | Llvm_intrinsic intrinsic_name -> intrinsic t i intrinsic_name
