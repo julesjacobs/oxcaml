@@ -3,11 +3,18 @@
 set -eu
 
 build_dir=$(pwd)
+host_arch=$(uname -m)
+host_system=$(uname -s)
 src="$build_dir/deep_compile_generated.ml"
 exe="$build_dir/deep_compile_generated.exe"
 out="$build_dir/deep_compile_generated.out"
 boundary_out="$build_dir/deep_compile_boundary.out"
 extra_ocamlopt_flags=""
+extra_link_flags=""
+
+case "$host_system:$host_arch" in
+  Linux:x86_64 | Linux:amd64) extra_link_flags="-ccopt -no-pie" ;;
+esac
 
 search_dir=$build_dir
 ocamlopt=""
@@ -27,6 +34,20 @@ if [ -z "$ocamlopt" ]; then
   fi
 fi
 
+stdlib_flags=""
+ocamlopt_dir=$(dirname "$ocamlopt")
+for stdlib_dir in \
+  "$ocamlopt_dir/lib/ocaml" \
+  "$ocamlopt_dir/_install/lib/ocaml" \
+  "$ocamlopt_dir/../lib/ocaml" \
+  "$ocamlopt_dir/../../runtime_stdlib_install/lib/ocaml_runtime_stdlib"
+do
+  if [ -f "$stdlib_dir/stdlib.cmi" ]; then
+    stdlib_flags="-I $stdlib_dir"
+    break
+  fi
+done
+
 {
   echo '[@@@warning "-26"]'
   echo 'external opaque : int -> int = "%opaque"'
@@ -42,7 +63,8 @@ fi
 } > "$src"
 
 OCAMLRUNPARAM=b,l=2000000 \
-  "$ocamlopt" -O3 -g -llvm-backend \
+  "$ocamlopt" $stdlib_flags -O3 -llvm-backend \
+  $extra_link_flags \
   $extra_ocamlopt_flags \
   -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
   -o "$exe" "$src"
@@ -57,7 +79,8 @@ diff -u "$build_dir/deep_compile_generated.expected" "$out"
 
 set +e
 OCAMLRUNPARAM=b=1,l=16384 \
-  "$ocamlopt" -O3 -g -llvm-backend \
+  "$ocamlopt" $stdlib_flags -O3 -llvm-backend \
+  $extra_link_flags \
   $extra_ocamlopt_flags \
   -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
   -o "$exe.too_small" "$src" > "$boundary_out" 2>&1
@@ -85,7 +108,8 @@ i=1
 while [ "$i" -le 5 ]; do
   set +e
   OCAMLRUNPARAM=b=1,l=32768 \
-    "$ocamlopt" -O3 -g -llvm-backend \
+    "$ocamlopt" $stdlib_flags -O3 -llvm-backend \
+    $extra_link_flags \
     $extra_ocamlopt_flags \
     -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
     -o "$exe.boundary" "$src" > "$boundary_out" 2>&1
