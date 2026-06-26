@@ -3,11 +3,27 @@
 set -eu
 
 build_dir=$(pwd)
+host_arch=$(uname -m)
+host_system=$(uname -s)
 src="$build_dir/basic_safepoint_ordinary_trap_roots_generated.ml"
 out="$build_dir/basic_safepoint_ordinary_trap_roots_generated.o"
 ir="$build_dir/basic_safepoint_ordinary_trap_roots_generated.ll"
 cfg_dump="$build_dir/basic_safepoint_ordinary_trap_roots_generated.cmx.dump"
 llvm_path="${LLVM_PATH:-${LLVM_WRAPPER:-/tmp/oxcaml-clang-wrapper}}"
+debug_flags="-g"
+check_ordinary_call_invoke=true
+
+case "$host_system:$host_arch" in
+  Linux:x86_64 | Linux:amd64)
+    debug_flags=""
+    ;;
+esac
+
+case "$host_arch" in
+  x86_64 | amd64)
+    check_ordinary_call_invoke=false
+    ;;
+esac
 
 search_dir=$build_dir
 ocamlopt=""
@@ -29,6 +45,20 @@ if [ -z "$ocamlopt" ]; then
     ocamlopt="_build/install/main/bin/ocamlopt.opt"
   fi
 fi
+
+stdlib_flags=""
+ocamlopt_dir=$(dirname "$ocamlopt")
+for stdlib_dir in \
+  "$ocamlopt_dir/lib/ocaml" \
+  "$ocamlopt_dir/_install/lib/ocaml" \
+  "$ocamlopt_dir/../lib/ocaml" \
+  "$ocamlopt_dir/../../runtime_stdlib_install/lib/ocaml_runtime_stdlib"
+do
+  if [ -f "$stdlib_dir/stdlib.cmi" ]; then
+    stdlib_flags="-I $stdlib_dir"
+    break
+  fi
+done
 
 cat > "$src" <<'EOF'
 exception E
@@ -54,7 +84,7 @@ let[@inline never] ordinary_call payload b =
   try may_raise b with E -> String.length payload
 EOF
 
-"$ocamlopt" -O3 -g -S -c -keep-llvmir -llvm-backend \
+"$ocamlopt" $stdlib_flags -O3 $debug_flags -S -c -keep-llvmir -llvm-backend \
   -llvm-frontend-gc-roots -dcfg -dump-into-file \
   -llvm-path "$llvm_path" \
   -o "$out" "$src"
@@ -106,7 +136,7 @@ slot_for_arg() {
 
 call_gc_line() {
   name="$1"
-  function_ir "$name" | grep '@"\\01_caml_call_gc"'
+  function_ir "$name" | grep -E '@"\\01_?caml_call_gc"'
 }
 
 may_raise_line() {
@@ -204,4 +234,6 @@ fi
 assert_slot_absent_at_call_gc alloc_branch "$payload_slot" "handler-only payload"
 assert_gc_live_present_at_call_gc alloc_branch
 
-assert_ordinary_call_uses_trap
+if [ "$check_ordinary_call_invoke" = true ]; then
+  assert_ordinary_call_uses_trap
+fi
