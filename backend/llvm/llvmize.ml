@@ -3302,6 +3302,35 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_variable_shift_x86 ?(vector_width_in_bits = 128) width_in_bits
+      (op : I.binary_op) =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let shift = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let oversized =
+      emit_ins t
+        (I.icmp I.Iuge ~arg1:shift
+           ~arg2:(int_vector_constant_like typ width_in_bits))
+    in
+    let clamped_shift =
+      emit_ins t
+        (I.select ~cond:oversized
+           ~ifso:(int_vector_constant_like typ (width_in_bits - 1))
+           ~ifnot:shift)
+    in
+    let shifted = emit_ins t (I.binary op ~arg1:arg ~arg2:clamped_shift) in
+    let res =
+      match[@warning "-8"] op with
+      | Shl | Lshr ->
+        emit_ins t
+          (I.select ~cond:oversized ~ifso:(V.zeroinitializer typ)
+             ~ifnot:shifted)
+      | Ashr -> shifted
+      | Add | Sub | Mul | Udiv | Sdiv | Urem | Srem | And | Or | Xor ->
+        Misc.fatal_error "expected shift operation"
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_dup_lane width_in_bits lane =
     let typ = int_vec_type ~width_in_bits in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -4269,6 +4298,26 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_movemask ~vector_width_in_bits:128 64
     | Amd64_simd_instrs.Vmovmskpd_r64_Y ->
       simd_movemask ~vector_width_in_bits:256 64
+    | Amd64_simd_instrs.Vpsllvd_X_X_Xm128 ->
+      simd_int_variable_shift_x86 32 Shl
+    | Amd64_simd_instrs.Vpsllvq_X_X_Xm128 ->
+      simd_int_variable_shift_x86 64 Shl
+    | Amd64_simd_instrs.Vpsllvd_Y_Y_Ym256 ->
+      simd_int_variable_shift_x86 ~vector_width_in_bits:256 32 Shl
+    | Amd64_simd_instrs.Vpsllvq_Y_Y_Ym256 ->
+      simd_int_variable_shift_x86 ~vector_width_in_bits:256 64 Shl
+    | Amd64_simd_instrs.Vpsrlvd_X_X_Xm128 ->
+      simd_int_variable_shift_x86 32 Lshr
+    | Amd64_simd_instrs.Vpsrlvq_X_X_Xm128 ->
+      simd_int_variable_shift_x86 64 Lshr
+    | Amd64_simd_instrs.Vpsrlvd_Y_Y_Ym256 ->
+      simd_int_variable_shift_x86 ~vector_width_in_bits:256 32 Lshr
+    | Amd64_simd_instrs.Vpsrlvq_Y_Y_Ym256 ->
+      simd_int_variable_shift_x86 ~vector_width_in_bits:256 64 Lshr
+    | Amd64_simd_instrs.Vpsravd_X_X_Xm128 ->
+      simd_int_variable_shift_x86 32 Ashr
+    | Amd64_simd_instrs.Vpsravd_Y_Y_Ym256 ->
+      simd_int_variable_shift_x86 ~vector_width_in_bits:256 32 Ashr
     | Amd64_simd_instrs.Andps | Amd64_simd_instrs.Andpd
     | Amd64_simd_instrs.Pand | Amd64_simd_instrs.Vandps_X_X_Xm128
     | Amd64_simd_instrs.Vandpd_X_X_Xm128
