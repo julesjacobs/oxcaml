@@ -3263,6 +3263,34 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_shift_bytes_imm ?(vector_width_in_bits = 128) n ~left =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits:8 in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let lanes = vector_width_in_bits / 8 in
+    let res =
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let lane_base = (lane / 16) * 16 in
+             let lane_offset = lane - lane_base in
+             let src_offset =
+               if left then lane_offset - n else lane_offset + n
+             in
+             let elem =
+               if src_offset < 0 || src_offset >= 16
+               then V.of_int ~typ:T.i8 0
+               else
+                 emit_ins t
+                   (I.extractelement ~vector:arg
+                      ~index:(V.of_int (lane_base + src_offset)))
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane)
+                  ~to_insert:elem))
+           (V.poison typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_variable_shift width_in_bits intrinsic =
     let typ = int_vec_type ~width_in_bits in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -4163,6 +4191,16 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_shift_count ~vector_width_in_bits:256 16 Ashr
     | Amd64_simd_instrs.Vpsrad_Y_Y_Xm128 ->
       simd_int_shift_count ~vector_width_in_bits:256 32 Ashr
+    | Amd64_simd_instrs.Pslldq | Amd64_simd_instrs.Vpslldq_X_X ->
+      simd_int_shift_bytes_imm (require_imm instr_id imm) ~left:true
+    | Amd64_simd_instrs.Psrldq | Amd64_simd_instrs.Vpsrldq_X_X ->
+      simd_int_shift_bytes_imm (require_imm instr_id imm) ~left:false
+    | Amd64_simd_instrs.Vpslldq_Y_Y ->
+      simd_int_shift_bytes_imm ~vector_width_in_bits:256
+        (require_imm instr_id imm) ~left:true
+    | Amd64_simd_instrs.Vpsrldq_Y_Y ->
+      simd_int_shift_bytes_imm ~vector_width_in_bits:256
+        (require_imm instr_id imm) ~left:false
     | Amd64_simd_instrs.Andps | Amd64_simd_instrs.Andpd
     | Amd64_simd_instrs.Pand | Amd64_simd_instrs.Vandps_X_X_Xm128
     | Amd64_simd_instrs.Vandpd_X_X_Xm128
