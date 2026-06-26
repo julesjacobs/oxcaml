@@ -6264,16 +6264,21 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
   | Opaque ->
     let temp = load_reg_to_temp t i.arg.(0) in
     let typ = V.get_type temp in
-    let opaque_temp =
+    let constraints =
       match[@warning "-fragile-match"] typ with
-      | T.Vector _ ->
-        emit_ins t
-          (I.inline_asm ~asm:"" ~constraints:"=w,0" ~args:[temp]
-             ~res_type:(Some typ) ~sideeffect:false)
-      | _ ->
-        emit_ins t
-          (I.inline_asm ~asm:"" ~constraints:"=r,0" ~args:[temp]
-             ~res_type:(Some typ) ~sideeffect:false)
+      | T.Vector _ -> (
+        match Target_system.architecture () with
+        | Target_system.AArch64 -> "=w,0"
+        | Target_system.X86_64 | Target_system.IA32 -> "=x,0"
+        | Target_system.ARM | Target_system.POWER | Target_system.Z
+        | Target_system.Riscv ->
+          fail_msg ~name:"Opaque" "unsupported vector opaque constraint")
+      | _ -> "=r,0"
+    in
+    let opaque_temp =
+      emit_ins t
+        (I.inline_asm ~asm:"" ~constraints ~args:[temp] ~res_type:(Some typ)
+           ~sideeffect:false)
     in
     store_into_reg t i.res.(0) opaque_temp
   | Const_int n ->

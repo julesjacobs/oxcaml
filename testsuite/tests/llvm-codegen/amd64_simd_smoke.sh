@@ -150,6 +150,21 @@ external blend_256_32 :
   = "caml_vec256_unreachable" "caml_avx_vec256_blend_32"
 [@@noalloc] [@@builtin]
 
+let[@inline never] force_alloc () =
+  ignore (Array.init 128 (fun i -> i + 1))
+
+let[@inline never] opaque_vec128_sum v =
+  let v = Sys.opaque_identity v in
+  force_alloc ();
+  Int64.add (int64x2_low_int64 v) (int64x2_high_int64 v)
+
+let[@inline never] opaque_vec256_sum v =
+  let v = Sys.opaque_identity v in
+  force_alloc ();
+  Int64.add
+    (Int64.add (int64x4_lane0 v) (int64x4_lane1 v))
+    (Int64.add (int64x4_lane2 v) (int64x4_lane3 v))
+
 let () =
   Printf.printf "%.1f %.1f\n" (min_float64 3.0 4.0) (max_float64 3.0 4.0);
   let v0 = int32x4_of_int64s 0x00000001_00000000L 0x00000003_00000002L in
@@ -183,7 +198,11 @@ let () =
     (int32x8_lane01 r32x8)
     (int32x8_lane23 r32x8)
     (int32x8_lane45 r32x8)
-    (int32x8_lane67 r32x8)
+    (int32x8_lane67 r32x8);
+  Printf.printf "opaque:%Ld\n"
+    (opaque_vec128_sum (int64x2_of_int64s 21L 34L));
+  Printf.printf "opaque256:%Ld\n"
+    (opaque_vec256_sum (int64x4_of_int64s 1L 2L 3L 4L))
 EOF
 
 cat > "$stub_src" <<'EOF'
@@ -275,7 +294,9 @@ expected='3.0 4.0
 0000000100000004 0000000300000006
 2 1
 4 1 6 3
-0000000100000008 000000030000000a 000000050000000c 000000070000000e'
+0000000100000008 000000030000000a 000000050000000c 000000070000000e
+opaque:55
+opaque256:10'
 
 actual=$(cat "$stdout_file")
 if [ "$actual" != "$expected" ]; then
