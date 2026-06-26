@@ -451,6 +451,20 @@ def RetCC_X86_64_OxCaml : CallingConv<[
   CCIfType<[f32, f64], CCAssignToReg<[
     XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7,
     XMM8, XMM9, XMM10, XMM11, XMM12, XMM13, XMM14, XMM15
+  ]>>,
+
+  // OxCaml represents 128/256/512-bit SIMD values as integer vectors in LLVM.
+  CCIfType<[v2i64, v4i32, v8i16, v16i8, v4f32, v2f64], CCAssignToReg<[
+    XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7,
+    XMM8, XMM9, XMM10, XMM11, XMM12, XMM13, XMM14, XMM15
+  ]>>,
+  CCIfType<[v4i64, v8i32, v16i16, v32i8, v8f32, v4f64], CCAssignToReg<[
+    YMM0, YMM1, YMM2, YMM3, YMM4, YMM5, YMM6, YMM7,
+    YMM8, YMM9, YMM10, YMM11, YMM12, YMM13, YMM14, YMM15
+  ]>>,
+  CCIfType<[v8i64, v16i32, v32i16, v64i8, v16f32, v8f64], CCAssignToReg<[
+    ZMM0, ZMM1, ZMM2, ZMM3, ZMM4, ZMM5, ZMM6, ZMM7,
+    ZMM8, ZMM9, ZMM10, ZMM11, ZMM12, ZMM13, ZMM14, ZMM15
   ]>>
 ]>;
 
@@ -461,6 +475,15 @@ def RetCC_X86_64_OxCaml_C_Call : CallingConv<[
 ]>;
 
 def RetCC_X86_64_OxCaml_C_Call_StackArgs : CallingConv<[
+  CCIfType<[i64], CCAssignToReg<[R14, R15]>>,
+
+  CCDelegateTo<RetCC_X86_64_C>
+]>;
+
+def RetCC_X86_64_OxCaml_C_Direct_Call : CallingConv<[
+  // Hidden runtime-register results: R14 is domain state, R15 is allocation
+  // pointer. C callees preserve both under the SysV AMD64 ABI, so these model
+  // the dependency without requiring real data movement.
   CCIfType<[i64], CCAssignToReg<[R14, R15]>>,
 
   CCDelegateTo<RetCC_X86_64_C>
@@ -525,7 +548,9 @@ def RetCC_X86_64 : CallingConv<[
   CCIfCC<"CallingConv::OxCaml_C_Call", CCDelegateTo<RetCC_X86_64_OxCaml_C_Call>>,
   CCIfCC<"CallingConv::OxCaml_C_Call_StackArgs",
     CCDelegateTo<RetCC_X86_64_OxCaml_C_Call_StackArgs>>,
-  
+  CCIfCC<"CallingConv::OxCaml_C_Direct_Call",
+    CCDelegateTo<RetCC_X86_64_OxCaml_C_Direct_Call>>,
+
   // See arg CC for OxCaml_Alloc for why we use OxCaml here.
   CCIfCC<"CallingConv::OxCaml_Alloc", CCDelegateTo<RetCC_X86_64_OxCaml>>,
 
@@ -752,6 +777,20 @@ def CC_X86_64_OxCaml : CallingConv<[
   CCIfType<[f32, f64], CCAssignToReg<[
     XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7,
     XMM8, XMM9, XMM10, XMM11, XMM12, XMM13, XMM14, XMM15
+  ]>>,
+
+  // OxCaml represents 128/256/512-bit SIMD values as integer vectors in LLVM.
+  CCIfType<[v2i64, v4i32, v8i16, v16i8, v4f32, v2f64], CCAssignToReg<[
+    XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7,
+    XMM8, XMM9, XMM10, XMM11, XMM12, XMM13, XMM14, XMM15
+  ]>>,
+  CCIfType<[v4i64, v8i32, v16i16, v32i8, v8f32, v4f64], CCAssignToReg<[
+    YMM0, YMM1, YMM2, YMM3, YMM4, YMM5, YMM6, YMM7,
+    YMM8, YMM9, YMM10, YMM11, YMM12, YMM13, YMM14, YMM15
+  ]>>,
+  CCIfType<[v8i64, v16i32, v32i16, v64i8, v16f32, v8f64], CCAssignToReg<[
+    ZMM0, ZMM1, ZMM2, ZMM3, ZMM4, ZMM5, ZMM6, ZMM7,
+    ZMM8, ZMM9, ZMM10, ZMM11, ZMM12, ZMM13, ZMM14, ZMM15
   ]>>
 ]>;
 
@@ -769,6 +808,15 @@ def CC_X86_64_OxCaml_C_Call_StackArgs : CallingConv<[
   // transfer of stack arguments. As before, RAX is the function ptr, and [R13, R12]
   // delimit arguments on the stack
   CCIfType<[i64], CCAssignToReg<[R14, R15, RAX, R13, R12]>>,
+
+  // Follow C convention normally otherwise
+  CCDelegateTo<CC_X86_64_C>
+]>;
+
+def CC_X86_64_OxCaml_C_Direct_Call : CallingConv<[
+  // Hidden runtime-register arguments: R14 is domain state, R15 is allocation
+  // pointer. Ordinary C arguments start after these and follow the C ABI.
+  CCIfType<[i64], CCAssignToReg<[R14, R15]>>,
 
   // Follow C convention normally otherwise
   CCDelegateTo<CC_X86_64_C>
@@ -1183,6 +1231,8 @@ def CC_X86_64 : CallingConv<[
   CCIfCC<"CallingConv::OxCaml_C_Call", CCDelegateTo<CC_X86_64_OxCaml_C_Call>>,
   CCIfCC<"CallingConv::OxCaml_C_Call_StackArgs",
     CCDelegateTo<CC_X86_64_OxCaml_C_Call_StackArgs>>,
+  CCIfCC<"CallingConv::OxCaml_C_Direct_Call",
+    CCDelegateTo<CC_X86_64_OxCaml_C_Direct_Call>>,
 
   // OxCaml_Alloc follows the same CC as OxCaml, but doesn't pass arguments
   // (or return) in any non-runtime register. So, as long as it is used that way,

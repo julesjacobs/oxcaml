@@ -41,6 +41,20 @@ using namespace llvm;
 #define GET_REGINFO_TARGET_DESC
 #include "X86GenRegisterInfo.inc"
 
+static bool isOxCamlCallingConv(CallingConv::ID CC) {
+  switch (CC) {
+  case CallingConv::OxCaml_WithFP:
+  case CallingConv::OxCaml_WithoutFP:
+  case CallingConv::OxCaml_C_Call:
+  case CallingConv::OxCaml_C_Call_StackArgs:
+  case CallingConv::OxCaml_C_Direct_Call:
+  case CallingConv::OxCaml_Alloc:
+    return true;
+  default:
+    return false;
+  }
+}
+
 static cl::opt<bool>
 EnableBasePointer("x86-use-base-pointer", cl::Hidden, cl::init(true),
           cl::desc("Enable use of a base pointer for complex stack frames"));
@@ -309,6 +323,8 @@ X86RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
     return CSR_64_OxCaml_C_Call_SaveList;
   case CallingConv::OxCaml_C_Call_StackArgs:
     return CSR_64_OxCaml_C_Call_StackArgs_SaveList;
+  case CallingConv::OxCaml_C_Direct_Call:
+    return IsWin64 ? CSR_Win64_SaveList : CSR_64_SaveList;
   case CallingConv::OxCaml_Alloc:
     return CSR_64_OxCaml_Alloc_SaveList;
   case CallingConv::AnyReg:
@@ -442,6 +458,8 @@ X86RegisterInfo::getCallPreservedMask(const MachineFunction &MF,
     return CSR_64_OxCaml_C_Call_RegMask;
   case CallingConv::OxCaml_C_Call_StackArgs:
     return CSR_64_OxCaml_C_Call_StackArgs_RegMask;
+  case CallingConv::OxCaml_C_Direct_Call:
+    return IsWin64 ? CSR_Win64_RegMask : CSR_64_RegMask;
   case CallingConv::OxCaml_Alloc:
     return CSR_64_OxCaml_Alloc_RegMask;
   case CallingConv::AnyReg:
@@ -548,6 +566,27 @@ const uint32_t *X86RegisterInfo::getDarwinTLSCallPreservedMask() const {
   return CSR_64_TLS_Darwin_RegMask;
 }
 
+static constexpr MCPhysReg OxCamlRuntimeEnteredLiveIns[] = {
+    X86::RAX, X86::R14, X86::R15};
+
+bool X86RegisterInfo::isRuntimeEnteredLiveIn(const MachineFunction &MF,
+                                             MCRegister PhysReg) const {
+  if (!MF.getFunction().hasGC() ||
+      (MF.getFunction().getGC() != "oxcaml" &&
+       MF.getFunction().getGC() != "ocaml"))
+    return false;
+  return is_contained(OxCamlRuntimeEnteredLiveIns, PhysReg);
+}
+
+ArrayRef<MCPhysReg>
+X86RegisterInfo::getRuntimeEnteredLiveIns(const MachineFunction &MF) const {
+  if (!MF.getFunction().hasGC() ||
+      (MF.getFunction().getGC() != "oxcaml" &&
+       MF.getFunction().getGC() != "ocaml"))
+    return {};
+  return OxCamlRuntimeEnteredLiveIns;
+}
+
 BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   BitVector Reserved(getNumRegs());
   const X86FrameLowering *TFI = getFrameLowering(MF);
@@ -571,6 +610,13 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   // Set the instruction pointer register and its aliases as reserved.
   for (const MCPhysReg &SubReg : subregs_inclusive(X86::RIP))
     Reserved.set(SubReg);
+
+  if (isOxCamlCallingConv(MF.getFunction().getCallingConv())) {
+    for (const MCPhysReg &SubReg : subregs_inclusive(X86::R14))
+      Reserved.set(SubReg);
+    for (const MCPhysReg &SubReg : subregs_inclusive(X86::R15))
+      Reserved.set(SubReg);
+  }
 
   // Set the frame-pointer register and its aliases as reserved if needed.
   if (TFI->hasFP(MF)) {
