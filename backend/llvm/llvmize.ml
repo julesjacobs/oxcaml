@@ -3530,8 +3530,8 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
     | _ -> Misc.fatal_error "expected vector type"
   in
-  let simd_int_cmp width_in_bits cond ~zero =
-    let typ = int_vec_type ~width_in_bits in
+  let simd_int_cmp ?(vector_width_in_bits = 128) width_in_bits cond ~zero =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits in
     let cond =
       match cond with
       | Int_EQ -> I.Ieq
@@ -3716,6 +3716,38 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_minmax ~vector_width_in_bits:256 16 I.Islt
     | Amd64_simd_instrs.Vpminsd_Y_Y_Ym256 ->
       simd_int_minmax ~vector_width_in_bits:256 32 I.Islt
+    | Amd64_simd_instrs.Pcmpeqb | Amd64_simd_instrs.Vpcmpeqb_X_X_Xm128 ->
+      simd_int_cmp 8 Int_EQ ~zero:false
+    | Amd64_simd_instrs.Pcmpeqw | Amd64_simd_instrs.Vpcmpeqw_X_X_Xm128 ->
+      simd_int_cmp 16 Int_EQ ~zero:false
+    | Amd64_simd_instrs.Pcmpeqd | Amd64_simd_instrs.Vpcmpeqd_X_X_Xm128 ->
+      simd_int_cmp 32 Int_EQ ~zero:false
+    | Amd64_simd_instrs.Pcmpeqq | Amd64_simd_instrs.Vpcmpeqq_X_X_Xm128 ->
+      simd_int_cmp 64 Int_EQ ~zero:false
+    | Amd64_simd_instrs.Vpcmpeqb_Y_Y_Ym256 ->
+      simd_int_cmp ~vector_width_in_bits:256 8 Int_EQ ~zero:false
+    | Amd64_simd_instrs.Vpcmpeqw_Y_Y_Ym256 ->
+      simd_int_cmp ~vector_width_in_bits:256 16 Int_EQ ~zero:false
+    | Amd64_simd_instrs.Vpcmpeqd_Y_Y_Ym256 ->
+      simd_int_cmp ~vector_width_in_bits:256 32 Int_EQ ~zero:false
+    | Amd64_simd_instrs.Vpcmpeqq_Y_Y_Ym256 ->
+      simd_int_cmp ~vector_width_in_bits:256 64 Int_EQ ~zero:false
+    | Amd64_simd_instrs.Pcmpgtb | Amd64_simd_instrs.Vpcmpgtb_X_X_Xm128 ->
+      simd_int_cmp 8 Int_GT ~zero:false
+    | Amd64_simd_instrs.Pcmpgtw | Amd64_simd_instrs.Vpcmpgtw_X_X_Xm128 ->
+      simd_int_cmp 16 Int_GT ~zero:false
+    | Amd64_simd_instrs.Pcmpgtd | Amd64_simd_instrs.Vpcmpgtd_X_X_Xm128 ->
+      simd_int_cmp 32 Int_GT ~zero:false
+    | Amd64_simd_instrs.Pcmpgtq | Amd64_simd_instrs.Vpcmpgtq_X_X_Xm128 ->
+      simd_int_cmp 64 Int_GT ~zero:false
+    | Amd64_simd_instrs.Vpcmpgtb_Y_Y_Ym256 ->
+      simd_int_cmp ~vector_width_in_bits:256 8 Int_GT ~zero:false
+    | Amd64_simd_instrs.Vpcmpgtw_Y_Y_Ym256 ->
+      simd_int_cmp ~vector_width_in_bits:256 16 Int_GT ~zero:false
+    | Amd64_simd_instrs.Vpcmpgtd_Y_Y_Ym256 ->
+      simd_int_cmp ~vector_width_in_bits:256 32 Int_GT ~zero:false
+    | Amd64_simd_instrs.Vpcmpgtq_Y_Y_Ym256 ->
+      simd_int_cmp ~vector_width_in_bits:256 64 Int_GT ~zero:false
     | Amd64_simd_instrs.Andps | Amd64_simd_instrs.Andpd
     | Amd64_simd_instrs.Pand | Amd64_simd_instrs.Vandps_X_X_Xm128
     | Amd64_simd_instrs.Vandpd_X_X_Xm128
