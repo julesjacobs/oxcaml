@@ -7652,8 +7652,8 @@ let invoke_clang_with_llvmir ~output_filename ~input_filename ~extra_flags =
        @ ["-o"; Filename.quote output_filename]
        @ ["-x ir"; Filename.quote input_filename]
        @ ["-O3"; "-S"; "-Wno-override-module"]
-       @ fixed_reg_flags @ fp_flags @ branch_shape_flags @ llvm_flags
-       @ extra_flags))
+       @ fixed_reg_flags @ fp_flags @ branch_shape_flags
+       @ Arch.llvm_target_feature_flags () @ llvm_flags @ extra_flags))
 
 let llvmir_to_assembly t =
   match t.asm_filename with

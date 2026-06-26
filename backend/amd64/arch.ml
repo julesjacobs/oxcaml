@@ -220,6 +220,31 @@ let command_line_options =
        built with AddressSanitizer support enabled."
   ] @ Extension.args
 
+let llvm_target_feature_flags () =
+  let flag_for_enabled_extension (ext : Extension.t) =
+    let flag =
+      match ext with
+      | POPCNT -> "-mpopcnt"
+      | LZCNT -> "-mlzcnt"
+      | PREFETCHW -> "-mprfchw"
+      | PREFETCHWT1 -> "-mprefetchwt1"
+      | SSE3 -> "-msse3"
+      | SSSE3 -> "-mssse3"
+      | SSE4_1 -> "-msse4.1"
+      | SSE4_2 -> "-msse4.2"
+      | CLMUL -> "-mpclmul"
+      | BMI -> "-mbmi"
+      | BMI2 -> "-mbmi2"
+      | AVX -> "-mavx"
+      | AVX2 -> "-mavx2"
+      | F16C -> "-mf16c"
+      | FMA -> "-mfma"
+      | AVX512F -> "-mavx512f"
+    in
+    if Extension.enabled ext then Some flag else None
+  in
+  List.filter_map flag_for_enabled_extension (Extension.available ())
+
 (* Specific operations for the AMD64 processor *)
 
 open Format

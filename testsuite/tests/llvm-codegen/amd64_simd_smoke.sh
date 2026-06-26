@@ -266,7 +266,6 @@ int64_t vec256_lane3(__m256i v)
 EOF
 
 "$ocamlopt" $stdlib_flags -extension simd_beta -favx -ccopt -mavx -llvm-backend \
-  -llvm-flags -mavx \
   -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
   -o "$out" "$stub_src" "$src"
 
