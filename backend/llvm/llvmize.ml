@@ -4608,7 +4608,23 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
       V.imm T.vec128 (Format.asprintf "<%s, %s>" (elem word0) (elem word1))
     in
     store_into_reg t i.res.(0) vector
-  | Const_vec256 _ | Const_vec512 _ -> not_implemented_basic ~msg:"const_vec" i
+  | Const_vec256 { word0; word1; word2; word3 } ->
+    let elem word = Format.asprintf "i64 %Ld" word in
+    let vector =
+      V.imm T.vec256
+        (Format.asprintf "<%s, %s, %s, %s>" (elem word0) (elem word1)
+           (elem word2) (elem word3))
+    in
+    store_into_reg t i.res.(0) vector
+  | Const_vec512 { word0; word1; word2; word3; word4; word5; word6; word7 } ->
+    let elem word = Format.asprintf "i64 %Ld" word in
+    let vector =
+      V.imm T.vec512
+        (Format.asprintf "<%s, %s, %s, %s, %s, %s, %s, %s>" (elem word0)
+           (elem word1) (elem word2) (elem word3) (elem word4) (elem word5)
+           (elem word6) (elem word7))
+    in
+    store_into_reg t i.res.(0) vector
   (* [mutability] is used by CFG optimizations before final lowering. *)
   | Load { memory_chunk; addressing_mode; mutability = _; is_atomic } ->
     load t i memory_chunk addressing_mode ~is_atomic
