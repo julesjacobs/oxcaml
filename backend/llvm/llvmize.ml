@@ -3347,6 +3347,37 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_movemask ~vector_width_in_bits width_in_bits =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let elem_typ = T.Int { width_in_bits } in
+    let lanes = vector_width_in_bits / width_in_bits in
+    let res =
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun acc lane ->
+             let elem =
+               emit_ins t
+                 (I.extractelement ~vector:arg ~index:(V.of_int lane))
+             in
+             let sign_bit =
+               emit_ins t
+                 (I.binary Lshr ~arg1:elem
+                    ~arg2:(V.of_int ~typ:elem_typ (width_in_bits - 1)))
+             in
+             let bit =
+               emit_ins t
+                 (I.convert Zext ~arg:sign_bit ~to_:T.i64)
+             in
+             let shifted =
+               emit_ins t
+                 (I.binary Shl ~arg1:bit ~arg2:(V.of_int ~typ:T.i64 lane))
+             in
+             emit_ins t (I.binary Or ~arg1:acc ~arg2:shifted))
+           (V.of_int ~typ:T.i64 0)
+    in
+    store_int_res res
+  in
   let simd_int_get_lane width_in_bits lane =
     let typ = int_vec_type ~width_in_bits in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -4225,6 +4256,19 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | Amd64_simd_instrs.Vpsrldq_Y_Y ->
       simd_int_shift_bytes_imm ~vector_width_in_bits:256
         (require_imm instr_id imm) ~left:false
+    | Amd64_simd_instrs.Pmovmskb_r64_X
+    | Amd64_simd_instrs.Vpmovmskb_r64_X ->
+      simd_movemask ~vector_width_in_bits:128 8
+    | Amd64_simd_instrs.Vpmovmskb_r64_Y ->
+      simd_movemask ~vector_width_in_bits:256 8
+    | Amd64_simd_instrs.Movmskps | Amd64_simd_instrs.Vmovmskps_r64_X ->
+      simd_movemask ~vector_width_in_bits:128 32
+    | Amd64_simd_instrs.Vmovmskps_r64_Y ->
+      simd_movemask ~vector_width_in_bits:256 32
+    | Amd64_simd_instrs.Movmskpd | Amd64_simd_instrs.Vmovmskpd_r64_X ->
+      simd_movemask ~vector_width_in_bits:128 64
+    | Amd64_simd_instrs.Vmovmskpd_r64_Y ->
+      simd_movemask ~vector_width_in_bits:256 64
     | Amd64_simd_instrs.Andps | Amd64_simd_instrs.Andpd
     | Amd64_simd_instrs.Pand | Amd64_simd_instrs.Vandps_X_X_Xm128
     | Amd64_simd_instrs.Vandpd_X_X_Xm128
