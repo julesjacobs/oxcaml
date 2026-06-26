@@ -26,6 +26,8 @@
 #include "llvm/CodeGen/SlotIndexes.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 
+#include "OxCamlTargetABI.h"
+
 namespace llvm {
 namespace oxcamlroots {
 
@@ -74,6 +76,7 @@ class GCValueness {
   LiveStacks &LS;
   SlotIndexes &Indexes;
   const TargetInstrInfo *TII;
+  OxCamlTargetABI ABI;
   const SmallSet<int, 16> &ValueHomeFIs;
   DenseSet<Key> Seeds;
   // 1 = value, 2 = not a value, 3 = in progress (optimistic).

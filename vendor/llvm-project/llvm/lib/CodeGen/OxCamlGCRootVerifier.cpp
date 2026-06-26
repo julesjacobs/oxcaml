@@ -152,21 +152,6 @@ static void walkGCPtrSection(const MachineInstr &MI,
   }
 }
 
-/// True for statepoints whose callee runs SAVE_ALL_REGS (alloc family:
-/// caml_call_gc / realloc entries) — the only sites where the runtime can
-/// resolve frame-descriptor REGISTER roots (against the gc_regs bucket).
-/// Identified by the regmask preserving x0, which no other OxCaml callee
-/// convention does.
-static bool isAllocFamilyMask(const uint32_t *RegMask,
-                              const TargetRegisterInfo *TRI) {
-  if (!RegMask)
-    return false;
-  for (unsigned R = 1, E = TRI->getNumRegs(); R != E; ++R)
-    if (StringRef(TRI->getName(R)) == "X0")
-      return !MachineOperand::clobbersPhysReg(RegMask, R);
-  return false;
-}
-
 static const uint32_t *getStatepointRegMask(const MachineInstr &MI) {
   for (const MachineOperand &MO : MI.operands())
     if (MO.isRegMask())
@@ -307,6 +292,8 @@ bool OxCamlGCRootVerifier::runOnMachineFunction(MachineFunction &MF) {
   MachineDominatorTree &MDT = getAnalysis<MachineDominatorTree>();
   const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
   const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
+  oxcamlroots::OxCamlTargetABI ABI =
+      oxcamlroots::OxCamlTargetABI::get(MF);
 
   DenseSet<Register> GCRegs, DerivedRegs;
   computeGCAndDerivedSets(MF, Statepoints, LS, TII, GCRegs, DerivedRegs);
@@ -436,7 +423,7 @@ bool OxCamlGCRootVerifier::runOnMachineFunction(MachineFunction &MF) {
           // after the call, which slot-only relocation prevents for
           // RS4GC-tracked values. Report real findings at alloc sites,
           // info elsewhere.
-          if (isAllocFamilyMask(RegMask, TRI)) {
+          if (oxcamlroots::isAllocFamilyMask(ABI, RegMask, TRI)) {
             ++NumUnlistedRegRoots;
             Report(*MI) << "gc vreg " << printReg(R, TRI)
                         << " is a second, unlisted register location ("

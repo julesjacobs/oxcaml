@@ -349,10 +349,11 @@ static void collectGCSlots(const DenseSet<Register> &GCRegs, VirtRegMap &VRM,
 /// resolves odd live_ofs entries against the gc_regs bucket, which at any
 /// other safepoint (e.g. a C call that allocates) dangles at the last
 /// freed bucket — a register entry there hands the GC garbage. The family
-/// is identified by its regmask: the alloc convention preserves x0, which
-/// no other OxCaml callee does (both the ordinary and C-call conventions
-/// return results in it).
+/// is identified by its regmask: the alloc convention preserves the ordinary
+/// result register (x0 on AArch64, rax on AMD64), which no other OxCaml callee
+/// does (both the ordinary and C-call conventions return results in it).
 static bool isAllocFamilyStatepoint(const MachineInstr &MI,
+                                    const OxCamlTargetABI &ABI,
                                     const TargetRegisterInfo *TRI);
 
 static const uint32_t *getStatepointRegMask(const MachineInstr &MI) {
@@ -363,14 +364,10 @@ static const uint32_t *getStatepointRegMask(const MachineInstr &MI) {
 }
 
 static bool isAllocFamilyStatepoint(const MachineInstr &MI,
+                                    const OxCamlTargetABI &ABI,
                                     const TargetRegisterInfo *TRI) {
   const uint32_t *RegMask = getStatepointRegMask(MI);
-  if (!RegMask)
-    return false;
-  for (unsigned R = 1, E = TRI->getNumRegs(); R != E; ++R)
-    if (StringRef(TRI->getName(R)) == "X0")
-      return !MachineOperand::clobbersPhysReg(RegMask, R);
-  return false;
+  return isAllocFamilyMask(ABI, RegMask, TRI);
 }
 
 GCValueness::GCValueness(MachineFunction &MF,
@@ -379,6 +376,7 @@ GCValueness::GCValueness(MachineFunction &MF,
                          LiveIntervals &LIS, LiveStacks &LS,
                          SlotIndexes &Indexes, const TargetInstrInfo *TII)
     : MF(MF), LIS(LIS), LS(LS), Indexes(Indexes), TII(TII),
+      ABI(OxCamlTargetABI::get(MF)),
       ValueHomeFIs(ValueHomeFIs) {
   // Collect slot accesses first: the listed-operand seed walk below flows
   // backward through reload<-store memory edges and needs SlotStores.
@@ -522,21 +520,15 @@ void GCValueness::collectAccesses() {
 }
 
 // Whether \p Src read at \p At is the OxCaml allocation cursor: the
-// reserved physical register X27, reached through value-preserving or
-// cursor-preserving steps only — plain COPYs (ISel materializes reads of
-// the reserved register through CopyFromReg vregs; post-call re-reads
-// are COPY $x27), SUBXri decrements (the allocation step itself; the
-// post-decrement cursor still points at the youngest block's header),
-// and PHIs whose every incoming value is itself the cursor (the
-// fast-path/realloc-path join). All paths must root at X27; any
-// unprovable step rejects.
+// reserved physical allocation-pointer register (X27 on AArch64, R15 on
+// AMD64), reached through value-preserving or cursor-preserving steps only:
+// plain COPYs, stack spills/reloads, target allocation decrements, and PHIs
+// whose every incoming value is itself the cursor. Any unprovable step
+// rejects.
 bool GCValueness::isAllocCursor(Register Src, SlotIndex At) {
   const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
-  auto IsX27 = [&](Register R) {
-    return StringRef(TRI->getName(R.asMCReg())) == "X27";
-  };
   if (Src.isPhysical())
-    return IsX27(Src);
+    return ABI.isAllocationCursorRegister(Src.asMCReg(), TRI);
   if (!LIS.hasInterval(Src))
     return false;
   const VNInfo *V0 = LIS.getInterval(Src).getVNInfoAt(At.getRegSlot(true));
@@ -571,34 +563,39 @@ bool GCValueness::isAllocCursor(Register Src, SlotIndex At) {
     if (!D)
       return false;
     Register Next;
+    SlotIndex NextIdx = VNI->def;
     if (D->isCopy() && !D->getOperand(0).getSubReg() &&
         !D->getOperand(1).getSubReg()) {
       Next = D->getOperand(1).getReg();
-    } else if (StringRef(TII->getName(D->getOpcode())) == "SUBXri" &&
-               D->getNumExplicitOperands() >= 4 &&
-               D->getOperand(1).isReg() && D->getOperand(2).isImm() &&
-               D->getOperand(3).isImm() &&
-               D->getOperand(3).getImm() == 0) {
-      Next = D->getOperand(1).getReg();
-    } else {
-      return false;
+    } else if (!ABI.isAllocationCursorDecrement(*D, TII, Next)) {
+      int FI;
+      if (Register LR = TII->isLoadFromStackSlot(*D, FI);
+          LR.isValid() && LR == R) {
+        const auto *Last = lastStoreBefore(FI, D->getParent(), VNI->def);
+        if (!Last)
+          return false;
+        Next = Last->first;
+        NextIdx = Last->second;
+      } else {
+        return false;
+      }
     }
     if (Next.isPhysical()) {
-      if (!IsX27(Next))
+      if (!ABI.isAllocationCursorRegister(Next.asMCReg(), TRI))
         return false;
       continue; // this path roots at the cursor register
     }
     if (!LIS.hasInterval(Next))
       return false;
     const VNInfo *Q =
-        LIS.getInterval(Next).getVNInfoAt(VNI->def.getRegSlot(true));
+        LIS.getInterval(Next).getVNInfoAt(NextIdx.getRegSlot(true));
     if (!Q)
-      Q = LIS.getInterval(Next).getVNInfoBefore(VNI->def);
+      Q = LIS.getInterval(Next).getVNInfoBefore(NextIdx);
     if (!Q)
       return false;
     Work.push_back({Next, Q});
   }
-  return true; // every path rooted at X27
+  return true; // every path rooted at the allocation cursor register
 }
 
 bool GCValueness::phiValue(Register R, const LiveInterval &LI,
@@ -649,10 +646,9 @@ bool GCValueness::regValue(Register R, const VNInfo *VNI) {
         // in-place statepoint call's p1-typed result. Indirect callees
         // (closure calls) have no symbol to type, so additionally trust
         // the gc bit on the destination when copying from an ordinary
-        // result/argument register (x0-x15; never the runtime registers
-        // x26-x28, whose raw copies can share a coalesced family with
-        // gc vregs): the bit on such copies comes from the IR result
-        // type via FunctionLoweringInfo.
+        // result/argument register (AArch64 x0-x15 or the corresponding
+        // AMD64 non-runtime OxCaml GPRs): the bit on such copies comes from
+        // the IR result type via FunctionLoweringInfo.
         // Trust requires TYPE provenance, not the coalescer-OR'd gc
         // bit: on a merged register the gc bit may describe the OTHER
         // range, and a raw (untagged) call result judged "value" gets
@@ -664,12 +660,8 @@ bool GCValueness::regValue(Register R, const VNInfo *VNI) {
         // one-hop forward COPY into a typed vreg.
         bool BitTrust = false;
         {
-          StringRef SrcName = MF.getSubtarget()
-                                  .getRegisterInfo()
-                                  ->getName(Src.asMCReg());
-          unsigned K;
-          if (SrcName.consume_front("X") && !SrcName.getAsInteger(10, K) &&
-              K <= 15) {
+          if (ABI.isOrdinaryGPR(Src.asMCReg(),
+                                MF.getSubtarget().getRegisterInfo())) {
             if (MF.getRegInfo().isOxCamlTypedP1(R))
               BitTrust = true;
             else
@@ -702,41 +694,12 @@ bool GCValueness::regValue(Register R, const VNInfo *VNI) {
         // The opaque derived-pointer/allocation-result pin: its result
         // is a gc value by construction.
         V = true;
-      } else if (D->mayStore() && D->hasOneMemOperand() &&
-                 D->memoperands().front()->getAddrSpace() == 1 &&
-                 D->getNumExplicitDefs() == 1 &&
-                 D->getOperand(0).isReg() &&
-                 D->getOperand(0).getReg() == R &&
-                 D->getNumExplicitOperands() >= 4 &&
-                 D->getOperand(2).isReg() &&
-                 D->getOperand(2).getReg() == R &&
-                 D->getOperand(3).isImm() &&
-                 D->getOperand(3).getImm() == 8) {
-        // Allocation write-back: llvmize forms the block value pointer
-        // by storing the first field with a pre-indexed store at +8
-        // from the header pointer (str xV, [xH, #8]!); the written-back
-        // register IS the new block pointer. llvmize emits no other
-        // tied write-back addrspace(1) stores at +8 (field stores use
-        // absolute offsets), so the shape identifies the alloc result.
-        V = true;
-      } else if (StringRef(TII->getName(D->getOpcode())) == "ADDXri" &&
-                 D->getNumExplicitOperands() >= 4 &&
-                 D->getOperand(0).isReg() &&
-                 D->getOperand(0).getReg() == R &&
-                 D->getOperand(1).isReg() &&
-                 D->getOperand(2).isImm() &&
-                 D->getOperand(2).getImm() == 8 &&
-                 D->getOperand(3).isImm() &&
-                 D->getOperand(3).getImm() == 0 &&
-                 isAllocCursor(D->getOperand(1).getReg(), VNI->def)) {
-        // Young-allocation fast path without write-back: the block value
-        // pointer formed as allocation-cursor + 8 (add xV, x27, #8). In a
-        // gc'd function x27 is the reserved allocation cursor, and +8
-        // past the fresh block's header is by construction the new block
-        // pointer. Between this def and the block's header/field
-        // initialization llvmize emits no safepoint, so wherever a
-        // statepoint can observe the value it is an initialized young
-        // block pointer the GC must forward.
+      } else if (ABI.isAllocationResultValue(
+                     *D, R, TII, [&](Register Base) {
+                       return isAllocCursor(Base, VNI->def);
+                     })) {
+        // Young-allocation fast path: target-specific instruction shapes
+        // form the block value pointer from the allocation cursor.
         V = true;
       } else if (D->getNumExplicitOperands() >= 2 &&
                  D->getNumExplicitDefs() == 1 &&
@@ -830,9 +793,9 @@ bool GCValueness::physRegHoldsValueAt(Register Src, MachineInstr *At) {
     const auto *Callee = dyn_cast<Function>(Target.getGlobal());
     if (!Callee)
       return false;
-    StringRef RName = TRI->getName(Src.asMCReg());
-    unsigned K;
-    if (!RName.consume_front("X") || RName.getAsInteger(10, K))
+    std::optional<unsigned> K =
+        ABI.resultGPROrdinal(Src.asMCReg(), TRI);
+    if (!K)
       return false;
     const auto *Outer = dyn_cast<StructType>(Callee->getReturnType());
     if (!Outer || Outer->getNumElements() != 2)
@@ -844,7 +807,7 @@ bool GCValueness::physRegHoldsValueAt(Register Src, MachineInstr *At) {
     for (Type *ET : Res->elements()) {
       if (ET->isFloatingPointTy() || ET->isVectorTy())
         continue;
-      if (XIdx++ == K) {
+      if (XIdx++ == *K) {
         if (const auto *PT = dyn_cast<PointerType>(ET))
           if (PT->getAddressSpace() == 1)
             return true;
@@ -860,27 +823,17 @@ bool GCValueness::physRegHoldsValueAt(Register Src, MachineInstr *At) {
   Register ArgV = MF.getRegInfo().getLiveInVirtReg(Src.asMCReg());
   if (ArgV.isValid() && MF.getRegInfo().isOxCamlGCArg(ArgV))
     return true;
-  // The livein vreg is ISel's raw copy target and usually not the
-  // marked argument vreg; map the register to its formal directly. The
-  // OxCaml conventions pass integer/pointer arguments in x28, x27, x0,
-  // x1, ... in declaration order (floats ride d-regs separately).
-  StringRef RName = TRI->getName(Src.asMCReg());
-  unsigned Ordinal;
-  if (RName == "X28")
-    Ordinal = 0;
-  else if (RName == "X27")
-    Ordinal = 1;
-  else {
-    unsigned K;
-    if (!RName.consume_front("X") || RName.getAsInteger(10, K) || K > 15)
-      return false;
-    Ordinal = K + 2;
-  }
+  // The livein vreg is ISel's raw copy target and usually not the marked
+  // argument vreg; map the register to its formal directly.
+  std::optional<unsigned> Ordinal =
+      ABI.paramGPROrdinal(Src.asMCReg(), TRI);
+  if (!Ordinal)
+    return false;
   unsigned Idx = 0;
   for (Type *PT : MF.getFunction().getFunctionType()->params()) {
     if (PT->isFloatingPointTy() || PT->isVectorTy())
       continue;
-    if (Idx++ == Ordinal) {
+    if (Idx++ == *Ordinal) {
       if (const auto *P = dyn_cast<PointerType>(PT))
         return P->getAddressSpace() == 1;
       return false;
@@ -1296,6 +1249,7 @@ static bool processStatepoint(MachineInstr &MI, MachineFunction &MF,
                               const SmallSet<int, 16> &GCSlots,
                               const DenseSet<Register> &GCRegs,
                               const SmallSet<int, 16> &ValueHomeFIs,
+                              const OxCamlTargetABI &ABI,
                               GCValueness &GCV, ValueHomeLiveness &VHL,
                               LiveStacks &LS, LiveIntervals &LIS,
                               VirtRegMap &VRM, SlotIndexes &Indexes,
@@ -1613,7 +1567,7 @@ static bool processStatepoint(MachineInstr &MI, MachineFunction &MF,
   // hands the GC garbage. See isAllocFamilyStatepoint.
   SmallVector<Register, 8> RegsToAdd;
   if (EnableOxCamlStatepointRegisterRoots &&
-      isAllocFamilyStatepoint(MI, MF.getSubtarget().getRegisterInfo())) {
+      isAllocFamilyStatepoint(MI, ABI, MF.getSubtarget().getRegisterInfo())) {
     const uint32_t *RegMask = getStatepointRegMask(MI);
     for (Register R : GCRegs) {
       if (ListedRegs.count(R) || !LIS.hasInterval(R) || !VRM.hasPhys(R))
@@ -1692,6 +1646,7 @@ bool OxCamlStatepointSpillRoots::runOnMachineFunction(MachineFunction &MF) {
   if (GCSlots.empty() && GCRegs.empty())
     return false;
 
+  OxCamlTargetABI ABI = OxCamlTargetABI::get(MF);
   GCValueness GCV(MF, Statepoints, ValueHomeFIs, LIS, LS, Indexes, TII);
   ValueHomeLiveness VHL(MF, Statepoints, ValueHomeFIs, TII, Indexes);
   MachineDominatorTree &MDT = getAnalysis<MachineDominatorTree>();
@@ -1717,7 +1672,7 @@ bool OxCamlStatepointSpillRoots::runOnMachineFunction(MachineFunction &MF) {
   SmallSet<int, 16> SlotsNeedingInit;
   for (MachineInstr *MI : Statepoints)
     Changed |= processStatepoint(*MI, MF, GCSlots, GCRegs, ValueHomeFIs,
-                                 GCV, VHL, LS, LIS, VRM, Indexes, MDT,
+                                 ABI, GCV, VHL, LS, LIS, VRM, Indexes, MDT,
                                  InitPhys.isValid() && EnableOxCamlStatepointSlotInit, SlotsNeedingInit);
 
   // Emit the entry-block initializations: store the gc argument value
