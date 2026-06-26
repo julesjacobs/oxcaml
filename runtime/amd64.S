@@ -772,6 +772,7 @@ Make_llvm_call_realloc_stack(_avx512, ZMM)
     CFI_STARTPROC                                      ;      \
         CFI_SIGNAL_FRAME;                                    \
         /* %r10 contains required words and %r11 the continuation. */ \
+        ENTER_FUNCTION;                                      \
         SAVE_ALL_REGS(simd);                                 \
         movq    %r15, Caml_state(gc_regs);                   \
         movq    10*8(%r15), C_ARG_1; /* saved %r10 arg */    \
@@ -782,6 +783,7 @@ Make_llvm_call_realloc_stack(_avx512, ZMM)
         testq   %rax, %rax;                                  \
         jz      1f;                                          \
         RESTORE_ALL_REGS(simd);                              \
+        LEAVE_FUNCTION;                                      \
         jmp     *%r11;                                       \
 1:      /* Restore the gc_regs bucket popped by SAVE_ALL_REGS */ \
         movq    Caml_state(gc_regs_buckets), %r11;           \
@@ -789,6 +791,7 @@ Make_llvm_call_realloc_stack(_avx512, ZMM)
         movq    %r15, Caml_state(gc_regs_buckets);           \
         movq    Caml_state(young_ptr), %r15;                 \
         LEA_VAR(caml_exn_Stack_overflow, %rax);              \
+        LEAVE_FUNCTION;                                      \
         jmp     LBL(caml_raise_exn);                         \
     CFI_ENDPROC                              ;               \
     ENDFUNCTION(G(caml_llvm_prologue_realloc_stack ## suffix))
