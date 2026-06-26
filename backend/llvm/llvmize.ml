@@ -3066,6 +3066,56 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     then value
     else emit_ins t (I.convert Bitcast ~arg:value ~to_:typ)
   in
+  let insert_i64_lane vector lane to_insert =
+    emit_ins t (I.insertelement ~vector ~index:(V.of_int lane) ~to_insert)
+  in
+  let extract_i64_lane vector lane =
+    emit_ins t (I.extractelement ~vector ~index:(V.of_int lane))
+  in
+  let insert_i32_lane vector lane to_insert =
+    emit_ins t (I.insertelement ~vector ~index:(V.of_int lane) ~to_insert)
+  in
+  let extract_i32_lane vector lane =
+    emit_ins t (I.extractelement ~vector ~index:(V.of_int lane))
+  in
+  let zero_vec128 () =
+    List.init 2 Fun.id
+    |> List.fold_left
+         (fun vector lane ->
+           insert_i64_lane vector lane (V.of_int ~typ:T.i64 0))
+         (V.poison T.vec128)
+  in
+  let zero_i32x4 () =
+    List.init 4 Fun.id
+    |> List.fold_left
+         (fun vector lane ->
+           insert_i32_lane vector lane (V.of_int ~typ:T.i32 0))
+         (V.poison (int_vec_type ~width_in_bits:32))
+  in
+  let load_i64_from_address addr arg_idx =
+    let ptr = load_address_from_reg t addr i.arg.(arg_idx) in
+    emit_ins t (I.load_with_align ~align:1 ~ptr ~typ:T.i64)
+  in
+  let load_i32_from_address addr arg_idx =
+    let ptr = load_address_from_reg t addr i.arg.(arg_idx) in
+    emit_ins t (I.load_with_align ~align:1 ~ptr ~typ:T.i32)
+  in
+  let load_vec_from_address ~typ ~align addr arg_idx =
+    let ptr = load_address_from_reg t addr i.arg.(arg_idx) in
+    emit_ins t (I.load_with_align ~align ~ptr ~typ)
+  in
+  let store_i64_to_address_arg addr arg_idx to_store =
+    let ptr = load_address_from_reg t addr i.arg.(arg_idx) in
+    emit_ins_no_res t (I.store_with_align ~align:1 ~ptr ~to_store)
+  in
+  let store_i32_to_address_arg addr arg_idx to_store =
+    let ptr = load_address_from_reg t addr i.arg.(arg_idx) in
+    emit_ins_no_res t (I.store_with_align ~align:1 ~ptr ~to_store)
+  in
+  let store_vec_to_address_arg ~align addr arg_idx to_store =
+    let ptr = load_address_from_reg t addr i.arg.(arg_idx) in
+    emit_ins_no_res t (I.store_with_align ~align ~ptr ~to_store)
+  in
   let int_vector_constant width_in_bits n =
     let typ = int_vec_type ~width_in_bits in
     let elem_type = T.Int { width_in_bits } in
@@ -3559,6 +3609,125 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let res = call_llvm_intrinsic t name [arg] typ in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_mem_full_load ~addr ~typ ~align =
+    let loaded = load_vec_from_address ~typ ~align addr 0 in
+    cast_if_needed loaded (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_mem_full_store ~addr ~typ ~align =
+    let to_store = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    store_vec_to_address_arg ~align addr 0 to_store
+  in
+  let simd_mem_load_low64 ~addr ~addr_arg ~base ~lane =
+    let loaded = load_i64_from_address addr addr_arg in
+    insert_i64_lane base lane loaded |> store_into_reg t i.res.(0)
+  in
+  let simd_mem_load_low32 ~addr =
+    let loaded = load_i32_from_address addr 0 in
+    zero_i32x4 () |> fun vector ->
+    insert_i32_lane vector 0 loaded |> fun vector ->
+    cast_if_needed vector T.vec128 |> store_into_reg t i.res.(0)
+  in
+  let simd_mem_store_low64 ~addr =
+    let vector = load_reg_to_temp ~typ:T.vec128 t i.arg.(1) in
+    let low = extract_i64_lane vector 0 in
+    store_i64_to_address_arg addr 0 low
+  in
+  let simd_mem_store_low32 ~addr =
+    let vector =
+      load_reg_to_temp ~typ:T.vec128 t i.arg.(1) |> fun vector ->
+      cast_if_needed vector (int_vec_type ~width_in_bits:32)
+    in
+    let low = extract_i32_lane vector 0 in
+    store_i32_to_address_arg addr 0 low
+  in
+  let simd_mem_store_int32 ~addr =
+    let value = load_reg_to_temp ~typ:T.i64 t i.arg.(1) in
+    let value = emit_ins t (I.convert Trunc ~arg:value ~to_:T.i32) in
+    store_i32_to_address_arg addr 0 value
+  in
+  let simd_mem_store_int64 ~addr =
+    let value = load_reg_to_temp ~typ:T.i64 t i.arg.(1) in
+    store_i64_to_address_arg addr 0 value
+  in
+  let simd_mem ~(mem_operation : amd64_simd_mem_operation)
+      ~(instr : Amd64_simd_instrs.id) ~imm:_ ~addr =
+    match[@warning "-4"] mem_operation, instr with
+    | ( Simd_mem_load,
+        ( Amd64_simd_instrs.Movapd_X_Xm128
+        | Amd64_simd_instrs.Movaps_X_Xm128
+        | Amd64_simd_instrs.Movdqa_X_Xm128
+        | Amd64_simd_instrs.Movntdqa
+        | Amd64_simd_instrs.Vmovapd_X_Xm128
+        | Amd64_simd_instrs.Vmovntdqa_X_m128 ) ) ->
+      simd_mem_full_load ~addr ~typ:T.vec128 ~align:16
+    | ( Simd_mem_load,
+        ( Amd64_simd_instrs.Lddqu
+        | Amd64_simd_instrs.Movupd_X_Xm128
+        | Amd64_simd_instrs.Movups_X_Xm128
+        | Amd64_simd_instrs.Movdqu_X_Xm128
+        | Amd64_simd_instrs.Vlddqu_X_m128
+        | Amd64_simd_instrs.Vmovupd_X_Xm128 ) ) ->
+      simd_mem_full_load ~addr ~typ:T.vec128 ~align:1
+    | ( Simd_mem_load,
+        ( Amd64_simd_instrs.Vmovapd_Y_Ym256
+        | Amd64_simd_instrs.Vmovntdqa_Y_m256 ) ) ->
+      simd_mem_full_load ~addr ~typ:T.vec256 ~align:32
+    | ( Simd_mem_load,
+        ( Amd64_simd_instrs.Vlddqu_Y_m256
+        | Amd64_simd_instrs.Vmovupd_Y_Ym256 ) ) ->
+      simd_mem_full_load ~addr ~typ:T.vec256 ~align:1
+    | ( Simd_mem_store,
+        ( Amd64_simd_instrs.Movapd_m128_X
+        | Amd64_simd_instrs.Movntdq
+        | Amd64_simd_instrs.Movntpd
+        | Amd64_simd_instrs.Movntps
+        | Amd64_simd_instrs.Vmovapd_m128_X
+        | Amd64_simd_instrs.Vmovntdq_m128_X
+        | Amd64_simd_instrs.Vmovntpd_m128_X
+        | Amd64_simd_instrs.Vmovntps_m128_X ) ) ->
+      simd_mem_full_store ~addr ~typ:T.vec128 ~align:16
+    | ( Simd_mem_store,
+        ( Amd64_simd_instrs.Movupd_m128_X
+        | Amd64_simd_instrs.Vmovupd_m128_X ) ) ->
+      simd_mem_full_store ~addr ~typ:T.vec128 ~align:1
+    | ( Simd_mem_store,
+        ( Amd64_simd_instrs.Vmovapd_m256_Y
+        | Amd64_simd_instrs.Vmovntdq_m256_Y
+        | Amd64_simd_instrs.Vmovntpd_m256_Y
+        | Amd64_simd_instrs.Vmovntps_m256_Y ) ) ->
+      simd_mem_full_store ~addr ~typ:T.vec256 ~align:32
+    | Simd_mem_store, Amd64_simd_instrs.Vmovupd_m256_Y ->
+      simd_mem_full_store ~addr ~typ:T.vec256 ~align:1
+    | ( Simd_mem_load,
+        ( Amd64_simd_instrs.Movd_X_r32m32 | Amd64_simd_instrs.Vmovd_X_r32m32
+        | Amd64_simd_instrs.Movss_X_m32 | Amd64_simd_instrs.Vmovss_X_m32 ) ) ->
+      simd_mem_load_low32 ~addr
+    | ( Simd_mem_load,
+        ( Amd64_simd_instrs.Movq_X_r64m64 | Amd64_simd_instrs.Vmovq_X_r64m64
+        | Amd64_simd_instrs.Movsd_X_m64 | Amd64_simd_instrs.Vmovsd_X_m64 ) ) ->
+      simd_mem_load_low64 ~addr ~addr_arg:0 ~base:(zero_vec128 ()) ~lane:0
+    | ( Simd_mem_load,
+        (Amd64_simd_instrs.Movlpd_X_m64 | Amd64_simd_instrs.Vmovlpd_X_X_m64) )
+      ->
+      let base = load_reg_to_temp ~typ:T.vec128 t i.arg.(0) in
+      simd_mem_load_low64 ~addr ~addr_arg:1 ~base ~lane:0
+    | ( Simd_mem_load,
+        (Amd64_simd_instrs.Movhpd_X_m64 | Amd64_simd_instrs.Vmovhpd_X_X_m64) )
+      ->
+      let base = load_reg_to_temp ~typ:T.vec128 t i.arg.(0) in
+      simd_mem_load_low64 ~addr ~addr_arg:1 ~base ~lane:1
+    | ( Simd_mem_store,
+        (Amd64_simd_instrs.Movsd_m64_X | Amd64_simd_instrs.Vmovsd_m64_X) ) ->
+      simd_mem_store_low64 ~addr
+    | ( Simd_mem_store,
+        (Amd64_simd_instrs.Movss_m32_X | Amd64_simd_instrs.Vmovss_m32_X) ) ->
+      simd_mem_store_low32 ~addr
+    | Simd_mem_store, Amd64_simd_instrs.Movnti_m32_r32 ->
+      simd_mem_store_int32 ~addr
+    | Simd_mem_store, Amd64_simd_instrs.Movnti_m64_r64 ->
+      simd_mem_store_int64 ~addr
+    | _ -> not_implemented_basic ~msg:"amd64 SIMD memory operation" i
+  in
   let classified = Llvmize_specific.classify op in
   match[@warning "-fragile-match"] classified with
   | Amd64_lea addr -> load_address_from_reg t addr i.arg.(0) |> store_int_res
@@ -3785,8 +3954,8 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | Amd64_simd_instrs.Vpxor_Y_Y_Ym256 ->
       simd_int_binary ~vector_width_in_bits:256 64 Xor
     | _ -> not_implemented_basic ~msg:"amd64 SIMD-specific operation" i)
-  | Amd64_simd_mem _ ->
-    not_implemented_basic ~msg:"amd64 SIMD-specific operation" i
+  | Amd64_simd_mem { mem_operation; instr; imm; addr } ->
+    simd_mem ~mem_operation ~instr ~imm ~addr
   | Bswap bitwidth -> bswap t i bitwidth
   | Llvm_intrinsic intrinsic_name -> intrinsic t i intrinsic_name
   | Arm64_shiftarith (shift_op, shift) ->
