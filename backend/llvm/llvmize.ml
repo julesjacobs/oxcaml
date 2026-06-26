@@ -2911,15 +2911,38 @@ let bswap t (i : Cfg.basic Cfg.instruction) (bitwidth : Arch.bswap_bitwidth) =
 let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
   let do_conv arg (to_ : T.t) =
     let from : T.t = V.get_type arg in
-    (* CR yusumez: I really don't like the -fragile-match... *)
-    match[@warning "-fragile-match"] from, to_ with
-    | _ when T.equal from to_ -> arg
-    | Double, Vector { num_of_elems = _; elem_type = Double } ->
+    let bitcast arg to_ = emit_ins t (I.convert Bitcast ~arg ~to_) in
+    let insert_double arg =
       emit_ins t
         (I.insertelement ~vector:(V.poison to_) ~index:(V.of_int 0)
            ~to_insert:arg)
-    | Vector { num_of_elems = _; elem_type = Double }, Double ->
+    in
+    let extract_double arg =
       emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int 0))
+    in
+    (* CR yusumez: I really don't like the -fragile-match... *)
+    match[@warning "-fragile-match"] from, to_ with
+    | _ when T.equal from to_ -> arg
+    | Double, Vector { num_of_elems = _; elem_type = Double } -> insert_double arg
+    | Int { width_in_bits = 64 }, Double -> bitcast arg T.double
+    | Int { width_in_bits = 64 }, Vector { num_of_elems = _; elem_type = Double }
+      ->
+      bitcast arg T.double |> insert_double
+    | ( Vector
+          { num_of_elems = from_elems; elem_type = Int { width_in_bits = 64 } },
+        Vector { num_of_elems = to_elems; elem_type = Double } )
+      when from_elems = to_elems ->
+      bitcast arg to_
+    | Vector { num_of_elems = _; elem_type = Double }, Double -> extract_double arg
+    | Double, Int { width_in_bits = 64 } -> bitcast arg T.i64
+    | Vector { num_of_elems = _; elem_type = Double }, Int { width_in_bits = 64 }
+      ->
+      extract_double arg |> fun arg -> bitcast arg T.i64
+    | ( Vector { num_of_elems = from_elems; elem_type = Double },
+        Vector
+          { num_of_elems = to_elems; elem_type = Int { width_in_bits = 64 } } )
+      when from_elems = to_elems ->
+      bitcast arg to_
     | Int { width_in_bits = 64 }, Int { width_in_bits = 32 } ->
       emit_ins t (I.convert Trunc ~arg ~to_)
     | _ ->
