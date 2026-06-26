@@ -4406,6 +4406,14 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_avg_unsigned ~vector_width_in_bits:256 8
     | Amd64_simd_instrs.Vpavgw_Y_Y_Ym256 ->
       simd_int_avg_unsigned ~vector_width_in_bits:256 16
+    | Amd64_simd_instrs.Pmullw | Amd64_simd_instrs.Vpmullw_X_X_Xm128 ->
+      simd_int_binary 16 Mul
+    | Amd64_simd_instrs.Pmulld | Amd64_simd_instrs.Vpmulld_X_X_Xm128 ->
+      simd_int_binary 32 Mul
+    | Amd64_simd_instrs.Vpmullw_Y_Y_Ym256 ->
+      simd_int_binary ~vector_width_in_bits:256 16 Mul
+    | Amd64_simd_instrs.Vpmulld_Y_Y_Ym256 ->
+      simd_int_binary ~vector_width_in_bits:256 32 Mul
     | Amd64_simd_instrs.Andps | Amd64_simd_instrs.Andpd
     | Amd64_simd_instrs.Pand | Amd64_simd_instrs.Vandps_X_X_Xm128
     | Amd64_simd_instrs.Vandpd_X_X_Xm128
