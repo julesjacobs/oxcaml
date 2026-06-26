@@ -3251,6 +3251,29 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_abs ?(vector_width_in_bits = 128) width_in_bits =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let zero = int_vector_constant_like typ 0 in
+    let negative = emit_ins t (I.icmp I.Islt ~arg1:arg ~arg2:zero) in
+    let negated = emit_ins t (I.binary Sub ~arg1:zero ~arg2:arg) in
+    let res = emit_ins t (I.select ~cond:negative ~ifso:negated ~ifnot:arg) in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_int_mulsign ?(vector_width_in_bits = 128) width_in_bits =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let zero = int_vector_constant_like typ 0 in
+    let sign_negative = emit_ins t (I.icmp I.Islt ~arg1:arg2 ~arg2:zero) in
+    let sign_zero = emit_ins t (I.icmp I.Ieq ~arg1:arg2 ~arg2:zero) in
+    let negated = emit_ins t (I.binary Sub ~arg1:zero ~arg2:arg1) in
+    let signed =
+      emit_ins t (I.select ~cond:sign_negative ~ifso:negated ~ifnot:arg1)
+    in
+    let res = emit_ins t (I.select ~cond:sign_zero ~ifso:zero ~ifnot:signed) in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_mul_high_i16 ?(vector_width_in_bits = 128) ~unsigned () =
     let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits:16 in
     let wide_typ = T.Int { width_in_bits = 32 } in
@@ -4692,6 +4715,33 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | Amd64_simd_instrs.Vpackusdw_Y_Y_Ym256 ->
       simd_int_pack_saturating ~vector_width_in_bits:256 32
         ~unsigned_dst:true
+    | Amd64_simd_instrs.Pabsb_X_Xm128 | Amd64_simd_instrs.Vpabsb_X_Xm128 ->
+      simd_int_abs 8
+    | Amd64_simd_instrs.Pabsw_X_Xm128 | Amd64_simd_instrs.Vpabsw_X_Xm128 ->
+      simd_int_abs 16
+    | Amd64_simd_instrs.Pabsd_X_Xm128 | Amd64_simd_instrs.Vpabsd_X_Xm128 ->
+      simd_int_abs 32
+    | Amd64_simd_instrs.Vpabsb_Y_Ym256 ->
+      simd_int_abs ~vector_width_in_bits:256 8
+    | Amd64_simd_instrs.Vpabsw_Y_Ym256 ->
+      simd_int_abs ~vector_width_in_bits:256 16
+    | Amd64_simd_instrs.Vpabsd_Y_Ym256 ->
+      simd_int_abs ~vector_width_in_bits:256 32
+    | Amd64_simd_instrs.Psignb_X_Xm128
+    | Amd64_simd_instrs.Vpsignb_X_X_Xm128 ->
+      simd_int_mulsign 8
+    | Amd64_simd_instrs.Psignw_X_Xm128
+    | Amd64_simd_instrs.Vpsignw_X_X_Xm128 ->
+      simd_int_mulsign 16
+    | Amd64_simd_instrs.Psignd_X_Xm128
+    | Amd64_simd_instrs.Vpsignd_X_X_Xm128 ->
+      simd_int_mulsign 32
+    | Amd64_simd_instrs.Vpsignb_Y_Y_Ym256 ->
+      simd_int_mulsign ~vector_width_in_bits:256 8
+    | Amd64_simd_instrs.Vpsignw_Y_Y_Ym256 ->
+      simd_int_mulsign ~vector_width_in_bits:256 16
+    | Amd64_simd_instrs.Vpsignd_Y_Y_Ym256 ->
+      simd_int_mulsign ~vector_width_in_bits:256 32
     | Amd64_simd_instrs.Pavgb_X_Xm128
     | Amd64_simd_instrs.Vpavgb_X_X_Xm128 ->
       simd_int_avg_unsigned 8
