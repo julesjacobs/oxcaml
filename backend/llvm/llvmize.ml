@@ -3754,6 +3754,73 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_pack_saturating ?(vector_width_in_bits = 128)
+      src_width_in_bits ~unsigned_dst =
+    let dst_width_in_bits = src_width_in_bits / 2 in
+    let src_typ =
+      wide_int_vec_type ~vector_width_in_bits ~width_in_bits:src_width_in_bits
+    in
+    let dst_typ =
+      wide_int_vec_type ~vector_width_in_bits ~width_in_bits:dst_width_in_bits
+    in
+    let src_elem_typ = T.Int { width_in_bits = src_width_in_bits } in
+    let dst_elem_typ = T.Int { width_in_bits = dst_width_in_bits } in
+    let min_value, max_value =
+      if unsigned_dst
+      then 0, (1 lsl dst_width_in_bits) - 1
+      else
+        ( ~-(1 lsl (dst_width_in_bits - 1)),
+          (1 lsl (dst_width_in_bits - 1)) - 1 )
+    in
+    let min_value = V.of_int ~typ:src_elem_typ min_value in
+    let max_value = V.of_int ~typ:src_elem_typ max_value in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) src_typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) src_typ in
+    let lanes_per_arg_128 = 128 / src_width_in_bits in
+    let dst_lanes_per_128 = 128 / dst_width_in_bits in
+    let blocks = vector_width_in_bits / 128 in
+    let clamp elem =
+      let below_min = emit_ins t (I.icmp I.Islt ~arg1:elem ~arg2:min_value) in
+      let above_max = emit_ins t (I.icmp I.Isgt ~arg1:elem ~arg2:max_value) in
+      let clamped_min =
+        emit_ins t (I.select ~cond:below_min ~ifso:min_value ~ifnot:elem)
+      in
+      emit_ins t
+        (I.select ~cond:above_max ~ifso:max_value ~ifnot:clamped_min)
+    in
+    let res =
+      List.init blocks Fun.id
+      |> List.fold_left
+           (fun vector block ->
+             List.init dst_lanes_per_128 Fun.id
+             |> List.fold_left
+                  (fun vector lane ->
+                    let src_arg, src_lane =
+                      if lane < lanes_per_arg_128
+                      then arg1, lane
+                      else arg2, lane - lanes_per_arg_128
+                    in
+                    let src_lane = (block * lanes_per_arg_128) + src_lane in
+                    let elem =
+                      emit_ins t
+                        (I.extractelement ~vector:src_arg
+                           ~index:(V.of_int src_lane))
+                    in
+                    let clamped = clamp elem in
+                    let narrowed =
+                      emit_ins t
+                        (I.convert Trunc ~arg:clamped ~to_:dst_elem_typ)
+                    in
+                    emit_ins t
+                      (I.insertelement ~vector
+                         ~index:(V.of_int
+                                   ((block * dst_lanes_per_128) + lane))
+                         ~to_insert:narrowed))
+                  vector)
+           (V.poison dst_typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_widening_mul src_width_in_bits convert_op ~high =
     let dst_width_in_bits = 2 * src_width_in_bits in
     let src_typ = int_vec_type ~width_in_bits:src_width_in_bits in
@@ -4601,6 +4668,30 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | Amd64_simd_instrs.Vpmovzxdq_Y_Xm128 ->
       simd_int_extend_low_lanes ~dst_vector_width_in_bits:256
         ~src_width_in_bits:32 ~dst_width_in_bits:64 I.Zext
+    | Amd64_simd_instrs.Packsswb
+    | Amd64_simd_instrs.Vpacksswb_X_X_Xm128 ->
+      simd_int_pack_saturating 16 ~unsigned_dst:false
+    | Amd64_simd_instrs.Packssdw
+    | Amd64_simd_instrs.Vpackssdw_X_X_Xm128 ->
+      simd_int_pack_saturating 32 ~unsigned_dst:false
+    | Amd64_simd_instrs.Packuswb
+    | Amd64_simd_instrs.Vpackuswb_X_X_Xm128 ->
+      simd_int_pack_saturating 16 ~unsigned_dst:true
+    | Amd64_simd_instrs.Packusdw
+    | Amd64_simd_instrs.Vpackusdw_X_X_Xm128 ->
+      simd_int_pack_saturating 32 ~unsigned_dst:true
+    | Amd64_simd_instrs.Vpacksswb_Y_Y_Ym256 ->
+      simd_int_pack_saturating ~vector_width_in_bits:256 16
+        ~unsigned_dst:false
+    | Amd64_simd_instrs.Vpackssdw_Y_Y_Ym256 ->
+      simd_int_pack_saturating ~vector_width_in_bits:256 32
+        ~unsigned_dst:false
+    | Amd64_simd_instrs.Vpackuswb_Y_Y_Ym256 ->
+      simd_int_pack_saturating ~vector_width_in_bits:256 16
+        ~unsigned_dst:true
+    | Amd64_simd_instrs.Vpackusdw_Y_Y_Ym256 ->
+      simd_int_pack_saturating ~vector_width_in_bits:256 32
+        ~unsigned_dst:true
     | Amd64_simd_instrs.Pavgb_X_Xm128
     | Amd64_simd_instrs.Vpavgb_X_X_Xm128 ->
       simd_int_avg_unsigned 8
