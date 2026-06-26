@@ -3763,6 +3763,39 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_shuffle_words ?(vector_width_in_bits = 128) n ~high =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits:16 in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let lanes = vector_width_in_bits / 16 in
+    let res =
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let lane_base = (lane / 8) * 8 in
+             let lane_offset = lane - lane_base in
+             let shuffle_half = (lane_offset >= 4) = high in
+             let src_offset =
+               if shuffle_half
+               then (
+                 let selector_lane =
+                   if high then lane_offset - 4 else lane_offset
+                 in
+                 let selector = (n lsr (2 * selector_lane)) land 0b11 in
+                 (if high then 4 else 0) + selector)
+               else lane_offset
+             in
+             let elem =
+               emit_ins t
+                 (I.extractelement ~vector:arg
+                    ~index:(V.of_int (lane_base + src_offset)))
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane)
+                  ~to_insert:elem))
+           (V.poison typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_variable_shift width_in_bits intrinsic =
     let typ = int_vec_type ~width_in_bits in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -4888,6 +4921,18 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | Amd64_simd_instrs.Vpalignr_Y_Y_Ym256 ->
       simd_int_align_right_bytes ~vector_width_in_bits:256
         (require_imm instr_id imm)
+    | Amd64_simd_instrs.Pshufhw
+    | Amd64_simd_instrs.Vpshufhw_X_Xm128 ->
+      simd_int_shuffle_words (require_imm instr_id imm) ~high:true
+    | Amd64_simd_instrs.Pshuflw
+    | Amd64_simd_instrs.Vpshuflw_X_Xm128 ->
+      simd_int_shuffle_words (require_imm instr_id imm) ~high:false
+    | Amd64_simd_instrs.Vpshufhw_Y_Ym256 ->
+      simd_int_shuffle_words ~vector_width_in_bits:256
+        (require_imm instr_id imm) ~high:true
+    | Amd64_simd_instrs.Vpshuflw_Y_Ym256 ->
+      simd_int_shuffle_words ~vector_width_in_bits:256
+        (require_imm instr_id imm) ~high:false
     | Amd64_simd_instrs.Pmovmskb_r64_X
     | Amd64_simd_instrs.Vpmovmskb_r64_X ->
       simd_movemask ~vector_width_in_bits:128 8
