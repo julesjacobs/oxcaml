@@ -315,6 +315,14 @@ let call_linker ?dissector_args file_list_rev startup_file output_name =
     then Ccomp.Partial
     else Ccomp.Exe
   in
+  let llvm_amd64_needs_non_pie_link =
+    !Clflags.llvm_backend
+    && mode = Ccomp.Exe
+    &&
+    match Target_system.architecture (), Target_system.derived_system () with
+    | Target_system.X86_64, Target_system.Linux -> true
+    | _ -> false
+  in
   (* Determine if we need to use a temporary file for objcopy workflow *)
   (* We disable the objcopy workflow if the output is piped to /dev/null. *)
   let needs_objcopy_workflow =
@@ -329,9 +337,18 @@ let call_linker ?dissector_args file_list_rev startup_file output_name =
     then Filename.temp_file (Filename.basename output_name) ".tmp"
     else output_name
   in
+  let call_linker_with_llvm_amd64_link_mode () =
+    let saved_ccopts = !Clflags.all_ccopts in
+    Misc.try_finally
+      ~always:(fun () -> Clflags.all_ccopts := saved_ccopts)
+      (fun () ->
+        if llvm_amd64_needs_non_pie_link
+        then Clflags.all_ccopts := "-no-pie" :: !Clflags.all_ccopts;
+        Ccomp.call_linker mode link_output_name files c_lib)
+  in
   let exitcode =
     Profile.record_call "link_object" (fun () ->
-        Ccomp.call_linker mode link_output_name files c_lib)
+        call_linker_with_llvm_amd64_link_mode ())
   in
   if not (exitcode = 0)
   then (
