@@ -12,6 +12,7 @@ asm="$build_dir/trap_recovery_runtime_generated.s"
 debug_flags="-g"
 extra_link_flags=""
 aarch64_trap_checks=false
+amd64_debug_checks=false
 
 case "$host_arch" in
   arm64 | aarch64) aarch64_trap_checks=true ;;
@@ -19,8 +20,8 @@ esac
 
 case "$host_system:$host_arch" in
   Linux:x86_64 | Linux:amd64)
-    debug_flags=""
     extra_link_flags="-ccopt -no-pie"
+    amd64_debug_checks=true
     ;;
 esac
 
@@ -231,6 +232,11 @@ EOF
 "$ocamlopt" $stdlib_flags -O3 $debug_flags -S -c -keep-llvmir -llvm-backend \
   -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
   -o "$dynamic_cmx" "$dynamic_src"
+
+if [ "$amd64_debug_checks" = true ]; then
+  grep -Eq '^[[:space:]]*\.file[[:space:]]+0[[:space:]].*"trap_recovery_dynamic_finally\.ml"' "$dynamic_asm"
+  grep -q '\.debug_info' "$dynamic_asm"
+fi
 
 "$ocamlopt" $stdlib_flags -O3 -llvm-backend \
   $extra_link_flags \
