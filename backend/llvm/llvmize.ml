@@ -3251,6 +3251,50 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_mul_high_i16 ?(vector_width_in_bits = 128) ~unsigned () =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits:16 in
+    let wide_typ = T.Int { width_in_bits = 32 } in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let widen_op = if unsigned then I.Zext else I.Sext in
+    let shift_op = if unsigned then I.Lshr else I.Ashr in
+    let lanes = vector_width_in_bits / 16 in
+    let res =
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let elem1 =
+               emit_ins t
+                 (I.extractelement ~vector:arg1 ~index:(V.of_int lane))
+             in
+             let elem2 =
+               emit_ins t
+                 (I.extractelement ~vector:arg2 ~index:(V.of_int lane))
+             in
+             let elem1 =
+               emit_ins t (I.convert widen_op ~arg:elem1 ~to_:wide_typ)
+             in
+             let elem2 =
+               emit_ins t (I.convert widen_op ~arg:elem2 ~to_:wide_typ)
+             in
+             let product = emit_ins t (I.binary Mul ~arg1:elem1 ~arg2:elem2) in
+             let high =
+               emit_ins t
+                 (I.binary shift_op ~arg1:product
+                    ~arg2:(V.of_int ~typ:wide_typ 16))
+             in
+             let narrowed =
+               emit_ins t
+                 (I.convert Trunc ~arg:high
+                    ~to_:(T.Int { width_in_bits = 16 }))
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane)
+                  ~to_insert:narrowed))
+           (V.poison typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_shift_imm ?(vector_width_in_bits = 128) width_in_bits op n =
     let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -4414,6 +4458,15 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_binary ~vector_width_in_bits:256 16 Mul
     | Amd64_simd_instrs.Vpmulld_Y_Y_Ym256 ->
       simd_int_binary ~vector_width_in_bits:256 32 Mul
+    | Amd64_simd_instrs.Pmulhw | Amd64_simd_instrs.Vpmulhw_X_X_Xm128 ->
+      simd_int_mul_high_i16 ~unsigned:false ()
+    | Amd64_simd_instrs.Pmulhuw_X_Xm128
+    | Amd64_simd_instrs.Vpmulhuw_X_X_Xm128 ->
+      simd_int_mul_high_i16 ~unsigned:true ()
+    | Amd64_simd_instrs.Vpmulhw_Y_Y_Ym256 ->
+      simd_int_mul_high_i16 ~vector_width_in_bits:256 ~unsigned:false ()
+    | Amd64_simd_instrs.Vpmulhuw_Y_Y_Ym256 ->
+      simd_int_mul_high_i16 ~vector_width_in_bits:256 ~unsigned:true ()
     | Amd64_simd_instrs.Andps | Amd64_simd_instrs.Andpd
     | Amd64_simd_instrs.Pand | Amd64_simd_instrs.Vandps_X_X_Xm128
     | Amd64_simd_instrs.Vandpd_X_X_Xm128
