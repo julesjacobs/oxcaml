@@ -3376,6 +3376,28 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_broadcast_low_lane ~dst_vector_width_in_bits width_in_bits =
+    let src_typ =
+      wide_int_vec_type ~vector_width_in_bits:128 ~width_in_bits
+    in
+    let dst_typ =
+      wide_int_vec_type ~vector_width_in_bits:dst_vector_width_in_bits
+        ~width_in_bits
+    in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) src_typ in
+    let elem = emit_ins t (I.extractelement ~vector:arg ~index:(V.of_int 0)) in
+    let lanes = dst_vector_width_in_bits / width_in_bits in
+    let res =
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane)
+                  ~to_insert:elem))
+           (V.poison dst_typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_movemask ~vector_width_in_bits width_in_bits =
     let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -4318,6 +4340,14 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_variable_shift_x86 32 Ashr
     | Amd64_simd_instrs.Vpsravd_Y_Y_Ym256 ->
       simd_int_variable_shift_x86 ~vector_width_in_bits:256 32 Ashr
+    | Amd64_simd_instrs.Vpbroadcastb_X_Xm8 ->
+      simd_int_broadcast_low_lane ~dst_vector_width_in_bits:128 8
+    | Amd64_simd_instrs.Vpbroadcastb_Y_Xm8 ->
+      simd_int_broadcast_low_lane ~dst_vector_width_in_bits:256 8
+    | Amd64_simd_instrs.Vpbroadcastw_X_Xm16 ->
+      simd_int_broadcast_low_lane ~dst_vector_width_in_bits:128 16
+    | Amd64_simd_instrs.Vpbroadcastw_Y_Xm16 ->
+      simd_int_broadcast_low_lane ~dst_vector_width_in_bits:256 16
     | Amd64_simd_instrs.Andps | Amd64_simd_instrs.Andpd
     | Amd64_simd_instrs.Pand | Amd64_simd_instrs.Vandps_X_X_Xm128
     | Amd64_simd_instrs.Vandpd_X_X_Xm128
