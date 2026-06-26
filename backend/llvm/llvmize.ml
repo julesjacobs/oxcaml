@@ -2421,10 +2421,7 @@ let extcall ?unwind_label t (i : Cfg.terminator Cfg.instruction) ~func_symbol
              before the ordinary C result registers. On AArch64 these are
              x28/x27; on AMD64 these are r14/r15. This models the
              domain-state/allocation-pointer dependency that the stack-switch
-             pseudo needs while still generating a plain direct C call. AMD64
-             runtime5 also needs the native backend's OCaml-stack to C-stack
-             switch around the call; that is emitted below with explicit stack
-             pointer reads/writes. *)
+             pseudo needs while still generating a plain direct C call. *)
           ignore unwind_label;
           let emit_direct_call () =
             emit_ins t
@@ -2433,25 +2430,7 @@ let extcall ?unwind_label t (i : Cfg.terminator Cfg.instruction) ~func_symbol
                  ~attrs:(gc_attr ~can_call_gc:false t i)
                  ~operand_bundles:[] ~cc:Oxcaml_c_direct_call ~musttail:false)
           in
-          let switch_to_c_stack =
-            match target_arch with
-            | Target_system.X86_64 -> Config.runtime5 && not Config.no_stack_checks
-            | Target_system.AArch64 -> false
-            | Target_system.IA32 | Target_system.ARM | Target_system.POWER
-            | Target_system.Z | Target_system.Riscv ->
-              assert false
-          in
-          if switch_to_c_stack
-          then (
-            let ds = emit_ins t (I.load ~ptr:domainstate_ptr ~typ:T.i64) in
-            let c_sp_ptr = load_domainstate_addr ~ds_loc:ds t Domain_c_stack in
-            let c_sp = emit_ins t (I.load ~ptr:c_sp_ptr ~typ:T.i64) in
-            let ocaml_sp = read_stack_pointer t in
-            write_stack_pointer t c_sp;
-            let c_res = emit_direct_call () in
-            write_stack_pointer t ocaml_sp;
-            c_res)
-          else emit_direct_call ()
+          emit_direct_call ()
         in
         let runtime_values =
           extract_struct t c_res

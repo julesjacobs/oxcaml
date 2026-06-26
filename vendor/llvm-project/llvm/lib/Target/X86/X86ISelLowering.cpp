@@ -4421,6 +4421,9 @@ X86TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   bool IsSibcall      = false;
   bool IsGuaranteeTCO = MF.getTarget().Options.GuaranteedTailCallOpt ||
       CallConv == CallingConv::Tail || CallConv == CallingConv::SwiftTail;
+  bool NeedsOxCamlCStackSwitch =
+      CallConv == CallingConv::OxCaml_C_Direct_Call &&
+      MF.getFunction().hasFnAttribute("oxcaml-stack-check");
   bool IsCalleePopSRet = !IsGuaranteeTCO && hasCalleePopSRet(Outs, Subtarget);
   X86MachineFunctionInfo *X86Info = MF.getInfo<X86MachineFunctionInfo>();
   bool HasNCSR = (CB && isa<CallInst>(CB) &&
@@ -4925,7 +4928,10 @@ X86TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     return Ret;
   }
 
-  if (HasNoCfCheck && IsCFProtectionSupported && IsIndirectCall) {
+  if (NeedsOxCamlCStackSwitch) {
+    assert(!isTailCall && "direct OxCaml C calls cannot be tail calls");
+    Chain = DAG.getNode(X86ISD::OXCAML_C_DIRECT_CALL, dl, NodeTys, Ops);
+  } else if (HasNoCfCheck && IsCFProtectionSupported && IsIndirectCall) {
     Chain = DAG.getNode(X86ISD::NT_CALL, dl, NodeTys, Ops);
   } else if (CLI.CB && objcarc::hasAttachedCallOpBundle(CLI.CB)) {
     // Calls with a "clang.arc.attachedcall" bundle are special. They should be
@@ -34427,6 +34433,7 @@ const char *X86TargetLowering::getTargetNodeName(unsigned Opcode) const {
   NODE_NAME_CASE(FST)
   NODE_NAME_CASE(CALL)
   NODE_NAME_CASE(CALL_RVMARKER)
+  NODE_NAME_CASE(OXCAML_C_DIRECT_CALL)
   NODE_NAME_CASE(BT)
   NODE_NAME_CASE(CMP)
   NODE_NAME_CASE(FCMP)

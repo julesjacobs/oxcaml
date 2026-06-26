@@ -184,7 +184,14 @@ void CFIInstrInserter::calculateOutgoingCFAInfo(MBBCFAInfo &MBBInfo) {
   BitVector CSRSaved(NumRegs), CSRRestored(NumRegs);
 
   // Determine cfa offset and register set by the block.
-  for (MachineInstr &MI : *MBBInfo.MBB) {
+  struct CFIState {
+    int Offset;
+    unsigned Register;
+    BitVector CSRSaved;
+    BitVector CSRRestored;
+  };
+  SmallVector<CFIState, 4> CFIStateStack;
+  for (MachineInstr &MI : MBBInfo.MBB->instrs()) {
     if (MI.isCFIInstruction()) {
       std::optional<unsigned> CSRReg;
       std::optional<int> CSROffset;
@@ -225,20 +232,17 @@ void CFIInstrInserter::calculateOutgoingCFAInfo(MBBCFAInfo &MBBInfo) {
 #endif
         break;
       case MCCFIInstruction::OpRememberState:
-        // TODO: Add support for handling cfi_remember_state.
-#ifndef NDEBUG
-        report_fatal_error(
-            "Support for cfi_remember_state not implemented! Value of CFA "
-            "may be incorrect!\n");
-#endif
+        CFIStateStack.push_back(
+            {SetOffset, SetRegister, CSRSaved, CSRRestored});
         break;
       case MCCFIInstruction::OpRestoreState:
-        // TODO: Add support for handling cfi_restore_state.
-#ifndef NDEBUG
-        report_fatal_error(
-            "Support for cfi_restore_state not implemented! Value of CFA may "
-            "be incorrect!\n");
-#endif
+        if (CFIStateStack.empty())
+          report_fatal_error("cfi_restore_state without cfi_remember_state");
+        SetOffset = CFIStateStack.back().Offset;
+        SetRegister = CFIStateStack.back().Register;
+        CSRSaved = CFIStateStack.back().CSRSaved;
+        CSRRestored = CFIStateStack.back().CSRRestored;
+        CFIStateStack.pop_back();
         break;
       // Other CFI directives do not affect CFA value.
       case MCCFIInstruction::OpUndefined:

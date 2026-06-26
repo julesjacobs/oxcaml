@@ -77,6 +77,9 @@ namespace llvm {
     /// Same as call except it adds the NoTrack prefix.
     NT_CALL,
 
+    /// Noalloc OxCaml C call with an inline OCaml-stack to C-stack switch.
+    OXCAML_C_DIRECT_CALL,
+
     // Pseudo for a OBJC call that gets emitted together with a special
     // marker instruction.
     CALL_RVMARKER,

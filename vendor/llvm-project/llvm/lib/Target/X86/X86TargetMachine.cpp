@@ -626,7 +626,7 @@ void X86PassConfig::addPreEmitPass2() {
     // ObjC runtime functions present in the module.
     const Function &F = MF.getFunction();
     const Module *M = F.getParent();
-    return M->getModuleFlag("kcfi") ||
+    return F.hasFnAttribute("oxcaml-stack-check") || M->getModuleFlag("kcfi") ||
            (TT.isOSDarwin() &&
             (M->getFunction("objc_retainAutoreleasedReturnValue") ||
              M->getFunction("objc_unsafeClaimAutoreleasedReturnValue")));

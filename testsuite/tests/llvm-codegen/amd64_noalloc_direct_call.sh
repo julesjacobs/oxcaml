@@ -127,21 +127,20 @@ fi
 grep -q '^ok$' "$stdout_file"
 
 awk '
-  /define .*__f_.*_code/ { in_f = 1 }
-  in_f && /^}/ {
-    exit state == 4 ? 0 : 1
+  /define .*__f_.*_code/ {
+    in_f = 1
+    found = 1
+    state = 0
   }
-  in_f && state == 0 && /@llvm\.read_register\.i64\(metadata !\{!"rsp\\00"\}\)/ {
+  in_f && /^}/ {
+    checked = state == 1
+    in_f = 0
+  }
+  in_f && state == 0 && /call[[:space:]]+oxcaml_c_directcc .*@"\\01_?amd64_noalloc_add_native"/ {
     state = 1
   }
-  in_f && state == 1 && /@llvm\.write_register\.i64\(metadata !\{!"rsp\\00"\}/ {
-    state = 2
-  }
-  in_f && state == 2 && /call[[:space:]]+oxcaml_c_directcc .*@"\\01_?amd64_noalloc_add_native"/ {
-    state = 3
-  }
-  in_f && state == 3 && /@llvm\.write_register\.i64\(metadata !\{!"rsp\\00"\}/ {
-    state = 4
+  END {
+    exit found && checked ? 0 : 1
   }
 ' "$ir"
 
@@ -151,3 +150,87 @@ if grep -q 'c_call_wrapper' "$ir"; then
 fi
 
 grep -Eq 'callq?[[:space:]]+_?amd64_noalloc_add_native' "$asm"
+
+awk '
+  /^_?caml.*__f_.*_code:/ {
+    in_f = 1
+    found = 1
+    state = "entry"
+    saw_cfi_start = 0
+    saw_cfi_remember = 0
+    saw_cfi_c_stack = 0
+    saw_cfi_restore = 0
+    saw_cfi_return = 0
+    saw_c_stack_load = 0
+    saw_ret = 0
+    next
+  }
+  in_f && /^[[:space:]]*\.cfi_startproc/ {
+    saw_cfi_start = 1
+    next
+  }
+  in_f && state == "entry" && /^[[:space:]]*movq[[:space:]]+%rsp,[[:space:]]+%r[a-z0-9]+/ {
+    saved_rsp_reg = $3
+    sub(/,$/, "", saved_rsp_reg)
+    if (saved_rsp_reg == "%rbp") {
+      next
+    }
+    if (saved_rsp_reg != "%r13") {
+      bad = 1
+      next
+    }
+    state = "saved_ocaml_rsp"
+    next
+  }
+  in_f && state == "saved_ocaml_rsp" && /^[[:space:]]*\.cfi_remember_state/ {
+    saw_cfi_remember = 1
+    next
+  }
+  in_f && state == "saved_ocaml_rsp" && /^[[:space:]]*\.cfi_def_cfa_register[[:space:]]+%r13/ {
+    saw_cfi_c_stack = 1
+    next
+  }
+  in_f && state == "saved_ocaml_rsp" && /^[[:space:]]*movq[[:space:]]+104\(%r14\),[[:space:]]+%rsp/ {
+    saw_c_stack_load = 1
+    state = "entered_c_stack"
+    next
+  }
+  in_f && state == "entered_c_stack" && /^[[:space:]]*callq?[[:space:]]+_?amd64_noalloc_add_native/ {
+    state = "called_c"
+    next
+  }
+  in_f && state == "called_c" && /^[[:space:]]*movq[[:space:]]+%r[a-z0-9]+,[[:space:]]+%rsp/ {
+    restored_rsp_reg = $2
+    sub(/,$/, "", restored_rsp_reg)
+    if (restored_rsp_reg != saved_rsp_reg) {
+      bad = 1
+      next
+    }
+    state = "restored_ocaml_rsp"
+    next
+  }
+  in_f && state == "restored_ocaml_rsp" && /^[[:space:]]*\.cfi_restore_state/ {
+    saw_cfi_restore = 1
+    next
+  }
+  in_f && /^[[:space:]]*\.cfi_def_cfa[[:space:]]+%rsp,[[:space:]]+8/ {
+    saw_cfi_return = 1
+    next
+  }
+  in_f && /^[[:space:]]*retq/ {
+    saw_ret = 1
+    next
+  }
+  in_f && /^[[:space:]]*\.cfi_endproc/ {
+    if (saw_cfi_start && saw_cfi_remember && saw_cfi_c_stack && saw_cfi_restore && saw_cfi_return && saw_ret && saw_c_stack_load && state == "restored_ocaml_rsp") {
+      checked = 1
+      in_f = 0
+      next
+    }
+    bad = 1
+    in_f = 0
+  }
+  END {
+    exit found && checked && !bad ? 0 : 1
+  }
+' "$asm"

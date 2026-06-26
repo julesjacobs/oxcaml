@@ -1,0 +1,31 @@
+# RUN: llc -o - %s -mtriple=x86_64-- -verify-cfiinstrs \
+# RUN:     -run-pass=cfi-instr-inserter 2>&1 | FileCheck %s
+
+# The remember/restore pair must leave the outgoing CFA state unchanged. If
+# cfi-instr-inserter lets the temporary $r13 CFA escape from bb.1, it inserts a
+# repair CFI instruction in bb.2.
+
+--- |
+  define void @foo() {
+    ret void
+  }
+...
+---
+name: foo
+body: |
+  bb.0:
+    CFI_INSTRUCTION def_cfa $rsp, 8
+    TEST8rr renamable $dil, renamable $dil, implicit-def $eflags, implicit killed $edi
+    JCC_1 %bb.2, 5, implicit killed $eflags
+
+  bb.1:
+    CFI_INSTRUCTION remember_state
+    CFI_INSTRUCTION def_cfa_register $r13
+    CFI_INSTRUCTION restore_state
+    JMP_1 %bb.2
+
+  bb.2:
+    ; CHECK-LABEL: bb.2:
+    ; CHECK-NEXT: RET
+    RET 0
+...

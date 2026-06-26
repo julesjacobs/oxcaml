@@ -24,6 +24,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/Passes.h" // For IDs of passes that are preserved.
 #include "llvm/IR/GlobalValue.h"
+#include "llvm/MC/MCDwarf.h"
 #include "llvm/Target/TargetMachine.h"
 using namespace llvm;
 
@@ -65,6 +66,8 @@ private:
                                MachineBasicBlock::iterator MBBI);
   void expandCALL_RVMARKER(MachineBasicBlock &MBB,
                            MachineBasicBlock::iterator MBBI);
+  void expandOXCAML_C_DIRECT_CALL(MachineBasicBlock &MBB,
+                                  MachineBasicBlock::iterator MBBI);
   bool ExpandMI(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI);
   bool ExpandMBB(MachineBasicBlock &MBB);
 
@@ -256,6 +259,90 @@ void X86ExpandPseudo::expandCALL_RVMARKER(MachineBasicBlock &MBB,
                    std::next(RtCall->getIterator()));
 }
 
+void X86ExpandPseudo::expandOXCAML_C_DIRECT_CALL(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI) {
+  MachineInstr &MI = *MBBI;
+  const DebugLoc &DL = MI.getDebugLoc();
+  MachineFunction &MF = *MBB.getParent();
+
+  unsigned CallOpc;
+  unsigned FirstCallExtraOp;
+  switch (MI.getOpcode()) {
+  case X86::CALL64m_OXCAML_C_DIRECT:
+  {
+    MachineInstrBuilder MIB =
+        BuildMI(MBB, MBBI, DL, TII->get(X86::MOV64rm), X86::R11);
+    for (unsigned I = 0; I != X86::AddrNumOperands; ++I)
+      MIB.add(MI.getOperand(I));
+    CallOpc = X86::CALL64r;
+    FirstCallExtraOp = X86::AddrNumOperands;
+    break;
+  }
+  case X86::CALL64r_OXCAML_C_DIRECT:
+    BuildMI(MBB, MBBI, DL, TII->get(X86::MOV64rr), X86::R11)
+        .add(MI.getOperand(0));
+    CallOpc = X86::CALL64r;
+    FirstCallExtraOp = 1;
+    break;
+  case X86::CALL64pcrel32_OXCAML_C_DIRECT:
+    CallOpc = X86::CALL64pcrel32;
+    FirstCallExtraOp = 1;
+    break;
+  default:
+    llvm_unreachable("unexpected opcode");
+  }
+
+  MachineInstr *First =
+      BuildMI(MBB, MBBI, DL, TII->get(X86::MOV64rr), X86::R13)
+          .addReg(X86::RSP)
+          .getInstr();
+
+  unsigned RememberState =
+      MF.addFrameInst(MCCFIInstruction::createRememberState(nullptr));
+  BuildMI(MBB, MBBI, DL, TII->get(TargetOpcode::CFI_INSTRUCTION))
+      .addCFIIndex(RememberState);
+
+  unsigned DwarfR13 = TRI->getDwarfRegNum(X86::R13, true);
+  unsigned DefCfaR13 =
+      MF.addFrameInst(MCCFIInstruction::createDefCfaRegister(nullptr, DwarfR13));
+  BuildMI(MBB, MBBI, DL, TII->get(TargetOpcode::CFI_INSTRUCTION))
+      .addCFIIndex(DefCfaR13);
+
+  // Domain_c_stack is field 13 in runtime/caml/domain_state.tbl.
+  addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::MOV64rm), X86::RSP),
+               X86::R14, false, 13 * 8);
+
+  MachineInstr *Call = BuildMI(MBB, MBBI, DL, TII->get(CallOpc)).getInstr();
+  if (MI.getOpcode() == X86::CALL64m_OXCAML_C_DIRECT ||
+      MI.getOpcode() == X86::CALL64r_OXCAML_C_DIRECT)
+    Call->addOperand(MachineOperand::CreateReg(X86::R11, false));
+  else
+    Call->addOperand(MI.getOperand(0));
+  for (unsigned I = FirstCallExtraOp, E = MI.getNumOperands(); I != E; ++I) {
+    const MachineOperand &MO = MI.getOperand(I);
+    if (MO.isReg() && MO.isDef() && MO.isImplicit() && MO.getReg() == X86::R13)
+      continue;
+    Call->addOperand(MI.getOperand(I));
+  }
+  Call->setCFIType(MF, MI.getCFIType());
+
+  MachineInstr *Last =
+      BuildMI(MBB, MBBI, DL, TII->get(X86::MOV64rr), X86::RSP)
+          .addReg(X86::R13)
+          .getInstr();
+
+  unsigned RestoreState =
+      MF.addFrameInst(MCCFIInstruction::createRestoreState(nullptr));
+  BuildMI(MBB, MBBI, DL, TII->get(TargetOpcode::CFI_INSTRUCTION))
+      .addCFIIndex(RestoreState);
+
+  if (MI.shouldUpdateCallSiteInfo())
+    MBB.getParent()->moveCallSiteInfo(&MI, Call);
+
+  MI.eraseFromParent();
+  finalizeBundle(MBB, First->getIterator(), std::next(Last->getIterator()));
+}
+
 /// If \p MBBI is a pseudo instruction, this method expands
 /// it to the corresponding (sequence of) actual instruction(s).
 /// \returns true if \p MBBI has been expanded.
@@ -267,6 +354,11 @@ bool X86ExpandPseudo::ExpandMI(MachineBasicBlock &MBB,
   switch (Opcode) {
   default:
     return false;
+  case X86::CALL64m_OXCAML_C_DIRECT:
+  case X86::CALL64r_OXCAML_C_DIRECT:
+  case X86::CALL64pcrel32_OXCAML_C_DIRECT:
+    expandOXCAML_C_DIRECT_CALL(MBB, MBBI);
+    return true;
   case X86::TCRETURNdi:
   case X86::TCRETURNdicc:
   case X86::TCRETURNri:

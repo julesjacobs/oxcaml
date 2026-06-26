@@ -429,6 +429,22 @@ let isPseudo = 1, isCall = 1, isCodeGenOnly = 1,
   def CALL64pcrel32_RVMARKER :
     PseudoI<(outs), (ins i64imm:$rvfunc, i64i32imm_brtarget:$dst), []>,
             Requires<[In64BitMode]>;
+
+  let Defs = [R13] in {
+    def CALL64m_OXCAML_C_DIRECT :
+      PseudoI<(outs), (ins i64mem:$dst),
+              [(X86oxcaml_c_direct_call (loadi64 addr:$dst))]>,
+              Requires<[In64BitMode]>;
+
+    def CALL64r_OXCAML_C_DIRECT :
+      PseudoI<(outs), (ins GR64:$dst),
+              [(X86oxcaml_c_direct_call GR64:$dst)]>,
+              Requires<[In64BitMode]>;
+
+    def CALL64pcrel32_OXCAML_C_DIRECT :
+      PseudoI<(outs), (ins i64i32imm_brtarget:$dst), []>,
+              Requires<[In64BitMode]>;
+  }
 }
 
 // Conditional tail calls are similar to the above, but they are branches

@@ -1302,6 +1302,11 @@ def : Pat<(X86call (i64 tglobaladdr:$dst)),
 def : Pat<(X86call (i64 texternalsym:$dst)),
           (CALL64pcrel32 texternalsym:$dst)>;
 
+def : Pat<(X86oxcaml_c_direct_call (i64 tglobaladdr:$dst)),
+          (CALL64pcrel32_OXCAML_C_DIRECT tglobaladdr:$dst)>;
+def : Pat<(X86oxcaml_c_direct_call (i64 texternalsym:$dst)),
+          (CALL64pcrel32_OXCAML_C_DIRECT texternalsym:$dst)>;
+
 def : Pat<(X86call_rvmarker (i64 tglobaladdr:$rvfunc), (i64 texternalsym:$dst)),
           (CALL64pcrel32_RVMARKER tglobaladdr:$rvfunc, texternalsym:$dst)>;
 def : Pat<(X86call_rvmarker (i64 tglobaladdr:$rvfunc), (i64 tglobaladdr:$dst)),

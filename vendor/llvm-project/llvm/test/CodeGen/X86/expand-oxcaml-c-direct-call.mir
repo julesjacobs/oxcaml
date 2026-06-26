@@ -1,0 +1,70 @@
+# RUN: llc -o - -run-pass=x86-pseudo -verify-machineinstrs %s | FileCheck %s
+
+--- |
+  target triple = "x86_64-unknown-linux-gnu"
+
+  declare void @callee()
+
+  define void @direct() { ret void }
+  define void @reg_r13() { ret void }
+  define void @mem_r13() { ret void }
+...
+---
+# CHECK-LABEL: name: direct
+# CHECK:      BUNDLE
+# CHECK-NEXT:   $r13 = MOV64rr $rsp
+# CHECK-NEXT:   CFI_INSTRUCTION remember_state
+# CHECK-NEXT:   CFI_INSTRUCTION def_cfa_register $r13
+# CHECK-NEXT:   $rsp = MOV64rm $r14, 1, $noreg, 104, $noreg
+# CHECK-NEXT:   CALL64pcrel32 @callee, csr_64
+# CHECK-NEXT:   $rsp = MOV64rr internal $r13
+# CHECK-NEXT: }
+# CHECK-NEXT: CFI_INSTRUCTION restore_state
+name: direct
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $r14
+    CALL64pcrel32_OXCAML_C_DIRECT @callee, csr_64, implicit $rsp, implicit $ssp, implicit-def $rsp, implicit-def $ssp
+    RET 0
+...
+---
+# CHECK-LABEL: name: reg_r13
+# CHECK:      $r11 = MOV64rr $r13
+# CHECK-NEXT: BUNDLE
+# CHECK-NEXT:   $r13 = MOV64rr $rsp
+# CHECK-NEXT:   CFI_INSTRUCTION remember_state
+# CHECK-NEXT:   CFI_INSTRUCTION def_cfa_register $r13
+# CHECK-NEXT:   $rsp = MOV64rm $r14, 1, $noreg, 104, $noreg
+# CHECK-NEXT:   CALL64r $r11, csr_64
+# CHECK-NEXT:   $rsp = MOV64rr internal $r13
+# CHECK-NEXT: }
+# CHECK-NEXT: CFI_INSTRUCTION restore_state
+name: reg_r13
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $r13, $r14
+    CALL64r_OXCAML_C_DIRECT $r13, csr_64, implicit $rsp, implicit $ssp, implicit-def $rsp, implicit-def $ssp
+    RET 0
+...
+---
+# CHECK-LABEL: name: mem_r13
+# CHECK:      $r11 = MOV64rm $r13, 1, $noreg, 0, $noreg
+# CHECK-NEXT: BUNDLE
+# CHECK-NEXT:   $r13 = MOV64rr $rsp
+# CHECK-NEXT:   CFI_INSTRUCTION remember_state
+# CHECK-NEXT:   CFI_INSTRUCTION def_cfa_register $r13
+# CHECK-NEXT:   $rsp = MOV64rm $r14, 1, $noreg, 104, $noreg
+# CHECK-NEXT:   CALL64r $r11, csr_64
+# CHECK-NEXT:   $rsp = MOV64rr internal $r13
+# CHECK-NEXT: }
+# CHECK-NEXT: CFI_INSTRUCTION restore_state
+name: mem_r13
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $r13, $r14
+    CALL64m_OXCAML_C_DIRECT $r13, 1, $noreg, 0, $noreg, csr_64, implicit $rsp, implicit $ssp, implicit-def $rsp, implicit-def $ssp
+    RET 0
+...
