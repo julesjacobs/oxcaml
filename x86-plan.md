@@ -34,6 +34,10 @@ reach the same quality bar as the current ARM64 backend:
 - C calls, C-stack switching, noalloc direct calls, and stack-argument calls
   have correct stackmaps and root preservation.
 - Tests cover AMD64 directly rather than inferring correctness from ARM64.
+- The test suite passes under the LLVM backend, then a self-stage2 compiler
+  built through the LLVM backend also passes the same test suite.
+- After correctness is established, performance is measured against the native
+  AMD64 backend before treating the work as ready.
 
 ## Current state
 
@@ -341,9 +345,15 @@ Use this order so failures stay attributable:
 7. Run AMD64 `llvm-gc-roots`.
 8. Run allocation, exception, C-call, and backtrace tests with GC stress.
 9. Install a compiler with the LLVM backend enabled and run smoke tests.
-10. Run self-stage2 validation.
-11. Run `make -s fmt`, `make -s boot-compiler`, and `make -s test` before
+10. Run the full relevant test suite under the standard compiler using the
+    LLVM backend.
+11. Run self-stage2 validation.
+12. Run the same relevant test suite under the self-stage2 LLVM-backend
+    compiler.
+13. Run `make -s fmt`, `make -s boot-compiler`, and `make -s test` before
     calling the work complete.
+14. After correctness is green, measure performance against the native AMD64
+    backend and record the results before deciding what remains.
 
 During agent work in this workspace, follow `AGENTS.md`:
 
