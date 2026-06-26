@@ -4742,6 +4742,40 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
     let bitcast arg to_ = emit_ins t (I.convert Bitcast ~arg ~to_) in
     let trunc arg to_ = emit_ins t (I.convert Trunc ~arg ~to_) in
     let zext arg to_ = emit_ins t (I.convert Zext ~arg ~to_) in
+    let vec_type_of_width = function
+      | Cmm.Vec128 -> T.vec128
+      | Cmm.Vec256 -> T.vec256
+      | Cmm.Vec512 -> T.vec512
+    in
+    let vec_lanes_of_width = function
+      | Cmm.Vec128 -> 2
+      | Cmm.Vec256 -> 4
+      | Cmm.Vec512 -> 8
+    in
+    let reinterpret_vec ~src_width ~dst_width =
+      let src_typ = vec_type_of_width src_width in
+      let dst_typ = vec_type_of_width dst_width in
+      let src = load_reg_to_temp ~typ:src_typ t i.arg.(0) in
+      let src =
+        if T.equal (V.get_type src) src_typ then src else bitcast src src_typ
+      in
+      let src_lanes = vec_lanes_of_width src_width in
+      let dst_lanes = vec_lanes_of_width dst_width in
+      let res =
+        List.init (min src_lanes dst_lanes) Fun.id
+        |> List.fold_left
+             (fun vector lane ->
+               let elem =
+                 emit_ins t
+                   (I.extractelement ~vector:src ~index:(V.of_int lane))
+               in
+               emit_ins t
+                 (I.insertelement ~vector ~index:(V.of_int lane)
+                    ~to_insert:elem))
+             (V.poison dst_typ)
+      in
+      store_into_reg t i.res.(0) res
+    in
     match cast_op with
     | Float32_of_int32 ->
       let arg = load_reg_to_temp ~typ:T.i64 t i.arg.(0) in
@@ -4767,15 +4801,9 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
         emit_ins t (I.convert Bitcast ~arg ~to_:(T.of_reg i.res.(0)))
       in
       store_into_reg t i.res.(0) converted
-    | V128_of_vec Vec128 ->
-      let arg = load_reg_to_temp ~typ:T.vec128 t i.arg.(0) in
-      let res_typ = T.of_reg i.res.(0) in
-      let converted =
-        if T.equal (V.get_type arg) res_typ then arg else bitcast arg res_typ
-      in
-      store_into_reg t i.res.(0) converted
-    | V128_of_vec (Vec256 | Vec512) | V256_of_vec _ | V512_of_vec _ ->
-      not_implemented_basic ~msg:"vector reinterpret cast" i)
+    | V128_of_vec src_width -> reinterpret_vec ~src_width ~dst_width:Cmm.Vec128
+    | V256_of_vec src_width -> reinterpret_vec ~src_width ~dst_width:Cmm.Vec256
+    | V512_of_vec src_width -> reinterpret_vec ~src_width ~dst_width:Cmm.Vec512)
   | Specific op -> specific t i op
   | Intop_atomic { op; size; addr } -> atomic t i op ~size ~addr
   | Pause -> (
