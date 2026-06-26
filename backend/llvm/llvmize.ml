@@ -3295,6 +3295,64 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_sad_unsigned_i8 ?(vector_width_in_bits = 128) () =
+    let byte_typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits:8 in
+    let res_typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits:64 in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) byte_typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) byte_typ in
+    let groups = vector_width_in_bits / 64 in
+    let res =
+      List.init groups Fun.id
+      |> List.fold_left
+           (fun vector group ->
+             let sum =
+               List.init 8 Fun.id
+               |> List.fold_left
+                    (fun acc byte ->
+                      let lane = (8 * group) + byte in
+                      let elem1 =
+                        emit_ins t
+                          (I.extractelement ~vector:arg1
+                             ~index:(V.of_int lane))
+                      in
+                      let elem2 =
+                        emit_ins t
+                          (I.extractelement ~vector:arg2
+                             ~index:(V.of_int lane))
+                      in
+                      let elem1 =
+                        emit_ins t (I.convert Zext ~arg:elem1 ~to_:T.i16)
+                      in
+                      let elem2 =
+                        emit_ins t (I.convert Zext ~arg:elem2 ~to_:T.i16)
+                      in
+                      let elem1_ge_elem2 =
+                        emit_ins t (I.icmp I.Iuge ~arg1:elem1 ~arg2:elem2)
+                      in
+                      let diff1 =
+                        emit_ins t (I.binary Sub ~arg1:elem1 ~arg2:elem2)
+                      in
+                      let diff2 =
+                        emit_ins t (I.binary Sub ~arg1:elem2 ~arg2:elem1)
+                      in
+                      let abs_diff =
+                        emit_ins t
+                          (I.select ~cond:elem1_ge_elem2 ~ifso:diff1
+                             ~ifnot:diff2)
+                      in
+                      let abs_diff =
+                        emit_ins t (I.convert Zext ~arg:abs_diff ~to_:T.i64)
+                      in
+                      emit_ins t (I.binary Add ~arg1:acc ~arg2:abs_diff))
+                    (V.of_int ~typ:T.i64 0)
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int group)
+                  ~to_insert:sum))
+           (V.poison res_typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_shift_imm ?(vector_width_in_bits = 128) width_in_bits op n =
     let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -4467,6 +4525,11 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_mul_high_i16 ~vector_width_in_bits:256 ~unsigned:false ()
     | Amd64_simd_instrs.Vpmulhuw_Y_Y_Ym256 ->
       simd_int_mul_high_i16 ~vector_width_in_bits:256 ~unsigned:true ()
+    | Amd64_simd_instrs.Psadbw_X_Xm128
+    | Amd64_simd_instrs.Vpsadbw_X_X_Xm128 ->
+      simd_int_sad_unsigned_i8 ()
+    | Amd64_simd_instrs.Vpsadbw_Y_Y_Ym256 ->
+      simd_int_sad_unsigned_i8 ~vector_width_in_bits:256 ()
     | Amd64_simd_instrs.Andps | Amd64_simd_instrs.Andpd
     | Amd64_simd_instrs.Pand | Amd64_simd_instrs.Vandps_X_X_Xm128
     | Amd64_simd_instrs.Vandpd_X_X_Xm128
