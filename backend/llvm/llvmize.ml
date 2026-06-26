@@ -493,7 +493,17 @@ let ensure_debug_compile_unit t =
           (Printf.sprintf
              {|distinct !DICompileUnit(language: DW_LANG_OCaml, file: !%d, producer: "oxcaml-llvm", isOptimized: true, runtimeVersion: 0, emissionKind: FullDebug)|}
              file_id);
-        add_debug_module_flag t "Dwarf Version" 4;
+        (* GNU as rejects LLVM's x86 DWARF-4 directory form
+           [.file N "." "source"].  DWARF 5 makes llc emit the accepted
+           directory-index form instead. *)
+        let dwarf_version =
+          match Target_system.architecture () with
+          | Target_system.X86_64 | Target_system.IA32 -> 5
+          | Target_system.AArch64 | Target_system.ARM | Target_system.POWER
+          | Target_system.Z | Target_system.Riscv ->
+            4
+        in
+        add_debug_module_flag t "Dwarf Version" dwarf_version;
         add_debug_module_flag t "Debug Info Version" 3;
         t.debug_file_id <- Some file_id;
         t.debug_subroutine_type_id <- Some subroutine_type_id;
