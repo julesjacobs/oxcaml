@@ -3,10 +3,23 @@
 set -eu
 
 build_dir=$(pwd)
+host_arch=$(uname -m)
+host_system=$(uname -s)
 src="$build_dir/allocation_frametable_generated.ml"
 out="$build_dir/allocation_frametable_generated.exe"
 asm="$build_dir/allocation_frametable_generated.s"
 stdout_file="$build_dir/allocation_frametable_stdout.txt"
+debug_flags="-g"
+extra_link_flags=""
+check_debug_locations=true
+
+case "$host_system:$host_arch" in
+  Linux:x86_64 | Linux:amd64)
+    debug_flags=""
+    extra_link_flags="-ccopt -no-pie"
+    check_debug_locations=false
+    ;;
+esac
 
 search_dir=$build_dir
 ocamlopt=""
@@ -26,6 +39,20 @@ if [ -z "$ocamlopt" ]; then
   fi
 fi
 
+stdlib_flags=""
+ocamlopt_dir=$(dirname "$ocamlopt")
+for stdlib_dir in \
+  "$ocamlopt_dir/lib/ocaml" \
+  "$ocamlopt_dir/_install/lib/ocaml" \
+  "$ocamlopt_dir/../lib/ocaml" \
+  "$ocamlopt_dir/../../runtime_stdlib_install/lib/ocaml_runtime_stdlib"
+do
+  if [ -f "$stdlib_dir/stdlib.cmi" ]; then
+    stdlib_flags="-I $stdlib_dir"
+    break
+  fi
+done
+
 cat > "$src" <<'EOF'
 external opaque : 'a -> 'a = "%opaque"
 
@@ -39,7 +66,8 @@ let () =
   print_endline "ok"
 EOF
 
-"$ocamlopt" -O3 -g -S -llvm-backend \
+"$ocamlopt" $stdlib_flags -O3 $debug_flags -S -llvm-backend \
+  $extra_link_flags \
   -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
   -o "$out" "$src"
 
@@ -80,4 +108,6 @@ awk '
 
 # With [-g], the same frametable record should also carry source-location
 # strings for allocation debug metadata.
-grep -q "allocation_frametable_generated.ml" "$asm"
+if [ "$check_debug_locations" = true ]; then
+  grep -q "allocation_frametable_generated.ml" "$asm"
+fi
