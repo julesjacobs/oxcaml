@@ -3134,8 +3134,14 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let res = call_llvm_intrinsic t name [arg1; arg2] typ in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
-  let simd_int_minmax width_in_bits cond =
-    let typ = int_vec_type ~width_in_bits in
+  let simd_int_binary_intrinsic ?(vector_width_in_bits = 128) width_in_bits
+      intrinsic =
+    simd_binary_intrinsic
+      (wide_int_vec_type ~vector_width_in_bits ~width_in_bits)
+      intrinsic
+  in
+  let simd_int_minmax ?(vector_width_in_bits = 128) width_in_bits cond =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits in
     let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
     let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
     let choose_arg1 = emit_ins t (I.icmp cond ~arg1 ~arg2) in
@@ -3614,6 +3620,22 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_binary ~vector_width_in_bits:256 32 Add
     | Amd64_simd_instrs.Vpaddq_Y_Y_Ym256 ->
       simd_int_binary ~vector_width_in_bits:256 64 Add
+    | Amd64_simd_instrs.Paddsb | Amd64_simd_instrs.Vpaddsb_X_X_Xm128 ->
+      simd_int_binary_intrinsic 8 "sadd.sat"
+    | Amd64_simd_instrs.Paddsw | Amd64_simd_instrs.Vpaddsw_X_X_Xm128 ->
+      simd_int_binary_intrinsic 16 "sadd.sat"
+    | Amd64_simd_instrs.Paddusb | Amd64_simd_instrs.Vpaddusb_X_X_Xm128 ->
+      simd_int_binary_intrinsic 8 "uadd.sat"
+    | Amd64_simd_instrs.Paddusw | Amd64_simd_instrs.Vpaddusw_X_X_Xm128 ->
+      simd_int_binary_intrinsic 16 "uadd.sat"
+    | Amd64_simd_instrs.Vpaddsb_Y_Y_Ym256 ->
+      simd_int_binary_intrinsic ~vector_width_in_bits:256 8 "sadd.sat"
+    | Amd64_simd_instrs.Vpaddsw_Y_Y_Ym256 ->
+      simd_int_binary_intrinsic ~vector_width_in_bits:256 16 "sadd.sat"
+    | Amd64_simd_instrs.Vpaddusb_Y_Y_Ym256 ->
+      simd_int_binary_intrinsic ~vector_width_in_bits:256 8 "uadd.sat"
+    | Amd64_simd_instrs.Vpaddusw_Y_Y_Ym256 ->
+      simd_int_binary_intrinsic ~vector_width_in_bits:256 16 "uadd.sat"
     | Amd64_simd_instrs.Psubb | Amd64_simd_instrs.Vpsubb_X_X_Xm128 ->
       simd_int_binary 8 Sub
     | Amd64_simd_instrs.Psubw | Amd64_simd_instrs.Vpsubw_X_X_Xm128 ->
@@ -3630,6 +3652,70 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_binary ~vector_width_in_bits:256 32 Sub
     | Amd64_simd_instrs.Vpsubq_Y_Y_Ym256 ->
       simd_int_binary ~vector_width_in_bits:256 64 Sub
+    | Amd64_simd_instrs.Psubsb | Amd64_simd_instrs.Vpsubsb_X_X_Xm128 ->
+      simd_int_binary_intrinsic 8 "ssub.sat"
+    | Amd64_simd_instrs.Psubsw | Amd64_simd_instrs.Vpsubsw_X_X_Xm128 ->
+      simd_int_binary_intrinsic 16 "ssub.sat"
+    | Amd64_simd_instrs.Psubusb | Amd64_simd_instrs.Vpsubusb_X_X_Xm128 ->
+      simd_int_binary_intrinsic 8 "usub.sat"
+    | Amd64_simd_instrs.Psubusw | Amd64_simd_instrs.Vpsubusw_X_X_Xm128 ->
+      simd_int_binary_intrinsic 16 "usub.sat"
+    | Amd64_simd_instrs.Vpsubsb_Y_Y_Ym256 ->
+      simd_int_binary_intrinsic ~vector_width_in_bits:256 8 "ssub.sat"
+    | Amd64_simd_instrs.Vpsubsw_Y_Y_Ym256 ->
+      simd_int_binary_intrinsic ~vector_width_in_bits:256 16 "ssub.sat"
+    | Amd64_simd_instrs.Vpsubusb_Y_Y_Ym256 ->
+      simd_int_binary_intrinsic ~vector_width_in_bits:256 8 "usub.sat"
+    | Amd64_simd_instrs.Vpsubusw_Y_Y_Ym256 ->
+      simd_int_binary_intrinsic ~vector_width_in_bits:256 16 "usub.sat"
+    | Amd64_simd_instrs.Pmaxub_X_Xm128 | Amd64_simd_instrs.Vpmaxub_X_X_Xm128 ->
+      simd_int_minmax 8 I.Iugt
+    | Amd64_simd_instrs.Pminub_X_Xm128 | Amd64_simd_instrs.Vpminub_X_X_Xm128 ->
+      simd_int_minmax 8 I.Iult
+    | Amd64_simd_instrs.Pmaxsw_X_Xm128 | Amd64_simd_instrs.Vpmaxsw_X_X_Xm128 ->
+      simd_int_minmax 16 I.Isgt
+    | Amd64_simd_instrs.Pminsw_X_Xm128 | Amd64_simd_instrs.Vpminsw_X_X_Xm128 ->
+      simd_int_minmax 16 I.Islt
+    | Amd64_simd_instrs.Pmaxsb | Amd64_simd_instrs.Vpmaxsb_X_X_Xm128 ->
+      simd_int_minmax 8 I.Isgt
+    | Amd64_simd_instrs.Pmaxsd | Amd64_simd_instrs.Vpmaxsd_X_X_Xm128 ->
+      simd_int_minmax 32 I.Isgt
+    | Amd64_simd_instrs.Pmaxuw | Amd64_simd_instrs.Vpmaxuw_X_X_Xm128 ->
+      simd_int_minmax 16 I.Iugt
+    | Amd64_simd_instrs.Pmaxud | Amd64_simd_instrs.Vpmaxud_X_X_Xm128 ->
+      simd_int_minmax 32 I.Iugt
+    | Amd64_simd_instrs.Pminsb | Amd64_simd_instrs.Vpminsb_X_X_Xm128 ->
+      simd_int_minmax 8 I.Islt
+    | Amd64_simd_instrs.Pminsd | Amd64_simd_instrs.Vpminsd_X_X_Xm128 ->
+      simd_int_minmax 32 I.Islt
+    | Amd64_simd_instrs.Pminuw | Amd64_simd_instrs.Vpminuw_X_X_Xm128 ->
+      simd_int_minmax 16 I.Iult
+    | Amd64_simd_instrs.Pminud | Amd64_simd_instrs.Vpminud_X_X_Xm128 ->
+      simd_int_minmax 32 I.Iult
+    | Amd64_simd_instrs.Vpmaxub_Y_Y_Ym256 ->
+      simd_int_minmax ~vector_width_in_bits:256 8 I.Iugt
+    | Amd64_simd_instrs.Vpmaxuw_Y_Y_Ym256 ->
+      simd_int_minmax ~vector_width_in_bits:256 16 I.Iugt
+    | Amd64_simd_instrs.Vpmaxud_Y_Y_Ym256 ->
+      simd_int_minmax ~vector_width_in_bits:256 32 I.Iugt
+    | Amd64_simd_instrs.Vpminub_Y_Y_Ym256 ->
+      simd_int_minmax ~vector_width_in_bits:256 8 I.Iult
+    | Amd64_simd_instrs.Vpminuw_Y_Y_Ym256 ->
+      simd_int_minmax ~vector_width_in_bits:256 16 I.Iult
+    | Amd64_simd_instrs.Vpminud_Y_Y_Ym256 ->
+      simd_int_minmax ~vector_width_in_bits:256 32 I.Iult
+    | Amd64_simd_instrs.Vpmaxsb_Y_Y_Ym256 ->
+      simd_int_minmax ~vector_width_in_bits:256 8 I.Isgt
+    | Amd64_simd_instrs.Vpmaxsw_Y_Y_Ym256 ->
+      simd_int_minmax ~vector_width_in_bits:256 16 I.Isgt
+    | Amd64_simd_instrs.Vpmaxsd_Y_Y_Ym256 ->
+      simd_int_minmax ~vector_width_in_bits:256 32 I.Isgt
+    | Amd64_simd_instrs.Vpminsb_Y_Y_Ym256 ->
+      simd_int_minmax ~vector_width_in_bits:256 8 I.Islt
+    | Amd64_simd_instrs.Vpminsw_Y_Y_Ym256 ->
+      simd_int_minmax ~vector_width_in_bits:256 16 I.Islt
+    | Amd64_simd_instrs.Vpminsd_Y_Y_Ym256 ->
+      simd_int_minmax ~vector_width_in_bits:256 32 I.Islt
     | Amd64_simd_instrs.Andps | Amd64_simd_instrs.Andpd
     | Amd64_simd_instrs.Pand | Amd64_simd_instrs.Vandps_X_X_Xm128
     | Amd64_simd_instrs.Vandpd_X_X_Xm128
