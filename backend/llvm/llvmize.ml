@@ -3687,6 +3687,50 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_shuffle_bytes ?(vector_width_in_bits = 128) () =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits:8 in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let mask = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let lanes = vector_width_in_bits / 8 in
+    let res =
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let lane_base = (lane / 16) * 16 in
+             let selector =
+               emit_ins t
+                 (I.extractelement ~vector:mask ~index:(V.of_int lane))
+             in
+             let zero =
+               emit_ins t
+                 (I.icmp I.Iuge ~arg1:selector ~arg2:(V.of_int ~typ:T.i8 128))
+             in
+             let index =
+               emit_ins t
+                 (I.binary And ~arg1:selector ~arg2:(V.of_int ~typ:T.i8 15))
+             in
+             let index = emit_ins t (I.convert Zext ~arg:index ~to_:T.i64) in
+             let index =
+               if lane_base = 0
+               then index
+               else
+                 emit_ins t
+                   (I.binary Add ~arg1:index
+                      ~arg2:(V.of_int ~typ:T.i64 lane_base))
+             in
+             let selected = emit_ins t (I.extractelement ~vector:arg ~index) in
+             let elem =
+               emit_ins t
+                 (I.select ~cond:zero ~ifso:(V.of_int ~typ:T.i8 0)
+                    ~ifnot:selected)
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane)
+                  ~to_insert:elem))
+           (V.poison typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_variable_shift width_in_bits intrinsic =
     let typ = int_vec_type ~width_in_bits in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -4801,6 +4845,11 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | Amd64_simd_instrs.Vpsrldq_Y_Y ->
       simd_int_shift_bytes_imm ~vector_width_in_bits:256
         (require_imm instr_id imm) ~left:false
+    | Amd64_simd_instrs.Pshufb_X_Xm128
+    | Amd64_simd_instrs.Vpshufb_X_X_Xm128 ->
+      simd_int_shuffle_bytes ()
+    | Amd64_simd_instrs.Vpshufb_Y_Y_Ym256 ->
+      simd_int_shuffle_bytes ~vector_width_in_bits:256 ()
     | Amd64_simd_instrs.Pmovmskb_r64_X
     | Amd64_simd_instrs.Vpmovmskb_r64_X ->
       simd_movemask ~vector_width_in_bits:128 8
