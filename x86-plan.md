@@ -362,6 +362,15 @@ During agent work in this workspace, follow `AGENTS.md`:
 - Use the standard installed compiler with `-llvm-backend` for focused
   reproducers before escalating to self-stage2-only reproducers.
 - Avoid concurrent `make` or `dune` commands in the same checkout.
+- Commit real code or test progress regularly so each step has a reviewable
+  checkpoint.
+- After each progress commit, do a code-review pass on that commit before
+  building further on it: look for correctness bugs, missing tests, ABI
+  mismatches with the native AMD64 backend, and gaps relative to the ARM64
+  quality bar.
+- Iterate on review findings immediately, either by amending the current
+  checkpoint before push or by adding a follow-up fix commit when the branch is
+  already shared.
 
 ## Main risks
 
