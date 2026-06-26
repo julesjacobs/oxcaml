@@ -3233,6 +3233,34 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_shuffle_lanes ~src_vector_width_in_bits ~dst_vector_width_in_bits
+      width_in_bits ~src_lane =
+    let src_typ =
+      wide_int_vec_type ~vector_width_in_bits:src_vector_width_in_bits
+        ~width_in_bits
+    in
+    let dst_typ =
+      wide_int_vec_type ~vector_width_in_bits:dst_vector_width_in_bits
+        ~width_in_bits
+    in
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) src_typ in
+    let lanes = dst_vector_width_in_bits / width_in_bits in
+    let res =
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let elem =
+               emit_ins t
+                 (I.extractelement ~vector:arg
+                    ~index:(V.of_int (src_lane lane)))
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane)
+                  ~to_insert:elem))
+           (V.poison dst_typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_get_lane width_in_bits lane =
     let typ = int_vec_type ~width_in_bits in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -3993,6 +4021,38 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | Amd64_simd_instrs.Vxorpd_Y_Y_Ym256
     | Amd64_simd_instrs.Vpxor_Y_Y_Ym256 ->
       simd_int_binary ~vector_width_in_bits:256 64 Xor
+    | Amd64_simd_instrs.Movddup | Amd64_simd_instrs.Vmovddup_X_Xm64 ->
+      simd_int_shuffle_lanes ~src_vector_width_in_bits:128
+        ~dst_vector_width_in_bits:128 64 ~src_lane:(fun _ -> 0)
+    | Amd64_simd_instrs.Vmovddup_Y_Ym256 ->
+      simd_int_shuffle_lanes ~src_vector_width_in_bits:256
+        ~dst_vector_width_in_bits:256 64
+        ~src_lane:(fun lane -> 2 * (lane / 2))
+    | Amd64_simd_instrs.Movshdup | Amd64_simd_instrs.Vmovshdup_X_Xm128 ->
+      simd_int_shuffle_lanes ~src_vector_width_in_bits:128
+        ~dst_vector_width_in_bits:128 32
+        ~src_lane:(fun lane -> (2 * (lane / 2)) + 1)
+    | Amd64_simd_instrs.Vmovshdup_Y_Ym256 ->
+      simd_int_shuffle_lanes ~src_vector_width_in_bits:256
+        ~dst_vector_width_in_bits:256 32
+        ~src_lane:(fun lane -> (2 * (lane / 2)) + 1)
+    | Amd64_simd_instrs.Movsldup | Amd64_simd_instrs.Vmovsldup_X_Xm128 ->
+      simd_int_shuffle_lanes ~src_vector_width_in_bits:128
+        ~dst_vector_width_in_bits:128 32
+        ~src_lane:(fun lane -> 2 * (lane / 2))
+    | Amd64_simd_instrs.Vmovsldup_Y_Ym256 ->
+      simd_int_shuffle_lanes ~src_vector_width_in_bits:256
+        ~dst_vector_width_in_bits:256 32
+        ~src_lane:(fun lane -> 2 * (lane / 2))
+    | Amd64_simd_instrs.Vbroadcastsd_Y_X ->
+      simd_int_shuffle_lanes ~src_vector_width_in_bits:128
+        ~dst_vector_width_in_bits:256 64 ~src_lane:(fun _ -> 0)
+    | Amd64_simd_instrs.Vbroadcastss_X_X ->
+      simd_int_shuffle_lanes ~src_vector_width_in_bits:128
+        ~dst_vector_width_in_bits:128 32 ~src_lane:(fun _ -> 0)
+    | Amd64_simd_instrs.Vbroadcastss_Y_X ->
+      simd_int_shuffle_lanes ~src_vector_width_in_bits:128
+        ~dst_vector_width_in_bits:256 32 ~src_lane:(fun _ -> 0)
     | _ -> not_implemented_basic ~msg:"amd64 SIMD-specific operation" i)
   | Amd64_simd_mem { mem_operation; instr; imm; addr } ->
     simd_mem ~mem_operation ~instr ~imm ~addr
