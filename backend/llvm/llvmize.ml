@@ -3796,6 +3796,41 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_interleave ?(vector_width_in_bits = 128) width_in_bits ~high =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let lanes_per_128 = 128 / width_in_bits in
+    let half_lanes_per_128 = lanes_per_128 / 2 in
+    let blocks = vector_width_in_bits / 128 in
+    let res =
+      List.init blocks Fun.id
+      |> List.fold_left
+           (fun vector block ->
+             List.init lanes_per_128 Fun.id
+             |> List.fold_left
+                  (fun vector lane ->
+                    let pair = lane / 2 in
+                    let src_lane_offset =
+                      pair + (if high then half_lanes_per_128 else 0)
+                    in
+                    let src_arg = if (lane land 1) = 0 then arg1 else arg2 in
+                    let elem =
+                      emit_ins t
+                        (I.extractelement ~vector:src_arg
+                           ~index:
+                             (V.of_int
+                                ((block * lanes_per_128) + src_lane_offset)))
+                    in
+                    emit_ins t
+                      (I.insertelement ~vector
+                         ~index:(V.of_int ((block * lanes_per_128) + lane))
+                         ~to_insert:elem))
+                  vector)
+           (V.poison typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_variable_shift width_in_bits intrinsic =
     let typ = int_vec_type ~width_in_bits in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -4933,6 +4968,58 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | Amd64_simd_instrs.Vpshuflw_Y_Ym256 ->
       simd_int_shuffle_words ~vector_width_in_bits:256
         (require_imm instr_id imm) ~high:false
+    | Amd64_simd_instrs.Punpckhbw
+    | Amd64_simd_instrs.Vpunpckhbw_X_X_Xm128 ->
+      simd_int_interleave 8 ~high:true
+    | Amd64_simd_instrs.Punpckhwd
+    | Amd64_simd_instrs.Vpunpckhwd_X_X_Xm128 ->
+      simd_int_interleave 16 ~high:true
+    | Amd64_simd_instrs.Unpckhps
+    | Amd64_simd_instrs.Punpckhdq
+    | Amd64_simd_instrs.Vunpckhps_X_X_Xm128
+    | Amd64_simd_instrs.Vpunpckhdq_X_X_Xm128 ->
+      simd_int_interleave 32 ~high:true
+    | Amd64_simd_instrs.Unpckhpd
+    | Amd64_simd_instrs.Punpckhqdq
+    | Amd64_simd_instrs.Vunpckhpd_X_X_Xm128
+    | Amd64_simd_instrs.Vpunpckhqdq_X_X_Xm128 ->
+      simd_int_interleave 64 ~high:true
+    | Amd64_simd_instrs.Punpcklbw
+    | Amd64_simd_instrs.Vpunpcklbw_X_X_Xm128 ->
+      simd_int_interleave 8 ~high:false
+    | Amd64_simd_instrs.Punpcklwd
+    | Amd64_simd_instrs.Vpunpcklwd_X_X_Xm128 ->
+      simd_int_interleave 16 ~high:false
+    | Amd64_simd_instrs.Unpcklps
+    | Amd64_simd_instrs.Punpckldq
+    | Amd64_simd_instrs.Vunpcklps_X_X_Xm128
+    | Amd64_simd_instrs.Vpunpckldq_X_X_Xm128 ->
+      simd_int_interleave 32 ~high:false
+    | Amd64_simd_instrs.Unpcklpd
+    | Amd64_simd_instrs.Punpcklqdq
+    | Amd64_simd_instrs.Vunpcklpd_X_X_Xm128
+    | Amd64_simd_instrs.Vpunpcklqdq_X_X_Xm128 ->
+      simd_int_interleave 64 ~high:false
+    | Amd64_simd_instrs.Vpunpckhbw_Y_Y_Ym256 ->
+      simd_int_interleave ~vector_width_in_bits:256 8 ~high:true
+    | Amd64_simd_instrs.Vpunpckhwd_Y_Y_Ym256 ->
+      simd_int_interleave ~vector_width_in_bits:256 16 ~high:true
+    | Amd64_simd_instrs.Vunpckhps_Y_Y_Ym256
+    | Amd64_simd_instrs.Vpunpckhdq_Y_Y_Ym256 ->
+      simd_int_interleave ~vector_width_in_bits:256 32 ~high:true
+    | Amd64_simd_instrs.Vunpckhpd_Y_Y_Ym256
+    | Amd64_simd_instrs.Vpunpckhqdq_Y_Y_Ym256 ->
+      simd_int_interleave ~vector_width_in_bits:256 64 ~high:true
+    | Amd64_simd_instrs.Vpunpcklbw_Y_Y_Ym256 ->
+      simd_int_interleave ~vector_width_in_bits:256 8 ~high:false
+    | Amd64_simd_instrs.Vpunpcklwd_Y_Y_Ym256 ->
+      simd_int_interleave ~vector_width_in_bits:256 16 ~high:false
+    | Amd64_simd_instrs.Vunpcklps_Y_Y_Ym256
+    | Amd64_simd_instrs.Vpunpckldq_Y_Y_Ym256 ->
+      simd_int_interleave ~vector_width_in_bits:256 32 ~high:false
+    | Amd64_simd_instrs.Vunpcklpd_Y_Y_Ym256
+    | Amd64_simd_instrs.Vpunpcklqdq_Y_Y_Ym256 ->
+      simd_int_interleave ~vector_width_in_bits:256 64 ~high:false
     | Amd64_simd_instrs.Pmovmskb_r64_X
     | Amd64_simd_instrs.Vpmovmskb_r64_X ->
       simd_movemask ~vector_width_in_bits:128 8
