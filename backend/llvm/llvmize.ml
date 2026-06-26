@@ -3731,6 +3731,38 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_align_right_bytes ?(vector_width_in_bits = 128) n =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits:8 in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let lanes = vector_width_in_bits / 8 in
+    let res =
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let lane_base = (lane / 16) * 16 in
+             let lane_offset = lane - lane_base in
+             let src_offset = n + lane_offset in
+             let elem =
+               if src_offset >= 32
+               then V.of_int ~typ:T.i8 0
+               else if src_offset < 16
+               then
+                 emit_ins t
+                   (I.extractelement ~vector:arg2
+                      ~index:(V.of_int (lane_base + src_offset)))
+               else
+                 emit_ins t
+                   (I.extractelement ~vector:arg1
+                      ~index:(V.of_int (lane_base + src_offset - 16)))
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane)
+                  ~to_insert:elem))
+           (V.poison typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_variable_shift width_in_bits intrinsic =
     let typ = int_vec_type ~width_in_bits in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -4850,6 +4882,12 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_shuffle_bytes ()
     | Amd64_simd_instrs.Vpshufb_Y_Y_Ym256 ->
       simd_int_shuffle_bytes ~vector_width_in_bits:256 ()
+    | Amd64_simd_instrs.Palignr_X_Xm128
+    | Amd64_simd_instrs.Vpalignr_X_X_Xm128 ->
+      simd_int_align_right_bytes (require_imm instr_id imm)
+    | Amd64_simd_instrs.Vpalignr_Y_Y_Ym256 ->
+      simd_int_align_right_bytes ~vector_width_in_bits:256
+        (require_imm instr_id imm)
     | Amd64_simd_instrs.Pmovmskb_r64_X
     | Amd64_simd_instrs.Vpmovmskb_r64_X ->
       simd_movemask ~vector_width_in_bits:128 8
