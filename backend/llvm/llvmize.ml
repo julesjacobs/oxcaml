@@ -3055,11 +3055,16 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
         elem_type = T.Int { width_in_bits }
       }
   in
-  let float_vec_type ~width =
+  let wide_float_vec_type ~vector_width_in_bits ~width =
     let elem_type, num_of_elems =
-      match width with Cmm.Float32 -> T.float, 4 | Cmm.Float64 -> T.double, 2
+      match width with
+      | Cmm.Float32 -> T.float, vector_width_in_bits / 32
+      | Cmm.Float64 -> T.double, vector_width_in_bits / 64
     in
     T.Vector { num_of_elems; elem_type }
+  in
+  let float_vec_type ~width =
+    wide_float_vec_type ~vector_width_in_bits:128 ~width
   in
   let cast_if_needed value typ =
     if T.equal (V.get_type value) typ
@@ -3484,15 +3489,15 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let res = call_llvm_intrinsic t name [arg1; arg2] typ in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
-  let simd_float_binary width op =
-    let typ = float_vec_type ~width in
+  let simd_float_binary ?(vector_width_in_bits = 128) width op =
+    let typ = wide_float_vec_type ~vector_width_in_bits ~width in
     let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
     let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
     let res = emit_ins t (I.binary op ~arg1 ~arg2) in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
-  let simd_float_unary_intrinsic width intrinsic =
-    let typ = float_vec_type ~width in
+  let simd_float_unary_intrinsic ?(vector_width_in_bits = 128) width intrinsic =
+    let typ = wide_float_vec_type ~vector_width_in_bits ~width in
     let name = intrinsic ^ "." ^ llvm_intrinsic_type_suffix typ in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
     let res = call_llvm_intrinsic t name [arg] typ in
@@ -3985,6 +3990,46 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_cmp ~vector_width_in_bits:256 32 Int_GT ~zero:false
     | Amd64_simd_instrs.Vpcmpgtq_Y_Y_Ym256 ->
       simd_int_cmp ~vector_width_in_bits:256 64 Int_GT ~zero:false
+    | Amd64_simd_instrs.Addps | Amd64_simd_instrs.Vaddps_X_X_Xm128 ->
+      simd_float_binary Cmm.Float32 Fadd
+    | Amd64_simd_instrs.Addpd | Amd64_simd_instrs.Vaddpd_X_X_Xm128 ->
+      simd_float_binary Cmm.Float64 Fadd
+    | Amd64_simd_instrs.Vaddps_Y_Y_Ym256 ->
+      simd_float_binary ~vector_width_in_bits:256 Cmm.Float32 Fadd
+    | Amd64_simd_instrs.Vaddpd_Y_Y_Ym256 ->
+      simd_float_binary ~vector_width_in_bits:256 Cmm.Float64 Fadd
+    | Amd64_simd_instrs.Subps | Amd64_simd_instrs.Vsubps_X_X_Xm128 ->
+      simd_float_binary Cmm.Float32 Fsub
+    | Amd64_simd_instrs.Subpd | Amd64_simd_instrs.Vsubpd_X_X_Xm128 ->
+      simd_float_binary Cmm.Float64 Fsub
+    | Amd64_simd_instrs.Vsubps_Y_Y_Ym256 ->
+      simd_float_binary ~vector_width_in_bits:256 Cmm.Float32 Fsub
+    | Amd64_simd_instrs.Vsubpd_Y_Y_Ym256 ->
+      simd_float_binary ~vector_width_in_bits:256 Cmm.Float64 Fsub
+    | Amd64_simd_instrs.Mulps | Amd64_simd_instrs.Vmulps_X_X_Xm128 ->
+      simd_float_binary Cmm.Float32 Fmul
+    | Amd64_simd_instrs.Mulpd | Amd64_simd_instrs.Vmulpd_X_X_Xm128 ->
+      simd_float_binary Cmm.Float64 Fmul
+    | Amd64_simd_instrs.Vmulps_Y_Y_Ym256 ->
+      simd_float_binary ~vector_width_in_bits:256 Cmm.Float32 Fmul
+    | Amd64_simd_instrs.Vmulpd_Y_Y_Ym256 ->
+      simd_float_binary ~vector_width_in_bits:256 Cmm.Float64 Fmul
+    | Amd64_simd_instrs.Divps | Amd64_simd_instrs.Vdivps_X_X_Xm128 ->
+      simd_float_binary Cmm.Float32 Fdiv
+    | Amd64_simd_instrs.Divpd | Amd64_simd_instrs.Vdivpd_X_X_Xm128 ->
+      simd_float_binary Cmm.Float64 Fdiv
+    | Amd64_simd_instrs.Vdivps_Y_Y_Ym256 ->
+      simd_float_binary ~vector_width_in_bits:256 Cmm.Float32 Fdiv
+    | Amd64_simd_instrs.Vdivpd_Y_Y_Ym256 ->
+      simd_float_binary ~vector_width_in_bits:256 Cmm.Float64 Fdiv
+    | Amd64_simd_instrs.Sqrtps | Amd64_simd_instrs.Vsqrtps_X_Xm128 ->
+      simd_float_unary_intrinsic Cmm.Float32 "sqrt"
+    | Amd64_simd_instrs.Sqrtpd | Amd64_simd_instrs.Vsqrtpd_X_Xm128 ->
+      simd_float_unary_intrinsic Cmm.Float64 "sqrt"
+    | Amd64_simd_instrs.Vsqrtps_Y_Ym256 ->
+      simd_float_unary_intrinsic ~vector_width_in_bits:256 Cmm.Float32 "sqrt"
+    | Amd64_simd_instrs.Vsqrtpd_Y_Ym256 ->
+      simd_float_unary_intrinsic ~vector_width_in_bits:256 Cmm.Float64 "sqrt"
     | Amd64_simd_instrs.Andps | Amd64_simd_instrs.Andpd
     | Amd64_simd_instrs.Pand | Amd64_simd_instrs.Vandps_X_X_Xm128
     | Amd64_simd_instrs.Vandpd_X_X_Xm128
