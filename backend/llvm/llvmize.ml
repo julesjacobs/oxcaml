@@ -3627,6 +3627,32 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     insert_i32_lane vector 0 loaded |> fun vector ->
     cast_if_needed vector T.vec128 |> store_into_reg t i.res.(0)
   in
+  let simd_mem_broadcast_i64 ~addr ~typ ~lanes =
+    let loaded = load_i64_from_address addr 0 in
+    List.init lanes Fun.id
+    |> List.fold_left
+         (fun vector lane -> insert_i64_lane vector lane loaded)
+         (V.poison typ)
+    |> store_into_reg t i.res.(0)
+  in
+  let simd_mem_broadcast_i32 ~addr ~typ ~lanes ~res_typ =
+    let loaded = load_i32_from_address addr 0 in
+    List.init lanes Fun.id
+    |> List.fold_left
+         (fun vector lane -> insert_i32_lane vector lane loaded)
+         (V.poison typ)
+    |> fun vector -> cast_if_needed vector res_typ |> store_into_reg t i.res.(0)
+  in
+  let simd_mem_broadcast_vec128 ~addr =
+    let loaded = load_vec_from_address ~typ:T.vec128 ~align:1 addr 0 in
+    List.init 4 Fun.id
+    |> List.fold_left
+         (fun vector lane ->
+           let loaded_lane = extract_i64_lane loaded (lane mod 2) in
+           insert_i64_lane vector lane loaded_lane)
+         (V.poison T.vec256)
+    |> store_into_reg t i.res.(0)
+  in
   let simd_mem_store_low64 ~addr =
     let vector = load_reg_to_temp ~typ:T.vec128 t i.arg.(1) in
     let low = extract_i64_lane vector 0 in
@@ -3676,6 +3702,20 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
         ( Amd64_simd_instrs.Vlddqu_Y_m256
         | Amd64_simd_instrs.Vmovupd_Y_Ym256 ) ) ->
       simd_mem_full_load ~addr ~typ:T.vec256 ~align:1
+    | ( Simd_mem_load,
+        (Amd64_simd_instrs.Movddup | Amd64_simd_instrs.Vmovddup_X_Xm64) ) ->
+      simd_mem_broadcast_i64 ~addr ~typ:T.vec128 ~lanes:2
+    | Simd_mem_load, Amd64_simd_instrs.Vbroadcastf128 ->
+      simd_mem_broadcast_vec128 ~addr
+    | Simd_mem_load, Amd64_simd_instrs.Vbroadcastsd_Y_m64 ->
+      simd_mem_broadcast_i64 ~addr ~typ:T.vec256 ~lanes:4
+    | Simd_mem_load, Amd64_simd_instrs.Vbroadcastss_X_m32 ->
+      simd_mem_broadcast_i32 ~addr ~typ:(int_vec_type ~width_in_bits:32)
+        ~lanes:4 ~res_typ:T.vec128
+    | Simd_mem_load, Amd64_simd_instrs.Vbroadcastss_Y_m32 ->
+      simd_mem_broadcast_i32 ~addr
+        ~typ:(wide_int_vec_type ~vector_width_in_bits:256 ~width_in_bits:32)
+        ~lanes:8 ~res_typ:T.vec256
     | ( Simd_mem_store,
         ( Amd64_simd_instrs.Movapd_m128_X
         | Amd64_simd_instrs.Movntdq
