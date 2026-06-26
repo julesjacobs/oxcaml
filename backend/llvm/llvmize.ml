@@ -3203,6 +3203,54 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let res = emit_ins t (I.select ~cond:choose_arg1 ~ifso:arg1 ~ifnot:arg2) in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_avg_unsigned ?(vector_width_in_bits = 128) width_in_bits =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits in
+    let wide_width_in_bits = 2 * width_in_bits in
+    let wide_elem_typ = T.Int { width_in_bits = wide_width_in_bits } in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let lanes = vector_width_in_bits / width_in_bits in
+    let res =
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let elem1 =
+               emit_ins t
+                 (I.extractelement ~vector:arg1 ~index:(V.of_int lane))
+             in
+             let elem2 =
+               emit_ins t
+                 (I.extractelement ~vector:arg2 ~index:(V.of_int lane))
+             in
+             let elem1 =
+               emit_ins t (I.convert Zext ~arg:elem1 ~to_:wide_elem_typ)
+             in
+             let elem2 =
+               emit_ins t (I.convert Zext ~arg:elem2 ~to_:wide_elem_typ)
+             in
+             let sum = emit_ins t (I.binary Add ~arg1:elem1 ~arg2:elem2) in
+             let rounded =
+               emit_ins t
+                 (I.binary Add ~arg1:sum
+                    ~arg2:(V.of_int ~typ:wide_elem_typ 1))
+             in
+             let avg =
+               emit_ins t
+                 (I.binary Lshr ~arg1:rounded
+                    ~arg2:(V.of_int ~typ:wide_elem_typ 1))
+             in
+             let narrowed =
+               emit_ins t
+                 (I.convert Trunc ~arg:avg
+                    ~to_:(T.Int { width_in_bits }))
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane)
+                  ~to_insert:narrowed))
+           (V.poison typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_shift_imm ?(vector_width_in_bits = 128) width_in_bits op n =
     let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -4348,6 +4396,16 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_broadcast_low_lane ~dst_vector_width_in_bits:128 16
     | Amd64_simd_instrs.Vpbroadcastw_Y_Xm16 ->
       simd_int_broadcast_low_lane ~dst_vector_width_in_bits:256 16
+    | Amd64_simd_instrs.Pavgb_X_Xm128
+    | Amd64_simd_instrs.Vpavgb_X_X_Xm128 ->
+      simd_int_avg_unsigned 8
+    | Amd64_simd_instrs.Pavgw_X_Xm128
+    | Amd64_simd_instrs.Vpavgw_X_X_Xm128 ->
+      simd_int_avg_unsigned 16
+    | Amd64_simd_instrs.Vpavgb_Y_Y_Ym256 ->
+      simd_int_avg_unsigned ~vector_width_in_bits:256 8
+    | Amd64_simd_instrs.Vpavgw_Y_Y_Ym256 ->
+      simd_int_avg_unsigned ~vector_width_in_bits:256 16
     | Amd64_simd_instrs.Andps | Amd64_simd_instrs.Andpd
     | Amd64_simd_instrs.Pand | Amd64_simd_instrs.Vandps_X_X_Xm128
     | Amd64_simd_instrs.Vandpd_X_X_Xm128
