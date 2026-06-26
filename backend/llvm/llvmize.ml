@@ -43,6 +43,8 @@ module E = LL.Function.Emitter
 module I = LL.Instruction
 module F = LL.Format
 
+open Llvmize_specific_types
+
 type error = Asm_generation of (string * int)
 
 exception Error of error
@@ -2952,14 +2954,53 @@ let intrinsic t (i : Cfg.basic Cfg.instruction) intrinsic_name =
 let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
   let int_arg n = load_reg_to_temp ~typ:T.i64 t i.arg.(n) in
   let store_int_res value = store_into_reg t i.res.(0) value in
+  let store_i64_to_address addr base_arg value =
+    let ptr = load_address_from_reg t addr base_arg in
+    emit_ins_no_res t (I.store ~ptr ~to_store:value)
+  in
   let float_arg typ n = load_reg_to_temp ~typ t i.arg.(n) in
+  let float_op : Llvmize_specific.float_operation -> I.binary_op = function
+    | Ifloatadd -> Fadd
+    | Ifloatsub -> Fsub
+    | Ifloatmul -> Fmul
+    | Ifloatdiv -> Fdiv
+  in
+  let float_arith_mem width op addr =
+    let typ = T.of_float_width width in
+    let lhs = float_arg typ 0 in
+    let ptr = load_address_from_reg t addr i.arg.(1) in
+    let rhs = emit_ins t (I.load ~ptr ~typ) in
+    emit_ins t (I.binary (float_op op) ~arg1:lhs ~arg2:rhs)
+    |> store_into_reg t i.res.(0)
+  in
+  let prefetch_locality : amd64_prefetch_temporal_locality_hint -> int =
+    function
+    | Prefetch_nonlocal -> 0
+    | Prefetch_low -> 1
+    | Prefetch_moderate -> 2
+    | Prefetch_high -> 3
+  in
+  let prefetch ~is_write ~locality addr =
+    let ptr = load_address_from_reg t addr i.arg.(0) in
+    call_llvm_intrinsic_no_res t "prefetch.p0"
+      [ ptr;
+        V.of_int ~typ:T.i32 (if is_write then 1 else 0);
+        V.of_int ~typ:T.i32 (prefetch_locality locality);
+        V.of_int ~typ:T.i32 1 ]
+  in
+  let cldemote addr =
+    let ptr = load_address_from_reg t addr i.arg.(0) in
+    emit_ins_no_res t
+      (I.inline_asm ~asm:"cldemote ($0)" ~constraints:"r" ~args:[ptr]
+         ~res_type:T.Or_void.void ~sideeffect:true)
+  in
   let round_intrinsic_name mode =
     match mode with
-    | Simd.Rounding_mode.Current -> "nearbyint"
-    | Simd.Rounding_mode.Neg_inf -> "floor"
-    | Simd.Rounding_mode.Pos_inf -> "ceil"
-    | Simd.Rounding_mode.Zero -> "trunc"
-    | Simd.Rounding_mode.Nearest -> "roundeven"
+    | Round_current -> "nearbyint"
+    | Round_neg_inf -> "floor"
+    | Round_pos_inf -> "ceil"
+    | Round_zero -> "trunc"
+    | Round_nearest -> "roundeven"
   in
   let float_round typ mode =
     let name =
@@ -3318,12 +3359,12 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     let cond =
       match cond with
-      | Simd.Float_cond.EQ -> I.Foeq
-      | Simd.Float_cond.GE -> I.Foge
-      | Simd.Float_cond.GT -> I.Fogt
-      | Simd.Float_cond.LE | Simd.Float_cond.LT | Simd.Float_cond.NE
-      | Simd.Float_cond.CC | Simd.Float_cond.CS | Simd.Float_cond.LS
-      | Simd.Float_cond.HI ->
+      | Float_EQ -> I.Foeq
+      | Float_GE -> I.Foge
+      | Float_GT -> I.Fogt
+      | Float_LE | Float_LT | Float_NE
+      | Float_CC | Float_CS | Float_LS
+      | Float_HI ->
         fail_msg ~name:"simd_float_cmp" "unexpected float comparison"
     in
     let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -3472,11 +3513,11 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let typ = int_vec_type ~width_in_bits in
     let cond =
       match cond with
-      | Simd.Cond.EQ -> I.Ieq
-      | Simd.Cond.GE -> I.Isge
-      | Simd.Cond.GT -> I.Isgt
-      | Simd.Cond.LE -> I.Isle
-      | Simd.Cond.LT -> I.Islt
+      | Int_EQ -> I.Ieq
+      | Int_GE -> I.Isge
+      | Int_GT -> I.Isgt
+      | Int_LE -> I.Isle
+      | Int_LT -> I.Islt
     in
     let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
     let arg2 =
@@ -3497,10 +3538,54 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let res = call_llvm_intrinsic t name [arg] typ in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
-  match[@warning "-fragile-match"] op with
-  | Ibswap { bitwidth } -> bswap t i bitwidth
-  | Illvm_intrinsic intrinsic_name -> intrinsic t i intrinsic_name
-  | Ishiftarith (shift_op, shift) ->
+  let classified = Llvmize_specific.classify op in
+  match[@warning "-fragile-match"] classified with
+  | Amd64_lea addr -> load_address_from_reg t addr i.arg.(0) |> store_int_res
+  | Amd64_store_int (n, addr, _is_modify) ->
+    store_i64_to_address addr i.arg.(0) (V.of_nativeint n)
+  | Amd64_offset_loc (n, addr) ->
+    let ptr = load_address_from_reg t addr i.arg.(0) in
+    let old_value = emit_ins t (I.load ~ptr ~typ:T.i64) in
+    let new_value =
+      emit_ins t (I.binary Add ~arg1:old_value ~arg2:(V.of_int n))
+    in
+    emit_ins_no_res t (I.store ~ptr ~to_store:new_value)
+  | Amd64_floatarithmem (width, op, addr) -> float_arith_mem width op addr
+  | Amd64_sextend32 ->
+    let narrowed = emit_ins t (I.convert Trunc ~arg:(int_arg 0) ~to_:T.i32) in
+    emit_ins t (I.convert Sext ~arg:narrowed ~to_:T.i64) |> store_int_res
+  | Amd64_zextend32 ->
+    let narrowed = emit_ins t (I.convert Trunc ~arg:(int_arg 0) ~to_:T.i32) in
+    emit_ins t (I.convert Zext ~arg:narrowed ~to_:T.i64) |> store_int_res
+  | Amd64_rdtsc ->
+    call_llvm_intrinsic t "readcyclecounter" [] T.i64 |> store_int_res
+  | Amd64_rdpmc ->
+    let counter = emit_ins t (I.convert Trunc ~arg:(int_arg 0) ~to_:T.i32) in
+    call_llvm_intrinsic t "x86.rdpmc" [counter] T.i64 |> store_int_res
+  | Amd64_lfence | Amd64_sfence | Amd64_mfence ->
+    emit_ins_no_res t (I.fence Seq_cst)
+  | Amd64_packf32 ->
+    let pack_arg n =
+      let arg = float_arg T.double n in
+      let bits64 = emit_ins t (I.convert Bitcast ~arg ~to_:T.i64) in
+      emit_ins t (I.convert Trunc ~arg:bits64 ~to_:T.i32)
+    in
+    let low = pack_arg 0 in
+    let high = pack_arg 1 in
+    let low64 = emit_ins t (I.convert Zext ~arg:low ~to_:T.i64) in
+    let high64 = emit_ins t (I.convert Zext ~arg:high ~to_:T.i64) in
+    let high64 = emit_ins t (I.binary Shl ~arg1:high64 ~arg2:(V.of_int 32)) in
+    let packed = emit_ins t (I.binary Or ~arg1:low64 ~arg2:high64) in
+    emit_ins t (I.convert Bitcast ~arg:packed ~to_:T.double)
+    |> store_into_reg t i.res.(0)
+  | Amd64_prefetch { is_write; locality; addr } ->
+    prefetch ~is_write ~locality addr
+  | Amd64_cldemote addr -> cldemote addr
+  | Amd64_simd _ | Amd64_simd_mem _ ->
+    not_implemented_basic ~msg:"amd64 SIMD-specific operation" i
+  | Bswap bitwidth -> bswap t i bitwidth
+  | Llvm_intrinsic intrinsic_name -> intrinsic t i intrinsic_name
+  | Arm64_shiftarith (shift_op, shift) ->
     let shifted =
       emit_ins t
         (I.binary
@@ -3512,307 +3597,309 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       match shift_op with Ishiftadd -> Add | Ishiftsub -> Sub
     in
     emit_ins t (I.binary op ~arg1:(int_arg 0) ~arg2:shifted) |> store_int_res
-  | Imuladd | Imulsub ->
+  | Arm64_muladd | Arm64_mulsub ->
     let product =
       emit_ins t (I.binary Mul ~arg1:(int_arg 0) ~arg2:(int_arg 1))
     in
     let value =
-      match op with
-      | Imuladd -> emit_ins t (I.binary Add ~arg1:product ~arg2:(int_arg 2))
-      | Imulsub -> emit_ins t (I.binary Sub ~arg1:(int_arg 2) ~arg2:product)
+      match classified with
+      | Arm64_muladd ->
+        emit_ins t (I.binary Add ~arg1:product ~arg2:(int_arg 2))
+      | Arm64_mulsub ->
+        emit_ins t (I.binary Sub ~arg1:(int_arg 2) ~arg2:product)
       | _ -> assert false
     in
     store_int_res value
-  | Isignext size ->
+  | Arm64_signext size ->
     let narrowed_type = T.Int { width_in_bits = size } in
     let narrowed =
       emit_ins t (I.convert Trunc ~arg:(int_arg 0) ~to_:narrowed_type)
     in
     emit_ins t (I.convert Sext ~arg:narrowed ~to_:T.i64) |> store_int_res
-  | Imove32 ->
+  | Arm64_move32 ->
     let narrowed = emit_ins t (I.convert Trunc ~arg:(int_arg 0) ~to_:T.i32) in
     emit_ins t (I.convert Zext ~arg:narrowed ~to_:T.i64) |> store_int_res
-  | Inegmulf ->
+  | Arm64_negmulf ->
     let typ = T.of_reg i.res.(0) in
     let product =
       emit_ins t (I.binary Fmul ~arg1:(float_arg typ 0) ~arg2:(float_arg typ 1))
     in
     emit_ins t (I.unary Fneg ~arg:product) |> store_into_reg t i.res.(0)
-  | Imuladdf ->
+  | Arm64_muladdf ->
     let typ = T.of_reg i.res.(0) in
     float_muladd `Muladd typ |> store_into_reg t i.res.(0)
-  | Imulsubf ->
+  | Arm64_mulsubf ->
     let typ = T.of_reg i.res.(0) in
     float_muladd `Mulsub typ |> store_into_reg t i.res.(0)
-  | Inegmuladdf ->
+  | Arm64_negmuladdf ->
     let typ = T.of_reg i.res.(0) in
     float_muladd `Negmuladd typ |> store_into_reg t i.res.(0)
-  | Inegmulsubf ->
+  | Arm64_negmulsubf ->
     let typ = T.of_reg i.res.(0) in
     float_muladd `Negmulsub typ |> store_into_reg t i.res.(0)
-  | Isqrtf ->
+  | Arm64_sqrtf ->
     let typ = T.of_reg i.res.(0) in
     call_llvm_intrinsic t
       ("sqrt." ^ llvm_intrinsic_type_suffix typ)
       [float_arg typ 0]
       typ
     |> store_into_reg t i.res.(0)
-  | Isimd (Simd.Round_f32 mode) ->
+  | Arm64_simd (Round_f32 mode) ->
     float_round T.float mode |> store_into_reg t i.res.(0)
-  | Isimd (Simd.Round_f64 mode) ->
+  | Arm64_simd (Round_f64 mode) ->
     float_round T.double mode |> store_into_reg t i.res.(0)
-  | Isimd Simd.Min_scalar_f32 ->
+  | Arm64_simd Min_scalar_f32 ->
     float_minmax_match_sse Folt T.float |> store_into_reg t i.res.(0)
-  | Isimd Simd.Max_scalar_f32 ->
+  | Arm64_simd Max_scalar_f32 ->
     float_minmax_match_sse Fogt T.float |> store_into_reg t i.res.(0)
-  | Isimd Simd.Min_scalar_f64 ->
+  | Arm64_simd Min_scalar_f64 ->
     float_minmax_match_sse Folt T.double |> store_into_reg t i.res.(0)
-  | Isimd Simd.Max_scalar_f64 ->
+  | Arm64_simd Max_scalar_f64 ->
     float_minmax_match_sse Fogt T.double |> store_into_reg t i.res.(0)
-  | Isimd Simd.Fmin_f32 ->
+  | Arm64_simd Fmin_f32 ->
     float_minmax "minimum" T.float |> store_into_reg t i.res.(0)
-  | Isimd Simd.Fmax_f32 ->
+  | Arm64_simd Fmax_f32 ->
     float_minmax "maximum" T.float |> store_into_reg t i.res.(0)
-  | Isimd Simd.Fmin_f64 ->
+  | Arm64_simd Fmin_f64 ->
     float_minmax "minimum" T.double |> store_into_reg t i.res.(0)
-  | Isimd Simd.Fmax_f64 ->
+  | Arm64_simd Fmax_f64 ->
     float_minmax "maximum" T.double |> store_into_reg t i.res.(0)
-  | Isimd Simd.Round_f32_s64 ->
+  | Arm64_simd Round_f32_s64 ->
     float_round_to_i64 T.float |> store_into_reg t i.res.(0)
-  | Isimd Simd.Round_f64_s64 ->
+  | Arm64_simd Round_f64_s64 ->
     float_round_to_i64 T.double |> store_into_reg t i.res.(0)
-  | Isimd Simd.Addq_s64 -> simd_int_binary 64 Add
-  | Isimd Simd.Addq_s32 -> simd_int_binary 32 Add
-  | Isimd Simd.Addq_s16 -> simd_int_binary 16 Add
-  | Isimd Simd.Addq_s8 -> simd_int_binary 8 Add
-  | Isimd Simd.Subq_s64 -> simd_int_binary 64 Sub
-  | Isimd Simd.Subq_s32 -> simd_int_binary 32 Sub
-  | Isimd Simd.Subq_s16 -> simd_int_binary 16 Sub
-  | Isimd Simd.Subq_s8 -> simd_int_binary 8 Sub
-  | Isimd Simd.Mulq_s32 -> simd_int_binary 32 Mul
-  | Isimd Simd.Mulq_s16 -> simd_int_binary 16 Mul
-  | Isimd Simd.Minq_s32 -> simd_int_minmax 32 I.Islt
-  | Isimd Simd.Minq_s16 -> simd_int_minmax 16 I.Islt
-  | Isimd Simd.Minq_s8 -> simd_int_minmax 8 I.Islt
-  | Isimd Simd.Maxq_s32 -> simd_int_minmax 32 I.Isgt
-  | Isimd Simd.Maxq_s16 -> simd_int_minmax 16 I.Isgt
-  | Isimd Simd.Maxq_s8 -> simd_int_minmax 8 I.Isgt
-  | Isimd Simd.Minq_u32 -> simd_int_minmax 32 I.Iult
-  | Isimd Simd.Minq_u16 -> simd_int_minmax 16 I.Iult
-  | Isimd Simd.Minq_u8 -> simd_int_minmax 8 I.Iult
-  | Isimd Simd.Maxq_u32 -> simd_int_minmax 32 I.Iugt
-  | Isimd Simd.Maxq_u16 -> simd_int_minmax 16 I.Iugt
-  | Isimd Simd.Maxq_u8 -> simd_int_minmax 8 I.Iugt
-  | Isimd Simd.Andq_s64 -> simd_int_binary 64 And
-  | Isimd Simd.Andq_s32 -> simd_int_binary 32 And
-  | Isimd Simd.Andq_s16 -> simd_int_binary 16 And
-  | Isimd Simd.Andq_s8 -> simd_int_binary 8 And
-  | Isimd Simd.Orrq_s64 -> simd_int_binary 64 Or
-  | Isimd Simd.Orrq_s32 -> simd_int_binary 32 Or
-  | Isimd Simd.Orrq_s16 -> simd_int_binary 16 Or
-  | Isimd Simd.Orrq_s8 -> simd_int_binary 8 Or
-  | Isimd Simd.Eorq_s64 -> simd_int_binary 64 Xor
-  | Isimd Simd.Eorq_s32 -> simd_int_binary 32 Xor
-  | Isimd Simd.Eorq_s16 -> simd_int_binary 16 Xor
-  | Isimd Simd.Eorq_s8 -> simd_int_binary 8 Xor
-  | Isimd Simd.Negq_s64 -> simd_int_unary 64 `Neg
-  | Isimd Simd.Negq_s32 -> simd_int_unary 32 `Neg
-  | Isimd Simd.Negq_s16 -> simd_int_unary 16 `Neg
-  | Isimd Simd.Negq_s8 -> simd_int_unary 8 `Neg
-  | Isimd Simd.Mvnq_s64 -> simd_int_unary 64 `Not
-  | Isimd Simd.Mvnq_s32 -> simd_int_unary 32 `Not
-  | Isimd Simd.Mvnq_s16 -> simd_int_unary 16 `Not
-  | Isimd Simd.Mvnq_s8 -> simd_int_unary 8 `Not
-  | Isimd (Simd.Shlq_n_u64 n) -> simd_int_shift_imm 64 Shl n
-  | Isimd (Simd.Shlq_n_u32 n) -> simd_int_shift_imm 32 Shl n
-  | Isimd (Simd.Shlq_n_u16 n) -> simd_int_shift_imm 16 Shl n
-  | Isimd (Simd.Shlq_n_u8 n) -> simd_int_shift_imm 8 Shl n
-  | Isimd (Simd.Shrq_n_u64 n) -> simd_int_shift_imm 64 Lshr n
-  | Isimd (Simd.Shrq_n_u32 n) -> simd_int_shift_imm 32 Lshr n
-  | Isimd (Simd.Shrq_n_u16 n) -> simd_int_shift_imm 16 Lshr n
-  | Isimd (Simd.Shrq_n_u8 n) -> simd_int_shift_imm 8 Lshr n
-  | Isimd (Simd.Shrq_n_s64 n) -> simd_int_shift_imm 64 Ashr n
-  | Isimd (Simd.Shrq_n_s32 n) -> simd_int_shift_imm 32 Ashr n
-  | Isimd (Simd.Shrq_n_s16 n) -> simd_int_shift_imm 16 Ashr n
-  | Isimd (Simd.Shrq_n_s8 n) -> simd_int_shift_imm 8 Ashr n
-  | Isimd Simd.Shlq_u64 -> simd_int_variable_shift 64 "aarch64.neon.ushl"
-  | Isimd Simd.Shlq_u32 -> simd_int_variable_shift 32 "aarch64.neon.ushl"
-  | Isimd Simd.Shlq_u16 -> simd_int_variable_shift 16 "aarch64.neon.ushl"
-  | Isimd Simd.Shlq_u8 -> simd_int_variable_shift 8 "aarch64.neon.ushl"
-  | Isimd Simd.Shlq_s64 -> simd_int_variable_shift 64 "aarch64.neon.sshl"
-  | Isimd Simd.Shlq_s32 -> simd_int_variable_shift 32 "aarch64.neon.sshl"
-  | Isimd Simd.Shlq_s16 -> simd_int_variable_shift 16 "aarch64.neon.sshl"
-  | Isimd Simd.Shlq_s8 -> simd_int_variable_shift 8 "aarch64.neon.sshl"
-  | Isimd (Simd.Dupq_lane_s64 { lane }) -> simd_int_dup_lane 64 lane
-  | Isimd (Simd.Dupq_lane_s32 { lane }) -> simd_int_dup_lane 32 lane
-  | Isimd (Simd.Dupq_lane_s16 { lane }) -> simd_int_dup_lane 16 lane
-  | Isimd (Simd.Dupq_lane_s8 { lane }) -> simd_int_dup_lane 8 lane
-  | Isimd (Simd.Getq_lane_s64 { lane }) -> simd_int_get_lane 64 lane
-  | Isimd (Simd.Getq_lane_s32 { lane }) -> simd_int_get_lane 32 lane
-  | Isimd (Simd.Getq_lane_s16 { lane }) -> simd_int_get_lane 16 lane
-  | Isimd (Simd.Getq_lane_s8 { lane }) -> simd_int_get_lane 8 lane
-  | Isimd (Simd.Setq_lane_s64 { lane }) -> simd_int_set_lane 64 lane
-  | Isimd (Simd.Setq_lane_s32 { lane }) -> simd_int_set_lane 32 lane
-  | Isimd (Simd.Setq_lane_s16 { lane }) -> simd_int_set_lane 16 lane
-  | Isimd (Simd.Setq_lane_s8 { lane }) -> simd_int_set_lane 8 lane
-  | Isimd Simd.Movl_s32 -> simd_int_widen_low 32 Sext
-  | Isimd Simd.Movl_u32 -> simd_int_widen_low 32 Zext
-  | Isimd Simd.Movl_s16 -> simd_int_widen_low 16 Sext
-  | Isimd Simd.Movl_u16 -> simd_int_widen_low 16 Zext
-  | Isimd Simd.Movl_s8 -> simd_int_widen_low 8 Sext
-  | Isimd Simd.Movl_u8 -> simd_int_widen_low 8 Zext
-  | Isimd Simd.Cvtq_f64_s64 ->
+  | Arm64_simd Addq_s64 -> simd_int_binary 64 Add
+  | Arm64_simd Addq_s32 -> simd_int_binary 32 Add
+  | Arm64_simd Addq_s16 -> simd_int_binary 16 Add
+  | Arm64_simd Addq_s8 -> simd_int_binary 8 Add
+  | Arm64_simd Subq_s64 -> simd_int_binary 64 Sub
+  | Arm64_simd Subq_s32 -> simd_int_binary 32 Sub
+  | Arm64_simd Subq_s16 -> simd_int_binary 16 Sub
+  | Arm64_simd Subq_s8 -> simd_int_binary 8 Sub
+  | Arm64_simd Mulq_s32 -> simd_int_binary 32 Mul
+  | Arm64_simd Mulq_s16 -> simd_int_binary 16 Mul
+  | Arm64_simd Minq_s32 -> simd_int_minmax 32 I.Islt
+  | Arm64_simd Minq_s16 -> simd_int_minmax 16 I.Islt
+  | Arm64_simd Minq_s8 -> simd_int_minmax 8 I.Islt
+  | Arm64_simd Maxq_s32 -> simd_int_minmax 32 I.Isgt
+  | Arm64_simd Maxq_s16 -> simd_int_minmax 16 I.Isgt
+  | Arm64_simd Maxq_s8 -> simd_int_minmax 8 I.Isgt
+  | Arm64_simd Minq_u32 -> simd_int_minmax 32 I.Iult
+  | Arm64_simd Minq_u16 -> simd_int_minmax 16 I.Iult
+  | Arm64_simd Minq_u8 -> simd_int_minmax 8 I.Iult
+  | Arm64_simd Maxq_u32 -> simd_int_minmax 32 I.Iugt
+  | Arm64_simd Maxq_u16 -> simd_int_minmax 16 I.Iugt
+  | Arm64_simd Maxq_u8 -> simd_int_minmax 8 I.Iugt
+  | Arm64_simd Andq_s64 -> simd_int_binary 64 And
+  | Arm64_simd Andq_s32 -> simd_int_binary 32 And
+  | Arm64_simd Andq_s16 -> simd_int_binary 16 And
+  | Arm64_simd Andq_s8 -> simd_int_binary 8 And
+  | Arm64_simd Orrq_s64 -> simd_int_binary 64 Or
+  | Arm64_simd Orrq_s32 -> simd_int_binary 32 Or
+  | Arm64_simd Orrq_s16 -> simd_int_binary 16 Or
+  | Arm64_simd Orrq_s8 -> simd_int_binary 8 Or
+  | Arm64_simd Eorq_s64 -> simd_int_binary 64 Xor
+  | Arm64_simd Eorq_s32 -> simd_int_binary 32 Xor
+  | Arm64_simd Eorq_s16 -> simd_int_binary 16 Xor
+  | Arm64_simd Eorq_s8 -> simd_int_binary 8 Xor
+  | Arm64_simd Negq_s64 -> simd_int_unary 64 `Neg
+  | Arm64_simd Negq_s32 -> simd_int_unary 32 `Neg
+  | Arm64_simd Negq_s16 -> simd_int_unary 16 `Neg
+  | Arm64_simd Negq_s8 -> simd_int_unary 8 `Neg
+  | Arm64_simd Mvnq_s64 -> simd_int_unary 64 `Not
+  | Arm64_simd Mvnq_s32 -> simd_int_unary 32 `Not
+  | Arm64_simd Mvnq_s16 -> simd_int_unary 16 `Not
+  | Arm64_simd Mvnq_s8 -> simd_int_unary 8 `Not
+  | Arm64_simd (Shlq_n_u64 n) -> simd_int_shift_imm 64 Shl n
+  | Arm64_simd (Shlq_n_u32 n) -> simd_int_shift_imm 32 Shl n
+  | Arm64_simd (Shlq_n_u16 n) -> simd_int_shift_imm 16 Shl n
+  | Arm64_simd (Shlq_n_u8 n) -> simd_int_shift_imm 8 Shl n
+  | Arm64_simd (Shrq_n_u64 n) -> simd_int_shift_imm 64 Lshr n
+  | Arm64_simd (Shrq_n_u32 n) -> simd_int_shift_imm 32 Lshr n
+  | Arm64_simd (Shrq_n_u16 n) -> simd_int_shift_imm 16 Lshr n
+  | Arm64_simd (Shrq_n_u8 n) -> simd_int_shift_imm 8 Lshr n
+  | Arm64_simd (Shrq_n_s64 n) -> simd_int_shift_imm 64 Ashr n
+  | Arm64_simd (Shrq_n_s32 n) -> simd_int_shift_imm 32 Ashr n
+  | Arm64_simd (Shrq_n_s16 n) -> simd_int_shift_imm 16 Ashr n
+  | Arm64_simd (Shrq_n_s8 n) -> simd_int_shift_imm 8 Ashr n
+  | Arm64_simd Shlq_u64 -> simd_int_variable_shift 64 "aarch64.neon.ushl"
+  | Arm64_simd Shlq_u32 -> simd_int_variable_shift 32 "aarch64.neon.ushl"
+  | Arm64_simd Shlq_u16 -> simd_int_variable_shift 16 "aarch64.neon.ushl"
+  | Arm64_simd Shlq_u8 -> simd_int_variable_shift 8 "aarch64.neon.ushl"
+  | Arm64_simd Shlq_s64 -> simd_int_variable_shift 64 "aarch64.neon.sshl"
+  | Arm64_simd Shlq_s32 -> simd_int_variable_shift 32 "aarch64.neon.sshl"
+  | Arm64_simd Shlq_s16 -> simd_int_variable_shift 16 "aarch64.neon.sshl"
+  | Arm64_simd Shlq_s8 -> simd_int_variable_shift 8 "aarch64.neon.sshl"
+  | Arm64_simd (Dupq_lane_s64 { lane }) -> simd_int_dup_lane 64 lane
+  | Arm64_simd (Dupq_lane_s32 { lane }) -> simd_int_dup_lane 32 lane
+  | Arm64_simd (Dupq_lane_s16 { lane }) -> simd_int_dup_lane 16 lane
+  | Arm64_simd (Dupq_lane_s8 { lane }) -> simd_int_dup_lane 8 lane
+  | Arm64_simd (Getq_lane_s64 { lane }) -> simd_int_get_lane 64 lane
+  | Arm64_simd (Getq_lane_s32 { lane }) -> simd_int_get_lane 32 lane
+  | Arm64_simd (Getq_lane_s16 { lane }) -> simd_int_get_lane 16 lane
+  | Arm64_simd (Getq_lane_s8 { lane }) -> simd_int_get_lane 8 lane
+  | Arm64_simd (Setq_lane_s64 { lane }) -> simd_int_set_lane 64 lane
+  | Arm64_simd (Setq_lane_s32 { lane }) -> simd_int_set_lane 32 lane
+  | Arm64_simd (Setq_lane_s16 { lane }) -> simd_int_set_lane 16 lane
+  | Arm64_simd (Setq_lane_s8 { lane }) -> simd_int_set_lane 8 lane
+  | Arm64_simd Movl_s32 -> simd_int_widen_low 32 Sext
+  | Arm64_simd Movl_u32 -> simd_int_widen_low 32 Zext
+  | Arm64_simd Movl_s16 -> simd_int_widen_low 16 Sext
+  | Arm64_simd Movl_u16 -> simd_int_widen_low 16 Zext
+  | Arm64_simd Movl_s8 -> simd_int_widen_low 8 Sext
+  | Arm64_simd Movl_u8 -> simd_int_widen_low 8 Zext
+  | Arm64_simd Cvtq_f64_s64 ->
     simd_convert
       (int_vec_type ~width_in_bits:64)
       (float_vec_type ~width:Cmm.Float64)
       Sitofp
-  | Isimd Simd.Cvtq_f32_s32 ->
+  | Arm64_simd Cvtq_f32_s32 ->
     simd_convert
       (int_vec_type ~width_in_bits:32)
       (float_vec_type ~width:Cmm.Float32)
       Sitofp
-  | Isimd Simd.Cvtq_s64_f64 ->
+  | Arm64_simd Cvtq_s64_f64 ->
     simd_fp_to_signed_int
       (float_vec_type ~width:Cmm.Float64)
       (int_vec_type ~width_in_bits:64)
       "fcvtzs"
-  | Isimd Simd.Cvtnq_s64_f64 ->
+  | Arm64_simd Cvtnq_s64_f64 ->
     simd_fp_to_signed_int
       (float_vec_type ~width:Cmm.Float64)
       (int_vec_type ~width_in_bits:64)
       "fcvtns"
-  | Isimd Simd.Cvtq_s32_f32 ->
+  | Arm64_simd Cvtq_s32_f32 ->
     simd_fp_to_signed_int
       (float_vec_type ~width:Cmm.Float32)
       (int_vec_type ~width_in_bits:32)
       "fcvtzs"
-  | Isimd Simd.Cvtnq_s32_f32 ->
+  | Arm64_simd Cvtnq_s32_f32 ->
     simd_fp_to_signed_int
       (float_vec_type ~width:Cmm.Float32)
       (int_vec_type ~width_in_bits:32)
       "fcvtns"
-  | Isimd Simd.Cvt_f64_f32 -> simd_cvt_f64_f32 ()
-  | Isimd Simd.Cvt_f32_f64 -> simd_cvt_f32_f64 ()
-  | Isimd Simd.Movn_s64 -> simd_int_narrow 64 ~high:false
-  | Isimd Simd.Movn_s32 -> simd_int_narrow 32 ~high:false
-  | Isimd Simd.Movn_s16 -> simd_int_narrow 16 ~high:false
-  | Isimd Simd.Movn_high_s64 -> simd_int_narrow 64 ~high:true
-  | Isimd Simd.Movn_high_s32 -> simd_int_narrow 32 ~high:true
-  | Isimd Simd.Movn_high_s16 -> simd_int_narrow 16 ~high:true
-  | Isimd Simd.Qmovn_s64 ->
+  | Arm64_simd Cvt_f64_f32 -> simd_cvt_f64_f32 ()
+  | Arm64_simd Cvt_f32_f64 -> simd_cvt_f32_f64 ()
+  | Arm64_simd Movn_s64 -> simd_int_narrow 64 ~high:false
+  | Arm64_simd Movn_s32 -> simd_int_narrow 32 ~high:false
+  | Arm64_simd Movn_s16 -> simd_int_narrow 16 ~high:false
+  | Arm64_simd Movn_high_s64 -> simd_int_narrow 64 ~high:true
+  | Arm64_simd Movn_high_s32 -> simd_int_narrow 32 ~high:true
+  | Arm64_simd Movn_high_s16 -> simd_int_narrow 16 ~high:true
+  | Arm64_simd Qmovn_s64 ->
     simd_int_saturating_narrow 64 ~unsigned:false ~high:false
-  | Isimd Simd.Qmovn_s32 ->
+  | Arm64_simd Qmovn_s32 ->
     simd_int_saturating_narrow 32 ~unsigned:false ~high:false
-  | Isimd Simd.Qmovn_s16 ->
+  | Arm64_simd Qmovn_s16 ->
     simd_int_saturating_narrow 16 ~unsigned:false ~high:false
-  | Isimd Simd.Qmovn_u32 ->
+  | Arm64_simd Qmovn_u32 ->
     simd_int_saturating_narrow 32 ~unsigned:true ~high:false
-  | Isimd Simd.Qmovn_u16 ->
+  | Arm64_simd Qmovn_u16 ->
     simd_int_saturating_narrow 16 ~unsigned:true ~high:false
-  | Isimd Simd.Qmovn_high_s64 ->
+  | Arm64_simd Qmovn_high_s64 ->
     simd_int_saturating_narrow 64 ~unsigned:false ~high:true
-  | Isimd Simd.Qmovn_high_s32 ->
+  | Arm64_simd Qmovn_high_s32 ->
     simd_int_saturating_narrow 32 ~unsigned:false ~high:true
-  | Isimd Simd.Qmovn_high_s16 ->
+  | Arm64_simd Qmovn_high_s16 ->
     simd_int_saturating_narrow 16 ~unsigned:false ~high:true
-  | Isimd Simd.Qmovn_high_u32 ->
+  | Arm64_simd Qmovn_high_u32 ->
     simd_int_saturating_narrow 32 ~unsigned:true ~high:true
-  | Isimd Simd.Qmovn_high_u16 ->
+  | Arm64_simd Qmovn_high_u16 ->
     simd_int_saturating_narrow 16 ~unsigned:true ~high:true
-  | Isimd Simd.Absq_s8 ->
+  | Arm64_simd Absq_s8 ->
     simd_unary_intrinsic (int_vec_type ~width_in_bits:8) "aarch64.neon.abs"
-  | Isimd Simd.Absq_s16 ->
+  | Arm64_simd Absq_s16 ->
     simd_unary_intrinsic (int_vec_type ~width_in_bits:16) "aarch64.neon.abs"
-  | Isimd Simd.Absq_s32 ->
+  | Arm64_simd Absq_s32 ->
     simd_unary_intrinsic (int_vec_type ~width_in_bits:32) "aarch64.neon.abs"
-  | Isimd Simd.Absq_s64 ->
+  | Arm64_simd Absq_s64 ->
     simd_unary_intrinsic (int_vec_type ~width_in_bits:64) "aarch64.neon.abs"
-  | Isimd Simd.Mullq_s16 -> simd_int_widening_mul 16 Sext ~high:false
-  | Isimd Simd.Mullq_high_s16 -> simd_int_widening_mul 16 Sext ~high:true
-  | Isimd Simd.Mullq_u16 -> simd_int_widening_mul 16 Zext ~high:false
-  | Isimd Simd.Mullq_high_u16 -> simd_int_widening_mul 16 Zext ~high:true
-  | Isimd Simd.Qaddq_s8 ->
+  | Arm64_simd Mullq_s16 -> simd_int_widening_mul 16 Sext ~high:false
+  | Arm64_simd Mullq_high_s16 -> simd_int_widening_mul 16 Sext ~high:true
+  | Arm64_simd Mullq_u16 -> simd_int_widening_mul 16 Zext ~high:false
+  | Arm64_simd Mullq_high_u16 -> simd_int_widening_mul 16 Zext ~high:true
+  | Arm64_simd Qaddq_s8 ->
     simd_binary_intrinsic (int_vec_type ~width_in_bits:8) "aarch64.neon.sqadd"
-  | Isimd Simd.Qaddq_s16 ->
+  | Arm64_simd Qaddq_s16 ->
     simd_binary_intrinsic (int_vec_type ~width_in_bits:16) "aarch64.neon.sqadd"
-  | Isimd Simd.Qaddq_u8 ->
+  | Arm64_simd Qaddq_u8 ->
     simd_binary_intrinsic (int_vec_type ~width_in_bits:8) "aarch64.neon.uqadd"
-  | Isimd Simd.Qaddq_u16 ->
+  | Arm64_simd Qaddq_u16 ->
     simd_binary_intrinsic (int_vec_type ~width_in_bits:16) "aarch64.neon.uqadd"
-  | Isimd Simd.Qsubq_s8 ->
+  | Arm64_simd Qsubq_s8 ->
     simd_binary_intrinsic (int_vec_type ~width_in_bits:8) "aarch64.neon.sqsub"
-  | Isimd Simd.Qsubq_s16 ->
+  | Arm64_simd Qsubq_s16 ->
     simd_binary_intrinsic (int_vec_type ~width_in_bits:16) "aarch64.neon.sqsub"
-  | Isimd Simd.Qsubq_u8 ->
+  | Arm64_simd Qsubq_u8 ->
     simd_binary_intrinsic (int_vec_type ~width_in_bits:8) "aarch64.neon.uqsub"
-  | Isimd Simd.Qsubq_u16 ->
+  | Arm64_simd Qsubq_u16 ->
     simd_binary_intrinsic (int_vec_type ~width_in_bits:16) "aarch64.neon.uqsub"
-  | Isimd Simd.Paddq_s8 ->
+  | Arm64_simd Paddq_s8 ->
     simd_binary_intrinsic (int_vec_type ~width_in_bits:8) "aarch64.neon.addp"
-  | Isimd Simd.Paddq_s16 ->
+  | Arm64_simd Paddq_s16 ->
     simd_binary_intrinsic (int_vec_type ~width_in_bits:16) "aarch64.neon.addp"
-  | Isimd Simd.Paddq_s32 ->
+  | Arm64_simd Paddq_s32 ->
     simd_binary_intrinsic (int_vec_type ~width_in_bits:32) "aarch64.neon.addp"
-  | Isimd Simd.Paddq_s64 ->
+  | Arm64_simd Paddq_s64 ->
     simd_binary_intrinsic (int_vec_type ~width_in_bits:64) "aarch64.neon.addp"
-  | Isimd Simd.Zip1_f32 ->
+  | Arm64_simd Zip1_f32 ->
     simd_zip (T.Vector { num_of_elems = 2; elem_type = T.float }) ~high:false
-  | Isimd Simd.Zip1q_s8 -> simd_zip (int_vec_type ~width_in_bits:8) ~high:false
-  | Isimd Simd.Zip2q_s8 -> simd_zip (int_vec_type ~width_in_bits:8) ~high:true
-  | Isimd Simd.Zip1q_s16 ->
+  | Arm64_simd Zip1q_s8 -> simd_zip (int_vec_type ~width_in_bits:8) ~high:false
+  | Arm64_simd Zip2q_s8 -> simd_zip (int_vec_type ~width_in_bits:8) ~high:true
+  | Arm64_simd Zip1q_s16 ->
     simd_zip (int_vec_type ~width_in_bits:16) ~high:false
-  | Isimd Simd.Zip2q_s16 -> simd_zip (int_vec_type ~width_in_bits:16) ~high:true
-  | Isimd Simd.Zip1q_f32 ->
+  | Arm64_simd Zip2q_s16 -> simd_zip (int_vec_type ~width_in_bits:16) ~high:true
+  | Arm64_simd Zip1q_f32 ->
     simd_zip (float_vec_type ~width:Cmm.Float32) ~high:false
-  | Isimd Simd.Zip2q_f32 ->
+  | Arm64_simd Zip2q_f32 ->
     simd_zip (float_vec_type ~width:Cmm.Float32) ~high:true
-  | Isimd Simd.Zip1q_f64 ->
+  | Arm64_simd Zip1q_f64 ->
     simd_zip (float_vec_type ~width:Cmm.Float64) ~high:false
-  | Isimd Simd.Zip2q_f64 ->
+  | Arm64_simd Zip2q_f64 ->
     simd_zip (float_vec_type ~width:Cmm.Float64) ~high:true
-  | Isimd (Simd.Extq_u8 n) -> simd_extq_u8 n
-  | Isimd (Simd.Copyq_laneq_s64 { src_lane; dst_lane }) ->
+  | Arm64_simd (Extq_u8 n) -> simd_extq_u8 n
+  | Arm64_simd (Copyq_laneq_s64 { src_lane; dst_lane }) ->
     simd_copyq_laneq_s64 ~src_lane ~dst_lane
-  | Isimd Simd.Addq_f32 -> simd_float_binary Cmm.Float32 Fadd
-  | Isimd Simd.Subq_f32 -> simd_float_binary Cmm.Float32 Fsub
-  | Isimd Simd.Mulq_f32 -> simd_float_binary Cmm.Float32 Fmul
-  | Isimd Simd.Divq_f32 -> simd_float_binary Cmm.Float32 Fdiv
-  | Isimd Simd.Addq_f64 -> simd_float_binary Cmm.Float64 Fadd
-  | Isimd Simd.Subq_f64 -> simd_float_binary Cmm.Float64 Fsub
-  | Isimd Simd.Mulq_f64 -> simd_float_binary Cmm.Float64 Fmul
-  | Isimd Simd.Divq_f64 -> simd_float_binary Cmm.Float64 Fdiv
-  | Isimd Simd.Paddq_f32 ->
+  | Arm64_simd Addq_f32 -> simd_float_binary Cmm.Float32 Fadd
+  | Arm64_simd Subq_f32 -> simd_float_binary Cmm.Float32 Fsub
+  | Arm64_simd Mulq_f32 -> simd_float_binary Cmm.Float32 Fmul
+  | Arm64_simd Divq_f32 -> simd_float_binary Cmm.Float32 Fdiv
+  | Arm64_simd Addq_f64 -> simd_float_binary Cmm.Float64 Fadd
+  | Arm64_simd Subq_f64 -> simd_float_binary Cmm.Float64 Fsub
+  | Arm64_simd Mulq_f64 -> simd_float_binary Cmm.Float64 Fmul
+  | Arm64_simd Divq_f64 -> simd_float_binary Cmm.Float64 Fdiv
+  | Arm64_simd Paddq_f32 ->
     simd_binary_intrinsic
       (float_vec_type ~width:Cmm.Float32)
       "aarch64.neon.faddp"
-  | Isimd Simd.Paddq_f64 ->
+  | Arm64_simd Paddq_f64 ->
     simd_binary_intrinsic
       (float_vec_type ~width:Cmm.Float64)
       "aarch64.neon.faddp"
-  | Isimd (Simd.Cmp_f32 cond) -> simd_float_cmp Cmm.Float32 cond
-  | Isimd (Simd.Cmp_f64 cond) -> simd_float_cmp Cmm.Float64 cond
-  | Isimd (Simd.Cmpz_s64 cond) -> simd_int_cmp 64 cond ~zero:true
-  | Isimd (Simd.Cmpz_s32 cond) -> simd_int_cmp 32 cond ~zero:true
-  | Isimd (Simd.Cmpz_s16 cond) -> simd_int_cmp 16 cond ~zero:true
-  | Isimd (Simd.Cmpz_s8 cond) -> simd_int_cmp 8 cond ~zero:true
-  | Isimd (Simd.Cmp_s64 cond) -> simd_int_cmp 64 cond ~zero:false
-  | Isimd (Simd.Cmp_s32 cond) -> simd_int_cmp 32 cond ~zero:false
-  | Isimd (Simd.Cmp_s16 cond) -> simd_int_cmp 16 cond ~zero:false
-  | Isimd (Simd.Cmp_s8 cond) -> simd_int_cmp 8 cond ~zero:false
-  | Isimd Simd.Minq_f32 -> simd_float_minmax Cmm.Float32 "minimum"
-  | Isimd Simd.Maxq_f32 -> simd_float_minmax Cmm.Float32 "maximum"
-  | Isimd Simd.Minq_f64 -> simd_float_minmax Cmm.Float64 "minimum"
-  | Isimd Simd.Maxq_f64 -> simd_float_minmax Cmm.Float64 "maximum"
-  | Isimd Simd.Sqrtq_f32 -> simd_float_unary_intrinsic Cmm.Float32 "sqrt"
-  | Isimd Simd.Sqrtq_f64 -> simd_float_unary_intrinsic Cmm.Float64 "sqrt"
-  | Isimd Simd.Recpeq_f32 ->
+  | Arm64_simd (Cmp_f32 cond) -> simd_float_cmp Cmm.Float32 cond
+  | Arm64_simd (Cmp_f64 cond) -> simd_float_cmp Cmm.Float64 cond
+  | Arm64_simd (Cmpz_s64 cond) -> simd_int_cmp 64 cond ~zero:true
+  | Arm64_simd (Cmpz_s32 cond) -> simd_int_cmp 32 cond ~zero:true
+  | Arm64_simd (Cmpz_s16 cond) -> simd_int_cmp 16 cond ~zero:true
+  | Arm64_simd (Cmpz_s8 cond) -> simd_int_cmp 8 cond ~zero:true
+  | Arm64_simd (Cmp_s64 cond) -> simd_int_cmp 64 cond ~zero:false
+  | Arm64_simd (Cmp_s32 cond) -> simd_int_cmp 32 cond ~zero:false
+  | Arm64_simd (Cmp_s16 cond) -> simd_int_cmp 16 cond ~zero:false
+  | Arm64_simd (Cmp_s8 cond) -> simd_int_cmp 8 cond ~zero:false
+  | Arm64_simd Minq_f32 -> simd_float_minmax Cmm.Float32 "minimum"
+  | Arm64_simd Maxq_f32 -> simd_float_minmax Cmm.Float32 "maximum"
+  | Arm64_simd Minq_f64 -> simd_float_minmax Cmm.Float64 "minimum"
+  | Arm64_simd Maxq_f64 -> simd_float_minmax Cmm.Float64 "maximum"
+  | Arm64_simd Sqrtq_f32 -> simd_float_unary_intrinsic Cmm.Float32 "sqrt"
+  | Arm64_simd Sqrtq_f64 -> simd_float_unary_intrinsic Cmm.Float64 "sqrt"
+  | Arm64_simd Recpeq_f32 ->
     simd_float_unary_intrinsic Cmm.Float32 "aarch64.neon.frecpe"
-  | Isimd Simd.Rsqrteq_f32 ->
+  | Arm64_simd Rsqrteq_f32 ->
     simd_float_unary_intrinsic Cmm.Float32 "aarch64.neon.frsqrte"
-  | Isimd Simd.Rsqrteq_f64 ->
+  | Arm64_simd Rsqrteq_f64 ->
     simd_float_unary_intrinsic Cmm.Float64 "aarch64.neon.frsqrte"
-  | Isimd (Simd.Roundq_f32 mode) -> simd_float_round Cmm.Float32 mode
-  | Isimd (Simd.Roundq_f64 mode) -> simd_float_round Cmm.Float64 mode
+  | Arm64_simd (Roundq_f32 mode) -> simd_float_round Cmm.Float32 mode
+  | Arm64_simd (Roundq_f64 mode) -> simd_float_round Cmm.Float64 mode
   | _ -> not_implemented_basic ~msg:"specific" i
 
 (* CR yusumez: Implement atomic operations properly, since the current
