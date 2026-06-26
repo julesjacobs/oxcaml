@@ -31,6 +31,16 @@ let hasSideEffects = 0, isNotDuplicable = 1, Uses = [ESP, SSP],
   def MOVPC32r : Ii32<0xE8, Pseudo, (outs GR32:$reg), (ins i32imm:$label),
                       "", []>;
 
+// In-place statepoint relocate: the post-statepoint incarnation of a GC value.
+// Keep it opaque through machine-SSA optimizers; the generic OxCaml relocate
+// lowering rewrites it to a COPY immediately before register coalescing.
+let hasSideEffects = 1, isCodeGenOnly = 1, isPseudo = 1 in
+def OXCAML_RELOCATE : I<0, Pseudo, (outs GR64:$dst), (ins GR64:$src),
+                        "# OXCAML_RELOCATE",
+                        [(set GR64:$dst,
+                              (int_oxcaml_relocated GR64:$src))]>,
+                       Requires<[In64BitMode]>, Sched<[WriteMove]>;
+
 // ADJCALLSTACKDOWN/UP implicitly use/def ESP because they may be expanded into
 // a stack adjustment and the codegen must know that they may modify the stack
 // pointer before prolog-epilog rewriting occurs.

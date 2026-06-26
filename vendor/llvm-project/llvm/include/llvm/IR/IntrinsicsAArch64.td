@@ -10,8 +10,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-def llvm_oxcaml_value_ty : LLVMQualPointerType<llvm_i8_ty, 1>;
-
 let TargetPrefix = "aarch64" in {
 
 def int_aarch64_ldxr : Intrinsic<[llvm_i64_ty], [llvm_anyptr_ty],
@@ -119,17 +117,6 @@ def int_aarch64_oxcaml_trap_publish
 // Expanded to a plain add after register allocation.
 def int_aarch64_oxcaml_rederive
     : Intrinsic<[llvm_oxcaml_value_ty], [llvm_oxcaml_value_ty, llvm_i64_ty],
-                [IntrHasSideEffects, IntrNoDuplicate, IntrNoMerge,
-                 IntrWillReturn, IntrNoCallback, IntrNoFree]>;
-
-// The post-statepoint incarnation of a gc value under in-place root
-// semantics. Opaque before register allocation so no value-based pass
-// (CSE/LICM/sinking/folding) can identify the pre- and post-statepoint
-// worlds; converted to a plain COPY right before register coalescing,
-// which merges it away (the old value dies at the statepoint where the
-// new one is born), yielding in-place final code at zero cost.
-def int_aarch64_oxcaml_relocated
-    : Intrinsic<[llvm_oxcaml_value_ty], [llvm_oxcaml_value_ty],
                 [IntrHasSideEffects, IntrNoDuplicate, IntrNoMerge,
                  IntrWillReturn, IntrNoCallback, IntrNoFree]>;
 

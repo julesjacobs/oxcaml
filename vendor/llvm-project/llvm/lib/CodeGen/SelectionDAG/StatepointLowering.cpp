@@ -1483,8 +1483,7 @@ void SelectionDAGBuilder::visitGCRelocate(const GCRelocateInst &Relocate) {
     SDValue Chain = DAG.getRoot();
     SDValue Ops[] = {
         Chain,
-        DAG.getTargetConstant(Intrinsic::aarch64_oxcaml_relocated, DL,
-                              MVT::i64),
+        DAG.getTargetConstant(Intrinsic::oxcaml_relocated, DL, MVT::i64),
         SD};
     SDValue Node =
         DAG.getNode(ISD::INTRINSIC_W_CHAIN, DL,

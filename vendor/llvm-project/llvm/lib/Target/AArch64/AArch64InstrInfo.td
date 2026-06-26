@@ -1000,12 +1000,12 @@ def OXCAML_REDERIVE
 // In-place statepoint relocate: the post-statepoint incarnation of a gc
 // value. Opaque through the machine-SSA optimizers; rewritten to a COPY
 // just before register coalescing (OxCamlLowerRelocate), which then
-// merges it with its source. See int_aarch64_oxcaml_relocated.
+// merges it with its source. See int_oxcaml_relocated.
 let hasSideEffects = 1, isCodeGenOnly = 1, Size = 4 in
 def OXCAML_RELOCATE
     : Pseudo<(outs GPR64:$dst), (ins GPR64:$src),
              [(set GPR64:$dst,
-                   (int_aarch64_oxcaml_relocated GPR64:$src))]>,
+                   (int_oxcaml_relocated GPR64:$src))]>,
       Sched<[]>;
 
 // The expansion is 3 instructions (adr, stp-pre, add); an understated
