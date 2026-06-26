@@ -3,11 +3,19 @@
 set -eu
 
 build_dir=$(pwd)
+source_dir=${test_source_directory:-$(dirname "$0")}
+host_arch=$(uname -m)
+host_system=$(uname -s)
 src="$build_dir/raw_stack_word_generated.ml"
 out="$build_dir/raw_stack_word_generated.exe"
 stdout_file="$build_dir/raw_stack_word_stdout.txt"
 stderr_file="$build_dir/raw_stack_word_stderr.txt"
 stub_obj="$build_dir/raw_stack_word_stubs.o"
+extra_link_ccopt=""
+
+case "$host_system:$host_arch" in
+  Linux:x86_64 | Linux:amd64) extra_link_ccopt="-no-pie" ;;
+esac
 
 search_dir=$build_dir
 ocamlopt=""
@@ -26,6 +34,63 @@ if [ -z "$ocamlopt" ]; then
     ocamlopt="_build/install/main/bin/ocamlopt.opt"
   fi
 fi
+
+ocamlopt_dir=$(dirname "$ocamlopt")
+stdlib_dir_arg=""
+for stdlib_dir in \
+  "$ocamlopt_dir/../_build/runtime_stdlib_install/lib/ocaml_runtime_stdlib" \
+  "$ocamlopt_dir/../runtime_stdlib_install/lib/ocaml_runtime_stdlib" \
+  "$source_dir/../../../_build/runtime_stdlib_install/lib/ocaml_runtime_stdlib" \
+  "$source_dir/../../../../_build/runtime_stdlib_install/lib/ocaml_runtime_stdlib" \
+  "$ocamlopt_dir/../../runtime_stdlib_install/lib/ocaml_runtime_stdlib" \
+  "$ocamlopt_dir/utils" \
+  "$ocamlopt_dir/lib/ocaml" \
+  "$ocamlopt_dir/_install/lib/ocaml" \
+  "$ocamlopt_dir/../lib/ocaml"
+do
+  if [ -f "$stdlib_dir/std_exit.cmx" ] || [ -f "$stdlib_dir/stdlib.cmi" ]; then
+    stdlib_dir_arg="$stdlib_dir"
+    break
+  fi
+done
+
+stdlib_upstream_dir_arg=""
+for stdlib_upstream_dir in \
+  "$ocamlopt_dir/otherlibs/stdlib_upstream_compatible" \
+  "$ocamlopt_dir/lib/ocaml/stdlib_upstream_compatible" \
+  "$ocamlopt_dir/_install/lib/ocaml/stdlib_upstream_compatible" \
+  "$ocamlopt_dir/../lib/ocaml/stdlib_upstream_compatible"
+do
+  if [ -f "$stdlib_upstream_dir/stdlib_upstream_compatible.cmxa" ]; then
+    stdlib_upstream_dir_arg="$stdlib_upstream_dir"
+    break
+  fi
+done
+
+runtime_include_dir_arg=""
+for runtime_dir in \
+  "$source_dir/../../../runtime" \
+  "$ocamlopt_dir/runtime" \
+  "$ocamlopt_dir/../runtime" \
+  "$ocamlopt_dir/../../runtime"
+do
+  if [ -f "$runtime_dir/caml/alloc.h" ]; then
+    runtime_include_dir_arg="$runtime_dir"
+    break
+  fi
+done
+
+run_ocamlopt_with_test_paths() {
+  if [ -n "$stdlib_upstream_dir_arg" ]; then
+    set -- -I "$stdlib_upstream_dir_arg" "$@"
+  else
+    set -- -I +stdlib_upstream_compatible "$@"
+  fi
+  if [ -n "$stdlib_dir_arg" ]; then
+    set -- -I "$stdlib_dir_arg" "$@"
+  fi
+  "$ocamlopt" "$@"
+}
 
 {
   echo "open Stdlib_upstream_compatible"
@@ -62,16 +127,32 @@ fi
   echo "      \"before=%s/%s after=%s/%s high_before=%nx base_after=%nx high_after=%nx\\n\""
   echo "      before_s before_hex after_s after_hex high_before base_after high_after;"
   echo "    failwith \"raw stack-looking nativeint# was rewritten\""
-  echo "  end"
+  echo "  end;"
+  echo "  if Nativeint.equal before base_after && Nativeint.equal high_before high_after"
+  echo "  then failwith \"stack did not grow\""
 } > "$src"
 
-"$ocamlopt" -I +stdlib_upstream_compatible -O3 -g -llvm-backend \
-  -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
-  -c -o "$stub_obj" "$build_dir/raw_stack_word_stubs.c"
+if [ -n "$runtime_include_dir_arg" ]; then
+  run_ocamlopt_with_test_paths -ccopt "-I$runtime_include_dir_arg" \
+    -O3 -llvm-backend \
+    -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
+    -c -o "$stub_obj" "$build_dir/raw_stack_word_stubs.c"
+else
+  run_ocamlopt_with_test_paths -O3 -llvm-backend \
+    -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
+    -c -o "$stub_obj" "$build_dir/raw_stack_word_stubs.c"
+fi
 
-"$ocamlopt" -I +stdlib_upstream_compatible -O3 -g -llvm-backend \
-  -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
-  -o "$out" stdlib_upstream_compatible.cmxa "$stub_obj" "$src"
+if [ -n "$extra_link_ccopt" ]; then
+  run_ocamlopt_with_test_paths -O3 -llvm-backend \
+    -ccopt "$extra_link_ccopt" \
+    -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
+    -o "$out" stdlib_upstream_compatible.cmxa "$stub_obj" "$src"
+else
+  run_ocamlopt_with_test_paths -O3 -llvm-backend \
+    -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
+    -o "$out" stdlib_upstream_compatible.cmxa "$stub_obj" "$src"
+fi
 
 set +e
 OCAMLRUNPARAM="l=1M" "$out" > "$stdout_file" 2> "$stderr_file"
