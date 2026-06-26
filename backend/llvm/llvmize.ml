@@ -3570,6 +3570,14 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     let res = call_llvm_intrinsic t name [arg1; arg2] typ in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_float_minmax_match_sse ?(vector_width_in_bits = 128) width cond =
+    let typ = wide_float_vec_type ~vector_width_in_bits ~width in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let cmp = emit_ins t (I.fcmp cond ~arg1 ~arg2) in
+    let res = emit_ins t (I.select ~cond:cmp ~ifso:arg1 ~ifnot:arg2) in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_float_binary ?(vector_width_in_bits = 128) width op =
     let typ = wide_float_vec_type ~vector_width_in_bits ~width in
     let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -4111,6 +4119,22 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_float_unary_intrinsic ~vector_width_in_bits:256 Cmm.Float32 "sqrt"
     | Amd64_simd_instrs.Vsqrtpd_Y_Ym256 ->
       simd_float_unary_intrinsic ~vector_width_in_bits:256 Cmm.Float64 "sqrt"
+    | Amd64_simd_instrs.Minps | Amd64_simd_instrs.Vminps_X_X_Xm128 ->
+      simd_float_minmax_match_sse Cmm.Float32 I.Folt
+    | Amd64_simd_instrs.Minpd | Amd64_simd_instrs.Vminpd_X_X_Xm128 ->
+      simd_float_minmax_match_sse Cmm.Float64 I.Folt
+    | Amd64_simd_instrs.Vminps_Y_Y_Ym256 ->
+      simd_float_minmax_match_sse ~vector_width_in_bits:256 Cmm.Float32 I.Folt
+    | Amd64_simd_instrs.Vminpd_Y_Y_Ym256 ->
+      simd_float_minmax_match_sse ~vector_width_in_bits:256 Cmm.Float64 I.Folt
+    | Amd64_simd_instrs.Maxps | Amd64_simd_instrs.Vmaxps_X_X_Xm128 ->
+      simd_float_minmax_match_sse Cmm.Float32 I.Fogt
+    | Amd64_simd_instrs.Maxpd | Amd64_simd_instrs.Vmaxpd_X_X_Xm128 ->
+      simd_float_minmax_match_sse Cmm.Float64 I.Fogt
+    | Amd64_simd_instrs.Vmaxps_Y_Y_Ym256 ->
+      simd_float_minmax_match_sse ~vector_width_in_bits:256 Cmm.Float32 I.Fogt
+    | Amd64_simd_instrs.Vmaxpd_Y_Y_Ym256 ->
+      simd_float_minmax_match_sse ~vector_width_in_bits:256 Cmm.Float64 I.Fogt
     | Amd64_simd_instrs.Psllw_X | Amd64_simd_instrs.Vpsllw_X_X ->
       simd_int_shift_imm 16 Shl (require_imm instr_id imm)
     | Amd64_simd_instrs.Pslld_X | Amd64_simd_instrs.Vpslld_X_X ->
