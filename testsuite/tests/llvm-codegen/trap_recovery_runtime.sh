@@ -204,6 +204,7 @@ dynamic_src="$build_dir/trap_recovery_dynamic_finally.ml"
 dynamic_cmx="$build_dir/trap_recovery_dynamic_finally.cmx"
 dynamic_ir="$build_dir/trap_recovery_dynamic_finally.ll"
 dynamic_asm="$build_dir/trap_recovery_dynamic_finally.s"
+dynamic_out="$build_dir/trap_recovery_dynamic_finally.exe"
 
 cat > "$dynamic_src" <<'EOF'
 exception E of string array
@@ -230,6 +231,14 @@ EOF
 "$ocamlopt" $stdlib_flags -O3 $debug_flags -S -c -keep-llvmir -llvm-backend \
   -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
   -o "$dynamic_cmx" "$dynamic_src"
+
+"$ocamlopt" $stdlib_flags -O3 -llvm-backend \
+  $extra_link_flags \
+  -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
+  -o "$dynamic_out" "$dynamic_src"
+
+"$dynamic_out" > "$build_dir/trap_recovery_dynamic_finally_stdout.txt"
+grep -q "^0$" "$build_dir/trap_recovery_dynamic_finally_stdout.txt"
 
 if [ "$aarch64_trap_checks" = true ]; then
   grep -q "declare { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()" \
