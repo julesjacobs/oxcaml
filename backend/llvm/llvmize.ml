@@ -3318,6 +3318,78 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_mul_hadd_i16 ?(vector_width_in_bits = 128) () =
+    let src_typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits:16 in
+    let dst_typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits:32 in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) src_typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) src_typ in
+    let lanes = vector_width_in_bits / 32 in
+    let res =
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let product src_lane =
+               let elem1 =
+                 emit_ins t
+                   (I.extractelement ~vector:arg1 ~index:(V.of_int src_lane))
+               in
+               let elem2 =
+                 emit_ins t
+                   (I.extractelement ~vector:arg2 ~index:(V.of_int src_lane))
+               in
+               let elem1 =
+                 emit_ins t (I.convert Sext ~arg:elem1 ~to_:T.i32)
+               in
+               let elem2 =
+                 emit_ins t (I.convert Sext ~arg:elem2 ~to_:T.i32)
+               in
+               emit_ins t (I.binary Mul ~arg1:elem1 ~arg2:elem2)
+             in
+             let product1 = product (2 * lane) in
+             let product2 = product ((2 * lane) + 1) in
+             let sum =
+               emit_ins t (I.binary Add ~arg1:product1 ~arg2:product2)
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane) ~to_insert:sum))
+           (V.poison dst_typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_int_mul_even_i32 ?(vector_width_in_bits = 128) ~unsigned () =
+    let src_typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits:32 in
+    let dst_typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits:64 in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) src_typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) src_typ in
+    let convert_op = if unsigned then I.Zext else I.Sext in
+    let lanes = vector_width_in_bits / 64 in
+    let res =
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let src_lane = 2 * lane in
+             let elem1 =
+               emit_ins t
+                 (I.extractelement ~vector:arg1 ~index:(V.of_int src_lane))
+             in
+             let elem2 =
+               emit_ins t
+                 (I.extractelement ~vector:arg2 ~index:(V.of_int src_lane))
+             in
+             let elem1 =
+               emit_ins t (I.convert convert_op ~arg:elem1 ~to_:T.i64)
+             in
+             let elem2 =
+               emit_ins t (I.convert convert_op ~arg:elem2 ~to_:T.i64)
+             in
+             let product = emit_ins t (I.binary Mul ~arg1:elem1 ~arg2:elem2) in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane)
+                  ~to_insert:product))
+           (V.poison dst_typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_sad_unsigned_i8 ?(vector_width_in_bits = 128) () =
     let byte_typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits:8 in
     let res_typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits:64 in
@@ -4760,6 +4832,20 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_binary ~vector_width_in_bits:256 16 Mul
     | Amd64_simd_instrs.Vpmulld_Y_Y_Ym256 ->
       simd_int_binary ~vector_width_in_bits:256 32 Mul
+    | Amd64_simd_instrs.Pmaddwd
+    | Amd64_simd_instrs.Vpmaddwd_X_X_Xm128 ->
+      simd_int_mul_hadd_i16 ()
+    | Amd64_simd_instrs.Vpmaddwd_Y_Y_Ym256 ->
+      simd_int_mul_hadd_i16 ~vector_width_in_bits:256 ()
+    | Amd64_simd_instrs.Pmuldq | Amd64_simd_instrs.Vpmuldq_X_X_Xm128 ->
+      simd_int_mul_even_i32 ~unsigned:false ()
+    | Amd64_simd_instrs.Pmuludq_X_Xm128
+    | Amd64_simd_instrs.Vpmuludq_X_X_Xm128 ->
+      simd_int_mul_even_i32 ~unsigned:true ()
+    | Amd64_simd_instrs.Vpmuldq_Y_Y_Ym256 ->
+      simd_int_mul_even_i32 ~vector_width_in_bits:256 ~unsigned:false ()
+    | Amd64_simd_instrs.Vpmuludq_Y_Y_Ym256 ->
+      simd_int_mul_even_i32 ~vector_width_in_bits:256 ~unsigned:true ()
     | Amd64_simd_instrs.Pmulhw | Amd64_simd_instrs.Vpmulhw_X_X_Xm128 ->
       simd_int_mul_high_i16 ~unsigned:false ()
     | Amd64_simd_instrs.Pmulhuw_X_Xm128
