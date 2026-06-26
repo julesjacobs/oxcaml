@@ -42,7 +42,9 @@ done
 
 cat > "$src" <<'EOF'
 type nonrec int32x4 = int32x4#
+type nonrec int32x8 = int32x8#
 type nonrec int64x2 = int64x2#
+type nonrec int64x4 = int64x4#
 
 external min_float64 : float -> float -> float
   = "caml_vec128_unreachable" "caml_sse2_float64_min"
@@ -76,6 +78,46 @@ external int64x2_high_int64 : int64x2 -> int64
   = "caml_vec128_unreachable" "vec128_high_int64"
 [@@noalloc] [@@unboxed]
 
+external int64x4_of_int64s : int64 -> int64 -> int64 -> int64 -> int64x4
+  = "caml_vec256_unreachable" "vec256_of_int64s"
+[@@noalloc] [@@unboxed]
+
+external int64x4_lane0 : int64x4 -> int64
+  = "caml_vec256_unreachable" "vec256_lane0"
+[@@noalloc] [@@unboxed]
+
+external int64x4_lane1 : int64x4 -> int64
+  = "caml_vec256_unreachable" "vec256_lane1"
+[@@noalloc] [@@unboxed]
+
+external int64x4_lane2 : int64x4 -> int64
+  = "caml_vec256_unreachable" "vec256_lane2"
+[@@noalloc] [@@unboxed]
+
+external int64x4_lane3 : int64x4 -> int64
+  = "caml_vec256_unreachable" "vec256_lane3"
+[@@noalloc] [@@unboxed]
+
+external int32x8_of_int64s : int64 -> int64 -> int64 -> int64 -> int32x8
+  = "caml_vec256_unreachable" "vec256_of_int64s"
+[@@noalloc] [@@unboxed]
+
+external int32x8_lane01 : int32x8 -> int64
+  = "caml_vec256_unreachable" "vec256_lane0"
+[@@noalloc] [@@unboxed]
+
+external int32x8_lane23 : int32x8 -> int64
+  = "caml_vec256_unreachable" "vec256_lane1"
+[@@noalloc] [@@unboxed]
+
+external int32x8_lane45 : int32x8 -> int64
+  = "caml_vec256_unreachable" "vec256_lane2"
+[@@noalloc] [@@unboxed]
+
+external int32x8_lane67 : int32x8 -> int64
+  = "caml_vec256_unreachable" "vec256_lane3"
+[@@noalloc] [@@unboxed]
+
 external blend_32 :
   (int[@untagged]) ->
   (int32x4[@unboxed]) ->
@@ -92,6 +134,22 @@ external blend_64 :
   = "caml_vec128_unreachable" "caml_sse41_vec128_blend_64"
 [@@noalloc] [@@builtin]
 
+external blend_256_64 :
+  (int[@untagged]) ->
+  (int64x4[@unboxed]) ->
+  (int64x4[@unboxed]) ->
+  (int64x4[@unboxed])
+  = "caml_vec256_unreachable" "caml_avx_vec256_blend_64"
+[@@noalloc] [@@builtin]
+
+external blend_256_32 :
+  (int[@untagged]) ->
+  (int32x8[@unboxed]) ->
+  (int32x8[@unboxed]) ->
+  (int32x8[@unboxed])
+  = "caml_vec256_unreachable" "caml_avx_vec256_blend_32"
+[@@noalloc] [@@builtin]
+
 let () =
   Printf.printf "%.1f %.1f\n" (min_float64 3.0 4.0) (max_float64 3.0 4.0);
   let v0 = int32x4_of_int64s 0x00000001_00000000L 0x00000003_00000002L in
@@ -103,7 +161,29 @@ let () =
   let v0 = int64x2_of_int64s 0L 1L in
   let v1 = int64x2_of_int64s 2L 3L in
   let r64 = blend_64 0b01 v0 v1 in
-  Printf.printf "%Ld %Ld\n" (int64x2_low_int64 r64) (int64x2_high_int64 r64)
+  Printf.printf "%Ld %Ld\n" (int64x2_low_int64 r64) (int64x2_high_int64 r64);
+  let v0 = int64x4_of_int64s 0L 1L 2L 3L in
+  let v1 = int64x4_of_int64s 4L 5L 6L 7L in
+  let r64x4 = blend_256_64 0b0101 v0 v1 in
+  Printf.printf "%Ld %Ld %Ld %Ld\n"
+    (int64x4_lane0 r64x4)
+    (int64x4_lane1 r64x4)
+    (int64x4_lane2 r64x4)
+    (int64x4_lane3 r64x4);
+  let v0 =
+    int32x8_of_int64s 0x00000001_00000000L 0x00000003_00000002L
+      0x00000005_00000004L 0x00000007_00000006L
+  in
+  let v1 =
+    int32x8_of_int64s 0x00000009_00000008L 0x0000000b_0000000aL
+      0x0000000d_0000000cL 0x0000000f_0000000eL
+  in
+  let r32x8 = blend_256_32 0b01010101 v0 v1 in
+  Printf.printf "%016Lx %016Lx %016Lx %016Lx\n"
+    (int32x8_lane01 r32x8)
+    (int32x8_lane23 r32x8)
+    (int32x8_lane45 r32x8)
+    (int32x8_lane67 r32x8)
 EOF
 
 cat > "$stub_src" <<'EOF'
@@ -114,10 +194,13 @@ cat > "$stub_src" <<'EOF'
 #define BUILTIN(name) void name(void) { abort(); }
 
 BUILTIN(caml_vec128_unreachable)
+BUILTIN(caml_vec256_unreachable)
 BUILTIN(caml_sse2_float64_min)
 BUILTIN(caml_sse2_float64_max)
 BUILTIN(caml_sse41_vec128_blend_32)
 BUILTIN(caml_sse41_vec128_blend_64)
+BUILTIN(caml_avx_vec256_blend_64)
+BUILTIN(caml_avx_vec256_blend_32)
 
 typedef union {
   __m128i vec;
@@ -142,9 +225,48 @@ int64_t vec128_high_int64(__m128i v)
   words.vec = v;
   return words.i64[1];
 }
+
+typedef union {
+  __m256i vec;
+  int64_t i64[4];
+} vec256_words;
+
+__m256i vec256_of_int64s(int64_t a, int64_t b, int64_t c, int64_t d)
+{
+  return _mm256_set_epi64x(d, c, b, a);
+}
+
+int64_t vec256_lane0(__m256i v)
+{
+  vec256_words words;
+  words.vec = v;
+  return words.i64[0];
+}
+
+int64_t vec256_lane1(__m256i v)
+{
+  vec256_words words;
+  words.vec = v;
+  return words.i64[1];
+}
+
+int64_t vec256_lane2(__m256i v)
+{
+  vec256_words words;
+  words.vec = v;
+  return words.i64[2];
+}
+
+int64_t vec256_lane3(__m256i v)
+{
+  vec256_words words;
+  words.vec = v;
+  return words.i64[3];
+}
 EOF
 
-"$ocamlopt" $stdlib_flags -extension simd_beta -ccopt -msse4.2 -llvm-backend \
+"$ocamlopt" $stdlib_flags -extension simd_beta -favx -ccopt -mavx -llvm-backend \
+  -llvm-flags -mavx \
   -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
   -o "$out" "$stub_src" "$src"
 
@@ -152,7 +274,9 @@ EOF
 
 expected='3.0 4.0
 0000000100000004 0000000300000006
-2 1'
+2 1
+4 1 6 3
+0000000100000008 000000030000000a 000000050000000c 000000070000000e'
 
 actual=$(cat "$stdout_file")
 if [ "$actual" != "$expected" ]; then
