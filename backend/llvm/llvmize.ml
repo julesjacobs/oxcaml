@@ -3430,6 +3430,68 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_horizontal_binary ?(vector_width_in_bits = 128) width_in_bits
+      op ~saturating =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let lanes_per_128 = 128 / width_in_bits in
+    let half_lanes_per_128 = lanes_per_128 / 2 in
+    let blocks = vector_width_in_bits / 128 in
+    let clamp_i16 value =
+      let min_value = V.of_int ~typ:T.i32 (-32768) in
+      let max_value = V.of_int ~typ:T.i32 32767 in
+      let below_min = emit_ins t (I.icmp I.Islt ~arg1:value ~arg2:min_value) in
+      let above_max = emit_ins t (I.icmp I.Isgt ~arg1:value ~arg2:max_value) in
+      let clamped_min =
+        emit_ins t (I.select ~cond:below_min ~ifso:min_value ~ifnot:value)
+      in
+      emit_ins t
+        (I.select ~cond:above_max ~ifso:max_value ~ifnot:clamped_min)
+    in
+    let combine elem1 elem2 =
+      if saturating
+      then (
+        let elem1 = emit_ins t (I.convert Sext ~arg:elem1 ~to_:T.i32) in
+        let elem2 = emit_ins t (I.convert Sext ~arg:elem2 ~to_:T.i32) in
+        let combined = emit_ins t (I.binary op ~arg1:elem1 ~arg2:elem2) in
+        let clamped = clamp_i16 combined in
+        emit_ins t (I.convert Trunc ~arg:clamped ~to_:T.i16))
+      else emit_ins t (I.binary op ~arg1:elem1 ~arg2:elem2)
+    in
+    let res =
+      List.init blocks Fun.id
+      |> List.fold_left
+           (fun vector block ->
+             List.init lanes_per_128 Fun.id
+             |> List.fold_left
+                  (fun vector lane ->
+                    let src_arg, pair =
+                      if lane < half_lanes_per_128
+                      then arg1, lane
+                      else arg2, lane - half_lanes_per_128
+                    in
+                    let src_base = (block * lanes_per_128) + (2 * pair) in
+                    let elem1 =
+                      emit_ins t
+                        (I.extractelement ~vector:src_arg
+                           ~index:(V.of_int src_base))
+                    in
+                    let elem2 =
+                      emit_ins t
+                        (I.extractelement ~vector:src_arg
+                           ~index:(V.of_int (src_base + 1)))
+                    in
+                    let combined = combine elem1 elem2 in
+                    emit_ins t
+                      (I.insertelement ~vector
+                         ~index:(V.of_int ((block * lanes_per_128) + lane))
+                         ~to_insert:combined))
+                  vector)
+           (V.poison typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_sad_unsigned_i8 ?(vector_width_in_bits = 128) () =
     let byte_typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits:8 in
     let res_typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits:64 in
@@ -4854,6 +4916,42 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_mulsign ~vector_width_in_bits:256 16
     | Amd64_simd_instrs.Vpsignd_Y_Y_Ym256 ->
       simd_int_mulsign ~vector_width_in_bits:256 32
+    | Amd64_simd_instrs.Phaddw_X_Xm128
+    | Amd64_simd_instrs.Vphaddw_X_X_Xm128 ->
+      simd_int_horizontal_binary 16 Add ~saturating:false
+    | Amd64_simd_instrs.Phaddd_X_Xm128
+    | Amd64_simd_instrs.Vphaddd_X_X_Xm128 ->
+      simd_int_horizontal_binary 32 Add ~saturating:false
+    | Amd64_simd_instrs.Phaddsw_X_Xm128
+    | Amd64_simd_instrs.Vphaddsw_X_X_Xm128 ->
+      simd_int_horizontal_binary 16 Add ~saturating:true
+    | Amd64_simd_instrs.Phsubw_X_Xm128
+    | Amd64_simd_instrs.Vphsubw_X_X_Xm128 ->
+      simd_int_horizontal_binary 16 Sub ~saturating:false
+    | Amd64_simd_instrs.Phsubd_X_Xm128
+    | Amd64_simd_instrs.Vphsubd_X_X_Xm128 ->
+      simd_int_horizontal_binary 32 Sub ~saturating:false
+    | Amd64_simd_instrs.Phsubsw_X_Xm128
+    | Amd64_simd_instrs.Vphsubsw_X_X_Xm128 ->
+      simd_int_horizontal_binary 16 Sub ~saturating:true
+    | Amd64_simd_instrs.Vphaddw_Y_Y_Ym256 ->
+      simd_int_horizontal_binary ~vector_width_in_bits:256 16 Add
+        ~saturating:false
+    | Amd64_simd_instrs.Vphaddd_Y_Y_Ym256 ->
+      simd_int_horizontal_binary ~vector_width_in_bits:256 32 Add
+        ~saturating:false
+    | Amd64_simd_instrs.Vphaddsw_Y_Y_Ym256 ->
+      simd_int_horizontal_binary ~vector_width_in_bits:256 16 Add
+        ~saturating:true
+    | Amd64_simd_instrs.Vphsubw_Y_Y_Ym256 ->
+      simd_int_horizontal_binary ~vector_width_in_bits:256 16 Sub
+        ~saturating:false
+    | Amd64_simd_instrs.Vphsubd_Y_Y_Ym256 ->
+      simd_int_horizontal_binary ~vector_width_in_bits:256 32 Sub
+        ~saturating:false
+    | Amd64_simd_instrs.Vphsubsw_Y_Y_Ym256 ->
+      simd_int_horizontal_binary ~vector_width_in_bits:256 16 Sub
+        ~saturating:true
     | Amd64_simd_instrs.Pavgb_X_Xm128
     | Amd64_simd_instrs.Vpavgb_X_X_Xm128 ->
       simd_int_avg_unsigned 8
