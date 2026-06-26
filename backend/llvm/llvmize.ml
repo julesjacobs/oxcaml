@@ -4203,10 +4203,40 @@ let poll ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction) =
   emit_unwind_landingpad_after t unwind_label exn_entry;
   emit_label t after_poll
 
+type amd64_simd_save =
+  | Save_none
+  | Save_xmm
+  | Save_ymm
+  | Save_zmm
+
+let amd64_stack_realloc_symbol live =
+  let save =
+    Reg.Set.fold
+      (fun reg save ->
+        if not (Reg.is_reg reg)
+        then save
+        else
+          match reg.typ with
+          | Vec512 -> Save_zmm
+          | Vec256 -> (
+            match save with Save_zmm -> save | Save_none | Save_xmm | Save_ymm -> Save_ymm)
+          | Float | Float32 | Vec128 | Valx2 -> (
+            match save with Save_zmm | Save_ymm -> save | Save_none | Save_xmm -> Save_xmm)
+          | Val | Addr | Int -> save)
+      live Save_none
+  in
+  "caml_llvm_call_realloc_stack"
+  ^
+  match save with
+  | Save_none -> ""
+  | Save_xmm -> "_sse"
+  | Save_ymm -> "_avx"
+  | Save_zmm -> "_avx512"
+
 let stack_check ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction)
     max_frame_size_bytes =
   match Target_system.architecture () with
-  | Target_system.AArch64 ->
+  | Target_system.AArch64 | Target_system.X86_64 ->
     let threshold_offset =
       (Domainstate.stack_ctx_words * Arch.size_addr)
       + Stack_check.stack_threshold_size
@@ -4234,17 +4264,25 @@ let stack_check ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction)
     let required_words =
       (Stack_check.stack_threshold_size + Misc.align max_frame_size_bytes 8) / 8
     in
-    add_referenced_symbol t "caml_llvm_call_realloc_stack";
+    let realloc_stack_symbol =
+      match Target_system.architecture () with
+      | Target_system.AArch64 -> "caml_llvm_call_realloc_stack"
+      | Target_system.X86_64 -> amd64_stack_realloc_symbol i.live
+      | Target_system.IA32 | Target_system.ARM | Target_system.POWER
+      | Target_system.Z | Target_system.Riscv ->
+        Misc.fatal_error "unexpected architecture"
+    in
+    add_referenced_symbol t realloc_stack_symbol;
     call_runtime_for_basic_safepoint
       ~attrs:(gc_attr ~can_call_gc:true t i @ [LL.Fn_attr.Cold])
-      ?unwind_label ~cc:Oxcaml_alloc t i "caml_llvm_call_realloc_stack"
-      [V.of_int required_words] [] "stack check"
+      ?unwind_label ~cc:Oxcaml_alloc t i realloc_stack_symbol [V.of_int required_words]
+      [] "stack check"
     |> ignore;
     emit_ins_no_res t (I.br after_realloc);
     emit_unwind_landingpad_after t unwind_label exn_entry;
     emit_label t after_realloc
-  | Target_system.IA32 | Target_system.X86_64 | Target_system.ARM
-  | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
+  | Target_system.IA32 | Target_system.ARM | Target_system.POWER | Target_system.Z
+  | Target_system.Riscv ->
     fail_msg ~name:"stack_check" "unsupported architecture for LLVM backend"
 
 let unwind_for_instruction t i =
@@ -5009,20 +5047,25 @@ let fun_attrs ~has_try:_ ~cfg_stack_check_bytes ~cfg_stack_check_before_bytes
   let gc_attrs = [Gc gc_name] in
   let frame_pointer_attrs =
     match Target_system.architecture (), Config.no_stack_checks with
-    | Target_system.AArch64, false ->
-      Oxcaml_stack_check
-      ::
-      (if !Oxcaml_flags.cfg_stack_checks
-       then
-         Oxcaml_stack_check_bytes cfg_stack_check_bytes
-         ::
-         (if cfg_stack_check_bytes = 0
-          then []
-          else [Oxcaml_stack_check_before_bytes cfg_stack_check_before_bytes])
-       else [])
-    | Target_system.AArch64, true -> []
-    | ( ( Target_system.IA32 | Target_system.X86_64 | Target_system.ARM
-        | Target_system.POWER | Target_system.Z | Target_system.Riscv ),
+    | (Target_system.AArch64 | Target_system.X86_64), false ->
+      let stack_check_attrs =
+        Oxcaml_stack_check
+        ::
+        (if !Oxcaml_flags.cfg_stack_checks
+         then
+           Oxcaml_stack_check_bytes cfg_stack_check_bytes
+           ::
+           (if cfg_stack_check_bytes = 0
+            then []
+            else [Oxcaml_stack_check_before_bytes cfg_stack_check_before_bytes])
+         else [])
+      in
+      if Target_system.architecture () = Target_system.X86_64
+      then No_red_zone :: stack_check_attrs
+      else stack_check_attrs
+    | (Target_system.AArch64 | Target_system.X86_64), true -> []
+    | ( ( Target_system.IA32 | Target_system.ARM | Target_system.POWER
+        | Target_system.Z | Target_system.Riscv ),
         (_ : bool) ) ->
       []
   in
@@ -5589,9 +5632,9 @@ let init ~output_prefix ~ppf_dump =
     (Config.no_stack_checks
     ||
     match Target_system.architecture () with
-    | Target_system.AArch64 -> true
-    | Target_system.IA32 | Target_system.X86_64 | Target_system.ARM
-    | Target_system.POWER | Target_system.Z | Target_system.Riscv ->
+    | Target_system.AArch64 | Target_system.X86_64 -> true
+    | Target_system.IA32 | Target_system.ARM | Target_system.POWER
+    | Target_system.Z | Target_system.Riscv ->
       false);
   fail_if_not ~msg:"runtime5 required" "init" Config.runtime5;
   let llvmir_filename = output_prefix ^ ".ll" in

@@ -202,6 +202,7 @@ module Fn_attr : sig
     | Frame_pointer_all
     | Gc of string
     | Gc_leaf_function
+    | No_red_zone
     | Noinline
     | Oxcaml_stack_check
     | Oxcaml_stack_check_bytes of int

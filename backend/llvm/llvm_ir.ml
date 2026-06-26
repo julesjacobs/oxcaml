@@ -472,6 +472,7 @@ module Fn_attr = struct
     | Frame_pointer_all
     | Gc of string
     | Gc_leaf_function
+    | No_red_zone
     | Noinline
     | Oxcaml_stack_check
     | Oxcaml_stack_check_bytes of int
@@ -484,6 +485,7 @@ module Fn_attr = struct
     | Frame_pointer_all -> {|"frame-pointer"="all"|}
     | Gc s -> Format.sprintf {|gc "%s"|} s
     | Gc_leaf_function -> {|"gc-leaf-function"="true"|}
+    | No_red_zone -> "noredzone"
     | Noinline -> "noinline"
     | Oxcaml_stack_check -> {|"oxcaml-stack-check"="true"|}
     | Oxcaml_stack_check_bytes i ->
@@ -500,7 +502,7 @@ module Fn_attr = struct
   let to_string t = Format.asprintf "%a" pp_t t
 
   let order = function
-    | Cold | Frame_pointer_all | Gc_leaf_function | Noinline
+    | Cold | Frame_pointer_all | Gc_leaf_function | No_red_zone | Noinline
     | Oxcaml_stack_check | Oxcaml_stack_check_bytes _
     | Oxcaml_stack_check_before_bytes _ | Returns_twice | Statepoint_id _ ->
       0

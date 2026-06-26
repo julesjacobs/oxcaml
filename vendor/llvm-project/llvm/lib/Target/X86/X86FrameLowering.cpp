@@ -29,10 +29,12 @@
 #include "llvm/CodeGen/WinEHFuncInfo.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/InlineAsm.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCObjectFileInfo.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Target/TargetOptions.h"
 #include <cstdlib>
 
@@ -43,6 +45,128 @@ STATISTIC(NumFrameExtraProbe,
           "Number of extra stack probes generated in prologue");
 
 using namespace llvm;
+
+struct OxCamlStackCheckAttrs {
+  bool Requested = false;
+  bool HasCfgBytes = false;
+  uint64_t CfgBytes = 0;
+  bool HasBeforeBytes = false;
+  uint64_t BeforeBytes = 0;
+};
+
+static OxCamlStackCheckAttrs
+getOxCamlStackCheckAttrs(const MachineFunction &MF) {
+  const Function &F = MF.getFunction();
+  OxCamlStackCheckAttrs Attrs;
+  Attrs.Requested = F.hasFnAttribute("oxcaml-stack-check");
+
+  Attribute CfgBytesAttr = F.getFnAttribute("oxcaml-stack-check-bytes");
+  if (CfgBytesAttr.isValid()) {
+    bool Failed =
+        CfgBytesAttr.getValueAsString().getAsInteger(10, Attrs.CfgBytes);
+    assert(!Failed && "invalid oxcaml-stack-check-bytes attribute");
+    Attrs.HasCfgBytes = !Failed;
+  }
+
+  Attribute BeforeBytesAttr =
+      F.getFnAttribute("oxcaml-stack-check-before-bytes");
+  if (BeforeBytesAttr.isValid()) {
+    bool Failed =
+        BeforeBytesAttr.getValueAsString().getAsInteger(10, Attrs.BeforeBytes);
+    assert(!Failed && "invalid oxcaml-stack-check-before-bytes attribute");
+    Attrs.HasBeforeBytes = !Failed;
+  }
+
+  return Attrs;
+}
+
+static bool hasOxCamlStackCheckProtocol(const MachineFunction &MF) {
+  return getOxCamlStackCheckAttrs(MF).Requested;
+}
+
+static uint64_t getOxCamlPrologueStackCheckBytes(const MachineFunction &MF,
+                                                 uint64_t PrefixBytes) {
+  constexpr uint64_t StackThresholdBytes = 32 * 8;
+  constexpr uint64_t OrdinaryCheckSlowPathReserveBytes = 32;
+  if (!hasOxCamlStackCheckProtocol(MF))
+    return 0;
+
+  OxCamlStackCheckAttrs Attrs = getOxCamlStackCheckAttrs(MF);
+  if (!Attrs.HasCfgBytes)
+    return PrefixBytes == 0 ? 0
+                            : PrefixBytes + OrdinaryCheckSlowPathReserveBytes;
+
+  uint64_t UncheckedCfgBytes = 0;
+  if (Attrs.CfgBytes != 0) {
+    if (!Attrs.HasBeforeBytes)
+      return PrefixBytes + OrdinaryCheckSlowPathReserveBytes;
+    UncheckedCfgBytes = Attrs.BeforeBytes;
+  }
+
+  uint64_t UncheckedBytes =
+      PrefixBytes + UncheckedCfgBytes + OrdinaryCheckSlowPathReserveBytes;
+  return UncheckedBytes < StackThresholdBytes ? 0 : UncheckedBytes;
+}
+
+static StringRef getOxCamlStackCheckHelperSuffix(const X86Subtarget &ST) {
+  if (ST.hasAVX512())
+    return "_avx512";
+  if (ST.hasAVX())
+    return "_avx";
+  if (ST.hasSSE2())
+    return "_sse";
+  return "";
+}
+
+static std::string getOxCamlRuntimeSymbol(const MachineFunction &MF,
+                                          StringRef Name) {
+  char Prefix = MF.getDataLayout().getGlobalPrefix();
+  if (Prefix == '\0')
+    return Name.str();
+  std::string Symbol(1, Prefix);
+  Symbol += Name.str();
+  return Symbol;
+}
+
+static void emitOxCamlStackCheck(MachineBasicBlock &MBB,
+                                 MachineBasicBlock::iterator MBBI,
+                                 const DebugLoc &DL,
+                                 const TargetInstrInfo &TII,
+                                 uint64_t StackSizeInBytes) {
+  if (StackSizeInBytes == 0)
+    return;
+
+  MachineFunction *MF = MBB.getParent();
+  const X86Subtarget &ST = MF->getSubtarget<X86Subtarget>();
+  if (!ST.is64Bit())
+    report_fatal_error("OxCaml LLVM stack checks require x86-64");
+
+  constexpr uint64_t StackThresholdWords = 32;
+  constexpr uint64_t StackCtxWords = 13;
+  constexpr uint64_t CurrentStackOffset = 40;
+  uint64_t AlignedStackSize = alignTo(StackSizeInBytes, 8);
+  uint64_t RequiredWords = StackThresholdWords + AlignedStackSize / 8;
+  uint64_t CheckBytes =
+      AlignedStackSize + ((StackThresholdWords + StackCtxWords) * 8);
+  std::string ReallocStack =
+      getOxCamlRuntimeSymbol(*MF, "caml_llvm_prologue_realloc_stack") +
+      getOxCamlStackCheckHelperSuffix(ST).str();
+  std::string Asm =
+      "leaq -" + std::to_string(CheckBytes) + "(%rsp), %r10\n\t"
+      "cmpq " + std::to_string(CurrentStackOffset) + "(%r14), %r10\n\t"
+      "jae 9f\n\t"
+      "movq $$" + std::to_string(RequiredWords) + ", %r10\n\t"
+      "leaq 9f(%rip), %r11\n\t"
+      "jmp " + ReallocStack + "\n"
+      "9:";
+  unsigned ExtraInfo = InlineAsm::Extra_HasSideEffects |
+                       InlineAsm::Extra_MayLoad |
+                       InlineAsm::Extra_MayStore;
+  BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::INLINEASM))
+      .addExternalSymbol(MF->createExternalSymbolName(Asm))
+      .addImm(ExtraInfo)
+      .setMIFlags(MachineInstr::FrameSetup);
+}
 
 X86FrameLowering::X86FrameLowering(const X86Subtarget &STI,
                                    MaybeAlign StackAlignOverride)
@@ -1582,6 +1706,7 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
       !MFI.adjustsStack() &&                   // No calls.
       !EmitStackProbeCall &&                   // No stack probes.
       !MFI.hasCopyImplyingStackAdjustment() && // Don't push and pop.
+      !hasOxCamlStackCheckProtocol(MF) &&       // No OCaml stack checks.
       !MF.shouldSplitStack()) {                // Regular stack
     uint64_t MinSize =
         X86FI->getCalleeSavedFrameSize() - X86FI->getTCReturnAddrDelta();
@@ -1590,6 +1715,12 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
     StackSize = std::max(MinSize, StackSize > 128 ? StackSize - 128 : 0);
     MFI.setStackSize(StackSize);
   }
+
+  uint64_t OxCamlPrologueStackCheckBytes =
+      getOxCamlPrologueStackCheckBytes(MF, StackSize);
+  if (OxCamlPrologueStackCheckBytes != 0)
+    emitOxCamlStackCheck(MBB, MBB.begin(), DL, TII,
+                         OxCamlPrologueStackCheckBytes);
 
   // Insert stack pointer adjustment for later moving of return addr.  Only
   // applies to tail call optimized functions where the callee argument stack

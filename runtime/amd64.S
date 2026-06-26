@@ -737,6 +737,67 @@ Make_call_realloc_stack(_sse, XMM)
 Make_call_realloc_stack(_avx, YMM)
 Make_call_realloc_stack(_avx512, ZMM)
 
+#define Make_llvm_call_realloc_stack(suffix, simd)        \
+    FUNCTION(G(caml_llvm_call_realloc_stack ## suffix))   \
+    CFI_STARTPROC                                  ;      \
+        CFI_SIGNAL_FRAME;                                \
+        ENTER_FUNCTION;                                  \
+        SAVE_ALL_REGS(simd);                             \
+        movq    0*8(%r15), C_ARG_1; /* saved %rax arg */ \
+        SWITCH_OCAML_TO_C;                               \
+        C_call  (GCALL(caml_try_realloc_stack));         \
+        SWITCH_C_TO_OCAML;                               \
+        cmpq    $0, %rax;                                \
+        jz      1f;                                      \
+        RESTORE_ALL_REGS(simd);                          \
+        LEAVE_FUNCTION;                                  \
+        ret;                                             \
+1:      /* Restore the gc_regs bucket popped by SAVE_ALL_REGS */ \
+        movq    Caml_state(gc_regs_buckets), %r11;       \
+        movq    %r11, 0(%r15); /* next ptr */            \
+        movq    %r15, Caml_state(gc_regs_buckets);       \
+        SWITCH_OCAML_TO_C;                               \
+        LEA_VAR(caml_exn_Stack_overflow, %rdi);          \
+        C_call  (GCALL(caml_raise_async));               \
+    CFI_ENDPROC                          ;               \
+    ENDFUNCTION(G(caml_llvm_call_realloc_stack ## suffix))
+
+Make_llvm_call_realloc_stack(, NO)
+Make_llvm_call_realloc_stack(_sse, XMM)
+Make_llvm_call_realloc_stack(_avx, YMM)
+Make_llvm_call_realloc_stack(_avx512, ZMM)
+
+#define Make_llvm_prologue_realloc_stack(suffix, simd)        \
+    FUNCTION(G(caml_llvm_prologue_realloc_stack ## suffix))   \
+    CFI_STARTPROC                                      ;      \
+        CFI_SIGNAL_FRAME;                                    \
+        /* %r10 contains required words and %r11 the continuation. */ \
+        SAVE_ALL_REGS(simd);                                 \
+        movq    %r15, Caml_state(gc_regs);                   \
+        movq    10*8(%r15), C_ARG_1; /* saved %r10 arg */    \
+        SWITCH_OCAML_TO_C;                                   \
+        C_call  (GCALL(caml_try_realloc_stack));             \
+        SWITCH_C_TO_OCAML;                                   \
+        movq    Caml_state(gc_regs), %r15;                   \
+        testq   %rax, %rax;                                  \
+        jz      1f;                                          \
+        RESTORE_ALL_REGS(simd);                              \
+        jmp     *%r11;                                       \
+1:      /* Restore the gc_regs bucket popped by SAVE_ALL_REGS */ \
+        movq    Caml_state(gc_regs_buckets), %r11;           \
+        movq    %r11, 0(%r15); /* next ptr */                \
+        movq    %r15, Caml_state(gc_regs_buckets);           \
+        movq    Caml_state(young_ptr), %r15;                 \
+        LEA_VAR(caml_exn_Stack_overflow, %rax);              \
+        jmp     LBL(caml_raise_exn);                         \
+    CFI_ENDPROC                              ;               \
+    ENDFUNCTION(G(caml_llvm_prologue_realloc_stack ## suffix))
+
+Make_llvm_prologue_realloc_stack(, NO)
+Make_llvm_prologue_realloc_stack(_sse, XMM)
+Make_llvm_prologue_realloc_stack(_avx, YMM)
+Make_llvm_prologue_realloc_stack(_avx512, ZMM)
+
 #define Make_call_gc(suffix, simd)                   \
     FUNCTION(G(caml_call_gc##suffix)) ;              \
     CFI_STARTPROC                     ;              \
