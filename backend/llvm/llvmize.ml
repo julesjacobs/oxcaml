@@ -3318,6 +3318,46 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_mul_round_i16 ?(vector_width_in_bits = 128) () =
+    let typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits:16 in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let lanes = vector_width_in_bits / 16 in
+    let res =
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let elem1 =
+               emit_ins t
+                 (I.extractelement ~vector:arg1 ~index:(V.of_int lane))
+             in
+             let elem2 =
+               emit_ins t
+                 (I.extractelement ~vector:arg2 ~index:(V.of_int lane))
+             in
+             let elem1 = emit_ins t (I.convert Sext ~arg:elem1 ~to_:T.i32) in
+             let elem2 = emit_ins t (I.convert Sext ~arg:elem2 ~to_:T.i32) in
+             let product = emit_ins t (I.binary Mul ~arg1:elem1 ~arg2:elem2) in
+             let shifted =
+               emit_ins t
+                 (I.binary Ashr ~arg1:product ~arg2:(V.of_int ~typ:T.i32 14))
+             in
+             let rounded =
+               emit_ins t
+                 (I.binary Add ~arg1:shifted ~arg2:(V.of_int ~typ:T.i32 1))
+             in
+             let high =
+               emit_ins t
+                 (I.binary Ashr ~arg1:rounded ~arg2:(V.of_int ~typ:T.i32 1))
+             in
+             let narrowed = emit_ins t (I.convert Trunc ~arg:high ~to_:T.i16) in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane)
+                  ~to_insert:narrowed))
+           (V.poison typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_mul_hadd_i16 ?(vector_width_in_bits = 128) () =
     let src_typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits:16 in
     let dst_typ = wide_int_vec_type ~vector_width_in_bits ~width_in_bits:32 in
@@ -4855,6 +4895,11 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
       simd_int_mul_high_i16 ~vector_width_in_bits:256 ~unsigned:false ()
     | Amd64_simd_instrs.Vpmulhuw_Y_Y_Ym256 ->
       simd_int_mul_high_i16 ~vector_width_in_bits:256 ~unsigned:true ()
+    | Amd64_simd_instrs.Pmulhrsw_X_Xm128
+    | Amd64_simd_instrs.Vpmulhrsw_X_X_Xm128 ->
+      simd_int_mul_round_i16 ()
+    | Amd64_simd_instrs.Vpmulhrsw_Y_Y_Ym256 ->
+      simd_int_mul_round_i16 ~vector_width_in_bits:256 ()
     | Amd64_simd_instrs.Psadbw_X_Xm128
     | Amd64_simd_instrs.Vpsadbw_X_X_Xm128 ->
       simd_int_sad_unsigned_i8 ()
