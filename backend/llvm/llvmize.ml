@@ -3853,6 +3853,30 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_int_blend_lanes width_in_bits n =
+    let typ =
+      wide_int_vec_type ~vector_width_in_bits:128 ~width_in_bits
+    in
+    let arg1 = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
+    let arg2 = cast_if_needed (load_reg_to_temp t i.arg.(1)) typ in
+    let lanes = 128 / width_in_bits in
+    let res =
+      List.init lanes Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let bit = (n lsr lane) land 1 in
+             let src_arg = if bit = 0 then arg1 else arg2 in
+             let elem =
+               emit_ins t
+                 (I.extractelement ~vector:src_arg ~index:(V.of_int lane))
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane)
+                  ~to_insert:elem))
+           (V.poison typ)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_variable_shift width_in_bits intrinsic =
     let typ = int_vec_type ~width_in_bits in
     let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) typ in
@@ -5048,6 +5072,12 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | Amd64_simd_instrs.Vpblendw_Y_Y_Ym256 ->
       simd_int_blend_words ~vector_width_in_bits:256
         (require_imm instr_id imm)
+    | Amd64_simd_instrs.Blendps
+    | Amd64_simd_instrs.Vblendps_X_X_Xm128 ->
+      simd_int_blend_lanes 32 (require_imm instr_id imm)
+    | Amd64_simd_instrs.Blendpd
+    | Amd64_simd_instrs.Vblendpd_X_X_Xm128 ->
+      simd_int_blend_lanes 64 (require_imm instr_id imm)
     | Amd64_simd_instrs.Pmovmskb_r64_X
     | Amd64_simd_instrs.Vpmovmskb_r64_X ->
       simd_movemask ~vector_width_in_bits:128 8
