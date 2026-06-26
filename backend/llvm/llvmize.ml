@@ -2386,7 +2386,15 @@ let extcall ?unwind_label t (i : Cfg.terminator Cfg.instruction) ~func_symbol
           (fun reg typ -> load_reg_to_temp ~typ t reg)
           arg_regs arg_types
       in
-      if Target_system.architecture () = Target_system.AArch64
+      let target_arch = Target_system.architecture () in
+      let supports_direct_noalloc_c_call =
+        match target_arch with
+        | Target_system.AArch64 | Target_system.X86_64 -> true
+        | Target_system.IA32 | Target_system.ARM | Target_system.POWER
+        | Target_system.Z | Target_system.Riscv ->
+          false
+      in
+      if supports_direct_noalloc_c_call
       then (
         add_referenced_symbol t func_symbol;
         let args = prepare_call_args t args in
@@ -2398,17 +2406,42 @@ let extcall ?unwind_label t (i : Cfg.terminator Cfg.instruction) ~func_symbol
 
              The leading runtime-register operands/results are not C-level
              arguments/results. The [oxcaml_c_directcc] convention assigns them
-             to x28/x27 before the ordinary C arguments and returns them from
-             x28/x27 before the ordinary C result registers. AAPCS preserves
-             x28/x27, so this models the domain-state/allocation-pointer
-             dependency that the stack-switch pseudo needs while still
-             generating a plain direct C call. *)
+             to target-specific callee-saved runtime registers before the
+             ordinary C arguments and returns them from the same registers
+             before the ordinary C result registers. On AArch64 these are
+             x28/x27; on AMD64 these are r14/r15. This models the
+             domain-state/allocation-pointer dependency that the stack-switch
+             pseudo needs while still generating a plain direct C call. AMD64
+             runtime5 also needs the native backend's OCaml-stack to C-stack
+             switch around the call; that is emitted below with explicit stack
+             pointer reads/writes. *)
           ignore unwind_label;
-          emit_ins t
-            (I.call ~func:(LL.Ident.global func_symbol) ~args
-               ~res_type:(Some (T.Struct direct_res_types))
-               ~attrs:(gc_attr ~can_call_gc:false t i)
-               ~operand_bundles:[] ~cc:Oxcaml_c_direct_call ~musttail:false)
+          let emit_direct_call () =
+            emit_ins t
+              (I.call ~func:(LL.Ident.global func_symbol) ~args
+                 ~res_type:(Some (T.Struct direct_res_types))
+                 ~attrs:(gc_attr ~can_call_gc:false t i)
+                 ~operand_bundles:[] ~cc:Oxcaml_c_direct_call ~musttail:false)
+          in
+          let switch_to_c_stack =
+            match target_arch with
+            | Target_system.X86_64 -> Config.runtime5 && not Config.no_stack_checks
+            | Target_system.AArch64 -> false
+            | Target_system.IA32 | Target_system.ARM | Target_system.POWER
+            | Target_system.Z | Target_system.Riscv ->
+              assert false
+          in
+          if switch_to_c_stack
+          then (
+            let ds = emit_ins t (I.load ~ptr:domainstate_ptr ~typ:T.i64) in
+            let c_sp_ptr = load_domainstate_addr ~ds_loc:ds t Domain_c_stack in
+            let c_sp = emit_ins t (I.load ~ptr:c_sp_ptr ~typ:T.i64) in
+            let ocaml_sp = read_stack_pointer t in
+            write_stack_pointer t c_sp;
+            let c_res = emit_direct_call () in
+            write_stack_pointer t ocaml_sp;
+            c_res)
+          else emit_direct_call ()
         in
         let runtime_values =
           extract_struct t c_res
