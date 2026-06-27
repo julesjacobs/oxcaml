@@ -218,6 +218,50 @@ Validation after clearing stale dune boot-context state
 - `make -s llvm-test-one-no-rebuild LLVM_PATH="$PWD/llvm-tool-wrapper.sh" \
   TEST=testsuite/tests/typing-layouts-or-null/atomics.ml` passed: 5 passed.
 
+2026-06-27 optimized AMD64 GC-root fix: the clean
+`LLVM_WRAPPER_LLC_OPT_LEVEL=3 make -s llvm-compiler` build exposed a stale-root
+bug in the shared post-regalloc root listing. X86 byte stack-slot copies
+matched LLVM's generic `isLoadFromStackSlot` / `isStoreToStackSlot` predicates,
+so the pass treated a one-byte spill slot as value-preserving and listed it as
+a GC root. The reduced failing shape was in
+`camlFlambda2_simplify__Join_points__compute_handler_env_20_48_code`: a byte
+copy
+`MOV8rm %stack.0` / `MOV8mr %stack.9` preceded a call to `caml_apply2`, and the
+old root list included `%stack.9`. At runtime the corresponding frame offset
+held raw byte data such as `0x40` / `0x98`, so `caml_scan_stack` could scan a
+garbage root under stress GC.
+
+The fix is intentionally shared rather than AMD64-special-cased:
+`OxCamlStatepointGCValueness.h` now defines the value-copy predicates used by
+both `OxCamlStatepointSpillRoots` and `OxCamlGCRootVerifier`. A stack-slot
+load/store is value-preserving only when the actual memory access is 8 bytes.
+Targets that report the width through the `TargetInstrInfo` hook use that; for
+targets such as AArch64 where the hook returns size `0`, the helper falls back
+to the instruction's single `MachineMemOperand` size. Non-pointer-width stores
+to LiveStacks slots are recorded as clobbers, so old value stores do not
+incorrectly reach past raw subword writes.
+
+Validation after the fix:
+
+- `make -C _build/llvm-tools -j8 llc opt` passed.
+- Regenerated the reduced `Join_points` MIR with `llc -O3
+  -stop-after=oxcaml-statepoint-spill-roots`; the byte copy to `%stack.9`
+  remains, but the following `caml_apply2` statepoint lists only `%stack.0` and
+  `%stack.1` as roots, not `%stack.9`.
+- Clean build with
+  `LLVM_WRAPPER_LLC_OPT_LEVEL=3 LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh" make -s llvm-compiler`
+  passed after clearing dune build state.
+- `make -s llvm-test-one ... DIR=llvm-gc-roots` did not reach the test after
+  that clean build because the default boot/test Dune context was missing
+  generated include/flag files (`_build/default/ocamlopt_flags.sexp`,
+  `duneconf/camlinternalquote_if_missing_from_stdlib`, etc.). As a direct
+  backend check instead, compiled and ran
+  `testsuite/tests/llvm-gc-roots/allocation_slow_path_roots.ml` with
+  `_build/install/main/bin/ocamlopt.opt -llvm-backend -llvm-path
+  "$PWD/tools/llvm-rs4gc-llc-wrapper.sh"` and
+  `LLVM_WRAPPER_LLC_OPT_LEVEL=3 OCAMLRUNPARAM='s=64k,o=1,O=1'`; it printed
+  `ok`.
+
 2026-06-27 AMD64 optimized-llc backend progress:
 added target-side active trap-depth tracking for X86, mirroring the AArch64
 machine-CFG trap stack analysis.  X86 now records active OCaml trap bytes before

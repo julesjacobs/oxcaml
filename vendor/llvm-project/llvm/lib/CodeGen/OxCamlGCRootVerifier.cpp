@@ -222,7 +222,7 @@ static void computeGCAndDerivedSets(MachineFunction &MF,
   for (MachineBasicBlock &MBB : MF)
     for (MachineInstr &MI : MBB) {
       int FI;
-      if (Register R = TII->isLoadFromStackSlot(MI, FI))
+      if (Register R = oxcamlroots::isValueLoadFromStackSlot(TII, MI, FI))
         if (R.isVirtual() && ValueHomeFIs.count(FI))
           GCRegs.insert(R);
     }
@@ -328,10 +328,10 @@ bool OxCamlGCRootVerifier::runOnMachineFunction(MachineFunction &MF) {
         continue;
       }
       int FI;
-      if (Register R = TII->isLoadFromStackSlot(MI, FI))
+      if (Register R = oxcamlroots::isValueLoadFromStackSlot(TII, MI, FI))
         if (R.isVirtual())
           ValueComp.unionSets((int64_t)R.id(), SlotNode(FI));
-      if (Register R = TII->isStoreToStackSlot(MI, FI))
+      if (Register R = oxcamlroots::isValueStoreToStackSlot(TII, MI, FI))
         if (R.isVirtual())
           ValueComp.unionSets((int64_t)R.id(), SlotNode(FI));
     }

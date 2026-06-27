@@ -306,7 +306,7 @@ static void computeGCRegs(MachineFunction &MF,
   for (const MachineBasicBlock &MBB : MF)
     for (const MachineInstr &MI : MBB) {
       int FI;
-      if (Register R = TII->isLoadFromStackSlot(MI, FI))
+      if (Register R = isValueLoadFromStackSlot(TII, MI, FI))
         if (R.isVirtual() && ValueHomeFIs.count(FI))
           GCRegs.insert(R);
     }
@@ -368,6 +368,20 @@ static bool isAllocFamilyStatepoint(const MachineInstr &MI,
                                     const TargetRegisterInfo *TRI) {
   const uint32_t *RegMask = getStatepointRegMask(MI);
   return isAllocFamilyMask(ABI, RegMask, TRI);
+}
+
+static SmallVector<int, 2> storeFrameIndices(const MachineInstr &MI) {
+  SmallSet<int, 2> Seen;
+  SmallVector<int, 2> Result;
+  if (!MI.mayStore() || MI.isCall())
+    return Result;
+  for (const MachineOperand &MO : MI.operands()) {
+    if (!MO.isFI())
+      continue;
+    if (Seen.insert(MO.getIndex()).second)
+      Result.push_back(MO.getIndex());
+  }
+  return Result;
 }
 
 GCValueness::GCValueness(MachineFunction &MF,
@@ -454,7 +468,7 @@ GCValueness::GCValueness(MachineFunction &MF,
         continue;
       }
       int FI;
-      if (Register LR = TII->isLoadFromStackSlot(*D, FI))
+      if (Register LR = isValueLoadFromStackSlot(TII, *D, FI))
         if (LR == Cur && LS.hasInterval(FI))
           if (const auto *LB =
                   lastStoreBefore(FI, D->getParent(), VNI->def))
@@ -489,14 +503,15 @@ void GCValueness::collectAccesses() {
         }
       }
       int FI;
-      if (Register Dst = TII->isLoadFromStackSlot(MI, FI))
+      if (Register Dst = isValueLoadFromStackSlot(TII, MI, FI))
         if (LS.hasInterval(FI))
           SlotLoads[FI].push_back(
               {Dst, Indexes.getInstructionIndex(MI)});
-      if (Register Src = TII->isStoreToStackSlot(MI, FI)) {
+      Register StackSlotStoreSrc = isValueStoreToStackSlot(TII, MI, FI);
+      if (StackSlotStoreSrc) {
         if (LS.hasInterval(FI))
           SlotStores[FI].push_back(
-              {Src, Indexes.getInstructionIndex(MI)});
+              {StackSlotStoreSrc, Indexes.getInstructionIndex(MI)});
         // A store into a value-home slot (ISel statepoint pool slot or
         // exnroot alloca) marks its source as a gc value: ISel only spills
         // gc-section values there (llvmize deopt args are all constants,
@@ -505,16 +520,23 @@ void GCValueness::collectAccesses() {
         // the structural rules below cannot interpret, e.g. the alloc
         // fast path's STRXpre write-back that forms the block pointer
         // while storing its first field.
-        if (ValueHomeFIs.count(FI) && Src.isVirtual() &&
-            LIS.hasInterval(Src)) {
+        if (ValueHomeFIs.count(FI) && StackSlotStoreSrc.isVirtual() &&
+            LIS.hasInterval(StackSlotStoreSrc)) {
           SlotIndex StIdx = Indexes.getInstructionIndex(MI);
-          const LiveInterval &SrcLI = LIS.getInterval(Src);
+          const LiveInterval &SrcLI = LIS.getInterval(StackSlotStoreSrc);
           const VNInfo *VNI = SrcLI.getVNInfoAt(StIdx.getRegSlot(true));
           if (!VNI)
             VNI = SrcLI.getVNInfoBefore(StIdx.getRegSlot());
           if (VNI)
-            Seeds.insert({(int64_t)Src.id(), VNI->id});
+            Seeds.insert({(int64_t)StackSlotStoreSrc.id(), VNI->id});
         }
+      }
+      for (int ClobberedFI : storeFrameIndices(MI)) {
+        if (StackSlotStoreSrc && ClobberedFI == FI)
+          continue;
+        if (LS.hasInterval(ClobberedFI))
+          SlotStores[ClobberedFI].push_back(
+              {Register(), Indexes.getInstructionIndex(MI)});
       }
     }
 }
@@ -569,7 +591,7 @@ bool GCValueness::isAllocCursor(Register Src, SlotIndex At) {
       Next = D->getOperand(1).getReg();
     } else if (!ABI.isAllocationCursorDecrement(*D, TII, Next)) {
       int FI;
-      if (Register LR = TII->isLoadFromStackSlot(*D, FI);
+      if (Register LR = isValueLoadFromStackSlot(TII, *D, FI);
           LR.isValid() && LR == R) {
         const auto *Last = lastStoreBefore(FI, D->getParent(), VNI->def);
         if (!Last)
@@ -682,7 +704,7 @@ bool GCValueness::regValue(Register R, const VNInfo *VNI) {
       }
     } else {
       int FI;
-      if (Register LR = TII->isLoadFromStackSlot(*D, FI)) {
+      if (Register LR = isValueLoadFromStackSlot(TII, *D, FI)) {
         if (LR == R) {
           if (ValueHomeFIs.count(FI))
             V = true;
@@ -843,6 +865,8 @@ bool GCValueness::physRegHoldsValueAt(Register Src, MachineInstr *At) {
 }
 
 bool GCValueness::storeValue(int FI, Register Src, SlotIndex StIdx) {
+  if (!Src.isValid())
+    return false;
   if (Src.isVirtual()) {
     const VNInfo *Q = nullptr;
     if (LIS.hasInterval(Src)) {
@@ -1137,10 +1161,10 @@ public:
     for (MachineBasicBlock &MBB : MF)
       for (MachineInstr &MI : MBB) {
         int FI;
-        if (TII->isLoadFromStackSlot(MI, FI) && ValueHomeFIs.count(FI))
+        if (isValueLoadFromStackSlot(TII, MI, FI) && ValueHomeFIs.count(FI))
           Get(FI).Acc[MBB.getNumber()].push_back(
               {Indexes.getInstructionIndex(MI), Load});
-        else if (TII->isStoreToStackSlot(MI, FI) && ValueHomeFIs.count(FI))
+        else if (isValueStoreToStackSlot(TII, MI, FI) && ValueHomeFIs.count(FI))
           Get(FI).Acc[MBB.getNumber()].push_back(
               {Indexes.getInstructionIndex(MI), Store});
       }
@@ -1380,7 +1404,7 @@ static bool processStatepoint(MachineInstr &MI, MachineFunction &MF,
         if (D->isCopy() && !D->getOperand(0).getSubReg() &&
             !D->getOperand(1).getSubReg()) {
           Src = D->getOperand(1).getReg();
-        } else if (Register LR = TII->isLoadFromStackSlot(*D, FI)) {
+        } else if (Register LR = isValueLoadFromStackSlot(TII, *D, FI)) {
           if (LR != R)
             break;
           // Reload-fed operand: regardless of WHICH store filled the
