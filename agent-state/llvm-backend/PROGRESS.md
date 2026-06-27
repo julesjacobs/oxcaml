@@ -960,3 +960,41 @@ Next implementation priority:
    around exception paths, especially `caml_raise_exn`.
 3. Treat the two `asmcomp` failures as test-harness/codegen-output integration
    unless reduced evidence shows a semantic backend issue.
+
+2026-06-27 AMD64 high-arity/trap-frame investigation:
+
+- Reduced `tests/syntactic-arity/max_arity.ml` with the installed compiler:
+  LLVM AMD64 printed `f (): No exception.` and then jumped to address `0x1`
+  during `f () ()`; native AMD64 printed `f () (): Exception.` and exited
+  normally.
+- The generated partial closure layout was correct and matched native:
+  `caml_curry7`, arity info, direct code pointer, then captured values.  The
+  direct function entered with the expected closure in `r9` and took the same
+  missing-optional-argument reraise path as native.
+- The immediate corruption was in the caller's active trap frame.  LLVM emitted
+  `push handler; push Caml_state->exn_handler; mov rsp, Caml_state->exn_handler`
+  like native, but then wrote high-arity outgoing stack arguments at `0(%rsp)`,
+  overwriting the trap frame.  `caml_reraise_exn` restored `rsp` from
+  `Caml_state->exn_handler`, popped the previous handler, and returned through
+  an overwritten word containing OCaml unit (`1`).
+- A rejected LLVM experiment disabled reserved call frames for every machine
+  function containing OxCaml native trap pseudos.  After rebuilding `llc`
+  directly with `cmake --build _build/llvm-tools --target llc -- -j8`, this
+  changed the high-arity call shape to materialize `subq $416` / `addq $416`
+  around the stack-argument calls inside the trap.  The direct repro and
+  `make -s llvm-test-one-no-rebuild
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh" DIR=syntactic-arity` then
+  passed (`24 passed, 0 failed`).
+- That experiment is not viable as-is.  A partial full LLVM suite run showed
+  new segfaults in `tests/ast-invariants/test.ml` and
+  `tests/async-exns/async_exns_1.ml`.  The async-exns crash reduced to GC stack
+  scanning during minor collection (`runtime/fiber.c:478`, `Hd_val(vblock)`),
+  which means the broad call-frame change invalidates frame-table / stack-root
+  assumptions around GC.  The source change was backed out before committing.
+- Next fix should be narrower than "disable reserved call frames for any trap".
+  It needs to preserve native AMD64's invariant that active trap frames are not
+  overwritten by outgoing stack arguments while keeping LLVM's GC/frame-table
+  model consistent.  Candidate directions: model only stack-argument calls
+  inside active traps, or make the X86 trap pseudo/call-frame lowering reserve a
+  trap-frame band without changing unrelated calls.  Re-run at least
+  `syntactic-arity`, `async-exns`, and `ast-invariants` before any commit.
