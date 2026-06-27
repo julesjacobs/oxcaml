@@ -173,12 +173,18 @@ grep -Eq '@"\\01_?amd64_stack_args_gc_native"' "$ir"
 grep -Eq 'callq?[[:space:]]+_?caml_c_call_stack_args' "$asm"
 
 awk '
+  function without_comma(value) {
+    sub(/,$/, "", value)
+    return value
+  }
   /^_?caml.*__call_.*_code:/ {
     in_call = 1
     found = 1
     checked = 0
     state = "entry"
     saw_stack_save = 0
+    saw_stack_save_spill = 0
+    saw_stack_save_reload = 0
     next
   }
   in_call && !saw_stack_save && /^[[:space:]]*movq[[:space:]]+%rsp,[[:space:]]+%r[a-z0-9]+/ {
@@ -191,11 +197,33 @@ awk '
     saw_stack_save = 1
     next
   }
+  in_call && saw_stack_save && !saw_stack_save_spill && $0 ~ "^[[:space:]]*movq[[:space:]]+" stack_save_reg ",[[:space:]]+-?[0-9]+\\(%rbp\\)" {
+    stack_save_slot = $0
+    sub(/^[[:space:]]*movq[[:space:]]+%r[a-z0-9]+,[[:space:]]*/, "", stack_save_slot)
+    sub(/[[:space:]].*$/, "", stack_save_slot)
+    saw_stack_save_spill = 1
+    next
+  }
   in_call && saw_stack_save && /^[[:space:]]*callq?[[:space:]]+_?caml_c_call_stack_args/ {
     state = "called_helper"
     next
   }
-  in_call && state == "called_helper" && $0 ~ "^[[:space:]]*movq[[:space:]]+" stack_save_reg ",[[:space:]]+%rsp" {
+  in_call && state == "called_helper" && $1 == "movq" && without_comma($2) == stack_save_reg && $3 == "%rsp" {
+    checked = 1
+    in_call = 0
+    next
+  }
+  in_call && state == "called_helper" && saw_stack_save_spill && $1 == "movq" && without_comma($2) == stack_save_slot && $3 == "%rsp" {
+    checked = 1
+    in_call = 0
+    next
+  }
+  in_call && state == "called_helper" && saw_stack_save_spill && !saw_stack_save_reload && $1 == "movq" && without_comma($2) == stack_save_slot && $3 ~ /^%r[a-z0-9]+$/ {
+    stack_save_reload_reg = $3
+    saw_stack_save_reload = 1
+    next
+  }
+  in_call && state == "called_helper" && saw_stack_save_reload && $1 == "movq" && without_comma($2) == stack_save_reload_reg && $3 == "%rsp" {
     checked = 1
     in_call = 0
     next

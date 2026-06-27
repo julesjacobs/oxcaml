@@ -700,3 +700,30 @@ Validation:
 - `make -s llvm-test-one-no-rebuild ... TEST=testsuite/tests/typing-layouts-arrays/test_int_or_null_array.ml`
   passed: 4 passed, 0 failed.
 - `make -C _build/llvm-tools -j8 llc opt` passed.
+
+2026-06-27 AMD64 C-stack-args root test cleanup:
+the `amd64_c_stack_args_roots` generated program and IR contract were correct:
+the program printed `ok`, the IR contained the `caml_c_call_stack_args`
+statepoint, and the generated assembly restored `%rsp` after the helper call.
+The test failed because its awk check required the saved `%rsp` value to remain
+in the original register.  Current LLVM can spill the saved stack pointer and
+reload it before `stackrestore`, which is valid.  Relaxed the assembly check to
+accept direct register restore, spill/reload restore, or direct spill-slot
+restore while still requiring the restore after `caml_c_call_stack_args`.
+Code review caught the direct spill-slot restore case before commit.
+
+Build-state repair: a pre-commit `make -s llvm-compiler` initially failed with
+stale `_install`/boot artifacts disagreeing over `CamlinternalQuote`.  Clearing
+`_build/default`, `_build/_bootinstall`, `_build/.db`, and
+`_build/.filesystem-clock` fixed the stale state, and the rerun passed.
+
+Validation:
+
+- `make -s llvm-compiler LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"`
+  passed after clearing stale build state.
+- `make -s llvm-test-one-no-rebuild LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh" \
+  TEST=testsuite/tests/llvm-codegen/amd64_c_stack_args_roots.ml` passed:
+  3 passed, 0 failed.
+- `make -s llvm-test-one-no-rebuild LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh" \
+  DIR=llvm-codegen` passed: 64 passed, 30 skipped, 0 failed.
+- `make -C _build/llvm-tools -j8 llc opt` passed.
