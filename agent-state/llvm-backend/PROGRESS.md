@@ -129,6 +129,12 @@ validation then passed:
   `_llvm_self_stage_install`. Wrapper counts: boot 829 fresh IR inputs, runtime
   73, main 1107, final self-stage smoke 2. Both boot and final smoke programs
   printed `55`.
+- Re-running `tools/build-llvm-self-stage-install.sh` with
+  `STAGE0_INSTALL="$PWD/_llvm_self_stage_install"` and separate
+  `_llvm_self_stage2_*` output directories completed and produced
+  `_llvm_self_stage2_install`. Wrapper counts: boot 835 fresh IR inputs,
+  runtime 74, main 1106, final self-stage2 smoke 2. Both boot and final smoke
+  programs printed `55`.
 
 Rejected experiment: tried to make AMD64 LLVM stack-growth helpers terminate
 their `%rbp` chain like AArch64 terminates `x29`, but this is incorrect for
