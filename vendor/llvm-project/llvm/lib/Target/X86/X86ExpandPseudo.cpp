@@ -24,7 +24,9 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/Passes.h" // For IDs of passes that are preserved.
+#include "llvm/CodeGen/StackMaps.h"
 #include "llvm/IR/GlobalValue.h"
+#include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCDwarf.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Target/TargetMachine.h"
@@ -34,6 +36,52 @@ using namespace llvm;
 #define X86_EXPAND_PSEUDO_NAME "X86 pseudo instruction expansion pass"
 
 static constexpr int64_t OxCamlDomainExnHandlerOffset = 48;
+
+static bool isOxCamlCallingConv(CallingConv::ID CC) {
+  switch (CC) {
+  case CallingConv::OxCaml_WithFP:
+  case CallingConv::OxCaml_WithoutFP:
+  case CallingConv::OxCaml_C_Call:
+  case CallingConv::OxCaml_C_Call_StackArgs:
+  case CallingConv::OxCaml_C_Direct_Call:
+  case CallingConv::OxCaml_Alloc:
+    return true;
+  default:
+    return false;
+  }
+}
+
+static void buildCFIAdjustCfaOffset(MachineBasicBlock &MBB,
+                                    MachineBasicBlock::iterator MBBI,
+                                    const DebugLoc &DL, const X86InstrInfo *TII,
+                                    int Offset) {
+  MachineFunction &MF = *MBB.getParent();
+  unsigned CFIIndex =
+      MF.addFrameInst(MCCFIInstruction::createAdjustCfaOffset(nullptr, Offset));
+  BuildMI(MBB, MBBI, DL, TII->get(TargetOpcode::CFI_INSTRUCTION))
+      .addCFIIndex(CFIIndex);
+}
+
+static bool isCamlRaiseExnLikeName(StringRef Name) {
+  Name.consume_front("\01");
+  return Name == "caml_raise_exn" || Name == "caml_reraise_exn";
+}
+
+static bool isCamlRaiseExnLikeStatepoint(const MachineInstr &MI) {
+  if (MI.getOpcode() != TargetOpcode::STATEPOINT)
+    return false;
+  const MachineOperand &Target = StatepointOpers(&MI).getCallTarget();
+  if (Target.isGlobal())
+    return isCamlRaiseExnLikeName(Target.getGlobal()->getName());
+  if (Target.isSymbol())
+    return isCamlRaiseExnLikeName(Target.getSymbolName());
+  return false;
+}
+
+static bool needsDwarfCFI(const MachineFunction &MF) {
+  return !MF.getTarget().getMCAsmInfo()->usesWindowsCFI() &&
+         MF.needsFrameMoves();
+}
 
 namespace {
 class X86ExpandPseudo : public MachineFunctionPass {
@@ -84,6 +132,7 @@ private:
                                   MachineBasicBlock::iterator MBBI);
   bool ExpandMI(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI);
   bool ExpandMBB(MachineBasicBlock &MBB);
+  bool useOxCamlRspBasedCFI(const MachineFunction &MF) const;
 
   /// This function expands pseudos which affects control flow.
   /// It is done in separate pass to simplify blocks navigation in main
@@ -357,11 +406,19 @@ void X86ExpandPseudo::expandOXCAML_C_DIRECT_CALL(
   finalizeBundle(MBB, First->getIterator(), std::next(Last->getIterator()));
 }
 
+bool X86ExpandPseudo::useOxCamlRspBasedCFI(const MachineFunction &MF) const {
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  return isOxCamlCallingConv(MF.getFunction().getCallingConv()) &&
+         needsDwarfCFI(MF) && X86FL->hasFP(MF) &&
+         !TRI->hasStackRealignment(MF) && !MFI.hasVarSizedObjects();
+}
+
 void X86ExpandPseudo::expandOXCAML_PUSH_TRAP(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI) {
   MachineInstr &MI = *MBBI;
   const DebugLoc &DL = MI.getDebugLoc();
   MachineBasicBlock *RecoveryMBB = MI.getOperand(0).getMBB();
+  bool NeedsTrapCFI = useOxCamlRspBasedCFI(*MBB.getParent());
 
   BuildMI(MBB, MBBI, DL, TII->get(X86::LEA64r), X86::R11)
       .addReg(X86::RIP)
@@ -370,8 +427,12 @@ void X86ExpandPseudo::expandOXCAML_PUSH_TRAP(
       .addMBB(RecoveryMBB)
       .addReg(0);
   BuildMI(MBB, MBBI, DL, TII->get(X86::PUSH64r)).addReg(X86::R11);
+  if (NeedsTrapCFI)
+    buildCFIAdjustCfaOffset(MBB, MBBI, DL, TII, 8);
   addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::PUSH64rmm)), X86::R14,
                false, OxCamlDomainExnHandlerOffset);
+  if (NeedsTrapCFI)
+    buildCFIAdjustCfaOffset(MBB, MBBI, DL, TII, 8);
   addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::MOV64mr)), X86::R14,
                false, OxCamlDomainExnHandlerOffset)
       .addReg(X86::RSP);
@@ -383,10 +444,15 @@ void X86ExpandPseudo::expandOXCAML_PUSH_TRAP_DEAD(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI) {
   MachineInstr &MI = *MBBI;
   const DebugLoc &DL = MI.getDebugLoc();
+  bool NeedsTrapCFI = useOxCamlRspBasedCFI(*MBB.getParent());
 
   BuildMI(MBB, MBBI, DL, TII->get(X86::PUSH64i8)).addImm(0);
+  if (NeedsTrapCFI)
+    buildCFIAdjustCfaOffset(MBB, MBBI, DL, TII, 8);
   addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::PUSH64rmm)), X86::R14,
                false, OxCamlDomainExnHandlerOffset);
+  if (NeedsTrapCFI)
+    buildCFIAdjustCfaOffset(MBB, MBBI, DL, TII, 8);
   addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::MOV64mr)), X86::R14,
                false, OxCamlDomainExnHandlerOffset)
       .addReg(X86::RSP);
@@ -419,10 +485,15 @@ void X86ExpandPseudo::expandOXCAML_POP_TRAP(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI) {
   MachineInstr &MI = *MBBI;
   const DebugLoc &DL = MI.getDebugLoc();
+  bool NeedsTrapCFI = useOxCamlRspBasedCFI(*MBB.getParent());
 
   addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::POP64rmm)), X86::R14,
                false, OxCamlDomainExnHandlerOffset);
+  if (NeedsTrapCFI)
+    buildCFIAdjustCfaOffset(MBB, MBBI, DL, TII, -8);
   BuildMI(MBB, MBBI, DL, TII->get(X86::POP64r), X86::R11);
+  if (NeedsTrapCFI)
+    buildCFIAdjustCfaOffset(MBB, MBBI, DL, TII, -8);
 
   MI.eraseFromParent();
 }
@@ -922,7 +993,15 @@ bool X86ExpandPseudo::ExpandMBB(MachineBasicBlock &MBB) {
   MachineBasicBlock::iterator MBBI = MBB.begin(), E = MBB.end();
   while (MBBI != E) {
     MachineBasicBlock::iterator NMBBI = std::next(MBBI);
+    DebugLoc DL = MBBI->getDebugLoc();
+    bool AddPostRaiseNop =
+        isOxCamlCallingConv(MBB.getParent()->getFunction().getCallingConv()) &&
+        isCamlRaiseExnLikeStatepoint(*MBBI);
     Modified |= ExpandMI(MBB, MBBI);
+    if (AddPostRaiseNop) {
+      BuildMI(MBB, NMBBI, DL, TII->get(X86::NOOP));
+      Modified = true;
+    }
     MBBI = NMBBI;
   }
 

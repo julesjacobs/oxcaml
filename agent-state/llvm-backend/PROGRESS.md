@@ -218,6 +218,110 @@ Validation after clearing stale dune boot-context state
 - `make -s llvm-test-one-no-rebuild LLVM_PATH="$PWD/llvm-tool-wrapper.sh" \
   TEST=testsuite/tests/typing-layouts-or-null/atomics.ml` passed: 5 passed.
 
+2026-06-27 AMD64 CFI/exception unwinding fix in progress on
+`jujacobs/llvm-x86-plan`:
+
+- Fixed AMD64 OxCaml trap push/pop expansion to emit DWARF CFA offset
+  adjustments for the two trap words, matching the real `%rsp` movement during
+  active exception-handler chains.
+- Switched generated AMD64 OxCaml frame CFI to the native AMD64-style
+  `%rsp`-based CFA model instead of exposing `%rbp` as the canonical frame
+  register. This preserves native unwinding behavior around generated OCaml
+  frames while leaving non-OxCaml x86 code on LLVM's existing frame-pointer CFI
+  path.
+- Added post-statepoint `nop` padding after OxCaml `caml_raise_exn` and
+  `caml_reraise_exn` calls. Native AMD64 keeps terminal raises inside the
+  function FDE range this way; without it, GDB sees the call return address at
+  the half-open function end and falls back to bad frame-pointer heuristics.
+- Addressed gpt-5.5-high review feedback that the new `%rsp`-based CFA mode
+  also has to follow the no-frame-pointer callee-saved push/pop CFA update
+  paths. The fix accounts for the extra saved `%rbp` slot in generated OxCaml
+  frames and keeps the existing non-OxCaml x86 frame-pointer CFI behavior.
+- Addressed follow-up review feedback by restoring the saved `%rbp`
+  `.cfi_offset` rule while keeping `%rsp` as the CFA register in normal OxCaml
+  frames, and by falling back to LLVM's frame-pointer CFI path for stack
+  realignment or variable-sized-object frames where `%rsp + constant` is not a
+  valid caller-CFA description.
+- Addressed final review feedback by gating trap push/pop CFA adjustments on
+  the same `%rsp`-CFA eligibility. Realigned or dynamic OxCaml frames now keep
+  the frame-pointer CFI fallback clean while normal generated OxCaml frames
+  still track the two active-trap stack words precisely.
+- Addressed another review finding by applying the same `%rsp`-CFA eligibility
+  to call-frame pseudo lowering. OxCaml frames with outgoing stack arguments
+  now emit CFA updates for temporary call-argument stack adjustments, matching
+  the existing no-frame-pointer x86 path.
+
+Validation:
+
+- `cmake --build _build/llvm-tools --target llc -- -j8` passed.
+- Manual `tests/native-cfi-stepping/test_cfi.ml` LLVM-backend GDB reproducer
+  passed (`ok`) before and after the callee-saved CFI review fix.
+- First `make -s llvm-install LLVM_PATH=...` failed because `_build/llvm-tools/bin`
+  was not first on `PATH`; system `opt` could not parse `oxcaml_fpcc`. Rerunning
+  with `PATH="$PWD/_build/llvm-tools/bin:$PATH"` then exposed stale Dune
+  interface assumptions from the bad invocation.
+- After the documented stale-state cleanup
+  (`rm -rf _build/main _build/default _build/boot _build/_bootinstall _build/.db
+  _build/.filesystem-clock _runtest`), `PATH="$PWD/_build/llvm-tools/bin:$PATH"
+  make -s llvm-install LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"` passed.
+- After clearing `_build/default`, `_build/_bootinstall`, Dune metadata, and
+  `_runtest`, `PATH="$PWD/_build/llvm-tools/bin:$PATH" make -s install_for_test
+  LLVM_BACKEND=1 LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"` passed.
+- Post-clean focused tests passed:
+  `native-cfi-stepping` 6/0/0, `llvm-codegen` 67/30/0,
+  `llvm-gc-roots` 12/6/0, `llvm-stack-checks` 8/2/0,
+  `syntactic-arity` 24/0/0, and `async-exns` 5/0/0.
+- After the callee-saved CFI review fix, `cmake --build _build/llvm-tools
+  --target llc -- -j8` passed, the manual CFI reproducer still passed, and the
+  focused tests still passed: `native-cfi-stepping` 6/0/0,
+  `llvm-codegen` 67/30/0, `llvm-gc-roots` 12/6/0, `llvm-stack-checks` 8/2/0,
+  `syntactic-arity` 24/0/0, and `async-exns` 5/0/0.
+- A later `llvm-install` without cleanup hit the known stale
+  `CamlinternalQuote` interface state again; after the same documented cleanup,
+  `PATH="$PWD/_build/llvm-tools/bin:$PATH" make -s llvm-install
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"` passed, and the final manual
+  CFI reproducer with the freshly installed compiler passed (`ok`).
+- After the follow-up review fixes, `cmake --build _build/llvm-tools --target
+  llc -- -j8` passed. Small `llc` probes confirmed that a normal `oxcaml_fpcc`
+  frame emits `%rsp`-CFA rows plus `.cfi_offset %rbp, -16`, while an
+  `alignstack(32)` `oxcaml_fpcc` frame falls back to `.cfi_def_cfa_register
+  %rbp` across the stack realignment.
+- After refreshing `install_for_test`, focused tests passed again:
+  `native-cfi-stepping` 6/0/0, `llvm-codegen` 67/30/0,
+  `llvm-gc-roots` 12/6/0, `llvm-stack-checks` 8/2/0,
+  `syntactic-arity` 24/0/0, and `async-exns` 5/0/0.
+- A final documented-cleanup
+  `PATH="$PWD/_build/llvm-tools/bin:$PATH" make -s llvm-install
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"` passed after the last source
+  edits. The final manual CFI reproducer with the freshly installed compiler
+  passed (`ok`).
+- After the trap-CFI gate, `cmake --build _build/llvm-tools --target llc -- -j8`
+  passed, the manual CFI reproducer passed, and the small normal/re-aligned
+  `llc` CFI probes still showed the expected `%rsp`-CFA and frame-pointer-CFA
+  split. After refreshing `install_for_test`, focused tests passed again:
+  `native-cfi-stepping` 6/0/0, `llvm-codegen` 67/30/0,
+  `llvm-gc-roots` 12/6/0, `llvm-stack-checks` 8/2/0,
+  `syntactic-arity` 24/0/0, and `async-exns` 5/0/0.
+- Final documented-cleanup
+  `PATH="$PWD/_build/llvm-tools/bin:$PATH" make -s llvm-install
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"` passed after the trap-CFI
+  gate. The final manual CFI reproducer with the freshly installed compiler
+  passed (`ok`).
+- After the call-frame CFI fix, `cmake --build _build/llvm-tools --target llc
+  -- -j8` passed. A direct `llc` probe for an `oxcaml_fpcc` caller making an
+  `oxcaml_ccc` call with outgoing stack arguments emitted CFA rows around the
+  stack-argument adjustment (`.cfi_def_cfa_offset 32` after `subq $16, %rsp`
+  and back to 16 after `addq $16, %rsp`).
+- After refreshing `install_for_test`, focused tests passed again:
+  `native-cfi-stepping` 6/0/0, `llvm-codegen` 67/30/0,
+  `llvm-gc-roots` 12/6/0, `llvm-stack-checks` 8/2/0,
+  `syntactic-arity` 24/0/0, and `async-exns` 5/0/0.
+- Final documented-cleanup
+  `PATH="$PWD/_build/llvm-tools/bin:$PATH" make -s llvm-install
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"` passed after the call-frame
+  CFI fix. The final manual CFI reproducer with the freshly installed compiler
+  passed (`ok`).
+
 2026-06-27 AMD64 native trap-depth fix:
 high-arity calls inside active exception handlers were overwriting AMD64 LLVM
 native trap records because outgoing stack-argument stores used `%rsp` offsets

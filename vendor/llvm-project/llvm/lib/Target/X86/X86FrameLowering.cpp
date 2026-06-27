@@ -50,6 +50,29 @@ STATISTIC(NumFrameExtraProbe,
 using namespace llvm;
 
 namespace {
+static bool isOxCamlCallingConv(CallingConv::ID CC) {
+  switch (CC) {
+  case CallingConv::OxCaml_WithFP:
+  case CallingConv::OxCaml_WithoutFP:
+  case CallingConv::OxCaml_C_Call:
+  case CallingConv::OxCaml_C_Call_StackArgs:
+  case CallingConv::OxCaml_C_Direct_Call:
+  case CallingConv::OxCaml_Alloc:
+    return true;
+  default:
+    return false;
+  }
+}
+
+static bool useOxCamlRspBasedCFI(const MachineFunction &MF,
+                                 const X86RegisterInfo *TRI, bool HasFP,
+                                 bool NeedsDwarfCFI, bool IsFunclet = false) {
+  return isOxCamlCallingConv(MF.getFunction().getCallingConv()) &&
+         NeedsDwarfCFI && HasFP && !IsFunclet &&
+         !TRI->hasStackRealignment(MF) &&
+         !MF.getFrameInfo().hasVarSizedObjects();
+}
+
 static bool isOxCamlNativeTrapInstr(const MachineInstr &MI) {
   switch (MI.getOpcode()) {
   case X86::OXCAML_PUSH_TRAP:
@@ -1777,6 +1800,8 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
       !IsFunclet && STI.isTargetWin32() && MMI.getModule()->getCodeViewFlag();
   bool NeedsWinCFI = NeedsWin64CFI || NeedsWinFPO;
   bool NeedsDwarfCFI = needsDwarfCFI(MF);
+  bool UseOxCamlRspBasedCFI =
+      useOxCamlRspBasedCFI(MF, TRI, HasFP, NeedsDwarfCFI, IsFunclet);
   Register FramePtr = TRI->getFrameRegister(MF);
   const Register MachineFramePtr =
       STI.isTarget64BitILP32()
@@ -2015,7 +2040,7 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
               .addReg(StackPtr)
               .setMIFlag(MachineInstr::FrameSetup);
 
-        if (NeedsDwarfCFI) {
+        if (NeedsDwarfCFI && !UseOxCamlRspBasedCFI) {
           // Mark effective beginning of when frame pointer becomes valid.
           // Define the current CFA to use the EBP/RBP register.
           unsigned DwarfFramePtr = TRI->getDwarfRegNum(MachineFramePtr, true);
@@ -2058,7 +2083,7 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
 
   // Skip the callee-saved push instructions.
   bool PushedRegs = false;
-  int StackOffset = 2 * stackGrowth;
+  int StackOffset = (UseOxCamlRspBasedCFI ? 3 : 2) * stackGrowth;
 
   while (MBBI != MBB.end() &&
          MBBI->getFlag(MachineInstr::FrameSetup) &&
@@ -2068,7 +2093,7 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
     Register Reg = MBBI->getOperand(0).getReg();
     ++MBBI;
 
-    if (!HasFP && NeedsDwarfCFI) {
+    if ((!HasFP || UseOxCamlRspBasedCFI) && NeedsDwarfCFI) {
       // Mark callee-saved push instruction.
       // Define the current CFA rule to use the provided offset.
       assert(StackSize);
@@ -2348,9 +2373,10 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
     }
   }
 
-  if (((!HasFP && NumBytes) || PushedRegs) && NeedsDwarfCFI) {
+  if ((((!HasFP || UseOxCamlRspBasedCFI) && NumBytes) || PushedRegs) &&
+      NeedsDwarfCFI) {
     // Mark end of stack pointer adjustment.
-    if (!HasFP && NumBytes) {
+    if ((!HasFP || UseOxCamlRspBasedCFI) && NumBytes) {
       // Define the current CFA rule to use the provided offset.
       assert(StackSize);
       BuildCFI(
@@ -2494,6 +2520,8 @@ void X86FrameLowering::emitEpilogue(MachineFunction &MF,
   bool NeedsDwarfCFI = (!MF.getTarget().getTargetTriple().isOSDarwin() &&
                         !MF.getTarget().getTargetTriple().isOSWindows()) &&
                        MF.needsFrameMoves();
+  bool UseOxCamlRspBasedCFI =
+      useOxCamlRspBasedCFI(MF, TRI, HasFP, NeedsDwarfCFI, IsFunclet);
 
   if (IsFunclet) {
     assert(HasFP && "EH funclets without FP not yet implemented");
@@ -2618,11 +2646,13 @@ void X86FrameLowering::emitEpilogue(MachineFunction &MF,
   } else if (NumBytes) {
     // Adjust stack pointer back: ESP += numbytes.
     emitSPUpdate(MBB, MBBI, DL, NumBytes, /*InEpilogue=*/true);
-    if (!HasFP && NeedsDwarfCFI) {
+    if ((!HasFP || UseOxCamlRspBasedCFI) && NeedsDwarfCFI) {
       // Define the current CFA rule to use the provided offset.
+      int CfaOffset = CSSize + TailCallArgReserveSize + SlotSize;
+      if (UseOxCamlRspBasedCFI)
+        CfaOffset += SlotSize;
       BuildCFI(MBB, MBBI, DL,
-               MCCFIInstruction::cfiDefCfaOffset(
-                   nullptr, CSSize + TailCallArgReserveSize + SlotSize),
+               MCCFIInstruction::cfiDefCfaOffset(nullptr, CfaOffset),
                MachineInstr::FrameDestroy);
     }
     --MBBI;
@@ -2637,9 +2667,11 @@ void X86FrameLowering::emitEpilogue(MachineFunction &MF,
   if (NeedsWin64CFI && MF.hasWinCFI())
     BuildMI(MBB, MBBI, DL, TII.get(X86::SEH_Epilogue));
 
-  if (!HasFP && NeedsDwarfCFI) {
+  if ((!HasFP || UseOxCamlRspBasedCFI) && NeedsDwarfCFI) {
     MBBI = FirstCSPop;
     int64_t Offset = -CSSize - SlotSize;
+    if (UseOxCamlRspBasedCFI)
+      Offset -= SlotSize;
     // Mark callee-saved pop instruction.
     // Define the current CFA rule to use the provided offset.
     while (MBBI != MBB.end()) {
@@ -3726,6 +3758,8 @@ eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
     const Function &F = MF.getFunction();
     bool WindowsCFI = MF.getTarget().getMCAsmInfo()->usesWindowsCFI();
     bool DwarfCFI = !WindowsCFI && MF.needsFrameMoves();
+    bool UseOxCamlRspBasedCFI =
+        useOxCamlRspBasedCFI(MF, TRI, hasFP(MF), DwarfCFI);
 
     // If we have any exception handlers in this function, and we adjust
     // the SP before calls, we may need to indicate this to the unwinder
@@ -3751,7 +3785,8 @@ eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
     // TODO: This is needed only if we require precise CFA.
     // If this is a callee-pop calling convention, emit a CFA adjust for
     // the amount the callee popped.
-    if (isDestroy && InternalAmt && DwarfCFI && !hasFP(MF))
+    if (isDestroy && InternalAmt && DwarfCFI &&
+        (!hasFP(MF) || UseOxCamlRspBasedCFI))
       BuildCFI(MBB, InsertPos, DL,
                MCCFIInstruction::createAdjustCfaOffset(nullptr, -InternalAmt));
 
@@ -3773,7 +3808,7 @@ eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
       }
     }
 
-    if (DwarfCFI && !hasFP(MF)) {
+    if (DwarfCFI && (!hasFP(MF) || UseOxCamlRspBasedCFI)) {
       // If we don't have FP, but need to generate unwind information,
       // we need to set the correct CFA offset after the stack adjustment.
       // How much we adjust the CFA offset depends on whether we're emitting
