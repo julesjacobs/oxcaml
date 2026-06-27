@@ -727,3 +727,30 @@ Validation:
 - `make -s llvm-test-one-no-rebuild LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh" \
   DIR=llvm-codegen` passed: 64 passed, 30 skipped, 0 failed.
 - `make -C _build/llvm-tools -j8 llc opt` passed.
+
+2026-06-27 mixed-blocks frame-descriptor investigation:
+`testsuite/tests/mixed-blocks/generated_native_test.ml` now passes with the
+current standard installed compiler under `-llvm-backend`; the failure only
+reproduced with the existing `_llvm_self_stage2_install`, which was stale
+relative to later AMD64 stack-frame commits. A mechanical reducer for the stale
+self-stage2 failure narrowed the abort
+(`caml_scan_stack: missing frame descriptor retaddr=(nil)`) to the first live
+`int64x4#` mixed-block record after a sequence of flattened-float records, with
+all values kept live across `Gc.full_major`. The failing stale assembly used
+dynamic stack realignment in the OCaml frame:
+`push %rbp; mov %rsp,%rbp; and $-32,%rsp; sub ...,%rsp`. Recompiling the same
+reduced prefix with the current standard compiler emits `no-realign-stack`, has
+no dynamic `%rsp` realignment in the OCaml frame, and runs successfully.
+
+Follow-up validation after deleting the stale self-stage build/install
+directories and rebuilding from the current branch: both stage1 and stage2
+LLVM self-stage installs completed. Stage1 wrapper counts were boot 826 fresh
+IR inputs, runtime 73, main 1099, final smoke 2; stage2 wrapper counts were
+boot 833, runtime 73, main 1098, final smoke 2. All smoke programs printed
+`55`. The focused self-stage2 mixed-blocks run then passed:
+`SELF_STAGE=2 GENERATE_LIST=0 LIST=/tmp/llvm-self-stage2-mixed-blocks-list.txt
+LLVM_TESTSUITE_PARALLEL=0 LLVM_WRAPPER="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"
+tools/run-llvm-stage5-ocamltest.sh` with `tests/mixed-blocks` in the list
+reported 43 passed, 2 skipped, 0 failed. This clears the prior
+`generated_native_test.ml` frame-descriptor abort as stale build state, not a
+current AMD64 LLVM backend failure.
