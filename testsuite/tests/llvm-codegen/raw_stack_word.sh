@@ -37,35 +37,44 @@ fi
 
 ocamlopt_dir=$(dirname "$ocamlopt")
 stdlib_dir_arg=""
-for stdlib_dir in \
-  "$ocamlopt_dir/../_build/runtime_stdlib_install/lib/ocaml_runtime_stdlib" \
-  "$ocamlopt_dir/../runtime_stdlib_install/lib/ocaml_runtime_stdlib" \
-  "$source_dir/../../../_build/runtime_stdlib_install/lib/ocaml_runtime_stdlib" \
-  "$source_dir/../../../../_build/runtime_stdlib_install/lib/ocaml_runtime_stdlib" \
-  "$ocamlopt_dir/../../runtime_stdlib_install/lib/ocaml_runtime_stdlib" \
-  "$ocamlopt_dir/utils" \
-  "$ocamlopt_dir/lib/ocaml" \
-  "$ocamlopt_dir/_install/lib/ocaml" \
-  "$ocamlopt_dir/../lib/ocaml"
-do
-  if [ -f "$stdlib_dir/std_exit.cmx" ] || [ -f "$stdlib_dir/stdlib.cmi" ]; then
-    stdlib_dir_arg="$stdlib_dir"
-    break
-  fi
-done
+if [ -n "${OCAMLLIB:-}" ] && [ -f "$OCAMLLIB/stdlib.cmi" ]; then
+  stdlib_dir_arg="$OCAMLLIB"
+else
+  for stdlib_dir in \
+    "$ocamlopt_dir/../_build/runtime_stdlib_install/lib/ocaml_runtime_stdlib" \
+    "$ocamlopt_dir/../runtime_stdlib_install/lib/ocaml_runtime_stdlib" \
+    "$source_dir/../../../_build/runtime_stdlib_install/lib/ocaml_runtime_stdlib" \
+    "$source_dir/../../../../_build/runtime_stdlib_install/lib/ocaml_runtime_stdlib" \
+    "$ocamlopt_dir/../../runtime_stdlib_install/lib/ocaml_runtime_stdlib" \
+    "$ocamlopt_dir/utils" \
+    "$ocamlopt_dir/lib/ocaml" \
+    "$ocamlopt_dir/_install/lib/ocaml" \
+    "$ocamlopt_dir/../lib/ocaml"
+  do
+    if [ -f "$stdlib_dir/std_exit.cmx" ] || [ -f "$stdlib_dir/stdlib.cmi" ]; then
+      stdlib_dir_arg="$stdlib_dir"
+      break
+    fi
+  done
+fi
 
 stdlib_upstream_dir_arg=""
-for stdlib_upstream_dir in \
-  "$ocamlopt_dir/otherlibs/stdlib_upstream_compatible" \
-  "$ocamlopt_dir/lib/ocaml/stdlib_upstream_compatible" \
-  "$ocamlopt_dir/_install/lib/ocaml/stdlib_upstream_compatible" \
-  "$ocamlopt_dir/../lib/ocaml/stdlib_upstream_compatible"
-do
-  if [ -f "$stdlib_upstream_dir/stdlib_upstream_compatible.cmxa" ]; then
-    stdlib_upstream_dir_arg="$stdlib_upstream_dir"
-    break
-  fi
-done
+if [ -n "${OCAMLLIB:-}" ] \
+  && [ -f "$OCAMLLIB/stdlib_upstream_compatible/stdlib_upstream_compatible.cmxa" ]; then
+  stdlib_upstream_dir_arg="$OCAMLLIB/stdlib_upstream_compatible"
+else
+  for stdlib_upstream_dir in \
+    "$ocamlopt_dir/otherlibs/stdlib_upstream_compatible" \
+    "$ocamlopt_dir/lib/ocaml/stdlib_upstream_compatible" \
+    "$ocamlopt_dir/_install/lib/ocaml/stdlib_upstream_compatible" \
+    "$ocamlopt_dir/../lib/ocaml/stdlib_upstream_compatible"
+  do
+    if [ -f "$stdlib_upstream_dir/stdlib_upstream_compatible.cmxa" ]; then
+      stdlib_upstream_dir_arg="$stdlib_upstream_dir"
+      break
+    fi
+  done
+fi
 
 runtime_include_dir_arg=""
 for runtime_dir in \

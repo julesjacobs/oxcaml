@@ -612,3 +612,36 @@ Validation:
 
 Next validation step: run the LLVM testsuite using the self-stage compiler now
 that wrapper coverage diagnostics are trustworthy.
+
+2026-06-27 self-stage testsuite harness cleanup:
+a full self-stage testsuite run was started with
+`SELF_STAGE=1 LLVM_WRAPPER="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"
+tools/run-llvm-stage5-ocamltest.sh`.  It was stopped after reaching
+`typing-layouts-*` because the generated list included test output directories
+named `_ocamltest`, causing duplicate nested test runs and noisy failures from
+generated roots.  The useful failures seen before stopping include missing
+AMD64 SIMD lowering (`vinsertf128`), `Selection.select_oper` in float32 array
+native tests, native CFI stepping output mismatches, `templates/basic/probe.ml`
+missing LLVM lowering for `probe`, and a few likely self-stage-only runtime
+failures that still need focused reduction against the standard
+`-llvm-backend` compiler.
+
+Harness fix: `tools/run-llvm-stage5-ocamltest.sh` now exports the
+same wrapper as `LLVM_PATH` for shell tests that do not read `OCAMLPARAM`, and
+its generated test list prunes `_ocamltest` directories.  This is intended to
+make reruns measure the AMD64 LLVM backend rather than stale generated output.
+The focused rerun then showed `stack_check_size_contract_amd64.ml` passing and
+left only the known `raw_stack_word_amd64.ml` inconsistent-CMI failure in
+`llvm-codegen`; `raw_stack_word.sh` now prefers the active `OCAMLLIB` for both
+the stdlib and `stdlib_upstream_compatible` so self-stage tests do not mix a
+normal-build runtime stdlib with self-stage libraries.
+
+Validation:
+
+- `bash -n tools/run-llvm-stage5-ocamltest.sh
+  testsuite/tests/llvm-codegen/raw_stack_word.sh` passed.
+- The generated self-stage test list has 400 entries and 0 `_ocamltest`
+  entries.
+- Focused self-stage testsuite rerun with `tests/llvm-stack-checks` and
+  `tests/llvm-codegen` passed: 72 passed, 32 skipped, 0 failed, with 109
+  wrapper lines and 56 fresh IR inputs.
