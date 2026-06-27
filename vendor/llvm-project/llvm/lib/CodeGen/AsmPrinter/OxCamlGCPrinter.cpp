@@ -123,22 +123,28 @@ void OxCamlGCMetadataPrinter::finishAssembly(Module &M, GCModuleInfo &Info,
 // TODO: This is target-specific and should probably live in a
 // target-specific location.
 
-// Directly taken from [Reg_class.gpr_dwarf_reg_numbers]:
-// https://github.com/oxcaml/oxcaml/blob/main/backend/amd64/reg_class.ml#L26
-// Note that R14 and R15 are added for completeness
-static constexpr std::array<unsigned, 16> GPR_OxCamlToDwarf =
-  { 0, 3, 5, 4, 1, 2, 8, 9, 12, 13, 10, 11, 6, 14, 15 };
-
-static constexpr auto GPR_DwarfToOxCaml = []() {
-  std::array<unsigned, 16> result{};
-  for (size_t ocaml_idx = 0; ocaml_idx < GPR_OxCamlToDwarf.size(); ++ocaml_idx) {
-    unsigned dwarf_reg = GPR_OxCamlToDwarf[ocaml_idx];
-    if (dwarf_reg < result.size()) {
-      result[dwarf_reg] = ocaml_idx;
-    }
-  }
-  return result;
-}();
+// This must match runtime/amd64.S:SAVE_ALL_REGS.  R14 and R15 are runtime
+// registers and are not saved as scannable gc_regs roots.
+static constexpr unsigned NoOxCamlGPRIndex =
+    std::numeric_limits<unsigned>::max();
+static constexpr std::array<unsigned, 16> GPR_DwarfToOxCaml = {
+    0,                 // RAX
+    4,                 // RDX
+    5,                 // RCX
+    1,                 // RBX
+    3,                 // RSI
+    2,                 // RDI
+    12,                // RBP
+    NoOxCamlGPRIndex,  // RSP
+    6,                 // R8
+    7,                 // R9
+    10,                // R10
+    11,                // R11
+    8,                 // R12
+    9,                 // R13
+    NoOxCamlGPRIndex,  // R14
+    NoOxCamlGPRIndex,  // R15
+};
 
 static const unsigned XMMBeginOxCaml = 100;
 static const unsigned XMMBeginDwarf = 17;
@@ -146,13 +152,14 @@ static const unsigned XMMEndDwarf = 32;
 
 static unsigned mapX86DwarfRegToOxCamlIndex(unsigned DwarfRegNum) {
   if (DwarfRegNum < GPR_DwarfToOxCaml.size()) {
-    return GPR_DwarfToOxCaml[DwarfRegNum];
+    unsigned OxCamlIndex = GPR_DwarfToOxCaml[DwarfRegNum];
+    if (OxCamlIndex != NoOxCamlGPRIndex)
+      return OxCamlIndex;
   } else if (XMMBeginDwarf <= DwarfRegNum && DwarfRegNum <= XMMEndDwarf) {
     return DwarfRegNum - XMMBeginDwarf + XMMBeginOxCaml;
-  } else {
-    report_fatal_error("[OxCamlGCPrinter] unrecognised DWARF register: "
-      + Twine(DwarfRegNum));
   }
+  report_fatal_error("[OxCamlGCPrinter] x86 register has no OxCaml gc_regs "
+                     "root slot: " + Twine(DwarfRegNum));
 }
 
 static unsigned mapAArch64DwarfRegToOxCamlIndex(unsigned DwarfRegNum) {

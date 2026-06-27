@@ -8,13 +8,16 @@ explicitly asks for it.
 Use the current `jujacobs/llvm-backend` work as the base. The old
 `jujacobs/llvm-amd64-support` branch is useful as a checklist and as source
 material for focused patches, but it predates the current root tracking,
-statepoint, frametable, and AArch64 stack/trap work. Do not copy it wholesale.
+statepoint, frametable, and AArch64 stack/trap work. Do not copy it wholesale,
+and do not keep old x86 mechanisms where they differ from the current ARM64
+LLVM backend design.
 
 When the right AMD64 behavior is unclear, match the existing native AMD64
 backend first, especially for calling conventions, register roles, stack layout,
-runtime entry/exit protocols, and assembly helper behavior. Use ARM64 as the
-quality and architecture of the LLVM integration, not as a reason to invent a
-different AMD64 ABI.
+runtime entry/exit protocols, and assembly helper behavior. The intended shape
+is the current ARM64 LLVM backend generalized to AMD64 target details, not two
+independent mechanisms and not compatibility with the old low-quality x86 LLVM
+backend.
 
 ## Quality bar
 

@@ -218,6 +218,46 @@ Validation after clearing stale dune boot-context state
 - `make -s llvm-test-one-no-rebuild LLVM_PATH="$PWD/llvm-tool-wrapper.sh" \
   TEST=testsuite/tests/typing-layouts-or-null/atomics.ml` passed: 5 passed.
 
+2026-06-27 AMD64 optimized-llc backend progress:
+added target-side active trap-depth tracking for X86, mirroring the AArch64
+machine-CFG trap stack analysis.  X86 now records active OCaml trap bytes before
+frame-index replacement and adjusts real `%rsp`-relative frame-index accesses,
+which fixed the earlier optimized-wrapper runtime-stdlib crash where a runtime
+exception landing block stored R14/R15 spill slots 16 bytes away from the later
+recovered-RBP reloads.  Statepoint/stackmap/patchpoint metadata operands are
+excluded from that generic X86 offset adjustment because the OxCaml frametable
+printer already applies active trap bytes from the encoded statepoint id.
+Continue this line of work by generalizing the ARM64 LLVM backend mechanism to
+AMD64 target details.  Do not preserve old x86 LLVM behavior when it conflicts
+with the current ARM64 mechanism or native AMD64 backend/runtime contracts.
+
+Also corrected the AMD64 OxCaml frametable gc_regs map in
+`OxCamlGCPrinter.cpp`: the previous table declared 16 entries but initialized
+15, causing DWARF RAX to be remapped to gc_regs index 15.  Runtime
+`amd64.S:SAVE_ALL_REGS` saves only 13 integer root registers; R14 and R15 are
+runtime domain/allocation registers and are now rejected as scannable gc_regs
+roots, matching the native AMD64 register map.
+
+Validation:
+
+- `make -C _build/llvm-tools -j8 llc opt` passed after the LLVM target changes.
+- Clean default-wrapper build passed:
+  `make -s llvm-compiler` with `LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"`
+  and default `LLVM_WRAPPER_LLC_OPT_LEVEL` (`llc -O0`).
+- Clean optimized-wrapper build still fails:
+  `LLVM_WRAPPER_LLC_OPT_LEVEL=3 make -s llvm-compiler` reaches the main
+  compiler workspace and then reports `.ocamlcommon.objs/native/_unknown_`
+  segfaults.  The earlier runtime stdlib crash is gone, but the remaining
+  failure is not fixed yet.  Direct stress loops of the reported `mode.ml`,
+  `tast_mapper.ml`, and dynlink parser commands did not reproduce reliably
+  outside dune; continue by reducing the remaining GC-sensitive main-workspace
+  crash and inspecting generated frame metadata/roots.
+- Requested `gpt-5.5` high code-review agent could not be spawned because the
+  multi-agent thread limit was reached.  Local review checked the changed X86
+  trap-depth path and AMD64 gc_regs map against `runtime/amd64.S`, native
+  `backend/amd64/proc.ml`, and AArch64 active-trap handling; no additional
+  obvious issue was found beyond the known incomplete optimized build.
+
 2026-06-27 optimized LLVM pipeline blocker and buildable RS4GC wrapper:
 with the clang-like local wrapper (`opt -O3` then `llc -O3`), a clean
 `make -s llvm-compiler` failed in the boot compiler while lowering optimized

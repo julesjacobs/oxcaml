@@ -876,6 +876,7 @@ X86RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
                                                : isFuncletReturnInstr(*MBBI);
   const X86FrameLowering *TFI = getFrameLowering(MF);
   int FrameIndex = MI.getOperand(FIOperandNum).getIndex();
+  unsigned Opc = MI.getOpcode();
 
   // Determine base register and offset.
   int FIOffset;
@@ -895,13 +896,17 @@ X86RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   } else {
     FIOffset = TFI->getFrameIndexReference(MF, FrameIndex, BasePtr).getFixed();
   }
+  if (BasePtr == StackPtr && Opc != TargetOpcode::STACKMAP &&
+      Opc != TargetOpcode::PATCHPOINT && Opc != TargetOpcode::STATEPOINT) {
+    const X86MachineFunctionInfo *X86FI = MF.getInfo<X86MachineFunctionInfo>();
+    FIOffset += X86FI->getOxCamlActiveTrapBytes(MI);
+  }
 
   // LOCAL_ESCAPE uses a single offset, with no register. It only works in the
   // simple FP case, and doesn't work with stack realignment. On 32-bit, the
   // offset is from the traditional base pointer location.  On 64-bit, the
   // offset is from the SP at the end of the prologue, not the FP location. This
   // matches the behavior of llvm.frameaddress.
-  unsigned Opc = MI.getOpcode();
   if (Opc == TargetOpcode::LOCAL_ESCAPE) {
     MachineOperand &FI = MI.getOperand(FIOperandNum);
     FI.ChangeToImmediate(FIOffset);

@@ -17,7 +17,10 @@
 #include "X86MachineFunctionInfo.h"
 #include "X86Subtarget.h"
 #include "X86TargetMachine.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallSet.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/EHPersonalities.h"
 #include "llvm/CodeGen/LivePhysRegs.h"
@@ -45,6 +48,107 @@ STATISTIC(NumFrameExtraProbe,
           "Number of extra stack probes generated in prologue");
 
 using namespace llvm;
+
+namespace {
+static bool isOxCamlNativeTrapInstr(const MachineInstr &MI) {
+  switch (MI.getOpcode()) {
+  case X86::OXCAML_PUSH_TRAP:
+  case X86::OXCAML_PUSH_TRAP_DEAD:
+  case X86::OXCAML_POP_TRAP:
+  case X86::OXCAML_RAISE_NOTRACE_EDGE:
+    return true;
+  default:
+    return false;
+  }
+}
+
+static bool equalOxCamlTrapStacks(ArrayRef<const MachineInstr *> Left,
+                                  ArrayRef<const MachineInstr *> Right) {
+  if (Left.size() != Right.size())
+    return false;
+  for (auto [LeftMI, RightMI] : llvm::zip(Left, Right))
+    if (LeftMI != RightMI)
+      return false;
+  return true;
+}
+
+static void computeOxCamlActiveTrapBytes(MachineFunction &MF) {
+  X86MachineFunctionInfo *X86FI = MF.getInfo<X86MachineFunctionInfo>();
+  X86FI->clearOxCamlActiveTrapBytes();
+
+  bool HasNativeTrapInstr = false;
+  for (const MachineBasicBlock &MBB : MF)
+    for (const MachineInstr &MI : MBB)
+      HasNativeTrapInstr |= isOxCamlNativeTrapInstr(MI);
+  if (!HasNativeTrapInstr || MF.empty())
+    return;
+
+  using TrapStack = SmallVector<const MachineInstr *, 4>;
+  DenseMap<const MachineBasicBlock *, TrapStack> InStacks;
+  SmallVector<const MachineBasicBlock *, 16> Worklist;
+
+  auto PropagateStack = [&](const MachineBasicBlock *MBB,
+                            const TrapStack &Stack) {
+    auto It = InStacks.find(MBB);
+    if (It == InStacks.end()) {
+      InStacks[MBB] = Stack;
+      Worklist.push_back(MBB);
+      return;
+    }
+
+    if (!equalOxCamlTrapStacks(It->second, Stack))
+      report_fatal_error(
+          "incompatible OxCaml native trap stacks at machine CFG join");
+  };
+
+  PropagateStack(&MF.front(), TrapStack());
+  while (!Worklist.empty()) {
+    const MachineBasicBlock *MBB = Worklist.pop_back_val();
+    TrapStack Stack = InStacks.lookup(MBB);
+
+    for (const MachineInstr &MI : *MBB) {
+      X86FI->setOxCamlActiveTrapBytes(MI, Stack.size() * 16);
+
+      switch (MI.getOpcode()) {
+      case X86::OXCAML_PUSH_TRAP: {
+        PropagateStack(MI.getOperand(0).getMBB(), Stack);
+        Stack.push_back(&MI);
+        break;
+      }
+      case X86::OXCAML_PUSH_TRAP_DEAD:
+        Stack.push_back(&MI);
+        break;
+      case X86::OXCAML_POP_TRAP:
+        if (Stack.empty())
+          report_fatal_error(
+              "OxCaml native trap pop without matching active trap");
+        Stack.pop_back();
+        break;
+      case X86::OXCAML_RAISE_NOTRACE_EDGE: {
+        TrapStack HandlerStack = Stack;
+        if (!HandlerStack.empty())
+          HandlerStack.pop_back();
+        PropagateStack(MI.getOperand(1).getMBB(), HandlerStack);
+        break;
+      }
+      default:
+        break;
+      }
+    }
+
+    if (!MBB->empty() &&
+        MBB->back().getOpcode() == X86::OXCAML_RAISE_NOTRACE_EDGE)
+      continue;
+
+    for (const MachineBasicBlock *Succ : MBB->successors()) {
+      TrapStack SuccStack = Stack;
+      if (Succ->isRuntimeEntered() && !SuccStack.empty())
+        SuccStack.pop_back();
+      PropagateStack(Succ, SuccStack);
+    }
+  }
+}
+} // namespace
 
 struct OxCamlStackCheckAttrs {
   bool Requested = false;
@@ -4005,6 +4109,8 @@ void X86FrameLowering::adjustFrameForMsvcCxxEh(MachineFunction &MF) const {
 
 void X86FrameLowering::processFunctionBeforeFrameIndicesReplaced(
     MachineFunction &MF, RegScavenger *RS) const {
+  computeOxCamlActiveTrapBytes(MF);
+
   if (STI.is32Bit() && MF.hasEHFunclets())
     restoreWinEHStackPointersInParent(MF);
 }

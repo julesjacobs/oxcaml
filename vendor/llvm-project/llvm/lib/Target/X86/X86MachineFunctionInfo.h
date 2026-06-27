@@ -124,6 +124,7 @@ class X86MachineFunctionInfo : public MachineFunctionInfo {
   DenseMap<const Value *, size_t> PreallocatedIds;
   SmallVector<size_t, 0> PreallocatedStackSizes;
   SmallVector<SmallVector<size_t, 4>, 0> PreallocatedArgOffsets;
+  DenseMap<const MachineInstr *, unsigned> OxCamlActiveTrapBytes;
 
 private:
   /// ForwardedMustTailRegParms - A list of virtual and physical registers
@@ -221,6 +222,15 @@ public:
 
   bool hasVirtualTileReg() const { return HasVirtualTileReg; }
   void setHasVirtualTileReg(bool v) { HasVirtualTileReg = v; }
+
+  void clearOxCamlActiveTrapBytes() { OxCamlActiveTrapBytes.clear(); }
+  void setOxCamlActiveTrapBytes(const MachineInstr &MI, unsigned Bytes) {
+    OxCamlActiveTrapBytes[&MI] = Bytes;
+  }
+  unsigned getOxCamlActiveTrapBytes(const MachineInstr &MI) const {
+    auto It = OxCamlActiveTrapBytes.find(&MI);
+    return It == OxCamlActiveTrapBytes.end() ? 0 : It->second;
+  }
 
   std::optional<int> getSwiftAsyncContextFrameIdx() const {
     return SwiftAsyncContextFrameIdx;
