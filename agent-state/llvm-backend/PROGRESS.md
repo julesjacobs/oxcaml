@@ -190,3 +190,37 @@ Failure clusters to reduce and fix:
   `test_float32_u_array.ml` variants instead report `Selection.select_oper`.
   Treat the repeated generated product/vector array failures as one SIMD
   lowering cluster; related scalar unboxed arrays and product iarrays passed.
+
+2026-06-27 atomic compare-exchange fix in progress:
+`backend/llvm/llvmize.ml` now returns LLVM `cmpxchg`'s loaded old value for
+`Cmm.Compare_exchange` instead of selecting the previous destination register
+on success. This matches native AMD64 `lock cmpxchg` result semantics: the old
+loaded value is in `rax` on both success and failure. Added AMD64 LLVM codegen
+coverage in `tests/llvm-codegen/amd64_core_ops.ml` for int and ref
+`Atomic.compare_exchange` success/failure.
+
+Validation after clearing stale dune boot-context state
+(`_build/default`, `_build/_bootinstall`, `_build/.db`,
+`_build/.filesystem-clock`):
+
+- `make -s llvm-compiler LLVM_PATH="$PWD/llvm-tool-wrapper.sh"` passed.
+- `make -s llvm-install LLVM_PATH="$PWD/llvm-tool-wrapper.sh"` passed.
+- Direct installed-compiler repro for
+  `testsuite/tests/lib-atomic/test_atomic_cmpxchg.ml` with
+  `-llvm-backend -llvm-path "$PWD/llvm-tool-wrapper.sh"` passed.
+- Direct installed-compiler repro for
+  `testsuite/tests/typing-layouts-or-null/atomics.ml` with
+  `-llvm-backend -llvm-path "$PWD/llvm-tool-wrapper.sh"` passed.
+- `make -s llvm-test-one-no-rebuild LLVM_PATH="$PWD/llvm-tool-wrapper.sh" \
+  TEST=testsuite/tests/llvm-codegen/amd64_core_ops.ml` passed: 5 passed.
+- `make -s llvm-test-one-no-rebuild LLVM_PATH="$PWD/llvm-tool-wrapper.sh" \
+  TEST=testsuite/tests/lib-atomic/test_atomic_cmpxchg.ml` passed: 2 passed.
+- `make -s llvm-test-one-no-rebuild LLVM_PATH="$PWD/llvm-tool-wrapper.sh" \
+  TEST=testsuite/tests/typing-layouts-or-null/atomics.ml` passed: 5 passed.
+
+`llvm-codegen` no-rebuild directory run got through the new
+`amd64_core_ops.ml` checks and still has the known `raw_stack_word_amd64.ml`
+CMI-mismatch harness failure. Attempted to spawn the requested `gpt-5.5-high`
+code-review agent for this commit, but the multi-agent tool reported the
+thread limit was reached; local review with `git diff --check`, `git diff`,
+and `git status --short` found no issue.
