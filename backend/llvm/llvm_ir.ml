@@ -1046,6 +1046,10 @@ module Instruction = struct
     assert' "load_volatile" (Value.get_type ptr |> Type.is_ptr);
     Load { ptr; typ; volatile_ = true; atomic = None; align = None }
 
+  let load_volatile_with_align ~align ~ptr ~typ =
+    assert' "load_volatile_with_align" (Value.get_type ptr |> Type.is_ptr);
+    Load { ptr; typ; volatile_ = true; atomic = None; align = Some align }
+
   let load_atomic ~ordering ~ptr ~typ =
     assert' "load_atomic" (Value.get_type ptr |> Type.is_ptr);
     Load { ptr; typ; volatile_ = false; atomic = Some ordering; align = Some 8 }
@@ -1491,6 +1495,10 @@ module Data = struct
           private_ : bool
         }
     | External of string
+    | Probe_semaphore of
+        { name : string;
+          enabled_at_init : bool
+        }
 
   let default_data_section () =
     match Target_system.derived_system () with
@@ -1514,6 +1522,9 @@ module Data = struct
 
   let external_ name = External name
 
+  let probe_semaphore ~name ~enabled_at_init =
+    Probe_semaphore { name; enabled_at_init }
+
   let pp_t ppf = function
     | Constant { name; value; section; align; private_ = _ } ->
       (* CR yusumez: If private global variables are not referenced anywhere
@@ -1534,4 +1545,16 @@ module Data = struct
       (* CR yusumez: We don't need that ptr there... *)
       Format.pp_line ppf "%a = external global ptr" Ident.pp_t
         (Ident.global name)
+    | Probe_semaphore { name; enabled_at_init } ->
+      let linkage_visibility =
+        if Target_system.is_macos () then "" else "weak hidden "
+      in
+      let section =
+        if Target_system.is_macos () then "__TEXT,__probes" else ".probes"
+      in
+      Format.pp_line ppf
+        "%a = %sglobal { i16, i16 } { i16 0, i16 %d }, section %S, align 2"
+        Ident.pp_t (Ident.global name) linkage_visibility
+        (Bool.to_int enabled_at_init)
+        section
 end

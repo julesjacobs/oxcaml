@@ -814,3 +814,58 @@ Validation:
   without the repo LLVM tools on `PATH` fails with stock `opt` rejecting
   `oxcaml_fpcc`, which is an invocation/environment error rather than a backend
   regression.
+
+2026-06-27 AMD64 LLVM probe lowering in progress:
+the remaining `probe` failure from the self-stage2 suite was reproduced against
+the current standard installed compiler with
+`testsuite/tests/templates/basic/probe.ml`, which failed in LLVMize with
+`unimplemented instruction: probe`.  The implementation now follows the native
+AMD64 semaphore naming and layout (`caml_probes_semaphore_<name>` containing
+two `i16`s, with the OCaml enable flag at byte offset 2), and lowers
+`Probe_is_enabled` to a volatile aligned load of that flag.  `Probe`
+terminators are lowered as a branch on the same flag to an ordinary OxCaml
+handler call, so handler calls use the existing LLVM call/statepoint,
+live-root, and trap/unwind machinery rather than adding a second
+AMD64-specific frontend-root mechanism.
+
+Current limitations to keep in mind: this is not yet the full native optimized
+probe/USDT patch-site implementation.  LLVM output defines weak hidden
+semaphore globals in `.probes` and preserves OCaml `enabled_at_init` semantics,
+but it does not yet emit native probe notes or byte-patchable call sites.
+That is acceptable as incremental backend progress, but full probe parity still
+requires note emission if external dynamic probe enabling is in scope.
+
+Validation:
+
+- Restored a usable stage0 `_install` from the fresh `_llvm_self_stage2_install`
+  after accidentally deleting the stale `_install`; `_install/bin/ocamlopt.opt
+  -config` reports `standard_library: $PWD/_install/lib/ocaml`.
+- After clearing `_build/default`, `_build/_bootinstall`, `_build/.db`, and
+  `_build/.filesystem-clock`, `PATH="$PWD/_build/llvm-tools/bin:$PATH"
+  make -s llvm-install LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"`
+  passed with only same-file copy warnings.
+- Direct installed-compiler repro of `testsuite/tests/templates/basic/probe.ml`
+  passed under `-llvm-backend -llvm-path
+  "$PWD/tools/llvm-rs4gc-llc-wrapper.sh"`.
+- Direct installed-compiler repro of
+  `testsuite/tests/typing-layouts-or-null/probe.ml` passed under the same LLVM
+  backend flags.
+- Inspecting `probe.ll`/`probe.s` for the template repro showed a load from
+  `caml_probes_semaphore_probe + 2`, a conditional branch, an
+  `oxcaml_fpcc` statepoint call to the generated probe handler, and a weak
+  hidden `.probes` semaphore definition.  A code review caught that the
+  semaphore load must be volatile because the flag can be changed outside
+  LLVM-visible IR; after adding an aligned volatile load helper, the emitted IR
+  contains `load volatile i16, ptr ..., align 2`.
+- Direct runtime smokes passed for `~enabled_at_init:true`, `false`,
+  `probe_is_enabled`, a heap root live across `Gc.full_major ()` in an enabled
+  probe handler, and exception propagation from an enabled handler.
+- Added `testsuite/tests/llvm-codegen/amd64_probes.ml`; direct installed-compiler
+  compile and run of that exact test passed with `-O3 -llvm-backend`.
+- `make -C _build/llvm-tools -j8 llc opt` passed, confirming the vendored LLVM
+  tools still build after the wrapper/build-state cleanup.
+- The ordinary `make llvm-test-one` path currently needs `_runtest` repair in
+  this checkout after the build-state cleanup; invoking it tried to rebuild the
+  default boot compiler and failed on generated-source/fallback files before
+  reaching the test.  Use direct installed-compiler repros or the stage harness
+  with a coherent stage build until `_runtest` is refreshed.

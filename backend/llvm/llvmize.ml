@@ -182,6 +182,7 @@ type t =
     mutable c_call_wrappers : c_call_wrapper String.Map.t;
         (* Wrappers for noalloc C calls. This is currently needed since
            manipulating the stack inline is broken. *)
+    mutable probe_semaphores : bool option String.Map.t;
     mutable all_trap_blocks : trap_block_info list;
     mutable next_debug_metadata_id : int;
     mutable debug_compile_unit_id : int option;
@@ -427,6 +428,7 @@ let create ~llvmir_filename ~ppf_dump =
     function_arg_types = String.Map.empty;
     called_intrinsics = String.Map.empty;
     c_call_wrappers = String.Map.empty;
+    probe_semaphores = String.Map.empty;
     all_trap_blocks = [];
     next_debug_metadata_id = 100000;
     debug_compile_unit_id = None;
@@ -611,6 +613,26 @@ let add_function_def t fundef = t.function_defs <- fundef :: t.function_defs
 
 let add_data_def t data_def = t.data_defs <- data_def :: t.data_defs
 
+let probe_semaphore_symbol name =
+  Asm_targets.Asm_symbol.Predef.caml_probes_semaphore ~name
+  |> Asm_targets.Asm_symbol.to_raw_string
+
+let find_or_add_probe_semaphore t name enabled_at_init dbg =
+  let update enabled_at_init =
+    t.probe_semaphores
+      <- String.Map.add name enabled_at_init t.probe_semaphores
+  in
+  (match String.Map.find_opt name t.probe_semaphores with
+  | None -> update enabled_at_init
+  | Some previous -> (
+    match previous, enabled_at_init with
+    | None, None | Some _, None -> ()
+    | None, Some _ -> update enabled_at_init
+    | Some previous, Some enabled_at_init ->
+      if not (Bool.equal previous enabled_at_init)
+      then raise (Emitaux.Error (Inconsistent_probe_init (name, dbg)))));
+  probe_semaphore_symbol name
+
 let register_function_signature t (fd : Cmm.fundecl) =
   let arg_types =
     List.concat_map
@@ -723,6 +745,18 @@ let emit_comment t fmt =
   F.kasprintf (fun s -> E.comment fun_info.emitter s) fmt
 
 (* Common helpers *)
+
+let probe_semaphore_enabled t name enabled_at_init dbg =
+  let symbol = find_or_add_probe_semaphore t name enabled_at_init dbg in
+  let semaphore =
+    emit_ins t
+      (I.getelementptr ~base_type:T.i8 ~base_ptr:(V.of_symbol symbol)
+         ~indices:[V.of_int 2])
+  in
+  let enabled =
+    emit_ins t (I.load_volatile_with_align ~align:2 ~ptr:semaphore ~typ:T.i16)
+  in
+  emit_ins t (I.icmp Ine ~arg1:enabled ~arg2:(V.of_int ~typ:T.i16 0))
 
 let cast t arg to_ =
   let from = V.get_type arg in
@@ -1640,6 +1674,25 @@ let unwind_label_and_landingpad_for_exn_entry exn_entry =
       | Target_system.Z | Target_system.Riscv ),
       None ) ->
     None, None
+
+let probe t (i : Cfg.terminator Cfg.instruction) ~name ~handler_code_sym
+    ~enabled_at_init ~label_after =
+  reject_addr_regs_across t i "probe";
+  let probe_enabled =
+    probe_semaphore_enabled t name (Some enabled_at_init) i.dbg
+  in
+  let call_label = V.of_label (Cmm.new_label ()) in
+  emit_ins_no_res t
+    (I.br_cond ~cond:probe_enabled ~ifso:call_label
+       ~ifnot:(V.of_label label_after));
+  emit_label t call_label;
+  let exn_entry = exn_entry_for_instruction t i in
+  let unwind_label, exn_entry =
+    unwind_label_and_landingpad_for_exn_entry exn_entry
+  in
+  call ?unwind_label t i (Direct (Cmm.global_symbol handler_code_sym));
+  br_label t label_after;
+  emit_unwind_landingpad_after t unwind_label exn_entry
 
 let trap_block_type () =
   match Target_system.architecture () with
@@ -2714,9 +2767,8 @@ let emit_terminator t (block : Cfg.basic_block)
         emit_unwind_landingpad_after t unwind_label exn_entry
       | Prim { op; label_after } -> (
         match op with
-        | Probe _ ->
-          reject_addr_regs i.arg "prim";
-          not_implemented_terminator ~msg:"probe" i
+        | Probe { name; handler_code_sym; enabled_at_init } ->
+          probe t i ~name ~handler_code_sym ~enabled_at_init ~label_after
         | External { func_symbol; alloc; ty_args; stack_ofs; stack_align; _ } ->
           let exn_entry = exn_entry_for_block t block in
           let unwind_label, exn_entry =
@@ -6778,7 +6830,10 @@ let basic_op t (i : Cfg.basic Cfg.instruction) (op : Operation.t) =
   | Stackoffset _ -> () (* Handled separately via [Safepoint.attr] *)
   | Spill | Reload -> not_implemented_basic ~msg:"spill / reload" i
   | Name_for_debugger _ -> ()
-  | Probe_is_enabled _ -> not_implemented_basic i
+  | Probe_is_enabled { name; enabled_at_init } ->
+    let enabled = probe_semaphore_enabled t name enabled_at_init i.dbg in
+    emit_ins t (I.convert Zext ~arg:enabled ~to_:(T.of_reg i.res.(0)))
+    |> store_into_reg t i.res.(0)
 
 let emit_basic t (i : Cfg.basic Cfg.instruction) =
   emit_comment t "%a" F.pp_dbg_instr_basic i;
@@ -7117,12 +7172,12 @@ let terminator_has_gc_safepoint (i : Cfg.terminator Cfg.instruction) =
   | Call _ -> true
   | Call_no_return { alloc; stack_ofs; _ } -> alloc || stack_ofs > 0
   | Prim { op = External { alloc; stack_ofs; _ }; _ } -> alloc || stack_ofs > 0
+  | Prim { op = Probe _; _ } -> true
   | Invalid { stack_ofs; _ } -> stack_ofs > 0
   | Raise (Raise_regular | Raise_reraise) -> true
   | Raise Raise_notrace -> false
   | Tailcall_func _ | Tailcall_self _ | Return | Never | Always _
-  | Parity_test _ | Truth_test _ | Float_test _ | Int_test _ | Switch _
-  | Prim { op = Probe _; _ } ->
+  | Parity_test _ | Truth_test _ | Float_test _ | Int_test _ | Switch _ ->
     false
 
 let preserved_reg_slots liveness active_traps cfg =
@@ -7791,6 +7846,16 @@ let declare_data t =
   String.Set.diff t.referenced_symbols t.defined_symbols
   |> String.Set.iter (fun sym -> add_data_def t (LL.Data.external_ sym))
 
+let define_probe_semaphores t =
+  String.Map.iter
+    (fun name enabled_at_init ->
+      let symbol = probe_semaphore_symbol name in
+      add_data_def t
+        (LL.Data.probe_semaphore ~name:symbol
+           ~enabled_at_init:(Option.value enabled_at_init ~default:false));
+      add_defined_symbol t symbol)
+    t.probe_semaphores
+
 let define_auxiliary_functions t =
   define_c_call_wrappers t;
   (match Target_system.architecture () with
@@ -7998,6 +8063,7 @@ let write_llvmir_to_file t =
 let end_assembly () =
   let t = get_current_compilation_unit "end_asm" in
   define_auxiliary_functions t;
+  define_probe_semaphores t;
   declare_data t;
   write_llvmir_to_file t;
   Out_channel.close t.oc;
