@@ -441,7 +441,10 @@ def RetCC_X86_64_HHVM: CallingConv<[
 ]>;
 
 def RetCC_X86_64_OxCaml : CallingConv<[
-  // Promote all types to i64
+  // OCaml value/address results use the same GPR convention as integers.
+  CCIfType<[iPTR], CCBitConvertToType<i64>>,
+
+  // Promote all integer-like scalar types to i64.
   CCIfType<[i8, i16, i32], CCPromoteToType<i64>>,
 
   // Runtime registers (R14, R15) are threaded through function calls
@@ -761,6 +764,9 @@ def CC_X86_Win64_VectorCall : CallingConv<[
 ]>;
 
 def CC_X86_64_OxCaml : CallingConv<[
+  // OCaml value/address arguments use the same GPR convention as integers.
+  CCIfType<[iPTR], CCBitConvertToType<i64>>,
+
   // Promote i8/i16/i32 arguments to i64.
   CCIfType<[i8, i16, i32], CCPromoteToType<i64>>,
 

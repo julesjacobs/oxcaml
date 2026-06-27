@@ -12,6 +12,7 @@ cfg_dump="$build_dir/basic_safepoint_ordinary_trap_roots_generated.cmx.dump"
 llvm_path="${LLVM_PATH:-${LLVM_WRAPPER:-/tmp/oxcaml-clang-wrapper}}"
 debug_flags="-g"
 check_ordinary_call_invoke=true
+call_gc_symbol_pattern='@"\\01_?caml_call_gc"'
 
 case "$host_system:$host_arch" in
   Linux:x86_64 | Linux:amd64)
@@ -22,6 +23,7 @@ esac
 case "$host_arch" in
   x86_64 | amd64)
     check_ordinary_call_invoke=false
+    call_gc_symbol_pattern='@"\\01_?caml_call_gc(_sse|_avx|_avx512)"'
     ;;
 esac
 
@@ -136,7 +138,7 @@ slot_for_arg() {
 
 call_gc_line() {
   name="$1"
-  function_ir "$name" | grep -E '@"\\01_?caml_call_gc"'
+  function_ir "$name" | grep -E "$call_gc_symbol_pattern"
 }
 
 may_raise_line() {

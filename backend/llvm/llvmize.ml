@@ -6180,6 +6180,80 @@ let call_runtime_for_basic_safepoint ?alloc_info ?unwind_label ~attrs ~cc t i
   refresh_slow_path_roots t slow_path_roots;
   res
 
+type amd64_simd_save =
+  | Save_none
+  | Save_xmm
+  | Save_ymm
+  | Save_zmm
+
+let amd64_max_simd_save save1 save2 =
+  match save1, save2 with
+  | Save_zmm, _ | _, Save_zmm -> Save_zmm
+  | Save_ymm, _ | _, Save_ymm -> Save_ymm
+  | Save_xmm, _ | _, Save_xmm -> Save_xmm
+  | Save_none, Save_none -> Save_none
+
+let amd64_simd_save_for_live live =
+  Reg.Set.fold
+    (fun reg save ->
+      if not (Reg.is_reg reg)
+      then save
+      else
+        let reg_save =
+          match reg.typ with
+          | Vec512 -> Save_zmm
+          | Vec256 -> Save_ymm
+          | Float | Float32 | Vec128 | Valx2 -> Save_xmm
+          | Val | Addr | Int -> Save_none
+        in
+        amd64_max_simd_save save reg_save)
+    live Save_none
+
+let amd64_simd_save_for_target_features () =
+  List.fold_left
+    (fun save flag ->
+      let flag_save =
+        match flag with
+        | "-mavx512f" -> Save_zmm
+        | "-mavx" | "-mavx2" -> Save_ymm
+        | _ -> Save_none
+      in
+      amd64_max_simd_save save flag_save)
+    Save_xmm (Arch.llvm_target_feature_flags ())
+
+let amd64_simd_save_for_llvm_runtime_call live =
+  amd64_max_simd_save (amd64_simd_save_for_target_features ())
+    (amd64_simd_save_for_live live)
+
+let amd64_stack_realloc_symbol live =
+  match amd64_simd_save_for_live live with
+  | Save_none -> "caml_llvm_call_realloc_stack"
+  | Save_xmm -> "caml_llvm_call_realloc_stack_sse"
+  | Save_ymm -> "caml_llvm_call_realloc_stack_avx"
+  | Save_zmm -> "caml_llvm_call_realloc_stack_avx512"
+
+let amd64_call_local_realloc_symbol live =
+  match amd64_simd_save_for_llvm_runtime_call live with
+  | Save_none -> "caml_call_local_realloc"
+  | Save_xmm -> "caml_call_local_realloc_sse"
+  | Save_ymm -> "caml_call_local_realloc_avx"
+  | Save_zmm -> "caml_call_local_realloc_avx512"
+
+let amd64_call_gc_symbol live =
+  match amd64_simd_save_for_llvm_runtime_call live with
+  | Save_none -> "caml_call_gc"
+  | Save_xmm -> "caml_call_gc_sse"
+  | Save_ymm -> "caml_call_gc_avx"
+  | Save_zmm -> "caml_call_gc_avx512"
+
+let local_realloc_symbol live =
+  match Target_system.architecture () with
+  | Target_system.AArch64 -> "caml_call_local_realloc"
+  | Target_system.X86_64 -> amd64_call_local_realloc_symbol live
+  | Target_system.IA32 | Target_system.ARM | Target_system.POWER
+  | Target_system.Z | Target_system.Riscv ->
+    Misc.fatal_error "unexpected architecture"
+
 let local_alloc t (i : Cfg.basic Cfg.instruction) num_bytes =
   (* Make space on the local stack *)
   let local_sp_ptr = load_domainstate_addr t Domain_local_sp in
@@ -6205,11 +6279,11 @@ let local_alloc t (i : Cfg.basic Cfg.instruction) num_bytes =
     (I.br_cond ~cond:skip_realloc_expect ~ifso:after_realloc ~ifnot:call_realloc);
   (* Call realloc *)
   emit_label t call_realloc;
-  (* CR yusumez: Handle SIMD regs appropriately once we have them *)
-  add_referenced_symbol t "caml_call_local_realloc";
+  let realloc_symbol = local_realloc_symbol i.live in
+  add_referenced_symbol t realloc_symbol;
   call_runtime_for_basic_safepoint
     ~attrs:(gc_attr ~can_call_gc:true t i @ [LL.Fn_attr.Cold])
-    ~cc:Oxcaml_alloc t i "caml_call_local_realloc" [] [] "local realloc"
+    ~cc:Oxcaml_alloc t i realloc_symbol [] [] "local realloc"
   |> ignore;
   emit_ins_no_res t (I.br after_realloc);
   (* After alloc *)
@@ -6224,14 +6298,23 @@ let local_alloc t (i : Cfg.basic Cfg.instruction) num_bytes =
   let res = do_offset t new_local_sp_addr T.val_ptr 8 in
   store_into_reg t i.res.(0) res
 
-let call_gc_for_basic_safepoint ?alloc_info ?unwind_label ~attrs t i =
-  add_referenced_symbol t "caml_call_gc";
+let call_gc_for_basic_safepoint ?alloc_info ?unwind_label ~attrs t
+    (i : Cfg.basic Cfg.instruction) =
+  let call_gc_symbol =
+    match Target_system.architecture () with
+    | Target_system.X86_64 -> amd64_call_gc_symbol i.live
+    | Target_system.AArch64 -> "caml_call_gc"
+    | Target_system.IA32 | Target_system.ARM | Target_system.POWER
+    | Target_system.Z | Target_system.Riscv ->
+      Misc.fatal_error "unexpected architecture"
+  in
+  add_referenced_symbol t call_gc_symbol;
   let slow_path_roots, live_roots =
     roots_for_basic_safepoint ?unwind_label t i "basic safepoint"
   in
   store_slow_path_roots t slow_path_roots;
   call_simple ~attrs ~live_roots ~slow_path_roots ?alloc_info ?unwind_label
-    ~cc:Oxcaml_alloc t "caml_call_gc" [] []
+    ~cc:Oxcaml_alloc t call_gc_symbol [] []
   |> ignore;
   refresh_slow_path_roots t slow_path_roots
 
@@ -6308,36 +6391,6 @@ let poll ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction) =
   emit_ins_no_res t (I.br after_poll);
   emit_unwind_landingpad_after t unwind_label exn_entry;
   emit_label t after_poll
-
-type amd64_simd_save =
-  | Save_none
-  | Save_xmm
-  | Save_ymm
-  | Save_zmm
-
-let amd64_stack_realloc_symbol live =
-  let save =
-    Reg.Set.fold
-      (fun reg save ->
-        if not (Reg.is_reg reg)
-        then save
-        else
-          match reg.typ with
-          | Vec512 -> Save_zmm
-          | Vec256 -> (
-            match save with Save_zmm -> save | Save_none | Save_xmm | Save_ymm -> Save_ymm)
-          | Float | Float32 | Vec128 | Valx2 -> (
-            match save with Save_zmm | Save_ymm -> save | Save_none | Save_xmm -> Save_xmm)
-          | Val | Addr | Int -> save)
-      live Save_none
-  in
-  "caml_llvm_call_realloc_stack"
-  ^
-  match save with
-  | Save_none -> ""
-  | Save_xmm -> "_sse"
-  | Save_ymm -> "_avx"
-  | Save_zmm -> "_avx512"
 
 let stack_check ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction)
     max_frame_size_bytes =

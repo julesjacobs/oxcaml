@@ -218,6 +218,49 @@ Validation after clearing stale dune boot-context state
 - `make -s llvm-test-one-no-rebuild LLVM_PATH="$PWD/llvm-tool-wrapper.sh" \
   TEST=testsuite/tests/typing-layouts-or-null/atomics.ml` passed: 5 passed.
 
+2026-06-27 AMD64 LLVM SIMD-preserving GC slow paths:
+reduced the `tests/unboxed-primitive-args` failures to heap allocation slow
+paths after C calls returning `float32`/SIMD values. The direct C-call ABI was
+already correct; the bug was that AMD64 LLVM called plain `caml_call_gc` before
+boxing the returned XMM/YMM value, clobbering the return register. The fix makes
+AMD64 LLVM allocation/poll slow paths call the existing native AMD64
+SIMD-preserving helper family (`caml_call_gc_sse`, `_avx`, `_avx512`) while
+leaving AArch64 on `caml_call_gc`. AMD64 local realloc slow paths now use the
+matching `caml_call_local_realloc*` helper family. These LLVM runtime calls use
+a conservative target-feature save width, widened by live SIMD registers, so
+they preserve just-returned SIMD values that are not present in the allocation
+instruction's liveness. Stack realloc helper selection was refactored to use the
+same AMD64 save-class helper instead of string suffix construction, but remains
+live-set based like the native AMD64 stack-check path.
+The X86 LLVM OxCaml calling convention also now bit-converts `iPTR` to `i64` for
+arguments/results, matching native AMD64's `Val`/`Addr`/`Int` GPR class and the
+existing AArch64 OxCaml pointer convention.
+
+Validation for the SIMD-preserving GC patch, with
+`PATH="$PWD/_build/llvm-tools/bin:$PATH"` and
+`LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"`:
+
+- `make -s llvm-install LLVM_PATH=...` passed after clearing stale dune build
+  contexts.
+- `make -s install_for_test LLVM_BACKEND=1 LLVM_PATH=...` passed.
+- `make -s llvm-test-one-no-rebuild LLVM_PATH=... DIR=unboxed-primitive-args`
+  passed: 8 passed, 1 skipped.
+- `make -s llvm-test-one-no-rebuild LLVM_PATH=... DIR=llvm-gc-roots` passed:
+  12 passed, 6 skipped.
+- `make -s llvm-test-one-no-rebuild LLVM_PATH=... DIR=llvm-stack-checks`
+  passed: 8 passed, 2 skipped.
+- `make -s llvm-test-one-no-rebuild LLVM_PATH=... DIR=llvm-codegen` passed:
+  67 passed, 30 skipped.
+- `make -s llvm-test-one-no-rebuild LLVM_PATH=... DIR=typing-layouts-arrays`
+  passed: 134 passed.
+- `make -s llvm-test-one-no-rebuild LLVM_PATH=... DIR=typing-layouts-iarrays`
+  passed: 81 passed.
+
+Next full-suite run should confirm the previous 30-failure standard
+`llvm-test-no-rebuild` result is reduced. Expected remaining real clusters are
+native CFI stepping, syntactic max-arity segfault, and any residual harness
+issues around internal assembler tests.
+
 2026-06-27 AMD64 LLVM `Cpackf32` selection fix:
 `tests/typing-layouts-arrays/test_float32_u_array.ml` failed in the standard
 LLVM backend with `Fatal error: Selection.select_oper`. The failing operation
