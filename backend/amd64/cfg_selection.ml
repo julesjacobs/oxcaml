@@ -479,6 +479,10 @@ let select_operation
   if !Clflags.llvm_backend
   then
     match op with
+    | Cpackf32 ->
+      (* [Cpackf32] has no target-independent Cfg operation. Keep selecting the
+         AMD64 operation in LLVM mode so Llvmize can lower its semantics. *)
+      Rewritten (specific Ipackf32, args)
     | Cbswap { bitwidth } ->
       let bitwidth = select_bitwidth bitwidth in
       Rewritten (specific (Ibswap { bitwidth }), args)

@@ -218,6 +218,35 @@ Validation after clearing stale dune boot-context state
 - `make -s llvm-test-one-no-rebuild LLVM_PATH="$PWD/llvm-tool-wrapper.sh" \
   TEST=testsuite/tests/typing-layouts-or-null/atomics.ml` passed: 5 passed.
 
+2026-06-27 AMD64 LLVM `Cpackf32` selection fix:
+`tests/typing-layouts-arrays/test_float32_u_array.ml` failed in the standard
+LLVM backend with `Fatal error: Selection.select_oper`. The failing operation
+was `Cpackf32`: ARM64 keeps selecting its normal semantic pack operation in
+LLVM mode (`Zip1_f32`), but AMD64 LLVM mode bypassed the normal `Ipackf32`
+rewrite and fell through to the generic fatal case even though Llvmize already
+lowers `Amd64_packf32`. The fix is to keep selecting `Ipackf32` for AMD64 LLVM
+mode, matching the ARM pattern of preserving the backend semantic operation and
+letting Llvmize lower it.
+
+Validation:
+
+- `PATH="$PWD/_build/llvm-tools/bin:$PATH" make -s llvm-compiler \
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"` passed after clearing stale
+  `_build/default`, `_build/_bootinstall`, `_build/.db`, and
+  `_build/.filesystem-clock`.
+- Manual fresh-compiler compile and link/run of
+  `gen_u_array.ml`, `test_gen_u_array.ml`, and `test_float32_u_array.ml` with
+  `-extension layouts_beta -llvm-backend` passed using
+  `_build/install/main/bin/ocamlopt.opt` and the existing `_runtest` stdlib.
+- `make -C _build/llvm-tools -j8 llc opt` passed.
+
+Build-state note: `make -s llvm-test-one ... test_float32_u_array.ml` still
+tried to rebuild the boot compiler through the stale generated-source path and
+failed before running the test (`parser.mly`, `flambda_parser.mly`,
+`tools/make_opcodes.mll` missing under `_build/default`). The source fix was
+validated with the freshly built compiler directly; the next full test target
+should first repair/clear that stale install-for-test state.
+
 2026-06-27 optimized AMD64 GC-root fix: the clean
 `LLVM_WRAPPER_LLC_OPT_LEVEL=3 make -s llvm-compiler` build exposed a stale-root
 bug in the shared post-regalloc root listing. X86 byte stack-slot copies
