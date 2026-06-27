@@ -645,3 +645,24 @@ Validation:
 - Focused self-stage testsuite rerun with `tests/llvm-stack-checks` and
   `tests/llvm-codegen` passed: 72 passed, 32 skipped, 0 failed, with 109
   wrapper lines and 56 fresh IR inputs.
+
+2026-06-27 AMD64 SIMD `vinsertf128`/`vextractf128` fix:
+added LLVM lowering for AVX 128-bit lane extraction and insertion on 256-bit
+vectors.  The lowering treats AMD64 `Vec256` as the existing LLVM `<4 x i64>`
+representation and AMD64 `Vec128` as `<2 x i64>`, matching native AMD64
+selection semantics: `vextractf128 imm, src` returns 128-bit lane `imm & 1`,
+and `vinsertf128 imm, base, inserted` replaces the corresponding 128-bit lane
+of `base`.
+
+Validation:
+
+- `bash -n testsuite/tests/llvm-codegen/amd64_simd_smoke.sh` passed.
+- After restoring build state with a fresh native `make -s install`,
+  `make -s llvm-install LLVM_BOOT_BACKEND=0
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"` passed with only same-file
+  copy warnings.
+- `make -s llvm-test-one-no-rebuild ... TEST=testsuite/tests/llvm-codegen/amd64_simd_smoke.ml`
+  passed: 3 passed, 0 failed.
+- `make -s llvm-test-one-no-rebuild ... TEST=testsuite/tests/typing-layouts-arrays/test_int_or_null_array.ml`
+  passed: 4 passed, 0 failed.
+- `make -C _build/llvm-tools -j8 llc opt` passed.

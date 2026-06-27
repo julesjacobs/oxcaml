@@ -4020,6 +4020,45 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     in
     cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
   in
+  let simd_vec256_extract_128 n =
+    let arg = cast_if_needed (load_reg_to_temp t i.arg.(0)) T.vec256 in
+    let lane_base = 2 * (n land 1) in
+    let res =
+      List.init 2 Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let elem =
+               emit_ins t
+                 (I.extractelement ~vector:arg
+                    ~index:(V.of_int (lane_base + lane)))
+             in
+             emit_ins t
+               (I.insertelement ~vector ~index:(V.of_int lane)
+                  ~to_insert:elem))
+           (V.poison T.vec128)
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
+  let simd_vec256_insert_128 n =
+    let base = cast_if_needed (load_reg_to_temp t i.arg.(0)) T.vec256 in
+    let inserted = cast_if_needed (load_reg_to_temp t i.arg.(1)) T.vec128 in
+    let lane_base = 2 * (n land 1) in
+    let res =
+      List.init 2 Fun.id
+      |> List.fold_left
+           (fun vector lane ->
+             let elem =
+               emit_ins t
+                 (I.extractelement ~vector:inserted ~index:(V.of_int lane))
+             in
+             emit_ins t
+               (I.insertelement ~vector
+                  ~index:(V.of_int (lane_base + lane))
+                  ~to_insert:elem))
+           base
+    in
+    cast_if_needed res (T.of_reg i.res.(0)) |> store_into_reg t i.res.(0)
+  in
   let simd_int_broadcast_low_lane ~dst_vector_width_in_bits width_in_bits =
     let src_typ =
       wide_int_vec_type ~vector_width_in_bits:128 ~width_in_bits
@@ -5595,6 +5634,10 @@ let specific t (i : Cfg.basic Cfg.instruction) (op : Arch.specific_operation) =
     | Amd64_simd_instrs.Vbroadcastss_Y_X ->
       simd_int_shuffle_lanes ~src_vector_width_in_bits:128
         ~dst_vector_width_in_bits:256 32 ~src_lane:(fun _ -> 0)
+    | Amd64_simd_instrs.Vextractf128 ->
+      simd_vec256_extract_128 (require_imm instr_id imm)
+    | Amd64_simd_instrs.Vinsertf128 ->
+      simd_vec256_insert_128 (require_imm instr_id imm)
     | _ -> not_implemented_basic ~msg:"amd64 SIMD-specific operation" i)
   | Amd64_simd_mem { mem_operation; instr; imm; addr } ->
     simd_mem ~mem_operation ~instr ~imm ~addr

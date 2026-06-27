@@ -150,6 +150,19 @@ external blend_256_32 :
   = "caml_vec256_unreachable" "caml_avx_vec256_blend_32"
 [@@noalloc] [@@builtin]
 
+external extract_128 :
+  (int[@untagged]) -> (int64x4[@unboxed]) -> (int64x2[@unboxed])
+  = "caml_vec128_unreachable" "caml_avx_vec256_extract_128"
+[@@noalloc] [@@builtin]
+
+external insert_128 :
+  (int[@untagged]) ->
+  (int64x4[@unboxed]) ->
+  (int64x2[@unboxed]) ->
+  (int64x4[@unboxed])
+  = "caml_vec256_unreachable" "caml_avx_vec256_insert_128"
+[@@noalloc] [@@builtin]
+
 let[@inline never] force_alloc () =
   ignore (Array.init 128 (fun i -> i + 1))
 
@@ -199,6 +212,26 @@ let () =
     (int32x8_lane23 r32x8)
     (int32x8_lane45 r32x8)
     (int32x8_lane67 r32x8);
+  let base = int64x4_of_int64s 0L 1L 2L 3L in
+  let half = int64x2_of_int64s 8L 9L in
+  let low_half = extract_128 0 base in
+  let high_half = extract_128 1 base in
+  Printf.printf "%Ld %Ld / %Ld %Ld\n"
+    (int64x2_low_int64 low_half)
+    (int64x2_high_int64 low_half)
+    (int64x2_low_int64 high_half)
+    (int64x2_high_int64 high_half);
+  let insert_low = insert_128 0 base half in
+  let insert_high = insert_128 1 base half in
+  Printf.printf "%Ld %Ld %Ld %Ld / %Ld %Ld %Ld %Ld\n"
+    (int64x4_lane0 insert_low)
+    (int64x4_lane1 insert_low)
+    (int64x4_lane2 insert_low)
+    (int64x4_lane3 insert_low)
+    (int64x4_lane0 insert_high)
+    (int64x4_lane1 insert_high)
+    (int64x4_lane2 insert_high)
+    (int64x4_lane3 insert_high);
   Printf.printf "opaque:%Ld\n"
     (opaque_vec128_sum (int64x2_of_int64s 21L 34L));
   Printf.printf "opaque256:%Ld\n"
@@ -220,6 +253,8 @@ BUILTIN(caml_sse41_vec128_blend_32)
 BUILTIN(caml_sse41_vec128_blend_64)
 BUILTIN(caml_avx_vec256_blend_64)
 BUILTIN(caml_avx_vec256_blend_32)
+BUILTIN(caml_avx_vec256_extract_128)
+BUILTIN(caml_avx_vec256_insert_128)
 
 typedef union {
   __m128i vec;
@@ -295,6 +330,8 @@ expected='3.0 4.0
 2 1
 4 1 6 3
 0000000100000008 000000030000000a 000000050000000c 000000070000000e
+0 1 / 2 3
+8 9 2 3 / 0 1 8 9
 opaque:55
 opaque256:10'
 
