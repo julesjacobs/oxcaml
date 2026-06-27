@@ -238,14 +238,19 @@ Validation:
   `gen_u_array.ml`, `test_gen_u_array.ml`, and `test_float32_u_array.ml` with
   `-extension layouts_beta -llvm-backend` passed using
   `_build/install/main/bin/ocamlopt.opt` and the existing `_runtest` stdlib.
+- After `llvm-install`, manually refreshed `_runtest` from `_install` without
+  invoking the plain non-LLVM `install_for_test` prerequisite path, then
+  `PATH="$PWD/_build/llvm-tools/bin:$PATH" make -s llvm-test-one-no-rebuild \
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh" \
+  TEST=testsuite/tests/typing-layouts-arrays/test_float32_u_array.ml` passed:
+  5 passed, 0 failed.
 - `make -C _build/llvm-tools -j8 llc opt` passed.
 
 Build-state note: `make -s llvm-test-one ... test_float32_u_array.ml` still
-tried to rebuild the boot compiler through the stale generated-source path and
-failed before running the test (`parser.mly`, `flambda_parser.mly`,
-`tools/make_opcodes.mll` missing under `_build/default`). The source fix was
-validated with the freshly built compiler directly; the next full test target
-should first repair/clear that stale install-for-test state.
+routes through the plain `install_for_test` prerequisite, which attempts a
+non-LLVM boot rebuild in this checkout and fails before running the test. The
+usable path after a fresh LLVM install is the no-rebuild harness with `_runtest`
+synced from `_install`.
 
 2026-06-27 optimized AMD64 GC-root fix: the clean
 `LLVM_WRAPPER_LLC_OPT_LEVEL=3 make -s llvm-compiler` build exposed a stale-root
