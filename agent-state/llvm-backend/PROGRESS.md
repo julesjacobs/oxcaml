@@ -912,3 +912,51 @@ Validation:
   default boot compiler and failed on generated-source/fallback files before
   reaching the test.  Use direct installed-compiler repros or the stage harness
   with a coherent stage build until `_runtest` is refreshed.
+
+2026-06-27 AMD64 slow-path SIMD preservation validation:
+after commit `43056b8f7e` (`Preserve AMD64 SIMD regs in LLVM GC slow paths`),
+the standard installed LLVM-backend test suite was rebuilt with the repo LLVM
+tools on `PATH` and run with
+`make -s llvm-test-no-rebuild
+LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"`.
+
+The full standard run improved from the earlier 30-failure baseline to:
+
+- 6806 passed
+- 312 skipped
+- 4 failed
+
+Resolved failure clusters:
+
+- `tests/typing-layouts-arrays` passed in the full run, including vector,
+  product, scannable product, nullable product, and unboxed scalar array cases.
+- `tests/typing-layouts-iarrays` passed in the full run, including moving-GC,
+  product, scannable product, nullable product, and unboxed scalar iarray cases.
+- `tests/unboxed-primitive-args` passed in the full run on AMD64.
+- Additional relevant GC/local/stack sanity passed in the same run, including
+  `tests/statmemprof`, `tests/runtime-errors/stackoverflow.ml`,
+  `tests/typing-local/localgcbug.ml`, `tests/typing-local`, weak/ephemeron
+  tests, vector array tests, and AMD64 layout `caml_modify` cases.
+
+Remaining standard LLVM failures:
+
+- `tests/asmcomp/movsx_small_ints.ml` line 8: native assembler-output harness
+  expects `movsx_small_ints.s`; LLVM backend does not leave the expected `.s`.
+- `tests/asmcomp/shift_mem_cl.ml` line 4: same assembler-output harness shape.
+- `tests/native-cfi-stepping/test_cfi.ml` line 12: `gdb` output differs from
+  reference, with repeated backtrace failures around `caml_raise_exn`.
+- `tests/syntactic-arity/max_arity.ml` line 166: generated executable prints
+  `f (): No exception.` then segfaults.  This is the next substantive AMD64
+  backend target and likely belongs in calling-convention / stack-argument
+  lowering; compare the ARM LLVM backend generalization and the native AMD64
+  backend rather than preserving old LLVM AMD64 behavior.
+
+Next implementation priority:
+
+1. Fix `syntactic-arity/max_arity.ml` by auditing AMD64 OxCaml calling
+   convention lowering for high arity, stack arguments, tail calls, and partial
+   application paths against native AMD64.
+2. Fix CFI/exception stepping so LLVM AMD64 has native-quality unwind metadata
+   around exception paths, especially `caml_raise_exn`.
+3. Treat the two `asmcomp` failures as test-harness/codegen-output integration
+   unless reduced evidence shows a semantic backend issue.
