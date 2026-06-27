@@ -754,3 +754,63 @@ tools/run-llvm-stage5-ocamltest.sh` with `tests/mixed-blocks` in the list
 reported 43 passed, 2 skipped, 0 failed. This clears the prior
 `generated_native_test.ml` frame-descriptor abort as stale build state, not a
 current AMD64 LLVM backend failure.
+
+2026-06-27 wrapper `llc` optimization level fix for AMD64 stack checks:
+the fresh self-stage2 stack-check run exposed a real toolchain problem in
+`tests/llvm-stack-checks/compile_challenges_amd64.ml`: compiling the generated
+deep-let stress file with `OCAMLRUNPARAM=b,l=2000000` raised `Stack overflow`.
+The reduced reproducer was normal compiler compilation of a generated file, not
+frontend roots and not a second AMD64-specific stack-check mechanism.
+
+The failing compiler object had a huge `type_expect_` frame:
+`lea -0x9120(%rsp), %r10` and `sub $0x8f90, %rsp`.  Keeping IR showed the
+wrapper's `opt` pipeline reduced the pre-opt IR from 5550 allocas to 12, but
+then the wrapper ran `llc -O0` by default even when the compiler passed `-O3`.
+Manual codegen of the same optimized IR produced the bad ~36KB frame at
+`llc -O0`, while `llc -O3` produced an ordinary sub-KB frame.  The wrapper now
+defaults `llc` to `-O3`, maps recognized clang-style `-O*` arguments to the
+corresponding `llc` optimization level, and still lets
+`LLVM_WRAPPER_LLC_OPT_LEVEL` override the choice for diagnostics.
+
+Validation:
+
+- `bash -n tools/llvm-rs4gc-llc-wrapper.sh` passed.
+- Direct shim testing of wrapper argument parsing confirmed the default
+  `llc -O3` behavior, bare `-O`/`-O1` mapping to `llc -O1`,
+  `-O2`/`-Os`/`-Oz` mapping to `llc -O2`, `-O3`/`-O4`/`-Ofast` mapping to
+  `llc -O3`, and `LLVM_WRAPPER_LLC_OPT_LEVEL` overriding a later `-O3`.
+- Direct wrapper codegen of the saved `typecore.ll` defaulted to optimized
+  codegen and emitted `type_expect_` with `leaq -688(%rsp), %r10` rather than
+  the previous `-37152` check.
+- After clearing stale main build state, `make -s llvm-compiler
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"` passed, and direct
+  compilation of the reduced deep-let file with
+  `_build/install/main/bin/ocamlopt.opt` passed under
+  `OCAMLRUNPARAM=b,l=2000000`.
+- After clearing stale install state, `make -s llvm-install
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"` passed; the installed
+  `type_expect_` prologue used `lea -0x2b0(%rsp), %r10`, and the same direct
+  deep-let compilation passed with `_install/bin/ocamlopt.opt`.
+- `make -s llvm-test-one-no-rebuild
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh" DIR=llvm-stack-checks`
+  passed: 8 passed, 2 skipped, 0 failed.
+- `make -s llvm-test-one-no-rebuild
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh" DIR=llvm-codegen` passed:
+  64 passed, 30 skipped, 0 failed.
+- A fresh stage1 LLVM self-stage install and fresh stage2 LLVM self-stage
+  install both passed with real wrapper coverage.  Stage1 wrapper counts were
+  boot 826 fresh IR inputs, runtime 73, main 1103, final smoke 2; stage2 counts
+  were boot 829, runtime 73, main 1096, final smoke 2.  All smoke programs
+  printed `55`.
+- Focused self-stage2 `tests/llvm-stack-checks` passed with
+  `SELF_STAGE=2 GENERATE_LIST=0 LLVM_TESTSUITE_PARALLEL=0
+  LLVM_WRAPPER="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"`: 8 passed, 2 skipped,
+  0 failed, with 14 wrapper lines and 7 fresh IR inputs.
+- `make -C _build/llvm-tools -j8 llc opt` passed.
+- After the review-requested `-O`/`-Ofast` mapping cleanup,
+  `PATH="$PWD/_build/llvm-tools/bin:$PATH" make -s
+  llvm-test-one-no-rebuild LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"
+  DIR=llvm-stack-checks` passed again: 8 passed, 2 skipped, 0 failed.  Running
+  without the repo LLVM tools on `PATH` fails with stock `opt` rejecting
+  `oxcaml_fpcc`, which is an invocation/environment error rather than a backend
+  regression.

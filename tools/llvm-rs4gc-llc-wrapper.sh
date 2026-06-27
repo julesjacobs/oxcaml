@@ -12,7 +12,20 @@ input=
 mode=asm
 emit_llvm=0
 compile_only=0
+llc_opt_level=${LLVM_WRAPPER_LLC_OPT_LEVEL:-3}
 llc_args=()
+
+set_llc_opt_level_from_arg() {
+  if [ -n "${LLVM_WRAPPER_LLC_OPT_LEVEL:-}" ]; then
+    return
+  fi
+  case "$1" in
+    -O0) llc_opt_level=0 ;;
+    -O|-O1) llc_opt_level=1 ;;
+    -O2|-Os|-Oz) llc_opt_level=2 ;;
+    -O3|-O4|-Ofast) llc_opt_level=3 ;;
+  esac
+}
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -34,7 +47,11 @@ while [ "$#" -gt 0 ]; do
       compile_only=1
       shift
       ;;
-    -S|-O*|-Wno-override-module|-g|-Wno-trigraphs)
+    -O*)
+      set_llc_opt_level_from_arg "$1"
+      shift
+      ;;
+    -S|-Wno-override-module|-g|-Wno-trigraphs)
       shift
       ;;
     -mllvm)
@@ -92,7 +109,7 @@ if [ "$mode" = "ir" ]; then
     }
     trap cleanup EXIT
     opt -S -passes="$pipeline" "$input" -o "$tmp"
-    llc -O"${LLVM_WRAPPER_LLC_OPT_LEVEL:-0}" --relocation-model=pic \
+    llc -O"$llc_opt_level" --relocation-model=pic \
       "${llc_args[@]}" "$tmp" -o "$out"
   fi
 elif [ "$compile_only" = 1 ]; then
