@@ -245,18 +245,25 @@ $(ocamldir)/dune.runtime_selection:
 .PHONY: bootstrap-default-dune-includes
 bootstrap-default-dune-includes: duneconf/dune duneconf/boot.ws
 	mkdir -p _build/default/duneconf
+	rm -f _build/default/duneconf/camlinternalquote_if_missing_from_stdlib
 	if ocaml -e 'open CamlinternalQuote' 2>/dev/null; then \
 	  echo '()' > _build/default/duneconf/camlinternalquote_if_missing_from_stdlib; \
 	else \
 	  echo 'camlinternalQuote' > _build/default/duneconf/camlinternalquote_if_missing_from_stdlib; \
 	fi
 	mkdir -p _build/default
+	rm -f _build/default/ocamlopt_flags.sexp \
+	  _build/default/boot_oc_cflags.sexp \
+	  _build/default/oc_cflags.sexp \
+	  _build/default/oc_cppflags.sexp \
+	  _build/default/sharedlib_cflags.sexp
 	cp ocamlopt_upstream_flags.sexp _build/default/ocamlopt_flags.sexp
 	cp boot_oc_cflags.sexp _build/default/boot_oc_cflags.sexp
 	cp oc_cflags.sexp _build/default/oc_cflags.sexp
 	cp oc_cppflags.sexp _build/default/oc_cppflags.sexp
 	cp sharedlib_cflags.sexp _build/default/sharedlib_cflags.sexp
 	mkdir -p _build/default/middle_end/flambda2/algorithms
+	rm -f _build/default/middle_end/flambda2/algorithms/ocamlopt_flags.sexp
 	cp middle_end/flambda2/algorithms/ocamlopt_upstream_flags.sexp \
 	  _build/default/middle_end/flambda2/algorithms/ocamlopt_flags.sexp
 
