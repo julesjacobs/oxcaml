@@ -536,3 +536,48 @@ Next work should reduce that self-boot frame-descriptor failure with a
 single-worker boot-context build and fix the AMD64 frame/frametable mechanism
 by generalizing the current ARM LLVM backend design, not by adding frontend
 roots or preserving the old x86 LLVM behavior.
+
+2026-06-27 clean generated-include overwrite fix:
+the bootstrap include materialization target also has to handle the case where
+Dune already generated the files read-only.  It now removes the generated probe
+and flag sexps before rewriting/copying them.
+
+Validation:
+
+- After the `rm -f` cleanup, `make -s llvm-install LLVM_BOOT_BACKEND=0
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"` passed, with only same-file
+  `cp` warnings.
+
+2026-06-27 AMD64 no-dynamic-realignment fix:
+the clean self-stage frame-descriptor failure reduced to LLVM-generated AMD64
+functions using dynamically realigned frames (`push %rbp; mov %rsp,%rbp; and
+$-32,%rsp; sub ...,%rsp`).  The OxCaml frametable records a static frame size,
+so that dynamic padding cannot be described correctly during stack scanning.
+The fix is to give all x86-64 LLVM-generated OxCaml functions the LLVM
+`"no-realign-stack"` function attribute, alongside the existing AMD64 red-zone
+handling.  This prevents MachineFrameInfo from creating a dynamically realigned
+frame in the first place, matching the native AMD64 backend's static stack
+model rather than adding a separate x86 LLVM mechanism.
+
+Validation with `LLVM_WRAPPER_LLC_OPT_LEVEL=3`,
+`LLVM_BOOT_BACKEND=0`, and `_build/llvm-tools/bin` first on `PATH`:
+
+- Clean `make -s llvm-compiler ...` passed after removing `_build/default`,
+  `_build/_bootinstall`, `_build/.db`, and `_build/.filesystem-clock`.
+- `make -s llvm-install ...` passed, with only same-file `cp` warnings.
+- `make -s llvm-test-one ... TEST=llvm-codegen/no_realign_stack_attr.ml`
+  passed: 4 passed, 0 failed.
+- `make -s llvm-test-one-no-rebuild ... DIR=llvm-stack-checks` passed:
+  8 passed, 2 skipped, 0 failed.
+- `make -s llvm-test-one-no-rebuild ... DIR=llvm-gc-roots` passed:
+  12 passed, 6 skipped, 0 failed.
+- `make -s llvm-test-one-no-rebuild ... DIR=llvm-codegen` passed:
+  64 passed, 30 skipped, 0 failed.
+- Clean `make -s llvm-self-stage-install
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"` passed and produced
+  `_llvm_self_stage_install/bin/ocamlopt.opt`.
+
+Caveat: the self-stage wrapper diagnostics still printed zero wrapper/fresh-IR
+counts.  The target completed successfully and got past the previous missing
+frame-descriptor blocker, but the wrapper-count instrumentation should be
+understood before treating the self-stage result as full LLVM coverage.

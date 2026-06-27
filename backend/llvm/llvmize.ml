@@ -7202,9 +7202,10 @@ let fun_attrs ~has_try ~cfg_stack_check_bytes ~cfg_stack_check_before_bytes
          else [])
       in
       if Target_system.architecture () = Target_system.X86_64
-      then No_red_zone :: stack_check_attrs
+      then No_red_zone :: No_realign_stack :: stack_check_attrs
       else stack_check_attrs
-    | Target_system.X86_64, true -> if has_try then [No_red_zone] else []
+    | Target_system.X86_64, true ->
+      if has_try then [No_red_zone; No_realign_stack] else [No_realign_stack]
     | Target_system.AArch64, true -> []
     | ( ( Target_system.IA32 | Target_system.ARM | Target_system.POWER
         | Target_system.Z | Target_system.Riscv ),
