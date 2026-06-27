@@ -124,6 +124,11 @@ validation then passed:
   -> 12 passed, 6 skipped, 0 failed.
 - `make -s llvm-test-one LLVM_PATH="$PWD/llvm-tool-wrapper.sh" DIR=llvm-codegen`
   -> 60 passed, 30 skipped, 0 failed.
+- `STAGE0_INSTALL="$PWD/_install" LLVM_WRAPPER="$PWD/llvm-tool-wrapper.sh" \
+  tools/build-llvm-self-stage-install.sh` completed and produced
+  `_llvm_self_stage_install`. Wrapper counts: boot 829 fresh IR inputs, runtime
+  73, main 1107, final self-stage smoke 2. Both boot and final smoke programs
+  printed `55`.
 
 Rejected experiment: tried to make AMD64 LLVM stack-growth helpers terminate
 their `%rbp` chain like AArch64 terminates `x29`, but this is incorrect for
