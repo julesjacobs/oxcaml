@@ -218,6 +218,66 @@ Validation after clearing stale dune boot-context state
 - `make -s llvm-test-one-no-rebuild LLVM_PATH="$PWD/llvm-tool-wrapper.sh" \
   TEST=testsuite/tests/typing-layouts-or-null/atomics.ml` passed: 5 passed.
 
+2026-06-27 optimized LLVM pipeline blocker and buildable RS4GC wrapper:
+with the clang-like local wrapper (`opt -O3` then `llc -O3`), a clean
+`make -s llvm-compiler` failed in the boot compiler while lowering optimized
+`utils/file_sections.ml`:
+
+```
+LLVM ERROR: unrematerialized OxCaml derived pointer across statepoint
+```
+
+The reduced failing function was extracted with:
+
+```
+_build/llvm-tools/bin/llvm-extract \
+  --func=$'\001camlOxcaml_utils__File_sections__unsafe_blit_to_array_8_24_code' \
+  -S /tmp/oxcaml-rs4gc-fails/optimized.333780.ll \
+  -o /tmp/file_sections.unsafe_blit.ll
+```
+
+`llc -O3` creates an LSR pointer induction PHI for an addrspace(1) array slot:
+`%lsr.iv1 = phi ptr addrspace(1) [ %uglygep2.remat, %L623 ],
+[ %uglygep.remat, %L540 ]`, base `%3`.  The current RS4GC single-base PHI
+rematerializer correctly refuses to relocate this interior pointer
+independently, but it also cannot yet rematerialize the LSR form.  The same
+reducer passes if RS4GC runs after IR optimization and before `llc`:
+
+```
+_build/llvm-tools/bin/opt -S \
+  -passes='default<O3>,rewrite-statepoints-for-gc,verify' \
+  /tmp/file_sections.unsafe_blit.ll -o /tmp/file_sections.rs4gc.ll
+_build/llvm-tools/bin/llc -O3 --relocation-model=pic --frame-pointer=all \
+  -mattr=+avx,+avx2 -mattr=+avx \
+  /tmp/file_sections.rs4gc.ll -o /tmp/file_sections.rs4gc.s
+```
+
+However, a clean boot compiler built with `opt
+default<O3>,rewrite-statepoints-for-gc,verify` followed by `llc -O3` was
+miscompiled: `_build/_bootinstall/bin/ocamlc.opt` deterministically segfaulted
+while compiling `stdlib/camlinternalOO.ml`, with gdb showing the crash at
+`typing/types.ml:1328` in `Types.get_level`, called from
+`Ctype.nondep_type_rec_inner`.  The crash happened after several minor/major
+collections, so post-RS4GC codegen optimization remains suspect for stack-map
+or root metadata.
+
+Added `tools/llvm-rs4gc-llc-wrapper.sh` as a checked-in build wrapper.  It runs
+`opt -passes='default<O3>,rewrite-statepoints-for-gc,verify'` and defaults to
+`llc -O0` after RS4GC; `LLVM_WRAPPER_LLC_OPT_LEVEL=3` reproduces the optimized
+post-RS4GC path for follow-up debugging.  Validation with the conservative
+default after clearing `_build/default`, `_build/_bootinstall`,
+`_build/runtime_stdlib`, `_build/install`, `_build/.db`, and
+`_build/.filesystem-clock`:
+
+```
+PATH="$PWD/_build/llvm-tools/bin:$PATH" \
+LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh" make -s llvm-compiler
+```
+
+passed with the checked-in wrapper.  Next step: reduce and fix the
+`LLVM_WRAPPER_LLC_OPT_LEVEL=3` miscompile so the final AMD64 path can regain
+optimized post-RS4GC codegen and performance measurements.
+
 `llvm-codegen` no-rebuild directory run got through the new
 `amd64_core_ops.ml` checks and still has the known `raw_stack_word_amd64.ml`
 CMI-mismatch harness failure. Attempted to spawn the requested `gpt-5.5-high`
