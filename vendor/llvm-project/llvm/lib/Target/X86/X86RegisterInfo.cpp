@@ -878,6 +878,28 @@ X86RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   int FrameIndex = MI.getOperand(FIOperandNum).getIndex();
   unsigned Opc = MI.getOpcode();
 
+  if ((Opc == TargetOpcode::STACKMAP || Opc == TargetOpcode::PATCHPOINT ||
+       Opc == TargetOpcode::STATEPOINT) &&
+      isOxCamlCallingConv(MF.getFunction().getCallingConv())) {
+    Register FrameReg;
+    StackOffset Offset = TFI->getFrameIndexReferencePreferSP(
+        MF, FrameIndex, FrameReg, /*IgnoreSPUpdates=*/false);
+    Offset += StackOffset::getFixed(MI.getOperand(FIOperandNum + 1).getImm());
+    if (FrameReg == StackPtr) {
+      const X86MachineFunctionInfo *X86FI =
+          MF.getInfo<X86MachineFunctionInfo>();
+      Offset += StackOffset::getFixed(SPAdj);
+      Offset += StackOffset::getFixed(X86FI->getOxCamlActiveTrapBytes(MI));
+    } else {
+      report_fatal_error("[OxCaml] statepoint stack location did not "
+                         "resolve SP-relative; the frametable cannot "
+                         "describe it");
+    }
+    MI.getOperand(FIOperandNum).ChangeToRegister(FrameReg, false);
+    MI.getOperand(FIOperandNum + 1).ChangeToImmediate(Offset.getFixed());
+    return false;
+  }
+
   // Determine base register and offset.
   int FIOffset;
   Register BasePtr;

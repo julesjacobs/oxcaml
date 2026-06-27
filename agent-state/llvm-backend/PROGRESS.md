@@ -432,3 +432,47 @@ The likely next fix needs a principled AMD64 frame-table model for dynamically
 realigned OCaml frames, or a way to make only OCaml-callable frames statically
 aligned without the frame-size explosion above.  Do not commit either rejected
 experiment.
+
+2026-06-27 AMD64 statepoint frame-index cleanup:
+changed x86 frame-index elimination so OxCaml `STACKMAP` / `PATCHPOINT` /
+`STATEPOINT` operands follow the AArch64 contract.  Stackmap locations for
+OxCaml calling conventions must resolve relative to `RSP`, include the
+statepoint operand immediate, `SPAdj`, and active trap bytes, and fail closed
+if LLVM tries to describe an FP/base-pointer location.  This generalizes the
+ARM mechanism to AMD64 rather than adding a frontend-root fallback or preserving
+old x86 behavior.
+
+Validation:
+
+- `make -C _build/llvm-tools -j8 llc opt` passed.
+- Clean optimized-wrapper rebuild passed:
+  `LLVM_WRAPPER_LLC_OPT_LEVEL=3 make -s llvm-compiler
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"`.
+- `make -s llvm-install LLVM_WRAPPER_LLC_OPT_LEVEL=3
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"` passed, with only
+  same-file `cp` warnings.
+- `make -s llvm-test-one-no-rebuild LLVM_WRAPPER_LLC_OPT_LEVEL=3
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh" DIR=llvm-stack-checks`
+  passed: 8 passed, 2 skipped, 0 failed.
+- `make -s llvm-test-one-no-rebuild LLVM_WRAPPER_LLC_OPT_LEVEL=3
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh" DIR=llvm-gc-roots`
+  passed: 12 passed, 6 skipped, 0 failed.
+
+Build-state note: `llvm-test-one-no-rebuild` uses `_runtest/ocamlopt.opt`,
+which points at `_install/bin/ocamlopt.opt`.  Rebuilding only
+`make llvm-compiler` leaves `_install` stale; that stale compiler reproduced
+`compile_challenges_amd64.ml` stack overflow even though direct replay with
+`_build/install/main/bin/ocamlopt.opt` passed.  Running `make llvm-install`
+fixed the focused stack-check result.
+
+Remaining validation issues not fixed by this patch:
+
+- `make -s llvm-test-one-no-rebuild ... DIR=llvm-codegen` reached 58 passed,
+  30 skipped, 2 failed.  `raw_stack_word_amd64.ml` failed from stale
+  `_runtest/otherlibs/stdlib_upstream_compatible` CMIs disagreeing with the
+  rebuilt runtime stdlib; refreshing `_runtest` through `llvm-test-one`
+  currently needs default Dune build-context repair after the clean LLVM build.
+- `stack_check_size_contract_amd64.ml` failed with
+  `noalloc_outgoing_stack_args: expected LLVM prologue stack check`; inspect
+  this next against the native AMD64 stack-check contract before changing the
+  test or frame lowering.
