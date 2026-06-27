@@ -906,7 +906,7 @@ class GCPointerAggregateExploder {
   DenseMap<Value *, SmallVector<Value *, 4>> LeafValues;
   DenseSet<PHINode *> PHIsWithPlaceholders;
   DenseSet<PHINode *> FilledPHIs;
-  SmallVector<Instruction *, 32> MaybeDead;
+  SmallVector<WeakTrackingVH, 32> MaybeDead;
 
   static void collectLeaves(Type *Ty, SmallVectorImpl<unsigned> &Prefix,
                             SmallVectorImpl<AggregateLeafInfo> &Leaves) {
@@ -1195,7 +1195,10 @@ public:
 
   bool eraseDeadInstructions() {
     bool Changed = false;
-    for (Instruction *I : llvm::reverse(MaybeDead)) {
+    for (WeakTrackingVH &Handle : llvm::reverse(MaybeDead)) {
+      auto *I = dyn_cast_or_null<Instruction>(Handle);
+      if (!I)
+        continue;
       if (!I->use_empty())
         continue;
       RecursivelyDeleteTriviallyDeadInstructions(I);

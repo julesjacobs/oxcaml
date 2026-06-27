@@ -224,3 +224,40 @@ CMI-mismatch harness failure. Attempted to spawn the requested `gpt-5.5-high`
 code-review agent for this commit, but the multi-agent tool reported the
 thread limit was reached; local review with `git diff --check`, `git diff`,
 and `git status --short` found no issue.
+
+2026-06-27 optimized LLVM tool path status:
+the local `llvm-tool-wrapper.sh` had been sending real IR-to-assembly builds
+straight to `llc -O3`, skipping the `opt -O3` step implied by the compiler's
+clang command line. After changing the untracked local wrapper to run
+`opt -O3` before `llc`, a reduced `runtime-errors/stackoverflow.ml` compile
+initially crashed in `RewriteStatepointsForGC::exposeGCPointersInAggregates`.
+The source fix in `vendor/llvm-project/llvm/lib/Transforms/Scalar/RewriteStatepointsForGC.cpp`
+changes that pass's `MaybeDead` queue from raw `Instruction *` to
+`WeakTrackingVH`, so recursive deletion can null out instructions that were
+queued but already deleted as operands of another dead aggregate instruction.
+
+Validation:
+
+- Rebuilt local LLVM `opt` and `llc` with
+  `cmake --build _build/llvm-tools --target opt llc -- -j8`.
+- `_build/llvm-tools/bin/llc -O3 ... /tmp/stackoverflow.optimized.ll` no
+  longer crashes.
+- `_build/llvm-tools/bin/llc -O3 ... /tmp/stackoverflow.stackoverflow-fns.optimized.ll`
+  no longer crashes.
+- Direct `runtime-errors/stackoverflow.ml` compile/run with the optimized
+  wrapper now matches the expected nested overflow output.
+- `make -s llvm-test-one-no-rebuild LLVM_PATH="$PWD/llvm-tool-wrapper.sh" \
+  TEST=testsuite/tests/runtime-errors/stackoverflow.ml` passed: 4 passed.
+- `_build/llvm-tools/bin/opt -S -passes=rewrite-statepoints-for-gc,verify \
+  vendor/llvm-project/llvm/test/Transforms/RewriteStatepointsForGC/oxcaml-gc-aggregate-explosion.ll`
+  passed.
+- The same `opt` command with `-rs4gc-fail-on-unhandled-gc-aggregate` passed.
+
+Remaining optimized-pipeline blocker: a clean `make -s llvm-compiler` with the
+optimized wrapper now reaches real RS4GC derived-pointer guard failures in
+`tools/simdgen/simdgen.ml`, `utils/file_sections.ml`, and
+`middle_end/flambda2/types/grammar/type_grammar.ml`:
+`LLVM ERROR: unrematerialized OxCaml derived pointer across statepoint`.
+This confirms the old wrapper was hiding optimized-pipeline backend gaps. Next
+work should reduce and fix the derived-pointer rematerialization failures
+rather than weakening the guard or returning to the no-opt validation path.
