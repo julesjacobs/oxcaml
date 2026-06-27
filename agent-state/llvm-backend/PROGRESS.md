@@ -405,3 +405,30 @@ optimized wrapper now reaches real RS4GC derived-pointer guard failures in
 This confirms the old wrapper was hiding optimized-pipeline backend gaps. Next
 work should reduce and fix the derived-pointer rematerialization failures
 rather than weakening the guard or returning to the no-opt validation path.
+
+2026-06-27 AMD64 stack realignment investigation:
+`testsuite/tests/mixed-blocks/generated_native_test.ml` still exposes an
+LLVM-built compiler stack-scan failure.  The failing compile aborts in
+`caml_scan_stack` while scanning the compiler process, not the generated test
+program.  A gdb walk found a realigned AMD64 frame in
+`Flambda2_from_lambda__Closure_conversion_aux.create`; LLVM emits
+`push %rbp; mov %rsp,%rbp; and $-32,%rsp; sub ...,%rsp`, but the OxCaml frame
+descriptor is static and does not describe the dynamic padding correctly.
+
+Rejected source experiments:
+
+- Disabling X86 stack realignment for `gc "oxcaml"`/`gc "ocaml"` functions
+  made frames static and fixed the immediate mixed-block compile, but it grew
+  compiler frames enough that `llvm-stack-checks/compile_challenges_amd64.ml`
+  failed the large-stack compile with `Fatal error: exception Stack overflow`.
+  That is not acceptable for stack-check quality.
+- Carrying `HasStackRealignment`/`MaxStackAlignment` through `StackMaps` and
+  compensating in `OxCamlGCPrinter` also failed.  Adding max alignment
+  overshot the scan (the next plausible code return addresses were below the
+  scanner SP); changing the compensation to only a saved-frame-pointer slot
+  still failed the mixed-block compile with a missing frame descriptor.
+
+The likely next fix needs a principled AMD64 frame-table model for dynamically
+realigned OCaml frames, or a way to make only OCaml-callable frames statically
+aligned without the frame-size explosion above.  Do not commit either rejected
+experiment.
