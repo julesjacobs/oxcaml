@@ -146,3 +146,47 @@ breaks execution. The experiment was fully reverted before the passing build
 and tests above. Any future AMD64 frame-chain cleanup must preserve native
 AMD64 frame-pointer rewriting semantics, not copy the AArch64 clobbering
 approach literally.
+
+2026-06-27 self-stage2 full test-suite status for AMD64 LLVM:
+`SELF_STAGE=2 LLVM_TESTSUITE_JOBS=8 tools/run-llvm-stage5-ocamltest.sh`
+completed serially because GNU parallel was unavailable. Final result:
+6730 passed, 301 skipped, 38 failed, 0 not started, 0 unexpected errors.
+Wrapper totals: 6500 wrapper lines, 3250 fresh IR inputs.
+
+Failure clusters to reduce and fix:
+
+- Atomic compare-exchange semantics:
+  `tests/lib-atomic/test_atomic_cmpxchg.ml` native fails with
+  `Assert_failure("test_atomic_cmpxchg.ml", 11, 9)`, and
+  `tests/typing-layouts-or-null/atomics.ml` fails in native variants at
+  `Assert_failure("atomics.ml", 79, 14)`. Treat these as one AMD64 LLVM
+  primitive-lowering bug and compare against native AMD64 lowering.
+- Stack-check / stack-overflow quality:
+  `tests/llvm-stack-checks/compile_challenges_amd64.ml` fails with compiler
+  stack overflow under self-stage2; `tests/misc/pr7168.ml` fails in both
+  bytecode and native compiler modes with stack overflow; and
+  `tests/runtime-errors/stackoverflow.ml` native catches overflow too early
+  compared with the reference output. Standard installed `-llvm-backend`
+  `llvm-stack-checks` passed earlier, so reduce which failures only reproduce
+  with the self-stage2 compiler.
+- GC/frame descriptor correctness:
+  `tests/mixed-blocks/generated_native_test.ml` compiles but aborts during GC
+  with `caml_scan_stack: missing frame descriptor retaddr=(nil)`. The older
+  generated mixed-block native test passed. Reduce this against the standard
+  installed `-llvm-backend` compiler first; if it only reproduces under
+  self-stage2, keep the smallest self-stage2 reproducer.
+- LLVM test harness/setup issues:
+  `tests/llvm-codegen/raw_stack_word_amd64.ml` failed with inconsistent CMI
+  assumptions involving `Stdlib_upstream_compatible`; and
+  `tests/llvm-codegen/stack_check_size_contract_amd64.ml` failed because
+  `/tmp/oxcaml-clang-wrapper` was missing. These look like self-stage2
+  harness/env issues, not source backend failures.
+- Missing LLVM lowering coverage:
+  `tests/templates/basic/probe.ml` and
+  `tests/typing-layouts-or-null/probe.ml` fail with
+  `Llvmize: unimplemented instruction: probe`. Many
+  `tests/typing-layouts-arrays` native failures are the same AMD64 SIMD gap,
+  typically `Llvmize: unimplemented instruction ... vinsertf128`; the
+  `test_float32_u_array.ml` variants instead report `Selection.select_oper`.
+  Treat the repeated generated product/vector array failures as one SIMD
+  lowering cluster; related scalar unboxed arrays and product iarrays passed.
