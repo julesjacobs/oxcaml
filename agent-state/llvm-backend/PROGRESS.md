@@ -581,3 +581,6 @@ Caveat: the self-stage wrapper diagnostics still printed zero wrapper/fresh-IR
 counts.  The target completed successfully and got past the previous missing
 frame-descriptor blocker, but the wrapper-count instrumentation should be
 understood before treating the self-stage result as full LLVM coverage.
+
+Post-commit validation at branch head: `make -C _build/llvm-tools -j8 llc opt`
+passed.
