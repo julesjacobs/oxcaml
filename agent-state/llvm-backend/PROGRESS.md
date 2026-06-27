@@ -122,6 +122,8 @@ validation then passed:
   -> 8 passed, 2 skipped, 0 failed.
 - `make -s llvm-test-one LLVM_PATH="$PWD/llvm-tool-wrapper.sh" DIR=llvm-gc-roots`
   -> 12 passed, 6 skipped, 0 failed.
+- `make -s llvm-test-one LLVM_PATH="$PWD/llvm-tool-wrapper.sh" DIR=llvm-codegen`
+  -> 60 passed, 30 skipped, 0 failed.
 
 Rejected experiment: tried to make AMD64 LLVM stack-growth helpers terminate
 their `%rbp` chain like AArch64 terminates `x29`, but this is incorrect for
