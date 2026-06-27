@@ -472,10 +472,10 @@ if [ "$(cfg_stack_check_bytes noalloc_outgoing_stack_args)" = "0" ]; then
 fi
 case "$host_arch" in
   x86_64 | amd64)
-    # On AMD64, LLVM reserves outgoing C stack-argument space in the machine
-    # frame before the ordinary CFG stack check runs, so the prologue needs its
-    # own check too.
-    assert_has_prologue_realloc noalloc_outgoing_stack_args
+    # The ordinary CFG stack check includes outgoing C stack-argument space and
+    # runs before x86 lowers that outgoing call frame, so a second prologue
+    # check would be redundant in the normal CFG-stack-check path.
+    assert_no_prologue_realloc noalloc_outgoing_stack_args
     ;;
   *)
     assert_no_prologue_realloc noalloc_outgoing_stack_args

@@ -476,3 +476,38 @@ Remaining validation issues not fixed by this patch:
   `noalloc_outgoing_stack_args: expected LLVM prologue stack check`; inspect
   this next against the native AMD64 stack-check contract before changing the
   test or frame lowering.
+
+2026-06-27 AMD64 stack-check contract cleanup:
+inspected `stack_check_size_contract_amd64.ml` after the statepoint
+SP-relative change.  The failing `noalloc_outgoing_stack_args` case emits an
+ordinary CFG stack check for 352 bytes before the late x86 outgoing
+stack-argument subtraction.  Forcing `X86FrameLowering` to add
+`getMaxCallFrameSize()` to the prologue-check prefix made the next clean LLVM
+boot fail with widespread `caml_scan_stack: missing frame descriptor` crashes,
+so that experiment was rejected.  The correct normal-mode contract is that the
+ordinary CFG stack check covers outgoing C stack arguments; prologue checks
+only cover stack use before an ordinary CFG check can run.  The
+`no_cfg_stack_checks` variant still verifies the old/no-CFG mode gets the
+prologue check.
+
+Build-state note: after a failed LLVM self-boot, break the cycle with a native
+boot compiler while still building the main compiler with LLVM:
+`make -s llvm-compiler LLVM_BOOT_BACKEND=0
+LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"`, followed by
+`make -s llvm-install LLVM_BOOT_BACKEND=0
+LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"`.  Keep
+`$PWD/_build/llvm-tools/bin` on `PATH`; otherwise the wrapper may find a
+system `opt` that rejects `oxcaml_fpcc` IR.
+
+Validation after the cleanup, with `LLVM_WRAPPER_LLC_OPT_LEVEL=3`,
+`LLVM_BOOT_BACKEND=0`, and `_build/llvm-tools/bin` first on `PATH`:
+
+- `make -C _build/llvm-tools -j8 llc opt` passed.
+- `make -s llvm-compiler ...` passed.
+- `make -s llvm-install ...` passed, with only same-file `cp` warnings.
+- `make -s llvm-test-one-no-rebuild ... DIR=llvm-stack-checks` passed:
+  8 passed, 2 skipped, 0 failed.
+- `make -s llvm-test-one-no-rebuild ... DIR=llvm-gc-roots` passed:
+  12 passed, 6 skipped, 0 failed.
+- `make -s llvm-test-one-no-rebuild ... DIR=llvm-codegen` passed:
+  60 passed, 30 skipped, 0 failed.
