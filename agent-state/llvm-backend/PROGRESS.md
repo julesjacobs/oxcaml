@@ -511,3 +511,28 @@ Validation after the cleanup, with `LLVM_WRAPPER_LLC_OPT_LEVEL=3`,
   12 passed, 6 skipped, 0 failed.
 - `make -s llvm-test-one-no-rebuild ... DIR=llvm-codegen` passed:
   60 passed, 30 skipped, 0 failed.
+
+2026-06-27 AMD64 clean self-stage build-state cleanup:
+clean `llvm-self-stage-install` runs can remove `_build/default` while the
+boot workspace still expects generated default-context include files.  Added a
+`bootstrap-default-dune-includes` make target, called before `boot-compiler`,
+to materialize the generated default-context files that the boot workspace
+references: the CamlinternalQuote probe result, project-root flag sexps, and
+the local Flambda2 algorithms `ocamlopt_flags.sexp`.
+
+Validation from a clean boot/default context:
+
+- Removed `_build/default`, `_build/_bootinstall`, `_build/.db`, and
+  `_build/.filesystem-clock`.
+- Ran `make -s llvm-self-stage-install
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"` with
+  `LLVM_WRAPPER_LLC_OPT_LEVEL=3` and `_build/llvm-tools/bin` first on `PATH`.
+- The build no longer failed on missing generated Dune include files.  It
+  reached the real AMD64 self-boot failure:
+  `caml_scan_stack: missing frame descriptor ...`, ending in
+  `Makefile.common-ox:116: boot-compiler`.
+
+Next work should reduce that self-boot frame-descriptor failure with a
+single-worker boot-context build and fix the AMD64 frame/frametable mechanism
+by generalizing the current ARM LLVM backend design, not by adding frontend
+roots or preserving the old x86 LLVM behavior.
