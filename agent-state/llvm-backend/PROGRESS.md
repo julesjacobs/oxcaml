@@ -108,3 +108,28 @@ so the volatile stores remain in the hot loop. A principled fix should intern
 explicit exception-root slots by equivalent store-site value/statepoint rather
 than by recovery incoming edge, and should prune unused explicit root slots
 before appending them to `gc-live`.
+
+2026-06-27 AMD64 LLVM validation on branch `jujacobs/llvm-x86-plan`: rebuilt
+the compiler/runtime with the existing LLVM tools after clearing stale dune
+boot-context state. The first `llvm-stack-checks` failure in
+`compile_challenges_amd64.ml` was not a source regression; the checkout had an
+inconsistent `_build/default` context.
+After clearing `_build/default`, `_build/_bootinstall`, and dune's `_build/.db`
+metadata, `make -s llvm-compiler` and `make -s llvm-install` completed. Focused
+validation then passed:
+
+- `make -s llvm-test-one LLVM_PATH="$PWD/llvm-tool-wrapper.sh" DIR=llvm-stack-checks`
+  -> 8 passed, 2 skipped, 0 failed.
+- `make -s llvm-test-one LLVM_PATH="$PWD/llvm-tool-wrapper.sh" DIR=llvm-gc-roots`
+  -> 12 passed, 6 skipped, 0 failed.
+
+Rejected experiment: tried to make AMD64 LLVM stack-growth helpers terminate
+their `%rbp` chain like AArch64 terminates `x29`, but this is incorrect for
+AMD64 with frame pointers. A clean rebuild produced a reproducible segfault in
+`_build/main/tools/merge_archives.exe` during `ocamloptcomp_with_flambda2.cmxa`
+creation. The reason is that AMD64 frame-pointer stacks need `%rbp` rewritten
+by `caml_try_realloc_stack`; restoring an old-stack `%rbp` after stack growth
+breaks execution. The experiment was fully reverted before the passing build
+and tests above. Any future AMD64 frame-chain cleanup must preserve native
+AMD64 frame-pointer rewriting semantics, not copy the AArch64 clobbering
+approach literally.
