@@ -37,6 +37,7 @@ normal_runtime_dir=${NORMAL_RUNTIME_DIR:-$normal_build/runtime_stdlib/runtime}
 fake_root=${FAKE_ROOT:-$default_fake_root}
 wrapper=${LLVM_WRAPPER:?set LLVM_WRAPPER to the clang wrapper or LLVM tool path}
 wrapper_log=${LLVM_WRAPPER_LOG:-$wrapper.log}
+export LLVM_WRAPPER_LOG="$wrapper_log"
 list=${LIST:-$default_list}
 generate_list=${GENERATE_LIST:-1}
 parallel_tests=${LLVM_TESTSUITE_PARALLEL:-auto}

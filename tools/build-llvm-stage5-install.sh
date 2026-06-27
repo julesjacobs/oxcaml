@@ -10,6 +10,7 @@ main_build=${MAIN_BUILD:-$repo/_llvm_stage5_main_build}
 stage_install=${STAGE_INSTALL:-$repo/_llvm_stage5_install}
 wrapper=${LLVM_WRAPPER:?set LLVM_WRAPPER to the clang wrapper or LLVM tool path}
 wrapper_log=${LLVM_WRAPPER_LOG:-$wrapper.log}
+export LLVM_WRAPPER_LOG="$wrapper_log"
 llvm_extra_flags=${LLVM_EXTRA_FLAGS:-}
 runtime_ws=${RUNTIME_WS:-$repo/_llvm_stage5_runtime.ws}
 main_ws=${MAIN_WS:-$repo/_llvm_stage5_main.ws}

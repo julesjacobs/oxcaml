@@ -9,6 +9,7 @@ stage0_install=$(cd "$stage0_install" && pwd)
 boot_build=${BOOT_BUILD:-$repo/_llvm_boot_context_build}
 wrapper=${LLVM_WRAPPER:?set LLVM_WRAPPER to the clang wrapper or LLVM tool path}
 wrapper_log=${LLVM_WRAPPER_LOG:-$wrapper.log}
+export LLVM_WRAPPER_LOG="$wrapper_log"
 llvm_extra_flags=${LLVM_EXTRA_FLAGS:-}
 opam_switch_bin=${OPAM_SWITCH_BIN:-}
 arch=${ARCH:-}

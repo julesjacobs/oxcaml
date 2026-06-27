@@ -584,3 +584,31 @@ understood before treating the self-stage result as full LLVM coverage.
 
 Post-commit validation at branch head: `make -C _build/llvm-tools -j8 llc opt`
 passed.
+
+2026-06-27 wrapper-count validation fix:
+the self-stage scripts were counting `$wrapper.log` by default but not exporting
+that path as `LLVM_WRAPPER_LOG`, while the checked-in RS4GC wrapper only logs
+when that environment variable is set.  Exporting the resolved log path in the
+boot, stage5, self-stage, and stage5 ocamltest helpers makes the diagnostics
+measure real LLVM backend use instead of silently reporting zero.
+
+Validation:
+
+- `bash -n tools/build-llvm-boot-with-installed.sh
+  tools/build-llvm-stage5-install.sh tools/build-llvm-self-stage-install.sh
+  tools/run-llvm-stage5-ocamltest.sh` passed.
+- A first `make -s llvm-self-stage-install ...` rerun exposed stale build
+  state before self-stage: `_install/lib/ocaml/stdlib.cmxa` disagreed with
+  boot artifacts over `CamlinternalQuote`.
+- Repaired the build state by removing `_build/default`, `_build/_bootinstall`,
+  `_build/.db`, and `_build/.filesystem-clock`, then running
+  `make -s llvm-install LLVM_BOOT_BACKEND=0
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"`; it passed with only
+  same-file `cp` warnings.
+- `LLVM_WRAPPER="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"
+  tools/build-llvm-self-stage-install.sh` passed with real wrapper counts:
+  boot 1678 wrapper lines / 834 fresh IR inputs, smoke 4 / 2, runtime 148 / 74,
+  main 2228 / 1097, self-stage smoke 4 / 2.
+
+Next validation step: run the LLVM testsuite using the self-stage compiler now
+that wrapper coverage diagnostics are trustworthy.
