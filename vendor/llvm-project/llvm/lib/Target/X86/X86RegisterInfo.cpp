@@ -848,6 +848,22 @@ static bool isFuncletReturnInstr(MachineInstr &MI) {
   llvm_unreachable("impossible");
 }
 
+static bool isBeforeOxCamlTrapRecover(MachineBasicBlock::iterator II) {
+  MachineBasicBlock &MBB = *II->getParent();
+  if (!MBB.isRuntimeEntered())
+    return false;
+
+  for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end(); I != E;
+       ++I) {
+    if (I == II)
+      return true;
+    if (I->getOpcode() == X86::OXCAML_TRAP_RECOVER)
+      return false;
+  }
+
+  return false;
+}
+
 bool
 X86RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
                                      int SPAdj, unsigned FIOperandNum,
@@ -870,6 +886,10 @@ X86RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
            "Return instruction can only reference SP relative frame objects");
     FIOffset =
         TFI->getFrameIndexReferenceSP(MF, FrameIndex, BasePtr, 0).getFixed();
+  } else if (isBeforeOxCamlTrapRecover(II)) {
+    FIOffset = TFI->getFrameIndexReferenceSP(
+                     MF, FrameIndex, BasePtr, MF.getFrameInfo().getStackSize())
+                   .getFixed();
   } else if (TFI->Is64Bit && (MBB.isEHFuncletEntry() || IsEHFuncletEpilogue)) {
     FIOffset = TFI->getWin64EHFrameIndexRef(MF, FrameIndex, BasePtr);
   } else {

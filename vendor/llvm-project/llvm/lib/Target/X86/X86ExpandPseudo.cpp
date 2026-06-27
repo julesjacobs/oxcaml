@@ -20,16 +20,20 @@
 #include "X86Subtarget.h"
 #include "llvm/Analysis/EHPersonalities.h"
 #include "llvm/CodeGen/LivePhysRegs.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/Passes.h" // For IDs of passes that are preserved.
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/MC/MCDwarf.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Target/TargetMachine.h"
 using namespace llvm;
 
 #define DEBUG_TYPE "x86-pseudo"
 #define X86_EXPAND_PSEUDO_NAME "X86 pseudo instruction expansion pass"
+
+static constexpr int64_t OxCamlDomainExnHandlerOffset = 48;
 
 namespace {
 class X86ExpandPseudo : public MachineFunctionPass {
@@ -67,6 +71,16 @@ private:
   void expandCALL_RVMARKER(MachineBasicBlock &MBB,
                            MachineBasicBlock::iterator MBBI);
   void expandOXCAML_C_DIRECT_CALL(MachineBasicBlock &MBB,
+                                  MachineBasicBlock::iterator MBBI);
+  void expandOXCAML_PUSH_TRAP(MachineBasicBlock &MBB,
+                              MachineBasicBlock::iterator MBBI);
+  void expandOXCAML_PUSH_TRAP_DEAD(MachineBasicBlock &MBB,
+                                   MachineBasicBlock::iterator MBBI);
+  void expandOXCAML_TRAP_RECOVER(MachineBasicBlock &MBB,
+                                 MachineBasicBlock::iterator MBBI);
+  void expandOXCAML_POP_TRAP(MachineBasicBlock &MBB,
+                             MachineBasicBlock::iterator MBBI);
+  void expandOXCAML_RAISE_NOTRACE(MachineBasicBlock &MBB,
                                   MachineBasicBlock::iterator MBBI);
   bool ExpandMI(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI);
   bool ExpandMBB(MachineBasicBlock &MBB);
@@ -343,6 +357,94 @@ void X86ExpandPseudo::expandOXCAML_C_DIRECT_CALL(
   finalizeBundle(MBB, First->getIterator(), std::next(Last->getIterator()));
 }
 
+void X86ExpandPseudo::expandOXCAML_PUSH_TRAP(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI) {
+  MachineInstr &MI = *MBBI;
+  const DebugLoc &DL = MI.getDebugLoc();
+  MachineBasicBlock *RecoveryMBB = MI.getOperand(0).getMBB();
+
+  BuildMI(MBB, MBBI, DL, TII->get(X86::LEA64r), X86::R11)
+      .addReg(X86::RIP)
+      .addImm(1)
+      .addReg(0)
+      .addMBB(RecoveryMBB)
+      .addReg(0);
+  BuildMI(MBB, MBBI, DL, TII->get(X86::PUSH64r)).addReg(X86::R11);
+  addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::PUSH64rmm)), X86::R14,
+               false, OxCamlDomainExnHandlerOffset);
+  addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::MOV64mr)), X86::R14,
+               false, OxCamlDomainExnHandlerOffset)
+      .addReg(X86::RSP);
+
+  MI.eraseFromParent();
+}
+
+void X86ExpandPseudo::expandOXCAML_PUSH_TRAP_DEAD(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI) {
+  MachineInstr &MI = *MBBI;
+  const DebugLoc &DL = MI.getDebugLoc();
+
+  BuildMI(MBB, MBBI, DL, TII->get(X86::PUSH64i8)).addImm(0);
+  addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::PUSH64rmm)), X86::R14,
+               false, OxCamlDomainExnHandlerOffset);
+  addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::MOV64mr)), X86::R14,
+               false, OxCamlDomainExnHandlerOffset)
+      .addReg(X86::RSP);
+
+  MI.eraseFromParent();
+}
+
+void X86ExpandPseudo::expandOXCAML_TRAP_RECOVER(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI) {
+  MachineInstr &MI = *MBBI;
+  const DebugLoc &DL = MI.getDebugLoc();
+  MachineFunction &MF = *MBB.getParent();
+  uint64_t OuterTrapBytes = MI.getOperand(0).getImm();
+  uint64_t StackSize = MF.getFrameInfo().getStackSize();
+  if (StackSize < 8)
+    report_fatal_error("OxCaml trap recovery requires an AMD64 frame");
+  uint64_t RestoreOffset = StackSize - 8 + OuterTrapBytes;
+
+  BuildMI(MBB, MBBI, DL, TII->get(X86::LEA64r), X86::RBP)
+      .addReg(X86::RSP)
+      .addImm(1)
+      .addReg(0)
+      .addImm(RestoreOffset)
+      .addReg(0);
+
+  MI.eraseFromParent();
+}
+
+void X86ExpandPseudo::expandOXCAML_POP_TRAP(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI) {
+  MachineInstr &MI = *MBBI;
+  const DebugLoc &DL = MI.getDebugLoc();
+
+  addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::POP64rmm)), X86::R14,
+               false, OxCamlDomainExnHandlerOffset);
+  BuildMI(MBB, MBBI, DL, TII->get(X86::POP64r), X86::R11);
+
+  MI.eraseFromParent();
+}
+
+void X86ExpandPseudo::expandOXCAML_RAISE_NOTRACE(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI) {
+  MachineInstr &MI = *MBBI;
+  const DebugLoc &DL = MI.getDebugLoc();
+  Register ExnBucket = MI.getOperand(0).getReg();
+
+  if (ExnBucket != X86::RAX)
+    BuildMI(MBB, MBBI, DL, TII->get(X86::MOV64rr), X86::RAX).addReg(ExnBucket);
+  addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::MOV64rm), X86::RSP),
+               X86::R14, false, OxCamlDomainExnHandlerOffset);
+  addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::POP64rmm)), X86::R14,
+               false, OxCamlDomainExnHandlerOffset);
+  BuildMI(MBB, MBBI, DL, TII->get(X86::POP64r), X86::R11);
+  BuildMI(MBB, MBBI, DL, TII->get(X86::JMP64r)).addReg(X86::R11);
+
+  MI.eraseFromParent();
+}
+
 /// If \p MBBI is a pseudo instruction, this method expands
 /// it to the corresponding (sequence of) actual instruction(s).
 /// \returns true if \p MBBI has been expanded.
@@ -358,6 +460,22 @@ bool X86ExpandPseudo::ExpandMI(MachineBasicBlock &MBB,
   case X86::CALL64r_OXCAML_C_DIRECT:
   case X86::CALL64pcrel32_OXCAML_C_DIRECT:
     expandOXCAML_C_DIRECT_CALL(MBB, MBBI);
+    return true;
+  case X86::OXCAML_PUSH_TRAP:
+    expandOXCAML_PUSH_TRAP(MBB, MBBI);
+    return true;
+  case X86::OXCAML_PUSH_TRAP_DEAD:
+    expandOXCAML_PUSH_TRAP_DEAD(MBB, MBBI);
+    return true;
+  case X86::OXCAML_TRAP_RECOVER:
+    expandOXCAML_TRAP_RECOVER(MBB, MBBI);
+    return true;
+  case X86::OXCAML_POP_TRAP:
+    expandOXCAML_POP_TRAP(MBB, MBBI);
+    return true;
+  case X86::OXCAML_RAISE_NOTRACE:
+  case X86::OXCAML_RAISE_NOTRACE_EDGE:
+    expandOXCAML_RAISE_NOTRACE(MBB, MBBI);
     return true;
   case X86::TCRETURNdi:
   case X86::TCRETURNdicc:

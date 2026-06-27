@@ -100,6 +100,7 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeX86Target() {
   initializeX86LoadValueInjectionLoadHardeningPassPass(PR);
   initializeX86LoadValueInjectionRetHardeningPassPass(PR);
   initializeX86OptimizeLEAPassPass(PR);
+  initializeX86OxCamlRuntimeEntryPass(PR);
   initializeX86PartialReductionPass(PR);
   initializePseudoProbeInserterPass(PR);
   initializeX86ReturnThunksPass(PR);
@@ -518,6 +519,8 @@ bool X86PassConfig::addPreISel() {
 }
 
 void X86PassConfig::addPreRegAlloc() {
+  addPass(createX86OxCamlRuntimeEntryPass());
+
   if (getOptLevel() != CodeGenOpt::None) {
     addPass(&LiveRangeShrinkID);
     addPass(createX86FixupSetCC());
@@ -553,6 +556,7 @@ void X86PassConfig::addPostRegAlloc() {
 }
 
 void X86PassConfig::addPreSched2() {
+  addPass(createX86OxCamlRuntimeEntryPass(/*MoveRecoverOnly=*/true));
   addPass(createX86ExpandPseudoPass());
   addPass(createX86KCFIPass());
 }

@@ -41,6 +41,51 @@ def OXCAML_RELOCATE : I<0, Pseudo, (outs GR64:$dst), (ins GR64:$src),
                               (int_oxcaml_relocated GR64:$src))]>,
                        Requires<[In64BitMode]>, Sched<[WriteMove]>;
 
+let hasSideEffects = 1, mayLoad = 1, mayStore = 1, isCodeGenOnly = 1,
+    isPseudo = 1,
+    Uses = [RSP, R14], Defs = [RSP, R11] in
+def OXCAML_PUSH_TRAP : I<0, Pseudo, (outs), (ins brtarget:$recovery_target),
+                         "# OXCAML_PUSH_TRAP", []>,
+                       Requires<[In64BitMode]>, Sched<[WriteStore]>;
+
+let hasSideEffects = 1, mayLoad = 1, mayStore = 1, isCodeGenOnly = 1,
+    isPseudo = 1,
+    Uses = [RSP, R14], Defs = [RSP] in
+def OXCAML_PUSH_TRAP_DEAD : I<0, Pseudo, (outs), (ins),
+                              "# OXCAML_PUSH_TRAP_DEAD", []>,
+                            Requires<[In64BitMode]>, Sched<[WriteStore]>;
+
+let hasSideEffects = 1, mayLoad = 1, mayStore = 1,
+    isBarrier = 1, isCodeGenOnly = 1, isPseudo = 1,
+    Uses = [RSP], Defs = [RBP] in
+def OXCAML_TRAP_RECOVER : I<0, Pseudo, (outs), (ins i32imm:$outer_trap_bytes),
+                            "# OXCAML_TRAP_RECOVER", []>,
+                          Requires<[In64BitMode]>, Sched<[WriteLEA]>;
+
+let hasSideEffects = 1, mayLoad = 1, mayStore = 1, isCodeGenOnly = 1,
+    isPseudo = 1,
+    Uses = [RSP, R14], Defs = [RSP, R11] in
+def OXCAML_POP_TRAP : I<0, Pseudo, (outs), (ins),
+                        "# OXCAML_POP_TRAP", []>,
+                      Requires<[In64BitMode]>, Sched<[WriteLoad]>;
+
+let hasSideEffects = 1, mayLoad = 1, mayStore = 1, isCodeGenOnly = 1,
+    isPseudo = 1,
+    isTerminator = 1, isBarrier = 1, isIndirectBranch = 1,
+    Uses = [R14, R15], Defs = [RAX, RSP, R11] in
+def OXCAML_RAISE_NOTRACE : I<0, Pseudo, (outs), (ins GR64:$exn_bucket),
+                            "# OXCAML_RAISE_NOTRACE", []>,
+                          Requires<[In64BitMode]>, Sched<[WriteJump]>;
+
+let hasSideEffects = 1, mayLoad = 1, mayStore = 1, isCodeGenOnly = 1,
+    isPseudo = 1,
+    isTerminator = 1, isBarrier = 1, isBranch = 1, isIndirectBranch = 1,
+    Uses = [R14, R15], Defs = [RAX, RSP, R11] in
+def OXCAML_RAISE_NOTRACE_EDGE
+    : I<0, Pseudo, (outs), (ins GR64:$exn_bucket, brtarget:$recovery_target),
+        "# OXCAML_RAISE_NOTRACE_EDGE", []>,
+      Requires<[In64BitMode]>, Sched<[WriteJump]>;
+
 // ADJCALLSTACKDOWN/UP implicitly use/def ESP because they may be expanded into
 // a stack adjustment and the codegen must know that they may modify the stack
 // pointer before prolog-epilog rewriting occurs.

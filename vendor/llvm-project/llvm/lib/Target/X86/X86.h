@@ -115,6 +115,9 @@ FunctionPass *createX86WinEHStatePass();
 /// the MachineInstr to MC.
 FunctionPass *createX86ExpandPseudoPass();
 
+/// Return a pass that models OxCaml runtime-entered trap recovery blocks.
+FunctionPass *createX86OxCamlRuntimeEntryPass(bool MoveRecoverOnly = false);
+
 /// This pass converts X86 cmov instructions into branch when profitable.
 FunctionPass *createX86CmovConverterPass();
 
@@ -187,6 +190,7 @@ void initializeX86LowerAMXIntrinsicsLegacyPassPass(PassRegistry &);
 void initializeX86LowerAMXTypeLegacyPassPass(PassRegistry &);
 void initializeX86LowerTileCopyPass(PassRegistry &);
 void initializeX86OptimizeLEAPassPass(PassRegistry &);
+void initializeX86OxCamlRuntimeEntryPass(PassRegistry &);
 void initializeX86PartialReductionPass(PassRegistry &);
 void initializeX86PreAMXConfigPassPass(PassRegistry &);
 void initializeX86PreTileConfigPass(PassRegistry &);

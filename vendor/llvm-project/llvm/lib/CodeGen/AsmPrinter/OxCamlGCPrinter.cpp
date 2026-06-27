@@ -189,10 +189,13 @@ static uint64_t stackOffsetOfID(uint64_t ID, bool IsAArch64) {
   return ID & ((1ull << 16) - 1) & Mask;
 }
 
-static uint64_t activeTrapBytesOfID(uint64_t ID, bool IsAArch64) {
-  if (!IsAArch64)
-    return 0;
-  return ((ID >> 1) & 7ull) * 16;
+static uint64_t activeTrapBytesOfID(uint64_t ID, const Triple &TheTriple) {
+  if (TheTriple.getArch() == Triple::aarch64 ||
+      TheTriple.getArch() == Triple::aarch64_32)
+    return ((ID >> 1) & 7ull) * 16;
+  if (TheTriple.getArch() == Triple::x86_64)
+    return ((ID >> 32) & 7ull) * 16;
+  return 0;
 }
 
 static uint64_t allocSizeOfID(uint64_t ID) {
@@ -715,7 +718,7 @@ bool OxCamlGCMetadataPrinter::emitStackMaps(Module &M, StackMaps &SM, AsmPrinter
       // adjustments. LLVM does not model this as part of the static frame size
       // consistently across call sites, so apply the OxCaml offset directly.
       uint64_t StackOffset = stackOffsetOfID(CSI.ID, IsAArch64);
-      ActiveTrapBytes = activeTrapBytesOfID(CSI.ID, IsAArch64);
+      ActiveTrapBytes = activeTrapBytesOfID(CSI.ID, TargetTriple);
       FrameSize += StackOffset;
 
       if (FrameSize & FrameSizeReservedMask) {
@@ -724,7 +727,6 @@ bool OxCamlGCMetadataPrinter::emitStackMaps(Module &M, StackMaps &SM, AsmPrinter
       }
       
     }
-
     OxCamlDebugInfo DebugInfo = debugInfoForCallsite(CSI);
     OxCamlAllocInfo AllocInfo = allocInfoForCallsite(CSI);
     bool HasAlloc = isOxCamlEncodedStatepointID(CSI.ID) && IDHasAlloc(CSI.ID);

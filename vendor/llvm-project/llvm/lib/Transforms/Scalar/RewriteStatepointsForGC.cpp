@@ -28,6 +28,7 @@
 #include "llvm/Analysis/DomTreeUpdater.h"
 #include "llvm/Analysis/Utils/Local.h"
 #include "llvm/IR/IntrinsicsAArch64.h"
+#include "llvm/IR/IntrinsicsX86.h"
 #include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
@@ -2902,8 +2903,9 @@ static bool isOxCamlFunction(const Function &F) {
 static IntrinsicInst *getOxCamlTrapRecover(BasicBlock &BB) {
   for (Instruction &I : BB) {
     auto *II = dyn_cast<IntrinsicInst>(&I);
-    if (II && II->getIntrinsicID() ==
-                  Intrinsic::aarch64_oxcaml_trap_recover)
+    if (II &&
+        (II->getIntrinsicID() == Intrinsic::aarch64_oxcaml_trap_recover ||
+         II->getIntrinsicID() == Intrinsic::x86_oxcaml_trap_recover))
       return II;
   }
   return nullptr;
@@ -3101,6 +3103,7 @@ static bool isUnsupportedNestedOxCamlRecoveryInstruction(Instruction &I) {
 
   switch (II->getIntrinsicID()) {
   case Intrinsic::aarch64_oxcaml_push_trap:
+  case Intrinsic::x86_oxcaml_push_trap:
     return true;
   default:
     return false;
@@ -9471,7 +9474,9 @@ static void computeLiveInValues(BasicBlock::reverse_iterator Begin,
   }
 }
 
-static void computeLiveOutSeed(BasicBlock *BB, SetVector<Value *> &LiveTmp) {
+static void computeLiveOutSeed(BasicBlock *BB, SetVector<Value *> &LiveTmp,
+                               DominatorTree &DT) {
+  Instruction *Term = BB->getTerminator();
   for (BasicBlock *Succ : successors(BB)) {
     for (auto &I : *Succ) {
       PHINode *PN = dyn_cast<PHINode>(&I);
@@ -9479,8 +9484,12 @@ static void computeLiveOutSeed(BasicBlock *BB, SetVector<Value *> &LiveTmp) {
         break;
 
       Value *V = PN->getIncomingValueForBlock(BB);
-      if (isHandledGCPointerType(V->getType()) && !isa<Constant>(V))
-        LiveTmp.insert(V);
+      if (!isHandledGCPointerType(V->getType()) || isa<Constant>(V))
+        continue;
+      if (auto *VI = dyn_cast<Instruction>(V))
+        if (VI != Term && !DT.dominates(VI, Term))
+          continue;
+      LiveTmp.insert(V);
     }
   }
 }
@@ -9554,7 +9563,7 @@ static void computeLiveInValues(DominatorTree &DT, Function &F,
 #endif
 
     Data.LiveOut[&BB] = SetVector<Value *>();
-    computeLiveOutSeed(&BB, Data.LiveOut[&BB]);
+    computeLiveOutSeed(&BB, Data.LiveOut[&BB], DT);
     Data.LiveIn[&BB] = Data.LiveSet[&BB];
     Data.LiveIn[&BB].set_union(Data.LiveOut[&BB]);
     Data.LiveIn[&BB].set_subtract(Data.KillSet[&BB]);

@@ -20,8 +20,8 @@ class InvokeInst;
 class LandingPadInst;
 
 bool isOxCamlGCFunction(const Function &F);
-bool isAArch64OxCamlTrapPublish(const Instruction *I);
-bool isAArch64OxCamlTrapRecover(const Instruction *I);
+bool isOxCamlTrapPublish(const Instruction *I);
+bool isOxCamlTrapRecover(const Instruction *I);
 const LandingPadInst *getOxCamlTrapRecoveryLandingPad(const BasicBlock &BB);
 const IntrinsicInst *getOxCamlTrapRecoverAfterLandingPad(const BasicBlock &BB);
 bool isOxCamlTrapRecoveryPad(const Function &F, const BasicBlock &BB);

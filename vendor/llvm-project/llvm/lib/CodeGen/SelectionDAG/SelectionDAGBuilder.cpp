@@ -76,6 +76,7 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/IntrinsicsAArch64.h"
+#include "llvm/IR/IntrinsicsX86.h"
 #include "llvm/IR/IntrinsicsWebAssembly.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Statepoint.h"
@@ -2990,7 +2991,8 @@ void SelectionDAGBuilder::visitInvoke(const InvokeInst &I) {
     case Intrinsic::experimental_gc_statepoint:
       LowerStatepoint(cast<GCStatepointInst>(I), CodegenEHPadBB);
       break;
-    case Intrinsic::aarch64_oxcaml_raise_notrace_edge: {
+    case Intrinsic::aarch64_oxcaml_raise_notrace_edge:
+    case Intrinsic::x86_oxcaml_raise_notrace_edge: {
       if (!IsOxCamlTrapRecoveryInvoke)
         report_fatal_error("OxCaml raise-notrace edge must unwind to an active "
                            "runtime-entered trap recovery block");
@@ -3001,7 +3003,7 @@ void SelectionDAGBuilder::visitInvoke(const InvokeInst &I) {
       Ops.push_back(getRoot());
       const TargetLowering &TLI = DAG.getTargetLoweringInfo();
       Ops.push_back(DAG.getTargetConstant(
-          Intrinsic::aarch64_oxcaml_raise_notrace_edge, getCurSDLoc(),
+          Fn->getIntrinsicID(), getCurSDLoc(),
           TLI.getPointerTy(DAG.getDataLayout())));
       Ops.push_back(getValue(I.getArgOperand(0)));
       Ops.push_back(getValue(I.getArgOperand(1)));
@@ -4885,7 +4887,8 @@ void SelectionDAGBuilder::visitAtomicStore(const StoreInst &I) {
 /// node.
 void SelectionDAGBuilder::visitTargetIntrinsic(const CallInst &I,
                                                unsigned Intrinsic) {
-  if (Intrinsic == llvm::Intrinsic::aarch64_oxcaml_push_trap) {
+  if (Intrinsic == llvm::Intrinsic::aarch64_oxcaml_push_trap ||
+      Intrinsic == llvm::Intrinsic::x86_oxcaml_push_trap) {
     const Value *RecoveryTarget = I.getArgOperand(0);
     MachineBasicBlock *RecoveryMBB = nullptr;
     bool DeletedRecoveryTarget = false;
@@ -4935,7 +4938,8 @@ void SelectionDAGBuilder::visitTargetIntrinsic(const CallInst &I,
     return;
   }
 
-  if (Intrinsic == llvm::Intrinsic::aarch64_oxcaml_trap_recover &&
+  if ((Intrinsic == llvm::Intrinsic::aarch64_oxcaml_trap_recover ||
+       Intrinsic == llvm::Intrinsic::x86_oxcaml_trap_recover) &&
       !FuncInfo.MBB->isRuntimeEntered() &&
       isOxCamlTrapRecoveryContinuation(*FuncInfo.Fn, *I.getParent())) {
     FuncInfo.MBB->setIsRuntimeEntered();

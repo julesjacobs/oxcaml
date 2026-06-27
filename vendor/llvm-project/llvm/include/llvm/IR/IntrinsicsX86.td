@@ -17,6 +17,51 @@ let TargetPrefix = "x86" in {  // All intrinsics start with "llvm.x86.".
 }
 
 //===----------------------------------------------------------------------===//
+// OxCaml runtime trap recovery.
+let TargetPrefix = "x86" in {
+  // OxCaml trap recovery state at a runtime-entered trap recovery block.
+  // AMD64 uses rax for the exception bucket, r15 for the allocation pointer,
+  // and r14 for the domain state pointer.  The argument is the byte size of
+  // still-active outer trap frames left on the stack by native AMD64 exception
+  // entry.  The second result is kept to match the AArch64 trap-recover shape;
+  // AMD64 has already restored the previous trap pointer in
+  // Caml_state->exn_handler when the handler is entered.
+  def int_x86_oxcaml_trap_recover
+      : Intrinsic<[llvm_oxcaml_value_ty, llvm_i64_ty, llvm_i64_ty,
+                   llvm_i64_ty], [llvm_i64_ty],
+                  [IntrNoMem, IntrHasSideEffects, IntrConvergent,
+                   IntrNoDuplicate, IntrNoMerge, IntrWillReturn,
+                   IntrNoCallback, IntrNoFree]>;
+
+  // OxCaml native-shaped trap frame push/pop.  The push argument is a
+  // blockaddress for the runtime-entered recovery block stored in the trap
+  // frame alongside the previous Caml_state->exn_handler.
+  def int_x86_oxcaml_push_trap
+      : Intrinsic<[], [llvm_ptr_ty],
+                  [IntrHasSideEffects, IntrConvergent, IntrNoDuplicate,
+                   IntrNoMerge, IntrWillReturn, IntrNoCallback, IntrNoFree]>;
+  def int_x86_oxcaml_pop_trap
+      : Intrinsic<[], [],
+                  [IntrHasSideEffects, IntrConvergent, IntrNoDuplicate,
+                   IntrNoMerge, IntrWillReturn, IntrNoCallback, IntrNoFree]>;
+
+  // OxCaml raise-notrace.  This restores rsp from Caml_state->exn_handler,
+  // pops the previous handler and branch target, and jumps to the target with
+  // the exception bucket in rax.  The handler is runtime-entered and reads the
+  // domain state / allocation cursor from r14 / r15.
+  def int_x86_oxcaml_raise_notrace
+      : Intrinsic<[], [llvm_i64_ty, llvm_i64_ty, llvm_i64_ty],
+                  [IntrHasSideEffects, IntrConvergent, IntrNoDuplicate,
+                   IntrNoMerge, IntrNoReturn, Throws, IntrNoCallback,
+                   IntrNoFree]>;
+  def int_x86_oxcaml_raise_notrace_edge
+      : Intrinsic<[], [llvm_i64_ty, llvm_i64_ty, llvm_i64_ty, llvm_ptr_ty],
+                  [IntrHasSideEffects, IntrConvergent, IntrNoDuplicate,
+                   IntrNoMerge, IntrNoReturn, Throws, IntrNoCallback,
+                   IntrNoFree]>;
+}
+
+//===----------------------------------------------------------------------===//
 // SEH intrinsics for Windows
 let TargetPrefix = "x86" in {
   def int_x86_seh_lsda : Intrinsic<[llvm_ptr_ty], [llvm_ptr_ty], [IntrNoMem]>;
