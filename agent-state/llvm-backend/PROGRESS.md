@@ -218,6 +218,32 @@ Validation after clearing stale dune boot-context state
 - `make -s llvm-test-one-no-rebuild LLVM_PATH="$PWD/llvm-tool-wrapper.sh" \
   TEST=testsuite/tests/typing-layouts-or-null/atomics.ml` passed: 5 passed.
 
+2026-06-27 AMD64 native trap-depth fix:
+high-arity calls inside active exception handlers were overwriting AMD64 LLVM
+native trap records because outgoing stack-argument stores used `%rsp` offsets
+that did not account for the two trap words pushed by `OXCAML_PUSH_TRAP`.
+Rejected the fixed-trap-frame-object experiment because it created a separate
+mechanism from AArch64 and broke clean runtime stdlib builds. The committed
+direction is the AArch64 mechanism generalized to AMD64: keep native trap
+push/pop records, keep active-trap-depth analysis, and adjust SP-relative
+stack memory operands carrying stack pseudo memory operands by the active trap
+byte count before frame indices are replaced.
+
+Validation:
+
+- `cmake --build _build/llvm-tools --target llc -- -j8` passed.
+- Direct installed-compiler repro for
+  `testsuite/tests/syntactic-arity/max_arity.ml` with `-llvm-backend` now
+  prints `f () (): Exception.` instead of segfaulting.
+- After clearing stale dune build state, `make -s llvm-install
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"` passed.
+- `make -s llvm-test-one-no-rebuild DIR=syntactic-arity
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"` passed: 24 passed.
+- `make -s llvm-test-one-no-rebuild DIR=async-exns
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"` passed: 5 passed.
+- `make -s llvm-test-one-no-rebuild DIR=ast-invariants
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"` passed: 2 passed.
+
 2026-06-27 AMD64 LLVM SIMD-preserving GC slow paths:
 reduced the `tests/unboxed-primitive-args` failures to heap allocation slow
 paths after C calls returning `float32`/SIMD values. The direct C-call ABI was

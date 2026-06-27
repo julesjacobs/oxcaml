@@ -148,6 +148,56 @@ static void computeOxCamlActiveTrapBytes(MachineFunction &MF) {
     }
   }
 }
+
+static bool hasOxCamlStackPseudoMemOperand(const MachineInstr &MI) {
+  for (const MachineMemOperand *MMO : MI.memoperands()) {
+    const PseudoSourceValue *PSV = MMO->getPseudoValue();
+    if (PSV && PSV->isStack())
+      return true;
+  }
+  return false;
+}
+
+static void adjustOxCamlSPRelativeStackAccesses(MachineFunction &MF) {
+  X86MachineFunctionInfo *X86FI = MF.getInfo<X86MachineFunctionInfo>();
+  const X86InstrInfo *TII =
+      static_cast<const X86InstrInfo *>(MF.getSubtarget().getInstrInfo());
+  const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+
+  for (MachineBasicBlock &MBB : MF) {
+    for (MachineInstr &MI : MBB) {
+      unsigned ActiveTrapBytes = X86FI->getOxCamlActiveTrapBytes(MI);
+      if (ActiveTrapBytes == 0 || !MI.mayLoadOrStore() ||
+          !hasOxCamlStackPseudoMemOperand(MI))
+        continue;
+
+      SmallVector<const MachineOperand *, 1> BaseOps;
+      int64_t Offset;
+      bool OffsetIsScalable;
+      unsigned Width;
+      if (!TII->getMemOperandsWithOffsetWidth(MI, BaseOps, Offset,
+                                              OffsetIsScalable, Width, TRI) ||
+          OffsetIsScalable || BaseOps.size() != 1 || !BaseOps[0]->isReg() ||
+          BaseOps[0]->getReg() != X86::RSP)
+        continue;
+
+      int MemRefBegin = X86II::getMemoryOperandNo(MI.getDesc().TSFlags);
+      if (MemRefBegin < 0)
+        continue;
+      MemRefBegin += X86II::getOperandBias(MI.getDesc());
+
+      MachineOperand &DispOp = MI.getOperand(MemRefBegin + X86::AddrDisp);
+      if (!DispOp.isImm())
+        continue;
+
+      int64_t NewOffset = DispOp.getImm() + ActiveTrapBytes;
+      if (!isInt<32>(NewOffset))
+        report_fatal_error(
+            "OxCaml active trap adjustment exceeds x86 displacement range");
+      DispOp.setImm(NewOffset);
+    }
+  }
+}
 } // namespace
 
 struct OxCamlStackCheckAttrs {
@@ -4110,6 +4160,7 @@ void X86FrameLowering::adjustFrameForMsvcCxxEh(MachineFunction &MF) const {
 void X86FrameLowering::processFunctionBeforeFrameIndicesReplaced(
     MachineFunction &MF, RegScavenger *RS) const {
   computeOxCamlActiveTrapBytes(MF);
+  adjustOxCamlSPRelativeStackAccesses(MF);
 
   if (STI.is32Bit() && MF.hasEHFunclets())
     restoreWinEHStackPointersInParent(MF);
