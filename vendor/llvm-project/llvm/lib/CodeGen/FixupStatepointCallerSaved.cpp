@@ -39,6 +39,8 @@ using namespace llvm;
 STATISTIC(NumSpilledRegisters, "Number of spilled register");
 STATISTIC(NumSpillSlotsAllocated, "Number of spill slots allocated");
 STATISTIC(NumSpillSlotsExtended, "Number of spill slots extended");
+STATISTIC(NumSelfLoopRootStoresHoisted,
+          "Number of stable statepoint root stores hoisted out of self loops");
 
 static cl::opt<bool> FixupSCSExtendSlotSize(
     "fixup-scs-extend-slot-size", cl::Hidden, cl::init(false),
@@ -95,6 +97,47 @@ INITIALIZE_PASS_END(FixupStatepointCallerSaved, DEBUG_TYPE,
 static unsigned getRegisterSize(const TargetRegisterInfo &TRI, Register Reg) {
   const TargetRegisterClass *RC = TRI.getMinimalPhysRegClass(Reg);
   return TRI.getSpillSize(*RC);
+}
+
+static bool isPointerSizedSlotAccess(unsigned Size) {
+  return Size == 0 || Size == 8;
+}
+
+static SmallVector<int, 4> getStatepointGCPtrSlots(const MachineInstr &MI) {
+  SmallVector<int, 4> Slots;
+  StatepointOpers SO(&MI);
+  int FirstGCPtrIdx = SO.getFirstGCPtrIdx();
+  if (FirstGCPtrIdx == -1)
+    return Slots;
+
+  unsigned NumGCPtrs = MI.getOperand(SO.getNumGCPtrIdx()).getImm();
+  unsigned CurIdx = FirstGCPtrIdx;
+  SmallSet<int, 4> Seen;
+  for (unsigned N = 0; N < NumGCPtrs; ++N) {
+    const MachineOperand &MO = MI.getOperand(CurIdx);
+    int FI = 0;
+    bool FoundFI = false;
+    if (MO.isImm() && MO.getImm() == StackMaps::IndirectMemRefOp) {
+      if (CurIdx + 2 < MI.getNumOperands() &&
+          MI.getOperand(CurIdx + 2).isFI()) {
+        FI = MI.getOperand(CurIdx + 2).getIndex();
+        FoundFI = true;
+      }
+    } else if (MO.isImm() && MO.getImm() == StackMaps::DirectMemRefOp) {
+      if (CurIdx + 1 < MI.getNumOperands() &&
+          MI.getOperand(CurIdx + 1).isFI()) {
+        FI = MI.getOperand(CurIdx + 1).getIndex();
+        FoundFI = true;
+      }
+    } else if (MO.isFI()) {
+      FI = MO.getIndex();
+      FoundFI = true;
+    }
+    if (FoundFI && Seen.insert(FI).second)
+      Slots.push_back(FI);
+    CurIdx = StackMaps::getNextMetaArgIdx(&MI, CurIdx);
+  }
+  return Slots;
 }
 
 // Try to eliminate redundant copy to register which we're going to
@@ -593,13 +636,188 @@ class StatepointProcessor {
 private:
   MachineFunction &MF;
   const TargetRegisterInfo &TRI;
+  const TargetInstrInfo &TII;
   FrameIndexesCache CacheFI;
   RegReloadCache ReloadCache;
 
 public:
   StatepointProcessor(MachineFunction &MF)
       : MF(MF), TRI(*MF.getSubtarget().getRegisterInfo()),
+        TII(*MF.getSubtarget().getInstrInfo()),
         CacheFI(MF.getFrameInfo(), TRI) {}
+
+  bool hasSingleStatepoint(const MachineBasicBlock &MBB) const {
+    unsigned NumStatepoints = 0;
+    for (const MachineInstr &I : MBB)
+      if (I.getOpcode() == TargetOpcode::STATEPOINT && ++NumStatepoints > 1)
+        return false;
+    return NumStatepoints == 1;
+  }
+
+  bool hasEHPadSuccessor(const MachineBasicBlock &MBB) const {
+    return llvm::any_of(MBB.successors(),
+                        [](const MachineBasicBlock *Succ) {
+                          return Succ->isEHPad();
+                        });
+  }
+
+  bool hasUnsafeTerminatorSuffix(MachineBasicBlock &MBB,
+                                 MachineBasicBlock::iterator Begin) const {
+    for (auto It = Begin, End = MBB.end(); It != End; ++It)
+      if (It->isCall() || It->getOpcode() == TargetOpcode::STATEPOINT)
+        return true;
+    return false;
+  }
+
+  MachineInstr *findStoreToSlotBefore(MachineInstr &MI, int FI,
+                                      Register &StoredReg) const {
+    MachineBasicBlock *MBB = MI.getParent();
+    MachineBasicBlock::iterator It(MI);
+    while (It != MBB->begin()) {
+      --It;
+      if (It->isCall() || It->getOpcode() == TargetOpcode::STATEPOINT)
+        return nullptr;
+      int StoreFI = 0;
+      unsigned Size = 0;
+      Register Reg = TII.isStoreToStackSlot(*It, StoreFI, Size);
+      if (!Reg.isValid())
+        continue;
+      if (StoreFI != FI)
+        continue;
+      if (!isPointerSizedSlotAccess(Size) || !Reg.isPhysical())
+        return nullptr;
+      StoredReg = Reg;
+      return &*It;
+    }
+    return nullptr;
+  }
+
+  MachineInstr *findReloadFromSlotAfter(MachineInstr &MI, int FI,
+                                        Register Reg) const {
+    MachineBasicBlock *MBB = MI.getParent();
+    for (auto It = std::next(MachineBasicBlock::iterator(MI)), End = MBB->end();
+         It != End; ++It) {
+      if (It->isCall() || It->getOpcode() == TargetOpcode::STATEPOINT)
+        return nullptr;
+      if (It->mayStore())
+        for (const MachineOperand &MO : It->operands())
+          if (MO.isFI() && MO.getIndex() == FI)
+            return nullptr;
+      int LoadFI = 0;
+      unsigned Size = 0;
+      Register LoadedReg = TII.isLoadFromStackSlot(*It, LoadFI, Size);
+      if (LoadedReg.isValid() && LoadFI == FI) {
+        if (LoadedReg == Reg && isPointerSizedSlotAccess(Size))
+          return &*It;
+        return nullptr;
+      }
+      if (It->modifiesRegister(Reg, &TRI))
+        return nullptr;
+    }
+    return nullptr;
+  }
+
+  bool prefixTransparentToStore(MachineInstr &Store, int FI,
+                                Register Reg) const {
+    MachineBasicBlock *MBB = Store.getParent();
+    for (auto It = MBB->begin(), End = MachineBasicBlock::iterator(Store);
+         It != End; ++It) {
+      if (It->isCall() || It->getOpcode() == TargetOpcode::STATEPOINT)
+        return false;
+      if (It->modifiesRegister(Reg, &TRI))
+        return false;
+      if (It->mayLoadOrStore())
+        for (const MachineOperand &MO : It->operands())
+          if (MO.isFI() && MO.getIndex() == FI)
+            return false;
+    }
+    return true;
+  }
+
+  bool regAndSlotStableToBackedge(MachineInstr &Reload, int FI,
+                                  Register Reg) const {
+    MachineBasicBlock *MBB = Reload.getParent();
+    for (auto It = std::next(MachineBasicBlock::iterator(Reload)),
+              End = MBB->end();
+         It != End; ++It) {
+      if (It->isCall() || It->getOpcode() == TargetOpcode::STATEPOINT)
+        return false;
+      if (It->modifiesRegister(Reg, &TRI))
+        return false;
+      if (It->mayStore())
+        for (const MachineOperand &MO : It->operands())
+          if (MO.isFI() && MO.getIndex() == FI)
+            return false;
+    }
+    return true;
+  }
+
+  bool canInitializeSlotInPredecessors(MachineBasicBlock &MBB,
+                                       Register Reg) const {
+    bool HasOutsidePred = false;
+    for (MachineBasicBlock *Pred : MBB.predecessors()) {
+      if (Pred == &MBB)
+        continue;
+      HasOutsidePred = true;
+      if (Pred->isEHPad() || Pred->succ_size() != 1)
+        return false;
+      MachineBasicBlock::iterator InsertBefore = Pred->getFirstTerminator();
+      if (hasUnsafeTerminatorSuffix(*Pred, InsertBefore))
+        return false;
+    }
+    return HasOutsidePred && MBB.isLiveIn(Reg);
+  }
+
+  void initializeSlotInPredecessors(MachineBasicBlock &MBB, Register Reg,
+                                    int FI) const {
+    const TargetRegisterClass *RC = TRI.getMinimalPhysRegClass(Reg);
+    for (MachineBasicBlock *Pred : MBB.predecessors()) {
+      if (Pred == &MBB)
+        continue;
+      MachineBasicBlock::iterator InsertBefore = Pred->getFirstTerminator();
+      TII.storeRegToStackSlot(*Pred, InsertBefore, Reg, /*isKill=*/false, FI,
+                              RC, &TRI, Register());
+    }
+  }
+
+  bool tryHoistSelfLoopRootStore(MachineInstr &MI) const {
+    StatepointOpers SO(&MI);
+    if (MF.getTarget().getTargetTriple().getArch() != Triple::x86_64 ||
+        SO.getCallingConv() != CallingConv::OxCaml_WithFP)
+      return false;
+
+    MachineBasicBlock *MBB = MI.getParent();
+    if (MBB->isEHPad() || hasEHPadSuccessor(*MBB) ||
+        !is_contained(MBB->successors(), MBB) ||
+        !is_contained(MBB->predecessors(), MBB) ||
+        !hasSingleStatepoint(*MBB))
+      return false;
+
+    for (int FI : getStatepointGCPtrSlots(MI)) {
+      Register Reg;
+      MachineInstr *Store = findStoreToSlotBefore(MI, FI, Reg);
+      if (!Store)
+        continue;
+      if (!prefixTransparentToStore(*Store, FI, Reg))
+        continue;
+      MachineInstr *Reload = findReloadFromSlotAfter(MI, FI, Reg);
+      if (!Reload)
+        continue;
+      if (!regAndSlotStableToBackedge(*Reload, FI, Reg))
+        continue;
+      if (!canInitializeSlotInPredecessors(*MBB, Reg))
+        continue;
+
+      initializeSlotInPredecessors(*MBB, Reg, FI);
+      Store->eraseFromParent();
+      ++NumSelfLoopRootStoresHoisted;
+      LLVM_DEBUG(dbgs() << "[OxCaml] hoisted self-loop statepoint root store "
+                        << printReg(Reg, &TRI) << " to FI " << FI << " in "
+                        << MF.getName() << "\n");
+      return true;
+    }
+    return false;
+  }
 
   bool process(MachineInstr &MI, bool AllowGCPtrInCSR) {
     StatepointOpers SO(&MI);
@@ -686,7 +904,10 @@ bool FixupStatepointCallerSaved::runOnMachineFunction(MachineFunction &MF) {
     if (MaxStatepointsWithRegs.getNumOccurrences() &&
         NumStatepoints >= MaxStatepointsWithRegs)
       AllowGCPtrInCSR = false;
-    Changed |= SPP.process(*I, AllowGCPtrInCSR);
+    bool Processed = SPP.process(*I, AllowGCPtrInCSR);
+    Changed |= Processed;
+    if (!Processed)
+      Changed |= SPP.tryHoistSelfLoopRootStore(*I);
   }
   return Changed;
 }

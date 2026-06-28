@@ -1730,3 +1730,52 @@ measurement against the native AMD64 backend.
   special cases unless separately proven, and any block with additional calls,
   multiple statepoints, ambiguous stores to the same slot, or root-register
   modification on the statepoint-to-backedge path.
+
+2026-06-28 AMD64 self-loop root-store hoist:
+
+- Implemented a narrow post-RA peephole in
+  `FixupStatepointCallerSaved.cpp` for already-folded AMD64
+  `OxCaml_WithFP` statepoint roots.  This does not revive frontend roots: it
+  operates on the normal statepoint/stackmap stack-root shape after register
+  allocation, where the statepoint already lists the GC root stack slot.
+- The transform only fires for a self-loop block with one statepoint, no EH
+  pad/successor, dedicated non-self predecessors, a pointer-sized physical-reg
+  store to a listed GC root slot before the statepoint, a matching reload after
+  it, a transparent prefix before the store, a transparent statepoint-to-reload
+  range, and no modification of the root register or slot on the reload-to-
+  backedge path.  It rejects C-call/alloc-family/invoke shapes and ambiguous
+  same-slot loads/stores.
+- Added MIR coverage in
+  `vendor/llvm-project/llvm/test/CodeGen/X86/oxcaml-statepoint-hoist-self-loop-root.mir`
+  for the positive hoist and two negative cases found by review: source-register
+  redefinition before the store and same-slot load before the store.
+- Validation run:
+  ```sh
+  cmake --build _build/llvm-tools --target llc FileCheck -- -j8
+  _build/llvm-tools/bin/llc -o - \
+    vendor/llvm-project/llvm/test/CodeGen/X86/oxcaml-statepoint-hoist-self-loop-root.mir \
+    -run-pass fixup-statepoint-caller-saved -verify-machineinstrs | \
+    _build/llvm-tools/bin/FileCheck \
+      vendor/llvm-project/llvm/test/CodeGen/X86/oxcaml-statepoint-hoist-self-loop-root.mir
+  for t in \
+    vendor/llvm-project/llvm/test/CodeGen/X86/statepoint-fixup-call.mir \
+    vendor/llvm-project/llvm/test/CodeGen/X86/statepoint-fixup-copy-prop.mir \
+    vendor/llvm-project/llvm/test/CodeGen/X86/statepoint-fixup-invoke.mir \
+    vendor/llvm-project/llvm/test/CodeGen/X86/statepoint-fixup-shared-ehpad.mir; do \
+    _build/llvm-tools/bin/llc -o - "$t" \
+      -run-pass fixup-statepoint-caller-saved -verify-machineinstrs | \
+      _build/llvm-tools/bin/FileCheck "$t" || exit 1; \
+  done
+  _build/llvm-tools/bin/llc -O3 --relocation-model=pic --frame-pointer=all \
+    -verify-machineinstrs -stop-after=fixup-statepoint-caller-saved \
+    /tmp/loop-gc-rs4gc.ll -o /tmp/loop-gc-hoist-fixup.mir
+  git diff --check
+  ```
+- Focused MIR evidence now shows `%stack.0` root stores in the dedicated
+  preheaders for the inspected `loop_invariant_gc_across_call` self-loops; the
+  self-loop bodies retain the statepoint stack-root load and unrelated integer
+  spills, but no per-iteration `%stack.0` root store in the inspected blocks.
+- gpt-5.5-high review initially found two high safety bugs in the prefix
+  reasoning: source-register redefinition and same-slot load before the selected
+  store.  Both were fixed and covered by negative MIR tests.  Final re-review
+  reported no commit-blocking findings.
