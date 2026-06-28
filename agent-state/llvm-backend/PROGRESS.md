@@ -1171,3 +1171,61 @@ Next implementation priority:
 - Next gate is LLVM self-stage2 build/test.  If a self-stage2-only failure
   appears, reduce it as far as possible and record why the standard
   `-llvm-backend` compiler does not cover it.
+
+2026-06-28 LLVM self-stage2 build/test gate passed on
+`jujacobs/llvm-x86-plan`.
+
+Build-state recovery notes:
+
+- Use the OxCaml switch explicitly:
+  `eval "$(opam env --switch=oxcaml-5.4.0+oxcaml --set-switch)"`.
+- Disable the shared Dune cache while recovering this checkout:
+  `DUNE_CACHE=disabled`.
+- Keep the local LLVM tools first on `PATH`:
+  `PATH="$PWD/_build/llvm-tools/bin:$PATH"`.
+- The phony `llvm-install` / `install_for_test` paths can rebuild stale or wrong
+  Dune contexts after cleanup.  The successful recovery was: rebuild `_install`
+  with `make -s install LLVM_BOOT_BACKEND=0`; rebuild the LLVM install with
+  `make -s llvm-install`; run `tools/build-llvm-self-stage-install.sh` directly
+  for stage1, then run it again for stage2 with explicit output directories:
+
+`LLVM_WRAPPER="$PWD/tools/llvm-rs4gc-llc-wrapper.sh" \
+tools/build-llvm-self-stage-install.sh`
+
+`STAGE0_INSTALL="$PWD/_llvm_self_stage_install" \
+BOOT_BUILD="$PWD/_llvm_self_stage2_boot_context_build" \
+BOOT_INSTALL="$PWD/_llvm_self_stage2_boot_install" \
+SELF_RUNTIME_BUILD="$PWD/_llvm_self_stage2_runtime_build" \
+SELF_MAIN_BUILD="$PWD/_llvm_self_stage2_main_build" \
+SELF_STAGE_INSTALL="$PWD/_llvm_self_stage2_install" \
+LLVM_WRAPPER="$PWD/tools/llvm-rs4gc-llc-wrapper.sh" \
+tools/build-llvm-self-stage-install.sh`
+
+Stage1 self-build produced `_llvm_self_stage_install`. Wrapper counts:
+boot 820 fresh IR inputs, runtime 73, main 1100, final smoke 2. Both smoke
+programs printed `55`.
+
+Stage2 self-build produced `_llvm_self_stage2_install`. Wrapper counts:
+boot 834 fresh IR inputs, runtime 74, main 1097, final smoke 2. Both smoke
+programs printed `55`.
+
+Self-stage2 suite command:
+
+`DUNE_CACHE=disabled PATH="$PWD/_build/llvm-tools/bin:$PATH" SELF_STAGE=2 \
+LLVM_WRAPPER="$PWD/tools/llvm-rs4gc-llc-wrapper.sh" \
+tools/run-llvm-stage5-ocamltest.sh`
+
+The runner's default `SELF_STAGE=2` list is
+`_llvm_self_stage2_all_minus_asm_list.txt`, excluding `tests/asmgen` and
+`tests/asmcomp`. GNU parallel is not installed in this environment, so the
+script fell back to the serial `one` target with that generated list. Final
+result: 6778 passed, 301 skipped, 0 failed, 0 not started, 0 unexpected errors,
+7079 considered. Wrapper totals: 6447 wrapper lines, 3225 fresh IR inputs.
+
+Important pass signals include AMD64 LLVM codegen probes, GC roots, stack
+checks, native CFI stepping, frame pointers, statmemprof callback roots, native
+dynlink, runtime events, stack allocation/local allocation, layout arrays and
+iarrays with moving-GC coverage, C API layout tests, weak/ephemeron/finalizer
+tests, and unboxed primitive arguments. This clears the requested normal-suite
+and self-stage2 correctness gate for AMD64 LLVM. The next gate is performance
+measurement against the native AMD64 backend.
