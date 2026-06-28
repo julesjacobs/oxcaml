@@ -1779,3 +1779,15 @@ measurement against the native AMD64 backend.
   reasoning: source-register redefinition and same-slot load before the selected
   store.  Both were fixed and covered by negative MIR tests.  Final re-review
   reported no commit-blocking findings.
+- Post-commit quick loop benchmark with
+  ```sh
+  PATH="$PWD/_build/llvm-tools/bin:$PATH" SAMPLES=5 \
+    LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh" \
+    python3 agent-state/test-suite-29e4cd/loop_invariant_microbench/run.py
+  ```
+  showed `loop_invariant_int_across_call` native 0.0678s, LLVM 0.0600s,
+  ratio 0.8850x; `loop_invariant_gc_across_call` native 0.0694s, LLVM
+  0.1053s, ratio 1.5174x.  So the commit improves the inspected MIR shape but
+  does not close the loop-invariant GC benchmark gap; the next step is to
+  inspect the final assembly after this hoist and identify the remaining hot
+  instructions.
