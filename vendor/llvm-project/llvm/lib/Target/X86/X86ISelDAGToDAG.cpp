@@ -18,6 +18,7 @@
 #include "X86TargetMachine.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/FunctionLoweringInfo.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/Config/llvm-config.h"
@@ -32,6 +33,7 @@
 #include "llvm/Support/KnownBits.h"
 #include "llvm/Support/MathExtras.h"
 #include <cstdint>
+#include <optional>
 
 using namespace llvm;
 
@@ -2046,6 +2048,30 @@ static bool foldMaskedShiftToScaledMask(SelectionDAG &DAG, SDValue N,
 // Note that this function assumes the mask is provided as a mask *after* the
 // value is shifted. The input chain may or may not match that, but computing
 // such a mask is trivial.
+static std::optional<uint64_t>
+getI64ConstantOrHoistedMOV64ri(SelectionDAG &DAG, SDValue N) {
+  if (N.getOpcode() == ISD::AssertZext)
+    N = N.getOperand(0);
+
+  if (auto *C = dyn_cast<ConstantSDNode>(N))
+    return C->getZExtValue();
+
+  if (N.getOpcode() != ISD::CopyFromReg)
+    return std::nullopt;
+
+  auto *RegNode = dyn_cast<RegisterSDNode>(N.getOperand(1));
+  if (!RegNode || !RegNode->getReg().isVirtual())
+    return std::nullopt;
+
+  MachineInstr *Def =
+      DAG.getMachineFunction().getRegInfo().getVRegDef(RegNode->getReg());
+  if (!Def || Def->getOpcode() != X86::MOV64ri || Def->getNumOperands() < 2 ||
+      !Def->getOperand(1).isImm())
+    return std::nullopt;
+
+  return static_cast<uint64_t>(Def->getOperand(1).getImm());
+}
+
 static bool foldMaskAndShiftToScale(SelectionDAG &DAG, SDValue N,
                                     uint64_t Mask,
                                     SDValue Shift, SDValue X,
@@ -2347,10 +2373,13 @@ bool X86DAGToDAGISel::matchAddressRecursively(SDValue N, X86ISelAddressMode &AM,
     // The mask used for the transform is expected to be post-shift, but we
     // found the shift first so just apply the shift to the mask before passing
     // it down.
-    if (!isa<ConstantSDNode>(N.getOperand(1)) ||
-        !isa<ConstantSDNode>(And.getOperand(1)))
+    if (!isa<ConstantSDNode>(N.getOperand(1)))
       break;
-    uint64_t Mask = And.getConstantOperandVal(1) >> N.getConstantOperandVal(1);
+    std::optional<uint64_t> AndMask =
+        getI64ConstantOrHoistedMOV64ri(*CurDAG, And.getOperand(1));
+    if (!AndMask)
+      break;
+    uint64_t Mask = *AndMask >> N.getConstantOperandVal(1);
 
     // Try to fold the mask and shift into the scale, and return false if we
     // succeed.
@@ -2501,14 +2530,17 @@ bool X86DAGToDAGISel::matchAddressRecursively(SDValue N, X86ISelAddressMode &AM,
     assert(N.getSimpleValueType().getSizeInBits() <= 64 &&
            "Unexpected value size!");
 
-    if (!isa<ConstantSDNode>(N.getOperand(1)))
+    bool MaskIsConstant = isa<ConstantSDNode>(N.getOperand(1));
+    std::optional<uint64_t> MaybeMask =
+        getI64ConstantOrHoistedMOV64ri(*CurDAG, N.getOperand(1));
+    if (!MaybeMask)
       break;
 
     if (N.getOperand(0).getOpcode() == ISD::SRL) {
       SDValue Shift = N.getOperand(0);
       SDValue X = Shift.getOperand(0);
 
-      uint64_t Mask = N.getConstantOperandVal(1);
+      uint64_t Mask = *MaybeMask;
 
       // Try to fold the mask and shift into an extract and scale.
       if (!foldMaskAndShiftToExtract(*CurDAG, N, Mask, Shift, X, AM))
@@ -2529,6 +2561,8 @@ bool X86DAGToDAGISel::matchAddressRecursively(SDValue N, X86ISelAddressMode &AM,
 
     // Try to swap the mask and shift to place shifts which can be done as
     // a scale on the outside of the mask.
+    if (!MaskIsConstant)
+      break;
     if (!foldMaskedShiftToScaledMask(*CurDAG, N, AM))
       return false;
 

@@ -218,6 +218,44 @@ Validation after clearing stale dune boot-context state
 - `make -s llvm-test-one-no-rebuild LLVM_PATH="$PWD/llvm-tool-wrapper.sh" \
   TEST=testsuite/tests/typing-layouts-or-null/atomics.ml` passed: 5 passed.
 
+2026-06-28 AMD64 string-length lowering progress: the remaining
+`loop_invariant_gc_across_call` slowdown was not the standalone
+`loop_2_6_code` body; it was the module-entry unrolled loop after RS4GC. The
+optimized IR had repeated OCaml string length shapes
+`(header >> 7) & 0x1fffffffffff8`, but X86 SelectionDAG hoisted the large mask
+into a `MOV64ri` virtual register shared by several blocks. The existing
+address-mode fold only recognized immediate mask operands, so final assembly
+materialized `movabsq $562949953421304` and used `andq` inside each hot loop.
+
+The X86 address matcher now looks through `AssertZext(CopyFromReg)` when that
+virtual register is defined by a hoisted `MOV64ri`, reusing the existing
+shifted-mask addressing fold. This keeps the ARM-quality mechanism shape for
+AMD64 without frontend changes: the hot loop now uses `shlq $8; shrq $18` and
+`movzbl -1(base,index,8)` for the rematerialized string header. Focused
+validation:
+
+- `cmake --build _build/llvm-tools --target llc FileCheck -- -j8` passed.
+- Direct `llc | FileCheck` for
+  `vendor/llvm-project/llvm/test/CodeGen/X86/oxcaml-header-mask-addressing.ll`
+  passed for the default x86-64 target and `-mcpu=znver1`.
+- Direct `llc -verify-machineinstrs` for the same X86 header-mask regression
+  file passed.
+- `llvm-lit` from the source-tree path is not configured in this checkout
+  (`llvm_config` is `None` without a generated lit site config), so the direct
+  `llc | FileCheck` commands are the focused test evidence.
+- Regenerated benchmark assembly for `loop_invariant_gc_across_call` no longer
+  contains `movabsq $562949953421304` or hot-loop `andq`.
+- Microbenchmark with current tools, `SAMPLES=5`: `loop_invariant_int_across_call`
+  native 0.0658s / LLVM 0.0622s / ratio 0.9448; `loop_invariant_gc_across_call`
+  native 0.0703s / LLVM 0.1012s / ratio 1.4390. This improves the previous
+  ~1.57x result but still leaves stack-spill/call-boundary traffic as the next
+  performance target.
+- Code review found that the first implementation let non-immediate masks fall
+  through to an older `foldMaskedShiftToScaledMask` helper that still requires a
+  `ConstantSDNode`. The committed version gates that fallback to real constant
+  nodes and adds a non-shift hoisted-mask regression so the widened matcher does
+  not crash outside the shifted-mask case.
+
 2026-06-28 AMD64 trap runtime-register progress on
 `jujacobs/llvm-x86-plan`: moved normal X86 push/pop trap lowering off the
 hidden physical `r14` dependency and onto explicit domain-state operands.
