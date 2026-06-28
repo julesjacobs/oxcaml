@@ -10,6 +10,7 @@ Compiler-binary runs compare a normal native-built `ocamlopt.opt` against an LLV
 
 | run | geomean | median | min | max | note |
 | --- | ---: | ---: | ---: | ---: | --- |
+| 2026-06-28 AMD64 self-stage2, native-mode compile | 1.0105 | 1.0125 | 0.9792 | 1.0577 | valid; `_install/bin/ocamlopt.opt` vs `_llvm_self_stage2_install/bin/ocamlopt.opt`, both normal native backend |
 | Old baseline before string compare lowering | 1.0897 | | | | valid |
 | After conservative short string/bytes compare lowering | 1.0766 | | | | valid |
 | After `caml_modify` Candidate 1 fast path | 1.0651 | | | | valid |
@@ -24,6 +25,33 @@ Compiler-binary runs compare a normal native-built `ocamlopt.opt` against an LLV
 | No-scalar clone with LLVM-built `_install` | 1.0085 | 1.0025 | 0.9997 | 1.0374 | invalid; supposed native side used LLVM backend |
 | Design 1 / stack-growth prototype | 1.0090 | | | | invalid/suspect |
 
+2026-06-28 AMD64 self-stage2 compiler-binary benchmark:
+
+- Comparison: native-built `_install/bin/ocamlopt.opt` versus LLVM-built
+  `_llvm_self_stage2_install/bin/ocamlopt.opt`.
+- Both compilers compiled the benchmark source files in normal native mode; no
+  `-llvm-backend` flag was passed to either compiler.
+- Method: direct `ocamlopt.opt -c` of representative compiler modules copied
+  under `_build/main`, with the generated `_build/main` `.cmi` object
+  directories on the include path.  Each file used one warmup plus five
+  measured samples, alternating measured compiler order.  `OCAMLLIB` was unset
+  so each installed compiler used its own installed stdlib path.
+- Raw JSON: `/tmp/oxcaml_compiler_binary_native_vs_llvm_stage2_20260628.json`.
+- Aggregate: geomean 1.0105x, median 1.0125x, min 0.9792x, max 1.0577x,
+  summed median runtime ratio 1.0108x.
+
+| file | native-built compiler | LLVM-built compiler | LLVM/native |
+| --- | ---: | ---: | ---: |
+| `env.ml` | 1.5768s | 1.6039s | 1.0172 |
+| `ctype.ml` | 2.5502s | 2.5514s | 1.0005 |
+| `typecore.ml` | 4.7931s | 4.8530s | 1.0125 |
+| `translcore.ml` | 1.2988s | 1.3246s | 1.0199 |
+| `typemod.ml` | 1.3682s | 1.3976s | 1.0215 |
+| `cfg_to_linear.ml` | 0.1630s | 0.1599s | 0.9808 |
+| `cfg_selectgen.ml` | 0.5322s | 0.5211s | 0.9792 |
+| `llvmize.ml` | 3.8605s | 3.8904s | 1.0077 |
+| `regalloc_irc.ml` | 0.3188s | 0.3372s | 1.0577 |
+
 Recorded changes from old baseline:
 
 | comparison | geomean change |
@@ -37,7 +65,7 @@ Recorded changes from old baseline:
 | Undefined-root invariant fix | -0.0914 |
 | Raw heap-address canonicalization | -0.1031 |
 
-Latest compiler-binary per-file medians, after raw heap-address canonicalization:
+Previous compiler-binary per-file medians, after raw heap-address canonicalization:
 
 | file | native | LLVM | LLVM/native |
 | --- | ---: | ---: | ---: |

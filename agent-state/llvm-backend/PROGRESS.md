@@ -1259,3 +1259,23 @@ measurement against the native AMD64 backend.
   current native-vs-LLVM performance measurement.  A broader perf sweep should
   restore or recreate the missing historical harnesses if more exhaustive
   compiler-binary/minibench coverage is needed.
+
+2026-06-28 compiler-binary performance benchmark:
+
+- Ran the requested native-built compiler versus LLVM-built compiler comparison.
+  Native side was `_install/bin/ocamlopt.opt`; LLVM side was
+  `_llvm_self_stage2_install/bin/ocamlopt.opt`.
+- Both compilers compiled representative compiler source files in normal native
+  mode.  No `-llvm-backend` flag was passed.
+- Method: direct `ocamlopt.opt -c` of these `_build/main` modules:
+  `env.ml`, `ctype.ml`, `typecore.ml`, `translcore.ml`, `typemod.ml`,
+  `cfg_to_linear.ml`, `cfg_selectgen.ml`, `llvmize.ml`, and
+  `regalloc_irc.ml`.  Used the generated `_build/main` `.cmi` object
+  directories as include context.  `OCAMLLIB` was unset so each installed
+  compiler used its own installed stdlib path.  Each file used one warmup plus
+  five measured samples, alternating measured compiler order.
+- Result: geomean 1.0105x LLVM-built/native-built, median 1.0125x, summed
+  median runtime ratio 1.0108x, min 0.9792x, max 1.0577x.  Slowest file was
+  `regalloc_irc.ml` at 1.0577x; fastest was `cfg_selectgen.ml` at 0.9792x.
+  Raw JSON is at
+  `/tmp/oxcaml_compiler_binary_native_vs_llvm_stage2_20260628.json`.
