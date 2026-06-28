@@ -85,6 +85,29 @@ type known_value =
   | Const_float32 of int32
   | Const_float of int64
 
+type known_values =
+  { find : Reg.t -> known_value option;
+    replace : Reg.t -> known_value -> unit;
+    remove : Reg.t -> unit;
+    filter_map_inplace :
+      (Reg.t -> known_value -> known_value option) -> unit
+  }
+
+let make_known_values ~(use_loc_equality : bool) : known_values =
+  let module Tbl =
+    (val if use_loc_equality
+         then
+           (module Reg.UsingLocEquality.Tbl :
+             Hashtbl.S with type key = Reg.t)
+         else (module Reg.Tbl : Hashtbl.S with type key = Reg.t))
+  in
+  let tbl = Tbl.create 17 in
+  { find = (fun reg -> Tbl.find_opt tbl reg);
+    replace = (fun reg value -> Tbl.replace tbl reg value);
+    remove = (fun reg -> Tbl.remove tbl reg);
+    filter_map_inplace = (fun f -> Tbl.filter_map_inplace f tbl)
+  }
+
 let eval_int_op op (left : nativeint) (right : nativeint) : nativeint option =
   let is_valid_shift =
     Nativeint.compare right 0n >= 0
@@ -147,25 +170,26 @@ let find_unique_index : 'a array -> f:('a -> bool) -> int option =
    been executed. Currently only tracks constant values, moves between
    registers, basic integer arithmetic, and basic float64 arithmetic over known
    values. *)
-let collect_known_values (cfg : Cfg.t) (block : Cfg.basic_block) :
-    known_value Reg.UsingLocEquality.Tbl.t =
-  let known_values = Reg.UsingLocEquality.Tbl.create 17 in
+let collect_known_values ~(use_loc_equality : bool) (cfg : Cfg.t)
+    (block : Cfg.basic_block) : known_values =
+  let known_values = make_known_values ~use_loc_equality in
   let replace reg value =
     if not (Reg.is_unknown reg)
-    then Reg.UsingLocEquality.Tbl.replace known_values reg value
+    then known_values.replace reg value
+    else if not use_loc_equality
+    then known_values.replace reg value
     else Misc.fatal_errorf "unexpected unknown location (%a)" Printreg.reg reg
   in
-  let find_opt reg = Reg.UsingLocEquality.Tbl.find_opt known_values reg in
-  let remove reg = Reg.UsingLocEquality.Tbl.remove known_values reg in
+  let find_opt reg = known_values.find reg in
+  let remove reg = known_values.remove reg in
   let remove_destroyed (instr : Cfg.basic Cfg.instruction) =
     let destroyed_regs = Proc.destroyed_at_basic instr.desc in
-    Reg.UsingLocEquality.Tbl.filter_map_inplace
+    known_values.filter_map_inplace
       (fun reg known_value ->
         let is_destroyed =
           Array.exists (fun r -> Reg.same_loc r reg) destroyed_regs
         in
         if is_destroyed then None else Some known_value)
-      known_values
   in
   let infer_known_values_from_predecessor () =
     (* When there is only one predecessor, we can sometimes infer the value of a
@@ -296,22 +320,19 @@ let collect_known_values (cfg : Cfg.t) (block : Cfg.basic_block) :
           | Domain_index )
       | Reloadretaddr | Pushtrap _ | Poptrap _ | Prologue | Epilogue
       | Stack_check _ ->
-        Array.iter
-          (fun reg -> Reg.UsingLocEquality.Tbl.remove known_values reg)
-          instr.res;
+        Array.iter remove instr.res;
         remove_destroyed instr);
   known_values
 
 (* Compute the destination of a terminator, using [known_values] to determine
    the values of some registers, returning [None] if the destination is not
    statically known. *)
-let evaluate_terminator (known_values : known_value Reg.UsingLocEquality.Tbl.t)
+let evaluate_terminator (known_values : known_values)
     (term : Cfg.terminator Cfg.instruction) : Label.t option =
   let[@inline] get_known_value ~(arg_idx : int) : known_value option =
     if arg_idx >= 0 && arg_idx < Array.length term.arg
     then
-      Reg.UsingLocEquality.Tbl.find_opt known_values
-        (Array.unsafe_get term.arg arg_idx)
+      known_values.find (Array.unsafe_get term.arg arg_idx)
     else
       Misc.fatal_errorf "invalid argument index (%d) for instruction %a" arg_idx
         InstructionId.format term.id
@@ -428,12 +449,19 @@ let evaluate_terminator (known_values : known_value Reg.UsingLocEquality.Tbl.t)
     None
 
 let block_known_values (cfg : Cfg.t) (block : C.basic_block)
-    ~(is_after_regalloc : bool) ~(allowed_to_be_irreducible : bool) : bool =
+    ~(allow_value_propagation_before_regalloc : bool)
+    ~(allowed_to_be_irreducible : bool) : bool =
+  let value_propagation_allowed =
+    cfg.register_locations_are_set || allow_value_propagation_before_regalloc
+  in
   if
     !Oxcaml_flags.cfg_value_propagation
-    && is_after_regalloc && allowed_to_be_irreducible
+    && value_propagation_allowed && allowed_to_be_irreducible
   then (
-    let known_values = collect_known_values cfg block in
+    let known_values =
+      collect_known_values ~use_loc_equality:cfg.register_locations_are_set cfg
+        block
+    in
     match evaluate_terminator known_values block.terminator with
     | None -> false
     | Some succ ->
@@ -454,8 +482,11 @@ let block_known_values (cfg : Cfg.t) (block : C.basic_block)
    order. Also, for linear to cfg and back will be harder to generate exactly
    the same layout. Also, how do we map execution counts about branches onto
    this terminator? *)
-let block (cfg : C.t) (block : C.basic_block) : bool =
-  let is_after_regalloc = cfg.register_locations_are_set in
+let block ?(allow_value_propagation_before_regalloc = false) (cfg : C.t)
+    (block : C.basic_block) : bool =
+  let value_propagation_allowed =
+    cfg.register_locations_are_set || allow_value_propagation_before_regalloc
+  in
   match block.terminator.desc with
   | Always successor_label ->
     (* If we have a jump to an empty block whose terminator is a condition, we
@@ -475,9 +506,12 @@ let block (cfg : C.t) (block : C.basic_block) : bool =
            of the loop information. *)
         if
           !Oxcaml_flags.cfg_value_propagation
-          && is_after_regalloc && cfg.allowed_to_be_irreducible
+          && value_propagation_allowed && cfg.allowed_to_be_irreducible
         then
-          let known_values = collect_known_values cfg block in
+          let known_values =
+            collect_known_values
+              ~use_loc_equality:cfg.register_locations_are_set cfg block
+          in
           evaluate_terminator known_values successor_block.terminator
         else None
       in
@@ -528,11 +562,11 @@ let block (cfg : C.t) (block : C.basic_block) : bool =
         <- { block.terminator with desc = Always l; arg = [||]; res = [||] };
       false)
     else
-      block_known_values cfg block ~is_after_regalloc
+      block_known_values cfg block ~allow_value_propagation_before_regalloc
         ~allowed_to_be_irreducible:cfg.allowed_to_be_irreducible
   | Switch labels ->
     let shortcircuit =
-      block_known_values cfg block ~is_after_regalloc
+      block_known_values cfg block ~allow_value_propagation_before_regalloc
         ~allowed_to_be_irreducible:cfg.allowed_to_be_irreducible
     in
     if shortcircuit
@@ -544,10 +578,12 @@ let block (cfg : C.t) (block : C.basic_block) : bool =
   | Call _ | Prim _ | Invalid _ ->
     false
 
-let run cfg =
+let run ?(allow_value_propagation_before_regalloc = false) cfg =
   let registration_needed =
     C.fold_blocks cfg ~init:false ~f:(fun _ b registration_needed ->
-        let shortcircuit = block cfg b in
+        let shortcircuit =
+          block ~allow_value_propagation_before_regalloc cfg b
+        in
         registration_needed || shortcircuit)
   in
   if registration_needed

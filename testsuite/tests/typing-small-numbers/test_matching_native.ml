@@ -1,6 +1,7 @@
 (* TEST
  flambda2;
  {
+   not-macos;
    toplevel.opt;
  }
 *)

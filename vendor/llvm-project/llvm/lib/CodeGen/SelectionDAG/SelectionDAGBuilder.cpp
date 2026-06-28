@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "SelectionDAGBuilder.h"
+#include "OxCamlTrapUtils.h"
 #include "SDNodeDbgValue.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APInt.h"
@@ -77,6 +78,7 @@
 #include "llvm/IR/IntrinsicsAArch64.h"
 #include "llvm/IR/IntrinsicsWebAssembly.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Statepoint.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
@@ -2950,6 +2952,12 @@ void SelectionDAGBuilder::visitInvoke(const InvokeInst &I) {
   // catchswitch for successors.
   MachineBasicBlock *Return = FuncInfo.MBBMap[I.getSuccessor(0)];
   const BasicBlock *EHPadBB = I.getSuccessor(1);
+  const BasicBlock *OxCamlTrapRecoveryBB =
+      getOxCamlTrapRecoveryInvokeTarget(I, *FuncInfo.DT);
+  bool IsOxCamlTrapRecoveryInvoke = OxCamlTrapRecoveryBB != nullptr;
+  bool IsOxCamlRaiseNotraceEdge = false;
+  const BasicBlock *CodegenEHPadBB =
+      IsOxCamlTrapRecoveryInvoke ? nullptr : EHPadBB;
 
   // Deopt bundles are lowered in LowerCallSiteWithDeoptBundle, and we don't
   // have to do anything here to lower funclet bundles.
@@ -2963,7 +2971,7 @@ void SelectionDAGBuilder::visitInvoke(const InvokeInst &I) {
   const Value *Callee(I.getCalledOperand());
   const Function *Fn = dyn_cast<Function>(Callee);
   if (isa<InlineAsm>(Callee))
-    visitInlineAsm(I, EHPadBB);
+    visitInlineAsm(I, CodegenEHPadBB);
   else if (Fn && Fn->isIntrinsic()) {
     switch (Fn->getIntrinsicID()) {
     default:
@@ -2977,11 +2985,32 @@ void SelectionDAGBuilder::visitInvoke(const InvokeInst &I) {
       break;
     case Intrinsic::experimental_patchpoint_void:
     case Intrinsic::experimental_patchpoint_i64:
-      visitPatchpoint(I, EHPadBB);
+      visitPatchpoint(I, CodegenEHPadBB);
       break;
     case Intrinsic::experimental_gc_statepoint:
-      LowerStatepoint(cast<GCStatepointInst>(I), EHPadBB);
+      LowerStatepoint(cast<GCStatepointInst>(I), CodegenEHPadBB);
       break;
+    case Intrinsic::aarch64_oxcaml_raise_notrace_edge: {
+      if (!IsOxCamlTrapRecoveryInvoke)
+        report_fatal_error("OxCaml raise-notrace edge must unwind to an active "
+                           "runtime-entered trap recovery block");
+      IsOxCamlRaiseNotraceEdge = true;
+      MachineBasicBlock *RecoveryMBB =
+          FuncInfo.MBBMap[OxCamlTrapRecoveryBB];
+      SmallVector<SDValue, 4> Ops;
+      Ops.push_back(getRoot());
+      const TargetLowering &TLI = DAG.getTargetLoweringInfo();
+      Ops.push_back(DAG.getTargetConstant(
+          Intrinsic::aarch64_oxcaml_raise_notrace_edge, getCurSDLoc(),
+          TLI.getPointerTy(DAG.getDataLayout())));
+      Ops.push_back(getValue(I.getArgOperand(0)));
+      Ops.push_back(getValue(I.getArgOperand(1)));
+      Ops.push_back(getValue(I.getArgOperand(2)));
+      Ops.push_back(DAG.getBasicBlock(RecoveryMBB));
+      SDVTList VTs = DAG.getVTList(ArrayRef<EVT>({MVT::Other}));
+      DAG.setRoot(DAG.getNode(ISD::INTRINSIC_VOID, getCurSDLoc(), VTs, Ops));
+      break;
+    }
     case Intrinsic::wasm_rethrow: {
       // This is usually done in visitTargetIntrinsic, but this intrinsic is
       // special because it can be invoked, so we manually lower it to a DAG
@@ -3002,9 +3031,9 @@ void SelectionDAGBuilder::visitInvoke(const InvokeInst &I) {
     // Eventually we will support lowering the @llvm.experimental.deoptimize
     // intrinsic, and right now there are no plans to support other intrinsics
     // with deopt state.
-    LowerCallSiteWithDeoptBundle(&I, getValue(Callee), EHPadBB);
+    LowerCallSiteWithDeoptBundle(&I, getValue(Callee), CodegenEHPadBB);
   } else {
-    LowerCallTo(I, getValue(Callee), false, false, EHPadBB);
+    LowerCallTo(I, getValue(Callee), false, false, CodegenEHPadBB);
   }
 
   // If the value of the invoke is used outside of its defining block, make it
@@ -3023,16 +3052,32 @@ void SelectionDAGBuilder::visitInvoke(const InvokeInst &I) {
   findUnwindDestinations(FuncInfo, EHPadBB, EHPadBBProb, UnwindDests);
 
   // Update successor info.
-  addSuccessorWithProb(InvokeMBB, Return);
-  for (auto &UnwindDest : UnwindDests) {
-    UnwindDest.first->setIsEHPad();
-    addSuccessorWithProb(InvokeMBB, UnwindDest.first, UnwindDest.second);
+  if (IsOxCamlRaiseNotraceEdge) {
+    MachineBasicBlock *Target = FuncInfo.MBBMap[OxCamlTrapRecoveryBB];
+    Target->setIsRuntimeEntered();
+    Target->setMachineBlockAddressTaken();
+    Target->setLabelMustBeEmitted();
+  } else {
+    addSuccessorWithProb(InvokeMBB, Return);
+  }
+  if (IsOxCamlTrapRecoveryInvoke && !IsOxCamlRaiseNotraceEdge) {
+    MachineBasicBlock *Target = FuncInfo.MBBMap[OxCamlTrapRecoveryBB];
+    Target->setIsRuntimeEntered();
+    Target->setMachineBlockAddressTaken();
+    Target->setLabelMustBeEmitted();
+    addSuccessorWithProb(InvokeMBB, Target, EHPadBBProb);
+  } else {
+    for (auto &UnwindDest : UnwindDests) {
+      UnwindDest.first->setIsEHPad();
+      addSuccessorWithProb(InvokeMBB, UnwindDest.first, UnwindDest.second);
+    }
   }
   InvokeMBB->normalizeSuccProbs();
 
   // Drop into normal successor.
-  DAG.setRoot(DAG.getNode(ISD::BR, getCurSDLoc(), MVT::Other, getControlRoot(),
-                          DAG.getBasicBlock(Return)));
+  if (!IsOxCamlRaiseNotraceEdge)
+    DAG.setRoot(DAG.getNode(ISD::BR, getCurSDLoc(), MVT::Other,
+                            getControlRoot(), DAG.getBasicBlock(Return)));
 }
 
 void SelectionDAGBuilder::visitCallBr(const CallBrInst &I) {
@@ -3078,6 +3123,30 @@ void SelectionDAGBuilder::visitResume(const ResumeInst &RI) {
 }
 
 void SelectionDAGBuilder::visitLandingPad(const LandingPadInst &LP) {
+  if (!FuncInfo.MBB->isRuntimeEntered() &&
+      isOxCamlTrapRecoveryPad(*FuncInfo.Fn, *LP.getParent()) &&
+      (hasDominatingOxCamlTrapPublishForRecoveryPad(*FuncInfo.Fn,
+                                                    *LP.getParent(),
+                                                    *FuncInfo.DT) ||
+       hasOxCamlPushTrapTargeting(*FuncInfo.Fn, *LP.getParent()))) {
+    FuncInfo.MBB->setIsRuntimeEntered();
+    FuncInfo.MBB->setMachineBlockAddressTaken();
+    FuncInfo.MBB->setLabelMustBeEmitted();
+  }
+
+  if (FuncInfo.MBB->isRuntimeEntered()) {
+    assert(LP.getType()->isTokenTy() &&
+           "runtime-entered trap recovery must use token landingpad");
+    return;
+  }
+
+  if (isOxCamlTrapRecoveryLandingPadTrampoline(*FuncInfo.Fn, *LP.getParent(),
+                                               *FuncInfo.DT)) {
+    assert(LP.getType()->isTokenTy() &&
+           "trap recovery landingpad trampoline must use token landingpad");
+    return;
+  }
+
   assert(FuncInfo.MBB->isEHPad() &&
          "Call to landingpad not in landing pad!");
 
@@ -4816,6 +4885,64 @@ void SelectionDAGBuilder::visitAtomicStore(const StoreInst &I) {
 /// node.
 void SelectionDAGBuilder::visitTargetIntrinsic(const CallInst &I,
                                                unsigned Intrinsic) {
+  if (Intrinsic == llvm::Intrinsic::aarch64_oxcaml_push_trap) {
+    const Value *RecoveryTarget = I.getArgOperand(0);
+    MachineBasicBlock *RecoveryMBB = nullptr;
+    bool DeletedRecoveryTarget = false;
+    if (auto *BA = dyn_cast<BlockAddress>(RecoveryTarget->stripPointerCasts())) {
+      RecoveryMBB = FuncInfo.MBBMap[BA->getBasicBlock()];
+      if (!RecoveryMBB)
+        report_fatal_error("missing machine block for OxCaml trap recovery");
+      if (!RecoveryMBB->isRuntimeEntered()) {
+        BasicBlock *RecoveryBB = BA->getBasicBlock();
+        if (isOxCamlTrapRecoveryPad(*FuncInfo.Fn, *RecoveryBB) ||
+            isOxCamlTrapRecoveryContinuation(*FuncInfo.Fn, *RecoveryBB)) {
+          RecoveryMBB->setIsRuntimeEntered();
+          RecoveryMBB->setMachineBlockAddressTaken();
+          RecoveryMBB->setLabelMustBeEmitted();
+        }
+      }
+    } else if (match(RecoveryTarget, m_IntToPtr(m_SpecificInt(1)))) {
+      // LLVM rewrites blockaddresses to inttoptr(1) when it deletes an
+      // unreachable block. This can happen after it proves every protected
+      // operation is nounwind: the trap frame is still pushed and popped on
+      // the normal path, but its recovery target is impossible to enter.
+      DeletedRecoveryTarget = true;
+    } else {
+      std::string ArgStr;
+      raw_string_ostream OS(ArgStr);
+      RecoveryTarget->print(OS);
+      report_fatal_error(Twine("OxCaml push trap recovery target must be a "
+                               "blockaddress or deleted-blockaddress sentinel, "
+                               "got: ") +
+                         OS.str());
+    }
+
+    const TargetLowering &TLI = DAG.getTargetLoweringInfo();
+    SmallVector<SDValue, 3> Ops;
+    Ops.push_back(getRoot());
+    Ops.push_back(DAG.getTargetConstant(Intrinsic, getCurSDLoc(),
+                                        TLI.getPointerTy(DAG.getDataLayout())));
+    if (DeletedRecoveryTarget)
+      Ops.push_back(DAG.getTargetConstant(0, getCurSDLoc(),
+                                          TLI.getPointerTy(DAG.getDataLayout())));
+    else
+      Ops.push_back(DAG.getBasicBlock(RecoveryMBB));
+    SDVTList VTs = DAG.getVTList(ArrayRef<EVT>({MVT::Other}));
+    SDValue Result =
+        DAG.getNode(ISD::INTRINSIC_VOID, getCurSDLoc(), VTs, Ops);
+    DAG.setRoot(Result.getValue(Result.getNode()->getNumValues() - 1));
+    return;
+  }
+
+  if (Intrinsic == llvm::Intrinsic::aarch64_oxcaml_trap_recover &&
+      !FuncInfo.MBB->isRuntimeEntered() &&
+      isOxCamlTrapRecoveryContinuation(*FuncInfo.Fn, *I.getParent())) {
+    FuncInfo.MBB->setIsRuntimeEntered();
+    FuncInfo.MBB->setMachineBlockAddressTaken();
+    FuncInfo.MBB->setLabelMustBeEmitted();
+  }
+
   // Ignore the callsite's attributes. A specific call site may be marked with
   // readnone, but the lowering code will expect the chain based on the
   // definition.
@@ -10856,6 +10983,24 @@ void SelectionDAGISel::LowerArguments(const Function &F) {
                                    Reg);
     }
 
+    // OxCaml: vregs holding addrspace(1) formal arguments are known gc
+    // value seeds for the post-RA root analyses.
+    auto MarkOxCamlGCArg = [&](Register Reg) {
+      const Function &Fn = *FuncInfo->Fn;
+      if (!Reg.isVirtual() || !Fn.hasGC() ||
+          (Fn.getGC() != "oxcaml" && Fn.getGC() != "ocaml"))
+        return;
+      if (auto *PT = dyn_cast<PointerType>(Arg.getType()))
+        if (PT->getAddressSpace() == 1) {
+          MachineRegisterInfo &MRI = FuncInfo->MF->getRegInfo();
+          MRI.setOxCamlGCPtr(Reg);
+          MRI.setOxCamlGCArg(Reg);
+          if (getenv("OXSR_DEBUG_ARGS"))
+            errs() << "[oxsr-arg] " << FuncInfo->MF->getName() << ": arg "
+                   << Arg.getArgNo() << " -> " << printReg(Reg) << "\n";
+        }
+    };
+
     // If this argument is live outside of the entry block, insert a copy from
     // wherever we got it to the vreg that other BB's will reference it as.
     if (Res.getOpcode() == ISD::CopyFromReg) {
@@ -10865,12 +11010,14 @@ void SelectionDAGISel::LowerArguments(const Function &F) {
       unsigned Reg = cast<RegisterSDNode>(Res.getOperand(1))->getReg();
       if (Register::isVirtualRegister(Reg)) {
         FuncInfo->ValueMap[&Arg] = Reg;
+        MarkOxCamlGCArg(Reg);
         continue;
       }
     }
     if (!isOnlyUsedInEntryBlock(&Arg, TM.Options.EnableFastISel)) {
-      FuncInfo->InitializeRegForValue(&Arg);
+      Register Reg = FuncInfo->InitializeRegForValue(&Arg);
       SDB->CopyToExportRegsIfNeeded(&Arg);
+      MarkOxCamlGCArg(Reg);
     }
   }
 

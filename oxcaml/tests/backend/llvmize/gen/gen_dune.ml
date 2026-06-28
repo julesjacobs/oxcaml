@@ -57,10 +57,14 @@ module F = struct
 
   let check_env_rule =
     let message =
-      "ERROR: OXCAML_CLANG environment variable not set.\n\
-       Llvmize tests require a custom LLVM build.\n\
-       Please set OXCAML_CLANG to the path of your custom Clang binary.\n\
-       Example: export OXCAML_CLANG=/path/to/custom/clang\n"
+      "ERROR: missing llvmize test environment variable.\n\
+       Llvmize tests require OXCAML_CLANG, OXCAML_LLVM_TEST_OCAMLOPT, and \
+       OXCAML_LLVM_TEST_STDLIB.\n\
+       Example: export OXCAML_CLANG=/path/to/custom/clang\n\
+       Example: export \
+       OXCAML_LLVM_TEST_OCAMLOPT=/path/to/_build/_bootinstall/bin/ocamlopt.opt\n\
+       Example: export \
+       OXCAML_LLVM_TEST_STDLIB=/path/to/_build/runtime_stdlib_install/lib/ocaml_runtime_stdlib\n"
     in
     asprintf
       {|(rule
@@ -75,8 +79,8 @@ module F = struct
       message
 
   let exe_rule ~deps ~output =
-    asprintf "(run ${ocamlopt} %a -opaque -o %s.exe)" (pp_strings pp_space) deps
-      output
+    asprintf "(run ${ocamlopt} %a -opaque -o %s.exe ${llvm_flags})"
+      (pp_strings pp_space) deps output
 
   (* CR yusumez: Make one rule per task to better use incremental tests. *)
   let pp_compile_rule ppf ~targets ~deps ~task_rules =
@@ -154,20 +158,29 @@ module F = struct
       tasks
 end
 
-let print_rule ~extra_subst ~buf rule_template =
+let print_rule_for_arch ~architecture ~extra_subst ~buf rule_template =
   let enabled_if =
-    {|(enabled_if
+    Format.sprintf
+      {|(enabled_if
   (and
-   (= %{context_name} "main")
-   (= %{architecture} "amd64")
-   (<> %{env:OXCAML_CLANG=} "")))|}
+   (= %%{context_name} "main")
+   (= %%{architecture} %S)
+   (<> %%{env:OXCAML_CLANG=} "")
+   (<> %%{env:OXCAML_LLVM_TEST_OCAMLOPT=} "")
+   (<> %%{env:OXCAML_LLVM_TEST_STDLIB=} "")))|}
+      architecture
   in
   let enabled_if_without_llvm =
-    {|(enabled_if
+    Format.sprintf
+      {|(enabled_if
   (and
-   (= %{context_name} "main")
-   (= %{architecture} "amd64")
-   (= %{env:OXCAML_CLANG=} "")))|}
+   (= %%{context_name} "main")
+   (= %%{architecture} %S)
+   (or
+    (= %%{env:OXCAML_CLANG=} "")
+    (= %%{env:OXCAML_LLVM_TEST_OCAMLOPT=} "")
+    (= %%{env:OXCAML_LLVM_TEST_STDLIB=} ""))))|}
+      architecture
   in
   (* Prioritise [extra_subst] *)
   let subst label =
@@ -177,7 +190,9 @@ let print_rule ~extra_subst ~buf rule_template =
     | Some (_, res) -> res
     | None -> (
       match label with
-      | "ocamlopt" -> "%{bin:ocamlopt.opt}"
+      | "ocamlopt" ->
+        "%{env:OXCAML_LLVM_TEST_OCAMLOPT=} -I \
+         %{env:OXCAML_LLVM_TEST_STDLIB=}"
       | "enabled_if" -> enabled_if
       | "enabled_if_without_llvm" -> enabled_if_without_llvm
       | "filter" -> "filter.sh"
@@ -194,18 +209,22 @@ let print_rule ~extra_subst ~buf rule_template =
         "-g -O3 -opaque -S -dump-into-file -dcmm -dcfg -dlinear"
       | "stop_after_llvm_flags" ->
         "-g -O3 -opaque -dump-into-file -dcmm -dcfg -stop-after llvmize"
-      | "c_flags" -> "-c -g -O3 -I %{project_root}/runtime"
+      | "c_flags" -> "-c -g -O3 -I ../../../../../../runtime"
       | _ -> assert false)
   in
   Buffer.clear buf;
   Buffer.add_substitute buf subst rule_template;
   Buffer.output_buffer Out_channel.stdout buf
 
-let print_test ~extra_subst ~run ~tasks ~buf =
+let print_test_for_arch ~architecture ~extra_subst ~run ~tasks ~buf =
   let rule_template =
     Format.asprintf "%a" (F.pp_rule_template ~run ~tasks) ()
   in
-  print_rule ~extra_subst ~buf rule_template
+  print_rule_for_arch ~architecture ~extra_subst ~buf rule_template
+
+let print_test = print_test_for_arch ~architecture:"amd64"
+
+let print_rule = print_rule_for_arch ~architecture:"amd64"
 
 let ocaml_llvm_and_output_ir name =
   [ Ocaml_llvm { filename = name; stop_after_llvmize = false };
@@ -219,10 +238,40 @@ let () =
         [ Ocaml_llvm { filename = name; stop_after_llvmize = true };
           Output_ir { source = name; output = name } ]
   in
+  let print_test_compile_with_poll_insertion name =
+    print_test
+      ~extra_subst:
+        [ ( "llvm_flags",
+            "-llvm-backend -llvm-path ${OXCAML_CLANG} -keep-llvmir \
+             -dno-asm-comments" ) ]
+      ~buf ~run:None
+      ~tasks:
+        [ Ocaml_llvm { filename = name; stop_after_llvmize = false };
+          Output_ir { source = name; output = name } ]
+  in
   let print_test_ir_and_run name =
     let main_name = name ^ "_main" in
     print_test ~extra_subst:[] ~buf ~run:(Some name)
       ~tasks:(ocaml_llvm_and_output_ir name @ [Ocaml_default main_name])
+  in
+  let print_arm64_output_test ?output name filenames =
+    print_test_for_arch ~architecture:"arm64" ~extra_subst:[] ~buf
+      ~run:(Some (Option.value output ~default:name))
+      ~tasks:
+        (List.map
+           (fun filename ->
+             Ocaml_llvm { filename; stop_after_llvmize = false })
+           filenames)
+  in
+  let print_arm64_output_test_c ?output ~c_suffix name filenames =
+    print_test_for_arch ~architecture:"arm64" ~extra_subst:[] ~buf
+      ~run:(Some (Option.value output ~default:name))
+      ~tasks:
+        (C (name ^ "_" ^ c_suffix)
+         :: List.map
+              (fun filename ->
+                Ocaml_llvm { filename; stop_after_llvmize = false })
+              filenames)
   in
   let print_test_ir_and_run_with_dep ~extra_dep_suffix
       ?(extra_dep_with_llvm_backend = false) name =
@@ -251,6 +300,16 @@ let () =
   let print_test_run_no_main name =
     print_test ~extra_subst:[] ~buf ~run:(Some name)
       ~tasks:(ocaml_llvm_and_output_ir name)
+  in
+  let print_test_run_no_main_for_arch ~architecture ?(extra_subst = []) name =
+    print_test_for_arch ~architecture ~extra_subst ~buf ~run:(Some name)
+      ~tasks:[Ocaml_llvm { filename = name; stop_after_llvmize = false }]
+  in
+  let print_test_c_for_arch ~architecture ~c_suffix name =
+    let c_name = name ^ "_" ^ c_suffix in
+    print_test_for_arch ~architecture ~extra_subst:[] ~buf ~run:(Some name)
+      ~tasks:
+        [C c_name; Ocaml_llvm { filename = name; stop_after_llvmize = false }]
   in
   print_rule ~extra_subst:[] ~buf F.check_env_rule;
   print_test_ir_only "id_fn";
@@ -281,4 +340,43 @@ let () =
   print_test ~extra_subst:[] ~buf ~run:(Some "csel")
     ~tasks:([C "csel_stub"] @ ocaml_llvm_and_output_ir "csel");
   print_test_ir_only "dls_get";
+  print_test_ir_only "statepoint_metadata";
+  print_test_compile_with_poll_insertion "poll";
+  print_arm64_output_test "const_val" ["const_val"; "const_val_main"];
+  print_arm64_output_test_c ~c_suffix:"stub" "int_ops"
+    ["int_ops_data"; "int_ops"; "int_ops_main"];
+  print_arm64_output_test "gcd" ["gcd_data"; "gcd"; "gcd_main"];
+  print_arm64_output_test "array_rev"
+    ["array_rev_data"; "array_rev"; "array_rev_main"];
+  print_arm64_output_test ~output:"float_ops_arm64" "float_ops"
+    ["float_ops"; "float_ops_main"];
+  print_arm64_output_test "many_args"
+    ["many_args_defn"; "many_args"; "many_args_main"];
+  print_arm64_output_test "multi_ret" ["multi_ret"; "multi_ret_main"];
+  print_arm64_output_test "indirect_call"
+    ["indirect_call"; "indirect_call_main"];
+  print_arm64_output_test_c ~c_suffix:"defn" "extcalls"
+    ["extcalls"; "extcalls_main"];
+  print_arm64_output_test "exn" ["exn_part1"; "exn_part2"; "exn_part3"];
+  print_arm64_output_test "alloc" ["alloc"];
+  print_arm64_output_test "tailcall" ["tailcall2"; "tailcall"];
+  print_arm64_output_test "switch" ["switch"];
+  print_arm64_output_test_c ~c_suffix:"stub" "csel" ["csel"];
+  print_test_c_for_arch ~architecture:"arm64" ~c_suffix:"stubs"
+    "arm64_c_call_gc";
+  print_test_c_for_arch ~architecture:"arm64" ~c_suffix:"stubs"
+    "arm64_global_roots";
+  print_test_run_no_main_for_arch ~architecture:"arm64" "arm64_many_args";
+  print_test_run_no_main_for_arch ~architecture:"arm64"
+    "arm64_input_channel_loop";
+  print_test_run_no_main_for_arch ~architecture:"arm64"
+    "arm64_exception_root_refresh";
+  print_test_run_no_main_for_arch ~architecture:"arm64"
+    "arm64_stack_overflow_trap";
+  print_test_run_no_main_for_arch ~architecture:"arm64"
+    ~extra_subst:
+      [ ( "common_flags",
+          "-g -O3 -opaque -S -dump-into-file -dcmm -dcfg -dlinear -extension \
+           simd_beta" ) ]
+    "arm64_specific_ops";
   ()

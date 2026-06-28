@@ -348,6 +348,9 @@ static void PrintCallingConv(unsigned cc, raw_ostream &Out) {
   case CallingConv::OxCaml_C_Call_StackArgs:
     Out << "oxcaml_c_stackcc";
     break;
+  case CallingConv::OxCaml_C_Direct_Call:
+    Out << "oxcaml_c_directcc";
+    break;
   case CallingConv::OxCaml_Alloc:  Out << "oxcaml_alloccc"; break;
   }
 }

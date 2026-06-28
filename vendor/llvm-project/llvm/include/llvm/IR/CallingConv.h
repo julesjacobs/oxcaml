@@ -247,6 +247,7 @@ namespace CallingConv {
     OxCaml_C_Call = 106, // [caml_c_call]
     OxCaml_C_Call_StackArgs = 107, // [caml_c_call_stack_args_llvm_backend]
     OxCaml_Alloc = 108, // [caml_call_gc] and [caml_local_realloc]
+    OxCaml_C_Direct_Call = 109, // noalloc C call with inline C stack switch
 
     /// The highest possible ID. Must be some 2^k - 1.
     MaxID = 1023

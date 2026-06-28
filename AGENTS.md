@@ -34,6 +34,12 @@ make -s install               # Install the compiler to $(pwd)/_install
 make -s fmt                   # Auto-format code (always run before committing)
 ```
 
+For native-vs-LLVM compiler-binary benchmarking, build the native comparison
+compiler with `tools/build-clean-native-install.sh`. It removes stale LLVM
+workspace files when needed, saves the clean comparison compiler under
+`_native_install` with its build tree under `_native_build`, and verifies the
+saved build log does not contain `llvm-backend=1`.
+
 ## Test Commands
 ```bash
 make -s test-one TEST=test-dir/path.ml      # Run a single test testsuite/tests/test-dir/path.ml

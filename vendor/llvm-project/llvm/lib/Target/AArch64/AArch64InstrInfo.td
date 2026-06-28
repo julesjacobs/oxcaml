@@ -580,6 +580,11 @@ def AArch64call          : SDNode<"AArch64ISD::CALL",
                                 [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
                                  SDNPVariadic]>;
 
+def AArch64oxcaml_c_direct_call
+    : SDNode<"AArch64ISD::OXCAML_C_DIRECT_CALL",
+             SDTypeProfile<0, -1, [SDTCisPtrTy<0>]>,
+             [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue, SDNPVariadic]>;
+
 def AArch64call_bti      : SDNode<"AArch64ISD::CALL_BTI",
                                 SDTypeProfile<0, -1, [SDTCisPtrTy<0>]>,
                                 [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
@@ -771,6 +776,8 @@ def AArch64faddp     : PatFrags<(ops node:$Rn, node:$Rm),
                                  (int_aarch64_neon_faddp node:$Rn, node:$Rm)]>;
 def AArch64roundingvlshr : ComplexPattern<vAny, 2, "SelectRoundingVLShr", [AArch64vlshr]>;
 
+def brtarget : Operand<OtherVT>;
+
 def SDT_AArch64SETTAG : SDTypeProfile<0, 2, [SDTCisPtrTy<0>, SDTCisPtrTy<1>]>;
 def AArch64stg : SDNode<"AArch64ISD::STG", SDT_AArch64SETTAG, [SDNPHasChain, SDNPMayStore, SDNPMemOperand]>;
 def AArch64stzg : SDNode<"AArch64ISD::STZG", SDT_AArch64SETTAG, [SDNPHasChain, SDNPMayStore, SDNPMemOperand]>;
@@ -952,6 +959,79 @@ let hasSideEffects = 1, mayLoad = 1, mayStore = 1 in
 def SPACE : Pseudo<(outs GPR64:$Rd), (ins i32imm:$size, GPR64:$Rn),
                    [(set GPR64:$Rd, (int_aarch64_space imm:$size, GPR64:$Rn))]>,
             Sched<[]>;
+
+let hasSideEffects = 1, mayStore = 1, isCodeGenOnly = 1,
+    Defs = [X26], Size = 16 in
+def OXCAML_TRAP_PUBLISH
+    : Pseudo<(outs),
+             (ins GPR64sp:$trap_block, GPR64:$previous_trap,
+                  GPR64:$recovery_target),
+             []>,
+      Sched<[]>;
+
+// The destination handler is runtime-entered: it reads the domain state
+// and allocation cursor from x28/x27, so both must hold the current SSA
+// values at the raise (ISel pins them with glued copies).
+let hasSideEffects = 1, mayLoad = 1, isCodeGenOnly = 1, isTerminator = 1,
+    isBarrier = 1, isIndirectBranch = 1, Uses = [X26, X27, X28],
+    Defs = [X0, X16, X26, SP], Size = 16 in
+def OXCAML_RAISE_NOTRACE
+    : Pseudo<(outs), (ins GPR64:$exn_bucket), []>,
+      Sched<[]>;
+
+let hasSideEffects = 1, mayLoad = 1, isCodeGenOnly = 1, isTerminator = 1,
+    isBarrier = 1, isBranch = 1, isIndirectBranch = 1, Uses = [X26, X27, X28],
+    Defs = [X0, X16, X26, SP], Size = 16 in
+def OXCAML_RAISE_NOTRACE_EDGE
+    : Pseudo<(outs), (ins GPR64:$exn_bucket, brtarget:$recovery_target), []>,
+      Sched<[]>;
+
+// Derived-pointer recompute for in-place statepoints: base + byteoff,
+// kept opaque (side-effecting, unduplicable) so no CSE/LICM/sink can
+// merge or move it across a statepoint; expanded to a plain add after
+// register allocation.
+let hasSideEffects = 1, isCodeGenOnly = 1, Size = 4 in
+def OXCAML_REDERIVE
+    : Pseudo<(outs GPR64:$dst), (ins GPR64:$base, GPR64:$off),
+             [(set GPR64:$dst,
+                   (int_aarch64_oxcaml_rederive GPR64:$base, GPR64:$off))]>,
+      Sched<[]>;
+
+// In-place statepoint relocate: the post-statepoint incarnation of a gc
+// value. Opaque through the machine-SSA optimizers; rewritten to a COPY
+// just before register coalescing (OxCamlLowerRelocate), which then
+// merges it with its source. See int_aarch64_oxcaml_relocated.
+let hasSideEffects = 1, isCodeGenOnly = 1, Size = 4 in
+def OXCAML_RELOCATE
+    : Pseudo<(outs GPR64:$dst), (ins GPR64:$src),
+             [(set GPR64:$dst,
+                   (int_aarch64_oxcaml_relocated GPR64:$src))]>,
+      Sched<[]>;
+
+// The expansion is 3 instructions (adr, stp-pre, add); an understated
+// Size makes AArch64CompressJumpTables pick byte-sized tables whose
+// label differences then overflow at assembly time.
+let hasSideEffects = 1, mayStore = 1, isCodeGenOnly = 1, Uses = [SP, X26],
+    Defs = [SP, X16, X26], Size = 12 in
+def OXCAML_PUSH_TRAP
+    : Pseudo<(outs), (ins brtarget:$recovery_target), []>,
+      Sched<[]>;
+
+let hasSideEffects = 1, mayStore = 1, isCodeGenOnly = 1, Uses = [SP, X26],
+    Defs = [SP, X16, X26], Size = 12 in
+def OXCAML_PUSH_TRAP_DEAD
+    : Pseudo<(outs), (ins), []>,
+      Sched<[]>;
+
+// Expands to a pair load (ldp x26, x16) mirroring OXCAML_PUSH_TRAP's pair
+// store: on Apple cores a single ldr that reads one element of an stp pays
+// a store-forwarding stall when the push is still in flight (tight
+// try-around-call loops). X16 is a dead scratch def.
+let hasSideEffects = 1, mayLoad = 1, isCodeGenOnly = 1, Uses = [SP],
+    Defs = [SP, X16, X26], Size = 4 in
+def OXCAML_POP_TRAP
+    : Pseudo<(outs), (ins), []>,
+      Sched<[]>;
 
 let hasSideEffects = 1, isCodeGenOnly = 1 in {
   def SpeculationSafeValueX
@@ -2560,6 +2640,9 @@ let isCall = 1, Defs = [LR], Uses = [SP] in {
                      Sched<[WriteBrReg]>;
   def BLR_BTI : Pseudo<(outs), (ins variable_ops), []>,
                 Sched<[WriteBrReg]>;
+  def OXCAML_C_DIRECT_CALL : Pseudo<(outs), (ins variable_ops), []>,
+                             Sched<[WriteI, WriteLD, WriteI, WriteBrReg,
+                                    WriteI]>;
 } // isCall
 
 def : Pat<(AArch64call GPR64:$Rn),
@@ -2576,6 +2659,13 @@ def : Pat<(AArch64call_rvmarker (i64 tglobaladdr:$rvfunc), GPR64:$Rn),
 def : Pat<(AArch64call_bti GPR64:$Rn),
           (BLR_BTI GPR64:$Rn)>,
       Requires<[NoSLSBLRMitigation]>;
+
+def : Pat<(AArch64oxcaml_c_direct_call GPR64:$Rn),
+          (OXCAML_C_DIRECT_CALL GPR64:$Rn)>;
+def : Pat<(AArch64oxcaml_c_direct_call tglobaladdr:$addr),
+          (OXCAML_C_DIRECT_CALL tglobaladdr:$addr)>;
+def : Pat<(AArch64oxcaml_c_direct_call texternalsym:$func),
+          (OXCAML_C_DIRECT_CALL texternalsym:$func)>;
 
 let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1 in {
 def BR  : BranchReg<0b0000, "br", [(brind GPR64:$Rn)]>;

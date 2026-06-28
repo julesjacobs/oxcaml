@@ -274,6 +274,8 @@ let read_one_param ppf position name v =
   | "nocwd" -> set "nocwd" [ no_cwd ] v
   | "linkall" -> set "linkall" [ link_everything ] v
   | "llvm-backend" -> set "llvm-backend" [ Clflags.llvm_backend ] v
+  | "llvm-frontend-gc-roots" ->
+      set "llvm-frontend-gc-roots" [ Clflags.llvm_frontend_gc_roots ] v
   | "nolabels" -> set "nolabels" [ classic ] v
   | "principal" -> set "principal"  [ principal ] v
   | "rectypes" -> set "rectypes" [ recursive_types ] v

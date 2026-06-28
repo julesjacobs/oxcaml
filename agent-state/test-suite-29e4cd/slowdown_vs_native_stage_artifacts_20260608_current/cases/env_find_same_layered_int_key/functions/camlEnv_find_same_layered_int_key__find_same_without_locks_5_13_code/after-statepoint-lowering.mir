@@ -1,0 +1,234 @@
+---
+name:            "\x01_camlEnv_find_same_layered_int_key__find_same_without_locks_5_13_code"
+alignment:       4
+exposesReturnsTwice: false
+legalized:       false
+regBankSelected: false
+selected:        false
+failedISel:      false
+tracksRegLiveness: true
+hasWinCFI:       false
+callsEHReturn:   false
+callsUnwindInit: false
+hasEHCatchret:   false
+hasEHScopes:     false
+hasEHFunclets:   false
+debugInstrRef:   false
+failsVerification: false
+tracksDebugUserValues: false
+registers:
+  - { id: 0, class: gpr64all, preferred-register: '' }
+  - { id: 1, class: gpr64all, preferred-register: '' }
+  - { id: 2, class: gpr64all, preferred-register: '' }
+  - { id: 3, class: gpr64all, preferred-register: '' }
+  - { id: 4, class: gpr64all, preferred-register: '' }
+  - { id: 5, class: gpr64all, preferred-register: '' }
+  - { id: 6, class: gpr64all, preferred-register: '' }
+  - { id: 7, class: gpr64all, preferred-register: '' }
+  - { id: 8, class: gpr64sp, preferred-register: '' }
+  - { id: 9, class: gpr64all, preferred-register: '' }
+  - { id: 10, class: gpr64sp, preferred-register: '' }
+  - { id: 11, class: gpr64, preferred-register: '' }
+  - { id: 12, class: gpr64, preferred-register: '' }
+  - { id: 13, class: gpr64sp, preferred-register: '' }
+  - { id: 14, class: gpr64, preferred-register: '' }
+  - { id: 15, class: gpr64all, preferred-register: '' }
+  - { id: 16, class: gpr64all, preferred-register: '' }
+  - { id: 17, class: gpr64all, preferred-register: '' }
+  - { id: 18, class: gpr64all, preferred-register: '' }
+  - { id: 19, class: gpr64common, preferred-register: '' }
+  - { id: 20, class: gpr64, preferred-register: '' }
+  - { id: 21, class: gpr64, preferred-register: '' }
+  - { id: 22, class: gpr64, preferred-register: '' }
+  - { id: 23, class: gpr64common, preferred-register: '' }
+  - { id: 24, class: gpr32, preferred-register: '' }
+  - { id: 25, class: gpr64, preferred-register: '' }
+  - { id: 26, class: gpr64common, preferred-register: '' }
+  - { id: 27, class: gpr64common, preferred-register: '' }
+  - { id: 28, class: gpr64, preferred-register: '' }
+  - { id: 29, class: gpr32, preferred-register: '' }
+  - { id: 30, class: gpr64all, preferred-register: '' }
+  - { id: 31, class: gpr64all, preferred-register: '' }
+  - { id: 32, class: gpr64all, preferred-register: '' }
+  - { id: 33, class: gpr64all, preferred-register: '' }
+  - { id: 34, class: gpr64all, preferred-register: '' }
+  - { id: 35, class: gpr64all, preferred-register: '' }
+  - { id: 36, class: gpr64, preferred-register: '' }
+  - { id: 37, class: gpr64, preferred-register: '' }
+  - { id: 38, class: gpr64, preferred-register: '' }
+  - { id: 39, class: gpr64all, preferred-register: '' }
+  - { id: 40, class: gpr64all, preferred-register: '' }
+  - { id: 41, class: gpr64all, preferred-register: '' }
+  - { id: 42, class: gpr64, preferred-register: '' }
+  - { id: 43, class: gpr64all, preferred-register: '' }
+  - { id: 44, class: gpr64all, preferred-register: '' }
+  - { id: 45, class: gpr64sp, preferred-register: '' }
+  - { id: 46, class: gpr64, preferred-register: '' }
+  - { id: 47, class: gpr64common, preferred-register: '' }
+  - { id: 48, class: gpr64, preferred-register: '' }
+  - { id: 49, class: gpr32, preferred-register: '' }
+  - { id: 50, class: gpr64common, preferred-register: '' }
+  - { id: 51, class: gpr64, preferred-register: '' }
+  - { id: 52, class: gpr64, preferred-register: '' }
+liveins:
+  - { reg: '$x28', virtual-reg: '%19' }
+  - { reg: '$x27', virtual-reg: '%20' }
+  - { reg: '$x0', virtual-reg: '%21' }
+  - { reg: '$x1', virtual-reg: '%22' }
+frameInfo:
+  isFrameAddressTaken: false
+  isReturnAddressTaken: false
+  hasStackMap:     false
+  hasPatchPoint:   false
+  stackSize:       0
+  offsetAdjustment: 0
+  maxAlignment:    8
+  adjustsStack:    true
+  hasCalls:        true
+  stackProtector:  ''
+  functionContext: ''
+  maxCallFrameSize: 0
+  cvBytesOfCalleeSavedRegisters: 0
+  hasOpaqueSPAdjustment: false
+  hasVAStart:      false
+  hasMustTailInVarArgFunc: false
+  hasTailCall:     false
+  localFrameSize:  0
+  savePoint:       ''
+  restorePoint:    ''
+fixedStack:      []
+stack:
+  - { id: 0, name: .0.exnroot, type: default, offset: 0, size: 8, alignment: 8, 
+      stack-id: default, callee-saved-register: '', callee-saved-restored: true, 
+      debug-info-variable: '', debug-info-expression: '', debug-info-location: '' }
+  - { id: 1, name: exnroot, type: default, offset: 0, size: 8, alignment: 8, 
+      stack-id: default, callee-saved-register: '', callee-saved-restored: true, 
+      debug-info-variable: '', debug-info-expression: '', debug-info-location: '' }
+callSites:       []
+debugValueSubstitutions: []
+constants:       []
+machineFunctionInfo: {}
+body:             |
+  bb.0.L1:
+    successors: %bb.1(0x00106035), %bb.2(0x7fef9fcb)
+    liveins: $x28, $x27, $x0, $x1
+  
+    %22:gpr64 = COPY $x1
+    %21:gpr64 = COPY $x0
+    %20:gpr64 = COPY $x27
+    %19:gpr64common = COPY $x28
+    %24:gpr32 = MOVi32imm 1
+    %25:gpr64 = SUBREG_TO_REG 0, killed %24, %subreg.sub_32
+    STRXui %25, %stack.0..0.exnroot, 0 :: (volatile store (s64) into %ir..0.exnroot)
+    STRXui %25, %stack.1.exnroot, 0 :: (volatile store (s64) into %ir.exnroot)
+    %26:gpr64common = LDRXui %19, 5 :: (load (s64) from %ir.5, align 4)
+    %27:gpr64common = ADDXri killed %26, 408, 0
+    INLINEASM &"mov $0, sp", 1 /* sideeffect attdialect */, 2555914 /* regdef:GPR64common */, def %23
+    %28:gpr64 = SUBSXrr %23, killed %27, implicit-def $nzcv
+    Bcc 2, %bb.2, implicit $nzcv
+    B %bb.1
+  
+  bb.1.L179:
+    successors: %bb.2(0x80000000)
+  
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %29:gpr32 = MOVi32imm 38
+    %30:gpr64all = SUBREG_TO_REG 0, killed %29, %subreg.sub_32
+    $x28 = COPY %19
+    $x27 = COPY %20
+    $x0 = COPY %30
+    %1:gpr64all, %0:gpr64all = STATEPOINT 0, 0, 3, @"\01_caml_llvm_call_realloc_stack", $x28, $x27, $x0, 2, 108, 2, 0, 2, 0, 2, 2, %21(tied-def 0), %22(tied-def 1), 2, 2, 0, %stack.0..0.exnroot, 0, 0, %stack.1.exnroot, 0, 2, 2, 0, 0, 1, 1, csr_aarch64_oxcaml_alloc, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def dead early-clobber $lr :: (volatile load store (s64) on %stack.0..0.exnroot), (volatile load store (s64) on %stack.1.exnroot)
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %31:gpr64all = COPY $x28
+    %32:gpr64all = COPY $x27
+    %2:gpr64all = COPY %31
+    %3:gpr64all = COPY %32
+  
+  bb.2.L147.preheader:
+    successors: %bb.3(0x80000000)
+  
+    %4:gpr64all = PHI %22, %bb.0, %0, %bb.1
+    %5:gpr64all = PHI %20, %bb.0, %3, %bb.1
+    %6:gpr64all = PHI %19, %bb.0, %2, %bb.1
+    %7:gpr64all = PHI %21, %bb.0, %1, %bb.1
+  
+  bb.3.L147:
+    successors: %bb.5(0x7fff0802), %bb.4(0x0000f7fe)
+  
+    %8:gpr64sp = PHI %4, %bb.2, %17, %bb.8
+    %9:gpr64all = PHI %5, %bb.2, %15, %bb.8
+    %10:gpr64sp = PHI %6, %bb.2, %16, %bb.8
+    %11:gpr64 = PHI %7, %bb.2, %18, %bb.8
+    %36:gpr64 = LDRXui %8, 1 :: (load (s64) from %ir..0.in.remat, addrspace 1)
+    %37:gpr64 = LDRXui %8, 0 :: (load (s64) from %ir..045.in, addrspace 1)
+    %38:gpr64 = LDRXui %10, 8 :: (load (s64) from %ir.15, align 4)
+    %12:gpr64 = COPY %38
+    OXCAML_PUSH_TRAP %bb.4, implicit-def dead $sp, implicit-def dead $x16, implicit-def dead $x26, implicit $sp, implicit $x26
+    STRXui killed %36, %stack.0..0.exnroot, 0 :: (volatile store (s64) into %ir..0.exnroot)
+    STRXui %11, %stack.1.exnroot, 0 :: (volatile store (s64) into %ir.exnroot)
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    $x28 = COPY %10
+    $x27 = COPY %9
+    $x0 = COPY %11
+    $x1 = COPY %37
+    STATEPOINT 18, 0, 4, @"\01_camlEnv_find_same_layered_int_key__ident_find_same_4_12_code", $x28, $x27, $x0, $x1, 2, 105, 2, 0, 2, 41, 2, 1870160740, 2, 1, 2, 0, 2, 1, 2, 27, 2, 0, 2, 6, 2, 36, 2, 0, 2, 36, 2, 32, 2, 7761509, 2, 6907487, 2, 6251630, 2, 7168371, 2, 7102309, 2, 6650209, 2, 6579570, 2, 7235935, 2, 7036788, 2, 3045733, 2, 27757, 2, 53, 2, 7761477, 2, 6907487, 2, 6251630, 2, 7168371, 2, 7102309, 2, 6650209, 2, 6579570, 2, 7235935, 2, 7036788, 2, 3045733, 2, 7235942, 2, 7561060, 2, 6647137, 2, 6911839, 2, 7301236, 2, 6255733, 2, 6516588, 2, 29547, 2, 0, 2, 2, 0, %stack.0..0.exnroot, 0, 0, %stack.1.exnroot, 0, 2, 0, csr_aarch64_oxcaml_withoutfp, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr :: (volatile load store (s64) on %stack.0..0.exnroot), (volatile load store (s64) on %stack.1.exnroot)
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %39:gpr64all = COPY $x28
+    %40:gpr64all = COPY $x27
+    %41:gpr64all = COPY $x0
+    %35:gpr64all = COPY %41
+    %34:gpr64all = COPY %40
+    %33:gpr64all = COPY %39
+    B %bb.5
+  
+  bb.4.L182 (machine-block-address-taken, ir-block-address-taken %ir-block.L182, landing-pad, runtime-entered):
+    successors: %bb.6(0x7ffff800), %bb.9(0x00000800)
+    liveins: $x0, $x26, $x27, $x28
+  
+    EH_LABEL <mcsymbol >
+    %42:gpr64 = COPY $x0
+    %43:gpr64all = COPY $x26
+    %44:gpr64all = COPY $x27
+    %45:gpr64sp = COPY $x28
+    %46:gpr64 = LDRXui %stack.0..0.exnroot, 0 :: (volatile dereferenceable load (s64) from %ir..0.exnroot)
+    %13:gpr64sp = COPY %46
+    %14:gpr64 = COPY %42
+    %15:gpr64all = COPY %44
+    %16:gpr64all = COPY %45
+    STRXui %12, %45, 8 :: (store (s64) into %ir.20, align 4)
+    %47:gpr64common = MOVaddr target-flags(aarch64-page) @"\01_camlEnv_find_same_layered_int_key__Not_found_same292", target-flags(aarch64-pageoff, aarch64-nc) @"\01_camlEnv_find_same_layered_int_key__Not_found_same292"
+    %48:gpr64 = SUBSXrr %42, killed %47, implicit-def $nzcv
+    Bcc 0, %bb.6, implicit $nzcv
+    B %bb.9
+  
+  bb.5.L183:
+    OXCAML_POP_TRAP implicit-def dead $sp, implicit-def dead $x26, implicit $sp
+    $x28 = COPY %33
+    $x27 = COPY %34
+    $x0 = COPY %35
+    RET_ReallyLR implicit $x28, implicit $x27, implicit $x0
+  
+  bb.6.L163:
+    successors: %bb.8(0x7ffff800), %bb.7(0x00000800)
+  
+    %49:gpr32 = COPY %13.sub_32
+    TBZW killed %49, 0, %bb.8
+    B %bb.7
+  
+  bb.7.L165:
+    %50:gpr64common = MOVaddr target-flags(aarch64-page) @"\01_camlEnv_find_same_layered_int_key__Not_found_same292", target-flags(aarch64-pageoff, aarch64-nc) @"\01_camlEnv_find_same_layered_int_key__Not_found_same292"
+    OXCAML_RAISE_NOTRACE killed %50, implicit-def dead $x0, implicit-def dead $x16, implicit-def dead $x26, implicit-def dead $sp, implicit $x26
+  
+  bb.8.L167:
+    successors: %bb.3(0x80000000)
+  
+    %51:gpr64 = LDRXui %13, 0 :: (load (s64) from %ir..0.exnroot.load, addrspace 1)
+    %17:gpr64all = COPY %51
+    %52:gpr64 = LDRXui %stack.1.exnroot, 0 :: (volatile dereferenceable load (s64) from %ir.exnroot)
+    %18:gpr64all = COPY %52
+    B %bb.3
+  
+  bb.9.L174:
+    OXCAML_RAISE_NOTRACE %14, implicit-def dead $x0, implicit-def dead $x16, implicit-def dead $x26, implicit-def dead $sp, implicit $x26
+
+...

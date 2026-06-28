@@ -230,7 +230,7 @@ let check_terminator_arity t label block =
     let ty_res =
       match label_after with None -> Cmm.typ_void | Some _ -> Cmm.typ_int
     in
-    check_external ~ty_args:[Cmm.XInt] ~ty_res
+    check_external ~ty_args:[Cmm.XValue] ~ty_res
 
 let check_basic_arity t label (instr : Cfg.basic Cfg.instruction) =
   let args = instr.arg in

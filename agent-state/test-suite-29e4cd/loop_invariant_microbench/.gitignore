@@ -1,0 +1,5 @@
+build/
+inspect/
+results.json
+src/
+*.log

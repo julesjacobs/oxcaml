@@ -487,6 +487,10 @@ void StackMaps::parseStatepointOpers(const MachineInstr &MI,
     (void)NumGCPairs;
     LLVM_DEBUG(dbgs() << "NumGCPairs = " << NumGCPairs << "\n");
 
+    const Function &F = AP.MF->getFunction();
+    bool IsOxCamlGC =
+        F.hasGC() && (F.getGC() == "oxcaml" || F.getGC() == "ocaml");
+
     auto MOB = MI.operands_begin();
     for (auto &P : GCPairs) {
       assert(P.first < GCPtrIndices.size() && "base pointer index not found");
@@ -497,9 +501,37 @@ void StackMaps::parseStatepointOpers(const MachineInstr &MI,
       LLVM_DEBUG(dbgs() << "Base : " << BaseIdx << " Derived : " << DerivedIdx
                         << "\n");
       (void)DerivedIdx;
-      // The stackmap consumer for OxCaml frame tables can only expose base
-      // OCaml values to the runtime GC. Derived pointers remain available to
-      // gc.relocate, but must not be scanned as independent roots.
+      if (IsOxCamlGC && P.first != P.second) {
+        std::string Msg;
+        raw_string_ostream OS(Msg);
+        const TargetRegisterInfo *TRI = AP.MF->getSubtarget().getRegisterInfo();
+        auto PrintOperandRange = [&](unsigned From, unsigned To) {
+          OS << "[";
+          for (unsigned I = From; I < To; ++I) {
+            if (I != From)
+              OS << ", ";
+            OS << "#" << I << "=";
+            MI.getOperand(I).print(OS, TRI);
+          }
+          OS << "]";
+        };
+        unsigned NextBaseIdx = StackMaps::getNextMetaArgIdx(&MI, BaseIdx);
+        unsigned NextDerivedIdx =
+            StackMaps::getNextMetaArgIdx(&MI, DerivedIdx);
+        OS << "OxCaml statepoint contains a derived GC pointer in "
+           << F.getName()
+           << "; RS4GC must rematerialize derived pointers before stackmap "
+              "lowering"
+           << "\n  logical base/derived pair: " << P.first << "/"
+           << P.second << "\n  machine base operand range: ";
+        PrintOperandRange(BaseIdx, NextBaseIdx);
+        OS << "\n  machine derived operand range: ";
+        PrintOperandRange(DerivedIdx, NextDerivedIdx);
+        OS << "\n  statepoint MI: " << MI;
+        OS.flush();
+        report_fatal_error(StringRef(Msg));
+      }
+
       const auto Before = Locations.size();
       (void)parseOperand(MOB + BaseIdx, MOE, Locations, LiveOuts);
       for (auto I = Locations.begin() + Before, E = Locations.end(); I != E;

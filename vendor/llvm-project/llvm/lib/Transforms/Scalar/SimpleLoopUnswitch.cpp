@@ -1192,6 +1192,17 @@ static BasicBlock *buildClonedLoopBlocks(
       // We should have a value map between the instruction and its clone.
       assert(VMap.lookup(&I) == &ClonedI && "Mismatch in the value map!");
 
+      // Token values cannot be merged with PHIs.  An unused token-producing
+      // exit instruction can still be cloned because there is no SSA value to
+      // merge at the split point.
+      if (I.getType()->isTokenTy()) {
+        assert(I.use_empty() &&
+               "cannot merge a token-producing exit instruction");
+        assert(ClonedI.use_empty() &&
+               "cloned token-producing exit instruction should be unused");
+        continue;
+      }
+
       // Forget SCEVs based on exit phis in case SCEV looked through the phi.
       if (SE && isa<PHINode>(I))
         SE->forgetValue(&I);
@@ -2882,6 +2893,14 @@ static bool isSafeForNoNTrivialUnswitching(Loop &L, LoopInfo &LI) {
                            "in exit block\n");
       return false;
     }
+    // If a token-producing exit instruction is used, splitting and cloning the
+    // exit would require merging the original and cloned tokens with a PHI.
+    for (Instruction &I : *ExitBB)
+      if (I.getType()->isTokenTy() && !I.use_empty()) {
+        LLVM_DEBUG(dbgs() << "Cannot unswitch because of used token in exit "
+                             "block\n");
+        return false;
+      }
   }
 
   return true;

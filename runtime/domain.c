@@ -923,6 +923,10 @@ static void reserve_minor_heaps_from_stw_single(void) {
 
   minor_heap_max_bsz = (uintnat)Bsize_wsize(caml_minor_heap_max_wsz);
   minor_heap_reservation_bsize = minor_heap_max_bsz * caml_params->max_domains;
+  /* OXCAML_YOUNG_FLIP debug aid (see minor_gc.c): reserve a spare young
+     space so the minor heap can alternate locations each collection. */
+  if (getenv("OXCAML_YOUNG_FLIP"))
+    minor_heap_reservation_bsize += minor_heap_max_bsz;
 
   /* reserve memory space for minor heaps */
   heaps_base = caml_mem_map(minor_heap_reservation_bsize, CAML_MAP_RESERVE_ONLY, "minor reservation");

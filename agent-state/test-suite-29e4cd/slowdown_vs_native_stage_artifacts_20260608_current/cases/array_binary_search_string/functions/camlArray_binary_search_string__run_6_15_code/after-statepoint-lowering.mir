@@ -1,0 +1,855 @@
+---
+name:            "\x01_camlArray_binary_search_string__run_6_15_code"
+alignment:       4
+exposesReturnsTwice: false
+legalized:       false
+regBankSelected: false
+selected:        false
+failedISel:      false
+tracksRegLiveness: true
+hasWinCFI:       false
+callsEHReturn:   false
+callsUnwindInit: false
+hasEHCatchret:   false
+hasEHScopes:     false
+hasEHFunclets:   false
+debugInstrRef:   false
+failsVerification: false
+tracksDebugUserValues: false
+registers:
+  - { id: 0, class: gpr64all, preferred-register: '' }
+  - { id: 1, class: gpr64all, preferred-register: '' }
+  - { id: 2, class: gpr64all, preferred-register: '' }
+  - { id: 3, class: gpr64all, preferred-register: '' }
+  - { id: 4, class: gpr64all, preferred-register: '' }
+  - { id: 5, class: gpr64all, preferred-register: '' }
+  - { id: 6, class: gpr64, preferred-register: '' }
+  - { id: 7, class: gpr64sp, preferred-register: '' }
+  - { id: 8, class: gpr64all, preferred-register: '' }
+  - { id: 9, class: gpr64all, preferred-register: '' }
+  - { id: 10, class: gpr64all, preferred-register: '' }
+  - { id: 11, class: gpr64all, preferred-register: '' }
+  - { id: 12, class: gpr64all, preferred-register: '' }
+  - { id: 13, class: gpr64all, preferred-register: '' }
+  - { id: 14, class: gpr64all, preferred-register: '' }
+  - { id: 15, class: gpr64all, preferred-register: '' }
+  - { id: 16, class: gpr64all, preferred-register: '' }
+  - { id: 17, class: gpr64all, preferred-register: '' }
+  - { id: 18, class: gpr64, preferred-register: '' }
+  - { id: 19, class: gpr64common, preferred-register: '' }
+  - { id: 20, class: gpr64all, preferred-register: '' }
+  - { id: 21, class: gpr64all, preferred-register: '' }
+  - { id: 22, class: gpr64, preferred-register: '' }
+  - { id: 23, class: gpr64all, preferred-register: '' }
+  - { id: 24, class: gpr64all, preferred-register: '' }
+  - { id: 25, class: gpr64sp, preferred-register: '' }
+  - { id: 26, class: gpr64sp, preferred-register: '' }
+  - { id: 27, class: gpr64all, preferred-register: '' }
+  - { id: 28, class: gpr64all, preferred-register: '' }
+  - { id: 29, class: gpr64all, preferred-register: '' }
+  - { id: 30, class: gpr64all, preferred-register: '' }
+  - { id: 31, class: gpr64all, preferred-register: '' }
+  - { id: 32, class: gpr64, preferred-register: '' }
+  - { id: 33, class: gpr64common, preferred-register: '' }
+  - { id: 34, class: gpr64sp, preferred-register: '' }
+  - { id: 35, class: gpr64all, preferred-register: '' }
+  - { id: 36, class: gpr64all, preferred-register: '' }
+  - { id: 37, class: gpr64all, preferred-register: '' }
+  - { id: 38, class: gpr64all, preferred-register: '' }
+  - { id: 39, class: gpr64all, preferred-register: '' }
+  - { id: 40, class: gpr64all, preferred-register: '' }
+  - { id: 41, class: gpr64sp, preferred-register: '' }
+  - { id: 42, class: gpr64all, preferred-register: '' }
+  - { id: 43, class: gpr64all, preferred-register: '' }
+  - { id: 44, class: gpr64common, preferred-register: '' }
+  - { id: 45, class: gpr64common, preferred-register: '' }
+  - { id: 46, class: gpr64all, preferred-register: '' }
+  - { id: 47, class: gpr64all, preferred-register: '' }
+  - { id: 48, class: gpr64sp, preferred-register: '' }
+  - { id: 49, class: gpr64all, preferred-register: '' }
+  - { id: 50, class: gpr64all, preferred-register: '' }
+  - { id: 51, class: gpr64all, preferred-register: '' }
+  - { id: 52, class: gpr64all, preferred-register: '' }
+  - { id: 53, class: gpr64all, preferred-register: '' }
+  - { id: 54, class: gpr64, preferred-register: '' }
+  - { id: 55, class: gpr64, preferred-register: '' }
+  - { id: 56, class: gpr64sp, preferred-register: '' }
+  - { id: 57, class: gpr64all, preferred-register: '' }
+  - { id: 58, class: gpr64, preferred-register: '' }
+  - { id: 59, class: gpr64, preferred-register: '' }
+  - { id: 60, class: gpr64all, preferred-register: '' }
+  - { id: 61, class: gpr64common, preferred-register: '' }
+  - { id: 62, class: gpr64all, preferred-register: '' }
+  - { id: 63, class: gpr64all, preferred-register: '' }
+  - { id: 64, class: gpr64all, preferred-register: '' }
+  - { id: 65, class: gpr64all, preferred-register: '' }
+  - { id: 66, class: gpr64, preferred-register: '' }
+  - { id: 67, class: gpr64, preferred-register: '' }
+  - { id: 68, class: gpr64sp, preferred-register: '' }
+  - { id: 69, class: gpr64all, preferred-register: '' }
+  - { id: 70, class: gpr64all, preferred-register: '' }
+  - { id: 71, class: gpr64all, preferred-register: '' }
+  - { id: 72, class: gpr64all, preferred-register: '' }
+  - { id: 73, class: gpr64all, preferred-register: '' }
+  - { id: 74, class: gpr64all, preferred-register: '' }
+  - { id: 75, class: gpr64all, preferred-register: '' }
+  - { id: 76, class: gpr64all, preferred-register: '' }
+  - { id: 77, class: gpr64all, preferred-register: '' }
+  - { id: 78, class: gpr64all, preferred-register: '' }
+  - { id: 79, class: gpr64all, preferred-register: '' }
+  - { id: 80, class: gpr64all, preferred-register: '' }
+  - { id: 81, class: gpr64all, preferred-register: '' }
+  - { id: 82, class: gpr64all, preferred-register: '' }
+  - { id: 83, class: gpr64all, preferred-register: '' }
+  - { id: 84, class: gpr64all, preferred-register: '' }
+  - { id: 85, class: gpr64all, preferred-register: '' }
+  - { id: 86, class: gpr64all, preferred-register: '' }
+  - { id: 87, class: gpr64all, preferred-register: '' }
+  - { id: 88, class: gpr64, preferred-register: '' }
+  - { id: 89, class: gpr64, preferred-register: '' }
+  - { id: 90, class: gpr64common, preferred-register: '' }
+  - { id: 91, class: gpr64common, preferred-register: '' }
+  - { id: 92, class: gpr64common, preferred-register: '' }
+  - { id: 93, class: gpr64common, preferred-register: '' }
+  - { id: 94, class: gpr32, preferred-register: '' }
+  - { id: 95, class: gpr64, preferred-register: '' }
+  - { id: 96, class: gpr64all, preferred-register: '' }
+  - { id: 97, class: gpr64all, preferred-register: '' }
+  - { id: 98, class: gpr64common, preferred-register: '' }
+  - { id: 99, class: gpr64, preferred-register: '' }
+  - { id: 100, class: gpr64, preferred-register: '' }
+  - { id: 101, class: gpr64sp, preferred-register: '' }
+  - { id: 102, class: gpr64, preferred-register: '' }
+  - { id: 103, class: gpr32, preferred-register: '' }
+  - { id: 104, class: gpr64, preferred-register: '' }
+  - { id: 105, class: gpr64, preferred-register: '' }
+  - { id: 106, class: gpr64common, preferred-register: '' }
+  - { id: 107, class: gpr64, preferred-register: '' }
+  - { id: 108, class: gpr64common, preferred-register: '' }
+  - { id: 109, class: gpr64common, preferred-register: '' }
+  - { id: 110, class: gpr64all, preferred-register: '' }
+  - { id: 111, class: gpr64all, preferred-register: '' }
+  - { id: 112, class: gpr64all, preferred-register: '' }
+  - { id: 113, class: gpr64, preferred-register: '' }
+  - { id: 114, class: gpr64common, preferred-register: '' }
+  - { id: 115, class: gpr32, preferred-register: '' }
+  - { id: 116, class: gpr64all, preferred-register: '' }
+  - { id: 117, class: gpr64all, preferred-register: '' }
+  - { id: 118, class: gpr64all, preferred-register: '' }
+  - { id: 119, class: gpr64all, preferred-register: '' }
+  - { id: 120, class: gpr64sp, preferred-register: '' }
+  - { id: 121, class: gpr64sp, preferred-register: '' }
+  - { id: 122, class: gpr64all, preferred-register: '' }
+  - { id: 123, class: gpr64, preferred-register: '' }
+  - { id: 124, class: gpr64, preferred-register: '' }
+  - { id: 125, class: gpr64, preferred-register: '' }
+  - { id: 126, class: gpr64all, preferred-register: '' }
+  - { id: 127, class: gpr64all, preferred-register: '' }
+  - { id: 128, class: gpr64common, preferred-register: '' }
+  - { id: 129, class: gpr32, preferred-register: '' }
+  - { id: 130, class: gpr64, preferred-register: '' }
+  - { id: 131, class: gpr64common, preferred-register: '' }
+  - { id: 132, class: gpr32, preferred-register: '' }
+  - { id: 133, class: gpr64, preferred-register: '' }
+  - { id: 134, class: gpr64common, preferred-register: '' }
+  - { id: 135, class: gpr32, preferred-register: '' }
+  - { id: 136, class: gpr64all, preferred-register: '' }
+  - { id: 137, class: gpr64sp, preferred-register: '' }
+  - { id: 138, class: gpr64all, preferred-register: '' }
+  - { id: 139, class: gpr64all, preferred-register: '' }
+  - { id: 140, class: gpr64common, preferred-register: '' }
+  - { id: 141, class: gpr64common, preferred-register: '' }
+  - { id: 142, class: gpr64, preferred-register: '' }
+  - { id: 143, class: gpr32, preferred-register: '' }
+  - { id: 144, class: gpr64all, preferred-register: '' }
+  - { id: 145, class: gpr64all, preferred-register: '' }
+  - { id: 146, class: gpr64all, preferred-register: '' }
+  - { id: 147, class: gpr64all, preferred-register: '' }
+  - { id: 148, class: gpr32, preferred-register: '' }
+  - { id: 149, class: gpr32, preferred-register: '' }
+  - { id: 150, class: gpr64, preferred-register: '' }
+  - { id: 151, class: gpr64, preferred-register: '' }
+  - { id: 152, class: gpr64common, preferred-register: '' }
+  - { id: 153, class: gpr64common, preferred-register: '' }
+  - { id: 154, class: gpr64all, preferred-register: '' }
+  - { id: 155, class: gpr64all, preferred-register: '' }
+  - { id: 156, class: gpr64common, preferred-register: '' }
+  - { id: 157, class: gpr64, preferred-register: '' }
+  - { id: 158, class: gpr64, preferred-register: '' }
+  - { id: 159, class: gpr64sp, preferred-register: '' }
+  - { id: 160, class: gpr64, preferred-register: '' }
+  - { id: 161, class: gpr32, preferred-register: '' }
+  - { id: 162, class: gpr64, preferred-register: '' }
+  - { id: 163, class: gpr64, preferred-register: '' }
+  - { id: 164, class: gpr64common, preferred-register: '' }
+  - { id: 165, class: gpr64, preferred-register: '' }
+  - { id: 166, class: gpr64common, preferred-register: '' }
+  - { id: 167, class: gpr64common, preferred-register: '' }
+  - { id: 168, class: gpr64all, preferred-register: '' }
+  - { id: 169, class: gpr64all, preferred-register: '' }
+  - { id: 170, class: gpr64all, preferred-register: '' }
+  - { id: 171, class: gpr64common, preferred-register: '' }
+  - { id: 172, class: gpr64, preferred-register: '' }
+  - { id: 173, class: gpr64common, preferred-register: '' }
+  - { id: 174, class: gpr32, preferred-register: '' }
+  - { id: 175, class: gpr64all, preferred-register: '' }
+  - { id: 176, class: gpr64all, preferred-register: '' }
+  - { id: 177, class: gpr64all, preferred-register: '' }
+  - { id: 178, class: gpr64all, preferred-register: '' }
+  - { id: 179, class: gpr64all, preferred-register: '' }
+  - { id: 180, class: gpr64all, preferred-register: '' }
+  - { id: 181, class: gpr64all, preferred-register: '' }
+  - { id: 182, class: gpr32common, preferred-register: '' }
+  - { id: 183, class: gpr32, preferred-register: '' }
+  - { id: 184, class: gpr64, preferred-register: '' }
+  - { id: 185, class: gpr64, preferred-register: '' }
+  - { id: 186, class: gpr64, preferred-register: '' }
+  - { id: 187, class: gpr64all, preferred-register: '' }
+  - { id: 188, class: gpr64all, preferred-register: '' }
+  - { id: 189, class: gpr32, preferred-register: '' }
+  - { id: 190, class: gpr64, preferred-register: '' }
+  - { id: 191, class: gpr64sp, preferred-register: '' }
+  - { id: 192, class: gpr64common, preferred-register: '' }
+  - { id: 193, class: gpr64, preferred-register: '' }
+  - { id: 194, class: gpr64all, preferred-register: '' }
+  - { id: 195, class: gpr64all, preferred-register: '' }
+  - { id: 196, class: gpr64sp, preferred-register: '' }
+  - { id: 197, class: gpr64, preferred-register: '' }
+  - { id: 198, class: gpr64all, preferred-register: '' }
+  - { id: 199, class: gpr64common, preferred-register: '' }
+  - { id: 200, class: gpr64, preferred-register: '' }
+  - { id: 201, class: gpr64common, preferred-register: '' }
+  - { id: 202, class: gpr32, preferred-register: '' }
+  - { id: 203, class: gpr64all, preferred-register: '' }
+  - { id: 204, class: gpr64all, preferred-register: '' }
+  - { id: 205, class: gpr64all, preferred-register: '' }
+  - { id: 206, class: gpr64all, preferred-register: '' }
+  - { id: 207, class: gpr64, preferred-register: '' }
+  - { id: 208, class: gpr32, preferred-register: '' }
+  - { id: 209, class: gpr64common, preferred-register: '' }
+  - { id: 210, class: gpr64, preferred-register: '' }
+  - { id: 211, class: gpr32common, preferred-register: '' }
+  - { id: 212, class: gpr32, preferred-register: '' }
+  - { id: 213, class: gpr64, preferred-register: '' }
+  - { id: 214, class: gpr64all, preferred-register: '' }
+  - { id: 215, class: gpr64all, preferred-register: '' }
+  - { id: 216, class: fpr64, preferred-register: '' }
+  - { id: 217, class: gpr64sp, preferred-register: '' }
+  - { id: 218, class: gpr64, preferred-register: '' }
+  - { id: 219, class: gpr64all, preferred-register: '' }
+  - { id: 220, class: gpr32, preferred-register: '' }
+  - { id: 221, class: gpr64, preferred-register: '' }
+  - { id: 222, class: gpr64, preferred-register: '' }
+  - { id: 223, class: gpr64, preferred-register: '' }
+  - { id: 224, class: gpr64, preferred-register: '' }
+  - { id: 225, class: gpr64all, preferred-register: '' }
+  - { id: 226, class: gpr32, preferred-register: '' }
+  - { id: 227, class: gpr64, preferred-register: '' }
+  - { id: 228, class: gpr32, preferred-register: '' }
+  - { id: 229, class: gpr64, preferred-register: '' }
+  - { id: 230, class: gpr32, preferred-register: '' }
+  - { id: 231, class: gpr32, preferred-register: '' }
+  - { id: 232, class: gpr32, preferred-register: '' }
+  - { id: 233, class: gpr64, preferred-register: '' }
+  - { id: 234, class: gpr64all, preferred-register: '' }
+  - { id: 235, class: gpr64, preferred-register: '' }
+  - { id: 236, class: gpr64common, preferred-register: '' }
+  - { id: 237, class: gpr64, preferred-register: '' }
+  - { id: 238, class: gpr64all, preferred-register: '' }
+  - { id: 239, class: gpr64all, preferred-register: '' }
+  - { id: 240, class: gpr64, preferred-register: '' }
+  - { id: 241, class: gpr64, preferred-register: '' }
+  - { id: 242, class: gpr64, preferred-register: '' }
+  - { id: 243, class: gpr64common, preferred-register: '' }
+  - { id: 244, class: gpr64, preferred-register: '' }
+  - { id: 245, class: gpr64common, preferred-register: '' }
+  - { id: 246, class: gpr64, preferred-register: '' }
+  - { id: 247, class: gpr64common, preferred-register: '' }
+  - { id: 248, class: gpr64, preferred-register: '' }
+  - { id: 249, class: gpr64all, preferred-register: '' }
+  - { id: 250, class: gpr32, preferred-register: '' }
+  - { id: 251, class: gpr64all, preferred-register: '' }
+  - { id: 252, class: gpr64common, preferred-register: '' }
+  - { id: 253, class: gpr32, preferred-register: '' }
+  - { id: 254, class: gpr64, preferred-register: '' }
+  - { id: 255, class: gpr64common, preferred-register: '' }
+  - { id: 256, class: gpr64all, preferred-register: '' }
+  - { id: 257, class: gpr64all, preferred-register: '' }
+liveins:
+  - { reg: '$x28', virtual-reg: '%88' }
+  - { reg: '$x27', virtual-reg: '%89' }
+  - { reg: '$x0', virtual-reg: '%90' }
+  - { reg: '$x1', virtual-reg: '%91' }
+frameInfo:
+  isFrameAddressTaken: false
+  isReturnAddressTaken: false
+  hasStackMap:     false
+  hasPatchPoint:   false
+  stackSize:       0
+  offsetAdjustment: 0
+  maxAlignment:    8
+  adjustsStack:    true
+  hasCalls:        true
+  stackProtector:  ''
+  functionContext: ''
+  maxCallFrameSize: 0
+  cvBytesOfCalleeSavedRegisters: 0
+  hasOpaqueSPAdjustment: false
+  hasVAStart:      false
+  hasMustTailInVarArgFunc: false
+  hasTailCall:     false
+  localFrameSize:  0
+  savePoint:       ''
+  restorePoint:    ''
+fixedStack:      []
+stack:
+  - { id: 0, name: '', type: default, offset: 0, size: 8, alignment: 8, 
+      stack-id: default, callee-saved-register: '', callee-saved-restored: true, 
+      debug-info-variable: '', debug-info-expression: '', debug-info-location: '' }
+  - { id: 1, name: '', type: default, offset: 0, size: 8, alignment: 8, 
+      stack-id: default, callee-saved-register: '', callee-saved-restored: true, 
+      debug-info-variable: '', debug-info-expression: '', debug-info-location: '' }
+  - { id: 2, name: '', type: default, offset: 0, size: 8, alignment: 8, 
+      stack-id: default, callee-saved-register: '', callee-saved-restored: true, 
+      debug-info-variable: '', debug-info-expression: '', debug-info-location: '' }
+  - { id: 3, name: '', type: default, offset: 0, size: 8, alignment: 8, 
+      stack-id: default, callee-saved-register: '', callee-saved-restored: true, 
+      debug-info-variable: '', debug-info-expression: '', debug-info-location: '' }
+  - { id: 4, name: '', type: default, offset: 0, size: 8, alignment: 8, 
+      stack-id: default, callee-saved-register: '', callee-saved-restored: true, 
+      debug-info-variable: '', debug-info-expression: '', debug-info-location: '' }
+callSites:       []
+debugValueSubstitutions: []
+constants:       []
+machineFunctionInfo: {}
+body:             |
+  bb.0.L1:
+    successors: %bb.1(0x00106035), %bb.2(0x7fef9fcb)
+    liveins: $x28, $x27, $x0, $x1
+  
+    %91:gpr64common = COPY $x1
+    %90:gpr64common = COPY $x0
+    %89:gpr64 = COPY $x27
+    %88:gpr64 = COPY $x28
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %92:gpr64common = LOADgot target-flags(aarch64-got) @"\01_caml_format_int"
+    %93:gpr64common = LOADgot target-flags(aarch64-got) @"\01_camlStdlib__immstring191"
+    %94:gpr32 = MOVi32imm 1
+    %95:gpr64 = SUBREG_TO_REG 0, killed %94, %subreg.sub_32
+    $x28 = COPY %88
+    $x27 = COPY %89
+    $x8 = COPY %92
+    $x0 = COPY %93
+    $x1 = COPY %95
+    STATEPOINT 0, 0, 5, @"\01_caml_c_call", $x28, $x27, $x8, $x0, $x1, 2, 106, 2, 0, 2, 97, 2, 1870160740, 2, 1, 2, 1, 2, 4, 2, 280, 2, 0, 2, 2, 2, 19, 2, 0, 2, 19, 2, 9, 2, 6583411, 2, 6449516, 2, 7105838, 2, 20, 2, 6583379, 2, 6449516, 2, 7631662, 2, 7235954, 2, 7298919, 2, 6905702, 2, 29806, 2, 27, 2, 0, 2, 50, 2, 65, 2, 0, 2, 65, 2, 29, 2, 7500385, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 27757, 2, 36, 2, 7500353, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 7239026, 2, 6694958, 2, 2715253, 2, 85, 2, 0, 2, 22, 2, 27, 2, 0, 2, 27, 2, 8, 2, 7500385, 2, 3045729, 2, 27757, 2, 18, 2, 6583379, 2, 6449516, 2, 4284255, 2, 6386290, 2, 6893177, 2, 7629166, 2, 27, 2, 0, 2, 4, 2, 69, 2, 0, 2, 69, 2, 29, 2, 7500385, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 27757, 2, 30, 2, 7500353, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 7239026, 2, 0, 2, 0, 2, 0, csr_aarch64_oxcaml_c_call, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %96:gpr64all = COPY $x28
+    %97:gpr64all = COPY $x27
+    %98:gpr64common = COPY $x0
+    %99:gpr64 = LDURXi %98, -8 :: (load (s64) from %ir.remat, align 4, addrspace 1)
+    %100:gpr64 = UBFMXri killed %99, 7, 63
+    %101:gpr64sp = ANDXri killed %100, 8045
+    %102:gpr64 = nsw SUBSXri killed %101, 1, 0, implicit-def dead $nzcv
+    %103:gpr32 = LDRBBroX %98, %102, 0, 0 :: (load (s8) from %ir.remat377, addrspace 1)
+    %104:gpr64 = SUBREG_TO_REG 0, killed %103, %subreg.sub_32
+    %105:gpr64 = nsw SUBSXrr %102, killed %104, implicit-def dead $nzcv
+    %106:gpr64common = nsw UBFMXri %105, 63, 62
+    %107:gpr64 = BFMXri %95, %105, 63, 62
+    %108:gpr64common = nsw ADDXri killed %106, 35, 0
+    STRXui %98, %stack.0, 0 :: (store (s64) into %stack.0)
+    STRXui %108, %stack.1, 0 :: (store (s64) into %stack.1)
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %109:gpr64common = LOADgot target-flags(aarch64-got) @"\01_caml_create_bytes"
+    $x28 = COPY %96
+    $x27 = COPY %97
+    $x8 = COPY %109
+    $x0 = COPY %108
+    STATEPOINT 0, 0, 4, @"\01_caml_c_call", $x28, $x27, $x8, $x0, 2, 106, 2, 0, 2, 94, 2, 1870160740, 2, 1, 2, 1, 2, 4, 2, 226, 2, 0, 2, 10, 2, 32, 2, 0, 2, 32, 2, 9, 2, 6583411, 2, 6449516, 2, 7105838, 2, 10, 2, 6583379, 2, 6449516, 2, 6170670, 2, 41, 2, 27, 2, 0, 2, 28, 2, 65, 2, 0, 2, 65, 2, 29, 2, 7500385, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 27757, 2, 36, 2, 7500353, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 7239026, 2, 6694958, 2, 2715253, 2, 85, 2, 0, 2, 22, 2, 27, 2, 0, 2, 27, 2, 8, 2, 7500385, 2, 3045729, 2, 27757, 2, 18, 2, 6583379, 2, 6449516, 2, 4284255, 2, 6386290, 2, 6893177, 2, 7629166, 2, 27, 2, 0, 2, 4, 2, 69, 2, 0, 2, 69, 2, 29, 2, 7500385, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 27757, 2, 30, 2, 7500353, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 7239026, 2, 2, 1, 8, %stack.0, 0, 1, 8, %stack.1, 0, 2, 0, 2, 2, 0, 0, 1, 1, csr_aarch64_oxcaml_c_call, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr :: (volatile load store (s64) on %stack.0), (volatile load store (s64) on %stack.1)
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %110:gpr64all = COPY $x28
+    %111:gpr64all = COPY $x27
+    %112:gpr64all = COPY $x0
+    %113:gpr64 = LDRXui %stack.0, 0 :: (load (s64) from %stack.0)
+    %0:gpr64all = COPY %112
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %114:gpr64common = MOVaddr target-flags(aarch64-page) @"\01_camlArray_binary_search_string__immstring129", target-flags(aarch64-pageoff, aarch64-nc) @"\01_camlArray_binary_search_string__immstring129"
+    %115:gpr32 = MOVi32imm 35
+    %116:gpr64all = SUBREG_TO_REG 0, killed %115, %subreg.sub_32
+    $x28 = COPY %110
+    $x27 = COPY %111
+    $x0 = COPY %114
+    $x1 = COPY %95
+    $x2 = COPY %112
+    $x3 = COPY %95
+    $x4 = COPY %116
+    OXCAML_C_DIRECT_CALL @"\01_caml_blit_string", $x28, $x27, $x0, $x1, $x2, $x3, $x4, csr_aarch64_aapcs, implicit-def dead $lr, implicit $sp, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %117:gpr64all = COPY $x28
+    %118:gpr64all = COPY $x27
+    %119:gpr64all = COPY $x0
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    $x28 = COPY %117
+    $x27 = COPY %118
+    $x0 = COPY %113
+    $x1 = COPY %95
+    $x2 = COPY %112
+    $x3 = COPY %116
+    $x4 = COPY %107
+    OXCAML_C_DIRECT_CALL @"\01_caml_blit_string", $x28, $x27, $x0, $x1, $x2, $x3, $x4, csr_aarch64_aapcs, implicit-def dead $lr, implicit $sp, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %120:gpr64sp = COPY $x28
+    %121:gpr64sp = COPY $x27
+    %122:gpr64all = COPY $x0
+    %1:gpr64all = COPY %120
+    %123:gpr64 = SUBSXri %121, 24, 0, implicit-def dead $nzcv
+    %2:gpr64all = COPY %123
+    %124:gpr64 = LDRXui %120, 0 :: (load (s64) from %ir.21, align 4)
+    %125:gpr64 = SUBSXrr killed %124, %123, implicit-def $nzcv
+    Bcc 9, %bb.2, implicit $nzcv
+    B %bb.1
+  
+  bb.1.L345:
+    successors: %bb.2(0x80000000)
+  
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    $x28 = COPY %1
+    $x27 = COPY %2
+    %3:gpr64all = STATEPOINT 196609, 0, 2, @"\01_caml_call_gc", $x28, $x27, 2, 108, 2, 0, 2, 80, 2, 1870160737, 2, 1, 2, 1, 2, 3, 2, 3, 2, 27, 2, 0, 2, 28, 2, 68, 2, 0, 2, 68, 2, 29, 2, 7500385, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 27757, 2, 36, 2, 7500353, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 7239026, 2, 6694958, 2, 2715253, 2, 85, 2, 0, 2, 22, 2, 27, 2, 0, 2, 27, 2, 8, 2, 7500385, 2, 3045729, 2, 27757, 2, 18, 2, 6583379, 2, 6449516, 2, 4284255, 2, 6386290, 2, 6893177, 2, 7629166, 2, 27, 2, 0, 2, 4, 2, 69, 2, 0, 2, 69, 2, 29, 2, 7500385, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 27757, 2, 30, 2, 7500353, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 7239026, 2, 1, %0(tied-def 0), 2, 0, 2, 1, 0, 0, csr_aarch64_oxcaml_alloc, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def dead early-clobber $lr
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %126:gpr64all = COPY $x28
+    %127:gpr64all = COPY $x27
+    %4:gpr64all = COPY %126
+    %5:gpr64all = COPY %127
+  
+  bb.2.L346:
+    successors: %bb.3(0x00106035), %bb.4(0x7fef9fcb)
+  
+    %6:gpr64 = PHI %0, %bb.0, %3, %bb.1
+    %7:gpr64sp = PHI %2, %bb.0, %5, %bb.1
+    %8:gpr64all = PHI %1, %bb.0, %4, %bb.1
+    %129:gpr32 = MOVi32imm 2048
+    %130:gpr64 = SUBREG_TO_REG 0, killed %129, %subreg.sub_32
+    STRXui killed %130, %7, 0 :: (volatile store (s64) into %ir.remat378, align 4, addrspace 1)
+    early-clobber %131:gpr64common = STRXpre %6, %7, 8 :: (store (s64) into %ir.27, addrspace 1)
+    %132:gpr32 = MOVi32imm 1
+    %133:gpr64 = SUBREG_TO_REG 0, killed %132, %subreg.sub_32
+    STRXui killed %133, %7, 2 :: (volatile store (s64) into %ir.remat379, align 4, addrspace 1)
+    STRXui %131, %stack.0, 0 :: (store (s64) into %stack.0)
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %134:gpr64common = LOADgot target-flags(aarch64-got) @"\01_caml_array_make"
+    %135:gpr32 = MOVi32imm 129
+    %136:gpr64all = SUBREG_TO_REG 0, killed %135, %subreg.sub_32
+    $x28 = COPY %8
+    $x27 = COPY %7
+    $x8 = COPY %134
+    $x0 = COPY %136
+    $x1 = COPY %131
+    STATEPOINT 0, 0, 5, @"\01_caml_c_call", $x28, $x27, $x8, $x0, $x1, 2, 106, 2, 0, 2, 49, 2, 1870160740, 2, 1, 2, 1, 2, 2, 2, 85, 2, 0, 2, 13, 2, 27, 2, 0, 2, 27, 2, 8, 2, 7500385, 2, 3045729, 2, 27757, 2, 18, 2, 6583379, 2, 6449516, 2, 4284255, 2, 6386290, 2, 6893177, 2, 7629166, 2, 27, 2, 0, 2, 4, 2, 69, 2, 0, 2, 69, 2, 29, 2, 7500385, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 27757, 2, 30, 2, 7500353, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 7239026, 2, 1, 1, 8, %stack.0, 0, 2, 0, 2, 1, 0, 0, csr_aarch64_oxcaml_c_call, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr :: (volatile load store (s64) on %stack.0)
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %137:gpr64sp = COPY $x28
+    %138:gpr64all = COPY $x27
+    %139:gpr64all = COPY $x0
+    %9:gpr64all = COPY %137
+    %10:gpr64all = COPY %138
+    %11:gpr64all = COPY %139
+    %140:gpr64common = LDRXui %137, 5 :: (load (s64) from %ir.30, align 4)
+    %141:gpr64common = ADDXri killed %140, 376, 0
+    INLINEASM &"mov $0, sp", 1 /* sideeffect attdialect */, 2555914 /* regdef:GPR64common */, def %128
+    %142:gpr64 = SUBSXrr %128, killed %141, implicit-def $nzcv
+    Bcc 2, %bb.4, implicit $nzcv
+    B %bb.3
+  
+  bb.3.L347:
+    successors: %bb.4(0x80000000)
+  
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %143:gpr32 = MOVi32imm 34
+    %144:gpr64all = SUBREG_TO_REG 0, killed %143, %subreg.sub_32
+    $x28 = COPY %9
+    $x27 = COPY %10
+    $x0 = COPY %144
+    %12:gpr64all = STATEPOINT 0, 0, 3, @"\01_caml_llvm_call_realloc_stack", $x28, $x27, $x0, 2, 108, 2, 0, 2, 0, 2, 1, %11(tied-def 0), 2, 0, 2, 1, 0, 0, csr_aarch64_oxcaml_alloc, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def dead early-clobber $lr
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %145:gpr64all = COPY $x28
+    %146:gpr64all = COPY $x27
+    %13:gpr64all = COPY %145
+    %14:gpr64all = COPY %146
+  
+  bb.4.L204.preheader:
+    successors: %bb.5(0x80000000)
+  
+    %15:gpr64all = PHI %11, %bb.2, %12, %bb.3
+    %16:gpr64all = PHI %10, %bb.2, %14, %bb.3
+    %17:gpr64all = PHI %9, %bb.2, %13, %bb.3
+    %148:gpr32 = MOVi32imm 1
+    %147:gpr64all = SUBREG_TO_REG 0, killed %148, %subreg.sub_32
+  
+  bb.5.L204:
+    successors: %bb.6(0x00000000), %bb.7(0x80000000)
+  
+    %18:gpr64 = PHI %15, %bb.4, %33, %bb.9
+    %19:gpr64common = PHI %147, %bb.4, %40, %bb.9
+    %20:gpr64all = PHI %16, %bb.4, %39, %bb.9
+    %21:gpr64all = PHI %17, %bb.4, %38, %bb.9
+    %149:gpr32 = MOVi32imm 1
+    %150:gpr64 = SUBREG_TO_REG 0, killed %149, %subreg.sub_32
+    %151:gpr64 = ORRXrs %150, %19, 1
+    %22:gpr64 = COPY %151
+    STRXui %18, %stack.0, 0 :: (store (s64) into %stack.0)
+    STRXui %151, %stack.1, 0 :: (store (s64) into %stack.1)
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %152:gpr64common = LOADgot target-flags(aarch64-got) @"\01_caml_format_int"
+    %153:gpr64common = LOADgot target-flags(aarch64-got) @"\01_camlStdlib__immstring191"
+    $x28 = COPY %21
+    $x27 = COPY %20
+    $x8 = COPY %152
+    $x0 = COPY %153
+    $x1 = COPY %151
+    STATEPOINT 0, 0, 5, @"\01_caml_c_call", $x28, $x27, $x8, $x0, $x1, 2, 106, 2, 0, 2, 97, 2, 1870160740, 2, 1, 2, 1, 2, 4, 2, 280, 2, 0, 2, 2, 2, 19, 2, 0, 2, 19, 2, 9, 2, 6583411, 2, 6449516, 2, 7105838, 2, 20, 2, 6583379, 2, 6449516, 2, 7631662, 2, 7235954, 2, 7298919, 2, 6905702, 2, 29806, 2, 27, 2, 0, 2, 50, 2, 65, 2, 0, 2, 65, 2, 29, 2, 7500385, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 27757, 2, 36, 2, 7500353, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 7239026, 2, 6694958, 2, 2715253, 2, 87, 2, 0, 2, 22, 2, 27, 2, 0, 2, 27, 2, 8, 2, 7500385, 2, 3045729, 2, 27757, 2, 18, 2, 6583379, 2, 6449516, 2, 4284255, 2, 6386290, 2, 6893177, 2, 7629166, 2, 27, 2, 0, 2, 4, 2, 69, 2, 0, 2, 69, 2, 29, 2, 7500385, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 27757, 2, 30, 2, 7500353, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 7239026, 2, 2, 1, 8, %stack.0, 0, 1, 8, %stack.1, 0, 2, 0, 2, 2, 0, 0, 1, 1, csr_aarch64_oxcaml_c_call, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr :: (volatile load store (s64) on %stack.0), (volatile load store (s64) on %stack.1)
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %154:gpr64all = COPY $x28
+    %155:gpr64all = COPY $x27
+    %156:gpr64common = COPY $x0
+    %157:gpr64 = LDURXi %156, -8 :: (load (s64) from %ir.remat382, align 4, addrspace 1)
+    %158:gpr64 = UBFMXri killed %157, 7, 63
+    %159:gpr64sp = ANDXri killed %158, 8045
+    %160:gpr64 = nsw SUBSXri killed %159, 1, 0, implicit-def dead $nzcv
+    %161:gpr32 = LDRBBroX %156, %160, 0, 0 :: (load (s8) from %ir.remat383, addrspace 1)
+    %162:gpr64 = SUBREG_TO_REG 0, killed %161, %subreg.sub_32
+    %163:gpr64 = nsw SUBSXrr %160, killed %162, implicit-def dead $nzcv
+    %164:gpr64common = nsw UBFMXri %163, 63, 62
+    %165:gpr64 = BFMXri %150, %163, 63, 62
+    %166:gpr64common = nsw ADDXri killed %164, 35, 0
+    STRXui %156, %stack.1, 0 :: (store (s64) into %stack.1)
+    STRXui %166, %stack.2, 0 :: (store (s64) into %stack.2)
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %167:gpr64common = LOADgot target-flags(aarch64-got) @"\01_caml_create_bytes"
+    $x28 = COPY %154
+    $x27 = COPY %155
+    $x8 = COPY %167
+    $x0 = COPY %166
+    STATEPOINT 0, 0, 4, @"\01_caml_c_call", $x28, $x27, $x8, $x0, 2, 106, 2, 0, 2, 94, 2, 1870160740, 2, 1, 2, 1, 2, 4, 2, 226, 2, 0, 2, 10, 2, 32, 2, 0, 2, 32, 2, 9, 2, 6583411, 2, 6449516, 2, 7105838, 2, 10, 2, 6583379, 2, 6449516, 2, 6170670, 2, 41, 2, 27, 2, 0, 2, 28, 2, 65, 2, 0, 2, 65, 2, 29, 2, 7500385, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 27757, 2, 36, 2, 7500353, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 7239026, 2, 6694958, 2, 2715253, 2, 87, 2, 0, 2, 22, 2, 27, 2, 0, 2, 27, 2, 8, 2, 7500385, 2, 3045729, 2, 27757, 2, 18, 2, 6583379, 2, 6449516, 2, 4284255, 2, 6386290, 2, 6893177, 2, 7629166, 2, 27, 2, 0, 2, 4, 2, 69, 2, 0, 2, 69, 2, 29, 2, 7500385, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 27757, 2, 30, 2, 7500353, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 7239026, 2, 3, 1, 8, %stack.1, 0, 1, 8, %stack.0, 0, 1, 8, %stack.2, 0, 2, 0, 2, 3, 0, 0, 1, 1, 2, 2, csr_aarch64_oxcaml_c_call, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr :: (volatile load store (s64) on %stack.1), (volatile load store (s64) on %stack.0), (volatile load store (s64) on %stack.2)
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %168:gpr64all = COPY $x28
+    %169:gpr64all = COPY $x27
+    %170:gpr64all = COPY $x0
+    %171:gpr64common = LDRXui %stack.0, 0 :: (load (s64) from %stack.0)
+    %23:gpr64all = COPY %171
+    %172:gpr64 = LDRXui %stack.1, 0 :: (load (s64) from %stack.1)
+    %24:gpr64all = COPY %170
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %173:gpr64common = MOVaddr target-flags(aarch64-page) @"\01_camlArray_binary_search_string__immstring129", target-flags(aarch64-pageoff, aarch64-nc) @"\01_camlArray_binary_search_string__immstring129"
+    %174:gpr32 = MOVi32imm 35
+    %175:gpr64all = SUBREG_TO_REG 0, killed %174, %subreg.sub_32
+    $x28 = COPY %168
+    $x27 = COPY %169
+    $x0 = COPY %173
+    $x1 = COPY %150
+    $x2 = COPY %170
+    $x3 = COPY %150
+    $x4 = COPY %175
+    OXCAML_C_DIRECT_CALL @"\01_caml_blit_string", $x28, $x27, $x0, $x1, $x2, $x3, $x4, csr_aarch64_aapcs, implicit-def dead $lr, implicit $sp, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %176:gpr64all = COPY $x28
+    %177:gpr64all = COPY $x27
+    %178:gpr64all = COPY $x0
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    $x28 = COPY %176
+    $x27 = COPY %177
+    $x0 = COPY %172
+    $x1 = COPY %150
+    $x2 = COPY %170
+    $x3 = COPY %175
+    $x4 = COPY %165
+    OXCAML_C_DIRECT_CALL @"\01_caml_blit_string", $x28, $x27, $x0, $x1, $x2, $x3, $x4, csr_aarch64_aapcs, implicit-def dead $lr, implicit $sp, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %179:gpr64all = COPY $x28
+    %180:gpr64all = COPY $x27
+    %181:gpr64all = COPY $x0
+    %25:gpr64sp = COPY %179
+    %26:gpr64sp = COPY %180
+    %182:gpr32common = LDURBBi %171, -8 :: (load (s8) from %ir.remat380, addrspace 1)
+    %183:gpr32 = SUBSWri killed %182, 254, 0, implicit-def $nzcv
+    Bcc 1, %bb.7, implicit $nzcv
+    B %bb.6
+  
+  bb.6.L224:
+    successors: 
+  
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %255:gpr64common = MOVaddr target-flags(aarch64-page) @"\01_camlArray_binary_search_string__invalid776", target-flags(aarch64-pageoff, aarch64-nc) @"\01_camlArray_binary_search_string__invalid776"
+    $x28 = COPY %25
+    $x27 = COPY %26
+    $x0 = COPY %255
+    OXCAML_C_DIRECT_CALL @"\01_caml_flambda2_invalid", $x28, $x27, $x0, csr_aarch64_aapcs, implicit-def dead $lr, implicit $sp, implicit-def $sp, implicit-def $x28, implicit-def $x27
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %256:gpr64all = COPY $x28
+    %257:gpr64all = COPY $x27
+    BRK 1
+  
+  bb.7.L226:
+    successors: %bb.8(0x00106035), %bb.9(0x7fef9fcb)
+  
+    %184:gpr64 = SUBSXri %26, 24, 0, implicit-def dead $nzcv
+    %27:gpr64all = COPY %184
+    %185:gpr64 = LDRXui %25, 0 :: (load (s64) from %ir.59, align 4)
+    %186:gpr64 = SUBSXrr killed %185, %184, implicit-def $nzcv
+    Bcc 9, %bb.9, implicit $nzcv
+    B %bb.8
+  
+  bb.8.L350:
+    successors: %bb.9(0x80000000)
+  
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    $x28 = COPY %25
+    $x27 = COPY %27
+    %29:gpr64all, %28:gpr64all = STATEPOINT 196609, 0, 2, @"\01_caml_call_gc", $x28, $x27, 2, 108, 2, 0, 2, 80, 2, 1870160737, 2, 1, 2, 1, 2, 3, 2, 3, 2, 27, 2, 0, 2, 28, 2, 68, 2, 0, 2, 68, 2, 29, 2, 7500385, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 27757, 2, 36, 2, 7500353, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 7239026, 2, 6694958, 2, 2715253, 2, 87, 2, 0, 2, 22, 2, 27, 2, 0, 2, 27, 2, 8, 2, 7500385, 2, 3045729, 2, 27757, 2, 18, 2, 6583379, 2, 6449516, 2, 4284255, 2, 6386290, 2, 6893177, 2, 7629166, 2, 27, 2, 0, 2, 4, 2, 69, 2, 0, 2, 69, 2, 29, 2, 7500385, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 27757, 2, 30, 2, 7500353, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 7239026, 2, 2, %24(tied-def 0), %23(tied-def 1), 2, 0, 2, 2, 0, 0, 1, 1, csr_aarch64_oxcaml_alloc, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def dead early-clobber $lr
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %187:gpr64all = COPY $x28
+    %188:gpr64all = COPY $x27
+    %30:gpr64all = COPY %187
+    %31:gpr64all = COPY %188
+  
+  bb.9.L351:
+    successors: %bb.10(0x04000000), %bb.5(0x7c000000)
+  
+    %32:gpr64 = PHI %24, %bb.7, %29, %bb.8
+    %33:gpr64common = PHI %23, %bb.7, %28, %bb.8
+    %34:gpr64sp = PHI %27, %bb.7, %31, %bb.8
+    %35:gpr64all = PHI %25, %bb.7, %30, %bb.8
+    %189:gpr32 = MOVi32imm 2048
+    %190:gpr64 = SUBREG_TO_REG 0, killed %189, %subreg.sub_32
+    STRXui killed %190, %34, 0 :: (volatile store (s64) into %ir.remat384, align 4, addrspace 1)
+    early-clobber %191:gpr64sp = STRXpre %32, %34, 8 :: (store (s64) into %ir.65, addrspace 1)
+    STRXui %22, %34, 2 :: (volatile store (s64) into %ir.remat385, align 4, addrspace 1)
+    %192:gpr64common = ADDXrs %33, %22, 2
+    %193:gpr64 = SUBSXri killed %192, 4, 0, implicit-def dead $nzcv
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    $x28 = COPY %35
+    $x27 = COPY %34
+    $x0 = COPY %193
+    $x1 = COPY %191
+    OXCAML_C_DIRECT_CALL @"\01_caml_modify", $x28, $x27, $x0, $x1, csr_aarch64_aapcs, implicit-def dead $lr, implicit $sp, implicit-def $sp, implicit-def $x28, implicit-def $x27
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %194:gpr64all = COPY $x28
+    %195:gpr64all = COPY $x27
+    %37:gpr64all = COPY %195
+    %36:gpr64all = COPY %194
+    %38:gpr64all = COPY %194
+    %39:gpr64all = COPY %195
+    %196:gpr64sp = nuw nsw ADDXri %19, 1, 0
+    %40:gpr64all = COPY %196
+    %197:gpr64 = SUBSXri %196, 64, 0, implicit-def $nzcv
+    Bcc 1, %bb.5, implicit $nzcv
+    B %bb.10
+  
+  bb.10.L236:
+    successors: %bb.11(0x80000000)
+  
+    %199:gpr64common = LDRXui %33, 0 :: (load (s64) from %ir..2, addrspace 1)
+    %200:gpr64 = LDRXui killed %199, 0 :: (load (s64) from %ir.73, addrspace 1)
+    STRXui %200, %stack.1, 0 :: (store (s64) into %stack.1)
+    STRXui %33, %stack.0, 0 :: (store (s64) into %stack.0)
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %201:gpr64common = LOADgot target-flags(aarch64-got) @"\01_caml_array_make"
+    %202:gpr32 = MOVi32imm 129
+    %203:gpr64all = SUBREG_TO_REG 0, killed %202, %subreg.sub_32
+    $x28 = COPY %36
+    $x27 = COPY %37
+    $x8 = COPY %201
+    $x0 = COPY %203
+    $x1 = COPY %200
+    STATEPOINT 0, 0, 5, @"\01_caml_c_call", $x28, $x27, $x8, $x0, $x1, 2, 106, 2, 0, 2, 49, 2, 1870160740, 2, 1, 2, 1, 2, 2, 2, 155, 2, 0, 2, 12, 2, 40, 2, 0, 2, 40, 2, 8, 2, 7500385, 2, 3045729, 2, 27757, 2, 17, 2, 6583379, 2, 6449516, 2, 4284255, 2, 6386290, 2, 7155321, 2, 28769, 2, 29, 2, 0, 2, 13, 2, 28, 2, 0, 2, 28, 2, 29, 2, 7500385, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 27757, 2, 30, 2, 7500353, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 7239026, 2, 2, 1, 8, %stack.0, 0, 1, 8, %stack.1, 0, 2, 0, 2, 2, 0, 0, 1, 1, csr_aarch64_oxcaml_c_call, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr :: (volatile load store (s64) on %stack.0), (volatile load store (s64) on %stack.1)
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %204:gpr64all = COPY $x28
+    %205:gpr64all = COPY $x27
+    %206:gpr64all = COPY $x0
+    %207:gpr64 = LDRXui %stack.0, 0 :: (load (s64) from %stack.0)
+    %41:gpr64sp = COPY %207
+    %42:gpr64all = COPY %204
+    %43:gpr64all = COPY %205
+    %208:gpr32 = MOVi32imm 8
+    %198:gpr64all = SUBREG_TO_REG 0, killed %208, %subreg.sub_32
+    %44:gpr64common = COPY %206
+  
+  bb.11.L252:
+    successors: %bb.12(0x40000000), %bb.13(0x40000000)
+  
+    %45:gpr64common = PHI %198, %bb.10, %53, %bb.14
+    %46:gpr64all = PHI %43, %bb.10, %51, %bb.14
+    %47:gpr64all = PHI %42, %bb.10, %52, %bb.14
+    %209:gpr64common = LDRXroX %41, %45, 0, 0 :: (load (s64) from %ir.uglygep416, addrspace 1)
+    %210:gpr64 = LDRXui killed %209, 0 :: (load (s64) from %ir.76, addrspace 1)
+    %48:gpr64sp = COPY %210
+    %211:gpr32common = LDURBBi %44, -8 :: (load (s8) from %ir.remat387, addrspace 1)
+    %212:gpr32 = SUBSWri killed %211, 254, 0, implicit-def $nzcv
+    Bcc 1, %bb.13, implicit $nzcv
+    B %bb.12
+  
+  bb.12.L265:
+    successors: %bb.14(0x80000000)
+  
+    %216:fpr64 = LDRDui %48, 0 :: (load (s64) from %ir.77, addrspace 1)
+    STRDroX killed %216, %44, %45, 0, 0 :: (store (s64) into %ir.uglygep415, addrspace 1)
+    B %bb.14
+  
+  bb.13.L272:
+    successors: %bb.14(0x80000000)
+  
+    %213:gpr64 = ADDXrr %44, %45
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    $x28 = COPY %47
+    $x27 = COPY %46
+    $x0 = COPY %213
+    $x1 = COPY %48
+    OXCAML_C_DIRECT_CALL @"\01_caml_modify", $x28, $x27, $x0, $x1, csr_aarch64_aapcs, implicit-def dead $lr, implicit $sp, implicit-def $sp, implicit-def $x28, implicit-def $x27
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %214:gpr64all = COPY $x28
+    %215:gpr64all = COPY $x27
+    %49:gpr64all = COPY %214
+    %50:gpr64all = COPY %215
+  
+  bb.14.L279:
+    successors: %bb.15(0x04000000), %bb.11(0x7c000000)
+  
+    %51:gpr64all = PHI %50, %bb.13, %46, %bb.12
+    %52:gpr64all = PHI %49, %bb.13, %47, %bb.12
+    %217:gpr64sp = nuw nsw ADDXri %45, 8, 0
+    %53:gpr64all = COPY %217
+    %218:gpr64 = SUBSXri %217, 512, 0, implicit-def $nzcv
+    Bcc 1, %bb.11, implicit $nzcv
+    B %bb.15
+  
+  bb.15.L284:
+    successors: %bb.24(0x40000000), %bb.16(0x40000000)
+  
+    %220:gpr32 = MOVi32imm 1
+    %219:gpr64all = SUBREG_TO_REG 0, killed %220, %subreg.sub_32
+    %221:gpr64 = SUBSXri %91, 3, 0, implicit-def $nzcv
+    Bcc 11, %bb.24, implicit $nzcv
+    B %bb.16
+  
+  bb.16.L291:
+    successors: %bb.18(0x40000000), %bb.17(0x40000000)
+  
+    %222:gpr64 = UBFMXri %91, 1, 63
+    %54:gpr64 = COPY %222
+    %223:gpr64 = UBFMXri %90, 1, 63
+    %55:gpr64 = COPY %223
+    %224:gpr64 = SUBSXri %90, 3, 0, implicit-def $nzcv
+    Bcc 11, %bb.18, implicit $nzcv
+    B %bb.17
+  
+  bb.17.L297.preheader:
+    successors: %bb.20(0x80000000)
+  
+    %226:gpr32 = MOVi32imm 1
+    %225:gpr64all = SUBREG_TO_REG 0, killed %226, %subreg.sub_32
+    B %bb.20
+  
+  bb.18.L297.us.preheader:
+    successors: %bb.19(0x80000000)
+  
+    %250:gpr32 = MOVi32imm 1
+    %249:gpr64all = SUBREG_TO_REG 0, killed %250, %subreg.sub_32
+  
+  bb.19.L297.us:
+    successors: %bb.24(0x04000000), %bb.19(0x7c000000)
+  
+    %56:gpr64sp = PHI %249, %bb.18, %57, %bb.19
+    %252:gpr64common = ADDXri %56, 1, 0
+    %57:gpr64all = COPY %252
+    %253:gpr32 = MOVi32imm 1
+    %251:gpr64all = SUBREG_TO_REG 0, killed %253, %subreg.sub_32
+    %254:gpr64 = SUBSXrr %252, %54, implicit-def $nzcv
+    Bcc 12, %bb.24, implicit $nzcv
+    B %bb.19
+  
+  bb.20.L297:
+    successors: %bb.21(0x80000000)
+  
+    %58:gpr64 = PHI %41, %bb.17, %74, %bb.22
+    %59:gpr64 = PHI %44, %bb.17, %75, %bb.22
+    %60:gpr64all = PHI %225, %bb.17, %78, %bb.22
+    %61:gpr64common = PHI %225, %bb.17, %82, %bb.22
+    %62:gpr64all = PHI %51, %bb.17, %81, %bb.22
+    %63:gpr64all = PHI %52, %bb.17, %80, %bb.22
+    STRXui %59, %stack.4, 0 :: (store (s64) into %stack.4)
+    STRXui %58, %stack.3, 0 :: (store (s64) into %stack.3)
+    %228:gpr32 = MOVi32imm 1
+    %227:gpr64 = SUBREG_TO_REG 0, killed %228, %subreg.sub_32
+    %229:gpr64 = ORRXrs %227, %61, 1
+    %64:gpr64all = COPY %229
+  
+  bb.21.L309:
+    successors: %bb.22(0x04000000), %bb.21(0x7c000000)
+  
+    %65:gpr64all = PHI %58, %bb.20, %74, %bb.21
+    %66:gpr64 = PHI %59, %bb.20, %75, %bb.21
+    %67:gpr64 = PHI %60, %bb.20, %78, %bb.21
+    %68:gpr64sp = PHI %227, %bb.20, %79, %bb.21
+    %69:gpr64all = PHI %62, %bb.20, %77, %bb.21
+    %70:gpr64all = PHI %63, %bb.20, %76, %bb.21
+    %230:gpr32 = COPY %68.sub_32
+    %231:gpr32 = COPY %64.sub_32
+    %232:gpr32 = ADDWrs killed %231, killed %230, 1
+    %234:gpr64all = IMPLICIT_DEF
+    %233:gpr64 = INSERT_SUBREG %234, killed %232, %subreg.sub_32
+    %235:gpr64 = UBFMXri killed %233, 62, 6
+    %236:gpr64common = ADDXrr %66, killed %235
+    %237:gpr64 = LDURXi killed %236, -4 :: (load (s64) from %ir.remat395, addrspace 1)
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    $x28 = COPY %70
+    $x27 = COPY %69
+    $x0 = COPY %237
+    $x1 = COPY %65
+    STATEPOINT 0, 0, 4, @"\01_camlArray_binary_search_string__find_4_13_code", $x28, $x27, $x0, $x1, 2, 105, 2, 0, 2, 32, 2, 1870160740, 2, 1, 2, 0, 2, 1, 2, 33, 2, 0, 2, 20, 2, 68, 2, 0, 2, 68, 2, 29, 2, 7500385, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 27757, 2, 30, 2, 7500353, 2, 6256993, 2, 7235938, 2, 7959137, 2, 6648671, 2, 6517345, 2, 7561064, 2, 6910580, 2, 3041134, 2, 7239026, 2, 2, 1, 8, %stack.4, 0, 1, 8, %stack.3, 0, 2, 0, 2, 2, 0, 0, 1, 1, csr_aarch64_oxcaml_withoutfp, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr :: (volatile load store (s64) on %stack.4), (volatile load store (s64) on %stack.3)
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %238:gpr64all = COPY $x28
+    %239:gpr64all = COPY $x27
+    %240:gpr64 = COPY $x0
+    %73:gpr64all = COPY %240
+    %72:gpr64all = COPY %239
+    %71:gpr64all = COPY %238
+    %241:gpr64 = LDRXui %stack.3, 0 :: (load (s64) from %stack.3)
+    %74:gpr64all = COPY %241
+    %242:gpr64 = LDRXui %stack.4, 0 :: (load (s64) from %stack.4)
+    %75:gpr64all = COPY %242
+    %76:gpr64all = COPY %238
+    %77:gpr64all = COPY %239
+    %243:gpr64common = ADDXrr %67, %240
+    %244:gpr64 = SUBSXri killed %243, 1, 0, implicit-def dead $nzcv
+    %78:gpr64all = COPY %244
+    %245:gpr64common = ADDXri %68, 1, 0
+    %79:gpr64all = COPY %245
+    %246:gpr64 = SUBSXrr %245, %55, implicit-def $nzcv
+    Bcc 13, %bb.21, implicit $nzcv
+    B %bb.22
+  
+  bb.22.L330.loopexit:
+    successors: %bb.23(0x04000000), %bb.20(0x7c000000)
+  
+    %80:gpr64all = COPY %71
+    %81:gpr64all = COPY %72
+    %247:gpr64common = ADDXri %61, 1, 0
+    %82:gpr64all = COPY %247
+    %248:gpr64 = SUBSXrr %247, %54, implicit-def $nzcv
+    Bcc 13, %bb.20, implicit $nzcv
+    B %bb.23
+  
+  bb.23.common.ret.loopexit322:
+    successors: %bb.24(0x80000000)
+  
+    %83:gpr64all = COPY %71
+    %84:gpr64all = COPY %72
+  
+  bb.24.common.ret:
+    %85:gpr64all = PHI %52, %bb.15, %83, %bb.23, %52, %bb.19
+    %86:gpr64all = PHI %51, %bb.15, %84, %bb.23, %51, %bb.19
+    %87:gpr64all = PHI %219, %bb.15, %78, %bb.23, %251, %bb.19
+    $x28 = COPY %85
+    $x27 = COPY %86
+    $x0 = COPY %87
+    RET_ReallyLR implicit $x28, implicit $x27, implicit $x0
+
+...

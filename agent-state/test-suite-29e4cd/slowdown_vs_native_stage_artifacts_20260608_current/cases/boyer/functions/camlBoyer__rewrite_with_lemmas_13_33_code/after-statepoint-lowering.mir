@@ -1,0 +1,457 @@
+---
+name:            "\x01_camlBoyer__rewrite_with_lemmas_13_33_code"
+alignment:       4
+exposesReturnsTwice: false
+legalized:       false
+regBankSelected: false
+selected:        false
+failedISel:      false
+tracksRegLiveness: true
+hasWinCFI:       false
+callsEHReturn:   false
+callsUnwindInit: false
+hasEHCatchret:   false
+hasEHScopes:     false
+hasEHFunclets:   false
+debugInstrRef:   false
+failsVerification: false
+tracksDebugUserValues: false
+registers:
+  - { id: 0, class: gpr64all, preferred-register: '' }
+  - { id: 1, class: gpr64all, preferred-register: '' }
+  - { id: 2, class: gpr64all, preferred-register: '' }
+  - { id: 3, class: gpr64all, preferred-register: '' }
+  - { id: 4, class: gpr64all, preferred-register: '' }
+  - { id: 5, class: gpr64all, preferred-register: '' }
+  - { id: 6, class: gpr64all, preferred-register: '' }
+  - { id: 7, class: gpr64all, preferred-register: '' }
+  - { id: 8, class: gpr64all, preferred-register: '' }
+  - { id: 9, class: gpr64all, preferred-register: '' }
+  - { id: 10, class: gpr64all, preferred-register: '' }
+  - { id: 11, class: gpr64all, preferred-register: '' }
+  - { id: 12, class: gpr64all, preferred-register: '' }
+  - { id: 13, class: gpr64all, preferred-register: '' }
+  - { id: 14, class: gpr64all, preferred-register: '' }
+  - { id: 15, class: gpr64all, preferred-register: '' }
+  - { id: 16, class: gpr64all, preferred-register: '' }
+  - { id: 17, class: gpr64all, preferred-register: '' }
+  - { id: 18, class: gpr64all, preferred-register: '' }
+  - { id: 19, class: gpr64, preferred-register: '' }
+  - { id: 20, class: gpr64sp, preferred-register: '' }
+  - { id: 21, class: gpr64all, preferred-register: '' }
+  - { id: 22, class: gpr64common, preferred-register: '' }
+  - { id: 23, class: gpr64, preferred-register: '' }
+  - { id: 24, class: gpr64, preferred-register: '' }
+  - { id: 25, class: gpr64all, preferred-register: '' }
+  - { id: 26, class: gpr64sp, preferred-register: '' }
+  - { id: 27, class: gpr64, preferred-register: '' }
+  - { id: 28, class: gpr64all, preferred-register: '' }
+  - { id: 29, class: gpr64all, preferred-register: '' }
+  - { id: 30, class: gpr64all, preferred-register: '' }
+  - { id: 31, class: gpr64all, preferred-register: '' }
+  - { id: 32, class: gpr64all, preferred-register: '' }
+  - { id: 33, class: gpr64all, preferred-register: '' }
+  - { id: 34, class: gpr64all, preferred-register: '' }
+  - { id: 35, class: gpr64all, preferred-register: '' }
+  - { id: 36, class: gpr64all, preferred-register: '' }
+  - { id: 37, class: gpr64all, preferred-register: '' }
+  - { id: 38, class: gpr64all, preferred-register: '' }
+  - { id: 39, class: gpr64all, preferred-register: '' }
+  - { id: 40, class: gpr64all, preferred-register: '' }
+  - { id: 41, class: gpr64all, preferred-register: '' }
+  - { id: 42, class: gpr64all, preferred-register: '' }
+  - { id: 43, class: gpr64all, preferred-register: '' }
+  - { id: 44, class: gpr64, preferred-register: '' }
+  - { id: 45, class: gpr64, preferred-register: '' }
+  - { id: 46, class: gpr64, preferred-register: '' }
+  - { id: 47, class: gpr64, preferred-register: '' }
+  - { id: 48, class: gpr64, preferred-register: '' }
+  - { id: 49, class: gpr64sp, preferred-register: '' }
+  - { id: 50, class: gpr64all, preferred-register: '' }
+  - { id: 51, class: gpr64all, preferred-register: '' }
+  - { id: 52, class: gpr64all, preferred-register: '' }
+  - { id: 53, class: gpr64all, preferred-register: '' }
+  - { id: 54, class: gpr64all, preferred-register: '' }
+  - { id: 55, class: gpr64all, preferred-register: '' }
+  - { id: 56, class: gpr64all, preferred-register: '' }
+  - { id: 57, class: gpr64all, preferred-register: '' }
+  - { id: 58, class: gpr64all, preferred-register: '' }
+  - { id: 59, class: gpr64common, preferred-register: '' }
+  - { id: 60, class: gpr64, preferred-register: '' }
+  - { id: 61, class: gpr64, preferred-register: '' }
+  - { id: 62, class: gpr64, preferred-register: '' }
+  - { id: 63, class: gpr64common, preferred-register: '' }
+  - { id: 64, class: gpr32, preferred-register: '' }
+  - { id: 65, class: gpr64, preferred-register: '' }
+  - { id: 66, class: gpr64common, preferred-register: '' }
+  - { id: 67, class: gpr64common, preferred-register: '' }
+  - { id: 68, class: gpr64, preferred-register: '' }
+  - { id: 69, class: gpr32, preferred-register: '' }
+  - { id: 70, class: gpr64all, preferred-register: '' }
+  - { id: 71, class: gpr64all, preferred-register: '' }
+  - { id: 72, class: gpr64all, preferred-register: '' }
+  - { id: 73, class: gpr32, preferred-register: '' }
+  - { id: 74, class: gpr64sp, preferred-register: '' }
+  - { id: 75, class: gpr64sp, preferred-register: '' }
+  - { id: 76, class: gpr64all, preferred-register: '' }
+  - { id: 77, class: gpr64common, preferred-register: '' }
+  - { id: 78, class: gpr64, preferred-register: '' }
+  - { id: 79, class: gpr64, preferred-register: '' }
+  - { id: 80, class: gpr64, preferred-register: '' }
+  - { id: 81, class: gpr64all, preferred-register: '' }
+  - { id: 82, class: gpr64all, preferred-register: '' }
+  - { id: 83, class: gpr64all, preferred-register: '' }
+  - { id: 84, class: gpr64, preferred-register: '' }
+  - { id: 85, class: gpr64, preferred-register: '' }
+  - { id: 86, class: gpr64, preferred-register: '' }
+  - { id: 87, class: gpr64, preferred-register: '' }
+  - { id: 88, class: gpr64, preferred-register: '' }
+  - { id: 89, class: gpr64, preferred-register: '' }
+  - { id: 90, class: gpr64, preferred-register: '' }
+  - { id: 91, class: gpr64all, preferred-register: '' }
+  - { id: 92, class: gpr64all, preferred-register: '' }
+  - { id: 93, class: gpr64all, preferred-register: '' }
+  - { id: 94, class: gpr64all, preferred-register: '' }
+  - { id: 95, class: gpr64all, preferred-register: '' }
+  - { id: 96, class: gpr32, preferred-register: '' }
+  - { id: 97, class: gpr64, preferred-register: '' }
+  - { id: 98, class: gpr64common, preferred-register: '' }
+  - { id: 99, class: gpr64sp, preferred-register: '' }
+  - { id: 100, class: gpr64, preferred-register: '' }
+  - { id: 101, class: gpr64all, preferred-register: '' }
+  - { id: 102, class: gpr64all, preferred-register: '' }
+  - { id: 103, class: gpr64all, preferred-register: '' }
+  - { id: 104, class: gpr64all, preferred-register: '' }
+  - { id: 105, class: gpr64all, preferred-register: '' }
+  - { id: 106, class: gpr64all, preferred-register: '' }
+  - { id: 107, class: gpr64, preferred-register: '' }
+  - { id: 108, class: gpr64, preferred-register: '' }
+  - { id: 109, class: gpr64, preferred-register: '' }
+  - { id: 110, class: gpr64all, preferred-register: '' }
+  - { id: 111, class: gpr64all, preferred-register: '' }
+  - { id: 112, class: gpr64all, preferred-register: '' }
+  - { id: 113, class: gpr64, preferred-register: '' }
+  - { id: 114, class: gpr64all, preferred-register: '' }
+  - { id: 115, class: gpr64all, preferred-register: '' }
+  - { id: 116, class: gpr64sp, preferred-register: '' }
+  - { id: 117, class: gpr64, preferred-register: '' }
+  - { id: 118, class: gpr64, preferred-register: '' }
+  - { id: 119, class: gpr64common, preferred-register: '' }
+  - { id: 120, class: gpr64, preferred-register: '' }
+  - { id: 121, class: gpr64, preferred-register: '' }
+  - { id: 122, class: gpr64, preferred-register: '' }
+  - { id: 123, class: gpr32, preferred-register: '' }
+  - { id: 124, class: gpr64, preferred-register: '' }
+  - { id: 125, class: gpr64, preferred-register: '' }
+liveins:
+  - { reg: '$x28', virtual-reg: '%59' }
+  - { reg: '$x27', virtual-reg: '%60' }
+  - { reg: '$x0', virtual-reg: '%61' }
+  - { reg: '$x1', virtual-reg: '%62' }
+frameInfo:
+  isFrameAddressTaken: false
+  isReturnAddressTaken: false
+  hasStackMap:     false
+  hasPatchPoint:   false
+  stackSize:       0
+  offsetAdjustment: 0
+  maxAlignment:    8
+  adjustsStack:    true
+  hasCalls:        true
+  stackProtector:  ''
+  functionContext: ''
+  maxCallFrameSize: 0
+  cvBytesOfCalleeSavedRegisters: 0
+  hasOpaqueSPAdjustment: false
+  hasVAStart:      false
+  hasMustTailInVarArgFunc: false
+  hasTailCall:     false
+  localFrameSize:  0
+  savePoint:       ''
+  restorePoint:    ''
+fixedStack:      []
+stack:
+  - { id: 0, name: .3.exnroot, type: default, offset: 0, size: 8, alignment: 8, 
+      stack-id: default, callee-saved-register: '', callee-saved-restored: true, 
+      debug-info-variable: '', debug-info-expression: '', debug-info-location: '' }
+  - { id: 1, name: .07182.exnroot, type: default, offset: 0, size: 8, alignment: 8, 
+      stack-id: default, callee-saved-register: '', callee-saved-restored: true, 
+      debug-info-variable: '', debug-info-expression: '', debug-info-location: '' }
+  - { id: 2, name: exnroot, type: default, offset: 0, size: 8, alignment: 8, 
+      stack-id: default, callee-saved-register: '', callee-saved-restored: true, 
+      debug-info-variable: '', debug-info-expression: '', debug-info-location: '' }
+  - { id: 3, name: exnroot124, type: default, offset: 0, size: 8, alignment: 8, 
+      stack-id: default, callee-saved-register: '', callee-saved-restored: true, 
+      debug-info-variable: '', debug-info-expression: '', debug-info-location: '' }
+  - { id: 4, name: '', type: default, offset: 0, size: 8, alignment: 8, 
+      stack-id: default, callee-saved-register: '', callee-saved-restored: true, 
+      debug-info-variable: '', debug-info-expression: '', debug-info-location: '' }
+  - { id: 5, name: '', type: default, offset: 0, size: 8, alignment: 8, 
+      stack-id: default, callee-saved-register: '', callee-saved-restored: true, 
+      debug-info-variable: '', debug-info-expression: '', debug-info-location: '' }
+callSites:       []
+debugValueSubstitutions: []
+constants:       []
+machineFunctionInfo: {}
+body:             |
+  bb.0.L1:
+    successors: %bb.1(0x00106035), %bb.2(0x7fef9fcb)
+    liveins: $x28, $x27, $x0, $x1
+  
+    %62:gpr64 = COPY $x1
+    %61:gpr64 = COPY $x0
+    %60:gpr64 = COPY $x27
+    %59:gpr64common = COPY $x28
+    %64:gpr32 = MOVi32imm 1
+    %65:gpr64 = SUBREG_TO_REG 0, killed %64, %subreg.sub_32
+    STRXui %65, %stack.0..3.exnroot, 0 :: (volatile store (s64) into %ir..3.exnroot)
+    STRXui %65, %stack.1..07182.exnroot, 0 :: (volatile store (s64) into %ir..07182.exnroot)
+    STRXui %65, %stack.2.exnroot, 0 :: (volatile store (s64) into %ir.exnroot)
+    STRXui %65, %stack.3.exnroot124, 0 :: (volatile store (s64) into %ir.exnroot124)
+    %66:gpr64common = LDRXui %59, 5 :: (load (s64) from %ir.5, align 4)
+    %67:gpr64common = ADDXri killed %66, 408, 0
+    INLINEASM &"mov $0, sp", 1 /* sideeffect attdialect */, 2555914 /* regdef:GPR64common */, def %63
+    %68:gpr64 = SUBSXrr %63, killed %67, implicit-def $nzcv
+    Bcc 2, %bb.2, implicit $nzcv
+    B %bb.1
+  
+  bb.1.L670:
+    successors: %bb.2(0x80000000)
+  
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    %69:gpr32 = MOVi32imm 38
+    %70:gpr64all = SUBREG_TO_REG 0, killed %69, %subreg.sub_32
+    $x28 = COPY %59
+    $x27 = COPY %60
+    $x0 = COPY %70
+    %0:gpr64all, %1:gpr64all = STATEPOINT 0, 0, 3, @"\01_caml_llvm_call_realloc_stack", $x28, $x27, $x0, 2, 108, 2, 0, 2, 0, 2, 2, %62(tied-def 0), %61(tied-def 1), 2, 4, 0, %stack.1..07182.exnroot, 0, 0, %stack.2.exnroot, 0, 0, %stack.3.exnroot124, 0, 0, %stack.0..3.exnroot, 0, 2, 2, 0, 0, 1, 1, csr_aarch64_oxcaml_alloc, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def dead early-clobber $lr :: (volatile load store (s64) on %stack.1..07182.exnroot), (volatile load store (s64) on %stack.2.exnroot), (volatile load store (s64) on %stack.3.exnroot124), (volatile load store (s64) on %stack.0..3.exnroot)
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %71:gpr64all = COPY $x28
+    %72:gpr64all = COPY $x27
+    %2:gpr64all = COPY %71
+    %3:gpr64all = COPY %72
+  
+  bb.2.L671:
+    successors: %bb.3(0x40000000), %bb.6(0x40000000)
+  
+    %4:gpr64all = PHI %61, %bb.0, %1, %bb.1
+    %5:gpr64all = PHI %62, %bb.0, %0, %bb.1
+    %6:gpr64all = PHI %60, %bb.0, %3, %bb.1
+    %7:gpr64all = PHI %59, %bb.0, %2, %bb.1
+    %73:gpr32 = COPY %5.sub_32
+    TBNZW killed %73, 0, %bb.6
+    B %bb.3
+  
+  bb.3.L637.preheader:
+    successors: %bb.7(0x80000000)
+  
+    B %bb.7
+  
+  bb.4.common.ret:
+    %8:gpr64all = PHI %16, %bb.6, %51, %bb.13
+    %9:gpr64all = PHI %17, %bb.6, %52, %bb.13
+    %10:gpr64all = PHI %18, %bb.6, %53, %bb.13
+    $x28 = COPY %8
+    $x27 = COPY %9
+    $x0 = COPY %10
+    RET_ReallyLR implicit $x28, implicit $x27, implicit $x0
+  
+  bb.5.L635.loopexit:
+    successors: %bb.6(0x80000000)
+  
+    %124:gpr64 = LDRXui %stack.3.exnroot124, 0 :: (volatile dereferenceable load (s64) from %ir.exnroot124)
+    %11:gpr64all = COPY %124
+  
+  bb.6.L635:
+    successors: %bb.4(0x80000000)
+  
+    %12:gpr64all = PHI %4, %bb.2, %25, %bb.5
+    %13:gpr64all = PHI %6, %bb.2, %28, %bb.5
+    %14:gpr64all = PHI %7, %bb.2, %29, %bb.5
+    %15:gpr64all = PHI %4, %bb.2, %11, %bb.5
+    %18:gpr64all = COPY %15
+    %17:gpr64all = COPY %13
+    %16:gpr64all = COPY %14
+    B %bb.4
+  
+  bb.7.L637:
+    successors: %bb.9(0x7ffff800), %bb.8(0x00000800)
+  
+    %19:gpr64 = PHI %4, %bb.3, %25, %bb.14
+    %20:gpr64sp = PHI %7, %bb.3, %29, %bb.14
+    %21:gpr64all = PHI %6, %bb.3, %28, %bb.14
+    %22:gpr64common = PHI %5, %bb.3, %57, %bb.14
+    %23:gpr64 = PHI %4, %bb.3, %58, %bb.14
+    %77:gpr64common = LDRXui %22, 0 :: (load (s64) from %ir..07182, addrspace 1)
+    %78:gpr64 = LDRXui %20, 8 :: (load (s64) from %ir.21, align 4)
+    %24:gpr64 = COPY %78
+    OXCAML_PUSH_TRAP %bb.8, implicit-def dead $sp, implicit-def dead $x16, implicit-def dead $x26, implicit $sp, implicit $x26
+    %79:gpr64 = LDRXui %77, 1 :: (load (s64) from %ir.remat, addrspace 1)
+    %80:gpr64 = LDRXui %77, 0 :: (load (s64) from %ir.19, addrspace 1)
+    STRXui %22, %stack.1..07182.exnroot, 0 :: (volatile store (s64) into %ir..07182.exnroot)
+    STRXui %23, %stack.2.exnroot, 0 :: (volatile store (s64) into %ir.exnroot)
+    STRXui %23, %stack.3.exnroot124, 0 :: (volatile store (s64) into %ir.exnroot124)
+    STRXui %19, %stack.0..3.exnroot, 0 :: (volatile store (s64) into %ir..3.exnroot)
+    STRXui killed %79, %stack.4, 0 :: (store (s64) into %stack.4)
+    STRXui %19, %stack.5, 0 :: (store (s64) into %stack.5)
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    $x28 = COPY %20
+    $x27 = COPY %21
+    $x0 = COPY %23
+    $x1 = COPY %80
+    STATEPOINT 18, 0, 4, @"\01_camlBoyer__unify_9_29_code", $x28, $x27, $x0, $x1, 2, 105, 2, 0, 2, 24, 2, 1870160740, 2, 1, 2, 0, 2, 1, 2, 107, 2, 0, 2, 31, 2, 46, 2, 0, 2, 46, 2, 8, 2, 7958370, 2, 3043941, 2, 27757, 2, 25, 2, 7958338, 2, 3043941, 2, 7824754, 2, 7629170, 2, 7823205, 2, 6845545, 2, 6646879, 2, 6385005, 2, 115, 2, 2, 1, 8, %stack.4, 0, 1, 8, %stack.5, 0, 2, 4, 0, %stack.1..07182.exnroot, 0, 0, %stack.2.exnroot, 0, 0, %stack.3.exnroot124, 0, 0, %stack.0..3.exnroot, 0, 2, 2, 0, 0, 1, 1, csr_aarch64_oxcaml_withoutfp, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr :: (volatile load store (s64) on %stack.4), (volatile load store (s64) on %stack.5), (volatile load store (s64) on %stack.1..07182.exnroot), (volatile load store (s64) on %stack.2.exnroot), (volatile load store (s64) on %stack.3.exnroot124), (volatile load store (s64) on %stack.0..3.exnroot)
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %81:gpr64all = COPY $x28
+    %82:gpr64all = COPY $x27
+    %83:gpr64all = COPY $x0
+    %76:gpr64all = COPY %83
+    %75:gpr64sp = COPY %82
+    %74:gpr64sp = COPY %81
+    B %bb.9
+  
+  bb.8.L673 (machine-block-address-taken, ir-block-address-taken %ir-block.L673, landing-pad, runtime-entered):
+    successors: %bb.14(0x7ffff800), %bb.15(0x00000800)
+    liveins: $x0, $x26, $x27, $x28
+  
+    EH_LABEL <mcsymbol >
+    %113:gpr64 = COPY $x0
+    %114:gpr64all = COPY $x26
+    %115:gpr64all = COPY $x27
+    %116:gpr64sp = COPY $x28
+    %117:gpr64 = LDRXui %stack.0..3.exnroot, 0 :: (volatile dereferenceable load (s64) from %ir..3.exnroot)
+    %25:gpr64all = COPY %117
+    %118:gpr64 = LDRXui %stack.1..07182.exnroot, 0 :: (volatile dereferenceable load (s64) from %ir..07182.exnroot)
+    %26:gpr64sp = COPY %118
+    %27:gpr64 = COPY %113
+    %28:gpr64all = COPY %115
+    %29:gpr64all = COPY %116
+    STRXui %24, %116, 8 :: (store (s64) into %ir.28, align 4)
+    %119:gpr64common = MOVaddr target-flags(aarch64-page) @"\01_camlBoyer__Unify3423", target-flags(aarch64-pageoff, aarch64-nc) @"\01_camlBoyer__Unify3423"
+    %120:gpr64 = SUBSXrr %113, killed %119, implicit-def $nzcv
+    Bcc 0, %bb.14, implicit $nzcv
+    B %bb.15
+  
+  bb.9.L674:
+    successors: %bb.10(0x00106035), %bb.11(0x7fef9fcb)
+  
+    %84:gpr64 = LDRXui %stack.4, 0 :: (load (s64) from %stack.4)
+    %30:gpr64all = COPY %84
+    %85:gpr64 = LDRXui %stack.1..07182.exnroot, 0 :: (volatile dereferenceable load (s64) from %ir..07182.exnroot)
+    %31:gpr64all = COPY %85
+    %86:gpr64 = LDRXui %stack.2.exnroot, 0 :: (volatile dereferenceable load (s64) from %ir.exnroot)
+    %32:gpr64all = COPY %86
+    %87:gpr64 = LDRXui %stack.5, 0 :: (load (s64) from %stack.5)
+    %33:gpr64all = COPY %87
+    %34:gpr64all = COPY %74
+    %35:gpr64all = COPY %76
+    %88:gpr64 = SUBSXri %75, 40, 0, implicit-def dead $nzcv
+    %36:gpr64all = COPY %88
+    %89:gpr64 = LDRXui %74, 0 :: (load (s64) from %ir.33, align 4)
+    %90:gpr64 = SUBSXrr killed %89, %88, implicit-def $nzcv
+    Bcc 9, %bb.11, implicit $nzcv
+    B %bb.10
+  
+  bb.10.L675:
+    successors: %bb.11(0x80000000)
+  
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    $x28 = COPY %34
+    $x27 = COPY %36
+    %37:gpr64all, %38:gpr64all, %39:gpr64all, %40:gpr64all, %41:gpr64all = STATEPOINT 327699, 0, 2, @"\01_caml_call_gc", $x28, $x27, 2, 108, 2, 0, 2, 44, 2, 1870160737, 2, 1, 2, 1, 2, 5, 2, 2, 2, 71, 2, 2, 2, 19, 2, 60, 2, 93, 2, 153, 2, 8, 2, 7958370, 2, 3043941, 2, 27757, 2, 24, 2, 7958338, 2, 3043941, 2, 7368801, 2, 6257004, 2, 6452595, 2, 3044467, 2, 6255457, 2, 6514034, 2, 107, 2, 0, 2, 18, 2, 50, 2, 0, 2, 50, 2, 8, 2, 7958370, 2, 3043941, 2, 27757, 2, 25, 2, 7958338, 2, 3043941, 2, 7824754, 2, 7629170, 2, 7823205, 2, 6845545, 2, 6646879, 2, 6385005, 2, 115, 2, 5, %30(tied-def 0), %33(tied-def 1), %32(tied-def 2), %31(tied-def 3), %35(tied-def 4), 2, 4, 0, %stack.1..07182.exnroot, 0, 0, %stack.2.exnroot, 0, 0, %stack.3.exnroot124, 0, 0, %stack.0..3.exnroot, 0, 2, 5, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, csr_aarch64_oxcaml_alloc, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def dead early-clobber $lr :: (volatile load store (s64) on %stack.1..07182.exnroot), (volatile load store (s64) on %stack.2.exnroot), (volatile load store (s64) on %stack.3.exnroot124), (volatile load store (s64) on %stack.0..3.exnroot)
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %91:gpr64all = COPY $x28
+    %92:gpr64all = COPY $x27
+    %42:gpr64all = COPY %91
+    %43:gpr64all = COPY %92
+  
+  bb.11.L676:
+    successors: %bb.12(0x7ffff800), %bb.8(0x00000800)
+  
+    %44:gpr64 = PHI %35, %bb.9, %41, %bb.10
+    %45:gpr64 = PHI %32, %bb.9, %39, %bb.10
+    %46:gpr64 = PHI %31, %bb.9, %40, %bb.10
+    %47:gpr64 = PHI %30, %bb.9, %37, %bb.10
+    %48:gpr64 = PHI %33, %bb.9, %38, %bb.10
+    %49:gpr64sp = PHI %36, %bb.9, %43, %bb.10
+    %50:gpr64all = PHI %34, %bb.9, %42, %bb.10
+    %96:gpr32 = MOVi32imm 4343
+    %97:gpr64 = SUBREG_TO_REG 0, killed %96, %subreg.sub_32
+    STRXui killed %97, %49, 0 :: (volatile store (s64) into %ir.remat118, align 4, addrspace 1)
+    %98:gpr64common = MOVaddr target-flags(aarch64-page) @"\01_camlBoyer__as_rec_8_34_code", target-flags(aarch64-pageoff, aarch64-nc) @"\01_camlBoyer__as_rec_8_34_code"
+    early-clobber %99:gpr64sp = STRXpre killed %98, %49, 8 :: (volatile store (s64) into %ir.41, align 4, addrspace 1)
+    %100:gpr64 = MOVi64imm 108086391056891909
+    STRXui killed %100, %49, 2 :: (volatile store (s64) into %ir.remat119, align 4, addrspace 1)
+    STRXui %47, %49, 3 :: (store (s64) into %ir.remat120, addrspace 1)
+    STRXui %44, %49, 4 :: (store (s64) into %ir.remat121, addrspace 1)
+    STRXui %46, %stack.1..07182.exnroot, 0 :: (volatile store (s64) into %ir..07182.exnroot)
+    STRXui %45, %stack.2.exnroot, 0 :: (volatile store (s64) into %ir.exnroot)
+    STRXui %48, %stack.3.exnroot124, 0 :: (volatile store (s64) into %ir.exnroot124)
+    STRXui %48, %stack.0..3.exnroot, 0 :: (volatile store (s64) into %ir..3.exnroot)
+    STRXui %45, %stack.4, 0 :: (store (s64) into %stack.4)
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    $x28 = COPY %50
+    $x27 = COPY %49
+    $x0 = COPY %47
+    $x1 = COPY %99
+    STATEPOINT 18, 0, 4, @"\01_camlBoyer__as_rec_8_34_code", $x28, $x27, $x0, $x1, 2, 105, 2, 0, 2, 41, 2, 1870160740, 2, 1, 2, 0, 2, 2, 2, 75, 2, 0, 2, 2, 2, 13, 2, 0, 2, 13, 2, 8, 2, 7958370, 2, 3043941, 2, 27757, 2, 17, 2, 7958338, 2, 3043941, 2, 7368801, 2, 6257004, 2, 6452595, 2, 29811, 2, 107, 2, 0, 2, 18, 2, 50, 2, 0, 2, 50, 2, 8, 2, 7958370, 2, 3043941, 2, 27757, 2, 25, 2, 7958338, 2, 3043941, 2, 7824754, 2, 7629170, 2, 7823205, 2, 6845545, 2, 6646879, 2, 6385005, 2, 115, 2, 1, 1, 8, %stack.4, 0, 2, 4, 0, %stack.1..07182.exnroot, 0, 0, %stack.2.exnroot, 0, 0, %stack.3.exnroot124, 0, 0, %stack.0..3.exnroot, 0, 2, 1, 0, 0, csr_aarch64_oxcaml_withoutfp, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr :: (volatile load store (s64) on %stack.4), (volatile load store (s64) on %stack.1..07182.exnroot), (volatile load store (s64) on %stack.2.exnroot), (volatile load store (s64) on %stack.3.exnroot124), (volatile load store (s64) on %stack.0..3.exnroot)
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %101:gpr64all = COPY $x28
+    %102:gpr64all = COPY $x27
+    %103:gpr64all = COPY $x0
+    %95:gpr64all = COPY %103
+    %94:gpr64all = COPY %102
+    %93:gpr64all = COPY %101
+    B %bb.12
+  
+  bb.12.L677:
+    successors: %bb.13(0x7fff0802), %bb.8(0x0000f7fe)
+  
+    %107:gpr64 = LDRXui %stack.4, 0 :: (load (s64) from %stack.4)
+    %108:gpr64 = LDRXui %stack.1..07182.exnroot, 0 :: (volatile dereferenceable load (s64) from %ir..07182.exnroot)
+    %109:gpr64 = LDRXui %stack.2.exnroot, 0 :: (volatile dereferenceable load (s64) from %ir.exnroot)
+    STRXui killed %108, %stack.1..07182.exnroot, 0 :: (volatile store (s64) into %ir..07182.exnroot)
+    STRXui killed %107, %stack.2.exnroot, 0 :: (volatile store (s64) into %ir.exnroot)
+    STRXui %109, %stack.3.exnroot124, 0 :: (volatile store (s64) into %ir.exnroot124)
+    STRXui %109, %stack.0..3.exnroot, 0 :: (volatile store (s64) into %ir..3.exnroot)
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    $x28 = COPY %93
+    $x27 = COPY %94
+    $x0 = COPY %95
+    STATEPOINT 18, 0, 3, @"\01_camlBoyer__rewrite_12_32_code", $x28, $x27, $x0, 2, 105, 2, 0, 2, 24, 2, 1870160740, 2, 1, 2, 0, 2, 1, 2, 107, 2, 0, 2, 10, 2, 50, 2, 0, 2, 50, 2, 8, 2, 7958370, 2, 3043941, 2, 27757, 2, 25, 2, 7958338, 2, 3043941, 2, 7824754, 2, 7629170, 2, 7823205, 2, 6845545, 2, 6646879, 2, 6385005, 2, 115, 2, 0, 2, 4, 0, %stack.1..07182.exnroot, 0, 0, %stack.2.exnroot, 0, 0, %stack.3.exnroot124, 0, 0, %stack.0..3.exnroot, 0, 2, 0, csr_aarch64_oxcaml_withoutfp, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0, implicit-def dead early-clobber $lr :: (volatile load store (s64) on %stack.1..07182.exnroot), (volatile load store (s64) on %stack.2.exnroot), (volatile load store (s64) on %stack.3.exnroot124), (volatile load store (s64) on %stack.0..3.exnroot)
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %110:gpr64all = COPY $x28
+    %111:gpr64all = COPY $x27
+    %112:gpr64all = COPY $x0
+    %106:gpr64all = COPY %112
+    %105:gpr64all = COPY %111
+    %104:gpr64all = COPY %110
+    B %bb.13
+  
+  bb.13.L678:
+    successors: %bb.4(0x80000000)
+  
+    %51:gpr64all = COPY %104
+    %52:gpr64all = COPY %105
+    %53:gpr64all = COPY %106
+    %125:gpr64 = LDRXui %stack.2.exnroot, 0 :: (volatile dereferenceable load (s64) from %ir.exnroot)
+    %54:gpr64all = COPY %104
+    %55:gpr64all = COPY %105
+    %56:gpr64all = COPY %106
+    OXCAML_POP_TRAP implicit-def dead $sp, implicit-def dead $x26, implicit $sp
+    B %bb.4
+  
+  bb.14.L660:
+    successors: %bb.7(0x7c000000), %bb.5(0x04000000)
+  
+    %121:gpr64 = LDRXui %26, 1 :: (load (s64) from %ir.remat122, addrspace 1)
+    %57:gpr64all = COPY %121
+    %122:gpr64 = LDRXui %stack.2.exnroot, 0 :: (volatile dereferenceable load (s64) from %ir.exnroot)
+    %58:gpr64all = COPY %122
+    %123:gpr32 = COPY %121.sub_32
+    TBZW killed %123, 0, %bb.7
+    B %bb.5
+  
+  bb.15.L665:
+    OXCAML_RAISE_NOTRACE %27, implicit-def dead $x0, implicit-def dead $x16, implicit-def dead $x26, implicit-def dead $sp, implicit $x26
+
+...

@@ -44,6 +44,7 @@
 #define CFI_ADJUST(n) .cfi_adjust_cfa_offset n
 #define CFI_REGISTER(r1,r2) .cfi_register r1,r2
 #define CFI_OFFSET(r,n) .cfi_offset r,n
+#define CFI_UNDEFINED(r) .cfi_undefined r
 #define CFI_DEF_CFA_REGISTER(r) .cfi_def_cfa_register r
 #define CFI_SIGNAL_FRAME .cfi_signal_frame
 #define CFI_REMEMBER_STATE .cfi_remember_state
@@ -54,6 +55,7 @@
 #define CFI_ADJUST(n)
 #define CFI_REGISTER(r1,r2)
 #define CFI_OFFSET(r,n)
+#define CFI_UNDEFINED(r)
 #define CFI_DEF_CFA_REGISTER(r)
 #define CFI_SIGNAL_FRAME
 #define CFI_REMEMBER_STATE
@@ -238,6 +240,17 @@ G(name):
 #define Cont_last_fiber(reg) [reg, #8]
 #define Cont_gc_regs(reg)    [reg, #16]
 
+.macro CHECK_SP_IN_STACK stack
+        cmp     sp, \stack
+        b.lo    9999f
+        ldr     TMP2, Stack_handler(\stack)
+        cmp     sp, TMP2
+        b.hs    9999f
+        b       10000f
+9999:  brk     #0x4c56
+10000:
+.endm
+
 .macro WOSIZE_BLOCK_VAL dst, src
         ldr     \dst, [\src, #-8]
         lsr     \dst, \dst, #10
@@ -252,6 +265,7 @@ G(name):
 .macro SWITCH_OCAML_TO_C
     /* Fill in Caml_state->current_stack->sp */
         ldr     TMP, Caml_state(current_stack)
+        CHECK_SP_IN_STACK TMP
         mov     TMP2, sp
         str     TMP2, Stack_sp(TMP)
     /* No need to update Stack_local_sp: if the runtime
@@ -558,6 +572,83 @@ FUNCTION(caml_call_realloc_stack)
         b       G(caml_raise_async)
         CFI_ENDPROC
 END_FUNCTION(caml_call_realloc_stack)
+
+/* Same protocol as caml_call_realloc_stack (required space in words pushed
+   at [sp, 16] by the caller), but for LLVM OxCaml prologue stack checks:
+   the frame-pointer chain must be terminated here, exactly as in
+   caml_llvm_call_realloc_stack below.  Routing these checks through
+   caml_call_realloc_stack saves the stale incoming x29, and stack growth
+   then follows it into LLVM frames and rewrites spilled words that happen
+   to look like old-stack addresses. */
+FUNCTION(caml_llvm_call_realloc_stack_stkarg)
+        CFI_STARTPROC
+        CFI_SIGNAL_FRAME
+        CFI_OFFSET(30, -8)
+        stp     xzr, x30, [sp, -16]!
+        CFI_ADJUST(16)
+        CFI_UNDEFINED(29)
+        add     x29, sp, #0
+    /* Save all registers (including ALLOC_PTR & TRAP_PTR) */
+        SAVE_ALL_REGS
+        ldr     C_ARG_1, [sp, 16] /* argument */
+        SWITCH_OCAML_TO_C
+        bl      G(caml_try_realloc_stack)
+        SWITCH_C_TO_OCAML
+        cbz     x0, 1f
+        RESTORE_ALL_REGS
+    /* Free stack space and return to caller */
+        ldp     x29, x30, [sp], 16
+        ret
+1:  /* Restore the gc_regs bucket popped by SAVE_ALL_REGS */
+        ldr     TMP, Caml_state(gc_regs)
+        sub     TMP, TMP, #16
+        ldr     TMP2, Caml_state(gc_regs_buckets)
+        str     TMP2, [TMP, 0]  /* next ptr */
+        str     TMP, Caml_state(gc_regs_buckets)
+    /* Raise the Stack_overflow exception */
+        ldp     x29, x30, [sp], 16
+        add     sp, sp, 16 /* pop argument */
+        SWITCH_OCAML_TO_C
+        ADDRGLOBAL(x0, caml_exn_Stack_overflow)
+        b       G(caml_raise_async)
+        CFI_ENDPROC
+END_FUNCTION(caml_llvm_call_realloc_stack_stkarg)
+
+FUNCTION(caml_llvm_call_realloc_stack)
+        CFI_STARTPROC
+        CFI_SIGNAL_FRAME
+    /* Save return address and terminate the frame-pointer chain.
+       LLVM OxCaml frames do not maintain a valid x29 chain.  Saving the
+       incoming x29 here lets stack growth treat stale LLVM frame contents as a
+       frame-pointer link and rewrite raw stack-looking words. */
+        CFI_OFFSET(30, -8)
+        stp     xzr, x30, [sp, -16]!
+        CFI_ADJUST(16)
+        CFI_UNDEFINED(29)
+        add     x29, sp, #0
+    /* Save all registers (including ALLOC_PTR & TRAP_PTR) */
+        SAVE_ALL_REGS
+        /* required space in words is already in C_ARG_1 */
+        SWITCH_OCAML_TO_C
+        bl      G(caml_try_realloc_stack)
+        SWITCH_C_TO_OCAML
+        cbz     x0, 1f
+        RESTORE_ALL_REGS
+    /* Free stack space and return to caller */
+        ldp     x29, x30, [sp], 16
+        ret
+1:  /* Restore the gc_regs bucket popped by SAVE_ALL_REGS */
+        ldr     TMP, Caml_state(gc_regs)
+        sub     TMP, TMP, #16
+        ldr     TMP2, Caml_state(gc_regs_buckets)
+        str     TMP2, [TMP, 0]  /* next ptr */
+        str     TMP, Caml_state(gc_regs_buckets)
+    /* Raise the Stack_overflow exception */
+        SWITCH_OCAML_TO_C
+        ADDRGLOBAL(x0, caml_exn_Stack_overflow)
+        b       G(caml_raise_async)
+        CFI_ENDPROC
+END_FUNCTION(caml_llvm_call_realloc_stack)
 
 FUNCTION(caml_call_gc)
         CFI_STARTPROC
@@ -1039,6 +1130,12 @@ FUNCTION(caml_reraise_exn)
         CFI_ENDPROC
 END_FUNCTION(caml_reraise_exn)
 
+FUNCTION(caml_raise_notrace)
+        CFI_STARTPROC
+        JUMP_TO_TRAP_PTR
+        CFI_ENDPROC
+END_FUNCTION(caml_raise_notrace)
+
 #if defined(WITH_THREAD_SANITIZER)
 /* When TSan support is enabled, this routine should be called just before
    raising an exception. It calls __tsan_func_exit for every OCaml frame about
@@ -1183,6 +1280,7 @@ END_FUNCTION(caml_callback3_asm)
         CFI_ADJUST(16)
         add     x29, sp, #0
     /* Save OCaml SP and exn_handler in the stack info */
+        CHECK_SP_IN_STACK \old_stack
         mov     TMP, sp
         str     TMP, Stack_sp(\old_stack)
         str     TRAP_PTR, Stack_exception(\old_stack)
@@ -1332,11 +1430,16 @@ FUNCTION(caml_reperform)
     /*  x0: effect to perform
         x1: continuation
         x2: last_fiber */
+        ldr     TMP, Cont_fiber(x1)
+        cmp     TMP, #1 /* Val_ptr(NULL), already consumed */
+        b.eq    1f
         ldr     TMP, Stack_handler_from_cont(x2)
         ldr     x2, Caml_state(current_stack) /* x2 := old stack */
         str     x2, Handler_parent(TMP) /* Append to last_fiber */
         add     x3, x2, 1 /* x3 (last_fiber) := Val_ptr(old stack) */
         b       L(do_perform)
+1:      ADDRGLOBAL(ADDITIONAL_ARG, caml_raise_continuation_already_resumed)
+        b       G(caml_c_call)
         CFI_ENDPROC
 END_FUNCTION(caml_reperform)
 

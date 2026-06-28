@@ -66,11 +66,11 @@ InsertPointAnalysis::computeLastInsertPoint(const LiveInterval &CurLI,
   SlotIndex MBBEnd = LIS.getMBBEndIdx(&MBB);
 
   SmallVector<const MachineBasicBlock *, 1> ExceptionalSuccessors;
-  bool EHPadSuccessor = false;
+  bool RuntimeEnteredSuccessor = false;
   for (const MachineBasicBlock *SMBB : MBB.successors()) {
-    if (SMBB->isEHPad()) {
+    if (SMBB->isEHPad() || SMBB->isRuntimeEntered()) {
       ExceptionalSuccessors.push_back(SMBB);
-      EHPadSuccessor = true;
+      RuntimeEnteredSuccessor = true;
     } else if (SMBB->isInlineAsmBrIndirectTarget())
       ExceptionalSuccessors.push_back(SMBB);
   }
@@ -93,7 +93,7 @@ InsertPointAnalysis::computeLastInsertPoint(const LiveInterval &CurLI,
     if (ExceptionalSuccessors.empty())
       return LIP.first;
     for (const MachineInstr &MI : llvm::reverse(MBB)) {
-      if ((EHPadSuccessor && MI.isCall()) ||
+      if ((RuntimeEnteredSuccessor && MI.isCall()) ||
           MI.getOpcode() == TargetOpcode::INLINEASM_BR) {
         LIP.second = LIS.getInstructionIndex(MI);
         break;
@@ -101,8 +101,8 @@ InsertPointAnalysis::computeLastInsertPoint(const LiveInterval &CurLI,
     }
   }
 
-  // If CurLI is live into a landing pad successor, move the last insert point
-  // back to the call that may throw.
+  // If CurLI is live into a runtime-entered ABI successor, move the last
+  // insert point back to the call that may transfer control there.
   if (!LIP.second)
     return LIP.first;
 

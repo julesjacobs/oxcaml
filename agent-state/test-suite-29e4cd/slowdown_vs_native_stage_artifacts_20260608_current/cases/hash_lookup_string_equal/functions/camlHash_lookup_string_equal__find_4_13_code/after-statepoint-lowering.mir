@@ -1,0 +1,193 @@
+---
+name:            "\x01_camlHash_lookup_string_equal__find_4_13_code"
+alignment:       4
+exposesReturnsTwice: false
+legalized:       false
+regBankSelected: false
+selected:        false
+failedISel:      false
+tracksRegLiveness: true
+hasWinCFI:       false
+callsEHReturn:   false
+callsUnwindInit: false
+hasEHCatchret:   false
+hasEHScopes:     false
+hasEHFunclets:   false
+debugInstrRef:   false
+failsVerification: false
+tracksDebugUserValues: false
+registers:
+  - { id: 0, class: gpr64all, preferred-register: '' }
+  - { id: 1, class: gpr64all, preferred-register: '' }
+  - { id: 2, class: gpr64all, preferred-register: '' }
+  - { id: 3, class: gpr64all, preferred-register: '' }
+  - { id: 4, class: gpr64all, preferred-register: '' }
+  - { id: 5, class: gpr64all, preferred-register: '' }
+  - { id: 6, class: gpr64sp, preferred-register: '' }
+  - { id: 7, class: gpr64all, preferred-register: '' }
+  - { id: 8, class: gpr64all, preferred-register: '' }
+  - { id: 9, class: gpr64sp, preferred-register: '' }
+  - { id: 10, class: gpr64all, preferred-register: '' }
+  - { id: 11, class: gpr64all, preferred-register: '' }
+  - { id: 12, class: gpr64all, preferred-register: '' }
+  - { id: 13, class: gpr64all, preferred-register: '' }
+  - { id: 14, class: gpr64all, preferred-register: '' }
+  - { id: 15, class: gpr64all, preferred-register: '' }
+  - { id: 16, class: gpr64all, preferred-register: '' }
+  - { id: 17, class: gpr64all, preferred-register: '' }
+  - { id: 18, class: gpr64all, preferred-register: '' }
+  - { id: 19, class: gpr64all, preferred-register: '' }
+  - { id: 20, class: gpr64all, preferred-register: '' }
+  - { id: 21, class: gpr64all, preferred-register: '' }
+  - { id: 22, class: gpr64, preferred-register: '' }
+  - { id: 23, class: gpr64, preferred-register: '' }
+  - { id: 24, class: gpr64, preferred-register: '' }
+  - { id: 25, class: gpr64common, preferred-register: '' }
+  - { id: 26, class: gpr64all, preferred-register: '' }
+  - { id: 27, class: gpr64, preferred-register: '' }
+  - { id: 28, class: gpr64, preferred-register: '' }
+  - { id: 29, class: gpr32, preferred-register: '' }
+  - { id: 30, class: gpr64common, preferred-register: '' }
+  - { id: 31, class: gpr64, preferred-register: '' }
+  - { id: 32, class: gpr64, preferred-register: '' }
+  - { id: 33, class: gpr64all, preferred-register: '' }
+  - { id: 34, class: gpr64all, preferred-register: '' }
+  - { id: 35, class: gpr64sp, preferred-register: '' }
+  - { id: 36, class: gpr64, preferred-register: '' }
+  - { id: 37, class: gpr64, preferred-register: '' }
+  - { id: 38, class: gpr32, preferred-register: '' }
+  - { id: 39, class: gpr64all, preferred-register: '' }
+  - { id: 40, class: gpr64, preferred-register: '' }
+  - { id: 41, class: gpr64, preferred-register: '' }
+liveins:
+  - { reg: '$x28', virtual-reg: '%22' }
+  - { reg: '$x27', virtual-reg: '%23' }
+  - { reg: '$x0', virtual-reg: '%24' }
+  - { reg: '$x1', virtual-reg: '%25' }
+frameInfo:
+  isFrameAddressTaken: false
+  isReturnAddressTaken: false
+  hasStackMap:     false
+  hasPatchPoint:   false
+  stackSize:       0
+  offsetAdjustment: 0
+  maxAlignment:    1
+  adjustsStack:    true
+  hasCalls:        true
+  stackProtector:  ''
+  functionContext: ''
+  maxCallFrameSize: 0
+  cvBytesOfCalleeSavedRegisters: 0
+  hasOpaqueSPAdjustment: false
+  hasVAStart:      false
+  hasMustTailInVarArgFunc: false
+  hasTailCall:     false
+  localFrameSize:  0
+  savePoint:       ''
+  restorePoint:    ''
+fixedStack:      []
+stack:           []
+callSites:       []
+debugValueSubstitutions: []
+constants:       []
+machineFunctionInfo: {}
+body:             |
+  bb.0.L1:
+    successors: %bb.1(0x40000000), %bb.3(0x40000000)
+    liveins: $x28, $x27, $x0, $x1
+  
+    %25:gpr64common = COPY $x1
+    %24:gpr64 = COPY $x0
+    %23:gpr64 = COPY $x27
+    %22:gpr64 = COPY $x28
+    %27:gpr64 = LDRXui %25, 0 :: (load (s64) from %ir.3, addrspace 1)
+    %0:gpr64all = COPY %27
+    %28:gpr64 = MOVi64imm -1
+    %26:gpr64all = COPY %28
+    %29:gpr32 = COPY %27.sub_32
+    TBNZW killed %29, 0, %bb.3
+    B %bb.1
+  
+  bb.1.L129.preheader:
+    successors: %bb.4(0x80000000)
+  
+    B %bb.4
+  
+  bb.2.common.ret.loopexit:
+    successors: %bb.3(0x80000000)
+  
+    %1:gpr64all = COPY %12
+    %40:gpr64 = MOVi64imm -1
+    %39:gpr64all = COPY %40
+    %2:gpr64all = COPY %11
+  
+  bb.3.common.ret:
+    %3:gpr64all = PHI %22, %bb.0, %2, %bb.2, %19, %bb.8
+    %4:gpr64all = PHI %23, %bb.0, %1, %bb.2, %20, %bb.8
+    %5:gpr64all = PHI %26, %bb.0, %39, %bb.2, %21, %bb.8
+    $x28 = COPY %3
+    $x27 = COPY %4
+    $x0 = COPY %5
+    RET_ReallyLR implicit $x28, implicit $x27, implicit $x0
+  
+  bb.4.L129:
+    successors: %bb.8(0x04000000), %bb.5(0x7c000000)
+  
+    %6:gpr64sp = PHI %0, %bb.1, %16, %bb.6
+    %7:gpr64all = PHI %23, %bb.1, %14, %bb.6
+    %8:gpr64all = PHI %22, %bb.1, %15, %bb.6
+    %30:gpr64common = LDRXui %6, 0 :: (load (s64) from %ir..035, addrspace 1)
+    %9:gpr64sp = COPY %30
+    %31:gpr64 = LDRXui %30, 0 :: (load (s64) from %ir.9, addrspace 1)
+    %10:gpr64all = COPY %31
+    %32:gpr64 = SUBSXrr %31, %24, implicit-def $nzcv
+    Bcc 0, %bb.8, implicit $nzcv
+    B %bb.5
+  
+  bb.5.L132:
+    successors: %bb.6(0x7c000000), %bb.7(0x04000000)
+  
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    $x28 = COPY %8
+    $x27 = COPY %7
+    $x0 = COPY %24
+    $x1 = COPY %10
+    OXCAML_C_DIRECT_CALL @"\01_caml_string_equal", $x28, $x27, $x0, $x1, csr_aarch64_aapcs, implicit-def dead $lr, implicit $sp, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def $x0
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    %33:gpr64all = COPY $x28
+    %34:gpr64all = COPY $x27
+    %35:gpr64sp = COPY $x0
+    %13:gpr64all = COPY %35
+    %12:gpr64all = COPY %34
+    %11:gpr64all = COPY %33
+    %36:gpr64 = SUBSXri %35, 1, 0, implicit-def $nzcv
+    Bcc 1, %bb.7, implicit $nzcv
+    B %bb.6
+  
+  bb.6.L134:
+    successors: %bb.4(0x7c000000), %bb.2(0x04000000)
+  
+    %14:gpr64all = COPY %12
+    %15:gpr64all = COPY %11
+    %37:gpr64 = LDRXui %6, 1 :: (load (s64) from %ir.16, addrspace 1)
+    %16:gpr64all = COPY %37
+    %38:gpr32 = COPY %37.sub_32
+    TBZW killed %38, 0, %bb.4
+    B %bb.2
+  
+  bb.7.L138.split.loop.exit49:
+    successors: %bb.8(0x80000000)
+  
+    %17:gpr64all = COPY %11
+    %18:gpr64all = COPY %12
+  
+  bb.8.L138:
+    successors: %bb.3(0x80000000)
+  
+    %19:gpr64all = PHI %8, %bb.4, %17, %bb.7
+    %20:gpr64all = PHI %7, %bb.4, %18, %bb.7
+    %41:gpr64 = LDRXui %9, 1 :: (load (s64) from %ir.22, addrspace 1)
+    %21:gpr64all = COPY %41
+    B %bb.3
+
+...

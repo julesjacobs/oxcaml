@@ -979,7 +979,7 @@ let select_operation_avx2 ~dbg:_ op args =
     | "caml_avx2_int32x8_mul_even_unsigned" -> instr vpmuludq_Y_Y_Ym256 args
     | "caml_avx2_int16x16_mul_high" -> instr vpmulhw_Y_Y_Ym256 args
     | "caml_avx2_int16x16_mul_high_unsigned" -> instr vpmulhuw_Y_Y_Ym256 args
-    | "caml_avx2_int16x16_mul_round" -> instr vpmulhrsw_Y_Y_Ym256 args
+    | "caml_avx2_int16x16_mul_round" -> instr vpmulhrsw_Y_Y_Y args
     | "caml_avx2_int16x16_mul_low" -> instr vpmullw_Y_Y_Ym256 args
     | "caml_avx2_int32x8_mul_low" -> instr vpmulld_Y_Y_Ym256 args
     | "caml_avx2_cvt_int16x16_int8x32_saturating" ->

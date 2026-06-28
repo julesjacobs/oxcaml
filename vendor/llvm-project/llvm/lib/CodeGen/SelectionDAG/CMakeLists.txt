@@ -10,6 +10,7 @@ add_llvm_component_library(LLVMSelectionDAG
   LegalizeTypesGeneric.cpp
   LegalizeVectorOps.cpp
   LegalizeVectorTypes.cpp
+  OxCamlTrapUtils.cpp
   ResourcePriorityQueue.cpp
   ScheduleDAGFast.cpp
   ScheduleDAGRRList.cpp

@@ -44,6 +44,7 @@
 #include "llvm/Transforms/Scalar/LowerConstantIntrinsics.h"
 #include "llvm/Transforms/Scalar/MergeICmps.h"
 #include "llvm/Transforms/Scalar/PartiallyInlineLibCalls.h"
+#include "llvm/Transforms/Scalar/RewriteStatepointsForGC.h"
 #include "llvm/Transforms/Scalar/ScalarizeMaskedMemIntrin.h"
 #include "llvm/Transforms/Utils/EntryExitInstrumenter.h"
 #include "llvm/Transforms/Utils/LowerInvoke.h"
@@ -617,6 +618,7 @@ void CodeGenPassBuilder<Derived>::addIRPasses(AddIRPass &addPass) const {
 
   // Run GC lowering passes for builtin collectors
   // TODO: add a pass insertion point here
+  addPass(RewriteStatepointsForGC());
   addPass(GCLoweringPass());
   addPass(ShadowStackGCLoweringPass());
   addPass(LowerConstantIntrinsicsPass());

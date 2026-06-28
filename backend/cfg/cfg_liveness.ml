@@ -96,8 +96,13 @@ module Transfer :
 
   let exception_ : domain -> context -> (domain, error) result =
    fun { before; across = _ } () ->
+    let loc_exn_bucket =
+      if !Clflags.llvm_backend
+      then Reg.create_alias Proc.loc_exn_bucket ~typ:Val
+      else Proc.loc_exn_bucket
+    in
     Result.ok
-    @@ { before = Reg.Set.remove Proc.loc_exn_bucket before;
+    @@ { before = Reg.Set.remove loc_exn_bucket before;
          across = Reg.Set.empty
        }
 end

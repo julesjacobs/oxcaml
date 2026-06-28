@@ -99,7 +99,7 @@ static void print_symbol(const char* symbol, const regmatch_t* match)
   regoff_t off = match->rm_so;
   regoff_t len = match->rm_eo - match->rm_so;
 
-  fprintf(stdout, "%.*s\n", len, symbol + off);
+  fprintf(stdout, "%.*s\n", (int)len, symbol + off);
   fflush(stdout);
 }
 

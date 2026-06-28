@@ -28,6 +28,10 @@
 
 [@@@ocaml.warning "+a-40-41-42"]
 
-val block : Cfg.t -> Cfg.basic_block -> bool
+val block :
+  ?allow_value_propagation_before_regalloc:bool ->
+  Cfg.t ->
+  Cfg.basic_block ->
+  bool
 
-val run : Cfg.t -> unit
+val run : ?allow_value_propagation_before_regalloc:bool -> Cfg.t -> unit

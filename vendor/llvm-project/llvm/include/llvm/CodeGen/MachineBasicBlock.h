@@ -143,6 +143,10 @@ private:
   /// Indicate that this basic block is entered via an exception handler.
   bool IsEHPad = false;
 
+  /// Indicate that this basic block can be entered from runtime code with
+  /// target-defined physical-register ABI live-ins.
+  bool IsRuntimeEntered = false;
+
   /// Indicate that this MachineBasicBlock is referenced somewhere other than
   /// as predecessor/successor, a terminator MachineInstr, or a jump table.
   bool MachineBlockAddressTaken = false;
@@ -582,6 +586,14 @@ public:
   /// Indicates the block is a landing pad.  That is this basic block is entered
   /// via an exception handler.
   void setIsEHPad(bool V = true) { IsEHPad = V; }
+
+  /// Returns true if this block can be entered from runtime code with
+  /// target-defined physical-register ABI live-ins.
+  bool isRuntimeEntered() const { return IsRuntimeEntered; }
+
+  /// Indicates that this block can be entered from runtime code with
+  /// target-defined physical-register ABI live-ins.
+  void setIsRuntimeEntered(bool V = true) { IsRuntimeEntered = V; }
 
   bool hasEHPadSuccessor() const;
 

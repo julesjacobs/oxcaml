@@ -26,6 +26,7 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/StackMaps.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/IR/CallingConv.h"
 #include "llvm/IR/Statepoint.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Support/Debug.h"
@@ -278,6 +279,16 @@ public:
         MFI.setObjectAlignment(FI, Align(Size));
         NumSpillSlotsExtended++;
       }
+      // Record the assignment for the landing pad on the reuse path too:
+      // without this, the next statepoint sharing the pad picks a
+      // DIFFERENT slot for the same register, and the pad's reloads
+      // (deduplicated per (reg, slot)) read the other path's slot.
+      if (EHPad) {
+        GlobalIndices[EHPad].push_back(std::make_pair(Reg, FI));
+        LLVM_DEBUG(dbgs() << "Reserved (reused) FI " << FI << " for reg "
+                          << printReg(Reg, &TRI) << " at landing pad "
+                          << printMBBReference(*EHPad) << "\n");
+      }
       return FI;
     }
     int FI = MFI.CreateSpillStackObject(Size, Align(Size));
@@ -324,6 +335,8 @@ private:
   // Cache of frame indexes used on previous instruction processing.
   FrameIndexesCache &CacheFI;
   bool AllowGCPtrInCSR;
+  bool OnlySpillTargetForcedRegs;
+  bool SpillAllRegOperands;
   // Operands with physical registers requiring spilling.
   SmallVector<unsigned, 8> OpsToSpill;
   // Set of register to spill.
@@ -335,10 +348,13 @@ private:
 
 public:
   StatepointState(MachineInstr &MI, const uint32_t *Mask,
-                  FrameIndexesCache &CacheFI, bool AllowGCPtrInCSR)
+                  FrameIndexesCache &CacheFI, bool AllowGCPtrInCSR,
+                  bool OnlySpillTargetForcedRegs, bool SpillAllRegOperands)
       : MI(MI), MF(*MI.getMF()), TRI(*MF.getSubtarget().getRegisterInfo()),
         TII(*MF.getSubtarget().getInstrInfo()), MFI(MF.getFrameInfo()),
-        Mask(Mask), CacheFI(CacheFI), AllowGCPtrInCSR(AllowGCPtrInCSR) {
+        Mask(Mask), CacheFI(CacheFI), AllowGCPtrInCSR(AllowGCPtrInCSR),
+        OnlySpillTargetForcedRegs(OnlySpillTargetForcedRegs),
+        SpillAllRegOperands(SpillAllRegOperands) {
 
     // Find statepoint's landing pad, if any.
     EHPad = nullptr;
@@ -388,14 +404,26 @@ public:
       Register Reg = MO.getReg();
       assert(Reg.isPhysical() && "Only physical regs are expected");
 
-      if (isCalleeSaved(Reg) && (AllowGCPtrInCSR || !is_contained(GCRegs, Reg)))
+      bool MustSpillForTarget = TRI.shouldSpillStatepointGCPtr(MF, Reg);
+      if (OnlySpillTargetForcedRegs && !MustSpillForTarget)
+        continue;
+
+      if (!MustSpillForTarget && !SpillAllRegOperands &&
+          isCalleeSaved(Reg) &&
+          (AllowGCPtrInCSR || !is_contained(GCRegs, Reg)))
         continue;
 
       LLVM_DEBUG(dbgs() << "Will spill " << printReg(Reg, &TRI) << " at index "
                         << Idx << "\n");
 
-      if (VisitedRegs.insert(Reg).second)
+      if (VisitedRegs.insert(Reg).second) {
         RegsToSpill.push_back(Reg);
+        // A preserved register keeps its value across the call, but once
+        // its slot is the listed root the GC updates the SLOT: post-call
+        // uses must read the slot or they see the pre-GC pointer.
+        if (SpillAllRegOperands && isCalleeSaved(Reg))
+          RegsToReload.push_back(Reg);
+      }
       OpsToSpill.push_back(Idx);
     }
     CacheFI.sortRegisters(RegsToSpill);
@@ -489,23 +517,21 @@ public:
       // We skipped undef uses and did not spill them, so we should not
       // proceed with defs here.
       if (MI.getOperand(MI.findTiedOperandIdx(I)).isUndef()) {
-        if (AllowGCPtrInCSR) {
+        if (AllowGCPtrInCSR || OnlySpillTargetForcedRegs) {
           NewIndices.push_back(NewMI->getNumOperands());
           MIB.addReg(Reg, RegState::Define);
         }
         continue;
       }
-      if (!AllowGCPtrInCSR) {
-        assert(is_contained(RegsToSpill, Reg));
+
+      if (is_contained(RegsToSpill, Reg)) {
         RegsToReload.push_back(Reg);
+        NewIndices.push_back(NumOps);
       } else {
-        if (isCalleeSaved(Reg)) {
-          NewIndices.push_back(NewMI->getNumOperands());
-          MIB.addReg(Reg, RegState::Define);
-        } else {
-          NewIndices.push_back(NumOps);
-          RegsToReload.push_back(Reg);
-        }
+        assert((AllowGCPtrInCSR || OnlySpillTargetForcedRegs) &&
+               "Expected all statepoint defs to be spilled");
+        NewIndices.push_back(NewMI->getNumOperands());
+        MIB.addReg(Reg, RegState::Define);
       }
     }
 
@@ -527,10 +553,12 @@ public:
       } else {
         MIB.add(MO);
         unsigned OldDef;
-        if (AllowGCPtrInCSR && MI.isRegTiedToDefOperand(I, &OldDef)) {
+        if (MI.isRegTiedToDefOperand(I, &OldDef)) {
           assert(OldDef < NumDefs);
-          assert(NewIndices[OldDef] < NumOps);
-          MIB->tieOperands(NewIndices[OldDef], MIB->getNumOperands() - 1);
+          if (OldDef < NewIndices.size()) {
+            assert(NewIndices[OldDef] < NumOps);
+            MIB->tieOperands(NewIndices[OldDef], MIB->getNumOperands() - 1);
+          }
         }
       }
     }
@@ -574,13 +602,28 @@ public:
   bool process(MachineInstr &MI, bool AllowGCPtrInCSR) {
     StatepointOpers SO(&MI);
     uint64_t Flags = SO.getFlags();
-    // Do nothing for LiveIn, it supports all registers.
-    if (Flags & (uint64_t)StatepointFlags::DeoptLiveIn)
-      return false;
+    CallingConv::ID CC = SO.getCallingConv();
+    // Generic DeoptLiveIn statepoints can describe any register. Still give the
+    // target a chance to force spills for registers its runtime cannot scan as
+    // GC root locations.  OxCaml allocation statepoints enter runtime paths
+    // that save ordinary root registers in gc_regs, so they also only need
+    // target-forced spills.
+    bool OnlySpillTargetForcedRegs =
+        (Flags & (uint64_t)StatepointFlags::DeoptLiveIn) ||
+        CC == CallingConv::OxCaml_Alloc;
+    // OxCaml C calls preserve x19-x26, so the register allocator may
+    // legally park a gc value there across the call - but a register
+    // root at a non-alloc statepoint is invisible to the runtime (only
+    // the alloc family populates gc_regs). Force EVERY register operand
+    // of these statepoints into a stack slot; the frame table can then
+    // describe it. A no-op under spill lowering (no register operands
+    // survive ISel there); load-bearing under in-place lowering.
+    bool SpillAllRegOperands =
+        CC == CallingConv::OxCaml_C_Call ||
+        CC == CallingConv::OxCaml_C_Call_StackArgs;
     LLVM_DEBUG(dbgs() << "\nMBB " << MI.getParent()->getNumber() << " "
                       << MI.getParent()->getName() << " : process statepoint "
                       << MI);
-    CallingConv::ID CC = SO.getCallingConv();
     const uint32_t *Mask = nullptr;
     for (const MachineOperand &MO : MI.operands()) {
       if (MO.isRegMask()) {
@@ -590,7 +633,8 @@ public:
     }
     if (!Mask)
       Mask = TRI.getCallPreservedMask(MF, CC);
-    StatepointState SS(MI, Mask, CacheFI, AllowGCPtrInCSR);
+    StatepointState SS(MI, Mask, CacheFI, AllowGCPtrInCSR,
+                       OnlySpillTargetForcedRegs, SpillAllRegOperands);
     CacheFI.reset(SS.getEHPad());
 
     if (!SS.findRegistersToSpill())

@@ -550,6 +550,13 @@ ProfitableToMerge(MachineBasicBlock *MBB1, MachineBasicBlock *MBB2,
                   bool AfterPlacement,
                   MBFIWrapper &MBBFreqInfo,
                   ProfileSummaryInfo *PSI) {
+  // Runtime-entered blocks are ABI entry labels. They may look like ordinary
+  // machine blocks after instruction selection, but redirecting a normal edge
+  // into one would bypass the external runtime-entry ABI that defines its
+  // live-ins.
+  if (MBB1->isRuntimeEntered() || MBB2->isRuntimeEntered())
+    return false;
+
   // It is never profitable to tail-merge blocks from two different EH scopes.
   if (!EHScopeMembership.empty()) {
     auto EHScope1 = EHScopeMembership.find(MBB1);
@@ -931,20 +938,23 @@ bool BranchFolder::TryTailMergeBlocks(MachineBasicBlock *SuccBB,
     // into the other.
     if (SameTails.size() == 2 &&
         SameTails[0].getBlock()->isLayoutSuccessor(SameTails[1].getBlock()) &&
-        SameTails[1].tailIsWholeBlock() && !SameTails[1].getBlock()->isEHPad())
+        SameTails[1].tailIsWholeBlock() &&
+        !SameTails[1].getBlock()->isEHPad() &&
+        !SameTails[1].getBlock()->isRuntimeEntered())
       commonTailIndex = 1;
     else if (SameTails.size() == 2 &&
              SameTails[1].getBlock()->isLayoutSuccessor(
                  SameTails[0].getBlock()) &&
              SameTails[0].tailIsWholeBlock() &&
-             !SameTails[0].getBlock()->isEHPad())
+             !SameTails[0].getBlock()->isEHPad() &&
+             !SameTails[0].getBlock()->isRuntimeEntered())
       commonTailIndex = 0;
     else {
       // Otherwise just pick one, favoring the fall-through predecessor if
       // there is one.
       for (unsigned i = 0, e = SameTails.size(); i != e; ++i) {
         MachineBasicBlock *MBB = SameTails[i].getBlock();
-        if ((MBB == EntryBB || MBB->isEHPad()) &&
+        if ((MBB == EntryBB || MBB->isEHPad() || MBB->isRuntimeEntered()) &&
             SameTails[i].tailIsWholeBlock())
           continue;
         if (MBB == PredBB) {
@@ -1010,7 +1020,8 @@ bool BranchFolder::TailMergeBlocks(MachineFunction &MF) {
   for (MachineBasicBlock &MBB : MF) {
     if (MergePotentials.size() == TailMergeThreshold)
       break;
-    if (!TriedMerging.count(&MBB) && MBB.succ_empty())
+    if (!TriedMerging.count(&MBB) && MBB.succ_empty() &&
+        !MBB.isRuntimeEntered())
       MergePotentials.push_back(MergePotentialsElt(HashEndOfMBB(MBB), &MBB));
   }
 
@@ -1085,7 +1096,8 @@ bool BranchFolder::TailMergeBlocks(MachineFunction &MF) {
 
       // Skip blocks which may jump to a landing pad or jump from an asm blob.
       // Can't tail merge these.
-      if (PBB->hasEHPadSuccessor() || PBB->mayHaveInlineAsmBr())
+      if (PBB->isRuntimeEntered() || PBB->hasEHPadSuccessor() ||
+          PBB->mayHaveInlineAsmBr())
         continue;
 
       // After block placement, only consider predecessors that belong to the
@@ -1341,7 +1353,8 @@ ReoptimizeBlock:
   // explicitly.  Landing pads should not do this since the landing-pad table
   // points to this block.  Blocks with their addresses taken shouldn't be
   // optimized away.
-  if (IsEmptyBlock(MBB) && !MBB->isEHPad() && !MBB->hasAddressTaken() &&
+  if (IsEmptyBlock(MBB) && !MBB->isEHPad() && !MBB->isRuntimeEntered() &&
+      !MBB->hasAddressTaken() &&
       SameEHScope) {
     salvageDebugInfoFromEmptyBlock(TII, *MBB);
     // Dead block?  Leave for cleanup later.
@@ -1349,7 +1362,7 @@ ReoptimizeBlock:
 
     if (FallThrough == MF.end()) {
       // TODO: Simplify preds to not branch here if possible!
-    } else if (FallThrough->isEHPad()) {
+    } else if (FallThrough->isEHPad() || FallThrough->isRuntimeEntered()) {
       // Don't rewrite to a landing pad fallthough.  That could lead to the case
       // where a BB jumps to more than one landing pad.
       // TODO: Is it ever worth rewriting predecessors which don't already
@@ -1402,7 +1415,8 @@ ReoptimizeBlock:
     // analyzeBranch.
     if (PriorCond.empty() && !PriorTBB && MBB->pred_size() == 1 &&
         PrevBB.succ_size() == 1 &&
-        !MBB->hasAddressTaken() && !MBB->isEHPad()) {
+        !MBB->hasAddressTaken() && !MBB->isEHPad() &&
+        !MBB->isRuntimeEntered()) {
       LLVM_DEBUG(dbgs() << "\nMerging into block: " << PrevBB
                         << "From MBB: " << *MBB);
       // Remove redundant DBG_VALUEs first.
@@ -1568,7 +1582,8 @@ ReoptimizeBlock:
     // other blocks across it.
     if (CurTBB && CurCond.empty() && !CurFBB &&
         IsBranchOnlyBlock(MBB) && CurTBB != MBB &&
-        !MBB->hasAddressTaken() && !MBB->isEHPad()) {
+        !MBB->hasAddressTaken() && !MBB->isEHPad() &&
+        !MBB->isRuntimeEntered()) {
       DebugLoc dl = getBranchDebugLoc(*MBB);
       // This block may contain just an unconditional branch.  Because there can
       // be 'non-branch terminators' in the block, try removing the branch and
@@ -1663,7 +1678,7 @@ ReoptimizeBlock:
     // see if it has a fall-through into its successor.
     bool CurFallsThru = MBB->canFallThrough();
 
-    if (!MBB->isEHPad()) {
+    if (!MBB->isEHPad() && !MBB->isRuntimeEntered()) {
       // Check all the predecessors of this block.  If one of them has no fall
       // throughs, and analyzeBranch thinks it _could_ fallthrough to this
       // block, move this block right after it.
@@ -1737,7 +1752,7 @@ ReoptimizeBlock:
       MachineBasicBlock *PrevTBB = nullptr, *PrevFBB = nullptr;
       SmallVector<MachineOperand, 4> PrevCond;
       if (FallThrough != MF.end() &&
-          !FallThrough->isEHPad() &&
+          !FallThrough->isEHPad() && !FallThrough->isRuntimeEntered() &&
           !TII->analyzeBranch(PrevBB, PrevTBB, PrevFBB, PrevCond, true) &&
           PrevBB.isSuccessor(&*FallThrough)) {
         MBB->moveAfter(&MF.back());

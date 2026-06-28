@@ -50,7 +50,7 @@ let remove_vars_with_machtype free_vars vars =
 
 let exttype_of_kind (k : Flambda_kind.t) : Cmm.exttype =
   match k with
-  | Value -> XInt
+  | Value -> XValue
   | Naked_number Naked_float -> XFloat
   | Naked_number Naked_float32 -> XFloat32
   | Naked_number Naked_int64 -> XInt64

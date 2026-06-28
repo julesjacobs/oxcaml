@@ -16,6 +16,7 @@
  (modes native)
  (libraries expectcommon ocamlopttoplevel)
  (flags (:standard -linkall))
+ (foreign_stubs (language c) (names expectnat_llvm_personality_anchor))
  (modules expectnat))
 
 (ocamllex

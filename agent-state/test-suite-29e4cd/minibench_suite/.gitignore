@@ -1,0 +1,8 @@
+build/
+src/
+inspect/
+wrappers/
+rs4gc_dumps*/
+*.log
+results*.json
+results.json

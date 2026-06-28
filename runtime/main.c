@@ -27,6 +27,11 @@
 #include <windows.h>
 #endif
 
+extern void caml_llvm_eh_personality(void);
+
+CAMLexport void *caml_llvm_eh_personality_anchor =
+  (void *) caml_llvm_eh_personality;
+
 int main_os(int argc, char_os **argv)
 {
 #ifdef _WIN32

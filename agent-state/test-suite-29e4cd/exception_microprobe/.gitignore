@@ -1,0 +1,13 @@
+__pycache__/
+build/
+inspect*/
+results*.json
+*.cmi
+*.cmt
+*.cmti
+*.cmx
+*.o
+*.s
+*.ll
+sweep/build/
+

@@ -65,6 +65,14 @@ let select_bitwidth : Cmm.bswap_bitwidth -> Arch.bswap_bitwidth = function
 
 let specific x : Cfg.basic_or_terminator = Basic (Op (Specific x))
 
+let is_llvm_intrinsic_builtin = function
+  | "caml_rdtsc_unboxed"
+  | "caml_rdpmc_unboxed"
+  | "caml_sse2_float64_min"
+  | "caml_sse2_float64_max" ->
+    true
+  | _ -> false
+
 let is_immediate (op : Operation.integer_operation) n :
     Cfg_selectgen_target_intf.is_immediate_result =
   match op with
@@ -147,21 +155,33 @@ let select_operation' ~generic_select_condition:_ (op : Cmm.operation)
   in
   match op with
   (* Integer addition *)
-  | Caddi | Caddv | Cadda -> (
-    match args with
-    (* Shift-add *)
-    | [arg1; Cop (Clsl, [arg2; Cconst_int (n, _)], _)] when n > 0 && n < 64 ->
-      Rewritten (specific (Ishiftarith (Ishiftadd, n)), [arg1; arg2])
-    | [arg1; Cop (Casr, [arg2; Cconst_int (n, _)], _)] when n > 0 && n < 64 ->
-      Rewritten (specific (Ishiftarith (Ishiftadd, -n)), [arg1; arg2])
-    | [Cop (Clsl, [arg1; Cconst_int (n, _)], _); arg2] when n > 0 && n < 64 ->
-      Rewritten (specific (Ishiftarith (Ishiftadd, n)), [arg2; arg1])
-    | [Cop (Casr, [arg1; Cconst_int (n, _)], _); arg2] when n > 0 && n < 64 ->
-      Rewritten (specific (Ishiftarith (Ishiftadd, -n)), [arg2; arg1])
-    (* Multiply-add *)
-    | [arg1; Cop (Cmuli, args2, dbg)] | [Cop (Cmuli, args2, dbg); arg1] ->
-      rewrite_multiply_add_or_sub Ishiftadd Imuladd ~arg1 ~args2 dbg
-    | _ -> Use_default)
+  | (Caddi | Caddv | Cadda as op) -> (
+    if !Clflags.llvm_backend
+       &&
+       match op with
+       | Cadda -> true
+       | Caddi | Caddv -> false
+       | _ -> assert false
+    then Use_default
+    else
+      match args with
+      (* Shift-add *)
+      | [arg1; Cop (Clsl, [arg2; Cconst_int (n, _)], _)] when n > 0 && n < 64
+        ->
+        Rewritten (specific (Ishiftarith (Ishiftadd, n)), [arg1; arg2])
+      | [arg1; Cop (Casr, [arg2; Cconst_int (n, _)], _)] when n > 0 && n < 64
+        ->
+        Rewritten (specific (Ishiftarith (Ishiftadd, -n)), [arg1; arg2])
+      | [Cop (Clsl, [arg1; Cconst_int (n, _)], _); arg2] when n > 0 && n < 64
+        ->
+        Rewritten (specific (Ishiftarith (Ishiftadd, n)), [arg2; arg1])
+      | [Cop (Casr, [arg1; Cconst_int (n, _)], _); arg2] when n > 0 && n < 64
+        ->
+        Rewritten (specific (Ishiftarith (Ishiftadd, -n)), [arg2; arg1])
+      (* Multiply-add *)
+      | [arg1; Cop (Cmuli, args2, dbg)] | [Cop (Cmuli, args2, dbg); arg1] ->
+        rewrite_multiply_add_or_sub Ishiftadd Imuladd ~arg1 ~args2 dbg
+      | _ -> Use_default)
   (* Integer subtraction *)
   | Csubi -> (
     match args with
@@ -233,7 +253,15 @@ let select_operation
     (args : Cmm.expression list) dbg ~label_after :
     Cfg_selectgen_target_intf.select_operation_result =
   if !Clflags.llvm_backend
-  then Use_default
+  then
+    match select_operation' ~generic_select_condition op args dbg ~label_after with
+    | (Rewritten _ | Select_operation_then_rewrite _) as selected -> selected
+    | Use_default -> (
+      match op with
+      | Cextcall { func; builtin = true; _ } when is_llvm_intrinsic_builtin func
+        ->
+        Rewritten (specific (Illvm_intrinsic func), args)
+      | _ -> Use_default)
   else select_operation' ~generic_select_condition op args dbg ~label_after
 
 let select_store ~is_assign:_ _addr _exp :
@@ -255,7 +283,7 @@ let insert_move_extcall_arg (ty_arg : Cmm.exttype) src dst :
   let ty_arg_is_small_int =
     match ty_arg with
     | XInt32 | XInt16 | XInt8 -> true
-    | XInt | XInt64 | XFloat32 | XFloat | XVec128 -> false
+    | XInt | XValue | XAddr | XInt64 | XFloat32 | XFloat | XVec128 -> false
     | XVec256 | XVec512 -> Misc.fatal_error "arm64: got 256/512 bit vector"
   in
   if macosx && ty_arg_is_small_int && is_stack_slot dst

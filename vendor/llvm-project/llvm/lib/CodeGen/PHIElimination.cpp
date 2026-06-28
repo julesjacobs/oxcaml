@@ -309,6 +309,13 @@ void PHIElimination::LowerPHINode(MachineBasicBlock &MBB,
     } else {
       const TargetRegisterClass *RC = MF.getRegInfo().getRegClass(DestReg);
       entry = IncomingReg = MF.getRegInfo().createVirtualRegister(RC);
+      // OxCaml: the phi-join register carries the same runtime value as
+      // the phi destination; without the gc bit its spill slots would be
+      // invisible to the gc root listing.
+      if (MF.getRegInfo().isOxCamlGCPtr(DestReg))
+        MF.getRegInfo().setOxCamlGCPtr(IncomingReg);
+      if (MF.getRegInfo().isOxCamlGCArg(DestReg))
+        MF.getRegInfo().setOxCamlGCArg(IncomingReg);
     }
     // Give the target possiblity to handle special cases fallthrough otherwise
     PHICopy = TII->createPHIDestinationCopy(MBB, AfterPHIsIt, MPhi->getDebugLoc(),

@@ -185,7 +185,7 @@ let linearize_terminator cfg_with_layout (func : string) start
            (Lextcall
               { func = Cmm.caml_flambda2_invalid;
                 alloc = false;
-                ty_args = (* Arg is a statically allocated symbol. *) [XInt];
+                ty_args = (* Arg is a statically allocated OCaml value. *) [XValue];
                 ty_res = Cmm.typ_void;
                 returns = false;
                 stack_ofs;

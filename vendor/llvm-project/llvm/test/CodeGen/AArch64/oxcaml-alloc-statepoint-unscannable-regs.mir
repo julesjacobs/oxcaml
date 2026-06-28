@@ -1,0 +1,63 @@
+# RUN: llc -mtriple=aarch64-apple-macosx -run-pass=fixup-statepoint-caller-saved -o - %s | FileCheck %s
+
+# OxCaml allocation statepoints use a preserve-most calling convention because
+# the runtime saves ordinary OCaml value registers in gc_regs.  x16 is not one
+# of those saved registers, so a GC root in x16 must be spilled to a stack slot
+# before the frame table is emitted.
+
+--- |
+  target triple = "aarch64-apple-macosx"
+
+  @caml_call_gc = external global ptr
+
+  declare token @llvm.experimental.gc.statepoint.p0(i64 immarg, i32 immarg, ptr, i32 immarg, i32 immarg, ...)
+  declare ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token, i32, i32)
+  declare { { i64, i64 }, {} } @llvm.experimental.gc.result.sl_sl_i64i64ssl_ss(token)
+
+  define oxcaml_fpcc { { i64, i64 }, { ptr addrspace(1) } } @test(i64 %domain, i64 %alloc, ptr addrspace(1) %root) gc "oxcaml" {
+  entry:
+    %tok = call oxcaml_alloccc token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 1, i32 0, ptr elementtype({ { i64, i64 }, {} } (i64, i64)) @caml_call_gc, i32 2, i32 0, i64 %domain, i64 %alloc, i32 0, i32 0) [ "gc-live"(ptr addrspace(1) %root) ]
+    %rel = call ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token %tok, i32 0, i32 0)
+    %result = call { { i64, i64 }, {} } @llvm.experimental.gc.result.sl_sl_i64i64ssl_ss(token %tok)
+    %r0 = extractvalue { { i64, i64 }, {} } %result, 0, 0
+    %r1 = extractvalue { { i64, i64 }, {} } %result, 0, 1
+    %ret0 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } poison, i64 %r0, 0, 0
+    %ret1 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %ret0, i64 %r1, 0, 1
+    %ret2 = insertvalue { { i64, i64 }, { ptr addrspace(1) } } %ret1, ptr addrspace(1) %rel, 1, 0
+    ret { { i64, i64 }, { ptr addrspace(1) } } %ret2
+  }
+
+...
+---
+name:            test
+tracksRegLiveness: true
+liveins:
+  - { reg: '$x28', virtual-reg: '' }
+  - { reg: '$x27', virtual-reg: '' }
+  - { reg: '$x16', virtual-reg: '' }
+frameInfo:
+  adjustsStack:    true
+  hasCalls:        true
+  maxAlignment:    8
+  localFrameSize:  8
+stack:
+  - { id: 0, name: '', type: default, offset: 0, size: 8, alignment: 8,
+      stack-id: default, callee-saved-register: '', callee-saved-restored: true,
+      local-offset: -8, debug-info-variable: '', debug-info-expression: '',
+      debug-info-location: '' }
+machineFunctionInfo: {}
+body:             |
+  bb.0.entry:
+    liveins: $x16, $x27, $x28
+
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    STATEPOINT 1, 0, 2, @caml_call_gc, $x28, $x27, 2, 108, 2, 0, 2, 0, 2, 1, $x16, 2, 0, 2, 1, 0, 0, csr_aarch64_oxcaml_alloc, implicit-def $sp, implicit-def $x28, implicit-def $x27, implicit-def dead early-clobber $lr
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    RET_ReallyLR implicit $x28, implicit $x27
+
+...
+
+# CHECK-LABEL: name: test
+# CHECK: stack:
+# CHECK: STRXui {{(killed )?}}$x16, %stack.[[SLOT:[0-9]+]], 0
+# CHECK: STATEPOINT {{.*}} 1, 8, %stack.[[SLOT]], 0

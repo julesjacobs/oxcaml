@@ -227,6 +227,13 @@ bool llvm::CC_AArch64_OxCaml_C_Call_StackArgs(
                                               ArgFlags, State);
 }
 
+bool llvm::CC_AArch64_OxCaml_C_Direct_Call(
+    unsigned ValNo, MVT ValVT, MVT LocVT, CCValAssign::LocInfo LocInfo,
+    ISD::ArgFlagsTy ArgFlags, CCState &State) {
+  return ::CC_AArch64_OxCaml_C_Direct_Call(ValNo, ValVT, LocVT, LocInfo,
+                                           ArgFlags, State);
+}
+
 bool llvm::RetCC_AArch64_OxCaml(unsigned ValNo, MVT ValVT, MVT LocVT,
                                 CCValAssign::LocInfo LocInfo,
                                 ISD::ArgFlagsTy ArgFlags, CCState &State) {
@@ -239,4 +246,11 @@ bool llvm::RetCC_AArch64_OxCaml_C_Call(unsigned ValNo, MVT ValVT, MVT LocVT,
                                        CCState &State) {
   return ::RetCC_AArch64_OxCaml_C_Call(ValNo, ValVT, LocVT, LocInfo, ArgFlags,
                                        State);
+}
+
+bool llvm::RetCC_AArch64_OxCaml_C_Direct_Call(
+    unsigned ValNo, MVT ValVT, MVT LocVT, CCValAssign::LocInfo LocInfo,
+    ISD::ArgFlagsTy ArgFlags, CCState &State) {
+  return ::RetCC_AArch64_OxCaml_C_Direct_Call(ValNo, ValVT, LocVT, LocInfo,
+                                              ArgFlags, State);
 }

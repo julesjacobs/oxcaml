@@ -7,6 +7,7 @@
  {
    bytecode;
  }{
+   not-llvm-backend;
    native;
  }
 *)

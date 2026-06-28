@@ -65,8 +65,12 @@ let block :
       Label.format exn_label Cfg_colours.pop);
   Format.fprintf fmt "\n";
   DLL.iter block.body ~f:(fun (instr : Cfg.basic Cfg.instruction) ->
-      Format.fprintf fmt "%a%t%a%t%a\n" instr_prefix instr Cfg_colours.basic
-        Cfg.dump_basic instr.desc Cfg_colours.pop instr_suffix (instr, liveness));
+      Format.fprintf fmt "%a%t%a%t" instr_prefix instr Cfg_colours.basic
+        Cfg.dump_basic instr.desc Cfg_colours.pop;
+      (match[@ocaml.warning "-fragile-match"] instr.desc with
+      | Cfg.Stack_check _ -> Format.fprintf fmt " before=%d" instr.stack_offset
+      | _ -> ());
+      Format.fprintf fmt "%a\n" instr_suffix (instr, liveness));
   Format.fprintf fmt "%a%t%a%t%a\n\n" instr_prefix block.terminator
     Cfg_colours.terminator
     (Cfg.dump_terminator ~sep:", ")

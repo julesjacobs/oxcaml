@@ -2086,6 +2086,9 @@ bool LLParser::parseOptionalCallingConv(unsigned &CC) {
   case lltok::kw_oxcaml_nofpcc:  CC = CallingConv::OxCaml_WithoutFP; break;
   case lltok::kw_oxcaml_ccc:     CC = CallingConv::OxCaml_C_Call; break;
   case lltok::kw_oxcaml_c_stackcc:CC = CallingConv::OxCaml_C_Call_StackArgs; break;
+  case lltok::kw_oxcaml_c_directcc:
+    CC = CallingConv::OxCaml_C_Direct_Call;
+    break;
   case lltok::kw_oxcaml_alloccc: CC = CallingConv::OxCaml_Alloc; break;
   case lltok::kw_cc: {
       Lex.Lex();

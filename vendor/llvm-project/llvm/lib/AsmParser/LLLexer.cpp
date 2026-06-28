@@ -635,6 +635,7 @@ lltok::Kind LLLexer::LexIdentifier() {
   KEYWORD(oxcaml_nofpcc);
   KEYWORD(oxcaml_ccc);
   KEYWORD(oxcaml_c_stackcc);
+  KEYWORD(oxcaml_c_directcc);
   KEYWORD(oxcaml_alloccc);
 
   KEYWORD(cc);

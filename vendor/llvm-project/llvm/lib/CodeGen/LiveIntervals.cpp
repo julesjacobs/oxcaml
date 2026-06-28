@@ -315,7 +315,7 @@ void LiveIntervals::computeRegUnitRange(LiveRange &LR, unsigned Unit) {
 
 /// Precompute the live ranges of any register units that are live-in to an ABI
 /// block somewhere. Register values can appear without a corresponding def when
-/// entering the entry block or a landing pad.
+/// entering the entry block, a landing pad, or a runtime-entered block.
 void LiveIntervals::computeLiveInRegUnits() {
   RegUnitRanges.resize(TRI->getNumRegUnits());
   LLVM_DEBUG(dbgs() << "Computing live-in reg-units in ABI blocks.\n");
@@ -325,8 +325,11 @@ void LiveIntervals::computeLiveInRegUnits() {
 
   // Check all basic blocks for live-ins.
   for (const MachineBasicBlock &MBB : *MF) {
-    // We only care about ABI blocks: Entry + landing pads.
-    if ((&MBB != &MF->front() && !MBB.isEHPad()) || MBB.livein_empty())
+    // We only care about ABI blocks: entry, landing pads, and runtime-entered
+    // blocks.
+    if ((&MBB != &MF->front() && !MBB.isEHPad() &&
+         !MBB.isRuntimeEntered()) ||
+        MBB.livein_empty())
       continue;
 
     // Create phi-defs at Begin for all live-in registers.

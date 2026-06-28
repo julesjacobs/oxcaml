@@ -30,8 +30,8 @@
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
-#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
+#include "OxCamlTrapUtils.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
@@ -77,11 +77,12 @@ static ISD::NodeType getPreferredExtendForValue(const Instruction *I) {
 }
 
 void FunctionLoweringInfo::set(const Function &fn, MachineFunction &mf,
-                               SelectionDAG *DAG) {
+                               SelectionDAG *DAG, DominatorTree *DomTree) {
   Fn = &fn;
   MF = &mf;
   TLI = MF->getSubtarget().getTargetLowering();
   RegInfo = &MF->getRegInfo();
+  DT = DomTree;
   const TargetFrameLowering *TFI = MF->getSubtarget().getFrameLowering();
   DA = DAG->getDivergenceAnalysis();
 
@@ -269,8 +270,20 @@ void FunctionLoweringInfo::set(const Function &fn, MachineFunction &mf,
       MBB->setAddressTakenIRBlock(const_cast<BasicBlock *>(&BB));
 
     // Mark landing pad blocks.
+    bool HasConcreteTrapTarget =
+        getOxCamlTrapRecoveryLandingPad(BB) &&
+        hasOxCamlPushTrapTargeting(*Fn, BB);
+    bool HasAbstractTrapTarget =
+        DT && llvm::isOxCamlTrapRecoveryPad(*Fn, BB) &&
+        hasDominatingOxCamlTrapPublishForRecoveryPad(*Fn, BB, *DT);
+    bool IsOxCamlTrapRecoveryPad = HasConcreteTrapTarget || HasAbstractTrapTarget;
     if (BB.isEHPad())
       MBB->setIsEHPad();
+    if (IsOxCamlTrapRecoveryPad) {
+      MBB->setIsRuntimeEntered();
+      MBB->setMachineBlockAddressTaken();
+      MBB->setLabelMustBeEmitted();
+    }
 
     // Create Machine PHI nodes for LLVM PHI nodes, lowering them as
     // appropriate.
@@ -394,8 +407,23 @@ Register FunctionLoweringInfo::CreateRegs(Type *Ty, bool isDivergent) {
 }
 
 Register FunctionLoweringInfo::CreateRegs(const Value *V) {
-  return CreateRegs(V->getType(), DA && DA->isDivergent(V) &&
-                    !TLI->requiresUniformRegister(*MF, V));
+  Register R = CreateRegs(V->getType(), DA && DA->isDivergent(V) &&
+                          !TLI->requiresUniformRegister(*MF, V));
+  // OxCaml: vregs that carry a gc value (ptr addrspace(1)) get the gc
+  // bit at creation. This is the root of the bit lattice: it covers phi
+  // destinations, gc.results and every other cross-block value that
+  // never appears directly in a statepoint gc section; InstrEmitter,
+  // PHIElimination, the coalescer and cloneVirtualRegister propagate it
+  // from here.
+  if (V->getType()->isPointerTy() &&
+      V->getType()->getPointerAddressSpace() == 1) {
+    const Function &F = MF->getFunction();
+    if (F.hasGC() && (F.getGC() == "oxcaml" || F.getGC() == "ocaml")) {
+      MF->getRegInfo().setOxCamlGCPtr(R);
+      MF->getRegInfo().setOxCamlTypedP1(R);
+    }
+  }
+  return R;
 }
 
 /// GetLiveOutRegInfo - Gets LiveOutInfo for a register, returning NULL if the

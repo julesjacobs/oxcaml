@@ -1413,6 +1413,7 @@ end
 module type Opttop_options = sig
   include Toplevel_options
   include Optcommon_options
+  val _llvm_backend : unit -> unit
   val _verbose : unit -> unit
   val _S : unit -> unit
 end;;
@@ -1931,6 +1932,7 @@ module Make_opttop_options (F : Opttop_options) = struct
     mk_inline_lifting_benefit F._inline_lifting_benefit;
     mk_inline_branch_factor F._inline_branch_factor;
     mk_labels F._labels;
+    mk_llvm_backend F._llvm_backend;
     mk_alias_deps F._alias_deps;
     mk_no_alias_deps F._no_alias_deps;
     mk_linscan F._linscan;
@@ -2619,6 +2621,7 @@ module Default = struct
     include Toplevel
     include Native
     include Core
+    let _llvm_backend = set llvm_backend
   end
 
   module Optmain = struct

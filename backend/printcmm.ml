@@ -54,6 +54,8 @@ let machtype ppf mty =
 
 let exttype ppf = function
   | XInt -> fprintf ppf "int"
+  | XValue -> fprintf ppf "value"
+  | XAddr -> fprintf ppf "addr"
   | XInt8 -> fprintf ppf "int8"
   | XInt16 -> fprintf ppf "int16"
   | XInt32 -> fprintf ppf "int32"
@@ -327,7 +329,7 @@ let operation d = function
       is_write
       (temporal_locality locality)
   | Catomic { op; size = _ } -> Printf.sprintf "atomic %s" (atomic_op op)
-  | Copaque -> "opaque"
+  | Copaque _ -> "opaque"
   | Cbeginregion -> "beginregion"
   | Cendregion -> "endregion"
   | Ctuple_field (field, _ty) -> to_string "tuple_field %i" field

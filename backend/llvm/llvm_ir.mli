@@ -72,6 +72,12 @@ module Type : sig
 
   val doublex2 : t
 
+  val vec128 : t
+
+  val vec256 : t
+
+  val vec512 : t
+
   val label : t
 
   val metadata : t
@@ -193,9 +199,13 @@ end
 module Fn_attr : sig
   type t =
     | Cold
+    | Frame_pointer_all
     | Gc of string
     | Gc_leaf_function
     | Noinline
+    | Oxcaml_stack_check
+    | Oxcaml_stack_check_bytes of int
+    | Oxcaml_stack_check_before_bytes of int
     | Returns_twice
     | Statepoint_id of int
 
@@ -214,6 +224,7 @@ module Calling_conventions : sig
     | Oxcaml
     | Oxcaml_c_call
     | Oxcaml_c_call_stack_args
+    | Oxcaml_c_direct_call
     | Oxcaml_alloc
 
   val to_string : t -> string
@@ -256,6 +267,12 @@ module Instruction : sig
     | Atomicrmw_or
     | Atomicrmw_xor
     | Atomicrmw_xchg
+
+  type atomic_ordering =
+    | Monotonic
+    | Acquire
+    | Release
+    | Seq_cst
 
   type convert_op =
     | Sext
@@ -319,6 +336,8 @@ module Instruction : sig
 
   val atomicrmw_op_to_string : atomicrmw_op -> string
 
+  val atomic_ordering_to_string : atomic_ordering -> string
+
   type op
 
   type t
@@ -342,9 +361,22 @@ module Instruction : sig
 
   val unreachable : op
 
+  val invoke :
+    func:Ident.t ->
+    args:Value.t list ->
+    res_type:Type.Or_void.t ->
+    attrs:Fn_attr.t list ->
+    operand_bundles:(string * Value.t list) list ->
+    cc:Calling_conventions.t ->
+    normal:Value.t ->
+    unwind:Value.t ->
+    op
+
   val unary : unary_op -> arg:Value.t -> op
 
   val binary : binary_op -> arg1:Value.t -> arg2:Value.t -> op
+
+  val binary_contract : binary_op -> arg1:Value.t -> arg2:Value.t -> op
 
   val convert : convert_op -> arg:Value.t -> to_:Type.t -> op
 
@@ -361,14 +393,29 @@ module Instruction : sig
   val insertvalue :
     aggregate:Value.t -> indices:int list -> to_insert:Value.t -> op
 
-  val alloca : ?count:Value.t -> Type.t -> op
+  val alloca : ?count:Value.t -> ?align:int -> Type.t -> op
 
   val load : ptr:Value.t -> typ:Type.t -> op
 
+  val load_with_align : align:int -> ptr:Value.t -> typ:Type.t -> op
+
+  val load_volatile : ptr:Value.t -> typ:Type.t -> op
+
+  val load_atomic : ordering:atomic_ordering -> ptr:Value.t -> typ:Type.t -> op
+
   val store : ptr:Value.t -> to_store:Value.t -> op
+
+  val store_with_align : align:int -> ptr:Value.t -> to_store:Value.t -> op
+
+  val store_volatile : ptr:Value.t -> to_store:Value.t -> op
+
+  val store_atomic :
+    ordering:atomic_ordering -> ptr:Value.t -> to_store:Value.t -> op
 
   val getelementptr :
     base_type:Type.t -> base_ptr:Value.t -> indices:Value.t list -> op
+
+  val fence : atomic_ordering -> op
 
   val cmpxchg :
     ptr:Value.t -> compare_with:Value.t -> set_if_equal:Value.t -> op
@@ -382,6 +429,7 @@ module Instruction : sig
     args:Value.t list ->
     res_type:Type.Or_void.t ->
     attrs:Fn_attr.t list ->
+    operand_bundles:(string * Value.t list) list ->
     cc:Calling_conventions.t ->
     musttail:bool ->
     op
@@ -394,13 +442,17 @@ module Instruction : sig
     sideeffect:bool ->
     op
 
-  val pp_t : ?comment:string -> Format.formatter -> t -> unit
+  val landingpad : typ:Type.t -> cleanup:bool -> op
+
+  val pp_t :
+    ?comment:string -> ?dbg_metadata:string -> Format.formatter -> t -> unit
 end
 
 module Function : sig
   type t
 
-  val add_instruction : ?comment:string -> t -> Instruction.t -> unit
+  val add_instruction :
+    ?comment:string -> ?dbg_metadata:string -> t -> Instruction.t -> unit
 
   val add_label_def : t -> Ident.t -> unit
 
@@ -417,6 +469,8 @@ module Function : sig
       }
 
     val create :
+      dbg_metadata:string option ->
+      personality:Ident.t option ->
       name:string ->
       args:Type.t list ->
       res:Type.Or_void.t ->
@@ -435,9 +489,15 @@ module Function : sig
     val get_fun_ident : t -> Ident.t
 
     val ins :
-      ?comment:string -> ?res_ident:Ident.t -> t -> Instruction.op -> Value.t
+      ?comment:string ->
+      ?dbg_metadata:string ->
+      ?res_ident:Ident.t ->
+      t ->
+      Instruction.op ->
+      Value.t
 
-    val ins_no_res : ?comment:string -> t -> Instruction.op -> unit
+    val ins_no_res :
+      ?comment:string -> ?dbg_metadata:string -> t -> Instruction.op -> unit
 
     val comment : t -> string -> unit
 
@@ -449,10 +509,13 @@ module Fundecl : sig
   type t =
     { name : string;
       args : Type.t list;
-      res : Type.Or_void.t
+      res : Type.Or_void.t;
+      varargs : bool
     }
 
   val create : string -> Type.t list -> Type.Or_void.t -> t
+
+  val create_varargs : string -> Type.t list -> Type.Or_void.t -> t
 
   val pp_t : Format.formatter -> t -> unit
 

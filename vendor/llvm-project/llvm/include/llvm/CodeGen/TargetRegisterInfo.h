@@ -492,6 +492,24 @@ public:
     return nullptr;
   }
 
+  /// Return true if \p PhysReg is a valid physical live-in for a
+  /// runtime-entered block.
+  ///
+  /// A runtime-entered block is reached by target/runtime control flow rather
+  /// than an ordinary machine branch. Targets that use such blocks must define
+  /// the ABI registers that are valid at the block entry.
+  virtual bool isRuntimeEnteredLiveIn(const MachineFunction &MF,
+                                      MCRegister PhysReg) const {
+    return false;
+  }
+
+  /// Return the physical registers that must be live-in to every
+  /// runtime-entered block for this target/runtime ABI.
+  virtual ArrayRef<MCPhysReg>
+  getRuntimeEnteredLiveIns(const MachineFunction &MF) const {
+    return {};
+  }
+
   /// Return a register mask that clobbers everything.
   virtual const uint32_t *getNoPreservedMask() const {
     llvm_unreachable("target does not provide no preserved mask");
@@ -594,6 +612,17 @@ public:
   /// instruction, provide the target the opportunity to adjust it (mainly to
   /// remove pseudo-registers that should be ignored).
   virtual void adjustStackMapLiveOutMask(uint32_t *Mask) const {}
+
+  /// Return true if a GC pointer in PhysReg must be spilled before it is
+  /// described in statepoint metadata.
+  ///
+  /// Some runtimes can only scan roots in a subset of physical registers. Such
+  /// registers may still be allocatable for ordinary code, but they cannot be
+  /// exposed as register root locations at safepoints.
+  virtual bool shouldSpillStatepointGCPtr(const MachineFunction &MF,
+                                          MCRegister PhysReg) const {
+    return false;
+  }
 
   /// Return a super-register of the specified register
   /// Reg so its sub-register of index SubIdx is Reg.

@@ -1985,6 +1985,17 @@ static Instruction *foldSelectGEP(GetElementPtrInst &GEP,
 
 Instruction *InstCombinerImpl::visitGEPOfGEP(GetElementPtrInst &GEP,
                                              GEPOperator *Src) {
+  auto PreserveOxCamlBaseValue = [&](Instruction *NewGEP) -> Instruction * {
+    if (MDNode *MD = GEP.getMetadata("is_base_value"))
+      NewGEP->setMetadata("is_base_value", MD);
+    return NewGEP;
+  };
+
+  if (auto *SrcInst = dyn_cast<Instruction>(Src);
+      SrcInst && SrcInst->getMetadata("is_base_value") &&
+      !GEP.getMetadata("is_base_value"))
+    return nullptr;
+
   // Combine Indices - If the source pointer to this getelementptr instruction
   // is a getelementptr instruction with matching element type, combine the
   // indices of the two getelementptr instructions into a single instruction.
@@ -2018,7 +2029,7 @@ Instruction *InstCombinerImpl::visitGEPOfGEP(GetElementPtrInst &GEP,
           GetElementPtrInst *NewGEP = GetElementPtrInst::Create(
               GEP.getSourceElementType(), NewSrc, {SO1});
           NewGEP->setIsInBounds(IsInBounds);
-          return NewGEP;
+          return PreserveOxCamlBaseValue(NewGEP);
         }
       }
     }
@@ -2077,13 +2088,14 @@ Instruction *InstCombinerImpl::visitGEPOfGEP(GetElementPtrInst &GEP,
       // If both GEP are constant-indexed, and cannot be merged in either way,
       // convert them to a GEP of i8.
       if (Src->hasAllConstantIndices())
-        return isMergedGEPInBounds(*Src, *cast<GEPOperator>(&GEP))
-            ? GetElementPtrInst::CreateInBounds(
-                Builder.getInt8Ty(), Src->getOperand(0),
-                Builder.getInt(OffsetOld), GEP.getName())
-            : GetElementPtrInst::Create(
-                Builder.getInt8Ty(), Src->getOperand(0),
-                Builder.getInt(OffsetOld), GEP.getName());
+        return PreserveOxCamlBaseValue(
+            isMergedGEPInBounds(*Src, *cast<GEPOperator>(&GEP))
+                ? GetElementPtrInst::CreateInBounds(
+                      Builder.getInt8Ty(), Src->getOperand(0),
+                      Builder.getInt(OffsetOld), GEP.getName())
+                : GetElementPtrInst::Create(
+                      Builder.getInt8Ty(), Src->getOperand(0),
+                      Builder.getInt(OffsetOld), GEP.getName()));
       return nullptr;
     }
 
@@ -2100,13 +2112,13 @@ Instruction *InstCombinerImpl::visitGEPOfGEP(GetElementPtrInst &GEP,
       IsInBounds &= Idx.isNonNegative() == ConstIndices[0].isNonNegative();
     }
 
-    return IsInBounds
-               ? GetElementPtrInst::CreateInBounds(Src->getSourceElementType(),
-                                                   Src->getOperand(0), Indices,
-                                                   GEP.getName())
-               : GetElementPtrInst::Create(Src->getSourceElementType(),
-                                           Src->getOperand(0), Indices,
-                                           GEP.getName());
+    return PreserveOxCamlBaseValue(
+        IsInBounds ? GetElementPtrInst::CreateInBounds(
+                         Src->getSourceElementType(), Src->getOperand(0),
+                         Indices, GEP.getName())
+                   : GetElementPtrInst::Create(Src->getSourceElementType(),
+                                               Src->getOperand(0), Indices,
+                                               GEP.getName()));
   }
 
   if (Src->getResultElementType() != GEP.getSourceElementType())
@@ -2160,13 +2172,14 @@ Instruction *InstCombinerImpl::visitGEPOfGEP(GetElementPtrInst &GEP,
   }
 
   if (!Indices.empty())
-    return isMergedGEPInBounds(*Src, *cast<GEPOperator>(&GEP))
-               ? GetElementPtrInst::CreateInBounds(
-                     Src->getSourceElementType(), Src->getOperand(0), Indices,
-                     GEP.getName())
-               : GetElementPtrInst::Create(Src->getSourceElementType(),
-                                           Src->getOperand(0), Indices,
-                                           GEP.getName());
+    return PreserveOxCamlBaseValue(
+        isMergedGEPInBounds(*Src, *cast<GEPOperator>(&GEP))
+            ? GetElementPtrInst::CreateInBounds(Src->getSourceElementType(),
+                                                Src->getOperand(0), Indices,
+                                                GEP.getName())
+            : GetElementPtrInst::Create(Src->getSourceElementType(),
+                                        Src->getOperand(0), Indices,
+                                        GEP.getName()));
 
   return nullptr;
 }

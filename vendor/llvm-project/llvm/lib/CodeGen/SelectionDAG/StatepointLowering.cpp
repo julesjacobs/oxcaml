@@ -30,6 +30,7 @@
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
 #include "llvm/CodeGen/StackMaps.h"
+#include "llvm/IR/IntrinsicsAArch64.h"
 #include "llvm/CodeGen/TargetLowering.h"
 #include "llvm/CodeGen/TargetOpcodes.h"
 #include "llvm/IR/CallingConv.h"
@@ -50,6 +51,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <limits>
 #include <tuple>
 #include <utility>
 
@@ -74,6 +76,37 @@ cl::opt<bool> UseRegistersForGCPointersInLandingPad(
 cl::opt<unsigned> MaxRegistersForGCPointers(
     "max-registers-for-gc-values", cl::Hidden, cl::init(0),
     cl::desc("Max number of VRegs allowed to pass GC pointer meta args in"));
+
+static cl::opt<bool> OxCamlStatepointInPlace(
+    "oxcaml-statepoint-inplace", cl::Hidden, cl::init(true),
+    cl::desc("Lower OxCaml alloc-family statepoints with in-place root "
+             "semantics: gc values stay plain (untied) operands wherever "
+             "the register allocator put them; relocates are identity"));
+
+// Non-static: SelectionDAGBuilder consults this to bypass stable
+// statepoint root homes, which exist only to give phis a fixed slot
+// across the ISel pool-spilling scheme that this flag removes.
+// Non-static: AArch64RegisterInfo consults this to clobber the integer
+// CSRs in the C-call preserved mask (a gc value surviving an in-place
+// C-call statepoint in a callee-saved register goes stale when the GC
+// moves the object - registers are not roots at C-call safepoints).
+cl::opt<bool> OxCamlStatepointInPlaceCCalls(
+    "oxcaml-statepoint-inplace-c-calls", cl::Hidden, cl::init(false),
+    cl::desc("Extend in-place statepoint lowering to OxCaml C calls. "
+             "Sound only with FixupStatepointCallerSaved force-spilling "
+             "callee-saved gc operands at these statepoints (their CSR set "
+             "preserves x19-x26, and a gc value parked there is invisible "
+             "to the runtime - the BUG 7 hazard); the fixup pass does this "
+             "unconditionally for the OxCaml C-call conventions, and the "
+             "AArch64 call preserved mask drops x19-x25 under this flag."));
+
+cl::opt<bool> OxCamlStatepointInPlaceCalls(
+    "oxcaml-statepoint-inplace-calls", cl::Hidden, cl::init(true),
+    cl::desc("Extend in-place statepoint lowering to ordinary OxCaml "
+             "calls (clobber-all conventions): no ISel pool spilling; "
+             "values live across land in register-allocator spill slots, "
+             "which the statepoint operands fold to and the frametable "
+             "lists. C calls and invokes keep the spilling scheme."));
 
 typedef FunctionLoweringInfo::StatepointRelocationRecord RecordType;
 
@@ -435,6 +468,9 @@ spillIncomingStatepointValue(SDValue Incoming, SDValue Chain,
     MMO = getMachineMemOperand(MF, *cast<FrameIndexSDNode>(Loc));
 
     Builder.StatepointLowering.setLocation(Incoming, Loc);
+  } else if (auto *FI = dyn_cast<FrameIndexSDNode>(Loc)) {
+    auto &MF = Builder.DAG.getMachineFunction();
+    MMO = getMachineMemOperand(MF, *FI);
   }
 
   assert(Loc.getNode());
@@ -545,6 +581,7 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
                         SmallVectorImpl<MachineMemOperand *> &MemRefs,
                         SmallVectorImpl<SDValue> &GCPtrs,
                         DenseMap<SDValue, int> &LowerAsVReg,
+                        bool &InPlaceOut,
                         SelectionDAGBuilder::StatepointLoweringInfo &SI,
                         SelectionDAGBuilder &Builder) {
   // Lower the deopt and gc arguments for this statepoint.  Layout will be:
@@ -563,8 +600,89 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
   const bool LiveInDeopt =
     SI.StatepointFlags & (uint64_t)StatepointFlags::DeoptLiveIn;
 
-  // Decide which deriver pointers will go on VRegs
-  unsigned MaxVRegPtrs = MaxRegistersForGCPointers.getValue();
+  // Decide which derived pointers will go on VRegs.  OxCaml allocation
+  // statepoints enter runtime paths that save ordinary root registers in
+  // gc_regs, so they COULD describe scalar GC roots as registers; however
+  // the tied-def vreg lowering makes every live gc value multi-located
+  // (forced into a register at the statepoint while its spill-slot homes
+  // stay live and are reloaded afterwards), and the post-RA root listing
+  // machinery cannot soundly enumerate all the secondary locations (found
+  // via OXCAML_YOUNG_FLIP: cont-pattern frames with ~18 reloaded values
+  // whose slot copies went stale). Until statepoints use in-place root
+  // semantics (no tied defs), keep every gc value in its ISel spill slot
+  // at every statepoint: single canonical location per value, which the
+  // frametable lists and the GC updates. Override for experiments with
+  // -max-registers-for-gc-values.
+  unsigned MaxVRegPtrs = MaxRegistersForGCPointers.getNumOccurrences()
+                             ? MaxRegistersForGCPointers.getValue()
+                             : 0;
+  // Debug hook: comma-separated function-name substrings that use the vreg
+  // lowering regardless of the default (bisecting miscompiles).
+  if (const char *FL = getenv("OXSR_VREG_FUNCS")) {
+    StringRef Name = Builder.DAG.getMachineFunction().getName();
+    SmallVector<StringRef, 8> Parts;
+    StringRef(FL).split(Parts, ',', -1, false);
+    for (StringRef P : Parts)
+      if (!P.empty() && Name.contains(P))
+        MaxVRegPtrs = std::numeric_limits<unsigned>::max();
+  }
+
+  // In-place lowering (RA-derived roots plan, step 1): at alloc-family
+  // statepoints (caml_call_gc / realloc — the OxCaml_Alloc convention
+  // preserves every register and the runtime saves and rewrites the full
+  // register file through the gc_regs bucket), gc values need no
+  // canonical spill slot. They are passed as plain untied operands and
+  // stay wherever the register allocator put them: a register operand
+  // becomes a frametable register root (the GC updates the register in
+  // place, so later uses of the same vreg read the relocated value); a
+  // spilled operand folds to its slot and becomes a stack root.
+  // Relocates lower to identity (RecordType::NoRelocate). CallInst
+  // statepoints only, and only when every entry is its own base
+  // (llvmize keeps interior pointers away from safepoints; an interior
+  // pointer listed as an independent root would corrupt the heap).
+  // Ordinary OxCaml calls (step 2) extend the same scheme: their
+  // conventions clobber every register, so anything live across is
+  // forced into register-allocator spill slots, which the (untied)
+  // statepoint operands fold to and the frametable lists directly —
+  // one slot per value, no pool double-spill. C calls are excluded
+  // (their convention preserves x19-x26, and a gc value parked there
+  // is invisible to the runtime — the BUG 7 hazard). Invokes lower
+  // in place on the NORMAL edge: handler-live values still travel
+  // through the exnroot machinery (RS4GC's handler-value demotion),
+  // which is independent of how the statepoint's own gc operands are
+  // lowered.
+  bool InPlaceCC =
+      SI.CLI.CallConv == CallingConv::OxCaml_Alloc
+          ? OxCamlStatepointInPlace.getValue()
+          : (((SI.CLI.CallConv == CallingConv::OxCaml_WithFP ||
+               SI.CLI.CallConv == CallingConv::OxCaml_WithoutFP) &&
+              OxCamlStatepointInPlaceCalls) ||
+             ((SI.CLI.CallConv == CallingConv::OxCaml_C_Call ||
+               SI.CLI.CallConv == CallingConv::OxCaml_C_Call_StackArgs) &&
+              OxCamlStatepointInPlaceCCalls));
+  bool InPlace = false;
+  if (InPlaceCC && (isa_and_nonnull<CallInst>(SI.StatepointInstr) ||
+                    isa_and_nonnull<InvokeInst>(SI.StatepointInstr))) {
+    const Function &F = Builder.DAG.getMachineFunction().getFunction();
+    if (F.hasGC() && (F.getGC() == "oxcaml" || F.getGC() == "ocaml")) {
+      InPlace = true;
+      // RS4GC rematerializes derived pointers (interior addresses) after
+      // statepoints. With identity relocates the rematerialized chain
+      // would CSE with the pre-statepoint original and cross the
+      // statepoint stale; such statepoints keep the spill lowering,
+      // whose reloaded base keeps the rematerialization distinct.
+      if (cast<CallBase>(SI.StatepointInstr)
+              ->hasFnAttr("oxcaml-statepoint-derived-remat"))
+        InPlace = false;
+      for (unsigned I = 0; InPlace && I != SI.Bases.size(); ++I)
+        if (Builder.getValue(SI.Bases[I]) !=
+            Builder.getValue(SI.Ptrs[I]))
+          InPlace = false;
+    }
+  }
+  if (InPlace)
+    MaxVRegPtrs = 0;
+  InPlaceOut = InPlace;
 
   // Pointers used on exceptional path of invoke statepoint.
   // We cannot assing them to VRegs.
@@ -629,7 +747,7 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
              Builder.getValue(V).getValueType()))
       return true;
     if (isGCValue(V, Builder))
-      return !LowerAsVReg.count(Builder.getValue(V));
+      return !InPlace && !LowerAsVReg.count(Builder.getValue(V));
     return !(LiveInDeopt || UseRegistersForDeoptValues);
   };
 
@@ -643,16 +761,21 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
       reservePreviousStackSlotForValue(V, Builder);
   }
 
-  for (const Value *V : SI.Ptrs) {
-    SDValue SDV = Builder.getValue(V);
-    if (!LowerAsVReg.count(SDV))
-      reservePreviousStackSlotForValue(V, Builder);
-  }
+  // In-place statepoints must not pre-assign pool slot locations to gc
+  // values: a location set here would route the relocate record to
+  // RecordType::Spill, reloading a slot this statepoint never updates.
+  if (!InPlace) {
+    for (const Value *V : SI.Ptrs) {
+      SDValue SDV = Builder.getValue(V);
+      if (!LowerAsVReg.count(SDV))
+        reservePreviousStackSlotForValue(V, Builder);
+    }
 
-  for (const Value *V : SI.Bases) {
-    SDValue SDV = Builder.getValue(V);
-    if (!LowerAsVReg.count(SDV))
-      reservePreviousStackSlotForValue(V, Builder);
+    for (const Value *V : SI.Bases) {
+      SDValue SDV = Builder.getValue(V);
+      if (!LowerAsVReg.count(SDV))
+        reservePreviousStackSlotForValue(V, Builder);
+    }
   }
 
   // First, prefix the list with the number of unique values to be
@@ -684,8 +807,8 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
   // Finally, go ahead and lower all the gc arguments.
   pushStackMapConstant(Ops, Builder, LoweredGCPtrs.size());
   for (SDValue SDV : LoweredGCPtrs)
-    lowerIncomingStatepointValue(SDV, !LowerAsVReg.count(SDV), Ops, MemRefs,
-                                 Builder);
+    lowerIncomingStatepointValue(
+        SDV, !InPlace && !LowerAsVReg.count(SDV), Ops, MemRefs, Builder);
 
   // Copy to out vector. LoweredGCPtrs will be empty after this point.
   GCPtrs = LoweredGCPtrs.takeVector();
@@ -757,8 +880,9 @@ SDValue SelectionDAGBuilder::LowerAsSTATEPOINT(
   SmallVector<MachineMemOperand*, 16> MemRefs;
   // Maps derived pointer SDValue to statepoint result of relocated pointer.
   DenseMap<SDValue, int> LowerAsVReg;
+  bool InPlaceStatepoint = false;
   lowerStatepointMetaArgs(LoweredMetaArgs, MemRefs, LoweredGCArgs, LowerAsVReg,
-                          SI, *this);
+                          InPlaceStatepoint, SI, *this);
 
   // Now that we've emitted the spills, we need to update the root so that the
   // call sequence is ordered correctly.
@@ -948,11 +1072,13 @@ SDValue SelectionDAGBuilder::LowerAsSTATEPOINT(
       Record.type = RecordType::Spill;
       Record.payload.FI = cast<FrameIndexSDNode>(Loc)->getIndex();
     } else {
-      Record.type = RecordType::NoRelocate;
-      // If we didn't relocate a value, we'll essentialy end up inserting an
-      // additional use of the original value when lowering the gc.relocate.
-      // We need to make sure the value is available at the new use, which
-      // might be in another block.
+      // In-place statepoints relocate through an opaque pseudo of the
+      // original value (see RecordType::InPlace); everything else uses
+      // the value directly.
+      Record.type = InPlaceStatepoint ? RecordType::InPlace
+                                      : RecordType::NoRelocate;
+      // Either way the lowering inserts a use of the original value at
+      // the gc.relocate, which might be in another block.
       if (Relocate->getParent() != StatepointInstr->getParent())
         ExportFromCurrentBlock(V);
     }
@@ -1102,6 +1228,25 @@ SelectionDAGBuilder::LowerStatepoint(const GCStatepointInst &I,
     }
   }
 
+  // OxCaml uses rewritten statepoints to describe roots that are only needed
+  // while the callee runs.  Such roots are present in the gc-live bundle but do
+  // not necessarily have a gc.relocate in the caller.  Keep them visible to
+  // stackmap lowering by recording any gc-live value that was not already
+  // covered by a relocate or deopt operand.
+  if (I.getFunction()->hasGC() &&
+      (I.getFunction()->getGC() == "oxcaml" ||
+       I.getFunction()->getGC() == "ocaml")) {
+    for (const Use &U : make_range(I.gc_args_begin(), I.gc_args_end())) {
+      Value *V = U.get();
+      if (!isGCValue(V, *this))
+        continue;
+      if (Seen.insert(getValue(V)).second) {
+        SI.Bases.push_back(V);
+        SI.Ptrs.push_back(V);
+      }
+    }
+  }
+
   SI.GCArgs = ArrayRef<const Use>(I.gc_args_begin(), I.gc_args_end());
   SI.StatepointInstr = &I;
   SI.ID = I.getID();
@@ -1146,8 +1291,7 @@ SelectionDAGBuilder::LowerStatepoint(const GCStatepointInst &I,
   Type *RetTy = GCResultLocality.second->getType();
   Register Reg = FuncInfo.CreateRegs(RetTy);
   RegsForValue RFV(*DAG.getContext(), DAG.getTargetLoweringInfo(),
-                   DAG.getDataLayout(), Reg, RetTy,
-                   I.getCallingConv());
+                   DAG.getDataLayout(), Reg, RetTy, std::nullopt);
   SDValue Chain = DAG.getEntryNode();
   
   RFV.getCopyToRegs(ReturnValue, DAG, getCurSDLoc(), Chain, nullptr);
@@ -1181,8 +1325,13 @@ void SelectionDAGBuilder::LowerCallSiteWithDeoptBundleImpl(
   SI.EHPadBB = EHPadBB;
 
   if (auto GCLiveBundle = Call->getOperandBundle(LLVMContext::OB_gc_live)) {
+    SI.GCArgs =
+        ArrayRef<const Use>(GCLiveBundle->Inputs.begin(),
+                            GCLiveBundle->Inputs.end());
     for (const Use &U : GCLiveBundle->Inputs) {
       Value *V = U.get();
+      if (!isGCValue(V, *this))
+        continue;
       SI.Bases.push_back(V);
       SI.Ptrs.push_back(V);
     }
@@ -1191,6 +1340,8 @@ void SelectionDAGBuilder::LowerCallSiteWithDeoptBundleImpl(
   if (SDValue ReturnVal = LowerAsSTATEPOINT(SI)) {
     ReturnVal = lowerRangeToAssertZExt(DAG, *Call, ReturnVal);
     setValue(Call, ReturnVal);
+    if (FuncInfo.isExportedInst(Call))
+      CopyValueToVirtualRegister(Call, FuncInfo.ValueMap[Call]);
   }
 }
 
@@ -1315,13 +1466,47 @@ void SelectionDAGBuilder::visitGCRelocate(const GCRelocateInst &Relocate) {
     return;
   }
 
+  if (Record.type == RecordType::InPlace) {
+    // The post-statepoint incarnation: an opaque pseudo of the original
+    // value. Constants do not relocate and pass through directly (with
+    // the oxcaml-safe undef immediate, as below).
+    SDValue SD = getValue(DerivedPtr);
+    if (SD.isUndef() && SD.getValueType().getSizeInBits() <= 64) {
+      setValue(&Relocate, DAG.getConstant(1, SDLoc(SD), MVT::i64));
+      return;
+    }
+    if (isa<ConstantSDNode>(SD) || isa<FrameIndexSDNode>(SD)) {
+      setValue(&Relocate, SD);
+      return;
+    }
+    SDLoc DL = getCurSDLoc();
+    SDValue Chain = DAG.getRoot();
+    SDValue Ops[] = {
+        Chain,
+        DAG.getTargetConstant(Intrinsic::aarch64_oxcaml_relocated, DL,
+                              MVT::i64),
+        SD};
+    SDValue Node =
+        DAG.getNode(ISD::INTRINSIC_W_CHAIN, DL,
+                    DAG.getVTList(SD.getValueType(), MVT::Other), Ops);
+    DAG.setRoot(Node.getValue(1));
+    setValue(&Relocate, Node);
+    return;
+  }
+
   assert(Record.type == RecordType::NoRelocate);
   SDValue SD = getValue(DerivedPtr);
 
   if (SD.isUndef() && SD.getValueType().getSizeInBits() <= 64) {
-    // Lowering relocate(undef) as arbitrary constant. Current constant value
-    // is chosen such that it's unlikely to be a valid pointer.
-    setValue(&Relocate, DAG.getTargetConstant(0xFEFEFEFE, SDLoc(SD), MVT::i64));
+    // Lowering relocate(undef) as an arbitrary constant is valid, but for
+    // OCaml GC values it must be a non-pointer immediate in case the value is
+    // recorded as a root and scanned by the runtime.
+    const Function &F = DAG.getMachineFunction().getFunction();
+    uint64_t UndefValue =
+        (F.hasGC() && (F.getGC() == "oxcaml" || F.getGC() == "ocaml"))
+            ? 1
+            : 0xFEFEFEFE;
+    setValue(&Relocate, DAG.getConstant(UndefValue, SDLoc(SD), MVT::i64));
     return;
   }
 

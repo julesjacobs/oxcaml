@@ -248,7 +248,7 @@ let oper_result_type = function
   | Craise _ -> typ_void
   | Cprobe _ -> typ_void
   | Cprobe_is_enabled _ -> typ_int
-  | Copaque -> typ_val
+  | Copaque ty -> ty
   | Cpoll | Cpause -> typ_void
   | Cbeginregion ->
     (* This must not be typ_val; the begin-region operation returns a naked

@@ -45,6 +45,9 @@ void llvm::initializeCodeGen(PassRegistry &Registry) {
   initializeFinalizeISelPass(Registry);
   initializeFinalizeMachineBundlesPass(Registry);
   initializeFixupStatepointCallerSavedPass(Registry);
+  initializeOxCamlStatepointSpillRootsPass(Registry);
+  initializeOxCamlGCRootVerifierPass(Registry);
+  initializeOxCamlLowerRelocatePass(Registry);
   initializeFuncletLayoutPass(Registry);
   initializeGCMachineCodeAnalysisPass(Registry);
   initializeGCModuleInfoPass(Registry);

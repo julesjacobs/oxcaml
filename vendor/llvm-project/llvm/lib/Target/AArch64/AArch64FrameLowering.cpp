@@ -193,8 +193,10 @@
 #include "AArch64TargetMachine.h"
 #include "MCTargetDesc/AArch64AddressingModes.h"
 #include "MCTargetDesc/AArch64MCTargetDesc.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/LivePhysRegs.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
@@ -206,6 +208,7 @@
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/PseudoSourceValue.h"
 #include "llvm/CodeGen/RegisterScavenging.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
@@ -433,6 +436,7 @@ bool AArch64FrameLowering::hasFP(const MachineFunction &MF) const {
       CC == CallingConv::OxCaml_WithFP || CC == CallingConv::OxCaml_WithoutFP ||
       CC == CallingConv::OxCaml_C_Call ||
       CC == CallingConv::OxCaml_C_Call_StackArgs ||
+      CC == CallingConv::OxCaml_C_Direct_Call ||
       CC == CallingConv::OxCaml_Alloc;
   // Win64 EH requires a frame pointer if funclets are present, as the locals
   // are accessed off the frame pointer in both the parent function and the
@@ -891,8 +895,80 @@ static bool windowsRequiresStackProbe(MachineFunction &MF,
          !F.hasFnAttribute("no-stack-arg-probe");
 }
 
-static bool needsOxCamlStackCheck(const MachineFunction &MF) {
-  return MF.getFunction().hasFnAttribute("oxcaml-stack-check");
+struct OxCamlStackCheckAttrs {
+  bool Requested = false;
+  bool HasCfgBytes = false;
+  uint64_t CfgBytes = 0;
+  bool HasBeforeBytes = false;
+  uint64_t BeforeBytes = 0;
+};
+
+static OxCamlStackCheckAttrs
+getOxCamlStackCheckAttrs(const MachineFunction &MF) {
+  const Function &F = MF.getFunction();
+  OxCamlStackCheckAttrs Attrs;
+  Attrs.Requested = F.hasFnAttribute("oxcaml-stack-check");
+
+  Attribute CfgBytesAttr = F.getFnAttribute("oxcaml-stack-check-bytes");
+  if (CfgBytesAttr.isValid()) {
+    bool Failed =
+        CfgBytesAttr.getValueAsString().getAsInteger(10, Attrs.CfgBytes);
+    assert(!Failed && "invalid oxcaml-stack-check-bytes attribute");
+    Attrs.HasCfgBytes = !Failed;
+  }
+
+  Attribute BeforeBytesAttr =
+      F.getFnAttribute("oxcaml-stack-check-before-bytes");
+  if (BeforeBytesAttr.isValid()) {
+    bool Failed =
+        BeforeBytesAttr.getValueAsString().getAsInteger(10, Attrs.BeforeBytes);
+    assert(!Failed && "invalid oxcaml-stack-check-before-bytes attribute");
+    Attrs.HasBeforeBytes = !Failed;
+  }
+
+  return Attrs;
+}
+
+static bool hasOxCamlStackCheckProtocol(const MachineFunction &MF) {
+  return getOxCamlStackCheckAttrs(MF).Requested;
+}
+
+static bool needsOxCamlFrameRecord(const MachineFunction &MF) {
+  const Function &F = MF.getFunction();
+  return F.getCallingConv() == CallingConv::OxCaml_WithFP &&
+         F.hasPersonalityFn();
+}
+
+static uint64_t getOxCamlPrologueStackCheckBytes(const MachineFunction &MF,
+                                                 uint64_t PrefixBytes) {
+  constexpr uint64_t StackThresholdBytes = 32 * 8;
+  // Leave room for the inline slow-path argument save and the frame record
+  // pushed by stack-growth helpers before they switch to the C stack.
+  constexpr uint64_t OrdinaryCheckSlowPathReserveBytes = 32;
+  if (!hasOxCamlStackCheckProtocol(MF))
+    return 0;
+
+  OxCamlStackCheckAttrs Attrs = getOxCamlStackCheckAttrs(MF);
+
+  // Preserve legacy safety when CFG stack-check insertion did not run.
+  if (!Attrs.HasCfgBytes)
+    return PrefixBytes == 0 ? 0
+                            : PrefixBytes + OrdinaryCheckSlowPathReserveBytes;
+
+  // The caller leaves StackThresholdBytes of slack at function entry. The
+  // prologue check is only needed when LLVM's machine prologue plus unchecked
+  // CFG stack use before the first ordinary CFG check would spend that slack,
+  // including the helper-side reserve needed if the ordinary check takes its
+  // slow path.
+  uint64_t UncheckedCfgBytes = 0;
+  if (Attrs.CfgBytes != 0) {
+    if (!Attrs.HasBeforeBytes)
+      return PrefixBytes + OrdinaryCheckSlowPathReserveBytes;
+    UncheckedCfgBytes = Attrs.BeforeBytes;
+  }
+  uint64_t UncheckedBytes =
+      PrefixBytes + UncheckedCfgBytes + OrdinaryCheckSlowPathReserveBytes;
+  return UncheckedBytes < StackThresholdBytes ? 0 : UncheckedBytes;
 }
 
 static void emitOxCamlStackCheck(MachineBasicBlock &MBB,
@@ -921,7 +997,9 @@ static void emitOxCamlStackCheck(MachineBasicBlock &MBB,
       "mov x16, #" +
       std::to_string(RequiredWords) +
       "\n\t"
-      "bl _caml_llvm_prologue_realloc_stack\n"
+      "stp x16, x17, [sp, #-16]!\n\t"
+      "bl _caml_llvm_call_realloc_stack_stkarg\n\t"
+      "ldp x16, x17, [sp], #16\n"
       "9:\n\t"
       "mov x30, x17";
   unsigned ExtraInfo = InlineAsm::Extra_HasSideEffects | InlineAsm::Extra_MayLoad |
@@ -1560,6 +1638,11 @@ void AArch64FrameLowering::emitPrologue(MachineFunction &MF,
            "unexpected function without stack frame but with SVE objects");
     // All of the stack allocation is for locals.
     AFI->setLocalStackSize(NumBytes);
+    uint64_t OxCamlPrologueStackCheckBytes =
+        getOxCamlPrologueStackCheckBytes(MF, NumBytes);
+    if (OxCamlPrologueStackCheckBytes != 0)
+      emitOxCamlStackCheck(MBB, MBBI, DL, TII,
+                           OxCamlPrologueStackCheckBytes);
     if (!NumBytes)
       return;
     // REDZONE: If the stack size is less than 128 bytes, we don't need
@@ -1589,8 +1672,6 @@ void AArch64FrameLowering::emitPrologue(MachineFunction &MF,
           .setMIFlag(MachineInstr::FrameSetup);
     }
 
-    if (needsOxCamlStackCheck(MF))
-      emitOxCamlStackCheck(MBB, MBB.begin(), DL, TII, NumBytes);
     return;
   }
 
@@ -1609,8 +1690,20 @@ void AArch64FrameLowering::emitPrologue(MachineFunction &MF,
           : 0;
   int64_t OxCamlStackCheckSize =
       NumBytes + OxCamlStackCheckRealignmentPadding;
-  bool CombineSPBump =
-      !needsOxCamlStackCheck(MF) && shouldCombineCSRLocalStackBump(MF, NumBytes);
+  uint64_t OxCamlPrologueStackCheckBytes =
+      getOxCamlPrologueStackCheckBytes(MF, OxCamlStackCheckSize);
+  bool NeedsOxCamlPrologueStackCheck = OxCamlPrologueStackCheckBytes != 0;
+  if (NeedsOxCamlPrologueStackCheck)
+    emitOxCamlStackCheck(MBB, MBBI, DL, TII,
+                         OxCamlPrologueStackCheckBytes);
+  // OxCaml: combining the callee-save and local SP bumps is fine as long as
+  // no prologue stack check is required; the check must observe SP before
+  // any of the frame has been allocated. The combined form keeps LR at the
+  // top of the frame (the CSR save offsets are fixed up below), which is
+  // what the OCaml stack walk requires; the epilogue already combines.
+  bool CombineSPBump = (!hasOxCamlStackCheckProtocol(MF) ||
+                        !NeedsOxCamlPrologueStackCheck) &&
+                       shouldCombineCSRLocalStackBump(MF, NumBytes);
   bool HomPrologEpilog = homogeneousPrologEpilog(MF);
   if (CombineSPBump) {
     assert(!SVEStackSize && "Cannot combine SP bump with SVE");
@@ -1622,7 +1715,7 @@ void AArch64FrameLowering::emitPrologue(MachineFunction &MF,
   } else if (HomPrologEpilog) {
     // Stack has been already adjusted.
     NumBytes -= PrologueSaveSize;
-  } else if (PrologueSaveSize != 0 && needsOxCamlStackCheck(MF)) {
+  } else if (PrologueSaveSize != 0 && NeedsOxCamlPrologueStackCheck) {
     MachineBasicBlock::iterator FirstCSR = MBBI;
     MachineBasicBlock::iterator End = MBB.end();
     while (FirstCSR != End && !isCalleeSaveSaveOpcode(FirstCSR->getOpcode()))
@@ -1652,8 +1745,7 @@ void AArch64FrameLowering::emitPrologue(MachineFunction &MF,
     ++MBBI;
   }
 
-  if (!IsFunclet && !HasFP &&
-      F.getCallingConv() == CallingConv::OxCaml_WithFP) {
+  if (!IsFunclet && !HasFP && needsOxCamlFrameRecord(MF)) {
     emitFrameOffset(MBB, MBBI, DL, AArch64::FP, AArch64::SP,
                     StackOffset::getFixed(0), TII, MachineInstr::FrameSetup,
                     false, NeedsWinCFI, &HasWinCFI);
@@ -1957,9 +2049,6 @@ void AArch64FrameLowering::emitPrologue(MachineFunction &MF,
       MBB.addLiveIn(AArch64::X1);
     }
   }
-
-  if (needsOxCamlStackCheck(MF))
-    emitOxCamlStackCheck(MBB, MBB.begin(), DL, TII, OxCamlStackCheckSize);
 }
 
 static void InsertReturnAddressAuth(MachineFunction &MF, MachineBasicBlock &MBB,
@@ -2537,9 +2626,20 @@ static unsigned getPrologueDeath(MachineFunction &MF, unsigned Reg) {
   return getKillRegState(!IsLiveIn);
 }
 
+static bool isOxCamlCallingConv(CallingConv::ID CC) {
+  return CC == CallingConv::OxCaml_WithFP ||
+         CC == CallingConv::OxCaml_WithoutFP ||
+         CC == CallingConv::OxCaml_C_Call ||
+         CC == CallingConv::OxCaml_C_Call_StackArgs ||
+         CC == CallingConv::OxCaml_C_Direct_Call ||
+         CC == CallingConv::OxCaml_Alloc;
+}
+
 static bool produceCompactUnwindFrame(MachineFunction &MF) {
   const AArch64Subtarget &Subtarget = MF.getSubtarget<AArch64Subtarget>();
   AttributeList Attrs = MF.getFunction().getAttributes();
+  if (isOxCamlCallingConv(MF.getFunction().getCallingConv()))
+    return false;
   return Subtarget.isTargetMachO() &&
          !(Subtarget.getTargetLowering()->supportSwiftError() &&
            Attrs.hasAttrSomewhere(Attribute::SwiftError)) &&
@@ -2789,11 +2889,17 @@ static void computeCalleeSaveRegisterPairs(
     // OxCaml no-FP frames are walked from the stack pointer and expect the
     // saved return address at the top word of the fixed frame.  When LR is the
     // only callee-save register, the frame is still 16-byte aligned, so place
-    // LR at SP+8 rather than in the padding word at SP.
-    if (CC == CallingConv::OxCaml_WithoutFP && !NeedsFrameRecord &&
+    // LR at SP+8 rather than in the padding word at SP.  The frame object must
+    // also be 16-byte aligned so the padding word stays paired with LR and
+    // cannot be reused for an ordinary spill.
+    if ((CC == CallingConv::OxCaml_WithoutFP ||
+         CC == CallingConv::OxCaml_WithFP) &&
+        !NeedsFrameRecord &&
         !RPI.isPaired() && RPI.Reg1 == AArch64::LR &&
-        RPI.Type == RegPairInfo::GPR && Offset == 0)
+        RPI.Type == RegPairInfo::GPR && Offset == 0) {
+      MFI.setObjectAlignment(RPI.FrameIdx, Align(16));
       Offset += 8;
+    }
     RPI.Offset = Offset / Scale;
 
     assert(((!RPI.isScalable() && RPI.Offset >= -64 && RPI.Offset <= 63) ||
@@ -3166,7 +3272,7 @@ void AArch64FrameLowering::determineCalleeSaves(MachineFunction &MF,
   uint64_t EstimatedStackSize = MFI.estimateStackSize(MF);
   if (hasFP(MF) ||
       windowsRequiresStackProbe(MF, EstimatedStackSize + CSStackSize + 16) ||
-      (needsOxCamlStackCheck(MF) && EstimatedStackSize != 0)) {
+      (needsOxCamlFrameRecord(MF) && EstimatedStackSize != 0)) {
     SavedRegs.set(AArch64::FP);
     SavedRegs.set(AArch64::LR);
   }
@@ -3284,6 +3390,13 @@ bool AArch64FrameLowering::assignCalleeSavedSpillSlots(
 
     unsigned Size = RegInfo->getSpillSize(*RC);
     Align Alignment(RegInfo->getSpillAlign(*RC));
+    CallingConv::ID CC = MF.getFunction().getCallingConv();
+    if ((CC == CallingConv::OxCaml_WithoutFP ||
+         CC == CallingConv::OxCaml_WithFP) &&
+        !needsOxCamlFrameRecord(MF) && Reg == AArch64::LR) {
+      Size = 16;
+      Alignment = Align(16);
+    }
     int FrameIdx = MFI.CreateStackObject(Size, Alignment, true);
     CS.setFrameIdx(FrameIdx);
 
@@ -3860,10 +3973,165 @@ MachineBasicBlock::iterator tryMergeAdjacentSTG(MachineBasicBlock::iterator II,
 
   return InsertI;
 }
+
+static bool isOxCamlNativeTrapInstr(const MachineInstr &MI) {
+  switch (MI.getOpcode()) {
+  case AArch64::OXCAML_PUSH_TRAP:
+  case AArch64::OXCAML_PUSH_TRAP_DEAD:
+  case AArch64::OXCAML_POP_TRAP:
+  case AArch64::OXCAML_RAISE_NOTRACE_EDGE:
+    return true;
+  default:
+    return false;
+  }
+}
+
+static bool equalOxCamlTrapStacks(ArrayRef<const MachineInstr *> Left,
+                                  ArrayRef<const MachineInstr *> Right) {
+  if (Left.size() != Right.size())
+    return false;
+  for (auto [LeftMI, RightMI] : llvm::zip(Left, Right))
+    if (LeftMI != RightMI)
+      return false;
+  return true;
+}
+
+static void computeOxCamlActiveTrapBytes(MachineFunction &MF) {
+  AArch64FunctionInfo *AFI = MF.getInfo<AArch64FunctionInfo>();
+  AFI->clearOxCamlActiveTrapBytes();
+
+  bool HasNativeTrapInstr = false;
+  for (const MachineBasicBlock &MBB : MF)
+    for (const MachineInstr &MI : MBB)
+      HasNativeTrapInstr |= isOxCamlNativeTrapInstr(MI);
+  if (!HasNativeTrapInstr || MF.empty())
+    return;
+
+  using TrapStack = SmallVector<const MachineInstr *, 4>;
+  DenseMap<const MachineBasicBlock *, TrapStack> InStacks;
+  SmallVector<const MachineBasicBlock *, 16> Worklist;
+
+  auto PropagateStack = [&](const MachineBasicBlock *MBB,
+                            const TrapStack &Stack) {
+    auto It = InStacks.find(MBB);
+    if (It == InStacks.end()) {
+      InStacks[MBB] = Stack;
+      Worklist.push_back(MBB);
+      return;
+    }
+
+    if (!equalOxCamlTrapStacks(It->second, Stack))
+      report_fatal_error(
+          "incompatible OxCaml native trap stacks at machine CFG join");
+  };
+
+  PropagateStack(&MF.front(), TrapStack());
+  while (!Worklist.empty()) {
+    const MachineBasicBlock *MBB = Worklist.pop_back_val();
+    TrapStack Stack = InStacks.lookup(MBB);
+
+    for (const MachineInstr &MI : *MBB) {
+      AFI->setOxCamlActiveTrapBytes(MI, Stack.size() * 16);
+
+      switch (MI.getOpcode()) {
+      case AArch64::OXCAML_PUSH_TRAP: {
+        PropagateStack(MI.getOperand(0).getMBB(), Stack);
+        Stack.push_back(&MI);
+        break;
+      }
+      case AArch64::OXCAML_PUSH_TRAP_DEAD:
+        Stack.push_back(&MI);
+        break;
+      case AArch64::OXCAML_POP_TRAP:
+        if (Stack.empty())
+          report_fatal_error(
+              "OxCaml native trap pop without matching active trap");
+        Stack.pop_back();
+        break;
+      case AArch64::OXCAML_RAISE_NOTRACE_EDGE: {
+        TrapStack HandlerStack = Stack;
+        if (!HandlerStack.empty())
+          HandlerStack.pop_back();
+        PropagateStack(MI.getOperand(1).getMBB(), HandlerStack);
+        break;
+      }
+      default:
+        break;
+      }
+    }
+
+    if (!MBB->empty() &&
+        MBB->back().getOpcode() == AArch64::OXCAML_RAISE_NOTRACE_EDGE)
+      continue;
+
+    for (const MachineBasicBlock *Succ : MBB->successors()) {
+      TrapStack SuccStack = Stack;
+      if (Succ->isRuntimeEntered() && !SuccStack.empty())
+        SuccStack.pop_back();
+      PropagateStack(Succ, SuccStack);
+    }
+  }
+}
+
+static bool hasOxCamlStackPseudoMemOperand(const MachineInstr &MI) {
+  for (const MachineMemOperand *MMO : MI.memoperands()) {
+    const PseudoSourceValue *PSV = MMO->getPseudoValue();
+    if (PSV && PSV->isStack())
+      return true;
+  }
+  return false;
+}
+
+static void adjustOxCamlSPRelativeStackAccesses(MachineFunction &MF) {
+  AArch64FunctionInfo *AFI = MF.getInfo<AArch64FunctionInfo>();
+  const AArch64InstrInfo *TII =
+      static_cast<const AArch64InstrInfo *>(MF.getSubtarget().getInstrInfo());
+  const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+
+  for (MachineBasicBlock &MBB : MF) {
+    for (MachineInstr &MI : MBB) {
+      unsigned ActiveTrapBytes = AFI->getOxCamlActiveTrapBytes(MI);
+      if (ActiveTrapBytes == 0 || !MI.mayLoadOrStore() ||
+          !hasOxCamlStackPseudoMemOperand(MI))
+        continue;
+
+      const MachineOperand *BaseOp = nullptr;
+      int64_t Offset;
+      bool OffsetIsScalable;
+      unsigned Width;
+      if (!TII->getMemOperandWithOffsetWidth(MI, BaseOp, Offset,
+                                             OffsetIsScalable, Width, TRI) ||
+          OffsetIsScalable || !BaseOp->isReg() || BaseOp->getReg() != AArch64::SP)
+        continue;
+
+      TypeSize ScaleValue(0U, false);
+      int64_t MinOffset, MaxOffset;
+      if (!AArch64InstrInfo::getMemOpInfo(MI.getOpcode(), ScaleValue, Width,
+                                          MinOffset, MaxOffset) ||
+          ScaleValue.isScalable())
+        continue;
+
+      unsigned Scale = ScaleValue.getKnownMinValue();
+      if (ActiveTrapBytes % Scale != 0)
+        report_fatal_error(
+            "cannot adjust OxCaml stack access by active trap bytes");
+
+      MachineOperand &OffsetOp = TII->getMemOpBaseRegImmOfsOffsetOperand(MI);
+      int64_t NewOffset = OffsetOp.getImm() + ActiveTrapBytes / Scale;
+      if (NewOffset < MinOffset || NewOffset > MaxOffset)
+        report_fatal_error(
+            "OxCaml active trap adjustment exceeds stack access immediate range");
+      OffsetOp.ChangeToImmediate(NewOffset);
+    }
+  }
+}
 } // namespace
 
 void AArch64FrameLowering::processFunctionBeforeFrameIndicesReplaced(
     MachineFunction &MF, RegScavenger *RS = nullptr) const {
+  computeOxCamlActiveTrapBytes(MF);
+  adjustOxCamlSPRelativeStackAccesses(MF);
+
   if (StackTaggingMergeSetTag)
     for (auto &BB : MF)
       for (MachineBasicBlock::iterator II = BB.begin(); II != BB.end();)
