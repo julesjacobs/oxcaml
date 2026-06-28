@@ -152,7 +152,7 @@ def llvm_flags():
 def selected_cases():
     selected = os.environ.get("CASES", "")
     if not selected:
-        return CASES
+        return CASES + LOCAL_CASES
     names = [name for name in selected.split(",") if name]
     missing = sorted(set(names) - set(CASES) - set(LOCAL_CASES))
     if missing:

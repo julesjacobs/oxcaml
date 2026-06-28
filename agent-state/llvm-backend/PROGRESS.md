@@ -1317,3 +1317,28 @@ measurement against the native AMD64 backend.
   `REPETITIONS=3`.  Sum-of-module-medians ratio was 1.0095x; median
   round-total ratio was 1.0117x.  Generated JSON is ignored by
   `agent-state/test-suite-29e4cd/.gitignore`.
+
+2026-06-28 full minibench default run:
+
+- Changed `minibench_suite/run.py` so the default `CASES` selection is
+  `CASES + LOCAL_CASES`, not only the 16 standard js_of_ocaml cases.  This
+  makes all 52 known minibench cases run when `CASES` is unset, including
+  `matmul` and `matmul_transposed`.
+- Reran the full minibench suite with
+  `OCAMLOPT="$PWD/_install/bin/ocamlopt.opt"`,
+  `OCAMLLIB="$PWD/_install/lib/ocaml"`,
+  `LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"`, `SAMPLES=3`, and
+  `WARMUPS=1`.
+- Result: 52 cases completed.  Runtime geomean 0.8598x LLVM/native, median
+  0.9090x, total runtime ratio 0.8493x, min 0.5793x, max 1.1785x.  LLVM
+  compile-time geomean was 3.2975x native and total compile-time ratio was
+  3.2738x.
+- Largest slowdowns: `soli` 1.1785x, `hash_batch_murmur_mix` 1.1586x,
+  `finance_greeks_pnl` 1.1199x, `splay` 1.0582x, and `binary_trees` 1.0552x.
+  Largest speedups: `numeric_float_dot_hof` 0.5793x,
+  `hash_stdlib_string_vecadd_param_int64u` 0.5828x,
+  `hash_stdlib_string_vecxor_param_int64u` 0.6099x, and
+  `hash_stdlib_string_ocaml_mix_param2_int64u` 0.6331x.
+- Matrix cases: `matmul` was essentially tied at 1.0085x; `matmul_transposed`
+  was faster under LLVM at 0.8322x.  Results JSON:
+  `agent-state/test-suite-29e4cd/minibench_suite/results.json` (ignored).

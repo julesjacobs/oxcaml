@@ -19,7 +19,9 @@ ignored inside each harness directory.
 ## Minibenches
 
 - `minibench_suite/run.py`: fixed native-vs-LLVM harness for vendored
-  js_of_ocaml execution benchmarks plus local numeric, hash, and finance cases.
+  js_of_ocaml execution benchmarks plus local numeric, hash, finance, and
+  matrix cases.  With `CASES` unset it runs both the standard cases and all
+  local cases.
 - Standard minibench sources come from
   `external/js_of_ocaml/benchmarks/sources/ml/`.
 - Extra local sources live in `minibench_suite/local_src/*.ml`.
