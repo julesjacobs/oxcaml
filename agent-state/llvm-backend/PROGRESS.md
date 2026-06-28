@@ -1404,3 +1404,86 @@ measurement against the native AMD64 backend.
   `PATH="$PWD/_build/llvm-tools/bin:$PATH"` reported 12 passed, 6 skipped,
   0 failed.  Full `make -s test` was not run for this build-rule fix, so this
   is a focused validation step, not a full-suite success claim.
+
+2026-06-28 current-head installed LLVM suite:
+
+- Reran the full standard installed-compiler LLVM suite on
+  `jujacobs/llvm-x86-plan` at `69289499fd` after the AMD64 small-root
+  statepoint step and boot lexer rule fix:
+  ```sh
+  PATH="$PWD/_build/llvm-tools/bin:$PATH" \
+  DUNE_CACHE=disabled \
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh" \
+    make -s llvm-test-no-rebuild
+  ```
+- Result: 6809 passed, 314 skipped, 0 failed, 0 not started, 0 unexpected
+  errors, 7123 considered.
+- Important pass signals in the streamed output included AMD64 LLVM codegen,
+  GC-root, stack-check, stack-growth, trap-recovery, native CFI stepping,
+  statmemprof callback, dynlink, runtime-events, local/stack allocation,
+  layout/C-API, SIMD-like vector array, weak/ephemeron/finalizer, and unboxed
+  primitive argument coverage.
+- This re-clears the normal installed-compiler `-llvm-backend` gate for the
+  current commit.  The next gate is a fresh LLVM self-stage2 build/test on the
+  same head because the older self-stage2 pass predates the latest commits.
+
+2026-06-28 current-head LLVM self-stage2:
+
+- Revalidated LLVM self-stage on `jujacobs/llvm-x86-plan` at `69289499fd`
+  using isolated current-head stage directories and the rs4gc wrapper:
+  ```sh
+  PATH="$PWD/_build/llvm-tools/bin:$PATH" \
+  DUNE_CACHE=disabled \
+  LLVM_WRAPPER="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"
+  export DUNE_CACHE PATH LLVM_WRAPPER
+  STAGE0_INSTALL="$PWD/_install" \
+  BOOT_BUILD="$PWD/_llvm_current_stage1_boot_context_build" \
+  BOOT_INSTALL="$PWD/_llvm_current_stage1_boot_install" \
+  SELF_RUNTIME_BUILD="$PWD/_llvm_current_stage1_runtime_build" \
+  SELF_MAIN_BUILD="$PWD/_llvm_current_stage1_main_build" \
+  SELF_STAGE_INSTALL="$PWD/_llvm_current_stage1_install" \
+    tools/build-llvm-self-stage-install.sh
+  ```
+  then produced `_llvm_current_stage2_install` with:
+  ```sh
+  PATH="$PWD/_build/llvm-tools/bin:$PATH" \
+  DUNE_CACHE=disabled \
+  LLVM_WRAPPER="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"
+  export DUNE_CACHE PATH LLVM_WRAPPER
+  STAGE0_INSTALL="$PWD/_llvm_current_stage1_install" \
+  BOOT_BUILD="$PWD/_llvm_current_stage2_boot_context_build" \
+  BOOT_INSTALL="$PWD/_llvm_current_stage2_boot_install" \
+  SELF_RUNTIME_BUILD="$PWD/_llvm_current_stage2_runtime_build" \
+  SELF_MAIN_BUILD="$PWD/_llvm_current_stage2_main_build" \
+  SELF_STAGE_INSTALL="$PWD/_llvm_current_stage2_install" \
+    tools/build-llvm-self-stage-install.sh
+  ```
+- Stage1 and stage2 both built successfully.  Wrapper summaries:
+  stage1 boot 1678 wrapper lines / 825 fresh IR, runtime 148 / 74, main
+  2228 / 1104; stage2 boot 1678 / 828, runtime 148 / 74, main 2228 / 1103.
+  The script's final smoke test printed `55` for both stages.
+- Ran the self-stage2 suite with:
+  ```sh
+  SELF_STAGE=2 \
+  STAGE_INSTALL="$PWD/_llvm_current_stage2_install" \
+  STAGE_BUILD="$PWD/_llvm_current_stage2_main_build" \
+  NORMAL_RUNTIME_DIR="$PWD/_build/runtime_stdlib/runtime" \
+  FAKE_ROOT="$PWD/_llvm_current_stage2_ocamltest_src" \
+  LIST="$PWD/_llvm_current_stage2_all_minus_asm_list.txt" \
+  LLVM_WRAPPER="$PWD/tools/llvm-rs4gc-llc-wrapper.sh" \
+    tools/run-llvm-stage5-ocamltest.sh
+  ```
+- Result: 6778 passed, 301 skipped, 0 failed, 0 not started, 0 unexpected
+  errors, 7079 considered.  The self-stage2 test wrapper reported 6719
+  wrapper lines and 3361 fresh IR inputs.
+- Important pass signals in the streamed self-stage2 output included the AMD64
+  LLVM codegen, GC-root, stack-check, stack-growth, trap-recovery, native CFI
+  stepping, dynlink, runtime-events, statmemprof callback, weak/ephemeron/
+  finalizer, local/stack allocation, layout/C-API, SIMD vector-array,
+  unboxed return, and unboxed primitive argument tests.
+- This re-clears the self-stage2 build and self-stage2 all-minus-asm suite
+  gates for the current commit.  The runner excluded `tests/asmgen` and
+  `tests/asmcomp`, matching the `all_minus_asm` list used for this LLVM
+  validation pass.  Remaining project work is performance: rerun/report the
+  benchmark suite against native and continue investigating the largest LLVM
+  slowdowns from generated code evidence.
