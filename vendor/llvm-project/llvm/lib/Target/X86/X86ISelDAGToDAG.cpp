@@ -2049,7 +2049,8 @@ static bool foldMaskedShiftToScaledMask(SelectionDAG &DAG, SDValue N,
 static bool foldMaskAndShiftToScale(SelectionDAG &DAG, SDValue N,
                                     uint64_t Mask,
                                     SDValue Shift, SDValue X,
-                                    X86ISelAddressMode &AM) {
+                                    X86ISelAddressMode &AM,
+                                    bool CanUseFastBEXTR) {
   if (Shift.getOpcode() != ISD::SRL || !Shift.hasOneUse() ||
       !isa<ConstantSDNode>(Shift.getOperand(1)))
     return true;
@@ -2071,6 +2072,7 @@ static bool foldMaskAndShiftToScale(SelectionDAG &DAG, SDValue N,
 
   // Scale the leading zero count down based on the actual size of the value.
   // Also scale it down based on the size of the shift.
+  unsigned OriginalMaskLZ = MaskLZ;
   unsigned ScaleDown = (64 - X.getSimpleValueType().getSizeInBits()) + ShiftAmt;
   if (MaskLZ < ScaleDown)
     return true;
@@ -2095,7 +2097,50 @@ static bool foldMaskAndShiftToScale(SelectionDAG &DAG, SDValue N,
   APInt MaskedHighBits =
     APInt::getHighBitsSet(X.getSimpleValueType().getSizeInBits(), MaskLZ);
   KnownBits Known = DAG.computeKnownBits(X);
-  if (MaskedHighBits != Known.Zero) return true;
+  if (MaskedHighBits != Known.Zero) {
+    // If the mask clears high bits that are not known zero, preserve that
+    // masking by shifting those bits out before the right shift.  This keeps the
+    // address-mode scale fold available for patterns such as:
+    //
+    //   ((x >> 7) & 0x1fffffffffff8)
+    //
+    // which can be selected as:
+    //
+    //   ((x << 8) >> 18) * 8
+    //
+    // and avoids materializing a large 64-bit mask immediate.
+    if (X.getSimpleValueType() != MVT::i64 || ReplacingAnyExtend ||
+        OriginalMaskLZ < ShiftAmt)
+      return true;
+    // Preserve the existing preference for BEXTR on targets where it is known
+    // to be fast.  This fallback is for the non-BEXTR path that would otherwise
+    // materialize the shifted mask as an immediate.
+    if (CanUseFastBEXTR && N.hasOneUse())
+      return true;
+
+    MVT VT = N.getSimpleValueType();
+    SDLoc DL(N);
+    SDValue NewSHLAmt = DAG.getConstant(OriginalMaskLZ - ShiftAmt, DL, MVT::i8);
+    SDValue NewSHL = DAG.getNode(ISD::SHL, DL, VT, X, NewSHLAmt);
+    SDValue NewSRLAmt = DAG.getConstant(OriginalMaskLZ + AMShiftAmt, DL,
+                                        MVT::i8);
+    SDValue NewSRL = DAG.getNode(ISD::SRL, DL, VT, NewSHL, NewSRLAmt);
+    SDValue NewScaleAmt = DAG.getConstant(AMShiftAmt, DL, MVT::i8);
+    SDValue NewScaled = DAG.getNode(ISD::SHL, DL, VT, NewSRL, NewScaleAmt);
+
+    insertDAGNode(DAG, N, NewSHLAmt);
+    insertDAGNode(DAG, N, NewSHL);
+    insertDAGNode(DAG, N, NewSRLAmt);
+    insertDAGNode(DAG, N, NewSRL);
+    insertDAGNode(DAG, N, NewScaleAmt);
+    insertDAGNode(DAG, N, NewScaled);
+    DAG.ReplaceAllUsesWith(N, NewScaled);
+    DAG.RemoveDeadNode(N.getNode());
+
+    AM.Scale = 1 << AMShiftAmt;
+    AM.IndexReg = NewSRL;
+    return false;
+  }
 
   // We've identified a pattern that can be transformed into a single shift
   // and an addressing mode. Make it so.
@@ -2309,7 +2354,8 @@ bool X86DAGToDAGISel::matchAddressRecursively(SDValue N, X86ISelAddressMode &AM,
 
     // Try to fold the mask and shift into the scale, and return false if we
     // succeed.
-    if (!foldMaskAndShiftToScale(*CurDAG, N, Mask, N, X, AM))
+    if (!foldMaskAndShiftToScale(*CurDAG, N, Mask, N, X, AM,
+                                 /*CanUseFastBEXTR=*/false))
       return false;
     break;
   }
@@ -2469,7 +2515,11 @@ bool X86DAGToDAGISel::matchAddressRecursively(SDValue N, X86ISelAddressMode &AM,
         return false;
 
       // Try to fold the mask and shift directly into the scale.
-      if (!foldMaskAndShiftToScale(*CurDAG, N, Mask, Shift, X, AM))
+      bool CanUseFastBEXTR =
+          Subtarget->hasTBM() ||
+          (Subtarget->hasBMI() && Subtarget->hasFastBEXTR());
+      if (!foldMaskAndShiftToScale(*CurDAG, N, Mask, Shift, X, AM,
+                                   CanUseFastBEXTR))
         return false;
 
       // Try to fold the mask and shift into BEXTR and scale.

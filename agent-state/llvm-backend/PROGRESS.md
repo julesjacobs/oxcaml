@@ -1552,3 +1552,46 @@ measurement against the native AMD64 backend.
   shape when the mask needs a `movabsq`, or attack the larger statepoint
   quality issue by reducing call-boundary root spills/reloads and runtime
   register shuffles while preserving the no-frontend-roots model.
+
+2026-06-28 X86 target-side OCaml header-mask address fold:
+
+- Implemented the target-side part of the string-header code-shape cleanup in
+  `llvm/lib/Target/X86/X86ISelDAGToDAG.cpp`.  When X86 sees a shifted
+  contiguous mask such as `((x >> 7) & 0x1fffffffffff8)` and cannot prove the
+  masked high bits are already zero, it can now preserve those semantics with a
+  left shift followed by a right shift, then use the addressing-mode scale
+  instead of materializing a large 64-bit mask immediate.  The motivating OCaml
+  string-header case now selects as:
+  ```asm
+  shlq $8, %rsi
+  shrq $18, %rsi
+  movzbl -1(%rdi,%rsi,8), %eax
+  ```
+  rather than `shrq $7; movabsq $562949953421304; andq`.
+- Added `llvm/test/CodeGen/X86/oxcaml-header-mask-addressing.ll` to lock this
+  addressing form down, including a case where the masked value is also used
+  outside the address computation so normal DAG uses remain scaled while the
+  addressing-mode index uses the unscaled value.
+- Code review found that the first version preempted the existing BEXTR fold
+  on targets where BEXTR is fast.  The final version preserves that behavior
+  for the single-use case, and the test now checks `-mcpu=znver1` still selects
+  `bextrq` while the multi-use case still takes the shift/address-scale path.
+- Validation run:
+  ```sh
+  cmake --build _build/llvm-tools --target llc -- -j8
+  _build/llvm-tools/bin/llc < vendor/llvm-project/llvm/test/CodeGen/X86/oxcaml-header-mask-addressing.ll -mtriple=x86_64-unknown-linux-gnu | _build/llvm-tools/bin/FileCheck vendor/llvm-project/llvm/test/CodeGen/X86/oxcaml-header-mask-addressing.ll
+  _build/llvm-tools/bin/llc < vendor/llvm-project/llvm/test/CodeGen/X86/oxcaml-header-mask-addressing.ll -mtriple=x86_64-unknown-linux-gnu -mcpu=znver1 | _build/llvm-tools/bin/FileCheck vendor/llvm-project/llvm/test/CodeGen/X86/oxcaml-header-mask-addressing.ll --check-prefix=BEXTR
+  _build/llvm-tools/bin/llc < vendor/llvm-project/llvm/test/CodeGen/X86/fold-and-shift.ll -mtriple=i686-- | _build/llvm-tools/bin/FileCheck vendor/llvm-project/llvm/test/CodeGen/X86/fold-and-shift.ll
+  _build/llvm-tools/bin/llc < vendor/llvm-project/llvm/test/CodeGen/X86/shift-mask.ll -mtriple=x86_64-pc-linux | _build/llvm-tools/bin/FileCheck vendor/llvm-project/llvm/test/CodeGen/X86/shift-mask.ll --check-prefixes=X64,X64-MASK
+  _build/llvm-tools/bin/llc < vendor/llvm-project/llvm/test/CodeGen/X86/shift-mask.ll -mtriple=x86_64-pc-linux -mattr=+fast-scalar-shift-masks | _build/llvm-tools/bin/FileCheck vendor/llvm-project/llvm/test/CodeGen/X86/shift-mask.ll --check-prefixes=X64,X64-SHIFT,X64-SHIFT2
+  ```
+- Also recompiled and ran focused normal-path OxCaml checks with the rebuilt
+  `llc`: `testsuite/tests/llvm-codegen/string_compare_correctness.ml` printed
+  `OK`, and `testsuite/tests/llvm-gc-roots/live_values_roots.ml` printed `ok`
+  with `OCAMLRUNPARAM='s=64k,o=1,O=1'`.
+- Rerunning the loop-invariant microbench after the semantic fix showed:
+  `loop_invariant_int_across_call` native 0.068184s, LLVM 0.058621s,
+  0.8597x; `loop_invariant_gc_across_call` native 0.069402s, LLVM 0.111809s,
+  1.6110x.  This confirms the header-mask code shape is fixed, but the largest
+  slowdown remains the statepoint call-boundary quality issue: extra live-value
+  spills/reloads and runtime-register shuffles around calls.
