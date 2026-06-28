@@ -47,6 +47,7 @@
 #include "llvm/Support/MachineValueType.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
+#include "llvm/TargetParser/Triple.h"
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -107,6 +108,12 @@ cl::opt<bool> OxCamlStatepointInPlaceCalls(
              "values live across land in register-allocator spill slots, "
              "which the statepoint operands fold to and the frametable "
              "lists. C calls and invokes keep the spilling scheme."));
+
+static cl::opt<unsigned> OxCamlX86InPlaceMaxGCRoots(
+    "oxcaml-x86-statepoint-inplace-max-gc-roots", cl::Hidden, cl::init(2),
+    cl::desc("Maximum number of unique GC roots for which x86 OxCaml ordinary "
+             "calls use in-place statepoint lowering. Larger statepoints keep "
+             "the spill-slot lowering to avoid AMD64 register-pressure cliffs."));
 
 typedef FunctionLoweringInfo::StatepointRelocationRecord RecordType;
 
@@ -651,16 +658,30 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
   // through the exnroot machinery (RS4GC's handler-value demotion),
   // which is independent of how the statepoint's own gc operands are
   // lowered.
+  const auto TargetArch =
+      Builder.DAG.getTarget().getTargetTriple().getArch();
   const bool IsX86Target =
-      Builder.DAG.getTarget().getTargetTriple().isX86();
+      TargetArch == Triple::x86 || TargetArch == Triple::x86_64;
+  const bool IsX86_64Target = TargetArch == Triple::x86_64;
+  auto getUniqueGCRootCount = [&]() {
+    SmallPtrSet<const Value *, 16> Roots;
+    for (const Value *V : SI.Ptrs)
+      Roots.insert(V);
+    for (const Value *V : SI.Bases)
+      Roots.insert(V);
+    return Roots.size();
+  };
   // AArch64 has enough GPR headroom for OxCaml statepoints to leave all live
   // roots in place and let RA choose register or spill-slot locations. AMD64
   // has far fewer allocatable GPRs; large calls and stack-check/realloc
-  // statepoints can otherwise require more simultaneous register roots than the
-  // target can allocate. Keep x86 on the existing spill-slot lowering until
-  // this is replaced with a target root-budget policy.
+  // statepoints can otherwise create sharp register-pressure cliffs. Let AMD64
+  // use the same in-place semantics only for small root sets, and keep x86
+  // spill-slot lowering for larger statepoints and all 32-bit x86 statepoints.
   const bool InPlaceOrdinaryOxCamlCalls =
-      OxCamlStatepointInPlaceCalls && !IsX86Target;
+      OxCamlStatepointInPlaceCalls &&
+      (!IsX86Target || (IsX86_64Target &&
+                        getUniqueGCRootCount() <=
+                            OxCamlX86InPlaceMaxGCRoots));
   const bool InPlaceAllocOxCamlCalls =
       OxCamlStatepointInPlace && !IsX86Target;
   bool InPlaceCC =

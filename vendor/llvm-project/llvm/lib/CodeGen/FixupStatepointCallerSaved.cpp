@@ -30,6 +30,8 @@
 #include "llvm/IR/Statepoint.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Target/TargetMachine.h"
+#include "llvm/TargetParser/Triple.h"
 
 using namespace llvm;
 
@@ -618,7 +620,17 @@ public:
     // of these statepoints into a stack slot; the frame table can then
     // describe it. A no-op under spill lowering (no register operands
     // survive ISel there); load-bearing under in-place lowering.
+    //
+    // AMD64 OxCaml_WithFP calls also need this with in-place lowering:
+    // %rbp is preserved by the with-frame-pointers convention, but ordinary
+    // call frames cannot update a caller root left in that register. AArch64
+    // has no allocatable preserved integer root register in the corresponding
+    // convention, so it does not need this target-specific guard.
+    bool IsX86OrdinaryOxCamlCall =
+        MF.getTarget().getTargetTriple().getArch() == Triple::x86_64 &&
+        CC == CallingConv::OxCaml_WithFP;
     bool SpillAllRegOperands =
+        IsX86OrdinaryOxCamlCall ||
         CC == CallingConv::OxCaml_C_Call ||
         CC == CallingConv::OxCaml_C_Call_StackArgs;
     LLVM_DEBUG(dbgs() << "\nMBB " << MI.getParent()->getNumber() << " "

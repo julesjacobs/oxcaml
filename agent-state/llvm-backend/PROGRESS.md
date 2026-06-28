@@ -1342,3 +1342,41 @@ measurement against the native AMD64 backend.
 - Matrix cases: `matmul` was essentially tied at 1.0085x; `matmul_transposed`
   was faster under LLVM at 0.8322x.  Results JSON:
   `agent-state/test-suite-29e4cd/minibench_suite/results.json` (ignored).
+
+2026-06-28 AMD64 small-root in-place statepoint step:
+
+- Investigated the largest current slowdown from the focused loop benchmark,
+  `loop_invariant_gc_across_call` at about 1.6x LLVM/native.  MIR showed the
+  AMD64 path still used the spill-slot statepoint lowering for ordinary calls,
+  while the AArch64 path uses in-place statepoint lowering.
+- Enabled in-place lowering for AMD64 ordinary OxCaml calls only when the
+  statepoint has at most two unique GC roots.  Larger AMD64 statepoints and all
+  32-bit x86 statepoints keep the existing spill-slot lowering to avoid the
+  known AMD64 register-pressure cliff.
+- Added a fixup-pass guard for AMD64 `OxCaml_WithFP` ordinary calls so any
+  statepoint register metadata operands are rewritten to stack slots before
+  frametable emission; this avoids listing `%rbp` as a caller root at ordinary
+  call frames, which the runtime cannot update.
+- Added `CodeGen/X86/oxcaml-small-root-inplace-statepoint.ll` covering:
+  small-root AMD64 default in-place lowering after fixup, forced budget-zero
+  fallback, default 3-root AMD64 fallback, and the 32-bit x86 non-in-place path.
+- Code review: spawned `gpt-5.5` high-reasoning reviewer.  First pass caught
+  an over-broad `isX86()` gate and missing budget coverage; both were fixed.
+  Second pass found no remaining correctness bugs and requested the i386 RUN,
+  which was added.
+- Validation passed:
+  `cmake --build _build/llvm-tools --target llc FileCheck -j 8`;
+  manual FileCheck runs for the X86 default, budget-zero, and i386 RUN lines
+  with `-verify-machineinstrs`; and both existing AArch64 alloc-statepoint
+  FileCheck paths.
+- Focused loop benchmark after the safe fixup change was still a modest perf
+  move, not a complete fix: `loop_invariant_gc_across_call` was about 1.58x
+  LLVM/native versus about 1.61x before.  This is mainly a parity/foundation
+  step; the next perf work should inspect remaining runtime-register and root
+  spill/reload traffic in the hot loop.
+- High-level compiler/testsuite validation is currently blocked before the
+  LLVM backend by a Dune/boot-compiler build-state failure: `make boot-compiler`
+  and `make llvm-test-one DIR=llvm-gc-roots` both fail with broad
+  `ocamldep returned unexpected output` and ocamllex missing-input errors such
+  as `tools/make_opcodes.mll`.  The source files exist in the checkout, so this
+  should be treated as a build-state issue to clear before the next suite run.
