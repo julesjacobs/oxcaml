@@ -1156,3 +1156,18 @@ Next implementation priority:
 - Next gate after committing this cleanup is a clean full normal LLVM suite
   rerun if needed, then self-stage2 build/test under LLVM.  After self-stage2
   passes, collect performance measurements against the native backend.
+
+2026-06-28 committed-state normal LLVM suite rerun:
+
+- Reran the full standard installed-compiler LLVM suite after committing the
+  `not-llvm-backend` predicates for the two native internal-assembler tests:
+  `PATH="$PWD/_build/llvm-tools/bin:$PATH" make -s llvm-test-no-rebuild
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"`.
+- Result: 6809 passed, 314 skipped, 0 failed, 0 unexpected errors.  The two
+  `asmcomp` internal-assembler tests now skip only under LLVM, and the full
+  AMD64 LLVM coverage still passes, including CFI stepping, exception paths, GC
+  roots, stack checks, statmemprof callbacks, layout/C-API tests, local
+  allocation, and weak/ephemeron sections.
+- Next gate is LLVM self-stage2 build/test.  If a self-stage2-only failure
+  appears, reduce it as far as possible and record why the standard
+  `-llvm-backend` compiler does not cover it.
