@@ -1,0 +1,30 @@
+exception E1
+exception E2
+exception E3
+
+let[@inline never] opaque x = Sys.opaque_identity x
+
+let[@inline never] make_closure a0 a1 a2 a3 a4 a5 a6 a7 =
+  fun x ->
+    if x land 1 = 0 then raise_notrace E3;
+    x + a0 + a1 + a2 + a3 + a4 + a5 + a6 + a7
+
+let n = 16_000_000
+
+let run () =
+  let f = opaque (make_closure 1 3 5 7 11 13 17 19) in
+  let acc = ref 0 in
+  for i = 1 to n do
+    acc :=
+      !acc +
+      try
+        try
+          try opaque (f i) with E3 -> i land 3
+        with E2 -> i land 5
+      with E1 -> i land 7
+  done;
+  !acc
+
+let () =
+  let x = run () in
+  if x = 0 then print_endline "bad"
