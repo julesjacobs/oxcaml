@@ -109,12 +109,6 @@ cl::opt<bool> OxCamlStatepointInPlaceCalls(
              "which the statepoint operands fold to and the frametable "
              "lists. C calls and invokes keep the spilling scheme."));
 
-static cl::opt<unsigned> OxCamlX86InPlaceMaxGCRoots(
-    "oxcaml-x86-statepoint-inplace-max-gc-roots", cl::Hidden, cl::init(2),
-    cl::desc("Maximum number of unique GC roots for which x86 OxCaml ordinary "
-             "calls use in-place statepoint lowering. Larger statepoints keep "
-             "the spill-slot lowering to avoid AMD64 register-pressure cliffs."));
-
 typedef FunctionLoweringInfo::StatepointRelocationRecord RecordType;
 
 static SDNode *findCallSeqEnd(SDNode *N, SmallPtrSetImpl<SDNode *> &Seen) {
@@ -658,32 +652,15 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
   // through the exnroot machinery (RS4GC's handler-value demotion),
   // which is independent of how the statepoint's own gc operands are
   // lowered.
-  const auto TargetArch =
-      Builder.DAG.getTarget().getTargetTriple().getArch();
-  const bool IsX86Target =
-      TargetArch == Triple::x86 || TargetArch == Triple::x86_64;
-  const bool IsX86_64Target = TargetArch == Triple::x86_64;
-  auto getUniqueGCRootCount = [&]() {
-    SmallPtrSet<const Value *, 16> Roots;
-    for (const Value *V : SI.Ptrs)
-      Roots.insert(V);
-    for (const Value *V : SI.Bases)
-      Roots.insert(V);
-    return Roots.size();
-  };
-  // AArch64 has enough GPR headroom for OxCaml statepoints to leave all live
-  // roots in place and let RA choose register or spill-slot locations. AMD64
-  // has far fewer allocatable GPRs; large calls and stack-check/realloc
-  // statepoints can otherwise create sharp register-pressure cliffs. Let AMD64
-  // use the same in-place semantics only for small root sets, and keep x86
-  // spill-slot lowering for larger statepoints and all 32-bit x86 statepoints.
+  const bool IsX86_32Target =
+      Builder.DAG.getTarget().getTargetTriple().getArch() == Triple::x86;
+  // 32-bit x86 is not part of the OxCaml AMD64 backend work. Keep it on the
+  // conservative spill-slot path while AMD64 follows the same in-place
+  // statepoint policy as AArch64.
   const bool InPlaceOrdinaryOxCamlCalls =
-      OxCamlStatepointInPlaceCalls &&
-      (!IsX86Target || (IsX86_64Target &&
-                        getUniqueGCRootCount() <=
-                            OxCamlX86InPlaceMaxGCRoots));
+      OxCamlStatepointInPlaceCalls && !IsX86_32Target;
   const bool InPlaceAllocOxCamlCalls =
-      OxCamlStatepointInPlace && !IsX86Target;
+      OxCamlStatepointInPlace && !IsX86_32Target;
   bool InPlaceCC =
       SI.CLI.CallConv == CallingConv::OxCaml_Alloc
           ? InPlaceAllocOxCamlCalls

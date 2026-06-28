@@ -1638,3 +1638,50 @@ measurement against the native AMD64 backend.
   1.6110x.  This confirms the header-mask code shape is fixed, but the largest
   slowdown remains the statepoint call-boundary quality issue: extra live-value
   spills/reloads and runtime-register shuffles around calls.
+
+2026-06-28 AMD64 in-place statepoint policy:
+
+- Removed the AMD64-only root-count cap and the AMD64 exclusion for
+  alloc-family in-place statepoint lowering in
+  `llvm/lib/CodeGen/SelectionDAG/StatepointLowering.cpp`.  AMD64 now follows
+  the same in-place statepoint policy as AArch64 for ordinary OxCaml calls and
+  alloc-family calls.  32-bit x86 remains on the conservative spill-slot path,
+  since it is outside the AMD64 backend parity goal.
+- Updated `llvm/test/CodeGen/X86/oxcaml-small-root-inplace-statepoint.ll`:
+  removed the deleted `-oxcaml-x86-statepoint-inplace-max-gc-roots` coverage,
+  checked that large AMD64 ordinary-call root sets no longer fall back to the
+  volatile pool-spill path, added AMD64 alloc-family in-place coverage, and
+  kept 32-bit x86 spill-slot coverage.
+- MIR investigation of `loop_invariant_gc_across_call` shows the remaining hot
+  store is a post-register-allocation store to a listed RA spill/root slot
+  immediately before each ordinary-call statepoint.  The root slot is reloaded
+  after the statepoint and can often be reused on the loop backedge, so the next
+  performance target is a correctness-preserving stable-root-slot/hoisting
+  optimization rather than frontend roots or a second GC mechanism.
+- Validation run:
+  ```sh
+  cmake --build _build/llvm-tools --target llc FileCheck -- -j8
+  _build/llvm-tools/bin/llc -mtriple=x86_64-unknown-linux-gnu -stop-after=fixup-statepoint-caller-saved -o - vendor/llvm-project/llvm/test/CodeGen/X86/oxcaml-small-root-inplace-statepoint.ll | _build/llvm-tools/bin/FileCheck --check-prefix=DEFAULT vendor/llvm-project/llvm/test/CodeGen/X86/oxcaml-small-root-inplace-statepoint.ll
+  _build/llvm-tools/bin/llc -mtriple=i386-unknown-linux-gnu -verify-machineinstrs -stop-after=finalize-isel -o - vendor/llvm-project/llvm/test/CodeGen/X86/oxcaml-small-root-inplace-statepoint.ll | _build/llvm-tools/bin/FileCheck --check-prefix=I386 vendor/llvm-project/llvm/test/CodeGen/X86/oxcaml-small-root-inplace-statepoint.ll
+  _build/llvm-tools/bin/llc -mtriple=x86_64-unknown-linux-gnu -verify-machineinstrs -stop-after=finalize-isel < vendor/llvm-project/llvm/test/CodeGen/X86/oxcaml-native-trap-intrinsics.ll | _build/llvm-tools/bin/FileCheck vendor/llvm-project/llvm/test/CodeGen/X86/oxcaml-native-trap-intrinsics.ll --check-prefix=MIR
+  _build/llvm-tools/bin/llc -mtriple=x86_64-unknown-linux-gnu -verify-machineinstrs < vendor/llvm-project/llvm/test/CodeGen/X86/oxcaml-native-trap-intrinsics.ll | _build/llvm-tools/bin/FileCheck vendor/llvm-project/llvm/test/CodeGen/X86/oxcaml-native-trap-intrinsics.ll --check-prefix=ASM
+  _build/llvm-tools/bin/llc -O3 --relocation-model=pic --frame-pointer=all -verify-machineinstrs /tmp/loop-gc-rs4gc.ll -o /tmp/loop-gc-after-policy.s
+  ```
+- Focused installed-compiler checks through
+  `tools/llvm-rs4gc-llc-wrapper.sh` passed:
+  `testsuite/tests/llvm-codegen/string_compare_correctness.ml` printed `OK`;
+  `testsuite/tests/llvm-gc-roots/live_values_roots.ml` printed `ok` under
+  `OCAML_TEST_SIZE=2 OCAMLRUNPARAM='s=64k,o=1,O=1'`; and the
+  `stack_growth_amd64.sh` and `allocation_frametable.sh` tests passed from
+  temporary directories.
+- Code review by the gpt-5.5-high review agent found no lowering-code blocker
+  and one test weakness: the large ordinary-call FileCheck could still match
+  the old volatile fallback.  Tightened that check to require the non-volatile
+  in-place/fixup stack-root memoperand shape, then reran the X86 checks plus
+  `-oxcaml-gc-root-verifier=1 -oxcaml-gc-root-verifier-fatal=1` for x86_64 and
+  i386.
+- Final loop-invariant microbench sample after rebuilding `llc`:
+  `loop_invariant_int_across_call` native 0.0687s, LLVM 0.0625s, ratio 0.9097x;
+  `loop_invariant_gc_across_call` native 0.0700s, LLVM 0.1029s, ratio 1.4704x.
+  This change improves AMD64 mechanism parity, but the remaining largest
+  slowdown is still the ordinary-call root-slot store/reload issue.
