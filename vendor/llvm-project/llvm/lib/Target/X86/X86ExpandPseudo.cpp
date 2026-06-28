@@ -418,6 +418,7 @@ void X86ExpandPseudo::expandOXCAML_PUSH_TRAP(
   MachineInstr &MI = *MBBI;
   const DebugLoc &DL = MI.getDebugLoc();
   MachineBasicBlock *RecoveryMBB = MI.getOperand(0).getMBB();
+  Register DomainState = MI.getOperand(1).getReg();
   bool NeedsTrapCFI = useOxCamlRspBasedCFI(*MBB.getParent());
 
   BuildMI(MBB, MBBI, DL, TII->get(X86::LEA64r), X86::R11)
@@ -429,11 +430,11 @@ void X86ExpandPseudo::expandOXCAML_PUSH_TRAP(
   BuildMI(MBB, MBBI, DL, TII->get(X86::PUSH64r)).addReg(X86::R11);
   if (NeedsTrapCFI)
     buildCFIAdjustCfaOffset(MBB, MBBI, DL, TII, 8);
-  addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::PUSH64rmm)), X86::R14,
+  addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::PUSH64rmm)), DomainState,
                false, OxCamlDomainExnHandlerOffset);
   if (NeedsTrapCFI)
     buildCFIAdjustCfaOffset(MBB, MBBI, DL, TII, 8);
-  addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::MOV64mr)), X86::R14,
+  addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::MOV64mr)), DomainState,
                false, OxCamlDomainExnHandlerOffset)
       .addReg(X86::RSP);
 
@@ -444,16 +445,17 @@ void X86ExpandPseudo::expandOXCAML_PUSH_TRAP_DEAD(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI) {
   MachineInstr &MI = *MBBI;
   const DebugLoc &DL = MI.getDebugLoc();
+  Register DomainState = MI.getOperand(0).getReg();
   bool NeedsTrapCFI = useOxCamlRspBasedCFI(*MBB.getParent());
 
   BuildMI(MBB, MBBI, DL, TII->get(X86::PUSH64i8)).addImm(0);
   if (NeedsTrapCFI)
     buildCFIAdjustCfaOffset(MBB, MBBI, DL, TII, 8);
-  addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::PUSH64rmm)), X86::R14,
+  addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::PUSH64rmm)), DomainState,
                false, OxCamlDomainExnHandlerOffset);
   if (NeedsTrapCFI)
     buildCFIAdjustCfaOffset(MBB, MBBI, DL, TII, 8);
-  addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::MOV64mr)), X86::R14,
+  addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::MOV64mr)), DomainState,
                false, OxCamlDomainExnHandlerOffset)
       .addReg(X86::RSP);
 
@@ -485,9 +487,10 @@ void X86ExpandPseudo::expandOXCAML_POP_TRAP(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI) {
   MachineInstr &MI = *MBBI;
   const DebugLoc &DL = MI.getDebugLoc();
+  Register DomainState = MI.getOperand(0).getReg();
   bool NeedsTrapCFI = useOxCamlRspBasedCFI(*MBB.getParent());
 
-  addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::POP64rmm)), X86::R14,
+  addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::POP64rmm)), DomainState,
                false, OxCamlDomainExnHandlerOffset);
   if (NeedsTrapCFI)
     buildCFIAdjustCfaOffset(MBB, MBBI, DL, TII, -8);

@@ -3107,6 +3107,7 @@ static bool isUnsupportedNestedOxCamlRecoveryInstruction(Instruction &I) {
   switch (II->getIntrinsicID()) {
   case Intrinsic::aarch64_oxcaml_push_trap:
   case Intrinsic::x86_oxcaml_push_trap:
+  case Intrinsic::x86_oxcaml_push_trap_with_domain:
     return true;
   default:
     return false;

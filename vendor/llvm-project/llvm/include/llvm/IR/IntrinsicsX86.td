@@ -33,15 +33,31 @@ let TargetPrefix = "x86" in {
                    IntrNoDuplicate, IntrNoMerge, IntrWillReturn,
                    IntrNoCallback, IntrNoFree]>;
 
-  // OxCaml native-shaped trap frame push/pop.  The push argument is a
-  // blockaddress for the runtime-entered recovery block stored in the trap
-  // frame alongside the previous Caml_state->exn_handler.
+  // Legacy OxCaml native-shaped trap frame push/pop, kept so an existing
+  // installed compiler can bootstrap this source tree.  These use the
+  // historical hidden physical r14 dependency and therefore force R14/R15 to
+  // stay reserved in any function that contains them.
   def int_x86_oxcaml_push_trap
       : Intrinsic<[], [llvm_ptr_ty],
                   [IntrHasSideEffects, IntrConvergent, IntrNoDuplicate,
                    IntrNoMerge, IntrWillReturn, IntrNoCallback, IntrNoFree]>;
   def int_x86_oxcaml_pop_trap
       : Intrinsic<[], [],
+                  [IntrHasSideEffects, IntrConvergent, IntrNoDuplicate,
+                   IntrNoMerge, IntrWillReturn, IntrNoCallback, IntrNoFree]>;
+
+  // Explicit-domain trap push/pop for the normal AMD64 path.  The push
+  // arguments are the runtime-entered recovery block stored in the trap frame
+  // and the current domain-state pointer.  The pop argument is the current
+  // domain-state pointer.  AMD64 trap links live in Caml_state->exn_handler,
+  // so model this dependency explicitly instead of relying on a hidden
+  // physical r14 use.
+  def int_x86_oxcaml_push_trap_with_domain
+      : Intrinsic<[], [llvm_ptr_ty, llvm_i64_ty],
+                  [IntrHasSideEffects, IntrConvergent, IntrNoDuplicate,
+                   IntrNoMerge, IntrWillReturn, IntrNoCallback, IntrNoFree]>;
+  def int_x86_oxcaml_pop_trap_with_domain
+      : Intrinsic<[], [llvm_i64_ty],
                   [IntrHasSideEffects, IntrConvergent, IntrNoDuplicate,
                    IntrNoMerge, IntrWillReturn, IntrNoCallback, IntrNoFree]>;
 

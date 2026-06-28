@@ -4888,7 +4888,8 @@ void SelectionDAGBuilder::visitAtomicStore(const StoreInst &I) {
 void SelectionDAGBuilder::visitTargetIntrinsic(const CallInst &I,
                                                unsigned Intrinsic) {
   if (Intrinsic == llvm::Intrinsic::aarch64_oxcaml_push_trap ||
-      Intrinsic == llvm::Intrinsic::x86_oxcaml_push_trap) {
+      Intrinsic == llvm::Intrinsic::x86_oxcaml_push_trap ||
+      Intrinsic == llvm::Intrinsic::x86_oxcaml_push_trap_with_domain) {
     const Value *RecoveryTarget = I.getArgOperand(0);
     MachineBasicBlock *RecoveryMBB = nullptr;
     bool DeletedRecoveryTarget = false;
@@ -4897,13 +4898,9 @@ void SelectionDAGBuilder::visitTargetIntrinsic(const CallInst &I,
       if (!RecoveryMBB)
         report_fatal_error("missing machine block for OxCaml trap recovery");
       if (!RecoveryMBB->isRuntimeEntered()) {
-        BasicBlock *RecoveryBB = BA->getBasicBlock();
-        if (isOxCamlTrapRecoveryPad(*FuncInfo.Fn, *RecoveryBB) ||
-            isOxCamlTrapRecoveryContinuation(*FuncInfo.Fn, *RecoveryBB)) {
-          RecoveryMBB->setIsRuntimeEntered();
-          RecoveryMBB->setMachineBlockAddressTaken();
-          RecoveryMBB->setLabelMustBeEmitted();
-        }
+        RecoveryMBB->setIsRuntimeEntered();
+        RecoveryMBB->setMachineBlockAddressTaken();
+        RecoveryMBB->setLabelMustBeEmitted();
       }
     } else if (match(RecoveryTarget, m_IntToPtr(m_SpecificInt(1)))) {
       // LLVM rewrites blockaddresses to inttoptr(1) when it deletes an
@@ -4931,6 +4928,8 @@ void SelectionDAGBuilder::visitTargetIntrinsic(const CallInst &I,
                                           TLI.getPointerTy(DAG.getDataLayout())));
     else
       Ops.push_back(DAG.getBasicBlock(RecoveryMBB));
+    if (Intrinsic == llvm::Intrinsic::x86_oxcaml_push_trap_with_domain)
+      Ops.push_back(getValue(I.getArgOperand(1)));
     SDVTList VTs = DAG.getVTList(ArrayRef<EVT>({MVT::Other}));
     SDValue Result =
         DAG.getNode(ISD::INTRINSIC_VOID, getCurSDLoc(), VTs, Ops);

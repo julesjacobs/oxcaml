@@ -6534,7 +6534,9 @@ let emit_x86_pushtrap t (i : Cfg.basic Cfg.instruction) lbl_handler =
   let recovery_target =
     V.blockaddress ~func:fun_ident ~block:(V.get_ident_exn exn_entry)
   in
-  call_llvm_intrinsic_no_res t "x86.oxcaml.push.trap" [recovery_target];
+  let ds = emit_ins t (I.load ~ptr:domainstate_ptr ~typ:T.i64) in
+  call_llvm_intrinsic_no_res t "x86.oxcaml.push.trap.with.domain"
+    [recovery_target; ds];
   emit_ins_no_res t (I.br try_label);
   emit_label t exn_entry;
   ignore (emit_ins t (I.landingpad ~typ:T._token ~cleanup:true));
@@ -6935,7 +6937,8 @@ let emit_basic t (i : Cfg.basic Cfg.instruction) =
           | Target_system.X86_64 ->
             ignore trap_block;
             ignore stacksave_ptr;
-            call_llvm_intrinsic_no_res t "x86.oxcaml.pop.trap" []
+            let ds = emit_ins t (I.load ~ptr:domainstate_ptr ~typ:T.i64) in
+            call_llvm_intrinsic_no_res t "x86.oxcaml.pop.trap.with.domain" [ds]
           | Target_system.IA32 | Target_system.ARM | Target_system.POWER
           | Target_system.Z | Target_system.Riscv ->
             fail_msg ~name:"poptrap" "unsupported architecture for LLVM backend"

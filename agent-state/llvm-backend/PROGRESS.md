@@ -218,6 +218,49 @@ Validation after clearing stale dune boot-context state
 - `make -s llvm-test-one-no-rebuild LLVM_PATH="$PWD/llvm-tool-wrapper.sh" \
   TEST=testsuite/tests/typing-layouts-or-null/atomics.ml` passed: 5 passed.
 
+2026-06-28 AMD64 trap runtime-register progress on
+`jujacobs/llvm-x86-plan`: moved normal X86 push/pop trap lowering off the
+hidden physical `r14` dependency and onto explicit domain-state operands.
+`backend/llvm/llvmize.ml` now emits
+`llvm.x86.oxcaml.push.trap.with.domain` and
+`llvm.x86.oxcaml.pop.trap.with.domain`; vendored LLVM keeps the legacy
+hidden-`r14` trap intrinsics only for bootstrapping existing installed
+compilers. The X86 trap pseudos now carry a `GR64PLTSafe` domain operand,
+their expansion reads/writes `Caml_state->exn_handler` through that operand,
+and R14/R15 are only reserved for functions that still contain the legacy X86
+trap intrinsics. Shared trap-recovery utilities and RS4GC nested-recovery
+checks now classify the explicit-domain X86 push intrinsic the same way as the
+legacy push.
+
+Code review was run twice with a `gpt-5.5` high agent. The first review found
+two blockers: the new push intrinsic was missing from shared trap-publish
+classification, and the domain operand could self-clobber if allocated to
+`r11`. Both were fixed before commit; the follow-up review reported no
+remaining commit blockers.
+
+Validation:
+
+- `cmake --build _build/llvm-tools --target llc opt FileCheck -- -j8` passed.
+- Direct `llc -verify-machineinstrs` + `FileCheck` checks for
+  `vendor/llvm-project/llvm/test/CodeGen/X86/oxcaml-native-trap-intrinsics.ll`
+  passed. The test now checks that invokes unwind directly to the
+  runtime-entered recovery block and that the trap domain operand is
+  `gr64pltsafe`.
+- Direct installed-compiler focused checks passed:
+  `testsuite/tests/llvm-codegen/string_compare_correctness.ml` and
+  `testsuite/tests/llvm-gc-roots/live_values_roots.ml`
+  (`OCAML_TEST_SIZE=2`, `OCAMLRUNPARAM='s=64k,o=1,O=1'`).
+- Hot-loop assembly from
+  `agent-state/test-suite-29e4cd/loop_invariant_microbench/inspect/loop_invariant_gc_across_call.asm.llvm.ll`
+  no longer has R14/R15 shadow-copy traffic around managed calls; remaining
+  `%r14` uses are stack checks.
+- After clearing stale Dune contexts while preserving `_build/llvm-tools`,
+  `make -s llvm-compiler LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"`
+  passed from a clean Dune state. Keep `_install` coherent with the Dune boot
+  context before incremental `llvm-compiler` reruns; rewriting `_install` from
+  `_build/install/main` after a build can make existing `_build/default`
+  objects inconsistent over `CamlinternalQuote`.
+
 2026-06-27 AMD64 CFI/exception unwinding fix in progress on
 `jujacobs/llvm-x86-plan`:
 

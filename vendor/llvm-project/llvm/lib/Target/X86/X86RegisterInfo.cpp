@@ -30,6 +30,8 @@
 #include "llvm/CodeGen/VirtRegMap.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/IntrinsicsX86.h"
 #include "llvm/IR/Type.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -53,6 +55,27 @@ static bool isOxCamlCallingConv(CallingConv::ID CC) {
   default:
     return false;
   }
+}
+
+static bool hasLegacyOxCamlTrapIntrinsic(const Function &F) {
+  for (const BasicBlock &BB : F) {
+    for (const Instruction &I : BB) {
+      const auto *CB = dyn_cast<CallBase>(&I);
+      if (!CB)
+        continue;
+      const Function *Callee = CB->getCalledFunction();
+      if (!Callee)
+        continue;
+      switch (Callee->getIntrinsicID()) {
+      case Intrinsic::x86_oxcaml_push_trap:
+      case Intrinsic::x86_oxcaml_pop_trap:
+        return true;
+      default:
+        break;
+      }
+    }
+  }
+  return false;
 }
 
 static cl::opt<bool>
@@ -611,7 +634,8 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   for (const MCPhysReg &SubReg : subregs_inclusive(X86::RIP))
     Reserved.set(SubReg);
 
-  if (isOxCamlCallingConv(MF.getFunction().getCallingConv())) {
+  if (isOxCamlCallingConv(MF.getFunction().getCallingConv()) &&
+      hasLegacyOxCamlTrapIntrinsic(MF.getFunction())) {
     for (const MCPhysReg &SubReg : subregs_inclusive(X86::R14))
       Reserved.set(SubReg);
     for (const MCPhysReg &SubReg : subregs_inclusive(X86::R15))

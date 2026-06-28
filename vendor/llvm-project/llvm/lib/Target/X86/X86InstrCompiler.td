@@ -43,15 +43,18 @@ def OXCAML_RELOCATE : I<0, Pseudo, (outs GR64:$dst), (ins GR64:$src),
 
 let hasSideEffects = 1, mayLoad = 1, mayStore = 1, isCodeGenOnly = 1,
     isPseudo = 1,
-    Uses = [RSP, R14], Defs = [RSP, R11] in
-def OXCAML_PUSH_TRAP : I<0, Pseudo, (outs), (ins brtarget:$recovery_target),
+    Uses = [RSP], Defs = [RSP, R11] in
+def OXCAML_PUSH_TRAP : I<0, Pseudo, (outs),
+                         (ins brtarget:$recovery_target,
+                              GR64PLTSafe:$domain_state),
                          "# OXCAML_PUSH_TRAP", []>,
                        Requires<[In64BitMode]>, Sched<[WriteStore]>;
 
 let hasSideEffects = 1, mayLoad = 1, mayStore = 1, isCodeGenOnly = 1,
     isPseudo = 1,
-    Uses = [RSP, R14], Defs = [RSP] in
-def OXCAML_PUSH_TRAP_DEAD : I<0, Pseudo, (outs), (ins),
+    Uses = [RSP], Defs = [RSP] in
+def OXCAML_PUSH_TRAP_DEAD : I<0, Pseudo, (outs),
+                              (ins GR64PLTSafe:$domain_state),
                               "# OXCAML_PUSH_TRAP_DEAD", []>,
                             Requires<[In64BitMode]>, Sched<[WriteStore]>;
 
@@ -64,8 +67,8 @@ def OXCAML_TRAP_RECOVER : I<0, Pseudo, (outs), (ins i32imm:$outer_trap_bytes),
 
 let hasSideEffects = 1, mayLoad = 1, mayStore = 1, isCodeGenOnly = 1,
     isPseudo = 1,
-    Uses = [RSP, R14], Defs = [RSP, R11] in
-def OXCAML_POP_TRAP : I<0, Pseudo, (outs), (ins),
+    Uses = [RSP], Defs = [RSP, R11] in
+def OXCAML_POP_TRAP : I<0, Pseudo, (outs), (ins GR64PLTSafe:$domain_state),
                         "# OXCAML_POP_TRAP", []>,
                       Requires<[In64BitMode]>, Sched<[WriteLoad]>;
 

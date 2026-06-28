@@ -4934,15 +4934,54 @@ void X86DAGToDAGISel::Select(SDNode *Node) {
     case Intrinsic::x86_oxcaml_push_trap: {
       SDValue Chain = Node->getOperand(0);
       SDValue RecoveryTarget = Node->getOperand(2);
+      SDValue DomainState = CurDAG->getRegister(X86::R14, MVT::i64);
+      MachineBasicBlock *RecoveryMBB = nullptr;
       if (auto *RecoveryBB = dyn_cast<BasicBlockSDNode>(RecoveryTarget)) {
-        SDValue Ops[] = {CurDAG->getBasicBlock(RecoveryBB->getBasicBlock()),
+        RecoveryMBB = RecoveryBB->getBasicBlock();
+      } else if (auto *RecoveryBA =
+                     dyn_cast<BlockAddressSDNode>(RecoveryTarget)) {
+        const BlockAddress *BA = RecoveryBA->getBlockAddress();
+        if (BA->getFunction() == &MF->getFunction())
+          RecoveryMBB = FuncInfo->MBBMap[BA->getBasicBlock()];
+      }
+      if (RecoveryMBB) {
+        SDValue Ops[] = {CurDAG->getBasicBlock(RecoveryMBB), DomainState,
                          Chain};
         CurDAG->SelectNodeTo(Node, X86::OXCAML_PUSH_TRAP, MVT::Other, Ops);
         return;
       }
       if (auto *DeadTarget = dyn_cast<ConstantSDNode>(RecoveryTarget);
           DeadTarget && DeadTarget->isZero()) {
-        SDValue Ops[] = {Chain};
+        SDValue Ops[] = {DomainState, Chain};
+        CurDAG->SelectNodeTo(Node, X86::OXCAML_PUSH_TRAP_DEAD, MVT::Other, Ops);
+        return;
+      }
+      report_fatal_error(
+          "OxCaml push trap recovery target must be a machine basic block");
+      return;
+    }
+    case Intrinsic::x86_oxcaml_push_trap_with_domain: {
+      SDValue Chain = Node->getOperand(0);
+      SDValue RecoveryTarget = Node->getOperand(2);
+      SDValue DomainState = Node->getOperand(3);
+      MachineBasicBlock *RecoveryMBB = nullptr;
+      if (auto *RecoveryBB = dyn_cast<BasicBlockSDNode>(RecoveryTarget)) {
+        RecoveryMBB = RecoveryBB->getBasicBlock();
+      } else if (auto *RecoveryBA =
+                     dyn_cast<BlockAddressSDNode>(RecoveryTarget)) {
+        const BlockAddress *BA = RecoveryBA->getBlockAddress();
+        if (BA->getFunction() == &MF->getFunction())
+          RecoveryMBB = FuncInfo->MBBMap[BA->getBasicBlock()];
+      }
+      if (RecoveryMBB) {
+        SDValue Ops[] = {CurDAG->getBasicBlock(RecoveryMBB), DomainState,
+                         Chain};
+        CurDAG->SelectNodeTo(Node, X86::OXCAML_PUSH_TRAP, MVT::Other, Ops);
+        return;
+      }
+      if (auto *DeadTarget = dyn_cast<ConstantSDNode>(RecoveryTarget);
+          DeadTarget && DeadTarget->isZero()) {
+        SDValue Ops[] = {DomainState, Chain};
         CurDAG->SelectNodeTo(Node, X86::OXCAML_PUSH_TRAP_DEAD, MVT::Other, Ops);
         return;
       }
@@ -4952,7 +4991,15 @@ void X86DAGToDAGISel::Select(SDNode *Node) {
     }
     case Intrinsic::x86_oxcaml_pop_trap: {
       SDValue Chain = Node->getOperand(0);
-      SDValue Ops[] = {Chain};
+      SDValue DomainState = CurDAG->getRegister(X86::R14, MVT::i64);
+      SDValue Ops[] = {DomainState, Chain};
+      CurDAG->SelectNodeTo(Node, X86::OXCAML_POP_TRAP, MVT::Other, Ops);
+      return;
+    }
+    case Intrinsic::x86_oxcaml_pop_trap_with_domain: {
+      SDValue Chain = Node->getOperand(0);
+      SDValue DomainState = Node->getOperand(2);
+      SDValue Ops[] = {DomainState, Chain};
       CurDAG->SelectNodeTo(Node, X86::OXCAML_POP_TRAP, MVT::Other, Ops);
       return;
     }
