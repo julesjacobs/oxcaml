@@ -1791,3 +1791,14 @@ measurement against the native AMD64 backend.
   does not close the loop-invariant GC benchmark gap; the next step is to
   inspect the final assembly after this hoist and identify the remaining hot
   instructions.
+- Post-hoist assembly comparison found the next likely bottleneck in the module
+  entry hot path, not the standalone `loop_2_6` body.  LLVM emits five unrolled
+  inner loops for the benchmark's five repetitions.  In each inner loop it
+  computes `String.length` with a materialized mask:
+  `movabsq $562949953421304, ...; movq -8(root), ...; shrq $7; andq mask; ...`.
+  Native AMD64 uses the cheaper header-size sequence
+  `movq -8(root), ...; salq $8; shrq $18; leaq -1(,idx,8), ...` and does not
+  materialize the large mask in the loop.  The next implementation target should
+  extend/fix the existing X86 header-mask/addressing combine so it also catches
+  this module-entry scalar/multi-use `String.length` shape before returning to
+  the root-slot work.
