@@ -139,6 +139,7 @@ Clean-native vs no-scalar LLVM-built:
 
 | run | cases | geomean | median | min | max | note |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| 2026-06-28 AMD64 focused archived slow-cases | 9 | 1.0248 | 1.0073 | 0.9456 | 1.1498 | full harness scripts absent in this checkout; same `_install/bin/ocamlopt.opt`, native backend vs `-llvm-backend`, args `100000 100`, 1 warmup + 5 measured samples |
 | Design 1 post-full-validation | 36 | 0.9075 | 1.0143 | 0.2958 | 1.5118 | all reported try cases had `wrap_try_refs=0` |
 | Earlier no-domain-exn-store comparison | 36 | 0.9131 | 0.9965 | 0.2870 | 1.6201 | before removing hot exn-handler stores |
 | No-domain-exn-store | 36 | 0.8861 | 1.0437 | 0.2991 | 1.5784 | previous current run |
@@ -147,6 +148,38 @@ Clean-native vs no-scalar LLVM-built:
 | After stage2 skip | 43 | 0.8902 | 0.9926 | 0.3021 | 1.5471 | all listed current cases had `wrap_try_refs=0` |
 | After undefined-root invariant fix | 43 | 0.8558 | 0.9416 | 0.2994 | 1.4571 | full normal LLVM-backend and self-stage2 passed |
 | After raw heap-address canonicalization | 43 | 0.8144 | 0.9588 | 0.2830 | 1.0702 | full normal LLVM-backend and self-stage2 passed |
+
+2026-06-28 focused AMD64 archived slow-case run:
+
+- Scope: the nine raw cases still present under
+  `agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases`.
+  The historical representative/minibench/compiler-binary harness scripts were
+  not present in this checkout, so this is a focused runtime comparison rather
+  than a full rerun of those harnesses.
+- Command shape: compile every case once with `_install/bin/ocamlopt.opt` for
+  the native backend and once with the same compiler plus `-llvm-backend
+  -llvm-path "$PWD/tools/llvm-rs4gc-llc-wrapper.sh"`.
+- Environment: `eval "$(opam env --switch=oxcaml-5.4.0+oxcaml --set-switch)"`,
+  `DUNE_CACHE=disabled`, `PATH="$PWD/_build/llvm-tools/bin:$PATH"`,
+  `OCAMLLIB="$PWD/_install/lib/ocaml"`.
+- Method: output-checked reduced run, then one warmup plus five measured
+  executions per backend per case.  Runtime args were `100000 100`; `boyer`
+  ignores those args.  Raw JSON was written to
+  `/tmp/oxcaml_llvm_x86_perf_scaled_20260628.json`.
+- Aggregate: geomean 1.0248x, median 1.0073x, min 0.9456x, max 1.1498x,
+  summed median runtime ratio 1.0147x.
+
+| case | native median | LLVM median | LLVM/native |
+| --- | ---: | ---: | ---: |
+| `array_binary_search_string` | 0.244428s | 0.236130s | 0.9661 |
+| `boyer` | 0.120249s | 0.113710s | 0.9456 |
+| `env_find_same_layered_int_key` | 0.168970s | 0.170195s | 1.0073 |
+| `hash_lookup_string_equal` | 0.376616s | 0.397223s | 1.0547 |
+| `layered_try_raise_hit_only` | 0.154397s | 0.169298s | 1.0965 |
+| `string_map_equal_content` | 0.218297s | 0.229885s | 1.0531 |
+| `string_tree_first_byte_diff` | 0.232068s | 0.232431s | 1.0016 |
+| `try_find_miss_rare` | 0.395331s | 0.381912s | 0.9661 |
+| `try_raise_cross_function_caught` | 0.056969s | 0.065501s | 1.1498 |
 
 Worst slowdowns after raw heap-address canonicalization:
 

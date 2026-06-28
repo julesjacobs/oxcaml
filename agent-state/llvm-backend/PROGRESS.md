@@ -1229,3 +1229,33 @@ iarrays with moving-GC coverage, C API layout tests, weak/ephemeron/finalizer
 tests, and unboxed primitive arguments. This clears the requested normal-suite
 and self-stage2 correctness gate for AMD64 LLVM. The next gate is performance
 measurement against the native AMD64 backend.
+
+2026-06-28 focused AMD64 performance gate:
+
+- The historical representative/minibench/compiler-binary benchmark harness
+  scripts referenced by old `agent-state` notes are not present in this
+  checkout.  To still get a current performance signal, reran the nine archived
+  raw slow-case inputs under
+  `agent-state/test-suite-29e4cd/slowdown_vs_native_stage_artifacts_20260608_current/cases`.
+- Comparison was generated-code performance from the same compiler:
+  `_install/bin/ocamlopt.opt` native backend versus the same compiler with
+  `-llvm-backend -llvm-path "$PWD/tools/llvm-rs4gc-llc-wrapper.sh"`.
+- Environment: `eval "$(opam env --switch=oxcaml-5.4.0+oxcaml --set-switch)"`,
+  `DUNE_CACHE=disabled`, `PATH="$PWD/_build/llvm-tools/bin:$PATH"`,
+  `OCAMLLIB="$PWD/_install/lib/ocaml"`.
+- Method: output-checked each pair on a reduced run, then one warmup plus five
+  measured executions per backend.  Runtime args were `100000 100`; `boyer`
+  ignores those args.  Raw JSON is at
+  `/tmp/oxcaml_llvm_x86_perf_scaled_20260628.json`.
+- Result: geomean 1.0248x LLVM/native, median 1.0073x, summed median runtime
+  ratio 1.0147x, min 0.9456x, max 1.1498x.  Slowest cases were
+  `try_raise_cross_function_caught` at 1.1498x,
+  `layered_try_raise_hit_only` at 1.0965x, `hash_lookup_string_equal` at
+  1.0547x, and `string_map_equal_content` at 1.0531x.  Fastest cases were
+  `boyer` at 0.9456x, `array_binary_search_string` at 0.9661x, and
+  `try_find_miss_rare` at 0.9661x.
+- This completes the requested local gate order on AMD64 in this checkout:
+  normal installed-compiler LLVM suite, LLVM self-stage2 build/test, then a
+  current native-vs-LLVM performance measurement.  A broader perf sweep should
+  restore or recreate the missing historical harnesses if more exhaustive
+  compiler-binary/minibench coverage is needed.
