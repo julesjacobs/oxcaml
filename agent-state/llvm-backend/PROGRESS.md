@@ -1487,3 +1487,68 @@ measurement against the native AMD64 backend.
   validation pass.  Remaining project work is performance: rerun/report the
   benchmark suite against native and continue investigating the largest LLVM
   slowdowns from generated code evidence.
+
+2026-06-28 current-head AMD64 LLVM performance pass:
+
+- Reran the imported minibench suite with the current installed compiler:
+  ```sh
+  PATH="$PWD/_build/llvm-tools/bin:$PATH" \
+  OCAMLOPT="$PWD/_install/bin/ocamlopt.opt" \
+  OCAMLLIB="$PWD/_install/lib/ocaml" \
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh" \
+  SAMPLES=3 WARMUPS=1 \
+    agent-state/test-suite-29e4cd/minibench_suite/run.py
+  ```
+- The suite ran 52 cases.  Aggregate runtime was LLVM/native 0.8433x by summed
+  medians, 0.8524x geomean, and 0.9034x median case ratio.  Aggregate compile
+  time was LLVM/native 3.2317x by summed times and 3.2486x geomean.  The largest
+  minibench runtime slowdowns were `soli` 1.2280x, `boyer` 1.0981x, `hamming`
+  1.0864x, `numeric_float_dot` 1.0562x, and `finance_greeks_pnl` 1.0547x.
+  Matrix cases were not slow in this run: `matmul` 0.9150x and
+  `matmul_transposed` 0.8466x.
+- Reran the loop-invariant microbenchmark with 9 samples:
+  ```sh
+  PATH="$PWD/_build/llvm-tools/bin:$PATH" \
+  OCAMLOPT="$PWD/_install/bin/ocamlopt.opt" \
+  OCAMLLIB="$PWD/_install/lib/ocaml" \
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh" \
+  SAMPLES=9 N=12000000 REPS=5 \
+    python3 agent-state/test-suite-29e4cd/loop_invariant_microbench/run.py
+  ```
+- Results: `loop_invariant_int_across_call` native 0.0682s, LLVM 0.0596s,
+  ratio 0.8743x; `loop_invariant_gc_across_call` native 0.0676s, LLVM 0.1073s,
+  ratio 1.5873x.  The LLVM absolute time for the GC-root case is consistent
+  with the earlier 0.1081s run; the ratio moved mostly because the native
+  median was faster in this run.
+- Reran a corrected compiler-binary benchmark that uses matching build trees
+  for each compiler instead of mixing both compilers with `_build/main` CMIs.
+  Raw results are recorded in
+  `agent-state/test-suite-29e4cd/compiler_bench_current_matching_builds_20260628_124645.json`.
+  Modules: `cfg_selectgen`, `llvmize`, `translcore`, `ctype`, `env`,
+  `typecore`, and `typemod`; 5 repetitions; normal native compilation mode
+  without `-llvm-backend`.  Sum of module medians was LLVM/native 1.0145x
+  (native 15.9805s, LLVM-built compiler 16.2122s).  Round-total median was
+  1.0173x (native 15.9783s, LLVM-built compiler 16.2546s).  Largest module
+  ratios: `cfg_selectgen` 1.0380x, `translcore` 1.0322x, `llvmize` 1.0296x,
+  `typemod` 1.0256x, `typecore` 1.0098x; `env` and `ctype` were slightly
+  faster under the LLVM-built compiler.
+- Current largest slowdown remains `loop_invariant_gc_across_call`.  The hot
+  native inner loop keeps the string root in a stack slot and reloads it after
+  the call, then computes `String.length` with `salq $8; shrq $18; leaq
+  -1(,%rbx,8)`.  The hot LLVM inner loop additionally spills/reloads the live
+  accumulator, loop index, and string root around every statepoint call, shuffles
+  the OxCaml runtime registers through `%r14/%r15`, and computes the string
+  offset with `movabsq $562949953421304; shrq $7; andq`.
+- A backend-only experiment changed `emit_ocaml_string_length` to emit the
+  native-shaped `shl reserved_header_bits; lshr
+  (reserved_header_bits + header_wosize_shift); shl 3` sequence.  The generated
+  LLVM IR changed as intended, and direct focused checks passed
+  (`string_compare_correctness` printed `OK`, `live_values_roots` printed `ok`
+  under stress GC), but X86 instruction selection canonicalized the sequence
+  back to the same `shr $7` plus large-mask machine code.  The experiment was
+  reverted rather than committed as a cosmetic IR-only change.
+- Next performance fix should be target-side, not frontend-side: either teach
+  X86 lowering to prefer native-style shifts/LEA for this OCaml header mask
+  shape when the mask needs a `movabsq`, or attack the larger statepoint
+  quality issue by reducing call-boundary root spills/reloads and runtime
+  register shuffles while preserving the no-frontend-roots model.

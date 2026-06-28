@@ -1,0 +1,188 @@
+{
+  "timestamp": "20260628_124645",
+  "native": {
+    "compiler": "/home/jules/git/oxcaml-llvm/_install/bin/ocamlopt.opt",
+    "ocamllib": "/home/jules/git/oxcaml-llvm/_install/lib/ocaml",
+    "build_main": "/home/jules/git/oxcaml-llvm/_build/main"
+  },
+  "llvm": {
+    "compiler": "/home/jules/git/oxcaml-llvm/_llvm_current_stage2_install/bin/ocamlopt.opt",
+    "real_compiler": "/home/jules/git/oxcaml-llvm/_llvm_current_stage2_install/bin/ocamlopt.opt.real",
+    "ocamllib": "/home/jules/git/oxcaml-llvm/_llvm_current_stage2_install/lib/ocaml",
+    "build_main": "/home/jules/git/oxcaml-llvm/_llvm_current_stage2_main_build/main"
+  },
+  "repetitions": 5,
+  "modules": [
+    {
+      "source": "backend/cfg_selectgen.ml",
+      "module": "cfg_selectgen",
+      "native_median_s": 0.530793790705502,
+      "llvm_median_s": 0.5509692267514765,
+      "llvm_over_native_ratio": 1.0380099322924603,
+      "native_samples_s": [
+        0.5265050861053169,
+        0.530793790705502,
+        0.5561985457316041,
+        0.5463713677600026,
+        0.5085088042542338
+      ],
+      "llvm_samples_s": [
+        0.5506885908544064,
+        0.5533304237760603,
+        0.5509692267514765,
+        0.5266090459190309,
+        0.5583295850083232
+      ]
+    },
+    {
+      "source": "backend/llvm/llvmize.ml",
+      "module": "llvmize",
+      "native_median_s": 3.8721979199908674,
+      "llvm_median_s": 3.986931161954999,
+      "llvm_over_native_ratio": 1.0296300045438798,
+      "native_samples_s": [
+        3.771932548843324,
+        3.9602359971031547,
+        3.8907568836584687,
+        3.8330426099710166,
+        3.8721979199908674
+      ],
+      "llvm_samples_s": [
+        3.941833607852459,
+        3.986931161954999,
+        4.062007805798203,
+        3.8891406441107392,
+        4.089716765098274
+      ]
+    },
+    {
+      "source": "lambda/translcore.ml",
+      "module": "translcore",
+      "native_median_s": 1.2791135138832033,
+      "llvm_median_s": 1.3202458610758185,
+      "llvm_over_native_ratio": 1.0321569170727807,
+      "native_samples_s": [
+        1.2786836689338088,
+        1.2791135138832033,
+        1.3946285508573055,
+        1.2814187272451818,
+        1.2773138508200645
+      ],
+      "llvm_samples_s": [
+        1.320418184157461,
+        1.3095720089040697,
+        1.3516717329621315,
+        1.2910792836919427,
+        1.3202458610758185
+      ]
+    },
+    {
+      "source": "typing/ctype.ml",
+      "module": "ctype",
+      "native_median_s": 2.580448924098164,
+      "llvm_median_s": 2.564201507717371,
+      "llvm_over_native_ratio": 0.9937036473657501,
+      "native_samples_s": [
+        2.589256918989122,
+        2.6608612993732095,
+        2.580448924098164,
+        2.5415616119280457,
+        2.54872019123286
+      ],
+      "llvm_samples_s": [
+        2.5324319852516055,
+        2.5434364951215684,
+        2.670313199982047,
+        2.6845062696374953,
+        2.564201507717371
+      ]
+    },
+    {
+      "source": "typing/env.ml",
+      "module": "env",
+      "native_median_s": 1.6075114710256457,
+      "llvm_median_s": 1.5982328089885414,
+      "llvm_over_native_ratio": 0.9942279341675961,
+      "native_samples_s": [
+        1.6075114710256457,
+        1.579604680184275,
+        1.6246949220076203,
+        1.566414738073945,
+        1.6183736179955304
+      ],
+      "llvm_samples_s": [
+        1.6169076547957957,
+        1.5816445997916162,
+        1.705466317012906,
+        1.5914072543382645,
+        1.5982328089885414
+      ]
+    },
+    {
+      "source": "typing/typecore.ml",
+      "module": "typecore",
+      "native_median_s": 4.75620594015345,
+      "llvm_median_s": 4.802737389691174,
+      "llvm_over_native_ratio": 1.0097833126074063,
+      "native_samples_s": [
+        4.75620594015345,
+        4.670485052745789,
+        4.881975503172725,
+        4.842066667042673,
+        4.731107960920781
+      ],
+      "llvm_samples_s": [
+        4.707824010401964,
+        4.848597366828471,
+        4.857966799288988,
+        4.802737389691174,
+        4.747946195304394
+      ]
+    },
+    {
+      "source": "typing/typemod.ml",
+      "module": "typemod",
+      "native_median_s": 1.3542558490298688,
+      "llvm_median_s": 1.3888874659314752,
+      "llvm_over_native_ratio": 1.025572432953799,
+      "native_samples_s": [
+        1.3586401101201773,
+        1.3476848527789116,
+        1.3358193482272327,
+        1.3542558490298688,
+        1.422069693915546
+      ],
+      "llvm_samples_s": [
+        1.3576561650261283,
+        1.3697906490415335,
+        1.4473573160357773,
+        1.4691175827756524,
+        1.3888874659314752
+      ]
+    }
+  ],
+  "sum_of_module_medians": {
+    "native_s": 15.9805274088867,
+    "llvm_s": 16.212205422110856,
+    "llvm_over_native_ratio": 1.0144975198437642
+  },
+  "round_total_medians": {
+    "native_s": 15.978292039129883,
+    "llvm_s": 16.2545974701643,
+    "llvm_over_native_ratio": 1.017292551066019,
+    "native_round_totals_s": [
+      15.888735744170845,
+      16.028779186774045,
+      16.26452267775312,
+      15.965131571050733,
+      15.978292039129883
+    ],
+    "llvm_round_totals_s": [
+      16.02776019833982,
+      16.19330270541832,
+      16.64575239783153,
+      16.2545974701643,
+      16.267560189124197
+    ]
+  }
+}
