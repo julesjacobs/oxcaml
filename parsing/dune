@@ -27,6 +27,11 @@
   (with-stdout-to %{targets}
    (bash "cat $(menhir --suggest-menhirLib)/menhirLib.mli"))))
 
-(ocamllex
- (modules lexer)
- (mode fallback))
+(rule
+ (target lexer.ml)
+ (mode fallback)
+ (deps
+  (sandbox always)
+  lexer.mll)
+ (action
+  (run %{bin:ocamllex} -q -o %{target} %{deps})))

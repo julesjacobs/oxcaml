@@ -1380,3 +1380,27 @@ measurement against the native AMD64 backend.
   `ocamldep returned unexpected output` and ocamllex missing-input errors such
   as `tools/make_opcodes.mll`.  The source files exist in the checkout, so this
   should be treated as a build-state issue to clear before the next suite run.
+
+2026-06-28 boot build-state fix:
+
+- Root cause of the immediate boot failure was Dune 3.23 user-rule sandboxing
+  interacting with generated lexer rules.  The old `ocamllex (mode fallback)`
+  rules for `parsing/lexer.ml` and `tools/make_opcodes.ml`, plus the Flambda
+  parser lexer rule, could run in a sandbox where the source `.mll` files were
+  not materialized.
+- Replaced the two `ocamllex` stanzas with their explicit-rule equivalent,
+  preserving `(mode fallback)`, and added `(sandbox always)` dependencies to
+  all three lexer rules so Dune materializes the `.mll` inputs in the action
+  sandbox.  This keeps Dune's dependency path rewriting instead of relying on
+  checkout-relative `_build` paths.
+- Cleaned only `_build/default` with `dune clean --root=. --workspace=duneconf/boot.ws _build/default`;
+  `_build/llvm-tools` was left intact.
+- Validation passed:
+  `make -s boot-compiler` from the clean `_build/default`, then
+  `make -s boot-compiler` again without cleaning.
+- The previously blocked focused LLVM test now passes:
+  `make -s llvm-test-one-no-rebuild DIR=llvm-gc-roots` with
+  `LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"` and
+  `PATH="$PWD/_build/llvm-tools/bin:$PATH"` reported 12 passed, 6 skipped,
+  0 failed.  Full `make -s test` was not run for this build-rule fix, so this
+  is a focused validation step, not a full-suite success claim.

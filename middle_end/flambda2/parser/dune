@@ -5,10 +5,11 @@
 
 (rule
  (target flambda_lex.ml)
- (deps flambda_lex.mll)
+ (deps
+  (sandbox always)
+  flambda_lex.mll)
  (action
-  (chdir %{workspace_root}
-   (run ocamllex -q %{deps} -o %{target}))))
+  (run %{bin:ocamllex} -q %{deps} -o %{target})))
 
 (rule
  (deps flambda_parser_in.ml)

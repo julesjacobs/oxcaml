@@ -29,9 +29,14 @@
  (names   make_opcodes)
  (modules make_opcodes))
 
-(ocamllex
- (modules make_opcodes)
- (mode    fallback))
+(rule
+ (target make_opcodes.ml)
+ (mode fallback)
+ (deps
+  (sandbox always)
+  make_opcodes.mll)
+ (action
+  (run %{bin:ocamllex} -q -o %{target} %{deps})))
 
 
 (executable
