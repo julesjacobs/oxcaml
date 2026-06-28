@@ -24,6 +24,7 @@ val trap_notes : bool ref
 (* Machine-specific command-line options *)
 
 val command_line_options : (string * Arg.spec * string) list
+val llvm_target_feature_flags : unit -> string list
 
 (* Addressing modes *)
 

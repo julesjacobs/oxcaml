@@ -23,8 +23,12 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/LiveStacks.h"
+#include "llvm/CodeGen/MachineInstr.h"
+#include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/CodeGen/SlotIndexes.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+
+#include "OxCamlTargetABI.h"
 
 namespace llvm {
 namespace oxcamlroots {
@@ -45,6 +49,29 @@ void collectValueHomeFIs(ArrayRef<MachineInstr *> Statepoints, LiveStacks &LS,
                          SmallSet<int, 16> &ListedSlotsAnywhere,
                          SmallSet<int, 16> &ValueHomeFIs);
 
+inline bool isPointerSizedStackAccess(const MachineInstr &MI,
+                                      unsigned TargetReportedBytes) {
+  constexpr unsigned ValueBytes = 8;
+  if (TargetReportedBytes != 0)
+    return TargetReportedBytes == ValueBytes;
+  if (!MI.hasOneMemOperand())
+    return false;
+  return MI.memoperands().front()->getSize() == ValueBytes;
+}
+
+inline Register isValueLoadFromStackSlot(const TargetInstrInfo *TII,
+                                         const MachineInstr &MI, int &FI) {
+  unsigned Size = 0;
+  Register R = TII->isLoadFromStackSlot(MI, FI, Size);
+  return R.isValid() && isPointerSizedStackAccess(MI, Size) ? R : Register();
+}
+
+inline Register isValueStoreToStackSlot(const TargetInstrInfo *TII,
+                                        const MachineInstr &MI, int &FI) {
+  unsigned Size = 0;
+  Register R = TII->isStoreToStackSlot(MI, FI, Size);
+  return R.isValid() && isPointerSizedStackAccess(MI, Size) ? R : Register();
+}
 
 /// Flow-sensitive value identity. The gc bit and its COPY closure are
 /// per-register and therefore per-FAMILY: after coalescing and phi
@@ -74,6 +101,7 @@ class GCValueness {
   LiveStacks &LS;
   SlotIndexes &Indexes;
   const TargetInstrInfo *TII;
+  OxCamlTargetABI ABI;
   const SmallSet<int, 16> &ValueHomeFIs;
   DenseSet<Key> Seeds;
   // 1 = value, 2 = not a value, 3 = in progress (optimistic).
@@ -84,7 +112,9 @@ class GCValueness {
   // vregs into one frame index, so a single slot routinely holds gc values
   // on some ranges and raw data on others. The whole-slot summary both
   // under-lists (a live gc value skipped because an unrelated range stored
-  // raw data — a missed root, stale after GC) and over-lists.
+  // raw data — a missed root, stale after GC) and over-lists. The source
+  // register may be invalid for a target memory store that clobbers the
+  // frame index without being a whole-slot spill.
   DenseMap<int, SmallVector<std::pair<Register, SlotIndex>, 4>> SlotStores;
   // All reloads from each LiveStacks slot, for consumer evidence.
   DenseMap<int, SmallVector<std::pair<Register, SlotIndex>, 4>> SlotLoads;

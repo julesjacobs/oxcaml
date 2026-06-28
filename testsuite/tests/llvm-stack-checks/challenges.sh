@@ -3,6 +3,8 @@
 set -eu
 
 build_dir=$(pwd)
+host_arch=$(uname -m)
+host_system=$(uname -s)
 src="$build_dir/challenges_generated.ml"
 exe="$build_dir/challenges_generated.exe"
 out="$build_dir/challenges_generated.out"
@@ -13,6 +15,15 @@ ir="$build_dir/challenges_generated.ll"
 asm="$build_dir/challenges_generated.s"
 cfg_dump="$build_dir/challenges_generated.cmx.dump"
 extra_ocamlopt_flags=""
+extra_link_flags=""
+default_depth=20000
+
+case "$host_system:$host_arch" in
+  Linux:x86_64 | Linux:amd64)
+    extra_link_flags="-ccopt -no-pie"
+    default_depth=2000
+    ;;
+esac
 
 search_dir=$build_dir
 ocamlopt=""
@@ -32,12 +43,26 @@ if [ -z "$ocamlopt" ]; then
   fi
 fi
 
+stdlib_flags=""
+ocamlopt_dir=$(dirname "$ocamlopt")
+for stdlib_dir in \
+  "$ocamlopt_dir/lib/ocaml" \
+  "$ocamlopt_dir/_install/lib/ocaml" \
+  "$ocamlopt_dir/../lib/ocaml" \
+  "$ocamlopt_dir/../../runtime_stdlib_install/lib/ocaml_runtime_stdlib"
+do
+  if [ -f "$stdlib_dir/stdlib.cmi" ]; then
+    stdlib_flags="-I $stdlib_dir"
+    break
+  fi
+done
+
 cat > "$src" <<'EOF'
 external opaque : 'a -> 'a = "%opaque"
 
 let depth =
   match Sys.getenv_opt "OCAML_STACK_CHECK_CHALLENGE_DEPTH" with
-  | None -> 20_000
+  | None -> @DEFAULT_DEPTH@
   | Some s -> int_of_string s
 
 let prologue_depth = min depth 1_000
@@ -237,8 +262,10 @@ let () =
   check "effect" (effect_stack_growth depth > 0);
   check "live-roots" (live_roots_stack_growth depth > 0)
 EOF
+sed "s/@DEFAULT_DEPTH@/$default_depth/" "$src" > "$src.tmp"
+mv "$src.tmp" "$src"
 
-"$ocamlopt" -O3 -g -S -c -keep-llvmir -llvm-backend \
+"$ocamlopt" $stdlib_flags -O3 -S -c -keep-llvmir -llvm-backend \
   -dcfg -dump-into-file \
   $extra_ocamlopt_flags \
   -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
@@ -261,17 +288,18 @@ if ! grep -q '"oxcaml-stack-check-bytes"="[1-9]' "$ir"; then
   exit 1
 fi
 
-if ! grep '_caml_llvm_call_realloc_stack' "$asm" | grep -qv '_stkarg'; then
+if ! grep -E '_?caml_llvm_call_realloc_stack' "$asm" | grep -qv '_stkarg'; then
   echo "expected ordinary LLVM stack-check slow path in stress program" >&2
   exit 1
 fi
 
-if ! grep -qE '_caml_call_realloc_stack|_caml_llvm_call_realloc_stack_stkarg' "$asm"; then
+if ! grep -qE '_?caml_call_realloc_stack|_?caml_llvm_call_realloc_stack_stkarg|_?caml_llvm_prologue_realloc_stack' "$asm"; then
   echo "expected prologue LLVM stack-check slow path for pre-CFG-check stack use in stress program" >&2
   exit 1
 fi
 
-"$ocamlopt" -O3 -g -llvm-backend \
+"$ocamlopt" $stdlib_flags -O3 -llvm-backend \
+  $extra_link_flags \
   -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
   -o "$exe" "$src"
 
@@ -311,7 +339,8 @@ let[@inline never] stack_overflow () =
 let () = stack_overflow ()
 EOF
 
-"$ocamlopt" -O3 -g -llvm-backend \
+"$ocamlopt" $stdlib_flags -O3 -llvm-backend \
+  $extra_link_flags \
   -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
   -o "$overflow_exe" "$overflow_src"
 

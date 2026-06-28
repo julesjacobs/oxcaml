@@ -37,6 +37,8 @@ normal_runtime_dir=${NORMAL_RUNTIME_DIR:-$normal_build/runtime_stdlib/runtime}
 fake_root=${FAKE_ROOT:-$default_fake_root}
 wrapper=${LLVM_WRAPPER:?set LLVM_WRAPPER to the clang wrapper or LLVM tool path}
 wrapper_log=${LLVM_WRAPPER_LOG:-$wrapper.log}
+export LLVM_WRAPPER_LOG="$wrapper_log"
+export LLVM_PATH="$wrapper"
 list=${LIST:-$default_list}
 generate_list=${GENERATE_LIST:-1}
 parallel_tests=${LLVM_TESTSUITE_PARALLEL:-auto}
@@ -71,7 +73,8 @@ fi
 find "$repo/testsuite/tests" -name '*.corrected' -delete
 
 if [ "$generate_list" = 1 ]; then
-  find "$repo/testsuite/tests" -type d | while IFS= read -r dir; do
+  find "$repo/testsuite/tests" -type d -name _ocamltest -prune -o -type d -print \
+    | while IFS= read -r dir; do
     if find "$dir" -maxdepth 1 -type f \
         \( -name '*.ml' -o -name '*.mli' -o -name '*.mll' -o -name '*.mly' \) \
         | grep -q .; then

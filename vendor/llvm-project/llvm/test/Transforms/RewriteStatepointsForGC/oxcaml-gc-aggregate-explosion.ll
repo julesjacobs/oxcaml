@@ -108,6 +108,17 @@ entry:
   ret ptr addrspace(1) %p
 }
 
+define ptr addrspace(1) @dead_insertvalue_operand_chain(ptr addrspace(1) %obj) gc "oxcaml" {
+; CHECK-LABEL: define ptr addrspace(1) @dead_insertvalue_operand_chain(
+; CHECK: @llvm.experimental.gc.statepoint{{.*}} [ "deopt"(), "gc-live"(ptr addrspace(1) %obj) ]
+entry:
+  %agg0 = insertvalue { ptr addrspace(1), ptr addrspace(1) } poison, ptr addrspace(1) %obj, 0
+  %agg1 = insertvalue { ptr addrspace(1), ptr addrspace(1) } %agg0, ptr addrspace(1) %obj, 1
+  call void @may_gc() "statepoint-id"="0" [ "deopt"() ]
+  %p = extractvalue { ptr addrspace(1), ptr addrspace(1) } %agg1, 0
+  ret ptr addrspace(1) %p
+}
+
 define ptr addrspace(1) @invoke_normal_result(ptr addrspace(1) %obj) gc "oxcaml" personality ptr @personality {
 ; CHECK-LABEL: define ptr addrspace(1) @invoke_normal_result(
 ; CHECK: normal:

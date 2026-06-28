@@ -52,6 +52,7 @@ val trap_notes : bool ref
 val arch_check_symbols : bool ref
 val is_asan_enabled : bool ref
 val command_line_options : (string * Arg.spec * string) list
+val llvm_target_feature_flags : unit -> string list
 
 (* Specific operations for the AMD64 processor *)
 

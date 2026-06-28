@@ -3,10 +3,27 @@
 set -eu
 
 build_dir=$(pwd)
+host_arch=$(uname -m)
+host_system=$(uname -s)
 src="$build_dir/trap_recovery_runtime_generated.ml"
 out="$build_dir/trap_recovery_runtime_generated.exe"
 ir="$build_dir/trap_recovery_runtime_generated.ll"
 asm="$build_dir/trap_recovery_runtime_generated.s"
+debug_flags="-g"
+extra_link_flags=""
+aarch64_trap_checks=false
+amd64_debug_checks=false
+
+case "$host_arch" in
+  arm64 | aarch64) aarch64_trap_checks=true ;;
+esac
+
+case "$host_system:$host_arch" in
+  Linux:x86_64 | Linux:amd64)
+    extra_link_flags="-ccopt -no-pie"
+    amd64_debug_checks=true
+    ;;
+esac
 
 search_dir=$build_dir
 ocamlopt=""
@@ -25,6 +42,20 @@ if [ -z "$ocamlopt" ]; then
     ocamlopt="_build/install/main/bin/ocamlopt.opt"
   fi
 fi
+
+stdlib_flags=""
+ocamlopt_dir=$(dirname "$ocamlopt")
+for stdlib_dir in \
+  "$ocamlopt_dir/lib/ocaml" \
+  "$ocamlopt_dir/_install/lib/ocaml" \
+  "$ocamlopt_dir/../lib/ocaml" \
+  "$ocamlopt_dir/../../runtime_stdlib_install/lib/ocaml_runtime_stdlib"
+do
+  if [ -f "$stdlib_dir/stdlib.cmi" ]; then
+    stdlib_flags="-I $stdlib_dir"
+    break
+  fi
+done
 
 cat > "$src" <<'EOF'
 exception E of int
@@ -62,34 +93,38 @@ let () =
     (handler_live_string s (-7))
 EOF
 
-"$ocamlopt" -O3 -S -keep-llvmir -llvm-backend \
+"$ocamlopt" $stdlib_flags -O3 -S -keep-llvmir -llvm-backend \
+  $extra_link_flags \
   -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" -o "$out" "$src"
 
-"$ocamlopt" -O3 -keep-llvmir -llvm-backend \
+"$ocamlopt" $stdlib_flags -O3 -keep-llvmir -llvm-backend \
+  $extra_link_flags \
   -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" -o "$out" "$src"
 
 "$out" > "$build_dir/trap_recovery_runtime_stdout.txt"
 grep -q "^4 105 1010 2 10007$" "$build_dir/trap_recovery_runtime_stdout.txt"
 
-grep -q "landingpad token" "$ir"
-grep -q "@llvm.aarch64.oxcaml.push.trap" "$ir"
-grep -q "@llvm.aarch64.oxcaml.pop.trap" "$ir"
-grep -q "@llvm.aarch64.oxcaml.trap.recover" "$ir"
-grep -q "unwind label" "$ir"
-if grep -q '@"\\01_wrap_try"' "$ir" || grep -q '^_wrap_try:' "$asm"; then
-  echo "AArch64 trap recovery should not emit wrap_try" >&2
-  exit 1
+if [ "$aarch64_trap_checks" = true ]; then
+  grep -q "landingpad token" "$ir"
+  grep -q "@llvm.aarch64.oxcaml.push.trap" "$ir"
+  grep -q "@llvm.aarch64.oxcaml.pop.trap" "$ir"
+  grep -q "@llvm.aarch64.oxcaml.trap.recover" "$ir"
+  grep -q "unwind label" "$ir"
+  if grep -q '@"\\01_wrap_try"' "$ir" || grep -q '^_wrap_try:' "$asm"; then
+    echo "AArch64 trap recovery should not emit wrap_try" >&2
+    exit 1
+  fi
+  if grep -q "_caml_raise_notrace" "$asm"; then
+    echo "AArch64 raise_notrace with an active trap should not call caml_raise_notrace" >&2
+    exit 1
+  fi
+  if grep -q "llvm.aarch64.oxcaml.trap" "$asm"; then
+    echo "trap intrinsics leaked to assembly" >&2
+    exit 1
+  fi
+  grep -q "stp	x26, x16, \\[sp, #-16\\]!" "$asm"
+  grep -q "ldp	x26, x16, \\[sp\\], #16" "$asm"
 fi
-if grep -q "_caml_raise_notrace" "$asm"; then
-  echo "AArch64 raise_notrace with an active trap should not call caml_raise_notrace" >&2
-  exit 1
-fi
-if grep -q "llvm.aarch64.oxcaml.trap" "$asm"; then
-  echo "trap intrinsics leaked to assembly" >&2
-  exit 1
-fi
-grep -q "stp	x26, x16, \\[sp, #-16\\]!" "$asm"
-grep -q "ldp	x26, x16, \\[sp\\], #16" "$asm"
 
 hot_src="$build_dir/trap_recovery_hot_push_pop.ml"
 hot_cmx="$build_dir/trap_recovery_hot_push_pop.cmx"
@@ -109,16 +144,18 @@ let[@inline never] run n =
   !acc
 EOF
 
-"$ocamlopt" -O3 -S -c -keep-llvmir -llvm-backend \
+"$ocamlopt" $stdlib_flags -O3 -S -c -keep-llvmir -llvm-backend \
   -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" -o "$hot_cmx" "$hot_src"
 
-if grep -q '\[x28, #48\]' "$hot_asm"; then
-  echo "AArch64 hot trap push/pop should keep x26 authoritative" >&2
-  exit 1
-fi
-if grep -q '_wrap_try' "$hot_asm"; then
-  echo "AArch64 hot trap push/pop should not emit wrap_try" >&2
-  exit 1
+if [ "$aarch64_trap_checks" = true ]; then
+  if grep -q '\[x28, #48\]' "$hot_asm"; then
+    echo "AArch64 hot trap push/pop should keep x26 authoritative" >&2
+    exit 1
+  fi
+  if grep -q '_wrap_try' "$hot_asm"; then
+    echo "AArch64 hot trap push/pop should not emit wrap_try" >&2
+    exit 1
+  fi
 fi
 
 moving_src="$build_dir/trap_recovery_moving_finally.ml"
@@ -157,7 +194,8 @@ let () =
   print_endline "moving-finally-ok"
 EOF
 
-"$ocamlopt" -O3 -llvm-backend \
+"$ocamlopt" $stdlib_flags -O3 -llvm-backend \
+  $extra_link_flags \
   -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" -o "$moving_out" "$moving_src"
 
 "$moving_out" > "$build_dir/trap_recovery_moving_finally_stdout.txt"
@@ -167,6 +205,7 @@ dynamic_src="$build_dir/trap_recovery_dynamic_finally.ml"
 dynamic_cmx="$build_dir/trap_recovery_dynamic_finally.cmx"
 dynamic_ir="$build_dir/trap_recovery_dynamic_finally.ll"
 dynamic_asm="$build_dir/trap_recovery_dynamic_finally.s"
+dynamic_out="$build_dir/trap_recovery_dynamic_finally.exe"
 
 cat > "$dynamic_src" <<'EOF'
 exception E of string array
@@ -190,47 +229,62 @@ let () =
   try protect_reraise 3 with E a -> print_endline a.(0)
 EOF
 
-"$ocamlopt" -O3 -g -S -c -keep-llvmir -llvm-backend \
+"$ocamlopt" $stdlib_flags -O3 $debug_flags -S -c -keep-llvmir -llvm-backend \
   -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
   -o "$dynamic_cmx" "$dynamic_src"
 
-grep -q "declare { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()" \
-  "$dynamic_ir"
-
-cleanup_label=$(
-  awk '
-    $1 == "bl" && $2 ~ /^_camlTrap_recovery_dynamic_finally__cleanup_2_/ {
-      getline
-      sub(/:.*/, "", $1)
-      print $1
-      exit
-    }
-  ' "$dynamic_asm"
-)
-
-if [ -z "$cleanup_label" ]; then
-  echo "dynamic finally test did not find cleanup call label" >&2
-  exit 1
+if [ "$amd64_debug_checks" = true ]; then
+  grep -Eq '^[[:space:]]*\.file[[:space:]]+0[[:space:]].*"trap_recovery_dynamic_finally\.ml"' "$dynamic_asm"
+  grep -q '\.debug_info' "$dynamic_asm"
 fi
 
-cleanup_roots=$(
-  awk -v label="$cleanup_label" '
-    $1 == ".long" && index($2, label "-") == 1 {
-      in_entry = 1
-      short_count = 0
-      next
-    }
-    in_entry && $1 == ".short" {
-      short_count++
-      if (short_count == 2) {
-        print $2
+"$ocamlopt" $stdlib_flags -O3 -llvm-backend \
+  $extra_link_flags \
+  -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
+  -o "$dynamic_out" "$dynamic_src"
+
+"$dynamic_out" > "$build_dir/trap_recovery_dynamic_finally_stdout.txt"
+grep -q "^0$" "$build_dir/trap_recovery_dynamic_finally_stdout.txt"
+
+if [ "$aarch64_trap_checks" = true ]; then
+  grep -q "declare { ptr addrspace(1), i64, i64, i64 } @llvm.aarch64.oxcaml.trap.recover()" \
+    "$dynamic_ir"
+
+  cleanup_label=$(
+    awk '
+      $1 == "bl" && $2 ~ /^_camlTrap_recovery_dynamic_finally__cleanup_2_/ {
+        getline
+        sub(/:.*/, "", $1)
+        print $1
         exit
       }
-    }
-  ' "$dynamic_asm"
-)
+    ' "$dynamic_asm"
+  )
 
-if [ "$cleanup_roots" != "2" ]; then
-  echo "dynamic finally cleanup should root exception and backtrace; got ${cleanup_roots:-no frame entry}" >&2
-  exit 1
+  if [ -z "$cleanup_label" ]; then
+    echo "dynamic finally test did not find cleanup call label" >&2
+    exit 1
+  fi
+
+  cleanup_roots=$(
+    awk -v label="$cleanup_label" '
+      $1 == ".long" && index($2, label "-") == 1 {
+        in_entry = 1
+        short_count = 0
+        next
+      }
+      in_entry && $1 == ".short" {
+        short_count++
+        if (short_count == 2) {
+          print $2
+          exit
+        }
+      }
+    ' "$dynamic_asm"
+  )
+
+  if [ "$cleanup_roots" != "2" ]; then
+    echo "dynamic finally cleanup should root exception and backtrace; got ${cleanup_roots:-no frame entry}" >&2
+    exit 1
+  fi
 fi

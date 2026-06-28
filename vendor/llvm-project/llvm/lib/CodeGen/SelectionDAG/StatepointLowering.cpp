@@ -651,12 +651,24 @@ lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
   // through the exnroot machinery (RS4GC's handler-value demotion),
   // which is independent of how the statepoint's own gc operands are
   // lowered.
+  const bool IsX86Target =
+      Builder.DAG.getTarget().getTargetTriple().isX86();
+  // AArch64 has enough GPR headroom for OxCaml statepoints to leave all live
+  // roots in place and let RA choose register or spill-slot locations. AMD64
+  // has far fewer allocatable GPRs; large calls and stack-check/realloc
+  // statepoints can otherwise require more simultaneous register roots than the
+  // target can allocate. Keep x86 on the existing spill-slot lowering until
+  // this is replaced with a target root-budget policy.
+  const bool InPlaceOrdinaryOxCamlCalls =
+      OxCamlStatepointInPlaceCalls && !IsX86Target;
+  const bool InPlaceAllocOxCamlCalls =
+      OxCamlStatepointInPlace && !IsX86Target;
   bool InPlaceCC =
       SI.CLI.CallConv == CallingConv::OxCaml_Alloc
-          ? OxCamlStatepointInPlace.getValue()
+          ? InPlaceAllocOxCamlCalls
           : (((SI.CLI.CallConv == CallingConv::OxCaml_WithFP ||
                SI.CLI.CallConv == CallingConv::OxCaml_WithoutFP) &&
-              OxCamlStatepointInPlaceCalls) ||
+              InPlaceOrdinaryOxCamlCalls) ||
              ((SI.CLI.CallConv == CallingConv::OxCaml_C_Call ||
                SI.CLI.CallConv == CallingConv::OxCaml_C_Call_StackArgs) &&
               OxCamlStatepointInPlaceCCalls));
@@ -1313,7 +1325,7 @@ void SelectionDAGBuilder::LowerCallSiteWithDeoptBundleImpl(
 
   auto DeoptBundle = *Call->getOperandBundle(LLVMContext::OB_deopt);
 
-  unsigned DefaultID = StatepointDirectives::DeoptBundleStatepointID;
+  uint64_t DefaultID = StatepointDirectives::DeoptBundleStatepointID;
 
   auto SD = parseStatepointDirectivesFromAttrs(Call->getAttributes());
   SI.ID = SD.StatepointID.value_or(DefaultID);
@@ -1483,8 +1495,7 @@ void SelectionDAGBuilder::visitGCRelocate(const GCRelocateInst &Relocate) {
     SDValue Chain = DAG.getRoot();
     SDValue Ops[] = {
         Chain,
-        DAG.getTargetConstant(Intrinsic::aarch64_oxcaml_relocated, DL,
-                              MVT::i64),
+        DAG.getTargetConstant(Intrinsic::oxcaml_relocated, DL, MVT::i64),
         SD};
     SDValue Node =
         DAG.getNode(ISD::INTRINSIC_W_CHAIN, DL,

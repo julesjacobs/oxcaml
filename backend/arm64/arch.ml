@@ -45,6 +45,8 @@ let command_line_options = [
     " Enable the Common Short Sequence Compression (CSSC) instructions."
 ]
 
+let llvm_target_feature_flags () = []
+
 (* Addressing modes *)
 
 type addressing_mode =

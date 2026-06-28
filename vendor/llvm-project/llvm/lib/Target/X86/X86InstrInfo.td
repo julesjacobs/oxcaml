@@ -210,6 +210,11 @@ def X86call_rvmarker  : SDNode<"X86ISD::CALL_RVMARKER",     SDT_X86Call,
 def X86NoTrackCall : SDNode<"X86ISD::NT_CALL", SDT_X86Call,
                             [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
                              SDNPVariadic]>;
+
+def X86oxcaml_c_direct_call : SDNode<"X86ISD::OXCAML_C_DIRECT_CALL", SDT_X86Call,
+                                     [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
+                                      SDNPVariadic]>;
+
 def X86NoTrackBrind : SDNode<"X86ISD::NT_BRIND", SDT_X86NtBrind,
                              [SDNPHasChain]>;
 

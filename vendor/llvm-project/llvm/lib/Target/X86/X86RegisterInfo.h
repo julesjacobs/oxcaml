@@ -104,6 +104,10 @@ public:
   const uint32_t *getCallPreservedMask(const MachineFunction &MF,
                                        CallingConv::ID) const override;
   const uint32_t *getNoPreservedMask() const override;
+  bool isRuntimeEnteredLiveIn(const MachineFunction &MF,
+                              MCRegister PhysReg) const override;
+  ArrayRef<MCPhysReg>
+  getRuntimeEnteredLiveIns(const MachineFunction &MF) const override;
 
   // Calls involved in thread-local variable lookup save more registers than
   // normal calls, so they need a different mask to represent this.

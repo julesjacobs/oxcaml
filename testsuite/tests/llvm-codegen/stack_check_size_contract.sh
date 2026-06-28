@@ -4,6 +4,7 @@ set -eu
 
 mode="${1:-stack-checks}"
 build_dir=$(pwd)
+host_arch=$(uname -m)
 src="$build_dir/stack_check_size_contract_generated.ml"
 out="$build_dir/stack_check_size_contract_generated.o"
 ir="$build_dir/stack_check_size_contract_generated.ll"
@@ -30,6 +31,20 @@ if [ -z "$ocamlopt" ]; then
     ocamlopt="_build/install/main/bin/ocamlopt.opt"
   fi
 fi
+
+stdlib_flags=""
+ocamlopt_dir=$(dirname "$ocamlopt")
+for stdlib_dir in \
+  "$ocamlopt_dir/lib/ocaml" \
+  "$ocamlopt_dir/_install/lib/ocaml" \
+  "$ocamlopt_dir/../lib/ocaml" \
+  "$ocamlopt_dir/../../runtime_stdlib_install/lib/ocaml_runtime_stdlib"
+do
+  if [ -f "$stdlib_dir/stdlib.cmi" ]; then
+    stdlib_flags="-I $stdlib_dir"
+    break
+  fi
+done
 
 if [ "$mode" = "no-cfg-stack-checks" ]; then
   extra_ocamlopt_flags="-no-cfg-stack-checks"
@@ -73,7 +88,7 @@ done
 printf "\n"
 } > "$src"
 
-"$ocamlopt" -O3 -g -S -c -keep-llvmir -llvm-backend \
+"$ocamlopt" $stdlib_flags -O3 -S -c -keep-llvmir -llvm-backend \
   -dcfg -dump-into-file \
   $extra_ocamlopt_flags \
   -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" \
@@ -191,11 +206,11 @@ function_ir() {
 
 has_prologue_realloc() {
   function_asm "$1" \
-    | grep -qE '_caml_call_realloc_stack|_caml_llvm_call_realloc_stack_stkarg'
+    | grep -qE '_?caml_call_realloc_stack|_?caml_llvm_call_realloc_stack_stkarg|_?caml_llvm_prologue_realloc_stack'
 }
 
 has_ordinary_realloc() {
-  function_asm "$1" | grep '_caml_llvm_call_realloc_stack' \
+  function_asm "$1" | grep -E '_?caml_llvm_call_realloc_stack' \
     | grep -qv '_stkarg'
 }
 
@@ -228,11 +243,11 @@ assert_no_ordinary_realloc() {
 }
 
 assert_ordinary_realloc_is_statepoint() {
-  if function_ir "$1" | grep '_caml_llvm_call_realloc_stack' | grep -q '"gc-leaf-function"="true"'; then
+  if function_ir "$1" | grep -E '_?caml_llvm_call_realloc_stack' | grep -q '"gc-leaf-function"="true"'; then
     echo "$1: ordinary LLVM stack check must not be a GC leaf" >&2
     exit 1
   fi
-  if ! function_ir "$1" | grep '_caml_llvm_call_realloc_stack' | grep -q '"statepoint-id"='; then
+  if ! function_ir "$1" | grep -E '_?caml_llvm_call_realloc_stack' | grep -q '"statepoint-id"='; then
     echo "$1: ordinary LLVM stack check must be a statepoint" >&2
     exit 1
   fi
@@ -240,7 +255,7 @@ assert_ordinary_realloc_is_statepoint() {
 
 boundary_function_asm() {
   name="$1"
-  awk -v name="_${name}:" '
+  awk -v name="${name}:" '
     index($0, name) != 0 { in_function = 1 }
     in_function { print }
     in_function && /^[[:space:]]*\.cfi_endproc/ { in_function = 0 }
@@ -249,7 +264,7 @@ boundary_function_asm() {
 
 boundary_has_prologue_realloc() {
   boundary_function_asm "$1" \
-    | grep -qE '_caml_call_realloc_stack|_caml_llvm_call_realloc_stack_stkarg'
+    | grep -qE '_?caml_call_realloc_stack|_?caml_llvm_call_realloc_stack_stkarg|_?caml_llvm_prologue_realloc_stack'
 }
 
 check_zero_byte_prologue_boundary() {
@@ -258,8 +273,14 @@ check_zero_byte_prologue_boundary() {
   # respectively. With the helper-side reserve, 96- and 128-byte prefixes leave
   # enough of the 256-byte threshold when there is no unchecked CFG stack use.
   # 256 bytes does not.
-  cat > "$boundary_ir" <<'EOF'
-target triple = "arm64-apple-macosx"
+  case "$host_arch" in
+    x86_64 | amd64) boundary_target="x86_64-pc-linux-gnu" ;;
+    arm64 | aarch64) boundary_target="arm64-apple-macosx" ;;
+    *) boundary_target="arm64-apple-macosx" ;;
+  esac
+
+  cat > "$boundary_ir" <<EOF
+target triple = "$boundary_target"
 
 define oxcaml_fpcc i64 @zero_byte_safe(i64 %ds, i64 %alloc, i64 %x) "oxcaml-stack-check"="true" "oxcaml-stack-check-bytes"="0" {
 entry:
@@ -283,7 +304,7 @@ entry:
 }
 EOF
 
-  "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" -target arm64-apple-macosx \
+  "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" -target "$boundary_target" \
     -Wno-override-module -x ir -S -O3 -o "$boundary_asm" "$boundary_ir"
 
   if boundary_has_prologue_realloc zero_byte_safe; then
@@ -305,7 +326,7 @@ EOF
     "$boundary_ir.nonzero" > "$boundary_ir.nonzero.before"
   mv "$boundary_ir.nonzero.before" "$boundary_ir.nonzero"
   mv "$boundary_ir.nonzero" "$boundary_ir"
-  "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" -target arm64-apple-macosx \
+  "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" -target "$boundary_target" \
     -Wno-override-module -x ir -S -O3 -o "$boundary_asm" "$boundary_ir"
 
   # A nonzero byte-count attribute is a producer contract: OxCaml has inserted
@@ -329,7 +350,7 @@ EOF
   sed 's/"oxcaml-stack-check-before-bytes"="0"/"oxcaml-stack-check-before-bytes"="96"/g' \
     "$boundary_ir" > "$boundary_ir.before64"
   mv "$boundary_ir.before64" "$boundary_ir"
-  "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" -target arm64-apple-macosx \
+  "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" -target "$boundary_target" \
     -Wno-override-module -x ir -S -O3 -o "$boundary_asm" "$boundary_ir"
 
   if boundary_has_prologue_realloc zero_byte_safe; then
@@ -371,11 +392,11 @@ if [ "$mode" = "no-stack-checks" ]; then
     echo "unexpected OxCaml stack-check attribute in no-stack-checks build" >&2
     exit 1
   fi
-  if grep -q '_caml_call_realloc_stack' "$asm"; then
+  if grep -qE '_?caml_call_realloc_stack' "$asm"; then
     echo "unexpected OxCaml stack-check prologue in no-stack-checks build" >&2
     exit 1
   fi
-  if grep -q '_caml_llvm_call_realloc_stack' "$asm"; then
+  if grep -qE '_?caml_llvm_call_realloc_stack' "$asm"; then
     echo "unexpected ordinary LLVM stack check in no-stack-checks build" >&2
     exit 1
   fi
@@ -449,6 +470,16 @@ if [ "$(cfg_stack_check_bytes noalloc_outgoing_stack_args)" = "0" ]; then
   echo "noalloc_outgoing_stack_args should have nonzero CFG stack-check bytes" >&2
   exit 1
 fi
-assert_no_prologue_realloc noalloc_outgoing_stack_args
+case "$host_arch" in
+  x86_64 | amd64)
+    # The ordinary CFG stack check includes outgoing C stack-argument space and
+    # runs before x86 lowers that outgoing call frame, so a second prologue
+    # check would be redundant in the normal CFG-stack-check path.
+    assert_no_prologue_realloc noalloc_outgoing_stack_args
+    ;;
+  *)
+    assert_no_prologue_realloc noalloc_outgoing_stack_args
+    ;;
+esac
 assert_has_ordinary_realloc noalloc_outgoing_stack_args
 assert_ordinary_realloc_is_statepoint noalloc_outgoing_stack_args

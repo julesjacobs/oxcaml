@@ -87,6 +87,7 @@
 #include "llvm/IR/IntrinsicsAArch64.h"
 #include "llvm/IR/IntrinsicsARM.h"
 #include "llvm/IR/IntrinsicsWebAssembly.h"
+#include "llvm/IR/IntrinsicsX86.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
@@ -4774,12 +4775,15 @@ void Verifier::visitInstruction(Instruction &I) {
                 F->getIntrinsicID() == Intrinsic::experimental_gc_statepoint ||
                 F->getIntrinsicID() ==
                     Intrinsic::aarch64_oxcaml_raise_notrace_edge ||
+                F->getIntrinsicID() ==
+                    Intrinsic::x86_oxcaml_raise_notrace_edge ||
                 F->getIntrinsicID() == Intrinsic::wasm_rethrow ||
                 IsAttachedCallOperand(F, CBI, i),
-            "Cannot invoke an intrinsic other than donothing, patchpoint, "
-            "statepoint, coro_resume, coro_destroy, "
-            "aarch64.oxcaml.raise.notrace.edge or clang.arc.attachedcall",
-            &I);
+                "Cannot invoke an intrinsic other than donothing, patchpoint, "
+                "statepoint, coro_resume, coro_destroy, "
+                "aarch64.oxcaml.raise.notrace.edge, "
+                "x86.oxcaml.raise.notrace.edge or clang.arc.attachedcall",
+                &I);
       Check(F->getParent() == &M, "Referencing function in another module!", &I,
             &M, F, F->getParent());
     } else if (BasicBlock *OpBB = dyn_cast<BasicBlock>(I.getOperand(i))) {

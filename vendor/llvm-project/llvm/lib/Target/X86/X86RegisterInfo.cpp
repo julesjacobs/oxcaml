@@ -41,6 +41,20 @@ using namespace llvm;
 #define GET_REGINFO_TARGET_DESC
 #include "X86GenRegisterInfo.inc"
 
+static bool isOxCamlCallingConv(CallingConv::ID CC) {
+  switch (CC) {
+  case CallingConv::OxCaml_WithFP:
+  case CallingConv::OxCaml_WithoutFP:
+  case CallingConv::OxCaml_C_Call:
+  case CallingConv::OxCaml_C_Call_StackArgs:
+  case CallingConv::OxCaml_C_Direct_Call:
+  case CallingConv::OxCaml_Alloc:
+    return true;
+  default:
+    return false;
+  }
+}
+
 static cl::opt<bool>
 EnableBasePointer("x86-use-base-pointer", cl::Hidden, cl::init(true),
           cl::desc("Enable use of a base pointer for complex stack frames"));
@@ -309,6 +323,8 @@ X86RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
     return CSR_64_OxCaml_C_Call_SaveList;
   case CallingConv::OxCaml_C_Call_StackArgs:
     return CSR_64_OxCaml_C_Call_StackArgs_SaveList;
+  case CallingConv::OxCaml_C_Direct_Call:
+    return IsWin64 ? CSR_Win64_SaveList : CSR_64_SaveList;
   case CallingConv::OxCaml_Alloc:
     return CSR_64_OxCaml_Alloc_SaveList;
   case CallingConv::AnyReg:
@@ -442,6 +458,8 @@ X86RegisterInfo::getCallPreservedMask(const MachineFunction &MF,
     return CSR_64_OxCaml_C_Call_RegMask;
   case CallingConv::OxCaml_C_Call_StackArgs:
     return CSR_64_OxCaml_C_Call_StackArgs_RegMask;
+  case CallingConv::OxCaml_C_Direct_Call:
+    return IsWin64 ? CSR_Win64_RegMask : CSR_64_RegMask;
   case CallingConv::OxCaml_Alloc:
     return CSR_64_OxCaml_Alloc_RegMask;
   case CallingConv::AnyReg:
@@ -548,6 +566,27 @@ const uint32_t *X86RegisterInfo::getDarwinTLSCallPreservedMask() const {
   return CSR_64_TLS_Darwin_RegMask;
 }
 
+static constexpr MCPhysReg OxCamlRuntimeEnteredLiveIns[] = {
+    X86::RAX, X86::R14, X86::R15};
+
+bool X86RegisterInfo::isRuntimeEnteredLiveIn(const MachineFunction &MF,
+                                             MCRegister PhysReg) const {
+  if (!MF.getFunction().hasGC() ||
+      (MF.getFunction().getGC() != "oxcaml" &&
+       MF.getFunction().getGC() != "ocaml"))
+    return false;
+  return is_contained(OxCamlRuntimeEnteredLiveIns, PhysReg);
+}
+
+ArrayRef<MCPhysReg>
+X86RegisterInfo::getRuntimeEnteredLiveIns(const MachineFunction &MF) const {
+  if (!MF.getFunction().hasGC() ||
+      (MF.getFunction().getGC() != "oxcaml" &&
+       MF.getFunction().getGC() != "ocaml"))
+    return {};
+  return OxCamlRuntimeEnteredLiveIns;
+}
+
 BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   BitVector Reserved(getNumRegs());
   const X86FrameLowering *TFI = getFrameLowering(MF);
@@ -571,6 +610,13 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   // Set the instruction pointer register and its aliases as reserved.
   for (const MCPhysReg &SubReg : subregs_inclusive(X86::RIP))
     Reserved.set(SubReg);
+
+  if (isOxCamlCallingConv(MF.getFunction().getCallingConv())) {
+    for (const MCPhysReg &SubReg : subregs_inclusive(X86::R14))
+      Reserved.set(SubReg);
+    for (const MCPhysReg &SubReg : subregs_inclusive(X86::R15))
+      Reserved.set(SubReg);
+  }
 
   // Set the frame-pointer register and its aliases as reserved if needed.
   if (TFI->hasFP(MF)) {
@@ -802,6 +848,22 @@ static bool isFuncletReturnInstr(MachineInstr &MI) {
   llvm_unreachable("impossible");
 }
 
+static bool isBeforeOxCamlTrapRecover(MachineBasicBlock::iterator II) {
+  MachineBasicBlock &MBB = *II->getParent();
+  if (!MBB.isRuntimeEntered())
+    return false;
+
+  for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end(); I != E;
+       ++I) {
+    if (I == II)
+      return true;
+    if (I->getOpcode() == X86::OXCAML_TRAP_RECOVER)
+      return false;
+  }
+
+  return false;
+}
+
 bool
 X86RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
                                      int SPAdj, unsigned FIOperandNum,
@@ -814,6 +876,29 @@ X86RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
                                                : isFuncletReturnInstr(*MBBI);
   const X86FrameLowering *TFI = getFrameLowering(MF);
   int FrameIndex = MI.getOperand(FIOperandNum).getIndex();
+  unsigned Opc = MI.getOpcode();
+
+  if ((Opc == TargetOpcode::STACKMAP || Opc == TargetOpcode::PATCHPOINT ||
+       Opc == TargetOpcode::STATEPOINT) &&
+      isOxCamlCallingConv(MF.getFunction().getCallingConv())) {
+    Register FrameReg;
+    StackOffset Offset = TFI->getFrameIndexReferencePreferSP(
+        MF, FrameIndex, FrameReg, /*IgnoreSPUpdates=*/false);
+    Offset += StackOffset::getFixed(MI.getOperand(FIOperandNum + 1).getImm());
+    if (FrameReg == StackPtr) {
+      const X86MachineFunctionInfo *X86FI =
+          MF.getInfo<X86MachineFunctionInfo>();
+      Offset += StackOffset::getFixed(SPAdj);
+      Offset += StackOffset::getFixed(X86FI->getOxCamlActiveTrapBytes(MI));
+    } else {
+      report_fatal_error("[OxCaml] statepoint stack location did not "
+                         "resolve SP-relative; the frametable cannot "
+                         "describe it");
+    }
+    MI.getOperand(FIOperandNum).ChangeToRegister(FrameReg, false);
+    MI.getOperand(FIOperandNum + 1).ChangeToImmediate(Offset.getFixed());
+    return false;
+  }
 
   // Determine base register and offset.
   int FIOffset;
@@ -824,10 +909,19 @@ X86RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
            "Return instruction can only reference SP relative frame objects");
     FIOffset =
         TFI->getFrameIndexReferenceSP(MF, FrameIndex, BasePtr, 0).getFixed();
+  } else if (isBeforeOxCamlTrapRecover(II)) {
+    FIOffset = TFI->getFrameIndexReferenceSP(
+                     MF, FrameIndex, BasePtr, MF.getFrameInfo().getStackSize())
+                   .getFixed();
   } else if (TFI->Is64Bit && (MBB.isEHFuncletEntry() || IsEHFuncletEpilogue)) {
     FIOffset = TFI->getWin64EHFrameIndexRef(MF, FrameIndex, BasePtr);
   } else {
     FIOffset = TFI->getFrameIndexReference(MF, FrameIndex, BasePtr).getFixed();
+  }
+  if (BasePtr == StackPtr && Opc != TargetOpcode::STACKMAP &&
+      Opc != TargetOpcode::PATCHPOINT && Opc != TargetOpcode::STATEPOINT) {
+    const X86MachineFunctionInfo *X86FI = MF.getInfo<X86MachineFunctionInfo>();
+    FIOffset += X86FI->getOxCamlActiveTrapBytes(MI);
   }
 
   // LOCAL_ESCAPE uses a single offset, with no register. It only works in the
@@ -835,7 +929,6 @@ X86RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   // offset is from the traditional base pointer location.  On 64-bit, the
   // offset is from the SP at the end of the prologue, not the FP location. This
   // matches the behavior of llvm.frameaddress.
-  unsigned Opc = MI.getOpcode();
   if (Opc == TargetOpcode::LOCAL_ESCAPE) {
     MachineOperand &FI = MI.getOperand(FIOperandNum);
     FI.ChangeToImmediate(FIOffset);

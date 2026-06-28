@@ -472,6 +472,8 @@ module Fn_attr = struct
     | Frame_pointer_all
     | Gc of string
     | Gc_leaf_function
+    | No_red_zone
+    | No_realign_stack
     | Noinline
     | Oxcaml_stack_check
     | Oxcaml_stack_check_bytes of int
@@ -484,6 +486,8 @@ module Fn_attr = struct
     | Frame_pointer_all -> {|"frame-pointer"="all"|}
     | Gc s -> Format.sprintf {|gc "%s"|} s
     | Gc_leaf_function -> {|"gc-leaf-function"="true"|}
+    | No_red_zone -> "noredzone"
+    | No_realign_stack -> {|"no-realign-stack"|}
     | Noinline -> "noinline"
     | Oxcaml_stack_check -> {|"oxcaml-stack-check"="true"|}
     | Oxcaml_stack_check_bytes i ->
@@ -500,8 +504,9 @@ module Fn_attr = struct
   let to_string t = Format.asprintf "%a" pp_t t
 
   let order = function
-    | Cold | Frame_pointer_all | Gc_leaf_function | Noinline
-    | Oxcaml_stack_check | Oxcaml_stack_check_bytes _
+    | Cold | Frame_pointer_all | Gc_leaf_function | No_red_zone
+    | No_realign_stack | Noinline | Oxcaml_stack_check
+    | Oxcaml_stack_check_bytes _
     | Oxcaml_stack_check_before_bytes _ | Returns_twice | Statepoint_id _ ->
       0
     | Gc _ -> 10
@@ -1041,6 +1046,10 @@ module Instruction = struct
     assert' "load_volatile" (Value.get_type ptr |> Type.is_ptr);
     Load { ptr; typ; volatile_ = true; atomic = None; align = None }
 
+  let load_volatile_with_align ~align ~ptr ~typ =
+    assert' "load_volatile_with_align" (Value.get_type ptr |> Type.is_ptr);
+    Load { ptr; typ; volatile_ = true; atomic = None; align = Some align }
+
   let load_atomic ~ordering ~ptr ~typ =
     assert' "load_atomic" (Value.get_type ptr |> Type.is_ptr);
     Load { ptr; typ; volatile_ = false; atomic = Some ordering; align = Some 8 }
@@ -1486,6 +1495,10 @@ module Data = struct
           private_ : bool
         }
     | External of string
+    | Probe_semaphore of
+        { name : string;
+          enabled_at_init : bool
+        }
 
   let default_data_section () =
     match Target_system.derived_system () with
@@ -1509,6 +1522,9 @@ module Data = struct
 
   let external_ name = External name
 
+  let probe_semaphore ~name ~enabled_at_init =
+    Probe_semaphore { name; enabled_at_init }
+
   let pp_t ppf = function
     | Constant { name; value; section; align; private_ = _ } ->
       (* CR yusumez: If private global variables are not referenced anywhere
@@ -1529,4 +1545,16 @@ module Data = struct
       (* CR yusumez: We don't need that ptr there... *)
       Format.pp_line ppf "%a = external global ptr" Ident.pp_t
         (Ident.global name)
+    | Probe_semaphore { name; enabled_at_init } ->
+      let linkage_visibility =
+        if Target_system.is_macos () then "" else "weak hidden "
+      in
+      let section =
+        if Target_system.is_macos () then "__TEXT,__probes" else ".probes"
+      in
+      Format.pp_line ppf
+        "%a = %sglobal { i16, i16 } { i16 0, i16 %d }, section %S, align 2"
+        Ident.pp_t (Ident.global name) linkage_visibility
+        (Bool.to_int enabled_at_init)
+        section
 end

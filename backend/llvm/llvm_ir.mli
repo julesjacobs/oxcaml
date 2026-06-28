@@ -202,6 +202,8 @@ module Fn_attr : sig
     | Frame_pointer_all
     | Gc of string
     | Gc_leaf_function
+    | No_red_zone
+    | No_realign_stack
     | Noinline
     | Oxcaml_stack_check
     | Oxcaml_stack_check_bytes of int
@@ -401,6 +403,8 @@ module Instruction : sig
 
   val load_volatile : ptr:Value.t -> typ:Type.t -> op
 
+  val load_volatile_with_align : align:int -> ptr:Value.t -> typ:Type.t -> op
+
   val load_atomic : ordering:atomic_ordering -> ptr:Value.t -> typ:Type.t -> op
 
   val store : ptr:Value.t -> to_store:Value.t -> op
@@ -534,6 +538,8 @@ module Data : sig
     t
 
   val external_ : string -> t
+
+  val probe_semaphore : name:string -> enabled_at_init:bool -> t
 
   val pp_t : Format.formatter -> t -> unit
 end

@@ -3,10 +3,17 @@
 set -eu
 
 build_dir=$(pwd)
+host_arch=$(uname -m)
+host_system=$(uname -s)
 src="$build_dir/poll_statepoint_generated.ml"
 out="$build_dir/poll_statepoint_generated.exe"
 ir="$build_dir/poll_statepoint_generated.ll"
 asm="$build_dir/poll_statepoint_generated.s"
+extra_link_flags=""
+
+case "$host_system:$host_arch" in
+  Linux:x86_64 | Linux:amd64) extra_link_flags="-ccopt -no-pie" ;;
+esac
 
 search_dir=$build_dir
 ocamlopt=""
@@ -26,6 +33,20 @@ if [ -z "$ocamlopt" ]; then
   fi
 fi
 
+stdlib_flags=""
+ocamlopt_dir=$(dirname "$ocamlopt")
+for stdlib_dir in \
+  "$ocamlopt_dir/lib/ocaml" \
+  "$ocamlopt_dir/_install/lib/ocaml" \
+  "$ocamlopt_dir/../lib/ocaml" \
+  "$ocamlopt_dir/../../runtime_stdlib_install/lib/ocaml_runtime_stdlib"
+do
+  if [ -f "$stdlib_dir/stdlib.cmi" ]; then
+    stdlib_flags="-I $stdlib_dir"
+    break
+  fi
+done
+
 cat > "$src" <<'EOF'
 external poll : unit -> unit = "%poll"
 
@@ -36,11 +57,12 @@ let[@inline never] run n =
 let () = Printf.printf "%d\n" (run 41)
 EOF
 
-"$ocamlopt" -g -O3 -S -keep-llvmir -llvm-backend \
+"$ocamlopt" $stdlib_flags -O3 -S -keep-llvmir -llvm-backend \
+  $extra_link_flags \
   -llvm-path "${LLVM_PATH:-/tmp/oxcaml-clang-wrapper}" -o "$out" "$src"
 "$out" > "$build_dir/poll_statepoint_stdout.txt"
 grep -q "^42$" "$build_dir/poll_statepoint_stdout.txt"
-grep -q 'caml_call_gc.*"statepoint-id"="1"' "$ir"
+grep -qE '_?caml_call_gc.*"statepoint-id"="1"' "$ir"
 
 # Poll frames are encoded in the frametable like allocation frames with zero
 # allocation entries.  Check the final assembly too, not only the LLVM IR.

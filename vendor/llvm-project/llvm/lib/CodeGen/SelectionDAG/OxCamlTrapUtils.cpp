@@ -17,6 +17,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/IntrinsicsAArch64.h"
+#include "llvm/IR/IntrinsicsX86.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/Support/Casting.h"
 
@@ -32,7 +33,8 @@ static const Value *getOxCamlTrapRecoveryTarget(const IntrinsicInst &II) {
   unsigned RecoveryTargetOp;
   if (II.getIntrinsicID() == Intrinsic::aarch64_oxcaml_trap_publish)
     RecoveryTargetOp = 2;
-  else if (II.getIntrinsicID() == Intrinsic::aarch64_oxcaml_push_trap)
+  else if (II.getIntrinsicID() == Intrinsic::aarch64_oxcaml_push_trap ||
+           II.getIntrinsicID() == Intrinsic::x86_oxcaml_push_trap)
     RecoveryTargetOp = 0;
   else
     return nullptr;
@@ -145,7 +147,7 @@ getOxCamlTrapRecoverAtBlockStart(const Function &F, const BasicBlock &BB) {
     if (isa<PHINode>(I) || I.isDebugOrPseudoInst())
       continue;
     const auto *II = dyn_cast<IntrinsicInst>(&I);
-    if (II && isAArch64OxCamlTrapRecover(II))
+    if (II && isOxCamlTrapRecover(II))
       return II;
     if (!isAllowedBeforeTrapRecover(F, BB, I))
       return nullptr;
@@ -182,16 +184,17 @@ bool llvm::isOxCamlGCFunction(const Function &F) {
   return F.hasGC() && (F.getGC() == "oxcaml" || F.getGC() == "ocaml");
 }
 
-bool llvm::isAArch64OxCamlTrapPublish(const Instruction *I) {
+bool llvm::isOxCamlTrapPublish(const Instruction *I) {
   const auto *II = dyn_cast_or_null<IntrinsicInst>(I);
-  return II &&
-         II->getIntrinsicID() == Intrinsic::aarch64_oxcaml_trap_publish;
+  return II && (II->getIntrinsicID() == Intrinsic::aarch64_oxcaml_trap_publish ||
+                II->getIntrinsicID() == Intrinsic::x86_oxcaml_push_trap);
 }
 
-bool llvm::isAArch64OxCamlTrapRecover(const Instruction *I) {
+bool llvm::isOxCamlTrapRecover(const Instruction *I) {
   const auto *II = dyn_cast_or_null<IntrinsicInst>(I);
   return II &&
-         II->getIntrinsicID() == Intrinsic::aarch64_oxcaml_trap_recover;
+         (II->getIntrinsicID() == Intrinsic::aarch64_oxcaml_trap_recover ||
+          II->getIntrinsicID() == Intrinsic::x86_oxcaml_trap_recover);
 }
 
 const LandingPadInst *
@@ -212,7 +215,7 @@ llvm::getOxCamlTrapRecoverAfterLandingPad(const BasicBlock &BB) {
     if (&I == LP || I.isDebugOrPseudoInst())
       continue;
     const auto *II = dyn_cast<IntrinsicInst>(&I);
-    if (II && isAArch64OxCamlTrapRecover(II))
+    if (II && isOxCamlTrapRecover(II))
       return II;
     if (!isAllowedBeforeTrapRecover(*BB.getParent(), BB, I))
       return nullptr;
@@ -367,7 +370,8 @@ bool llvm::hasOxCamlPushTrapTargeting(const Function &F,
     for (const Instruction &I : BB) {
       const auto *II = dyn_cast<IntrinsicInst>(&I);
       if (!II ||
-          II->getIntrinsicID() != Intrinsic::aarch64_oxcaml_push_trap)
+          (II->getIntrinsicID() != Intrinsic::aarch64_oxcaml_push_trap &&
+           II->getIntrinsicID() != Intrinsic::x86_oxcaml_push_trap))
         continue;
       const auto *BA = dyn_cast<BlockAddress>(
           II->getArgOperand(0)->stripPointerCasts());

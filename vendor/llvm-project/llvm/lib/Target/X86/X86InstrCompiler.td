@@ -31,6 +31,61 @@ let hasSideEffects = 0, isNotDuplicable = 1, Uses = [ESP, SSP],
   def MOVPC32r : Ii32<0xE8, Pseudo, (outs GR32:$reg), (ins i32imm:$label),
                       "", []>;
 
+// In-place statepoint relocate: the post-statepoint incarnation of a GC value.
+// Keep it opaque through machine-SSA optimizers; the generic OxCaml relocate
+// lowering rewrites it to a COPY immediately before register coalescing.
+let hasSideEffects = 1, isCodeGenOnly = 1, isPseudo = 1 in
+def OXCAML_RELOCATE : I<0, Pseudo, (outs GR64:$dst), (ins GR64:$src),
+                        "# OXCAML_RELOCATE",
+                        [(set GR64:$dst,
+                              (int_oxcaml_relocated GR64:$src))]>,
+                       Requires<[In64BitMode]>, Sched<[WriteMove]>;
+
+let hasSideEffects = 1, mayLoad = 1, mayStore = 1, isCodeGenOnly = 1,
+    isPseudo = 1,
+    Uses = [RSP, R14], Defs = [RSP, R11] in
+def OXCAML_PUSH_TRAP : I<0, Pseudo, (outs), (ins brtarget:$recovery_target),
+                         "# OXCAML_PUSH_TRAP", []>,
+                       Requires<[In64BitMode]>, Sched<[WriteStore]>;
+
+let hasSideEffects = 1, mayLoad = 1, mayStore = 1, isCodeGenOnly = 1,
+    isPseudo = 1,
+    Uses = [RSP, R14], Defs = [RSP] in
+def OXCAML_PUSH_TRAP_DEAD : I<0, Pseudo, (outs), (ins),
+                              "# OXCAML_PUSH_TRAP_DEAD", []>,
+                            Requires<[In64BitMode]>, Sched<[WriteStore]>;
+
+let hasSideEffects = 1, mayLoad = 1, mayStore = 1,
+    isBarrier = 1, isCodeGenOnly = 1, isPseudo = 1,
+    Uses = [RSP], Defs = [RBP] in
+def OXCAML_TRAP_RECOVER : I<0, Pseudo, (outs), (ins i32imm:$outer_trap_bytes),
+                            "# OXCAML_TRAP_RECOVER", []>,
+                          Requires<[In64BitMode]>, Sched<[WriteLEA]>;
+
+let hasSideEffects = 1, mayLoad = 1, mayStore = 1, isCodeGenOnly = 1,
+    isPseudo = 1,
+    Uses = [RSP, R14], Defs = [RSP, R11] in
+def OXCAML_POP_TRAP : I<0, Pseudo, (outs), (ins),
+                        "# OXCAML_POP_TRAP", []>,
+                      Requires<[In64BitMode]>, Sched<[WriteLoad]>;
+
+let hasSideEffects = 1, mayLoad = 1, mayStore = 1, isCodeGenOnly = 1,
+    isPseudo = 1,
+    isTerminator = 1, isBarrier = 1, isIndirectBranch = 1,
+    Uses = [R14, R15], Defs = [RAX, RSP, R11] in
+def OXCAML_RAISE_NOTRACE : I<0, Pseudo, (outs), (ins GR64:$exn_bucket),
+                            "# OXCAML_RAISE_NOTRACE", []>,
+                          Requires<[In64BitMode]>, Sched<[WriteJump]>;
+
+let hasSideEffects = 1, mayLoad = 1, mayStore = 1, isCodeGenOnly = 1,
+    isPseudo = 1,
+    isTerminator = 1, isBarrier = 1, isBranch = 1, isIndirectBranch = 1,
+    Uses = [R14, R15], Defs = [RAX, RSP, R11] in
+def OXCAML_RAISE_NOTRACE_EDGE
+    : I<0, Pseudo, (outs), (ins GR64:$exn_bucket, brtarget:$recovery_target),
+        "# OXCAML_RAISE_NOTRACE_EDGE", []>,
+      Requires<[In64BitMode]>, Sched<[WriteJump]>;
+
 // ADJCALLSTACKDOWN/UP implicitly use/def ESP because they may be expanded into
 // a stack adjustment and the codegen must know that they may modify the stack
 // pointer before prolog-epilog rewriting occurs.
@@ -1291,6 +1346,11 @@ def : Pat<(X86call (i64 tglobaladdr:$dst)),
           (CALL64pcrel32 tglobaladdr:$dst)>;
 def : Pat<(X86call (i64 texternalsym:$dst)),
           (CALL64pcrel32 texternalsym:$dst)>;
+
+def : Pat<(X86oxcaml_c_direct_call (i64 tglobaladdr:$dst)),
+          (CALL64pcrel32_OXCAML_C_DIRECT tglobaladdr:$dst)>;
+def : Pat<(X86oxcaml_c_direct_call (i64 texternalsym:$dst)),
+          (CALL64pcrel32_OXCAML_C_DIRECT texternalsym:$dst)>;
 
 def : Pat<(X86call_rvmarker (i64 tglobaladdr:$rvfunc), (i64 texternalsym:$dst)),
           (CALL64pcrel32_RVMARKER tglobaladdr:$rvfunc, texternalsym:$dst)>;

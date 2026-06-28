@@ -17,6 +17,7 @@
 #include "X86Subtarget.h"
 #include "X86TargetMachine.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/CodeGen/FunctionLoweringInfo.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/Config/llvm-config.h"
@@ -4784,6 +4785,43 @@ void X86DAGToDAGISel::Select(SDNode *Node) {
     unsigned IntNo = Node->getConstantOperandVal(1);
     switch (IntNo) {
     default: break;
+    case Intrinsic::x86_oxcaml_trap_recover: {
+      SDValue Chain = Node->getOperand(0);
+      uint64_t OuterTrapBytes = Node->getConstantOperandVal(2);
+      if (!FuncInfo->MBB->isRuntimeEntered()) {
+        std::string BlockName;
+        raw_string_ostream OS(BlockName);
+        FuncInfo->MBB->printName(OS);
+        report_fatal_error(
+            Twine("trap recovery intrinsic must be in a runtime-entered ABI "
+                  "block: ") +
+            OS.str());
+      }
+      FuncInfo->MBB->addLiveIn(X86::RAX);
+      FuncInfo->MBB->addLiveIn(X86::R14);
+      FuncInfo->MBB->addLiveIn(X86::R15);
+      SDNode *Recover =
+          CurDAG->getMachineNode(X86::OXCAML_TRAP_RECOVER, dl, MVT::Other,
+                                 CurDAG->getTargetConstant(OuterTrapBytes, dl,
+                                                           MVT::i32),
+                                 Chain);
+      Chain = SDValue(Recover, 0);
+      SDValue Bucket = CurDAG->getCopyFromReg(Chain, dl, X86::RAX, MVT::i64);
+      Chain = Bucket.getValue(1);
+      SDValue PrevTrap = CurDAG->getCopyFromReg(Chain, dl, X86::RAX, MVT::i64);
+      Chain = PrevTrap.getValue(1);
+      SDValue Alloc = CurDAG->getCopyFromReg(Chain, dl, X86::R15, MVT::i64);
+      Chain = Alloc.getValue(1);
+      SDValue Domain = CurDAG->getCopyFromReg(Chain, dl, X86::R14, MVT::i64);
+      Chain = Domain.getValue(1);
+      ReplaceUses(SDValue(Node, 0), Bucket);
+      ReplaceUses(SDValue(Node, 1), PrevTrap);
+      ReplaceUses(SDValue(Node, 2), Alloc);
+      ReplaceUses(SDValue(Node, 3), Domain);
+      ReplaceUses(SDValue(Node, 4), Chain);
+      CurDAG->RemoveDeadNode(Node);
+      return;
+    }
     case Intrinsic::x86_encodekey128:
     case Intrinsic::x86_encodekey256: {
       if (!Subtarget->hasKL())
@@ -4843,6 +4881,64 @@ void X86DAGToDAGISel::Select(SDNode *Node) {
     unsigned IntNo = Node->getConstantOperandVal(1);
     switch (IntNo) {
     default: break;
+    case Intrinsic::x86_oxcaml_push_trap: {
+      SDValue Chain = Node->getOperand(0);
+      SDValue RecoveryTarget = Node->getOperand(2);
+      if (auto *RecoveryBB = dyn_cast<BasicBlockSDNode>(RecoveryTarget)) {
+        SDValue Ops[] = {CurDAG->getBasicBlock(RecoveryBB->getBasicBlock()),
+                         Chain};
+        CurDAG->SelectNodeTo(Node, X86::OXCAML_PUSH_TRAP, MVT::Other, Ops);
+        return;
+      }
+      if (auto *DeadTarget = dyn_cast<ConstantSDNode>(RecoveryTarget);
+          DeadTarget && DeadTarget->isZero()) {
+        SDValue Ops[] = {Chain};
+        CurDAG->SelectNodeTo(Node, X86::OXCAML_PUSH_TRAP_DEAD, MVT::Other, Ops);
+        return;
+      }
+      report_fatal_error(
+          "OxCaml push trap recovery target must be a machine basic block");
+      return;
+    }
+    case Intrinsic::x86_oxcaml_pop_trap: {
+      SDValue Chain = Node->getOperand(0);
+      SDValue Ops[] = {Chain};
+      CurDAG->SelectNodeTo(Node, X86::OXCAML_POP_TRAP, MVT::Other, Ops);
+      return;
+    }
+    case Intrinsic::x86_oxcaml_raise_notrace: {
+      SDValue Chain = Node->getOperand(0);
+      SDValue ExnBucket = Node->getOperand(2);
+      SDValue Ds = Node->getOperand(3);
+      SDValue Alloc = Node->getOperand(4);
+      Chain = CurDAG->getCopyToReg(Chain, dl, X86::R14, Ds, SDValue());
+      Chain = CurDAG->getCopyToReg(Chain, dl, X86::R15, Alloc,
+                                   Chain.getValue(1));
+      SDValue Ops[] = {ExnBucket, Chain, Chain.getValue(1)};
+      CurDAG->SelectNodeTo(Node, X86::OXCAML_RAISE_NOTRACE, MVT::Other, Ops);
+      return;
+    }
+    case Intrinsic::x86_oxcaml_raise_notrace_edge: {
+      SDValue Chain = Node->getOperand(0);
+      SDValue ExnBucket = Node->getOperand(2);
+      SDValue Ds = Node->getOperand(3);
+      SDValue Alloc = Node->getOperand(4);
+      SDValue RecoveryTarget = Node->getOperand(5);
+      if (auto *RecoveryBB = dyn_cast<BasicBlockSDNode>(RecoveryTarget)) {
+        Chain = CurDAG->getCopyToReg(Chain, dl, X86::R14, Ds, SDValue());
+        Chain = CurDAG->getCopyToReg(Chain, dl, X86::R15, Alloc,
+                                     Chain.getValue(1));
+        SDValue Ops[] = {ExnBucket,
+                         CurDAG->getBasicBlock(RecoveryBB->getBasicBlock()),
+                         Chain, Chain.getValue(1)};
+        CurDAG->SelectNodeTo(Node, X86::OXCAML_RAISE_NOTRACE_EDGE, MVT::Other,
+                             Ops);
+        return;
+      }
+      report_fatal_error(
+          "OxCaml raise-notrace edge target must be a machine basic block");
+      return;
+    }
     case Intrinsic::x86_sse3_monitor:
     case Intrinsic::x86_monitorx:
     case Intrinsic::x86_clzero: {

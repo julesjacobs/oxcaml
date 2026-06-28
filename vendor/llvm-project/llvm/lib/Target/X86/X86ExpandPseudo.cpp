@@ -20,15 +20,68 @@
 #include "X86Subtarget.h"
 #include "llvm/Analysis/EHPersonalities.h"
 #include "llvm/CodeGen/LivePhysRegs.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/Passes.h" // For IDs of passes that are preserved.
+#include "llvm/CodeGen/StackMaps.h"
 #include "llvm/IR/GlobalValue.h"
+#include "llvm/MC/MCAsmInfo.h"
+#include "llvm/MC/MCDwarf.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Target/TargetMachine.h"
 using namespace llvm;
 
 #define DEBUG_TYPE "x86-pseudo"
 #define X86_EXPAND_PSEUDO_NAME "X86 pseudo instruction expansion pass"
+
+static constexpr int64_t OxCamlDomainExnHandlerOffset = 48;
+
+static bool isOxCamlCallingConv(CallingConv::ID CC) {
+  switch (CC) {
+  case CallingConv::OxCaml_WithFP:
+  case CallingConv::OxCaml_WithoutFP:
+  case CallingConv::OxCaml_C_Call:
+  case CallingConv::OxCaml_C_Call_StackArgs:
+  case CallingConv::OxCaml_C_Direct_Call:
+  case CallingConv::OxCaml_Alloc:
+    return true;
+  default:
+    return false;
+  }
+}
+
+static void buildCFIAdjustCfaOffset(MachineBasicBlock &MBB,
+                                    MachineBasicBlock::iterator MBBI,
+                                    const DebugLoc &DL, const X86InstrInfo *TII,
+                                    int Offset) {
+  MachineFunction &MF = *MBB.getParent();
+  unsigned CFIIndex =
+      MF.addFrameInst(MCCFIInstruction::createAdjustCfaOffset(nullptr, Offset));
+  BuildMI(MBB, MBBI, DL, TII->get(TargetOpcode::CFI_INSTRUCTION))
+      .addCFIIndex(CFIIndex);
+}
+
+static bool isCamlRaiseExnLikeName(StringRef Name) {
+  Name.consume_front("\01");
+  return Name == "caml_raise_exn" || Name == "caml_reraise_exn";
+}
+
+static bool isCamlRaiseExnLikeStatepoint(const MachineInstr &MI) {
+  if (MI.getOpcode() != TargetOpcode::STATEPOINT)
+    return false;
+  const MachineOperand &Target = StatepointOpers(&MI).getCallTarget();
+  if (Target.isGlobal())
+    return isCamlRaiseExnLikeName(Target.getGlobal()->getName());
+  if (Target.isSymbol())
+    return isCamlRaiseExnLikeName(Target.getSymbolName());
+  return false;
+}
+
+static bool needsDwarfCFI(const MachineFunction &MF) {
+  return !MF.getTarget().getMCAsmInfo()->usesWindowsCFI() &&
+         MF.needsFrameMoves();
+}
 
 namespace {
 class X86ExpandPseudo : public MachineFunctionPass {
@@ -65,8 +118,21 @@ private:
                                MachineBasicBlock::iterator MBBI);
   void expandCALL_RVMARKER(MachineBasicBlock &MBB,
                            MachineBasicBlock::iterator MBBI);
+  void expandOXCAML_C_DIRECT_CALL(MachineBasicBlock &MBB,
+                                  MachineBasicBlock::iterator MBBI);
+  void expandOXCAML_PUSH_TRAP(MachineBasicBlock &MBB,
+                              MachineBasicBlock::iterator MBBI);
+  void expandOXCAML_PUSH_TRAP_DEAD(MachineBasicBlock &MBB,
+                                   MachineBasicBlock::iterator MBBI);
+  void expandOXCAML_TRAP_RECOVER(MachineBasicBlock &MBB,
+                                 MachineBasicBlock::iterator MBBI);
+  void expandOXCAML_POP_TRAP(MachineBasicBlock &MBB,
+                             MachineBasicBlock::iterator MBBI);
+  void expandOXCAML_RAISE_NOTRACE(MachineBasicBlock &MBB,
+                                  MachineBasicBlock::iterator MBBI);
   bool ExpandMI(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI);
   bool ExpandMBB(MachineBasicBlock &MBB);
+  bool useOxCamlRspBasedCFI(const MachineFunction &MF) const;
 
   /// This function expands pseudos which affects control flow.
   /// It is done in separate pass to simplify blocks navigation in main
@@ -256,6 +322,200 @@ void X86ExpandPseudo::expandCALL_RVMARKER(MachineBasicBlock &MBB,
                    std::next(RtCall->getIterator()));
 }
 
+void X86ExpandPseudo::expandOXCAML_C_DIRECT_CALL(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI) {
+  MachineInstr &MI = *MBBI;
+  const DebugLoc &DL = MI.getDebugLoc();
+  MachineFunction &MF = *MBB.getParent();
+
+  unsigned CallOpc;
+  unsigned FirstCallExtraOp;
+  switch (MI.getOpcode()) {
+  case X86::CALL64m_OXCAML_C_DIRECT:
+  {
+    MachineInstrBuilder MIB =
+        BuildMI(MBB, MBBI, DL, TII->get(X86::MOV64rm), X86::R11);
+    for (unsigned I = 0; I != X86::AddrNumOperands; ++I)
+      MIB.add(MI.getOperand(I));
+    CallOpc = X86::CALL64r;
+    FirstCallExtraOp = X86::AddrNumOperands;
+    break;
+  }
+  case X86::CALL64r_OXCAML_C_DIRECT:
+    BuildMI(MBB, MBBI, DL, TII->get(X86::MOV64rr), X86::R11)
+        .add(MI.getOperand(0));
+    CallOpc = X86::CALL64r;
+    FirstCallExtraOp = 1;
+    break;
+  case X86::CALL64pcrel32_OXCAML_C_DIRECT:
+    CallOpc = X86::CALL64pcrel32;
+    FirstCallExtraOp = 1;
+    break;
+  default:
+    llvm_unreachable("unexpected opcode");
+  }
+
+  MachineInstr *First =
+      BuildMI(MBB, MBBI, DL, TII->get(X86::MOV64rr), X86::R13)
+          .addReg(X86::RSP)
+          .getInstr();
+
+  unsigned RememberState =
+      MF.addFrameInst(MCCFIInstruction::createRememberState(nullptr));
+  BuildMI(MBB, MBBI, DL, TII->get(TargetOpcode::CFI_INSTRUCTION))
+      .addCFIIndex(RememberState);
+
+  unsigned DwarfR13 = TRI->getDwarfRegNum(X86::R13, true);
+  unsigned DefCfaR13 =
+      MF.addFrameInst(MCCFIInstruction::createDefCfaRegister(nullptr, DwarfR13));
+  BuildMI(MBB, MBBI, DL, TII->get(TargetOpcode::CFI_INSTRUCTION))
+      .addCFIIndex(DefCfaR13);
+
+  // Domain_c_stack is field 13 in runtime/caml/domain_state.tbl.
+  addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::MOV64rm), X86::RSP),
+               X86::R14, false, 13 * 8);
+
+  MachineInstr *Call = BuildMI(MBB, MBBI, DL, TII->get(CallOpc)).getInstr();
+  if (MI.getOpcode() == X86::CALL64m_OXCAML_C_DIRECT ||
+      MI.getOpcode() == X86::CALL64r_OXCAML_C_DIRECT)
+    Call->addOperand(MachineOperand::CreateReg(X86::R11, false));
+  else
+    Call->addOperand(MI.getOperand(0));
+  for (unsigned I = FirstCallExtraOp, E = MI.getNumOperands(); I != E; ++I) {
+    const MachineOperand &MO = MI.getOperand(I);
+    if (MO.isReg() && MO.isDef() && MO.isImplicit() && MO.getReg() == X86::R13)
+      continue;
+    Call->addOperand(MI.getOperand(I));
+  }
+  Call->setCFIType(MF, MI.getCFIType());
+
+  MachineInstr *Last =
+      BuildMI(MBB, MBBI, DL, TII->get(X86::MOV64rr), X86::RSP)
+          .addReg(X86::R13)
+          .getInstr();
+
+  unsigned RestoreState =
+      MF.addFrameInst(MCCFIInstruction::createRestoreState(nullptr));
+  BuildMI(MBB, MBBI, DL, TII->get(TargetOpcode::CFI_INSTRUCTION))
+      .addCFIIndex(RestoreState);
+
+  if (MI.shouldUpdateCallSiteInfo())
+    MBB.getParent()->moveCallSiteInfo(&MI, Call);
+
+  MI.eraseFromParent();
+  finalizeBundle(MBB, First->getIterator(), std::next(Last->getIterator()));
+}
+
+bool X86ExpandPseudo::useOxCamlRspBasedCFI(const MachineFunction &MF) const {
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  return isOxCamlCallingConv(MF.getFunction().getCallingConv()) &&
+         needsDwarfCFI(MF) && X86FL->hasFP(MF) &&
+         !TRI->hasStackRealignment(MF) && !MFI.hasVarSizedObjects();
+}
+
+void X86ExpandPseudo::expandOXCAML_PUSH_TRAP(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI) {
+  MachineInstr &MI = *MBBI;
+  const DebugLoc &DL = MI.getDebugLoc();
+  MachineBasicBlock *RecoveryMBB = MI.getOperand(0).getMBB();
+  bool NeedsTrapCFI = useOxCamlRspBasedCFI(*MBB.getParent());
+
+  BuildMI(MBB, MBBI, DL, TII->get(X86::LEA64r), X86::R11)
+      .addReg(X86::RIP)
+      .addImm(1)
+      .addReg(0)
+      .addMBB(RecoveryMBB)
+      .addReg(0);
+  BuildMI(MBB, MBBI, DL, TII->get(X86::PUSH64r)).addReg(X86::R11);
+  if (NeedsTrapCFI)
+    buildCFIAdjustCfaOffset(MBB, MBBI, DL, TII, 8);
+  addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::PUSH64rmm)), X86::R14,
+               false, OxCamlDomainExnHandlerOffset);
+  if (NeedsTrapCFI)
+    buildCFIAdjustCfaOffset(MBB, MBBI, DL, TII, 8);
+  addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::MOV64mr)), X86::R14,
+               false, OxCamlDomainExnHandlerOffset)
+      .addReg(X86::RSP);
+
+  MI.eraseFromParent();
+}
+
+void X86ExpandPseudo::expandOXCAML_PUSH_TRAP_DEAD(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI) {
+  MachineInstr &MI = *MBBI;
+  const DebugLoc &DL = MI.getDebugLoc();
+  bool NeedsTrapCFI = useOxCamlRspBasedCFI(*MBB.getParent());
+
+  BuildMI(MBB, MBBI, DL, TII->get(X86::PUSH64i8)).addImm(0);
+  if (NeedsTrapCFI)
+    buildCFIAdjustCfaOffset(MBB, MBBI, DL, TII, 8);
+  addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::PUSH64rmm)), X86::R14,
+               false, OxCamlDomainExnHandlerOffset);
+  if (NeedsTrapCFI)
+    buildCFIAdjustCfaOffset(MBB, MBBI, DL, TII, 8);
+  addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::MOV64mr)), X86::R14,
+               false, OxCamlDomainExnHandlerOffset)
+      .addReg(X86::RSP);
+
+  MI.eraseFromParent();
+}
+
+void X86ExpandPseudo::expandOXCAML_TRAP_RECOVER(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI) {
+  MachineInstr &MI = *MBBI;
+  const DebugLoc &DL = MI.getDebugLoc();
+  MachineFunction &MF = *MBB.getParent();
+  uint64_t OuterTrapBytes = MI.getOperand(0).getImm();
+  uint64_t StackSize = MF.getFrameInfo().getStackSize();
+  if (StackSize < 8)
+    report_fatal_error("OxCaml trap recovery requires an AMD64 frame");
+  uint64_t RestoreOffset = StackSize - 8 + OuterTrapBytes;
+
+  BuildMI(MBB, MBBI, DL, TII->get(X86::LEA64r), X86::RBP)
+      .addReg(X86::RSP)
+      .addImm(1)
+      .addReg(0)
+      .addImm(RestoreOffset)
+      .addReg(0);
+
+  MI.eraseFromParent();
+}
+
+void X86ExpandPseudo::expandOXCAML_POP_TRAP(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI) {
+  MachineInstr &MI = *MBBI;
+  const DebugLoc &DL = MI.getDebugLoc();
+  bool NeedsTrapCFI = useOxCamlRspBasedCFI(*MBB.getParent());
+
+  addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::POP64rmm)), X86::R14,
+               false, OxCamlDomainExnHandlerOffset);
+  if (NeedsTrapCFI)
+    buildCFIAdjustCfaOffset(MBB, MBBI, DL, TII, -8);
+  BuildMI(MBB, MBBI, DL, TII->get(X86::POP64r), X86::R11);
+  if (NeedsTrapCFI)
+    buildCFIAdjustCfaOffset(MBB, MBBI, DL, TII, -8);
+
+  MI.eraseFromParent();
+}
+
+void X86ExpandPseudo::expandOXCAML_RAISE_NOTRACE(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI) {
+  MachineInstr &MI = *MBBI;
+  const DebugLoc &DL = MI.getDebugLoc();
+  Register ExnBucket = MI.getOperand(0).getReg();
+
+  if (ExnBucket != X86::RAX)
+    BuildMI(MBB, MBBI, DL, TII->get(X86::MOV64rr), X86::RAX).addReg(ExnBucket);
+  addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::MOV64rm), X86::RSP),
+               X86::R14, false, OxCamlDomainExnHandlerOffset);
+  addRegOffset(BuildMI(MBB, MBBI, DL, TII->get(X86::POP64rmm)), X86::R14,
+               false, OxCamlDomainExnHandlerOffset);
+  BuildMI(MBB, MBBI, DL, TII->get(X86::POP64r), X86::R11);
+  BuildMI(MBB, MBBI, DL, TII->get(X86::JMP64r)).addReg(X86::R11);
+
+  MI.eraseFromParent();
+}
+
 /// If \p MBBI is a pseudo instruction, this method expands
 /// it to the corresponding (sequence of) actual instruction(s).
 /// \returns true if \p MBBI has been expanded.
@@ -267,6 +527,27 @@ bool X86ExpandPseudo::ExpandMI(MachineBasicBlock &MBB,
   switch (Opcode) {
   default:
     return false;
+  case X86::CALL64m_OXCAML_C_DIRECT:
+  case X86::CALL64r_OXCAML_C_DIRECT:
+  case X86::CALL64pcrel32_OXCAML_C_DIRECT:
+    expandOXCAML_C_DIRECT_CALL(MBB, MBBI);
+    return true;
+  case X86::OXCAML_PUSH_TRAP:
+    expandOXCAML_PUSH_TRAP(MBB, MBBI);
+    return true;
+  case X86::OXCAML_PUSH_TRAP_DEAD:
+    expandOXCAML_PUSH_TRAP_DEAD(MBB, MBBI);
+    return true;
+  case X86::OXCAML_TRAP_RECOVER:
+    expandOXCAML_TRAP_RECOVER(MBB, MBBI);
+    return true;
+  case X86::OXCAML_POP_TRAP:
+    expandOXCAML_POP_TRAP(MBB, MBBI);
+    return true;
+  case X86::OXCAML_RAISE_NOTRACE:
+  case X86::OXCAML_RAISE_NOTRACE_EDGE:
+    expandOXCAML_RAISE_NOTRACE(MBB, MBBI);
+    return true;
   case X86::TCRETURNdi:
   case X86::TCRETURNdicc:
   case X86::TCRETURNri:
@@ -712,7 +993,15 @@ bool X86ExpandPseudo::ExpandMBB(MachineBasicBlock &MBB) {
   MachineBasicBlock::iterator MBBI = MBB.begin(), E = MBB.end();
   while (MBBI != E) {
     MachineBasicBlock::iterator NMBBI = std::next(MBBI);
+    DebugLoc DL = MBBI->getDebugLoc();
+    bool AddPostRaiseNop =
+        isOxCamlCallingConv(MBB.getParent()->getFunction().getCallingConv()) &&
+        isCamlRaiseExnLikeStatepoint(*MBBI);
     Modified |= ExpandMI(MBB, MBBI);
+    if (AddPostRaiseNop) {
+      BuildMI(MBB, NMBBI, DL, TII->get(X86::NOOP));
+      Modified = true;
+    }
     MBBI = NMBBI;
   }
 

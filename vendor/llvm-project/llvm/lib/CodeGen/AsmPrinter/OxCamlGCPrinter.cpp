@@ -29,6 +29,7 @@
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
+#include "llvm/Target/TargetMachine.h"
 #include <array>
 #include <cctype>
 #include <cstddef>
@@ -122,22 +123,28 @@ void OxCamlGCMetadataPrinter::finishAssembly(Module &M, GCModuleInfo &Info,
 // TODO: This is target-specific and should probably live in a
 // target-specific location.
 
-// Directly taken from [Reg_class.gpr_dwarf_reg_numbers]:
-// https://github.com/oxcaml/oxcaml/blob/main/backend/amd64/reg_class.ml#L26
-// Note that R14 and R15 are added for completeness
-static constexpr std::array<unsigned, 16> GPR_OxCamlToDwarf =
-  { 0, 3, 5, 4, 1, 2, 8, 9, 12, 13, 10, 11, 6, 14, 15 };
-
-static constexpr auto GPR_DwarfToOxCaml = []() {
-  std::array<unsigned, 16> result{};
-  for (size_t ocaml_idx = 0; ocaml_idx < GPR_OxCamlToDwarf.size(); ++ocaml_idx) {
-    unsigned dwarf_reg = GPR_OxCamlToDwarf[ocaml_idx];
-    if (dwarf_reg < result.size()) {
-      result[dwarf_reg] = ocaml_idx;
-    }
-  }
-  return result;
-}();
+// This must match runtime/amd64.S:SAVE_ALL_REGS.  R14 and R15 are runtime
+// registers and are not saved as scannable gc_regs roots.
+static constexpr unsigned NoOxCamlGPRIndex =
+    std::numeric_limits<unsigned>::max();
+static constexpr std::array<unsigned, 16> GPR_DwarfToOxCaml = {
+    0,                 // RAX
+    4,                 // RDX
+    5,                 // RCX
+    1,                 // RBX
+    3,                 // RSI
+    2,                 // RDI
+    12,                // RBP
+    NoOxCamlGPRIndex,  // RSP
+    6,                 // R8
+    7,                 // R9
+    10,                // R10
+    11,                // R11
+    8,                 // R12
+    9,                 // R13
+    NoOxCamlGPRIndex,  // R14
+    NoOxCamlGPRIndex,  // R15
+};
 
 static const unsigned XMMBeginOxCaml = 100;
 static const unsigned XMMBeginDwarf = 17;
@@ -145,13 +152,14 @@ static const unsigned XMMEndDwarf = 32;
 
 static unsigned mapX86DwarfRegToOxCamlIndex(unsigned DwarfRegNum) {
   if (DwarfRegNum < GPR_DwarfToOxCaml.size()) {
-    return GPR_DwarfToOxCaml[DwarfRegNum];
+    unsigned OxCamlIndex = GPR_DwarfToOxCaml[DwarfRegNum];
+    if (OxCamlIndex != NoOxCamlGPRIndex)
+      return OxCamlIndex;
   } else if (XMMBeginDwarf <= DwarfRegNum && DwarfRegNum <= XMMEndDwarf) {
     return DwarfRegNum - XMMBeginDwarf + XMMBeginOxCaml;
-  } else {
-    report_fatal_error("[OxCamlGCPrinter] unrecognised DWARF register: "
-      + Twine(DwarfRegNum));
   }
+  report_fatal_error("[OxCamlGCPrinter] x86 register has no OxCaml gc_regs "
+                     "root slot: " + Twine(DwarfRegNum));
 }
 
 static unsigned mapAArch64DwarfRegToOxCamlIndex(unsigned DwarfRegNum) {
@@ -169,9 +177,8 @@ static unsigned mapAArch64DwarfRegToOxCamlIndex(unsigned DwarfRegNum) {
   }
 }
 
-static unsigned mapLLVMDwarfRegToOxCamlIndex(const Module &M,
+static unsigned mapLLVMDwarfRegToOxCamlIndex(const Triple &TheTriple,
                                              unsigned DwarfRegNum) {
-  Triple TheTriple(M.getTargetTriple());
   switch (TheTriple.getArch()) {
   case Triple::x86_64:
     return mapX86DwarfRegToOxCamlIndex(DwarfRegNum);
@@ -180,7 +187,7 @@ static unsigned mapLLVMDwarfRegToOxCamlIndex(const Module &M,
     return mapAArch64DwarfRegToOxCamlIndex(DwarfRegNum);
   default:
     report_fatal_error("[OxCamlGCPrinter] unsupported target: "
-      + Twine(M.getTargetTriple()));
+      + Twine(TheTriple.str()));
   }
 }
 
@@ -189,10 +196,13 @@ static uint64_t stackOffsetOfID(uint64_t ID, bool IsAArch64) {
   return ID & ((1ull << 16) - 1) & Mask;
 }
 
-static uint64_t activeTrapBytesOfID(uint64_t ID, bool IsAArch64) {
-  if (!IsAArch64)
-    return 0;
-  return ((ID >> 1) & 7ull) * 16;
+static uint64_t activeTrapBytesOfID(uint64_t ID, const Triple &TheTriple) {
+  if (TheTriple.getArch() == Triple::aarch64 ||
+      TheTriple.getArch() == Triple::aarch64_32)
+    return ((ID >> 1) & 7ull) * 16;
+  if (TheTriple.getArch() == Triple::x86_64)
+    return ((ID >> 32) & 7ull) * 16;
+  return 0;
 }
 
 static uint64_t allocSizeOfID(uint64_t ID) {
@@ -453,8 +463,7 @@ static std::vector<uint8_t> encodedAllocSizes(uint64_t AllocSize) {
   return Sizes;
 }
 
-static bool isAArch64Target(const Module &M) {
-  Triple TheTriple(M.getTargetTriple());
+static bool isAArch64Target(const Triple &TheTriple) {
   return TheTriple.getArch() == Triple::aarch64 ||
          TheTriple.getArch() == Triple::aarch64_32;
 }
@@ -666,6 +675,7 @@ bool OxCamlGCMetadataPrinter::emitStackMaps(Module &M, StackMaps &SM, AsmPrinter
   std::map<std::string, MCSymbol *> DebugBlobs;
   NameRecordMap NameRecords;
   NameRecordMap FileLabels;
+  const Triple &TargetTriple = AP.TM.getTargetTriple();
   
   OS.switchSection(AP.getObjFileLowering().getDataSection());
 
@@ -702,7 +712,7 @@ bool OxCamlGCMetadataPrinter::emitStackMaps(Module &M, StackMaps &SM, AsmPrinter
 
     // frame_data
     uint64_t FrameSize = CSI.CSFunctionInfo.StaticStackSize;
-    bool IsAArch64 = isAArch64Target(M);
+    bool IsAArch64 = isAArch64Target(TargetTriple);
     if (!IsAArch64)
       FrameSize += PtrSize; // Return address
 
@@ -715,7 +725,7 @@ bool OxCamlGCMetadataPrinter::emitStackMaps(Module &M, StackMaps &SM, AsmPrinter
       // adjustments. LLVM does not model this as part of the static frame size
       // consistently across call sites, so apply the OxCaml offset directly.
       uint64_t StackOffset = stackOffsetOfID(CSI.ID, IsAArch64);
-      ActiveTrapBytes = activeTrapBytesOfID(CSI.ID, IsAArch64);
+      ActiveTrapBytes = activeTrapBytesOfID(CSI.ID, TargetTriple);
       FrameSize += StackOffset;
 
       if (FrameSize & FrameSizeReservedMask) {
@@ -724,7 +734,6 @@ bool OxCamlGCMetadataPrinter::emitStackMaps(Module &M, StackMaps &SM, AsmPrinter
       }
       
     }
-
     OxCamlDebugInfo DebugInfo = debugInfoForCallsite(CSI);
     OxCamlAllocInfo AllocInfo = allocInfoForCallsite(CSI);
     bool HasAlloc = isOxCamlEncodedStatepointID(CSI.ID) && IDHasAlloc(CSI.ID);
@@ -778,7 +787,8 @@ bool OxCamlGCMetadataPrinter::emitStackMaps(Module &M, StackMaps &SM, AsmPrinter
         // Register indices are tagged (2n+1) and follow the OxCaml register
         // map (see `mapLLVMDwarfRegToOxCamlIndex`)
         unsigned DwarfRegNum = Loc.Reg;
-        unsigned OxCamlIndex = mapLLVMDwarfRegToOxCamlIndex(M, DwarfRegNum);
+        unsigned OxCamlIndex =
+            mapLLVMDwarfRegToOxCamlIndex(TargetTriple, DwarfRegNum);
         LiveOffsets.push_back((OxCamlIndex << 1) + 1);
       } else if (Loc.Type == StackMaps::Location::Direct ||
                  Loc.Type == StackMaps::Location::Indirect) {
@@ -845,8 +855,8 @@ bool OxCamlGCMetadataPrinter::emitStackMaps(Module &M, StackMaps &SM, AsmPrinter
                            Twine(CSRRootMap.size()));
       OS.emitInt16(CSRRootMap.size());
       for (const auto &Entry : CSRRootMap) {
-        unsigned OxCamlIndex = mapLLVMDwarfRegToOxCamlIndex(
-            M, Entry.DwarfRegNum);
+        unsigned OxCamlIndex =
+            mapLLVMDwarfRegToOxCamlIndex(TargetTriple, Entry.DwarfRegNum);
         if (OxCamlIndex >= 1 << 16)
           report_fatal_error("[OxCamlGCPrinter] CSR root register index too "
                              "large: " +

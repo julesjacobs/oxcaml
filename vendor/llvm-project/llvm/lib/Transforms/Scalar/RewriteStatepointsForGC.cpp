@@ -28,6 +28,7 @@
 #include "llvm/Analysis/DomTreeUpdater.h"
 #include "llvm/Analysis/Utils/Local.h"
 #include "llvm/IR/IntrinsicsAArch64.h"
+#include "llvm/IR/IntrinsicsX86.h"
 #include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
@@ -905,7 +906,7 @@ class GCPointerAggregateExploder {
   DenseMap<Value *, SmallVector<Value *, 4>> LeafValues;
   DenseSet<PHINode *> PHIsWithPlaceholders;
   DenseSet<PHINode *> FilledPHIs;
-  SmallVector<Instruction *, 32> MaybeDead;
+  SmallVector<WeakTrackingVH, 32> MaybeDead;
 
   static void collectLeaves(Type *Ty, SmallVectorImpl<unsigned> &Prefix,
                             SmallVectorImpl<AggregateLeafInfo> &Leaves) {
@@ -1194,7 +1195,10 @@ public:
 
   bool eraseDeadInstructions() {
     bool Changed = false;
-    for (Instruction *I : llvm::reverse(MaybeDead)) {
+    for (WeakTrackingVH &Handle : llvm::reverse(MaybeDead)) {
+      auto *I = dyn_cast_or_null<Instruction>(Handle);
+      if (!I)
+        continue;
       if (!I->use_empty())
         continue;
       RecursivelyDeleteTriviallyDeadInstructions(I);
@@ -2902,8 +2906,9 @@ static bool isOxCamlFunction(const Function &F) {
 static IntrinsicInst *getOxCamlTrapRecover(BasicBlock &BB) {
   for (Instruction &I : BB) {
     auto *II = dyn_cast<IntrinsicInst>(&I);
-    if (II && II->getIntrinsicID() ==
-                  Intrinsic::aarch64_oxcaml_trap_recover)
+    if (II &&
+        (II->getIntrinsicID() == Intrinsic::aarch64_oxcaml_trap_recover ||
+         II->getIntrinsicID() == Intrinsic::x86_oxcaml_trap_recover))
       return II;
   }
   return nullptr;
@@ -3000,7 +3005,7 @@ struct OxCamlRecoveryBoundaryPhi {
 struct OxCamlRecoveryBoundaryUse {
   BasicBlock *IncomingBlock;
   BasicBlock *BoundaryBlock;
-  Value *Value;
+  Value *GCValue;
 };
 
 struct OxCamlRecoveryBoundaryEdge {
@@ -3101,6 +3106,7 @@ static bool isUnsupportedNestedOxCamlRecoveryInstruction(Instruction &I) {
 
   switch (II->getIntrinsicID()) {
   case Intrinsic::aarch64_oxcaml_push_trap:
+  case Intrinsic::x86_oxcaml_push_trap:
     return true;
   default:
     return false;
@@ -3314,7 +3320,7 @@ static bool collectStrictOxCamlRecoveryOnlyRegion(
           for (const OxCamlRecoveryBoundaryUse &BoundaryUse : BoundaryUses) {
             if (BoundaryUse.IncomingBlock == BB &&
                 BoundaryUse.BoundaryBlock == Succ &&
-                BoundaryUse.Value == V) {
+                BoundaryUse.GCValue == V) {
               Seen = true;
               break;
             }
@@ -3552,7 +3558,7 @@ static void oxcamlCheckSelfBarriers(Function &F, const char *Tag) {
     return;
   for (Instruction &I : instructions(F))
     if (auto *CI = dyn_cast<CallInst>(&I))
-      if (CI->getIntrinsicID() == Intrinsic::aarch64_oxcaml_relocated &&
+      if (CI->getIntrinsicID() == Intrinsic::oxcaml_relocated &&
           CI->getArgOperand(0) == CI) {
         errs() << "[exnphi] SELF barrier after " << Tag << " in "
                << F.getName() << "\n";
@@ -3841,8 +3847,7 @@ static bool materializeOxCamlExceptionRootSlots(
             }
           }
           if (auto *BarrierCI = dyn_cast<CallInst>(EdgeValue))
-            if (BarrierCI->getIntrinsicID() ==
-                Intrinsic::aarch64_oxcaml_relocated) {
+            if (BarrierCI->getIntrinsicID() == Intrinsic::oxcaml_relocated) {
               EdgeValue = BarrierCI->getArgOperand(0);
               Progress = true;
               continue;
@@ -4176,8 +4181,8 @@ static bool materializeOxCamlExceptionRootSlots(
         [&](Value *RootValue) -> Instruction * {
       if (Instruction *B = FindDominatingBarrier(RootValue))
         return B;
-      Function *Decl = Intrinsic::getDeclaration(
-          F.getParent(), Intrinsic::aarch64_oxcaml_relocated);
+      Function *Decl =
+          Intrinsic::getDeclaration(F.getParent(), Intrinsic::oxcaml_relocated);
       CallInst *Barrier = RecoverBuilder.CreateCall(
           Decl, {RootValue},
           suffixed_name_or(RootValue, ".exnssa", "exnssa"));
@@ -4199,8 +4204,7 @@ static bool materializeOxCamlExceptionRootSlots(
         for (bool Stripped = true; Stripped && ++Hops <= 8;) {
           Stripped = false;
           if (auto *CI = dyn_cast<CallInst>(X))
-            if (CI->getIntrinsicID() ==
-                Intrinsic::aarch64_oxcaml_relocated) {
+            if (CI->getIntrinsicID() == Intrinsic::oxcaml_relocated) {
               X = CI->getArgOperand(0);
               Stripped = true;
               continue;
@@ -4598,7 +4602,7 @@ static bool materializeOxCamlExceptionRootSlots(
           for (const OxCamlRecoveryBoundaryUse &BoundaryUse : BoundaryUses) {
             if (BoundaryUse.IncomingBlock == BoundaryEdge.IncomingBlock &&
                 BoundaryUse.BoundaryBlock == BoundaryEdge.BoundaryBlock &&
-                BoundaryUse.Value == V) {
+                BoundaryUse.GCValue == V) {
               Seen = true;
               break;
             }
@@ -4607,7 +4611,7 @@ static bool materializeOxCamlExceptionRootSlots(
                BoundaryLiveUses) {
             if (BoundaryUse.IncomingBlock == BoundaryEdge.IncomingBlock &&
                 BoundaryUse.BoundaryBlock == BoundaryEdge.BoundaryBlock &&
-                BoundaryUse.Value == V) {
+                BoundaryUse.GCValue == V) {
               Seen = true;
               break;
             }
@@ -4619,7 +4623,7 @@ static bool materializeOxCamlExceptionRootSlots(
       }
 
       for (OxCamlRecoveryBoundaryUse &BoundaryUse : BoundaryLiveUses) {
-        Value *V = BoundaryUse.Value;
+        Value *V = BoundaryUse.GCValue;
         DVCache.clear();
         KnownBases.clear();
         if (DebugOxCamlDerivedRemat) {
@@ -4675,7 +4679,7 @@ static bool materializeOxCamlExceptionRootSlots(
       }
 
       for (OxCamlRecoveryBoundaryUse &BoundaryUse : BoundaryUses) {
-        Value *V = BoundaryUse.Value;
+        Value *V = BoundaryUse.GCValue;
         DVCache.clear();
         KnownBases.clear();
 
@@ -9473,7 +9477,9 @@ static void computeLiveInValues(BasicBlock::reverse_iterator Begin,
   }
 }
 
-static void computeLiveOutSeed(BasicBlock *BB, SetVector<Value *> &LiveTmp) {
+static void computeLiveOutSeed(BasicBlock *BB, SetVector<Value *> &LiveTmp,
+                               DominatorTree &DT) {
+  Instruction *Term = BB->getTerminator();
   for (BasicBlock *Succ : successors(BB)) {
     for (auto &I : *Succ) {
       PHINode *PN = dyn_cast<PHINode>(&I);
@@ -9481,8 +9487,12 @@ static void computeLiveOutSeed(BasicBlock *BB, SetVector<Value *> &LiveTmp) {
         break;
 
       Value *V = PN->getIncomingValueForBlock(BB);
-      if (isHandledGCPointerType(V->getType()) && !isa<Constant>(V))
-        LiveTmp.insert(V);
+      if (!isHandledGCPointerType(V->getType()) || isa<Constant>(V))
+        continue;
+      if (auto *VI = dyn_cast<Instruction>(V))
+        if (VI != Term && !DT.dominates(VI, Term))
+          continue;
+      LiveTmp.insert(V);
     }
   }
 }
@@ -9556,7 +9566,7 @@ static void computeLiveInValues(DominatorTree &DT, Function &F,
 #endif
 
     Data.LiveOut[&BB] = SetVector<Value *>();
-    computeLiveOutSeed(&BB, Data.LiveOut[&BB]);
+    computeLiveOutSeed(&BB, Data.LiveOut[&BB], DT);
     Data.LiveIn[&BB] = Data.LiveSet[&BB];
     Data.LiveIn[&BB].set_union(Data.LiveOut[&BB]);
     Data.LiveIn[&BB].set_subtract(Data.KillSet[&BB]);

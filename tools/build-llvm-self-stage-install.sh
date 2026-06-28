@@ -12,6 +12,7 @@ self_main_build=${SELF_MAIN_BUILD:-$repo/_llvm_self_stage_main_build}
 self_stage_install=${SELF_STAGE_INSTALL:-$repo/_llvm_self_stage_install}
 wrapper=${LLVM_WRAPPER:?set LLVM_WRAPPER to the clang wrapper or LLVM tool path}
 wrapper_log=${LLVM_WRAPPER_LOG:-$wrapper.log}
+export LLVM_WRAPPER_LOG="$wrapper_log"
 llvm_extra_flags=${LLVM_EXTRA_FLAGS:-}
 
 require_path () {
