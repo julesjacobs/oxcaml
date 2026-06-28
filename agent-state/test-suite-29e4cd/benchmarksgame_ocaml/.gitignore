@@ -1,0 +1,13 @@
+build/
+inspect/
+results*.json
+fasta_input_*.fa
+*.cmi
+*.cmt
+*.cmti
+*.cmx
+*.o
+*.s
+*.ll
+*.exe
+probe_all/build/

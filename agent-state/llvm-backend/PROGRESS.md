@@ -1279,3 +1279,41 @@ measurement against the native AMD64 backend.
   `regalloc_irc.ml` at 1.0577x; fastest was `cfg_selectgen.ml` at 0.9792x.
   Raw JSON is at
   `/tmp/oxcaml_compiler_binary_native_vs_llvm_stage2_20260628.json`.
+
+2026-06-28 benchmark harness import and run:
+
+- Fetched `origin/jujacobs/llvm-backend` and applied commit `bd34dfbf89`
+  (`Add LLVM backend benchmark harnesses`) onto `jujacobs/llvm-x86-plan`.
+  Did not merge the branch wholesale because it is based behind the AMD64 work.
+- Ran the new runtime harnesses with
+  `OCAMLOPT="$PWD/_install/bin/ocamlopt.opt"`,
+  `OCAMLLIB="$PWD/_install/lib/ocaml"`,
+  `LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"`, `SAMPLES=3`, and
+  `WARMUPS=1`.
+- `exception_microprobe/run.py`: 21 cases completed.  From printed medians:
+  geomean LLVM/native 0.9595x, median 1.0009x, min 0.4574x, max 1.3652x.
+  Largest slowdowns were `closure_call_many_handler_live_roots_raise` 1.3652x,
+  `raise_payload_caught_cross_function` 1.3466x,
+  `raise_caught_cross_function` 1.2579x, and
+  `many_handler_live_roots_raise` 1.2250x.
+- `loop_invariant_microbench/run.py`: 2 cases completed.  Geomean 1.1842x,
+  median 1.2395x, min 0.8734x, max 1.6057x.  The slowdown was
+  `loop_invariant_gc_across_call` at 1.6057x; the int case was 0.8734x.
+- `minibench_suite/run.py`: 16 default cases completed.  Runtime geomean
+  0.9675x, median 0.9933x, total runtime ratio 0.9251x, min 0.7275x, max
+  1.1408x.  LLVM compile-time geomean was 3.2620x native.  Results JSON:
+  `agent-state/test-suite-29e4cd/minibench_suite/results.json`.
+- `benchmarksgame_ocaml/run.py`: 11 selected cases completed.  Runtime geomean
+  0.9635x, median 0.9884x, total runtime ratio 0.9377x, min 0.7924x, max
+  1.1674x.  Results JSON:
+  `agent-state/test-suite-29e4cd/benchmarksgame_ocaml/results.json`.
+- The imported `run_compiler_bench.py` expected `_native_install` and
+  `_llvm_self_stage_install` build logs.  `_native_install` was created with
+  `tools/build-clean-native-install.sh`, but the required logs were unavailable
+  in this checkout, so the harness was extended with `COMPILER_BENCH_MODE=direct`
+  and explicit compiler/OCAMLLIB environment overrides.  Ran it with
+  `_native_install/bin/ocamlopt.opt` versus
+  `_llvm_self_stage2_install/bin/ocamlopt.opt`, normal native compilation mode,
+  `REPETITIONS=3`.  Sum-of-module-medians ratio was 1.0095x; median
+  round-total ratio was 1.0117x.  Generated JSON is ignored by
+  `agent-state/test-suite-29e4cd/.gitignore`.
