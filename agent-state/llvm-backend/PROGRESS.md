@@ -1128,3 +1128,31 @@ Next implementation priority:
   inside active traps, or make the X86 trap pseudo/call-frame lowering reserve a
   trap-frame band without changing unrelated calls.  Re-run at least
   `syntactic-arity`, `async-exns`, and `ast-invariants` before any commit.
+
+2026-06-28 normal LLVM suite after AMD64 trap/CFI fixes:
+
+- Full standard installed-compiler LLVM run:
+  `PATH="$PWD/_build/llvm-tools/bin:$PATH" make -s llvm-test-no-rebuild
+  LLVM_PATH="$PWD/tools/llvm-rs4gc-llc-wrapper.sh"`.
+- Result: 6809 passed, 312 skipped, 2 failed.  The previous substantive
+  `native-cfi-stepping` and `syntactic-arity/max_arity.ml` failures passed in
+  the full run, along with the AMD64 LLVM codegen, GC roots, stack checks,
+  statmemprof callback, dynlink, local allocation, stack-allocation, layout,
+  C-API, and weak/ephemeron native sections.
+- Remaining failures were both native backend internal-assembler regression
+  tests copied from `oxcaml/testsuite/tests/asmcomp`:
+  `movsx_small_ints.ml` and `shift_mem_cl.ml`.  Both pass
+  `-internal-assembler` and are specifically about `x86_binary_emitter.ml`;
+  under `-llvm-backend`, the harness tried to assemble a native `.s` file that
+  the LLVM backend path does not leave behind.
+- Added `not-llvm-backend;` to both tests so they continue to run in native
+  internal-assembler configurations but are skipped under the LLVM backend.
+  Focused LLVM checks after refreshing the `_runtest` copies:
+  `llvm-test-one-no-rebuild TEST=testsuite/tests/asmcomp/movsx_small_ints.ml`
+  and `llvm-test-one-no-rebuild TEST=testsuite/tests/asmcomp/shift_mem_cl.ml`
+  both passed with the tests skipped by the `not-llvm-backend` predicate.
+  Non-LLVM focused `test-one-no-rebuild` runs for both files also passed and
+  executed the native tests, preserving internal-assembler coverage.
+- Next gate after committing this cleanup is a clean full normal LLVM suite
+  rerun if needed, then self-stage2 build/test under LLVM.  After self-stage2
+  passes, collect performance measurements against the native backend.

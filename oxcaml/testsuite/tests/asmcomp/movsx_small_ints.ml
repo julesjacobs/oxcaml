@@ -4,6 +4,7 @@
  not-macos;
  include stdlib_stable;
  flambda2;
+ not-llvm-backend;
  flags = "-internal-assembler";
  native;
 *)

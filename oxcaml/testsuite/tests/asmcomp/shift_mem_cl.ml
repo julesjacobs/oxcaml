@@ -1,5 +1,6 @@
 (* TEST
  arch_amd64;
+ not-llvm-backend;
  flags = "-internal-assembler";
  native;
 *)
