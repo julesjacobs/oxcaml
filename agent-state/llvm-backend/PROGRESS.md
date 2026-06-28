@@ -1685,3 +1685,48 @@ measurement against the native AMD64 backend.
   `loop_invariant_gc_across_call` native 0.0700s, LLVM 0.1029s, ratio 1.4704x.
   This change improves AMD64 mechanism parity, but the remaining largest
   slowdown is still the ordinary-call root-slot store/reload issue.
+
+2026-06-28 AMD64 ordinary-call spill-slot investigation:
+
+- Rechecked the largest remaining loop-invariant slowdown from the current
+  worktree instead of assuming the earlier diagnosis.  The normal in-place path
+  is active at ISel: with
+  ```sh
+  _build/llvm-tools/bin/llc -O3 --relocation-model=pic --frame-pointer=all \
+    -verify-machineinstrs -stop-after=finalize-isel /tmp/loop-gc-rs4gc.ll \
+    -o /tmp/loop-gc-finalize-isel.mir
+  ```
+  the ordinary-call statepoint operands are virtual registers, not frontend
+  roots and not explicit statepoint pool spills.  This matches the intended
+  ARM-quality/no-frontend-roots design.
+- A first attempted fixup-pass store hoist was backed out before commit: the
+  hot stores are already present before `FixupStatepointCallerSaved`, so that
+  pass is too late and is not the right place to solve this slowdown.
+- The more precise pass-boundary evidence is:
+  ```sh
+  _build/llvm-tools/bin/llc -O3 --relocation-model=pic --frame-pointer=all \
+    -verify-machineinstrs -print-before=oxcaml-statepoint-spill-roots \
+    -print-after=oxcaml-statepoint-spill-roots /tmp/loop-gc-rs4gc.ll \
+    -o /tmp/loop-gc-oxsr-print.s 2>/tmp/loop-gc-oxsr-print.txt
+  ```
+  Around the hot loop, RA has already created the root spill-slot store, e.g.
+  `MOV64mr %stack.1, ..., %225:gr64`, before the ordinary-call statepoint that
+  lists `%stack.1`; the same slot is reloaded into `%225:gr64` after the
+  statepoint.  OXSR runs with this post-RA shape and reasons about listed and
+  sibling locations to keep moving-GC correctness.
+- Therefore the next real implementation target is a post-RA/OXSR-aware
+  stable-slot optimization, not `FixupStatepointCallerSaved` and not frontend
+  root lowering.  It must preserve the existing OXSR invariant: every live
+  location of a GC value visible across a statepoint must be listed or otherwise
+  proven unobservable.  The safe shape to optimize is a self-loop ordinary
+  OxCaml call where a sibling spill slot is initialized on non-backedge entry,
+  listed/updated at the statepoint, reloaded after the statepoint, and the
+  reloaded value reaches the backedge without modification.  In that shape the
+  per-iteration pre-statepoint store can potentially be replaced by the
+  predecessor initialization plus the GC's in-place update of the stable slot.
+- The optimization should be implemented where `VirtRegMap`, `LiveStacks`,
+  `LiveIntervals`, `SlotIndexes`, and OXSR's value/home-slot reasoning are all
+  available.  It should explicitly avoid C calls, invokes/EH pads, alloc-family
+  special cases unless separately proven, and any block with additional calls,
+  multiple statepoints, ambiguous stores to the same slot, or root-register
+  modification on the statepoint-to-backedge path.
