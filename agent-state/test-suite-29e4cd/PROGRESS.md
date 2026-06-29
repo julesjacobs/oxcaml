@@ -7,6 +7,37 @@ path specifically: backend code generation, LLVM/BOLT handling, LLVM-only
 profile/layout work, or another change that is not available to the native
 build under the same benchmark setup.
 
+2026-06-29 BOLT ICP frametable investigation update: the current
+LLVM-built-compiler-only BOLT path still does not meet the required `+6%`
+target over the native-built compiler. Full BOLT indirect-call promotion can
+create new promoted direct-call return PCs for OCaml-managed calls. Existing
+descriptor retaddr patching is insufficient because those new return PCs did
+not exist in the input frametables. Example failure:
+`camlStdlib__List__concat_map_64_160_code` gained a promoted direct call whose
+return PC `0x3c5a81b` had no descriptor, while the original fallback indirect
+call return PC had one. Prototype ELF-level synthetic frametable growth can
+make startup pass by redirecting one zero-count frametable pointer to appended
+descriptors, but two tested descriptor-selection policies are not safe enough:
+a broad callsite-matching synthesizer produced 12,228 new descriptors and then
+failed compiling `backend/llvm/llvmize.ml` with `allocation failure during
+minor GC`; a conservative direct-call/fallback-jump pattern produced 195 new
+descriptors and still corrupted GC once the demand-driven set included the
+descriptor for return PC `0x3b9993a`. This indicates that safe ICP support
+needs a principled OCaml/BOLT frametable model for BOLT-created callsites, not
+blind descriptor cloning.
+
+Also tested a restricted `-indirect-call-promotion=calls
+-icp-top-callsites=10` build. BOLT reported zero optimized callsites, so it
+needed no synthetic frametable entries and passed both `-version` and a direct
+`backend/llvm/llvmize.ml` compile. Benchmarking against the native-built
+compiler on the five-module compiler-throughput workload gave only `+3.40%`
+with `samples=7, inner_repetitions=3`
+(`native-current-vs-llvm-constfilter-cache-hfsort-peep-rodata-icp-top10-inner3.json`),
+worse than the existing best `cache-hfsort-peep-rodata` result (`+3.77%`).
+Conclusion: ICP remains potentially LLVM-path-specific, but the safe top10
+variant is effectively a no-op, and the real ICP variants are blocked on
+correct frametable synthesis.
+
 2026-06-29 rejected LLVM-path experiment: a targeted X86 hidden-flag prototype
 that disabled folded stack-slot reloads after OxCaml statepoints fixed the
 focused `loop_invariant_gc_across_call_dynamic_reps` shape locally (normal real
