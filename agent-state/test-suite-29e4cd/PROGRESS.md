@@ -7,6 +7,23 @@ path specifically: backend code generation, LLVM/BOLT handling, LLVM-only
 profile/layout work, or another change that is not available to the native
 build under the same benchmark setup.
 
+2026-06-29 rejected LLVM-path experiment: a targeted X86 hidden-flag prototype
+that disabled folded stack-slot reloads after OxCaml statepoints fixed the
+focused `loop_invariant_gc_across_call_dynamic_reps` shape locally (normal real
+wrapper full-size run about `1.51x` LLVM/native; prototype about `1.02x` to
+`1.09x`, depending on sample count). This confirmed that the microbenchmark
+slowdown is post-statepoint X86 spill folding, not a frontend-root or generic
+optimization-level issue. However, the prototype is not viable as implemented:
+exception one-sample screening was mixed, benchmarksgame was mostly neutral,
+and a real guarded self-stage boot build reproducibly crashed `llc` in greedy
+register allocation/InlineSpiller while compiling `tools/simdgen/simdgen.ml`
+and `external/owee/owee_elf_notes.ml` (`MachineOperand::getReg()` assertion)
+even after excluding statepoint/patchpoint/stackmap pseudos. The experimental
+source change and temporary wrappers were removed; normal `make -C
+_build/llvm-tools -j2 llc` passes again. Any future fix must be more precise
+than blocking broad post-statepoint folding, and must pass a real LLVM build
+before benchmarking.
+
 2026-06-29 compiler-performance investigation update: the large
 `Hashtbl.create`/capacity-growth code-size pathology is real, but the tested
 global full-unroll cap is not a useful compiler-throughput lever. Local,
