@@ -486,6 +486,11 @@ let select_operation
     | Cbswap { bitwidth } ->
       let bitwidth = select_bitwidth bitwidth in
       Rewritten (specific (Ibswap { bitwidth }), args)
+    | Cextcall { func; _ }
+      when String.equal func "sqrt" || String.equal func "sqrtf" -> (
+      match Simd_selection.select_operation_cfg ~dbg func args with
+      | Some (op, args) -> Rewritten (Basic (Op op), args)
+      | None -> Use_default)
     | Cextcall { func; builtin = true; _ } when is_llvm_intrinsic_builtin func
       ->
       (* Illvm_intrinsic must not allocate on the OCaml heap. See
