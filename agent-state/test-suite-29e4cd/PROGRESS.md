@@ -29,6 +29,31 @@ Artifacts are under
 `build_hashtbl_nounroll_main_normal.log`, and the corresponding
 `llvm-wrapper-*` / `opt-*` logs.
 
+2026-06-29 BOLT ICP/inlining follow-up: further LLVM-path BOLT variants still
+do not reach the `+6%` native-built-compiler target. `--icp-inline` reduced
+the number of optimized ICP callsites versus full ICP (`26.0%` of profiled
+indirect callsites rather than `76.4%`), but it still failed startup with
+`caml_scan_stack: missing frame descriptor retaddr=0x3c5ebdb` after normal
+frametable patching. Post-BOLT guard ablations that forced 79 ordinary OCaml
+promoted-call fast paths to the original indirect fallback still failed
+compiling `backend/llvm/llvmize.ml` with `allocation failure during minor GC`;
+patching 12 remaining register-indirect fallback cases and then the final 4
+C/runtime hook fast paths did not fix the corruption. Conclusion: this ICP
+output is not recoverable by simply disabling recognizable fast paths after
+BOLT; safe ICP needs either BOLT-side filtering before transformation or a real
+OCaml-aware metadata model.
+
+BOLT `-inline-small-functions` is safe but not useful enough. With
+`-inline-small-functions-bytes=16`, BOLT inlined 1,099 calls at 645 callsites,
+patched all 224,543 frame descriptors, passed `-version`, and compiled
+`backend/llvm/llvmize.ml`, but screened at only `+3.69%`:
+`native-current-vs-llvm-constfilter-cache-hfsort-peep-rodata-inline-small16-screen.json`.
+With threshold `32`, BOLT inlined 9,905 calls at 1,447 callsites and also
+passed the same smoke tests, but screened at only `+3.36%`:
+`native-current-vs-llvm-constfilter-cache-hfsort-peep-rodata-inline-small32-screen.json`.
+The current best stronger result remains the non-inlining
+`cache-hfsort-peep-rodata` BOLT binary at `+3.77%`.
+
 2026-06-29 BOLT ICP frametable investigation update: the current
 LLVM-built-compiler-only BOLT path still does not meet the required `+6%`
 target over the native-built compiler. Full BOLT indirect-call promotion can
