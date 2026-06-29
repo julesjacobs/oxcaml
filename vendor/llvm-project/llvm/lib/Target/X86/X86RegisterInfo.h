@@ -108,6 +108,9 @@ public:
                               MCRegister PhysReg) const override;
   ArrayRef<MCPhysReg>
   getRuntimeEnteredLiveIns(const MachineFunction &MF) const override;
+  bool shouldSpillStatepointGCPtr(const MachineFunction &MF,
+                                  CallingConv::ID StatepointCC,
+                                  MCRegister PhysReg) const override;
 
   // Calls involved in thread-local variable lookup save more registers than
   // normal calls, so they need a different mask to represent this.

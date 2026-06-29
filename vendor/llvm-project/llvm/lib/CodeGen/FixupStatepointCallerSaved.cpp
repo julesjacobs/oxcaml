@@ -377,6 +377,7 @@ private:
   MachineFrameInfo &MFI;
   // Mask with callee saved registers.
   const uint32_t *Mask;
+  CallingConv::ID StatepointCC;
   // Cache of frame indexes used on previous instruction processing.
   FrameIndexesCache &CacheFI;
   bool AllowGCPtrInCSR;
@@ -397,7 +398,8 @@ public:
                   bool OnlySpillTargetForcedRegs, bool SpillAllRegOperands)
       : MI(MI), MF(*MI.getMF()), TRI(*MF.getSubtarget().getRegisterInfo()),
         TII(*MF.getSubtarget().getInstrInfo()), MFI(MF.getFrameInfo()),
-        Mask(Mask), CacheFI(CacheFI), AllowGCPtrInCSR(AllowGCPtrInCSR),
+        Mask(Mask), StatepointCC(StatepointOpers(&MI).getCallingConv()),
+        CacheFI(CacheFI), AllowGCPtrInCSR(AllowGCPtrInCSR),
         OnlySpillTargetForcedRegs(OnlySpillTargetForcedRegs),
         SpillAllRegOperands(SpillAllRegOperands) {
 
@@ -449,7 +451,8 @@ public:
       Register Reg = MO.getReg();
       assert(Reg.isPhysical() && "Only physical regs are expected");
 
-      bool MustSpillForTarget = TRI.shouldSpillStatepointGCPtr(MF, Reg);
+      bool MustSpillForTarget =
+          TRI.shouldSpillStatepointGCPtr(MF, StatepointCC, Reg);
       if (OnlySpillTargetForcedRegs && !MustSpillForTarget)
         continue;
 
@@ -466,7 +469,7 @@ public:
         // A preserved register keeps its value across the call, but once
         // its slot is the listed root the GC updates the SLOT: post-call
         // uses must read the slot or they see the pre-GC pointer.
-        if (SpillAllRegOperands && isCalleeSaved(Reg))
+        if ((MustSpillForTarget || SpillAllRegOperands) && isCalleeSaved(Reg))
           RegsToReload.push_back(Reg);
       }
       OpsToSpill.push_back(Idx);
@@ -839,16 +842,7 @@ public:
     // describe it. A no-op under spill lowering (no register operands
     // survive ISel there); load-bearing under in-place lowering.
     //
-    // AMD64 OxCaml_WithFP calls also need this with in-place lowering:
-    // %rbp is preserved by the with-frame-pointers convention, but ordinary
-    // call frames cannot update a caller root left in that register. AArch64
-    // has no allocatable preserved integer root register in the corresponding
-    // convention, so it does not need this target-specific guard.
-    bool IsX86OrdinaryOxCamlCall =
-        MF.getTarget().getTargetTriple().getArch() == Triple::x86_64 &&
-        CC == CallingConv::OxCaml_WithFP;
     bool SpillAllRegOperands =
-        IsX86OrdinaryOxCamlCall ||
         CC == CallingConv::OxCaml_C_Call ||
         CC == CallingConv::OxCaml_C_Call_StackArgs;
     LLVM_DEBUG(dbgs() << "\nMBB " << MI.getParent()->getNumber() << " "

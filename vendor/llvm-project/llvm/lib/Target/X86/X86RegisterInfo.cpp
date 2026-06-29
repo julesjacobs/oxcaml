@@ -610,6 +610,27 @@ X86RegisterInfo::getRuntimeEnteredLiveIns(const MachineFunction &MF) const {
   return OxCamlRuntimeEnteredLiveIns;
 }
 
+bool X86RegisterInfo::shouldSpillStatepointGCPtr(
+    const MachineFunction &MF, CallingConv::ID StatepointCC,
+    MCRegister PhysReg) const {
+  if (!isOxCamlCallingConv(MF.getFunction().getCallingConv()))
+    return false;
+  if (!Is64Bit)
+    return false;
+
+  // The AMD64 allocation family enters runtime helpers that save the ordinary
+  // root register set in gc_regs, including RBP.  Ordinary managed calls do not
+  // have that gc_regs bucket: a caller root left in the WithFP-preserved RBP
+  // would be invisible to the runtime and could be reloaded stale after a
+  // moving collection.  Keep this as target rootability policy, mirroring the
+  // AArch64 target hook for registers without ordinary gc_regs slots.
+  if (StatepointCC == CallingConv::OxCaml_WithFP &&
+      MCRegisterInfo::regsOverlap(PhysReg, X86::RBP))
+    return true;
+
+  return false;
+}
+
 BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   BitVector Reserved(getNumRegs());
   const X86FrameLowering *TFI = getFrameLowering(MF);

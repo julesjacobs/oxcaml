@@ -624,6 +624,20 @@ public:
     return false;
   }
 
+  /// Return true if a GC pointer in PhysReg must be spilled before it is
+  /// described in statepoint metadata for a particular statepoint calling
+  /// convention.
+  ///
+  /// Targets can use this when a register is rootable for one runtime entry
+  /// kind but not another.  For example, an allocation statepoint may save a
+  /// register in a runtime gc_regs bucket while an ordinary managed call cannot
+  /// update that same physical register as a caller root.
+  virtual bool shouldSpillStatepointGCPtr(const MachineFunction &MF,
+                                          CallingConv::ID StatepointCC,
+                                          MCRegister PhysReg) const {
+    return shouldSpillStatepointGCPtr(MF, PhysReg);
+  }
+
   /// Return a super-register of the specified register
   /// Reg so its sub-register of index SubIdx is Reg.
   MCRegister getMatchingSuperReg(MCRegister Reg, unsigned SubIdx,
