@@ -34,6 +34,7 @@ BRANCHENTRY = 0x80000000
 
 INSTRUCTION_RE = re.compile(r"^\s*([0-9a-fA-F]+):\s*(.*)$")
 CALL_TARGET_RE = re.compile(r"<([^>]+)>")
+PUSH_IMMEDIATE_RE = re.compile(r"^push[q]?\s+\$(0x[0-9a-fA-F]+|[0-9]+)")
 
 
 def align(value: int, by: int) -> int:
@@ -258,6 +259,13 @@ class CallSite:
     target: str | None
 
 
+@dataclass(frozen=True)
+class SharedReturnSite:
+    push_addr: int
+    jmp_addr: int
+    return_addr: int
+
+
 def normalize_call_target(target: str | None) -> str | None:
     if target is None:
         return None
@@ -289,6 +297,32 @@ def collect_call_sites(path: Path) -> list[CallSite]:
             target = normalize_call_target(target_match.group(1) if target_match else None)
             previous_call = (addr, target)
             calls.append((addr, target))
+    return out
+
+
+def collect_shared_return_sites(path: Path) -> list[SharedReturnSite]:
+    proc = subprocess.run(
+        ["objdump", "-d", "--no-show-raw-insn", str(path)],
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+    )
+    pending: tuple[int, int] | None = None
+    out: list[SharedReturnSite] = []
+    for line in proc.stdout.splitlines():
+        match = INSTRUCTION_RE.match(line)
+        if match is None:
+            continue
+        addr = int(match.group(1), 16)
+        text = match.group(2).strip()
+        if pending is not None:
+            push_addr, return_addr = pending
+            if text.startswith("jmp") and "*" in text:
+                out.append(SharedReturnSite(push_addr, addr, return_addr))
+            pending = None
+        push_match = PUSH_IMMEDIATE_RE.match(text)
+        if push_match is not None:
+            pending = (addr, int(push_match.group(1), 0))
     return out
 
 
@@ -330,11 +364,29 @@ def calls_in_range(calls: list[CallSite], call_addrs: list[int], start: int, end
     return selected
 
 
-def build_call_return_map(input_elf: Elf64, output_elf: Elf64, bat: BatInfo) -> dict[int, int]:
+def shared_returns_in_range(
+    sites: list[SharedReturnSite], site_addrs: list[int], start: int, end: int
+) -> list[SharedReturnSite]:
+    left = bisect.bisect_left(site_addrs, start)
+    selected: list[SharedReturnSite] = []
+    for site in sites[left:]:
+        if end and site.push_addr >= end:
+            break
+        selected.append(site)
+    return selected
+
+
+def build_call_return_map(
+    input_elf: Elf64, output_elf: Elf64, bat: BatInfo
+) -> tuple[dict[int, int], int, list[str]]:
     input_calls = sorted(collect_call_sites(input_elf.path), key=lambda c: c.call_addr)
     output_calls = sorted(collect_call_sites(output_elf.path), key=lambda c: c.call_addr)
+    output_shared_returns = sorted(
+        collect_shared_return_sites(output_elf.path), key=lambda site: site.push_addr
+    )
     input_call_addrs = [call.call_addr for call in input_calls]
     output_call_addrs = [call.call_addr for call in output_calls]
+    output_shared_return_addrs = [site.push_addr for site in output_shared_returns]
     input_exec = executable_symbols(input_elf)
     output_exec = executable_symbols(output_elf)
     input_ranges = symbol_ranges(input_exec)
@@ -345,6 +397,9 @@ def build_call_return_map(input_elf: Elf64, output_elf: Elf64, bat: BatInfo) -> 
     for cold, hot in bat.cold_to_hot.items():
         cold_by_hot.setdefault(hot, []).append(cold)
     mapping: dict[int, int] = {}
+    unsupported_icp_count = 0
+    unsupported_icp_returns: list[str] = []
+    unsupported_seen: set[tuple[str, int, int, int]] = set()
 
     for name, (input_sym, input_end) in input_ranges.items():
         output_sym = output_by_name.get(name)
@@ -359,8 +414,13 @@ def build_call_return_map(input_elf: Elf64, output_elf: Elf64, bat: BatInfo) -> 
             if cold_range is not None:
                 output_fragments.append(cold_range)
         old_calls = calls_in_range(input_calls, input_call_addrs, input_sym.value, input_end)
+        old_indirect_calls = [call for call in old_calls if call.target is None]
+        old_indirect_by_addr = {call.call_addr: call for call in old_indirect_calls}
+        old_calls_by_addr = sorted(old_calls, key=lambda call: call.call_addr)
+        old_call_addrs_in_func = [call.call_addr for call in old_calls_by_addr]
         old_by_target: dict[str | None, list[CallSite]] = {}
         new_by_target: dict[str | None, list[tuple[CallSite, int]]] = {}
+        new_direct_approx_pairs: list[tuple[int, int, CallSite]] = []
         for call in old_calls:
             old_by_target.setdefault(call.target, []).append(call)
         for fragment_sym, fragment_end in output_fragments:
@@ -374,6 +434,52 @@ def build_call_return_map(input_elf: Elf64, output_elf: Elf64, bat: BatInfo) -> 
                 )
                 approx_old_call = input_sym.value + approx_old_offset
                 new_by_target.setdefault(call.target, []).append((call, approx_old_call))
+                if call.target is not None:
+                    approx_old_return_offset = Translator.translate_output_offset(
+                        bat_entries, call.return_addr - fragment_sym.value
+                    )
+                    new_direct_approx_pairs.append(
+                        (approx_old_call, input_sym.value + approx_old_return_offset, call)
+                    )
+            shared_return_sites = shared_returns_in_range(
+                output_shared_returns,
+                output_shared_return_addrs,
+                fragment_sym.value,
+                fragment_end,
+            )
+            for site in shared_return_sites:
+                old_call = None
+                for site_addr in (site.jmp_addr, site.push_addr):
+                    approx_old_offset = Translator.translate_output_offset(
+                        bat_entries, site_addr - fragment_sym.value
+                    )
+                    approx_old_call = input_sym.value + approx_old_offset
+                    old_call = old_indirect_by_addr.get(approx_old_call)
+                    if old_call is not None:
+                        break
+                if old_call is not None:
+                    mapping[old_call.return_addr] = site.return_addr
+                    idx = bisect.bisect_left(old_call_addrs_in_func, old_call.call_addr)
+                    previous_old_call = (
+                        old_call_addrs_in_func[idx - 1] if idx > 0 else input_sym.value
+                    )
+                    for direct_approx_call, _direct_approx_return, direct_call in new_direct_approx_pairs:
+                        if direct_call.return_addr == site.return_addr:
+                            continue
+                        if not (previous_old_call < direct_approx_call <= old_call.call_addr):
+                            continue
+                        key = (name, old_call.call_addr, direct_call.call_addr, direct_call.return_addr)
+                        if key in unsupported_seen:
+                            continue
+                        unsupported_seen.add(key)
+                        unsupported_icp_count += 1
+                        if len(unsupported_icp_returns) < 20:
+                            unsupported_icp_returns.append(
+                                f"{name}: promoted direct call 0x{direct_call.call_addr:x} "
+                                f"from old indirect 0x{old_call.call_addr:x} returns to "
+                                f"0x{direct_call.return_addr:x}, which needs a synthesized "
+                                f"frame descriptor distinct from shared return 0x{site.return_addr:x}"
+                            )
         for target, old_group in old_by_target.items():
             new_group = new_by_target.get(target)
             if new_group is None or len(new_group) != len(old_group):
@@ -382,7 +488,7 @@ def build_call_return_map(input_elf: Elf64, output_elf: Elf64, bat: BatInfo) -> 
             new_group = sorted(new_group, key=lambda item: item[1])
             for old_call, (new_call, _approx_old_call) in zip(old_group, new_group, strict=True):
                 mapping[old_call.return_addr] = new_call.return_addr
-    return mapping
+    return mapping, unsupported_icp_count, unsupported_icp_returns
 
 
 class Translator:
@@ -473,7 +579,9 @@ def descriptor_end(elf: Elf64, addr: int) -> int:
 def patch_frametables(input_elf: Elf64, output_elf: Elf64) -> tuple[int, int, list[str]]:
     bat = parse_bat(output_elf)
     translator = Translator(input_elf, output_elf, bat)
-    call_return_map = build_call_return_map(input_elf, output_elf, bat)
+    call_return_map, unsupported_icp_count, unsupported_icp_returns = build_call_return_map(
+        input_elf, output_elf, bat
+    )
     input_tables_by_name = unique_by_name(frametable_symbols(input_elf))
     output_tables = frametable_symbols(output_elf)
     patched = 0
@@ -512,6 +620,9 @@ def patch_frametables(input_elf: Elf64, output_elf: Elf64) -> tuple[int, int, li
             next_out = descriptor_end(output_elf, out_addr)
             in_addr += next_out - out_addr
             out_addr = next_out
+    if unsupported_icp_count:
+        unresolved += unsupported_icp_count
+        samples.extend(unsupported_icp_returns)
     samples.insert(0, f"call-site mapped {call_mapped}; BAT fallback mapped {bat_mapped}")
     return patched, unresolved, samples
 

@@ -1,5 +1,56 @@
 # Progress
 
+2026-06-29 BOLT ICP shared-return prototype: this is an LLVM/BOLT-path-only
+experiment, not a generic `-O4` style change. Added a hidden X86 BOLT mode
+prototype, `--x86-oxcaml-icp-shared-return`, intended to keep OxCaml GC frame
+descriptors valid when BOLT does indirect-call promotion. The useful machine
+code shape for cold fallback calls is:
+`push $shared_return; jmp *callee`, where `shared_return` is a continuation PC
+that already has the original callsite's frame descriptor. The patcher now
+detects this shape and maps the old descriptor using the converted indirect
+`jmp`, whose BAT entry maps back to the original indirect call. This fixed the
+first full-ICP startup missing-descriptor class during the prototype: a
+fallback-only patched artifact reached `-version` once `224444` frame
+descriptors mapped through call sites and only `99` used generic BAT fallback.
+The current patcher deliberately no longer exits successfully for that artifact,
+because startup success is too weak while promoted direct-call return PCs still
+lack descriptors.
+
+The prototype is not yet benchmarkable. Multi-target ICP is unsafe without
+descriptor duplication, so the BOLT mode now skips non-tail multi-target
+callsites; this reduces optimized ICP callsites from `76.4%` to `71.5%` while
+leaving most ICP active. The hidden mode also rejects memory-form indirect
+calls for now; `call *mem` is not generally equivalent to `push return; jmp
+*mem` when the memory operand is `%rsp`-relative. The remaining correctness
+blocker is normal promoted direct calls: BOLT emits a direct call that returns
+to an intermediate PC and then jumps to the shared continuation. Re-running the
+current patcher on the fallback-only BOLT output now exits nonzero with
+`unresolved 16` candidate promoted-direct hazards. One proven site is
+`camlCtype__with_local_level_19_945_code`: `call caml_tuplify6` returns to
+`0x3ba532f`, then jumps to descriptor-bearing `0x3ba5320`. This is the same
+site that made the real compiler-module smoke fail while compiling
+`backend/llvm/llvmize.ml`. Therefore full ICP needs real descriptor
+synthesis/duplication for promoted direct-call return PCs, or a BOLT call shape
+that preserves a single descriptor-bearing return PC.
+
+Patcher work in
+`bolt_compiler_20260629/patch_ocaml_frametables.py` now detects
+`push $return; jmp *callee` fallback sites and maps sparse single-target
+promotions inside large functions by using the converted indirect jump's BAT
+identity. It also rejects promoted direct-call return PCs in the same old-call
+interval, because those need new descriptors and cannot be made correct by
+moving the old descriptor. This reject check is deliberately fail-closed and
+can over-approximate; it is a guard against benchmarking unsafe artifacts, not
+a proof that every reported site is independently bad. The earlier approximate
+direct-call fallback and
+address-order zip heuristics were removed after review because they could
+silently assign a descriptor to the wrong PC. A direct promoted-call
+`push shared_return; jmp direct_target` source experiment was also rejected:
+the generated ctype site pushed the shared return but jumped back to the merge
+block instead of to `caml_tuplify6`, so the source was restored to
+fallback-only. Do not benchmark the ICP shared-return artifacts until
+`-version` and real compiler-module compile smoke tests both pass.
+
 2026-06-29 LLVM-only scalar spill-fusing follow-up: tested a narrower hidden
 X86 `llc` flag that disabled scalar integer ALU spill folding only in OxCaml
 functions after a statepoint in the same machine block. It fixed the focused

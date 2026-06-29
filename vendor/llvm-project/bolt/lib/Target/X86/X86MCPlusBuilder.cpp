@@ -46,6 +46,12 @@ static cl::opt<bool> X86StripRedundantAddressSize(
     cl::desc("Remove redundant Address-Size override prefix"), cl::init(true),
     cl::cat(BoltOptCategory));
 
+static cl::opt<bool> X86OxCamlICPSharedReturn(
+    "x86-oxcaml-icp-shared-return",
+    cl::desc("Lower non-tail X86 ICP fallback calls as push shared-return; "
+             "jmp indirect, so OxCaml frame descriptors can be shared"),
+    cl::init(false), cl::Hidden, cl::cat(BoltOptCategory));
+
 } // namespace opts
 
 namespace {
@@ -3420,7 +3426,11 @@ public:
       const bool MinimizeCodeSize, MCContext *Ctx) override {
     const bool IsTailCall = isTailCall(CallInst);
     const bool IsJumpTable = getJumpTable(CallInst) != 0;
+    const bool UseOxCamlSharedReturn =
+        opts::X86OxCamlICPSharedReturn && !IsTailCall && !IsJumpTable;
     BlocksVectorTy Results;
+    if (UseOxCamlSharedReturn && Targets.size() != 1)
+      return Results;
 
     // Label for the current code block.
     MCSymbol *NextTarget = nullptr;
@@ -3459,6 +3469,24 @@ public:
       MCInst &Merge = NewCall.back();
       Merge.clear();
       createUncondBranch(Merge, MergeBlock, Ctx);
+    };
+
+    const auto createPushReturnAddress = [&](MCInst &Inst,
+                                             const MCSymbol *ReturnAddress) {
+      Inst.clear();
+      Inst.setOpcode(X86::PUSH64i32);
+      Inst.addOperand(MCOperand::createExpr(MCSymbolRefExpr::create(
+          ReturnAddress, MCSymbolRefExpr::VK_None, *Ctx)));
+    };
+
+    const auto convertIndirectCallToJump = [&](MCInst &Inst) {
+      switch (Inst.getOpcode()) {
+      case X86::CALL64r:
+        Inst.setOpcode(X86::JMP64r);
+        return true;
+      default:
+        return false;
+      }
     };
 
     for (unsigned int i = 0; i < Targets.size(); ++i) {
@@ -3615,7 +3643,8 @@ public:
           // the merge block.
           if (i == 0) {
             // Fallthrough to merge block.
-            MergeBlock = Ctx->createNamedTempSymbol();
+            if (!MergeBlock)
+              MergeBlock = Ctx->createNamedTempSymbol();
           } else {
             // Insert jump to the merge block if we are not doing a fallthrough.
             jumpToMergeBlock(*NewCall);
@@ -3634,7 +3663,17 @@ public:
 
     // Jump to merge block from cold call block
     if (!IsTailCall && !IsJumpTable) {
-      jumpToMergeBlock(NewCall);
+      if (UseOxCamlSharedReturn) {
+        MCInst IndirectJump = NewCall.back();
+        if (!convertIndirectCallToJump(IndirectJump))
+          return BlocksVectorTy();
+        NewCall.pop_back();
+        NewCall.push_back(CallInst);
+        createPushReturnAddress(NewCall.back(), MergeBlock);
+        NewCall.push_back(IndirectJump);
+      } else {
+        jumpToMergeBlock(NewCall);
+      }
 
       // Record merge block
       Results.emplace_back(MergeBlock, InstructionListType());
