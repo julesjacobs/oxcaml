@@ -1,0 +1,3 @@
+patched 224538 frame descriptor return addresses
+unresolved 0 frame descriptor return addresses
+call-site mapped 224538; BAT fallback mapped 0

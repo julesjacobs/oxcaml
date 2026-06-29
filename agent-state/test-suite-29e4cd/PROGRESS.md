@@ -1,6 +1,64 @@
 # Progress
 
-Last updated: 2026-06-12. THE LATENT FLIP MISCOMPILE IS FIXED (7 bugs
+Last updated: 2026-06-29. Important correction: the broad benchmark run in
+`spill_fusing_effect/` used the temporary `llc-wrapper.sh`, which fed raw
+pre-optimization LLVM IR directly to `llc`. That is not the project pipeline:
+`tools/llvm-rs4gc-llc-wrapper.sh` runs
+`default<O3>,rewrite-statepoints-for-gc,verify` before `llc`. The raw-wrapper
+run made `matmul` look catastrophically slow because 211 frontend-style
+`alloca`s survived to codegen. With the real wrapper, fresh `SAMPLES=7`
+minibench results are `matmul` native `0.1158s`, LLVM `0.1062s`, ratio
+`0.9171`, and `matmul_transposed` native `0.0920s`, LLVM `0.0659s`, ratio
+`0.7162`. Treat `matmul` as roughly parity given native-sample variance; treat
+the broad `spill_fusing_effect/` tables as invalid for
+LLVM-vs-native performance and rerun any global spill-fusing ablation through
+the real wrapper.
+
+Full corrected rerun with the real wrapper (`SAMPLES=7,WARMUPS=2`) is saved in
+`agent-state/test-suite-29e4cd/real_wrapper_full_bench_20260629/`. Across the
+84 broad benchmark cases (minibench, benchmarksgame, exception microprobe),
+total LLVM/native runtime ratio is `0.8822`, geomean `0.8840`, with 21 cases
+slower than native, 10 above 1.05x, and 7 above 1.10x. Including the four
+focused loop-invariant probes gives 88 cases total, total ratio `0.8858`,
+geomean `0.8972`, 23 slower, 12 above 1.05x, and 9 above 1.10x. Largest broad
+slowdowns are `exception/closure_call_many_handler_live_roots_raise` `1.1912x`,
+`minibench/hash_batch_murmur_mix` `1.1807x`,
+`exception/raise_caught_cross_function` `1.1734x`, `benchmarksgame/nbody_1`
+`1.1401x`, and `exception/raise_payload_caught_cross_function` `1.1256x`.
+The focused GC loop-invariant probes remain the largest overall slowdowns:
+dynamic reps `1.5823x`, fixed reps `1.5735x`. Summary:
+`agent-state/test-suite-29e4cd/real_wrapper_full_bench_20260629/summary.md`.
+
+Slowdown deep dive completed for the top corrected cases. Artifacts and report:
+`agent-state/test-suite-29e4cd/slowdown_deep_dive_20260629/report.md`.
+Main classifications: loop-invariant GC probe is post-RA X86 spill-fusing of
+scalar loop state around statepoints; exception slowdowns are
+invoke/landingpad/trap-loop state placement rather than a pure GC root bug;
+`nbody_1` is largely a float `sqrt` lowering gap (`sqrt@PLT` vs native
+`vsqrtsd`, patched assembly closes about half the gap); `finance_greeks_pnl` is
+a smaller call/statepoint-adjacent spill scheduling issue; `matmul` is healthy
+under the corrected pipeline.
+
+Current AMD64 investigation: the
+`loop_invariant_gc_across_call_dynamic_reps` slowdown is caused by X86
+spill-fusing of scalar reloads after an OxCaml statepoint/call, not by the GC
+root stack-slot mechanism and not primarily by the chosen physical register
+names. Pre-regalloc MIR is reasonable; greedy/inline-spiller split the scalar
+live-through-call values, create ordinary scalar spill slots, and X86
+`foldMemoryOperandImpl` folds the post-call accumulator reload into memory
+arithmetic. `-disable-spill-fusing` fixes the focused microbenchmark
+(`~0.410s -> ~0.237s` at `reps=20`; both no-hoist/no-fusing `~0.230s`), while
+`-disable-spill-hoist` alone does not (`~0.408s`). Next step: rerun the
+global spill-fusing ablation through `tools/llvm-rs4gc-llc-wrapper.sh`, then
+prototype a narrow X86/OxCaml predicate that suppresses only harmful
+statepoint-adjacent scalar spill folding, and add a focused MIR test that
+still verifies GC roots remain stack roots. Detailed plan:
+`amd64-arm-parity-plan.md`; raw/summary benchmark artifacts:
+`agent-state/test-suite-29e4cd/spill_fusing_effect/summary.md` and
+`summary.json` are raw-`llc` artifacts, not valid project-pipeline performance
+results.
+
+Previous status (2026-06-12): THE LATENT FLIP MISCOMPILE IS FIXED (7 bugs
 total) AND THE FULL GATE IS GREEN: stage1+stage2 builds, boot-flip 3/3,
 stage1-binary flip-stress 16/16 module runs (typecore ctype typedecl
 env typeclass parmatch matching translcore btype subst printtyp),
@@ -611,6 +669,27 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
 
 ## Follow-up Opportunities
 
+- 2026-06-29 sqrt lowering fix:
+  - AMD64 LLVM mode now selects non-builtin `sqrt`/`sqrtf` through the existing
+    AMD64 SIMD selector, reusing the same native-parity path that lowers to
+    `llvm.sqrt.*` in Llvmize.
+  - Fresh custom LLVM boot build passed using
+    `_llvm_sqrt_boot_context_build/default/boot_ocamlopt.exe` and the project
+    RS4GC wrapper: `boot fresh ir: 828`.
+  - Focused regression script passed:
+    `testsuite/tests/llvm-codegen/amd64_sqrt_intrinsic.sh`.
+  - Direct probe showed `llvm.sqrt.f64`/`llvm.sqrt.f32` in IR and
+    `vsqrtsd`/`vsqrtss` in assembly, with no sqrt libcall in code.
+  - Focused `benchmarksgame_ocaml` `nbody_1` rerun with the fresh compiler:
+    native median `0.8371s`, LLVM median `0.8357s`, LLVM/native `0.9983`.
+    Captured LLVM nbody IR has two `llvm.sqrt.f64` calls and captured assembly
+    emits `vsqrtsd` instead of `sqrt@PLT`.
+  - Normal `make -s boot-compiler` remains blocked in this checkout by a
+    pre-existing boot-workspace dune sandbox/source-copy failure: rules for
+    files such as `parsing/lexer.mll`, `parsing/parser.mly`,
+    `middle_end/flambda2/parser/flambda_parser.mly`, and `tools/make_opcodes.mll`
+    report missing deps under `_build/default` even though the source files are
+    present and tracked. The custom LLVM boot script avoids that path.
 - Individual slowdowns are still worth investigating:
   `closure_env_in_try_hit` about `1.29x`,
   `closure_env_in_try_no_raise` about `1.25x`,
@@ -618,3 +697,202 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
   `boyer_like_failed_unify` about `1.23x`, and minibench `boyer` about `1.13x`.
 - Do not resurrect the global all-volatile-root-slot mode as the default without
   fresh evidence; it regressed total micro time in the latest run.
+- 2026-06-29 exception slowdown follow-up:
+  - `raise_caught_cross_function` is now traced to LLVM `loop-reduce`
+    introducing a second loop-carried tagged call-argument IV for the
+    invoke-statepoint. AMD64 runtime-entry clobbers then force that IV through
+    an extra spill/reload slot around each protected call.
+  - Native AMD64, like arm64, marks all normal registers destroyed at raise; it
+    does not rely on registers being live into handlers. The better native shape
+    recomputes the tagged call argument at the call.
+  - The existing OxCaml LSR guards miss exception statepoints because they look
+    for call-form `IntrinsicInst`; protected calls are invoke-form
+    `@llvm.experimental.gc.statepoint`.
+  - Relinked ablation medians for `raise_caught_cross_function`: native
+    `0.0740s`, LLVM `0.0849s` (`1.1470x`), recompute-tag `0.0770s`
+    (`1.0406x`), global `--disable-lsr` `0.0798s` (`1.0780x`).
+  - Detailed notes and artifacts are in
+    `agent-state/test-suite-29e4cd/slowdown_deep_dive_20260629/report.md` and
+    `.../exception/raise_caught_cross_function/`.
+- 2026-06-29 LSR invoke-statepoint fix:
+  - Updated LLVM LoopStrengthReduce so OxCaml statepoint detection uses
+    `CallBase`, covering both call-form and invoke-form statepoints.
+  - Made statepoint call-argument LSR skipping the default, turned the broad
+    whole-statepoint-loop LSR disable back into an opt-in escape hatch, and
+    kept pre-inc loop-exit IVs for OxCaml loops containing statepoints. This
+    preserves the original single IV for protected call args instead of
+    creating a second loop-carried tagged IV.
+  - Added `CodeGen/X86/oxcaml-lsr-statepoint-invoke.ll`.
+  - Validation: rebuilt `_build/llvm-tools/bin/llc`; direct FileCheck pipeline
+    for the new test passed; saved `raise_caught_cross_function` post-RS4GC IR
+    now emits `leaq 1(%rax,%rax), %rax` at the call and no `addq $2`.
+  - Quick benchmark reruns with the real wrapper and rebuilt tools:
+    `raise_caught_cross_function` `1.0729x` LLVM/native (`SAMPLES=3`) vs the
+    earlier corrected broad baseline around `1.1734x`; loop-invariant GC
+    dynamic probe `1.4490x` vs earlier `1.5823x`. Full-suite numbers still need
+    a longer rerun.
+- 2026-06-29 exception slowdown class-2 follow-up after the LSR fix:
+  - Fresh focused exception microprobe run with rebuilt local `llc`
+    (`SAMPLES=5,WARMUPS=1`, `_install/bin/ocamlopt.opt`, local RS4GC wrapper):
+    `raise_caught_cross_function` `1.0884x`, payload cross-function `0.9398x`,
+    `closure_call_many_handler_live_roots_raise` `1.1912x`,
+    `boyer_like_failed_unify` `1.1314x`, `catch_failure_then_unify` `1.1020x`,
+    `nested_failed_unify` `1.0144x`.
+  - Native and LLVM both use trap-stack recovery and both clobber ordinary
+    registers at raise. Remaining slowdowns are state placement around
+    protected calls and, in Boyer/catch, real exnroot/relocate pressure.
+  - `closure_call_many_handler_live_roots_raise` is the clean live-root case:
+    2 post-RS4GC exnroot allocas, no `gc.relocate`s, hot invoke carries
+    `gc-live(ptr %...exnroot)`, and final asm still spills scalar loop state
+    through frame slots around the invoke.
+  - `catch_failure_then_unify`/Boyer are mixed cases: 8 post-RS4GC allocas,
+    14 statepoints, 11 relocates, three exnroot homes in `unify1`, plus folded
+    reloads around protected calls.
+  - `-rs4gc-oxcaml-exn-ssa-roots` had no effect on the representative AMD64
+    artifacts. Forcing `-rs4gc-oxcaml-exn-ssa-all` reduced catch's root slots
+    (`alloca` 8 -> 2, exnroot refs 51 -> 10) but made the asm shape worse
+    (larger frame and folded reloads 5 -> 7), so it is not a default fix.
+  - Current no-spill-fusing ablation is mixed: helps
+    `raise_caught_cross_function` (`1.0884x -> 1.0356x`) and Boyer slightly
+    (`1.1314x -> 1.1127x`), barely changes
+    `closure_call_many_handler_live_roots_raise` (`1.1912x -> 1.1844x`),
+    worsens catch (`1.1020x -> 1.1152x`), and badly worsens nested
+    (`1.0144x -> 1.2023x`). Global spill-fusing suppression is not the
+    exception fix.
+  - Updated `amd64-arm-parity-plan.md` with the class-2 findings and next plan:
+    keep the existing exnroot/value-home root mechanism, inspect MIR state
+    placement around invoke-statepoints, and compare against arm64 artifacts
+    before proposing a narrow AMD64 placement/root-materialization change.
+  - Followed up with MIR cuts at `greedy`, `oxcaml-statepoint-spill-roots`,
+    `virtregrewriter`, and `prologepilog` for
+    `closure_call_many_handler_live_roots_raise` and
+    `catch_failure_then_unify`; see
+    `agent-state/test-suite-29e4cd/slowdown_deep_dive_20260629/exception/class2-mir-findings.md`.
+    Result: closure's hot invoke lists only the exnroot home and has ordinary
+    scalar/domain-state frame homes; catch's `run_4_9_code` correctly gains
+    one backend-listed GC spill root (`%stack.4`) while exception temporaries
+    are rejected. The next implementation target is compact native-like
+    placement/reload around invoke-statepoints, not frontend roots, global
+    no-spill-fusing, or forced SSA exn roots.
+- 2026-06-29 compiler-binary benchmark rerun:
+  - Compared `_native_install/bin/ocamlopt.opt` against
+    `_llvm_current_stage2_install/bin/ocamlopt.opt`; both compilers compiled
+    representative compiler modules in normal native mode with no
+    `-llvm-backend`.
+  - Used matching build trees/CMIs: native side `_native_build/main`, LLVM side
+    `_llvm_current_stage2_main_build/main`. Verified `_native_build/log` does
+    not contain `llvm-backend=1`.
+  - Modules: `cfg_selectgen`, `llvmize`, `translcore`, `ctype`, `env`,
+    `typecore`, and `typemod`; 1 warmup, 7 measured repetitions.
+  - Result artifact:
+    `agent-state/test-suite-29e4cd/compiler_bench_native_vs_llvmbuilt_native_mode_20260629_023513.json`.
+    Sum of module medians: native `16.0902s`, LLVM-built `16.1625s`, ratio
+    `1.0045x`. Round-total median: native `16.0943s`, LLVM-built `16.1595s`,
+    ratio `1.0041x`. Module-ratio geomean `1.0076x`, median `1.0125x`.
+  - Largest slow module ratios: `cfg_selectgen` `1.0293x`, `typecore`
+    `1.0141x`, `translcore` `1.0127x`, `typemod` `1.0125x`. `llvmize`
+    (`0.9912x`) and `env` (`0.9937x`) were slightly faster with the
+    LLVM-built compiler.
+- 2026-06-29 BOLT compiler-binary experiment:
+  - Built BOLT tools in a separate CMake tree:
+    `_build/llvm-bolt/bin/llvm-bolt`, `perf2bolt`, and `merge-fdata`.
+  - Relinked the LLVM-built compiler from the existing stage2 build products
+    with `-ccopt -Wl,--emit-relocs`, producing
+    `agent-state/test-suite-29e4cd/bolt_compiler_20260629/ocamlopt.reloc`.
+    The relinked binary has `.rela.text`, `.rela.rodata`, `.rela.eh_frame`,
+    `.rela.data*`, and `.symtab`.
+  - Fixed a local BOLT runtime build issue in
+    `vendor/llvm-project/bolt/runtime/instr.cpp`: GCC emitted a mangled
+    anonymous-namespace reference to `__bolt_instr_conservative`, while BOLT
+    emits the runtime data symbol unmangled. Forcing the asm symbol name let
+    `llvm-bolt -instrument` emit an instrumented binary.
+  - Full profile-guided BOLT is still not measurable in this environment.
+    `perf record` is blocked by `kernel.perf_event_paranoid=4` for hardware and
+    software events, direct `sysctl` is denied, and passwordless `sudo` is not
+    available. BOLT instrumentation of OCaml-managed code segfaults immediately
+    in `caml_garbage_collection`/`caml_do_call_gc`, consistent with inserted
+    instrumentation calls/return addresses violating OCaml frame-table/GC stack
+    assumptions.
+  - A no-profile BOLT rewrite of all code also segfaults on `-version`. A
+    minimal rewrite with `-skip-funcs='.*'` runs, confirming the toolchain and
+    relocation-enabled binary are basically usable. A conservative runnable
+    subset that skips all `caml*` functions also runs:
+    `ocamlopt.nocaml.bolt`.
+  - Benchmarked the runnable subset against the relocation-enabled base, both
+    compiling the same compiler modules in native mode with the same
+    `_llvm_current_stage2_main_build/main` CMIs and
+    `_llvm_current_stage2_install/lib/ocaml`; result artifact:
+    `agent-state/test-suite-29e4cd/bolt_compiler_20260629/bolt_skip_caml_vs_reloc_bench_20260629_025323.json`.
+    Sum of module medians: base `16.1975s`, BOLT-skip-caml `16.3050s`, ratio
+    `1.0066x`. Round-total median: base `16.2409s`, BOLT-skip-caml
+    `16.2972s`, ratio `1.0035x`. Geomean module ratio `1.0023x`.
+  - Conclusion: the current runnable BOLT subset has no useful win. The
+    potentially interesting BOLT measurement requires either enabling perf
+    sampling for the uninstrumented compiler or teaching BOLT/OxCaml how to
+    rewrite OCaml-managed functions while updating/preserving the runtime frame
+    metadata needed by GC and exceptions.
+- 2026-06-29 BOLT follow-up with perf enabled:
+  - Enabled perf sampling externally and collected LBR data for a corrected
+    relocation-enabled compiler. Built/reused BOLT tools:
+    `_build/llvm-bolt/bin/llvm-bolt`, `perf2bolt`, and `llvm-bat-dump`.
+  - Fixed AMD64 native frametable emission to live in `.data` like the arm
+    backend shape: `backend/amd64/emit.ml` now emits the frametable as a data
+    object symbol, uses zero fill, and uses data-section label metadata for
+    frame-table-relative entries. A first attempt with text-section label
+    metadata broke native emission; matching arm's data-section metadata fixed
+    that.
+  - Rebuilt LLVM self-stage through stage2. Stage2 passed only after reducing
+    dune parallelism with `DUNE_BUILD_FLAGS=-j2`; the earlier high-parallelism
+    stage2 boot build crashed during large Flambda2 module compilation. The
+    resulting `_llvm_boltfix2_stage2_install/bin/ocamlopt.opt` passes a native
+    allocation/exception smoke test.
+  - Relinked the stage2 compiler with `-ccopt -Wl,--emit-relocs`:
+    `agent-state/test-suite-29e4cd/bolt_compiler_20260629/ocamlopt.boltfix2.reloc`.
+    The startup frametable is in `.data` and has relocations.
+  - Added
+    `agent-state/test-suite-29e4cd/bolt_compiler_20260629/patch_ocaml_frametables.py`.
+    BAT alone is too imprecise for OCaml frame descriptors because BOLT shortens
+    instructions inside basic blocks. The patcher now disassembles old/new
+    binaries and maps old frame descriptor PCs to new call return PCs by call
+    target and BAT-estimated original call instruction address. Matching on the
+    call instruction, rather than the return PC, is required for reordered
+    blocks because return PCs can sit at BAT block boundaries. For split
+    functions, the patcher parses BOLT cold-to-hot BAT entries and matches hot
+    plus cold fragments together against the parent input function.
+  - No-profile BOLT now works for OCaml-managed code:
+    `ocamlopt.boltfix2.noprofile.bat.callpatched` starts and compiles/runs the
+    native smoke test. The patcher rewrote all 224,538 descriptors by call-site
+    mapping with zero unresolved descriptors.
+  - Collected a profile from the reduced standalone compiler-module workload
+    (`cfg_selectgen`, `llvmize`, `translcore`, `ctype`, `env`) and converted it
+    with `perf2bolt`:
+    `ocamlopt.boltfix2.subset.lbr.perf.data` and
+    `ocamlopt.boltfix2.subset.lbr.fdata`. `perf2bolt` read 187,793 samples and
+    2,999,194 LBR entries.
+  - Profile-guided BOLT with function reordering only works:
+    `ocamlopt.boltfix2.profile-funconly.bat.callpatched` starts and passes the
+    reduced compiler-module workload. Command used `-data=...subset.lbr.fdata`,
+    `--enable-bat`, `-reorder-functions=hfsort`, `-reorder-blocks=none`,
+    `-align-macro-fusion=none`, and `-peepholes=none`.
+  - Full profile-guided BOLT now works on the reduced compiler-module workload:
+    `ocamlopt.boltfix2.fullbolt-nosplit.bat.calladdrpatched` passes with
+    `-reorder-blocks=ext-tsp` and `-reorder-functions=hfsort`, and
+    `ocamlopt.boltfix2.fullbolt.bat.coldpatched` passes with
+    `-split-functions -split-strategy=profile2` as well. The successful split
+    patch rewrote all 224,538 frame descriptors by call-site mapping with zero
+    BAT fallback mappings.
+  - Quick timing on the reduced workload, three samples:
+    stage2 real median `9.585s`; relocation-enabled median `9.634s`;
+    no-profile BOLT median `9.514s` (`0.988x` vs reloc); profile-loaded
+    no-reorder median `9.576s` (`0.994x`); profile function-only median
+    `9.600s` (`0.996x`). Artifact:
+    `agent-state/test-suite-29e4cd/bolt_compiler_20260629/boltfix2-stable-benchmark.json`.
+  - Full BOLT timing on the same five-module workload with three compile
+    repetitions per timing sample: relocation-enabled median `28.849s`;
+    no-profile BOLT median `28.344s` (`0.983x`); profile function-only median
+    `28.729s` (`0.996x`); full BOLT no-split median `27.807s` (`0.964x`);
+    full BOLT split median `28.230s` (`0.979x`). Artifact:
+    `agent-state/test-suite-29e4cd/bolt_compiler_20260629/boltfix2-fullbolt-benchmark.json`.
+  - Next BOLT tasks: promote the patcher into maintained tooling, validate the
+    BOLTed compiler on a larger native build/test slice, and then compare the
+    BOLTed LLVM-built compiler against the native-built compiler.

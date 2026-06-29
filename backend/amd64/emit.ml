@@ -3128,10 +3128,15 @@ let end_assembly () =
   (* PR#6329 *)
   emit_global_label ~section:Data "data_end";
   D.int64 0L;
-  D.text ();
-  D.align ~fill:Nop ~bytes:8;
+  D.data ();
+  D.align ~fill:Zero ~bytes:8;
   (* PR#7591 *)
-  emit_global_label ~section:Text "frametable";
+  let frametable = Cmm_helpers.make_symbol "frametable" in
+  let frametable_sym = S.create_global frametable in
+  D.type_symbol ~ty:Object frametable_sym;
+  add_def_symbol frametable;
+  global_maybe_protected frametable_sym;
+  D.define_symbol_label ~section:Data frametable_sym;
   (* CR sspies: Share the [emit_frames] code with the Arm backend. *)
   emit_frames
     { efa_code_label =
@@ -3141,6 +3146,7 @@ let end_assembly () =
       efa_data_label =
         (fun l ->
           let l = label_to_asm_label ~section:Data l in
+          D.type_label ~ty:Object l;
           D.label l);
       efa_i8 = (fun n -> D.int8 n);
       efa_i16 = (fun n -> D.int16 n);
@@ -3149,20 +3155,19 @@ let end_assembly () =
       efa_u16 = (fun n -> D.uint16 n);
       efa_u32 = (fun n -> D.uint32 n);
       efa_word = (fun n -> D.targetint (Targetint.of_int_exn n));
-      efa_align = (fun n -> D.align ~fill:Nop ~bytes:n);
+      efa_align = (fun n -> D.align ~fill:Zero ~bytes:n);
       efa_label_rel =
         (fun lbl ofs ->
-          let lbl = label_to_asm_label ~section:Text lbl in
+          let lbl = label_to_asm_label ~section:Data lbl in
           let ofs = Targetint.of_int32 ofs in
           D.between_this_and_label_offset_32bit_expr ~upper:lbl
             ~offset_upper:ofs);
       efa_def_label =
         (fun l ->
-          let lbl = label_to_asm_label ~section:Text l in
+          let lbl = label_to_asm_label ~section:Data l in
           D.define_label lbl);
       efa_string = (fun s -> D.string (s ^ "\000"))
     };
-  let frametable_sym = S.create_global (Cmm_helpers.make_symbol "frametable") in
   D.size frametable_sym;
   D.data ();
   Probe_emission.emit_probe_notes ~add_def_symbol;
