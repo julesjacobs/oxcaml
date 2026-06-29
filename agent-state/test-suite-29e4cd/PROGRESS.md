@@ -45,6 +45,31 @@ starts but screened at `+3.21%`. Artifacts live under
 `native-current-vs-llvm-constfilter-blocknormal-hfsort-peep-rodata-screen.json`,
 and the corresponding `constfilter-...icp...` logs.
 
+2026-06-29 later BOLT follow-up: tested post-layout profile refinement and
+register reassignment; neither is a keeper. Profiling the current best BOLTed
+compiler worked. Artifacts live under
+`agent-state/test-suite-29e4cd/bolt_compiler_20260629/`: `perf2bolt`
+recognized a `boltedcollection` and emitted
+`ocamlopt.constfilter.cache-hfsort-peep-rodata.profiled.lbr.fdata`. Reapplying
+the best safe BOLT recipe to the original relocatable compiler with that
+translated profile produced a runnable binary with complete frametable patching
+(`patched 224543`, `unresolved 0`), but it screened at only `+3.70%`:
+`native-current-vs-llvm-constfilter-refined-cache-hfsort-peep-rodata-screen.json`.
+Merging the original and translated post-BOLT profiles is not valid as-is:
+`merge-fdata` rejects mixed normal/`boltedcollection` inputs, and stripping the
+marker makes BOLT report `98.0%` of samples in stale functions; that binary
+starts but screens at `-0.49%` in
+`native-current-vs-llvm-constfilter-original-refined-noheader-cache-hfsort-peep-rodata-screen.json`.
+BOLT `-reg-reassign` is unsafe for this compiler binary: both the existing
+`cache-hfsort-peep-rodata-frameopt-regreassign` artifact and a new isolated
+`cache-hfsort-peep-rodata-regreassign` build patch all existing frame
+descriptors but abort on `-version` with `allocation failure during minor GC`.
+Current best stronger `inner_repetitions=3` result remains
+`cache-hfsort-peep-rodata` at `+3.77%`; the likely next LLVM-only work is either
+real frametable synthesis for BOLT-created callsites so ICP can be measured
+safely, or a precise LLVM codegen improvement rather than more generic BOLT
+layout variants.
+
 2026-06-29 compiler-performance investigation update: the large
 `Hashtbl.create`/capacity-growth code-size pathology is real, but the tested
 global full-unroll cap is not a useful compiler-throughput lever. Local,
