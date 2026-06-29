@@ -154,12 +154,11 @@ static cl::opt<bool> InsnsCost(
   cl::desc("Add instruction count to a LSR cost model"));
 
 static cl::opt<bool> OxcamlSkipStatepointCallArgLSR(
-    "oxcaml-skip-statepoint-call-arg-lsr", cl::Hidden, cl::init(false),
-    cl::desc("Prototype: do not strength-reduce IV operands used by GC "
-             "statepoint calls"));
+    "oxcaml-skip-statepoint-call-arg-lsr", cl::Hidden, cl::init(true),
+    cl::desc("Do not strength-reduce IV operands used by GC statepoint calls"));
 
 static cl::opt<bool> OxcamlDisableStatepointLoopLSR(
-    "oxcaml-disable-statepoint-loop-lsr", cl::Hidden, cl::init(true),
+    "oxcaml-disable-statepoint-loop-lsr", cl::Hidden, cl::init(false),
     cl::desc("Skip loop strength reduction for OxCaml loops containing GC "
              "statepoints"));
 
@@ -217,6 +216,28 @@ static cl::opt<bool> StressIVChain(
 #else
 static bool StressIVChain = false;
 #endif
+
+static bool isGCStatepointCallBase(const Instruction *I) {
+  const auto *CB = dyn_cast<CallBase>(I);
+  if (!CB)
+    return false;
+
+  const Function *Callee = CB->getCalledFunction();
+  return Callee &&
+         Callee->getIntrinsicID() == Intrinsic::experimental_gc_statepoint;
+}
+
+static bool isOxcamlGCFunction(const Function &F) {
+  return F.hasGC() && F.getGC() == "oxcaml";
+}
+
+static bool containsStatepoint(const Loop &L) {
+  for (const BasicBlock *BB : L.blocks())
+    for (const Instruction &I : *BB)
+      if (isGCStatepointCallBase(&I))
+        return true;
+  return false;
+}
 
 namespace {
 
@@ -2438,6 +2459,16 @@ LSRInstance::OptimizeLoopTermCond() {
   // in the latch check, and we want to insert post-inc expressions before
   // the backedge.
   BasicBlock *LatchBlock = L->getLoopLatch();
+  if (OxcamlSkipStatepointCallArgLSR && LatchBlock &&
+      isOxcamlGCFunction(*L->getHeader()->getParent()) &&
+      containsStatepoint(*L)) {
+    IVIncInsertPos = LatchBlock->getTerminator();
+    LLVM_DEBUG(dbgs() << "Keeping pre-inc loop exit IV for "
+                         "statepoint-containing OxCaml loop: "
+                      << L->getHeader()->getName() << '\n');
+    return;
+  }
+
   SmallVector<BasicBlock*, 8> ExitingBlocks;
   L->getExitingBlocks(ExitingBlocks);
   if (!llvm::is_contained(ExitingBlocks, LatchBlock)) {
@@ -3313,13 +3344,12 @@ void LSRInstance::CollectFixupsAndInitialFormulae() {
 
   for (const IVStrideUse &U : IU) {
     Instruction *UserInst = U.getUser();
-    if (OxcamlSkipStatepointCallArgLSR)
-      if (auto *II = dyn_cast<IntrinsicInst>(UserInst))
-        if (II->getIntrinsicID() == Intrinsic::experimental_gc_statepoint) {
-          LLVM_DEBUG(dbgs() << "Skipping statepoint IV user: " << *UserInst
-                            << '\n');
-          continue;
-        }
+    if (OxcamlSkipStatepointCallArgLSR &&
+        isGCStatepointCallBase(UserInst)) {
+      LLVM_DEBUG(dbgs() << "Skipping statepoint IV user: " << *UserInst
+                        << '\n');
+      continue;
+    }
 
     // Skip IV users that are part of profitable IV Chains.
     User::op_iterator UseI =
@@ -6916,19 +6946,6 @@ static bool ReduceLoopStrength(Loop *L, IVUsers &IU, ScalarEvolution &SE,
   SalvageableDVIRecords.clear();
   DVIHandles.clear();
   return Changed;
-}
-
-static bool isOxcamlGCFunction(const Function &F) {
-  return F.hasGC() && F.getGC() == "oxcaml";
-}
-
-static bool containsStatepoint(const Loop &L) {
-  for (const BasicBlock *BB : L.blocks())
-    for (const Instruction &I : *BB)
-      if (const auto *II = dyn_cast<IntrinsicInst>(&I))
-        if (II->getIntrinsicID() == Intrinsic::experimental_gc_statepoint)
-          return true;
-  return false;
 }
 
 bool LoopStrengthReduce::runOnLoop(Loop *L, LPPassManager & /*LPM*/) {
