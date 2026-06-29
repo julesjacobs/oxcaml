@@ -24,6 +24,27 @@ _build/llvm-tools -j2 llc` passes again. Any future fix must be more precise
 than blocking broad post-statepoint folding, and must pass a real LLVM build
 before benchmarking.
 
+2026-06-29 BOLT follow-up: tested additional LLVM-built-compiler-only BOLT
+variants; none reaches the `+6%` target, and none beats the existing best
+`cache-hfsort-peep-rodata` result (`+3.77%`) on comparable inner-repetition
+runs. Indirect-call promotion is not safe with the current OCaml frametable
+patcher: both
+`-indirect-call-promotion=calls` and the same with `-icp-old-code-sequence`
+patched all existing descriptors but failed immediately at startup with
+`caml_scan_stack: missing frame descriptor`. The missing PCs are newly-created
+promoted-call return addresses, e.g. in
+`camlStdlib__List__concat_map_64_160_code`; the patcher rewrites old
+descriptors but cannot synthesize extra descriptors for BOLT-added callsites.
+So ICP requires real frame-table growth/synthesis before it can be benchmarked.
+Safe layout-only variants were neutral or worse than best:
+`cache-hfsortplus-peep-rodata` starts and measured `+3.82%` on a short screen
+but only `+3.35%` on `samples=5, inner=3`; `blocknormal-hfsort-peep-rodata`
+starts but screened at `+3.21%`. Artifacts live under
+`agent-state/test-suite-29e4cd/bolt_compiler_20260629/`, including
+`native-current-vs-llvm-constfilter-cache-hfsortplus-peep-rodata-inner3.json`,
+`native-current-vs-llvm-constfilter-blocknormal-hfsort-peep-rodata-screen.json`,
+and the corresponding `constfilter-...icp...` logs.
+
 2026-06-29 compiler-performance investigation update: the large
 `Hashtbl.create`/capacity-growth code-size pathology is real, but the tested
 global full-unroll cap is not a useful compiler-throughput lever. Local,
