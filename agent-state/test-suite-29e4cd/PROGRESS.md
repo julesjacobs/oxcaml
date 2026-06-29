@@ -7,6 +7,63 @@ path specifically: backend code generation, LLVM/BOLT handling, LLVM-only
 profile/layout work, or another change that is not available to the native
 build under the same benchmark setup.
 
+2026-06-29 ctype-focused BOLT experiment: the current best valid compiler
+binary remains
+`ocamlopt.constfilter.cache-hfsort-peep-rodata.bat.patched`, with
+`+3.77%` on the five-module compiler-throughput workload
+(`samples=7`, `inner_repetitions=3`). Per-module reruns against the same
+native-built baseline show the blocker is `typing/ctype.ml`: `cfg_selectgen`
+`+3.91%`, `llvmize` `+4.63%`, `translcore` `+4.94%`, `ctype` only `+0.87%`,
+and `env` `+4.13%`. Supporting artifacts are
+`native-current-vs-llvm-constfilter-cache-hfsort-peep-rodata-module-*-inner3.json`.
+A best-candidate perf profile for `ctype` is heavily runtime/GC dominated
+(`do_some_marking` `13.41%`, `oldify_one` `7.90%`, `clear_garbage` `3.76%`,
+`caml_modify` `2.98%`), and hot helper disassembly still shows LLVM-generated
+AMD64 code using larger frames/root-slot traffic in some functions than the
+native backend shape. Supporting artifacts are under
+`best_peep_perf_profiles_20260629/`, especially
+`best-ctype-symbol-report-simple.txt`,
+`native-ctype-symbol-report-simple.txt`, and `asm/`.
+
+To test whether this was mostly a BOLT profile-coverage issue, collected a
+new LBR profile from `ocamlopt.constfilter.reloc` compiling only
+`typing/ctype.ml` for seven repetitions:
+`ocamlopt.constfilter.reloc.ctype7.lbr.perf.data` and
+`ocamlopt.constfilter.reloc.ctype7.lbr.fdata`. `perf2bolt` read 66,734
+samples and 1,066,577 LBR entries. Rebuilt with the same safe BOLT recipe
+(`-reorder-blocks=cache`, `-reorder-functions=hfsort`, `-peepholes=all`,
+`-reorder-data=.rodata`, `--enable-bat`) and frame-table patched
+`ocamlopt.constfilter.ctype7-cache-hfsort-peep-rodata.bat.patched`
+successfully (`patched 224543`, `unresolved 0`). The binary passed `-version`
+and direct compile smoke tests for both `typing/ctype.ml` and
+`backend/llvm/llvmize.ml`.
+
+Result: this focused profile improves the holdout but is not a keeper. The
+`ctype`-only benchmark improves to `+2.23%`
+(`native-current-vs-llvm-constfilter-ctype7-cache-hfsort-peep-rodata-module-typing_ctype-inner3.json`),
+but the full five-module benchmark is only `+3.34%`
+(`native-current-vs-llvm-constfilter-ctype7-cache-hfsort-peep-rodata-inner3.json`),
+worse than the existing `+3.77%` best. Conclusion: BOLT profile specialization
+can move `ctype`, but it trades away broader layout wins. The next plausible
+LLVM-only improvement is not `-O4` or another generic optimization level; it is
+either real OCaml/BOLT metadata support for transformations like ICP that
+create new managed callsites, or a precise AMD64 LLVM codegen fix for the
+extra statepoint/call-adjacent stack traffic and root-slot/frame shape.
+
+Also tested a normal-profile merge of the existing broad five-module fdata
+(`ocamlopt.constfilter.reloc.noassert.lbr.fdata`) and the new `ctype7` fdata
+(`ocamlopt.constfilter.reloc.ctype7.lbr.fdata`), producing
+`ocamlopt.constfilter.reloc.noassert-plus-ctype7.lbr.fdata`; merge log:
+`merge-noassert-plus-ctype7.log`. This avoids the previously rejected mixed
+`boltedcollection` post-BOLT merge issue because both inputs are pre-BOLT
+profiles for `ocamlopt.constfilter.reloc`. The merged profile BOLT binary
+`ocamlopt.constfilter.noassert-plus-ctype7-cache-hfsort-peep-rodata.bat.patched`
+patched cleanly (`patched 224543`, `unresolved 0`) and passed `-version` plus
+direct `ctype`/`llvmize` compile smoke tests, but a short full-workload screen
+was only `+1.52%`
+(`native-current-vs-llvm-constfilter-noassert-plus-ctype7-cache-hfsort-peep-rodata-screen.json`).
+Rejected without a stronger run.
+
 2026-06-29 unroll follow-up: reran the no-loop-unrolling idea through the real
 LLVM backend wrapper rather than relying on the earlier invalid benchmark.
 Global `--disable-loop-unrolling` for the main compiler rebuild is rejected:
