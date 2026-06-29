@@ -1,5 +1,39 @@
 # Progress
 
+2026-06-29 scope correction: do not count generic optimization-level changes
+such as `-O4` toward the compiler-performance goal. Those would apply equally
+to a native-built compiler, so the remaining work must improve the LLVM-built
+path specifically: backend code generation, LLVM/BOLT handling, LLVM-only
+profile/layout work, or another change that is not available to the native
+build under the same benchmark setup.
+
+2026-06-29 compiler-performance investigation update: the large
+`Hashtbl.create`/capacity-growth code-size pathology is real, but the tested
+global full-unroll cap is not a useful compiler-throughput lever. Local,
+currently untracked workspace artifacts include captured `stdlib/hashtbl.ml`
+LLVM IR in
+`agent-state/test-suite-29e4cd/unroll_investigation_20260629/hashtbl_compile/`;
+rerun the investigation rather than relying on those paths after a fresh clone.
+`LoopFullUnrollPass` fully unrolls the bounded doubling loops (`L125` in
+`camlHashtbl__create_inner_7_118_code`, `L4212` in
+`camlHashtbl__create_83_232_code`), creating the long compare ladder. Local
+ablations fix the assembly shape: `--disable-loop-unrolling` shrinks
+`create_83` from 208 assembly lines to 58, and
+`--unroll-full-max-count=41` does the same while cap 48 allows the ladder.
+However, the whole-compiler build evidence only rejects the narrower full-unroll
+cap 41, not no-loop-unroll generally: the direct no-loop-unroll build failed
+with a minor-GC allocation failure, and the later install that measured `-6.45%`
+logged zero wrapper invocations, so do not use that benchmark as evidence about
+LLVM no-loop-unroll throughput. The full-unroll cap 41 build completed with 148
+runtime and 2228 main wrapper invocations, smoked, and using the real binary
+still measured `-5.21%` vs native in the local workspace artifact
+(`native-current-vs-llvm-fullcap41-real-screen.json`). The same screen with
+the current LLVM compiler is roughly parity with native (`+0.15%`,
+`native-current-vs-llvm-constfilter-current-screen-rerun.json`). Do not pursue
+a global full-unroll cap; no-loop-unroll would need a clean LLVM-path build
+before it can be judged. Any future fix for this code-size issue must be more
+surgical and rebenchmarked against the compiler workload before keeping.
+
 Last updated: 2026-06-29. Important correction: the broad benchmark run in
 `spill_fusing_effect/` used the temporary `llc-wrapper.sh`, which fed raw
 pre-optimization LLVM IR directly to `llc`. That is not the project pipeline:
