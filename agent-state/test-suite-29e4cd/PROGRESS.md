@@ -1,5 +1,30 @@
 # Progress
 
+2026-06-29 LLVM-only scalar spill-fusing follow-up: tested a narrower hidden
+X86 `llc` flag that disabled scalar integer ALU spill folding only in OxCaml
+functions after a statepoint in the same machine block. It fixed the focused
+dynamic GC loop shape locally and could build a full LLVM-stage compiler when
+bootstrapped from the clean native install
+`_native_current_install` (`main fresh ir: 1114`). The existing
+`_install/bin/ocamlopt.opt` is not a trustworthy bootstrap for this
+validation: it can abort before wrapper invocation while compiling
+`otherlibs/dynlink/parser.ml` with `Fatal error: allocation failure during
+minor GC`; the same action succeeds under `_native_current_install`.
+
+Result: rejected for the compiler-throughput goal. Benchmarking the clean
+native-bootstrapped LLVM-stage compiler against the native-built compiler,
+both compiling in normal native mode over the five standard modules with
+`samples=7`, `inner_repetitions=3`, gave native median `27.068969s`, candidate
+median `28.667318s`, ratio `1.059047`, i.e. `-5.90%`. Artifact:
+`bolt_compiler_20260629/native-current-vs-llvm-scalaralu-nativeboot-benchmark.json`.
+The experimental LLVM source/test changes were removed. The current best valid
+full-workload LLVM-path result remains the safe BOLT layout binary
+`ocamlopt.constfilter.cache-hfsort-peep-rodata.bat.patched` at about `+3.77%`;
+the remaining path to the required `+6%` is still real OCaml-aware BOLT
+frametable support for transformations such as ICP, or a precise AMD64 LLVM
+codegen improvement that helps the compiler workload rather than the isolated
+loop benchmark.
+
 2026-06-29 scope correction: do not count generic optimization-level changes
 such as `-O4` toward the compiler-performance goal. Those would apply equally
 to a native-built compiler, so the remaining work must improve the LLVM-built

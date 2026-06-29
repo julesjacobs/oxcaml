@@ -1,0 +1,48 @@
+{
+  "description": "Native-built compiler vs LLVM-built scalar-ALU spill-fusing experiment; both compile in normal native mode",
+  "modules": [
+    "backend/cfg_selectgen.ml",
+    "backend/llvm/llvmize.ml",
+    "lambda/translcore.ml",
+    "typing/ctype.ml",
+    "typing/env.ml"
+  ],
+  "samples": 7,
+  "inner_repetitions": 3,
+  "results": {
+    "baseline": {
+      "compiler": "/home/jules/git/oxcaml-llvm/_native_current_install/bin/ocamlopt.opt",
+      "build_main": "/home/jules/git/oxcaml-llvm/_native_current_build/main",
+      "ocamllib": "/home/jules/git/oxcaml-llvm/_native_current_install/lib/ocaml",
+      "times": [
+        27.006783321034163,
+        27.133983329869807,
+        27.1551757119596,
+        26.909833806101233,
+        27.06896906811744,
+        27.05564033985138,
+        27.120084851048887
+      ],
+      "mean": 27.064352918283216,
+      "median": 27.06896906811744
+    },
+    "candidate": {
+      "compiler": "/home/jules/git/oxcaml-llvm/_llvm_scalaralu_nativeboot_install/bin/ocamlopt.opt",
+      "build_main": "/home/jules/git/oxcaml-llvm/_llvm_scalaralu_nativeboot_main_build/main",
+      "ocamllib": "/home/jules/git/oxcaml-llvm/_llvm_scalaralu_nativeboot_install/lib/ocaml",
+      "times": [
+        28.667318298015743,
+        28.58060300210491,
+        28.99632360599935,
+        28.711624471936375,
+        28.668353653047234,
+        28.64481052197516,
+        28.658747639041394
+      ],
+      "mean": 28.70396874173145,
+      "median": 28.667318298015743
+    }
+  },
+  "candidate_vs_baseline_median": 1.0590472886453914,
+  "improvement_percent": -5.904728864539144
+}
