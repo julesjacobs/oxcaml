@@ -7,6 +7,28 @@ path specifically: backend code generation, LLVM/BOLT handling, LLVM-only
 profile/layout work, or another change that is not available to the native
 build under the same benchmark setup.
 
+2026-06-29 unroll follow-up: reran the no-loop-unrolling idea through the real
+LLVM backend wrapper rather than relying on the earlier invalid benchmark.
+Global `--disable-loop-unrolling` for the main compiler rebuild is rejected:
+the wrapper logs show 271 optimizer invocations / 271 fresh IR compilations,
+then the build failed while compiling `otherlibs/dynlink` and `.ocamlcommon`
+with `allocation failure during minor GC` / `SEGV`; no
+`_llvm_nounroll_clean_install/bin/ocamlopt.opt` was produced. Whole-runtime
+stdlib no-loop is also rejected: the runtime stdlib build itself completed
+with 74 fresh IR compilations, but a normal main rebuild against it failed
+with the same minor-GC/SEGV pattern and produced no install. A narrower
+`stdlib__Hashtbl.ll`-only no-loop wrapper matched exactly that stdlib IR file
+once, but a normal main rebuild against the resulting stdlib still failed with
+minor-GC allocation failures in `otherlibs/dynlink` and `.ocamlcommon`, again
+with no installed compiler. Conclusion: the Hashtbl full-unroll code-size
+pathology is real, but disabling loop unrolling, even only for Hashtbl in the
+stdlib, is not a safe compiler-throughput improvement in this pipeline.
+Artifacts are under
+`agent-state/test-suite-29e4cd/unroll_investigation_20260629/`, especially
+`build_nounroll_clean_main.log`, `build_nounroll_stdlib_main_normal.log`,
+`build_hashtbl_nounroll_main_normal.log`, and the corresponding
+`llvm-wrapper-*` / `opt-*` logs.
+
 2026-06-29 BOLT ICP frametable investigation update: the current
 LLVM-built-compiler-only BOLT path still does not meet the required `+6%`
 target over the native-built compiler. Full BOLT indirect-call promotion can
