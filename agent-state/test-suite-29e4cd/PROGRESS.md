@@ -69,6 +69,15 @@
     bloat, and these flags should not be booted or benchmarked for the +6%
     goal.
 
+- 2026-06-30 rejected deferred-spilling screen:
+  - Screened `llc --enable-deferred-spilling` on the saved `typing/ctype.ml`
+    RS4GC input as a narrow allocator-policy diagnostic.
+  - It reduced OXSR appended spill-slot roots only from `1629` to `1618`
+    (`1618 -> 1606` GC-family slots, `860 -> 856` ordinary-call slots,
+    `757 -> 749` alloc-family slots) while leaving the broad shape unchanged.
+    This is far too small to plausibly close the full benchmark gap to `+6%`,
+    so it was not booted or benchmarked.
+
 - 2026-06-30 MIR-level `ctype` root-pressure narrowing:
   - Reconfirmed the scope constraint after the `-O4` discussion: the +6%
     target must come from LLVM-path-only work. Generic compiler-driver
