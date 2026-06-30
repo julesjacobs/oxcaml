@@ -1,5 +1,31 @@
 # Progress
 
+- 2026-06-30 rejected targeted `ctype` BasicRA ablation:
+  - Reconfirmed Jules's scope correction: generic optimization settings such as
+    `-O4` cannot count toward the goal because the native-built compiler could
+    use them too. This test stayed LLVM-path-only by changing the LLVM codegen
+    path only for `typing/ctype.ml`, and only as an ablation of the root/spill
+    pressure hypothesis.
+  - Added a temporary wrapper
+    `agent-state/test-suite-29e4cd/llc-wrapper-ctype-basicra.sh` that passed
+    `-mllvm -regalloc=basic` only when compiling `ctype.ll`; all other modules
+    went through the normal `tools/llvm-rs4gc-llc-wrapper.sh`. A focused
+    `typing/ctype.ml` real-wrapper smoke passed
+    (`ctype-basicra-smoke.log`, `ctype-basicra-smoke-wrapper.log`).
+  - A separate self-stage build using `_llvm_ctype_basicra_*` failed with exit
+    code 1. The build log reports repeated `Fatal error: allocation failure
+    during minor GC` followed by `Command got signal SEGV`; the wrapper log
+    confirms the targeted `ctype.ll` invocation used `-regalloc=basic`
+    (`ctype-basicra-selfstage-build.log`,
+    `ctype-basicra-selfstage-wrapper.log`). The temporary wrapper was removed.
+  - Conclusion: the direct BasicRA signal is useful only as a diagnostic that
+    allocator/root-home shape matters. It is not a valid improvement candidate:
+    even targeted to `ctype`, it fails self-stage in the same GC-corruption
+    class as earlier root-refresh prototypes. The next candidate should keep
+    the current ARM-style in-place statepoint mechanism and change AMD64 root
+    home selection/coalescing with verifier-backed correctness, not use
+    path-specific wrappers or broad allocator replacement.
+
 - 2026-06-30 rejected post-RA physical duplicate-root refresh prototype:
   - Implemented a temporary hidden LLVM backend prototype in
     `FixupStatepointCallerSaved` rather than using generic `-O4`/driver flags.
