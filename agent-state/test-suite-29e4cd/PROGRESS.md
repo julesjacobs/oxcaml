@@ -1,5 +1,28 @@
 # Progress
 
+- 2026-06-30 rejected safe BOLT artifacts on seven-module workload:
+  - Rechecked the current best safe BOLT artifact on the explicit seven-module
+    compiler workload (`cfg_selectgen`, `llvmize`, `translcore`, `ctype`,
+    `env`, `typecore`, `typemod`) using the corrected native-mode artifacts:
+    `_native_current_build/main/oxcaml_main_native.exe` plus
+    `_native_current_install/lib/ocaml` versus
+    `ocamlopt.constfilter.cache-hfsort-peep-rodata.bat.patched` plus
+    `_llvm_constfilter_build/main` and `_llvm_constfilter_install/lib/ocaml`.
+    Result, `samples=3`, `inner_repetitions=2`: native median `29.674922s`,
+    candidate median `29.020564s`, improvement `+2.21%`
+    (`bolt_compiler_20260629/native-oxcamlopt-vs-best-bolt-oxcamlopt-seven-paired-inner2.json`).
+  - Also checked the ctype-heavy merged-profile artifact
+    `ocamlopt.constfilter.noassert-plus-ctype7-cache-hfsort-peep-rodata.bat.patched`
+    on the same seven-module workload. Result, `samples=3`,
+    `inner_repetitions=2`: native median `29.977394s`, candidate median
+    `29.358300s`, improvement `+2.07%`
+    (`bolt_compiler_20260629/native-oxcamlopt-vs-noassert-plus-ctype7-cache-hfsort-peep-rodata-seven-paired-inner2.json`).
+  - Conclusion: the narrower five-module BOLT result (`+4.63%` paired) does
+    not generalize to the stricter seven-module compiler workload, and neither
+    existing safe BOLT artifact is close to the requested LLVM-path-only `+6%`
+    goal. Future compiler-throughput claims should include the seven-module
+    workload, not only the old five-module set.
+
 - 2026-06-30 rejected current-stack-slot reuse experiment:
   - Tested a narrow LLVM-only source change in
     `FixupStatepointCallerSaved`: add hidden
