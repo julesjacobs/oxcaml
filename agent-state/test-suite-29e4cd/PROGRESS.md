@@ -2586,3 +2586,33 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     (`-disable-spill-fusing`, skipping roots, allowing GC pointers in CSRs) are
     rejected because they either fail full compiler validation or do not reduce
     the relevant root pressure.
+- 2026-06-30 rejected post-OXSR dead-slot observation pruning:
+  - Prototyped a conservative `OxCamlStatepointSpillRoots` diagnostic using the
+    existing `GCValueness::mayObserveContent` query at the three LiveStacks slot
+    append sites. To avoid a stale slot being skipped before a later safepoint,
+    the diagnostic also treated later statepoints in the same store-free region
+    as potential observers. This was an LLVM-path-only source experiment, not a
+    frontend or generic `-O4`-style change.
+  - Focused direct `llc` stats on saved `typing/ctype.ml` RS4GC IR improved the
+    visible root-count bucket: appended spill-slot roots dropped from the
+    recorded baseline `1629` to `1305`, with GC-family slots at `1293`
+    (`966` ordinary, `326` alloc, `1` C-call). The full boot/smoke gate with
+    `_native_current_install` stage0 and the canonical
+    `tools/llvm-rs4gc-llc-wrapper.sh` passed; smoke printed `55`
+    (`1682` boot wrapper lines / `841` fresh IR, then `4` smoke wrapper lines /
+    `2` fresh IR).
+  - Performance rejected the candidate. A quick five-module compiler-throughput
+    screen using the patched boot compiler was worse, not better: native median
+    `9.061933s`, candidate median `11.870869s` (`-30.997%`). A focused
+    `typing/ctype.ml` screen was also worse versus native: native median
+    `7.283169s`, candidate median `9.911037s` (`-36.081%`). Result files:
+    `bolt_compiler_20260629/native-current-vs-observe-root-boot-samples3-inner1.json`
+    and
+    `bolt_compiler_20260629/native-current-vs-observe-root-boot-ctype-samples5-inner3.json`.
+  - The source change was reverted and vendored `llc` was rebuilt back to the
+    checked-in source state. Conclusion: pruning descriptors after allocation can
+    reduce root-list volume, but that alone does not move the LLVM-built
+    compiler toward the required `+6%` versus native. The next promising work
+    should still target the earlier producer: AMD64 register allocation / split
+    placement / statepoint operand materialization that creates long-lived
+    duplicate GC spill homes in hot `ctype` functions.
