@@ -29,12 +29,37 @@
     jump table and warned that data reordering requires basic jump-table
     support, so no useful data-reorder artifact was produced. Log:
     `bolt_compiler_20260629/constfilter-cache-hfsort-peep-rodata-jtbasic-data.log`.
+  - Investigated the real BOLT ICP direct-call shape instead of the rejected
+    `push; jmp` shared-return shape. Plain BOLT ICP produced
+    `ocamlopt.constfilter.cache-hfsort-peep-rodata-icp-calls-v4.bat.bolt`
+    with about `79.2%` of profiled indirect callsites optimized, but the
+    existing frametable patcher missed BOLT-created direct-call return PCs
+    such as `0x3bb5dc3` in `List.concat_map`, causing
+    `caml_scan_stack: missing frame descriptor`.
+  - Extended the local patcher experimentally to synthesize descriptors for
+    promoted direct-call returns by cloning the fallback indirect-call
+    descriptor when the fallback return jumps to the same post-call
+    continuation. This produced
+    `ocamlopt.constfilter.cache-hfsort-peep-rodata-icp-calls-v4.synth4.bat.patched`
+    with `224543` ordinary descriptors patched, `0` unresolved descriptors,
+    and `312` synthesized ICP descriptors. It passed `-version` and a small
+    native compile smoke.
+  - Rejected that normal-ICP synthesis as not yet correct. The five-module
+    smoke failed compiling `backend/llvm/llvmize.ml` with
+    `Invalid_argument("hash: mixed block value")`, consistent with a wrong
+    root map rather than a missing descriptor. Ablations skipping either half
+    of the synthesized descriptor set immediately produced missing-frame
+    aborts (`0x3b460f7`, `0x3bb5dc3`, etc.), so many synthesized descriptors
+    are genuinely needed; the current problem is exact root-layout correctness
+    for BOLT-created callsites, not simply over-synthesizing unused entries.
+    Do not benchmark normal ICP until the descriptor model can survive real
+    compiler-module compilation.
   - Current measured best is unchanged:
     `ocamlopt.constfilter.cache-hfsort-peep-rodata.bat.patched` at `+3.77%`.
-    The remaining LLVM-only path is still either exact OCaml-aware BOLT
-    frametable support for new promoted call return PCs, or a backend
-    root/spill precision improvement that preserves the arm-style in-place
-    statepoint model.
+    The viable LLVM-only path is now backend root/spill precision, or a much
+    stronger OCaml-aware BOLT frametable implementation for new promoted call
+    return PCs that proves live-root equivalence instead of cloning
+    descriptors heuristically.
 
 2026-06-29 BOLT ICP shared-return prototype: this is an LLVM/BOLT-path-only
 experiment, not a generic `-O4` style change. Added a hidden X86 BOLT mode
