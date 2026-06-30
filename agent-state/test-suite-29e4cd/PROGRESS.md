@@ -3236,3 +3236,48 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     analysis regime, or a target-aware greedy heuristic that reduces duplicate
     statepoint-crossing spill homes while preserving the current ARM-style
     in-place statepoint mechanism.
+- 2026-06-30 LLVM-path-only follow-up screens after the `-O4` correction:
+  - Reconfirmed the scope rule: `-O4`, `-mcpu=native`, and similar generic
+    optimization-level or driver settings are not valid evidence for the
+    compiler-throughput goal because the native-built compiler can receive the
+    same treatment. I focused this pass on LLVM-backend-only statepoint and
+    register-allocation knobs.
+  - Tested `-oxcaml-disable-statepoint-loop-lsr` by running local
+    `_build/llvm-tools/bin/opt` on the saved pre-RS4GC `typing/ctype.ml` IR
+    (`root_stats_20260630/skip-stack-realloc-extra-roots/ctype.ll`) with
+    `default<O3>,rewrite-statepoints-for-gc,verify`, then local `llc -O3`.
+    Result: no movement at all in the current counters (`407` fixup spill
+    slots, `798` fixup spilled registers, `1629` appended spill slots,
+    `1618` GC-family slots split `757` alloc / `860` ordinary / `1` C-call,
+    `2374` regalloc spill slots). Assembly line count was also unchanged.
+    Artifact:
+    `bolt_compiler_20260629/root_stats_20260630/lsr-statepoint-screen/`.
+  - Screened existing fixup-only knobs on saved post-RS4GC `ctype.rs4gc.ll`:
+    `-fixup-scs-extend-slot-size` and
+    `-fixup-scs-enable-copy-propagation=false`. Both were no-ops for the
+    relevant counters: same `407`/`798` fixup stats, same `1629` appended
+    slots, same `5938` reloads and `2374` regalloc spill slots. Artifact:
+    `root_stats_20260630/fixup-knob-screen-20260630/`.
+  - Temporarily added a disabled-by-default diagnostic in
+    `FixupStatepointCallerSaved` to force ordinary managed-call register
+    operands (`OxCaml_WithFP`/`OxCaml_WithoutFP`) into fresh stack slots. On
+    saved `ctype.rs4gc.ll`, enabling it had zero effect on every counter, which
+    rules out the simple hypothesis that ordinary-call bloat is caused by
+    unspilled statepoint register operands. The diagnostic was reverted and
+    local `llc` rebuilt back to checked-in source. Artifact:
+    `root_stats_20260630/managed-reg-spill-screen-20260630/`.
+  - Screened `-disable-spill-hoist` on the same saved `ctype.rs4gc.ll`, since
+    hoisted spills could have been the producer of long-lived roots. It was
+    also a complete no-op for the root and spiller counters (`1629` appended
+    slots, `1618` GC-family, `3144` spills inserted, `524` spills removed).
+    Artifact: `root_stats_20260630/spill-hoist-screen-20260630/`.
+  - Rechecked AMD64 call-convention parity instead of assuming it. LLVM AMD64
+    ordinary OxCaml args/results use the native backend order
+    `r14,r15,rax,rbx,rdi,rsi,rdx,rcx,r8,r9,r12,r13` (runtime registers first in
+    LLVM IR, then native argument/result registers), and ordinary managed calls
+    preserve only the frame pointer just as `backend/amd64/proc.ml` treats
+    normal calls as destroying all physical registers. AMD64 allocation entries
+    do save the full ordinary root set in `runtime/amd64.S:SAVE_ALL_REGS`, so
+    the `gc_regs` mapping is not the missing piece. This keeps the next target
+    on allocator split/spill placement and OXSR-compatible root-home coalescing,
+    not ABI register-order changes or generic optimization flags.
