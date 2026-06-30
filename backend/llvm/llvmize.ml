@@ -6432,11 +6432,33 @@ let stack_check ?unwind_label ?exn_entry t (i : Cfg.basic Cfg.instruction)
         Misc.fatal_error "unexpected architecture"
     in
     add_referenced_symbol t realloc_stack_symbol;
-    call_runtime_for_basic_safepoint
-      ~attrs:(gc_attr ~can_call_gc:true t i @ [LL.Fn_attr.Cold])
-      ?unwind_label ~cc:Oxcaml_alloc t i realloc_stack_symbol [V.of_int required_words]
-      [] "stack check"
-    |> ignore;
+    let attrs =
+      match Target_system.architecture () with
+      | Target_system.X86_64 ->
+        (* [caml_try_realloc_stack] is CAMLnoalloc.  On AMD64 the runtime
+           helper preserves live OCaml registers itself, matching the native
+           stack-check slow path; emitting this as a statepoint needlessly adds
+           a frame descriptor and makes all live roots visible at every
+           ordinary stack check. *)
+        gc_attr ~can_call_gc:false t i @ [LL.Fn_attr.Cold]
+      | Target_system.AArch64 ->
+        gc_attr ~can_call_gc:true t i @ [LL.Fn_attr.Cold]
+      | Target_system.IA32 | Target_system.ARM | Target_system.POWER
+      | Target_system.Z | Target_system.Riscv ->
+        Misc.fatal_error "unexpected architecture"
+    in
+    (match Target_system.architecture () with
+    | Target_system.X86_64 ->
+      call_simple ~attrs ~cc:Oxcaml_alloc t realloc_stack_symbol
+        [V.of_int required_words] []
+      |> ignore
+    | Target_system.AArch64 ->
+      call_runtime_for_basic_safepoint ~attrs ?unwind_label ~cc:Oxcaml_alloc t
+        i realloc_stack_symbol [V.of_int required_words] [] "stack check"
+      |> ignore
+    | Target_system.IA32 | Target_system.ARM | Target_system.POWER
+    | Target_system.Z | Target_system.Riscv ->
+      Misc.fatal_error "unexpected architecture");
     emit_ins_no_res t (I.br after_realloc);
     emit_unwind_landingpad_after t unwind_label exn_entry;
     emit_label t after_realloc

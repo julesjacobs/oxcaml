@@ -1566,3 +1566,47 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     support for transformations such as ICP, or a backend/root-placement fix
     that keeps the in-place arm-style mechanism while reducing AMD64
     duplicate live homes around ordinary calls and stack checks.
+  - Implemented and tested an AMD64-only ordinary stack-check cleanup in
+    `backend/llvm/llvmize.ml`: ordinary AMD64 stack checks now call
+    `caml_llvm_call_realloc_stack*` as a GC-leaf `Oxcaml_alloc` call instead
+    of a statepoint. AArch64 keeps the existing statepoint stack-check path.
+    The local correctness review checked that
+    `ordinary_trap_unwind_for_basic_safepoint` gives `Stack_check` no ordinary
+    unwind edge and that the AMD64 runtime helper saves all OCaml registers
+    around `caml_try_realloc_stack`, matching the native AMD64 stack-check
+    slow path. Updated
+    `testsuite/tests/llvm-codegen/stack_check_size_contract.sh` so AMD64
+    expects ordinary stack-check calls to be `gc-leaf-function` and not carry
+    a `statepoint-id`, while non-AMD64 hosts keep the old statepoint contract.
+  - Validation:
+    - Boot LLVM build with `tools/build-llvm-boot-with-installed.sh` passed
+      the smoke (`55`).
+    - Focused stack-check contract script passed in normal and
+      `no-cfg-stack-checks` modes with the boot compiler.
+    - Self-stage install built successfully with
+      `tools/build-llvm-stage5-install.sh`; the self-built compiler passed the
+      native fib smoke.
+    - Frametable analysis of the self-built compiler confirmed the
+      `caml_llvm_call_realloc_stack` bucket disappeared. The previous best
+      BOLT artifact had about `30987` descriptors / `73650` live roots in that
+      bucket; the stack-check-leaf self-built compiler and BOLT artifact have
+      no such bucket.
+  - BOLT relink note: the first relocation-enabled relink accidentally used
+    the boot/native stdlib and produced BOLT artifacts that patched with `92`
+    BAT fallback frame mappings and crashed in `caml_garbage_collection`.
+    Relinking with the matching `_llvm_stackcheck_leaf_install/lib/ocaml`
+    stdlib fixed this: no-profile and profiled BOLT both patched with zero BAT
+    fallback mappings and passed the fib smoke.
+  - Performance result: the un-BOLTed self-built stack-check-leaf compiler was
+    still slower than native-built (`-2.63%`, artifact
+    `native-current-vs-stackcheck-leaf-install-samples5-inner3.json`). The
+    valid full-BOLT stack-check-leaf artifact
+    `ocamlopt.stackcheck-leaf.stage-stdlib.cache-hfsort-peep-rodata.bat.patched`
+    reached only `+1.81%` vs native-built on the five-module native-mode
+    compiler workload (`native-current-vs-stackcheck-leaf-stage-stdlib-cache-hfsort-peep-rodata-samples5-inner3.json`),
+    below both the current best valid BOLT artifact (`+3.77%`) and the `+6%`
+    goal. Conclusion: removing ordinary stack-check statepoints is a real
+    metadata/root-table cleanup and likely worth keeping for stack-check
+    quality, but it is not the main throughput lever. The next target remains
+    allocation/ordinary-call root precision, especially the `ctype` major-GC
+    root-scanning gap.

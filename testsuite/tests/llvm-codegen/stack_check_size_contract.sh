@@ -253,6 +253,28 @@ assert_ordinary_realloc_is_statepoint() {
   fi
 }
 
+assert_ordinary_realloc_is_leaf() {
+  if ! function_ir "$1" | grep -E '_?caml_llvm_call_realloc_stack' | grep -q '"gc-leaf-function"="true"'; then
+    echo "$1: ordinary AMD64 LLVM stack check must be a GC leaf" >&2
+    exit 1
+  fi
+  if function_ir "$1" | grep -E '_?caml_llvm_call_realloc_stack' | grep -q '"statepoint-id"='; then
+    echo "$1: ordinary AMD64 LLVM stack check must not be a statepoint" >&2
+    exit 1
+  fi
+}
+
+assert_ordinary_realloc_has_target_contract() {
+  case "$host_arch" in
+    x86_64 | amd64)
+      assert_ordinary_realloc_is_leaf "$1"
+      ;;
+    *)
+      assert_ordinary_realloc_is_statepoint "$1"
+      ;;
+  esac
+}
+
 boundary_function_asm() {
   name="$1"
   awk -v name="${name}:" '
@@ -454,7 +476,7 @@ if [ "$(cfg_stack_check_bytes small_non_tail_call)" = "0" ]; then
 fi
 assert_no_prologue_realloc small_non_tail_call
 assert_has_ordinary_realloc small_non_tail_call
-assert_ordinary_realloc_is_statepoint small_non_tail_call
+assert_ordinary_realloc_has_target_contract small_non_tail_call
 
 check_contract_matches_cfg stack_check_keeps_root
 if [ "$(cfg_stack_check_bytes stack_check_keeps_root)" = "0" ]; then
@@ -463,7 +485,7 @@ if [ "$(cfg_stack_check_bytes stack_check_keeps_root)" = "0" ]; then
 fi
 assert_no_prologue_realloc stack_check_keeps_root
 assert_has_ordinary_realloc stack_check_keeps_root
-assert_ordinary_realloc_is_statepoint stack_check_keeps_root
+assert_ordinary_realloc_has_target_contract stack_check_keeps_root
 
 check_contract_matches_cfg noalloc_outgoing_stack_args
 if [ "$(cfg_stack_check_bytes noalloc_outgoing_stack_args)" = "0" ]; then
@@ -482,4 +504,4 @@ case "$host_arch" in
     ;;
 esac
 assert_has_ordinary_realloc noalloc_outgoing_stack_args
-assert_ordinary_realloc_is_statepoint noalloc_outgoing_stack_args
+assert_ordinary_realloc_has_target_contract noalloc_outgoing_stack_args
