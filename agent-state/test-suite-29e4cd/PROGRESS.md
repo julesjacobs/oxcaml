@@ -1923,3 +1923,31 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     "drop fallback-only register roots" fix for the observed corruption. The
     direct-ICP route still needs exact metadata for the direct-call state, not
     a small register-filter heuristic.
+- 2026-06-30 instrumented-BOLT BAT screen:
+  - Revisited full/instrumented BOLT as an LLVM-built-binary-only route, still
+    excluding generic driver optimizations such as `-O4`.
+  - Confirmed the local instrumentation runtime symbol fix in
+    `vendor/llvm-project/bolt/runtime/instr.cpp` remains relevant: the old log
+    failed to link the anonymous-namespace
+    `_ZN12_GLOBAL__N_125__bolt_instr_conservativeE` symbol, while the later log
+    links the instrumentation runtime successfully.
+  - Tried fresh full instrumentation of `ocamlopt.constfilter.reloc` with
+    `--enable-bat`, so the existing OCaml frametable patcher could translate
+    descriptor return PCs before running the binary. BOLT did not reach output:
+    `constfilter-instrumented-bat.log` ends with glibc heap corruption
+    (`corrupted double-linked list (not small)`).
+  - Tried profile-guided hot-only instrumentation with the existing LBR fdata
+    and `--enable-bat`. This also failed inside BOLT before output; the crash
+    stack is in `BinaryEmitter::emitFunction` via
+    `MCPlusBuilder::getOffset`, logged in
+    `constfilter-instrumented-hot-bat.log`.
+  - Control run: the same hot-only instrumentation without `--enable-bat`
+    succeeded and produced
+    `ocamlopt.constfilter.instrumented-hot-nobat`. That unpatched binary does
+    not start, which is expected because BOLT has rewritten code addresses
+    without emitting BAT data for the OCaml frametable patcher.
+  - Conclusion: instrumented BOLT is not currently blocked on the runtime
+    symbol fix; it is blocked on making BOLT instrumentation emit usable BAT
+    maps (or otherwise exposing an address map) so OCaml frametables can be
+    patched before profiling. This remains a plausible LLVM-only path, but it
+    requires a BOLT-side fix before any performance measurement can count.
