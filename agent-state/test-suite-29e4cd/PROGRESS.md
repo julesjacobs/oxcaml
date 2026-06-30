@@ -1,5 +1,26 @@
 # Progress
 
+- 2026-06-30 rejected corrected-gate `-split-spill-mode=default` as a
+  compiler-throughput path:
+  - Retested the global split-spill diagnostic under the corrected boot gate
+    after discovering the old `_install` stage0 was stale. The corrected gate
+    uses `_native_current_install` as stage0 plus the canonical
+    `tools/llvm-rs4gc-llc-wrapper.sh` with local LLVM tools on `PATH`.
+  - The serialized boot build passed and the smoke test printed `55`
+    (`1682` wrapper lines, `841` fresh IR, then `4` smoke wrapper lines / `2`
+    fresh IR). This overturns the old correctness rejection: the earlier
+    `.ocamlcommon` failure was a bad-stage0 validation artifact, not proof
+    that `-split-spill-mode=default` is boot-unsafe.
+  - Performance still rejects it for the current goal. On the same quick
+    three-sample, one-inner five-module compiler screen, native median was
+    `9.029214s`, the normal LLVM boot compiler was previously `11.617564s`,
+    and the split-default LLVM boot compiler was `11.563912s`. That is only a
+    tiny comparable-boot improvement over normal LLVM and still far behind
+    native, not a route to the required LLVM-path-only `+6%`.
+  - Removed the temporary split-default wrapper. The result file is the
+    untracked local artifact
+    `native-current-vs-splitdefault-boot-samples3-inner1.json`.
+
 - 2026-06-30 corrected boot gate and re-screened post-statepoint fold block:
   - Rechecked the earlier post-statepoint spill-fusing diagnostic after finding
     the previous boot rejection used the stale `_install` stage0. The normal
