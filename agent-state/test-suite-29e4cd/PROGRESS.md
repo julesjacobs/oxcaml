@@ -1,5 +1,37 @@
 # Progress
 
+- 2026-06-30 rejected type-heavy BOLT profile specialization:
+  - Collected a fresh LBR profile from the relinked LLVM-built constfilter
+    compiler on five repetitions of `typing/typecore.ml` and
+    `typing/typemod.ml`:
+    `bolt_compiler_20260629/ocamlopt.constfilter.reloc.typeheavy5.lbr.perf.data`.
+    `perf2bolt` matched the build-id, read `114124` samples and `1824743`
+    LBR entries, ignored `3.8%` of samples, had zero trace-content
+    mismatches, and wrote
+    `ocamlopt.constfilter.reloc.typeheavy5.lbr.fdata`.
+  - Rebuilding with the current local shared-return BOLT tools and the normal
+    safe recipe did not patch cleanly: even with
+    `-indirect-call-promotion=none`, and again with peepholes/SCTC disabled for
+    a layout-only artifact, the frametable patcher reported the same `61`
+    BOLT-created call-return PCs needing synthesized descriptors. This means
+    the local BOLT branch is not producing a clean no-new-callsite artifact for
+    this profile.
+  - As a screen only, patched the layout-only artifact with
+    `--synthesize-icp-descriptors`, producing
+    `ocamlopt.constfilter.typeheavy5-layout-rodata.synth.bat.patched`
+    (`224543` return PCs patched, `61` synthesized descriptors, `0`
+    unresolved). It passed `-version` and a seven-module compile smoke using
+    the matching LLVM build tree/library.
+  - Performance rejected the route before any deeper validation. Corrected
+    seven-module native-mode comparison, `samples=3`, `inner_repetitions=2`:
+    native median `29.693207s`, candidate median `29.314014s`, ratio
+    `0.987230`, improvement `+1.28%`
+    (`bolt_compiler_20260629/native-oxcamlopt-vs-typeheavy5-layout-rodata-synth-seven-inner2.json`).
+  - Conclusion: profile-specializing BOLT for `typecore`/`typemod` does not
+    move the aggregate toward the required LLVM-path-only `+6%`, and the
+    current local BOLT tools also require non-production descriptor synthesis
+    for this artifact. Do not count this result as a keeper.
+
 - 2026-06-30 serial BOLT module checks after LLVM-path-only clarification:
   - Reran the accidental parallel per-module BOLT checks serially. The target is
     still native-built compiler throughput in normal native mode; generic
