@@ -1,5 +1,30 @@
 # Progress
 
+- 2026-06-30 rejected full `-regalloc=basic` allocator diagnostic:
+  - Reconfirmed the scope constraint: generic driver optimization levels such
+    as `-O4` remain invalid because they also apply to the native-built
+    compiler. This experiment was LLVM-path-only: change the LLVM codegen
+    allocator for the LLVM-built path.
+  - Screened the saved post-RS4GC `typing/ctype.ml` IR with
+    `llc -O3 -regalloc=basic`. The diagnostic strongly reduced root-pressure
+    counters: OXSR-appended spill slots dropped from the current `1629` to
+    `74`; GC-family slots dropped from `1618` to `74`, split as `7`
+    alloc-family, `66` ordinary-call, and `1` C-call. The tradeoff was much
+    more allocator spilling (`2592` spill slots allocated) and larger assembly
+    (`253953` lines vs about `251284` current).
+  - Tried a boot build with `LLVM_EXTRA_FLAGS='-mllvm -regalloc=basic'` in a
+    separate `_llvm_basicra_boot_context_build`. The build failed before a
+    benchmarkable compiler existed: `.ocamlcommon` reported minor-GC allocation
+    failure/SEGV, and Flambda2 native objects also took SEGVs. I stopped the
+    remaining dune jobs after the repeated failure class was clear.
+  - Conclusion: replacing greedy with basic is not a valid implementation
+    route. It is still useful evidence: the extra AMD64 `ctype` roots are
+    created by greedy register allocation / spill-slot lifetime shape before
+    `OxCamlStatepointSpillRoots`, not by a missing AMD64 calling-convention
+    mask or by OXSR inventing roots after the fact. The next fix should
+    isolate the specific greedy decision that creates long-lived GC stack
+    homes and make a narrow OxCaml-aware change that passes a full boot build.
+
 - 2026-06-30 LLVM-path full-BOLT/ICP follow-up after excluding generic `-O4`:
   - Built a no-asserts `llvm-bolt` from the local LLVM tree and continued the
     full-BOLT path only, because generic optimization-level changes would also
