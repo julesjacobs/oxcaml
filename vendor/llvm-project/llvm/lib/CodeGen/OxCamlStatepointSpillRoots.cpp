@@ -62,8 +62,15 @@ using namespace llvm::oxcamlroots;
 
 #define DEBUG_TYPE "oxcaml-statepoint-spill-roots"
 
-STATISTIC(NumSlotsAppended,
-          "Number of sibling spill slots appended to statepoints");
+STATISTIC(NumSlotsAppended, "Number of spill slots appended to statepoints");
+STATISTIC(NumGCFamilySlotsAppended,
+          "Number of GC-family spill slots appended to statepoints");
+STATISTIC(NumReloadSiblingSlotsAppended,
+          "Number of reload-fed sibling spill slots appended to statepoints");
+STATISTIC(NumStoreSiblingSlotsAppended,
+          "Number of store-equivalent sibling spill slots appended to statepoints");
+STATISTIC(NumValueHomeSlotsAppended,
+          "Number of value-home spill slots appended to statepoints");
 STATISTIC(NumRegsAppended,
           "Number of crossing gc registers appended to statepoints");
 STATISTIC(NumSlotInits,
@@ -1351,6 +1358,7 @@ static bool processStatepoint(MachineInstr &MI, MachineFunction &MF,
       SlotsNeedingInit.insert(Slot);
     }
     SlotsToAdd.push_back(Slot);
+    ++NumGCFamilySlotsAppended;
   }
 
   // Sibling locations of listed register operands. RA satisfies a
@@ -1414,6 +1422,7 @@ static bool processStatepoint(MachineInstr &MI, MachineFunction &MF,
               GCV.noStoreBetween(FI, VNI->def, Idx2)) {
             Added.insert(FI);
             SlotsToAdd.push_back(FI);
+            ++NumReloadSiblingSlotsAppended;
           }
           const auto *St = GCV.mustReachStoreAt(FI, VNI->def);
           if (!St)
@@ -1547,6 +1556,7 @@ static bool processStatepoint(MachineInstr &MI, MachineFunction &MF,
         if (Match) {
           Added.insert(FI2);
           SlotsToAdd.push_back(FI2);
+          ++NumStoreSiblingSlotsAppended;
         }
       }
   }
@@ -1577,6 +1587,7 @@ static bool processStatepoint(MachineInstr &MI, MachineFunction &MF,
       SlotsNeedingInit.insert(Slot);
     }
     SlotsToAdd.push_back(Slot);
+    ++NumValueHomeSlotsAppended;
   }
 
   // Gc registers live across the statepoint in a regmask-preserved physical

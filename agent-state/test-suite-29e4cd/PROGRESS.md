@@ -1279,3 +1279,23 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     machinery more precise, especially the slot-root cases in
     `OxCamlStatepointSpillRoots`, and then require a full LLVM build before
     benchmarking.
+- 2026-06-30 root-counter instrumentation:
+  - Added LLVM `STATISTIC` counters under `oxcaml-statepoint-spill-roots` to
+    split appended slot roots into GC-family live stack slots, reload-fed
+    sibling slots, store-equivalent sibling slots, and value-home slots. The
+    aggregate counter label was corrected from "sibling spill slots" to
+    "spill slots" because it covers all appended slot-root classes.
+  - Rebuilt LLVM `llc` successfully with
+    `cmake --build _build/llvm-tools --target llc -- -j2`.
+  - Ran a standalone LLVM-backend compile of `typing/ctype.ml` with
+    `-mllvm -stats`, local `_build/llvm-tools`, and output under
+    `agent-state/test-suite-29e4cd/bolt_compiler_20260629/root_stats_20260630/final/`.
+    It passed. The new split shows the holdout module is dominated by ordinary
+    GC-family live stack slots, not sibling-repair cases: `1618` GC-family
+    slot roots, `11` reload-fed sibling slot roots, no reported
+    store-equivalent or value-home slot roots, `9` register roots, `7` slot
+    initializations, and `1629` total appended slot roots.
+  - Next implementation target should therefore be earlier root-liveness or
+    stack-slot precision that reduces GC-family stack slots reaching
+    statepoints. Optimizing/removing sibling-slot repair would not materially
+    move `ctype`.
