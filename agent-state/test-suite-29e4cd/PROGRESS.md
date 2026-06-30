@@ -1299,3 +1299,29 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     stack-slot precision that reduces GC-family stack slots reaching
     statepoints. Optimizing/removing sibling-slot repair would not materially
     move `ctype`.
+- 2026-06-30 rejected rooted-only unobserved slot filter:
+  - Prototyped `-oxcaml-statepoint-skip-unobserved-gc-slots`, first as a
+    broad "no later slot load/statepoint use" filter and then narrowed to only
+    skip a slot when the same value is already rooted by the current
+    statepoint. The broad version was unsound: it built after a transient
+    replay/resume, but the installed compiler segfaulted while compiling
+    `backend/llvm/llvmize.ml`; gdb stopped in
+    `Flambda2_types__Type_grammar.must_be_singleton`, showing the analysis had
+    confused "slot not read later" with "value dead".
+  - The rooted-only version rebuilt `llc`, passed a focused `typing/ctype.ml`
+    stats compile, and reduced appended roots in that module from the baseline
+    `1629` to `985` (`974` GC-family, `11` reload-fed sibling, `9` register
+    roots, `644` unobserved GC-family slots skipped). A fresh `_llvm_skipobs3`
+    compiler build needed serial resume (`DUNE_BUILD_FLAGS=-j1`) after
+    nondeterministic bootstrap-tool SEGVs under `-j2`; the exact failed rules
+    replayed cleanly.
+  - The `_llvm_skipobs3_install` compiler passed the five-module smoke
+    (`cfg_selectgen`, `llvmize`, `translcore`, `ctype`, `env`) but regressed
+    the compiler-throughput benchmark. Seven samples with three inner
+    repetitions against `_native_current_install/bin/ocamlopt.opt` gave
+    baseline median `27.032365s`, candidate median `28.469930s`, ratio
+    `1.053179x`, improvement `-5.32%` in
+    `native-current-vs-llvm-skipobs3-inner3.json`.
+  - Conclusion: this local frametable-size reduction is not a viable path to
+    the +6% LLVM-only compiler goal. The uncommitted code changes were removed
+    rather than carried forward.
