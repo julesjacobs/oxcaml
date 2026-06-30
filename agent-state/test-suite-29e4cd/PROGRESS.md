@@ -22,6 +22,22 @@
     ordinary and allocation statepoints, rather than adding late frametable
     filters or a second GC-root mechanism.
 
+- 2026-06-30 rejected LLVM-only omit-frame-pointer screen:
+  - Tested the existing `agent-state/test-suite-29e4cd/llc-wrapper-omit-fp.sh`
+    wrapper, which strips `-fno-omit-frame-pointer` before invoking the normal
+    LLVM backend wrapper. This is LLVM-path-only and does not use generic
+    `-O4`-style optimization.
+  - The canonical boot gate with `_native_current_install` stage0 passed:
+    `_llvm_omitfp_boot_build/default/main_native.exe` was produced, the boot
+    path compiled `841` fresh LLVM IR files, and the smoke test printed `55`.
+  - The representative compiler-throughput benchmark is rejected for
+    correctness: after seven stable native baseline samples, the omit-FP
+    candidate segfaulted on the first candidate workload while compiling
+    `backend/cfg_selectgen.ml`.
+  - Conclusion: omitting frame pointers cannot be counted as a performance
+    improvement without a separate correctness fix. It is not the path to the
+    required `+6%`.
+
 - 2026-06-30 MIR-level `ctype` root-pressure narrowing:
   - Reconfirmed the scope constraint after the `-O4` discussion: the +6%
     target must come from LLVM-path-only work. Generic compiler-driver
