@@ -1889,3 +1889,29 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     OCaml-aware root map for the promoted call return PC; cloning the fallback
     descriptor, even with a tighter detector, is not correct enough to carry
     or benchmark.
+- 2026-06-30 LLVM-only scope and ICP rerun after review:
+  - Reconfirmed the review constraint: `-O4` and other generic driver-level
+    optimization changes do not count toward the `+6%` goal because the
+    native-built compiler can use them too. Only LLVM-backend/codegen changes,
+    LLVM-path pass configuration, or LLVM-built-binary-only BOLT/profile work
+    are valid evidence.
+  - Ran a read-only stricter normal-ICP detector using BAT proximity to pair
+    promoted direct calls with their fallback indirect callsites. It did not
+    reduce the candidate set: loose and strict detection both found `220`
+    synthesized-descriptor candidates, and the startup missing-descriptor site
+    `0x3bb5dc3` remained included. The previous `normalicp2` failure is
+    therefore not explained by a simple out-of-neighborhood false match.
+  - Reran existing half-skip normal-ICP artifacts to check whether descriptor
+    cloning failures localize to a small subset. `synth4-skip156-312` still
+    aborts immediately on `-version` with missing descriptor `0x3bb5dc3`.
+    `synth4-skip0-156` passes `-version` but aborts during the first
+    benchmark module, `backend/cfg_selectgen.ml`. `synth4-skipapply` also
+    passes `-version` and aborts on `backend/cfg_selectgen.ml`. This reinforces
+    that cloned descriptors are broadly unsafe for BOLT-created ICP return PCs;
+    do not count or benchmark these artifacts.
+  - Current best valid LLVM-only result remains the safe BOLT layout artifact
+    `ocamlopt.constfilter.cache-hfsort-peep-rodata.bat.patched` at `+3.77%`
+    over the native-built compiler. To get to `+6%`, the next implementation
+    work should avoid generic `-O` changes and either add exact OCaml-aware
+    BOLT metadata for new ICP return PCs or improve AMD64 LLVM root/spill
+    precision while preserving the arm-style in-place GC model.
