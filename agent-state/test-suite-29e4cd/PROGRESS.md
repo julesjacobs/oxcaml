@@ -1,5 +1,24 @@
 # Progress
 
+- 2026-06-30 rejected OxCaml call-split-remainder root-pressure hypothesis:
+  - After the `-O4` scope correction, tested another LLVM-path-only allocator
+    diagnostic rather than any generic driver optimization. Added a temporary
+    hidden switch around the existing greedy
+    `AllowOxCamlCallSplitRemainders` path, rebuilt `llc`, and screened the
+    saved post-RS4GC `typing/ctype.ml` IR with current behavior versus
+    call-split remainders disabled.
+  - Result: this hook is not the source of the visible `ctype` root pressure.
+    Both variants reported the same `1629` statepoint spill slots, with the
+    same split of `757` alloc-family, `860` ordinary-call, and `1` C-call
+    GC-family slots. Regalloc bookkeeping changed slightly (`4024` splits /
+    `12181` split copies at default versus `3940` / `12044` with the hook
+    disabled), but root scanning did not move.
+  - Removed the temporary switch after the screen. Conclusion: the long-lived
+    GC-family stack homes are created by broader greedy spill placement /
+    live-stack shape, not by the one extra bounded splitting stage for
+    OxCaml call-crossing remainders. Keep focusing on either a narrower
+    allocator/live-stack fix or an LLVM-built-binary-only BOLT/profile win.
+
 - 2026-06-30 rejected full `-regalloc=basic` allocator diagnostic:
   - Reconfirmed the scope constraint: generic driver optimization levels such
     as `-O4` remain invalid because they also apply to the native-built
