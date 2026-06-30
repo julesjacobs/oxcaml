@@ -1,5 +1,27 @@
 # Progress
 
+- 2026-06-30 LLVM-path scope and CSR-root checkpoint:
+  - Reaffirmed the goal constraint: `-O4` is not a valid candidate because it
+    is a generic build/driver optimization that can also be applied to the
+    native-built compiler. Future candidates must be LLVM-path-specific:
+    AMD64 LLVM backend/codegen changes, LLVM-only backend pass configuration,
+    or post-link/profile work specific to the LLVM-built artifact.
+  - Rechecked the apparent AMD64 register-convention gap against native AMD64
+    and the ARM LLVM backend. AMD64 LLVM's argument CC already matches the
+    native OCaml argument order after the runtime registers
+    (`R14`, `R15`, then `RAX`, `RBX`, `RDI`, `RSI`, `RDX`, `RCX`, `R8`,
+    `R9`, `R12`, `R13`), and the allocation-family CSR mask already treats
+    `R10/R11` as clobbered like native `destroyed_at_alloc_or_poll`.
+  - Confirmed that globally allowing GC pointers in callee-saved registers is
+    not a fix and not the ARM-shaped mechanism. The saved
+    `-fixup-allow-gcptr-in-csr` screen worsens `typing/ctype.ml`: fixup spills
+    rise from `798` to `1683`, OXSR spill roots rise from `1629` to `1645`,
+    and crossing register roots rise from `9` to `18`.
+  - The remaining valid line of attack is still pre-OXSR root/spill shape:
+    avoid producing duplicate long-lived stack homes for GC values around
+    ordinary and allocation statepoints, rather than adding late frametable
+    filters or a second GC-root mechanism.
+
 - 2026-06-30 MIR-level `ctype` root-pressure narrowing:
   - Reconfirmed the scope constraint after the `-O4` discussion: the +6%
     target must come from LLVM-path-only work. Generic compiler-driver
