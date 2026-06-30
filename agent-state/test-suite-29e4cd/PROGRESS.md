@@ -3125,3 +3125,36 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     `+1.41%`.
   - Both remain below the existing safe best seven-module BOLT result
     (`+2.205%`) and are not sufficient for the `+6%` target.
+- 2026-06-30 rejected PBQP register-allocation screen:
+  - Ran a read-only direct `llc` screen on the saved post-RS4GC
+    `typing/ctype.ml` IR
+    (`bolt_compiler_20260629/mir_20260630/ctype.rs4gc.ll`) to check whether
+    an LLVM-only register allocator choice could get the `basic` root-counter
+    shape without carrying `basic`'s known full-build failures.
+  - `greedy` reproduced the high-root shape: `1645` appended spill slots,
+    `1632` GC-family slots (`1014` ordinary-call, `617` alloc-family, `1`
+    C-call), `18` crossing GC registers, `13` reload-fed siblings, `628`
+    fixup spill slots, `1683` fixup spilled registers, `6184` folded stack
+    accesses, `4975` reloads, and `1954` regalloc spill slots.
+  - `basic` and `pbqp` both reduced appended roots to `74` total / `74`
+    GC-family (`66` ordinary-call, `7` alloc-family, `1` C-call) with only
+    `2` crossing GC registers. `pbqp` had fewer reloads than `basic`
+    (`5368` vs `6356`) but still more than greedy, and it is not a correctness
+    win by itself.
+  - Tested `pbqp` as a bounded LLVM-path pass-config candidate with
+    `LLVM_EXTRA_FLAGS='-mllvm -regalloc=pbqp'` through the normal
+    `tools/llvm-rs4gc-llc-wrapper.sh` boot pipeline, using a separate
+    `_llvm_pbqp_boot_build` and wrapper log
+    `agent-state/test-suite-29e4cd/pbqp-boot-wrapper.log`. The workspace
+    `scripts/agent-tmp-env` helper was not present at this checkout root, but
+    the test still used an explicit isolated build dir and wrapper log.
+  - Rejected on build correctness before performance: after `141` fresh LLVM
+    IR compilations, the serial boot produced `Fatal error: allocation failure
+    during minor GC` while compiling `.ocamlcommon.objs/native/shape.{cmx,o}`.
+    The diagnostic build was stopped after the failure because further output
+    could not make the candidate valid.
+  - Conclusion: alternate allocators confirm the root bloat is greedy
+    policy-sensitive, but wholesale `pbqp` is not a viable LLVM-path
+    improvement. The useful direction remains a narrow AMD64/OxCaml fix that
+    gets statepoint GC operands to fold to fresh stack homes without switching
+    the whole compiler away from greedy or deleting roots after OXSR.
