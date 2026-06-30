@@ -1366,3 +1366,49 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     amd64 away from the arm-style model. The remaining path is to keep the
     in-place design and reduce the ordinary GC-family LiveStacks crossings
     without reverting to the old pool-spill mechanism.
+- 2026-06-30 rejected generic-O and ctype-weighted BOLT follow-up:
+  - Reconfirmed scope: generic optimization-level changes such as `-O4` are
+    not valid for the requested compiler-throughput goal, because the same
+    setting would also apply to the native-built compiler in a fair comparison.
+    Remaining candidates must be LLVM-path-specific: LLVM backend codegen/root
+    quality, LLVM-only profile/layout treatment of the LLVM-built compiler, or
+    other changes that do not equally improve the native-built baseline.
+  - Collected direct `typing/ctype.ml` GC stats with `OCAMLRUNPARAM=v=0x1000`
+    for the current native-built compiler and the best safe LLVM+BOLT artifact.
+    Allocation stayed essentially identical (`allocated_words` `560541660` vs
+    `560551364`), but LLVM+BOLT still did more major-GC work:
+    `promoted_words` `60935935 -> 61242980`, `major_words`
+    `66212720 -> 66519765`, `major_collections` `22 -> 23`, and
+    `major_work_done` `366283673 -> 379152503` (`+3.51%`). This matches the
+    earlier un-BOLTed observation and keeps the `ctype` holdout focused on root
+    precision / GC scanning, not instruction-selection-only effects.
+  - Tested a valid LLVM-path BOLT profile-weighting experiment rather than a
+    generic `-O` change. A first attempt to merge the existing best profile
+    with the old `ctype7` fdata failed correctly because the former was
+    collected from a BOLT-deployed binary while the latter came from the
+    non-BOLT relocation binary (`merge-fdata` refuses to mix them). Collected a
+    new compatible three-repetition `ctype` LBR profile from
+    `ocamlopt.constfilter.cache-hfsort-peep-rodata.bat.patched`; `perf2bolt`
+    mapped it through BAT cleanly (`27726` samples, `442645` LBR entries, zero
+    trace-content mismatches).
+  - Merged that compatible ctype profile with the current best profile and
+    rebuilt the same safe BOLT shape (`cache+` block layout, `hfsort` function
+    order, peepholes, rodata-load simplification, BAT). Frametable patching
+    succeeded with `224543` descriptor return addresses rewritten, zero
+    unresolved, and zero BAT-fallback mappings. The artifact
+    `ocamlopt.constfilter.profiled-plus-bolted-ctype3-cache-hfsort-peep-rodata.bat.patched`
+    started and passed the five-module smoke (`cfg_selectgen`, `llvmize`,
+    `translcore`, `ctype`, `env`).
+  - The full seven-sample / three-inner-repetition compiler-throughput
+    benchmark rejected the moderate ctype-weighted profile. Native median was
+    `27.044386s`; candidate median was `26.184857s`; ratio `0.968218`;
+    improvement `+3.18%`. Artifact:
+    `native-current-vs-llvm-constfilter-profiled-plus-bolted-ctype3-cache-hfsort-peep-rodata-inner3.json`.
+    This is worse than the current best safe BOLT result (`+3.77%`), so BOLT
+    profile weighting is not currently the path to the required `+6%`.
+  - Current conclusion: the valid LLVM-path work should move back to backend
+    root precision while preserving the arm-style in-place design. The best
+    measured artifact remains
+    `ocamlopt.constfilter.cache-hfsort-peep-rodata.bat.patched` at `+3.77%`;
+    the remaining gap is dominated by `ctype`'s extra major-GC/root-scanning
+    work.
