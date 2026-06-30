@@ -1,5 +1,44 @@
 # Progress
 
+- 2026-06-30 rejected explicit post-RS4GC IR-PGO generation after the `-O4`
+  correction:
+  - Reconfirmed Jules's scope constraint: generic `-O4`/driver optimization is
+    invalid because the native-built compiler can receive the same treatment.
+    This investigation stayed LLVM-path-only by testing LLVM IR
+    instrumentation/profile generation in the LLVM backend wrapper.
+  - First controlled rerun exposed a setup bug, not a compiler result:
+    `LLVM_WRAPPER_PGO_KIND=instr-gen` expands to `opt -pgo-kind=instr-gen`,
+    but this checkout's local `opt` accepts
+    `pgo-instr-gen-pipeline`/`pgo-instr-use-pipeline`. Rerunning with
+    `-pgo-kind=pgo-instr-gen-pipeline` was also the wrong mechanism for the
+    explicit wrapper pipeline: it caused `opt` to abort inside
+    `materializeOxCamlExceptionRootSlots` while compiling `misc.ml`.
+  - The correct mechanical form is to omit `-pgo-kind` and use the explicit
+    post-RS4GC pipeline:
+    `default<O3>,rewrite-statepoints-for-gc,pgo-instr-gen,instrprof,verify`,
+    with `-mtriple=x86_64-unknown-linux-gnu -disable-vp`, local `llvm-mc`, and
+    the matching local compiler-rt profile runtime linked through
+    `LLVM_EXTRA_OCAMLOPT_FLAGS`.
+  - A serial boot-only generation build with that corrected setup still failed
+    correctness. It reached `1588` wrapper invocations and wrote two small
+    `.profraw` files, proving the profile runtime path can execute, but Dune
+    failed with the same GC-corruption class as earlier PGO attempts:
+    `ikind.ml` and `asmlink.ml` segfaulted, while
+    `middle_end/flambda2/simplify/expr_builder.ml` and `llvmize.ml` aborted
+    with `Fatal error: allocation failure during minor GC`.
+  - Artifacts:
+    `ir_pgo_20260630/build-post-gen-j1-explicit.log`,
+    `_llvm_irpgo_post_gen_j1_explicit_boot_build/log`,
+    `ir_pgo_20260630/post-gen-j1-explicit-wrapper.log`, and
+    `ir_pgo_20260630/raw-post-build-j1-explicit/`.
+  - Conclusion: IR-PGO remains a valid LLVM-only category in principle, but it
+    is not currently a valid route to the `+6%` compiler-throughput target.
+    The explicit post-RS4GC counter instrumentation corrupts a real boot build
+    even under `-j1`; do not use the partial profile for performance claims.
+    A future PGO attempt must first make instrumentation calls safe for
+    OxCaml/RS4GC statepoint code, or restrict instrumentation to a proven-safe
+    subset of functions.
+
 - 2026-06-30 rejected targeted `ctype` BasicRA ablation:
   - Reconfirmed Jules's scope correction: generic optimization settings such as
     `-O4` cannot count toward the goal because the native-built compiler could
