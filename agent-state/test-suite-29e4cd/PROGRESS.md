@@ -60,6 +60,12 @@
     stronger OCaml-aware BOLT frametable implementation for new promoted call
     return PCs that proves live-root equivalence instead of cloning
     descriptors heuristically.
+  - Rechecked the existing BOLT instrumentation artifacts after the scope
+    correction. Both `ocamlopt.instrumented` and
+    `ocamlopt.instrumented.skipgc` still segfault immediately on `-version`.
+    That confirms instrumented full-BOLT profiles are not available yet; the
+    startup blocker remains OCaml frame/GC metadata for BOLT-inserted
+    instrumentation code, not the earlier runtime symbol-link issue.
 
 2026-06-29 BOLT ICP shared-return prototype: this is an LLVM/BOLT-path-only
 experiment, not a generic `-O4` style change. Added a hidden X86 BOLT mode
