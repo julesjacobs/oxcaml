@@ -1,5 +1,24 @@
 # Progress
 
+- 2026-06-30 strict LLVM-path-only BOLT status after excluding generic `-O4`:
+  - Recorded the current best valid strict seven-module compiler-throughput
+    result. The candidate is an LLVM-built compiler artifact optimized only on
+    the LLVM path with BOLT/instrumented profile data:
+    `bolt_compiler_20260629/ocamlopt.constfilter.instrprof-cache-hfsort-peep-rodata-icp10.bat.patched`.
+    The baseline remains the native-built compiler
+    `_native_current_build/main/oxcaml_main_native.exe`; both compilers run in
+    normal native compilation mode.
+  - Corrected seven-module workload
+    (`cfg_selectgen`, `llvmize`, `translcore`, `ctype`, `env`, `typecore`,
+    `typemod`), `samples=3`, `inner_repetitions=2`: native median
+    `29.636680s`, candidate median `28.715547s`, ratio `0.968919`,
+    improvement `+3.108%`
+    (`bolt_compiler_20260629/native-oxcamlopt-vs-instrprof-icp10-seven-inner2.json`).
+  - This is the best strict LLVM-path-only result so far, but it is not a goal
+    completion: the target is at least `+6%` beyond the native-built compiler,
+    and generic flags such as `-O4` remain excluded because they could also be
+    applied to the native-built compiler.
+
 - 2026-06-30 IR PGO full-build follow-up after excluding generic `-O4`:
   - Reconfirmed the scope constraint from Jules: generic `-O4`-style changes
     cannot count for the +6% goal because they could also be applied to the
