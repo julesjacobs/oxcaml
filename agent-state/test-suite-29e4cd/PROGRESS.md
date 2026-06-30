@@ -1,5 +1,20 @@
 # Progress
 
+- 2026-06-30 rejected instrprof BOLT no-peepholes variant:
+  - Tried another narrow variant of the current best instrumentation-profile
+    BOLT recipe: keep `-reorder-blocks=cache+`,
+    `-reorder-functions=hfsort+`, `-simplify-rodata-loads`, and `--enable-bat`,
+    but set `-peepholes=none`.
+  - BOLT completed, but frametable patching again was not clean:
+    `constfilter-instrprof-cache-hfsort-noppl-rodata-patch.log` reported `60`
+    unresolved return PCs requiring synthesized descriptors. This is the same
+    BOLT-created call-return metadata failure class as the plain-`hfsort`
+    variant.
+  - Conclusion: do not benchmark this artifact. The full current
+    instrumentation-profile recipe with peepholes is still the best clean
+    strict LLVM-only BOLT artifact (`+3.234%`); turning peepholes off does not
+    produce a production-quality candidate.
+
 - 2026-06-30 rejected instrprof BOLT plain-`hfsort` layout variant:
   - Tried to vary the current best instrumentation-profile BOLT recipe by
     keeping `-reorder-blocks=cache+`, `-peepholes=all`,
