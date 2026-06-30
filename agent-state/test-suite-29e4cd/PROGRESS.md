@@ -1473,3 +1473,48 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     `ocamlopt.constfilter.cache-hfsort-peep-rodata.bat.patched` at `+3.77%`;
     the remaining gap is dominated by `ctype`'s extra major-GC/root-scanning
     work.
+- 2026-06-30 rejected `mcpu=native` + full BOLT route:
+  - Reconfirmed the scope after review: `-O4` and other generic optimization
+    level changes are not valid candidates for the compiler-throughput goal,
+    because the native-built compiler could receive the same treatment. The
+    tested route here is LLVM-path-specific: an LLVM-built `mcpu=native`
+    compiler binary relinked with relocations, then optimized with BOLT.
+  - Relinked the existing `_llvm_mcpu_native_build/main` compiler objects with
+    only `-ccopt -Wl,--emit-relocs` added, producing
+    `bolt_compiler_20260629/ocamlopt.mcpu-native.reloc`. The binary has
+    `.rela.text`, `.rela.rodata`, `.rela.eh_frame`, data relocations, and
+    `.symtab`. It starts, reports config, and compiles/runs the native fib
+    smoke with `_llvm_mcpu_native_install/lib/ocaml`.
+  - Collected a five-repetition seven-module LBR profile from the relinked
+    binary using the matching `_llvm_mcpu_native_build/main` and
+    `_llvm_mcpu_native_install/lib/ocaml` context. `perf2bolt` matched the
+    build-id, read `288862` samples and `4617718` LBR entries, ignored `3.5%`
+    of samples, had zero trace-content mismatches, and wrote
+    `ocamlopt.mcpu-native.reloc.compiler7.lbr.fdata`.
+  - Ran the same safe BOLT shape as the current best compiler artifact:
+    `--enable-bat -lite -reorder-blocks=cache+
+    -reorder-functions=hfsort -peepholes=all -simplify-rodata-loads`. BOLT
+    produced
+    `ocamlopt.mcpu-native.cache-hfsort-peep-rodata.bat.bolt`; frametable
+    patching from the clean committed patcher produced
+    `ocamlopt.mcpu-native.cache-hfsort-peep-rodata.bat.patched` with
+    `224274` descriptor return addresses patched, zero unresolved, all via
+    call-site mapping. Startup/config/fib smoke passed, and a one-sample
+    workload smoke versus the unbolted `mcpu=native` install was faster
+    (`9.713s` -> `9.283s`).
+  - The robust native-built comparison rejected the candidate. Seven samples
+    with three inner repetitions gave native-built median `26.984741s`,
+    candidate median `28.478105s`, ratio `1.055341`, improvement `-5.53%` in
+    `native-current-vs-llvm-mcpu-native-cache-hfsort-peep-rodata-inner3.json`.
+  - A sanity rerun of the unbolted `mcpu=native` install under the same
+    three-inner setup showed that the starting point is already bad here:
+    five samples gave native-built median `27.367092s`, `mcpu=native` median
+    `29.010651s`, ratio `1.060056`, improvement `-6.01%` in
+    `native-current-vs-llvm-mcpu-native-install-inner3-rerun.json`.
+  - Conclusion: relocation-enabled full BOLT now works mechanically for the
+    `mcpu=native` LLVM-built compiler, but this route is not a path to the
+    requested `+6%` over native-built. The best valid artifact remains
+    `ocamlopt.constfilter.cache-hfsort-peep-rodata.bat.patched` at `+3.77%`.
+    The next useful work remains LLVM backend/root precision, especially the
+    `ctype` extra major-GC/root-scanning gap, not generic optimization level
+    changes or `mcpu=native`.
