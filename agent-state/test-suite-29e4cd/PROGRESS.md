@@ -3174,3 +3174,20 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
   - Conclusion: ordinary `StackSlotColoring` cannot simply be moved in front of
     OXSR. Any pre-root-list slot coalescing would need a dedicated pass that
     preserves or recomputes the LiveStacks information OXSR depends on.
+- 2026-06-30 rejected LiveStacks-remap variant of pre-OXSR coloring:
+  - Prototyped the minimal infrastructure needed to make the previous
+    pass-order idea less hand-wavy: add a `LiveStacks::remapIntervals` helper,
+    call it from `StackSlotColoring`, mark `LiveStacks` preserved, and move
+    `StackSlotColoring` before OXSR. The intent was to keep OXSR's required
+    liveness view consistent with the rewritten frame-index operands.
+  - The prototype built `llc`, but the saved `typing/ctype.ml` post-RS4GC
+    compile still aborted before counters with the same legacy pass-manager
+    scheduling failure: `Live Stack Slot Analysis` could not be scheduled for
+    `OxCaml Statepoint Spill Slot Roots`.
+  - Reverted the prototype source edits and rebuilt `_build/llvm-tools/bin/llc`
+    back to the checked-in source state; the relevant LLVM source files have
+    no diff after the revert.
+  - Conclusion: preserving/remapping `LiveStacks` inside the existing
+    `StackSlotColoring` pass is not enough to make this pass order available.
+    A real pre-OXSR coalescer would likely need to be a new pass in the same
+    analysis regime as OXSR rather than reusing `StackSlotColoring` directly.
