@@ -1,5 +1,23 @@
 # Progress
 
+- 2026-06-30 rejected explicit `ext-tsp` instrprof BOLT layout:
+  - Tested the explicit replacement for deprecated `-reorder-blocks=cache+`:
+    rebuilt the five-module instrumentation-profile BOLT candidate with
+    `-reorder-blocks=ext-tsp -reorder-functions=hfsort+ -peepholes=all
+    -simplify-rodata-loads --enable-bat`.
+  - As with nearby instrprof variants, plain frametable patching reported `60`
+    BOLT-created ICP-style return PCs; patching with
+    `--synthesize-icp-descriptors` produced zero unresolved descriptors and the
+    binary passed `-version`.
+  - A one-sample strict seven-module screen looked slightly promising at
+    `+3.30%`, so I reran the same strict workload shape as the current best:
+    `samples=3`, `inner_repetitions=2`. The fuller run rejected it: native
+    median `30.063137s`, candidate median `29.135878s`, improvement `+3.08%`
+    (`native-oxcamlopt-vs-instrprof-exttsp-synth-seven-inner2.json`).
+  - This remains a valid LLVM-path-only BOLT/layout experiment, but it is below
+    the current strict best instrprof BOLT result (`+3.234%`) and far below
+    the requested `+6%`.
+
 - 2026-06-30 rejected strict-seven instrumentation-profile BOLT retraining:
   - The existing `ocamlopt.constfilter.instrumented-hot-bat.fdata` had been
     collected on the old five-module compiler workload; the saved temporary
