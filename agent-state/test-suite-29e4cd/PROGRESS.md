@@ -2757,3 +2757,29 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     work should borrow only the insight that ordinary-call duplicate homes are
     reducible; it should not use partitioned complement splitting as the
     production policy.
+- 2026-06-30 fair compiler-throughput baseline recalibration:
+  - Rechecked the benchmark setup after the partition screen exposed a
+    misleading artifact comparison. Installed native
+    `_native_current_install/bin/ocamlopt.opt` is `65M`, whereas build-tree
+    native `_native_current_build/main/main_native.exe` is `27M` and LLVM
+    build-tree compilers are typically `34M`-`38M`. Comparing installed native
+    to build-tree LLVM makes LLVM look artificially fast and should not be used
+    for the "native-built compiler vs LLVM-built compiler" goal.
+  - The invalid installed-native vs partition-LLVM run
+    `native-current-vs-partition-repro-inner3.json` reported `+57.8%`; this is
+    not evidence. A later attempt to compare the existing best BOLT artifact
+    `ocamlopt.constfilter.cache-hfsort-peep-rodata.bat.patched` against native
+    build-tree also is not usable: the BOLT artifact (`101M`, non-PIE) SEGV'd
+    while compiling `backend/llvm/llvmize.ml` in that setup.
+  - The fair current/default comparison is
+    `native-buildtree-vs-llvm-canonical-inner3.json`, using native
+    `_native_current_build/main/main_native.exe` against LLVM
+    `_llvm_native_stage0_canonical_j1_boot_build/default/main_native.exe`, both
+    compiling the same five modules in normal native mode with the same
+    build-main and `OCAMLLIB`. Native median: `10.209638s`; LLVM median:
+    `11.417733s`; ratio `1.11833`; improvement `-11.83%`.
+  - Current performance target should be interpreted against the build-tree
+    native compiler unless a different artifact policy is explicitly chosen.
+    On this recalibrated workload, the +6% goal means the LLVM-built compiler
+    must get below about `9.60s`, not merely beat the installed native
+    `ocamlopt.opt` artifact.
