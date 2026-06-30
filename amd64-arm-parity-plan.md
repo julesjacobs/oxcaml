@@ -212,6 +212,157 @@ The main AMD64 performance risk is extra stack traffic around statepoints,
 calls, exception roots, and preserved registers. Local post-RA peepholes are the
 wrong default fix.
 
+Scope rule: performance wins for the compiler-throughput goal must be
+LLVM-path-only. Generic driver optimization levels or build flags such as
+`-O4` do not count, because they can be applied equally to the native-built
+compiler. Valid candidates are LLVM backend/codegen changes, LLVM-built-only
+pipeline decisions, or post-link work that is specific to the LLVM-built binary.
+
+Current focused benchmark finding:
+
+- The largest investigated slowdown is
+  `loop_invariant_gc_across_call_dynamic_reps`, a dynamic-repetition variant of
+  the loop-invariant GC microbenchmark. Making `reps` dynamic removes the
+  five-copy constant-entry cloning from the original benchmark, leaving a single
+  nested hot loop in the module entry.
+- The dynamic benchmark still shows AMD64 LLVM roughly 1.5x slower than native
+  in local runs, so constant outer-loop cloning is not the main cause.
+- Assembly ablations on the linked LLVM object show what is not causal:
+  replacing the hot-loop `String.length x` with a constant does not materially
+  improve runtime; changing only the string byte-load address form toward
+  native does not help; rewriting LLVM frame-slot references from `%rbp`
+  offsets to equivalent `%rsp` offsets does not help; inlining the tiny `tick`
+  body alone does not help.
+- A full native-shaped replacement of LLVM's hot module-entry loop closes the
+  gap. With `reps=20`, local medians were approximately:
+  native original `0.266s`, LLVM control `0.404s`, native-shaped LLVM loop
+  `0.265s`.
+- A native-control/register-layout variant that kept LLVM's string-length
+  address form also closed the gap (`0.266s` at `reps=20`). This rules out the
+  string-length addressing sequence as the important difference.
+- An unsafe diagnostic variant that keeps loop state in registers across this
+  known leaf `tick` call runs faster than native (`0.225s` at `reps=20`), which
+  confirms the broad cost is the call/statepoint-adjacent loop-state
+  spill/reload shape, not the call instruction itself.
+- Therefore the concrete LLVM-vs-native gap for this benchmark is the AMD64
+  LLVM loop-state/register-allocation shape around the statepoint call. Native
+  arranges the hot loop around `%rbx`/`%rdi` and compact `%rsp` slots:
+  root `x` at `(%rsp)`, reps bound at `8(%rsp)`, `i` in `%rdi`/`16(%rsp)`,
+  inner accumulator in `%rbx`/`24(%rsp)`, and outer state at `32/40(%rsp)`.
+  LLVM's generated shape instead uses a generic `%rax`/`%rcx` loop with
+  statepoint-adjacent spills/reloads through separate frame slots.
+- MIR pass investigation pins down where this shape appears. In `after-greedy`,
+  the hot entry loop still has virtual registers and no frame slots in the loop;
+  the statepoint lists the string root as a virtual GC operand. After
+  `OxCamlStatepointSpillRoots`, the statepoint's GC operand is correctly a
+  stack slot for the string root, while the two integer loop-state slots are
+  ordinary regalloc spill slots, not GC roots. After virtual-register rewriting,
+  those integer slots become the final `%rax`/`%rcx` spill/reload pattern.
+- The AMD64 ABI model explains why the scalar values must be saved somewhere:
+  `CSR_64_OxCaml_WithFP` preserves only `%rbp`, so managed calls clobber normal
+  integer registers. Native's `%rbx`/`%rdi` loop shape is not relying on those
+  registers being preserved; it also saves and reloads them around `tick`.
+- A focused ablation that keeps LLVM's frame layout and statepoint root slot,
+  but changes only the hot inner loop's scalar plan toward the native
+  `%rbx`/`%rdi` shape, improves the same linked LLVM object from a median
+  `0.406s` to `0.231s` at `reps=20` in a same-run comparison
+  (`native = 0.269s`). This is the most precise evidence so far: the large
+  slowdown is caused by the scalar loop-state allocation/schedule chosen around
+  the statepoint, not by the string root stack mechanism or frame-pointer
+  addressing.
+- Deeper MIR/debug investigation identifies the exact decision point. The
+  pre-regalloc MIR for the hot loop is still reasonable: `%128` is the loop
+  counter, copied to fixed `$rax` only for the `tick` call, and `%127` is the
+  loop-carried accumulator. Greedy register allocation then splits the
+  live-through call intervals because `csr_64_oxcaml_withfp` preserves only
+  `%rbp`. The inline spiller creates stack slots for the scalar split pieces:
+  `%148` from original `%128` is assigned `%rcx`, spilled to `%stack.4`, and
+  reloaded after the call; `%145` from original `%127` is assigned `%rax`,
+  spilled to `%stack.5`, and used after the call. The GC root is separate:
+  original `%118` becomes the root stack slot `%stack.2`.
+- The harmful part is not the register names. Reserving early caller-saved
+  registers for regalloc left the hot loop unchanged. Adding MIR
+  `preferred-register` hints for `%127 -> $rbx` and `%128 -> $rdi` was too weak
+  to change the final loop. Temporarily changing X86 `GR64` allocation order to
+  put `RBX, RDI` first changed the physical registers but kept the bad
+  store/reload/folded-memory shape and did not improve runtime
+  (`0.414s` at `reps=20`). `basic` regalloc is also slow (`0.412s`) and still
+  keeps the loop state in stack slots/folded memory operations.
+- The successful ablation is X86 spill-fusing. With normal `llc` options,
+  `reps=20` control was `0.410s`. `-disable-spill-hoist` alone was unchanged
+  (`0.408s`). `-disable-spill-fusing` improved to `0.237s`, and
+  `-disable-spill-hoist -disable-spill-fusing` improved to `0.230s`, matching
+  the hand-written scalar-loop ablation. The no-fusing assembly still spills
+  before the statepoint call, which is correct for clobbered scalar registers,
+  but reloads the scalar values into registers after the call and uses
+  register-register arithmetic:
+  `movq -48(%rbp), %rcx; movq -40(%rbp), %rdi; addq %rdi, %rax`.
+  The slow default instead folds the accumulator reload into
+  `addq -40(%rbp), %rax`, producing the high-cost loop shape.
+- Implementation hook: generic spilling goes through
+  `InlineSpiller::foldMemoryOperand` in
+  `vendor/llvm-project/llvm/lib/CodeGen/InlineSpiller.cpp`; X86 implements the
+  fold in `X86InstrInfo::foldMemoryOperandImpl`, guarded globally by the
+  hidden `disable-spill-fusing` option in
+  `vendor/llvm-project/llvm/lib/Target/X86/X86InstrInfo.cpp`. A real fix should
+  be targeted, not a global disabling of X86 spill folding.
+- Important benchmark correction: the first broad spill-fusing ablation used
+  `agent-state/test-suite-29e4cd/llc-wrapper.sh`, a temporary helper that fed
+  raw pre-optimization LLVM IR directly to `llc`. That is not the intended
+  OxCaml LLVM pipeline. The real wrapper,
+  `tools/llvm-rs4gc-llc-wrapper.sh`, runs
+  `default<O3>,rewrite-statepoints-for-gc,verify` before `llc`.
+  The raw-wrapper run made `matmul` look about 7x slower because 211
+  frontend-style `alloca`s survived to machine code. Re-running only
+  `matmul,matmul_transposed` with the real wrapper and `SAMPLES=7,WARMUPS=2`
+  gives:
+  - `matmul`: native `0.1158s`, LLVM `0.1062s`, ratio `0.9171`
+    (roughly parity; native samples varied).
+  - `matmul_transposed`: native `0.0920s`, LLVM `0.0659s`, ratio `0.7162`.
+  The saved LLVM assembly has the expected direct double-load,
+  `vmulsd`/`vaddsd`, XMM-accumulator loop shape. Therefore the broad
+  `spill_fusing_effect/` tables are invalid as project-pipeline performance
+  data and must not drive prioritization. They should be rerun through the real
+  wrapper before drawing any global conclusion about spill-fusing flags.
+- Full corrected rerun with the real wrapper (`SAMPLES=7,WARMUPS=2`) is saved
+  in `agent-state/test-suite-29e4cd/real_wrapper_full_bench_20260629/`. Across
+  the 84 broad benchmark cases (minibench, benchmarksgame, exception
+  microprobe), total LLVM/native runtime ratio is `0.8822`, geomean `0.8840`,
+  with 21 cases slower than native, 10 above 1.05x, and 7 above 1.10x.
+  Including the four focused loop-invariant probes gives 88 cases total, total
+  ratio `0.8858`, geomean `0.8972`, 23 slower, 12 above 1.05x, and 9 above
+  1.10x. Largest broad slowdowns are
+  `exception/closure_call_many_handler_live_roots_raise` `1.1912x`,
+  `minibench/hash_batch_murmur_mix` `1.1807x`,
+  `exception/raise_caught_cross_function` `1.1734x`,
+  `benchmarksgame/nbody_1` `1.1401x`, and
+  `exception/raise_payload_caught_cross_function` `1.1256x`. The focused GC
+  loop-invariant probes remain the largest overall slowdowns: dynamic reps
+  `1.5823x`, fixed reps `1.5735x`. Full summary:
+  `agent-state/test-suite-29e4cd/real_wrapper_full_bench_20260629/summary.md`.
+- Slowdown deep dive artifacts and classification are in
+  `agent-state/test-suite-29e4cd/slowdown_deep_dive_20260629/report.md`.
+  The float `sqrt` target has been implemented for AMD64 LLVM by selecting
+  non-builtin `sqrt`/`sqrtf` through the existing AMD64 SIMD path. A fresh
+  custom LLVM boot compiler emits `llvm.sqrt.f64`/`llvm.sqrt.f32` and final
+  `vsqrtsd`/`vsqrtss`; focused `nbody_1` rerun is now LLVM/native `0.9983`.
+  The best remaining targets are targeted statepoint-adjacent scalar
+  spill-fusing suppression for the loop-invariant GC probe, and then exception
+  invoke/landingpad/trap-loop state placement using `raise_caught_cross_function`
+  as the pure exception-regalloc case and
+  `closure_call_many_handler_live_roots_raise` as the exnroot-pressure case.
+- A later `typing/ctype.ml` MIR comparison narrows the root-pressure issue to
+  greedy register allocation/spill placement before
+  `OxCamlStatepointSpillRoots`. Greedy causes OXSR to append `1629` stack-slot
+  roots for `ctype`, while diagnostic `-regalloc=basic` appends only `74`
+  but miscompiles boot. In `camlCtype__unify3_569_1424_code`, slots such as
+  `%stack.24` are ordinary GC-family spill homes live across many ordinary
+  `OxCaml_WithFP` calls; OXSR correctly lists them after the fact. Required
+  physical-register fixup roots are a separate correctness mechanism and should
+  not be optimized away. The candidate fix should therefore make AMD64 greedy
+  avoid or shorten these long-lived GC spill homes before OXSR, not delete
+  frametable roots late.
+
 Plan:
 
 - For each large slowdown, compare AMD64 LLVM against ARM LLVM mechanism and
@@ -220,8 +371,113 @@ Plan:
   legacy x86 mechanism.
 - Prefer regalloc/calling-convention/root-policy fixes over local instruction
   forwarding or reload peepholes.
+- For the dynamic loop-invariant GC slowdown, investigate why AMD64 LLVM
+  register allocation and spill placement choose the inferior `%rax`/`%rcx`
+  scalar loop-state schedule instead of native's `%rbx`/`%rdi` schedule. The fix
+  direction should be to make AMD64 instruction selection/regalloc see the same
+  safe choices that native uses for ordinary managed calls, not to add a
+  benchmark-specific post-RA peephole.
+- For this specific slowdown, prototype a principled X86/OxCaml policy that
+  prevents harmful spill fusing for scalar reloads immediately after OxCaml
+  statepoints/calls when the reload feeds loop-carried arithmetic. Start with a
+  narrow target-side predicate in X86 spill folding, keyed by OxCaml
+  calling-convention/statepoint context and hot-loop reload use, then compare
+  against global `-disable-spill-fusing` to ensure the fix captures the win
+  without disabling beneficial X86 folding elsewhere.
+- Add a focused MIR test that compiles the reduced statepoint loop through
+  regalloc and checks that the post-call scalar accumulator is explicitly
+  reloaded into a register before arithmetic, while the GC root remains a
+  statepoint stack root. This test should fail on the current default and pass
+  with the targeted no-harmful-fusing fix.
+- Benchmark after each prototype: at minimum rerun
+  `loop_invariant_gc_across_call_dynamic_reps` with dynamic reps, plus the
+  broader LLVM/native benchmark suite to catch cases where suppressing spill
+  folding regresses ordinary x86 code.
+- Preserve the safety rule that ordinary managed-call statepoints must expose
+  GC roots in scannable locations. Any performance fix must distinguish
+  non-GC loop state that can remain in registers from GC roots that need stack
+  root semantics, and must respect real call clobbers rather than assuming
+  arbitrary direct calls are leaf/noalloc.
 - Keep code-review on every performance commit and require focused tests plus
   at least a representative benchmark rerun.
+
+Exception-heavy slowdown update after the invoke-statepoint LSR fix
+(`0f316ce2cf`):
+
+- A fresh focused exception microprobe run with rebuilt local `llc`
+  (`SAMPLES=5,WARMUPS=1`, `_install/bin/ocamlopt.opt`, project-style
+  RS4GC wrapper) shows the original simple LSR case is mostly fixed:
+  `raise_caught_cross_function` is now `1.0884x` LLVM/native and
+  `raise_payload_caught_cross_function` is `0.9398x`.
+- The remaining stable exception slowdowns are now
+  `closure_call_many_handler_live_roots_raise` `1.1912x`,
+  `boyer_like_failed_unify` `1.1314x`, and
+  `catch_failure_then_unify` `1.1020x`; `nested_failed_unify` was near parity
+  in this run (`1.0144x`) despite being slower in the earlier broad run.
+- Native and LLVM both use the OCaml trap stack and both assume ordinary
+  registers are destroyed when control reaches a handler. The remaining
+  difference is state placement around protected calls, not a requirement for
+  registers to stay live into handlers.
+- `closure_call_many_handler_live_roots_raise` is the clean exnroot-pressure
+  case: post-RS4GC IR has two exnroot allocas, no `gc.relocate`s, and the hot
+  invoke lists the exnroot as `gc-live`. Final LLVM asm still spills scalar
+  loop state through `%rbp` frame slots around the invoke; native homes similar
+  values in its tighter trap/frame layout and reloads fewer values on the
+  normal path.
+- `catch_failure_then_unify`/`boyer_like_failed_unify` combine EH overhead with
+  true root work: post-RS4GC IR has 8 allocas, 14 statepoints, 11 relocates,
+  and three exnroot homes in `unify1`. Their hot loops have folded reloads at
+  protected calls plus handler reloads from exnroot homes.
+- The existing root mechanism is deliberate and should not be replaced by a
+  second frontend-root style path. Exnroot homes are value homes that the GC can
+  update in place across exceptional control flow; `OxCamlStatepointSpillRoots`
+  and the verifier know about them.
+- The experimental `-rs4gc-oxcaml-exn-ssa-roots` option had no effect on the
+  representative AMD64 artifacts. Forcing `-rs4gc-oxcaml-exn-ssa-all` reduced
+  `catch_failure_then_unify` root slots (`alloca` count 8 -> 2, exnroot refs
+  51 -> 10), but grew the hot frame/reload shape and increased folded reloads
+  (5 -> 7). This matches the RS4GC source comment warning that SSA-rooting
+  handler-only values stretches live ranges and makes regalloc spill them
+  again. Do not turn this on globally.
+- A current no-spill-fusing ablation is mixed: it helps
+  `raise_caught_cross_function` (`1.0884x -> 1.0356x`) and Boyer slightly
+  (`1.1314x -> 1.1127x`), barely moves
+  `closure_call_many_handler_live_roots_raise` (`1.1912x -> 1.1844x`), worsens
+  `catch_failure_then_unify` (`1.1020x -> 1.1152x`), and badly worsens
+  `nested_failed_unify` (`1.0144x -> 1.2023x`). Global spill-fusing suppression
+  is therefore not the class-2 fix.
+- MIR cuts after greedy, after `OxCamlStatepointSpillRoots`, after
+  virtregrewrite, and after prolog/epilog are recorded in
+  `agent-state/test-suite-29e4cd/slowdown_deep_dive_20260629/exception/`,
+  with the summary in
+  `agent-state/test-suite-29e4cd/slowdown_deep_dive_20260629/exception/class2-mir-findings.md`.
+  In the closure live-root case, the hot statepoint lists only the exnroot
+  value home; `OxCamlStatepointSpillRoots` rejects the landingpad exception
+  temporary as not live across statepoints, and the remaining spill slots are
+  ordinary scalar loop/domain state. In `catch_failure_then_unify`, the pass
+  correctly appends one real spilled GC value (`%stack.4` in `run_4_9_code`) to
+  the protected `unify1` statepoint while rejecting the exception temporary.
+  This confirms the normal backend GC mechanism is active; the next target is
+  native-like compact placement/reload of ordinary state around
+  invoke-statepoints, not a second root mechanism.
+
+Next class-2 plan:
+
+- Keep `closure_call_many_handler_live_roots_raise` as the pure live-root
+  testcase and `catch_failure_then_unify`/Boyer as the mixed exnroot+relocate
+  testcase.
+- Instrument MIR after greedy, `OxCamlStatepointSpillRoots`, and
+  virtregrewrite for these cases to separate GC value homes from ordinary
+  scalar spill slots. The likely target is statepoint/trap-adjacent placement
+  of non-GC loop/list state, not the root-listing mechanism.
+- Compare AMD64 against the arm64 LLVM output for the same source once an arm64
+  artifact is available. Specifically check whether arm64 avoids the extra
+  scalar homes around protected calls or simply schedules them better.
+- Prototype only narrow changes: either improve X86 placement for scalar values
+  live across invoke-statepoints, or reduce unnecessary exnroot materialization
+  when the value already has a normal-path statepoint home. Any prototype must
+  keep the current backend-recognized exnroot/value-home model and must be
+  validated with self-stage plus exception/GC stress tests.
 
 ### 8. Legacy frontend-ish AMD64 paths
 
