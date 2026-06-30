@@ -1781,3 +1781,26 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     The hot ICP opportunity is dominated by nonzero-root OCaml callsites, so
     full ICP needs proper OCaml frame/root metadata for BOLT-created promoted
     return PCs rather than descriptor cloning or a zero-root subset.
+- 2026-06-30 rejected scoped allocator partition screen:
+  - Tried a narrower version of the earlier `-split-spill-mode=default`
+    experiment: in `RegAllocGreedy`, use `SM_Partition` only for OxCaml live
+    ranges that cross call regmasks, leaving non-OxCaml and non-call-crossing
+    ranges on the normal `SM_Speed` path. This is LLVM-path-only and was meant
+    to reduce overlapping complement intervals that become duplicate
+    statepoint-crossing stack homes.
+  - Focused `typing/ctype.ml` RS4GC stats matched the earlier split-default
+    shape: total appended spill slots `4675 -> 4276`, GC-family slots
+    `4665 -> 4265`, ordinary-call slots `3335 -> 2703`, but alloc-family
+    slots worsened `1301 -> 1533`; assembly lines fell `251284 -> 249951`.
+  - Rebuilt vendored `llc` and ran
+    `tools/build-llvm-boot-with-installed.sh` with
+    `LLVM_WRAPPER=agent-state/test-suite-29e4cd/llc-wrapper.sh`. The boot build
+    failed in `middle_end/flambda2/simplify/.flambda2_simplify.objs/native/_unknown_`
+    and `.ocamloptcomp.objs/native/_unknown_` with SEGV / minor-GC allocation
+    failure, the same failure class as global split-default. Reverted the
+    allocator edit and rebuilt `llc` back to the checked-in source state.
+  - Conclusion: partitioning call-crossing live ranges does reduce some
+    ordinary-call duplicate homes, but it changes the allocator enough to
+    miscompile the compiler. Do not pursue this as a direct policy change; any
+    allocator-side fix needs a more precise invariant and a small failing
+    reducer before performance testing.
