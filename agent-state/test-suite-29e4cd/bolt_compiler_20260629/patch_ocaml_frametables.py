@@ -38,6 +38,9 @@ INSTRUCTION_RE = re.compile(r"^\s*([0-9a-fA-F]+):\s*(.*)$")
 CALL_TARGET_RE = re.compile(r"<([^>]+)>")
 PUSH_IMMEDIATE_RE = re.compile(r"^push[q]?\s+\$(0x[0-9a-fA-F]+|[0-9]+)")
 JUMP_ADDRESS_RE = re.compile(r"^jmp[q]?\s+([0-9a-fA-F]+)")
+INSTRUMENTED_INDIRECT_CALL_HANDLERS = {
+    "__bolt_instr_ind_call_handler_func",
+}
 
 
 def align(value: int, by: int) -> int:
@@ -515,6 +518,10 @@ def build_call_return_map(
                 )
                 approx_old_call = input_sym.value + approx_old_offset
                 new_by_target.setdefault(call.target, []).append((call, approx_old_call))
+                if call.target in INSTRUMENTED_INDIRECT_CALL_HANDLERS:
+                    old_call = old_indirect_by_addr.get(approx_old_call)
+                    if old_call is not None:
+                        mapping[old_call.return_addr] = call.return_addr
                 if call.target is not None:
                     approx_old_return_offset = Translator.translate_output_offset(
                         bat_entries, call.return_addr - fragment_sym.value

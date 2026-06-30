@@ -241,8 +241,10 @@ void operator delete(void *Ptr, BumpPtrAllocator &A) { A.deallocate(Ptr); }
 
 namespace {
 
-// Disable instrumentation optimizations that sacrifice profile accuracy
-extern "C" bool __bolt_instr_conservative;
+// Disable instrumentation optimizations that sacrifice profile accuracy.
+// This declaration is inside an anonymous namespace, so force the ELF symbol
+// name to match the runtime data symbol emitted by BOLT.
+extern bool __bolt_instr_conservative __asm__("__bolt_instr_conservative");
 
 /// Basic key-val atom stored in our hash
 struct SimpleHashTableEntryBase {

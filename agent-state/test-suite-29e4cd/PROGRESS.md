@@ -1951,3 +1951,40 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     maps (or otherwise exposing an address map) so OCaml frametables can be
     patched before profiling. This remains a plausible LLVM-only path, but it
     requires a BOLT-side fix before any performance measurement can count.
+- 2026-06-30 instrumented-BOLT BAT fix and measurement:
+  - Fixed the BOLT `--instrument --enable-bat` emitter crash by making
+    `MCPlusBuilder::getAnnotationInst` return null when the last nested
+    `MCInst` operand is not an `ANNOTATION_LABEL`, instead of relying on a
+    debug-only assert and then reading non-annotation operands as annotation
+    immediates in no-assert builds.
+  - Rebuilt `llvm-bolt`; hot-only instrumentation of
+    `ocamlopt.constfilter.reloc` with `--enable-bat` now completes, links the
+    instrumentation runtime, and writes `61331` BAT maps. The earlier runtime
+    symbol fix for `__bolt_instr_conservative` is still required.
+  - Extended `patch_ocaml_frametables.py` to map return PCs for inserted calls
+    to `__bolt_instr_ind_call_handler_func` back to the original indirect
+    call's frame descriptor. Without this, the patched instrumented compiler
+    failed immediately with a missing descriptor at the return after the BOLT
+    instrumentation handler call in `camlStdlib__List__concat_map_64_160_code`.
+  - Validation:
+    - `python3 -m py_compile patch_ocaml_frametables.py` passes.
+    - The hot-only instrumented/BAT compiler patches with `224543` descriptors,
+      `0` unresolved, and all descriptors call-site mapped after the handler
+      return fix.
+    - The patched instrumented compiler passes `-version`, a tiny compile, and
+      collects an `8.8M` instrumentation fdata while compiling the standard
+      five compiler benchmark modules three times.
+  - Reapplied the safe `cache+`/`hfsort+`/peephole/rodata BOLT recipe to
+    `ocamlopt.constfilter.reloc` using that instrumentation fdata. The final
+    binary `ocamlopt.constfilter.instrprof-cache-hfsort-peep-rodata.bat.patched`
+    patches with `224543` descriptors, `0` unresolved, and all descriptors
+    call-site mapped. It passes `-version` and a one-inner-repetition
+    five-module compile smoke.
+  - Benchmark result against the native-built compiler, both compiling in
+    normal native mode with `samples=7`, `inner_repetitions=3`:
+    native median `26.990598s`, candidate median `26.266300s`, ratio
+    `0.973164811`, improvement `+2.68%`
+    (`native-current-vs-llvm-constfilter-instrprof-cache-hfsort-peep-rodata-inner3.json`).
+    This is a valid LLVM-built-binary-only improvement path but does not meet
+    the `+6%` target and is worse than the prior best safe BOLT result
+    (`+3.77%`). Do not count it as the goal artifact.

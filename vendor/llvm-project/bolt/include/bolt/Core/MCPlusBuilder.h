@@ -105,7 +105,8 @@ private:
       return nullptr;
 
     MCInst *AnnotationInst = const_cast<MCInst *>(LastOp.getInst());
-    assert(AnnotationInst->getOpcode() == TargetOpcode::ANNOTATION_LABEL);
+    if (AnnotationInst->getOpcode() != TargetOpcode::ANNOTATION_LABEL)
+      return nullptr;
 
     return AnnotationInst;
   }
