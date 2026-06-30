@@ -2098,3 +2098,35 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     toward the `+6%` goal. The best valid result remains the safe BOLT layout
     artifact at about `+3.77%`; further progress still needs exact OCaml-aware
     metadata for real BOLT ICP or a backend root/spill precision improvement.
+- 2026-06-30 rejected unobserved sibling-slot filter:
+  - Reaffirmed the scope correction from review: `-O4` and other generic
+    driver-level flags are invalid for the `+6%` goal because the native-built
+    compiler can use the same flags. Candidate wins must be LLVM-backend
+    codegen/pass changes, LLVM-path-only configuration, or post-link/profile
+    work that applies only to the LLVM-built artifact.
+  - Tested an LLVM-only `OxCamlStatepointSpillRoots` precision prototype that
+    tried to avoid appending a sibling spill slot when no later load or later
+    statepoint could observe the slot contents before an overwrite. The idea
+    was to reduce AMD64 frametable/root pressure without changing frontend root
+    production or adding a second GC mechanism.
+  - Focused checks initially looked promising: rebuilt `_build/llvm-tools/bin/llc`;
+    compiling `typing/ctype.ml` with the standard compiler, `-llvm-backend`,
+    and patched `llc` passed; `-mllvm -stats` on `ctype` reported `1505`
+    "unobserved spill slots not appended" versus `1504` remaining appended
+    spill slots. The seven-module LLVM-backend compile smoke
+    (`cfg_selectgen`, `llvmize`, `translcore`, `ctype`, `env`, `typecore`,
+    `typemod`) also passed.
+  - Full compiler build validation rejected the prototype. A separate
+    LLVM-built install attempt using `_llvm_obsfilter_*` failed while building
+    the main compiler: first with segfaults in `otherlibs/dynlink` and
+    `middle_end/flambda2/kinds/flambda_kind.ml`; after broadening observations
+    to include noncanonical frame-index loads, `flambda_kind` progressed but
+    dynlink still failed with `Fatal error: allocation failure during minor GC`.
+  - The prototype was reverted completely and `_build/llvm-tools/bin/llc` was
+    rebuilt from the restored sources. Conclusion: LiveStacks intervals plus a
+    local "future observation" test are not enough to decide that a sibling
+    slot may be skipped. The missing observation may be through a path or
+    machine construct not represented by canonical reload/statepoint uses, or
+    the slot may be needed to keep root state coherent across exceptional or
+    compiler-generated paths. Do not revive this filter without first proving
+    the access model against the failing dynlink case.
