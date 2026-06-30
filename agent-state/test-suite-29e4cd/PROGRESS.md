@@ -2423,3 +2423,32 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     for the same GC values inside hot functions, and the safe fix is to prevent
     or coalesce those duplicate homes before frametable emission, not to remove
     already-live roots after `OxCamlStatepointSpillRoots`.
+- 2026-06-30 corrected compiler-throughput scope and root-mechanism checkpoint:
+  - Generic optimization-level changes such as `-O4` are invalid for the
+    compiler-throughput goal, because the native-built compiler can receive the
+    same driver/runtime setting. The only valid candidates are LLVM-path-only
+    changes: AMD64 LLVM backend/codegen improvements, LLVM-only backend pass
+    configuration, or profile/post-link work that applies specifically to the
+    LLVM-built compiler artifact.
+  - The current best valid artifact remains the BOLT-patched LLVM-built
+    compiler
+    `bolt_compiler_20260629/ocamlopt.constfilter.cache-hfsort-peep-rodata.bat.patched`,
+    about `+3.77%` versus the native-built compiler on the representative
+    compiler-module benchmark, still short of the required `+6%`.
+  - Rechecked the native AMD64/ARM and LLVM mechanisms. Native AMD64 and ARM
+    both record register roots in frame descriptors, and both treat ordinary
+    OCaml calls as destroying all physical registers. LLVM's statepoint path
+    still needs `FixupStatepointCallerSaved` because register allocation cannot
+    directly model statepoint GC operands as runtime "late reads"; that pass is
+    shared infrastructure, not an AMD64-only replacement mechanism.
+  - The AMD64-specific quality gap is downstream shape: `FixupStatepointCallerSaved`
+    spills register roots that survive to ordinary calls, and
+    `OxCamlStatepointSpillRoots` then appends sibling spill slots that also
+    carry those GC values across statepoints. The large `ctype` counts are
+    therefore mostly duplicate live homes created around the correct
+    ARM-style in-place statepoint mechanism. The next LLVM-only fix should make
+    AMD64 register allocation/fixup produce fewer duplicate homes, or prove a
+    sound pre-frametable coalescing rule. Broad filters already tested
+    (`-disable-spill-fusing`, skipping roots, allowing GC pointers in CSRs) are
+    rejected because they either fail full compiler validation or do not reduce
+    the relevant root pressure.
