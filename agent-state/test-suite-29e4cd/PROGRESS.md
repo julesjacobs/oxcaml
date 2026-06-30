@@ -3102,3 +3102,26 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     On this recalibrated workload, the +6% goal means the LLVM-built compiler
     must get below about `9.60s`, not merely beat the installed native
     `ocamlopt.opt` artifact.
+- 2026-06-30 LLVM-path-only performance constraint:
+  - Do not count generic optimization-level changes such as `-O4` toward the
+    compiler-throughput target. The native-built compiler can also use generic
+    frontend/compiler-driver optimization flags, so they are not evidence that
+    the LLVM path itself improved.
+  - Valid candidates must be LLVM-path-specific: AMD64 LLVM backend codegen,
+    LLVM-specific pass configuration that is not equally applicable to the
+    native backend, LLVM-built profile/layout work, or BOLT support that relies
+    on LLVM-emitted metadata / frame tables.
+- 2026-06-30 additional BOLT seven-module screens:
+  - Screened two already-produced safe BOLT artifacts on the corrected
+    seven-module workload against native
+    `_native_current_build/main/oxcaml_main_native.exe`, with matching
+    build-main and `OCAMLLIB` paths, `samples=3`, `inner=2`.
+  - `ocamlopt.constfilter.blockcache.bat.patched`:
+    `native-oxcamlopt-vs-blockcache-seven-inner2.json`; native median
+    `29.766652s`, candidate median `29.201322s`, improvement `+1.90%`.
+  - `ocamlopt.constfilter.merged7-exact5-cache-hfsort.bat.patched`:
+    `native-oxcamlopt-vs-merged7-exact5-cache-hfsort-seven-inner2.json`;
+    native median `29.735143s`, candidate median `29.315223s`, improvement
+    `+1.41%`.
+  - Both remain below the existing safe best seven-module BOLT result
+    (`+2.205%`) and are not sufficient for the `+6%` target.
