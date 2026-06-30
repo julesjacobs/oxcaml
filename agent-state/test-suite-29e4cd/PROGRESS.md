@@ -1,5 +1,36 @@
 # Progress
 
+- 2026-06-30 LLVM-only pipeline and safe-BOLT follow-up:
+  - Screened saved `typing/ctype.ml` IR with additional LLVM-only backend
+    knobs. `-enable-ipra` worsened the proxy (`4675` -> `4726` total appended
+    spill roots; assembly `251284` -> `251353` lines). `-enable-misched`,
+    `-enable-post-misched`, both schedulers together, and `-machine-sink-bfi`
+    were neutral on the saved IR stats/size. No build-worthy candidate came
+    from this screen.
+  - Tested safe BOLT tail-duplication variants on the relocation-enabled
+    constfilter compiler. Both variants patched existing OCaml frametables and
+    passed `-version`; neither used ICP or created required synthetic
+    descriptors.
+  - Variant using the base `ocamlopt.reloc.lbr.fdata` profile plus
+    `-tail-duplication=cache` patched with zero unresolved descriptors, but
+    had a weaker profile shape (`6895` profiled functions, `7` ignored profile
+    objects) and benchmarked at only `+1.21%` vs native-built on the five-module
+    native-mode compiler workload
+    (`native-current-vs-llvm-constfilter-cache-hfsort-peep-rodata-taildup-cache-screen.json`).
+  - Variant using the matching `ocamlopt.constfilter.reloc.noassert.lbr.fdata`
+    profile and exact current-best block layout (`-reorder-blocks=cache`) patched
+    with zero unresolved descriptors (`224542` call-site mappings, `1` BAT
+    fallback), matched the current best profile shape (`7380` profiled
+    functions), but benchmarked at only `+2.82%`
+    (`native-current-vs-llvm-constfilter-noassert-cacheonly-hfsort-peep-rodata-taildup-cache-screen.json`).
+    The `cache+` version with the same profile was also below best at `+2.71%`.
+  - Conclusion: safe BOLT tail duplication is not the missing `+6%` path. The
+    best valid result remains
+    `ocamlopt.constfilter.cache-hfsort-peep-rodata.bat.patched` at `+3.77%`.
+    The next viable work remains a backend/root-placement improvement or a
+    real OCaml-aware BOLT frametable implementation for transformations such as
+    ICP.
+
 - 2026-06-30 LLVM-path allocator flag screen after excluding generic `-O4`:
   - Screened saved `typing/ctype.ml` post-RS4GC IR with several `llc`-only
     options. `-split-spill-mode=default` was the only promising stat change:
