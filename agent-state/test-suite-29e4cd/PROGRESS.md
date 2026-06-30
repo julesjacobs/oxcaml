@@ -2130,3 +2130,37 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     the slot may be needed to keep root state coherent across exceptional or
     compiler-generated paths. Do not revive this filter without first proving
     the access model against the failing dynlink case.
+- 2026-06-30 rejected global LLVM-only spill-fusing suppression:
+  - Reaffirmed that generic `-O4`/optimization-level changes are not valid for
+    the compiler-throughput goal because the native-built compiler can use them
+    too. This experiment instead used an LLVM-path-only `llc` switch:
+    `-mllvm -disable-spill-fusing`, appended by a local wrapper around the
+    normal `tools/llvm-rs4gc-llc-wrapper.sh` pipeline.
+  - Focused loop-invariant screening still confirms the earlier diagnosis. With
+    the corrected real wrapper pipeline (`SAMPLES=5`, `N=12000000`, `REPS=5`),
+    `loop_invariant_gc_across_call_dynamic_reps` moved to parity:
+    native `0.0708s`, LLVM `0.0709s`, ratio `1.0005`; the fixed-reps GC case
+    improved to ratio `1.0785`. This shows the microbenchmark's large AMD64
+    slowdown is genuinely tied to X86 spill folding around statepoints, not to
+    frontend roots or a generic optimization-level setting.
+  - Full compiler-build validation rejects the global knob. A separate
+    LLVM-built install attempt with `_llvm_nospillfuse_*` and the same wrapper
+    first failed under `DUNE_BUILD_FLAGS=-j2` after `380` wrapper invocations:
+    `.ocamlcommon.objs/native/build_path_prefix_map.cmx` got `SIGSEGV`, and
+    `otherlibs/dynlink/.dynlink_compilerlibs.objs/byte/...Type_shape.cmo`
+    aborted with `Fatal error: allocation failure during minor GC`.
+    Rerunning the two apparent failing commands in isolation succeeded, so this
+    was not enough by itself; a serialized main-build retry with
+    `BUILD_RUNTIME=0 BUILD_MAIN=1 REFRESH_INSTALL=0 DUNE_BUILD_FLAGS=-j1`
+    still failed after `266` wrapper invocations when compiling
+    `.ocamlcommon.objs/native/typecore.cmx` (`SIGSEGV`). A clean serialized
+    main build from scratch (`rm -rf _llvm_nospillfuse_main_build
+    _llvm_nospillfuse_install`, reuse the completed runtime, then `-j1`)
+    still failed after `540` wrapper invocations, with a dynlink native compile
+    aborting on minor-GC allocation failure and later `.ocamlcommon` native
+    compiles taking `SIGSEGV`.
+  - Conclusion: broad spill-fusing suppression is correctness-unsafe for the
+    self-stage compiler and is not a `+6%` candidate. The useful fact to carry
+    forward is narrower: harmful post-statepoint scalar reload folding is a real
+    performance class, but any fix must be targeted enough to preserve the
+    compiler build and the existing statepoint/frimetable/root mechanism.
