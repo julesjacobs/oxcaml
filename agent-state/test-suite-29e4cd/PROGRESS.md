@@ -2717,3 +2717,43 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     was rebuilt back to the checked-in source state. Do not revisit simple
     statepoint-GC-use spill-weight scaling unless paired with a more direct
     split-placement or operand-home change.
+- 2026-06-30 rejected narrower partition split-placement repro:
+  - Reintroduced a hidden diagnostic equivalent to the earlier targeted
+    partition experiment, but scoped to virtual registers used in the GC pointer
+    section of OxCaml `STATEPOINT` operands and applied only at greedy's
+    global-region and per-block split reset sites. The diagnostic remained
+    disabled by default and was used only through
+    `-mllvm -oxcaml-statepoint-partition-spill-mode`.
+  - Focused direct `typing/ctype.ml` stats reproduced the useful counter
+    signal: appended spill slots dropped from the current `1629` baseline to
+    `1250`; GC-family ordinary-call slots dropped `860 -> 290`; reload-fed
+    sibling slots dropped `11 -> 3`; crossing GC registers dropped `9 -> 6`.
+    Alloc-family GC-family slots worsened `757 -> 956`, so the shape is still
+    a tradeoff rather than a pure ARM-style improvement.
+  - Correctness was better than the previous broad targeted-partition note:
+    a serial boot with `DUNE_BUILD_FLAGS="-j 1 --display short"` passed
+    (`1682` wrapper lines / `841` fresh IR), then a manual smoke using the
+    resulting `boot_ocamlopt.exe` printed `55` (`4` wrapper lines / `2` fresh
+    IR). A normal parallel boot also passed with script smoke (`1682` boot
+    wrapper lines / `831` fresh IR; smoke printed `55` with `2` fresh IR).
+    This suggests the earlier `.ocamlcommon` failure was from a broader or
+    different partition predicate, not this exact narrowed reconstruction.
+  - Performance rejected the diagnostic in a fair compiler-throughput
+    comparison. The first benchmark
+    `native-current-vs-partition-repro-inner3.json` is invalid because it
+    compared installed native `ocamlopt.opt` (`65M`) against build-tree LLVM
+    `main_native.exe` (`34M`), producing a meaningless `+57.8%`. The fair
+    build-tree comparison
+    `native-buildtree-vs-partition-repro-inner3.json` compared native
+    `_native_current_build/main/main_native.exe` (`27M`) to LLVM
+    `_llvm_partition_repro_parallel_build/default/main_native.exe` (`34M`):
+    native median `10.200226s`, LLVM partition median `11.374757s`, ratio
+    `1.11515`, improvement `-11.51%`.
+  - The source diagnostic was reverted and `_build/llvm-tools/bin/llc` was
+    rebuilt back to the checked-in source state. Conclusion: partitioning these
+    statepoint GC live ranges is now correctness-plausible under the narrowed
+    predicate, but it is not a throughput candidate because it slows the
+    LLVM-built compiler substantially in the fair build-tree comparison. Future
+    work should borrow only the insight that ordinary-call duplicate homes are
+    reducible; it should not use partitioned complement splitting as the
+    production policy.
