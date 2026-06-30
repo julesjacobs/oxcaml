@@ -1247,3 +1247,35 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     the compiler-module workload, so the next investigation should compare the
     safe BOLT and full-ICP assembly/profile side by side and identify exactly
     which promoted call sites or layout side effects lose the layout-only win.
+- 2026-06-30 LLVM-path root/spill-shape follow-up:
+  - Reconfirmed that generic optimization-level changes such as `-O4` are not
+    acceptable for the compiler-throughput goal, because they would also apply
+    to the native-built compiler under a fair setup. The remaining viable
+    changes must affect the LLVM-built path only.
+  - The current five-module blocker is still `typing/ctype.ml`: the best safe
+    BOLT layout artifact is `+3.77%` overall, with per-module results around
+    `+3.91%` to `+4.94%` except `ctype`, which is only `+0.87%`.
+  - Existing frametable-root analysis shows an LLVM-path-specific root
+    inflation problem in the compiler binary: native has about 197k frame
+    descriptors / 524k live roots / 415k stack roots, while the LLVM-built
+    compiler has about 225k frame descriptors / 774k live roots / 567k stack
+    roots. Hot helper examples also inflate: `Reg.find_opt` goes from 18 live
+    roots / 14 stack roots to 39 / 39; `Reg.replace` goes from 18 / 13 to
+    63 / 60. That matches the `ctype` perf profile being GC/runtime dominated.
+  - Tried a real LLVM-built compiler ablation with
+    `LLVM_EXTRA_FLAGS='-mllvm -fixup-scs-enable-copy-propagation=false'` in
+    separate `_llvm_nocopyprop_*` build/install directories, using
+    `tools/build-llvm-stage5-install.sh`, local `_build/llvm-tools`, and
+    `DUNE_BUILD_FLAGS=-j2`. Runtime/stdlib completed (`74` fresh LLVM IR
+    compilations), but the main compiler build failed after `401` fresh LLVM IR
+    compilations with `Fatal error: allocation failure during minor GC` in
+    `.ocamlcommon.objs/byte/_unknown_` and SEGVs in
+    `otherlibs/dynlink/.dynlink_compilerlibs.objs/native/_unknown_` and
+    `.oxcaml_common.objs/native/_unknown_`. This broad copy-propagation
+    ablation is rejected as a build-state/correctness failure, not benchmarked.
+  - Do not pursue disabling root mechanisms wholesale: old verifier history
+    shows `-oxcaml-statepoint-spill-roots=0` and disabling register roots expose
+    real stale-root bugs. The performance path is to make the root/spill
+    machinery more precise, especially the slot-root cases in
+    `OxCamlStatepointSpillRoots`, and then require a full LLVM build before
+    benchmarking.
