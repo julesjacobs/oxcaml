@@ -1,5 +1,26 @@
 # Progress
 
+- 2026-06-30 matched no-debug diagnostic for the current best BOLT artifact:
+  - Checked whether the remaining compiler-throughput gap is mostly debug
+    frametable work by rerunning the five-module compiler benchmark without
+    `-g`. This was a diagnostic only; dropping `-g` is not a candidate
+    optimization for the goal.
+  - An initial reduction accidentally ran the BOLT compiler against the
+    native-built `OCAMLLIB`/build tree and produced a misleading segfault. The
+    corrected run matches the validated setup: native compiler with
+    `_native_current_build/main` + `_native_current_install/lib/ocaml`, and the
+    BOLT compiler with `_llvm_constfilter_build/main` +
+    `_llvm_constfilter_install/lib/ocaml`.
+  - Corrected no-`-g` result, `samples=3`, `inner_repetitions=3`: native median
+    `26.917524s`, best BOLT median `26.129731s`, ratio `0.970733`, improvement
+    `+2.93%`
+    (`native-current-vs-best-bolt-no-debug-matched-diagnostic-samples3-inner3.json`).
+  - This is below the robust `-g` best (`+3.77%`) and nowhere near the required
+    LLVM-path-only `+6%`. Debug-info generation or debug-only frametable
+    descriptors are therefore not the missing win by themselves; the remaining
+    gap still points at broader AMD64 LLVM root/spill and allocator/code-shape
+    issues, especially the weak `typing/ctype.ml` module result.
+
 - 2026-06-30 rejected corrected-gate `-split-spill-mode=default` as a
   compiler-throughput path:
   - Retested the global split-spill diagnostic under the corrected boot gate
