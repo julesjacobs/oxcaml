@@ -1,5 +1,36 @@
 # Progress
 
+- 2026-06-30 fair build-tree compiler baseline reset:
+  - Corrected the compiler-throughput baseline after finding an artifact-class
+    mismatch in earlier BOLT/compiler comparisons. The installed native
+    compiler `_native_current_install/bin/ocamlopt.opt` is a 65M installed
+    artifact, while the LLVM candidates measured so far are build-tree
+    `main_native.exe` artifacts around 34M-38M. Comparing installed native to
+    build-tree LLVM makes the LLVM path look artificially good and cannot be
+    used for the "+6% beyond native-built compiler" goal.
+  - The current fair comparison is build-tree native
+    `_native_current_build/main/main_native.exe` versus build-tree LLVM
+    `_llvm_native_stage0_canonical_j1_boot_build/default/main_native.exe`,
+    both compiling in normal native mode with the same native build-main and
+    `_native_current_install/lib/ocaml` library.
+  - Five-module result, `samples=7`, `inner_repetitions=3`:
+    native median `10.209638s`, LLVM median `11.417733s`, ratio `1.11833`,
+    improvement `-11.83%`
+    (`bolt_compiler_20260629/native-buildtree-vs-llvm-canonical-inner3.json`).
+    The +6% target therefore means getting below roughly `9.60s` on this
+    corrected artifact policy.
+  - Per-module split, `samples=5`, `inner_repetitions=3`, all build-tree
+    artifacts:
+    `backend/cfg_selectgen.ml` is `-11.56%`, `backend/llvm/llvmize.ml` is
+    `-8.56%`, `lambda/translcore.ml` is `-14.88%`, `typing/ctype.ml` is
+    `-8.28%`, and `typing/env.ml` is `-9.84%`.
+  - This changes the near-term investigation priority. The statepoint/root
+    work remains important for AMD64 quality, but the corrected compiler
+    benchmark shows a broad LLVM-built compiler slowdown, not just a
+    `typing/ctype.ml` GC-root outlier. Future candidates still must be
+    LLVM-path-only; generic flags such as `-O4` remain invalid because they
+    would also apply to native-built.
+
 - 2026-06-30 LLVM-path scope and CSR-root checkpoint:
   - Reaffirmed the goal constraint: `-O4` is not a valid candidate because it
     is a generic build/driver optimization that can also be applied to the
