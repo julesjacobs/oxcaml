@@ -1,5 +1,19 @@
 # Progress
 
+- 2026-06-30 rejected close BOLT artifact after paired check:
+  - Re-ran the quick-screen-close
+    `ocamlopt.constfilter.noassert-plus-ctype7-cache-hfsort-peep-rodata.bat.patched`
+    artifact under the corrected native-mode setup:
+    `_native_current_build/main/oxcaml_main_native.exe` plus
+    `_native_current_install/lib/ocaml` versus the BOLT artifact plus matching
+    `_llvm_constfilter_build/main` and `_llvm_constfilter_install/lib/ocaml`.
+  - Paired five-module result, `samples=5`, `inner_repetitions=2`: native
+    median `17.955501s`, candidate median `17.274383s`, improvement `+3.79%`
+    (`bolt_compiler_20260629/native-oxcamlopt-vs-noassert-plus-ctype7-cache-hfsort-peep-rodata-paired-inner2.json`).
+  - Conclusion: the old `+5.19%` quick screen was not a stable route to the
+    required `+6%`; the current best validated LLVM-path artifact remains the
+    safe BOLT layout result at `+4.63%` paired.
+
 - 2026-06-30 scope correction after review:
   - Reconfirmed that generic optimization-level changes such as `-O4` cannot
     count toward the compiler-throughput goal: the native-built compiler can use
