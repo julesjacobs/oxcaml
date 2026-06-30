@@ -1,5 +1,31 @@
 # Progress
 
+- 2026-06-30 serial BOLT module checks after LLVM-path-only clarification:
+  - Reran the accidental parallel per-module BOLT checks serially. The target is
+    still native-built compiler throughput in normal native mode; generic
+    optimization-level changes such as `-O4` are not valid evidence because the
+    native-built compiler could use the same setting. Valid candidates must be
+    LLVM-path-only changes: LLVM codegen, LLVM-only pass configuration, or
+    profile/layout work applied to the LLVM-built artifact.
+  - Best current safe BOLT artifact:
+    `bolt_compiler_20260629/ocamlopt.constfilter.cache-hfsort-peep-rodata.bat.patched`,
+    compared against native-built
+    `_native_current_build/main/oxcaml_main_native.exe`, both with matching
+    build-main and `OCAMLLIB` in normal native mode.
+  - `typing/typecore.ml`, `samples=5`, `inner_repetitions=3`: native median
+    `13.761614s`, BOLTed LLVM median `13.510840s`, ratio `0.981777`,
+    improvement `+1.82%`
+    (`bolt_compiler_20260629/native-current-vs-best-bolt-module-typing_typecore-samples5-inner3.json`).
+  - `typing/typemod.ml`, `samples=5`, `inner_repetitions=3`: native median
+    `3.810753s`, BOLTed LLVM median `3.662960s`, ratio `0.961217`,
+    improvement `+3.88%`
+    (`bolt_compiler_20260629/native-current-vs-best-bolt-module-typing_typemod-samples5-inner3.json`).
+  - Conclusion: safe BOLT does help the type-heavy modules, but not enough to
+    reach the required `+6%` over the native-built compiler on the broader
+    workload. The remaining work should stay on LLVM-path-only improvements and
+    should not count generic flags that are equally available to native-built
+    artifacts.
+
 - 2026-06-30 corrected `typing/typecore.ml` module classification:
   - Reran the unbolted LLVM-built constfilter compiler versus the corrected
     native-built compiler on `typing/typecore.ml` with a longer timing run,
