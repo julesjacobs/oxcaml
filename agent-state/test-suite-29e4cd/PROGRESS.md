@@ -1,5 +1,34 @@
 # Progress
 
+- 2026-06-30 rejected strict-seven instrumentation-profile BOLT retraining:
+  - The existing `ocamlopt.constfilter.instrumented-hot-bat.fdata` had been
+    collected on the old five-module compiler workload; the saved temporary
+    output contained only `cfg_selectgen`, `llvmize`, `translcore`, `ctype`,
+    and `env`, not `typecore`/`typemod`.
+  - Recollected instrumentation data with
+    `ocamlopt.constfilter.instrumented-hot-bat.handlerpatched` on the strict
+    seven-module workload (`3` repetitions of `cfg_selectgen`, `llvmize`,
+    `translcore`, `ctype`, `env`, `typecore`, `typemod`). The BOLT
+    instrumentation fdata path is relative, so the profiling compiler must run
+    with cwd at the workspace root; running it from `_llvm_constfilter_build`
+    fails with `Error while trying to open profile file for writing`.
+  - Rebuilt the same safe recipe from `ocamlopt.constfilter.reloc` using the
+    seven-module fdata:
+    `-reorder-blocks=cache+ -reorder-functions=hfsort+ -peepholes=all
+    -simplify-rodata-loads --enable-bat`. The output again needed synthetic
+    descriptors for `60` BOLT-created ICP-style return PCs, patched cleanly
+    with `--synthesize-icp-descriptors`, and passed `-version`.
+  - A one-sample, one-inner strict seven-module screen rejected it:
+    native median `14.867345s`, candidate median `14.650651s`, improvement
+    `+1.46%`. This is a valid LLVM-path-only profile/BOLT experiment, but it is
+    weaker than the current strict best instrprof result (`+3.234%`) and far
+    below the required `+6%`.
+  - Restored the default `ocamlopt.constfilter.instrumented-hot-bat.fdata` by
+    recollecting the five-module profile with the corrected root cwd, and kept
+    the seven-module fdata as
+    `ocamlopt.constfilter.instrumented-seven-hot-bat.fdata` for local
+    reference.
+
 - 2026-06-30 rejected synthetic-descriptor instrprof BOLT variants:
   - Rechecked the three instrprof BOLT variants that previously had `60`
     unresolved frame descriptor return addresses. The unresolved entries were

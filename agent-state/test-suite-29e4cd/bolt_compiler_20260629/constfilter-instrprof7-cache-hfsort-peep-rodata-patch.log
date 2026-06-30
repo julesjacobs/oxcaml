@@ -1,0 +1,23 @@
+patched 224543 frame descriptor return addresses
+unresolved 60 frame descriptor return addresses
+call-site mapped 224426; BAT fallback mapped 117
+camlFlambda2_simplify__Simplify_apply_cont_expr__rebuild_apply_cont_2_10_code: ICP call 0x3e31109 from old indirect 0x18df24d returns to 0x3e3110b, which needs a synthesized frame descriptor distinct from shared return 0x3e30fae
+camlX86_proc__string_of_substring_literal_5_46_code: ICP call 0x3f5247c from old indirect 0x1a3a65f returns to 0x3f5247e, which needs a synthesized frame descriptor distinct from shared return 0x3f524f6
+camlPrintlinear__instr$27_inner_5_23_code: ICP call 0x3f59e87 from old indirect 0x1a43759 returns to 0x3f59e89, which needs a synthesized frame descriptor distinct from shared return 0x3f5a781
+camlPrintlinear__instr$27_inner_5_23_code: ICP call 0x3f5a133 from old indirect 0x1a43759 returns to 0x3f5a135, which needs a synthesized frame descriptor distinct from shared return 0x3f5a781
+camlSimplify_terminator__fn$5bbackend$2fcfg$2fsimplify_terminator.ml$3a239$2c25$2d$2d3585$5d_27_69_code: ICP call 0x3b9015f from old indirect 0x1a543d2 returns to 0x3b90161, which needs a synthesized frame descriptor distinct from shared return 0x3b8fb49
+camlX86_masm__arg_mem_2_18_code: ICP call 0x3f6f36b from old indirect 0x1a6efbb returns to 0x3f6f36d, which needs a synthesized frame descriptor distinct from shared return 0x3f6f4bb
+camlX86_masm__code_begin: ICP call 0x3f6f36b from old indirect 0x1a6efbb returns to 0x3f6f36d, which needs a synthesized frame descriptor distinct from shared return 0x3f6f4bb
+camlProbe_emission__stap_arg_7_26_code: ICP call 0x401df2d from old indirect 0x1b59c0d returns to 0x401df2f, which needs a synthesized frame descriptor distinct from shared return 0x401df74
+camlInternal_assembler__fn$5bbackend$2finternal_assembler$2finternal_assembler.ml$3a203$2c4$2d$2d832$5d_20_50_code: ICP call 0x404609b from old indirect 0x1b9ba17 returns to 0x404609d, which needs a synthesized frame descriptor distinct from shared return 0x404616c
+camlDwarf_low__Dwarf_operator__fn$5bbackend$2fdebug$2fdwarf$2fdwarf_low$2fdwarf_operator.ml$3a554$2c17$2d$2d7674$5d_4_29_code: ICP call 0x40ae458 from old indirect 0x1c118e2 returns to 0x40ae45a, which needs a synthesized frame descriptor distinct from shared return 0x40aedb2
+camlDwarf_low__Dwarf_operator__fn$5bbackend$2fdebug$2fdwarf$2fdwarf_low$2fdwarf_operator.ml$3a554$2c17$2d$2d7674$5d_4_29_code: ICP call 0x40ae718 from old indirect 0x1c118e2 returns to 0x40ae71a, which needs a synthesized frame descriptor distinct from shared return 0x40aedb2
+camlDwarf_low__Dwarf_operator__fn$5bbackend$2fdebug$2fdwarf$2fdwarf_low$2fdwarf_operator.ml$3a554$2c17$2d$2d7674$5d_4_29_code: ICP call 0x40aeb16 from old indirect 0x1c118e2 returns to 0x40aeb18, which needs a synthesized frame descriptor distinct from shared return 0x40aedb2
+camlFlambda2_types__Typing_env_extension__fold_11_37_code: ICP call 0x3b7f8d1 from old indirect 0x1ce28a4 returns to 0x3b7f8d3, which needs a synthesized frame descriptor distinct from shared return 0x3b7f89a
+camlFlambda2_types__Meet_and_n_way_join__n_way_join_head_of_kind_value_97_430_code: ICP call 0x4187e15 from old indirect 0x1d2ff88 returns to 0x4187e17, which needs a synthesized frame descriptor distinct from shared return 0x4187ebc
+camlFlambda2_term_basics__Simple__pattern_match$27_25_104_code: ICP call 0x41b8eee from old indirect 0x1d6c49e returns to 0x41b8ef0, which needs a synthesized frame descriptor distinct from shared return 0x41b8f8e
+camlFlambda2_term_basics__Simple__pattern_match$27_25_104_code: ICP call 0x41b8f7a from old indirect 0x1d6c528 returns to 0x41b8f7c, which needs a synthesized frame descriptor distinct from shared return 0x41b8fd6
+camlFlambda2_identifiers__Int_ids__create_107_866_code: ICP call 0x3ae1958 from old indirect 0x1db72f3 returns to 0x3ae195a, which needs a synthesized frame descriptor distinct from shared return 0x3ae18cc
+camlFlambda2_algorithms__Patricia_tree__mem_tree_70_406_code: ICP call 0x42ae373 from old indirect 0x1e7b453 returns to 0x42ae375, which needs a synthesized frame descriptor distinct from shared return 0x42ae395
+camlFlambda2_algorithms__Patricia_tree__mem_tree_70_406_code: ICP call 0x42ae3f7 from old indirect 0x1e7b4e0 returns to 0x42ae3f9, which needs a synthesized frame descriptor distinct from shared return 0x42ae388
+camlFlambda2_algorithms__Patricia_tree__mem_71_407_code: ICP call 0x42ae60e from old indirect 0x1e7b6e0 returns to 0x42ae610, which needs a synthesized frame descriptor distinct from shared return 0x42ae58b

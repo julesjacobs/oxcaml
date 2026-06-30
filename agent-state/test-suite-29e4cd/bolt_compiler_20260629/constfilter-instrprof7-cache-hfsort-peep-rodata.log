@@ -1,0 +1,38 @@
+BOLT-WARNING: '-reorder-blocks=cache+' is deprecated, please use '-reorder-blocks=ext-tsp' instead
+BOLT-INFO: Target architecture: x86_64
+BOLT-INFO: BOLT version: 79fff1805b580fdca828bdd28beb0188a36cec11
+BOLT-INFO: first alloc address is 0x400000
+BOLT-INFO: creating new program header table at address 0x3800000, offset 0x3400000
+BOLT-WARNING: debug info will be stripped from the binary. Use -update-debug-sections to keep it.
+BOLT-INFO: enabling relocation mode
+BOLT-INFO: enabling lite mode
+BOLT-WARNING: split function detected on input : caml_ba_hash.cold/1. The support is limited in relocation mode
+BOLT-WARNING: disabling lite mode (-lite) when split functions are present
+BOLT-WARNING: Failed to analyze 54 relocations
+BOLT-INFO: pre-processing profile using branch profile reader
+BOLT-INFO: forcing -jump-tables=move as PIC jump table was detected in function camlFlambda2_reaper__Field__hash_view_4_29_code
+BOLT-INFO: 7278 out of 61695 functions in the binary (11.8%) have non-empty execution profile
+BOLT-INFO: 345 functions with profile could not be optimized
+BOLT-INFO: profile for 1 objects was ignored
+BOLT-INFO: the input contains 2987 (dynamic count : 10146102) opportunities for macro-fusion optimization. Will fix instances on a hot path.
+BOLT-INFO: validate-mem-refs updated 1 object references
+BOLT-INFO: 176306 instructions were shortened
+BOLT-INFO: removed 7045 empty blocks
+BOLT-INFO: simplified 0 out of 879 loads from a statically computed address.
+BOLT-INFO: dynamic loads simplified: 0
+BOLT-INFO: dynamic loads found: 2434125
+BOLT-INFO: basic block reordering modified layout of 3314 functions (45.53% of profiled, 5.35% of total)
+BOLT-INFO: UCE removed 0 blocks and 0 bytes of code.
+BOLT-INFO: 9 Functions were reordered by LoopInversionPass
+BOLT-INFO: hfsort+ reduced the number of chains from 7623 to 1573
+BOLT-INFO: SCTC: patched 105 tail calls (103 forward) tail calls (2 backward) from a total of 105 while removing 2 double jumps and removing 97 basic blocks totalling 485 bytes of code. CTCs total execution count is 12643772 and the number of times CTCs are taken is 1290006.
+BOLT-INFO: Peephole: 2 double jumps patched.
+BOLT-INFO: Peephole: 5225 tail call traps inserted.
+BOLT-INFO: Peephole: 0 useless conditional branches removed.
+BOLT-INFO: setting _end to 0x4dfa554
+BOLT-INFO: setting _end to 0x4dfa554
+BOLT-INFO: setting __hot_start to 0x3a00000
+BOLT-INFO: setting __hot_end to 0x3cd03f7
+BOLT-INFO: patched build-id (flipped last bit)
+BOLT-INFO: Wrote 61324 BAT maps
+BOLT-INFO: Wrote 0 BAT cold-to-hot entries
