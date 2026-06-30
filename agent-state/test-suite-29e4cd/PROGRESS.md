@@ -3191,3 +3191,48 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     `StackSlotColoring` pass is not enough to make this pass order available.
     A real pre-OXSR coalescer would likely need to be a new pass in the same
     analysis regime as OXSR rather than reusing `StackSlotColoring` directly.
+- 2026-06-30 LLVM-path-only correction and noalloc/debug root check:
+  - Reconfirmed the scope constraint from review: `-O4` and other generic
+    driver-level optimization changes are invalid for the compiler-throughput
+    target because the native-built compiler could use them too. Valid
+    candidates must be LLVM-backend/codegen/pass-layout/profile changes that
+    improve only the LLVM-built path, or LLVM-specific post-link/profile
+    metadata such as BOLT-safe frametable support.
+  - Checked the saved `typing/ctype.ml` IR to test the hypothesis that
+    `gc-leaf-function`/noalloc calls were accidentally converted into
+    statepoints. The visible `caml_modify` calls remain ordinary
+    `oxcaml_c_directcc` calls marked `gc-leaf-function` after RS4GC, not
+    `llvm.experimental.gc.statepoint` calls. That rules out the simple
+    "leaf noalloc calls become safepoints" explanation.
+  - The whole-compiler frametable summaries still show the real root pressure:
+    native has `197298` frames / `523867` live roots / `415445` stack roots,
+    while the LLVM artifact has `224541` frames / `773566` live roots /
+    `566595` stack roots. The largest deltas are debug-bearing descriptors:
+    `noalloc+debug` grows from `310702` to `422287` live roots and
+    `alloc+debug` grows from `205192` to `262921` live roots.
+  - These debug-bearing descriptors are not by themselves removable: native
+    also emits them, and the runtime/backtrace machinery uses frame
+    descriptors even when the call itself does not allocate. The valid target
+    is therefore reducing redundant or over-conservative live root locations
+    before frame-table emission, not stripping debug/deopt information.
+  - Checked the ARM-only CSR root map path before considering an AMD64 copy.
+    `StackMaps::getFunctionInfo` currently only records AArch64 callee-saved
+    root maps, and the generic runtime scanner in this checkout does not
+    obviously consume such maps in the normal `live_ofs` scan. Do not add an
+    AMD64 CSR map blindly; any equivalent must first be proven against the
+    runtime frame-descriptor format and native AMD64 `gc_regs` convention.
+  - Re-summarized prior allocator/root diagnostics. The narrowed partition
+    split-placement experiment is a valid LLVM-path signal, not a generic
+    optimization-level change: it reduced focused `ctype` appended roots
+    (`1629 -> 1250`) and ordinary-call GC-family roots (`860 -> 290`) and
+    passed boot/smoke, but the fair build-tree compiler-throughput benchmark
+    still rejected it (`native 10.200226s`, LLVM partition `11.374757s`,
+    `-11.51%`). It should remain diagnostic evidence that live-range shape is
+    the issue, not a production candidate.
+  - Current conclusion: the next real candidate must improve the AMD64
+    allocator/OXSR root-home shape without a broad partition spill policy and
+    without deleting roots after the fact. Promising directions are narrow
+    statepoint operand home selection, earlier coalescing in an OXSR-compatible
+    analysis regime, or a target-aware greedy heuristic that reduces duplicate
+    statepoint-crossing spill homes while preserving the current ARM-style
+    in-place statepoint mechanism.
