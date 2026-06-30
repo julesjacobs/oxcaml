@@ -1828,3 +1828,39 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     root precision, especially reducing allocator-created duplicate stack homes
     without weakening the in-place GC mechanism or changing general LLVM flags
     that native-built could also use.
+- 2026-06-30 corrected LLVM-path scope after review:
+  - `-O4` and other generic driver-level optimization changes are invalid for
+    the `+6%` compiler-throughput goal because the native-built compiler could
+    use the same setting. Valid candidates are LLVM-backend changes, LLVM
+    pass/codegen configuration that only affects the LLVM-built artifact, and
+    BOLT/profile work on the LLVM-built artifact.
+  - Rechecked the temporary all-path BOLT shared-return prototype and restored
+    the patcher/source state. The direct `push $return; jmp target` ICP shape
+    duplicates the already rejected `icp-sharedret-v3` result: it starts and
+    passes small smoke, but benchmarks at `-4.07%`, so it must not be carried
+    forward as a performance fix. The local no-assert `llvm-bolt` binary was
+    rebuilt after the source was restored so future BOLT runs do not use stale
+    behavior.
+  - Rechecked existing safe BOLT results under the corrected scope. The best
+    robust whole-workload artifact remains
+    `ocamlopt.constfilter.cache-hfsort-peep-rodata.bat.patched` at `+3.77%`
+    on the seven-sample/three-inner-repetition five-module workload. Other
+    safe BOLT screens around `cache-hfsort`, `hfsort+`, tail duplication,
+    ctype-weighted profiles, `mcpu=native`, and full-ICP variants either
+    rerun lower than best, fail correctness, or regress. BOLT layout alone is
+    not currently enough to reach `+6%`.
+  - Rechecked AMD64 ABI parity before proposing root changes. LLVM AMD64 uses
+    the same ten ordinary OCaml value registers as native
+    (`RAX RBX RDI RSI RDX RCX R8 R9 R12 R13`), excludes PLT-unsafe
+    `R10/R11`, models ordinary OxCaml calls as preserving no value registers
+    (plus `RBP` only under frame pointers), and models alloc-family calls as
+    preserving all non-runtime registers except `R10/R11`, matching native's
+    `destroyed_at_alloc_or_poll` intent. The remaining root inflation is
+    therefore not an obvious calling-convention mismatch.
+  - Post-stackcheck frametable comparison: native has `197298` descriptors and
+    `523867` live roots; the stackcheck-leaf BOLT artifact has `193324`
+    descriptors and `699633` live roots. The old `caml_llvm_call_realloc_stack`
+    bucket is gone, but ordinary/debug and alloc-family roots remain much
+    larger than native. This keeps the next valid implementation target on
+    AMD64 LLVM root/spill precision, not frontend roots, not generic
+    optimization levels, and not another ad hoc BOLT call-shape workaround.
