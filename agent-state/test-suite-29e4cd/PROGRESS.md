@@ -1,5 +1,22 @@
 # Progress
 
+- 2026-06-30 seven-module drag narrowed to `typing/typecore.ml`:
+  - After the seven-module BOLT rejection, measured the two added modules
+    separately with the unbolted LLVM-built constfilter compiler against the
+    corrected native-built compiler, both in normal native mode.
+  - `typing/typecore.ml`, `samples=3`, `inner_repetitions=3`: native median
+    `13.746075s`, LLVM-built median `14.243479s`, ratio `1.036185`,
+    improvement `-3.62%`
+    (`bolt_compiler_20260629/native-current-vs-llvm-constfilter-current-module-typing_typecore-inner3.json`).
+  - `typing/typemod.ml`, same setup: native median `3.789557s`, LLVM-built
+    median `3.725575s`, ratio `0.983116`, improvement `+1.69%`
+    (`bolt_compiler_20260629/native-current-vs-llvm-constfilter-current-module-typing_typemod-inner3.json`).
+  - Conclusion: the stricter seven-module workload is mainly exposing a
+    `typecore` base LLVM-codegen regression, not a broad failure of both added
+    modules. Older `typecore` perfstat files are from a different build pair
+    and are not sufficient to explain this current regression; the next useful
+    step is a fresh corrected native-vs-LLVM perf profile for `typecore`.
+
 - 2026-06-30 rejected safe BOLT artifacts on seven-module workload:
   - Rechecked the current best safe BOLT artifact on the explicit seven-module
     compiler workload (`cfg_selectgen`, `llvmize`, `translcore`, `ctype`,
