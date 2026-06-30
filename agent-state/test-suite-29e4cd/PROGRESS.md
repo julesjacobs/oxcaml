@@ -1988,3 +1988,14 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     This is a valid LLVM-built-binary-only improvement path but does not meet
     the `+6%` target and is worse than the prior best safe BOLT result
     (`+3.77%`). Do not count it as the goal artifact.
+  - Also tested full BOLT ICP with the same instrumentation fdata plus
+    `--indirect-call-promotion=all --x86-oxcaml-icp-shared-return`. BOLT
+    optimized `66.3%` of profiled indirect callsites. The patched artifact
+    `ocamlopt.constfilter.instrprof-cache-hfsort-peep-rodata-icp.bat.patched`
+    passes `-version` and the one-inner-repetition five-module compile smoke,
+    which is a correctness improvement over earlier ICP attempts.
+  - Performance is negative: native median `26.968339s`, ICP candidate median
+    `27.286278s`, ratio `1.011789326`, improvement `-1.18%`
+    (`native-current-vs-llvm-constfilter-instrprof-cache-hfsort-peep-rodata-icp-inner3.json`).
+    Therefore the straightforward full-BOLT ICP configuration is not a path to
+    the required `+6%`, despite now being benchmarkable.
