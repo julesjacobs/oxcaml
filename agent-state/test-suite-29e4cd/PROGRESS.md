@@ -1,5 +1,41 @@
 # Progress
 
+- 2026-06-30 LLVM-path BOLT follow-up after the `-O4` scope correction:
+  - Confirmed again that the target must be an LLVM-path improvement, not a
+    generic optimization-level change that a native-built compiler could also
+    use.
+  - Prototyped a direct shared-return BOLT ICP shape locally:
+    promoted direct arms used `push $merge_return; jmp target` so every arm
+    shared the original descriptor-bearing return PC. Built `llvm-bolt`
+    successfully, then used a no-asserts BOLT build because the assertions
+    build hits the known pre-ICP CFI stack assertion in this binary.
+    BOLT completed with `-indirect-call-promotion=calls` and
+    `--x86-oxcaml-icp-shared-return`; frametable patching reported
+    `patched 224543`, `unresolved 0`, and the artifact passed `-version`,
+    `-config`, and a small native compile smoke. Artifact:
+    `bolt_compiler_20260629/ocamlopt.constfilter.cache-hfsort-peep-rodata-icp-sharedret-v3.bat.patched`.
+  - Rejected that source/code-shape change for performance. The full
+    seven-sample / three-inner-repetition five-module benchmark gave native
+    median `27.025927s`, candidate median `28.126696s`, ratio `1.040730`,
+    i.e. `-4.07%` in
+    `native-current-vs-llvm-constfilter-cache-hfsort-peep-rodata-icp-sharedret-v3-inner3.json`.
+    The source and patcher edits for this experiment were removed; do not
+    carry the `push; jmp direct_target` shape forward as a performance fix.
+    The better full-BOLT path is exact frametable synthesis/mapping for real
+    promoted direct calls, preserving BOLT's fast direct-call shape.
+  - Also screened the apparent data-reordering gap by trying the safe BOLT
+    recipe with `-jump-tables=basic -reorder-data=.rodata
+    -reorder-data-algo=funcs`. BOLT still forced `jump-tables=move` for a PIC
+    jump table and warned that data reordering requires basic jump-table
+    support, so no useful data-reorder artifact was produced. Log:
+    `bolt_compiler_20260629/constfilter-cache-hfsort-peep-rodata-jtbasic-data.log`.
+  - Current measured best is unchanged:
+    `ocamlopt.constfilter.cache-hfsort-peep-rodata.bat.patched` at `+3.77%`.
+    The remaining LLVM-only path is still either exact OCaml-aware BOLT
+    frametable support for new promoted call return PCs, or a backend
+    root/spill precision improvement that preserves the arm-style in-place
+    statepoint model.
+
 2026-06-29 BOLT ICP shared-return prototype: this is an LLVM/BOLT-path-only
 experiment, not a generic `-O4` style change. Added a hidden X86 BOLT mode
 prototype, `--x86-oxcaml-icp-shared-return`, intended to keep OxCaml GC frame
