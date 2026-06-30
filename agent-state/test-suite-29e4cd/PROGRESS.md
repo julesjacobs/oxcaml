@@ -1,5 +1,38 @@
 # Progress
 
+- 2026-06-30 rejected ordinary-root durable-home folding:
+  - Tested an LLVM-path-only AMD64 OXSR prototype,
+    `-mllvm -oxcaml-ordinary-root-home-folding`, that refreshed a virtual
+    register root's original spill slot immediately before ordinary managed
+    statepoints, folded the GC operand to that stack home, and removed that
+    slot from the appended root list. This directly targeted the root bloat
+    seen in the LLVM-built compiler without changing frontend roots or using
+    generic driver optimization flags.
+  - Focused saved-IR validation looked technically promising. Rebuilt `llc`;
+    `typing/ctype.ml` post-RS4GC IR passed `--verify-machineinstrs`. Final
+    stats after accounting cleanup: `952` ordinary-call register roots folded
+    to refreshed homes, final GC-family spill slots appended dropped to `689`,
+    and ordinary-call GC-family stack roots dropped to `66`.
+  - Real wrapper validation also passed: focused `typing/ctype.ml`, the
+    seven-module LLVM-backend smoke with a native-built driver, and the same
+    seven-module smoke with the existing LLVM-built driver all compiled through
+    `tools/llvm-rs4gc-llc-wrapper.sh` with the candidate flag.
+  - Build validation passed in separate `_llvm_homefold_*` directories:
+    boot build reported `1682` wrapper lines / `841` fresh IR and smoke
+    printed `55`; self-stage install reported runtime `148`/`74`, main
+    `2228`/`1114`, and self-stage smoke `4`/`2` with output `55`.
+  - Performance rejected it. On the corrected seven-module native-mode
+    compiler workload (`samples=3`, `inner_repetitions=2`), native-built median
+    was `29.6685s`, the home-fold LLVM-built compiler median was `30.9572s`,
+    for `candidate_vs_baseline_median=1.0434` (`-4.34%` improvement). Artifact:
+    `bolt_compiler_20260629/homefold-self-vs-native-seven-20260630.json`.
+  - Conclusion: "make register roots durable by refreshing/folding them into
+    homes" can be made to pass substantial correctness gates, but it worsens
+    the actual compiler-throughput goal. The source prototype was removed.
+    Do not count this toward the `+6%` target; future work should inspect why
+    the root-count improvement loses runtime, likely added stores/memory-form
+    statepoints and worse code shape around ordinary calls.
+
 - 2026-06-30 LLVM-path-only constraint checkpoint after the `-O4` correction:
   - Reaffirmed that `-O4` and similar driver-wide optimization-level changes do
     not count toward the `+6%` target: the native-built compiler can receive
