@@ -25,6 +25,8 @@ SHT_SYMTAB = 2
 SHT_DYNSYM = 11
 SHF_ALLOC = 0x2
 SHF_EXECINSTR = 0x4
+PT_LOAD = 1
+PF_W = 0x2
 
 FRAME_DESCRIPTOR_DEBUG = 1
 FRAME_DESCRIPTOR_ALLOC = 2
@@ -35,6 +37,7 @@ BRANCHENTRY = 0x80000000
 INSTRUCTION_RE = re.compile(r"^\s*([0-9a-fA-F]+):\s*(.*)$")
 CALL_TARGET_RE = re.compile(r"<([^>]+)>")
 PUSH_IMMEDIATE_RE = re.compile(r"^push[q]?\s+\$(0x[0-9a-fA-F]+|[0-9]+)")
+JUMP_ADDRESS_RE = re.compile(r"^jmp[q]?\s+([0-9a-fA-F]+)")
 
 
 def align(value: int, by: int) -> int:
@@ -68,16 +71,51 @@ class BatInfo:
     cold_to_hot: dict[int, int]
 
 
+@dataclass(frozen=True)
+class ProgramHeader:
+    index: int
+    offset: int
+    p_type: int
+    flags: int
+    file_offset: int
+    vaddr: int
+    filesz: int
+    memsz: int
+    align: int
+
+
 class Elf64:
     def __init__(self, path: Path) -> None:
         self.path = path
         self.data = bytearray(path.read_bytes())
         if self.data[:4] != b"\x7fELF" or self.data[4] != 2 or self.data[5] != 1:
             raise ValueError(f"{path}: expected little-endian ELF64")
+        phoff = self.u64_at(0x20)
+        phentsize = self.u16_at(0x36)
+        phnum = self.u16_at(0x38)
         shoff = self.u64_at(0x28)
         shentsize = self.u16_at(0x3A)
         shnum = self.u16_at(0x3C)
         shstrndx = self.u16_at(0x3E)
+        self.program_headers: list[ProgramHeader] = []
+        for i in range(phnum):
+            off = phoff + i * phentsize
+            p_type, flags, file_offset, vaddr, _paddr, filesz, memsz, align = struct.unpack_from(
+                "<IIQQQQQQ", self.data, off
+            )
+            self.program_headers.append(
+                ProgramHeader(
+                    index=i,
+                    offset=off,
+                    p_type=p_type,
+                    flags=flags,
+                    file_offset=file_offset,
+                    vaddr=vaddr,
+                    filesz=filesz,
+                    memsz=memsz,
+                    align=align,
+                )
+            )
         raw = []
         for i in range(shnum):
             off = shoff + i * shentsize
@@ -159,11 +197,17 @@ class Elf64:
             raise OverflowError(f"0x{addr:x}: relative address {value} does not fit int32")
         struct.pack_into("<i", self.data, self.off_for_addr(addr), value)
 
+    def put_u64_at_addr(self, addr: int, value: int) -> None:
+        struct.pack_into("<Q", self.data, self.off_for_addr(addr), value)
+
     def u16_at(self, off: int) -> int:
         return struct.unpack_from("<H", self.data, off)[0]
 
     def u64_at(self, off: int) -> int:
         return struct.unpack_from("<Q", self.data, off)[0]
+
+    def put_u64_at(self, off: int, value: int) -> None:
+        struct.pack_into("<Q", self.data, off, value)
 
     def write(self, path: Path) -> None:
         path.write_bytes(self.data)
@@ -266,6 +310,23 @@ class SharedReturnSite:
     return_addr: int
 
 
+@dataclass(frozen=True)
+class UnsupportedICPReturn:
+    function: str
+    old_call_addr: int
+    direct_call_addr: int
+    return_addr: int
+    shared_return_addr: int
+
+    def describe(self) -> str:
+        return (
+            f"{self.function}: promoted direct call 0x{self.direct_call_addr:x} "
+            f"from old indirect 0x{self.old_call_addr:x} returns to "
+            f"0x{self.return_addr:x}, which needs a synthesized frame descriptor "
+            f"distinct from shared return 0x{self.shared_return_addr:x}"
+        )
+
+
 def normalize_call_target(target: str | None) -> str | None:
     if target is None:
         return None
@@ -326,6 +387,26 @@ def collect_shared_return_sites(path: Path) -> list[SharedReturnSite]:
     return out
 
 
+def collect_unconditional_jump_targets(path: Path) -> dict[int, int]:
+    proc = subprocess.run(
+        ["objdump", "-d", "--no-show-raw-insn", str(path)],
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+    )
+    out: dict[int, int] = {}
+    for line in proc.stdout.splitlines():
+        match = INSTRUCTION_RE.match(line)
+        if match is None:
+            continue
+        addr = int(match.group(1), 16)
+        text = match.group(2).strip()
+        jump_match = JUMP_ADDRESS_RE.match(text)
+        if jump_match is not None:
+            out[addr] = int(jump_match.group(1), 16)
+    return out
+
+
 def symbol_ranges(symbols: list[Symbol]) -> dict[str, tuple[Symbol, int]]:
     ranges: dict[str, tuple[Symbol, int]] = {}
     ordered = sorted(symbols, key=lambda s: (s.value, s.name))
@@ -378,12 +459,13 @@ def shared_returns_in_range(
 
 def build_call_return_map(
     input_elf: Elf64, output_elf: Elf64, bat: BatInfo
-) -> tuple[dict[int, int], int, list[str]]:
+) -> tuple[dict[int, int], list[UnsupportedICPReturn]]:
     input_calls = sorted(collect_call_sites(input_elf.path), key=lambda c: c.call_addr)
     output_calls = sorted(collect_call_sites(output_elf.path), key=lambda c: c.call_addr)
     output_shared_returns = sorted(
         collect_shared_return_sites(output_elf.path), key=lambda site: site.push_addr
     )
+    output_jump_targets = collect_unconditional_jump_targets(output_elf.path)
     input_call_addrs = [call.call_addr for call in input_calls]
     output_call_addrs = [call.call_addr for call in output_calls]
     output_shared_return_addrs = [site.push_addr for site in output_shared_returns]
@@ -397,8 +479,7 @@ def build_call_return_map(
     for cold, hot in bat.cold_to_hot.items():
         cold_by_hot.setdefault(hot, []).append(cold)
     mapping: dict[int, int] = {}
-    unsupported_icp_count = 0
-    unsupported_icp_returns: list[str] = []
+    unsupported_icp_returns: list[UnsupportedICPReturn] = []
     unsupported_seen: set[tuple[str, int, int, int]] = set()
 
     for name, (input_sym, input_end) in input_ranges.items():
@@ -466,20 +547,23 @@ def build_call_return_map(
                     for direct_approx_call, _direct_approx_return, direct_call in new_direct_approx_pairs:
                         if direct_call.return_addr == site.return_addr:
                             continue
+                        if output_jump_targets.get(direct_call.return_addr) != site.return_addr:
+                            continue
                         if not (previous_old_call < direct_approx_call <= old_call.call_addr):
                             continue
                         key = (name, old_call.call_addr, direct_call.call_addr, direct_call.return_addr)
                         if key in unsupported_seen:
                             continue
                         unsupported_seen.add(key)
-                        unsupported_icp_count += 1
-                        if len(unsupported_icp_returns) < 20:
-                            unsupported_icp_returns.append(
-                                f"{name}: promoted direct call 0x{direct_call.call_addr:x} "
-                                f"from old indirect 0x{old_call.call_addr:x} returns to "
-                                f"0x{direct_call.return_addr:x}, which needs a synthesized "
-                                f"frame descriptor distinct from shared return 0x{site.return_addr:x}"
+                        unsupported_icp_returns.append(
+                            UnsupportedICPReturn(
+                                function=name,
+                                old_call_addr=old_call.call_addr,
+                                direct_call_addr=direct_call.call_addr,
+                                return_addr=direct_call.return_addr,
+                                shared_return_addr=site.return_addr,
                             )
+                        )
         for target, old_group in old_by_target.items():
             new_group = new_by_target.get(target)
             if new_group is None or len(new_group) != len(old_group):
@@ -488,7 +572,7 @@ def build_call_return_map(
             new_group = sorted(new_group, key=lambda item: item[1])
             for old_call, (new_call, _approx_old_call) in zip(old_group, new_group, strict=True):
                 mapping[old_call.return_addr] = new_call.return_addr
-    return mapping, unsupported_icp_count, unsupported_icp_returns
+    return mapping, unsupported_icp_returns
 
 
 class Translator:
@@ -576,12 +660,116 @@ def descriptor_end(elf: Elf64, addr: int) -> int:
     return align(p, 8)
 
 
-def patch_frametables(input_elf: Elf64, output_elf: Elf64) -> tuple[int, int, list[str]]:
+def find_master_frametable(elf: Elf64) -> tuple[int, int]:
+    for sym in elf.symbols():
+        if sym.name == "caml_frametable":
+            return sym.value, sym.size
+    raise ValueError("could not find caml_frametable")
+
+
+def writable_load_for_addr(elf: Elf64, addr: int) -> ProgramHeader:
+    for ph in elf.program_headers:
+        if ph.p_type != PT_LOAD or not (ph.flags & PF_W):
+            continue
+        if ph.vaddr <= addr < ph.vaddr + ph.memsz:
+            return ph
+    raise ValueError(f"0x{addr:x}: no writable LOAD segment")
+
+
+def next_load_file_offset(elf: Elf64, ph: ProgramHeader) -> int:
+    later = [
+        other.file_offset
+        for other in elf.program_headers
+        if other.p_type == PT_LOAD and other.file_offset > ph.file_offset
+    ]
+    return min(later) if later else len(elf.data)
+
+
+def synthesize_icp_frametable(
+    output_elf: Elf64,
+    descriptor_by_pc: dict[int, bytes],
+    unsupported_icp_returns: list[UnsupportedICPReturn],
+) -> tuple[int, list[str]]:
+    if not unsupported_icp_returns:
+        return 0, []
+
+    master_addr, master_size = find_master_frametable(output_elf)
+    master_entries = master_size // 8 if master_size else 100_000
+    terminator_addr = None
+    for i in range(master_entries):
+        entry_addr = master_addr + 8 * i
+        if output_elf.u64_at_addr(entry_addr) == 0:
+            terminator_addr = entry_addr
+            break
+    if terminator_addr is None:
+        raise ValueError("could not find caml_frametable terminator")
+    if output_elf.u64_at_addr(terminator_addr + 8) != 0:
+        raise ValueError(
+            f"caml_frametable terminator at 0x{terminator_addr:x} has no spare zero slot"
+        )
+
+    master_load = writable_load_for_addr(output_elf, master_addr)
+    synth_addr = align(master_load.vaddr + master_load.memsz, 8)
+    synth_file_offset = master_load.file_offset + (synth_addr - master_load.vaddr)
+
+    synthetic_descriptors: list[tuple[UnsupportedICPReturn, bytes]] = []
+    missing: list[str] = []
+    for item in unsupported_icp_returns:
+        source = descriptor_by_pc.get(item.shared_return_addr)
+        if source is None:
+            if len(missing) < 20:
+                missing.append(
+                    f"{item.function}: no source descriptor for shared return "
+                    f"0x{item.shared_return_addr:x}"
+                )
+            continue
+        synthetic_descriptors.append((item, source))
+
+    if missing:
+        return 0, missing
+
+    table = bytearray(struct.pack("<Q", len(synthetic_descriptors)))
+    for item, source in synthetic_descriptors:
+        desc_addr = synth_addr + len(table)
+        desc = bytearray(source)
+        rel = item.return_addr - desc_addr
+        if rel < -(1 << 31) or rel >= (1 << 31):
+            raise OverflowError(
+                f"0x{item.return_addr:x}: synthetic descriptor at 0x{desc_addr:x} "
+                "does not fit int32 relative retaddr"
+            )
+        struct.pack_into("<i", desc, 0, rel)
+        table.extend(desc)
+
+    synth_end = synth_file_offset + len(table)
+    next_load = next_load_file_offset(output_elf, master_load)
+    if synth_end > next_load:
+        raise ValueError(
+            f"synthetic frametable ending at file offset 0x{synth_end:x} "
+            f"would overlap next LOAD at 0x{next_load:x}"
+        )
+    if synth_end > len(output_elf.data):
+        output_elf.data.extend(b"\0" * (synth_end - len(output_elf.data)))
+    output_elf.data[synth_file_offset:synth_end] = table
+
+    new_filesz = synth_end - master_load.file_offset
+    new_memsz = synth_addr + len(table) - master_load.vaddr
+    output_elf.put_u64_at(master_load.offset + 32, new_filesz)
+    output_elf.put_u64_at(master_load.offset + 40, new_memsz)
+    output_elf.put_u64_at_addr(terminator_addr, synth_addr)
+    output_elf.put_u64_at_addr(terminator_addr + 8, 0)
+    return len(synthetic_descriptors), [
+        f"synthesized {len(synthetic_descriptors)} ICP frame descriptors "
+        f"at 0x{synth_addr:x}"
+    ]
+
+
+def patch_frametables(
+    input_elf: Elf64, output_elf: Elf64, synthesize_icp_descriptors: bool
+) -> tuple[int, int, list[str]]:
     bat = parse_bat(output_elf)
     translator = Translator(input_elf, output_elf, bat)
-    call_return_map, unsupported_icp_count, unsupported_icp_returns = build_call_return_map(
-        input_elf, output_elf, bat
-    )
+    call_return_map, unsupported_icp_returns = build_call_return_map(input_elf, output_elf, bat)
     input_tables_by_name = unique_by_name(frametable_symbols(input_elf))
     output_tables = frametable_symbols(output_elf)
     patched = 0
@@ -589,6 +777,7 @@ def patch_frametables(input_elf: Elf64, output_elf: Elf64) -> tuple[int, int, li
     bat_mapped = 0
     unresolved = 0
     samples: list[str] = []
+    descriptor_by_pc: dict[int, bytes] = {}
 
     for out_table in output_tables:
         in_table = input_tables_by_name.get(out_table.name)
@@ -618,11 +807,24 @@ def patch_frametables(input_elf: Elf64, output_elf: Elf64) -> tuple[int, int, li
                 output_elf.put_i32_at_addr(out_addr, new_pc - out_addr)
                 patched += 1
             next_out = descriptor_end(output_elf, out_addr)
+            if new_pc is not None:
+                descriptor_by_pc[new_pc] = bytes(
+                    output_elf.data[output_elf.off_for_addr(out_addr) : output_elf.off_for_addr(next_out)]
+                )
             in_addr += next_out - out_addr
             out_addr = next_out
-    if unsupported_icp_count:
-        unresolved += unsupported_icp_count
-        samples.extend(unsupported_icp_returns)
+    if unsupported_icp_returns:
+        if synthesize_icp_descriptors:
+            synthesized, synth_samples = synthesize_icp_frametable(
+                output_elf, descriptor_by_pc, unsupported_icp_returns
+            )
+            samples.extend(synth_samples)
+            missing = len(unsupported_icp_returns) - synthesized
+            if missing:
+                unresolved += missing
+        else:
+            unresolved += len(unsupported_icp_returns)
+            samples.extend(item.describe() for item in unsupported_icp_returns[:20])
     samples.insert(0, f"call-site mapped {call_mapped}; BAT fallback mapped {bat_mapped}")
     return patched, unresolved, samples
 
@@ -632,12 +834,19 @@ def main() -> None:
     parser.add_argument("input", type=Path, help="pre-BOLT executable with old text addresses")
     parser.add_argument("bolted", type=Path, help="BOLT output produced with --enable-bat")
     parser.add_argument("output", type=Path, help="patched executable to write")
+    parser.add_argument(
+        "--synthesize-icp-descriptors",
+        action="store_true",
+        help="append a synthetic frametable for BOLT-created ICP direct-call return PCs",
+    )
     args = parser.parse_args()
 
     shutil.copy2(args.bolted, args.output)
     input_elf = Elf64(args.input)
     output_elf = Elf64(args.output)
-    patched, unresolved, samples = patch_frametables(input_elf, output_elf)
+    patched, unresolved, samples = patch_frametables(
+        input_elf, output_elf, args.synthesize_icp_descriptors
+    )
     output_elf.write(args.output)
     mode = os.stat(args.bolted).st_mode
     os.chmod(args.output, mode | 0o111)

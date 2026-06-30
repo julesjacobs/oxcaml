@@ -1204,3 +1204,46 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
   - Next BOLT tasks: promote the patcher into maintained tooling, validate the
     BOLTed compiler on a larger native build/test slice, and then compare the
     BOLTed LLVM-built compiler against the native-built compiler.
+- 2026-06-30 BOLT ICP descriptor-synthesis prototype:
+  - Added an explicit `--synthesize-icp-descriptors` mode to the local
+    frametable patcher. For the shared-return fallback shape currently emitted
+    by this BOLT experiment, the default remains fail-closed: recognized
+    promoted direct-call return PCs that cannot share the original
+    indirect-call shared-return descriptor are reported as unresolved instead
+    of silently producing an unsafe executable. This is not yet a complete
+    detector for every possible BOLT ICP shape.
+  - The synthesis mode duplicates the shared-return frame descriptor, rewrites
+    only the descriptor return address, appends a small synthetic frametable at
+    the end of the writable `PT_LOAD` segment, extends that segment, and
+    installs the new frametable pointer in the spare zero slot after the
+    `caml_frametable` terminator. This is still an experiment for measuring
+    full BOLT ICP, not maintained production tooling.
+  - Tightened the ICP detector after an unsafe first version. The broad
+    heuristic synthesized 16 descriptors and passed `-version` plus four
+    compiler modules, but `typing/env.ml` failed with `Fatal error: allocation
+    failure during minor GC`. Inspection showed false positives such as an
+    ordinary direct-call return in `camlTypes__map_rigid_rec_67_301_code`.
+    The detector now only treats a promoted direct-call return as needing a
+    descriptor when that return PC contains an unconditional jump to the
+    shared continuation. The refined artifact synthesized 4 descriptors.
+  - Validation for the refined artifact
+    `ocamlopt.constfilter.cache-hfsort-peep-rodata-icp-sharedret-regonly.synth2.bat.patched`:
+    `python3 -m py_compile` on the patcher passed; patching reported
+    `patched 224543 frame descriptor return addresses`, `unresolved 0`,
+    `call-site mapped 224444; BAT fallback mapped 99`, and `synthesized 4 ICP
+    frame descriptors at 0x37185d8`; `-version` passed; a five-module native
+    compile replay passed for `backend/cfg_selectgen.ml`,
+    `backend/llvm/llvmize.ml`, `lambda/translcore.ml`, `typing/ctype.ml`, and
+    `typing/env.ml`.
+  - Full ICP was measurable but not a path to the requested +6% LLVM-only win.
+    Seven-sample, three-inner-repetition benchmark against the native-built
+    compiler gave baseline median `26.857952s`, candidate median
+    `27.102657s`, ratio `1.009111x`, improvement `-0.91%`. The earlier safe
+    layout-only BOLT artifact on the same comparison remains much better:
+    ratio `0.962296x`, improvement `+3.77%`.
+  - Per-module three-sample breakdown for the refined full-ICP artifact:
+    `cfg_selectgen` `-1.04%`, `llvmize` `+1.46%`, `translcore` `-1.81%`,
+    `ctype` `-1.86%`, `env` `-0.03%`. Full ICP hurts or is neutral on most of
+    the compiler-module workload, so the next investigation should compare the
+    safe BOLT and full-ICP assembly/profile side by side and identify exactly
+    which promoted call sites or layout side effects lose the layout-only win.
