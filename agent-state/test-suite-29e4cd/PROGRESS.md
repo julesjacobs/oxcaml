@@ -1,5 +1,35 @@
 # Progress
 
+- 2026-06-30 corrected boot gate and re-screened post-statepoint fold block:
+  - Rechecked the earlier post-statepoint spill-fusing diagnostic after finding
+    the previous boot rejection used the stale `_install` stage0. The normal
+    canonical LLVM wrapper also failed with `_install` as stage0, so that was
+    not a valid candidate-specific correctness gate.
+  - Established a clean gate using `_native_current_install` as stage0 and the
+    canonical `tools/llvm-rs4gc-llc-wrapper.sh` with local LLVM tools on
+    `PATH`. A serialized boot build passed and its smoke test printed `55`
+    (`1682` wrapper lines, `841` fresh IR, then `4` smoke wrapper lines / `2`
+    fresh IR).
+  - Retried the temporary hidden
+    `-disable-post-statepoint-spill-fusing` diagnostic under that corrected
+    gate. It also passed the serialized boot build and smoke with the same
+    wrapper counts. This means the diagnostic is boot-safe at this level; the
+    old failure was a stale-stage0/build-gate issue, not proof that this
+    candidate miscompiled the compiler.
+  - Performance still rejects it as a compiler-throughput path. A quick
+    three-sample, one-inner five-module screen of the post-statepoint boot
+    compiler against native was slow, but so was the normal LLVM boot compiler:
+    normal boot median `11.617564s`, post-statepoint boot median `11.594173s`
+    versus native around `9.0s`. The diagnostic is only a tiny boot-compiler
+    improvement over comparable normal LLVM boot, not a route to `+6%`.
+    Results are in untracked local artifacts
+    `native-current-vs-canonical-boot-samples3-inner1.json` and
+    `native-current-vs-poststatepoint-boot-samples3-inner1.json`.
+  - Removed the temporary source/wrapper again and rebuilt `llc` from restored
+    sources. The useful takeaways are: use `_native_current_install` for future
+    boot gates, and keep looking for a root/spill improvement that moves the
+    compiler workload, not just the small loop microbenchmark.
+
 - 2026-06-30 rejected post-statepoint spill-fusing block as a compiler candidate:
   - Reconfirmed the scope correction: generic driver/compiler optimization
     changes such as `-O4` cannot count toward the +6% target because the
