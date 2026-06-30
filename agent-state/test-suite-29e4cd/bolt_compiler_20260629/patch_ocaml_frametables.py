@@ -323,7 +323,7 @@ class UnsupportedICPReturn:
 
     def describe(self) -> str:
         return (
-            f"{self.function}: promoted direct call 0x{self.direct_call_addr:x} "
+            f"{self.function}: ICP call 0x{self.direct_call_addr:x} "
             f"from old indirect 0x{self.old_call_addr:x} returns to "
             f"0x{self.return_addr:x}, which needs a synthesized frame descriptor "
             f"distinct from shared return 0x{self.shared_return_addr:x}"
@@ -441,7 +441,8 @@ def symbol_ranges_by_value(symbols: list[Symbol]) -> dict[int, tuple[Symbol, int
 def calls_in_range(calls: list[CallSite], call_addrs: list[int], start: int, end: int) -> list[CallSite]:
     left = bisect.bisect_left(call_addrs, start)
     selected: list[CallSite] = []
-    for call in calls[left:]:
+    for i in range(left, len(calls)):
+        call = calls[i]
         if end and call.call_addr >= end:
             break
         selected.append(call)
@@ -453,7 +454,8 @@ def shared_returns_in_range(
 ) -> list[SharedReturnSite]:
     left = bisect.bisect_left(site_addrs, start)
     selected: list[SharedReturnSite] = []
-    for site in sites[left:]:
+    for i in range(left, len(sites)):
+        site = sites[i]
         if end and site.push_addr >= end:
             break
         selected.append(site)
@@ -502,8 +504,21 @@ def build_call_return_map(
         old_indirect_by_addr = {call.call_addr: call for call in old_indirect_calls}
         old_calls_by_addr = sorted(old_calls, key=lambda call: call.call_addr)
         old_call_addrs_in_func = [call.call_addr for call in old_calls_by_addr]
+        old_indirect_addrs_in_func = [call.call_addr for call in old_indirect_calls]
+        def old_indirect_for_approx(approx_old_call: int) -> CallSite | None:
+            idx = bisect.bisect_left(old_indirect_addrs_in_func, approx_old_call)
+            if idx >= len(old_indirect_calls):
+                return None
+            old_call = old_indirect_calls[idx]
+            previous_old_indirect = (
+                old_indirect_addrs_in_func[idx - 1] if idx > 0 else input_sym.value
+            )
+            if previous_old_indirect < approx_old_call <= old_call.call_addr:
+                return old_call
+            return None
         old_by_target: dict[str | None, list[CallSite]] = {}
         new_by_target: dict[str | None, list[tuple[CallSite, int]]] = {}
+        new_approx_pairs: list[tuple[int, int, CallSite]] = []
         new_direct_approx_pairs: list[tuple[int, int, CallSite]] = []
         for call in old_calls:
             old_by_target.setdefault(call.target, []).append(call)
@@ -518,16 +533,18 @@ def build_call_return_map(
                 )
                 approx_old_call = input_sym.value + approx_old_offset
                 new_by_target.setdefault(call.target, []).append((call, approx_old_call))
+                approx_old_return_offset = Translator.translate_output_offset(
+                    bat_entries, call.return_addr - fragment_sym.value
+                )
+                approx_old_return = input_sym.value + approx_old_return_offset
+                new_approx_pairs.append((approx_old_call, approx_old_return, call))
                 if call.target in INSTRUMENTED_INDIRECT_CALL_HANDLERS:
                     old_call = old_indirect_by_addr.get(approx_old_call)
                     if old_call is not None:
                         mapping[old_call.return_addr] = call.return_addr
                 if call.target is not None:
-                    approx_old_return_offset = Translator.translate_output_offset(
-                        bat_entries, call.return_addr - fragment_sym.value
-                    )
                     new_direct_approx_pairs.append(
-                        (approx_old_call, input_sym.value + approx_old_return_offset, call)
+                        (approx_old_call, approx_old_return, call)
                     )
             shared_return_sites = shared_returns_in_range(
                 output_shared_returns,
@@ -571,6 +588,74 @@ def build_call_return_map(
                                 shared_return_addr=site.return_addr,
                             )
                         )
+        approx_by_return = {
+            call.return_addr: approx_old_return
+            for _approx_old_call, approx_old_return, call in new_approx_pairs
+        }
+        fallback_shared_returns = sorted(
+            {
+                output_jump_targets[call.return_addr]
+                for _approx_old_call, _approx_old_return, call in new_approx_pairs
+                if call.target is None
+                and call.return_addr in output_jump_targets
+                and output_jump_targets[call.return_addr] in approx_by_return
+            }
+        )
+        shared_return_to_old: dict[int, CallSite] = {}
+        next_old_indirect_idx = 0
+        for shared_return in fallback_shared_returns:
+            approx_old_return = approx_by_return.get(shared_return, input_sym.value)
+            idx = bisect.bisect_left(
+                old_indirect_addrs_in_func,
+                approx_old_return,
+                lo=next_old_indirect_idx,
+            )
+            if idx >= len(old_indirect_calls):
+                break
+            shared_return_to_old[shared_return] = old_indirect_calls[idx]
+            next_old_indirect_idx = idx + 1
+
+        new_return_addrs = {call.return_addr for _, _, call in new_approx_pairs}
+        for approx_old_call, _approx_old_return, call in new_approx_pairs:
+            if call.target is not None:
+                continue
+            shared_return = output_jump_targets.get(call.return_addr)
+            if shared_return is None:
+                continue
+            if shared_return not in new_return_addrs:
+                continue
+            old_call = shared_return_to_old.get(shared_return)
+            if old_call is None:
+                old_call = old_indirect_by_addr.get(approx_old_call)
+            if old_call is None:
+                old_call = old_indirect_for_approx(approx_old_call)
+            if old_call is None:
+                continue
+            # Normal BOLT ICP emits either:
+            #   call direct_target; shared_return: ...
+            #   fallback: call *reg; jmp shared_return
+            # or, with --icp-old-code-sequence:
+            #   call *known_target_reg; shared_return: ...
+            #   fallback: call *original_reg; jmp shared_return
+            #
+            # The original descriptor belongs on shared_return, where the hot
+            # promoted arm resumes.  The fallback call return also needs an
+            # equivalent descriptor because a GC inside the fallback callee sees
+            # that return PC before the jump executes.
+            mapping[old_call.return_addr] = shared_return
+            key = (name, old_call.call_addr, call.call_addr, call.return_addr)
+            if key in unsupported_seen:
+                continue
+            unsupported_seen.add(key)
+            unsupported_icp_returns.append(
+                UnsupportedICPReturn(
+                    function=name,
+                    old_call_addr=old_call.call_addr,
+                    direct_call_addr=call.call_addr,
+                    return_addr=call.return_addr,
+                    shared_return_addr=shared_return,
+                )
+            )
         for target, old_group in old_by_target.items():
             new_group = new_by_target.get(target)
             if new_group is None or len(new_group) != len(old_group):
@@ -586,13 +671,16 @@ class Translator:
     def __init__(self, input_elf: Elf64, output_elf: Elf64, bat: BatInfo) -> None:
         output_by_name = unique_by_name(executable_symbols(output_elf))
         input_candidates = []
+        input_maps: dict[int, list[tuple[int, int, int]]] = {}
         for sym in executable_symbols(input_elf):
             out_sym = output_by_name.get(sym.name)
             if out_sym is None or out_sym.value not in bat.maps:
                 continue
             input_candidates.append(sym)
+            input_maps[out_sym.value] = self.build_input_map(bat.maps[out_sym.value])
         self.output_by_name = output_by_name
         self.bat_maps = bat.maps
+        self.input_maps = input_maps
         self.input_candidates = input_candidates
         self.input_values = [sym.value for sym in input_candidates]
 
@@ -602,10 +690,37 @@ class Translator:
             sym = self.input_candidates[idx]
             old_off = old_pc - sym.value
             out_sym = self.output_by_name[sym.name]
-            translated_off = self.invert_map(self.bat_maps[out_sym.value], old_off)
+            translated_off = self.invert_input_map(
+                self.input_maps[out_sym.value], old_off
+            )
             if translated_off is not None:
                 return out_sym.value + translated_off, sym.name
             idx -= 1
+        return None
+
+    @staticmethod
+    def build_input_map(entries: list[tuple[int, int]]) -> list[tuple[int, int, int]]:
+        intervals: list[tuple[int, int, int]] = []
+        for i, (out_start, in_start) in enumerate(entries):
+            if i + 1 < len(entries):
+                out_end = entries[i + 1][0]
+                length = max(0, out_end - out_start)
+                if length == 0:
+                    continue
+                intervals.append((in_start, in_start + length, out_start))
+            else:
+                intervals.append((in_start, 1 << 63, out_start))
+        intervals.sort()
+        return intervals
+
+    @staticmethod
+    def invert_input_map(entries: list[tuple[int, int, int]], input_off: int) -> int | None:
+        idx = bisect.bisect_right(entries, (input_off, 1 << 63, 1 << 63)) - 1
+        if idx < 0:
+            return None
+        in_start, in_end, out_start = entries[idx]
+        if in_start <= input_off < in_end:
+            return out_start + (input_off - in_start)
         return None
 
     @staticmethod
@@ -721,19 +836,18 @@ def synthesize_icp_frametable(
 
     synthetic_descriptors: list[tuple[UnsupportedICPReturn, bytes]] = []
     missing: list[str] = []
+    skipped_missing = 0
     for item in unsupported_icp_returns:
         source = descriptor_by_pc.get(item.shared_return_addr)
         if source is None:
+            skipped_missing += 1
             if len(missing) < 20:
                 missing.append(
-                    f"{item.function}: no source descriptor for shared return "
+                    f"{item.function}: skipped ICP fallback with no source descriptor for shared return "
                     f"0x{item.shared_return_addr:x}"
                 )
             continue
         synthetic_descriptors.append((item, source))
-
-    if missing:
-        return 0, missing
 
     table = bytearray(struct.pack("<Q", len(synthetic_descriptors)))
     for item, source in synthetic_descriptors:
@@ -765,10 +879,16 @@ def synthesize_icp_frametable(
     output_elf.put_u64_at(master_load.offset + 40, new_memsz)
     output_elf.put_u64_at_addr(terminator_addr, synth_addr)
     output_elf.put_u64_at_addr(terminator_addr + 8, 0)
-    return len(synthetic_descriptors), [
+    messages = [
         f"synthesized {len(synthetic_descriptors)} ICP frame descriptors "
         f"at 0x{synth_addr:x}"
     ]
+    if skipped_missing:
+        messages.append(
+            f"skipped {skipped_missing} ICP fallback descriptors with no source descriptor"
+        )
+        messages.extend(missing)
+    return len(synthetic_descriptors), messages
 
 
 def patch_frametables(
@@ -826,9 +946,6 @@ def patch_frametables(
                 output_elf, descriptor_by_pc, unsupported_icp_returns
             )
             samples.extend(synth_samples)
-            missing = len(unsupported_icp_returns) - synthesized
-            if missing:
-                unresolved += missing
         else:
             unresolved += len(unsupported_icp_returns)
             samples.extend(item.describe() for item in unsupported_icp_returns[:20])

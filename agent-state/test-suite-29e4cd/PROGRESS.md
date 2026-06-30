@@ -2061,3 +2061,40 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     gap; the next useful work should return to AMD64 LLVM root/spill precision
     or exact BOLT metadata for transformations that actually change hot code
     without corrupting OCaml frame roots.
+- 2026-06-30 LLVM-path-only scope correction and BOLT old-sequence ICP:
+  - Reconfirmed the review constraint: `-O4` and similar generic optimization
+    level changes do not count toward the goal, since they can also apply to
+    the native-built compiler. Candidate wins must be LLVM-backend/codegen,
+    LLVM-path pass configuration, or LLVM-built-binary-only BOLT/profile work.
+  - Improved the benchmark-local frametable patcher so BOLT ICP experiments
+    with `--icp-old-code-sequence` can be evaluated instead of failing at the
+    first missing descriptor:
+    - `calls_in_range` and `shared_returns_in_range` no longer copy huge
+      callsite suffixes for every function, making full-binary call mapping
+      finish in the normal objdump-scale time.
+    - BAT input-PC inversion is indexed for descriptor fallback mapping.
+    - For ICP shapes where a fallback indirect call returns to a `jmp` into a
+      shared continuation, the patcher maps the original descriptor to the
+      shared continuation and appends a synthetic duplicate descriptor for the
+      fallback return PC. Pairing uses order-preserving shared continuations
+      against old indirect calls, because BOLT can map all inserted ICP code
+      back to an earlier block address.
+  - Repatched
+    `ocamlopt.constfilter.cache-hfsort-peep-rodata-icp-oldseq.bat.bolt` with
+    `--synthesize-icp-descriptors`. The final patch reported `224543` patched
+    descriptors, `0` unresolved, `224452` call-site mappings, `91` BAT fallback
+    mappings, and `284` synthesized ICP fallback descriptors. Startup
+    `-version` passed.
+  - Rejected this old-code-sequence ICP artifact before benchmarking. A focused
+    native-mode compile of `backend/cfg_selectgen.ml` first exposed missing
+    descriptors at generated ICP continuations; after fixing those mappings,
+    the same smoke segfaulted. GDB stopped in
+    `camlIkind__ckind_of_jkind_15_128_code`, with the stack passing through
+    the newly descriptor-covered `camlMode__hint_407_1756_code` return
+    continuation `0x3a996f3`. This is wrong-root or transformed-code corruption,
+    not a valid performance candidate.
+  - Conclusion: BOLT old-code-sequence ICP is now better diagnosed but still
+    not safe enough for the compiler workload. Do not benchmark it or count it
+    toward the `+6%` goal. The best valid result remains the safe BOLT layout
+    artifact at about `+3.77%`; further progress still needs exact OCaml-aware
+    metadata for real BOLT ICP or a backend root/spill precision improvement.
