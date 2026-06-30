@@ -3158,3 +3158,19 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     improvement. The useful direction remains a narrow AMD64/OxCaml fix that
     gets statepoint GC operands to fold to fresh stack homes without switching
     the whole compiler away from greedy or deleting roots after OXSR.
+- 2026-06-30 rejected pre-OXSR stack-slot-coloring experiment:
+  - Tested a temporary pass-order diagnostic: run `StackSlotColoring` before
+    `OxCamlStatepointSpillRoots` so OXSR might see merged spill homes instead
+    of per-original greedy spill slots. This would have been an LLVM-backend
+    fix, not a frontend or generic optimization-level change.
+  - Rebuilt `llc` with the temporary pass order, then ran the saved
+    `typing/ctype.ml` post-RS4GC IR. The compile aborted before producing
+    counters: the legacy pass manager reported it could not schedule
+    `Live Stack Slot Analysis`, which OXSR requires, after
+    `StackSlotColoring`.
+  - Reverted the temporary source edit and rebuilt `_build/llvm-tools/bin/llc`
+    back to the checked-in pass order. `git diff` for
+    `TargetPassConfig.cpp` is empty after the revert.
+  - Conclusion: ordinary `StackSlotColoring` cannot simply be moved in front of
+    OXSR. Any pre-root-list slot coalescing would need a dedicated pass that
+    preserves or recomputes the LiveStacks information OXSR depends on.
