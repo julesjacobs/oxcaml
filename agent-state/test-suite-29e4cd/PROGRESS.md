@@ -1,5 +1,26 @@
 # Progress
 
+- 2026-06-30 LLVM-path allocator flag screen after excluding generic `-O4`:
+  - Screened saved `typing/ctype.ml` post-RS4GC IR with several `llc`-only
+    options. `-split-spill-mode=default` was the only promising stat change:
+    total OXSR-appended spill roots moved from `4675` to `4276`, mostly by
+    reducing ordinary-call GC-family slots (`3335` -> `2703`), and the emitted
+    assembly shrank from `251284` to `249938` lines. `split-spill-mode=size`,
+    `greedy-reverse-local-assignment`, and
+    `greedy-regclass-priority-trumps-globalness` were neutral or worse.
+  - Tried to build a separate split-default LLVM boot/self-stage using a
+    wrapper that only appended `-mllvm -split-spill-mode=default`. The normal
+    boot build failed with minor-GC allocation failures in the stage0 compiler
+    while compiling boot native objects. A serialized `DUNE_BUILD_FLAGS=-j1`
+    boot retry reproduced the same failure (`.ocamlcommon.objs/native/_unknown_`
+    / `Fatal error: allocation failure during minor GC`), so this is not just
+    parallel build pressure.
+  - Conclusion: do not count or benchmark `-split-spill-mode=default` as a
+    valid win. It remains an interesting diagnostic hint that spill partitioning
+    affects `ctype` root pressure, but the actual fix needs to be a narrower
+    OxCaml-aware allocator/root-placement change that preserves boot build
+    correctness.
+
 - 2026-06-30 LLVM-path backend ablation after the `-O4` correction:
   - Rechecked the safe BOLT `-reg-reassign` artifact before benchmarking it.
     Both `ocamlopt.constfilter.cache-hfsort-peep-rodata-regreassign.bat.patched`
