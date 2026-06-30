@@ -1,5 +1,36 @@
 # Progress
 
+- 2026-06-30 rejected current-stack-slot reuse experiment:
+  - Tested a narrow LLVM-only source change in
+    `FixupStatepointCallerSaved`: add hidden
+    `-fixup-scs-reuse-current-stack-slot` mode that tries to reuse an existing
+    same-block pointer-sized stack slot when the immediately preceding machine
+    code proves it currently holds the same physical register needed as a
+    statepoint root. This was deliberately not an `-O4`/driver flag experiment;
+    generic optimization-level changes remain invalid for this goal because
+    the native-built compiler can use them too.
+  - Focused `typing/ctype.ml` saved-RS4GC `llc` stats looked locally useful:
+    `311` current stack slots reused, fixup spill slots reduced from `407` to
+    `273`, fixup spilled registers reduced from `798` to `487`, and frame
+    bytes reduced from `27936` to `27040`. The important root counters were
+    unchanged (`1629` appended spill-slot roots, `1618` GC-family roots).
+  - Built a full LLVM-path compiler artifact with local OxCaml LLVM tools on
+    `PATH`; the earlier build failure was only the wrapper finding
+    `/usr/bin/opt`, which cannot parse OxCaml's LLVM IR calling convention.
+    The corrected build and script self-stage smoke completed.
+  - Rejected on the explicit seven-module compiler correctness smoke using
+    `_llvm_current_slot_main_build/main/oxcaml_main_native.exe` plus matching
+    `_llvm_current_slot_install/lib/ocaml`: the candidate segfaulted compiling
+    `typing/typecore.ml`. This is the same safety class as the earlier
+    allocator/root-slot reuse attempts: even when a local slot looks current
+    before the statepoint, it is not a sound replacement for a dedicated
+    statepoint root slot.
+  - Reverted the source change and rebuilt `_build/llvm-tools/bin/llc` back to
+    the checked-in source state. Conclusion: root-slot reuse is too brittle for
+    this path; remaining viable work should avoid aliasing existing allocator
+    slots and instead improve LLVM-only layout/profile/codegen around the
+    existing correct in-place statepoint mechanism.
+
 - 2026-06-30 rejected post-rewrite self-loop hoist experiment:
   - Tested a narrow LLVM-only source change in
     `FixupStatepointCallerSaved`: after rewriting a statepoint and inserting
