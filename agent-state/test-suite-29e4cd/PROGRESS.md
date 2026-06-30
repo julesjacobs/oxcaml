@@ -1,5 +1,35 @@
 # Progress
 
+- 2026-06-30 rejected fresh corrected-workload BOLT profile:
+  - Built missing `perf2bolt` and `merge-fdata` targets for both
+    `_build_bolt_tools_sharedret` and `_build_bolt_tools_sharedret_noassert`.
+    The assert-enabled `perf2bolt` reproduced the known jump-table assertion;
+    the no-assert tool converted the fresh profile successfully.
+  - Collected a fresh LBR profile from unbolted
+    `ocamlopt.constfilter.reloc` on the corrected five-module native-mode
+    workload using `_llvm_constfilter_build/main` and
+    `_llvm_constfilter_install/lib/ocaml`: `5` repetitions, `186906` samples,
+    `2876005` LBR entries. The resulting fdata is
+    `fresh_corrected_bolt/ocamlopt.constfilter.reloc.corrected5.lbr.fdata`.
+  - Applied BOLT with the reconstructed current-best shape using
+    `-reorder-blocks=cache`, `-reorder-functions=hfsort`, `-peepholes=all`,
+    `-reorder-data=.rodata`, and `--enable-bat`. Frametable patching required
+    `--synthesize-icp-descriptors` for `61` BOLT-created ICP descriptors and
+    then passed a native compile/run smoke test. Corrected quick screen:
+    native median `9.213356s`, fresh BOLT median `8.883544s`, improvement
+    `+3.58%`
+    (`fresh_corrected_bolt/native-oxcamlopt-vs-fresh-corrected5-bolt-screen-inner1.json`).
+  - Rebuilt the same fresh profile with the alternate recipe recorded in older
+    notes: `-lite`, `-reorder-blocks=cache+`, `-reorder-functions=hfsort`,
+    `-peepholes=all`, `-simplify-rodata-loads`, and `--enable-bat`. The
+    patcher synthesized `62` ICP descriptors and smoke passed, but the screen
+    was only `+0.36%`
+    (`fresh_corrected_bolt/native-oxcamlopt-vs-fresh-corrected5-cacheplus-bolt-screen-inner1.json`).
+  - Conclusion: a fresh exact-workload LBR profile does not beat the existing
+    best BOLT artifact. The best corrected result remains
+    `ocamlopt.constfilter.cache-hfsort-peep-rodata.bat.patched`, but its paired
+    benchmark is only `+4.63%`, short of the requested `+6%`.
+
 - 2026-06-30 corrected native-mode compiler benchmark reset:
   - Supersedes the previous "fair build-tree compiler baseline reset" entry
     for compiler-throughput numbers. That entry used build-tree
