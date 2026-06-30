@@ -1,0 +1,126 @@
+===-------------------------------------------------------------------------===
+                          ... Statistics Collected ...
+===-------------------------------------------------------------------------===
+
+ 59643 asm-printer                   - Number of machine instrs printed
+  9260 assume-queries                - Number of Queries into an assume assume bundles
+  5326 branch-folder                 - Number of branches optimized
+  3289 branch-folder                 - Number of dead blocks removed
+     5 branch-folder                 - Number of times common instructions are hoisted
+  1206 branch-folder                 - Number of block tails merged
+    71 codegenprepare                - Number of uses of and mask instructions optimized
+   250 codegenprepare                - Number of blocks eliminated
+   186 codegenprepare                - Number of uses of Cast expressions replaced with uses of sunken Casts
+   120 codegenprepare                - Number of uses of Cmp expressions replaced with uses of sunken Cmps
+     1 codegenprepare                - Number of uses of [s|z]ext instructions optimized
+    20 codegenprepare                - Number of [s|z]ext instructions combined with loads
+    18 codegenprepare                - Number of memory instructions whose address computations were sunk
+    55 codegenprepare                - Number of trivial PHIs eliminated
+    57 consthoist                    - Number of constants hoisted
+    17 consthoist                    - Number of constants rebased
+ 33392 dagcombine                    - Number of dag nodes combined
+  3554 dead-mi-elimination           - Number of dead instructions deleted
+   224 dwarfehprepare                - Number of cleanup landing pads remaining
+    40 dwarfehprepare                - Number of functions with nounwind
+   822 dwarfehprepare                - Number of functions with unwind
+     4 fixup-statepoint-caller-saved - Number of stable statepoint root stores hoisted out of self loops
+   626 fixup-statepoint-caller-saved - Number of spill slots allocated
+  1682 fixup-statepoint-caller-saved - Number of spilled register
+   179 ir                            - Number of renumberings across all blocks
+  9714 isel                          - Number of blocks selected using DAG
+517346 isel                          - Number of times dag isel has to try another path
+   862 isel                          - Number of entry blocks encountered
+    27 machine-cp                    - Number of copy defs backward propagated
+   171 machine-cp                    - Number of copy uses forwarded
+    58 machine-cp                    - Number of dead copies deleted
+   872 machine-cse                   - Number of common subexpression eliminated
+   224 machine-cse                   - Number of copies coalesced
+     2 machine-cse                   - Number of cross-MBB physreg referencing CS eliminated
+     2 machine-cse                   - Number of physreg referencing common subexpr eliminated
+    43 machine-latecleanup           - Number of redundant instructions removed.
+   380 machine-sink                  - Number of copies sunk after RA
+   214 machine-sink                  - Number of critical edges split
+  3326 machine-sink                  - Number of machine instructions sunk
+   104 machinelicm                   - Number of hoisted machine instructions CSEed
+   334 machinelicm                   - Number of machine instructions hoisted out of loops
+  1317 mcexpr                        - Number of MCExpr evaluations
+   141 opt-phis                      - Number of dead PHI cycles
+     1 opt-phis                      - Number of PHI cycles replaced
+    54 oxcaml-statepoint-spill-roots - DIAGNOSTIC: direct duplicate stack roots at statepoints with EH successor
+  1345 oxcaml-statepoint-spill-roots - DIAGNOSTIC: direct duplicate stack roots at statepoints without EH successor
+  1399 oxcaml-statepoint-spill-roots - DIAGNOSTIC: direct duplicate stack roots
+   615 oxcaml-statepoint-spill-roots - Number of GC-family spill slots appended to alloc-family statepoints
+     1 oxcaml-statepoint-spill-roots - Number of GC-family spill slots appended to C-call statepoints
+  1012 oxcaml-statepoint-spill-roots - Number of GC-family spill slots appended to ordinary-call statepoints
+  1628 oxcaml-statepoint-spill-roots - Number of GC-family spill slots appended to statepoints
+    18 oxcaml-statepoint-spill-roots - Number of crossing gc registers appended to statepoints
+    13 oxcaml-statepoint-spill-roots - Number of reload-fed sibling spill slots appended to statepoints
+    18 oxcaml-statepoint-spill-roots - Number of listed spill slots initialized at function entry
+  1641 oxcaml-statepoint-spill-roots - Number of spill slots appended to statepoints
+     1 peephole-opt                  - Number of compares eliminated
+  1130 peephole-opt                  - Number of loads folded
+  2411 phi-node-elimination          - Number of critical edges split
+ 11700 phi-node-elimination          - Number of phis lowered
+    13 phi-node-elimination          - Number of reused lowered phis
+   705 pre-RA-sched                  - Number of loads clustered together
+     1 pre-RA-sched                  - Number of duplicated nodes
+     6 pre-RA-sched                  - Number of times a  single predecessor was added
+    25 pre-RA-sched                  - Number of times the topological order has been recomputed
+ 25808 prologepilog                  - Number of bytes used for stack in all functions
+   862 prologepilog                  - Number of functions seen in PEI
+ 31457 regalloc                      - Number of registers assigned
+ 11531 regalloc                      - Number of copies inserted for splitting
+  3021 regalloc                      - Number of instructions deleted by DCE
+  1577 regalloc                      - Number of interferences evicted
+  3983 regalloc                      - Number of splits finished
+  6187 regalloc                      - Number of folded stack accesses
+     8 regalloc                      - Number of folded loads
+     3 regalloc                      - Number of live ranges fractured by DCE
+  1691 regalloc                      - Number of split global live ranges
+ 33813 regalloc                      - Number of identity moves eliminated after rewriting
+    28 regalloc                      - Number of dead lane conflicts tested
+    28 regalloc                      - Number of dead lane conflicts resolved
+   926 regalloc                      - Number of split local live ranges
+ 22013 regalloc                      - Number of new live ranges queued
+  2741 regalloc                      - Number of instructions rematerialized
+  1497 regalloc                      - Number of instructions re-materialized
+  4972 regalloc                      - Number of reloads inserted
+   511 regalloc                      - Number of reloads removed
+  1184 regalloc                      - Number of rematerialized defs for spilling
+    60 regalloc                      - Number of rematerialized defs for splitting
+  1767 regalloc                      - Number of shrinkToUses called
+  1797 regalloc                      - Number of splits that were simple
+  2216 regalloc                      - Number of spilled snippets
+  1953 regalloc                      - Number of spill slots allocated
+  3938 regalloc                      - Number of spilled live ranges
+  2639 regalloc                      - Number of spills inserted
+   431 regalloc                      - Number of spills removed
+  3622 regalloc                      - Number of registers unassigned
+     2 regalloc                      - Number of instruction commuting performed
+  5196 regalloc                      - Number of cross class joins performed
+ 54602 regalloc                      - Number of interval joins performed
+     1 scalar-evolution              - Number of loops with predictable loop counts
+    45 scalar-evolution              - Number of loops without predictable loop counts
+    11 shrink-wrap                   - Number of shrink-wrapping candidates
+   862 shrink-wrap                   - Number of functions
+  5131 slotindexes                   - Number of local renumberings
+    12 stack-slot-coloring           - Number of trivially dead stack accesses eliminated
+   632 stack-slot-coloring           - Number of stack slots eliminated due to coloring
+   862 stackmaps                     - Number of functions skipped
+   862 stackmaps                     - Number of functions visited
+  5075 statepoint-lowering           - Number of statepoint nodes encountered
+   114 statepoint-lowering           - Number of stack slots allocated for statepoints
+    11 statepoint-lowering           - Maximum number of stack slots required for a singe statepoint
+   348 tailduplication               - Number of dead blocks removed
+  1173 tailduplication               - Number of instructions added due to tail duplication
+    82 tailduplication               - Number of instructions removed due to tail duplication
+   357 tailduplication               - Number of tail duplicated blocks
+   484 tailduplication               - Number of tails duplicated
+    40 twoaddressinstruction         - Number of instructions aggressively commuted
+    43 twoaddressinstruction         - Number of instructions commuted to coalesce
+  1341 twoaddressinstruction         - Number of instructions promoted to 3-address
+     1 twoaddressinstruction         - Number of instructions re-scheduled down
+  3275 twoaddressinstruction         - Number of two-address instructions
+    24 x86-cmov-conversion           - Number of CMOV-group candidates
+     4 x86-cmov-conversion           - Number of optimized CMOV-groups
+    28 x86-fixup-setcc               - Number of setcc + zext pairs substituted

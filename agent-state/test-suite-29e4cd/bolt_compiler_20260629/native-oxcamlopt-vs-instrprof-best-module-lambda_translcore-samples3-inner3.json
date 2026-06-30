@@ -1,0 +1,36 @@
+{
+  "description": "LLVM-built compiler baseline vs profile-guided BOLT no-split compiler; both compile in normal native mode",
+  "modules": [
+    "lambda/translcore.ml"
+  ],
+  "samples": 3,
+  "inner_repetitions": 3,
+  "results": {
+    "baseline": {
+      "compiler": "/home/jules/git/oxcaml-llvm/_native_current_build/main/oxcaml_main_native.exe",
+      "build_main": "/home/jules/git/oxcaml-llvm/_native_current_build/main",
+      "ocamllib": "/home/jules/git/oxcaml-llvm/_native_current_install/lib/ocaml",
+      "times": [
+        3.7036432502791286,
+        3.689039106015116,
+        3.721580184996128
+      ],
+      "mean": 3.704754180430124,
+      "median": 3.7036432502791286
+    },
+    "candidate": {
+      "compiler": "/home/jules/git/oxcaml-llvm/agent-state/test-suite-29e4cd/bolt_compiler_20260629/ocamlopt.constfilter.instrprof-cache-hfsort-peep-rodata.bat.patched",
+      "build_main": "/home/jules/git/oxcaml-llvm/_llvm_constfilter_build/main",
+      "ocamllib": "/home/jules/git/oxcaml-llvm/_llvm_constfilter_install/lib/ocaml",
+      "times": [
+        3.556152503937483,
+        3.4697608100250363,
+        3.599236087407917
+      ],
+      "mean": 3.5417164671234787,
+      "median": 3.556152503937483
+    }
+  },
+  "candidate_vs_baseline_median": 0.9601768484773662,
+  "improvement_percent": 3.9823151522633826
+}

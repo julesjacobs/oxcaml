@@ -1,5 +1,41 @@
 # Progress
 
+- 2026-06-30 current-best module split and duplicate-home next target:
+  - Measured the current best strict artifact
+    `ocamlopt.constfilter.instrprof-cache-hfsort-peep-rodata.bat.patched`
+    module-by-module against `_native_current_build/main/oxcaml_main_native.exe`,
+    with matching build trees/`OCAMLLIB`, `samples=3`, `inner_repetitions=3`.
+    Results:
+    `typing/ctype.ml` `+1.06%`, `typing/typemod.ml` `+3.42%`,
+    `typing/typecore.ml` `+3.97%`, `lambda/translcore.ml` `+3.98%`,
+    `backend/llvm/llvmize.ml` `+4.12%`,
+    `backend/cfg_selectgen.ml` `+5.10%`, and `typing/env.ml` `+5.38%`.
+    The holdout for the +6% goal is therefore still `ctype`, not the
+    already-near-target modules.
+  - Recollected direct `typing/ctype.ml` runtime GC counters for the current
+    instrprof-BOLT artifact with `OCAMLRUNPARAM=v=0x1000`. Allocation is still
+    effectively identical to native (`allocated_words` `560541694` vs
+    `560551417`, `+0.002%`), but LLVM does more GC work:
+    `promoted_words` `60935603 -> 61242861` (`+0.50%`),
+    `major_collections` `22 -> 23`, and `major_work_done`
+    `366282621 -> 379154554` (`+3.51%`). This confirms the current-best
+    `ctype` residual gap is still root/retention/major-GC pressure, not BOLT
+    layout or ordinary allocation volume.
+  - Ran a temporary stats-only OXSR diagnostic on the saved post-RS4GC
+    `typing/ctype.ml` IR to split duplicate stack homes by EH shape. The
+    diagnostic counted primary GC-family appended stack roots whose
+    must-reaching store source has the same propagated value name as an
+    already-listed statepoint root. Out of `1628` GC-family appended stack
+    roots, `1399` matched this duplicate-home class; `1345` were at statepoints
+    with no EH successor and only `54` were at statepoints with an EH successor.
+  - The temporary diagnostic source edit was reverted, and `_build/llvm-tools/bin/llc`
+    was rebuilt back to the checked-in source state. The next source-level
+    candidate should be a normal-edge duplicate-home refresh design: skip
+    scanning a duplicate stack home when a listed statepoint root carries the
+    same value, then copy/refresh the relocated value back into that stack home
+    after the statepoint. The diagnostic says this can cover most `ctype`
+    duplicate roots before needing the harder EH-edge refresh case.
+
 - 2026-06-30 rejected explicit `ext-tsp` instrprof BOLT layout:
   - Tested the explicit replacement for deprecated `-reorder-blocks=cache+`:
     rebuilt the five-module instrumentation-profile BOLT candidate with
