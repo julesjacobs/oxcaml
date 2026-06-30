@@ -3781,3 +3781,35 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     operand folding: it likely needs to influence which values get long-lived
     stack homes, or coalesce/refresh only proven duplicate root homes, while
     keeping enough folding to avoid register-allocation failure.
+- 2026-06-30 rejected additional LLVM-only regalloc shape screens:
+  - Kept the scope strict after the `-O4` correction: these were direct LLVM
+    backend/codegen screens on the saved `typing/ctype.ml` post-RS4GC IR, not
+    flags that the native backend can also use. Baseline for the exact rebuilt
+    `llc` run was `1641` appended spill slots (`1628` GC-family: `615`
+    alloc-family, `1012` ordinary-call, `1` C-call), `4972` reloads inserted,
+    and `6187` folded stack accesses. Artifact:
+    `bolt_compiler_20260629/root_stats_20260630/call-split-baseline-20260630/`.
+  - Added and then reverted a temporary hidden switch around the existing
+    OxCaml call-split remainder path in `RegAllocGreedy`, defaulting to the
+    checked-in behavior. Running with that path disabled was neutral/worse:
+    `1640` appended spill slots (`1627` GC-family: `619` alloc-family, `1007`
+    ordinary-call, `1` C-call), `4990` reloads, and `6188` folded stack
+    accesses. Artifact:
+    `root_stats_20260630/no-oxcaml-call-split-remainders-20260630/`.
+  - Screened the stock LLVM-only `llc` flag `--enable-deferred-spilling=true`.
+    It also moved the wrong way on root pressure: `1651` appended spill slots
+    (`1638` GC-family: `625` alloc-family, `1012` ordinary-call, `1` C-call),
+    with `4946` reloads and `6204` folded stack accesses. Artifact:
+    `root_stats_20260630/deferred-spilling-20260630/`.
+  - Screened `--split-spill-mode=size`. It was worse than baseline for the
+    current target: `1662` appended spill slots (`1649` GC-family: `618`
+    alloc-family, `1030` ordinary-call, `1` C-call), with `4991` reloads and
+    `6162` folded stack accesses. Artifact:
+    `root_stats_20260630/split-size-20260630/`.
+  - Reverted the temporary source edit and rebuilt `_build/llvm-tools/bin/llc`
+    back to checked-in source; `git diff` for `RegAllocGreedy.cpp` is empty.
+    Conclusion: the existing call-split remainder customization is not the
+    missing large lever, and stock deferred/size spill modes do not improve the
+    AMD64 root-home shape. Continue toward a precise producer-side fix for
+    long-lived GC stack homes, or exact BOLT metadata for transformations that
+    materially change hot code.
