@@ -1,5 +1,33 @@
 # Progress
 
+- 2026-06-30 LLVM-path-only constraint checkpoint after the `-O4` correction:
+  - Reaffirmed that `-O4` and similar driver-wide optimization-level changes do
+    not count toward the `+6%` target: the native-built compiler can receive
+    the same treatment, so such results are not LLVM-path improvements.
+  - Rechecked the currently tempting non-`O4` explanations before doing more
+    source work. The AMD64 LLVM calling convention still matches the native
+    AMD64 register order and allocation clobber model (`R14/R15` threaded
+    first, then `RAX/RBX/RDI/RSI/RDX/RCX/R8/R9/R12/R13`, with `R10/R11`
+    clobbered at alloc/poll). The target hook also already prevents ordinary
+    `WithFP` statepoints from exposing an invisible `RBP` register root. This
+    keeps the problem out of the ABI/register-save bucket.
+  - Rechecked frame-pointer reasoning against the ARM target. AArch64 has a
+    target-level OxCaml exception to generic frame-pointer forcing, but the
+    current AMD64 native-vs-LLVM compiler comparison is built with frame
+    pointers enabled on both sides, and the existing LLVM-only omit-FP screen
+    booted but later segfaulted compiling `backend/cfg_selectgen.ml`. Do not
+    use frame-pointer removal as goal evidence without a separate correctness
+    project.
+  - Rechecked spill splitting as an LLVM-path-only allocator lever. It remains
+    diagnostic only: saved-IR counters show root movement, but the global and
+    scoped split/partition screens either fail boot/self-stage with the same
+    GC-corruption class or are slower under the corrected build-tree benchmark.
+  - Current direction: a valid win must change AMD64 LLVM producer-side
+    root-home/spill shape in a verifier-backed way, or provide exact
+    OCaml-aware BOLT metadata for new managed return PCs. It must not be a
+    generic optimization-level switch and must not delete OXSR roots without a
+    proof that the runtime can still observe the relocated value.
+
 - 2026-06-30 rejected explicit post-RS4GC IR-PGO generation after the `-O4`
   correction:
   - Reconfirmed Jules's scope constraint: generic `-O4`/driver optimization is
