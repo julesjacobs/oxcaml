@@ -50,6 +50,7 @@
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/CodeGen/VirtRegMap.h"
+#include "llvm/IR/CallingConv.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/InitializePasses.h"
@@ -65,6 +66,14 @@ using namespace llvm::oxcamlroots;
 STATISTIC(NumSlotsAppended, "Number of spill slots appended to statepoints");
 STATISTIC(NumGCFamilySlotsAppended,
           "Number of GC-family spill slots appended to statepoints");
+STATISTIC(NumGCFamilyAllocSlotsAppended,
+          "Number of GC-family spill slots appended to alloc-family statepoints");
+STATISTIC(NumGCFamilyOrdinarySlotsAppended,
+          "Number of GC-family spill slots appended to ordinary-call statepoints");
+STATISTIC(NumGCFamilyCCallSlotsAppended,
+          "Number of GC-family spill slots appended to C-call statepoints");
+STATISTIC(NumGCFamilyOtherSlotsAppended,
+          "Number of GC-family spill slots appended to other statepoints");
 STATISTIC(NumReloadSiblingSlotsAppended,
           "Number of reload-fed sibling spill slots appended to statepoints");
 STATISTIC(NumStoreSiblingSlotsAppended,
@@ -375,6 +384,27 @@ static bool isAllocFamilyStatepoint(const MachineInstr &MI,
                                     const TargetRegisterInfo *TRI) {
   const uint32_t *RegMask = getStatepointRegMask(MI);
   return isAllocFamilyMask(ABI, RegMask, TRI);
+}
+
+static void countGCFamilySlotByCC(CallingConv::ID CC,
+                                  bool IsAllocFamilyStatepoint) {
+  if (IsAllocFamilyStatepoint) {
+    ++NumGCFamilyAllocSlotsAppended;
+    return;
+  }
+  switch (CC) {
+  case CallingConv::OxCaml_WithFP:
+  case CallingConv::OxCaml_WithoutFP:
+    ++NumGCFamilyOrdinarySlotsAppended;
+    return;
+  case CallingConv::OxCaml_C_Call:
+  case CallingConv::OxCaml_C_Call_StackArgs:
+    ++NumGCFamilyCCallSlotsAppended;
+    return;
+  default:
+    ++NumGCFamilyOtherSlotsAppended;
+    return;
+  }
 }
 
 static SmallVector<int, 2> storeFrameIndices(const MachineInstr &MI) {
@@ -1305,6 +1335,9 @@ static bool processStatepoint(MachineInstr &MI, MachineFunction &MF,
   SlotIndex Idx = Indexes.getInstructionIndex(MI);
   SlotIndex InSlot = Idx.getRegSlot(true);
   SlotIndex OutSlot = Idx.getRegSlot();
+  const CallingConv::ID StatepointCC = StatepointOpers(&MI).getCallingConv();
+  const bool IsAllocFamily =
+      isAllocFamilyStatepoint(MI, ABI, MF.getSubtarget().getRegisterInfo());
   SmallVector<int, 8> SlotsToAdd;
   bool DebugSlots =
       VerboseOxCamlStatepointSpillRoots && getenv("OXSR_DEBUG_SLOTS");
@@ -1359,6 +1392,7 @@ static bool processStatepoint(MachineInstr &MI, MachineFunction &MF,
     }
     SlotsToAdd.push_back(Slot);
     ++NumGCFamilySlotsAppended;
+    countGCFamilySlotByCC(StatepointCC, IsAllocFamily);
   }
 
   // Sibling locations of listed register operands. RA satisfies a
@@ -1602,7 +1636,7 @@ static bool processStatepoint(MachineInstr &MI, MachineFunction &MF,
   // hands the GC garbage. See isAllocFamilyStatepoint.
   SmallVector<Register, 8> RegsToAdd;
   if (EnableOxCamlStatepointRegisterRoots &&
-      isAllocFamilyStatepoint(MI, ABI, MF.getSubtarget().getRegisterInfo())) {
+      IsAllocFamily) {
     const uint32_t *RegMask = getStatepointRegMask(MI);
     for (Register R : GCRegs) {
       if (ListedRegs.count(R) || !LIS.hasInterval(R) || !VRM.hasPhys(R))

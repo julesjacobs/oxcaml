@@ -1635,3 +1635,25 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     the LLVM codegen path, especially the `ctype` GC-scanning gap, or (2) a
     deeper OCaml-aware BOLT integration that can derive correct descriptors
     for BOLT-created callsites rather than cloning nearby ones.
+- 2026-06-30 `ctype` GC-family root split by statepoint kind:
+  - Added diagnostic `STATISTIC` counters in
+    `OxCamlStatepointSpillRoots.cpp` to split GC-family spill-slot roots by
+    statepoint kind. This is codegen-neutral and only affects `-mllvm -stats`
+    output.
+  - Rebuilt vendored `llc` with `cmake --build _build/llvm-tools --target llc
+    -- -j2` and reran the focused `typing/ctype.ml` IR through
+    `tools/llvm-rs4gc-llc-wrapper.sh` with `PATH` forced to
+    `_build/llvm-tools/bin`.
+  - Result in
+    `root_stats_20260630/gc-family-by-cc/stderr.log`: of `1618` GC-family
+    spill slots appended in `ctype`, `757` are at alloc-family statepoints,
+    `860` are at ordinary-call statepoints, `1` is at a C-call statepoint, and
+    none are in the "other" bucket. The remaining root/scanning gap is
+    therefore not just ordinary calls; AMD64 alloc-family in-place statepoints
+    are also producing many extra live stack homes.
+  - Next backend target: inspect hot `ctype` functions around alloc-family
+    statepoints and compare AMD64 against the arm-style intent. The likely
+    issue is not the presence of the post-RA sibling-root mechanism itself,
+    but AMD64 register-pressure / spill-slot placement causing many values to
+    have both register roots and live spill homes at alloc and ordinary
+    statepoints.
