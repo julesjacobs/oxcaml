@@ -2202,3 +2202,36 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     forward is narrower: harmful post-statepoint scalar reload folding is a real
     performance class, but any fix must be targeted enough to preserve the
     compiler build and the existing statepoint/frimetable/root mechanism.
+- 2026-06-30 LLVM-path-only scope checkpoint:
+  - Reconfirmed the review constraint again: `-O4` and similar generic
+    optimization-level or driver changes are not valid progress toward this
+    goal, because the native-built compiler could receive the same change. Do
+    not count such results. Valid candidates must affect only the LLVM path:
+    AMD64 LLVM backend/codegen changes, LLVM-only pass configuration in the
+    backend pipeline, or post-link/profile work on the LLVM-built compiler
+    artifact.
+  - The best valid compiler-throughput result remains the safe BOLT layout
+    artifact
+    `agent-state/test-suite-29e4cd/bolt_compiler_20260629/ocamlopt.constfilter.cache-hfsort-peep-rodata.bat.patched`,
+    about `+3.77%` versus the native-built compiler. Additional valid BOLT
+    screens after the correction did not beat it: ctype-weighted compatible
+    profile merge (`+2.79%` one-sample), `-align-functions=64` (`+2.70%`),
+    `-align-blocks` (`+3.15%`), `-align-macro-fusion=all` (`-1.17%`), and
+    `-use-edge-counts` (`+1.70%`).
+  - The most promising remaining LLVM-only direction is still AMD64
+    root/spill precision, not another generic optimization flag. For
+    `typing/ctype.ml`, current stats show `1618` GC-family spill slots appended
+    by `OxCamlStatepointSpillRoots`, split as `757` alloc-family, `860`
+    ordinary-call, and `1` C-call. The old no-inplace diagnostic drops this to
+    `200`, but it changes statepoint lowering shape and allocates `3098`
+    statepoint stack slots instead of `114`, so it is a rejected diagnostic, not
+    a target mechanism.
+  - ARM comparison: this branch already uses the ARM-style in-place statepoint
+    policy for AMD64 alloc and ordinary managed calls. The remaining AMD64
+    penalty appears downstream, in x86 register allocation/spill folding
+    creating sibling stack locations that must be listed for correctness.
+    Broad post-RA filters such as "skip unobserved slots" and global
+    `-disable-spill-fusing` are rejected because full compiler-build validation
+    found GC/allocation failures. The next fix must prevent or narrowly reshape
+    the bad AMD64 spill pattern while preserving the existing frametable/root
+    mechanism, not filter roots away after the fact.
