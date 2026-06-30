@@ -1,5 +1,21 @@
 # Progress
 
+- 2026-06-30 rejected combined LBR+instrumentation BOLT profile:
+  - Measured the existing combined-profile artifact
+    `bolt_compiler_20260629/ocamlopt.constfilter.lbr-plus-instrprof-cache-hfsort-peep-rodata.bat.patched`
+    on the same strict seven-module native-mode compiler workload. This was a
+    valid LLVM-built-binary-only post-link/profile screen, not a generic
+    optimization-level change.
+  - Result against `_native_current_build/main/oxcaml_main_native.exe`, with
+    matching build trees/libraries, `samples=3`, `inner_repetitions=2`: native
+    median `29.597333s`, candidate median `29.479233s`, ratio `0.996010`,
+    improvement `+0.399%`
+    (`bolt_compiler_20260629/native-oxcamlopt-vs-lbr-plus-instrprof-seven-inner2.json`).
+  - Conclusion: merging the LBR and instrumentation profiles makes the strict
+    compiler workload worse than the instrumentation-profile-only BOLT
+    artifact (`+3.234%`). Do not count or continue this combined-profile BOLT
+    route toward the `+6%` target.
+
 - 2026-06-30 strict no-ICP instrumentation-profile BOLT result:
   - Measured the corresponding instrumentation-profile BOLT artifact without
     ICP on the strict seven-module native-mode compiler workload:
