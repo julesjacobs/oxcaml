@@ -1,5 +1,31 @@
 # Progress
 
+- 2026-06-30 LLVM-path backend ablation after the `-O4` correction:
+  - Rechecked the safe BOLT `-reg-reassign` artifact before benchmarking it.
+    Both `ocamlopt.constfilter.cache-hfsort-peep-rodata-regreassign.bat.patched`
+    and the older `frameopt-regreassign` artifact abort immediately on
+    `-version` with `Fatal error: allocation failure during minor GC`, so
+    BOLT register reassignment remains unsafe for this compiler binary and is
+    not a benchmark candidate.
+  - Tested a focused RA spill-weight hypothesis locally: add a hidden
+    `-oxcaml-statepoint-vararg-weight-multiplier` knob that boosts spill
+    weights for virtual registers used as statepoint GC operands, then compile
+    the saved `typing/ctype.ml` LLVM IR with multipliers `2`, `4`, and `8`.
+    The source edit was reverted after the experiment.
+  - Result: no useful movement. Baseline `ctype` stats are `407`
+    fixup spill slots, `798` fixup-spilled registers, `1618` GC-family
+    appended slot roots, `11` reload-fed sibling roots, `9` register roots,
+    and `1629` total appended slots. Multipliers `4` and `8` still had `407`
+    fixup spill slots and `798` spilled registers, but changed the root mix to
+    `1619` GC-family slots, `8` register roots, and `1630` total appended
+    slots; multiplier `2` was similarly neutral/slightly worse (`1631` total).
+  - Conclusion: simply biasing RA to keep statepoint operands in registers
+    does not address the long-lived GC-family stack homes in `ctype`. The next
+    backend path should inspect where those stack slots are created/split, not
+    just adjust their generic spill weight. The best valid measured artifact
+    remains `ocamlopt.constfilter.cache-hfsort-peep-rodata.bat.patched` at
+    `+3.77%` over the native-built compiler.
+
 - 2026-06-30 LLVM-path BOLT follow-up after the `-O4` scope correction:
   - Confirmed again that the target must be an LLVM-path improvement, not a
     generic optimization-level change that a native-built compiler could also
