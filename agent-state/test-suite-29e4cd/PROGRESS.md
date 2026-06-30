@@ -1,5 +1,37 @@
 # Progress
 
+- 2026-06-30 rejected post-RA physical duplicate-root refresh prototype:
+  - Implemented a temporary hidden LLVM backend prototype in
+    `FixupStatepointCallerSaved` rather than using generic `-O4`/driver flags.
+    The prototype was x86-only, alloc-family-only, skipped EH successors, and
+    only removed a stack root when the same stack slot had just been reloaded
+    into an already-listed physical register root. It then emitted an immediate
+    post-statepoint store from that physical register back to the stack slot.
+  - Saved-IR `typing/ctype.ml` stats showed the intended effect but less
+    coverage than the earlier unsafe vreg attempt: `417` duplicate stack roots
+    were refreshed from listed physical registers
+    (`bolt_compiler_20260629/root_stats_20260630/refresh-phys-proto.llc.err`).
+    A focused real-wrapper compile of `typing/ctype.ml` through
+    `-llvm-backend` also passed
+    (`refresh-phys-ctype-smoke.log`, `refresh-phys-smoke-wrapper.log`).
+  - The same prototype failed a separate LLVM self-stage build in
+    `_llvm_refresh_phys_*`: the boot log reported repeated
+    `Fatal error: allocation failure during minor GC` and
+    `Command got signal SEGV` failures after hundreds of fresh wrapper
+    invocations (`refresh-phys-selfstage-build.log`,
+    `refresh-phys-selfstage-wrapper.log`). This is the same stale-root/
+    GC-corruption failure class as the earlier vreg refresh prototype, so the
+    source edit and temporary wrapper were reverted and `_build/llvm-tools/bin/llc`
+    was rebuilt back to the checked-in source state.
+  - Conclusion: a purely local post-statepoint store is still not a safe
+    replacement for scanning the duplicate stack home. The missing proof is
+    stronger than "slot was reloaded into a listed register immediately before
+    the statepoint"; the stack home can still be a live root location whose
+    absence during collection corrupts boot. Future work should stop trying to
+    delete roots with local reload/store pattern matching and instead make the
+    listed root location itself be the durable home, or carry explicit OXSR
+    value/location metadata into a later pass with verifier coverage.
+
 - 2026-06-30 rejected duplicate-home refresh-store prototype:
   - Implemented a temporary, hidden LLVM backend prototype in
     `OxCamlStatepointSpillRoots` that only applied to non-EH alloc-family
