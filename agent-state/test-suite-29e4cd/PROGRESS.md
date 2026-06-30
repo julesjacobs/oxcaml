@@ -1864,3 +1864,28 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     larger than native. This keeps the next valid implementation target on
     AMD64 LLVM root/spill precision, not frontend roots, not generic
     optimization levels, and not another ad hoc BOLT call-shape workaround.
+- 2026-06-30 rejected normal direct-ICP descriptor cloning retry:
+  - Repatched the existing normal direct-ICP BOLT output
+    `ocamlopt.constfilter.cache-hfsort-peep-rodata-icp-calls-v4.bat.bolt`
+    with the current patcher and no synthesis. It reported zero unresolved
+    descriptors but immediately aborted on `-version` with
+    `caml_scan_stack: missing frame descriptor retaddr=0x3bb5dc3`.
+    Disassembly showed the missing PC is the promoted direct call in
+    `camlStdlib__List__concat_map_64_160_code`: BOLT emits
+    `call caml_tuplify2` returning directly to the shared continuation, while
+    the fallback `call *%rcx` returns to a tiny `jmp` to that continuation.
+  - Tried a guarded local patcher edit, then removed it. The edit detected
+    both normal ICP shapes: promoted direct returns that jump to the fallback
+    continuation, and promoted direct returns that are themselves the fallback
+    continuation target. It synthesized `220` descriptors from fallback
+    descriptors and skipped `5` descriptor-less fallback sites. The resulting
+    artifact `ocamlopt.constfilter.cache-hfsort-peep-rodata-icp-calls-v4.normalicp2.bat.patched`
+    passed `-version`, `-config`, and a tiny native compile.
+  - The same artifact failed the five-module compiler smoke while compiling
+    `backend/llvm/llvmize.ml` with `Fatal error: allocation failure during
+    minor GC`. This is the same wrong-root/corruption class as the earlier
+    `synth4` descriptor-cloning attempts, not a missing-descriptor startup
+    issue. Conclusion: normal BOLT direct-call ICP still needs an exact
+    OCaml-aware root map for the promoted call return PC; cloning the fallback
+    descriptor, even with a tighter detector, is not correct enough to carry
+    or benchmark.
