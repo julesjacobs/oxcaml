@@ -1610,3 +1610,28 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     quality, but it is not the main throughput lever. The next target remains
     allocation/ordinary-call root precision, especially the `ctype` major-GC
     root-scanning gap.
+- 2026-06-30 BOLT ICP descriptor refinement after the `-O4` correction:
+  - Reconfirmed that generic `-O4` is out of scope because native-built can use
+    the same driver-level optimization; only LLVM-path improvements count.
+  - Investigated normal BOLT ICP again on
+    `ocamlopt.constfilter.cache-hfsort-peep-rodata-icp-calls-v4.bat.bolt`.
+    The missing-frame startup site `0x3bb5dc3` is a normal ICP shape:
+    BOLT emits a promoted direct `call target` returning to the shared
+    continuation, while the fallback `call *reg` returns to a small block that
+    jumps to that continuation. There is no `push $return; jmp *callee` in
+    this shape, so the current patcher does not rediscover these descriptors.
+  - Tried local patcher variants, then restored the patcher source. Variant A
+    synthesized descriptors by cloning the exact old return-PC descriptor:
+    it patched with zero unresolved descriptors but segfaulted compiling
+    `backend/cfg_selectgen.ml`. Variant B synthesized descriptors by cloning
+    the output fallback-call descriptor: it synthesized `178` descriptors,
+    skipped `4` descriptor-less source returns, patched with zero unresolved
+    descriptors, and still segfaulted compiling `backend/cfg_selectgen.ml`.
+  - Conclusion: making normal BOLT ICP safe is not just a missing-return-PC
+    enumeration problem. The cloned descriptor root maps are not reliable for
+    the promoted direct-call state. Do not benchmark normal ICP or count it
+    toward the goal until we can prove the exact frame/root state at the
+    promoted return PC. The viable paths remain (1) backend/root precision in
+    the LLVM codegen path, especially the `ctype` GC-scanning gap, or (2) a
+    deeper OCaml-aware BOLT integration that can derive correct descriptors
+    for BOLT-created callsites rather than cloning nearby ones.
