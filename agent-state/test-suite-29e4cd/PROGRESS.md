@@ -1,5 +1,21 @@
 # Progress
 
+- 2026-06-30 rejected post-rewrite self-loop hoist experiment:
+  - Tested a narrow LLVM-only source change in
+    `FixupStatepointCallerSaved`: after rewriting a statepoint and inserting
+    reloads, call the existing `tryHoistSelfLoopRootStore` helper on the new
+    statepoint too. This keeps the existing ARM-style in-place/root mechanism
+    and only tries to reduce redundant store/reload shape created by the AMD64
+    statepoint fixup pass.
+  - Focused `typing/ctype.ml` `llc` stats on the saved RS4GC IR showed only a
+    tiny local effect: self-loop root-store hoists increased from `15` to `17`,
+    but the important counters were unchanged (`1629` appended spill-slot roots,
+    `1618` GC-family roots, `757` alloc-family roots, `860` ordinary-call roots,
+    frame size `27936` bytes).
+  - Reverted the source change and rebuilt `_build/llvm-tools/bin/llc` back to
+    the checked-in source state. Conclusion: this is not a plausible route to
+    the remaining compiler-throughput gap and is not worth a full boot/build.
+
 - 2026-06-30 rejected close BOLT artifact after paired check:
   - Re-ran the quick-screen-close
     `ocamlopt.constfilter.noassert-plus-ctype7-cache-hfsort-peep-rodata.bat.patched`
