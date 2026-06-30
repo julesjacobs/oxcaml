@@ -3662,3 +3662,28 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     `ctype-pbqp-selfstage-build.log`, and `ctype-pbqp-selfstage-wrapper.log`.
     This matches the broader BasicRA/PBQP failure class: the saved-IR root shape
     improvement is not correctness-preserving when used in a real self-stage.
+- 2026-06-30 rejected seven-module safe-BOLT profile refresh:
+  - Filled a missing profile-coverage check by collecting a fresh five-rep LBR
+    profile from `ocamlopt.constfilter.reloc` on the strict seven-module
+    workload. `perf record` captured `123.103 MB` / `299173` samples;
+    no-assert `perf2bolt` read `288388` samples and `4609630` LBR entries and
+    wrote
+    `constfilter_seven_safe_bolt_20260630/ocamlopt.constfilter.reloc.seven.lbr.fdata`.
+  - Rebuilt with the usual safe layout recipe
+    `-reorder-blocks=cache -reorder-functions=hfsort -peepholes=all
+    -reorder-data=.rodata --enable-bat`. The local BOLT build still created
+    `61` managed call-return PCs needing synthesized descriptors; explicitly
+    adding `-indirect-call-promotion=none` did not change that unresolved set.
+    A clean no-new-callsite artifact was therefore not produced.
+  - As a diagnostic screen only, patched with `--synthesize-icp-descriptors`
+    (`224543` return PCs patched, `61` synthesized descriptors, `0`
+    unresolved) and ran the strict seven-module benchmark. Result:
+    native-built median `29.72610942600295s`, LLVM-built seven-profile BOLT
+    median `28.751744050066918s`, ratio `0.9672219003848616`, improvement
+    `+3.2778099615138445%`
+    (`constfilter_seven_safe_bolt_20260630/native-oxcamlopt-vs-seven-profile-synth-seven-inner2.json`).
+    This is both below the required `+6%` and not production-safe because of
+    synthesized descriptors, so seven-module profile refresh is not the next
+    route. The remaining likely path is still real AMD64 LLVM codegen/root
+    shape work, or BOLT support that can make new managed return PCs exact and
+    profitable rather than synthetic and slow.
