@@ -2256,3 +2256,37 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     LLVM-only investigation should target why the GC-family spill slots are live
     across statepoints in the first place, or reduce frametable/root descriptor
     volume in a way that is provably equivalent to the ARM/native mechanisms.
+- 2026-06-30 `ctype` GC-family root producer classification:
+  - Parsed the current verbose `OxCamlStatepointSpillRoots` log
+    (`root_verbose_20260630/current/stderr.log`). It matches the current stats:
+    `1638` appended locations total, split as `1629` stack slots and `9`
+    register roots across `896` statepoints in `257` functions.
+  - Top appended-location producers are concentrated in `ctype` unification
+    code: `unify_row_field` (`105` locations), `unify_row` (`64`), `unify3`
+    (`59`), `copy` (`54`), `instance_prim_locals` (`52`), `build_subtype`
+    (`44`), and `loop_386` (`42`). ID `0` ordinary-call statepoints account
+    for `767` appended locations, but encoded allocation/debug IDs also matter:
+    `196609` has `176`, `327681` has `105`, `262145` has `78`, `131073` has
+    `68`, and `393217` has `60`. The issue is therefore not isolated to either
+    ordinary calls or allocation statepoints.
+  - Parsed the emitted `camlCtype__frametable` descriptors and mapped return
+    labels back to functions. Current `ctype.s` has `4528` descriptors and
+    `20675` live roots. The no-inplace diagnostic has roughly the same
+    descriptor count (`4530`) but fewer live roots (`19257`), so its improvement
+    is genuinely root-list pressure rather than descriptor-count removal.
+  - The largest current-minus-no-inplace live-root reductions are in the same
+    hot functions: `unify_row_field` `461 -> 380` (`-81`), `unify_row`
+    `728 -> 676` (`-52`), `instance_prim_locals` `192 -> 142` (`-50`),
+    `build_subtype` `1115 -> 1071` (`-44`), `copy` `362 -> 320` (`-42`),
+    and `loop_386` `487 -> 447` (`-40`). `unify3` dominates total descriptor
+    roots (`2109`) but only drops by `20`, so the root-pressure fix should start
+    with the duplicated stack homes in `unify_row_field`/`unify_row` rather
+    than descriptor layout or generic BOLT.
+  - Example `unify_row_field` statepoints repeatedly append the same stack
+    homes across both ordinary calls and allocation/debug IDs: `%stack.1`,
+    `%stack.3`, `%stack.11`, `%stack.15`, `%stack.19`, `%stack.21`, `%stack.25`,
+    and `%stack.31` appear in several large appends. This supports the next
+    source-level hypothesis: AMD64 is creating multiple long-lived stack homes
+    for the same GC values inside hot functions, and the safe fix is to prevent
+    or coalesce those duplicate homes before frametable emission, not to remove
+    already-live roots after `OxCamlStatepointSpillRoots`.
