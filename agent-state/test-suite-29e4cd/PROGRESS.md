@@ -38,6 +38,22 @@
     improvement without a separate correctness fix. It is not the path to the
     required `+6%`.
 
+- 2026-06-30 rejected fixup spill-slot reuse diagnostic:
+  - Tested a hidden `FixupStatepointCallerSaved` diagnostic that disables reuse
+    of that pass's spill-slot pool across statepoints. The hypothesis was that
+    slot reuse might be stretching GC-family stack-slot live ranges and forcing
+    OXSR to list the same physical spill homes at many statepoints.
+  - Rebuilt `llc`, compiled the saved `typing/ctype.ml` RS4GC input
+    `root_mir_20260630/ctype.rs4gc.ll`, and compared direct backend stats.
+    The diagnostic changed fixup spill-slot allocation from `407` to `790` and
+    total stack bytes from `27936` to `30976`, but OXSR stayed exactly the same:
+    `1629` appended spill-slot roots, including `1618` GC-family slots,
+    `860` ordinary-call slots, `757` alloc-family slots, `1` C-call slot,
+    `11` reload-fed sibling slots, and `9` crossing register roots.
+  - Conclusion: the `ctype` root pressure is not caused by fixup's spill-slot
+    pool reuse. The prototype was reverted and `llc` rebuilt back to the
+    checked-in source state.
+
 - 2026-06-30 MIR-level `ctype` root-pressure narrowing:
   - Reconfirmed the scope constraint after the `-O4` discussion: the +6%
     target must come from LLVM-path-only work. Generic compiler-driver
