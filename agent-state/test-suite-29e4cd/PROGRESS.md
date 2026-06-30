@@ -1657,3 +1657,29 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     but AMD64 register-pressure / spill-slot placement causing many values to
     have both register roots and live spill homes at alloc and ordinary
     statepoints.
+- 2026-06-30 LLVM-path-only follow-up after rejecting `-O4`:
+  - Reconfirmed the goal constraint: `-O4` and other generic driver flags are
+    not valid evidence for this task because they would also apply to the
+    native-built compiler. Candidate wins must come from the LLVM backend,
+    LLVM pass configuration, or LLVM-built-binary-only BOLT/profile work.
+  - Tested a narrow root-precision idea locally, then reverted it: separate
+    "valid OCaml value" from "needs relocation" and skip slots whose unique
+    reaching store is provably a tagged immediate or static OCaml data block.
+    Vendored `llc` rebuilt, and the focused `typing/ctype.ml` stats compile
+    passed, but the new skip count was zero and all root counters remained
+    unchanged (`1629` total appended spill slots, `1618` GC-family slots).
+    Conclusion: this is not the `ctype` root-scanning lever; do not carry the
+    added complexity.
+  - Generated `unify_row_field` MIR stopped immediately before and after
+    `OxCamlStatepointSpillRoots`. At the hot `caml_apply2` statepoint, the
+    pre-OXSR statepoint already lists `14` GC operands. OXSR grows it to `20`
+    by adding six live stack homes (`%stack.1`, `%stack.2`, `%stack.3`,
+    `%stack.16`, `%stack.28`, `%stack.32`) that would otherwise stale after a
+    moving GC. This confirms OXSR is part of the root-count growth, but it is
+    repairing real duplicate homes rather than inventing arbitrary roots.
+  - Checked a suspected AMD64 calling-convention mismatch. The native backend
+    comments mention `rax` through `r13`, but the actual
+    `ocaml_int_registers` list is `RAX RBX RDI RSI RDX RCX R8 R9 R12 R13`;
+    `R10`/`R11` are intentionally excluded because PLT stubs may clobber them.
+    The LLVM AMD64 ordinary OxCaml calling convention uses the same value
+    register list, so there is no `R10`/`R11` parity fix to make here.
