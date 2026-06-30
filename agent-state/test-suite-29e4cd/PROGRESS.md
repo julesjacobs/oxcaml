@@ -54,6 +54,21 @@
     pool reuse. The prototype was reverted and `llc` rebuilt back to the
     checked-in source state.
 
+- 2026-06-30 rejected stack-slot coloring diagnostics:
+  - Screened `llc` flags `--no-stack-coloring` and `--no-stack-slot-sharing` on
+    the saved `typing/ctype.ml` RS4GC input. The hypothesis was that stack-slot
+    coloring/sharing might merge unrelated lifetimes into longer GC-family
+    stack-slot intervals that OXSR must list.
+  - Neither flag moved the relevant root counters. Both stayed at `1629`
+    appended spill-slot roots, including `1618` GC-family slots, `860`
+    ordinary-call slots, `757` alloc-family slots, `1` C-call slot, `11`
+    reload-fed sibling slots, and `9` crossing register roots.
+  - `--no-stack-slot-sharing` increased total stack bytes from `27936` to
+    `33920`; `--no-stack-coloring` did not reduce root pressure either.
+    Conclusion: stack-slot coloring is not the source of the `ctype` root
+    bloat, and these flags should not be booted or benchmarked for the +6%
+    goal.
+
 - 2026-06-30 MIR-level `ctype` root-pressure narrowing:
   - Reconfirmed the scope constraint after the `-O4` discussion: the +6%
     target must come from LLVM-path-only work. Generic compiler-driver
