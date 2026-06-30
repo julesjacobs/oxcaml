@@ -1,5 +1,31 @@
 # Progress
 
+- 2026-06-30 rejected duplicate-home refresh-store prototype:
+  - Implemented a temporary, hidden LLVM backend prototype in
+    `OxCamlStatepointSpillRoots` that only applied to non-EH alloc-family
+    statepoints with an already-listed direct register root. Instead of listing
+    a duplicate stack home for the same value, it inserted a post-statepoint
+    store from the relocated register root back to that stack slot. This was an
+    LLVM-path-only source experiment, not a generic `-O4`/driver-flag change.
+  - Saved-IR `typing/ctype.ml` stats looked promising: appended spill-slot roots
+    dropped from `2497` to `1917`; reload-fed sibling roots dropped from `865`
+    to `287`; `580` duplicate stack homes were refreshed after statepoints.
+    Artifact:
+    `bolt_compiler_20260629/root_stats_20260630/refresh-duplicate-slots-proto/`.
+  - The same flag passed a one-module real-wrapper smoke compiling
+    `typing/ctype.ml` through `-llvm-backend`, but failed a separate LLVM
+    self-stage build in `_llvm_refresh_*` after `1590` wrapper invocations /
+    `789` fresh IR compilations. The boot log has two `Command got signal
+    SEGV` failures and then `Fatal error: allocation failure during minor GC`
+    (`refresh-duplicate-slots-build.log`). This is stale-root/GC-corruption
+    behavior, so the prototype is rejected and was reverted.
+  - Conclusion: refreshing duplicate homes is still the right class of idea, but
+    the naive post-statepoint vreg store is not sound. A future attempt must
+    prove the write-back source is the relocated value after virtual-register
+    rewriting, or move the design into a later physical-register pass with an
+    explicit side table from OXSR. Do not commit the rejected hidden flag or
+    wrapper scripts.
+
 - 2026-06-30 current-best module split and duplicate-home next target:
   - Measured the current best strict artifact
     `ocamlopt.constfilter.instrprof-cache-hfsort-peep-rodata.bat.patched`
