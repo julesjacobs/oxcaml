@@ -1,5 +1,39 @@
 # Progress
 
+- 2026-06-30 IR PGO full-build follow-up after excluding generic `-O4`:
+  - Reconfirmed the scope constraint from Jules: generic `-O4`-style changes
+    cannot count for the +6% goal because they could also be applied to the
+    native-built compiler. The remaining candidates must be LLVM-path-only:
+    LLVM codegen/pass changes, LLVM-only profile use, or post-link work on the
+    LLVM-built artifact.
+  - Integrated new-PM PGO generation before RS4GC is not viable as-is. On full
+    compiler modules it changes exception-recovery CFG shape enough for RS4GC
+    to fail with `unsupported OxCaml recovery predecessor for explicit
+    exception roots`. A later standalone `pgo-instr-gen,instrprof` before
+    RS4GC still hits the same failure on compiler modules such as `ccomp`.
+  - Post-RS4GC counter-only generation is mechanically better. Small OCaml
+    smoke passes with
+    `default<O3>,rewrite-statepoints-for-gc,pgo-instr-gen,instrprof,verify`,
+    `-mtriple=x86_64-unknown-linux-gnu -disable-vp`, `llvm-mc`, and the local
+    profile runtime linked with `-Wl,-u,__llvm_profile_runtime`. Value
+    profiling remains disabled because it previously crashed through
+    `__llvm_profile_instrument_target`.
+  - A full post-RS4GC instrumented boot build is not stable yet. It gets deep
+    into `.ocamlcommon`, flambda2, `.ocamloptcomp`, and boot executable
+    compilation, but multiple host `ocamlopt.opt` invocations abort with
+    `Fatal error: allocation failure during minor GC` while compiling modules
+    such as `ikind.ml`, `flambda2/simplify/expr_builder.ml`, and `llvmize.ml`.
+    Rerunning the failed `ikind.ml` compile directly with the same wrapper and
+    profile settings succeeds, so the current evidence points to instability
+    during the full instrumented build rather than a deterministic bad module.
+  - The partial `.profraw` files from that failed run merge cleanly with the
+    matching local `llvm-profdata`, and post-RS4GC profile-use plumbing works
+    on a small compile via
+    `default<O3>,rewrite-statepoints-for-gc,pgo-instr-use,verify` plus
+    `-pgo-test-profile-file=<profdata>`. This proves use-side mechanics, but
+    the available partial profile is not a valid performance candidate and no
+    +6% result has been produced.
+
 - 2026-06-30 IR PGO plumbing smoke:
   - Added wrapper-only knobs for LLVM new-PM PGO (`LLVM_WRAPPER_PGO_KIND`,
     `LLVM_WRAPPER_PROFILE_FILE`, `LLVM_WRAPPER_OPT_EXTRA_ARGS`) plus an
