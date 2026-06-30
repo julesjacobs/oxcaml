@@ -1518,3 +1518,45 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     The next useful work remains LLVM backend/root precision, especially the
     `ctype` extra major-GC/root-scanning gap, not generic optimization level
     changes or `mcpu=native`.
+- 2026-06-30 follow-up after review correction:
+  - Rejected `-O4` again as an invalid route. It is not an LLVM-path
+    improvement because the native-built compiler could also be run with the
+    same driver optimization level; do not use it as evidence toward the
+    `+6%` goal.
+  - Rechecked frame pointers as a possible LLVM-only explanation. The
+    native-built baseline reports `with_frame_pointers: true` and both native
+    and LLVM compiler configs carry `-fno-omit-frame-pointer`, so frame-pointer
+    removal is not a valid explanation for the LLVM-vs-native compiler gap in
+    the current setup.
+  - Parsed the existing `typing/ctype.ml` current-vs-no-inplace assembly
+    artifacts. The no-inplace ablation reduces the actual frametable live-root
+    count by about the same amount as the `OxCamlStatepointSpillRoots`
+    appended-slot delta, so the `ctype` GC scanning gap is not just a stats
+    artifact. The largest current-minus-no-inplace deltas are in hot
+    `ctype` functions: `unify_row_field`, `unify_row`,
+    `instance_prim_locals`, `build_subtype`, `copy`, `loop_386`, and
+    `unify3`. The shape is mostly stack-root growth with fewer register roots.
+    The no-inplace ablation remains rejected because it abandons the arm-style
+    in-place ordinary-call design and regressed the full compiler benchmark.
+  - Re-read the AMD64/AArch64 OxCaml calling-convention definitions. AMD64's
+    ordinary OxCaml calls mostly match the intended arm model:
+    `OxCaml_WithoutFP` preserves no GPRs, `OxCaml_WithFP` preserves only
+    `RBP`, and the X86 target hook force-spills `RBP` roots because ordinary
+    calls do not populate `gc_regs`. The remaining gap therefore looks more
+    like AMD64 register-pressure / statepoint operand placement than a
+    fundamentally wrong ordinary-call preserved mask.
+  - Ran the linked-binary frametable analyzer on the native-built baseline and
+    current best BOLT artifact. Native has `197298` descriptors / `523867`
+    live roots / `415445` stack roots. The BOLTed LLVM-built compiler has
+    `224541` descriptors / `773566` live roots / `566595` stack roots, with
+    duplicate roots negligible (`54`). The LLVM-built binary also has a large
+    LLVM-specific stack-check target class:
+    `caml_llvm_call_realloc_stack` accounts for about `30987` descriptors and
+    `73650` live roots. These checks are cold dynamically, but their
+    statepoint operand lists and live ranges can still affect AMD64 code
+    quality; this is a valid LLVM-path investigation target.
+  - Current direction: keep `-O4` and other generic flags out of the goal.
+    Continue with LLVM-only fixes: either exact OCaml-aware BOLT frametable
+    support for transformations such as ICP, or a backend/root-placement fix
+    that keeps the in-place arm-style mechanism while reducing AMD64
+    duplicate live homes around ordinary calls and stack checks.
