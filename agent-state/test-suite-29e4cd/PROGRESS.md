@@ -1,5 +1,23 @@
 # Progress
 
+- 2026-06-30 strict no-ICP instrumentation-profile BOLT result:
+  - Measured the corresponding instrumentation-profile BOLT artifact without
+    ICP on the strict seven-module native-mode compiler workload:
+    `bolt_compiler_20260629/ocamlopt.constfilter.instrprof-cache-hfsort-peep-rodata.bat.patched`.
+    This is LLVM-built-binary-only post-link/profile work; it is not a generic
+    optimization-level change and does not apply to the native-built compiler.
+  - Result against `_native_current_build/main/oxcaml_main_native.exe`, with
+    matching build trees/libraries, `samples=3`, `inner_repetitions=2`: native
+    median `29.868744s`, candidate median `28.902896s`, ratio `0.967664`,
+    improvement `+3.234%`
+    (`bolt_compiler_20260629/native-oxcamlopt-vs-instrprof-noicp-seven-inner2.json`).
+  - This supersedes the previous `instrprof-cache-hfsort-peep-rodata-icp10`
+    strict result (`+3.108%`) as the best measured strict LLVM-path-only
+    artifact so far. The `icp10` BOLT log reported `0.0%` optimized indirect
+    callsites, so the win should be attributed to the instrumentation-profile
+    BOLT layout/peephole recipe rather than ICP. This is still short of the
+    required `+6%` target.
+
 - 2026-06-30 strict LLVM-path-only BOLT status after excluding generic `-O4`:
   - Recorded the current best valid strict seven-module compiler-throughput
     result. The candidate is an LLVM-built compiler artifact optimized only on
