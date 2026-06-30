@@ -1999,3 +1999,33 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     (`native-current-vs-llvm-constfilter-instrprof-cache-hfsort-peep-rodata-icp-inner3.json`).
     Therefore the straightforward full-BOLT ICP configuration is not a path to
     the required `+6%`, despite now being benchmarkable.
+- 2026-06-30 rejected ordinary-register-root canonicalization:
+  - Tested an LLVM-only `OxCamlStatepointSpillRoots` prototype that rewrote
+    ordinary managed-call register root operands to the virtual register's
+    allocator spill slot when that slot was already going to be appended as a
+    GC-family stack root. Focused `typing/ctype.ml` stats looked promising:
+    `fixup-statepoint-caller-saved` dropped from `407` allocated spill slots /
+    `798` spilled registers to `4` / `4`, ordinary-call GC-family appended
+    slots dropped from `860` to `66`, total appended slots dropped from `1629`
+    to `835`, and frame size dropped from `27936` to `24768` bytes.
+  - Full LLVM self-stage install completed and the narrow five-module smoke
+    passed, but this was not enough validation. A seven-module native-mode
+    compiler workload caught a correctness failure: both the wrapper and real
+    `_llvm_canon_stage1_install/bin/ocamlopt.opt` segfault while compiling
+    `typing/typecore.ml`. The relocation-enabled relink reproduced the same
+    failure, so this is not a BOLT/relink problem.
+  - Benchmarking the same bad compiler on the narrower five-module set was
+    also negative: native-built median `27.267752s`, candidate median
+    `29.301929s`, ratio `1.074600`, improvement `-7.46%`
+    (`canon_native_vs_llvm_pair_20260630_053516.json`).
+  - The prototype was removed from the source tree and `_build/llvm-tools/bin/llc`
+    was rebuilt cleanly from restored sources. The failed assumption is that an
+    allocator spill slot already live across a statepoint necessarily contains
+    the same current value as the listed register root. That is false: the slot
+    may be live and value-typed but stale at that exact call, so replacing the
+    register root with the slot can hide the only fresh copy from the GC.
+  - Validation rule going forward: root-precision changes must pass at least
+    the seven-module compiler workload (`cfg_selectgen`, `llvmize`,
+    `translcore`, `ctype`, `env`, `typecore`, `typemod`) before any
+    performance result is considered. Five-module smoke can miss real stale-root
+    bugs.
