@@ -1,0 +1,4 @@
+patched 224543 frame descriptor return addresses
+unresolved 0 frame descriptor return addresses
+call-site mapped 224426; BAT fallback mapped 117
+synthesized 60 ICP frame descriptors at 0x37185d8

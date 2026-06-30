@@ -1,5 +1,23 @@
 # Progress
 
+- 2026-06-30 rejected synthetic-descriptor instrprof BOLT variants:
+  - Rechecked the three instrprof BOLT variants that previously had `60`
+    unresolved frame descriptor return addresses. The unresolved entries were
+    BOLT-created ICP-style return PCs, so I regenerated patched binaries with
+    `patch_ocaml_frametables.py --synthesize-icp-descriptors`.
+  - All three variants patched with zero unresolved descriptors and synthesized
+    `60` extra frame descriptors:
+    `instrprof-cache-hfsortplain-peep-rodata`,
+    `instrprof-cache-hfsort-noppl-rodata`, and
+    `instrprof-blockcache-hfsort-peep-rodata`. Each passed `-version` and a
+    one-sample, one-inner-repetition seven-module native-mode compile smoke.
+  - The rough seven-module timing screen rejected them as goal candidates:
+    plain `hfsort` was `-1.14%`, no-peepholes was `+1.58%`, and blockcache
+    was `+1.44%` versus the native-built compiler. This is LLVM-path-only BOLT
+    work and does not rely on generic `-O4`-style flags, but it is weaker than
+    the current strict best instrprof BOLT result (`+3.234%`) and far below the
+    required `+6%`.
+
 - 2026-06-30 rejected instrprof BOLT blockcache variant:
   - Tried changing the current best instrumentation-profile BOLT recipe from
     `-reorder-blocks=cache+` to `-reorder-blocks=cache` while keeping
