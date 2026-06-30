@@ -1,5 +1,24 @@
 # Progress
 
+- 2026-06-30 scope correction after review:
+  - Reconfirmed that generic optimization-level changes such as `-O4` cannot
+    count toward the compiler-throughput goal: the native-built compiler can use
+    the same flag, so it is not an LLVM-path improvement. Valid candidates are
+    limited to LLVM backend/codegen changes, LLVM-only pass configuration, or
+    profile/post-link work applied specifically to the LLVM-built artifact.
+  - Re-smoked the build-tree artifacts after the later "build-tree
+    recalibration" note. Both `_native_current_build/main/main_native.exe` and
+    `_llvm_native_stage0_canonical_j1_boot_build/default/main_native.exe`
+    compile a trivial `t.ml` to `t.cmo` even when passed `-o t.cmx`; they do
+    not produce `t.cmx`/`t.o`. They are therefore not valid native-mode
+    compiler-throughput artifacts for this goal.
+  - The corrected artifact policy remains the one from the native-mode reset:
+    use `_native_current_build/main/oxcaml_main_native.exe` (or its identical
+    installed `ocamlopt.opt`) for the native-built baseline, and use matching
+    LLVM-built `main/oxcaml_main_native.exe` plus matching `OCAMLLIB` for LLVM
+    candidates. The later `main_native.exe` build-tree numbers should be
+    treated as superseded diagnostics, not as the active target.
+
 - 2026-06-30 rejected fresh corrected-workload BOLT profile:
   - Built missing `perf2bolt` and `merge-fdata` targets for both
     `_build_bolt_tools_sharedret` and `_build_bolt_tools_sharedret_noassert`.
