@@ -1,5 +1,34 @@
 # Progress
 
+- 2026-06-30 MIR-level `ctype` root-pressure narrowing:
+  - Reconfirmed the scope constraint after the `-O4` discussion: the +6%
+    target must come from LLVM-path-only work. Generic compiler-driver
+    optimization levels remain invalid because they can be applied equally to
+    the native-built compiler.
+  - Compared the saved `typing/ctype.ml` verbose
+    `OxCamlStatepointSpillRoots` logs for greedy versus the diagnostic
+    `-regalloc=basic`. Greedy appends `1629` stack-slot roots; basic appends
+    only `74`, but basic still miscompiles boot and remains diagnostic-only.
+    This proves the root bloat is not inherent in RS4GC or the frametable
+    format. It is created by greedy's post-statepoint live-stack/spill shape.
+  - The per-function delta is concentrated enough to target:
+    `unify_row_field` has `105` appended locations under greedy and `0` under
+    basic, `unify_row` has `64` versus `8`, `unify3` has `59` versus `29`,
+    `copy` has `54` versus `0`, `instance_prim_locals` has `52` versus `0`,
+    and `build_subtype` has `44` versus `0`.
+  - Emitted temporary stop-after MIR snapshots for `greedy`,
+    `virtregrewriter`, and `oxcaml-statepoint-spill-roots` under
+    `root_mir_20260630/`. In `camlCtype__unify3_569_1424_code`, OXSR is not
+    inventing fake roots: greedy leaves concrete GC-family spill homes such as
+    `%stack.24` live across multiple ordinary `OxCaml_WithFP` calls (for
+    example around `is_instantiable_ty`, `instantiable_scope`, and
+    `is_equatable_ty`). OXSR then correctly lists those live homes alongside
+    the pre-existing exception root slots.
+  - Conclusion: the next candidate should be a pre-OXSR allocator/splitting
+    fix that makes AMD64 greedy behave more like the successful arm-shaped
+    path for OxCaml GC values. Late frametable filtering or root deletion is
+    the wrong layer unless a verifier-backed equivalence proof is found.
+
 - 2026-06-30 matched no-debug diagnostic for the current best BOLT artifact:
   - Checked whether the remaining compiler-throughput gap is mostly debug
     frametable work by rerunning the five-module compiler benchmark without
