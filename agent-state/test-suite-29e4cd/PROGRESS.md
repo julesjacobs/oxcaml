@@ -1,5 +1,43 @@
 # Progress
 
+- 2026-06-30 LLVM-path full-BOLT/ICP follow-up after excluding generic `-O4`:
+  - Built a no-asserts `llvm-bolt` from the local LLVM tree and continued the
+    full-BOLT path only, because generic optimization-level changes would also
+    apply to the native-built compiler and are out of scope for the +6% goal.
+  - Found the old `--icp-old-code-sequence` lowering was unsafe for OxCaml even
+    aside from frametables: it materialized the hot target in `%r10`/`%r11`
+    based only on call-instruction operands. OxCaml code can have live values in
+    those registers across the callsite, so the old-code-sequence promotion can
+    corrupt non-root values. The new local BOLT shape for
+    `--x86-oxcaml-icp-shared-return --icp-old-code-sequence` compares the
+    original indirect-call register against the hot target, emits a direct hot
+    call, and keeps the fallback as `push $return; jmp *reg`.
+  - Tightened `patch_ocaml_frametables.py` for this direct-hot-call shape.
+    Ordinary indirect calls are now mapped from exact BAT-translated old
+    indirect calls instead of broad `target=None` grouping, and ICP shared-return
+    mapping prefers the fallback call's translated old call over the shared
+    continuation PC. This fixed a real missing-frame failure while compiling
+    `lambda/translcore.ml`: input return `0x21751ba` now maps to output return
+    `0x3a90889`, and that PC is present in `camlLambda__frametable`.
+  - Correctness smoke passed for the regenerated direct-ICP artifact:
+    `ocamlopt.constfilter.cache-hfsort-peep-rodata-icp-oldseq-regpres-direct.bat.patched`
+    reports `5.2.0+ox`, patches `224543` descriptors with `0` unresolved and
+    `61` synthesized ICP descriptors, and successfully compiles the previous
+    failing `lambda/translcore.ml` repro.
+  - Performance is still not good enough. One-sample five-module native-mode
+    compiler screens showed full direct ICP at only `+0.16%` vs native-built,
+    top-callsites 10% at `+2.81%`, top-callsites 25% at `-3.02%`, and
+    top-callsites 50% at `-0.57%`. These do not justify a long benchmark run
+    and do not beat the current valid best, the layout-only
+    `ocamlopt.constfilter.cache-hfsort-peep-rodata.bat.patched` at about
+    `+3.77%`.
+  - Conclusion: this is real full-BOLT correctness progress but not the +6%
+    result. The next performance question is why even valid direct ICP loses the
+    layout-only win, likely code-size/layout disruption or poor callsite
+    selection. The +6% target still needs either a more selective OCaml-aware
+    BOLT ICP policy, a working instrumentation/full profile path, or a backend
+    root/spill improvement that raises the pre-BOLT compiler.
+
 - 2026-06-30 LLVM-only pipeline and safe-BOLT follow-up:
   - Screened saved `typing/ctype.ml` IR with additional LLVM-only backend
     knobs. `-enable-ipra` worsened the proxy (`4675` -> `4726` total appended

@@ -592,6 +592,7 @@ def build_call_return_map(
             call.return_addr: approx_old_return
             for _approx_old_call, approx_old_return, call in new_approx_pairs
         }
+        new_return_addrs = {call.return_addr for _, _, call in new_approx_pairs}
         fallback_shared_returns = sorted(
             {
                 output_jump_targets[call.return_addr]
@@ -602,8 +603,21 @@ def build_call_return_map(
             }
         )
         shared_return_to_old: dict[int, CallSite] = {}
+        for approx_old_call, _approx_old_return, call in new_approx_pairs:
+            if call.target is not None:
+                continue
+            shared_return = output_jump_targets.get(call.return_addr)
+            if shared_return is None or shared_return not in new_return_addrs:
+                continue
+            old_call = old_indirect_by_addr.get(approx_old_call)
+            if old_call is None:
+                old_call = old_indirect_for_approx(approx_old_call)
+            if old_call is not None:
+                shared_return_to_old.setdefault(shared_return, old_call)
         next_old_indirect_idx = 0
         for shared_return in fallback_shared_returns:
+            if shared_return in shared_return_to_old:
+                continue
             approx_old_return = approx_by_return.get(shared_return, input_sym.value)
             idx = bisect.bisect_left(
                 old_indirect_addrs_in_func,
@@ -615,7 +629,14 @@ def build_call_return_map(
             shared_return_to_old[shared_return] = old_indirect_calls[idx]
             next_old_indirect_idx = idx + 1
 
-        new_return_addrs = {call.return_addr for _, _, call in new_approx_pairs}
+        for approx_old_call, _approx_old_return, call in new_approx_pairs:
+            if call.target is not None:
+                continue
+            if call.return_addr in output_jump_targets:
+                continue
+            old_call = old_indirect_by_addr.get(approx_old_call)
+            if old_call is not None:
+                mapping[old_call.return_addr] = call.return_addr
         for approx_old_call, _approx_old_return, call in new_approx_pairs:
             if call.target is not None:
                 continue
@@ -657,6 +678,8 @@ def build_call_return_map(
                 )
             )
         for target, old_group in old_by_target.items():
+            if target is None:
+                continue
             new_group = new_by_target.get(target)
             if new_group is None or len(new_group) != len(old_group):
                 continue

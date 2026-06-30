@@ -3440,13 +3440,16 @@ public:
     MCSymbol *MergeBlock = nullptr;
 
     unsigned FuncAddrReg = X86::R10;
-
     const bool LoadElim = !VtableSyms.empty();
+    const bool UseOxCamlRegPreservingOldSequence =
+        UseOxCamlSharedReturn && MinimizeCodeSize && !LoadElim &&
+        isBranchOnReg(CallInst);
+
     assert((!LoadElim || VtableSyms.size() == Targets.size()) &&
            "There must be a vtable entry for every method "
            "in the targets vector.");
 
-    if (MinimizeCodeSize && !LoadElim) {
+    if (MinimizeCodeSize && !LoadElim && !UseOxCamlRegPreservingOldSequence) {
       std::set<unsigned> UsedRegs;
 
       for (unsigned int I = 0; I < MCPlus::getNumPrimeOperands(CallInst); ++I) {
@@ -3493,7 +3496,7 @@ public:
       Results.emplace_back(NextTarget, InstructionListType());
       InstructionListType *NewCall = &Results.back().second;
 
-      if (MinimizeCodeSize && !LoadElim) {
+      if (MinimizeCodeSize && !LoadElim && !UseOxCamlRegPreservingOldSequence) {
         // Load the call target into FuncAddrReg.
         NewCall->push_back(CallInst); // Copy CallInst in order to get SMLoc
         MCInst &Target = NewCall->back();
@@ -3605,7 +3608,14 @@ public:
 
         CallOrJmp.clear();
 
-        if (MinimizeCodeSize && !LoadElim) {
+        if (UseOxCamlRegPreservingOldSequence) {
+          CallOrJmp.setOpcode(X86::CALL64pcrel32);
+          if (Targets[i].first)
+            CallOrJmp.addOperand(MCOperand::createExpr(MCSymbolRefExpr::create(
+                Targets[i].first, MCSymbolRefExpr::VK_None, *Ctx)));
+          else
+            CallOrJmp.addOperand(MCOperand::createImm(Targets[i].second));
+        } else if (MinimizeCodeSize && !LoadElim) {
           CallOrJmp.setOpcode(IsTailCall ? X86::JMP32r : X86::CALL64r);
           CallOrJmp.addOperand(MCOperand::createReg(FuncAddrReg));
         } else {
