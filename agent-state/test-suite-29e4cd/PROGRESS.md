@@ -1,6 +1,27 @@
 # Progress
 
-- 2026-06-30 seven-module drag narrowed to `typing/typecore.ml`:
+- 2026-06-30 corrected `typing/typecore.ml` module classification:
+  - Reran the unbolted LLVM-built constfilter compiler versus the corrected
+    native-built compiler on `typing/typecore.ml` with a longer timing run,
+    because the earlier three-sample result was noisy.
+  - `samples=7`, `inner_repetitions=3`: native median `13.752003s`,
+    LLVM-built median `13.798317s`, ratio `1.003368`, improvement `-0.34%`
+    (`bolt_compiler_20260629/native-current-vs-llvm-constfilter-current-module-typing_typecore-samples7-inner3.json`).
+  - Fresh flat perf profiles for this corrected setup were also collected:
+    `perf_typecore_20260630/native-typecore.data` (`23098` samples) and
+    `perf_typecore_20260630/llvm-constfilter-typecore.data` (`23259`
+    samples), with flat reports in the same directory. The top-level profile
+    shape is very similar; LLVM has somewhat higher share in
+    `Flambda2_algorithms.Patricia_tree.find_tree`, `Stdlib.Hashtbl.find`, and
+    related lookup/hash paths, but total sampled cycles are not consistent with
+    a large standalone `typecore` regression.
+  - This supersedes the preceding three-sample `typecore` note: `typecore` is
+    not a clear `-3.62%` base LLVM-codegen regression. The seven-module BOLT
+    result remains poor because the added type-heavy work gets little benefit
+    from existing safe BOLT layout, not because unbolted LLVM is drastically
+    slower on `typecore`.
+
+- 2026-06-30 superseded noisy `typing/typecore.ml` module split:
   - After the seven-module BOLT rejection, measured the two added modules
     separately with the unbolted LLVM-built constfilter compiler against the
     corrected native-built compiler, both in normal native mode.
@@ -11,11 +32,9 @@
   - `typing/typemod.ml`, same setup: native median `3.789557s`, LLVM-built
     median `3.725575s`, ratio `0.983116`, improvement `+1.69%`
     (`bolt_compiler_20260629/native-current-vs-llvm-constfilter-current-module-typing_typemod-inner3.json`).
-  - Conclusion: the stricter seven-module workload is mainly exposing a
-    `typecore` base LLVM-codegen regression, not a broad failure of both added
-    modules. Older `typecore` perfstat files are from a different build pair
-    and are not sufficient to explain this current regression; the next useful
-    step is a fresh corrected native-vs-LLVM perf profile for `typecore`.
+  - Superseded by the longer `typecore` rerun above. The three-sample result
+    was too noisy to classify `typecore` as a clear base LLVM-codegen
+    regression.
 
 - 2026-06-30 rejected safe BOLT artifacts on seven-module workload:
   - Rechecked the current best safe BOLT artifact on the explicit seven-module
