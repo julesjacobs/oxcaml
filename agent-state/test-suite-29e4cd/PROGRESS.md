@@ -1,5 +1,38 @@
 # Progress
 
+- 2026-06-30 rejected post-statepoint spill-fusing block as a compiler candidate:
+  - Reconfirmed the scope correction: generic driver/compiler optimization
+    changes such as `-O4` cannot count toward the +6% target because the
+    native-built compiler can receive the same treatment. Candidate wins must
+    be LLVM-path-only: backend/codegen, LLVM-built-only pass configuration, or
+    LLVM-built binary post-link work such as BOLT.
+  - Tested a temporary hidden `llc` switch that skipped folding spill reloads
+    into instructions after a same-block statepoint in `oxcaml`/`ocaml` GC
+    functions. Focused `typing/ctype.ml` RS4GC stats showed the switch hit the
+    intended shape without changing root metadata: OXSR stayed at `1629`
+    appended spill slots, fixup stayed at `407` spill slots / `798` spilled
+    registers, frame size stayed `27936` bytes, while regalloc skipped `1574`
+    post-statepoint folds and inserted `47` more reloads.
+  - The focused dynamic loop microbenchmark confirmed this is a real LLVM-only
+    control point for the old folded-memory-ALU slowdown: with the normal
+    wrapper the GC loop cases were about `1.53x` to `1.56x` slower than native;
+    with the temporary switch they were about `1.07x` slower on the same
+    reduced five-sample setup.
+  - Full compiler boot validation rejected the switch. A fresh boot build
+    through `tools/build-llvm-boot-with-installed.sh`, using only the targeted
+    wrapper flag, failed after roughly `402` wrapper invocations with the same
+    hard correctness class as prior broad allocator experiments:
+    `.ocamlcommon` reported `Fatal error: allocation failure during minor GC`
+    and the byte side took `SEGV`. I stopped the remaining build jobs after
+    that failure and reverted the temporary source/wrapper, then rebuilt `llc`
+    from restored sources.
+  - Conclusion: harmful post-statepoint scalar reload folding is still an
+    important measured slowdown class, but simply blocking all same-block
+    post-statepoint folding is too broad or violates an allocator/root
+    invariant. The next valid route is to reduce the `.ocamlcommon` failure
+    and identify the exact unsafe subcase, or design a narrower transform that
+    preserves the microbenchmark win and passes boot/self-stage validation.
+
 - 2026-06-30 rejected targeted OxCaml statepoint partition spill mode:
   - Followed up on the global `-split-spill-mode=default` signal with a
     temporary hidden diagnostic that kept the normal greedy `speed` mode
