@@ -1761,3 +1761,23 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     `R10`/`R11` are intentionally excluded because PLT stubs may clobber them.
     The LLVM AMD64 ordinary OxCaml calling convention uses the same value
     register list, so there is no `R10`/`R11` parity fix to make here.
+- 2026-06-30 LLVM-path-only BOLT ICP root-safety screen:
+  - Added a benchmark-local analyzer
+    `bolt_compiler_20260629/analyze_icp_root_safety.py` to classify BOLT ICP
+    promoted direct-call source sites by the original OCaml frame descriptor's
+    live-root count. This is not compiler-path code; it correlates BOLT BAT,
+    post-ICP `call; jmp merge` shapes, frametable descriptors, and optional
+    `.fdata` call counts.
+  - Ran it on the unsafe normal ICP artifact
+    `ocamlopt.constfilter.cache-hfsort-peep-rodata-icp-calls-v4.bat.bolt`
+    against `ocamlopt.constfilter.reloc` and
+    `ocamlopt.constfilter.reloc.noassert.lbr.fdata`. Result:
+    `538` approximated promoted source sites; `491` had nonzero live roots,
+    `41` had zero live roots, and `6` had no source descriptor. Weighted by
+    `.fdata` call counts, nonzero-live sites accounted for `4396` counts while
+    zero-live sites accounted for only `23`.
+  - Conclusion: a conservative zero-live-only BOLT ICP filter would be
+    correct-looking but too small to plausibly recover the missing throughput.
+    The hot ICP opportunity is dominated by nonzero-root OCaml callsites, so
+    full ICP needs proper OCaml frame/root metadata for BOLT-created promoted
+    return PCs rather than descriptor cloning or a zero-root subset.
