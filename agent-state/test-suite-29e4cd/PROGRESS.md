@@ -1804,3 +1804,27 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     miscompile the compiler. Do not pursue this as a direct policy change; any
     allocator-side fix needs a more precise invariant and a small failing
     reducer before performance testing.
+- 2026-06-30 `ctype` bottleneck restated after excluding `-O4`:
+  - Rechecked existing `typing/ctype.ml` perf reports. Both native and the
+    current best LLVM+BOLT artifact are dominated by GC work
+    (`do_some_marking`, `oldify_one`, `pool_sweep`, `oldify_mopup`), so BOLT
+    code layout has little headroom on this module by itself.
+  - Existing GC stats explain why `ctype` barely improves: native has
+    `60935609` promoted words, `22` major collections, and `366282246`
+    `major_work_done`; LLVM/BOLT has `61242865` promoted words, `23` major
+    collections, and `379148840` `major_work_done`, with essentially the same
+    total allocation. The gap is therefore extra GC retention/scanning work,
+    not ordinary generated-code speed alone.
+  - Ran `analyze_frametable_roots.py` over native, un-BOLTed LLVM, and the
+    current best LLVM+BOLT artifact. Native has `197298` frames and `523867`
+    live roots (`108422` register, `415445` stack); LLVM/BOLT has `224541`
+    frames and `773566` live roots (`206971` register, `566595` stack). BOLT
+    preserves the LLVM frametable shape, so this is an LLVM-backend root
+    metadata issue, not a BOLT layout issue.
+  - The old best artifact still shows the pre-stackcheck-leaf
+    `caml_llvm_call_realloc_stack` bucket (`73650` roots), but the later
+    stackcheck-leaf build removed that bucket and still only reached `+1.81%`.
+    The remaining high-value target is therefore alloc-family and ordinary-call
+    root precision, especially reducing allocator-created duplicate stack homes
+    without weakening the in-place GC mechanism or changing general LLVM flags
+    that native-built could also use.
