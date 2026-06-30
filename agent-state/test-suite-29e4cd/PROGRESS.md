@@ -1325,3 +1325,44 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
   - Conclusion: this local frametable-size reduction is not a viable path to
     the +6% LLVM-only compiler goal. The uncommitted code changes were removed
     rather than carried forward.
+- 2026-06-30 ordinary-call in-place ablation:
+  - Rebuilt `_build/llvm-tools/bin/llc` from clean sources after noticing the
+    previous local binary still contained the rejected unobserved-slot
+    experiment. The current source tree does not contain that experiment.
+  - Collected helper-profile and runtime-GC stats for `typing/ctype.ml`.
+    Native-built and LLVM-built execute essentially the same helper workload:
+    `modify_total` differs by only `+0.12%`, and initialize/string-helper
+    totals are effectively identical. The LLVM-built compiler does, however,
+    spend more time in major-GC work: `promoted_words` `+0.50%`,
+    `major_words` `+0.46%`, `major_collections` `22 -> 23`, and
+    `major_work_done` `366282246 -> 379147801` (`+3.51%`). This supports the
+    root-precision hypothesis for the remaining `ctype` gap rather than a
+    generic `-O4`-style optimization-level explanation.
+  - Clean `ctype.ml` root-listing stats are back to the committed baseline:
+    `1629` appended slots, of which `1618` are ordinary GC-family LiveStacks
+    slots, `11` reload-fed sibling slots, and `9` register roots. The largest
+    appended-slot functions are broad hot typing code, not one rare repair
+    case: `unify_row_field` `105`, `unify_row` `63`, `unify3` `59`, `copy`
+    `54`, and `instance_prim_locals` `52`.
+  - Ablated only ordinary OxCaml call in-place lowering with
+    `-mllvm -oxcaml-statepoint-inplace-calls=false`, leaving alloc-family
+    statepoints in-place. Focused `ctype.ml` stats changed from
+    `1629` appended slots to `200`, while SelectionDAG statepoint pool slots
+    increased from `114` to `3098`. A direct assembly-frametable parse showed
+    total `ctype` live roots nevertheless dropped from `20675` to `19257`,
+    with stack roots dropping from `17625` to `15443`; the emitted object also
+    shrank slightly (`1394312` to `1390584` bytes).
+  - Built a full `_llvm_noinplacecalls_install` compiler with that flag
+    (`74` runtime/stdlib fresh LLVM IR compilations and `1114` main fresh IR
+    compilations). The installed compiler passed the five-module smoke
+    (`cfg_selectgen`, `llvmize`, `translcore`, `ctype`, `env`).
+  - The full compiler-throughput benchmark rejected the ablation. Seven
+    samples with three inner repetitions against the native-built compiler
+    gave baseline median `27.027748s`, candidate median `28.639198s`, ratio
+    `1.059622x`, improvement `-5.96%` in
+    `native-current-vs-llvm-noinplacecalls-inner3.json`.
+  - Conclusion: disabling ordinary-call in-place lowering is useful
+    diagnostically, but it is not a valid performance direction and would move
+    amd64 away from the arm-style model. The remaining path is to keep the
+    in-place design and reduce the ordinary GC-family LiveStacks crossings
+    without reverting to the old pool-spill mechanism.
