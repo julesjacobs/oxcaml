@@ -3642,3 +3642,23 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     the whole `+6%` target. The main root-pressure problem still appears to be
     producer-side AMD64 live-range/spill shape creating many stack-only GC homes
     across ordinary and allocation statepoints.
+- 2026-06-30 strict LLVM-path follow-up rejections:
+  - Rejected the full-BOLT no-split artifact under the strict comparison where
+    the native-built compiler is the baseline and both compilers compile in
+    normal native mode. Artifact:
+    `bolt_compiler_20260629/native-oxcamlopt-vs-fullbolt-nosplit-seven-inner2-20260630.json`.
+    Seven-module workload medians: native-built `29.5885493112728s`,
+    LLVM-built full-BOLT no-split `29.92605889076367s`, ratio
+    `1.0114067633374064`, improvement `-1.1406763337406423%`. This is not a
+    route to the required `+6%` LLVM-path win.
+  - Rejected targeted `typing/ctype.ml` PBQP register allocation as an
+    ablation. The direct smoke using
+    `llc-wrapper-ctype-pbqp.sh` passed and confirmed only `ctype.ll` received
+    `-mllvm -regalloc=pbqp`, but a fresh self-stage with the same wrapper failed
+    later with repeated `Fatal error: allocation failure during minor GC` while
+    building `middle_end/flambda2/simplify/.flambda2_simplify.objs/native` and
+    `.ocamloptcomp.objs/native`. Artifacts:
+    `ctype-pbqp-smoke.log`, `ctype-pbqp-smoke-wrapper.log`,
+    `ctype-pbqp-selfstage-build.log`, and `ctype-pbqp-selfstage-wrapper.log`.
+    This matches the broader BasicRA/PBQP failure class: the saved-IR root shape
+    improvement is not correctness-preserving when used in a real self-stage.
