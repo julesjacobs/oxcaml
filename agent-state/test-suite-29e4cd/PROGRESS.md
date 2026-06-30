@@ -1,5 +1,21 @@
 # Progress
 
+- 2026-06-30 rejected instrprof BOLT plain-`hfsort` layout variant:
+  - Tried to vary the current best instrumentation-profile BOLT recipe by
+    keeping `-reorder-blocks=cache+`, `-peepholes=all`,
+    `-simplify-rodata-loads`, and `--enable-bat`, but changing function
+    reordering to plain `-reorder-functions=hfsort`.
+  - BOLT completed, but frametable patching was not clean:
+    `constfilter-instrprof-cache-hfsortplain-peep-rodata-patch.log` reported
+    `60` unresolved return PCs and listed BOLT-created call returns requiring
+    synthesized descriptors. The resulting binary starts (`-version` prints
+    `5.2.0+ox`), but the unresolved descriptors mean it is not safe to
+    benchmark or count as a production-quality compiler artifact.
+  - Conclusion: do not pursue this plain-`hfsort` variant unless the BOLT
+    frametable metadata path is improved to account exactly for the new
+    call-return PCs. The best valid strict artifact remains the no-ICP
+    instrumentation-profile BOLT result at `+3.234%`.
+
 - 2026-06-30 rejected combined LBR+instrumentation BOLT profile:
   - Measured the existing combined-profile artifact
     `bolt_compiler_20260629/ocamlopt.constfilter.lbr-plus-instrprof-cache-hfsort-peep-rodata.bat.patched`
