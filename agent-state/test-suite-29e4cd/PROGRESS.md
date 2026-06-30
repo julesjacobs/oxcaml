@@ -2029,3 +2029,35 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     `translcore`, `ctype`, `env`, `typecore`, `typemod`) before any
     performance result is considered. Five-module smoke can miss real stale-root
     bugs.
+- 2026-06-30 additional instrumented-BOLT screens:
+  - Patched the previously unpatched
+    `ocamlopt.constfilter.instrprof-cache-hfsort-peep-rodata-icp10.bat`
+    artifact. Patching rewrote `224543` descriptors with zero unresolved and
+    all by call-site mapping; `-version` passed. BOLT reported this top-10
+    configuration optimized `0.0%` of indirect calls, so it is effectively a
+    layout-only variant.
+  - A one-sample/one-inner screen looked promising (`+4.64%`), but the normal
+    seven-sample/three-inner benchmark rejected it as a goal candidate:
+    native-built median `27.181370s`, candidate median `26.331605s`, ratio
+    `0.968737`, improvement `+3.13%`
+    (`native-current-vs-llvm-constfilter-instrprof-cache-hfsort-peep-rodata-icp10-inner3.json`).
+    This is valid LLVM-built-binary-only work, but it is below the existing
+    safe BOLT best (`+3.77%`) and below the required `+6%`.
+  - Also tried merging the non-BOLT LBR profile
+    `ocamlopt.constfilter.reloc.noassert.lbr.fdata` with the new
+    instrumentation profile `ocamlopt.constfilter.instrumented-hot-bat.fdata`.
+    `merge-fdata` accepted both as same-input legacy fdata and produced
+    `ocamlopt.constfilter.reloc.lbr-plus-instrprof.fdata`. The same safe BOLT
+    recipe then covered more profiled functions (`7805` vs `7350`/`7380`) and
+    patched cleanly with zero unresolved descriptors.
+  - The merged-profile artifact was rejected by a one-sample/one-inner screen:
+    native `9.097661s`, candidate `9.125639s`, ratio `1.003075`, improvement
+    `-0.31%`
+    (`native-current-vs-llvm-constfilter-lbr-plus-instrprof-cache-hfsort-peep-rodata-screen1.json`).
+    Do not spend a robust benchmark run on this merged profile.
+  - Current best valid artifact remains
+    `ocamlopt.constfilter.cache-hfsort-peep-rodata.bat.patched` at `+3.77%`.
+    BOLT profile tweaks and measured ICP variants are not closing the remaining
+    gap; the next useful work should return to AMD64 LLVM root/spill precision
+    or exact BOLT metadata for transformations that actually change hot code
+    without corrupting OCaml frame roots.
