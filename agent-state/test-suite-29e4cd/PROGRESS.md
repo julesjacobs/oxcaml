@@ -1,5 +1,27 @@
 # Progress
 
+- 2026-06-30 corrected unbolted seven-module baseline and perf counters:
+  - Reran unbolted LLVM-built constfilter versus native-built
+    `oxcaml_main_native.exe` on the corrected seven-module native-mode
+    workload. `samples=3`, `inner_repetitions=2`: native median
+    `29.867989s`, LLVM median `30.235557s`, ratio `1.012306`,
+    improvement `-1.23%`
+    (`bolt_compiler_20260629/native-oxcamlopt-vs-llvm-constfilter-seven-inner2-rerun.json`).
+  - Because that small delta is noise-sensitive, collected perf counters on
+    one isolated two-repetition seven-module run per compiler. The first broad
+    event set was multiplexed and should only be used qualitatively; it showed
+    LLVM with higher L1I misses (`1.40x`) but fewer branch misses (`0.95x`).
+  - The narrower non-multiplexed counter run is the useful one:
+    native elapsed `29.715790s`, LLVM elapsed `29.739473s`; task-clock ratio
+    `1.0015`, cycles ratio `1.0009`, instructions ratio `0.9909`, branches
+    ratio `0.9944`, branch-misses ratio `0.9489`. IPC is slightly lower for
+    LLVM (`2.0629` versus native `2.0839`), but there is no evidence of a
+    large unbolted base-codegen regression on this aggregate workload.
+  - Conclusion: the current seven-module picture is base LLVM-built compiler
+    near parity with native, plus only a small safe-BOLT/layout gain. The +6%
+    target still requires an LLVM-path-only improvement, but chasing generic
+    `-O4`-style flags or a broad base slowdown is the wrong direction.
+
 - 2026-06-30 rejected type-heavy BOLT profile specialization:
   - Collected a fresh LBR profile from the relinked LLVM-built constfilter
     compiler on five repetitions of `typing/typecore.ml` and
