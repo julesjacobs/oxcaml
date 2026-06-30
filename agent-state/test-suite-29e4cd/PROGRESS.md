@@ -2694,3 +2694,26 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     should still target the earlier producer: AMD64 register allocation / split
     placement / statepoint operand materialization that creates long-lived
     duplicate GC spill homes in hot `ctype` functions.
+- 2026-06-30 rejected statepoint GC operand spill-weight diagnostic:
+  - Tested a narrow LLVM-only register-allocation diagnostic in
+    `CalcSpillWeights`: scale spill-weight contributions only for operands in
+    the GC pointer section of OxCaml `STATEPOINT` instructions. The intent was
+    to bias greedy RA toward spilling/folding those operands through existing
+    stack homes while preserving the ARM-style in-place statepoint model. This
+    is distinct from invalid generic optimization-level changes such as `-O4`,
+    which would also apply to the native-built compiler.
+  - Focused direct `typing/ctype.ml` screens at scales `0.25`, `0.10`, and
+    `0.0` left every relevant counter unchanged from the current baseline:
+    `1629` spill slots appended to statepoints, `1618` GC-family slots (`860`
+    ordinary-call, `757` alloc-family, `1` C-call), `9` crossing GC registers,
+    `11` reload-fed sibling slots, `7133` folded stack accesses, `5938`
+    reloads inserted, and `2374` regalloc spill slots allocated.
+  - A temporary statistic confirmed the hook was not dead code: with scale
+    `0.0`, it fired `12569` times on the saved `ctype.rs4gc.ll`. Since even
+    eliminating those local weight contributions did not perturb greedy's
+    chosen splits/spills, the bad AMD64 shape is controlled by later split
+    placement / allocation feasibility rather than this per-use weight.
+  - The diagnostic source change was reverted and `_build/llvm-tools/bin/llc`
+    was rebuilt back to the checked-in source state. Do not revisit simple
+    statepoint-GC-use spill-weight scaling unless paired with a more direct
+    split-placement or operand-home change.
