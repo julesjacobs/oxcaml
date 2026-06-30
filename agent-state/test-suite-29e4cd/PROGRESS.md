@@ -1,5 +1,35 @@
 # Progress
 
+- 2026-06-30 rejected targeted OxCaml statepoint partition spill mode:
+  - Followed up on the global `-split-spill-mode=default` signal with a
+    temporary hidden diagnostic that kept the normal greedy `speed` mode
+    everywhere except OxCaml GC virtual registers used as statepoint varargs,
+    where global/block splitting used partitioned complement mode. This was
+    intended to target the bad statepoint root shape without changing generic
+    LLVM/X86 allocation.
+  - Focused `typing/ctype.ml` screen reproduced the same promising counter
+    movement as the global mode: total appended spill slots dropped from
+    `1629` to `1226`, ordinary-call GC-family slots from `860` to `219`,
+    crossing GC registers from `9` to `3`, and assembly from `257463` to
+    `255932` lines. As before, alloc-family GC-family roots rose from `757`
+    to `1000`.
+  - The seven-module standard `-llvm-backend` smoke
+    (`cfg_selectgen`, `llvmize`, `translcore`, `ctype`, `env`, `typecore`,
+    `typemod`) passed, including the `typecore` case that caught an earlier
+    bad root canonicalization.
+  - Full boot validation still rejected it. A separate
+    `_llvm_targeted_partition_boot_build` failed after `414` wrapper
+    invocations with `Fatal error: allocation failure during minor GC` in
+    `.ocamlcommon` and then a `.ocamlcommon` `SEGV`. I stopped the remaining
+    jobs, reverted the source diagnostic, and rebuilt `llc` from restored
+    sources.
+  - Conclusion: partitioned complement splitting of statepoint GC values is
+    still too broad or violates a hidden allocator/root invariant even when
+    limited to statepoint varargs. The root counter movement is useful
+    evidence, but this cannot become a performance candidate without first
+    reducing to the full-boot `.ocamlcommon` failure and proving a narrower
+    transformation safe.
+
 - 2026-06-30 rejected `-split-spill-mode=default` despite focused root win:
   - Screened the saved post-RS4GC `typing/ctype.ml` IR with
     `llc -mllvm -split-spill-mode={default,size,speed}`. The current default
