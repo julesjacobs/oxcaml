@@ -3281,3 +3281,22 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     the `gc_regs` mapping is not the missing piece. This keeps the next target
     on allocator split/spill placement and OXSR-compatible root-home coalescing,
     not ABI register-order changes or generic optimization flags.
+- 2026-06-30 direct duplicate-root classification:
+  - Added a temporary stats-only diagnostic to
+    `OxCamlStatepointSpillRoots::processStatepoint` to classify GC-family stack
+    slots whose must-reaching store source is the same virtual-register value as
+    a root already listed by the statepoint. This did not change emitted code.
+  - Rebuilt only `_build/llvm-tools/bin/llc`, then ran the saved
+    `typing/ctype.ml` post-RS4GC IR
+    (`bolt_compiler_20260629/mir_20260630/ctype.rs4gc.ll`) with direct
+    `llc -O3 --relocation-model=pic --stats`. The diagnostic reported `285`
+    direct duplicates out of `1628` GC-family appended stack roots (`1641`
+    total appended stack roots). Artifact:
+    `bolt_compiler_20260629/root_stats_20260630/dup-listed-diagnostic-20260630/`.
+  - Reverted the temporary source edit and rebuilt `llc` back to the checked-in
+    source state; `git diff` for `OxCamlStatepointSpillRoots.cpp` is empty.
+  - Conclusion: direct duplicate stack homes are real and may justify a future
+    refresh-store/root-home design, but they are not dominant enough to explain
+    the whole `+6%` target. The main root-pressure problem still appears to be
+    producer-side AMD64 live-range/spill shape creating many stack-only GC homes
+    across ordinary and allocation statepoints.
