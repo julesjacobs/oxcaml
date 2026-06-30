@@ -1,5 +1,23 @@
 # Progress
 
+- 2026-06-30 rejected spill-weight multiplier as an LLVM-path improvement:
+  - Tested a temporary hidden `llc` switch that multiplied spill weights for
+    OxCaml GC virtual registers live as statepoint varargs. The goal was to
+    see whether nudging greedy RA to spill those values would fold them into
+    existing statepoint stack operands, as `-regalloc=basic` does in the
+    diagnostic screen.
+  - Screened saved post-RS4GC `typing/ctype.ml` IR at multipliers `0.75`,
+    `0.5`, `0.25`, and `0.125`. The result was flat: OXSR appended-root
+    counts stayed at `1629` to `1631` spill slots, with the GC-family total at
+    `1618` to `1620`; assembly size changed by only a handful of lines.
+  - Removed the temporary switch. Conclusion: the bad shape is not controlled
+    by the final scalar spill-weight value alone. The useful contrast remains
+    greedy versus basic immediately before OXSR: basic lists many more stack
+    operands at statepoints, while greedy leaves long-lived GC stack homes live
+    but unlisted, causing OXSR to append them. The next allocator investigation
+    should look at reload folding / statepoint operand constraints or live-range
+    splitting placement, not global spill-weight scaling.
+
 - 2026-06-30 rejected OxCaml call-split-remainder root-pressure hypothesis:
   - After the `-O4` scope correction, tested another LLVM-path-only allocator
     diagnostic rather than any generic driver optimization. Added a temporary
