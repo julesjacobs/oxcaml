@@ -3754,3 +3754,30 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     route. The remaining likely path is still real AMD64 LLVM codegen/root
     shape work, or BOLT support that can make new managed return PCs exact and
     profitable rather than synthetic and slow.
+- 2026-06-30 rejected narrow statepoint-GC fold suppression diagnostic:
+  - After the review correction, kept the scope LLVM-path-only: no `-O4`,
+    `-mcpu=native`, or other flags that native-built could also receive. I
+    tested a temporary hidden `llc` diagnostic in `InlineSpiller` that skipped
+    memory folding only for operands in the vararg section of OxCaml
+    `STATEPOINT`s, instead of using the already-rejected broad x86
+    `-disable-spill-fusing` knob.
+  - Built `_build/llvm-tools/bin/llc`, then ran the saved
+    `typing/ctype.ml` post-RS4GC IR with
+    `llc -O3 --relocation-model=pic --oxcaml-no-statepoint-gc-folding --stats`
+    against `bolt_compiler_20260629/mir_20260630/ctype.rs4gc.ll`.
+    Artifact:
+    `bolt_compiler_20260629/root_stats_20260630/no-statepoint-gc-folding-20260630/`.
+  - Rejected before any boot build: `llc` printed repeated
+    `error: ran out of registers during register allocation`, and the OXSR
+    counters moved sharply in the wrong direction. Baseline `ctype` was `1629`
+    appended spill slots (`757` alloc-family, `860` ordinary-call, `1` C-call);
+    the diagnostic became `7693` appended spill slots (`1432` alloc-family,
+    `6203` ordinary-call, `1` C-call). Regalloc also inserted far more reloads
+    (`5938 -> 11134`) and almost eliminated folded stack accesses
+    (`7133 -> 168`).
+  - Reverted the temporary source edit and rebuilt `llc` back to the checked-in
+    source state. Conclusion: direct statepoint-GC fold suppression is the
+    wrong lever. The needed fix is more selective than forbidding statepoint
+    operand folding: it likely needs to influence which values get long-lived
+    stack homes, or coalesce/refresh only proven duplicate root homes, while
+    keeping enough folding to avoid register-allocation failure.
