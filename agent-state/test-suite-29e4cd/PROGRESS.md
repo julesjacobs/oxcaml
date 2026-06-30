@@ -2235,3 +2235,24 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     found GC/allocation failures. The next fix must prevent or narrowly reshape
     the bad AMD64 spill pattern while preserving the existing frametable/root
     mechanism, not filter roots away after the fact.
+- 2026-06-30 rejected narrow x86 GC-spill-folding diagnostic:
+  - Tested a narrower version of the previously rejected global
+    `-disable-spill-fusing` idea. The temporary X86 diagnostic blocked ordinary
+    frame-index memory folding only when the folded operand was an OxCaml GC
+    pointer virtual register in an OxCaml function; statepoint operand folding
+    and non-GC x86 folding were left alone. The source change was reverted
+    after the measurement and `_build/llvm-tools/bin/llc` was rebuilt back to
+    checked-in sources.
+  - On the saved `typing/ctype.ml` post-RS4GC IR, direct `llc` stats showed
+    the diagnostic did fire (`8136` attempted GC pointer spill folds blocked),
+    but it did not move the root-pressure metrics at all. Baseline and
+    diagnostic both reported `1618` GC-family spill slots appended (`757`
+    alloc-family, `860` ordinary-call, `1` C-call), `9` crossing GC registers,
+    `11` reload-fed sibling slots, and `1629` total spill slots appended.
+    Regalloc merely shifted from `7133` to `7089` folded stack accesses and
+    from `5938` to `5982` reloads inserted.
+  - Conclusion: the compiler-throughput `ctype` gap is not solved by blocking
+    ordinary x86 memory folding for GC vregs after allocation. The next
+    LLVM-only investigation should target why the GC-family spill slots are live
+    across statepoints in the first place, or reduce frametable/root descriptor
+    volume in a way that is provably equivalent to the ARM/native mechanisms.
