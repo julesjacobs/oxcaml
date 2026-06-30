@@ -1915,3 +1915,11 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     work should avoid generic `-O` changes and either add exact OCaml-aware
     BOLT metadata for new ICP return PCs or improve AMD64 LLVM root/spill
     precision while preserving the arm-style in-place GC model.
+  - Checked descriptor contents for representative normal-ICP sites from the
+    detector output, including the startup `concat_map` site and candidates in
+    `caml_apply2`, `caml_apply5`, `camlCfg_dataflow__strong_connect`, and
+    `camlX86_gas__print_reg`. The cloned source descriptors sampled there were
+    stack-root-only, not register-root descriptors. This rules out a narrow
+    "drop fallback-only register roots" fix for the observed corruption. The
+    direct-ICP route still needs exact metadata for the direct-call state, not
+    a small register-filter heuristic.
