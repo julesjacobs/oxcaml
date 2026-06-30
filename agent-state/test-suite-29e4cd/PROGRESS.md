@@ -1,5 +1,46 @@
 # Progress
 
+- 2026-06-30 rejected `-split-spill-mode=default` despite focused root win:
+  - Screened the saved post-RS4GC `typing/ctype.ml` IR with
+    `llc -mllvm -split-spill-mode={default,size,speed}`. The current default
+    for greedy is `speed`; `size` was worse (`1664` appended spill slots vs
+    `1629`). `default` looked promising in isolation: appended spill slots
+    dropped to `1226`, ordinary-call GC-family slots dropped from `860` to
+    `219`, crossing GC registers dropped from `9` to `3`, and assembly shrank
+    from `257463` to `255903` lines. The tradeoff was more alloc-family roots
+    (`757` -> `1000`) and more splitting.
+  - Tried a separate boot build with
+    `LLVM_EXTRA_FLAGS='-mllvm -split-spill-mode=default'` using the normal
+    `tools/llvm-rs4gc-llc-wrapper.sh` pipeline. Rejected on correctness before
+    benchmarking: the build hit `Fatal error: allocation failure during minor
+    GC` in `.ocamlcommon` and multiple `SEGV`s in `.ocamlcommon`,
+    `middle_end/flambda2/types`, and `middle_end/flambda2/reaper`. I stopped
+    the remaining `-j2` jobs after the repeated failure class was clear.
+  - Conclusion: complement spill placement is a real control point for the
+    root-pressure counters, but the global `default` mode miscompiles the
+    compiler. A future fix may borrow the useful part only if it can be
+    constrained to a proven-safe OxCaml/statepoint case and pass the
+    seven-module workload plus full boot validation.
+
+- 2026-06-30 stackcheck-leaf does not solve the `ctype` bottleneck:
+  - Ran a focused five-sample, three-inner benchmark of the existing
+    `ocamlopt.stackcheck-leaf.stage-stdlib.cache-hfsort-peep-rodata.bat.patched`
+    artifact on `typing/ctype.ml` against the native-built compiler. Result:
+    native median `7.478881s`, candidate median `7.409149s`, ratio `0.990676`,
+    improvement `+0.93%`
+    (`native-current-vs-stackcheck-leaf-stage-stdlib-cache-hfsort-peep-rodata-module-typing_ctype-samples5-inner3.json`).
+  - Re-ran frametable analysis for the same artifact. The old
+    `caml_llvm_call_realloc_stack` bucket is gone, but live roots are still far
+    above native: native has `523867` live roots; stackcheck-leaf+BOLT has
+    `699633`. Remaining deltas are mostly `noalloc+debug` stack roots
+    (`310702` native vs `422229` LLVM) and `alloc+debug` roots (`205192` vs
+    `263190`).
+  - Conclusion: same-quality stack checks are still important, but the
+    compiler-throughput blocker is not just the old stack-check path. The
+    remaining `ctype` work has to reduce ordinary/debug and alloc-family root
+    pressure without switching away from the arm-style in-place statepoint
+    mechanism or applying a generic all-backends optimization level.
+
 - 2026-06-30 rejected spill-weight multiplier as an LLVM-path improvement:
   - Tested a temporary hidden `llc` switch that multiplied spill weights for
     OxCaml GC virtual registers live as statepoint varargs. The goal was to
