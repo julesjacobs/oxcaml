@@ -3813,3 +3813,33 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     AMD64 root-home shape. Continue toward a precise producer-side fix for
     long-lived GC stack homes, or exact BOLT metadata for transformations that
     materially change hot code.
+- 2026-06-30 ordinary-call durable-home candidate sizing:
+  - Tested a stats-only OXSR probe, again staying LLVM-path-only and using the
+    saved `typing/ctype.ml` post-RS4GC IR. The probe counted ordinary managed
+    call register roots whose original `VirtRegMap` spill slot was also being
+    appended to the same statepoint as a GC-family stack root. Artifact:
+    `bolt_compiler_20260629/root_stats_20260630/ordinary-home-candidate-stats-20260630/`.
+  - The candidate set is large: `952` ordinary-call register roots have an
+    appended original spill-slot home in this module, while the same run has
+    `1012` ordinary-call GC-family appended stack roots and `1641` appended
+    spill slots total. This explains why the earlier unsafe ordinary-register
+    canonicalization had such a large focused effect (`794` register roots
+    canonicalized, ordinary-call appended slots `860 -> 66` in that older
+    baseline).
+  - The previous canonicalization failed because it replaced the register root
+    with an existing spill slot without proving that slot was fresh at the
+    call. The safer candidate is therefore not "use the slot as-is"; it is
+    "refresh the durable spill-slot home immediately before the ordinary
+    statepoint, then fold the tied register gc operand to that slot so the GC
+    updates the location later reloads will read."
+  - Implementation note: this is more invasive than a one-operand rewrite.
+    Statepoint register gc operands have tied defs; folded stack roots do not.
+    A correct prototype must rebuild the statepoint gc-pointer section, remove
+    the selected tied defs, preserve/renumber remaining ties and base/derived
+    map entries, insert indexed pre-statepoint stores, and update
+    `SlotIndexes`/verifier-visible state. Do not implement this by deleting
+    roots after OXSR or by cloning the previously rejected stale-slot
+    canonicalization.
+  - Reverted the stats-only source edit and rebuilt `_build/llvm-tools/bin/llc`
+    back to checked-in source; `git diff` for
+    `OxCamlStatepointSpillRoots.cpp` is empty.
