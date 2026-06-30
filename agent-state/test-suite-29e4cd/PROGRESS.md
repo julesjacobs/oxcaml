@@ -1,5 +1,44 @@
 # Progress
 
+- 2026-06-30 corrected native-mode compiler benchmark reset:
+  - Supersedes the previous "fair build-tree compiler baseline reset" entry
+    for compiler-throughput numbers. That entry used build-tree
+    `main_native.exe` artifacts, but direct smoke tests showed
+    `main_native.exe -c t.ml` produces `t.cmo`, not `t.cmx`/`t.o`. It is the
+    byte-compiler driver path, so its timings do not answer the native-mode
+    ocamlopt question.
+  - Correct native-mode build-tree baseline is
+    `_native_current_build/main/oxcaml_main_native.exe` (same size/build-id as
+    installed `_native_current_install/bin/ocamlopt.opt`). A trivial compile
+    produces `t.cmx` and `t.o`, as expected.
+  - Correct canonical LLVM ocamlopt screen used
+    `_llvm_canon_stage1_main_build/main/oxcaml_main_native.exe` with its
+    matching `_llvm_canon_stage1_install/lib/ocaml`; using native or
+    constfilter build inputs caused candidate segfaults from mismatched
+    compiler-library artifacts. With matched native-mode inputs,
+    `samples=3`, `inner_repetitions=1`, five modules:
+    native median `9.171918s`, LLVM median `9.767490s`, ratio `1.06493`,
+    improvement `-6.49%`
+    (`bolt_compiler_20260629/native-oxcamlopt-vs-llvm-canon-oxcamlopt-matched-screen-inner1.json`).
+  - Re-screened existing BOLT candidates under the corrected native-mode
+    setup. The best quick screen remained
+    `ocamlopt.constfilter.cache-hfsort-peep-rodata.bat.patched`:
+    native median `9.312751s`, BOLT median `8.793771s`, improvement `+5.57%`
+    (`native-oxcamlopt-vs-best-bolt-oxcamlopt-screen-inner1.json`).
+    Nearby variants were worse: `cache-hfsort` `+3.49%`, ICP top10 `+0.81%`,
+    instrprof ICP10 `+4.38%`, blockcache `+4.21%`.
+  - Ran a cleaner paired alternating benchmark for the best BOLT artifact,
+    `samples=5`, `inner_repetitions=2`, same five modules. Result:
+    native median `18.485972s`, BOLT median `17.630192s`, improvement
+    `+4.63%`
+    (`native-oxcamlopt-vs-best-bolt-oxcamlopt-paired-inner2.json`). This is a
+    real LLVM-path win, but it does not satisfy the requested `+6% beyond the
+    native-built compiler` target.
+  - Important diagnostic caveat: the observed `caml_apply2` direct-call loss
+    and `main_native.exe` disassembly were from the byte-compiler artifact, not
+    from the corrected ocamlopt artifact. Treat that as a potentially useful
+    codegen clue, not as proven cause of the native-mode ocamlopt gap.
+
 - 2026-06-30 fair build-tree compiler baseline reset:
   - Corrected the compiler-throughput baseline after finding an artifact-class
     mismatch in earlier BOLT/compiler comparisons. The installed native
