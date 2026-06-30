@@ -1,5 +1,19 @@
 # Progress
 
+- 2026-06-30 rejected instrprof BOLT blockcache variant:
+  - Tried changing the current best instrumentation-profile BOLT recipe from
+    `-reorder-blocks=cache+` to `-reorder-blocks=cache` while keeping
+    `-reorder-functions=hfsort+`, `-peepholes=all`,
+    `-simplify-rodata-loads`, and `--enable-bat`.
+  - BOLT completed, but frametable patching again reported `60` unresolved
+    BOLT-created call-return PCs requiring synthesized descriptors
+    (`constfilter-instrprof-blockcache-hfsort-peep-rodata-patch.log`). This is
+    not a clean artifact and was not benchmarked.
+  - Conclusion: the current clean instrprof BOLT recipe is narrow:
+    `cache+`/`hfsort+`/peepholes/rodata patches with zero unresolved
+    descriptors and gives the best strict result so far (`+3.234%`), while
+    nearby block/function/peephole variants create unsafe return-PC metadata.
+
 - 2026-06-30 rejected instrprof BOLT no-peepholes variant:
   - Tried another narrow variant of the current best instrumentation-profile
     BOLT recipe: keep `-reorder-blocks=cache+`,
