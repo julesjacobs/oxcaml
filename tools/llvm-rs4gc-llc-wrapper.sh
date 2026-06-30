@@ -14,6 +14,20 @@ emit_llvm=0
 compile_only=0
 llc_opt_level=${LLVM_WRAPPER_LLC_OPT_LEVEL:-3}
 llc_args=()
+opt_args=()
+assembler=${LLVM_WRAPPER_ASSEMBLER:-as}
+assembler_triple=${LLVM_WRAPPER_ASSEMBLER_TRIPLE:-x86_64-unknown-linux-gnu}
+
+if [ -n "${LLVM_WRAPPER_PGO_KIND:-}" ]; then
+  opt_args+=("-pgo-kind=$LLVM_WRAPPER_PGO_KIND")
+fi
+if [ -n "${LLVM_WRAPPER_PROFILE_FILE:-}" ]; then
+  opt_args+=("-profile-file=$LLVM_WRAPPER_PROFILE_FILE")
+fi
+if [ -n "${LLVM_WRAPPER_OPT_EXTRA_ARGS:-}" ]; then
+  read -r -a extra_opt_args <<< "$LLVM_WRAPPER_OPT_EXTRA_ARGS"
+  opt_args+=("${extra_opt_args[@]}")
+fi
 
 set_llc_opt_level_from_arg() {
   if [ -n "${LLVM_WRAPPER_LLC_OPT_LEVEL:-}" ]; then
@@ -93,9 +107,9 @@ if [ -z "$out" ] || [ -z "$input" ]; then
 fi
 
 if [ "$mode" = "ir" ]; then
-  pipeline='default<O3>,rewrite-statepoints-for-gc,verify'
+  pipeline=${LLVM_WRAPPER_OPT_PIPELINE:-'default<O3>,rewrite-statepoints-for-gc,verify'}
   if [ "$emit_llvm" = 1 ]; then
-    opt -S -passes="$pipeline" "$input" -o "$out"
+    opt "${opt_args[@]}" -S -passes="$pipeline" "$input" -o "$out"
   else
     tmp=$(mktemp --suffix=.ll)
     cleanup() {
@@ -108,12 +122,23 @@ if [ "$mode" = "ir" ]; then
       rm -f "$tmp"
     }
     trap cleanup EXIT
-    opt -S -passes="$pipeline" "$input" -o "$tmp"
+    opt "${opt_args[@]}" -S -passes="$pipeline" "$input" -o "$tmp"
     llc -O"$llc_opt_level" --relocation-model=pic \
       "${llc_args[@]}" "$tmp" -o "$out"
   fi
 elif [ "$compile_only" = 1 ]; then
-  as "$input" -o "$out"
+  case "$assembler" in
+    as)
+      as "$input" -o "$out"
+      ;;
+    llvm-mc)
+      llvm-mc -triple="$assembler_triple" -filetype=obj "$input" -o "$out"
+      ;;
+    *)
+      echo "unsupported assembler: $assembler" >&2
+      exit 2
+      ;;
+  esac
 else
   echo "unsupported wrapper invocation" >&2
   exit 2

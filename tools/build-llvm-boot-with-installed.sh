@@ -11,6 +11,7 @@ wrapper=${LLVM_WRAPPER:?set LLVM_WRAPPER to the clang wrapper or LLVM tool path}
 wrapper_log=${LLVM_WRAPPER_LOG:-$wrapper.log}
 export LLVM_WRAPPER_LOG="$wrapper_log"
 llvm_extra_flags=${LLVM_EXTRA_FLAGS:-}
+llvm_extra_ocamlopt_flags=${LLVM_EXTRA_OCAMLOPT_FLAGS:-}
 opam_switch_bin=${OPAM_SWITCH_BIN:-}
 arch=${ARCH:-}
 run_smoke=${RUN_SMOKE:-1}
@@ -105,6 +106,13 @@ if [ -n "$llvm_extra_flags" ]; then
   WRAPPER="$wrapper" LLVM_FLAGS_PARAM="$llvm_flags_param" \
     perl -0pi -e \
       '$w = $ENV{"WRAPPER"}; $p = $ENV{"LLVM_FLAGS_PARAM"}; s/llvm-path=\Q$w\E/llvm-path=$w$p/g' \
+      "$repo/duneconf/boot.ws"
+fi
+
+if [ -n "$llvm_extra_ocamlopt_flags" ]; then
+  LLVM_EXTRA_OCAMLOPT_FLAGS="$llvm_extra_ocamlopt_flags" \
+    perl -0pi -e \
+      '$f = $ENV{"LLVM_EXTRA_OCAMLOPT_FLAGS"}; s/(\(flags \(:standard[^\n]*\)\)\n)/$1    (ocamlopt_flags (:standard $f))\n/' \
       "$repo/duneconf/boot.ws"
 fi
 

@@ -1,5 +1,30 @@
 # Progress
 
+- 2026-06-30 IR PGO plumbing smoke:
+  - Added wrapper-only knobs for LLVM new-PM PGO (`LLVM_WRAPPER_PGO_KIND`,
+    `LLVM_WRAPPER_PROFILE_FILE`, `LLVM_WRAPPER_OPT_EXTRA_ARGS`) plus an
+    optional `LLVM_WRAPPER_ASSEMBLER=llvm-mc` path for assembly containing
+    LLVM-only directives such as `.cg_profile`. Default wrapper behavior stays
+    unchanged.
+  - Built matching local profile tooling: `llvm-profdata`, `llvm-mc`, and a
+    profile-only compiler-rt archive at
+    `_build/compiler-rt-profile-local/lib/linux/libclang_rt.profile-x86_64.a`.
+    The system LLVM 20/21 profile runtimes are not usable with this local LLVM:
+    they write/report raw profile version mismatches.
+  - Mechanical smoke passed for counter-only IR PGO on a small OCaml program:
+    generation requires `-disable-vp` because value profiling inserted
+    `__llvm_profile_instrument_target` into OxCaml calling-convention code and
+    segfaulted; profile-use then required `llvm-mc` because local LLVM emitted
+    `.cg_profile` and system `as` rejected it. With
+    `LLVM_WRAPPER_OPT_EXTRA_ARGS='-mtriple=x86_64-unknown-linux-gnu -disable-vp'`
+    and `LLVM_WRAPPER_ASSEMBLER=llvm-mc`, the generated `.profraw` merged with
+    local `llvm-profdata` and the profile-use binary ran.
+  - Added `LLVM_EXTRA_OCAMLOPT_FLAGS` to the LLVM build helper scripts so an
+    instrumented compiler build can pass
+    `-ccopt -Wl,-u,__llvm_profile_runtime -cclib <local-profile-rt>` through
+    Dune `ocamlopt_flags` instead of abusing global/native-applicable flags.
+    This is still only a plumbing checkpoint, not a validated `+6%` result.
+
 - 2026-06-30 corrected unbolted seven-module baseline and perf counters:
   - Reran unbolted LLVM-built constfilter versus native-built
     `oxcaml_main_native.exe` on the corrected seven-module native-mode

@@ -14,6 +14,7 @@ wrapper=${LLVM_WRAPPER:?set LLVM_WRAPPER to the clang wrapper or LLVM tool path}
 wrapper_log=${LLVM_WRAPPER_LOG:-$wrapper.log}
 export LLVM_WRAPPER_LOG="$wrapper_log"
 llvm_extra_flags=${LLVM_EXTRA_FLAGS:-}
+llvm_extra_ocamlopt_flags=${LLVM_EXTRA_OCAMLOPT_FLAGS:-}
 
 require_path () {
   if [ ! -e "$1" ]; then
@@ -54,6 +55,7 @@ llvm_ocamlparam="_,llvm-backend=1,llvm-path=$wrapper$llvm_flags_param"
 STAGE0_INSTALL="$stage0_install" \
 BOOT_BUILD="$boot_build" \
 LLVM_WRAPPER="$wrapper" \
+LLVM_EXTRA_OCAMLOPT_FLAGS="$llvm_extra_ocamlopt_flags" \
 RUN_SMOKE=1 \
   "$repo/tools/build-llvm-boot-with-installed.sh"
 
@@ -88,6 +90,7 @@ RUNTIME_BUILD="$self_runtime_build" \
 MAIN_BUILD="$self_main_build" \
 STAGE_INSTALL="$self_stage_install" \
 LLVM_WRAPPER="$wrapper" \
+LLVM_EXTRA_OCAMLOPT_FLAGS="$llvm_extra_ocamlopt_flags" \
   "$repo/tools/build-llvm-stage5-install.sh"
 
 tmpdir=$(mktemp -d /tmp/oxcaml-llvm-self-stage-smoke.XXXXXX)

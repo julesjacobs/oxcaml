@@ -12,6 +12,7 @@ wrapper=${LLVM_WRAPPER:?set LLVM_WRAPPER to the clang wrapper or LLVM tool path}
 wrapper_log=${LLVM_WRAPPER_LOG:-$wrapper.log}
 export LLVM_WRAPPER_LOG="$wrapper_log"
 llvm_extra_flags=${LLVM_EXTRA_FLAGS:-}
+llvm_extra_ocamlopt_flags=${LLVM_EXTRA_OCAMLOPT_FLAGS:-}
 runtime_ws=${RUNTIME_WS:-$repo/_llvm_stage5_runtime.ws}
 main_ws=${MAIN_WS:-$repo/_llvm_stage5_main.ws}
 arch=${ARCH:-}
@@ -75,6 +76,12 @@ if [ -n "$llvm_extra_flags" ]; then
   llvm_flags_param=",llvm-flags=$llvm_extra_flags"
 fi
 llvm_ocamlparam="_,llvm-backend=1,llvm-path=$wrapper$llvm_flags_param"
+runtime_ocamlopt_flags=":standard"
+main_ocamlopt_flags=":standard -fno-asan"
+if [ -n "$llvm_extra_ocamlopt_flags" ]; then
+  runtime_ocamlopt_flags="$runtime_ocamlopt_flags $llvm_extra_ocamlopt_flags"
+  main_ocamlopt_flags="$main_ocamlopt_flags $llvm_extra_ocamlopt_flags"
+fi
 
 cat > "$runtime_ws" <<EOF
 (lang dune 2.8)
@@ -86,6 +93,7 @@ cat > "$runtime_ws" <<EOF
     (OCAMLLIB ("$boot_install/lib/ocaml")))
   (env (_
     (flags (:standard -directory stdlib -warn-error +A -alert -unsafe_multidomain))
+    (ocamlopt_flags ($runtime_ocamlopt_flags))
     (env-vars ("OCAMLPARAM" "$llvm_ocamlparam"))))))
 EOF
 
@@ -99,7 +107,7 @@ cat > "$main_ws" <<EOF
     (OCAMLLIB ("$runtime_build/install/runtime_stdlib/lib/ocaml_runtime_stdlib")))
   (env (_
     (flags (:standard -directory compiler-distro -warn-error +A -alert -unsafe_multidomain))
-    (ocamlopt_flags (:standard -fno-asan))
+    (ocamlopt_flags ($main_ocamlopt_flags))
     (env-vars ("OCAMLPARAM" "$llvm_ocamlparam"))))))
 EOF
 
