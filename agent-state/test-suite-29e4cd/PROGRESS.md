@@ -1,5 +1,53 @@
 # Progress
 
+- 2026-06-30 rejected additional AMD64 greedy allocator screens:
+  - Stayed within the corrected scope: these were LLVM-path-only allocator and
+    statepoint-root-shape experiments, not `-O4` or driver-wide optimization
+    changes that native-built could also use.
+  - Dumped `typing/ctype.ml` OXSR decisions to identify where greedy differs
+    from the diagnostic BasicRA shape. Default greedy appended roots at `1034`
+    statepoints across `221` functions (`1663` roots in the verbose dump);
+    BasicRA appended roots at only `72` statepoints across `10` functions
+    (`76` roots), but BasicRA remains invalid because previous boot validation
+    failed with GC corruption. The biggest greedy-only contributors were
+    `unify_row_field` (`102` roots), `copy` (`56`), `unify_row` (`56` delta),
+    `instance_prim_locals` (`54`), and `loop_386` (`52`). Artifacts:
+    `bolt_compiler_20260629/root_stats_20260630/oxsr-verbose-214315/` and
+    `bolt_compiler_20260629/root_stats_20260630/oxsr-basicra-verbose-214340/`.
+  - Checked existing Fixup/greedy/spill knobs on saved `ctype` IR. They did
+    not materially improve the proxy: `--fixup-allow-gcptr-in-csr`,
+    disabling Fixup copy propagation, `--greedy-regclass-priority-trumps-globalness`,
+    disabling OxCaml call-split remainders, deferred spilling, spill-hoist, and
+    spill-fusing were no-ops or worse. `--greedy-reverse-local-assignment` was
+    only `1645 -> 1635` appended spill slots. Artifacts:
+    `statepoint-knob-screen-214635/`, `greedy-knob-screen-214707/`,
+    `spillmode-screen-214831/`, and `callsplit-gate-screen-215028/`.
+  - Tested a temporary OxCaml-only spill-weight scale for live ranges used as
+    statepoint varargs. Lowering the weight was the wrong direction
+    (`1645 -> 1710-1730` appended spill slots). Raising it helped modestly:
+    scale `8`/`16` reduced `ctype` appended spill slots from `1645` to `1599`,
+    ordinary-call GC-family slots from `1014` to `959`, local splits from
+    `926` to `596`, and assembly from `254272` to `254196` lines. Artifacts:
+    `vararg-scale-screen-215138/` and `vararg-highscale-screen-215220/`.
+  - Scale `8` passed real correctness gates: focused `typing/ctype.ml` wrapper
+    smoke, strict seven-module wrapper smoke (`7` fresh IR compiles), and a
+    boot build (`1682` wrapper lines, `841` fresh IR compiles, smoke output
+    `55`). Artifacts: `vararg-scale-ctype-smoke-wrapper.log`,
+    `vararg-scale-seven-smoke-wrapper.log`, `vararg-scale8-boot-build.log`,
+    and `vararg-scale8-boot-wrapper.log`.
+  - Performance rejected it for the goal. On the strict seven-module
+    native-mode compiler workload (`samples=3`, `inner_repetitions=1`),
+    native-built median was `14.8084s`, the scale-8 LLVM-built boot compiler
+    median was `19.1434s`, for `candidate_vs_baseline_median=1.2927`
+    (`-29.27%` improvement). Artifact:
+    `bolt_compiler_20260629/native-oxcamlopt-vs-vararg-scale8-boot-seven-screen-inner1-20260630.json`.
+  - Conclusion: increasing spill weight for statepoint varargs is a
+    boot-correct, directionally sensible allocator lever, but its effect is far
+    too small to close the compiler-throughput gap. The temporary source
+    changes were removed and local `llc` was rebuilt back to checked-in
+    behavior. The remaining root-shape problem is still broader greedy
+    live-stack interval creation, not a single exposed LLVM flag.
+
 - 2026-06-30 rejected redundant pre-statepoint root-store skipping as the next
   `+6%` route:
   - Stayed within Jules's corrected scope: no `-O4` or other optimization knob
