@@ -4188,3 +4188,33 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     split-shape driven. The next attempt should either change operand home
     selection before fixup creates temporary slots, or change AMD64 allocation
     so fewer original stack homes cross statepoints in the first place.
+- 2026-07-01 LLVM-path-only scope correction and OXSR producer classification:
+  - Reconfirmed Jules's review constraint: `-O4` and any flag that would also
+    apply to the native-built compiler cannot count toward the requested `+6%`
+    target. Valid wins must be LLVM-path-only: AMD64 LLVM codegen/statepoint
+    handling, LLVM-built-only pass configuration, or post-link work on the
+    LLVM-built artifact.
+  - Added a temporary stats-only OXSR probe, rebuilt `llc`, and ran the saved
+    post-RS4GC `typing/ctype.ml` IR through lowering. Artifact:
+    `bolt_compiler_20260629/root_stats_20260701/oxsr-producer-classify/`.
+    The temporary source edit was then reverted and `llc` rebuilt back to the
+    checked-in source state (`oxsr-producer-classify-llc-restore.log`).
+  - The producer shape is now clear: `ctype` had `1632` GC-family appended
+    stack roots, and `1558` of them were original spill homes of already-listed
+    statepoint register operands. Split by statepoint class, `948/1014`
+    ordinary-call GC-family roots and `610/617` alloc-family roots were this
+    shape. The same run counted `1571` listed register roots whose original
+    spill slot was live across the statepoint (`954` ordinary, `617` alloc).
+  - Must-reaching-store sources for the appended GC-family roots were mostly
+    nontrivial value producers: `885` PHI, `330` COPY, `246` other, `66`
+    physical-register stores, `30` reload defs, and `75` with no unique
+    must-reaching store. This explains why local adjacent-store reuse and
+    simple folded-slot replacement did not move the root counts.
+  - Conclusion: the remaining `ctype` root pressure is not old `gcroot`, not
+    frontend roots, and not a BOLT layout problem. It is the AMD64 LLVM
+    register/statepoint path leaving a listed root and its durable allocator
+    home as separate live locations. The next viable code change should make
+    those locations converge before frametable emission, with value identity
+    and EH correctness checked, or change Greedy splitting so the durable home
+    no longer crosses the statepoint unnecessarily. Do not count generic
+    optimization levels toward this target.
