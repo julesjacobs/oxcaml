@@ -1,5 +1,39 @@
 # Progress
 
+- 2026-06-30 rejected redundant pre-statepoint root-store skipping as the next
+  `+6%` route:
+  - Stayed within Jules's corrected scope: no `-O4` or other optimization knob
+    that the native-built compiler could also use. The temporary change was a
+    hidden LLVM backend flag in `FixupStatepointCallerSaved` that skipped a
+    pre-statepoint stack-root refresh only when the immediately preceding
+    statepoint listed the same frame index, the next instruction reloaded that
+    frame index into the same physical register, and no intervening call,
+    statepoint, register clobber, or store to that frame index was present.
+  - After tightening the proof to only same-insertion-point stores, saved
+    post-RS4GC `typing/ctype.ml` passed `llc -O3 --verify-machineinstrs` and
+    skipped `184` static root stores. All OXSR/statepoint/root counters were
+    unchanged (`1645` total appended spill slots, `1632` GC-family spill slots,
+    `18` crossing GC registers, `13` reload-fed siblings), and assembly shrank
+    from `254272` to `254088` lines. Artifact:
+    `bolt_compiler_20260629/root_stats_20260630/redundant-root-store-tight-213328/`.
+  - A real boot build with
+    `LLVM_EXTRA_FLAGS='-mllvm -fixup-scs-skip-redundant-root-stores'` passed:
+    `1682` wrapper lines, `841` fresh IR compilations, and smoke output `55`.
+    Artifacts:
+    `redundant-root-store-final-boot-build.log` and
+    `redundant-root-store-final-boot-wrapper.log`.
+  - Performance rejected it for the current goal. On the corrected strict
+    seven-module native-mode compiler workload (`samples=3`,
+    `inner_repetitions=1`), native-built median was `14.9594s`, the
+    LLVM-built candidate median was `19.0771s`, for
+    `candidate_vs_baseline_median=1.2753` (`-27.53%` improvement). Artifact:
+    `bolt_compiler_20260629/native-oxcamlopt-vs-redundant-root-store-final-seven-screen-inner1-20260630.json`.
+  - Conclusion: this is a real LLVM-path cleanup opportunity, but it is far
+    too small to close the compiler-throughput gap. The temporary source change
+    was removed and local `llc` was rebuilt back to checked-in behavior. Next
+    work should keep focusing on producer-side AMD64 root/spill shape or exact
+    OCaml-aware BOLT metadata, not generic optimization levels.
+
 - 2026-06-30 rejected additional LLVM-path-only codegen screens:
   - Screened LLVM machine outliner on saved post-RS4GC `typing/ctype.ml` with
     `llc -O3 --verify-machineinstrs --enable-machine-outliner`. This is
