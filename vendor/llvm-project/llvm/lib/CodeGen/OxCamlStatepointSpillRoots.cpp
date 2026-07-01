@@ -33,6 +33,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ADT/BitVector.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
@@ -84,6 +85,8 @@ STATISTIC(NumRegsAppended,
           "Number of crossing gc registers appended to statepoints");
 STATISTIC(NumSlotInits,
           "Number of listed spill slots initialized at function entry");
+STATISTIC(NumOrdinaryRootHomesFolded,
+          "Number of ordinary-call register roots folded to refreshed stack homes");
 
 static cl::opt<bool> EnableOxCamlStatepointSpillRoots(
     "oxcaml-statepoint-spill-roots", cl::Hidden, cl::init(true),
@@ -99,6 +102,12 @@ static cl::opt<bool> EnableOxCamlStatepointSlotInit(
     "oxcaml-statepoint-slot-init", cl::Hidden, cl::init(true),
     cl::desc("Initialize listed-but-undominated slots at function entry; "
              "with this off such slots are skipped instead"));
+
+static cl::opt<bool> EnableOxCamlOrdinaryRootHomeFolding(
+    "oxcaml-ordinary-root-home-folding", cl::Hidden, cl::init(false),
+    cl::desc("For ordinary OxCaml statepoints, refresh a listed register root's "
+             "live original spill home and list that home instead of the "
+             "register"));
 
 static cl::opt<bool> VerboseOxCamlStatepointSpillRoots(
     "oxcaml-statepoint-spill-roots-verbose", cl::Hidden, cl::init(false),
@@ -220,6 +229,66 @@ static void appendRootsToStatepoint(MachineInstr &MI, MachineFunction &MF,
   MI.getOperand(NumGCPtrCountIdx).setImm(OldNumGCPtrs + NumToAdd);
   MI.getOperand(MapCountIdx + 4 * SlotsToAdd.size() + RegsToAdd.size())
       .setImm(OldMapCount + NumToAdd);
+}
+
+/// Replace selected gc-pointer register records with folded stack-slot records.
+/// The replacement map is keyed by the original operand index of the register
+/// record in \p MI. Counts and base/derived map entries are logical-index based,
+/// so changing the physical record width does not change their values.
+static void foldGCPtrRegsToSlots(MachineInstr &MI, MachineFunction &MF,
+                                 ArrayRef<std::pair<unsigned, int>> Replacements) {
+  if (Replacements.empty())
+    return;
+
+  SmallDenseMap<unsigned, int, 8> ReplacementSlots;
+  for (auto [Idx, Slot] : Replacements)
+    ReplacementSlots[Idx] = Slot;
+
+  StatepointOpers SO(&MI);
+  int FirstGCPtrIdx = SO.getFirstGCPtrIdx();
+  assert(FirstGCPtrIdx != -1 && "expected gc pointer operands");
+  unsigned NumGCPtrs = MI.getOperand(SO.getNumGCPtrIdx()).getImm();
+
+  SmallVector<std::pair<unsigned, SmallVector<MachineOperand, 4>>, 16> Records;
+  unsigned CurIdx = (unsigned)FirstGCPtrIdx;
+  for (unsigned N = 0; N < NumGCPtrs; ++N) {
+    unsigned NextIdx = StackMaps::getNextMetaArgIdx(&MI, CurIdx);
+    Records.push_back({CurIdx, {}});
+    for (unsigned I = CurIdx; I < NextIdx; ++I)
+      Records.back().second.push_back(MI.getOperand(I));
+    CurIdx = NextIdx;
+  }
+  unsigned TailStart = CurIdx;
+
+  SmallVector<MachineOperand, 64> Tail;
+  for (unsigned I = TailStart, E = MI.getNumOperands(); I < E; ++I)
+    Tail.push_back(MI.getOperand(I));
+
+  while (MI.getNumOperands() > (unsigned)FirstGCPtrIdx)
+    MI.removeOperand(MI.getNumOperands() - 1);
+
+  for (auto &[Begin, Operands] : Records) {
+    auto It = ReplacementSlots.find(Begin);
+    if (It == ReplacementSlots.end()) {
+      for (MachineOperand &MO : Operands)
+        MI.addOperand(MF, MO);
+      continue;
+    }
+
+    int Slot = It->second;
+    MI.addOperand(MF, MachineOperand::CreateImm(StackMaps::IndirectMemRefOp));
+    MI.addOperand(MF, MachineOperand::CreateImm(8));
+    MI.addOperand(MF, MachineOperand::CreateFI(Slot));
+    MI.addOperand(MF, MachineOperand::CreateImm(0));
+    MI.addMemOperand(
+        MF, MF.getMachineMemOperand(
+                MachinePointerInfo::getFixedStack(MF, Slot),
+                MachineMemOperand::MOLoad | MachineMemOperand::MOStore, 8,
+                MF.getFrameInfo().getObjectAlign(Slot)));
+  }
+
+  for (MachineOperand &MO : Tail)
+    MI.addOperand(MF, MO);
 }
 
 /// Walk the gc-pointer section of \p MI, recording stack slots that are
@@ -1341,6 +1410,77 @@ static bool processStatepoint(MachineInstr &MI, MachineFunction &MF,
   SmallVector<int, 8> SlotsToAdd;
   bool DebugSlots =
       VerboseOxCamlStatepointSpillRoots && getenv("OXSR_DEBUG_SLOTS");
+
+  if (EnableOxCamlOrdinaryRootHomeFolding &&
+      (StatepointCC == CallingConv::OxCaml_WithFP ||
+       StatepointCC == CallingConv::OxCaml_WithoutFP) &&
+      !llvm::any_of(MI.getParent()->successors(),
+                    [](const MachineBasicBlock *Succ) {
+                      return Succ->isEHPad();
+                    })) {
+    const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
+    const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+    MachineRegisterInfo &MRI = MF.getRegInfo();
+    StatepointOpers SO(&MI);
+    SmallVector<std::pair<unsigned, int>, 8> Replacements;
+    SmallSet<Register, 8> FoldedRegs;
+    unsigned CurIdx = (unsigned)SO.getFirstGCPtrIdx();
+    unsigned NumGCPtrs = MI.getOperand(SO.getNumGCPtrIdx()).getImm();
+    for (unsigned N = 0; N < NumGCPtrs; ++N) {
+      unsigned NextIdx = StackMaps::getNextMetaArgIdx(&MI, CurIdx);
+      MachineOperand &MO = MI.getOperand(CurIdx);
+      unsigned TiedDef = 0;
+      if (!MO.isReg() || !MO.getReg().isVirtual() ||
+          MI.isRegTiedToDefOperand(CurIdx, &TiedDef)) {
+        CurIdx = NextIdx;
+        continue;
+      }
+
+      Register R = MO.getReg();
+      if (!LIS.hasInterval(R)) {
+        CurIdx = NextIdx;
+        continue;
+      }
+
+      int Slot = VRM.getStackSlot(VRM.getOriginal(R));
+      if (Slot == VirtRegMap::NO_STACK_SLOT || ListedSlots.count(Slot) ||
+          !LS.hasInterval(Slot)) {
+        CurIdx = NextIdx;
+        continue;
+      }
+
+      const LiveInterval &SLI = LS.getInterval(Slot);
+      if (!SLI.liveAt(InSlot) || !SLI.liveAt(OutSlot) ||
+          !GCV.slotValueAt(Slot, InSlot)) {
+        CurIdx = NextIdx;
+        continue;
+      }
+
+      const TargetRegisterClass *RC = MRI.getRegClass(R);
+      MachineBasicBlock &MBB = *MI.getParent();
+      MachineBasicBlock::iterator InsertBefore = MI.getIterator();
+      MachineBasicBlock::iterator Prev = InsertBefore;
+      bool HadPrev = Prev != MBB.begin();
+      if (HadPrev)
+        --Prev;
+      TII->storeRegToStackSlot(MBB, InsertBefore, R, /*isKill=*/false, Slot, RC,
+                               TRI, Register());
+      MachineBasicBlock::iterator FirstNew =
+          HadPrev ? std::next(Prev) : MBB.begin();
+      for (MachineBasicBlock::iterator It = FirstNew; It != InsertBefore; ++It)
+        Indexes.insertMachineInstrInMaps(*It);
+      Replacements.push_back({CurIdx, Slot});
+      FoldedRegs.insert(R);
+      ListedSlots.insert(Slot);
+      ++NumOrdinaryRootHomesFolded;
+      CurIdx = NextIdx;
+    }
+    foldGCPtrRegsToSlots(MI, MF, Replacements);
+    for (Register R : FoldedRegs)
+      if (LIS.hasInterval(R))
+        LIS.shrinkToUses(&LIS.getInterval(R));
+  }
+
   for (int Slot : GCSlots) {
     if (ListedSlots.count(Slot))
       continue;

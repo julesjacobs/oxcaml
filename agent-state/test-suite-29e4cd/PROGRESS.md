@@ -4325,3 +4325,41 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     exact binary and compare against native. Do not count this as progress
     toward `+6%` until the source is restored, full correctness gates pass, and
     the boltable artifact is measured.
+- 2026-07-01 restored ordinary-call root-home folding source prototype:
+  - Reintroduced a hidden/default-off LLVM-path-only knob,
+    `-oxcaml-ordinary-root-home-folding`, in
+    `OxCamlStatepointSpillRoots`. For ordinary OxCaml statepoints
+    (`OxCaml_WithFP` / `OxCaml_WithoutFP`) without an EH-pad successor, it
+    recognizes a direct virtual-register GC root whose original allocator spill
+    home is already live and GC-valued across the statepoint, refreshes that
+    durable home immediately before the statepoint, and rewrites the statepoint
+    GC pointer record to list the stack home instead of the register. This
+    continues the ARM-like direction of converging to one durable root home
+    instead of preserving the old AMD64 duplicate register/root-slot shape.
+  - Fixed the prototype's verifier failure by shrinking LiveIntervals after
+    rewriting the statepoint operand. Without that update, the removed virtual
+    register root still had a live segment ending at the statepoint even though
+    the statepoint no longer read the register.
+  - Built the LLVM tool gate:
+    `cmake --build _build/llvm-tools --target llc -j2`.
+  - Focused saved post-RS4GC `typing/ctype.ml` lowering passed
+    `_build/llvm-tools/bin/llc -O3 --relocation-model=pic
+    --verify-machineinstrs --oxcaml-ordinary-root-home-folding --stats`
+    on `bolt_compiler_20260629/mir_20260630/ctype.rs4gc.ll`. Counters included
+    `889` ordinary-call register roots folded, `123` ordinary-call GC-family
+    spill slots appended, and `739` total GC-family spill slots appended.
+    Artifact directory:
+    `bolt_compiler_20260629/root_stats_20260701/ordinary-homefold-reproto/`.
+  - Real compiler smoke also passed with the standard compiler invoking the
+    LLVM backend and wrapper over seven hot modules:
+    `backend/cfg_selectgen.ml`, `backend/llvm/llvmize.ml`,
+    `lambda/translcore.ml`, `typing/ctype.ml`, `typing/env.ml`,
+    `typing/typecore.ml`, and `typing/typemod.ml`. It produced seven `.cmx`
+    files with seven fresh wrapper `-x ir` invocations. Artifact directory:
+    `ordinary-root-home-folding-current-seven-smoke/`.
+  - This is not a completed `+6%` result. The saved self-stage artifact showed
+    only `+1.827%` on the same-tree seven-module native-mode compiler
+    benchmark. Next required steps are to build a fresh LLVM-built compiler
+    with this source knob enabled, measure it against the native-built compiler,
+    then build it in a boltable configuration and test whether BOLT composes
+    cleanly and moves the combined result toward the required `+6%`.
