@@ -1,5 +1,38 @@
 # Progress
 
+- 2026-06-30 rejected additional LLVM-path-only codegen screens:
+  - Screened LLVM machine outliner on saved post-RS4GC `typing/ctype.ml` with
+    `llc -O3 --verify-machineinstrs --enable-machine-outliner`. This is
+    LLVM-machine-codegen-specific rather than a generic `-O4`-style flag, but
+    it was not promising: it created `622` outlined functions and grew the
+    `ctype` assembly from `8,050,636` to `8,742,697` bytes with no root/spill
+    counter improvement. Do not build this as a compiler candidate.
+  - Screened LLVM ext-TSP block placement directly in `llc` on the same saved
+    IR (`--enable-ext-tsp-block-placement`, with and without
+    `--ext-tsp-apply-without-profile`). It passed the verifier but left
+    root/spill counters unchanged and only nudged assembly size upward
+    (`8,050,636` to `8,060,175` bytes). This matches the already weaker BOLT
+    ext-TSP evidence, so it is not a build-worthy path.
+  - Prototyped an AMD64 LLVM prologue stack-check layout improvement behind
+    `-mllvm -x86-oxcaml-split-prologue-stack-check`: replace the current
+    inline-asm prologue check, whose hot path is a taken `jae` over embedded
+    slow-path code, with explicit machine blocks where the hot path falls
+    through and only overflow branches to a slow block that jumps to the
+    existing `caml_llvm_prologue_realloc_stack*` helper. The saved `ctype` IR
+    passed `--verify-machineinstrs`, emitted the intended `leaq/cmpq/jb slow`
+    prologue shape, and the corrected seven-module real-wrapper smoke passed
+    with all seven fresh IR calls carrying the flag. A tiny LLVM-backend
+    executable also ran under `OCAMLRUNPARAM=s=4k`.
+  - Full correctness rejected the split prologue stack-check prototype. A clean
+    self-stage install in `_llvm_splitstk_*` failed after about `784` flagged
+    fresh IR compiles with `Command got signal SEGV` and
+    `Fatal error: allocation failure during minor GC` across `.ocamlcommon`,
+    `.ocamloptcomp`, `flambda2_algorithms`, and `flambda2_simplify`. The
+    likely remaining issue is interaction with real compiler EH/frametable
+    ranges or the prologue stack-growth continuation PC, not the basic slow
+    path alone. The source prototype was removed and `llc` was rebuilt back to
+    the checked-in source.
+
 - 2026-06-30 rejected dead identity listed-register-root deletion:
   - Tested an LLVM-path-only `OxCamlStatepointSpillRoots` prototype,
     `-mllvm -oxcaml-drop-dead-identity-listed-reg-roots`, that removed already
