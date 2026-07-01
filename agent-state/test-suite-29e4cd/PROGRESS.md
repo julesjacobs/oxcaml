@@ -4145,3 +4145,26 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     size, but it is not a throughput lever for the current compiler workload.
     Do not spend more time on exnroot listing precision for the `+6%` compiler
     target unless paired with a separate win that changes hot code shape.
+- 2026-07-01 rejected existing pre-statepoint root-store reuse:
+  - Tested a temporary hidden `FixupStatepointCallerSaved` diagnostic
+    `--fixup-scs-use-existing-root-stores`, still respecting the review rule
+    that `-O4`/generic native-applicable flags cannot count. The idea was to
+    avoid creating a fresh fixup spill slot when the physical GC operand had
+    already been stored to a pointer-sized stack slot in the same block before
+    the statepoint with no intervening call/statepoint/register clobber.
+  - The saved `typing/ctype.ml` post-RS4GC screen showed the diagnostic fired,
+    but not on the root-pressure class we need. It reused `264` existing
+    stores, reduced fixup spill slots `626 -> 551`, and shrank printed machine
+    instructions `59643 -> 59378` / assembly lines `254561 -> 254296`.
+    However OXSR and statepoint-lowering counters were unchanged:
+    `1641` appended spill-slot roots both ways, `1628` GC-family roots both
+    ways, `1012` ordinary-call roots both ways, `615` alloc-family roots both
+    ways, and `114` statepoint-lowering stack slots both ways.
+  - Rejected before boot/benchmark because the focused evidence shows this is
+    a small fixup-frame/code-size cleanup, not the duplicate durable-home
+    reduction needed for the `+6%` compiler-throughput goal. The temporary
+    source edit was reverted and `_build/llvm-tools/bin/llc` was rebuilt back
+    to checked-in behavior (`existing-root-store-llc-restore.log`). Future work
+    should target choosing the durable stack home as the statepoint operand
+    earlier or changing allocator/root-home shape, not merely reusing adjacent
+    stores that do not reduce OXSR's appended root set.
