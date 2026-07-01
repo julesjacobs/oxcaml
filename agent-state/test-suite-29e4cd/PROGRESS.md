@@ -4288,3 +4288,40 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     causes, especially the AMD64 root-home/register-statepoint shape, or find a
     BOLT transformation that patches with zero synthesized descriptors and
     survives real compiler workloads.
+- 2026-07-01 corrected saved home-fold performance and BOLT composition screen:
+  - Re-ran the saved `-oxcaml-ordinary-root-home-folding` self-stage compiler
+    artifact against the current same-tree seven-module native-mode compiler
+    benchmark. This is an LLVM-path-only codegen artifact, not a generic
+    optimization-level change. Baseline was
+    `_native_current_build/main/main_native.exe`; candidate was
+    `_llvm_homefold_self_main_build/main/main_native.exe`; both used
+    `_native_current_build/main` and `_native_current_install/lib/ocaml`.
+  - Corrected result:
+    `bolt_compiler_20260629/native-current-vs-homefold-saved-seven-rerun.json`.
+    Native median `12.291341s`; saved home-fold LLVM median `12.066731s`;
+    ratio `0.981726`; improvement `+1.827%`. This revises the earlier
+    conclusion: home-fold is not a throughput loss under the corrected harness,
+    but by itself it is far short of the required `+6%`.
+  - Collected a fresh LBR profile for the saved home-fold binary on the strict
+    seven-module workload:
+    `ocamlopt.homefold.reloc.seven.lbr.perf.data`. `perf record` captured
+    `100.985 MB` / `245694` samples. The no-assert `perf2bolt` matched the
+    build-id via `main_native.exe`, read `244685` samples and `3903921` LBR
+    entries, reported `0` trace-content mismatches, and wrote
+    `ocamlopt.homefold.reloc.seven.lbr.fdata`.
+  - Attempted to compose the home-fold codegen win with the current safe BOLT
+    layout family. Full cache/hfsort failed because the saved home-fold binary
+    was not linked with code relocations: BOLT reported
+    `function reordering only works when relocations are enabled`, and explicit
+    `-relocs` failed with `relocations against code are missing from the input
+    file`. A narrower non-relocation block-cache/peephole BOLT run completed,
+    but the OCaml frametable patch failed with a 32-bit relative displacement
+    overflow, so it is not benchmarkable.
+  - Conclusion: ordinary-call durable-home folding remains the only currently
+    measured source-level LLVM-path win in the compiler benchmark, but the
+    saved artifact cannot answer whether it composes with BOLT. The next real
+    candidate should restore the home-fold source carefully, rebuild/self-stage
+    it in the normal boltable/emit-relocs configuration, then profile/BOLT that
+    exact binary and compare against native. Do not count this as progress
+    toward `+6%` until the source is restored, full correctness gates pass, and
+    the boltable artifact is measured.
