@@ -4168,3 +4168,23 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     should target choosing the durable stack home as the statepoint operand
     earlier or changing allocator/root-home shape, not merely reusing adjacent
     stores that do not reduce OXSR's appended root set.
+- 2026-07-01 rejected listed-slot to durable-home replacement subset:
+  - Tested a narrower OXSR diagnostic
+    `--oxcaml-replace-listed-slots-with-durable-homes`, again LLVM-path-only.
+    The prototype attempted to replace an already-listed folded statepoint slot
+    with an unlisted live stack home when both had the same must-reaching value
+    name at an ordinary non-EH statepoint, instead of appending the unlisted
+    home as a duplicate root.
+  - The saved `typing/ctype.ml` post-RS4GC screen showed this subset does not
+    describe the hot duplicate-root problem: the replacement counter stayed
+    zero, assembly line count stayed `254561`, and all relevant counters were
+    identical to baseline (`1641` appended spill-slot roots, `1628` GC-family
+    roots, `1012` ordinary-call roots, `615` alloc-family roots, `626`
+    fixup spill slots, `114` statepoint-lowering stack slots).
+  - Reverted the temporary OXSR source edit and rebuilt `llc` back to
+    checked-in behavior (`durable-slot-replace-llc-restore.log`). Conclusion:
+    the durable-home win is not a simple folded-slot replacement inside OXSR;
+    the large duplicate class is likely register/tied-operand or allocator
+    split-shape driven. The next attempt should either change operand home
+    selection before fixup creates temporary slots, or change AMD64 allocation
+    so fewer original stack homes cross statepoints in the first place.
