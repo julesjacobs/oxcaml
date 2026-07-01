@@ -4257,3 +4257,34 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     allocator/splitting decisions that prevent durable homes from crossing
     ordinary statepoints in the first place, or a larger ARM-like root-home
     model that changes hot code shape rather than a late fixup repair.
+- 2026-07-01 rejected generic `-O4` scope and exec-count BOLT layout:
+  - Jules clarified that `-O4` cannot count toward the compiler-speed target
+    because the same generic optimization level would also apply to the
+    native-built compiler. The valid target remains LLVM-path-only improvement:
+    AMD64 LLVM codegen/statepoint behavior, LLVM-built-only pass selection, or
+    LLVM-built artifact work whose effect is measured against the current
+    native-built compiler.
+  - Screened a BOLT function-order variant on the existing LLVM-built compiler
+    artifact with the safe profile
+    `ocamlopt.constfilter.reloc.exact5.lbr.fdata`:
+    `-reorder-blocks=cache -reorder-functions=exec-count -peepholes=all
+    -reorder-data=.rodata -lite=false --enable-bat`. BOLT succeeded and wrote
+    BAT maps, but plain frametable patching left `60` unresolved call-return
+    frame descriptors.
+  - Retried the patch with `--synthesize-icp-descriptors`; the patched binary
+    answered `-version`, but the seven-module compiler-speed screen aborted on
+    the candidate while compiling `typing/env.ml`, before any candidate timing
+    samples were collected. Artifact:
+    `bolt_compiler_20260629/native-current-vs-execcount-peep-rodata-synth-seven-screen.json`
+    was not produced because the candidate died with `SIGABRT`.
+  - Retried BOLT with `-indirect-call-promotion=none` to test whether these
+    synthesized descriptors were caused by ordinary BOLT ICP. The result still
+    had the same `60` unresolved call-return descriptors, so this knob does not
+    make the exec-count layout recipe compatible with the current OCaml
+    frametable patcher.
+  - Rejected this variant for correctness before performance. The current best
+    valid result is still the existing cache/hfsort BOLT layout family, below
+    the required `+6%`. Next useful work should return to LLVM-path codegen
+    causes, especially the AMD64 root-home/register-statepoint shape, or find a
+    BOLT transformation that patches with zero synthesized descriptors and
+    survives real compiler workloads.
