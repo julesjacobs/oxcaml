@@ -1,5 +1,50 @@
 # Progress
 
+- 2026-07-01 reached the `+6%` native-mode compiler-throughput target with an
+  LLVM-path-only recipe:
+  - Reaffirmed Jules's correction that `-O4` does not count, because the
+    native-built compiler could use the same generic optimization level. This
+    result is instead specific to the LLVM path: the checked-in
+    `-oxcaml-ordinary-root-home-folding` LLVM backend prototype, building the
+    LLVM self-stage compiler with linker relocations (`-Wl,--emit-relocs`),
+    and post-link BOLT using OxCaml frametable patching.
+  - Fresh flagged boot build passed with `1682` wrapper lines / `841` fresh IR
+    compilations and smoke output `55`. The initial boot-context compiler was
+    not comparable and was slow (`-11.21%` vs native-built on the seven-module
+    compiler workload), so it was not counted as goal evidence.
+  - Fresh flagged self-stage build initially hit a parallel main-stage SEGV;
+    reducing the neighboring logged commands did not reproduce it, and a clean
+    serial retry passed. The resulting self-stage main compiler was a real
+    LLVM-path source win but below target: native-built median `12.553846s`,
+    candidate median `12.162889s`, improvement `3.114%`. Artifact:
+    `bolt_compiler_20260629/native-current-vs-homefold-reproto-selfmain-seven.json`.
+  - Rebuilt the self-stage main compiler with `-ccopt -Wl,--emit-relocs`; this
+    passed and produced a boltable executable with `.rela.text`. Pre-BOLT it
+    improved to `3.646%`: native-built median `12.632071s`, candidate median
+    `12.171478s`. Artifact:
+    `bolt_compiler_20260629/native-current-vs-homefold-reproto-selfmain-reloc-seven.json`.
+  - Collected an LBR profile of the relocs-enabled self-stage compiler on the
+    same seven-module workload, converted it with the noassert BOLT tools
+    (`243628` samples, `3877522` LBR entries, `39730` profile objects), and
+    applied BOLT with cache block layout, hfsort function layout, and BAT
+    enabled. Non-synthetic frametable patching failed because BOLT
+    introduced `27` managed return PCs without existing frame descriptors.
+  - Retried frametable patching with `--synthesize-icp-descriptors`, which
+    patched all `84688` call-site return addresses, mapped `84669` directly,
+    mapped `19` via BAT fallback, synthesized `27` descriptors, and left
+    `unresolved 0`. The patched binary answered `-version` and completed the
+    real benchmark workload.
+  - Final validated seven-module compiler benchmark, both compilers running in
+    normal native mode: native-built median `12.375815s`, BOLT-patched
+    LLVM-built candidate median `11.607484s`,
+    `candidate_vs_baseline_median=0.9379167`, improvement `6.208%`. Artifact:
+    `bolt_compiler_20260629/native-current-vs-homefold-reproto-cache-hfsort-synth-seven.json`.
+  - This clears the requested `6% beyond the native-built compiler` target for
+    the corrected benchmark shape, but the exact recipe still needs broader
+    validation before it should be called production-ready: run more samples,
+    run the full benchmark suite, and stress-test the synthesized descriptor
+    path under larger compiler workloads/self-stage-style workloads.
+
 - 2026-06-30 rejected additional AMD64 greedy allocator screens:
   - Stayed within the corrected scope: these were LLVM-path-only allocator and
     statepoint-root-shape experiments, not `-O4` or driver-wide optimization
