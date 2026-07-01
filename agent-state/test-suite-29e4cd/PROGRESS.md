@@ -1,5 +1,37 @@
 # Progress
 
+- 2026-06-30 rejected dead identity listed-register-root deletion:
+  - Tested an LLVM-path-only `OxCamlStatepointSpillRoots` prototype,
+    `-mllvm -oxcaml-drop-dead-identity-listed-reg-roots`, that removed already
+    listed virtual-register GC operands from statepoints when the register was
+    not live at the statepoint out slot and only appeared in identity
+    base/derived map entries. This deliberately avoided `-O4` or other
+    optimization-level changes that the native-built compiler could also use.
+  - Focused saved-IR validation initially looked promising. On saved
+    post-RS4GC `typing/ctype.ml`, direct `llc -O3 --verify-machineinstrs`
+    dropped `827` listed register roots while preserving the existing appended
+    stack-root counts (`1641` total appended spill slots, `1628` GC-family).
+    After adding an EH-successor guard, it still dropped `770` roots and passed
+    the machine verifier.
+  - Real wrapper smokes also passed when the flag was passed in the correct
+    form, `llvm-flags=-mllvm -oxcaml-drop-dead-identity-listed-reg-roots`: a
+    focused `typing/ctype.ml` compile and the corrected seven-module
+    LLVM-backend smoke both completed, with all fresh IR wrapper calls carrying
+    the `-mllvm` flag.
+  - Full correctness rejected it. A clean self-stage install with the
+    unguarded version failed after about `790` flagged fresh IR compiles with
+    `Fatal error: allocation failure during minor GC`. Retrying from clean
+    `_llvm_dropdead_*` build directories with the EH-successor guard still
+    failed after about `780` flagged fresh IR compiles, with the same
+    GC-corruption signature across `.ocamloptcomp`, `flambda2_simplify`, and
+    `arm64_binary_emitter` objects.
+  - Conclusion: machine-liveness-based deletion of listed register roots is not
+    sound as implemented, even when EH successors are skipped. The failed
+    prototype was removed and `llc` was rebuilt back to the checked-in source.
+    Do not reuse this as a performance candidate without first proving the
+    statepoint operand/map rewrite against the runtime stackmap semantics, not
+    just LLVM's machine verifier.
+
 - 2026-06-30 rejected ordinary-root durable-home folding:
   - Tested an LLVM-path-only AMD64 OXSR prototype,
     `-mllvm -oxcaml-ordinary-root-home-folding`, that refreshed a virtual
