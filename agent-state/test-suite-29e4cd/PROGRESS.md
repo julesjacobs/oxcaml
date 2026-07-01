@@ -4218,3 +4218,42 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     and EH correctness checked, or change Greedy splitting so the durable home
     no longer crosses the statepoint unnecessarily. Do not count generic
     optimization levels toward this target.
+- 2026-07-01 rejected late Fixup reuse of original root homes:
+  - Tested an LLVM-path-only hidden prototype
+    `--oxcaml-fixup-original-root-homes`. OXSR marked ordinary-call listed
+    register roots whose original allocator spill home was live/value across
+    the statepoint, kept that home visible to stack-slot coloring with a
+    private fixed-stack marker operand, and Fixup then spilled the physical
+    register into that original home instead of allocating a second root slot.
+    This was intended to converge the AMD64 path toward the ARM-style single
+    root home without changing frontend roots or native-built behavior.
+  - Focused saved post-RS4GC `typing/ctype.ml` lowering passed
+    `--verify-machineinstrs` after the marker was changed from an immediate
+    side-channel to a real FI+memoperand marker. The direct counters moved in
+    the intended direction but only modestly: compared with the
+    `oxsr-producer-classify` baseline, ordinary-call GC-family appended roots
+    dropped `1014 -> 796`, total GC-family appended roots `1632 -> 1414`,
+    total OXSR appended spill slots `1645 -> 1618`, Fixup spill slots
+    `628 -> 616`, and assembly lines `254272 -> 254221`. The prototype marked
+    and used `218` original homes with zero late rejections in the verified
+    run.
+  - End-to-end smoke build with
+    `LLVM_EXTRA_FLAGS='-mllvm -oxcaml-fixup-original-root-homes'` passed:
+    `_llvm_fixup_original_home_boot_build/default/main_native.exe`.
+  - Performance rejected it. The same-tree seven-module compiler benchmark
+    used `_native_current_build/main` and `_native_current_install/lib/ocaml`
+    for both compilers to isolate executable speed. Artifact:
+    `bolt_compiler_20260629/fixup_original_home_same_tree_native_vs_llvm7_20260630_230547.json`.
+    Native-built median `18.399596s`; flagged LLVM-built median `20.489433s`;
+    ratio `1.113581`; improvement `-11.358%`. A prior attempt using the
+    candidate boot build as the source/interface tree was discarded because it
+    failed on `typing/ctype.ml` with an interface mismatch (`Result.t` arity).
+  - Conclusion: late Fixup reuse of original homes is sound enough to build
+    and verify in this shape, but it is not a throughput lever for the `+6%`
+    target. It reduces a visible subset of duplicate roots without improving
+    the compiler benchmark, likely because the remaining root pressure and/or
+    added marker/Fixup constraints still leave the hot code shape worse than
+    native. The temporary source edit was rejected; next work should target
+    allocator/splitting decisions that prevent durable homes from crossing
+    ordinary statepoints in the first place, or a larger ARM-like root-home
+    model that changes hot code shape rather than a late fixup repair.
