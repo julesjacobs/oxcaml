@@ -3941,3 +3941,39 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
   - Reverted the stats-only source edit and rebuilt `_build/llvm-tools/bin/llc`
     back to checked-in source; `git diff` for
     `OxCamlStatepointSpillRoots.cpp` is empty.
+- 2026-06-30 exception-root slot narrowing rejected:
+  - Kept the scope LLVM-only after rejecting `-O4`: all experiments were in
+    RS4GC/LLVM tool builds and were validated against saved LLVM IR before
+    any benchmark attempt.
+  - Root cause confirmed on
+    `flambda2_simplify__Simplify_apply_expr__simplify_effect_op_55_159_code`:
+    default RS4GC lists nearly every explicit exception-root slot at nearly
+    every statepoint in the function. Focused post-RS4GC count was `16004`
+    `gc-live` operands over `162` statepoints, max `105`; the native
+    frametable for the same function has only `999` live roots total.
+  - `-rs4gc-oxcaml-exn-ssa-roots -rs4gc-oxcaml-exn-ssa-all` reduced the
+    focused IR root count to `10699` and passed focused `llc`, but failed a
+    boot build on `ctype.ml`: `llc` rejected the optimized IR with broken
+    EH/landingpad structure (`LandingPadInst not the first non-PHI
+    instruction`, `Instruction does not dominate all uses`). Rejected as
+    unsafe.
+  - Removing the global all-slot prefill gave the best focused shape
+    (`787` operands, max `12`, assembly `58069 -> 42477` lines), but boot
+    compilation crashed with minor-GC failures/segfaults. Rejected as stale
+    slot contents across ordinary GC points.
+  - A store-dominates/live-range variant kept most of the focused win
+    (`1420` operands, max `34`) and lowered `ctype`, but still failed boot
+    with minor-GC failures/segfaults. Rejected because conditional stores can
+    reach statepoints without dominating them.
+  - A store-reaches-only variant was more conservative and lowered `ctype`,
+    but gave back most of the win (`14236` operands, max `105`). Rejected as
+    too broad to plausibly deliver the needed compiler-speed improvement.
+  - A store-reaches-and-load-reachable variant was intermediate (`7211`
+    operands, max `86`) and lowered `ctype`, but still failed boot with
+    minor-GC failures/segfaults. Rejected as still missing required scan
+    points.
+  - Reverted all temporary RS4GC source edits and rebuilt `_build/llvm-tools`
+    from checked-in source. Conclusion: the all-slot behavior is a real
+    performance problem, but a sound fix needs a proper path-sensitive
+    exception-root slot liveness model or a different representation; local
+    reachability filters are not safe enough.
