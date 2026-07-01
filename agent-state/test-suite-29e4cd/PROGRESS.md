@@ -3879,6 +3879,54 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     operand folding: it likely needs to influence which values get long-lived
     stack homes, or coalesce/refresh only proven duplicate root homes, while
     keeping enough folding to avoid register-allocation failure.
+- 2026-06-30 rejected fresh seven-module BOLT/ICP screens after the `-O4`
+  correction:
+  - Reconfirmed the constraint from review: `-O4` is not a valid candidate for
+    this goal because the native-built compiler can receive the same driver
+    change. The screens below are therefore LLVM-path-only artifact tests on the
+    LLVM-built compiler: BOLT profile/layout/managed-frame metadata, not
+    frontend or native-applicable optimization flags.
+  - Collected a fresh LBR profile from
+    `bolt_compiler_20260629/ocamlopt.constfilter.reloc` on the strict
+    seven-module workload (`cfg_selectgen`, `llvmize`, `translcore`, `ctype`,
+    `env`, `typecore`, `typemod`) using the LLVM constfilter build tree and
+    install. `perf record` captured `74.035 MB` / `180051` samples; `perf2bolt`
+    matched the build-id, read `173506` samples and `2771615` LBR entries with
+    `0` trace/content mismatches, and wrote
+    `ocamlopt.constfilter.reloc.sevenfresh.lbr.fdata`.
+  - Rebuilt the usual safe layout shape
+    (`-reorder-blocks=cache+ -reorder-functions=hfsort --enable-bat`) with the
+    local noassert BOLT. The frametable patcher found `61` managed return PCs
+    needing extra descriptors (`224543` return PCs patched, `224498`
+    call-site mapped, `45` BAT fallback mapped). Explicitly adding
+    `-indirect-call-promotion=none` did not change that unsupported set, and
+    `--x86-oxcaml-icp-shared-return` also had no effect for this layout-only
+    case. Those artifacts are rejected as production candidates because they
+    leave unresolved frame descriptors without descriptor synthesis.
+  - As a diagnostic only, patched the no-ICP artifact with
+    `--synthesize-icp-descriptors`; it synthesized `61` descriptors and had
+    `0` unresolved frame descriptors, then passed a trivial `ocamlopt -c`
+    smoke. Strict seven-module benchmark against the native-built
+    `oxcaml_main_native.exe`, `samples=3`, `inner=2`: native median
+    `29.526132s`, candidate median `29.222849s`, improvement
+    `+1.0271675103956213%`
+    (`native-oxcamlopt-vs-sevenfresh-cache-hfsort-noicp-synth-seven-inner2-20260630.json`).
+    This is below the previous best safe strict run (`+3.6665%`) and well below
+    the required `+6%`, so fresh seven-module BOLT layout is not the missing
+    lever.
+  - Ran one bounded ICP screen with
+    `-indirect-call-promotion=calls -icp-top-callsites=50
+    --x86-oxcaml-icp-shared-return`. It still produced the same `61`
+    unsupported managed return PCs without synthesis. A one-sample diagnostic
+    with synthesized descriptors screened at only `+1.4882139653575432%`
+    (`native-oxcamlopt-vs-sevenfresh-icp50-sharedret-synth-seven-screen1-20260630.json`).
+    This is also below the layout-only best, so exact BOLT ICP metadata would
+    not by itself reach the `+6%` target on this workload.
+  - Conclusion: after excluding `-O4` and other native-applicable knobs, BOLT
+    layout/ICP work appears capped far short of the target in the current
+    setup. The next useful work remains real AMD64 LLVM codegen/root-shape
+    improvement: fewer duplicate/long-lived GC stack homes before frametable
+    emission, while preserving the existing ARM-style statepoint/GC mechanism.
 - 2026-06-30 rejected additional LLVM-only regalloc shape screens:
   - Kept the scope strict after the `-O4` correction: these were direct LLVM
     backend/codegen screens on the saved `typing/ctype.ml` post-RS4GC IR, not
