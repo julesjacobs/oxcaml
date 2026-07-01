@@ -4107,3 +4107,41 @@ back through cont's statepoint reloads against the stashed RS4GC IR.
     performance problem, but a sound fix needs a proper path-sensitive
     exception-root slot liveness model or a different representation; local
     reachability filters are not safe enough.
+- 2026-07-01 rejected path-sensitive exnroot slot liveness diagnostic:
+  - Reconfirmed the scope constraint from review: `-O4` and any other generic
+    frontend/native-applicable optimization level is invalid for the `+6%`
+    target. This screen was an LLVM-path-only RS4GC diagnostic, enabled only
+    through a temporary hidden `--rs4gc-oxcaml-live-exnroot-slots` option.
+  - The diagnostic computed per-explicit-exnroot-slot CFG liveness and listed a
+    slot at a statepoint only when a non-init, non-constant store could reach
+    the statepoint and a load of that slot could still be reached before an
+    overwrite. Direct protected invoke store sites remained conservatively
+    listed. This was intended as the proper dataflow version of the previously
+    rejected local reachability filters.
+  - Focused screens moved the intended IR shape and lowered cleanly. On
+    `typing/ctype.ml`, exnroot operand references dropped `16419 -> 11017`,
+    `gc-live` bundle lines dropped `4235 -> 3936`, and assembly shrank
+    `254561 -> 249452` lines. OXSR/regalloc root-shape counters were
+    essentially unchanged (`1641` appended spill slots both ways; reloads
+    `4972 -> 4971`). Exception microbenches also shrank modestly
+    (`closure_call_many_handler_live_roots_raise` asm `716 -> 707`,
+    `catch_failure_then_unify` asm `1854 -> 1838`).
+  - Correctness was better than the older reachability filters: a full boot
+    with `LLVM_WRAPPER_OPT_EXTRA_ARGS='--rs4gc-oxcaml-live-exnroot-slots'`
+    passed (`1682` boot wrapper lines / `841` fresh IR), and the script smoke
+    printed `55`.
+  - Performance still rejected it. Strict seven-module build-tree comparison
+    against native-built `main_native.exe`:
+    `native-buildtree-vs-live-exnroot-seven-inner2-20260630.json`; native
+    median `12.330539s`, LLVM diagnostic median `13.771906s`, ratio
+    `1.116894`, improvement `-11.689%`. LLVM-vs-LLVM comparison against the
+    canonical LLVM-built compiler also rejected it:
+    `llvm-canonical-vs-live-exnroot-seven-inner2-20260630.json`; canonical
+    median `13.828298s`, diagnostic median `14.195360s`, ratio `1.026544`,
+    improvement `-2.654%`.
+  - Reverted the temporary RS4GC source edit and rebuilt `_build/llvm-tools`
+    back to checked-in behavior (`live-exnroot-tools-restore.log`). Conclusion:
+    path-sensitive exnroot slot listing is now proven bootable and reduces IR
+    size, but it is not a throughput lever for the current compiler workload.
+    Do not spend more time on exnroot listing precision for the `+6%` compiler
+    target unless paired with a separate win that changes hot code shape.
