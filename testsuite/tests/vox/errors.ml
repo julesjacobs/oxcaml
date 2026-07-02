@@ -298,3 +298,38 @@ Line 1, characters 4-16:
         ^^^^^^^^^^^^
 Error: vox: the type of apply_nested carries a refinement mentioning g, which may not appear in a module-level type; annotate with a dependent arrow ((g : ...) -> ...) or a self-contained refinement
 |}]
+
+(* Mutable variables may not appear in refinements: a mutable variable
+   has no stable logical value, so facts recorded about it at different
+   times would contradict (e.g. [a = m] before [m <- 1] and [b = m]
+   after would prove [a = b]). *)
+let mut_pred () =
+  let mutable m = 0 in
+  let a : {v:int | v = m} = assume_unchecked_ m in
+  m <- 1;
+  (a :> int)
+[%%expect{|
+Line 3, characters 23-24:
+3 |   let a : {v:int | v = m} = assume_unchecked_ m in
+                           ^
+Error: vox: mutable variables may not appear in refinements
+|}]
+
+(* The same rejection at dependent applications: substituting a mutable
+   variable's stamp would smuggle it into refinements. *)
+let dep_imm : (x:int) -> {v:int | v = x} = fun x -> refine_ x
+[%%expect{|
+val dep_imm : (x : int) -> int{ _ = x } = <fun>
+|}]
+
+let mut_dep () =
+  let mutable m = 0 in
+  let refine_ a = dep_imm m in
+  m <- 1;
+  a
+[%%expect{|
+Line 3, characters 26-27:
+3 |   let refine_ a = dep_imm m in
+                              ^
+Error: vox: the argument for a dependent parameter must be an immutable variable (let-bind it first)
+|}]

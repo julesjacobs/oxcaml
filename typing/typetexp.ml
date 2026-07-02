@@ -936,6 +936,13 @@ let rec elab_vox_pred ~bound ~self_root env (e : Parsetree.expression)
       | Some `Self -> Pbound
       | None ->
           match Env.lookup_value ~use:false ~loc lid env with
+          | (Path.Pident _, {val_kind = Val_mut _; _}, _) ->
+              (* A mutable variable has no stable logical value: facts
+                 recorded about it at different times would contradict.
+                 (The VC walker also never scopes mutable binders, but
+                 the rejection must not depend on that.) *)
+              Location.raise_errorf ~loc
+                "vox: mutable variables may not appear in refinements"
           | (Path.Pident id, _, _) -> Pvar id
           | _ ->
               Location.raise_errorf ~loc
@@ -998,6 +1005,9 @@ let rec elab_vox_pred ~bound ~self_root env (e : Parsetree.expression)
           elab_vox_constr ~bound ~self_root env ~loc lid (Some a)
       | Pexp_ident {txt = Longident.Lident "not"; _}, [a] ->
           Pnot (elab_vox_pred ~bound ~self_root env a)
+      | Pexp_ident {txt = Longident.Lident ("-" | "~-"); _}, [a] ->
+          (* unary minus *)
+          Pbinop (Sub, Pint 0, elab_vox_pred ~bound ~self_root env a)
       | Pexp_ident {txt = Longident.Lident "&&"; _}, [a; b] ->
           Pand (elab_vox_pred ~bound ~self_root env a, elab_vox_pred ~bound ~self_root env b)
       | Pexp_ident {txt = Longident.Lident "||"; _}, [a; b] ->
@@ -1019,13 +1029,18 @@ let rec elab_vox_pred ~bound ~self_root env (e : Parsetree.expression)
             | _ -> assert false
           in
           Pbinop (binop, elab_vox_pred ~bound ~self_root env a, elab_vox_pred ~bound ~self_root env b)
-      | Pexp_ident {txt = Longident.Lident f; _}, (_ :: _ as args) ->
-          (* Any other applied identifier is a SPEC function: a logical
-             function the user defines on the solver side via
+      | Pexp_ident {txt = Longident.Lident f; _}, (_ :: _ as args)
+        when String.length f > 0
+             && (match f.[0] with 'a' .. 'z' | '_' -> true | _ -> false) ->
+          (* Any other applied lowercase identifier is a SPEC function:
+             a logical function the user defines on the solver side via
              [-vox-prelude].  Spec functions live in their own namespace
              (program functions have no logical meaning), and, like the
              rest of the predicate language, they are untyped: undefined
-             or ill-sorted applications are solver errors at VC time. *)
+             or ill-sorted applications are solver errors at VC time.
+             Operator names do NOT fall through here: an unsupported
+             operator shape must be an error, never silently an
+             uninterpreted function. *)
           Pfun (f, List.map (elab_vox_pred ~bound ~self_root env) args)
       | _ -> unsupported ()
       end

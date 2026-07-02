@@ -5128,12 +5128,23 @@ vox_pred_mul:
 vox_pred_app:
   | h = vox_pred_app a = vox_pred_proj
       { mkexp ~loc:$sloc (Pexp_apply (h, [Nolabel, a])) }
+  | p = vox_pred_atom { p }
+;
+
+(* Prefix minus: [- INT] stays a (negative) literal, so [min_int] is
+   writable; any other operand is the logic's negation, elaborated as
+   [0 - p].  Minus lives at the atom level, not inside application or
+   projection operands, so [len x - 1] stays a subtraction. *)
+vox_pred_atom:
   | p = vox_pred_proj { p }
   | MINUS n = INT
       { let (n, m) = n in
         mkexp ~loc:$sloc
           (Pexp_constant
              (mkconst ~loc:$sloc (Pconst_integer ("-" ^ n, m)))) }
+  | MINUS p = vox_pred_arg_not_int
+      { mkexp ~loc:$sloc
+          (Pexp_apply (mkoperator ~loc:$loc($1) "~-", [Nolabel, p])) }
 ;
 
 (* Field projection binds tighter than application, as in expressions:
@@ -5154,14 +5165,18 @@ vox_pred_projbase:
 ;
 
 vox_pred_arg:
-  | UNDERSCORE
-      { mkexpvar ~loc:$sloc "_" }
-  | id = LIDENT
-      { mkexpvar ~loc:$sloc id }
   | n = INT
       { let (n, m) = n in
         mkexp ~loc:$sloc
           (Pexp_constant (mkconst ~loc:$sloc (Pconst_integer (n, m)))) }
+  | p = vox_pred_arg_not_int { p }
+;
+
+vox_pred_arg_not_int:
+  | UNDERSCORE
+      { mkexpvar ~loc:$sloc "_" }
+  | id = LIDENT
+      { mkexpvar ~loc:$sloc id }
   | TRUE
       { mkexp ~loc:$sloc
           (Pexp_construct (mkrhs (Lident "true") $sloc, None)) }

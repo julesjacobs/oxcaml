@@ -900,10 +900,13 @@ let rec smt_of_pred buf (p : Refinement.pred) =
         smt_of_pred buf a)
       args;
     Buffer.add_char buf ')'
-  | Pfun (f, []) -> Buffer.add_string buf f
+  (* Spec functions are defined by the [-vox-prelude].  The name is
+     pipe-quoted: [|f|] denotes the same SMT symbol as a plain [f], so
+     preludes declaring the plain name keep working, while names that
+     are not simple SMT symbols (e.g. [len']) stay well-formed. *)
+  | Pfun (f, []) -> Buffer.add_string buf ("|" ^ smt_escape f ^ "|")
   | Pfun (f, args) ->
-    (* spec function: emitted verbatim; defined by the [-vox-prelude] *)
-    Buffer.add_string buf ("(" ^ f);
+    Buffer.add_string buf ("(|" ^ smt_escape f ^ "|");
     List.iter
       (fun a ->
         Buffer.add_char buf ' ';
@@ -1221,7 +1224,9 @@ let rec lean_of_pred buf (p : Refinement.pred) =
     Buffer.add_char buf ')'
   | Pfun (f, []) -> Buffer.add_string buf f
   | Pfun (f, args) ->
-    (* spec function: emitted verbatim; defined by the [-vox-prelude] *)
+    (* Spec function, emitted verbatim (unlike the SMT side, no quoting
+       is needed: every OCaml lowercase identifier, [']s included, is a
+       valid Lean identifier); defined by the [-vox-prelude]. *)
     Buffer.add_string buf ("(" ^ f);
     List.iter
       (fun a ->

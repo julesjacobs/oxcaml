@@ -4981,6 +4981,12 @@ let vox_open_dependent_arrow env binder ~sarg_opt ~app_loc ty_ret ty_ret0 =
       match sarg.pexp_desc with
       | Pexp_ident lid ->
         (match Env.lookup_value ~use:false ~loc:sarg.pexp_loc lid.txt env with
+         | (Path.Pident _, {val_kind = Val_mut _; _}, _) ->
+           (* Substituting a mutable variable's stamp would let facts
+              recorded about it at different times contradict. *)
+           Location.raise_errorf ~loc:sarg.pexp_loc
+             "vox: the argument for a dependent parameter must be an \
+              immutable variable (let-bind it first)"
          | (Path.Pident id, _, _) ->
            let by = Refinement.Pvar id in
            let ty_ret' = Vox_dep.subst_binder b ~by ty_ret in

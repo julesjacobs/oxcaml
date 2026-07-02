@@ -75,3 +75,25 @@ Line 1, characters 4-8:
         ^^^^
 Error: vox: the type of leak carries a refinement mentioning three, which may not appear in a module-level type; annotate with a dependent arrow ((three : ...) -> ...) or a self-contained refinement
 |}]
+
+(* Unary minus is the logic's [0 - e] (and [- INT] a negative literal;
+   an operator shape the grammar does not know is an error, never a
+   silent spec function). *)
+let neg : (x : int) -> int{ _ = - x } =
+  fun x -> refine_ (0 - x)
+[%%expect{|
+Line 2, characters 19-26: vox VC:
+  goal: (0 - x) = (0 - x)
+  hypotheses:
+  three = 3
+val neg : (x : int) -> int{ _ = (0 - x) } = <fun>
+|}]
+
+let m : int{ _ = -1 } = refine_ (0 - 1)
+[%%expect{|
+Line 1, characters 32-39: vox VC:
+  goal: (0 - 1) = -1
+  hypotheses:
+  three = 3
+val m : int{ _ = -1 } = -1
+|}]
