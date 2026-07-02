@@ -751,6 +751,16 @@ let rec typexp copy_scope s ty =
           let ret = typexp copy_scope s ret in
           let comm = copy_commu comm in
           Tarrow ((label, marg, mret, binder), arg, ret, comm)
+      | Trefine (t, p) ->
+          (* vox: constructor applications in the predicate carry type
+             paths, which must be remapped exactly as [Tconstr] paths
+             are.  A path substituted away by a type function is left
+             untouched: the orphaned predicate then fails structural
+             comparison / VC-time resolution, which is sound. *)
+          let map_path q =
+            if to_subst_by_type_function s q then q else type_path s q
+          in
+          Trefine (typexp copy_scope s t, Refinement.map_paths map_path p)
       | _ -> copy_type_desc (typexp copy_scope s) desc
     in
     Transient_expr.set_stub_desc ty' desc;

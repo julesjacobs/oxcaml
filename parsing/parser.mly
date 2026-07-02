@@ -5114,14 +5114,27 @@ vox_pred_mul:
   | p = vox_pred_app { p }
 ;
 
+(* Application is generic and left-nested: [len x], [mem 2 _] (curried,
+   flattened by the elaborator), and constructor application [Cons (h, t)]
+   ([mod_longident] atoms are constructors; a parenthesized comma list is
+   a tuple).  Argument atoms exclude [- INT] so that [len x - 1] stays a
+   subtraction; write [len (-1)] to apply to a negative literal. *)
 vox_pred_app:
-  | f = LIDENT a = vox_pred_atom
-      { mkexp ~loc:$sloc
-          (Pexp_apply (mkexpvar ~loc:$loc(f) f, [Nolabel, a])) }
+  | h = vox_pred_app a = vox_pred_arg
+      { mkexp ~loc:$sloc (Pexp_apply (h, [Nolabel, a])) }
   | p = vox_pred_atom { p }
 ;
 
 vox_pred_atom:
+  | p = vox_pred_arg { p }
+  | MINUS n = INT
+      { let (n, m) = n in
+        mkexp ~loc:$sloc
+          (Pexp_constant
+             (mkconst ~loc:$sloc (Pconst_integer ("-" ^ n, m)))) }
+;
+
+vox_pred_arg:
   | UNDERSCORE
       { mkexpvar ~loc:$sloc "_" }
   | id = LIDENT
@@ -5130,18 +5143,18 @@ vox_pred_atom:
       { let (n, m) = n in
         mkexp ~loc:$sloc
           (Pexp_constant (mkconst ~loc:$sloc (Pconst_integer (n, m)))) }
-  | MINUS n = INT
-      { let (n, m) = n in
-        mkexp ~loc:$sloc
-          (Pexp_constant
-             (mkconst ~loc:$sloc (Pconst_integer ("-" ^ n, m)))) }
   | TRUE
       { mkexp ~loc:$sloc
           (Pexp_construct (mkrhs (Lident "true") $sloc, None)) }
   | FALSE
       { mkexp ~loc:$sloc
           (Pexp_construct (mkrhs (Lident "false") $sloc, None)) }
-  | LPAREN p = vox_pred RPAREN { p }
+  | c = mkrhs(mod_longident)
+      { mkexp ~loc:$sloc (Pexp_construct (c, None)) }
+  | LPAREN ps = separated_nonempty_llist(COMMA, vox_pred) RPAREN
+      { match ps with
+        | [ p ] -> p
+        | ps -> mkexp ~loc:$sloc (Pexp_tuple (List.map (fun p -> None, p) ps)) }
 ;
 
 (* This is the syntax of the actual type parameters in an application of

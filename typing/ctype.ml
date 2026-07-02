@@ -8896,3 +8896,25 @@ let apply_left_is_contained_by is_contained_by ?(modalities = Modality.Const.id)
 let apply_right_is_contained_by is_contained_by
   ?(modalities = Modality.Const.id) mode =
   Modality.Const.apply_right ~is_contained_by modalities mode
+
+(* vox: recognize a "simple" variant type: monomorphic, non-GADT, closed,
+   at least one constructor (zero-constructor datatypes cannot be declared
+   to the solver), every constructor with tuple arguments (hence
+   immutable).  These are the variants whose constructors may appear in
+   refinement predicates; the solver models them with its datatype
+   theory. *)
+let vox_simple_variant env p =
+  match Env.find_type p env with
+  | exception Not_found -> None
+  | decl ->
+      match decl.type_params, decl.type_kind with
+      | [], Type_variant ((_ :: _ as cstrs), _, _)
+        when List.for_all
+               (fun (cd : Types.constructor_declaration) ->
+                 Option.is_none cd.cd_res
+                 && (match cd.cd_args with
+                     | Cstr_tuple _ -> true
+                     | Cstr_record _ -> false))
+               cstrs ->
+          Some cstrs
+      | _ -> None

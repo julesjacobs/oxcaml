@@ -917,3 +917,9 @@ val apply_left_is_contained_by : Mode.Hint.is_contained_by
 val apply_right_is_contained_by : Mode.Hint.is_contained_by
   -> ?modalities:Mode.Modality.Const.t
   -> ('l * allowed) Mode.Value.t -> Mode.Value.r
+
+(** vox: if [p] is a "simple" variant (monomorphic, non-GADT, closed,
+    non-empty, tuple constructor arguments only), its constructor
+    declarations. *)
+val vox_simple_variant :
+  Env.t -> Path.t -> Types.constructor_declaration list option

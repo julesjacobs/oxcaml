@@ -3,8 +3,9 @@
    Runs as a separate pass over the FINAL typedtree (the type checker emits no VCs; it
    backtracks internally). Walks the tree carrying a logical environment of facts; each
    [refine_] node yields the VC [facts |- p[v := name of e]]; [assume_] is reported as
-   ASSUMED. Facts come from exactly three places (DESIGN.md): unpacking / binders of
-   refined type, path facts from [if], and (v1) dependent application.
+   ASSUMED. Facts come from exactly four places (DESIGN.md): unpacking / binders of
+   refined type, path facts from [if], dependent application, and match facts on a
+   variable scrutinee ([s = C x1 ... xn] in the branch that matched [C x1 ... xn]).
 
    VCs are discharged by a Z3 subprocess over SMT-LIB2. Solver error, unknown, and timeout
    all count as verification FAILURE. *)
@@ -19,11 +20,12 @@ type vc =
   ; vc_assumed : bool
   }
 
-(* Declaration sorts for logical names, per DESIGN.md: int as Int, bool as Bool, anything
-   else at a single uninterpreted sort. *)
+(* Declaration sorts for logical names, per DESIGN.md: int as Int, bool as Bool, simple
+   variants as solver datatypes, anything else at a single uninterpreted sort. *)
 type dsort =
   | S_int
   | S_bool
+  | S_data of Path.t (* a "simple" variant, modelled with the datatype theory *)
   | S_other
 
 let vcs : vc list ref = ref []
@@ -32,10 +34,24 @@ let name_sorts : (Ident.t, dsort) Hashtbl.t = Hashtbl.create 64
 (* Fresh unknowns minted by the pass itself; always "in scope". *)
 let synthetic_names : (Ident.t, unit) Hashtbl.t = Hashtbl.create 16
 
+(* Simple-variant datatypes used by the current module's (or toplevel
+   session's) VCs, in dependency order (the datatypes of a datatype's fields
+   precede it; self-recursion is fine).  Mutual recursion is not supported:
+   detecting a back-edge POISONS the type being registered, which then sorts
+   as [S_other] everywhere (sound: facts about its structure become
+   ill-sorted and verification fails). *)
+let datatypes : (Path.t * (string * dsort list) list) list ref = ref []
+let registering : Path.t list ref = ref []
+let poisoned : Path.t list ref = ref []
+let find_datatype p = List.find_opt (fun (q, _) -> Path.same p q) !datatypes
+
 let reset () =
   vcs := [];
   Hashtbl.reset name_sorts;
-  Hashtbl.reset synthetic_names
+  Hashtbl.reset synthetic_names;
+  datatypes := [];
+  registering := [];
+  poisoned := []
 ;;
 
 (* Expansion can fail on exotic types (e.g. stage errors inside quotations); fall back to
@@ -46,15 +62,88 @@ let safe_expand_head env ty =
   | exception _ -> ty
 ;;
 
-let rec dsort_of_type env ty =
+(* A STABLE string for a type path: no stamps, and a path rooted in the
+   current unit is prefixed with the unit's name, so the same type gets
+   the same solver-side name in its defining module and in every client
+   (a [-vox-prelude] can then refer to it).  Distinct paths that map to
+   the same string (e.g. types in shadowed local modules) are detected
+   at registration and rejected. *)
+let rec path_uname (p : Path.t) =
+  match p with
+  | Path.Pident id ->
+    if Ident.is_global_or_predef id
+    then Ident.name id
+    else Env.get_current_unit_name () ^ "." ^ Ident.name id
+  | Path.Pdot (q, s) -> path_uname q ^ "." ^ s
+  | Path.Papply (q, r) -> path_uname q ^ "(" ^ path_uname r ^ ")"
+  | Path.Pextra_ty (q, _) -> path_uname q ^ ".#extra"
+;;
+
+(* The sort of the type at path [p], registering it as a datatype (with its
+   field datatypes, recursively) on first sight. *)
+let rec datatype_sort env p =
+  if Path.same p Predef.path_int
+  then S_int
+  else if Path.same p Predef.path_bool
+  then S_bool
+  else if List.exists (Path.same p) !poisoned
+  then S_other
+  else if find_datatype p <> None
+  then S_data p
+  else if List.exists (Path.same p) !registering
+  then (
+    match !registering with
+    | q :: _ when Path.same p q -> S_data p (* self-recursion *)
+    | _ ->
+      (* mutual recursion: poison the back-edge's target *)
+      poisoned := p :: !poisoned;
+      S_other)
+  else (
+    match Ctype.vox_simple_variant env p with
+    | None -> S_other
+    | Some cstrs ->
+      registering := p :: !registering;
+      let constrs =
+        List.map
+          (fun (cd : Types.constructor_declaration) ->
+            ( Ident.name cd.cd_id
+            , List.map (dsort_of_type env) (Types.tys_of_constr_args cd.cd_args) ))
+          cstrs
+      in
+      registering := List.tl !registering;
+      if List.exists (Path.same p) !poisoned
+      then S_other
+      else (
+        (* Solver-side names are stamp-free: reject a distinct path that
+           would alias an already-registered datatype's name. *)
+        List.iter
+          (fun (q, _) ->
+            if String.equal (path_uname p) (path_uname q)
+            then
+              Location.raise_errorf
+                "vox: two distinct types would share the solver-side name \
+                 %s; rename one of them"
+                (path_uname p))
+          !datatypes;
+        datatypes := !datatypes @ [ p, constrs ];
+        S_data p))
+
+and dsort_of_type env ty =
   match get_desc (safe_expand_head env ty) with
-  | Tconstr (p, [], _) when Path.same p Predef.path_int -> S_int
-  | Tconstr (p, [], _) when Path.same p Predef.path_bool -> S_bool
+  | Tconstr (p, [], _) -> datatype_sort env p
   | Trefine (skel, _) -> dsort_of_type env skel
   | _ -> S_other
 ;;
 
 let record_name env id ty = Hashtbl.replace name_sorts id (dsort_of_type env ty)
+
+(* Register the datatypes of any constructor application in [p].  Called
+   wherever a predicate enters the fact/goal stream; a path that fails to
+   register (not a simple variant here, or mutually recursive) is caught at
+   discharge time. *)
+let register_pred_paths env p =
+  List.iter (fun q -> ignore (datatype_sort env q)) (Refinement.constr_paths p)
+;;
 
 let has_vox_attr name attrs =
   List.exists (fun (a : Parsetree.attribute) -> String.equal a.attr_name.txt name) attrs
@@ -76,7 +165,9 @@ let binder_facts : type k. Env.t -> k general_pattern -> Refinement.pred list =
     (fun (id, _, ty, _, _) ->
       record_name env id ty;
       match refinement_of_type env ty with
-      | Some p -> [ Refinement.subst_bound ~by:(Refinement.Pvar id) p ]
+      | Some p ->
+        register_pred_paths env p;
+        [ Refinement.subst_bound ~by:(Refinement.Pvar id) p ]
       | None -> [])
     (pat_bound_idents_full pat)
 ;;
@@ -91,13 +182,24 @@ let unpack_fact
   then []
   else (
     match pat_bound_idents pat, refinement_of_type env scrut with
-    | [ id ], Some p -> [ Refinement.subst_bound ~by:(Refinement.Pvar id) p ]
+    | [ id ], Some p ->
+      register_pred_paths env p;
+      [ Refinement.subst_bound ~by:(Refinement.Pvar id) p ]
     | _ -> [])
 ;;
 
 (* The logical name of an expression: variables denote their stamp, integer literals
-   themselves; anything else is a fresh unknown. *)
-let name_of_expr env (e : expression) : Refinement.pred =
+   themselves, applications of simple-variant constructors their constructor term
+   (over the names of their arguments -- "constructors get the usual refinements");
+   anything else is a fresh unknown. *)
+let fresh_unknown env (e : expression) =
+  let id = Ident.create_local "*vox-unknown*" in
+  record_name env id e.exp_type;
+  Hashtbl.replace synthetic_names id ();
+  Refinement.Pvar id
+;;
+
+let rec name_of_expr env (e : expression) : Refinement.pred =
   match e.exp_desc with
   | Texp_ident { path = Path.Pident id; _ } -> Refinement.Pvar id
   | Texp_constant (Const_int n) -> Refinement.Pint n
@@ -105,11 +207,14 @@ let name_of_expr env (e : expression) : Refinement.pred =
     Refinement.Pbool true
   | Texp_construct ({ txt = Longident.Lident "false"; _ }, _, _, [], _) ->
     Refinement.Pbool false
-  | _ ->
-    let id = Ident.create_local "*vox-unknown*" in
-    record_name env id e.exp_type;
-    Hashtbl.replace synthetic_names id ();
-    Refinement.Pvar id
+  | Texp_construct (_, cstr, _, args, _) ->
+    let path = Data_types.cstr_res_type_path cstr in
+    (match datatype_sort env path with
+     | S_data _ ->
+       Refinement.Pconstr
+         (path, cstr.cstr_name, List.map (fun (_, a) -> name_of_expr env a) args)
+     | S_int | S_bool | S_other -> fresh_unknown env e)
+  | _ -> fresh_unknown env e
 ;;
 
 (* The logical context of a program point: facts, plus the stamps in
@@ -281,6 +386,57 @@ and check_class_type ~loc ~what = function
     check_class_type ~loc ~what cty
 ;;
 
+(* vox match fact ("the match refines the thing we matched on"): matching a
+   variable scrutinee [sid] against a SIMPLE pattern -- one constructor of a
+   simple variant whose sub-patterns are all variables or wildcards --
+   contributes [sid = C x1 ... xn] to the case's guard and body.  Wildcards
+   name fresh unknowns.  Anything deeper (nesting, aliases, or-patterns,
+   constants) contributes nothing, which is sound.  This is the constructor
+   analogue of the [if] path fact. *)
+let match_fact
+  : type k. Env.t -> Ident.t -> k general_pattern -> Refinement.pred option
+  =
+  fun env sid pat ->
+  let arg_name (_, (p : value general_pattern)) =
+    match p.pat_desc with
+    | Tpat_var { id; _ } -> Some (Refinement.Pvar id)
+    | Tpat_any ->
+      let id = Ident.create_local "*vox-wild*" in
+      record_name env id p.pat_type;
+      Hashtbl.replace synthetic_names id ();
+      Some (Refinement.Pvar id)
+    | _ -> None
+  in
+  let constructor_fact cstr args =
+    let path = Data_types.cstr_res_type_path cstr in
+    match datatype_sort env path with
+    | S_int | S_bool | S_other -> None
+    | S_data _ ->
+      let rec name_args acc = function
+        | [] -> Some (List.rev acc)
+        | a :: rest ->
+          (match arg_name a with
+           | Some n -> name_args (n :: acc) rest
+           | None -> None)
+      in
+      (match name_args [] args with
+       | Some names ->
+         Some
+           (Refinement.Pbinop
+              ( Refinement.Eq
+              , Refinement.Pvar sid
+              , Refinement.Pconstr (path, cstr.Data_types.cstr_name, names) ))
+       | None -> None)
+  in
+  match pat.pat_desc with
+  | Tpat_value p ->
+    (match (p :> value general_pattern).pat_desc with
+     | Tpat_construct (_, cstr, _, args, _) -> constructor_fact cstr args
+     | _ -> None)
+  | Tpat_construct (_, cstr, _, args, _) -> constructor_fact cstr args
+  | _ -> None
+;;
+
 (* Extend the context at a binding pattern: new stamps come into scope;
    refined binders contribute their facts (plus the scrutinee's
    refinement for unpack patterns). *)
@@ -312,6 +468,7 @@ let rec walk_expr env ctx (e : expression) =
   then (
     match refinement_of_type env e.exp_type with
     | Some p ->
+      register_pred_paths env p;
       let n = name_of_expr env e in
       emit_vc
         ~loc:e.exp_loc
@@ -326,9 +483,23 @@ let rec walk_expr env ctx (e : expression) =
     walk_expr env ctx' body
   | Texp_match (scrut, _sort, comp_cases, val_cases, _partial) ->
     walk_expr env ctx scrut;
+    let scrut_id =
+      match scrut.exp_desc with
+      | Texp_ident { path = Path.Pident id; _ } -> Some id
+      | _ -> None
+    in
     let do_case : type k. k case -> unit =
       fun c ->
       let ctx' = extend_pat ~scrut:scrut.exp_type env ctx c.c_lhs in
+      let ctx' =
+        match
+          match scrut_id with
+          | Some sid -> match_fact env sid c.c_lhs
+          | None -> None
+        with
+        | Some f -> { ctx' with cfacts = f :: ctx'.cfacts }
+        | None -> ctx'
+      in
       Option.iter (walk_expr env ctx') c.c_guard;
       walk_expr env ctx' c.c_rhs
     in
@@ -405,6 +576,71 @@ let smt_name id =
   "|" ^ s ^ "|"
 ;;
 
+let smt_escape s =
+  String.map
+    (fun c ->
+      match c with
+      | '|' | '\\' -> '_'
+      | _ -> c)
+    s
+;;
+
+let smt_dt_name p = "|dt:" ^ smt_escape (path_uname p) ^ "|"
+let smt_constr_name p c = "|c:" ^ smt_escape (path_uname p ^ "." ^ c) ^ "|"
+
+let smt_sel_name p c i =
+  "|s:" ^ smt_escape (path_uname p ^ "." ^ c) ^ "." ^ Int.to_string i ^ "|"
+;;
+
+let smt_sort = function
+  | S_int -> "Int"
+  | S_bool -> "Bool"
+  | S_other -> "VoxU"
+  | S_data p ->
+    (match find_datatype p with
+     | Some _ -> smt_dt_name p
+     | None -> "VoxU" (* unregistered: degrade, sound *))
+;;
+
+let datatype_field_needs_voxu () =
+  List.exists
+    (fun (_, constrs) ->
+      List.exists
+        (fun (_, fields) ->
+          List.exists
+            (fun fs ->
+              match fs with
+              | S_other -> true
+              | S_int | S_bool | S_data _ -> false)
+            fields)
+        constrs)
+    !datatypes
+;;
+
+(* All registered datatypes, one [declare-datatypes] block each, already in
+   dependency order (self-recursion within a block is fine). *)
+let smt_datatype_decls buf =
+  List.iter
+    (fun (p, constrs) ->
+      Buffer.add_string
+        buf
+        (Printf.sprintf "(declare-datatypes ((%s 0)) ((" (smt_dt_name p));
+      List.iteri
+        (fun k (cname, fields) ->
+          if k > 0 then Buffer.add_char buf ' ';
+          Buffer.add_string buf ("(" ^ smt_constr_name p cname);
+          List.iteri
+            (fun i fs ->
+              Buffer.add_string
+                buf
+                (Printf.sprintf " (%s %s)" (smt_sel_name p cname i) (smt_sort fs)))
+            fields;
+          Buffer.add_char buf ')')
+        constrs;
+      Buffer.add_string buf ")))\n")
+    !datatypes
+;;
+
 let rec smt_of_pred buf (p : Refinement.pred) =
   let open Refinement in
   match p with
@@ -419,6 +655,25 @@ let rec smt_of_pred buf (p : Refinement.pred) =
       Buffer.add_string buf
         (Printf.sprintf "(- %s)" (String.sub s 1 (String.length s - 1))))
   | Pbool b -> Buffer.add_string buf (Bool.to_string b)
+  | Pconstr (p, c, []) -> Buffer.add_string buf (smt_constr_name p c)
+  | Pconstr (p, c, args) ->
+    Buffer.add_string buf ("(" ^ smt_constr_name p c);
+    List.iter
+      (fun a ->
+        Buffer.add_char buf ' ';
+        smt_of_pred buf a)
+      args;
+    Buffer.add_char buf ')'
+  | Pfun (f, []) -> Buffer.add_string buf f
+  | Pfun (f, args) ->
+    (* spec function: emitted verbatim; defined by the [-vox-prelude] *)
+    Buffer.add_string buf ("(" ^ f);
+    List.iter
+      (fun a ->
+        Buffer.add_char buf ' ';
+        smt_of_pred buf a)
+      args;
+    Buffer.add_char buf ')'
   | Pbinop (Neq, a, b) ->
     Buffer.add_string buf "(not (= ";
     smt_of_pred buf a;
@@ -463,6 +718,43 @@ let rec smt_of_pred buf (p : Refinement.pred) =
 
 let free_vars_of_vc vc = List.concat_map Refinement.free_vars (vc.vc_goal :: vc.vc_facts)
 
+(* The [-vox-prelude] file: user-written solver-side definitions (spec
+   functions such as measures), inserted verbatim into every generated
+   solver input just after the datatype declarations.  Written for
+   whichever backend [-vox-solver] selects.  Normalized to end in a
+   newline; an unreadable file is a verification failure. *)
+let prelude_cache : string option ref = ref None
+
+let prelude () =
+  match !prelude_cache with
+  | Some c -> c
+  | None ->
+    let c =
+      if String.equal !Clflags.vox_prelude ""
+      then ""
+      else (
+        match
+          let ic = open_in_bin !Clflags.vox_prelude in
+          let n = in_channel_length ic in
+          let c = really_input_string ic n in
+          close_in ic;
+          c
+        with
+        | c ->
+          if String.length c > 0 && c.[String.length c - 1] = '\n'
+          then c
+          else c ^ "\n"
+        | exception Sys_error msg ->
+          Location.raise_errorf "vox: cannot read -vox-prelude file: %s" msg)
+    in
+    prelude_cache := Some c;
+    c
+;;
+
+let prelude_lines () =
+  String.fold_left (fun n c -> if c = '\n' then n + 1 else n) 0 (prelude ())
+;;
+
 let smt_script vc =
   let buf = Buffer.create 512 in
   let seen = Hashtbl.create 16 in
@@ -471,10 +763,14 @@ let smt_script vc =
       (fun id ->
         match Hashtbl.find_opt name_sorts id with
         | Some (S_int | S_bool) -> false
+        | Some (S_data p) -> find_datatype p = None
         | Some S_other | None -> true)
       (free_vars_of_vc vc)
+    || datatype_field_needs_voxu ()
   in
   if needs_other then Buffer.add_string buf "(declare-sort VoxU 0)\n";
+  smt_datatype_decls buf;
+  Buffer.add_string buf (prelude ());
   List.iter
     (fun id ->
       if not (Hashtbl.mem seen id)
@@ -482,9 +778,8 @@ let smt_script vc =
         Hashtbl.add seen id ();
         let s =
           match Hashtbl.find_opt name_sorts id with
-          | Some S_int -> "Int"
-          | Some S_bool -> "Bool"
-          | Some S_other | None -> "VoxU"
+          | Some ds -> smt_sort ds
+          | None -> "VoxU"
         in
         Buffer.add_string buf (Printf.sprintf "(declare-const %s %s)\n" (smt_name id) s)))
     (free_vars_of_vc vc);
@@ -573,8 +868,7 @@ let run_z3 script =
    modelled as [Prop] (equality between boolean-valued predicates
    becomes [↔]), everything else lives in an opaque type [VoxU]. *)
 
-let lean_name id =
-  let s = Ident.unique_name id in
+let lean_sanitize s =
   let b = Bytes.of_string s in
   Bytes.iteri
     (fun i c ->
@@ -582,7 +876,37 @@ let lean_name id =
       | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> ()
       | _ -> Bytes.set b i '_')
     b;
-  "v_" ^ Bytes.to_string b
+  Bytes.to_string b
+;;
+
+let lean_name id = "v_" ^ lean_sanitize (Ident.unique_name id)
+let lean_dt_name p = "Vox_" ^ lean_sanitize (path_uname p)
+let lean_constr_name p c = lean_dt_name p ^ "." ^ lean_sanitize c
+
+let lean_sort = function
+  | S_int -> "Int"
+  | S_bool -> "Prop"
+  | S_other -> "VoxU"
+  | S_data p ->
+    (match find_datatype p with
+     | Some _ -> lean_dt_name p
+     | None -> "VoxU" (* unregistered: degrade, sound *))
+;;
+
+(* One inductive per line (the error-line mapping counts lines), in dependency
+   order; self-recursion within a line is fine. *)
+let lean_datatype_decls buf =
+  List.iter
+    (fun (p, constrs) ->
+      Buffer.add_string buf (Printf.sprintf "inductive %s : Type where" (lean_dt_name p));
+      List.iter
+        (fun (cname, fields) ->
+          Buffer.add_string buf (Printf.sprintf " | %s : " (lean_sanitize cname));
+          List.iter (fun fs -> Buffer.add_string buf (lean_sort fs ^ " -> ")) fields;
+          Buffer.add_string buf (lean_dt_name p))
+        constrs;
+      Buffer.add_char buf '\n')
+    !datatypes
 ;;
 
 let boolish p =
@@ -594,7 +918,8 @@ let boolish p =
     (match Hashtbl.find_opt name_sorts id with
      | Some S_bool -> true
      | _ -> false)
-  | Pbound | Pint _ | Pbinop ((Add | Sub | Mul), _, _) -> false
+  | Pbound | Pint _ | Pconstr _ | Pfun _ | Pbinop ((Add | Sub | Mul), _, _) ->
+    false
 ;;
 
 let rec lean_of_pred buf (p : Refinement.pred) =
@@ -614,6 +939,25 @@ let rec lean_of_pred buf (p : Refinement.pred) =
     then Buffer.add_string buf (Printf.sprintf "(%d : Int)" n)
     else Buffer.add_string buf (Printf.sprintf "((%d : Int))" n)
   | Pbool b -> Buffer.add_string buf (if b then "True" else "False")
+  | Pconstr (p, c, []) -> Buffer.add_string buf (lean_constr_name p c)
+  | Pconstr (p, c, args) ->
+    Buffer.add_string buf ("(" ^ lean_constr_name p c);
+    List.iter
+      (fun a ->
+        Buffer.add_char buf ' ';
+        lean_of_pred buf a)
+      args;
+    Buffer.add_char buf ')'
+  | Pfun (f, []) -> Buffer.add_string buf f
+  | Pfun (f, args) ->
+    (* spec function: emitted verbatim; defined by the [-vox-prelude] *)
+    Buffer.add_string buf ("(" ^ f);
+    List.iter
+      (fun a ->
+        Buffer.add_char buf ' ';
+        lean_of_pred buf a)
+      args;
+    Buffer.add_char buf ')'
   | Pbinop (Eq, a, b) -> bin (if boolish a || boolish b then "↔" else "=") a b
   | Pbinop (Neq, a, b) ->
     Buffer.add_string buf "(¬ ";
@@ -644,9 +988,8 @@ let lean_theorem buf i vc =
         Hashtbl.add seen id ();
         let sort =
           match Hashtbl.find_opt name_sorts id with
-          | Some S_int -> "Int"
-          | Some S_bool -> "Prop"
-          | Some S_other | None -> "VoxU"
+          | Some ds -> lean_sort ds
+          | None -> "VoxU"
         in
         Buffer.add_string buf
           (Printf.sprintf "(%s : %s) " (lean_name id) sort)))
@@ -673,16 +1016,25 @@ let lean_file vcs =
           (fun id ->
             match Hashtbl.find_opt name_sorts id with
             | Some (S_int | S_bool) -> false
+            | Some (S_data p) -> find_datatype p = None
             | Some S_other | None -> true)
           (free_vars_of_vc vc))
       vcs
+    || datatype_field_needs_voxu ()
   in
-  let first_line = if needs_voxu then 2 else 1 in
+  (* Header: VoxU (referenced by datatype fields, so first), then one
+     inductive per line, then the [-vox-prelude]; theorems follow, one
+     per line. *)
+  let first_line =
+    1 + (if needs_voxu then 1 else 0) + List.length !datatypes + prelude_lines ()
+  in
   if needs_voxu then Buffer.add_string buf "opaque VoxU : Type\n";
+  lean_datatype_decls buf;
+  Buffer.add_string buf (prelude ());
   List.iteri (fun i vc -> lean_theorem buf i vc) vcs;
   ( Buffer.contents buf,
     fun line ->
-      (* An error on the preamble line maps to no VC (and a negative
+      (* An error on a header line maps to no VC (and a negative
          index would make [List.nth_opt] raise). *)
       if line < first_line then None else List.nth_opt vcs (line - first_line)
   )
@@ -732,14 +1084,26 @@ let run_lean vcs =
                       String.sub l (String.length in_file + 1)
                         (String.length l - String.length in_file - 1)
                     in
+                    let is_error =
+                      (* skip warnings: only "<file>:L:C: error: ..." *)
+                      let needle = " error: " in
+                      let rec find i =
+                        if i + String.length needle > String.length l
+                        then false
+                        else
+                          String.equal (String.sub l i (String.length needle)) needle
+                          || find (i + 1)
+                      in
+                      find 0
+                    in
                     (match String.index_opt rest ':' with
-                     | Some i ->
+                     | Some i when is_error ->
                        (match int_of_string_opt (String.sub rest 0 i) with
                         | Some n ->
                           error_line := Some n;
                           msg := l
                         | None -> ())
-                     | None -> ())
+                     | Some _ | None -> ())
                   | _ -> ())
                | Some _ -> ()
              done
@@ -806,6 +1170,24 @@ let dump_vc ppf vc =
 
 let discharge () =
   let all = List.rev !vcs in
+  (* A constructor application whose datatype failed to register (the type is
+     not a simple variant here, or is mutually recursive) cannot be declared
+     to the solver: such a goal is an error, such a fact is dropped (sound). *)
+  let pred_usable p =
+    List.for_all (fun q -> find_datatype q <> None) (Refinement.constr_paths p)
+  in
+  let all =
+    List.map
+      (fun vc ->
+        if not (vc.vc_assumed || pred_usable vc.vc_goal)
+        then
+          Location.raise_errorf
+            ~loc:vc.vc_loc
+            "vox: this obligation mentions constructors of a type that is \
+             not usable here (not a simple variant, or mutually recursive)";
+        { vc with vc_facts = List.filter pred_usable vc.vc_facts })
+      all
+  in
   if !Clflags.vox_dump_vc then List.iter (dump_vc Format.err_formatter) all;
   if !Clflags.vox_dry_run
   then ()

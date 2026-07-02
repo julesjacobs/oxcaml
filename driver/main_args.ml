@@ -939,6 +939,11 @@ let mk_vox_solver_path f =
   "-vox-solver-path", Arg.String f,
   "<path>  vox: path to the solver binary"
 
+let mk_vox_prelude f =
+  "-vox-prelude", Arg.String f,
+  "<file>  vox: solver-side definitions (spec functions) inserted into\n\
+  \      every generated solver input, after the datatype declarations"
+
 let mk_dtlambda f =
   "-dtlambda", Arg.Unit f, " (undocumented)"
 
@@ -1227,6 +1232,7 @@ module type Core_options = sig
   val _vox_dry_run : unit -> unit
   val _vox_solver : string -> unit
   val _vox_solver_path : string -> unit
+  val _vox_prelude : string -> unit
   val _dparsetree : unit -> unit
   val _dparsetree_loc_ghost_invariants : unit -> unit
   val _dtypedtree : unit -> unit
@@ -1630,6 +1636,7 @@ struct
     mk_vox_dry_run F._vox_dry_run;
     mk_vox_solver F._vox_solver;
     mk_vox_solver_path F._vox_solver_path;
+    mk_vox_prelude F._vox_prelude;
     mk_dparsetree F._dparsetree;
     mk_dparsetree_loc_ghost_invariants F._dparsetree_loc_ghost_invariants;
     mk_dtypedtree F._dtypedtree;
@@ -1743,6 +1750,7 @@ struct
     mk_vox_dry_run F._vox_dry_run;
     mk_vox_solver F._vox_solver;
     mk_vox_solver_path F._vox_solver_path;
+    mk_vox_prelude F._vox_prelude;
     mk_dparsetree F._dparsetree;
     mk_dparsetree_loc_ghost_invariants F._dparsetree_loc_ghost_invariants;
     mk_dtypedtree F._dtypedtree;
@@ -1931,6 +1939,7 @@ struct
     mk_vox_dry_run F._vox_dry_run;
     mk_vox_solver F._vox_solver;
     mk_vox_solver_path F._vox_solver_path;
+    mk_vox_prelude F._vox_prelude;
     mk_dparsetree F._dparsetree;
     mk_dparsetree_loc_ghost_invariants F._dparsetree_loc_ghost_invariants;
     mk_dtypedtree F._dtypedtree;
@@ -2100,6 +2109,7 @@ module Make_opttop_options (F : Opttop_options) = struct
     mk_vox_dry_run F._vox_dry_run;
     mk_vox_solver F._vox_solver;
     mk_vox_solver_path F._vox_solver_path;
+    mk_vox_prelude F._vox_prelude;
     mk_dparsetree F._dparsetree;
     mk_dparsetree_loc_ghost_invariants F._dparsetree_loc_ghost_invariants;
     mk_dtypedtree F._dtypedtree;
@@ -2251,6 +2261,7 @@ struct
     mk_vox_dry_run F._vox_dry_run;
     mk_vox_solver F._vox_solver;
     mk_vox_solver_path F._vox_solver_path;
+    mk_vox_prelude F._vox_prelude;
     mk_dparsetree F._dparsetree;
     mk_dtypedtree F._dtypedtree;
     mk_dshape F._dshape;
@@ -2500,6 +2511,7 @@ module Default = struct
     let _vox_dry_run = set vox_dry_run
     let _vox_solver s = vox_solver := s
     let _vox_solver_path s = vox_solver_path := s
+    let _vox_prelude s = vox_prelude := s
     let _dtypedtree = set dump_typedtree
     let _dshape = set dump_shape
     let _dmatchcomp = set dump_matchcomp

@@ -949,15 +949,39 @@ let rec elab_vox_pred ~bound ~self_root env (e : Parsetree.expression)
       end
   | Pexp_construct ({txt = Longident.Lident "true"; _}, None) -> Pbool true
   | Pexp_construct ({txt = Longident.Lident "false"; _}, None) -> Pbool false
-  | Pexp_apply
-      ({pexp_desc = Pexp_ident {txt = Longident.Lident op; _}; _}, args) ->
-      begin match op, args with
-      | "not", [(Nolabel, a)] -> Pnot (elab_vox_pred ~bound ~self_root env a)
-      | "&&", [(Nolabel, a); (Nolabel, b)] ->
+  | Pexp_construct ({txt = lid; _}, arg) ->
+      elab_vox_constr ~bound ~self_root env ~loc lid arg
+  | Pexp_apply _ ->
+      (* Flatten a curried spine: the compact predicate grammar nests
+         applications one argument at a time. *)
+      let rec spine (e : Parsetree.expression) acc =
+        match e.pexp_desc with
+        | Pexp_apply (h, args) ->
+            let args =
+              List.map
+                (fun (lbl, a) ->
+                  match lbl with
+                  | Asttypes.Nolabel -> a
+                  | _ -> unsupported ())
+                args
+            in
+            spine h (args @ acc)
+        | _ -> e, acc
+      in
+      let head, args = spine e [] in
+      begin match head.pexp_desc, args with
+      | Pexp_construct ({txt = lid; _}, None), [a] ->
+          (* constructor application from the compact grammar *)
+          elab_vox_constr ~bound ~self_root env ~loc lid (Some a)
+      | Pexp_ident {txt = Longident.Lident "not"; _}, [a] ->
+          Pnot (elab_vox_pred ~bound ~self_root env a)
+      | Pexp_ident {txt = Longident.Lident "&&"; _}, [a; b] ->
           Pand (elab_vox_pred ~bound ~self_root env a, elab_vox_pred ~bound ~self_root env b)
-      | "||", [(Nolabel, a); (Nolabel, b)] ->
+      | Pexp_ident {txt = Longident.Lident "||"; _}, [a; b] ->
           Por (elab_vox_pred ~bound ~self_root env a, elab_vox_pred ~bound ~self_root env b)
-      | _, [(Nolabel, a); (Nolabel, b)] ->
+      | Pexp_ident {txt = Longident.Lident
+            (("+" | "-" | "*" | "=" | "<>" | "<" | "<=" | ">" | ">=") as op);
+          _}, [a; b] ->
           let binop =
             match op with
             | "+" -> Add
@@ -969,12 +993,56 @@ let rec elab_vox_pred ~bound ~self_root env (e : Parsetree.expression)
             | "<=" -> Le
             | ">" -> Gt
             | ">=" -> Ge
-            | _ -> unsupported ()
+            | _ -> assert false
           in
           Pbinop (binop, elab_vox_pred ~bound ~self_root env a, elab_vox_pred ~bound ~self_root env b)
+      | Pexp_ident {txt = Longident.Lident f; _}, (_ :: _ as args) ->
+          (* Any other applied identifier is a SPEC function: a logical
+             function the user defines on the solver side via
+             [-vox-prelude].  Spec functions live in their own namespace
+             (program functions have no logical meaning), and, like the
+             rest of the predicate language, they are untyped: undefined
+             or ill-sorted applications are solver errors at VC time. *)
+          Pfun (f, List.map (elab_vox_pred ~bound ~self_root env) args)
       | _ -> unsupported ()
       end
   | _ -> unsupported ()
+
+(* Constructor application in a predicate: admitted only at "simple"
+   variants, whose constructors the solver models with its datatype
+   theory.  The argument list is syntactic (no arity or sort checking,
+   per the untyped-predicates rule). *)
+and elab_vox_constr ~bound ~self_root env ~loc lid
+      (arg : Parsetree.expression option) : Refinement.pred =
+  let cstr =
+    match Env.lookup_constructor ~use:false ~loc Env.Positive lid env with
+    | (cstr, _locks) -> cstr
+    | exception _ ->
+        Location.raise_errorf ~loc
+          "vox: unbound constructor in refinement predicate"
+  in
+  let path = Data_types.cstr_res_type_path cstr in
+  if Ctype.vox_simple_variant env path = None then
+    Location.raise_errorf ~loc
+      "vox: only constructors of simple variant types (monomorphic, \
+       non-GADT, tuple constructor arguments) may appear in refinement \
+       predicates";
+  let args =
+    match arg with
+    | None -> []
+    | Some {pexp_desc = Pexp_tuple comps; _} when cstr.cstr_arity > 1 ->
+        List.map
+          (fun (lbl, a) ->
+            match lbl with
+            | None -> a
+            | Some _ ->
+                Location.raise_errorf ~loc:a.Parsetree.pexp_loc
+                  "vox: unsupported form in a refinement predicate")
+          comps
+    | Some a -> [a]
+  in
+  Refinement.Pconstr
+    (path, cstr.cstr_name, List.map (elab_vox_pred ~bound ~self_root env) args)
 
 let rec transl_type env ~policy ?(aliased=false) ~row_context mode styp =
   Builtin_attributes.warning_scope styp.ptyp_attributes

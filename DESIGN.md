@@ -54,6 +54,30 @@
   is an error ("annotate"). In module signatures, refinements may
   mention only parameters of their own type -- never top-level values.
   So .cmi predicates are self-contained.
+- Simple algebraic data types: constructors of "simple" variants
+  (monomorphic, non-GADT, closed, at least one constructor, tuple
+  arguments only -- hence immutable: mutability enters variants only
+  through inline-record fields, and a mutated field plus injectivity
+  would prove false equalities) may appear in predicates:
+  `ilist{ _ = Cons (3, Nil) }`.  The solver models them with its
+  datatype theory (free, injective, pairwise-distinct constructors);
+  datatypes reach it as `declare-datatypes` blocks (Z3) or single-line
+  `inductive`s (Lean) in dependency order.  Mutually recursive
+  datatypes are not supported (self-recursion is fine).  Constructor
+  argument types may themselves be refined (`W of {v:int | v > 0}`):
+  matching then contributes the field's refinement at the binder.
+- Spec functions: any other applied identifier in a predicate,
+  `len _` or `mem 2 _`, denotes a logical function that the user
+  defines on the solver side in a `-vox-prelude` file, inserted
+  verbatim into every generated solver input just after the datatype
+  declarations (for Lean: `@[grind] def len : Vox_M_ilist -> Int ...`).
+  Spec functions live in their own namespace -- program functions have
+  no logical meaning, so there is nothing to collide with -- and, like
+  the rest of the predicate language, they are untyped.  To make
+  preludes writable, solver-side datatype names are STABLE: stamp-free
+  and unit-qualified (`Vox_<Unit>_<path>`), the same in the defining
+  module and in every client; distinct types that would collide are
+  rejected ("rename one of them").
 - The compiler attaches no logical meaning to any program operation or
   constant. Both are defined in user code with `assume_`:
 
@@ -84,6 +108,24 @@ Facts about names come from exactly three places:
 - Dependent application: applying `f : (x:int) -> {z | p}` to variable
   `a` substitutes: the result type is `{z | p[x:=a]}`, so
   `let refine_ m = mul a b` yields `m = a * b`.
+- Match facts (the match refines the thing it matched on): in
+  `match s with ...` where `s` is a VARIABLE, a case whose pattern is
+  one constructor of a simple variant over variables or wildcards
+  checks its guard and body under `s = C x1 ... xn` (wildcards name
+  fresh unknowns).  Deeper patterns -- nesting, aliases, or-patterns,
+  constants -- contribute nothing, which is sound.  A branch learns
+  what `s` IS, never what it is not: negative facts are future work.
+
+Constructors are the one program construct with built-in logical
+meaning ("the usual refinements"): the name of `K e1 ... en` is
+`K n1 ... nn` over the arguments' names, so `refine_ (K 3)` at
+`t{ _ = K 3 }` has the trivial obligation `K 3 = K 3`, and checking
+`fun x -> refine_ (K x)` against `(x : int) -> t{ _ = K x }` opens the
+binder to the trivial `K x = K x`.  With a measure in the prelude,
+recursive functions verify INDUCTIVELY: each recursive call
+re-instantiates the dependent signature at the actual arguments, so
+its refined result is the induction hypothesis (see append/rev in
+testsuite/tests/vox/lean_spec.ml).
 
 A plain `let x = e` contributes nothing: `x` is a fresh unknown.
 Aliasing is expressed with the existing forms,

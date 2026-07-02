@@ -25,6 +25,18 @@ type pred =
   | Pvar of Ident.t (* logical value of a program variable or dependent-arrow binder *)
   | Pint of int
   | Pbool of bool
+  | Pconstr of Path.t * string * pred list
+    (* application of a variant constructor, identified by its type's
+       path and the constructor's name.  Only constructors of "simple"
+       variants (monomorphic, non-GADT, tuple arguments) are admitted
+       at elaboration; the solver models them with the datatype theory
+       (free, injective, pairwise-distinct constructors). *)
+  | Pfun of string * pred list
+    (* application of a SPEC function: a logical function (measure,
+       predicate, ...) that the user defines on the solver side via
+       [-vox-prelude].  Purely a name -- the compiler neither resolves
+       nor sorts it; an undefined or ill-sorted application is a solver
+       error at VC time, i.e. a verification failure. *)
   | Pbinop of binop * pred * pred
   | Pand of pred * pred
   | Por of pred * pred
@@ -85,8 +97,22 @@ let rec equal p1 p2 =
   | Pbinop (op1, a1, b1), Pbinop (op2, a2, b2) -> op1 = op2 && equal a1 a2 && equal b1 b2
   | Pand (a1, b1), Pand (a2, b2) | Por (a1, b1), Por (a2, b2) ->
     equal a1 a2 && equal b1 b2
+  | Pconstr (p1, c1, args1), Pconstr (p2, c2, args2) ->
+    (* The type path compares with [Path.same]: two ways of naming the
+       same type through different module aliases are DIFFERENT, like
+       every other structural discrepancy.  Sharp edges, not bugs. *)
+    Path.same p1 p2
+    && String.equal c1 c2
+    && List.length args1 = List.length args2
+    && List.for_all2 equal args1 args2
+  | Pfun (f1, args1), Pfun (f2, args2) ->
+    String.equal f1 f2
+    && List.length args1 = List.length args2
+    && List.for_all2 equal args1 args2
   | Pnot a1, Pnot a2 -> equal a1 a2
-  | (Pbound | Pvar _ | Pint _ | Pbool _ | Pbinop _ | Pand _ | Por _ | Pnot _), _ -> false
+  | ( ( Pbound | Pvar _ | Pint _ | Pbool _ | Pconstr _ | Pfun _ | Pbinop _
+      | Pand _ | Por _ | Pnot _ ),
+      _ ) -> false
 ;;
 
 (* Substitute program variable [id] by predicate [by] (dependent application and lambda
@@ -95,6 +121,8 @@ let rec subst_var id ~by p =
   match p with
   | Pvar id' when Ident.same id id' -> by
   | Pbound | Pvar _ | Pint _ | Pbool _ -> p
+  | Pconstr (path, c, args) -> Pconstr (path, c, List.map (subst_var id ~by) args)
+  | Pfun (f, args) -> Pfun (f, List.map (subst_var id ~by) args)
   | Pbinop (op, a, b) -> Pbinop (op, subst_var id ~by a, subst_var id ~by b)
   | Pand (a, b) -> Pand (subst_var id ~by a, subst_var id ~by b)
   | Por (a, b) -> Por (subst_var id ~by a, subst_var id ~by b)
@@ -107,6 +135,8 @@ let rec subst_bound ~by p =
   match p with
   | Pbound -> by
   | Pvar _ | Pint _ | Pbool _ -> p
+  | Pconstr (path, c, args) -> Pconstr (path, c, List.map (subst_bound ~by) args)
+  | Pfun (f, args) -> Pfun (f, List.map (subst_bound ~by) args)
   | Pbinop (op, a, b) -> Pbinop (op, subst_bound ~by a, subst_bound ~by b)
   | Pand (a, b) -> Pand (subst_bound ~by a, subst_bound ~by b)
   | Por (a, b) -> Por (subst_bound ~by a, subst_bound ~by b)
@@ -117,6 +147,7 @@ let rec free_vars acc p =
   match p with
   | Pvar id -> id :: acc
   | Pbound | Pint _ | Pbool _ -> acc
+  | Pconstr (_, _, args) | Pfun (_, args) -> List.fold_left free_vars acc args
   | Pbinop (_, a, b) | Pand (a, b) | Por (a, b) -> free_vars (free_vars acc a) b
   | Pnot a -> free_vars acc a
 ;;
@@ -127,9 +158,34 @@ let rec mem_var id p =
   match p with
   | Pvar id' -> Ident.same id id'
   | Pbound | Pint _ | Pbool _ -> false
+  | Pconstr (_, _, args) | Pfun (_, args) -> List.exists (mem_var id) args
   | Pbinop (_, a, b) | Pand (a, b) | Por (a, b) -> mem_var id a || mem_var id b
   | Pnot a -> mem_var id a
 ;;
+
+(* Remap the type paths of constructor applications (used by [Subst] when a
+   predicate crosses a module boundary, exactly as [Tconstr] paths do). *)
+let rec map_paths f p =
+  match p with
+  | Pbound | Pvar _ | Pint _ | Pbool _ -> p
+  | Pconstr (path, c, args) -> Pconstr (f path, c, List.map (map_paths f) args)
+  | Pfun (g, args) -> Pfun (g, List.map (map_paths f) args)
+  | Pbinop (op, a, b) -> Pbinop (op, map_paths f a, map_paths f b)
+  | Pand (a, b) -> Pand (map_paths f a, map_paths f b)
+  | Por (a, b) -> Por (map_paths f a, map_paths f b)
+  | Pnot a -> Pnot (map_paths f a)
+;;
+
+let rec constr_paths acc p =
+  match p with
+  | Pbound | Pvar _ | Pint _ | Pbool _ -> acc
+  | Pconstr (path, _, args) -> List.fold_left constr_paths (path :: acc) args
+  | Pfun (_, args) -> List.fold_left constr_paths acc args
+  | Pbinop (_, a, b) | Pand (a, b) | Por (a, b) -> constr_paths (constr_paths acc a) b
+  | Pnot a -> constr_paths acc a
+;;
+
+let constr_paths p = constr_paths [] p
 
 (* Printing, in the compact surface format: the bound value variable prints as [_];
    program variables print with their source name (unique enough for diagnostics). *)
@@ -140,6 +196,17 @@ let rec print ppf p =
   | Pvar id -> pp_print_string ppf (Ident.name id)
   | Pint n -> pp_print_int ppf n
   | Pbool b -> pp_print_bool ppf b
+  | Pconstr (_, c, []) -> pp_print_string ppf c
+  | Pconstr (_, c, [ a ]) -> fprintf ppf "@[%s %a@]" c print_atom a
+  | Pconstr (_, c, a :: args) ->
+    fprintf ppf "@[%s (%a" c print a;
+    List.iter (fun x -> fprintf ppf ",@ %a" print x) args;
+    fprintf ppf ")@]"
+  | Pfun (f, []) -> pp_print_string ppf f
+  | Pfun (f, args) ->
+    fprintf ppf "@[%s" f;
+    List.iter (fun x -> fprintf ppf "@ %a" print_atom x) args;
+    fprintf ppf "@]"
   | Pbinop (op, a, b) ->
     fprintf ppf "@[%a %s@ %a@]" print_atom a (binop_name op) print_atom b
   | Pand (a, b) -> fprintf ppf "@[%a &&@ %a@]" print_atom a print_atom b
@@ -148,8 +215,10 @@ let rec print ppf p =
 
 and print_atom ppf p =
   match p with
-  | Pbound | Pvar _ | Pint _ | Pbool _ -> print ppf p
-  | Pbinop _ | Pand _ | Por _ | Pnot _ -> Format.fprintf ppf "(%a)" print p
+  | Pbound | Pvar _ | Pint _ | Pbool _ | Pconstr (_, _, []) | Pfun (_, []) ->
+    print ppf p
+  | Pconstr (_, _, _ :: _) | Pfun (_, _ :: _) | Pbinop _ | Pand _ | Por _
+  | Pnot _ -> Format.fprintf ppf "(%a)" print p
 ;;
 
 let to_string p = Format.asprintf "%a" print p
