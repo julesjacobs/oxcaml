@@ -17,6 +17,7 @@ Line 1, characters 36-37:
                                         ^
 Error: vox: verification failed (lean).
        Goal: 0 > 0
+Hypotheses: <none>
 (lean: error: `grind` failed)
 |}]
 
@@ -32,6 +33,8 @@ Line 3, characters 10-11:
               ^
 Error: vox: verification failed (lean).
        Goal: a > 0
+Hypotheses:
+  a#2 > 0
 (lean: error: `grind` failed)
 |}]
 
@@ -45,6 +48,7 @@ Line 1, characters 54-55:
                                                           ^
 Error: vox: verification failed (lean).
        Goal: (0 > 0) && (not (0 > 0))
+Hypotheses: <none>
 (lean: error: `grind` failed)
 |}]
 
@@ -55,5 +59,6 @@ Line 1, characters 38-39:
                                           ^
 Error: vox: verification failed (lean).
        Goal: 0 = 42
+Hypotheses: <none>
 (lean: error: `grind` failed)
 |}]

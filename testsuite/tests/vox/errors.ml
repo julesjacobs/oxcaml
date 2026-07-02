@@ -276,3 +276,25 @@ Line 1, characters 41-60:
                                              ^^^^^^^^^^^^^^^^^^^
 Error: vox: refine_ applied directly to another refine_/assume_/assume_unchecked_ expression is not supported; let-bind the inner expression first
 |}]
+
+(* A dependent binder is not supported on an optional or position
+   parameter: the caller may pass the option itself, so the binder
+   would not name the value the definition sees. *)
+let opt_dep : ?l:((x : string)) -> int -> int = fun ?l:_ n -> n
+[%%expect{|
+Line 1, characters 23-29:
+1 | let opt_dep : ?l:((x : string)) -> int -> int = fun ?l:_ n -> n
+                           ^^^^^^
+Error: vox: a dependent binder is not supported on an optional or position parameter
+|}]
+
+(* A binder's name denotes the refined value only in the refinement at
+   the top of its own annotation; in a nested refinement it is an
+   ordinary (here unbound) variable. *)
+let apply_nested (g : int -> int{ g > 0 }) = g
+[%%expect{|
+Line 1, characters 4-16:
+1 | let apply_nested (g : int -> int{ g > 0 }) = g
+        ^^^^^^^^^^^^
+Error: vox: the type of apply_nested carries a refinement mentioning g, which may not appear in a module-level type; annotate with a dependent arrow ((g : ...) -> ...) or a self-contained refinement
+|}]

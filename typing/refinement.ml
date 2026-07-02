@@ -188,12 +188,22 @@ let rec constr_paths acc p =
 let constr_paths p = constr_paths [] p
 
 (* Printing, in the compact surface format: the bound value variable prints as [_];
-   program variables print with their source name (unique enough for diagnostics). *)
+   program variables print through [var_display] -- the source name by default, but
+   diagnostics that show several predicates together disambiguate same-named
+   different-stamp variables (shadowing) via [with_var_display]. *)
+let var_display : (Ident.t -> string) ref = ref Ident.name
+
+let with_var_display f k =
+  let saved = !var_display in
+  var_display := f;
+  Fun.protect ~finally:(fun () -> var_display := saved) k
+;;
+
 let rec print ppf p =
   let open Format in
   match p with
   | Pbound -> pp_print_string ppf "_"
-  | Pvar id -> pp_print_string ppf (Ident.name id)
+  | Pvar id -> pp_print_string ppf (!var_display id)
   | Pint n -> pp_print_int ppf n
   | Pbool b -> pp_print_bool ppf b
   | Pconstr (_, c, []) -> pp_print_string ppf c

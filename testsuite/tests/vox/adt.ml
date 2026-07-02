@@ -46,14 +46,14 @@ Line 4, characters 19-20: vox VC:
   hypotheses:
   s = (K y)
   s = (K 3)
-  s = (K 3)
+  s#2 = (K 3)
   k3 = (K 3)
 Line 5, characters 17-18: vox VC (RUNTIME CHECKED):
   goal: 0 = 3
   hypotheses:
   s = L
   s = (K 3)
-  s = (K 3)
+  s#2 = (K 3)
   k3 = (K 3)
 val get : t{ _ = (K 3) } -> int{ _ = 3 } = <fun>
 |}]
@@ -76,14 +76,14 @@ Line 8, characters 27-28: vox VC:
   hypotheses:
   s = (Cons (h, *vox-wild*))
   s = (Cons (3, Nil))
-  s = (Cons (3, Nil))
+  s#2 = (Cons (3, Nil))
   k3 = (K 3)
 Line 9, characters 19-20: vox VC (RUNTIME CHECKED):
   goal: 0 = 3
   hypotheses:
   s = Nil
   s = (Cons (3, Nil))
-  s = (Cons (3, Nil))
+  s#2 = (Cons (3, Nil))
   k3 = (K 3)
 val head : ilist{ _ = (Cons (3, Nil)) } -> int{ _ = 3 } = <fun>
 |}]

@@ -64,7 +64,7 @@ val lt_witness : (x : int) -> (y : int) -> unit{ x < y } option = <fun>
 let s : string{ _ = _ } = refine_ "hi"
 [%%expect{|
 Line 1, characters 34-38: vox VC:
-  goal: *vox-unknown* = *vox-unknown*
+  goal: *unknown1* = *unknown1*
   hypotheses:
   a' >= 0
   a >= 0
@@ -114,4 +114,42 @@ Line 1, characters 48-51:
 Error: The value "dep" has type "(x : int) -> int{ _ = x }"
        but an expression was expected of type "(y : int) -> int{ _ = (y + 1) }"
        Type "int{ _ = y }" is not compatible with type "int{ _ = (y + 1) }"
+|}]
+
+(* Refined recursive occurrences must not loop jkind computation. *)
+type self_ref = { self_field : self_ref{ true } }
+[%%expect{|
+type self_ref = { self_field : self_ref{ true }; }
+|}]
+
+(* let-bound self names elaborate identically on the pattern and the
+   expression sides of the binding. *)
+let n : int{ n > 0 } = assume_ 5
+[%%expect{|
+Line 1, characters 31-32: vox VC (RUNTIME CHECKED):
+  goal: 5 > 0
+  hypotheses:
+  s = s
+  a' >= 0
+  a >= 0
+val n : int{ _ > 0 } = 5
+|}]
+
+(* The printed form of dependent arrows reparses: an interface written
+   in the display syntax matches the implementation, including
+   alpha-renamed binders. *)
+module M : sig
+  val g : (y : int) -> int{ _ = y }
+end = struct
+  let g : (x : int) -> int{ _ = x } = fun x -> assume_ x
+end
+[%%expect{|
+Line 4, characters 55-56: vox VC (RUNTIME CHECKED):
+  goal: x = x
+  hypotheses:
+  n > 0
+  s = s
+  a' >= 0
+  a >= 0
+module M : sig val g : (y : int) -> int{ _ = y } end
 |}]

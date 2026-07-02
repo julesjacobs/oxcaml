@@ -38,11 +38,58 @@ type dsort =
   | S_data of Path.t (* a "simple" variant, modelled with the datatype theory *)
   | S_other
 
+(* Failure diagnostics show what the solver was given, so a failed
+   obligation can be understood without re-running under -dump-vc.
+   When one source name covers several stamps within a VC (shadowing),
+   later ones display as name#2, name#3, ... in order of appearance,
+   so a hypothesis about a shadowed variable cannot read as identical
+   to the goal it fails to prove. *)
+let with_vc_display vc k =
+  let seen : (string, Ident.t list) Hashtbl.t = Hashtbl.create 8 in
+  List.iter
+    (fun p ->
+      List.iter
+        (fun id ->
+          let name = Ident.name id in
+          let ids = try Hashtbl.find seen name with Not_found -> [] in
+          if not (List.exists (Ident.same id) ids)
+          then Hashtbl.replace seen name (ids @ [ id ]))
+        (Refinement.free_vars p))
+    (vc.vc_goal :: vc.vc_facts);
+  let display id =
+    let name = Ident.name id in
+    match Hashtbl.find_opt seen name with
+    | Some (_ :: _ :: _ as ids) ->
+      let rec index i = function
+        | [] -> name
+        | id' :: _ when Ident.same id id' ->
+          if i = 1 then name else Printf.sprintf "%s#%d" name i
+        | _ :: rest -> index (i + 1) rest
+      in
+      index 1 ids
+    | _ -> name
+  in
+  Refinement.with_var_display display k
+;;
+
+let hyps_for_error vc =
+  with_vc_display vc (fun () ->
+    match vc.vc_facts with
+    | [] -> "\nHypotheses: <none>"
+    | fs ->
+      "\nHypotheses:"
+      ^ String.concat "" (List.map (fun f -> "\n  " ^ Refinement.to_string f) fs))
+;;
+
+let goal_for_error vc = with_vc_display vc (fun () -> Refinement.to_string vc.vc_goal)
+
 let vcs : vc list ref = ref []
 let name_sorts : (Ident.t, dsort) Hashtbl.t = Hashtbl.create 64
 
-(* Fresh unknowns minted by the pass itself; always "in scope". *)
+(* Fresh unknowns minted by the pass itself; always "in scope".
+   Numbered so distinct unknowns are distinguishable in diagnostics. *)
 let synthetic_names : (Ident.t, unit) Hashtbl.t = Hashtbl.create 16
+let unknown_counter = ref 0
 
 (* Simple-variant datatypes used by the current module's (or toplevel
    session's) VCs, in dependency order (the datatypes of a datatype's fields
@@ -61,7 +108,8 @@ let reset () =
   Hashtbl.reset synthetic_names;
   datatypes := [];
   registering := [];
-  poisoned := []
+  poisoned := [];
+  unknown_counter := 0
 ;;
 
 (* Expansion can fail on exotic types (e.g. stage errors inside quotations); fall back to
@@ -205,7 +253,8 @@ let unpack_fact
    the arguments are themselves named, so translatable arithmetic reflects
    inside them); anything else is a fresh unknown. *)
 let fresh_unknown env (e : expression) =
-  let id = Ident.create_local "*vox-unknown*" in
+  incr unknown_counter;
+  let id = Ident.create_local (Printf.sprintf "*unknown%d*" !unknown_counter) in
   record_name env id e.exp_type;
   Hashtbl.replace synthetic_names id ();
   Refinement.Pvar id
@@ -1097,9 +1146,16 @@ let lean_file vcs =
   let first_line =
     1 + (if needs_voxu then 1 else 0) + List.length !datatypes + prelude_lines ()
   in
+  let first_line = first_line + 1 in
   if needs_voxu then Buffer.add_string buf "opaque VoxU : Type\n";
   lean_datatype_decls buf;
   Buffer.add_string buf (prelude ());
+  (* Bound elaboration per theorem: a diverging [grind] must count as
+     a verification failure, not hang the build.  (A wedged process
+     outside elaboration remains out of scope, as for z3.)  Emitted
+     after the prelude so a prelude may begin with [import], which
+     Lean requires to be the first command in the file. *)
+  Buffer.add_string buf "set_option maxHeartbeats 400000\n";
   List.iteri (fun i vc -> lean_theorem buf i vc) vcs;
   ( Buffer.contents buf,
     fun line ->
@@ -1226,8 +1282,9 @@ let run_lean vcs =
               find 0
             in
             Location.raise_errorf ~loc:vc.vc_loc
-              "vox: verification failed (lean).@ Goal: %s%s"
-              (Refinement.to_string vc.vc_goal)
+              "vox: verification failed (lean).@ Goal: %s%s%s"
+              (goal_for_error vc)
+              (hyps_for_error vc)
               (if String.equal msg "" then "" else "\n(lean: " ^ msg ^ ")")
         end)
 ;;
@@ -1237,6 +1294,7 @@ let run_lean vcs =
 let print_pred ppf p = Format.pp_print_string ppf (Refinement.to_string p)
 
 let dump_vc ppf vc =
+  with_vc_display vc @@ fun () ->
   Format.fprintf
     ppf
     "@[<v 2>%a: vox VC%s:@ goal: %a@ hypotheses:%t@]@."
@@ -1300,14 +1358,16 @@ let discharge () =
             | Invalid ->
               Location.raise_errorf
                 ~loc:vc.vc_loc
-                "vox: verification failed.@ Unprovable goal: %s"
-                (Refinement.to_string vc.vc_goal)
+                "vox: verification failed.@ Unprovable goal: %s%s"
+                (goal_for_error vc)
+                (hyps_for_error vc)
             | Unknown reason ->
               Location.raise_errorf
                 ~loc:vc.vc_loc
-                "vox: verification failed (%s).@ Goal: %s"
+                "vox: verification failed (%s).@ Goal: %s%s"
                 reason
-                (Refinement.to_string vc.vc_goal)))
+                (goal_for_error vc)
+                (hyps_for_error vc)))
         all
     | other ->
       (match all with
