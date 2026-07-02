@@ -234,6 +234,7 @@
   typedtree
   printtyped
   ctype
+  vox_dep
   vox_verify
   printtyp
   rawprinttyp

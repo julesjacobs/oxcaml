@@ -4692,6 +4692,33 @@ strict_function_or_labeled_tuple_type:
             maybe_curry_typ codomain codomain_loc, arg_modes, ret_modes) }
     )
     { $1 }
+  (* vox dependent arrow [(x : ty) -> codomain]: refinements in the
+     codomain may mention [x].  Encoded as a vox.pi extension around an
+     arrow whose label smuggles the binder name; typetexp elaborates
+     the binder into de Bruijn parameter references. *)
+  | mktyp(
+      LPAREN binder = LIDENT COLON binder_ty = atomic_type RPAREN
+      MINUSGREATER
+      codomain = strict_function_or_labeled_tuple_type
+        { Ptyp_extension
+            ({ txt = "vox.pi"; loc = make_loc $sloc },
+             PTyp (mktyp ~loc:$sloc
+                     (Ptyp_arrow
+                        (Labelled binder, binder_ty, codomain, [], [])))) }
+    )
+    { $1 }
+  | mktyp(
+      LPAREN binder = LIDENT COLON binder_ty = atomic_type RPAREN
+      MINUSGREATER
+      codomain = tuple_type
+      %prec MINUSGREATER
+        { Ptyp_extension
+            ({ txt = "vox.pi"; loc = make_loc $sloc },
+             PTyp (mktyp ~loc:$sloc
+                     (Ptyp_arrow
+                        (Labelled binder, binder_ty, codomain, [], [])))) }
+    )
+    { $1 }
   (* The next three cases are for labled tuples - see comment on [tuple_type]
      below.
 
@@ -5035,10 +5062,10 @@ atomic_type:
       { (match flag with
          | Immutable, [] -> ()
          | _ -> expecting $loc(flag) "an unqualified refinement variable");
-        if bound <> "v" then expecting $loc(bound) "v";
+        (* The bound variable's name rides the extension name. *)
         mktyp ~loc:$sloc
           (Ptyp_extension
-             ({ txt = "vox.refine"; loc = make_loc $sloc },
+             ({ txt = "vox.refine." ^ bound; loc = make_loc $sloc },
               PStr [ Str.eval (Exp.constraint_ pred (Some ty) []) ])) }
 
 

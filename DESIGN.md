@@ -83,13 +83,19 @@ scope; `100` may be passed directly since `div`'s first parameter
 occurs in no refinement):
 
     let zero : {v:int | v = 0} = assume_ 0
-    let lt (x : int) (y : int) : {z:bool | z = (x < y)} = assume_ (x < y)
+    let lt : (x : int) -> (y : int) -> {z:bool | z = (x < y)} =
+      fun x y -> assume_ (x < y)
     let div (a : int) (b : {v:int | not (v = 0)}) : int =
       let refine_ b = b in a / b
     let safe x =
       let refine_ z = zero in
       let refine_ c = lt z x in
       if c then div 100 (refine_ x) else 0
+
+(The dependent type must be written as an annotation, [(x : int) ->
+...]: writing the refinement directly on a lambda's return type would
+mention the lambda's own parameters, whose facts die with its scope --
+the verifier drops out-of-scope facts, soundly failing such uses.)
 
 The facts `z = 0`, `c = (z < x)`, and the path fact `c = true` prove
 `refine_ x`'s obligation `not (x = 0)`.

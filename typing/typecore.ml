@@ -10276,6 +10276,41 @@ and type_apply_arg env ~app_loc ~funct ~index ~position_and_mode ~partial_app
       | Labelled _ | Nolabel -> assert false)
   | Omitted _ as arg -> (lbl, arg, None)
 
+(* vox: dependent application.  After the standard application has been
+   typed, references in the result type to a consumed dependent-arrow
+   parameter (de Bruijn offsets counting consumed arrows) are replaced
+   by the corresponding argument's stamp.  v0 restrictions: the
+   argument for a dependent parameter must be a plain variable
+   ("let-bind the argument first"), passed positionally (no labels,
+   no omitted parameters in the same application). *)
+and vox_apply_dependent ~app_loc args ty_ret =
+  let k = List.length args in
+  let mentions j = Vox_dep.mentions_outer_param ~offset:(k - 1 - j) ty_ret in
+  let subst_one ty_ret (j, (lbl, arg)) =
+    if not (mentions j) then ty_ret
+    else begin
+      (match lbl with
+       | Nolabel -> ()
+       | _ ->
+         Location.raise_errorf ~loc:app_loc
+           "vox: dependent application with labeled or optional arguments \
+            is not supported");
+      match arg with
+      | Arg ({exp_desc = Texp_ident {path = Path.Pident id; _}; _}, _) ->
+        Vox_dep.subst_outer_param ~offset:(k - 1 - j)
+          ~by:(Refinement.Pvar id) ty_ret
+      | Arg (texp, _) ->
+        Location.raise_errorf ~loc:texp.exp_loc
+          "vox: the argument for a dependent parameter must be a variable \
+           (let-bind it first)"
+      | Omitted _ ->
+        Location.raise_errorf ~loc:app_loc
+          "vox: a dependent parameter cannot be omitted or commuted"
+    end
+  in
+  List.fold_left subst_one ty_ret
+    (List.mapi (fun j (lbl, arg) -> j, (lbl, arg)) args)
+
 and type_application env app_loc expected_mode position_and_mode
       funct funct_mode sargs ret_tvar =
   let is_ignore funct =
@@ -10369,6 +10404,11 @@ and type_application env app_loc expected_mode position_and_mode
                              (Nolabel, Arg n)] *)
           ty_ret, mode_ret, args, position_and_mode
         end
+      in
+      let ty_ret =
+        vox_apply_dependent ~app_loc
+          (List.map (fun (lbl, arg, _) -> lbl, arg) args)
+          ty_ret
       in
       args, ty_ret, mode_ret, position_and_mode
 

@@ -861,12 +861,36 @@ let type_open :
     ref =
   ref (fun ?used_slot:_ _ -> assert false)
 
+(* vox: dependent-arrow binders in scope during type elaboration,
+   innermost first.  Every arrow's codomain pushes an entry (the binder
+   name for a dependent arrow, "" for a plain one) so that a binder's
+   de Bruijn index equals the number of arrows between the predicate
+   and its arrow.  [vox_pi_pending] carries a binder name from the
+   [vox.pi] extension node to the arrow translation that consumes it. *)
+let vox_pi_binders : string list ref = ref []
+let vox_pi_pending : string option ref = ref None
+
+let vox_with_pi_binder name f =
+  vox_pi_binders := name :: !vox_pi_binders;
+  Fun.protect
+    ~finally:(fun () -> vox_pi_binders := List.tl !vox_pi_binders)
+    f
+
+let vox_find_pi_binder name =
+  let rec find i = function
+    | [] -> None
+    | n :: _ when String.equal n name && not (String.equal n "") -> Some i
+    | _ :: rest -> find (i + 1) rest
+  in
+  find 0 !vox_pi_binders
+
 (* vox: elaborate a refinement predicate (an untyped logical term) from
    its surface form.  [v] denotes the bound value variable; other
-   variables must resolve to simple (non-module) value identifiers in
-   [env].  The predicate is NOT type checked (DESIGN.md): ill-sorted
-   predicates surface as solver errors at VC time. *)
-let rec elab_vox_pred env (e : Parsetree.expression) : Refinement.pred =
+   variables resolve first to enclosing dependent-arrow binders (as
+   de Bruijn parameter references), then to simple (non-module) value
+   identifiers in [env].  The predicate is NOT type checked (DESIGN.md):
+   ill-sorted predicates surface as solver errors at VC time. *)
+let rec elab_vox_pred ~bound env (e : Parsetree.expression) : Refinement.pred =
   let open Refinement in
   let loc = e.pexp_loc in
   let unsupported () =
@@ -874,7 +898,14 @@ let rec elab_vox_pred env (e : Parsetree.expression) : Refinement.pred =
       "vox: unsupported form in a refinement predicate"
   in
   match e.pexp_desc with
-  | Pexp_ident {txt = Longident.Lident "v"; _} -> Pbound
+  | Pexp_ident {txt = Longident.Lident name; _} when String.equal name bound ->
+      Pbound
+  | Pexp_ident {txt = Longident.Lident name; _}
+    when vox_find_pi_binder name <> None ->
+      begin match vox_find_pi_binder name with
+      | Some i -> Pparam (i, name)
+      | None -> assert false
+      end
   | Pexp_ident {txt = lid; _} ->
       begin match Env.lookup_value ~use:false ~loc lid env with
       | (Path.Pident id, _, _) -> Pvar id
@@ -895,11 +926,11 @@ let rec elab_vox_pred env (e : Parsetree.expression) : Refinement.pred =
   | Pexp_apply
       ({pexp_desc = Pexp_ident {txt = Longident.Lident op; _}; _}, args) ->
       begin match op, args with
-      | "not", [(Nolabel, a)] -> Pnot (elab_vox_pred env a)
+      | "not", [(Nolabel, a)] -> Pnot (elab_vox_pred ~bound env a)
       | "&&", [(Nolabel, a); (Nolabel, b)] ->
-          Pand (elab_vox_pred env a, elab_vox_pred env b)
+          Pand (elab_vox_pred ~bound env a, elab_vox_pred ~bound env b)
       | "||", [(Nolabel, a); (Nolabel, b)] ->
-          Por (elab_vox_pred env a, elab_vox_pred env b)
+          Por (elab_vox_pred ~bound env a, elab_vox_pred ~bound env b)
       | _, [(Nolabel, a); (Nolabel, b)] ->
           let binop =
             match op with
@@ -914,7 +945,7 @@ let rec elab_vox_pred env (e : Parsetree.expression) : Refinement.pred =
             | ">=" -> Ge
             | _ -> unsupported ()
           in
-          Pbinop (binop, elab_vox_pred env a, elab_vox_pred env b)
+          Pbinop (binop, elab_vox_pred ~bound env a, elab_vox_pred ~bound env b)
       | _ -> unsupported ()
       end
   | _ -> unsupported ()
@@ -950,8 +981,13 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
       in
       ctyp desc typ
   | Ptyp_arrow _ ->
+      (* vox: a pending dependent-arrow binder applies to the first
+         arrow of this chain; every codomain pushes a scope entry so
+         de Bruijn indices count all arrows uniformly. *)
+      let vox_binder = !vox_pi_pending in
+      vox_pi_pending := None;
       let args, ret, ret_mode = extract_params styp in
-      let rec loop acc_mode args =
+      let rec loop ~vox_first acc_mode args =
         match args with
         | (l, arg_mode, arg) :: rest ->
           check_arg_type arg;
@@ -968,7 +1004,15 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
             | _ :: _ ->
               { mode_modes = acc_mode; mode_desc = [] }
           in
-          let ret_cty = loop acc_mode rest in
+          let vox_scope =
+            match vox_first, vox_binder with
+            | true, Some name -> name
+            | _ -> ""
+          in
+          let ret_cty =
+            vox_with_pi_binder vox_scope (fun () ->
+              loop ~vox_first:false acc_mode rest)
+          in
           let arg_ty = arg_cty.ctyp_type in
           let arg_ty =
             if Btype.is_Tpoly arg_ty then arg_ty else newmono arg_ty
@@ -993,7 +1037,7 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
             ty
         | [] -> transl_type env ~policy ~row_context ret_mode.mode_modes ret
       in
-      loop mode args
+      loop ~vox_first:true mode args
   | Ptyp_tuple stl ->
     let desc, typ =
       transl_type_aux_tuple env ~loc ~policy ~row_context stl
@@ -1301,8 +1345,36 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
       let new_env = Env.enter_splice ~loc env in
       let cty = transl_type new_env ~policy ~row_context mode t in
       ctyp (Ttyp_splice cty) (newty (Tsplice cty.ctyp_type))
-  | Ptyp_extension ({txt = "vox.refine"; _}, payload) ->
-      (* vox refined type [{v:ty | pred}]. *)
+  | Ptyp_extension ({txt = "vox.pi"; _}, payload) ->
+      (* vox dependent arrow [(x : ty) -> codomain]: re-elaborate as a
+         plain arrow with the binder pending; the arrow translation
+         pushes it around the codomain. *)
+      begin match payload with
+      | PTyp ({ptyp_desc = Ptyp_arrow (Labelled name, _, _, _, _); _} as arrow) ->
+          let arrow =
+            { arrow with
+              ptyp_desc =
+                (match arrow.ptyp_desc with
+                 | Ptyp_arrow (_, a, r, ma, mr) ->
+                     Ptyp_arrow (Nolabel, a, r, ma, mr)
+                 | _ -> assert false) }
+          in
+          vox_pi_pending := Some name;
+          transl_type env ~policy ~row_context mode arrow
+      | _ ->
+          Location.raise_errorf ~loc
+            "vox: malformed dependent-arrow payload"
+      end
+  | Ptyp_extension ({txt = vox_ext; _}, payload)
+    when String.length vox_ext >= 10
+         && String.equal (String.sub vox_ext 0 10) "vox.refine" ->
+      (* vox refined type [{b:ty | pred}]; the bound variable's name
+         [b] rides the extension name as "vox.refine.b". *)
+      let bound =
+        if String.length vox_ext > 11
+        then String.sub vox_ext 11 (String.length vox_ext - 11)
+        else "v"
+      in
       let pred_expr, skel_styp =
         match payload with
         | PStr [{pstr_desc =
@@ -1324,7 +1396,7 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
           Location.raise_errorf ~loc
             "vox: refinements are only supported at types int and bool"
       end;
-      let pred = elab_vox_pred env pred_expr in
+      let pred = elab_vox_pred ~bound env pred_expr in
       { cty with ctyp_type = newty (Trefine (skel, pred)) }
   | Ptyp_extension ext ->
       raise (Error_forward (Builtin_attributes.error_of_extension ext))

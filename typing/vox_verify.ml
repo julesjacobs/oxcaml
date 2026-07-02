@@ -29,9 +29,13 @@ type dsort =
 let vcs : vc list ref = ref []
 let name_sorts : (Ident.t, dsort) Hashtbl.t = Hashtbl.create 64
 
+(* Fresh unknowns minted by the pass itself; always "in scope". *)
+let synthetic_names : (Ident.t, unit) Hashtbl.t = Hashtbl.create 16
+
 let reset () =
   vcs := [];
-  Hashtbl.reset name_sorts
+  Hashtbl.reset name_sorts;
+  Hashtbl.reset synthetic_names
 ;;
 
 (* Expansion can fail on exotic types (e.g. stage errors inside quotations); fall back to
@@ -104,15 +108,68 @@ let name_of_expr env (e : expression) : Refinement.pred =
   | _ ->
     let id = Ident.create_local "*vox-unknown*" in
     record_name env id e.exp_type;
+    Hashtbl.replace synthetic_names id ();
     Refinement.Pvar id
 ;;
 
-let emit_vc ~loc ~facts ~goal ~assumed =
+(* The logical context of a program point: facts, plus the stamps in
+   scope there.  A fact mentioning an out-of-scope stamp must not be
+   used: the same dead stamp can reach several unrelated points (e.g.
+   through a refinement in a function's inferred result type that
+   mentions the function's own parameters), and equating them would
+   prove false facts.  Out-of-scope facts are dropped (sound: fewer
+   hypotheses); out-of-scope goals are errors. *)
+type ctx =
+  { cfacts : Refinement.pred list
+  ; cscope : Ident.t list
+  }
+
+let in_scope ctx id =
+  List.exists (Ident.same id) ctx.cscope || Hashtbl.mem synthetic_names id
+
+let pred_in_scope ctx p = List.for_all (in_scope ctx) (Refinement.free_vars p)
+
+let emit_vc ~loc ~ctx ~goal ~assumed =
+  (* Leftover dependent-arrow parameters: a fact still mentioning one
+     is dropped (sound: fewer hypotheses); a goal still mentioning one
+     cannot be discharged and is an error (v0: this arises when a
+     lambda body is checked directly against a dependent arrow, which
+     is not yet supported -- define such functions with assume_). *)
+  if (not assumed) && Refinement.max_param goal >= 0
+  then
+    Location.raise_errorf ~loc
+      "vox: this obligation mentions a dependent-arrow parameter, which is \
+       not supported here yet (define the function with assume_, or apply \
+       it to variables)";
+  if (not assumed) && not (pred_in_scope ctx goal)
+  then
+    Location.raise_errorf ~loc
+      "vox: this obligation mentions a variable that has escaped its scope";
+  let facts =
+    List.filter
+      (fun f -> Refinement.max_param f < 0 && pred_in_scope ctx f)
+      ctx.cfacts
+  in
   vcs := { vc_loc = loc; vc_facts = facts; vc_goal = goal; vc_assumed = assumed } :: !vcs
 ;;
 
-(* Walk an expression under a list of facts, collecting VCs. *)
-let rec walk_expr env facts (e : expression) =
+(* Extend the context at a binding pattern: new stamps come into scope;
+   refined binders contribute their facts (plus the scrutinee's
+   refinement for unpack patterns). *)
+let extend_pat : type k. ?scrut:type_expr -> Env.t -> ctx -> k general_pattern -> ctx =
+  fun ?scrut env ctx pat ->
+  let unpack =
+    match scrut with
+    | Some s -> unpack_fact env pat ~scrut:s
+    | None -> []
+  in
+  { cfacts = unpack @ binder_facts env pat @ ctx.cfacts
+  ; cscope = pat_bound_idents pat @ ctx.cscope
+  }
+;;
+
+(* Walk an expression under a logical context, collecting VCs. *)
+let rec walk_expr env ctx (e : expression) =
   (* Intro forms: the node itself carries the vox attribute and the refined type. *)
   let is_refine = has_vox_attr "vox.refine" e.exp_attributes in
   let is_assume = has_vox_attr "vox.assume" e.exp_attributes in
@@ -123,66 +180,64 @@ let rec walk_expr env facts (e : expression) =
       let n = name_of_expr env e in
       emit_vc
         ~loc:e.exp_loc
-        ~facts
+        ~ctx
         ~goal:(Refinement.subst_bound ~by:n p)
         ~assumed:is_assume
     | None -> ());
   match e.exp_desc with
   | Texp_let (_rec_flag, vbs, body) ->
-    List.iter (fun vb -> walk_expr env facts vb.vb_expr) vbs;
-    let facts' = List.concat_map (fun vb -> binder_facts env vb.vb_pat) vbs @ facts in
-    walk_expr env facts' body
+    List.iter (fun vb -> walk_expr env ctx vb.vb_expr) vbs;
+    let ctx' = List.fold_left (fun ctx vb -> extend_pat env ctx vb.vb_pat) ctx vbs in
+    walk_expr env ctx' body
   | Texp_match (scrut, _sort, comp_cases, val_cases, _partial) ->
-    walk_expr env facts scrut;
+    walk_expr env ctx scrut;
     let do_case : type k. k case -> unit =
       fun c ->
-      let facts' =
-        unpack_fact env c.c_lhs ~scrut:scrut.exp_type @ binder_facts env c.c_lhs @ facts
-      in
-      Option.iter (walk_expr env facts') c.c_guard;
-      walk_expr env facts' c.c_rhs
+      let ctx' = extend_pat ~scrut:scrut.exp_type env ctx c.c_lhs in
+      Option.iter (walk_expr env ctx') c.c_guard;
+      walk_expr env ctx' c.c_rhs
     in
     List.iter do_case comp_cases;
     List.iter do_case val_cases
   | Texp_ifthenelse (cond, e_then, e_else) ->
-    walk_expr env facts cond;
+    walk_expr env ctx cond;
     let cond_fact =
       match cond.exp_desc with
       | Texp_ident { path = Path.Pident id; _ } -> Some (Refinement.Pvar id)
       | _ -> None
     in
-    let with_fact f facts =
+    let with_fact f ctx =
       match cond_fact with
-      | None -> facts
-      | Some c -> f c :: facts
+      | None -> ctx
+      | Some c -> { ctx with cfacts = f c :: ctx.cfacts }
     in
-    walk_expr env (with_fact (fun c -> c) facts) e_then;
-    Option.iter (walk_expr env (with_fact (fun c -> Refinement.Pnot c) facts)) e_else
+    walk_expr env (with_fact (fun c -> c) ctx) e_then;
+    Option.iter (walk_expr env (with_fact (fun c -> Refinement.Pnot c) ctx)) e_else
   | Texp_function { params; body; _ } ->
-    let facts' =
-      List.concat_map
-        (fun fp ->
+    let ctx' =
+      List.fold_left
+        (fun ctx fp ->
           match fp.fp_kind with
-          | Tparam_pat pat -> binder_facts env pat
+          | Tparam_pat pat -> extend_pat env ctx pat
           | Tparam_optional_default (pat, default, _) ->
-            walk_expr env facts default;
-            binder_facts env pat)
+            walk_expr env ctx default;
+            extend_pat env ctx pat)
+        ctx
         params
-      @ facts
     in
     (match body with
-     | Tfunction_body e -> walk_expr env facts' e
+     | Tfunction_body e -> walk_expr env ctx' e
      | Tfunction_cases { fc_cases; _ } ->
        List.iter
          (fun c ->
-           let facts'' = binder_facts env c.c_lhs @ facts' in
-           Option.iter (walk_expr env facts'') c.c_guard;
-           walk_expr env facts'' c.c_rhs)
+           let ctx'' = extend_pat env ctx' c.c_lhs in
+           Option.iter (walk_expr env ctx'') c.c_guard;
+           walk_expr env ctx'' c.c_rhs)
          fc_cases)
   | _ ->
-    (* Generic traversal of children under the same facts. *)
+    (* Generic traversal of children under the same context. *)
     let it =
-      { Tast_iterator.default_iterator with expr = (fun _ e' -> walk_expr env facts e') }
+      { Tast_iterator.default_iterator with expr = (fun _ e' -> walk_expr env ctx e') }
     in
     Tast_iterator.default_iterator.expr it e
 ;;
@@ -196,6 +251,7 @@ let rec smt_of_pred buf (p : Refinement.pred) =
   let open Refinement in
   match p with
   | Pbound -> assert false (* always substituted before discharge *)
+  | Pparam _ -> assert false (* guarded in emit_vc *)
   | Pvar id -> Buffer.add_string buf (smt_name id)
   | Pint n ->
     if n >= 0
@@ -419,19 +475,21 @@ let check_implementation (str : structure) =
   then ()
   else (
     reset ();
-    let facts = ref [] in
+    let ctx = ref { cfacts = []; cscope = [] } in
     List.iter
       (fun item ->
         match item.str_desc with
         | Tstr_value (_rec_flag, vbs) ->
-          List.iter (fun vb -> walk_expr str.str_final_env !facts vb.vb_expr) vbs;
-          facts
-          := List.concat_map (fun vb -> binder_facts str.str_final_env vb.vb_pat) vbs
-             @ !facts
+          List.iter (fun vb -> walk_expr str.str_final_env !ctx vb.vb_expr) vbs;
+          ctx
+          := List.fold_left
+               (fun ctx vb -> extend_pat str.str_final_env ctx vb.vb_pat)
+               !ctx
+               vbs
         | _ ->
           let it =
             { Tast_iterator.default_iterator with
-              expr = (fun _ e -> walk_expr str.str_final_env !facts e)
+              expr = (fun _ e -> walk_expr str.str_final_env !ctx e)
             }
           in
           it.structure_item it item)
