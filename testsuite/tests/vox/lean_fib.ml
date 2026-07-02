@@ -15,45 +15,29 @@
    proved: a recursive call re-instantiates the dependent signature at
    the actual arguments, so its refined result is the induction
    hypothesis; the fast-doubling identities are prelude lemmas, proved
-   there by induction from the fib addition formula. *)
+   there by induction from the fib addition formula.  Arithmetic and
+   comparisons are reflected (Vox_reflect), so the only assumed
+   primitive is floor halving, whose [asr] the logic does not model --
+   and even that assumption is RUNTIME CHECKED. *)
 
-(* The usual assume_d primitives: the compiler attaches no logical
-   meaning to program arithmetic (DESIGN.md); these give it one. *)
-let zero : int{ _ = 0 } = assume_ 0
-let one : int{ _ = 1 } = assume_ 1
-let two : int{ _ = 2 } = assume_ 2
-
-let add : (x : int) -> (y : int) -> int{ _ = x + y } = fun x y -> assume_ (x + y)
-let sub : (x : int) -> (y : int) -> int{ _ = x - y } = fun x y -> assume_ (x - y)
-let mul : (x : int) -> (y : int) -> int{ _ = x * y } = fun x y -> assume_ (x * y)
-let le : (x : int) -> (y : int) -> bool{ _ = (x <= y) } = fun x y -> assume_ (x <= y)
-let eq : (x : int) -> (y : int) -> bool{ _ = (x = y) } = fun x y -> assume_ (x = y)
-
-(* Floor halving: for every x, x = 2*(x asr 1) or x = 2*(x asr 1) + 1. *)
 let half : (x : int) -> int{ x = 2 * _ || x = 2 * _ + 1 } =
   fun x -> assume_ (x asr 1)
 
-(* Naive recursion, O(fib n) calls.  Total: fib n = 0 for n <= 0. *)
+(* Naive recursion, O(fib n) calls.  Total: fib n = 0 for n <= 0.
+   Recursive arguments are let-bound: a dependent application's
+   argument must be a variable. *)
 let rec fib_naive : (n : int) -> int{ _ = fib n } =
   fun n ->
-    let refine_ z = zero in
-    let refine_ o = one in
-    let refine_ c0 = le n z in
-    if c0
-    then refine_ z
+    if n <= 0
+    then refine_ 0
+    else if n = 1
+    then refine_ 1
     else begin
-      let refine_ c1 = eq n o in
-      if c1
-      then refine_ o
-      else begin
-        let refine_ t = two in
-        let refine_ m1 = sub n o in
-        let refine_ m2 = sub n t in
-        let refine_ r1 = fib_naive m1 in
-        let refine_ r2 = fib_naive m2 in
-        let refine_ r = add r1 r2 in
-        refine_ r
-      end
+      let refine_ m1 = refine_ (n - 1) in
+      let refine_ m2 = refine_ (n - 2) in
+      let refine_ r1 = fib_naive m1 in
+      let refine_ r2 = fib_naive m2 in
+      refine_ (r1 + r2)
     end
 
 (* Tail-recursive accumulator loop, O(n) iterations: the parameters
@@ -67,25 +51,21 @@ let rec fib_loop
   fun n i a b ->
     let refine_ a0 = a in
     let refine_ b0 = b in
-    let refine_ c = eq i n in
-    if c
+    if i = n
     then refine_ a0
     else begin
-      let refine_ o = one in
-      let refine_ j = add i o in
-      let refine_ s = add a0 b0 in
+      let refine_ j = refine_ (i + 1) in
       let a2 = (refine_ b0 : int{ _ = fib j && j >= 0 }) in
-      let b2 = (refine_ s : int{ _ = fib (j + 1) }) in
+      let b2 = (refine_ (a0 + b0) : int{ _ = fib (j + 1) }) in
       let refine_ r = fib_loop n j a2 b2 in
       refine_ r
     end
 
 let fib_iter : (n : int) -> int{ _ = fib n } =
   fun n ->
-    let refine_ z = zero in
-    let refine_ o = one in
+    let refine_ z = refine_ 0 in
     let a0 = (refine_ z : int{ _ = fib z && z >= 0 }) in
-    let b0 = (refine_ o : int{ _ = fib (z + 1) }) in
+    let b0 = (refine_ 1 : int{ _ = fib (z + 1) }) in
     let refine_ r = fib_loop n z a0 b0 in
     refine_ r
 
@@ -93,48 +73,34 @@ let fib_iter : (n : int) -> int{ _ = fib n } =
    a simple variant, so the pair appears in predicates.  With k = n/2:
    fib (2k) = fib k * (2 fib (k+1) - fib k) and fib (2k+1) = fib k ^ 2
    + fib (k+1) ^ 2 (prelude lemmas; they need k >= 0, hence the ghost
-   proposition parameter).  In the odd branch the two stepping stones
-   [x2 = fib (2k)] and [y2 = fib (2k+1)] keep each obligation within
-   grind's instantiation budget. *)
+   proposition parameter).  Annotating x and y with the doubling
+   identities puts [fib (2 * k)] syntactically in each obligation,
+   which is what fires the prelude lemmas; the final obligations are
+   then pure congruence. *)
 type pair = P of int * int
 
 let rec fib_fd
   : (n : int) -> (p : unit{ n >= 0 }) -> pair{ _ = P (fib n, fib (n + 1)) }
   =
   fun n p ->
-    let refine_ z = zero in
-    let refine_ o = one in
-    let refine_ c0 = le n z in
-    if c0
-    then refine_ (P (z, o))
+    if n <= 0
+    then refine_ (P (0, 1))
     else begin
-      let refine_ t = two in
       let refine_ k = half n in
       let pk = (refine_ () : unit{ k >= 0 }) in
       let refine_ q = fib_fd k pk in
       match q with
       | P (a, b) ->
-        let refine_ tb = mul t b in
-        let refine_ d = sub tb a in
-        let refine_ x = mul a d in
-        let refine_ aa = mul a a in
-        let refine_ bb = mul b b in
-        let refine_ y = add aa bb in
-        let refine_ tk = mul t k in
-        let refine_ c1 = eq n tk in
-        if c1
+        let refine_ x = (refine_ (a * (2 * b - a)) : int{ _ = fib (2 * k) }) in
+        let refine_ y = (refine_ (a * a + b * b) : int{ _ = fib (2 * k + 1) }) in
+        if n = 2 * k
         then refine_ (P (x, y))
-        else begin
-          let refine_ x2 = (refine_ x : int{ _ = x && _ = fib (2 * k) }) in
-          let refine_ y2 = (refine_ y : int{ _ = y && _ = fib (2 * k + 1) }) in
-          let refine_ w = add x2 y2 in
-          refine_ (P (y2, w))
-        end
+        else refine_ (P (y, x + y))
     end
 
 (* Client side: fib 10, by fast doubling. *)
 let fib10 : int{ _ = fib 10 } =
-  let refine_ ten = (assume_ 10 : int{ _ = 10 }) in
+  let refine_ ten = refine_ 10 in
   let p10 = (refine_ () : unit{ ten >= 0 }) in
   let refine_ r = fib_fd ten p10 in
   match r with
