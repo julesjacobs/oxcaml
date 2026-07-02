@@ -15,7 +15,9 @@ Line 1, characters 8-17:
 Error: vox: refine_ needs a refined expected type; add a type annotation
 |}]
 
-(* v0 refinements are supported at int and bool only. *)
+(* Refinements are allowed at every skeleton type; non-int/bool
+   skeletons get equality-only reasoning at an uninterpreted solver
+   sort (see compact.ml). *)
 let s : {v:string | v = v} = refine_ "hi"
 [%%expect{|
 val s : string{ _ = _ } = "hi"

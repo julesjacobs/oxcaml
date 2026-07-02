@@ -5105,7 +5105,17 @@ and unify3 uenv t1 t1' t2 t2' =
              binder with the other side's predicates.  Renaming one
              binder to the other before unifying keeps the merged
              graph consistent (the rebuild shares all non-predicate
-             nodes, so variables inside still get linked). *)
+             nodes, so variables inside still get linked).  The rename
+             targets [id2] because [link_type t1' t2] above makes d2
+             the surviving desc.  When only ONE side has a binder,
+             nothing is renamed: if it is d2's, the surviving graph is
+             consistent; if it is d1's (e.g. d2 is a [type_approx]
+             skeleton whose codomain is still a variable), the
+             surviving arrow can end up binderless over predicates
+             that still mention id1 -- a dangling reference the
+             verifier's scope check rejects (sound: fails closed), and
+             harmless in the approx case where the approx node is dead
+             as soon as the annotated type wins. *)
           let u1 =
             match b1, b2 with
             | Some id1, Some id2 when not (Ident.same id1 id2) ->

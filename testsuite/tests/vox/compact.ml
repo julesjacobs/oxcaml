@@ -84,3 +84,33 @@ Line 1, characters 11-18:
                ^^^^^^^
 Error: vox: (y : ...) names a value and is only meaningful as a function parameter or around a refined type (ty{ ... })
 |}]
+
+(* Two independently written dependent signatures are alpha-compared:
+   unification renames one binder to the other (the unify3 rename
+   path), so re-annotating with a different binder name is accepted... *)
+let dep : (x : int) -> int{ _ = x } = fun x -> assume_ x
+[%%expect{|
+Line 1, characters 55-56: vox VC (ASSUMED):
+  goal: x = x
+  hypotheses:
+  s = s
+  a' >= 0
+  a >= 0
+val dep : (x : int) -> int{ _ = x } = <fun>
+|}]
+
+let dep' : (y : int) -> int{ _ = y } = dep
+[%%expect{|
+val dep' : (y : int) -> int{ _ = y } = <fun>
+|}]
+
+(* ...while a genuinely different dependency is not. *)
+let dep_wrong : (y : int) -> int{ _ = y + 1 } = dep
+[%%expect{|
+Line 1, characters 48-51:
+1 | let dep_wrong : (y : int) -> int{ _ = y + 1 } = dep
+                                                    ^^^
+Error: The value "dep" has type "(x : int) -> int{ _ = x }"
+       but an expression was expected of type "(y : int) -> int{ _ = (y + 1) }"
+       Type "int{ _ = y }" is not compatible with type "int{ _ = (y + 1) }"
+|}]

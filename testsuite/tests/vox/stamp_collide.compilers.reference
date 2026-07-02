@@ -1,0 +1,26 @@
+File "collide_a.ml", line 6, characters 58-59: vox VC (ASSUMED):
+  goal: x = x
+  hypotheses: <none>
+File "collide_a.ml", line 9, characters 21-28: vox VC (ASSUMED):
+  goal: *vox-unknown* = (p + q)
+  hypotheses: <none>
+File "collide_b.ml", line 4, characters 58-59: vox VC (ASSUMED):
+  goal: y = y
+  hypotheses: <none>
+File "collide_b.ml", line 7, characters 21-28: vox VC (ASSUMED):
+  goal: *vox-unknown* = (r * s)
+  hypotheses: <none>
+File "stamp_collide.ml", line 25, characters 12-13: vox VC:
+  goal: a = 5
+  hypotheses:
+  m = (n' * n')
+  a = n'
+  n' = 5
+  n = 5
+File "stamp_collide.ml", line 25, characters 43-44: vox VC:
+  goal: m = 25
+  hypotheses:
+  m = (n' * n')
+  a = n'
+  n' = 5
+  n = 5

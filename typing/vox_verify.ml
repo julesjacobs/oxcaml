@@ -1063,7 +1063,20 @@ let run_lean vcs =
         let status = Sys.command cmd in
         if status <> 0
         then begin
-          (* Find the first "<file>:LINE:COL: error" and map it back. *)
+          (* Find the first "<file>:LINE:COL: error: ..." and map it
+             back.  Lean also emits "warning:" lines in the same
+             format (e.g. for unused hypotheses); attributing the
+             failure to the first WARNING would blame the wrong VC, so
+             only "error:" lines count. *)
+          let contains_error l =
+            let needle = "error:" in
+            let n = String.length needle in
+            let rec at i =
+              i + n <= String.length l
+              && (String.equal (String.sub l i n) needle || at (i + 1))
+            in
+            at 0
+          in
           let ic = open_in out_file in
           let error_line = ref None in
           let msg = ref "" in
@@ -1079,7 +1092,8 @@ let run_lean vcs =
                     when String.length l > String.length in_file
                          && String.equal
                               (String.sub l 0 (String.length in_file))
-                              in_file ->
+                              in_file
+                         && contains_error l ->
                     let rest =
                       String.sub l (String.length in_file + 1)
                         (String.length l - String.length in_file - 1)

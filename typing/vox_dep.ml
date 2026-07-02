@@ -59,7 +59,22 @@ let rec subst id ~by ty visited =
 
 (* Open the binder [id]: replace it by [by] throughout [ty].  Non-
    destructive: rebuilds only changed spines, so annotation types and
-   other instances are unaffected. *)
+   other instances are unaffected.
+
+   [subst] has no notion of shadowing, so it relies on this INVARIANT:
+   within any type graph it can reach, binder stamps are distinct.
+   In-unit this holds because typetexp mints a fresh ident per arrow
+   (and copies share, never re-bind, binders).  Across units it is
+   delicate: stamps restart per compiler process, so two .cmis
+   routinely contain COLLIDING [Scoped] binder stamps ([Ident.same]
+   already keeps them apart from every [Local] program variable).  Two
+   things keep a foreign colliding binder out of reach: signature
+   self-containment (Vox_verify.check_signature) forces every
+   .cmi-crossing binder reference to sit under its own arrow, and
+   [subst] walks [Tconstr] ARGUMENTS only, never a constructor's
+   expansion, so another unit's binder can only be reached through its
+   own (freshly copied, consistently stamped) arrow.  See
+   testsuite/tests/vox/stamp_collide.ml. *)
 let subst_binder id ~by ty = subst id ~by ty []
 
 (* Refinements can hide inside object fields, polymorphic-variant

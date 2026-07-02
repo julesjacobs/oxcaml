@@ -925,22 +925,24 @@ let rec elab_vox_pred ~bound ~self_root env (e : Parsetree.expression)
   | Pexp_ident {txt = Longident.Lident name; _}
     when String.equal name bound || String.equal name "_" ->
       Pbound
-  | Pexp_ident {txt = Longident.Lident name; _}
-    when vox_find_scope ~self_root name <> None ->
-      begin match vox_find_scope ~self_root name with
+  | Pexp_ident {txt = lid; _} ->
+      let scope_entry =
+        match lid with
+        | Longident.Lident name -> vox_find_scope ~self_root name
+        | _ -> None
+      in
+      begin match scope_entry with
       | Some (`Pi id) -> Pvar id
       | Some `Self -> Pbound
-      | None -> assert false
-      end
-  | Pexp_ident {txt = lid; _} ->
-      begin match Env.lookup_value ~use:false ~loc lid env with
-      | (Path.Pident id, _, _) -> Pvar id
-      | _ ->
-          Location.raise_errorf ~loc
-            "vox: only locally bound variables may appear in refinements"
-      | exception _ ->
-          Location.raise_errorf ~loc
-            "vox: unbound variable in refinement predicate"
+      | None ->
+          match Env.lookup_value ~use:false ~loc lid env with
+          | (Path.Pident id, _, _) -> Pvar id
+          | _ ->
+              Location.raise_errorf ~loc
+                "vox: only locally bound variables may appear in refinements"
+          | exception _ ->
+              Location.raise_errorf ~loc
+                "vox: unbound variable in refinement predicate"
       end
   | Pexp_constant {pconst_desc = Pconst_integer (s, None); _} ->
       begin match int_of_string_opt s with
