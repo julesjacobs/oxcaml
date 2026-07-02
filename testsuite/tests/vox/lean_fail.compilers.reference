@@ -1,0 +1,6 @@
+File "lean_fail.ml", line 11, characters 36-37:
+11 | let bad : {v:int | v > 0} = refine_ 0
+                                         ^
+Error: vox: verification failed (lean).
+       Goal: 0 > 0
+(lean: error: `grind` failed)

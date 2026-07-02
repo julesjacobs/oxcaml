@@ -175,6 +175,8 @@ val instantiate : bool ref
 val dump_source : bool ref
 val vox_dump_vc : bool ref
 val vox_dry_run : bool ref
+val vox_solver : string ref
+val vox_solver_path : string ref
 val dump_parsetree : bool ref
 val dump_typedtree : bool ref
 val dump_shape : bool ref

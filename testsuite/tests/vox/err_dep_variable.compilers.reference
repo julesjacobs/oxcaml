@@ -1,0 +1,4 @@
+File "err_dep_variable.ml", line 14, characters 23-24:
+14 | let bad (x : int) = lt 0 x
+                            ^
+Error: vox: the argument for a dependent parameter must be a variable (let-bind it first)

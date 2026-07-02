@@ -349,9 +349,19 @@ type verdict =
   | Unknown of string
 
 let z3_command () =
-  match Sys.getenv_opt "VOX_Z3" with
-  | Some s -> s
-  | None -> "z3"
+  if not (String.equal !Clflags.vox_solver_path "") then !Clflags.vox_solver_path
+  else
+    match Sys.getenv_opt "VOX_Z3" with
+    | Some s -> s
+    | None -> "z3"
+;;
+
+let lean_command () =
+  if not (String.equal !Clflags.vox_solver_path "") then !Clflags.vox_solver_path
+  else
+    match Sys.getenv_opt "VOX_LEAN" with
+    | Some s -> s
+    | None -> "lean"
 ;;
 
 let run_z3 script =
@@ -396,6 +406,209 @@ let run_z3 script =
 ;;
 
 (* ------------------------------------------------------------------ *)
+(* Lean backend: VCs become Lean 4 theorems proved by [grind], batched
+   one file per module, one theorem per line so failing line numbers
+   map back to VCs.  Int-sorted names are [Int], bool-sorted names are
+   modelled as [Prop] (equality between boolean-valued predicates
+   becomes [↔]), everything else lives in an opaque type [VoxU]. *)
+
+let lean_name id =
+  let s = Ident.unique_name id in
+  let b = Bytes.of_string s in
+  Bytes.iteri
+    (fun i c ->
+      match c with
+      | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> ()
+      | _ -> Bytes.set b i '_')
+    b;
+  "v_" ^ Bytes.to_string b
+;;
+
+let boolish p =
+  let open Refinement in
+  match p with
+  | Pbool _ | Pbinop ((Eq | Neq | Lt | Le | Gt | Ge), _, _)
+  | Pand _ | Por _ | Pnot _ -> true
+  | Pvar id ->
+    (match Hashtbl.find_opt name_sorts id with
+     | Some S_bool -> true
+     | _ -> false)
+  | Pbound | Pparam _ | Pint _ | Pbinop ((Add | Sub | Mul), _, _) -> false
+;;
+
+let rec lean_of_pred buf (p : Refinement.pred) =
+  let open Refinement in
+  let bin op a b =
+    Buffer.add_char buf '(';
+    lean_of_pred buf a;
+    Buffer.add_string buf (" " ^ op ^ " ");
+    lean_of_pred buf b;
+    Buffer.add_char buf ')'
+  in
+  match p with
+  | Pbound -> assert false
+  | Pparam _ -> assert false
+  | Pvar id -> Buffer.add_string buf (lean_name id)
+  | Pint n ->
+    if n >= 0
+    then Buffer.add_string buf (Printf.sprintf "(%d : Int)" n)
+    else Buffer.add_string buf (Printf.sprintf "((%d : Int))" n)
+  | Pbool b -> Buffer.add_string buf (if b then "True" else "False")
+  | Pbinop (Eq, a, b) -> bin (if boolish a || boolish b then "↔" else "=") a b
+  | Pbinop (Neq, a, b) ->
+    Buffer.add_string buf "(¬ ";
+    bin (if boolish a || boolish b then "↔" else "=") a b;
+    Buffer.add_char buf ')'
+  | Pbinop (Add, a, b) -> bin "+" a b
+  | Pbinop (Sub, a, b) -> bin "-" a b
+  | Pbinop (Mul, a, b) -> bin "*" a b
+  | Pbinop (Lt, a, b) -> bin "<" a b
+  | Pbinop (Le, a, b) -> bin "≤" a b
+  | Pbinop (Gt, a, b) -> bin ">" a b
+  | Pbinop (Ge, a, b) -> bin "≥" a b
+  | Pand (a, b) -> bin "∧" a b
+  | Por (a, b) -> bin "∨" a b
+  | Pnot a ->
+    Buffer.add_string buf "(¬ ";
+    lean_of_pred buf a;
+    Buffer.add_char buf ')'
+;;
+
+let lean_theorem buf i vc =
+  Buffer.add_string buf (Printf.sprintf "theorem vc_%d " i);
+  let seen = Hashtbl.create 16 in
+  List.iter
+    (fun id ->
+      if not (Hashtbl.mem seen id)
+      then (
+        Hashtbl.add seen id ();
+        let sort =
+          match Hashtbl.find_opt name_sorts id with
+          | Some S_int -> "Int"
+          | Some S_bool -> "Prop"
+          | Some S_other | None -> "VoxU"
+        in
+        Buffer.add_string buf
+          (Printf.sprintf "(%s : %s) " (lean_name id) sort)))
+    (free_vars_of_vc vc);
+  List.iteri
+    (fun j f ->
+      Buffer.add_string buf (Printf.sprintf "(h_%d : " j);
+      lean_of_pred buf f;
+      Buffer.add_string buf ") ")
+    vc.vc_facts;
+  Buffer.add_string buf ": ";
+  lean_of_pred buf vc.vc_goal;
+  Buffer.add_string buf " := by grind\n"
+;;
+
+(* Returns the file contents and, per theorem, the 1-based line it
+   occupies (for mapping lean's error locations back to VCs). *)
+let lean_file vcs =
+  let buf = Buffer.create 1024 in
+  let needs_voxu =
+    List.exists
+      (fun vc ->
+        List.exists
+          (fun id ->
+            match Hashtbl.find_opt name_sorts id with
+            | Some (S_int | S_bool) -> false
+            | Some S_other | None -> true)
+          (free_vars_of_vc vc))
+      vcs
+  in
+  let first_line = if needs_voxu then 2 else 1 in
+  if needs_voxu then Buffer.add_string buf "opaque VoxU : Type\n";
+  List.iteri (fun i vc -> lean_theorem buf i vc) vcs;
+  Buffer.contents buf, fun line -> List.nth_opt vcs (line - first_line)
+;;
+
+let run_lean vcs =
+  match vcs with
+  | [] -> ()
+  | first :: _ ->
+    let contents, vc_of_line = lean_file vcs in
+    let in_file = Filename.temp_file "vox" ".lean" in
+    let out_file = Filename.temp_file "vox" ".out" in
+    Misc.try_finally
+      ~always:(fun () ->
+        Misc.remove_file in_file;
+        Misc.remove_file out_file)
+      (fun () ->
+        let oc = open_out in_file in
+        output_string oc contents;
+        close_out oc;
+        let cmd =
+          Printf.sprintf "%s %s > %s 2>&1"
+            (Filename.quote (lean_command ()))
+            (Filename.quote in_file) (Filename.quote out_file)
+        in
+        let status = Sys.command cmd in
+        if status <> 0
+        then begin
+          (* Find the first "<file>:LINE:COL: error" and map it back. *)
+          let ic = open_in out_file in
+          let error_line = ref None in
+          let msg = ref "" in
+          (try
+             while true do
+               let l = input_line ic in
+               match !error_line with
+               | None ->
+                 (match String.index_opt l ':' with
+                  | Some _
+                    when String.length l > String.length in_file
+                         && String.equal
+                              (String.sub l 0 (String.length in_file))
+                              in_file ->
+                    let rest =
+                      String.sub l (String.length in_file + 1)
+                        (String.length l - String.length in_file - 1)
+                    in
+                    (match String.index_opt rest ':' with
+                     | Some i ->
+                       (match int_of_string_opt (String.sub rest 0 i) with
+                        | Some n ->
+                          error_line := Some n;
+                          msg := l
+                        | None -> ())
+                     | None -> ())
+                  | _ -> ())
+               | Some _ -> ()
+             done
+           with
+           | End_of_file -> ());
+          close_in ic;
+          let vc =
+            match !error_line with
+            | Some line ->
+              (match vc_of_line line with
+               | Some vc -> vc
+               | None -> first)
+            | None -> first
+          in
+          (* Strip the (nondeterministic) temp-file prefix from the
+             message; keep from "error:" onward. *)
+          let msg =
+            let m = !msg in
+            let needle = "error:" in
+            let rec find i =
+              if i + String.length needle > String.length m
+              then m
+              else if String.equal (String.sub m i (String.length needle)) needle
+              then String.sub m i (String.length m - i)
+              else find (i + 1)
+            in
+            find 0
+          in
+          Location.raise_errorf ~loc:vc.vc_loc
+            "vox: verification failed (lean).@ Goal: %s%s"
+            (Refinement.to_string vc.vc_goal)
+            (if String.equal msg "" then "" else "\n(lean: " ^ msg ^ ")")
+        end)
+;;
+
+(* ------------------------------------------------------------------ *)
 
 let print_pred ppf p = Format.pp_print_string ppf (Refinement.to_string p)
 
@@ -419,25 +632,34 @@ let discharge () =
   if !Clflags.vox_dump_vc then List.iter (dump_vc Format.err_formatter) all;
   if !Clflags.vox_dry_run
   then ()
-  else
-    List.iter
-      (fun vc ->
-        if not vc.vc_assumed
-        then (
-          match run_z3 (smt_script vc) with
-          | Valid -> ()
-          | Invalid ->
-            Location.raise_errorf
-              ~loc:vc.vc_loc
-              "vox: verification failed.@ Unprovable goal: %s"
-              (Refinement.to_string vc.vc_goal)
-          | Unknown reason ->
-            Location.raise_errorf
-              ~loc:vc.vc_loc
-              "vox: verification failed (%s).@ Goal: %s"
-              reason
-              (Refinement.to_string vc.vc_goal)))
-      all
+  else (
+    match !Clflags.vox_solver with
+    | "lean" -> run_lean (List.filter (fun vc -> not vc.vc_assumed) all)
+    | "z3" ->
+      List.iter
+        (fun vc ->
+          if not vc.vc_assumed
+          then (
+            match run_z3 (smt_script vc) with
+            | Valid -> ()
+            | Invalid ->
+              Location.raise_errorf
+                ~loc:vc.vc_loc
+                "vox: verification failed.@ Unprovable goal: %s"
+                (Refinement.to_string vc.vc_goal)
+            | Unknown reason ->
+              Location.raise_errorf
+                ~loc:vc.vc_loc
+                "vox: verification failed (%s).@ Goal: %s"
+                reason
+                (Refinement.to_string vc.vc_goal)))
+        all
+    | other ->
+      (match all with
+       | [] -> ()
+       | vc :: _ ->
+         Location.raise_errorf ~loc:vc.vc_loc
+           "vox: unknown solver %S (expected \"z3\" or \"lean\")" other))
 ;;
 
 (* Entry point: called on the final typedtree of an implementation. *)
