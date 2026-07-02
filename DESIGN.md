@@ -1,177 +1,97 @@
-# OxCaml Refinement Verification Extension — Design Document
+# OxCaml Refinement Verification
 
-Status: prototype design, decisions below are SETTLED unless marked OPEN.
-The implementing model must not re-litigate settled decisions. If a settled
-decision proves unimplementable, STOP and report; do not silently substitute
-an alternative.
+- A refined type is written `{v:int | p}` (or `{v:bool | p}`).
+  Predicates are built from `v`, program variables, int/bool literals,
+  `+ - *`, comparisons, and `&& || not`. A program variable in a
+  refinement means the logical value associated with it, not the
+  program value. Predicates are UNTYPED -- the compiler never checks
+  them; the logic types them, as in first-order logic. An ill-sorted
+  predicate surfaces as a solver error at VC time, which counts as a
+  verification failure.
+- Refined types are rigid: `{v:int | v>0}` is an ordinary type, distinct
+  from `int` and from `{v:int | v>1}`. There is no subtyping anywhere.
+  Unification handles them like a type constructor and asserts equal
+  predicates -- structurally equal, variables compared by stamp. So
+  `{v|v>0}` vs `{v|0<v}` is a type error, as are two separately written
+  but alpha-equal dependent signatures. Sharp edges, not bugs.
+- Introduction: `refine e` wraps `e` at the refined type expected from
+  context (an annotation, or the parameter type at an argument
+  position). This is the ONLY construct that generates a proof
+  obligation. No refined expected type in context is an error.
+- `assume e` is `refine e` with the proof obligation skipped (reported
+  as ASSUMED in diagnostics).
+- Elimination: the irrefutable pattern `refine x`, as in
+  `let refine x = e`, binds `x` at the skeleton type. Free -- no proof
+  obligation. `e`'s type must be refined. Both forms erase at runtime;
+  `refine` becomes a keyword.
+- Function types may name their parameters, and later refinements may
+  mention them: `(x:int) -> (y:int) -> {z:int | z = x * y}`. Dependent
+  types arise from annotations only; inferred arrows are never
+  dependent. At an application, if the parameter's name occurs in the
+  remaining type, the argument must be a VARIABLE (else: "let-bind the
+  argument first"); its stamp is substituted.
+- Scope: a refinement may mention only parameters of its own type and
+  program variables in scope at every point the type flows to; escape
+  is an error ("annotate"). In module signatures, refinements may
+  mention only parameters of their own type -- never top-level values.
+  So .cmi predicates are self-contained.
+- The compiler attaches no logical meaning to any program operation or
+  constant. Both are defined in user code with `assume`:
 
-## 1. Overview
+      let mul (x : int) (y : int) : {z:int | z = x * y} = assume (x * y)
+      let zero : {v:int | v = 0} = assume 0
 
-A verification extension for OxCaml based on:
-- **Refinement types**: `{v:τ | p}` where `p` is a predicate over the
-  *verifier type* (SMT sort) corresponding to the OxCaml type `τ`.
-- **A pi type**: `Π(x:τ).σ` — a dependent arrow where the *refinements* in
-  σ may mention the logical reflection of `x`. σ's structure may NOT depend
-  on `x` (refinement-level dependency only). This keeps checking decidable
-  and erasure trivial.
-- **SMT discharge**: every subtyping check between refined types with the
-  same skeleton becomes an implication query sent to Z3.
+  (the `x * y` in the predicate is the logic's multiplication; the one
+  in the body is the program's). Constants are exported refined and
+  unpacked at use: facts are module-local, types travel.
 
-Architecture is Liquid Types (Rondon/Kawaguchi/Jhala): variable-only
-dependent application in the core, ANF elaboration at the surface, so
-terms never appear inside types — only logic variables.
+## VC generation
 
-## 2. Backwards compatibility (hard requirement)
+Once the program is type inferred, we extract verification conditions
+from the typed tree. Every value has a logical NAME: binders get one
+keyed by their stamp (never their source name -- shadowing), everything
+else is a fresh unknown. Names are declared to the solver by OCaml
+type: int as Int, bool as Bool, anything else at a single uninterpreted
+sort (equality is all the logic knows about other types). Solver error,
+unknown, and timeout all count as verification FAILURE, never success.
+Facts about names come from exactly three places:
 
-- Unannotated programs must typecheck and compile exactly as before.
-  The full existing OxCaml testsuite must pass at EVERY step of the plan.
-- Pi types never arise unless written by the user.
-- Refinement payloads are invisible to unification and all legacy code.
+- Unpacking: `let refine x = e` with `e : {v | p}` contributes
+  `p[v:=x]`. The same rule applies to any binder of refined type
+  (function parameters, pattern variables): matching
+  `xs : {v:int|v>0} list` against `x :: _` makes `x > 0` available.
+- Path facts: `if c then e1 else e2` checks `e1` under `c = true` and
+  `e2` under `c = false`, where `c` is the condition's name.
+- Dependent application: applying `f : (x:int) -> {z | p}` to variable
+  `a` substitutes: the result type is `{z | p[x:=a]}`, so
+  `let refine m = mul a b` yields `m = a * b`.
 
-## 3. Surface syntax
+A plain `let x = e` contributes nothing: `x` is a fresh unknown.
+Aliasing is expressed with the existing forms,
 
-- Refinement: `{v:int | p}`. The bound value variable is always written
-  `v` in surface syntax.
-- Logical reflection of a program variable `x` is written `x#` INSIDE
-  refinement braces only. OPEN: `#` clashes with OxCaml's unboxed-type
-  lexing (`float#`, `#(a,b)`). Step C1 resolves this; acceptable outcomes
-  are (a) `x#` works inside `{...}` via lexer state, or (b) a different
-  sigil, chosen at C1 and used consistently after.
-- Pi arrow surface syntax: `(x : τ) -> σ` (dependent arrow, OCaml-ish),
-  printed the same way. `Π` is used in this document as notation only.
-- Kind annotation: `type t : value with verifier Int` (rides the existing
-  jkind annotation syntax).
-- `assume e` — unchecked ascription (VC skipped). Ordinary ascription
-  `(e : {v:τ|p})` is the checked introduction form.
-- Measures: `measure len : 'a list -> int` — a signature-level declaration
-  of a logical function symbol. Trusted (axiomatized), not checked, in the
-  prototype.
+    let refine x = (refine y : {v:int | v = y})
 
-## 4. Logic layer
+whose obligation is the trivial `y = y` and whose unpacking yields
+`x = y`.
 
-- **Predicate AST**: immutable tree. Boolean connectives, comparisons,
-  linear integer arithmetic, applications of measure symbols, logic
-  variables. The refinement's value variable `v` is a `Bound` de Bruijn
-  index WITHIN the predicate tree. All other variables are free and
-  identified by **Ident stamp** (see §6).
-- **Sort AST**: `Int`, `Bool`, uninterpreted sorts (globally unique ids),
-  sort variables (for type parameters), and constructor sorts as needed
-  later (e.g. `ListSort(s)`).
-- **Well-sortedness** is a real judgment: a predicate is checked against a
-  sort environment at PARSE/elaboration time, not at VC time. Example:
-  `{v:t | v + 1 > 0}` is an error when `t`'s sort is uninterpreted.
-- **VC module**: interface is `check : hypotheses:pred list -> goal:pred
-  -> [Valid | Invalid | Unknown of reason]`. Serializes to SMT-LIB2,
-  drives a Z3 subprocess, parses sat/unsat/timeout. Timeouts are
-  `Unknown`, reported as verification failures with a distinct message.
-- `--dump-vc` flag prints every generated VC (hypotheses, goal, source
-  location) — must exist from the first VC onward.
+`refine e` at expected type `{v | p}` yields the VC
+`facts |- p[v := n]`, where `n` is `e`'s name.
 
-## 5. Verifier sorts as a kind component
+End-to-end example, one VC, provable (`lt` returns a refined bool that
+is unpacked before `if`; `zero` is unpacked to bring `z = 0` into
+scope; `100` may be passed directly since `div`'s first parameter
+occurs in no refinement):
 
-- Add a **verifier-sort field to jkinds**. Do not build a parallel kind
-  system; reuse jkind inference/defaulting, signature inclusion, .cmi
-  serialization, and annotation syntax.
-- **Defaults**: builtins get structural sorts (`int` → SMT `Int` for the
-  prototype — the unbounded-integer choice, overflow-unsound, per-module
-  soundness knob deferred; `bool` → `Bool`). Every other type declaration
-  gets a FRESH uninterpreted sort. Consequence: every immutable binder is
-  reflectable, worst case with equality/congruence reasoning only.
-- **Signature matching direction**:
-  - Sig `type t : value` (no sort annotation) over impl `type t = int`
-    ⇒ the sort is SEALED: clients see a fresh uninterpreted sort.
-    Clients must NOT be able to prove arithmetic facts about `t`.
-  - Sig `type t : value with verifier Int` ⇒ inclusion requires the
-    implementation's sort to EQUAL Int.
-- **Type parameters** map to sort variables; `Ctype.copy`/instantiation
-  instantiates sort variables inside refinements.
-- Measures are NOT part of kinds; they are value-namespace-like logical
-  declarations scoped by signatures.
+    let zero : {v:int | v = 0} = assume 0
+    let lt (x : int) (y : int) : {z:bool | z = (x < y)} = assume (x < y)
+    let div (a : int) (b : {v:int | not (v = 0)}) : int =
+      let refine b = b in a / b
+    let safe x =
+      let refine z = zero in
+      let refine c = lt z x in
+      if c then div 100 (refine x) else 0
 
-## 6. Representation (settled — do not deviate)
+The facts `z = 0`, `c = (z < x)`, and the path fact `c = true` prove
+`refine x`'s obligation `not (x = 0)`.
 
-- **Refinements and pi binders ride `Tarrow` and type payloads, not a new
-  type constructor.** Concretely: an optional payload
-  `(Ident.t option * refinement option)` on arrows (binder present iff
-  the arrow is dependent), and a refinement payload slot on base-type
-  nodes. Unification IGNORES payloads (merge policy: at unification of
-  two arrows, payload handling is not unification's job; the refinement
-  checker consults payloads separately). Rationale: `typecore`/`ctype`
-  pattern-match on `Tarrow` everywhere; a sibling constructor would
-  require auditing every site. Precedent: modes and jkinds.
-- **Pi binders are stamped `Ident.t`s**, freshened during `Ctype.copy`.
-  Never de Bruijn at the type-graph level: `type_expr` is a mutable
-  shared graph, so binder depth is ill-defined.
-- **The refinement value variable `v` is a Bound index** inside the
-  immutable predicate tree (no freshening on copy needed for it).
-- **Hash variables are keyed by Ident stamp, not name.** `x#` is surface
-  syntax resolving through the normal environment to a stamped ident;
-  its logical counterpart is a function of the stamp. Shadowing must be
-  handled by stamps.
-- **Reflectability**: a binder gets a logical counterpart iff it is
-  immutable, not `contended`, and its type has a verifier sort (which,
-  given the uninterpreted default, is nearly always). `mutable`/`ref`
-  bindings have NO counterpart in the prototype (soundness for state;
-  strong update under `unique` is future work).
-
-## 7. Checking algorithm
-
-Bidirectional, prototype-grade:
-
-- **Synthesis** for variables, applications, annotated terms.
-  Variable occurrences are **selfified**: occurrence of `y` synthesizes
-  `{v | v = y#}` conjoined with (or in place of) the declared refinement.
-- **Checking** for lambdas (against pi: bind the binder's stamp into the
-  logical environment, check the body) and for branches of `if`/`match`
-  (each branch checked against the expected type under its path
-  condition; synthesizing a type FOR a conditional requires an
-  annotation — that is acceptable for the prototype).
-- **Logical environment**: every in-scope reflectable binder
-  `x : {v|p}` contributes hypothesis `p[v := x#]` to all VCs in scope.
-  Elimination is implicit; there is no unpack construct.
-- **Path conditions**: `if c then e1 else e2` checks `e1` under the
-  reflection of `c` and `e2` under its negation (requires an
-  expression→predicate reflection mini-translator for the supported
-  fragment: variables, literals, comparisons, boolean ops). `match`
-  branches add tag facts and pattern-binder equations; `option` and
-  `list` (with a hardcoded `len` measure) are built in for the prototype.
-- **Subtyping**: same skeleton required; refinements discharge via VC.
-  `Π(x:τ).σ ≤ τ' → σ'` holds by forgetting the dependency (contravariant
-  arg check, weaken result). Plain arrow lifts to trivial pi for free.
-- **Application default**: if the function's type is not manifestly a pi,
-  assume a plain arrow. No dependency inference.
-- **Dependent application** in the core is VARIABLE-ONLY:
-  `(Π(x:τ).σ) y ⇒ σ[x# := y#]`, a capture-avoiding stamp-for-stamp
-  rename. No term substitution machinery exists anywhere.
-- **ANF elaboration**: the elaborator rewrites `f e` (f manifestly
-  pi-typed, e not a variable) to `let tmp = e in f tmp`. Surface language
-  stays unrestricted.
-- **Escape check**: at generalization, walk refinements of the
-  generalized type; if any free stamp's binder is out of scope, ERROR
-  (never silently weaken to `true` — unsound in argument positions).
-
-## 8. Module boundaries
-
-- Signatures carry refinements and sort-annotated kinds; both round-trip
-  through .cmi.
-- Calls into unannotated modules are implicitly `assume`d at the
-  boundary (their declared OxCaml types taken with trivial refinements).
-- Lemma functions are ordinary functions with unit-refined results;
-  calling one introduces its postcondition — no new syntax.
-
-## 9. Invariants the implementation must never break
-
-1. Full upstream testsuite green after every step.
-2. No term ever appears inside a type; only stamped logic variables.
-3. Unification never inspects refinement payloads.
-4. Stamps, never names, identify logical variables.
-5. Ill-sorted refinements are parse/elaboration-time errors.
-6. Escape ⇒ error, never silent weakening.
-7. `Unknown`/timeout from the solver ⇒ verification failure, never pass.
-
-## 10. Explicitly deferred (do not implement)
-
-Refinement inference (Horn solving), overflow-sound bitvector ints,
-strong update via uniqueness, measure realizability checking, floats and
-other unboxed sorts, first-class function reflection, GADTs/existentials
-beyond what falls out, error-message polish beyond locations.
+A `--dump-vc` flag prints every VC (hypotheses, goal, source location).
