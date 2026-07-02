@@ -4151,6 +4151,9 @@ let type_toplevel_phrase env sig_acc s =
   remove_mode_and_jkind_variables env sg;
   remove_mode_and_jkind_variables_for_toplevel str;
   Typecore.optimise_allocations ();
+  (* vox: generate and discharge verification conditions for this phrase.
+     No-op for sessions that never use refinements. *)
+  Vox_verify.check_toplevel_phrase str ~sig_acc sg;
   (str, sg, to_remove_from_sg, shape, env)
 
 let type_module_alias env smod =
@@ -4467,9 +4470,10 @@ let type_implementation target modulename initial_env ast =
       Value.submode_err (Location.in_file sourcefile, Structure)
         mode (Env.mode_unit ~staticity:Staticity.Dynamic);
       (* vox: generate and discharge verification conditions over the
-         final typedtree.  No-op for programs without refinements. *)
+         final typedtree, and check that exported refinements are
+         self-contained.  No-op for programs without refinements. *)
       Profile.record_call "vox_verify" (fun () ->
-        Vox_verify.check_implementation str);
+        Vox_verify.check_implementation str sg);
       let uid = Uid.of_compilation_unit_id modulename in
       let shape = Shape.set_uid_if_none shape uid in
       if !Clflags.binary_annotations_cms then
@@ -4686,6 +4690,9 @@ let type_interface ~sourcefile modulename env ast =
     cms_register_toplevel_signature_attributes ~uid ~sourcefile ast
   end;
   let sg = transl_signature ~interface_toplevel:true env ast in
+  (* vox: refinements written in an interface must be self-contained
+     (they go straight into the .cmi). *)
+  Vox_verify.check_signature sg.sig_type;
   let arg_type =
     !Clflags.as_argument_for
     |> Option.map Global_module.Parameter_name.of_string

@@ -1,6 +1,8 @@
 (* TEST
- flags = "-vox-solver lean -vox-solver-path /nix/store/h6z4nr52r2x6v7ygqg59cl8nzjg0yxcy-lean4-4.31.0/bin/lean";
+ flags = "-vox-solver lean";
+ script = "sh ${test_source_directory}/has-lean.sh";
  modules = "vc_lib.ml";
+ script;
  setup-ocamlc.byte-build-env;
  ocamlc.byte;
  check-ocamlc.byte-output;
@@ -8,8 +10,8 @@
 
 (* Real verification through Lean 4's [grind]: every obligation below
    is actually proved (this test fails to compile if any proof fails).
-   The solver path is this machine's nix store lean4; adjust or use
-   -vox-solver-path/VOX_LEAN elsewhere. *)
+   has-lean.sh locates the solver (VOX_LEAN, PATH, or a pinned copy)
+   and skips the test when there is none. *)
 
 (* Arithmetic through a dependent userland operation (linear: grind's
    integer reasoning; nonlinear facts like x*x >= 0 are beyond it). *)

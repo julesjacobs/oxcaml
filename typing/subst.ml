@@ -740,7 +740,7 @@ let rec typexp copy_scope s ty =
           end
       | Tfield(_label, kind, _t1, t2) when field_kind_repr kind = Fabsent ->
           Tlink (typexp copy_scope s t2)
-      | Tarrow ((label, marg, mret), arg, ret, comm) ->
+      | Tarrow ((label, marg, mret, binder), arg, ret, comm) ->
           let marg, mret =
             match s.additional_action with
             | Prepare_for_saving { prepare_mode; _ } ->
@@ -750,7 +750,7 @@ let rec typexp copy_scope s ty =
           let arg = typexp copy_scope s arg in
           let ret = typexp copy_scope s ret in
           let comm = copy_commu comm in
-          Tarrow ((label, marg, mret), arg, ret, comm)
+          Tarrow ((label, marg, mret, binder), arg, ret, comm)
       | _ -> copy_type_desc (typexp copy_scope s) desc
     in
     Transient_expr.set_stub_desc ty' desc;

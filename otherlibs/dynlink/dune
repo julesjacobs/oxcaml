@@ -137,6 +137,7 @@
   value_rec_types
   refinement
   btype
+  vox_dep
   lazy_backtrack
   type_shape
   zero_alloc_utils
@@ -338,6 +339,8 @@
 (copy_files ../../typing/mode.ml)
 
 (copy_files ../../typing/refinement.ml)
+
+(copy_files ../../typing/vox_dep.ml)
 
 (copy_files ../../typing/btype.ml)
 
@@ -755,6 +758,7 @@
   .dynlink_compilerlibs.objs/byte/dynlink_compilerlibs__Primitive.cmo
   .dynlink_compilerlibs.objs/byte/dynlink_compilerlibs__Oprint.cmo
   .dynlink_compilerlibs.objs/byte/dynlink_compilerlibs__Btype.cmo
+  .dynlink_compilerlibs.objs/byte/dynlink_compilerlibs__Vox_dep.cmo
   .dynlink_compilerlibs.objs/byte/dynlink_compilerlibs__Typemode.cmo
   .dynlink_compilerlibs.objs/byte/dynlink_compilerlibs__Predef.cmo
   .dynlink_compilerlibs.objs/byte/dynlink_compilerlibs__Subst.cmo
@@ -881,6 +885,7 @@
   .dynlink_compilerlibs.objs/native/dynlink_compilerlibs__Primitive.cmx
   .dynlink_compilerlibs.objs/native/dynlink_compilerlibs__Oprint.cmx
   .dynlink_compilerlibs.objs/native/dynlink_compilerlibs__Btype.cmx
+  .dynlink_compilerlibs.objs/native/dynlink_compilerlibs__Vox_dep.cmx
   .dynlink_compilerlibs.objs/native/dynlink_compilerlibs__Typemode.cmx
   .dynlink_compilerlibs.objs/native/dynlink_compilerlibs__Predef.cmx
   .dynlink_compilerlibs.objs/native/dynlink_compilerlibs__Subst.cmx

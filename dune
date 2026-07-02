@@ -233,8 +233,8 @@
   signature_with_global_bindings
   typedtree
   printtyped
-  ctype
   vox_dep
+  ctype
   vox_verify
   printtyp
   rawprinttyp

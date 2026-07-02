@@ -128,6 +128,21 @@ let rec add_type bv ty =
   | Ptyp_of_kind jkind -> add_jkind bv jkind
   | Ptyp_repr(_, t) -> add_type bv t
   | Ptyp_newlayout(_, t) -> add_type bv t
+  | Ptyp_extension ({txt; _}, PTyp t)
+    when String.length txt > 10 && String.sub txt 0 10 = "vox.named." ->
+      (* vox named type [(x : ty)]: the type rides the payload. *)
+      add_type bv t
+  | Ptyp_extension ({txt; _},
+                    PStr [{pstr_desc =
+                             Pstr_eval
+                               ({pexp_desc =
+                                   Pexp_constraint (_pred, Some ty, _); _},
+                                _); _}])
+    when String.length txt >= 10 && String.sub txt 0 10 = "vox.refine" ->
+      (* vox refined type {v:ty | p}: the skeleton can reference
+         modules; the predicate cannot (only unqualified variables are
+         allowed there). *)
+      add_type bv ty
   | Ptyp_extension e -> handle_extension e
 
 and add_package_type bv ptyp =
@@ -236,6 +251,9 @@ let rec add_pattern bv pat =
   | Ppat_open ( m, p) -> let bv = open_module bv m.txt in add_pattern bv p
   | Ppat_effect(p1, p2) -> add_pattern bv p1; add_pattern bv p2
   | Ppat_exception p -> add_pattern bv p
+  | Ppat_extension ({txt = "vox.refine"; _}, PPat (p, None)) ->
+      (* vox unpack pattern [refine_ p]. *)
+      add_pattern bv p
   | Ppat_extension e -> handle_extension e
 
 let add_pattern bv pat =
@@ -328,6 +346,10 @@ let rec add_expr bv exp =
       | Error () -> handle_extension e
       | Ok { arg; _ } -> add_expr bv arg
       end
+  | Pexp_extension ({txt = ("vox.refine" | "vox.assume"); _},
+                    PStr [{pstr_desc = Pstr_eval (e, _); _}]) ->
+      (* vox [refine_ e] / [assume_ e]. *)
+      add_expr bv e
   | Pexp_extension e -> handle_extension e
   | Pexp_stack e -> add_expr bv e
   | Pexp_overwrite (e1, e2) -> add_expr bv e1; add_expr bv e2

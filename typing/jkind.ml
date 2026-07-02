@@ -1195,6 +1195,15 @@ module Base_and_axes = struct
             No_with_bounds,
             { ctl with fuel_status = Sufficient_fuel } )
         | (ty, ti) :: bs -> (
+          (* vox: refinements are transparent to jkinds; strip them so
+             the skeleton (e.g. a recursive type constructor) gets the
+             normal fuel accounting instead of looping forever. *)
+          let rec vox_strip ty =
+            match get_desc ty with
+            | Trefine (skel, _) -> vox_strip skel
+            | _ -> ty
+          in
+          let ty = vox_strip ty in
           (* Map the type's info before expanding the type *)
           let ti =
             match map_type_info with

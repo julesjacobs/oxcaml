@@ -4692,33 +4692,6 @@ strict_function_or_labeled_tuple_type:
             maybe_curry_typ codomain codomain_loc, arg_modes, ret_modes) }
     )
     { $1 }
-  (* vox dependent arrow [(x : ty) -> codomain]: refinements in the
-     codomain may mention [x].  Encoded as a vox.pi extension around an
-     arrow whose label smuggles the binder name; typetexp elaborates
-     the binder into de Bruijn parameter references. *)
-  | mktyp(
-      LPAREN binder = LIDENT COLON binder_ty = atomic_type RPAREN
-      MINUSGREATER
-      codomain = strict_function_or_labeled_tuple_type
-        { Ptyp_extension
-            ({ txt = "vox.pi"; loc = make_loc $sloc },
-             PTyp (mktyp ~loc:$sloc
-                     (Ptyp_arrow
-                        (Labelled binder, binder_ty, codomain, [], [])))) }
-    )
-    { $1 }
-  | mktyp(
-      LPAREN binder = LIDENT COLON binder_ty = atomic_type RPAREN
-      MINUSGREATER
-      codomain = tuple_type
-      %prec MINUSGREATER
-        { Ptyp_extension
-            ({ txt = "vox.pi"; loc = make_loc $sloc },
-             PTyp (mktyp ~loc:$sloc
-                     (Ptyp_arrow
-                        (Labelled binder, binder_ty, codomain, [], [])))) }
-    )
-    { $1 }
   (* The next three cases are for labled tuples - see comment on [tuple_type]
      below.
 
@@ -4956,6 +4929,12 @@ tuple_type:
 delimited_type_supporting_local_open:
   | LPAREN type_ = core_type RPAREN
       { type_ }
+  (* vox named type [(y : ty)].  Typetexp gives it meaning: as an
+     arrow domain it is a dependent binder ([(x : int) -> ...]);
+     elsewhere [ty] must be refined and [y] names the bound value
+     variable ([(y : int{ y > 3 })]). *)
+  | LPAREN type_ = vox_named_type RPAREN
+      { type_ }
   | LPAREN MODULE ext_attrs = ext_attributes package_type = package_type_ RPAREN
       { mktyp_attrs ~loc:$sloc (Ptyp_package package_type) ext_attrs }
   | mktyp(
@@ -5053,6 +5032,14 @@ atomic_type:
       { mktyp ~loc:$sloc (Ptyp_any (Some jkind)) }
   | LPAREN TYPE COLON jkind=jkind_annotation RPAREN
       { mktyp ~loc:$loc (Ptyp_of_kind jkind) }
+  (* vox compact refined type [ty{ pred }]: postfix braces on an
+     atomic type; [_] denotes the bound value variable.  The predicate
+     has its own small grammar (the expression grammar has no [_]). *)
+  | ty = atomic_type LBRACE pred = vox_pred RBRACE
+      { mktyp ~loc:$sloc
+          (Ptyp_extension
+             ({ txt = "vox.refine"; loc = make_loc $sloc },
+              PStr [ Str.eval (Exp.constraint_ pred (Some ty) []) ])) }
   (* vox refined type [{v:ty | pred}].  The [mutable_or_global_flag] and
      [possibly_poly(core_type_no_attr)] mirror the record
      [label_declaration] grammar exactly so that LR states stay merged
@@ -5068,6 +5055,94 @@ atomic_type:
              ({ txt = "vox.refine." ^ bound; loc = make_loc $sloc },
               PStr [ Str.eval (Exp.constraint_ pred (Some ty) []) ])) }
 
+
+(* vox: a named type [y : ty]; see its two use sites. *)
+vox_named_type:
+  | mktyp(
+      l = LIDENT COLON ty = atomic_type
+        { Ptyp_extension
+            ({ txt = "vox.named." ^ l; loc = make_loc $sloc }, PTyp ty) }
+    )
+    { $1 }
+;
+
+(* vox: the predicate sublanguage of compact refined types [ty{ pred }].
+   A dedicated grammar rather than [seq_expr] so that [_] (the bound
+   value variable) is expressible; it builds ordinary [Parsetree]
+   expressions ([_] becomes the identifier "_", which only the vox
+   elaborator understands). *)
+%inline vox_cmp_op:
+  | EQUAL { "=" }
+  | LESS { "<" }
+  | GREATER { ">" }
+  | op = INFIXOP0 { op }
+;
+
+vox_pred:
+  | p = vox_pred_or { p }
+;
+
+vox_pred_or:
+  | a = vox_pred_or BARBAR b = vox_pred_and
+      { mkexp ~loc:$sloc (mkinfix a (mkoperator ~loc:$loc($2) "||") b) }
+  | p = vox_pred_and { p }
+;
+
+vox_pred_and:
+  | a = vox_pred_and AMPERAMPER b = vox_pred_cmp
+      { mkexp ~loc:$sloc (mkinfix a (mkoperator ~loc:$loc($2) "&&") b) }
+  | p = vox_pred_cmp { p }
+;
+
+vox_pred_cmp:
+  | a = vox_pred_add op = vox_cmp_op b = vox_pred_add
+      { mkexp ~loc:$sloc (mkinfix a (mkoperator ~loc:$loc(op) op) b) }
+  | p = vox_pred_add { p }
+;
+
+vox_pred_add:
+  | a = vox_pred_add PLUS b = vox_pred_mul
+      { mkexp ~loc:$sloc (mkinfix a (mkoperator ~loc:$loc($2) "+") b) }
+  | a = vox_pred_add MINUS b = vox_pred_mul
+      { mkexp ~loc:$sloc (mkinfix a (mkoperator ~loc:$loc($2) "-") b) }
+  | p = vox_pred_mul { p }
+;
+
+vox_pred_mul:
+  | a = vox_pred_mul STAR b = vox_pred_app
+      { mkexp ~loc:$sloc (mkinfix a (mkoperator ~loc:$loc($2) "*") b) }
+  | p = vox_pred_app { p }
+;
+
+vox_pred_app:
+  | f = LIDENT a = vox_pred_atom
+      { mkexp ~loc:$sloc
+          (Pexp_apply (mkexpvar ~loc:$loc(f) f, [Nolabel, a])) }
+  | p = vox_pred_atom { p }
+;
+
+vox_pred_atom:
+  | UNDERSCORE
+      { mkexpvar ~loc:$sloc "_" }
+  | id = LIDENT
+      { mkexpvar ~loc:$sloc id }
+  | n = INT
+      { let (n, m) = n in
+        mkexp ~loc:$sloc
+          (Pexp_constant (mkconst ~loc:$sloc (Pconst_integer (n, m)))) }
+  | MINUS n = INT
+      { let (n, m) = n in
+        mkexp ~loc:$sloc
+          (Pexp_constant
+             (mkconst ~loc:$sloc (Pconst_integer ("-" ^ n, m)))) }
+  | TRUE
+      { mkexp ~loc:$sloc
+          (Pexp_construct (mkrhs (Lident "true") $sloc, None)) }
+  | FALSE
+      { mkexp ~loc:$sloc
+          (Pexp_construct (mkrhs (Lident "false") $sloc, None)) }
+  | LPAREN p = vox_pred RPAREN { p }
+;
 
 (* This is the syntax of the actual type parameters in an application of
    a type constructor, such as int, int list, or (int, bool) Hashtbl.t.

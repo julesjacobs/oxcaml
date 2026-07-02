@@ -1,4 +1,0 @@
-File "err_unpack.ml", line 11, characters 22-31:
-11 | let f (x : int) = let refine_ w = x in w
-                           ^^^^^^^^^
-Error: vox: a refine_ pattern requires the scrutinee to have a refined type

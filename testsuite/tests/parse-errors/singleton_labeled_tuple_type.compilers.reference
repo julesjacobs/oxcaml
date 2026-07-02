@@ -1,4 +1,4 @@
-File "singleton_labeled_tuple_type.ml", line 7, characters 26-27:
+File "singleton_labeled_tuple_type.ml", line 7, characters 19-26:
 7 | let foo (just_x : (x : int)) = just_x
-                              ^
-Error: Syntax error
+                       ^^^^^^^
+Error: vox: (x : ...) names a value and is only meaningful as a function parameter or around a refined type (ty{ ... })

@@ -293,7 +293,13 @@ and arg_label =
   | Position of string (** [label:[%call_pos] -> ...] *)
 
 and arrow_desc =
-  arg_label * Mode.Alloc.lr * Mode.Alloc.lr
+  arg_label * Mode.Alloc.lr * Mode.Alloc.lr * Ident.t option
+(** vox: the last component is the dependent-arrow binder, if any:
+    refinements in the codomain may reference it as an ordinary
+    [Refinement.Pvar].  Bound like [Tpoly] binds its univars: opened
+    by substitution at application and lambda sites; alpha-compared
+    via [Refinement.with_binder_pair] when two arrows are unified.
+    [None] whenever the codomain does not mention the parameter. *)
 
 (** [package] corresponds to the type of a first-class module *)
 and package =

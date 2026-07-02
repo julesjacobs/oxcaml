@@ -1,4 +1,0 @@
-File "err_refine_context.ml", line 11, characters 8-17:
-11 | let x = refine_ 3
-             ^^^^^^^^^
-Error: vox: refine_ needs a refined expected type; add a type annotation

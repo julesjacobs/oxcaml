@@ -66,6 +66,13 @@ val type_open:
 
 val valid_tyvar_name : string -> bool
 
+(* vox: while elaborating a type in [f], treat [name] in the
+   refinement at the TOP of the annotation [root] as the refined value
+   itself (like [_]); used for a pattern variable's own annotation,
+   [let f (x : int{x > 3}) = ...]. *)
+val vox_with_self_name :
+  root:Parsetree.core_type -> string -> (unit -> 'a) -> 'a
+
 (** [transl_label lbl ty] produces a Typedtree argument label for an argument
     with label [lbl] and type [ty].
 

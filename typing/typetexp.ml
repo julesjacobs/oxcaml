@@ -861,28 +861,51 @@ let type_open :
     ref =
   ref (fun ?used_slot:_ _ -> assert false)
 
-(* vox: dependent-arrow binders in scope during type elaboration,
-   innermost first.  Every arrow's codomain pushes an entry (the binder
-   name for a dependent arrow, "" for a plain one) so that a binder's
-   de Bruijn index equals the number of arrows between the predicate
-   and its arrow.  [vox_pi_pending] carries a binder name from the
-   [vox.pi] extension node to the arrow translation that consumes it. *)
-let vox_pi_binders : string list ref = ref []
-let vox_pi_pending : string option ref = ref None
+(* vox: names with special meaning inside refinement predicates during
+   type elaboration, innermost first.  A dependent arrow pushes its
+   binder ([Vox_pi], resolving to the [Ident] stored in the arrow's
+   [arrow_desc]) around its CODOMAIN; around a binder's own type -- the
+   domain of [(x : ty) -> ...], or the annotation in [let f (x : ty)] --
+   the name denotes the refined value itself ([Vox_self], resolving to
+   the bound variable, like [_]). *)
+type vox_scope_entry =
+  | Vox_pi of string * Ident.t
+  | Vox_self of string * Parsetree.core_type
+    (* the annotation's root: the name denotes the bound value ONLY in
+       the refinement at the top of its own annotation, not in nested
+       refinements (where it would silently denote a different
+       value). *)
 
-let vox_with_pi_binder name f =
-  vox_pi_binders := name :: !vox_pi_binders;
-  Fun.protect
-    ~finally:(fun () -> vox_pi_binders := List.tl !vox_pi_binders)
-    f
+let vox_scope : vox_scope_entry list ref = ref []
 
-let vox_find_pi_binder name =
-  let rec find i = function
-    | [] -> None
-    | n :: _ when String.equal n name && not (String.equal n "") -> Some i
-    | _ :: rest -> find (i + 1) rest
-  in
-  find 0 !vox_pi_binders
+(* vox: recognize the parser's named-type encoding [(x : ty)]. *)
+let vox_named_binder (sty : Parsetree.core_type) =
+  match sty.ptyp_desc with
+  | Ptyp_extension ({txt; _}, PTyp inner)
+    when String.length txt > 10
+         && String.equal (String.sub txt 0 10) "vox.named." ->
+      Some (String.sub txt 10 (String.length txt - 10), inner)
+  | _ -> None
+
+let vox_push_scope entry f =
+  vox_scope := entry :: !vox_scope;
+  Fun.protect ~finally:(fun () -> vox_scope := List.tl !vox_scope) f
+
+let vox_with_pi_binder binder f =
+  match binder with
+  | None -> f ()
+  | Some (name, id) -> vox_push_scope (Vox_pi (name, id)) f
+
+let vox_with_self_name ~root name f = vox_push_scope (Vox_self (name, root)) f
+
+let vox_find_scope ~self_root name =
+  List.find_map
+    (function
+      | Vox_pi (n, id) when String.equal n name -> Some (`Pi id)
+      | Vox_self (n, root) when String.equal n name ->
+          if root == self_root then Some `Self else None
+      | Vox_pi _ | Vox_self _ -> None)
+    !vox_scope
 
 (* vox: elaborate a refinement predicate (an untyped logical term) from
    its surface form.  [v] denotes the bound value variable; other
@@ -890,7 +913,8 @@ let vox_find_pi_binder name =
    de Bruijn parameter references), then to simple (non-module) value
    identifiers in [env].  The predicate is NOT type checked (DESIGN.md):
    ill-sorted predicates surface as solver errors at VC time. *)
-let rec elab_vox_pred ~bound env (e : Parsetree.expression) : Refinement.pred =
+let rec elab_vox_pred ~bound ~self_root env (e : Parsetree.expression)
+  : Refinement.pred =
   let open Refinement in
   let loc = e.pexp_loc in
   let unsupported () =
@@ -898,12 +922,14 @@ let rec elab_vox_pred ~bound env (e : Parsetree.expression) : Refinement.pred =
       "vox: unsupported form in a refinement predicate"
   in
   match e.pexp_desc with
-  | Pexp_ident {txt = Longident.Lident name; _} when String.equal name bound ->
+  | Pexp_ident {txt = Longident.Lident name; _}
+    when String.equal name bound || String.equal name "_" ->
       Pbound
   | Pexp_ident {txt = Longident.Lident name; _}
-    when vox_find_pi_binder name <> None ->
-      begin match vox_find_pi_binder name with
-      | Some i -> Pparam (i, name)
+    when vox_find_scope ~self_root name <> None ->
+      begin match vox_find_scope ~self_root name with
+      | Some (`Pi id) -> Pvar id
+      | Some `Self -> Pbound
       | None -> assert false
       end
   | Pexp_ident {txt = lid; _} ->
@@ -926,11 +952,11 @@ let rec elab_vox_pred ~bound env (e : Parsetree.expression) : Refinement.pred =
   | Pexp_apply
       ({pexp_desc = Pexp_ident {txt = Longident.Lident op; _}; _}, args) ->
       begin match op, args with
-      | "not", [(Nolabel, a)] -> Pnot (elab_vox_pred ~bound env a)
+      | "not", [(Nolabel, a)] -> Pnot (elab_vox_pred ~bound ~self_root env a)
       | "&&", [(Nolabel, a); (Nolabel, b)] ->
-          Pand (elab_vox_pred ~bound env a, elab_vox_pred ~bound env b)
+          Pand (elab_vox_pred ~bound ~self_root env a, elab_vox_pred ~bound ~self_root env b)
       | "||", [(Nolabel, a); (Nolabel, b)] ->
-          Por (elab_vox_pred ~bound env a, elab_vox_pred ~bound env b)
+          Por (elab_vox_pred ~bound ~self_root env a, elab_vox_pred ~bound ~self_root env b)
       | _, [(Nolabel, a); (Nolabel, b)] ->
           let binop =
             match op with
@@ -945,7 +971,7 @@ let rec elab_vox_pred ~bound env (e : Parsetree.expression) : Refinement.pred =
             | ">=" -> Ge
             | _ -> unsupported ()
           in
-          Pbinop (binop, elab_vox_pred ~bound env a, elab_vox_pred ~bound env b)
+          Pbinop (binop, elab_vox_pred ~bound ~self_root env a, elab_vox_pred ~bound ~self_root env b)
       | _ -> unsupported ()
       end
   | _ -> unsupported ()
@@ -981,21 +1007,39 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
       in
       ctyp desc typ
   | Ptyp_arrow _ ->
-      (* vox: a pending dependent-arrow binder applies to the first
-         arrow of this chain; every codomain pushes a scope entry so
-         de Bruijn indices count all arrows uniformly. *)
-      let vox_binder = !vox_pi_pending in
-      vox_pi_pending := None;
+      (* vox: a domain written [(x : ty)] makes this arrow dependent
+         with binder [x]: within [ty] itself, [x] denotes the refined
+         value; over the codomain, [x] denotes the parameter. *)
       let args, ret, ret_mode = extract_params styp in
-      let rec loop ~vox_first acc_mode args =
+      let rec loop acc_mode args =
         match args with
         | (l, arg_mode, arg) :: rest ->
           check_arg_type arg;
           let l = transl_label l (Some arg) in
+          let vox_binder, arg =
+            match vox_named_binder arg with
+            | Some (name, inner) -> Some name, inner
+            | None -> None, arg
+          in
+          (match vox_binder, l with
+           | Some _, (Optional _ | Position _) ->
+             (* An optional argument can be passed as the option
+                (wrapping/eliminating at the call site), so the binder
+                would not name the value the definition sees. *)
+             Location.raise_errorf ~loc:arg.ptyp_loc
+               "vox: a dependent binder is not supported on an optional \
+                or position parameter"
+           | _ -> ());
           let arg_cty =
             if Btype.is_position l then
               ctyp Ttyp_call_pos (newconstr Predef.path_lexing_position [])
-            else transl_type env ~policy ~row_context arg_mode.mode_modes arg
+            else
+              (match vox_binder with
+               | Some name ->
+                 vox_with_self_name ~root:arg name (fun () ->
+                   transl_type env ~policy ~row_context arg_mode.mode_modes arg)
+               | None ->
+                 transl_type env ~policy ~row_context arg_mode.mode_modes arg)
           in
           let acc_mode = curry_mode acc_mode arg_mode.mode_modes in
           let ret_mode =
@@ -1004,14 +1048,20 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
             | _ :: _ ->
               { mode_modes = acc_mode; mode_desc = [] }
           in
-          let vox_scope =
-            match vox_first, vox_binder with
-            | true, Some name -> name
-            | _ -> ""
+          let vox_arrow_binder =
+            match vox_binder with
+            | Some name ->
+                (* A [Scoped] ident: [Ident.same] never equates it with
+                   any [Local] program variable, so binder stamps
+                   marshalled through .cmis cannot collide with a
+                   consuming unit's variables (stamps are only
+                   process-local). *)
+                Some (name, Ident.create_scoped ~scope:Ident.lowest_scope name)
+            | None -> None
           in
           let ret_cty =
-            vox_with_pi_binder vox_scope (fun () ->
-              loop ~vox_first:false acc_mode rest)
+            vox_with_pi_binder vox_arrow_binder (fun () ->
+              loop acc_mode rest)
           in
           let arg_ty = arg_cty.ctyp_type in
           let arg_ty =
@@ -1028,7 +1078,16 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
           in
           let arg_mode_desc = Alloc.of_const arg_mode.mode_modes in
           let ret_mode_desc = Alloc.of_const ret_mode.mode_modes in
-          let arrow_desc = (l, arg_mode_desc, ret_mode_desc) in
+          (* Normalize: keep the binder only if the codomain actually
+             references it, so [(x:int) -> t] and [int -> t] are the
+             same type when [x] is unused. *)
+          let vox_stored_binder =
+            match vox_arrow_binder with
+            | Some (_, id) when Vox_dep.mentions_ident id ret_cty.ctyp_type ->
+                Some id
+            | _ -> None
+          in
+          let arrow_desc = (l, arg_mode_desc, ret_mode_desc, vox_stored_binder) in
           let ty =
             newty (Tarrow(arrow_desc, arg_ty, ret_cty.ctyp_type, commu_ok))
           in
@@ -1037,7 +1096,7 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
             ty
         | [] -> transl_type env ~policy ~row_context ret_mode.mode_modes ret
       in
-      loop ~vox_first:true mode args
+      loop mode args
   | Ptyp_tuple stl ->
     let desc, typ =
       transl_type_aux_tuple env ~loc ~policy ~row_context stl
@@ -1345,26 +1404,28 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
       let new_env = Env.enter_splice ~loc env in
       let cty = transl_type new_env ~policy ~row_context mode t in
       ctyp (Ttyp_splice cty) (newty (Tsplice cty.ctyp_type))
-  | Ptyp_extension ({txt = "vox.pi"; _}, payload) ->
-      (* vox dependent arrow [(x : ty) -> codomain]: re-elaborate as a
-         plain arrow with the binder pending; the arrow translation
-         pushes it around the codomain. *)
-      begin match payload with
-      | PTyp ({ptyp_desc = Ptyp_arrow (Labelled name, _, _, _, _); _} as arrow) ->
-          let arrow =
-            { arrow with
-              ptyp_desc =
-                (match arrow.ptyp_desc with
-                 | Ptyp_arrow (_, a, r, ma, mr) ->
-                     Ptyp_arrow (Nolabel, a, r, ma, mr)
-                 | _ -> assert false) }
-          in
-          vox_pi_pending := Some name;
-          transl_type env ~policy ~row_context mode arrow
-      | _ ->
-          Location.raise_errorf ~loc
-            "vox: malformed dependent-arrow payload"
-      end
+  | Ptyp_extension ({txt; _}, PTyp inner)
+    when String.length txt > 10
+         && String.equal (String.sub txt 0 10) "vox.named." ->
+      (* vox named type [(y : ty)] outside an arrow domain (domains are
+         consumed by the arrow translation above): [ty] must be
+         refined, and [y] names its bound value variable. *)
+      let name = String.sub txt 10 (String.length txt - 10) in
+      let is_refined =
+        match inner.ptyp_desc with
+        | Ptyp_extension ({txt = t; _}, _) ->
+            String.length t >= 10
+            && String.equal (String.sub t 0 10) "vox.refine"
+        | _ -> false
+      in
+      if not is_refined
+      then
+        Location.raise_errorf ~loc
+          "vox: (%s : ...) names a value and is only meaningful as a \
+           function parameter or around a refined type (ty{ ... })"
+          name;
+      vox_with_self_name ~root:inner name (fun () ->
+        transl_type env ~policy ~row_context mode inner)
   | Ptyp_extension ({txt = vox_ext; _}, payload)
     when String.length vox_ext >= 10
          && String.equal (String.sub vox_ext 0 10) "vox.refine" ->
@@ -1373,7 +1434,7 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
       let bound =
         if String.length vox_ext > 11
         then String.sub vox_ext 11 (String.length vox_ext - 11)
-        else "v"
+        else "_"
       in
       let pred_expr, skel_styp =
         match payload with
@@ -1388,15 +1449,11 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
       in
       let cty = transl_type env ~policy ~row_context mode skel_styp in
       let skel = cty.ctyp_type in
-      begin match get_desc (Ctype.expand_head env skel) with
-      | Tconstr (p, [], _)
-        when Path.same p Predef.path_int || Path.same p Predef.path_bool ->
-          ()
-      | _ ->
-          Location.raise_errorf ~loc
-            "vox: refinements are only supported at types int and bool"
-      end;
-      let pred = elab_vox_pred ~bound env pred_expr in
+      (* Refinements are allowed at every skeleton type: the solver
+         declares int as Int and bool as Bool, and everything else at a
+         single uninterpreted sort where equality is all the logic
+         knows (DESIGN.md). *)
+      let pred = elab_vox_pred ~bound ~self_root:styp env pred_expr in
       { cty with ctyp_type = newty (Trefine (skel, pred)) }
   | Ptyp_extension ext ->
       raise (Error_forward (Builtin_attributes.error_of_extension ext))

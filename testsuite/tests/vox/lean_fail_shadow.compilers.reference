@@ -1,6 +1,0 @@
-File "lean_fail_shadow.ml", line 15, characters 10-11:
-15 |   refine_ a
-               ^
-Error: vox: verification failed (lean).
-       Goal: a > 0
-(lean: error: `grind` failed)

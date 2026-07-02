@@ -130,41 +130,176 @@ let in_scope ctx id =
 let pred_in_scope ctx p = List.for_all (in_scope ctx) (Refinement.free_vars p)
 
 let emit_vc ~loc ~ctx ~goal ~assumed =
-  (* Leftover dependent-arrow parameters: a fact still mentioning one
-     is dropped (sound: fewer hypotheses); a goal still mentioning one
-     cannot be discharged and is an error (v0: this arises when a
-     lambda body is checked directly against a dependent arrow, which
-     is not yet supported -- define such functions with assume_). *)
-  if (not assumed) && Refinement.max_param goal >= 0
-  then
-    Location.raise_errorf ~loc
-      "vox: this obligation mentions a dependent-arrow parameter, which is \
-       not supported here yet (define the function with assume_, or apply \
-       it to variables)";
+  (* Facts mentioning out-of-scope stamps (including any dependent
+     binder a substitution failed to open) are dropped (sound: fewer
+     hypotheses); such goals cannot be discharged and are errors. *)
   if (not assumed) && not (pred_in_scope ctx goal)
   then
     Location.raise_errorf ~loc
       "vox: this obligation mentions a variable that has escaped its scope";
-  let facts =
-    List.filter
-      (fun f -> Refinement.max_param f < 0 && pred_in_scope ctx f)
-      ctx.cfacts
-  in
+  let facts = List.filter (pred_in_scope ctx) ctx.cfacts in
   vcs := { vc_loc = loc; vc_facts = facts; vc_goal = goal; vc_assumed = assumed } :: !vcs
+;;
+
+(* Escaped refinements (DESIGN: "escape is an error").  A binder's type
+   may not carry refinements mentioning program variables that are not
+   in scope at the binding: the same stamp can name a different value
+   at another point (recursion re-binds it; unification propagates
+   types across scopes), so such facts would be unsound.  At the module
+   level the rule is stricter: refinements in exported types may
+   mention no program variables at all (predicates in .cmis are
+   self-contained; stamps do not survive a compilation unit).
+   Dependent-arrow binders are exempt where the type itself binds them
+   ([iter_refinement_preds] reports them as [bound]). *)
+type escape_mode =
+  | Module_level
+  | In_scope of ctx * Ident.t list (* extra idents treated as in scope *)
+
+let check_type_escapes ~loc ~what mode ty =
+  Vox_dep.iter_refinement_preds ty (fun ~bound p ->
+    List.iter
+      (fun v ->
+        let bad =
+          if List.exists (Ident.same v) bound
+          then false
+          else (
+            match mode with
+            | Module_level -> true
+            | In_scope (ctx, extra) ->
+              not (in_scope ctx v || List.exists (Ident.same v) extra))
+        in
+        if bad
+        then
+          Location.raise_errorf ~loc
+            "vox: the type of %s carries a refinement mentioning %s, which \
+             %s; annotate with a dependent arrow ((%s : ...) -> ...) or a \
+             self-contained refinement"
+            what
+            (Ident.name v)
+            (match mode with
+             | Module_level -> "may not appear in a module-level type"
+             | In_scope _ -> "is not in scope here")
+            (Ident.name v))
+      (Refinement.free_vars p))
+;;
+
+let check_binder_escape ~toplevel ctx ~extra_scope (pat : _ general_pattern) id ty =
+  let mode = if toplevel then Module_level else In_scope (ctx, extra_scope) in
+  check_type_escapes ~loc:pat.pat_loc ~what:(Ident.name id) mode ty
+;;
+
+(* Backstop for binders the walker does not model (inside local or
+   nested module structures, try handlers, letops, ...): they
+   contribute no facts, but their types must still be escape-checked --
+   a stored closure typed with another activation's variable would
+   otherwise smuggle false facts (the pattern's own binders count as in
+   scope; siblings bound by the unmodeled construct do not, which is
+   conservative). *)
+let backstop_pat : type k. ctx -> k general_pattern -> unit =
+  fun ctx pat ->
+  let bound = pat_bound_idents pat in
+  List.iter
+    (fun (id, _, ty, _, _) ->
+      check_binder_escape ~toplevel:false ctx ~extra_scope:bound pat id ty)
+    (pat_bound_idents_full pat)
+;;
+
+(* Module-level self-containment, applied to a whole signature
+   (implementation, interface, or toplevel phrase): every refinement
+   reachable from any exported item -- values, type manifests, record
+   fields, constructor arguments, extension constructors, submodules,
+   module types, classes -- must be free of program variables.  This is
+   what makes .cmi predicates self-contained: stamps do not survive a
+   compilation unit, so an imported [Pvar] can collide with an
+   unrelated local stamp and prove false facts. *)
+let rec check_signature (sg : Types.signature) =
+  List.iter check_signature_item sg
+
+and check_signature_item (item : Types.signature_item) =
+  let check ~loc ~what ty = check_type_escapes ~loc ~what Module_level ty in
+  let check_constructor_arguments ~what = function
+    | Types.Cstr_tuple args ->
+      List.iter
+        (fun (ca : Types.constructor_argument) ->
+          check ~loc:ca.ca_loc ~what ca.ca_type)
+        args
+    | Types.Cstr_record lbls ->
+      List.iter
+        (fun (ld : Types.label_declaration) ->
+          check ~loc:ld.ld_loc ~what ld.ld_type)
+        lbls
+  in
+  match item with
+  | Sig_value (id, vd, _) ->
+    check ~loc:vd.val_loc ~what:(Ident.name id) vd.val_type
+  | Sig_type (id, decl, _, _) ->
+    let what = "type " ^ Ident.name id in
+    Option.iter (check ~loc:decl.type_loc ~what) decl.type_manifest;
+    (match decl.type_kind with
+     | Type_abstract _ | Type_open -> ()
+     | Type_record (lbls, _, _) | Type_record_unboxed_product (lbls, _, _) ->
+       List.iter
+         (fun (ld : Types.label_declaration) ->
+           check ~loc:ld.ld_loc ~what ld.ld_type)
+         lbls
+     | Type_variant (cds, _, _) ->
+       List.iter
+         (fun (cd : Types.constructor_declaration) ->
+           check_constructor_arguments ~what cd.cd_args)
+         cds)
+  | Sig_typext (id, ext, _, _) ->
+    check_constructor_arguments ~what:(Ident.name id) ext.ext_args
+  | Sig_module (_, _, md, _, _) -> check_module_type md.md_type
+  | Sig_modtype (_, mtd, _) -> Option.iter check_module_type mtd.mtd_type
+  | Sig_class (id, cd, _, _) ->
+    check_class_type ~loc:cd.cty_loc ~what:(Ident.name id) cd.cty_type
+  | Sig_class_type (id, ctd, _, _) ->
+    check_class_type ~loc:ctd.clty_loc ~what:(Ident.name id) ctd.clty_type
+  | Sig_jkind _ -> ()
+
+and check_module_type = function
+  | Mty_ident _ | Mty_alias _ -> ()
+  | Mty_signature sg -> check_signature sg
+  | Mty_functor (param, res, _) ->
+    (match param with
+     | Unit -> ()
+     | Named (_, mty, _) -> check_module_type mty);
+    check_module_type res
+  | Mty_strengthen (mty, _, _) -> check_module_type mty
+
+and check_class_type ~loc ~what = function
+  | Cty_constr (_, args, cty) ->
+    List.iter (check_type_escapes ~loc ~what Module_level) args;
+    check_class_type ~loc ~what cty
+  | Cty_signature csig ->
+    check_type_escapes ~loc ~what Module_level csig.csig_self;
+    Vars.iter
+      (fun _ (_, _, ty) -> check_type_escapes ~loc ~what Module_level ty)
+      csig.csig_vars
+  | Cty_arrow (_, ty, cty) ->
+    check_type_escapes ~loc ~what Module_level ty;
+    check_class_type ~loc ~what cty
 ;;
 
 (* Extend the context at a binding pattern: new stamps come into scope;
    refined binders contribute their facts (plus the scrutinee's
    refinement for unpack patterns). *)
-let extend_pat : type k. ?scrut:type_expr -> Env.t -> ctx -> k general_pattern -> ctx =
-  fun ?scrut env ctx pat ->
+let extend_pat
+  : type k. ?toplevel:bool -> ?scrut:type_expr -> Env.t -> ctx -> k general_pattern -> ctx
+  =
+  fun ?(toplevel = false) ?scrut env ctx pat ->
+  let bound = pat_bound_idents pat in
+  List.iter
+    (fun (id, _, ty, _, _) ->
+      check_binder_escape ~toplevel ctx ~extra_scope:bound pat id ty)
+    (pat_bound_idents_full pat);
   let unpack =
     match scrut with
     | Some s -> unpack_fact env pat ~scrut:s
     | None -> []
   in
   { cfacts = unpack @ binder_facts env pat @ ctx.cfacts
-  ; cscope = pat_bound_idents pat @ ctx.cscope
+  ; cscope = bound @ ctx.cscope
   }
 ;;
 
@@ -235,9 +370,18 @@ let rec walk_expr env ctx (e : expression) =
            walk_expr env ctx'' c.c_rhs)
          fc_cases)
   | _ ->
-    (* Generic traversal of children under the same context. *)
+    (* Generic traversal of children under the same context.  Patterns
+       reached this way belong to constructs the walker does not model
+       (try handlers, letops, local module structures, ...); they are
+       escape-checked but contribute no facts. *)
     let it =
-      { Tast_iterator.default_iterator with expr = (fun _ e' -> walk_expr env ctx e') }
+      { Tast_iterator.default_iterator with
+        expr = (fun _ e' -> walk_expr env ctx e')
+      ; pat =
+          (fun sub (type k) (p : k general_pattern) ->
+            backstop_pat ctx p;
+            Tast_iterator.default_iterator.pat sub p)
+      }
     in
     Tast_iterator.default_iterator.expr it e
 ;;
@@ -245,18 +389,35 @@ let rec walk_expr env ctx (e : expression) =
 (* ------------------------------------------------------------------ *)
 (* SMT-LIB2 serialization *)
 
-let smt_name id = "|" ^ Ident.unique_name id ^ "|"
+(* SMT-LIB2 quoted symbols may contain any character except '|' and
+   '\'; operator identifiers (e.g. [( || )]) would otherwise break the
+   quoting.  Replacement cannot collide: [Ident.unique_name] includes
+   the stamp, and distinct idents never share one. *)
+let smt_name id =
+  let s =
+    String.map
+      (fun c ->
+        match c with
+        | '|' | '\\' -> '_'
+        | _ -> c)
+      (Ident.unique_name id)
+  in
+  "|" ^ s ^ "|"
+;;
 
 let rec smt_of_pred buf (p : Refinement.pred) =
   let open Refinement in
   match p with
   | Pbound -> assert false (* always substituted before discharge *)
-  | Pparam _ -> assert false (* guarded in emit_vc *)
   | Pvar id -> Buffer.add_string buf (smt_name id)
   | Pint n ->
     if n >= 0
     then Buffer.add_string buf (Int.to_string n)
-    else Buffer.add_string buf (Printf.sprintf "(- %d)" (-n))
+    else (
+      (* Strip the sign rather than negating: [-min_int] overflows. *)
+      let s = Int.to_string n in
+      Buffer.add_string buf
+        (Printf.sprintf "(- %s)" (String.sub s 1 (String.length s - 1))))
   | Pbool b -> Buffer.add_string buf (Bool.to_string b)
   | Pbinop (Neq, a, b) ->
     Buffer.add_string buf "(not (= ";
@@ -433,7 +594,7 @@ let boolish p =
     (match Hashtbl.find_opt name_sorts id with
      | Some S_bool -> true
      | _ -> false)
-  | Pbound | Pparam _ | Pint _ | Pbinop ((Add | Sub | Mul), _, _) -> false
+  | Pbound | Pint _ | Pbinop ((Add | Sub | Mul), _, _) -> false
 ;;
 
 let rec lean_of_pred buf (p : Refinement.pred) =
@@ -447,7 +608,6 @@ let rec lean_of_pred buf (p : Refinement.pred) =
   in
   match p with
   | Pbound -> assert false
-  | Pparam _ -> assert false
   | Pvar id -> Buffer.add_string buf (lean_name id)
   | Pint n ->
     if n >= 0
@@ -520,7 +680,12 @@ let lean_file vcs =
   let first_line = if needs_voxu then 2 else 1 in
   if needs_voxu then Buffer.add_string buf "opaque VoxU : Type\n";
   List.iteri (fun i vc -> lean_theorem buf i vc) vcs;
-  Buffer.contents buf, fun line -> List.nth_opt vcs (line - first_line)
+  ( Buffer.contents buf,
+    fun line ->
+      (* An error on the preamble line maps to no VC (and a negative
+         index would make [List.nth_opt] raise). *)
+      if line < first_line then None else List.nth_opt vcs (line - first_line)
+  )
 ;;
 
 let run_lean vcs =
@@ -550,9 +715,11 @@ let run_lean vcs =
           let ic = open_in out_file in
           let error_line = ref None in
           let msg = ref "" in
+          let first_output = ref "" in
           (try
              while true do
                let l = input_line ic in
+               if String.equal !first_output "" then first_output := l;
                match !error_line with
                | None ->
                  (match String.index_opt l ':' with
@@ -579,32 +746,42 @@ let run_lean vcs =
            with
            | End_of_file -> ());
           close_in ic;
-          let vc =
-            match !error_line with
-            | Some line ->
-              (match vc_of_line line with
-               | Some vc -> vc
-               | None -> first)
-            | None -> first
-          in
-          (* Strip the (nondeterministic) temp-file prefix from the
-             message; keep from "error:" onward. *)
-          let msg =
-            let m = !msg in
-            let needle = "error:" in
-            let rec find i =
-              if i + String.length needle > String.length m
-              then m
-              else if String.equal (String.sub m i (String.length needle)) needle
-              then String.sub m i (String.length m - i)
-              else find (i + 1)
+          match !error_line with
+          | None ->
+            (* No per-theorem diagnostic: the solver itself failed
+               (missing binary, crash, bad flags).  Blaming a VC would
+               hide the real cause. *)
+            Location.raise_errorf ~loc:first.vc_loc
+              "vox: verification failed (lean solver error, exit %d): %s"
+              status
+              (if String.equal !first_output ""
+               then "<no output>"
+               else !first_output)
+          | Some line ->
+            let vc =
+              match vc_of_line line with
+              | Some vc -> vc
+              | None -> first
             in
-            find 0
-          in
-          Location.raise_errorf ~loc:vc.vc_loc
-            "vox: verification failed (lean).@ Goal: %s%s"
-            (Refinement.to_string vc.vc_goal)
-            (if String.equal msg "" then "" else "\n(lean: " ^ msg ^ ")")
+            (* Strip the (nondeterministic) temp-file prefix from the
+               message; keep from "error:" onward. *)
+            let msg =
+              let m = !msg in
+              let needle = "error:" in
+              let rec find i =
+                if i + String.length needle > String.length m
+                then m
+                else if
+                  String.equal (String.sub m i (String.length needle)) needle
+                then String.sub m i (String.length m - i)
+                else find (i + 1)
+              in
+              find 0
+            in
+            Location.raise_errorf ~loc:vc.vc_loc
+              "vox: verification failed (lean).@ Goal: %s%s"
+              (Refinement.to_string vc.vc_goal)
+              (if String.equal msg "" then "" else "\n(lean: " ^ msg ^ ")")
         end)
 ;;
 
@@ -676,6 +853,17 @@ let uses_vox (str : structure) =
         && String.equal (String.sub a.attr_name.txt 0 4) "vox.")
       attrs
   in
+  (* A structural (no-expansion) check: a binder can have a refined type
+     with no vox syntax of its own (e.g. it was bound to a refined value
+     from another phrase or module) and must still contribute facts and
+     be escape-checked.  Aliases hiding a [Trefine] behind [Tconstr] are
+     missed; expanding here would mutate the types of programs that
+     never opted into vox, which this gate exists to prevent. *)
+  let type_has_refine ty =
+    let refined = ref false in
+    Vox_dep.iter_refinement_preds ty (fun ~bound:_ _ -> refined := true);
+    !refined
+  in
   let it =
     { Tast_iterator.default_iterator with
       expr =
@@ -684,7 +872,8 @@ let uses_vox (str : structure) =
           Tast_iterator.default_iterator.expr sub e)
     ; pat =
         (fun sub (type k) (p : k general_pattern) ->
-          if has_vox p.pat_attributes then found := true;
+          if has_vox p.pat_attributes || type_has_refine p.pat_type
+          then found := true;
           Tast_iterator.default_iterator.pat sub p)
     }
   in
@@ -692,29 +881,77 @@ let uses_vox (str : structure) =
   !found
 ;;
 
-let check_implementation (str : structure) =
+let walk_items (str : structure) ctx =
+  List.iter
+    (fun item ->
+      match item.str_desc with
+      | Tstr_value (_rec_flag, vbs) ->
+        List.iter (fun vb -> walk_expr str.str_final_env !ctx vb.vb_expr) vbs;
+        ctx
+        := List.fold_left
+             (fun ctx vb ->
+               extend_pat ~toplevel:true str.str_final_env ctx vb.vb_pat)
+             !ctx
+             vbs
+      | _ ->
+        let it =
+          { Tast_iterator.default_iterator with
+            expr = (fun _ e -> walk_expr str.str_final_env !ctx e)
+          ; pat =
+              (fun sub (type k) (p : k general_pattern) ->
+                backstop_pat !ctx p;
+                Tast_iterator.default_iterator.pat sub p)
+          }
+        in
+        it.structure_item it item)
+    str.str_items
+;;
+
+let check_implementation (str : structure) (sg : Types.signature) =
+  (* The signature check is unconditional: a refined type can appear in
+     an exported item (a type manifest, an exception, an external) with
+     no vox syntax in any expression, and it must still be
+     self-contained.  It only reads types structurally, so it cannot
+     perturb programs that never use vox. *)
+  check_signature sg;
   if not (uses_vox str)
   then ()
   else (
     reset ();
     let ctx = ref { cfacts = []; cscope = [] } in
-    List.iter
-      (fun item ->
-        match item.str_desc with
-        | Tstr_value (_rec_flag, vbs) ->
-          List.iter (fun vb -> walk_expr str.str_final_env !ctx vb.vb_expr) vbs;
-          ctx
-          := List.fold_left
-               (fun ctx vb -> extend_pat str.str_final_env ctx vb.vb_pat)
-               !ctx
-               vbs
-        | _ ->
-          let it =
-            { Tast_iterator.default_iterator with
-              expr = (fun _ e -> walk_expr str.str_final_env !ctx e)
-            }
-          in
-          it.structure_item it item)
-      str.str_items;
+    walk_items str ctx;
     discharge ())
+;;
+
+(* Toplevel entry point (also the expect-test runner): phrases arrive one at a
+   time, so the logical context persists across phrases, mirroring how facts
+   accumulate down the items of an implementation.  Skipping is per-session
+   rather than per-phrase: once any phrase has used vox, later phrases are
+   walked even without vox attributes of their own, so that their toplevel
+   binders (which may carry refinements copied from earlier phrases)
+   contribute facts. *)
+let toplevel_ctx = ref { cfacts = []; cscope = [] }
+let toplevel_active = ref false
+
+let check_toplevel_phrase (str : structure) ~(sig_acc : Types.signature)
+      (sg : Types.signature) =
+  (* [sig_acc] (the session's accumulated signature) is re-checked on
+     every phrase: typing this phrase can instantiate a weak type
+     variable in an EARLIER phrase's signature with a refined type
+     mentioning one of this phrase's variables -- e.g. a stored closure
+     in a module-wrapped cell -- which phrase-local checks miss. *)
+  check_signature sig_acc;
+  check_signature sg;
+  if !toplevel_active || uses_vox str
+  then (
+    toplevel_active := true;
+    vcs := [];
+    let ctx = ref !toplevel_ctx in
+    walk_items str ctx;
+    (* Discharge before committing the phrase's facts: if verification
+       fails, the toplevel backtracks the phrase, so its bindings never
+       exist and their facts (e.g. a refuted contradictory refinement)
+       must not be available to later phrases. *)
+    discharge ();
+    toplevel_ctx := !ctx)
 ;;

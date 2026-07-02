@@ -3921,8 +3921,16 @@ and type_pat_aux
       | Some sty ->
         let type_modes = Typemode.transl_alloc_mode ms in
         let cty, ty, expected_ty' =
-          solve_Ppat_constraint tps loc !!penv type_modes.mode_modes sty
-            expected_ty
+          (* vox: in [(x : ty)], refinements in [ty] may name [x] for
+             the refined value itself. *)
+          let solve () =
+            solve_Ppat_constraint tps loc !!penv type_modes.mode_modes sty
+              expected_ty
+          in
+          (match sp_constrained.ppat_desc with
+           | Ppat_var name ->
+               Typetexp.vox_with_self_name ~root:sty name.txt solve
+           | _ -> solve ())
         in
         let p =
           type_pat ~alloc_mode tps category sp_constrained expected_ty' sort
@@ -3992,6 +4000,14 @@ and type_pat_aux
                 attr_payload = PStr [];
                 attr_loc = loc }
               :: p.pat_attributes }
+      | Tvar _ ->
+          (* The pattern was typed before the scrutinee (this happens
+             at the structure level, where the let-into-match rewrite
+             that types the scrutinee first does not apply). *)
+          Location.raise_errorf ~loc
+            "vox: cannot determine the scrutinee's refined type here; \
+             unpack inside an expression ([let refine_ x = e in ...]) \
+             or bind with the refined type annotated instead"
       | _ ->
           Location.raise_errorf ~loc
             "vox: a refine_ pattern requires the scrutinee to have a \
@@ -4618,7 +4634,7 @@ let rec list_labels_aux env visited ls ty_fun =
   if TypeSet.mem ty visited then
     List.rev ls, false
   else match get_desc ty with
-    | Tarrow ((l,_,_), _, ty_res, _) ->
+    | Tarrow ((l,_,_,_), _, ty_res, _) ->
         list_labels_aux env (TypeSet.add ty visited) (l::ls) ty_res
     | _ ->
         List.rev ls, is_Tvar ty
@@ -4822,7 +4838,7 @@ let remaining_function_type_for_error ty_ret mode_ret rev_args =
          | Arg (Eliminated_optional_arg
                   { mode_fun; ty_arg; mode_arg; level; _ })
          | Omitted { mode_fun; ty_arg; mode_arg; level } ->
-             let arrow_desc = lbl, mode_arg, mode_ret in
+             let arrow_desc = lbl, mode_arg, mode_ret, None in
              let ty_ret =
                newty2 ~level
                  (Tarrow (arrow_desc, ty_arg, ty_ret, commu_ok))
@@ -4884,7 +4900,7 @@ let collect_unknown_apply_args env funct ty_fun0 mode_fun rev_args sargs
                   Warnings.Ignored_extra_argument;
               let mode_arg = Alloc.newvar () in
               let mode_ret = Alloc.newvar () in
-              let kind = (lbl, mode_arg, mode_ret) in
+              let kind = (lbl, mode_arg, mode_ret, None) in
               begin try
                 unify env ty_fun
                   (newty (Tarrow(kind,ty_arg,ty_res,commu_var ())));
@@ -4903,7 +4919,7 @@ let collect_unknown_apply_args env funct ty_fun0 mode_fun rev_args sargs
                               { some_args_ok; ty_fun; jkind }))
               end;
               (sort_arg, mode_arg, ty_arg_mono, mode_ret, ty_res)
-        | Tarrow ((l, mode_arg, mode_ret), ty_arg, ty_res, _)
+        | Tarrow ((l, mode_arg, mode_ret, _), ty_arg, ty_res, _)
           when labels_match ~param:l ~arg:lbl ->
             let sort_arg =
               match
@@ -4940,6 +4956,50 @@ let collect_unknown_apply_args env funct ty_fun0 mode_fun rev_args sargs
         loop ty_res mode_ret ((lbl, Arg arg) :: rev_args) rest
   in
   loop ty_fun0 mode_fun rev_args sargs
+
+(* vox: open a dependent arrow at its application site, like
+   [instance_poly] opens a [Tpoly]: the argument must syntactically be
+   a variable (whose stamp is known without typing it), and the binder
+   is substituted by that stamp throughout the remaining type -- so
+   later parameter types and the result are instantiated before any
+   argument expression is typechecked.  A missing argument for a
+   dependent parameter cannot be named and is an error. *)
+let vox_open_dependent_arrow env binder ~sarg_opt ~app_loc ty_ret ty_ret0 =
+  match binder with
+  | None -> ty_ret, ty_ret0
+  | Some b ->
+    match sarg_opt with
+    | None ->
+      Location.raise_errorf ~loc:app_loc
+        "vox: a dependent parameter cannot be omitted"
+    | Some (sarg : Parsetree.expression) ->
+      let let_bind () =
+        Location.raise_errorf ~loc:sarg.pexp_loc
+          "vox: the argument for a dependent parameter must be a variable \
+           (let-bind it first)"
+      in
+      match sarg.pexp_desc with
+      | Pexp_ident lid ->
+        (match Env.lookup_value ~use:false ~loc:sarg.pexp_loc lid.txt env with
+         | (Path.Pident id, _, _) ->
+           let by = Refinement.Pvar id in
+           let ty_ret' = Vox_dep.subst_binder b ~by ty_ret in
+           (* [subst_binder] does not rebuild objects, polymorphic
+              variants or packages; a binder left behind there would
+              dangle (its facts silently dropped), so reject. *)
+           if Vox_dep.mentions_ident b ty_ret'
+           then
+             Location.raise_errorf ~loc:app_loc
+               "vox: this dependent parameter occurs under a type the \
+                substitution cannot reach (an object, polymorphic \
+                variant, or first-class module); this is not supported";
+           ty_ret', Vox_dep.subst_binder b ~by ty_ret0
+         | _ -> let_bind ()
+         | exception _ ->
+           (* Unbound: skip the substitution and let the argument's own
+              typing report the error. *)
+           ty_ret, ty_ret0)
+      | _ -> let_bind ()
 
 (* See Note [Type-checking applications] for an overview *)
 let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
@@ -4979,7 +5039,7 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
         ret_tvar
     | Some (ad, arrow_kind) ->
       begin
-        let (l, mode_arg, mode_ret) = ad in
+        let (l, mode_arg, mode_ret, vox_binder) = ad in
         let name = label_name l
         and optional = is_optional l
         and omittable = is_omittable l in
@@ -5064,6 +5124,14 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
                   Omitted { mode_fun; ty_arg; mode_arg; level = lv; sort_arg }
                 end
             in
+            let ty_ret, ty_ret0 =
+              vox_open_dependent_arrow env vox_binder
+                ~sarg_opt:
+                  (match arg_opt with
+                   | Some (sarg, _, ~commuted:_) -> Some sarg
+                   | None -> None)
+                ~app_loc:funct.exp_loc ty_ret ty_ret0
+            in
             loop ty_ret ty_ret0 mode_ret ((l, arg) :: rev_args) remaining_sargs
           end
   in
@@ -5081,7 +5149,7 @@ let type_omitted_parameters_and_build_result_type expected_mode env loc ty_ret
              let args = (lbl, Arg (exp, sort), sch) :: args in
              (ty_ret, mode_ret, open_args, closed_args, args)
          | Omitted { mode_fun; ty_arg; mode_arg; level; sort_arg } ->
-             let arrow_desc = (lbl, mode_arg, mode_ret) in
+             let arrow_desc = (lbl, mode_arg, mode_ret, None) in
              let sort_ret =
                match type_sort ~why:Function_result ~fixed:false env ty_ret with
                | Ok sort -> sort
@@ -5513,7 +5581,7 @@ let rec approx_type env sty =
         let ret = approx_type env sty in
         let marg = Alloc.of_const arg_mode.mode_modes in
         let mret = Alloc.newvar () in
-        newty (Tarrow ((p,marg,mret), arg_ty.ctyp_type, ret, commu_ok))
+        newty (Tarrow ((p,marg,mret,None), arg_ty.ctyp_type, ret, commu_ok))
       end
   | Ptyp_arrow (p, arg_sty, sty, arg_mode, _) ->
       let arg_mode = Typemode.transl_alloc_mode arg_mode in
@@ -5526,7 +5594,7 @@ let rec approx_type env sty =
       let ret = approx_type env sty in
       let marg = Alloc.of_const arg_mode.mode_modes in
       let mret = Alloc.newvar () in
-      newty (Tarrow ((p,marg,mret), newmono arg, ret, commu_ok))
+      newty (Tarrow ((p,marg,mret,None), newmono arg, ret, commu_ok))
   | Ptyp_tuple args ->
       newty (Ttuple (List.map (fun (l, t) -> l, approx_type env t) args))
   | Ptyp_constr (lid, ctl) ->
@@ -6079,10 +6147,10 @@ type apply_prim =
   | Revapply
 let check_apply_prim_type prim typ =
   match get_desc typ with
-  | Tarrow ((Nolabel,_,_),a,b,_) when tpoly_is_mono a ->
+  | Tarrow ((Nolabel,_,_,_),a,b,_) when tpoly_is_mono a ->
       let a = tpoly_get_mono a in
       begin match get_desc b with
-      | Tarrow((Nolabel,_,_),c,d,_) when tpoly_is_mono c ->
+      | Tarrow((Nolabel,_,_,_),c,d,_) when tpoly_is_mono c ->
           let c = tpoly_get_mono c in
           let f, x, res =
             match prim with
@@ -6090,7 +6158,7 @@ let check_apply_prim_type prim typ =
             | Revapply -> c, a, d
           in
           begin match get_desc f with
-          | Tarrow((Nolabel,_,_),fl,fr,_) ->
+          | Tarrow((Nolabel,_,_,_),fl,fr,_) ->
               let fl = tpoly_get_mono fl in
               is_Tvar fl && is_Tvar fr && is_Tvar x && is_Tvar res
               && Types.eq_type fl x && Types.eq_type fr res
@@ -6352,6 +6420,18 @@ and type_function_ret_info =
   }
 
 (* value binding elaboration *)
+
+(* vox: a [let x : ty = e] binding elaborates its annotation twice (on
+   the pattern and on the synthesized [(e : ty)] constraint); both must
+   see the same self-name scope so [x] in the top refinement of [ty]
+   denotes the bound value on both sides.  Root-identity keeps this
+   from reaching any other annotation typed within [f]. *)
+let vox_with_binding_self (vb : Parsetree.value_binding) f =
+  match vb.pvb_pat.ppat_desc, vb.pvb_constraint with
+  | Ppat_var name,
+    Some (Pvc_constraint { locally_abstract_univars = []; typ }) ->
+      Typetexp.vox_with_self_name ~root:typ name.txt f
+  | _ -> f ()
 
 let vb_exp_constraint {pvb_expr=expr; pvb_pat=pat; pvb_constraint=ct; pvb_modes=modes; _ } =
   let open Ast_helper in
@@ -7000,10 +7080,11 @@ and type_expect_
     when turn_let_into_match spat ->
       (* TODO: allow non-empty attributes? *)
       let sval = vb_exp_constraint vb in
-      type_expect env expected_mode
-        {sexp with
-         pexp_desc = Pexp_match (sval, [Ast_helper.Exp.case spat sbody])}
-        ty_expected_explained
+      vox_with_binding_self vb (fun () ->
+        type_expect env expected_mode
+          {sexp with
+           pexp_desc = Pexp_match (sval, [Ast_helper.Exp.case spat sbody])}
+          ty_expected_explained)
   | Pexp_let(mutable_flag, rec_flag, spat_sexp_list, sbody) ->
       let is_bor, spat_sexp_list =
         List.fold_left_map
@@ -8354,7 +8435,7 @@ and type_expect_
             loop slet.pbop_pat (newvar initial_jkind) initial_sort sands
           in
           let ty_func_result, body_sort = new_rep_var ~why:Function_result () in
-          let arrow_desc = Nolabel, Alloc.legacy, Alloc.legacy in
+          let arrow_desc = Nolabel, Alloc.legacy, Alloc.legacy, None in
           let ty_func =
             newty (Tarrow(arrow_desc, newmono ty_params, ty_func_result,
                           commu_ok))
@@ -9261,7 +9342,8 @@ and type_function
           { mode_modes = Alloc.Const.Option.none; mode_desc = [] }
       in
       let env,
-          { filtered_arrow = { ty_arg; arg_mode; ty_ret; ret_mode };
+          { filtered_arrow =
+              { ty_arg; arg_mode; ty_ret; ret_mode; arrow_binder };
             arg_sort; ret_sort;
             ty_arg_mono; expected_pat_mode; expected_inner_mode;
             alloc_mode; really_poly
@@ -9324,6 +9406,35 @@ and type_function
           ~type_body:begin
             fun () pat ~when_env:_ ~ext_env ~cont:_ ~ty_expected ~ty_infer:_
               ~contains_gadt:param_contains_gadt ->
+              (* vox: open the dependent arrow at its definition site,
+                 like [instance_poly_fixed] opens a [Tpoly]: the rest of
+                 the expected type is checked with the binder replaced
+                 by the just-bound parameter's stamp.  Non-destructive:
+                 the closed type (and hence the function's interface)
+                 is untouched. *)
+              let ty_expected =
+                match arrow_binder with
+                | None -> ty_expected
+                | Some b ->
+                  (match pat.pat_desc with
+                   | Tpat_var { id; _ } ->
+                     let ty' =
+                       Vox_dep.subst_binder b ~by:(Refinement.Pvar id)
+                         ty_expected
+                     in
+                     if Vox_dep.mentions_ident b ty'
+                     then
+                       Location.raise_errorf ~loc:pat.pat_loc
+                         "vox: this dependent parameter occurs under a \
+                          type the substitution cannot reach (an object, \
+                          polymorphic variant, or first-class module); \
+                          this is not supported";
+                     ty'
+                   | _ ->
+                     Location.raise_errorf ~loc:pat.pat_loc
+                       "vox: a dependent parameter must be bound to a \
+                        variable pattern")
+              in
               let { function_ = _, params_suffix, body;
                     newtypes; params_contain_gadt = suffix_contains_gadt;
                     fun_alloc_mode; ret_info;
@@ -9381,7 +9492,8 @@ and type_function
         instance
           (newgenty
              (Tarrow
-                ((typed_arg_label, arg_mode, ret_mode), ty_arg, ty_ret, commu_ok)))
+                ((typed_arg_label, arg_mode, ret_mode, arrow_binder),
+                 ty_arg, ty_ret, commu_ok)))
       in
       (* This is quadratic, as it operates over the entire tail of the
          type for each new parameter. Now that functions are n-ary, we
@@ -9977,15 +10089,15 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
     let lv = get_level expty in
     let lv' = get_level expty' in
     match get_desc expty', get_desc expty with
-    | Tarrow((l, marg, mret), ty_arg', ty_res', _),
+    | Tarrow((l, marg, mret, vbinder), ty_arg', ty_res', _),
       Tarrow(_, ty_arg,  ty_res,  _)
       when lv' = generic_level || not !Clflags.principal ->
       let ty_res', ty_res, changed = loosen_arrow_modes ty_res' ty_res in
       let mret, changed' = Alloc.newvar_below mret in
       let marg, changed'' = Alloc.newvar_above marg in
       if changed || changed' || changed'' then
-        newty2 ~level:lv' (Tarrow((l, marg, mret), ty_arg', ty_res', commu_ok)),
-        newty2 ~level:lv  (Tarrow((l, marg, mret), ty_arg,  ty_res,  commu_ok)),
+        newty2 ~level:lv' (Tarrow((l, marg, mret, vbinder), ty_arg', ty_res', commu_ok)),
+        newty2 ~level:lv  (Tarrow((l, marg, mret, vbinder), ty_arg,  ty_res,  commu_ok)),
         true
       else
         ty', ty, false
@@ -10011,7 +10123,7 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
     let work () =
       let te = expand_head env ty_expected' in
       match get_desc te with
-        Tarrow((Nolabel,_,_),_,ty_res0,_) ->
+        Tarrow((Nolabel,_,_,_),_,ty_res0,_) ->
           Some (no_labels ty_res0, get_level te)
       | _ -> None
     in
@@ -10039,7 +10151,7 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
       in
       let rec make_args args ty_fun =
         match get_desc (expand_head env ty_fun) with
-        | Tarrow ((l,_marg,_mret),ty_arg,ty_fun,_) when is_optional l ->
+        | Tarrow ((l,_marg,_mret,_),ty_arg,ty_fun,_) when is_optional l ->
             let ty =
               type_option_none env (instance (tpoly_get_mono ty_arg))
                 sarg.pexp_loc
@@ -10047,10 +10159,10 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
             (* CR layouts v5: change value assumption below when we allow
                non-values in structures. *)
             make_args ((l, Arg (ty, Jkind.Sort.scannable)) :: args) ty_fun
-        | Tarrow ((l,_marg,_mret),_,ty_fun,_) when is_position l ->
+        | Tarrow ((l,_marg,_mret,_),_,ty_fun,_) when is_position l ->
             let arg = src_pos (Location.ghostify sarg.pexp_loc) [] env in
             make_args ((l, Arg (arg, Jkind.Sort.scannable)) :: args) ty_fun
-        | Tarrow ((l,_,_),_,ty_res',_) when l = Nolabel || !Clflags.classic ->
+        | Tarrow ((l,_,_,_),_,ty_res',_) when l = Nolabel || !Clflags.classic ->
             List.rev args, ty_fun, no_labels ty_res'
         | Tvar _ ->  List.rev args, ty_fun, false
         |  _ -> [], texp.exp_type, false
@@ -10067,7 +10179,7 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
       and ty_fun = instance ty_fun' in
       let marg, ty_arg, mret, ty_res =
         match get_desc (expand_head env ty_expected) with
-          Tarrow((Nolabel,marg,mret),ty_arg,ty_res,_) ->
+          Tarrow((Nolabel,marg,mret,_),ty_arg,ty_res,_) ->
            marg, ty_arg, mret, ty_res
         | _ -> assert false
       in
@@ -10276,41 +10388,6 @@ and type_apply_arg env ~app_loc ~funct ~index ~position_and_mode ~partial_app
       | Labelled _ | Nolabel -> assert false)
   | Omitted _ as arg -> (lbl, arg, None)
 
-(* vox: dependent application.  After the standard application has been
-   typed, references in the result type to a consumed dependent-arrow
-   parameter (de Bruijn offsets counting consumed arrows) are replaced
-   by the corresponding argument's stamp.  v0 restrictions: the
-   argument for a dependent parameter must be a plain variable
-   ("let-bind the argument first"), passed positionally (no labels,
-   no omitted parameters in the same application). *)
-and vox_apply_dependent ~app_loc args ty_ret =
-  let k = List.length args in
-  let mentions j = Vox_dep.mentions_outer_param ~offset:(k - 1 - j) ty_ret in
-  let subst_one ty_ret (j, (lbl, arg)) =
-    if not (mentions j) then ty_ret
-    else begin
-      (match lbl with
-       | Nolabel -> ()
-       | _ ->
-         Location.raise_errorf ~loc:app_loc
-           "vox: dependent application with labeled or optional arguments \
-            is not supported");
-      match arg with
-      | Arg ({exp_desc = Texp_ident {path = Path.Pident id; _}; _}, _) ->
-        Vox_dep.subst_outer_param ~offset:(k - 1 - j)
-          ~by:(Refinement.Pvar id) ty_ret
-      | Arg (texp, _) ->
-        Location.raise_errorf ~loc:texp.exp_loc
-          "vox: the argument for a dependent parameter must be a variable \
-           (let-bind it first)"
-      | Omitted _ ->
-        Location.raise_errorf ~loc:app_loc
-          "vox: a dependent parameter cannot be omitted or commuted"
-    end
-  in
-  List.fold_left subst_one ty_ret
-    (List.mapi (fun j (lbl, arg) -> j, (lbl, arg)) args)
-
 and type_application env app_loc expected_mode position_and_mode
       funct funct_mode sargs ret_tvar =
   let is_ignore funct =
@@ -10404,11 +10481,6 @@ and type_application env app_loc expected_mode position_and_mode
                              (Nolabel, Arg n)] *)
           ty_ret, mode_ret, args, position_and_mode
         end
-      in
-      let ty_ret =
-        vox_apply_dependent ~app_loc
-          (List.map (fun (lbl, arg, _) -> lbl, arg) args)
-          ty_ret
       in
       args, ty_ret, mode_ret, position_and_mode
 
@@ -11152,7 +11224,7 @@ and type_function_cases_expect
     let ty_fun =
       instance
         (newgenty
-           (Tarrow ((Nolabel, arg_mode, ret_mode), ty_arg, ty_ret, commu_ok)))
+           (Tarrow ((Nolabel, arg_mode, ret_mode, None), ty_arg, ty_ret, commu_ok)))
     in
     unify_exp_types loc env ty_fun (instance ty_expected);
     let param , param_uid = name_cases "param" cases in
@@ -11288,7 +11360,8 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
                   | _ -> pat
                 in
                 let bound_expr = vb_exp_constraint binding in
-                type_approx env bound_expr pat.pat_type)
+                vox_with_binding_self binding (fun () ->
+                  type_approx env bound_expr pat.pat_type))
               pat_list spat_sexp_list;
           (* CR-someday zqian: Here, if recursive, unify [pv_lpoly] with user
              annotations of layout poly. *)
@@ -11370,13 +11443,15 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
                 in
                 let exp =
                   Builtin_attributes.warning_scope pvb_attributes (fun () ->
-                    type_expect exp_env mode sexp (mk_expected ty'))
+                    vox_with_binding_self vb (fun () ->
+                      type_expect exp_env mode sexp (mk_expected ty')))
                 in
                 exp, Some vars
             | _ ->
                 let exp =
                   Builtin_attributes.warning_scope pvb_attributes (fun () ->
-                    type_expect exp_env mode sexp (mk_expected expected_ty))
+                    vox_with_binding_self vb (fun () ->
+                      type_expect exp_env mode sexp (mk_expected expected_ty)))
                 in
                 exp, None)
       in
@@ -11652,7 +11727,7 @@ and type_andops env sarg sands expected_sort expected_ty =
             let ty_result, op_result_sort =
               new_rep_var ~why:Function_result ()
             in
-            let arrow_desc = (Nolabel, Alloc.legacy, Alloc.legacy) in
+            let arrow_desc = (Nolabel, Alloc.legacy, Alloc.legacy, None) in
             let ty_rest_fun =
               newty (Tarrow(arrow_desc, newmono ty_arg, ty_result, commu_ok)) in
             let ty_op =
@@ -11759,7 +11834,7 @@ and type_n_ary_function
                       let new_mode_var () = Mode.Alloc.newvar () in
                       (newty
                          (Tarrow
-                            ( (arg_label, new_mode_var (), new_mode_var ())
+                            ( (arg_label, new_mode_var (), new_mode_var (), None)
                             , new_ty_var Function_argument
                             , new_ty_var Function_result
                             , commu_ok )));
@@ -12450,7 +12525,7 @@ let escaping_submode_reason_hint =
     let get_non_local_arity ty =
       let rec loop sureness n ty =
         match get_desc ty with
-        | Tarrow ((_, _, res_mode), _, res_ty, _) ->
+        | Tarrow ((_, _, res_mode, _), _, res_ty, _) ->
           begin match
             Locality.Guts.check_const (Alloc.proj_comonadic Areality res_mode)
           with

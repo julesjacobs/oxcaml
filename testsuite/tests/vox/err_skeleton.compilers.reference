@@ -1,4 +1,0 @@
-File "err_skeleton.ml", line 11, characters 8-26:
-11 | let s : {v:string | v = v} = refine_ "hi"
-             ^^^^^^^^^^^^^^^^^^
-Error: vox: refinements are only supported at types int and bool

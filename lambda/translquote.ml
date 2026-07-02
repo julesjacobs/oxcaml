@@ -2796,7 +2796,7 @@ let type_for_annotation ~env ~loc typ =
         | Tunivar _ ->
           let name, jkind_annotation = unwrap_univar ty |> Option.get in
           Ttyp_var (Some name, jkind_annotation)
-        | Tarrow ((arg_label, _, _), ty, ty', _) ->
+        | Tarrow ((arg_label, _, _, _), ty, ty', _) ->
           Ttyp_arrow
             ( arg_label,
               go ty,
