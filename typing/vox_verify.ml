@@ -361,7 +361,8 @@ let pred_in_scope ctx p = List.for_all (in_scope ctx) (Refinement.free_vars p)
    denotation). *)
 let rec pred_unreflectable (p : Refinement.pred) =
   match p with
-  | Refinement.Pconstr _ | Refinement.Pfun _ | Refinement.Pfield _ -> true
+  | Refinement.Pconstr _ | Refinement.Pfun _ | Refinement.Pfield _
+  | Refinement.Pis _ -> true
   | Refinement.Pbound | Refinement.Pvar _ | Refinement.Pint _
   | Refinement.Pbool _ -> false
   | Refinement.Pbinop (_, a, b)
@@ -643,6 +644,46 @@ let match_facts
   | _ -> []
 ;;
 
+(* Negative match facts: if control reaches an arm, every EARLIER arm
+   failed to match.  That is a usable fact only when the earlier arm's
+   failure is decided by its constructor head alone: a guard-free arm
+   whose pattern is one constructor of a simple variant over variables
+   or wildcards (the same shape that earns a positive fact).  Such an
+   arm contributes [not (s is C)] to every later arm.  Guarded arms
+   contribute nothing (the pattern may have matched with the guard
+   false); deeper patterns contribute nothing (the head may have
+   matched while a sub-pattern refuted). *)
+let pattern_negation
+  : type k. Env.t -> Ident.t -> k general_pattern -> Refinement.pred option
+  =
+  fun env sid pat ->
+  let head_negation cstr args =
+    let path = Data_types.cstr_res_type_path cstr in
+    match datatype_sort env path with
+    | S_int | S_bool | S_other -> None
+    | S_data _ ->
+      let simple (_, (p : value general_pattern)) =
+        match p.pat_desc with
+        | Tpat_var _ | Tpat_any -> true
+        | _ -> false
+      in
+      if List.for_all simple args
+      then
+        Some
+          (Refinement.Pnot
+             (Refinement.Pis
+                (path, cstr.Data_types.cstr_name, Refinement.Pvar sid)))
+      else None
+  in
+  match pat.pat_desc with
+  | Tpat_value p ->
+    (match (p :> value general_pattern).pat_desc with
+     | Tpat_construct (_, cstr, _, args, _) -> head_negation cstr args
+     | _ -> None)
+  | Tpat_construct (_, cstr, _, args, _) -> head_negation cstr args
+  | _ -> None
+;;
+
 (* Extend the context at a binding pattern: new stamps come into scope;
    refined binders contribute their facts (plus the scrutinee's
    refinement for unpack patterns). *)
@@ -710,20 +751,47 @@ let rec walk_expr env ctx (e : expression) =
       | Texp_ident { path = Path.Pident id; _ } -> Some id
       | _ -> None
     in
-    let do_case : type k. k case -> unit =
-      fun c ->
+    let do_case : type k. Refinement.pred list -> k case -> unit =
+      fun negs c ->
       let ctx' = extend_pat ~scrut:scrut.exp_type env ctx c.c_lhs in
       let ctx' =
         match scrut_id with
         | Some sid ->
-          { ctx' with cfacts = match_facts env sid c.c_lhs @ ctx'.cfacts }
+          { ctx' with
+            cfacts = match_facts env sid c.c_lhs @ negs @ ctx'.cfacts
+          }
         | None -> ctx'
       in
       Option.iter (walk_expr env ctx') c.c_guard;
       walk_expr env ctx' c.c_rhs
     in
-    List.iter do_case comp_cases;
-    List.iter do_case val_cases
+    (* Arms additionally see the negations of the guard-free simple
+       arms ABOVE them.  All ordinary arms -- value and exception, in
+       source order -- arrive as computation cases (value patterns
+       wrapped in [Tpat_value]); [val_cases] holds effect-handler arms.
+       Exception and effect arms never contribute a negation (their
+       patterns are not simple-variant constructors: exception and
+       effect types are open), and their RECEIVING facts is vacuously
+       sound under the variable-scrutinee gate: evaluating a variable
+       can neither raise nor perform. *)
+    let run_cases : type k. k case list -> unit =
+      fun cases ->
+      ignore
+        (List.fold_left
+           (fun negs c ->
+             do_case negs c;
+             match scrut_id, c.c_guard with
+             | Some sid, None ->
+               (match pattern_negation env sid c.c_lhs with
+                | Some n -> negs @ [ n ]
+                | None -> negs)
+             | _ -> negs)
+           []
+           cases
+          : Refinement.pred list)
+    in
+    run_cases comp_cases;
+    run_cases val_cases
   | Texp_ifthenelse (cond, e_then, e_else) ->
     walk_expr env ctx cond;
     (* The path fact is the condition's logic translation when it has
@@ -811,6 +879,17 @@ let smt_sel_name p c i =
 ;;
 
 let smt_field_name p l = "|s:" ^ smt_escape (path_uname p ^ "." ^ l) ^ "|"
+
+(* Arity of constructor [c] of the registered variant at [p]; testers of
+   unregistered paths never reach serialization (usability filter). *)
+let constr_arity p c =
+  match find_datatype p with
+  | Some (_, Dt_variant constrs) ->
+    (match List.assoc_opt c constrs with
+     | Some fields -> List.length fields
+     | None -> 0)
+  | Some (_, Dt_record _) | None -> 0
+;;
 
 
 let smt_sort = function
@@ -915,6 +994,11 @@ let rec smt_of_pred buf (p : Refinement.pred) =
     Buffer.add_char buf ')'
   | Pfield (p, l, a) ->
     Buffer.add_string buf ("(" ^ smt_field_name p l ^ " ");
+    smt_of_pred buf a;
+    Buffer.add_char buf ')'
+  | Pis (p, c, a) ->
+    (* the datatype theory's native tester *)
+    Buffer.add_string buf ("((_ is " ^ smt_constr_name p c ^ ") ");
     smt_of_pred buf a;
     Buffer.add_char buf ')'
   | Pbinop (Neq, a, b) ->
@@ -1192,6 +1276,7 @@ let boolish p =
         | Some S_bool -> true
         | Some (S_int | S_data _ | S_other) | None -> false)
      | Some (_, Dt_variant _) | None -> false)
+  | Pis _ -> true
   | Pbound | Pint _ | Pconstr _ | Pfun _ | Pbinop ((Add | Sub | Mul), _, _) ->
     false
 ;;
@@ -1239,6 +1324,27 @@ let rec lean_of_pred buf (p : Refinement.pred) =
     Buffer.add_string buf ("(" ^ lean_dt_name p ^ "." ^ lean_sanitize l ^ " ");
     lean_of_pred buf a;
     Buffer.add_char buf ')'
+  | Pis (p, c, a) ->
+    (* existential tester; the exhaustiveness hypothesis emitted per
+       tester subject (lean_theorem) lets grind case on it *)
+    let n = constr_arity p c in
+    Buffer.add_char buf '(';
+    if n > 0
+    then begin
+      Buffer.add_string buf "∃";
+      for i = 0 to n - 1 do
+        Buffer.add_string buf (Printf.sprintf " e%d" i)
+      done;
+      Buffer.add_string buf ", "
+    end;
+    lean_of_pred buf a;
+    Buffer.add_string buf (" = " ^ if n > 0 then "(" else "");
+    Buffer.add_string buf (lean_constr_name p c);
+    for i = 0 to n - 1 do
+      Buffer.add_string buf (Printf.sprintf " e%d" i)
+    done;
+    if n > 0 then Buffer.add_char buf ')';
+    Buffer.add_char buf ')'
   | Pbinop (Eq, a, b) -> bin (if boolish a || boolish b then "↔" else "=") a b
   | Pbinop (Neq, a, b) ->
     Buffer.add_string buf "(¬ ";
@@ -1280,6 +1386,57 @@ let lean_theorem buf i vc =
       Buffer.add_string buf (Printf.sprintf "(h_%d : " j);
       lean_of_pred buf f;
       Buffer.add_string buf ") ")
+    vc.vc_facts;
+  (* Exhaustiveness hypotheses: for each tester subject among the facts,
+     tell grind the subject IS one of its constructors, so it can case
+     on the negations.  (Z3's datatype theory knows this natively.)
+     The disjunction is [Por] over the positive testers, so it reuses
+     the serializer; validated shape: (∃ a, s = K a) ∨ ... ∨ s = M. *)
+  let seen_subj = Hashtbl.create 4 in
+  let exh = ref 0 in
+  List.iter
+    (fun f ->
+      let rec collect (q : Refinement.pred) =
+        (match q with
+         | Refinement.Pis (path, _, Refinement.Pvar id) ->
+           let key = Ident.unique_name id ^ "|" ^ path_uname path in
+           if not (Hashtbl.mem seen_subj key)
+           then (
+             Hashtbl.add seen_subj key ();
+             match find_datatype path with
+             | Some (_, Dt_variant constrs) ->
+               let disj =
+                 match
+                   List.map
+                     (fun (cname, _) ->
+                       Refinement.Pis (path, cname, Refinement.Pvar id))
+                     constrs
+                 with
+                 | [] -> assert false (* simple variants are non-empty *)
+                 | t :: ts ->
+                   List.fold_left (fun acc t' -> Refinement.Por (acc, t')) t ts
+               in
+               incr exh;
+               Buffer.add_string buf (Printf.sprintf "(h_exh%d : " !exh);
+               lean_of_pred buf disj;
+               Buffer.add_string buf ") "
+             | Some (_, Dt_record _) | None -> ())
+         | _ -> ());
+        match q with
+        | Refinement.Pis (_, _, a)
+        | Refinement.Pfield (_, _, a)
+        | Refinement.Pnot a -> collect a
+        | Refinement.Pconstr (_, _, args) | Refinement.Pfun (_, args) ->
+          List.iter collect args
+        | Refinement.Pbinop (_, a, b)
+        | Refinement.Pand (a, b)
+        | Refinement.Por (a, b) ->
+          collect a;
+          collect b
+        | Refinement.Pbound | Refinement.Pvar _ | Refinement.Pint _
+        | Refinement.Pbool _ -> ()
+      in
+      collect f)
     vc.vc_facts;
   Buffer.add_string buf ": ";
   lean_of_pred buf vc.vc_goal;

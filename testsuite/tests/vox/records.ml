@@ -109,6 +109,7 @@ Line 10, characters 23-24: vox VC (RUNTIME CHECKED):
   goal: 0 = 1
   hypotheses:
   s = Nothing
+  not (s is Pt)
   s = (Pt q)
   q.px = 1
   v.px = 1

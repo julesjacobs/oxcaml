@@ -175,9 +175,18 @@ places:
   variable sub-pattern (per-field, so partial patterns are fine).
   `let p = x in ...` gets the same facts, so destructuring a record
   binds its fields logically.  Deeper patterns -- nesting, aliases,
-  or-patterns, constants -- contribute nothing, which is sound.  A
-  branch learns what `s` IS, never what it is not: negative facts are
-  future work.
+  or-patterns, constants -- contribute nothing, which is sound.
+  NEGATIVE facts: an arm also learns that every EARLIER arm failed to
+  match, usable exactly when that failure is decided by the head
+  alone: each guard-free earlier arm of the simple shape contributes
+  `not (s is C)` (an internal constructor tester, not surface syntax).
+  Guarded arms contribute no negation (the pattern may have matched
+  with the guard false), nor do arms with refuting sub-patterns
+  (`A 0`: the head may have matched anyway).  Z3 has native testers;
+  Lean encodes `s is C` existentially and each theorem with tester
+  facts also receives the subject's exhaustiveness disjunction
+  ((∃ a, s = A a) ∨ ... ∨ s = C) as a hypothesis, so grind can case on
+  the negations -- a default arm below `A _` and `B` proves `s = C`.
 
 Constructors are the one program construct with built-in logical
 meaning ("the usual refinements"): the name of `K e1 ... en` is

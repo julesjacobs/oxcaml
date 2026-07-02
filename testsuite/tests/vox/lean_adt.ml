@@ -68,3 +68,18 @@ let three : {r:int | r = 3} =
   match s with
   | Adt_lib.K y -> refine_ y
   | Adt_lib.L -> assume_ 0
+
+(* Negative match facts, really proved: the default arm knows s is
+   neither an A nor B, and exhaustiveness makes it a C. *)
+type abc =
+  | Ay of int
+  | Bee
+  | Cee
+
+let classify (s : abc) : {r:int | r >= 0} =
+  match s with
+  | Ay _ -> refine_ 0
+  | Bee -> refine_ 1
+  | _ ->
+    let refine_ w = (refine_ s : abc{ _ = Cee }) in
+    refine_ 2

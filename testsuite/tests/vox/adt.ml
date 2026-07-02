@@ -52,6 +52,7 @@ Line 5, characters 17-18: vox VC (RUNTIME CHECKED):
   goal: 0 = 3
   hypotheses:
   s = L
+  not (s is K)
   s = (K 3)
   s#2 = (K 3)
   k3 = (K 3)
@@ -82,6 +83,7 @@ Line 9, characters 19-20: vox VC (RUNTIME CHECKED):
   goal: 0 = 3
   hypotheses:
   s = Nil
+  not (s is Cons)
   s = (Cons (3, Nil))
   s#2 = (Cons (3, Nil))
   k3 = (K 3)
@@ -111,6 +113,7 @@ Line 8, characters 17-18: vox VC (RUNTIME CHECKED):
   goal: 1 > 0
   hypotheses:
   t = Z
+  not (t is W)
   k3 = (K 3)
 val getw : w -> int{ _ > 0 } = <fun>
 |}]
@@ -154,4 +157,66 @@ Line 7, characters 32-34:
 7 | let bad : m{ _ = MB } = refine_ MB
                                     ^^
 Error: vox: this obligation mentions constructors of a type that is not usable here (not a simple variant, or mutually recursive)
+|}]
+
+(* Negative match facts: each guard-free simple arm contributes
+   [not (s is C)] to the arms below it, so the default arm can prove
+   what s must be. *)
+type abc =
+  | Ay of int
+  | Bee
+  | Cee
+
+let classify (s : abc) : {r:int | r >= 0} =
+  match s with
+  | Ay _ -> refine_ 0
+  | Bee -> refine_ 1
+  | _ ->
+    let refine_ w = (refine_ s : abc{ _ = Cee }) in
+    refine_ 2
+[%%expect{|
+type abc = Ay of int | Bee | Cee
+Line 8, characters 20-21: vox VC:
+  goal: 0 >= 0
+  hypotheses:
+  s = (Ay *vox-wild*)
+  k3 = (K 3)
+Line 9, characters 19-20: vox VC:
+  goal: 1 >= 0
+  hypotheses:
+  s = Bee
+  not (s is Ay)
+  k3 = (K 3)
+Line 11, characters 29-30: vox VC:
+  goal: s = Cee
+  hypotheses:
+  not (s is Ay)
+  not (s is Bee)
+  k3 = (K 3)
+Line 12, characters 12-13: vox VC:
+  goal: 2 >= 0
+  hypotheses:
+  w = Cee
+  not (s is Ay)
+  not (s is Bee)
+  k3 = (K 3)
+val classify : abc -> int{ _ >= 0 } = <fun>
+|}]
+
+(* A guarded arm contributes NO negation (its pattern may have matched
+   with the guard false), and neither does an arm whose sub-pattern can
+   refute (the head may have matched anyway). *)
+let suppressed (s : abc) (g : bool) : int =
+  match s with
+  | Ay 0 -> 0
+  | Bee when g -> 1
+  | _ ->
+    let refine_ w = (assume_unchecked_ s : abc{ _ = Cee }) in
+    2
+[%%expect{|
+Line 6, characters 39-40: vox VC (ASSUMED):
+  goal: s = Cee
+  hypotheses:
+  k3 = (K 3)
+val suppressed : abc -> bool -> int = <fun>
 |}]
