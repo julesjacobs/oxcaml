@@ -25,8 +25,8 @@ val a' : int{ _ >= 0 } = 3
 let sub : (x : int{x > 3}) -> (y : int) -> int{ x + _ = y } =
   fun x y -> assume_ (y - (x :> int))
 [%%expect{|
-Line 2, characters 21-37: vox VC (ASSUMED):
-  goal: (x + *vox-unknown*) = y
+Line 2, characters 21-37: vox VC (RUNTIME CHECKED):
+  goal: (x + (y - x)) = y
   hypotheses:
   x > 3
   a' >= 0
@@ -37,8 +37,8 @@ val sub : (x : int{ _ > 3 }) -> (y : int) -> int{ (x + _) = y } = <fun>
 (* Named result binder. *)
 let above : (x : int) -> (y : int{ y > x }) = fun x -> assume_ (x + 1)
 [%%expect{|
-Line 1, characters 63-70: vox VC (ASSUMED):
-  goal: *vox-unknown* > x
+Line 1, characters 63-70: vox VC (RUNTIME CHECKED):
+  goal: (x + 1) > x
   hypotheses:
   a' >= 0
   a >= 0
@@ -50,9 +50,10 @@ val above : (x : int) -> int{ _ > x } = <fun>
 let lt_witness : (x : int) -> (y : int) -> unit{ x < y } option =
   fun x y -> if x < y then Some (assume_ ()) else None
 [%%expect{|
-Line 2, characters 41-43: vox VC (ASSUMED):
+Line 2, characters 41-43: vox VC (RUNTIME CHECKED):
   goal: x < y
   hypotheses:
+  x < y
   a' >= 0
   a >= 0
 val lt_witness : (x : int) -> (y : int) -> unit{ x < y } option = <fun>
@@ -90,7 +91,7 @@ Error: vox: (y : ...) names a value and is only meaningful as a function paramet
    path), so re-annotating with a different binder name is accepted... *)
 let dep : (x : int) -> int{ _ = x } = fun x -> assume_ x
 [%%expect{|
-Line 1, characters 55-56: vox VC (ASSUMED):
+Line 1, characters 55-56: vox VC (RUNTIME CHECKED):
   goal: x = x
   hypotheses:
   s = s

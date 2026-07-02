@@ -384,8 +384,87 @@ and transl_exp1 ~scopes ~in_new_scope layout e =
       Texp_function _ | Texp_for _ | Texp_while _ -> false
     | _ -> true
   in
-  if eval_once then transl_exp0 ~scopes ~in_new_scope layout e else
-  Translobj.oo_wrap e.exp_env true (transl_exp0 ~scopes ~in_new_scope layout) e
+  let lam =
+    if eval_once then transl_exp0 ~scopes ~in_new_scope layout e else
+    Translobj.oo_wrap e.exp_env true (transl_exp0 ~scopes ~in_new_scope layout) e
+  in
+  vox_assume_check ~scopes layout e lam
+
+(* vox: [assume_ e] carries the "vox.assume" attribute and a refined
+   type; wrap its translation in a runtime check of the predicate,
+   raising [Failure] when it does not hold.  Predicates are built from
+   the bound value, program variables (dependent-arrow binders have
+   been opened to the enclosing parameters' stamps during type
+   checking, and the VC pass rejects out-of-scope variables in
+   runtime-checked goals), and integer/boolean operations, all of which
+   compile directly. *)
+and vox_assume_check ~scopes layout e lam =
+  let is_assume =
+    List.exists
+      (fun (a : Parsetree.attribute) ->
+         String.equal a.attr_name.txt "vox.assume")
+      e.exp_attributes
+  in
+  if not is_assume then lam else
+  match get_desc e.exp_type with
+  | Trefine (_, pred) ->
+      let loc = of_location ~scopes e.exp_loc in
+      let v = Ident.create_local "*vox*" in
+      let rec check (p : Refinement.pred) =
+        match p with
+        | Refinement.Pbound -> Lvar v
+        | Refinement.Pvar id -> Lvar id
+        | Refinement.Pconstr _ | Refinement.Pfun _ ->
+            (* Rejected by the VC pass (emit_vc, Runtime_check). *)
+            Location.raise_errorf ~loc:e.exp_loc
+              "vox: assume_ cannot compile a runtime check involving \
+               constructors or spec functions; use assume_unchecked_"
+        | Refinement.Pint n -> Lconst (Const_base (Const_int n))
+        | Refinement.Pbool b ->
+            Lconst (Const_base (Const_int (if b then 1 else 0)))
+        | Refinement.Pbinop (op, a, b) ->
+            let intop op = Pscalar (Binary (Integral (int, op))) in
+            let icmp cmp = Pscalar (Binary (Icmp (int, cmp))) in
+            let prim =
+              match op with
+              | Refinement.Add -> intop Add
+              | Refinement.Sub -> intop Sub
+              | Refinement.Mul -> intop Mul
+              | Refinement.Eq -> icmp Ceq
+              | Refinement.Neq -> icmp Cne
+              | Refinement.Lt -> icmp Clt
+              | Refinement.Le -> icmp Cle
+              | Refinement.Gt -> icmp Cgt
+              | Refinement.Ge -> icmp Cge
+            in
+            Lprim (prim, [check a; check b], loc)
+        | Refinement.Pand (a, b) -> Lprim (Psequand, [check a; check b], loc)
+        | Refinement.Por (a, b) -> Lprim (Psequor, [check a; check b], loc)
+        | Refinement.Pnot a -> Lprim (Pnot, [check a], loc)
+      in
+      let failed =
+        let slot =
+          transl_extension_path Loc_unknown
+            (Lazy.force Env.initial) Predef.path_failure
+        in
+        let (fname, line, char) =
+          Location.get_pos_info e.exp_loc.Location.loc_start
+        in
+        let msg =
+          Printf.sprintf "vox: assume_ check failed at %s:%d:%d: %s"
+            fname line char (Refinement.to_string pred)
+        in
+        Lprim (Praise Raise_regular,
+               [Lprim (Pmakeblock (0, Immutable, All_value, alloc_heap),
+                       [slot;
+                        Lconst (Const_base
+                                  (Const_string (msg, e.exp_loc, None)))],
+                       loc)],
+               loc)
+      in
+      Llet (Strict, layout, v, Lambda.debug_uid_none, lam,
+            Lifthenelse (check pred, Lvar v, failed, layout))
+  | _ -> lam
 
 and transl_exp0 ~in_new_scope ~scopes layout e =
   match e.exp_desc with

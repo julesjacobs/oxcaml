@@ -1038,6 +1038,7 @@ let maybe_pmod_constraint mode expr =
 %token FUNCTION               "function"
 %token FUNCTOR                "functor"
 %token ASSUME                 "assume_"
+%token ASSUME_UNCHECKED       "assume_unchecked_"
 %token GLOBAL                 "global_"
 %token GREATER                ">"
 %token GREATERRBRACE          ">}"
@@ -2904,6 +2905,11 @@ fun_expr:
      { mkexp ~loc:$sloc
          (Pexp_extension
             ({ txt = "vox.assume"; loc = make_loc $loc($1) },
+             PStr [ Str.eval $2 ])) }
+  | ASSUME_UNCHECKED seq_expr
+     { mkexp ~loc:$sloc
+         (Pexp_extension
+            ({ txt = "vox.assume_unchecked"; loc = make_loc $loc($1) },
              PStr [ Str.eval $2 ])) }
 ;
 %inline expr:

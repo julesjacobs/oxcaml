@@ -48,3 +48,26 @@ let weaken_strengthen (n : {v:int | v > 1}) : {v:int | v > 0} =
 let branch_facts (a : int) (b : int) : {v:bool | v || not v} =
   let refine_ c = lt a b in
   if c then refine_ c else refine_ true
+
+(* Reflection: refine_ on compound int/bool expressions.  Synthesis
+   position gives the exact refinement {v | v = e'}; checking position
+   reflects e' into the goal; compound if-conditions become path facts
+   directly.  The flagship shape again, with no userland operations at
+   all. *)
+let safe_reflect (x : int) : int =
+  let c = refine_ (0 < x) in
+  if (c :> bool) then div 100 (refine_ x) else 0
+
+let safe_direct (x : int) : int =
+  if 0 < x then div 100 (refine_ x) else 0
+
+(* Checking position: the goal is (x + 1) > x, proved by grind. *)
+let bump : (x : int) -> {v:int | v > x} =
+  fun x -> refine_ (x + 1)
+
+(* Exact refinements compose through binder facts: d = x + x and
+   x > 0 prove d > 1. *)
+let double_reflect (x : {v:int | v > 0}) : {v:int | v > 1} =
+  let refine_ x' = x in
+  let d = refine_ (x' + x') in
+  refine_ (d :> int)

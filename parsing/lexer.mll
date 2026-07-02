@@ -54,6 +54,7 @@ let all_keywords =
     "as", AS, always;
     "assert", ASSERT, v1_6;
     "assume_", ASSUME, oxcaml;
+    "assume_unchecked_", ASSUME_UNCHECKED, oxcaml;
     "begin", BEGIN, always;
     "borrow_", BORROW, oxcaml;
     "class", CLASS, v1_0;

@@ -10,7 +10,7 @@
 
 let zero : {v:int | v = 0} = assume_ 0
 [%%expect{|
-Line 1, characters 37-38: vox VC (ASSUMED):
+Line 1, characters 37-38: vox VC (RUNTIME CHECKED):
   goal: 0 = 0
   hypotheses: <none>
 val zero : int{ _ = 0 } = 0
@@ -19,8 +19,8 @@ val zero : int{ _ = 0 } = 0
 let lt : (x : int) -> (y : int) -> {z:bool | z = (x < y)} =
   fun x y -> assume_ (x < y)
 [%%expect{|
-Line 2, characters 21-28: vox VC (ASSUMED):
-  goal: *vox-unknown* = (x < y)
+Line 2, characters 21-28: vox VC (RUNTIME CHECKED):
+  goal: (x < y) = (x < y)
   hypotheses:
   zero = 0
 val lt : (x : int) -> (y : int) -> bool{ _ = (x < y) } = <fun>
@@ -54,7 +54,7 @@ let partial (a : int) (b : int) : {w:bool | w || not w} =
   refine_ (c || not c)
 [%%expect{|
 Line 4, characters 10-22: vox VC:
-  goal: *vox-unknown* || (not *vox-unknown*)
+  goal: (c || (not c)) || (not (c || (not c)))
   hypotheses:
   c = (a < b)
   zero = 0
@@ -75,7 +75,7 @@ let use_apply (a : int) : int =
   let p : {v:int | v = a} = assume_ a in
   apply a p
 [%%expect{|
-Line 2, characters 36-37: vox VC (ASSUMED):
+Line 2, characters 36-37: vox VC (RUNTIME CHECKED):
   goal: a = a
   hypotheses:
   zero = 0
@@ -105,9 +105,10 @@ Line 6, characters 42-43: vox VC:
   hypotheses:
   r = x
   zero = 0
-Line 12, characters 59-61: vox VC (ASSUMED):
+Line 12, characters 59-61: vox VC (RUNTIME CHECKED):
   goal: x' = x'
   hypotheses:
+  not (x = 0)
   zero = 0
 val countdown : (x : int) -> (unit -> int{ _ = x }) option -> int = <fun>
 |}]

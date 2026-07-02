@@ -269,6 +269,7 @@ val path_unboxed_float64x8: Path.t
 val path_match_failure: Path.t
 val path_invalid_argument: Path.t
 val path_assert_failure : Path.t
+val path_failure : Path.t
 val path_undefined_recursive_module : Path.t
 
 val ident_false : Ident.t

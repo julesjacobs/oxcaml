@@ -8609,11 +8609,20 @@ and type_expect_
           raise (Error (loc, env, Invalid_atomic_loc_payload))
       end
   | Pexp_extension
-      ({txt = ("vox.refine" | "vox.assume") as vox_kind; _}, payload) ->
-      (* vox: [refine_ e] / [assume_ e].  Typed at the refined type
-         expected from context; the inner expression is typed at the
-         skeleton.  The VC pass turns each vox.refine node into a proof
-         obligation (vox.assume is reported as ASSUMED). *)
+      ({txt = ("vox.refine" | "vox.assume" | "vox.assume_unchecked")
+              as vox_kind; _}, payload) ->
+      (* vox: [refine_ e] / [assume_ e] / [assume_unchecked_ e].  Typed
+         at the refined type expected from context; the inner expression
+         is typed at the skeleton.  The VC pass turns each vox.refine
+         node into a proof obligation; vox.assume skips the obligation
+         but compiles a runtime check of the predicate (translcore);
+         vox.assume_unchecked skips both and is reported as ASSUMED. *)
+      let vox_keyword =
+        match vox_kind with
+        | "vox.refine" -> "refine_"
+        | "vox.assume" -> "assume_"
+        | _ -> "assume_unchecked_"
+      in
       let inner =
         match payload with
         | PStr [{pstr_desc = Pstr_eval (e, []); _}] -> e
@@ -8621,30 +8630,81 @@ and type_expect_
             Location.raise_errorf ~loc "vox: malformed %s payload" vox_kind
       in
       let ty_exp = expand_head env (instance ty_expected) in
+      (* Intro markers ride the typed node's attributes, so stacking
+         two intro forms on one node would leave the inner one
+         invisible to the VC pass and to the runtime-check
+         translation.  Sharp edge: let-bind the inner form. *)
+      let check_not_nested_intro (exp : Typedtree.expression) =
+        let is_vox_intro (a : Parsetree.attribute) =
+          match a.attr_name.txt with
+          | "vox.refine" | "vox.refine_exact" | "vox.assume"
+          | "vox.assume_unchecked" -> true
+          | _ -> false
+        in
+        if List.exists is_vox_intro exp.exp_attributes
+        then
+          Location.raise_errorf ~loc
+            "vox: %s applied directly to another \
+             refine_/assume_/assume_unchecked_ expression is not \
+             supported; let-bind the inner expression first"
+            vox_keyword
+      in
+      let vox_attr name =
+        { attr_name = {txt = name; loc};
+          attr_payload = PStr [];
+          attr_loc = loc }
+      in
       begin match get_desc ty_exp with
       | Trefine (skel, _pred) ->
           let exp =
             type_expect env expected_mode inner
               (mk_expected (instance skel))
           in
+          check_not_nested_intro exp;
           rue
             { exp with
               exp_type = instance ty_exp;
-              exp_attributes =
-                { attr_name = {txt = vox_kind; loc};
-                  attr_payload = PStr [];
-                  attr_loc = loc }
-                :: exp.exp_attributes }
+              exp_attributes = vox_attr vox_kind :: exp.exp_attributes }
+      | Tvar _ when String.equal vox_kind "vox.refine" ->
+          (* vox: synthesis mode.  No refined type is expected from
+             context, so [refine_ e] synthesizes the EXACT refinement
+             {v:t | v = e'}, where e' is the logic translation of e
+             (Vox_reflect).  The type is definitionally true of the
+             value, so there is no proof obligation; facts flow from
+             binders of the synthesized type as usual. *)
+          let exp =
+            type_expect env expected_mode inner
+              (mk_expected (newvar (Jkind.Builtin.any ~why:Dummy_jkind)))
+          in
+          check_not_nested_intro exp;
+          begin match Vox_reflect.translate exp with
+          | Some p ->
+              let refined =
+                newty
+                  (Trefine
+                     (exp.exp_type,
+                      Refinement.Pbinop (Refinement.Eq, Refinement.Pbound, p)))
+              in
+              rue
+                { exp with
+                  exp_type = refined;
+                  exp_attributes =
+                    vox_attr "vox.refine_exact" :: exp.exp_attributes }
+          | None ->
+              Location.raise_errorf ~loc
+                "vox: refine_ cannot translate this expression into the \
+                 logic (only variables, int/bool constants, + - * ~-, \
+                 comparisons at int or bool, and && || not are supported); \
+                 add a refined type annotation"
+          end
       | Tvar _ ->
           Location.raise_errorf ~loc
             "vox: %s needs a refined expected type; add a type annotation"
-            (if String.equal vox_kind "vox.refine" then "refine_"
-             else "assume_")
+            vox_keyword
       | _ ->
           Location.raise_errorf ~loc
             "vox: %s used where the expected type is not refined"
-            (if String.equal vox_kind "vox.refine" then "refine_"
-             else "assume_")
+            vox_keyword
       end
   | Pexp_extension ext ->
     raise (Error_forward (Builtin_attributes.error_of_extension ext))

@@ -48,7 +48,7 @@ Line 4, characters 19-20: vox VC:
   s = (K 3)
   s = (K 3)
   k3 = (K 3)
-Line 5, characters 17-18: vox VC (ASSUMED):
+Line 5, characters 17-18: vox VC (RUNTIME CHECKED):
   goal: 0 = 3
   hypotheses:
   s = L
@@ -78,7 +78,7 @@ Line 8, characters 27-28: vox VC:
   s = (Cons (3, Nil))
   s = (Cons (3, Nil))
   k3 = (K 3)
-Line 9, characters 19-20: vox VC (ASSUMED):
+Line 9, characters 19-20: vox VC (RUNTIME CHECKED):
   goal: 0 = 3
   hypotheses:
   s = Nil
@@ -107,7 +107,7 @@ Line 7, characters 40-41: vox VC:
   t = (W y)
   y > 0
   k3 = (K 3)
-Line 8, characters 17-18: vox VC (ASSUMED):
+Line 8, characters 17-18: vox VC (RUNTIME CHECKED):
   goal: 1 > 0
   hypotheses:
   t = Z

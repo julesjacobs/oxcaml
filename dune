@@ -235,6 +235,7 @@
   printtyped
   vox_dep
   ctype
+  vox_reflect
   vox_verify
   printtyp
   rawprinttyp

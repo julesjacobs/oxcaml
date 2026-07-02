@@ -3,9 +3,11 @@
    Runs as a separate pass over the FINAL typedtree (the type checker emits no VCs; it
    backtracks internally). Walks the tree carrying a logical environment of facts; each
    [refine_] node yields the VC [facts |- p[v := name of e]]; [assume_] is reported as
-   ASSUMED. Facts come from exactly four places (DESIGN.md): unpacking / binders of
-   refined type, path facts from [if], dependent application, and match facts on a
-   variable scrutinee ([s = C x1 ... xn] in the branch that matched [C x1 ... xn]).
+   RUNTIME CHECKED (translcore compiles a check of the predicate) and
+   [assume_unchecked_] as ASSUMED; neither goes to the solver. Facts come from exactly
+   four places (DESIGN.md): unpacking / binders of refined type, path facts from [if],
+   dependent application, and match facts on a variable scrutinee ([s = C x1 ... xn] in
+   the branch that matched [C x1 ... xn]).
 
    VCs are discharged by a Z3 subprocess over SMT-LIB2. Solver error, unknown, and timeout
    all count as verification FAILURE. *)
@@ -13,11 +15,19 @@
 open Types
 open Typedtree
 
+(* How an obligation is discharged: [Prove] goes to the solver;
+   [Runtime_check] ([assume_]) is checked at runtime by compiled code;
+   [Assume] ([assume_unchecked_]) is trusted outright. *)
+type vc_kind =
+  | Prove
+  | Runtime_check
+  | Assume
+
 type vc =
   { vc_loc : Location.t
   ; vc_facts : Refinement.pred list (* Pbound-free *)
   ; vc_goal : Refinement.pred (* Pbound-free *)
-  ; vc_assumed : bool
+  ; vc_kind : vc_kind
   }
 
 (* Declaration sorts for logical names, per DESIGN.md: int as Int, bool as Bool, simple
@@ -188,10 +198,12 @@ let unpack_fact
     | _ -> [])
 ;;
 
-(* The logical name of an expression: variables denote their stamp, integer literals
-   themselves, applications of simple-variant constructors their constructor term
-   (over the names of their arguments -- "constructors get the usual refinements");
-   anything else is a fresh unknown. *)
+(* The logical name of an expression: variables denote their stamp; expressions
+   in the translatable int/bool fragment their logic translation (Vox_reflect);
+   applications of simple-variant constructors their constructor term (over the
+   names of their arguments -- "constructors get the usual refinements", and
+   the arguments are themselves named, so translatable arithmetic reflects
+   inside them); anything else is a fresh unknown. *)
 let fresh_unknown env (e : expression) =
   let id = Ident.create_local "*vox-unknown*" in
   record_name env id e.exp_type;
@@ -200,21 +212,20 @@ let fresh_unknown env (e : expression) =
 ;;
 
 let rec name_of_expr env (e : expression) : Refinement.pred =
-  match e.exp_desc with
-  | Texp_ident { path = Path.Pident id; _ } -> Refinement.Pvar id
-  | Texp_constant (Const_int n) -> Refinement.Pint n
-  | Texp_construct ({ txt = Longident.Lident "true"; _ }, _, _, [], _) ->
-    Refinement.Pbool true
-  | Texp_construct ({ txt = Longident.Lident "false"; _ }, _, _, [], _) ->
-    Refinement.Pbool false
-  | Texp_construct (_, cstr, _, args, _) ->
-    let path = Data_types.cstr_res_type_path cstr in
-    (match datatype_sort env path with
-     | S_data _ ->
-       Refinement.Pconstr
-         (path, cstr.cstr_name, List.map (fun (_, a) -> name_of_expr env a) args)
-     | S_int | S_bool | S_other -> fresh_unknown env e)
-  | _ -> fresh_unknown env e
+  match Vox_reflect.translate e with
+  | Some p -> p
+  | None ->
+    (match e.exp_desc with
+     | Texp_construct (_, cstr, _, args, _) ->
+       let path = Data_types.cstr_res_type_path cstr in
+       (match datatype_sort env path with
+        | S_data _ ->
+          Refinement.Pconstr
+            ( path
+            , cstr.cstr_name
+            , List.map (fun (_, a) -> name_of_expr env a) args )
+        | S_int | S_bool | S_other -> fresh_unknown env e)
+     | _ -> fresh_unknown env e)
 ;;
 
 (* The logical context of a program point: facts, plus the stamps in
@@ -234,16 +245,71 @@ let in_scope ctx id =
 
 let pred_in_scope ctx p = List.for_all (in_scope ctx) (Refinement.free_vars p)
 
-let emit_vc ~loc ~ctx ~goal ~assumed =
+(* Predicates the compiled runtime check cannot evaluate: constructor
+   terms (structural equality at datatype sorts is future work) and
+   spec functions (solver-side only, no runtime denotation). *)
+let rec pred_unreflectable (p : Refinement.pred) =
+  match p with
+  | Refinement.Pconstr _ | Refinement.Pfun _ -> true
+  | Refinement.Pbound | Refinement.Pvar _ | Refinement.Pint _
+  | Refinement.Pbool _ -> false
+  | Refinement.Pbinop (_, a, b)
+  | Refinement.Pand (a, b)
+  | Refinement.Por (a, b) -> pred_unreflectable a || pred_unreflectable b
+  | Refinement.Pnot a -> pred_unreflectable a
+;;
+
+let emit_vc ~loc ~ctx ~goal ~kind =
   (* Facts mentioning out-of-scope stamps (including any dependent
      binder a substitution failed to open) are dropped (sound: fewer
-     hypotheses); such goals cannot be discharged and are errors. *)
-  if (not assumed) && not (pred_in_scope ctx goal)
-  then
-    Location.raise_errorf ~loc
-      "vox: this obligation mentions a variable that has escaped its scope";
+     hypotheses); such goals cannot be discharged and are errors.  The
+     same scope requirement applies to runtime-checked goals: the
+     compiled check reads those variables at run time. *)
+  (match kind with
+   | Prove ->
+     if not (pred_in_scope ctx goal)
+     then
+       Location.raise_errorf ~loc
+         "vox: this obligation mentions a variable that has escaped its scope"
+   | Runtime_check ->
+     if not (pred_in_scope ctx goal)
+     then
+       Location.raise_errorf ~loc
+         "vox: assume_ compiles a runtime check of this refinement, but it \
+          mentions a variable that is not in scope here; use \
+          assume_unchecked_";
+     if pred_unreflectable goal
+     then
+       Location.raise_errorf ~loc
+         "vox: assume_ compiles a runtime check of this refinement, but it \
+          involves a constructor or spec function, which the compiled check \
+          cannot evaluate; use assume_unchecked_";
+     (* The compiled check compares machine words, which agrees with the
+        logic only for int- and bool-sorted operands: other sorts are
+        uninterpreted, and physical equality is stricter than logical
+        equality (a coherent assumption could fail at run time). *)
+     let int_or_bool id =
+       match Hashtbl.find_opt name_sorts id with
+       | Some (S_int | S_bool) -> true
+       | Some (S_data _ | S_other) | None -> false
+     in
+     (match
+        List.find_opt
+          (fun id -> not (int_or_bool id))
+          (Refinement.free_vars goal)
+      with
+      | Some id ->
+        Location.raise_errorf ~loc
+          "vox: assume_ compiles a runtime check of this refinement, but %s \
+           is not an int or bool, so the runtime comparison would not agree \
+           with the logic's equality; use assume_unchecked_"
+          (if Hashtbl.mem synthetic_names id
+           then "the checked value"
+           else Ident.name id)
+      | None -> ())
+   | Assume -> ());
   let facts = List.filter (pred_in_scope ctx) ctx.cfacts in
-  vcs := { vc_loc = loc; vc_facts = facts; vc_goal = goal; vc_assumed = assumed } :: !vcs
+  vcs := { vc_loc = loc; vc_facts = facts; vc_goal = goal; vc_kind = kind } :: !vcs
 ;;
 
 (* Escaped refinements (DESIGN: "escape is an error").  A binder's type
@@ -462,20 +528,24 @@ let extend_pat
 (* Walk an expression under a logical context, collecting VCs. *)
 let rec walk_expr env ctx (e : expression) =
   (* Intro forms: the node itself carries the vox attribute and the refined type. *)
-  let is_refine = has_vox_attr "vox.refine" e.exp_attributes in
-  let is_assume = has_vox_attr "vox.assume" e.exp_attributes in
-  if is_refine || is_assume
-  then (
-    match refinement_of_type env e.exp_type with
-    | Some p ->
-      register_pred_paths env p;
-      let n = name_of_expr env e in
-      emit_vc
-        ~loc:e.exp_loc
-        ~ctx
-        ~goal:(Refinement.subst_bound ~by:n p)
-        ~assumed:is_assume
-    | None -> ());
+  let kind =
+    if has_vox_attr "vox.refine" e.exp_attributes
+    then Some Prove
+    else if has_vox_attr "vox.assume" e.exp_attributes
+    then Some Runtime_check
+    else if has_vox_attr "vox.assume_unchecked" e.exp_attributes
+    then Some Assume
+    else None
+  in
+  (match kind with
+   | Some kind ->
+     (match refinement_of_type env e.exp_type with
+      | Some p ->
+        register_pred_paths env p;
+        let n = name_of_expr env e in
+        emit_vc ~loc:e.exp_loc ~ctx ~goal:(Refinement.subst_bound ~by:n p) ~kind
+      | None -> ())
+   | None -> ());
   match e.exp_desc with
   | Texp_let (_rec_flag, vbs, body) ->
     List.iter (fun vb -> walk_expr env ctx vb.vb_expr) vbs;
@@ -507,11 +577,10 @@ let rec walk_expr env ctx (e : expression) =
     List.iter do_case val_cases
   | Texp_ifthenelse (cond, e_then, e_else) ->
     walk_expr env ctx cond;
-    let cond_fact =
-      match cond.exp_desc with
-      | Texp_ident { path = Path.Pident id; _ } -> Some (Refinement.Pvar id)
-      | _ -> None
-    in
+    (* The path fact is the condition's logic translation when it has
+       one (a variable, or a translatable int/bool expression);
+       untranslatable conditions contribute nothing. *)
+    let cond_fact = Vox_reflect.translate cond in
     let with_fact f ctx =
       match cond_fact with
       | None -> ctx
@@ -1173,7 +1242,10 @@ let dump_vc ppf vc =
     "@[<v 2>%a: vox VC%s:@ goal: %a@ hypotheses:%t@]@."
     Location.print_loc
     vc.vc_loc
-    (if vc.vc_assumed then " (ASSUMED)" else "")
+    (match vc.vc_kind with
+     | Prove -> ""
+     | Runtime_check -> " (RUNTIME CHECKED)"
+     | Assume -> " (ASSUMED)")
     print_pred
     vc.vc_goal
     (fun ppf ->
@@ -1193,7 +1265,12 @@ let discharge () =
   let all =
     List.map
       (fun vc ->
-        if not (vc.vc_assumed || pred_usable vc.vc_goal)
+        let needs_solver =
+          match vc.vc_kind with
+          | Prove -> true
+          | Runtime_check | Assume -> false
+        in
+        if needs_solver && not (pred_usable vc.vc_goal)
         then
           Location.raise_errorf
             ~loc:vc.vc_loc
@@ -1206,12 +1283,17 @@ let discharge () =
   if !Clflags.vox_dry_run
   then ()
   else (
+    let needs_proof vc =
+      match vc.vc_kind with
+      | Prove -> true
+      | Runtime_check | Assume -> false
+    in
     match !Clflags.vox_solver with
-    | "lean" -> run_lean (List.filter (fun vc -> not vc.vc_assumed) all)
+    | "lean" -> run_lean (List.filter needs_proof all)
     | "z3" ->
       List.iter
         (fun vc ->
-          if not vc.vc_assumed
+          if needs_proof vc
           then (
             match run_z3 (smt_script vc) with
             | Valid -> ()

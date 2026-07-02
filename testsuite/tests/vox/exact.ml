@@ -1,0 +1,77 @@
+(* TEST
+ flags = "-dump-vc -vox-dry-run";
+ expect;
+*)
+
+(* vox: synthesis mode.  [refine_ e] with no refined expected type
+   synthesizes the EXACT refinement {v:t | v = e'} where e' is the
+   logic translation of e -- definitionally true, so no obligation. *)
+let three = refine_ 3
+[%%expect{|
+val three : int{ _ = 3 } = 3
+|}]
+
+(* The DESIGN.md flagship, with no userland lt/zero operations: the
+   comparison is reflected by refine_, its binder contributes the fact,
+   and the path fact discharges div's precondition. *)
+let div (a : int) (b : int{ not (_ = 0) }) : int = a / (b :> int)
+[%%expect{|
+val div : int -> int{ not (_ = 0) } -> int = <fun>
+|}]
+
+let safe (x : int) : int =
+  let c = refine_ (0 < x) in
+  if (c :> bool) then div 100 (refine_ x) else 0
+[%%expect{|
+Line 3, characters 39-40: vox VC:
+  goal: not (x = 0)
+  hypotheses:
+  c
+  c = (0 < x)
+  three = 3
+val safe : int -> int = <fun>
+|}]
+
+(* Compound conditions are translated directly into path facts: no
+   binding needed at all. *)
+let safe2 (x : int) : int =
+  if 0 < x then div 100 (refine_ x) else 0
+[%%expect{|
+Line 2, characters 33-34: vox VC:
+  goal: not (x = 0)
+  hypotheses:
+  0 < x
+  three = 3
+val safe2 : int -> int = <fun>
+|}]
+
+(* Checking position also reflects compound expressions into the goal
+   (rather than a fresh unknown). *)
+let bump : (x : int) -> int{ _ > x } =
+  fun x -> refine_ (x + 1)
+[%%expect{|
+Line 2, characters 19-26: vox VC:
+  goal: (x + 1) > x
+  hypotheses:
+  three = 3
+val bump : (x : int) -> int{ _ > x } = <fun>
+|}]
+
+(* Untranslatable expressions need an annotation. *)
+let bad = refine_ (String.length "a")
+[%%expect{|
+Line 1, characters 10-37:
+1 | let bad = refine_ (String.length "a")
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: vox: refine_ cannot translate this expression into the logic (only variables, int/bool constants, + - * ~-, comparisons at int or bool, and && || not are supported); add a refined type annotation
+|}]
+
+(* Synthesized exact refinements obey the scope rules: at the module
+   level the type would mention the program variable [three]. *)
+let leak = refine_ ((three :> int) + 1)
+[%%expect{|
+Line 1, characters 4-8:
+1 | let leak = refine_ ((three :> int) + 1)
+        ^^^^
+Error: vox: the type of leak carries a refinement mentioning three, which may not appear in a module-level type; annotate with a dependent arrow ((three : ...) -> ...) or a self-contained refinement
+|}]

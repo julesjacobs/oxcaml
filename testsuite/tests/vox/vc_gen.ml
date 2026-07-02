@@ -27,10 +27,11 @@ Line 1, characters 31-35: vox VC:
 val b : bool{ _ } = true
 |}]
 
-(* assume_ skips the obligation and is flagged ASSUMED. *)
+(* assume_ skips the obligation but compiles a runtime check; flagged
+   RUNTIME CHECKED. *)
 let a : {v:int | v >= 0} = assume_ 5
 [%%expect{|
-Line 1, characters 35-36: vox VC (ASSUMED):
+Line 1, characters 35-36: vox VC (RUNTIME CHECKED):
   goal: 5 >= 0
   hypotheses:
   b
@@ -96,4 +97,33 @@ Line 2, characters 35-40: vox VC:
   b
   x > 0
 val branch : bool -> bool{ _ || (not _) } = <fun>
+|}]
+
+(* assume_unchecked_ skips the obligation and the runtime check;
+   flagged ASSUMED. *)
+let au : {v:int | v >= 1} = assume_unchecked_ 7
+[%%expect{|
+Line 1, characters 46-47: vox VC (ASSUMED):
+  goal: 7 >= 1
+  hypotheses:
+  unpack > 0
+  a >= 0
+  b
+  x > 0
+val au : int{ _ >= 1 } = 7
+|}]
+
+(* The toplevel executes the compiled check: a failing assume_ raises
+   Failure instead of binding a lie. *)
+let lie : {v:int | v > 100} = assume_ 1
+[%%expect{|
+Line 1, characters 38-39: vox VC (RUNTIME CHECKED):
+  goal: 1 > 100
+  hypotheses:
+  au >= 1
+  unpack > 0
+  a >= 0
+  b
+  x > 0
+Exception: Failure "vox: assume_ check failed at :1:38: _ > 100".
 |}]

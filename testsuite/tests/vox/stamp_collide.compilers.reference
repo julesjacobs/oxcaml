@@ -1,14 +1,14 @@
-File "collide_a.ml", line 6, characters 58-59: vox VC (ASSUMED):
+File "collide_a.ml", line 6, characters 58-59: vox VC (RUNTIME CHECKED):
   goal: x = x
   hypotheses: <none>
-File "collide_a.ml", line 9, characters 21-28: vox VC (ASSUMED):
-  goal: *vox-unknown* = (p + q)
+File "collide_a.ml", line 9, characters 21-28: vox VC (RUNTIME CHECKED):
+  goal: (p + q) = (p + q)
   hypotheses: <none>
-File "collide_b.ml", line 4, characters 58-59: vox VC (ASSUMED):
+File "collide_b.ml", line 4, characters 58-59: vox VC (RUNTIME CHECKED):
   goal: y = y
   hypotheses: <none>
-File "collide_b.ml", line 7, characters 21-28: vox VC (ASSUMED):
-  goal: *vox-unknown* = (r * s)
+File "collide_b.ml", line 7, characters 21-28: vox VC (RUNTIME CHECKED):
+  goal: (r * s) = (r * s)
   hypotheses: <none>
 File "stamp_collide.ml", line 25, characters 12-13: vox VC:
   goal: a = 5

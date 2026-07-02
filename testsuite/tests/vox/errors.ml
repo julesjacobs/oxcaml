@@ -6,13 +6,14 @@
 (* vox: static (typechecker) errors.  All cases run under -vox-dry-run:
    these are rejected before any solver would run. *)
 
-(* refine_ needs a refined expected type from context. *)
-let x = refine_ 3
+(* assume_ needs a refined expected type from context (refine_ without
+   one synthesizes the exact refinement instead; see exact.ml). *)
+let x = assume_ 3
 [%%expect{|
 Line 1, characters 8-17:
-1 | let x = refine_ 3
+1 | let x = assume_ 3
             ^^^^^^^^^
-Error: vox: refine_ needs a refined expected type; add a type annotation
+Error: vox: assume_ needs a refined expected type; add a type annotation
 |}]
 
 (* Refinements are allowed at every skeleton type; non-int/bool
@@ -239,4 +240,39 @@ Line 1, characters 52-53:
 1 | let vf : (x:int) -> [ `A of {v:int | v = x} ] = fun x -> `A (assume_ x)
                                                         ^
 Error: vox: this dependent parameter occurs under a type the substitution cannot reach (an object, polymorphic variant, or first-class module); this is not supported
+|}]
+
+(* assume_ compiles a runtime check, which is only faithful to the
+   logic for int- and bool-sorted operands: physical equality on other
+   sorts is stricter than logical equality, so a coherent assumption
+   could fail at run time.  Rejected; assume_unchecked_ is the escape
+   hatch. *)
+let strings () =
+  let s = String.make 1 'a' in
+  let t : string{ _ = s } = assume_ (String.make 1 'a') in
+  (t :> string)
+[%%expect{|
+Line 3, characters 36-55:
+3 |   let t : string{ _ = s } = assume_ (String.make 1 'a') in
+                                        ^^^^^^^^^^^^^^^^^^^
+Error: vox: assume_ compiles a runtime check of this refinement, but s is not an int or bool, so the runtime comparison would not agree with the logic's equality; use assume_unchecked_
+|}]
+
+let strings_unchecked () =
+  let s = String.make 1 'a' in
+  let t : string{ _ = s } = assume_unchecked_ (String.make 1 'a') in
+  (t :> string) ^ s
+[%%expect{|
+val strings_unchecked : unit -> string = <fun>
+|}]
+
+(* Intro forms may not be stacked directly on one another (the markers
+   would collapse onto a single node, hiding the inner obligation from
+   the VC pass and the runtime check): let-bind the inner form. *)
+let nested : {v: int{ _ > 0 } | v > 1} = refine_ (assume_ 2)
+[%%expect{|
+Line 1, characters 41-60:
+1 | let nested : {v: int{ _ > 0 } | v > 1} = refine_ (assume_ 2)
+                                             ^^^^^^^^^^^^^^^^^^^
+Error: vox: refine_ applied directly to another refine_/assume_/assume_unchecked_ expression is not supported; let-bind the inner expression first
 |}]
