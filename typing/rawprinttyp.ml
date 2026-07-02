@@ -164,6 +164,8 @@ and raw_type_desc ppf ty =
     fprintf ppf "Tof_kind@ %a" (Format_doc.compat (Jkind.format env)) jkind
   | Tbox t ->
     fprintf ppf "@[Tbox@ %a@]" raw_type t
+  | Trefine (t, p) ->
+    fprintf ppf "@[Trefine(@,%a,@,%s)@]" raw_type t (Refinement.to_string p)
 
 and raw_row_fixed ppf = function
 | None -> fprintf ppf "None"

@@ -4466,6 +4466,10 @@ let type_implementation target modulename initial_env ast =
       in
       Value.submode_err (Location.in_file sourcefile, Structure)
         mode (Env.mode_unit ~staticity:Staticity.Dynamic);
+      (* vox: generate and discharge verification conditions over the
+         final typedtree.  No-op for programs without refinements. *)
+      Profile.record_call "vox_verify" (fun () ->
+        Vox_verify.check_implementation str);
       let uid = Uid.of_compilation_unit_id modulename in
       let shape = Shape.set_uid_if_none shape uid in
       if !Clflags.binary_annotations_cms then

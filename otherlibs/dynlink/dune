@@ -135,6 +135,7 @@
   ldd
   axis_lattice
   value_rec_types
+  refinement
   btype
   lazy_backtrack
   type_shape
@@ -335,6 +336,8 @@
 (copy_files ../../typing/shape_reduce.ml)
 
 (copy_files ../../typing/mode.ml)
+
+(copy_files ../../typing/refinement.ml)
 
 (copy_files ../../typing/btype.ml)
 
@@ -745,6 +748,7 @@
   .dynlink_compilerlibs.objs/byte/dynlink_compilerlibs__Ldd.cmo
   .dynlink_compilerlibs.objs/byte/dynlink_compilerlibs__Unit_info.cmo
   .dynlink_compilerlibs.objs/byte/dynlink_compilerlibs__Shape.cmo
+  .dynlink_compilerlibs.objs/byte/dynlink_compilerlibs__Refinement.cmo
   .dynlink_compilerlibs.objs/byte/dynlink_compilerlibs__Types.cmo
   .dynlink_compilerlibs.objs/byte/dynlink_compilerlibs__Attr_helper.cmo
   .dynlink_compilerlibs.objs/byte/dynlink_compilerlibs__Scalar.cmo
@@ -870,6 +874,7 @@
   .dynlink_compilerlibs.objs/native/dynlink_compilerlibs__Ldd.cmx
   .dynlink_compilerlibs.objs/native/dynlink_compilerlibs__Unit_info.cmx
   .dynlink_compilerlibs.objs/native/dynlink_compilerlibs__Shape.cmx
+  .dynlink_compilerlibs.objs/native/dynlink_compilerlibs__Refinement.cmx
   .dynlink_compilerlibs.objs/native/dynlink_compilerlibs__Types.cmx
   .dynlink_compilerlibs.objs/native/dynlink_compilerlibs__Attr_helper.cmx
   .dynlink_compilerlibs.objs/native/dynlink_compilerlibs__Scalar.cmx

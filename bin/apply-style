@@ -1,0 +1,10 @@
+#!/bin/sh
+# No-op style hook for this repository.
+#
+# The user-level Claude Code PostToolUse hook runs Jane Street's
+# apply-style (ocamlformat) on every edited file, preferring
+# "$(dune root)/bin/apply-style" when it exists.  This compiler repo is
+# deliberately NOT ocamlformat-formatted (see .ocamlformat at the root:
+# disable=true); wholesale reformatting creates enormous diff noise
+# against upstream.  This shim makes the hook a no-op here.
+exit 0

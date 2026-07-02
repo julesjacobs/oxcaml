@@ -3972,6 +3972,31 @@ and type_pat_aux
       }
   | Ppat_effect _ ->
       raise (Error (loc, !!penv, Effect_pattern_below_toplevel))
+  | Ppat_extension ({txt = "vox.refine"; _}, PPat (inner, None)) ->
+      (* vox: unpack pattern [refine_ x].  Binds [x] at the skeleton
+         type of the refined scrutinee; the VC pass contributes the
+         scrutinee's refinement fact for [x]. *)
+      begin match inner.ppat_desc with
+      | Ppat_var _ -> ()
+      | _ ->
+          Location.raise_errorf ~loc
+            "vox: a refine_ pattern must bind a variable"
+      end;
+      let ty_exp = expand_head !!penv (instance expected_ty) in
+      begin match get_desc ty_exp with
+      | Trefine (skel, _pred) ->
+          let p = type_pat tps category inner (instance skel) sort in
+          { p with
+            pat_attributes =
+              { attr_name = {txt = "vox.refine"; loc};
+                attr_payload = PStr [];
+                attr_loc = loc }
+              :: p.pat_attributes }
+      | _ ->
+          Location.raise_errorf ~loc
+            "vox: a refine_ pattern requires the scrutinee to have a \
+             refined type"
+      end
   | Ppat_extension ext ->
       raise (Error_forward (Builtin_attributes.error_of_extension ext))
 
@@ -5966,6 +5991,9 @@ let turn_let_into_match p =
        | Ppat_tuple (_, Open) -> true
        | Ppat_tuple (spl, Closed) ->
          List.exists (fun (l, _) -> Option.is_some l) spl
+       | Ppat_extension ({txt = "vox.refine"; _}, _) ->
+         (* vox unpack patterns need the scrutinee's type first. *)
+         true
        | _ -> false)
     p
 
@@ -8498,6 +8526,44 @@ and type_expect_
             exp_env = env }
       | _ ->
           raise (Error (loc, env, Invalid_atomic_loc_payload))
+      end
+  | Pexp_extension
+      ({txt = ("vox.refine" | "vox.assume") as vox_kind; _}, payload) ->
+      (* vox: [refine_ e] / [assume_ e].  Typed at the refined type
+         expected from context; the inner expression is typed at the
+         skeleton.  The VC pass turns each vox.refine node into a proof
+         obligation (vox.assume is reported as ASSUMED). *)
+      let inner =
+        match payload with
+        | PStr [{pstr_desc = Pstr_eval (e, []); _}] -> e
+        | _ ->
+            Location.raise_errorf ~loc "vox: malformed %s payload" vox_kind
+      in
+      let ty_exp = expand_head env (instance ty_expected) in
+      begin match get_desc ty_exp with
+      | Trefine (skel, _pred) ->
+          let exp =
+            type_expect env expected_mode inner
+              (mk_expected (instance skel))
+          in
+          rue
+            { exp with
+              exp_type = instance ty_exp;
+              exp_attributes =
+                { attr_name = {txt = vox_kind; loc};
+                  attr_payload = PStr [];
+                  attr_loc = loc }
+                :: exp.exp_attributes }
+      | Tvar _ ->
+          Location.raise_errorf ~loc
+            "vox: %s needs a refined expected type; add a type annotation"
+            (if String.equal vox_kind "vox.refine" then "refine_"
+             else "assume_")
+      | _ ->
+          Location.raise_errorf ~loc
+            "vox: %s used where the expected type is not refined"
+            (if String.equal vox_kind "vox.refine" then "refine_"
+             else "assume_")
       end
   | Pexp_extension ext ->
     raise (Error_forward (Builtin_attributes.error_of_extension ext))

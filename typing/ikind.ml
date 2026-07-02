@@ -459,6 +459,9 @@ module Solver = struct
       | Types.Tbox t ->
         let base = Ldd.const Axis_lattice.mutable_data in
         Ldd.join base (kind ~use_tables:true ctx t)
+      | Types.Trefine (t, _) ->
+        (* vox: refined types erase to their skeleton; same kind. *)
+        kind ~use_tables:true ctx t
       | Types.Tfield _ -> failwith "Tfield shouldn't appear in kind"
       | Types.Tnil -> failwith "Tnil shouldn't appear in kind"
       | Types.Tquote _ | Types.Tsplice _ | Types.Tquote_eval _ ->

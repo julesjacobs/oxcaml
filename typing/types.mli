@@ -277,6 +277,12 @@ and type_desc =
   | Tbox of type_expr
   (** [Tbox ty] ==> [ty box] *)
 
+  | Trefine of type_expr * Refinement.pred
+  (** [Trefine (ty, p)] ==> a vox refined type over skeleton [ty].
+      Rigid: unifies only with a [Trefine] whose skeleton unifies and
+      whose predicate is structurally equal.  Erased to [ty] at
+      compilation; its jkind and layout are those of [ty]. *)
+
 (** This is used in the Typedtree. It is distinct from
     {{!Asttypes.arg_label}[arg_label]} because Position argument labels are
     discovered through typechecking. *)

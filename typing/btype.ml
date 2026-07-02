@@ -378,6 +378,7 @@ let fold_type_expr f init ty =
     List.fold_left (fun result (_n, ty) -> f result ty) init pack.pack_cstrs
   | Tof_kind _ -> init
   | Tbox ty -> f init ty
+  | Trefine (ty, _) -> f init ty
 
 let iter_type_expr f ty =
   fold_type_expr (fun () v -> f v) () ty
@@ -621,6 +622,7 @@ let rec copy_type_desc ?(keep_names=false) f = function
         pack_cstrs = List.map (fun (n, ty) -> (n, f ty)) pack.pack_cstrs}
   | Tof_kind jk -> Tof_kind jk
   | Tbox ty -> Tbox (f ty)
+  | Trefine (ty, p) -> Trefine (f ty, p)
 
 (* TODO: rename to [module Copy_scope] *)
 module For_copy : sig

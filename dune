@@ -208,6 +208,7 @@
   ;; TYPING
   ident
   path
+  refinement
   jkind
   scalar
   primitive
@@ -233,6 +234,7 @@
   typedtree
   printtyped
   ctype
+  vox_verify
   printtyp
   rawprinttyp
   gprinttyp

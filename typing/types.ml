@@ -165,6 +165,7 @@ and type_desc =
   | Tpackage of package
   | Tof_kind of jkind_lr
   | Tbox of type_expr
+  | Trefine of type_expr * Refinement.pred
 
 and arg_label =
   | Nolabel
@@ -1352,6 +1353,7 @@ let best_effort_compare_type_expr te1 te2 =
         | Tsplice _
         | Tquote_eval _
         | Tbox _
+        | Trefine _
         (* CR layouts v2.8: we can actually see Tsubst here in certain cases, eg during
            [Ctype.copy] when copying the types inside of with_bounds. We also can't
            compare Tsubst structurally, because the Tsubsts that are created in

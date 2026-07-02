@@ -1,0 +1,42 @@
+File "vc_gen.ml", line 14, characters 34-35: vox VC:
+  goal: 3 > 0
+  hypotheses: <none>
+File "vc_gen.ml", line 17, characters 31-35: vox VC:
+  goal: true
+  hypotheses:
+  x > 0
+File "vc_gen.ml", line 20, characters 35-36: vox VC (ASSUMED):
+  goal: 5 >= 0
+  hypotheses:
+  b
+  x > 0
+File "vc_gen.ml", line 28, characters 11-12: vox VC:
+  goal: not (n = 0)
+  hypotheses:
+  not (n = 0)
+  a >= 0
+  b
+  x > 0
+File "vc_gen.ml", line 33, characters 10-11: vox VC:
+  goal: w > 0
+  hypotheses:
+  w > 0
+  a >= 0
+  b
+  x > 0
+File "vc_gen.ml", line 38, characters 20-21: vox VC:
+  goal: c || (not c)
+  hypotheses:
+  c
+  unpack > 0
+  a >= 0
+  b
+  x > 0
+File "vc_gen.ml", line 38, characters 35-40: vox VC:
+  goal: false || (not false)
+  hypotheses:
+  not c
+  unpack > 0
+  a >= 0
+  b
+  x > 0

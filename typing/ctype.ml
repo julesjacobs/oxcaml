@@ -1040,7 +1040,8 @@ let rec copy_spine copy_scope ty =
   | Tsplice _
   | Tquote_eval _
   | Tof_kind _
-  | Tbox _ -> ty
+  | Tbox _
+  | Trefine _ -> ty
   | ( Tarrow _ | Tpoly _ | Trepr _ | Ttuple _ | Tunboxed_tuple _ | Tpackage _
     | Tconstr _ ) as desc ->
       let level = get_level ty in
@@ -2474,6 +2475,8 @@ and try_reduce_quote_eval env t =
   (* [<[t box]> eval]  ==>  [<[t]> eval box] *)
   | Tbox t ->
     Tbox (new_quote_eval_ty t)
+  (* Refined types do not reduce under quote-eval. *)
+  | Trefine _ -> raise Cannot_expand
   (* [<[#(t1 * t2)]> eval]  ==>  [#(<[t1]> eval * <[t2]> eval)] *)
   | Tunboxed_tuple tl ->
     Tunboxed_tuple (List.map (fun (l, t) -> (l, new_quote_eval_ty t)) tl)
@@ -2659,6 +2662,7 @@ let rec extract_concrete_typedecl env ty =
   | Tsplice ty -> extract_concrete_typedecl (decr_stage env) ty
   | Tquote_eval ty -> extract_concrete_typedecl (incr_stage env) ty
   | Tbox ty -> extract_concrete_typedecl env ty
+  | Trefine (ty, _) -> extract_concrete_typedecl env ty
   | Tarrow _ | Ttuple _ | Tunboxed_tuple _ | Tobject _ | Tfield _ | Tnil
   | Tvariant _ | Tpackage _ | Tof_kind _ -> Has_no_typedecl
   | Tvar _ | Tunivar _ -> May_have_typedecl
@@ -2815,6 +2819,7 @@ let contained_without_boxing env ty =
   | Tunboxed_tuple labeled_tys ->
     List.map snd labeled_tys
   | Tpoly (ty, _) -> [ty]
+  | Trefine (ty, _) -> [ty]
   | Trepr (_, _) ->  Misc.fatal_error "Ctype.contained_without_boxing: repr"
   | Tvar _ | Tarrow _ | Ttuple _ | Tobject _ | Tfield _ | Tnil | Tlink _
   | Tsubst _ | Tvariant _ | Tunivar _ | Tpackage _ | Tof_kind _ | Tbox _
@@ -3050,6 +3055,9 @@ and estimate_type_jkind ~expand_components ~ignore_mod_bounds env ty =
       ty
     |> Jkind.map_type_expr new_quote_ty
   | Tbox _ -> Jkind.Builtin.value ~why:Boxed
+  | Trefine (ty, _) ->
+      (* vox: refined types erase to their skeleton; same jkind. *)
+      estimate_type_jkind ~expand_components ~ignore_mod_bounds env ty
   | Tnil -> Jkind.Builtin.value ~why:Tnil
   | Tlink _ | Tsubst _ -> assert false
   | Tvariant row ->
@@ -4396,6 +4404,9 @@ let rec mcomp type_pairs env t1 t2 =
             mcomp type_pairs (incr_stage env) t1 t2
         | (Tbox t1, Tbox t2, _, _) ->
             mcomp type_pairs env t1 t2
+        | (Trefine (t1, p1), Trefine (t2, p2), _, _)
+          when Refinement.equal p1 p2 ->
+            mcomp type_pairs env t1 t2
         | (Tbox t, _, _, _) when is_unboxable_ty env t2' ->
           mcomp type_pairs env t (unbox_ty_exn env t2')
         | (_, Tbox t, _, _) when is_unboxable_ty env t1' ->
@@ -5054,6 +5065,11 @@ and unify3 uenv t1 t1' t2 t2' =
   | (_, Tquote s2) when is_flexible_ty s2 ->
       unify_with_incr_stage uenv (fun uenv -> unify uenv (new_splice_ty t1') s2)
   | (Tbox t1, Tbox t2) ->
+      unify uenv t1 t2
+  (* vox: rigid refined types.  Skeletons unify; predicates must be
+     structurally equal.  Unequal predicates fall through to the
+     incompatible-types error. *)
+  | (Trefine (t1, p1), Trefine (t2, p2)) when Refinement.equal p1 p2 ->
       unify uenv t1 t2
   | (_, Tbox t2) when is_unboxable_ty (get_env uenv) t1' ->
       unify uenv (unbox_ty_exn (get_env uenv) t1') t2
@@ -6425,6 +6441,9 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
                 (incr_stage env) t1 t2
           | (Tbox t1, Tbox t2) ->
               moregen inst_nongen variance type_pairs env t1 t2
+          | (Trefine (t1, p1), Trefine (t2, p2))
+            when Refinement.equal p1 p2 ->
+              moregen inst_nongen variance type_pairs env t1 t2
           | (Tbox t, _) when is_unboxable_ty env t2' ->
               moregen inst_nongen variance type_pairs
                 env t (unbox_ty_exn env t2')
@@ -6937,6 +6956,9 @@ let rec eqtype rename type_pairs subst env ~do_jkind_check t1 t2 =
               eqtype rename type_pairs subst
                 (incr_stage env) ~do_jkind_check t1 t2
           | (Tbox t1, Tbox t2) ->
+              eqtype rename type_pairs subst env ~do_jkind_check t1 t2
+          | (Trefine (t1, p1), Trefine (t2, p2))
+            when Refinement.equal p1 p2 ->
               eqtype rename type_pairs subst env ~do_jkind_check t1 t2
           | (_, _) ->
               raise_unexplained_for Equality
@@ -7673,6 +7695,10 @@ let rec build_subtype env (visited : transient_expr list)
       let (t1', c) = build_subtype env visited loops posi level t1 in
       if c > Unchanged then (newty (Tbox t1'), c)
       else (t, Unchanged)
+  | Trefine (t1, p) ->
+      let (t1', c) = build_subtype env visited loops posi level t1 in
+      if c > Unchanged then (newty (Trefine (t1', p)), c)
+      else (t, Unchanged)
   | Tnil ->
       if posi then
         let v = newvar (Jkind.Builtin.value ~why:Tnil) in
@@ -7867,6 +7893,22 @@ let rec subtype_rec env trace t1 t2 cstrs =
            (Subtype.Diff {got = t1; expected = t2} :: trace)
            t1 t2
            cstrs
+    (* vox: refined types.  Equal predicates: subtype on skeletons.
+       A refined type is a subtype of its (unrefined) skeleton: this is
+       the coercion [(e :> ty)] that erases the refinement.  The
+       reverse direction is NOT admitted (introduction is [refine_]). *)
+    | (Trefine (u1, p1), Trefine (u2, p2)) when Refinement.equal p1 p2 ->
+        subtype_rec
+          env
+          (Subtype.Diff {got = u1; expected = u2} :: trace)
+          u1 u2
+          cstrs
+    | (Trefine (u1, _), _) ->
+        subtype_rec
+          env
+          (Subtype.Diff {got = u1; expected = t2} :: trace)
+          u1 t2
+          cstrs
     | (_, _) ->
         (trace, t1, t2, !univar_pairs)::cstrs
   end

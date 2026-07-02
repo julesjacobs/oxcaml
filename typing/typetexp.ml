@@ -861,6 +861,64 @@ let type_open :
     ref =
   ref (fun ?used_slot:_ _ -> assert false)
 
+(* vox: elaborate a refinement predicate (an untyped logical term) from
+   its surface form.  [v] denotes the bound value variable; other
+   variables must resolve to simple (non-module) value identifiers in
+   [env].  The predicate is NOT type checked (DESIGN.md): ill-sorted
+   predicates surface as solver errors at VC time. *)
+let rec elab_vox_pred env (e : Parsetree.expression) : Refinement.pred =
+  let open Refinement in
+  let loc = e.pexp_loc in
+  let unsupported () =
+    Location.raise_errorf ~loc
+      "vox: unsupported form in a refinement predicate"
+  in
+  match e.pexp_desc with
+  | Pexp_ident {txt = Longident.Lident "v"; _} -> Pbound
+  | Pexp_ident {txt = lid; _} ->
+      begin match Env.lookup_value ~use:false ~loc lid env with
+      | (Path.Pident id, _, _) -> Pvar id
+      | _ ->
+          Location.raise_errorf ~loc
+            "vox: only locally bound variables may appear in refinements"
+      | exception _ ->
+          Location.raise_errorf ~loc
+            "vox: unbound variable in refinement predicate"
+      end
+  | Pexp_constant {pconst_desc = Pconst_integer (s, None); _} ->
+      begin match int_of_string_opt s with
+      | Some n -> Pint n
+      | None -> unsupported ()
+      end
+  | Pexp_construct ({txt = Longident.Lident "true"; _}, None) -> Pbool true
+  | Pexp_construct ({txt = Longident.Lident "false"; _}, None) -> Pbool false
+  | Pexp_apply
+      ({pexp_desc = Pexp_ident {txt = Longident.Lident op; _}; _}, args) ->
+      begin match op, args with
+      | "not", [(Nolabel, a)] -> Pnot (elab_vox_pred env a)
+      | "&&", [(Nolabel, a); (Nolabel, b)] ->
+          Pand (elab_vox_pred env a, elab_vox_pred env b)
+      | "||", [(Nolabel, a); (Nolabel, b)] ->
+          Por (elab_vox_pred env a, elab_vox_pred env b)
+      | _, [(Nolabel, a); (Nolabel, b)] ->
+          let binop =
+            match op with
+            | "+" -> Add
+            | "-" -> Sub
+            | "*" -> Mul
+            | "=" -> Eq
+            | "<>" -> Neq
+            | "<" -> Lt
+            | "<=" -> Le
+            | ">" -> Gt
+            | ">=" -> Ge
+            | _ -> unsupported ()
+          in
+          Pbinop (binop, elab_vox_pred env a, elab_vox_pred env b)
+      | _ -> unsupported ()
+      end
+  | _ -> unsupported ()
+
 let rec transl_type env ~policy ?(aliased=false) ~row_context mode styp =
   Builtin_attributes.warning_scope styp.ptyp_attributes
     (fun () -> transl_type_aux env ~policy ~aliased ~row_context mode styp)
@@ -1243,6 +1301,31 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
       let new_env = Env.enter_splice ~loc env in
       let cty = transl_type new_env ~policy ~row_context mode t in
       ctyp (Ttyp_splice cty) (newty (Tsplice cty.ctyp_type))
+  | Ptyp_extension ({txt = "vox.refine"; _}, payload) ->
+      (* vox refined type [{v:ty | pred}]. *)
+      let pred_expr, skel_styp =
+        match payload with
+        | PStr [{pstr_desc =
+                   Pstr_eval
+                     ({pexp_desc = Pexp_constraint (e, Some ty, []); _}, _);
+                 _}] ->
+            (e, ty)
+        | _ ->
+            Location.raise_errorf ~loc
+              "vox: malformed refined-type payload"
+      in
+      let cty = transl_type env ~policy ~row_context mode skel_styp in
+      let skel = cty.ctyp_type in
+      begin match get_desc (Ctype.expand_head env skel) with
+      | Tconstr (p, [], _)
+        when Path.same p Predef.path_int || Path.same p Predef.path_bool ->
+          ()
+      | _ ->
+          Location.raise_errorf ~loc
+            "vox: refinements are only supported at types int and bool"
+      end;
+      let pred = elab_vox_pred env pred_expr in
+      { cty with ctyp_type = newty (Trefine (skel, pred)) }
   | Ptyp_extension ext ->
       raise (Error_forward (Builtin_attributes.error_of_extension ext))
 

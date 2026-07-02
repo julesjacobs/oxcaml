@@ -1591,6 +1591,12 @@ let rec tree_of_modal_typexp mode modal ty =
       let tyl' = apply_subst s [ty] in
       Internal_names.add p';
       Otyp_constr (tree_of_path (Some Type) p', tree_of_typlist mode tyl')
+    | Trefine (ty, p) ->
+      (* vox v0 rendering: skeleton decorated with the predicate as an
+         attribute; avoids an outcometree constructor. *)
+      Otyp_attribute
+        (tree_of_typexp mode Alloc.Const.legacy ty,
+         {oattr_name = "vox.refine " ^ Refinement.to_string p})
   in
   Aliases.remove_delay px;
   alias_nongen_row mode px ty;

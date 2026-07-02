@@ -53,6 +53,7 @@ let all_keywords =
     "and", AND, always;
     "as", AS, always;
     "assert", ASSERT, v1_6;
+    "assume_", ASSUME, oxcaml;
     "begin", BEGIN, always;
     "borrow_", BORROW, oxcaml;
     "class", CLASS, v1_0;
@@ -99,6 +100,7 @@ let all_keywords =
     "poly_", POLY, oxcaml;
     "private", PRIVATE, v1_0;
     "rec", REC, always;
+    "refine_", REFINE, oxcaml;
     "repr_", REPR, oxcaml;
     "sig", SIG, always;
     "stack_", STACK, oxcaml;

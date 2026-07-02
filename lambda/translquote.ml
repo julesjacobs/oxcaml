@@ -2871,7 +2871,7 @@ let type_for_annotation ~env ~loc typ =
               tpt_type = Mty_ident pack_path;
               tpt_txt = mkloc (Untypeast.lident_of_path pack_path) loc
             }
-        | Tlink _ | Tsubst _ | Tfield _ | Tnil ->
+        | Tlink _ | Tsubst _ | Tfield _ | Tnil | Trefine _ ->
           fatal_errorf
             "Translquote [at %a]:@ Unexpected type expression@ in a quoted \
              higher-rank function type"

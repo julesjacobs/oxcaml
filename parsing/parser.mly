@@ -1037,6 +1037,7 @@ let maybe_pmod_constraint mode expr =
 %token FUN                    "fun"
 %token FUNCTION               "function"
 %token FUNCTOR                "functor"
+%token ASSUME                 "assume_"
 %token GLOBAL                 "global_"
 %token GREATER                ">"
 %token GREATERRBRACE          ">}"
@@ -1115,6 +1116,7 @@ let maybe_pmod_constraint mode expr =
 %token RBRACKET               "]"
 %token RBRACKETGREATER        "]>"
 %token REC                    "rec"
+%token REFINE                 "refine_"
 %token REPR                   "repr_"
 %token RPAREN                 ")"
 %token SEMI                   ";"
@@ -2893,6 +2895,16 @@ fun_expr:
      { mkexp_constraint ~loc:$sloc ~exp ~cty:None ~modes:[mode] }
   | EXCLAVE seq_expr
      { mkexp_exclave ~loc:$sloc ~kwd_loc:($loc($1)) $2 }
+  | REFINE seq_expr
+     { mkexp ~loc:$sloc
+         (Pexp_extension
+            ({ txt = "vox.refine"; loc = make_loc $loc($1) },
+             PStr [ Str.eval $2 ])) }
+  | ASSUME seq_expr
+     { mkexp ~loc:$sloc
+         (Pexp_extension
+            ({ txt = "vox.assume"; loc = make_loc $loc($1) },
+             PStr [ Str.eval $2 ])) }
 ;
 %inline expr:
   | or_function(fun_expr) { $1 }
@@ -3744,6 +3756,11 @@ pattern_gen:
     ) { $1 }
   | LAZY ext_attributes simple_pattern
       { mkpat_attrs ~loc:$sloc (Ppat_lazy $3) $2}
+  | REFINE simple_pattern
+      { mkpat ~loc:$sloc
+          (Ppat_extension
+             ({ txt = "vox.refine"; loc = make_loc $loc($1) },
+              PPat ($2, None))) }
 ;
 
 simple_pattern:
@@ -5009,6 +5026,20 @@ atomic_type:
       { mktyp ~loc:$sloc (Ptyp_any (Some jkind)) }
   | LPAREN TYPE COLON jkind=jkind_annotation RPAREN
       { mktyp ~loc:$loc (Ptyp_of_kind jkind) }
+  (* vox refined type [{v:ty | pred}].  The [mutable_or_global_flag] and
+     [possibly_poly(core_type_no_attr)] mirror the record
+     [label_declaration] grammar exactly so that LR states stay merged
+     until BAR (refined type) vs SEMI/RBRACE (record declaration). *)
+  | LBRACE flag=mutable_or_global_flag bound=LIDENT COLON
+    ty=possibly_poly(core_type_no_attr) BAR pred=seq_expr RBRACE
+      { (match flag with
+         | Immutable, [] -> ()
+         | _ -> expecting $loc(flag) "an unqualified refinement variable");
+        if bound <> "v" then expecting $loc(bound) "v";
+        mktyp ~loc:$sloc
+          (Ptyp_extension
+             ({ txt = "vox.refine"; loc = make_loc $sloc },
+              PStr [ Str.eval (Exp.constraint_ pred (Some ty) []) ])) }
 
 
 (* This is the syntax of the actual type parameters in an application of
