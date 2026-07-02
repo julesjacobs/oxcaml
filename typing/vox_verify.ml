@@ -91,13 +91,20 @@ let name_sorts : (Ident.t, dsort) Hashtbl.t = Hashtbl.create 64
 let synthetic_names : (Ident.t, unit) Hashtbl.t = Hashtbl.create 16
 let unknown_counter = ref 0
 
-(* Simple-variant datatypes used by the current module's (or toplevel
+(* The solver-side declaration of a "simple" type: a variant becomes a free
+   datatype; a record becomes a single-constructor datatype with named
+   selectors (a Lean [structure]). *)
+type dt_decl =
+  | Dt_variant of (string * dsort list) list (* constructor, field sorts *)
+  | Dt_record of (string * dsort) list (* label, sort *)
+
+(* Simple-variant/record datatypes used by the current module's (or toplevel
    session's) VCs, in dependency order (the datatypes of a datatype's fields
    precede it; self-recursion is fine).  Mutual recursion is not supported:
    detecting a back-edge POISONS the type being registered, which then sorts
    as [S_other] everywhere (sound: facts about its structure become
    ill-sorted and verification fails). *)
-let datatypes : (Path.t * (string * dsort list) list) list ref = ref []
+let datatypes : (Path.t * dt_decl) list ref = ref []
 let registering : Path.t list ref = ref []
 let poisoned : Path.t list ref = ref []
 let find_datatype p = List.find_opt (fun (q, _) -> Path.same p q) !datatypes
@@ -157,18 +164,39 @@ let rec datatype_sort env p =
       poisoned := p :: !poisoned;
       S_other)
   else (
-    match Ctype.vox_simple_variant env p with
+    registering := p :: !registering;
+    (* The pop must survive exceptions: at the toplevel the vox globals
+       persist across phrases, and a stale [registering] entry would
+       spuriously poison later phrases as mutual recursion. *)
+    let decl =
+      Fun.protect
+        ~finally:(fun () -> registering := List.tl !registering)
+        (fun () ->
+          match Ctype.vox_simple_variant env p with
+          | Some cstrs ->
+            Some
+              (Dt_variant
+                 (List.map
+                    (fun (cd : Types.constructor_declaration) ->
+                      ( Ident.name cd.cd_id
+                      , List.map
+                          (dsort_of_type env)
+                          (Types.tys_of_constr_args cd.cd_args) ))
+                    cstrs))
+          | None ->
+            (match Ctype.vox_simple_record env p with
+             | Some lbls ->
+               Some
+                 (Dt_record
+                    (List.map
+                       (fun (ld : Types.label_declaration) ->
+                         Ident.name ld.ld_id, dsort_of_type env ld.ld_type)
+                       lbls))
+             | None -> None))
+    in
+    match decl with
     | None -> S_other
-    | Some cstrs ->
-      registering := p :: !registering;
-      let constrs =
-        List.map
-          (fun (cd : Types.constructor_declaration) ->
-            ( Ident.name cd.cd_id
-            , List.map (dsort_of_type env) (Types.tys_of_constr_args cd.cd_args) ))
-          cstrs
-      in
-      registering := List.tl !registering;
+    | Some decl ->
       if List.exists (Path.same p) !poisoned
       then S_other
       else (
@@ -183,7 +211,7 @@ let rec datatype_sort env p =
                  %s; rename one of them"
                 (path_uname p))
           !datatypes;
-        datatypes := !datatypes @ [ p, constrs ];
+        datatypes := !datatypes @ [ p, decl ];
         S_data p))
 
 and dsort_of_type env ty =
@@ -274,6 +302,39 @@ let rec name_of_expr env (e : expression) : Refinement.pred =
             , cstr.cstr_name
             , List.map (fun (_, a) -> name_of_expr env a) args )
         | S_int | S_bool | S_other -> fresh_unknown env e)
+     | Texp_record { fields; extended_expression; _ }
+       when Array.length fields > 0 ->
+       (* A record literal names the constructor term ["mk"] (a reserved
+          lowercase name: real constructors are capitalized); in a
+          functional update [{ b with l = e }], kept fields project out
+          of the base's name. *)
+       let path =
+         Data_types.lbl_res_type_path (match fields.(0) with lbl, _, _ -> lbl)
+       in
+       (match datatype_sort env path with
+        | S_data _ ->
+          let base =
+            Option.map
+              (fun (be, _, _) -> name_of_expr env be)
+              extended_expression
+          in
+          let arg_of (lbl, _, def) =
+            match def, base with
+            | Overridden (_, ex), _ -> name_of_expr env ex
+            | Kept _, Some b ->
+              Refinement.Pfield (path, lbl.Data_types.lbl_name, b)
+            | Kept _, None ->
+              (* unreachable: [Kept] implies a functional update *)
+              fresh_unknown env e
+          in
+          Refinement.Pconstr (path, "mk", List.map arg_of (Array.to_list fields))
+        | S_int | S_bool | S_other -> fresh_unknown env e)
+     | Texp_field { record; label; _ } ->
+       let path = Data_types.lbl_res_type_path label in
+       (match label.lbl_mut, datatype_sort env path with
+        | Types.Immutable, S_data _ ->
+          Refinement.Pfield (path, label.lbl_name, name_of_expr env record)
+        | _ -> fresh_unknown env e)
      | _ -> fresh_unknown env e)
 ;;
 
@@ -295,11 +356,12 @@ let in_scope ctx id =
 let pred_in_scope ctx p = List.for_all (in_scope ctx) (Refinement.free_vars p)
 
 (* Predicates the compiled runtime check cannot evaluate: constructor
-   terms (structural equality at datatype sorts is future work) and
-   spec functions (solver-side only, no runtime denotation). *)
+   terms and field projections (structural operations at datatype sorts
+   are future work) and spec functions (solver-side only, no runtime
+   denotation). *)
 let rec pred_unreflectable (p : Refinement.pred) =
   match p with
-  | Refinement.Pconstr _ | Refinement.Pfun _ -> true
+  | Refinement.Pconstr _ | Refinement.Pfun _ | Refinement.Pfield _ -> true
   | Refinement.Pbound | Refinement.Pvar _ | Refinement.Pint _
   | Refinement.Pbool _ -> false
   | Refinement.Pbinop (_, a, b)
@@ -501,15 +563,19 @@ and check_class_type ~loc ~what = function
     check_class_type ~loc ~what cty
 ;;
 
-(* vox match fact ("the match refines the thing we matched on"): matching a
-   variable scrutinee [sid] against a SIMPLE pattern -- one constructor of a
-   simple variant whose sub-patterns are all variables or wildcards --
-   contributes [sid = C x1 ... xn] to the case's guard and body.  Wildcards
-   name fresh unknowns.  Anything deeper (nesting, aliases, or-patterns,
-   constants) contributes nothing, which is sound.  This is the constructor
-   analogue of the [if] path fact. *)
-let match_fact
-  : type k. Env.t -> Ident.t -> k general_pattern -> Refinement.pred option
+(* vox match facts ("the match refines the thing we matched on"): matching a
+   variable scrutinee [sid] against a SIMPLE pattern contributes facts to the
+   case's guard and body:
+   - one constructor of a simple variant over variables/wildcards gives
+     [sid = C x1 ... xn] (wildcards name fresh unknowns);
+   - a simple-record pattern gives [xi = sid.li] per VARIABLE sub-pattern
+     (per-field, so partial patterns are fine; non-variable fields
+     contribute nothing).
+   Anything deeper (nesting, aliases, or-patterns, constants) contributes
+   nothing, which is sound.  This is the constructor analogue of the [if]
+   path fact; [let p = x in ...] gets the same facts. *)
+let match_facts
+  : type k. Env.t -> Ident.t -> k general_pattern -> Refinement.pred list
   =
   fun env sid pat ->
   let arg_name (_, (p : value general_pattern)) =
@@ -522,10 +588,10 @@ let match_fact
       Some (Refinement.Pvar id)
     | _ -> None
   in
-  let constructor_fact cstr args =
+  let constructor_facts cstr args =
     let path = Data_types.cstr_res_type_path cstr in
     match datatype_sort env path with
-    | S_int | S_bool | S_other -> None
+    | S_int | S_bool | S_other -> []
     | S_data _ ->
       let rec name_args acc = function
         | [] -> Some (List.rev acc)
@@ -536,20 +602,45 @@ let match_fact
       in
       (match name_args [] args with
        | Some names ->
-         Some
-           (Refinement.Pbinop
-              ( Refinement.Eq
-              , Refinement.Pvar sid
-              , Refinement.Pconstr (path, cstr.Data_types.cstr_name, names) ))
-       | None -> None)
+         [ Refinement.Pbinop
+             ( Refinement.Eq
+             , Refinement.Pvar sid
+             , Refinement.Pconstr (path, cstr.Data_types.cstr_name, names) )
+         ]
+       | None -> [])
+  in
+  let record_facts (fields : (_ * Data_types.label_description * _) list) =
+    match fields with
+    | [] -> []
+    | (_, lbl0, _) :: _ ->
+      let path = Data_types.lbl_res_type_path lbl0 in
+      (match datatype_sort env path with
+       | S_int | S_bool | S_other -> []
+       | S_data _ ->
+         List.filter_map
+           (fun (_, (lbl : Data_types.label_description), sub) ->
+             match (sub : value general_pattern).pat_desc with
+             | Tpat_var { id; _ } ->
+               Some
+                 (Refinement.Pbinop
+                    ( Refinement.Eq
+                    , Refinement.Pvar id
+                    , Refinement.Pfield (path, lbl.lbl_name, Refinement.Pvar sid)
+                    ))
+             | _ -> None)
+           fields)
+  in
+  let value_facts (p : value general_pattern) =
+    match p.pat_desc with
+    | Tpat_construct (_, cstr, _, args, _) -> constructor_facts cstr args
+    | Tpat_record (fields, _, _, _) -> record_facts fields
+    | _ -> []
   in
   match pat.pat_desc with
-  | Tpat_value p ->
-    (match (p :> value general_pattern).pat_desc with
-     | Tpat_construct (_, cstr, _, args, _) -> constructor_fact cstr args
-     | _ -> None)
-  | Tpat_construct (_, cstr, _, args, _) -> constructor_fact cstr args
-  | _ -> None
+  | Tpat_value p -> value_facts (p :> value general_pattern)
+  | Tpat_construct (_, cstr, _, args, _) -> constructor_facts cstr args
+  | Tpat_record (fields, _, _, _) -> record_facts fields
+  | _ -> []
 ;;
 
 (* Extend the context at a binding pattern: new stamps come into scope;
@@ -599,6 +690,18 @@ let rec walk_expr env ctx (e : expression) =
   | Texp_let (_rec_flag, vbs, body) ->
     List.iter (fun vb -> walk_expr env ctx vb.vb_expr) vbs;
     let ctx' = List.fold_left (fun ctx vb -> extend_pat env ctx vb.vb_pat) ctx vbs in
+    (* A destructuring let of a variable gets the same facts a match
+       case would: [let { x; y } = r in ...]. *)
+    let ctx' =
+      List.fold_left
+        (fun ctx vb ->
+          match vb.vb_expr.exp_desc with
+          | Texp_ident { path = Path.Pident id; _ } ->
+            { ctx with cfacts = match_facts env id vb.vb_pat @ ctx.cfacts }
+          | _ -> ctx)
+        ctx'
+        vbs
+    in
     walk_expr env ctx' body
   | Texp_match (scrut, _sort, comp_cases, val_cases, _partial) ->
     walk_expr env ctx scrut;
@@ -611,12 +714,9 @@ let rec walk_expr env ctx (e : expression) =
       fun c ->
       let ctx' = extend_pat ~scrut:scrut.exp_type env ctx c.c_lhs in
       let ctx' =
-        match
-          match scrut_id with
-          | Some sid -> match_fact env sid c.c_lhs
-          | None -> None
-        with
-        | Some f -> { ctx' with cfacts = f :: ctx'.cfacts }
+        match scrut_id with
+        | Some sid ->
+          { ctx' with cfacts = match_facts env sid c.c_lhs @ ctx'.cfacts }
         | None -> ctx'
       in
       Option.iter (walk_expr env ctx') c.c_guard;
@@ -710,6 +810,9 @@ let smt_sel_name p c i =
   "|s:" ^ smt_escape (path_uname p ^ "." ^ c) ^ "." ^ Int.to_string i ^ "|"
 ;;
 
+let smt_field_name p l = "|s:" ^ smt_escape (path_uname p ^ "." ^ l) ^ "|"
+
+
 let smt_sort = function
   | S_int -> "Int"
   | S_bool -> "Bool"
@@ -720,41 +823,56 @@ let smt_sort = function
      | None -> "VoxU" (* unregistered: degrade, sound *))
 ;;
 
+let sort_is_other = function
+  | S_other -> true
+  | S_int | S_bool | S_data _ -> false
+;;
+
 let datatype_field_needs_voxu () =
   List.exists
-    (fun (_, constrs) ->
-      List.exists
-        (fun (_, fields) ->
-          List.exists
-            (fun fs ->
-              match fs with
-              | S_other -> true
-              | S_int | S_bool | S_data _ -> false)
-            fields)
-        constrs)
+    (fun (_, decl) ->
+      match decl with
+      | Dt_variant constrs ->
+        List.exists (fun (_, fields) -> List.exists sort_is_other fields) constrs
+      | Dt_record fields -> List.exists (fun (_, fs) -> sort_is_other fs) fields)
     !datatypes
 ;;
 
 (* All registered datatypes, one [declare-datatypes] block each, already in
-   dependency order (self-recursion within a block is fine). *)
+   dependency order (self-recursion within a block is fine).  A record is a
+   single ["mk"] constructor whose selectors are the labels. *)
 let smt_datatype_decls buf =
   List.iter
-    (fun (p, constrs) ->
+    (fun (p, decl) ->
       Buffer.add_string
         buf
         (Printf.sprintf "(declare-datatypes ((%s 0)) ((" (smt_dt_name p));
-      List.iteri
-        (fun k (cname, fields) ->
-          if k > 0 then Buffer.add_char buf ' ';
-          Buffer.add_string buf ("(" ^ smt_constr_name p cname);
-          List.iteri
-            (fun i fs ->
-              Buffer.add_string
-                buf
-                (Printf.sprintf " (%s %s)" (smt_sel_name p cname i) (smt_sort fs)))
-            fields;
-          Buffer.add_char buf ')')
-        constrs;
+      (match decl with
+       | Dt_variant constrs ->
+         List.iteri
+           (fun k (cname, fields) ->
+             if k > 0 then Buffer.add_char buf ' ';
+             Buffer.add_string buf ("(" ^ smt_constr_name p cname);
+             List.iteri
+               (fun i fs ->
+                 Buffer.add_string
+                   buf
+                   (Printf.sprintf
+                      " (%s %s)"
+                      (smt_sel_name p cname i)
+                      (smt_sort fs)))
+               fields;
+             Buffer.add_char buf ')')
+           constrs
+       | Dt_record fields ->
+         Buffer.add_string buf ("(" ^ smt_constr_name p "mk");
+         List.iter
+           (fun (l, fs) ->
+             Buffer.add_string
+               buf
+               (Printf.sprintf " (%s %s)" (smt_field_name p l) (smt_sort fs)))
+           fields;
+         Buffer.add_char buf ')');
       Buffer.add_string buf ")))\n")
     !datatypes
 ;;
@@ -791,6 +909,10 @@ let rec smt_of_pred buf (p : Refinement.pred) =
         Buffer.add_char buf ' ';
         smt_of_pred buf a)
       args;
+    Buffer.add_char buf ')'
+  | Pfield (p, l, a) ->
+    Buffer.add_string buf ("(" ^ smt_field_name p l ^ " ");
+    smt_of_pred buf a;
     Buffer.add_char buf ')'
   | Pbinop (Neq, a, b) ->
     Buffer.add_string buf "(not (= ";
@@ -873,6 +995,10 @@ let prelude_lines () =
   String.fold_left (fun n c -> if c = '\n' then n + 1 else n) 0 (prelude ())
 ;;
 
+let vc_uses_spec_fun vc =
+  List.exists Refinement.mentions_spec_fun (vc.vc_goal :: vc.vc_facts)
+;;
+
 let smt_script vc =
   let buf = Buffer.create 512 in
   let seen = Hashtbl.create 16 in
@@ -888,7 +1014,7 @@ let smt_script vc =
   in
   if needs_other then Buffer.add_string buf "(declare-sort VoxU 0)\n";
   smt_datatype_decls buf;
-  Buffer.add_string buf (prelude ());
+  if vc_uses_spec_fun vc then Buffer.add_string buf (prelude ());
   List.iter
     (fun id ->
       if not (Hashtbl.mem seen id)
@@ -1011,18 +1137,37 @@ let lean_sort = function
      | None -> "VoxU" (* unregistered: degrade, sound *))
 ;;
 
-(* One inductive per line (the error-line mapping counts lines), in dependency
-   order; self-recursion within a line is fine. *)
+(* One declaration per line (the error-line mapping counts lines), in
+   dependency order; self-recursion within a line is fine.  Variants are
+   inductives; records are structures, whose projections come built in. *)
 let lean_datatype_decls buf =
   List.iter
-    (fun (p, constrs) ->
-      Buffer.add_string buf (Printf.sprintf "inductive %s : Type where" (lean_dt_name p));
-      List.iter
-        (fun (cname, fields) ->
-          Buffer.add_string buf (Printf.sprintf " | %s : " (lean_sanitize cname));
-          List.iter (fun fs -> Buffer.add_string buf (lean_sort fs ^ " -> ")) fields;
-          Buffer.add_string buf (lean_dt_name p))
-        constrs;
+    (fun (p, decl) ->
+      (match decl with
+       | Dt_variant constrs ->
+         Buffer.add_string
+           buf
+           (Printf.sprintf "inductive %s : Type where" (lean_dt_name p));
+         List.iter
+           (fun (cname, fields) ->
+             Buffer.add_string
+               buf
+               (Printf.sprintf " | %s : " (lean_sanitize cname));
+             List.iter
+               (fun fs -> Buffer.add_string buf (lean_sort fs ^ " -> "))
+               fields;
+             Buffer.add_string buf (lean_dt_name p))
+           constrs
+       | Dt_record fields ->
+         Buffer.add_string
+           buf
+           (Printf.sprintf "structure %s where" (lean_dt_name p));
+         List.iter
+           (fun (l, fs) ->
+             Buffer.add_string
+               buf
+               (Printf.sprintf " (%s : %s)" (lean_sanitize l) (lean_sort fs)))
+           fields);
       Buffer.add_char buf '\n')
     !datatypes
 ;;
@@ -1036,6 +1181,14 @@ let boolish p =
     (match Hashtbl.find_opt name_sorts id with
      | Some S_bool -> true
      | _ -> false)
+  | Pfield (p, l, _) ->
+    (* a bool-sorted field is a [Prop] in the Lean model *)
+    (match find_datatype p with
+     | Some (_, Dt_record fields) ->
+       (match List.assoc_opt l fields with
+        | Some S_bool -> true
+        | Some (S_int | S_data _ | S_other) | None -> false)
+     | Some (_, Dt_variant _) | None -> false)
   | Pbound | Pint _ | Pconstr _ | Pfun _ | Pbinop ((Add | Sub | Mul), _, _) ->
     false
 ;;
@@ -1075,6 +1228,11 @@ let rec lean_of_pred buf (p : Refinement.pred) =
         Buffer.add_char buf ' ';
         lean_of_pred buf a)
       args;
+    Buffer.add_char buf ')'
+  | Pfield (p, l, a) ->
+    (* structure projection *)
+    Buffer.add_string buf ("(" ^ lean_dt_name p ^ "." ^ lean_sanitize l ^ " ");
+    lean_of_pred buf a;
     Buffer.add_char buf ')'
   | Pbinop (Eq, a, b) -> bin (if boolish a || boolish b then "↔" else "=") a b
   | Pbinop (Neq, a, b) ->
@@ -1141,15 +1299,21 @@ let lean_file vcs =
     || datatype_field_needs_voxu ()
   in
   (* Header: VoxU (referenced by datatype fields, so first), then one
-     inductive per line, then the [-vox-prelude]; theorems follow, one
-     per line. *)
+     declaration per line, then the [-vox-prelude] -- only when some VC
+     applies a spec function: the prelude may reference another
+     module's datatypes, which do not exist in this input.  Theorems
+     follow, one per line. *)
+  let want_prelude = List.exists vc_uses_spec_fun vcs in
   let first_line =
-    1 + (if needs_voxu then 1 else 0) + List.length !datatypes + prelude_lines ()
+    1
+    + (if needs_voxu then 1 else 0)
+    + List.length !datatypes
+    + (if want_prelude then prelude_lines () else 0)
   in
   let first_line = first_line + 1 in
   if needs_voxu then Buffer.add_string buf "opaque VoxU : Type\n";
   lean_datatype_decls buf;
-  Buffer.add_string buf (prelude ());
+  if want_prelude then Buffer.add_string buf (prelude ());
   (* Bound elaboration per theorem: a diverging [grind] must count as
      a verification failure, not hang the build.  (A wedged process
      outside elaboration remains out of scope, as for z3.)  Emitted

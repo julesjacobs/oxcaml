@@ -923,3 +923,8 @@ val apply_right_is_contained_by : Mode.Hint.is_contained_by
     declarations. *)
 val vox_simple_variant :
   Env.t -> Path.t -> Types.constructor_declaration list option
+
+(** vox: if [p] is a "simple" record (monomorphic, all fields
+    immutable), its label declarations. *)
+val vox_simple_record :
+  Env.t -> Path.t -> Types.label_declaration list option

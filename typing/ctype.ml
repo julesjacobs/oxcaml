@@ -8928,3 +8928,25 @@ let vox_simple_variant env p =
                cstrs ->
           Some cstrs
       | _ -> None
+
+(* vox: recognize a "simple" record type: monomorphic, every field
+   immutable.  These are the records whose fields may appear (projected)
+   in refinement predicates; the solver models them as single-constructor
+   datatypes with named selectors.  A mutable field disqualifies the
+   whole record from precise tracking: naming a record term and then
+   mutating a field would prove false equalities.  (Refinements ON a
+   mutable field's type still work as invariants, independently.) *)
+let vox_simple_record env p =
+  match Env.find_type p env with
+  | exception Not_found -> None
+  | decl ->
+      match decl.type_params, decl.type_kind with
+      | [], Type_record ((_ :: _ as lbls), _, _)
+        when List.for_all
+               (fun (ld : Types.label_declaration) ->
+                 match ld.ld_mutable with
+                 | Immutable -> true
+                 | Mutable _ -> false)
+               lbls ->
+          Some lbls
+      | _ -> None

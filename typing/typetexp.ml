@@ -953,6 +953,27 @@ let rec elab_vox_pred ~bound ~self_root env (e : Parsetree.expression)
   | Pexp_construct ({txt = Longident.Lident "false"; _}, None) -> Pbool false
   | Pexp_construct ({txt = lid; _}, arg) ->
       elab_vox_constr ~bound ~self_root env ~loc lid arg
+  | Pexp_field (base, {txt = lid; _}) ->
+      (* Field projection: the label resolves like constructors do (the
+         predicate is untyped, and selector symbols are per-type), and
+         only fields of simple immutable records are admitted. *)
+      let label =
+        match
+          Env.lookup_label ~use:false ~record_form:Data_types.Legacy ~loc
+            Env.Projection lid env
+        with
+        | l -> l
+        | exception _ ->
+            Location.raise_errorf ~loc
+              "vox: unbound record field in refinement predicate"
+      in
+      let path = Data_types.lbl_res_type_path label in
+      if Ctype.vox_simple_record env path = None then
+        Location.raise_errorf ~loc
+          "vox: only fields of simple records (monomorphic, no mutable \
+           fields) may appear in refinement predicates";
+      Pfield
+        (path, label.Data_types.lbl_name, elab_vox_pred ~bound ~self_root env base)
   | Pexp_apply _ ->
       (* Flatten a curried spine: the compact predicate grammar nests
          applications one argument at a time. *)

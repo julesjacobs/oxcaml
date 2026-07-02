@@ -5126,18 +5126,31 @@ vox_pred_mul:
    a tuple).  Argument atoms exclude [- INT] so that [len x - 1] stays a
    subtraction; write [len (-1)] to apply to a negative literal. *)
 vox_pred_app:
-  | h = vox_pred_app a = vox_pred_arg
+  | h = vox_pred_app a = vox_pred_proj
       { mkexp ~loc:$sloc (Pexp_apply (h, [Nolabel, a])) }
-  | p = vox_pred_atom { p }
-;
-
-vox_pred_atom:
-  | p = vox_pred_arg { p }
+  | p = vox_pred_proj { p }
   | MINUS n = INT
       { let (n, m) = n in
         mkexp ~loc:$sloc
           (Pexp_constant
              (mkconst ~loc:$sloc (Pconst_integer ("-" ^ n, m)))) }
+;
+
+(* Field projection binds tighter than application, as in expressions:
+   [len r.x] is [len (r.x)].  Constructors are not projection bases
+   (their DOT belongs to [mod_longident]), which keeps the grammar
+   deterministic. *)
+vox_pred_proj:
+  | p = vox_pred_projbase { p }
+  | c = mkrhs(mod_longident)
+      { mkexp ~loc:$sloc (Pexp_construct (c, None)) }
+;
+
+vox_pred_projbase:
+  | a = vox_pred_projbase DOT l = mkrhs(LIDENT)
+      { mkexp ~loc:$sloc
+          (Pexp_field (a, { l with txt = Longident.Lident l.txt })) }
+  | p = vox_pred_arg { p }
 ;
 
 vox_pred_arg:
@@ -5155,8 +5168,6 @@ vox_pred_arg:
   | FALSE
       { mkexp ~loc:$sloc
           (Pexp_construct (mkrhs (Lident "false") $sloc, None)) }
-  | c = mkrhs(mod_longident)
-      { mkexp ~loc:$sloc (Pexp_construct (c, None)) }
   | LPAREN ps = separated_nonempty_llist(COMMA, vox_pred) RPAREN
       { match ps with
         | [ p ] -> p

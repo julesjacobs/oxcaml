@@ -90,11 +90,32 @@
   datatypes are not supported (self-recursion is fine).  Constructor
   argument types may themselves be refined (`W of {v:int | v > 0}`):
   matching then contributes the field's refinement at the binder.
+- Simple records (monomorphic, EVERY field immutable) are
+  single-constructor datatypes with named selectors (Lean:
+  [structure]s, whose projections come built in).  Field projection
+  appears in predicates -- `point{ _.px = p.py }` -- binding tighter
+  than application, as in expressions; the label resolves at
+  elaboration like constructors do.  Construction names the
+  constructor term; a functional update `{ p with px = e }` projects
+  kept fields out of the base's name (the frame comes for free).  A
+  mutable field disqualifies the whole record from precise tracking
+  (naming a term and then mutating a field would prove false
+  equalities): its fields may not appear in predicates and its reads
+  stay fresh unknowns.  Refinements ON a mutable field's type still
+  work, as invariants re-proved at every write.  Record literals do
+  not appear in predicates (project instead: `_.px = 1 && _.py = 2`);
+  structure extensionality is not automatic (grind proves projection
+  goals, not bare record equalities from equal projections).  A field
+  named [mk] (the structure's constructor), or two fields whose
+  sanitized solver names collide, makes the emitted declaration
+  invalid: a solver error, i.e. a verification failure (fails
+  closed).
 - Spec functions: any other applied identifier in a predicate,
   `len _` or `mem 2 _`, denotes a logical function that the user
   defines on the solver side in a `-vox-prelude` file, inserted
-  verbatim into every generated solver input just after the datatype
-  declarations (for Lean: `@[grind] def len : Vox_M_ilist -> Int ...`).
+  verbatim -- just after the datatype declarations -- into every
+  generated solver input that applies a spec function (not into other
+  inputs: the prelude may reference datatypes of a different module) (for Lean: `@[grind] def len : Vox_M_ilist -> Int ...`).
   Spec functions live in their own namespace -- program functions have
   no logical meaning, so there is nothing to collide with -- and, like
   the rest of the predicate language, they are untyped.  To make
@@ -150,9 +171,13 @@ places:
   `match s with ...` where `s` is a VARIABLE, a case whose pattern is
   one constructor of a simple variant over variables or wildcards
   checks its guard and body under `s = C x1 ... xn` (wildcards name
-  fresh unknowns).  Deeper patterns -- nesting, aliases, or-patterns,
-  constants -- contribute nothing, which is sound.  A branch learns
-  what `s` IS, never what it is not: negative facts are future work.
+  fresh unknowns); a simple-record pattern contributes `xi = s.li` per
+  variable sub-pattern (per-field, so partial patterns are fine).
+  `let p = x in ...` gets the same facts, so destructuring a record
+  binds its fields logically.  Deeper patterns -- nesting, aliases,
+  or-patterns, constants -- contribute nothing, which is sound.  A
+  branch learns what `s` IS, never what it is not: negative facts are
+  future work.
 
 Constructors are the one program construct with built-in logical
 meaning ("the usual refinements"): the name of `K e1 ... en` is
