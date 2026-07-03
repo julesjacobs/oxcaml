@@ -35,6 +35,9 @@ Error: vox: verification failed (lean).
        Goal: a > 0
 Hypotheses:
   a#2 > 0
+Possible counterexample:
+  a = 0
+  a#2 = 1
 (lean: error: `grind` failed)
 |}]
 

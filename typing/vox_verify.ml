@@ -44,7 +44,7 @@ type dsort =
    later ones display as name#2, name#3, ... in order of appearance,
    so a hypothesis about a shadowed variable cannot read as identical
    to the goal it fails to prove. *)
-let with_vc_display vc k =
+let vc_display_fun vc =
   let seen : (string, Ident.t list) Hashtbl.t = Hashtbl.create 8 in
   List.iter
     (fun p ->
@@ -56,7 +56,7 @@ let with_vc_display vc k =
           then Hashtbl.replace seen name (ids @ [ id ]))
         (Refinement.free_vars p))
     (vc.vc_goal :: vc.vc_facts);
-  let display id =
+  fun id ->
     let name = Ident.name id in
     match Hashtbl.find_opt seen name with
     | Some (_ :: _ :: _ as ids) ->
@@ -68,9 +68,9 @@ let with_vc_display vc k =
       in
       index 1 ids
     | _ -> name
-  in
-  Refinement.with_var_display display k
 ;;
+
+let with_vc_display vc k = Refinement.with_var_display (vc_display_fun vc) k
 
 let hyps_for_error vc =
   with_vc_display vc (fun () ->
@@ -1741,53 +1741,6 @@ let lean_datatype_decls buf ~skip =
     !datatypes
 ;;
 
-(* The .cmi spec export of a unit: its blocks plus pre-rendered
-   declarations of the datatypes its exported refinements mention.
-   Computed from a FRESH registration pass over the exported signature
-   (batch compilation may leave another unit's datatype state in the
-   globals), restored afterwards.  No blocks, no export: without spec
-   functions clients register datatypes on demand as before. *)
-let cmi_export env (sg : Types.signature) ~blocks =
-  if blocks = []
-  then None
-  else begin
-    let saved = !datatypes, !registering, !poisoned in
-    datatypes := [];
-    registering := [];
-    poisoned := [];
-    Misc.try_finally
-      ~always:(fun () ->
-        let d, r, po = saved in
-        datatypes := d;
-        registering := r;
-        poisoned := po)
-      (fun () ->
-        iter_signature_types sg ~f:(fun ~loc:_ ~what:_ ty ->
-          register_type_specs env ty);
-        let dts =
-          List.map
-            (fun ((p, _) as dt) ->
-              path_uname p, lean_datatype_decl dt, smt_datatype_decl dt)
-            !datatypes
-        in
-        Some
-          { Cmi_format.vp_datatypes = dts
-          ; vp_needs_voxu = datatype_field_needs_voxu ()
-          ; vp_blocks = blocks
-          })
-  end
-;;
-
-(* Save-site entry points (see Typemod / Compile_common). *)
-let cmi_export_of_signature (tsg : Typedtree.signature) =
-  cmi_export tsg.sig_final_env tsg.sig_type ~blocks:(collect_preludes_sig tsg)
-;;
-
-let cmi_export_of_structure (str : structure) (sg : Types.signature) =
-  cmi_export str.str_final_env sg
-    ~blocks:(List.map (fun (b, s, _loc) -> b, s) (collect_preludes str))
-;;
-
 let boolish p =
   let open Refinement in
   match p with
@@ -1952,6 +1905,77 @@ let lean_spec_def buf (d : Vox_reflect.spec_def) =
     Buffer.add_string buf ").toNat\ndecreasing_by all_goals omega\n"
 ;;
 
+(* The .cmi spec export of a unit: its reflected definitions
+   (pre-rendered, as lean-only blocks ahead of the user's blocks, which
+   may state lemmas about them), its blocks, plus pre-rendered
+   declarations of the datatypes its exported refinements and
+   definitions mention.  Computed from a FRESH registration pass over
+   the exported signature (batch compilation may leave another unit's
+   datatype state in the globals), restored afterwards.  No blocks and
+   no definitions, no export: without spec functions clients register
+   datatypes on demand as before. *)
+let cmi_export env (sg : Types.signature) ~defs ~blocks =
+  let def_blocks =
+    List.map
+      (fun (d : Vox_reflect.spec_def) ->
+        let b = Buffer.create 128 in
+        lean_spec_def b d;
+        Some "lean", Buffer.contents b)
+      defs
+  in
+  let blocks = def_blocks @ blocks in
+  if blocks = []
+  then None
+  else begin
+    let saved = !datatypes, !registering, !poisoned in
+    datatypes := [];
+    registering := [];
+    poisoned := [];
+    Misc.try_finally
+      ~always:(fun () ->
+        let d, r, po = saved in
+        datatypes := d;
+        registering := r;
+        poisoned := po)
+      (fun () ->
+        iter_signature_types sg ~f:(fun ~loc:_ ~what:_ ty ->
+          register_type_specs env ty);
+        List.iter
+          (fun d ->
+            List.iter
+              (fun p -> ignore (datatype_sort env p))
+              (Vox_reflect.def_datatype_paths d))
+          defs;
+        let dts =
+          List.map
+            (fun ((p, _) as dt) ->
+              path_uname p, lean_datatype_decl dt, smt_datatype_decl dt)
+            !datatypes
+        in
+        Some
+          { Cmi_format.vp_datatypes = dts
+          ; vp_needs_voxu = datatype_field_needs_voxu ()
+          ; vp_blocks = blocks
+          })
+  end
+;;
+
+(* Save-site entry points (see Typemod / Compile_common).  Reflected
+   definitions are exported only from the cmi a unit writes itself: for
+   a unit with an .mli the cmi comes from the interface, which has no
+   bodies to reflect -- there, total_ functions stay private to the
+   implementation (clients' calls degrade to unknowns; sound). *)
+let cmi_export_of_signature (tsg : Typedtree.signature) =
+  cmi_export tsg.sig_final_env tsg.sig_type ~defs:[]
+    ~blocks:(collect_preludes_sig tsg)
+;;
+
+let cmi_export_of_structure (str : structure) (sg : Types.signature) =
+  cmi_export str.str_final_env sg ~defs:!spec_defs
+    ~blocks:(List.map (fun (b, s, _loc) -> b, s) (collect_preludes str))
+;;
+
+
 (* Emits every definition; also returns the total line count and, per
    definition, its 0-based line span within the block (so a Lean error
    inside a definition -- typically a failed termination proof -- is
@@ -2080,16 +2104,12 @@ let lean_file vcs =
   let own_decls = Buffer.create 256 in
   lean_datatype_decls own_decls ~skip:!seen;
   seg (Buffer.contents own_decls);
-  (* Reflected definitions, unconditionally: they are checked
-     (termination included) even when nothing else needs the
-     prelude. *)
-  List.iter
-    (fun (d : Vox_reflect.spec_def) ->
-      let b = Buffer.create 128 in
-      lean_spec_def b d;
-      seg ~src:(Reflected_def d) (Buffer.contents b))
-    !spec_defs;
-  if want_prelude
+  (* Imported blocks and the [-vox-prelude] file come BEFORE this
+     module's reflected definitions: a definition may call an imported
+     reflected function (whose definition rides the exporting unit's
+     blocks).  They are therefore also needed whenever this module has
+     definitions, not only when a VC applies a spec function. *)
+  if want_prelude || !spec_defs <> []
   then (
     List.iter
       (fun (unit, vp) ->
@@ -2097,10 +2117,22 @@ let lean_file vcs =
           (fun text -> seg ~src:(Imported_block unit) text)
           (export_blocks_for "lean" vp))
       !imported_preludes;
-    seg (prelude ());
+    seg (prelude ()));
+  (* Reflected definitions, unconditionally: they are checked
+     (termination included) even when nothing else needs the
+     prelude.  This module's own blocks follow them, so a block may
+     state lemmas about them. *)
+  List.iter
+    (fun (d : Vox_reflect.spec_def) ->
+      let b = Buffer.create 128 in
+      lean_spec_def b d;
+      seg ~src:(Reflected_def d) (Buffer.contents b))
+    !spec_defs;
+  if want_prelude
+  then
     List.iter
       (fun (s, loc) -> seg ~src:(Local_block loc) s)
-      (embedded_for "lean"));
+      (embedded_for "lean");
   (* Bound elaboration per theorem: a diverging [grind] must count as
      a verification failure, not hang the build.  (A wedged process
      outside elaboration remains out of scope, as for z3.)  Emitted
@@ -2137,6 +2169,86 @@ let lean_file vcs =
           index would make [List.nth_opt] raise). *)
        if line < first_line then None else List.nth_opt vcs (line - first_line)),
     block_of_line )
+;;
+
+(* Counterexample rendering: a failed [grind] prints, among its goal
+   diagnostics, the arithmetic model its linear solver ended on
+   ("[assign] v_n_308 := 7").  Rewritten to source names, that model is
+   usually a concrete input on which the goal is false -- the single
+   most useful thing a failure message can carry.  Lines still
+   mentioning internal [v_...] names after rewriting (values the VC
+   cannot name) are dropped; ["a ^ 2"]-style bracketed ring monomials
+   too. *)
+let replace_all ~sub ~by s =
+  let n = String.length sub in
+  let buf = Buffer.create (String.length s) in
+  let i = ref 0 in
+  while !i <= String.length s - n do
+    if String.equal (String.sub s !i n) sub
+    then (
+      Buffer.add_string buf by;
+      i := !i + n)
+    else (
+      Buffer.add_char buf s.[!i];
+      incr i)
+  done;
+  Buffer.add_substring buf s !i (String.length s - !i);
+  Buffer.contents buf
+;;
+
+let counterexample_for_error vc assigns =
+  match assigns with
+  | [] -> ""
+  | _ ->
+    let display = vc_display_fun vc in
+    let vars =
+      List.fold_left
+        (fun acc id -> if List.exists (Ident.same id) acc then acc else id :: acc)
+        []
+        (free_vars_of_vc vc)
+    in
+    let subs =
+      List.sort
+        (fun (a, _) (b, _) -> compare (String.length b) (String.length a))
+        (List.map (fun id -> lean_name id, display id) vars)
+    in
+    let rewrite s =
+      List.fold_left (fun s (sub, by) -> replace_all ~sub ~by s) s subs
+    in
+    let contains ~sub s =
+      let n = String.length sub in
+      let rec at i =
+        i + n <= String.length s
+        && (String.equal (String.sub s i n) sub || at (i + 1))
+      in
+      at 0
+    in
+    let shown =
+      List.filter_map
+        (fun l ->
+          let l = rewrite l in
+          if contains ~sub:"v_" l
+          then None
+          else (
+            (* Nonlinear monomials and other theory atoms print in
+               corner brackets ("[x * y] := 1"); keep them, brackets
+               stripped -- dropping them could show a partial model
+               that satisfies the goal. *)
+            let l = replace_all ~sub:"\xe3\x80\x8c" ~by:"" l in
+            let l = replace_all ~sub:"\xe3\x80\x8d" ~by:"" l in
+            Some (replace_all ~sub:" := " ~by:" = " l)))
+        assigns
+    in
+    let shown =
+      if List.length shown > 12
+      then List.filteri (fun i _ -> i < 12) shown @ [ "..." ]
+      else shown
+    in
+    (match shown with
+     | [] -> ""
+     | _ ->
+       "\nPossible counterexample:"
+       ^ String.concat "" (List.map (fun l -> "\n  " ^ l) shown))
 ;;
 
 let run_lean vcs =
@@ -2200,6 +2312,15 @@ let run_lean vcs =
           let error_line = ref None in
           let msg = ref "" in
           let first_output = ref "" in
+          (* The grind diagnostics that follow the first error include
+             the arithmetic model ("[assign] x := 7") that refuted the
+             goal; collect it until the next per-location message. *)
+          let assigns = ref [] in
+          let assigns_done = ref false in
+          let is_file_line l =
+            String.length l > String.length in_file
+            && String.equal (String.sub l 0 (String.length in_file)) in_file
+          in
           (try
              while true do
                let l = input_line ic in
@@ -2207,12 +2328,7 @@ let run_lean vcs =
                match !error_line with
                | None ->
                  (match String.index_opt l ':' with
-                  | Some _
-                    when String.length l > String.length in_file
-                         && String.equal
-                              (String.sub l 0 (String.length in_file))
-                              in_file
-                         && error_marker l <> None ->
+                  | Some _ when is_file_line l && error_marker l <> None ->
                     let rest =
                       String.sub l (String.length in_file + 1)
                         (String.length l - String.length in_file - 1)
@@ -2226,11 +2342,25 @@ let run_lean vcs =
                         | None -> ())
                      | None -> ())
                   | _ -> ())
-               | Some _ -> ()
+               | Some _ ->
+                 if is_file_line l
+                 then assigns_done := true
+                 else if not !assigns_done
+                 then (
+                   let t = String.trim l in
+                   let tag = "[assign] " in
+                   if String.length t > String.length tag
+                      && String.equal (String.sub t 0 (String.length tag)) tag
+                   then
+                     assigns
+                     := String.sub t (String.length tag)
+                          (String.length t - String.length tag)
+                        :: !assigns)
              done
            with
            | End_of_file -> ());
           close_in ic;
+          let assigns = List.rev !assigns in
           (* Strip the (nondeterministic) temp-file prefix from the
              message; keep from "error"/"error(kind)" onward. *)
           let strip_msg m =
@@ -2286,9 +2416,10 @@ let run_lean vcs =
                (match vc_of_line line, vcs with
                 | Some vc, _ | None, vc :: _ ->
                   Location.raise_errorf ~loc:vc.vc_loc
-                    "vox: verification failed (lean).@ Goal: %s%s%s"
+                    "vox: verification failed (lean).@ Goal: %s%s%s%s"
                     (goal_for_error vc)
                     (hyps_for_error vc)
+                    (counterexample_for_error vc assigns)
                     (if String.equal msg "" then ""
                      else "\n(lean: " ^ msg ^ ")")
                 | None, [] ->

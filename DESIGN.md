@@ -188,15 +188,24 @@
   goals, so `fib` with guards `n <= 0` / `n = 1` needs exactly
   `[@@vox.decreases n]`.  Two reflected functions may not share a
   name; a reflected name shadowing a prelude definition is a solver
-  error (fails closed).  See testsuite/tests/vox/lean_reflect.ml (a
+  error (fails closed).  See testsuite/tests/vox/demo/lean_reflect.ml (a
   spec library with an EMPTY prelude) and lean_fib.ml (reflected fib,
   with the fast-doubling lemmas stated about it in the prelude).
+  Reflected functions CROSS MODULES: the marker rides the binder
+  pattern into val_attributes and hence the .cmi, and the definition
+  rides the unit's spec export (pre-rendered, ahead of the unit's own
+  blocks, which may state lemmas about it) -- so a client names
+  [A.fib x] like a local call, applies [A.fib] (or [fib], after
+  [open]) in predicates, and may reflect its own functions in terms of
+  imported ones (imported blocks are emitted before this module's
+  definitions).  A unit with an .mli exports neither marker nor
+  definition: its total_ functions stay private, and a client's use
+  degrades to an unknown (sound).  Two units exporting the same
+  definition name collide in the client's solver input (fails
+  closed).  See testsuite/tests/vox/demo/lean_reflectclient.ml.
   Caveats: the program/logic correspondence of a reflected call is
   partial-correctness (a diverging call returns no value) and ideal
-  arithmetic (overflow, as everywhere); the definition is emitted only
-  in its own module (client modules re-reflect nothing -- cross-module
-  reflected calls are future work, needing the definition in the
-  .cmi).
+  arithmetic (overflow, as everywhere).
 - Embedded preludes: `[%%vox.prelude.lean {lean|...|lean}]` (and
   `.z3`, or bare `vox.prelude` for whichever backend runs) puts the
   solver-side text directly in the module, next to the datatypes it
@@ -338,6 +347,12 @@ arrow as the sanctioned spelling.)
 A `-dump-vc` flag prints every VC (hypotheses, goal, source location);
 `-vox-dry-run` skips the solver, so VC generation is testable without
 z3 (see testsuite/tests/vox, promoted like other reference tests).
+A failed obligation reports the goal, the hypotheses, and -- when
+grind's linear solver leaves one -- a POSSIBLE COUNTEREXAMPLE: its
+arithmetic model, rewritten to source names ([a = 0, a#2 = 1],
+[fib 4 = 3]).  On linear goals it is a genuine refutation; nonlinear
+monomials and theory atoms appear as their own entries, so a model
+that is only linear-consistent is visibly so.
 
 ## Escape enforcement (the activation problem)
 

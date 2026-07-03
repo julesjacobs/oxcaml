@@ -50,6 +50,48 @@ let register_reflected id ~arity =
   Hashtbl.replace reflected id (Ident.name id, arity)
 ;;
 
+let find_attr name (attrs : Parsetree.attributes) =
+  List.find_opt
+    (fun (a : Parsetree.attribute) -> String.equal a.attr_name.txt name)
+    attrs
+;;
+
+let has_total_attr attrs = find_attr "vox.total" attrs <> None
+
+(* [Some (name, arity)] when [path] denotes a reflected function: a
+   local one (the typing-time table), or any value carrying the
+   [vox.total] marker in its val_attributes -- the marker rides the
+   binder pattern into the value description and hence the .cmi, so
+   IMPORTED reflected functions are recognized too (their definitions
+   ride the exporting unit's spec blocks; a unit with an .mli exports
+   no marker and no definition, consistently).  The definition's
+   solver-side name is the source name, and the arity is the type's
+   arrow count: reflected functions are first-order, so it is exact. *)
+let reflected_call_info env path (desc : Types.value_description) =
+  let table =
+    match path with
+    | Path.Pident id -> Hashtbl.find_opt reflected id
+    | _ -> None
+  in
+  match table with
+  | Some _ -> table
+  | None ->
+    if has_total_attr desc.val_attributes
+    then (
+      let rec arity ty acc =
+        let ty =
+          match Ctype.expand_head env ty with
+          | ty' -> ty'
+          | exception _ -> ty
+        in
+        match Types.get_desc ty with
+        | Tarrow (_, _, ret, _) -> arity ret (acc + 1)
+        | _ -> acc
+      in
+      Some (Path.last path, arity desc.val_type 0))
+    else None
+;;
+
 let rec translate (e : expression) : Refinement.pred option =
   match e.exp_desc with
   | Texp_ident { path = Path.Pident id; _ } -> Some (Refinement.Pvar id)
@@ -72,9 +114,13 @@ let rec translate (e : expression) : Refinement.pred option =
          (translate record)
      | None -> None)
   | Texp_apply
-      ({ exp_desc = Texp_ident { path = Path.Pident id; _ }; _ }, args, _, _, _)
-    when Hashtbl.mem reflected id ->
-    let name, arity = Hashtbl.find reflected id in
+      ({ exp_desc = Texp_ident { path; desc; _ }; _ }, args, _, _, _)
+    when reflected_call_info e.exp_env path desc <> None ->
+    let name, arity =
+      match reflected_call_info e.exp_env path desc with
+      | Some info -> info
+      | None -> assert false
+    in
     let args =
       List.map
         (fun (lbl, arg) ->
@@ -353,14 +399,6 @@ let rec translate_metric params (e : Parsetree.expression) : Refinement.pred =
     Refinement.Pbinop (binop, translate_metric params a, translate_metric params b)
   | _ -> unsupported ()
 ;;
-
-let find_attr name (attrs : Parsetree.attributes) =
-  List.find_opt
-    (fun (a : Parsetree.attribute) -> String.equal a.attr_name.txt name)
-    attrs
-;;
-
-let has_total_attr attrs = find_attr "vox.total" attrs <> None
 
 (* The [total_] marker rides the binder pattern (parser); the
    [@@vox.total] attribute spelling on the binding also works. *)

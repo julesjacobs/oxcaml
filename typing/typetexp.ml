@@ -1042,6 +1042,31 @@ let rec elab_vox_pred ~bound ~self_root env (e : Parsetree.expression)
              operator shape must be an error, never silently an
              uninterpreted function. *)
           Pfun (f, List.map (elab_vox_pred ~bound ~self_root env) args)
+      | Pexp_ident {txt = (Longident.Ldot _ as lid); _}, (_ :: _ as args) ->
+          (* A QUALIFIED applied identifier must denote a reflected
+             ([total_]) function of another module: its definition
+             rides that unit's spec export, under its source name.
+             (The marker check is inlined rather than taken from
+             Vox_reflect, which is not part of dynlink's module set.) *)
+          let has_total_attr attrs =
+            List.exists
+              (fun (a : Parsetree.attribute) ->
+                String.equal a.attr_name.txt "vox.total")
+              attrs
+          in
+          begin match Env.lookup_value ~use:false ~loc lid env with
+          | (path, desc, _)
+            when has_total_attr desc.val_attributes ->
+              Pfun (Path.last path,
+                    List.map (elab_vox_pred ~bound ~self_root env) args)
+          | _ ->
+              Location.raise_errorf ~loc
+                "vox: a qualified identifier in a predicate must denote a \
+                 total_ function"
+          | exception _ ->
+              Location.raise_errorf ~loc
+                "vox: unbound identifier in refinement predicate"
+          end
       | _ -> unsupported ()
       end
   | _ -> unsupported ()

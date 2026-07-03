@@ -5168,6 +5168,12 @@ vox_pred_proj:
   | p = vox_pred_projbase { p }
   | c = mkrhs(mod_longident)
       { mkexp ~loc:$sloc (Pexp_construct (c, None)) }
+  (* Qualified lowercase identifier [M.f]: a reflected (total_)
+     function of another module, applied as a spec function. *)
+  | m = mod_longident DOT id = LIDENT
+      { mkexp ~loc:$sloc
+          (Pexp_ident
+             (mkrhs (ldot m $loc(m) id $loc(id)) $sloc)) }
 ;
 
 vox_pred_projbase:
