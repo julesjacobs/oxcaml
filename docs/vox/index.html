@@ -648,6 +648,24 @@ distinct because <code>Star</code> means disjoint.</p>
   ignore x; ignore y;
   t</code></pre></div>
 
+<div class="card"><h3>In-place list reversal <span class="pill">demo/lean_seplist.ml</span></h3>
+<p>The textbook separation-logic proof: <code>Lseg (l, vs)</code> owns a
+null-terminated segment holding the model list, the reflected
+<code>rev_append</code> is the specification, and <code>reverse</code>
+rewires next pointers node by node — returning the same cells holding the
+reversed list.</p>
+<pre><code class="ml">let rec total_ rev_append (vs : ilist) (ws : ilist) : ilist =
+  match vs with
+  | INil -&gt; ws
+  | ICons (v, vs') -&gt; rev_append vs' (ICons (v, ws))
+
+let reverse :
+  (l : link) -&gt; (vs : ilist) -&gt;
+  htoken{ sat (Star (Lseg (l, vs), Emp)) (hp _) } @ unique -&gt;
+  stepped{ sat (Star (Lseg (_.lnk, rev_append vs INil), Emp)) (hp _.stok) }
+    @ unique =
+  fun l vs t -&gt; ...</code></pre></div>
+
 <div class="card"><h3>Deleting bounds checks, safely <span class="pill">demo/lean_kernel.ml</span></h3>
 <p><code>get</code> reads with <code>unsafe_get</code>: the per-access
 check is replaced by a proof at each call site.  The benchmark

@@ -44,6 +44,8 @@ UNSHOWN = {
     'demo/lean_borrow_elem.ml': 'slot borrows; the borrow and quicksort cards cover the idea',
     'demo/lean_flip_proph.ml': 'prophecy-flavored variant of the flip card',
     'demo/lean_qsort_run.ml': 'expect-block runner for the quicksort card',
+    'demo/lean_reverse.ml':
+        'McCarthy-array methodology note; kernel and quicksort are the page\'s array cards',
 }
 
 
@@ -174,6 +176,14 @@ def main():
                                   r'^let roundtrip', r'^  r$'),
         '@SEP@': slice_between(read('demo/lean_sep.ml'), r'^let swap',
                                r'^  t$'),
+        '@SEPLIST@': slice_between(read('demo/lean_seplist.ml'),
+                                   r'^let rec total_ rev_append',
+                                   r'rev_append vs\' \(ICons \(v, ws\)\)')
+                     + '\n\n'
+                     + slice_between(read('demo/lean_seplist.ml'),
+                                     r'^let reverse',
+                                     r'^    @ unique =')
+                     + '\n  fun l vs t -> ...',
         '@QSORT@': slice_between(read('demo/lean_qsort.ml'),
                                  r'^let rec qsort', r'@ local unique =$')
                    + '\n  fun m -> ...\n\n'
