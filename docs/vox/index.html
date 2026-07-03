@@ -458,14 +458,15 @@ own source location.</p>
 |lean}]</code></pre></div>
 
 <div class="card"><h3>Binary search <span class="pill">demo/lean_binsearch.ml</span></h3>
-<p>Over immutable arrays with uninterpreted <code>len</code>/<code>elem</code>:
-in-bounds access, the bracket invariant, and the flip-point characterization
-of the result.</p>
+<p>Immutable arrays are a built-in theory &mdash; <code>Iarray.length a</code>
+and <code>a.(i)</code> in predicates, reflected in expressions, nothing
+assumed: in-bounds access, the bracket invariant, and the flip-point
+characterization of the result are all proved.</p>
 <pre><code class="ml">let lower_bound
   : (a : int iarray) -&gt; (x : int)
-    -&gt; int{ 0 &lt;= _ &amp;&amp; _ &lt;= len a
-            &amp;&amp; (_ &lt; len a -&gt; elem a _ &gt;= x)
-            &amp;&amp; (0 &lt; _ -&gt; elem a (_ - 1) &lt; x) }
+    -&gt; int{ 0 &lt;= _ &amp;&amp; _ &lt;= Iarray.length a
+            &amp;&amp; (_ &lt; Iarray.length a -&gt; a.(_) &gt;= x)
+            &amp;&amp; (0 &lt; _ -&gt; a.(_ - 1) &lt; x) }
   =
   fun a x -&gt; ...</code></pre></div>
 
@@ -491,30 +492,28 @@ negated guard.</p>
 <pre><code class="ml">let search2
   : (a : int iarray) -&gt; (x : int)
     -&gt; bracket{ _.hi = _.lo + 1
-                &amp;&amp; -1 &lt;= _.lo &amp;&amp; _.hi &lt;= len a
-                &amp;&amp; (_.lo = -1 || elem a _.lo &lt; x)
-                &amp;&amp; (_.hi = len a || elem a _.hi &gt;= x) }
+                &amp;&amp; -1 &lt;= _.lo &amp;&amp; _.hi &lt;= Iarray.length a
+                &amp;&amp; (0 &lt;= _.lo -&gt; a.(_.lo) &lt; x)
+                &amp;&amp; (_.hi &lt; Iarray.length a -&gt; a.(_.hi) &gt;= x) }
   =
   fun a x -&gt;
-  let refine_ n = length a in
+  let n = Iarray.length a in
   let mutable lo = -1 in
   let mutable hi = n in
   (while hi - lo &gt; 1 do
      let l = lo in
      let h = hi in
-     let refine_ s = (refine_ (h - l) : {v:int | v = h - l}) in
-     let refine_ d = half s in
-     let refine_ mid = (refine_ (l + d) : {v:int | v = l + d}) in
-     let refine_ v = get a mid (refine_ ()) in
+     let mid = (l + h) / 2 in
+     let v = get a mid in
      if v &gt;= x then hi &lt;- mid else lo &lt;- mid
    done)
   [@vox.invariant
-    -1 &lt;= lo &amp;&amp; lo &lt; hi &amp;&amp; hi &lt;= len a
-    &amp;&amp; (lo = -1 || elem a lo &lt; x)
-    &amp;&amp; (hi = len a || elem a hi &gt;= x)];
+    -1 &lt;= lo &amp;&amp; lo &lt; hi &amp;&amp; hi &lt;= Iarray.length a
+    &amp;&amp; (lo = -1 || Iarray.get a lo &lt; x)
+    &amp;&amp; (hi = Iarray.length a || Iarray.get a hi &gt;= x)];
   let l = lo in
   let h = hi in
-  refine_ { lo = l; hi = h }</code></pre></div>
+  { lo = l; hi = h }</code></pre></div>
 
 <div class="card"><h3>Interior mutability <span class="pill">demo/lean_pcell.ml</span></h3>
 <p>Mutable cells behind a linear token discipline: reads and writes consume
@@ -539,15 +538,13 @@ arrays compatible.  Measured on a dev box: the verified dot product runs
 <b>1.36×</b> the bounds-checked loop; the verified sum matches
 hand-written <code>unsafe_get</code> exactly — verification costs nothing
 at runtime.</p>
-<pre><code class="ml">let length : (a : int iarray) -&gt; int{ _ = len a &amp;&amp; 0 &lt;= _ } =
-  fun a -&gt; assume_unchecked_ (Iarray.length a)
-
-let get : (a : int iarray) -&gt; (i : int{ 0 &lt;= _ &amp;&amp; _ &lt; len a }) -&gt; int =
+<pre><code class="ml">let get : (a : int iarray) -&gt; (i : int{ 0 &lt;= _ &amp;&amp; _ &lt; Iarray.length a })
+          -&gt; int =
   fun a i -&gt; Iarray.unsafe_get a i
 
 let sum : (a : int iarray) -&gt; int =
   fun a -&gt;
-    let n = length a in
+    let n = Iarray.length a in
     let rec go : (i : int{ 0 &lt;= _ &amp;&amp; _ &lt;= n }) -&gt; int -&gt; int =
       fun i acc -&gt; if i &lt; n then go (i + 1) (acc + get a i) else acc
     in

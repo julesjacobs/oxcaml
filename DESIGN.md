@@ -390,6 +390,19 @@
   block).
   Like `assume_unchecked_` and `-vox-prelude`, an embedded block is
   trusted (an `axiom` proves anything).
+- Native immutable arrays: [int iarray] is a built-in theory.
+  `Iarray.length a` and `Iarray.get a i` (surface sugar `a.(i)`)
+  appear in predicates and reflect in expressions (recognized by
+  PRIMITIVE, gated on the [int iarray] type -- the mutable array's
+  identical primitives do not reflect); values sort at an opaque
+  [VoxIA] with reserved operations and ONE compiler-owned axiom,
+  length nonnegativity.  [get] is TOTAL in the logic, like division:
+  the safe program get raises out of bounds, so no value flows there
+  and the unconstrained fact is vacuous (partial correctness) --
+  bounds SAFETY is an opt-in contract, e.g.
+  `(i : int{ 0 <= _ && _ < Iarray.length a })`, and such a wrapper is
+  then PROVED, not assumed (see demo/lean_binsearch.ml, which assumes
+  nothing).  Element sorts beyond int are future work.
 - Ghost sorts: `type g [@@vox.sort int]` (or `bool`) declares that an
   abstract type's LOGICAL REPRESENTATIVE is its value at a base sort:
   values of `g` are modelled as opaque Ints instead of at the

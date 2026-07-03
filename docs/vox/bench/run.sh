@@ -9,11 +9,10 @@ LEAN=${VOX_LEAN:-/nix/store/h6z4nr52r2x6v7ygqg59cl8nzjg0yxcy-lean4-4.31.0/bin/le
 D=$(mktemp -d)
 trap 'rm -rf "$D"' EXIT
 cp "$ROOT/testsuite/tests/vox/demo/lean_kernel.ml" \
-   "$ROOT/testsuite/tests/vox/demo/kernel_lib.lean" \
    "$ROOT/docs/vox/bench/bench.ml" "$D"
 cd "$D"
-"$OPT" -O3 -vox-solver-path "$LEAN" -vox-prelude kernel_lib.lean \
+"$OPT" -O3 -vox-solver-path "$LEAN" \
   -o bench lean_kernel.ml bench.ml 2>/dev/null \
-  || "$OPT" -vox-solver-path "$LEAN" -vox-prelude kernel_lib.lean \
+  || "$OPT" -vox-solver-path "$LEAN" \
        -o bench lean_kernel.ml bench.ml
 ./bench

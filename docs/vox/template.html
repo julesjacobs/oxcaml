@@ -204,9 +204,10 @@ own source location.</p>
 <pre><code class="lean">@EMBEDDED@</code></pre></div>
 
 <div class="card"><h3>Binary search <span class="pill">demo/lean_binsearch.ml</span></h3>
-<p>Over immutable arrays with uninterpreted <code>len</code>/<code>elem</code>:
-in-bounds access, the bracket invariant, and the flip-point characterization
-of the result.</p>
+<p>Immutable arrays are a built-in theory &mdash; <code>Iarray.length a</code>
+and <code>a.(i)</code> in predicates, reflected in expressions, nothing
+assumed: in-bounds access, the bracket invariant, and the flip-point
+characterization of the result are all proved.</p>
 <pre><code class="ml">@BINSEARCH@</code></pre></div>
 
 <div class="card"><h3>Mutable locals, loop invariants <span class="pill">demo/lean_mutable.ml</span></h3>

@@ -117,7 +117,7 @@ def main():
                                    r'^let iota', r'^  refine_ x$'),
         '@IMP_BINSEARCH@': slice_between(read('demo/lean_imp_binsearch.ml'),
                                          r'^let search2',
-                                         r'refine_ \{ lo = l; hi = h \}'),
+                                         r'^  \{ lo = l; hi = h \}$'),
         '@PCELL@': slice_between(read('demo/lean_pcell.ml'), r'^let swap_sum',
                                  r'read c1 a t1 in') + '\n    ...',
         '@BST_MLI@': strip_leading_comment(read('demo/bst.mli')),
@@ -131,7 +131,7 @@ def main():
                                         r'^Error: vox: verification failed',
                                         r'^\(lean: '),
         '@KERNEL@': slice_between(read('demo/lean_kernel.ml'),
-                                  r'^let length', r'^    go 0 0'),
+                                  r'^let get', r'^    go 0 0'),
         '@BST_ALT@': slice_between(read('demo/lean_bst_alt.ml'),
                                    r'^module Set', r'^end')
                      + '\n\n'
