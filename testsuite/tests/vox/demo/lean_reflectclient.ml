@@ -43,21 +43,17 @@ let rec append : (a : ilist) -> (b : ilist) -> ilist{ len _ = len a + len b } =
       let refine_ r = append t b in
       refine_ (Cons (h, r))
 
-(* And against the imported fib: the loop invariant crosses the module
-   boundary. *)
+(* And against the imported fib: the loop invariant (parameter
+   contracts) crosses the module boundary. *)
 let rec fib_loop
   : (n : int) -> (i : int) -> (a : int{ _ = fib i && i >= 0 })
     -> (b : int{ _ = fib (i + 1) }) -> int{ _ = fib n }
   =
   fun n i a b ->
-    let refine_ a0 = a in
-    let refine_ b0 = b in
     if i = n
-    then refine_ a0
+    then refine_ a
     else begin
       let refine_ j = refine_ (i + 1) in
-      let a2 = (refine_ b0 : int{ _ = fib j && j >= 0 }) in
-      let b2 = (refine_ (a0 + b0) : int{ _ = fib (j + 1) }) in
-      let refine_ r = fib_loop n j a2 b2 in
+      let refine_ r = fib_loop n j b (a + b) in
       refine_ r
     end
