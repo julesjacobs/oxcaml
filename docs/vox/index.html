@@ -28,7 +28,8 @@ html{scroll-behavior:smooth}
 body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 var(--sans)}
 a{color:var(--acc);text-decoration:none} a:hover{text-decoration:underline}
 nav{position:sticky;top:0;z-index:9;background:var(--navbg);backdrop-filter:blur(6px);
-    border-bottom:1px solid var(--line);padding:.6rem 1.2rem;display:flex;gap:1.2rem;
+    border-bottom:1px solid var(--line);padding:.6rem 1.2rem}
+nav .in{max-width:960px;margin:0 auto;display:flex;gap:1.2rem;
     align-items:baseline;flex-wrap:wrap}
 nav b{color:var(--fg);font-size:1.05rem}
 nav a{color:var(--dim);font-size:.9rem} nav a:hover{color:var(--fg)}
@@ -70,7 +71,7 @@ th{background:var(--panel);color:var(--fg)} td{color:var(--dim)} td:first-child{
 </style>
 </head>
 <body>
-<nav>
+<nav><div class="in">
   <b>vox</b>
   <a href="#sixty">the model</a>
   <a href="#spec">total_</a>
@@ -79,7 +80,7 @@ th{background:var(--panel);color:var(--fg)} td{color:var(--dim)} td:first-child{
   <a href="#tour">features</a>
   <a href="#trust">trust model</a>
   <a href="#run">running it</a>
-</nav>
+</div></nav>
 <main>
 
 <h1>Refinement types for OxCaml,<br><span class="l">discharged by Lean at compile time.</span></h1>
