@@ -29,7 +29,29 @@
 
    CAVEAT (DESIGN.md): the logic's ints are unbounded while the
    machine's wrap, so the translation of + - * equates modular with
-   ideal arithmetic; overflow is outside the model. *)
+   ideal arithmetic; overflow is outside the model.
+
+   THE TRANSLATOR TOWER -- what turns a term into a logic term, and
+   why there are several entry points rather than one:
+   - [translate_surface]: Parsetree, for DEPENDENT ARGUMENTS -- runs
+     before the argument is typed, so admission is keyed on resolution
+     and declared types only;
+   - [translate]: the typed superset of the surface fragment (same
+     [prim_pred] table, plus type-gated comparisons/projections and
+     field reads) -- names arguments in the VC walker, if-conditions,
+     and exact synthesis;
+   - [translate_rhs]: [translate] plus applications of simple-variant
+     constructors, for reflected definition bodies (where an
+     untranslatable term is an ERROR, never a fresh unknown);
+   - [Vox_verify.name_of_expr]: [translate] made TOTAL -- adds
+     registration-aware constructor/record/tuple naming and degrades
+     everything else to a fresh unknown;
+   - [Typetexp.elab_vox_pred]: the PREDICATE language, deliberately
+     separate -- a different grammar ([_], named binders, spec
+     functions, implication, quantifiers) whose operators are spelled,
+     not resolved.
+   The primitive fragment lives once, in [prim_pred]; the
+   [@@vox.decreases] metric reuses [translate_surface]. *)
 
 open Typedtree
 
@@ -60,6 +82,33 @@ let is_unlabeled_pair env ty =
   in
   match Types.get_desc ty with
   | Ttuple [ (None, _); (None, _) ] -> true
+  | _ -> false
+;;
+
+(* The surface twin of the gate above, usable BEFORE the argument is
+   typed: the resolved value's DECLARED domain is an unlabeled pair
+   (as [Stdlib.fst]'s ['a * 'b -> 'a] is), so any application that
+   typechecks has its argument at a pair type -- exactly when
+   [translate] will admit the projection.  A user [external] carrying
+   the same primitive at a non-pair or fully polymorphic type is
+   refused here (and [translate], gated on the actual argument type,
+   stays a superset). *)
+let declared_domain_is_unlabeled_pair env (desc : Types.value_description) =
+  let ty =
+    match Ctype.expand_head env desc.val_type with
+    | ty -> ty
+    | exception _ -> desc.val_type
+  in
+  match Types.get_desc ty with
+  | Tarrow (_, dom, _, _) ->
+    (* Arrow domains wrap their type in [Tpoly]; a trivial one is
+       transparent, a genuinely polymorphic parameter is refused. *)
+    let dom =
+      match Types.get_desc dom with
+      | Tpoly (t, []) -> t
+      | _ -> dom
+    in
+    is_unlabeled_pair env dom
   | _ -> false
 ;;
 
@@ -119,6 +168,66 @@ let reflected_call_info env path (desc : Types.value_description) =
     else None
 ;;
 
+(* The compiler-attached logical meaning of a PRIMITIVE application:
+   ONE table, shared by the typed translation ([translate]) and its
+   surface twin ([translate_surface]) so the two fragments cannot
+   drift -- a primitive admitted in one is admitted in both.
+   Admissions that need TYPE information are the callers' gates:
+   [cmp_ok] (the polymorphic comparisons, at int/bool operands only)
+   and [proj_ok] ([fst]/[snd], at a pair argument only) -- the typed
+   side inspects the argument's type; the surface side passes what it
+   can know before typing (no comparisons; the resolved declaration's
+   domain for projections). *)
+let prim_pred prim_name ~cmp_ok ~proj_ok
+      (args : Refinement.pred option list) : Refinement.pred option =
+  match
+    if List.for_all Option.is_some args
+    then Some (List.map Option.get args)
+    else None
+  with
+  | None -> None
+  | Some args ->
+    let unary k =
+      match args with
+      | [ a ] -> Some (k a)
+      | _ -> None
+    in
+    let binary k =
+      match args with
+      | [ a; b ] -> Some (k a b)
+      | _ -> None
+    in
+    let intop op = binary (fun a b -> Refinement.Pbinop (op, a, b)) in
+    let proj i =
+      if proj_ok then unary (fun a -> Refinement.Pproj (2, i, a)) else None
+    in
+    let cmp op = if cmp_ok then intop op else None in
+    (match prim_name with
+     | "%addint" -> intop Refinement.Add
+     | "%subint" -> intop Refinement.Sub
+     | "%mulint" -> intop Refinement.Mul
+     | "%divint" -> intop Refinement.Div
+     | "%modint" -> intop Refinement.Mod
+     | "%negint" ->
+       unary (fun a -> Refinement.Pbinop (Sub, Refinement.Pint 0, a))
+     | "%succint" ->
+       unary (fun a -> Refinement.Pbinop (Add, a, Refinement.Pint 1))
+     | "%predint" ->
+       unary (fun a -> Refinement.Pbinop (Sub, a, Refinement.Pint 1))
+     | "%field0_immut" -> proj 0
+     | "%field1_immut" -> proj 1
+     | "%sequand" -> binary (fun a b -> Refinement.Pand (a, b))
+     | "%sequor" -> binary (fun a b -> Refinement.Por (a, b))
+     | "%boolnot" -> unary (fun a -> Refinement.Pnot a)
+     | "%equal" -> cmp Refinement.Eq
+     | "%notequal" -> cmp Refinement.Neq
+     | "%lessthan" -> cmp Refinement.Lt
+     | "%lessequal" -> cmp Refinement.Le
+     | "%greaterthan" -> cmp Refinement.Gt
+     | "%greaterequal" -> cmp Refinement.Ge
+     | _ -> None)
+;;
+
 (* SURFACE translation, for dependent application: the logic term
    denoting an argument expression that has not been typed yet (the
    binder must be substituted throughout the remaining type BEFORE
@@ -128,9 +237,13 @@ let reflected_call_info env path (desc : Types.value_description) =
    resolution the later typing will perform: a primitive recognized by
    its name cannot be a shadowing impostor, and the admitted int/bool
    primitives are monomorphic, so if the program typechecks their
-   operands are ints/bools.  The POLYMORPHIC comparisons are excluded:
-   their operand sort is unknown before typing, and the logic's
-   equality disagrees with the program's at floats (nan) and functions.
+   operands are ints/bools.  Unlabeled tuples need no type gate (the
+   product model is per-arity, polymorphic); [fst]/[snd] are gated on
+   the resolved value's DECLARED pair domain, which any typechecking
+   application's argument then has.  The POLYMORPHIC comparisons are
+   excluded: their operand sort is unknown before typing, and the
+   logic's equality disagrees with the program's at floats (nan) and
+   functions.
    Mutable variables are rejected as everywhere (a stamp names one
    value; a cell has many).  The fragment is pure up to
    Division_by_zero, whose raise makes downstream facts vacuous
@@ -145,6 +258,16 @@ let rec translate_surface env (e : Parsetree.expression)
     Some (Refinement.Pbool true)
   | Pexp_construct ({ txt = Longident.Lident "false"; _ }, None) ->
     Some (Refinement.Pbool false)
+  | Pexp_tuple comps
+    when List.length comps >= 2
+         && List.for_all (fun (lbl, _) -> Option.is_none lbl) comps ->
+    (* An unlabeled tuple is a product term regardless of its type
+       (the per-arity product datatype is polymorphic), so it needs no
+       type-based gate.  Labeled tuples are not modelled. *)
+    let args = List.map (fun (_, a) -> translate_surface env a) comps in
+    if List.for_all Option.is_some args
+    then Some (Refinement.Ptuple (List.map Option.get args))
+    else None
   | Pexp_ident lid ->
     (match Env.lookup_value ~use:false ~loc:e.pexp_loc lid.txt env with
      | Path.Pident id, { val_kind = Val_reg _; _ }, _ ->
@@ -160,45 +283,18 @@ let rec translate_surface env (e : Parsetree.expression)
           | _ -> None)
         sargs
     in
-    if not (List.for_all Option.is_some args)
-    then None
-    else (
-      let args = List.map Option.get args in
-      let unary k =
-        match args with
-        | [ a ] -> Some (k a)
-        | _ -> None
-      in
-      let binary k =
-        match args with
-        | [ a; b ] -> Some (k a b)
-        | _ -> None
-      in
-      let intop op = binary (fun a b -> Refinement.Pbinop (op, a, b)) in
-      match Env.lookup_value ~use:false ~loc:pexp_loc lid.txt env with
-      | _, { val_kind = Val_prim prim; _ }, _ ->
-        (match prim.prim_name with
-         | "%addint" -> intop Refinement.Add
-         | "%subint" -> intop Refinement.Sub
-         | "%mulint" -> intop Refinement.Mul
-         | "%divint" -> intop Refinement.Div
-         | "%modint" -> intop Refinement.Mod
-         | "%negint" ->
-           unary (fun a -> Refinement.Pbinop (Sub, Refinement.Pint 0, a))
-         | "%succint" ->
-           unary (fun a -> Refinement.Pbinop (Add, a, Refinement.Pint 1))
-         | "%predint" ->
-           unary (fun a -> Refinement.Pbinop (Sub, a, Refinement.Pint 1))
-         | "%sequand" -> binary (fun a b -> Refinement.Pand (a, b))
-         | "%sequor" -> binary (fun a b -> Refinement.Por (a, b))
-         | "%boolnot" -> unary (fun a -> Refinement.Pnot a)
-         | _ -> None)
-      | path, desc, _ ->
-        (match reflected_call_info env path desc with
-         | Some (name, arity) when List.length args = arity ->
-           Some (Refinement.Pfun (name, args))
-         | _ -> None)
-      | exception _ -> None)
+    (match Env.lookup_value ~use:false ~loc:pexp_loc lid.txt env with
+     | _, ({ val_kind = Val_prim prim; _ } as desc), _ ->
+       prim_pred prim.prim_name ~cmp_ok:false
+         ~proj_ok:(declared_domain_is_unlabeled_pair env desc)
+         args
+     | path, desc, _ ->
+       (match reflected_call_info env path desc with
+        | Some (name, arity)
+          when List.length args = arity && List.for_all Option.is_some args ->
+          Some (Refinement.Pfun (name, List.map Option.get args))
+        | _ -> None)
+     | exception _ -> None)
   | _ -> None
 ;;
 
@@ -267,7 +363,7 @@ let translate ?(mutvar = fun _ -> None) (e : expression)
       , _
       , _
       , _ ) ->
-    let args =
+    let sargs =
       List.map
         (fun (lbl, arg) ->
           match (lbl : Types.arg_label), arg with
@@ -275,59 +371,22 @@ let translate ?(mutvar = fun _ -> None) (e : expression)
           | _ -> None)
         args
     in
-    let unary k =
-      match args with
-      | [ Some a ] -> Option.map k (go a)
-      | _ -> None
+    (* The type-dependent gates: comparisons at int/bool operands
+       (both operands have the same type; checking one suffices), and
+       fst/snd at an unlabeled-pair argument (the primitive itself is
+       a generic block read). *)
+    let cmp_ok =
+      match sargs with
+      | Some a :: _ -> is_int_or_bool a.exp_env a.exp_type
+      | _ -> false
     in
-    let binary k =
-      match args with
-      | [ Some a; Some b ] ->
-        (match go a, go b with
-         | Some pa, Some pb -> Some (k pa pb)
-         | _ -> None)
-      | _ -> None
+    let proj_ok =
+      match sargs with
+      | [ Some a ] -> is_unlabeled_pair a.exp_env a.exp_type
+      | _ -> false
     in
-    let intop op = binary (fun a b -> Refinement.Pbinop (op, a, b)) in
-    let proj i =
-      (* fst/snd: gated on the ARGUMENT being an unlabeled pair (the
-         primitive itself is a generic block read). *)
-      match args with
-      | [ Some a ] when is_unlabeled_pair a.exp_env a.exp_type ->
-        Option.map (fun p -> Refinement.Pproj (2, i, p)) (go a)
-      | _ -> None
-    in
-    let cmp op =
-      (* Both operands have the same type; checking one suffices. *)
-      match args with
-      | Some a :: _ when is_int_or_bool a.exp_env a.exp_type ->
-        binary (fun a b -> Refinement.Pbinop (op, a, b))
-      | _ -> None
-    in
-    (match prim.prim_name with
-     | "%addint" -> intop Refinement.Add
-     | "%subint" -> intop Refinement.Sub
-     | "%mulint" -> intop Refinement.Mul
-     | "%divint" -> intop Refinement.Div
-     | "%modint" -> intop Refinement.Mod
-     | "%negint" ->
-       unary (fun a -> Refinement.Pbinop (Sub, Refinement.Pint 0, a))
-     | "%succint" ->
-       unary (fun a -> Refinement.Pbinop (Add, a, Refinement.Pint 1))
-     | "%predint" ->
-       unary (fun a -> Refinement.Pbinop (Sub, a, Refinement.Pint 1))
-     | "%field0_immut" -> proj 0
-     | "%field1_immut" -> proj 1
-     | "%sequand" -> binary (fun a b -> Refinement.Pand (a, b))
-     | "%sequor" -> binary (fun a b -> Refinement.Por (a, b))
-     | "%boolnot" -> unary (fun a -> Refinement.Pnot a)
-     | "%equal" -> cmp Refinement.Eq
-     | "%notequal" -> cmp Refinement.Neq
-     | "%lessthan" -> cmp Refinement.Lt
-     | "%lessequal" -> cmp Refinement.Le
-     | "%greaterthan" -> cmp Refinement.Gt
-     | "%greaterequal" -> cmp Refinement.Ge
-     | _ -> None)
+    prim_pred prim.prim_name ~cmp_ok ~proj_ok
+      (List.map (fun a -> Option.bind a go) sargs)
     | _ -> None
   in
   go e
@@ -516,39 +575,26 @@ and translate_clause : type k. k case -> def_clause =
 ;;
 
 (* The [@@vox.decreases e] metric: an int-valued expression over the
-   parameters, in a tiny surface fragment (parameters, int literals,
-   [+ - *]). *)
-let rec translate_metric params (e : Parsetree.expression) : Refinement.pred =
-  let unsupported () =
+   parameters, in the SAME surface fragment dependent arguments use
+   ([translate_surface] -- one fragment, not a bespoke third), plus a
+   parameters-only restriction ([termination_by] quantifies over the
+   definition's parameters, nothing else). *)
+let translate_metric env params (e : Parsetree.expression) : Refinement.pred =
+  match translate_surface env e with
+  | None ->
     Location.raise_errorf ~loc:e.pexp_loc
-      "vox: a [@@vox.decreases] metric may mention only the function's \
-       parameters, int literals, and + - *"
-  in
-  match e.pexp_desc with
-  | Pexp_ident { txt = Longident.Lident name; _ } ->
-    (match
-       List.find_opt (fun (id, _) -> String.equal (Ident.name id) name) params
-     with
-     | Some (id, _) -> Refinement.Pvar id
-     | None -> unsupported ())
-  | Pexp_constant { pconst_desc = Pconst_integer (s, None); _ } ->
-    (match int_of_string_opt s with
-     | Some n -> Refinement.Pint n
-     | None -> unsupported ())
-  | Pexp_apply
-      ( { pexp_desc =
-            Pexp_ident { txt = Longident.Lident (("+" | "-" | "*") as op); _ }
-        ; _
-        }
-      , [ (Nolabel, a); (Nolabel, b) ] ) ->
-    let binop =
-      match op with
-      | "+" -> Refinement.Add
-      | "-" -> Refinement.Sub
-      | _ -> Refinement.Mul
-    in
-    Refinement.Pbinop (binop, translate_metric params a, translate_metric params b)
-  | _ -> unsupported ()
+      "vox: a [@@vox.decreases] metric must be a pure expression the logic \
+       can name, over the function's parameters"
+  | Some p ->
+    List.iter
+      (fun v ->
+        if not (List.exists (fun (id, _) -> Ident.same v id) params)
+        then
+          Location.raise_errorf ~loc:e.pexp_loc
+            "vox: a [@@vox.decreases] metric may mention only the function's \
+             parameters")
+      (Refinement.free_vars p);
+    p
 ;;
 
 (* The [total_] marker rides the binder pattern (parser); the
@@ -634,9 +680,9 @@ let translate_def (vb : Typedtree.value_binding) : spec_def =
           "vox: a reflected function's parameters must be plain variables"
     in
     let params = List.map param params in
-    let params, def_body, ret_ty =
+    let params, def_body, ret_ty, metric_env =
       match body with
-      | Tfunction_body e -> params, translate_body e, e.exp_type
+      | Tfunction_body e -> params, translate_body e, e.exp_type, e.exp_env
       | Tfunction_cases fc ->
         (match fc.fc_cases with
          | [] -> def_unsupported loc
@@ -650,7 +696,10 @@ let translate_def (vb : Typedtree.value_binding) : spec_def =
            in
            ( params @ [ fc.fc_param, scrut_sort ]
            , Bcase (fc.fc_param, List.map translate_clause fc.fc_cases)
-           , c0.c_rhs.exp_type ))
+           , c0.c_rhs.exp_type
+             (* the pattern's env: the parameters are in scope, the
+                case's own binders are not *)
+           , c0.c_lhs.pat_env ))
     in
     if params = [] then def_unsupported loc;
     let ret = rsort_of_type env ~loc ~what:"the result" ret_ty in
@@ -658,7 +707,7 @@ let translate_def (vb : Typedtree.value_binding) : spec_def =
       match find_attr "vox.decreases" vb.vb_attributes with
       | None -> None
       | Some { attr_payload = PStr [ { pstr_desc = Pstr_eval (e, _); _ } ]; _ }
-        -> Some (translate_metric params e)
+        -> Some (translate_metric metric_env params e)
       | Some a ->
         Location.raise_errorf ~loc:a.attr_loc
           "vox: [@@vox.decreases] expects an expression payload"

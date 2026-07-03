@@ -134,11 +134,15 @@
   remaining type, the argument must be an expression the logic can
   NAME before it is typed: an immutable variable (its stamp), a
   literal (itself), or a pure surface expression over the reflected
-  int/bool operations and saturated total_ calls, which names itself
-  (`f (i + 1)`, `f (fib k)`); the name is substituted throughout the
-  remaining type (else: "let-bind the argument first").  Recognition
-  resolves identifiers in the environment -- the same resolution the
-  later typing performs -- so a shadowed `(+)` cannot lie; the
+  int/bool operations, saturated total_ calls, unlabeled tuples, and
+  `fst`/`snd`, which names itself (`f (i + 1)`, `f (fib k)`,
+  `f (a, b)`); the name is substituted throughout the remaining type
+  (else: "let-bind the argument first").  Recognition resolves
+  identifiers in the environment -- the same resolution the later
+  typing performs -- so a shadowed `(+)` cannot lie; tuples need no
+  type gate (the product model is per-arity, polymorphic), and
+  `fst`/`snd` are admitted by their resolved value's DECLARED pair
+  domain, which any typechecking application's argument then has; the
   POLYMORPHIC comparisons are excluded (their operand sort is unknown
   before typing, and the logic's equality disagrees with the
   program's at floats and functions); mutable variables are rejected

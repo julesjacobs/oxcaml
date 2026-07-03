@@ -79,3 +79,49 @@ Line 1, characters 13-20:
                  ^^^^^^^
 Error: vox: fst expects exactly one argument in a refinement predicate
 |}]
+
+(* Tuples and pair projections are NAMEABLE, so they may be dependent
+   arguments: the binder is substituted by the product term / the
+   projection. *)
+let first : (p : (int * int)) -> int{ _ = fst p } =
+  fun p -> refine_ (fst p)
+let use : (a : int) -> (b : int) -> int{ _ = a } =
+  fun a b ->
+    let refine_ r = first (a, b) in
+    refine_ r
+[%%expect{|
+Line 2, characters 19-26: vox VC:
+  goal: (fst p) = (fst p)
+  hypotheses:
+  p#2 = (1, 2)
+  p#2 = (1, 2)
+val first : (p : (int * int)) -> int{ _ = (fst p) } = <fun>
+Line 6, characters 12-13: vox VC:
+  goal: r = a
+  hypotheses:
+  r = (fst (a, b))
+  p = (1, 2)
+  p = (1, 2)
+val use : (a : int) -> int -> int{ _ = a } = <fun>
+|}]
+
+(* The projection primitives are generic block reads: a user external
+   at a NON-pair type is not [fst] and stays unnameable. *)
+type t2 = { x2 : int; y2 : int }
+external cheat : t2 -> int = "%field0_immut"
+let g : (k : int) -> int{ _ = k } = fun k -> refine_ k
+let bad (v : t2) : int = g (cheat v)
+[%%expect{|
+type t2 = { x2 : int; y2 : int; }
+external cheat : t2 -> int = "%field0_immut"
+Line 3, characters 53-54: vox VC:
+  goal: k = k
+  hypotheses:
+  p = (1, 2)
+  p = (1, 2)
+val g : (k : int) -> int{ _ = k } = <fun>
+Line 4, characters 27-36:
+4 | let bad (v : t2) : int = g (cheat v)
+                               ^^^^^^^^^
+Error: vox: the argument for a dependent parameter must be a variable or a pure expression the logic can name (let-bind it first)
+|}]
