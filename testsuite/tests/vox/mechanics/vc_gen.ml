@@ -74,6 +74,7 @@ let unpack : {v:int | v > 0} =
 Line 3, characters 10-11: vox VC:
   goal: w > 0
   hypotheses:
+  w = x
   w > 0
   a = 5
   a >= 0
@@ -94,6 +95,8 @@ Line 2, characters 20-21: vox VC:
   hypotheses:
   c
   unpack > 0
+  w = x
+  w > 0
   a = 5
   a >= 0
   b = true
@@ -105,6 +108,8 @@ Line 2, characters 35-40: vox VC:
   hypotheses:
   not c
   unpack > 0
+  w = x
+  w > 0
   a = 5
   a >= 0
   b = true
@@ -122,6 +127,8 @@ Line 1, characters 46-47: vox VC (ASSUMED):
   goal: 7 >= 1
   hypotheses:
   unpack > 0
+  w = x
+  w > 0
   a = 5
   a >= 0
   b = true
@@ -141,6 +148,8 @@ Line 1, characters 38-39: vox VC (RUNTIME CHECKED):
   au = 7
   au >= 1
   unpack > 0
+  w = x
+  w > 0
   a = 5
   a >= 0
   b = true
@@ -163,6 +172,8 @@ Line 1, characters 38-39: vox VC:
   au = 7
   au >= 1
   unpack > 0
+  w = x
+  w > 0
   a = 5
   a >= 0
   b = true

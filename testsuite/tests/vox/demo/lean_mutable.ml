@@ -55,3 +55,25 @@ let get () : {r:int | r = 9} =
   match m with
   | K y -> refine_ y
   | L -> assume_unchecked_ 0
+
+(* An index-mentioning loop invariant, really proved: it elaborates in
+   the body's environment; the entry assertion instantiates the index
+   at the first value, the back-edge assertion at the next, and the
+   post-loop assumption splits on whether the loop ran. *)
+let iota : (n : int) -> {r:int | (n < 1 && r = 0) || (n >= 1 && r = n)} =
+  fun n ->
+  let mutable x = 0 in
+  (for i = 1 to n do
+     x <- x + 1
+   done) [@vox.invariant x = i - 1];
+  refine_ x
+
+let count_down
+  : (n : int) -> {r:int | (n < 0 && r = 0) || (n >= 0 && r = n + 1)}
+  =
+  fun n ->
+  let mutable x = 0 in
+  (for i = n downto 0 do
+     x <- x + 1
+   done) [@vox.invariant x = n - i];
+  refine_ x

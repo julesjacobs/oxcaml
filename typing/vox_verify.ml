@@ -559,6 +559,76 @@ let mut_havoc_written env e =
   List.concat_map (mut_havoc env) (written_mutables e)
 ;;
 
+(* Loop invariants ([@vox.invariant p]): a FORMULA over program
+   variables, living in the logical environment -- not a refinement
+   type: it never travels and is never compared.  The elaborated
+   template is instantiated at each boundary point by closing every
+   mutable mention over the variable's current version (Thrust-style:
+   the logic only ever sees stable names).  Discipline (the classical
+   quadruple): ASSERT over the entry versions; havoc; ASSUME over the
+   head versions; ASSERT over the body-exit versions at the back-edge;
+   after the loop, the head assumption stands alongside the negated
+   guard. *)
+let loop_invariant (e : expression) =
+  let all =
+    List.filter_map
+      (fun (a : Parsetree.attribute) ->
+        if String.equal a.attr_name.txt "vox.invariant"
+        then (
+          match a.attr_payload with
+          | PStr [ { pstr_desc = Pstr_eval (pred, _); _ } ] ->
+            Some (pred, a.attr_loc)
+          | _ ->
+            Location.raise_errorf ~loc:a.attr_loc
+              "vox: malformed [@vox.invariant] payload (expected a predicate)")
+        else None)
+      e.exp_attributes
+  in
+  match all with
+  | [] -> None
+  | (_, loc0) :: _ -> Some (List.map fst all, loc0)
+;;
+
+(* Close a formula template over the current versions of the mutable
+   variables it mentions. *)
+let close_over_versions p =
+  Hashtbl.fold
+    (fun id (v, _) p -> Refinement.subst_var id ~by:(Refinement.Pvar v) p)
+    mut_versions
+    p
+;;
+
+(* [ienv] is the environment the formula elaborates in: the loop
+   expression's for a while loop, the BODY's for a for loop (where the
+   index is bound). *)
+let elab_loop_invariant ienv (e : expression) =
+  match loop_invariant e with
+  | None -> None
+  | Some (preds, attr_loc) ->
+    (* several [@vox.invariant] attributes conjoin *)
+    let elab pred =
+      let template, mentioned = Typetexp.elab_vox_invariant ienv pred in
+      List.iter
+        (fun id ->
+          if not (Hashtbl.mem mut_versions id)
+          then
+            Location.raise_errorf ~loc:attr_loc
+              "vox: the invariant mentions the mutable variable %s, which is \
+               not tracked here (is it defined outside the enclosing \
+               function?)"
+              (Ident.name id))
+        mentioned;
+      register_pred_paths ienv template;
+      template
+    in
+    let template =
+      match List.map elab preds with
+      | [] -> assert false
+      | t :: ts -> List.fold_left (fun acc t' -> Refinement.Pand (acc, t')) t ts
+    in
+    Some (template, attr_loc)
+;;
+
 (* Facts contributed by the binders of a pattern: every binder is recorded (for its
    declaration sort); binders of refined type contribute their refinement instantiated at
    the binder. *)
@@ -807,7 +877,7 @@ let emit_vc ~loc ~ctx ~goal ~kind =
         List.partition
           (fun d ->
             match d with
-            | Refinement.Pbinop (_, Refinement.Pvar v, _) ->
+            | Refinement.Pbinop (Refinement.Eq, Refinement.Pvar v, _) ->
               Hashtbl.mem needed (Ident.unique_name v)
             | _ -> false)
           remaining
@@ -1103,6 +1173,12 @@ let match_facts
     | Tpat_construct (_, cstr, _, args, _) -> constructor_facts cstr args
     | Tpat_record (fields, _, _, _) -> record_facts fields
     | Tpat_tuple comps -> tuple_facts comps
+    | Tpat_var { id; _ } ->
+      (* a variable pattern binds the scrutinee itself; in particular
+         [let refine_ x = m] (which desugars to a match) ties the
+         binder to a mutable scrutinee's version *)
+      [ Refinement.Pbinop (Refinement.Eq, Refinement.Pvar id, Refinement.Pvar sid)
+      ]
     | _ -> []
   in
   match pat.pat_desc with
@@ -1175,6 +1251,29 @@ let extend_pat
   }
 ;;
 
+(* Whether a computation pattern is free of exception patterns: only
+   then does matching it guarantee the scrutinee ran to completion. *)
+let rec exceptionless (p : computation general_pattern) =
+  match p.pat_desc with
+  | Tpat_value _ -> true
+  | Tpat_exception _ -> false
+  | Tpat_or (a, b, _) -> exceptionless a && exceptionless b
+;;
+
+(* The single value arm of a match, when it has exactly one arm (a
+   computation case wrapping a value pattern, as unpack and
+   destructuring lets desugar to).  An arm containing an exception
+   pattern does not qualify: it can be reached with the scrutinee
+   interrupted between writes, so its state may not be threaded. *)
+let single_arm
+  : computation case list -> value case list -> computation case option
+  =
+  fun comp_cases val_cases ->
+  match comp_cases, val_cases with
+  | [ c ], [] when exceptionless c.c_lhs -> Some c
+  | _ -> None
+;;
+
 (* Walk an expression under a logical context, collecting VCs.  Returns
    the context for the expression's CONTINUATION: mutable-variable
    assignments extend it with the fresh version's definitional equation
@@ -1209,9 +1308,30 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
         emit_vc ~loc:e.exp_loc ~ctx ~goal:(Refinement.subst_bound ~by:n p) ~kind
       | None -> ())
    | None -> ());
+  (* A [@vox.invariant] anywhere but on a loop would otherwise be
+     SILENTLY unchecked -- the worst failure mode for a verification
+     annotation. *)
+  (match e.exp_desc, loop_invariant e with
+   | (Texp_while _ | Texp_for _), _ | _, None -> ()
+   | _, Some (_, attr_loc) ->
+     Location.raise_errorf ~loc:attr_loc
+       "vox: [@vox.invariant] is only supported on while and for loops");
   match e.exp_desc with
   | Texp_apply (funct, args, _, _, _) ->
-    ignore (walk_expr env ctx funct : ctx);
+    (* The function and its arguments evaluate in unspecified order
+       (right-to-left in practice): as in the generic traversal, each
+       child starts from the entry versions with everything this
+       application writes havocked, and the continuation havocs it
+       again.  For pure applications ([written] empty) this is
+       identical to walking every child under the entry context. *)
+    let saved = save_versions () in
+    let written = written_mutables e in
+    let child_ctx () =
+      restore_versions saved;
+      let hfacts = List.concat_map (mut_havoc env) written in
+      { ctx with cfacts = hfacts @ ctx.cfacts }
+    in
+    ignore (walk_expr env (child_ctx ()) funct : ctx);
     (* Contract obligations (parameters as preconditions): each
        argument for a refined parameter must satisfy the predicate at
        its logical name; an intro-form argument
@@ -1220,7 +1340,8 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
        binder is substituted by the argument's translation (a variable,
        literal, or pure reflected expression -- enforced at typing
        time) as the spine is walked, mirroring the application-site
-       opening. *)
+       opening.  The obligation is emitted under the argument's child
+       context, whose version state is what [name_of_expr] reads. *)
     let arrow_ty = ref funct.exp_type in
     List.iter
       (fun (_lbl, (arg : apply_arg)) ->
@@ -1229,7 +1350,14 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
           | Arg (a, _) -> Some a
           | Omitted _ -> None
         in
-        Option.iter (fun a -> ignore (walk_expr env ctx a : ctx)) arg_expr;
+        let actx =
+          match arg_expr with
+          | Some a ->
+            let actx = child_ctx () in
+            ignore (walk_expr env actx a : ctx);
+            actx
+          | None -> ctx
+        in
         match get_desc (safe_expand_head env !arrow_ty) with
         | Tarrow ((_, _, _, binder), dom, ret, _) ->
           (match arg_expr with
@@ -1244,7 +1372,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
                 register_pred_paths env p;
                 emit_vc
                   ~loc:a.exp_loc
-                  ~ctx
+                  ~ctx:actx
                   ~goal:(Refinement.subst_bound ~by:(name_of_expr env a) p)
                   ~kind:Prove
               | _ -> ());
@@ -1255,9 +1383,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
            | None -> arrow_ty := ret)
         | _ -> ())
       args;
-    (* the function and its arguments evaluate in unspecified order:
-       out-contexts are discarded, and every mutable variable this
-       application writes is havocked for the continuation *)
+    restore_versions saved;
     { ctx with cfacts = mut_havoc_written env e @ ctx.cfacts }
   | Texp_let (rec_flag, [ vb ], body) ->
     (* Reflected definitions are global; a local one could capture
@@ -1379,6 +1505,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
     let ctx1 = walk_expr env ctx e1 in
     walk_expr env ctx1 e2
   | Texp_match (scrut, _sort, comp_cases, val_cases, _partial) ->
+    let saved_pre = save_versions () in
     let ctx0 = walk_expr env ctx scrut in
     let scrut_id =
       match scrut.exp_desc with
@@ -1388,18 +1515,60 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
         Option.map fst (Hashtbl.find_opt mut_versions id)
       | _ -> None
     in
+    (match single_arm comp_cases val_cases with
+     | Some c ->
+       (* A single-arm match (unpacks [let refine_ x = e] and
+          destructuring lets desugar to these) is straight-line code:
+          the arm's out-context IS the continuation's state -- thread
+          it, versions included, instead of joining.  Sound also for a
+          partial single-arm match: on pattern failure the continuation
+          is unreachable. *)
+       let ctx' = extend_pat ~scrut:scrut.exp_type env ctx0 c.c_lhs in
+       let ctx' =
+         match scrut_id with
+         | Some sid ->
+           { ctx' with cfacts = match_facts env sid c.c_lhs @ ctx'.cfacts }
+         | None -> ctx'
+       in
+       let gctx =
+         match c.c_guard with
+         | None -> ctx'
+         | Some g -> walk_expr env ctx' g
+       in
+       walk_expr env gctx c.c_rhs
+     | None ->
     let saved = save_versions () in
-    let do_case : type k. Refinement.pred list -> k case -> unit =
-      fun negs c ->
-      restore_versions saved;
-      let ctx' = extend_pat ~scrut:scrut.exp_type env ctx0 c.c_lhs in
+    let do_case : type k. interrupted:bool -> Refinement.pred list -> k case -> unit =
+      fun ~interrupted negs c ->
+      let base =
+        if interrupted
+        then (
+          (* the arm can be reached with [scrut] interrupted between
+             writes: neither its threaded versions nor its facts are
+             valid here.  Start from the pre-scrutinee state, with
+             everything the scrutinee writes havocked. *)
+          restore_versions saved_pre;
+          { ctx with
+            cfacts =
+              List.concat_map (mut_havoc env) (written_mutables scrut)
+              @ ctx.cfacts
+          })
+        else (
+          restore_versions saved;
+          ctx0)
+      in
+      let ctx' =
+        if interrupted
+        then extend_pat env base c.c_lhs
+        else extend_pat ~scrut:scrut.exp_type env base c.c_lhs
+      in
       let ctx' =
         match scrut_id with
-        | Some sid ->
+        | Some sid when not interrupted ->
           { ctx' with
             cfacts = match_facts env sid c.c_lhs @ negs @ ctx'.cfacts
           }
-        | None -> ctx'
+        | _ -> ctx'
       in
       let gctx =
         match c.c_guard with
@@ -1414,15 +1583,16 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
        wrapped in [Tpat_value]); [val_cases] holds effect-handler arms.
        Exception and effect arms never contribute a negation (their
        patterns are not simple-variant constructors: exception and
-       effect types are open), and their RECEIVING facts is vacuously
-       sound under the variable-scrutinee gate: evaluating a variable
-       can neither raise nor perform. *)
-    let run_cases : type k. k case list -> unit =
-      fun cases ->
+       effect types are open), and they are INTERRUPTED arms: control
+       reaches them with the scrutinee stopped between writes, so they
+       receive the pre-scrutinee state (writes havocked) rather than
+       the scrutinee's threaded facts and versions. *)
+    let run_cases : type k. (k general_pattern -> bool) -> k case list -> unit =
+      fun is_interrupted cases ->
       ignore
         (List.fold_left
            (fun negs c ->
-             do_case negs c;
+             do_case ~interrupted:(is_interrupted c.c_lhs) negs c;
              match scrut_id, c.c_guard with
              | Some sid, None ->
                (match pattern_negation env sid c.c_lhs with
@@ -1433,12 +1603,21 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
            cases
           : Refinement.pred list)
     in
-    run_cases comp_cases;
-    run_cases val_cases;
+    run_cases (fun p -> not (exceptionless p)) comp_cases;
+    run_cases (fun _ -> true) val_cases;
     restore_versions saved;
     (* havoc-join across arms in v1: written variables get a fresh
-       version, keeping only the declared refinement *)
-    { ctx0 with cfacts = mut_havoc_written env e @ ctx0.cfacts }
+       version, keeping only the declared refinement.  When some arm
+       is interrupted, the continuation can be reached without the
+       scrutinee having completed, so its facts may not be kept
+       either. *)
+    let base =
+      if List.exists (fun c -> not (exceptionless c.c_lhs)) comp_cases
+         || val_cases <> []
+      then ctx
+      else ctx0
+    in
+    { base with cfacts = mut_havoc_written env e @ base.cfacts })
   | Texp_ifthenelse (cond, e_then, e_else) ->
     let ctx0 = walk_expr env ctx cond in
     (* The path fact is the condition's logic translation when it has
@@ -1497,10 +1676,29 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
   | Texp_while { wh_cond; wh_body; _ } ->
     (* Head state: havoc everything the loop writes; head versions
        denote any iteration's entry, and the declared refinements
-       re-attach (every write re-proved them).  The body walks under
-       the reflected condition; normal exit happens at the test, so the
-       continuation sees the head state plus its negation. *)
+       re-attach (every write re-proved them).  A [@vox.invariant]
+       formula additionally follows the classical quadruple: ASSERTED
+       over the entry versions, ASSUMED over the head versions, ASSERTED
+       over the body-exit versions at the back-edge; after the loop the
+       head assumption stands with the negated guard.  The body walks
+       under the reflected condition; normal exit happens at the test,
+       so the continuation sees the head state plus its negation. *)
+    let inv = elab_loop_invariant e.exp_env e in
+    (match inv with
+     | Some (template, attr_loc) ->
+       (* entry: the first iteration's head state is the current one *)
+       emit_vc
+         ~loc:attr_loc
+         ~ctx
+         ~goal:(close_over_versions template)
+         ~kind:Prove
+     | None -> ());
     let head = mut_havoc_written env e in
+    let head =
+      match inv with
+      | Some (template, _) -> close_over_versions template :: head
+      | None -> head
+    in
     let hctx = { ctx with cfacts = head @ ctx.cfacts } in
     let cctx = walk_expr env hctx wh_cond in
     let cond_fact = Vox_reflect.translate ~mutvar:mut_read wh_cond in
@@ -1510,7 +1708,17 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
       | Some c -> { cctx with cfacts = c :: cctx.cfacts }
       | None -> cctx
     in
-    ignore (walk_expr env bctx wh_body : ctx);
+    let bctx_out = walk_expr env bctx wh_body in
+    (match inv with
+     | Some (template, attr_loc) ->
+       (* back-edge: the next iteration's head state is the body's exit
+          state *)
+       emit_vc
+         ~loc:attr_loc
+         ~ctx:bctx_out
+         ~goal:(close_over_versions template)
+         ~kind:Prove
+     | None -> ());
     restore_versions saved;
     (match cond_fact with
      | Some c -> { cctx with cfacts = Refinement.Pnot c :: cctx.cfacts }
@@ -1523,7 +1731,97 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
     let from_p = Vox_reflect.translate ~mutvar:mut_read for_from in
     let to_p = Vox_reflect.translate ~mutvar:mut_read for_to in
     record_name env for_id for_from.exp_type;
-    let head = mut_havoc_written env e in
+    (* The invariant elaborates in the BODY's environment, where the
+       index is bound.  An index mention makes the quadruple
+       index-aware: the entry assertion instantiates the index at the
+       FIRST value, the back-edge assertion at the NEXT value (what it
+       establishes is the next iteration's head state), and after the
+       loop the head assumption stands at the one-past-the-end value
+       when the loop ran -- at the first value otherwise (the entry
+       assertion, over unchanged variables). *)
+    let inv = elab_loop_invariant for_body.exp_env e in
+    let mentions_index =
+      match inv with
+      | Some (template, _) ->
+        List.exists (Ident.same for_id) (Refinement.free_vars template)
+      | None -> false
+    in
+    let index_bounds =
+      match from_p, to_p with
+      | Some f, Some t -> Some (f, t)
+      | _ -> None
+    in
+    (match inv, index_bounds with
+     | Some (_, attr_loc), None when mentions_index ->
+       Location.raise_errorf ~loc:attr_loc
+         "vox: the invariant mentions the loop index, but a loop bound does \
+          not reflect into the logic; bind the bounds to variables first"
+     | _ -> ());
+    let step p =
+      let op =
+        match for_dir with
+        | Upto -> Refinement.Add
+        | Downto -> Refinement.Sub
+      in
+      Refinement.Pbinop (op, p, Refinement.Pint 1)
+    in
+    let at_index by template =
+      if mentions_index
+      then (
+        match index_bounds, by with
+        | Some (f, _), `First -> Refinement.subst_var for_id ~by:f template
+        | Some (_, t), `Past -> Refinement.subst_var for_id ~by:(step t) template
+        | Some _, `Next ->
+          Refinement.subst_var for_id ~by:(step (Refinement.Pvar for_id)) template
+        | None, _ -> assert false (* rejected above *))
+      else template
+    in
+    (match inv with
+     | Some (template, attr_loc) ->
+       emit_vc
+         ~loc:attr_loc
+         ~ctx:c1
+         ~goal:(close_over_versions (at_index `First template))
+         ~kind:Prove
+     | None -> ());
+    let head_havoc = mut_havoc_written env e in
+    let head_inv =
+      match inv with
+      | Some (template, _) -> [ close_over_versions template ]
+      | None -> []
+    in
+    (* The post-loop instance of the invariant: over the head (havoc)
+       versions, which also denote the final state.  With an index
+       mention it splits on whether the loop ran; the empty case keeps
+       the entry instance, sound because nothing was written. *)
+    let post_inv =
+      match inv with
+      | None -> []
+      | Some (template, _) ->
+        if not mentions_index
+        then head_inv
+        else (
+          let f, t =
+            match index_bounds with
+            | Some ft -> ft
+            | None -> assert false (* rejected above *)
+          in
+          let ran, empty =
+            match for_dir with
+            | Upto ->
+              ( Refinement.Pbinop (Refinement.Le, f, t)
+              , Refinement.Pbinop (Refinement.Gt, f, t) )
+            | Downto ->
+              ( Refinement.Pbinop (Refinement.Ge, f, t)
+              , Refinement.Pbinop (Refinement.Lt, f, t) )
+          in
+          [ Refinement.Por
+              ( Refinement.Pand
+                  (empty, close_over_versions (at_index `First template))
+              , Refinement.Pand
+                  (ran, close_over_versions (at_index `Past template)) )
+          ])
+    in
     let bounds =
       match from_p, to_p with
       | Some f, Some t ->
@@ -1538,13 +1836,32 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
       | _ -> []
     in
     let bctx =
-      { cfacts = bounds @ head @ c1.cfacts; cscope = for_id :: c1.cscope }
+      { cfacts = bounds @ head_inv @ head_havoc @ c1.cfacts
+      ; cscope = for_id :: c1.cscope
+      }
     in
     let saved = save_versions () in
-    ignore (walk_expr env bctx for_body : ctx);
+    let bctx_out = walk_expr env bctx for_body in
+    (match inv with
+     | Some (template, attr_loc) ->
+       emit_vc
+         ~loc:attr_loc
+         ~ctx:bctx_out
+         ~goal:(close_over_versions (at_index `Next template))
+         ~kind:Prove
+     | None -> ());
     restore_versions saved;
-    { c1 with cfacts = head @ c1.cfacts }
+    { c1 with cfacts = post_inv @ head_havoc @ c1.cfacts }
   | Texp_function { params; body; _ } ->
+    (* A function body runs at call time: outer mutable variables are
+       not live inside it (closures cannot capture them), so suspend
+       the version table -- reads cannot occur, and invariants inside
+       the body mentioning outer mutables are rejected by the liveness
+       check rather than silently mis-instantiated. *)
+    let suspended = save_versions () in
+    Hashtbl.reset mut_versions;
+    Fun.protect ~finally:(fun () -> restore_versions suspended)
+    @@ fun () ->
     (* Contract facts (parameters as preconditions): a refined arrow
        DOMAIN contributes its predicate at the parameter's name -- the
        parameter itself is bound at the skeleton, and every caller
@@ -1634,18 +1951,58 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
        keeps the entry state (closures cannot capture mutable
        variables, so the body cannot write any variable we track) *)
     ctx
+  | Texp_try (tried, cases, eff_cases) ->
+    (* [tried] walks as straight-line code for its own VCs, but a
+       handler arm runs with it interrupted between writes: arms
+       receive the pre-try state with everything [tried] writes
+       havocked (like the exception arms of a match), and the
+       continuation -- reachable through either path -- keeps the
+       entry facts plus the havoc-join. *)
+    let saved = save_versions () in
+    ignore (walk_expr env ctx tried : ctx);
+    restore_versions saved;
+    let hctx =
+      { ctx with
+        cfacts =
+          List.concat_map (mut_havoc env) (written_mutables tried)
+          @ ctx.cfacts
+      }
+    in
+    let hsaved = save_versions () in
+    let do_handler (c : value case) =
+      restore_versions hsaved;
+      let ctx' = extend_pat env hctx c.c_lhs in
+      let gctx =
+        match c.c_guard with
+        | None -> ctx'
+        | Some g -> walk_expr env ctx' g
+      in
+      ignore (walk_expr env gctx c.c_rhs : ctx)
+    in
+    List.iter do_handler cases;
+    List.iter do_handler eff_cases;
+    restore_versions saved;
+    { ctx with cfacts = mut_havoc_written env e @ ctx.cfacts }
   | _ ->
     (* Generic traversal of children under the same context.  Patterns
        reached this way belong to constructs the walker does not model
-       (try handlers, letops, local module structures, ...); they are
-       escape-checked but contribute no facts.  Children may evaluate
-       in any order, so their out-contexts are discarded (a version
-       minted by one child is a sound, unconstrained name in a
-       sibling), and every mutable variable this subtree writes is
-       havocked for the continuation. *)
+       (letops, local module structures, ...); they are escape-checked
+       but contribute no facts.  Children may evaluate in ANY order
+       (arguments right-to-left in practice), so a child may neither
+       see a sibling's threaded version nor keep an entry version a
+       sibling may overwrite first: each child starts from the entry
+       versions with everything this subtree writes havocked, and the
+       continuation havocs it again. *)
+    let saved = save_versions () in
+    let written = written_mutables e in
     let it =
       { Tast_iterator.default_iterator with
-        expr = (fun _ e' -> ignore (walk_expr env ctx e' : ctx))
+        expr =
+          (fun _ e' ->
+            restore_versions saved;
+            let hfacts = List.concat_map (mut_havoc env) written in
+            ignore
+              (walk_expr env { ctx with cfacts = hfacts @ ctx.cfacts } e' : ctx))
       ; pat =
           (fun sub (type k) (p : k general_pattern) ->
             backstop_pat ctx p;
@@ -1657,6 +2014,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
       }
     in
     Tast_iterator.default_iterator.expr it e;
+    restore_versions saved;
     let havoc = mut_havoc_written env e in
     if havoc = [] then ctx else { ctx with cfacts = havoc @ ctx.cfacts }
 ;;

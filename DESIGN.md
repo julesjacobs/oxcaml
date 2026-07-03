@@ -525,6 +525,59 @@ may not appear in refinements or dependent applications ([let x = m]
 pins the current value to an immutable name, with the fact
 [x = m@k], and is the sanctioned bridge).
 
+## Loop invariants
+
+Refinements live at the EDGES (signatures, module boundaries); inside
+code everything is unpacked to plain values plus the logical
+environment.  A loop invariant belongs to the latter: it is a FORMULA
+over program variables, not a refinement type -- it never travels and
+is never compared -- written as an attribute on the loop:
+
+    (while hi - lo > 1 do ... done)
+    [@vox.invariant -1 <= lo && lo < hi && hi <= len a && ...]
+
+Mutable variables may appear (only here): the formula is a template
+that the walker instantiates at each boundary point over the
+variables' current SSA versions.  The discipline is the classical
+quadruple, i.e. exactly how the loop's tail-recursive encoding with a
+ghost [unit{...}] parameter would verify: the formula is ASSERTED over
+the entry versions (the first call), havoc, ASSUMED over the head
+versions (an arbitrary call's parameters), ASSERTED over the body-exit
+versions at the back-edge (the recursive call), and after the loop the
+head assumption stands with the negated guard.  Mentioned mutables
+must be tracked at the loop (a loop inside a closure cannot see the
+enclosing function's mutables); written-but-unmentioned variables
+havoc as usual.  With invariants, mutable variables are TYPICALLY NOT
+REFINED: their per-point facts come from versions, their loop-stable
+facts from the invariant, and declared refinements remain merely an
+option for continuous per-variable value-properties.
+
+A FOR-loop invariant elaborates in the body's environment, so it may
+mention the index.  The quadruple is then index-aware: the entry
+assertion instantiates the index at the first value, the back-edge
+assertion at the NEXT value (what one iteration establishes is the
+next iteration's head state), and the post-loop assumption stands at
+the one-past-the-end value when the loop ran -- at the first value
+otherwise, where it is just the entry assertion over unchanged
+variables.  Index mentions require both bounds to reflect into the
+logic (bind them to variables first).
+
+Single-arm matches -- what unpacks [let refine_ x = e] and
+destructuring lets desugar to -- are straight-line code: the walker
+threads the arm's out-context (facts and versions) to the
+continuation instead of joining, so facts established inside a loop
+body reach the back-edge assertion.
+
+Threading stops where control can be INTERRUPTED.  An arm containing
+an exception pattern, a try handler, or an effect arm can be reached
+with the scrutinee stopped between writes: such arms -- and the
+continuation of a match that has one -- receive the pre-scrutinee
+state with everything the scrutinee writes havocked, never its
+threaded versions or facts.  Children of unmodeled constructs
+(application arguments, tuple components, ...) evaluate in
+unspecified order, so each child likewise sees the subtree's writes
+havocked rather than a sibling's threaded version.
+
 ## Escape enforcement (the activation problem)
 
 Logical names are static stamps, which do not distinguish function

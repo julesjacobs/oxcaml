@@ -199,6 +199,7 @@ Line 11, characters 29-30: vox VC:
 Line 12, characters 12-13: vox VC:
   goal: 2 >= 0
   hypotheses:
+  w = s
   w = Cee
   not (s is Ay)
   not (s is Bee)

@@ -70,6 +70,13 @@ val valid_tyvar_name : string -> bool
    refinement at the TOP of the annotation [root] as the refined value
    itself (like [_]); used for a pattern variable's own annotation,
    [let f (x : int{x > 3}) = ...]. *)
+(* vox: elaborate a loop-invariant formula in [env] (mutable-variable
+   mentions permitted; returned alongside for the walker's liveness
+   check).  The formula is a template over program variables that the
+   VC walker instantiates at loop boundary points. *)
+val elab_vox_invariant :
+  Env.t -> Parsetree.expression -> Refinement.pred * Ident.t list
+
 val vox_with_self_name :
   root:Parsetree.core_type -> string -> (unit -> 'a) -> 'a
 

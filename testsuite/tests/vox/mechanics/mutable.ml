@@ -56,6 +56,7 @@ Line 2, characters 49-50: vox VC:
 Line 5, characters 22-29: vox VC:
   goal: (t + i) >= 0
   hypotheses:
+  t = total@1
   t >= 0
   1 <= i
   i <= n
@@ -65,6 +66,7 @@ Line 5, characters 22-29: vox VC:
 Line 8, characters 10-11: vox VC:
   goal: r >= 0
   hypotheses:
+  r = total@1
   r >= 0
   total@1 >= 0
   total >= 0
@@ -165,7 +167,7 @@ let opaque (u : unit -> unit -> unit) : {r:int | r >= 1} =
   assume_unchecked_ m
 [%%expect{|
 Line 4, characters 20-21: vox VC (ASSUMED):
-  goal: m@3 >= 1
+  goal: m@7 >= 1
   hypotheses: <none>
 val opaque : (unit -> unit -> unit) -> int{ _ >= 1 } = <fun>
 |}]
@@ -196,4 +198,190 @@ Line 10, characters 27-28: vox VC (ASSUMED):
   not (m@1 is K)
   m@1 = (K 9)
 val get : unit -> int{ _ = 9 } = <fun>
+|}]
+
+(* Loop invariants: a [@vox.invariant] formula over program variables is
+   a fact in the LOGICAL ENVIRONMENT, not a refinement type.  The
+   classical quadruple: ASSERTED over the entry versions, ASSUMED over
+   the head versions, ASSERTED over the body-exit versions at the
+   back-edge; after the loop the head assumption stands with the negated
+   guard.  Mutable variables stay unrefined. *)
+let count (n : int) : {r:int | r >= 0} =
+  let mutable x = 0 in
+  let mutable y = n in
+  (while y > 0 do
+     x <- x + 1;
+     y <- y - 1
+   done) [@vox.invariant x >= 0 && x + y = n];
+  refine_ x
+[%%expect{|
+Line 7, characters 9-45: vox VC:
+  goal: (x >= 0) && ((x + y) = n)
+  hypotheses:
+  y = n
+  x = 0
+Line 7, characters 9-45: vox VC:
+  goal: (x@2 >= 0) && ((x@2 + y@2) = n)
+  hypotheses:
+  y@1 > 0
+  (x@1 >= 0) && ((x@1 + y@1) = n)
+  y@2 = (y@1 - 1)
+  x@2 = (x@1 + 1)
+Line 8, characters 10-11: vox VC:
+  goal: x@1 >= 0
+  hypotheses:
+  not (y@1 > 0)
+  (x@1 >= 0) && ((x@1 + y@1) = n)
+val count : int -> int{ _ >= 0 } = <fun>
+|}]
+
+(* The invariant may only mention mutables tracked at the loop: a loop
+   inside a closure cannot see the enclosing function's mutables. *)
+let bad_scope () =
+  let mutable m = 0 in
+  let f () =
+    (while false do () done) [@vox.invariant m >= 0]
+  in
+  m <- 1;
+  f ()
+[%%expect{|
+Line 4, characters 45-46:
+4 |     (while false do () done) [@vox.invariant m >= 0]
+                                                 ^
+Error: vox: unbound variable in refinement predicate
+|}]
+
+(* The FOR-loop invariant elaborates in the body's environment, so it
+   may mention the index: the entry assertion instantiates it at the
+   first value, the back-edge assertion at the NEXT value (the next
+   iteration's head state), and the post-loop assumption splits on
+   whether the loop ran. *)
+let iota : (n : int) -> {r:int | (n < 1 && r = 0) || (n >= 1 && r = n)} =
+  fun n ->
+  let mutable x = 0 in
+  (for i = 1 to n do
+     x <- x + 1
+   done) [@vox.invariant x = i - 1];
+  refine_ x
+[%%expect{|
+Line 6, characters 9-35: vox VC:
+  goal: x = (1 - 1)
+  hypotheses:
+  x = 0
+Line 6, characters 9-35: vox VC:
+  goal: x@2 = ((i + 1) - 1)
+  hypotheses:
+  1 <= i
+  i <= n
+  x@1 = (i - 1)
+  x@2 = (x@1 + 1)
+Line 7, characters 10-11: vox VC:
+  goal: ((n < 1) && (x@1 = 0)) || ((n >= 1) && (x@1 = n))
+  hypotheses:
+  ((1 > n) && (x@1 = (1 - 1))) || ((1 <= n) && (x@1 = ((n + 1) - 1)))
+val iota : (n : int) -> int{ ((n < 1) && (_ = 0)) || ((n >= 1) && (_ = n)) } =
+  <fun>
+|}]
+
+(* [downto] mirrors, stepping the index down. *)
+let count_down
+  : (n : int) -> {r:int | (n < 0 && r = 0) || (n >= 0 && r = n + 1)}
+  =
+  fun n ->
+  let mutable x = 0 in
+  (for i = n downto 0 do
+     x <- x + 1
+   done) [@vox.invariant x = n - i];
+  refine_ x
+[%%expect{|
+Line 8, characters 9-35: vox VC:
+  goal: x = (n - n)
+  hypotheses:
+  x = 0
+Line 8, characters 9-35: vox VC:
+  goal: x@2 = (n - (i - 1))
+  hypotheses:
+  0 <= i
+  i <= n
+  x@1 = (n - i)
+  x@2 = (x@1 + 1)
+Line 9, characters 10-11: vox VC:
+  goal: ((n < 0) && (x@1 = 0)) || ((n >= 0) && (x@1 = (n + 1)))
+  hypotheses:
+  ((n < 0) && (x@1 = (n - n))) || ((n >= 0) && (x@1 = (n - (0 - 1))))
+val count_down :
+  (n : int) -> int{ ((n < 0) && (_ = 0)) || ((n >= 0) && (_ = (n + 1))) } =
+  <fun>
+|}]
+
+(* An index mention needs both bounds in the logic. *)
+let bad_bound (f : unit -> int) : int =
+  let mutable x = 0 in
+  (for i = 0 to f () do
+     x <- x + 1
+   done) [@vox.invariant x >= i];
+  x
+[%%expect{|
+Line 5, characters 9-32:
+5 |    done) [@vox.invariant x >= i];
+             ^^^^^^^^^^^^^^^^^^^^^^^
+Error: vox: the invariant mentions the loop index, but a loop bound does not reflect into the logic; bind the bounds to variables first
+|}]
+
+(* An arm containing an exception pattern can be reached with the
+   scrutinee interrupted between writes: it -- and the continuation of
+   a match that has one -- receives the pre-scrutinee state with the
+   scrutinee's writes havocked, never the threaded versions.  Here the
+   value arm keeps the threaded fact [x@1 = 1]; the exception arm and
+   the continuation below see an unconstrained version. *)
+let interrupted (p : bool) : {r:int | r = 1} =
+  let mutable x = 0 in
+  match (if p then raise Not_found); x <- 1 with
+  | () -> refine_ x
+  | exception Not_found -> refine_ x
+[%%expect{|
+Line 4, characters 18-19: vox VC:
+  goal: x@1 = 1
+  hypotheses:
+  x@1 = 1
+Line 5, characters 35-36: vox VC:
+  goal: x@2 = 1
+  hypotheses: <none>
+val interrupted : bool -> int{ _ = 1 } = <fun>
+|}]
+
+let interrupted_single (p : bool) : {r:int | r = 1} =
+  let mutable x = 0 in
+  (match (if p then raise Not_found); x <- 1 with
+   | () | exception Not_found -> ());
+  refine_ x
+[%%expect{|
+Line 5, characters 10-11: vox VC:
+  goal: x@3 = 1
+  hypotheses: <none>
+val interrupted_single : bool -> int{ _ = 1 } = <fun>
+|}]
+
+(* Children of an unmodeled construct (application arguments here)
+   evaluate in unspecified order: each sees the subtree's writes
+   havocked, not a sibling's threaded version -- the write below may
+   run before the read. *)
+let siblings () : {r:int | r = 0} =
+  let use (a : {v:int | v = 0}) (_ : unit) : {v:int | v = 0} = a in
+  let mutable x = 0 in
+  let r = use (refine_ x) (x <- 1) in
+  r
+[%%expect{|
+Line 2, characters 63-64: vox VC:
+  goal: a = 0
+  hypotheses:
+  a = 0
+Line 4, characters 23-24: vox VC:
+  goal: x@2 = 0
+  hypotheses: <none>
+Line 5, characters 2-3: vox VC:
+  goal: r = 0
+  hypotheses:
+  r = 0
+val siblings : unit -> int{ _ = 0 } = <fun>
 |}]

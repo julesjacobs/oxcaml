@@ -109,3 +109,131 @@ Possible counterexample:
   i@1 = 0
 (lean: error: `grind` failed)
 |}]
+
+(* Loop invariants must be established at entry... *)
+let inv_entry (n : int) : int =
+  let mutable x = 5 in
+  (while x > n do
+     x <- x - 1
+   done) [@vox.invariant x = 0];
+  x
+[%%expect{|
+Line 5, characters 9-31:
+5 |    done) [@vox.invariant x = 0];
+             ^^^^^^^^^^^^^^^^^^^^^^
+Error: vox: verification failed (lean).
+       Goal: x = 0
+Hypotheses:
+  x = 5
+Possible counterexample:
+  x = 5
+(lean: error: `grind` failed)
+|}]
+
+(* ... and preserved by the body. *)
+let inv_preserved (n : int) : int =
+  let mutable x = 0 in
+  (while x < n do
+     x <- x + 2
+   done) [@vox.invariant x >= 0 && x <= n];
+  x
+[%%expect{|
+Line 5, characters 9-42:
+5 |    done) [@vox.invariant x >= 0 && x <= n];
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: vox: verification failed (lean).
+       Goal: (x >= 0) && (x <= n)
+Hypotheses:
+  x = 0
+Possible counterexample:
+  n = -1
+  x = 0
+(lean: error: `grind` failed)
+|}]
+
+(* The entry assertion instantiates an index-mentioning invariant at
+   the FIRST index value... *)
+let inv_index_entry (n : int) : int =
+  let mutable x = 0 in
+  (for i = 1 to n do
+     x <- x + 1
+   done) [@vox.invariant x = i];
+  x
+[%%expect{|
+Line 5, characters 9-31:
+5 |    done) [@vox.invariant x = i];
+             ^^^^^^^^^^^^^^^^^^^^^^
+Error: vox: verification failed (lean).
+       Goal: x = 1
+Hypotheses:
+  x = 0
+Possible counterexample:
+  x = 0
+(lean: error: `grind` failed)
+|}]
+
+(* ... and the back-edge asserts it at the NEXT one: holding at the
+   current index is not preservation. *)
+let inv_index_step (n : int) : int =
+  let mutable x = 0 in
+  (for i = 1 to n do
+     ()
+   done) [@vox.invariant x = i - 1];
+  x
+[%%expect{|
+Line 5, characters 9-35:
+5 |    done) [@vox.invariant x = i - 1];
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: vox: verification failed (lean).
+       Goal: x = ((i + 1) - 1)
+Hypotheses:
+  1 <= i
+  i <= n
+  x = (i - 1)
+  x = 0
+Possible counterexample:
+  i = 1
+  x = 0
+  n = 1
+(lean: error: `grind` failed)
+|}]
+
+(* An exception arm can be reached with the scrutinee interrupted
+   between writes (here, with [p] true, before [x <- 1] ran), so the
+   continuation sees the write havocked and this does NOT verify. *)
+let interrupted (p : bool) : {r:int | r = 1} =
+  let mutable x = 0 in
+  (match (if p then raise Not_found); x <- 1 with
+   | () | exception Not_found -> ());
+  refine_ x
+[%%expect{|
+Line 5, characters 10-11:
+5 |   refine_ x
+              ^
+Error: vox: verification failed (lean).
+       Goal: x@3 = 1
+Hypotheses: <none>
+Possible counterexample:
+  x@3 = 2
+(lean: error: `grind` failed)
+|}]
+
+(* Application arguments evaluate in unspecified order (right-to-left
+   in practice, so the write races ahead of the read): siblings see
+   each other's writes havocked and this does NOT verify. *)
+let siblings () : {r:int | r = 0} =
+  let use (a : {v:int | v = 0}) (_ : unit) : {v:int | v = 0} = a in
+  let mutable x = 0 in
+  let r = use (refine_ x) (x <- 1) in
+  r
+[%%expect{|
+Line 4, characters 23-24:
+4 |   let r = use (refine_ x) (x <- 1) in
+                           ^
+Error: vox: verification failed (lean).
+       Goal: x@2 = 0
+Hypotheses: <none>
+Possible counterexample:
+  x@2 = 1
+(lean: error: `grind` failed)
+|}]

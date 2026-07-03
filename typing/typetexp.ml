@@ -907,6 +907,18 @@ let vox_find_scope ~self_root name =
       | Vox_pi _ | Vox_self _ -> None)
     !vox_scope
 
+(* vox: loop-invariant elaboration mode.  An invariant is a FORMULA in
+   the logical environment, not a refinement type: it never travels, is
+   never compared by unification, and is instantiated by the VC walker
+   at specific boundary points by substituting each mutable variable's
+   current SSA version (Thrust-style: refinements over stable logical
+   names only; the mutable STAMP in the elaborated template is a
+   placeholder the walker always closes over before use).  So mutable
+   mentions -- banned in refinement types -- are permitted here, and
+   collected for the walker's liveness check. *)
+let vox_invariant_mode = ref false
+let vox_invariant_mutables : Ident.t list ref = ref []
+
 (* vox: elaborate a refinement predicate (an untyped logical term) from
    its surface form.  [v] denotes the bound value variable; other
    variables resolve first to enclosing dependent-arrow binders (as
@@ -936,13 +948,23 @@ let rec elab_vox_pred ~bound ~self_root env (e : Parsetree.expression)
       | Some `Self -> Pbound
       | None ->
           match Env.lookup_value ~use:false ~loc lid env with
-          | (Path.Pident _, {val_kind = Val_mut _; _}, _) ->
+          | (Path.Pident id, {val_kind = Val_mut _; _}, _) ->
               (* A mutable variable has no stable logical value: facts
                  recorded about it at different times would contradict.
-                 (The VC walker also never scopes mutable binders, but
-                 the rejection must not depend on that.) *)
-              Location.raise_errorf ~loc
-                "vox: mutable variables may not appear in refinements"
+                 (The VC walker also never scopes mutable binders, so
+                 the rejection must not depend on that.)  The exception
+                 is a loop INVARIANT, which is a formula instantiated
+                 by the walker at boundary points over the variable's
+                 current version. *)
+              if !vox_invariant_mode
+              then begin
+                if not (List.exists (Ident.same id) !vox_invariant_mutables)
+                then vox_invariant_mutables := id :: !vox_invariant_mutables;
+                Pvar id
+              end
+              else
+                Location.raise_errorf ~loc
+                  "vox: mutable variables may not appear in refinements"
           | (Path.Pident id, _, _) -> Pvar id
           | _ ->
               Location.raise_errorf ~loc
@@ -1187,6 +1209,32 @@ and elab_vox_constr ~bound ~self_root env ~loc lid
   in
   Refinement.Pconstr
     (path, cstr.cstr_name, List.map (elab_vox_pred ~bound ~self_root env) args)
+
+(* vox: elaborate a loop-invariant formula (see [vox_invariant_mode]).
+   Returns the template together with the mutable variables it mentions,
+   which the walker must find tracked at the loop.  [self_root] is a
+   dummy: an invariant has no bound value variable, and no enclosing
+   named-binder annotation. *)
+let elab_vox_invariant env (e : Parsetree.expression)
+  : Refinement.pred * Ident.t list
+  =
+  let dummy_root =
+    { Parsetree.ptyp_desc = Ptyp_any None
+    ; ptyp_loc = e.pexp_loc
+    ; ptyp_loc_stack = []
+    ; ptyp_attributes = []
+    }
+  in
+  vox_invariant_mode := true;
+  vox_invariant_mutables := [];
+  Fun.protect
+    ~finally:(fun () ->
+      vox_invariant_mode := false;
+      vox_invariant_mutables := [])
+    (fun () ->
+      let p = elab_vox_pred ~bound:"" ~self_root:dummy_root env e in
+      p, !vox_invariant_mutables)
+;;
 
 let rec transl_type env ~policy ?(aliased=false) ~row_context mode styp =
   Builtin_attributes.warning_scope styp.ptyp_attributes
