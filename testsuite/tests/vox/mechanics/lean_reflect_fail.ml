@@ -72,5 +72,5 @@ Lines 1-2, characters 0-19:
 1 | let rec total_ up (n : int) = if n = 0 then 0 else up (n + 1)
 2 | [@@vox.decreases n]
 Error: vox: the reflected definition of up was rejected by the solver (is it terminating?  int-indexed recursion needs a [@vox.decreases] metric)
-(lean: error: omega could not prove the goal:)
+(lean: error: `grind` failed)
 |}]

@@ -2635,9 +2635,12 @@ let rec lean_of_pred buf (p : Refinement.pred) =
    prelude.  [@[grind] def] registers the defining equations with
    grind.  Termination is Lean's to check: structural recursion needs
    nothing, and a [@@vox.decreases e] metric becomes
-   [termination_by (e).toNat] with an omega [decreasing_by] (the branch
-   guards are in context for those goals).  The def name is the source
-   name, so a [-vox-prelude] can state lemmas about it. *)
+   [termination_by (e).toNat] with an omega [decreasing_by], falling
+   back to [grind] for the goals omega leaves opaque -- a recursion on
+   [n / 2] decreases through [Int.tdiv], which omega treats as an atom
+   (the branch guards are in context for those goals either way).  The
+   def name is the source name, so a [-vox-prelude] can state lemmas
+   about it. *)
 let lean_rsort (s : Vox_reflect.rsort) =
   match s with
   | Vox_reflect.Rint -> "Int"
@@ -2686,7 +2689,8 @@ let lean_spec_def buf (d : Vox_reflect.spec_def) =
   | Some m ->
     Buffer.add_string buf "termination_by (";
     lean_of_pred buf m;
-    Buffer.add_string buf ").toNat\ndecreasing_by all_goals omega\n"
+    Buffer.add_string buf
+      ").toNat\ndecreasing_by all_goals (first | omega | grind)\n"
 ;;
 
 (* The .cmi spec export of a unit: its reflected definitions

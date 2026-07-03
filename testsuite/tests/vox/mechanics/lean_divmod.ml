@@ -68,3 +68,15 @@ Line 2, characters 19-28:
                        ^^^^^^^^^
 Error: vox: assume_ compiles a runtime check of this refinement, but it involves a constructor, tuple, projection, spec function, quantifier, or division, which the compiled check cannot evaluate faithfully; use assume_unchecked_
 |}]
+
+(* Logarithmic recursion REFLECTS: the [@@vox.decreases n] metric's
+   decrease goal runs through [Int.tdiv], which omega alone treats as
+   an atom -- the emitted [decreasing_by] falls back to grind. *)
+let rec total_ steps n = if n <= 1 then 0 else 1 + steps (n / 2)
+[@@vox.decreases n]
+
+let s4 : int{ _ = steps 4 && _ = 2 } = refine_ (steps 4)
+[%%expect{|
+val steps : int -> int = <fun>
+val s4 : int{ (_ = (steps 4)) && (_ = 2) } = 2
+|}]
