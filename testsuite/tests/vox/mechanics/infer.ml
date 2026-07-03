@@ -6,7 +6,7 @@
 (* vox: implicit refinement introduction/elimination.  Every form
    below is written WITHOUT [refine_]; elaboration inserts the intro
    (or elim) where rigid unification would otherwise fail.  Run with
-   -vox-dry-run; update with [make promote-one TEST=vox/infer.ml]. *)
+   -vox-dry-run; update with [make promote-one TEST=vox/mechanics/infer.ml]. *)
 
 (* Implicit intro on a literal: same VC as [refine_ 3]. *)
 let x : {v:int | v > 0} = 3

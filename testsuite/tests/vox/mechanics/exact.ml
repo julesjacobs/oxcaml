@@ -11,7 +11,8 @@ let three = refine_ 3
 val three : int{ _ = 3 } = 3
 |}]
 
-(* The DESIGN.md flagship, with no userland lt/zero operations: the
+(* The div/safe example in the explicit-synthesis spelling (the
+   current implicit spelling lives in infer.ml and DESIGN.md): the
    comparison is reflected by refine_, its binder contributes the fact,
    and the path fact discharges div's precondition. *)
 let div (a : int) (b : int{ not (_ = 0) }) : int = a / (b :> int)

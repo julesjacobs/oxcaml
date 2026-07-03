@@ -3,7 +3,9 @@
  expect;
 *)
 
-(* vox: dependent arrows (DESIGN.md's end-to-end example).  [lt]'s
+(* vox: dependent arrows, pinned in the EXPLICIT intro/elim spelling
+   (still supported; the implicit spelling of the same example lives
+   in infer.ml and DESIGN.md).  [lt]'s
    result refinement mentions its parameters; applying it to variables
    substitutes their stamps, so the unpacked [c] carries [c = (z < x)]
    and the path fact discharges [div]'s precondition. *)

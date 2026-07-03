@@ -30,10 +30,15 @@ module G : sig type g val mk : (v : int) -> g{ _ = v } @ unique end
 
 let use : (n : int) -> int{ _ = n + 1 } =
   fun n ->
-  let refine_ x = G.mk n in
-  let refine_ u = (refine_ () : unit{ x + 1 = n + 1 }) in
-  refine_ (n + 1)
+  let x = G.mk n in
+  let _u : unit{ x + 1 = n + 1 } = () in
+  n + 1
 [%%expect{|
+Line 3, characters 6-7:
+3 |   let x = G.mk n in
+          ^
+Warning 26 [unused-var]: unused variable "x".
+
 val use : (n : int) -> int{ _ = (n + 1) } = <fun>
 |}]
 
@@ -63,10 +68,15 @@ module B : sig type b val mk : (v : bool) -> b{ _ = v } @ unique end
 
 let useb : (v : bool) -> bool{ _ = v } =
   fun v ->
-  let refine_ x = B.mk v in
-  let refine_ u = (refine_ () : unit{ x = v }) in
-  refine_ v
+  let x = B.mk v in
+  let _u : unit{ x = v } = () in
+  v
 [%%expect{|
+Line 3, characters 6-7:
+3 |   let x = B.mk v in
+          ^
+Warning 26 [unused-var]: unused variable "x".
+
 val useb : (v : bool) -> bool{ _ = v } = <fun>
 |}]
 
@@ -120,9 +130,14 @@ let localmod : (n : int) -> int{ _ = n + 1 } =
       fun v -> assume_unchecked_ (Obj.magic_unique { c = v })
   end
   in
-  let refine_ x = M.mk n in
-  let refine_ u = (refine_ () : unit{ x + 1 = n + 1 }) in
-  refine_ (n + 1)
+  let x = M.mk n in
+  let _u : unit{ x + 1 = n + 1 } = () in
+  n + 1
 [%%expect{|
+Line 10, characters 6-7:
+10 |   let x = M.mk n in
+           ^
+Warning 26 [unused-var]: unused variable "x".
+
 val localmod : (n : int) -> int{ _ = (n + 1) } = <fun>
 |}]
