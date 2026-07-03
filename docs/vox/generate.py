@@ -113,6 +113,11 @@ def main():
         '@BINSEARCH@': slice_between(read('demo/lean_binsearch.ml'),
                                      r'^let lower_bound', r'^  =')
                        + '\n  fun a x -> ...',
+        '@MUTABLE@': slice_between(read('demo/lean_mutable.ml'),
+                                   r'^let iota', r'^  refine_ x$'),
+        '@IMP_BINSEARCH@': slice_between(read('demo/lean_imp_binsearch.ml'),
+                                         r'^let search2',
+                                         r'refine_ \{ lo = l; hi = h \}'),
         '@PCELL@': slice_between(read('demo/lean_pcell.ml'), r'^let swap_sum',
                                  r'read c1 a t1 in') + '\n    ...',
         '@BST_MLI@': strip_leading_comment(read('demo/bst.mli')),

@@ -209,6 +209,21 @@ in-bounds access, the bracket invariant, and the flip-point characterization
 of the result.</p>
 <pre><code class="ml">@BINSEARCH@</code></pre></div>
 
+<div class="card"><h3>Mutable locals, loop invariants <span class="pill">demo/lean_mutable.ml</span></h3>
+<p>Reads of a <code>let mutable</code> variable name its current SSA
+version; every write mints a fresh one.  A <code>[@vox.invariant]</code>
+formula follows the classical quadruple — asserted at entry, assumed at
+the loop head, asserted again at the back-edge — and may mention a
+for-loop's index; after the loop it stands at one past the end.</p>
+<pre><code class="ml">@MUTABLE@</code></pre></div>
+
+<div class="card"><h3>The same search, imperatively <span class="pill">demo/lean_imp_binsearch.ml</span></h3>
+<p>The recursive bracket invariant of <code>lower_bound</code>, worn as a
+loop annotation: two unrefined mutable indices, plain reads and writes, and
+the flip-point postcondition falls out of the invariant together with the
+negated guard.</p>
+<pre><code class="ml">@IMP_BINSEARCH@</code></pre></div>
+
 <div class="card"><h3>Interior mutability <span class="pill">demo/lean_pcell.ml</span></h3>
 <p>Mutable cells behind a linear token discipline: reads and writes consume
 and return a unique token, so facts about a cell's contents cannot survive a

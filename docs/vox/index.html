@@ -469,6 +469,53 @@ of the result.</p>
   =
   fun a x -&gt; ...</code></pre></div>
 
+<div class="card"><h3>Mutable locals, loop invariants <span class="pill">demo/lean_mutable.ml</span></h3>
+<p>Reads of a <code>let mutable</code> variable name its current SSA
+version; every write mints a fresh one.  A <code>[@vox.invariant]</code>
+formula follows the classical quadruple — asserted at entry, assumed at
+the loop head, asserted again at the back-edge — and may mention a
+for-loop's index; after the loop it stands at one past the end.</p>
+<pre><code class="ml">let iota : (n : int) -&gt; {r:int | (n &lt; 1 &amp;&amp; r = 0) || (n &gt;= 1 &amp;&amp; r = n)} =
+  fun n -&gt;
+  let mutable x = 0 in
+  (for i = 1 to n do
+     x &lt;- x + 1
+   done) [@vox.invariant x = i - 1];
+  refine_ x</code></pre></div>
+
+<div class="card"><h3>The same search, imperatively <span class="pill">demo/lean_imp_binsearch.ml</span></h3>
+<p>The recursive bracket invariant of <code>lower_bound</code>, worn as a
+loop annotation: two unrefined mutable indices, plain reads and writes, and
+the flip-point postcondition falls out of the invariant together with the
+negated guard.</p>
+<pre><code class="ml">let search2
+  : (a : int iarray) -&gt; (x : int)
+    -&gt; bracket{ _.hi = _.lo + 1
+                &amp;&amp; -1 &lt;= _.lo &amp;&amp; _.hi &lt;= len a
+                &amp;&amp; (_.lo = -1 || elem a _.lo &lt; x)
+                &amp;&amp; (_.hi = len a || elem a _.hi &gt;= x) }
+  =
+  fun a x -&gt;
+  let refine_ n = length a in
+  let mutable lo = -1 in
+  let mutable hi = n in
+  (while hi - lo &gt; 1 do
+     let l = lo in
+     let h = hi in
+     let refine_ s = (refine_ (h - l) : {v:int | v = h - l}) in
+     let refine_ d = half s in
+     let refine_ mid = (refine_ (l + d) : {v:int | v = l + d}) in
+     let refine_ v = get a mid (refine_ ()) in
+     if v &gt;= x then hi &lt;- mid else lo &lt;- mid
+   done)
+  [@vox.invariant
+    -1 &lt;= lo &amp;&amp; lo &lt; hi &amp;&amp; hi &lt;= len a
+    &amp;&amp; (lo = -1 || elem a lo &lt; x)
+    &amp;&amp; (hi = len a || elem a hi &gt;= x)];
+  let l = lo in
+  let h = hi in
+  refine_ { lo = l; hi = h }</code></pre></div>
+
 <div class="card"><h3>Interior mutability <span class="pill">demo/lean_pcell.ml</span></h3>
 <p>Mutable cells behind a linear token discipline: reads and writes consume
 and return a unique token, so facts about a cell's contents cannot survive a
