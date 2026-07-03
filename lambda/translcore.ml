@@ -416,7 +416,7 @@ and vox_assume_check ~scopes layout e lam =
         | Refinement.Pvar id -> Lvar id
         | Refinement.Pconstr _ | Refinement.Pfun _ | Refinement.Pfield _
         | Refinement.Ptuple _ | Refinement.Pproj _
-        | Refinement.Pis _ | Refinement.Pquant _ ->
+        | Refinement.Pis _ | Refinement.Pquant _ | Refinement.Pglobal _ ->
             (* Rejected by the VC pass (emit_vc, Runtime_check). *)
             Location.raise_errorf ~loc:e.exp_loc
               "vox: assume_ cannot compile a runtime check involving %s; \

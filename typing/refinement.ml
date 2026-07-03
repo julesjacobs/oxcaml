@@ -25,6 +25,12 @@ type binop =
 type pred =
   | Pbound (* the bound value variable v *)
   | Pvar of Ident.t (* logical value of a program variable or dependent-arrow binder *)
+  | Pglobal of Path.t
+    (* logical value of a MODULE-LEVEL (immutable) value, identified
+       by path -- the global counterpart of [Pvar].  Stamp-free and
+       .cmi-stable, like the type paths in [Pconstr]/[Pfield]/[Pis];
+       two distinct paths to one value are distinct names (both facts
+       true, equality not assumed). *)
   | Pint of int
   | Pbool of bool
   | Pconstr of Path.t * string * pred list
@@ -139,6 +145,7 @@ let rec equal p1 p2 =
   match p1, p2 with
   | Pbound, Pbound -> true
   | Pvar id1, Pvar id2 -> equal_var id1 id2
+  | Pglobal p1, Pglobal p2 -> Path.same p1 p2
   | Pint n1, Pint n2 -> Int.equal n1 n2
   | Pbool b1, Pbool b2 -> Bool.equal b1 b2
   | Pbinop (op1, a1, b1), Pbinop (op2, a2, b2) -> op1 = op2 && equal a1 a2 && equal b1 b2
@@ -171,8 +178,8 @@ let rec equal p1 p2 =
        use: two independently written (hence differently-stamped)
        quantifiers compare with their binders paired. *)
     q1 = q2 && with_binder_pair id1 id2 (fun () -> equal a1 a2)
-  | ( ( Pbound | Pvar _ | Pint _ | Pbool _ | Pconstr _ | Pfun _ | Pfield _
-      | Ptuple _ | Pproj _
+  | ( ( Pbound | Pvar _ | Pglobal _ | Pint _ | Pbool _ | Pconstr _ | Pfun _
+      | Pfield _ | Ptuple _ | Pproj _
       | Pis _ | Pbinop _ | Pand _ | Por _ | Pnot _ | Pimp _ | Pquant _ ),
       _ ) -> false
 ;;
@@ -182,7 +189,7 @@ let rec equal p1 p2 =
 let rec subst_var id ~by p =
   match p with
   | Pvar id' when Ident.same id id' -> by
-  | Pbound | Pvar _ | Pint _ | Pbool _ -> p
+  | Pbound | Pvar _ | Pglobal _ | Pint _ | Pbool _ -> p
   | Pconstr (path, c, args) -> Pconstr (path, c, List.map (subst_var id ~by) args)
   | Pfun (f, args) -> Pfun (f, List.map (subst_var id ~by) args)
   | Pfield (path, l, a) -> Pfield (path, l, subst_var id ~by a)
@@ -205,7 +212,7 @@ let rec subst_var id ~by p =
 let rec subst_bound ~by p =
   match p with
   | Pbound -> by
-  | Pvar _ | Pint _ | Pbool _ -> p
+  | Pvar _ | Pglobal _ | Pint _ | Pbool _ -> p
   | Pconstr (path, c, args) -> Pconstr (path, c, List.map (subst_bound ~by) args)
   | Pfun (f, args) -> Pfun (f, List.map (subst_bound ~by) args)
   | Pfield (path, l, a) -> Pfield (path, l, subst_bound ~by a)
@@ -223,7 +230,7 @@ let rec subst_bound ~by p =
 let rec free_vars acc p =
   match p with
   | Pvar id -> id :: acc
-  | Pbound | Pint _ | Pbool _ -> acc
+  | Pbound | Pglobal _ | Pint _ | Pbool _ -> acc
   | Pconstr (_, _, args) | Pfun (_, args) | Ptuple args ->
     List.fold_left free_vars acc args
   | Pfield (_, _, a) | Pis (_, _, a) | Pproj (_, _, a) -> free_vars acc a
@@ -242,7 +249,7 @@ let free_vars p = free_vars [] p
 let rec mem_var id p =
   match p with
   | Pvar id' -> Ident.same id id'
-  | Pbound | Pint _ | Pbool _ -> false
+  | Pbound | Pglobal _ | Pint _ | Pbool _ -> false
   | Pconstr (_, _, args) | Pfun (_, args) | Ptuple args ->
     List.exists (mem_var id) args
   | Pfield (_, _, a) | Pis (_, _, a) | Pproj (_, _, a) -> mem_var id a
@@ -256,7 +263,7 @@ let rec mem_var id p =
    predicate crosses a module boundary, exactly as [Tconstr] paths do). *)
 let rec map_paths f p =
   match p with
-  | Pbound | Pvar _ | Pint _ | Pbool _ -> p
+  | Pbound | Pvar _ | Pglobal _ | Pint _ | Pbool _ -> p
   | Pconstr (path, c, args) -> Pconstr (f path, c, List.map (map_paths f) args)
   | Pfun (g, args) -> Pfun (g, List.map (map_paths f) args)
   | Pfield (path, l, a) -> Pfield (f path, l, map_paths f a)
@@ -273,7 +280,7 @@ let rec map_paths f p =
 
 let rec constr_paths acc p =
   match p with
-  | Pbound | Pvar _ | Pint _ | Pbool _ -> acc
+  | Pbound | Pvar _ | Pglobal _ | Pint _ | Pbool _ -> acc
   | Pconstr (path, _, args) -> List.fold_left constr_paths (path :: acc) args
   | Pfun (_, args) | Ptuple args -> List.fold_left constr_paths acc args
   | Pfield (path, _, a) | Pis (path, _, a) -> constr_paths (path :: acc) a
@@ -290,7 +297,7 @@ let constr_paths p = constr_paths [] p
    solver input must declare one product datatype per arity. *)
 let rec tuple_arities acc p =
   match p with
-  | Pbound | Pvar _ | Pint _ | Pbool _ -> acc
+  | Pbound | Pvar _ | Pglobal _ | Pint _ | Pbool _ -> acc
   | Ptuple args -> List.fold_left tuple_arities (List.length args :: acc) args
   | Pproj (n, _, a) -> tuple_arities (n :: acc) a
   | Pconstr (_, _, args) | Pfun (_, args) -> List.fold_left tuple_arities acc args
@@ -309,7 +316,7 @@ let tuple_arities p = tuple_arities [] p
    module's input. *)
 let rec mentions_spec_fun p =
   match p with
-  | Pbound | Pvar _ | Pint _ | Pbool _ -> false
+  | Pbound | Pvar _ | Pglobal _ | Pint _ | Pbool _ -> false
   | Pfun _ -> true
   | Pconstr (_, _, args) | Ptuple args -> List.exists mentions_spec_fun args
   | Pfield (_, _, a) | Pis (_, _, a) | Pproj (_, _, a) | Pnot a ->
@@ -336,6 +343,7 @@ let rec print ppf p =
   match p with
   | Pbound -> pp_print_string ppf "_"
   | Pvar id -> pp_print_string ppf (!var_display id)
+  | Pglobal p -> pp_print_string ppf (Path.name p)
   | Pint n -> pp_print_int ppf n
   | Pbool b -> pp_print_bool ppf b
   | Pconstr (_, c, []) -> pp_print_string ppf c
@@ -391,7 +399,8 @@ let rec print ppf p =
 
 and print_atom ppf p =
   match p with
-  | Pbound | Pvar _ | Pint _ | Pbool _ | Pconstr (_, _, []) | Pfun (_, [])
+  | Pbound | Pvar _ | Pglobal _ | Pint _ | Pbool _ | Pconstr (_, _, [])
+  | Pfun (_, [])
   | Pfield _ | Ptuple _ -> print ppf p
   | Pproj (n, _, _) ->
     (* [fst]/[snd] print as applications; the [.i] form is atomic *)
@@ -419,7 +428,7 @@ let ia_get = "Vox_ia_get"
    the built-in theories on use.) *)
 let rec mentions_fun name p =
   match p with
-  | Pbound | Pvar _ | Pint _ | Pbool _ -> false
+  | Pbound | Pvar _ | Pglobal _ | Pint _ | Pbool _ -> false
   | Pfun (f, args) ->
     String.equal f name || List.exists (mentions_fun name) args
   | Pconstr (_, _, args) | Ptuple args -> List.exists (mentions_fun name) args

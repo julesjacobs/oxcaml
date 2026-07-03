@@ -896,7 +896,7 @@ let rec pred_unreflectable (p : Refinement.pred) =
   match p with
   | Refinement.Pconstr _ | Refinement.Pfun _ | Refinement.Pfield _
   | Refinement.Ptuple _ | Refinement.Pproj _
-  | Refinement.Pis _ | Refinement.Pquant _ -> true
+  | Refinement.Pis _ | Refinement.Pquant _ | Refinement.Pglobal _ -> true
   | Refinement.Pbinop ((Refinement.Div | Refinement.Mod), _, _) -> true
   | Refinement.Pbound | Refinement.Pvar _ | Refinement.Pint _
   | Refinement.Pbool _ -> false
@@ -2645,6 +2645,10 @@ let boolish p =
   match p with
   | Pbool _ | Pbinop ((Eq | Neq | Lt | Le | Gt | Ge), _, _)
   | Pand _ | Por _ | Pnot _ | Pimp _ -> true
+  | Pglobal _ ->
+    (* Dormant until the walker emits [Pglobal]s: global sorts then
+       arrive with their registration. *)
+    false
   | Pvar id ->
     (match Hashtbl.find_opt name_sorts id with
      | Some S_bool -> true
@@ -2677,6 +2681,7 @@ let rec lean_of_pred buf (p : Refinement.pred) =
   match p with
   | Pbound -> assert false
   | Pvar id -> Buffer.add_string buf (lean_name id)
+  | Pglobal p -> Buffer.add_string buf ("g_" ^ lean_sanitize (path_uname p))
   | Pint n ->
     if n >= 0
     then Buffer.add_string buf (Printf.sprintf "(%d : Int)" n)
@@ -3005,7 +3010,8 @@ let lean_theorem buf i vc =
         | Refinement.Pimp (a, b) ->
           collect a;
           collect b
-        | Refinement.Pbound | Refinement.Pvar _ | Refinement.Pint _
+        | Refinement.Pbound | Refinement.Pvar _ | Refinement.Pglobal _
+        | Refinement.Pint _
         | Refinement.Pbool _ -> ()
       in
       collect f)
