@@ -8,7 +8,8 @@
  check-ocamlc.byte-output;
 *)
 
-(* Fibonacci, where the spec IS the program: the naive recursion below
+(* Demo 6/7 -- Fibonacci, where the spec IS the program: the naive
+   recursion below
    is REFLECTED ([@@vox.reflect]) -- the compiler translates its
    definition into the logic and emits it as a Lean [@[grind] def],
    with [termination_by] synthesized from [@@vox.decreases n]; an

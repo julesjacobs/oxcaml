@@ -8,9 +8,9 @@
  check-ocamlc.byte-output;
 *)
 
-(* Binary search over [int iarray], after "Binary Search a Little
-   Simpler & More Generic" (julesjacobs.com): keep l < r with p(l)
-   false and p(r) true, halve until r = l + 1.  Starting from the
+(* Demo 7/7 -- binary search over [int iarray], after "Binary Search a
+   Little Simpler & More Generic" (julesjacobs.com): keep l < r with
+   p(l) false and p(r) true, halve until r = l + 1.  Starting from the
    virtual sentinels l = -1 and r = length a (where p(-1) = false and
    p (length a) = true artificially), the loop probes only indices
    STRICTLY between them -- so every access is in bounds, which is

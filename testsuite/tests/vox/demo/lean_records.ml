@@ -9,12 +9,13 @@
  check-ocamlc.byte-output;
 *)
 
-(* Real verification of record refinements through Lean's [grind]:
-   records become structures, projections are the built-in ones, and
-   every obligation below is actually proved.  Exercises construction,
-   projection goals, functional update with frame facts, per-field
-   destructuring facts, ADT/record composition, and a spec-function
-   measure over a record. *)
+(* Demo 3/7 -- simple records.  Real verification of record
+   refinements through Lean's [grind]: records become structures,
+   projections are the built-in ones, and every obligation below is
+   actually proved.  Exercises construction, projection goals,
+   functional update with frame facts, per-field destructuring facts,
+   ADT/record composition, and a spec-function measure over a record
+   (rec_lib.lean). *)
 
 type point =
   { px : int
@@ -43,7 +44,8 @@ let compose (v : point{ _.px = 1 }) : {r:int | r = 1} =
   let refine_ s = (refine_ (Pt q) : shape{ _ = Pt q }) in
   match s with
   | Pt w -> let { px; _ } = w in refine_ px
-  | Nothing -> assume_ 0
+  (* Dead arm, proved dead: s = Pt q and s = Nothing contradict. *)
+  | Nothing -> refine_ 0
 
 (* Cross-module: Rec_aux.one's refinement projects a field of
    Rec_aux.wid; the path travels through the .cmi. *)
@@ -55,12 +57,9 @@ let from_lib : {r:int | r = 1} =
 (* A measure over a record, from the prelude. *)
 let d : point{ norm1 _ = 3 } = refine_ { px = 1; py = 2 }
 
-let add : (a : int) -> (b : int) -> {c:int | c = a + b} =
-  fun a b -> assume_ (a + b)
-
+(* A direct field read names itself ([x = p.px]); reflected
+   arithmetic then carries the update value into the goal. *)
 let shift : (p : point) -> point{ norm1 _ = norm1 p + 1 } =
   fun p ->
-  let refine_ x = (refine_ (p.px) : {v:int | v = p.px}) in
-  let refine_ one = (assume_ 1 : {v:int | v = 1}) in
-  let refine_ z = add x one in
-  refine_ { p with px = z }
+    let refine_ x = (refine_ p.px : {v:int | v = p.px}) in
+    refine_ { p with px = x + 1 }

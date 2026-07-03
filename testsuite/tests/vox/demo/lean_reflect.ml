@@ -7,7 +7,8 @@
  check-ocamlc.byte-output;
 *)
 
-(* Reflected recursive functions ([@@vox.reflect]): the compiler
+(* Demo 4/7 -- the program as its own spec.  Reflected recursive
+   functions ([@@vox.reflect]): the compiler
    translates the definition into the logic and emits it as a Lean
    [@[grind] def] (Lean checks termination -- structural recursion here
    needs no metric).  A saturated call of a reflected function then

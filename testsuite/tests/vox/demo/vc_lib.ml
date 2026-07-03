@@ -4,4 +4,4 @@
 let pos : {v:int | v > 0} = refine_ 3
 
 let add : (a : int) -> (b : int) -> {c:int | c = a + b} =
-  fun a b -> assume_ (a + b)
+  fun a b -> refine_ (a + b)

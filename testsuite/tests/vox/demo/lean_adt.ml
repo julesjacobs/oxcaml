@@ -8,11 +8,16 @@
  check-ocamlc.byte-output;
 *)
 
-(* Real verification of ADT refinements through Lean's [grind]: every
-   obligation below is actually proved (this test fails to compile if
-   any proof fails).  Exercises constructor introduction, match facts,
-   injectivity, distinctness, recursion, bool (Prop) fields, refined
-   constructor arguments, and cross-module constructor predicates. *)
+(* Demo 2/7 -- algebraic data types.  Real verification of ADT
+   refinements through Lean's [grind]: every obligation below is
+   actually proved (this test fails to compile if any proof fails).
+   Exercises constructor introduction, match facts, injectivity,
+   distinctness, recursion, bool (Prop) fields, refined constructor
+   arguments, cross-module constructor predicates, and negative match
+   facts.  Note the dead arms: their hypotheses are contradictory
+   (the scrutinee's refinement names one constructor, the arm's match
+   fact another), so [refine_] proves them dead -- no runtime check,
+   no assumption. *)
 
 type t =
   | K of int
@@ -26,7 +31,7 @@ let get (s : t{ _ = K 3 }) : {r:int | r = 3} =
   let refine_ s = s in
   match s with
   | K y -> refine_ y
-  | L -> assume_ 0
+  | L -> refine_ 0
 
 (* Distinctness: s = L proves s is not K 0. *)
 let notk (s : t{ _ = L }) : t{ not (_ = K 0) } =
@@ -42,7 +47,7 @@ let head (s : ilist{ _ = Cons (3, Nil) }) : {r:int | r = 3} =
   let refine_ s = s in
   match s with
   | Cons (h, _) -> refine_ h
-  | Nil -> assume_ 0
+  | Nil -> refine_ 0
 
 (* Bool fields (modelled as Prop): injectivity at Prop works too. *)
 type bp = B of bool
@@ -60,14 +65,14 @@ type w =
 let getw (t : w) : {r:int | r > 0} =
   match t with
   | W y -> let refine_ z = y in refine_ z
-  | Z -> assume_ 1
+  | Z -> refine_ 1
 
 (* Cross-module: Adt_lib.k3's refinement mentions Adt_lib's constructor. *)
 let three : {r:int | r = 3} =
   let refine_ s = Adt_lib.k3 in
   match s with
   | Adt_lib.K y -> refine_ y
-  | Adt_lib.L -> assume_ 0
+  | Adt_lib.L -> refine_ 0
 
 (* Negative match facts, really proved: the default arm knows s is
    neither an A nor B, and exhaustiveness makes it a C. *)

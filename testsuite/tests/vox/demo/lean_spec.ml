@@ -8,12 +8,15 @@
  check-ocamlc.byte-output;
 *)
 
-(* Spec functions ([-vox-prelude]): measures and predicates written in
-   Lean (spec_lib.lean) and applied in refinements.  Every obligation is
-   really proved.  The recursive functions are verified INDUCTIVELY:
-   each recursive call re-instantiates the dependent signature at the
-   actual arguments, so its refined result is the induction
-   hypothesis. *)
+(* Demo 5/7 -- spec functions from a prelude.  Where [@@vox.reflect]
+   (demo 4) makes the program its own spec, a [-vox-prelude] file
+   defines spec functions on the SOLVER side (spec_lib.lean) -- the
+   spelling for specs beyond the reflectable fragment, or that should
+   not live in the program.  [mem] returns Prop, which no OCaml
+   function can.  Every obligation is really proved.  The recursive
+   functions are verified INDUCTIVELY: each recursive call
+   re-instantiates the dependent signature at the actual arguments, so
+   its refined result is the induction hypothesis. *)
 
 type ilist =
   | Nil
