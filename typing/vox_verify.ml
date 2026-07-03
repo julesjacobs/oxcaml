@@ -190,6 +190,69 @@ let rec path_uname (p : Path.t) =
   | Path.Pextra_ty (q, _) -> path_uname q ^ ".#extra"
 ;;
 
+(* An abstract type may declare that its LOGICAL REPRESENTATIVE is its
+   value at a base sort ([@@vox.sort int]): values of the type are
+   modelled as opaque Ints (or Bools) rather than at VoxU, so
+   refinements can use them directly as the values they stand for --
+   ghost types whose denotation IS the value (prophecies; refs
+   denoting their contents).  TRUSTED: the declaring library asserts
+   that every fact it issues about such values is true of that
+   interpretation.  The attribute must appear on the declaration in
+   both the interface and the implementation (sorts are computed
+   per-compilation from the visible declaration). *)
+let vox_sort_of_attribute (a : Parsetree.attribute) =
+  if not (String.equal a.attr_name.txt "vox.sort")
+  then None
+  else (
+    match a.attr_payload with
+    | PStr
+        [ { pstr_desc =
+              Pstr_eval
+                ({ pexp_desc = Pexp_ident { txt = Longident.Lident s; _ }; _ }, _)
+          ; _
+          }
+        ] ->
+      (match s with
+       | "int" -> Some S_int
+       | "bool" -> Some S_bool
+       | _ ->
+         Location.raise_errorf
+           ~loc:a.attr_loc
+           "vox: unknown vox.sort %S (expected \"int\" or \"bool\")"
+           s)
+    | _ ->
+      Location.raise_errorf
+        ~loc:a.attr_loc
+        "vox: vox.sort takes a single sort name, e.g. [@@@@vox.sort int]")
+;;
+
+(* Eager validation: a malformed [@@vox.sort] is an error even when no
+   value of the type ever reaches a VC (a typo on a ghost type must not
+   be silent), and so is the attribute on a pure ALIAS, where it would
+   be silently ignored (sorting expands aliases to their definition
+   first).  Run wherever declarations pass by. *)
+let validate_vox_sort_attributes ?(alias = false) (attrs : Parsetree.attributes) =
+  List.iter
+    (fun (a : Parsetree.attribute) ->
+      match vox_sort_of_attribute a with
+      | None -> ()
+      | Some _ ->
+        if alias
+        then
+          Location.raise_errorf
+            ~loc:a.attr_loc
+            "vox: vox.sort on a type alias has no effect (an alias expands \
+             to its definition before sorting); put the attribute on the \
+             definition")
+    attrs
+;;
+
+let vox_sort_attribute env p =
+  match Env.find_type p env with
+  | exception Not_found -> None
+  | decl -> List.find_map vox_sort_of_attribute decl.type_attributes
+;;
+
 (* The sort of the type at path [p], registering it as a datatype (with its
    field datatypes, recursively) on first sight. *)
 let rec datatype_sort env p =
@@ -197,7 +260,13 @@ let rec datatype_sort env p =
   then S_int
   else if Path.same p Predef.path_bool
   then S_bool
-  else if List.exists (Path.same p) !poisoned
+  else (
+    match vox_sort_attribute env p with
+    | Some s -> s
+    | None -> datatype_sort_unattributed env p)
+
+and datatype_sort_unattributed env p =
+  if List.exists (Path.same p) !poisoned
   then S_other
   else if find_datatype p <> None
   then S_data p
@@ -761,7 +830,31 @@ and iter_class_type_types ~f ~loc ~what = function
    This is what makes .cmi predicates self-contained: stamps do not
    survive a compilation unit, so an imported [Pvar] can collide with
    an unrelated local stamp and prove false facts. *)
+(* [@@vox.sort] hygiene over an exported signature: malformed payloads
+   are errors even when no value of the type ever reaches a VC (a typo
+   on a ghost type must not be silent). *)
+let rec validate_signature_sorts (sg : Types.signature) =
+  List.iter
+    (fun (item : Types.signature_item) ->
+      match item with
+      | Sig_type (_, decl, _, _) ->
+        let alias =
+          (match decl.type_kind with
+           | Type_abstract _ -> true
+           | _ -> false)
+          && Option.is_some decl.type_manifest
+        in
+        validate_vox_sort_attributes ~alias decl.type_attributes
+      | Sig_module (_, _, md, _, _) ->
+        (match md.md_type with
+         | Mty_signature sub -> validate_signature_sorts sub
+         | _ -> ())
+      | _ -> ())
+    sg
+;;
+
 let check_signature (sg : Types.signature) =
+  validate_signature_sorts sg;
   iter_signature_types sg
     ~f:(fun ~loc ~what ty -> check_type_escapes ~loc ~what Module_level ty)
 ;;
@@ -932,7 +1025,13 @@ let extend_pat
 ;;
 
 (* Walk an expression under a logical context, collecting VCs. *)
-let rec walk_expr env ctx (e : expression) =
+let rec walk_expr _outer_env ctx (e : expression) =
+  (* Use the node's OWN env, re-derived at every recursive call: an env
+     threaded from the enclosing structure misses type declarations
+     introduced by let-module (and friends) inside the expression, whose
+     types would then silently sort at VoxU -- same bug class as the
+     walk_items nested-module fix. *)
+  let env = e.exp_env in
   (* Intro forms: the node itself carries the vox attribute and the refined type. *)
   let kind =
     if has_vox_attr "vox.refine" e.exp_attributes
@@ -1965,8 +2064,14 @@ let lean_file vcs =
      source order; finally the elaboration bound.  Theorems follow,
      one per line.  A solver error inside a block is reported at the
      block's own location (or its defining unit). *)
-  let needs_voxu = needs_voxu || imported_need_voxu () in
   let want_prelude = List.exists vc_uses_spec_fun vcs in
+  (* Prelude text (imported blocks, -vox-prelude, own blocks) declares
+     spec functions AT VoxU (e.g. [opaque f : VoxU -> Int]); if VoxU
+     itself were not declared, Lean's autobound implicits would
+     silently generalize those signatures ([{VoxU : Sort u} -> ...]),
+     turning ill-sorted applications into polymorphic ones instead of
+     errors.  So the prelude implies VoxU. *)
+  let needs_voxu = needs_voxu || imported_need_voxu () || want_prelude in
   let segments = ref [] in
   let seg ?src text = if text <> "" then segments := (text, src) :: !segments in
   if needs_voxu then seg "opaque VoxU : Type\n";
@@ -2492,7 +2597,12 @@ let walk_items (str : structure) ctx =
       | _ ->
         let it =
           { Tast_iterator.default_iterator with
-            expr = (fun _ e -> walk_expr str.str_final_env !ctx e)
+            (* the expression's OWN env, not the top-level structure's:
+               inside a nested module, locally declared types (their
+               attributes, constructors, labels) are only findable in
+               the inner env -- with the outer env they silently sort
+               at VoxU *)
+            expr = (fun _ e -> walk_expr e.exp_env !ctx e)
           ; pat =
               (fun sub (type k) (p : k general_pattern) ->
                 backstop_pat !ctx p;
@@ -2501,19 +2611,68 @@ let walk_items (str : structure) ctx =
               (fun sub vb ->
                 reject_local_reflect vb;
                 Tast_iterator.default_iterator.value_binding sub vb)
+          ; type_declaration =
+              (fun sub td ->
+                (* eager [@@vox.sort] validation for LOCAL declarations
+                   (exported ones are covered by check_signature) *)
+                let alias =
+                  (match td.typ_kind with
+                   | Ttype_abstract -> true
+                   | _ -> false)
+                  && Option.is_some td.typ_manifest
+                in
+                validate_vox_sort_attributes ~alias td.typ_attributes;
+                Tast_iterator.default_iterator.type_declaration sub td)
           }
         in
         it.structure_item it item)
     str.str_items
 ;;
 
-let check_implementation (str : structure) (sg : Types.signature) =
+(* An interface/implementation pair must agree on [@@vox.sort] for
+   every exported type: sorts are computed per-compilation from the
+   VISIBLE declaration, so a mismatch would let clients reason at one
+   sort against an implementation verified at another. *)
+let check_sort_consistency (str : structure) (sg : Types.signature) =
+  List.iter
+    (fun (item : Types.signature_item) ->
+      match item with
+      | Sig_type (id, decl, _, _) ->
+        let sig_sort =
+          List.find_map vox_sort_of_attribute decl.type_attributes
+        in
+        (match
+           Env.find_type_by_name
+             (Longident.Lident (Ident.name id))
+             str.str_final_env
+         with
+         | exception Not_found -> ()
+         | _, impl_decl ->
+           let impl_sort =
+             List.find_map vox_sort_of_attribute impl_decl.type_attributes
+           in
+           if not (sig_sort = impl_sort)
+           then
+             Location.raise_errorf
+               ~loc:impl_decl.type_loc
+               "vox: the vox.sort of type %s differs between the interface \
+                and the implementation; the attribute must appear \
+                identically on both declarations"
+               (Ident.name id))
+      | _ -> ())
+    sg
+;;
+
+let check_implementation ?intf (str : structure) (sg : Types.signature) =
   (* The signature check is unconditional: a refined type can appear in
      an exported item (a type manifest, an exception, an external) with
      no vox syntax in any expression, and it must still be
      self-contained.  It only reads types structurally, so it cannot
      perturb programs that never use vox. *)
   check_signature sg;
+  (* [intf] is the .mli's signature when one exists (the inferred [sg]
+     always agrees with the struct trivially). *)
+  Option.iter (check_sort_consistency str) intf;
   if not (uses_vox str)
   then ()
   else (

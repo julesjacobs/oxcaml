@@ -1,0 +1,4 @@
+File "sortmm_i.ml", line 1, characters 0-28:
+1 | type t = { mutable c : int }
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: vox: the vox.sort of type t differs between the interface and the implementation; the attribute must appear identically on both declarations

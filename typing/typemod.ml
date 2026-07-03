@@ -4502,9 +4502,9 @@ let type_implementation target modulename initial_env ast =
          with an .mli, the interface's .cmi -- which may carry the
          spec-prelude blocks the implementation is verified against --
          is only read inside the branch. *)
-      let vox_verify () =
+      let vox_verify ?intf () =
         Profile.record_call "vox_verify" (fun () ->
-          Vox_verify.check_implementation str sg)
+          Vox_verify.check_implementation ?intf str sg)
       in
       let uid = Uid.of_compilation_unit_id modulename in
       let shape = Shape.set_uid_if_none shape uid in
@@ -4605,8 +4605,10 @@ let type_implementation target modulename initial_env ast =
               ~actual_staticity:staticity dclsig arg_type
           in
           (* The interface's .cmi is loaded now: its spec-prelude
-             blocks are visible to the verifier. *)
-          vox_verify ();
+             blocks are visible to the verifier, and the interface
+             signature is checked for [@@vox.sort] agreement with the
+             implementation's declarations. *)
+          vox_verify ~intf:dclsig ();
           Typecore.force_delayed_checks ();
           Mode.erase_hints ();
           Typecore.optimise_allocations ();
