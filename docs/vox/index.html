@@ -398,7 +398,6 @@ theory.  The <code>Nil</code> branch below is unreachable, and that is
 proved rather than assumed: its facts are contradictory, so
 <code>refine_ 0</code> discharges against <code>r = 3</code>.</p>
 <pre><code class="ml">let head (s : ilist{ _ = Cons (3, Nil) }) : {r:int | r = 3} =
-  let refine_ s = s in
   match s with
   | Cons (h, _) -&gt; refine_ h
   | Nil -&gt; refine_ 0</code></pre></div>
