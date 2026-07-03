@@ -12,11 +12,12 @@
    at each (bare) call; the probe condition [sq m <= x] reflects to
    itself, so the path fact IS the nonlinear relation the invariant
    update needs, and the solver only ever substitutes equals for
-   equals.  The one nonlinear lemma ("a nonnegative number is at most
-   its square", for the initial bracket) is PROVED about [sq] in the
-   embedded prelude block and fired by an explicit grind pattern; the
-   only assumption left is floor halving (whose [asr] the logic does
-   not model), and even that is RUNTIME CHECKED. *)
+   equals.  The midpoint is reflected division ([/] is T-division,
+   which the solver reasons about natively for constant divisors), and
+   the one nonlinear lemma ("a nonnegative number is at most its
+   square", for the initial bracket) is PROVED about [sq] in the
+   embedded prelude block and fired by an explicit grind pattern.
+   NOTHING in this file is assumed. *)
 
 let total_ sq m = m * m
 
@@ -31,13 +32,6 @@ theorem le_sq (m : Int) (h : 0 <= m) : m <= sq m := by
 grind_pattern le_sq => sq m
 |lean}]
 
-let half : (s : int) -> int{ s = 2 * _ || s = 2 * _ + 1 } =
-  fun s -> assume_ (s asr 1)
-[%%expect{|
-val sq : int -> int = <fun>
-val half : (s : int) -> int{ (s = (2 * _)) || (s = ((2 * _) + 1)) } = <fun>
-|}]
-
 let isqrt : (x : int{ 0 <= _ }) -> {r:int | 0 <= r && sq r <= x && x < sq (r + 1)} =
   fun x ->
     let rec go
@@ -48,8 +42,7 @@ let isqrt : (x : int{ 0 <= _ }) -> {r:int | 0 <= r && sq r <= x && x < sq (r + 1
       fun lo hi ->
         if lo + 1 < hi
         then begin
-          let refine_ s = refine_ (lo + hi) in
-          let refine_ m = half s in
+          let refine_ m = refine_ ((lo + hi) / 2) in
           if sq m <= x then go m hi else go lo m
         end
         else refine_ lo
@@ -57,6 +50,7 @@ let isqrt : (x : int{ 0 <= _ }) -> {r:int | 0 <= r && sq r <= x && x < sq (r + 1
     let refine_ x1 = refine_ (x + 1) in
     go 0 x1
 [%%expect{|
+val sq : int -> int = <fun>
 val isqrt :
   (x : int{ 0 <= _ }) ->
   int{ (0 <= _) && (((sq _) <= x) && (x < (sq (_ + 1)))) } = <fun>
@@ -85,8 +79,7 @@ let isqrt_broken
       fun lo hi ->
         if lo + 1 < hi
         then begin
-          let refine_ s = refine_ (lo + hi) in
-          let refine_ m = half s in
+          let refine_ m = refine_ ((lo + hi) / 2) in
           if sq m <= x then go m hi else go lo m
         end
         else refine_ hi
@@ -94,8 +87,8 @@ let isqrt_broken
     let refine_ x1 = refine_ (x + 1) in
     go 0 x1
 [%%expect{|
-Line 16, characters 21-23:
-16 |         else refine_ hi
+Line 15, characters 21-23:
+15 |         else refine_ hi
                           ^^
 Error: vox: verification failed (lean).
        Goal: (0 <= hi) && (((sq hi) <= x) && (x < (sq (hi + 1))))

@@ -5,16 +5,20 @@
    [translate e] returns the logic term denoting [e]'s value when [e]
    is built from variables, int/bool literals, immutable field reads
    of simple records, and the primitive operations the predicate
-   language models (+ - * ~- succ pred on int; && || not; comparisons
-   at int or bool); [None] otherwise.
+   language models (+ - * / mod ~- succ pred on int; && || not;
+   comparisons at int or bool); [None] otherwise.
    Recognition is keyed on the PRIMITIVE ([Val_prim]), never the source
    name, so shadowing [(+)] cannot be mistaken for integer addition.
    Comparisons are polymorphic primitives and are translated only at
    int or bool operands: at other types the logic's equality is
    uninterpreted, and [compare] does not denote it.
 
-   The translatable fragment is pure, so naming a subexpression never
-   duplicates or reorders effects.
+   The translatable fragment is pure up to Division_by_zero: [/] and
+   [mod] can raise where the logic's T-division is total ([tdiv x 0 =
+   0]).  Sound under partial correctness -- a raised exception aborts
+   the continuation, so facts recorded about the never-bound result
+   hold vacuously -- and naming a subexpression still never duplicates
+   or reorders effects (the LOGIC term is a value either way).
 
    CAVEAT (DESIGN.md): the logic's ints are unbounded while the
    machine's wrap, so the translation of + - * equates modular with
@@ -173,6 +177,8 @@ let rec translate (e : expression) : Refinement.pred option =
      | "%addint" -> intop Refinement.Add
      | "%subint" -> intop Refinement.Sub
      | "%mulint" -> intop Refinement.Mul
+     | "%divint" -> intop Refinement.Div
+     | "%modint" -> intop Refinement.Mod
      | "%negint" ->
        unary (fun a -> Refinement.Pbinop (Sub, Refinement.Pint 0, a))
      | "%succint" ->

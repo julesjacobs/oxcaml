@@ -469,12 +469,15 @@ let pred_in_scope ctx p = List.for_all (in_scope ctx) (Refinement.free_vars p)
 
 (* Predicates the compiled runtime check cannot evaluate: constructor
    terms and field projections (structural operations at datatype sorts
-   are future work) and spec functions (solver-side only, no runtime
-   denotation). *)
+   are future work), spec functions (solver-side only, no runtime
+   denotation), and division/modulo (the logic's T-division is total,
+   [tdiv x 0 = 0], where the program raises: a faithful check cannot
+   be compiled). *)
 let rec pred_unreflectable (p : Refinement.pred) =
   match p with
   | Refinement.Pconstr _ | Refinement.Pfun _ | Refinement.Pfield _
   | Refinement.Pis _ -> true
+  | Refinement.Pbinop ((Refinement.Div | Refinement.Mod), _, _) -> true
   | Refinement.Pbound | Refinement.Pvar _ | Refinement.Pint _
   | Refinement.Pbool _ -> false
   | Refinement.Pbinop (_, a, b)
@@ -506,8 +509,9 @@ let emit_vc ~loc ~ctx ~goal ~kind =
      then
        Location.raise_errorf ~loc
          "vox: assume_ compiles a runtime check of this refinement, but it \
-          involves a constructor, field projection, or spec function, which \
-          the compiled check cannot evaluate; use assume_unchecked_";
+          involves a constructor, field projection, spec function, or \
+          division, which the compiled check cannot evaluate faithfully; \
+          use assume_unchecked_";
      (* The compiled check compares machine words, which agrees with the
         logic only for int- and bool-sorted operands: other sorts are
         uninterpreted, and physical equality is stricter than logical
@@ -1435,8 +1439,8 @@ let boolish p =
         | Some (S_int | S_data _ | S_other) | None -> false)
      | Some (_, Dt_variant _) | None -> false)
   | Pis _ -> true
-  | Pbound | Pint _ | Pconstr _ | Pfun _ | Pbinop ((Add | Sub | Mul), _, _) ->
-    false
+  | Pbound | Pint _ | Pconstr _ | Pfun _
+  | Pbinop ((Add | Sub | Mul | Div | Mod), _, _) -> false
 ;;
 
 let rec lean_of_pred buf (p : Refinement.pred) =
@@ -1511,6 +1515,14 @@ let rec lean_of_pred buf (p : Refinement.pred) =
   | Pbinop (Add, a, b) -> bin "+" a b
   | Pbinop (Sub, a, b) -> bin "-" a b
   | Pbinop (Mul, a, b) -> bin "*" a b
+  | Pbinop ((Div | Mod) as op, a, b) ->
+    (* OCaml's [/] and [mod] truncate toward zero: exactly [Int.tdiv]
+       and [Int.tmod]. *)
+    Buffer.add_string buf (if op = Div then "(Int.tdiv " else "(Int.tmod ");
+    lean_of_pred buf a;
+    Buffer.add_char buf ' ';
+    lean_of_pred buf b;
+    Buffer.add_char buf ')' 
   | Pbinop (Lt, a, b) -> bin "<" a b
   | Pbinop (Le, a, b) -> bin "≤" a b
   | Pbinop (Gt, a, b) -> bin ">" a b

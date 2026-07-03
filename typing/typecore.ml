@@ -8732,7 +8732,7 @@ and type_expect_
           | None ->
               Location.raise_errorf ~loc
                 "vox: refine_ cannot translate this expression into the \
-                 logic (only variables, int/bool constants, + - * ~-, \
+                 logic (only variables, int/bool constants, + - * / mod ~-, \
                  comparisons at int or bool, and && || not are supported); \
                  add a refined type annotation"
           end

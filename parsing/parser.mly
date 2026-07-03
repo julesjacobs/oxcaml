@@ -5130,6 +5130,14 @@ vox_pred_add:
 vox_pred_mul:
   | a = vox_pred_mul STAR b = vox_pred_app
       { mkexp ~loc:$sloc (mkinfix a (mkoperator ~loc:$loc($2) "*") b) }
+  | a = vox_pred_mul op = INFIXOP3 b = vox_pred_app
+      { (* Of the INFIXOP3 tokens only [/] is in the logic; the others
+           (land, lor, ...) must error rather than silently become
+           spec functions. *)
+        if not (String.equal op "/") then expecting $loc(op) "/";
+        mkexp ~loc:$sloc (mkinfix a (mkoperator ~loc:$loc(op) "/") b) }
+  | a = vox_pred_mul MOD b = vox_pred_app
+      { mkexp ~loc:$sloc (mkinfix a (mkoperator ~loc:$loc($2) "mod") b) }
   | p = vox_pred_app { p }
 ;
 

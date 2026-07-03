@@ -19,6 +19,8 @@ type binop =
   | Le
   | Gt
   | Ge
+  | Div (* T-division, truncating toward zero: OCaml's [/], Lean's [Int.tdiv] *)
+  | Mod (* remainder with the dividend's sign: OCaml's [mod], Lean's [Int.tmod] *)
 
 type pred =
   | Pbound (* the bound value variable v *)
@@ -66,6 +68,8 @@ let binop_name = function
   | Le -> "<="
   | Gt -> ">"
   | Ge -> ">="
+  | Div -> "/"
+  | Mod -> "mod"
 ;;
 
 (* Alpha-equivalence support: while two arrow types are being compared, their binders are

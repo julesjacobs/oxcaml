@@ -432,6 +432,13 @@ and vox_assume_check ~scopes layout e lam =
               | Refinement.Add -> intop Add
               | Refinement.Sub -> intop Sub
               | Refinement.Mul -> intop Mul
+              | Refinement.Div | Refinement.Mod ->
+                  (* Rejected by the VC pass (emit_vc, Runtime_check):
+                     the logic's T-division is total where the program
+                     raises. *)
+                  Location.raise_errorf ~loc:e.exp_loc
+                    "vox: assume_ cannot compile a runtime check \
+                     involving division; use assume_unchecked_"
               | Refinement.Eq -> icmp Ceq
               | Refinement.Neq -> icmp Cne
               | Refinement.Lt -> icmp Clt

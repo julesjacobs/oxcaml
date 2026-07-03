@@ -12,7 +12,11 @@
   int as Int and bool as Bool; every other type lives at a single
   uninterpreted sort where equality is all the logic knows.
   Predicates are built from the bound variable, program variables,
-  int/bool literals, `+ - *`, comparisons, and `&& || not`.  A
+  int/bool literals, `+ - * / mod` (division and remainder with
+  OCaml's semantics: T-division, truncating toward zero -- the solver
+  sees Lean's `Int.tdiv`/`Int.tmod`; the logic totalizes `x / 0` as 0
+  where the program raises, sound under partial correctness),
+  comparisons, and `&& || not`.  A
   program variable in a refinement means the logical value associated
   with it, not the program value. Predicates are UNTYPED -- the
   compiler never checks them; the logic types them, as in first-order
@@ -252,7 +256,7 @@
   are exported refined and unpacked at use: facts are module-local,
   types travel.
 - CAVEAT: the logic's ints are unbounded while the machine's wrap, so
-  reflecting `+ - *` equates modular with ideal arithmetic; overflow is
+  reflecting `+ - * / mod` equates modular with ideal arithmetic; overflow is
   outside the model (`x + 1 > x` is provable and false at `max_int`).
 
 ## VC generation

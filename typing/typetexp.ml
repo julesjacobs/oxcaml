@@ -1013,13 +1013,16 @@ let rec elab_vox_pred ~bound ~self_root env (e : Parsetree.expression)
       | Pexp_ident {txt = Longident.Lident "||"; _}, [a; b] ->
           Por (elab_vox_pred ~bound ~self_root env a, elab_vox_pred ~bound ~self_root env b)
       | Pexp_ident {txt = Longident.Lident
-            (("+" | "-" | "*" | "=" | "<>" | "<" | "<=" | ">" | ">=") as op);
+            (("+" | "-" | "*" | "/" | "mod"
+             | "=" | "<>" | "<" | "<=" | ">" | ">=") as op);
           _}, [a; b] ->
           let binop =
             match op with
             | "+" -> Add
             | "-" -> Sub
             | "*" -> Mul
+            | "/" -> Div
+            | "mod" -> Mod
             | "=" -> Eq
             | "<>" -> Neq
             | "<" -> Lt
@@ -1031,7 +1034,11 @@ let rec elab_vox_pred ~bound ~self_root env (e : Parsetree.expression)
           Pbinop (binop, elab_vox_pred ~bound ~self_root env a, elab_vox_pred ~bound ~self_root env b)
       | Pexp_ident {txt = Longident.Lident f; _}, (_ :: _ as args)
         when String.length f > 0
-             && (match f.[0] with 'a' .. 'z' | '_' -> true | _ -> false) ->
+             && (match f.[0] with 'a' .. 'z' | '_' -> true | _ -> false)
+             (* the two LOWERCASE operator names: a wrong-arity use
+                must be an error, never silently a spec function *)
+             && not (String.equal f "mod")
+             && not (String.equal f "not") ->
           (* Any other applied lowercase identifier is a SPEC function:
              a logical function the user defines on the solver side via
              [-vox-prelude].  Spec functions live in their own namespace
