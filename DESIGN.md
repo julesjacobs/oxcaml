@@ -23,8 +23,9 @@
   OCaml's semantics: T-division, truncating toward zero -- the solver
   sees Lean's `Int.tdiv`/`Int.tmod`; the logic totalizes `x / 0` as 0
   where the program raises, sound under partial correctness),
-  comparisons, `&& || not`, implication `p -> q` (sugar for
-  `not p || q`), and quantifiers (below).  A
+  comparisons, `&& || not`, implication `p -> q` (native and
+  right-associative; structurally distinct from its expansion
+  `not p || q`, as every respelling is), and quantifiers (below).  A
   program variable in a refinement means the logical value associated
   with it, not the program value. Predicates are UNTYPED -- the
   compiler never checks them; the logic types them, as in first-order

@@ -5112,13 +5112,9 @@ vox_named_type:
 vox_pred:
   | p = vox_pred_or { p }
   | a = vox_pred_or MINUSGREATER b = vox_pred
-      { mkexp ~loc:$sloc
-          (mkinfix
-             (mkexp ~loc:$loc(a)
-                (Pexp_apply
-                   (mkoperator ~loc:$loc($2) "not", [ Nolabel, a ])))
-             (mkoperator ~loc:$loc($2) "||")
-             b) }
+      { (* native implication; the marker operator is unspoofable in
+           the predicate grammar (it has no operator atoms) *)
+        mkexp ~loc:$sloc (mkinfix a (mkoperator ~loc:$loc($2) "==>") b) }
   | q = vox_quant_head bs = nonempty_list(mkrhs(LIDENT)) DOT body = vox_pred
       { let binder b =
           Nolabel,

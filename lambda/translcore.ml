@@ -451,6 +451,9 @@ and vox_assume_check ~scopes layout e lam =
             Lprim (prim, [check a; check b], loc)
         | Refinement.Pand (a, b) -> Lprim (Psequand, [check a; check b], loc)
         | Refinement.Por (a, b) -> Lprim (Psequor, [check a; check b], loc)
+        | Refinement.Pimp (a, b) ->
+            (* material implication: (not a) || b *)
+            Lprim (Psequor, [Lprim (Pnot, [check a], loc); check b], loc)
         | Refinement.Pnot a -> Lprim (Pnot, [check a], loc)
       in
       let failed =

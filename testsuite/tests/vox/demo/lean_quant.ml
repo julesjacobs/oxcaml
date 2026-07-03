@@ -7,7 +7,7 @@
 *)
 
 (* Demo: quantifiers in predicates.  [forall_ x. p], [exists_ x. p],
-   and implication [p -> q] (sugar for [not p || q]); binders are
+   and native implication [p -> q]; binders are
    untyped like the rest of the predicate language, and Lean infers
    their sorts.  Every obligation below is really proved, with no
    intro forms anywhere: obligations arise implicitly at annotations.

@@ -6,8 +6,8 @@
 (* vox: quantifiers in predicates.  [forall_ x. p] and [exists_ x. p]
    (keywords, like refine_/total_: bare forall/exists collide with
    existing identifiers); binders extend maximally right and may be
-   listed ([forall_ x y. p]); implication [p -> q] desugars to
-   [not p || q].  Binders are fresh Scoped idents, compared under the
+   listed ([forall_ x y. p]); implication [p -> q] is native and
+   right-associative.  Binders are fresh Scoped idents, compared under the
    dependent-arrow binder pairing, so alpha-variants are the SAME
    rigid type.  A quantified predicate reaches the solver with the
    binder unannotated (predicates are untyped; Lean infers). *)
@@ -16,10 +16,9 @@ let lub : (x : int) -> int{ x <= _ && (forall_ z. x <= z -> _ <= z) } =
   fun x -> refine_ x
 [%%expect{|
 Line 2, characters 19-20: vox VC:
-  goal: (x <= x) && (forall_ z. (not (x <= z)) || (x <= z))
+  goal: (x <= x) && (forall_ z. (x <= z) -> (x <= z))
   hypotheses: <none>
-val lub :
-  (x : int) -> int{ (x <= _) && (forall_ z. (not (x <= z)) || (_ <= z)) } =
+val lub : (x : int) -> int{ (x <= _) && (forall_ z. (x <= z) -> (_ <= z)) } =
   <fun>
 |}]
 
@@ -84,15 +83,14 @@ let lub2 : (x : int) -> {r:int | x <= r && (forall_ z. x <= z -> r <= z)} =
   fun x -> x
 [%%expect{|
 Line 2, characters 11-12: vox VC:
-  goal: (x <= x) && (forall_ z. (not (x <= z)) || (x <= z))
+  goal: (x <= x) && (forall_ z. (x <= z) -> (x <= z))
   hypotheses:
   swapped = pair
   forall_ a. forall_ b. (b + a) = (a + b)
   pair2 = pair
   forall_ a. forall_ b. (a + b) = (b + a)
   pair = ()
-val lub2 :
-  (x : int) -> int{ (x <= _) && (forall_ z. (not (x <= z)) || (_ <= z)) } =
+val lub2 : (x : int) -> int{ (x <= _) && (forall_ z. (x <= z) -> (_ <= z)) } =
   <fun>
 |}]
 

@@ -886,7 +886,8 @@ let rec pred_unreflectable (p : Refinement.pred) =
   | Refinement.Pbool _ -> false
   | Refinement.Pbinop (_, a, b)
   | Refinement.Pand (a, b)
-  | Refinement.Por (a, b) -> pred_unreflectable a || pred_unreflectable b
+  | Refinement.Por (a, b)
+  | Refinement.Pimp (a, b) -> pred_unreflectable a || pred_unreflectable b
   | Refinement.Pnot a -> pred_unreflectable a
 ;;
 
@@ -2588,7 +2589,7 @@ let boolish p =
   let open Refinement in
   match p with
   | Pbool _ | Pbinop ((Eq | Neq | Lt | Le | Gt | Ge), _, _)
-  | Pand _ | Por _ | Pnot _ -> true
+  | Pand _ | Por _ | Pnot _ | Pimp _ -> true
   | Pvar id ->
     (match Hashtbl.find_opt name_sorts id with
      | Some S_bool -> true
@@ -2726,6 +2727,7 @@ let rec lean_of_pred buf (p : Refinement.pred) =
     Buffer.add_string buf "(¬ ";
     lean_of_pred buf a;
     Buffer.add_char buf ')'
+  | Pimp (a, b) -> bin "→" a b
 ;;
 
 (* Reflected definitions, emitted between the datatypes and the
@@ -2944,7 +2946,8 @@ let lean_theorem buf i vc =
           List.iter collect args
         | Refinement.Pbinop (_, a, b)
         | Refinement.Pand (a, b)
-        | Refinement.Por (a, b) ->
+        | Refinement.Por (a, b)
+        | Refinement.Pimp (a, b) ->
           collect a;
           collect b
         | Refinement.Pbound | Refinement.Pvar _ | Refinement.Pint _

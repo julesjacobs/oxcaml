@@ -1117,6 +1117,9 @@ let rec elab_vox_pred ~bound ~self_root env (e : Parsetree.expression)
           Pand (elab_vox_pred ~bound ~self_root env a, elab_vox_pred ~bound ~self_root env b)
       | Pexp_ident {txt = Longident.Lident "||"; _}, [a; b] ->
           Por (elab_vox_pred ~bound ~self_root env a, elab_vox_pred ~bound ~self_root env b)
+      | Pexp_ident {txt = Longident.Lident "==>"; _}, [a; b] ->
+          (* the parser's native-implication marker *)
+          Pimp (elab_vox_pred ~bound ~self_root env a, elab_vox_pred ~bound ~self_root env b)
       | Pexp_ident {txt = Longident.Lident
             (("+" | "-" | "*" | "/" | "mod"
              | "=" | "<>" | "<" | "<=" | ">" | ">=") as op);
