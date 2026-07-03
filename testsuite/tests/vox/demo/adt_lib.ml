@@ -6,4 +6,4 @@ type t =
   | K of int
   | L
 
-let k3 : t{ _ = K 3 } = refine_ (K 3)
+let k3 : t{ _ = K 3 } = K 3

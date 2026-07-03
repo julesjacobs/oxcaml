@@ -22,39 +22,47 @@ type ilist =
   | Nil
   | Cons of int * ilist
 
-let nil0 : ilist{ len _ = 0 } = refine_ Nil
+(* No intro forms anywhere below: constructors and variables are
+   introduced implicitly at the annotations, binders bind at the
+   skeleton with their refinements as facts, and a plain [let] of a
+   constructor term contributes its defining equation. *)
 
-let l2 : ilist{ len _ = 2 } = refine_ (Cons (1, Cons (2, Nil)))
+let nil0 : ilist{ len _ = 0 } = Nil
 
-let has2 : ilist{ mem 2 _ } = refine_ (Cons (1, Cons (2, Nil)))
+let l2 : ilist{ len _ = 2 } = Cons (1, Cons (2, Nil))
+
+let has2 : ilist{ mem 2 _ } = Cons (1, Cons (2, Nil))
 
 (* Pushing increments the measure. *)
-let push (l : ilist{ len _ = 2 }) : ilist{ len _ = 3 } =
-  refine_ (Cons (9, l))
+let push (l : ilist{ len _ = 2 }) : ilist{ len _ = 3 } = Cons (9, l)
 
-(* append: len distributes over it -- the textbook inductive proof. *)
+(* append: len distributes over it -- the textbook inductive proof.
+   The recursive call's refined result is the induction hypothesis,
+   unpacked by the [let] that names it. *)
 let rec append : (a : ilist) -> (b : ilist) -> ilist{ len _ = len a + len b } =
   fun a b ->
     match a with
-    | Nil -> refine_ b
+    | Nil -> b
     | Cons (h, t) ->
-      let refine_ r = append t b in
-      refine_ (Cons (h, r))
+      let r = append t b in
+      Cons (h, r)
 
-(* rev via accumulator: length is preserved. *)
+(* rev via accumulator: length is preserved.  [acc2]'s binder equation
+   [acc2 = Cons (h, acc)] carries the invariant; the weakening of the
+   recursive result to this call's instantiation is the final [r]. *)
 let rec rev_append
   : (acc : ilist) -> (l : ilist) -> ilist{ len _ = len acc + len l }
   =
   fun acc l ->
   match l with
-  | Nil -> refine_ acc
+  | Nil -> acc
   | Cons (h, t) ->
-    let refine_ acc2 = (refine_ (Cons (h, acc)) : ilist{ len _ = len acc + 1 }) in
-    let refine_ r = rev_append acc2 t in
-    refine_ r
+    let acc2 = Cons (h, acc) in
+    let r = rev_append acc2 t in
+    r
 
 let rev : (l : ilist) -> ilist{ len _ = len l } =
   fun l ->
-  let refine_ nil = (refine_ Nil : ilist{ _ = Nil }) in
-  let refine_ r = rev_append nil l in
-  refine_ r
+  let nil = Nil in
+  let r = rev_append nil l in
+  r

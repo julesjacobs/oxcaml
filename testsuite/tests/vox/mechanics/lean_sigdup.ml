@@ -18,4 +18,4 @@
 
 let _ = Dupspec_b.v
 
-let a : Dupspec_a.t{ dup_spec _ = 0 } = refine_ Dupspec_a.A
+let a : Dupspec_a.t{ dup_spec _ = 0 } = Dupspec_a.A

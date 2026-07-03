@@ -88,24 +88,24 @@ theorem fib_add (m n : Int) (hm : 0 <= m) (hn : 0 <= n) :
 
 (* A reflected call names itself: the program's fib meets the spec
    definitionally (the goal is [fib n = fib n]). *)
-let fib_slow : (n : int) -> int{ _ = fib n } = fun n -> refine_ (fib n)
+let fib_slow : (n : int) -> int{ _ = fib n } = fun n -> fib n
 
 (* Tail-recursive accumulator loop, O(n) iterations: the parameters
    carry the invariant (a, b) = (fib i, fib (i+1)) with i >= 0 as
    CONTRACTS -- the body assumes them, and each call site discharges
    them at its own (bare) arguments, the shifted accumulators and the
    literal seeds included.  (For n < i the loop diverges; partial
-   correctness is unbothered.) *)
+   correctness is unbothered.)  [j]'s binder equation carries the
+   shift; the final [r] weakens the recursive result. *)
 let rec fib_loop
   : (n : int) -> (i : int) -> (a : int{ _ = fib i && i >= 0 })
     -> (b : int{ _ = fib (i + 1) }) -> int{ _ = fib n }
   =
   fun n i a b ->
     if i = n
-    then refine_ a
+    then a
     else begin
-      let refine_ r = fib_loop n (i + 1) b (a + b) in
-      refine_ r
+      fib_loop n (i + 1) b (a + b)
     end
 
 let fib_iter : (n : int) -> int{ _ = fib n } =
@@ -122,22 +122,22 @@ let fib_iter : (n : int) -> int{ _ = fib n } =
 let rec fib_fd : (n : int{ _ >= 0 }) -> (int * int){ _ = (fib n, fib (n + 1)) } =
   fun n ->
     if n <= 0
-    then refine_ (0, 1)
+    then (0, 1)
     else begin
-      let refine_ k = half n in
-      let refine_ q = fib_fd k in
+      let k = half n in
+      let q = fib_fd k in
       match q with
       | (a, b) ->
-        let refine_ x = (refine_ (a * (2 * b - a)) : int{ _ = fib (2 * k) }) in
-        let refine_ y = (refine_ (a * a + b * b) : int{ _ = fib (2 * k + 1) }) in
+        let x : int{ _ = fib (2 * k) } = a * (2 * b - a) in
+        let y : int{ _ = fib (2 * k + 1) } = a * a + b * b in
         if n = 2 * k
-        then refine_ (x, y)
-        else refine_ (y, x + y)
+        then (x, y)
+        else (y, x + y)
     end
 
 (* Client side: fib 10, by fast doubling; the precondition [10 >= 0]
    is discharged at the literal argument. *)
 let fib10 : int{ _ = fib 10 } =
-  let refine_ r = fib_fd 10 in
+  let r = fib_fd 10 in
   match r with
-  | (u, _) -> refine_ u
+  | (u, _) -> u

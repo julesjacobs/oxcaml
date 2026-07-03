@@ -4,4 +4,4 @@
 
 type wid = { w : int }
 
-let one : wid{ _.w = 1 } = refine_ { w = 1 }
+let one : wid{ _.w = 1 } = { w = 1 }

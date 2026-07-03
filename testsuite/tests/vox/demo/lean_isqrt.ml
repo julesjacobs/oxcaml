@@ -45,7 +45,7 @@ let isqrt : (x : int{ 0 <= _ }) -> {r:int | 0 <= r && sq r <= x && x < sq (r + 1
           let m = (lo + hi) / 2 in
           if sq m <= x then go m hi else go lo m
         end
-        else refine_ lo
+        else lo
     in
     let x1 = x + 1 in
     go 0 x1
@@ -59,8 +59,8 @@ val isqrt :
 (* Client side: the precondition [0 <= 9] is discharged at the literal
    argument; the functional spec arrives as facts. *)
 let three : int =
-  let refine_ r = isqrt 9 in
-  let _w : {u:int | u = r && 0 <= u} = refine_ r in
+  let r = isqrt 9 in
+  let _w : {u:int | u = r && 0 <= u} = r in
   r
 [%%expect{|
 val three : int = 3
@@ -82,7 +82,7 @@ let isqrt_broken
           let m = (lo + hi) / 2 in
           if sq m <= x then go m hi else go lo m
         end
-        else refine_ hi
+        else hi
     in
     let x1 = x + 1 in
     go 0 x1

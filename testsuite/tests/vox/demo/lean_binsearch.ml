@@ -75,20 +75,20 @@ let rec search
          ideal, not wrapping.  Harmless here -- both are bounded by a
          real array's length -- but outside the model. *)
       let s = l + r in
-      let refine_ m = half s in
+      let m = half s in
       (* l < m < r, hence 0 <= m < len a: the probe is in bounds. *)
-      let refine_ v = get a m in
+      let v = get a m in
       if v >= x
       then begin
-        let refine_ q = search a x l m in
-        refine_ q
+        let q = search a x l m in
+        q
       end
       else begin
-        let refine_ q = search a x m r in
-        refine_ q
+        let q = search a x m r in
+        q
       end
     end
-    else refine_ { lo = l; hi = r }
+    else { lo = l; hi = r }
 
 (* The note's Q2 -- on a sorted array, the first index whose element
    is >= x, or len a if there is none.  What is proved is the
@@ -100,16 +100,16 @@ let lower_bound
             && (_ = 0 || elem a (_ - 1) < x) }
   =
   fun a x ->
-    let refine_ n = length a in
-    let refine_ q = search a x (-1) n in
+    let n = length a in
+    let q = search a x (-1) n in
     let { lo = _; hi } = q in
-    refine_ hi
+    hi
 
 (* Client side: the note's example array.  The application carries no
-   obligations; its refined result is unpacked before export. *)
+   obligations; its refined result is unpacked by the plain [let]. *)
 let a8 : int iarray = [: 2; 3; 3; 3; 6; 8; 8; 9 :]
 let six : int = 6
 
 let idx6 : int =
-  let refine_ i = lower_bound a8 six in
+  let i = lower_bound a8 six in
   i

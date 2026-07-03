@@ -6,7 +6,6 @@ type ilist =
   | Nil
   | Cons of int * ilist
 
-let two : ilist{ len _ = 2 } = refine_ (Cons (1, Cons (2, Nil)))
+let two : ilist{ len _ = 2 } = Cons (1, Cons (2, Nil))
 
-let push (l : ilist{ len _ = 2 }) : ilist{ len _ = 3 } =
-  refine_ (Cons (9, l))
+let push (l : ilist{ len _ = 2 }) : ilist{ len _ = 3 } = Cons (9, l)

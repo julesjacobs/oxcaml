@@ -17,4 +17,4 @@
 def broken : Int := unknown_identifier
 |lean}]
 
-let x : int{ spec_id _ = 0 } = refine_ 0
+let x : int{ spec_id _ = 0 } = 0

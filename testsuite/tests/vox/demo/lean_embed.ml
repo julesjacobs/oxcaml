@@ -24,23 +24,22 @@ type ilist =
   | .Cons _ t => 1 + len t
 |lean}]
 
-let l2 : ilist{ len _ = 2 } = refine_ (Cons (1, Cons (2, Nil)))
+let l2 : ilist{ len _ = 2 } = Cons (1, Cons (2, Nil))
 
-let push (l : ilist{ len _ = 2 }) : ilist{ len _ = 3 } =
-  refine_ (Cons (9, l))
+let push (l : ilist{ len _ = 2 }) : ilist{ len _ = 3 } = Cons (9, l)
 
 (* Later blocks may use earlier blocks' definitions (source order). *)
 [%%vox.lean {lean|
 @[grind] def nonempty (l : Vox_Lean_embed_ilist) : Prop := len l > 0
 |lean}]
 
-let ne : ilist{ nonempty _ } = refine_ (Cons (7, Nil))
+let ne : ilist{ nonempty _ } = Cons (7, Nil)
 
 (* The textbook inductive proof, through an embedded measure. *)
 let rec append : (a : ilist) -> (b : ilist) -> ilist{ len _ = len a + len b } =
   fun a b ->
     match a with
-    | Nil -> refine_ b
+    | Nil -> b
     | Cons (h, t) ->
-      let refine_ r = append t b in
-      refine_ (Cons (h, r))
+      let r = append t b in
+      Cons (h, r)
