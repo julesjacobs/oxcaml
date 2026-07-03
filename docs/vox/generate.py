@@ -130,6 +130,8 @@ def main():
         '@BST_FAIL_OUT@': slice_between(read('mechanics/lean_bst_fail.ml'),
                                         r'^Error: vox: verification failed',
                                         r'^\(lean: '),
+        '@KERNEL@': slice_between(read('demo/lean_kernel.ml'),
+                                  r'^let length', r'^    go 0 0'),
         '@BST_ALT@': slice_between(read('demo/lean_bst_alt.ml'),
                                    r'^module Set', r'^end')
                      + '\n\n'

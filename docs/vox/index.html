@@ -530,6 +530,29 @@ errors.</p>
   let (r1, t1a) = read c1 a t1 in             (* r1 = a *)
     ...</code></pre></div>
 
+<div class="card"><h3>Deleting bounds checks, safely <span class="pill">demo/lean_kernel.ml</span></h3>
+<p><code>get</code> reads with <code>unsafe_get</code>: the per-access
+check is replaced by a proof at each call site.  The benchmark
+(<code>docs/vox/bench</code>) compiles this kernel natively, under
+verification — the driver itself would not compile until it proved its
+arrays compatible.  Measured on a dev box: the verified dot product runs
+<b>1.36×</b> the bounds-checked loop; the verified sum matches
+hand-written <code>unsafe_get</code> exactly — verification costs nothing
+at runtime.</p>
+<pre><code class="ml">let length : (a : int iarray) -&gt; int{ _ = len a &amp;&amp; 0 &lt;= _ } =
+  fun a -&gt; assume_unchecked_ (Iarray.length a)
+
+let get : (a : int iarray) -&gt; (i : int{ 0 &lt;= _ &amp;&amp; _ &lt; len a }) -&gt; int =
+  fun a i -&gt; Iarray.unsafe_get a i
+
+let sum : (a : int iarray) -&gt; int =
+  fun a -&gt;
+    let n = length a in
+    let rec go : (i : int{ 0 &lt;= _ &amp;&amp; _ &lt;= n }) -&gt; int -&gt; int =
+      fun i acc -&gt; if i &lt; n then go (i + 1) (acc + get a i) else acc
+    in
+    go 0 0</code></pre></div>
+
 <div class="card"><h3>Reflected arithmetic <span class="pill">Vox_reflect</span></h3>
 <p><code>+ - * / mod</code>, comparisons, and <code>&amp;&amp; || not</code>
 carry their logical meaning, recognized by primitive rather than by name (a

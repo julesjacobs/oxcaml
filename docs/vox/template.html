@@ -231,6 +231,17 @@ write.  Duplicated, stale, forged, and cross-cell tokens are compile-time
 errors.</p>
 <pre><code class="ml">@PCELL@</code></pre></div>
 
+<div class="card"><h3>Deleting bounds checks, safely <span class="pill">demo/lean_kernel.ml</span></h3>
+<p><code>get</code> reads with <code>unsafe_get</code>: the per-access
+check is replaced by a proof at each call site.  The benchmark
+(<code>docs/vox/bench</code>) compiles this kernel natively, under
+verification — the driver itself would not compile until it proved its
+arrays compatible.  Measured on a dev box: the verified dot product runs
+<b>1.36×</b> the bounds-checked loop; the verified sum matches
+hand-written <code>unsafe_get</code> exactly — verification costs nothing
+at runtime.</p>
+<pre><code class="ml">@KERNEL@</code></pre></div>
+
 <div class="card"><h3>Reflected arithmetic <span class="pill">Vox_reflect</span></h3>
 <p><code>+ - * / mod</code>, comparisons, and <code>&amp;&amp; || not</code>
 carry their logical meaning, recognized by primitive rather than by name (a
