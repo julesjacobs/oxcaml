@@ -35,7 +35,7 @@ val div : int -> int{ not (_ = 0) } -> int = <fun>
 |}]
 
 let safe (x : int) : int =
-  let refine_ z = zero in
+  let z = zero in
   let refine_ c = lt z x in
   if c then div 100 (refine_ x) else 0
 [%%expect{|
@@ -45,7 +45,6 @@ Line 4, characters 29-30: vox VC:
   c
   c = (z < x)
   z = zero
-  z = 0
   zero = 0
 val safe : int -> int = <fun>
 |}]

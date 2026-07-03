@@ -7231,44 +7231,11 @@ and type_expect_
        | _ -> None)
     | Tvar _ | Tunivar _ | Tpoly _ -> None
     | _ ->
-      (* Expected type is rigid and unrefined. *)
-      match sexp.pexp_desc with
-      | Pexp_ident lid ->
-        let scheme_is_refined =
-          match Env.find_value_by_name lid.txt env with
-          | exception Not_found -> false
-          | (_, desc) ->
-            (* This peek must not commit any expansion: expanding a
-               scheme that mentions a local (GADT) equation here would
-               poison the ambiguity tracking of the ordinary typing
-               that follows.  Only a [Tconstr] can abbreviate a refined
-               type, and its expansion is done on a protected copy,
-               under a snapshot (mirroring [type_argument]). *)
-            (match get_desc desc.val_type with
-             | Trefine _ -> true
-             | Tconstr _ ->
-               let work () =
-                 match
-                   get_desc
-                     (expand_head env (protect_expansion env desc.val_type))
-                 with
-                 | Trefine _ -> true
-                 | _ -> false
-               in
-               if Env.has_local_constraints env then
-                 let snap = Btype.snapshot () in
-                 try_finally ~always:(fun () -> Btype.backtrack snap) work
-               else work ()
-             | _ -> false)
-        in
-        if not scheme_is_refined then None
-        else begin
-          let exp = type_exp env expected_mode sexp in
-          match get_desc (expand_head env exp.exp_type) with
-          | Trefine (skel', _) -> Some (rue { exp with exp_type = skel' })
-          | _ -> Some (rue exp)
-        end
-      | _ -> None
+      (* Expected type is rigid and unrefined: nothing to do -- a
+         variable USE is never refined (uses are opened at the
+         skeleton), and a refined APPLICATION result is erased at its
+         own [rue]. *)
+      None
   in
   match vox_subsume () with
   | Some exp -> exp
@@ -7320,9 +7287,22 @@ and type_expect_
               unique_use = unique_use ~loc ~env actual_mode
                 (as_single_mode expected_mode); mode = actual_mode }
       in
+      (* vox: a variable USE never has a refined type -- binders bind
+         at the skeleton (binders as facts), and the one remaining
+         refined kind of name, a MODULE-LEVEL value, is opened here at
+         its use: the signature keeps the refined type (types travel),
+         the use is carrier-typed, and the verification pass carries
+         the refinement as a fact at the value's name.  No expansion
+         (an abbreviation-hidden refinement keeps the rigid
+         behavior). *)
+      let use_ty =
+        match desc.val_kind, get_desc desc.val_type with
+        | Val_reg _, Trefine (skel, _) -> skel
+        | _ -> desc.val_type
+      in
       let exp = rue {
         exp_desc; exp_loc = loc; exp_extra = [];
-        exp_type = desc.val_type;
+        exp_type = use_ty;
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
       in
@@ -7730,20 +7710,6 @@ and type_expect_
         end ~before_generalize:(fun (arg, _) ->
           may_lower_contravariant env arg;
           generalize arg.exp_type)
-      in
-      (* vox: a MODULE-LEVEL value scrutinized directly keeps its .cmi
-         refined type, which no ordinary pattern can match (rigid).
-         Erase it to the skeleton for the match: the verification pass
-         names such scrutinees by path and carries the refinement as a
-         global fact, so nothing is lost.  (Local scrutinees never need
-         this: binders bind at the skeleton.)  No expansion: an
-         abbreviation-hidden refinement keeps the rigid behavior. *)
-      let arg =
-        match arg.exp_desc, get_desc arg.exp_type with
-        | Texp_ident { path = (Path.Pdot _ | Path.Papply _); _ },
-          Trefine (skel, _) ->
-            { arg with exp_type = skel }
-        | _ -> arg
       in
       let val_cases, partial =
         type_cases Computation env arg_pat_mode expected_mode arg.exp_type

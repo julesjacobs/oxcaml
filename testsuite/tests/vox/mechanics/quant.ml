@@ -36,6 +36,11 @@ val pair : unit{ forall_ i. forall_ j. (i + j) = (j + i) } = ()
    subsumption is free -- no VC. *)
 let pair2 : unit{ forall_ a b. a + b = b + a } = pair
 [%%expect{|
+Line 1, characters 49-53: vox VC:
+  goal: forall_ a. forall_ b. (a + b) = (b + a)
+  hypotheses:
+  pair = ()
+  forall_ i. forall_ j. (i + j) = (j + i)
 val pair2 : unit{ forall_ a. forall_ b. (a + b) = (b + a) } = ()
 |}]
 

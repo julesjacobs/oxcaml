@@ -66,16 +66,17 @@ Line 2, characters 11-12: vox VC:
 val reuse : int{ not (_ = 0) } -> int{ not (_ = 0) } = <fun>
 |}]
 
-(* Unpacking: [w] gets [x]'s refinement as a fact. *)
+(* A module-level value's refinement is a fact at its NAME: [w]
+   aliases [x] (self fact), whose global fact discharges the goal --
+   no unpacking form anywhere. *)
 let unpack : {v:int | v > 0} =
-  let refine_ w = x in
-  refine_ w
+  let w = x in
+  w
 [%%expect{|
-Line 3, characters 10-11: vox VC:
+Line 3, characters 2-3: vox VC:
   goal: w > 0
   hypotheses:
   w = x
-  w > 0
   a = 5
   a >= 0
   b = true
@@ -96,7 +97,6 @@ Line 2, characters 20-21: vox VC:
   c
   unpack > 0
   w = x
-  w > 0
   a = 5
   a >= 0
   b = true
@@ -109,7 +109,6 @@ Line 2, characters 35-40: vox VC:
   not c
   unpack > 0
   w = x
-  w > 0
   a = 5
   a >= 0
   b = true
@@ -128,7 +127,6 @@ Line 1, characters 46-47: vox VC (ASSUMED):
   hypotheses:
   unpack > 0
   w = x
-  w > 0
   a = 5
   a >= 0
   b = true
@@ -149,7 +147,6 @@ Line 1, characters 38-39: vox VC (RUNTIME CHECKED):
   au >= 1
   unpack > 0
   w = x
-  w > 0
   a = 5
   a >= 0
   b = true
@@ -173,7 +170,6 @@ Line 1, characters 38-39: vox VC:
   au >= 1
   unpack > 0
   w = x
-  w > 0
   a = 5
   a >= 0
   b = true

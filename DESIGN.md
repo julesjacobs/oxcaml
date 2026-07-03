@@ -144,8 +144,8 @@
   name per path on first use, carries the import's .cmi refinement as
   a global fact pulled into exactly the VCs that mention the name, and
   matching or destructuring an import contributes the usual facts at
-  the interned name (typing erases a directly-scrutinized import's
-  refined type to the skeleton for the patterns' sake).  Two paths to
+  the interned name (imports are carrier-typed at use, so ordinary
+  patterns apply directly).  Two paths to
   one value intern separately -- both facts are true, their equality
   is not assumed (sound, incomplete).  Dependent ARGUMENTS still
   require typing-time names (variables, literals, pure reflected
@@ -804,6 +804,14 @@ the scope rule above.
   [-> y:int{...}] is LR(1)-ambiguous with labeled arrows and labeled
   tuples)
 - [x] test/toplevel/error-message output is in that format
+- [ ] `Pglobal of Path.t` in the predicate language: replace the
+  verification pass's per-path interned stamps with a first-class
+  global-value constructor, symmetric with the path-based `Pconstr`/
+  `Pfield`/`Pis` and riding the same .cmi path machinery.  Kills the
+  two-paths-one-value incompleteness (normalize the path), lets
+  imports qualify as DEPENDENT arguments (typing-time nameable, no
+  stamps), and opens signature predicates over module values
+  (`val cap : int{ _ <= Config.max }`) -- "facts follow paths".
 - [ ] strong update for @ unique mutation (the library encodings so
   far: pcell separation tokens, [@@vox.sort] trusted ghosts)
 - [ ] RustHorn style borrows via block indices

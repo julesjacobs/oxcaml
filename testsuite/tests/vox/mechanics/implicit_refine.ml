@@ -24,6 +24,10 @@ val three : int{ _ = 3 } = 3
    obligation is generated for the alias. *)
 let keep : int{ _ = 3 } = three
 [%%expect{|
+Line 1, characters 26-31: vox VC:
+  goal: three = 3
+  hypotheses:
+  three = 3
 val keep : int{ _ = 3 } = 3
 |}]
 

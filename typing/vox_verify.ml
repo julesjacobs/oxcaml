@@ -103,6 +103,7 @@ let unknown_counter = ref 0
    name per PATH, with the import's .cmi refinement as a global fact
    (see [intern_global]). *)
 let global_names : (string, Ident.t) Hashtbl.t = Hashtbl.create 16
+let global_ids : (Ident.t, unit) Hashtbl.t = Hashtbl.create 16
 let global_facts : Refinement.pred list ref = ref []
 
 (* The solver-side declaration of a "simple" type: a variant becomes a free
@@ -201,6 +202,7 @@ let reset () =
   embedded_blocks := [];
   imported_specs := [];
   Hashtbl.reset global_names;
+  Hashtbl.reset global_ids;
   global_facts := []
 ;;
 
@@ -748,7 +750,10 @@ let intern_global env (e : expression) (p : Path.t) : Ident.t =
   | None ->
     let id = Ident.create_local key in
     Hashtbl.replace global_names key id;
-    Hashtbl.replace synthetic_names id ();
+    (* NOT a synthetic unknown: a global's name is meaningful (it
+       must survive [self_fact]'s noise filter and print as itself),
+       but like a synthetic it is always in scope. *)
+    Hashtbl.replace global_ids id ();
     record_name env id e.exp_type;
     (* The .cmi refinement comes from the value's SCHEME: at the use
        the node's type may already be the stripped skeleton (contract
@@ -875,7 +880,9 @@ type ctx =
   }
 
 let in_scope ctx id =
-  List.exists (Ident.same id) ctx.cscope || Hashtbl.mem synthetic_names id
+  List.exists (Ident.same id) ctx.cscope
+  || Hashtbl.mem synthetic_names id
+  || Hashtbl.mem global_ids id
 
 let pred_in_scope ctx p = List.for_all (in_scope ctx) (Refinement.free_vars p)
 

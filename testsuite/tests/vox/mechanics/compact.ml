@@ -16,6 +16,11 @@ val a : int{ _ >= 0 } = 3
 (* The old spelling is the same type. *)
 let a' : {v:int | v >= 0} = a
 [%%expect{|
+Line 1, characters 28-29: vox VC:
+  goal: a >= 0
+  hypotheses:
+  a = 3
+  a >= 0
 val a' : int{ _ >= 0 } = 3
 |}]
 
