@@ -5064,9 +5064,12 @@ atomic_type:
   (* vox refined type [{v:ty | pred}].  The [mutable_or_global_flag] and
      [possibly_poly(core_type_no_attr)] mirror the record
      [label_declaration] grammar exactly so that LR states stay merged
-     until BAR (refined type) vs SEMI/RBRACE (record declaration). *)
+     until BAR (refined type) vs SEMI/RBRACE (record declaration).
+     After BAR the production is committed, so the predicate uses the
+     same [vox_pred] grammar as the compact form -- quantifiers,
+     implication, and [_] work in both spellings. *)
   | LBRACE flag=mutable_or_global_flag bound=LIDENT COLON
-    ty=possibly_poly(core_type_no_attr) BAR pred=seq_expr RBRACE
+    ty=possibly_poly(core_type_no_attr) BAR pred=vox_pred RBRACE
       { (match flag with
          | Immutable, [] -> ()
          | _ -> expecting $loc(flag) "an unqualified refinement variable");

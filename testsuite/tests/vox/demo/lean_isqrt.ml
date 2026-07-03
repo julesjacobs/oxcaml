@@ -53,7 +53,7 @@ let isqrt : (x : int{ 0 <= _ }) -> {r:int | 0 <= r && sq r <= x && x < sq (r + 1
 val sq : int -> int = <fun>
 val isqrt :
   (x : int{ 0 <= _ }) ->
-  int{ (0 <= _) && (((sq _) <= x) && (x < (sq (_ + 1)))) } = <fun>
+  int{ ((0 <= _) && ((sq _) <= x)) && (x < (sq (_ + 1))) } = <fun>
 |}]
 
 (* Client side: the precondition [0 <= 9] is discharged at the literal
@@ -91,7 +91,7 @@ Line 15, characters 13-15:
 15 |         else hi
                   ^^
 Error: vox: verification failed (lean).
-       Goal: (0 <= hi) && (((sq hi) <= x) && (x < (sq (hi + 1))))
+       Goal: ((0 <= hi) && ((sq hi) <= x)) && (x < (sq (hi + 1)))
 Hypotheses:
   not ((lo + 1) < hi)
   (lo < hi) && (x < (sq hi))
@@ -99,7 +99,7 @@ Hypotheses:
   0 <= x
   _w = r
   (_w = r) && (0 <= _w)
-  (0 <= r) && (((sq r) <= 9) && (9 < (sq (r + 1))))
+  ((0 <= r) && ((sq r) <= 9)) && (9 < (sq (r + 1)))
 Possible counterexample:
   hi = 1
   x = 9

@@ -38,7 +38,8 @@
   optional/position parameters cannot carry dependent binders (the
   caller may pass the option itself); [-dsource] output of the
   compact form does not reparse ([_] in the encoded payload is not
-  an expression) -- the long form round-trips.
+  an expression, and quantifier keywords are not operators) -- the
+  long form round-trips for quantifier-free predicates.
 - Refined types are rigid: `{v:int | v>0}` is an ordinary type, distinct
   from `int` and from `{v:int | v>1}`. There is no subtyping in the
   TYPE ALGEBRA: unification handles refinements like a type
@@ -272,8 +273,8 @@
 - Quantifiers: `forall_ x. p` and `exists_ x. p` (keywords, like
   `refine_`: bare `forall`/`exists` collide with existing
   identifiers); binders may be listed (`forall_ i j. p`) and extend
-  maximally right.  They live in the compact predicate grammar only
-  (the long form's predicate rides the expression grammar).  A binder
+  maximally right, in both the compact and long spellings (one
+  [vox_pred] grammar serves both).  A binder
   is a fresh `Scoped` ident -- like a dependent-arrow binder, so a
   .cmi-marshalled stamp can never collide with a client's variables --
   compared under the same binder pairing, so alpha-variants are the

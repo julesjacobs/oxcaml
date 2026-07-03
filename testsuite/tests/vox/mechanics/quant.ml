@@ -69,15 +69,31 @@ val shadow : int -> unit{ exists_ k. k = k } = <fun>
 |}]
 
 (* ... but may not shadow the refined value or an enclosing binder:
-   the bound-value name would win the lookup.  (Quantifiers live in
-   the compact predicate grammar; the long form's predicate rides the
-   expression grammar, where forall_ is just a keyword.) *)
+   the bound-value name would win the lookup. *)
 let selfshadow (y : int{ forall_ y. y = y }) : int = 0
 [%%expect{|
 Line 1, characters 33-34:
 1 | let selfshadow (y : int{ forall_ y. y = y }) : int = 0
                                      ^
 Error: vox: this quantifier binder shadows the refined value or an enclosing binder; rename it
+|}]
+
+(* The long form uses the same predicate grammar: quantifiers,
+   implication, and [_] work there too. *)
+let lub2 : (x : int) -> {r:int | x <= r && (forall_ z. x <= z -> r <= z)} =
+  fun x -> x
+[%%expect{|
+Line 2, characters 11-12: vox VC:
+  goal: (x <= x) && (forall_ z. (not (x <= z)) || (x <= z))
+  hypotheses:
+  swapped = pair
+  forall_ a. forall_ b. (b + a) = (a + b)
+  pair2 = pair
+  forall_ a. forall_ b. (a + b) = (b + a)
+  pair = ()
+val lub2 :
+  (x : int) -> int{ (x <= _) && (forall_ z. (not (x <= z)) || (_ <= z)) } =
+  <fun>
 |}]
 
 (* assume_ cannot compile a runtime check of a quantifier. *)
