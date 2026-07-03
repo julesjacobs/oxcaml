@@ -339,6 +339,11 @@ let translate ?(mutvar = fun _ -> None) (e : expression)
     match e.exp_desc with
     | Texp_mutvar { txt = id; _ } -> mutvar id
     | Texp_ident { path = Path.Pident id; _ } -> Some (Refinement.Pvar id)
+    | Texp_ident { path = (Path.Pdot _ | Path.Papply _) as p; _ } ->
+      (* A module-level value names itself by PATH: stamp-free,
+         .cmi-stable, registered (sort and .cmi-refinement fact) by
+         the verification pass at VC emission. *)
+      Some (Refinement.Pglobal p)
   | Texp_constant (Const_int n) -> Some (Refinement.Pint n)
   | Texp_construct ({ txt = Longident.Lident "true"; _ }, _, _, [], _) ->
     Some (Refinement.Pbool true)

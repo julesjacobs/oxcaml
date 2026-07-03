@@ -246,6 +246,22 @@ let rec free_vars acc p =
 
 let free_vars p = free_vars [] p
 
+(* The module-level values a predicate mentions, by path. *)
+let rec free_globals acc p =
+  match p with
+  | Pglobal path -> path :: acc
+  | Pbound | Pvar _ | Pint _ | Pbool _ -> acc
+  | Pconstr (_, _, args) | Pfun (_, args) | Ptuple args ->
+    List.fold_left free_globals acc args
+  | Pfield (_, _, a) | Pis (_, _, a) | Pproj (_, _, a) -> free_globals acc a
+  | Pbinop (_, a, b) | Pand (a, b) | Por (a, b) | Pimp (a, b) ->
+    free_globals (free_globals acc a) b
+  | Pnot a -> free_globals acc a
+  | Pquant (_, _, a) -> free_globals acc a
+;;
+
+let free_globals p = free_globals [] p
+
 let rec mem_var id p =
   match p with
   | Pvar id' -> Ident.same id id'

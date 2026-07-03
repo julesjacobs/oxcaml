@@ -99,11 +99,10 @@ let name_sorts : (Ident.t, dsort) Hashtbl.t = Hashtbl.create 64
 let synthetic_names : (Ident.t, unit) Hashtbl.t = Hashtbl.create 16
 let unknown_counter = ref 0
 
-(* Module-level values used by this unit's VCs: a stable synthetic
-   name per PATH, with the import's .cmi refinement as a global fact
-   (see [intern_global]). *)
-let global_names : (string, Ident.t) Hashtbl.t = Hashtbl.create 16
-let global_ids : (Ident.t, unit) Hashtbl.t = Hashtbl.create 16
+(* Module-level values named by this unit's VCs ([Pglobal]s): sort per
+   path, with the import's .cmi refinement as a global fact (see
+   [register_global]). *)
+let globals : (string, Path.t * dsort) Hashtbl.t = Hashtbl.create 16
 let global_facts : Refinement.pred list ref = ref []
 
 (* The solver-side declaration of a "simple" type: a variant becomes a free
@@ -201,8 +200,7 @@ let reset () =
   unknown_counter := 0;
   embedded_blocks := [];
   imported_specs := [];
-  Hashtbl.reset global_names;
-  Hashtbl.reset global_ids;
+  Hashtbl.reset globals;
   global_facts := []
 ;;
 
@@ -731,50 +729,33 @@ let stable_arg_name (a : expression) : Refinement.pred option =
   Vox_reflect.translate a
 ;;
 
-(* Module-level values used by this unit's VCs get a stable synthetic
-   name per PATH, interned on first sight, so an import is usable in
-   the logic without a local rebinding: [Lean_sig.push mine]'s
-   contract obligation speaks of [mine]'s name, and destructuring an
-   imported record contributes its per-field facts.  If the use's type
-   carries a refinement (the import's .cmi refinement), the fact
-   becomes a GLOBAL hypothesis, pulled into a VC exactly when the name
-   is mentioned.  The interned stamp is process-local and never enters
-   a .cmi (module-level self-containment already rejects predicates
-   over program values).  Two paths to one value intern separately:
-   both facts are true; their equality is not assumed (sound,
-   incomplete). *)
-let intern_global env (e : expression) (p : Path.t) : Ident.t =
+(* Register a module-level value on first sight: its sort (for the
+   solver declaration) and, if its scheme carries a refinement, the
+   .cmi fact at [Pglobal p], pulled into exactly the VCs that mention
+   the path.  The registry is the emit-time chokepoint: every channel
+   that can put a [Pglobal] into a predicate (reflection of an ident,
+   dependent substitution, an imported predicate) funnels through
+   [emit_vc], which scans and registers.  Two paths to one value
+   register separately (both facts true, equality not assumed). *)
+let rec register_global env (p : Path.t) =
   let key = path_uname p in
-  match Hashtbl.find_opt global_names key with
-  | Some id -> id
-  | None ->
-    let id = Ident.create_local key in
-    Hashtbl.replace global_names key id;
-    (* NOT a synthetic unknown: a global's name is meaningful (it
-       must survive [self_fact]'s noise filter and print as itself),
-       but like a synthetic it is always in scope. *)
-    Hashtbl.replace global_ids id ();
-    record_name env id e.exp_type;
-    (* The .cmi refinement comes from the value's SCHEME: at the use
-       the node's type may already be the stripped skeleton (contract
-       arguments, implicit erasure). *)
-    let scheme_ty =
-      match Env.find_value p env with
-      | vd -> Some (Subst.Lazy.force_value_description vd).val_type
-      | exception Not_found -> None
-    in
-    let refined =
-      match Option.map (refinement_of_type env) scheme_ty with
-      | Some (Some pr) -> Some pr
-      | _ -> refinement_of_type env e.exp_type
-    in
-    (match refined with
-     | Some pr ->
-       register_pred_paths env pr;
-       global_facts
-       := Refinement.subst_bound ~by:(Refinement.Pvar id) pr :: !global_facts
-     | None -> ());
-    id
+  if not (Hashtbl.mem globals key)
+  then (
+    match Env.find_value p env with
+    | vd ->
+      let vd = Subst.Lazy.force_value_description vd in
+      Hashtbl.replace globals key (p, dsort_of_type env vd.val_type);
+      (match refinement_of_type env vd.val_type with
+       | Some pr ->
+         register_pred_paths env pr;
+         let fact = Refinement.subst_bound ~by:(Refinement.Pglobal p) pr in
+         List.iter (register_global env) (Refinement.free_globals fact);
+         global_facts := fact :: !global_facts
+       | None -> ())
+    | exception Not_found ->
+      (* Unresolvable here (e.g. a stale path): declare at the
+         uninterpreted sort; no fact. *)
+      Hashtbl.replace globals key (p, S_other))
 ;;
 
 let rec name_of_expr env (e : expression) : Refinement.pred =
@@ -786,10 +767,6 @@ let rec name_of_expr env (e : expression) : Refinement.pred =
     p
   | None ->
     (match e.exp_desc with
-     | Texp_ident { path = (Path.Pdot _ | Path.Papply _) as p; _ } ->
-       (* A module-level value: name it stably by its path (and pick
-          up its .cmi refinement as a global fact). *)
-       Refinement.Pvar (intern_global env e p)
      | Texp_construct (_, cstr, _, args, _) ->
        let path = Data_types.cstr_res_type_path cstr in
        (match datatype_sort env path with
@@ -880,9 +857,7 @@ type ctx =
   }
 
 let in_scope ctx id =
-  List.exists (Ident.same id) ctx.cscope
-  || Hashtbl.mem synthetic_names id
-  || Hashtbl.mem global_ids id
+  List.exists (Ident.same id) ctx.cscope || Hashtbl.mem synthetic_names id
 
 let pred_in_scope ctx p = List.for_all (in_scope ctx) (Refinement.free_vars p)
 
@@ -907,7 +882,15 @@ let rec pred_unreflectable (p : Refinement.pred) =
   | Refinement.Pnot a -> pred_unreflectable a
 ;;
 
-let emit_vc ~loc ~ctx ~goal ~kind =
+let emit_vc ~env ~loc ~ctx ~goal ~kind =
+  (* Register every module-level value this VC mentions: its solver
+     declaration (sort) and its .cmi refinement as a global fact --
+     the single chokepoint for all channels that can produce a
+     [Pglobal] (reflection, dependent substitution, imported
+     predicates). *)
+  List.iter
+    (register_global env)
+    (List.concat_map Refinement.free_globals (goal :: ctx.cfacts));
   (* Facts mentioning out-of-scope stamps (including any dependent
      binder a substitution failed to open) are dropped (sound: fewer
      hypotheses); such goals cannot be discharged and are errors.  The
@@ -998,7 +981,10 @@ let emit_vc ~loc ~ctx ~goal ~kind =
     let note p =
       List.iter
         (fun id -> Hashtbl.replace mentioned (Ident.unique_name id) ())
-        (Refinement.free_vars p)
+        (Refinement.free_vars p);
+      List.iter
+        (fun gp -> Hashtbl.replace mentioned (path_uname gp) ())
+        (Refinement.free_globals p)
     in
     note goal;
     List.iter note facts;
@@ -1007,7 +993,10 @@ let emit_vc ~loc ~ctx ~goal ~kind =
         (fun g ->
           List.exists
             (fun id -> Hashtbl.mem mentioned (Ident.unique_name id))
-            (Refinement.free_vars g))
+            (Refinement.free_vars g)
+          || List.exists
+               (fun gp -> Hashtbl.mem mentioned (path_uname gp))
+               (Refinement.free_globals g))
         !global_facts
   in
   (* Several fact channels can deliver the same fact (a binder fact and
@@ -1221,9 +1210,9 @@ let check_signature (sg : Types.signature) =
    nothing, which is sound.  This is the constructor analogue of the [if]
    path fact; [let p = x in ...] gets the same facts. *)
 let match_facts
-  : type k. Env.t -> Ident.t -> k general_pattern -> Refinement.pred list
+  : type k. Env.t -> Refinement.pred -> k general_pattern -> Refinement.pred list
   =
-  fun env sid pat ->
+  fun env subject pat ->
   let arg_name (_, (p : value general_pattern)) =
     match p.pat_desc with
     | Tpat_var { id; _ } -> Some (Refinement.Pvar id)
@@ -1250,7 +1239,7 @@ let match_facts
        | Some names ->
          [ Refinement.Pbinop
              ( Refinement.Eq
-             , Refinement.Pvar sid
+             , subject
              , Refinement.Pconstr (path, cstr.Data_types.cstr_name, names) )
          ]
        | None -> [])
@@ -1271,7 +1260,7 @@ let match_facts
                  (Refinement.Pbinop
                     ( Refinement.Eq
                     , Refinement.Pvar id
-                    , Refinement.Pfield (path, lbl.lbl_name, Refinement.Pvar sid)
+                    , Refinement.Pfield (path, lbl.lbl_name, subject)
                     ))
              | _ -> None)
            fields)
@@ -1293,7 +1282,7 @@ let match_facts
             (Refinement.Pbinop
                ( Refinement.Eq
                , Refinement.Pvar id
-               , Refinement.Pproj (n, i, Refinement.Pvar sid) ))
+               , Refinement.Pproj (n, i, subject) ))
         | _ -> None)
     end
   in
@@ -1302,15 +1291,15 @@ let match_facts
     | Tpat_construct (_, cstr, _, args, _) -> constructor_facts cstr args
     | Tpat_record (fields, _, _, _) -> record_facts fields
     | Tpat_tuple comps -> tuple_facts comps
-    | Tpat_var { id; _ } when not (Ident.same id sid) ->
+    | Tpat_var { id; _ }
+      when not (Refinement.equal (Refinement.Pvar id) subject) ->
       (* A variable pattern aliases the scrutinee: [match s with y ->]
          (and a [function y ->] case, whose scrutinee is [fc_param])
          learns [y = s]; [let refine_ x = m] (which desugars to a
          match) ties the binder to a mutable scrutinee's version.  The
-         [Ident.same] guard: [fc_param] IS the first variable case's
+         self-alias guard: [fc_param] IS the first variable case's
          ident (see [Typecore.name_cases]), and [x = x] is noise. *)
-      [ Refinement.Pbinop (Refinement.Eq, Refinement.Pvar id, Refinement.Pvar sid)
-      ]
+      [ Refinement.Pbinop (Refinement.Eq, Refinement.Pvar id, subject) ]
     | _ -> []
   in
   match pat.pat_desc with
@@ -1318,12 +1307,13 @@ let match_facts
   | Tpat_construct (_, cstr, _, args, _) -> constructor_facts cstr args
   | Tpat_record (fields, _, _, _) -> record_facts fields
   | Tpat_tuple comps -> tuple_facts comps
-  | Tpat_var { id; _ } when not (Ident.same id sid) ->
+  | Tpat_var { id; _ }
+    when not (Refinement.equal (Refinement.Pvar id) subject) ->
     (* Bare value patterns (let bindings and [function]-case arms reach
-       here unwrapped).  The [Ident.same] guard: [fc_param] IS the
-       first variable case's ident (see [Typecore.name_cases]), and
-       [x = x] is noise. *)
-    [ Refinement.Pbinop (Refinement.Eq, Refinement.Pvar id, Refinement.Pvar sid) ]
+       here unwrapped).  The self-alias guard: [fc_param] IS the first
+       variable case's ident (see [Typecore.name_cases]), and [x = x]
+       is noise. *)
+    [ Refinement.Pbinop (Refinement.Eq, Refinement.Pvar id, subject) ]
   | _ -> []
 ;;
 
@@ -1337,9 +1327,9 @@ let match_facts
    false); deeper patterns contribute nothing (the head may have
    matched while a sub-pattern refuted). *)
 let pattern_negation
-  : type k. Env.t -> Ident.t -> k general_pattern -> Refinement.pred option
+  : type k. Env.t -> Refinement.pred -> k general_pattern -> Refinement.pred option
   =
-  fun env sid pat ->
+  fun env subject pat ->
   let head_negation cstr args =
     let path = Data_types.cstr_res_type_path cstr in
     match datatype_sort env path with
@@ -1355,7 +1345,7 @@ let pattern_negation
         Some
           (Refinement.Pnot
              (Refinement.Pis
-                (path, cstr.Data_types.cstr_name, Refinement.Pvar sid)))
+                (path, cstr.Data_types.cstr_name, subject)))
       else None
   in
   match pat.pat_desc with
@@ -1483,6 +1473,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
           | _ -> []
         in
         emit_vc
+          ~env
           ~loc:e.exp_loc
           ~ctx:{ ctx with cfacts = self_hyps @ ctx.cfacts }
           ~goal:(Refinement.subst_bound ~by:n p)
@@ -1551,6 +1542,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
                              a.exp_attributes) ->
                 register_pred_paths env p;
                 emit_vc
+                  ~env
                   ~loc:a.exp_loc
                   ~ctx:actx
                   ~goal:(Refinement.subst_bound ~by:(name_of_expr env a) p)
@@ -1585,17 +1577,25 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
       match vb.vb_expr.exp_desc, vb.vb_pat.pat_desc with
       | Texp_ident _, Tpat_var _ -> ctx'
       | Texp_ident { path = Path.Pident id; _ }, _ ->
-        { ctx' with cfacts = match_facts env id vb.vb_pat @ ctx'.cfacts }
+        { ctx' with
+          cfacts =
+            match_facts env (Refinement.Pvar id) vb.vb_pat @ ctx'.cfacts
+        }
       | Texp_ident { path = (Path.Pdot _ | Path.Papply _) as p; _ }, _ ->
-        let id = intern_global vb.vb_expr.exp_env vb.vb_expr p in
-        { ctx' with cfacts = match_facts env id vb.vb_pat @ ctx'.cfacts }
+        { ctx' with
+          cfacts =
+            match_facts env (Refinement.Pglobal p) vb.vb_pat @ ctx'.cfacts
+        }
       | Texp_mutvar { txt = mid; _ }, _ ->
         (match Hashtbl.find_opt mut_versions mid with
          | Some (v, _) ->
            (* [match_facts] ties a variable pattern to the version
               directly and destructures records/constructors through
               it. *)
-           { ctx' with cfacts = match_facts env v vb.vb_pat @ ctx'.cfacts }
+           { ctx' with
+             cfacts =
+               match_facts env (Refinement.Pvar v) vb.vb_pat @ ctx'.cfacts
+           }
          | None -> ctx')
       | _, _ -> ctx'
     in
@@ -1633,10 +1633,15 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
           match vb.vb_expr.exp_desc, vb.vb_pat.pat_desc with
           | Texp_ident _, Tpat_var _ -> ctx
           | Texp_ident { path = Path.Pident id; _ }, _ ->
-            { ctx with cfacts = match_facts env id vb.vb_pat @ ctx.cfacts }
+            { ctx with
+              cfacts =
+                match_facts env (Refinement.Pvar id) vb.vb_pat @ ctx.cfacts
+            }
           | Texp_ident { path = (Path.Pdot _ | Path.Papply _) as p; _ }, _ ->
-            let id = intern_global vb.vb_expr.exp_env vb.vb_expr p in
-            { ctx with cfacts = match_facts env id vb.vb_pat @ ctx.cfacts }
+            { ctx with
+              cfacts =
+                match_facts env (Refinement.Pglobal p) vb.vb_pat @ ctx.cfacts
+            }
           | _ -> ctx)
         ctx'
         vbs
@@ -1692,16 +1697,18 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
     let ctx0 = walk_expr env ctx scrut in
     let scrut_id =
       match scrut.exp_desc with
-      | Texp_ident { path = Path.Pident id; _ } -> Some id
+      | Texp_ident { path = Path.Pident id; _ } -> Some (Refinement.Pvar id)
       | Texp_ident { path = (Path.Pdot _ | Path.Papply _) as p; _ } ->
-        (* A module-level scrutinee matches like a local one: its
-           interned name receives the match facts (loads are pure, so
-           receiving facts stays vacuously sound for exception and
-           effect arms). *)
-        Some (intern_global scrut.exp_env scrut p)
+        (* A module-level scrutinee matches like a local one: its path
+           name receives the match facts (loads are pure, so receiving
+           facts stays vacuously sound for exception and effect
+           arms). *)
+        Some (Refinement.Pglobal p)
       | Texp_mutvar { txt = id; _ } ->
         (* the version pins the value read by the match *)
-        Option.map fst (Hashtbl.find_opt mut_versions id)
+        Option.map
+          (fun (v, _) -> Refinement.Pvar v)
+          (Hashtbl.find_opt mut_versions id)
       | _ -> None
     in
     (match single_arm comp_cases val_cases with
@@ -1877,6 +1884,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
      | Some (template, attr_loc) ->
        (* entry: the first iteration's head state is the current one *)
        emit_vc
+         ~env
          ~loc:attr_loc
          ~ctx
          ~goal:(close_over_versions template)
@@ -1903,6 +1911,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
        (* back-edge: the next iteration's head state is the body's exit
           state *)
        emit_vc
+         ~env
          ~loc:attr_loc
          ~ctx:bctx_out
          ~goal:(close_over_versions template)
@@ -1959,6 +1968,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
     (match inv with
      | Some (template, attr_loc) ->
        emit_vc
+         ~env
          ~loc:attr_loc
          ~ctx:c1
          ~goal:(close_over_versions (at_index `First template))
@@ -2017,6 +2027,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
     (match inv with
      | Some (template, attr_loc) ->
        emit_vc
+         ~env
          ~loc:attr_loc
          ~ctx:bctx_out
          ~goal:(close_over_versions (at_index `Next template))
@@ -2140,7 +2151,10 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
               let ctx'' = extend_pat env ctx' c.c_lhs in
               let ctx'' =
                 { ctx'' with
-                  cfacts = match_facts env fc_param c.c_lhs @ negs @ ctx''.cfacts
+                  cfacts =
+                    match_facts env (Refinement.Pvar fc_param) c.c_lhs
+                    @ negs
+                    @ ctx''.cfacts
                 }
               in
               let gctx =
@@ -2151,7 +2165,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
               ignore (walk_expr env gctx c.c_rhs : ctx);
               match c.c_guard with
               | None ->
-                (match pattern_negation env fc_param c.c_lhs with
+                (match pattern_negation env (Refinement.Pvar fc_param) c.c_lhs with
                  | Some n -> negs @ [ n ]
                  | None -> negs)
               | Some _ -> negs)
@@ -2645,10 +2659,10 @@ let boolish p =
   match p with
   | Pbool _ | Pbinop ((Eq | Neq | Lt | Le | Gt | Ge), _, _)
   | Pand _ | Por _ | Pnot _ | Pimp _ -> true
-  | Pglobal _ ->
-    (* Dormant until the walker emits [Pglobal]s: global sorts then
-       arrive with their registration. *)
-    false
+  | Pglobal p ->
+    (match Hashtbl.find_opt globals (path_uname p) with
+     | Some (_, S_bool) -> true
+     | _ -> false)
   | Pvar id ->
     (match Hashtbl.find_opt name_sorts id with
      | Some S_bool -> true
@@ -2953,6 +2967,21 @@ let lean_theorem buf i vc =
         Buffer.add_string buf
           (Printf.sprintf "(%s : %s) " (lean_name id) sort)))
     (free_vars_of_vc vc);
+  let seen_g = Hashtbl.create 4 in
+  List.iter
+    (fun gp ->
+      let key = path_uname gp in
+      if not (Hashtbl.mem seen_g key)
+      then (
+        Hashtbl.add seen_g key ();
+        let sort =
+          match Hashtbl.find_opt globals key with
+          | Some (_, ds) -> lean_sort ds
+          | None -> "VoxU"
+        in
+        Buffer.add_string buf
+          (Printf.sprintf "(g_%s : %s) " (lean_sanitize key) sort)))
+    (List.concat_map Refinement.free_globals (vc.vc_goal :: vc.vc_facts));
   List.iteri
     (fun j f ->
       Buffer.add_string buf (Printf.sprintf "(h_%d : " j);
@@ -2970,8 +2999,14 @@ let lean_theorem buf i vc =
     (fun f ->
       let rec collect (q : Refinement.pred) =
         (match q with
-         | Refinement.Pis (path, _, Refinement.Pvar id) ->
-           let key = Ident.unique_name id ^ "|" ^ path_uname path in
+         | Refinement.Pis
+             (path, _, ((Refinement.Pvar _ | Refinement.Pglobal _) as subj)) ->
+           let skey =
+             match subj with
+             | Refinement.Pvar id -> Ident.unique_name id
+             | _ -> Refinement.to_string subj
+           in
+           let key = skey ^ "|" ^ path_uname path in
            if not (Hashtbl.mem seen_subj key)
            then (
              Hashtbl.add seen_subj key ();
@@ -2981,7 +3016,7 @@ let lean_theorem buf i vc =
                  match
                    List.map
                      (fun (cname, _) ->
-                       Refinement.Pis (path, cname, Refinement.Pvar id))
+                       Refinement.Pis (path, cname, subj))
                      constrs
                  with
                  | [] -> assert false (* simple variants are non-empty *)

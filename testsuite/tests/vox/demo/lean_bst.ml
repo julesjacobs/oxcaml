@@ -16,8 +16,7 @@
 open Bst
 
 let demo : bool{ _ } * bool{ not _ } =
-  let e = empty in
-  let t1 = insert 2 e in
+  let t1 = insert 2 empty in
   let t2 = insert 1 t1 in
   let t3 = insert 3 t2 in
   let hit = member 2 t3 in

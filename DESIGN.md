@@ -139,17 +139,17 @@
   rigid unrefined expected type (no obligation arises there, and the
   fact of an unnamed value is unreachable either way -- name it with
   a `let` to keep it).  Other forms at a different refinement must be
-  let-bound ("let-bind it first").  MODULE-LEVEL values need no local
-  rebinding to participate: the verification pass interns a stable
-  name per path on first use, carries the import's .cmi refinement as
-  a global fact pulled into exactly the VCs that mention the name, and
-  matching or destructuring an import contributes the usual facts at
-  the interned name (imports are carrier-typed at use, so ordinary
-  patterns apply directly).  Two paths to
-  one value intern separately -- both facts are true, their equality
-  is not assumed (sound, incomplete).  Dependent ARGUMENTS still
-  require typing-time names (variables, literals, pure reflected
-  expressions): imports do not yet qualify there.  Branch constructs propagate the
+  let-bound ("let-bind it first").  MODULE-LEVEL values participate
+  by PATH: `Pglobal` is the global counterpart of `Pvar`, stamp-free
+  and .cmi-stable like the type paths in `Pconstr`/`Pfield`/`Pis`.
+  An import names itself, qualifies as a DEPENDENT argument
+  ([insert 2 empty]), matches and destructures directly (imports are
+  carrier-typed at use), and its .cmi refinement arrives as a global
+  fact, registered at VC emission and pulled into exactly the VCs
+  that mention the path.  Two paths to one value are two names --
+  both facts true, their equality not assumed (sound, incomplete).
+  Globals are unreflectable in runtime checks (assume_ points at
+  assume_unchecked_).  Branch constructs propagate the
   expected type, so implicit intros land at the LEAVES, under each
   branch's path facts (and, since local binders are carrier-typed,
   unannotated joins of refined-fact-carrying and plain branches are
@@ -804,14 +804,11 @@ the scope rule above.
   [-> y:int{...}] is LR(1)-ambiguous with labeled arrows and labeled
   tuples)
 - [x] test/toplevel/error-message output is in that format
-- [ ] `Pglobal of Path.t` in the predicate language: replace the
-  verification pass's per-path interned stamps with a first-class
-  global-value constructor, symmetric with the path-based `Pconstr`/
-  `Pfield`/`Pis` and riding the same .cmi path machinery.  Kills the
-  two-paths-one-value incompleteness (normalize the path), lets
-  imports qualify as DEPENDENT arguments (typing-time nameable, no
-  stamps), and opens signature predicates over module values
-  (`val cap : int{ _ <= Config.max }`) -- "facts follow paths".
+- [ ] surface syntax for `Pglobal` in written predicates
+  (`val cap : int{ _ <= Config.max }`): the representation, facts,
+  and Subst-side path remapping questions ([map_paths] does not yet
+  rewrite value paths under functor substitution) -- "facts follow
+  paths".
 - [ ] strong update for @ unique mutation (the library encodings so
   far: pcell separation tokens, [@@vox.sort] trusted ghosts)
 - [ ] RustHorn style borrows via block indices

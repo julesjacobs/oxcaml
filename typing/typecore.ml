@@ -5066,7 +5066,11 @@ let vox_open_dependent_arrow env binder ~sarg_opt ~app_loc ty_ret ty_ret0 =
              "vox: the argument for a dependent parameter must be an \
               immutable variable (let-bind it first)"
          | (Path.Pident id, _, _) -> subst (Refinement.Pvar id)
-         | _ -> let_bind ()
+         | ((Path.Pdot _ | Path.Papply _) as p, _, _) ->
+           (* A module-level value: immutable by construction, named
+              stably by its path. *)
+           subst (Refinement.Pglobal p)
+         | (Path.Pextra_ty _, _, _) -> let_bind ()
          | exception _ ->
            (* Unbound: skip the substitution and let the argument's own
               typing report the error. *)
