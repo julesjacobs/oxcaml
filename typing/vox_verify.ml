@@ -319,6 +319,18 @@ let refinement_of_type env ty =
   | _ -> None
 ;;
 
+(* The refinement of an arrow PARAMETER type (a contract, DESIGN.md),
+   looking under the [Tpoly] wrapper arrow domains carry.  A genuinely
+   polymorphic domain (non-empty univars) is NOT a contract -- typing
+   leaves those rigid -- so the walker must not report one: it would
+   emit obligations typing never stripped for. *)
+let param_refinement env ty =
+  match get_desc (safe_expand_head env ty) with
+  | Tpoly (t, []) -> refinement_of_type env t
+  | Trefine (_, p) -> Some p
+  | _ -> None
+;;
+
 (* Facts contributed by the binders of a pattern: every binder is recorded (for its
    declaration sort); binders of refined type contribute their refinement instantiated at
    the binder. *)
@@ -363,6 +375,22 @@ let fresh_unknown env (e : expression) =
   record_name env id e.exp_type;
   Hashtbl.replace synthetic_names id ();
   Refinement.Pvar id
+;;
+
+(* The stable logical name of an argument, if it has one: variables
+   denote their stamp, literals themselves.  Used for dependent-binder
+   substitution, mirroring [vox_open_dependent_arrow] exactly (typing
+   already rejected mutable variables and compound expressions
+   there). *)
+let stable_arg_name (a : expression) : Refinement.pred option =
+  match a.exp_desc with
+  | Texp_ident { path = Path.Pident id; _ } -> Some (Refinement.Pvar id)
+  | Texp_constant (Const_int n) -> Some (Refinement.Pint n)
+  | Texp_construct ({ txt = Longident.Lident "true"; _ }, _, _, [], _) ->
+    Some (Refinement.Pbool true)
+  | Texp_construct ({ txt = Longident.Lident "false"; _ }, _, _, [], _) ->
+    Some (Refinement.Pbool false)
+  | _ -> None
 ;;
 
 let rec name_of_expr env (e : expression) : Refinement.pred =
@@ -835,6 +863,50 @@ let rec walk_expr env ctx (e : expression) =
       | None -> ())
    | None -> ());
   match e.exp_desc with
+  | Texp_apply (funct, args, _, _, _) ->
+    walk_expr env ctx funct;
+    (* Contract obligations (parameters as preconditions): each
+       argument for a refined parameter must satisfy the predicate at
+       its logical name; an intro-form argument
+       ([refine_]/[assume_]/[assume_unchecked_]) carries its own
+       obligation instead (the explicit-cast spelling).  The dependent
+       binder is substituted by the (syntactically enforced) variable
+       or literal argument's name as the spine is walked, mirroring
+       the application-site opening done at typing time. *)
+    let arrow_ty = ref funct.exp_type in
+    List.iter
+      (fun (_lbl, (arg : apply_arg)) ->
+        let arg_expr =
+          match arg with
+          | Arg (a, _) -> Some a
+          | Omitted _ -> None
+        in
+        Option.iter (walk_expr env ctx) arg_expr;
+        match get_desc (safe_expand_head env !arrow_ty) with
+        | Tarrow ((_, _, _, binder), dom, ret, _) ->
+          (match arg_expr with
+           | Some a ->
+             (match param_refinement env dom with
+              | Some p
+                when not
+                       (has_vox_attr "vox.refine" a.exp_attributes
+                        || has_vox_attr "vox.assume" a.exp_attributes
+                        || has_vox_attr "vox.assume_unchecked"
+                             a.exp_attributes) ->
+                register_pred_paths env p;
+                emit_vc
+                  ~loc:a.exp_loc
+                  ~ctx
+                  ~goal:(Refinement.subst_bound ~by:(name_of_expr env a) p)
+                  ~kind:Prove
+              | _ -> ());
+             (match binder, stable_arg_name a with
+              | Some b, Some by ->
+                arrow_ty := Vox_dep.subst_binder b ~by ret
+              | _ -> arrow_ty := ret)
+           | None -> arrow_ty := ret)
+        | _ -> ())
+      args
   | Texp_let (_rec_flag, vbs, body) ->
     (* Reflected definitions are global; a local one could capture
        enclosing variables (translate_def's closedness check would also
@@ -918,14 +990,64 @@ let rec walk_expr env ctx (e : expression) =
     walk_expr env (with_fact (fun c -> c) ctx) e_then;
     Option.iter (walk_expr env (with_fact (fun c -> Refinement.Pnot c) ctx)) e_else
   | Texp_function { params; body; _ } ->
+    (* Contract facts (parameters as preconditions): a refined arrow
+       DOMAIN contributes its predicate at the parameter's name -- the
+       parameter itself is bound at the skeleton, and every caller
+       discharged the predicate at its argument.  The arrow's dependent
+       binder is substituted by the parameter's stamp as the spine is
+       walked, mirroring the definition-site opening done at typing
+       time.  (A parameter whose PATTERN still carries the refined type
+       -- the pattern-annotation spelling -- contributes through
+       [binder_facts] instead; the guard avoids the duplicate.) *)
+    let arrow_ty = ref e.exp_type in
     let ctx' =
       List.fold_left
         (fun ctx fp ->
-          match fp.fp_kind with
-          | Tparam_pat pat -> extend_pat env ctx pat
-          | Tparam_optional_default (pat, default, _) ->
-            walk_expr env ctx default;
-            extend_pat env ctx pat)
+          let pat, is_default =
+            match fp.fp_kind with
+            | Tparam_pat pat -> pat, false
+            | Tparam_optional_default (pat, default, _) ->
+              walk_expr env ctx default;
+              pat, true
+          in
+          let ctx = extend_pat env ctx pat in
+          match get_desc (safe_expand_head env !arrow_ty) with
+          | Tarrow ((_, _, _, binder), dom, ret, _) ->
+            let id_opt =
+              match pat.pat_desc with
+              | Tpat_var { id; _ } -> Some id
+              | _ -> None
+            in
+            let ctx =
+              match param_refinement env dom with
+              | Some p
+                when (not is_default)
+                     && Option.is_none (refinement_of_type env pat.pat_type) ->
+                let name =
+                  match id_opt with
+                  | Some id -> Refinement.Pvar id
+                  | None ->
+                    incr unknown_counter;
+                    let s =
+                      Ident.create_local
+                        (Printf.sprintf "*param%d*" !unknown_counter)
+                    in
+                    record_name env s pat.pat_type;
+                    Hashtbl.replace synthetic_names s ();
+                    Refinement.Pvar s
+                in
+                register_pred_paths env p;
+                { ctx with
+                  cfacts = Refinement.subst_bound ~by:name p :: ctx.cfacts
+                }
+              | _ -> ctx
+            in
+            (match binder, id_opt with
+             | Some b, Some id ->
+               arrow_ty := Vox_dep.subst_binder b ~by:(Refinement.Pvar id) ret
+             | _ -> arrow_ty := ret);
+            ctx
+          | _ -> ctx)
         ctx
         params
     in
@@ -2271,7 +2393,13 @@ let discharge () =
    must not even inspect (and via [Ctype.expand_head], mutate) the types of unannotated
    programs. *)
 let uses_vox (str : structure) =
-  let found = ref false in
+  (* Applications to contract parameters carry no vox syntax; the type
+     checker flags them ([Vox_dep.contract_use_seen]) at the point it
+     strips the parameter refinement, where the domain is already being
+     expanded at the correct stage.  Read-and-clear per unit/phrase. *)
+  let contract_use = !Vox_dep.contract_use_seen in
+  Vox_dep.contract_use_seen := false;
+  let found = ref contract_use in
   let has_vox attrs =
     List.exists
       (fun (a : Parsetree.attribute) ->

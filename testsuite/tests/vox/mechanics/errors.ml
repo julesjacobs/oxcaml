@@ -69,11 +69,13 @@ let lt : (x : int) -> (y : int) -> {z:bool | z = (x < y)} =
 val lt : (x : int) -> (y : int) -> bool{ _ = (x < y) } = <fun>
 |}]
 
-let bad (x : int) = lt 0 x
+(* (Variables and literals have stable logical names; a compound
+   expression does not.) *)
+let bad (x : int) = lt (x * 2) x
 [%%expect{|
-Line 1, characters 23-24:
-1 | let bad (x : int) = lt 0 x
-                           ^
+Line 1, characters 23-30:
+1 | let bad (x : int) = lt (x * 2) x
+                           ^^^^^^^
 Error: vox: the argument for a dependent parameter must be a variable (let-bind it first)
 |}]
 

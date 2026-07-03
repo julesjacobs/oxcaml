@@ -92,54 +92,44 @@ theorem fib_add (m n : Int) (hm : 0 <= m) (hn : 0 <= n) :
 let fib_slow : (n : int) -> int{ _ = fib n } = fun n -> refine_ (fib n)
 
 (* Tail-recursive accumulator loop, O(n) iterations: the parameters
-   carry the invariant (a, b) = (fib i, fib (i+1)) with i >= 0; each
-   iteration shifts it to i+1 by re-refining the shifted values.
-   (For n < i the loop diverges; partial correctness is unbothered.) *)
+   carry the invariant (a, b) = (fib i, fib (i+1)) with i >= 0 as
+   CONTRACTS -- the body assumes them, and each call site discharges
+   them at its own (bare) arguments, the shifted accumulators and the
+   literal seeds included.  (For n < i the loop diverges; partial
+   correctness is unbothered.) *)
 let rec fib_loop
   : (n : int) -> (i : int) -> (a : int{ _ = fib i && i >= 0 })
     -> (b : int{ _ = fib (i + 1) }) -> int{ _ = fib n }
   =
   fun n i a b ->
-    let refine_ a0 = a in
-    let refine_ b0 = b in
     if i = n
-    then refine_ a0
+    then refine_ a
     else begin
       let refine_ j = refine_ (i + 1) in
-      let a2 = (refine_ b0 : int{ _ = fib j && j >= 0 }) in
-      let b2 = (refine_ (a0 + b0) : int{ _ = fib (j + 1) }) in
-      let refine_ r = fib_loop n j a2 b2 in
+      let refine_ r = fib_loop n j b (a + b) in
       refine_ r
     end
 
 let fib_iter : (n : int) -> int{ _ = fib n } =
-  fun n ->
-    let refine_ z = refine_ 0 in
-    let a0 = (refine_ z : int{ _ = fib z && z >= 0 }) in
-    let b0 = (refine_ 1 : int{ _ = fib (z + 1) }) in
-    let refine_ r = fib_loop n z a0 b0 in
-    refine_ r
+  fun n -> fib_loop n 0 0 1
 
 (* Fast doubling, O(log n) iterations, on pairs (fib n, fib (n+1)) --
    a simple variant, so the pair appears in predicates.  With k = n/2:
    fib (2k) = fib k * (2 fib (k+1) - fib k) and fib (2k+1) = fib k ^ 2
    + fib (k+1) ^ 2 (the embedded lemmas; they need k >= 0, hence the
-   ghost proposition parameter).  Annotating x and y with the doubling
-   identities puts [fib (2 * k)] syntactically in each obligation,
-   which is what fires the lemmas; the final obligations are then pure
-   congruence. *)
+   precondition on n, discharged at each call).  Annotating x and y
+   with the doubling identities puts [fib (2 * k)] syntactically in
+   each obligation, which is what fires the lemmas; the final
+   obligations are then pure congruence. *)
 type pair = P of int * int
 
-let rec fib_fd
-  : (n : int) -> (p : unit{ n >= 0 }) -> pair{ _ = P (fib n, fib (n + 1)) }
-  =
-  fun n p ->
+let rec fib_fd : (n : int{ _ >= 0 }) -> pair{ _ = P (fib n, fib (n + 1)) } =
+  fun n ->
     if n <= 0
     then refine_ (P (0, 1))
     else begin
       let refine_ k = half n in
-      let pk = (refine_ () : unit{ k >= 0 }) in
-      let refine_ q = fib_fd k pk in
+      let refine_ q = fib_fd k in
       match q with
       | P (a, b) ->
         let refine_ x = (refine_ (a * (2 * b - a)) : int{ _ = fib (2 * k) }) in
@@ -149,10 +139,9 @@ let rec fib_fd
         else refine_ (P (y, x + y))
     end
 
-(* Client side: fib 10, by fast doubling. *)
+(* Client side: fib 10, by fast doubling; the precondition [10 >= 0]
+   is discharged at the literal argument. *)
 let fib10 : int{ _ = fib 10 } =
-  let refine_ ten = refine_ 10 in
-  let p10 = (refine_ () : unit{ ten >= 0 }) in
-  let refine_ r = fib_fd ten p10 in
+  let refine_ r = fib_fd 10 in
   match r with
   | P (u, _) -> refine_ u

@@ -164,23 +164,21 @@ let dup : (n : int) -> int{ _ = n + 1 } =
   let refine_ p = alloc n in
   let { cell = c; tok = t } = p in
   let { cell = _; tok = t2 } = p in
-  let ta = (refine_ t : itoken{ tid _ = cid c && cts _ = n }) in
-  let tb = (refine_ t2 : itoken{ tid _ = cid c && cts _ = n }) in
-  let refine_ n1 = (refine_ ((n :> int) + 1) : int{ _ = n + 1 }) in
-  let ua = write c n n1 ta in
+  let refine_ n1 = refine_ (n + 1) in
+  let ua = write c n n1 t in
   ignore ua;
-  let (rp, ub) = read c n tb in
+  let (rp, ub) = read c n t2 in
   ignore ub;
   let refine_ r = rp in
-  (refine_ ((r :> int) + 1) : int{ _ = n + 1 })
+  refine_ (r + 1)
 [%%expect{|
-Line 11, characters 26-28:
-11 |   let (rp, ub) = read c n tb in
-                               ^^
+Line 9, characters 26-28:
+9 |   let (rp, ub) = read c n t2 in
+                              ^^
 Error: This value is used here, but it has already been used as unique at:
-Line 9, characters 24-26:
-9 |   let ua = write c n n1 ta in
-                            ^^
+Line 7, characters 24-25:
+7 |   let ua = write c n n1 t in
+                            ^
 
 |}]
 
@@ -190,21 +188,19 @@ let stale : (n : int) -> int{ _ = n } =
   fun n ->
   let refine_ p = alloc n in
   let { cell = c; tok = t } = p in
-  let t' = (refine_ t : itoken{ tid _ = cid c && cts _ = n }) in
-  let refine_ z = (refine_ 0 : int{ _ = 0 }) in
-  let u = write c n z t' in
+  let u = write c n 0 t in
   ignore u;
-  let (rp, u2) = read c n t' in
+  let (rp, u2) = read c n t in
   ignore u2;
   let refine_ r = rp in
-  (refine_ (r :> int) : int{ _ = n })
+  refine_ r
 [%%expect{|
-Line 9, characters 26-28:
-9 |   let (rp, u2) = read c n t' in
-                              ^^
+Line 7, characters 26-27:
+7 |   let (rp, u2) = read c n t in
+                              ^
 Error: This value is used here, but it has already been used as unique at:
-Line 7, characters 22-24:
-7 |   let u = write c n z t' in
-                          ^^
+Line 5, characters 22-23:
+5 |   let u = write c n 0 t in
+                          ^
 
 |}]

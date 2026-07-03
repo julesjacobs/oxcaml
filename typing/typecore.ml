@@ -4978,6 +4978,19 @@ let vox_open_dependent_arrow env binder ~sarg_opt ~app_loc ty_ret ty_ret0 =
           "vox: the argument for a dependent parameter must be a variable \
            (let-bind it first)"
       in
+      let subst by =
+        let ty_ret' = Vox_dep.subst_binder b ~by ty_ret in
+        (* [subst_binder] does not rebuild objects, polymorphic
+           variants or packages; a binder left behind there would
+           dangle (its facts silently dropped), so reject. *)
+        if Vox_dep.mentions_ident b ty_ret'
+        then
+          Location.raise_errorf ~loc:app_loc
+            "vox: this dependent parameter occurs under a type the \
+             substitution cannot reach (an object, polymorphic \
+             variant, or first-class module); this is not supported";
+        ty_ret', Vox_dep.subst_binder b ~by ty_ret0
+      in
       match sarg.pexp_desc with
       | Pexp_ident lid ->
         (match Env.lookup_value ~use:false ~loc:sarg.pexp_loc lid.txt env with
@@ -4987,25 +5000,45 @@ let vox_open_dependent_arrow env binder ~sarg_opt ~app_loc ty_ret ty_ret0 =
            Location.raise_errorf ~loc:sarg.pexp_loc
              "vox: the argument for a dependent parameter must be an \
               immutable variable (let-bind it first)"
-         | (Path.Pident id, _, _) ->
-           let by = Refinement.Pvar id in
-           let ty_ret' = Vox_dep.subst_binder b ~by ty_ret in
-           (* [subst_binder] does not rebuild objects, polymorphic
-              variants or packages; a binder left behind there would
-              dangle (its facts silently dropped), so reject. *)
-           if Vox_dep.mentions_ident b ty_ret'
-           then
-             Location.raise_errorf ~loc:app_loc
-               "vox: this dependent parameter occurs under a type the \
-                substitution cannot reach (an object, polymorphic \
-                variant, or first-class module); this is not supported";
-           ty_ret', Vox_dep.subst_binder b ~by ty_ret0
+         | (Path.Pident id, _, _) -> subst (Refinement.Pvar id)
          | _ -> let_bind ()
          | exception _ ->
            (* Unbound: skip the substitution and let the argument's own
               typing report the error. *)
            ty_ret, ty_ret0)
+      (* A literal names itself: substituting it is exact. *)
+      | Pexp_constant {pconst_desc = Pconst_integer (s, None); _}
+        when int_of_string_opt s <> None ->
+        subst (Refinement.Pint (int_of_string s))
+      | Pexp_construct ({txt = Longident.Lident ("true" | "false" as b'); _},
+                        None) ->
+        subst (Refinement.Pbool (String.equal b' "true"))
       | _ -> let_bind ()
+
+(* vox: a refinement on an arrow PARAMETER is a contract, not a value
+   type.  The callee binds the parameter at the SKELETON and assumes
+   the predicate as a fact; the caller discharges the predicate at the
+   argument's logical name (a VC emitted by the verification pass over
+   the final tree).  Both sides therefore speak about one stamp -- no
+   unpacking, hence no seam between the body's types and the opened
+   annotation.  An argument spelled with an intro form
+   ([refine_]/[assume_]/[assume_unchecked_]) keeps the rigid behavior:
+   an explicit cast typed at the refined parameter type. *)
+let vox_is_cast_arg (sarg : Parsetree.expression) =
+  match sarg.pexp_desc with
+  | Pexp_extension
+      ({txt = ("vox.refine" | "vox.assume" | "vox.assume_unchecked"); _}, _) ->
+    true
+  | _ -> false
+
+let vox_strip_param_refinement env ty =
+  match get_desc (expand_head env ty) with
+  | Trefine (skel, _) ->
+      (* Flags the unit for the verification pass (see
+         [Vox_dep.contract_use_seen]). *)
+      Vox_dep.contract_use_seen := true;
+      skel
+  | _ -> ty
 
 (* See Note [Type-checking applications] for an overview *)
 let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
@@ -9462,6 +9495,11 @@ and type_function
             ty_default_arg, Some (default_arg, arg_label, default_arg_sort),
               default_arg_sort
       in
+      (* vox: a refined parameter binds at its SKELETON; the predicate
+         is a contract, assumed as a fact by the verification pass
+         (recovered from the arrow's domain) and discharged at every
+         application site. *)
+      let ty_arg_internal = vox_strip_param_refinement env ty_arg_internal in
       let (pat, params, body, ret_info, newtypes, contains_gadt, curry), partial =
         (* Check everything else in the scope of the parameter. *)
         map_half_typed_cases Value env expected_pat_mode
@@ -10394,6 +10432,15 @@ and type_apply_arg env ~app_loc ~funct ~index ~position_and_mode ~partial_app
       let arg, sch =
         if vars = [] then begin
           let ty_arg0' = tpoly_get_mono ty_arg0 in
+          (* vox: contract parameter -- the argument is typed at the
+             skeleton; the predicate becomes a VC at the argument's
+             name (see [vox_strip_param_refinement]). *)
+          let ty_arg', ty_arg0' =
+            if vox_is_cast_arg sarg then ty_arg', ty_arg0'
+            else
+              ( vox_strip_param_refinement env ty_arg',
+                vox_strip_param_refinement env ty_arg0' )
+          in
           if wrapped_in_some then begin
             type_option_some
               env expected_mode sarg ty_arg' ty_arg0', None

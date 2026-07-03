@@ -71,15 +71,25 @@ let apply : (x:int) -> {v:int | v = x} -> int =
 val apply : (x : int) -> int{ _ = x } -> int = <fun>
 |}]
 
-let use_apply (a : int) : int =
-  let p : {v:int | v = a} = assume_ a in
-  apply a p
+(* Contract parameters: arguments are passed BARE and the predicate is
+   discharged at the argument's logical name; literals name
+   themselves, for dependent parameters too. *)
+let use_apply (a : int) : int = apply a a
 [%%expect{|
-Line 2, characters 36-37: vox VC (RUNTIME CHECKED):
+Line 1, characters 40-41: vox VC:
   goal: a = a
   hypotheses:
   zero = 0
 val use_apply : int -> int = <fun>
+|}]
+
+let use_apply_lit : int = apply 5 5
+[%%expect{|
+Line 1, characters 34-35: vox VC:
+  goal: 5 = 5
+  hypotheses:
+  zero = 0
+val use_apply_lit : int = 5
 |}]
 
 (* Recursion is sound by construction: the recursive call

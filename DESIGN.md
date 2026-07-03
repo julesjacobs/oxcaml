@@ -35,15 +35,16 @@
   separately written alpha-equal dependent signatures are the same
   type. `{v|v>0}` vs `{v|0<v}` is a type error. Sharp edges, not bugs.
 - Introduction: `refine_ e` wraps `e` at the refined type expected from
-  context (an annotation, or the parameter type at an argument
-  position). This is the ONLY construct that generates a proof
-  obligation. With no refined expected type in context, `refine_ e`
-  instead SYNTHESIZES the exact refinement `{v:t | v = e'}`, where `e'`
-  is the logic translation of `e` -- definitionally true, so no
-  obligation; the fact then flows from the binder as usual
-  (`let c = refine_ (0 < x)` gives `c : bool{ _ = (0 < x) }`).
-  Expressions the logic cannot express are an error there ("add a
-  refined type annotation").
+  context (an annotation, or -- as an explicit cast -- the parameter
+  type at an argument position). Proof obligations arise from exactly
+  two places: `refine_`, and applications to refined PARAMETERS (see
+  "Parameters as preconditions" below). With no refined expected type
+  in context, `refine_ e` instead SYNTHESIZES the exact refinement
+  `{v:t | v = e'}`, where `e'` is the logic translation of `e` --
+  definitionally true, so no obligation; the fact then flows from the
+  binder as usual (`let c = refine_ (0 < x)` gives
+  `c : bool{ _ = (0 < x) }`).  Expressions the logic cannot express
+  are an error there ("add a refined type annotation").
 - `assume_ e` is `refine_ e` with the proof obligation replaced by a
   COMPILED RUNTIME CHECK of the predicate (reported as RUNTIME CHECKED
   in diagnostics): the value is tested against the predicate and
@@ -71,8 +72,44 @@
   mention them: `(x:int) -> (y:int) -> {z:int | z = x * y}`. Dependent
   types arise from annotations only; inferred arrows are never
   dependent. At an application, if the parameter's name occurs in the
-  remaining type, the argument must be a VARIABLE (else: "let-bind the
-  argument first"); its stamp is substituted.
+  remaining type, the argument must be an immutable VARIABLE or a
+  LITERAL -- both have stable logical names, a literal naming itself
+  (else: "let-bind the argument first"); the name is substituted
+  throughout the remaining type.
+- Parameters as preconditions: a refinement on an arrow PARAMETER is a
+  CONTRACT, not a value type.  Checking `fun x -> body` against
+  `(x : int{p}) -> t` binds `x` at the SKELETON int -- so the body uses
+  `x` directly, and every type the body writes about `x` speaks of the
+  same stamp as the opened annotation -- and `p[v:=x]` is assumed as a
+  fact.  Every application `f a` discharges `p` at `a`'s logical name
+  as a proof obligation; arguments are passed BARE (compound arguments
+  are named by their logic translation when they have one, a fresh
+  unknown otherwise).  An argument spelled with an intro form
+  (`refine_ e`/`assume_ e`/`assume_unchecked_ e`) instead keeps the
+  rigid behavior: an explicit cast typed at the refined parameter
+  type, carrying its own obligation.  Rationale: a refined binder
+  under rigid equality behaves as an existential package, and
+  existential elimination (unpacking) mints a fresh stamp -- any type
+  that must be equal across the unpack (e.g. a result predicate
+  mentioning the parameter) then fails rigid equality.  Quantifying
+  the index at the arrow and constraining it -- the DML arrow -- is
+  the semantics that needs no unpack; contracts are its vox spelling.
+  Refinements on STORED values (let-annotations, constructor payloads,
+  results) remain rigid packages with explicit `refine_` introduction
+  and `let refine_ x = e` elimination -- in particular a RESULT
+  refinement is proved where the body is written and unpacked at each
+  call, and weakening a call's result to the enclosing instantiation
+  is an unpack-and-reprove (see the recursive calls in
+  lean_binsearch.ml).  A parameter refined by a PATTERN annotation
+  (`fun (b : {v:int | p}) -> ...`) still binds as a rigid package
+  inside the body, while the resulting arrow gives callers the
+  contract convention.  (Detection of contract use in a module with no
+  vox syntax of its own -- bare calls into a contract API, possibly
+  behind a type abbreviation -- is flagged by the type checker at the
+  point it strips the parameter refinement, where the domain is
+  already being expanded at the correct stage; the verification gate
+  itself never expands the types of unannotated programs, which would
+  stage-fault on quotations.)
 - Scope: a refinement may mention only parameters of its own type and
   program variables in scope at every point the type flows to; escape
   is an error ("annotate"). In module signatures, refinements may

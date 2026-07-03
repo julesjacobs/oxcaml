@@ -16,8 +16,11 @@
    record so its refinement names the components with native
    projections, and destructuring recovers them (per-field facts) --
    two cells' tokens can be live at once.  The match-bound token is
-   bare: one checked [refine_] coercion re-establishes its refined
-   type, after which tokens thread rigidly.
+   bare.  Token parameters are CONTRACTS (parameters as
+   preconditions): callers pass tokens bare at the skeleton type,
+   each call discharging the ownership predicate from the facts in
+   scope; only the token a call RETURNS is a package, unpacked
+   before the next use.
 
    Contents is a dependent parameter ([k]/[old]) rather than living
    in the token's rigid type, so a caller who knows the contents

@@ -132,6 +132,18 @@ let rec iter_preds ~bound ty visited f =
 
 let iter_refinement_preds ty f = iter_preds ~bound:[] ty [] f
 
+(* Set by the type checker when a lambda or an application consumes a
+   refined (contract) parameter -- detected there because typing already
+   expands those domains AT THE CORRECT STAGE.  Read and cleared per
+   compilation unit / toplevel phrase by [Vox_verify.uses_vox]: the gate
+   itself must not expand the types of programs that never use vox (an
+   abbreviation-hidden contract arrow would otherwise escape the gate,
+   but expanding staged types under the wrong stage env is fatal --
+   [Misc.fatal_error] prints eagerly even when the exception is caught).
+   Set-then-backtracked typing paths only over-approximate: the walker
+   runs and finds nothing. *)
+let contract_use_seen = ref false
+
 (* Does any refinement in [ty] reference [id]?  Used to normalize away
    unused binders and to detect dependence on an argument. *)
 let mentions_ident id ty =
