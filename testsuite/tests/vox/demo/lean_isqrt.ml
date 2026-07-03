@@ -87,9 +87,9 @@ let isqrt_broken
     let x1 = x + 1 in
     go 0 x1
 [%%expect{|
-Line 15, characters 21-23:
-15 |         else refine_ hi
-                          ^^
+Line 15, characters 13-15:
+15 |         else hi
+                  ^^
 Error: vox: verification failed (lean).
        Goal: (0 <= hi) && (((sq hi) <= x) && (x < (sq (hi + 1))))
 Hypotheses:
