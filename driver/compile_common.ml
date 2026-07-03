@@ -136,7 +136,9 @@ let emit_signature info alerts tsg =
     let staticity =
       Typemod.staticity_of_modalities tsg.Typedtree.sig_modalities
     in
-    Env.save_signature ~alerts (tsg.Typedtree.sig_type, staticity)
+    Env.save_signature ~alerts
+      ?vox_preludes:(Vox_verify.cmi_export_of_signature tsg)
+      (tsg.Typedtree.sig_type, staticity)
       (Compilation_unit.name info.module_name) kind
       (Unit_info.cmi info.target)
   in

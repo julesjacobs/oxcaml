@@ -165,7 +165,16 @@ val make_cmi : 'a t
   -> Cmi_format.kind
   -> Subst.Lazy.persistent_signature
   -> alerts
+  -> vox_preludes:Cmi_format.vox_prelude_export option
   -> Cmi_format.cmi_infos_lazy
+
+(* vox: the exported spec (datatype declarations + prelude blocks) of
+   every loaded import, with the unit's own import names (for
+   dependency-ordering in solver inputs). *)
+val vox_imported_preludes : 'a t
+  -> (Compilation_unit.Name.t
+      * Cmi_format.vox_prelude_export
+      * Compilation_unit.Name.t list) list
 
 val save_cmi : 'a t -> Persistent_signature.t -> unit
 

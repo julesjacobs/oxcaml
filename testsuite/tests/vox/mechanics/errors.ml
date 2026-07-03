@@ -231,6 +231,30 @@ Line 1, characters 18-41:
 Error: vox: the type of Leak carries a refinement mentioning forty_two, which may not appear in a module-level type; annotate with a dependent arrow ((forty_two : ...) -> ...) or a self-contained refinement
 |}]
 
+(* Embedded prelude blocks are validated at typing time: the payload
+   must be a single string literal... *)
+[%%vox.prelude 42]
+[%%expect{|
+Line 1, characters 3-14:
+1 | [%%vox.prelude 42]
+       ^^^^^^^^^^^
+Error: vox: a prelude block takes a single string literal, e.g. [%%vox.prelude.lean {lean|...|lean}]
+|}]
+
+(* ...and the backend suffix must name a known solver. *)
+[%%vox.prelude.coq "Definition x := 3."]
+[%%expect{|
+Line 1, characters 3-18:
+1 | [%%vox.prelude.coq "Definition x := 3."]
+       ^^^^^^^^^^^^^^^
+Error: vox: unknown prelude backend "coq" (expected "lean" or "z3")
+|}]
+
+(* A well-formed block is accepted (and inert under -vox-dry-run). *)
+[%%vox.prelude.lean {lean|@[grind] def spec_id (n : Int) : Int := n|lean}]
+[%%expect{|
+|}]
+
 (* A dependent parameter under a polymorphic variant (or object /
    first-class module) cannot be substituted at applications; such
    types are rejected when the binder is opened. *)

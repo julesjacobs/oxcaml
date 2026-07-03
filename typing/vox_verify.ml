@@ -115,6 +115,23 @@ let find_datatype p = List.find_opt (fun (q, _) -> Path.same p q) !datatypes
    reference them. *)
 let spec_defs : Vox_reflect.spec_def list ref = ref []
 
+(* Embedded prelude blocks ([%%vox.prelude ...]) of the module (or
+   toplevel session) being verified, in source order: backend
+   restriction ([None] = any), text (ending in a newline), and the
+   block's location (solver errors inside a block are reported
+   there).  See the collection functions below. *)
+let embedded_preludes : (string option * string * Location.t) list ref = ref []
+
+(* Prelude blocks imported from other units' .cmis ([%%vox.prelude]
+   in their interfaces): unit name and blocks, in dependency order
+   (a unit's blocks after the units it imports).  Gathered from the
+   persistent env at verification time; the definition travels with
+   the defining module, so a client can never verify against a
+   DIFFERENT version of a spec function used in an imported signature
+   (the .cmi CRC forces re-verification when the spec changes). *)
+let imported_preludes : (string * Cmi_format.vox_prelude_export) list ref =
+  ref []
+
 let reset () =
   vcs := [];
   Hashtbl.reset name_sorts;
@@ -123,7 +140,9 @@ let reset () =
   registering := [];
   poisoned := [];
   spec_defs := [];
-  unknown_counter := 0
+  unknown_counter := 0;
+  embedded_preludes := [];
+  imported_preludes := []
 ;;
 
 (* Expansion can fail on exotic types (e.g. stage errors inside quotations); fall back to
@@ -259,6 +278,34 @@ let register_spec_def env (vb : Typedtree.value_binding) =
     (fun p -> ignore (datatype_sort env p))
     (Vox_reflect.def_datatype_paths d);
   spec_defs := !spec_defs @ [ d ]
+;;
+
+(* Register the datatypes an exported refinement is ABOUT: refined
+   skeletons plus constructor applications in the predicates.  Used to
+   compute the .cmi's spec export, so a client that never mentions
+   these types itself still receives their declarations alongside the
+   spec blocks that reference them.  The walk is structural (like
+   [uses_vox]): a refinement hidden behind a type alias is missed, so
+   its datatype is not exported -- a client whose spec needs it then
+   fails at the solver (closed), never falsely verifies. *)
+let register_type_specs env ty =
+  let rec go ty visited =
+    if List.memq ty visited
+    then ()
+    else begin
+      let visited = ty :: visited in
+      match get_desc ty with
+      | Trefine (skel, p) ->
+        ignore (dsort_of_type env skel : dsort);
+        register_pred_paths env p;
+        go skel visited
+      | Tarrow (_, a, r, _) ->
+        go a visited;
+        go r visited
+      | _ -> List.iter (fun t -> go t visited) (Vox_dep.children ty)
+    end
+  in
+  go ty []
 ;;
 
 let has_vox_attr name attrs =
@@ -532,19 +579,16 @@ let backstop_pat : type k. ctx -> k general_pattern -> unit =
     (pat_bound_idents_full pat)
 ;;
 
-(* Module-level self-containment, applied to a whole signature
-   (implementation, interface, or toplevel phrase): every refinement
-   reachable from any exported item -- values, type manifests, record
-   fields, constructor arguments, extension constructors, submodules,
-   module types, classes -- must be free of program variables.  This is
-   what makes .cmi predicates self-contained: stamps do not survive a
-   compilation unit, so an imported [Pvar] can collide with an
-   unrelated local stamp and prove false facts. *)
-let rec check_signature (sg : Types.signature) =
-  List.iter check_signature_item sg
+(* Every type reachable from any exported item of a signature --
+   values, type manifests, record fields, constructor arguments,
+   extension constructors, submodules, module types, classes.  Used
+   both for the self-containment check and for computing the .cmi's
+   spec export. *)
+let rec iter_signature_types ~f (sg : Types.signature) =
+  List.iter (iter_signature_item_types ~f) sg
 
-and check_signature_item (item : Types.signature_item) =
-  let check ~loc ~what ty = check_type_escapes ~loc ~what Module_level ty in
+and iter_signature_item_types ~f (item : Types.signature_item) =
+  let check = f in
   let check_constructor_arguments ~what = function
     | Types.Cstr_tuple args ->
       List.iter
@@ -577,36 +621,46 @@ and check_signature_item (item : Types.signature_item) =
          cds)
   | Sig_typext (id, ext, _, _) ->
     check_constructor_arguments ~what:(Ident.name id) ext.ext_args
-  | Sig_module (_, _, md, _, _) -> check_module_type md.md_type
-  | Sig_modtype (_, mtd, _) -> Option.iter check_module_type mtd.mtd_type
+  | Sig_module (_, _, md, _, _) -> iter_module_type_types ~f md.md_type
+  | Sig_modtype (_, mtd, _) -> Option.iter (iter_module_type_types ~f) mtd.mtd_type
   | Sig_class (id, cd, _, _) ->
-    check_class_type ~loc:cd.cty_loc ~what:(Ident.name id) cd.cty_type
+    iter_class_type_types ~f ~loc:cd.cty_loc ~what:(Ident.name id) cd.cty_type
   | Sig_class_type (id, ctd, _, _) ->
-    check_class_type ~loc:ctd.clty_loc ~what:(Ident.name id) ctd.clty_type
+    iter_class_type_types ~f ~loc:ctd.clty_loc ~what:(Ident.name id)
+      ctd.clty_type
   | Sig_jkind _ -> ()
 
-and check_module_type = function
+and iter_module_type_types ~f = function
   | Mty_ident _ | Mty_alias _ -> ()
-  | Mty_signature sg -> check_signature sg
+  | Mty_signature sg -> iter_signature_types ~f sg
   | Mty_functor (param, res, _) ->
     (match param with
      | Unit -> ()
-     | Named (_, mty, _) -> check_module_type mty);
-    check_module_type res
-  | Mty_strengthen (mty, _, _) -> check_module_type mty
+     | Named (_, mty, _) -> iter_module_type_types ~f mty);
+    iter_module_type_types ~f res
+  | Mty_strengthen (mty, _, _) -> iter_module_type_types ~f mty
 
-and check_class_type ~loc ~what = function
+and iter_class_type_types ~f ~loc ~what = function
   | Cty_constr (_, args, cty) ->
-    List.iter (check_type_escapes ~loc ~what Module_level) args;
-    check_class_type ~loc ~what cty
+    List.iter (f ~loc ~what) args;
+    iter_class_type_types ~f ~loc ~what cty
   | Cty_signature csig ->
-    check_type_escapes ~loc ~what Module_level csig.csig_self;
-    Vars.iter
-      (fun _ (_, _, ty) -> check_type_escapes ~loc ~what Module_level ty)
-      csig.csig_vars
+    f ~loc ~what csig.csig_self;
+    Vars.iter (fun _ (_, _, ty) -> f ~loc ~what ty) csig.csig_vars
   | Cty_arrow (_, ty, cty) ->
-    check_type_escapes ~loc ~what Module_level ty;
-    check_class_type ~loc ~what cty
+    f ~loc ~what ty;
+    iter_class_type_types ~f ~loc ~what cty
+;;
+
+(* Module-level self-containment, applied to a whole signature
+   (implementation, interface, or toplevel phrase): every refinement
+   reachable from any exported item must be free of program variables.
+   This is what makes .cmi predicates self-contained: stamps do not
+   survive a compilation unit, so an imported [Pvar] can collide with
+   an unrelated local stamp and prove false facts. *)
+let check_signature (sg : Types.signature) =
+  iter_signature_types sg
+    ~f:(fun ~loc ~what ty -> check_type_escapes ~loc ~what Module_level ty)
 ;;
 
 (* vox match facts ("the match refines the thing we matched on"): matching a
@@ -972,42 +1026,51 @@ let datatype_field_needs_voxu () =
     !datatypes
 ;;
 
-(* All registered datatypes, one [declare-datatypes] block each, already in
-   dependency order (self-recursion within a block is fine).  A record is a
-   single ["mk"] constructor whose selectors are the labels. *)
-let smt_datatype_decls buf =
-  List.iter
-    (fun (p, decl) ->
-      Buffer.add_string
-        buf
-        (Printf.sprintf "(declare-datatypes ((%s 0)) ((" (smt_dt_name p));
-      (match decl with
-       | Dt_variant constrs ->
+(* One [declare-datatypes] block (self-recursion within it is fine).  A
+   record is a single ["mk"] constructor whose selectors are the
+   labels. *)
+let smt_datatype_decl (p, decl) =
+  let buf = Buffer.create 128 in
+  Buffer.add_string
+    buf
+    (Printf.sprintf "(declare-datatypes ((%s 0)) ((" (smt_dt_name p));
+  (match decl with
+   | Dt_variant constrs ->
+     List.iteri
+       (fun k (cname, fields) ->
+         if k > 0 then Buffer.add_char buf ' ';
+         Buffer.add_string buf ("(" ^ smt_constr_name p cname);
          List.iteri
-           (fun k (cname, fields) ->
-             if k > 0 then Buffer.add_char buf ' ';
-             Buffer.add_string buf ("(" ^ smt_constr_name p cname);
-             List.iteri
-               (fun i fs ->
-                 Buffer.add_string
-                   buf
-                   (Printf.sprintf
-                      " (%s %s)"
-                      (smt_sel_name p cname i)
-                      (smt_sort fs)))
-               fields;
-             Buffer.add_char buf ')')
-           constrs
-       | Dt_record fields ->
-         Buffer.add_string buf ("(" ^ smt_constr_name p "mk");
-         List.iter
-           (fun (l, fs) ->
+           (fun i fs ->
              Buffer.add_string
                buf
-               (Printf.sprintf " (%s %s)" (smt_field_name p l) (smt_sort fs)))
+               (Printf.sprintf
+                  " (%s %s)"
+                  (smt_sel_name p cname i)
+                  (smt_sort fs)))
            fields;
-         Buffer.add_char buf ')');
-      Buffer.add_string buf ")))\n")
+         Buffer.add_char buf ')')
+       constrs
+   | Dt_record fields ->
+     Buffer.add_string buf ("(" ^ smt_constr_name p "mk");
+     List.iter
+       (fun (l, fs) ->
+         Buffer.add_string
+           buf
+           (Printf.sprintf " (%s %s)" (smt_field_name p l) (smt_sort fs)))
+       fields;
+     Buffer.add_char buf ')');
+  Buffer.add_string buf ")))\n";
+  Buffer.contents buf
+;;
+
+(* All registered datatypes except [skip] (already declared by an
+   imported export), in dependency order. *)
+let smt_datatype_decls buf ~skip =
+  List.iter
+    (fun ((p, _) as dt) ->
+      if not (List.exists (String.equal (path_uname p)) skip)
+      then Buffer.add_string buf (smt_datatype_decl dt))
     !datatypes
 ;;
 
@@ -1100,6 +1163,203 @@ let rec smt_of_pred buf (p : Refinement.pred) =
 
 let free_vars_of_vc vc = List.concat_map Refinement.free_vars (vc.vc_goal :: vc.vc_facts)
 
+(* Embedded preludes: [%%vox.prelude {lean|...|lean}] structure items
+   carry solver-side text directly in the OCaml source.  The
+   [.lean]/[.z3] suffix restricts a block to one backend; a bare
+   [vox.prelude] block is inserted for whichever backend runs (like
+   the [-vox-prelude] file).  Blocks are module-local for now: they do
+   not travel in the .cmi, so a CLIENT unpacking exported refinements
+   that mention this module's spec functions still needs the
+   definitions on its own command line (or its own blocks). *)
+
+type prelude_kind =
+  | Not_prelude
+  | Prelude of string option (* [None] = backend-generic *)
+  | Bad_backend of string
+
+let prelude_extension_kind txt =
+  if String.equal txt "vox.prelude" then Prelude None
+  else if String.equal txt "vox.prelude.lean" then Prelude (Some "lean")
+  else if String.equal txt "vox.prelude.z3" then Prelude (Some "z3")
+  else if
+    String.length txt >= 12 && String.equal (String.sub txt 0 12) "vox.prelude."
+  then Bad_backend (String.sub txt 12 (String.length txt - 12))
+  else Not_prelude
+;;
+
+(* Whether Typemod should claim this extension item (including
+   misspelled backends, so they get the vox error, not "uninterpreted
+   extension"). *)
+let is_prelude_extension_name txt =
+  match prelude_extension_kind txt with
+  | Prelude _ | Bad_backend _ -> true
+  | Not_prelude -> false
+;;
+
+(* Validates and extracts the text of a [%%vox.prelude] payload; used
+   by Typemod (to accept the item) and by the collection below. *)
+let prelude_extension_text (({txt; loc}, payload) : Parsetree.extension) =
+  match prelude_extension_kind txt with
+  | Not_prelude -> None
+  | Bad_backend b ->
+    Location.raise_errorf ~loc
+      "vox: unknown prelude backend %S (expected \"lean\" or \"z3\")" b
+  | Prelude backend ->
+    (match payload with
+     | Parsetree.PStr
+         [ { pstr_desc =
+               Pstr_eval
+                 ( { pexp_desc =
+                       Pexp_constant {pconst_desc = Pconst_string (s, _, _); _}
+                   ; _ }
+                 , [] )
+           ; _ } ] ->
+       Some (backend, s)
+     | _ ->
+       Location.raise_errorf ~loc
+         "vox: a prelude block takes a single string literal, e.g. \
+          [%%%%vox.prelude.lean {lean|...|lean}]")
+;;
+
+let normalize_block s =
+  if String.length s > 0 && s.[String.length s - 1] = '\n' then s else s ^ "\n"
+;;
+
+let collect_preludes (str : structure) =
+  List.filter_map
+    (fun item ->
+      match item.str_desc with
+      | Tstr_attribute ({attr_name = {txt; _}; attr_payload; attr_loc} : attribute)
+        when is_prelude_extension_name txt ->
+        (match prelude_extension_text ({txt; loc = attr_loc}, attr_payload) with
+         | Some (backend, s) -> Some (backend, normalize_block s, attr_loc)
+         | None -> None)
+      | _ -> None)
+    str.str_items
+;;
+
+let embedded_for backend =
+  List.filter_map
+    (fun (b, s, loc) ->
+      match b with
+      | None -> Some (s, loc)
+      | Some b when String.equal b backend -> Some (s, loc)
+      | Some _ -> None)
+    !embedded_preludes
+;;
+
+(* Blocks of an INTERFACE ([%%vox.prelude] in an .mli): collected by
+   the .mli's compilation and saved into the .cmi (see Typemod), so
+   they reach every client -- and the unit's own implementation, whose
+   verification reads the interface's .cmi like any other import. *)
+let collect_preludes_sig (sg : Typedtree.signature) =
+  List.filter_map
+    (fun item ->
+      match item.sig_desc with
+      | Tsig_attribute ({attr_name = {txt; _}; attr_payload; attr_loc}
+                        : attribute)
+        when is_prelude_extension_name txt ->
+        (match
+           prelude_extension_text ({txt; loc = attr_loc}, attr_payload)
+         with
+         | Some (backend, s) -> Some (backend, normalize_block s)
+         | None -> None)
+      | _ -> None)
+    sg.sig_items
+;;
+
+(* Imported spec exports in dependency order (a unit's spec after the
+   units it imports; name order breaks ties, for determinism). *)
+let gather_imported_preludes () =
+  let all =
+    Env.vox_imported_preludes ()
+    |> List.map (fun (name, export, deps) ->
+      ( Compilation_unit.Name.to_string name
+      , export
+      , List.map Compilation_unit.Name.to_string deps ))
+    |> List.sort (fun (a, _, _) (b, _, _) -> String.compare a b)
+  in
+  let carriers = List.map (fun (n, _, _) -> n) all in
+  let visited = ref [] in
+  let out = ref [] in
+  let rec visit n =
+    if not (List.exists (String.equal n) !visited)
+    then (
+      visited := n :: !visited;
+      match List.find_opt (fun (m, _, _) -> String.equal m n) all with
+      | None -> ()
+      | Some (_, export, deps) ->
+        List.iter visit (List.filter (fun d -> List.exists (String.equal d) carriers) deps);
+        out := (n, export) :: !out)
+  in
+  List.iter (fun (n, _, _) -> visit n) all;
+  List.rev !out
+;;
+
+(* The blocks of one unit's export that apply to [backend]. *)
+let export_blocks_for backend (vp : Cmi_format.vox_prelude_export) =
+  List.filter_map
+    (fun (b, s) ->
+      match b with
+      | None -> Some s
+      | Some b when String.equal b backend -> Some s
+      | Some _ -> None)
+    vp.Cmi_format.vp_blocks
+;;
+
+(* Datatype names already declared by imported exports: a client
+   skips re-declaring these (stable names guarantee they denote the
+   same declarations). *)
+let imported_unames () =
+  List.concat_map
+    (fun (_, vp) ->
+      List.map (fun (n, _, _) -> n) vp.Cmi_format.vp_datatypes)
+    !imported_preludes
+;;
+
+let imported_need_voxu () =
+  List.exists
+    (fun (_, vp) -> vp.Cmi_format.vp_needs_voxu)
+    !imported_preludes
+;;
+
+(* A datatype of THIS module whose stable name matches an imported
+   declaration is not re-declared (see the emitters' [~skip]) -- which
+   is only sound if it really is the same declaration.  The renderers
+   are deterministic, so comparing rendered text detects a local type
+   shadowing an imported one at the same solver-side name. *)
+let check_imported_datatype_clashes ~render =
+  List.iter
+    (fun ((p, _) as dt) ->
+      let uname = path_uname p in
+      List.iter
+        (fun (unit, vp) ->
+          List.iter
+            (fun (n, leand, _) ->
+              if String.equal n uname
+                 && not (String.equal (render dt : string) leand)
+              then
+                Location.raise_errorf
+                  "vox: the type %s would share the solver-side name %s \
+                   with a different datatype imported from unit %s; \
+                   rename one of them"
+                  uname
+                  uname
+                  unit)
+            vp.Cmi_format.vp_datatypes)
+        !imported_preludes)
+    !datatypes
+;;
+
+(* Where a line of generated solver input came from, for error
+   attribution. *)
+type block_src =
+  | Local_block of Location.t
+  | Imported_block of string (* unit name *)
+  | Reflected_def of Vox_reflect.spec_def
+
+let count_lines s = String.fold_left (fun n c -> if c = '\n' then n + 1 else n) 0 s
+
 (* The [-vox-prelude] file: user-written solver-side definitions (spec
    functions such as measures), inserted verbatim into every generated
    solver input just after the datatype declarations.  Written for
@@ -1154,9 +1414,35 @@ let smt_script vc =
       (free_vars_of_vc vc)
     || datatype_field_needs_voxu ()
   in
+  let needs_other = needs_other || imported_need_voxu () in
   if needs_other then Buffer.add_string buf "(declare-sort VoxU 0)\n";
-  smt_datatype_decls buf;
-  if vc_uses_spec_fun vc then Buffer.add_string buf (prelude ());
+  (* Imported datatype declarations first (dependency order,
+     deduplicated across units by stable name), then this module's
+     remaining datatypes: declarations are always needed (this VC's
+     sort declarations may reference them through the cross-unit
+     dedup).  Prelude TEXT -- imported blocks, the -vox-prelude file,
+     own blocks, in that order -- only when the VC mentions a spec
+     function, like the file was gated before. *)
+  let imported_seen = ref [] in
+  List.iter
+    (fun (_, vp) ->
+      List.iter
+        (fun (n, _, smtd) ->
+          if not (List.exists (String.equal n) !imported_seen)
+          then (
+            imported_seen := n :: !imported_seen;
+            Buffer.add_string buf smtd))
+        vp.Cmi_format.vp_datatypes)
+    !imported_preludes;
+  smt_datatype_decls buf ~skip:!imported_seen;
+  if vc_uses_spec_fun vc
+  then (
+    List.iter
+      (fun (_, vp) ->
+        List.iter (fun s -> Buffer.add_string buf s) (export_blocks_for "z3" vp))
+      !imported_preludes;
+    Buffer.add_string buf (prelude ());
+    List.iter (fun (s, _) -> Buffer.add_string buf s) (embedded_for "z3"));
   List.iter
     (fun id ->
       if not (Hashtbl.mem seen id)
@@ -1279,39 +1565,96 @@ let lean_sort = function
      | None -> "VoxU" (* unregistered: degrade, sound *))
 ;;
 
-(* One declaration per line (the error-line mapping counts lines), in
-   dependency order; self-recursion within a line is fine.  Variants are
-   inductives; records are structures, whose projections come built in. *)
-let lean_datatype_decls buf =
+(* One declaration, on a single line (the error-line mapping counts
+   lines); self-recursion within a line is fine.  Variants are
+   inductives; records are structures, whose projections come built
+   in. *)
+let lean_datatype_decl (p, decl) =
+  let buf = Buffer.create 128 in
+  (match decl with
+   | Dt_variant constrs ->
+     Buffer.add_string
+       buf
+       (Printf.sprintf "inductive %s : Type where" (lean_dt_name p));
+     List.iter
+       (fun (cname, fields) ->
+         Buffer.add_string
+           buf
+           (Printf.sprintf " | %s : " (lean_sanitize cname));
+         List.iter
+           (fun fs -> Buffer.add_string buf (lean_sort fs ^ " -> "))
+           fields;
+         Buffer.add_string buf (lean_dt_name p))
+       constrs
+   | Dt_record fields ->
+     Buffer.add_string
+       buf
+       (Printf.sprintf "structure %s where" (lean_dt_name p));
+     List.iter
+       (fun (l, fs) ->
+         Buffer.add_string
+           buf
+           (Printf.sprintf " (%s : %s)" (lean_sanitize l) (lean_sort fs)))
+       fields);
+  Buffer.add_char buf '\n';
+  Buffer.contents buf
+;;
+
+(* All registered datatypes except [skip] (already declared by an
+   imported export), in dependency order. *)
+let lean_datatype_decls buf ~skip =
   List.iter
-    (fun (p, decl) ->
-      (match decl with
-       | Dt_variant constrs ->
-         Buffer.add_string
-           buf
-           (Printf.sprintf "inductive %s : Type where" (lean_dt_name p));
-         List.iter
-           (fun (cname, fields) ->
-             Buffer.add_string
-               buf
-               (Printf.sprintf " | %s : " (lean_sanitize cname));
-             List.iter
-               (fun fs -> Buffer.add_string buf (lean_sort fs ^ " -> "))
-               fields;
-             Buffer.add_string buf (lean_dt_name p))
-           constrs
-       | Dt_record fields ->
-         Buffer.add_string
-           buf
-           (Printf.sprintf "structure %s where" (lean_dt_name p));
-         List.iter
-           (fun (l, fs) ->
-             Buffer.add_string
-               buf
-               (Printf.sprintf " (%s : %s)" (lean_sanitize l) (lean_sort fs)))
-           fields);
-      Buffer.add_char buf '\n')
+    (fun ((p, _) as dt) ->
+      if not (List.exists (String.equal (path_uname p)) skip)
+      then Buffer.add_string buf (lean_datatype_decl dt))
     !datatypes
+;;
+
+(* The .cmi spec export of a unit: its blocks plus pre-rendered
+   declarations of the datatypes its exported refinements mention.
+   Computed from a FRESH registration pass over the exported signature
+   (batch compilation may leave another unit's datatype state in the
+   globals), restored afterwards.  No blocks, no export: without spec
+   functions clients register datatypes on demand as before. *)
+let cmi_export env (sg : Types.signature) ~blocks =
+  if blocks = []
+  then None
+  else begin
+    let saved = !datatypes, !registering, !poisoned in
+    datatypes := [];
+    registering := [];
+    poisoned := [];
+    Misc.try_finally
+      ~always:(fun () ->
+        let d, r, po = saved in
+        datatypes := d;
+        registering := r;
+        poisoned := po)
+      (fun () ->
+        iter_signature_types sg ~f:(fun ~loc:_ ~what:_ ty ->
+          register_type_specs env ty);
+        let dts =
+          List.map
+            (fun ((p, _) as dt) ->
+              path_uname p, lean_datatype_decl dt, smt_datatype_decl dt)
+            !datatypes
+        in
+        Some
+          { Cmi_format.vp_datatypes = dts
+          ; vp_needs_voxu = datatype_field_needs_voxu ()
+          ; vp_blocks = blocks
+          })
+  end
+;;
+
+(* Save-site entry points (see Typemod / Compile_common). *)
+let cmi_export_of_signature (tsg : Typedtree.signature) =
+  cmi_export tsg.sig_final_env tsg.sig_type ~blocks:(collect_preludes_sig tsg)
+;;
+
+let cmi_export_of_structure (str : structure) (sg : Types.signature) =
+  cmi_export str.str_final_env sg
+    ~blocks:(List.map (fun (b, s, _loc) -> b, s) (collect_preludes str))
 ;;
 
 let boolish p =
@@ -1482,25 +1825,6 @@ let lean_spec_def buf (d : Vox_reflect.spec_def) =
    definition, its 0-based line span within the block (so a Lean error
    inside a definition -- typically a failed termination proof -- is
    reported against that definition, not blamed on some VC). *)
-let lean_spec_def_decls () =
-  let buf = Buffer.create 256 in
-  let count () =
-    String.fold_left
-      (fun n c -> if c = '\n' then n + 1 else n)
-      0
-      (Buffer.contents buf)
-  in
-  let spans =
-    List.map
-      (fun (d : Vox_reflect.spec_def) ->
-        let start = count () in
-        lean_spec_def buf d;
-        start, count () - 1, d)
-      !spec_defs
-  in
-  Buffer.contents buf, count (), spans
-;;
-
 let lean_theorem buf i vc =
   Buffer.add_string buf (Printf.sprintf "theorem vc_%d " i);
   let seen = Hashtbl.create 16 in
@@ -1596,47 +1920,92 @@ let lean_file vcs =
       vcs
     || datatype_field_needs_voxu ()
   in
-  (* Header: VoxU (referenced by datatype fields, so first), then one
-     declaration per line, then the [-vox-prelude] -- only when some VC
-     applies a spec function: the prelude may reference another
-     module's datatypes, which do not exist in this input.  Theorems
-     follow, one per line. *)
+  (* Header, as (text, provenance) SEGMENTS so line accounting cannot
+     drift from what is emitted: VoxU (referenced by datatype fields,
+     so first); each imported unit's datatype declarations in
+     dependency order (deduplicated across units by stable name); this
+     module's remaining datatypes; then -- only when some VC applies a
+     spec function -- the prelude text: imported blocks in dependency
+     order, the [-vox-prelude] file, this module's own blocks in
+     source order; finally the elaboration bound.  Theorems follow,
+     one per line.  A solver error inside a block is reported at the
+     block's own location (or its defining unit). *)
+  let needs_voxu = needs_voxu || imported_need_voxu () in
   let want_prelude = List.exists vc_uses_spec_fun vcs in
-  let spec_def_decls, spec_def_lines, spec_def_spans = lean_spec_def_decls () in
-  let defs_first_line =
-    1 + (if needs_voxu then 1 else 0) + List.length !datatypes
-  in
-  let first_line =
-    1
-    + (if needs_voxu then 1 else 0)
-    + List.length !datatypes
-    + spec_def_lines
-    + (if want_prelude then prelude_lines () else 0)
-  in
-  let first_line = first_line + 1 in
-  if needs_voxu then Buffer.add_string buf "opaque VoxU : Type\n";
-  lean_datatype_decls buf;
-  Buffer.add_string buf spec_def_decls;
-  if want_prelude then Buffer.add_string buf (prelude ());
+  let segments = ref [] in
+  let seg ?src text = if text <> "" then segments := (text, src) :: !segments in
+  if needs_voxu then seg "opaque VoxU : Type\n";
+  let seen = ref [] in
+  List.iter
+    (fun (unit, vp) ->
+      List.iter
+        (fun (n, leand, _) ->
+          if not (List.exists (String.equal n) !seen)
+          then (
+            seen := n :: !seen;
+            seg ~src:(Imported_block unit) leand))
+        vp.Cmi_format.vp_datatypes)
+    !imported_preludes;
+  let own_decls = Buffer.create 256 in
+  lean_datatype_decls own_decls ~skip:!seen;
+  seg (Buffer.contents own_decls);
+  (* Reflected definitions, unconditionally: they are checked
+     (termination included) even when nothing else needs the
+     prelude. *)
+  List.iter
+    (fun (d : Vox_reflect.spec_def) ->
+      let b = Buffer.create 128 in
+      lean_spec_def b d;
+      seg ~src:(Reflected_def d) (Buffer.contents b))
+    !spec_defs;
+  if want_prelude
+  then (
+    List.iter
+      (fun (unit, vp) ->
+        List.iter
+          (fun text -> seg ~src:(Imported_block unit) text)
+          (export_blocks_for "lean" vp))
+      !imported_preludes;
+    seg (prelude ());
+    List.iter
+      (fun (s, loc) -> seg ~src:(Local_block loc) s)
+      (embedded_for "lean"));
   (* Bound elaboration per theorem: a diverging [grind] must count as
      a verification failure, not hang the build.  (A wedged process
      outside elaboration remains out of scope, as for z3.)  Emitted
      after the prelude so a prelude may begin with [import], which
      Lean requires to be the first command in the file. *)
-  Buffer.add_string buf "set_option maxHeartbeats 400000\n";
+  seg "set_option maxHeartbeats 400000\n";
+  let segments = List.rev !segments in
+  let block_ranges, first_line =
+    List.fold_left
+      (fun (ranges, start) (text, src) ->
+        let n = count_lines text in
+        let ranges =
+          match src with
+          | Some src -> (start, n, src) :: ranges
+          | None -> ranges
+        in
+        (ranges, start + n))
+      ([], 1)
+      segments
+  in
+  List.iter (fun (text, _) -> Buffer.add_string buf text) segments;
   List.iteri (fun i vc -> lean_theorem buf i vc) vcs;
-  let def_of_line line =
-    List.find_opt
-      (fun (s, e, _) -> line >= defs_first_line + s && line <= defs_first_line + e)
-      spec_def_spans
-    |> Option.map (fun (_, _, d) -> d)
+  let block_of_line line =
+    List.find_map
+      (fun (start, n, src) ->
+        if start <= line && line < start + n
+        then Some (src, line - start + 1)
+        else None)
+      block_ranges
   in
   ( Buffer.contents buf,
     (fun line ->
-      (* An error on a header line maps to no VC (and a negative
-         index would make [List.nth_opt] raise). *)
-      if line < first_line then None else List.nth_opt vcs (line - first_line)),
-    def_of_line )
+       (* An error on a header line maps to no VC (and a negative
+          index would make [List.nth_opt] raise). *)
+       if line < first_line then None else List.nth_opt vcs (line - first_line)),
+    block_of_line )
 ;;
 
 let run_lean vcs =
@@ -1652,7 +2021,7 @@ let run_lean vcs =
       | [], d :: _ -> d.Vox_reflect.sd_loc
       | [], [] -> assert false
     in
-    let contents, vc_of_line, def_of_line = lean_file vcs in
+    let contents, vc_of_line, block_of_line = lean_file vcs in
     let in_file = Filename.temp_file "vox" ".lean" in
     let out_file = Filename.temp_file "vox" ".out" in
     Misc.try_finally
@@ -1676,12 +2045,23 @@ let run_lean vcs =
              format (e.g. for unused hypotheses); attributing the
              failure to the first WARNING would blame the wrong VC, so
              only "error:" lines count. *)
-          let contains_error l =
-            let needle = "error:" in
+          (* Lean prints "<file>:L:C: error: ..." or, with a kind,
+             "<file>:L:C: error(lean.some.kind): ...".  Warnings use
+             the same shapes with "warning"; only errors count (a
+             warning line before the real error must not steal the
+             attribution). *)
+          let error_marker l =
+            let needle = " error" in
             let n = String.length needle in
             let rec at i =
-              i + n <= String.length l
-              && (String.equal (String.sub l i n) needle || at (i + 1))
+              if i + n > String.length l
+              then None
+              else if
+                String.equal (String.sub l i n) needle
+                && i + n < String.length l
+                && (l.[i + n] = ':' || l.[i + n] = '(')
+              then Some (i + 1)
+              else at (i + 1)
             in
             at 0
           in
@@ -1701,37 +2081,32 @@ let run_lean vcs =
                          && String.equal
                               (String.sub l 0 (String.length in_file))
                               in_file
-                         && contains_error l ->
+                         && error_marker l <> None ->
                     let rest =
                       String.sub l (String.length in_file + 1)
                         (String.length l - String.length in_file - 1)
                     in
-                    let is_error =
-                      (* skip warnings: only "<file>:L:C: error: ..." *)
-                      let needle = " error: " in
-                      let rec find i =
-                        if i + String.length needle > String.length l
-                        then false
-                        else
-                          String.equal (String.sub l i (String.length needle)) needle
-                          || find (i + 1)
-                      in
-                      find 0
-                    in
                     (match String.index_opt rest ':' with
-                     | Some i when is_error ->
+                     | Some i ->
                        (match int_of_string_opt (String.sub rest 0 i) with
                         | Some n ->
                           error_line := Some n;
                           msg := l
                         | None -> ())
-                     | Some _ | None -> ())
+                     | None -> ())
                   | _ -> ())
                | Some _ -> ()
              done
            with
            | End_of_file -> ());
           close_in ic;
+          (* Strip the (nondeterministic) temp-file prefix from the
+             message; keep from "error"/"error(kind)" onward. *)
+          let strip_msg m =
+            match error_marker m with
+            | Some i -> String.sub m i (String.length m - i)
+            | None -> m
+          in
           match !error_line with
           | None ->
             (* No per-theorem diagnostic: the solver itself failed
@@ -1744,39 +2119,47 @@ let run_lean vcs =
                then "<no output>"
                else !first_output)
           | Some line ->
-            (* Strip the (nondeterministic) temp-file prefix from the
-               message; keep from "error:" onward. *)
-            let msg =
-              let m = !msg in
-              let needle = "error:" in
-              let rec find i =
-                if i + String.length needle > String.length m
-                then m
-                else if
-                  String.equal (String.sub m i (String.length needle)) needle
-                then String.sub m i (String.length m - i)
-                else find (i + 1)
-              in
-              find 0
-            in
-            (match def_of_line line with
-             | Some (d : Vox_reflect.spec_def) ->
+            (match block_of_line line with
+             | Some (Local_block block_loc, rel_line) ->
+               (* The error is inside an embedded [%%vox.prelude]
+                  block: report it there, not at a VC. *)
+               Location.raise_errorf ~loc:block_loc
+                 "vox: error in embedded prelude (line %d of this \
+                  block):@ %s"
+                 rel_line
+                 (strip_msg !msg)
+             | Some (Imported_block unit, rel_line) ->
+               (* The error is inside a spec prelude imported from
+                  another unit's interface (e.g. two units exporting
+                  the same spec-function name).  There is no local
+                  source position; anchor at the current file. *)
+               Location.raise_errorf
+                 ~loc:(Location.in_file !Location.input_name)
+                 "vox: error in the spec prelude imported from unit \
+                  %s (line %d of its block):@ %s"
+                 unit
+                 rel_line
+                 (strip_msg !msg)
+             | Some (Reflected_def d, _) ->
                (* The definition itself was rejected -- most often Lean
                   could not establish termination. *)
-               Location.raise_errorf ~loc:d.sd_loc
+               let msg = strip_msg !msg in
+               Location.raise_errorf ~loc:d.Vox_reflect.sd_loc
                  "vox: the reflected definition of %s was rejected by the \
                   solver (is it terminating?  int-indexed recursion needs a \
                   [@@vox.decreases] metric)%s"
-                 d.sd_name
+                 d.Vox_reflect.sd_name
                  (if String.equal msg "" then "" else "\n(lean: " ^ msg ^ ")")
              | None ->
+               let msg = strip_msg !msg in
                (match vc_of_line line, vcs with
                 | Some vc, _ | None, vc :: _ ->
                   Location.raise_errorf ~loc:vc.vc_loc
                     "vox: verification failed (lean).@ Goal: %s%s%s"
                     (goal_for_error vc)
                     (hyps_for_error vc)
-                    (if String.equal msg "" then "" else "\n(lean: " ^ msg ^ ")")
+                    (if String.equal msg "" then ""
+                     else "\n(lean: " ^ msg ^ ")")
                 | None, [] ->
                   Location.raise_errorf ~loc:fallback_loc
                     "vox: verification failed (lean): %s"
@@ -1808,6 +2191,7 @@ let dump_vc ppf vc =
 ;;
 
 let discharge () =
+  check_imported_datatype_clashes ~render:lean_datatype_decl;
   let all = List.rev !vcs in
   (* A constructor application whose datatype failed to register (the type is
      not a simple variant here, or is mutually recursive) cannot be declared
@@ -1980,6 +2364,12 @@ let check_implementation (str : structure) (sg : Types.signature) =
   then ()
   else (
     reset ();
+    (* Blocks anywhere in the module are available to all of its VCs
+       (they are emitted, in source order, into every solver input);
+       blocks exported by imported units' interfaces -- including this
+       unit's own .mli -- come from their .cmis. *)
+    embedded_preludes := collect_preludes str;
+    imported_preludes := gather_imported_preludes ();
     let ctx = ref { cfacts = []; cscope = [] } in
     walk_items str ctx;
     discharge ())
@@ -1993,6 +2383,7 @@ let check_implementation (str : structure) (sg : Types.signature) =
    binders (which may carry refinements copied from earlier phrases)
    contribute facts. *)
 let toplevel_ctx = ref { cfacts = []; cscope = [] }
+let toplevel_preludes : (string option * string * Location.t) list ref = ref []
 let toplevel_active = ref false
 
 let check_toplevel_phrase (str : structure) ~(sig_acc : Types.signature)
@@ -2008,6 +2399,10 @@ let check_toplevel_phrase (str : structure) ~(sig_acc : Types.signature)
   then (
     toplevel_active := true;
     vcs := [];
+    (* The session's committed blocks plus this phrase's; committed
+       (like the facts below) only if the phrase discharges. *)
+    embedded_preludes := !toplevel_preludes @ collect_preludes str;
+    imported_preludes := gather_imported_preludes ();
     let ctx = ref !toplevel_ctx in
     walk_items str ctx;
     (* Discharge before committing the phrase's facts: if verification
@@ -2015,5 +2410,6 @@ let check_toplevel_phrase (str : structure) ~(sig_acc : Types.signature)
        exist and their facts (e.g. a refuted contradictory refinement)
        must not be available to later phrases. *)
     discharge ();
-    toplevel_ctx := !ctx)
+    toplevel_ctx := !ctx;
+    toplevel_preludes := !embedded_preludes)
 ;;

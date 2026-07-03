@@ -2554,6 +2554,20 @@ and transl_signature ?(interface_toplevel = false) env
             (Builtin_attributes.get_implicit_jkind_attr attr)
         in
         mksig (Tsig_attribute attr) env loc, [], newenv
+    | Psig_extension ((({txt; _}, _) as ext), _attrs)
+      when Vox_verify.is_prelude_extension_name txt ->
+        (* vox: [%%vox.prelude ...] in an interface exports the block
+           through the .cmi to every client (and to this unit's own
+           implementation).  Validated here; collected from the typed
+           signature when the .cmi is written. *)
+        ignore
+          (Vox_verify.prelude_extension_text ext
+           : (string option * string) option);
+        let name, payload = ext in
+        let attr =
+          {attr_name = name; attr_payload = payload; attr_loc = loc}
+        in
+        mksig (Tsig_attribute attr) env loc, [], env
     | Psig_extension (ext, _attrs) ->
         raise (Error_forward (Builtin_attributes.error_of_extension ext))
     | Psig_jkind sdecl ->
@@ -4079,6 +4093,18 @@ and type_structure ?(toplevel = None) ~funct_body anchor env sstr =
         new_env
     | Pstr_include sincl ->
         type_str_include ~loc env shape_map sincl sig_acc
+    | Pstr_extension ((({txt; _}, _) as ext), _attrs)
+      when Vox_verify.is_prelude_extension_name txt ->
+        (* vox: [%%vox.prelude {lean|...|lean}] embeds solver-side
+           definitions.  Validated here, then carried as an attribute
+           so the verification pass can collect it from the tree. *)
+        ignore
+          (Vox_verify.prelude_extension_text ext
+           : (string option * string) option);
+        let name, payload = ext in
+        Tstr_attribute
+          {attr_name = name; attr_payload = payload; attr_loc = loc},
+        [], shape_map, env
     | Pstr_extension (ext, _attrs) ->
         raise (Error_forward (Builtin_attributes.error_of_extension ext))
     | Pstr_attribute x ->
@@ -4471,15 +4497,22 @@ let type_implementation target modulename initial_env ast =
         mode (Env.mode_unit ~staticity:Staticity.Dynamic);
       (* vox: generate and discharge verification conditions over the
          final typedtree, and check that exported refinements are
-         self-contained.  No-op for programs without refinements. *)
-      Profile.record_call "vox_verify" (fun () ->
-        Vox_verify.check_implementation str sg);
+         self-contained.  No-op for programs without refinements.
+         Called from each branch below rather than here: for a unit
+         with an .mli, the interface's .cmi -- which may carry the
+         spec-prelude blocks the implementation is verified against --
+         is only read inside the branch. *)
+      let vox_verify () =
+        Profile.record_call "vox_verify" (fun () ->
+          Vox_verify.check_implementation str sg)
+      in
       let uid = Uid.of_compilation_unit_id modulename in
       let shape = Shape.set_uid_if_none shape uid in
       if !Clflags.binary_annotations_cms then
         cms_register_toplevel_struct_attributes ~sourcefile ~uid ast;
       let simple_sg = Signature_names.simplify finalenv names sg in
       if !Clflags.print_types then begin
+        vox_verify ();
         remove_mode_and_jkind_variables finalenv sg;
         let zap_modality =
           Ctype.zap_modalities_to_floor_if_modes_enabled_at Alpha
@@ -4571,6 +4604,9 @@ let type_implementation target modulename initial_env ast =
             check_argument_type_if_given initial_env source_intf
               ~actual_staticity:staticity dclsig arg_type
           in
+          (* The interface's .cmi is loaded now: its spec-prelude
+             blocks are visible to the verifier. *)
+          vox_verify ();
           Typecore.force_delayed_checks ();
           Mode.erase_hints ();
           Typecore.optimise_allocations ();
@@ -4588,6 +4624,7 @@ let type_implementation target modulename initial_env ast =
             argument_interface;
           }
         end else begin
+          vox_verify ();
           Location.prerr_warning
             (Location.in_file sourcefile)
             Warnings.Missing_mli;
@@ -4634,7 +4671,10 @@ let type_implementation target modulename initial_env ast =
             in
             let cmi =
               Profile.record_call "save_cmi" (fun () ->
-                Env.save_signature ~alerts (simple_sg, Staticity.Dynamic)
+                Env.save_signature ~alerts
+                  ?vox_preludes:(Vox_verify.cmi_export_of_structure
+                                   str simple_sg)
+                  (simple_sg, Staticity.Dynamic)
                   name kind (Unit_info.cmi target))
             in
             Profile.record_call "save_cmt" (fun () ->

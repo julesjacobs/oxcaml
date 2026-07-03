@@ -15,10 +15,28 @@
 
 open Misc
 
+(* vox: the solver-side spec exported by a unit: its embedded
+   [%%vox.prelude] blocks plus pre-rendered declarations for the
+   datatypes its exported refinements are about (a client may never
+   mention those types itself, yet the blocks reference them). *)
+type vox_prelude_export = {
+  vp_datatypes : (string * string * string) list;
+      (* (stable solver-side name, Lean declaration, SMT-LIB
+         declaration), in dependency order; clients deduplicate by
+         name across imports *)
+  vp_needs_voxu : bool;
+      (* a datatype field uses the uninterpreted sort *)
+  vp_blocks : (string option * string) list;
+      (* (backend restriction, text) in source order *)
+}
+
 type pers_flags =
   | Rectypes
   | Alerts of alerts
   | Opaque
+  | Vox_prelude of vox_prelude_export
+      (* collected by Typemod, consumed by Vox_verify in every client.
+         Appending a constructor keeps old .cmis readable. *)
 
 type kind =
   | Normal of {

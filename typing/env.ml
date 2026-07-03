@@ -3329,8 +3329,8 @@ let persistent_structures_of_dir dir =
   |> persistent_structures_of_basenames
 
 (* Save a signature to a file *)
-let save_signature_with_transform cmi_transform ~alerts (sg, staticity) modname
-      kind cmi_info =
+let save_signature_with_transform cmi_transform ~alerts ?vox_preludes
+      (sg, staticity) modname kind cmi_info =
   Btype.cleanup_abbrev ();
   Subst.reset_additional_action_id ();
   let sg = Subst.Lazy.of_signature sg
@@ -3339,6 +3339,7 @@ let save_signature_with_transform cmi_transform ~alerts (sg, staticity) modname
   in
   let cmi =
     Persistent_env.make_cmi !persistent_env modname kind (sg, staticity) alerts
+      ~vox_preludes
     |> cmi_transform in
   let filename = Unit_info.Artifact.filename cmi_info in
   let pers_sig =
@@ -3350,12 +3351,16 @@ let save_signature_with_transform cmi_transform ~alerts (sg, staticity) modname
   Persistent_env.save_cmi !persistent_env pers_sig;
   cmi
 
-let save_signature ~alerts sg modname cu cmi =
-  save_signature_with_transform (fun cmi -> cmi) ~alerts sg modname cu cmi
+let save_signature ~alerts ?vox_preludes sg modname cu cmi =
+  save_signature_with_transform (fun cmi -> cmi) ~alerts ?vox_preludes
+    sg modname cu cmi
 
 let save_signature_with_imports ~alerts sg modname cu cmi imports =
   let with_imports cmi = { cmi with cmi_crcs = imports } in
   save_signature_with_transform with_imports ~alerts sg modname cu cmi
+
+let vox_imported_preludes () =
+  Persistent_env.vox_imported_preludes !persistent_env
 
 (* Make the initial environment. *)
 let initial () =

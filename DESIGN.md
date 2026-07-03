@@ -158,6 +158,30 @@
   in its own module (client modules re-reflect nothing -- cross-module
   reflected calls are future work, needing the definition in the
   .cmi).
+- Embedded preludes: `[%%vox.prelude.lean {lean|...|lean}]` (and
+  `.z3`, or bare `vox.prelude` for whichever backend runs) puts the
+  solver-side text directly in the module, next to the datatypes it
+  describes.  Blocks are emitted into every solver input for the
+  module, in source order; a solver error inside a block is reported
+  at the block's own location (with the line within the block).
+  Like `assume_unchecked_` and `-vox-prelude`, an embedded block is
+  trusted (an `axiom` proves anything).
+- Specced signatures: blocks in an `.mli` are EXPORTED through the
+  `.cmi`, together with pre-rendered declarations of the datatypes the
+  interface's refinements are about (a client may never mention those
+  types itself, yet the spec references them; clients deduplicate the
+  declarations by their stable names, and a local type may not shadow
+  an imported declaration at the same solver-side name with a
+  different shape).  Every client -- including the unit's own
+  implementation, which reads its interface like any other import --
+  receives the spec in dependency order.  The definition travels with
+  the defining module, so a client can never verify against a
+  DIFFERENT version of a spec function used in an imported signature,
+  and editing a spec changes the `.cmi` (its CRC), forcing clients to
+  re-verify.  Two imported units exporting the same spec name is a
+  duplicate solver definition: verification fails, blaming the
+  colliding unit's block (spec functions are not yet unit-namespaced).
+  Blocks in an `.ml` (of a unit with an `.mli`) stay module-local.
 - The compiler attaches logical meaning to exactly the operations the
   predicate language models (Vox_reflect): variables, int/bool
   constants, `+ - * ~-` (and `succ`/`pred`), `&& || not`, and

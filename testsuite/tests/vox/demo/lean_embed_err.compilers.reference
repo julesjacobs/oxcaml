@@ -1,0 +1,7 @@
+File "lean_embed_err.ml", lines 16-19, characters 0-7:
+16 | [%%vox.prelude.lean {lean|
+17 | @[grind] def spec_id (n : Int) : Int := n
+18 | def broken : Int := unknown_identifier
+19 | |lean}]
+Error: vox: error in embedded prelude (line 3 of this block):
+       error(lean.unknownIdentifier): Unknown identifier `unknown_identifier`
