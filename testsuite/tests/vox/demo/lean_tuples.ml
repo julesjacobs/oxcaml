@@ -28,8 +28,7 @@ let mkpair : (a : int) -> (b : int) -> (int * int){ _ = (a, b) } =
 
 (* A refinement speaking about the bound pair's components. *)
 let first_pos (p : (int * int){ fst _ > 0 }) : {r:int | r > 0} =
-  let refine_ q = p in
-  match q with
+  match p with
   | (x, _) -> refine_ x
 
 (* Destructuring let gets the same per-component facts a match would. *)
@@ -45,8 +44,7 @@ let rot3 : (a : int) -> (b : int) -> (c : int) ->
   fun a b c -> refine_ (b, c, a)
 
 let third (t : (int * int * int){ _ = (1, 2, 3) }) : {r:int | r = 3} =
-  let refine_ q = t in
-  match q with
+  match t with
   | (_, _, z) -> refine_ z
 
 (* A bool component: sorted [Prop] on the Lean side; the product
@@ -65,6 +63,5 @@ let nest : (a : int) -> (b : int) ->
 type w = W of (int * int)
 
 let unw (v : w{ _ = W (3, 4) }) : {r:int | r = 3} =
-  let refine_ q = v in
-  match q with
+  match v with
   | W p -> (match p with (x, _) -> refine_ x)

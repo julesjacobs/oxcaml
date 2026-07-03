@@ -42,12 +42,12 @@ let isqrt : (x : int{ 0 <= _ }) -> {r:int | 0 <= r && sq r <= x && x < sq (r + 1
       fun lo hi ->
         if lo + 1 < hi
         then begin
-          let refine_ m = refine_ ((lo + hi) / 2) in
+          let m = (lo + hi) / 2 in
           if sq m <= x then go m hi else go lo m
         end
         else refine_ lo
     in
-    let refine_ x1 = refine_ (x + 1) in
+    let x1 = x + 1 in
     go 0 x1
 [%%expect{|
 val sq : int -> int = <fun>
@@ -79,12 +79,12 @@ let isqrt_broken
       fun lo hi ->
         if lo + 1 < hi
         then begin
-          let refine_ m = refine_ ((lo + hi) / 2) in
+          let m = (lo + hi) / 2 in
           if sq m <= x then go m hi else go lo m
         end
         else refine_ hi
     in
-    let refine_ x1 = refine_ (x + 1) in
+    let x1 = x + 1 in
     go 0 x1
 [%%expect{|
 Line 15, characters 21-23:

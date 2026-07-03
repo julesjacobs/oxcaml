@@ -74,7 +74,7 @@ let rec search
          caveat: the logic's ints are unbounded, so l + r is proved
          ideal, not wrapping.  Harmless here -- both are bounded by a
          real array's length -- but outside the model. *)
-      let refine_ s = refine_ (l + r) in
+      let s = l + r in
       let refine_ m = half s in
       (* l < m < r, hence 0 <= m < len a: the probe is in bounds. *)
       let refine_ v = get a m in

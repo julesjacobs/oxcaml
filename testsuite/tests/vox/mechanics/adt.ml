@@ -31,30 +31,30 @@ Line 1, characters 54-59: vox VC:
   goal: (K x) = (K x)
   hypotheses:
   k3 = (K 3)
+  k3 = (K 3)
 val mk : (x : int) -> t{ _ = (K x) } = <fun>
 |}]
 
 (* Match facts: injectivity of K proves y = 3. *)
 let get (s : t{ _ = K 3 }) : {r:int | r = 3} =
-  let refine_ s = s in
   match s with
   | K y -> refine_ y
   | L -> assume_ 0
 [%%expect{|
-Line 4, characters 19-20: vox VC:
+Line 3, characters 19-20: vox VC:
   goal: y = 3
   hypotheses:
   s = (K y)
   s = (K 3)
-  s#2 = (K 3)
   k3 = (K 3)
-Line 5, characters 17-18: vox VC (RUNTIME CHECKED):
+  k3 = (K 3)
+Line 4, characters 17-18: vox VC (RUNTIME CHECKED):
   goal: 0 = 3
   hypotheses:
   s = L
   not (s is K)
   s = (K 3)
-  s#2 = (K 3)
+  k3 = (K 3)
   k3 = (K 3)
 val get : t{ _ = (K 3) } -> int{ _ = 3 } = <fun>
 |}]
@@ -66,26 +66,25 @@ type ilist =
   | Cons of int * ilist
 
 let head (s : ilist{ _ = Cons (3, Nil) }) : {r:int | r = 3} =
-  let refine_ s = s in
   match s with
   | Cons (h, _) -> refine_ h
   | Nil -> assume_ 0
 [%%expect{|
 type ilist = Nil | Cons of int * ilist
-Line 8, characters 27-28: vox VC:
+Line 7, characters 27-28: vox VC:
   goal: h = 3
   hypotheses:
   s = (Cons (h, *vox-wild*))
   s = (Cons (3, Nil))
-  s#2 = (Cons (3, Nil))
   k3 = (K 3)
-Line 9, characters 19-20: vox VC (RUNTIME CHECKED):
+  k3 = (K 3)
+Line 8, characters 19-20: vox VC (RUNTIME CHECKED):
   goal: 0 = 3
   hypotheses:
   s = Nil
   not (s is Cons)
   s = (Cons (3, Nil))
-  s#2 = (Cons (3, Nil))
+  k3 = (K 3)
   k3 = (K 3)
 val head : ilist{ _ = (Cons (3, Nil)) } -> int{ _ = 3 } = <fun>
 |}]
@@ -109,11 +108,13 @@ Line 7, characters 40-41: vox VC:
   t = (W y)
   y > 0
   k3 = (K 3)
+  k3 = (K 3)
 Line 8, characters 17-18: vox VC (RUNTIME CHECKED):
   goal: 1 > 0
   hypotheses:
   t = Z
   not (t is W)
+  k3 = (K 3)
   k3 = (K 3)
 val getw : w -> int{ _ > 0 } = <fun>
 |}]
@@ -181,11 +182,13 @@ Line 8, characters 20-21: vox VC:
   hypotheses:
   s = (Ay *vox-wild*)
   k3 = (K 3)
+  k3 = (K 3)
 Line 9, characters 19-20: vox VC:
   goal: 1 >= 0
   hypotheses:
   s = Bee
   not (s is Ay)
+  k3 = (K 3)
   k3 = (K 3)
 Line 11, characters 29-30: vox VC:
   goal: s = Cee
@@ -193,12 +196,14 @@ Line 11, characters 29-30: vox VC:
   not (s is Ay)
   not (s is Bee)
   k3 = (K 3)
+  k3 = (K 3)
 Line 12, characters 12-13: vox VC:
   goal: 2 >= 0
   hypotheses:
   w = Cee
   not (s is Ay)
   not (s is Bee)
+  k3 = (K 3)
   k3 = (K 3)
 val classify : abc -> int{ _ >= 0 } = <fun>
 |}]
@@ -217,6 +222,7 @@ let suppressed (s : abc) (g : bool) : int =
 Line 6, characters 39-40: vox VC (ASSUMED):
   goal: s = Cee
   hypotheses:
+  k3 = (K 3)
   k3 = (K 3)
 val suppressed : abc -> bool -> int = <fun>
 |}]

@@ -10,17 +10,15 @@ File "collide_b.ml", line 4, characters 58-59: vox VC (RUNTIME CHECKED):
 File "collide_b.ml", line 7, characters 21-28: vox VC (RUNTIME CHECKED):
   goal: (r * s) = (r * s)
   hypotheses: <none>
-File "stamp_collide.ml", line 25, characters 12-13: vox VC:
+File "stamp_collide.ml", line 24, characters 12-13: vox VC:
   goal: a = 5
   hypotheses:
-  m = (n' * n')
-  a = n'
-  n' = 5
+  m = (n * n)
+  a = n
   n = 5
-File "stamp_collide.ml", line 25, characters 43-44: vox VC:
+File "stamp_collide.ml", line 24, characters 43-44: vox VC:
   goal: m = 25
   hypotheses:
-  m = (n' * n')
-  a = n'
-  n' = 5
+  m = (n * n)
+  a = n
   n = 5

@@ -27,7 +27,6 @@ type ilist =
 let l2 : ilist{ len _ = 2 } = refine_ (Cons (1, Cons (2, Nil)))
 
 let push (l : ilist{ len _ = 2 }) : ilist{ len _ = 3 } =
-  let refine_ l = l in
   refine_ (Cons (9, l))
 
 (* Later blocks may use earlier blocks' definitions (source order). *)

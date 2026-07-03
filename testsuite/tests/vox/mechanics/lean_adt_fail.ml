@@ -44,20 +44,18 @@ Hypotheses: <none>
 
 (* Injectivity gives y = 4 here, not y = 3: the goal must fail. *)
 let inj (s : t{ _ = K 4 }) : {r:int | r = 3} =
-  let refine_ s = s in
   match s with
   | K y -> refine_ y
   | L -> refine_ 0
 [%%expect{|
-Line 4, characters 19-20:
-4 |   | K y -> refine_ y
+Line 3, characters 19-20:
+3 |   | K y -> refine_ y
                        ^
 Error: vox: verification failed (lean).
        Goal: y = 3
 Hypotheses:
   s = (K y)
   s = (K 4)
-  s#2 = (K 4)
 Possible counterexample:
   y = 4
 (lean: error: `grind` failed)

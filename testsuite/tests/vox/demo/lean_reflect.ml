@@ -41,9 +41,7 @@ let d1 : ilist{ depth _ = 1 } = refine_ (Cons (5, Nil))
 
 (* A program call of a reflected function names itself: the goal is
    [len l = 2] from the unpacked fact [len l = 2]. *)
-let len_of (l : ilist{ len _ = 2 }) : int{ _ = 2 } =
-  let refine_ l = l in
-  refine_ (len l)
+let len_of (l : ilist{ len _ = 2 }) : int{ _ = 2 } = refine_ (len l)
 
 (* Exact synthesis composes with reflected calls: [m] gets the fact
    [m = mem 3 l]. *)

@@ -27,15 +27,12 @@ let k1 : t{ _ = K 1 } = refine_ (K 1)
 
 (* Injectivity via match facts: s = K 3 and s = K y prove y = 3. *)
 let get (s : t{ _ = K 3 }) : {r:int | r = 3} =
-  let refine_ s = s in
   match s with
   | K y -> refine_ y
   | L -> refine_ 0
 
 (* Distinctness: s = L proves s is not K 0. *)
-let notk (s : t{ _ = L }) : t{ not (_ = K 0) } =
-  let refine_ s' = s in
-  refine_ s'
+let notk (s : t{ _ = L }) : t{ not (_ = K 0) } = refine_ s
 
 (* Recursion, with a wildcard sub-pattern naming a fresh unknown. *)
 type ilist =
@@ -43,7 +40,6 @@ type ilist =
   | Cons of int * ilist
 
 let head (s : ilist{ _ = Cons (3, Nil) }) : {r:int | r = 3} =
-  let refine_ s = s in
   match s with
   | Cons (h, _) -> refine_ h
   | Nil -> refine_ 0
@@ -52,7 +48,6 @@ let head (s : ilist{ _ = Cons (3, Nil) }) : {r:int | r = 3} =
 type bp = B of bool
 
 let getb (s : bp{ _ = B true }) : {r:bool | r = true} =
-  let refine_ s = s in
   match s with
   | B x -> refine_ x
 

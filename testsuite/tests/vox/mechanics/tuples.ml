@@ -28,6 +28,7 @@ Line 4, characters 24-25: vox VC:
   hypotheses:
   x = (fst q)
   p = (1, 2)
+  p = (1, 2)
 val f : (q : (int * int)) -> int{ _ = (fst q) } = <fun>
 |}]
 
@@ -44,6 +45,7 @@ Line 4, characters 27-36: vox VC:
   a = t.1
   b = t.2
   c = t.3
+  p = (1, 2)
   p = (1, 2)
 val g : (t : (int * int * int)) -> (int * int * int){ _ = t } = <fun>
 |}]

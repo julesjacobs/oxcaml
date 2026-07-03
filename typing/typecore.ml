@@ -3254,6 +3254,16 @@ let forbid_atomic_field_patterns loc penv (label_lid, label, pat) =
 
 (** [type_pat] propagates the expected type, and
     unification may update the typing environment. *)
+(* vox: set for the OUTERMOST pattern of a function value parameter
+   and consumed on entry to [type_pat], so only the parameter's root
+   constraint sees it: a variable parameter annotated with a refined
+   type binds at the SKELETON (the refinement is a contract -- the
+   arrow's domain keeps the refined type through the constraint's
+   [pat_type], the VC pass assumes the predicate at the parameter, and
+   every application discharges it), unifying the pattern-annotation
+   spelling [fun (x : int{p}) -> ...] with the arrow-annotation one. *)
+let vox_param_pat = ref false
+
 let rec type_pat
   : type k . type_pat_state -> k pattern_category ->
       no_existentials: existential_restriction option ->
@@ -3275,6 +3285,8 @@ and type_pat_aux
   = fun tps category ~no_existentials ~alloc_mode ~mutable_flag ~penv sp
         expected_ty sort ->
   assert (penv.in_counterexample = false);
+  let vox_is_param_root = !vox_param_pat in
+  vox_param_pat := false;
   let type_pat tps category ?(alloc_mode=alloc_mode) ?(penv=penv) =
     type_pat tps category ~no_existentials ~alloc_mode ~mutable_flag ~penv
   in
@@ -3931,6 +3943,17 @@ and type_pat_aux
            | Ppat_var name ->
                Typetexp.vox_with_self_name ~root:sty name.txt solve
            | _ -> solve ())
+        in
+        (* vox: a refined variable PARAMETER binds at its skeleton (see
+           [vox_param_pat]); [pat_type] keeps the refined [ty], which is
+           what flows into the arrow's domain. *)
+        let expected_ty' =
+          match sp_constrained.ppat_desc with
+          | Ppat_var _ when vox_is_param_root ->
+            (match get_desc (expand_head !!penv expected_ty') with
+             | Trefine (skel, _) -> skel
+             | _ -> expected_ty')
+          | _ -> expected_ty'
         in
         let p =
           type_pat ~alloc_mode tps category sp_constrained expected_ty' sort
@@ -8721,9 +8744,45 @@ and type_expect_
       in
       begin match get_desc ty_exp with
       | Trefine (skel, _pred) ->
+          (* vox: a checked CAST between refined types -- [refine_ x]
+             where [x] is itself refined re-proves the expected
+             refinement at [x]'s name (the subject's own refinement is
+             already a fact from its binder).  Only the skeletons must
+             agree; the subject is typed at its own type, detected
+             syntactically so that expected-type propagation into
+             non-variable subjects (constructor and record
+             disambiguation) is undisturbed. *)
+          let subject_refined =
+            match inner.pexp_desc with
+            | Pexp_ident lid ->
+                (match Env.lookup_value ~use:false ~loc lid.txt env with
+                 | (_, {val_type; _}, _) ->
+                     (match get_desc (expand_head env val_type) with
+                      | Trefine _ -> true
+                      | Tpoly (t, []) ->
+                          (match get_desc (expand_head env t) with
+                           | Trefine _ -> true
+                           | _ -> false)
+                      | _ -> false)
+                 | exception _ -> false)
+            | _ -> false
+          in
           let exp =
-            type_expect env expected_mode inner
-              (mk_expected (instance skel))
+            if subject_refined then begin
+              let exp =
+                type_expect env expected_mode inner
+                  (mk_expected
+                     (newvar (Jkind.Builtin.any ~why:Dummy_jkind)))
+              in
+              (match get_desc (expand_head env exp.exp_type) with
+               | Trefine (iskel, _) ->
+                   unify_exp_types loc env iskel (instance skel)
+               | _ ->
+                   unify_exp_types loc env exp.exp_type (instance skel));
+              exp
+            end else
+              type_expect env expected_mode inner
+                (mk_expected (instance skel))
           in
           check_not_nested_intro exp;
           rue
@@ -9526,6 +9585,9 @@ and type_function
          (recovered from the arrow's domain) and discharged at every
          application site. *)
       let ty_arg_internal = vox_strip_param_refinement env ty_arg_internal in
+      (* vox: the parameter's root pattern may bind a refined annotation
+         at its skeleton (see [vox_param_pat]). *)
+      vox_param_pat := true;
       let (pat, params, body, ret_info, newtypes, contains_gadt, curry), partial =
         (* Check everything else in the scope of the parameter. *)
         map_half_typed_cases Value env expected_pat_mode

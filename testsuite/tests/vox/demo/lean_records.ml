@@ -31,8 +31,7 @@ let setx : (p : point) -> point{ _.px = 3 && _.py = p.py } =
   fun p -> refine_ { p with px = 3 }
 
 let getx (p : point{ _.px = 7 }) : {r:int | r = 7} =
-  let refine_ q = p in
-  let { px; py = _ } = q in
+  let { px; py = _ } = p in
   refine_ px
 
 type shape =
@@ -40,8 +39,7 @@ type shape =
   | Nothing
 
 let compose (v : point{ _.px = 1 }) : {r:int | r = 1} =
-  let refine_ q = v in
-  let refine_ s = (refine_ (Pt q) : shape{ _ = Pt q }) in
+  let refine_ s = (refine_ (Pt v) : shape{ _ = Pt v }) in
   match s with
   | Pt w -> let { px; _ } = w in refine_ px
   (* Dead arm, proved dead: s = Pt q and s = Nothing contradict. *)

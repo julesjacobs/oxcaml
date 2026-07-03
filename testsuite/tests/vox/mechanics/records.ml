@@ -30,6 +30,7 @@ let swap : (p : point) -> point{ _.px = p.py && _.py = p.px } =
 Line 2, characters 19-43: vox VC:
   goal: ((mk (p.py, p.px)).px = p.py) && ((mk (p.py, p.px)).py = p.px)
   hypotheses:
+  origin = (mk (0, 0))
   (origin.px = 0) && (origin.py = 0)
 val swap : (p : point) -> point{ (_.px = p.py) && (_.py = p.px) } = <fun>
 |}]
@@ -41,38 +42,37 @@ let setx : (p : point) -> point{ _.px = 3 && _.py = p.py } =
 Line 2, characters 19-36: vox VC:
   goal: ((mk (3, p.py)).px = 3) && ((mk (3, p.py)).py = p.py)
   hypotheses:
+  origin = (mk (0, 0))
   (origin.px = 0) && (origin.py = 0)
 val setx : (p : point) -> point{ (_.px = 3) && (_.py = p.py) } = <fun>
 |}]
 
 (* Destructuring let: per-field facts (partial patterns are fine). *)
 let getx (p : point{ _.px = 7 }) : {r:int | r = 7} =
-  let refine_ q = p in
-  let { px; py = _ } = q in
+  let { px; py = _ } = p in
   refine_ px
 [%%expect{|
-Line 4, characters 10-12: vox VC:
+Line 3, characters 10-12: vox VC:
   goal: px = 7
   hypotheses:
-  px = q.px
-  q.px = 7
+  px = p.px
   p.px = 7
+  origin = (mk (0, 0))
   (origin.px = 0) && (origin.py = 0)
 val getx : point{ _.px = 7 } -> int{ _ = 7 } = <fun>
 |}]
 
 (* Same through a match. *)
 let getx2 (p : point{ _.px = 7 }) : {r:int | r = 7} =
-  let refine_ q = p in
-  match q with
+  match p with
   | { px; _ } -> refine_ px
 [%%expect{|
-Line 4, characters 25-27: vox VC:
+Line 3, characters 25-27: vox VC:
   goal: px = 7
   hypotheses:
-  px = q.px
-  q.px = 7
+  px = p.px
   p.px = 7
+  origin = (mk (0, 0))
   (origin.px = 0) && (origin.py = 0)
 val getx2 : point{ _.px = 7 } -> int{ _ = 7 } = <fun>
 |}]
@@ -85,24 +85,24 @@ let bump : (p : point) -> int{ _ = p.px + 1 } =
 Line 2, characters 19-29: vox VC:
   goal: (p.px + 1) = (p.px + 1)
   hypotheses:
+  origin = (mk (0, 0))
   (origin.px = 0) && (origin.py = 0)
 val bump : (p : point) -> int{ _ = (p.px + 1) } = <fun>
 |}]
 
-(* Synthesis position: [refine_ q.px] gets the exact refinement, and
-   the binder fact flows.  (The read needs the skeleton type, hence
-   the unpack -- refined types are rigid, as everywhere.) *)
+(* Synthesis position: [refine_ p.px] gets the exact refinement, and
+   the binder fact flows (the parameter is already at its skeleton:
+   its refinement is a contract). *)
 let through (p : point{ _.px = 7 }) : {r:int | r = 7} =
-  let refine_ q = p in
-  let refine_ x = refine_ q.px in
+  let refine_ x = refine_ p.px in
   refine_ x
 [%%expect{|
-Line 4, characters 10-11: vox VC:
+Line 3, characters 10-11: vox VC:
   goal: x = 7
   hypotheses:
-  x = q.px
-  q.px = 7
+  x = p.px
   p.px = 7
+  origin = (mk (0, 0))
   (origin.px = 0) && (origin.py = 0)
 val through : point{ _.px = 7 } -> int{ _ = 7 } = <fun>
 |}]
@@ -118,11 +118,13 @@ Line 4, characters 32-33: vox VC:
   goal: f.on || (1 = 0)
   hypotheses:
   f.on
+  origin = (mk (0, 0))
   (origin.px = 0) && (origin.py = 0)
 Line 4, characters 47-48: vox VC:
   goal: f.on || (0 = 0)
   hypotheses:
   not f.on
+  origin = (mk (0, 0))
   (origin.px = 0) && (origin.py = 0)
 val choose : (f : flag) -> int{ f.on || (_ = 0) } = <fun>
 |}]
@@ -133,36 +135,35 @@ type shape =
   | Nothing
 
 let compose (v : point{ _.px = 1 }) : {r:int | r = 1} =
-  let refine_ q = v in
-  let refine_ s = (refine_ (Pt q) : shape{ _ = Pt q }) in
+  let refine_ s = (refine_ (Pt v) : shape{ _ = Pt v }) in
   match s with
   | Pt w -> let { px; _ } = w in refine_ px
   | Nothing -> assume_ 0
 [%%expect{|
 type shape = Pt of point | Nothing
-Line 7, characters 27-33: vox VC:
-  goal: (Pt q) = (Pt q)
+Line 6, characters 27-33: vox VC:
+  goal: (Pt v) = (Pt v)
   hypotheses:
-  q.px = 1
   v.px = 1
+  origin = (mk (0, 0))
   (origin.px = 0) && (origin.py = 0)
-Line 9, characters 41-43: vox VC:
+Line 8, characters 41-43: vox VC:
   goal: px = 1
   hypotheses:
   px = w.px
   s = (Pt w)
-  s = (Pt q)
-  q.px = 1
+  s = (Pt v)
   v.px = 1
+  origin = (mk (0, 0))
   (origin.px = 0) && (origin.py = 0)
-Line 10, characters 23-24: vox VC (RUNTIME CHECKED):
+Line 9, characters 23-24: vox VC (RUNTIME CHECKED):
   goal: 0 = 1
   hypotheses:
   s = Nothing
   not (s is Pt)
-  s = (Pt q)
-  q.px = 1
+  s = (Pt v)
   v.px = 1
+  origin = (mk (0, 0))
   (origin.px = 0) && (origin.py = 0)
 val compose : point{ _.px = 1 } -> int{ _ = 1 } = <fun>
 |}]
@@ -186,8 +187,9 @@ let opaque (r : mrec) : {v:int | v = 3} =
   refine_ (r.m)
 [%%expect{|
 Line 3, characters 10-15: vox VC:
-  goal: *unknown1* = 3
+  goal: *unknown9* = 3
   hypotheses:
+  origin = (mk (0, 0))
   (origin.px = 0) && (origin.py = 0)
 val opaque : mrec -> int{ _ = 3 } = <fun>
 |}]

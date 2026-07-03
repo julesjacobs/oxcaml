@@ -113,10 +113,15 @@
   refinement is proved where the body is written and unpacked at each
   call, and weakening a call's result to the enclosing instantiation
   is an unpack-and-reprove (see the recursive calls in
-  lean_binsearch.ml).  A parameter refined by a PATTERN annotation
-  (`fun (b : {v:int | p}) -> ...`) still binds as a rigid package
-  inside the body, while the resulting arrow gives callers the
-  contract convention.  (Detection of contract use in a module with no
+  lean_binsearch.ml).  A variable parameter refined by a PATTERN
+  annotation (`fun (b : {v:int | p}) -> ...`) binds at the skeleton
+  too -- the two spellings have the same semantics; the refined type
+  still flows into the arrow through the constraint.  (`function`-case
+  parameters are the remaining package-bound spelling.)  `refine_ x`
+  on a variable that IS refined is a checked CAST: the subject keeps
+  its own type, only the skeletons must agree, and the expected
+  refinement becomes an obligation at `x`'s name, provable from the
+  subject's own binder fact.  (Detection of contract use in a module with no
   vox syntax of its own -- bare calls into a contract API, possibly
   behind a type abbreviation -- is flagged by the type checker at the
   point it strips the parameter refinement, where the domain is
@@ -350,13 +355,13 @@ re-instantiates the dependent signature at the actual arguments, so
 its refined result is the induction hypothesis (see append/rev in
 testsuite/tests/vox/demo/lean_spec.ml).
 
-A plain `let x = e` contributes nothing: `x` is a fresh unknown.
-Aliasing is expressed with the existing forms,
-
-    let refine_ x = (refine_ y : {v:int | v = y})
-
-whose obligation is the trivial `y = y` and whose unpacking yields
-`x = y`.
+A plain `let x = e` SELFIFIES: when `e` has a stable logical name
+(its reflection, a constructor term, an immutable field read), the
+binding contributes `x = name(e)` -- so `let s = l + r` carries
+`s = l + r` with no `refine_` in sight, and an unpack
+`let refine_ x = e` additionally remembers WHICH value it opened.
+An RHS the logic cannot name (a call, a mutable read) contributes
+nothing: `x` is a fresh unknown.
 
 `refine_ e` at expected type `{v | p}` yields the VC
 `facts |- p[v := n]`, where `n` is `e`'s name.

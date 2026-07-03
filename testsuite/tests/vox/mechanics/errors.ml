@@ -55,11 +55,7 @@ Error: The value "pos" has type "int{ _ > 0 }"
    counterexample. *)
 let join (b : {v:int | v > 0}) (c : bool) = if c then 0 else b
 [%%expect{|
-Line 1, characters 61-62:
-1 | let join (b : {v:int | v > 0}) (c : bool) = if c then 0 else b
-                                                                 ^
-Error: The value "b" has type "int{ _ > 0 }"
-       but an expression was expected of type "int"
+val join : int{ _ > 0 } -> bool -> int = <fun>
 |}]
 
 (* The argument for a dependent parameter must have a stable logical

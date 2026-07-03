@@ -23,6 +23,7 @@ let b : {v:bool | v} = refine_ true
 Line 1, characters 31-35: vox VC:
   goal: true
   hypotheses:
+  x = 3
   x > 0
 val b : bool{ _ } = true
 |}]
@@ -34,7 +35,9 @@ let a : {v:int | v >= 0} = assume_ 5
 Line 1, characters 35-36: vox VC (RUNTIME CHECKED):
   goal: 5 >= 0
   hypotheses:
+  b = true
   b
+  x = 3
   x > 0
 val a : int{ _ >= 0 } = 5
 |}]
@@ -54,8 +57,11 @@ Line 2, characters 11-12: vox VC:
   goal: not (n = 0)
   hypotheses:
   not (n = 0)
+  a = 5
   a >= 0
+  b = true
   b
+  x = 3
   x > 0
 val reuse : int{ not (_ = 0) } -> int{ not (_ = 0) } = <fun>
 |}]
@@ -69,8 +75,11 @@ Line 3, characters 10-11: vox VC:
   goal: w > 0
   hypotheses:
   w > 0
+  a = 5
   a >= 0
+  b = true
   b
+  x = 3
   x > 0
 val unpack : int{ _ > 0 } = 3
 |}]
@@ -85,16 +94,22 @@ Line 2, characters 20-21: vox VC:
   hypotheses:
   c
   unpack > 0
+  a = 5
   a >= 0
+  b = true
   b
+  x = 3
   x > 0
 Line 2, characters 35-40: vox VC:
   goal: false || (not false)
   hypotheses:
   not c
   unpack > 0
+  a = 5
   a >= 0
+  b = true
   b
+  x = 3
   x > 0
 val branch : bool -> bool{ _ || (not _) } = <fun>
 |}]
@@ -107,8 +122,11 @@ Line 1, characters 46-47: vox VC (ASSUMED):
   goal: 7 >= 1
   hypotheses:
   unpack > 0
+  a = 5
   a >= 0
+  b = true
   b
+  x = 3
   x > 0
 val au : int{ _ >= 1 } = 7
 |}]
@@ -120,10 +138,36 @@ let lie : {v:int | v > 100} = assume_ 1
 Line 1, characters 38-39: vox VC (RUNTIME CHECKED):
   goal: 1 > 100
   hypotheses:
+  au = 7
   au >= 1
   unpack > 0
+  a = 5
   a >= 0
+  b = true
   b
+  x = 3
   x > 0
 Exception: Failure "vox: assume_ check failed at :1:38: _ > 100".
+|}]
+
+(* A checked CAST between refined types: [x] keeps its own refined
+   type; the expected refinement becomes the obligation at [x]'s name,
+   provable from [x]'s binder fact. *)
+let cast : {v:int | v > -1} = refine_ x
+[%%expect{|
+Line 1, characters 38-39: vox VC:
+  goal: x > -1
+  hypotheses:
+  lie = 1
+  lie > 100
+  au = 7
+  au >= 1
+  unpack > 0
+  a = 5
+  a >= 0
+  b = true
+  b
+  x = 3
+  x > 0
+val cast : int{ _ > -1 } = 3
 |}]

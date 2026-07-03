@@ -33,6 +33,7 @@ Line 3, characters 10-11:
 Error: vox: verification failed (lean).
        Goal: a > 0
 Hypotheses:
+  a = 0
   a#2 > 0
 Possible counterexample:
   a = 0

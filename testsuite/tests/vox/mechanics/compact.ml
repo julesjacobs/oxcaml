@@ -29,7 +29,9 @@ Line 2, characters 21-37: vox VC (RUNTIME CHECKED):
   goal: (x + (y - x)) = y
   hypotheses:
   x > 3
+  a' = a
   a' >= 0
+  a = 3
   a >= 0
 val sub : (x : int{ _ > 3 }) -> (y : int) -> int{ (x + _) = y } = <fun>
 |}]
@@ -40,7 +42,9 @@ let above : (x : int) -> (y : int{ y > x }) = fun x -> assume_ (x + 1)
 Line 1, characters 63-70: vox VC (RUNTIME CHECKED):
   goal: (x + 1) > x
   hypotheses:
+  a' = a
   a' >= 0
+  a = 3
   a >= 0
 val above : (x : int) -> int{ _ > x } = <fun>
 |}]
@@ -54,7 +58,9 @@ Line 2, characters 41-43: vox VC (RUNTIME CHECKED):
   goal: x < y
   hypotheses:
   x < y
+  a' = a
   a' >= 0
+  a = 3
   a >= 0
 val lt_witness : (x : int) -> (y : int) -> unit{ x < y } option = <fun>
 |}]
@@ -64,9 +70,11 @@ val lt_witness : (x : int) -> (y : int) -> unit{ x < y } option = <fun>
 let s : string{ _ = _ } = refine_ "hi"
 [%%expect{|
 Line 1, characters 34-38: vox VC:
-  goal: *unknown1* = *unknown1*
+  goal: *unknown4* = *unknown4*
   hypotheses:
+  a' = a
   a' >= 0
+  a = 3
   a >= 0
 val s : string{ _ = _ } = "hi"
 |}]
@@ -95,7 +103,9 @@ Line 1, characters 55-56: vox VC (RUNTIME CHECKED):
   goal: x = x
   hypotheses:
   s = s
+  a' = a
   a' >= 0
+  a = 3
   a >= 0
 val dep : (x : int) -> int{ _ = x } = <fun>
 |}]
@@ -129,8 +139,11 @@ let n : int{ n > 0 } = assume_ 5
 Line 1, characters 31-32: vox VC (RUNTIME CHECKED):
   goal: 5 > 0
   hypotheses:
+  dep' = dep
   s = s
+  a' = a
   a' >= 0
+  a = 3
   a >= 0
 val n : int{ _ > 0 } = 5
 |}]
@@ -147,9 +160,13 @@ end
 Line 4, characters 55-56: vox VC (RUNTIME CHECKED):
   goal: x = x
   hypotheses:
+  n = 5
   n > 0
+  dep' = dep
   s = s
+  a' = a
   a' >= 0
+  a = 3
   a >= 0
 module M : sig val g : (y : int) -> int{ _ = y } end
 |}]

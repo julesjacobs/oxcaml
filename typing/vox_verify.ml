@@ -417,11 +417,6 @@ let fresh_unknown env (e : expression) =
   Refinement.Pvar id
 ;;
 
-(* The stable logical name of an argument, if it has one: variables
-   denote their stamp, literals themselves.  Used for dependent-binder
-   substitution, mirroring [vox_open_dependent_arrow] exactly (typing
-   already rejected mutable variables and compound expressions
-   there). *)
 (* The name a dependent argument was opened at by the type checker:
    [Vox_reflect.translate] is the typed twin of the surface translation
    [vox_open_dependent_arrow] substituted (the surface fragment is a
@@ -495,6 +490,27 @@ let rec name_of_expr env (e : expression) : Refinement.pred =
           Refinement.Pfield (path, label.lbl_name, name_of_expr env record)
         | _ -> fresh_unknown env e)
      | _ -> fresh_unknown env e)
+;;
+
+(* Selfification: a let binder names its RHS's value, so a binding
+   whose pattern is a single variable contributes [x = name(rhs)]
+   whenever the RHS has a stable logical name (its reflection, a
+   constructor term, an immutable field read) -- fresh unknowns are
+   skipped as pure noise.  Sound because the binding IS the evaluation:
+   if the RHS raised (division), [x] is never bound and the fact holds
+   vacuously.  This makes the aliasing idiom implicit: [let s = l + r]
+   carries [s = l + r], with no [refine_] in sight, and an unpack
+   [let refine_ x = e] additionally remembers WHICH value it opened. *)
+let self_fact env id (rhs : expression) =
+  match name_of_expr env rhs with
+  | Refinement.Pvar u when Hashtbl.mem synthetic_names u -> []
+  | n -> [ Refinement.Pbinop (Refinement.Eq, Refinement.Pvar id, n) ]
+;;
+
+let binding_self_facts env (vb : value_binding) =
+  match vb.vb_pat.pat_desc with
+  | Tpat_var { id; _ } -> self_fact env id vb.vb_expr
+  | _ -> []
 ;;
 
 (* The logical context of a program point: facts, plus the stamps in
@@ -1001,6 +1017,13 @@ let rec walk_expr env ctx (e : expression) =
         ctx'
         vbs
     in
+    let ctx' =
+      List.fold_left
+        (fun ctx vb ->
+          { ctx with cfacts = binding_self_facts env vb @ ctx.cfacts })
+        ctx'
+        vbs
+    in
     walk_expr env ctx' body
   | Texp_match (scrut, _sort, comp_cases, val_cases, _partial) ->
     walk_expr env ctx scrut;
@@ -1094,10 +1117,21 @@ let rec walk_expr env ctx (e : expression) =
               | _ -> None
             in
             let ctx =
+              (* The dedup guard keys on the BINDERS' types, not the
+                 pattern's: a refined pattern annotation keeps the
+                 refined [pat_type] (that is what flows to the arrow)
+                 while binding its variable at the skeleton, and its
+                 fact must come from here; only a binder that itself
+                 carries the refined type (inference-refined
+                 parameters) contributes through [binder_facts]
+                 instead. *)
               match param_refinement env dom with
               | Some p
                 when (not is_default)
-                     && Option.is_none (refinement_of_type env pat.pat_type) ->
+                     && List.for_all
+                          (fun (_, _, ty, _, _) ->
+                            Option.is_none (refinement_of_type env ty))
+                          (pat_bound_idents_full pat) ->
                 let name =
                   match id_opt with
                   | Some id -> Refinement.Pvar id
@@ -2416,6 +2450,15 @@ let walk_items (str : structure) ctx =
         := List.fold_left
              (fun ctx vb ->
                extend_pat ~toplevel:true str.str_final_env ctx vb.vb_pat)
+             !ctx
+             vbs;
+        ctx
+        := List.fold_left
+             (fun ctx vb ->
+               { ctx with
+                 cfacts =
+                   binding_self_facts str.str_final_env vb @ ctx.cfacts
+               })
              !ctx
              vbs
       | _ ->

@@ -19,7 +19,6 @@
 let pick (b : bool) = if b then Collide_a.dep else Collide_b.dep
 
 let use (n : {v:int | v = 5}) : {v:int | v = 5} * {v:int | v = 25} =
-  let refine_ n' = n in
-  let refine_ a = Collide_a.dep n' in
-  let refine_ m = Collide_b.dep2 n' n' in
+  let refine_ a = Collide_a.dep n in
+  let refine_ m = Collide_b.dep2 n n in
   ((refine_ a : {v:int | v = 5}), (refine_ m : {v:int | v = 25}))

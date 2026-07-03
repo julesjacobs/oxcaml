@@ -30,7 +30,6 @@ let has2 : ilist{ mem 2 _ } = refine_ (Cons (1, Cons (2, Nil)))
 
 (* Pushing increments the measure. *)
 let push (l : ilist{ len _ = 2 }) : ilist{ len _ = 3 } =
-  let refine_ l = l in
   refine_ (Cons (9, l))
 
 (* append: len distributes over it -- the textbook inductive proof. *)

@@ -16,8 +16,7 @@
 (* Arithmetic through a dependent userland operation (linear: grind's
    integer reasoning; nonlinear facts like x*x >= 0 are beyond it). *)
 let double_pos (x : {v:int | v > 0}) : {v:int | v > 1} =
-  let refine_ x' = x in
-  let refine_ d = Vc_lib.add x' x' in
+  let refine_ d = Vc_lib.add x x in
   refine_ d
 
 (* Cross-module refined value: the fact travels via the .cmi. *)
@@ -33,8 +32,7 @@ let lt : (x : int) -> (y : int) -> {z:bool | z = (x < y)} =
 
 let zero : {v:int | v = 0} = refine_ 0
 
-let div (a : int) (b : {v:int | not (v = 0)}) : int =
-  a / (let refine_ b = b in b)
+let div (a : int) (b : {v:int | not (v = 0)}) : int = a / b
 
 let safe (x : int) : int =
   let refine_ z = zero in
@@ -70,6 +68,5 @@ let bump : (x : int) -> {v:int | v > x} =
 (* Exact refinements compose through binder facts: d = x + x and
    x > 0 prove d > 1. *)
 let double_reflect (x : {v:int | v > 0}) : {v:int | v > 1} =
-  let refine_ x' = x in
-  let d = refine_ (x' + x') in
+  let d = refine_ (x + x) in
   refine_ (d :> int)

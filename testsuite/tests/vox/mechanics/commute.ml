@@ -32,6 +32,8 @@ Line 5, characters 28-29: vox VC:
   goal: r = (m + n)
   hypotheses:
   r = (m + n)
+  m = 3
+  n = 2
 val both : unit -> int = <fun>
 |}]
 
@@ -50,6 +52,8 @@ Line 6, characters 28-29: vox VC:
   goal: r = (m + n)
   hypotheses:
   r = (m + n)
+  m = 3
+  n = 2
 val deferred : unit -> int = <fun>
 |}]
 
