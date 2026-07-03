@@ -163,13 +163,12 @@ let dup : (n : int) -> int{ _ = n + 1 } =
   let refine_ p = alloc n in
   let { cell = c; tok = t } = p in
   let { cell = _; tok = t2 } = p in
-  let refine_ n1 = refine_ (n + 1) in
+  let n1 = n + 1 in
   let ua = write c n n1 t in
   ignore ua;
   let (rp, ub) = read c n t2 in
   ignore ub;
-  let refine_ r = rp in
-  refine_ (r + 1)
+  rp + 1
 [%%expect{|
 Line 9, characters 26-28:
 9 |   let (rp, ub) = read c n t2 in
@@ -191,8 +190,7 @@ let stale : (n : int) -> int{ _ = n } =
   ignore u;
   let (rp, u2) = read c n t in
   ignore u2;
-  let refine_ r = rp in
-  refine_ r
+  rp
 [%%expect{|
 Line 7, characters 26-27:
 7 |   let (rp, u2) = read c n t in

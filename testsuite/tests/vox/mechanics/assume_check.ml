@@ -59,5 +59,4 @@ let () =
   Printf.printf "compact 100 = %d\n" c;
   (* assume_unchecked_ performs no check: the lie goes through. *)
   let unchecked : {v:int | v > 100} = assume_unchecked_ 1 in
-  let refine_ u = unchecked in
-  Printf.printf "unchecked = %d\n" u
+  Printf.printf "unchecked = %d\n" unchecked

@@ -95,8 +95,9 @@ let fib_slow : (n : int) -> int{ _ = fib n } = fun n -> fib n
    CONTRACTS -- the body assumes them, and each call site discharges
    them at its own (bare) arguments, the shifted accumulators and the
    literal seeds included.  (For n < i the loop diverges; partial
-   correctness is unbothered.)  [j]'s binder equation carries the
-   shift; the final [r] weakens the recursive result. *)
+   correctness is unbothered.)  The recursive call is the bare tail:
+   its result refinement [_ = fib n] is the enclosing one, so it
+   passes through with no obligation at all. *)
 let rec fib_loop
   : (n : int) -> (i : int) -> (a : int{ _ = fib i && i >= 0 })
     -> (b : int{ _ = fib (i + 1) }) -> int{ _ = fib n }

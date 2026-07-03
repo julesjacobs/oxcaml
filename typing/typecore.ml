@@ -5797,6 +5797,17 @@ let type_approx_fun_one_param
   ty_ret
 
 let rec type_approx env sexp ty_expected =
+  (* vox: an approximation never needs the refinement -- the implicit
+     intro checks the expression at the SKELETON (see [vox_subsume]),
+     so approximate against that; unifying a fresh approximation with
+     the rigid refined type itself would fail before the intro can
+     fire (e.g. a tuple literal under a [let rec] whose codomain is a
+     refined tuple). *)
+  let ty_expected =
+    match get_desc ty_expected with
+    | Trefine (skel, _) -> skel
+    | _ -> ty_expected
+  in
   let loc = sexp.pexp_loc in
   match sexp.pexp_desc with
     Pexp_let (_, _, _, e) -> type_approx env e ty_expected

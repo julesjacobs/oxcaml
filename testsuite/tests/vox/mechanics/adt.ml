@@ -97,14 +97,13 @@ type w =
 
 let getw (t : w) : {r:int | r > 0} =
   match t with
-  | W y -> let refine_ z = y in refine_ z
+  | W y -> y
   | Z -> assume_ 1
 [%%expect{|
 type w = W of int{ _ > 0 } | Z
-Line 7, characters 40-41: vox VC:
-  goal: z > 0
+Line 7, characters 11-12: vox VC:
+  goal: y > 0
   hypotheses:
-  z > 0
   t = (W y)
   y > 0
   k3 = (K 3)
