@@ -1,7 +1,6 @@
 (* TEST
- flags = "-vox-solver lean -vox-prelude pcell_spec.lean";
+ flags = "-vox-solver lean";
  script = "sh ${test_source_directory}/../has-lean.sh";
- readonly_files = "pcell_spec.lean";
  modules = "pcell_lib.mli pcell_lib.ml";
  script;
  setup-ocamlc.byte-build-env;

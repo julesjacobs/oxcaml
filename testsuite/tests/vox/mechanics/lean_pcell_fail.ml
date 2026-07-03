@@ -1,5 +1,5 @@
 (* TEST
- flags = "-vox-solver lean -vox-prelude ${test_source_directory}/../demo/pcell_spec.lean";
+ flags = "-vox-solver lean";
  script = "sh ${test_source_directory}/../has-lean.sh";
  script;
  expect;
@@ -10,7 +10,17 @@
    test lean_pcell.ml exercises); the token discipline is enforced by
    two layers, and each probe pins down which one fires:
    Lean (no supporting fact) for forged and cross-cell tokens, the
-   uniqueness mode checker for duplication and stale reuse. *)
+   uniqueness mode checker for duplication and stale reuse.  The
+   token axioms are an embedded prelude block (no -vox-prelude
+   flag). *)
+
+[%%vox.prelude.lean {lean|
+opaque cid : VoxU -> Int
+opaque tid : VoxU -> Int
+opaque cts : VoxU -> Int
+|lean}]
+[%%expect{|
+|}]
 
 module P : sig
   type icell
@@ -31,7 +41,7 @@ module P : sig
     itoken{ tid _ = cid c && cts _ = v } @ unique
 end = struct
   type icell = { mutable v : int; id_ : int }
-  type itoken = Tok of int
+  type itoken = Tok of { id : int }
   type cpair = { cell : icell; tok : itoken }
 
   let ctr = ref 0
@@ -42,7 +52,7 @@ end = struct
       incr ctr;
       let id = !ctr in
       let c = { v; id_ = id } in
-      assume_unchecked_ { cell = c; tok = Tok id }
+      assume_unchecked_ { cell = c; tok = Tok { id } }
 
   let read :
     (c : icell) -> (k : int) ->
@@ -51,14 +61,15 @@ end = struct
     fun c k t ->
       ignore t; ignore k;
       ( (assume_unchecked_ c.v : int{ _ = k }),
-        (assume_unchecked_ (Tok c.id_)
+        (assume_unchecked_ (Tok { id = c.id_ })
           : itoken{ tid _ = cid c && cts _ = k }) )
 
   let write :
     (c : icell) -> (old : int) -> (v : int) ->
     itoken{ tid _ = cid c && cts _ = old } @ unique ->
     itoken{ tid _ = cid c && cts _ = v } @ unique =
-    fun c _old v t -> ignore t; c.v <- v; assume_unchecked_ (Tok c.id_)
+    fun c _old v t ->
+      ignore t; c.v <- v; assume_unchecked_ (Tok { id = c.id_ })
 end
 [%%expect{|
 module P :

@@ -2302,7 +2302,20 @@ let uses_vox (str : structure) =
     }
   in
   it.structure it str;
+  (* A phrase (or module) whose only vox content is a [%%vox.prelude]
+     block has no vox expressions, patterns, or bindings, but must
+     still be walked: at the toplevel a prelude-only FIRST phrase would
+     otherwise be skipped and its block silently dropped from every
+     later phrase's solver input (the spec functions then elaborate as
+     unbound identifiers, failing obligations for the wrong reason). *)
   !found
+  || List.exists
+       (fun item ->
+         match item.str_desc with
+         | Tstr_attribute (a : attribute) ->
+           is_prelude_extension_name a.attr_name.txt
+         | _ -> false)
+       str.str_items
 ;;
 
 let walk_items (str : structure) ctx =

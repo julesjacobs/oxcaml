@@ -5,7 +5,8 @@
    record, which the datatype story refuses); [itoken] is an
    unforgeable, unduplicable ghost witness of its contents.  [cts t]
    is the contents token snapshot [t] witnesses and [tid t = cid c]
-   ties it to its cell (opaque spec functions, pcell_spec.lean).
+   ties it to its cell (opaque spec functions in the embedded prelude
+   block below, exported to every client through the .cmi).
    Every operation consumes the token [@ unique] and returns a fresh
    one, so the mode checker is the borrow checker: a stale token
    cannot be presented, and no fact is ever retracted -- facts speak
@@ -29,6 +30,12 @@
 type icell
 type itoken
 type cpair = { cell : icell; tok : itoken }
+
+[%%vox.prelude.lean {lean|
+opaque cid : VoxU -> Int
+opaque tid : VoxU -> Int
+opaque cts : VoxU -> Int
+|lean}]
 
 val alloc :
   (v : int) -> cpair{ tid _.tok = cid _.cell && cts _.tok = v } @ unique
