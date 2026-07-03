@@ -33,12 +33,18 @@
   compact form does not reparse ([_] in the encoded payload is not
   an expression) -- the long form round-trips.
 - Refined types are rigid: `{v:int | v>0}` is an ordinary type, distinct
-  from `int` and from `{v:int | v>1}`. There is no subtyping anywhere.
-  Unification handles them like a type constructor and asserts equal
-  predicates -- structurally equal, variables compared by stamp, except
-  that dependent-arrow binders compare under a binder pairing, so two
-  separately written alpha-equal dependent signatures are the same
-  type. `{v|v>0}` vs `{v|0<v}` is a type error. Sharp edges, not bugs.
+  from `int` and from `{v:int | v>1}`. There is no subtyping in the
+  TYPE ALGEBRA: unification handles refinements like a type
+  constructor and asserts equal predicates -- structurally equal,
+  variables compared by stamp, except that dependent-arrow binders
+  (and quantifier binders) compare under a binder pairing, so two
+  separately written alpha-equal signatures are the same type.  What
+  SOFTENS the edges is implicit subsumption (below), which re-proves a
+  VARIABLE's refinement at a differently-spelled annotation as an
+  ordinary obligation -- so `{v|v>0}` vs `{v|0<v}` is a proof
+  obligation at a binder and remains a type error only where the
+  refinement sits under a type constructor, where no obligation can
+  be minted.  Sharp edges, not bugs.
 - Introduction: `refine_ e` wraps `e` at the refined type expected from
   context (an annotation, or -- as an explicit cast -- the parameter
   type at an argument position). Proof obligations arise from exactly
@@ -338,11 +344,29 @@
   solver-side text directly in the module, next to the datatypes and
   reflected definitions it is about (blocks are not "preludes":
   reflected definitions precede them, so a block may state lemmas
-  about the module's own total_ functions).  Blocks are emitted into every solver input for the
-  module, in source order; a solver error inside a block is reported
-  at the block's own location (with the line within the block).
+  about the module's own total_ functions).  Blocks are emitted, in
+  source order, into every solver input that needs them -- one whose
+  VCs apply a spec function, or a module with reflected definitions;
+  a block in a module with neither is never even elaborated (see
+  mechanics/lean_embed_err.ml).  A solver error inside a block is
+  reported at the block's own location (with the line within the
+  block).
   Like `assume_unchecked_` and `-vox-prelude`, an embedded block is
   trusted (an `axiom` proves anything).
+- Ghost sorts: `type g [@@vox.sort int]` (or `bool`) declares that an
+  abstract type's LOGICAL REPRESENTATIVE is its value at a base sort:
+  values of `g` are modelled as opaque Ints instead of at the
+  uninterpreted sort, so refinements can use them directly as the
+  values they stand for (prophecies, refs denoting their contents).
+  TRUSTED: the declaring library asserts every fact it issues is true
+  of that interpretation -- the attribute is the module's axiom, in
+  the same trust class as `assume_unchecked_` and solver blocks.  A
+  malformed or aliased `[@@vox.sort]` is an eager error (a typo on a
+  ghost type must not silently degrade to VoxU).  Relation to the
+  pcell separation tokens: both are library encodings of interior
+  mutability (tokens carry the cell's contents as facts; a ghost sort
+  lets the value DENOTE them); no doctrine yet picks between them --
+  see the Wishlist.  See mechanics/lean_vox_sort.ml.
 - Specced signatures: blocks in an `.mli` are EXPORTED through the
   `.cmi`, together with pre-rendered declarations of the datatypes the
   interface's refinements are about (a client may never mention those
@@ -392,12 +416,20 @@ translation; everything else is a fresh unknown. Names are declared to
 the solver by OCaml type: int as Int, bool as Bool, anything else at a
 single uninterpreted sort (equality is all the logic knows about other
 types). Solver error, unknown, and timeout all count as verification
-FAILURE, never success. Facts about names come from exactly three
-places:
+FAILURE, never success. Facts about names come from these places
+(each fact enters once: the emitter deduplicates a fact delivered by
+two channels, e.g. a binder fact and its selfification equation):
+
+- Binders: a binder of refined type contributes its refinement at the
+  binder (binders-as-facts), and a refined PARAMETER contributes its
+  contract predicate.
+- Selfification: a let-bound translatable expression contributes its
+  defining equation (`let s = l + r` carries `s = l + r`).
 
 - Unpacking: `let refine_ x = e` with `e : {v | p}` contributes
-  `p[v:=x]`. The same rule applies to any binder of refined type
-  (function parameters, pattern variables): matching
+  `p[v:=x]` and binds `x` at the SKELETON -- the weakening spelling,
+  for a refined value that must flow somewhere unrefined (a plain let
+  carries the same fact but keeps the refined type).  Matching
   `xs : {v:int|v>0} list` against `x :: _` makes `x > 0` available.
 - Path facts: `if c then e1 else e2` checks `e1` under `c = true` and
   `e2` under `c = false`, where `c` is the condition's name -- so a
@@ -463,19 +495,16 @@ directly into the path fact, and `100` may be passed directly since
 
 The path fact `0 < x` proves the contract obligation `not (x = 0)`
 at the call.
-The same works through a binding (`let c = refine_ (0 < x) in
-if (c :> bool) then ...`: the binder fact `c = (0 < x)` plus the path
-fact `c`), and through userland dependent operations for anything
-beyond the translatable fragment:
-
-    let lt : (x : int) -> (y : int) -> {z:bool | z = (x < y)} =
-      fun x y -> refine_ (x < y)
-
-(The dependent type must be written as an annotation, [(x : int) ->
-...]: a refinement written directly in terms of a lambda's parameters
-would name them as free program variables, which may not appear in the
-function's own type -- the escape checks reject it, with the dependent
-arrow as the sanctioned spelling.)
+The same works through a binding (`let c = 0 < x in if c then ...`:
+selfification carries `c = (0 < x)`, plus the path fact `c`); a
+dependent userland operation is needed only for facts beyond the
+translatable fragment, established with `assume_`/`assume_unchecked_`
+(the reflected fragment needs no wrappers).  A dependent type must be
+written as an annotation, `(x : int) -> ...`: a refinement written
+directly in terms of a lambda's parameters would name them as free
+program variables, which may not appear in the function's own type --
+the escape checks reject it, with the dependent arrow as the
+sanctioned spelling.
 
 A `-dump-vc` flag prints every VC (hypotheses, goal, source location);
 `-vox-dry-run` skips the solver, so VC generation is testable without
@@ -717,6 +746,13 @@ the scope rule above.
   [-> y:int{...}] is LR(1)-ambiguous with labeled arrows and labeled
   tuples)
 - [x] test/toplevel/error-message output is in that format
-- [ ] strong update for @ unique mutation
+- [ ] strong update for @ unique mutation (the library encodings so
+  far: pcell separation tokens, [@@vox.sort] trusted ghosts)
 - [ ] RustHorn style borrows via block indices
 - [x] Algebraic data types with refined constructors
+- [x] simple records, native tuples
+- [x] total_ (reflected) functions, cross-module through the .cmi
+- [x] embedded [%%vox.lean] blocks and specced .mli signatures
+- [x] quantifiers (forall_/exists_) and implication in predicates
+- [ ] a reconciled story for interior mutability (pcell tokens vs
+  [@@vox.sort]; two library encodings await a doctrine)

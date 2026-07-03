@@ -398,8 +398,8 @@ only linear-consistent is identifiable as such.</p>
 <p>Constructors of simple variants appear in predicates; a match refines its
 scrutinee; injectivity and distinctness come from the solver's datatype
 theory.  The <code>Nil</code> branch below is unreachable, and that is
-proved rather than assumed: its facts are contradictory, so
-<code>refine_ 0</code> discharges against <code>r = 3</code>.</p>
+proved rather than assumed: its facts are contradictory, so the bare
+<code>0</code> discharges against <code>r = 3</code>.</p>
 <pre><code class="ml">let head (s : ilist{ _ = Cons (3, Nil) }) : {r:int | r = 3} =
   match s with
   | Cons (h, _) -&gt; h

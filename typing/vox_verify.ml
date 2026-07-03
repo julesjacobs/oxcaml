@@ -4,10 +4,10 @@
    backtracks internally). Walks the tree carrying a logical environment of facts; each
    [refine_] node yields the VC [facts |- p[v := name of e]]; [assume_] is reported as
    RUNTIME CHECKED (translcore compiles a check of the predicate) and
-   [assume_unchecked_] as ASSUMED; neither goes to the solver. Facts come from exactly
-   four places (DESIGN.md): unpacking / binders of refined type, path facts from [if],
-   dependent application, and match facts on a variable scrutinee ([s = C x1 ... xn] in
-   the branch that matched [C x1 ... xn]).
+   [assume_unchecked_] as ASSUMED; neither goes to the solver. Facts come from the
+   channels DESIGN.md enumerates -- binders (their refinements and contracts),
+   selfification equations, unpacking, path facts from [if], dependent application,
+   and match facts (positive and negative) -- deduplicated at emission.
 
    VCs are discharged by a Lean 4 subprocess. Solver error, unknown, and timeout
    all count as verification FAILURE. *)
