@@ -65,10 +65,10 @@ let getw (t : w) : {r:int | r > 0} =
   | Z -> 1
 
 (* Cross-module: Adt_lib.k3's refinement mentions Adt_lib's
-   constructor; a plain local [let] unpacks the imported fact. *)
+   constructor; the import is matched DIRECTLY, its interned name
+   receiving the match facts alongside its .cmi refinement. *)
 let three : {r:int | r = 3} =
-  let s = Adt_lib.k3 in
-  match s with
+  match Adt_lib.k3 with
   | Adt_lib.K y -> y
   | Adt_lib.L -> 0
 

@@ -49,11 +49,10 @@ let compose (v : point{ _.px = 1 }) : {r:int | r = 1} =
   | Nothing -> 0
 
 (* Cross-module: Rec_aux.one's refinement projects a field of
-   Rec_aux.wid; the path travels through the .cmi, and a plain local
-   [let] unpacks the imported fact. *)
+   Rec_aux.wid; the path travels through the .cmi, and the import is
+   destructured DIRECTLY -- its name receives the per-field facts. *)
 let from_lib : {r:int | r = 1} =
-  let q = Rec_aux.one in
-  let { Rec_aux.w } = q in
+  let { Rec_aux.w } = Rec_aux.one in
   w
 
 (* A measure over a record, from the prelude. *)

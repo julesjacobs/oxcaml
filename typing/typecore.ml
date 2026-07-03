@@ -7731,6 +7731,20 @@ and type_expect_
           may_lower_contravariant env arg;
           generalize arg.exp_type)
       in
+      (* vox: a MODULE-LEVEL value scrutinized directly keeps its .cmi
+         refined type, which no ordinary pattern can match (rigid).
+         Erase it to the skeleton for the match: the verification pass
+         names such scrutinees by path and carries the refinement as a
+         global fact, so nothing is lost.  (Local scrutinees never need
+         this: binders bind at the skeleton.)  No expansion: an
+         abbreviation-hidden refinement keeps the rigid behavior. *)
+      let arg =
+        match arg.exp_desc, get_desc arg.exp_type with
+        | Texp_ident { path = (Path.Pdot _ | Path.Papply _); _ },
+          Trefine (skel, _) ->
+            { arg with exp_type = skel }
+        | _ -> arg
+      in
       let val_cases, partial =
         type_cases Computation env arg_pat_mode expected_mode arg.exp_type
           sort ty_expected_explained ~check_if_total:true loc val_caselist

@@ -95,6 +95,12 @@ let name_sorts : (Ident.t, dsort) Hashtbl.t = Hashtbl.create 64
 let synthetic_names : (Ident.t, unit) Hashtbl.t = Hashtbl.create 16
 let unknown_counter = ref 0
 
+(* Module-level values used by this unit's VCs: a stable synthetic
+   name per PATH, with the import's .cmi refinement as a global fact
+   (see [intern_global]). *)
+let global_names : (string, Ident.t) Hashtbl.t = Hashtbl.create 16
+let global_facts : Refinement.pred list ref = ref []
+
 (* The solver-side declaration of a "simple" type: a variant becomes a free
    datatype; a record becomes a single-constructor datatype with named
    selectors (a Lean [structure]). *)
@@ -189,7 +195,9 @@ let reset () =
   spec_defs := [];
   unknown_counter := 0;
   embedded_blocks := [];
-  imported_specs := []
+  imported_specs := [];
+  Hashtbl.reset global_names;
+  global_facts := []
 ;;
 
 (* A STABLE string for a type path: no stamps, and a path rooted in the
@@ -677,6 +685,49 @@ let stable_arg_name (a : expression) : Refinement.pred option =
   Vox_reflect.translate a
 ;;
 
+(* Module-level values used by this unit's VCs get a stable synthetic
+   name per PATH, interned on first sight, so an import is usable in
+   the logic without a local rebinding: [Lean_sig.push mine]'s
+   contract obligation speaks of [mine]'s name, and destructuring an
+   imported record contributes its per-field facts.  If the use's type
+   carries a refinement (the import's .cmi refinement), the fact
+   becomes a GLOBAL hypothesis, pulled into a VC exactly when the name
+   is mentioned.  The interned stamp is process-local and never enters
+   a .cmi (module-level self-containment already rejects predicates
+   over program values).  Two paths to one value intern separately:
+   both facts are true; their equality is not assumed (sound,
+   incomplete). *)
+let intern_global env (e : expression) (p : Path.t) : Ident.t =
+  let key = path_uname p in
+  match Hashtbl.find_opt global_names key with
+  | Some id -> id
+  | None ->
+    let id = Ident.create_local key in
+    Hashtbl.replace global_names key id;
+    Hashtbl.replace synthetic_names id ();
+    record_name env id e.exp_type;
+    (* The .cmi refinement comes from the value's SCHEME: at the use
+       the node's type may already be the stripped skeleton (contract
+       arguments, implicit erasure). *)
+    let scheme_ty =
+      match Env.find_value p env with
+      | vd -> Some (Subst.Lazy.force_value_description vd).val_type
+      | exception Not_found -> None
+    in
+    let refined =
+      match Option.map (refinement_of_type env) scheme_ty with
+      | Some (Some pr) -> Some pr
+      | _ -> refinement_of_type env e.exp_type
+    in
+    (match refined with
+     | Some pr ->
+       register_pred_paths env pr;
+       global_facts
+       := Refinement.subst_bound ~by:(Refinement.Pvar id) pr :: !global_facts
+     | None -> ());
+    id
+;;
+
 let rec name_of_expr env (e : expression) : Refinement.pred =
   match Vox_reflect.translate ~mutvar:mut_read e with
   | Some p ->
@@ -686,6 +737,10 @@ let rec name_of_expr env (e : expression) : Refinement.pred =
     p
   | None ->
     (match e.exp_desc with
+     | Texp_ident { path = (Path.Pdot _ | Path.Papply _) as p; _ } ->
+       (* A module-level value: name it stably by its path (and pick
+          up its .cmi refinement as a global fact). *)
+       Refinement.Pvar (intern_global env e p)
      | Texp_construct (_, cstr, _, args, _) ->
        let path = Data_types.cstr_res_type_path cstr in
        (match datatype_sort env path with
@@ -883,6 +938,26 @@ let emit_vc ~loc ~ctx ~goal ~kind =
     List.filter (pred_in_scope ctx) (grow [] !mut_defs)
   in
   let facts = facts @ defs in
+  (* Global facts (the .cmi refinements of module-level values named in
+     this VC) arrive by NEED: an import's fact appears exactly in the
+     VCs that mention its name. *)
+  let facts =
+    let mentioned = Hashtbl.create 8 in
+    let note p =
+      List.iter
+        (fun id -> Hashtbl.replace mentioned (Ident.unique_name id) ())
+        (Refinement.free_vars p)
+    in
+    note goal;
+    List.iter note facts;
+    facts
+    @ List.filter
+        (fun g ->
+          List.exists
+            (fun id -> Hashtbl.mem mentioned (Ident.unique_name id))
+            (Refinement.free_vars g))
+        !global_facts
+  in
   (* Several fact channels can deliver the same fact (a binder fact and
      its selfification equation, say); keep the first occurrence.
      Quadratic, but hypothesis lists are small. *)
@@ -1459,6 +1534,9 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
       | Texp_ident _, Tpat_var _ -> ctx'
       | Texp_ident { path = Path.Pident id; _ }, _ ->
         { ctx' with cfacts = match_facts env id vb.vb_pat @ ctx'.cfacts }
+      | Texp_ident { path = (Path.Pdot _ | Path.Papply _) as p; _ }, _ ->
+        let id = intern_global vb.vb_expr.exp_env vb.vb_expr p in
+        { ctx' with cfacts = match_facts env id vb.vb_pat @ ctx'.cfacts }
       | Texp_mutvar { txt = mid; _ }, _ ->
         (match Hashtbl.find_opt mut_versions mid with
          | Some (v, _) ->
@@ -1511,6 +1589,9 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
           match vb.vb_expr.exp_desc, vb.vb_pat.pat_desc with
           | Texp_ident _, Tpat_var _ -> ctx
           | Texp_ident { path = Path.Pident id; _ }, _ ->
+            { ctx with cfacts = match_facts env id vb.vb_pat @ ctx.cfacts }
+          | Texp_ident { path = (Path.Pdot _ | Path.Papply _) as p; _ }, _ ->
+            let id = intern_global vb.vb_expr.exp_env vb.vb_expr p in
             { ctx with cfacts = match_facts env id vb.vb_pat @ ctx.cfacts }
           | _ -> ctx)
         ctx'
@@ -1568,6 +1649,12 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
     let scrut_id =
       match scrut.exp_desc with
       | Texp_ident { path = Path.Pident id; _ } -> Some id
+      | Texp_ident { path = (Path.Pdot _ | Path.Papply _) as p; _ } ->
+        (* A module-level scrutinee matches like a local one: its
+           interned name receives the match facts (loads are pure, so
+           receiving facts stays vacuously sound for exception and
+           effect arms). *)
+        Some (intern_global scrut.exp_env scrut p)
       | Texp_mutvar { txt = id; _ } ->
         (* the version pins the value read by the match *)
         Option.map fst (Hashtbl.find_opt mut_versions id)

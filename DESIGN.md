@@ -138,7 +138,17 @@
   rigid unrefined expected type (no obligation arises there, and the
   fact of an unnamed value is unreachable either way -- name it with
   a `let` to keep it).  Other forms at a different refinement must be
-  let-bound ("let-bind it first").  Branch constructs propagate the
+  let-bound ("let-bind it first").  MODULE-LEVEL values need no local
+  rebinding to participate: the verification pass interns a stable
+  name per path on first use, carries the import's .cmi refinement as
+  a global fact pulled into exactly the VCs that mention the name, and
+  matching or destructuring an import contributes the usual facts at
+  the interned name (typing erases a directly-scrutinized import's
+  refined type to the skeleton for the patterns' sake).  Two paths to
+  one value intern separately -- both facts are true, their equality
+  is not assumed (sound, incomplete).  Dependent ARGUMENTS still
+  require typing-time names (variables, literals, pure reflected
+  expressions): imports do not yet qualify there.  Branch constructs propagate the
   expected type, so implicit intros land at the LEAVES, under each
   branch's path facts (and, since local binders are carrier-typed,
   unannotated joins of refined-fact-carrying and plain branches are
