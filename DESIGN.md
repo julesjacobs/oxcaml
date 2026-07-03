@@ -76,10 +76,19 @@
   mention them: `(x:int) -> (y:int) -> {z:int | z = x * y}`. Dependent
   types arise from annotations only; inferred arrows are never
   dependent. At an application, if the parameter's name occurs in the
-  remaining type, the argument must be an immutable VARIABLE or a
-  LITERAL -- both have stable logical names, a literal naming itself
-  (else: "let-bind the argument first"); the name is substituted
-  throughout the remaining type.
+  remaining type, the argument must be an expression the logic can
+  NAME before it is typed: an immutable variable (its stamp), a
+  literal (itself), or a pure surface expression over the reflected
+  int/bool operations and saturated total_ calls, which names itself
+  (`f (i + 1)`, `f (fib k)`); the name is substituted throughout the
+  remaining type (else: "let-bind the argument first").  Recognition
+  resolves identifiers in the environment -- the same resolution the
+  later typing performs -- so a shadowed `(+)` cannot lie; the
+  POLYMORPHIC comparisons are excluded (their operand sort is unknown
+  before typing, and the logic's equality disagrees with the
+  program's at floats and functions); mutable variables are rejected
+  as everywhere.  The fragment is pure up to Division_by_zero
+  (partial correctness).
 - Parameters as preconditions: a refinement on an arrow PARAMETER is a
   CONTRACT, not a value type.  Checking `fun x -> body` against
   `(x : int{p}) -> t` binds `x` at the SKELETON int -- so the body uses

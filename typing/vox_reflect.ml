@@ -103,6 +103,89 @@ let reflected_call_info env path (desc : Types.value_description) =
     else None
 ;;
 
+(* SURFACE translation, for dependent application: the logic term
+   denoting an argument expression that has not been typed yet (the
+   binder must be substituted throughout the remaining type BEFORE
+   later arguments are typechecked, so [translate] below cannot be
+   used).  Sound despite being syntactic because every construct is
+   keyed on what the identifier RESOLVES to in [env] -- the same
+   resolution the later typing will perform: a primitive recognized by
+   its name cannot be a shadowing impostor, and the admitted int/bool
+   primitives are monomorphic, so if the program typechecks their
+   operands are ints/bools.  The POLYMORPHIC comparisons are excluded:
+   their operand sort is unknown before typing, and the logic's
+   equality disagrees with the program's at floats (nan) and functions.
+   Mutable variables are rejected as everywhere (a stamp names one
+   value; a cell has many).  The fragment is pure up to
+   Division_by_zero, whose raise makes downstream facts vacuous
+   (partial correctness). *)
+let rec translate_surface env (e : Parsetree.expression)
+  : Refinement.pred option
+  =
+  match e.pexp_desc with
+  | Pexp_constant { pconst_desc = Pconst_integer (s, None); _ } ->
+    Option.map (fun n -> Refinement.Pint n) (int_of_string_opt s)
+  | Pexp_construct ({ txt = Longident.Lident "true"; _ }, None) ->
+    Some (Refinement.Pbool true)
+  | Pexp_construct ({ txt = Longident.Lident "false"; _ }, None) ->
+    Some (Refinement.Pbool false)
+  | Pexp_ident lid ->
+    (match Env.lookup_value ~use:false ~loc:e.pexp_loc lid.txt env with
+     | Path.Pident id, { val_kind = Val_reg _; _ }, _ ->
+       Some (Refinement.Pvar id)
+     | _ -> None
+     | exception _ -> None)
+  | Pexp_apply ({ pexp_desc = Pexp_ident lid; pexp_loc; _ }, sargs) ->
+    let args =
+      List.map
+        (fun (lbl, a) ->
+          match (lbl : Asttypes.arg_label) with
+          | Nolabel -> translate_surface env a
+          | _ -> None)
+        sargs
+    in
+    if not (List.for_all Option.is_some args)
+    then None
+    else (
+      let args = List.map Option.get args in
+      let unary k =
+        match args with
+        | [ a ] -> Some (k a)
+        | _ -> None
+      in
+      let binary k =
+        match args with
+        | [ a; b ] -> Some (k a b)
+        | _ -> None
+      in
+      let intop op = binary (fun a b -> Refinement.Pbinop (op, a, b)) in
+      match Env.lookup_value ~use:false ~loc:pexp_loc lid.txt env with
+      | _, { val_kind = Val_prim prim; _ }, _ ->
+        (match prim.prim_name with
+         | "%addint" -> intop Refinement.Add
+         | "%subint" -> intop Refinement.Sub
+         | "%mulint" -> intop Refinement.Mul
+         | "%divint" -> intop Refinement.Div
+         | "%modint" -> intop Refinement.Mod
+         | "%negint" ->
+           unary (fun a -> Refinement.Pbinop (Sub, Refinement.Pint 0, a))
+         | "%succint" ->
+           unary (fun a -> Refinement.Pbinop (Add, a, Refinement.Pint 1))
+         | "%predint" ->
+           unary (fun a -> Refinement.Pbinop (Sub, a, Refinement.Pint 1))
+         | "%sequand" -> binary (fun a b -> Refinement.Pand (a, b))
+         | "%sequor" -> binary (fun a b -> Refinement.Por (a, b))
+         | "%boolnot" -> unary (fun a -> Refinement.Pnot a)
+         | _ -> None)
+      | path, desc, _ ->
+        (match reflected_call_info env path desc with
+         | Some (name, arity) when List.length args = arity ->
+           Some (Refinement.Pfun (name, args))
+         | _ -> None)
+      | exception _ -> None)
+  | _ -> None
+;;
+
 let rec translate (e : expression) : Refinement.pred option =
   match e.exp_desc with
   | Texp_ident { path = Path.Pident id; _ } -> Some (Refinement.Pvar id)

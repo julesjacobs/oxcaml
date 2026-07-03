@@ -4958,12 +4958,14 @@ let collect_unknown_apply_args env funct ty_fun0 mode_fun rev_args sargs
   loop ty_fun0 mode_fun rev_args sargs
 
 (* vox: open a dependent arrow at its application site, like
-   [instance_poly] opens a [Tpoly]: the argument must syntactically be
-   a variable (whose stamp is known without typing it), and the binder
-   is substituted by that stamp throughout the remaining type -- so
-   later parameter types and the result are instantiated before any
-   argument expression is typechecked.  A missing argument for a
-   dependent parameter cannot be named and is an error. *)
+   [instance_poly] opens a [Tpoly]: the argument must be an expression
+   the logic can name WITHOUT typing it -- a variable (its stamp), or a
+   pure surface expression over the reflected int/bool operations and
+   total_ functions ([Vox_reflect.translate_surface]) -- and the binder
+   is substituted by that term throughout the remaining type, so later
+   parameter types and the result are instantiated before any argument
+   expression is typechecked.  A missing argument for a dependent
+   parameter cannot be named and is an error. *)
 let vox_open_dependent_arrow env binder ~sarg_opt ~app_loc ty_ret ty_ret0 =
   match binder with
   | None -> ty_ret, ty_ret0
@@ -4976,7 +4978,7 @@ let vox_open_dependent_arrow env binder ~sarg_opt ~app_loc ty_ret ty_ret0 =
       let let_bind () =
         Location.raise_errorf ~loc:sarg.pexp_loc
           "vox: the argument for a dependent parameter must be a variable \
-           (let-bind it first)"
+           or a pure expression the logic can name (let-bind it first)"
       in
       let subst by =
         let ty_ret' = Vox_dep.subst_binder b ~by ty_ret in
@@ -5006,14 +5008,14 @@ let vox_open_dependent_arrow env binder ~sarg_opt ~app_loc ty_ret ty_ret0 =
            (* Unbound: skip the substitution and let the argument's own
               typing report the error. *)
            ty_ret, ty_ret0)
-      (* A literal names itself: substituting it is exact. *)
-      | Pexp_constant {pconst_desc = Pconst_integer (s, None); _}
-        when int_of_string_opt s <> None ->
-        subst (Refinement.Pint (int_of_string s))
-      | Pexp_construct ({txt = Longident.Lident ("true" | "false" as b'); _},
-                        None) ->
-        subst (Refinement.Pbool (String.equal b' "true"))
-      | _ -> let_bind ()
+      | _ ->
+        (* A pure surface expression names itself: literals, the
+           reflected int/bool operations (recognized by what they
+           RESOLVE to, so shadowing cannot lie), and saturated calls of
+           total_ functions.  Substituting its translation is exact. *)
+        (match Vox_reflect.translate_surface env sarg with
+         | Some p -> subst p
+         | None -> let_bind ())
 
 (* vox: a refinement on an arrow PARAMETER is a contract, not a value
    type.  The callee binds the parameter at the SKELETON and assumes

@@ -104,8 +104,7 @@ let rec fib_loop
     if i = n
     then refine_ a
     else begin
-      let refine_ j = refine_ (i + 1) in
-      let refine_ r = fib_loop n j b (a + b) in
+      let refine_ r = fib_loop n (i + 1) b (a + b) in
       refine_ r
     end
 

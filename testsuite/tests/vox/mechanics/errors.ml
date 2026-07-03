@@ -62,21 +62,30 @@ Error: The value "b" has type "int{ _ > 0 }"
        but an expression was expected of type "int"
 |}]
 
-(* The argument for a dependent parameter must be a variable. *)
+(* The argument for a dependent parameter must have a stable logical
+   name: a variable, a literal, or a pure expression over the
+   reflected operations (recognized by what they resolve to). *)
 let lt : (x : int) -> (y : int) -> {z:bool | z = (x < y)} =
   fun x y -> assume_ (x < y)
 [%%expect{|
 val lt : (x : int) -> (y : int) -> bool{ _ = (x < y) } = <fun>
 |}]
 
-(* (Variables and literals have stable logical names; a compound
-   expression does not.) *)
-let bad (x : int) = lt (x * 2) x
+(* A translatable compound argument names itself. *)
+let ok (x : int) =
+  let refine_ b = lt (x * 2) x in
+  b
+[%%expect{|
+val ok : int -> bool = <fun>
+|}]
+
+(* An expression the logic cannot name is still an error. *)
+let bad (x : int) = lt (abs x) x
 [%%expect{|
 Line 1, characters 23-30:
-1 | let bad (x : int) = lt (x * 2) x
+1 | let bad (x : int) = lt (abs x) x
                            ^^^^^^^
-Error: vox: the argument for a dependent parameter must be a variable (let-bind it first)
+Error: vox: the argument for a dependent parameter must be a variable or a pure expression the logic can name (let-bind it first)
 |}]
 
 (* Escaped refinements are errors (DESIGN: "escape is an error").  An

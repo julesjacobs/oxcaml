@@ -383,15 +383,14 @@ let fresh_unknown env (e : expression) =
    substitution, mirroring [vox_open_dependent_arrow] exactly (typing
    already rejected mutable variables and compound expressions
    there). *)
+(* The name a dependent argument was opened at by the type checker:
+   [Vox_reflect.translate] is the typed twin of the surface translation
+   [vox_open_dependent_arrow] substituted (the surface fragment is a
+   subset of the typed one, and both key primitives and total_
+   functions on what the identifier resolves to), so the walker's
+   instantiation of the remaining contracts agrees with the types. *)
 let stable_arg_name (a : expression) : Refinement.pred option =
-  match a.exp_desc with
-  | Texp_ident { path = Path.Pident id; _ } -> Some (Refinement.Pvar id)
-  | Texp_constant (Const_int n) -> Some (Refinement.Pint n)
-  | Texp_construct ({ txt = Longident.Lident "true"; _ }, _, _, [], _) ->
-    Some (Refinement.Pbool true)
-  | Texp_construct ({ txt = Longident.Lident "false"; _ }, _, _, [], _) ->
-    Some (Refinement.Pbool false)
-  | _ -> None
+  Vox_reflect.translate a
 ;;
 
 let rec name_of_expr env (e : expression) : Refinement.pred =
@@ -875,9 +874,10 @@ let rec walk_expr env ctx (e : expression) =
        its logical name; an intro-form argument
        ([refine_]/[assume_]/[assume_unchecked_]) carries its own
        obligation instead (the explicit-cast spelling).  The dependent
-       binder is substituted by the (syntactically enforced) variable
-       or literal argument's name as the spine is walked, mirroring
-       the application-site opening done at typing time. *)
+       binder is substituted by the argument's translation (a variable,
+       literal, or pure reflected expression -- enforced at typing
+       time) as the spine is walked, mirroring the application-site
+       opening. *)
     let arrow_ty = ref funct.exp_type in
     List.iter
       (fun (_lbl, (arg : apply_arg)) ->
