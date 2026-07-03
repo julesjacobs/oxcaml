@@ -96,5 +96,11 @@ Hypotheses:
   (lo < hi) && (x < (hi * hi))
   (0 <= lo) && ((lo * lo) <= x)
   0 <= x
+Possible counterexample:
+  hi = 1
+  x = 0
+  lo = 0
+  hi ^ 2 = 1
+  lo ^ 2 = 0
 (lean: error: `grind` failed)
 |}]
