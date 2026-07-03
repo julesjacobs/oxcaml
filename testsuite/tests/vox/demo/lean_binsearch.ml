@@ -14,7 +14,10 @@
    virtual sentinels l = -1 and r = length a (where p(-1) = false and
    p (length a) = true artificially), the loop probes only indices
    STRICTLY between them -- so every access is in bounds, which is
-   here a THEOREM: [get] demands 0 <= i < len a.
+   here a THEOREM: [get] demands 0 <= i < len a.  The invariant
+   states p's endpoint values as guarded implications
+   ([0 <= l -> elem a l < x]): at the sentinels the guard is false
+   and the fact vacuous, which is exactly the artificial extension.
 
    The array reaches the logic as two uninterpreted spec functions,
    [len] and [elem] (binsearch_lib.lean, no axioms); [length] and
@@ -60,12 +63,12 @@ type ans =
 let rec search
   : (a : int iarray) -> (x : int) -> (l : int{ -1 <= _ })
     -> (r : int{ l < _ && _ <= len a
-                 && (l = -1 || elem a l < x)
-                 && (_ = len a || elem a _ >= x) })
+                 && (0 <= l -> elem a l < x)
+                 && (_ < len a -> elem a _ >= x) })
     -> ans{ _.hi = _.lo + 1
             && l <= _.lo && _.hi <= r
-            && (_.lo = -1 || elem a _.lo < x)
-            && (_.hi = len a || elem a _.hi >= x) }
+            && (0 <= _.lo -> elem a _.lo < x)
+            && (_.hi < len a -> elem a _.hi >= x) }
   =
   fun a x l r ->
     if r - l > 1
@@ -96,8 +99,8 @@ let rec search
 let lower_bound
   : (a : int iarray) -> (x : int)
     -> int{ 0 <= _ && _ <= len a
-            && (_ = len a || elem a _ >= x)
-            && (_ = 0 || elem a (_ - 1) < x) }
+            && (_ < len a -> elem a _ >= x)
+            && (0 < _ -> elem a (_ - 1) < x) }
   =
   fun a x ->
     let n = length a in

@@ -463,8 +463,8 @@ of the result.</p>
 <pre><code class="ml">let lower_bound
   : (a : int iarray) -&gt; (x : int)
     -&gt; int{ 0 &lt;= _ &amp;&amp; _ &lt;= len a
-            &amp;&amp; (_ = len a || elem a _ &gt;= x)
-            &amp;&amp; (_ = 0 || elem a (_ - 1) &lt; x) }
+            &amp;&amp; (_ &lt; len a -&gt; elem a _ &gt;= x)
+            &amp;&amp; (0 &lt; _ -&gt; elem a (_ - 1) &lt; x) }
   =
   fun a x -&gt; ...</code></pre></div>
 
