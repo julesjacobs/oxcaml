@@ -158,3 +158,25 @@ Line 3, characters 2-3: vox VC:
   x > 0
 val named : unit -> int{ _ = 3 } = <fun>
 |}]
+
+(* Implicit intros propagate through [exclave_]: its typing rule
+   checks the body against the expected type, so the intros land at
+   the branch LEAVES, under their path facts -- not on the exclave as
+   a whole (which would name a fresh unknown). *)
+let epropagate : (c : bool) -> int{ _ >= 1 } @ local =
+  fun c -> exclave_ (if c then 1 else 2)
+[%%expect{|
+Line 2, characters 31-32: vox VC:
+  goal: 1 >= 1
+  hypotheses:
+  c
+  x = 3
+  x > 0
+Line 2, characters 38-39: vox VC:
+  goal: 2 >= 1
+  hypotheses:
+  not c
+  x = 3
+  x > 0
+val epropagate : bool -> int{ _ >= 1 } @ local = <fun>
+|}]

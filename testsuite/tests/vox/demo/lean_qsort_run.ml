@@ -781,9 +781,7 @@ let swap :
        let (vj, m2) = sget m1 j in
        let m3 = sset m2 i vj in
        let m4 = sset m3 j vi in
-       (m4 : slice{ now _ = upd (upd (now m) i (elem (now m) j)) j
-                              (elem (now m) i)
-                    && fin _ = fin m }))
+       m4)
 [%%expect{|
 val swap :
   (m : S.slice) @ local unique ->
@@ -824,32 +822,16 @@ let rec part :
          then begin
            let s2 = swap s1 i j in
            let q = part p (i + 1) (j + 1) s2 n in
-           (q : (int * slice){ 0 <= fst _ && fst _ < n
-                        && elem (now (snd _)) (fst _) = p
-                        && all_le (take (fst _) (now (snd _))) p
-                        && all_ge (drop (fst _) (now (snd _))) p
-                        && perm (now s) (now (snd _))
-                        && fin (snd _) = fin s })
+           q
          end
          else begin
            let q = part p i (j + 1) s1 n in
-           (q : (int * slice){ 0 <= fst _ && fst _ < n
-                        && elem (now (snd _)) (fst _) = p
-                        && all_le (take (fst _) (now (snd _))) p
-                        && all_ge (drop (fst _) (now (snd _))) p
-                        && perm (now s) (now (snd _))
-                        && fin (snd _) = fin s })
+           q
          end
        end
        else begin
          let s' = swap s i j in
-         (((i : int), s')
-           : (int * slice){ 0 <= fst _ && fst _ < n
-                        && elem (now (snd _)) (fst _) = p
-                        && all_le (take (fst _) (now (snd _))) p
-                        && all_ge (drop (fst _) (now (snd _))) p
-                        && perm (now s) (now (snd _))
-                        && fin (snd _) = fin s })
+         ((i : int), s')
        end)
 [%%expect{|
 val part :
@@ -886,9 +868,7 @@ let rec qsort :
     exclave_
       (let (n, m0) = slen m in
        if n <= 1
-       then
-         (m0 : slice{ perm (now m) (now _) && sorted (now _)
-                      && fin _ = fin m })
+       then m0
        else begin
          let (p, mp) = sget m0 (n - 1) in
          let q = part p 0 0 mp n in
@@ -918,8 +898,7 @@ let rec qsort :
                          && perm (drop k (now m2)) (pv prest) }))
          in
          ignore u;
-         (mres : slice{ perm (now m) (now _) && sorted (now _)
-                   && fin _ = fin m })
+         mres
        end)
 [%%expect{|
 val qsort :
@@ -941,9 +920,7 @@ let rec psort :
     exclave_
       (let (n, m0) = slen m in
        if n <= 1
-       then
-         (m0 : slice{ perm (now m) (now _) && sorted (now _)
-                      && fin _ = fin m })
+       then m0
        else begin
          let (p, mp) = sget m0 (n - 1) in
          let q = part p 0 0 mp n in
@@ -986,8 +963,7 @@ let rec psort :
                          && perm (drop k (now m2)) (pv prest) }))
          in
          ignore u;
-         (mres : slice{ perm (now m) (now _) && sorted (now _)
-                   && fin _ = fin m })
+         mres
        end)
 [%%expect{|
 val psort :

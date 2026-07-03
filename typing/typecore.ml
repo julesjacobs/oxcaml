@@ -6292,9 +6292,18 @@ let is_vox_checked_atom sexp =
    refinement afterwards.  The recursive [is_inferred] cases
    (sequences, [if]) are deliberately excluded: they propagate the
    expected type into their sub-expressions, which places implicit
-   introductions at the leaves, under the branch path facts. *)
+   introductions at the leaves, under the branch path facts.
+   [exclave_ e] is likewise excluded even though it parses as an
+   application: its typing rule checks the body against the expected
+   type, so it is a propagation form -- treating it as an inferred
+   head would type the body expectation-free and wedge the implicit
+   introduction onto the whole exclave (a fresh unknown, its leaves'
+   facts out of reach). *)
 let is_vox_inferred_head sexp =
   match sexp.pexp_desc with
+  | Pexp_apply
+      ({ pexp_desc = Pexp_extension({ txt }, PStr []) },
+        [Nolabel, _]) when is_exclave_extension_node txt -> false
   | Pexp_ident _ | Pexp_apply _ | Pexp_field _
   | Pexp_constraint (_, Some _, _) | Pexp_coerce _ | Pexp_send _
   | Pexp_new _ -> true
