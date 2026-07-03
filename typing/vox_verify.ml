@@ -367,7 +367,11 @@ let fresh_unknown env (e : expression) =
 
 let rec name_of_expr env (e : expression) : Refinement.pred =
   match Vox_reflect.translate e with
-  | Some p -> p
+  | Some p ->
+    (* The translation may contain field projections; register their
+       record types so the structure declarations reach the solver. *)
+    register_pred_paths env p;
+    p
   | None ->
     (match e.exp_desc with
      | Texp_construct (_, cstr, _, args, _) ->
@@ -407,6 +411,10 @@ let rec name_of_expr env (e : expression) : Refinement.pred =
           Refinement.Pconstr (path, "mk", List.map arg_of (Array.to_list fields))
         | S_int | S_bool | S_other -> fresh_unknown env e)
      | Texp_field { record; label; _ } ->
+       (* Mostly subsumed: [Vox_reflect.translate] projects immutable
+          fields of simple records when the base itself translates.
+          This fallback still fires when the base is only NAMEABLE
+          (e.g. a field of a just-constructed record). *)
        let path = Data_types.lbl_res_type_path label in
        (match label.lbl_mut, datatype_sort env path with
         | Types.Immutable, S_data _ ->
@@ -471,8 +479,8 @@ let emit_vc ~loc ~ctx ~goal ~kind =
      then
        Location.raise_errorf ~loc
          "vox: assume_ compiles a runtime check of this refinement, but it \
-          involves a constructor or spec function, which the compiled check \
-          cannot evaluate; use assume_unchecked_";
+          involves a constructor, field projection, or spec function, which \
+          the compiled check cannot evaluate; use assume_unchecked_";
      (* The compiled check compares machine words, which agrees with the
         logic only for int- and bool-sorted operands: other sorts are
         uninterpreted, and physical equality is stricter than logical
@@ -901,6 +909,7 @@ let rec walk_expr env ctx (e : expression) =
        one (a variable, or a translatable int/bool expression);
        untranslatable conditions contribute nothing. *)
     let cond_fact = Vox_reflect.translate cond in
+    Option.iter (register_pred_paths env) cond_fact;
     let with_fact f ctx =
       match cond_fact with
       | None -> ctx

@@ -3,9 +3,10 @@
    built-in int/bool operations.
 
    [translate e] returns the logic term denoting [e]'s value when [e]
-   is built from variables, int/bool literals, and the primitive
-   operations the predicate language models (+ - * ~- succ pred on int;
-   && || not; comparisons at int or bool); [None] otherwise.
+   is built from variables, int/bool literals, immutable field reads
+   of simple records, and the primitive operations the predicate
+   language models (+ - * ~- succ pred on int; && || not; comparisons
+   at int or bool); [None] otherwise.
    Recognition is keyed on the PRIMITIVE ([Val_prim]), never the source
    name, so shadowing [(+)] cannot be mistaken for integer addition.
    Comparisons are polymorphic primitives and are translated only at
@@ -57,6 +58,19 @@ let rec translate (e : expression) : Refinement.pred option =
     Some (Refinement.Pbool true)
   | Texp_construct ({ txt = Longident.Lident "false"; _ }, _, _, [], _) ->
     Some (Refinement.Pbool false)
+  | Texp_field { record; label; _ } ->
+    (* A field read of a simple record is the structure projection the
+       predicate language writes as [_.px].  [vox_simple_record]
+       requires every field immutable, so the read is pure and its
+       value is stable -- a mutable field (which disqualifies the whole
+       record) must stay a fresh unknown at each read. *)
+    let path = Data_types.lbl_res_type_path label in
+    (match Ctype.vox_simple_record record.exp_env path with
+     | Some _ ->
+       Option.map
+         (fun base -> Refinement.Pfield (path, label.lbl_name, base))
+         (translate record)
+     | None -> None)
   | Texp_apply
       ({ exp_desc = Texp_ident { path = Path.Pident id; _ }; _ }, args, _, _, _)
     when Hashtbl.mem reflected id ->

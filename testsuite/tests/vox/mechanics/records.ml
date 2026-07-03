@@ -77,6 +77,56 @@ Line 4, characters 25-27: vox VC:
 val getx2 : point{ _.px = 7 } -> int{ _ = 7 } = <fun>
 |}]
 
+(* Immutable field reads REFLECT (Vox_reflect): inside a compound
+   expression the read names the projection directly. *)
+let bump : (p : point) -> int{ _ = p.px + 1 } =
+  fun p -> refine_ (p.px + 1)
+[%%expect{|
+Line 2, characters 19-29: vox VC:
+  goal: (p.px + 1) = (p.px + 1)
+  hypotheses:
+  (origin.px = 0) && (origin.py = 0)
+val bump : (p : point) -> int{ _ = (p.px + 1) } = <fun>
+|}]
+
+(* Synthesis position: [refine_ q.px] gets the exact refinement, and
+   the binder fact flows.  (The read needs the skeleton type, hence
+   the unpack -- refined types are rigid, as everywhere.) *)
+let through (p : point{ _.px = 7 }) : {r:int | r = 7} =
+  let refine_ q = p in
+  let refine_ x = refine_ q.px in
+  refine_ x
+[%%expect{|
+Line 4, characters 10-11: vox VC:
+  goal: x = 7
+  hypotheses:
+  x = q.px
+  q.px = 7
+  p.px = 7
+  (origin.px = 0) && (origin.py = 0)
+val through : point{ _.px = 7 } -> int{ _ = 7 } = <fun>
+|}]
+
+(* A bool field read is a path fact in both polarities. *)
+type flag = { on : bool }
+
+let choose : (f : flag) -> int{ f.on || _ = 0 } =
+  fun f -> if f.on then refine_ 1 else refine_ 0
+[%%expect{|
+type flag = { on : bool; }
+Line 4, characters 32-33: vox VC:
+  goal: f.on || (1 = 0)
+  hypotheses:
+  f.on
+  (origin.px = 0) && (origin.py = 0)
+Line 4, characters 47-48: vox VC:
+  goal: f.on || (0 = 0)
+  hypotheses:
+  not f.on
+  (origin.px = 0) && (origin.py = 0)
+val choose : (f : flag) -> int{ f.on || (_ = 0) } = <fun>
+|}]
+
 (* ADTs and records compose: injectivity of Pt links the payloads. *)
 type shape =
   | Pt of point

@@ -186,10 +186,13 @@
   Blocks in an `.ml` (of a unit with an `.mli`) stay module-local.
 - The compiler attaches logical meaning to exactly the operations the
   predicate language models (Vox_reflect): variables, int/bool
-  constants, `+ - * ~-` (and `succ`/`pred`), `&& || not`, and
-  comparisons at int or bool -- recognized by PRIMITIVE, so shadowing
-  `(+)` cannot be mistaken for integer addition. So built-in operations
-  need no userland wrappers:
+  constants, immutable field reads of simple records (the projection
+  the predicate language writes as `_.px`; a mutable field
+  disqualifies the record, and its reads stay fresh unknowns),
+  `+ - * ~-` (and `succ`/`pred`), `&& || not`, and comparisons at int
+  or bool -- recognized by PRIMITIVE, so shadowing `(+)` cannot be
+  mistaken for integer addition. So built-in operations need no
+  userland wrappers:
 
       let mul : (x : int) -> (y : int) -> {z:int | z = x * y} =
         fun x y -> refine_ (x * y)

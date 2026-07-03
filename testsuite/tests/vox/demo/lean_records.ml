@@ -57,9 +57,7 @@ let from_lib : {r:int | r = 1} =
 (* A measure over a record, from the prelude. *)
 let d : point{ norm1 _ = 3 } = refine_ { px = 1; py = 2 }
 
-(* A direct field read names itself ([x = p.px]); reflected
-   arithmetic then carries the update value into the goal. *)
+(* Field reads reflect like arithmetic does: the update value names
+   [p.px + 1], and the kept field projects out of the base. *)
 let shift : (p : point) -> point{ norm1 _ = norm1 p + 1 } =
-  fun p ->
-    let refine_ x = (refine_ p.px : {v:int | v = p.px}) in
-    refine_ { p with px = x + 1 }
+  fun p -> refine_ { p with px = p.px + 1 }
