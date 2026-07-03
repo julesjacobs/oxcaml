@@ -139,7 +139,7 @@ let spec_defs : Vox_reflect.spec_def list ref = ref []
    toplevel session) being verified, in source order: text (ending in
    a newline) and the block's location (solver errors inside a block
    are reported there).  See the collection functions below. *)
-let embedded_preludes : (string * Location.t) list ref = ref []
+let embedded_blocks : (string * Location.t) list ref = ref []
 
 (* Solver blocks imported from other units' .cmis ([%%vox.lean]
    in their interfaces): unit name and blocks, in dependency order
@@ -148,7 +148,7 @@ let embedded_preludes : (string * Location.t) list ref = ref []
    the defining module, so a client can never verify against a
    DIFFERENT version of a spec function used in an imported signature
    (the .cmi CRC forces re-verification when the spec changes). *)
-let imported_preludes : (string * Cmi_format.vox_prelude_export) list ref =
+let imported_specs : (string * Cmi_format.vox_spec_export) list ref =
   ref []
 
 (* SSA versions for [let mutable] variables (flow-sensitive mutation).
@@ -188,8 +188,8 @@ let reset () =
   tuple_arities := [];
   spec_defs := [];
   unknown_counter := 0;
-  embedded_preludes := [];
-  imported_preludes := []
+  embedded_blocks := [];
+  imported_specs := []
 ;;
 
 (* A STABLE string for a type path: no stamps, and a path rooted in the
@@ -2167,39 +2167,39 @@ let free_vars_of_vc vc = List.concat_map Refinement.free_vars (vc.vc_goal :: vc.
    travel: an .mli's blocks -- and an mli-less unit's -- ride the
    .cmi's spec export to every client. *)
 
-type prelude_kind =
-  | Not_prelude
-  | Prelude
+type vox_block_kind =
+  | Not_a_block
+  | Block
   | Bad_backend of string
 
-let prelude_extension_kind txt =
-  if String.equal txt "vox.lean" then Prelude
+let vox_block_of_extension txt =
+  if String.equal txt "vox.lean" then Block
   else if String.length txt >= 4 && String.equal (String.sub txt 0 4) "vox."
   then
     (* Claim the whole vox.* item-extension namespace, so a misspelled
        block gets a vox error rather than "uninterpreted extension". *)
     Bad_backend txt
-  else Not_prelude
+  else Not_a_block
 ;;
 
 (* Whether Typemod should claim this extension item (including
    misspelled backends, so they get the vox error, not "uninterpreted
    extension"). *)
-let is_prelude_extension_name txt =
-  match prelude_extension_kind txt with
-  | Prelude | Bad_backend _ -> true
-  | Not_prelude -> false
+let is_vox_block_name txt =
+  match vox_block_of_extension txt with
+  | Block | Bad_backend _ -> true
+  | Not_a_block -> false
 ;;
 
 (* Validates and extracts the text of a [%%vox.lean] payload; used
    by Typemod (to accept the item) and by the collection below. *)
-let prelude_extension_text (({txt; loc}, payload) : Parsetree.extension) =
-  match prelude_extension_kind txt with
-  | Not_prelude -> None
+let vox_block_text (({txt; loc}, payload) : Parsetree.extension) =
+  match vox_block_of_extension txt with
+  | Not_a_block -> None
   | Bad_backend b ->
     Location.raise_errorf ~loc
       "vox: unknown block extension %S (expected \"vox.lean\")" b
-  | Prelude ->
+  | Block ->
     (match payload with
      | Parsetree.PStr
          [ { pstr_desc =
@@ -2220,13 +2220,13 @@ let normalize_block s =
   if String.length s > 0 && s.[String.length s - 1] = '\n' then s else s ^ "\n"
 ;;
 
-let collect_preludes (str : structure) =
+let collect_blocks (str : structure) =
   List.filter_map
     (fun item ->
       match item.str_desc with
       | Tstr_attribute ({attr_name = {txt; _}; attr_payload; attr_loc} : attribute)
-        when is_prelude_extension_name txt ->
-        (match prelude_extension_text ({txt; loc = attr_loc}, attr_payload) with
+        when is_vox_block_name txt ->
+        (match vox_block_text ({txt; loc = attr_loc}, attr_payload) with
          | Some s -> Some (normalize_block s, attr_loc)
          | None -> None)
       | _ -> None)
@@ -2237,15 +2237,15 @@ let collect_preludes (str : structure) =
    the .mli's compilation and saved into the .cmi (see Typemod), so
    they reach every client -- and the unit's own implementation, whose
    verification reads the interface's .cmi like any other import. *)
-let collect_preludes_sig (sg : Typedtree.signature) =
+let collect_blocks_sig (sg : Typedtree.signature) =
   List.filter_map
     (fun item ->
       match item.sig_desc with
       | Tsig_attribute ({attr_name = {txt; _}; attr_payload; attr_loc}
                         : attribute)
-        when is_prelude_extension_name txt ->
+        when is_vox_block_name txt ->
         (match
-           prelude_extension_text ({txt; loc = attr_loc}, attr_payload)
+           vox_block_text ({txt; loc = attr_loc}, attr_payload)
          with
          | Some s -> Some (normalize_block s)
          | None -> None)
@@ -2255,9 +2255,9 @@ let collect_preludes_sig (sg : Typedtree.signature) =
 
 (* Imported spec exports in dependency order (a unit's spec after the
    units it imports; name order breaks ties, for determinism). *)
-let gather_imported_preludes () =
+let gather_imported_specs () =
   let all =
-    Env.vox_imported_preludes ()
+    Env.vox_imported_specs ()
     |> List.map (fun (name, export, deps) ->
       ( Compilation_unit.Name.to_string name
       , export
@@ -2284,7 +2284,7 @@ let gather_imported_preludes () =
 let imported_need_voxu () =
   List.exists
     (fun (_, vp) -> vp.Cmi_format.vp_needs_voxu)
-    !imported_preludes
+    !imported_specs
 ;;
 
 (* A datatype of THIS module whose stable name matches an imported
@@ -2314,7 +2314,7 @@ let check_imported_datatype_clashes ~render =
                   uname
                   unit)
             vp.Cmi_format.vp_datatypes)
-        !imported_preludes)
+        !imported_specs)
     !datatypes
 ;;
 
@@ -2765,12 +2765,12 @@ let cmi_export env (sg : Types.signature) ~defs ~blocks =
    implementation (clients' calls degrade to unknowns; sound). *)
 let cmi_export_of_signature (tsg : Typedtree.signature) =
   cmi_export tsg.sig_final_env tsg.sig_type ~defs:[]
-    ~blocks:(collect_preludes_sig tsg)
+    ~blocks:(collect_blocks_sig tsg)
 ;;
 
 let cmi_export_of_structure (str : structure) (sg : Types.signature) =
   cmi_export str.str_final_env sg ~defs:!spec_defs
-    ~blocks:(List.map fst (collect_preludes str))
+    ~blocks:(List.map fst (collect_blocks str))
 ;;
 
 
@@ -2882,14 +2882,14 @@ let lean_file vcs =
      source order; finally the elaboration bound.  Theorems follow,
      one per line.  A solver error inside a block is reported at the
      block's own location (or its defining unit). *)
-  let want_prelude = List.exists vc_uses_spec_fun vcs in
-  (* Prelude text (imported blocks, -vox-prelude, own blocks) declares
+  let want_spec_text = List.exists vc_uses_spec_fun vcs in
+  (* Block text (imported blocks, -vox-prelude, own blocks) declares
      spec functions AT VoxU (e.g. [opaque f : VoxU -> Int]); if VoxU
      itself were not declared, Lean's autobound implicits would
      silently generalize those signatures ([{VoxU : Sort u} -> ...]),
      turning ill-sorted applications into polymorphic ones instead of
      errors.  So the prelude implies VoxU. *)
-  let needs_voxu = needs_voxu || imported_need_voxu () || want_prelude in
+  let needs_voxu = needs_voxu || imported_need_voxu () || want_spec_text in
   let segments = ref [] in
   let seg ?src text = if text <> "" then segments := (text, src) :: !segments in
   if needs_voxu then seg "opaque VoxU : Type\n";
@@ -2903,7 +2903,7 @@ let lean_file vcs =
             seen := n :: !seen;
             seg ~src:(Imported_block unit) leand))
         vp.Cmi_format.vp_datatypes)
-    !imported_preludes;
+    !imported_specs;
   (* Tuple product structures precede this module's datatypes (whose
      fields may be tuple-sorted); imported exports carry their own,
      deduplicated by the stable per-arity name. *)
@@ -2922,14 +2922,14 @@ let lean_file vcs =
      reflected function (whose definition rides the exporting unit's
      blocks).  They are therefore also needed whenever this module has
      definitions, not only when a VC applies a spec function. *)
-  if want_prelude || !spec_defs <> []
+  if want_spec_text || !spec_defs <> []
   then (
     List.iter
       (fun (unit, vp) ->
         List.iter
           (fun text -> seg ~src:(Imported_block unit) text)
           vp.Cmi_format.vp_blocks)
-      !imported_preludes;
+      !imported_specs;
     seg (prelude ()));
   (* Reflected definitions, unconditionally: they are checked
      (termination included) even when nothing else needs the
@@ -2941,11 +2941,11 @@ let lean_file vcs =
       lean_spec_def b d;
       seg ~src:(Reflected_def d) (Buffer.contents b))
     !spec_defs;
-  if want_prelude
+  if want_spec_text
   then
     List.iter
       (fun (s, loc) -> seg ~src:(Local_block loc) s)
-      !embedded_preludes;
+      !embedded_blocks;
   (* Bound elaboration per theorem: a diverging [grind] must count as
      a verification failure, not hang the build.  (A wedged process
      outside elaboration remains out of scope.)  Emitted
@@ -3362,7 +3362,7 @@ let uses_vox (str : structure) =
        (fun item ->
          match item.str_desc with
          | Tstr_attribute (a : attribute) ->
-           is_prelude_extension_name a.attr_name.txt
+           is_vox_block_name a.attr_name.txt
          | _ -> false)
        str.str_items
 ;;
@@ -3501,8 +3501,8 @@ let check_implementation ?intf (str : structure) (sg : Types.signature) =
        (they are emitted, in source order, into every solver input);
        blocks exported by imported units' interfaces -- including this
        unit's own .mli -- come from their .cmis. *)
-    embedded_preludes := collect_preludes str;
-    imported_preludes := gather_imported_preludes ();
+    embedded_blocks := collect_blocks str;
+    imported_specs := gather_imported_specs ();
     let ctx = ref { cfacts = []; cscope = [] } in
     walk_items str ctx;
     discharge ())
@@ -3516,7 +3516,7 @@ let check_implementation ?intf (str : structure) (sg : Types.signature) =
    binders (which may carry refinements copied from earlier phrases)
    contribute facts. *)
 let toplevel_ctx = ref { cfacts = []; cscope = [] }
-let toplevel_preludes : (string * Location.t) list ref = ref []
+let toplevel_blocks : (string * Location.t) list ref = ref []
 let toplevel_active = ref false
 
 let check_toplevel_phrase (str : structure) ~(sig_acc : Types.signature)
@@ -3534,8 +3534,8 @@ let check_toplevel_phrase (str : structure) ~(sig_acc : Types.signature)
     vcs := [];
     (* The session's committed blocks plus this phrase's; committed
        (like the facts below) only if the phrase discharges. *)
-    embedded_preludes := !toplevel_preludes @ collect_preludes str;
-    imported_preludes := gather_imported_preludes ();
+    embedded_blocks := !toplevel_blocks @ collect_blocks str;
+    imported_specs := gather_imported_specs ();
     (* Reflected definitions and datatype registrations are committed
        the same way: a failed phrase is backtracked, so its rejected
        definition must not be re-emitted (and re-fail, blamed at the
@@ -3558,5 +3558,5 @@ let check_toplevel_phrase (str : structure) ~(sig_acc : Types.signature)
            phrases. *)
         discharge ());
     toplevel_ctx := !ctx;
-    toplevel_preludes := !embedded_preludes)
+    toplevel_blocks := !embedded_blocks)
 ;;

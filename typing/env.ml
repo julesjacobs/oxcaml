@@ -3359,8 +3359,8 @@ let save_signature_with_imports ~alerts sg modname cu cmi imports =
   let with_imports cmi = { cmi with cmi_crcs = imports } in
   save_signature_with_transform with_imports ~alerts sg modname cu cmi
 
-let vox_imported_preludes () =
-  Persistent_env.vox_imported_preludes !persistent_env
+let vox_imported_specs () =
+  Persistent_env.vox_imported_specs !persistent_env
 
 (* Make the initial environment. *)
 let initial () =

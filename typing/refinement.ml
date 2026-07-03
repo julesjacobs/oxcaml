@@ -291,7 +291,7 @@ let rec tuple_arities acc p =
 
 let tuple_arities p = tuple_arities [] p
 
-(* Does [p] apply any spec function?  Prelude text (which defines
+(* Does [p] apply any spec function?  Spec text (which defines
    them) is injected only into solver inputs that need it: it may
    reference datatypes of one module, which do not exist in another
    module's input. *)

@@ -19,7 +19,7 @@ open Misc
    [%%vox.lean] blocks plus pre-rendered declarations for the
    datatypes its exported refinements are about (a client may never
    mention those types itself, yet the blocks reference them). *)
-type vox_prelude_export = {
+type vox_spec_export = {
   vp_datatypes : (string * string) list;
       (* (stable solver-side name, Lean declaration), in dependency
          order; clients deduplicate by name across imports *)
@@ -33,7 +33,7 @@ type pers_flags =
   | Rectypes
   | Alerts of alerts
   | Opaque
-  | Vox_prelude of vox_prelude_export
+  | Vox_spec of vox_spec_export
       (* collected by Typemod, consumed by Vox_verify in every client.
          Appending a constructor keeps old .cmis readable. *)
 

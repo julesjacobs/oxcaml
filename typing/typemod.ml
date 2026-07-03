@@ -2555,13 +2555,13 @@ and transl_signature ?(interface_toplevel = false) env
         in
         mksig (Tsig_attribute attr) env loc, [], newenv
     | Psig_extension ((({txt; _}, _) as ext), _attrs)
-      when Vox_verify.is_prelude_extension_name txt ->
+      when Vox_verify.is_vox_block_name txt ->
         (* vox: [%%vox.lean ...] in an interface exports the block
            through the .cmi to every client (and to this unit's own
            implementation).  Validated here; collected from the typed
            signature when the .cmi is written. *)
         ignore
-          (Vox_verify.prelude_extension_text ext
+          (Vox_verify.vox_block_text ext
            : string option);
         let name, payload = ext in
         let attr =
@@ -4094,12 +4094,12 @@ and type_structure ?(toplevel = None) ~funct_body anchor env sstr =
     | Pstr_include sincl ->
         type_str_include ~loc env shape_map sincl sig_acc
     | Pstr_extension ((({txt; _}, _) as ext), _attrs)
-      when Vox_verify.is_prelude_extension_name txt ->
+      when Vox_verify.is_vox_block_name txt ->
         (* vox: [%%vox.lean {lean|...|lean}] embeds solver-side
            definitions.  Validated here, then carried as an attribute
            so the verification pass can collect it from the tree. *)
         ignore
-          (Vox_verify.prelude_extension_text ext
+          (Vox_verify.vox_block_text ext
            : string option);
         let name, payload = ext in
         Tstr_attribute

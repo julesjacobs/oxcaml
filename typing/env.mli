@@ -623,7 +623,7 @@ val read_signature:
            Results: signature. If [add_binding] is true, creates an entry for
            the module in the environment. *)
 val save_signature:
-  alerts:alerts -> ?vox_preludes:Cmi_format.vox_prelude_export
+  alerts:alerts -> ?vox_preludes:Cmi_format.vox_spec_export
   -> persistent_signature
   -> Compilation_unit.Name.t -> Cmi_format.kind
   -> Unit_info.Artifact.t -> Cmi_format.cmi_infos_lazy
@@ -640,9 +640,9 @@ val save_signature_with_imports:
 (* vox: the exported spec (datatype declarations + prelude blocks) of
    every loaded import (unit name, export, the unit's own import
    names); see Vox_verify. *)
-val vox_imported_preludes : unit
+val vox_imported_specs : unit
   -> (Compilation_unit.Name.t
-      * Cmi_format.vox_prelude_export
+      * Cmi_format.vox_spec_export
       * Compilation_unit.Name.t list) list
 
 (* Register a module as a parameter to this unit. *)

@@ -325,7 +325,7 @@ let save_import penv crc modname impl flags filename =
     (function
         | Rectypes -> ()
         | Alerts _ -> ()
-        | Vox_prelude _ -> ()
+        | Vox_spec _ -> ()
         | Opaque -> register_import_as_opaque penv modname)
     flags;
   Consistbl.check crc_units modname impl crc filename;
@@ -350,7 +350,7 @@ let acknowledge_import penv ~check modname pers_sig =
             if not !Clflags.recursive_types then
               error (Need_recursive_types(modname))
         | Alerts _ -> ()
-        | Vox_prelude _ -> ()
+        | Vox_spec _ -> ()
         | Opaque -> register_import_as_opaque penv modname)
     flags;
   begin match kind, CU.get_current () with
@@ -1107,7 +1107,7 @@ let is_imported_opaque {imported_opaque_units; _} s =
    dependency).  A unit's own .mli, read while compiling its .ml, is
    in this table too, which is exactly what lets the implementation be
    verified against the interface's specs. *)
-let vox_imported_preludes {imports; _} =
+let vox_imported_specs {imports; _} =
   Hashtbl.fold
     (fun name info acc ->
       match info with
@@ -1115,7 +1115,7 @@ let vox_imported_preludes {imports; _} =
       | Found imp ->
         let export =
           List.find_map
-            (function Cmi_format.Vox_prelude vp -> Some vp | _ -> None)
+            (function Cmi_format.Vox_spec vp -> Some vp | _ -> None)
             imp.imp_flags
         in
         (match export with
@@ -1140,7 +1140,7 @@ let make_cmi penv modname kind sign alerts ~vox_preludes =
       [Alerts alerts];
       (match vox_preludes with
        | None -> []
-       | Some vp -> [Cmi_format.Vox_prelude vp]);
+       | Some vp -> [Cmi_format.Vox_spec vp]);
     ]
   in
   let params =
