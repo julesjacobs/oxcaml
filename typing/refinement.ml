@@ -67,6 +67,20 @@ type pred =
   | Pand of pred * pred
   | Por of pred * pred
   | Pnot of pred
+  | Pquant of quant * Ident.t * pred
+    (* quantifier [forall_ x. p] / [exists_ x. p].  The binder is a
+       fresh [Scoped] ident, like a dependent-arrow binder: [Scoped]
+       stamps marshalled through a .cmi can never collide with a
+       consuming unit's [Local] variables, and freshness makes
+       substitution capture-free.  The binder is UNSORTED (predicates
+       are untyped): the Lean side emits it unannotated and lets
+       elaboration infer, exactly as the existential encoding of [Pis]
+       already does; an uninferable binder is a solver error, i.e. a
+       verification failure. *)
+
+and quant =
+  | Qforall
+  | Qexists
 
 let binop_name = function
   | Add -> "+"
@@ -146,9 +160,14 @@ let rec equal p1 p2 =
   | Pis (p1, c1, a1), Pis (p2, c2, a2) ->
     Path.same p1 p2 && String.equal c1 c2 && equal a1 a2
   | Pnot a1, Pnot a2 -> equal a1 a2
+  | Pquant (q1, id1, a1), Pquant (q2, id2, a2) ->
+    (* Alpha-equivalence, by the same binder pairing dependent arrows
+       use: two independently written (hence differently-stamped)
+       quantifiers compare with their binders paired. *)
+    q1 = q2 && with_binder_pair id1 id2 (fun () -> equal a1 a2)
   | ( ( Pbound | Pvar _ | Pint _ | Pbool _ | Pconstr _ | Pfun _ | Pfield _
       | Ptuple _ | Pproj _
-      | Pis _ | Pbinop _ | Pand _ | Por _ | Pnot _ ),
+      | Pis _ | Pbinop _ | Pand _ | Por _ | Pnot _ | Pquant _ ),
       _ ) -> false
 ;;
 
@@ -168,6 +187,10 @@ let rec subst_var id ~by p =
   | Pand (a, b) -> Pand (subst_var id ~by a, subst_var id ~by b)
   | Por (a, b) -> Por (subst_var id ~by a, subst_var id ~by b)
   | Pnot a -> Pnot (subst_var id ~by a)
+  | Pquant (q, b, a) ->
+    (* No capture and no shadowing: quantifier binders are fresh
+       stamps, distinct from every substitutable variable. *)
+    Pquant (q, b, subst_var id ~by a)
 ;;
 
 (* Substitute the bound variable [v] (used when instantiating a refinement at a logical
@@ -186,6 +209,7 @@ let rec subst_bound ~by p =
   | Pand (a, b) -> Pand (subst_bound ~by a, subst_bound ~by b)
   | Por (a, b) -> Por (subst_bound ~by a, subst_bound ~by b)
   | Pnot a -> Pnot (subst_bound ~by a)
+  | Pquant (q, b, a) -> Pquant (q, b, subst_bound ~by a)
 ;;
 
 let rec free_vars acc p =
@@ -197,6 +221,11 @@ let rec free_vars acc p =
   | Pfield (_, _, a) | Pis (_, _, a) | Pproj (_, _, a) -> free_vars acc a
   | Pbinop (_, a, b) | Pand (a, b) | Por (a, b) -> free_vars (free_vars acc a) b
   | Pnot a -> free_vars acc a
+  | Pquant (_, b, a) ->
+    (* The binder is bound, not free.  Filtering the body's variables
+       suffices: binder stamps are fresh, so [b] cannot also occur in
+       [acc]. *)
+    List.filter (fun id -> not (Ident.same id b)) (free_vars acc a)
 ;;
 
 let free_vars p = free_vars [] p
@@ -210,6 +239,7 @@ let rec mem_var id p =
   | Pfield (_, _, a) | Pis (_, _, a) | Pproj (_, _, a) -> mem_var id a
   | Pbinop (_, a, b) | Pand (a, b) | Por (a, b) -> mem_var id a || mem_var id b
   | Pnot a -> mem_var id a
+  | Pquant (_, b, a) -> (not (Ident.same id b)) && mem_var id a
 ;;
 
 (* Remap the type paths of constructor applications (used by [Subst] when a
@@ -227,6 +257,7 @@ let rec map_paths f p =
   | Pand (a, b) -> Pand (map_paths f a, map_paths f b)
   | Por (a, b) -> Por (map_paths f a, map_paths f b)
   | Pnot a -> Pnot (map_paths f a)
+  | Pquant (q, b, a) -> Pquant (q, b, map_paths f a)
 ;;
 
 let rec constr_paths acc p =
@@ -238,6 +269,7 @@ let rec constr_paths acc p =
   | Pproj (_, _, a) -> constr_paths acc a
   | Pbinop (_, a, b) | Pand (a, b) | Por (a, b) -> constr_paths (constr_paths acc a) b
   | Pnot a -> constr_paths acc a
+  | Pquant (_, _, a) -> constr_paths acc a
 ;;
 
 let constr_paths p = constr_paths [] p
@@ -254,6 +286,7 @@ let rec tuple_arities acc p =
   | Pbinop (_, a, b) | Pand (a, b) | Por (a, b) ->
     tuple_arities (tuple_arities acc a) b
   | Pnot a -> tuple_arities acc a
+  | Pquant (_, _, a) -> tuple_arities acc a
 ;;
 
 let tuple_arities p = tuple_arities [] p
@@ -271,6 +304,7 @@ let rec mentions_spec_fun p =
     mentions_spec_fun a
   | Pbinop (_, a, b) | Pand (a, b) | Por (a, b) ->
     mentions_spec_fun a || mentions_spec_fun b
+  | Pquant (_, _, a) -> mentions_spec_fun a
 ;;
 
 (* Printing, in the compact surface format: the bound value variable prints as [_];
@@ -324,6 +358,14 @@ let rec print ppf p =
   | Pand (a, b) -> fprintf ppf "@[%a &&@ %a@]" print_atom a print_atom b
   | Por (a, b) -> fprintf ppf "@[%a ||@ %a@]" print_atom a print_atom b
   | Pnot a -> fprintf ppf "@[not %a@]" print_atom a
+  | Pquant (q, b, a) ->
+    (* Reparses: [forall_ x. p] is the surface syntax.  The binder
+       prints through [var_display] so shadowing diagnostics
+       disambiguate it like any other variable. *)
+    fprintf ppf "@[%s %s.@ %a@]"
+      (match q with Qforall -> "forall_" | Qexists -> "exists_")
+      (!var_display b)
+      print a
 
 and print_atom ppf p =
   match p with
@@ -333,7 +375,7 @@ and print_atom ppf p =
     (* [fst]/[snd] print as applications; the [.i] form is atomic *)
     if n = 2 then Format.fprintf ppf "(%a)" print p else print ppf p
   | Pconstr (_, _, _ :: _) | Pfun (_, _ :: _) | Pis _ | Pbinop _
-  | Pand _ | Por _ | Pnot _ -> Format.fprintf ppf "(%a)" print p
+  | Pand _ | Por _ | Pnot _ | Pquant _ -> Format.fprintf ppf "(%a)" print p
 ;;
 
 let to_string p = Format.asprintf "%a" print p

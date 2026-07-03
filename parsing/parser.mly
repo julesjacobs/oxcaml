@@ -1118,6 +1118,8 @@ let maybe_pmod_constraint mode expr =
 %token RBRACKETGREATER        "]>"
 %token REC                    "rec"
 %token REFINE                 "refine_"
+%token FORALL                 "forall_"
+%token EXISTS                 "exists_"
 %token REPR                   "repr_"
 %token RPAREN                 ")"
 %token SEMI                   ";"
@@ -5097,8 +5099,38 @@ vox_named_type:
   | op = INFIXOP0 { op }
 ;
 
+(* Quantifiers bind weakest and extend maximally right, like [fun];
+   implication [p -> q] sits just above them, right-associative, and
+   desugars to [not p || q] (so the printed form, which shows the
+   desugaring, reparses).  Both live only at the top of a predicate or
+   inside parentheses.  A quantifier is encoded as an application of
+   the (keyword, hence unspoofable) ident [forall_]/[exists_] to the
+   binder names and the body; the elaborator peels it back apart. *)
 vox_pred:
   | p = vox_pred_or { p }
+  | a = vox_pred_or MINUSGREATER b = vox_pred
+      { mkexp ~loc:$sloc
+          (mkinfix
+             (mkexp ~loc:$loc(a)
+                (Pexp_apply
+                   (mkoperator ~loc:$loc($2) "not", [ Nolabel, a ])))
+             (mkoperator ~loc:$loc($2) "||")
+             b) }
+  | q = vox_quant_head bs = nonempty_list(mkrhs(LIDENT)) DOT body = vox_pred
+      { let binder b =
+          Nolabel,
+          mkexp ~loc:(b.loc.Location.loc_start, b.loc.Location.loc_end)
+            (Pexp_ident { b with txt = Longident.Lident b.txt })
+        in
+        mkexp ~loc:$sloc
+          (Pexp_apply
+             (mkexpvar ~loc:$loc(q) q,
+              List.map binder bs @ [ Nolabel, body ])) }
+;
+
+%inline vox_quant_head:
+  | FORALL { "forall_" }
+  | EXISTS { "exists_" }
 ;
 
 vox_pred_or:

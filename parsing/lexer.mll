@@ -66,10 +66,12 @@ let all_keywords =
     "else", ELSE, always;
     "end", END, always;
     "exception", EXCEPTION, always;
+    "exists_", EXISTS, oxcaml;
     "exclave_", EXCLAVE, oxcaml;
     "external", EXTERNAL, always;
     "false", FALSE, always;
     "for", FOR, always;
+    "forall_", FORALL, oxcaml;
     "fun", FUN, always;
     "function", FUNCTION, always;
     "functor", FUNCTOR, always;

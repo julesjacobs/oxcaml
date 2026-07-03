@@ -540,7 +540,7 @@ let rec pred_unreflectable (p : Refinement.pred) =
   match p with
   | Refinement.Pconstr _ | Refinement.Pfun _ | Refinement.Pfield _
   | Refinement.Ptuple _ | Refinement.Pproj _
-  | Refinement.Pis _ -> true
+  | Refinement.Pis _ | Refinement.Pquant _ -> true
   | Refinement.Pbinop ((Refinement.Div | Refinement.Mod), _, _) -> true
   | Refinement.Pbound | Refinement.Pvar _ | Refinement.Pint _
   | Refinement.Pbool _ -> false
@@ -573,9 +573,9 @@ let emit_vc ~loc ~ctx ~goal ~kind =
      then
        Location.raise_errorf ~loc
          "vox: assume_ compiles a runtime check of this refinement, but it \
-          involves a constructor, field projection, spec function, or \
-          division, which the compiled check cannot evaluate faithfully; \
-          use assume_unchecked_";
+          involves a constructor, field projection, spec function, \
+          quantifier, or division, which the compiled check cannot \
+          evaluate faithfully; use assume_unchecked_";
      (* The compiled check compares machine words, which agrees with the
         logic only for int- and bool-sorted operands: other sorts are
         uninterpreted, and physical equality is stricter than logical
@@ -1587,7 +1587,7 @@ let boolish p =
         | Some S_bool -> true
         | Some (S_int | S_data _ | S_tuple _ | S_other) | None -> false)
      | Some (_, Dt_variant _) | None -> false)
-  | Pis _ -> true
+  | Pis _ | Pquant _ -> true
   (* A bool-sorted tuple COMPONENT is a Prop the model cannot see from
      the (untyped) projection alone: [=] between Props is emitted
      there, a sharp edge grind still handles via propext. *)
@@ -1649,6 +1649,20 @@ let rec lean_of_pred buf (p : Refinement.pred) =
     Buffer.add_char buf ')'
   | Pproj (n, i, a) ->
     Buffer.add_string buf (Printf.sprintf "(%s.p%d " (tuple_uname n) (i + 1));
+    lean_of_pred buf a;
+    Buffer.add_char buf ')'
+  | Pquant (q, id, a) ->
+    (* The binder is unannotated -- predicates are untyped, and Lean
+       infers its sort from the body, exactly as for the existential
+       encoding of [Pis] below; an uninferable binder is a solver
+       error, i.e. a verification failure. *)
+    Buffer.add_string
+      buf
+      ((match q with
+        | Qforall -> "(∀ "
+        | Qexists -> "(∃ ")
+       ^ lean_name id
+       ^ ", ");
     lean_of_pred buf a;
     Buffer.add_char buf ')'
   | Pis (p, c, a) ->
@@ -1904,6 +1918,7 @@ let lean_theorem buf i vc =
         | Refinement.Pis (_, _, a)
         | Refinement.Pfield (_, _, a)
         | Refinement.Pproj (_, _, a)
+        | Refinement.Pquant (_, _, a)
         | Refinement.Pnot a -> collect a
         | Refinement.Pconstr (_, _, args)
         | Refinement.Pfun (_, args)

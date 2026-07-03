@@ -1019,6 +1019,52 @@ let rec elab_vox_pred ~bound ~self_root env (e : Parsetree.expression)
       | Pexp_construct ({txt = lid; _}, None), [a] ->
           (* constructor application from the compact grammar *)
           elab_vox_constr ~bound ~self_root env ~loc lid (Some a)
+      | Pexp_ident {txt = Longident.Lident (("forall_" | "exists_") as q); _},
+        (_ :: _ :: _ as args) ->
+          (* Quantifier: the grammar encodes [forall_ x y. p] as an
+             application of the keyword ident to the binder names and
+             the body.  Binders are minted as fresh [Scoped] idents
+             (like dependent-arrow binders: .cmi-marshalled stamps must
+             not collide with a client's [Local] variables) and pushed
+             on the elaboration scope, innermost first, so they shadow
+             program variables.  Shadowing the refined value's own name
+             or an enclosing binder is rejected: the bound-value check
+             above would win the lookup, resolving occurrences to the
+             wrong variable.  Sharp edges, not bugs. *)
+          let quant =
+            match q with
+            | "forall_" -> Refinement.Qforall
+            | _ -> Refinement.Qexists
+          in
+          let body, binders =
+            match List.rev args with
+            | body :: rev_binders -> body, List.rev rev_binders
+            | [] -> assert false
+          in
+          let binder_name (b : Parsetree.expression) =
+            match b.pexp_desc with
+            | Pexp_ident {txt = Longident.Lident n; _} ->
+                if String.equal n bound
+                   || String.equal n "_"
+                   || vox_find_scope ~self_root n <> None
+                then
+                  Location.raise_errorf ~loc:b.pexp_loc
+                    "vox: this quantifier binder shadows the refined \
+                     value or an enclosing binder; rename it"
+                else n
+            | _ ->
+                Location.raise_errorf ~loc:b.pexp_loc
+                  "vox: a quantifier binder must be a plain variable name"
+          in
+          let rec go = function
+            | [] -> elab_vox_pred ~bound ~self_root env body
+            | b :: rest ->
+                let n = binder_name b in
+                let id = Ident.create_scoped ~scope:Ident.lowest_scope n in
+                vox_push_scope (Vox_pi (n, id)) (fun () ->
+                  Pquant (quant, id, go rest))
+          in
+          go binders
       | Pexp_ident {txt = Longident.Lident "not"; _}, [a] ->
           Pnot (elab_vox_pred ~bound ~self_root env a)
       | Pexp_ident {txt = Longident.Lident "fst"; _}, [a] ->

@@ -16,7 +16,8 @@
   OCaml's semantics: T-division, truncating toward zero -- the solver
   sees Lean's `Int.tdiv`/`Int.tmod`; the logic totalizes `x / 0` as 0
   where the program raises, sound under partial correctness),
-  comparisons, and `&& || not`.  A
+  comparisons, `&& || not`, implication `p -> q` (sugar for
+  `not p || q`), and quantifiers (below).  A
   program variable in a refinement means the logical value associated
   with it, not the program value. Predicates are UNTYPED -- the
   compiler never checks them; the logic types them, as in first-order
@@ -242,6 +243,30 @@
   parenthesize it -- [(p : (int * int)) -> ...] -- since
   [(p : int * int)] is the LABELED TUPLE type [p:int * int] (the
   LR(1) ambiguity above); the printer emits the parenthesized form.
+- Quantifiers: `forall_ x. p` and `exists_ x. p` (keywords, like
+  `refine_`: bare `forall`/`exists` collide with existing
+  identifiers); binders may be listed (`forall_ i j. p`) and extend
+  maximally right.  They live in the compact predicate grammar only
+  (the long form's predicate rides the expression grammar).  A binder
+  is a fresh `Scoped` ident -- like a dependent-arrow binder, so a
+  .cmi-marshalled stamp can never collide with a client's variables --
+  compared under the same binder pairing, so alpha-variants are the
+  SAME rigid type.  Binders are UNSORTED like the rest of the
+  predicate language: the Lean side emits them unannotated and lets
+  elaboration infer (a formula whose atoms involve only binders is
+  stuck at polymorphic operators -- ground it with an int literal).
+  `assume_` cannot check a quantifier (compile-time error pointing at
+  `assume_unchecked_`).  The automation envelope, measured against
+  grind (demo/lean_quant.ml): a `forall_` GOAL is reliable (grind
+  introduces the binder); an `exists_` FACT is reliable (grind
+  skolemizes it); an `exists_` GOAL needs the witness-equation idiom
+  (`exists_ y. y = 3 && ...`); instantiating a `forall_` FACT is
+  unreliable (E-matching against linear-arithmetic normal forms) --
+  heavy quantified reasoning, e.g. sortedness instantiated at
+  discovered indices, still belongs in `[%%vox.lean]` prelude lemmas,
+  where `@[grind]` annotations control the patterns.  Verification
+  stays fails-closed throughout: an obligation grind cannot discharge
+  is a compile error, never unsoundness.
 - Spec functions: any other applied identifier in a predicate,
   `len _` or `mem 2 _`, denotes a logical function that the user
   defines on the solver side -- in a `-vox-prelude` file or an

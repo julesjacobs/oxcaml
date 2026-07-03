@@ -64,5 +64,5 @@ let unchecked : (d : int) -> int{ _ = 100 / d } =
 Line 2, characters 19-28:
 2 |   fun d -> assume_ (100 / d)
                        ^^^^^^^^^
-Error: vox: assume_ compiles a runtime check of this refinement, but it involves a constructor, field projection, spec function, or division, which the compiled check cannot evaluate faithfully; use assume_unchecked_
+Error: vox: assume_ compiles a runtime check of this refinement, but it involves a constructor, field projection, spec function, quantifier, or division, which the compiled check cannot evaluate faithfully; use assume_unchecked_
 |}]
