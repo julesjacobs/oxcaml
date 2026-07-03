@@ -43,6 +43,7 @@ Line 4, characters 29-30: vox VC:
   hypotheses:
   c
   c = (z < x)
+  z = zero
   z = 0
   zero = 0
   zero = 0

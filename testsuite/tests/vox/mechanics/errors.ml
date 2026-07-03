@@ -24,17 +24,21 @@ let s : {v:string | v = v} = refine_ "hi"
 val s : string{ _ = _ } = "hi"
 |}]
 
-(* Unpacking requires a refined scrutinee. *)
+(* Unpacking an UNREFINED scrutinee is dead code: under binders as
+   facts every binder already binds at the skeleton, so there is
+   nothing to unpack -- a plain [let] carries the self fact. *)
 let f (x : int) = let refine_ w = x in w
 [%%expect{|
 Line 1, characters 22-31:
 1 | let f (x : int) = let refine_ w = x in w
                           ^^^^^^^^^
-Error: vox: a refine_ pattern requires the scrutinee to have a refined type
+Error: vox: a refine_ pattern requires the scrutinee to have a refined type (a plain let binds at the skeleton and carries the fact already)
 |}]
 
 (* Rigid refined types: predicates compare structurally, so v > 0 and
-   0 < v are DIFFERENT types (a documented sharp edge). *)
+   0 < v are DIFFERENT types.  At a check position a VARIABLE is
+   implicitly re-refined -- a proof obligation rather than a type
+   error (see infer.ml). *)
 let pos : {v:int | v > 0} = refine_ 3
 [%%expect{|
 val pos : int{ _ > 0 } = 3
@@ -42,17 +46,32 @@ val pos : int{ _ > 0 } = 3
 
 let y : {v:int | 0 < v} = pos
 [%%expect{|
-Line 1, characters 26-29:
-1 | let y : {v:int | 0 < v} = pos
-                              ^^^
-Error: The value "pos" has type "int{ _ > 0 }"
-       but an expression was expected of type "int{ 0 < _ }"
+val y : int{ 0 < _ } = 3
 |}]
 
-(* A refined and an unrefined branch do not unify: refinements never
-   flow through unification (soundness: which branch's refinement
-   "won" would be an implementation accident).  DESIGN.md's required
-   counterexample. *)
+(* Under a type constructor there is no implicit step: refinements
+   unify only with structurally equal predicates, so v > 0 and 0 < v
+   remain distinct (the documented sharp edge). *)
+let xs : {v:int | v > 0} list = [pos]
+[%%expect{|
+val xs : int{ _ > 0 } list = [3]
+|}]
+
+let ys : {v:int | 0 < v} list = xs
+[%%expect{|
+Line 1, characters 32-34:
+1 | let ys : {v:int | 0 < v} list = xs
+                                    ^^
+Error: The value "xs" has type "int{ _ > 0 } list"
+       but an expression was expected of type "int{ 0 < _ } list"
+       Type "int{ _ > 0 }" is not compatible with type "int{ 0 < _ }"
+|}]
+
+(* Refinements never flow through unification -- and under binders as
+   facts they no longer try: the parameter [b] binds at the skeleton
+   [int] (its refinement is a fact at its stamp), so the join is
+   plainly [int] in either branch order.  DESIGN.md's counterexample,
+   now simply well-typed. *)
 let join (b : {v:int | v > 0}) (c : bool) = if c then 0 else b
 [%%expect{|
 val join : int{ _ > 0 } -> bool -> int = <fun>

@@ -1620,11 +1620,33 @@ let iter_pattern_variables_type_mut ~f_immut ~f_mut pvs =
     | Val_mut _ -> f_mut pv_type
     | _ -> f_immut pv_lpoly pv_type) pvs
 
-let add_pattern_variables ?check ?check_as env pv =
+let add_pattern_variables ?check ?check_as ?(vox_unpack=false) env pv =
   List.fold_right
     (fun {pv_id; pv_mode; pv_value_kind; pv_type; pv_loc; pv_kind;
           pv_attributes; pv_uid; pv_lpoly} env ->
        let check = if pv_kind=As_var then check_as else check in
+       (* vox: binders as facts -- a LOCAL binder whose type carries a
+          top-level refinement enters the environment at the SKELETON;
+          the predicate becomes a fact at the binder's stamp,
+          contributed by the verification pass from the pattern (whose
+          type keeps the refinement).  This is the [let]/[match]
+          analogue of the contract rule for parameters: names bind at
+          carriers, predicates live in the logical context, refined
+          types live in annotations and interfaces.  Mutable binders
+          are exempt (a persistent fact about a mutable name would
+          survive assignment).  No expansion: an alias-hidden
+          refinement stays a package, consistent with the
+          verification pass's own no-expansion gate. *)
+       let pv_type =
+         if not vox_unpack then pv_type
+         else
+           match pv_value_kind with
+           | Val_mut _ -> pv_type
+           | _ ->
+             (match get_desc pv_type with
+              | Trefine (skel, _) -> skel
+              | _ -> pv_type)
+       in
        Env.add_value ?check ~mode:pv_mode pv_id
          {val_type = pv_type; val_kind = pv_value_kind; val_lpoly = pv_lpoly;
           Types.val_loc = pv_loc;
@@ -4032,9 +4054,15 @@ and type_pat_aux
              unpack inside an expression ([let refine_ x = e in ...]) \
              or bind with the refined type annotated instead"
       | _ ->
+          (* Under binders as facts every binder already binds at the
+             skeleton, so an unpack of an unrefined scrutinee is dead
+             code -- usually the old idiom [let refine_ x = x] applied
+             to a binder that no longer needs it.  A plain [let]
+             carries the self fact. *)
           Location.raise_errorf ~loc
             "vox: a refine_ pattern requires the scrutinee to have a \
-             refined type"
+             refined type (a plain let binds at the skeleton and \
+             carries the fact already)"
       end
   | Ppat_extension ext ->
       raise (Error_forward (Builtin_attributes.error_of_extension ext))
@@ -6227,6 +6255,30 @@ let rec is_inferred sexp =
   | Pexp_ifthenelse (_, e1, Some e2) -> is_inferred e1 && is_inferred e2
   | _ -> false
 
+(* vox: forms whose head type constructor is determined by the syntax
+   alone and can never be [Trefine].  Checking one against a refined
+   expected type is certain to fail rigid unification, so an implicit
+   [refine_] introduction is inserted instead (see [type_expect_]). *)
+let is_vox_checked_atom sexp =
+  match sexp.pexp_desc with
+  | Pexp_constant _ | Pexp_tuple _ | Pexp_construct _ | Pexp_variant _
+  | Pexp_record _ | Pexp_array _ | Pexp_function _ -> true
+  | _ -> false
+
+(* vox: the non-recursive [is_inferred] heads.  These are typechecked
+   without using the expected type, so at a refined expected type they
+   can be typed under a fresh variable and reconciled with the
+   refinement afterwards.  The recursive [is_inferred] cases
+   (sequences, [if]) are deliberately excluded: they propagate the
+   expected type into their sub-expressions, which places implicit
+   introductions at the leaves, under the branch path facts. *)
+let is_vox_inferred_head sexp =
+  match sexp.pexp_desc with
+  | Pexp_ident _ | Pexp_apply _ | Pexp_field _
+  | Pexp_constraint (_, Some _, _) | Pexp_coerce _ | Pexp_send _
+  | Pexp_new _ -> true
+  | _ -> false
+
 (* check if the type of %apply or %revapply matches the type expected by
    the specialized typing rule for those primitives.
 *)
@@ -7053,6 +7105,153 @@ and type_expect_
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
   in
+  (* vox: implicit refinement introduction/elimination at check
+     positions.  Refined types are rigid, so each rule below fires only
+     where unification is certain to fail today; no currently-typeable
+     program changes meaning.
+     - Expected [t{p}], expression a syntactic value form (constant,
+       constructor, tuple, record, array, function): its head type can
+       never be refined, so it is typed at the skeleton and the node is
+       marked as a [refine_] introduction (a proof obligation, exactly
+       as if the user had written [refine_ e]).
+     - Expected [t{p}], inferred form (variable, application, ...):
+       typed without the expected type (the [is_inferred] contract),
+       then reconciled: an equal refined type or a type variable passes
+       through as before (no obligation); an unrefined rigid type
+       becomes an introduction; a VARIABLE at a different refinement is
+       re-refined (obligation [p]; its own refinement is in the logical
+       context from its binder).  Any other form at a different
+       refinement must be let-bound: its refinement has no logical name
+       to survive as a hypothesis.
+     - Expected rigid and unrefined, expression a variable of refined
+       type: implicit elimination, obligation-free (the fact lives at
+       the binder).  Restricted to variables for the same reason:
+       erasing an unnamed value would silently discard its only fact.
+     Propagation forms ([if], [match], [let], sequences, ...) fall
+     through to their ordinary typing, which pushes the expected type
+     into their branches; the rules above then re-fire at the leaves,
+     under the branch path facts. *)
+  let vox_subsume () : Typedtree.expression option =
+    match overwrite with
+    | Overwriting _ | Assigning _ -> None
+    | No_overwrite ->
+    (* The head peek must be a strict no-op for non-vox programs:
+       under local (GADT) constraints, [protect_expansion] does not
+       copy a non-generic expected type, and expanding the shared type
+       through a local equation stamps it with the equation's scope,
+       changing where ambiguity errors surface.  Peek under a
+       snapshot, as [type_argument] does; only the head constructor of
+       the answer is consulted after the rollback. *)
+    let peek_head () =
+      get_desc (expand_head env (protect_expansion env ty_expected))
+    in
+    let expected_head =
+      if Env.has_local_constraints env then
+        let snap = Btype.snapshot () in
+        try_finally ~always:(fun () -> Btype.backtrack snap) peek_head
+      else peek_head ()
+    in
+    match expected_head with
+    | Trefine _ ->
+      let ty_exp = expand_head env (instance ty_expected) in
+      (match get_desc ty_exp with
+       | Trefine (skel, pred) ->
+         let intro exp =
+           let is_vox_intro (a : Parsetree.attribute) =
+             match a.attr_name.txt with
+             | "vox.refine" | "vox.refine_exact" | "vox.assume"
+             | "vox.assume_unchecked" -> true
+             | _ -> false
+           in
+           if List.exists is_vox_intro exp.exp_attributes
+           then
+             Location.raise_errorf ~loc
+               "vox: this expression already carries a refinement \
+                introduction and cannot implicitly be refined again; \
+                let-bind it first";
+           let attr : Parsetree.attribute =
+             { attr_name = {txt = "vox.refine"; loc};
+               attr_payload = PStr [];
+               attr_loc = loc }
+           in
+           Some (rue
+             { exp with
+               exp_type = instance ty_exp;
+               exp_attributes = attr :: exp.exp_attributes })
+         in
+         if is_vox_checked_atom sexp then
+           let exp =
+             type_expect env expected_mode sexp (mk_expected (instance skel))
+           in
+           intro exp
+         else if is_vox_inferred_head sexp then begin
+           let exp = type_exp env expected_mode sexp in
+           match get_desc (expand_head env exp.exp_type) with
+           | Trefine (_, pred') when Refinement.equal pred pred' ->
+             Some (rue exp)
+           | Trefine (skel', _) ->
+             (match sexp.pexp_desc with
+              | Pexp_ident _ ->
+                with_explanation (fun () ->
+                  unify_exp_types loc env skel' (instance skel));
+                intro exp
+              | _ ->
+                Location.raise_errorf ~loc
+                  "vox: this expression's refined type differs from \
+                   the refinement expected here, and only a variable \
+                   can be implicitly re-refined; let-bind it first")
+           | Tvar _ -> Some (rue exp)
+           | _ ->
+             with_explanation (fun () ->
+               unify_exp_types loc env exp.exp_type (instance skel));
+             intro exp
+         end
+         else None
+       | _ -> None)
+    | Tvar _ | Tunivar _ | Tpoly _ -> None
+    | _ ->
+      (* Expected type is rigid and unrefined. *)
+      match sexp.pexp_desc with
+      | Pexp_ident lid ->
+        let scheme_is_refined =
+          match Env.find_value_by_name lid.txt env with
+          | exception Not_found -> false
+          | (_, desc) ->
+            (* This peek must not commit any expansion: expanding a
+               scheme that mentions a local (GADT) equation here would
+               poison the ambiguity tracking of the ordinary typing
+               that follows.  Only a [Tconstr] can abbreviate a refined
+               type, and its expansion is done on a protected copy,
+               under a snapshot (mirroring [type_argument]). *)
+            (match get_desc desc.val_type with
+             | Trefine _ -> true
+             | Tconstr _ ->
+               let work () =
+                 match
+                   get_desc
+                     (expand_head env (protect_expansion env desc.val_type))
+                 with
+                 | Trefine _ -> true
+                 | _ -> false
+               in
+               if Env.has_local_constraints env then
+                 let snap = Btype.snapshot () in
+                 try_finally ~always:(fun () -> Btype.backtrack snap) work
+               else work ()
+             | _ -> false)
+        in
+        if not scheme_is_refined then None
+        else begin
+          let exp = type_exp env expected_mode sexp in
+          match get_desc (expand_head env exp.exp_type) with
+          | Trefine (skel', _) -> Some (rue { exp with exp_type = skel' })
+          | _ -> Some (rue exp)
+        end
+      | _ -> None
+  in
+  match vox_subsume () with
+  | Some exp -> exp
+  | None ->
   match sexp.pexp_desc with
   | Pexp_ident lid ->
       let path, actual_mode, layout_args, desc, kind =
@@ -7212,8 +7411,8 @@ and type_expect_
             else Modules_rejected
           in
           let (pat_exp_list, new_env) =
-            type_let existential_context env mutable_flag rec_flag
-              spat_sexp_list allow_modules
+            type_let ~vox_unpack:true existential_context env mutable_flag
+              rec_flag spat_sexp_list allow_modules
           in
           let body =
             type_expect
@@ -11236,6 +11435,7 @@ and map_half_typed_cases
         let cont_vars, pvs =
           List.partition (fun pv -> pv.pv_kind = Continuation_var) pvs in
         let add_pattern_vars = add_pattern_variables
+            ~vox_unpack:true
             ~check:(fun s ->
               Warnings.Unused_var_strict { name = s; mutated = false })
             ~check_as:(fun s ->
@@ -11483,6 +11683,7 @@ and type_effect_cases
 (* Typing of let bindings *)
 
 and type_let ?check ?check_strict ?(force_toplevel = false)
+    ?(vox_unpack = false)
     existential_context env mutable_flag rec_flag spat_sexp_list allow_modules =
   (* Check that all bindings are either all poly or all non-poly *)
   let is_lpoly =
@@ -11760,6 +11961,34 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
     ) l;
   (* See Note [add_module_variables after checking expressions] *)
   let new_env = add_module_variables new_env mvs in
+  (* vox: binders as facts for [let] -- the binders entered the
+     environment BEFORE their right-hand sides were typed, so a binder
+     whose refined type was inferred from its RHS is only now known to
+     carry one.  Re-enter each such immutable binder at the skeleton
+     of its (already generalized) type; the pattern keeps the refined
+     type, from which the verification pass contributes the fact.
+     [vox_unpack] is set only for expression-level lets: module-level
+     bindings keep the refined type (types travel across module
+     boundaries; the fact is module-local). *)
+  let new_env =
+    if not vox_unpack then new_env
+    else
+      List.fold_left
+        (fun acc_env pv ->
+          match pv.pv_value_kind with
+          | Val_mut _ -> acc_env
+          | _ ->
+            (match Env.find_value (Path.Pident pv.pv_id) acc_env with
+             | lazy_vd ->
+               let vd = Subst.Lazy.force_value_description lazy_vd in
+               (match get_desc vd.val_type with
+                | Trefine (skel, _) ->
+                  Env.add_value ~mode:pv.pv_mode pv.pv_id
+                    { vd with val_type = skel } acc_env
+                | _ -> acc_env)
+             | exception Not_found -> acc_env))
+        new_env pvs
+  in
   (* vox: a [total_] binding registers its identifier, so that
      from here on a saturated application of it translates into the
      logic ([Vox_reflect.translate]).  The definition itself is
@@ -12303,7 +12532,7 @@ and type_comprehension_clause ~loc ~comprehension_type ~container_type env
       let env =
         let check s = Warnings.Unused_var { name = s; mutated = false } in
         let pvs = tps.tps_pattern_variables in
-        add_pattern_variables ~check ~check_as:check env pvs
+        add_pattern_variables ~vox_unpack:true ~check ~check_as:check env pvs
       in
       env, Texp_comp_for tbindings
   | Pcomp_when cond ->

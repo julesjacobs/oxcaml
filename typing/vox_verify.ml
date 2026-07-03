@@ -998,7 +998,7 @@ let rec walk_expr env ctx (e : expression) =
            | None -> arrow_ty := ret)
         | _ -> ())
       args
-  | Texp_let (_rec_flag, vbs, body) ->
+  | Texp_let (rec_flag, vbs, body) ->
     (* Reflected definitions are global; a local one could capture
        enclosing variables (translate_def's closedness check would also
        catch that, but the restriction is the honest one). *)
@@ -1018,11 +1018,18 @@ let rec walk_expr env ctx (e : expression) =
         vbs
     in
     let ctx' =
-      List.fold_left
-        (fun ctx vb ->
-          { ctx with cfacts = binding_self_facts env vb @ ctx.cfacts })
-        ctx'
-        vbs
+      (* RECURSIVE bindings contribute no self fact: a cyclic
+         constructor equation ([let rec ones = 1 :: ones]) is
+         unsatisfiable in the solver's well-founded datatype theory,
+         which would make the hypotheses inconsistent. *)
+      match rec_flag with
+      | Recursive -> ctx'
+      | Nonrecursive ->
+        List.fold_left
+          (fun ctx vb ->
+            { ctx with cfacts = binding_self_facts env vb @ ctx.cfacts })
+          ctx'
+          vbs
     in
     walk_expr env ctx' body
   | Texp_match (scrut, _sort, comp_cases, val_cases, _partial) ->
@@ -2426,7 +2433,7 @@ let walk_items (str : structure) ctx =
   List.iter
     (fun item ->
       match item.str_desc with
-      | Tstr_value (_rec_flag, vbs) ->
+      | Tstr_value (rec_flag, vbs) ->
         (match vbs with
          | _ :: _ :: _
            when List.exists
@@ -2452,15 +2459,21 @@ let walk_items (str : structure) ctx =
                extend_pat ~toplevel:true str.str_final_env ctx vb.vb_pat)
              !ctx
              vbs;
-        ctx
-        := List.fold_left
-             (fun ctx vb ->
-               { ctx with
-                 cfacts =
-                   binding_self_facts str.str_final_env vb @ ctx.cfacts
-               })
-             !ctx
-             vbs
+        (match rec_flag with
+         | Recursive ->
+           (* No self facts for recursive bindings (cyclic constructor
+              equations are unsatisfiable in the datatype theory). *)
+           ()
+         | Nonrecursive ->
+           ctx
+           := List.fold_left
+                (fun ctx vb ->
+                  { ctx with
+                    cfacts =
+                      binding_self_facts str.str_final_env vb @ ctx.cfacts
+                  })
+                !ctx
+                vbs)
       | _ ->
         let it =
           { Tast_iterator.default_iterator with

@@ -41,14 +41,16 @@
 - Introduction: `refine_ e` wraps `e` at the refined type expected from
   context (an annotation, or -- as an explicit cast -- the parameter
   type at an argument position). Proof obligations arise from exactly
-  two places: `refine_`, and applications to refined PARAMETERS (see
-  "Parameters as preconditions" below). With no refined expected type
-  in context, `refine_ e` instead SYNTHESIZES the exact refinement
-  `{v:t | v = e'}`, where `e'` is the logic translation of `e` --
-  definitionally true, so no obligation; the fact then flows from the
-  binder as usual (`let c = refine_ (0 < x)` gives
-  `c : bool{ _ = (0 < x) }`).  Expressions the logic cannot express
-  are an error there ("add a refined type annotation").
+  two places: `refine_` intros -- written explicitly, or inserted
+  implicitly at check positions (see the IMPLICIT bullet below) --
+  and applications to refined PARAMETERS (see "Parameters as
+  preconditions" below). With no refined expected type in context,
+  `refine_ e` instead SYNTHESIZES the exact refinement `{v:t | v = e'}`,
+  where `e'` is the logic translation of `e` -- definitionally true, so
+  no obligation; the fact then flows from the binder as usual
+  (`let c = refine_ (0 < x)` gives `c : bool{ _ = (0 < x) }`).
+  Expressions the logic cannot express are an error there ("add a
+  refined type annotation").
 - `assume_ e` is `refine_ e` with the proof obligation replaced by a
   COMPILED RUNTIME CHECK of the predicate (reported as RUNTIME CHECKED
   in diagnostics): the value is tested against the predicate and
@@ -67,11 +69,63 @@
   cannot check.
 - Elimination: the irrefutable pattern `refine_ x`, as in
   `let refine_ x = e`, binds `x` at the skeleton type. Free -- no proof
-  obligation. `e`'s type must be refined. `refine_` and
+  obligation. With BINDERS AS FACTS (below) this is what every binder
+  does; the explicit pattern remains for emphasis on a genuinely
+  refined scrutinee, and an unrefined scrutinee is an error (the
+  unpack would be dead code -- a plain `let` binds at the skeleton
+  and carries the self fact already).  `refine_` and
   `assume_unchecked_` erase at runtime; `assume_` erases to its runtime
   check. `refine_`, `assume_`, and `assume_unchecked_` are keywords
   (bare `refine`/`assume` collide with existing identifiers across the
   compiler).
+- BINDERS AS FACTS: every LOCAL binder whose type carries a top-level
+  refinement -- function parameters (via the contract rule), match and
+  pattern binders, and `let`-bound names, annotated or inferred --
+  binds at the SKELETON; the predicate becomes a fact at the binder's
+  stamp (contributed by the verification pass from the pattern, whose
+  type keeps the refinement).  An annotation on a binder therefore
+  means "prove here, assume after": the refined type never enters the
+  local typing context, so a bound name composes with everything its
+  carrier does (equality, polymorphic instantiation, deep positions)
+  -- the DML discipline, where Sigma-packages are opened at every
+  binding.  Exemptions: MODULE-LEVEL bindings keep their refined types
+  (types travel across module boundaries; facts are module-local), and
+  MUTABLE binders keep theirs (a persistent fact about a mutable name
+  would survive assignment).  Deep refinements (`int{p} list`) are
+  untouched: only the top-level refinement of the bound name opens.
+- IMPLICIT introduction/elimination (inference for the above; see
+  testsuite/tests/vox/mechanics/infer.ml).  Contract positions are
+  owned by the contract rule (a monomorphic refined arrow domain is
+  stripped at the application, so no coercion is ever needed there),
+  and local binders are owned by BINDERS AS FACTS (their uses are
+  carrier-typed from the start); the implicit rules below cover the
+  remaining RIGID positions -- refined expected types at annotations,
+  results and constructor payloads, values imported at module-level
+  refined types, and the refined domains contracts leave rigid
+  (polymorphic ones).  Refined types stay rigid in unification, so
+  elaboration can insert the coercion exactly where unification is
+  certain to fail.  Where the EXPECTED type is refined: a syntactic
+  value form (constant, constructor, tuple, record, array, function)
+  is typed at the skeleton and marked as a `refine_` intro; an
+  inferred form (variable, application, field, ...) is typed without
+  the expected type and reconciled -- equal refinement or flexible
+  type: pass-through, no obligation; unrefined rigid type: an intro;
+  a VARIABLE at a different refinement: re-refined (the obligation is
+  discharged with the variable's own refinement, in context from its
+  binder).  Dually, a VARIABLE of refined type used where a rigid
+  unrefined type is expected is implicitly eliminated,
+  obligation-free.  The non-intro cases are variables-only because
+  facts are indexed by logical names: erasing or re-refining an
+  unnamed value would disconnect its refinement from the logic
+  (error: "let-bind it first").  Branch constructs propagate the
+  expected type, so implicit intros land at the LEAVES, under each
+  branch's path facts (and, since local binders are carrier-typed,
+  unannotated joins of refined-fact-carrying and plain branches are
+  simply well-typed at the carrier, in either order).  Implicit
+  insertion always chooses `refine_` (an honest obligation), never
+  `assume_`; `refine_` remains required in synthesis position and
+  wherever the expected type is not yet resolved when the expression
+  is checked.
 - Function types may name their parameters, and later refinements may
   mention them: `(x:int) -> (y:int) -> {z:int | z = x * y}`. Dependent
   types arise from annotations only; inferred arrows are never
@@ -108,20 +162,20 @@
   the index at the arrow and constraining it -- the DML arrow -- is
   the semantics that needs no unpack; contracts are its vox spelling.
   Refinements on STORED values (let-annotations, constructor payloads,
-  results) remain rigid packages with explicit `refine_` introduction
-  and `let refine_ x = e` elimination -- in particular a RESULT
-  refinement is proved where the body is written and unpacked at each
-  call, and weakening a call's result to the enclosing instantiation
-  is an unpack-and-reprove (see the recursive calls in
-  lean_binsearch.ml).  A variable parameter refined by a PATTERN
-  annotation (`fun (b : {v:int | p}) -> ...`) binds at the skeleton
-  too -- the two spellings have the same semantics; the refined type
-  still flows into the arrow through the constraint.  (`function`-case
-  parameters are the remaining package-bound spelling.)  `refine_ x`
-  on a variable that IS refined is a checked CAST: the subject keeps
-  its own type, only the skeletons must agree, and the expected
-  refinement becomes an obligation at `x`'s name, provable from the
-  subject's own binder fact.  (Detection of contract use in a module with no
+  results) remain rigid TYPES -- but the names bound to them do not
+  stay packages: BINDERS AS FACTS (above) opens every local binder at
+  the skeleton, so a call's refined result is unpacked by the `let`
+  that names it (which also remembers WHICH value it opened -- the
+  self fact), and weakening it to the enclosing instantiation is an
+  implicit re-proof at the annotation.  A parameter refined by a
+  PATTERN annotation (`fun (b : {v:int | p}) -> ...`) likewise binds
+  at the skeleton, the refined type still flowing into the arrow
+  through the constraint, so the two parameter spellings agree and
+  callers get the contract convention.  `refine_ x` on a variable
+  that IS refined is a checked CAST: the subject keeps its own type,
+  only the skeletons must agree, and the expected refinement becomes
+  an obligation at `x`'s name, provable from the subject's own binder
+  fact.  (Detection of contract use in a module with no
   vox syntax of its own -- bare calls into a contract API, possibly
   behind a type abbreviation -- is flagged by the type checker at the
   point it strips the parameter refinement, where the domain is
@@ -358,10 +412,14 @@ testsuite/tests/vox/demo/lean_spec.ml).
 A plain `let x = e` SELFIFIES: when `e` has a stable logical name
 (its reflection, a constructor term, an immutable field read), the
 binding contributes `x = name(e)` -- so `let s = l + r` carries
-`s = l + r` with no `refine_` in sight, and an unpack
-`let refine_ x = e` additionally remembers WHICH value it opened.
-An RHS the logic cannot name (a call, a mutable read) contributes
-nothing: `x` is a fresh unknown.
+`s = l + r` with no `refine_` in sight, aliasing just works
+(`let y = x` gives `y = x`), and an unpack `let refine_ x = e`
+additionally remembers WHICH value it opened.  An RHS the logic
+cannot name (a call, a mutable read) contributes nothing: `x` is a
+fresh unknown.  RECURSIVE bindings contribute no self fact: a cyclic
+constructor equation (`let rec ones = 1 :: ones`) is unsatisfiable in
+the solver's well-founded datatype theory, which would poison the
+hypotheses.
 
 `refine_ e` at expected type `{v | p}` yields the VC
 `facts |- p[v := n]`, where `n` is `e`'s name.
@@ -370,12 +428,12 @@ End-to-end example, one VC, provable -- the comparison is reflected
 directly into the path fact, and `100` may be passed directly since
 `div`'s first parameter occurs in no refinement:
 
-    let div (a : int) (b : {v:int | not (v = 0)}) : int =
-      let refine_ b = b in a / b
+    let div (a : int) (b : {v:int | not (v = 0)}) : int = a / b
     let safe x =
-      if 0 < x then div 100 (refine_ x) else 0
+      if 0 < x then div 100 x else 0
 
-The path fact `0 < x` proves `refine_ x`'s obligation `not (x = 0)`.
+The path fact `0 < x` proves the contract obligation `not (x = 0)`
+at the call.
 The same works through a binding (`let c = refine_ (0 < x) in
 if (c :> bool) then ...`: the binder fact `c = (0 < x)` plus the path
 fact `c`), and through userland dependent operations for anything

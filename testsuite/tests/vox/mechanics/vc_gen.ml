@@ -74,6 +74,7 @@ let unpack : {v:int | v > 0} =
 Line 3, characters 10-11: vox VC:
   goal: w > 0
   hypotheses:
+  w = x
   w > 0
   a = 5
   a >= 0
