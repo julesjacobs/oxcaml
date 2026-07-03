@@ -240,6 +240,7 @@ Nothing is assumed, and no verification keyword appears in the code.</p>
   <button class="on">bst.mli — the model is the interface</button>
   <button>bst.ml — proved against it</button>
   <button>a client</button>
+  <button>an alt interface, quantified</button>
 </div>
 <div class="tabpane on"><pre style="max-height:34rem"><code class="ml">@BST_MLI@</code></pre></div>
 <div class="tabpane"><pre style="max-height:34rem"><code class="ml">@BST_ML@</code></pre></div>
@@ -247,6 +248,12 @@ Nothing is assumed, and no verification keyword appears in the code.</p>
 <p style="color:var(--dim);font-size:.9rem">The miss is as proved as the
 hits: <code>mem_insert</code> characterizes each insertion completely, down
 to <code>mem 5 empty = False</code>.</p></div>
+<div class="tabpane"><pre style="max-height:34rem"><code class="ml">@BST_ALT@</code></pre>
+<p style="color:var(--dim);font-size:.9rem">With quantifiers in predicates
+(<code>forall_</code>/<code>exists_</code>), the exported theorem can live in
+the TYPE instead: an alternative interface over the untouched module states
+everything <code>add</code> does in one refinement, and a client instantiates
+it at whatever key it asks about.</p></div>
 
 <p>The classic search-tree bugs are compile errors with witnesses.
 Descending the wrong side misses exactly the element the counterexample

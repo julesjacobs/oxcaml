@@ -125,6 +125,11 @@ def main():
         '@BST_FAIL_OUT@': slice_between(read('mechanics/lean_bst_fail.ml'),
                                         r'^Error: vox: verification failed',
                                         r'^\(lean: '),
+        '@BST_ALT@': slice_between(read('demo/lean_bst_alt.ml'),
+                                   r'^module Set', r'^end')
+                     + '\n\n'
+                     + slice_between(read('demo/lean_bst_alt.ml'),
+                                     r'^let probe', r'^    b$'),
     }
 
     if args.ocamlc and args.lean:
