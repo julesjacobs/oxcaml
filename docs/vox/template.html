@@ -79,6 +79,7 @@ th{background:var(--panel);color:var(--fg)} td{color:var(--dim)} td:first-child{
   <a href="#wrong">failures</a>
   <a href="#tour">features</a>
   <a href="#bst">a module</a>
+  <a href="#ptrie">the compiler's trie</a>
   <a href="#trust">trust model</a>
   <a href="#run">running it</a>
 </div></nav>
@@ -350,6 +351,42 @@ names — below, <code>x&nbsp;=&nbsp;-1</code> under a root of
 <pre><code class="ml">@BST_FAIL@</code></pre>
 <pre class="out"><code>@BST_FAIL_OUT@</code></pre>
 
+<h2 id="ptrie">Real code from the compiler: the Patricia trie</h2>
+<p>The integer-set structure OxCaml's own optimizer runs on
+(<code>middle_end/flambda2/algorithms/patricia_tree.ml</code>), as the
+classic little-endian toy — the GADT plumbing stripped, the bit twiddling
+kept: <code>i&nbsp;land&nbsp;b&nbsp;=&nbsp;0</code>,
+<code>i&nbsp;land&nbsp;(b&nbsp;-&nbsp;1)</code>, and the lowest-set-bit trick
+<code>x&nbsp;land&nbsp;(-x)</code> that appears verbatim in the compiler's
+<code>unpack</code>.  The interface models the bit operations
+<i>arithmetically</i> — under floor division an integer is its infinite
+two's-complement bit string, so masking is <code>%</code> and the branching
+bit is a two-line recursion — and proves every bit-level fact from first
+principles in core Lean: nothing about bits is axiomatized.  The trust
+surface is three one-line bridges (vox does not reflect the bitwise
+operators), each carrying its arithmetic model as its contract; from there
+the Patricia invariant, the one-path search, and insertion are proved arm by
+arm against the model.</p>
+
+<div class="tabs" data-tabs>
+  <button class="on">ptrie.mli — bit theory, invariant, theorems</button>
+  <button>ptrie.ml — three trusted lines, the rest proved</button>
+  <button>a client</button>
+</div>
+<div class="tabpane on"><pre style="max-height:34rem"><code class="ml">@PTRIE_MLI@</code></pre></div>
+<div class="tabpane"><pre style="max-height:34rem"><code class="ml">@PTRIE_ML@</code></pre></div>
+<div class="tabpane"><pre><code class="ml">@PTRIE_CLIENT@</code></pre>
+<p style="color:var(--dim);font-size:.9rem">Same shape as the BST client —
+the model membership never reads a prefix, so clients reason about a bit
+trie without a bit in sight.</p></div>
+
+<p>THE Patricia pitfall — descending by the branching bit without first
+checking the prefix, which files the key under a prefix it does not match
+(<code>insert</code> must <code>join</code> on a mismatch) — is a compile
+error with a witness:</p>
+<pre><code class="ml">@PTRIE_FAIL@</code></pre>
+<pre class="out"><code>@PTRIE_FAIL_OUT@</code></pre>
+
 <h2 id="trust">Trust model</h2>
 <table>
 <tr><th>Construct</th><th>Status</th><th>Notes</th></tr>
@@ -363,7 +400,8 @@ names — below, <code>x&nbsp;=&nbsp;-1</code> under a root of
   <td>The compiler inserts the test; a violated assumption raises rather than entering the logic.
       Compiled only when the check is faithful to the logic; otherwise a compile error.</td></tr>
 <tr><td><code>assume_unchecked_ e</code>, <code>[%%vox.lean]</code> blocks</td><td><span class="e">Trusted</span></td>
-  <td>The explicit trust surface.  In the fib development it amounts to one line: floor halving.</td></tr>
+  <td>The explicit trust surface.  In the fib development it amounts to one line: floor halving.
+      In the Patricia trie, the three bit-twiddling one-liners.</td></tr>
 </table>
 <p>Known limits, by design: partial correctness (a diverging call neither
 proves nor asserts anything), and ideal integer arithmetic (overflow is

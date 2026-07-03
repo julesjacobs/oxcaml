@@ -201,6 +201,17 @@ def main():
                                         r'^\(lean: '),
         '@KERNEL@': slice_between(read('demo/lean_kernel.ml'),
                                   r'^let sum', r'^    go 0 0'),
+        '@PTRIE_MLI@': strip_leading_comment(read('lib/ptrie.mli')),
+        '@PTRIE_ML@': strip_leading_comment(read('lib/ptrie.ml')),
+        '@PTRIE_CLIENT@': slice_between(read('demo/lean_ptrie.ml'),
+                                        r'^let demo', r'\(hit, miss\)'),
+        '@PTRIE_FAIL@': slice_between(read('mechanics/lean_ptrie_fail.ml'),
+                                      r'^let rec ins_unguarded', r'^\[%%expect',
+                                      include_stop=False).rstrip('\n'),
+        '@PTRIE_FAIL_OUT@': slice_between(
+            slice_between(read('mechanics/lean_ptrie_fail.ml'),
+                          r'^let rec ins_unguarded', r'^\(lean: '),
+            r'^Error: vox: verification failed', r'^\(lean: '),
         '@BST_ALT@': slice_between(read('demo/lean_bst_alt.ml'),
                                    r'^module Set', r'^end')
                      + '\n\n'
