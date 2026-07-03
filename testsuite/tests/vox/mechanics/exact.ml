@@ -28,8 +28,6 @@ Line 3, characters 39-40: vox VC:
   hypotheses:
   c
   c = (0 < x)
-  c = (0 < x)
-  three = 3
   three = 3
 val safe : int -> int = <fun>
 |}]
@@ -44,7 +42,6 @@ Line 2, characters 33-34: vox VC:
   hypotheses:
   0 < x
   three = 3
-  three = 3
 val safe2 : int -> int = <fun>
 |}]
 
@@ -57,7 +54,6 @@ Line 2, characters 19-26: vox VC:
   goal: (x + 1) > x
   hypotheses:
   three = 3
-  three = 3
 val bump : (x : int) -> int{ _ > x } = <fun>
 |}]
 
@@ -67,7 +63,7 @@ let bad = refine_ (String.length "a")
 Line 1, characters 10-37:
 1 | let bad = refine_ (String.length "a")
               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: vox: refine_ cannot translate this expression into the logic (only variables, int/bool constants, + - * / mod ~-, comparisons at int or bool, and && || not are supported); add a refined type annotation
+Error: vox: refine_ cannot translate this expression into the logic (only variables, int/bool constants, tuples, immutable field reads, fst/snd, calls to total_ functions, + - * / mod ~-, comparisons at int or bool, and && || not are supported); add a refined type annotation
 |}]
 
 (* Synthesized exact refinements obey the scope rules: at the module
@@ -90,7 +86,6 @@ Line 2, characters 19-26: vox VC:
   goal: (0 - x) = (0 - x)
   hypotheses:
   three = 3
-  three = 3
 val neg : (x : int) -> int{ _ = (0 - x) } = <fun>
 |}]
 
@@ -99,7 +94,6 @@ let m : int{ _ = -1 } = refine_ (0 - 1)
 Line 1, characters 32-39: vox VC:
   goal: (0 - 1) = -1
   hypotheses:
-  three = 3
   three = 3
 val m : int{ _ = -1 } = -1
 |}]

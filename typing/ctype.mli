@@ -918,6 +918,10 @@ val apply_right_is_contained_by : Mode.Hint.is_contained_by
   -> ?modalities:Mode.Modality.Const.t
   -> ('l * allowed) Mode.Value.t -> Mode.Value.r
 
+(** vox: [expand_head] with a no-expansion fallback when expansion
+    fails; conservative for vox translation purposes. *)
+val vox_expand_head : Env.t -> Types.type_expr -> Types.type_expr
+
 (** vox: if [p] is a "simple" variant (monomorphic, non-GADT, closed,
     non-empty, tuple constructor arguments only), its constructor
     declarations. *)

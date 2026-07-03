@@ -8931,6 +8931,15 @@ let apply_right_is_contained_by is_contained_by
   ?(modalities = Modality.Const.id) mode =
   Modality.Const.apply_right ~is_contained_by modalities mode
 
+(* vox: [expand_head] that falls back to no expansion when expansion
+   fails (exotic types, e.g. stage errors inside quotations) --
+   conservative for every vox use (an unexpanded type just translates
+   less precisely). *)
+let vox_expand_head env ty =
+  match expand_head env ty with
+  | ty' -> ty'
+  | exception _ -> ty
+
 (* vox: recognize a "simple" variant type: monomorphic, non-GADT, closed,
    at least one constructor (zero-constructor datatypes cannot be declared
    to the solver), every constructor with tuple arguments (hence

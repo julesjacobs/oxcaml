@@ -28,7 +28,6 @@ Line 4, characters 24-25: vox VC:
   hypotheses:
   x = (fst q)
   p = (1, 2)
-  p = (1, 2)
 val f : (q : (int * int)) -> int{ _ = (fst q) } = <fun>
 |}]
 
@@ -46,7 +45,6 @@ Line 4, characters 27-36: vox VC:
   b = t.2
   c = t.3
   p = (1, 2)
-  p = (1, 2)
 val g : (t : (int * int * int)) -> (int * int * int){ _ = t } = <fun>
 |}]
 
@@ -57,7 +55,7 @@ let h = refine_ (~x:1, 2)
 Line 1, characters 8-25:
 1 | let h = refine_ (~x:1, 2)
             ^^^^^^^^^^^^^^^^^
-Error: vox: refine_ cannot translate this expression into the logic (only variables, int/bool constants, + - * / mod ~-, comparisons at int or bool, and && || not are supported); add a refined type annotation
+Error: vox: refine_ cannot translate this expression into the logic (only variables, int/bool constants, tuples, immutable field reads, fst/snd, calls to total_ functions, + - * / mod ~-, comparisons at int or bool, and && || not are supported); add a refined type annotation
 |}]
 
 (* assume_ cannot runtime-check structural predicates: tuples point at
@@ -67,7 +65,7 @@ let k (v : int * int) = (assume_ v : (int * int){ _ = (1, 2) })
 Line 1, characters 33-34:
 1 | let k (v : int * int) = (assume_ v : (int * int){ _ = (1, 2) })
                                      ^
-Error: vox: assume_ compiles a runtime check of this refinement, but it involves a constructor, field projection, spec function, quantifier, or division, which the compiled check cannot evaluate faithfully; use assume_unchecked_
+Error: vox: assume_ compiles a runtime check of this refinement, but it involves a constructor, tuple, projection, spec function, quantifier, or division, which the compiled check cannot evaluate faithfully; use assume_unchecked_
 |}]
 
 (* fst/snd are reserved in predicates: a misapplied one is an error,
@@ -94,13 +92,11 @@ Line 2, characters 19-26: vox VC:
   goal: (fst p) = (fst p)
   hypotheses:
   p#2 = (1, 2)
-  p#2 = (1, 2)
 val first : (p : (int * int)) -> int{ _ = (fst p) } = <fun>
 Line 6, characters 12-13: vox VC:
   goal: r = a
   hypotheses:
   r = (fst (a, b))
-  p = (1, 2)
   p = (1, 2)
 val use : (a : int) -> int -> int{ _ = a } = <fun>
 |}]
@@ -117,7 +113,6 @@ external cheat : t2 -> int = "%field0_immut"
 Line 3, characters 53-54: vox VC:
   goal: k = k
   hypotheses:
-  p = (1, 2)
   p = (1, 2)
 val g : (k : int) -> int{ _ = k } = <fun>
 Line 4, characters 27-36:

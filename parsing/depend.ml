@@ -134,7 +134,7 @@ let rec add_type bv ty =
   | Ptyp_repr(_, t) -> add_type bv t
   | Ptyp_newlayout(_, t) -> add_type bv t
   | Ptyp_extension ({txt; _}, PTyp t)
-    when String.length txt > 10 && String.sub txt 0 10 = "vox.named." ->
+    when String.starts_with ~prefix:"vox.named." txt ->
       (* vox named type [(x : ty)]: the type rides the payload. *)
       add_type bv t
   | Ptyp_extension ({txt; _},
@@ -143,7 +143,7 @@ let rec add_type bv ty =
                                ({pexp_desc =
                                    Pexp_constraint (pred, Some ty, _); _},
                                 _); _}])
-    when String.length txt >= 10 && String.sub txt 0 10 = "vox.refine" ->
+    when String.starts_with ~prefix:"vox.refine" txt ->
       (* vox refined type {v:ty | p}: both the skeleton and the
          predicate can reference modules (the predicate through
          qualified constructors such as [M.Cons]). *)

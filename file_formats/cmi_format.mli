@@ -16,7 +16,7 @@
 open Misc
 
 (* vox: the solver-side spec exported by a unit: its embedded
-   [%%vox.prelude] blocks plus pre-rendered declarations for the
+   [%%vox.lean] blocks plus pre-rendered declarations for the
    datatypes its exported refinements are about (a client may never
    mention those types itself, yet the blocks reference them). *)
 type vox_prelude_export = {

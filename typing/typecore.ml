@@ -5089,6 +5089,16 @@ let vox_open_dependent_arrow env binder ~sarg_opt ~app_loc ty_ret ty_ret0 =
    annotation.  An argument spelled with an intro form
    ([refine_]/[assume_]/[assume_unchecked_]) keeps the rigid behavior:
    an explicit cast typed at the refined parameter type. *)
+(* An expression already carrying an intro marker (refine_ / assume_ /
+   assume_unchecked_): stacking a second intro on the same typed node
+   would leave the inner one invisible to the VC pass and to the
+   runtime-check translation. *)
+let vox_is_intro_attribute (a : Parsetree.attribute) =
+  match a.attr_name.txt with
+  | "vox.refine" | "vox.refine_exact" | "vox.assume"
+  | "vox.assume_unchecked" -> true
+  | _ -> false
+
 let vox_is_cast_arg (sarg : Parsetree.expression) =
   match sarg.pexp_desc with
   | Pexp_extension
@@ -7168,13 +7178,7 @@ and type_expect_
       (match get_desc ty_exp with
        | Trefine (skel, pred) ->
          let intro exp =
-           let is_vox_intro (a : Parsetree.attribute) =
-             match a.attr_name.txt with
-             | "vox.refine" | "vox.refine_exact" | "vox.assume"
-             | "vox.assume_unchecked" -> true
-             | _ -> false
-           in
-           if List.exists is_vox_intro exp.exp_attributes
+           if List.exists vox_is_intro_attribute exp.exp_attributes
            then
              Location.raise_errorf ~loc
                "vox: this expression already carries a refinement \
@@ -8933,13 +8937,7 @@ and type_expect_
          invisible to the VC pass and to the runtime-check
          translation.  Sharp edge: let-bind the inner form. *)
       let check_not_nested_intro (exp : Typedtree.expression) =
-        let is_vox_intro (a : Parsetree.attribute) =
-          match a.attr_name.txt with
-          | "vox.refine" | "vox.refine_exact" | "vox.assume"
-          | "vox.assume_unchecked" -> true
-          | _ -> false
-        in
-        if List.exists is_vox_intro exp.exp_attributes
+        if List.exists vox_is_intro_attribute exp.exp_attributes
         then
           Location.raise_errorf ~loc
             "vox: %s applied directly to another \
@@ -9027,9 +9025,11 @@ and type_expect_
           | None ->
               Location.raise_errorf ~loc
                 "vox: refine_ cannot translate this expression into the \
-                 logic (only variables, int/bool constants, + - * / mod ~-, \
-                 comparisons at int or bool, and && || not are supported); \
-                 add a refined type annotation"
+                 logic (only variables, int/bool constants, tuples, \
+                 immutable field reads, fst/snd, calls to total_ \
+                 functions, + - * / mod ~-, comparisons at int or bool, \
+                 and && || not are supported); add a refined type \
+                 annotation"
           end
       | Tvar _ ->
           Location.raise_errorf ~loc

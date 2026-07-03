@@ -51,7 +51,6 @@ Line 1, characters 51-55: vox VC:
   pair2 = pair
   forall_ a. forall_ b. (a + b) = (b + a)
   pair = ()
-  forall_ i. forall_ j. (i + j) = (j + i)
 val swapped : unit{ forall_ a. forall_ b. (b + a) = (a + b) } = ()
 |}]
 
@@ -66,7 +65,6 @@ Line 1, characters 68-70: vox VC (ASSUMED):
   pair2 = pair
   forall_ a. forall_ b. (a + b) = (b + a)
   pair = ()
-  forall_ i. forall_ j. (i + j) = (j + i)
 val shadow : int -> unit{ exists_ k. k = k } = <fun>
 |}]
 
@@ -88,5 +86,5 @@ let checked : unit{ forall_ n. n = n } = assume_ ()
 Line 1, characters 49-51:
 1 | let checked : unit{ forall_ n. n = n } = assume_ ()
                                                      ^^
-Error: vox: assume_ compiles a runtime check of this refinement, but it involves a constructor, field projection, spec function, quantifier, or division, which the compiled check cannot evaluate faithfully; use assume_unchecked_
+Error: vox: assume_ compiles a runtime check of this refinement, but it involves a constructor, tuple, projection, spec function, quantifier, or division, which the compiled check cannot evaluate faithfully; use assume_unchecked_
 |}]

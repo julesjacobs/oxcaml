@@ -192,14 +192,6 @@ let reset () =
   imported_preludes := []
 ;;
 
-(* Expansion can fail on exotic types (e.g. stage errors inside quotations); fall back to
-   no expansion, which is conservative. *)
-let safe_expand_head env ty =
-  match Ctype.expand_head env ty with
-  | ty' -> ty'
-  | exception _ -> ty
-;;
-
 (* A STABLE string for a type path: no stamps, and a path rooted in the
    current unit is prefixed with the unit's name, so the same type gets
    the same solver-side name in its defining module and in every client
@@ -358,7 +350,7 @@ and datatype_sort_unattributed env p =
         S_data p))
 
 and dsort_of_type ?(visited = []) env ty =
-  let ty = safe_expand_head env ty in
+  let ty = Ctype.vox_expand_head env ty in
   (* A -rectypes cycle can run through a tuple with no nominal type on
      the path; revisiting a node degrades to the uninterpreted sort
      (sound). *)
@@ -450,7 +442,7 @@ let has_vox_attr name attrs =
 
 (* The refinement of a type, if any. *)
 let refinement_of_type env ty =
-  match get_desc (safe_expand_head env ty) with
+  match get_desc (Ctype.vox_expand_head env ty) with
   | Trefine (_, p) -> Some p
   | _ -> None
 ;;
@@ -461,7 +453,7 @@ let refinement_of_type env ty =
    leaves those rigid -- so the walker must not report one: it would
    emit obligations typing never stripped for. *)
 let param_refinement env ty =
-  match get_desc (safe_expand_head env ty) with
+  match get_desc (Ctype.vox_expand_head env ty) with
   | Tpoly (t, []) -> refinement_of_type env t
   | Trefine (_, p) -> Some p
   | _ -> None
@@ -831,9 +823,9 @@ let emit_vc ~loc ~ctx ~goal ~kind =
      then
        Location.raise_errorf ~loc
          "vox: assume_ compiles a runtime check of this refinement, but it \
-          involves a constructor, field projection, spec function, \
-          quantifier, or division, which the compiled check cannot \
-          evaluate faithfully; use assume_unchecked_";
+          involves %s, which the compiled check cannot evaluate \
+          faithfully; use assume_unchecked_"
+         Refinement.unreflectable_what;
      (* The compiled check compares machine words, which agrees with the
         logic only for int- and bool-sorted operands: other sorts are
         uninterpreted, and physical equality is stricter than logical
@@ -891,6 +883,16 @@ let emit_vc ~loc ~ctx ~goal ~kind =
     List.filter (pred_in_scope ctx) (grow [] !mut_defs)
   in
   let facts = facts @ defs in
+  (* Several fact channels can deliver the same fact (a binder fact and
+     its selfification equation, say); keep the first occurrence.
+     Quadratic, but hypothesis lists are small. *)
+  let facts =
+    List.fold_left
+      (fun acc f -> if List.exists (Refinement.equal f) acc then acc else f :: acc)
+      []
+      facts
+    |> List.rev
+  in
   vcs := { vc_loc = loc; vc_facts = facts; vc_goal = goal; vc_kind = kind } :: !vcs
 ;;
 
@@ -1358,7 +1360,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
             actx
           | None -> ctx
         in
-        match get_desc (safe_expand_head env !arrow_ty) with
+        match get_desc (Ctype.vox_expand_head env !arrow_ty) with
         | Tarrow ((_, _, _, binder), dom, ret, _) ->
           (match arg_expr with
            | Some a ->
@@ -1883,7 +1885,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
               pat, true
           in
           let ctx = extend_pat env ctx pat in
-          match get_desc (safe_expand_head env !arrow_ty) with
+          match get_desc (Ctype.vox_expand_head env !arrow_ty) with
           | Tarrow ((_, _, _, binder), dom, ret, _) ->
             let id_opt =
               match pat.pat_desc with
@@ -2094,7 +2096,7 @@ let is_prelude_extension_name txt =
   | Not_prelude -> false
 ;;
 
-(* Validates and extracts the text of a [%%vox.prelude] payload; used
+(* Validates and extracts the text of a [%%vox.lean] payload; used
    by Typemod (to accept the item) and by the collection below. *)
 let prelude_extension_text (({txt; loc}, payload) : Parsetree.extension) =
   match prelude_extension_kind txt with
@@ -2136,7 +2138,7 @@ let collect_preludes (str : structure) =
     str.str_items
 ;;
 
-(* Blocks of an INTERFACE ([%%vox.prelude] in an .mli): collected by
+(* Blocks of an INTERFACE ([%%vox.lean] in an .mli): collected by
    the .mli's compilation and saved into the .cmi (see Typemod), so
    they reach every client -- and the unit's own implementation, whose
    verification reads the interface's .cmi like any other import. *)

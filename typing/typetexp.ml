@@ -882,8 +882,7 @@ let vox_scope : vox_scope_entry list ref = ref []
 let vox_named_binder (sty : Parsetree.core_type) =
   match sty.ptyp_desc with
   | Ptyp_extension ({txt; _}, PTyp inner)
-    when String.length txt > 10
-         && String.equal (String.sub txt 0 10) "vox.named." ->
+    when String.starts_with ~prefix:"vox.named." txt ->
       Some (String.sub txt 10 (String.length txt - 10), inner)
   | _ -> None
 
@@ -1665,8 +1664,7 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
       let cty = transl_type new_env ~policy ~row_context mode t in
       ctyp (Ttyp_splice cty) (newty (Tsplice cty.ctyp_type))
   | Ptyp_extension ({txt; _}, PTyp inner)
-    when String.length txt > 10
-         && String.equal (String.sub txt 0 10) "vox.named." ->
+    when String.starts_with ~prefix:"vox.named." txt ->
       (* vox named type [(y : ty)] outside an arrow domain (domains are
          consumed by the arrow translation above): [ty] must be
          refined, and [y] names its bound value variable. *)
@@ -1674,8 +1672,7 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
       let is_refined =
         match inner.ptyp_desc with
         | Ptyp_extension ({txt = t; _}, _) ->
-            String.length t >= 10
-            && String.equal (String.sub t 0 10) "vox.refine"
+            String.starts_with ~prefix:"vox.refine" t
         | _ -> false
       in
       if not is_refined
@@ -1687,8 +1684,7 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
       vox_with_self_name ~root:inner name (fun () ->
         transl_type env ~policy ~row_context mode inner)
   | Ptyp_extension ({txt = vox_ext; _}, payload)
-    when String.length vox_ext >= 10
-         && String.equal (String.sub vox_ext 0 10) "vox.refine" ->
+    when String.starts_with ~prefix:"vox.refine" vox_ext ->
       (* vox refined type [{b:ty | pred}]; the bound variable's name
          [b] rides the extension name as "vox.refine.b". *)
       let bound =

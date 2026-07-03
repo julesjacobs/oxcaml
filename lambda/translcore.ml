@@ -419,9 +419,9 @@ and vox_assume_check ~scopes layout e lam =
         | Refinement.Pis _ | Refinement.Pquant _ ->
             (* Rejected by the VC pass (emit_vc, Runtime_check). *)
             Location.raise_errorf ~loc:e.exp_loc
-              "vox: assume_ cannot compile a runtime check involving \
-               constructors, spec functions, field projections, or \
-               quantifiers; use assume_unchecked_"
+              "vox: assume_ cannot compile a runtime check involving %s; \
+               use assume_unchecked_"
+              Refinement.unreflectable_what
         | Refinement.Pint n -> Lconst (Const_base (Const_int n))
         | Refinement.Pbool b ->
             Lconst (Const_base (Const_int (if b then 1 else 0)))
@@ -438,8 +438,9 @@ and vox_assume_check ~scopes layout e lam =
                      the logic's T-division is total where the program
                      raises. *)
                   Location.raise_errorf ~loc:e.exp_loc
-                    "vox: assume_ cannot compile a runtime check \
-                     involving division; use assume_unchecked_"
+                    "vox: assume_ cannot compile a runtime check involving \
+                     %s; use assume_unchecked_"
+                    Refinement.unreflectable_what
               | Refinement.Eq -> icmp Ceq
               | Refinement.Neq -> icmp Cne
               | Refinement.Lt -> icmp Clt

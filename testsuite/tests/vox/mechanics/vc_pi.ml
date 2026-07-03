@@ -23,7 +23,6 @@ Line 2, characters 21-28: vox VC (RUNTIME CHECKED):
   goal: (x < y) = (x < y)
   hypotheses:
   zero = 0
-  zero = 0
 val lt : (x : int) -> (y : int) -> bool{ _ = (x < y) } = <fun>
 |}]
 
@@ -46,7 +45,6 @@ Line 4, characters 29-30: vox VC:
   z = zero
   z = 0
   zero = 0
-  zero = 0
 val safe : int -> int = <fun>
 |}]
 
@@ -60,7 +58,6 @@ Line 4, characters 10-22: vox VC:
   goal: (c || (not c)) || (not (c || (not c)))
   hypotheses:
   c = (a < b)
-  zero = 0
   zero = 0
 val partial : int -> int -> bool{ _ || (not _) } = <fun>
 |}]
@@ -84,7 +81,6 @@ Line 1, characters 40-41: vox VC:
   goal: a = a
   hypotheses:
   zero = 0
-  zero = 0
 val use_apply : int -> int = <fun>
 |}]
 
@@ -93,7 +89,6 @@ let use_apply_lit : int = apply 5 5
 Line 1, characters 34-35: vox VC:
   goal: 5 = 5
   hypotheses:
-  zero = 0
   zero = 0
 val use_apply_lit : int = 5
 |}]
@@ -121,13 +116,11 @@ Line 6, characters 42-43: vox VC:
   hypotheses:
   r = x
   zero = 0
-  zero = 0
 Line 12, characters 59-61: vox VC (RUNTIME CHECKED):
   goal: x' = x'
   hypotheses:
   x' = (x - 1)
   not (x = 0)
-  zero = 0
   zero = 0
 val countdown : (x : int) -> (unit -> int{ _ = x }) option -> int = <fun>
 |}]

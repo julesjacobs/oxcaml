@@ -56,14 +56,7 @@
 open Typedtree
 
 let is_int_or_bool env ty =
-  let ty =
-    (* Expansion can fail on exotic types; falling back to no expansion
-       just makes the translation more conservative. *)
-    match Ctype.expand_head env ty with
-    | ty -> ty
-    | exception _ -> ty
-  in
-  match Types.get_desc ty with
+  match Types.get_desc (Ctype.vox_expand_head env ty) with
   | Tconstr (p, [], _) ->
     Path.same p Predef.path_int || Path.same p Predef.path_bool
   | _ -> false
@@ -75,11 +68,7 @@ let is_int_or_bool env ty =
    with the same primitive at another type must not be mistaken for a
    tuple projection. *)
 let is_unlabeled_pair env ty =
-  let ty =
-    match Ctype.expand_head env ty with
-    | ty -> ty
-    | exception _ -> ty
-  in
+  let ty = Ctype.vox_expand_head env ty in
   match Types.get_desc ty with
   | Ttuple [ (None, _); (None, _) ] -> true
   | _ -> false
@@ -155,12 +144,7 @@ let reflected_call_info env path (desc : Types.value_description) =
     if has_total_attr desc.val_attributes
     then (
       let rec arity ty acc =
-        let ty =
-          match Ctype.expand_head env ty with
-          | ty' -> ty'
-          | exception _ -> ty
-        in
-        match Types.get_desc ty with
+        match Types.get_desc (Ctype.vox_expand_head env ty) with
         | Tarrow (_, _, ret, _) -> arity ret (acc + 1)
         | _ -> acc
       in
@@ -439,14 +423,8 @@ type spec_def =
   ; sd_loc : Location.t
   }
 
-let safe_expand_head env ty =
-  match Ctype.expand_head env ty with
-  | ty' -> ty'
-  | exception _ -> ty
-;;
-
 let rsort_of_type env ~loc ~what ty =
-  match Types.get_desc (safe_expand_head env ty) with
+  match Types.get_desc (Ctype.vox_expand_head env ty) with
   | Tconstr (p, [], _) ->
     if Path.same p Predef.path_int
     then Rint
@@ -515,7 +493,7 @@ let rec translate_body (e : expression) : def_body =
        is a proposition, not a datatype: [match (b : Prop) with | True]
        is a Lean type error.  Reject it here with the fix spelled out
        rather than blaming the definition on an opaque solver error. *)
-    (match Types.get_desc (safe_expand_head scrut.exp_env scrut.exp_type) with
+    (match Types.get_desc (Ctype.vox_expand_head scrut.exp_env scrut.exp_type) with
      | Tconstr (p, [], _) when Path.same p Predef.path_bool ->
        Location.raise_errorf ~loc:scrut.exp_loc
          "vox: a reflected function cannot [match] on bool (the solver \

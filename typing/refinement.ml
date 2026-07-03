@@ -60,9 +60,9 @@ type pred =
     (* constructor tester: "the term is an application of THIS
        constructor".  INTERNAL ONLY -- not expressible in surface
        predicates; minted by the VC pass as the negative match fact
-       [not (s is C)] for arms below a guard-free simple arm.  Z3 has
-       native testers; Lean encodes it existentially, with an
-       exhaustiveness hypothesis supplied per tester subject. *)
+       [not (s is C)] for arms below a guard-free simple arm.  Lean
+       encodes it existentially, with an exhaustiveness hypothesis
+       supplied per tester subject. *)
   | Pbinop of binop * pred * pred
   | Pand of pred * pred
   | Por of pred * pred
@@ -379,3 +379,12 @@ and print_atom ppf p =
 ;;
 
 let to_string p = Format.asprintf "%a" print p
+
+(* The constructs a compiled runtime check cannot evaluate faithfully,
+   for diagnostics.  Owned here so the two rejection messages
+   (Vox_verify's gate and Translcore's backstop) cannot drift from the
+   [pred] type or from each other; keep in sync with
+   [Vox_verify.pred_unreflectable]. *)
+let unreflectable_what =
+  "a constructor, tuple, projection, spec function, quantifier, or division"
+;;
