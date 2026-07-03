@@ -75,3 +75,33 @@ Line 3, characters 9-10:
              ^
 Error: vox: this obligation mentions a variable that has escaped its scope
 |}]
+
+(* A compound dependent argument is one honest [let] away: the binding
+   selfifies with the full typed fragment, so even shapes the surface
+   translation cannot name inline (comparisons, field reads) reach the
+   dependent parameter through their let-bound name. *)
+let use : (b : bool) -> bool{ _ = b } = fun b -> refine_ b
+[%%expect{|
+Line 1, characters 57-58: vox VC:
+  goal: b = b
+  hypotheses: <none>
+val use : (b : bool) -> bool{ _ = b } = <fun>
+|}]
+
+let cmp_arg () =
+  let p = 1 in
+  let q = 2 in
+  let c = p < q in
+  let refine_ r = use c in
+  let refine_ ok = (refine_ r : bool{ _ = (p < q) }) in
+  ok
+[%%expect{|
+Line 6, characters 28-29: vox VC:
+  goal: r = (p < q)
+  hypotheses:
+  r = c
+  c = (p < q)
+  q = 2
+  p = 1
+val cmp_arg : unit -> bool = <fun>
+|}]

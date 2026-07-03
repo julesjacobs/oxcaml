@@ -1096,7 +1096,17 @@ let rec elab_vox_pred ~bound ~self_root env (e : Parsetree.expression)
           Pproj (2, 0, elab_vox_pred ~bound ~self_root env a)
       | Pexp_ident {txt = Longident.Lident "snd"; _}, [a] ->
           Pproj (2, 1, elab_vox_pred ~bound ~self_root env a)
-      | Pexp_ident {txt = Longident.Lident (("fst" | "snd") as f); _}, _ ->
+      | Pexp_ident {txt = Longident.Lident "succ"; _}, [a] ->
+          (* [succ]/[pred] are reserved builtins, translated exactly as
+             the program fragments translate them ([x + 1]/[x - 1]);
+             falling through to the spec-function namespace would
+             silently split one value into two non-equal logic terms. *)
+          Pbinop (Add, elab_vox_pred ~bound ~self_root env a, Pint 1)
+      | Pexp_ident {txt = Longident.Lident "pred"; _}, [a] ->
+          Pbinop (Sub, elab_vox_pred ~bound ~self_root env a, Pint 1)
+      | Pexp_ident
+          {txt = Longident.Lident (("fst" | "snd" | "succ" | "pred") as f); _},
+        _ ->
           Location.raise_errorf ~loc
             "vox: %s expects exactly one argument in a refinement predicate"
             f

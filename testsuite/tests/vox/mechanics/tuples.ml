@@ -55,7 +55,7 @@ let h = refine_ (~x:1, 2)
 Line 1, characters 8-25:
 1 | let h = refine_ (~x:1, 2)
             ^^^^^^^^^^^^^^^^^
-Error: vox: refine_ cannot translate this expression into the logic (only variables, int/bool constants, tuples, immutable field reads, fst/snd, calls to total_ functions, + - * / mod ~-, comparisons at int or bool, and && || not are supported); add a refined type annotation
+Error: vox: refine_ cannot translate this expression into the logic (only variables, int/bool constants, tuples, immutable field reads, fst/snd, calls to total_ functions, + - * / mod ~-, comparisons at int or bool, && || not, and constructors and records of simple types are supported); add a refined type annotation
 |}]
 
 (* assume_ cannot runtime-check structural predicates: tuples point at

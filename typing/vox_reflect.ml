@@ -466,6 +466,78 @@ let rec translate_rhs (e : expression) : Refinement.pred option =
      | _ -> None)
 ;;
 
+(* The NAMEABLE fragment: [translate] extended with constructor terms,
+   record literals ([mk]), unlabeled tuples, and immutable field reads
+   of nameable bases -- everything that names a value DETERMINISTICALLY,
+   with no fresh-unknown fallback.  Used by [refine_]'s synthesis mode;
+   [Vox_verify.name_of_expr] is the same fragment plus fresh unknowns
+   (and solver-side datatype registration). *)
+let rec translate_nameable (e : expression) : Refinement.pred option =
+  match translate e with
+  | Some p -> Some p
+  | None ->
+    let all_nameable args =
+      let args = List.map translate_nameable args in
+      if List.for_all Option.is_some args
+      then Some (List.map Option.get args)
+      else None
+    in
+    (match e.exp_desc with
+     | Texp_construct (_, cstr, _, args, _) ->
+       let path = Data_types.cstr_res_type_path cstr in
+       (match Ctype.vox_simple_variant e.exp_env path with
+        | None -> None
+        | Some _ ->
+          Option.map
+            (fun ns -> Refinement.Pconstr (path, cstr.cstr_name, ns))
+            (all_nameable (List.map snd args)))
+     | Texp_record { fields; extended_expression; _ }
+       when Array.length fields > 0 ->
+       let path =
+         Data_types.lbl_res_type_path (match fields.(0) with lbl, _, _ -> lbl)
+       in
+       (match Ctype.vox_simple_record e.exp_env path with
+        | None -> None
+        | Some _ ->
+          let base =
+            match extended_expression with
+            | None -> Some None
+            | Some (be, _, _) ->
+              Option.map Option.some (translate_nameable be)
+          in
+          (match base with
+           | None -> None
+           | Some base ->
+             let arg_of (lbl, _, def) =
+               match def, base with
+               | Typedtree.Overridden (_, ex), _ -> translate_nameable ex
+               | Kept _, Some b ->
+                 Some (Refinement.Pfield (path, lbl.Data_types.lbl_name, b))
+               | Kept _, None -> None
+             in
+             let args = List.map arg_of (Array.to_list fields) in
+             if List.for_all Option.is_some args
+             then
+               Some
+                 (Refinement.Pconstr (path, "mk", List.map Option.get args))
+             else None))
+     | Texp_tuple (comps, _)
+       when List.length comps >= 2
+            && List.for_all (fun (lbl, _) -> Option.is_none lbl) comps ->
+       Option.map
+         (fun ns -> Refinement.Ptuple ns)
+         (all_nameable (List.map snd comps))
+     | Texp_field { record; label; _ } ->
+       let path = Data_types.lbl_res_type_path label in
+       (match label.lbl_mut, Ctype.vox_simple_record e.exp_env path with
+        | Types.Immutable, Some _ ->
+          Option.map
+            (fun b -> Refinement.Pfield (path, label.lbl_name, b))
+            (translate_nameable record)
+        | _ -> None)
+     | _ -> None)
+;;
+
 let def_unsupported loc =
   Location.raise_errorf ~loc
     "vox: this expression cannot be reflected into the logic (reflected \

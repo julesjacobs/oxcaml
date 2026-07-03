@@ -138,7 +138,10 @@
   insertion always chooses `refine_` (an honest obligation), never
   `assume_`; `refine_` remains required in synthesis position and
   wherever the expected type is not yet resolved when the expression
-  is checked.
+  is checked.  Synthesis names the full NAMEABLE fragment: the
+  reflected operations plus constructor terms, record literals,
+  tuples, and immutable field reads (`let k = refine_ (Cons (x, Nil))`
+  synthesizes `{v | v = Cons (x, Nil)}`).
 - Function types may name their parameters, and later refinements may
   mention them: `(x:int) -> (y:int) -> {z:int | z = x * y}`. Dependent
   types arise from annotations only; inferred arrows are never
@@ -284,7 +287,11 @@
   stays fails-closed throughout: an obligation grind cannot discharge
   is a compile error, never unsoundness.
 - Spec functions: any other applied identifier in a predicate,
-  `len _` or `mem 2 _`, denotes a logical function that the user
+  `len _` or `mem 2 _`, denotes a logical function (`not`, `fst`,
+  `snd`, `succ`, `pred` and `mod` are RESERVED builtins with their
+  program meaning -- `succ x` is `x + 1` in a predicate exactly as in
+  a reflected program expression -- and never fall through to the
+  spec namespace) that the user
   defines on the solver side -- in a `-vox-prelude` file or an
   embedded `[%%vox.lean]` block (`@[grind] def len : Vox_M_ilist ->
   Int ...`), or implicitly by a `total_` definition (below).  Prelude
@@ -451,8 +458,14 @@ two channels, e.g. a binder fact and its selfification equation):
   fresh unknowns); a simple-record pattern contributes `xi = s.li` per
   variable sub-pattern (per-field, so partial patterns are fine).
   `let p = x in ...` gets the same facts, so destructuring a record
-  binds its fields logically.  Deeper patterns -- nesting, aliases,
-  or-patterns, constants -- contribute nothing, which is sound.
+  binds its fields logically.  A bare VARIABLE arm aliases the
+  scrutinee (`match s with y -> ...` learns `y = s`).  Deeper patterns
+  -- nesting, aliases, or-patterns, constants -- contribute nothing,
+  which is sound.  `function`-cases are a match on the anonymous
+  parameter: a refined domain contributes its contract at that
+  parameter, and the arms get the same match facts and negations
+  against it (the case patterns type against the skeleton, like the
+  other parameter spellings).
   NEGATIVE facts: an arm also learns that every EARLIER arm failed to
   match, usable exactly when that failure is decided by the head
   alone: each guard-free earlier arm of the simple shape contributes

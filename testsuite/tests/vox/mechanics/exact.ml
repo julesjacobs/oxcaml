@@ -64,7 +64,7 @@ let bad = refine_ (String.length "a")
 Line 1, characters 10-37:
 1 | let bad = refine_ (String.length "a")
               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: vox: refine_ cannot translate this expression into the logic (only variables, int/bool constants, tuples, immutable field reads, fst/snd, calls to total_ functions, + - * / mod ~-, comparisons at int or bool, and && || not are supported); add a refined type annotation
+Error: vox: refine_ cannot translate this expression into the logic (only variables, int/bool constants, tuples, immutable field reads, fst/snd, calls to total_ functions, + - * / mod ~-, comparisons at int or bool, && || not, and constructors and records of simple types are supported); add a refined type annotation
 |}]
 
 (* Synthesized exact refinements obey the scope rules: at the module

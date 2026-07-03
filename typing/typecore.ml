@@ -9034,7 +9034,7 @@ and type_expect_
               (mk_expected (newvar (Jkind.Builtin.any ~why:Dummy_jkind)))
           in
           check_not_nested_intro exp;
-          begin match Vox_reflect.translate exp with
+          begin match Vox_reflect.translate_nameable exp with
           | Some p ->
               let refined =
                 newty
@@ -9053,8 +9053,8 @@ and type_expect_
                  logic (only variables, int/bool constants, tuples, \
                  immutable field reads, fst/snd, calls to total_ \
                  functions, + - * / mod ~-, comparisons at int or bool, \
-                 and && || not are supported); add a refined type \
-                 annotation"
+                 && || not, and constructors and records of simple \
+                 types are supported); add a refined type annotation"
           end
       | Tvar _ ->
           Location.raise_errorf ~loc
@@ -11654,8 +11654,14 @@ and type_function_cases_expect
         ~is_first_val_param:first ~is_final_val_param:true
     in
     let cases, partial =
+      (* vox: [function]-case parameters are contracts like the other
+         parameter spellings: the patterns type against the SKELETON of
+         a refined domain (the arrow below keeps the refined [ty_arg]),
+         and the domain's predicate is assumed at [fc_param] by the
+         verification pass. *)
       type_cases Value env
-        expected_pat_mode expected_inner_mode ty_arg_mono arg_sort
+        expected_pat_mode expected_inner_mode
+        (vox_strip_param_refinement env ty_arg_mono) arg_sort
         (mk_expected ty_ret) ~check_if_total:true loc cases
     in
     let ty_fun =

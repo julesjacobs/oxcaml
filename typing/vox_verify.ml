@@ -1175,10 +1175,13 @@ let match_facts
     | Tpat_construct (_, cstr, _, args, _) -> constructor_facts cstr args
     | Tpat_record (fields, _, _, _) -> record_facts fields
     | Tpat_tuple comps -> tuple_facts comps
-    | Tpat_var { id; _ } ->
-      (* a variable pattern binds the scrutinee itself; in particular
-         [let refine_ x = m] (which desugars to a match) ties the
-         binder to a mutable scrutinee's version *)
+    | Tpat_var { id; _ } when not (Ident.same id sid) ->
+      (* A variable pattern aliases the scrutinee: [match s with y ->]
+         (and a [function y ->] case, whose scrutinee is [fc_param])
+         learns [y = s]; [let refine_ x = m] (which desugars to a
+         match) ties the binder to a mutable scrutinee's version.  The
+         [Ident.same] guard: [fc_param] IS the first variable case's
+         ident (see [Typecore.name_cases]), and [x = x] is noise. *)
       [ Refinement.Pbinop (Refinement.Eq, Refinement.Pvar id, Refinement.Pvar sid)
       ]
     | _ -> []
@@ -1188,6 +1191,11 @@ let match_facts
   | Tpat_construct (_, cstr, _, args, _) -> constructor_facts cstr args
   | Tpat_record (fields, _, _, _) -> record_facts fields
   | Tpat_tuple comps -> tuple_facts comps
+  | Tpat_var { id; _ } when not (Ident.same id sid) ->
+    (* Bare value patterns ([function]-case arms reach here unwrapped).
+       The [Ident.same] guard: [fc_param] IS the first variable case's
+       ident (see [Typecore.name_cases]), and [x = x] is noise. *)
+    [ Refinement.Pbinop (Refinement.Eq, Refinement.Pvar id, Refinement.Pvar sid) ]
   | _ -> []
 ;;
 
@@ -1442,12 +1450,16 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
        variable additionally pins its current value to the immutable
        binder ([let x = m]) -- the only way to name a mutable
        variable's value, since mutable stamps may not appear in
-       refinements or dependent applications. *)
+       refinements or dependent applications.  A plain [let y = x] of
+       an immutable variable is skipped: its alias fact is the SELF
+       fact below (the variable arm of [match_facts] would duplicate
+       it). *)
     let ctx' =
-      match vb.vb_expr.exp_desc with
-      | Texp_ident { path = Path.Pident id; _ } ->
+      match vb.vb_expr.exp_desc, vb.vb_pat.pat_desc with
+      | Texp_ident _, Tpat_var _ -> ctx'
+      | Texp_ident { path = Path.Pident id; _ }, _ ->
         { ctx' with cfacts = match_facts env id vb.vb_pat @ ctx'.cfacts }
-      | Texp_mutvar { txt = mid; _ } ->
+      | Texp_mutvar { txt = mid; _ }, _ ->
         (match Hashtbl.find_opt mut_versions mid with
          | Some (v, _) ->
            let direct =
@@ -1462,7 +1474,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
              cfacts = direct @ match_facts env v vb.vb_pat @ ctx'.cfacts
            }
          | None -> ctx')
-      | _ -> ctx'
+      | _, _ -> ctx'
     in
     (* Selfification (no self fact for a RECURSIVE binding: a cyclic
        constructor equation is unsatisfiable in the datatype theory). *)
@@ -1496,8 +1508,9 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
     let ctx' =
       List.fold_left
         (fun ctx vb ->
-          match vb.vb_expr.exp_desc with
-          | Texp_ident { path = Path.Pident id; _ } ->
+          match vb.vb_expr.exp_desc, vb.vb_pat.pat_desc with
+          | Texp_ident _, Tpat_var _ -> ctx
+          | Texp_ident { path = Path.Pident id; _ }, _ ->
             { ctx with cfacts = match_facts env id vb.vb_pat @ ctx.cfacts }
           | _ -> ctx)
         ctx'
@@ -1981,17 +1994,56 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
     in
     (match body with
      | Tfunction_body e -> ignore (walk_expr env ctx' e : ctx)
-     | Tfunction_cases { fc_cases; _ } ->
-       List.iter
-         (fun c ->
-           let ctx'' = extend_pat env ctx' c.c_lhs in
-           let gctx =
-             match c.c_guard with
-             | None -> ctx''
-             | Some g -> walk_expr env ctx'' g
-           in
-           ignore (walk_expr env gctx c.c_rhs : ctx))
-         fc_cases);
+     | Tfunction_cases { fc_cases; fc_param; _ } ->
+       (* The cases consume one more arrow, whose parameter is
+          [fc_param]: a refined domain contributes its contract at
+          [fc_param]'s stamp (the patterns were typed at the skeleton,
+          like the other parameter spellings), and the cases are a
+          match on [fc_param] -- they get match facts and the
+          negations of earlier guard-free simple arms, exactly as
+          [Texp_match] on a variable scrutinee. *)
+       let ctx' =
+         match get_desc (Ctype.vox_expand_head env !arrow_ty) with
+         | Tarrow (_, dom, _, _) ->
+           record_name env fc_param dom;
+           (* [fc_param] is compiler-introduced: like the unnamed-param
+              synthetics, it is always in scope for the cases. *)
+           Hashtbl.replace synthetic_names fc_param ();
+           (match param_refinement env dom with
+            | Some p ->
+              register_pred_paths env p;
+              { ctx' with
+                cfacts =
+                  Refinement.subst_bound ~by:(Refinement.Pvar fc_param) p
+                  :: ctx'.cfacts
+              }
+            | None -> ctx')
+         | _ -> ctx'
+       in
+       ignore
+         (List.fold_left
+            (fun negs c ->
+              let ctx'' = extend_pat env ctx' c.c_lhs in
+              let ctx'' =
+                { ctx'' with
+                  cfacts = match_facts env fc_param c.c_lhs @ negs @ ctx''.cfacts
+                }
+              in
+              let gctx =
+                match c.c_guard with
+                | None -> ctx''
+                | Some g -> walk_expr env ctx'' g
+              in
+              ignore (walk_expr env gctx c.c_rhs : ctx);
+              match c.c_guard with
+              | None ->
+                (match pattern_negation env fc_param c.c_lhs with
+                 | Some n -> negs @ [ n ]
+                 | None -> negs)
+              | Some _ -> negs)
+            []
+            fc_cases
+           : Refinement.pred list));
     (* a function body runs at call time, not here: the continuation
        keeps the entry state (closures cannot capture mutable
        variables, so the body cannot write any variable we track) *)
