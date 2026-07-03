@@ -3,29 +3,42 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
 <title>vox — refinement types for OxCaml, checked by Lean</title>
 <style>
 :root{
+  color-scheme: dark light;
   --bg:#0f1115; --panel:#161a22; --panel2:#1c2230; --line:#2a3245;
   --fg:#d8dee9; --dim:#8b95a7; --acc:#7aa2f7; --acc2:#9ece6a; --warn:#e0af68;
-  --err:#f7768e; --kw:#bb9af7; --str:#9ece6a; --com:#565f89; --lit:#ff9e64;
+  --err:#f7768e; --kw:#bb9af7; --com:#565f89; --lit:#ff9e64;
+  --navbg:rgba(15,17,21,.92);
   --mono:'SF Mono',ui-monospace,'Cascadia Code',Menlo,Consolas,monospace;
   --sans:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
 }
+@media (prefers-color-scheme: light){
+  :root{
+    --bg:#ffffff; --panel:#f6f7f9; --panel2:#eceef2; --line:#d9dde4;
+    --fg:#24292f; --dim:#57606a; --acc:#0b5fbf; --acc2:#1a7f37; --warn:#7d4e00;
+    --err:#c0334d; --kw:#8250df; --com:#6e7781; --lit:#953800;
+    --navbg:rgba(255,255,255,.92);
+  }
+}
 *{box-sizing:border-box}
+html{scroll-behavior:smooth}
 body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 var(--sans)}
 a{color:var(--acc);text-decoration:none} a:hover{text-decoration:underline}
-nav{position:sticky;top:0;z-index:9;background:rgba(15,17,21,.92);backdrop-filter:blur(6px);
+nav{position:sticky;top:0;z-index:9;background:var(--navbg);backdrop-filter:blur(6px);
     border-bottom:1px solid var(--line);padding:.6rem 1.2rem;display:flex;gap:1.2rem;
     align-items:baseline;flex-wrap:wrap}
 nav b{color:var(--fg);font-size:1.05rem}
 nav a{color:var(--dim);font-size:.9rem} nav a:hover{color:var(--fg)}
 main{max-width:960px;margin:0 auto;padding:0 1.2rem 4rem}
-h1{font-size:2.3rem;line-height:1.15;margin:2.5rem 0 .5rem}
+h1{font-size:2.1rem;line-height:1.2;margin:2.5rem 0 .5rem}
 h1 .l{color:var(--acc)}
-h2{margin:3rem 0 .6rem;font-size:1.5rem;border-bottom:1px solid var(--line);padding-bottom:.3rem}
+h2{margin:3rem 0 .6rem;font-size:1.45rem;border-bottom:1px solid var(--line);
+   padding-bottom:.3rem;scroll-margin-top:3.5rem}
 h3{margin:1.6rem 0 .4rem;font-size:1.1rem}
-.tag{color:var(--dim);font-size:1.12rem;max-width:46rem}
+.tag{color:var(--dim);font-size:1.08rem;max-width:46rem}
 .claims{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:.8rem;margin:1.6rem 0}
 .claim{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:.8rem 1rem}
 .claim b{display:block;color:var(--acc2);margin-bottom:.2rem;font-size:.95rem}
@@ -34,12 +47,9 @@ pre{background:var(--panel);border:1px solid var(--line);border-radius:8px;
     padding:.9rem 1rem;overflow-x:auto;font:13px/1.55 var(--mono);margin:.8rem 0}
 code{font-family:var(--mono)}
 p code, li code, td code{background:var(--panel2);padding:.08em .35em;border-radius:4px;font-size:.88em}
-.k{color:var(--kw)} .s{color:var(--str)} .c{color:var(--com)} .n{color:var(--lit)}
-.r{color:var(--acc)} .e{color:var(--err)} .g{color:var(--acc2)} .w{color:var(--warn)}
+.k{color:var(--kw)} .c{color:var(--com)} .n{color:var(--lit)}
+.e{color:var(--err)} .g{color:var(--acc2)} .w{color:var(--warn)}
 .out{border-left:3px solid var(--err)}
-.out .hd{color:var(--err);font-weight:600}
-details{margin:.8rem 0}
-details>summary{cursor:pointer;color:var(--acc);padding:.4rem 0;user-select:none}
 .tabs{display:flex;gap:.3rem;margin:.9rem 0 0;flex-wrap:wrap}
 .tabs button{background:var(--panel);color:var(--dim);border:1px solid var(--line);
   border-bottom:none;border-radius:8px 8px 0 0;padding:.45rem .9rem;font:.88rem var(--sans);cursor:pointer}
@@ -62,63 +72,62 @@ th{background:var(--panel);color:var(--fg)} td{color:var(--dim)} td:first-child{
 <body>
 <nav>
   <b>vox</b>
-  <a href="#sixty">in 60 seconds</a>
-  <a href="#spec">the program is the spec</a>
+  <a href="#sixty">the model</a>
+  <a href="#spec">total_</a>
   <a href="#fib">fib, one file</a>
-  <a href="#wrong">when you're wrong</a>
-  <a href="#tour">feature tour</a>
+  <a href="#wrong">failures</a>
+  <a href="#tour">features</a>
   <a href="#trust">trust model</a>
-  <a href="#run">run it</a>
+  <a href="#run">running it</a>
 </nav>
 <main>
 
-<h1>Refinement types for OxCaml,<br><span class="l">every obligation checked by Lean.</span></h1>
+<h1>Refinement types for OxCaml,<br><span class="l">discharged by Lean at compile time.</span></h1>
 <p class="tag">
 <b>vox</b> is an experimental extension of the
-<a href="https://github.com/julesjacobs/oxcaml/tree/vox">OxCaml compiler</a>:
-types may carry logical predicates, and the compiler discharges every resulting
-proof obligation through Lean&nbsp;4's <code>grind</code> — at every
-<code>ocamlc</code> invocation.  If it compiles, the properties hold.
+<a href="https://github.com/julesjacobs/oxcaml/tree/vox">OxCaml compiler</a>.
+Types may carry logical predicates; the resulting proof obligations are sent
+to Lean&nbsp;4's <code>grind</code> on every <code>ocamlc</code> invocation,
+and an undischarged obligation is a compile error.
 </p>
 
 <div class="claims">
   <div class="claim"><b>The program is its own spec</b>
-    <span>Mark a function <code>total_</code> and its definition becomes a logical
-    function — no hand-written solver definitions, no drift.</span></div>
-  <div class="claim"><b>Really proved, every build</b>
-    <span>Obligations become Lean theorems, re-established from scratch on each
-    compile.  Solver timeout or error is a compile error.</span></div>
-  <div class="claim"><b>Failures carry counterexamples</b>
-    <span>A failed obligation reports its goal, hypotheses, and a concrete
-    candidate model: <code>n = 0, fib n = 0</code>.</span></div>
-  <div class="claim"><b>Specs travel with modules</b>
-    <span>Reflected definitions and lemma blocks ride the <code>.cmi</code>;
-    clients verify against another module's functions directly.</span></div>
+    <span>A function marked <code>total_</code> becomes a logical function;
+    its OCaml body is the definition the solver reasons from.</span></div>
+  <div class="claim"><b>Re-checked on every build</b>
+    <span>Obligations are emitted as Lean theorems and re-proved from scratch
+    each compile.  Solver timeout or error fails the build.</span></div>
+  <div class="claim"><b>Failures include a model</b>
+    <span>A failed obligation reports its goal, the hypotheses in scope, and
+    the candidate counterexample the solver ended on.</span></div>
+  <div class="claim"><b>Specs cross module boundaries</b>
+    <span>Reflected definitions and lemma blocks travel in the
+    <code>.cmi</code>; clients verify against them directly.</span></div>
 </div>
 
-<h2 id="sixty">vox in sixty seconds</h2>
+<h2 id="sixty">The model, briefly</h2>
 <p>A refinement is a predicate on a type: <code>int{ _ &gt;= 0 }</code>,
-<code>int{ not (_ = 0) }</code>.  A refinement on a <em>parameter</em> is a
-contract: callers prove it, the body assumes it.  Here the branch condition is
-all the proof <code>div</code>'s contract needs — and the compiler finds it:</p>
+<code>int{ not (_ = 0) }</code>.  A refinement on a parameter is a contract:
+the body assumes it, and each call site must discharge it.  Here the branch
+condition is sufficient, and the check is fully automatic:</p>
 <pre><code class="ml">let div : (a : int) -&gt; (b : int{ not (_ = 0) }) -&gt; int = fun a b -&gt; a / b
 
 let safe x = if 0 &lt; x then div 100 x else 0</code></pre>
 <p>Proof obligations arise from exactly two places: applications to refined
-parameters, as above — no keyword at the call — and explicit
-<code>refine_&nbsp;e</code> claims (a result refinement, a stored value).  Both
-are <em>proved</em>.  Trust is equally explicit, and graded:
-<code>assume_&nbsp;e</code> is <em>checked at runtime</em> (the compiler inserts
-the test); <code>assume_unchecked_&nbsp;e</code> is <em>trusted</em> — the only
-escape hatch, and it is grep-able.</p>
+parameters, as above — no annotation at the call — and explicit
+<code>refine_&nbsp;e</code> claims (a result refinement, a stored value).
+Both are proved.  Trust is explicit and graded: <code>assume_&nbsp;e</code> is
+checked at runtime (the compiler inserts the test), and
+<code>assume_unchecked_&nbsp;e</code> is trusted outright — the one escape
+hatch, and it is greppable.</p>
 
-<h2 id="spec">The program is the spec: <code>total_</code></h2>
-<p>Marking a recursive function <code>total_</code> reflects its definition into
-the logic: the compiler translates the body, emits it as an honest Lean
-<code>def</code>, and Lean checks termination.  Calls of the function name
-themselves, and the same name can be applied inside any refinement.  The
-textbook inductive proof about <code>append</code> then needs <em>zero</em>
-solver-side text:</p>
+<h2 id="spec">Reflected functions: <code>total_</code></h2>
+<p>Marking a recursive function <code>total_</code> translates its body into
+the logic.  The compiler emits it as an ordinary Lean <code>def</code>, Lean
+checks termination, and the function's name becomes usable inside
+refinements.  The inductive proof about <code>append</code> below requires no
+solver-side definitions and no proof text:</p>
 <pre><code class="ml">let rec total_ len l =
   match l with
   | Nil -&gt; 0
@@ -136,22 +145,23 @@ let rec append : (a : ilist) -&gt; (b : ilist) -&gt; ilist{ len _ = len a + len 
       let refine_ r = append t b in
       refine_ (Cons (h, r))</code></pre>
 <p>Each recursive call re-instantiates the declared signature at its actual
-arguments — the induction hypothesis, for free.  Non-structural recursion
-carries a metric (<code>[@@vox.decreases n]</code>) from which the termination
-proof is synthesized.</p>
+arguments, which is the induction hypothesis.  Non-structural recursion
+carries a metric — <code>[@@vox.decreases n]</code> — from which the
+termination argument is synthesized.</p>
 
-<h2 id="fib">A complete verified development in one file</h2>
-<p>Three Fibonacci implementations — the naive recursion (reflected: it
-<em>is</em> the spec), a tail-recursive accumulator loop whose invariant rides
-the parameter contracts, and <i>O</i>(log&nbsp;n) fast doubling — plus the
-doubling lemmas, proved by functional induction <em>on the reflected definition
-itself</em>, in an embedded Lean block next to the code.  There is no second
-Fibonacci anywhere.  The only trusted line is the halving primitive
-(<code>asr</code> is outside the logic), and even that is runtime-checked.</p>
+<h2 id="fib">A complete development in one file</h2>
+<p>Three Fibonacci implementations: the naive recursion, reflected, is the
+specification; a tail-recursive accumulator loop carries its invariant in the
+parameter contracts; and <i>O</i>(log&nbsp;n) fast doubling is verified
+against the same <code>fib</code>.  The doubling identities are proved in an
+embedded Lean block, by functional induction on the reflected definition
+itself — there is no second, solver-side Fibonacci.  The one assumption is
+the halving primitive (<code>asr</code> is outside the logic), and it is
+runtime-checked.</p>
 
 <div class="tabs" data-tabs>
-  <button class="on">lean_fib.ml — the whole thing</button>
-  <button>what the solver sees (generated)</button>
+  <button class="on">lean_fib.ml — complete</button>
+  <button>generated solver input</button>
 </div>
 <div class="tabpane on"><pre style="max-height:34rem"><code class="ml">(* Demo: Fibonacci, where the spec IS the program, and the whole
    development is ONE FILE.  The naive recursion below is TOTAL
@@ -353,14 +363,13 @@ theorem vc_11 (v_n_313 : Int) (v_y_319 : Int) (v_x_318 : Int) (v_k_314 : Int) (v
 theorem vc_12 (v_n_313 : Int) (v_y_319 : Int) (v_x_318 : Int) (v_k_314 : Int) (v_q_315 : (VoxT2 Int Int)) (v_a_316 : Int) (v_b_317 : Int) (h_0 : (¬ (v_n_313 = ((2 : Int) * v_k_314)))) (h_1 : (v_y_319 = (fib (((2 : Int) * v_k_314) + (1 : Int))))) (h_2 : (v_x_318 = (fib ((2 : Int) * v_k_314)))) (h_3 : (v_a_316 = (VoxT2.p1 v_q_315))) (h_4 : (v_b_317 = (VoxT2.p2 v_q_315))) (h_5 : (v_q_315 = (VoxT2.mk (fib v_k_314) (fib (v_k_314 + (1 : Int)))))) (h_6 : ((v_n_313 = ((2 : Int) * v_k_314)) ∨ (v_n_313 = (((2 : Int) * v_k_314) + (1 : Int))))) (h_7 : (¬ (v_n_313 ≤ (0 : Int)))) (h_8 : (v_n_313 ≥ (0 : Int))) : ((VoxT2.mk v_y_319 (v_x_318 + v_y_319)) = (VoxT2.mk (fib v_n_313) (fib (v_n_313 + (1 : Int))))) := by grind
 theorem vc_13 : ((10 : Int) ≥ (0 : Int)) := by grind
 theorem vc_14 (v_u_322 : Int) (v_r_321 : (VoxT2 Int Int)) (h_0 : (v_u_322 = (VoxT2.p1 v_r_321))) (h_1 : (v_r_321 = (VoxT2.mk (fib (10 : Int)) (fib ((10 : Int) + (1 : Int)))))) : (v_u_322 = (fib (10 : Int))) := by grind</code></pre>
-<p style="color:var(--dim);font-size:.9rem">Generated per compile and checked by
-Lean: the <code>pair</code> datatype, the reflected <code>fib</code> (with
-synthesized <code>termination_by</code>), the embedded lemma block verbatim, and
-one theorem per obligation — fifteen for this file, each <code>by grind</code>.
-The temp file is deleted after the run; verification never rests on a stale
-artifact.</p></div>
+<p style="color:var(--dim);font-size:.9rem">Regenerated and checked on every
+compile: the <code>pair</code> datatype, the reflected <code>fib</code> with
+its synthesized <code>termination_by</code>, the embedded lemma block
+verbatim, and one theorem per obligation — fifteen for this file, each closed
+by <code>grind</code>.</p></div>
 
-<h2 id="wrong">When you're wrong, it tells you where — with a witness</h2>
+<h2 id="wrong">What a failure looks like</h2>
 <pre><code class="ml">let rec total_ fib n =
   if n &lt;= 0 then 0 else if n = 1 then 1 else fib (n - 1) + fib (n - 2)
 [@@vox.decreases n]
@@ -374,40 +383,41 @@ Possible counterexample:
   n = 0
   fib n = 0
 (lean: error: `grind` failed)</code></pre>
-<p>The goal, the hypotheses in scope, and the model the solver's arithmetic
-ended on, rewritten to source names.  On linear goals it is a genuine
-refutation; nonlinear atoms print as their own entries so a merely
-linear-consistent model is visibly so.</p>
+<p>The goal, the hypotheses in scope, and the arithmetic model the solver
+ended on, rewritten to source names.  On linear goals the model is a genuine
+refutation; nonlinear atoms print as separate entries, so a model that is
+only linear-consistent is identifiable as such.</p>
 
-<h2 id="tour">Feature tour</h2>
+<h2 id="tour">Features</h2>
 <div class="grid">
 
 <div class="card"><h3>Algebraic data types <span class="pill">demo/lean_adt.ml</span></h3>
-<p>Constructors of simple variants live in predicates; matches refine the
+<p>Constructors of simple variants appear in predicates; a match refines its
 scrutinee; injectivity and distinctness come from the solver's datatype
-theory.  Note the <code>Nil</code> branch: it is unreachable, and the compiler
-<em>proves</em> it — the match facts contradict, so even <code>0 = 3</code>
-discharges.</p>
+theory.  The <code>Nil</code> branch below is unreachable, and that is
+proved rather than assumed: its facts are contradictory, so
+<code>refine_ 0</code> discharges against <code>r = 3</code>.</p>
 <pre><code class="ml">let head (s : ilist{ _ = Cons (3, Nil) }) : {r:int | r = 3} =
   let refine_ s = s in
   match s with
   | Cons (h, _) -&gt; refine_ h
   | Nil -&gt; refine_ 0</code></pre></div>
 
-<div class="card"><h3>Records &amp; projections <span class="pill">demo/lean_records.ml</span></h3>
-<p>Immutable records become Lean structures; field projection appears in
-predicates, and functional update gets the frame for free.</p>
+<div class="card"><h3>Records and projections <span class="pill">demo/lean_records.ml</span></h3>
+<p>Immutable records become Lean structures.  Field projection appears in
+predicates; functional update preserves the untouched fields' facts.</p>
 <pre><code class="ml">let origin : point{ _.px = 0 &amp;&amp; _.py = 0 } = refine_ { px = 0; py = 0 }
 
 let swap : (p : point) -&gt; point{ _.px = p.py &amp;&amp; _.py = p.px } =
   fun p -&gt; refine_ { px = p.py; py = p.px }</code></pre></div>
 
-<div class="card"><h3>Contracts: invariants on parameters <span class="pill">demo/lean_fib.ml</span></h3>
-<p>Parameter refinements are preconditions.  The loop below carries
-<code>(a, b) = (fib i, fib (i+1))</code> in its types; every call site —
-including the literal seeds in <code>fib_loop n 0 0 1</code> and the compound
-arguments <code>(i + 1)</code>, <code>(a + b)</code> — discharges them as
-ordinary obligations.</p>
+<div class="card"><h3>Contracts as loop invariants <span class="pill">demo/lean_fib.ml</span></h3>
+<p>Parameter refinements are preconditions, so a recursive function's
+parameters can carry its invariant — here
+<code>(a, b) = (fib i, fib (i+1))</code>.  Call sites discharge it as
+ordinary obligations, including at the literal seeds in
+<code>fib_loop n 0 0 1</code> and the compound arguments
+<code>(i + 1)</code>, <code>(a + b)</code>.</p>
 <pre><code class="ml">let rec fib_loop
   : (n : int) -&gt; (i : int) -&gt; (a : int{ _ = fib i &amp;&amp; i &gt;= 0 })
     -&gt; (b : int{ _ = fib (i + 1) }) -&gt; int{ _ = fib n }
@@ -423,21 +433,21 @@ ordinary obligations.</p>
 let fib_iter : (n : int) -&gt; int{ _ = fib n } =
   fun n -&gt; fib_loop n 0 0 1</code></pre></div>
 
-<div class="card"><h3>Specs cross module boundaries <span class="pill">demo/lean_reflectclient.ml</span></h3>
-<p>A <code>total_</code> function's definition rides its unit's
-<code>.cmi</code>.  Clients name it, apply it in predicates, and run inductive
-proofs against it — the <code>.cmi</code> checksum forces re-verification when
-the spec changes.</p>
+<div class="card"><h3>Specs across modules <span class="pill">demo/lean_reflectclient.ml</span></h3>
+<p>A <code>total_</code> function's definition is exported in its unit's
+<code>.cmi</code>.  Clients apply it in predicates and prove against it; the
+<code>.cmi</code> checksum forces re-verification when the definition
+changes.</p>
 <pre><code class="ml">let l2 : Reflect_lib.ilist{ Reflect_lib.len _ = 2 } =
   refine_ (Reflect_lib.Cons (1, Reflect_lib.Cons (2, Reflect_lib.Nil)))
 
 let f5 : int{ _ = Reflect_lib.fib 5 } = refine_ (Reflect_lib.fib 5)</code></pre></div>
 
-<div class="card"><h3>Lemmas live next to the code <span class="pill">[%%vox.lean]</span></h3>
-<p>Hand-written Lean — lemma libraries, induction proofs — embeds in the module
-it is about, is checked on every compile, and is exported through the
-<code>.cmi</code> like everything else.  Errors map back to the block's own
-source location.</p>
+<div class="card"><h3>Lemmas next to the code <span class="pill">[%%vox.lean]</span></h3>
+<p>Hand-written Lean — lemma statements and their proofs — embeds in the
+module it concerns, is checked on every compile, and is exported through the
+<code>.cmi</code>.  A solver error inside a block is reported at the block's
+own source location.</p>
 <pre><code class="lean">[%%vox.lean {lean|
 ...
 
@@ -446,10 +456,10 @@ source location.</p>
   ...
 |lean}]</code></pre></div>
 
-<div class="card"><h3>Binary search, fully specified <span class="pill">demo/lean_binsearch.ml</span></h3>
+<div class="card"><h3>Binary search <span class="pill">demo/lean_binsearch.ml</span></h3>
 <p>Over immutable arrays with uninterpreted <code>len</code>/<code>elem</code>:
-in-bounds access, the bracket invariant, and the flip-point characterization of
-the result — machine-checked.</p>
+in-bounds access, the bracket invariant, and the flip-point characterization
+of the result.</p>
 <pre><code class="ml">let lower_bound
   : (a : int iarray) -&gt; (x : int)
     -&gt; int{ 0 &lt;= _ &amp;&amp; _ &lt;= len a
@@ -459,9 +469,9 @@ the result — machine-checked.</p>
   fun a x -&gt; ...</code></pre></div>
 
 <div class="card"><h3>Interior mutability <span class="pill">demo/lean_pcell.ml</span></h3>
-<p>Mutable cells with a linear token discipline: each read/write consumes and
-returns a unique separation token, so facts about cell contents cannot survive
-a write.  Duplicated, stale, forged, and cross-cell tokens are compile-time
+<p>Mutable cells behind a linear token discipline: reads and writes consume
+and return a unique token, so facts about a cell's contents cannot survive a
+write.  Duplicated, stale, forged, and cross-cell tokens are compile-time
 errors.</p>
 <pre><code class="ml">let swap_sum : (a : int) -&gt; (b : int) -&gt; int{ _ = a + b } =
   fun a b -&gt;
@@ -474,33 +484,34 @@ errors.</p>
 
 <div class="card"><h3>Reflected arithmetic <span class="pill">Vox_reflect</span></h3>
 <p><code>+ - * / mod</code>, comparisons, and <code>&amp;&amp; || not</code>
-carry their logical meaning (recognized by primitive, so shadowing cannot lie;
-division is OCaml's T-division, totalized soundly under partial correctness).
-Conditions contribute themselves as path facts: write <code>if n &lt;= 0</code>
-and the branch knows it.</p></div>
+carry their logical meaning, recognized by primitive rather than by name (a
+shadowed <code>(+)</code> is not addition).  Division is OCaml's T-division,
+totalized soundly under partial correctness.  A branch condition contributes
+itself as a fact: writing <code>if n &lt;= 0</code> is enough.</p></div>
 
 </div>
 
-<h2 id="trust">The trust model, in one table</h2>
+<h2 id="trust">Trust model</h2>
 <table>
 <tr><th>Construct</th><th>Status</th><th>Notes</th></tr>
 <tr><td><code>refine_ e</code></td><td><span class="g">Proved</span></td>
-  <td>Becomes a Lean theorem; failure is a compile error with goal, hypotheses, counterexample.</td></tr>
+  <td>Emitted as a Lean theorem; failure is a compile error with goal, hypotheses, and model.</td></tr>
 <tr><td>parameter contracts</td><td><span class="g">Proved</span></td>
   <td>Discharged at every application, at the argument's logical name.</td></tr>
 <tr><td><code>total_</code> definitions</td><td><span class="g">Definitional</span></td>
-  <td>The emitted Lean <code>def</code> is the body; Lean independently checks termination.</td></tr>
+  <td>The emitted Lean <code>def</code> is the OCaml body; Lean independently checks termination.</td></tr>
 <tr><td><code>assume_ e</code></td><td><span class="w">Runtime-checked</span></td>
-  <td>The compiler inserts the test; a violated assumption raises instead of corrupting the logic.
-      Only compiled when the check is faithful; otherwise it is a compile error.</td></tr>
+  <td>The compiler inserts the test; a violated assumption raises rather than entering the logic.
+      Compiled only when the check is faithful to the logic; otherwise a compile error.</td></tr>
 <tr><td><code>assume_unchecked_ e</code>, <code>[%%vox.lean]</code> blocks</td><td><span class="e">Trusted</span></td>
-  <td>The explicit, auditable trust surface.  In the fib development it is one line: floor halving.</td></tr>
+  <td>The explicit trust surface.  In the fib development it amounts to one line: floor halving.</td></tr>
 </table>
-<p>Documented caveats: partial correctness (a diverging call proves nothing,
-and asserts nothing), and ideal integer arithmetic (overflow is outside the
-model).</p>
+<p>Known limits, by design: partial correctness (a diverging call neither
+proves nor asserts anything), and ideal integer arithmetic (overflow is
+outside the model).  Both are documented in
+<a href="https://github.com/julesjacobs/oxcaml/blob/vox/DESIGN.md">DESIGN.md</a>.</p>
 
-<h2 id="run">Run it yourself</h2>
+<h2 id="run">Running it</h2>
 <pre><code>git clone -b vox https://github.com/julesjacobs/oxcaml && cd oxcaml
 autoconf && ./configure && make boot-compiler
 make test-one DIR=vox        # needs a Lean 4 toolchain (elan) on PATH</code></pre>
@@ -516,7 +527,7 @@ else is extracted verbatim from
 vox is a research prototype on a public fork of
 <a href="https://github.com/oxcaml/oxcaml">OxCaml</a>.
 Design notes: <a href="https://github.com/julesjacobs/oxcaml/blob/vox/DESIGN.md">DESIGN.md</a>.
-This page is generated from the verified test suite by
+Page generated from the test suite by
 <a href="https://github.com/julesjacobs/oxcaml/blob/vox/docs/vox/generate.py">docs/vox/generate.py</a>.
 </div>
 </main>
@@ -532,16 +543,27 @@ document.querySelectorAll('[data-tabs]').forEach(bar=>{
     b.classList.add('on');panes[i].classList.add('on');
   }));
 });
-// minimal best-effort highlighting: one pass, alternation-ordered
-// (comments first), operating on already-escaped text.  Self-contained.
+// Minimal highlighting: one pass per language, alternation-ordered
+// (comments first), over already-escaped text.  OCaml blocks may embed
+// {lean|...|lean} regions, which are highlighted as Lean.
 const RX_ML = /(\(\*[\s\S]*?\*\))|(\b(?:let|rec|fun|function|match|with|if|then|else|type|of|open|module|in|and|begin|end|val|true|false|not|total_|refine_|assume_|assume_unchecked_)\b)|(\b\d+\b)/g;
 const RX_LEAN = /(--[^\n]*)|(\b(?:theorem|axiom|def|inductive|structure|by|fun_induction|grind|omega|termination_by|decreasing_by|have|rw|subst|by_cases|match|with|if|then|else|Int|Prop|Type|where)\b)|(\b\d+\b)/g;
-document.querySelectorAll('code.ml, code.lean').forEach(el=>{
-  const rx = el.classList.contains('lean') ? RX_LEAN : RX_ML;
-  el.innerHTML = el.innerHTML.replace(rx, (m, c, k, n) =>
+function paint(text, rx){
+  return text.replace(rx, (m, c, k, n) =>
     c ? '<span class="c">'+c+'</span>'
       : k ? '<span class="k">'+k+'</span>'
       : '<span class="n">'+n+'</span>');
+}
+document.querySelectorAll('code.ml, code.lean').forEach(el=>{
+  if (el.classList.contains('lean')) { el.innerHTML = paint(el.innerHTML, RX_LEAN); return; }
+  el.innerHTML = el.innerHTML
+    .split(/(\{lean\|[\s\S]*?\|lean\})/)
+    .map((part, i) => i % 2
+      ? '<span class="c">{lean|</span>'
+        + paint(part.slice(6, -6), RX_LEAN)
+        + '<span class="c">|lean}</span>'
+      : paint(part, RX_ML))
+    .join('');
 });
 </script>
 </body>
