@@ -18,7 +18,14 @@
    0]).  Sound under partial correctness -- a raised exception aborts
    the continuation, so facts recorded about the never-bound result
    hold vacuously -- and naming a subexpression still never duplicates
-   or reorders effects (the LOGIC term is a value either way).
+   or reorders effects (the LOGIC term is a value either way).  A
+   short-circuit condition can also leave a division UNEVALUATED
+   ([a && b / c > 0] with [a] false): the path fact still holds,
+   because reaching a branch means the evaluated prefix already
+   determines the condition's value -- [false && X] is false for
+   EVERY [X] -- so the totalized value of the unevaluated suffix
+   cannot flip the recorded fact, and every division that did
+   evaluate returned (no raise) with exactly the logic's value.
 
    CAVEAT (DESIGN.md): the logic's ints are unbounded while the
    machine's wrap, so the translation of + - * equates modular with
