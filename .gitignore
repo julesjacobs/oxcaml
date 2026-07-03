@@ -76,6 +76,8 @@ _profile/
 /configure
 /ocaml-*.cache
 /config.log
+/configure.log
+/build.log
 /config.status
 /configure~
 /flexlink.opt
