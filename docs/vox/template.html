@@ -102,11 +102,13 @@ proof obligation through Lean&nbsp;4's <code>grind</code> — at every
 contract: callers prove it, the body assumes it.  Here the branch condition is
 all the proof <code>div</code>'s contract needs — and the compiler finds it:</p>
 <pre><code class="ml">@SIXTY@</code></pre>
-<p>Three keywords control where obligations come from and where trust goes:
-<code>refine_&nbsp;e</code> claims a refinement and is <em>proved</em>;
-<code>assume_&nbsp;e</code> is <em>checked at runtime</em> (the compiler inserts the test);
-<code>assume_unchecked_&nbsp;e</code> is <em>trusted</em> — the only escape hatch,
-and it is grep-able.</p>
+<p>Proof obligations arise from exactly two places: applications to refined
+parameters, as above — no keyword at the call — and explicit
+<code>refine_&nbsp;e</code> claims (a result refinement, a stored value).  Both
+are <em>proved</em>.  Trust is equally explicit, and graded:
+<code>assume_&nbsp;e</code> is <em>checked at runtime</em> (the compiler inserts
+the test); <code>assume_unchecked_&nbsp;e</code> is <em>trusted</em> — the only
+escape hatch, and it is grep-able.</p>
 
 <h2 id="spec">The program is the spec: <code>total_</code></h2>
 <p>Marking a recursive function <code>total_</code> reflects its definition into
