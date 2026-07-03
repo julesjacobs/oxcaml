@@ -263,6 +263,20 @@ proof.  Double use, forged exports, and writes through frozen loans are
 compile-time errors.</p>
 <pre><code class="ml">@BORROW@</code></pre></div>
 
+<div class="card"><h3>A tree flipped in place <span class="pill">demo/lean_flip.ml</span></h3>
+<p>A mutable tree with a pure ghost model: <code>flip</code> swaps child
+pointers in place, its dependent signature
+<code>model _ = mirror (model h)</code> makes each recursive call the
+induction hypothesis, and flipping twice is provably the identity.</p>
+<pre><code class="ml">@FLIP@</code></pre></div>
+
+<div class="card"><h3>A separation logic <span class="pill">demo/lean_sep.ml</span></h3>
+<p>One unique token owns the heap; its refinement carries a reified
+assertion, and the frame is an explicit parameter.  Reads recover the ghost
+values, writes rewrite the points-to chunks, and two live references are
+distinct because <code>Star</code> means disjoint.</p>
+<pre><code class="ml">@SEP@</code></pre></div>
+
 <div class="card"><h3>Deleting bounds checks, safely <span class="pill">demo/lean_kernel.ml</span></h3>
 <p><code>get</code> reads with <code>unsafe_get</code>: the per-access
 check is replaced by a proof at each call site.  The benchmark
@@ -273,6 +287,14 @@ arrays compatible.  Measured on a dev box: the verified dot product runs
 hand-written <code>unsafe_get</code> exactly — verification costs nothing
 at runtime.</p>
 <pre><code class="ml">@KERNEL@</code></pre></div>
+
+<div class="card"><h3>Quicksort, then in parallel <span class="pill">demo/lean_qsort.ml</span></h3>
+<p>In-place quicksort over slice borrows, verified against
+<code>sorted</code>-and-<code>perm</code>: the recursion is a reborrow, and
+each side's facts come home as prophecy values.  Then the same
+verification runs fork-join — the sub-loans are disjoint by mode, so the
+sequential proof is the parallel proof.</p>
+<pre><code class="ml">@QSORT@</code></pre></div>
 
 <div class="card"><h3>Reflected arithmetic <span class="pill">Vox_reflect</span></h3>
 <p><code>+ - * / mod</code>, comparisons, and <code>&amp;&amp; || not</code>

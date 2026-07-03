@@ -22,9 +22,42 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 SUITE = os.path.join(ROOT, 'testsuite', 'tests', 'vox')
 
 
+SHOWN = set()
+
 def read(rel):
+    SHOWN.add(rel)
     with open(os.path.join(SUITE, rel)) as f:
         return f.read()
+
+
+# Demos deliberately not on the page, with the reason.  A new
+# demo/lean_*.ml must either be sliced into a card or listed here --
+# otherwise generation fails, so the page cannot silently lag the
+# suite.
+UNSHOWN = {
+    'demo/lean_verify.ml': 'first-contact basics; lean_overview is the page version',
+    'demo/lean_embed.ml': 'embedded blocks appear in the fib and flip cards',
+    'demo/lean_embedclient.ml': 'client side of lean_embed',
+    'demo/lean_sig.ml': 'specced .mli; the cross-module card uses reflectclient',
+    'demo/lean_sigclient.ml': 'client side of lean_sig',
+    'demo/lean_spec.ml': 'the -vox-prelude FILE spelling of lean_reflect',
+    'demo/lean_borrow_elem.ml': 'slot borrows; the borrow and quicksort cards cover the idea',
+    'demo/lean_flip_proph.ml': 'prophecy-flavored variant of the flip card',
+    'demo/lean_qsort_run.ml': 'expect-block runner for the quicksort card',
+}
+
+
+def check_demo_coverage():
+    demos = {'demo/' + f for f in os.listdir(os.path.join(SUITE, 'demo'))
+             if re.fullmatch(r'lean_\w+\.ml', f)}
+    missing = demos - SHOWN - set(UNSHOWN)
+    stale = set(UNSHOWN) - demos
+    if missing:
+        sys.exit('demos neither shown nor listed as unshown: %s'
+                 % ', '.join(sorted(missing)))
+    if stale:
+        sys.exit('UNSHOWN entries for demos that no longer exist: %s'
+                 % ', '.join(sorted(stale)))
 
 
 def slice_between(text, start, stop, *, include_stop=True, what=''):
@@ -134,6 +167,18 @@ def main():
                                    r'go 0 \(x \+ 1\)'),
         '@BORROW@': slice_between(read('demo/lean_borrow.ml'), r'^let bump',
                                   r'^  s$'),
+        '@FLIP@': slice_between(read('demo/lean_flip.ml'), r'^let rec flip',
+                                r'^  else h1')
+                  + '\n\n'
+                  + slice_between(read('demo/lean_flip.ml'),
+                                  r'^let roundtrip', r'^  r$'),
+        '@SEP@': slice_between(read('demo/lean_sep.ml'), r'^let swap',
+                               r'^  t$'),
+        '@QSORT@': slice_between(read('demo/lean_qsort.ml'),
+                                 r'^let rec qsort', r'@ local unique =$')
+                   + '\n  fun m -> ...\n\n'
+                   + slice_between(read('demo/lean_qsort.ml'),
+                                   r'Par_lib.fork_join2', r'ignore ur;'),
         '@BST_MLI@': strip_leading_comment(read('demo/bst.mli')),
         '@BST_ML@': strip_leading_comment(read('demo/bst.ml')),
         '@BST_CLIENT@': slice_between(read('demo/lean_bst.ml'), r'^let demo',
@@ -164,6 +209,7 @@ def main():
         tpl = tpl.replace(k, html.escape(v.rstrip('\n'), quote=False))
     leftover = re.findall(r'@[A-Z_]+@', tpl)
     assert not leftover, leftover
+    check_demo_coverage()
     with open(out_path, 'w') as f:
         f.write(tpl)
     print('wrote %s (%d bytes)' % (out_path, len(tpl)))

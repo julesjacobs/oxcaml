@@ -600,6 +600,54 @@ compile-time errors.</p>
   let s = vpeek x' in                    (* s = x' = p *)
   s</code></pre></div>
 
+<div class="card"><h3>A tree flipped in place <span class="pill">demo/lean_flip.ml</span></h3>
+<p>A mutable tree with a pure ghost model: <code>flip</code> swaps child
+pointers in place, its dependent signature
+<code>model _ = mirror (model h)</code> makes each recursive call the
+induction hypothesis, and flipping twice is provably the identity.</p>
+<pre><code class="ml">let rec flip : (h : vtree) @ unique -&gt; vtree{ model _ = mirror (model h) } @ unique =
+  fun h -&gt;
+  let (b, h1) = is_node h in
+  if b
+  then (
+    let (l, k) = take_left h1 in
+    let l' = flip l in
+    let h2 = put_left k l' in
+    let (r, k2) = take_right h2 in
+    let r' = flip r in
+    let h3 = put_right k2 r' in
+    let h4 = swap_kids h3 in
+    h4)
+  else h1
+
+let roundtrip : (t : tree) -&gt; tree{ _ = t } =
+  fun t -&gt;
+  let h = of_pure t in
+  let h1 = flip h in
+  let h2 = flip h1 in
+  let r = to_pure h2 in
+  r</code></pre></div>
+
+<div class="card"><h3>A separation logic <span class="pill">demo/lean_sep.ml</span></h3>
+<p>One unique token owns the heap; its refinement carries a reified
+assertion, and the frame is an explicit parameter.  Reads recover the ghost
+values, writes rewrite the points-to chunks, and two live references are
+distinct because <code>Star</code> means disjoint.</p>
+<pre><code class="ml">let swap :
+  (r1 : href) -&gt; (r2 : href) -&gt; (a : int) -&gt; (b : int) -&gt; (p : hprop) -&gt;
+  htoken{ sat (Star (Pts (r1, a), Star (Pts (r2, b), p))) (hp _) } @ unique -&gt;
+  htoken{ sat (Star (Pts (r1, b), Star (Pts (r2, a), p))) (hp _) } @ unique =
+  fun r1 r2 a b p t -&gt;
+  let f1 = Star (Pts (r2, b), p) in
+  let (x, t) = get r1 a f1 t in
+  let f2 = Star (Pts (r1, a), p) in
+  let (y, t) = get r2 b f2 t in
+  let t = set r1 a y f1 t in
+  let f3 = Star (Pts (r1, y), p) in
+  let t = set r2 b x f3 t in
+  ignore x; ignore y;
+  t</code></pre></div>
+
 <div class="card"><h3>Deleting bounds checks, safely <span class="pill">demo/lean_kernel.ml</span></h3>
 <p><code>get</code> reads with <code>unsafe_get</code>: the per-access
 check is replaced by a proof at each call site.  The benchmark
@@ -620,6 +668,199 @@ let sum : (a : int iarray) -&gt; int =
       fun i acc -&gt; if i &lt; n then go (i + 1) (acc + get a i) else acc
     in
     go 0 0</code></pre></div>
+
+<div class="card"><h3>Quicksort, then in parallel <span class="pill">demo/lean_qsort.ml</span></h3>
+<p>In-place quicksort over slice borrows, verified against
+<code>sorted</code>-and-<code>perm</code>: the recursion is a reborrow, and
+each side's facts come home as prophecy values.  Then the same
+verification runs fork-join — the sub-loans are disjoint by mode, so the
+sequential proof is the parallel proof.</p>
+<pre><code class="ml">let rec qsort :
+  (m : slice) @ local unique -&gt;
+  slice{ perm (now m) (now _) &amp;&amp; sorted (now _) &amp;&amp; fin _ = fin m }
+    @ local unique =
+  fun m -&gt; ...
+
+   [Par_lib.fork_join2] as once-closures -- disjointness is the mode
+   checker's, and each task's result is its side's resolution facts.
+   The negative probes (bounds, prophecy reuse, forged exports, loan
+   escape, racing tasks) live in mechanics/lean_qsort_fail.ml. *)
+
+open Slice_lib
+
+(* Swap two in-bounds positions of a loan: four threaded ops; the
+   composed [upd]/[elem] contents expression is re-proved at the
+   annotation by congruence alone, and [fin] just threads. *)
+let swap :
+  (m : slice) @ local unique -&gt;
+  (i : int{ 0 &lt;= _ &amp;&amp; _ &lt; len (now m) }) -&gt;
+  (j : int{ 0 &lt;= _ &amp;&amp; _ &lt; len (now m) }) -&gt;
+  slice{ now _ = upd (upd (now m) i (elem (now m) j)) j (elem (now m) i)
+         &amp;&amp; fin _ = fin m }
+    @ local unique =
+  fun m i j -&gt;
+    exclave_
+      (let (vi, m1) = sget m i in
+       let (vj, m2) = sget m1 j in
+       let m3 = sset m2 i vj in
+       let m4 = sset m3 j vi in
+       (m4 : slice{ now _ = upd (upd (now m) i (elem (now m) j)) j
+                              (elem (now m) i)
+                    &amp;&amp; fin _ = fin m }))
+
+(* Lomuto partition with the pivot parked at the last position.  The
+   invariant rides the parameters: positions [0,i) are &lt;= p, the
+   window [seg i j] is &gt;= p, the pivot p sits at [n-1], and [j] scans
+   until it reaches it.  Each recursive call discharges the halved
+   invariant from the path facts and the swap lemmas
+   ([swap_le]/[swap_mid]); the final swap parks the pivot at [i], and
+   [swap_final_ge] turns the window into the &gt;=-suffix. *)
+let rec part :
+  (p : int) -&gt; (i : int{ 0 &lt;= _ }) -&gt; (j : int{ i &lt;= _ }) -&gt;
+  (s : slice{ j &lt;= len (now _) - 1
+              &amp;&amp; elem (now _) (len (now _) - 1) = p
+              &amp;&amp; all_le (take i (now _)) p
+              &amp;&amp; all_ge (seg i j (now _)) p }) @ local unique -&gt;
+  (n : int{ _ = len (now s) }) -&gt;
+  (int * slice){ 0 &lt;= fst _ &amp;&amp; fst _ &lt; n
+                 &amp;&amp; elem (now (snd _)) (fst _) = p
+                 &amp;&amp; all_le (take (fst _) (now (snd _))) p
+                 &amp;&amp; all_ge (drop (fst _) (now (snd _))) p
+                 &amp;&amp; perm (now s) (now (snd _))
+                 &amp;&amp; fin (snd _) = fin s }
+    @ local unique =
+  fun p i j s n -&gt;
+    exclave_
+      (if j &lt; n - 1
+       then begin
+         let (v, s1) = sget s j in
+         if v &lt;= p
+         then begin
+           let s2 = swap s1 i j in
+           let q = part p (i + 1) (j + 1) s2 n in
+           (q : (int * slice){ 0 &lt;= fst _ &amp;&amp; fst _ &lt; n
+                        &amp;&amp; elem (now (snd _)) (fst _) = p
+                        &amp;&amp; all_le (take (fst _) (now (snd _))) p
+                        &amp;&amp; all_ge (drop (fst _) (now (snd _))) p
+                        &amp;&amp; perm (now s) (now (snd _))
+                        &amp;&amp; fin (snd _) = fin s })
+         end
+         else begin
+           let q = part p i (j + 1) s1 n in
+           (q : (int * slice){ 0 &lt;= fst _ &amp;&amp; fst _ &lt; n
+                        &amp;&amp; elem (now (snd _)) (fst _) = p
+                        &amp;&amp; all_le (take (fst _) (now (snd _))) p
+                        &amp;&amp; all_ge (drop (fst _) (now (snd _))) p
+                        &amp;&amp; perm (now s) (now (snd _))
+                        &amp;&amp; fin (snd _) = fin s })
+         end
+       end
+       else begin
+         let s' = swap s i j in
+         (((i : int), s')
+           : (int * slice){ 0 &lt;= fst _ &amp;&amp; fst _ &lt; n
+                        &amp;&amp; elem (now (snd _)) (fst _) = p
+                        &amp;&amp; all_le (take (fst _) (now (snd _))) p
+                        &amp;&amp; all_ge (drop (fst _) (now (snd _))) p
+                        &amp;&amp; perm (now s) (now (snd _))
+                        &amp;&amp; fin (snd _) = fin s })
+       end)
+
+(* Sequential quicksort on a loan: read the pivot, partition, then
+   REBORROW -- the outer split at the pivot index, the inner split
+   isolating the pivot's singleton.  Each side is sorted recursively
+   and resolved; the singleton is resolved as-is; resolving the inner
+   bracket's advanced parent reveals [pv prest] as pivot-then-right.
+   Each bracket's export restates its prophecies' facts in the scope
+   OUTSIDE the bracket, and the parent loan comes back at
+   [app (pv pl) (pv prest)], where the glue lemmas finish. *)
+let rec qsort :
+  (m : slice) @ local unique -&gt;
+  slice{ perm (now m) (now _) &amp;&amp; sorted (now _) &amp;&amp; fin _ = fin m }
+    @ local unique =
+  fun m -&gt;
+    exclave_
+      (let (n, m0) = slen m in
+       if n &lt;= 1
+       then
+         (m0 : slice{ perm (now m) (now _) &amp;&amp; sorted (now _)
+                      &amp;&amp; fin _ = fin m })
+       else begin
+         let (p, mp) = sget m0 (n - 1) in
+         let q = part p 0 0 mp n in
+         let (k, m2) = q in
+         let pl = new_proph () in
+         let prest = new_proph () in
+         let (mres, u) =
+           split pl prest m2 k (fun left rest -&gt;
+             let left' = qsort left in
+             let _u1 = sdrop left' in
+             let pm = new_proph () in
+             let pr = new_proph () in
+             let (rest_adv, u2) =
+               split pm pr rest 1 (fun mid right -&gt;
+                 let right' = qsort right in
+                 let _u2 = sdrop right' in
+                 let _u3 = sdrop mid in
+                 (() : unit{ pv pm = take 1 (now rest)
+                             &amp;&amp; sorted (pv pr)
+                             &amp;&amp; perm (drop 1 (now rest)) (pv pr) }))
+             in
+             ignore u2;
+             let _u4 = sdrop rest_adv in
+             (() : unit{ sorted (pv pl)
+                         &amp;&amp; perm (take k (now m2)) (pv pl)
+                         &amp;&amp; sorted (pv prest)
+                         &amp;&amp; perm (drop k (now m2)) (pv prest) }))
+         in
+         ignore u;
+         (mres : slice{ perm (now m) (now _) &amp;&amp; sorted (now _)
+                   &amp;&amp; fin _ = fin m })
+       end)
+
+(* Parallel quicksort, same spec: inside the inner bracket both
+   sub-loans are live and disjoint, so each once-closure consumes one
+   and fork_join2 runs them on separate domains -- each task returns
+   its side's resolution facts (global refined units), which survive
+   the join; everything else is the sequential proof. *)
+let rec psort :
+  (m : slice) @ local unique -&gt;
+  slice{ perm (now m) (now _) &amp;&amp; sorted (now _) &amp;&amp; fin _ = fin m }
+    @ local unique =
+  fun m -&gt;
+    exclave_
+      (let (n, m0) = slen m in
+       if n &lt;= 1
+       then
+         (m0 : slice{ perm (now m) (now _) &amp;&amp; sorted (now _)
+                      &amp;&amp; fin _ = fin m })
+       else begin
+         let (p, mp) = sget m0 (n - 1) in
+         let q = part p 0 0 mp n in
+         let (k, m2) = q in
+         let pl = new_proph () in
+         let prest = new_proph () in
+         let (mres, u) =
+           split pl prest m2 k (fun left rest -&gt;
+             let pm = new_proph () in
+             let pr = new_proph () in
+             let (rest_adv, u2) =
+               split pm pr rest 1 (fun mid right -&gt;
+                 let (ul, ur) =
+                   Par_lib.fork_join2
+                     (fun () -&gt;
+                       let left' = psort left in
+                       let _u = sdrop left' in
+                       (() : unit{ sorted (pv pl)
+                                   &amp;&amp; perm (take k (now m2)) (pv pl) }))
+                     (fun () -&gt;
+                       let right' = psort right in
+                       let _u = sdrop right' in
+                       (() : unit{ sorted (pv pr)
+                                   &amp;&amp; perm (drop 1 (now rest)) (pv pr) }))
+                 in
+                 ignore ul;
+                 ignore ur;</code></pre></div>
 
 <div class="card"><h3>Reflected arithmetic <span class="pill">Vox_reflect</span></h3>
 <p><code>+ - * / mod</code>, comparisons, and <code>&amp;&amp; || not</code>

@@ -1,0 +1,28 @@
+# CYBERSECURITY WARNING: DO NOT give workflows write permission to any source code repo.
+# If you want this functionality, ask for help from a subset of:
+# @jvanburen @glittershark @mshinwell
+name: vox demo page
+on:
+  push:
+    branches:
+      - vox
+  pull_request:
+    types: [opened, synchronize, reopened]
+jobs:
+  check:
+    name: page in sync with the suite
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout the OxCaml repo
+        uses: actions/checkout@v4
+      # Without --ocamlc/--lean the generator reuses the embedded
+      # solver-input tab, so no compiler build is needed: this fails if
+      # a snippet anchor drifted, if the page differs from what the
+      # suite generates, or if a demo/lean_*.ml is neither shown nor
+      # listed as deliberately unshown in generate.py.
+      - name: Regenerate the page
+        run: python3 docs/vox/generate.py
+      - name: The committed page matches
+        run: git diff --exit-code docs/vox
