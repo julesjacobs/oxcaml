@@ -6,7 +6,7 @@
  check-ocamlc.byte-output;
 *)
 
-(* Demo 4/7 -- the program as its own spec.  TOTAL (reflected)
+(* Demo: the program as its own spec.  TOTAL (reflected)
    recursive functions [let rec total_ f ...]: the compiler
    translates the definition into the logic and emits it as a Lean
    [@[grind] def] (Lean checks termination -- structural recursion here

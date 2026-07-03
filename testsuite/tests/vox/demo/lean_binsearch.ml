@@ -8,7 +8,7 @@
  check-ocamlc.byte-output;
 *)
 
-(* Demo 7/7 -- binary search over [int iarray], after "Binary Search a
+(* Demo: binary search over [int iarray], after "Binary Search a
    Little Simpler & More Generic" (julesjacobs.com): keep l < r with
    p(l) false and p(r) true, halve until r = l + 1.  Starting from the
    virtual sentinels l = -1 and r = length a (where p(-1) = false and

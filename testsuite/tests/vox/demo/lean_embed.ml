@@ -7,9 +7,9 @@
 *)
 
 (* Embedded prelude: the spec functions live INSIDE the module as a
-   [%%vox.lean] block -- no -vox-prelude file.  Same proofs as
-   lean_spec.ml: every obligation is really discharged by grind, the
-   recursive ones inductively.  Blocks may appear anywhere; they are
+   [%%vox.lean] block -- no -vox-prelude file.  A subset of
+   lean_spec.ml's proofs in that style: every obligation is really
+   discharged by grind, the recursive ones inductively.  Blocks may appear anywhere; they are
    emitted (in source order) into every solver input for the module,
    after the datatype declarations, whose solver-side names are stable
    (Vox_<Unit>_<type>). *)

@@ -7,7 +7,7 @@
  check-ocamlc.byte-output;
 *)
 
-(* Demo 2/7 -- algebraic data types.  Real verification of ADT
+(* Demo: algebraic data types.  Real verification of ADT
    refinements through Lean's [grind]: every obligation below is
    actually proved (this test fails to compile if any proof fails).
    Exercises constructor introduction, match facts, injectivity,

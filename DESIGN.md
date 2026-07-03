@@ -153,10 +153,13 @@
   closed).
 - Spec functions: any other applied identifier in a predicate,
   `len _` or `mem 2 _`, denotes a logical function that the user
-  defines on the solver side in a `-vox-prelude` file, inserted
-  verbatim -- just after the datatype declarations -- into every
-  generated solver input that applies a spec function (not into other
-  inputs: the prelude may reference datatypes of a different module) (for Lean: `@[grind] def len : Vox_M_ilist -> Int ...`).
+  defines on the solver side -- in a `-vox-prelude` file or an
+  embedded `[%%vox.lean]` block (`@[grind] def len : Vox_M_ilist ->
+  Int ...`), or implicitly by a `total_` definition (below).  Prelude
+  text is inserted verbatim -- just after the datatype declarations --
+  into every generated solver input that applies a spec function (not
+  into other inputs: a prelude may reference datatypes of a different
+  module).
   Spec functions live in their own namespace -- program functions have
   no logical meaning, so there is nothing to collide with -- and, like
   the rest of the predicate language, they are untyped.  To make
@@ -193,7 +196,7 @@
   `[@@vox.decreases n]`.  Two reflected functions may not share a
   name; a reflected name shadowing a prelude definition is a solver
   error (fails closed).  See testsuite/tests/vox/demo/lean_reflect.ml
-  (a spec library with an EMPTY prelude) and demo/lean_fib.ml
+  (a spec library with no prelude at all) and demo/lean_fib.ml
   (reflected fib, with the fast-doubling lemmas stated about it in an
   embedded prelude block).
   Reflected functions CROSS MODULES: the marker rides the binder
@@ -467,7 +470,7 @@ Dependent arrows implement exactly that:
   fresh at the actual arguments, so a closure refined at THIS
   activation's variable simply fails to typecheck as an argument
   refined at the NEXT activation's (see testsuite/tests/vox/mechanics:
-  [countdown] accepted, [unsound] rejected). The declared refinement
+  [countdown] in vc_pi.ml accepted, [unsound] in errors.ml rejected). The declared refinement
   is assumed at recursive calls: standard partial correctness
   (divergence makes facts vacuous).
 
@@ -497,4 +500,4 @@ the scope rule above.
 - [x] test/toplevel/error-message output is in that format
 - [ ] strong update for @ unique mutation
 - [ ] RustHorn style borrows via block indices
-- [ ] Algebraic data types with refined constructors
+- [x] Algebraic data types with refined constructors

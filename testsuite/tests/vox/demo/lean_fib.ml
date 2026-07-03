@@ -6,7 +6,7 @@
  check-ocamlc.byte-output;
 *)
 
-(* Demo 6/7 -- Fibonacci, where the spec IS the program, and the whole
+(* Demo: Fibonacci, where the spec IS the program, and the whole
    development is ONE FILE.  The naive recursion below is TOTAL
    (reflected): the compiler translates its definition into the logic
    and emits it as a Lean [@[grind] def], with [termination_by]

@@ -637,8 +637,9 @@ val save_signature_with_imports:
         (* Arguments: signature, module name, module kind,
            file name, imported units with their CRCs. *)
 
-(* vox: embedded prelude blocks of every loaded import (unit name,
-   blocks, the unit's own import names); see Vox_verify. *)
+(* vox: the exported spec (datatype declarations + prelude blocks) of
+   every loaded import (unit name, export, the unit's own import
+   names); see Vox_verify. *)
 val vox_imported_preludes : unit
   -> (Compilation_unit.Name.t
       * Cmi_format.vox_prelude_export

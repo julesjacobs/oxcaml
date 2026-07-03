@@ -9,7 +9,7 @@
  check-ocamlc.byte-output;
 *)
 
-(* Demo 3/7 -- simple records.  Real verification of record
+(* Demo: simple records.  Real verification of record
    refinements through Lean's [grind]: records become structures,
    projections are the built-in ones, and every obligation below is
    actually proved.  Exercises construction, projection goals,

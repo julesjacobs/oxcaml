@@ -8,8 +8,8 @@
  check-ocamlc.byte-output;
 *)
 
-(* Demo 5/7 -- spec functions from a prelude.  Where [@@vox.reflect]
-   (demo 4) makes the program its own spec, a [-vox-prelude] file
+(* Demo: spec functions from a prelude.  Where [total_]
+   (lean_reflect.ml) makes the program its own spec, a [-vox-prelude] file
    defines spec functions on the SOLVER side (spec_lib.lean) -- the
    spelling for specs beyond the reflectable fragment, or that should
    not live in the program.  [mem] returns Prop, which no OCaml

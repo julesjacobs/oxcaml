@@ -111,8 +111,9 @@ let find_datatype p = List.find_opt (fun (q, _) -> Path.same p q) !datatypes
 
 (* Reflected definitions ([total_] bindings) of the current module (or
    toplevel session), in definition order; emitted into the solver input
-   between the datatypes and the [-vox-prelude], so prelude lemmas may
-   reference them. *)
+   between the [-vox-prelude] and the module's own embedded blocks, so
+   those blocks may state lemmas about them (a prelude FILE precedes
+   them: a definition may call an imported reflected function). *)
 let spec_defs : Vox_reflect.spec_def list ref = ref []
 
 (* Embedded solver blocks ([%%vox.lean ...]) of the module (or
@@ -232,6 +233,7 @@ let rec datatype_sort env p =
             if String.equal (path_uname p) (path_uname q)
             then
               Location.raise_errorf
+                ~loc:(Location.in_file !Location.input_name)
                 "vox: two distinct types would share the solver-side name \
                  %s; rename one of them"
                 (path_uname p))
@@ -1239,16 +1241,6 @@ let gather_imported_preludes () =
   List.rev !out
 ;;
 
-(* Datatype names already declared by imported exports: a client
-   skips re-declaring these (stable names guarantee they denote the
-   same declarations). *)
-let imported_unames () =
-  List.concat_map
-    (fun (_, vp) ->
-      List.map (fun (n, _) -> n) vp.Cmi_format.vp_datatypes)
-    !imported_preludes
-;;
-
 let imported_need_voxu () =
   List.exists
     (fun (_, vp) -> vp.Cmi_format.vp_needs_voxu)
@@ -1259,7 +1251,9 @@ let imported_need_voxu () =
    declaration is not re-declared (see the emitters' [~skip]) -- which
    is only sound if it really is the same declaration.  The renderers
    are deterministic, so comparing rendered text detects a local type
-   shadowing an imported one at the same solver-side name. *)
+   shadowing an imported one at the same solver-side name.  [render]
+   is a parameter only because the Lean renderer it must be (the
+   export stores the Lean rendering) is defined later in this file. *)
 let check_imported_datatype_clashes ~render =
   List.iter
     (fun ((p, _) as dt) ->
@@ -1272,6 +1266,7 @@ let check_imported_datatype_clashes ~render =
                  && not (String.equal (render dt : string) leand)
               then
                 Location.raise_errorf
+                  ~loc:(Location.in_file !Location.input_name)
                   "vox: the type %s would share the solver-side name %s \
                    with a different datatype imported from unit %s; \
                    rename one of them"
@@ -1318,14 +1313,12 @@ let prelude () =
           then c
           else c ^ "\n"
         | exception Sys_error msg ->
-          Location.raise_errorf "vox: cannot read -vox-prelude file: %s" msg)
+          Location.raise_errorf
+            ~loc:(Location.in_file !Location.input_name)
+            "vox: cannot read -vox-prelude file: %s" msg)
     in
     prelude_cache := Some c;
     c
-;;
-
-let prelude_lines () =
-  String.fold_left (fun n c -> if c = '\n' then n + 1 else n) 0 (prelude ())
 ;;
 
 let vc_uses_spec_fun vc =
@@ -1473,7 +1466,8 @@ let rec lean_of_pred buf (p : Refinement.pred) =
   | Pfun (f, args) ->
     (* Spec function, emitted verbatim (no quoting is needed: every
        OCaml lowercase identifier, [']s included, is a valid Lean
-       identifier); defined by the [-vox-prelude]. *)
+       identifier); defined by a prelude (file, embedded block, or
+       imported spec export) or a [total_] definition. *)
     Buffer.add_string buf ("(" ^ f);
     List.iter
       (fun a ->
@@ -1663,10 +1657,6 @@ let cmi_export_of_structure (str : structure) (sg : Types.signature) =
 ;;
 
 
-(* Emits every definition; also returns the total line count and, per
-   definition, its 0-based line span within the block (so a Lean error
-   inside a definition -- typically a failed termination proof -- is
-   reported against that definition, not blamed on some VC). *)
 let lean_theorem buf i vc =
   Buffer.add_string buf (Printf.sprintf "theorem vc_%d " i);
   let seen = Hashtbl.create 16 in
@@ -1970,16 +1960,12 @@ let run_lean vcs =
         let status = Sys.command cmd in
         if status <> 0
         then begin
-          (* Find the first "<file>:LINE:COL: error: ..." and map it
-             back.  Lean also emits "warning:" lines in the same
-             format (e.g. for unused hypotheses); attributing the
-             failure to the first WARNING would blame the wrong VC, so
-             only "error:" lines count. *)
-          (* Lean prints "<file>:L:C: error: ..." or, with a kind,
+          (* Find the first error and map it back.  Lean prints
+             "<file>:L:C: error: ..." or, with a kind,
              "<file>:L:C: error(lean.some.kind): ...".  Warnings use
-             the same shapes with "warning"; only errors count (a
-             warning line before the real error must not steal the
-             attribution). *)
+             the same shapes with "warning" (e.g. for unused
+             hypotheses); only errors count (a warning line before the
+             real error must not steal the attribution). *)
           let error_marker l =
             let needle = " error" in
             let n = String.length needle in

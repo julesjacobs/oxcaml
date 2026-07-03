@@ -35,8 +35,9 @@ type pred =
        (free, injective, pairwise-distinct constructors). *)
   | Pfun of string * pred list
     (* application of a SPEC function: a logical function (measure,
-       predicate, ...) that the user defines on the solver side via
-       [-vox-prelude].  Purely a name -- the compiler neither resolves
+       predicate, ...) defined on the solver side -- by a prelude (the
+       [-vox-prelude] file, an embedded [%%vox.lean] block, or an
+       imported spec export) or by a [total_] definition.  Purely a name -- the compiler neither resolves
        nor sorts it; an undefined or ill-sorted application is a solver
        error at VC time, i.e. a verification failure. *)
   | Pfield of Path.t * string * pred
@@ -218,7 +219,7 @@ let rec constr_paths acc p =
 
 let constr_paths p = constr_paths [] p
 
-(* Does [p] apply any spec function?  The [-vox-prelude] (which defines
+(* Does [p] apply any spec function?  Prelude text (which defines
    them) is injected only into solver inputs that need it: it may
    reference datatypes of one module, which do not exist in another
    module's input. *)

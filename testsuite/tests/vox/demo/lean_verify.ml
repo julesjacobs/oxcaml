@@ -7,7 +7,7 @@
  check-ocamlc.byte-output;
 *)
 
-(* Demo 1/7 -- first contact with vox.  Real verification through
+(* Demo: first contact with vox.  Real verification through
    Lean 4's [grind]: every obligation below is actually proved (this
    test fails to compile if any proof fails).  has-lean.sh locates the
    solver (VOX_LEAN, PATH, or a pinned copy) and skips the test when
