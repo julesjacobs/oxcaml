@@ -389,3 +389,5 @@ ocaml/primitives.new
 /yacc/.gdb_history
 
 /natdynlinkops
+build.log
+configure.log
