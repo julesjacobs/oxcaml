@@ -1,6 +1,6 @@
 type t = A | B
 
-[%%vox.prelude.lean {lean|
+[%%vox.lean {lean|
 @[grind] def dup_spec : Vox_Dupspec_a_t -> Int
   | .A => 0
   | .B => 1

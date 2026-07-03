@@ -2556,7 +2556,7 @@ and transl_signature ?(interface_toplevel = false) env
         mksig (Tsig_attribute attr) env loc, [], newenv
     | Psig_extension ((({txt; _}, _) as ext), _attrs)
       when Vox_verify.is_prelude_extension_name txt ->
-        (* vox: [%%vox.prelude ...] in an interface exports the block
+        (* vox: [%%vox.lean ...] in an interface exports the block
            through the .cmi to every client (and to this unit's own
            implementation).  Validated here; collected from the typed
            signature when the .cmi is written. *)
@@ -4095,7 +4095,7 @@ and type_structure ?(toplevel = None) ~funct_body anchor env sstr =
         type_str_include ~loc env shape_map sincl sig_acc
     | Pstr_extension ((({txt; _}, _) as ext), _attrs)
       when Vox_verify.is_prelude_extension_name txt ->
-        (* vox: [%%vox.prelude {lean|...|lean}] embeds solver-side
+        (* vox: [%%vox.lean {lean|...|lean}] embeds solver-side
            definitions.  Validated here, then carried as an attribute
            so the verification pass can collect it from the tree. *)
         ignore

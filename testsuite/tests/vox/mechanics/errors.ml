@@ -235,25 +235,25 @@ Error: vox: the type of Leak carries a refinement mentioning forty_two, which ma
 
 (* Embedded prelude blocks are validated at typing time: the payload
    must be a single string literal... *)
-[%%vox.prelude 42]
+[%%vox.solver 42]
 [%%expect{|
-Line 1, characters 3-14:
-1 | [%%vox.prelude 42]
-       ^^^^^^^^^^^
-Error: vox: a prelude block takes a single string literal, e.g. [%%vox.prelude.lean {lean|...|lean}]
+Line 1, characters 3-13:
+1 | [%%vox.solver 42]
+       ^^^^^^^^^^
+Error: vox: unknown block extension "vox.solver" (expected "vox.lean")
 |}]
 
 (* ...and the backend suffix must name a known solver. *)
-[%%vox.prelude.coq "Definition x := 3."]
+[%%vox.coq "Definition x := 3."]
 [%%expect{|
-Line 1, characters 3-18:
-1 | [%%vox.prelude.coq "Definition x := 3."]
-       ^^^^^^^^^^^^^^^
-Error: vox: unknown prelude backend "coq" (expected "lean")
+Line 1, characters 3-10:
+1 | [%%vox.coq "Definition x := 3."]
+       ^^^^^^^
+Error: vox: unknown block extension "vox.coq" (expected "vox.lean")
 |}]
 
 (* A well-formed block is accepted (and inert under -vox-dry-run). *)
-[%%vox.prelude.lean {lean|@[grind] def spec_id (n : Int) : Int := n|lean}]
+[%%vox.lean {lean|@[grind] def spec_id (n : Int) : Int := n|lean}]
 [%%expect{|
 |}]
 

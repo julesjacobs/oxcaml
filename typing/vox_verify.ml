@@ -115,13 +115,13 @@ let find_datatype p = List.find_opt (fun (q, _) -> Path.same p q) !datatypes
    reference them. *)
 let spec_defs : Vox_reflect.spec_def list ref = ref []
 
-(* Embedded prelude blocks ([%%vox.prelude ...]) of the module (or
+(* Embedded solver blocks ([%%vox.lean ...]) of the module (or
    toplevel session) being verified, in source order: text (ending in
    a newline) and the block's location (solver errors inside a block
    are reported there).  See the collection functions below. *)
 let embedded_preludes : (string * Location.t) list ref = ref []
 
-(* Prelude blocks imported from other units' .cmis ([%%vox.prelude]
+(* Solver blocks imported from other units' .cmis ([%%vox.lean]
    in their interfaces): unit name and blocks, in dependency order
    (a unit's blocks after the units it imports).  Gathered from the
    persistent env at verification time; the definition travels with
@@ -1114,13 +1114,12 @@ let datatype_field_needs_voxu () =
 
 let free_vars_of_vc vc = List.concat_map Refinement.free_vars (vc.vc_goal :: vc.vc_facts)
 
-(* Embedded preludes: [%%vox.prelude {lean|...|lean}] structure items
-   carry solver-side text directly in the OCaml source ([.lean] is an
-   accepted, explicit spelling of the bare [vox.prelude]).  Blocks are
-   module-local for now: they do not travel in the .cmi, so a CLIENT
-   unpacking exported refinements that mention this module's spec
-   functions still needs the definitions on its own command line (or
-   its own blocks). *)
+(* Embedded solver blocks: [%%vox.lean {lean|...|lean}] structure
+   items carry solver-side text directly in the OCaml source.  They
+   are not "preludes": reflected definitions precede them, so a block
+   may state lemmas about the module's own total_ functions.  Blocks
+   travel: an .mli's blocks -- and an mli-less unit's -- ride the
+   .cmi's spec export to every client. *)
 
 type prelude_kind =
   | Not_prelude
@@ -1128,11 +1127,12 @@ type prelude_kind =
   | Bad_backend of string
 
 let prelude_extension_kind txt =
-  if String.equal txt "vox.prelude" then Prelude
-  else if String.equal txt "vox.prelude.lean" then Prelude
-  else if
-    String.length txt >= 12 && String.equal (String.sub txt 0 12) "vox.prelude."
-  then Bad_backend (String.sub txt 12 (String.length txt - 12))
+  if String.equal txt "vox.lean" then Prelude
+  else if String.length txt >= 4 && String.equal (String.sub txt 0 4) "vox."
+  then
+    (* Claim the whole vox.* item-extension namespace, so a misspelled
+       block gets a vox error rather than "uninterpreted extension". *)
+    Bad_backend txt
   else Not_prelude
 ;;
 
@@ -1152,7 +1152,7 @@ let prelude_extension_text (({txt; loc}, payload) : Parsetree.extension) =
   | Not_prelude -> None
   | Bad_backend b ->
     Location.raise_errorf ~loc
-      "vox: unknown prelude backend %S (expected \"lean\")" b
+      "vox: unknown block extension %S (expected \"vox.lean\")" b
   | Prelude ->
     (match payload with
      | Parsetree.PStr
@@ -1166,8 +1166,8 @@ let prelude_extension_text (({txt; loc}, payload) : Parsetree.extension) =
        Some s
      | _ ->
        Location.raise_errorf ~loc
-         "vox: a prelude block takes a single string literal, e.g. \
-          [%%%%vox.prelude.lean {lean|...|lean}]")
+         "vox: a solver block takes a single string literal, e.g. \
+          [%%%%vox.lean {lean|...|lean}]")
 ;;
 
 let normalize_block s =
@@ -2057,10 +2057,10 @@ let run_lean vcs =
           | Some line ->
             (match block_of_line line with
              | Some (Local_block block_loc, rel_line) ->
-               (* The error is inside an embedded [%%vox.prelude]
+               (* The error is inside an embedded [%%vox.lean]
                   block: report it there, not at a VC. *)
                Location.raise_errorf ~loc:block_loc
-                 "vox: error in embedded prelude (line %d of this \
+                 "vox: error in this solver block (line %d of the \
                   block):@ %s"
                  rel_line
                  (strip_msg !msg)
@@ -2071,7 +2071,7 @@ let run_lean vcs =
                   source position; anchor at the current file. *)
                Location.raise_errorf
                  ~loc:(Location.in_file !Location.input_name)
-                 "vox: error in the spec prelude imported from unit \
+                 "vox: error in the spec block imported from unit \
                   %s (line %d of its block):@ %s"
                  unit
                  rel_line
@@ -2217,7 +2217,7 @@ let uses_vox (str : structure) =
     }
   in
   it.structure it str;
-  (* A phrase (or module) whose only vox content is a [%%vox.prelude]
+  (* A phrase (or module) whose only vox content is a [%%vox.lean]
      block has no vox expressions, patterns, or bindings, but must
      still be walked: at the toplevel a prelude-only FIRST phrase would
      otherwise be skipped and its block silently dropped from every

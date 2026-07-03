@@ -7,7 +7,7 @@ type ilist =
   | Nil
   | Cons of int * ilist
 
-[%%vox.prelude.lean {lean|
+[%%vox.lean {lean|
 @[grind] def len : Vox_Lean_sig_ilist -> Int
   | .Nil => 0
   | .Cons _ t => 1 + len t

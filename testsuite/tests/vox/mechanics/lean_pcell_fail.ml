@@ -13,7 +13,7 @@
    token axioms are an embedded prelude block (no -vox-prelude
    flag). *)
 
-[%%vox.prelude.lean {lean|
+[%%vox.lean {lean|
 opaque cid : VoxU -> Int
 opaque tid : VoxU -> Int
 opaque cts : VoxU -> Int

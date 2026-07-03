@@ -20,7 +20,7 @@
 
 let total_ sq m = m * m
 
-[%%vox.prelude.lean {lean|
+[%%vox.lean {lean|
 theorem le_sq (m : Int) (h : 0 <= m) : m <= sq m := by
   simp only [sq]
   by_cases h1 : m = 0

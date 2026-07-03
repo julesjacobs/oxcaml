@@ -16,7 +16,7 @@
    against it.  Every obligation is really proved: a recursive call
    re-instantiates the dependent signature at the actual arguments, so
    its refined result is the induction hypothesis; the fast-doubling
-   identities are lemmas in an embedded [%%vox.prelude.lean] block,
+   identities are lemmas in an embedded [%%vox.lean] block,
    proved by functional induction DIRECTLY on the reflected [fib] --
    there is no second, Lean-side Fibonacci anywhere.  The only assumed
    primitive is floor halving, whose [asr] the logic does not model --
@@ -39,7 +39,7 @@ let rec total_ fib n =
    identities are corollaries.  [@[grind =]] keys them on the
    [fib (2 * k)] / [fib (2 * k + 1)] goal terms that the annotations
    in [fib_fd] provide. *)
-[%%vox.prelude.lean {lean|
+[%%vox.lean {lean|
 theorem fib_rec (n : Int) (h : 2 <= n) : fib n = fib (n - 1) + fib (n - 2) := by
   grind
 

@@ -7,7 +7,7 @@
 *)
 
 (* Embedded prelude: the spec functions live INSIDE the module as a
-   [%%vox.prelude.lean] block -- no -vox-prelude file.  Same proofs as
+   [%%vox.lean] block -- no -vox-prelude file.  Same proofs as
    lean_spec.ml: every obligation is really discharged by grind, the
    recursive ones inductively.  Blocks may appear anywhere; they are
    emitted (in source order) into every solver input for the module,
@@ -18,7 +18,7 @@ type ilist =
   | Nil
   | Cons of int * ilist
 
-[%%vox.prelude.lean {lean|
+[%%vox.lean {lean|
 @[grind] def len : Vox_Lean_embed_ilist -> Int
   | .Nil => 0
   | .Cons _ t => 1 + len t
@@ -31,7 +31,7 @@ let push (l : ilist{ len _ = 2 }) : ilist{ len _ = 3 } =
   refine_ (Cons (9, l))
 
 (* Later blocks may use earlier blocks' definitions (source order). *)
-[%%vox.prelude.lean {lean|
+[%%vox.lean {lean|
 @[grind] def nonempty (l : Vox_Lean_embed_ilist) : Prop := len l > 0
 |lean}]
 

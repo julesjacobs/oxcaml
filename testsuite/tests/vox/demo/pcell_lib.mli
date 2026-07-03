@@ -34,7 +34,7 @@ type icell
 type itoken
 type cpair = { cell : icell; tok : itoken }
 
-[%%vox.prelude.lean {lean|
+[%%vox.lean {lean|
 opaque cid : VoxU -> Int
 opaque tid : VoxU -> Int
 opaque cts : VoxU -> Int

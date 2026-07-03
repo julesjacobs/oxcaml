@@ -12,7 +12,7 @@
    some verification condition.  (The obligation must apply a spec
    function: prelude text only reaches solver inputs that use one.) *)
 
-[%%vox.prelude.lean {lean|
+[%%vox.lean {lean|
 @[grind] def spec_id (n : Int) : Int := n
 def broken : Int := unknown_identifier
 |lean}]

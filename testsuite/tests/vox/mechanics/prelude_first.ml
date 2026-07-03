@@ -12,7 +12,7 @@
    below then elaborated as an unbound identifier and the (trivially
    true) obligation failed for the wrong reason. *)
 
-[%%vox.prelude.lean {lean|
+[%%vox.lean {lean|
 opaque f : Int -> Int
 |lean}]
 [%%expect{|

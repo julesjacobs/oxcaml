@@ -207,10 +207,11 @@
   Caveats: the program/logic correspondence of a reflected call is
   partial-correctness (a diverging call returns no value) and ideal
   arithmetic (overflow, as everywhere).
-- Embedded preludes: `[%%vox.prelude.lean {lean|...|lean}]` (or the
-  equivalent bare `vox.prelude`) puts the
-  solver-side text directly in the module, next to the datatypes it
-  describes.  Blocks are emitted into every solver input for the
+- Embedded solver blocks: `[%%vox.lean {lean|...|lean}]` puts the
+  solver-side text directly in the module, next to the datatypes and
+  reflected definitions it is about (blocks are not "preludes":
+  reflected definitions precede them, so a block may state lemmas
+  about the module's own total_ functions).  Blocks are emitted into every solver input for the
   module, in source order; a solver error inside a block is reported
   at the block's own location (with the line within the block).
   Like `assume_unchecked_` and `-vox-prelude`, an embedded block is
