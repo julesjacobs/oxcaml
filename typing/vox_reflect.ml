@@ -522,6 +522,29 @@ let rec translate_rhs (e : expression) : Refinement.pred option =
               (Refinement.Pconstr
                  (path, cstr.cstr_name, List.map Option.get args))
           else None)
+     | Texp_apply
+         ({ exp_desc = Texp_ident { path; desc; _ }; _ }, args, _, _, _)
+       when reflected_call_info e.exp_env path desc <> None ->
+       (* A saturated reflected call whose arguments are themselves in
+          the RHS fragment: [translate]'s own reflected-call case only
+          admits [translate]-fragment arguments, which shuts out the
+          accumulator idiom ([rev_append vs' (ICons (v, ws))]). *)
+       let name, arity =
+         match reflected_call_info e.exp_env path desc with
+         | Some info -> info
+         | None -> assert false
+       in
+       let args =
+         List.map
+           (fun (lbl, arg) ->
+             match (lbl : Types.arg_label), arg with
+             | Nolabel, Arg (a, _) -> translate_rhs a
+             | _ -> None)
+           args
+       in
+       if List.length args = arity && List.for_all Option.is_some args
+       then Some (Refinement.Pfun (name, List.map Option.get args))
+       else None
      | _ -> None)
 ;;
 
