@@ -217,7 +217,8 @@ let compile_program (compiler : Ocaml_compilers.compiler) log env =
   let program_variable = Compiler.program_variable in
   let program_file = Environments.safe_lookup program_variable env in
   let all_modules =
-    Actions_helpers.words_of_variable env Ocaml_variables.all_modules in
+    List.map Actions_helpers.landed_name
+      (Actions_helpers.words_of_variable env Ocaml_variables.all_modules) in
   let output_variable = Compiler.output_variable in
   let prepare = prepare_module output_variable log env in
   let modules =

@@ -76,11 +76,21 @@ let readonly_files env = words_of_variable env Builtin_variables.readonly_files
 
 let subdirectories env = words_of_variable env Builtin_variables.subdirectories
 
+(* A listed file may live OUTSIDE the test's own directory (e.g.
+   vox's [modules = "../lib/foo.ml"]): such parent-relative entries
+   land in the build directory under their BASENAME (and the
+   compilation actions reference them the same way).  Entries in
+   SUBdirectories keep their paths -- the subdirectory was copied. *)
+let landed_name filename =
+  if String.length filename >= 2 && String.sub filename 0 2 = ".."
+  then Filename.basename filename
+  else filename
+
 let setup_symlinks test_source_directory build_directory files =
   let symlink filename =
     (* Emulate ln -sfT *)
     let src = Filename.concat test_source_directory filename in
-    let dst = Filename.concat build_directory filename in
+    let dst = Filename.concat build_directory (landed_name filename) in
     let () =
       if Sys.file_exists dst then
         if Sys.win32 && Sys.is_directory dst then
@@ -94,7 +104,7 @@ let setup_symlinks test_source_directory build_directory files =
       Unix.symlink src dst in
   let copy filename =
     let src = Filename.concat test_source_directory filename in
-    let dst = Filename.concat build_directory filename in
+    let dst = Filename.concat build_directory (landed_name filename) in
     Sys.copy_file src dst in
   let f = if Unix.has_symlink () then symlink else copy in
   Sys.make_directory build_directory;

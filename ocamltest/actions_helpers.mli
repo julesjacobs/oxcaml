@@ -37,6 +37,11 @@ val exit_status_of_variable : Environments.t -> Variables.t -> int
 
 val readonly_files : Environments.t -> string list
 
+val landed_name : string -> string
+(** Where a listed source file lands in the build directory: a
+    parent-relative entry (["../lib/foo.ml"]) at its basename,
+    anything else at its own (possibly subdirectory) path. *)
+
 val setup_symlinks : string -> string -> string list -> unit
 
 val setup_build_env : bool -> string list -> Actions.code
