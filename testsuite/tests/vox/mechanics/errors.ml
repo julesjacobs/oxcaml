@@ -314,15 +314,27 @@ let strings_unchecked () =
 val strings_unchecked : unit -> string = <fun>
 |}]
 
-(* Intro forms may not be stacked directly on one another (the markers
-   would collapse onto a single node, hiding the inner obligation from
-   the VC pass and the runtime check): let-bind the inner form. *)
+(* A literal nested refinement FLATTENS (the layers conjoin on the
+   underlying skeleton, mechanics/flatten.ml), so the TYPE is fine;
+   the inner intro then sits at the bare skeleton and errors. *)
 let nested : {v: int{ _ > 0 } | v > 1} = refine_ (assume_ 2)
 [%%expect{|
-Line 1, characters 41-60:
+Line 1, characters 49-60:
 1 | let nested : {v: int{ _ > 0 } | v > 1} = refine_ (assume_ 2)
-                                             ^^^^^^^^^^^^^^^^^^^
-Error: vox: refine_ applied directly to another refine_/assume_/assume_unchecked_ expression is not supported; let-bind the inner expression first
+                                                     ^^^^^^^^^^^
+Error: vox: assume_ used where the expected type is not refined
+|}]
+
+(* Stacking intro forms is rejected -- here the annotated inner intro
+   meets the outer's bare skeleton and rigid unification refuses;
+   let-bind the inner form. *)
+let stacked : {v:int | v > 1} = refine_ ((assume_ 2 : int{ _ > 0 }))
+[%%expect{|
+Line 1, characters 40-68:
+1 | let stacked : {v:int | v > 1} = refine_ ((assume_ 2 : int{ _ > 0 }))
+                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: This expression has type "int{ _ > 0 }"
+       but an expression was expected of type "int"
 |}]
 
 (* A dependent binder is not supported on an optional or position

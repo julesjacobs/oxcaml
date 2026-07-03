@@ -72,22 +72,16 @@ grind_pattern mem_insert => mem y (insert x t)
    contracts through the abbreviation like any other. *)
 type set = tree{ bst _ }
 
-(* [empty]'s type keeps the exact equation (a client's "not in the
-   empty set" facts flow from it); it enters [set] positions by
-   subsumption, [bst Leaf] being one unfold. *)
-val empty : tree{ _ = Leaf }
+val empty : set{ _ = Leaf }
 
 (* Efficient one-path search, proved equal to the model membership
    (which quantifies the WHOLE tree): the ordering lemmas bridge the
    path the code takes to the subtrees it skips. *)
 val member : (x : int) -> (t : set) -> bool{ _ = mem x t }
 
-(* Insertion returns exactly the model's insert; the interface-level
-   facts [bst _] and [mem x _] follow from the exported theorems, as
-   does -- at any client use -- the full characterization
-   [mem y (insert x t) <-> y = x || mem y t].  (Refinements do not
-   STACK, so the result carries its characterization on the
-   underlying [tree]; it flows into [set] positions by
-   subsumption.) *)
-val insert :
-  (x : int) -> (t : set) -> tree{ _ = insert x t && bst _ && mem x _ }
+(* Insertion returns exactly the model's insert; the [set] layer and
+   the equation conjoin (a refinement over a refined abbreviation
+   FLATTENS onto the underlying skeleton), and [mem x _] plus the full
+   characterization [mem y (insert x t) <-> y = x || mem y t] follow
+   from the exported theorems. *)
+val insert : (x : int) -> (t : set) -> set{ _ = insert x t && mem x _ }

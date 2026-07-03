@@ -8,6 +8,13 @@
   type the binder name already denotes the refined value:
   `(x : int{x > 3}) -> ...`, `let f (x : int{x > 3}) = ...`.  The
   long form `{v:int | p}` (binder named explicitly) is also accepted.
+  Refining a type whose EXPANSION is already refined -- an
+  abbreviation like `type set = tree{ bst _ }` -- CONJOINS the layers
+  on the underlying skeleton at elaboration: `set{ p }` IS
+  `tree{ bst _ && p }`, the same rigid type, and layers accumulate
+  through abbreviation chains (mechanics/flatten.ml).  A skeleton
+  that becomes refined only through later instantiation of a type
+  variable is not flattened; rigid unification fails closed there.
   Refinements are allowed at EVERY skeleton type: the solver knows
   int as Int and bool as Bool; every other type lives at a single
   uninterpreted sort where equality is all the logic knows.

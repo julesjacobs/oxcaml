@@ -12,7 +12,7 @@ type tree =
 
 type set = tree{ bst _ }
 
-let empty : tree{ _ = Leaf } = Leaf
+let empty : set{ _ = Leaf } = Leaf
 
 let rec member : (x : int) -> (t : set) -> bool{ _ = mem x t } =
   fun x t ->
@@ -24,7 +24,7 @@ let rec member : (x : int) -> (t : set) -> bool{ _ = mem x t } =
       else member x r
 
 let rec insert
-  : (x : int) -> (t : set) -> tree{ _ = insert x t && bst _ && mem x _ }
+  : (x : int) -> (t : set) -> set{ _ = insert x t && mem x _ }
   =
   fun x t ->
     match t with

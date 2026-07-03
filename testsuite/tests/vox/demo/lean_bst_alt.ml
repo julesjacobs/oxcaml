@@ -21,11 +21,11 @@ open Bst
 module Set : sig
   val add
     : (x : int) -> (t : set)
-      -> tree{ bst _ && (forall_ y. mem y _ = (y = x || mem y t)) }
+      -> set{ forall_ y. mem y _ = (y = x || mem y t) }
 end = struct
   let add
     : (x : int) -> (t : set)
-      -> tree{ bst _ && (forall_ y. mem y _ = (y = x || mem y t)) }
+      -> set{ forall_ y. mem y _ = (y = x || mem y t) }
     =
     fun x t ->
       let t' = insert x t in
@@ -44,7 +44,7 @@ let probe : (t : set) -> bool{ _ = mem 7 t } =
 
 (* An exists_ goal by the witness-equation idiom: the added key
    witnesses nonemptiness. *)
-let singleton : (x : int) -> tree{ bst _ && (exists_ y. y = x && mem y _) } =
+let singleton : (x : int) -> set{ exists_ y. y = x && mem y _ } =
   fun x ->
     let e = empty in
     let t = Set.add x e in

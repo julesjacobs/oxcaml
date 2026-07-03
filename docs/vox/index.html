@@ -575,32 +575,26 @@ grind_pattern mem_insert =&gt; mem y (insert x t)
    contracts through the abbreviation like any other. *)
 type set = tree{ bst _ }
 
-(* [empty]'s type keeps the exact equation (a client's "not in the
-   empty set" facts flow from it); it enters [set] positions by
-   subsumption, [bst Leaf] being one unfold. *)
-val empty : tree{ _ = Leaf }
+val empty : set{ _ = Leaf }
 
 (* Efficient one-path search, proved equal to the model membership
    (which quantifies the WHOLE tree): the ordering lemmas bridge the
    path the code takes to the subtrees it skips. *)
 val member : (x : int) -&gt; (t : set) -&gt; bool{ _ = mem x t }
 
-(* Insertion returns exactly the model's insert; the interface-level
-   facts [bst _] and [mem x _] follow from the exported theorems, as
-   does -- at any client use -- the full characterization
-   [mem y (insert x t) &lt;-&gt; y = x || mem y t].  (Refinements do not
-   STACK, so the result carries its characterization on the
-   underlying [tree]; it flows into [set] positions by
-   subsumption.) *)
-val insert :
-  (x : int) -&gt; (t : set) -&gt; tree{ _ = insert x t &amp;&amp; bst _ &amp;&amp; mem x _ }</code></pre></div>
+(* Insertion returns exactly the model's insert; the [set] layer and
+   the equation conjoin (a refinement over a refined abbreviation
+   FLATTENS onto the underlying skeleton), and [mem x _] plus the full
+   characterization [mem y (insert x t) &lt;-&gt; y = x || mem y t] follow
+   from the exported theorems. *)
+val insert : (x : int) -&gt; (t : set) -&gt; set{ _ = insert x t &amp;&amp; mem x _ }</code></pre></div>
 <div class="tabpane"><pre style="max-height:34rem"><code class="ml">type tree =
   | Leaf
   | Node of tree * int * tree
 
 type set = tree{ bst _ }
 
-let empty : tree{ _ = Leaf } = Leaf
+let empty : set{ _ = Leaf } = Leaf
 
 let rec member : (x : int) -&gt; (t : set) -&gt; bool{ _ = mem x t } =
   fun x t -&gt;
@@ -608,17 +602,11 @@ let rec member : (x : int) -&gt; (t : set) -&gt; bool{ _ = mem x t } =
     | Leaf -&gt; false
     | Node (l, v, r) -&gt;
       if x = v then true
-      else if x &lt; v then begin
-        let b = member x l in
-        b
-      end
-      else begin
-        let b = member x r in
-        b
-      end
+      else if x &lt; v then member x l
+      else member x r
 
 let rec insert
-  : (x : int) -&gt; (t : set) -&gt; tree{ _ = insert x t &amp;&amp; bst _ &amp;&amp; mem x _ }
+  : (x : int) -&gt; (t : set) -&gt; set{ _ = insert x t &amp;&amp; mem x _ }
   =
   fun x t -&gt;
     match t with
@@ -647,7 +635,7 @@ to <code>mem 5 empty = False</code>.</p></div>
 <div class="tabpane"><pre style="max-height:34rem"><code class="ml">module Set : sig
   val add
     : (x : int) -&gt; (t : set)
-      -&gt; tree{ bst _ &amp;&amp; (forall_ y. mem y _ = (y = x || mem y t)) }
+      -&gt; set{ forall_ y. mem y _ = (y = x || mem y t) }
 end = struct
 
 let probe : (t : set) -&gt; bool{ _ = mem 7 t } =

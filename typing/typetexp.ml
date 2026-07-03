@@ -1720,7 +1720,24 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
          single uninterpreted sort where equality is all the logic
          knows (DESIGN.md). *)
       let pred = elab_vox_pred ~bound ~self_root:styp env pred_expr in
-      { cty with ctyp_type = newty (Trefine (skel, pred)) }
+      (* vox: refining a type whose EXPANSION is already refined -- an
+         abbreviation like [type set = tree{ bst _ }] -- CONJOINS the
+         layers on the underlying skeleton: [set{ p }] is
+         [tree{ bst _ && p }].  Flattening at elaboration keeps a
+         single normal form, so nothing downstream ever meets a nested
+         [Trefine] from this path.  (A skeleton that becomes refined
+         only through later instantiation of a type variable is not
+         flattened; rigid unification then fails closed, as before.) *)
+      let refined =
+        match Ctype.expand_head env skel with
+        | expanded ->
+            (match get_desc expanded with
+             | Trefine (sk0, q) ->
+                 newty (Trefine (sk0, Refinement.Pand (q, pred)))
+             | _ -> newty (Trefine (skel, pred)))
+        | exception _ -> newty (Trefine (skel, pred))
+      in
+      { cty with ctyp_type = refined }
   | Ptyp_extension ext ->
       raise (Error_forward (Builtin_attributes.error_of_extension ext))
 
