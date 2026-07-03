@@ -47,6 +47,15 @@ type pred =
        do).  Only fields of "simple" records (monomorphic, all fields
        immutable) are admitted; the solver models such records as
        single-constructor datatypes with named selectors. *)
+  | Ptuple of pred list
+    (* an unlabeled tuple term [(p1, ..., pn)], n >= 2.  Tuples are
+       structural (no type path): the solver models each ARITY with one
+       polymorphic product datatype, so construction and projection
+       need no instantiation info and predicates stay untyped. *)
+  | Pproj of int * int * pred
+    (* [Pproj (arity, i, t)]: the [i]th component (0-based) of tuple
+       term [t] at the given arity -- [fst]/[snd] in the surface
+       syntax.  The arity picks the product datatype's selector. *)
   | Pis of Path.t * string * pred
     (* constructor tester: "the term is an application of THIS
        constructor".  INTERNAL ONLY -- not expressible in surface
@@ -130,10 +139,15 @@ let rec equal p1 p2 =
     && List.for_all2 equal args1 args2
   | Pfield (p1, l1, a1), Pfield (p2, l2, a2) ->
     Path.same p1 p2 && String.equal l1 l2 && equal a1 a2
+  | Ptuple args1, Ptuple args2 ->
+    List.length args1 = List.length args2 && List.for_all2 equal args1 args2
+  | Pproj (n1, i1, a1), Pproj (n2, i2, a2) ->
+    Int.equal n1 n2 && Int.equal i1 i2 && equal a1 a2
   | Pis (p1, c1, a1), Pis (p2, c2, a2) ->
     Path.same p1 p2 && String.equal c1 c2 && equal a1 a2
   | Pnot a1, Pnot a2 -> equal a1 a2
   | ( ( Pbound | Pvar _ | Pint _ | Pbool _ | Pconstr _ | Pfun _ | Pfield _
+      | Ptuple _ | Pproj _
       | Pis _ | Pbinop _ | Pand _ | Por _ | Pnot _ ),
       _ ) -> false
 ;;
@@ -147,6 +161,8 @@ let rec subst_var id ~by p =
   | Pconstr (path, c, args) -> Pconstr (path, c, List.map (subst_var id ~by) args)
   | Pfun (f, args) -> Pfun (f, List.map (subst_var id ~by) args)
   | Pfield (path, l, a) -> Pfield (path, l, subst_var id ~by a)
+  | Ptuple args -> Ptuple (List.map (subst_var id ~by) args)
+  | Pproj (n, i, a) -> Pproj (n, i, subst_var id ~by a)
   | Pis (path, c, a) -> Pis (path, c, subst_var id ~by a)
   | Pbinop (op, a, b) -> Pbinop (op, subst_var id ~by a, subst_var id ~by b)
   | Pand (a, b) -> Pand (subst_var id ~by a, subst_var id ~by b)
@@ -163,6 +179,8 @@ let rec subst_bound ~by p =
   | Pconstr (path, c, args) -> Pconstr (path, c, List.map (subst_bound ~by) args)
   | Pfun (f, args) -> Pfun (f, List.map (subst_bound ~by) args)
   | Pfield (path, l, a) -> Pfield (path, l, subst_bound ~by a)
+  | Ptuple args -> Ptuple (List.map (subst_bound ~by) args)
+  | Pproj (n, i, a) -> Pproj (n, i, subst_bound ~by a)
   | Pis (path, c, a) -> Pis (path, c, subst_bound ~by a)
   | Pbinop (op, a, b) -> Pbinop (op, subst_bound ~by a, subst_bound ~by b)
   | Pand (a, b) -> Pand (subst_bound ~by a, subst_bound ~by b)
@@ -174,8 +192,9 @@ let rec free_vars acc p =
   match p with
   | Pvar id -> id :: acc
   | Pbound | Pint _ | Pbool _ -> acc
-  | Pconstr (_, _, args) | Pfun (_, args) -> List.fold_left free_vars acc args
-  | Pfield (_, _, a) | Pis (_, _, a) -> free_vars acc a
+  | Pconstr (_, _, args) | Pfun (_, args) | Ptuple args ->
+    List.fold_left free_vars acc args
+  | Pfield (_, _, a) | Pis (_, _, a) | Pproj (_, _, a) -> free_vars acc a
   | Pbinop (_, a, b) | Pand (a, b) | Por (a, b) -> free_vars (free_vars acc a) b
   | Pnot a -> free_vars acc a
 ;;
@@ -186,8 +205,9 @@ let rec mem_var id p =
   match p with
   | Pvar id' -> Ident.same id id'
   | Pbound | Pint _ | Pbool _ -> false
-  | Pconstr (_, _, args) | Pfun (_, args) -> List.exists (mem_var id) args
-  | Pfield (_, _, a) | Pis (_, _, a) -> mem_var id a
+  | Pconstr (_, _, args) | Pfun (_, args) | Ptuple args ->
+    List.exists (mem_var id) args
+  | Pfield (_, _, a) | Pis (_, _, a) | Pproj (_, _, a) -> mem_var id a
   | Pbinop (_, a, b) | Pand (a, b) | Por (a, b) -> mem_var id a || mem_var id b
   | Pnot a -> mem_var id a
 ;;
@@ -200,6 +220,8 @@ let rec map_paths f p =
   | Pconstr (path, c, args) -> Pconstr (f path, c, List.map (map_paths f) args)
   | Pfun (g, args) -> Pfun (g, List.map (map_paths f) args)
   | Pfield (path, l, a) -> Pfield (f path, l, map_paths f a)
+  | Ptuple args -> Ptuple (List.map (map_paths f) args)
+  | Pproj (n, i, a) -> Pproj (n, i, map_paths f a)
   | Pis (path, c, a) -> Pis (f path, c, map_paths f a)
   | Pbinop (op, a, b) -> Pbinop (op, map_paths f a, map_paths f b)
   | Pand (a, b) -> Pand (map_paths f a, map_paths f b)
@@ -211,13 +233,30 @@ let rec constr_paths acc p =
   match p with
   | Pbound | Pvar _ | Pint _ | Pbool _ -> acc
   | Pconstr (path, _, args) -> List.fold_left constr_paths (path :: acc) args
-  | Pfun (_, args) -> List.fold_left constr_paths acc args
+  | Pfun (_, args) | Ptuple args -> List.fold_left constr_paths acc args
   | Pfield (path, _, a) | Pis (path, _, a) -> constr_paths (path :: acc) a
+  | Pproj (_, _, a) -> constr_paths acc a
   | Pbinop (_, a, b) | Pand (a, b) | Por (a, b) -> constr_paths (constr_paths acc a) b
   | Pnot a -> constr_paths acc a
 ;;
 
 let constr_paths p = constr_paths [] p
+
+(* Tuple arities used by a predicate (construction and projection): the
+   solver input must declare one product datatype per arity. *)
+let rec tuple_arities acc p =
+  match p with
+  | Pbound | Pvar _ | Pint _ | Pbool _ -> acc
+  | Ptuple args -> List.fold_left tuple_arities (List.length args :: acc) args
+  | Pproj (n, _, a) -> tuple_arities (n :: acc) a
+  | Pconstr (_, _, args) | Pfun (_, args) -> List.fold_left tuple_arities acc args
+  | Pfield (_, _, a) | Pis (_, _, a) -> tuple_arities acc a
+  | Pbinop (_, a, b) | Pand (a, b) | Por (a, b) ->
+    tuple_arities (tuple_arities acc a) b
+  | Pnot a -> tuple_arities acc a
+;;
+
+let tuple_arities p = tuple_arities [] p
 
 (* Does [p] apply any spec function?  Prelude text (which defines
    them) is injected only into solver inputs that need it: it may
@@ -227,8 +266,9 @@ let rec mentions_spec_fun p =
   match p with
   | Pbound | Pvar _ | Pint _ | Pbool _ -> false
   | Pfun _ -> true
-  | Pconstr (_, _, args) -> List.exists mentions_spec_fun args
-  | Pfield (_, _, a) | Pis (_, _, a) | Pnot a -> mentions_spec_fun a
+  | Pconstr (_, _, args) | Ptuple args -> List.exists mentions_spec_fun args
+  | Pfield (_, _, a) | Pis (_, _, a) | Pproj (_, _, a) | Pnot a ->
+    mentions_spec_fun a
   | Pbinop (_, a, b) | Pand (a, b) | Por (a, b) ->
     mentions_spec_fun a || mentions_spec_fun b
 ;;
@@ -264,6 +304,20 @@ let rec print ppf p =
     List.iter (fun x -> fprintf ppf "@ %a" print_atom x) args;
     fprintf ppf "@]"
   | Pfield (_, l, a) -> fprintf ppf "%a.%s" print_atom a l
+  | Ptuple (a :: args) ->
+    fprintf ppf "@[(%a" print a;
+    List.iter (fun x -> fprintf ppf ",@ %a" print x) args;
+    fprintf ppf ")@]"
+  | Ptuple [] ->
+    (* unreachable (arity >= 2 by construction), but diagnostics must
+       never crash *)
+    pp_print_string ppf "()"
+  | Pproj (2, 0, a) -> fprintf ppf "@[fst %a@]" print_atom a
+  | Pproj (2, 1, a) -> fprintf ppf "@[snd %a@]" print_atom a
+  | Pproj (_, i, a) ->
+    (* diagnostics only: projections beyond pairs arise from match
+       facts, never from surface predicates (1-based, as in Lean) *)
+    fprintf ppf "%a.%d" print_atom a (i + 1)
   | Pis (_, c, a) -> fprintf ppf "@[%a is@ %s@]" print_atom a c
   | Pbinop (op, a, b) ->
     fprintf ppf "@[%a %s@ %a@]" print_atom a (binop_name op) print_atom b
@@ -274,9 +328,12 @@ let rec print ppf p =
 and print_atom ppf p =
   match p with
   | Pbound | Pvar _ | Pint _ | Pbool _ | Pconstr (_, _, []) | Pfun (_, [])
-  | Pfield _ -> print ppf p
-  | Pconstr (_, _, _ :: _) | Pfun (_, _ :: _) | Pis _ | Pbinop _ | Pand _
-  | Por _ | Pnot _ -> Format.fprintf ppf "(%a)" print p
+  | Pfield _ | Ptuple _ -> print ppf p
+  | Pproj (n, _, _) ->
+    (* [fst]/[snd] print as applications; the [.i] form is atomic *)
+    if n = 2 then Format.fprintf ppf "(%a)" print p else print ppf p
+  | Pconstr (_, _, _ :: _) | Pfun (_, _ :: _) | Pis _ | Pbinop _
+  | Pand _ | Por _ | Pnot _ -> Format.fprintf ppf "(%a)" print p
 ;;
 
 let to_string p = Format.asprintf "%a" print p

@@ -47,6 +47,22 @@ let is_int_or_bool env ty =
   | _ -> false
 ;;
 
+(* An UNLABELED pair type: the shape [fst]/[snd] project out of.  The
+   projection primitives ([%field0_immut]/[%field1_immut]) are generic
+   block reads, so the argument's type is the gate -- a user [external]
+   with the same primitive at another type must not be mistaken for a
+   tuple projection. *)
+let is_unlabeled_pair env ty =
+  let ty =
+    match Ctype.expand_head env ty with
+    | ty -> ty
+    | exception _ -> ty
+  in
+  match Types.get_desc ty with
+  | Ttuple [ (None, _); (None, _) ] -> true
+  | _ -> false
+;;
+
 (* TOTAL (reflected) functions ([let rec total_ f ... = ...]): program
    functions whose definitions are translated into the logic
    (translate_def below) and emitted as solver-side definitions
@@ -194,6 +210,15 @@ let rec translate (e : expression) : Refinement.pred option =
     Some (Refinement.Pbool true)
   | Texp_construct ({ txt = Longident.Lident "false"; _ }, _, _, [], _) ->
     Some (Refinement.Pbool false)
+  | Texp_tuple (comps, _)
+    when List.length comps >= 2
+         && List.for_all (fun (lbl, _) -> Option.is_none lbl) comps ->
+    (* An unlabeled tuple is the product term the predicate language
+       writes as [(p1, ..., pn)]; labeled tuples are not modelled. *)
+    let args = List.map (fun (_, a) -> translate a) comps in
+    if List.for_all Option.is_some args
+    then Some (Refinement.Ptuple (List.map Option.get args))
+    else None
   | Texp_field { record; label; _ } ->
     (* A field read of a simple record is the structure projection the
        predicate language writes as [_.px].  [vox_simple_record]
@@ -256,6 +281,14 @@ let rec translate (e : expression) : Refinement.pred option =
       | _ -> None
     in
     let intop op = binary (fun a b -> Refinement.Pbinop (op, a, b)) in
+    let proj i =
+      (* fst/snd: gated on the ARGUMENT being an unlabeled pair (the
+         primitive itself is a generic block read). *)
+      match args with
+      | [ Some a ] when is_unlabeled_pair a.exp_env a.exp_type ->
+        Option.map (fun p -> Refinement.Pproj (2, i, p)) (translate a)
+      | _ -> None
+    in
     let cmp op =
       (* Both operands have the same type; checking one suffices. *)
       match args with
@@ -275,6 +308,8 @@ let rec translate (e : expression) : Refinement.pred option =
        unary (fun a -> Refinement.Pbinop (Add, a, Refinement.Pint 1))
      | "%predint" ->
        unary (fun a -> Refinement.Pbinop (Sub, a, Refinement.Pint 1))
+     | "%field0_immut" -> proj 0
+     | "%field1_immut" -> proj 1
      | "%sequand" -> binary (fun a b -> Refinement.Pand (a, b))
      | "%sequor" -> binary (fun a b -> Refinement.Por (a, b))
      | "%boolnot" -> unary (fun a -> Refinement.Pnot a)

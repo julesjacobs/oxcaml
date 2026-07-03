@@ -160,6 +160,29 @@
   sanitized solver names collide, makes the emitted declaration
   invalid: a solver error, i.e. a verification failure (fails
   closed).
+- Native tuples: unlabeled tuples are STRUCTURAL datatypes -- each
+  ARITY is modelled by one Sort-polymorphic product structure (VoxT2,
+  VoxT3, ...; the shape of Lean's PProd, so a Prop component -- the
+  model of bool -- instantiates as readily as a Type one), declared
+  once and instantiated by the solver's inference.  Construction
+  [(a, b)] and the pair projections [fst _]/[snd _] appear in
+  predicates with no instantiation info, keeping predicates untyped;
+  [fst]/[snd] are RESERVED in predicates (they never fall through to
+  the spec-function namespace).  Tuple expressions built from
+  translatable components translate ([refine_ (a, b)] synthesizes its
+  exact refinement); [fst]/[snd] translate by PRIMITIVE
+  ([%field0_immut]/[%field1_immut]), gated on the argument being an
+  unlabeled pair.  Matching a variable against a tuple pattern (or
+  destructuring [let (x, y) = p]) contributes [xi = proj_i s] per
+  VARIABLE component, exactly like simple records; projections beyond
+  pairs have no surface syntax and arise from match facts only
+  (printed 1-based, [t.1]).  Component types may be any sort
+  (datatypes, other tuples, uninterpreted); labeled and unboxed
+  tuples are not modelled and degrade soundly to the uninterpreted
+  sort.  CAVEAT: a dependent binder over a tuple domain must
+  parenthesize it -- [(p : (int * int)) -> ...] -- since
+  [(p : int * int)] is the LABELED TUPLE type [p:int * int] (the
+  LR(1) ambiguity above); the printer emits the parenthesized form.
 - Spec functions: any other applied identifier in a predicate,
   `len _` or `mem 2 _`, denotes a logical function that the user
   defines on the solver side -- in a `-vox-prelude` file or an

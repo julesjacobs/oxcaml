@@ -36,6 +36,10 @@ type dsort =
   | S_int
   | S_bool
   | S_data of Path.t (* a "simple" variant, modelled with the datatype theory *)
+  | S_tuple of dsort list
+    (* an unlabeled tuple, modelled with one polymorphic product
+       datatype per ARITY (VoxT2, VoxT3, ...) instantiated at the
+       component sorts *)
   | S_other
 
 (* Failure diagnostics show what the solver was given, so a failed
@@ -109,6 +113,21 @@ let registering : Path.t list ref = ref []
 let poisoned : Path.t list ref = ref []
 let find_datatype p = List.find_opt (fun (q, _) -> Path.same p q) !datatypes
 
+(* Tuple ARITIES in use (types of names, tuple terms in predicates):
+   each needs its product datatype (VoxT<n>) declared.  Tuples are
+   structural, so unlike [datatypes] there is nothing to render per
+   type -- the arity determines the declaration. *)
+let tuple_arities : int list ref = ref []
+
+let register_tuple_arity n =
+  if not (List.mem n !tuple_arities)
+  then tuple_arities := !tuple_arities @ [ n ]
+;;
+
+let register_pred_tuple_arities p =
+  List.iter register_tuple_arity (Refinement.tuple_arities p)
+;;
+
 (* Reflected definitions ([total_] bindings) of the current module (or
    toplevel session), in definition order; emitted into the solver input
    between the [-vox-prelude] and the module's own embedded blocks, so
@@ -139,6 +158,7 @@ let reset () =
   datatypes := [];
   registering := [];
   poisoned := [];
+  tuple_arities := [];
   spec_defs := [];
   unknown_counter := 0;
   embedded_preludes := [];
@@ -241,11 +261,24 @@ let rec datatype_sort env p =
         datatypes := !datatypes @ [ p, decl ];
         S_data p))
 
-and dsort_of_type env ty =
-  match get_desc (safe_expand_head env ty) with
-  | Tconstr (p, [], _) -> datatype_sort env p
-  | Trefine (skel, _) -> dsort_of_type env skel
-  | _ -> S_other
+and dsort_of_type ?(visited = []) env ty =
+  let ty = safe_expand_head env ty in
+  (* A -rectypes cycle can run through a tuple with no nominal type on
+     the path; revisiting a node degrades to the uninterpreted sort
+     (sound). *)
+  if List.mem (get_id ty) visited
+  then S_other
+  else (
+    let visited = get_id ty :: visited in
+    match get_desc ty with
+    | Tconstr (p, [], _) -> datatype_sort env p
+    | Trefine (skel, _) -> dsort_of_type ~visited env skel
+    | Ttuple comps
+      when List.length comps >= 2
+           && List.for_all (fun (lbl, _) -> Option.is_none lbl) comps ->
+      register_tuple_arity (List.length comps);
+      S_tuple (List.map (fun (_, t) -> dsort_of_type ~visited env t) comps)
+    | _ -> S_other)
 ;;
 
 let record_name env id ty = Hashtbl.replace name_sorts id (dsort_of_type env ty)
@@ -255,7 +288,8 @@ let record_name env id ty = Hashtbl.replace name_sorts id (dsort_of_type env ty)
    register (not a simple variant here, or mutually recursive) is caught at
    discharge time. *)
 let register_pred_paths env p =
-  List.iter (fun q -> ignore (datatype_sort env q)) (Refinement.constr_paths p)
+  List.iter (fun q -> ignore (datatype_sort env q)) (Refinement.constr_paths p);
+  register_pred_tuple_arities p
 ;;
 
 (* Register a [total_] binding: translate its body into an
@@ -278,6 +312,11 @@ let register_spec_def env (vb : Typedtree.value_binding) =
   List.iter
     (fun p -> ignore (datatype_sort env p))
     (Vox_reflect.def_datatype_paths d);
+  List.iter
+    register_pred_tuple_arities
+    (Vox_reflect.body_preds
+       (Option.to_list d.Vox_reflect.sd_decreases)
+       d.Vox_reflect.sd_body);
   spec_defs := !spec_defs @ [ d ]
 ;;
 
@@ -410,7 +449,7 @@ let rec name_of_expr env (e : expression) : Refinement.pred =
             ( path
             , cstr.cstr_name
             , List.map (fun (_, a) -> name_of_expr env a) args )
-        | S_int | S_bool | S_other -> fresh_unknown env e)
+        | S_int | S_bool | S_tuple _ | S_other -> fresh_unknown env e)
      | Texp_record { fields; extended_expression; _ }
        when Array.length fields > 0 ->
        (* A record literal names the constructor term ["mk"] (a reserved
@@ -437,7 +476,14 @@ let rec name_of_expr env (e : expression) : Refinement.pred =
               fresh_unknown env e
           in
           Refinement.Pconstr (path, "mk", List.map arg_of (Array.to_list fields))
-        | S_int | S_bool | S_other -> fresh_unknown env e)
+        | S_int | S_bool | S_tuple _ | S_other -> fresh_unknown env e)
+     | Texp_tuple (comps, _)
+       when List.length comps >= 2
+            && List.for_all (fun (lbl, _) -> Option.is_none lbl) comps ->
+       (* An unlabeled tuple names its product term over the components'
+          names ("constructors get the usual refinements"). *)
+       register_tuple_arity (List.length comps);
+       Refinement.Ptuple (List.map (fun (_, a) -> name_of_expr env a) comps)
      | Texp_field { record; label; _ } ->
        (* Mostly subsumed: [Vox_reflect.translate] projects immutable
           fields of simple records when the base itself translates.
@@ -477,6 +523,7 @@ let pred_in_scope ctx p = List.for_all (in_scope ctx) (Refinement.free_vars p)
 let rec pred_unreflectable (p : Refinement.pred) =
   match p with
   | Refinement.Pconstr _ | Refinement.Pfun _ | Refinement.Pfield _
+  | Refinement.Ptuple _ | Refinement.Pproj _
   | Refinement.Pis _ -> true
   | Refinement.Pbinop ((Refinement.Div | Refinement.Mod), _, _) -> true
   | Refinement.Pbound | Refinement.Pvar _ | Refinement.Pint _
@@ -520,7 +567,7 @@ let emit_vc ~loc ~ctx ~goal ~kind =
      let int_or_bool id =
        match Hashtbl.find_opt name_sorts id with
        | Some (S_int | S_bool) -> true
-       | Some (S_data _ | S_other) | None -> false
+       | Some (S_data _ | S_tuple _ | S_other) | None -> false
      in
      (match
         List.find_opt
@@ -731,7 +778,7 @@ let match_facts
   let constructor_facts cstr args =
     let path = Data_types.cstr_res_type_path cstr in
     match datatype_sort env path with
-    | S_int | S_bool | S_other -> []
+    | S_int | S_bool | S_tuple _ | S_other -> []
     | S_data _ ->
       let rec name_args acc = function
         | [] -> Some (List.rev acc)
@@ -755,7 +802,7 @@ let match_facts
     | (_, lbl0, _) :: _ ->
       let path = Data_types.lbl_res_type_path lbl0 in
       (match datatype_sort env path with
-       | S_int | S_bool | S_other -> []
+       | S_int | S_bool | S_tuple _ | S_other -> []
        | S_data _ ->
          List.filter_map
            (fun (_, (lbl : Data_types.label_description), sub) ->
@@ -770,16 +817,39 @@ let match_facts
              | _ -> None)
            fields)
   in
+  let tuple_facts (comps : (string option * value general_pattern) list) =
+    (* [xi = proj_i sid] per VARIABLE sub-pattern, like records
+       (per-component, so wildcards and deeper sub-patterns simply
+       contribute nothing).  Labeled tuples are not modelled. *)
+    if List.exists (fun (lbl, _) -> Option.is_some lbl) comps
+    then []
+    else begin
+      let n = List.length comps in
+      register_tuple_arity n;
+      List.mapi (fun i (_, sub) -> i, sub) comps
+      |> List.filter_map (fun (i, (sub : value general_pattern)) ->
+        match sub.pat_desc with
+        | Tpat_var { id; _ } ->
+          Some
+            (Refinement.Pbinop
+               ( Refinement.Eq
+               , Refinement.Pvar id
+               , Refinement.Pproj (n, i, Refinement.Pvar sid) ))
+        | _ -> None)
+    end
+  in
   let value_facts (p : value general_pattern) =
     match p.pat_desc with
     | Tpat_construct (_, cstr, _, args, _) -> constructor_facts cstr args
     | Tpat_record (fields, _, _, _) -> record_facts fields
+    | Tpat_tuple comps -> tuple_facts comps
     | _ -> []
   in
   match pat.pat_desc with
   | Tpat_value p -> value_facts (p :> value general_pattern)
   | Tpat_construct (_, cstr, _, args, _) -> constructor_facts cstr args
   | Tpat_record (fields, _, _, _) -> record_facts fields
+  | Tpat_tuple comps -> tuple_facts comps
   | _ -> []
 ;;
 
@@ -799,7 +869,7 @@ let pattern_negation
   let head_negation cstr args =
     let path = Data_types.cstr_res_type_path cstr in
     match datatype_sort env path with
-    | S_int | S_bool | S_other -> None
+    | S_int | S_bool | S_tuple _ | S_other -> None
     | S_data _ ->
       let simple (_, (p : value general_pattern)) =
         match p.pat_desc with
@@ -1103,9 +1173,19 @@ let constr_arity p c =
 ;;
 
 
-let sort_is_other = function
+(* The stable name of the product datatype for tuple arity [n]: the
+   same in every unit, like [path_uname]s, so clients deduplicate
+   imported declarations by name. *)
+let tuple_uname n = "VoxT" ^ Int.to_string n
+
+(* Does rendering this sort mention VoxU -- directly, inside a tuple
+   instantiation, or as the degraded rendering of an unregistered
+   datatype? *)
+let rec sort_needs_voxu = function
   | S_other -> true
-  | S_int | S_bool | S_data _ -> false
+  | S_int | S_bool -> false
+  | S_tuple comps -> List.exists sort_needs_voxu comps
+  | S_data p -> find_datatype p = None
 ;;
 
 let datatype_field_needs_voxu () =
@@ -1113,8 +1193,10 @@ let datatype_field_needs_voxu () =
     (fun (_, decl) ->
       match decl with
       | Dt_variant constrs ->
-        List.exists (fun (_, fields) -> List.exists sort_is_other fields) constrs
-      | Dt_record fields -> List.exists (fun (_, fs) -> sort_is_other fs) fields)
+        List.exists
+          (fun (_, fields) -> List.exists sort_needs_voxu fields)
+          constrs
+      | Dt_record fields -> List.exists (fun (_, fs) -> sort_needs_voxu fs) fields)
     !datatypes
 ;;
 
@@ -1359,14 +1441,47 @@ let lean_name id = "v_" ^ lean_sanitize (Ident.unique_name id)
 let lean_dt_name p = "Vox_" ^ lean_sanitize (path_uname p)
 let lean_constr_name p c = lean_dt_name p ^ "." ^ lean_sanitize c
 
-let lean_sort = function
+let rec lean_sort = function
   | S_int -> "Int"
   | S_bool -> "Prop"
   | S_other -> "VoxU"
+  | S_tuple comps ->
+    "(" ^ tuple_uname (List.length comps) ^ " "
+    ^ String.concat " " (List.map lean_sort comps)
+    ^ ")"
   | S_data p ->
     (match find_datatype p with
      | Some _ -> lean_dt_name p
      | None -> "VoxU" (* unregistered: degrade, sound *))
+;;
+
+(* The product structure for one tuple arity, universe-polymorphic over
+   [Sort] so a Prop component (the Lean model of bool) instantiates as
+   readily as a Type one -- the shape of core Lean's [PProd], with
+   explicit universe binders so no auto-binding is relied on.  One
+   line, like the other declarations (the error-line mapping counts
+   lines). *)
+let lean_tuple_decl n =
+  let buf = Buffer.create 128 in
+  Buffer.add_string buf (Printf.sprintf "structure %s.{" (tuple_uname n));
+  for i = 1 to n do
+    if i > 1 then Buffer.add_string buf ", ";
+    Buffer.add_string buf (Printf.sprintf "u%d" i)
+  done;
+  Buffer.add_string buf "}";
+  for i = 1 to n do
+    Buffer.add_string buf (Printf.sprintf " (t%d : Sort u%d)" i i)
+  done;
+  let univ =
+    let rec go i = if i > n then "1" else Printf.sprintf "max u%d (%s)" i (go (i + 1)) in
+    go 1
+  in
+  Buffer.add_string buf (Printf.sprintf " : Sort (%s) where" univ);
+  for i = 1 to n do
+    Buffer.add_string buf (Printf.sprintf " (p%d : t%d)" i i)
+  done;
+  Buffer.add_char buf '\n';
+  Buffer.contents buf
 ;;
 
 (* One declaration, on a single line (the error-line mapping counts
@@ -1429,10 +1544,13 @@ let boolish p =
      | Some (_, Dt_record fields) ->
        (match List.assoc_opt l fields with
         | Some S_bool -> true
-        | Some (S_int | S_data _ | S_other) | None -> false)
+        | Some (S_int | S_data _ | S_tuple _ | S_other) | None -> false)
      | Some (_, Dt_variant _) | None -> false)
   | Pis _ -> true
-  | Pbound | Pint _ | Pconstr _ | Pfun _
+  (* A bool-sorted tuple COMPONENT is a Prop the model cannot see from
+     the (untyped) projection alone: [=] between Props is emitted
+     there, a sharp edge grind still handles via propext. *)
+  | Pbound | Pint _ | Pconstr _ | Pfun _ | Ptuple _ | Pproj _
   | Pbinop ((Add | Sub | Mul | Div | Mod), _, _) -> false
 ;;
 
@@ -1478,6 +1596,18 @@ let rec lean_of_pred buf (p : Refinement.pred) =
   | Pfield (p, l, a) ->
     (* structure projection *)
     Buffer.add_string buf ("(" ^ lean_dt_name p ^ "." ^ lean_sanitize l ^ " ");
+    lean_of_pred buf a;
+    Buffer.add_char buf ')'
+  | Ptuple args ->
+    Buffer.add_string buf ("(" ^ tuple_uname (List.length args) ^ ".mk");
+    List.iter
+      (fun a ->
+        Buffer.add_char buf ' ';
+        lean_of_pred buf a)
+      args;
+    Buffer.add_char buf ')'
+  | Pproj (n, i, a) ->
+    Buffer.add_string buf (Printf.sprintf "(%s.p%d " (tuple_uname n) (i + 1));
     lean_of_pred buf a;
     Buffer.add_char buf ')'
   | Pis (p, c, a) ->
@@ -1609,16 +1739,18 @@ let cmi_export env (sg : Types.signature) ~defs ~blocks =
   if blocks = []
   then None
   else begin
-    let saved = !datatypes, !registering, !poisoned in
+    let saved = !datatypes, !registering, !poisoned, !tuple_arities in
     datatypes := [];
     registering := [];
     poisoned := [];
+    tuple_arities := [];
     Misc.try_finally
       ~always:(fun () ->
-        let d, r, po = saved in
+        let d, r, po, ta = saved in
         datatypes := d;
         registering := r;
-        poisoned := po)
+        poisoned := po;
+        tuple_arities := ta)
       (fun () ->
         iter_signature_types sg ~f:(fun ~loc:_ ~what:_ ty ->
           register_type_specs env ty);
@@ -1626,12 +1758,25 @@ let cmi_export env (sg : Types.signature) ~defs ~blocks =
           (fun d ->
             List.iter
               (fun p -> ignore (datatype_sort env p))
-              (Vox_reflect.def_datatype_paths d))
+              (Vox_reflect.def_datatype_paths d);
+            List.iter
+              register_pred_tuple_arities
+              (Vox_reflect.body_preds
+                 (Option.to_list d.Vox_reflect.sd_decreases)
+                 d.Vox_reflect.sd_body))
           defs;
         let dts =
           List.map
             (fun ((p, _) as dt) -> path_uname p, lean_datatype_decl dt)
             !datatypes
+        in
+        (* Tuple product declarations FIRST: the datatype declarations
+           may reference them in field sorts. *)
+        let dts =
+          List.map
+            (fun n -> tuple_uname n, lean_tuple_decl n)
+            !tuple_arities
+          @ dts
         in
         Some
           { Cmi_format.vp_datatypes = dts
@@ -1717,8 +1862,11 @@ let lean_theorem buf i vc =
         match q with
         | Refinement.Pis (_, _, a)
         | Refinement.Pfield (_, _, a)
+        | Refinement.Pproj (_, _, a)
         | Refinement.Pnot a -> collect a
-        | Refinement.Pconstr (_, _, args) | Refinement.Pfun (_, args) ->
+        | Refinement.Pconstr (_, _, args)
+        | Refinement.Pfun (_, args)
+        | Refinement.Ptuple args ->
           List.iter collect args
         | Refinement.Pbinop (_, a, b)
         | Refinement.Pand (a, b)
@@ -1745,9 +1893,8 @@ let lean_file vcs =
         List.exists
           (fun id ->
             match Hashtbl.find_opt name_sorts id with
-            | Some (S_int | S_bool) -> false
-            | Some (S_data p) -> find_datatype p = None
-            | Some S_other | None -> true)
+            | Some s -> sort_needs_voxu s
+            | None -> true)
           (free_vars_of_vc vc))
       vcs
     || datatype_field_needs_voxu ()
@@ -1778,6 +1925,16 @@ let lean_file vcs =
             seg ~src:(Imported_block unit) leand))
         vp.Cmi_format.vp_datatypes)
     !imported_preludes;
+  (* Tuple product structures precede this module's datatypes (whose
+     fields may be tuple-sorted); imported exports carry their own,
+     deduplicated by the stable per-arity name. *)
+  List.iter
+    (fun n ->
+      if not (List.exists (String.equal (tuple_uname n)) !seen)
+      then (
+        seen := tuple_uname n :: !seen;
+        seg (lean_tuple_decl n)))
+    !tuple_arities;
   let own_decls = Buffer.create 256 in
   lean_datatype_decls own_decls ~skip:!seen;
   seg (Buffer.contents own_decls);

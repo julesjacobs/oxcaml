@@ -111,30 +111,28 @@ let rec fib_loop
 let fib_iter : (n : int) -> int{ _ = fib n } =
   fun n -> fib_loop n 0 0 1
 
-(* Fast doubling, O(log n) iterations, on pairs (fib n, fib (n+1)) --
-   a simple variant, so the pair appears in predicates.  With k = n/2:
-   fib (2k) = fib k * (2 fib (k+1) - fib k) and fib (2k+1) = fib k ^ 2
-   + fib (k+1) ^ 2 (the embedded lemmas; they need k >= 0, hence the
-   precondition on n, discharged at each call).  Annotating x and y
-   with the doubling identities puts [fib (2 * k)] syntactically in
-   each obligation, which is what fires the lemmas; the final
-   obligations are then pure congruence. *)
-type pair = P of int * int
-
-let rec fib_fd : (n : int{ _ >= 0 }) -> pair{ _ = P (fib n, fib (n + 1)) } =
+(* Fast doubling, O(log n) iterations, on NATIVE pairs
+   (fib n, fib (n+1)) -- tuples appear in predicates directly.  With
+   k = n/2: fib (2k) = fib k * (2 fib (k+1) - fib k) and fib (2k+1) =
+   fib k ^ 2 + fib (k+1) ^ 2 (the embedded lemmas; they need k >= 0,
+   hence the precondition on n, discharged at each call).  Annotating
+   x and y with the doubling identities puts [fib (2 * k)]
+   syntactically in each obligation, which is what fires the lemmas;
+   the final obligations are then pure congruence. *)
+let rec fib_fd : (n : int{ _ >= 0 }) -> (int * int){ _ = (fib n, fib (n + 1)) } =
   fun n ->
     if n <= 0
-    then refine_ (P (0, 1))
+    then refine_ (0, 1)
     else begin
       let refine_ k = half n in
       let refine_ q = fib_fd k in
       match q with
-      | P (a, b) ->
+      | (a, b) ->
         let refine_ x = (refine_ (a * (2 * b - a)) : int{ _ = fib (2 * k) }) in
         let refine_ y = (refine_ (a * a + b * b) : int{ _ = fib (2 * k + 1) }) in
         if n = 2 * k
-        then refine_ (P (x, y))
-        else refine_ (P (y, x + y))
+        then refine_ (x, y)
+        else refine_ (y, x + y)
     end
 
 (* Client side: fib 10, by fast doubling; the precondition [10 >= 0]
@@ -142,4 +140,4 @@ let rec fib_fd : (n : int{ _ >= 0 }) -> pair{ _ = P (fib n, fib (n + 1)) } =
 let fib10 : int{ _ = fib 10 } =
   let refine_ r = fib_fd 10 in
   match r with
-  | P (u, _) -> refine_ u
+  | (u, _) -> refine_ u

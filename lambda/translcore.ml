@@ -415,6 +415,7 @@ and vox_assume_check ~scopes layout e lam =
         | Refinement.Pbound -> Lvar v
         | Refinement.Pvar id -> Lvar id
         | Refinement.Pconstr _ | Refinement.Pfun _ | Refinement.Pfield _
+        | Refinement.Ptuple _ | Refinement.Pproj _
         | Refinement.Pis _ ->
             (* Rejected by the VC pass (emit_vc, Runtime_check). *)
             Location.raise_errorf ~loc:e.exp_loc

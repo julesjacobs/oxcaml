@@ -960,6 +960,22 @@ let rec elab_vox_pred ~bound ~self_root env (e : Parsetree.expression)
   | Pexp_construct ({txt = Longident.Lident "false"; _}, None) -> Pbool false
   | Pexp_construct ({txt = lid; _}, arg) ->
       elab_vox_constr ~bound ~self_root env ~loc lid arg
+  | Pexp_tuple comps when List.length comps >= 2 ->
+      (* An unlabeled tuple term: modelled per ARITY with a polymorphic
+         product datatype, so no instantiation info is needed and the
+         predicate stays untyped.  Labeled tuples are not modelled. *)
+      let comps =
+        List.map
+          (fun (lbl, a) ->
+            match lbl with
+            | None -> a
+            | Some _ ->
+                Location.raise_errorf ~loc:a.Parsetree.pexp_loc
+                  "vox: labeled tuples may not appear in refinement \
+                   predicates")
+          comps
+      in
+      Ptuple (List.map (elab_vox_pred ~bound ~self_root env) comps)
   | Pexp_field (base, {txt = lid; _}) ->
       (* Field projection: the label resolves like constructors do (the
          predicate is untyped, and selector symbols are per-type), and
@@ -1005,6 +1021,18 @@ let rec elab_vox_pred ~bound ~self_root env (e : Parsetree.expression)
           elab_vox_constr ~bound ~self_root env ~loc lid (Some a)
       | Pexp_ident {txt = Longident.Lident "not"; _}, [a] ->
           Pnot (elab_vox_pred ~bound ~self_root env a)
+      | Pexp_ident {txt = Longident.Lident "fst"; _}, [a] ->
+          (* [fst]/[snd] are pair projections, reserved: they never fall
+             through to the spec-function namespace (so a misapplied one
+             below is an error, never silently an uninterpreted
+             function). *)
+          Pproj (2, 0, elab_vox_pred ~bound ~self_root env a)
+      | Pexp_ident {txt = Longident.Lident "snd"; _}, [a] ->
+          Pproj (2, 1, elab_vox_pred ~bound ~self_root env a)
+      | Pexp_ident {txt = Longident.Lident (("fst" | "snd") as f); _}, _ ->
+          Location.raise_errorf ~loc
+            "vox: %s expects exactly one argument in a refinement predicate"
+            f
       | Pexp_ident {txt = Longident.Lident ("-" | "~-"); _}, [a] ->
           (* unary minus *)
           Pbinop (Sub, Pint 0, elab_vox_pred ~bound ~self_root env a)
