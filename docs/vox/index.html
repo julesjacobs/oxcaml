@@ -570,26 +570,39 @@ theorem mem_insert (x y : Int) (t : Vox_Bst_tree) :
 grind_pattern mem_insert =&gt; mem y (insert x t)
 |lean}]
 
+(* The API type is the refined abbreviation itself: a set IS a tree
+   satisfying the ordering invariant.  Parameters of type [set] are
+   contracts through the abbreviation like any other. *)
+type set = tree{ bst _ }
+
+(* [empty]'s type keeps the exact equation (a client's "not in the
+   empty set" facts flow from it); it enters [set] positions by
+   subsumption, [bst Leaf] being one unfold. *)
 val empty : tree{ _ = Leaf }
 
 (* Efficient one-path search, proved equal to the model membership
    (which quantifies the WHOLE tree): the ordering lemmas bridge the
    path the code takes to the subtrees it skips. *)
-val member : (x : int) -&gt; (t : tree{ bst _ }) -&gt; bool{ _ = mem x t }
+val member : (x : int) -&gt; (t : set) -&gt; bool{ _ = mem x t }
 
 (* Insertion returns exactly the model's insert; the interface-level
    facts [bst _] and [mem x _] follow from the exported theorems, as
    does -- at any client use -- the full characterization
-   [mem y (insert x t) &lt;-&gt; y = x || mem y t]. *)
+   [mem y (insert x t) &lt;-&gt; y = x || mem y t].  (Refinements do not
+   STACK, so the result carries its characterization on the
+   underlying [tree]; it flows into [set] positions by
+   subsumption.) *)
 val insert :
-  (x : int) -&gt; (t : tree{ bst _ }) -&gt; tree{ _ = insert x t &amp;&amp; bst _ &amp;&amp; mem x _ }</code></pre></div>
+  (x : int) -&gt; (t : set) -&gt; tree{ _ = insert x t &amp;&amp; bst _ &amp;&amp; mem x _ }</code></pre></div>
 <div class="tabpane"><pre style="max-height:34rem"><code class="ml">type tree =
   | Leaf
   | Node of tree * int * tree
 
+type set = tree{ bst _ }
+
 let empty : tree{ _ = Leaf } = Leaf
 
-let rec member : (x : int) -&gt; (t : tree{ bst _ }) -&gt; bool{ _ = mem x t } =
+let rec member : (x : int) -&gt; (t : set) -&gt; bool{ _ = mem x t } =
   fun x t -&gt;
     match t with
     | Leaf -&gt; false
@@ -605,7 +618,7 @@ let rec member : (x : int) -&gt; (t : tree{ bst _ }) -&gt; bool{ _ = mem x t } =
       end
 
 let rec insert
-  : (x : int) -&gt; (t : tree{ bst _ }) -&gt; tree{ _ = insert x t &amp;&amp; bst _ &amp;&amp; mem x _ }
+  : (x : int) -&gt; (t : set) -&gt; tree{ _ = insert x t &amp;&amp; bst _ &amp;&amp; mem x _ }
   =
   fun x t -&gt;
     match t with
@@ -633,11 +646,11 @@ hits: <code>mem_insert</code> characterizes each insertion completely, down
 to <code>mem 5 empty = False</code>.</p></div>
 <div class="tabpane"><pre style="max-height:34rem"><code class="ml">module Set : sig
   val add
-    : (x : int) -&gt; (t : tree{ bst _ })
+    : (x : int) -&gt; (t : set)
       -&gt; tree{ bst _ &amp;&amp; (forall_ y. mem y _ = (y = x || mem y t)) }
 end = struct
 
-let probe : (t : tree{ bst _ }) -&gt; bool{ _ = mem 7 t } =
+let probe : (t : set) -&gt; bool{ _ = mem 7 t } =
   fun t -&gt;
     let t' = Set.add 2 t in
     let b = member 7 t' in

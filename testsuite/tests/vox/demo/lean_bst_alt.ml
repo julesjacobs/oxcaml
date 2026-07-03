@@ -20,11 +20,11 @@ open Bst
 
 module Set : sig
   val add
-    : (x : int) -> (t : tree{ bst _ })
+    : (x : int) -> (t : set)
       -> tree{ bst _ && (forall_ y. mem y _ = (y = x || mem y t)) }
 end = struct
   let add
-    : (x : int) -> (t : tree{ bst _ })
+    : (x : int) -> (t : set)
       -> tree{ bst _ && (forall_ y. mem y _ = (y = x || mem y t)) }
     =
     fun x t ->
@@ -36,7 +36,7 @@ end
    of 7 -- the forall_ instantiates at the key the client asks about,
    and [member]'s answer about the NEW tree is proved to answer the
    question about the OLD one. *)
-let probe : (t : tree{ bst _ }) -> bool{ _ = mem 7 t } =
+let probe : (t : set) -> bool{ _ = mem 7 t } =
   fun t ->
     let t' = Set.add 2 t in
     let b = member 7 t' in

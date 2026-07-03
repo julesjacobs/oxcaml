@@ -10,9 +10,11 @@ type tree =
   | Leaf
   | Node of tree * int * tree
 
+type set = tree{ bst _ }
+
 let empty : tree{ _ = Leaf } = Leaf
 
-let rec member : (x : int) -> (t : tree{ bst _ }) -> bool{ _ = mem x t } =
+let rec member : (x : int) -> (t : set) -> bool{ _ = mem x t } =
   fun x t ->
     match t with
     | Leaf -> false
@@ -28,7 +30,7 @@ let rec member : (x : int) -> (t : tree{ bst _ }) -> bool{ _ = mem x t } =
       end
 
 let rec insert
-  : (x : int) -> (t : tree{ bst _ }) -> tree{ _ = insert x t && bst _ && mem x _ }
+  : (x : int) -> (t : set) -> tree{ _ = insert x t && bst _ && mem x _ }
   =
   fun x t ->
     match t with
