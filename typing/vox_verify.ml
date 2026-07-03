@@ -109,6 +109,12 @@ let registering : Path.t list ref = ref []
 let poisoned : Path.t list ref = ref []
 let find_datatype p = List.find_opt (fun (q, _) -> Path.same p q) !datatypes
 
+(* Reflected definitions ([@@vox.reflect]) of the current module (or
+   toplevel session), in definition order; emitted into the solver input
+   between the datatypes and the [-vox-prelude], so prelude lemmas may
+   reference them. *)
+let spec_defs : Vox_reflect.spec_def list ref = ref []
+
 let reset () =
   vcs := [];
   Hashtbl.reset name_sorts;
@@ -116,6 +122,7 @@ let reset () =
   datatypes := [];
   registering := [];
   poisoned := [];
+  spec_defs := [];
   unknown_counter := 0
 ;;
 
@@ -229,6 +236,29 @@ let record_name env id ty = Hashtbl.replace name_sorts id (dsort_of_type env ty)
    discharge time. *)
 let register_pred_paths env p =
   List.iter (fun q -> ignore (datatype_sort env q)) (Refinement.constr_paths p)
+;;
+
+(* Register a [@@vox.reflect] binding: translate its body into an
+   equation-style definition (Vox_reflect.translate_def) and queue it
+   for emission.  Solver-side names are the source names, so two
+   reflected functions may not share one; the definition's datatypes
+   are registered so its emission never degrades to VoxU. *)
+let register_spec_def env (vb : Typedtree.value_binding) =
+  let d = Vox_reflect.translate_def vb in
+  List.iter
+    (fun (d' : Vox_reflect.spec_def) ->
+      if String.equal d'.sd_name d.sd_name
+      then
+        Location.raise_errorf
+          ~loc:d.sd_loc
+          "vox: two reflected functions would share the solver-side name %s; \
+           rename one of them"
+          d.sd_name)
+    !spec_defs;
+  List.iter
+    (fun p -> ignore (datatype_sort env p))
+    (Vox_reflect.def_datatype_paths d);
+  spec_defs := !spec_defs @ [ d ]
 ;;
 
 let has_vox_attr name attrs =
@@ -478,6 +508,21 @@ let check_binder_escape ~toplevel ctx ~extra_scope (pat : _ general_pattern) id 
    otherwise smuggle false facts (the pattern's own binders count as in
    scope; siblings bound by the unmodeled construct do not, which is
    conservative). *)
+(* Reflected definitions live at the top level of the current module:
+   that is where walk_items registers and emits them.  A marked binding
+   anywhere else -- a local let, or a structure item of a nested or
+   local module -- would be registered in the typing-time table (so its
+   calls would translate) but never emitted, and a local one could
+   capture enclosing variables; reject them all. *)
+let reject_local_reflect (vb : Typedtree.value_binding) =
+  if Vox_reflect.has_reflect_attr vb.vb_attributes
+  then
+    Location.raise_errorf
+      ~loc:vb.vb_loc
+      "vox: [@@vox.reflect] is only supported on top-level bindings of the \
+       current module"
+;;
+
 let backstop_pat : type k. ctx -> k general_pattern -> unit =
   fun ctx pat ->
   let bound = pat_bound_idents pat in
@@ -729,6 +774,10 @@ let rec walk_expr env ctx (e : expression) =
    | None -> ());
   match e.exp_desc with
   | Texp_let (_rec_flag, vbs, body) ->
+    (* Reflected definitions are global; a local one could capture
+       enclosing variables (translate_def's closedness check would also
+       catch that, but the restriction is the honest one). *)
+    List.iter reject_local_reflect vbs;
     List.iter (fun vb -> walk_expr env ctx vb.vb_expr) vbs;
     let ctx' = List.fold_left (fun ctx vb -> extend_pat env ctx vb.vb_pat) ctx vbs in
     (* A destructuring let of a variable gets the same facts a match
@@ -830,7 +879,9 @@ let rec walk_expr env ctx (e : expression) =
     (* Generic traversal of children under the same context.  Patterns
        reached this way belong to constructs the walker does not model
        (try handlers, letops, local module structures, ...); they are
-       escape-checked but contribute no facts. *)
+       escape-checked but contribute no facts.  Value bindings reached
+       this way (structure items of local modules) cannot host
+       reflected definitions. *)
     let it =
       { Tast_iterator.default_iterator with
         expr = (fun _ e' -> walk_expr env ctx e')
@@ -838,6 +889,10 @@ let rec walk_expr env ctx (e : expression) =
           (fun sub (type k) (p : k general_pattern) ->
             backstop_pat ctx p;
             Tast_iterator.default_iterator.pat sub p)
+      ; value_binding =
+          (fun sub vb ->
+            reject_local_reflect vb;
+            Tast_iterator.default_iterator.value_binding sub vb)
       }
     in
     Tast_iterator.default_iterator.expr it e
@@ -1365,6 +1420,87 @@ let rec lean_of_pred buf (p : Refinement.pred) =
     Buffer.add_char buf ')'
 ;;
 
+(* Reflected definitions, emitted between the datatypes and the
+   prelude.  [@[grind] def] registers the defining equations with
+   grind.  Termination is Lean's to check: structural recursion needs
+   nothing, and a [@@vox.decreases e] metric becomes
+   [termination_by (e).toNat] with an omega [decreasing_by] (the branch
+   guards are in context for those goals).  The def name is the source
+   name, so a [-vox-prelude] can state lemmas about it. *)
+let lean_rsort (s : Vox_reflect.rsort) =
+  match s with
+  | Vox_reflect.Rint -> "Int"
+  | Vox_reflect.Rbool -> "Prop"
+  | Vox_reflect.Rdata p -> lean_sort (S_data p)
+;;
+
+let rec lean_def_body buf (b : Vox_reflect.def_body) =
+  match b with
+  | Vox_reflect.Bpred p -> lean_of_pred buf p
+  | Vox_reflect.Bite (c, a, b') ->
+    Buffer.add_string buf "(if ";
+    lean_of_pred buf c;
+    Buffer.add_string buf " then ";
+    lean_def_body buf a;
+    Buffer.add_string buf " else ";
+    lean_def_body buf b';
+    Buffer.add_char buf ')'
+  | Vox_reflect.Bcase (x, clauses) ->
+    Buffer.add_string buf ("(match " ^ lean_name x ^ " with");
+    List.iter
+      (fun (cl : Vox_reflect.def_clause) ->
+        Buffer.add_string buf (" | " ^ lean_constr_name cl.dc_path cl.dc_cstr);
+        List.iter
+          (fun f -> Buffer.add_string buf (" " ^ lean_name f))
+          cl.dc_fields;
+        Buffer.add_string buf " => ";
+        lean_def_body buf cl.dc_rhs)
+      clauses;
+    Buffer.add_char buf ')'
+;;
+
+let lean_spec_def buf (d : Vox_reflect.spec_def) =
+  Buffer.add_string buf ("@[grind] def " ^ d.sd_name);
+  List.iter
+    (fun (id, s) ->
+      Buffer.add_string
+        buf
+        (Printf.sprintf " (%s : %s)" (lean_name id) (lean_rsort s)))
+    d.sd_params;
+  Buffer.add_string buf (" : " ^ lean_rsort d.sd_ret ^ " := ");
+  lean_def_body buf d.sd_body;
+  Buffer.add_char buf '\n';
+  match d.sd_decreases with
+  | None -> ()
+  | Some m ->
+    Buffer.add_string buf "termination_by (";
+    lean_of_pred buf m;
+    Buffer.add_string buf ").toNat\ndecreasing_by all_goals omega\n"
+;;
+
+(* Emits every definition; also returns the total line count and, per
+   definition, its 0-based line span within the block (so a Lean error
+   inside a definition -- typically a failed termination proof -- is
+   reported against that definition, not blamed on some VC). *)
+let lean_spec_def_decls () =
+  let buf = Buffer.create 256 in
+  let count () =
+    String.fold_left
+      (fun n c -> if c = '\n' then n + 1 else n)
+      0
+      (Buffer.contents buf)
+  in
+  let spans =
+    List.map
+      (fun (d : Vox_reflect.spec_def) ->
+        let start = count () in
+        lean_spec_def buf d;
+        start, count () - 1, d)
+      !spec_defs
+  in
+  Buffer.contents buf, count (), spans
+;;
+
 let lean_theorem buf i vc =
   Buffer.add_string buf (Printf.sprintf "theorem vc_%d " i);
   let seen = Hashtbl.create 16 in
@@ -1466,15 +1602,21 @@ let lean_file vcs =
      module's datatypes, which do not exist in this input.  Theorems
      follow, one per line. *)
   let want_prelude = List.exists vc_uses_spec_fun vcs in
+  let spec_def_decls, spec_def_lines, spec_def_spans = lean_spec_def_decls () in
+  let defs_first_line =
+    1 + (if needs_voxu then 1 else 0) + List.length !datatypes
+  in
   let first_line =
     1
     + (if needs_voxu then 1 else 0)
     + List.length !datatypes
+    + spec_def_lines
     + (if want_prelude then prelude_lines () else 0)
   in
   let first_line = first_line + 1 in
   if needs_voxu then Buffer.add_string buf "opaque VoxU : Type\n";
   lean_datatype_decls buf;
+  Buffer.add_string buf spec_def_decls;
   if want_prelude then Buffer.add_string buf (prelude ());
   (* Bound elaboration per theorem: a diverging [grind] must count as
      a verification failure, not hang the build.  (A wedged process
@@ -1483,19 +1625,34 @@ let lean_file vcs =
      Lean requires to be the first command in the file. *)
   Buffer.add_string buf "set_option maxHeartbeats 400000\n";
   List.iteri (fun i vc -> lean_theorem buf i vc) vcs;
+  let def_of_line line =
+    List.find_opt
+      (fun (s, e, _) -> line >= defs_first_line + s && line <= defs_first_line + e)
+      spec_def_spans
+    |> Option.map (fun (_, _, d) -> d)
+  in
   ( Buffer.contents buf,
-    fun line ->
+    (fun line ->
       (* An error on a header line maps to no VC (and a negative
          index would make [List.nth_opt] raise). *)
-      if line < first_line then None else List.nth_opt vcs (line - first_line)
-  )
+      if line < first_line then None else List.nth_opt vcs (line - first_line)),
+    def_of_line )
 ;;
 
 let run_lean vcs =
-  match vcs with
-  | [] -> ()
-  | first :: _ ->
-    let contents, vc_of_line = lean_file vcs in
+  (* Reflected definitions are checked (termination included) even when
+     the module has no VCs of its own: a rejected definition must fail
+     its defining module, not lie in wait. *)
+  match vcs, !spec_defs with
+  | [], [] -> ()
+  | _ ->
+    let fallback_loc =
+      match vcs, !spec_defs with
+      | vc :: _, _ -> vc.vc_loc
+      | [], d :: _ -> d.Vox_reflect.sd_loc
+      | [], [] -> assert false
+    in
+    let contents, vc_of_line, def_of_line = lean_file vcs in
     let in_file = Filename.temp_file "vox" ".lean" in
     let out_file = Filename.temp_file "vox" ".out" in
     Misc.try_finally
@@ -1580,18 +1737,13 @@ let run_lean vcs =
             (* No per-theorem diagnostic: the solver itself failed
                (missing binary, crash, bad flags).  Blaming a VC would
                hide the real cause. *)
-            Location.raise_errorf ~loc:first.vc_loc
+            Location.raise_errorf ~loc:fallback_loc
               "vox: verification failed (lean solver error, exit %d): %s"
               status
               (if String.equal !first_output ""
                then "<no output>"
                else !first_output)
           | Some line ->
-            let vc =
-              match vc_of_line line with
-              | Some vc -> vc
-              | None -> first
-            in
             (* Strip the (nondeterministic) temp-file prefix from the
                message; keep from "error:" onward. *)
             let msg =
@@ -1607,11 +1759,28 @@ let run_lean vcs =
               in
               find 0
             in
-            Location.raise_errorf ~loc:vc.vc_loc
-              "vox: verification failed (lean).@ Goal: %s%s%s"
-              (goal_for_error vc)
-              (hyps_for_error vc)
-              (if String.equal msg "" then "" else "\n(lean: " ^ msg ^ ")")
+            (match def_of_line line with
+             | Some (d : Vox_reflect.spec_def) ->
+               (* The definition itself was rejected -- most often Lean
+                  could not establish termination. *)
+               Location.raise_errorf ~loc:d.sd_loc
+                 "vox: the reflected definition of %s was rejected by the \
+                  solver (is it terminating?  int-indexed recursion needs a \
+                  [@@vox.decreases] metric)%s"
+                 d.sd_name
+                 (if String.equal msg "" then "" else "\n(lean: " ^ msg ^ ")")
+             | None ->
+               (match vc_of_line line, vcs with
+                | Some vc, _ | None, vc :: _ ->
+                  Location.raise_errorf ~loc:vc.vc_loc
+                    "vox: verification failed (lean).@ Goal: %s%s%s"
+                    (goal_for_error vc)
+                    (hyps_for_error vc)
+                    (if String.equal msg "" then "" else "\n(lean: " ^ msg ^ ")")
+                | None, [] ->
+                  Location.raise_errorf ~loc:fallback_loc
+                    "vox: verification failed (lean): %s"
+                    (if String.equal msg "" then "<no output>" else msg)))
         end)
 ;;
 
@@ -1739,6 +1908,13 @@ let uses_vox (str : structure) =
           if has_vox p.pat_attributes || type_has_refine p.pat_type
           then found := true;
           Tast_iterator.default_iterator.pat sub p)
+    ; value_binding =
+        (fun sub vb ->
+          (* [@@vox.reflect] bindings need the pass even when no other
+             vox syntax appears (their definitions must be registered,
+             translated, and checked). *)
+          if has_vox vb.vb_attributes then found := true;
+          Tast_iterator.default_iterator.value_binding sub vb)
     }
   in
   it.structure it str;
@@ -1750,6 +1926,24 @@ let walk_items (str : structure) ctx =
     (fun item ->
       match item.str_desc with
       | Tstr_value (_rec_flag, vbs) ->
+        (match vbs with
+         | _ :: _ :: _
+           when List.exists
+                  (fun vb -> Vox_reflect.has_reflect_attr vb.vb_attributes)
+                  vbs ->
+           (* Emission order is definition order, so a group could
+              forward-reference; mutual recursion is not supported
+              (matching the datatype restriction). *)
+           Location.raise_errorf
+             ~loc:(List.hd vbs).vb_loc
+             "vox: [@@vox.reflect] is not supported on multi-binding groups \
+              (mutually recursive reflected functions are not supported)"
+         | _ -> ());
+        List.iter
+          (fun vb ->
+            if Vox_reflect.has_reflect_attr vb.vb_attributes
+            then register_spec_def str.str_final_env vb)
+          vbs;
         List.iter (fun vb -> walk_expr str.str_final_env !ctx vb.vb_expr) vbs;
         ctx
         := List.fold_left
@@ -1765,6 +1959,10 @@ let walk_items (str : structure) ctx =
               (fun sub (type k) (p : k general_pattern) ->
                 backstop_pat !ctx p;
                 Tast_iterator.default_iterator.pat sub p)
+          ; value_binding =
+              (fun sub vb ->
+                reject_local_reflect vb;
+                Tast_iterator.default_iterator.value_binding sub vb)
           }
         in
         it.structure_item it item)

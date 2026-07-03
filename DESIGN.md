@@ -123,6 +123,41 @@
   and unit-qualified (`Vox_<Unit>_<path>`), the same in the defining
   module and in every client; distinct types that would collide are
   rejected ("rename one of them").
+- REFLECTED functions: a module-level `let rec f ... = ...
+  [@@vox.reflect]` is a program function that DEFINES the spec function
+  of the same name -- the compiler translates its body into an
+  equation-style logical definition (Vox_reflect.translate_def) and
+  emits it into the solver input between the datatypes and the prelude
+  (for Lean an honest `@[grind] def`, so prelude lemmas can be stated
+  about it), and a saturated application of `f` in program code
+  translates like a primitive: `refine_ (len l)` at `int{ _ = len l }`
+  is trivial, and `let refine_ r = refine_ (fib m)` is the induction
+  hypothesis at a recursive call.  The reflectable fragment is small
+  (sharp edges, not bugs): parameters are plain variables of int, bool
+  or simple-variant sort; the body is built from the translatable
+  operations, constructors, saturated calls to reflected functions
+  (self included), `if` on translatable conditions, and exhaustive
+  one-level `match` on a variable; the definition must be CLOSED (only
+  its own parameters and match fields), which is why reflected
+  bindings are module-level only.  TERMINATION is the solver's to
+  check -- an inconsistent definition (`f x = f x + 1`) would prove
+  anything, so a rejected definition is a verification failure
+  reported against the binding.  Structural recursion needs nothing;
+  int-indexed recursion carries `[@@vox.decreases e]` (an int metric
+  over the parameters), emitted as `termination_by (e).toNat` with an
+  omega `decreasing_by` -- the branch guards are in context for those
+  goals, so `fib` with guards `n <= 0` / `n = 1` needs exactly
+  `[@@vox.decreases n]`.  Two reflected functions may not share a
+  name; a reflected name shadowing a prelude definition is a solver
+  error (fails closed).  See testsuite/tests/vox/lean_reflect.ml (a
+  spec library with an EMPTY prelude) and lean_fib.ml (reflected fib,
+  with the fast-doubling lemmas stated about it in the prelude).
+  Caveats: the program/logic correspondence of a reflected call is
+  partial-correctness (a diverging call returns no value) and ideal
+  arithmetic (overflow, as everywhere); the definition is emitted only
+  in its own module (client modules re-reflect nothing -- cross-module
+  reflected calls are future work, needing the definition in the
+  .cmi).
 - The compiler attaches logical meaning to exactly the operations the
   predicate language models (Vox_reflect): variables, int/bool
   constants, `+ - * ~-` (and `succ`/`pred`), `&& || not`, and

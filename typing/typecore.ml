@@ -11625,6 +11625,28 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
     ) l;
   (* See Note [add_module_variables after checking expressions] *)
   let new_env = add_module_variables new_env mvs in
+  (* vox: a [@@vox.reflect] binding registers its identifier, so that
+     from here on a saturated application of it translates into the
+     logic ([Vox_reflect.translate]).  The definition itself is
+     translated and emitted by the VC pass (vox_verify), which also
+     rejects reflected bindings outside the module level. *)
+  List.iter
+    (fun vb ->
+       if Vox_reflect.has_reflect_attr vb.vb_attributes then
+         match vb.vb_pat.pat_desc with
+         | Tpat_var { id; _ } ->
+             let arity =
+               match vb.vb_expr.exp_desc with
+               | Texp_function { params; body; _ } ->
+                   List.length params
+                   + (match body with
+                      | Tfunction_cases _ -> 1
+                      | Tfunction_body _ -> 0)
+               | _ -> 0
+             in
+             Vox_reflect.register_reflected id ~arity
+         | _ -> ())
+    l;
   (l, new_env)
 
 and type_let_def_wrap_warnings

@@ -8,37 +8,36 @@
  check-ocamlc.byte-output;
 *)
 
-(* Three implementations of Fibonacci -- naive recursion, a
-   tail-recursive accumulator loop, and O(log n) fast doubling -- all
-   verified against the same Lean spec function [fib] (fib_lib.lean,
-   totalized with fib n = 0 for n <= 0).  Every obligation is really
-   proved: a recursive call re-instantiates the dependent signature at
-   the actual arguments, so its refined result is the induction
-   hypothesis; the fast-doubling identities are prelude lemmas, proved
-   there by induction from the fib addition formula.  Arithmetic and
-   comparisons are reflected (Vox_reflect), so the only assumed
-   primitive is floor halving, whose [asr] the logic does not model --
-   and even that assumption is RUNTIME CHECKED. *)
+(* Fibonacci, where the spec IS the program: the naive recursion below
+   is REFLECTED ([@@vox.reflect]) -- the compiler translates its
+   definition into the logic and emits it as a Lean [@[grind] def],
+   with [termination_by] synthesized from [@@vox.decreases n]; an
+   applied [fib] in any refinement then denotes this very function.
+   The tail-recursive accumulator loop and the O(log n) fast doubling
+   are verified against it.  Every obligation is really proved: a
+   recursive call re-instantiates the dependent signature at the
+   actual arguments, so its refined result is the induction
+   hypothesis; the fast-doubling identities are prelude lemmas
+   (fib_lib.lean), proved by induction over a Nat-indexed helper and
+   transported to the reflected [fib] along a functional-induction
+   bridge.  The only assumed primitive is floor halving, whose [asr]
+   the logic does not model -- and even that assumption is RUNTIME
+   CHECKED. *)
 
 let half : (x : int) -> int{ x = 2 * _ || x = 2 * _ + 1 } =
   fun x -> assume_ (x asr 1)
 
-(* Naive recursion, O(fib n) calls.  Total: fib n = 0 for n <= 0.
-   Recursive arguments are let-bound: a dependent application's
-   argument must be a variable. *)
-let rec fib_naive : (n : int) -> int{ _ = fib n } =
-  fun n ->
-    if n <= 0
-    then refine_ 0
-    else if n = 1
-    then refine_ 1
-    else begin
-      let refine_ m1 = refine_ (n - 1) in
-      let refine_ m2 = refine_ (n - 2) in
-      let refine_ r1 = fib_naive m1 in
-      let refine_ r2 = fib_naive m2 in
-      refine_ (r1 + r2)
-    end
+let rec fib n =
+  if n <= 0
+  then 0
+  else if n = 1
+  then 1
+  else fib (n - 1) + fib (n - 2)
+[@@vox.reflect] [@@vox.decreases n]
+
+(* A reflected call names itself: the program's fib meets the spec
+   definitionally (the goal is [fib n = fib n]). *)
+let fib_slow : (n : int) -> int{ _ = fib n } = fun n -> refine_ (fib n)
 
 (* Tail-recursive accumulator loop, O(n) iterations: the parameters
    carry the invariant (a, b) = (fib i, fib (i+1)) with i >= 0; each
