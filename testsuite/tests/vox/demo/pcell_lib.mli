@@ -12,11 +12,10 @@
    cannot be presented, and no fact is ever retracted -- facts speak
    of immutable token snapshots, never of the cell.
 
-   [alloc] returns cell and token together; the pair is a simple
-   record so its refinement names the components with native
-   projections, and destructuring recovers them (per-field facts) --
-   two cells' tokens can be live at once.  The match-bound token is
-   bare.  Token parameters are CONTRACTS (parameters as
+   [alloc] returns cell and token together as a NATIVE PAIR: its
+   refinement names the components with [fst]/[snd], and
+   destructuring recovers them (per-component facts) -- two cells'
+   tokens can be live at once.  The match-bound token is bare.  Token parameters are CONTRACTS (parameters as
    preconditions): callers pass tokens bare at the skeleton type,
    each call discharging the ownership predicate from the facts in
    scope; only the token a call RETURNS is a package, unpacked
@@ -32,7 +31,6 @@
 
 type icell
 type itoken
-type cpair = { cell : icell; tok : itoken }
 
 [%%vox.lean {lean|
 opaque cid : VoxU -> Int
@@ -41,7 +39,8 @@ opaque cts : VoxU -> Int
 |lean}]
 
 val alloc :
-  (v : int) -> cpair{ tid _.tok = cid _.cell && cts _.tok = v } @ unique
+  (v : int)
+  -> (icell * itoken){ tid (snd _) = cid (fst _) && cts (snd _) = v } @ unique
 
 val read :
   (c : icell) -> (k : int) -> itoken{ tid _ = cid c && cts _ = k } @ unique ->

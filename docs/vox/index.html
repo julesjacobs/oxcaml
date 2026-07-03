@@ -177,12 +177,9 @@ runtime-checked.</p>
    its refined result is the induction hypothesis; the fast-doubling
    identities are lemmas in an embedded [%%vox.lean] block,
    proved by functional induction DIRECTLY on the reflected [fib] --
-   there is no second, Lean-side Fibonacci anywhere.  The only assumed
-   primitive is floor halving, whose [asr] the logic does not model --
-   and even that assumption is RUNTIME CHECKED. *)
-
-let half : (x : int) -&gt; int{ x = 2 * _ || x = 2 * _ + 1 } =
-  fun x -&gt; assume_ (x asr 1)
+   there is no second, Lean-side Fibonacci anywhere.  NOTHING in this
+   file is assumed: the midpoint is reflected T-division, and its
+   parity annotation is PROVED. *)
 
 let rec total_ fib n =
   if n &lt;= 0
@@ -275,7 +272,9 @@ let fib_iter : (n : int) -&gt; int{ _ = fib n } =
    (fib n, fib (n+1)) -- tuples appear in predicates directly.  With
    k = n/2: fib (2k) = fib k * (2 fib (k+1) - fib k) and fib (2k+1) =
    fib k ^ 2 + fib (k+1) ^ 2 (the embedded lemmas; they need k &gt;= 0,
-   hence the precondition on n, discharged at each call).  Annotating
+   hence the precondition on n, discharged at each call).  The
+   midpoint is reflected T-division; its parity annotation is PROVED
+   (grind derives the disjunction from the tdiv bounds).  Annotating
    x and y with the doubling identities puts [fib (2 * k)]
    syntactically in each obligation, which is what fires the lemmas;
    the final obligations are then pure congruence. *)
@@ -284,7 +283,7 @@ let rec fib_fd : (n : int{ _ &gt;= 0 }) -&gt; (int * int){ _ = (fib n, fib (n + 
     if n &lt;= 0
     then (0, 1)
     else begin
-      let k = half n in
+      let k : int{ n = 2 * _ || n = 2 * _ + 1 } = n / 2 in
       let q = fib_fd k in
       match q with
       | (a, b) -&gt;
@@ -303,9 +302,9 @@ let fib10 : int{ _ = fib 10 } =
   | (u, _) -&gt; u</code></pre></div>
 <div class="tabpane"><pre style="max-height:34rem"><code class="lean" id="genlean">opaque VoxU : Type
 structure VoxT2.{u1, u2} (t1 : Sort u1) (t2 : Sort u2) : Sort (max u1 (max u2 (1))) where (p1 : t1) (p2 : t2)
-@[grind] def fib (v_n_285 : Int) : Int := (if (v_n_285 ≤ (0 : Int)) then (0 : Int) else (if (v_n_285 = (1 : Int)) then (1 : Int) else ((fib (v_n_285 - (1 : Int))) + (fib (v_n_285 - (2 : Int))))))
-termination_by (v_n_285).toNat
-decreasing_by all_goals omega
+@[grind] def fib (v_n_280 : Int) : Int := (if (v_n_280 ≤ (0 : Int)) then (0 : Int) else (if (v_n_280 = (1 : Int)) then (1 : Int) else ((fib (v_n_280 - (1 : Int))) + (fib (v_n_280 - (2 : Int))))))
+termination_by (v_n_280).toNat
+decreasing_by all_goals (first | omega | grind)
 
 theorem fib_rec (n : Int) (h : 2 &lt;= n) : fib n = fib (n - 1) + fib (n - 2) := by
   grind
@@ -352,20 +351,21 @@ theorem fib_add (m n : Int) (hm : 0 &lt;= m) (hn : 0 &lt;= n) :
   rw [e] at h
   grind
 set_option maxHeartbeats 400000
-theorem vc_0 (v_n_290 : Int) : ((fib v_n_290) = (fib v_n_290)) := by grind
-theorem vc_1 (v_n_300 : Int) (v_a_302 : Int) (v_i_301 : Int) (v_b_303 : Int) (h_0 : (v_i_301 = v_n_300)) (h_1 : (v_b_303 = (fib (v_i_301 + (1 : Int))))) (h_2 : ((v_a_302 = (fib v_i_301)) ∧ (v_i_301 ≥ (0 : Int)))) : (v_a_302 = (fib v_n_300)) := by grind
-theorem vc_2 (v_i_301 : Int) (v_b_303 : Int) (v_n_300 : Int) (v_a_302 : Int) (h_0 : (¬ (v_i_301 = v_n_300))) (h_1 : (v_b_303 = (fib (v_i_301 + (1 : Int))))) (h_2 : ((v_a_302 = (fib v_i_301)) ∧ (v_i_301 ≥ (0 : Int)))) : ((v_b_303 = (fib (v_i_301 + (1 : Int)))) ∧ ((v_i_301 + (1 : Int)) ≥ (0 : Int))) := by grind
-theorem vc_3 (v_i_301 : Int) (v_b_303 : Int) (v_a_302 : Int) (v_n_300 : Int) (h_0 : (¬ (v_i_301 = v_n_300))) (h_1 : (v_b_303 = (fib (v_i_301 + (1 : Int))))) (h_2 : ((v_a_302 = (fib v_i_301)) ∧ (v_i_301 ≥ (0 : Int)))) : ((v_a_302 + v_b_303) = (fib ((v_i_301 + (1 : Int)) + (1 : Int)))) := by grind
+theorem vc_0 (v_n_285 : Int) : ((fib v_n_285) = (fib v_n_285)) := by grind
+theorem vc_1 (v_n_295 : Int) (v_a_297 : Int) (v_i_296 : Int) (v_b_298 : Int) (h_0 : (v_i_296 = v_n_295)) (h_1 : (v_b_298 = (fib (v_i_296 + (1 : Int))))) (h_2 : ((v_a_297 = (fib v_i_296)) ∧ (v_i_296 ≥ (0 : Int)))) : (v_a_297 = (fib v_n_295)) := by grind
+theorem vc_2 (v_i_296 : Int) (v_b_298 : Int) (v_n_295 : Int) (v_a_297 : Int) (h_0 : (¬ (v_i_296 = v_n_295))) (h_1 : (v_b_298 = (fib (v_i_296 + (1 : Int))))) (h_2 : ((v_a_297 = (fib v_i_296)) ∧ (v_i_296 ≥ (0 : Int)))) : ((v_b_298 = (fib (v_i_296 + (1 : Int)))) ∧ ((v_i_296 + (1 : Int)) ≥ (0 : Int))) := by grind
+theorem vc_3 (v_i_296 : Int) (v_b_298 : Int) (v_a_297 : Int) (v_n_295 : Int) (h_0 : (¬ (v_i_296 = v_n_295))) (h_1 : (v_b_298 = (fib (v_i_296 + (1 : Int))))) (h_2 : ((v_a_297 = (fib v_i_296)) ∧ (v_i_296 ≥ (0 : Int)))) : ((v_a_297 + v_b_298) = (fib ((v_i_296 + (1 : Int)) + (1 : Int)))) := by grind
 theorem vc_4 : (((0 : Int) = (fib (0 : Int))) ∧ ((0 : Int) ≥ (0 : Int))) := by grind
 theorem vc_5 : ((1 : Int) = (fib ((0 : Int) + (1 : Int)))) := by grind
-theorem vc_6 (v_n_312 : Int) (h_0 : (v_n_312 ≤ (0 : Int))) (h_1 : (v_n_312 ≥ (0 : Int))) : ((VoxT2.mk (0 : Int) (1 : Int)) = (VoxT2.mk (fib v_n_312) (fib (v_n_312 + (1 : Int))))) := by grind
-theorem vc_7 (v_k_313 : Int) (v_n_312 : Int) (h_0 : ((v_n_312 = ((2 : Int) * v_k_313)) ∨ (v_n_312 = (((2 : Int) * v_k_313) + (1 : Int))))) (h_1 : (¬ (v_n_312 ≤ (0 : Int)))) (h_2 : (v_n_312 ≥ (0 : Int))) : (v_k_313 ≥ (0 : Int)) := by grind
-theorem vc_8 (v_k_313 : Int) (v_a_315 : Int) (v_b_316 : Int) (v_q_314 : (VoxT2 Int Int)) (v_n_312 : Int) (h_0 : (v_a_315 = (VoxT2.p1 v_q_314))) (h_1 : (v_b_316 = (VoxT2.p2 v_q_314))) (h_2 : (v_q_314 = (VoxT2.mk (fib v_k_313) (fib (v_k_313 + (1 : Int)))))) (h_3 : ((v_n_312 = ((2 : Int) * v_k_313)) ∨ (v_n_312 = (((2 : Int) * v_k_313) + (1 : Int))))) (h_4 : (¬ (v_n_312 ≤ (0 : Int)))) (h_5 : (v_n_312 ≥ (0 : Int))) : ((v_a_315 * (((2 : Int) * v_b_316) - v_a_315)) = (fib ((2 : Int) * v_k_313))) := by grind
-theorem vc_9 (v_k_313 : Int) (v_b_316 : Int) (v_a_315 : Int) (v_x_317 : Int) (v_q_314 : (VoxT2 Int Int)) (v_n_312 : Int) (h_0 : (v_x_317 = (v_a_315 * (((2 : Int) * v_b_316) - v_a_315)))) (h_1 : (v_x_317 = (fib ((2 : Int) * v_k_313)))) (h_2 : (v_a_315 = (VoxT2.p1 v_q_314))) (h_3 : (v_b_316 = (VoxT2.p2 v_q_314))) (h_4 : (v_q_314 = (VoxT2.mk (fib v_k_313) (fib (v_k_313 + (1 : Int)))))) (h_5 : ((v_n_312 = ((2 : Int) * v_k_313)) ∨ (v_n_312 = (((2 : Int) * v_k_313) + (1 : Int))))) (h_6 : (¬ (v_n_312 ≤ (0 : Int)))) (h_7 : (v_n_312 ≥ (0 : Int))) : (((v_a_315 * v_a_315) + (v_b_316 * v_b_316)) = (fib (((2 : Int) * v_k_313) + (1 : Int)))) := by grind
-theorem vc_10 (v_n_312 : Int) (v_y_318 : Int) (v_x_317 : Int) (v_k_313 : Int) (v_b_316 : Int) (v_a_315 : Int) (v_q_314 : (VoxT2 Int Int)) (h_0 : (v_n_312 = ((2 : Int) * v_k_313))) (h_1 : (v_y_318 = ((v_a_315 * v_a_315) + (v_b_316 * v_b_316)))) (h_2 : (v_y_318 = (fib (((2 : Int) * v_k_313) + (1 : Int))))) (h_3 : (v_x_317 = (v_a_315 * (((2 : Int) * v_b_316) - v_a_315)))) (h_4 : (v_x_317 = (fib ((2 : Int) * v_k_313)))) (h_5 : (v_a_315 = (VoxT2.p1 v_q_314))) (h_6 : (v_b_316 = (VoxT2.p2 v_q_314))) (h_7 : (v_q_314 = (VoxT2.mk (fib v_k_313) (fib (v_k_313 + (1 : Int)))))) (h_8 : ((v_n_312 = ((2 : Int) * v_k_313)) ∨ (v_n_312 = (((2 : Int) * v_k_313) + (1 : Int))))) (h_9 : (¬ (v_n_312 ≤ (0 : Int)))) (h_10 : (v_n_312 ≥ (0 : Int))) : ((VoxT2.mk v_x_317 v_y_318) = (VoxT2.mk (fib v_n_312) (fib (v_n_312 + (1 : Int))))) := by grind
-theorem vc_11 (v_n_312 : Int) (v_y_318 : Int) (v_x_317 : Int) (v_k_313 : Int) (v_b_316 : Int) (v_a_315 : Int) (v_q_314 : (VoxT2 Int Int)) (h_0 : (¬ (v_n_312 = ((2 : Int) * v_k_313)))) (h_1 : (v_y_318 = ((v_a_315 * v_a_315) + (v_b_316 * v_b_316)))) (h_2 : (v_y_318 = (fib (((2 : Int) * v_k_313) + (1 : Int))))) (h_3 : (v_x_317 = (v_a_315 * (((2 : Int) * v_b_316) - v_a_315)))) (h_4 : (v_x_317 = (fib ((2 : Int) * v_k_313)))) (h_5 : (v_a_315 = (VoxT2.p1 v_q_314))) (h_6 : (v_b_316 = (VoxT2.p2 v_q_314))) (h_7 : (v_q_314 = (VoxT2.mk (fib v_k_313) (fib (v_k_313 + (1 : Int)))))) (h_8 : ((v_n_312 = ((2 : Int) * v_k_313)) ∨ (v_n_312 = (((2 : Int) * v_k_313) + (1 : Int))))) (h_9 : (¬ (v_n_312 ≤ (0 : Int)))) (h_10 : (v_n_312 ≥ (0 : Int))) : ((VoxT2.mk v_y_318 (v_x_317 + v_y_318)) = (VoxT2.mk (fib v_n_312) (fib (v_n_312 + (1 : Int))))) := by grind
-theorem vc_12 : ((10 : Int) ≥ (0 : Int)) := by grind
-theorem vc_13 (v_u_321 : Int) (v_r_320 : (VoxT2 Int Int)) (h_0 : (v_u_321 = (VoxT2.p1 v_r_320))) (h_1 : (v_r_320 = (VoxT2.mk (fib (10 : Int)) (fib ((10 : Int) + (1 : Int)))))) : (v_u_321 = (fib (10 : Int))) := by grind</code></pre>
+theorem vc_6 (v_n_307 : Int) (h_0 : (v_n_307 ≤ (0 : Int))) (h_1 : (v_n_307 ≥ (0 : Int))) : ((VoxT2.mk (0 : Int) (1 : Int)) = (VoxT2.mk (fib v_n_307) (fib (v_n_307 + (1 : Int))))) := by grind
+theorem vc_7 (v_n_307 : Int) (h_0 : (¬ (v_n_307 ≤ (0 : Int)))) (h_1 : (v_n_307 ≥ (0 : Int))) : ((v_n_307 = ((2 : Int) * (Int.tdiv v_n_307 (2 : Int)))) ∨ (v_n_307 = (((2 : Int) * (Int.tdiv v_n_307 (2 : Int))) + (1 : Int)))) := by grind
+theorem vc_8 (v_k_308 : Int) (v_n_307 : Int) (h_0 : (v_k_308 = (Int.tdiv v_n_307 (2 : Int)))) (h_1 : ((v_n_307 = ((2 : Int) * v_k_308)) ∨ (v_n_307 = (((2 : Int) * v_k_308) + (1 : Int))))) (h_2 : (¬ (v_n_307 ≤ (0 : Int)))) (h_3 : (v_n_307 ≥ (0 : Int))) : (v_k_308 ≥ (0 : Int)) := by grind
+theorem vc_9 (v_k_308 : Int) (v_a_310 : Int) (v_b_311 : Int) (v_q_309 : (VoxT2 Int Int)) (v_n_307 : Int) (h_0 : (v_a_310 = (VoxT2.p1 v_q_309))) (h_1 : (v_b_311 = (VoxT2.p2 v_q_309))) (h_2 : (v_q_309 = (VoxT2.mk (fib v_k_308) (fib (v_k_308 + (1 : Int)))))) (h_3 : (v_k_308 = (Int.tdiv v_n_307 (2 : Int)))) (h_4 : ((v_n_307 = ((2 : Int) * v_k_308)) ∨ (v_n_307 = (((2 : Int) * v_k_308) + (1 : Int))))) (h_5 : (¬ (v_n_307 ≤ (0 : Int)))) (h_6 : (v_n_307 ≥ (0 : Int))) : ((v_a_310 * (((2 : Int) * v_b_311) - v_a_310)) = (fib ((2 : Int) * v_k_308))) := by grind
+theorem vc_10 (v_k_308 : Int) (v_b_311 : Int) (v_a_310 : Int) (v_x_312 : Int) (v_q_309 : (VoxT2 Int Int)) (v_n_307 : Int) (h_0 : (v_x_312 = (v_a_310 * (((2 : Int) * v_b_311) - v_a_310)))) (h_1 : (v_x_312 = (fib ((2 : Int) * v_k_308)))) (h_2 : (v_a_310 = (VoxT2.p1 v_q_309))) (h_3 : (v_b_311 = (VoxT2.p2 v_q_309))) (h_4 : (v_q_309 = (VoxT2.mk (fib v_k_308) (fib (v_k_308 + (1 : Int)))))) (h_5 : (v_k_308 = (Int.tdiv v_n_307 (2 : Int)))) (h_6 : ((v_n_307 = ((2 : Int) * v_k_308)) ∨ (v_n_307 = (((2 : Int) * v_k_308) + (1 : Int))))) (h_7 : (¬ (v_n_307 ≤ (0 : Int)))) (h_8 : (v_n_307 ≥ (0 : Int))) : (((v_a_310 * v_a_310) + (v_b_311 * v_b_311)) = (fib (((2 : Int) * v_k_308) + (1 : Int)))) := by grind
+theorem vc_11 (v_n_307 : Int) (v_y_313 : Int) (v_x_312 : Int) (v_k_308 : Int) (v_b_311 : Int) (v_a_310 : Int) (v_q_309 : (VoxT2 Int Int)) (h_0 : (v_n_307 = ((2 : Int) * v_k_308))) (h_1 : (v_y_313 = ((v_a_310 * v_a_310) + (v_b_311 * v_b_311)))) (h_2 : (v_y_313 = (fib (((2 : Int) * v_k_308) + (1 : Int))))) (h_3 : (v_x_312 = (v_a_310 * (((2 : Int) * v_b_311) - v_a_310)))) (h_4 : (v_x_312 = (fib ((2 : Int) * v_k_308)))) (h_5 : (v_a_310 = (VoxT2.p1 v_q_309))) (h_6 : (v_b_311 = (VoxT2.p2 v_q_309))) (h_7 : (v_q_309 = (VoxT2.mk (fib v_k_308) (fib (v_k_308 + (1 : Int)))))) (h_8 : (v_k_308 = (Int.tdiv v_n_307 (2 : Int)))) (h_9 : ((v_n_307 = ((2 : Int) * v_k_308)) ∨ (v_n_307 = (((2 : Int) * v_k_308) + (1 : Int))))) (h_10 : (¬ (v_n_307 ≤ (0 : Int)))) (h_11 : (v_n_307 ≥ (0 : Int))) : ((VoxT2.mk v_x_312 v_y_313) = (VoxT2.mk (fib v_n_307) (fib (v_n_307 + (1 : Int))))) := by grind
+theorem vc_12 (v_n_307 : Int) (v_y_313 : Int) (v_x_312 : Int) (v_k_308 : Int) (v_b_311 : Int) (v_a_310 : Int) (v_q_309 : (VoxT2 Int Int)) (h_0 : (¬ (v_n_307 = ((2 : Int) * v_k_308)))) (h_1 : (v_y_313 = ((v_a_310 * v_a_310) + (v_b_311 * v_b_311)))) (h_2 : (v_y_313 = (fib (((2 : Int) * v_k_308) + (1 : Int))))) (h_3 : (v_x_312 = (v_a_310 * (((2 : Int) * v_b_311) - v_a_310)))) (h_4 : (v_x_312 = (fib ((2 : Int) * v_k_308)))) (h_5 : (v_a_310 = (VoxT2.p1 v_q_309))) (h_6 : (v_b_311 = (VoxT2.p2 v_q_309))) (h_7 : (v_q_309 = (VoxT2.mk (fib v_k_308) (fib (v_k_308 + (1 : Int)))))) (h_8 : (v_k_308 = (Int.tdiv v_n_307 (2 : Int)))) (h_9 : ((v_n_307 = ((2 : Int) * v_k_308)) ∨ (v_n_307 = (((2 : Int) * v_k_308) + (1 : Int))))) (h_10 : (¬ (v_n_307 ≤ (0 : Int)))) (h_11 : (v_n_307 ≥ (0 : Int))) : ((VoxT2.mk v_y_313 (v_x_312 + v_y_313)) = (VoxT2.mk (fib v_n_307) (fib (v_n_307 + (1 : Int))))) := by grind
+theorem vc_13 : ((10 : Int) ≥ (0 : Int)) := by grind
+theorem vc_14 (v_u_316 : Int) (v_r_315 : (VoxT2 Int Int)) (h_0 : (v_u_316 = (VoxT2.p1 v_r_315))) (h_1 : (v_r_315 = (VoxT2.mk (fib (10 : Int)) (fib ((10 : Int) + (1 : Int)))))) : (v_u_316 = (fib (10 : Int))) := by grind</code></pre>
 <p style="color:var(--dim);font-size:.9rem">Regenerated and checked on every
 compile: the <code>pair</code> datatype, the reflected <code>fib</code> with
 its synthesized <code>termination_by</code>, the embedded lemma block
@@ -478,8 +478,8 @@ errors.</p>
   fun a b -&gt;
   let p = alloc a in
   let q = alloc b in
-  let { cell = c1; tok = t1 } = p in
-  let { cell = c2; tok = t2 } = q in
+  let (c1, t1) = p in
+  let (c2, t2) = q in
   let (r1, t1a) = read c1 a t1 in             (* r1 = a *)
     ...</code></pre></div>
 

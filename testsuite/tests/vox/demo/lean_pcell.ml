@@ -24,8 +24,8 @@ let swap_sum : (a : int) -> (b : int) -> int{ _ = a + b } =
   fun a b ->
   let p = alloc a in
   let q = alloc b in
-  let { cell = c1; tok = t1 } = p in
-  let { cell = c2; tok = t2 } = q in
+  let (c1, t1) = p in
+  let (c2, t2) = q in
   let (r1, t1a) = read c1 a t1 in             (* r1 = a *)
   let (r2, t2a) = read c2 b t2 in             (* r2 = b *)
   let t1b = write c1 a r2 t1a in              (* cell1 := r2 *)
@@ -56,7 +56,7 @@ let bump_via : (c : icell) -> (k : int) ->
 let bump : (n : int) -> int{ _ = n + 1 } =
   fun n ->
   let p = alloc n in
-  let { cell = c; tok = t } = p in
+  let (c, t) = p in
   let (r, u) = bump_via c n t in
   ignore u;
   r

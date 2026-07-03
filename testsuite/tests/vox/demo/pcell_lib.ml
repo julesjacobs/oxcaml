@@ -3,23 +3,21 @@ type icell = { mutable v : int; id_ : int }
 (* The inline-record argument keeps [itoken] OUT of the solver's
    datatype story (non-simple, still boxed), so this implementation
    models it at VoxU exactly as the interface's abstract [itoken]
-   does: the interface's .cmi-exported rendering of [cpair] and the
-   local one must agree on their field sorts. *)
+   does. *)
 type itoken = Tok of { id : int }
-
-type cpair = { cell : icell; tok : itoken }
 
 let ctr = ref 0
 
 let alloc :
-  (v : int) -> cpair{ tid _.tok = cid _.cell && cts _.tok = v } @ unique =
+  (v : int)
+  -> (icell * itoken){ tid (snd _) = cid (fst _) && cts (snd _) = v } @ unique =
   fun v ->
     incr ctr;
     (* capture the id first: reading [c.id_] inside the pair literal
        would use [c] twice (the unique pair consumes it) *)
     let id = !ctr in
     let c = { v; id_ = id } in
-    assume_unchecked_ { cell = c; tok = Tok { id } }
+    assume_unchecked_ (c, Tok { id })
 
 let read :
   (c : icell) -> (k : int) -> itoken{ tid _ = cid c && cts _ = k } @ unique ->

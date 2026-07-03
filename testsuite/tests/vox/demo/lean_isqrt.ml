@@ -47,8 +47,7 @@ let isqrt : (x : int{ 0 <= _ }) -> {r:int | 0 <= r && sq r <= x && x < sq (r + 1
         end
         else lo
     in
-    let x1 = x + 1 in
-    go 0 x1
+    go 0 (x + 1)
 [%%expect{|
 val sq : int -> int = <fun>
 val isqrt :
@@ -84,8 +83,7 @@ let isqrt_broken
         end
         else hi
     in
-    let x1 = x + 1 in
-    go 0 x1
+    go 0 (x + 1)
 [%%expect{|
 Line 15, characters 13-15:
 15 |         else hi

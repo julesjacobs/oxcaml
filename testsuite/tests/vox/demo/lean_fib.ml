@@ -18,12 +18,9 @@
    its refined result is the induction hypothesis; the fast-doubling
    identities are lemmas in an embedded [%%vox.lean] block,
    proved by functional induction DIRECTLY on the reflected [fib] --
-   there is no second, Lean-side Fibonacci anywhere.  The only assumed
-   primitive is floor halving, whose [asr] the logic does not model --
-   and even that assumption is RUNTIME CHECKED. *)
-
-let half : (x : int) -> int{ x = 2 * _ || x = 2 * _ + 1 } =
-  fun x -> assume_ (x asr 1)
+   there is no second, Lean-side Fibonacci anywhere.  NOTHING in this
+   file is assumed: the midpoint is reflected T-division, and its
+   parity annotation is PROVED. *)
 
 let rec total_ fib n =
   if n <= 0
@@ -116,7 +113,9 @@ let fib_iter : (n : int) -> int{ _ = fib n } =
    (fib n, fib (n+1)) -- tuples appear in predicates directly.  With
    k = n/2: fib (2k) = fib k * (2 fib (k+1) - fib k) and fib (2k+1) =
    fib k ^ 2 + fib (k+1) ^ 2 (the embedded lemmas; they need k >= 0,
-   hence the precondition on n, discharged at each call).  Annotating
+   hence the precondition on n, discharged at each call).  The
+   midpoint is reflected T-division; its parity annotation is PROVED
+   (grind derives the disjunction from the tdiv bounds).  Annotating
    x and y with the doubling identities puts [fib (2 * k)]
    syntactically in each obligation, which is what fires the lemmas;
    the final obligations are then pure congruence. *)
@@ -125,7 +124,7 @@ let rec fib_fd : (n : int{ _ >= 0 }) -> (int * int){ _ = (fib n, fib (n + 1)) } 
     if n <= 0
     then (0, 1)
     else begin
-      let k = half n in
+      let k : int{ n = 2 * _ || n = 2 * _ + 1 } = n / 2 in
       let q = fib_fd k in
       match q with
       | (a, b) ->

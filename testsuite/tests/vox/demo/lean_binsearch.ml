@@ -24,10 +24,11 @@
    [get] below are the only assumed bridge to the real [Iarray] --
    unchecked by necessity, since a runtime check cannot evaluate an
    uninterpreted function.  Everything else is really proved: the
-   midpoint arithmetic (via the RUNTIME CHECKED flooring of [asr]),
-   the in-bounds obligations, the invariant, and the flip-point
-   postcondition r = l + 1.  Sortedness is never needed: on an
-   unsorted array the result is still a point where p flips.
+   midpoint arithmetic (reflected T-division -- the solver reasons
+   about the halving directly), the in-bounds obligations, the
+   invariant, and the flip-point postcondition r = l + 1.
+   Sortedness is never needed: on an unsorted array the result is
+   still a point where p flips.
 
    Preconditions and the loop invariant ride on the PARAMETERS
    (contracts): the body assumes them, each call site discharges them
@@ -41,20 +42,11 @@ let get : (a : int iarray) -> (i : int{ 0 <= _ && _ < len a })
           -> int{ _ = elem a i } =
   fun a i -> assume_unchecked_ (Iarray.get a i)
 
-(* Floor halving: [asr] is outside the reflected fragment, so its
-   specification is assumed -- and RUNTIME CHECKED. *)
-let half : (s : int) -> int{ s = 2 * _ || s = 2 * _ + 1 } =
-  fun s -> assume_ (s asr 1)
-
-type ans =
-  { lo : int
-  ; hi : int
-  }
-
 (* The search: p(i) is elem a i >= x, extended by p(-1) = false and
    p(len a) = true.  The parameter contracts carry the invariant; the
-   result is the adjacent flip pair, inside the input bracket -- each
-   recursive call is a bare [search a x l m] / [search a x m r], its
+   result is the adjacent flip PAIR (a native tuple), inside the
+   input bracket -- each recursive call is a bare [search a x l m] /
+   [search a x m r], its
    halved invariant discharged from the path facts.  Each call is
    also the bare TAIL: its postcondition speaks of the SMALLER
    bracket, and the re-proof at the enclosing instantiation happens
@@ -66,10 +58,10 @@ let rec search
     -> (r : int{ l < _ && _ <= len a
                  && (0 <= l -> elem a l < x)
                  && (_ < len a -> elem a _ >= x) })
-    -> ans{ _.hi = _.lo + 1
-            && l <= _.lo && _.hi <= r
-            && (0 <= _.lo -> elem a _.lo < x)
-            && (_.hi < len a -> elem a _.hi >= x) }
+    -> (int * int){ snd _ = fst _ + 1
+            && l <= fst _ && snd _ <= r
+            && (0 <= fst _ -> elem a (fst _) < x)
+            && (snd _ < len a -> elem a (snd _) >= x) }
   =
   fun a x l r ->
     if r - l > 1
@@ -78,15 +70,14 @@ let rec search
          caveat: the logic's ints are unbounded, so l + r is proved
          ideal, not wrapping.  Harmless here -- both are bounded by a
          real array's length -- but outside the model. *)
-      let s = l + r in
-      let m = half s in
+      let m = (l + r) / 2 in
       (* l < m < r, hence 0 <= m < len a: the probe is in bounds. *)
       let v = get a m in
       if v >= x
       then search a x l m
       else search a x m r
     end
-    else { lo = l; hi = r }
+    else (l, r)
 
 (* The note's Q2 -- on a sorted array, the first index whose element
    is >= x, or len a if there is none.  What is proved is the
@@ -100,7 +91,7 @@ let lower_bound
   fun a x ->
     let n = length a in
     let q = search a x (-1) n in
-    let { lo = _; hi } = q in
+    let (_, hi) = q in
     hi
 
 (* Client side: the note's example array.  The application carries no
