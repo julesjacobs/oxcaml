@@ -145,8 +145,9 @@ Line 1, characters 4-7:
 Error: vox: the type of use carries a refinement mentioning a, which may not appear in a module-level type; annotate with a dependent arrow ((a : ...) -> ...) or a self-contained refinement
 |}]
 
-(* A dependent parameter cannot be commuted past: it would be omitted,
-   and an omitted argument has no name to substitute. *)
+(* A dependent parameter commuted past is DEFERRED, not omitted: the
+   binder stays unopened and the partial application's type rebinds it
+   (see commute.ml for the full walkthrough). *)
 let h : (x:int) -> l:int -> {v:int | v = x} = fun x ~l:_ -> assume_ x
 [%%expect{|
 val h : (x : int) -> l:int -> int{ _ = x } = <fun>
@@ -154,10 +155,7 @@ val h : (x : int) -> l:int -> int{ _ = x } = <fun>
 
 let part (n : int) = h ~l:n
 [%%expect{|
-Line 1, characters 21-22:
-1 | let part (n : int) = h ~l:n
-                         ^
-Error: vox: a dependent parameter cannot be omitted
+val part : int -> (x : int) -> int{ _ = x } = <fun>
 |}]
 
 (* Cross-activation closures are rejected by instantiation: the
@@ -367,4 +365,18 @@ Line 3, characters 26-27:
 3 |   let refine_ a = dep_imm m in
                               ^
 Error: vox: the argument for a dependent parameter must be an immutable variable (let-bind it first)
+|}]
+
+(* A reflected [match] on bool is rejected up front (bool passes the
+   simple-variant test but is a proposition on the solver side); the
+   fix -- [if] -- is spelled out. *)
+let rec total_ bmatch (b : bool) =
+  match b with
+  | true -> 1
+  | false -> 0
+[%%expect{|
+Line 2, characters 8-9:
+2 |   match b with
+            ^
+Error: vox: a reflected function cannot [match] on bool (the solver models bool as a proposition); use [if] instead
 |}]

@@ -3988,11 +3988,19 @@ let univar_pairs = ref []
 
 (* vox: while two arrows' codomains are compared, their dependent
    binders (if both present) are paired for predicate alpha-comparison
-   (see Refinement.with_binder_pair); the analogue of [univar_pairs]. *)
+   (see Refinement.with_binder_pair); the analogue of [univar_pairs].
+   Callers guard the ubiquitous no-binder case with
+   [vox_arrow_has_binder] so ordinary arrows do not pay a closure
+   allocation per comparison. *)
 let vox_with_binder_pair b1 b2 f =
   match b1, b2 with
   | Some id1, Some id2 -> Refinement.with_binder_pair id1 id2 f
   | _ -> f ()
+
+let vox_arrow_has_binder b1 b2 =
+  match b1, b2 with
+  | None, None -> false
+  | Some _, _ | _, Some _ -> true
 
 let with_univar_pairs pairs f =
   let old = !univar_pairs in
@@ -4388,8 +4396,11 @@ let rec mcomp type_pairs env t1 t2 =
         | (Tarrow ((l1,_,_,b1), t1, u1, _), Tarrow ((l2,_,_,b2), t2, u2, _), _, _)
           when compatible_labels ~in_pattern_mode:true l1 l2 ->
             mcomp type_pairs env t1 t2;
-            vox_with_binder_pair b1 b2
-              (fun () -> mcomp type_pairs env u1 u2);
+            if vox_arrow_has_binder b1 b2 then
+              vox_with_binder_pair b1 b2
+                (fun () -> mcomp type_pairs env u1 u2)
+            else
+              mcomp type_pairs env u1 u2;
         | (Ttuple tl1, Ttuple tl2, _, _) ->
             mcomp_labeled_list type_pairs env tl1 tl2
         (*
@@ -6407,8 +6418,11 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
              Tarrow ((l2,a2,r2,b2), t2, u2, _)) ->
               eq_labels Moregen ~in_pattern_mode:false l1 l2;
               moregen inst_nongen (neg_variance variance) type_pairs env t1 t2;
-              vox_with_binder_pair b1 b2 (fun () ->
-                moregen inst_nongen variance type_pairs env u1 u2);
+              if vox_arrow_has_binder b1 b2 then
+                vox_with_binder_pair b1 b2 (fun () ->
+                  moregen inst_nongen variance type_pairs env u1 u2)
+              else
+                moregen inst_nongen variance type_pairs env u1 u2;
               (* [t2] and [u2] is the user-written interface, which we deem as
                  more "principal" and used for mode crossing. See
                  [typing-modes/crossing.ml]. *)
@@ -6936,8 +6950,11 @@ let rec eqtype rename type_pairs subst env ~do_jkind_check t1 t2 =
              Tarrow ((l2,a2,r2,b2), t2, u2, _)) ->
               eq_labels Equality ~in_pattern_mode:false l1 l2;
               eqtype rename type_pairs subst env t1 t2 ~do_jkind_check:true;
-              vox_with_binder_pair b1 b2 (fun () ->
-                eqtype rename type_pairs subst env u1 u2 ~do_jkind_check:true);
+              if vox_arrow_has_binder b1 b2 then
+                vox_with_binder_pair b1 b2 (fun () ->
+                  eqtype rename type_pairs subst env u1 u2 ~do_jkind_check:true)
+              else
+                eqtype rename type_pairs subst env u1 u2 ~do_jkind_check:true;
               eqtype_alloc_mode a1 a2;
               eqtype_alloc_mode r1 r2
           | (Ttuple labeled_tl1, Ttuple labeled_tl2) ->
@@ -7832,12 +7849,19 @@ let rec subtype_rec env trace t1 t2 cstrs =
         (* vox: dependent codomains compare under the binder pairing
            (deferred constraints solved outside this scope still
            compare unpaired, which can only under-accept). *)
-        vox_with_binder_pair vb1 vb2 (fun () ->
+        if vox_arrow_has_binder vb1 vb2 then
+          vox_with_binder_pair vb1 vb2 (fun () ->
+            subtype_rec
+              env
+              (Subtype.Diff {got = u1; expected = u2} :: trace)
+              u1 u2
+              cstrs)
+        else
           subtype_rec
             env
             (Subtype.Diff {got = u1; expected = u2} :: trace)
             u1 u2
-            cstrs)
+            cstrs
     | (Ttuple tl1, Ttuple tl2) ->
         subtype_labeled_list env trace tl1 tl2 cstrs
     | (Tunboxed_tuple tl1, Tunboxed_tuple tl2) ->

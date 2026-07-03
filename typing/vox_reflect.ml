@@ -442,6 +442,16 @@ let rec translate_body (e : expression) : def_body =
         Location.raise_errorf ~loc:scrut.exp_loc
           "vox: a reflected [match] must scrutinize a variable"
     in
+    (* [bool] passes the simple-variant test, but its solver-side sort
+       is a proposition, not a datatype: [match (b : Prop) with | True]
+       is a Lean type error.  Reject it here with the fix spelled out
+       rather than blaming the definition on an opaque solver error. *)
+    (match Types.get_desc (safe_expand_head scrut.exp_env scrut.exp_type) with
+     | Tconstr (p, [], _) when Path.same p Predef.path_bool ->
+       Location.raise_errorf ~loc:scrut.exp_loc
+         "vox: a reflected function cannot [match] on bool (the solver \
+          models bool as a proposition); use [if] instead"
+     | _ -> ());
     (* Ordinary clauses arrive as COMPUTATION cases (value patterns
        wrapped in [Tpat_value]); [val_cases] holds effect handlers. *)
     if val_cases <> [] || partial <> Total

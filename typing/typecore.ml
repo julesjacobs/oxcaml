@@ -4703,7 +4703,10 @@ type untyped_omitted_param =
     ty_arg : type_expr;
     mode_arg : Alloc.lr;
     level: int;
-    sort_arg : Jkind.sort }
+    sort_arg : Jkind.sort;
+    (* vox: a deferred dependent parameter keeps its binder unopened;
+       the partial application's rebuilt arrow rebinds it. *)
+    vox_binder : Ident.t option }
 
 let is_partial_apply args =
   List.exists
@@ -4837,8 +4840,13 @@ let remaining_function_type_for_error ty_ret mode_ret rev_args =
              (ty_ret, mode_ret, closed_args)
          | Arg (Eliminated_optional_arg
                   { mode_fun; ty_arg; mode_arg; level; _ })
-         | Omitted { mode_fun; ty_arg; mode_arg; level } ->
-             let arrow_desc = lbl, mode_arg, mode_ret, None in
+         | Omitted { mode_fun; ty_arg; mode_arg; level; _ } ->
+             let vox_binder =
+               match arg with
+               | Omitted { vox_binder; _ } -> vox_binder
+               | Arg _ -> None
+             in
+             let arrow_desc = lbl, mode_arg, mode_ret, vox_binder in
              let ty_ret =
                newty2 ~level
                  (Tarrow (arrow_desc, ty_arg, ty_ret, commu_ok))
@@ -4964,8 +4972,12 @@ let collect_unknown_apply_args env funct ty_fun0 mode_fun rev_args sargs
    total_ functions ([Vox_reflect.translate_surface]) -- and the binder
    is substituted by that term throughout the remaining type, so later
    parameter types and the result are instantiated before any argument
-   expression is typechecked.  A missing argument for a dependent
-   parameter cannot be named and is an error. *)
+   expression is typechecked.  A dependent parameter DEFERRED by label
+   commutation is not opened at all -- the caller keeps the binder and
+   the partial application's rebuilt arrow rebinds it -- so
+   [sarg_opt = None] here means the parameter was ELIMINATED (an
+   omittable argument with no future application), which cannot be
+   named and is an error. *)
 let vox_open_dependent_arrow env binder ~sarg_opt ~app_loc ty_ret ty_ret0 =
   match binder with
   | None -> ty_ret, ty_ret0
@@ -5162,16 +5174,27 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
                      over it. *)
                   may_warn funct.exp_loc
                     (Warnings.Non_principal_labels "commuted an argument");
-                  Omitted { mode_fun; ty_arg; mode_arg; level = lv; sort_arg }
+                  Omitted { mode_fun; ty_arg; mode_arg; level = lv; sort_arg;
+                            vox_binder }
                 end
             in
             let ty_ret, ty_ret0 =
-              vox_open_dependent_arrow env vox_binder
-                ~sarg_opt:
-                  (match arg_opt with
-                   | Some (sarg, _, ~commuted:_) -> Some sarg
-                   | None -> None)
-                ~app_loc:funct.exp_loc ty_ret ty_ret0
+              match arg with
+              | Omitted _ ->
+                (* vox: a dependent parameter deferred by label
+                   commutation is not opened; the partial
+                   application's type rebinds the binder
+                   ([type_omitted_parameters_and_build_result_type]),
+                   so its occurrences in the remaining type stay
+                   bound. *)
+                ty_ret, ty_ret0
+              | _ ->
+                vox_open_dependent_arrow env vox_binder
+                  ~sarg_opt:
+                    (match arg_opt with
+                     | Some (sarg, _, ~commuted:_) -> Some sarg
+                     | None -> None)
+                  ~app_loc:funct.exp_loc ty_ret ty_ret0
             in
             loop ty_ret ty_ret0 mode_ret ((l, arg) :: rev_args) remaining_sargs
           end
@@ -5189,8 +5212,9 @@ let type_omitted_parameters_and_build_result_type expected_mode env loc ty_ret
              let open_args = (exp, marg) :: open_args in
              let args = (lbl, Arg (exp, sort), sch) :: args in
              (ty_ret, mode_ret, open_args, closed_args, args)
-         | Omitted { mode_fun; ty_arg; mode_arg; level; sort_arg } ->
-             let arrow_desc = (lbl, mode_arg, mode_ret, None) in
+         | Omitted { mode_fun; ty_arg; mode_arg; level; sort_arg;
+                     vox_binder } ->
+             let arrow_desc = (lbl, mode_arg, mode_ret, vox_binder) in
              let sort_ret =
                match type_sort ~why:Function_result ~fixed:false env ty_ret with
                | Ok sort -> sort
