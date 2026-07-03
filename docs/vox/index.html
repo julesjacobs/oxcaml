@@ -78,6 +78,7 @@ th{background:var(--panel);color:var(--fg)} td{color:var(--dim)} td:first-child{
   <a href="#fib">fib, one file</a>
   <a href="#wrong">failures</a>
   <a href="#tour">features</a>
+  <a href="#bst">a module</a>
   <a href="#trust">trust model</a>
   <a href="#run">running it</a>
 </div></nav>
@@ -136,15 +137,15 @@ solver-side definitions and no proof text:</p>
 
 (* The textbook inductive proof, against the REFLECTED len: no prelude
    measure.  Each recursive call re-instantiates the dependent
-   signature (the induction hypothesis); grind unfolds [len] via the
-   definitional equations. *)
+   signature -- the induction hypothesis, unpacked by the [let] that
+   names it; grind unfolds [len] via the definitional equations. *)
 let rec append : (a : ilist) -&gt; (b : ilist) -&gt; ilist{ len _ = len a + len b } =
   fun a b -&gt;
     match a with
-    | Nil -&gt; refine_ b
+    | Nil -&gt; b
     | Cons (h, t) -&gt;
-      let refine_ r = append t b in
-      refine_ (Cons (h, r))</code></pre>
+      let r = append t b in
+      Cons (h, r)</code></pre>
 <p>Each recursive call re-instantiates the declared signature at its actual
 arguments, which is the induction hypothesis.  Non-structural recursion
 carries a metric — <code>[@@vox.decreases n]</code> — from which the
@@ -246,24 +247,25 @@ theorem fib_add (m n : Int) (hm : 0 &lt;= m) (hn : 0 &lt;= n) :
 
 (* A reflected call names itself: the program's fib meets the spec
    definitionally (the goal is [fib n = fib n]). *)
-let fib_slow : (n : int) -&gt; int{ _ = fib n } = fun n -&gt; refine_ (fib n)
+let fib_slow : (n : int) -&gt; int{ _ = fib n } = fun n -&gt; fib n
 
 (* Tail-recursive accumulator loop, O(n) iterations: the parameters
    carry the invariant (a, b) = (fib i, fib (i+1)) with i &gt;= 0 as
    CONTRACTS -- the body assumes them, and each call site discharges
    them at its own (bare) arguments, the shifted accumulators and the
    literal seeds included.  (For n &lt; i the loop diverges; partial
-   correctness is unbothered.) *)
+   correctness is unbothered.)  The recursive call is the bare tail:
+   its result refinement [_ = fib n] is the enclosing one, so it
+   passes through with no obligation at all. *)
 let rec fib_loop
   : (n : int) -&gt; (i : int) -&gt; (a : int{ _ = fib i &amp;&amp; i &gt;= 0 })
     -&gt; (b : int{ _ = fib (i + 1) }) -&gt; int{ _ = fib n }
   =
   fun n i a b -&gt;
     if i = n
-    then refine_ a
+    then a
     else begin
-      let refine_ r = fib_loop n (i + 1) b (a + b) in
-      refine_ r
+      fib_loop n (i + 1) b (a + b)
     end
 
 let fib_iter : (n : int) -&gt; int{ _ = fib n } =
@@ -280,26 +282,27 @@ let fib_iter : (n : int) -&gt; int{ _ = fib n } =
 let rec fib_fd : (n : int{ _ &gt;= 0 }) -&gt; (int * int){ _ = (fib n, fib (n + 1)) } =
   fun n -&gt;
     if n &lt;= 0
-    then refine_ (0, 1)
+    then (0, 1)
     else begin
-      let refine_ k = half n in
-      let refine_ q = fib_fd k in
+      let k = half n in
+      let q = fib_fd k in
       match q with
       | (a, b) -&gt;
-        let refine_ x = (refine_ (a * (2 * b - a)) : int{ _ = fib (2 * k) }) in
-        let refine_ y = (refine_ (a * a + b * b) : int{ _ = fib (2 * k + 1) }) in
+        let x : int{ _ = fib (2 * k) } = a * (2 * b - a) in
+        let y : int{ _ = fib (2 * k + 1) } = a * a + b * b in
         if n = 2 * k
-        then refine_ (x, y)
-        else refine_ (y, x + y)
+        then (x, y)
+        else (y, x + y)
     end
 
 (* Client side: fib 10, by fast doubling; the precondition [10 &gt;= 0]
    is discharged at the literal argument. *)
 let fib10 : int{ _ = fib 10 } =
-  let refine_ r = fib_fd 10 in
+  let r = fib_fd 10 in
   match r with
-  | (u, _) -&gt; refine_ u</code></pre></div>
-<div class="tabpane"><pre style="max-height:34rem"><code class="lean" id="genlean">structure VoxT2.{u1, u2} (t1 : Sort u1) (t2 : Sort u2) : Sort (max u1 (max u2 (1))) where (p1 : t1) (p2 : t2)
+  | (u, _) -&gt; u</code></pre></div>
+<div class="tabpane"><pre style="max-height:34rem"><code class="lean" id="genlean">opaque VoxU : Type
+structure VoxT2.{u1, u2} (t1 : Sort u1) (t2 : Sort u2) : Sort (max u1 (max u2 (1))) where (p1 : t1) (p2 : t2)
 @[grind] def fib (v_n_285 : Int) : Int := (if (v_n_285 ≤ (0 : Int)) then (0 : Int) else (if (v_n_285 = (1 : Int)) then (1 : Int) else ((fib (v_n_285 - (1 : Int))) + (fib (v_n_285 - (2 : Int))))))
 termination_by (v_n_285).toNat
 decreasing_by all_goals omega
@@ -353,17 +356,16 @@ theorem vc_0 (v_n_290 : Int) : ((fib v_n_290) = (fib v_n_290)) := by grind
 theorem vc_1 (v_n_300 : Int) (v_a_302 : Int) (v_i_301 : Int) (v_b_303 : Int) (h_0 : (v_i_301 = v_n_300)) (h_1 : (v_b_303 = (fib (v_i_301 + (1 : Int))))) (h_2 : ((v_a_302 = (fib v_i_301)) ∧ (v_i_301 ≥ (0 : Int)))) : (v_a_302 = (fib v_n_300)) := by grind
 theorem vc_2 (v_i_301 : Int) (v_b_303 : Int) (v_n_300 : Int) (v_a_302 : Int) (h_0 : (¬ (v_i_301 = v_n_300))) (h_1 : (v_b_303 = (fib (v_i_301 + (1 : Int))))) (h_2 : ((v_a_302 = (fib v_i_301)) ∧ (v_i_301 ≥ (0 : Int)))) : ((v_b_303 = (fib (v_i_301 + (1 : Int)))) ∧ ((v_i_301 + (1 : Int)) ≥ (0 : Int))) := by grind
 theorem vc_3 (v_i_301 : Int) (v_b_303 : Int) (v_a_302 : Int) (v_n_300 : Int) (h_0 : (¬ (v_i_301 = v_n_300))) (h_1 : (v_b_303 = (fib (v_i_301 + (1 : Int))))) (h_2 : ((v_a_302 = (fib v_i_301)) ∧ (v_i_301 ≥ (0 : Int)))) : ((v_a_302 + v_b_303) = (fib ((v_i_301 + (1 : Int)) + (1 : Int)))) := by grind
-theorem vc_4 (v_n_300 : Int) (v_r_304 : Int) (v_i_301 : Int) (v_b_303 : Int) (v_a_302 : Int) (h_0 : (v_r_304 = (fib v_n_300))) (h_1 : (¬ (v_i_301 = v_n_300))) (h_2 : (v_b_303 = (fib (v_i_301 + (1 : Int))))) (h_3 : ((v_a_302 = (fib v_i_301)) ∧ (v_i_301 ≥ (0 : Int)))) : (v_r_304 = (fib v_n_300)) := by grind
-theorem vc_5 : (((0 : Int) = (fib (0 : Int))) ∧ ((0 : Int) ≥ (0 : Int))) := by grind
-theorem vc_6 : ((1 : Int) = (fib ((0 : Int) + (1 : Int)))) := by grind
-theorem vc_7 (v_n_313 : Int) (h_0 : (v_n_313 ≤ (0 : Int))) (h_1 : (v_n_313 ≥ (0 : Int))) : ((VoxT2.mk (0 : Int) (1 : Int)) = (VoxT2.mk (fib v_n_313) (fib (v_n_313 + (1 : Int))))) := by grind
-theorem vc_8 (v_k_314 : Int) (v_n_313 : Int) (h_0 : ((v_n_313 = ((2 : Int) * v_k_314)) ∨ (v_n_313 = (((2 : Int) * v_k_314) + (1 : Int))))) (h_1 : (¬ (v_n_313 ≤ (0 : Int)))) (h_2 : (v_n_313 ≥ (0 : Int))) : (v_k_314 ≥ (0 : Int)) := by grind
-theorem vc_9 (v_k_314 : Int) (v_a_316 : Int) (v_b_317 : Int) (v_q_315 : (VoxT2 Int Int)) (v_n_313 : Int) (h_0 : (v_a_316 = (VoxT2.p1 v_q_315))) (h_1 : (v_b_317 = (VoxT2.p2 v_q_315))) (h_2 : (v_q_315 = (VoxT2.mk (fib v_k_314) (fib (v_k_314 + (1 : Int)))))) (h_3 : ((v_n_313 = ((2 : Int) * v_k_314)) ∨ (v_n_313 = (((2 : Int) * v_k_314) + (1 : Int))))) (h_4 : (¬ (v_n_313 ≤ (0 : Int)))) (h_5 : (v_n_313 ≥ (0 : Int))) : ((v_a_316 * (((2 : Int) * v_b_317) - v_a_316)) = (fib ((2 : Int) * v_k_314))) := by grind
-theorem vc_10 (v_k_314 : Int) (v_b_317 : Int) (v_a_316 : Int) (v_x_318 : Int) (v_q_315 : (VoxT2 Int Int)) (v_n_313 : Int) (h_0 : (v_x_318 = (fib ((2 : Int) * v_k_314)))) (h_1 : (v_a_316 = (VoxT2.p1 v_q_315))) (h_2 : (v_b_317 = (VoxT2.p2 v_q_315))) (h_3 : (v_q_315 = (VoxT2.mk (fib v_k_314) (fib (v_k_314 + (1 : Int)))))) (h_4 : ((v_n_313 = ((2 : Int) * v_k_314)) ∨ (v_n_313 = (((2 : Int) * v_k_314) + (1 : Int))))) (h_5 : (¬ (v_n_313 ≤ (0 : Int)))) (h_6 : (v_n_313 ≥ (0 : Int))) : (((v_a_316 * v_a_316) + (v_b_317 * v_b_317)) = (fib (((2 : Int) * v_k_314) + (1 : Int)))) := by grind
-theorem vc_11 (v_n_313 : Int) (v_y_319 : Int) (v_x_318 : Int) (v_k_314 : Int) (v_q_315 : (VoxT2 Int Int)) (v_a_316 : Int) (v_b_317 : Int) (h_0 : (v_n_313 = ((2 : Int) * v_k_314))) (h_1 : (v_y_319 = (fib (((2 : Int) * v_k_314) + (1 : Int))))) (h_2 : (v_x_318 = (fib ((2 : Int) * v_k_314)))) (h_3 : (v_a_316 = (VoxT2.p1 v_q_315))) (h_4 : (v_b_317 = (VoxT2.p2 v_q_315))) (h_5 : (v_q_315 = (VoxT2.mk (fib v_k_314) (fib (v_k_314 + (1 : Int)))))) (h_6 : ((v_n_313 = ((2 : Int) * v_k_314)) ∨ (v_n_313 = (((2 : Int) * v_k_314) + (1 : Int))))) (h_7 : (¬ (v_n_313 ≤ (0 : Int)))) (h_8 : (v_n_313 ≥ (0 : Int))) : ((VoxT2.mk v_x_318 v_y_319) = (VoxT2.mk (fib v_n_313) (fib (v_n_313 + (1 : Int))))) := by grind
-theorem vc_12 (v_n_313 : Int) (v_y_319 : Int) (v_x_318 : Int) (v_k_314 : Int) (v_q_315 : (VoxT2 Int Int)) (v_a_316 : Int) (v_b_317 : Int) (h_0 : (¬ (v_n_313 = ((2 : Int) * v_k_314)))) (h_1 : (v_y_319 = (fib (((2 : Int) * v_k_314) + (1 : Int))))) (h_2 : (v_x_318 = (fib ((2 : Int) * v_k_314)))) (h_3 : (v_a_316 = (VoxT2.p1 v_q_315))) (h_4 : (v_b_317 = (VoxT2.p2 v_q_315))) (h_5 : (v_q_315 = (VoxT2.mk (fib v_k_314) (fib (v_k_314 + (1 : Int)))))) (h_6 : ((v_n_313 = ((2 : Int) * v_k_314)) ∨ (v_n_313 = (((2 : Int) * v_k_314) + (1 : Int))))) (h_7 : (¬ (v_n_313 ≤ (0 : Int)))) (h_8 : (v_n_313 ≥ (0 : Int))) : ((VoxT2.mk v_y_319 (v_x_318 + v_y_319)) = (VoxT2.mk (fib v_n_313) (fib (v_n_313 + (1 : Int))))) := by grind
-theorem vc_13 : ((10 : Int) ≥ (0 : Int)) := by grind
-theorem vc_14 (v_u_322 : Int) (v_r_321 : (VoxT2 Int Int)) (h_0 : (v_u_322 = (VoxT2.p1 v_r_321))) (h_1 : (v_r_321 = (VoxT2.mk (fib (10 : Int)) (fib ((10 : Int) + (1 : Int)))))) : (v_u_322 = (fib (10 : Int))) := by grind</code></pre>
+theorem vc_4 : (((0 : Int) = (fib (0 : Int))) ∧ ((0 : Int) ≥ (0 : Int))) := by grind
+theorem vc_5 : ((1 : Int) = (fib ((0 : Int) + (1 : Int)))) := by grind
+theorem vc_6 (v_n_312 : Int) (h_0 : (v_n_312 ≤ (0 : Int))) (h_1 : (v_n_312 ≥ (0 : Int))) : ((VoxT2.mk (0 : Int) (1 : Int)) = (VoxT2.mk (fib v_n_312) (fib (v_n_312 + (1 : Int))))) := by grind
+theorem vc_7 (v_k_313 : Int) (v_n_312 : Int) (h_0 : ((v_n_312 = ((2 : Int) * v_k_313)) ∨ (v_n_312 = (((2 : Int) * v_k_313) + (1 : Int))))) (h_1 : (¬ (v_n_312 ≤ (0 : Int)))) (h_2 : (v_n_312 ≥ (0 : Int))) : (v_k_313 ≥ (0 : Int)) := by grind
+theorem vc_8 (v_k_313 : Int) (v_a_315 : Int) (v_b_316 : Int) (v_q_314 : (VoxT2 Int Int)) (v_n_312 : Int) (h_0 : (v_a_315 = (VoxT2.p1 v_q_314))) (h_1 : (v_b_316 = (VoxT2.p2 v_q_314))) (h_2 : (v_q_314 = (VoxT2.mk (fib v_k_313) (fib (v_k_313 + (1 : Int)))))) (h_3 : ((v_n_312 = ((2 : Int) * v_k_313)) ∨ (v_n_312 = (((2 : Int) * v_k_313) + (1 : Int))))) (h_4 : (¬ (v_n_312 ≤ (0 : Int)))) (h_5 : (v_n_312 ≥ (0 : Int))) : ((v_a_315 * (((2 : Int) * v_b_316) - v_a_315)) = (fib ((2 : Int) * v_k_313))) := by grind
+theorem vc_9 (v_k_313 : Int) (v_b_316 : Int) (v_a_315 : Int) (v_x_317 : Int) (v_q_314 : (VoxT2 Int Int)) (v_n_312 : Int) (h_0 : (v_x_317 = (v_a_315 * (((2 : Int) * v_b_316) - v_a_315)))) (h_1 : (v_x_317 = (fib ((2 : Int) * v_k_313)))) (h_2 : (v_a_315 = (VoxT2.p1 v_q_314))) (h_3 : (v_b_316 = (VoxT2.p2 v_q_314))) (h_4 : (v_q_314 = (VoxT2.mk (fib v_k_313) (fib (v_k_313 + (1 : Int)))))) (h_5 : ((v_n_312 = ((2 : Int) * v_k_313)) ∨ (v_n_312 = (((2 : Int) * v_k_313) + (1 : Int))))) (h_6 : (¬ (v_n_312 ≤ (0 : Int)))) (h_7 : (v_n_312 ≥ (0 : Int))) : (((v_a_315 * v_a_315) + (v_b_316 * v_b_316)) = (fib (((2 : Int) * v_k_313) + (1 : Int)))) := by grind
+theorem vc_10 (v_n_312 : Int) (v_y_318 : Int) (v_x_317 : Int) (v_k_313 : Int) (v_b_316 : Int) (v_a_315 : Int) (v_q_314 : (VoxT2 Int Int)) (h_0 : (v_n_312 = ((2 : Int) * v_k_313))) (h_1 : (v_y_318 = ((v_a_315 * v_a_315) + (v_b_316 * v_b_316)))) (h_2 : (v_y_318 = (fib (((2 : Int) * v_k_313) + (1 : Int))))) (h_3 : (v_x_317 = (v_a_315 * (((2 : Int) * v_b_316) - v_a_315)))) (h_4 : (v_x_317 = (fib ((2 : Int) * v_k_313)))) (h_5 : (v_a_315 = (VoxT2.p1 v_q_314))) (h_6 : (v_b_316 = (VoxT2.p2 v_q_314))) (h_7 : (v_q_314 = (VoxT2.mk (fib v_k_313) (fib (v_k_313 + (1 : Int)))))) (h_8 : ((v_n_312 = ((2 : Int) * v_k_313)) ∨ (v_n_312 = (((2 : Int) * v_k_313) + (1 : Int))))) (h_9 : (¬ (v_n_312 ≤ (0 : Int)))) (h_10 : (v_n_312 ≥ (0 : Int))) : ((VoxT2.mk v_x_317 v_y_318) = (VoxT2.mk (fib v_n_312) (fib (v_n_312 + (1 : Int))))) := by grind
+theorem vc_11 (v_n_312 : Int) (v_y_318 : Int) (v_x_317 : Int) (v_k_313 : Int) (v_b_316 : Int) (v_a_315 : Int) (v_q_314 : (VoxT2 Int Int)) (h_0 : (¬ (v_n_312 = ((2 : Int) * v_k_313)))) (h_1 : (v_y_318 = ((v_a_315 * v_a_315) + (v_b_316 * v_b_316)))) (h_2 : (v_y_318 = (fib (((2 : Int) * v_k_313) + (1 : Int))))) (h_3 : (v_x_317 = (v_a_315 * (((2 : Int) * v_b_316) - v_a_315)))) (h_4 : (v_x_317 = (fib ((2 : Int) * v_k_313)))) (h_5 : (v_a_315 = (VoxT2.p1 v_q_314))) (h_6 : (v_b_316 = (VoxT2.p2 v_q_314))) (h_7 : (v_q_314 = (VoxT2.mk (fib v_k_313) (fib (v_k_313 + (1 : Int)))))) (h_8 : ((v_n_312 = ((2 : Int) * v_k_313)) ∨ (v_n_312 = (((2 : Int) * v_k_313) + (1 : Int))))) (h_9 : (¬ (v_n_312 ≤ (0 : Int)))) (h_10 : (v_n_312 ≥ (0 : Int))) : ((VoxT2.mk v_y_318 (v_x_317 + v_y_318)) = (VoxT2.mk (fib v_n_312) (fib (v_n_312 + (1 : Int))))) := by grind
+theorem vc_12 : ((10 : Int) ≥ (0 : Int)) := by grind
+theorem vc_13 (v_u_321 : Int) (v_r_320 : (VoxT2 Int Int)) (h_0 : (v_u_321 = (VoxT2.p1 v_r_320))) (h_1 : (v_r_320 = (VoxT2.mk (fib (10 : Int)) (fib ((10 : Int) + (1 : Int)))))) : (v_u_321 = (fib (10 : Int))) := by grind</code></pre>
 <p style="color:var(--dim);font-size:.9rem">Regenerated and checked on every
 compile: the <code>pair</code> datatype, the reflected <code>fib</code> with
 its synthesized <code>termination_by</code>, the embedded lemma block
@@ -400,16 +402,16 @@ proved rather than assumed: its facts are contradictory, so
 <code>refine_ 0</code> discharges against <code>r = 3</code>.</p>
 <pre><code class="ml">let head (s : ilist{ _ = Cons (3, Nil) }) : {r:int | r = 3} =
   match s with
-  | Cons (h, _) -&gt; refine_ h
-  | Nil -&gt; refine_ 0</code></pre></div>
+  | Cons (h, _) -&gt; h
+  | Nil -&gt; 0</code></pre></div>
 
 <div class="card"><h3>Records and projections <span class="pill">demo/lean_records.ml</span></h3>
 <p>Immutable records become Lean structures.  Field projection appears in
 predicates; functional update preserves the untouched fields' facts.</p>
-<pre><code class="ml">let origin : point{ _.px = 0 &amp;&amp; _.py = 0 } = refine_ { px = 0; py = 0 }
+<pre><code class="ml">let origin : point{ _.px = 0 &amp;&amp; _.py = 0 } = { px = 0; py = 0 }
 
 let swap : (p : point) -&gt; point{ _.px = p.py &amp;&amp; _.py = p.px } =
-  fun p -&gt; refine_ { px = p.py; py = p.px }</code></pre></div>
+  fun p -&gt; { px = p.py; py = p.px }</code></pre></div>
 
 <div class="card"><h3>Contracts as loop invariants <span class="pill">demo/lean_fib.ml</span></h3>
 <p>Parameter refinements are preconditions, so a recursive function's
@@ -424,10 +426,9 @@ ordinary obligations, including at the literal seeds in
   =
   fun n i a b -&gt;
     if i = n
-    then refine_ a
+    then a
     else begin
-      let refine_ r = fib_loop n (i + 1) b (a + b) in
-      refine_ r
+      fib_loop n (i + 1) b (a + b)
     end
 
 let fib_iter : (n : int) -&gt; int{ _ = fib n } =
@@ -439,9 +440,9 @@ let fib_iter : (n : int) -&gt; int{ _ = fib n } =
 <code>.cmi</code> checksum forces re-verification when the definition
 changes.</p>
 <pre><code class="ml">let l2 : Reflect_lib.ilist{ Reflect_lib.len _ = 2 } =
-  refine_ (Reflect_lib.Cons (1, Reflect_lib.Cons (2, Reflect_lib.Nil)))
+  Reflect_lib.Cons (1, Reflect_lib.Cons (2, Reflect_lib.Nil))
 
-let f5 : int{ _ = Reflect_lib.fib 5 } = refine_ (Reflect_lib.fib 5)</code></pre></div>
+let f5 : int{ _ = Reflect_lib.fib 5 } = Reflect_lib.fib 5</code></pre></div>
 
 <div class="card"><h3>Lemmas next to the code <span class="pill">[%%vox.lean]</span></h3>
 <p>Hand-written Lean — lemma statements and their proofs — embeds in the
@@ -475,11 +476,11 @@ write.  Duplicated, stale, forged, and cross-cell tokens are compile-time
 errors.</p>
 <pre><code class="ml">let swap_sum : (a : int) -&gt; (b : int) -&gt; int{ _ = a + b } =
   fun a b -&gt;
-  let refine_ p = alloc a in
-  let refine_ q = alloc b in
+  let p = alloc a in
+  let q = alloc b in
   let { cell = c1; tok = t1 } = p in
   let { cell = c2; tok = t2 } = q in
-  let (r1p, t1a0) = read c1 a t1 in
+  let (r1, t1a) = read c1 a t1 in             (* r1 = a *)
     ...</code></pre></div>
 
 <div class="card"><h3>Reflected arithmetic <span class="pill">Vox_reflect</span></h3>
@@ -490,6 +491,178 @@ totalized soundly under partial correctness.  A branch condition contributes
 itself as a fact: writing <code>if n &lt;= 0</code> is enough.</p></div>
 
 </div>
+
+<h2 id="bst">A verified module behind an interface</h2>
+<p>The shape that scales.  <code>bst.mli</code> states the model —
+whole-tree membership, the ordering invariant, a model-level
+<code>insert</code> — and proves its theorems once, in the interface's
+embedded block; definitions and theorems travel in the <code>.cmi</code>.
+The implementation is checked against them arm by arm: the efficient
+one-path search is proved equal to membership over the <i>whole</i> tree
+(the ordering lemmas account for the subtrees the code never visits), and
+each <code>insert</code> arm is proved to build exactly the model's tree.
+Nothing is assumed, and no verification keyword appears in the code.</p>
+
+<div class="tabs" data-tabs>
+  <button class="on">bst.mli — the model is the interface</button>
+  <button>bst.ml — proved against it</button>
+  <button>a client</button>
+</div>
+<div class="tabpane on"><pre style="max-height:34rem"><code class="ml">type tree =
+  | Leaf
+  | Node of tree * int * tree
+
+[%%vox.lean {lean|
+@[grind] def mem : Int -&gt; Vox_Bst_tree -&gt; Prop
+  | _, .Leaf =&gt; False
+  | x, .Node l v r =&gt; x = v ∨ mem x l ∨ mem x r
+
+@[grind] def all_lt : Vox_Bst_tree -&gt; Int -&gt; Prop
+  | .Leaf, _ =&gt; True
+  | .Node l v r, b =&gt; v &lt; b ∧ all_lt l b ∧ all_lt r b
+
+@[grind] def all_gt : Vox_Bst_tree -&gt; Int -&gt; Prop
+  | .Leaf, _ =&gt; True
+  | .Node l v r, b =&gt; v &gt; b ∧ all_gt l b ∧ all_gt r b
+
+@[grind] def bst : Vox_Bst_tree -&gt; Prop
+  | .Leaf =&gt; True
+  | .Node l v r =&gt; all_lt l v ∧ all_gt r v ∧ bst l ∧ bst r
+
+@[grind] def insert : Int -&gt; Vox_Bst_tree -&gt; Vox_Bst_tree
+  | x, .Leaf =&gt; .Node .Leaf x .Leaf
+  | x, .Node l v r =&gt;
+      if x = v then .Node l v r
+      else if x &lt; v then .Node (insert x l) v r
+      else .Node l v (insert x r)
+
+-- The ordering invariant makes one-path search complete: an element
+-- bounded away from a subtree is not in it.
+theorem not_mem_lt (x b : Int) (t : Vox_Bst_tree)
+    (h : all_lt t b) (hx : b &lt;= x) : ¬ mem x t := by
+  induction t &lt;;&gt; grind
+grind_pattern not_mem_lt =&gt; mem x t, all_lt t b
+
+theorem not_mem_gt (x b : Int) (t : Vox_Bst_tree)
+    (h : all_gt t b) (hx : x &lt;= b) : ¬ mem x t := by
+  induction t &lt;;&gt; grind
+grind_pattern not_mem_gt =&gt; mem x t, all_gt t b
+
+theorem all_lt_insert (x b : Int) (t : Vox_Bst_tree)
+    (h : all_lt t b) (hx : x &lt; b) : all_lt (insert x t) b := by
+  induction t &lt;;&gt; grind
+grind_pattern all_lt_insert =&gt; all_lt (insert x t) b
+
+theorem all_gt_insert (x b : Int) (t : Vox_Bst_tree)
+    (h : all_gt t b) (hx : b &lt; x) : all_gt (insert x t) b := by
+  induction t &lt;;&gt; grind
+grind_pattern all_gt_insert =&gt; all_gt (insert x t) b
+
+theorem bst_insert (x : Int) (t : Vox_Bst_tree)
+    (h : bst t) : bst (insert x t) := by
+  induction t &lt;;&gt; grind
+grind_pattern bst_insert =&gt; bst (insert x t)
+
+theorem mem_insert (x y : Int) (t : Vox_Bst_tree) :
+    mem y (insert x t) ↔ (y = x ∨ mem y t) := by
+  induction t &lt;;&gt; grind
+grind_pattern mem_insert =&gt; mem y (insert x t)
+|lean}]
+
+val empty : tree{ _ = Leaf }
+
+(* Efficient one-path search, proved equal to the model membership
+   (which quantifies the WHOLE tree): the ordering lemmas bridge the
+   path the code takes to the subtrees it skips. *)
+val member : (x : int) -&gt; (t : tree{ bst _ }) -&gt; bool{ _ = mem x t }
+
+(* Insertion returns exactly the model's insert; the interface-level
+   facts [bst _] and [mem x _] follow from the exported theorems, as
+   does -- at any client use -- the full characterization
+   [mem y (insert x t) &lt;-&gt; y = x || mem y t]. *)
+val insert :
+  (x : int) -&gt; (t : tree{ bst _ }) -&gt; tree{ _ = insert x t &amp;&amp; bst _ &amp;&amp; mem x _ }</code></pre></div>
+<div class="tabpane"><pre style="max-height:34rem"><code class="ml">type tree =
+  | Leaf
+  | Node of tree * int * tree
+
+let empty : tree{ _ = Leaf } = Leaf
+
+let rec member : (x : int) -&gt; (t : tree{ bst _ }) -&gt; bool{ _ = mem x t } =
+  fun x t -&gt;
+    match t with
+    | Leaf -&gt; false
+    | Node (l, v, r) -&gt;
+      if x = v then true
+      else if x &lt; v then begin
+        let b = member x l in
+        b
+      end
+      else begin
+        let b = member x r in
+        b
+      end
+
+let rec insert
+  : (x : int) -&gt; (t : tree{ bst _ }) -&gt; tree{ _ = insert x t &amp;&amp; bst _ &amp;&amp; mem x _ }
+  =
+  fun x t -&gt;
+    match t with
+    | Leaf -&gt; Node (Leaf, x, Leaf)
+    | Node (l, v, r) -&gt;
+      if x = v then t
+      else if x &lt; v then begin
+        let l' = insert x l in
+        Node (l', v, r)
+      end
+      else begin
+        let r' = insert x r in
+        Node (l, v, r')
+      end</code></pre></div>
+<div class="tabpane"><pre><code class="ml">let demo : bool{ _ } * bool{ not _ } =
+  let e = empty in
+  let t1 = insert 2 e in
+  let t2 = insert 1 t1 in
+  let t3 = insert 3 t2 in
+  let hit = member 2 t3 in
+  let miss = member 5 t3 in
+  (hit, miss)</code></pre>
+<p style="color:var(--dim);font-size:.9rem">The miss is as proved as the
+hits: <code>mem_insert</code> characterizes each insertion completely, down
+to <code>mem 5 empty = False</code>.</p></div>
+
+<p>The classic search-tree bugs are compile errors with witnesses.
+Descending the wrong side misses exactly the element the counterexample
+names — below, <code>x&nbsp;=&nbsp;-1</code> under a root of
+<code>0</code>:</p>
+<pre><code class="ml">let rec member_wrong : (x : int) -&gt; (t : tree{ bst _ }) -&gt; bool{ _ = mem x t } =
+  fun x t -&gt;
+    match t with
+    | Leaf -&gt; false
+    | Node (l, v, r) -&gt;
+      if x = v then true
+      else if x &lt; v then begin
+        let b = member_wrong x r in
+        b
+      end
+      else begin
+        let b = member_wrong x l in
+        b
+      end</code></pre>
+<pre class="out"><code>Error: vox: verification failed (lean).
+       Goal: b = (mem x t)
+Hypotheses:
+  b = (mem x r)
+  x &lt; v
+  not (x = v)
+  t = (Node (l, v, r))
+  not (t is Leaf)
+  bst t
+Possible counterexample:
+  x = -1
+  v = 0
+  w_1 = 0
+(lean: error: `grind` failed)</code></pre>
 
 <h2 id="trust">Trust model</h2>
 <table>

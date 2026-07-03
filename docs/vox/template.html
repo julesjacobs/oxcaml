@@ -78,6 +78,7 @@ th{background:var(--panel);color:var(--fg)} td{color:var(--dim)} td:first-child{
   <a href="#fib">fib, one file</a>
   <a href="#wrong">failures</a>
   <a href="#tour">features</a>
+  <a href="#bst">a module</a>
   <a href="#trust">trust model</a>
   <a href="#run">running it</a>
 </div></nav>
@@ -223,6 +224,36 @@ totalized soundly under partial correctness.  A branch condition contributes
 itself as a fact: writing <code>if n &lt;= 0</code> is enough.</p></div>
 
 </div>
+
+<h2 id="bst">A verified module behind an interface</h2>
+<p>The shape that scales.  <code>bst.mli</code> states the model —
+whole-tree membership, the ordering invariant, a model-level
+<code>insert</code> — and proves its theorems once, in the interface's
+embedded block; definitions and theorems travel in the <code>.cmi</code>.
+The implementation is checked against them arm by arm: the efficient
+one-path search is proved equal to membership over the <i>whole</i> tree
+(the ordering lemmas account for the subtrees the code never visits), and
+each <code>insert</code> arm is proved to build exactly the model's tree.
+Nothing is assumed, and no verification keyword appears in the code.</p>
+
+<div class="tabs" data-tabs>
+  <button class="on">bst.mli — the model is the interface</button>
+  <button>bst.ml — proved against it</button>
+  <button>a client</button>
+</div>
+<div class="tabpane on"><pre style="max-height:34rem"><code class="ml">@BST_MLI@</code></pre></div>
+<div class="tabpane"><pre style="max-height:34rem"><code class="ml">@BST_ML@</code></pre></div>
+<div class="tabpane"><pre><code class="ml">@BST_CLIENT@</code></pre>
+<p style="color:var(--dim);font-size:.9rem">The miss is as proved as the
+hits: <code>mem_insert</code> characterizes each insertion completely, down
+to <code>mem 5 empty = False</code>.</p></div>
+
+<p>The classic search-tree bugs are compile errors with witnesses.
+Descending the wrong side misses exactly the element the counterexample
+names — below, <code>x&nbsp;=&nbsp;-1</code> under a root of
+<code>0</code>:</p>
+<pre><code class="ml">@BST_FAIL@</code></pre>
+<pre class="out"><code>@BST_FAIL_OUT@</code></pre>
 
 <h2 id="trust">Trust model</h2>
 <table>

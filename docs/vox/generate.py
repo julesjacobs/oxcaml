@@ -40,6 +40,10 @@ def strip_test_header(text):
     return re.sub(r'\(\* TEST.*?\*\)\n\n', '', text, count=1, flags=re.S)
 
 
+def strip_leading_comment(text):
+    return re.sub(r'\A\(\*.*?\*\)\n\n', '', text, count=1, flags=re.S)
+
+
 def capture_generated_lean(ocamlc, lean):
     with tempfile.TemporaryDirectory() as d:
         save = os.path.join(d, 'generated.lean')
@@ -92,11 +96,11 @@ def main():
                      + '\n\n'
                      + slice_between(reflect,
                                      r'\(\* The textbook inductive proof',
-                                     r'refine_ \(Cons \(h, r\)\)'),
+                                     r'Cons \(h, r\)'),
         '@ADT@': slice_between(read('demo/lean_adt.ml'), r'^let head',
-                               r'Nil -> refine_ 0'),
+                               r'Nil -> 0'),
         '@RECORDS@': slice_between(read('demo/lean_records.ml'), r'^let origin',
-                                   r'refine_ \{ px = p.py; py = p.px \}'),
+                                   r'\{ px = p.py; py = p.px \}'),
         '@CONTRACTS@': slice_between(fib, r'^let rec fib_loop',
                                      r'fun n -> fib_loop n 0 0 1'),
         '@CROSSMOD@': slice_between(read('demo/lean_reflectclient.ml'),
@@ -111,6 +115,16 @@ def main():
                        + '\n  fun a x -> ...',
         '@PCELL@': slice_between(read('demo/lean_pcell.ml'), r'^let swap_sum',
                                  r'read c1 a t1 in') + '\n    ...',
+        '@BST_MLI@': strip_leading_comment(read('demo/bst.mli')),
+        '@BST_ML@': strip_leading_comment(read('demo/bst.ml')),
+        '@BST_CLIENT@': slice_between(read('demo/lean_bst.ml'), r'^let demo',
+                                      r'\(hit, miss\)'),
+        '@BST_FAIL@': slice_between(read('mechanics/lean_bst_fail.ml'),
+                                    r'^let rec member_wrong', r'^\[%%expect',
+                                    include_stop=False).rstrip('\n'),
+        '@BST_FAIL_OUT@': slice_between(read('mechanics/lean_bst_fail.ml'),
+                                        r'^Error: vox: verification failed',
+                                        r'^\(lean: '),
     }
 
     if args.ocamlc and args.lean:
