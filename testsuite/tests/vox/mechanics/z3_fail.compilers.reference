@@ -1,0 +1,6 @@
+File "z3_fail.ml", line 16, characters 36-37:
+16 | let bad : {v:int | v > 0} = refine_ 0
+                                         ^
+Error: vox: verification failed.
+       Unprovable goal: 0 > 0
+Hypotheses: <none>

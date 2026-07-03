@@ -188,9 +188,10 @@
   goals, so `fib` with guards `n <= 0` / `n = 1` needs exactly
   `[@@vox.decreases n]`.  Two reflected functions may not share a
   name; a reflected name shadowing a prelude definition is a solver
-  error (fails closed).  See testsuite/tests/vox/demo/lean_reflect.ml (a
-  spec library with an EMPTY prelude) and lean_fib.ml (reflected fib,
-  with the fast-doubling lemmas stated about it in the prelude).
+  error (fails closed).  See testsuite/tests/vox/demo/lean_reflect.ml
+  (a spec library with an EMPTY prelude) and demo/lean_fib.ml
+  (reflected fib, with the fast-doubling lemmas stated about it in an
+  embedded prelude block).
   Reflected functions CROSS MODULES: the marker rides the binder
   pattern into val_attributes and hence the .cmi, and the definition
   rides the unit's spec export (pre-rendered, ahead of the unit's own
@@ -205,7 +206,10 @@
   closed).  See testsuite/tests/vox/demo/lean_reflectclient.ml.
   Caveats: the program/logic correspondence of a reflected call is
   partial-correctness (a diverging call returns no value) and ideal
-  arithmetic (overflow, as everywhere).
+  arithmetic (overflow, as everywhere); and reflected definitions are
+  emitted only by the LEAN backend (Z3 has no termination checker for
+  recursive definitions), so a total_ binding under `-vox-solver z3`
+  is a compile-time error.
 - Embedded preludes: `[%%vox.prelude.lean {lean|...|lean}]` (and
   `.z3`, or bare `vox.prelude` for whichever backend runs) puts the
   solver-side text directly in the module, next to the datatypes it

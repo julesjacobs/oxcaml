@@ -93,6 +93,11 @@ let handle_extension ext =
   | _ ->
     ()
 
+(* vox refinement predicates embed expressions in types; [add_type]
+   is defined before [add_expr], hence the forward reference. *)
+let add_expr_forward : (bound_map -> Parsetree.expression -> unit) ref =
+  ref (fun _ _ -> ())
+
 let rec add_type bv ty =
   match ty.ptyp_desc with
     Ptyp_any jkind
@@ -136,13 +141,14 @@ let rec add_type bv ty =
                     PStr [{pstr_desc =
                              Pstr_eval
                                ({pexp_desc =
-                                   Pexp_constraint (_pred, Some ty, _); _},
+                                   Pexp_constraint (pred, Some ty, _); _},
                                 _); _}])
     when String.length txt >= 10 && String.sub txt 0 10 = "vox.refine" ->
-      (* vox refined type {v:ty | p}: the skeleton can reference
-         modules; the predicate cannot (only unqualified variables are
-         allowed there). *)
-      add_type bv ty
+      (* vox refined type {v:ty | p}: both the skeleton and the
+         predicate can reference modules (the predicate through
+         qualified constructors such as [M.Cons]). *)
+      add_type bv ty;
+      !add_expr_forward bv pred
   | Ptyp_extension e -> handle_extension e
 
 and add_package_type bv ptyp =
@@ -346,9 +352,10 @@ let rec add_expr bv exp =
       | Error () -> handle_extension e
       | Ok { arg; _ } -> add_expr bv arg
       end
-  | Pexp_extension ({txt = ("vox.refine" | "vox.assume"); _},
-                    PStr [{pstr_desc = Pstr_eval (e, _); _}]) ->
-      (* vox [refine_ e] / [assume_ e]. *)
+  | Pexp_extension
+      ({txt = ("vox.refine" | "vox.assume" | "vox.assume_unchecked"); _},
+       PStr [{pstr_desc = Pstr_eval (e, _); _}]) ->
+      (* vox [refine_ e] / [assume_ e] / [assume_unchecked_ e]. *)
       add_expr bv e
   | Pexp_extension e -> handle_extension e
   | Pexp_stack e -> add_expr bv e
@@ -787,3 +794,5 @@ and add_class_field bv pcf =
 
 and add_class_declaration bv decl =
   add_class_expr bv decl.pci_expr
+
+let () = add_expr_forward := add_expr

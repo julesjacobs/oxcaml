@@ -1,0 +1,6 @@
+File "z3_adt_fail.ml", line 20, characters 33-38:
+20 | let bad : t{ _ = K 3 } = refine_ (K 4)
+                                      ^^^^^
+Error: vox: verification failed.
+       Unprovable goal: (K 4) = (K 3)
+Hypotheses: <none>

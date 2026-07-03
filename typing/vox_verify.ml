@@ -2490,6 +2490,16 @@ let discharge () =
     match !Clflags.vox_solver with
     | "lean" -> run_lean (List.filter needs_proof all)
     | "z3" ->
+      (* Reflected definitions are emitted (and termination-checked)
+         only by the Lean backend; silently treating them as
+         uninterpreted would make every use fail with an undeclared
+         symbol, so reject them up front with a real error. *)
+      (match !spec_defs with
+       | [] -> ()
+       | d :: _ ->
+         Location.raise_errorf ~loc:d.Vox_reflect.sd_loc
+           "vox: reflected (total_) functions require \"-vox-solver \
+            lean\"; the z3 backend does not emit their definitions");
       List.iter
         (fun vc ->
           if needs_proof vc
@@ -2684,13 +2694,27 @@ let check_toplevel_phrase (str : structure) ~(sig_acc : Types.signature)
        (like the facts below) only if the phrase discharges. *)
     embedded_preludes := !toplevel_preludes @ collect_preludes str;
     imported_preludes := gather_imported_preludes ();
+    (* Reflected definitions and datatype registrations are committed
+       the same way: a failed phrase is backtracked, so its rejected
+       definition must not be re-emitted (and re-fail, blamed at the
+       OLD location) by every later phrase, and its datatypes must not
+       collide -- at their stamp-free solver-side names -- with the
+       retried phrase's. *)
+    let saved_spec_defs = !spec_defs in
+    let saved_datatypes = !datatypes in
     let ctx = ref !toplevel_ctx in
-    walk_items str ctx;
-    (* Discharge before committing the phrase's facts: if verification
-       fails, the toplevel backtracks the phrase, so its bindings never
-       exist and their facts (e.g. a refuted contradictory refinement)
-       must not be available to later phrases. *)
-    discharge ();
+    Misc.try_finally
+      ~exceptionally:(fun () ->
+        spec_defs := saved_spec_defs;
+        datatypes := saved_datatypes)
+      (fun () ->
+        walk_items str ctx;
+        (* Discharge before committing the phrase's facts: if
+           verification fails, the toplevel backtracks the phrase, so
+           its bindings never exist and their facts (e.g. a refuted
+           contradictory refinement) must not be available to later
+           phrases. *)
+        discharge ());
     toplevel_ctx := !ctx;
     toplevel_preludes := !embedded_preludes)
 ;;
