@@ -6,7 +6,7 @@
 (* vox: VC generation display test.  Run with -vox-dry-run, so VCs are
    printed but not sent to the solver; the expected output lives in the
    inline [%%expect] blocks (update with [make promote-one
-   TEST=vox/vc_gen.ml]). *)
+   TEST=vox/mechanics/vc_gen.ml]). *)
 
 (* Intro on a literal: one VC with no hypotheses. *)
 let x : {v:int | v > 0} = refine_ 3

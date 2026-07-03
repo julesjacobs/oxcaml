@@ -1,6 +1,6 @@
 (* TEST
  flags = "-vox-solver lean";
- script = "sh ${test_source_directory}/has-lean.sh";
+ script = "sh ${test_source_directory}/../has-lean.sh";
  script;
  setup-ocamlc.byte-build-env;
  ocamlc.byte;

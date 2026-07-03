@@ -232,7 +232,7 @@ binder to the trivial `K x = K x`.  With a measure in the prelude,
 recursive functions verify INDUCTIVELY: each recursive call
 re-instantiates the dependent signature at the actual arguments, so
 its refined result is the induction hypothesis (see append/rev in
-testsuite/tests/vox/lean_spec.ml).
+testsuite/tests/vox/demo/lean_spec.ml).
 
 A plain `let x = e` contributes nothing: `x` is a fresh unknown.
 Aliasing is expressed with the existing forms,
@@ -379,7 +379,7 @@ Dependent arrows implement exactly that:
   type is closed; each occurrence (recursive calls included) opens it
   fresh at the actual arguments, so a closure refined at THIS
   activation's variable simply fails to typecheck as an argument
-  refined at the NEXT activation's (see testsuite/tests/vox:
+  refined at the NEXT activation's (see testsuite/tests/vox/mechanics:
   [countdown] accepted, [unsound] rejected). The declared refinement
   is assumed at recursive calls: standard partial correctness
   (divergence makes facts vacuous).
