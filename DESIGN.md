@@ -483,6 +483,48 @@ arithmetic model, rewritten to source names ([a = 0, a#2 = 1],
 monomials and theory atoms appear as their own entries, so a model
 that is only linear-consistent is visibly so.
 
+## Mutable locals (flow-sensitive SSA versioning)
+
+[let mutable] variables verify flow-sensitively.  Each live mutable
+variable has a current logical VERSION (m, m@1, m@2, ...): reads --
+including inside reflected expressions, path conditions, and match
+scrutinees -- name the version in force at that program point, and
+every write mints a fresh one.  Two kinds of facts arise:
+
+- The definitional equation [m@1 = m + 1] of each assignment is a
+  Skolem-style definition (each version defined once, from strictly
+  earlier names), hence a conservative extension usable in EVERY
+  execution; equations are pulled into each VC by relevance.
+- The declared refinement instantiated at the new version is a THEOREM
+  proved under the assignment's path condition (rigid typing forces
+  every write through refine_), so it stays path-scoped: it would be
+  unsound in a sibling branch.
+
+Joins and havoc: an [if] whose condition reflects joins with
+[(c && m' = m_then) || (not c && m' = m_else)]; matches and
+untranslatable conditions havoc (a fresh unconstrained version).
+Loops havoc the variables they write at the loop head -- head versions
+denote any iteration's entry -- and the continuation of a [while] adds
+the negated condition; [for] bodies see reflected bounds
+[lo <= i && i <= hi].  Declared refinements survive every havoc (each
+write re-proved them): a rigid refinement on a mutable local IS a loop
+invariant, e.g.
+
+    let mutable total : {v:int | v >= 0} = refine_ 0 in
+    for i = 1 to n do
+      let refine_ t = total in
+      total <- (refine_ (t + i))
+    done
+
+Constructs the walker does not model (application arguments and other
+unspecified-evaluation-order positions, try, ...) havoc every variable
+their subtree writes; this is COMPLETE, not just conservative, because
+closures cannot capture mutable variables, so every mutation is a
+syntactic assignment.  The type-level bans stand: mutable stamps still
+may not appear in refinements or dependent applications ([let x = m]
+pins the current value to an immutable name, with the fact
+[x = m@k], and is the sanctioned bridge).
+
 ## Escape enforcement (the activation problem)
 
 Logical names are static stamps, which do not distinguish function

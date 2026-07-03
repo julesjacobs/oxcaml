@@ -202,9 +202,17 @@ let rec translate_surface env (e : Parsetree.expression)
   | _ -> None
 ;;
 
-let rec translate (e : expression) : Refinement.pred option =
-  match e.exp_desc with
-  | Texp_ident { path = Path.Pident id; _ } -> Some (Refinement.Pvar id)
+(* [mutvar] names reads of mutable variables ([Texp_mutvar]): the VC
+   walker passes its current-version lookup, so reflected expressions
+   read the SSA version in force at this program point; every other
+   caller keeps the default, under which mutable reads stay opaque. *)
+let translate ?(mutvar = fun _ -> None) (e : expression)
+  : Refinement.pred option
+  =
+  let rec go (e : expression) : Refinement.pred option =
+    match e.exp_desc with
+    | Texp_mutvar { txt = id; _ } -> mutvar id
+    | Texp_ident { path = Path.Pident id; _ } -> Some (Refinement.Pvar id)
   | Texp_constant (Const_int n) -> Some (Refinement.Pint n)
   | Texp_construct ({ txt = Longident.Lident "true"; _ }, _, _, [], _) ->
     Some (Refinement.Pbool true)
@@ -215,7 +223,7 @@ let rec translate (e : expression) : Refinement.pred option =
          && List.for_all (fun (lbl, _) -> Option.is_none lbl) comps ->
     (* An unlabeled tuple is the product term the predicate language
        writes as [(p1, ..., pn)]; labeled tuples are not modelled. *)
-    let args = List.map (fun (_, a) -> translate a) comps in
+    let args = List.map (fun (_, a) -> go a) comps in
     if List.for_all Option.is_some args
     then Some (Refinement.Ptuple (List.map Option.get args))
     else None
@@ -230,7 +238,7 @@ let rec translate (e : expression) : Refinement.pred option =
      | Some _ ->
        Option.map
          (fun base -> Refinement.Pfield (path, label.lbl_name, base))
-         (translate record)
+         (go record)
      | None -> None)
   | Texp_apply
       ({ exp_desc = Texp_ident { path; desc; _ }; _ }, args, _, _, _)
@@ -244,7 +252,7 @@ let rec translate (e : expression) : Refinement.pred option =
       List.map
         (fun (lbl, arg) ->
           match (lbl : Types.arg_label), arg with
-          | Nolabel, Arg (a, _) -> translate a
+          | Nolabel, Arg (a, _) -> go a
           | _ -> None)
         args
     in
@@ -269,13 +277,13 @@ let rec translate (e : expression) : Refinement.pred option =
     in
     let unary k =
       match args with
-      | [ Some a ] -> Option.map k (translate a)
+      | [ Some a ] -> Option.map k (go a)
       | _ -> None
     in
     let binary k =
       match args with
       | [ Some a; Some b ] ->
-        (match translate a, translate b with
+        (match go a, go b with
          | Some pa, Some pb -> Some (k pa pb)
          | _ -> None)
       | _ -> None
@@ -286,7 +294,7 @@ let rec translate (e : expression) : Refinement.pred option =
          primitive itself is a generic block read). *)
       match args with
       | [ Some a ] when is_unlabeled_pair a.exp_env a.exp_type ->
-        Option.map (fun p -> Refinement.Pproj (2, i, p)) (translate a)
+        Option.map (fun p -> Refinement.Pproj (2, i, p)) (go a)
       | _ -> None
     in
     let cmp op =
@@ -320,7 +328,9 @@ let rec translate (e : expression) : Refinement.pred option =
      | "%greaterthan" -> cmp Refinement.Gt
      | "%greaterequal" -> cmp Refinement.Ge
      | _ -> None)
-  | _ -> None
+    | _ -> None
+  in
+  go e
 ;;
 
 (* ------------------------------------------------------------------ *)

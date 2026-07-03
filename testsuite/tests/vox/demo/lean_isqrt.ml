@@ -97,14 +97,22 @@ Hypotheses:
   (lo < hi) && (x < (sq hi))
   (0 <= lo) && ((sq lo) <= x)
   0 <= x
+  _w = r
+  (_w = r) && (0 <= _w)
+  (0 <= r) && (((sq r) <= 9) && (9 < (sq (r + 1))))
 Possible counterexample:
   hi = 1
-  x = 0
+  x = 9
   lo = 0
+  r = 0
+  _w = 0
   sq hi = 0
   sq lo = 0
+  sq r = 0
   sq (hi + 1) = 0
-  hi ^ 2 = 1
-  lo ^ 2 = 0
+  sq (r + 1) = 0
+  hi ^ 2 = 10
+  lo ^ 2 = 9
+  ...
 (lean: error: `grind` failed)
 |}]

@@ -151,10 +151,37 @@ let embedded_preludes : (string * Location.t) list ref = ref []
 let imported_preludes : (string * Cmi_format.vox_prelude_export) list ref =
   ref []
 
+(* SSA versions for [let mutable] variables (flow-sensitive mutation).
+   [mut_versions] maps each LIVE mutable binder to its current logical
+   version -- a synthetic ident, so always in scope -- together with the
+   binder's declared type; reads name the version and every write mints
+   a fresh one.  A version's facts are eternal truths about a VALUE,
+   never about the cell, so they may flow anywhere downstream on the
+   control path; the walker threads contexts (and saves/restores this
+   table around branches) so they flow nowhere else.  [mut_counts]
+   numbers versions per binder for display and never rolls back. *)
+let mut_versions : (Ident.t, Ident.t * Types.type_expr) Hashtbl.t =
+  Hashtbl.create 16
+
+let mut_counts : (Ident.t, int) Hashtbl.t = Hashtbl.create 16
+
+(* Definitional equations [version = rhs-name], one per assignment.
+   Unlike the declared-refinement instances (which are theorems proved
+   under the assignment's path condition and stay path-scoped), these
+   are Skolem-style definitions -- each version is defined once, as a
+   function of strictly earlier names -- so adding them is a
+   conservative extension in EVERY execution: an execution that never
+   performs the assignment simply interprets the version by its
+   equation.  They are pulled into each VC by relevance (emit_vc). *)
+let mut_defs : Refinement.pred list ref = ref []
+
 let reset () =
   vcs := [];
   Hashtbl.reset name_sorts;
   Hashtbl.reset synthetic_names;
+  Hashtbl.reset mut_versions;
+  Hashtbl.reset mut_counts;
+  mut_defs := [];
   datatypes := [];
   registering := [];
   poisoned := [];
@@ -440,6 +467,98 @@ let param_refinement env ty =
   | _ -> None
 ;;
 
+let mut_read id =
+  Option.map (fun (v, _) -> Refinement.Pvar v) (Hashtbl.find_opt mut_versions id)
+;;
+
+let mut_fresh env id ty =
+  let k =
+    match Hashtbl.find_opt mut_counts id with
+    | Some k -> k + 1
+    | None -> 0
+  in
+  Hashtbl.replace mut_counts id k;
+  let name =
+    if k = 0 then Ident.name id else Printf.sprintf "%s@%d" (Ident.name id) k
+  in
+  let v = Ident.create_local name in
+  record_name env v ty;
+  Hashtbl.replace synthetic_names v ();
+  Hashtbl.replace mut_versions id (v, ty);
+  v
+;;
+
+(* The declared refinement, instantiated at a fresh version: sound
+   because rigid typing forced every write (and the initialization)
+   through [refine_] at that type. *)
+let mut_invariant env ty v =
+  match refinement_of_type env ty with
+  | Some p ->
+    register_pred_paths env p;
+    [ Refinement.subst_bound ~by:(Refinement.Pvar v) p ]
+  | None -> []
+;;
+
+(* [m <- e] and initialization: the fresh version's definitional
+   equation joins the global stream (sound everywhere); the declared
+   refinement is returned for the PATH-SCOPED context. *)
+let mut_assign env id ty ~rhs =
+  let v = mut_fresh env id ty in
+  mut_defs
+  := Refinement.Pbinop (Refinement.Eq, Refinement.Pvar v, rhs) :: !mut_defs;
+  mut_invariant env ty v
+;;
+
+(* Havoc: a fresh, unconstrained version (joins, loops, and constructs
+   the walker does not model).  Only the declared refinement survives:
+   it holds at every program point. *)
+let mut_havoc env id =
+  match Hashtbl.find_opt mut_versions id with
+  | None -> []
+  | Some (_, ty) ->
+    let v = mut_fresh env id ty in
+    mut_invariant env ty v
+;;
+
+let save_versions () = Hashtbl.fold (fun k v acc -> (k, v) :: acc) mut_versions []
+
+let restore_versions saved =
+  Hashtbl.reset mut_versions;
+  List.iter (fun (k, v) -> Hashtbl.replace mut_versions k v) saved
+;;
+
+let version_in snapshot id =
+  List.find_map
+    (fun (k, (v, _)) -> if Ident.same k id then Some v else None)
+    snapshot
+;;
+
+(* The mutable variables (tracked at this point) that [e] assigns
+   anywhere in its subtree.  Complete because closures cannot capture
+   mutable variables: every mutation is a syntactic [Texp_setmutvar]. *)
+let written_mutables (e : expression) =
+  let acc = ref [] in
+  let it =
+    { Tast_iterator.default_iterator with
+      expr =
+        (fun sub e' ->
+          (match e'.exp_desc with
+           | Texp_setmutvar ({ txt = id; _ }, _, _) ->
+             if Hashtbl.mem mut_versions id
+                && not (List.exists (Ident.same id) !acc)
+             then acc := id :: !acc
+           | _ -> ());
+          Tast_iterator.default_iterator.expr sub e')
+    }
+  in
+  it.expr it e;
+  !acc
+;;
+
+let mut_havoc_written env e =
+  List.concat_map (mut_havoc env) (written_mutables e)
+;;
+
 (* Facts contributed by the binders of a pattern: every binder is recorded (for its
    declaration sort); binders of refined type contribute their refinement instantiated at
    the binder. *)
@@ -497,7 +616,7 @@ let stable_arg_name (a : expression) : Refinement.pred option =
 ;;
 
 let rec name_of_expr env (e : expression) : Refinement.pred =
-  match Vox_reflect.translate e with
+  match Vox_reflect.translate ~mutvar:mut_read e with
   | Some p ->
     (* The translation may contain field projections; register their
        record types so the structure declarations reach the solver. *)
@@ -670,6 +789,38 @@ let emit_vc ~loc ~ctx ~goal ~kind =
       | None -> ())
    | Assume -> ());
   let facts = List.filter (pred_in_scope ctx) ctx.cfacts in
+  (* Pull in the definitional equations reachable from the goal and
+     facts (transitively through their right-hand sides); definitions
+     mentioning out-of-scope program variables are dropped, which only
+     weakens. *)
+  let defs =
+    let needed = Hashtbl.create 8 in
+    let note p =
+      List.iter
+        (fun id -> Hashtbl.replace needed (Ident.unique_name id) ())
+        (Refinement.free_vars p)
+    in
+    note goal;
+    List.iter note facts;
+    let rec grow acc remaining =
+      let take, keep =
+        List.partition
+          (fun d ->
+            match d with
+            | Refinement.Pbinop (_, Refinement.Pvar v, _) ->
+              Hashtbl.mem needed (Ident.unique_name v)
+            | _ -> false)
+          remaining
+      in
+      if take = []
+      then acc
+      else (
+        List.iter note take;
+        grow (take @ acc) keep)
+    in
+    List.filter (pred_in_scope ctx) (grow [] !mut_defs)
+  in
+  let facts = facts @ defs in
   vcs := { vc_loc = loc; vc_facts = facts; vc_goal = goal; vc_kind = kind } :: !vcs
 ;;
 
@@ -1024,8 +1175,15 @@ let extend_pat
   }
 ;;
 
-(* Walk an expression under a logical context, collecting VCs. *)
-let rec walk_expr _outer_env ctx (e : expression) =
+(* Walk an expression under a logical context, collecting VCs.  Returns
+   the context for the expression's CONTINUATION: mutable-variable
+   assignments extend it with the fresh version's definitional equation
+   (and declared-refinement instance), and joins extend it with join
+   facts.  Everything is path-scoped -- facts proved under a branch's
+   hypotheses never reach a sibling branch -- and the version table is
+   saved and restored around branching so each branch names the state it
+   actually sees. *)
+let rec walk_expr _outer_env ctx (e : expression) : ctx =
   (* Use the node's OWN env, re-derived at every recursive call: an env
      threaded from the enclosing structure misses type declarations
      introduced by let-module (and friends) inside the expression, whose
@@ -1053,7 +1211,7 @@ let rec walk_expr _outer_env ctx (e : expression) =
    | None -> ());
   match e.exp_desc with
   | Texp_apply (funct, args, _, _, _) ->
-    walk_expr env ctx funct;
+    ignore (walk_expr env ctx funct : ctx);
     (* Contract obligations (parameters as preconditions): each
        argument for a refined parameter must satisfy the predicate at
        its logical name; an intro-form argument
@@ -1071,7 +1229,7 @@ let rec walk_expr _outer_env ctx (e : expression) =
           | Arg (a, _) -> Some a
           | Omitted _ -> None
         in
-        Option.iter (walk_expr env ctx) arg_expr;
+        Option.iter (fun a -> ignore (walk_expr env ctx a : ctx)) arg_expr;
         match get_desc (safe_expand_head env !arrow_ty) with
         | Tarrow ((_, _, _, binder), dom, ret, _) ->
           (match arg_expr with
@@ -1096,16 +1254,74 @@ let rec walk_expr _outer_env ctx (e : expression) =
               | _ -> arrow_ty := ret)
            | None -> arrow_ty := ret)
         | _ -> ())
-      args
-  | Texp_let (rec_flag, vbs, body) ->
+      args;
+    (* the function and its arguments evaluate in unspecified order:
+       out-contexts are discarded, and every mutable variable this
+       application writes is havocked for the continuation *)
+    { ctx with cfacts = mut_havoc_written env e @ ctx.cfacts }
+  | Texp_let (rec_flag, [ vb ], body) ->
     (* Reflected definitions are global; a local one could capture
        enclosing variables (translate_def's closedness check would also
        catch that, but the restriction is the honest one). *)
-    List.iter reject_local_reflect vbs;
-    List.iter (fun vb -> walk_expr env ctx vb.vb_expr) vbs;
-    let ctx' = List.fold_left (fun ctx vb -> extend_pat env ctx vb.vb_pat) ctx vbs in
+    reject_local_reflect vb;
+    let ctx0 = walk_expr env ctx vb.vb_expr in
+    let ctx' = extend_pat env ctx0 vb.vb_pat in
     (* A destructuring let of a variable gets the same facts a match
-       case would: [let { x; y } = r in ...]. *)
+       case would: [let { x; y } = r in ...].  A let of a MUTABLE
+       variable additionally pins its current value to the immutable
+       binder ([let x = m]) -- the only way to name a mutable
+       variable's value, since mutable stamps may not appear in
+       refinements or dependent applications. *)
+    let ctx' =
+      match vb.vb_expr.exp_desc with
+      | Texp_ident { path = Path.Pident id; _ } ->
+        { ctx' with cfacts = match_facts env id vb.vb_pat @ ctx'.cfacts }
+      | Texp_mutvar { txt = mid; _ } ->
+        (match Hashtbl.find_opt mut_versions mid with
+         | Some (v, _) ->
+           let direct =
+             match vb.vb_pat.pat_desc with
+             | Tpat_var { id = x; _ } ->
+               [ Refinement.Pbinop
+                   (Refinement.Eq, Refinement.Pvar x, Refinement.Pvar v)
+               ]
+             | _ -> []
+           in
+           { ctx' with
+             cfacts = direct @ match_facts env v vb.vb_pat @ ctx'.cfacts
+           }
+         | None -> ctx')
+      | _ -> ctx'
+    in
+    (* Selfification (no self fact for a RECURSIVE binding: a cyclic
+       constructor equation is unsatisfiable in the datatype theory). *)
+    let ctx' =
+      match rec_flag with
+      | Recursive -> ctx'
+      | Nonrecursive ->
+        { ctx' with cfacts = binding_self_facts env vb @ ctx'.cfacts }
+    in
+    walk_expr env ctx' body
+  | Texp_let (rec_flag, vbs, body) ->
+    List.iter reject_local_reflect vbs;
+    (* [let .. and ..]: sibling evaluation order is unspecified, so each
+       right-hand side walks under the ENTRY context and every mutable
+       variable any of them writes is havocked. *)
+    List.iter (fun vb -> ignore (walk_expr env ctx vb.vb_expr : ctx)) vbs;
+    let saved = save_versions () in
+    let written = List.concat_map (fun vb -> written_mutables vb.vb_expr) vbs in
+    List.iter
+      (fun vb ->
+        restore_versions saved;
+        let hfacts = List.concat_map (mut_havoc env) written in
+        ignore
+          (walk_expr env { ctx with cfacts = hfacts @ ctx.cfacts } vb.vb_expr
+            : ctx))
+      vbs;
+    restore_versions saved;
+    let havoc = List.concat_map (mut_havoc env) written in
+    let ctx' = List.fold_left (fun ctx vb -> extend_pat env ctx vb.vb_pat) ctx vbs in
+    let ctx' = { ctx' with cfacts = havoc @ ctx'.cfacts } in
     let ctx' =
       List.fold_left
         (fun ctx vb ->
@@ -1120,27 +1336,63 @@ let rec walk_expr _outer_env ctx (e : expression) =
       (* RECURSIVE bindings contribute no self fact: a cyclic
          constructor equation ([let rec ones = 1 :: ones]) is
          unsatisfiable in the solver's well-founded datatype theory,
-         which would make the hypotheses inconsistent. *)
+         which would make the hypotheses inconsistent.  A group that
+         writes mutable variables contributes none either: sibling
+         order makes its RHS names unstable. *)
       match rec_flag with
-      | Recursive -> ctx'
-      | Nonrecursive ->
+      | Nonrecursive when written = [] ->
         List.fold_left
           (fun ctx vb ->
             { ctx with cfacts = binding_self_facts env vb @ ctx.cfacts })
           ctx'
           vbs
+      | Recursive | Nonrecursive -> ctx'
     in
     walk_expr env ctx' body
+  | Texp_letmutable (vb, body) ->
+    let ctx0 = walk_expr env ctx vb.vb_expr in
+    backstop_pat ctx0 vb.vb_pat;
+    (match vb.vb_pat.pat_desc with
+     | Tpat_var { id; _ } ->
+       let ty = vb.vb_pat.pat_type in
+       let rhs = name_of_expr env vb.vb_expr in
+       let facts = mut_assign env id ty ~rhs in
+       let out = walk_expr env { ctx0 with cfacts = facts @ ctx0.cfacts } body in
+       (* the binder's scope ends; its versions (synthetic) live on *)
+       Hashtbl.remove mut_versions id;
+       out
+     | _ ->
+       (* the extension only allows single-variable patterns; stay
+          conservative if that ever changes *)
+       walk_expr env ctx0 body)
+  | Texp_setmutvar ({ txt = id; _ }, _, rhs) ->
+    let ctx0 = walk_expr env ctx rhs in
+    (match Hashtbl.find_opt mut_versions id with
+     | Some (_, ty) ->
+       (* name the right-hand side BEFORE minting: its reads use the
+          version being replaced *)
+       let rhs_name = name_of_expr env rhs in
+       { ctx0 with cfacts = mut_assign env id ty ~rhs:rhs_name @ ctx0.cfacts }
+     | None -> ctx0)
+  | Texp_mutvar _ -> ctx
+  | Texp_sequence (e1, _, e2) ->
+    let ctx1 = walk_expr env ctx e1 in
+    walk_expr env ctx1 e2
   | Texp_match (scrut, _sort, comp_cases, val_cases, _partial) ->
-    walk_expr env ctx scrut;
+    let ctx0 = walk_expr env ctx scrut in
     let scrut_id =
       match scrut.exp_desc with
       | Texp_ident { path = Path.Pident id; _ } -> Some id
+      | Texp_mutvar { txt = id; _ } ->
+        (* the version pins the value read by the match *)
+        Option.map fst (Hashtbl.find_opt mut_versions id)
       | _ -> None
     in
+    let saved = save_versions () in
     let do_case : type k. Refinement.pred list -> k case -> unit =
       fun negs c ->
-      let ctx' = extend_pat ~scrut:scrut.exp_type env ctx c.c_lhs in
+      restore_versions saved;
+      let ctx' = extend_pat ~scrut:scrut.exp_type env ctx0 c.c_lhs in
       let ctx' =
         match scrut_id with
         | Some sid ->
@@ -1149,8 +1401,12 @@ let rec walk_expr _outer_env ctx (e : expression) =
           }
         | None -> ctx'
       in
-      Option.iter (walk_expr env ctx') c.c_guard;
-      walk_expr env ctx' c.c_rhs
+      let gctx =
+        match c.c_guard with
+        | None -> ctx'
+        | Some g -> walk_expr env ctx' g
+      in
+      ignore (walk_expr env gctx c.c_rhs : ctx)
     in
     (* Arms additionally see the negations of the guard-free simple
        arms ABOVE them.  All ordinary arms -- value and exception, in
@@ -1178,21 +1434,116 @@ let rec walk_expr _outer_env ctx (e : expression) =
           : Refinement.pred list)
     in
     run_cases comp_cases;
-    run_cases val_cases
+    run_cases val_cases;
+    restore_versions saved;
+    (* havoc-join across arms in v1: written variables get a fresh
+       version, keeping only the declared refinement *)
+    { ctx0 with cfacts = mut_havoc_written env e @ ctx0.cfacts }
   | Texp_ifthenelse (cond, e_then, e_else) ->
-    walk_expr env ctx cond;
+    let ctx0 = walk_expr env ctx cond in
     (* The path fact is the condition's logic translation when it has
        one (a variable, or a translatable int/bool expression);
-       untranslatable conditions contribute nothing. *)
-    let cond_fact = Vox_reflect.translate cond in
+       untranslatable conditions contribute nothing.  Translatable
+       implies pure, so the versions its reads name are stable. *)
+    let cond_fact = Vox_reflect.translate ~mutvar:mut_read cond in
     Option.iter (register_pred_paths env) cond_fact;
     let with_fact f ctx =
       match cond_fact with
       | None -> ctx
       | Some c -> { ctx with cfacts = f c :: ctx.cfacts }
     in
-    walk_expr env (with_fact (fun c -> c) ctx) e_then;
-    Option.iter (walk_expr env (with_fact (fun c -> Refinement.Pnot c) ctx)) e_else
+    let saved = save_versions () in
+    ignore (walk_expr env (with_fact (fun c -> c) ctx0) e_then : ctx);
+    let vers_then = save_versions () in
+    restore_versions saved;
+    (match e_else with
+     | Some e2 ->
+       ignore (walk_expr env (with_fact (fun c -> Refinement.Pnot c) ctx0) e2 : ctx)
+     | None -> ());
+    let vers_else = save_versions () in
+    restore_versions saved;
+    (* Conditional join: a variable written by either branch gets a
+       fresh version equated with the surviving branch's version under
+       the reflected condition (havoc when the condition did not
+       reflect). *)
+    let join_facts =
+      List.concat_map
+        (fun (id, (v0, ty)) ->
+          let vt = Option.value (version_in vers_then id) ~default:v0 in
+          let ve = Option.value (version_in vers_else id) ~default:v0 in
+          if Ident.same vt v0 && Ident.same ve v0
+          then []
+          else (
+            let vj = mut_fresh env id ty in
+            let inv = mut_invariant env ty vj in
+            match cond_fact with
+            | Some c ->
+              Refinement.Por
+                ( Refinement.Pand
+                    ( c
+                    , Refinement.Pbinop
+                        (Refinement.Eq, Refinement.Pvar vj, Refinement.Pvar vt)
+                    )
+                , Refinement.Pand
+                    ( Refinement.Pnot c
+                    , Refinement.Pbinop
+                        (Refinement.Eq, Refinement.Pvar vj, Refinement.Pvar ve)
+                    ) )
+              :: inv
+            | None -> inv))
+        saved
+    in
+    { ctx0 with cfacts = join_facts @ ctx0.cfacts }
+  | Texp_while { wh_cond; wh_body; _ } ->
+    (* Head state: havoc everything the loop writes; head versions
+       denote any iteration's entry, and the declared refinements
+       re-attach (every write re-proved them).  The body walks under
+       the reflected condition; normal exit happens at the test, so the
+       continuation sees the head state plus its negation. *)
+    let head = mut_havoc_written env e in
+    let hctx = { ctx with cfacts = head @ ctx.cfacts } in
+    let cctx = walk_expr env hctx wh_cond in
+    let cond_fact = Vox_reflect.translate ~mutvar:mut_read wh_cond in
+    let saved = save_versions () in
+    let bctx =
+      match cond_fact with
+      | Some c -> { cctx with cfacts = c :: cctx.cfacts }
+      | None -> cctx
+    in
+    ignore (walk_expr env bctx wh_body : ctx);
+    restore_versions saved;
+    (match cond_fact with
+     | Some c -> { cctx with cfacts = Refinement.Pnot c :: cctx.cfacts }
+     | None -> cctx)
+  | Texp_for { for_id; for_from; for_to; for_dir; for_body; _ } ->
+    let c0 = walk_expr env ctx for_from in
+    let c1 = walk_expr env c0 for_to in
+    (* Bounds are evaluated once, before any body write: reflect them
+       (pure when translatable) before havocking. *)
+    let from_p = Vox_reflect.translate ~mutvar:mut_read for_from in
+    let to_p = Vox_reflect.translate ~mutvar:mut_read for_to in
+    record_name env for_id for_from.exp_type;
+    let head = mut_havoc_written env e in
+    let bounds =
+      match from_p, to_p with
+      | Some f, Some t ->
+        let lo, hi =
+          match for_dir with
+          | Upto -> f, t
+          | Downto -> t, f
+        in
+        [ Refinement.Pbinop (Refinement.Le, lo, Refinement.Pvar for_id)
+        ; Refinement.Pbinop (Refinement.Le, Refinement.Pvar for_id, hi)
+        ]
+      | _ -> []
+    in
+    let bctx =
+      { cfacts = bounds @ head @ c1.cfacts; cscope = for_id :: c1.cscope }
+    in
+    let saved = save_versions () in
+    ignore (walk_expr env bctx for_body : ctx);
+    restore_versions saved;
+    { c1 with cfacts = head @ c1.cfacts }
   | Texp_function { params; body; _ } ->
     (* Contract facts (parameters as preconditions): a refined arrow
        DOMAIN contributes its predicate at the parameter's name -- the
@@ -1211,7 +1562,7 @@ let rec walk_expr _outer_env ctx (e : expression) =
             match fp.fp_kind with
             | Tparam_pat pat -> pat, false
             | Tparam_optional_default (pat, default, _) ->
-              walk_expr env ctx default;
+              ignore (walk_expr env ctx default : ctx);
               pat, true
           in
           let ctx = extend_pat env ctx pat in
@@ -1267,24 +1618,34 @@ let rec walk_expr _outer_env ctx (e : expression) =
         params
     in
     (match body with
-     | Tfunction_body e -> walk_expr env ctx' e
+     | Tfunction_body e -> ignore (walk_expr env ctx' e : ctx)
      | Tfunction_cases { fc_cases; _ } ->
        List.iter
          (fun c ->
            let ctx'' = extend_pat env ctx' c.c_lhs in
-           Option.iter (walk_expr env ctx'') c.c_guard;
-           walk_expr env ctx'' c.c_rhs)
-         fc_cases)
+           let gctx =
+             match c.c_guard with
+             | None -> ctx''
+             | Some g -> walk_expr env ctx'' g
+           in
+           ignore (walk_expr env gctx c.c_rhs : ctx))
+         fc_cases);
+    (* a function body runs at call time, not here: the continuation
+       keeps the entry state (closures cannot capture mutable
+       variables, so the body cannot write any variable we track) *)
+    ctx
   | _ ->
     (* Generic traversal of children under the same context.  Patterns
        reached this way belong to constructs the walker does not model
        (try handlers, letops, local module structures, ...); they are
-       escape-checked but contribute no facts.  Value bindings reached
-       this way (structure items of local modules) cannot host
-       reflected definitions. *)
+       escape-checked but contribute no facts.  Children may evaluate
+       in any order, so their out-contexts are discarded (a version
+       minted by one child is a sound, unconstrained name in a
+       sibling), and every mutable variable this subtree writes is
+       havocked for the continuation. *)
     let it =
       { Tast_iterator.default_iterator with
-        expr = (fun _ e' -> walk_expr env ctx e')
+        expr = (fun _ e' -> ignore (walk_expr env ctx e' : ctx))
       ; pat =
           (fun sub (type k) (p : k general_pattern) ->
             backstop_pat ctx p;
@@ -1295,7 +1656,9 @@ let rec walk_expr _outer_env ctx (e : expression) =
             Tast_iterator.default_iterator.value_binding sub vb)
       }
     in
-    Tast_iterator.default_iterator.expr it e
+    Tast_iterator.default_iterator.expr it e;
+    let havoc = mut_havoc_written env e in
+    if havoc = [] then ctx else { ctx with cfacts = havoc @ ctx.cfacts }
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -2572,7 +2935,9 @@ let walk_items (str : structure) ctx =
             if Vox_reflect.is_total_binding vb
             then register_spec_def str.str_final_env vb)
           vbs;
-        List.iter (fun vb -> walk_expr str.str_final_env !ctx vb.vb_expr) vbs;
+        List.iter
+          (fun vb -> ctx := walk_expr str.str_final_env !ctx vb.vb_expr)
+          vbs;
         ctx
         := List.fold_left
              (fun ctx vb ->
@@ -2602,7 +2967,7 @@ let walk_items (str : structure) ctx =
                attributes, constructors, labels) are only findable in
                the inner env -- with the outer env they silently sort
                at VoxU *)
-            expr = (fun _ e -> walk_expr e.exp_env !ctx e)
+            expr = (fun _ e -> ignore (walk_expr e.exp_env !ctx e : ctx))
           ; pat =
               (fun sub (type k) (p : k general_pattern) ->
                 backstop_pat !ctx p;

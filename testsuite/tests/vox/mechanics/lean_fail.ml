@@ -65,3 +65,47 @@ Error: vox: verification failed (lean).
 Hypotheses: <none>
 (lean: error: `grind` failed)
 |}]
+
+(* Mutable locals, the exploits: the stale value after a write, and a
+   pre-loop equation after havoc, must both FAIL. *)
+let stale () : {r:int | r = 3} =
+  let mutable m = 3 in
+  m <- m + 1;
+  refine_ m
+[%%expect{|
+Line 4, characters 10-11:
+4 |   refine_ m
+              ^
+Error: vox: verification failed (lean).
+       Goal: m@1 = 3
+Hypotheses:
+  m = 3
+  m@1 = (m + 1)
+Possible counterexample:
+  m@1 = 4
+  m = 3
+(lean: error: `grind` failed)
+|}]
+
+let post_loop (n : int) : {r:int | r = 0} =
+  let mutable m = 0 in
+  let mutable i = 0 in
+  while i < n do
+    m <- m + 1;
+    i <- i + 1
+  done;
+  refine_ m
+[%%expect{|
+Line 8, characters 10-11:
+8 |   refine_ m
+              ^
+Error: vox: verification failed (lean).
+       Goal: m@1 = 0
+Hypotheses:
+  not (i@1 < n)
+Possible counterexample:
+  m@1 = 1
+  n = 0
+  i@1 = 0
+(lean: error: `grind` failed)
+|}]
