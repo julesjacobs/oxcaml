@@ -120,6 +120,20 @@ def main():
                                          r'^  \{ lo = l; hi = h \}$'),
         '@PCELL@': slice_between(read('demo/lean_pcell.ml'), r'^let swap_sum',
                                  r'read c1 a t1 in') + '\n    ...',
+        '@TUPLES@': slice_between(read('demo/lean_tuples.ml'), r'^let swap',
+                                  r'\| \(x, y\) -> \(y, x\)')
+                    + '\n\n'
+                    + slice_between(read('demo/lean_tuples.ml'),
+                                    r'^let first_pos', r'\| \(x, _\) -> x'),
+        '@QUANT@': slice_between(read('demo/lean_quant.ml'), r'^let max2',
+                                 r'fun x y -> if x < y then y else x'),
+        '@ISQRT@': slice_between(read('demo/lean_isqrt.ml'),
+                                 r'^let total_ sq', r'^let total_ sq')
+                   + '\n\n'
+                   + slice_between(read('demo/lean_isqrt.ml'), r'^let isqrt',
+                                   r'go 0 \(x \+ 1\)'),
+        '@BORROW@': slice_between(read('demo/lean_borrow.ml'), r'^let bump',
+                                  r'^  s$'),
         '@BST_MLI@': strip_leading_comment(read('demo/bst.mli')),
         '@BST_ML@': strip_leading_comment(read('demo/bst.ml')),
         '@BST_CLIENT@': slice_between(read('demo/lean_bst.ml'), r'^let demo',

@@ -180,6 +180,14 @@ proved rather than assumed: its facts are contradictory, so the bare
 predicates; functional update preserves the untouched fields' facts.</p>
 <pre><code class="ml">@RECORDS@</code></pre></div>
 
+<div class="card"><h3>Native tuples <span class="pill">demo/lean_tuples.ml</span></h3>
+<p>Unlabeled tuples are structural: one polymorphic product per arity, so
+construction and <code>fst</code>/<code>snd</code> appear in predicates with
+no wrapper type and the predicate language stays untyped.  Matching (or a
+destructuring <code>let</code>) contributes per-component facts, and tuples
+of int/bool compare with <code>=</code> in the logic.</p>
+<pre><code class="ml">@TUPLES@</code></pre></div>
+
 <div class="card"><h3>Contracts as loop invariants <span class="pill">demo/lean_fib.ml</span></h3>
 <p>Parameter refinements are preconditions, so a recursive function's
 parameters can carry its invariant — here
@@ -203,12 +211,27 @@ module it concerns, is checked on every compile, and is exported through the
 own source location.</p>
 <pre><code class="lean">@EMBEDDED@</code></pre></div>
 
+<div class="card"><h3>Quantifiers <span class="pill">demo/lean_quant.ml</span></h3>
+<p><code>forall_</code>/<code>exists_</code> and implication in predicates;
+binders are untyped and Lean infers their sorts.  Here <code>max2</code> is
+not just an upper bound but provably the least one — each branch proves the
+quantified conclusion under its path fact.</p>
+<pre><code class="ml">@QUANT@</code></pre></div>
+
 <div class="card"><h3>Binary search <span class="pill">demo/lean_binsearch.ml</span></h3>
 <p>Immutable arrays are a built-in theory &mdash; <code>Iarray.length a</code>
 and <code>a.(i)</code> in predicates, reflected in expressions, nothing
 assumed: in-bounds access, the bracket invariant, and the flip-point
 characterization of the result are all proved.</p>
 <pre><code class="ml">@BINSEARCH@</code></pre></div>
+
+<div class="card"><h3>Correct, not just safe <span class="pill">demo/lean_isqrt.ml</span></h3>
+<p>Integer square root against a reflected <code>sq</code>: the result is
+bracketed by squares of the same function the program runs.  The midpoint is
+reflected division; one nonlinear lemma is proved in an embedded block.
+Nothing in the file is assumed — and returning the wrong endpoint is caught
+with a concrete counterexample (<code>x&nbsp;=&nbsp;0</code>).</p>
+<pre><code class="ml">@ISQRT@</code></pre></div>
 
 <div class="card"><h3>Mutable locals, loop invariants <span class="pill">demo/lean_mutable.ml</span></h3>
 <p>Reads of a <code>let mutable</code> variable name its current SSA
@@ -231,6 +254,14 @@ and return a unique token, so facts about a cell's contents cannot survive a
 write.  Duplicated, stale, forged, and cross-cell tokens are compile-time
 errors.</p>
 <pre><code class="ml">@PCELL@</code></pre></div>
+
+<div class="card"><h3>Mutable borrows <span class="pill">demo/lean_borrow.ml</span></h3>
+<p>RustHorn-style: a borrow hands the continuation a loan whose final value
+is a prophecy variable <code>p</code>; the borrower proves an export in
+lender terms, and after resolution the lender reads the residual back with
+proof.  Double use, forged exports, and writes through frozen loans are
+compile-time errors.</p>
+<pre><code class="ml">@BORROW@</code></pre></div>
 
 <div class="card"><h3>Deleting bounds checks, safely <span class="pill">demo/lean_kernel.ml</span></h3>
 <p><code>get</code> reads with <code>unsafe_get</code>: the per-access
