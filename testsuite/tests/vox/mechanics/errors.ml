@@ -249,7 +249,7 @@ Error: vox: a prelude block takes a single string literal, e.g. [%%vox.prelude.l
 Line 1, characters 3-18:
 1 | [%%vox.prelude.coq "Definition x := 3."]
        ^^^^^^^^^^^^^^^
-Error: vox: unknown prelude backend "coq" (expected "lean" or "z3")
+Error: vox: unknown prelude backend "coq" (expected "lean")
 |}]
 
 (* A well-formed block is accepted (and inert under -vox-dry-run). *)

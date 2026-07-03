@@ -122,8 +122,8 @@
   would prove false equalities) may appear in predicates:
   `ilist{ _ = Cons (3, Nil) }`.  The solver models them with its
   datatype theory (free, injective, pairwise-distinct constructors);
-  datatypes reach it as `declare-datatypes` blocks (Z3) or single-line
-  `inductive`s (Lean) in dependency order.  Mutually recursive
+  datatypes reach it as single-line Lean `inductive`s in dependency
+  order.  Mutually recursive
   datatypes are not supported (self-recursion is fine).  Constructor
   argument types may themselves be refined (`W of {v:int | v > 0}`):
   matching then contributes the field's refinement at the binder.
@@ -206,12 +206,9 @@
   closed).  See testsuite/tests/vox/demo/lean_reflectclient.ml.
   Caveats: the program/logic correspondence of a reflected call is
   partial-correctness (a diverging call returns no value) and ideal
-  arithmetic (overflow, as everywhere); and reflected definitions are
-  emitted only by the LEAN backend (Z3 has no termination checker for
-  recursive definitions), so a total_ binding under `-vox-solver z3`
-  is a compile-time error.
-- Embedded preludes: `[%%vox.prelude.lean {lean|...|lean}]` (and
-  `.z3`, or bare `vox.prelude` for whichever backend runs) puts the
+  arithmetic (overflow, as everywhere).
+- Embedded preludes: `[%%vox.prelude.lean {lean|...|lean}]` (or the
+  equivalent bare `vox.prelude`) puts the
   solver-side text directly in the module, next to the datatypes it
   describes.  Blocks are emitted into every solver input for the
   module, in source order; a solver error inside a block is reported
@@ -296,7 +293,7 @@ places:
   `not (s is C)` (an internal constructor tester, not surface syntax).
   Guarded arms contribute no negation (the pattern may have matched
   with the guard false), nor do arms with refuting sub-patterns
-  (`A 0`: the head may have matched anyway).  Z3 has native testers;
+  (`A 0`: the head may have matched anyway).
   Lean encodes `s is C` existentially and each theorem with tester
   facts also receives the subject's exhaustiveness disjunction
   ((∃ a, s = A a) ∨ ... ∨ s = C) as a hypothesis, so grind can case on
@@ -350,7 +347,7 @@ arrow as the sanctioned spelling.)
 
 A `-dump-vc` flag prints every VC (hypotheses, goal, source location);
 `-vox-dry-run` skips the solver, so VC generation is testable without
-z3 (see testsuite/tests/vox, promoted like other reference tests).
+a solver (see testsuite/tests/vox, promoted like other reference tests).
 A failed obligation reports the goal, the hypotheses, and -- when
 grind's linear solver leaves one -- a POSSIBLE COUNTEREXAMPLE: its
 arithmetic model, rewritten to source names ([a = 0, a#2 = 1],

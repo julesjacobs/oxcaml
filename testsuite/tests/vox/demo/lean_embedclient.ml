@@ -1,5 +1,4 @@
 (* TEST
- flags = "-vox-solver lean";
  script = "sh ${test_source_directory}/../has-lean.sh";
  modules = "lean_embed.ml";
  script;

@@ -9,7 +9,7 @@
    dependent application, and match facts on a variable scrutinee ([s = C x1 ... xn] in
    the branch that matched [C x1 ... xn]).
 
-   VCs are discharged by a Z3 subprocess over SMT-LIB2. Solver error, unknown, and timeout
+   VCs are discharged by a Lean 4 subprocess. Solver error, unknown, and timeout
    all count as verification FAILURE. *)
 
 open Types
@@ -116,11 +116,10 @@ let find_datatype p = List.find_opt (fun (q, _) -> Path.same p q) !datatypes
 let spec_defs : Vox_reflect.spec_def list ref = ref []
 
 (* Embedded prelude blocks ([%%vox.prelude ...]) of the module (or
-   toplevel session) being verified, in source order: backend
-   restriction ([None] = any), text (ending in a newline), and the
-   block's location (solver errors inside a block are reported
-   there).  See the collection functions below. *)
-let embedded_preludes : (string option * string * Location.t) list ref = ref []
+   toplevel session) being verified, in source order: text (ending in
+   a newline) and the block's location (solver errors inside a block
+   are reported there).  See the collection functions below. *)
+let embedded_preludes : (string * Location.t) list ref = ref []
 
 (* Prelude blocks imported from other units' .cmis ([%%vox.prelude]
    in their interfaces): unit name and blocks, in dependency order
@@ -1084,41 +1083,7 @@ let rec walk_expr env ctx (e : expression) =
 ;;
 
 (* ------------------------------------------------------------------ *)
-(* SMT-LIB2 serialization *)
-
-(* SMT-LIB2 quoted symbols may contain any character except '|' and
-   '\'; operator identifiers (e.g. [( || )]) would otherwise break the
-   quoting.  Replacement cannot collide: [Ident.unique_name] includes
-   the stamp, and distinct idents never share one. *)
-let smt_name id =
-  let s =
-    String.map
-      (fun c ->
-        match c with
-        | '|' | '\\' -> '_'
-        | _ -> c)
-      (Ident.unique_name id)
-  in
-  "|" ^ s ^ "|"
-;;
-
-let smt_escape s =
-  String.map
-    (fun c ->
-      match c with
-      | '|' | '\\' -> '_'
-      | _ -> c)
-    s
-;;
-
-let smt_dt_name p = "|dt:" ^ smt_escape (path_uname p) ^ "|"
-let smt_constr_name p c = "|c:" ^ smt_escape (path_uname p ^ "." ^ c) ^ "|"
-
-let smt_sel_name p c i =
-  "|s:" ^ smt_escape (path_uname p ^ "." ^ c) ^ "." ^ Int.to_string i ^ "|"
-;;
-
-let smt_field_name p l = "|s:" ^ smt_escape (path_uname p ^ "." ^ l) ^ "|"
+(* Serialization helpers *)
 
 (* Arity of constructor [c] of the registered variant at [p]; testers of
    unregistered paths never reach serialization (usability filter). *)
@@ -1131,16 +1096,6 @@ let constr_arity p c =
   | Some (_, Dt_record _) | None -> 0
 ;;
 
-
-let smt_sort = function
-  | S_int -> "Int"
-  | S_bool -> "Bool"
-  | S_other -> "VoxU"
-  | S_data p ->
-    (match find_datatype p with
-     | Some _ -> smt_dt_name p
-     | None -> "VoxU" (* unregistered: degrade, sound *))
-;;
 
 let sort_is_other = function
   | S_other -> true
@@ -1157,161 +1112,24 @@ let datatype_field_needs_voxu () =
     !datatypes
 ;;
 
-(* One [declare-datatypes] block (self-recursion within it is fine).  A
-   record is a single ["mk"] constructor whose selectors are the
-   labels. *)
-let smt_datatype_decl (p, decl) =
-  let buf = Buffer.create 128 in
-  Buffer.add_string
-    buf
-    (Printf.sprintf "(declare-datatypes ((%s 0)) ((" (smt_dt_name p));
-  (match decl with
-   | Dt_variant constrs ->
-     List.iteri
-       (fun k (cname, fields) ->
-         if k > 0 then Buffer.add_char buf ' ';
-         Buffer.add_string buf ("(" ^ smt_constr_name p cname);
-         List.iteri
-           (fun i fs ->
-             Buffer.add_string
-               buf
-               (Printf.sprintf
-                  " (%s %s)"
-                  (smt_sel_name p cname i)
-                  (smt_sort fs)))
-           fields;
-         Buffer.add_char buf ')')
-       constrs
-   | Dt_record fields ->
-     Buffer.add_string buf ("(" ^ smt_constr_name p "mk");
-     List.iter
-       (fun (l, fs) ->
-         Buffer.add_string
-           buf
-           (Printf.sprintf " (%s %s)" (smt_field_name p l) (smt_sort fs)))
-       fields;
-     Buffer.add_char buf ')');
-  Buffer.add_string buf ")))\n";
-  Buffer.contents buf
-;;
-
-(* All registered datatypes except [skip] (already declared by an
-   imported export), in dependency order. *)
-let smt_datatype_decls buf ~skip =
-  List.iter
-    (fun ((p, _) as dt) ->
-      if not (List.exists (String.equal (path_uname p)) skip)
-      then Buffer.add_string buf (smt_datatype_decl dt))
-    !datatypes
-;;
-
-let rec smt_of_pred buf (p : Refinement.pred) =
-  let open Refinement in
-  match p with
-  | Pbound -> assert false (* always substituted before discharge *)
-  | Pvar id -> Buffer.add_string buf (smt_name id)
-  | Pint n ->
-    if n >= 0
-    then Buffer.add_string buf (Int.to_string n)
-    else (
-      (* Strip the sign rather than negating: [-min_int] overflows. *)
-      let s = Int.to_string n in
-      Buffer.add_string buf
-        (Printf.sprintf "(- %s)" (String.sub s 1 (String.length s - 1))))
-  | Pbool b -> Buffer.add_string buf (Bool.to_string b)
-  | Pconstr (p, c, []) -> Buffer.add_string buf (smt_constr_name p c)
-  | Pconstr (p, c, args) ->
-    Buffer.add_string buf ("(" ^ smt_constr_name p c);
-    List.iter
-      (fun a ->
-        Buffer.add_char buf ' ';
-        smt_of_pred buf a)
-      args;
-    Buffer.add_char buf ')'
-  (* Spec functions are defined by the [-vox-prelude].  The name is
-     pipe-quoted: [|f|] denotes the same SMT symbol as a plain [f], so
-     preludes declaring the plain name keep working, while names that
-     are not simple SMT symbols (e.g. [len']) stay well-formed. *)
-  | Pfun (f, []) -> Buffer.add_string buf ("|" ^ smt_escape f ^ "|")
-  | Pfun (f, args) ->
-    Buffer.add_string buf ("(|" ^ smt_escape f ^ "|");
-    List.iter
-      (fun a ->
-        Buffer.add_char buf ' ';
-        smt_of_pred buf a)
-      args;
-    Buffer.add_char buf ')'
-  | Pfield (p, l, a) ->
-    Buffer.add_string buf ("(" ^ smt_field_name p l ^ " ");
-    smt_of_pred buf a;
-    Buffer.add_char buf ')'
-  | Pis (p, c, a) ->
-    (* the datatype theory's native tester *)
-    Buffer.add_string buf ("((_ is " ^ smt_constr_name p c ^ ") ");
-    smt_of_pred buf a;
-    Buffer.add_char buf ')'
-  | Pbinop (Neq, a, b) ->
-    Buffer.add_string buf "(not (= ";
-    smt_of_pred buf a;
-    Buffer.add_char buf ' ';
-    smt_of_pred buf b;
-    Buffer.add_string buf "))"
-  | Pbinop (op, a, b) ->
-    let s =
-      match op with
-      | Add -> "+"
-      | Sub -> "-"
-      | Mul -> "*"
-      | Eq -> "="
-      | Lt -> "<"
-      | Le -> "<="
-      | Gt -> ">"
-      | Ge -> ">="
-      | Neq -> assert false
-    in
-    Buffer.add_string buf ("(" ^ s ^ " ");
-    smt_of_pred buf a;
-    Buffer.add_char buf ' ';
-    smt_of_pred buf b;
-    Buffer.add_char buf ')'
-  | Pand (a, b) ->
-    Buffer.add_string buf "(and ";
-    smt_of_pred buf a;
-    Buffer.add_char buf ' ';
-    smt_of_pred buf b;
-    Buffer.add_char buf ')'
-  | Por (a, b) ->
-    Buffer.add_string buf "(or ";
-    smt_of_pred buf a;
-    Buffer.add_char buf ' ';
-    smt_of_pred buf b;
-    Buffer.add_char buf ')'
-  | Pnot a ->
-    Buffer.add_string buf "(not ";
-    smt_of_pred buf a;
-    Buffer.add_char buf ')'
-;;
-
 let free_vars_of_vc vc = List.concat_map Refinement.free_vars (vc.vc_goal :: vc.vc_facts)
 
 (* Embedded preludes: [%%vox.prelude {lean|...|lean}] structure items
-   carry solver-side text directly in the OCaml source.  The
-   [.lean]/[.z3] suffix restricts a block to one backend; a bare
-   [vox.prelude] block is inserted for whichever backend runs (like
-   the [-vox-prelude] file).  Blocks are module-local for now: they do
-   not travel in the .cmi, so a CLIENT unpacking exported refinements
-   that mention this module's spec functions still needs the
-   definitions on its own command line (or its own blocks). *)
+   carry solver-side text directly in the OCaml source ([.lean] is an
+   accepted, explicit spelling of the bare [vox.prelude]).  Blocks are
+   module-local for now: they do not travel in the .cmi, so a CLIENT
+   unpacking exported refinements that mention this module's spec
+   functions still needs the definitions on its own command line (or
+   its own blocks). *)
 
 type prelude_kind =
   | Not_prelude
-  | Prelude of string option (* [None] = backend-generic *)
+  | Prelude
   | Bad_backend of string
 
 let prelude_extension_kind txt =
-  if String.equal txt "vox.prelude" then Prelude None
-  else if String.equal txt "vox.prelude.lean" then Prelude (Some "lean")
-  else if String.equal txt "vox.prelude.z3" then Prelude (Some "z3")
+  if String.equal txt "vox.prelude" then Prelude
+  else if String.equal txt "vox.prelude.lean" then Prelude
   else if
     String.length txt >= 12 && String.equal (String.sub txt 0 12) "vox.prelude."
   then Bad_backend (String.sub txt 12 (String.length txt - 12))
@@ -1323,7 +1141,7 @@ let prelude_extension_kind txt =
    extension"). *)
 let is_prelude_extension_name txt =
   match prelude_extension_kind txt with
-  | Prelude _ | Bad_backend _ -> true
+  | Prelude | Bad_backend _ -> true
   | Not_prelude -> false
 ;;
 
@@ -1334,8 +1152,8 @@ let prelude_extension_text (({txt; loc}, payload) : Parsetree.extension) =
   | Not_prelude -> None
   | Bad_backend b ->
     Location.raise_errorf ~loc
-      "vox: unknown prelude backend %S (expected \"lean\" or \"z3\")" b
-  | Prelude backend ->
+      "vox: unknown prelude backend %S (expected \"lean\")" b
+  | Prelude ->
     (match payload with
      | Parsetree.PStr
          [ { pstr_desc =
@@ -1345,7 +1163,7 @@ let prelude_extension_text (({txt; loc}, payload) : Parsetree.extension) =
                    ; _ }
                  , [] )
            ; _ } ] ->
-       Some (backend, s)
+       Some s
      | _ ->
        Location.raise_errorf ~loc
          "vox: a prelude block takes a single string literal, e.g. \
@@ -1363,20 +1181,10 @@ let collect_preludes (str : structure) =
       | Tstr_attribute ({attr_name = {txt; _}; attr_payload; attr_loc} : attribute)
         when is_prelude_extension_name txt ->
         (match prelude_extension_text ({txt; loc = attr_loc}, attr_payload) with
-         | Some (backend, s) -> Some (backend, normalize_block s, attr_loc)
+         | Some s -> Some (normalize_block s, attr_loc)
          | None -> None)
       | _ -> None)
     str.str_items
-;;
-
-let embedded_for backend =
-  List.filter_map
-    (fun (b, s, loc) ->
-      match b with
-      | None -> Some (s, loc)
-      | Some b when String.equal b backend -> Some (s, loc)
-      | Some _ -> None)
-    !embedded_preludes
 ;;
 
 (* Blocks of an INTERFACE ([%%vox.prelude] in an .mli): collected by
@@ -1393,7 +1201,7 @@ let collect_preludes_sig (sg : Typedtree.signature) =
         (match
            prelude_extension_text ({txt; loc = attr_loc}, attr_payload)
          with
-         | Some (backend, s) -> Some (backend, normalize_block s)
+         | Some s -> Some (normalize_block s)
          | None -> None)
       | _ -> None)
     sg.sig_items
@@ -1427,24 +1235,13 @@ let gather_imported_preludes () =
   List.rev !out
 ;;
 
-(* The blocks of one unit's export that apply to [backend]. *)
-let export_blocks_for backend (vp : Cmi_format.vox_prelude_export) =
-  List.filter_map
-    (fun (b, s) ->
-      match b with
-      | None -> Some s
-      | Some b when String.equal b backend -> Some s
-      | Some _ -> None)
-    vp.Cmi_format.vp_blocks
-;;
-
 (* Datatype names already declared by imported exports: a client
    skips re-declaring these (stable names guarantee they denote the
    same declarations). *)
 let imported_unames () =
   List.concat_map
     (fun (_, vp) ->
-      List.map (fun (n, _, _) -> n) vp.Cmi_format.vp_datatypes)
+      List.map (fun (n, _) -> n) vp.Cmi_format.vp_datatypes)
     !imported_preludes
 ;;
 
@@ -1466,7 +1263,7 @@ let check_imported_datatype_clashes ~render =
       List.iter
         (fun (unit, vp) ->
           List.iter
-            (fun (n, leand, _) ->
+            (fun (n, leand) ->
               if String.equal n uname
                  && not (String.equal (render dt : string) leand)
               then
@@ -1493,9 +1290,8 @@ let count_lines s = String.fold_left (fun n c -> if c = '\n' then n + 1 else n) 
 
 (* The [-vox-prelude] file: user-written solver-side definitions (spec
    functions such as measures), inserted verbatim into every generated
-   solver input just after the datatype declarations.  Written for
-   whichever backend [-vox-solver] selects.  Normalized to end in a
-   newline; an unreadable file is a verification failure. *)
+   solver input just after the datatype declarations.  Normalized to
+   end in a newline; an unreadable file is a verification failure. *)
 let prelude_cache : string option ref = ref None
 
 let prelude () =
@@ -1532,88 +1328,9 @@ let vc_uses_spec_fun vc =
   List.exists Refinement.mentions_spec_fun (vc.vc_goal :: vc.vc_facts)
 ;;
 
-let smt_script vc =
-  let buf = Buffer.create 512 in
-  let seen = Hashtbl.create 16 in
-  let needs_other =
-    List.exists
-      (fun id ->
-        match Hashtbl.find_opt name_sorts id with
-        | Some (S_int | S_bool) -> false
-        | Some (S_data p) -> find_datatype p = None
-        | Some S_other | None -> true)
-      (free_vars_of_vc vc)
-    || datatype_field_needs_voxu ()
-  in
-  let needs_other = needs_other || imported_need_voxu () in
-  if needs_other then Buffer.add_string buf "(declare-sort VoxU 0)\n";
-  (* Imported datatype declarations first (dependency order,
-     deduplicated across units by stable name), then this module's
-     remaining datatypes: declarations are always needed (this VC's
-     sort declarations may reference them through the cross-unit
-     dedup).  Prelude TEXT -- imported blocks, the -vox-prelude file,
-     own blocks, in that order -- only when the VC mentions a spec
-     function, like the file was gated before. *)
-  let imported_seen = ref [] in
-  List.iter
-    (fun (_, vp) ->
-      List.iter
-        (fun (n, _, smtd) ->
-          if not (List.exists (String.equal n) !imported_seen)
-          then (
-            imported_seen := n :: !imported_seen;
-            Buffer.add_string buf smtd))
-        vp.Cmi_format.vp_datatypes)
-    !imported_preludes;
-  smt_datatype_decls buf ~skip:!imported_seen;
-  if vc_uses_spec_fun vc
-  then (
-    List.iter
-      (fun (_, vp) ->
-        List.iter (fun s -> Buffer.add_string buf s) (export_blocks_for "z3" vp))
-      !imported_preludes;
-    Buffer.add_string buf (prelude ());
-    List.iter (fun (s, _) -> Buffer.add_string buf s) (embedded_for "z3"));
-  List.iter
-    (fun id ->
-      if not (Hashtbl.mem seen id)
-      then (
-        Hashtbl.add seen id ();
-        let s =
-          match Hashtbl.find_opt name_sorts id with
-          | Some ds -> smt_sort ds
-          | None -> "VoxU"
-        in
-        Buffer.add_string buf (Printf.sprintf "(declare-const %s %s)\n" (smt_name id) s)))
-    (free_vars_of_vc vc);
-  List.iter
-    (fun f ->
-      Buffer.add_string buf "(assert ";
-      smt_of_pred buf f;
-      Buffer.add_string buf ")\n")
-    vc.vc_facts;
-  Buffer.add_string buf "(assert (not ";
-  smt_of_pred buf vc.vc_goal;
-  Buffer.add_string buf "))\n(check-sat)\n";
-  Buffer.contents buf
-;;
-
 (* ------------------------------------------------------------------ *)
-(* Z3 harness: [Sys.command] + temp files; no unix dependency. The solver's own timeout
-   flag bounds runtime. A wedged process is out of scope for v0. *)
-
-type verdict =
-  | Valid
-  | Invalid
-  | Unknown of string
-
-let z3_command () =
-  if not (String.equal !Clflags.vox_solver_path "") then !Clflags.vox_solver_path
-  else
-    match Sys.getenv_opt "VOX_Z3" with
-    | Some s -> s
-    | None -> "z3"
-;;
+(* Solver harness: [Sys.command] + temp files; no unix dependency.  A
+   wedged process is out of scope for v0. *)
 
 let lean_command () =
   if not (String.equal !Clflags.vox_solver_path "") then !Clflags.vox_solver_path
@@ -1621,47 +1338,6 @@ let lean_command () =
     match Sys.getenv_opt "VOX_LEAN" with
     | Some s -> s
     | None -> "lean"
-;;
-
-let run_z3 script =
-  let in_file = Filename.temp_file "vox" ".smt2" in
-  let out_file = Filename.temp_file "vox" ".out" in
-  Misc.try_finally
-    ~always:(fun () ->
-      Misc.remove_file in_file;
-      Misc.remove_file out_file)
-    (fun () ->
-      let oc = open_out in_file in
-      output_string oc script;
-      close_out oc;
-      let cmd =
-        Printf.sprintf
-          "%s -T:10 %s > %s 2>&1"
-          (Filename.quote (z3_command ()))
-          (Filename.quote in_file)
-          (Filename.quote out_file)
-      in
-      let status = Sys.command cmd in
-      let first_line =
-        let ic = open_in out_file in
-        let l =
-          try input_line ic with
-          | End_of_file -> ""
-        in
-        close_in ic;
-        l
-      in
-      match first_line with
-      | "unsat" -> Valid
-      | "sat" -> Invalid
-      | "timeout" -> Unknown "solver timeout"
-      | "unknown" -> Unknown "solver returned unknown"
-      | other ->
-        Unknown
-          (Printf.sprintf
-             "solver error (exit %d): %s"
-             status
-             (if String.equal other "" then "<no output>" else other)))
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -1791,9 +1467,9 @@ let rec lean_of_pred buf (p : Refinement.pred) =
     Buffer.add_char buf ')'
   | Pfun (f, []) -> Buffer.add_string buf f
   | Pfun (f, args) ->
-    (* Spec function, emitted verbatim (unlike the SMT side, no quoting
-       is needed: every OCaml lowercase identifier, [']s included, is a
-       valid Lean identifier); defined by the [-vox-prelude]. *)
+    (* Spec function, emitted verbatim (no quoting is needed: every
+       OCaml lowercase identifier, [']s included, is a valid Lean
+       identifier); defined by the [-vox-prelude]. *)
     Buffer.add_string buf ("(" ^ f);
     List.iter
       (fun a ->
@@ -1920,7 +1596,7 @@ let cmi_export env (sg : Types.signature) ~defs ~blocks =
       (fun (d : Vox_reflect.spec_def) ->
         let b = Buffer.create 128 in
         lean_spec_def b d;
-        Some "lean", Buffer.contents b)
+        Buffer.contents b)
       defs
   in
   let blocks = def_blocks @ blocks in
@@ -1948,8 +1624,7 @@ let cmi_export env (sg : Types.signature) ~defs ~blocks =
           defs;
         let dts =
           List.map
-            (fun ((p, _) as dt) ->
-              path_uname p, lean_datatype_decl dt, smt_datatype_decl dt)
+            (fun ((p, _) as dt) -> path_uname p, lean_datatype_decl dt)
             !datatypes
         in
         Some
@@ -1972,7 +1647,7 @@ let cmi_export_of_signature (tsg : Typedtree.signature) =
 
 let cmi_export_of_structure (str : structure) (sg : Types.signature) =
   cmi_export str.str_final_env sg ~defs:!spec_defs
-    ~blocks:(List.map (fun (b, s, _loc) -> b, s) (collect_preludes str))
+    ~blocks:(List.map fst (collect_preludes str))
 ;;
 
 
@@ -2004,7 +1679,7 @@ let lean_theorem buf i vc =
     vc.vc_facts;
   (* Exhaustiveness hypotheses: for each tester subject among the facts,
      tell grind the subject IS one of its constructors, so it can case
-     on the negations.  (Z3's datatype theory knows this natively.)
+     on the negations.
      The disjunction is [Por] over the positive testers, so it reuses
      the serializer; validated shape: (∃ a, s = K a) ∨ ... ∨ s = M. *)
   let seen_subj = Hashtbl.create 4 in
@@ -2094,7 +1769,7 @@ let lean_file vcs =
   List.iter
     (fun (unit, vp) ->
       List.iter
-        (fun (n, leand, _) ->
+        (fun (n, leand) ->
           if not (List.exists (String.equal n) !seen)
           then (
             seen := n :: !seen;
@@ -2115,7 +1790,7 @@ let lean_file vcs =
       (fun (unit, vp) ->
         List.iter
           (fun text -> seg ~src:(Imported_block unit) text)
-          (export_blocks_for "lean" vp))
+          vp.Cmi_format.vp_blocks)
       !imported_preludes;
     seg (prelude ()));
   (* Reflected definitions, unconditionally: they are checked
@@ -2132,10 +1807,10 @@ let lean_file vcs =
   then
     List.iter
       (fun (s, loc) -> seg ~src:(Local_block loc) s)
-      (embedded_for "lean");
+      !embedded_preludes;
   (* Bound elaboration per theorem: a diverging [grind] must count as
      a verification failure, not hang the build.  (A wedged process
-     outside elaboration remains out of scope, as for z3.)  Emitted
+     outside elaboration remains out of scope.)  Emitted
      after the prelude so a prelude may begin with [import], which
      Lean requires to be the first command in the file. *)
   seg "set_option maxHeartbeats 400000\n";
@@ -2487,45 +2162,7 @@ let discharge () =
       | Prove -> true
       | Runtime_check | Assume -> false
     in
-    match !Clflags.vox_solver with
-    | "lean" -> run_lean (List.filter needs_proof all)
-    | "z3" ->
-      (* Reflected definitions are emitted (and termination-checked)
-         only by the Lean backend; silently treating them as
-         uninterpreted would make every use fail with an undeclared
-         symbol, so reject them up front with a real error. *)
-      (match !spec_defs with
-       | [] -> ()
-       | d :: _ ->
-         Location.raise_errorf ~loc:d.Vox_reflect.sd_loc
-           "vox: reflected (total_) functions require \"-vox-solver \
-            lean\"; the z3 backend does not emit their definitions");
-      List.iter
-        (fun vc ->
-          if needs_proof vc
-          then (
-            match run_z3 (smt_script vc) with
-            | Valid -> ()
-            | Invalid ->
-              Location.raise_errorf
-                ~loc:vc.vc_loc
-                "vox: verification failed.@ Unprovable goal: %s%s"
-                (goal_for_error vc)
-                (hyps_for_error vc)
-            | Unknown reason ->
-              Location.raise_errorf
-                ~loc:vc.vc_loc
-                "vox: verification failed (%s).@ Goal: %s%s"
-                reason
-                (goal_for_error vc)
-                (hyps_for_error vc)))
-        all
-    | other ->
-      (match all with
-       | [] -> ()
-       | vc :: _ ->
-         Location.raise_errorf ~loc:vc.vc_loc
-           "vox: unknown solver %S (expected \"z3\" or \"lean\")" other))
+    run_lean (List.filter needs_proof all))
 ;;
 
 (* Entry point: called on the final typedtree of an implementation. *)
@@ -2674,7 +2311,7 @@ let check_implementation (str : structure) (sg : Types.signature) =
    binders (which may carry refinements copied from earlier phrases)
    contribute facts. *)
 let toplevel_ctx = ref { cfacts = []; cscope = [] }
-let toplevel_preludes : (string option * string * Location.t) list ref = ref []
+let toplevel_preludes : (string * Location.t) list ref = ref []
 let toplevel_active = ref false
 
 let check_toplevel_phrase (str : structure) ~(sig_acc : Types.signature)

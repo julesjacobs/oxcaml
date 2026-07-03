@@ -1,5 +1,4 @@
 (* TEST
- flags = "-vox-solver lean";
  script = "sh ${test_source_directory}/../has-lean.sh";
  modules = "dupspec_a.mli dupspec_a.ml dupspec_b.mli dupspec_b.ml";
  script;

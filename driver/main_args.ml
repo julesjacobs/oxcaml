@@ -931,10 +931,6 @@ let mk_dump_vc f =
 let mk_vox_dry_run f =
   "-vox-dry-run", Arg.Unit f, " vox: generate VCs but do not run the solver"
 
-let mk_vox_solver f =
-  "-vox-solver", Arg.String f,
-  "<name>  vox: solver for verification conditions (z3 or lean)"
-
 let mk_vox_solver_path f =
   "-vox-solver-path", Arg.String f,
   "<path>  vox: path to the solver binary"
@@ -1230,7 +1226,6 @@ module type Core_options = sig
   val _dsource : unit -> unit
   val _dump_vc : unit -> unit
   val _vox_dry_run : unit -> unit
-  val _vox_solver : string -> unit
   val _vox_solver_path : string -> unit
   val _vox_prelude : string -> unit
   val _dparsetree : unit -> unit
@@ -1634,7 +1629,6 @@ struct
     mk_dsource F._dsource;
     mk_dump_vc F._dump_vc;
     mk_vox_dry_run F._vox_dry_run;
-    mk_vox_solver F._vox_solver;
     mk_vox_solver_path F._vox_solver_path;
     mk_vox_prelude F._vox_prelude;
     mk_dparsetree F._dparsetree;
@@ -1748,7 +1742,6 @@ struct
     mk_dsource F._dsource;
     mk_dump_vc F._dump_vc;
     mk_vox_dry_run F._vox_dry_run;
-    mk_vox_solver F._vox_solver;
     mk_vox_solver_path F._vox_solver_path;
     mk_vox_prelude F._vox_prelude;
     mk_dparsetree F._dparsetree;
@@ -1937,7 +1930,6 @@ struct
     mk_dsource F._dsource;
     mk_dump_vc F._dump_vc;
     mk_vox_dry_run F._vox_dry_run;
-    mk_vox_solver F._vox_solver;
     mk_vox_solver_path F._vox_solver_path;
     mk_vox_prelude F._vox_prelude;
     mk_dparsetree F._dparsetree;
@@ -2107,7 +2099,6 @@ module Make_opttop_options (F : Opttop_options) = struct
     mk_dsource F._dsource;
     mk_dump_vc F._dump_vc;
     mk_vox_dry_run F._vox_dry_run;
-    mk_vox_solver F._vox_solver;
     mk_vox_solver_path F._vox_solver_path;
     mk_vox_prelude F._vox_prelude;
     mk_dparsetree F._dparsetree;
@@ -2259,7 +2250,6 @@ struct
     mk_dsource F._dsource;
     mk_dump_vc F._dump_vc;
     mk_vox_dry_run F._vox_dry_run;
-    mk_vox_solver F._vox_solver;
     mk_vox_solver_path F._vox_solver_path;
     mk_vox_prelude F._vox_prelude;
     mk_dparsetree F._dparsetree;
@@ -2509,7 +2499,6 @@ module Default = struct
     let _dsource = set dump_source
     let _dump_vc = set vox_dump_vc
     let _vox_dry_run = set vox_dry_run
-    let _vox_solver s = vox_solver := s
     let _vox_solver_path s = vox_solver_path := s
     let _vox_prelude s = vox_prelude := s
     let _dtypedtree = set dump_typedtree

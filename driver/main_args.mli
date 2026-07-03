@@ -92,7 +92,6 @@ module type Core_options = sig
   val _dsource : unit -> unit
   val _dump_vc : unit -> unit
   val _vox_dry_run : unit -> unit
-  val _vox_solver : string -> unit
   val _vox_solver_path : string -> unit
   val _vox_prelude : string -> unit
   val _dparsetree : unit -> unit

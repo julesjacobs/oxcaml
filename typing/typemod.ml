@@ -2562,7 +2562,7 @@ and transl_signature ?(interface_toplevel = false) env
            signature when the .cmi is written. *)
         ignore
           (Vox_verify.prelude_extension_text ext
-           : (string option * string) option);
+           : string option);
         let name, payload = ext in
         let attr =
           {attr_name = name; attr_payload = payload; attr_loc = loc}
@@ -4100,7 +4100,7 @@ and type_structure ?(toplevel = None) ~funct_body anchor env sstr =
            so the verification pass can collect it from the tree. *)
         ignore
           (Vox_verify.prelude_extension_text ext
-           : (string option * string) option);
+           : string option);
         let name, payload = ext in
         Tstr_attribute
           {attr_name = name; attr_payload = payload; attr_loc = loc},

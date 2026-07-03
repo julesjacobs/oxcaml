@@ -1,5 +1,5 @@
 (* TEST
- flags = "-vox-solver lean -vox-prelude binsearch_lib.lean";
+ flags = "-vox-prelude binsearch_lib.lean";
  script = "sh ${test_source_directory}/../has-lean.sh";
  readonly_files = "binsearch_lib.lean";
  script;

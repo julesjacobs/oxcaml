@@ -1,5 +1,5 @@
 (* TEST
- flags = "-vox-solver lean -vox-prelude rec_lib.lean";
+ flags = "-vox-prelude rec_lib.lean";
  script = "sh ${test_source_directory}/../has-lean.sh";
  modules = "rec_aux.ml";
  readonly_files = "rec_lib.lean";

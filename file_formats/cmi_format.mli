@@ -20,14 +20,13 @@ open Misc
    datatypes its exported refinements are about (a client may never
    mention those types itself, yet the blocks reference them). *)
 type vox_prelude_export = {
-  vp_datatypes : (string * string * string) list;
-      (* (stable solver-side name, Lean declaration, SMT-LIB
-         declaration), in dependency order; clients deduplicate by
-         name across imports *)
+  vp_datatypes : (string * string) list;
+      (* (stable solver-side name, Lean declaration), in dependency
+         order; clients deduplicate by name across imports *)
   vp_needs_voxu : bool;
       (* a datatype field uses the uninterpreted sort *)
-  vp_blocks : (string option * string) list;
-      (* (backend restriction, text) in source order *)
+  vp_blocks : string list;
+      (* block text, in source order *)
 }
 
 type pers_flags =
