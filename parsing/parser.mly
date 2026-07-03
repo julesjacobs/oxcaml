@@ -5219,6 +5219,20 @@ vox_pred_projbase:
   | a = vox_pred_projbase DOT l = mkrhs(LIDENT)
       { mkexp ~loc:$sloc
           (Pexp_field (a, { l with txt = Longident.Lident l.txt })) }
+  (* array indexing [a.(i)]: sugar for [Iarray.get a i], the built-in
+     theory's read (the elaborator owns the [Iarray] spelling). *)
+  | a = vox_pred_projbase DOT LPAREN i = vox_pred RPAREN
+      { let get =
+          mkexp ~loc:$sloc
+            (Pexp_ident
+               (mkrhs
+                  (Longident.Ldot
+                     (mkrhs (Longident.Lident "Iarray") $sloc,
+                      mkrhs "get" $sloc))
+                  $sloc))
+        in
+        mkexp ~loc:$sloc
+          (Pexp_apply (get, [ Nolabel, a; Nolabel, i ])) }
   | p = vox_pred_arg { p }
 ;
 

@@ -97,6 +97,19 @@ let is_unlabeled_pair env ty =
   | _ -> false
 ;;
 
+(* An [int iarray]: the type that admits the built-in array theory
+   ([Iarray.length]/[Iarray.get] reflect as Refinement.ia_len/ia_get).
+   Immutability is what makes the reflection sound (an iarray value
+   denotes one array); the int gate keeps [get]'s result Int-sorted. *)
+let is_int_iarray env ty =
+  match Types.get_desc (Ctype.vox_expand_head env ty) with
+  | Tconstr (p, [ elt ], _) when Path.same p Predef.path_iarray ->
+    (match Types.get_desc (Ctype.vox_expand_head env elt) with
+     | Tconstr (e, [], _) -> Path.same e Predef.path_int
+     | _ -> false)
+  | _ -> false
+;;
+
 (* The surface twin of the gate above, usable BEFORE the argument is
    typed: the resolved value's DECLARED domain is an unlabeled pair
    (as [Stdlib.fst]'s ['a * 'b -> 'a] is), so any application that
@@ -186,7 +199,7 @@ let reflected_call_info env path (desc : Types.value_description) =
    only) -- the typed side inspects the argument's type; the surface
    side passes what it can know before typing (no comparisons; the
    resolved declaration's domain for projections). *)
-let prim_pred prim_name ~eq_ok ~cmp_ok ~proj_ok
+let prim_pred prim_name ~eq_ok ~cmp_ok ~proj_ok ~ia_ok
       (args : Refinement.pred option list) : Refinement.pred option =
   match
     if List.for_all Option.is_some args
@@ -225,6 +238,14 @@ let prim_pred prim_name ~eq_ok ~cmp_ok ~proj_ok
        unary (fun a -> Refinement.Pbinop (Sub, a, Refinement.Pint 1))
      | "%field0_immut" -> proj 0
      | "%field1_immut" -> proj 1
+     | "%array_length" ->
+       if ia_ok
+       then unary (fun a -> Refinement.Pfun (Refinement.ia_len, [ a ]))
+       else None
+     | "%array_safe_get" ->
+       if ia_ok
+       then binary (fun a i -> Refinement.Pfun (Refinement.ia_get, [ a; i ]))
+       else None
      | "%sequand" -> binary (fun a b -> Refinement.Pand (a, b))
      | "%sequor" -> binary (fun a b -> Refinement.Por (a, b))
      | "%boolnot" -> unary (fun a -> Refinement.Pnot a)
@@ -295,7 +316,7 @@ let rec translate_surface env (e : Parsetree.expression)
     (match Env.lookup_value ~use:false ~loc:pexp_loc lid.txt env with
      | _, ({ val_kind = Val_prim prim; _ } as desc), _ ->
        prim_pred prim.prim_name ~eq_ok:false ~cmp_ok:false
-         ~proj_ok:(declared_domain_is_unlabeled_pair env desc)
+         ~proj_ok:(declared_domain_is_unlabeled_pair env desc) ~ia_ok:false
          args
      | path, desc, _ ->
        (match reflected_call_info env path desc with
@@ -400,7 +421,14 @@ let translate ?(mutvar = fun _ -> None) (e : expression)
       | [ Some a ] -> is_unlabeled_pair a.exp_env a.exp_type
       | _ -> false
     in
-    prim_pred prim.prim_name ~eq_ok ~cmp_ok ~proj_ok
+    let ia_ok =
+      (* [%array_length]/[%array_safe_get] are also the MUTABLE
+         array's primitives; the gate admits only [int iarray]. *)
+      match sargs with
+      | Some a :: _ -> is_int_iarray a.exp_env a.exp_type
+      | _ -> false
+    in
+    prim_pred prim.prim_name ~eq_ok ~cmp_ok ~proj_ok ~ia_ok
       (List.map (fun a -> Option.bind a go) sargs)
     | _ -> None
   in

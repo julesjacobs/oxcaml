@@ -1157,6 +1157,25 @@ let rec elab_vox_pred ~bound ~self_root env (e : Parsetree.expression)
              operator shape must be an error, never silently an
              uninterpreted function. *)
           Pfun (f, List.map (elab_vox_pred ~bound ~self_root env) args)
+      | Pexp_ident
+          {txt = Longident.Ldot ({txt = Longident.Lident "Iarray"; _},
+                                 {txt = ("length" | "get") as op; _}); _},
+        args ->
+          (* The built-in iarray theory: [Iarray.length a] and
+             [Iarray.get a i] (surface sugar [a.(i)]) denote the
+             reserved operations, regardless of any user module named
+             Iarray -- the theory owns the spelling. *)
+          let expect n k =
+            if List.length args = n
+            then k (List.map (elab_vox_pred ~bound ~self_root env) args)
+            else
+              Location.raise_errorf ~loc
+                "vox: Iarray.%s expects %d argument%s in a predicate"
+                op n (if n = 1 then "" else "s")
+          in
+          if String.equal op "length"
+          then expect 1 (fun args -> Pfun (Refinement.ia_len, args))
+          else expect 2 (fun args -> Pfun (Refinement.ia_get, args))
       | Pexp_ident {txt = (Longident.Ldot _ as lid); _}, (_ :: _ as args) ->
           (* A QUALIFIED applied identifier must denote a reflected
              ([total_]) function of another module: its definition

@@ -345,6 +345,10 @@ let rec print ppf p =
     List.iter (fun x -> fprintf ppf ",@ %a" print x) args;
     fprintf ppf ")@]"
   | Pfun (f, []) -> pp_print_string ppf f
+  | Pfun (f, [ a ]) when String.equal f "Vox_ia_len" ->
+    fprintf ppf "@[Iarray.length %a@]" print_atom a
+  | Pfun (f, [ a; i ]) when String.equal f "Vox_ia_get" ->
+    fprintf ppf "%a.(%a)" print_atom a print i
   | Pfun (f, args) ->
     fprintf ppf "@[%s" f;
     List.iter (fun x -> fprintf ppf "@ %a" print_atom x) args;
@@ -398,6 +402,32 @@ and print_atom ppf p =
 ;;
 
 let to_string p = Format.asprintf "%a" print p
+
+(* Built-in iarray theory: [Iarray.length a] and [a.(i)] in predicates
+   (and the reflected [Iarray.length]/[Iarray.get] in expressions)
+   denote these reserved spec functions.  Capitalized, so no
+   total_/prelude lowercase name can collide from OCaml source; the
+   theory declarations are emitted by Vox_verify when used.  [get] is
+   TOTAL in the logic, like division: the safe program [get] raises
+   out of bounds, so no value flows there and the unconstrained fact
+   is vacuous -- sound under partial correctness.  Bounds SAFETY is
+   an opt-in contract, not a forced obligation. *)
+let ia_len = "Vox_ia_len"
+let ia_get = "Vox_ia_get"
+
+(* Does [p] apply the spec function called [name]?  (Emission gates
+   the built-in theories on use.) *)
+let rec mentions_fun name p =
+  match p with
+  | Pbound | Pvar _ | Pint _ | Pbool _ -> false
+  | Pfun (f, args) ->
+    String.equal f name || List.exists (mentions_fun name) args
+  | Pconstr (_, _, args) | Ptuple args -> List.exists (mentions_fun name) args
+  | Pfield (_, _, a) | Pis (_, _, a) | Pproj (_, _, a) | Pnot a
+  | Pquant (_, _, a) -> mentions_fun name a
+  | Pbinop (_, a, b) | Pand (a, b) | Por (a, b) | Pimp (a, b) ->
+    mentions_fun name a || mentions_fun name b
+;;
 
 (* The constructs a compiled runtime check cannot evaluate faithfully,
    for diagnostics.  Owned here so the two rejection messages

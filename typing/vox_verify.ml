@@ -40,6 +40,10 @@ type dsort =
     (* an unlabeled tuple, modelled with one polymorphic product
        datatype per ARITY (VoxT2, VoxT3, ...) instantiated at the
        component sorts *)
+  | S_iarray
+    (* [int iarray], modelled by the built-in theory: an opaque sort
+       VoxIA with Vox_ia_len/Vox_ia_get (Refinement.ia_len/ia_get)
+       and the length-nonnegativity axiom, emitted when used *)
   | S_other
 
 (* Failure diagnostics show what the solver was given, so a failed
@@ -368,6 +372,11 @@ and dsort_of_type ?(visited = []) env ty =
     let visited = get_id ty :: visited in
     match get_desc ty with
     | Tconstr (p, [], _) -> datatype_sort env p
+    | Tconstr (p, [ elt ], _)
+      when Path.same p Predef.path_iarray
+           && (match get_desc (Ctype.vox_expand_head env elt) with
+               | Tconstr (e, [], _) -> Path.same e Predef.path_int
+               | _ -> false) -> S_iarray
     | Trefine (skel, _) -> dsort_of_type ~visited env skel
     | Ttuple comps
       when List.length comps >= 2
@@ -784,7 +793,7 @@ let rec name_of_expr env (e : expression) : Refinement.pred =
             ( path
             , cstr.cstr_name
             , List.map (fun (_, a) -> name_of_expr env a) args )
-        | S_int | S_bool | S_tuple _ | S_other -> fresh_unknown env e)
+        | S_int | S_bool | S_tuple _ | S_iarray | S_other -> fresh_unknown env e)
      | Texp_record { fields; extended_expression; _ }
        when Array.length fields > 0 ->
        (* A record literal names the constructor term ["mk"] (a reserved
@@ -811,7 +820,7 @@ let rec name_of_expr env (e : expression) : Refinement.pred =
               fresh_unknown env e
           in
           Refinement.Pconstr (path, "mk", List.map arg_of (Array.to_list fields))
-        | S_int | S_bool | S_tuple _ | S_other -> fresh_unknown env e)
+        | S_int | S_bool | S_tuple _ | S_iarray | S_other -> fresh_unknown env e)
      | Texp_tuple (comps, _)
        when List.length comps >= 2
             && List.for_all (fun (lbl, _) -> Option.is_none lbl) comps ->
@@ -924,7 +933,7 @@ let emit_vc ~loc ~ctx ~goal ~kind =
      let int_or_bool id =
        match Hashtbl.find_opt name_sorts id with
        | Some (S_int | S_bool) -> true
-       | Some (S_data _ | S_tuple _ | S_other) | None -> false
+       | Some (S_data _ | S_tuple _ | S_iarray | S_other) | None -> false
      in
      (match
         List.find_opt
@@ -1221,7 +1230,7 @@ let match_facts
   let constructor_facts cstr args =
     let path = Data_types.cstr_res_type_path cstr in
     match datatype_sort env path with
-    | S_int | S_bool | S_tuple _ | S_other -> []
+    | S_int | S_bool | S_tuple _ | S_iarray | S_other -> []
     | S_data _ ->
       let rec name_args acc = function
         | [] -> Some (List.rev acc)
@@ -1245,7 +1254,7 @@ let match_facts
     | (_, lbl0, _) :: _ ->
       let path = Data_types.lbl_res_type_path lbl0 in
       (match datatype_sort env path with
-       | S_int | S_bool | S_tuple _ | S_other -> []
+       | S_int | S_bool | S_tuple _ | S_iarray | S_other -> []
        | S_data _ ->
          List.filter_map
            (fun (_, (lbl : Data_types.label_description), sub) ->
@@ -1327,7 +1336,7 @@ let pattern_negation
   let head_negation cstr args =
     let path = Data_types.cstr_res_type_path cstr in
     match datatype_sort env path with
-    | S_int | S_bool | S_tuple _ | S_other -> None
+    | S_int | S_bool | S_tuple _ | S_iarray | S_other -> None
     | S_data _ ->
       let simple (_, (p : value general_pattern)) =
         match p.pat_desc with
@@ -2239,9 +2248,47 @@ let tuple_uname n = "VoxT" ^ Int.to_string n
    datatype? *)
 let rec sort_needs_voxu = function
   | S_other -> true
-  | S_int | S_bool -> false
+  | S_int | S_bool | S_iarray -> false
   | S_tuple comps -> List.exists sort_needs_voxu comps
   | S_data p -> find_datatype p = None
+;;
+
+(* Same question for the built-in iarray theory (VoxIA and its
+   operations), which is emitted only when something uses it. *)
+let rec sort_needs_iarray = function
+  | S_iarray -> true
+  | S_int | S_bool | S_other -> false
+  | S_tuple comps -> List.exists sort_needs_iarray comps
+  | S_data _ -> false
+;;
+
+(* The built-in iarray theory, emitted (right after VoxU) when
+   anything in the input uses it: an S_iarray-sorted name, a datatype
+   field at VoxIA, or a predicate applying the reserved operations.
+   (An IMPORTED datatype decl referencing VoxIA in a module with no
+   own iarray use is not detected -- the solver's unknown-identifier
+   error fails closed there.)  [get] is total in the logic, like
+   division; length nonnegativity is the theory's one axiom,
+   pattern-registered so grind instantiates it at every [len] term. *)
+let lean_iarray_theory =
+  "opaque VoxIA : Type\n\
+   opaque Vox_ia_len : VoxIA -> Int\n\
+   opaque Vox_ia_get : VoxIA -> Int -> Int\n\
+   axiom Vox_ia_len_nonneg (a : VoxIA) : 0 <= Vox_ia_len a\n\
+   grind_pattern Vox_ia_len_nonneg => Vox_ia_len a\n"
+;;
+
+let datatype_field_needs_iarray () =
+  List.exists
+    (fun (_, decl) ->
+      match decl with
+      | Dt_variant constrs ->
+        List.exists
+          (fun (_, fields) -> List.exists sort_needs_iarray fields)
+          constrs
+      | Dt_record fields ->
+        List.exists (fun (_, fs) -> sort_needs_iarray fs) fields)
+    !datatypes
 ;;
 
 let datatype_field_needs_voxu () =
@@ -2501,6 +2548,7 @@ let rec lean_sort = function
   | S_int -> "Int"
   | S_bool -> "Prop"
   | S_other -> "VoxU"
+  | S_iarray -> "VoxIA"
   | S_tuple comps ->
     "(" ^ tuple_uname (List.length comps) ^ " "
     ^ String.concat " " (List.map lean_sort comps)
@@ -2600,7 +2648,7 @@ let boolish p =
      | Some (_, Dt_record fields) ->
        (match List.assoc_opt l fields with
         | Some S_bool -> true
-        | Some (S_int | S_data _ | S_tuple _ | S_other) | None -> false)
+        | Some (S_int | S_data _ | S_tuple _ | S_iarray | S_other) | None -> false)
      | Some (_, Dt_variant _) | None -> false)
   | Pis _ | Pquant _ -> true
   (* A bool-sorted tuple COMPONENT is a Prop the model cannot see from
@@ -2994,9 +3042,27 @@ let lean_file vcs =
      turning ill-sorted applications into polymorphic ones instead of
      errors.  So the prelude implies VoxU. *)
   let needs_voxu = needs_voxu || imported_need_voxu () || want_spec_text in
+  let needs_iarray =
+    List.exists
+      (fun vc ->
+        List.exists
+          (fun id ->
+            match Hashtbl.find_opt name_sorts id with
+            | Some s -> sort_needs_iarray s
+            | None -> false)
+          (free_vars_of_vc vc)
+        || List.exists
+             (fun p ->
+               Refinement.mentions_fun Refinement.ia_len p
+               || Refinement.mentions_fun Refinement.ia_get p)
+             (vc.vc_goal :: vc.vc_facts))
+      vcs
+    || datatype_field_needs_iarray ()
+  in
   let segments = ref [] in
   let seg ?src text = if text <> "" then segments := (text, src) :: !segments in
   if needs_voxu then seg "opaque VoxU : Type\n";
+  if needs_iarray then seg lean_iarray_theory;
   let seen = ref [] in
   List.iter
     (fun (unit, vp) ->
