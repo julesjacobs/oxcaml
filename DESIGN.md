@@ -266,8 +266,13 @@
   (printed 1-based, [t.1]).  Component types may be any sort
   (datatypes, other tuples, uninterpreted); labeled and unboxed
   tuples are not modelled and degrade soundly to the uninterpreted
-  sort.  CAVEAT: a dependent binder over a tuple domain must
-  parenthesize it -- [(p : (int * int)) -> ...] -- since
+  sort.  The polymorphic EQUALITY translates at tuples of int/bool
+  (nested included): structural equality on immutable int/bool
+  components is exactly the product datatypes' equality.  The ORDER
+  comparisons do not (OCaml's tuple order is lexicographic; the logic
+  has no order at product sorts).  CAVEAT: a dependent binder over a
+  tuple domain must parenthesize it -- [(p : (int * int)) -> ...] --
+  since
   [(p : int * int)] is the LABELED TUPLE type [p:int * int] (the
   LR(1) ambiguity above); the printer emits the parenthesized form.
 - Quantifiers: `forall_ x. p` and `exists_ x. p` (keywords, like

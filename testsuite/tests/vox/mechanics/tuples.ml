@@ -120,3 +120,22 @@ Line 4, characters 27-36:
                                ^^^^^^^^^
 Error: vox: the argument for a dependent parameter must be a variable or a pure expression the logic can name (let-bind it first)
 |}]
+
+(* Equality translates at tuples of int/bool; ORDER comparisons do not
+   (OCaml's tuple order is lexicographic; the logic has no order at
+   product sorts), and neither does equality at other component types
+   (float equality disagrees with the logic's at nan). *)
+let lt_pair (p : (int * int)) (q : (int * int)) = refine_ (p < q)
+[%%expect{|
+Line 1, characters 50-65:
+1 | let lt_pair (p : (int * int)) (q : (int * int)) = refine_ (p < q)
+                                                      ^^^^^^^^^^^^^^^
+Error: vox: refine_ cannot translate this expression into the logic (only variables, int/bool constants, tuples, immutable field reads, fst/snd, calls to total_ functions, + - * / mod ~-, comparisons at int or bool, and && || not are supported); add a refined type annotation
+|}]
+let eq_float (p : (float * float)) (q : (float * float)) = refine_ (p = q)
+[%%expect{|
+Line 1, characters 59-74:
+1 | let eq_float (p : (float * float)) (q : (float * float)) = refine_ (p = q)
+                                                               ^^^^^^^^^^^^^^^
+Error: vox: refine_ cannot translate this expression into the logic (only variables, int/bool constants, tuples, immutable field reads, fst/snd, calls to total_ functions, + - * / mod ~-, comparisons at int or bool, and && || not are supported); add a refined type annotation
+|}]

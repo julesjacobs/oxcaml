@@ -67,3 +67,18 @@ type w = W of (int * int)
 let unw (v : w{ _ = W (3, 4) }) : {r:int | r = 3} =
   match v with
   | W p -> (match p with (x, _) -> x)
+
+(* The polymorphic EQUALITY translates at tuples of int/bool (nested
+   included): the path fact [p = q] is the product equality, so
+   component equalities follow by congruence -- the else-arm below is
+   proved dead.  (Order comparisons do not translate: OCaml's tuple
+   order is lexicographic; the logic has none at product sorts.) *)
+let eq_components : (p : (int * int)) -> (q : (int * int)) -> int{ _ = 1 } =
+  fun p q ->
+    if p = q
+    then (if fst p = fst q then 1 else 0)
+    else 1
+
+(* Reflexivity at a nested tuple with a bool (Prop) component. *)
+let refl_eq : (x : ((int * bool) * int)) -> bool{ _ } =
+  fun x -> x = x

@@ -6,11 +6,16 @@
    is built from variables, int/bool literals, immutable field reads
    of simple records, and the primitive operations the predicate
    language models (+ - * / mod ~- succ pred on int; && || not;
-   comparisons at int or bool); [None] otherwise.
+   comparisons at int or bool, equality also at unlabeled tuples of
+   int/bool); [None] otherwise.
    Recognition is keyed on the PRIMITIVE ([Val_prim]), never the source
    name, so shadowing [(+)] cannot be mistaken for integer addition.
-   Comparisons are polymorphic primitives and are translated only at
-   int or bool operands: at other types the logic's equality is
+   Comparisons are polymorphic primitives, translated only where the
+   logic's relation agrees with the program's: equality at int, bool,
+   and tuples of them (structural equality on immutable int/bool
+   components is the product datatypes' equality), order at int/bool
+   only (OCaml's tuple order is lexicographic; the logic has none at
+   product sorts).  At other types the logic's equality is
    uninterpreted, and [compare] does not denote it.
 
    The translatable fragment is pure up to Division_by_zero: [/] and
@@ -59,6 +64,24 @@ let is_int_or_bool env ty =
   match Types.get_desc (Ctype.vox_expand_head env ty) with
   | Tconstr (p, [], _) ->
     Path.same p Predef.path_int || Path.same p Predef.path_bool
+  | _ -> false
+;;
+
+(* Types at which the polymorphic EQUALITIES translate: int, bool, and
+   unlabeled tuples thereof (nested included) -- structural equality
+   on immutable int/bool components is exactly the logic's equality on
+   the product datatypes.  The ORDER comparisons stay int/bool only:
+   OCaml's order on tuples is lexicographic, and the logic has no
+   order at product sorts. *)
+let rec is_eq_comparable env ty =
+  match Types.get_desc (Ctype.vox_expand_head env ty) with
+  | Tconstr (p, [], _) ->
+    Path.same p Predef.path_int || Path.same p Predef.path_bool
+  | Ttuple comps ->
+    List.length comps >= 2
+    && List.for_all
+         (fun (lbl, t) -> Option.is_none lbl && is_eq_comparable env t)
+         comps
   | _ -> false
 ;;
 
@@ -157,12 +180,13 @@ let reflected_call_info env path (desc : Types.value_description) =
    surface twin ([translate_surface]) so the two fragments cannot
    drift -- a primitive admitted in one is admitted in both.
    Admissions that need TYPE information are the callers' gates:
-   [cmp_ok] (the polymorphic comparisons, at int/bool operands only)
-   and [proj_ok] ([fst]/[snd], at a pair argument only) -- the typed
-   side inspects the argument's type; the surface side passes what it
-   can know before typing (no comparisons; the resolved declaration's
-   domain for projections). *)
-let prim_pred prim_name ~cmp_ok ~proj_ok
+   [eq_ok] (the polymorphic equalities, at int/bool/tuple-of-them
+   operands), [cmp_ok] (the polymorphic ORDER comparisons, at int/bool
+   operands only), and [proj_ok] ([fst]/[snd], at a pair argument
+   only) -- the typed side inspects the argument's type; the surface
+   side passes what it can know before typing (no comparisons; the
+   resolved declaration's domain for projections). *)
+let prim_pred prim_name ~eq_ok ~cmp_ok ~proj_ok
       (args : Refinement.pred option list) : Refinement.pred option =
   match
     if List.for_all Option.is_some args
@@ -186,6 +210,7 @@ let prim_pred prim_name ~cmp_ok ~proj_ok
       if proj_ok then unary (fun a -> Refinement.Pproj (2, i, a)) else None
     in
     let cmp op = if cmp_ok then intop op else None in
+    let eq op = if eq_ok then intop op else None in
     (match prim_name with
      | "%addint" -> intop Refinement.Add
      | "%subint" -> intop Refinement.Sub
@@ -203,8 +228,8 @@ let prim_pred prim_name ~cmp_ok ~proj_ok
      | "%sequand" -> binary (fun a b -> Refinement.Pand (a, b))
      | "%sequor" -> binary (fun a b -> Refinement.Por (a, b))
      | "%boolnot" -> unary (fun a -> Refinement.Pnot a)
-     | "%equal" -> cmp Refinement.Eq
-     | "%notequal" -> cmp Refinement.Neq
+     | "%equal" -> eq Refinement.Eq
+     | "%notequal" -> eq Refinement.Neq
      | "%lessthan" -> cmp Refinement.Lt
      | "%lessequal" -> cmp Refinement.Le
      | "%greaterthan" -> cmp Refinement.Gt
@@ -269,7 +294,7 @@ let rec translate_surface env (e : Parsetree.expression)
     in
     (match Env.lookup_value ~use:false ~loc:pexp_loc lid.txt env with
      | _, ({ val_kind = Val_prim prim; _ } as desc), _ ->
-       prim_pred prim.prim_name ~cmp_ok:false
+       prim_pred prim.prim_name ~eq_ok:false ~cmp_ok:false
          ~proj_ok:(declared_domain_is_unlabeled_pair env desc)
          args
      | path, desc, _ ->
@@ -355,10 +380,16 @@ let translate ?(mutvar = fun _ -> None) (e : expression)
           | _ -> None)
         args
     in
-    (* The type-dependent gates: comparisons at int/bool operands
-       (both operands have the same type; checking one suffices), and
-       fst/snd at an unlabeled-pair argument (the primitive itself is
-       a generic block read). *)
+    (* The type-dependent gates: equality at int/bool or tuples of
+       them, order comparisons at int/bool (both operands have the
+       same type; checking one suffices), and fst/snd at an
+       unlabeled-pair argument (the primitive itself is a generic
+       block read). *)
+    let eq_ok =
+      match sargs with
+      | Some a :: _ -> is_eq_comparable a.exp_env a.exp_type
+      | _ -> false
+    in
     let cmp_ok =
       match sargs with
       | Some a :: _ -> is_int_or_bool a.exp_env a.exp_type
@@ -369,7 +400,7 @@ let translate ?(mutvar = fun _ -> None) (e : expression)
       | [ Some a ] -> is_unlabeled_pair a.exp_env a.exp_type
       | _ -> false
     in
-    prim_pred prim.prim_name ~cmp_ok ~proj_ok
+    prim_pred prim.prim_name ~eq_ok ~cmp_ok ~proj_ok
       (List.map (fun a -> Option.bind a go) sargs)
     | _ -> None
   in
