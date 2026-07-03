@@ -403,6 +403,15 @@
   `(i : int{ 0 <= _ && _ < Iarray.length a })`, and such a wrapper is
   then PROVED, not assumed (see demo/lean_binsearch.ml, which assumes
   nothing).  Element sorts beyond int are future work.
+- The library layer (testsuite/tests/vox/lib): the userland trusted
+  base lives in ONE place -- the heap-theory encodings (sep_lib,
+  borrow_lib, pcell_lib), the verified bst, and the bounds-contract
+  array reads (ia_lib, which assumes nothing) -- shared by the demos
+  through cross-directory [modules] references.  `grep
+  assume_unchecked_ testsuite/tests/vox/lib` IS the userland trust
+  audit.  Specs travel to the demo clients through the .cmi (specced
+  signatures); promotion to a real build unit awaits API stability,
+  and the sep/borrow/pcell crowning decision is the Wishlist's.
 - Ghost sorts: `type g [@@vox.sort int]` (or `bool`) declares that an
   abstract type's LOGICAL REPRESENTATIVE is its value at a base sort:
   values of `g` are modelled as opaque Ints instead of at the

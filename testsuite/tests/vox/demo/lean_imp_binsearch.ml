@@ -1,5 +1,6 @@
 (* TEST
  script = "sh ${test_source_directory}/../has-lean.sh";
+ modules = "../lib/ia_lib.mli ../lib/ia_lib.ml";
  script;
  setup-ocamlc.byte-build-env;
  ocamlc.byte;
@@ -28,7 +29,7 @@
    ([Iarray.length a], [a.(i)], length nonnegativity as the one
    compiler-owned axiom) and NOTHING in this file is assumed: the
    midpoint is reflected T-division, reads go through the PROVED
-   bounds-contract [get], and every obligation -- in-bounds accesses
+   bounds-contract [Ia_lib.get], and every obligation -- in-bounds accesses
    included -- is really proved.  Sortedness is never needed;
    termination is not checked. *)
 
@@ -36,10 +37,6 @@ type bracket =
   { lo : int
   ; hi : int
   }
-
-let get : (a : int iarray) -> (i : int{ 0 <= _ && _ < Iarray.length a })
-          -> int{ _ = a.(i) } =
-  fun a i -> Iarray.get a i
 
 let search
   : (a : int iarray) -> (x : int)
@@ -60,7 +57,7 @@ let search
     let br = b in
     let { lo = l; hi = h } = br in
     let mid = (l + h) / 2 in
-    let v = get a mid in
+    let v = Ia_lib.get a mid in
     if v >= x
     then b <- { lo = l; hi = mid }
     else b <- { lo = mid; hi = h }
@@ -69,7 +66,7 @@ let search
 
 (* The same search with TWO INDEPENDENT, UNREFINED mutable variables and
    ONE declared loop invariant.  Philosophy: refinements live at the
-   edges (the signatures of [get] and [search2]); inside the code
+   edges (the signatures of [Ia_lib.get] and [search2]); inside the code
    everything is plain values plus the logical environment, and the
    loop invariant is a FORMULA in that environment -- exactly the
    contract of the recursive version, worn as a loop annotation.  The
@@ -79,7 +76,7 @@ let search
    the negated guard -- which yields the flip-pair postcondition fully
    statically.  Note the body: plain reads, plain writes, no
    coercions -- every obligation lives at the two invariant assertions
-   and [get]'s edge precondition.  (The invariant ATTRIBUTE's payload
+   and [Ia_lib.get]'s edge precondition.  (The invariant ATTRIBUTE's payload
    rides the expression grammar, hence the qualified [Iarray.get]
    spelling and sentinel disjunctions there.) *)
 
@@ -98,7 +95,7 @@ let search2
      let l = lo in
      let h = hi in
      let mid = (l + h) / 2 in
-     let v = get a mid in
+     let v = Ia_lib.get a mid in
      if v >= x then hi <- mid else lo <- mid
    done)
   [@vox.invariant

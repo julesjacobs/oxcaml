@@ -1,6 +1,6 @@
 (* TEST
  script = "sh ${test_source_directory}/../has-lean.sh";
- modules = "pcell_lib.mli pcell_lib.ml";
+ modules = "../lib/pcell_lib.mli ../lib/pcell_lib.ml";
  script;
  setup-ocamlc.byte-build-env;
  ocamlc.byte;

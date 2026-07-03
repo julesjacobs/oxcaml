@@ -1,6 +1,6 @@
 (* TEST
  script = "sh ${test_source_directory}/../has-lean.sh";
- modules = "borrow_lib.mli borrow_lib.ml";
+ modules = "../lib/borrow_lib.mli ../lib/borrow_lib.ml";
  script;
  setup-ocamlc.byte-build-env;
  ocamlc.byte;

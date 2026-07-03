@@ -189,8 +189,8 @@ def main():
                    + '\n  fun m -> ...\n\n'
                    + slice_between(read('demo/lean_qsort.ml'),
                                    r'Par_lib.fork_join2', r'ignore ur;'),
-        '@BST_MLI@': strip_leading_comment(read('demo/bst.mli')),
-        '@BST_ML@': strip_leading_comment(read('demo/bst.ml')),
+        '@BST_MLI@': strip_leading_comment(read('lib/bst.mli')),
+        '@BST_ML@': strip_leading_comment(read('lib/bst.ml')),
         '@BST_CLIENT@': slice_between(read('demo/lean_bst.ml'), r'^let demo',
                                       r'\(hit, miss\)'),
         '@BST_FAIL@': slice_between(read('mechanics/lean_bst_fail.ml'),
@@ -200,7 +200,7 @@ def main():
                                         r'^Error: vox: verification failed',
                                         r'^\(lean: '),
         '@KERNEL@': slice_between(read('demo/lean_kernel.ml'),
-                                  r'^let get', r'^    go 0 0'),
+                                  r'^let sum', r'^    go 0 0'),
         '@BST_ALT@': slice_between(read('demo/lean_bst_alt.ml'),
                                    r'^module Set', r'^end')
                      + '\n\n'

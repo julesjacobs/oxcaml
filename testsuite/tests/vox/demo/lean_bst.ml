@@ -1,6 +1,6 @@
 (* TEST
  script = "sh ${test_source_directory}/../has-lean.sh";
- modules = "bst.mli bst.ml";
+ modules = "../lib/bst.mli ../lib/bst.ml";
  script;
  setup-ocamlc.byte-build-env;
  ocamlc.byte;

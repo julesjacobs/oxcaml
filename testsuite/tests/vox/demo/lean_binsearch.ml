@@ -1,5 +1,6 @@
 (* TEST
  script = "sh ${test_source_directory}/../has-lean.sh";
+ modules = "../lib/ia_lib.mli ../lib/ia_lib.ml";
  script;
  setup-ocamlc.byte-build-env;
  ocamlc.byte;
@@ -12,7 +13,7 @@
    virtual sentinels l = -1 and r = length a (where p(-1) = false and
    p (length a) = true artificially), the loop probes only indices
    STRICTLY between them -- so every access is in bounds, which is
-   here a THEOREM: [get] demands 0 <= i < Iarray.length a.  The
+   here a THEOREM: [Ia_lib.get] demands 0 <= i < Iarray.length a.  The
    invariant states p's endpoint values as guarded implications
    ([0 <= l -> a.(l) < x]): at the sentinels the guard is false and
    the fact vacuous, which is exactly the artificial extension.
@@ -30,13 +31,6 @@
    (contracts): the body assumes them, each call site discharges them
    at its own bare arguments -- the sentinel [-1] included, a literal
    naming itself. *)
-
-(* Reads go through this PROVED wrapper: the contract is the bounds
-   theorem, and the result refinement is discharged by reflection --
-   no bridge, no assumption. *)
-let get : (a : int iarray) -> (i : int{ 0 <= _ && _ < Iarray.length a })
-          -> int{ _ = a.(i) } =
-  fun a i -> Iarray.get a i
 
 (* The search: p(i) is a.(i) >= x, extended by p(-1) = false and
    p(length a) = true.  The parameter contracts carry the invariant;
@@ -68,7 +62,7 @@ let rec search
       let m = (l + r) / 2 in
       (* l < m < r, hence 0 <= m < Iarray.length a: the probe is in
          bounds. *)
-      let v = get a m in
+      let v = Ia_lib.get a m in
       if v >= x
       then search a x l m
       else search a x m r

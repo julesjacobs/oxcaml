@@ -555,7 +555,7 @@ negated guard.</p>
      let l = lo in
      let h = hi in
      let mid = (l + h) / 2 in
-     let v = get a mid in
+     let v = Ia_lib.get a mid in
      if v &gt;= x then hi &lt;- mid else lo &lt;- mid
    done)
   [@vox.invariant
@@ -675,15 +675,11 @@ arrays compatible.  Measured on a dev box: the verified dot product runs
 <b>1.36×</b> the bounds-checked loop; the verified sum matches
 hand-written <code>unsafe_get</code> exactly — verification costs nothing
 at runtime.</p>
-<pre><code class="ml">let get : (a : int iarray) -&gt; (i : int{ 0 &lt;= _ &amp;&amp; _ &lt; Iarray.length a })
-          -&gt; int =
-  fun a i -&gt; Iarray.unsafe_get a i
-
-let sum : (a : int iarray) -&gt; int =
+<pre><code class="ml">let sum : (a : int iarray) -&gt; int =
   fun a -&gt;
     let n = Iarray.length a in
     let rec go : (i : int{ 0 &lt;= _ &amp;&amp; _ &lt;= n }) -&gt; int -&gt; int =
-      fun i acc -&gt; if i &lt; n then go (i + 1) (acc + get a i) else acc
+      fun i acc -&gt; if i &lt; n then go (i + 1) (acc + Ia_lib.unsafe_get a i) else acc
     in
     go 0 0</code></pre></div>
 
@@ -722,9 +718,7 @@ let swap :
        let (vj, m2) = sget m1 j in
        let m3 = sset m2 i vj in
        let m4 = sset m3 j vi in
-       (m4 : slice{ now _ = upd (upd (now m) i (elem (now m) j)) j
-                              (elem (now m) i)
-                    &amp;&amp; fin _ = fin m }))
+       m4)
 
 (* Lomuto partition with the pivot parked at the last position.  The
    invariant rides the parameters: positions [0,i) are &lt;= p, the
@@ -756,32 +750,16 @@ let rec part :
          then begin
            let s2 = swap s1 i j in
            let q = part p (i + 1) (j + 1) s2 n in
-           (q : (int * slice){ 0 &lt;= fst _ &amp;&amp; fst _ &lt; n
-                        &amp;&amp; elem (now (snd _)) (fst _) = p
-                        &amp;&amp; all_le (take (fst _) (now (snd _))) p
-                        &amp;&amp; all_ge (drop (fst _) (now (snd _))) p
-                        &amp;&amp; perm (now s) (now (snd _))
-                        &amp;&amp; fin (snd _) = fin s })
+           q
          end
          else begin
            let q = part p i (j + 1) s1 n in
-           (q : (int * slice){ 0 &lt;= fst _ &amp;&amp; fst _ &lt; n
-                        &amp;&amp; elem (now (snd _)) (fst _) = p
-                        &amp;&amp; all_le (take (fst _) (now (snd _))) p
-                        &amp;&amp; all_ge (drop (fst _) (now (snd _))) p
-                        &amp;&amp; perm (now s) (now (snd _))
-                        &amp;&amp; fin (snd _) = fin s })
+           q
          end
        end
        else begin
          let s' = swap s i j in
-         (((i : int), s')
-           : (int * slice){ 0 &lt;= fst _ &amp;&amp; fst _ &lt; n
-                        &amp;&amp; elem (now (snd _)) (fst _) = p
-                        &amp;&amp; all_le (take (fst _) (now (snd _))) p
-                        &amp;&amp; all_ge (drop (fst _) (now (snd _))) p
-                        &amp;&amp; perm (now s) (now (snd _))
-                        &amp;&amp; fin (snd _) = fin s })
+         ((i : int), s')
        end)
 
 (* Sequential quicksort on a loan: read the pivot, partition, then
@@ -800,9 +778,7 @@ let rec qsort :
     exclave_
       (let (n, m0) = slen m in
        if n &lt;= 1
-       then
-         (m0 : slice{ perm (now m) (now _) &amp;&amp; sorted (now _)
-                      &amp;&amp; fin _ = fin m })
+       then m0
        else begin
          let (p, mp) = sget m0 (n - 1) in
          let q = part p 0 0 mp n in
@@ -832,8 +808,7 @@ let rec qsort :
                          &amp;&amp; perm (drop k (now m2)) (pv prest) }))
          in
          ignore u;
-         (mres : slice{ perm (now m) (now _) &amp;&amp; sorted (now _)
-                   &amp;&amp; fin _ = fin m })
+         mres
        end)
 
 (* Parallel quicksort, same spec: inside the inner bracket both
@@ -849,9 +824,7 @@ let rec psort :
     exclave_
       (let (n, m0) = slen m in
        if n &lt;= 1
-       then
-         (m0 : slice{ perm (now m) (now _) &amp;&amp; sorted (now _)
-                      &amp;&amp; fin _ = fin m })
+       then m0
        else begin
          let (p, mp) = sget m0 (n - 1) in
          let q = part p 0 0 mp n in
@@ -1019,8 +992,7 @@ let rec insert
         Node (l, v, r')
       end</code></pre></div>
 <div class="tabpane"><pre><code class="ml">let demo : bool{ _ } * bool{ not _ } =
-  let e = empty in
-  let t1 = insert 2 e in
+  let t1 = insert 2 empty in
   let t2 = insert 1 t1 in
   let t3 = insert 3 t2 in
   let hit = member 2 t3 in

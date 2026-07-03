@@ -1,12 +1,13 @@
 (* TEST
  script = "sh ${test_source_directory}/../has-lean.sh";
+ modules = "../lib/ia_lib.mli ../lib/ia_lib.ml";
  script;
  setup-ocamlc.byte-build-env;
  ocamlc.byte;
  check-ocamlc.byte-output;
 *)
 
-(* The performance unlock: [get] reads with [Iarray.unsafe_get] -- no
+(* The performance unlock: reads go through [Ia_lib.unsafe_get] -- no
    bounds check in the compiled code -- because its contract demands
    the proof at every call site instead.  The loops below discharge it
    from the loop bound and the path fact, so the stdlib's per-access
@@ -17,15 +18,11 @@
    file natively, under verification, and measures it against the
    bounds-checked loop. *)
 
-let get : (a : int iarray) -> (i : int{ 0 <= _ && _ < Iarray.length a })
-          -> int =
-  fun a i -> Iarray.unsafe_get a i
-
 let sum : (a : int iarray) -> int =
   fun a ->
     let n = Iarray.length a in
     let rec go : (i : int{ 0 <= _ && _ <= n }) -> int -> int =
-      fun i acc -> if i < n then go (i + 1) (acc + get a i) else acc
+      fun i acc -> if i < n then go (i + 1) (acc + Ia_lib.unsafe_get a i) else acc
     in
     go 0 0
 
@@ -38,6 +35,6 @@ let dot : (a : int iarray)
     let n = Iarray.length a in
     let rec go : (i : int{ 0 <= _ && _ <= n }) -> int -> int =
       fun i acc ->
-        if i < n then go (i + 1) (acc + (get a i * get b i)) else acc
+        if i < n then go (i + 1) (acc + (Ia_lib.unsafe_get a i * Ia_lib.unsafe_get b i)) else acc
     in
     go 0 0
