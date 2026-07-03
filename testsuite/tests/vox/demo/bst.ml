@@ -20,14 +20,8 @@ let rec member : (x : int) -> (t : set) -> bool{ _ = mem x t } =
     | Leaf -> false
     | Node (l, v, r) ->
       if x = v then true
-      else if x < v then begin
-        let b = member x l in
-        b
-      end
-      else begin
-        let b = member x r in
-        b
-      end
+      else if x < v then member x l
+      else member x r
 
 let rec insert
   : (x : int) -> (t : set) -> tree{ _ = insert x t && bst _ && mem x _ }

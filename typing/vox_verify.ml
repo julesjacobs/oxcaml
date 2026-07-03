@@ -1253,6 +1253,27 @@ let extend_pat
   }
 ;;
 
+(* The instantiated RESULT type of an application: walk the arrow
+   spine from the function's type, substituting each dependent binder
+   by its argument's stable name -- the same opening the application
+   site performed at typing time. *)
+let apply_result_type env funct (args : (_ * apply_arg) list) =
+  let arrow_ty = ref funct.exp_type in
+  List.iter
+    (fun (_lbl, (arg : apply_arg)) ->
+      match get_desc (Ctype.vox_expand_head env !arrow_ty) with
+      | Tarrow ((_, _, _, binder), _dom, ret, _) ->
+        (match arg, binder with
+         | Arg (a, _), Some b ->
+           (match stable_arg_name a with
+            | Some by -> arrow_ty := Vox_dep.subst_binder b ~by ret
+            | None -> arrow_ty := ret)
+         | _ -> arrow_ty := ret)
+      | _ -> ())
+    args;
+  !arrow_ty
+;;
+
 (* Whether a computation pattern is free of exception patterns: only
    then does matching it guarantee the scrutinee ran to completion. *)
 let rec exceptionless (p : computation general_pattern) =
@@ -1307,7 +1328,29 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
       | Some p ->
         register_pred_paths env p;
         let n = name_of_expr env e in
-        emit_vc ~loc:e.exp_loc ~ctx ~goal:(Refinement.subst_bound ~by:n p) ~kind
+        (* An intro-marked APPLICATION re-proves the expected
+           refinement of a value whose own instantiated result
+           refinement is a fact: selfify that refinement at the node's
+           name -- the inline unpack that [let q = f x in q] used to
+           spell.  Sound: the value satisfies its type, and on any
+           path where the goal matters the call has returned. *)
+        let self_hyps =
+          match e.exp_desc with
+          | Texp_apply (funct, args, _, _, _) ->
+            (match
+               refinement_of_type env (apply_result_type env funct args)
+             with
+             | Some ps when not (Refinement.equal ps p) ->
+               register_pred_paths env ps;
+               [ Refinement.subst_bound ~by:n ps ]
+             | _ -> [])
+          | _ -> []
+        in
+        emit_vc
+          ~loc:e.exp_loc
+          ~ctx:{ ctx with cfacts = self_hyps @ ctx.cfacts }
+          ~goal:(Refinement.subst_bound ~by:n p)
+          ~kind
       | None -> ())
    | None -> ());
   (* A [@vox.invariant] anywhere but on a loop would otherwise be

@@ -116,15 +116,20 @@ Line 1, characters 49-50: vox VC:
 val safe : int -> int = <fun>
 |}]
 
-(* Only a VARIABLE can be implicitly re-refined: an application whose
-   refined result differs from the expected refinement has no logical
-   name to carry its refinement as a hypothesis. *)
+(* An APPLICATION at a different refinement is re-refined inline: the
+   call's own instantiated result refinement is selfified at the
+   node's name and hypothesizes the obligation -- the unpack that
+   [let q = f () in q] used to spell.  (Here it is too weak: v > 0
+   does not give v > 1, and the obligation fails closed.) *)
 let bad (f : unit -> {v:int | v > 0}) : {v:int | v > 1} = f ()
 [%%expect{|
-Line 1, characters 58-62:
-1 | let bad (f : unit -> {v:int | v > 0}) : {v:int | v > 1} = f ()
-                                                              ^^^^
-Error: vox: this expression's refined type differs from the refinement expected here, and only a variable can be implicitly re-refined; let-bind it first
+Line 1, characters 58-62: vox VC:
+  goal: *unknown9* > 1
+  hypotheses:
+  *unknown9* > 0
+  x = 3
+  x > 0
+val bad : (unit -> int{ _ > 0 }) -> int{ _ > 1 } = <fun>
 |}]
 
 (* Joins are order-insensitive under binders as facts: [b] binds at

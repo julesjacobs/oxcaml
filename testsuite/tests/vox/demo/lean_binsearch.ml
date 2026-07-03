@@ -55,9 +55,10 @@ type ans =
    p(len a) = true.  The parameter contracts carry the invariant; the
    result is the adjacent flip pair, inside the input bracket -- each
    recursive call is a bare [search a x l m] / [search a x m r], its
-   halved invariant discharged from the path facts.  The result is
-   still unpacked and re-proved at the enclosing instantiation (the
-   recursive call's postcondition speaks of the SMALLER bracket).
+   halved invariant discharged from the path facts.  Each call is
+   also the bare TAIL: its postcondition speaks of the SMALLER
+   bracket, and the re-proof at the enclosing instantiation happens
+   inline, from the call's own selfified result.
    Termination is not checked (partial correctness), but r - l shrinks
    each call. *)
 let rec search
@@ -82,14 +83,8 @@ let rec search
       (* l < m < r, hence 0 <= m < len a: the probe is in bounds. *)
       let v = get a m in
       if v >= x
-      then begin
-        let q = search a x l m in
-        q
-      end
-      else begin
-        let q = search a x m r in
-        q
-      end
+      then search a x l m
+      else search a x m r
     end
     else { lo = l; hi = r }
 
@@ -113,6 +108,4 @@ let lower_bound
 let a8 : int iarray = [: 2; 3; 3; 3; 6; 8; 8; 9 :]
 let six : int = 6
 
-let idx6 : int =
-  let i = lower_bound a8 six in
-  i
+let idx6 : int = lower_bound a8 six

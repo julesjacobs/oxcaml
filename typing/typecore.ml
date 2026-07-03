@@ -7206,7 +7206,12 @@ and type_expect_
              Some (rue exp)
            | Trefine (skel', _) ->
              (match sexp.pexp_desc with
-              | Pexp_ident _ ->
+              | Pexp_ident _ | Pexp_apply _ ->
+                (* Re-refinement: the obligation is discharged from
+                   the subject's own refinement -- a variable's from
+                   its binder fact, an application's selfified at the
+                   node's name by the verification pass (the inline
+                   unpack that [let q = f x in q] used to spell). *)
                 with_explanation (fun () ->
                   unify_exp_types loc env skel' (instance skel));
                 intro exp
@@ -7214,7 +7219,8 @@ and type_expect_
                 Location.raise_errorf ~loc
                   "vox: this expression's refined type differs from \
                    the refinement expected here, and only a variable \
-                   can be implicitly re-refined; let-bind it first")
+                   or an application can be implicitly re-refined; \
+                   let-bind it first")
            | Tvar _ -> Some (rue exp)
            | _ ->
              with_explanation (fun () ->
@@ -7647,6 +7653,25 @@ and type_expect_
         | false -> funct
       in
       let args = List.map (fun (lbl, arg, _) -> (lbl, arg)) args in
+      (* vox: an application whose refined result meets a RIGID
+         unrefined expected type is erased to the skeleton: there is
+         no obligation to discharge there, and the fact of an unnamed
+         value is unreachable either way (name it with a [let] to
+         keep it).  A flexible expected type keeps the refinement
+         (pass-through), and a refined expected type never reaches
+         here (the subsumption hook owns it).  No expansion on either
+         side: expanding under local (GADT) constraints commits
+         equations and moves ambiguity errors, and an
+         abbreviation-hidden refinement just keeps the rigid
+         behavior. *)
+      let ty_ret =
+        match get_desc ty_ret with
+        | Trefine (skel', _) ->
+          (match get_desc ty_expected with
+           | Tvar _ | Tunivar _ | Tpoly _ | Trefine _ -> ty_ret
+           | _ -> skel')
+        | _ -> ty_ret
+      in
       let exp = rue {
         exp_desc = Texp_apply(funct, args, pm.apply_position, ap_mode,
                               zero_alloc);

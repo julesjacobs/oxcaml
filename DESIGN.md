@@ -117,14 +117,20 @@
   inferred form (variable, application, field, ...) is typed without
   the expected type and reconciled -- equal refinement or flexible
   type: pass-through, no obligation; unrefined rigid type: an intro;
-  a VARIABLE at a different refinement: re-refined (the obligation is
-  discharged with the variable's own refinement, in context from its
-  binder).  Dually, a VARIABLE of refined type used where a rigid
+  a VARIABLE or an APPLICATION at a different refinement: re-refined
+  (the obligation is discharged with the subject's own refinement --
+  a variable's from its binder fact, an application's SELFIFIED at
+  the node's name by the verification pass, the arrow spine walked
+  and dependent binders substituted exactly as typing did: the inline
+  unpack that `let q = f x in q` used to spell, so a recursive call
+  whose postcondition speaks of the smaller instance is the bare
+  TAIL).  Dually, a VARIABLE of refined type used where a rigid
   unrefined type is expected is implicitly eliminated,
-  obligation-free.  The non-intro cases are variables-only because
-  facts are indexed by logical names: erasing or re-refining an
-  unnamed value would disconnect its refinement from the logic
-  (error: "let-bind it first").  Branch constructs propagate the
+  obligation-free, and an APPLICATION's refined result is erased at a
+  rigid unrefined expected type (no obligation arises there, and the
+  fact of an unnamed value is unreachable either way -- name it with
+  a `let` to keep it).  Other forms at a different refinement must be
+  let-bound ("let-bind it first").  Branch constructs propagate the
   expected type, so implicit intros land at the LEAVES, under each
   branch's path facts (and, since local binders are carrier-typed,
   unannotated joins of refined-fact-carrying and plain branches are

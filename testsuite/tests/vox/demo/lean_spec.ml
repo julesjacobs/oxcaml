@@ -48,8 +48,8 @@ let rec append : (a : ilist) -> (b : ilist) -> ilist{ len _ = len a + len b } =
       Cons (h, r)
 
 (* rev via accumulator: length is preserved.  [acc2]'s binder equation
-   [acc2 = Cons (h, acc)] carries the invariant; the weakening of the
-   recursive result to this call's instantiation is the final [r]. *)
+   [acc2 = Cons (h, acc)] carries the invariant; the recursive call is
+   the bare tail, re-proved inline at this call's instantiation. *)
 let rec rev_append
   : (acc : ilist) -> (l : ilist) -> ilist{ len _ = len acc + len l }
   =
@@ -58,11 +58,9 @@ let rec rev_append
   | Nil -> acc
   | Cons (h, t) ->
     let acc2 = Cons (h, acc) in
-    let r = rev_append acc2 t in
-    r
+    rev_append acc2 t
 
 let rev : (l : ilist) -> ilist{ len _ = len l } =
   fun l ->
   let nil = Nil in
-  let r = rev_append nil l in
-  r
+  rev_append nil l
