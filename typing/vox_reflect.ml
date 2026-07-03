@@ -35,7 +35,7 @@ let is_int_or_bool env ty =
   | _ -> false
 ;;
 
-(* Reflected functions ([let rec f ... = ... [@@vox.reflect]]): program
+(* TOTAL (reflected) functions ([let rec total_ f ... = ...]): program
    functions whose definitions are translated into the logic
    (translate_def below) and emitted as solver-side definitions
    (vox_verify).  Registered by stamp when the binding is typed
@@ -133,7 +133,7 @@ let rec translate (e : expression) : Refinement.pred option =
 ;;
 
 (* ------------------------------------------------------------------ *)
-(* Reflected DEFINITIONS: the translation of a [@@vox.reflect] binding's
+(* Reflected DEFINITIONS: the translation of a [total_] binding's
    body into an equation-style logical definition.
 
    The reflectable fragment is deliberately small (sharp edges, not
@@ -346,7 +346,13 @@ let find_attr name (attrs : Parsetree.attributes) =
     attrs
 ;;
 
-let has_reflect_attr attrs = find_attr "vox.reflect" attrs <> None
+let has_total_attr attrs = find_attr "vox.total" attrs <> None
+
+(* The [total_] marker rides the binder pattern (parser); the
+   [@@vox.total] attribute spelling on the binding also works. *)
+let is_total_binding (vb : Typedtree.value_binding) =
+  has_total_attr vb.vb_attributes || has_total_attr vb.vb_pat.pat_attributes
+;;
 
 let rec body_preds acc = function
   | Bpred p -> p :: acc
@@ -400,7 +406,7 @@ let def_datatype_paths (d : spec_def) =
   @ List.concat_map Refinement.constr_paths (body_preds [] d.sd_body)
 ;;
 
-(* Translate a typed [@@vox.reflect] binding into a definition.  Raises
+(* Translate a typed [total_] binding into a definition.  Raises
    with a source location on anything outside the fragment. *)
 let translate_def (vb : Typedtree.value_binding) : spec_def =
   let loc = vb.vb_loc in
@@ -409,7 +415,7 @@ let translate_def (vb : Typedtree.value_binding) : spec_def =
     | Tpat_var { id; _ } -> id
     | _ ->
       Location.raise_errorf ~loc
-        "vox: [@@vox.reflect] requires a binding of a single variable"
+        "vox: total_ requires a binding of a single variable"
   in
   match vb.vb_expr.exp_desc with
   | Texp_function { params; body; _ } ->
@@ -483,5 +489,5 @@ let translate_def (vb : Typedtree.value_binding) : spec_def =
     }
   | _ ->
     Location.raise_errorf ~loc
-      "vox: [@@vox.reflect] requires a function binding"
+      "vox: total_ requires a function binding"
 ;;

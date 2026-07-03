@@ -1139,6 +1139,7 @@ let maybe_pmod_constraint mode expr =
 %token THEN                   "then"
 %token TILDE                  "~"
 %token TO                     "to"
+%token TOTAL                  "total_"
 %token TRUE                   "true"
 %token TRY                    "try"
 %token TYPE                   "type"
@@ -3373,6 +3374,18 @@ let_binding_body_no_punning:
 let_binding_body:
   | poly_flag = poly_flag let_binding_body_no_punning
       { let p,e,c,modes = $2 in (p,e,c,modes,false,poly_flag) }
+  (* vox: [let rec total_ f x = e] marks the binding as a TOTAL
+     (reflected) function; the marker rides the binder pattern as a
+     "vox.total" attribute. *)
+  | TOTAL poly_flag = poly_flag body = let_binding_body_no_punning
+      { let p,e,c,modes = body in
+        let attr =
+          mk_attr ~loc:(make_loc $loc($1))
+            { txt = "vox.total"; loc = make_loc $loc($1) }
+            (PStr [])
+        in
+        let p = { p with ppat_attributes = attr :: p.ppat_attributes } in
+        (p,e,c,modes,false,poly_flag) }
 /* BEGIN AVOID */
   | poly_flag = poly_flag val_ident %prec below_HASH
       { (mkpatvar ~loc:$loc($2) $2, ghexpvar ~loc:$loc($2) $2,

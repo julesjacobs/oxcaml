@@ -10,7 +10,7 @@
 
 (* Demo 6/7 -- Fibonacci, where the spec IS the program: the naive
    recursion below
-   is REFLECTED ([@@vox.reflect]) -- the compiler translates its
+   is TOTAL (reflected) -- the compiler translates its
    definition into the logic and emits it as a Lean [@[grind] def],
    with [termination_by] synthesized from [@@vox.decreases n]; an
    applied [fib] in any refinement then denotes this very function.
@@ -28,13 +28,13 @@
 let half : (x : int) -> int{ x = 2 * _ || x = 2 * _ + 1 } =
   fun x -> assume_ (x asr 1)
 
-let rec fib n =
+let rec total_ fib n =
   if n <= 0
   then 0
   else if n = 1
   then 1
   else fib (n - 1) + fib (n - 2)
-[@@vox.reflect] [@@vox.decreases n]
+[@@vox.decreases n]
 
 (* A reflected call names itself: the program's fib meets the spec
    definitionally (the goal is [fib n = fib n]). *)

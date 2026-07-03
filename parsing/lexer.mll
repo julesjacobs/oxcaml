@@ -108,6 +108,7 @@ let all_keywords =
     "struct", STRUCT, always;
     "then", THEN, always;
     "to", TO, always;
+    "total_", TOTAL, oxcaml;
     "true", TRUE, always;
     "try", TRY, always;
     "type", TYPE, always;

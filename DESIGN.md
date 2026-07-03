@@ -123,8 +123,10 @@
   and unit-qualified (`Vox_<Unit>_<path>`), the same in the defining
   module and in every client; distinct types that would collide are
   rejected ("rename one of them").
-- REFLECTED functions: a module-level `let rec f ... = ...
-  [@@vox.reflect]` is a program function that DEFINES the spec function
+- TOTAL (reflected) functions: a module-level `let rec total_ f ... =
+  ...` (the marker rides the binder pattern as a `vox.total`
+  attribute; the `[@@vox.total]` spelling also works) is a program
+  function that DEFINES the spec function
   of the same name -- the compiler translates its body into an
   equation-style logical definition (Vox_reflect.translate_def) and
   emits it into the solver input between the datatypes and the prelude

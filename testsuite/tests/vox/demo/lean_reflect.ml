@@ -7,8 +7,8 @@
  check-ocamlc.byte-output;
 *)
 
-(* Demo 4/7 -- the program as its own spec.  Reflected recursive
-   functions ([@@vox.reflect]): the compiler
+(* Demo 4/7 -- the program as its own spec.  TOTAL (reflected)
+   recursive functions [let rec total_ f ...]: the compiler
    translates the definition into the logic and emits it as a Lean
    [@[grind] def] (Lean checks termination -- structural recursion here
    needs no metric).  A saturated call of a reflected function then
@@ -20,23 +20,20 @@ type ilist =
   | Nil
   | Cons of int * ilist
 
-let rec len l =
+let rec total_ len l =
   match l with
   | Nil -> 0
   | Cons (_, t) -> 1 + len t
-[@@vox.reflect]
 
-let rec mem x l =
+let rec total_ mem x l =
   match l with
   | Nil -> false
   | Cons (h, t) -> x = h || mem x t
-[@@vox.reflect]
 
 (* The [function] form reflects too. *)
-let rec depth = function
+let rec total_ depth = function
   | Nil -> 0
   | Cons (_, t) -> 1 + depth t
-[@@vox.reflect]
 
 let nil0 : ilist{ len _ = 0 } = refine_ Nil
 let l2 : ilist{ len _ = 2 } = refine_ (Cons (1, Cons (2, Nil)))

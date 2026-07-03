@@ -109,7 +109,7 @@ let registering : Path.t list ref = ref []
 let poisoned : Path.t list ref = ref []
 let find_datatype p = List.find_opt (fun (q, _) -> Path.same p q) !datatypes
 
-(* Reflected definitions ([@@vox.reflect]) of the current module (or
+(* Reflected definitions ([total_] bindings) of the current module (or
    toplevel session), in definition order; emitted into the solver input
    between the datatypes and the [-vox-prelude], so prelude lemmas may
    reference them. *)
@@ -257,7 +257,7 @@ let register_pred_paths env p =
   List.iter (fun q -> ignore (datatype_sort env q)) (Refinement.constr_paths p)
 ;;
 
-(* Register a [@@vox.reflect] binding: translate its body into an
+(* Register a [total_] binding: translate its body into an
    equation-style definition (Vox_reflect.translate_def) and queue it
    for emission.  Solver-side names are the source names, so two
    reflected functions may not share one; the definition's datatypes
@@ -562,12 +562,12 @@ let check_binder_escape ~toplevel ctx ~extra_scope (pat : _ general_pattern) id 
    calls would translate) but never emitted, and a local one could
    capture enclosing variables; reject them all. *)
 let reject_local_reflect (vb : Typedtree.value_binding) =
-  if Vox_reflect.has_reflect_attr vb.vb_attributes
+  if Vox_reflect.is_total_binding vb
   then
     Location.raise_errorf
       ~loc:vb.vb_loc
-      "vox: [@@vox.reflect] is only supported on top-level bindings of the \
-       current module"
+      "vox: total_ is only supported on top-level bindings of the current \
+       module"
 ;;
 
 let backstop_pat : type k. ctx -> k general_pattern -> unit =
@@ -2294,7 +2294,7 @@ let uses_vox (str : structure) =
           Tast_iterator.default_iterator.pat sub p)
     ; value_binding =
         (fun sub vb ->
-          (* [@@vox.reflect] bindings need the pass even when no other
+          (* [total_] bindings need the pass even when no other
              vox syntax appears (their definitions must be registered,
              translated, and checked). *)
           if has_vox vb.vb_attributes then found := true;
@@ -2313,19 +2313,19 @@ let walk_items (str : structure) ctx =
         (match vbs with
          | _ :: _ :: _
            when List.exists
-                  (fun vb -> Vox_reflect.has_reflect_attr vb.vb_attributes)
+                  Vox_reflect.is_total_binding
                   vbs ->
            (* Emission order is definition order, so a group could
               forward-reference; mutual recursion is not supported
               (matching the datatype restriction). *)
            Location.raise_errorf
              ~loc:(List.hd vbs).vb_loc
-             "vox: [@@vox.reflect] is not supported on multi-binding groups \
+             "vox: total_ is not supported on multi-binding groups \
               (mutually recursive reflected functions are not supported)"
          | _ -> ());
         List.iter
           (fun vb ->
-            if Vox_reflect.has_reflect_attr vb.vb_attributes
+            if Vox_reflect.is_total_binding vb
             then register_spec_def str.str_final_env vb)
           vbs;
         List.iter (fun vb -> walk_expr str.str_final_env !ctx vb.vb_expr) vbs;
