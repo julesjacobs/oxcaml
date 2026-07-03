@@ -103,8 +103,7 @@ contract: callers prove it, the body assumes it.  Here the branch condition is
 all the proof <code>div</code>'s contract needs — and the compiler finds it:</p>
 <pre><code class="ml">let div : (a : int) -&gt; (b : int{ not (_ = 0) }) -&gt; int = fun a b -&gt; a / b
 
-let safe x = if 0 &lt; x then div 100 x else 0    (* proved: the path fact 0 &lt; x
-                                                  discharges div's contract *)</code></pre>
+let safe x = if 0 &lt; x then div 100 x else 0</code></pre>
 <p>Three keywords control where obligations come from and where trust goes:
 <code>refine_&nbsp;e</code> claims a refinement and is <em>proved</em>;
 <code>assume_&nbsp;e</code> is <em>checked at runtime</em> (the compiler inserts the test);
@@ -123,9 +122,10 @@ solver-side text:</p>
   | Nil -&gt; 0
   | Cons (_, t) -&gt; 1 + len t
 
-(* [len] is now a spec function: the compiler translated the definition
-   into the logic.  The classic inductive proof needs NO solver-side
-   definitions written by hand -- and no proof text at all: *)
+(* The textbook inductive proof, against the REFLECTED len: no prelude
+   measure.  Each recursive call re-instantiates the dependent
+   signature (the induction hypothesis); grind unfolds [len] via the
+   definitional equations. *)
 let rec append : (a : ilist) -&gt; (b : ilist) -&gt; ilist{ len _ = len a + len b } =
   fun a b -&gt;
     match a with
@@ -256,30 +256,28 @@ let rec fib_loop
 let fib_iter : (n : int) -&gt; int{ _ = fib n } =
   fun n -&gt; fib_loop n 0 0 1
 
-(* Fast doubling, O(log n) iterations, on pairs (fib n, fib (n+1)) --
-   a simple variant, so the pair appears in predicates.  With k = n/2:
-   fib (2k) = fib k * (2 fib (k+1) - fib k) and fib (2k+1) = fib k ^ 2
-   + fib (k+1) ^ 2 (the embedded lemmas; they need k &gt;= 0, hence the
-   precondition on n, discharged at each call).  Annotating x and y
-   with the doubling identities puts [fib (2 * k)] syntactically in
-   each obligation, which is what fires the lemmas; the final
-   obligations are then pure congruence. *)
-type pair = P of int * int
-
-let rec fib_fd : (n : int{ _ &gt;= 0 }) -&gt; pair{ _ = P (fib n, fib (n + 1)) } =
+(* Fast doubling, O(log n) iterations, on NATIVE pairs
+   (fib n, fib (n+1)) -- tuples appear in predicates directly.  With
+   k = n/2: fib (2k) = fib k * (2 fib (k+1) - fib k) and fib (2k+1) =
+   fib k ^ 2 + fib (k+1) ^ 2 (the embedded lemmas; they need k &gt;= 0,
+   hence the precondition on n, discharged at each call).  Annotating
+   x and y with the doubling identities puts [fib (2 * k)]
+   syntactically in each obligation, which is what fires the lemmas;
+   the final obligations are then pure congruence. *)
+let rec fib_fd : (n : int{ _ &gt;= 0 }) -&gt; (int * int){ _ = (fib n, fib (n + 1)) } =
   fun n -&gt;
     if n &lt;= 0
-    then refine_ (P (0, 1))
+    then refine_ (0, 1)
     else begin
       let refine_ k = half n in
       let refine_ q = fib_fd k in
       match q with
-      | P (a, b) -&gt;
+      | (a, b) -&gt;
         let refine_ x = (refine_ (a * (2 * b - a)) : int{ _ = fib (2 * k) }) in
         let refine_ y = (refine_ (a * a + b * b) : int{ _ = fib (2 * k + 1) }) in
         if n = 2 * k
-        then refine_ (P (x, y))
-        else refine_ (P (y, x + y))
+        then refine_ (x, y)
+        else refine_ (y, x + y)
     end
 
 (* Client side: fib 10, by fast doubling; the precondition [10 &gt;= 0]
@@ -287,8 +285,8 @@ let rec fib_fd : (n : int{ _ &gt;= 0 }) -&gt; pair{ _ = P (fib n, fib (n + 1)) }
 let fib10 : int{ _ = fib 10 } =
   let refine_ r = fib_fd 10 in
   match r with
-  | P (u, _) -&gt; refine_ u</code></pre></div>
-<div class="tabpane"><pre style="max-height:34rem"><code class="lean">inductive Vox_Lean_fib_pair : Type where | P : Int -&gt; Int -&gt; Vox_Lean_fib_pair
+  | (u, _) -&gt; refine_ u</code></pre></div>
+<div class="tabpane"><pre style="max-height:34rem"><code class="lean" id="genlean">structure VoxT2.{u1, u2} (t1 : Sort u1) (t2 : Sort u2) : Sort (max u1 (max u2 (1))) where (p1 : t1) (p2 : t2)
 @[grind] def fib (v_n_285 : Int) : Int := (if (v_n_285 ≤ (0 : Int)) then (0 : Int) else (if (v_n_285 = (1 : Int)) then (1 : Int) else ((fib (v_n_285 - (1 : Int))) + (fib (v_n_285 - (2 : Int))))))
 termination_by (v_n_285).toNat
 decreasing_by all_goals omega
@@ -345,14 +343,14 @@ theorem vc_3 (v_i_301 : Int) (v_b_303 : Int) (v_a_302 : Int) (v_n_300 : Int) (h_
 theorem vc_4 (v_n_300 : Int) (v_r_304 : Int) (v_i_301 : Int) (v_b_303 : Int) (v_a_302 : Int) (h_0 : (v_r_304 = (fib v_n_300))) (h_1 : (¬ (v_i_301 = v_n_300))) (h_2 : (v_b_303 = (fib (v_i_301 + (1 : Int))))) (h_3 : ((v_a_302 = (fib v_i_301)) ∧ (v_i_301 ≥ (0 : Int)))) : (v_r_304 = (fib v_n_300)) := by grind
 theorem vc_5 : (((0 : Int) = (fib (0 : Int))) ∧ ((0 : Int) ≥ (0 : Int))) := by grind
 theorem vc_6 : ((1 : Int) = (fib ((0 : Int) + (1 : Int)))) := by grind
-theorem vc_7 (v_n_315 : Int) (h_0 : (v_n_315 ≤ (0 : Int))) (h_1 : (v_n_315 ≥ (0 : Int))) : ((Vox_Lean_fib_pair.P (0 : Int) (1 : Int)) = (Vox_Lean_fib_pair.P (fib v_n_315) (fib (v_n_315 + (1 : Int))))) := by grind
-theorem vc_8 (v_k_316 : Int) (v_n_315 : Int) (h_0 : ((v_n_315 = ((2 : Int) * v_k_316)) ∨ (v_n_315 = (((2 : Int) * v_k_316) + (1 : Int))))) (h_1 : (¬ (v_n_315 ≤ (0 : Int)))) (h_2 : (v_n_315 ≥ (0 : Int))) : (v_k_316 ≥ (0 : Int)) := by grind
-theorem vc_9 (v_k_316 : Int) (v_a_318 : Int) (v_b_319 : Int) (v_q_317 : Vox_Lean_fib_pair) (v_n_315 : Int) (h_0 : (v_q_317 = (Vox_Lean_fib_pair.P v_a_318 v_b_319))) (h_1 : (v_q_317 = (Vox_Lean_fib_pair.P (fib v_k_316) (fib (v_k_316 + (1 : Int)))))) (h_2 : ((v_n_315 = ((2 : Int) * v_k_316)) ∨ (v_n_315 = (((2 : Int) * v_k_316) + (1 : Int))))) (h_3 : (¬ (v_n_315 ≤ (0 : Int)))) (h_4 : (v_n_315 ≥ (0 : Int))) : ((v_a_318 * (((2 : Int) * v_b_319) - v_a_318)) = (fib ((2 : Int) * v_k_316))) := by grind
-theorem vc_10 (v_k_316 : Int) (v_b_319 : Int) (v_a_318 : Int) (v_x_320 : Int) (v_q_317 : Vox_Lean_fib_pair) (v_n_315 : Int) (h_0 : (v_x_320 = (fib ((2 : Int) * v_k_316)))) (h_1 : (v_q_317 = (Vox_Lean_fib_pair.P v_a_318 v_b_319))) (h_2 : (v_q_317 = (Vox_Lean_fib_pair.P (fib v_k_316) (fib (v_k_316 + (1 : Int)))))) (h_3 : ((v_n_315 = ((2 : Int) * v_k_316)) ∨ (v_n_315 = (((2 : Int) * v_k_316) + (1 : Int))))) (h_4 : (¬ (v_n_315 ≤ (0 : Int)))) (h_5 : (v_n_315 ≥ (0 : Int))) : (((v_a_318 * v_a_318) + (v_b_319 * v_b_319)) = (fib (((2 : Int) * v_k_316) + (1 : Int)))) := by grind
-theorem vc_11 (v_n_315 : Int) (v_y_321 : Int) (v_x_320 : Int) (v_k_316 : Int) (v_b_319 : Int) (v_a_318 : Int) (v_q_317 : Vox_Lean_fib_pair) (h_0 : (v_n_315 = ((2 : Int) * v_k_316))) (h_1 : (v_y_321 = (fib (((2 : Int) * v_k_316) + (1 : Int))))) (h_2 : (v_x_320 = (fib ((2 : Int) * v_k_316)))) (h_3 : (v_q_317 = (Vox_Lean_fib_pair.P v_a_318 v_b_319))) (h_4 : (v_q_317 = (Vox_Lean_fib_pair.P (fib v_k_316) (fib (v_k_316 + (1 : Int)))))) (h_5 : ((v_n_315 = ((2 : Int) * v_k_316)) ∨ (v_n_315 = (((2 : Int) * v_k_316) + (1 : Int))))) (h_6 : (¬ (v_n_315 ≤ (0 : Int)))) (h_7 : (v_n_315 ≥ (0 : Int))) : ((Vox_Lean_fib_pair.P v_x_320 v_y_321) = (Vox_Lean_fib_pair.P (fib v_n_315) (fib (v_n_315 + (1 : Int))))) := by grind
-theorem vc_12 (v_n_315 : Int) (v_y_321 : Int) (v_x_320 : Int) (v_k_316 : Int) (v_b_319 : Int) (v_a_318 : Int) (v_q_317 : Vox_Lean_fib_pair) (h_0 : (¬ (v_n_315 = ((2 : Int) * v_k_316)))) (h_1 : (v_y_321 = (fib (((2 : Int) * v_k_316) + (1 : Int))))) (h_2 : (v_x_320 = (fib ((2 : Int) * v_k_316)))) (h_3 : (v_q_317 = (Vox_Lean_fib_pair.P v_a_318 v_b_319))) (h_4 : (v_q_317 = (Vox_Lean_fib_pair.P (fib v_k_316) (fib (v_k_316 + (1 : Int)))))) (h_5 : ((v_n_315 = ((2 : Int) * v_k_316)) ∨ (v_n_315 = (((2 : Int) * v_k_316) + (1 : Int))))) (h_6 : (¬ (v_n_315 ≤ (0 : Int)))) (h_7 : (v_n_315 ≥ (0 : Int))) : ((Vox_Lean_fib_pair.P v_y_321 (v_x_320 + v_y_321)) = (Vox_Lean_fib_pair.P (fib v_n_315) (fib (v_n_315 + (1 : Int))))) := by grind
+theorem vc_7 (v_n_313 : Int) (h_0 : (v_n_313 ≤ (0 : Int))) (h_1 : (v_n_313 ≥ (0 : Int))) : ((VoxT2.mk (0 : Int) (1 : Int)) = (VoxT2.mk (fib v_n_313) (fib (v_n_313 + (1 : Int))))) := by grind
+theorem vc_8 (v_k_314 : Int) (v_n_313 : Int) (h_0 : ((v_n_313 = ((2 : Int) * v_k_314)) ∨ (v_n_313 = (((2 : Int) * v_k_314) + (1 : Int))))) (h_1 : (¬ (v_n_313 ≤ (0 : Int)))) (h_2 : (v_n_313 ≥ (0 : Int))) : (v_k_314 ≥ (0 : Int)) := by grind
+theorem vc_9 (v_k_314 : Int) (v_a_316 : Int) (v_b_317 : Int) (v_q_315 : (VoxT2 Int Int)) (v_n_313 : Int) (h_0 : (v_a_316 = (VoxT2.p1 v_q_315))) (h_1 : (v_b_317 = (VoxT2.p2 v_q_315))) (h_2 : (v_q_315 = (VoxT2.mk (fib v_k_314) (fib (v_k_314 + (1 : Int)))))) (h_3 : ((v_n_313 = ((2 : Int) * v_k_314)) ∨ (v_n_313 = (((2 : Int) * v_k_314) + (1 : Int))))) (h_4 : (¬ (v_n_313 ≤ (0 : Int)))) (h_5 : (v_n_313 ≥ (0 : Int))) : ((v_a_316 * (((2 : Int) * v_b_317) - v_a_316)) = (fib ((2 : Int) * v_k_314))) := by grind
+theorem vc_10 (v_k_314 : Int) (v_b_317 : Int) (v_a_316 : Int) (v_x_318 : Int) (v_q_315 : (VoxT2 Int Int)) (v_n_313 : Int) (h_0 : (v_x_318 = (fib ((2 : Int) * v_k_314)))) (h_1 : (v_a_316 = (VoxT2.p1 v_q_315))) (h_2 : (v_b_317 = (VoxT2.p2 v_q_315))) (h_3 : (v_q_315 = (VoxT2.mk (fib v_k_314) (fib (v_k_314 + (1 : Int)))))) (h_4 : ((v_n_313 = ((2 : Int) * v_k_314)) ∨ (v_n_313 = (((2 : Int) * v_k_314) + (1 : Int))))) (h_5 : (¬ (v_n_313 ≤ (0 : Int)))) (h_6 : (v_n_313 ≥ (0 : Int))) : (((v_a_316 * v_a_316) + (v_b_317 * v_b_317)) = (fib (((2 : Int) * v_k_314) + (1 : Int)))) := by grind
+theorem vc_11 (v_n_313 : Int) (v_y_319 : Int) (v_x_318 : Int) (v_k_314 : Int) (v_q_315 : (VoxT2 Int Int)) (v_a_316 : Int) (v_b_317 : Int) (h_0 : (v_n_313 = ((2 : Int) * v_k_314))) (h_1 : (v_y_319 = (fib (((2 : Int) * v_k_314) + (1 : Int))))) (h_2 : (v_x_318 = (fib ((2 : Int) * v_k_314)))) (h_3 : (v_a_316 = (VoxT2.p1 v_q_315))) (h_4 : (v_b_317 = (VoxT2.p2 v_q_315))) (h_5 : (v_q_315 = (VoxT2.mk (fib v_k_314) (fib (v_k_314 + (1 : Int)))))) (h_6 : ((v_n_313 = ((2 : Int) * v_k_314)) ∨ (v_n_313 = (((2 : Int) * v_k_314) + (1 : Int))))) (h_7 : (¬ (v_n_313 ≤ (0 : Int)))) (h_8 : (v_n_313 ≥ (0 : Int))) : ((VoxT2.mk v_x_318 v_y_319) = (VoxT2.mk (fib v_n_313) (fib (v_n_313 + (1 : Int))))) := by grind
+theorem vc_12 (v_n_313 : Int) (v_y_319 : Int) (v_x_318 : Int) (v_k_314 : Int) (v_q_315 : (VoxT2 Int Int)) (v_a_316 : Int) (v_b_317 : Int) (h_0 : (¬ (v_n_313 = ((2 : Int) * v_k_314)))) (h_1 : (v_y_319 = (fib (((2 : Int) * v_k_314) + (1 : Int))))) (h_2 : (v_x_318 = (fib ((2 : Int) * v_k_314)))) (h_3 : (v_a_316 = (VoxT2.p1 v_q_315))) (h_4 : (v_b_317 = (VoxT2.p2 v_q_315))) (h_5 : (v_q_315 = (VoxT2.mk (fib v_k_314) (fib (v_k_314 + (1 : Int)))))) (h_6 : ((v_n_313 = ((2 : Int) * v_k_314)) ∨ (v_n_313 = (((2 : Int) * v_k_314) + (1 : Int))))) (h_7 : (¬ (v_n_313 ≤ (0 : Int)))) (h_8 : (v_n_313 ≥ (0 : Int))) : ((VoxT2.mk v_y_319 (v_x_318 + v_y_319)) = (VoxT2.mk (fib v_n_313) (fib (v_n_313 + (1 : Int))))) := by grind
 theorem vc_13 : ((10 : Int) ≥ (0 : Int)) := by grind
-theorem vc_14 (v_u_324 : Int) (v__vox_wild__326 : Int) (v_r_323 : Vox_Lean_fib_pair) (h_0 : (v_r_323 = (Vox_Lean_fib_pair.P v_u_324 v__vox_wild__326))) (h_1 : (v_r_323 = (Vox_Lean_fib_pair.P (fib (10 : Int)) (fib ((10 : Int) + (1 : Int)))))) : (v_u_324 = (fib (10 : Int))) := by grind</code></pre>
+theorem vc_14 (v_u_322 : Int) (v_r_321 : (VoxT2 Int Int)) (h_0 : (v_u_322 = (VoxT2.p1 v_r_321))) (h_1 : (v_r_321 = (VoxT2.mk (fib (10 : Int)) (fib ((10 : Int) + (1 : Int)))))) : (v_u_322 = (fib (10 : Int))) := by grind</code></pre>
 <p style="color:var(--dim);font-size:.9rem">Generated per compile and checked by
 Lean: the <code>pair</code> datatype, the reflected <code>fib</code> (with
 synthesized <code>termination_by</code>), the embedded lemma block verbatim, and
@@ -367,9 +365,7 @@ artifact.</p></div>
 
 (* Off by one: fib is not n+1.  The compiler says so, with a witness. *)
 let wrong : (n : int) -&gt; int{ _ = fib n } = fun n -&gt; refine_ (n + 1)</code></pre>
-<pre class="out"><code>4 | let wrong : (n : int) -&gt; int{ _ = fib n } = fun n -&gt; refine_ (n + 1)
-                                                                 ^^^^^^^
-Error: vox: verification failed (lean).
+<pre class="out"><code>Error: vox: verification failed (lean).
        Goal: (n + 1) = (fib n)
 Hypotheses: &lt;none&gt;
 Possible counterexample:
@@ -387,12 +383,14 @@ linear-consistent model is visibly so.</p>
 <div class="card"><h3>Algebraic data types <span class="pill">demo/lean_adt.ml</span></h3>
 <p>Constructors of simple variants live in predicates; matches refine the
 scrutinee; injectivity and distinctness come from the solver's datatype
-theory.</p>
+theory.  Note the <code>Nil</code> branch: it is unreachable, and the compiler
+<em>proves</em> it — the match facts contradict, so even <code>0 = 3</code>
+discharges.</p>
 <pre><code class="ml">let head (s : ilist{ _ = Cons (3, Nil) }) : {r:int | r = 3} =
   let refine_ s = s in
   match s with
-  | Cons (h, _) -&gt; refine_ h        (* injectivity: h = 3 *)
-  | Nil -&gt; assume_ 0                (* unreachable; runtime-checked *)</code></pre></div>
+  | Cons (h, _) -&gt; refine_ h
+  | Nil -&gt; refine_ 0</code></pre></div>
 
 <div class="card"><h3>Records &amp; projections <span class="pill">demo/lean_records.ml</span></h3>
 <p>Immutable records become Lean structures; field projection appears in
@@ -408,9 +406,7 @@ let swap : (p : point) -&gt; point{ _.px = p.py &amp;&amp; _.py = p.px } =
 including the literal seeds in <code>fib_loop n 0 0 1</code> and the compound
 arguments <code>(i + 1)</code>, <code>(a + b)</code> — discharges them as
 ordinary obligations.</p>
-<pre><code class="ml">(* The parameters CARRY the loop invariant: callers prove it,
-   the body assumes it.  Note the bare arguments at the call. *)
-let rec fib_loop
+<pre><code class="ml">let rec fib_loop
   : (n : int) -&gt; (i : int) -&gt; (a : int{ _ = fib i &amp;&amp; i &gt;= 0 })
     -&gt; (b : int{ _ = fib (i + 1) }) -&gt; int{ _ = fib n }
   =
@@ -422,16 +418,15 @@ let rec fib_loop
       refine_ r
     end
 
-let fib_iter : (n : int) -&gt; int{ _ = fib n } = fun n -&gt; fib_loop n 0 0 1</code></pre></div>
+let fib_iter : (n : int) -&gt; int{ _ = fib n } =
+  fun n -&gt; fib_loop n 0 0 1</code></pre></div>
 
 <div class="card"><h3>Specs cross module boundaries <span class="pill">demo/lean_reflectclient.ml</span></h3>
 <p>A <code>total_</code> function's definition rides its unit's
 <code>.cmi</code>.  Clients name it, apply it in predicates, and run inductive
 proofs against it — the <code>.cmi</code> checksum forces re-verification when
 the spec changes.</p>
-<pre><code class="ml">(* Reflect_lib reflects [len] and [fib]; their definitions travel
-   in the .cmi.  A client proves against them directly: *)
-let l2 : Reflect_lib.ilist{ Reflect_lib.len _ = 2 } =
+<pre><code class="ml">let l2 : Reflect_lib.ilist{ Reflect_lib.len _ = 2 } =
   refine_ (Reflect_lib.Cons (1, Reflect_lib.Cons (2, Reflect_lib.Nil)))
 
 let f5 : int{ _ = Reflect_lib.fib 5 } = refine_ (Reflect_lib.fib 5)</code></pre></div>
@@ -442,6 +437,8 @@ it is about, is checked on every compile, and is exported through the
 <code>.cmi</code> like everything else.  Errors map back to the block's own
 source location.</p>
 <pre><code class="lean">[%%vox.lean {lean|
+...
+
 @[grind =] theorem fib_double (k : Int) (hk : 0 &lt;= k) :
     fib (2 * k) = fib k * (2 * fib (k + 1) - fib k) := by
   ...
@@ -464,14 +461,13 @@ the result — machine-checked.</p>
 returns a unique separation token, so facts about cell contents cannot survive
 a write.  Duplicated, stale, forged, and cross-cell tokens are compile-time
 errors.</p>
-<pre><code class="ml">(* Interior mutability with unique separation tokens: reads and
-   writes thread a linear token; stale or duplicated tokens are
-   compile-time errors. *)
-let swap_sum : (a : int) -&gt; (b : int) -&gt; int{ _ = a + b } =
+<pre><code class="ml">let swap_sum : (a : int) -&gt; (b : int) -&gt; int{ _ = a + b } =
   fun a b -&gt;
-    let refine_ p = alloc a in
-    let { cell = c1; tok = t1 } = p in
-    let (r1p, t1') = read c1 a t1 in
+  let refine_ p = alloc a in
+  let refine_ q = alloc b in
+  let { cell = c1; tok = t1 } = p in
+  let { cell = c2; tok = t2 } = q in
+  let (r1p, t1a0) = read c1 a t1 in
     ...</code></pre></div>
 
 <div class="card"><h3>Reflected arithmetic <span class="pill">Vox_reflect</span></h3>
@@ -506,16 +502,20 @@ model).</p>
 <pre><code>git clone -b vox https://github.com/julesjacobs/oxcaml && cd oxcaml
 autoconf && ./configure && make boot-compiler
 make test-one DIR=vox        # needs a Lean 4 toolchain (elan) on PATH</code></pre>
-<p>Every snippet on this page is taken verbatim from
-<a href="https://github.com/julesjacobs/oxcaml/tree/vox/testsuite/tests/vox/demo">testsuite/tests/vox/demo</a>,
-and every compiler output shown was produced by the current branch head — the
-demo suite fails CI if any proof stops going through.</p>
+<p>Every example on this page lives in the branch's test suite and this page
+is generated from it (<code>docs/vox/generate.py</code>): the demo files must
+verify, and the failure example must fail with exactly the output shown
+(<code>mechanics/lean_wrong.ml</code> pins it, location and counterexample
+included), for the suite to pass.  Ellipses mark elided bodies; everything
+else is extracted verbatim from
+<a href="https://github.com/julesjacobs/oxcaml/tree/vox/testsuite/tests/vox">testsuite/tests/vox</a>.</p>
 
 <div class="foot">
 vox is a research prototype on a public fork of
 <a href="https://github.com/oxcaml/oxcaml">OxCaml</a>.
 Design notes: <a href="https://github.com/julesjacobs/oxcaml/blob/vox/DESIGN.md">DESIGN.md</a>.
-This page is generated from the verified demo suite.
+This page is generated from the verified test suite by
+<a href="https://github.com/julesjacobs/oxcaml/blob/vox/docs/vox/generate.py">docs/vox/generate.py</a>.
 </div>
 </main>
 
