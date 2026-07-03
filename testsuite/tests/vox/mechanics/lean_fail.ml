@@ -231,9 +231,9 @@ Line 4, characters 23-24:
 4 |   let r = use (refine_ x) (x <- 1) in
                            ^
 Error: vox: verification failed (lean).
-       Goal: x@2 = 0
+       Goal: x@1 = 0
 Hypotheses: <none>
 Possible counterexample:
-  x@2 = 1
+  x@1 = 1
 (lean: error: `grind` failed)
 |}]

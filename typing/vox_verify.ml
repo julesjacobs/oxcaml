@@ -559,6 +559,41 @@ let mut_havoc_written env e =
   List.concat_map (mut_havoc env) (written_mutables e)
 ;;
 
+(* The tracked mutable variables [e] READS ([Texp_mutvar]) anywhere in
+   its subtree; complete for the same reason as [written_mutables]. *)
+let read_mutables (e : expression) =
+  let acc = ref [] in
+  let it =
+    { Tast_iterator.default_iterator with
+      expr =
+        (fun sub e' ->
+          (match e'.exp_desc with
+           | Texp_mutvar { txt = id; _ } ->
+             if Hashtbl.mem mut_versions id
+                && not (List.exists (Ident.same id) !acc)
+             then acc := id :: !acc
+           | _ -> ());
+          Tast_iterator.default_iterator.expr sub e')
+    }
+  in
+  it.expr it e;
+  !acc
+;;
+
+(* Havoc facts for one unordered CHILD (application arguments, let-and
+   right-hand sides, generic traversal): only the subtree-written
+   variables the child itself reads get a fresh version.  A child blind
+   to a variable needs no name for it, and skipping the mint keeps
+   version numbering readable.  Call with the version table already
+   restored to the construct's entry state. *)
+let sibling_havoc env ~written child =
+  List.concat_map
+    (mut_havoc env)
+    (List.filter
+       (fun id -> List.exists (Ident.same id) written)
+       (read_mutables child))
+;;
+
 (* Loop invariants ([@vox.invariant p]): a FORMULA over program
    variables, living in the logical environment -- not a refinement
    type: it never travels and is never compared.  The elaborated
@@ -1267,9 +1302,10 @@ let match_facts
   | Tpat_record (fields, _, _, _) -> record_facts fields
   | Tpat_tuple comps -> tuple_facts comps
   | Tpat_var { id; _ } when not (Ident.same id sid) ->
-    (* Bare value patterns ([function]-case arms reach here unwrapped).
-       The [Ident.same] guard: [fc_param] IS the first variable case's
-       ident (see [Typecore.name_cases]), and [x = x] is noise. *)
+    (* Bare value patterns (let bindings and [function]-case arms reach
+       here unwrapped).  The [Ident.same] guard: [fc_param] IS the
+       first variable case's ident (see [Typecore.name_cases]), and
+       [x = x] is noise. *)
     [ Refinement.Pbinop (Refinement.Eq, Refinement.Pvar id, Refinement.Pvar sid) ]
   | _ -> []
 ;;
@@ -1454,12 +1490,11 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
        identical to walking every child under the entry context. *)
     let saved = save_versions () in
     let written = written_mutables e in
-    let child_ctx () =
+    let child_ctx child =
       restore_versions saved;
-      let hfacts = List.concat_map (mut_havoc env) written in
-      { ctx with cfacts = hfacts @ ctx.cfacts }
+      { ctx with cfacts = sibling_havoc env ~written child @ ctx.cfacts }
     in
-    ignore (walk_expr env (child_ctx ()) funct : ctx);
+    ignore (walk_expr env (child_ctx funct) funct : ctx);
     (* Contract obligations (parameters as preconditions): each
        argument for a refined parameter must satisfy the predicate at
        its logical name; an intro-form argument
@@ -1481,7 +1516,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
         let actx =
           match arg_expr with
           | Some a ->
-            let actx = child_ctx () in
+            let actx = child_ctx a in
             ignore (walk_expr env actx a : ctx);
             actx
           | None -> ctx
@@ -1540,17 +1575,10 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
       | Texp_mutvar { txt = mid; _ }, _ ->
         (match Hashtbl.find_opt mut_versions mid with
          | Some (v, _) ->
-           let direct =
-             match vb.vb_pat.pat_desc with
-             | Tpat_var { id = x; _ } ->
-               [ Refinement.Pbinop
-                   (Refinement.Eq, Refinement.Pvar x, Refinement.Pvar v)
-               ]
-             | _ -> []
-           in
-           { ctx' with
-             cfacts = direct @ match_facts env v vb.vb_pat @ ctx'.cfacts
-           }
+           (* [match_facts] ties a variable pattern to the version
+              directly and destructures records/constructors through
+              it. *)
+           { ctx' with cfacts = match_facts env v vb.vb_pat @ ctx'.cfacts }
          | None -> ctx')
       | _, _ -> ctx'
     in
@@ -1568,13 +1596,12 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
     (* [let .. and ..]: sibling evaluation order is unspecified, so each
        right-hand side walks under the ENTRY context and every mutable
        variable any of them writes is havocked. *)
-    List.iter (fun vb -> ignore (walk_expr env ctx vb.vb_expr : ctx)) vbs;
     let saved = save_versions () in
     let written = List.concat_map (fun vb -> written_mutables vb.vb_expr) vbs in
     List.iter
       (fun vb ->
         restore_versions saved;
-        let hfacts = List.concat_map (mut_havoc env) written in
+        let hfacts = sibling_havoc env ~written vb.vb_expr in
         ignore
           (walk_expr env { ctx with cfacts = hfacts @ ctx.cfacts } vb.vb_expr
             : ctx))
@@ -1871,10 +1898,13 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
   | Texp_for { for_id; for_from; for_to; for_dir; for_body; _ } ->
     let c0 = walk_expr env ctx for_from in
     let c1 = walk_expr env c0 for_to in
-    (* Bounds are evaluated once, before any body write: reflect them
-       (pure when translatable) before havocking. *)
-    let from_p = Vox_reflect.translate ~mutvar:mut_read for_from in
-    let to_p = Vox_reflect.translate ~mutvar:mut_read for_to in
+    (* Bounds are evaluated once, before any body write: NAME them
+       (their reflection when translatable, a fresh unknown otherwise)
+       before havocking.  One name per bound serves the head bounds and
+       the entry/post-loop index instances alike, so even an opaque
+       bound yields a consistent quadruple. *)
+    let from_n = name_of_expr env for_from in
+    let to_n = name_of_expr env for_to in
     record_name env for_id for_from.exp_type;
     (* The invariant elaborates in the BODY's environment, where the
        index is bound.  An index mention makes the quadruple
@@ -1891,17 +1921,6 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
         List.exists (Ident.same for_id) (Refinement.free_vars template)
       | None -> false
     in
-    let index_bounds =
-      match from_p, to_p with
-      | Some f, Some t -> Some (f, t)
-      | _ -> None
-    in
-    (match inv, index_bounds with
-     | Some (_, attr_loc), None when mentions_index ->
-       Location.raise_errorf ~loc:attr_loc
-         "vox: the invariant mentions the loop index, but a loop bound does \
-          not reflect into the logic; bind the bounds to variables first"
-     | _ -> ());
     let step p =
       let op =
         match for_dir with
@@ -1913,12 +1932,11 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
     let at_index by template =
       if mentions_index
       then (
-        match index_bounds, by with
-        | Some (f, _), `First -> Refinement.subst_var for_id ~by:f template
-        | Some (_, t), `Past -> Refinement.subst_var for_id ~by:(step t) template
-        | Some _, `Next ->
-          Refinement.subst_var for_id ~by:(step (Refinement.Pvar for_id)) template
-        | None, _ -> assert false (* rejected above *))
+        match by with
+        | `First -> Refinement.subst_var for_id ~by:from_n template
+        | `Past -> Refinement.subst_var for_id ~by:(step to_n) template
+        | `Next ->
+          Refinement.subst_var for_id ~by:(step (Refinement.Pvar for_id)) template)
       else template
     in
     (match inv with
@@ -1946,19 +1964,14 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
         if not mentions_index
         then head_inv
         else (
-          let f, t =
-            match index_bounds with
-            | Some ft -> ft
-            | None -> assert false (* rejected above *)
-          in
           let ran, empty =
             match for_dir with
             | Upto ->
-              ( Refinement.Pbinop (Refinement.Le, f, t)
-              , Refinement.Pbinop (Refinement.Gt, f, t) )
+              ( Refinement.Pbinop (Refinement.Le, from_n, to_n)
+              , Refinement.Pbinop (Refinement.Gt, from_n, to_n) )
             | Downto ->
-              ( Refinement.Pbinop (Refinement.Ge, f, t)
-              , Refinement.Pbinop (Refinement.Lt, f, t) )
+              ( Refinement.Pbinop (Refinement.Ge, from_n, to_n)
+              , Refinement.Pbinop (Refinement.Lt, from_n, to_n) )
           in
           [ Refinement.Por
               ( Refinement.Pand
@@ -1968,17 +1981,14 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
           ])
     in
     let bounds =
-      match from_p, to_p with
-      | Some f, Some t ->
-        let lo, hi =
-          match for_dir with
-          | Upto -> f, t
-          | Downto -> t, f
-        in
-        [ Refinement.Pbinop (Refinement.Le, lo, Refinement.Pvar for_id)
-        ; Refinement.Pbinop (Refinement.Le, Refinement.Pvar for_id, hi)
-        ]
-      | _ -> []
+      let lo, hi =
+        match for_dir with
+        | Upto -> from_n, to_n
+        | Downto -> to_n, from_n
+      in
+      [ Refinement.Pbinop (Refinement.Le, lo, Refinement.Pvar for_id)
+      ; Refinement.Pbinop (Refinement.Le, Refinement.Pvar for_id, hi)
+      ]
     in
     let bctx =
       { cfacts = bounds @ head_inv @ head_havoc @ c1.cfacts
@@ -2184,7 +2194,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
         expr =
           (fun _ e' ->
             restore_versions saved;
-            let hfacts = List.concat_map (mut_havoc env) written in
+            let hfacts = sibling_havoc env ~written e' in
             ignore
               (walk_expr env { ctx with cfacts = hfacts @ ctx.cfacts } e' : ctx))
       ; pat =

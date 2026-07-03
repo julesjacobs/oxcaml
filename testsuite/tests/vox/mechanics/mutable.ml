@@ -167,7 +167,7 @@ let opaque (u : unit -> unit -> unit) : {r:int | r >= 1} =
   assume_unchecked_ m
 [%%expect{|
 Line 4, characters 20-21: vox VC (ASSUMED):
-  goal: m@7 >= 1
+  goal: m@3 >= 1
   hypotheses: <none>
 val opaque : (unit -> unit -> unit) -> int{ _ >= 1 } = <fun>
 |}]
@@ -314,18 +314,28 @@ val count_down :
   <fun>
 |}]
 
-(* An index mention needs both bounds in the logic. *)
-let bad_bound (f : unit -> int) : int =
+(* An opaque bound is NAMED (a fresh unknown): one name serves the
+   head bounds and the entry/post-loop index instances alike, so an
+   index-mentioning invariant works over arbitrary bounds. *)
+let opaque_bound (f : unit -> int) : int =
   let mutable x = 0 in
   (for i = 0 to f () do
      x <- x + 1
    done) [@vox.invariant x >= i];
   x
 [%%expect{|
-Line 5, characters 9-32:
-5 |    done) [@vox.invariant x >= i];
-             ^^^^^^^^^^^^^^^^^^^^^^^
-Error: vox: the invariant mentions the loop index, but a loop bound does not reflect into the logic; bind the bounds to variables first
+Line 5, characters 9-32: vox VC:
+  goal: x >= 0
+  hypotheses:
+  x = 0
+Line 5, characters 9-32: vox VC:
+  goal: x@2 >= (i + 1)
+  hypotheses:
+  0 <= i
+  i <= *unknown13*
+  x@1 >= i
+  x@2 = (x@1 + 1)
+val opaque_bound : (unit -> int) -> int = <fun>
 |}]
 
 (* An arm containing an exception pattern can be reached with the
@@ -377,7 +387,7 @@ Line 2, characters 63-64: vox VC:
   hypotheses:
   a = 0
 Line 4, characters 23-24: vox VC:
-  goal: x@2 = 0
+  goal: x@1 = 0
   hypotheses: <none>
 Line 5, characters 2-3: vox VC:
   goal: r = 0

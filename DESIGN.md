@@ -634,8 +634,10 @@ assertion at the NEXT value (what one iteration establishes is the
 next iteration's head state), and the post-loop assumption stands at
 the one-past-the-end value when the loop ran -- at the first value
 otherwise, where it is just the entry assertion over unchanged
-variables.  Index mentions require both bounds to reflect into the
-logic (bind them to variables first).
+variables.  Bounds are NAMED (their reflection when translatable, a
+fresh unknown otherwise): one name per bound serves the head bounds
+and the entry/post-loop instances alike, so even an opaque bound
+([for i = 0 to f ()]) yields a consistent quadruple.
 
 Single-arm matches -- what unpacks [let refine_ x = e] and
 destructuring lets desugar to -- are straight-line code: the walker
