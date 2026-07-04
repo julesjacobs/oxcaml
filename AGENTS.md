@@ -63,6 +63,40 @@ Configuration is needed after changing `.in` files or the autoconf script.
 - Rebuild the project often while using the LSP using `make -s boot-compiler`. When
   you don't rebuild, the LSP may give you stale information from a previous build
 
+## vox: verification workflow (measured 2026-07-03)
+
+- Iterate on vox code by invoking the built compiler DIRECTLY -- a
+  verified module is about 1 second of Lean end to end:
+  `_build/_bootinstall/bin/ocamlc.opt -vox-solver-path <lean> -c file.ml`
+  (locate `<lean>` the way `testsuite/tests/vox/has-lean.sh` does:
+  `$VOX_LEAN`, PATH, or its pinned copy).
+- `make -s test-one` spends ~19s on build-graph freshness checking
+  even on an UNCHANGED tree, and rebuilds the compiler after
+  `typing/` changes.  Use it for final validation, not iteration, and
+  never concurrently with a background build or suite -- contention
+  turns seconds into minutes.
+- Cost model: honest module ~1s; a failing GROUND goal is sub-second
+  even with a large prelude; a failing QUANTIFIED goal under
+  quantified hypotheses costs ~6s of genuine search (not
+  heartbeat-bound).  So write expected-failure test goals as small
+  ground facts (`p = a + 2`, `1 = 2`), not quantified claims.
+- After `make promote-one` on an expect test, EYEBALL the promoted
+  expectations: confirm each rejection happens at the INTENDED layer
+  (mode / locality / contract VC / Lean proof failure).  A test that
+  "passes" while rejecting for the wrong reason -- e.g. an
+  elaboration error instead of a proof failure -- is a latent bug.
+- Mutable-array ghosts: use McCarthy stores (writes return
+  `{ _ = upd a j w }`, reads return the SAME atom `{ _ = a }`, three
+  @[grind] store axioms).  Quantified per-call frame conditions do
+  NOT scale: grind cannot instantiate forall-facts at goal indices.
+  State loop invariants as prelude Props with ONE hand-proved step
+  lemma per loop whose variables are all bound by its conclusion
+  (see demo/lean_reverse.ml).
+- Client `[%%vox.lean]` blocks may contain definitions and PROVED
+  theorems (Lean checks them); a client `axiom` silently joins the
+  TCB and can verify falsehoods -- currently unenforced, so review
+  for it.
+
 ## Important Notes
 
 - NEVER create files unless absolutely necessary
