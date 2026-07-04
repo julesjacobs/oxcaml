@@ -24,10 +24,10 @@ val origin : point{ (_.px = 0) && (_.py = 0) } = {px = 0; py = 0}
 |}]
 
 (* Dependent spec over projections; the record literal names itself. *)
-let swap : (p : point) -> point{ _.px = p.py && _.py = p.px } =
-  fun p -> refine_ { px = p.py; py = p.px }
+let swap (p : point) : point{ _.px = p.py && _.py = p.px } =
+  refine_ { px = p.py; py = p.px }
 [%%expect{|
-Line 2, characters 19-43: vox VC:
+Line 2, characters 10-34: vox VC:
   goal: ((mk (p.py, p.px)).px = p.py) && ((mk (p.py, p.px)).py = p.px)
   hypotheses:
   origin = (mk (0, 0))
@@ -36,10 +36,10 @@ val swap : (p : point) -> point{ (_.px = p.py) && (_.py = p.px) } = <fun>
 |}]
 
 (* Functional update: kept fields project out of the base. *)
-let setx : (p : point) -> point{ _.px = 3 && _.py = p.py } =
-  fun p -> refine_ { p with px = 3 }
+let setx (p : point) : point{ _.px = 3 && _.py = p.py } =
+  refine_ { p with px = 3 }
 [%%expect{|
-Line 2, characters 19-36: vox VC:
+Line 2, characters 10-27: vox VC:
   goal: ((mk (3, p.py)).px = 3) && ((mk (3, p.py)).py = p.py)
   hypotheses:
   origin = (mk (0, 0))
@@ -79,10 +79,9 @@ val getx2 : point{ _.px = 7 } -> int{ _ = 7 } = <fun>
 
 (* Immutable field reads REFLECT (Vox_reflect): inside a compound
    expression the read names the projection directly. *)
-let bump : (p : point) -> int{ _ = p.px + 1 } =
-  fun p -> refine_ (p.px + 1)
+let bump (p : point) : int{ _ = p.px + 1 } = refine_ (p.px + 1)
 [%%expect{|
-Line 2, characters 19-29: vox VC:
+Line 1, characters 53-63: vox VC:
   goal: (p.px + 1) = (p.px + 1)
   hypotheses:
   origin = (mk (0, 0))
@@ -110,17 +109,17 @@ val through : point{ _.px = 7 } -> int{ _ = 7 } = <fun>
 (* A bool field read is a path fact in both polarities. *)
 type flag = { on : bool }
 
-let choose : (f : flag) -> int{ f.on || _ = 0 } =
-  fun f -> if f.on then refine_ 1 else refine_ 0
+let choose (f : flag) : int{ f.on || _ = 0 } =
+  if f.on then refine_ 1 else refine_ 0
 [%%expect{|
 type flag = { on : bool; }
-Line 4, characters 32-33: vox VC:
+Line 4, characters 23-24: vox VC:
   goal: f.on || (1 = 0)
   hypotheses:
   f.on
   origin = (mk (0, 0))
   (origin.px = 0) && (origin.py = 0)
-Line 4, characters 47-48: vox VC:
+Line 4, characters 38-39: vox VC:
   goal: f.on || (0 = 0)
   hypotheses:
   not f.on

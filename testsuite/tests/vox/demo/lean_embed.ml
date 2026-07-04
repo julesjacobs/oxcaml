@@ -36,10 +36,9 @@ let push (l : ilist{ len _ = 2 }) : ilist{ len _ = 3 } = Cons (9, l)
 let ne : ilist{ nonempty _ } = Cons (7, Nil)
 
 (* The textbook inductive proof, through an embedded measure. *)
-let rec append : (a : ilist) -> (b : ilist) -> ilist{ len _ = len a + len b } =
-  fun a b ->
-    match a with
-    | Nil -> b
-    | Cons (h, t) ->
-      let r = append t b in
-      Cons (h, r)
+let rec append (a : ilist) (b : ilist) : ilist{ len _ = len a + len b } =
+  match a with
+  | Nil -> b
+  | Cons (h, t) ->
+    let r = append t b in
+    Cons (h, r)

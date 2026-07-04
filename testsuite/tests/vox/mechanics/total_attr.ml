@@ -11,11 +11,10 @@
 let rec double n = if n <= 0 then 0 else 2 + double (n - 1)
 [@@vox.total] [@@vox.decreases n]
 
-let d : (n : int) -> int{ _ = double n } =
-  fun n -> double n
+let d (n : int) : int{ _ = double n } = double n
 [%%expect{|
 val double : int -> int = <fun>
-Line 5, characters 11-19: vox VC:
+Line 4, characters 40-48: vox VC:
   goal: (double n) = (double n)
   hypotheses: <none>
 val d : (n : int) -> int{ _ = (double n) } = <fun>

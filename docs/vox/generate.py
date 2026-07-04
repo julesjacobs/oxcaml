@@ -134,7 +134,7 @@ def main():
         '@RECORDS@': slice_between(read('demo/lean_records.ml'), r'^let origin',
                                    r'\{ px = p.py; py = p.px \}'),
         '@CONTRACTS@': slice_between(fib, r'^let rec fib_loop',
-                                     r'fun n -> fib_loop n 0 0 1'),
+                                     r'^let fib_iter .* = fib_loop n 0 0 1'),
         '@CROSSMOD@': slice_between(read('demo/lean_reflectclient.ml'),
                                     r'^let l2', r'^let f5'),
         '@EMBEDDED@': '[%%vox.lean {lean|\n...\n\n'
@@ -144,7 +144,7 @@ def main():
                       + '\n  ...\n|lean}]',
         '@BINSEARCH@': slice_between(read('demo/lean_binsearch.ml'),
                                      r'^let lower_bound', r'^  =')
-                       + '\n  fun a x -> ...',
+                       + '\n  ...',
         '@MUTABLE@': slice_between(read('demo/lean_mutable.ml'),
                                    r'^let iota', r'^  refine_ x$'),
         '@IMP_BINSEARCH@': slice_between(read('demo/lean_imp_binsearch.ml'),
@@ -158,7 +158,7 @@ def main():
                     + slice_between(read('demo/lean_tuples.ml'),
                                     r'^let first_pos', r'\| \(x, _\) -> x'),
         '@QUANT@': slice_between(read('demo/lean_quant.ml'), r'^let max2',
-                                 r'fun x y -> if x < y then y else x'),
+                                 r'^  if x < y then y else x'),
         '@ISQRT@': slice_between(read('demo/lean_isqrt.ml'),
                                  r'^let total_ sq', r'^let total_ sq')
                    + '\n\n'
@@ -212,8 +212,8 @@ def main():
                           r'^let unpack', r'\(x lxor bit, bit\)\)')
             + '\n\n'
             + slice_between(read('lib/ptrie_packed.ml'),
-                            r'^    \| Branch \(x, t0, t1\) ->',
-                            r'^      end$'),
+                            r'^  \| Branch \(x, t0, t1\) ->',
+                            r'^    end$'),
         '@PTRIE_FAIL_OUT@': slice_between(
             slice_between(read('mechanics/lean_ptrie_fail.ml'),
                           r'^let rec ins_unguarded', r'^\(lean: '),

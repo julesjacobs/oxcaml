@@ -31,26 +31,23 @@ let total_ fib2 n = fib n + fib n
 
 let d3 : int{ _ = fib2 3 } = fib2 3
 
-let fib2_spec : (n : int) -> int{ _ = fib2 n } = fun n -> fib2 n
+let fib2_spec (n : int) : int{ _ = fib2 n } = fib2 n
 
 (* The textbook inductive proof, against the IMPORTED len. *)
-let rec append : (a : ilist) -> (b : ilist) -> ilist{ len _ = len a + len b } =
-  fun a b ->
-    match a with
-    | Nil -> b
-    | Cons (h, t) ->
-      let r = append t b in
-      Cons (h, r)
+let rec append (a : ilist) (b : ilist) : ilist{ len _ = len a + len b } =
+  match a with
+  | Nil -> b
+  | Cons (h, t) ->
+    let r = append t b in
+    Cons (h, r)
 
 (* And against the imported fib: the loop invariant (parameter
    contracts) crosses the module boundary. *)
-let rec fib_loop
-  : (n : int) -> (i : int) -> (a : int{ _ = fib i && i >= 0 })
-    -> (b : int{ _ = fib (i + 1) }) -> int{ _ = fib n }
+let rec fib_loop (n : int) (i : int) (a : int{ _ = fib i && i >= 0 })
+  (b : int{ _ = fib (i + 1) }) : int{ _ = fib n }
   =
-  fun n i a b ->
-    if i = n
-    then a
-    else begin
-      fib_loop n (i + 1) b (a + b)
-    end
+  if i = n
+  then a
+  else begin
+    fib_loop n (i + 1) b (a + b)
+  end

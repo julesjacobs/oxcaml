@@ -21,8 +21,8 @@ val r : int{ (_ = (-7 mod 2)) && (_ = -1) } = -1
 
 (* Tick alignment travels through arithmetic: the contract on [p] and
    the path fact prove the result's alignment. *)
-let next_tick : (p : int{ _ mod 25 = 0 }) -> int{ _ mod 25 = 0 } =
-  fun p -> refine_ (p + 25)
+let next_tick (p : int{ _ mod 25 = 0 }) : int{ _ mod 25 = 0 } =
+  refine_ (p + 25)
 [%%expect{|
 val next_tick : int{ (_ mod 25) = 0 } -> int{ (_ mod 25) = 0 } = <fun>
 |}]
@@ -63,12 +63,11 @@ Possible counterexample:
 (* [assume_] cannot compile a faithful runtime check of a predicate
    with division (the logic totalizes [x / 0] where the program
    raises); the checked form is rejected toward assume_unchecked_. *)
-let unchecked : (d : int) -> int{ _ = 100 / d } =
-  fun d -> assume_ (100 / d)
+let unchecked (d : int) : int{ _ = 100 / d } = assume_ (100 / d)
 [%%expect{|
-Line 2, characters 19-28:
-2 |   fun d -> assume_ (100 / d)
-                       ^^^^^^^^^
+Line 1, characters 55-64:
+1 | let unchecked (d : int) : int{ _ = 100 / d } = assume_ (100 / d)
+                                                           ^^^^^^^^^
 Error: vox: assume_ compiles a runtime check of this refinement, but it involves a constructor, tuple, projection, spec function, quantifier, or division, which the compiled check cannot evaluate faithfully; use assume_unchecked_
 |}]
 

@@ -37,8 +37,7 @@ let from_lib : {v:int | v > 0} =
 (* Path facts + dependent comparison (DESIGN.md flagship shape).
    Reflection makes both obligations trivial -- (x < y) = (x < y) and
    0 = 0 -- so these userland operations are PROVED, not assumed. *)
-let lt : (x : int) -> (y : int) -> {z:bool | z = (x < y)} =
-  fun x y -> x < y
+let lt (x : int) (y : int) : {z:bool | z = (x < y)} = x < y
 
 let zero : {v:int | v = 0} = 0
 
@@ -72,8 +71,7 @@ let safe_direct (x : int) : int =
   if 0 < x then div 100 x else 0
 
 (* Checking position: the goal is (x + 1) > x, proved by grind. *)
-let bump : (x : int) -> {v:int | v > x} =
-  fun x -> x + 1
+let bump (x : int) : {v:int | v > x} = x + 1
 
 (* Exact binder equations compose: d = x + x and x > 0 prove d > 1. *)
 let double_reflect (x : {v:int | v > 0}) : {v:int | v > 1} =

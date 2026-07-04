@@ -84,9 +84,9 @@ Error: vox: this obligation mentions a variable that has escaped its scope
    selfifies with the full typed fragment, so even shapes the surface
    translation cannot name inline (comparisons, field reads) reach the
    dependent parameter through their let-bound name. *)
-let use : (b : bool) -> bool{ _ = b } = fun b -> refine_ b
+let use (b : bool) : bool{ _ = b } = refine_ b
 [%%expect{|
-Line 1, characters 57-58: vox VC:
+Line 1, characters 45-46: vox VC:
   goal: b = b
   hypotheses: <none>
 val use : (b : bool) -> bool{ _ = b } = <fun>

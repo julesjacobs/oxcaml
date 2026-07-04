@@ -25,9 +25,9 @@ val k3 : t{ _ = (K 3) } = K 3
 
 (* The dependent constructor wrapper is PROVED (lambda opening
    substitutes the binder). *)
-let mk : (x : int) -> t{ _ = K x } = fun x -> refine_ (K x)
+let mk (x : int) : t{ _ = K x } = refine_ (K x)
 [%%expect{|
-Line 1, characters 54-59: vox VC:
+Line 1, characters 42-47: vox VC:
   goal: (K x) = (K x)
   hypotheses:
   k3 = (K 3)

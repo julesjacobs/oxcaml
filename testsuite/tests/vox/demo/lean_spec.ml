@@ -39,28 +39,24 @@ let push (l : ilist{ len _ = 2 }) : ilist{ len _ = 3 } = Cons (9, l)
 (* append: len distributes over it -- the textbook inductive proof.
    The recursive call's refined result is the induction hypothesis,
    unpacked by the [let] that names it. *)
-let rec append : (a : ilist) -> (b : ilist) -> ilist{ len _ = len a + len b } =
-  fun a b ->
-    match a with
-    | Nil -> b
-    | Cons (h, t) ->
-      let r = append t b in
-      Cons (h, r)
+let rec append (a : ilist) (b : ilist) : ilist{ len _ = len a + len b } =
+  match a with
+  | Nil -> b
+  | Cons (h, t) ->
+    let r = append t b in
+    Cons (h, r)
 
 (* rev via accumulator: length is preserved.  [acc2]'s binder equation
    [acc2 = Cons (h, acc)] carries the invariant; the recursive call is
    the bare tail, re-proved inline at this call's instantiation. *)
-let rec rev_append
-  : (acc : ilist) -> (l : ilist) -> ilist{ len _ = len acc + len l }
+let rec rev_append (acc : ilist) (l : ilist) : ilist{ len _ = len acc + len l }
   =
-  fun acc l ->
   match l with
   | Nil -> acc
   | Cons (h, t) ->
     let acc2 = Cons (h, acc) in
     rev_append acc2 t
 
-let rev : (l : ilist) -> ilist{ len _ = len l } =
-  fun l ->
+let rev (l : ilist) : ilist{ len _ = len l } =
   let nil = Nil in
   rev_append nil l

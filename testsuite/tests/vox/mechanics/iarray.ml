@@ -12,10 +12,9 @@
    opt-in contract.  Gated on [int iarray]: the MUTABLE array's
    identical primitives do not reflect. *)
 
-let read : (a : int iarray) -> (i : int) -> int{ _ = a.(i) } =
-  fun a i -> Iarray.get a i
+let read (a : int iarray) (i : int) : int{ _ = a.(i) } = Iarray.get a i
 [%%expect{|
-Line 2, characters 13-27: vox VC:
+Line 1, characters 57-71: vox VC:
   goal: (a.(i)) = (a.(i))
   hypotheses: <none>
 val read : (a : int iarray) -> (i : int) -> int{ _ = (a.(i)) } = <fun>
@@ -23,13 +22,12 @@ val read : (a : int iarray) -> (i : int) -> int{ _ = (a.(i)) } = <fun>
 
 (* Selfification names both operations; the qualified and sugar
    spellings are the same predicate. *)
-let len2 : (a : int iarray) -> int{ _ = Iarray.length a + a.(0) } =
-  fun a ->
-    let n = Iarray.length a in
-    let h = Iarray.get a 0 in
-    n + h
+let len2 (a : int iarray) : int{ _ = Iarray.length a + a.(0) } =
+  let n = Iarray.length a in
+  let h = Iarray.get a 0 in
+  n + h
 [%%expect{|
-Line 5, characters 4-9: vox VC:
+Line 4, characters 2-7: vox VC:
   goal: (n + h) = ((Iarray.length a) + (a.(0)))
   hypotheses:
   h = (a.(0))

@@ -31,21 +31,19 @@
 (* A forall_ GOAL, with implication: max2 is not just an upper bound
    but the LEAST one.  Each branch proves the quantified conclusion
    under its path fact. *)
-let max2
-  : (x : int) -> (y : int)
-    -> int{ x <= _ && y <= _ && (forall_ z. x <= z && y <= z -> _ <= z) }
+let max2 (x : int) (y : int)
+  : int{ x <= _ && y <= _ && (forall_ z. x <= z && y <= z -> _ <= z) }
   =
-  fun x y -> if x < y then y else x
+  if x < y then y else x
 
 (* An exists_ FACT: the evenness of [x] arrives existentially
    (parameters are contracts: the predicate is a fact about [x] in the
    body).  grind skolemizes the witness, and the parity conclusion is
    then quantifier-free. *)
-let even_not_odd
-  : (x : int{ exists_ y. _ = 2 * y }) -> (z : int)
-    -> unit{ not (x = 2 * z + 1) }
+let even_not_odd (x : int{ exists_ y. _ = 2 * y }) (z : int)
+  : unit{ not (x = 2 * z + 1) }
   =
-  fun x z -> ()
+  ()
 
 (* An exists_ GOAL, by the witness-equation idiom: leading with
    [y = 3] hands grind the witness; the remaining conjunct is ground

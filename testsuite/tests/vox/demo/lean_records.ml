@@ -26,11 +26,10 @@ type point =
 
 let origin : point{ _.px = 0 && _.py = 0 } = { px = 0; py = 0 }
 
-let swap : (p : point) -> point{ _.px = p.py && _.py = p.px } =
-  fun p -> { px = p.py; py = p.px }
+let swap (p : point) : point{ _.px = p.py && _.py = p.px } =
+  { px = p.py; py = p.px }
 
-let setx : (p : point) -> point{ _.px = 3 && _.py = p.py } =
-  fun p -> { p with px = 3 }
+let setx (p : point) : point{ _.px = 3 && _.py = p.py } = { p with px = 3 }
 
 let getx (p : point{ _.px = 7 }) : {r:int | r = 7} =
   let { px; py = _ } = p in
@@ -60,5 +59,5 @@ let d : point{ norm1 _ = 3 } = { px = 1; py = 2 }
 
 (* Field reads reflect like arithmetic does: the update value names
    [p.px + 1], and the kept field projects out of the base. *)
-let shift : (p : point) -> point{ norm1 _ = norm1 p + 1 } =
-  fun p -> { p with px = p.px + 1 }
+let shift (p : point) : point{ norm1 _ = norm1 p + 1 } =
+  { p with px = p.px + 1 }

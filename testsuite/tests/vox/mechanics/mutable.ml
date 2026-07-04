@@ -98,7 +98,7 @@ val h : unit -> int{ _ > 0 } = <fun>
 (* [let x = m] pins the current value to an immutable name -- the only
    way to use a mutable's value in dependent positions, since mutable
    stamps stay banned from refinements. *)
-let dep : (x : int) -> {v:int | v = x} = fun x -> refine_ x
+let dep (x : int) : {v:int | v = x} = refine_ x
 
 let bridge () : {r:int | r = 7} =
   let mutable m = 3 in
@@ -107,7 +107,7 @@ let bridge () : {r:int | r = 7} =
   let refine_ y = dep x in
   refine_ y
 [%%expect{|
-Line 1, characters 58-59: vox VC:
+Line 1, characters 46-47: vox VC:
   goal: x = x
   hypotheses: <none>
 val dep : (x : int) -> int{ _ = x } = <fun>
@@ -259,26 +259,25 @@ Error: vox: unbound variable in refinement predicate
    first value, the back-edge assertion at the NEXT value (the next
    iteration's head state), and the post-loop assumption splits on
    whether the loop ran. *)
-let iota : (n : int) -> {r:int | (n < 1 && r = 0) || (n >= 1 && r = n)} =
-  fun n ->
+let iota (n : int) : {r:int | (n < 1 && r = 0) || (n >= 1 && r = n)} =
   let mutable x = 0 in
   (for i = 1 to n do
      x <- x + 1
    done) [@vox.invariant x = i - 1];
   refine_ x
 [%%expect{|
-Line 6, characters 9-35: vox VC:
+Line 5, characters 9-35: vox VC:
   goal: x = (1 - 1)
   hypotheses:
   x = 0
-Line 6, characters 9-35: vox VC:
+Line 5, characters 9-35: vox VC:
   goal: x@2 = ((i + 1) - 1)
   hypotheses:
   1 <= i
   i <= n
   x@1 = (i - 1)
   x@2 = (x@1 + 1)
-Line 7, characters 10-11: vox VC:
+Line 6, characters 10-11: vox VC:
   goal: ((n < 1) && (x@1 = 0)) || ((n >= 1) && (x@1 = n))
   hypotheses:
   ((1 > n) && (x@1 = (1 - 1))) || ((1 <= n) && (x@1 = ((n + 1) - 1)))
@@ -287,28 +286,27 @@ val iota : (n : int) -> int{ ((n < 1) && (_ = 0)) || ((n >= 1) && (_ = n)) } =
 |}]
 
 (* [downto] mirrors, stepping the index down. *)
-let count_down
-  : (n : int) -> {r:int | (n < 0 && r = 0) || (n >= 0 && r = n + 1)}
+let count_down (n : int)
+  : {r:int | (n < 0 && r = 0) || (n >= 0 && r = n + 1)}
   =
-  fun n ->
   let mutable x = 0 in
   (for i = n downto 0 do
      x <- x + 1
    done) [@vox.invariant x = n - i];
   refine_ x
 [%%expect{|
-Line 8, characters 9-35: vox VC:
+Line 7, characters 9-35: vox VC:
   goal: x = (n - n)
   hypotheses:
   x = 0
-Line 8, characters 9-35: vox VC:
+Line 7, characters 9-35: vox VC:
   goal: x@2 = (n - (i - 1))
   hypotheses:
   0 <= i
   i <= n
   x@1 = (n - i)
   x@2 = (x@1 + 1)
-Line 9, characters 10-11: vox VC:
+Line 8, characters 10-11: vox VC:
   goal: ((n < 0) && (x@1 = 0)) || ((n >= 0) && (x@1 = (n + 1)))
   hypotheses:
   ((n < 0) && (x@1 = (n - n))) || ((n >= 0) && (x@1 = (n - (0 - 1))))

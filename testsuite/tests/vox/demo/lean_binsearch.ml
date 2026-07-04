@@ -42,49 +42,45 @@
    instantiation happens inline, from the call's own selfified result.
    Termination is not checked (partial correctness), but r - l shrinks
    each call. *)
-let rec search
-  : (a : int iarray) -> (x : int) -> (l : int{ -1 <= _ })
-    -> (r : int{ l < _ && _ <= Iarray.length a
-                 && (0 <= l -> a.(l) < x)
-                 && (_ < Iarray.length a -> a.(_) >= x) })
-    -> (int * int){ snd _ = fst _ + 1
-            && l <= fst _ && snd _ <= r
-            && (0 <= fst _ -> a.(fst _) < x)
-            && (snd _ < Iarray.length a -> a.(snd _) >= x) }
+let rec search (a : int iarray) (x : int) (l : int{ -1 <= _ })
+  (r : int{ l < _ && _ <= Iarray.length a
+            && (0 <= l -> a.(l) < x)
+            && (_ < Iarray.length a -> a.(_) >= x) })
+  : (int * int){ snd _ = fst _ + 1
+          && l <= fst _ && snd _ <= r
+          && (0 <= fst _ -> a.(fst _) < x)
+          && (snd _ < Iarray.length a -> a.(snd _) >= x) }
   =
-  fun a x l r ->
-    if r - l > 1
-    then begin
-      (* The classic midpoint overflow sits exactly on DESIGN.md's
-         caveat: the logic's ints are unbounded, so l + r is proved
-         ideal, not wrapping.  Harmless here -- both are bounded by a
-         real array's length -- but outside the model. *)
-      let m = (l + r) / 2 in
-      (* l < m < r, hence 0 <= m < Iarray.length a: the probe is in
-         bounds. *)
-      let v = Ia_lib.get a m in
-      if v >= x
-      then search a x l m
-      else search a x m r
-    end
-    else (l, r)
+  if r - l > 1
+  then begin
+    (* The classic midpoint overflow sits exactly on DESIGN.md's
+       caveat: the logic's ints are unbounded, so l + r is proved
+       ideal, not wrapping.  Harmless here -- both are bounded by a
+       real array's length -- but outside the model. *)
+    let m = (l + r) / 2 in
+    (* l < m < r, hence 0 <= m < Iarray.length a: the probe is in
+       bounds. *)
+    let v = Ia_lib.get a m in
+    if v >= x
+    then search a x l m
+    else search a x m r
+  end
+  else (l, r)
 
 (* The note's Q2 -- on a sorted array, the first index whose element
    is >= x, or length a if there is none.  What is proved is the
    flip-point characterization below, which holds sorted or not.
    [Iarray.length a] selfifies, and the initial bracket's -1 < n is
    the theory's nonnegativity axiom firing. *)
-let lower_bound
-  : (a : int iarray) -> (x : int)
-    -> int{ 0 <= _ && _ <= Iarray.length a
-            && (_ < Iarray.length a -> a.(_) >= x)
-            && (0 < _ -> a.(_ - 1) < x) }
+let lower_bound (a : int iarray) (x : int)
+  : int{ 0 <= _ && _ <= Iarray.length a
+         && (_ < Iarray.length a -> a.(_) >= x)
+         && (0 < _ -> a.(_ - 1) < x) }
   =
-  fun a x ->
-    let n = Iarray.length a in
-    let q = search a x (-1) n in
-    let (_, hi) = q in
-    hi
+  let n = Iarray.length a in
+  let q = search a x (-1) n in
+  let (_, hi) = q in
+  hi
 
 (* Client side: the note's example array.  The application carries no
    obligations; its refined result is unpacked by the plain [let]. *)

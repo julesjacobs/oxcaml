@@ -46,9 +46,9 @@ val promote : int -> int = <fun>
 |}]
 
 (* Arithmetic at a refined result type: the body needs no keyword. *)
-let inc : (x : int) -> int{ _ = x + 1 } = fun x -> x + 1
+let inc (x : int) : int{ _ = x + 1 } = x + 1
 [%%expect{|
-Line 1, characters 51-56: vox VC:
+Line 1, characters 39-44: vox VC:
   goal: (x + 1) = (x + 1)
   hypotheses:
   keep = three

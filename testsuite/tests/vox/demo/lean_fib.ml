@@ -85,7 +85,7 @@ theorem fib_add (m n : Int) (hm : 0 <= m) (hn : 0 <= n) :
 
 (* A reflected call names itself: the program's fib meets the spec
    definitionally (the goal is [fib n = fib n]). *)
-let fib_slow : (n : int) -> int{ _ = fib n } = fun n -> fib n
+let fib_slow (n : int) : int{ _ = fib n } = fib n
 
 (* Tail-recursive accumulator loop, O(n) iterations: the parameters
    carry the invariant (a, b) = (fib i, fib (i+1)) with i >= 0 as
@@ -95,19 +95,16 @@ let fib_slow : (n : int) -> int{ _ = fib n } = fun n -> fib n
    correctness is unbothered.)  The recursive call is the bare tail:
    its result refinement [_ = fib n] is the enclosing one, so it
    passes through with no obligation at all. *)
-let rec fib_loop
-  : (n : int) -> (i : int) -> (a : int{ _ = fib i && i >= 0 })
-    -> (b : int{ _ = fib (i + 1) }) -> int{ _ = fib n }
+let rec fib_loop (n : int) (i : int) (a : int{ _ = fib i && i >= 0 })
+  (b : int{ _ = fib (i + 1) }) : int{ _ = fib n }
   =
-  fun n i a b ->
-    if i = n
-    then a
-    else begin
-      fib_loop n (i + 1) b (a + b)
-    end
+  if i = n
+  then a
+  else begin
+    fib_loop n (i + 1) b (a + b)
+  end
 
-let fib_iter : (n : int) -> int{ _ = fib n } =
-  fun n -> fib_loop n 0 0 1
+let fib_iter (n : int) : int{ _ = fib n } = fib_loop n 0 0 1
 
 (* Fast doubling, O(log n) iterations, on NATIVE pairs
    (fib n, fib (n+1)) -- tuples appear in predicates directly.  With
@@ -119,21 +116,20 @@ let fib_iter : (n : int) -> int{ _ = fib n } =
    x and y with the doubling identities puts [fib (2 * k)]
    syntactically in each obligation, which is what fires the lemmas;
    the final obligations are then pure congruence. *)
-let rec fib_fd : (n : int{ _ >= 0 }) -> (int * int){ _ = (fib n, fib (n + 1)) } =
-  fun n ->
-    if n <= 0
-    then (0, 1)
-    else begin
-      let k : int{ n = 2 * _ || n = 2 * _ + 1 } = n / 2 in
-      let q = fib_fd k in
-      match q with
-      | (a, b) ->
-        let x : int{ _ = fib (2 * k) } = a * (2 * b - a) in
-        let y : int{ _ = fib (2 * k + 1) } = a * a + b * b in
-        if n = 2 * k
-        then (x, y)
-        else (y, x + y)
-    end
+let rec fib_fd (n : int{ _ >= 0 }) : (int * int){ _ = (fib n, fib (n + 1)) } =
+  if n <= 0
+  then (0, 1)
+  else begin
+    let k : int{ n = 2 * _ || n = 2 * _ + 1 } = n / 2 in
+    let q = fib_fd k in
+    match q with
+    | (a, b) ->
+      let x : int{ _ = fib (2 * k) } = a * (2 * b - a) in
+      let y : int{ _ = fib (2 * k + 1) } = a * a + b * b in
+      if n = 2 * k
+      then (x, y)
+      else (y, x + y)
+  end
 
 (* Client side: fib 10, by fast doubling; the precondition [10 >= 0]
    is discharged at the literal argument. *)

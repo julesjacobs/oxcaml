@@ -22,9 +22,9 @@ val d : int{ (0 < _) && (_ < 10) } = 5
 |}]
 
 (* Rigid equality with the spelled form: the identity coercion. *)
-let same : (p : pos{ _ < 10 }) -> int{ 0 < _ && _ < 10 } = fun p -> p
+let same (p : pos{ _ < 10 }) : int{ 0 < _ && _ < 10 } = p
 [%%expect{|
-Line 1, characters 68-69: vox VC:
+Line 1, characters 56-57: vox VC:
   goal: (0 < p) && (p < 10)
   hypotheses:
   (0 < p) && (p < 10)

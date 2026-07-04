@@ -18,12 +18,11 @@ val p : (int * int){ _ = (1, 2) } = (1, 2)
 (* Matching a variable against a tuple pattern contributes per-component
    projection facts, like simple records; wildcard components simply
    contribute nothing. *)
-let f : (q : (int * int)) -> int{ _ = fst q } =
-  fun q ->
-    match q with
-    | (x, _) -> refine_ x
+let f (q : (int * int)) : int{ _ = fst q } =
+  match q with
+  | (x, _) -> refine_ x
 [%%expect{|
-Line 4, characters 24-25: vox VC:
+Line 3, characters 22-23: vox VC:
   goal: x = (fst q)
   hypotheses:
   x = (fst q)
@@ -33,12 +32,11 @@ val f : (q : (int * int)) -> int{ _ = (fst q) } = <fun>
 
 (* Triples: projections beyond pairs have no surface syntax; the match
    fact prints in the 1-based [.i] form. *)
-let g : (t : (int * int * int)) -> (int * int * int){ _ = t } =
-  fun t ->
-    match t with
-    | (a, b, c) -> refine_ (a, b, c)
+let g (t : (int * int * int)) : (int * int * int){ _ = t } =
+  match t with
+  | (a, b, c) -> refine_ (a, b, c)
 [%%expect{|
-Line 4, characters 27-36: vox VC:
+Line 3, characters 25-34: vox VC:
   goal: (a, b, c) = t
   hypotheses:
   a = t.1
@@ -81,19 +79,17 @@ Error: vox: fst expects exactly one argument in a refinement predicate
 (* Tuples and pair projections are NAMEABLE, so they may be dependent
    arguments: the binder is substituted by the product term / the
    projection. *)
-let first : (p : (int * int)) -> int{ _ = fst p } =
-  fun p -> refine_ (fst p)
-let use : (a : int) -> (b : int) -> int{ _ = a } =
-  fun a b ->
-    let refine_ r = first (a, b) in
-    refine_ r
+let first (p : (int * int)) : int{ _ = fst p } = refine_ (fst p)
+let use (a : int) (b : int) : int{ _ = a } =
+  let refine_ r = first (a, b) in
+  refine_ r
 [%%expect{|
-Line 2, characters 19-26: vox VC:
+Line 1, characters 57-64: vox VC:
   goal: (fst p) = (fst p)
   hypotheses:
   p#2 = (1, 2)
 val first : (p : (int * int)) -> int{ _ = (fst p) } = <fun>
-Line 6, characters 12-13: vox VC:
+Line 4, characters 10-11: vox VC:
   goal: r = a
   hypotheses:
   *unknown4* = (fst (a, b))
@@ -107,12 +103,12 @@ val use : (a : int) -> int -> int{ _ = a } = <fun>
    at a NON-pair type is not [fst] and stays unnameable. *)
 type t2 = { x2 : int; y2 : int }
 external cheat : t2 -> int = "%field0_immut"
-let g : (k : int) -> int{ _ = k } = fun k -> refine_ k
+let g (k : int) : int{ _ = k } = refine_ k
 let bad (v : t2) : int = g (cheat v)
 [%%expect{|
 type t2 = { x2 : int; y2 : int; }
 external cheat : t2 -> int = "%field0_immut"
-Line 3, characters 53-54: vox VC:
+Line 3, characters 41-42: vox VC:
   goal: k = k
   hypotheses:
   p = (1, 2)
@@ -146,18 +142,17 @@ Error: vox: refine_ cannot translate this expression into the logic (only variab
    tie to a NAME for the result, and the result's refinement holds at
    that name -- recovered from the callee's instantiated result type,
    through the implicit erasure. *)
-let mk : (a : int) -> (int * int){ fst _ = a + 1 } = fun a -> (a + 1, 0)
-let use_direct : (a : int) -> int{ _ = a + 1 } =
-  fun a ->
-    let (r, _) = mk a in
-    r
+let mk (a : int) : (int * int){ fst _ = a + 1 } = (a + 1, 0)
+let use_direct (a : int) : int{ _ = a + 1 } =
+  let (r, _) = mk a in
+  r
 [%%expect{|
-Line 1, characters 62-72: vox VC:
+Line 1, characters 50-60: vox VC:
   goal: (fst (a + 1, 0)) = (a + 1)
   hypotheses:
   p = (1, 2)
 val mk : (a : int) -> (int * int){ (fst _) = (a + 1) } = <fun>
-Line 5, characters 4-5: vox VC:
+Line 4, characters 2-3: vox VC:
   goal: r = (a + 1)
   hypotheses:
   (fst *unknown8*) = (a + 1)

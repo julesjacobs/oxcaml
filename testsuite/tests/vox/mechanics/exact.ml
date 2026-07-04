@@ -48,10 +48,9 @@ val safe2 : int -> int = <fun>
 
 (* Checking position also reflects compound expressions into the goal
    (rather than a fresh unknown). *)
-let bump : (x : int) -> int{ _ > x } =
-  fun x -> refine_ (x + 1)
+let bump (x : int) : int{ _ > x } = refine_ (x + 1)
 [%%expect{|
-Line 2, characters 19-26: vox VC:
+Line 1, characters 44-51: vox VC:
   goal: (x + 1) > x
   hypotheses:
   three = 3
@@ -80,10 +79,9 @@ Error: vox: the type of leak carries a refinement mentioning three, which may no
 (* Unary minus is the logic's [0 - e] (and [- INT] a negative literal;
    an operator shape the grammar does not know is an error, never a
    silent spec function). *)
-let neg : (x : int) -> int{ _ = - x } =
-  fun x -> refine_ (0 - x)
+let neg (x : int) : int{ _ = - x } = refine_ (0 - x)
 [%%expect{|
-Line 2, characters 19-26: vox VC:
+Line 1, characters 45-52: vox VC:
   goal: (0 - x) = (0 - x)
   hypotheses:
   three = 3

@@ -32,22 +32,19 @@ theorem le_sq (m : Int) (h : 0 <= m) : m <= sq m := by
 grind_pattern le_sq => sq m
 |lean}]
 
-let isqrt : (x : int{ 0 <= _ }) -> {r:int | 0 <= r && sq r <= x && x < sq (r + 1)} =
-  fun x ->
-    let rec go
-      : (lo : int{ 0 <= _ && sq _ <= x }) ->
-        (hi : int{ lo < _ && x < sq _ }) ->
-        {r:int | 0 <= r && sq r <= x && x < sq (r + 1)}
-      =
-      fun lo hi ->
-        if lo + 1 < hi
-        then begin
-          let m = (lo + hi) / 2 in
-          if sq m <= x then go m hi else go lo m
-        end
-        else lo
-    in
-    go 0 (x + 1)
+let isqrt (x : int{ 0 <= _ }) : {r:int | 0 <= r && sq r <= x && x < sq (r + 1)} =
+  let rec go (lo : int{ 0 <= _ && sq _ <= x })
+    (hi : int{ lo < _ && x < sq _ })
+    : {r:int | 0 <= r && sq r <= x && x < sq (r + 1)}
+    =
+    if lo + 1 < hi
+    then begin
+      let m = (lo + hi) / 2 in
+      if sq m <= x then go m hi else go lo m
+    end
+    else lo
+  in
+  go 0 (x + 1)
 [%%expect{|
 val sq : int -> int = <fun>
 val isqrt :
@@ -67,27 +64,24 @@ val three : int = 3
 
 (* Returning the wrong endpoint is CAUGHT -- with a concrete witness:
    on input x = 0 the broken variant returns hi = 1, and sq 1 > 0. *)
-let isqrt_broken
-  : (x : int{ 0 <= _ }) -> {r:int | 0 <= r && sq r <= x && x < sq (r + 1)} =
-  fun x ->
-    let rec go
-      : (lo : int{ 0 <= _ && sq _ <= x }) ->
-        (hi : int{ lo < _ && x < sq _ }) ->
-        {r:int | 0 <= r && sq r <= x && x < sq (r + 1)}
-      =
-      fun lo hi ->
-        if lo + 1 < hi
-        then begin
-          let m = (lo + hi) / 2 in
-          if sq m <= x then go m hi else go lo m
-        end
-        else hi
-    in
-    go 0 (x + 1)
+let isqrt_broken (x : int{ 0 <= _ })
+  : {r:int | 0 <= r && sq r <= x && x < sq (r + 1)} =
+  let rec go (lo : int{ 0 <= _ && sq _ <= x })
+    (hi : int{ lo < _ && x < sq _ })
+    : {r:int | 0 <= r && sq r <= x && x < sq (r + 1)}
+    =
+    if lo + 1 < hi
+    then begin
+      let m = (lo + hi) / 2 in
+      if sq m <= x then go m hi else go lo m
+    end
+    else hi
+  in
+  go 0 (x + 1)
 [%%expect{|
-Line 15, characters 13-15:
-15 |         else hi
-                  ^^
+Line 12, characters 9-11:
+12 |     else hi
+              ^^
 Error: vox: verification failed (lean).
        Goal: ((0 <= hi) && ((sq hi) <= x)) && (x < (sq (hi + 1)))
 Hypotheses:

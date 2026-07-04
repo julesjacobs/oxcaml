@@ -45,35 +45,30 @@ let d1 : ilist{ depth _ = 1 } = Cons (5, Nil)
 let len_of (l : ilist{ len _ = 2 }) : int{ _ = 2 } = len l
 
 (* A reflected call in checking position is definitionally exact. *)
-let mem3 : (l : ilist) -> bool{ _ = mem 3 l } =
-  fun l -> mem 3 l
+let mem3 (l : ilist) : bool{ _ = mem 3 l } = mem 3 l
 
 (* The textbook inductive proof, against the REFLECTED len: no prelude
    measure.  Each recursive call re-instantiates the dependent
    signature -- the induction hypothesis, unpacked by the [let] that
    names it; grind unfolds [len] via the definitional equations. *)
-let rec append : (a : ilist) -> (b : ilist) -> ilist{ len _ = len a + len b } =
-  fun a b ->
-    match a with
-    | Nil -> b
-    | Cons (h, t) ->
-      let r = append t b in
-      Cons (h, r)
+let rec append (a : ilist) (b : ilist) : ilist{ len _ = len a + len b } =
+  match a with
+  | Nil -> b
+  | Cons (h, t) ->
+    let r = append t b in
+    Cons (h, r)
 
 (* rev via accumulator, length-preserving, same recipe: [acc2]'s
    binder equation carries the invariant, and the recursive call is
    the bare tail, re-proved inline at this call's instantiation. *)
-let rec rev_append
-  : (acc : ilist) -> (l : ilist) -> ilist{ len _ = len acc + len l }
+let rec rev_append (acc : ilist) (l : ilist) : ilist{ len _ = len acc + len l }
   =
-  fun acc l ->
   match l with
   | Nil -> acc
   | Cons (h, t) ->
     let acc2 = Cons (h, acc) in
     rev_append acc2 t
 
-let rev : (l : ilist) -> ilist{ len _ = len l } =
-  fun l ->
+let rev (l : ilist) : ilist{ len _ = len l } =
   let nil = Nil in
   rev_append nil l

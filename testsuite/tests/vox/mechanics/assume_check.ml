@@ -39,16 +39,14 @@ let () =
    | exception Failure _ -> print_endline "above 10 rejected");
   (* Dependent-arrow binders are opened to the parameters' stamps, so
      userland operations get real checks. *)
-  let mul : (x : int) -> (y : int) -> {z:int | z = x * y} =
-    fun x y -> assume_ (x * y)
-  in
+  let mul (x : int) (y : int) : {z:int | z = x * y} = assume_ (x * y) in
   let a = 6 in
   let b = 7 in
   let refine_ m = mul a b in
   Printf.printf "mul 6 7 = %d\n" m;
   (* A dependent check that lies fails at runtime. *)
-  let bad_mul : (x : int) -> (y : int) -> {z:int | z = x * y} =
-    fun x y -> assume_ (x * y + 1)
+  let bad_mul (x : int) (y : int) : {z:int | z = x * y} =
+    assume_ (x * y + 1)
   in
   (match bad_mul a b with
    | _ -> print_endline "unreachable: check did not fire"
