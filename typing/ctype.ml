@@ -8940,46 +8940,69 @@ let vox_expand_head env ty =
   | ty' -> ty'
   | exception _ -> ty
 
-(* vox: recognize a "simple" variant type: monomorphic, non-GADT, closed,
-   at least one constructor (zero-constructor datatypes cannot be declared
-   to the solver), every constructor with tuple arguments (hence
-   immutable).  These are the variants whose constructors may appear in
-   refinement predicates; the solver models them with its datatype
-   theory. *)
+(* vox: a PARAMETERIZED simple datatype must be user-defined -- a
+   predefined parameterized type ([list], [option], ...) is out of
+   scope (and [list]'s [[]]/[::] would collide under the solver-name
+   sanitizer).  Monomorphic types (predefined or not) are unrestricted,
+   preserving the earlier behavior exactly. *)
+let vox_predef_type p =
+  match (p : Path.t) with
+  | Path.Pident id -> Ident.is_predef id
+  | Path.Pdot _ | Path.Papply _ | Path.Pextra_ty _ -> false
+;;
+
+let vox_simple_params_ok p params =
+  match params with
+  | [] -> true
+  | _ :: _ -> not (vox_predef_type p)
+;;
+
+(* vox: recognize a "simple" variant type: non-GADT, closed, at least
+   one constructor (zero-constructor datatypes cannot be declared to the
+   solver), every constructor with tuple arguments (hence immutable).
+   May be PARAMETERIZED (user-defined only): the solver declares it once,
+   generically, and instantiates at each use.  These are the variants
+   whose constructors may appear in refinement predicates; the solver
+   models them with its datatype theory.  Returned with its type
+   parameters, from the same declaration as the constructors (shared
+   type-variable nodes). *)
 let vox_simple_variant env p =
   match Env.find_type p env with
   | exception Not_found -> None
   | decl ->
-      match decl.type_params, decl.type_kind with
-      | [], Type_variant ((_ :: _ as cstrs), _, _)
-        when List.for_all
-               (fun (cd : Types.constructor_declaration) ->
-                 Option.is_none cd.cd_res
-                 && (match cd.cd_args with
-                     | Cstr_tuple _ -> true
-                     | Cstr_record _ -> false))
-               cstrs ->
-          Some cstrs
+      match decl.type_kind with
+      | Type_variant ((_ :: _ as cstrs), _, _)
+        when vox_simple_params_ok p decl.type_params
+             && List.for_all
+                  (fun (cd : Types.constructor_declaration) ->
+                    Option.is_none cd.cd_res
+                    && (match cd.cd_args with
+                        | Cstr_tuple _ -> true
+                        | Cstr_record _ -> false))
+                  cstrs ->
+          Some (decl.type_params, cstrs)
       | _ -> None
 
-(* vox: recognize a "simple" record type: monomorphic, every field
-   immutable.  These are the records whose fields may appear (projected)
-   in refinement predicates; the solver models them as single-constructor
-   datatypes with named selectors.  A mutable field disqualifies the
-   whole record from precise tracking: naming a record term and then
-   mutating a field would prove false equalities.  (Refinements ON a
-   mutable field's type still work as invariants, independently.) *)
+(* vox: recognize a "simple" record type: every field immutable.  May be
+   parameterized (user-defined only; see [vox_simple_variant]).  These
+   are the records whose fields may appear (projected) in refinement
+   predicates; the solver models them as single-constructor datatypes
+   with named selectors.  A mutable field disqualifies the whole record
+   from precise tracking: naming a record term and then mutating a field
+   would prove false equalities.  (Refinements ON a mutable field's type
+   still work as invariants, independently.) *)
 let vox_simple_record env p =
   match Env.find_type p env with
   | exception Not_found -> None
   | decl ->
-      match decl.type_params, decl.type_kind with
-      | [], Type_record ((_ :: _ as lbls), _, _)
-        when List.for_all
-               (fun (ld : Types.label_declaration) ->
-                 match ld.ld_mutable with
-                 | Immutable -> true
-                 | Mutable _ -> false)
-               lbls ->
-          Some lbls
+      match decl.type_kind with
+      | Type_record ((_ :: _ as lbls), _, _)
+        when vox_simple_params_ok p decl.type_params
+             && List.for_all
+                  (fun (ld : Types.label_declaration) ->
+                    match ld.ld_mutable with
+                    | Immutable -> true
+                    | Mutable _ -> false)
+                  lbls ->
+          Some (decl.type_params, lbls)
       | _ -> None

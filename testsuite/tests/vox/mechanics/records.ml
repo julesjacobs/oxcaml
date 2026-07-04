@@ -194,14 +194,30 @@ Line 3, characters 10-15: vox VC:
 val opaque : mrec -> int{ _ = 3 } = <fun>
 |}]
 
-(* Parameterized records are not simple. *)
+(* Parameterized records ARE simple (user-defined): the projection
+   [_.contents] is admitted and modelled at each instantiation. *)
 type 'a box = { contents : 'a }
 
-let badbox : int box{ _.contents = 3 } = assume_ { contents = 3 }
+let getbox (b : (int box){ _.contents = 3 }) : {r:int | r = 3} =
+  refine_ b.contents
 [%%expect{|
 type 'a box = { contents : 'a; }
-Line 3, characters 22-32:
-3 | let badbox : int box{ _.contents = 3 } = assume_ { contents = 3 }
-                          ^^^^^^^^^^
-Error: vox: only fields of simple records (monomorphic, no mutable fields) may appear in refinement predicates
+Line 4, characters 10-20: vox VC:
+  goal: b.contents = 3
+  hypotheses:
+  b.contents = 3
+  origin = (mk (0, 0))
+  (origin.px = 0) && (origin.py = 0)
+val getbox : int box{ _.contents = 3 } -> int{ _ = 3 } = <fun>
+|}]
+
+(* [assume_] still cannot compile a runtime check of a field projection
+   (a structural operation at a datatype sort); assume_unchecked_ trusts
+   it instead. *)
+let badbox : int box{ _.contents = 3 } = assume_ { contents = 3 }
+[%%expect{|
+Line 1, characters 49-65:
+1 | let badbox : int box{ _.contents = 3 } = assume_ { contents = 3 }
+                                                     ^^^^^^^^^^^^^^^^
+Error: vox: assume_ compiles a runtime check of this refinement, but it involves a constructor, tuple, projection, spec function, quantifier, or division, which the compiled check cannot evaluate faithfully; use assume_unchecked_
 |}]

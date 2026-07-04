@@ -922,13 +922,23 @@ val apply_right_is_contained_by : Mode.Hint.is_contained_by
     fails; conservative for vox translation purposes. *)
 val vox_expand_head : Env.t -> Types.type_expr -> Types.type_expr
 
-(** vox: if [p] is a "simple" variant (monomorphic, non-GADT, closed,
-    non-empty, tuple constructor arguments only), its constructor
-    declarations. *)
+(** vox: if [p] is a "simple" variant (non-GADT, closed, non-empty,
+    tuple constructor arguments only), its type parameters and
+    constructor declarations.  May be parameterized when USER-DEFINED (a
+    predefined parameterized type is out of scope); monomorphic types
+    are unrestricted.  The parameters and the constructor argument types
+    share type-variable nodes (same declaration), so a caller can
+    classify the arguments in terms of the parameters. *)
 val vox_simple_variant :
-  Env.t -> Path.t -> Types.constructor_declaration list option
+  Env.t
+  -> Path.t
+  -> (Types.type_expr list * Types.constructor_declaration list) option
 
-(** vox: if [p] is a "simple" record (monomorphic, all fields
-    immutable), its label declarations. *)
+(** vox: if [p] is a "simple" record (all fields immutable), its type
+    parameters and label declarations.  May be parameterized when
+    user-defined.  The parameters and the field types share
+    type-variable nodes. *)
 val vox_simple_record :
-  Env.t -> Path.t -> Types.label_declaration list option
+  Env.t
+  -> Path.t
+  -> (Types.type_expr list * Types.label_declaration list) option
