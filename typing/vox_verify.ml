@@ -4559,6 +4559,78 @@ let check_sort_consistency (str : structure) (sg : Types.signature) =
     sg
 ;;
 
+(* A datatype named ONLY inside a [%%vox.lean] block's raw text (never
+   in an OCaml refinement or reflected-function signature) is not
+   registered on-sight, so [lean_datatype_decls] never declares it and
+   the block's reference to its name fails to elaborate.  At the
+   toplevel the type declaration is even its own vox-free phrase, which
+   is skipped entirely, so the block's phrase cannot see it as a
+   structure item.  So scan the blocks' text for [Vox_<name>]
+   references and register each type the surrounding env resolves --
+   exactly the datatypes a block mentions.  Inside a unit the emitted
+   name is unit-qualified ([Vox_Htbl_bucket] for [Htbl.bucket]), so
+   resolution also tries the token with the unit prefix stripped; a
+   candidate only registers when its OWN emitted name reproduces the
+   token exactly, so a bare [Vox_t] in a unit (which the emitter would
+   never satisfy) registers nothing.  Imported/qualified names do not
+   resolve here and are declared by their own units' exports;
+   registration is idempotent and a no-op for a non-simple type. *)
+let register_datatypes_in_blocks env blocks =
+  let is_ident_char c =
+    (c >= 'A' && c <= 'Z')
+    || (c >= 'a' && c <= 'z')
+    || (c >= '0' && c <= '9')
+    || c = '_'
+    || c = '\''
+  in
+  let unit_prefix =
+    match Env.get_current_unit_name () with
+    | "" -> None
+    | u -> Some (lean_sanitize u ^ "_")
+  in
+  let candidates token =
+    match unit_prefix with
+    | Some pre
+      when String.length token > String.length pre
+           && String.equal (String.sub token 0 (String.length pre)) pre ->
+      [ String.sub token (String.length pre)
+          (String.length token - String.length pre)
+      ; token
+      ]
+    | _ -> [ token ]
+  in
+  let register token =
+    List.iter
+      (fun name ->
+        if String.length name > 0
+        then (
+          match Env.find_type_by_name (Longident.Lident name) env with
+          | exception Not_found -> ()
+          | p, _ ->
+            if String.equal (lean_dt_name p) ("Vox_" ^ token)
+            then ignore (datatype_sort env p : dsort)))
+      (candidates token)
+  in
+  List.iter
+    (fun (text, _loc) ->
+      let n = String.length text in
+      let i = ref 0 in
+      while !i <= n - 4 do
+        if
+          String.equal (String.sub text !i 4) "Vox_"
+          && (!i = 0 || not (is_ident_char text.[!i - 1]))
+        then (
+          let j = ref (!i + 4) in
+          while !j < n && is_ident_char text.[!j] do
+            incr j
+          done;
+          register (String.sub text (!i + 4) (!j - !i - 4));
+          i := !j)
+        else incr i
+      done)
+    blocks
+;;
+
 let check_implementation ?intf (str : structure) (sg : Types.signature) =
   (* The signature check is unconditional: a refined type can appear in
      an exported item (a type manifest, an exception, an external) with
@@ -4578,6 +4650,7 @@ let check_implementation ?intf (str : structure) (sg : Types.signature) =
        blocks exported by imported units' interfaces -- including this
        unit's own .mli -- come from their .cmis. *)
     embedded_blocks := collect_blocks str;
+    register_datatypes_in_blocks str.str_final_env !embedded_blocks;
     imported_specs := gather_imported_specs ();
     let ctx = ref { cfacts = []; cscope = [] } in
     walk_items str ctx;
@@ -4625,6 +4698,7 @@ let check_toplevel_phrase (str : structure) ~(sig_acc : Types.signature)
         spec_defs := saved_spec_defs;
         datatypes := saved_datatypes)
       (fun () ->
+        register_datatypes_in_blocks str.str_final_env !embedded_blocks;
         walk_items str ctx;
         (* Discharge before committing the phrase's facts: if
            verification fails, the toplevel backtracks the phrase, so
