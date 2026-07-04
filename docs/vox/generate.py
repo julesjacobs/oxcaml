@@ -57,11 +57,17 @@ UNSHOWN = {
     'demo/lean_reverse.ml':
         'McCarthy-array methodology note; kernel and quicksort are the page\'s array cards',
     'demo/lean_seal.ml':
-        'sealed interfaces are mentioned, not sliced, in the signatures section',
+        'sealed interfaces are linked, not sliced, in the signatures section',
     'demo/lean_seal_alt.ml':
         'the identical client body of lean_seal.ml, against step_double',
     'demo/lean_oset.ml':
-        'full abstraction is mentioned, not sliced, in the signatures section',
+        'full abstraction is linked, not sliced, in the signatures section',
+    'demo/lean_bst.ml':
+        'the BST is linked, not sliced, in the signatures section',
+    'demo/lean_bst_alt.ml':
+        'the quantified alt interface is linked from the signatures section',
+    'demo/lean_ptrie.ml':
+        'the trie is linked, not sliced, in the signatures section',
 }
 
 
@@ -205,41 +211,8 @@ def main():
                                    r'^let rec psort', r'@ local unique =$')
                    + '\n  fun m -> ...   (* the SAME spec; the recursive calls\n'
                      '                    run under Par_lib.fork_join2 *)',
-        '@BST_MLI@': strip_leading_comment(read('lib/bst.mli')),
-        '@BST_ML@': strip_leading_comment(read('lib/bst.ml')),
-        '@BST_CLIENT@': slice_between(read('demo/lean_bst.ml'), r'^let demo',
-                                      r'\(hit, miss\)'),
-        '@BST_FAIL@': slice_between(read('mechanics/lean_bst_fail.ml'),
-                                    r'^let rec member_wrong', r'^\[%%expect',
-                                    include_stop=False).rstrip('\n'),
-        '@BST_FAIL_OUT@': slice_between(read('mechanics/lean_bst_fail.ml'),
-                                        r'^Line \d+, characters',
-                                        r'^\(lean: '),
         '@KERNEL@': slice_between(read('demo/lean_kernel.ml'),
                                   r'^let sum', r'^    go 0 0'),
-        '@PTRIE_MLI@': strip_leading_comment(read('lib/ptrie.mli')),
-        '@PTRIE_ML@': strip_leading_comment(read('lib/ptrie.ml')),
-        '@PTRIE_CLIENT@': slice_between(read('demo/lean_ptrie.ml'),
-                                        r'^let demo', r'\(hit, miss\)'),
-        '@PTRIE_FAIL@': slice_between(read('mechanics/lean_ptrie_fail.ml'),
-                                      r'^let rec ins_unguarded', r'^\[%%expect',
-                                      include_stop=False).rstrip('\n'),
-        '@PTRIE_PACKED@':
-            slice_between(read('lib/ptrie_packed.ml'),
-                          r'^let unpack', r'\(x lxor bit, bit\)\)')
-            + '\n\n'
-            + slice_between(read('lib/ptrie_packed.ml'),
-                            r'^  \| Branch \(x, t0, t1\) ->',
-                            r'^    end$'),
-        '@PTRIE_FAIL_OUT@': slice_between(
-            slice_between(read('mechanics/lean_ptrie_fail.ml'),
-                          r'^let rec ins_unguarded', r'^\(lean: '),
-            r'^Line \d+, characters', r'^\(lean: '),
-        '@BST_ALT@': slice_between(read('demo/lean_bst_alt.ml'),
-                                   r'^module Set', r'^end')
-                     + '\n\n'
-                     + slice_between(read('demo/lean_bst_alt.ml'),
-                                     r'^let probe', r'^    b$'),
     }
 
     nth = read('demo/lean_nth.ml')

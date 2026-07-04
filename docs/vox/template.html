@@ -286,105 +286,57 @@ representation: the type gets its own sort in the logic, laws can
 quantify over it, and the implementation proves them about the
 concrete type, which takes over the same solver-side name.</p>
 
-<p>The example below is the transparent style; <a href="#real">the
-trie that follows</a> applies it to harder code.
-<code>bst.mli</code> states the model (whole-tree membership, the
-ordering invariant, a model-level <code>insert</code>); the
-implementation is checked against it arm by arm.  The one-path search is
-proved equal to membership over the whole tree, and each
-<code>insert</code> arm is proved to build exactly the model&rsquo;s
-tree, with no proof text and no trust keyword.</p>
-
-<div class="tabs" data-tabs>
-  <button class="on">bst.ml &mdash; proved against the model</button>
-  <button>bst.mli &mdash; the model interface</button>
-  <button>a client</button>
-  <button>an alt interface, quantified</button>
-</div>
-<div class="tabpane on"><pre style="max-height:34rem"><code class="ml">@BST_ML@</code></pre></div>
-<div class="tabpane"><pre style="max-height:34rem"><code class="ml">@BST_MLI@</code></pre></div>
-<div class="tabpane"><pre><code class="ml">@BST_CLIENT@</code></pre>
-<p style="color:var(--dim);font-size:.9rem"><code>mem_insert</code> characterizes each insertion completely, down
-to <code>mem 5 empty = False</code>.</p></div>
-<div class="tabpane"><pre style="max-height:34rem"><code class="ml">@BST_ALT@</code></pre>
-<p style="color:var(--dim);font-size:.9rem">With quantifiers in predicates
-(<code>forall_</code>/<code>exists_</code>), the exported theorem can live in
-the type instead: an alternative interface over the untouched module states
-everything <code>add</code> does in one refinement, and a client instantiates
-it at whatever key it asks about.</p></div>
-
-<p>The classic search-tree bug is to descend the wrong side and miss an
-element.  The counterexample names one &mdash; below,
-<code>x&nbsp;=&nbsp;-1</code> under a root of <code>0</code>:</p>
-<pre><code class="ml">@BST_FAIL@</code></pre>
-<pre class="out"><code>@BST_FAIL_OUT@</code></pre>
-
-<p id="oset">The sealed style is exercised in the suite.
-<code>lib/step.mli</code> exports a single law as an axiom; two
-implementations (<code>step_incr</code>, <code>step_double</code>)
-each prove it, and <code>demo/lean_seal.ml</code> verifies the same
-client body against either, while an implementation that cannot prove
-the law is rejected at its seal
-(<code>mechanics/lean_seal_fail.ml</code>).  <code>lib/oset.mli</code>
-hides model and type both: the set is a binary search tree, but a
-client and its proofs see only four axioms
-(<code>demo/lean_oset.ml</code>;
-<code>mechanics/lean_oset_opaque.ml</code> checks that a fact the
-axioms do not imply is rejected).</p>
-
-<h2 id="real">The Patricia trie</h2>
-<p>This is the integer-set structure OxCaml&rsquo;s optimizer uses
-(<code>middle_end/flambda2/algorithms/patricia_tree.ml</code>), in its
-classic little-endian form: the GADT plumbing stripped, the bit twiddling
-kept, including <code>i&nbsp;land&nbsp;b&nbsp;=&nbsp;0</code>,
-<code>i&nbsp;land&nbsp;(b&nbsp;-&nbsp;1)</code>, and the lowest-set-bit
-trick <code>x&nbsp;land&nbsp;(-x)</code> that appears verbatim in the
-compiler&rsquo;s <code>unpack</code>.  The interface models the bit
-operations arithmetically and proves the bit-level facts from first
-principles in core Lean, so nothing about bits is axiomatized.  The trust
-surface is three one-line bridges (vox does not reflect the bitwise
-operators), each carrying its arithmetic model as its contract.  From
-there the Patricia invariant, the one-path search, and insertion are
-proved arm by arm against the model.</p>
-
-<div class="tabs" data-tabs>
-  <button class="on">ptrie.ml &mdash; the implementation</button>
-  <button>ptrie.mli &mdash; the bit theory</button>
-  <button>a client</button>
-</div>
-<div class="tabpane on"><pre style="max-height:34rem"><code class="ml">@PTRIE_ML@</code></pre>
-<p style="color:var(--dim);font-size:.9rem">The whole trust surface of the
-module: three <code>assume_unchecked_</code> one-liners bridging the bitwise
-primitives.  Everything else is proved.</p></div>
-<div class="tabpane"><pre style="max-height:34rem"><code class="ml">@PTRIE_MLI@</code></pre>
-<p style="color:var(--dim);font-size:.9rem">The interface carries the
-arithmetic bit theory and its lemmas: 346 lines of Lean against an
-89-line implementation with no proof text (about four lines of theory
-per line of code, the most of any development here), exported through
-the <code>.cmi</code> so clients inherit it.</p></div>
-<div class="tabpane"><pre><code class="ml">@PTRIE_CLIENT@</code></pre>
-<p style="color:var(--dim);font-size:.9rem">The model membership never reads
-a prefix, so clients reason about the trie with no bit operations at all.</p></div>
-
-<p>The classic Patricia pitfall is descending by the branching bit without
-first checking the prefix, which files the key under a prefix it does not
-match (<code>insert</code> must <code>join</code> on a mismatch).  It is
-a compile error with a witness:</p>
-<pre><code class="ml">@PTRIE_FAIL@</code></pre>
-<pre class="out"><code>@PTRIE_FAIL_OUT@</code></pre>
-
-<p>The full-fidelity variant (<code>lib/ptrie_packed</code>) is
-big-endian like the compiler, with the prefix and the branching bit
-packed into one int per branch exactly as the compiler's
-<code>prefix_and_bit</code> packs them: <code>pack</code> is
-<code>lor</code>, and <code>unpack</code> recovers the bit with
-<code>x&nbsp;land&nbsp;(-x)</code>.  The invariant is stated about the
-packed int itself: in a well-formed node the bit is its lowest set bit
-and the prefix is the rest, as theorems (<code>lbit_pack</code>)
-rather than fields.  Building a node with a mis-packed int is a
-verification failure, with the decoded fields in the
-counterexample.</p>
-<pre><code class="ml">@PTRIE_PACKED@</code></pre>
+<p>The examples, each in the branch&rsquo;s test suite:</p>
+<ul>
+<li><b>A BST behind a transparent model</b> &mdash;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/bst.mli">bst.mli</a> states whole-tree
+  membership, the ordering invariant, and a model-level
+  <code>insert</code>;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/bst.ml">bst.ml</a> is checked against it arm
+  by arm, with no proof text and no trust keyword;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/demo/lean_bst.ml">a client</a> proves against the
+  exported theorems, and
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/demo/lean_bst_alt.ml">an alternative
+  interface</a> states everything <code>add</code> does in one quantified
+  refinement.
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/mechanics/lean_bst_fail.ml">The classic
+  wrong-side bug</a> is rejected with a counterexample naming a missed
+  element.</li>
+<li id="real"><b>The Patricia trie</b> from OxCaml&rsquo;s optimizer
+  (<code>middle_end/flambda2/algorithms/patricia_tree.ml</code>),
+  little-endian, the bit twiddling kept:
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/ptrie.mli">ptrie.mli</a> models the bit
+  operations arithmetically and proves the bit theory from first
+  principles in core Lean, so nothing about bits is axiomatized;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/ptrie.ml">ptrie.ml</a>&rsquo;s whole trust
+  surface is three one-line bridges (vox does not reflect the bitwise
+  operators);
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/mechanics/lean_ptrie_fail.ml">descending without
+  checking the prefix</a> is a compile error with a witness.
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/ptrie_packed.ml">The packed variant</a> is
+  big-endian like the compiler, prefix and branching bit packed into one
+  int per branch; the invariant is stated about the packed int
+  itself.</li>
+<li><b>Sealed: one law, two implementations</b> &mdash;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/step.mli">step.mli</a> exports a single law
+  as an axiom;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/step_incr/step.ml">step_incr</a> and
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/step_double/step.ml">step_double</a> each
+  prove it, and
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/demo/lean_seal.ml">the same client body</a>
+  verifies against either;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/mechanics/lean_seal_fail.ml">an implementation
+  that cannot prove the law</a> is rejected at its seal.</li>
+<li id="oset"><b>Full abstraction</b> &mdash;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/oset.mli">oset.mli</a> hides model and
+  representation both;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/oset.ml">the implementation</a> is a binary
+  search tree, but
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/demo/lean_oset.ml">a client</a> and its proofs
+  see only four axioms;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/mechanics/lean_oset_opaque.ml">a fact the axioms
+  do not imply</a> is rejected.</li>
+</ul>
 
 <h2 id="automation">Automation</h2>
 <p><code>grind</code> covers the same ground as an SMT solver
