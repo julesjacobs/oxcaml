@@ -1554,6 +1554,11 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
           ~kind
       | None -> ())
    | None -> ());
+  (* vox: [unreachable_] claims the current path is dead: the obligation is
+     [false] under the facts in scope. *)
+  if has_vox_attr "vox.unreachable" e.exp_attributes
+  then
+    emit_vc ~env ~loc:e.exp_loc ~ctx ~goal:(Refinement.Pbool false) ~kind:Prove;
   (* A [@vox.invariant] anywhere but on a loop would otherwise be
      SILENTLY unchecked -- the worst failure mode for a verification
      annotation. *)

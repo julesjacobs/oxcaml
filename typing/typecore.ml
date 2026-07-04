@@ -6595,6 +6595,101 @@ and type_function_ret_info =
 
 (* value binding elaboration *)
 
+(* vox: does a syntactic type mention a vox construct (refined type
+   [ty{ p }], named type [(x : ty)])?  Gates the annotation hoist
+   below to vox-typed bindings, so non-vox programs are untouched. *)
+let vox_core_type_has_vox sty =
+  let found = ref false in
+  let iter =
+    { Ast_iterator.default_iterator with
+      typ =
+        (fun self ty ->
+          (match ty.ptyp_desc with
+           | Ptyp_extension ({ txt; _ }, _)
+             when String.starts_with ~prefix:"vox." txt -> found := true
+           | _ -> ());
+          Ast_iterator.default_iterator.typ self ty) }
+  in
+  iter.typ iter sty;
+  !found
+
+(* vox: hoist [let f (a : t1) (b : t2) : r = e] to
+   [let f : (a : t1) -> (b : t2) -> r = fun a b -> e] when an
+   annotation carries a vox refinement or named type.  Dependency in
+   types has exactly one spelling -- the dependent arrow -- and in the
+   sugar spelling the parameter names are pattern variables, so a
+   refinement in [r] (or in a later parameter) that mentions them
+   would dangle; under [let rec] the recursive occurrences additionally
+   hit a rigid unification error before the dangling-refinement check
+   can explain the fix.  Purely syntactic, and fails open: any shape
+   not recognized below is left untouched. *)
+let vox_hoist_value_binding (vb : Parsetree.value_binding) =
+  match vb.pvb_pat.ppat_desc, vb.pvb_constraint, vb.pvb_expr.pexp_desc with
+  | Ppat_var _, None,
+    Pexp_function
+      (params,
+       { mode_annotations = []; ret_mode_annotations = [];
+         ret_type_constraint = Some (Pconstraint ret) },
+       Pfunction_body body)
+    when (not vb.pvb_is_poly)
+         && vb.pvb_modes = []
+         && vb.pvb_expr.pexp_attributes = [] ->
+    let rec extract = function
+      | [] -> Some []
+      | (p : Parsetree.function_param) :: rest ->
+        (match p.pparam_desc with
+         | Pparam_val
+             (Nolabel, None,
+              { ppat_desc =
+                  Ppat_constraint
+                    (({ ppat_desc = Ppat_var name; _ } as inner),
+                     Some ty, []);
+                _ }) ->
+           Option.map (fun r -> (p, name, inner, ty) :: r) (extract rest)
+         | _ -> None)
+    in
+    (match extract params with
+     | Some ((_ :: _) as infos)
+       when List.exists vox_core_type_has_vox
+              (ret :: List.map (fun (_, _, _, ty) -> ty) infos) ->
+       let arrow =
+         List.fold_right
+           (fun (_, name, _, (ty : Parsetree.core_type)) acc ->
+             let dom =
+               { ptyp_desc =
+                   Ptyp_extension
+                     ({ txt = "vox.named." ^ name.txt; loc = ty.ptyp_loc },
+                      PTyp ty);
+                 ptyp_loc = ty.ptyp_loc;
+                 ptyp_loc_stack = [];
+                 ptyp_attributes = [] }
+             in
+             { ptyp_desc = Ptyp_arrow (Nolabel, dom, acc, [], []);
+               ptyp_loc = ty.ptyp_loc;
+               ptyp_loc_stack = [];
+               ptyp_attributes = [] })
+           infos ret
+       in
+       let params =
+         List.map
+           (fun ((p : Parsetree.function_param), _, inner, _) ->
+             { p with pparam_desc = Pparam_val (Nolabel, None, inner) })
+           infos
+       in
+       { vb with
+         pvb_constraint =
+           Some (Pvc_constraint { locally_abstract_univars = []; typ = arrow });
+         pvb_expr =
+           { vb.pvb_expr with
+             pexp_desc =
+               Pexp_function
+                 (params,
+                  { mode_annotations = []; ret_mode_annotations = [];
+                    ret_type_constraint = None },
+                  Pfunction_body body) } }
+     | _ -> vb)
+  | _ -> vb
+
 (* vox: a [let x : ty = e] binding elaborates its annotation twice (on
    the pattern and on the synthesized [(e : ty)] constraint); both must
    see the same self-name scope so [x] in the top refinement of [ty]
@@ -8928,6 +9023,30 @@ and type_expect_
       | _ ->
           raise (Error (loc, env, Invalid_atomic_loc_payload))
       end
+  | Pexp_extension ({txt = "vox.unreachable"; _}, payload) ->
+      (* vox: [unreachable_] types at any expected type and compiles to
+         [assert false]; the VC pass emits [false] as its obligation,
+         so it is accepted exactly where the path facts are
+         contradictory -- a proved-unreachable branch.  The raise is
+         dead code by that proof. *)
+      begin match payload with
+      | PStr [] -> ()
+      | _ -> Location.raise_errorf ~loc "vox: unreachable_ takes no payload"
+      end;
+      let sfalse =
+        Ast_helper.Exp.construct ~loc
+          {txt = Longident.Lident "false"; loc} None
+      in
+      let exp =
+        type_expect env expected_mode
+          (Ast_helper.Exp.assert_ ~loc sfalse) ty_expected_explained
+      in
+      { exp with
+        exp_attributes =
+          { attr_name = {txt = "vox.unreachable"; loc};
+            attr_payload = PStr [];
+            attr_loc = loc }
+          :: exp.exp_attributes }
   | Pexp_extension
       ({txt = ("vox.refine" | "vox.assume" | "vox.assume_unchecked")
               as vox_kind; _}, payload) ->
@@ -11720,6 +11839,9 @@ and type_effect_cases
 and type_let ?check ?check_strict ?(force_toplevel = false)
     ?(vox_unpack = false)
     existential_context env mutable_flag rec_flag spat_sexp_list allow_modules =
+  (* vox: hoist dependent parameter/result annotations into a
+     dependent-arrow binding annotation (see [vox_hoist_value_binding]). *)
+  let spat_sexp_list = List.map vox_hoist_value_binding spat_sexp_list in
   (* Check that all bindings are either all poly or all non-poly *)
   let is_lpoly =
     match spat_sexp_list with

@@ -58,10 +58,12 @@ Line 1, characters 51-55: vox VC:
 val swapped : unit{ forall_ a. forall_ b. (b + a) = (a + b) } = ()
 |}]
 
-(* A quantifier binder shadows program variables... *)
-let shadow (k : int) : unit{ exists_ k. k = k } = assume_unchecked_ ()
+(* A quantifier binder shadows ordinary program variables (the body
+   annotation below is NOT hoisted, so [k] stays a plain variable)... *)
+let shadow (k : int) =
+  (assume_unchecked_ () : unit{ exists_ k. k = k })
 [%%expect{|
-Line 1, characters 68-70: vox VC (ASSUMED):
+Line 2, characters 21-23: vox VC (ASSUMED):
   goal: exists_ k. k = k
   hypotheses:
   swapped = pair
@@ -70,6 +72,18 @@ Line 1, characters 68-70: vox VC (ASSUMED):
   forall_ a. forall_ b. (a + b) = (b + a)
   pair = ()
 val shadow : int -> unit{ exists_ k. k = k } = <fun>
+|}]
+
+(* ...but a RESULT annotation hoists the parameters into dependent
+   binders ([(k : int) -> unit{ ... }]), putting [k] in the
+   refinement's scope: shadowing it is now the enclosing-binder error,
+   exactly as for selfshadow below. *)
+let shadowparam (k : int) : unit{ exists_ k. k = k } = assume_unchecked_ ()
+[%%expect{|
+Line 1, characters 42-43:
+1 | let shadowparam (k : int) : unit{ exists_ k. k = k } = assume_unchecked_ ()
+                                              ^
+Error: vox: this quantifier binder shadows the refined value or an enclosing binder; rename it
 |}]
 
 (* ... but may not shadow the refined value or an enclosing binder:

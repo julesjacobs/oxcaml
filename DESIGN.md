@@ -83,6 +83,13 @@
   skipped outright (reported as ASSUMED in diagnostics). No check is
   compiled; this is the trusted escape hatch for predicates `assume_`
   cannot check.
+- `unreachable_` is an expression of any expected type whose proof
+  obligation is `false` under the path facts: a match arm (or branch)
+  is accepted exactly when it is PROVED unreachable.  It compiles to
+  `assert false` -- dead code by that proof.  A reachable `unreachable_`
+  fails with a counterexample.  (See demo/lean_nth.ml: a safe `nth`
+  whose `Nil` arm is dead because `0 <= i < len l` contradicts
+  `len Nil = 0`.)
 - Elimination: the irrefutable pattern `refine_ x`, as in
   `let refine_ x = e`, binds `x` at the skeleton type. Free -- no proof
   obligation. With BINDERS AS FACTS (below) this is what every binder
@@ -596,7 +603,15 @@ written as an annotation, `(x : int) -> ...`: a refinement written
 directly in terms of a lambda's parameters would name them as free
 program variables, which may not appear in the function's own type --
 the escape checks reject it, with the dependent arrow as the
-sanctioned spelling.
+sanctioned spelling.  The direct binding spelling
+`let [rec] f (x : t) ... : r = e` is HOISTED into that arrow at
+elaboration whenever an annotation carries a vox refinement or named
+type (all parameters become dependent binders, so `r` and later
+parameters may mention them, and a `let rec` is typed at the full
+contract from the start); the hoist is purely syntactic, gated to
+vox-typed bindings, and fails open on shapes it does not recognize
+(labelled or unannotated parameters, nested lambda chains, missing
+result annotation).
 
 A `-dump-vc` flag prints every VC (hypotheses, goal, source location);
 `-vox-dry-run` skips the solver, so VC generation is testable without
