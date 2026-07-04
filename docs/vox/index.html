@@ -90,8 +90,7 @@ th{background:var(--panel);color:var(--fg)} td{color:var(--dim)} td:first-child{
   <a href="#automation">automation</a>
   <a href="#modes">mutation</a>
   <a href="#perf">performance</a>
-  <a href="#tour">more features</a>
-  <a href="#trust">trust &amp; costs</a>
+  <a href="#tour">more demos</a>
   <a href="#run">running it</a>
 </div></nav>
 <main>
@@ -124,7 +123,7 @@ types backed by Lean.</p>
   array kernel at 1.36&times; the checked loop.</li>
 </ul>
 <p style="font-size:.85rem;color:var(--dim);margin:.5rem 0 .2rem">(all
-<a href="#trust">vibe-proved</a> by AI)</p>
+vibe-proved by AI)</p>
 </div>
 <p class="tag" style="color:var(--fg)">
 <b>vox</b> is an experimental extension of the OxCaml compiler in
@@ -559,8 +558,8 @@ value has no other references (what justifies a strong update),
 <code>once</code> makes capability tokens affine, and <code>local</code>
 confines a value to its region.  vox added no checker machinery: the
 mode checker enforces the ownership discipline, refinements carry the
-ghost state, and a small trusted library (accounted for in the trust
-table below) encodes the heap logic on top.  Rust&rsquo;s verifiers
+ghost state, and a small trusted library encodes the heap logic on
+top.  Rust&rsquo;s verifiers
 (Creusot, Prusti, RustHorn) make the analogous move on the borrow
 checker.  The two workhorses are mutable borrows &mdash; a loan whose
 final value is a prophecy variable &mdash; and mutable slices into
@@ -665,7 +664,7 @@ reasoning applies to other checks that exist only because a known fact was
 never stated: validation on trusted paths, defensive re-checks across
 module boundaries, option-wrapping of values that cannot be absent.</p>
 
-<h2 id="tour">More features</h2>
+<h2 id="tour">Some more demos</h2>
 <details><summary style="cursor:pointer;color:var(--dim)">Sixteen more
 cards: ADTs, records, tuples, quantifiers, loop invariants, cross-module
 specs, interior mutability, separation logic.</summary>
@@ -925,86 +924,6 @@ enough.</p></div>
 
 </div>
 </details>
-
-<h2 id="trust">Costs and trust</h2>
-<p>What a claim on this page is worth depends on what is proved, what is
-checked at runtime, and what is assumed:</p>
-<table>
-<tr><th>Construct</th><th>Status</th><th>Notes</th></tr>
-<tr><td><code>refine_ e</code></td><td><span class="g">Proved</span></td>
-  <td>Asserts a refinement of <code>e</code> by proof: the obligation is
-      emitted as a Lean theorem, and failure is a compile error with goal,
-      hypotheses, and model.</td></tr>
-<tr><td>parameter contracts</td><td><span class="g">Proved</span></td>
-  <td>Discharged at every application, at the argument&rsquo;s logical name.</td></tr>
-<tr><td><code>total_</code> definitions</td><td><span class="g">Definitional</span></td>
-  <td>The emitted Lean <code>def</code> is the OCaml body; Lean independently checks termination.</td></tr>
-<tr><td><code>[%%vox.lean]</code> theorems</td><td><span class="g">Proved</span></td>
-  <td>Hand-written lemmas are Lean-checked on every compile; a false proof is a compile error.</td></tr>
-<tr><td><code>assume_ e</code></td><td><span class="w">Runtime-checked</span></td>
-  <td>The compiler inserts the test; a violated assumption raises rather than entering the logic.
-      Checks may call reflected functions and compare structural data; compiled
-      only when faithful to the logic, otherwise a compile error.</td></tr>
-<tr><td><code>axiom</code> in an <code>.mli</code> block</td><td><span class="g">Obligation</span></td>
-  <td>The implementation must supply a proved theorem with the same name
-      and statement for every interface law (the <a href="#seal">seal</a>);
-      a missing or wrong proof is a compile error.</td></tr>
-<tr><td><code>assume_unchecked_ e</code>, <code>axiom</code> in <code>.ml</code> blocks</td><td><span class="e">Trusted</span></td>
-  <td>The primary trust surface.  In the Patricia trie it is three
-      bit-twiddling one-liners.</td></tr>
-<tr><td><code>[@@vox.sort int|bool]</code> ghost sorts; library mode casts</td><td><span class="e">Trusted</span></td>
-  <td>The mutation encodings&rsquo; trust surface: ghost types declaring their logical sort, and the
-      <code>Obj.magic</code>-family casts inside the token, borrow, slice, and
-      separation-logic libraries (about 450 lines in all).  The audit grep is <code>assume_unchecked_</code> +
-      <code>Obj.magic</code> + <code>[@@vox.sort]</code> over the trusted libs.
-      (<code>[@@vox.sort opaque]</code> is not in this row: an opaque sort
-      carries no facts of its own.)</td></tr>
-</table>
-<p>Verification runs inside <code>ocamlc</code>: a typical verified
-module in the suite adds about one second of Lean per compile; heavier
-inductive developments (the trie, quicksort) cost more.  Obligations are
-re-proved on every build, so there is no stale-proof state, and editing
-a spec changes the <code>.cmi</code> checksum, which forces clients to
-re-verify.  Imported interface theory is precompiled (the Lean module
-beside the <code>.cmi</code>), so a client compile does not
-re-elaborate it.  The compiler footprint is about 5,700 lines in
-<code>typing/</code> plus changes to arrows and unification; the build
-gains a pinned Lean toolchain.</p>
-<p>A broken obligation goes red at that function, like a type error,
-but closing a hard goal can require writing Lean, and <code>grind</code>
-can fail on goals that are true (nonlinear arithmetic, quantifier
-instantiation).  The options, in order: prove a lemma in an embedded
-block, downgrade to a runtime-checked <code>assume_</code>, or leave the
-function unannotated.  Known limits: partial correctness (termination is
-checked only for <code>total_</code> definitions), ideal integers (no
-overflow model), no shared-state concurrency beyond mode-checked
-disjointness, and <code>axiom</code>s in <code>.ml</code> lemma blocks
-join the trust surface silently today (a lint is planned) &mdash;
-interface <code>axiom</code>s do not: the <a href="#seal">seal</a>
-enforces them.</p>
-<p>Each feature shipped with adversarial probes (forged tokens,
-duplicated loans, escaped borrows, prophecy reuse, false exports), each
-pinned in the test suite to the layer that rejects it.  The Lean itself
-was mostly agent-drafted against <code>grind</code>&rsquo;s
-counterexample feedback; provenance does not matter for soundness, since
-Lean re-checks everything on every build.</p>
-<h2 id="next">Directions</h2>
-<p>Everything above is CI-checked today, on unmodified OxCaml modes and
-a stock Lean.  Next, roughly in order:</p>
-<ul>
-<li>Verified hot-path kernels behind plain interfaces, with their
-  defensive checks deleted.</li>
-<li>Interface models for core containers and protocol layers, so client
-  code proves against them without reading implementations.</li>
-<li>Concurrency beyond fork-join disjointness: an invariant layer for
-  shared state.</li>
-<li>Spec-driven testing at the <code>assume_</code> boundary:
-  quickcheck-style generators, fuzzers, AI-driven input search.</li>
-<li>Confining the remaining trust surface (<code>.ml</code> blocks, the
-  mutation libraries) to designated modules &mdash;
-  <a href="#seal">sealed interfaces</a> already do this for interface
-  laws.</li>
-</ul>
 
 <h2 id="run">Running it</h2>
 <pre><code>git clone -b vox https://github.com/julesjacobs/oxcaml && cd oxcaml
