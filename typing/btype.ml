@@ -492,9 +492,10 @@ let type_iterators_without_type_expr =
     match jkd.jkind_manifest with
     | None -> ()
     | Some { base = Kconstr (p, _); mod_bounds = _;
-             with_bounds = No_with_bounds } ->
+             with_bounds = No_with_bounds; refines = _ } ->
       it.it_path p
-    | Some { base = Layout _; mod_bounds = _; with_bounds = No_with_bounds } ->
+    | Some { base = Layout _; mod_bounds = _; with_bounds = No_with_bounds;
+             refines = _ } ->
       ()
   and it_functor_param it = function
     | Unit -> ()
@@ -1286,16 +1287,16 @@ module Jkind0 = struct
         type l r.
         ('layout, l * r) base_and_axes ->
         ('layout, Allowance.allowed * r) base_and_axes option =
-     fun { base; mod_bounds; with_bounds } ->
+     fun { base; mod_bounds; with_bounds; refines } ->
       match With_bounds.try_allow_l with_bounds with
       | None -> None
       | Some with_bounds ->
-        Some { base; mod_bounds = Obj.magic mod_bounds; with_bounds }
+        Some { base; mod_bounds = Obj.magic mod_bounds; with_bounds; refines }
 
-    let try_allow_r { base; mod_bounds; with_bounds } =
+    let try_allow_r { base; mod_bounds; with_bounds; refines } =
       match With_bounds.try_allow_r with_bounds with
       | Some with_bounds ->
-        Some { base; mod_bounds = Obj.magic mod_bounds; with_bounds }
+        Some { base; mod_bounds = Obj.magic mod_bounds; with_bounds; refines }
       | None -> None
   end
 
@@ -1311,13 +1312,15 @@ module Jkind0 = struct
     let of_path path =
       { base = Kconstr (path, Jkind_types.Scannable_axes.max);
         mod_bounds = Mod_bounds.max;
-        with_bounds = No_with_bounds
+        with_bounds = No_with_bounds;
+        refines = Vr_top
       }
 
     let max =
       { base = Layout Jkind_types.Layout.Const.max;
         mod_bounds = Mod_bounds.max;
-        with_bounds = No_with_bounds
+        with_bounds = No_with_bounds;
+        refines = Vr_top
       }
 
     (* This function is shallow in the sense that it does not expand abstract
@@ -1365,7 +1368,8 @@ module Jkind0 = struct
 
       let mk_jkind ~crossing ~externality (layout : Layout.Const.t) =
         let mod_bounds = Mod_bounds.create crossing ~externality in
-        { base = Layout layout; mod_bounds; with_bounds = No_with_bounds }
+        { base = Layout layout; mod_bounds; with_bounds = No_with_bounds;
+          refines = Vr_top }
 
       let any =
         { jkind =
@@ -1469,7 +1473,8 @@ module Jkind0 = struct
                     (Scannable,
                       { nullability = Non_null; separability = Non_float }));
               mod_bounds = immutable_data_mod_bounds;
-              with_bounds = No_with_bounds
+              with_bounds = No_with_bounds;
+              refines = Vr_top
             };
           name = "immutable_data"
         }
@@ -1482,7 +1487,8 @@ module Jkind0 = struct
                     (Scannable,
                       { nullability = Maybe_null; separability = Non_float }));
               mod_bounds = immutable_data_mod_bounds;
-              with_bounds = No_with_bounds
+              with_bounds = No_with_bounds;
+              refines = Vr_top
             };
           name = "immutable_data_or_null"
         }
@@ -1503,7 +1509,8 @@ module Jkind0 = struct
                      ~visibility:true ~staticity:false
                  in
                  create crossing ~externality:Externality.max);
-              with_bounds = No_with_bounds
+              with_bounds = No_with_bounds;
+              refines = Vr_top
             };
           name = "exn"
         }
@@ -1525,7 +1532,8 @@ module Jkind0 = struct
                     (Scannable,
                       { nullability = Non_null; separability = Non_float }));
               mod_bounds = sync_data_mod_bounds;
-              with_bounds = No_with_bounds
+              with_bounds = No_with_bounds;
+              refines = Vr_top
             };
           name = "sync_data"
         }
@@ -1538,7 +1546,8 @@ module Jkind0 = struct
                     (Scannable,
                       { nullability = Maybe_null; separability = Non_float }));
               mod_bounds = sync_data_mod_bounds;
-              with_bounds = No_with_bounds
+              with_bounds = No_with_bounds;
+              refines = Vr_top
             };
           name = "sync_data_or_null"
         }
@@ -1560,7 +1569,8 @@ module Jkind0 = struct
                     (Scannable,
                       { nullability = Non_null; separability = Non_float }));
               mod_bounds = mutable_data_mod_bounds;
-              with_bounds = No_with_bounds
+              with_bounds = No_with_bounds;
+              refines = Vr_top
             };
           name = "mutable_data"
         }
@@ -1573,7 +1583,8 @@ module Jkind0 = struct
                     (Scannable,
                       { nullability = Maybe_null; separability = Non_float }));
               mod_bounds = mutable_data_mod_bounds;
-              with_bounds = No_with_bounds
+              with_bounds = No_with_bounds;
+              refines = Vr_top
             };
           name = "mutable_data_or_null"
         }
@@ -1977,7 +1988,7 @@ module Jkind0 = struct
             With_bounds.add_modality ~type_expr ~modality bounds)
           tys_modalities No_with_bounds
       in
-      { base; mod_bounds; with_bounds }
+      { base; mod_bounds; with_bounds; refines = Vr_top }
 
     let get_const t =
       Base_and_axes.map_layout_option Jkind_types.Layout.get_const t
@@ -2201,7 +2212,8 @@ module Jkind0 = struct
         let desc : _ jkind_desc =
           { base = Layout layout;
             mod_bounds = Mod_bounds.max;
-            with_bounds = No_with_bounds }
+            with_bounds = No_with_bounds;
+            refines = Vr_top }
         in
         fresh_jkind_poly desc ~annotation:None ~why:(Product_creation why)
       (* We do not [mark_best] here because the resulting jkind is used (only)
@@ -2306,7 +2318,8 @@ module Jkind0 = struct
                  (Base Scannable,
                   { nullability = Non_null; separability = Non_float }));
           mod_bounds;
-          with_bounds = No_with_bounds
+          with_bounds = No_with_bounds;
+          refines = Vr_top
         }
         ~annotation:None ~why:(Value_creation why)
 
@@ -2576,7 +2589,8 @@ module Jkind0 = struct
                  (Base Scannable,
                   { nullability = Non_null; separability = Separable }));
           mod_bounds;
-          with_bounds = No_with_bounds
+          with_bounds = No_with_bounds;
+          refines = Vr_top
         }
         ~annotation:None ~why:(Primitive ident)
       |> mark_best
@@ -2586,7 +2600,8 @@ module Jkind0 = struct
         { base = Layout (Sort (Base Scannable, { nullability = Non_null;
                                                  separability = Separable }));
           mod_bounds = Mod_bounds.for_arrow;
-          with_bounds = No_with_bounds
+          with_bounds = No_with_bounds;
+          refines = Vr_top
         }
         ~annotation:None ~why:(Value_creation Quoted_expression)
       |> mark_best
@@ -2601,7 +2616,8 @@ module Jkind0 = struct
             Layout
               (Any { nullability = Maybe_null; separability = Separable });
           mod_bounds;
-          with_bounds = No_with_bounds
+          with_bounds = No_with_bounds;
+          refines = Vr_top
         }
         ~annotation:None ~why:(Any_creation Array_type_argument)
 
@@ -2618,7 +2634,8 @@ module Jkind0 = struct
                   { nullability = Non_null;
                     separability = Maybe_separable }));
           mod_bounds;
-          with_bounds = No_with_bounds
+          with_bounds = No_with_bounds;
+          refines = Vr_top
         }
         ~annotation:None ~why:(Value_creation why)
 

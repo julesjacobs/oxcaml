@@ -428,6 +428,20 @@
   mutability (tokens carry the cell's contents as facts; a ghost sort
   lets the value DENOTE them); no doctrine yet picks between them --
   see the Wishlist.  See mechanics/lean_vox_sort.ml.
+  KIND SYNTAX: the modeling may equivalently be declared in the
+  type's kind -- `type t : value refines int` (or `bool`) -- which is
+  the same trusted assertion carried as declaration METADATA in the
+  jkind: the kind algebra never combines or solves it (it is a peer
+  of the layout, inert for programs that never write it), the
+  verifier reads it through the environment (so it survives
+  abstraction, and applies to every instance of a parameterized
+  head), and it is checked exactly once, at signature inclusion: an
+  interface may declare `refines` only if the implementation carries
+  the same modeling -- by its own annotation or attribute, or
+  structurally (`type t = int` satisfies `refines int` unannotated).
+  Sharp edges, v1: the component does not PRINT (a `refines` kind
+  displays as its base), and only the base sorts are declarable
+  (datatype sorts remain structural).  See mechanics/refines_kind.ml.
 - Specced signatures: blocks in an `.mli` are EXPORTED through the
   `.cmi`, together with pre-rendered declarations of the datatypes the
   interface's refinements are about (a client may never mention those

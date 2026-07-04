@@ -277,25 +277,69 @@ let with_additional_action =
     | Duplicate_variables -> Duplicate_variables, Nothing
     | Prepare_for_saving ->
         let prepare_jkind (type l r) loc (jkind : (l * r) jkind) =
+          (* vox: the refines component may live only in the WRITTEN
+             annotation at this point (decl rebuilds do not thread the
+             field), and the annotation is dropped on save.  Rematerialize
+             it into the saved field so a client's .cmi view carries the
+             declared modeling. *)
+          let vox_refines =
+            match jkind.jkind.refines with
+            | (Vr_int | Vr_bool) as r -> r
+            | Vr_top ->
+              let rec of_annot (a : Parsetree.jkind_annotation) =
+                match a.pjka_desc with
+                | Pjk_operator (base, axes) ->
+                  let rec find = function
+                    | { Location.txt = "refines"; _ }
+                      :: { Location.txt = "int"; _ } :: _ -> Some Vr_int
+                    | { Location.txt = "refines"; _ }
+                      :: { Location.txt = "bool"; _ } :: _ -> Some Vr_bool
+                    | _ :: rest -> find rest
+                    | [] -> None
+                  in
+                  (match find axes with
+                   | Some r -> Some r
+                   | None -> of_annot base)
+                | Pjk_mod (base, _) | Pjk_with (base, _, _) -> of_annot base
+                | _ -> None
+              in
+              (match Option.bind jkind.annotation of_annot with
+               | Some r -> r
+               | None -> Vr_top)
+          in
+          let set_refines (k : (l * r) jkind) =
+            match vox_refines with
+            | Vr_top -> k
+            | Vr_int | Vr_bool ->
+              { k with jkind = { k.jkind with refines = vox_refines } }
+          in
           match Jkind.get_const jkind with
           | Some const ->
             let memoized =
-              Builtins_memo.find
-                ~quality:jkind.quality
-                ~ran_out_of_fuel_during_normalize:
-                  jkind.ran_out_of_fuel_during_normalize
-                const
+              (* vox: a refines-carrying kind must not collapse into the
+                 refines-less memoized builtin -- the .cmi would drop the
+                 modeling.  (The shallow equality itself stays
+                 refines-blind: printing elision shares it.) *)
+              match vox_refines with
+              | Vr_int | Vr_bool -> None
+              | Vr_top ->
+                Builtins_memo.find
+                  ~quality:jkind.quality
+                  ~ran_out_of_fuel_during_normalize:
+                    jkind.ran_out_of_fuel_during_normalize
+                  const
             in
             begin match memoized with
-            | Some jkind -> jkind
+            | Some jkind -> set_refines jkind
             | None ->
-              Jkind.of_const
-                ~quality:jkind.quality
-                ~ran_out_of_fuel_during_normalize:
-                  jkind.ran_out_of_fuel_during_normalize
-                const
-                ~annotation:None
-                ~why:Imported
+              set_refines
+                (Jkind.of_const
+                   ~quality:jkind.quality
+                   ~ran_out_of_fuel_during_normalize:
+                     jkind.ran_out_of_fuel_during_normalize
+                   const
+                   ~annotation:None
+                   ~why:Imported)
             end
           | None -> raise(Error (loc, Unconstrained_jkind_variable))
         in
@@ -580,11 +624,15 @@ let jkind_desc s jkind =
       if Path.compare p' p = 0 then jkind else
         { jkind with base = Kconstr (p', sa) }
     | Jkind_path p' -> { jkind with base = Kconstr (p', sa) }
-    | Jkind_const { base; mod_bounds; with_bounds = No_with_bounds } ->
+    | Jkind_const { base; mod_bounds; with_bounds = No_with_bounds;
+                    refines = _ } ->
       let const =
         { base = Jkind.Base_and_axes.meet_scannable_axes base sa;
           mod_bounds = Jkind.Mod_bounds.meet mod_bounds jkind.mod_bounds;
-          with_bounds = jkind.with_bounds }
+          with_bounds = jkind.with_bounds;
+          (* vox: resolving an alias reference; preserve the referencing
+             kind's refines. *)
+          refines = jkind.refines }
       in
       Jkind.Base_and_axes.map_layout Jkind_types.Layout.of_const const
     end
@@ -603,10 +651,14 @@ let jkind_const_desc s
       if Path.compare p' p = 0 then jkind else
         { jkind with base = Kconstr (p', sa) }
     | Jkind_path p' -> { jkind with base = Kconstr (p', sa) }
-    | Jkind_const { base; mod_bounds; with_bounds = No_with_bounds } ->
+    | Jkind_const { base; mod_bounds; with_bounds = No_with_bounds;
+                    refines = _ } ->
       { base = Jkind.Base_and_axes.meet_scannable_axes base sa;
         mod_bounds = Jkind.Mod_bounds.meet mod_bounds jkind.mod_bounds;
-        with_bounds = jkind.with_bounds }
+        with_bounds = jkind.with_bounds;
+        (* vox: resolving an alias reference; preserve the referencing
+           kind's refines. *)
+        refines = jkind.refines }
     end
   | Layout _ -> jkind
 

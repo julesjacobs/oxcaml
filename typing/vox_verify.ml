@@ -285,9 +285,19 @@ let validate_vox_sort_attributes ?(alias = false) (attrs : Parsetree.attributes)
 ;;
 
 let vox_sort_attribute env p =
+  (* The declared refines component of [p]'s kind: [type t : value
+     refines int], or the trusted [@@vox.sort] attribute, which
+     Typedecl folds into the same field. *)
   match Env.find_type p env with
   | exception Not_found -> None
-  | decl -> List.find_map vox_sort_of_attribute decl.type_attributes
+  | decl ->
+    (match Jkind.get_vox_refines decl.type_jkind with
+     | Vr_int -> Some S_int
+     | Vr_bool -> Some S_bool
+     | Vr_top ->
+       (* Decl rebuilds along some typedecl paths drop the kind field;
+          the attribute on the declaration is authoritative there. *)
+       List.find_map vox_sort_of_attribute decl.type_attributes)
 ;;
 
 (* The sort of the type at path [p], registering it as a datatype (with its
@@ -383,6 +393,13 @@ and dsort_of_type ?(visited = []) env ty =
            && (match get_desc (Ctype.vox_expand_head env elt) with
                | Tconstr (e, [], _) -> Path.same e Predef.path_int
                | _ -> false) -> S_iarray
+    | Tconstr (p, _ :: _, _) ->
+      (* A declared [refines] applies to every instance of a
+         parameterized head; the structural classification remains
+         monomorphic-only. *)
+      (match vox_sort_attribute env p with
+       | Some s -> s
+       | None -> S_other)
     | Trefine (skel, _) -> dsort_of_type ~visited env skel
     | Ttuple comps
       when List.length comps >= 2

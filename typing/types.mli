@@ -403,10 +403,21 @@ and 'layout jkind_base =
   | Layout of 'layout
   | Kconstr of Path.t * Jkind_types.Scannable_axes.t
 
+and vox_refines =
+  (* vox: the REFINES component of a kind -- the type's declared
+     logical modeling (see DESIGN.md).  A peer of [base], never an
+     axis: compared structurally under a flat order below [Vr_top]
+     (unconstrained), and inert for programs that never write
+     [refines]. *)
+  | Vr_top
+  | Vr_int
+  | Vr_bool
+
 and ('layout, 'd) base_and_axes =
   { base : 'layout jkind_base;
     mod_bounds : mod_bounds;
-    with_bounds : 'd with_bounds
+    with_bounds : 'd with_bounds;
+    refines : vox_refines
   }
   constraint 'd = 'l * 'r
 

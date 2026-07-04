@@ -1,4 +1,10 @@
-File "sortmm_i.ml", line 1, characters 0-28:
-1 | type t = { mutable c : int }
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: vox: the vox.sort of type t differs between the interface and the implementation; the attribute must appear identically on both declarations
+File "sortmm_i.ml", line 1:
+Error: The implementation sortmm_i.ml
+       does not match the interface sortmm_i.cmi: 
+       Type declarations do not match:
+         type t = { mutable c : int; }
+       is not included in
+         type t
+       The second declares refines int where the first declares no refines.
+       File "sortmm_i.mli", line 3, characters 0-23: Expected declaration
+       File "sortmm_i.ml", line 1, characters 0-28: Actual declaration

@@ -295,6 +295,7 @@ module Solver = struct
   (* Converting surface jkinds to solver ckinds. *)
   and ckind_of_jkind_desc : type a l r.
       ctx -> (a, l * r) Types.base_and_axes -> Ldd.node =
+   (* vox: refines is declaration metadata; the lattice does not carry it *)
    fun ctx jkind_desc ->
     let expand =
       match ctx.env with

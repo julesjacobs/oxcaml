@@ -146,6 +146,7 @@ type type_mismatch =
   | Fixed_representation of position
   | Jkind of Jkind.Violation.t
   | Unsafe_mode_crossing of unsafe_mode_crossing_mismatch
+  | Vox_refines of Types.vox_refines * Types.vox_refines
 
 type jkind_mismatch =
   | Manifest_missing

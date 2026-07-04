@@ -1217,6 +1217,89 @@ let transl_declaration env sdecl (id, uid) =
       | Type_abstract _ | Type_variant _ | Type_record _
       | Type_open -> jkind
     in
+    (* vox: the refines component of the declaration's kind.  An
+       explicit [refines] in a kind annotation is already in [jkind];
+       otherwise the trusted [@@vox.sort int|bool] attribute sets it,
+       and a plain int/bool manifest sets it structurally (so an .mli
+       [refines int] checks against [type t = int] unannotated). *)
+    let jkind =
+      match Jkind.get_vox_refines jkind with
+      | Vr_int | Vr_bool -> jkind
+      | Vr_top ->
+        (* The stored jkind may be an overapproximation of the written
+           annotation; read [refines] from the source annotation
+           directly. *)
+        let rec of_annot (a : Parsetree.jkind_annotation) =
+          match a.pjka_desc with
+          | Pjk_operator (base, axes) ->
+            let rec find = function
+              | { Location.txt = "refines"; _ }
+                :: { Location.txt = "int"; _ } :: _ -> Some Vr_int
+              | { Location.txt = "refines"; _ }
+                :: { Location.txt = "bool"; _ } :: _ -> Some Vr_bool
+              | _ :: rest -> find rest
+              | [] -> None
+            in
+            (match find axes with
+             | Some r -> Some r
+             | None -> of_annot base)
+          | Pjk_mod (base, _) | Pjk_with (base, _, _) -> of_annot base
+          | _ -> None
+        in
+        let of_annot =
+          Option.bind sdecl.ptype_jkind_annotation of_annot
+        in
+        (* Parity with [@@vox.sort]: on a pure ALIAS the modeling is a
+           footgun (the alias and its definition would diverge), so it
+           is rejected on both spellings. *)
+        (match of_annot, kind, man with
+         | Some _, Type_abstract _, Some _ ->
+           Location.raise_errorf ~loc:sdecl.ptype_loc
+             "vox: refines on a type alias has no effect; put it on the \
+              definition"
+         | _ -> ());
+        let of_attr =
+          List.find_map
+            (fun (a : Parsetree.attribute) ->
+              if not (String.equal a.attr_name.txt "vox.sort")
+              then None
+              else
+                match a.attr_payload with
+                | PStr
+                    [ { pstr_desc =
+                          Pstr_eval
+                            ( { pexp_desc =
+                                  Pexp_ident
+                                    { txt = Longident.Lident s; _ }
+                              ; _ }
+                            , _ )
+                      ; _ } ] ->
+                  (match s with
+                   | "int" -> Some Vr_int
+                   | "bool" -> Some Vr_bool
+                   | _ -> None (* vox_verify reports the bad name *))
+                | _ -> None)
+            sdecl.ptype_attributes
+        in
+        let structural () =
+          (* No expansion: expanding a manifest through a local (GADT)
+             equation moves ambiguity errors (see [vox_subsume]).  A
+             direct predef manifest is the only structural source. *)
+          match man with
+          | None -> None
+          | Some ty ->
+            (match get_desc ty with
+             | Tconstr (p, [], _) when Path.same p Predef.path_int ->
+               Some Vr_int
+             | Tconstr (p, [], _) when Path.same p Predef.path_bool ->
+               Some Vr_bool
+             | _ -> None)
+        in
+        (match of_annot, of_attr, structural () with
+         | Some r, _, _ | None, Some r, _ | None, None, Some r ->
+           Jkind.set_vox_refines r jkind
+         | None, None, None -> jkind)
+    in
     let arity = List.length params in
     let decl =
       { type_params = params;

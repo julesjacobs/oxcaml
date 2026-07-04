@@ -418,6 +418,7 @@ type type_mismatch =
   | Fixed_representation of position
   | Jkind of Jkind.Violation.t
   | Unsafe_mode_crossing of unsafe_mode_crossing_mismatch
+  | Vox_refines of Types.vox_refines * Types.vox_refines
 
 type jkind_mismatch =
   | Manifest_missing
@@ -792,6 +793,14 @@ let report_type_mismatch first second decl env ppf err =
   match err with
   | Arity ->
       pr "They have different arities."
+  | Vox_refines (r1, r2) ->
+      let show = function
+        | Types.Vr_top -> "no refines"
+        | Types.Vr_int -> "refines int"
+        | Types.Vr_bool -> "refines bool"
+      in
+      pr "%s declares %s where %s declares %s."
+        (String.capitalize_ascii second) (show r2) first (show r1)
   | Privacy err ->
       report_privacy_mismatch ppf err
   | Kind err ->
@@ -1589,7 +1598,68 @@ let type_manifest env ty1 ty2 priv2 kind2 =
    context E where all type constructors are equal). *)
 let type_declarations_consistency env decl1 decl2 =
   if decl1.type_arity <> decl2.type_arity then Some Arity
-  else match privacy_mismatch env decl1 decl2 with
+  else
+    (* vox: refines is declaration metadata, checked once, here: the
+       interface may not claim a logical modeling the implementation
+       does not carry.  An unconstrained interface accepts anything
+       (abstraction erases the modeling, soundly).  The implementation
+       side falls back to the STRUCTURAL modeling of its manifest
+       (decl rebuilds do not thread the field, and [type t = int]
+       must satisfy [refines int] unannotated). *)
+    let vox_sort_attr (decl : Types.type_declaration) =
+      List.find_map
+        (fun (a : Parsetree.attribute) ->
+          if not (String.equal a.attr_name.txt "vox.sort")
+          then None
+          else
+            match a.attr_payload with
+            | PStr
+                [ { pstr_desc =
+                      Pstr_eval
+                        ( { pexp_desc =
+                              Pexp_ident { txt = Longident.Lident "int"; _ }
+                          ; _ }
+                        , _ )
+                  ; _ } ] -> Some Types.Vr_int
+            | PStr
+                [ { pstr_desc =
+                      Pstr_eval
+                        ( { pexp_desc =
+                              Pexp_ident { txt = Longident.Lident "bool"; _ }
+                          ; _ }
+                        , _ )
+                  ; _ } ] -> Some Types.Vr_bool
+            | _ -> None)
+        decl.type_attributes
+    in
+    let r1 =
+      match Jkind.get_vox_refines decl1.type_jkind with
+      | (Types.Vr_int | Types.Vr_bool) as r -> r
+      | Types.Vr_top ->
+        match vox_sort_attr decl1 with
+        | Some r -> r
+        | None ->
+        (match decl1.type_manifest with
+         | None -> Types.Vr_top
+         | Some ty ->
+           (* No expansion (see the same choice in Typedecl): expanding
+              through a local equation moves ambiguity errors. *)
+           (match get_desc ty with
+            | Tconstr (p, [], _) when Path.same p Predef.path_int ->
+              Types.Vr_int
+            | Tconstr (p, [], _) when Path.same p Predef.path_bool ->
+              Types.Vr_bool
+            | _ -> Types.Vr_top))
+    in
+    let r2 =
+      match Jkind.get_vox_refines decl2.type_jkind with
+      | (Types.Vr_int | Types.Vr_bool) as r -> r
+      | Types.Vr_top ->
+        (match vox_sort_attr decl2 with Some r -> r | None -> Types.Vr_top)
+    in
+    if not (match r2 with Types.Vr_top -> true | _ -> r1 = r2)
+    then Some (Vox_refines (r1, r2))
+    else match privacy_mismatch env decl1 decl2 with
     | Some err -> Some (Privacy err)
     | None -> None
 
