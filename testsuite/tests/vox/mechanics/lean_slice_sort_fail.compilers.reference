@@ -1,0 +1,7 @@
+File "lean_slice_sort_fail.ml", line 16, characters 31-35:
+16 |   fun m -> merge_sorted_halves (-1) m
+                                    ^^^^
+Error: vox: verification failed (lean).
+       Goal: 0 <= -1
+Hypotheses: <none>
+(lean: error: `grind` failed)

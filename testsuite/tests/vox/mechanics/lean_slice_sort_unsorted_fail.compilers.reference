@@ -1,0 +1,16 @@
+File "lean_slice_sort_unsorted_fail.ml", line 19, characters 3-5:
+19 |   (() : unit{ sorted (fin m) })
+        ^^
+Error: vox: verification failed (lean).
+       Goal: sorted (fin m)
+Hypotheses:
+  (fin m) = (merged (take 1 (now m)) (drop 1 (now m)))
+  1 <= (len (now m))
+Possible counterexample:
+  len (now m) = 3
+  len (fin m) = 3
+  len (drop 1 (now m)) = 2
+  len (merged (take 1 (now m)) (drop 1 (now m))) = 3
+  len (take 1 (now m)) = 1
+  len (app (take 1 (now m)) (drop 1 (now m))) = 3
+(lean: error: `grind` failed)
