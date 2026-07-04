@@ -206,10 +206,14 @@ bounds from <code>i &lt;&gt; 0</code> and the <code>Cons</code> match.
 The <code>Nil</code> arm is dead code given the bounds;
 <code>unreachable_</code> makes this a proof obligation (the goal
 <code>false</code> under the arm&rsquo;s hypotheses) where
-<code>assert false</code> would defer it to run time.  Proof
-obligations arise in exactly three ways: applications of functions
-with refined parameters, <code>refine_ e</code> claims, and
-<code>unreachable_</code>.</p>
+<code>assert false</code> would defer it to run time.</p>
+<p>Proof obligations arise in one way only: by constructing a value of
+a refined type.  The body of <code>append</code> constructs its
+result, a caller of <code>nth</code> constructs the argument
+<code>i</code>, an explicit <code>refine_ e</code> claim constructs
+the value of <code>e</code> at a stated type, and
+<code>unreachable_</code> is the limiting case, a value of a type that
+nothing satisfies.</p>
 <p id="contracts"><b>Refinements generalize pre- and
 postconditions.</b>  A refinement can also appear under a type
 constructor: <code>int{ _ &gt;= 0 } list</code> states that every
