@@ -70,11 +70,21 @@ Configuration is needed after changing `.in` files or the autoconf script.
   `_build/_bootinstall/bin/ocamlc.opt -vox-solver-path <lean> -c file.ml`
   (locate `<lean>` the way `testsuite/tests/vox/has-lean.sh` does:
   `$VOX_LEAN`, PATH, or its pinned copy).
-- `make -s test-one` spends ~19s on build-graph freshness checking
-  even on an UNCHANGED tree, and rebuilds the compiler after
-  `typing/` changes.  Use it for final validation, not iteration, and
+- `make -s test-one` costs ~17s even on an UNCHANGED tree (its
+  install_for_test step re-checks the full dune install graph and
+  re-rsyncs the testsuite into _runtest), and MINUTES after compiler
+  changes or a pull.  Use it for final validation, not iteration, and
   never concurrently with a background build or suite -- contention
   turns seconds into minutes.
+- When only TEST FILES changed, skip the expensive step: copy the
+  edited test over its _runtest counterpart and run the no-rebuild
+  target (~3s):
+    cp testsuite/tests/vox/foo.ml _runtest/testsuite/tests/vox/foo.ml
+    make -s test-one-no-rebuild TEST=vox/foo.ml
+  (_runtest is a HARDLINKED copy, so in-place edits propagate by
+  themselves, but rename-style writers -- sed -i, most editors, git
+  -- silently break the link; the cp makes the recipe unconditional
+  and also covers brand-new files.)
 - Cost model: honest module ~1s; a failing GROUND goal is sub-second
   even with a large prelude; a failing QUANTIFIED goal under
   quantified hypotheses costs ~6s of genuine search (not
