@@ -68,6 +68,10 @@ UNSHOWN = {
         'the quantified alt interface is linked from the signatures section',
     'demo/lean_ptrie.ml':
         'the trie is linked, not sliced, in the signatures section',
+    'demo/lean_borrow.ml':
+        'the smallest borrow; the quicksort card is the page\'s borrow demo',
+    'demo/lean_kernel.ml':
+        'bounds-check elimination is noted on the quicksort card',
 }
 
 
@@ -190,14 +194,6 @@ def main():
                    + '\n\n'
                    + slice_between(read('demo/lean_isqrt.ml'), r'^let isqrt',
                                    r'go 0 \(x \+ 1\)'),
-        '@BORROW@': slice_between(read('demo/lean_borrow.ml'), r'^let bump',
-                                  r'^  s$'),
-        '@BORROW_FAIL@': slice_between(read('mechanics/lean_borrow_fail.ml'),
-                                       r'^let lie',
-                                       r"^  ignore x'; ignore u; 0$"),
-        '@BORROW_FAIL_OUT@': slice_between(
-            read('mechanics/lean_borrow_fail.ml'),
-            r'^Error: vox: verification failed', r'^\(lean: '),
         '@FLIP@': slice_between(read('demo/lean_flip.ml'), r'^let rec flip',
                                 r'^  else h1')
                   + '\n\n'
@@ -220,8 +216,6 @@ def main():
                                    r'^let rec psort', r'@ local unique =$')
                    + '\n  fun m -> ...   (* the SAME spec; the recursive calls\n'
                      '                    run under Par_lib.fork_join2 *)',
-        '@KERNEL@': slice_between(read('demo/lean_kernel.ml'),
-                                  r'^let sum', r'^    go 0 0'),
     }
 
     nth = read('demo/lean_nth.ml')

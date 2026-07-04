@@ -89,7 +89,6 @@ th{background:var(--panel);color:var(--fg)} td{color:var(--dim)} td:first-child{
   <a href="#real">trie</a>
   <a href="#automation">automation</a>
   <a href="#modes">mutation</a>
-  <a href="#perf">performance</a>
   <a href="#tour">more demos</a>
   <a href="#run">running it</a>
 </div></nav>
@@ -119,8 +118,6 @@ types backed by Lean.</p>
 <li><a href="#fib">Fast-doubling Fibonacci</a> verified against its own
   naive definition; <a href="#tour">binary search, integer square
   root</a>.</li>
-<li><a href="#perf">Dropping runtime checks</a>: a bounds-check-free
-  array kernel at 1.36&times; the checked loop.</li>
 </ul>
 <p style="font-size:.85rem;color:var(--dim);margin:.5rem 0 .2rem">(all
 vibe-proved by AI)</p>
@@ -552,71 +549,13 @@ its synthesized <code>termination_by</code>, the embedded lemma block
 verbatim, and one theorem per obligation (fifteen for this file), each
 closed by <code>grind</code>.</p></div>
 <h2 id="modes">Unique mutation</h2>
-<p>OxCaml&rsquo;s mode system was built for allocation control, but it
-provides the ownership substrate a verifier needs: a <code>unique</code>
-value has no other references (what justifies a strong update),
-<code>once</code> makes capability tokens affine, and <code>local</code>
-confines a value to its region.  vox added no checker machinery: the
-mode checker enforces the ownership discipline, refinements carry the
-ghost state, and a small trusted library encodes the heap logic on
-top.  Rust&rsquo;s verifiers
-(Creusot, Prusti, RustHorn) make the analogous move on the borrow
-checker.  The two workhorses are mutable borrows &mdash; a loan whose
-final value is a prophecy variable &mdash; and mutable slices into
-arrays, which the sorting demos below run on.</p>
+<p>OxCaml&rsquo;s <code>@ unique</code> mode lets us reason about
+mutation within the pure refinement system, and <code>@ local</code>
+lets us model mutable borrows and slices and verify them with
+RustHorn-style prophecies.</p>
 
-
-<p>The smallest case is a mutable borrow
-(<code>demo/lean_borrow.ml</code>).  The loan&rsquo;s final value is a
-prophecy variable <code>p</code>; the borrower proves a fact about it,
-stated in the lender&rsquo;s terms, and when the borrow ends the
-lender gets the value back together with that fact.  Double use,
-forged exports, and writes through frozen loans are compile-time
-errors.</p>
-<pre><code class="ml">let bump : (a : int) -&gt; int{ _ = a + 1 } =
-  fun a -&gt;
-  let x = vnew a in
-  let p = new_proph () in
-  let (x', u) = borrow_mut p x (fun m -&gt;
-    let (r, m1) = mget m in              (* r = now m = x = a *)
-    let m2 = mset m1 (r + 1) in
-    let _u0 = mdrop m2 in         (* fin m2 = now m2 *)
-    (() : unit{ p = a + 1 }))    (* export in lender terms *)
-  in
-  ignore u;                              (* u carried p = a + 1 *)
-  let s = vpeek x' in                    (* s = x' = p *)
-  s</code></pre>
-<p>A false export is rejected by Lean.  Below, the borrower wrote
-<code>a&nbsp;+&nbsp;1</code> but claims <code>a&nbsp;+&nbsp;2</code>,
-and the counterexample shows the prophecy&rsquo;s actual
-resolution:</p>
-<pre><code class="ml">let lie : (a : int) -&gt; int =
-  fun a -&gt;
-  let x = vnew a in
-  let p = new_proph () in
-  let (x', u) = borrow_mut p x (fun m -&gt;
-    let m1 = mset m (a + 1) in
-    let _u0 = mdrop m1 in
-    (() : unit{ p = a + 2 }))
-  in
-  ignore x'; ignore u; 0</code></pre>
-<pre class="out"><code>Error: vox: verification failed (lean).
-       Goal: p = (a + 2)
-Hypotheses:
-  (fin m1) = (now m1)
-  ((now m1) = (a + 1)) &amp;&amp; ((fin m1) = (fin m))
-  ((now m) = x) &amp;&amp; ((fin m) = p)
-  x = a
-Possible counterexample:
-  a = -1
-  p = 0
-  x = -1
-  fin m1 = 0
-  fin m = 0
-  now m1 = 0
-  now m = -1
-(lean: error: `grind` failed)</code></pre>
-<h3 id="qsort">In-place quicksort</h3>
+<h3 id="qsort">In-place parallel quicksort</h3>
+<p>We sort a slice into an array:</p>
 <pre><code class="ml">let rec qsort :
   (m : slice) @ local unique -&gt;
   slice{ perm (now m) (now _) &amp;&amp; sorted (now _) &amp;&amp; fin _ = fin m }
@@ -629,40 +568,8 @@ let rec psort :
     @ local unique =
   fun m -&gt; ...   (* the SAME spec; the recursive calls
                     run under Par_lib.fork_join2 *)</code></pre>
-<p style="color:var(--dim);font-size:.95rem;max-width:46rem">Verified
-sorted-and-permutation on a borrowed slice, with the fork-join parallel
-version under the same spec.  <code>@ unique</code> says the loan has no other
-references (what justifies mutating in place), <code>@ local</code>
-confines it to its region, and <code>now m</code> / <code>fin m</code>
-are a RustHorn-style borrow&rsquo;s current and final (prophesied)
-contents.  In <code>psort</code> the mode checker proves the two tasks
-own disjoint halves, so parallelizing changes nothing in the proof.
-Merge sort is done the same way
-(<code>demo/lean_slice_sort.ml</code>), sequential and parallel under
-the same spec, with the merge loop verified rather than assumed.</p>
-
-
-<h2 id="perf">Dropping runtime checks</h2>
-<p><code>get</code> reads with <code>Iarray.unsafe_get</code>, so there
-is no bounds check in the compiled code; its contract demands the proof at
-every call site instead.  The loop below discharges it from the loop bound
-and the path fact.  Nothing about any index is assumed:</p>
-<pre><code class="ml">let sum : (a : int iarray) -&gt; int =
-  fun a -&gt;
-    let n = Iarray.length a in
-    let rec go : (i : int{ 0 &lt;= _ &amp;&amp; _ &lt;= n }) -&gt; int -&gt; int =
-      fun i acc -&gt; if i &lt; n then go (i + 1) (acc + Ia_lib.unsafe_get a i) else acc
-    in
-    go 0 0</code></pre>
-<p>The benchmark (<code>docs/vox/bench</code>) compiles this kernel
-natively, under verification; the benchmark driver itself does not compile
-until it proves its arrays compatible.  Measured on a dev box, the
-verified dot product runs at <b>1.36&times;</b> the speed of the
-bounds-checked loop, and
-the verified sum matches hand-written <code>unsafe_get</code>.  The same
-reasoning applies to other checks that exist only because a known fact was
-never stated: validation on trusted paths, defensive re-checks across
-module boundaries, option-wrapping of values that cannot be absent.</p>
+<p>This quicksort eliminates bounds checks: indexing is statically
+proved, so the compiled code reads and writes without them.</p>
 
 <h2 id="tour">Some more demos</h2>
 <details><summary style="cursor:pointer;color:var(--dim)">Sixteen more
