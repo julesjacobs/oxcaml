@@ -178,7 +178,9 @@ partial function has no logical counterpart (from
 <code>f x = f x + 1</code> the logic would conclude
 <code>0 = 1</code>).</p>
 <pre><code class="ml">@EX_APPEND@</code></pre>
-<p id="sixty">The expression between braces is a term of the logic,
+<p id="sixty">Apart from the annotation on its result type,
+<code>append</code> is ordinary OCaml, and it compiles to the same
+code.  The expression between braces is a term of the logic,
 written in OCaml syntax.  It may mention the program variables in
 scope, including the function&rsquo;s own parameters;
 <code>_</code> denotes the value the refinement is attached to, in
@@ -192,8 +194,10 @@ establish in every arm.  The <code>Nil</code> arm follows from the
 definition of <code>len</code>.  In the <code>Cons</code> arm, the
 recursive call has the same signature, instantiated at <code>t</code>
 and <code>b</code>, so <code>len r = len t + len b</code> is known;
-this is the induction hypothesis, and the usual inductive proof goes
-through without any proof text.</p>
+this is the induction hypothesis.  The compiler emits each obligation
+as a Lean theorem, and Lean&rsquo;s
+<a href="#automation"><code>grind</code></a> proves it automatically;
+the file contains no proof text.</p>
 <pre><code class="ml">@EX_NTH@</code></pre>
 <p>A refinement on a parameter is a precondition: every caller must
 prove it, and the body may assume it.  Within the body, branch
@@ -205,8 +209,7 @@ The <code>Nil</code> arm is dead code given the bounds;
 <code>assert false</code> would defer it to run time.  Proof
 obligations arise in exactly three ways: applications of functions
 with refined parameters, <code>refine_ e</code> claims, and
-<code>unreachable_</code>.  All are discharged at compile time by the
-<a href="#automation">automation</a>.</p>
+<code>unreachable_</code>.</p>
 <p id="contracts"><b>Refinements generalize pre- and
 postconditions.</b>  A refinement can also appear under a type
 constructor: <code>int{ _ &gt;= 0 } list</code> states that every

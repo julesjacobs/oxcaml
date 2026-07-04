@@ -193,7 +193,9 @@ let rec append (a : ilist) (b : ilist) : ilist{ len _ = len a + len b } =
   | Cons (h, t) -&gt;
     let r = append t b in
     Cons (h, r)</code></pre>
-<p id="sixty">The expression between braces is a term of the logic,
+<p id="sixty">Apart from the annotation on its result type,
+<code>append</code> is ordinary OCaml, and it compiles to the same
+code.  The expression between braces is a term of the logic,
 written in OCaml syntax.  It may mention the program variables in
 scope, including the function&rsquo;s own parameters;
 <code>_</code> denotes the value the refinement is attached to, in
@@ -207,8 +209,10 @@ establish in every arm.  The <code>Nil</code> arm follows from the
 definition of <code>len</code>.  In the <code>Cons</code> arm, the
 recursive call has the same signature, instantiated at <code>t</code>
 and <code>b</code>, so <code>len r = len t + len b</code> is known;
-this is the induction hypothesis, and the usual inductive proof goes
-through without any proof text.</p>
+this is the induction hypothesis.  The compiler emits each obligation
+as a Lean theorem, and Lean&rsquo;s
+<a href="#automation"><code>grind</code></a> proves it automatically;
+the file contains no proof text.</p>
 <pre><code class="ml">(* The bounds are a contract, discharged at every call site. *)
 let rec nth (l : ilist) (i : int{ 0 &lt;= _ &amp;&amp; _ &lt; len l }) : int =
   match l with
@@ -224,8 +228,7 @@ The <code>Nil</code> arm is dead code given the bounds;
 <code>assert false</code> would defer it to run time.  Proof
 obligations arise in exactly three ways: applications of functions
 with refined parameters, <code>refine_ e</code> claims, and
-<code>unreachable_</code>.  All are discharged at compile time by the
-<a href="#automation">automation</a>.</p>
+<code>unreachable_</code>.</p>
 <p id="contracts"><b>Refinements generalize pre- and
 postconditions.</b>  A refinement can also appear under a type
 constructor: <code>int{ _ &gt;= 0 } list</code> states that every
