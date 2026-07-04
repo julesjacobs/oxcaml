@@ -111,6 +111,9 @@ types backed by Lean.</p>
 <li><a href="#real">The Patricia trie</a> from OxCaml&rsquo;s own
   optimizer (the bit theory proved from first principles) and a BST,
   each behind a proved model interface.</li>
+<li><a href="#seal">Sealed interfaces</a>: one sig, two verified
+  implementations; <a href="#oset">a set</a> whose representation is
+  hidden even from the logic.</li>
 <li><a href="#modes">Unique mutation</a>: in-place list reversal, a
   tree flipped in place, interior mutability.</li>
 <li><a href="#fib">Fast-doubling Fibonacci</a> verified against its own
@@ -145,9 +148,11 @@ Verification is opt-in per function.
   a function <code>total_</code> reflects it into the logic, and
   refinements can then call it.</li>
 <li><a href="#sig">Specs go on module signatures</a>: an
-  <code>.mli</code> can state a model and prove its theorems; both
-  travel in the <code>.cmi</code>, and clients verify against the
-  interface.</li>
+  <code>.mli</code> can state a model and prove its theorems; clients
+  verify against the interface alone.  It can instead hide the model
+  and export <a href="#seal">axioms as obligations</a> the
+  implementation must prove &mdash; even the
+  <a href="#oset">representation type</a> can stay abstract.</li>
 <li><a href="#automation">Automation</a>: <code>grind</code> handles the
   common case; missed goals are proved with tactics next to the code and
   registered with <code>@[grind]</code>; everything is
@@ -262,10 +267,13 @@ facts sampling cannot confirm; those are where proof takes over.</p>
 
 <h2 id="sig">Specs on module signatures</h2>
 <p>An <code>.mli</code> can state a model and prove its theorems once,
-in an embedded Lean block; definitions and theorems travel in the
-<code>.cmi</code>, so clients verify against the interface without
-reading the implementation, and editing a spec changes the checksum,
-which forces clients to re-verify.  The BST below is built this way; <a href="#real">the trie
+in an embedded Lean block; the block is compiled from the interface
+alone into a Lean module beside the <code>.cmi</code>
+(<code>VoxSig_&lt;Unit&gt;.olean</code>) that clients import, so
+clients verify against the interface without reading the
+implementation, and editing a spec changes the <code>.cmi</code>
+checksum, which forces clients to re-verify.  The BST below is built
+this way; <a href="#real">the trie
 that follows</a> applies the same shape to harder code.</p>
 
 <p><code>bst.mli</code> states the model (whole-tree membership, the
@@ -636,21 +644,27 @@ checked at runtime, and what is assumed:</p>
 <tr><td><code>assume_ e</code></td><td><span class="w">Runtime-checked</span></td>
   <td>The compiler inserts the test; a violated assumption raises rather than entering the logic.
       Compiled only when the check is faithful to the logic; otherwise a compile error.</td></tr>
-<tr><td><code>assume_unchecked_ e</code>, <code>axiom</code> in blocks</td><td><span class="e">Trusted</span></td>
+<tr><td><code>axiom</code> in an <code>.mli</code> block</td><td><span class="g">Obligation</span></td>
+  <td>Not trust: the implementation&rsquo;s compile ends in a
+      <a href="#seal">seal</a> demanding a same-named proved theorem for
+      every interface law; an unpaid law is a compile error.</td></tr>
+<tr><td><code>assume_unchecked_ e</code>, <code>axiom</code> in <code>.ml</code> blocks</td><td><span class="e">Trusted</span></td>
   <td>The primary trust surface.  In the Patricia trie it is three
       bit-twiddling one-liners.</td></tr>
-<tr><td><code>[@@vox.sort]</code> ghost sorts; library mode casts</td><td><span class="e">Trusted</span></td>
+<tr><td><code>[@@vox.sort int|bool]</code> ghost sorts; library mode casts</td><td><span class="e">Trusted</span></td>
   <td>The mutation encodings&rsquo; trust surface: ghost types declaring their logical sort, and the
       <code>Obj.magic</code>-family casts inside the token, borrow, slice, and
       separation-logic libraries (about 450 lines in all).  The audit grep is <code>assume_unchecked_</code> +
-      <code>Obj.magic</code> + <code>[@@vox.sort]</code> over the trusted libs.</td></tr>
+      <code>Obj.magic</code> + <code>[@@vox.sort]</code> over the trusted libs.
+      (<code>[@@vox.sort opaque]</code> is not in this row: an opaque sort
+      carries no facts of its own.)</td></tr>
 </table>
 <p>Verification runs inside <code>ocamlc</code>: a typical verified
 module in the suite adds about one second of Lean per compile; heavier
 inductive developments (the trie, quicksort) cost more.  Obligations are
 re-proved on every build, so there is no stale-proof state, and editing
 a spec changes the <code>.cmi</code> checksum, which forces clients to
-re-verify.  The compiler footprint is about 4,900 lines in
+re-verify.  The compiler footprint is about 5,700 lines in
 <code>typing/</code> plus changes to arrows and unification; the build
 gains a pinned Lean toolchain.</p>
 <p>A broken obligation goes red at that function, like a type error,
@@ -661,8 +675,10 @@ block, downgrade to a runtime-checked <code>assume_</code>, or leave the
 function unannotated.  Known limits: partial correctness (termination is
 checked only for <code>total_</code> definitions), ideal integers (no
 overflow model), no shared-state concurrency beyond mode-checked
-disjointness, and client <code>axiom</code>s in lemma blocks join the
-trust surface silently today (a lint is planned).</p>
+disjointness, and <code>axiom</code>s in <code>.ml</code> lemma blocks
+join the trust surface silently today (a lint is planned) &mdash;
+interface <code>axiom</code>s do not: the <a href="#seal">seal</a>
+enforces them.</p>
 <p>Each feature shipped with adversarial probes (forged tokens,
 duplicated loans, escaped borrows, prophecy reuse, false exports), each
 pinned in the test suite to the layer that rejects it.  The Lean itself
@@ -681,8 +697,10 @@ a stock Lean.  Next, roughly in order:</p>
   shared state.</li>
 <li>Spec-driven testing at the <code>assume_</code> boundary:
   quickcheck-style generators, fuzzers, AI-driven input search.</li>
-<li>Confining the trust surface to designated modules, so a
-  library&rsquo;s claims hold for downstream users by construction.</li>
+<li>Confining the remaining trust surface (<code>.ml</code> blocks, the
+  mutation libraries) to designated modules &mdash;
+  <a href="#seal">sealed interfaces</a> already do this for interface
+  laws.</li>
 </ul>
 
 <h2 id="run">Running it</h2>
