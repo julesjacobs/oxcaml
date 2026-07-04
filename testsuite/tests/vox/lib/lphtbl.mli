@@ -42,20 +42,20 @@ type opt =
 
 -- Slot arithmetic for the probe loops: the reflected [mod] is
 -- [Int.tmod]; a non-negative dividend lands in [0, 8).
-theorem tmod8_range (i : Int) (h : 0 <= i) : 0 <= Int.tmod i 8 ∧ Int.tmod i 8 < 8 := by
+public theorem tmod8_range (i : Int) (h : 0 <= i) : 0 <= Int.tmod i 8 ∧ Int.tmod i 8 < 8 := by
   exact ⟨Int.tmod_nonneg 8 (by omega), Int.tmod_lt_of_pos i (by omega)⟩
 grind_pattern tmod8_range => Int.tmod i 8
 
 -- ===== the hash =====
-@[grind] def home (k : Int) : Int := Int.tmod k 8
+@[grind, expose] public def home (k : Int) : Int := Int.tmod k 8
 
-theorem home_range (k : Int) (h : 0 <= k) : 0 <= home k ∧ home k < 8 := by
+public theorem home_range (k : Int) (h : 0 <= k) : 0 <= home k ∧ home k < 8 := by
   unfold home
   exact ⟨Int.tmod_nonneg 8 (by omega), Int.tmod_lt_of_pos k (by omega)⟩
 grind_pattern home_range => home k
 
 -- ===== probe-find (Nat fuel, linear position, slot = i mod 8) =====
-@[grind] def pf : Nat -> Int -> Int -> List Int -> List Int -> Vox_Lphtbl_opt
+@[grind, expose] public def pf : Nat -> Int -> Int -> List Int -> List Int -> Vox_Lphtbl_opt
   | 0, _, _, _, _ => .Missing
   | n + 1, i, k, ks, vs =>
       if pelem ks (Int.tmod i 8) = -1 then .Missing
@@ -64,21 +64,21 @@ grind_pattern home_range => home k
 
 -- all-scan variant: like pf but does NOT stop early at an empty slot.
 -- On a wf table it agrees with pf, and it frames trivially.
-@[grind] def pfa : Nat -> Int -> Int -> List Int -> List Int -> Vox_Lphtbl_opt
+@[grind, expose] public def pfa : Nat -> Int -> Int -> List Int -> List Int -> Vox_Lphtbl_opt
   | 0, _, _, _, _ => .Missing
   | n + 1, i, k, ks, vs =>
       if pelem ks (Int.tmod i 8) = k then .Found (pelem vs (Int.tmod i 8))
       else pfa n (i + 1) k ks vs
 
 -- ===== probe-insert (keys and values as two functions, same slot) =====
-@[grind] def pik : Nat -> Int -> Int -> List Int -> List Int
+@[grind, expose] public def pik : Nat -> Int -> Int -> List Int -> List Int
   | 0, _, _, ks => ks
   | n + 1, i, k, ks =>
       if pelem ks (Int.tmod i 8) = -1 then pupd ks (Int.tmod i 8) k
       else if pelem ks (Int.tmod i 8) = k then pupd ks (Int.tmod i 8) k
       else pik n (i + 1) k ks
 
-@[grind] def piv : Nat -> Int -> Int -> Int -> List Int -> List Int -> List Int
+@[grind, expose] public def piv : Nat -> Int -> Int -> Int -> List Int -> List Int -> List Int
   | 0, _, _, _, _, vs => vs
   | n + 1, i, k, v, ks, vs =>
       if pelem ks (Int.tmod i 8) = -1 then pupd vs (Int.tmod i 8) v
@@ -88,16 +88,16 @@ grind_pattern home_range => home k
 -- ===== Int-fuel wrappers + unfolding equations.  OCaml ints reflect
 -- as Lean Int, so the imperative loop's per-iteration contract is
 -- exactly the [pfI]/[pikI]/[pivI] unfolding below. =====
-@[grind] def pfI (f i k : Int) (ks vs : List Int) : Vox_Lphtbl_opt :=
+@[grind, expose] public def pfI (f i k : Int) (ks vs : List Int) : Vox_Lphtbl_opt :=
   pf f.toNat i k ks vs
 
-@[grind] def pikI (f i k : Int) (ks : List Int) : List Int :=
+@[grind, expose] public def pikI (f i k : Int) (ks : List Int) : List Int :=
   pik f.toNat i k ks
 
-@[grind] def pivI (f i k v : Int) (ks vs : List Int) : List Int :=
+@[grind, expose] public def pivI (f i k v : Int) (ks vs : List Int) : List Int :=
   piv f.toNat i k v ks vs
 
-theorem pfI_unfold (f i k : Int) (ks vs : List Int) :
+public theorem pfI_unfold (f i k : Int) (ks vs : List Int) :
     pfI f i k ks vs =
       (if f <= 0 then .Missing
        else if pelem ks (Int.tmod i 8) = -1 then .Missing
@@ -111,7 +111,7 @@ theorem pfI_unfold (f i k : Int) (ks vs : List Int) :
     rw [h1]; grind
 grind_pattern pfI_unfold => pfI f i k ks vs
 
-theorem pikI_unfold (f i k : Int) (ks : List Int) :
+public theorem pikI_unfold (f i k : Int) (ks : List Int) :
     pikI f i k ks =
       (if f <= 0 then ks
        else if pelem ks (Int.tmod i 8) = -1 then pupd ks (Int.tmod i 8) k
@@ -125,7 +125,7 @@ theorem pikI_unfold (f i k : Int) (ks : List Int) :
     rw [h1]; grind
 grind_pattern pikI_unfold => pikI f i k ks
 
-theorem pivI_unfold (f i k v : Int) (ks vs : List Int) :
+public theorem pivI_unfold (f i k v : Int) (ks vs : List Int) :
     pivI f i k v ks vs =
       (if f <= 0 then vs
        else if pelem ks (Int.tmod i 8) = -1 then pupd vs (Int.tmod i 8) v
@@ -140,44 +140,44 @@ theorem pivI_unfold (f i k v : Int) (ks vs : List Int) :
 grind_pattern pivI_unfold => pivI f i k v ks vs
 
 -- ===== top-level operations (stated via the Int-fuel entry points) =====
-@[grind] def pfind (k : Int) (ks vs : List Int) : Vox_Lphtbl_opt :=
+@[grind, expose] public def pfind (k : Int) (ks vs : List Int) : Vox_Lphtbl_opt :=
   pfI 8 (home k) k ks vs
 
-@[grind] def pinsk (k v : Int) (ks : List Int) : List Int :=
+@[grind, expose] public def pinsk (k v : Int) (ks : List Int) : List Int :=
   pikI 8 (home k) k ks
 
-@[grind] def pinsv (k v : Int) (ks vs : List Int) : List Int :=
+@[grind, expose] public def pinsv (k v : Int) (ks vs : List Int) : List Int :=
   pivI 8 (home k) k v ks vs
 
 -- bridges to the Nat-fuel forms the model theorems reason about
-@[grind] theorem pfind_pf (k : Int) (ks vs : List Int) :
+@[grind] public theorem pfind_pf (k : Int) (ks vs : List Int) :
     pfind k ks vs = pf 8 (home k) k ks vs := by
   unfold pfind pfI; rfl
 
-@[grind] theorem pinsk_pik (k v : Int) (ks : List Int) :
+@[grind] public theorem pinsk_pik (k v : Int) (ks : List Int) :
     pinsk k v ks = pik 8 (home k) k ks := by
   unfold pinsk pikI; rfl
 
-@[grind] theorem pinsv_piv (k v : Int) (ks vs : List Int) :
+@[grind] public theorem pinsv_piv (k v : Int) (ks vs : List Int) :
     pinsv k v ks vs = piv 8 (home k) k v ks vs := by
   unfold pinsv pivI; rfl
 
 -- ===== landing position and its predicate =====
-@[grind] def plnd : Nat -> Int -> Int -> List Int -> Int
+@[grind, expose] public def plnd : Nat -> Int -> Int -> List Int -> Int
   | 0, i, _, _ => i
   | n + 1, i, k, ks =>
       if pelem ks (Int.tmod i 8) = -1 then i
       else if pelem ks (Int.tmod i 8) = k then i
       else plnd n (i + 1) k ks
 
-@[grind] def lands : Nat -> Int -> Int -> List Int -> Prop
+@[grind, expose] public def lands : Nat -> Int -> Int -> List Int -> Prop
   | 0, _, _, _ => False
   | n + 1, i, k, ks =>
       pelem ks (Int.tmod i 8) = -1 ∨ pelem ks (Int.tmod i 8) = k
         ∨ lands n (i + 1) k ks
 
 -- ===== insert characterization =====
-theorem plnd_range (f : Nat) (i k : Int) (ks : List Int)
+public theorem plnd_range (f : Nat) (i k : Int) (ks : List Int)
     (hl : lands f i k ks) : i <= plnd f i k ks ∧ plnd f i k ks < i + f := by
   induction f generalizing i with
   | zero => grind
@@ -188,7 +188,7 @@ theorem plnd_range (f : Nat) (i k : Int) (ks : List Int)
       · grind
       · have := ih (i + 1) (by grind); grind
 
-theorem pik_eq (f : Nat) (i k : Int) (ks : List Int) (hl : lands f i k ks) :
+public theorem pik_eq (f : Nat) (i k : Int) (ks : List Int) (hl : lands f i k ks) :
     pik f i k ks = pupd ks (Int.tmod (plnd f i k ks) 8) k := by
   induction f generalizing i with
   | zero => grind
@@ -199,7 +199,7 @@ theorem pik_eq (f : Nat) (i k : Int) (ks : List Int) (hl : lands f i k ks) :
       · grind
       · have := ih (i + 1) (by grind); grind
 
-theorem piv_eq (f : Nat) (i k v : Int) (ks vs : List Int)
+public theorem piv_eq (f : Nat) (i k v : Int) (ks vs : List Int)
     (hl : lands f i k ks) :
     piv f i k v ks vs = pupd vs (Int.tmod (plnd f i k ks) 8) v := by
   induction f generalizing i with
@@ -211,7 +211,7 @@ theorem piv_eq (f : Nat) (i k v : Int) (ks vs : List Int)
       · grind
       · have := ih (i + 1) (by grind); grind
 
-theorem pik_noland (f : Nat) (i k : Int) (ks : List Int)
+public theorem pik_noland (f : Nat) (i k : Int) (ks : List Int)
     (hl : ¬ lands f i k ks) : pik f i k ks = ks := by
   induction f generalizing i with
   | zero => grind
@@ -222,7 +222,7 @@ theorem pik_noland (f : Nat) (i k : Int) (ks : List Int)
       · grind
       · have := ih (i + 1) (by grind); grind
 
-theorem piv_noland (f : Nat) (i k v : Int) (ks vs : List Int)
+public theorem piv_noland (f : Nat) (i k v : Int) (ks vs : List Int)
     (hl : ¬ lands f i k ks) : piv f i k v ks vs = vs := by
   induction f generalizing i with
   | zero => grind
@@ -233,7 +233,7 @@ theorem piv_noland (f : Nat) (i k v : Int) (ks vs : List Int)
       · grind
       · have := ih (i + 1) (by grind); grind
 
-theorem plnd_land (f : Nat) (i k : Int) (ks : List Int) (hl : lands f i k ks) :
+public theorem plnd_land (f : Nat) (i k : Int) (ks : List Int) (hl : lands f i k ks) :
     pelem ks (Int.tmod (plnd f i k ks) 8) = -1
       ∨ pelem ks (Int.tmod (plnd f i k ks) 8) = k := by
   induction f generalizing i with
@@ -247,7 +247,7 @@ theorem plnd_land (f : Nat) (i k : Int) (ks : List Int) (hl : lands f i k ks) :
 
 -- find and insert probe the same path from the same home, so a
 -- lookup of the just-inserted key lands on the write.
-theorem find_ins_hit (f : Nat) (i k v : Int) (ks vs : List Int)
+public theorem find_ins_hit (f : Nat) (i k v : Int) (ks vs : List Int)
     (hlen : plen ks = 8) (hlv : plen vs = 8) (hi : 0 <= i) (hk : 0 <= k)
     (hl : lands f i k ks) :
     pf f i k (pik f i k ks) (piv f i k v ks vs) = .Found v := by
@@ -279,26 +279,26 @@ theorem find_ins_hit (f : Nat) (i k v : Int) (ks vs : List Int)
 -- ===== the invariant (ground, quantifier-free) =====
 -- occupied path: from linear position i, until slot mod 8 reaches j,
 -- every slot is occupied (non-empty).
-@[grind] def occto : Nat -> Int -> Int -> List Int -> Prop
+@[grind, expose] public def occto : Nat -> Int -> Int -> List Int -> Prop
   | 0, _, _, _ => True
   | n + 1, i, j, ks =>
       if Int.tmod i 8 = j then True
       else pelem ks (Int.tmod i 8) ≠ -1 ∧ occto n (i + 1) j ks
 
-@[grind] def slotok (i : Int) (ks : List Int) : Prop :=
+@[grind, expose] public def slotok (i : Int) (ks : List Int) : Prop :=
   pelem ks i = -1 ∨ (0 <= pelem ks i ∧ occto 8 (home (pelem ks i)) i ks)
 
-@[grind] def wf (ks : List Int) : Prop :=
+@[grind, expose] public def wf (ks : List Int) : Prop :=
   plen ks = 8 ∧ slotok 0 ks ∧ slotok 1 ks ∧ slotok 2 ks ∧ slotok 3 ks
     ∧ slotok 4 ks ∧ slotok 5 ks ∧ slotok 6 ks ∧ slotok 7 ks
 
-@[grind] def hasfree (ks : List Int) : Prop :=
+@[grind, expose] public def hasfree (ks : List Int) : Prop :=
   pelem ks 0 = -1 ∨ pelem ks 1 = -1 ∨ pelem ks 2 = -1 ∨ pelem ks 3 = -1
     ∨ pelem ks 4 = -1 ∨ pelem ks 5 = -1 ∨ pelem ks 6 = -1 ∨ pelem ks 7 = -1
 
 -- occto is monotone: filling a slot with a non-empty value keeps
 -- every occupied path occupied.
-theorem occto_upd (f : Nat) (i j s w : Int) (ks : List Int)
+public theorem occto_upd (f : Nat) (i j s w : Int) (ks : List Int)
     (hs0 : 0 <= s) (hs8 : s < 8) (hlen : plen ks = 8) (hw : w ≠ -1)
     (h : occto f i j ks) : occto f i j (pupd ks s w) := by
   induction f generalizing i with
@@ -311,7 +311,7 @@ theorem occto_upd (f : Nat) (i j s w : Int) (ks : List Int)
       grind
 
 -- the path the insert walked (home k .. landing) is all occupied.
-theorem occto_land (f : Nat) (i k : Int) (ks : List Int)
+public theorem occto_land (f : Nat) (i k : Int) (ks : List Int)
     (hk : k ≠ -1) (hl : lands f i k ks) :
     occto f i (Int.tmod (plnd f i k ks) 8) ks := by
   induction f generalizing i with
@@ -326,19 +326,19 @@ theorem occto_land (f : Nat) (i k : Int) (ks : List Int)
         grind
 
 -- two linear positions within one turn of the ring have distinct slots
-theorem slot_ne (a b : Int) (ha : 0 <= a) (h1 : a < b) (h2 : b < a + 8) :
+public theorem slot_ne (a b : Int) (ha : 0 <= a) (h1 : a < b) (h2 : b < a + 8) :
     Int.tmod b 8 ≠ Int.tmod a 8 := by
   rw [Int.tmod_eq_emod_of_nonneg (show (0 : Int) <= b by omega),
       Int.tmod_eq_emod_of_nonneg ha]
   omega
 
 -- reaching the start slot is free
-theorem occto_refl (g : Nat) (a : Int) (ks : List Int) :
+public theorem occto_refl (g : Nat) (a : Int) (ks : List Int) :
     occto g a (Int.tmod a 8) ks := by
   cases g <;> grind
 
 -- every strict intermediate on an occupied path is occupied
-theorem occto_seg_occupied (g : Nat) (a b m : Int) (ks : List Int)
+public theorem occto_seg_occupied (g : Nat) (a b m : Int) (ks : List Int)
     (ha : 0 <= a) (hab : a <= b) (hbw : b < a + 8) (hg : b < a + g)
     (hocc : occto g a (Int.tmod b 8) ks)
     (ham : a <= m) (hmb : m < b) : pelem ks (Int.tmod m 8) ≠ -1 := by
@@ -353,7 +353,7 @@ theorem occto_seg_occupied (g : Nat) (a b m : Int) (ks : List Int)
       grind
 
 -- extend an occupied path by one already-occupied slot
-theorem occto_extend (g : Nat) (a b : Int) (ks : List Int)
+public theorem occto_extend (g : Nat) (a b : Int) (ks : List Int)
     (ha : 0 <= a) (hab : a <= b) (hbw : b + 1 < a + 8) (hg : b + 1 < a + g)
     (hocc : occto g a (Int.tmod b 8) ks)
     (hbocc : pelem ks (Int.tmod b 8) ≠ -1) :
@@ -372,7 +372,7 @@ theorem occto_extend (g : Nat) (a b : Int) (ks : List Int)
 
 -- inserting k at slot s (whose landing path is occupied) preserves
 -- the per-slot invariant at every slot.
-theorem slotok_ins (j s k : Int) (ks : List Int)
+public theorem slotok_ins (j s k : Int) (ks : List Int)
     (hlen : plen ks = 8) (hs0 : 0 <= s) (hs8 : s < 8)
     (hj0 : 0 <= j) (hj8 : j < 8) (hk : 0 <= k)
     (hold : slotok j ks) (hocc : occto 8 (home k) s ks) :
@@ -389,7 +389,7 @@ theorem slotok_ins (j s k : Int) (ks : List Int)
     grind
 
 -- ===== the empty table (constant -1 keys array) =====
-theorem wf_empty (ks : List Int) (hlen : plen ks = 8) (hc : pconst ks (-1)) :
+public theorem wf_empty (ks : List Int) (hlen : plen ks = 8) (hc : pconst ks (-1)) :
     wf ks := by
   have e0 := pelem_pconst ks (-1) 0 hc (by omega) (by omega)
   have e1 := pelem_pconst ks (-1) 1 hc (by omega) (by omega)
@@ -403,7 +403,7 @@ theorem wf_empty (ks : List Int) (hlen : plen ks = 8) (hc : pconst ks (-1)) :
 
 -- probing 8 slots from any home covers the whole ring, so a free
 -- slot guarantees the probe lands.
-theorem hf_lands (k : Int) (ks : List Int) (hk : 0 <= k) (hlen : plen ks = 8)
+public theorem hf_lands (k : Int) (ks : List Int) (hk : 0 <= k) (hlen : plen ks = 8)
     (hf : hasfree ks) : lands 8 (home k) k ks := by
   obtain ⟨hr0, hr8⟩ := home_range k hk
   have hcases : home k = 0 ∨ home k = 1 ∨ home k = 2 ∨ home k = 3
@@ -411,7 +411,7 @@ theorem hf_lands (k : Int) (ks : List Int) (hk : 0 <= k) (hlen : plen ks = 8)
   rcases hcases with h | h | h | h | h | h | h | h <;> rw [h] <;> grind
 
 -- ===== T2 : the inserted key is found =====
-theorem T2 (k v : Int) (ks vs : List Int)
+public theorem T2 (k v : Int) (ks vs : List Int)
     (hwf : wf ks) (hlv : plen vs = 8) (hk : 0 <= k) (hfr : hasfree ks) :
     pfind k (pinsk k v ks) (pinsv k v ks vs) = .Found v := by
   have hlen : plen ks = 8 := by grind
@@ -421,7 +421,7 @@ theorem T2 (k v : Int) (ks vs : List Int)
   grind
 
 -- ===== T1 : insertion preserves the invariant =====
-theorem T1 (k v : Int) (ks : List Int) (hwf : wf ks) (hk : 0 <= k) :
+public theorem T1 (k v : Int) (ks : List Int) (hwf : wf ks) (hk : 0 <= k) :
     wf (pinsk k v ks) := by
   by_cases hl : lands 8 (home k) k ks
   · have hlen : plen ks = 8 := by grind
@@ -454,7 +454,7 @@ theorem T1 (k v : Int) (ks : List Int) (hwf : wf ks) (hk : 0 <= k) :
     grind
 
 -- length is preserved (bundled in wf, restated for clients)
-theorem T1_len (k v : Int) (ks : List Int) (hlen : plen ks = 8) :
+public theorem T1_len (k v : Int) (ks : List Int) (hlen : plen ks = 8) :
     plen (pinsk k v ks) = 8 := by
   by_cases hl : lands 8 (home k) k ks
   · have hpe := pik_eq 8 (home k) k ks hl
@@ -464,7 +464,7 @@ theorem T1_len (k v : Int) (ks : List Int) (hlen : plen ks = 8) :
 
 -- values-array width is preserved too (rides every client signature,
 -- and lets a SECOND insert re-satisfy T2/T3's [plen vs = 8]).
-theorem T1v_len (k v : Int) (ks vs : List Int) (hlv : plen vs = 8) :
+public theorem T1v_len (k v : Int) (ks vs : List Int) (hlv : plen vs = 8) :
     plen (pinsv k v ks vs) = 8 := by
   by_cases hl : lands 8 (home k) k ks
   · have hpv := piv_eq 8 (home k) k v ks vs hl
@@ -473,7 +473,7 @@ theorem T1v_len (k v : Int) (ks vs : List Int) (hlv : plen vs = 8) :
     grind
 
 -- ===== T4 : lookup in the empty table misses =====
-theorem T4 (k : Int) (ks vs : List Int)
+public theorem T4 (k : Int) (ks vs : List Int)
     (hlen : plen ks = 8) (hc : pconst ks (-1)) (hk : 0 <= k) :
     pfind k ks vs = .Missing := by
   obtain ⟨hr0, hr8⟩ := home_range k hk
@@ -485,7 +485,7 @@ theorem T4 (k : Int) (ks vs : List Int)
 -- ===== T3 : every other key is unchanged =====
 -- pfa frames trivially: the one changed slot holds k, and both the
 -- old and new contents there differ from k', so the k'-scan skips it.
-theorem pfa_frame (f : Nat) (i s k k' v : Int) (ks vs : List Int)
+public theorem pfa_frame (f : Nat) (i s k k' v : Int) (ks vs : List Int)
     (hs0 : 0 <= s) (hs8 : s < 8) (hlen : plen ks = 8) (hlv : plen vs = 8)
     (hsk : pelem ks s ≠ k') (hkk' : k ≠ k') :
     pfa f i k' (pupd ks s k) (pupd vs s v) = pfa f i k' ks vs := by
@@ -499,7 +499,7 @@ theorem pfa_frame (f : Nat) (i s k k' v : Int) (ks vs : List Int)
 
 -- from a reachable empty slot, the all-scan finds no k' (any occupied
 -- slot ahead would have an occupied path through the empty slot).
-theorem pfa_miss (g : Nat) (a i k' : Int) (ks vs : List Int)
+public theorem pfa_miss (g : Nat) (a i k' : Int) (ks vs : List Int)
     (hk' : 0 <= k') (hwf : wf ks) (hi : home k' <= i)
     (hemp : pelem ks (Int.tmod i 8) = -1)
     (ha : i <= a) (haw : a + g <= home k' + 8) :
@@ -528,7 +528,7 @@ theorem pfa_miss (g : Nat) (a i k' : Int) (ks vs : List Int)
     · grind
 
 -- on a wf table, the early-stopping scan equals the all-scan.
-theorem pf_eq_pfa_gen (f : Nat) (i k' : Int) (ks vs : List Int)
+public theorem pf_eq_pfa_gen (f : Nat) (i k' : Int) (ks vs : List Int)
     (hk' : 0 <= k') (hwf : wf ks) (hi : home k' <= i)
     (hreach : occto 8 (home k') (Int.tmod i 8) ks)
     (hf : i + f <= home k' + 8) :
@@ -554,14 +554,14 @@ theorem pf_eq_pfa_gen (f : Nat) (i k' : Int) (ks vs : List Int)
         have hstep := ih (i + 1) (by omega) hreach' (by omega)
         grind
 
-theorem pf_eq_pfa (k' : Int) (ks vs : List Int)
+public theorem pf_eq_pfa (k' : Int) (ks vs : List Int)
     (hk' : 0 <= k') (hwf : wf ks) :
     pf 8 (home k') k' ks vs = pfa 8 (home k') k' ks vs := by
   have hr := home_range k' hk'
   exact pf_eq_pfa_gen 8 (home k') k' ks vs hk' hwf (by omega)
     (occto_refl 8 (home k') ks) (by omega)
 
-theorem T3 (k k' v : Int) (ks vs : List Int)
+public theorem T3 (k k' v : Int) (ks vs : List Int)
     (hwf : wf ks) (hk : 0 <= k) (hk' : 0 <= k') (hne : k' ≠ k) (hlv : plen vs = 8) :
     pfind k' (pinsk k v ks) (pinsv k v ks vs) = pfind k' ks vs := by
   by_cases hl : lands 8 (home k) k ks
@@ -591,16 +591,16 @@ theorem T3 (k k' v : Int) (ks vs : List Int)
 -- client that starts from a fresh (pconst) table can keep discharging
 -- T2 after several inserts without ever evaluating [pelem] on an
 -- opaque post-insert list. =====
-@[grind] def freecnt (ks : List Int) : Int :=
+@[grind, expose] public def freecnt (ks : List Int) : Int :=
   (if pelem ks 0 = -1 then 1 else 0) + (if pelem ks 1 = -1 then 1 else 0)
   + (if pelem ks 2 = -1 then 1 else 0) + (if pelem ks 3 = -1 then 1 else 0)
   + (if pelem ks 4 = -1 then 1 else 0) + (if pelem ks 5 = -1 then 1 else 0)
   + (if pelem ks 6 = -1 then 1 else 0) + (if pelem ks 7 = -1 then 1 else 0)
 
-theorem freecnt_hasfree (ks : List Int) (h : 0 < freecnt ks) : hasfree ks := by
+public theorem freecnt_hasfree (ks : List Int) (h : 0 < freecnt ks) : hasfree ks := by
   grind
 
-theorem freecnt_pconst (ks : List Int) (hc : pconst ks (-1)) (hlen : plen ks = 8) :
+public theorem freecnt_pconst (ks : List Int) (hc : pconst ks (-1)) (hlen : plen ks = 8) :
     freecnt ks = 8 := by
   have e0 := pelem_pconst ks (-1) 0 hc (by omega) (by omega)
   have e1 := pelem_pconst ks (-1) 1 hc (by omega) (by omega)
@@ -615,17 +615,17 @@ theorem freecnt_pconst (ks : List Int) (hc : pconst ks (-1)) (hlen : plen ks = 8
 -- a structural free-slot count: [freecnt] on a length-8 list equals
 -- [fcount], and the decrement bound is a cheap induction on [fcount]
 -- (the flat 8-way [freecnt] alone makes grind split 2^8 ways).
-@[grind] def fcount : List Int -> Int
+@[grind, expose] public def fcount : List Int -> Int
   | [] => 0
   | x :: t => (if x = -1 then 1 else 0) + fcount t
 
-theorem fcount_pupd_ge (ks : List Int) (s k : Int) (hk : k ≠ -1) (hs : 0 <= s) :
+public theorem fcount_pupd_ge (ks : List Int) (s k : Int) (hk : k ≠ -1) (hs : 0 <= s) :
     fcount ks - 1 <= fcount (pupd ks s k) := by
   induction ks generalizing s with
   | nil => grind
   | cons x t ih => have := ih (s - 1); grind
 
-theorem freecnt_eq_fcount (ks : List Int) (hlen : plen ks = 8) :
+public theorem freecnt_eq_fcount (ks : List Int) (hlen : plen ks = 8) :
     freecnt ks = fcount ks := by
   rcases ks with _ | ⟨a0, ks⟩; · simp [plen] at hlen
   rcases ks with _ | ⟨a1, ks⟩; · simp [plen] at hlen
@@ -642,7 +642,7 @@ theorem freecnt_eq_fcount (ks : List Int) (hlen : plen ks = 8) :
 
 -- an insert drops at most one free slot (it writes k >= 0 at one slot;
 -- a no-land insert leaves the list untouched).
-theorem freecnt_ins (k v : Int) (ks : List Int) (hk : 0 <= k) (hlen : plen ks = 8) :
+public theorem freecnt_ins (k v : Int) (ks : List Int) (hk : 0 <= k) (hlen : plen ks = 8) :
     freecnt ks - 1 <= freecnt (pinsk k v ks) := by
   by_cases hl : lands 8 (home k) k ks
   · have hr := home_range k hk
@@ -667,37 +667,37 @@ theorem freecnt_ins (k v : Int) (ks : List Int) (hk : 0 <= k) (hlen : plen ks = 
 -- SYMBOLIC per-arm goals an OCaml probe loop generates (each arm is a
 -- single [grind] step via the [pfI_unfold]/[pikI_unfold]/[pivI_unfold]
 -- patterns) =====
-theorem pfI_arm_empty (f i k : Int) (ks vs : List Int)
+public theorem pfI_arm_empty (f i k : Int) (ks vs : List Int)
     (h0 : 0 < f) (he : pelem ks (Int.tmod i 8) = -1) :
     pfI f i k ks vs = .Missing := by grind
 
-theorem pfI_arm_found (f i k : Int) (ks vs : List Int)
+public theorem pfI_arm_found (f i k : Int) (ks vs : List Int)
     (h0 : 0 < f) (hne : pelem ks (Int.tmod i 8) ≠ -1)
     (hk : pelem ks (Int.tmod i 8) = k) :
     pfI f i k ks vs = .Found (pelem vs (Int.tmod i 8)) := by grind
 
-theorem pfI_arm_step (f i k : Int) (ks vs : List Int)
+public theorem pfI_arm_step (f i k : Int) (ks vs : List Int)
     (h0 : 0 < f) (hne : pelem ks (Int.tmod i 8) ≠ -1)
     (hnk : pelem ks (Int.tmod i 8) ≠ k) :
     pfI f i k ks vs = pfI (f - 1) (i + 1) k ks vs := by grind
 
-theorem pfI_arm_done (f i k : Int) (ks vs : List Int) (h0 : f <= 0) :
+public theorem pfI_arm_done (f i k : Int) (ks vs : List Int) (h0 : f <= 0) :
     pfI f i k ks vs = .Missing := by grind
 
-theorem pikI_arm_land (f i k : Int) (ks : List Int)
+public theorem pikI_arm_land (f i k : Int) (ks : List Int)
     (h0 : 0 < f) (he : pelem ks (Int.tmod i 8) = -1) :
     pikI f i k ks = pupd ks (Int.tmod i 8) k := by grind
 
-theorem pikI_arm_step (f i k : Int) (ks : List Int)
+public theorem pikI_arm_step (f i k : Int) (ks : List Int)
     (h0 : 0 < f) (hne : pelem ks (Int.tmod i 8) ≠ -1)
     (hnk : pelem ks (Int.tmod i 8) ≠ k) :
     pikI f i k ks = pikI (f - 1) (i + 1) k ks := by grind
 
-theorem pivI_arm_land (f i k v : Int) (ks vs : List Int)
+public theorem pivI_arm_land (f i k v : Int) (ks vs : List Int)
     (h0 : 0 < f) (he : pelem ks (Int.tmod i 8) = -1) :
     pivI f i k v ks vs = pupd vs (Int.tmod i 8) v := by grind
 
-theorem pivI_arm_step (f i k v : Int) (ks vs : List Int)
+public theorem pivI_arm_step (f i k v : Int) (ks vs : List Int)
     (h0 : 0 < f) (hne : pelem ks (Int.tmod i 8) ≠ -1)
     (hnk : pelem ks (Int.tmod i 8) ≠ k) :
     pivI f i k v ks vs = pivI (f - 1) (i + 1) k v ks vs := by grind
@@ -719,7 +719,7 @@ grind_pattern freecnt_ins => freecnt (pinsk k v ks)
 -- is DERIVED at each level (freecnt_pconst = 8, dropped >= 1 per insert
 -- via freecnt_ins, still > 0), never assumed. Discharged by plain
 -- grind, exercising the whole pattern chain a client would hit. =====
-theorem client_chain_demo (k1 v1 k2 v2 : Int) (ks0 vs0 : List Int)
+public theorem client_chain_demo (k1 v1 k2 v2 : Int) (ks0 vs0 : List Int)
     (hc : pconst ks0 (-1)) (hlen : plen ks0 = 8) (hlv : plen vs0 = 8)
     (hk1 : 0 <= k1) (hk2 : 0 <= k2) :
     pfind k2 (pinsk k2 v2 (pinsk k1 v1 ks0))
@@ -730,7 +730,7 @@ theorem client_chain_demo (k1 v1 k2 v2 : Int) (ks0 vs0 : List Int)
 -- explicit hops (grind will not chain three instantiations at the
 -- nested terms on its own), then exported as one pattern so a client's
 -- two-insert miss VC closes in a single grind.
-theorem client_chain_miss (k1 v1 k2 v2 k3 : Int) (ks0 vs0 : List Int)
+public theorem client_chain_miss (k1 v1 k2 v2 k3 : Int) (ks0 vs0 : List Int)
     (hc : pconst ks0 (-1)) (hlen : plen ks0 = 8) (hlv : plen vs0 = 8)
     (hk1 : 0 <= k1) (hk2 : 0 <= k2) (hk3 : 0 <= k3)
     (hne1 : k3 ≠ k1) (hne2 : k3 ≠ k2) :
@@ -750,7 +750,7 @@ grind_pattern client_chain_miss =>
 
 -- acceptance: the client's actual miss VC (equality noise from pcts
 -- ghosts and tuple projections) closes by plain grind via the pattern.
-theorem demo_miss_vc (hit3 hit11 miss : Vox_Lphtbl_opt)
+public theorem demo_miss_vc (hit3 hit11 miss : Vox_Lphtbl_opt)
     (ks vs ks2 vs2 ks3 vs3 ks4 vs4 ks5 vs5 ks6 vs6 : List Int)
     (h0 : miss = pfind 4 ks2 vs2)
     (h1 : ks = ks2 ∧ wf ks) (h2 : vs = vs2 ∧ plen vs = 8)

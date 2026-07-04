@@ -35,11 +35,11 @@ type slice
 -- to [bpv].  All at Htbl's table datatype -- no parallel list
 -- theory, no conversion.  ([opaque] wants inhabitation, which an
 -- inductive does not carry automatically.)
-instance : Inhabited Vox_Htbl_table := ⟨.TNil⟩
-opaque bcts : VoxU -> Vox_Htbl_table
-opaque bnow : VoxU -> Vox_Htbl_table
-opaque bfin : VoxU -> Vox_Htbl_table
-opaque bpv : VoxU -> Vox_Htbl_table
+public instance : Inhabited Vox_Htbl_table := ⟨.TNil⟩
+public opaque bcts : VoxU -> Vox_Htbl_table
+public opaque bnow : VoxU -> Vox_Htbl_table
+public opaque bfin : VoxU -> Vox_Htbl_table
+public opaque bpv : VoxU -> Vox_Htbl_table
 |lean}]
 
 (* Allocate a mutable image of a model table: the ghost of the fresh

@@ -38,52 +38,52 @@ type 'a slice [@@vox.poly]
 -- denotes current/prophesied-final contents [pnow]/[pfin]; a
 -- prophecy denotes the sequence it resolves to [ppv].  All are
 -- lists at the value's own element sort.
-opaque pcts {a : Type} : Vox_Pslice_varr a -> List a
-opaque pnow {a : Type} : Vox_Pslice_slice a -> List a
-opaque pfin {a : Type} : Vox_Pslice_slice a -> List a
-opaque ppv {a : Type} : Vox_Pslice_proph a -> List a
+public opaque pcts {a : Type} : Vox_Pslice_varr a -> List a
+public opaque pnow {a : Type} : Vox_Pslice_slice a -> List a
+public opaque pfin {a : Type} : Vox_Pslice_slice a -> List a
+public opaque ppv {a : Type} : Vox_Pslice_proph a -> List a
 
 -- The generic list theory, structural like slice_lib's so every
 -- lemma is a uniform induction.
-@[grind] def plen {a : Type} : List a -> Int
+@[grind, expose] public def plen {a : Type} : List a -> Int
   | [] => 0
   | _ :: t => 1 + plen t
 
-@[grind] def pelem {a : Type} [Inhabited a] : List a -> Int -> a
+@[grind, expose] public def pelem {a : Type} [Inhabited a] : List a -> Int -> a
   | [], _ => default
   | x :: t, i => if i = 0 then x else pelem t (i - 1)
 
-@[grind] def pupd {a : Type} : List a -> Int -> a -> List a
+@[grind, expose] public def pupd {a : Type} : List a -> Int -> a -> List a
   | [], _, _ => []
   | x :: t, i, v => if i = 0 then v :: t else x :: pupd t (i - 1) v
 
 -- Every element is [x] (the ghost of a fresh constant array; kept
 -- structural so no well-founded recursion enters the theory).
-@[grind] def pconst {a : Type} : List a -> a -> Prop
+@[grind, expose] public def pconst {a : Type} : List a -> a -> Prop
   | [], _ => True
   | y :: t, x => y = x ∧ pconst t x
 
-theorem plen_nonneg {a : Type} (l : List a) : 0 <= plen l := by
+public theorem plen_nonneg {a : Type} (l : List a) : 0 <= plen l := by
   induction l <;> grind
 grind_pattern plen_nonneg => plen l
 
-theorem plen_pupd {a : Type} (l : List a) (i : Int) (v : a) :
+public theorem plen_pupd {a : Type} (l : List a) (i : Int) (v : a) :
     plen (pupd l i v) = plen l := by
   induction l generalizing i <;> grind
 grind_pattern plen_pupd => plen (pupd l i v)
 
-theorem pelem_pupd {a : Type} [Inhabited a] (l : List a) (i j : Int) (v : a)
+public theorem pelem_pupd {a : Type} [Inhabited a] (l : List a) (i j : Int) (v : a)
     (h1 : 0 <= i) (h2 : i < plen l) :
     pelem (pupd l i v) j = if j = i then v else pelem l j := by
   induction l generalizing i j <;> grind
 grind_pattern pelem_pupd => pelem (pupd l i v) j
 
-theorem pelem_pconst {a : Type} [Inhabited a] (l : List a) (x : a) (i : Int)
+public theorem pelem_pconst {a : Type} [Inhabited a] (l : List a) (x : a) (i : Int)
     (hc : pconst l x) (h1 : 0 <= i) (h2 : i < plen l) : pelem l i = x := by
   induction l generalizing i <;> grind
 grind_pattern pelem_pconst => pelem l i, pconst l x
 
-theorem pconst_pupd {a : Type} (l : List a) (i : Int) (x : a)
+public theorem pconst_pupd {a : Type} (l : List a) (i : Int) (x : a)
     (hc : pconst l x) : pconst (pupd l i x) x := by
   induction l generalizing i <;> grind
 grind_pattern pconst_pupd => pconst (pupd l i x) x
