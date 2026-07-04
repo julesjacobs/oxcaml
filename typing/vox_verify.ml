@@ -651,7 +651,18 @@ and dsort_of_type ?(visited = []) ?(params = []) env ty =
            register_poly_head p (List.length arg_sorts);
            S_poly (p, arg_sorts))
          else datatype_sort env p arg_sorts)
-    | Trefine (skel, _) -> dsort_of_type ~visited ~params env skel
+    | Trefine (skel, maps, _) ->
+      (* A binder of a via type is the BASE value (the runtime value IS
+         the base -- predicates are stored at the base sort, mentioning
+         the image via the map functions), so its solver sort is the
+         SKELETON's.  Register each map's target datatype anyway, so the
+         map functions' declarations (which mention it) type-check.
+         (An ABSTRACT via type reaches the solver as its image sort
+         through the kind, a separate path -- that is stage 3.) *)
+      List.iter
+        (fun (_, tsort) -> ignore (dsort_of_vox_sort env [] tsort : dsort))
+        maps;
+      dsort_of_type ~visited ~params env skel
     | Ttuple comps
       when List.length comps >= 2
            && List.for_all (fun (lbl, _) -> Option.is_none lbl) comps ->
@@ -715,8 +726,13 @@ let register_type_specs env ty =
     else begin
       let visited = ty :: visited in
       match get_desc ty with
-      | Trefine (skel, p) ->
+      | Trefine (skel, maps, p) ->
         ignore (dsort_of_type env skel : dsort);
+        (* register each via layer's target datatype, so its declaration
+           and the map functions that mention it reach the solver *)
+        List.iter
+          (fun (_, tsort) -> ignore (dsort_of_vox_sort env [] tsort : dsort))
+          maps;
         register_pred_paths env p;
         go skel visited
       | Tarrow (_, a, r, _) ->
@@ -742,7 +758,7 @@ let has_vox_attr name attrs =
 (* The refinement of a type, if any. *)
 let refinement_of_type env ty =
   match get_desc (Ctype.vox_expand_head env ty) with
-  | Trefine (_, p) -> Some p
+  | Trefine (_, _, p) -> Some p
   | _ -> None
 ;;
 
@@ -763,7 +779,7 @@ let invariant_preds env ty =
   in
   let rec go ty =
     match get_desc (Ctype.vox_expand_head env ty) with
-    | Trefine (skel, _) -> go skel
+    | Trefine (skel, _, _) -> go skel
     | Tconstr (p, _, _) ->
       (match Env.find_type p env with
        | exception Not_found -> []
@@ -784,7 +800,7 @@ let invariant_preds env ty =
 let param_refinement env ty =
   match get_desc (Ctype.vox_expand_head env ty) with
   | Tpoly (t, []) -> refinement_of_type env t
-  | Trefine (_, p) -> Some p
+  | Trefine (_, _, p) -> Some p
   | _ -> None
 ;;
 
@@ -1221,6 +1237,7 @@ let pred_in_scope ctx p = List.for_all (in_scope ctx) (Refinement.free_vars p)
 let rec dsort_equal a b =
   match a, b with
   | S_int, S_int | S_bool, S_bool | S_iarray, S_iarray -> true
+  | S_lean n1, S_lean n2 -> String.equal n1 n2
   | S_param i, S_param j -> Int.equal i j
   | S_data (p, xs), S_data (q, ys) ->
     Path.same p q
@@ -1232,7 +1249,7 @@ let rec dsort_equal a b =
     Path.same p q
     && List.compare_lengths xs ys = 0
     && List.for_all2 dsort_equal xs ys
-  | ( ( S_int | S_bool | S_iarray | S_param _ | S_data _ | S_tuple _
+  | ( ( S_int | S_bool | S_iarray | S_param _ | S_data _ | S_tuple _ | S_lean _
       | S_poly _ | S_other )
     , _ ) -> false
 ;;

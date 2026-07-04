@@ -1598,10 +1598,15 @@ let rec tree_of_modal_typexp mode modal ty =
       let tyl' = apply_subst s [ty] in
       Internal_names.add p';
       Otyp_constr (tree_of_path (Some Type) p', tree_of_typlist mode tyl')
-    | Trefine (ty, p) ->
-      (* vox: compact surface format [ty{ pred }]. *)
-      Otyp_refine
-        (tree_of_typexp mode Alloc.Const.legacy ty, Refinement.to_string p)
+    | Trefine (ty, maps, p) ->
+      (* vox: compact surface format [ty{ pred }], with [via f] per
+         abstraction-function layer. *)
+      let s =
+        List.fold_left
+          (fun acc (fn, _) -> acc ^ " via " ^ fn)
+          (Refinement.to_string p) maps
+      in
+      Otyp_refine (tree_of_typexp mode Alloc.Const.legacy ty, s)
   in
   Aliases.remove_delay px;
   alias_nongen_row mode px ty;

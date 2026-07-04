@@ -1204,7 +1204,7 @@ module Base_and_axes = struct
              normal fuel accounting instead of looping forever. *)
           let rec vox_strip ty =
             match get_desc ty with
-            | Trefine (skel, _) -> vox_strip skel
+            | Trefine (skel, _, _) -> vox_strip skel
             | _ -> ty
           in
           let ty = vox_strip ty in

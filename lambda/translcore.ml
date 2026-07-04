@@ -412,7 +412,7 @@ and vox_assume_check ~scopes layout e lam =
   in
   if not is_assume then lam else
   match get_desc e.exp_type with
-  | Trefine (_, pred) ->
+  | Trefine (_, _, pred) ->
       let loc = of_location ~scopes e.exp_loc in
       let v = Ident.create_local "*vox*" in
       let unreachable_case what =

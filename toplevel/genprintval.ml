@@ -490,7 +490,7 @@ module Make(O : OBJ)(EVP : EVALPATH with type valu = O.t) = struct
                 Oval_stuff "<box>"
               | ty -> tree_of_val depth obj ty
               end
-          | Trefine (ty, _) ->
+          | Trefine (ty, _, _) ->
               (* vox: refined values are their skeleton at runtime. *)
               tree_of_val depth obj ty
           | Tsubst _ | Tfield(_, _, _, _) | Tnil | Tlink _ | Tof_kind _ ->

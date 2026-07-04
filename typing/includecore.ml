@@ -1723,10 +1723,13 @@ let type_declarations_consistency env decl1 decl2 =
       | Tconstr (p, [], _) when Path.same p Predef.path_bool -> Some Vs_bool
       (* A refined manifest satisfies a [refines (int{ ... })] interface
          HONESTLY: its structural modeling carries the same invariant. *)
-      | Trefine (skel, pred) ->
+      | Trefine (skel, [], pred) ->
         (match sort_of_manifest skel with
          | Some s -> Some (Types.Vs_fact (s, pred))
          | None -> None)
+      | Trefine (_, maps, _) ->
+        (* a via manifest denotes at its last map's target sort *)
+        Some (snd (List.nth maps (List.length maps - 1)))
       | Tconstr (p, args, _) ->
         (match Env.find_type p env with
          | exception Not_found -> None

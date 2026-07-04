@@ -1279,12 +1279,99 @@ let elab_vox_invariant env (e : Parsetree.expression)
       p, !vox_invariant_mutables)
 ;;
 
+(* vox: the [@vox.via (fn : target)] attribute -- the surface spelling
+   of an abstraction-function layer on a refined type ([type set =
+   tree{ bst _ } [@vox.via (elems : iset)]]).  [fn] is the Lean map
+   function, [target] the OCaml type whose sort the layer maps INTO. *)
+let vox_via_attr (attrs : Parsetree.attributes) =
+  List.find_map
+    (fun (a : Parsetree.attribute) ->
+      if not (String.equal a.attr_name.txt "vox.via")
+      then None
+      else
+        match a.attr_payload with
+        | PStr
+            [ { pstr_desc =
+                  Pstr_eval
+                    ( { pexp_desc =
+                          Pexp_constraint
+                            ( { pexp_desc =
+                                  Pexp_ident { txt = Longident.Lident fn; _ }
+                              ; _ }
+                            , Some target
+                            , [] )
+                      ; _ }
+                    , _ )
+              ; _ } ] -> Some (a, fn, target)
+        | _ ->
+          Location.raise_errorf ~loc:a.attr_loc
+            "vox: vox.via takes a map and its target sort, e.g. \
+             [@vox.via (elems : iset)]")
+    attrs
+
+(* vox: the refinement sort of an OCaml type, for a via layer's target.
+   Mirrors typedecl's target elaboration for the shapes a target takes
+   in this (monomorphic) stage: int/bool, a head that declares its own
+   modeling (ghost sorts and [refines] kinds), a simple variant/record
+   (a datatype sort), or an unlabeled tuple; anything else degrades to
+   the uninterpreted sort (sound). *)
+let rec vox_target_sort env ty : Types.vox_sort =
+  match get_desc ty with
+  | Tconstr (p, [], _) when Path.same p Predef.path_int -> Types.Vs_int
+  | Tconstr (p, [], _) when Path.same p Predef.path_bool -> Types.Vs_bool
+  | Tconstr (p, args, _) ->
+    (match Env.find_type p env with
+     | exception Not_found -> Types.Vs_opaque
+     | decl ->
+       (match Jkind.get_vox_refines decl.type_jkind with
+        (* a head with its own modeling -- a ghost sort or a [refines]
+           kind.  Monomorphic here, so no [Vs_param] to instantiate. *)
+        | Types.Vr_sort s -> s
+        | Types.Vr_top ->
+          (match
+             Ctype.vox_simple_variant env p, Ctype.vox_simple_record env p
+           with
+           | Some _, _ | _, Some _ ->
+             Types.Vs_data (p, List.map (vox_target_sort env) args)
+           | None, None -> Types.Vs_opaque)))
+  | Ttuple comps
+    when List.length comps >= 2
+         && List.for_all (fun (l, _) -> Option.is_none l) comps ->
+    Types.Vs_tuple (List.map (fun (_, t) -> vox_target_sort env t) comps)
+  | _ -> Types.Vs_opaque
+
 let rec transl_type env ~policy ?(aliased=false) ~row_context mode styp =
   Builtin_attributes.warning_scope styp.ptyp_attributes
     (fun () -> transl_type_aux env ~policy ~aliased ~row_context mode styp)
 
 and transl_type_aux env ~row_context ~aliased ~policy mode styp =
   let loc = styp.ptyp_loc in
+  match vox_via_attr styp.ptyp_attributes with
+  | Some (via_a, fn, target_styp) ->
+    (* Translate the inner type WITHOUT the via attribute, then append a
+       map layer.  A via over a refined type extends its map list (the
+       base predicate is unchanged -- an extra via layer with nothing
+       above it is free); a via over a bare type starts a map list with
+       a trivially-true base predicate. *)
+    let inner_styp =
+      { styp with
+        ptyp_attributes =
+          List.filter (fun a -> not (a == via_a)) styp.ptyp_attributes }
+    in
+    let cty = transl_type env ~policy ~aliased ~row_context mode inner_styp in
+    let target_cty = transl_type env ~policy ~row_context mode target_styp in
+    let target_sort = vox_target_sort env target_cty.ctyp_type in
+    let ty =
+      match get_desc cty.ctyp_type with
+      | Trefine (skel, maps, pred) ->
+        newty (Trefine (skel, maps @ [ (fn, target_sort) ], pred))
+      | _ ->
+        newty
+          (Trefine
+             (cty.ctyp_type, [ (fn, target_sort) ], Refinement.Pbool true))
+    in
+    { cty with ctyp_type = ty }
+  | None ->
   let ctyp ctyp_desc ctyp_type =
     { ctyp_desc; ctyp_type; ctyp_env = env;
       ctyp_loc = loc; ctyp_attributes = styp.ptyp_attributes }
@@ -1766,10 +1853,25 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
         match Ctype.expand_head env skel with
         | expanded ->
             (match get_desc expanded with
-             | Trefine (sk0, q) ->
-                 newty (Trefine (sk0, Refinement.Pand (q, pred)))
-             | _ -> newty (Trefine (skel, pred)))
-        | exception _ -> newty (Trefine (skel, pred))
+             | Trefine (sk0, maps0, q) ->
+                 (* [set{ P }] over a via type: [P]'s bound value is at
+                    the composite image sort, so push it through the
+                    maps ([_ := g (f _)]) before conjoining at the base
+                    sort where predicates are stored. *)
+                 let pred =
+                   match maps0 with
+                   | [] -> pred
+                   | _ ->
+                     let composite =
+                       List.fold_left
+                         (fun acc (fn, _) -> Refinement.Pfun (fn, [ acc ]))
+                         Refinement.Pbound maps0
+                     in
+                     Refinement.subst_bound ~by:composite pred
+                 in
+                 newty (Trefine (sk0, maps0, Refinement.Pand (q, pred)))
+             | _ -> newty (Trefine (skel, [], pred)))
+        | exception _ -> newty (Trefine (skel, [], pred))
       in
       { cty with ctyp_type = refined }
   | Ptyp_extension ext ->

@@ -148,7 +148,7 @@ let rec immediate_subtypes : type_expr -> type_expr list = fun ty ->
          but "better safe than sorry" *)
       immediate_subtypes_object_row [] ty
   | Tquote ty | Tsplice ty | Tquote_eval ty | Tbox ty
-  | Trefine (ty, _) -> [ty]
+  | Trefine (ty, _, _) -> [ty]
   | Tlink _ | Tsubst _ -> assert false (* impossible due to Ctype.repr *)
   | Tvar _ | Tunivar _ -> []
   | Tof_kind _ -> []
@@ -469,7 +469,7 @@ let check_type
        under a separating type constructor. *)
     | (Tpoly(pty,_)       , m      ) ->
         check_type hyps pty m
-    | (Trefine(ty,_)      , m      ) ->
+    | (Trefine(ty,_,_)      , m      ) ->
         check_type hyps ty m
     | (Trepr(_pty,_)       , _m    ) ->
         assert false

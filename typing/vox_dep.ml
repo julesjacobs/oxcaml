@@ -21,12 +21,12 @@ let rec subst id ~by ty visited =
   else begin
     let visited = ty :: visited in
     match get_desc ty with
-    | Trefine (skel, p) ->
+    | Trefine (skel, maps, p) ->
       let p' = Refinement.subst_var id ~by p in
       let skel' = subst id ~by skel visited in
       if p' == p && skel' == skel
       then ty
-      else Btype.newty2 ~level:(get_level ty) (Trefine (skel', p'))
+      else Btype.newty2 ~level:(get_level ty) (Trefine (skel', maps, p'))
     | Tarrow (d, a, r, c) ->
       let a' = subst id ~by a visited in
       let r' = subst id ~by r visited in
@@ -112,7 +112,7 @@ let rec iter_preds ~bound ty visited f =
   else begin
     let visited = ty :: visited in
     match get_desc ty with
-    | Trefine (skel, p) ->
+    | Trefine (skel, _maps, p) ->
       f ~bound p;
       iter_preds ~bound skel visited f
     | Tarrow ((_, _, _, binder), a, r, _) ->

@@ -827,7 +827,7 @@ let rec typexp copy_scope s ty =
           let ret = typexp copy_scope s ret in
           let comm = copy_commu comm in
           Tarrow ((label, marg, mret, binder), arg, ret, comm)
-      | Trefine (t, p) ->
+      | Trefine (t, maps, p) ->
           (* vox: constructor applications in the predicate carry type
              paths, which must be remapped exactly as [Tconstr] paths
              are.  A path substituted away by a type function is left
@@ -844,8 +844,12 @@ let rec typexp copy_scope s ty =
                 Path.Papply (module_path s m, module_path s a)
             | Path.Pident _ | Path.Pextra_ty _ -> q
           in
+          let maps =
+            List.map (fun (fn, tsort) -> (fn, subst_vox_sort s tsort)) maps
+          in
           Trefine
             ( typexp copy_scope s t,
+              maps,
               Refinement.map_paths ~value:map_value_path map_path p )
       | _ -> copy_type_desc (typexp copy_scope s) desc
     in

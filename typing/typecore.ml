@@ -1644,7 +1644,7 @@ let add_pattern_variables ?check ?check_as ?(vox_unpack=false) env pv =
            | Val_mut _ -> pv_type
            | _ ->
              (match get_desc pv_type with
-              | Trefine (skel, _) -> skel
+              | Trefine (skel, _, _) -> skel
               | _ -> pv_type)
        in
        Env.add_value ?check ~mode:pv_mode pv_id
@@ -3310,7 +3310,7 @@ let rec type_pat
          | Ppat_record _ ->
            (let ty_exp = expand_head !!penv (instance expected_ty) in
             match get_desc ty_exp with
-            | Trefine (skel, _) -> Some (ty_exp, skel)
+            | Trefine (skel, _, _) -> Some (ty_exp, skel)
             | _ -> None)
          | _ -> None
        in
@@ -3999,7 +3999,7 @@ and type_pat_aux
           match sp_constrained.ppat_desc with
           | Ppat_var _ when vox_is_param_root ->
             (match get_desc (expand_head !!penv expected_ty') with
-             | Trefine (skel, _) -> skel
+             | Trefine (skel, _, _) -> skel
              | _ -> expected_ty')
           | _ -> expected_ty'
         in
@@ -4063,7 +4063,7 @@ and type_pat_aux
       end;
       let ty_exp = expand_head !!penv (instance expected_ty) in
       begin match get_desc ty_exp with
-      | Trefine (skel, _pred) ->
+      | Trefine (skel, _, _pred) ->
           let p = type_pat tps category inner (instance skel) sort in
           { p with
             pat_attributes =
@@ -5138,7 +5138,7 @@ let vox_is_cast_arg (sarg : Parsetree.expression) =
 
 let vox_strip_param_refinement env ty =
   match get_desc (expand_head env ty) with
-  | Trefine (skel, _) ->
+  | Trefine (skel, _, _) ->
       (* Flags the unit for the verification pass (see
          [Vox_dep.contract_use_seen]). *)
       Vox_dep.contract_use_seen := true;
@@ -5845,7 +5845,7 @@ let rec type_approx env sexp ty_expected =
      refined tuple). *)
   let ty_expected =
     match get_desc ty_expected with
-    | Trefine (skel, _) -> skel
+    | Trefine (skel, _, _) -> skel
     | _ -> ty_expected
   in
   let loc = sexp.pexp_loc in
@@ -7321,7 +7321,7 @@ and type_expect_
     | Trefine _ ->
       let ty_exp = expand_head env (instance ty_expected) in
       (match get_desc ty_exp with
-       | Trefine (skel, pred) ->
+       | Trefine (skel, _maps, pred) ->
          let intro exp =
            if List.exists vox_is_intro_attribute exp.exp_attributes
            then
@@ -7347,9 +7347,9 @@ and type_expect_
          else if is_vox_inferred_head sexp then begin
            let exp = type_exp env expected_mode sexp in
            match get_desc (expand_head env exp.exp_type) with
-           | Trefine (_, pred') when Refinement.equal pred pred' ->
+           | Trefine (_, _, pred') when Refinement.equal pred pred' ->
              Some (rue exp)
-           | Trefine (skel', _) ->
+           | Trefine (skel', _, _) ->
              (match sexp.pexp_desc with
               | Pexp_ident _ | Pexp_apply _ ->
                 (* Re-refinement: the obligation is discharged from
@@ -7442,7 +7442,7 @@ and type_expect_
          behavior). *)
       let use_ty =
         match desc.val_kind, get_desc desc.val_type with
-        | Val_reg _, Trefine (skel, _) -> skel
+        | Val_reg _, Trefine (skel, _, _) -> skel
         | _ -> desc.val_type
       in
       let exp = rue {
@@ -7791,7 +7791,7 @@ and type_expect_
          behavior. *)
       let ty_ret =
         match get_desc ty_ret with
-        | Trefine (skel', _) ->
+        | Trefine (skel', _, _) ->
           (match get_desc ty_expected with
            | Tvar _ | Tunivar _ | Tpoly _ | Trefine _ -> ty_ret
            | _ -> skel')
@@ -7878,7 +7878,7 @@ and type_expect_
         if has_unpack then arg.exp_type
         else
           match get_desc (expand_head env arg.exp_type) with
-          | Trefine (skel, _) -> skel
+          | Trefine (skel, _, _) -> skel
           | _ -> arg.exp_type
       in
       let val_cases, partial =
@@ -9126,7 +9126,7 @@ and type_expect_
           attr_loc = loc }
       in
       begin match get_desc ty_exp with
-      | Trefine (skel, _pred) ->
+      | Trefine (skel, _, _pred) ->
           (* vox: a checked CAST between refined types -- [refine_ x]
              where [x] is itself refined re-proves the expected
              refinement at [x]'s name (the subject's own refinement is
@@ -9158,7 +9158,7 @@ and type_expect_
                      (newvar (Jkind.Builtin.any ~why:Dummy_jkind)))
               in
               (match get_desc (expand_head env exp.exp_type) with
-               | Trefine (iskel, _) ->
+               | Trefine (iskel, _, _) ->
                    unify_exp_types loc env iskel (instance skel)
                | _ ->
                    unify_exp_types loc env exp.exp_type (instance skel));
@@ -9190,6 +9190,7 @@ and type_expect_
                 newty
                   (Trefine
                      (exp.exp_type,
+                      [],
                       Refinement.Pbinop (Refinement.Eq, Refinement.Pbound, p)))
               in
               rue
@@ -12177,7 +12178,7 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
              | lazy_vd ->
                let vd = Subst.Lazy.force_value_description lazy_vd in
                (match get_desc vd.val_type with
-                | Trefine (skel, _) ->
+                | Trefine (skel, _, _) ->
                   Env.add_value ~mode:pv.pv_mode pv.pv_id
                     { vd with val_type = skel } acc_env
                 | _ -> acc_env)

@@ -1268,7 +1268,7 @@ let transl_declaration env sdecl (id, uid) =
           in
           let rec go ?(head = false) (ty : Types.type_expr) : Types.vox_sort =
             match get_desc ty with
-            | Trefine (skel, pred) when head ->
+            | Trefine (skel, _maps, pred) when head ->
               (* An INVARIANT at the head: [int{ _ >= 0 }] models at the
                  skeleton's sort but carries the closed predicate.
                  [free_vars] must be empty -- an invariant may name only

@@ -165,7 +165,7 @@ and type_desc =
   | Tpackage of package
   | Tof_kind of jkind_lr
   | Tbox of type_expr
-  | Trefine of type_expr * Refinement.pred
+  | Trefine of type_expr * (string * vox_sort) list * Refinement.pred
 
 and arg_label =
   | Nolabel
@@ -643,6 +643,37 @@ and type_transparence =
     Type_public      (* unrestricted expansion *)
   | Type_new         (* "new" type *)
   | Type_private     (* private type *)
+
+(* vox: structural equality on refinement sorts.  [Vs_param] is
+   positional; a [Path.t] in [Vs_data] compares by [Path.same] (stamps
+   make [(=)] wrong across rebuilds); an invariant predicate by
+   [Refinement.equal].  Shared by rigid unification of [Trefine] maps
+   and the verifier's coercion channels. *)
+let rec vox_sort_equal (s1 : vox_sort) (s2 : vox_sort) =
+  match s1, s2 with
+  | Vs_int, Vs_int | Vs_bool, Vs_bool | Vs_opaque, Vs_opaque -> true
+  | Vs_lean n1, Vs_lean n2 -> String.equal n1 n2
+  | Vs_param i, Vs_param j -> Int.equal i j
+  | Vs_tuple ss1, Vs_tuple ss2 ->
+    List.length ss1 = List.length ss2 && List.for_all2 vox_sort_equal ss1 ss2
+  | Vs_data (p1, ss1), Vs_data (p2, ss2) ->
+    Path.same p1 p2
+    && List.length ss1 = List.length ss2
+    && List.for_all2 vox_sort_equal ss1 ss2
+  | Vs_fact (s1, p1), Vs_fact (s2, p2) ->
+    vox_sort_equal s1 s2 && Refinement.equal p1 p2
+  | ( ( Vs_int | Vs_bool | Vs_tuple _ | Vs_data _ | Vs_param _ | Vs_opaque
+      | Vs_lean _ | Vs_fact _ )
+    , _ ) ->
+    false
+
+(* vox: equality on [Trefine] maps -- same length, and each layer's
+   Lean function name and target sort equal, in order. *)
+let vox_maps_equal m1 m2 =
+  List.length m1 = List.length m2
+  && List.for_all2
+       (fun (f1, s1) (f2, s2) -> String.equal f1 f2 && vox_sort_equal s1 s2)
+       m1 m2
 
 let tys_of_constr_args = function
   | Cstr_tuple tl -> List.map (fun ca -> ca.ca_type) tl

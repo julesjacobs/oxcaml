@@ -277,11 +277,17 @@ and type_desc =
   | Tbox of type_expr
   (** [Tbox ty] ==> [ty box] *)
 
-  | Trefine of type_expr * Refinement.pred
-  (** [Trefine (ty, p)] ==> a vox refined type over skeleton [ty].
-      Rigid: unifies only with a [Trefine] whose skeleton unifies and
-      whose predicate is structurally equal.  Erased to [ty] at
-      compilation; its jkind and layout are those of [ty]. *)
+  | Trefine of type_expr * (string * vox_sort) list * Refinement.pred
+  (** [Trefine (ty, maps, p)] ==> a vox refined type over skeleton [ty].
+      [maps] is a list of [(lean_fn, target_sort)] abstraction-function
+      layers ([[]] = an ordinary refinement, today's [Trefine]); the
+      DENOTATION is [maps] folded (left to right) over [deno(ty)], and
+      the predicate [p] is stored at the BASE sort (over [deno(ty)]),
+      mentioning the image explicitly where a layer predicate was pushed
+      down.  Rigid: unifies only with a [Trefine] whose skeleton
+      unifies, whose [maps] are equal (name + target sort), and whose
+      predicate is structurally equal.  Erased to [ty] at compilation;
+      its jkind and layout are those of [ty]. *)
 
 (** This is used in the Typedtree. It is distinct from
     {{!Asttypes.arg_label}[arg_label]} because Position argument labels are
@@ -1097,6 +1103,12 @@ and constructor_argument =
 and constructor_arguments =
   | Cstr_tuple of constructor_argument list
   | Cstr_record of label_declaration list
+
+(* vox: structural equality on refinement sorts and on [Trefine] maps
+   ([Vs_data] paths by [Path.same], invariants by [Refinement.equal]). *)
+val vox_sort_equal : vox_sort -> vox_sort -> bool
+val vox_maps_equal :
+  (string * vox_sort) list -> (string * vox_sort) list -> bool
 
 val tys_of_constr_args : constructor_arguments -> type_expr list
 

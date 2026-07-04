@@ -764,7 +764,7 @@ module Digraph = struct
         mk "[Kind]"
     | Types.Tbox t ->
         mk "[Box]" |> std_edge t
-    | Types.Trefine (t, _) ->
+    | Types.Trefine (t, _, _) ->
         mk "[Refine]" |> std_edge t
   and variant params id0 (elts,main,fields) (name,rf)  =
     let id = Index.subnode ~name id0 in
