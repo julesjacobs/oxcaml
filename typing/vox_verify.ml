@@ -1430,36 +1430,40 @@ let match_facts
   : type k. Env.t -> Refinement.pred -> k general_pattern -> Refinement.pred list
   =
   fun env subject pat ->
-  let arg_name (_, (p : value general_pattern)) =
+  (* Each constructor argument gets a NAME: the variable's own when
+     the pattern is one (an alias counts), a fresh synthetic
+     otherwise; the name denotes the matched component, so a deeper
+     pattern destructures it in turn. *)
+  let arg_parts (_, (p : value general_pattern)) =
     match p.pat_desc with
-    | Tpat_var { id; _ } -> Some (Refinement.Pvar id)
-    | Tpat_any ->
+    | Tpat_var { id; _ } -> Refinement.Pvar id, None
+    | Tpat_alias { pattern = sub; id; _ } -> Refinement.Pvar id, Some sub
+    | _ ->
       let id = Ident.create_local "*vox-wild*" in
       record_name env id p.pat_type;
       Hashtbl.replace synthetic_names id ();
-      Some (Refinement.Pvar id)
-    | _ -> None
+      ( Refinement.Pvar id
+      , match p.pat_desc with
+        | Tpat_any -> None
+        | _ -> Some p )
   in
   let rec constructor_facts subject cstr args =
     let path = Data_types.cstr_res_type_path cstr in
     match datatype_sort env path [] with
     | S_int | S_bool | S_param _ | S_tuple _ | S_iarray | S_other -> []
     | S_data (_, _) ->
-      let rec name_args acc = function
-        | [] -> Some (List.rev acc)
-        | a :: rest ->
-          (match arg_name a with
-           | Some n -> name_args (n :: acc) rest
-           | None -> None)
-      in
-      (match name_args [] args with
-       | Some names ->
-         [ Refinement.Pbinop
-             ( Refinement.Eq
-             , subject
-             , Refinement.Pconstr (path, cstr.Data_types.cstr_name, names) )
-         ]
-       | None -> [])
+      let parts = List.map arg_parts args in
+      Refinement.Pbinop
+        ( Refinement.Eq
+        , subject
+        , Refinement.Pconstr
+            (path, cstr.Data_types.cstr_name, List.map fst parts) )
+      :: List.concat_map
+           (fun (n, sub) ->
+             match sub with
+             | Some p -> value_facts n p
+             | None -> [])
+           parts
   and record_facts
         subject (fields : (_ * Data_types.label_description * _) list)
     =

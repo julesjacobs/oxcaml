@@ -222,3 +222,22 @@ Line 3, characters 2-3: vox VC:
   p = (1, 2)
 val use_if : (a : int) -> bool -> int{ _ = (a + 1) } = <fun>
 |}]
+
+(* Constructor ARGUMENTS destructure too: each argument gets a name
+   (its variable when the pattern is one, a fresh synthetic for a
+   deeper pattern), the constructor equation speaks over the names,
+   and the deeper pattern ties through its projections. *)
+type box = Box of (int * int) * int
+let use_box (v : box) (a : int) : int{ _ = a } =
+  match v with
+  | Box ((x, _) as p, k) -> ignore p; ignore k; x + a - x
+[%%expect{|
+type box = Box of (int * int) * int
+Line 4, characters 48-57: vox VC:
+  goal: ((x + a) - x) = a
+  hypotheses:
+  v = (Box (p, k))
+  x = (fst p)
+  p#2 = (1, 2)
+val use_box : box -> (a : int) -> int{ _ = a } = <fun>
+|}]
