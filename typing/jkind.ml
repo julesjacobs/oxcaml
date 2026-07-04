@@ -4328,31 +4328,7 @@ let () =
 (* vox: the refines component is declaration metadata (see
    [Types.vox_refines]); these are its only accessors -- the kind
    algebra never consults it. *)
-let get_vox_refines (t : (_ * _) jkind) =
-  match t.jkind.refines with
-  | (Vr_int | Vr_bool) as r -> r
-  | Vr_top ->
-    (* The desc is rebuilt along several typedecl paths that do not
-       thread the field; the WRITTEN annotation survives those
-       rebuilds, so fall back to reading [refines] from it. *)
-    let rec of_annot (a : Parsetree.jkind_annotation) =
-      match a.pjka_desc with
-      | Pjk_operator (base, axes) ->
-        let rec find = function
-          | { Location.txt = "refines"; _ }
-            :: { Location.txt = "int"; _ } :: _ -> Some Vr_int
-          | { Location.txt = "refines"; _ }
-            :: { Location.txt = "bool"; _ } :: _ -> Some Vr_bool
-          | _ :: rest -> find rest
-          | [] -> None
-        in
-        (match find axes with Some r -> Some r | None -> of_annot base)
-      | Pjk_mod (base, _) | Pjk_with (base, _, _) -> of_annot base
-      | _ -> None
-    in
-    (match Option.bind t.annotation of_annot with
-     | Some r -> r
-     | None -> Vr_top)
+let get_vox_refines (t : (_ * _) jkind) = t.jkind.refines
 
 let set_vox_refines refines (t : ('l * 'r) jkind) =
   { t with jkind = { t.jkind with refines } }

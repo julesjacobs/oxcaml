@@ -1281,24 +1281,15 @@ let transl_declaration env sdecl (id, uid) =
                 | _ -> None)
             sdecl.ptype_attributes
         in
-        let structural () =
-          (* No expansion: expanding a manifest through a local (GADT)
-             equation moves ambiguity errors (see [vox_subsume]).  A
-             direct predef manifest is the only structural source. *)
-          match man with
-          | None -> None
-          | Some ty ->
-            (match get_desc ty with
-             | Tconstr (p, [], _) when Path.same p Predef.path_int ->
-               Some Vr_int
-             | Tconstr (p, [], _) when Path.same p Predef.path_bool ->
-               Some Vr_bool
-             | _ -> None)
-        in
-        (match of_annot, of_attr, structural () with
-         | Some r, _, _ | None, Some r, _ | None, None, Some r ->
-           Jkind.set_vox_refines r jkind
-         | None, None, None -> jkind)
+
+        (* The field is the DECLARED modeling only (annotation or
+           attribute); structural satisfaction ([type t = int] under
+           [refines int]) is computed at the inclusion check, so a
+           plain manifest never CLAIMS a modeling ([= private int] in
+           an interface must not). *)
+        (match of_annot, of_attr with
+         | Some r, _ | None, Some r -> Jkind.set_vox_refines r jkind
+         | None, None -> jkind)
     in
     let arity = List.length params in
     let decl =
@@ -1809,6 +1800,13 @@ let narrow_to_manifest_jkind env loc path decl =
     end;
     let type_ikind =
       Ikind.type_declaration_ikind_gated ~env:(Some env) ~path
+    in
+    let manifest_jkind =
+      (* vox: rebuilds preserve the refines component (declaration
+         metadata; see Types.vox_refines). *)
+      match Jkind.get_vox_refines decl.type_jkind with
+      | Vr_top -> manifest_jkind
+      | (Vr_int | Vr_bool) as r -> Jkind.set_vox_refines r manifest_jkind
     in
     { decl with type_jkind = manifest_jkind; type_ikind }
 
@@ -2569,11 +2567,11 @@ let update_record_representation
    [update_decls_jkind], so that mutually recursive type decls see each others'
    best kinds during normalization and subsumption
 *)
-let rec update_decl_jkind env dpath decl =
+let rec update_decl_jkind0 env dpath decl =
   let type_unboxed_version =
     Option.map
       (fun d ->
-        update_decl_jkind env (Path.unboxed_version dpath) d)
+        update_decl_jkind0 env (Path.unboxed_version dpath) d)
       decl.type_unboxed_version
   in
   let decl = { decl with type_unboxed_version } in
@@ -2812,6 +2810,16 @@ let rec update_decl_jkind env dpath decl =
   | Ok () -> new_decl
   | Error err ->
     raise (Error (decl.type_loc, Jkind_mismatch_of_path (env, dpath, err)))
+
+(* vox: the jkind updates above rebuild the kind from the
+   representation; the refines component is declaration metadata and
+   survives them. *)
+let update_decl_jkind env dpath decl =
+  let decl' = update_decl_jkind0 env dpath decl in
+  match Jkind.get_vox_refines decl.type_jkind with
+  | Vr_top -> decl'
+  | (Vr_int | Vr_bool) as r ->
+    { decl' with type_jkind = Jkind.set_vox_refines r decl'.type_jkind }
 
 let update_decls_jkind_reason decls =
   List.map
@@ -3595,6 +3603,13 @@ let normalize_decl_jkinds env decls =
         ~context:normalization_context
         env
         decl.type_jkind
+    in
+    let normalized_jkind =
+      (* vox: normalization rebuilds the desc; refines is declaration
+         metadata and survives it. *)
+      match Jkind.get_vox_refines decl.type_jkind with
+      | Vr_top -> normalized_jkind
+      | (Vr_int | Vr_bool) as r -> Jkind.set_vox_refines r normalized_jkind
     in
     let decl =
       { decl with

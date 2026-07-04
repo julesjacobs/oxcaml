@@ -282,31 +282,7 @@ let with_additional_action =
              field), and the annotation is dropped on save.  Rematerialize
              it into the saved field so a client's .cmi view carries the
              declared modeling. *)
-          let vox_refines =
-            match jkind.jkind.refines with
-            | (Vr_int | Vr_bool) as r -> r
-            | Vr_top ->
-              let rec of_annot (a : Parsetree.jkind_annotation) =
-                match a.pjka_desc with
-                | Pjk_operator (base, axes) ->
-                  let rec find = function
-                    | { Location.txt = "refines"; _ }
-                      :: { Location.txt = "int"; _ } :: _ -> Some Vr_int
-                    | { Location.txt = "refines"; _ }
-                      :: { Location.txt = "bool"; _ } :: _ -> Some Vr_bool
-                    | _ :: rest -> find rest
-                    | [] -> None
-                  in
-                  (match find axes with
-                   | Some r -> Some r
-                   | None -> of_annot base)
-                | Pjk_mod (base, _) | Pjk_with (base, _, _) -> of_annot base
-                | _ -> None
-              in
-              (match Option.bind jkind.annotation of_annot with
-               | Some r -> r
-               | None -> Vr_top)
-          in
+          let vox_refines = jkind.jkind.refines in
           let set_refines (k : (l * r) jkind) =
             match vox_refines with
             | Vr_top -> k
