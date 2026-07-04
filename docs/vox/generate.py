@@ -35,7 +35,11 @@ def read(rel):
 # otherwise generation fails, so the page cannot silently lag the
 # suite.
 UNSHOWN = {
-    'demo/lean_verify.ml': 'first-contact basics; lean_overview is the page version',
+    'demo/lean_overview.ml':
+        'first-contact basics; the example walkthrough covers them',
+    'demo/lean_reflect.ml':
+        'reflection overview; the walkthrough shows the same len/append',
+    'demo/lean_verify.ml': 'first-contact basics; the walkthrough is the page version',
     'demo/lean_embed.ml': 'embedded blocks appear in the fib and flip cards',
     'demo/lean_embedclient.ml': 'client side of lean_embed',
     'demo/lean_sig.ml': 'specced .mli; the cross-module card uses reflectclient',
@@ -117,18 +121,15 @@ def main():
     out_path = os.path.join(here, 'index.html')
 
     fib = read('demo/lean_fib.ml')
-    reflect = read('demo/lean_reflect.ml')
 
     snippets = {
-        '@SIXTY@': slice_between(read('demo/lean_overview.ml'),
-                                 r'^let div', r'^let safe .* else 0'),
-        '@FIB_SRC@': strip_test_header(fib),
-        '@REFLECT@': slice_between(reflect, r'^let rec total_ len',
-                                   r'Cons \(_, t\) -> 1 \+ len t')
-                     + '\n\n'
-                     + slice_between(reflect,
-                                     r'\(\* The textbook inductive proof',
-                                     r'Cons \(h, r\)'),
+        '@FIB_IMPLS@': slice_between(fib, r'^let rec total_ fib',
+                                      r'^\[@@vox\.decreases n\]')
+                       + '\n\n'
+                       + slice_between(fib, r'^let fib_slow',
+                                       r'\| \(u, _\) -> u'),
+        '@FIB_LEMMAS@': slice_between(fib, r'^\[%%vox\.lean \{lean\|',
+                                      r'^\|lean\}\]'),
         '@ADT@': slice_between(read('demo/lean_adt.ml'), r'^let head',
                                r'Nil -> 0'),
         '@RECORDS@': slice_between(read('demo/lean_records.ml'), r'^let origin',
@@ -181,7 +182,7 @@ def main():
                                      r'^let reverse',
                                      r'^    @ unique =')
                      + '\n  fun l vs t -> ...',
-        '@QSORT@': slice_between(read('demo/lean_qsort.ml'),
+        '@HERO_QSORT@': slice_between(read('demo/lean_qsort.ml'),
                                  r'^let rec qsort', r'@ local unique =$')
                    + '\n  fun m -> ...   (* sequential: partition, recurse *)\n\n'
                    + slice_between(read('demo/lean_qsort.ml'),
@@ -227,22 +228,20 @@ def main():
 
     nth = read('demo/lean_nth.ml')
     nth_fail = read('mechanics/lean_nth_fail.ml')
-    snippets['@HERO_ILIST@'] = (
+    snippets['@EX_LEN@'] = (
         slice_between(nth, r'^type ilist', r'^  \| Cons of int \* ilist')
         + '\n\n'
         + slice_between(nth, r'^\(\* total_ reflects',
-                        r'Cons \(_, t\) -> 1 \+ len t')
-        + '\n\n'
-        + slice_between(nth, r'^\(\* Proved: each recursive call',
-                        r'Cons \(h, r\)')
-        + '\n\n'
-        + slice_between(nth, r'^\(\* The bounds are a contract',
-                        r'if i = 0 then h else nth t \(i - 1\)'))
+                        r'Cons \(_, t\) -> 1 \+ len t'))
+    snippets['@EX_APPEND@'] = slice_between(
+        nth, r'^\(\* Proved: each recursive call', r'Cons \(h, r\)')
+    snippets['@EX_NTH@'] = slice_between(
+        nth, r'^\(\* The bounds are a contract',
+        r'if i = 0 then h else nth t \(i - 1\)')
     snippets['@HERO_FAIL@'] = slice_between(
         nth_fail, r'^let rec nth', r'if i = 0 then h else nth t \(i - 1\)')
     snippets['@HERO_FAIL_OUT@'] = slice_between(
         nth_fail, r'^Line \d+, characters', r'^\(lean: ')
-    snippets['@HERO_QSORT@'] = snippets['@QSORT@']
 
     if args.ocamlc and args.lean:
         snippets['@GEN_LEAN@'] = capture_generated_lean(args.ocamlc, args.lean)
