@@ -1,0 +1,29 @@
+File "lean_lphtbl_fail.ml", line 26, characters 15-18:
+26 |     let ks2 = (ks1 : int varr{ pcts _ = pcts ks }) in
+                    ^^^
+Error: vox: verification failed (lean).
+       Goal: (pcts ks1) = (pcts ks)
+Hypotheses:
+  ks1 = (fst *unknown2*)
+  vs1 = (snd *unknown2*)
+  ((pcts ks1) = (pinsk 3 7 (pcts ks))) && (wf (pcts ks1))
+  ((pcts vs1) = (pinsv 3 7 (pcts ks) (pcts vs))) && ((plen (pcts vs1)) = 8)
+  ks = (fst *unknown1*)
+  vs = (snd *unknown1*)
+  (wf (pcts ks)) && (pconst (pcts ks) -1)
+  (plen (pcts vs)) = 8
+Possible counterexample:
+  plen (pcts vs1) = 8
+  plen (pcts vs) = 8
+  home 3 = 3
+  plen (pcts ks) = 8
+  plen (pcts ks1) = 8
+  plen (pinsk 3 7 (pcts ks)) = 8
+  plen (pinsv 3 7 (pcts ks) (pcts vs)) = 8
+  home (pelem (pcts ks) 0) = 7
+  home (pelem (pcts ks) 1) = 7
+  home (pelem (pcts ks) 2) = 7
+  home (pelem (pcts ks) 3) = 7
+  home (pelem (pcts ks) 4) = 7
+  ...
+(lean: error: `grind` failed)

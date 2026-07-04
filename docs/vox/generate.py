@@ -77,6 +77,8 @@ UNSHOWN = {
         'client of lib/mhtbl, the imperative hash table; page card pending',
     'demo/lean_pslice.ml':
         'client of lib/pslice, polymorphic slices at two element types; page card pending',
+    'demo/lean_lphtbl.ml':
+        'client of lib/lphtbl, the linear-probing hash table; page card pending',
 }
 
 
