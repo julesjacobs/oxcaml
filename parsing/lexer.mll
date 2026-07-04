@@ -68,7 +68,6 @@ let all_keywords =
     "exception", EXCEPTION, always;
     "exists_", EXISTS, oxcaml;
     "exclave_", EXCLAVE, oxcaml;
-    "unreachable_", UNREACHABLE, oxcaml;
     "external", EXTERNAL, always;
     "false", FALSE, always;
     "for", FOR, always;

@@ -9023,30 +9023,6 @@ and type_expect_
       | _ ->
           raise (Error (loc, env, Invalid_atomic_loc_payload))
       end
-  | Pexp_extension ({txt = "vox.unreachable"; _}, payload) ->
-      (* vox: [unreachable_] types at any expected type and compiles to
-         [assert false]; the VC pass emits [false] as its obligation,
-         so it is accepted exactly where the path facts are
-         contradictory -- a proved-unreachable branch.  The raise is
-         dead code by that proof. *)
-      begin match payload with
-      | PStr [] -> ()
-      | _ -> Location.raise_errorf ~loc "vox: unreachable_ takes no payload"
-      end;
-      let sfalse =
-        Ast_helper.Exp.construct ~loc
-          {txt = Longident.Lident "false"; loc} None
-      in
-      let exp =
-        type_expect env expected_mode
-          (Ast_helper.Exp.assert_ ~loc sfalse) ty_expected_explained
-      in
-      { exp with
-        exp_attributes =
-          { attr_name = {txt = "vox.unreachable"; loc};
-            attr_payload = PStr [];
-            attr_loc = loc }
-          :: exp.exp_attributes }
   | Pexp_extension
       ({txt = ("vox.refine" | "vox.assume" | "vox.assume_unchecked")
               as vox_kind; _}, payload) ->

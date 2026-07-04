@@ -4,23 +4,33 @@
  expect;
 *)
 
-(* [unreachable_] claims the current path is dead: its proof obligation is
-   [false] under the path facts.  Contradictory facts discharge it. *)
+(* [unreachable_] is a library function, not a primitive: its argument
+   type [unit{ false }] is uninhabited, so each call is the proof
+   obligation [false] under the path facts.  The diverging body needs
+   no trust keyword -- the recursive call's obligation is discharged
+   from the [false] hypothesis, sound under partial correctness. *)
+
+let rec unreachable_ (u : unit{ false }) : 'a = unreachable_ u
+[%%expect{|
+val unreachable_ : unit{ false } -> 'a = <fun>
+|}]
+
+(* Contradictory facts discharge the call. *)
 
 let dead (n : int{ _ >= 0 }) : int =
-  if n < 0 then unreachable_ else n
+  if n < 0 then unreachable_ () else n
 [%%expect{|
 val dead : int{ _ >= 0 } -> int = <fun>
 |}]
 
-(* A reachable [unreachable_] is a proof failure with a witness. *)
+(* A reachable call is a proof failure with a witness. *)
 
 let alive (n : int) : int =
-  if n < 0 then unreachable_ else n
+  if n < 0 then unreachable_ () else n
 [%%expect{|
-Line 2, characters 16-28:
-2 |   if n < 0 then unreachable_ else n
-                    ^^^^^^^^^^^^
+Line 2, characters 29-31:
+2 |   if n < 0 then unreachable_ () else n
+                                 ^^
 Error: vox: verification failed (lean).
        Goal: false
 Hypotheses:

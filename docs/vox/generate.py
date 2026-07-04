@@ -236,7 +236,7 @@ def main():
     snippets['@EX_APPEND@'] = slice_between(
         nth, r'^\(\* Proved: each recursive call', r'Cons \(h, r\)')
     snippets['@EX_NTH@'] = slice_between(
-        nth, r'^\(\* The bounds are a contract',
+        nth, r'^\(\* Not a primitive',
         r'if i = 0 then h else nth t \(i - 1\)')
     snippets['@HERO_FAIL@'] = slice_between(
         nth_fail, r'^let rec nth', r'if i = 0 then h else nth t \(i - 1\)')

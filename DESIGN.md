@@ -83,12 +83,16 @@
   skipped outright (reported as ASSUMED in diagnostics). No check is
   compiled; this is the trusted escape hatch for predicates `assume_`
   cannot check.
-- `unreachable_` is an expression of any expected type whose proof
-  obligation is `false` under the path facts: a match arm (or branch)
-  is accepted exactly when it is PROVED unreachable.  It compiles to
-  `assert false` -- dead code by that proof.  A reachable `unreachable_`
-  fails with a counterexample.  (See demo/lean_nth.ml: a safe `nth`
-  whose `Nil` arm is dead because `0 <= i < len l` contradicts
+- `unreachable_` is NOT a primitive; it is a library function:
+  `let rec unreachable_ (u : unit{ false }) : 'a = unreachable_ u`.
+  Calling it constructs `()` at the uninhabited type `unit{ false }`,
+  so the obligation at the call site is `false` under the path facts:
+  a match arm (or branch) is accepted exactly when it is PROVED
+  unreachable.  A reachable call fails with a counterexample.  The
+  diverging body needs no trust keyword: the recursive call's `false`
+  obligation is discharged from the `false` hypothesis, sound under
+  partial correctness.  (See demo/lean_nth.ml: a safe `nth` whose
+  `Nil` arm is dead because `0 <= i < len l` contradicts
   `len Nil = 0`.)
 - Elimination: the irrefutable pattern `refine_ x`, as in
   `let refine_ x = e`, binds `x` at the skeleton type. Free -- no proof

@@ -1029,7 +1029,6 @@ let maybe_pmod_constraint mode expr =
 %token EQUAL                  "="
 %token EXCEPTION              "exception"
 %token EXCLAVE                "exclave_"
-%token UNREACHABLE            "unreachable_"
 %token EXTERNAL               "external"
 %token FALSE                  "false"
 %token <string * char option> FLOAT       "42.0" (* just an example *)
@@ -1233,7 +1232,7 @@ The precedences must be listed from low to high.
           METAOCAML_BRACKET_OPEN METAOCAML_ESCAPE
           /* OxCaml additions: */
           HASH_CHAR HASH_FLOAT HASH_INT
-          LBRACKETCOLON LESSLBRACKET DOLLAR UNREACHABLE
+          LBRACKETCOLON LESSLBRACKET DOLLAR
           HASHLBRACE HASHLPAREN UNDERSCORE
           HASHFALSE HASHTRUE
 
@@ -3274,11 +3273,6 @@ block_access:
       { unclosed "<[" $loc($1) "]>" $loc($3) }
   | UNDERSCORE
       { Pexp_hole }
-  (* vox: [unreachable_] -- an expression of any type, accepted by the
-     verifier only where the path facts are contradictory. *)
-  | UNREACHABLE
-      { Pexp_extension
-          ({ txt = "vox.unreachable"; loc = make_loc $sloc }, PStr []) }
 ;
 labeled_simple_expr:
     simple_expr %prec below_HASH

@@ -182,10 +182,9 @@ let rec total_ len l =
 <p id="reflect">The <code>total_</code> keyword reflects
 <code>len</code> into the logic: the compiler emits it as a Lean
 <code>def</code>, Lean checks that it terminates, and refinements can
-then call it.  Only <code>total_</code> functions can be reflected: a
-partial function has no logical counterpart (from
-<code>f x = f x + 1</code> the logic would conclude
-<code>0 = 1</code>).</p>
+then call it (allowing arbitrary OCaml functions in specifications
+would be unsound: from <code>f x = f x + 1</code> the logic would
+conclude <code>0 = 1</code>).</p>
 <pre><code class="ml">(* Proved: each recursive call is the induction hypothesis. *)
 let rec append (a : ilist) (b : ilist) : ilist{ len _ = len a + len b } =
   match a with
@@ -199,7 +198,7 @@ code.  The expression between braces is a term of the logic,
 written in OCaml syntax.  It may mention the program variables in
 scope, including the function&rsquo;s own parameters;
 <code>_</code> denotes the value the refinement is attached to, in
-this case the result of <code>append</code>.  In the logic, a program
+this case the result of <code>append</code>.  In refinements, a program
 variable stands for the logical counterpart of its run-time value: an
 <code>int</code> corresponds to a mathematical integer, a variant such
 as <code>ilist</code> to the corresponding Lean inductive value, and
@@ -213,26 +212,36 @@ this is the induction hypothesis.  The compiler emits each obligation
 as a Lean theorem, and Lean&rsquo;s
 <a href="#automation"><code>grind</code></a> proves it automatically;
 the file contains no proof text.</p>
-<pre><code class="ml">(* The bounds are a contract, discharged at every call site. *)
+<pre><code class="ml">(* Not a primitive: the argument type is uninhabited, so each call
+   is a proof obligation [false] -- allowed exactly where the facts
+   are contradictory. *)
+let rec unreachable_ (u : unit{ false }) : 'a = unreachable_ u
+
+(* The bounds are a contract, discharged at every call site. *)
 let rec nth (l : ilist) (i : int{ 0 &lt;= _ &amp;&amp; _ &lt; len l }) : int =
   match l with
-  | Nil -&gt; unreachable_   (* must be proved: [false] from the facts here *)
+  | Nil -&gt; unreachable_ ()   (* dead code, and proved so *)
   | Cons (h, t) -&gt; if i = 0 then h else nth t (i - 1)</code></pre>
 <p>A refinement on a parameter is a precondition: every caller must
 prove it, and the body may assume it.  Within the body, branch
 conditions are also in scope, so the recursive call discharges its
 bounds from <code>i &lt;&gt; 0</code> and the <code>Cons</code> match.
-The <code>Nil</code> arm is dead code given the bounds;
-<code>unreachable_</code> makes this a proof obligation (the goal
-<code>false</code> under the arm&rsquo;s hypotheses) where
-<code>assert false</code> would defer it to run time.</p>
+The <code>Nil</code> arm is dead code given the bounds, and calling
+<code>unreachable_ : unit{ false } -&gt; 'a</code> there proves it:
+the argument <code>()</code> must be given the type
+<code>unit{ false }</code>, so the obligation is <code>false</code>
+under the arm&rsquo;s hypotheses, where <code>assert false</code>
+would defer the claim to run time.  The definition itself carries no
+trust: inside the body <code>false</code> is a hypothesis, so the
+recursive call is discharged, and divergence is sound under partial
+correctness.</p>
 <p>Proof obligations arise in one way only: by constructing a value of
 a refined type.  The body of <code>append</code> constructs its
 result, a caller of <code>nth</code> constructs the argument
-<code>i</code>, an explicit <code>refine_ e</code> claim constructs
-the value of <code>e</code> at a stated type, and
-<code>unreachable_</code> is the limiting case, a value of a type that
-nothing satisfies.</p>
+<code>i</code>, and <code>unreachable_ ()</code> constructs
+<code>()</code> at a type nothing satisfies; an explicit
+<code>refine_ e</code> claim states a refined type for <code>e</code>
+directly.</p>
 <p id="contracts"><b>Refinements generalize pre- and
 postconditions.</b>  A refinement can also appear under a type
 constructor: <code>int{ _ &gt;= 0 } list</code> states that every
@@ -246,11 +255,11 @@ nothing to prove (in effect, unary parametricity).</p>
 and verification fails with a counterexample:</p>
 <pre><code class="ml">let rec nth (l : ilist) (i : int{ 0 &lt;= _ &amp;&amp; _ &lt;= len l }) : int =
   match l with
-  | Nil -&gt; unreachable_
+  | Nil -&gt; unreachable_ ()
   | Cons (h, t) -&gt; if i = 0 then h else nth t (i - 1)</code></pre>
-<pre class="out"><code>Line 12, characters 11-23:
-12 |   | Nil -&gt; unreachable_
-                ^^^^^^^^^^^^
+<pre class="out"><code>Line 14, characters 24-26:
+14 |   | Nil -&gt; unreachable_ ()
+                             ^^
 Error: vox: verification failed (lean).
        Goal: false
 Hypotheses:

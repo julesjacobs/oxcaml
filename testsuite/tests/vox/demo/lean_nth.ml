@@ -14,9 +14,13 @@
    textbook inductive proof with no proof text; [nth] is SAFE -- no
    option, no default value, no exception: the bounds ride the second
    parameter as a contract, so the [Nil] arm is dead code, and
-   [unreachable_] turns that into a PROOF OBLIGATION ([false] under
-   the arm's path facts -- [len Nil = 0] contradicts [0 <= i < len l])
-   rather than a programmer promise. *)
+   calling [unreachable_] there turns that into a PROOF OBLIGATION
+   ([false] under the arm's path facts -- [len Nil = 0] contradicts
+   [0 <= i < len l]) rather than a programmer promise.  [unreachable_]
+   is not a primitive but an ordinary library function whose argument
+   type [unit{ false }] is uninhabited; its diverging body needs no
+   trust keyword (the recursive call's [false] obligation is
+   discharged from the [false] hypothesis). *)
 
 type ilist =
   | Nil
@@ -37,8 +41,13 @@ let rec append (a : ilist) (b : ilist) : ilist{ len _ = len a + len b } =
     let r = append t b in
     Cons (h, r)
 
+(* Not a primitive: the argument type is uninhabited, so each call
+   is a proof obligation [false] -- allowed exactly where the facts
+   are contradictory. *)
+let rec unreachable_ (u : unit{ false }) : 'a = unreachable_ u
+
 (* The bounds are a contract, discharged at every call site. *)
 let rec nth (l : ilist) (i : int{ 0 <= _ && _ < len l }) : int =
   match l with
-  | Nil -> unreachable_   (* must be proved: [false] from the facts here *)
+  | Nil -> unreachable_ ()   (* dead code, and proved so *)
   | Cons (h, t) -> if i = 0 then h else nth t (i - 1)
