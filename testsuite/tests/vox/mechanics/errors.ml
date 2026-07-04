@@ -303,7 +303,7 @@ let strings () =
 Line 3, characters 36-55:
 3 |   let t : string{ _ = s } = assume_ (String.make 1 'a') in
                                         ^^^^^^^^^^^^^^^^^^^
-Error: vox: assume_ compiles a runtime check of this refinement, but s is not an int or bool, so the runtime comparison would not agree with the logic's equality; use assume_unchecked_
+Error: vox: assume_ compiles a runtime check of this refinement, but the checked value has a sort the check cannot evaluate faithfully (only ints, bools, and datatypes built from them can be checked); use assume_unchecked_
 |}]
 
 let strings_unchecked () =

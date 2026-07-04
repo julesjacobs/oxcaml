@@ -464,7 +464,5 @@ let rec mentions_fun name p =
    for diagnostics.  Owned here so the two rejection messages
    (Vox_verify's gate and Translcore's backstop) cannot drift from the
    [pred] type or from each other; keep in sync with
-   [Vox_verify.pred_unreflectable]. *)
-let unreflectable_what =
-  "a constructor, tuple, projection, spec function, quantifier, or division"
-;;
+   [Vox_verify.runtime_check_gate]. *)
+let unreflectable_what = "a tuple, projection, record field, or quantifier"

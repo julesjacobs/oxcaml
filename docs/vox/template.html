@@ -647,7 +647,8 @@ checked at runtime, and what is assumed:</p>
   <td>Hand-written lemmas are Lean-checked on every compile; a false proof is a compile error.</td></tr>
 <tr><td><code>assume_ e</code></td><td><span class="w">Runtime-checked</span></td>
   <td>The compiler inserts the test; a violated assumption raises rather than entering the logic.
-      Compiled only when the check is faithful to the logic; otherwise a compile error.</td></tr>
+      Checks may call reflected functions and compare structural data; compiled
+      only when faithful to the logic, otherwise a compile error.</td></tr>
 <tr><td><code>axiom</code> in an <code>.mli</code> block</td><td><span class="g">Obligation</span></td>
   <td>The implementation must supply a proved theorem with the same name
       and statement for every interface law (the <a href="#seal">seal</a>);

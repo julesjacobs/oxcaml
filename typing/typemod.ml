@@ -4481,6 +4481,7 @@ let type_implementation target modulename initial_env ast =
     gen_annot target annots;
   in
   Cmt_format.clear ();
+  Vox_reflect.new_unit ();
   Misc.try_finally (fun () ->
       Typecore.reset_delayed_checks ();
       Typecore.reset_allocations ();

@@ -68,7 +68,7 @@ let unchecked (d : int) : int{ _ = 100 / d } = assume_ (100 / d)
 Line 1, characters 55-64:
 1 | let unchecked (d : int) : int{ _ = 100 / d } = assume_ (100 / d)
                                                            ^^^^^^^^^
-Error: vox: assume_ compiles a runtime check of this refinement, but it involves a constructor, tuple, projection, spec function, quantifier, or division, which the compiled check cannot evaluate faithfully; use assume_unchecked_
+Error: vox: assume_ compiles a runtime check of this refinement, but it divides, and the logic's division is total (tdiv x 0 = 0) where the program raises; use assume_unchecked_
 |}]
 
 (* Logarithmic recursion REFLECTS: the [@@vox.decreases n] metric's

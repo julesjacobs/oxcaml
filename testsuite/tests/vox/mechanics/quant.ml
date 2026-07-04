@@ -119,5 +119,5 @@ let checked : unit{ forall_ n. n = n } = assume_ ()
 Line 1, characters 49-51:
 1 | let checked : unit{ forall_ n. n = n } = assume_ ()
                                                      ^^
-Error: vox: assume_ compiles a runtime check of this refinement, but it involves a constructor, tuple, projection, spec function, quantifier, or division, which the compiled check cannot evaluate faithfully; use assume_unchecked_
+Error: vox: assume_ compiles a runtime check of this refinement, but it involves a tuple, projection, record field, or quantifier, which the compiled check cannot evaluate faithfully; use assume_unchecked_
 |}]

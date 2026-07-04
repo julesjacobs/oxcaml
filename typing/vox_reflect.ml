@@ -147,8 +147,41 @@ let declared_domain_is_unlabeled_pair env (desc : Types.value_description) =
    can never be confused with the current unit's identifiers. *)
 let reflected : (Ident.t, string * int) Hashtbl.t = Hashtbl.create 16
 
-let register_reflected id ~arity =
-  Hashtbl.replace reflected id (Ident.name id, arity)
+(* Runtime-check resolution (compiled [assume_] checks CALL reflected
+   functions): the reflected function a spec-function NAME denotes.
+   Resolution must be stamp-accurate -- looking the name up in the
+   check site's environment could be captured by a program-level
+   shadowing [let rev = ...], and a check calling the wrong function
+   could verify a falsehood.  The table maps each name to its LATEST
+   registration (in a verifying program a redefinition at the same
+   name would already fail solver-side as a duplicate definition,
+   so "latest" is the only candidate that can be live), together
+   with the binding's type (for the gate's sort discipline) and a
+   GENERATION stamp: the tables are process-global, so when one
+   process compiles several units, a name registered by an earlier
+   unit must not resolve in a later one (its identifier is not in
+   the later unit's lambda scope).  [new_unit] bumps the generation
+   at the start of each implementation; the toplevel never bumps, so
+   a session is one generation, matching how its logical context
+   accumulates across phrases. *)
+let generation = ref 0
+let new_unit () = incr generation
+
+let reflected_by_name : (string, int * Ident.t * Types.type_expr) Hashtbl.t =
+  Hashtbl.create 16
+;;
+
+let register_reflected id ~ty ~arity =
+  Hashtbl.replace reflected id (Ident.name id, arity);
+  Hashtbl.replace reflected_by_name (Ident.name id) (!generation, id, ty)
+;;
+
+(* [Some (id, ty)] when [name] denotes a current-unit reflected
+   function a compiled check may call. *)
+let reflected_for_check name =
+  match Hashtbl.find_opt reflected_by_name name with
+  | Some (gen, id, ty) when gen = !generation -> Some (id, ty)
+  | Some _ | None -> None
 ;;
 
 let find_attr name (attrs : Parsetree.attributes) =

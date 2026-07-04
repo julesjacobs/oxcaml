@@ -63,7 +63,7 @@ let k (v : int * int) = (assume_ v : (int * int){ _ = (1, 2) })
 Line 1, characters 33-34:
 1 | let k (v : int * int) = (assume_ v : (int * int){ _ = (1, 2) })
                                      ^
-Error: vox: assume_ compiles a runtime check of this refinement, but it involves a constructor, tuple, projection, spec function, quantifier, or division, which the compiled check cannot evaluate faithfully; use assume_unchecked_
+Error: vox: assume_ compiles a runtime check of this refinement, but v has a sort the check cannot evaluate faithfully (only ints, bools, and datatypes built from them can be checked); use assume_unchecked_
 |}]
 
 (* fst/snd are reserved in predicates: a misapplied one is an error,

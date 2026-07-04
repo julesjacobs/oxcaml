@@ -396,8 +396,13 @@ and transl_exp1 ~scopes ~in_new_scope layout e =
    the bound value, program variables (dependent-arrow binders have
    been opened to the enclosing parameters' stamps during type
    checking, and the VC pass rejects out-of-scope variables in
-   runtime-checked goals), and integer/boolean operations, all of which
-   compile directly. *)
+   runtime-checked goals), integer/boolean operations, constructor
+   terms of simple variants, and applications of this unit's reflected
+   [total_] functions (resolved by stamp through Vox_reflect, never by
+   name at the check site).  The admissible forms -- including the
+   sort discipline that keeps every equality structural-faithful --
+   are gated by [Vox_verify.runtime_check_gate]; the cases rejected
+   here are its mirror and should be unreachable. *)
 and vox_assume_check ~scopes layout e lam =
   let is_assume =
     List.exists
@@ -410,45 +415,108 @@ and vox_assume_check ~scopes layout e lam =
   | Trefine (_, pred) ->
       let loc = of_location ~scopes e.exp_loc in
       let v = Ident.create_local "*vox*" in
+      let unreachable_case what =
+        (* Rejected by the VC pass (Vox_verify.runtime_check_gate). *)
+        Location.raise_errorf ~loc:e.exp_loc
+          "vox: assume_ cannot compile a runtime check involving %s; \
+           use assume_unchecked_"
+          what
+      in
+      let caml_equal =
+        Lambda.simple_prim_on_values ~name:"caml_equal" ~arity:2 ~alloc:true
+      in
+      let caml_notequal =
+        Lambda.simple_prim_on_values ~name:"caml_notequal" ~arity:2
+          ~alloc:true
+      in
       let rec check (p : Refinement.pred) =
         match p with
         | Refinement.Pbound -> Lvar v
         | Refinement.Pvar id -> Lvar id
-        | Refinement.Pconstr _ | Refinement.Pfun _ | Refinement.Pfield _
-        | Refinement.Ptuple _ | Refinement.Pproj _
+        | Refinement.Pfield _ | Refinement.Ptuple _ | Refinement.Pproj _
         | Refinement.Pis _ | Refinement.Pquant _ | Refinement.Pglobal _ ->
-            (* Rejected by the VC pass (emit_vc, Runtime_check). *)
-            Location.raise_errorf ~loc:e.exp_loc
-              "vox: assume_ cannot compile a runtime check involving %s; \
-               use assume_unchecked_"
-              Refinement.unreflectable_what
+            unreachable_case Refinement.unreflectable_what
         | Refinement.Pint n -> Lconst (Const_base (Const_int n))
         | Refinement.Pbool b ->
             Lconst (Const_base (Const_int (if b then 1 else 0)))
-        | Refinement.Pbinop (op, a, b) ->
-            let intop op = Pscalar (Binary (Integral (int, op))) in
-            let icmp cmp = Pscalar (Binary (Icmp (int, cmp))) in
-            let prim =
-              match op with
-              | Refinement.Add -> intop Add
-              | Refinement.Sub -> intop Sub
-              | Refinement.Mul -> intop Mul
-              | Refinement.Div | Refinement.Mod ->
-                  (* Rejected by the VC pass (emit_vc, Runtime_check):
-                     the logic's T-division is total where the program
-                     raises. *)
-                  Location.raise_errorf ~loc:e.exp_loc
-                    "vox: assume_ cannot compile a runtime check involving \
-                     %s; use assume_unchecked_"
-                    Refinement.unreflectable_what
-              | Refinement.Eq -> icmp Ceq
-              | Refinement.Neq -> icmp Cne
-              | Refinement.Lt -> icmp Clt
-              | Refinement.Le -> icmp Cle
-              | Refinement.Gt -> icmp Cgt
-              | Refinement.Ge -> icmp Cge
+        | Refinement.Pconstr (path, cname, args) ->
+            (* A simple variant's constructor, at the representation the
+               gate admitted: Ordinary tag, Variant_boxed, no inline
+               record, all-value fields. *)
+            let cstrs =
+              match Env.find_type_descrs path e.exp_env with
+              | Type_variant (cstrs, _, _) -> cstrs
+              | _ -> unreachable_case ("the constructor " ^ cname)
+              | exception Not_found ->
+                  unreachable_case ("the constructor " ^ cname)
             in
-            Lprim (prim, [check a; check b], loc)
+            let cstr =
+              match
+                List.find_opt
+                  (fun (c : Data_types.constructor_description) ->
+                    String.equal c.cstr_name cname)
+                  cstrs
+              with
+              | Some c -> c
+              | None -> unreachable_case ("the constructor " ^ cname)
+            in
+            (match cstr.cstr_tag with
+             | Ordinary {runtime_tag; _} ->
+                 if cstr.cstr_arity = 0
+                 then tagged_immediate runtime_tag
+                 else
+                   Lprim
+                     ( Pmakeblock
+                         (runtime_tag, Immutable, All_value, alloc_heap)
+                     , List.map check args
+                     , loc )
+             | _ -> unreachable_case ("the constructor " ^ cname))
+        | Refinement.Pfun (f, args) ->
+            (* A reflected total_ function of this unit: the registry
+               ident is the module-level binding, in scope here. *)
+            (match Vox_reflect.reflected_for_check f with
+             | Some (id, _) ->
+                 Lapply
+                   { ap_loc = loc;
+                     ap_func = Lvar id;
+                     ap_args = List.map check args;
+                     ap_result_layout = Lambda.layout_any_value;
+                     ap_mode = alloc_heap;
+                     ap_region_close = Rc_normal;
+                     ap_probe = None;
+                     ap_tailcall = Default_tailcall;
+                     ap_inlined = Default_inlined;
+                     ap_specialised = Default_specialise }
+             | None -> unreachable_case ("the spec function " ^ f))
+        | Refinement.Pbinop (op, a, b) ->
+            let intop op =
+              Lprim (Pscalar (Binary (Integral (int, op))),
+                     [check a; check b], loc)
+            in
+            let icmp cmp =
+              Lprim (Pscalar (Binary (Icmp (int, cmp))),
+                     [check a; check b], loc)
+            in
+            (match op with
+             | Refinement.Eq ->
+                 (* Structural equality: the gate admits equality only
+                    at ints, bools, and hereditarily-structural
+                    datatypes, where [caml_equal] agrees with the
+                    logic's equality. *)
+                 Lprim (Pccall caml_equal, [check a; check b], loc)
+             | Refinement.Neq ->
+                 Lprim (Pccall caml_notequal, [check a; check b], loc)
+             | Refinement.Div | Refinement.Mod ->
+                 (* Rejected by the VC pass: the logic's T-division is
+                    total where the program raises. *)
+                 unreachable_case "division"
+             | Refinement.Add -> intop Add
+             | Refinement.Sub -> intop Sub
+             | Refinement.Mul -> intop Mul
+             | Refinement.Lt -> icmp Clt
+             | Refinement.Le -> icmp Cle
+             | Refinement.Gt -> icmp Cgt
+             | Refinement.Ge -> icmp Cge)
         | Refinement.Pand (a, b) -> Lprim (Psequand, [check a; check b], loc)
         | Refinement.Por (a, b) -> Lprim (Psequor, [check a; check b], loc)
         | Refinement.Pimp (a, b) ->

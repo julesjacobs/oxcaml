@@ -12166,7 +12166,7 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
                       | Tfunction_body _ -> 0)
                | _ -> 0
              in
-             Vox_reflect.register_reflected id ~arity
+             Vox_reflect.register_reflected id ~ty:vb.vb_expr.exp_type ~arity
          | _ -> ())
     l;
   (l, new_env)

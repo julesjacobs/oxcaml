@@ -73,12 +73,26 @@
   `Failure` is raised when it does not hold. Dependent-arrow binders in
   the predicate have been opened to the enclosing parameters' stamps by
   the time the check is compiled. The check is compiled only when it is
-  FAITHFUL to the logic: every value it reads must be int- or
-  bool-sorted (other sorts are uninterpreted, where the machine's
-  physical equality is stricter than logical equality, so a coherent
-  assumption could fail at run time). A predicate reading a
-  non-int/bool value, or mentioning a variable not in scope at the
-  node, is a compile-time error pointing at `assume_unchecked_`.
+  FAITHFUL to the logic, per the sort discipline of
+  `Vox_verify.runtime_check_gate`: arithmetic and order comparisons at
+  ints exactly; equality at ints, bools, and hereditarily-STRUCTURAL
+  datatypes (every component an int, a bool, or such a datatype --
+  there OCaml structural equality IS the logic's inductive equality;
+  an atom-sorted component rejects); constructor terms of monomorphic
+  simple variants; and applications of the CURRENT UNIT's reflected
+  `total_` functions -- the reflected definition is the runtime
+  function, so calling it is faithful (termination is Lean-checked; a
+  division inside raises where the logic totalizes, which aborts the
+  check rather than mis-answering it).  Spec-function resolution is by
+  STAMP through the reflection registry, and the check site's
+  environment must agree (a shadowed name is a compile error: the
+  toplevel's value store is name-keyed at the defining phrase, so a
+  compiled check could otherwise call the shadowing binding).  Still
+  rejected, with a compile-time error pointing at
+  `assume_unchecked_`: tuples, projections, record fields,
+  quantifiers, top-level division, prelude-only spec functions (no
+  runtime denotation), imported reflected functions, and variables of
+  any other sort.
 - `assume_unchecked_ e` is `refine_ e` with the proof obligation
   skipped outright (reported as ASSUMED in diagnostics). No check is
   compiled; this is the trusted escape hatch for predicates `assume_`

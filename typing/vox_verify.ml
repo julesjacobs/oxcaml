@@ -1078,25 +1078,316 @@ let in_scope ctx id =
 
 let pred_in_scope ctx p = List.for_all (in_scope ctx) (Refinement.free_vars p)
 
-(* Predicates the compiled runtime check cannot evaluate: constructor
-   terms and field projections (structural operations at datatype sorts
-   are future work), spec functions (solver-side only, no runtime
-   denotation), and division/modulo (the logic's T-division is total,
-   [tdiv x 0 = 0], where the program raises: a faithful check cannot
-   be compiled). *)
-let rec pred_unreflectable (p : Refinement.pred) =
-  match p with
-  | Refinement.Pconstr _ | Refinement.Pfun _ | Refinement.Pfield _
-  | Refinement.Ptuple _ | Refinement.Pproj _
-  | Refinement.Pis _ | Refinement.Pquant _ | Refinement.Pglobal _ -> true
-  | Refinement.Pbinop ((Refinement.Div | Refinement.Mod), _, _) -> true
-  | Refinement.Pbound | Refinement.Pvar _ | Refinement.Pint _
-  | Refinement.Pbool _ -> false
-  | Refinement.Pbinop (_, a, b)
-  | Refinement.Pand (a, b)
-  | Refinement.Por (a, b)
-  | Refinement.Pimp (a, b) -> pred_unreflectable a || pred_unreflectable b
-  | Refinement.Pnot a -> pred_unreflectable a
+(* Sort discipline for COMPILED runtime checks (assume_): the check
+   must return the logic's verdict, so each construct is admitted only
+   where the compiled operation provably agrees with the logical one:
+
+   - arithmetic and order comparisons at [S_int] exactly;
+   - equality at [S_int], [S_bool], and hereditarily-STRUCTURAL
+     datatypes -- every component an int, a bool, or such a datatype
+     -- where OCaml structural equality IS inductive equality.  An
+     atom-sorted component ([S_other]) would compare structurally at
+     run time but by atom identity in the logic, so it is rejected;
+   - constructor terms of monomorphic simple variants, built at run
+     time from the registered representation;
+   - applications of CURRENT-UNIT reflected [total_] functions,
+     resolved by stamp through [Vox_reflect] (resolving the source
+     name in the check site's environment could be captured by a
+     program-level shadowing [let rev = ...], and a check calling the
+     wrong function could admit a false fact).  The reflected
+     definition IS the runtime function, so calling it is faithful:
+     termination is Lean-checked, and a division inside raises where
+     the logic totalizes, which aborts the check rather than
+     mis-answering it.
+
+   Everything else stays rejected: tuples, projections, record
+   fields (future work), quantifiers (not decidable by evaluation),
+   top-level division (the logic's T-division is total, [tdiv x 0 =
+   0], where the program raises), prelude-only spec functions (no
+   runtime denotation), and imported reflected functions (the
+   predicate carries only the source name, not the module). *)
+
+let rec dsort_equal a b =
+  match a, b with
+  | S_int, S_int | S_bool, S_bool | S_iarray, S_iarray -> true
+  | S_param i, S_param j -> Int.equal i j
+  | S_data (p, xs), S_data (q, ys) ->
+    Path.same p q
+    && List.compare_lengths xs ys = 0
+    && List.for_all2 dsort_equal xs ys
+  | S_tuple xs, S_tuple ys ->
+    List.compare_lengths xs ys = 0 && List.for_all2 dsort_equal xs ys
+  | ( (S_int | S_bool | S_iarray | S_param _ | S_data _ | S_tuple _ | S_other)
+    , _ ) -> false
+;;
+
+let rec structural_datatype ~seen p =
+  List.exists (Path.same p) seen
+  || (match find_datatype p with
+      | Some (_, Dt_variant (0, cstrs)) ->
+        List.for_all
+          (fun (_, fields) ->
+            List.for_all (structural_sort ~seen:(p :: seen)) fields)
+          cstrs
+      | Some (_, Dt_record (0, fields)) ->
+        List.for_all
+          (fun (_, s) -> structural_sort ~seen:(p :: seen) s)
+          fields
+      | Some (_, (Dt_variant _ | Dt_record _)) | None -> false
+      | Some (_, Dt_opaque) ->
+        (* A sealed datatype hides its representation from the logic;
+           a runtime structural comparison would see through it. *)
+        false)
+
+and structural_sort ~seen (s : dsort) =
+  match s with
+  | S_int | S_bool -> true
+  | S_data (p, []) -> structural_datatype ~seen p
+  | S_data (_, _ :: _) | S_param _ | S_tuple _ | S_iarray | S_other -> false
+;;
+
+let equality_sort s =
+  match s with
+  | S_int | S_bool -> true
+  | S_data (p, []) -> structural_datatype ~seen:[] p
+  | S_data (_, _ :: _) | S_param _ | S_tuple _ | S_iarray | S_other -> false
+;;
+
+(* The gate: raises unless [goal] compiles to a faithful check.
+   Mirrored by the translation in Translcore.vox_assume_check, which
+   compiles exactly the admitted forms. *)
+let runtime_check_gate env ~loc goal =
+  let err msg =
+    Location.raise_errorf ~loc
+      "vox: assume_ compiles a runtime check of this refinement, but %s; \
+       use assume_unchecked_"
+      msg
+  in
+  let sort_name s =
+    match s with
+    | S_int -> "Int"
+    | S_bool -> "Bool"
+    | S_data (p, _) -> "the datatype " ^ Path.name p
+    | S_tuple _ -> "a tuple"
+    | S_iarray -> "an iarray"
+    | S_param _ | S_other -> "an opaque sort"
+  in
+  let rec term (p : Refinement.pred) : dsort =
+    match p with
+    | Refinement.Pint _ -> S_int
+    | Refinement.Pbool _ -> S_bool
+    | Refinement.Pbound ->
+      (* Substituted away before emission; defensive. *)
+      err "the checked value's sort is unknown"
+    | Refinement.Pvar id ->
+      (match Hashtbl.find_opt name_sorts id with
+       | Some ((S_int | S_bool) as s) -> s
+       | Some (S_data (q, []) as s) when structural_datatype ~seen:[] q -> s
+       | Some _ | None ->
+         err
+           (Printf.sprintf
+              "%s has a sort the check cannot evaluate faithfully (only \
+               ints, bools, and datatypes built from them can be checked)"
+              (if Hashtbl.mem synthetic_names id
+               then "the checked value"
+               else Ident.name id)))
+    | Refinement.Pconstr (path, cname, args) ->
+      (match datatype_sort env path [] with
+       | S_data (_, []) -> ()
+       | S_int | S_bool | S_data _ | S_param _ | S_tuple _ | S_iarray
+       | S_other ->
+         err
+           (Printf.sprintf
+              "the constructor %s's datatype cannot be built by the check"
+              cname));
+      (match find_datatype path with
+       | Some (_, Dt_variant (0, cstrs)) ->
+         (match List.assoc_opt cname cstrs with
+          | Some fields ->
+            if List.compare_lengths fields args <> 0
+            then
+              err
+                (Printf.sprintf
+                   "the constructor %s is applied at the wrong arity" cname);
+            List.iter2
+              (fun field arg ->
+                if not (dsort_equal field (term arg))
+                then
+                  err
+                    (Printf.sprintf
+                       "an argument of the constructor %s has the wrong sort"
+                       cname))
+              fields args
+          | None ->
+            err
+              (Printf.sprintf
+                 "the constructor %s is not part of its datatype's model"
+                 cname))
+       | Some _ | None ->
+         err
+           (Printf.sprintf
+              "the constructor %s's datatype cannot be built by the check"
+              cname));
+      (* The runtime representation the translation builds. *)
+      (match Env.find_type_descrs path env with
+       | Type_variant (cstrs, _, _) ->
+         (match
+            List.find_opt
+              (fun (c : Data_types.constructor_description) ->
+                String.equal c.cstr_name cname)
+              cstrs
+          with
+          | Some c ->
+            (match c.cstr_tag, c.cstr_repr, c.cstr_inlined with
+             | Ordinary _, Variant_boxed _, None -> ()
+             | _ ->
+               err
+                 (Printf.sprintf
+                    "the constructor %s's representation cannot be built by \
+                     the check"
+                    cname))
+          | None ->
+            err
+              (Printf.sprintf "the constructor %s is not in scope at the \
+                               check" cname))
+       | _ ->
+         err
+           (Printf.sprintf "the constructor %s is not in scope at the check"
+              cname)
+       | exception Not_found ->
+         err
+           (Printf.sprintf "the constructor %s is not in scope at the check"
+              cname));
+      S_data (path, [])
+    | Refinement.Pfun (f, args) ->
+      (match Vox_reflect.reflected_for_check f with
+       | None ->
+         err
+           (Printf.sprintf
+              "%s has no runtime definition this check could call (only \
+               this unit's total_ functions do)"
+              f)
+       | Some (id, ty) ->
+         (* The check site's environment must resolve [f] to the
+            registered reflected binding itself.  A program-level
+            shadowing would not fool the batch compiler (the stamped
+            ident is a real lambda binding), but the TOPLEVEL resolves
+            an out-of-phrase ident through a name-keyed value store at
+            the defining phrase's execution, where the latest binding
+            of that name wins -- a shadowed name there would hand the
+            check the wrong function. *)
+         (match
+            Env.lookup_value ~use:false ~loc (Longident.Lident f) env
+          with
+          | Path.Pident id', _, _ when Ident.same id id' -> ()
+          | _ ->
+            err
+              (Printf.sprintf
+                 "%s is shadowed by another binding at this point, so the \
+                  check could not call the reflected definition the \
+                  predicate denotes"
+                 f)
+          | exception _ ->
+            err
+              (Printf.sprintf
+                 "%s is not in scope at this point, so the check could not \
+                  call the reflected definition the predicate denotes"
+                 f));
+         let rec arrow_sorts ty acc =
+           match Types.get_desc (Ctype.vox_expand_head env ty) with
+           | Tarrow (_, dom, cod, _) ->
+             (* Arrow domains are [Tpoly]-wrapped. *)
+             let dom =
+               match Types.get_desc dom with
+               | Tpoly (t, []) -> t
+               | _ -> dom
+             in
+             arrow_sorts cod (dsort_of_type env dom :: acc)
+           | _ -> List.rev acc, dsort_of_type env ty
+         in
+         let params, result = arrow_sorts ty [] in
+         if List.compare_lengths params args <> 0
+         then err (Printf.sprintf "%s is not applied at its full arity" f);
+         List.iter2
+           (fun param arg ->
+             let s = term arg in
+             if not (dsort_equal param s)
+             then
+               err
+                 (Printf.sprintf
+                    "an argument of %s has sort %s where %s is expected" f
+                    (sort_name s) (sort_name param)))
+           params args;
+         (match result with
+          | S_int | S_bool -> ()
+          | S_data (q, []) when structural_datatype ~seen:[] q -> ()
+          | S_data _ | S_param _ | S_tuple _ | S_iarray | S_other ->
+            err
+              (Printf.sprintf "%s returns %s, which the check cannot handle"
+                 f (sort_name result)));
+         result)
+    | Refinement.Pbinop
+        ((Refinement.Add | Refinement.Sub | Refinement.Mul), a, b) ->
+      int_operand a;
+      int_operand b;
+      S_int
+    | Refinement.Pbinop ((Refinement.Div | Refinement.Mod), _, _) ->
+      err
+        "it divides, and the logic's division is total (tdiv x 0 = 0) where \
+         the program raises"
+    | Refinement.Pbinop
+        ( (Refinement.Lt | Refinement.Le | Refinement.Gt | Refinement.Ge)
+        , a, b ) ->
+      int_operand a;
+      int_operand b;
+      S_bool
+    | Refinement.Pbinop ((Refinement.Eq | Refinement.Neq), a, b) ->
+      let sa = term a in
+      let sb = term b in
+      if not (dsort_equal sa sb)
+      then
+        err
+          (Printf.sprintf "an equality compares %s against %s" (sort_name sa)
+             (sort_name sb));
+      if not (equality_sort sa)
+      then
+        err
+          (Printf.sprintf
+             "an equality at %s would compare structurally at run time but \
+              not in the logic"
+             (sort_name sa));
+      S_bool
+    | Refinement.Pand (a, b) | Refinement.Por (a, b)
+    | Refinement.Pimp (a, b) ->
+      bool_operand a;
+      bool_operand b;
+      S_bool
+    | Refinement.Pnot a ->
+      bool_operand a;
+      S_bool
+    | Refinement.Pglobal _ ->
+      err "it mentions a module-level value, which the check cannot read"
+    | Refinement.Pfield _ | Refinement.Ptuple _ | Refinement.Pproj _
+    | Refinement.Pis _ | Refinement.Pquant _ ->
+      err
+        (Printf.sprintf
+           "it involves %s, which the compiled check cannot evaluate \
+            faithfully"
+           Refinement.unreflectable_what)
+  and int_operand p =
+    match term p with
+    | S_int -> ()
+    | s ->
+      err
+        (Printf.sprintf "an arithmetic or order operand is %s, not Int"
+           (sort_name s))
+  and bool_operand p =
+    match term p with
+    | S_bool -> ()
+    | s ->
+      err (Printf.sprintf "a logical operand is %s, not Bool" (sort_name s))
+  in
+  bool_operand goal
 ;;
 
 let emit_vc ~env ~loc ~ctx ~goal ~kind =
@@ -1126,36 +1417,7 @@ let emit_vc ~env ~loc ~ctx ~goal ~kind =
          "vox: assume_ compiles a runtime check of this refinement, but it \
           mentions a variable that is not in scope here; use \
           assume_unchecked_";
-     if pred_unreflectable goal
-     then
-       Location.raise_errorf ~loc
-         "vox: assume_ compiles a runtime check of this refinement, but it \
-          involves %s, which the compiled check cannot evaluate \
-          faithfully; use assume_unchecked_"
-         Refinement.unreflectable_what;
-     (* The compiled check compares machine words, which agrees with the
-        logic only for int- and bool-sorted operands: other sorts are
-        uninterpreted, and physical equality is stricter than logical
-        equality (a coherent assumption could fail at run time). *)
-     let int_or_bool id =
-       match Hashtbl.find_opt name_sorts id with
-       | Some (S_int | S_bool) -> true
-       | Some (S_data _ | S_param _ | S_tuple _ | S_iarray | S_other) | None -> false
-     in
-     (match
-        List.find_opt
-          (fun id -> not (int_or_bool id))
-          (Refinement.free_vars goal)
-      with
-      | Some id ->
-        Location.raise_errorf ~loc
-          "vox: assume_ compiles a runtime check of this refinement, but %s \
-           is not an int or bool, so the runtime comparison would not agree \
-           with the logic's equality; use assume_unchecked_"
-          (if Hashtbl.mem synthetic_names id
-           then "the checked value"
-           else Ident.name id)
-      | None -> ())
+     runtime_check_gate env ~loc goal
    | Assume -> ());
   let facts = List.filter (pred_in_scope ctx) ctx.cfacts in
   (* Pull in the definitional equations reachable from the goal and

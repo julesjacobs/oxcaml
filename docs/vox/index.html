@@ -285,17 +285,14 @@ raises when it does not.  This is useful at a trust boundary &mdash;
 validate an input where it enters, and the fact is then available to
 proofs, so the code behind the boundary compiles without further
 checks:</p>
-<pre><code class="ml">(* Validated once, at the boundary: the check is compiled from the
-   type. *)
-let percent (n : int) : int{ 0 &lt;= _ &amp;&amp; _ &lt;= 100 } = assume_ n
-
-(* Past the boundary: proved, no check compiled. *)
-let complement (p : int{ 0 &lt;= _ &amp;&amp; _ &lt;= 100 }) : int{ 0 &lt;= _ &amp;&amp; _ &lt;= 100 } =
-  100 - p</code></pre>
+<pre><code class="ml">(* Inline, at the boundary: [nth]'s own contract compiles to the
+   check, [len] call included; past it, [nth] runs proved and
+   checkless. *)
+let nth_checked (l : ilist) (i : int) : int = nth l (assume_ i)</code></pre>
 <p>A violated assumption raises, with the predicate and the
 location:</p>
 <pre class="out"><code>Exception:
-Failure "vox: assume_ check failed at :1:60: (0 &lt;= _) &amp;&amp; (_ &lt;= 100)".</code></pre>
+Failure "vox: assume_ check failed at :1:61: (0 &lt;= _) &amp;&amp; (_ &lt; (len l))".</code></pre>
 <p>The same mechanism turns a property that is stated but not proved
 into an executable oracle.  Reflected functions are ordinary OCaml, so
 the specification can simply run, and each call checks the
@@ -305,10 +302,9 @@ property:</p>
   | Nil -&gt; Nil
   | Cons (h, t) -&gt; append (rev t) (Cons (h, Nil))
 
-(* Stated, not proved: the reflected functions run as ordinary code,
-   and every call checks the property. *)
-let rev_involutive (l : ilist) : bool{ _ = true } =
-  assume_ (rev (rev l) = l)</code></pre>
+(* Lemma-style: stated, not proved; the reflected functions run as
+   ordinary code, and every call checks the property. *)
+let rev_involutive (l : ilist) : unit{ rev (rev l) = l } = assume_ ()</code></pre>
 <p>Property-based testing, fuzzing, or AI-driven input search could
 generate inputs and use the contract as the oracle.</p>
 
@@ -1830,7 +1826,8 @@ checked at runtime, and what is assumed:</p>
   <td>Hand-written lemmas are Lean-checked on every compile; a false proof is a compile error.</td></tr>
 <tr><td><code>assume_ e</code></td><td><span class="w">Runtime-checked</span></td>
   <td>The compiler inserts the test; a violated assumption raises rather than entering the logic.
-      Compiled only when the check is faithful to the logic; otherwise a compile error.</td></tr>
+      Checks may call reflected functions and compare structural data; compiled
+      only when faithful to the logic, otherwise a compile error.</td></tr>
 <tr><td><code>axiom</code> in an <code>.mli</code> block</td><td><span class="g">Obligation</span></td>
   <td>The implementation must supply a proved theorem with the same name
       and statement for every interface law (the <a href="#seal">seal</a>);
