@@ -309,10 +309,7 @@ property:</p>
 let rev_involutive (l : ilist) : bool{ _ = true } =
   assume_ (rev (rev l) = l)</code></pre>
 <p>Property-based testing, fuzzing, or AI-driven input search could
-drive this directly: generate inputs and use the contract as the
-oracle.  None of that tooling exists in vox yet.  Some facts are also
-beyond sampling &mdash; that a tree stays ordered under <em>every</em>
-insertion &mdash; and there proof takes over.</p>
+generate inputs and use the contract as the oracle.</p>
 
 <h2 id="sig">Specs on module signatures</h2>
 <p>An <code>.mli</code> can carry a logical model of its module
