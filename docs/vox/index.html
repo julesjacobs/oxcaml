@@ -552,7 +552,9 @@ closed by <code>grind</code>.</p></div>
 <p>OxCaml&rsquo;s <code>@ unique</code> mode lets us reason about
 mutation within the pure refinement system, and <code>@ local</code>
 lets us model mutable borrows and slices and verify them with
-RustHorn-style prophecies.</p>
+RustHorn-style prophecies.  Today the borrows are library-encoded;
+OxCaml language support for borrows would make this much more
+ergonomic.</p>
 
 <h3 id="qsort">In-place parallel quicksort</h3>
 <p>We sort a slice into an array:</p>
