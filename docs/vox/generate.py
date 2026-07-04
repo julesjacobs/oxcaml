@@ -73,6 +73,7 @@ UNSHOWN = {
     'demo/lean_kernel.ml':
         'bounds-check elimination is noted on the quicksort card',
     'demo/lean_htbl.ml': 'verified hash table; page card pending',
+    'demo/lean_htbl_mut.ml': 'mutable hash table on bucket borrows; page card pending',
 }
 
 
