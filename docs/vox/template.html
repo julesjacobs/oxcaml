@@ -84,6 +84,7 @@ th{background:var(--panel);color:var(--fg)} td{color:var(--dim)} td:first-child{
 <nav><div class="in">
   <a href="#top" style="color:var(--fg);font-weight:bold;font-size:1.05rem">vox</a>
   <a href="#example">example</a>
+  <a href="#why-test">tests</a>
   <a href="#sig">signatures</a>
   <a href="#real">trie</a>
   <a href="#automation">automation</a>
@@ -226,7 +227,9 @@ and verification fails with a counterexample:</p>
 error, at the offending expression, with the goal, the hypotheses in
 scope, and a candidate counterexample, rewritten to source names.
 This is also the feedback an agent receives when it writes the code or
-the proof.</p>
+the proof.  When the automation misses a correct obligation, the agent
+proves the missing lemmas in Lean and registers them with
+<code>grind</code>, and the check goes through.</p>
 <p>A refinement can also appear under a type
 constructor: <code>int{ _ &gt;= 0 } list</code> states that every
 element is nonnegative.  Because the fact is part of the type, the
@@ -234,6 +237,28 @@ typechecker propagates it, and polymorphic functions preserve it by
 instantiation: <code>List.rev</code> at
 <code>'a = int{ _ &gt;= 0 }</code> returns nonnegative elements with
 nothing to prove (in effect, unary parametricity).</p>
+
+<h2 id="why-test">Specs as tests</h2>
+<p>A contract is written once; how it is enforced can vary.
+Everything above is enforced by proof.  The other mechanism is
+<code>assume_ e</code>, which compiles the refinement into a runtime
+check: the value flows through when the predicate holds, and the
+program raises when it does not.  Inline, that is validation at a
+trust boundary, done once; code past the boundary is proved against
+the fact and compiles no further checks:</p>
+<pre><code class="ml">@ASSUME_INLINE@</code></pre>
+<p>A violated assumption raises, with the predicate and the
+location:</p>
+<pre class="out"><code>@ASSUME_FAIL_OUT@</code></pre>
+<p>Lemma-style, a property that is stated but not proved becomes an
+executable oracle.  Reflected functions are ordinary OCaml, so the
+specification itself can run, and each call checks the property:</p>
+<pre><code class="ml">@ASSUME_LEMMA@</code></pre>
+<p>This shape is what property-based testing, fuzzing, or AI-driven
+input search would consume, unchanged: generate the inputs, and the
+contract is the oracle.  None of these exist in vox yet.  Inductive
+invariants (a tree staying ordered under every insertion) are the
+facts sampling cannot confirm; those are where proof takes over.</p>
 
 <h2 id="sig">Specs on module signatures</h2>
 <p>An <code>.mli</code> can state a model and prove its theorems once,
@@ -392,17 +417,6 @@ are a RustHorn-style borrow&rsquo;s current and final (prophesied)
 contents.  In <code>psort</code> the mode checker proves the two tasks
 own disjoint halves, so parallelizing changes nothing in the proof.</p>
 
-
-<h2 id="why-test">Specs as tests</h2>
-<p>A contract is written once, independent of how it is enforced.
-Today the mechanisms are proof and runtime checking
-(<code>assume_</code> compiles the predicate into a test); since
-reflected specifications are executable OCaml, the same contract can
-also serve as the oracle for property-based testing, fuzzing, or
-AI-driven input search.  None of these exist in vox yet; they would
-consume the specs unchanged.  Inductive invariants (a tree staying
-ordered under every insertion) are facts that sampling cannot
-confirm.</p>
 
 <h2 id="perf">Dropping runtime checks</h2>
 <p><code>get</code> reads with <code>Iarray.unsafe_get</code>, so there

@@ -48,6 +48,8 @@ UNSHOWN = {
     'demo/lean_borrow_elem.ml': 'slot borrows; the borrow and quicksort cards cover the idea',
     'demo/lean_flip_proph.ml': 'prophecy-flavored variant of the flip card',
     'demo/lean_qsort_run.ml': 'expect-block runner for the quicksort card',
+    'demo/lean_slice_sort.ml':
+        'proof-style merge sort; quicksort is the page\'s sorting development',
     'demo/lean_ptrie_packed.ml':
         'client of lib/ptrie_packed; the packed subsection slices the lib itself',
     'demo/lean_reverse.ml':
@@ -238,6 +240,17 @@ def main():
     snippets['@EX_NTH@'] = slice_between(
         nth, r'^let rec nth',
         r'if i = 0 then h else nth t \(i - 1\)')
+    assume = read('demo/lean_assume.ml')
+    snippets['@ASSUME_INLINE@'] = slice_between(
+        assume, r'^\(\* Validated once', r'^  100 - p')
+    snippets['@ASSUME_FAIL_OUT@'] = slice_between(
+        assume, r'^Exception:', r'^Failure "vox: assume_ check')
+    snippets['@ASSUME_LEMMA@'] = (
+        slice_between(assume, r'^let rec total_ rev',
+                      r'append \(rev t\) \(Cons \(h, Nil\)\)')
+        + '\n\n'
+        + slice_between(assume, r'^\(\* Stated, not proved',
+                        r'assume_ \(rev \(rev l\) = l\)'))
     snippets['@HERO_FAIL@'] = slice_between(
         nth_fail, r'^let rec nth', r'if i = 0 then h else nth t \(i - 1\)')
     snippets['@HERO_FAIL_OUT@'] = slice_between(
