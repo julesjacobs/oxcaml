@@ -244,37 +244,39 @@ instantiation: <code>List.rev</code> at
 nothing to prove (in effect, unary parametricity).</p>
 
 <h2 id="why-test">Specs as tests</h2>
-<p>A contract is written once; how it is enforced can vary.
-Everything above is enforced by proof.  The other mechanism is
-<code>assume_ e</code>, which compiles the refinement into a runtime
-check: the value flows through when the predicate holds, and the
-program raises when it does not.  Inline, that is validation at a
-trust boundary, done once; code past the boundary is proved against
-the fact and compiles no further checks:</p>
+<p>Proof is not the only way to enforce a contract.
+<code>assume_ e</code> compiles the refinement into a runtime check:
+the value flows through when the predicate holds, and the program
+raises when it does not.  This is useful at a trust boundary &mdash;
+validate an input where it enters, and the fact is then available to
+proofs, so the code behind the boundary compiles without further
+checks:</p>
 <pre><code class="ml">@ASSUME_INLINE@</code></pre>
 <p>A violated assumption raises, with the predicate and the
 location:</p>
 <pre class="out"><code>@ASSUME_FAIL_OUT@</code></pre>
-<p>Lemma-style, a property that is stated but not proved becomes an
-executable oracle.  Reflected functions are ordinary OCaml, so the
-specification itself can run, and each call checks the property:</p>
+<p>The same mechanism turns a property that is stated but not proved
+into an executable oracle.  Reflected functions are ordinary OCaml, so
+the specification can simply run, and each call checks the
+property:</p>
 <pre><code class="ml">@ASSUME_LEMMA@</code></pre>
-<p>This shape is what property-based testing, fuzzing, or AI-driven
-input search would consume, unchanged: generate the inputs, and the
-contract is the oracle.  None of these exist in vox yet.  Inductive
-invariants (a tree staying ordered under every insertion) are the
-facts sampling cannot confirm; those are where proof takes over.</p>
+<p>Property-based testing, fuzzing, or AI-driven input search could
+drive this directly: generate inputs and use the contract as the
+oracle.  None of that tooling exists in vox yet.  Some facts are also
+beyond sampling &mdash; that a tree stays ordered under <em>every</em>
+insertion &mdash; and there proof takes over.</p>
 
 <h2 id="sig">Specs on module signatures</h2>
-<p>An <code>.mli</code> can state a model and prove its theorems once,
-in an embedded Lean block; the block is compiled from the interface
-alone into a Lean module beside the <code>.cmi</code>
-(<code>VoxSig_&lt;Unit&gt;.olean</code>) that clients import, so
-clients verify against the interface without reading the
-implementation, and editing a spec changes the <code>.cmi</code>
-checksum, which forces clients to re-verify.  The BST below is built
-this way; <a href="#real">the trie
-that follows</a> applies the same shape to harder code.</p>
+<p>An <code>.mli</code> can carry a logical model of its module
+&mdash; definitions, lemmas, proofs &mdash; in an embedded Lean block.
+The block is compiled from the interface alone into a Lean module
+beside the <code>.cmi</code> (<code>VoxSig_&lt;Unit&gt;.olean</code>),
+and clients import that: they verify against the interface without
+reading the implementation, and the interface&rsquo;s own proofs are
+not re-checked per client.  Editing a spec changes the
+<code>.cmi</code> checksum, which forces clients to re-verify.  The
+BST below is built this way; <a href="#real">the trie that
+follows</a> applies the same approach to harder code.</p>
 
 <p><code>bst.mli</code> states the model (whole-tree membership, the
 ordering invariant, a model-level <code>insert</code>); the
@@ -301,29 +303,28 @@ the type instead: an alternative interface over the untouched module states
 everything <code>add</code> does in one refinement, and a client instantiates
 it at whatever key it asks about.</p></div>
 
-<p>The classic search-tree bug, descending the wrong side, misses the
-element the counterexample names; below,
+<p>The classic search-tree bug is to descend the wrong side and miss an
+element.  The counterexample names one &mdash; below,
 <code>x&nbsp;=&nbsp;-1</code> under a root of <code>0</code>:</p>
 <pre><code class="ml">@BST_FAIL@</code></pre>
 <pre class="out"><code>@BST_FAIL_OUT@</code></pre>
 
 <h3 id="seal">Sealed interfaces: one sig, two implementations</h3>
-<p>The interface can hide more than code.  <code>step.mli</code> exports an
-opaque model constant and a law about it &mdash; an <code>axiom</code>, on
-the client&rsquo;s side of the wall.  The block is compiled once, from the
-<code>.mli</code> alone, into a Lean <em>module</em>
-(<code>VoxSig_Step.olean</code>, next to the <code>.cmi</code>) that clients
-import: a client proof depends on the interface text and nothing else
-&mdash; it exists before any implementation does, and no <code>.ml</code>
-edit can perturb it.  For an implementation the same axiom is an
-<em>obligation</em>: its solver input ends in a seal that re-elaborates the
-interface and demands a same-named <em>proved</em> theorem for every law.
-Two different implementations pay the same text below; the client verifies
-unchanged against either.</p>
+<p>An interface can also hide the model itself.  <code>step.mli</code>
+declares <code>step</code> as an opaque constant and states one law
+about it, as an <code>axiom</code>.  Clients rely on the law without
+seeing a definition: their proofs depend on the interface text and
+nothing else, so they hold before any implementation is written and
+are unaffected by <code>.ml</code> edits.  The implementation does not
+get the axiom for free: its solver input ends with a <em>seal</em>
+that re-elaborates the interface and requires a proved theorem with
+the same name and statement for every <code>axiom</code>.  Below, two
+different implementations prove the same law, and one client verifies
+against either.</p>
 
 <div class="tabs" data-tabs>
-  <button class="on">step.mli &mdash; the law, an axiom to clients</button>
-  <button>step_incr &mdash; one payment</button>
+  <button class="on">step.mli &mdash; the law</button>
+  <button>step_incr &mdash; one implementation</button>
   <button>step_double &mdash; another</button>
   <button>a client, either way</button>
 </div>
@@ -336,27 +337,29 @@ and <code>demo/lean_seal_alt.ml</code> verify this same body against
 step_incr and step_double respectively; <code>step</code> is opaque, so no
 client fact can distinguish them.</p></div>
 
-<p>And the seal fails closed.  An implementation that satisfies its own
-definition honestly but cannot prove the interface&rsquo;s law is refused at
-compile time &mdash; an unpaid obligation never reaches a client:</p>
+<p>An implementation that cannot prove the law is rejected at compile
+time, even when it honestly satisfies its own definitions &mdash; so a
+client never links against a module that does not meet its
+interface:</p>
 <pre><code class="ml">@SEAL_BAD@</code></pre>
 <pre class="out"><code>@SEAL_FAIL_OUT@</code></pre>
 
 <h3 id="oset">Full abstraction: the type hidden too</h3>
-<p><code>[@@vox.sort opaque]</code> gives an abstract type its own
-uninterpreted sort instead of the shared <code>VoxU</code>, so the interface
-block can state laws about exactly that type; the implementation&rsquo;s
-concrete declaration registers under the same solver name, and the sealed
-laws land on it.  Below, a set whose representation &mdash; even that it is
-a tree &mdash; never leaves the unit.  Clients prove membership facts from
-the four axioms alone; what the <code>.mli</code> hides, no client proof can
-see (<code>mechanics/lean_oset_opaque.ml</code> checks that a claim the
-axioms do not decide is refused).</p>
+<p>The representation type can be hidden as well.  Marking an abstract
+type <code>[@@vox.sort opaque]</code> gives it its own sort in the
+logic, rather than the shared <code>VoxU</code>, so the interface can
+state laws about values of that type.  In the implementation the
+concrete declaration takes over the same solver-side name, and the
+sealed laws are proved about the real representation.  The set below
+is a binary search tree, but neither clients nor their proofs can
+tell: everything a client knows follows from the four axioms
+(<code>mechanics/lean_oset_opaque.ml</code> checks that a fact the
+axioms do not imply is rejected).</p>
 
 <div class="tabs" data-tabs>
   <button class="on">oset.mli &mdash; type and model both hidden</button>
-  <button>oset.ml &mdash; pays over the concrete tree</button>
-  <button>a client, from the axioms alone</button>
+  <button>oset.ml &mdash; the implementation</button>
+  <button>a client</button>
 </div>
 <div class="tabpane on"><pre style="max-height:34rem"><code class="ml">@OSET_MLI@</code></pre></div>
 <div class="tabpane"><pre style="max-height:34rem"><code class="ml">@OSET_ML@</code></pre></div>
@@ -408,19 +411,20 @@ big-endian like the compiler, with the prefix and the branching bit
 packed into one int per branch exactly as the compiler's
 <code>prefix_and_bit</code> packs them: <code>pack</code> is
 <code>lor</code>, and <code>unpack</code> recovers the bit with
-<code>x&nbsp;land&nbsp;(-x)</code>.  The invariant rides the packed int:
-for a well-formed node the bit is its lowest set bit and the prefix is
-the rest, as theorems (<code>lbit_pack</code>) rather than fields.  A
-hand-built node's packed int is therefore checked: mis-pack it and the
-invariant refuses, with the decode in the counterexample.</p>
+<code>x&nbsp;land&nbsp;(-x)</code>.  The invariant is stated about the
+packed int itself: in a well-formed node the bit is its lowest set bit
+and the prefix is the rest, as theorems (<code>lbit_pack</code>)
+rather than fields.  Building a node with a mis-packed int is a
+verification failure, with the decoded fields in the
+counterexample.</p>
 <pre><code class="ml">@PTRIE_PACKED@</code></pre>
 
 <h2 id="automation">Automation</h2>
 <p><code>grind</code> covers the same ground as an SMT solver
 (congruence closure, E-matching, linear arithmetic), so the common case
 feels like SMT-backed refinement types.  When it misses, the fix is a
-lemma stated next to the code and proved with tactics (work language
-models are now good at), then registered with the automation via
+lemma stated next to the code and proved with tactics (work that
+language models are now good at), then registered with the automation via
 <code>@[grind]</code>, so the push-button case gets stronger over time
 for that codebase.  Lean&rsquo;s lemma libraries (mathlib) live in the
 same logic; the developments on this page prove everything from core
@@ -462,12 +466,13 @@ table below) encodes the heap logic on top.  Rust&rsquo;s verifiers
 checker.</p>
 
 
-<p>The smallest case, a mutable borrow
-(<code>demo/lean_borrow.ml</code>): the loan&rsquo;s final value is a
-prophecy variable <code>p</code>, the borrower proves an export in
-lender terms, and after resolution the lender reads the residual back
-with proof.  Double use, forged exports, and writes through frozen
-loans are compile-time errors.</p>
+<p>The smallest case is a mutable borrow
+(<code>demo/lean_borrow.ml</code>).  The loan&rsquo;s final value is a
+prophecy variable <code>p</code>; the borrower proves a fact about it,
+stated in the lender&rsquo;s terms, and when the borrow ends the
+lender gets the value back together with that fact.  Double use,
+forged exports, and writes through frozen loans are compile-time
+errors.</p>
 <pre><code class="ml">@BORROW@</code></pre>
 <h3 id="qsort">In-place quicksort</h3>
 <pre><code class="ml">@HERO_QSORT@</code></pre>
@@ -479,10 +484,9 @@ confines it to its region, and <code>now m</code> / <code>fin m</code>
 are a RustHorn-style borrow&rsquo;s current and final (prophesied)
 contents.  In <code>psort</code> the mode checker proves the two tasks
 own disjoint halves, so parallelizing changes nothing in the proof.
-Merge sort gets the same treatment
+Merge sort is done the same way
 (<code>demo/lean_slice_sort.ml</code>), sequential and parallel under
-one spec, with the merge loop itself verified &mdash; nothing assumed
-anywhere.</p>
+the same spec, with the merge loop verified rather than assumed.</p>
 
 
 <h2 id="perf">Dropping runtime checks</h2>
@@ -605,16 +609,16 @@ caught with a concrete counterexample (<code>x&nbsp;=&nbsp;0</code>).</p>
 <div class="card"><h3>Mutable locals, loop invariants <span class="pill">demo/lean_mutable.ml</span></h3>
 <p>Reads of a <code>let mutable</code> variable name its current SSA
 version; every write mints a fresh one.  A <code>[@vox.invariant]</code>
-formula follows the classical quadruple &mdash; asserted at entry, assumed
+formula is handled classically &mdash; asserted at entry, assumed
 at the loop head, asserted again at the back-edge &mdash; and may mention a
-for-loop&rsquo;s index; after the loop it stands at one past the end.</p>
+for-loop&rsquo;s index; after the loop it holds at one past the end.</p>
 <pre><code class="ml">@MUTABLE@</code></pre></div>
 
 <div class="card"><h3>Binary search, imperative <span class="pill">demo/lean_imp_binsearch.ml</span></h3>
-<p>The recursive bracket invariant of <code>lower_bound</code>, worn as a
-loop annotation: two unrefined mutable indices, plain reads and writes, and
-the flip-point postcondition falls out of the invariant together with the
-negated guard.</p>
+<p>The bracket invariant from the recursive <code>lower_bound</code>,
+restated as a loop annotation: two unrefined mutable indices, plain reads
+and writes, and the flip-point postcondition follows from the invariant
+and the negated guard.</p>
 <pre><code class="ml">@IMP_BINSEARCH@</code></pre></div>
 
 <div class="card"><h3>Reflected arithmetic <span class="pill">Vox_reflect</span></h3>
@@ -645,9 +649,9 @@ checked at runtime, and what is assumed:</p>
   <td>The compiler inserts the test; a violated assumption raises rather than entering the logic.
       Compiled only when the check is faithful to the logic; otherwise a compile error.</td></tr>
 <tr><td><code>axiom</code> in an <code>.mli</code> block</td><td><span class="g">Obligation</span></td>
-  <td>Not trust: the implementation&rsquo;s compile ends in a
-      <a href="#seal">seal</a> demanding a same-named proved theorem for
-      every interface law; an unpaid law is a compile error.</td></tr>
+  <td>The implementation must supply a proved theorem with the same name
+      and statement for every interface law (the <a href="#seal">seal</a>);
+      a missing or wrong proof is a compile error.</td></tr>
 <tr><td><code>assume_unchecked_ e</code>, <code>axiom</code> in <code>.ml</code> blocks</td><td><span class="e">Trusted</span></td>
   <td>The primary trust surface.  In the Patricia trie it is three
       bit-twiddling one-liners.</td></tr>
