@@ -44,6 +44,8 @@ UNSHOWN = {
     'demo/lean_borrow_elem.ml': 'slot borrows; the borrow and quicksort cards cover the idea',
     'demo/lean_flip_proph.ml': 'prophecy-flavored variant of the flip card',
     'demo/lean_qsort_run.ml': 'expect-block runner for the quicksort card',
+    'demo/lean_ptrie_packed.ml':
+        'client of lib/ptrie_packed; the packed subsection slices the lib itself',
     'demo/lean_reverse.ml':
         'McCarthy-array methodology note; kernel and quicksort are the page\'s array cards',
 }
@@ -188,7 +190,7 @@ def main():
                                  r'^let rec qsort', r'@ local unique =$')
                    + '\n  fun m -> ...\n\n'
                    + slice_between(read('demo/lean_qsort.ml'),
-                                   r'Par_lib.fork_join2', r'ignore ur;'),
+                                   r'Par_lib.fork_join2', r'ignore uc;'),
         '@BST_MLI@': strip_leading_comment(read('lib/bst.mli')),
         '@BST_ML@': strip_leading_comment(read('lib/bst.ml')),
         '@BST_CLIENT@': slice_between(read('demo/lean_bst.ml'), r'^let demo',
@@ -208,6 +210,13 @@ def main():
         '@PTRIE_FAIL@': slice_between(read('mechanics/lean_ptrie_fail.ml'),
                                       r'^let rec ins_unguarded', r'^\[%%expect',
                                       include_stop=False).rstrip('\n'),
+        '@PTRIE_PACKED@':
+            slice_between(read('lib/ptrie_packed.ml'),
+                          r'^let unpack', r'\(x lxor bit, bit\)\)')
+            + '\n\n'
+            + slice_between(read('lib/ptrie_packed.ml'),
+                            r'^    \| Branch \(x, t0, t1\) ->',
+                            r'^      end$'),
         '@PTRIE_FAIL_OUT@': slice_between(
             slice_between(read('mechanics/lean_ptrie_fail.ml'),
                           r'^let rec ins_unguarded', r'^\(lean: '),

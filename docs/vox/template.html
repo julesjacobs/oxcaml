@@ -387,6 +387,18 @@ error with a witness:</p>
 <pre><code class="ml">@PTRIE_FAIL@</code></pre>
 <pre class="out"><code>@PTRIE_FAIL_OUT@</code></pre>
 
+<p>And the FULL-fidelity variant (<code>lib/ptrie_packed</code>): big-endian
+like the compiler, with the prefix and the branching bit packed into
+<b>one int per branch</b> exactly as the compiler's
+<code>prefix_and_bit</code> packs them — <code>pack</code> is
+<code>lor</code>, and <code>unpack</code> recovers the bit with
+<code>x&nbsp;land&nbsp;(-x)</code>.  The invariant rides the packed int:
+for a well-formed node the bit IS its lowest set bit and the prefix IS the
+rest — theorems (<code>lbit_pack</code>), not fields.  A hand-built node's
+packed int is therefore <i>checked</i>: mis-pack it and the invariant
+refuses with the decode in the counterexample.</p>
+<pre><code class="ml">@PTRIE_PACKED@</code></pre>
+
 <h2 id="trust">Trust model</h2>
 <table>
 <tr><th>Construct</th><th>Status</th><th>Notes</th></tr>

@@ -738,7 +738,7 @@ let rec part :
   (int * slice){ 0 &lt;= fst _ &amp;&amp; fst _ &lt; n
                  &amp;&amp; elem (now (snd _)) (fst _) = p
                  &amp;&amp; all_le (take (fst _) (now (snd _))) p
-                 &amp;&amp; all_ge (drop (fst _) (now (snd _))) p
+                 &amp;&amp; all_ge (drop (fst _ + 1) (now (snd _))) p
                  &amp;&amp; perm (now s) (now (snd _))
                  &amp;&amp; fin (snd _) = fin s }
     @ local unique =
@@ -764,13 +764,13 @@ let rec part :
        end)
 
 (* Sequential quicksort on a loan: read the pivot, partition, then
-   REBORROW -- the outer split at the pivot index, the inner split
-   isolating the pivot's singleton.  Each side is sorted recursively
-   and resolved; the singleton is resolved as-is; resolving the inner
-   bracket's advanced parent reveals [pv prest] as pivot-then-right.
-   Each bracket's export restates its prophecies' facts in the scope
-   OUTSIDE the bracket, and the parent loan comes back at
-   [app (pv pl) (pv prest)], where the glue lemmas finish. *)
+   REBORROW -- one three-way split at the pivot's singleton.  Both
+   sides are sorted recursively and resolved; the singleton is
+   resolved as-is, pinning its prophecy to the pivot by equality.
+   The bracket's export restates the prophecies' facts in the scope
+   OUTSIDE it, and the parent loan comes back at
+   [app (pv p1) (app (pv p2) (pv p3))], where the glue lemmas
+   finish. *)
 let rec qsort :
   (m : slice) @ local unique -&gt;
   slice{ perm (now m) (now _) &amp;&amp; sorted (now _) &amp;&amp; fin _ = fin m }
@@ -784,39 +784,31 @@ let rec qsort :
          let (p, mp) = sget m0 (n - 1) in
          let q = part p 0 0 mp n in
          let (k, m2) = q in
-         let pl = new_proph () in
-         let prest = new_proph () in
+         let p1 = new_proph () in
+         let p2 = new_proph () in
+         let p3 = new_proph () in
          let (mres, u) =
-           split pl prest m2 k (fun left rest -&gt;
-             let left' = qsort left in
-             let _u1 = sdrop left' in
-             let pm = new_proph () in
-             let pr = new_proph () in
-             let (rest_adv, u2) =
-               split pm pr rest 1 (fun mid right -&gt;
-                 let right' = qsort right in
-                 let _u2 = sdrop right' in
-                 let _u3 = sdrop mid in
-                 (() : unit{ pv pm = take 1 (now rest)
-                             &amp;&amp; sorted (pv pr)
-                             &amp;&amp; perm (drop 1 (now rest)) (pv pr) }))
-             in
-             ignore u2;
-             let _u4 = sdrop rest_adv in
-             (() : unit{ sorted (pv pl)
-                         &amp;&amp; perm (take k (now m2)) (pv pl)
-                         &amp;&amp; sorted (pv prest)
-                         &amp;&amp; perm (drop k (now m2)) (pv prest) }))
+           split3 p1 p2 p3 m2 k (k + 1) (fun a b c -&gt;
+             let a' = qsort a in
+             let _u1 = sdrop a' in
+             let _u2 = sdrop b in
+             let c' = qsort c in
+             let _u3 = sdrop c' in
+             (() : unit{ sorted (pv p1)
+                         &amp;&amp; perm (take k (now m2)) (pv p1)
+                         &amp;&amp; pv p2 = seg k (k + 1) (now m2)
+                         &amp;&amp; sorted (pv p3)
+                         &amp;&amp; perm (drop (k + 1) (now m2)) (pv p3) }))
          in
          ignore u;
          mres
        end)
 
-(* Parallel quicksort, same spec: inside the inner bracket both
-   sub-loans are live and disjoint, so each once-closure consumes one
-   and fork_join2 runs them on separate domains -- each task returns
-   its side's resolution facts (global refined units), which survive
-   the join; everything else is the sequential proof. *)
+(* Parallel quicksort, same spec: the bracket's two outer sub-loans
+   are disjoint, so each once-closure consumes one and fork_join2
+   runs them on separate domains -- each task returns its side's
+   resolution facts (global refined units), which survive the join;
+   everything else is the sequential proof. *)
 let rec psort :
   (m : slice) @ local unique -&gt;
   slice{ perm (now m) (now _) &amp;&amp; sorted (now _) &amp;&amp; fin _ = fin m }
@@ -830,29 +822,26 @@ let rec psort :
          let (p, mp) = sget m0 (n - 1) in
          let q = part p 0 0 mp n in
          let (k, m2) = q in
-         let pl = new_proph () in
-         let prest = new_proph () in
+         let p1 = new_proph () in
+         let p2 = new_proph () in
+         let p3 = new_proph () in
          let (mres, u) =
-           split pl prest m2 k (fun left rest -&gt;
-             let pm = new_proph () in
-             let pr = new_proph () in
-             let (rest_adv, u2) =
-               split pm pr rest 1 (fun mid right -&gt;
-                 let (ul, ur) =
-                   Par_lib.fork_join2
-                     (fun () -&gt;
-                       let left' = psort left in
-                       let _u = sdrop left' in
-                       (() : unit{ sorted (pv pl)
-                                   &amp;&amp; perm (take k (now m2)) (pv pl) }))
-                     (fun () -&gt;
-                       let right' = psort right in
-                       let _u = sdrop right' in
-                       (() : unit{ sorted (pv pr)
-                                   &amp;&amp; perm (drop 1 (now rest)) (pv pr) }))
-                 in
-                 ignore ul;
-                 ignore ur;</code></pre></div>
+           split3 p1 p2 p3 m2 k (k + 1) (fun a b c -&gt;
+             let (ua, uc) =
+               Par_lib.fork_join2
+                 (fun () -&gt;
+                   let a' = psort a in
+                   let _u = sdrop a' in
+                   (() : unit{ sorted (pv p1)
+                               &amp;&amp; perm (take k (now m2)) (pv p1) }))
+                 (fun () -&gt;
+                   let c' = psort c in
+                   let _u = sdrop c' in
+                   (() : unit{ sorted (pv p3)
+                               &amp;&amp; perm (drop (k + 1) (now m2)) (pv p3) }))
+             in
+             ignore ua;
+             ignore uc;</code></pre></div>
 
 <div class="card"><h3>Reflected arithmetic <span class="pill">Vox_reflect</span></h3>
 <p><code>+ - * / mod</code>, comparisons, and <code>&amp;&amp; || not</code>
@@ -1574,6 +1563,31 @@ Possible counterexample:
   mask i (bbit i p) = -1
   mask 1 1 = 0
 (lean: error: `grind` failed)</code></pre>
+
+<p>And the FULL-fidelity variant (<code>lib/ptrie_packed</code>): big-endian
+like the compiler, with the prefix and the branching bit packed into
+<b>one int per branch</b> exactly as the compiler's
+<code>prefix_and_bit</code> packs them — <code>pack</code> is
+<code>lor</code>, and <code>unpack</code> recovers the bit with
+<code>x&nbsp;land&nbsp;(-x)</code>.  The invariant rides the packed int:
+for a well-formed node the bit IS its lowest set bit and the prefix IS the
+rest — theorems (<code>lbit_pack</code>), not fields.  A hand-built node's
+packed int is therefore <i>checked</i>: mis-pack it and the invariant
+refuses with the decode in the counterexample.</p>
+<pre><code class="ml">let unpack :
+  (x : int{ 0 &lt; _ }) -&gt; (int * int){ fst _ = x - lbit x &amp;&amp; snd _ = lbit x } =
+  fun x -&gt;
+    assume_unchecked_ (let bit = x land (-x) in (x lxor bit, bit))
+
+    | Branch (x, t0, t1) -&gt;
+      let q = unpack x in
+      let (p, b) = q in
+      let m = mask i b in
+      if m &lt;&gt; p then false
+      else begin
+        let z = zero_bit i b in
+        if z then mem i t0 else mem i t1
+      end</code></pre>
 
 <h2 id="trust">Trust model</h2>
 <table>
