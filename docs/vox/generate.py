@@ -72,6 +72,7 @@ UNSHOWN = {
         'the smallest borrow; the quicksort card is the page\'s borrow demo',
     'demo/lean_kernel.ml':
         'bounds-check elimination is noted on the quicksort card',
+    'demo/lean_htbl.ml': 'verified hash table; page card pending',
 }
 
 
