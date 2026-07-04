@@ -181,9 +181,7 @@ the logic: the compiler emits it as a Lean <code>def</code>, Lean
 checks that it terminates, and refinements can call it from here on.
 Only <code>total_</code> functions can be reflected, because a partial
 function has no logical counterpart (from <code>f x = f x + 1</code>
-the logic would conclude <code>0 = 1</code>); division is totalized as
-<code>x / 0 = 0</code> in the logic where the program raises, which is
-sound under partial correctness.</p>
+the logic would conclude <code>0 = 1</code>).</p>
 <pre><code class="ml">(* Proved: each recursive call is the induction hypothesis. *)
 let rec append (a : ilist) (b : ilist) : ilist{ len _ = len a + len b } =
   match a with
@@ -191,8 +189,8 @@ let rec append (a : ilist) (b : ilist) : ilist{ len _ = len a + len b } =
   | Cons (h, t) -&gt;
     let r = append t b in
     Cons (h, r)</code></pre>
-<p id="sixty">What sits inside the braces is a term of the logic, not
-OCaml.  Each value has a logical counterpart (the mathematical integer
+<p id="sixty">Expressions inside refinements are terms in the logic,
+albeit in OCaml syntax.  Each value has a logical counterpart (the mathematical integer
 for an <code>int</code>, a Lean inductive value for a variant, an
 opaque atom for other types); a variable in a refinement denotes the
 counterpart of the variable in scope; and dependent arrows let a
