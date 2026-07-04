@@ -341,24 +341,15 @@ concrete type, which takes over the same solver-side name.</p>
 <h2 id="automation">Automation</h2>
 <p><code>grind</code> covers the same ground as an SMT solver
 (congruence closure, E-matching, linear arithmetic), so the common case
-feels like SMT-backed refinement types.  When it misses, the fix is a
-lemma stated next to the code and proved with tactics (work that
-language models are now good at), then registered with the automation via
-<code>@[grind]</code>, so the push-button case gets stronger over time
-for that codebase.  Lean&rsquo;s lemma libraries (mathlib) live in the
-same logic; the developments on this page prove everything from core
-Lean.  <code>grind</code> produces proof terms that Lean&rsquo;s kernel
-checks, so the automation itself is outside the trust surface.</p>
+feels like SMT-backed refinement types.  When automation fails, you can
+prove a Lean lemma with tactics and register it with
+<code>grind</code>, or use a lemma from a Lean library.</p>
 
 <h3 id="fib">Fast-doubling Fibonacci</h3>
-<p>Three implementations in one file: the naive recursion, reflected, is
-the specification; a tail-recursive loop carries its invariant in the
-parameter contracts; and <i>O</i>(log&nbsp;n) fast doubling is verified
-against the same <code>fib</code>.  The doubling identities are
-proved in the embedded block by functional induction on the reflected
-definition and keyed into the automation with
-<code>@[grind =]</code>.  There is no trust keyword in
-the file.</p>
+<p>We define three versions of Fibonacci: by naive exponential
+recursion, linear loop, and fast-doubling <i>O</i>(log&nbsp;n)
+iterations, and prove them equivalent.  SMT can&rsquo;t do this on its
+own, so we help it out with some lemmas:</p>
 <div class="tabs" data-tabs>
   <button class="on">the implementations</button>
   <button>the embedded lemmas</button>

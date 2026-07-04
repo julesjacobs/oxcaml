@@ -101,6 +101,13 @@ def strip_leading_comment(text):
     return re.sub(r'\A\(\*.*?\*\)\n\n', '', text, count=1, flags=re.S)
 
 
+def strip_ml_comments(text):
+    """Remove (non-nested) OCaml comments and the blank lines they
+    leave behind."""
+    text = re.sub(r'[ \t]*\(\*.*?\*\)\n?', '', text, flags=re.S)
+    return re.sub(r'\n{3,}', '\n\n', text).strip('\n')
+
+
 def capture_generated_lean(ocamlc, lean):
     with tempfile.TemporaryDirectory() as d:
         save = os.path.join(d, 'generated.lean')
@@ -139,11 +146,13 @@ def main():
     fib = read('demo/lean_fib.ml')
 
     snippets = {
-        '@FIB_IMPLS@': slice_between(fib, r'^let rec total_ fib',
-                                      r'^\[@@vox\.decreases n\]')
-                       + '\n\n'
-                       + slice_between(fib, r'^let fib_slow',
-                                       r'\| \(u, _\) -> u'),
+        '@FIB_IMPLS@': strip_ml_comments(
+            slice_between(fib, r'^let rec total_ fib',
+                          r'^\[@@vox\.decreases n\]')
+            + '\n\n'
+            + slice_between(fib, r'^let fib_slow',
+                            r'^      else \(y, x \+ y\)$')
+            + '\n  end'),
         '@FIB_LEMMAS@': slice_between(fib, r'^\[%%vox\.lean \{lean\|',
                                       r'^\|lean\}\]'),
         '@ADT@': slice_between(read('demo/lean_adt.ml'), r'^let head',

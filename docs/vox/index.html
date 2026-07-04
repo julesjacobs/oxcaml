@@ -385,24 +385,15 @@ concrete type, which takes over the same solver-side name.</p>
 <h2 id="automation">Automation</h2>
 <p><code>grind</code> covers the same ground as an SMT solver
 (congruence closure, E-matching, linear arithmetic), so the common case
-feels like SMT-backed refinement types.  When it misses, the fix is a
-lemma stated next to the code and proved with tactics (work that
-language models are now good at), then registered with the automation via
-<code>@[grind]</code>, so the push-button case gets stronger over time
-for that codebase.  Lean&rsquo;s lemma libraries (mathlib) live in the
-same logic; the developments on this page prove everything from core
-Lean.  <code>grind</code> produces proof terms that Lean&rsquo;s kernel
-checks, so the automation itself is outside the trust surface.</p>
+feels like SMT-backed refinement types.  When automation fails, you can
+prove a Lean lemma with tactics and register it with
+<code>grind</code>, or use a lemma from a Lean library.</p>
 
 <h3 id="fib">Fast-doubling Fibonacci</h3>
-<p>Three implementations in one file: the naive recursion, reflected, is
-the specification; a tail-recursive loop carries its invariant in the
-parameter contracts; and <i>O</i>(log&nbsp;n) fast doubling is verified
-against the same <code>fib</code>.  The doubling identities are
-proved in the embedded block by functional induction on the reflected
-definition and keyed into the automation with
-<code>@[grind =]</code>.  There is no trust keyword in
-the file.</p>
+<p>We define three versions of Fibonacci: by naive exponential
+recursion, linear loop, and fast-doubling <i>O</i>(log&nbsp;n)
+iterations, and prove them equivalent.  SMT can&rsquo;t do this on its
+own, so we help it out with some lemmas:</p>
 <div class="tabs" data-tabs>
   <button class="on">the implementations</button>
   <button>the embedded lemmas</button>
@@ -418,14 +409,6 @@ the file.</p>
 
 let fib_slow (n : int) : int{ _ = fib n } = fib n
 
-(* Tail-recursive accumulator loop, O(n) iterations: the parameters
-   carry the invariant (a, b) = (fib i, fib (i+1)) with i &gt;= 0 as
-   CONTRACTS -- the body assumes them, and each call site discharges
-   them at its own (bare) arguments, the shifted accumulators and the
-   literal seeds included.  (For n &lt; i the loop diverges; partial
-   correctness is unbothered.)  The recursive call is the bare tail:
-   its result refinement [_ = fib n] is the enclosing one, so it
-   passes through with no obligation at all. *)
 let rec fib_loop (n : int) (i : int) (a : int{ _ = fib i &amp;&amp; i &gt;= 0 })
   (b : int{ _ = fib (i + 1) }) : int{ _ = fib n }
   =
@@ -437,16 +420,6 @@ let rec fib_loop (n : int) (i : int) (a : int{ _ = fib i &amp;&amp; i &gt;= 0 })
 
 let fib_iter (n : int) : int{ _ = fib n } = fib_loop n 0 0 1
 
-(* Fast doubling, O(log n) iterations, on NATIVE pairs
-   (fib n, fib (n+1)) -- tuples appear in predicates directly.  With
-   k = n/2: fib (2k) = fib k * (2 fib (k+1) - fib k) and fib (2k+1) =
-   fib k ^ 2 + fib (k+1) ^ 2 (the embedded lemmas; they need k &gt;= 0,
-   hence the precondition on n, discharged at each call).  The
-   midpoint is reflected T-division; its parity annotation is PROVED
-   (grind derives the disjunction from the tdiv bounds).  Annotating
-   x and y with the doubling identities puts [fib (2 * k)]
-   syntactically in each obligation, which is what fires the lemmas;
-   the final obligations are then pure congruence. *)
 let rec fib_fd (n : int{ _ &gt;= 0 }) : (int * int){ _ = (fib n, fib (n + 1)) } =
   if n &lt;= 0
   then (0, 1)
@@ -460,14 +433,7 @@ let rec fib_fd (n : int{ _ &gt;= 0 }) : (int * int){ _ = (fib n, fib (n + 1)) } 
       if n = 2 * k
       then (x, y)
       else (y, x + y)
-  end
-
-(* Client side: fib 10, by fast doubling; the precondition [10 &gt;= 0]
-   is discharged at the literal argument. *)
-let fib10 : int{ _ = fib 10 } =
-  let r = fib_fd 10 in
-  match r with
-  | (u, _) -&gt; u</code></pre></div>
+  end</code></pre></div>
 <div class="tabpane"><pre style="max-height:34rem"><code class="ml">[%%vox.lean {lean|
 theorem fib_rec (n : Int) (h : 2 &lt;= n) : fib n = fib (n - 1) + fib (n - 2) := by
   grind
