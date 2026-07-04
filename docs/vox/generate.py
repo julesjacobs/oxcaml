@@ -234,7 +234,7 @@ def main():
         + slice_between(nth, r'^let rec total_ len',
                         r'Cons \(_, t\) -> 1 \+ len t'))
     snippets['@EX_APPEND@'] = slice_between(
-        nth, r'^let rec append', r'Cons \(h, r\)')
+        nth, r'^\(\* Each obligation', r'^    Cons \(h, r\)$')
     snippets['@EX_NTH@'] = slice_between(
         nth, r'^let rec nth',
         r'if i = 0 then h else nth t \(i - 1\)')

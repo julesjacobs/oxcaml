@@ -184,11 +184,14 @@ then call it (allowing arbitrary OCaml functions in specifications
 would be unsound: from a definition like
 <code>let rec f x = f x + 1</code> the logic would conclude
 <code>0 = 1</code>).</p>
-<pre><code class="ml">let rec append (a : ilist) (b : ilist) : ilist{ len _ = len a + len b } =
+<pre><code class="ml">(* Each obligation is a Lean theorem, proved automatically by grind;
+   the file contains no proof text. *)
+let rec append (a : ilist) (b : ilist) : ilist{ len _ = len a + len b } =
   match a with
-  | Nil -&gt; b
+  | Nil -&gt; b  (* obligation: len b = len Nil + len b *)
   | Cons (h, t) -&gt;
-    let r = append t b in
+    let r = append t b in  (* induction hypothesis: len r = len t + len b *)
+    (* obligation: len (Cons (h, r)) = len (Cons (h, t)) + len b *)
     Cons (h, r)</code></pre>
 <p id="sixty">Apart from the annotation on its result type,
 <code>append</code> is ordinary OCaml, and the compiled code is the
@@ -211,18 +214,9 @@ such as <code>int{ _ &gt;= 0 }</code>.  <b>With dependency, refinements
 generalize pre- and postconditions</b>: a refinement on the result is
 a postcondition, which the body must establish; a refinement on a
 parameter is a precondition (<code>nth</code>, below).</p>
-<p>The <code>Nil</code> arm returns <code>b</code>, so its obligation
-is <code>len b = len Nil + len b</code>, immediate from the definition
-of <code>len</code>.  In the <code>Cons</code> arm, the recursive call
-has the same signature, instantiated at <code>t</code> and
-<code>b</code>, so <code>len r = len t + len b</code> is known; this
-is the induction hypothesis.  The compiler emits each obligation as a
-Lean theorem, and Lean&rsquo;s
-<a href="#automation"><code>grind</code></a> proves it automatically;
-the file contains no proof text.</p>
 <pre><code class="ml">let rec nth (l : ilist) (i : int{ 0 &lt;= _ &amp;&amp; _ &lt; len l }) : int =
   match l with
-  | Nil -&gt; unreachable_ ()   (* dead code, and proved so *)
+  | Nil -&gt; unreachable_ ()   (* dead code by the precondition *)
   | Cons (h, t) -&gt; if i = 0 then h else nth t (i - 1)</code></pre>
 <p>The bounds on <code>i</code> are the precondition at work: every
 caller must prove them, and the body may assume them.  Within the
@@ -241,7 +235,8 @@ result, a caller of <code>nth</code> constructs the argument
 <code>i</code>, and <code>unreachable_ ()</code> constructs
 <code>()</code> at a type nothing satisfies; an explicit
 <code>refine_ e</code> claim states a refined type for <code>e</code>
-directly.</p>
+directly.  All are discharged at compile time by the
+<a href="#automation">automation</a>.</p>
 <p>A refinement can also appear under a type
 constructor: <code>int{ _ &gt;= 0 } list</code> states that every
 element is nonnegative.  Because the fact is part of the type, the

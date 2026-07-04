@@ -31,11 +31,14 @@ let rec total_ len l =
   | Nil -> 0
   | Cons (_, t) -> 1 + len t
 
+(* Each obligation is a Lean theorem, proved automatically by grind;
+   the file contains no proof text. *)
 let rec append (a : ilist) (b : ilist) : ilist{ len _ = len a + len b } =
   match a with
-  | Nil -> b
+  | Nil -> b  (* obligation: len b = len Nil + len b *)
   | Cons (h, t) ->
-    let r = append t b in
+    let r = append t b in  (* induction hypothesis: len r = len t + len b *)
+    (* obligation: len (Cons (h, r)) = len (Cons (h, t)) + len b *)
     Cons (h, r)
 
 (* Not a primitive: the argument type is uninhabited (see header). *)
@@ -43,5 +46,5 @@ let rec unreachable_ (u : unit{ false }) : 'a = unreachable_ u
 
 let rec nth (l : ilist) (i : int{ 0 <= _ && _ < len l }) : int =
   match l with
-  | Nil -> unreachable_ ()   (* dead code, and proved so *)
+  | Nil -> unreachable_ ()   (* dead code by the precondition *)
   | Cons (h, t) -> if i = 0 then h else nth t (i - 1)
