@@ -165,54 +165,66 @@ Verification is opt-in per function.
 </div>
 
 <h2 id="example">Refinement types, by example</h2>
-<pre style="margin-top:1rem"><code class="ml">@EX_LEN@</code></pre>
-<p id="reflect">An ordinary datatype and an ordinary recursive
-function.  Marking the function <code>total_</code> reflects it into
-the logic: the compiler emits it as a Lean <code>def</code>, Lean
-checks that it terminates, and refinements can call it from here on.
-Only <code>total_</code> functions can be reflected, because a partial
-function has no logical counterpart (from <code>f x = f x + 1</code>
-the logic would conclude <code>0 = 1</code>).</p>
+<p>The first example proves that appending two lists adds their
+lengths.  The specification needs a length function it can mention, so
+the setup is a list type and the usual recursive definition of
+length:</p>
+<pre><code class="ml">@EX_LEN@</code></pre>
+<p id="reflect">The <code>total_</code> keyword reflects
+<code>len</code> into the logic: the compiler emits it as a Lean
+<code>def</code>, Lean checks that it terminates, and refinements can
+then call it.  Only <code>total_</code> functions can be reflected: a
+partial function has no logical counterpart (from
+<code>f x = f x + 1</code> the logic would conclude
+<code>0 = 1</code>).</p>
 <pre><code class="ml">@EX_APPEND@</code></pre>
-<p id="sixty">Expressions inside refinements are terms in the logic,
-albeit in OCaml syntax.  Each value has a logical counterpart (the mathematical integer
-for an <code>int</code>, a Lean inductive value for a variant, an
-opaque atom for other types); a variable in a refinement denotes the
-counterpart of the variable in scope; and dependent arrows let a
-signature name its parameters, as <code>len _ = len a + len b</code>
-names both of <code>append</code>&rsquo;s.  A parameter refinement is a
-precondition, proved by the caller; a result refinement is a
-postcondition, proved by the body.  Each recursive call re-instantiates
-the signature at its arguments, which is the induction hypothesis, so
-the textbook proof goes through with no proof text.</p>
-<p id="contracts">Refinements are not confined to function boundaries:
-<code>int{ _ &gt;= 0 } list</code> states a fact about every element.
-The fact lives in the type, so the typechecker propagates it, and any
-polymorphic function preserves it by instantiation
-(<code>List.rev</code> at <code>'a = int{ _ &gt;= 0 }</code> returns
-nonnegative elements with nothing to prove; in effect, unary
-parametricity for free).</p>
+<p id="sixty">The expression between braces is a term of the logic,
+written in OCaml syntax.  It may mention the program variables in
+scope, including the function&rsquo;s own parameters;
+<code>_</code> denotes the value the refinement is attached to, in
+this case the result of <code>append</code>.  In the logic, a program
+variable stands for the logical counterpart of its run-time value: an
+<code>int</code> corresponds to a mathematical integer, a variant such
+as <code>ilist</code> to the corresponding Lean inductive value, and
+values of other types to opaque atoms.</p>
+<p>A refinement on the result is a postcondition, which the body must
+establish in every arm.  The <code>Nil</code> arm follows from the
+definition of <code>len</code>.  In the <code>Cons</code> arm, the
+recursive call has the same signature, instantiated at <code>t</code>
+and <code>b</code>, so <code>len r = len t + len b</code> is known;
+this is the induction hypothesis, and the usual inductive proof goes
+through without any proof text.</p>
 <pre><code class="ml">@EX_NTH@</code></pre>
-<p>The bounds ride the parameter, so every caller must prove them, and
-inside the body the branch facts are in scope: the recursive call
-discharges its bounds from <code>i &lt;&gt; 0</code> and the
-<code>Cons</code> match.  The <code>Nil</code> arm is dead code given
-the bounds, and <code>unreachable_</code> makes that a proof obligation
-(<code>false</code> under the arm&rsquo;s facts) rather than a promise.
-Obligations arise in exactly these three ways: applications of refined
-parameters, <code>refine_ e</code> claims, and
-<code>unreachable_</code>; all are discharged by the
-<a href="#automation">automation</a> at compile time.</p>
-<p>Weakening the bound to <code>i &lt;= len l</code> makes the
-<code>Nil</code> arm reachable, and the compiler answers with a
-counterexample:</p>
+<p>A refinement on a parameter is a precondition: every caller must
+prove it, and the body may assume it.  Within the body, branch
+conditions are also in scope, so the recursive call discharges its
+bounds from <code>i &lt;&gt; 0</code> and the <code>Cons</code> match.
+The <code>Nil</code> arm is dead code given the bounds;
+<code>unreachable_</code> makes this a proof obligation (the goal
+<code>false</code> under the arm&rsquo;s hypotheses) where
+<code>assert false</code> would defer it to run time.  Proof
+obligations arise in exactly three ways: applications of functions
+with refined parameters, <code>refine_ e</code> claims, and
+<code>unreachable_</code>.  All are discharged at compile time by the
+<a href="#automation">automation</a>.</p>
+<p id="contracts"><b>Refinements generalize pre- and
+postconditions.</b>  A refinement can also appear under a type
+constructor: <code>int{ _ &gt;= 0 } list</code> states that every
+element is nonnegative.  Because the fact is part of the type, the
+typechecker propagates it, and polymorphic functions preserve it by
+instantiation: <code>List.rev</code> at
+<code>'a = int{ _ &gt;= 0 }</code> returns nonnegative elements with
+nothing to prove (in effect, unary parametricity).</p>
+<p>Weakening <code>nth</code>&rsquo;s bound to
+<code>i &lt;= len l</code> makes the <code>Nil</code> arm reachable,
+and verification fails with a counterexample:</p>
 <pre><code class="ml">@HERO_FAIL@</code></pre>
 <pre class="out"><code>@HERO_FAIL_OUT@</code></pre>
-<p id="counterexamples">A failure reports like a type error, at the offending expression:
-the goal, the hypotheses in scope, and a candidate counterexample,
-rewritten to source names.  The same information comes back in about a
-second; that is the feedback an agent gets when it writes the code or
-the proof.</p>
+<p id="counterexamples">A failed obligation is reported like a type
+error, at the offending expression, with the goal, the hypotheses in
+scope, and a candidate counterexample, rewritten to source names.  The
+report arrives in about a second; this is also the feedback an agent
+receives when it writes the code or the proof.</p>
 <p style="color:var(--dim);font-size:.9rem">From
 <code>demo/lean_nth.ml</code> and <code>mechanics/lean_nth_fail.ml</code>
 in the branch&rsquo;s CI.</p>
