@@ -33,11 +33,11 @@ type hprop =
   | Star of hprop * hprop
 
 [%%vox.lean {lean|
-opaque rid : VoxU -> Int
-abbrev HeapM := Int -> Option Int
-opaque hp : VoxU -> HeapM
+public opaque rid : VoxU -> Int
+public abbrev HeapM := Int -> Option Int
+public opaque hp : VoxU -> HeapM
 
-@[grind] def sat : Vox_Sep_lib_hprop -> HeapM -> Prop
+@[grind, expose] public def sat : Vox_Sep_lib_hprop -> HeapM -> Prop
   | .Emp, h => ∀ x, h x = none
   | .Pts r v, h => h (rid r) = some v ∧ ∀ x, x ≠ rid r → h x = none
   | .Star p q, h =>
@@ -46,7 +46,7 @@ opaque hp : VoxU -> HeapM
         ∧ (∀ x, h x = match h₁ x with | some v => some v | none => h₂ x)
         ∧ sat p h₁ ∧ sat q h₂
 
-theorem sat_star_comm (p q : Vox_Sep_lib_hprop) (h : HeapM) :
+public theorem sat_star_comm (p q : Vox_Sep_lib_hprop) (h : HeapM) :
     sat (.Star p q) h ↔ sat (.Star q p) h := by
   constructor <;> rintro ⟨h₁, h₂, hd, hu, s₁, s₂⟩ <;>
     exact ⟨h₂, h₁, fun x => (hd x).symm,
@@ -55,7 +55,7 @@ theorem sat_star_comm (p q : Vox_Sep_lib_hprop) (h : HeapM) :
            s₂, s₁⟩
 grind_pattern sat_star_comm => sat (.Star p q) h
 
-theorem sat_star_rot (a b q : Vox_Sep_lib_hprop) (h : HeapM) :
+public theorem sat_star_rot (a b q : Vox_Sep_lib_hprop) (h : HeapM) :
     sat (.Star a (.Star b q)) h ↔ sat (.Star b (.Star a q)) h := by
   constructor <;>
     rintro ⟨ha, hbq, hd, hu, sa, hb, hq, hd', hu', sb, sq⟩ <;>
@@ -66,7 +66,7 @@ theorem sat_star_rot (a b q : Vox_Sep_lib_hprop) (h : HeapM) :
     cases hx : ha x <;> cases hx' : hb x <;> cases hx'' : hq x <;> grind
 grind_pattern sat_star_rot => sat (.Star a (.Star b q)) h
 
-theorem sat_pts_neq (r r' : VoxU) (a b : Int) (q : Vox_Sep_lib_hprop)
+public theorem sat_pts_neq (r r' : VoxU) (a b : Int) (q : Vox_Sep_lib_hprop)
     (h : HeapM) :
     sat (.Star (.Pts r a) (.Star (.Pts r' b) q)) h → ¬ (r = r') := by
   rintro ⟨h₁, h₂, hd, hu, ⟨s₁, _⟩, h₃, h₄, hd', hu', ⟨s₃, _⟩, _⟩ heq

@@ -103,6 +103,13 @@ let hyps_for_error vc =
 let goal_for_error vc = with_vc_display vc (fun () -> Refinement.to_string vc.vc_goal)
 
 let vcs : vc list ref = ref []
+
+(* Toplevel sessions keep the legacy self-contained solver inputs
+   (everything spliced); file compilation uses MODULE-MODE inputs
+   ([module] header, [public import VoxCore] and the sig modules of
+   imports).  Set by the toplevel entry point. *)
+let toplevel_active = ref false
+
 let name_sorts : (Ident.t, dsort) Hashtbl.t = Hashtbl.create 64
 
 (* Fresh unknowns minted by the pass itself; always "in scope".
@@ -125,6 +132,14 @@ type dt_decl =
        sorts may be [S_param i] for the declaration's [i]th parameter. *)
   | Dt_record of int * (string * dsort) list
     (* type-parameter count, then (label, sort). *)
+  | Dt_opaque
+    (* an abstract type at its OWN uninterpreted sort
+       ([@@vox.sort opaque]) rather than at the shared VoxU: declared
+       [opaque Vox_<path> : Type], so interface blocks can state laws
+       about values of exactly this type.  A sealed implementation's
+       concrete declaration registers the real datatype under the SAME
+       solver name, which is how the seal's re-elaborated interface
+       lands on the concrete type. *)
 
 (* Simple-variant/record datatypes used by the current module's (or toplevel
    session's) VCs, in dependency order (the datatypes of a datatype's fields
@@ -250,7 +265,20 @@ let rec path_uname (p : Path.t) =
    that every fact it issues about such values is true of that
    interpretation.  The attribute must appear on the declaration in
    both the interface and the implementation (sorts are computed
-   per-compilation from the visible declaration). *)
+   per-compilation from the visible declaration).
+
+   [@@vox.sort opaque] instead gives the abstract type its OWN
+   uninterpreted sort, named by path, so an interface block can
+   declare model constants over exactly this type.  NOT trusted: the
+   sort carries no facts of its own, and the one asymmetry it permits
+   -- an attributed interface over a concrete implementation -- is the
+   sealed-abstraction pattern, sound because the concrete sort is one
+   model of the opaque sort and every interface fact is either a
+   checked contract or a sealed obligation. *)
+type sort_attr =
+  | Sa_sort of dsort
+  | Sa_opaque
+
 let vox_sort_of_attribute (a : Parsetree.attribute) =
   if not (String.equal a.attr_name.txt "vox.sort")
   then None
@@ -264,12 +292,14 @@ let vox_sort_of_attribute (a : Parsetree.attribute) =
           }
         ] ->
       (match s with
-       | "int" -> Some S_int
-       | "bool" -> Some S_bool
+       | "int" -> Some (Sa_sort S_int)
+       | "bool" -> Some (Sa_sort S_bool)
+       | "opaque" -> Some Sa_opaque
        | _ ->
          Location.raise_errorf
            ~loc:a.attr_loc
-           "vox: unknown vox.sort %S (expected \"int\" or \"bool\")"
+           "vox: unknown vox.sort %S (expected \"int\", \"bool\", or \
+            \"opaque\")"
            s)
     | _ ->
       Location.raise_errorf
@@ -311,6 +341,21 @@ let regular_self_args arg_sorts arity =
        (List.init arity Fun.id)
 ;;
 
+(* Solver-side names are stamp-free: reject a distinct path that would
+   alias an already-registered datatype's name. *)
+let assert_uname_fresh p =
+  List.iter
+    (fun (q, _) ->
+      if String.equal (path_uname p) (path_uname q)
+      then
+        Location.raise_errorf
+          ~loc:(Location.in_file !Location.input_name)
+          "vox: two distinct types would share the solver-side name %s; \
+           rename one of them"
+          (path_uname p))
+    !datatypes
+;;
+
 (* The sort of the type at path [p] applied to argument sorts
    [arg_sorts], registering it as a datatype (with its field datatypes,
    recursively) on first sight.  [arg_sorts] instantiates the
@@ -330,7 +375,13 @@ let rec datatype_sort env p arg_sorts =
    (...)], or the trusted [@@vox.sort int|bool] attribute, which Typedecl
    folds into the same field.  [arg_sorts] instantiates [p]'s parameters
    at the use, so a [Vs_param] in the declared sort resolves to the
-   concrete argument sort (or [S_other] if the use is under-applied). *)
+   concrete argument sort (or [S_other] if the use is under-applied).
+   [@@vox.sort opaque] stays ATTRIBUTE-ONLY (never folded into the
+   kind): the inclusion check then sees Vr_top on the interface side
+   and accepts a concrete implementation -- the sealed-abstraction
+   asymmetry, sound because the concrete sort is one model of the
+   opaque sort and every interface fact is either a checked contract
+   or a sealed obligation. *)
 and vox_sort_attribute env p arg_sorts =
   match Env.find_type p env with
   | exception Not_found -> None
@@ -340,7 +391,15 @@ and vox_sort_attribute env p arg_sorts =
      | Vr_top ->
        (* Decl rebuilds along some typedecl paths drop the kind field;
           the attribute on the declaration is authoritative there. *)
-       List.find_map vox_sort_of_attribute decl.type_attributes)
+       (match List.find_map vox_sort_of_attribute decl.type_attributes with
+        | Some (Sa_sort s) -> Some s
+        | Some Sa_opaque ->
+          (* arity-0 only: one uninterpreted sort cannot distinguish
+             instantiations of a parameterized type *)
+          if decl.type_params = []
+          then Some (datatype_sort_opaque p)
+          else Some S_other
+        | None -> None))
 
 (* Turn a declared refinement sort into a solver sort, registering any
    datatype/tuple it mentions.  [Vs_data] registers the MODELED datatype
@@ -361,6 +420,18 @@ and dsort_of_vox_sort env arg_sorts (vs : Types.vox_sort) =
   (* The invariant is a FACT, not part of the modeling: values are
      modeled at the underlying sort (registered as usual). *)
   | Vs_fact (s, _) -> dsort_of_vox_sort env arg_sorts s
+
+(* [@@vox.sort opaque]: register the path at its own uninterpreted
+   sort.  In an implementation whose concrete declaration was already
+   registered (the attribute lives on the interface only), the
+   concrete registration wins -- Path.same, same uname. *)
+and datatype_sort_opaque p =
+  if find_datatype p <> None
+  then S_data (p, [])
+  else (
+    assert_uname_fresh p;
+    datatypes := !datatypes @ [ p, Dt_opaque ];
+    S_data (p, []))
 
 and datatype_sort_unattributed env p arg_sorts =
   if List.exists (Path.same p) !poisoned
@@ -433,18 +504,7 @@ and datatype_sort_unattributed env p arg_sorts =
       if List.exists (Path.same p) !poisoned
       then S_other
       else (
-        (* Solver-side names are stamp-free: reject a distinct path that
-           would alias an already-registered datatype's name. *)
-        List.iter
-          (fun (q, _) ->
-            if String.equal (path_uname p) (path_uname q)
-            then
-              Location.raise_errorf
-                ~loc:(Location.in_file !Location.input_name)
-                "vox: two distinct types would share the solver-side name \
-                 %s; rename one of them"
-                (path_uname p))
-          !datatypes;
+        assert_uname_fresh p;
         datatypes := !datatypes @ [ p, decl ];
         S_data (p, arg_sorts)))
 
@@ -2513,14 +2573,14 @@ let constr_arity p c =
     (match List.assoc_opt c constrs with
      | Some fields -> List.length fields
      | None -> 0)
-  | Some (_, Dt_record _) | None -> 0
+  | Some (_, (Dt_record _ | Dt_opaque)) | None -> 0
 ;;
 
 
 (* The stable name of the product datatype for tuple arity [n]: the
    same in every unit, like [path_uname]s, so clients deduplicate
    imported declarations by name. *)
-let tuple_uname n = "VoxT" ^ Int.to_string n
+let tuple_uname = Vox_module.tuple_uname
 
 (* Does rendering this sort mention VoxU -- directly, inside a tuple
    instantiation, or as the degraded rendering of an unregistered
@@ -2553,13 +2613,7 @@ let rec sort_needs_iarray = function
    error fails closed there.)  [get] is total in the logic, like
    division; length nonnegativity is the theory's one axiom,
    pattern-registered so grind instantiates it at every [len] term. *)
-let lean_iarray_theory =
-  "opaque VoxIA : Type\n\
-   opaque Vox_ia_len : VoxIA -> Int\n\
-   opaque Vox_ia_get : VoxIA -> Int -> Int\n\
-   axiom Vox_ia_len_nonneg (a : VoxIA) : 0 <= Vox_ia_len a\n\
-   grind_pattern Vox_ia_len_nonneg => Vox_ia_len a\n"
-;;
+let lean_iarray_theory = Vox_module.lean_iarray_theory ()
 
 let datatype_field_needs_iarray () =
   List.exists
@@ -2570,7 +2624,8 @@ let datatype_field_needs_iarray () =
           (fun (_, fields) -> List.exists sort_needs_iarray fields)
           constrs
       | Dt_record (_, fields) ->
-        List.exists (fun (_, fs) -> sort_needs_iarray fs) fields)
+        List.exists (fun (_, fs) -> sort_needs_iarray fs) fields
+      | Dt_opaque -> false)
     !datatypes
 ;;
 
@@ -2582,7 +2637,9 @@ let datatype_field_needs_voxu () =
         List.exists
           (fun (_, fields) -> List.exists sort_needs_voxu fields)
           constrs
-      | Dt_record (_, fields) -> List.exists (fun (_, fs) -> sort_needs_voxu fs) fields)
+      | Dt_record (_, fields) ->
+        List.exists (fun (_, fs) -> sort_needs_voxu fs) fields
+      | Dt_opaque -> false)
     !datatypes
 ;;
 
@@ -2683,6 +2740,22 @@ let collect_blocks_sig (sg : Typedtree.signature) =
 
 (* Imported spec exports in dependency order (a unit's spec after the
    units it imports; name order breaks ties, for determinism). *)
+(* Search-path directories for Lean module artifacts: everywhere a
+   .cmi can be found, plus the compiling unit's own directory (where
+   its VoxCore/sig oleans are written). *)
+let lean_path_dirs () =
+  let own = Filename.dirname !Location.input_name in
+  let dirs = Load_path.get_path_list () in
+  let dirs =
+    if List.exists (String.equal own) dirs then dirs else own :: dirs
+  in
+  (* the lean invocations change directory; entries must survive *)
+  List.map
+    (fun d ->
+      if Filename.is_relative d then Filename.concat (Sys.getcwd ()) d else d)
+    dirs
+;;
+
 let gather_imported_specs () =
   let all =
     Env.vox_imported_specs ()
@@ -2723,6 +2796,7 @@ let imported_need_voxu () =
    is a parameter only because the Lean renderer it must be (the
    export stores the Lean rendering) is defined later in this file. *)
 let check_imported_datatype_clashes ~render =
+  let this_unit = Env.get_current_unit_name () in
   List.iter
     (fun ((p, _) as dt) ->
       let uname = path_uname p in
@@ -2732,6 +2806,14 @@ let check_imported_datatype_clashes ~render =
             (fun (n, leand) ->
               if String.equal n uname
                  && not (String.equal (render dt : string) leand)
+                 (* ... except OUR OWN interface's [@@vox.sort opaque]
+                    view of a type this implementation knows
+                    concretely: the shared name is the point (the
+                    seal's re-elaborated laws land on the concrete
+                    declaration), and the emitters never splice both *)
+                 && not
+                      (String.equal unit this_unit
+                       && String.equal (render (p, Dt_opaque) : string) leand)
               then
                 Location.raise_errorf
                   ~loc:(Location.in_file !Location.input_name)
@@ -2752,6 +2834,7 @@ type block_src =
   | Local_block of Location.t
   | Imported_block of string (* unit name *)
   | Reflected_def of Vox_reflect.spec_def
+  | Seal (* the trailing interface seal of a sig-bearing unit *)
 
 let count_lines s = String.fold_left (fun n c -> if c = '\n' then n + 1 else n) 0 s
 
@@ -2859,28 +2942,7 @@ let rec lean_sort = function
    explicit universe binders so no auto-binding is relied on.  One
    line, like the other declarations (the error-line mapping counts
    lines). *)
-let lean_tuple_decl n =
-  let buf = Buffer.create 128 in
-  Buffer.add_string buf (Printf.sprintf "structure %s.{" (tuple_uname n));
-  for i = 1 to n do
-    if i > 1 then Buffer.add_string buf ", ";
-    Buffer.add_string buf (Printf.sprintf "u%d" i)
-  done;
-  Buffer.add_string buf "}";
-  for i = 1 to n do
-    Buffer.add_string buf (Printf.sprintf " (t%d : Sort u%d)" i i)
-  done;
-  let univ =
-    let rec go i = if i > n then "1" else Printf.sprintf "max u%d (%s)" i (go (i + 1)) in
-    go 1
-  in
-  Buffer.add_string buf (Printf.sprintf " : Sort (%s) where" univ);
-  for i = 1 to n do
-    Buffer.add_string buf (Printf.sprintf " (p%d : t%d)" i i)
-  done;
-  Buffer.add_char buf '\n';
-  Buffer.contents buf
-;;
+let lean_tuple_decl ?vis n = Vox_module.lean_tuple_decl ?vis n
 
 (* One declaration, on a single line (the error-line mapping counts
    lines); self-recursion within a line is fine.  Variants are
@@ -2890,9 +2952,14 @@ let lean_tuple_decl n =
    which the field sorts and (for a variant) the applied result type
    mention; a monomorphic declaration ([arity = 0]) renders exactly as
    before. *)
-let lean_datatype_decl (p, decl) =
+let lean_datatype_decl ?(vis = "") (p, decl) =
   let buf = Buffer.create 128 in
-  let arity = match decl with Dt_variant (n, _) | Dt_record (n, _) -> n in
+  Buffer.add_string buf vis;
+  let arity =
+    match decl with
+    | Dt_variant (n, _) | Dt_record (n, _) -> n
+    | Dt_opaque -> 0
+  in
   let param_binders =
     String.concat ""
       (List.init arity (fun i -> Printf.sprintf " (%s : Type)" (lean_param_name i)))
@@ -2932,18 +2999,22 @@ let lean_datatype_decl (p, decl) =
          Buffer.add_string
            buf
            (Printf.sprintf " (%s : %s)" (lean_sanitize l) (lean_sort fs)))
-       fields);
+       fields
+   | Dt_opaque ->
+     Buffer.add_string
+       buf
+       (Printf.sprintf "opaque %s : Type" (lean_dt_name p)));
   Buffer.add_char buf '\n';
   Buffer.contents buf
 ;;
 
 (* All registered datatypes except [skip] (already declared by an
    imported export), in dependency order. *)
-let lean_datatype_decls buf ~skip =
+let lean_datatype_decls buf ~skip ~vis =
   List.iter
     (fun ((p, _) as dt) ->
       if not (List.exists (String.equal (path_uname p)) skip)
-      then Buffer.add_string buf (lean_datatype_decl dt))
+      then Buffer.add_string buf (lean_datatype_decl ~vis dt))
     !datatypes
 ;;
 
@@ -2966,8 +3037,9 @@ let boolish p =
      | Some (_, Dt_record (_, fields)) ->
        (match List.assoc_opt l fields with
         | Some S_bool -> true
-        | Some (S_int | S_data _ | S_param _ | S_tuple _ | S_iarray | S_other) | None -> false)
-     | Some (_, Dt_variant _) | None -> false)
+        | Some (S_int | S_data _ | S_param _ | S_tuple _ | S_iarray | S_other)
+        | None -> false)
+     | Some (_, (Dt_variant _ | Dt_opaque)) | None -> false)
   | Pis _ | Pquant _ -> true
   (* A bool-sorted tuple COMPONENT is a Prop the model cannot see from
      the (untyped) projection alone: [=] between Props is emitted
@@ -3168,7 +3240,7 @@ let lean_spec_def buf (d : Vox_reflect.spec_def) =
    datatype state in the globals), restored afterwards.  No blocks and
    no definitions, no export: without spec functions clients register
    datatypes on demand as before. *)
-let cmi_export env (sg : Types.signature) ~defs ~blocks =
+let cmi_export env (sg : Types.signature) ~defs ~blocks ~sig_module =
   let def_blocks =
     List.map
       (fun (d : Vox_reflect.spec_def) ->
@@ -3224,6 +3296,7 @@ let cmi_export env (sg : Types.signature) ~defs ~blocks =
           { Cmi_format.vp_datatypes = dts
           ; vp_needs_voxu = datatype_field_needs_voxu ()
           ; vp_blocks = blocks
+          ; vp_sig_module = sig_module
           })
   end
 ;;
@@ -3233,14 +3306,84 @@ let cmi_export env (sg : Types.signature) ~defs ~blocks =
    a unit with an .mli the cmi comes from the interface, which has no
    bodies to reflect -- there, total_ functions stay private to the
    implementation (clients' calls degrade to unknowns; sound). *)
+(* Building a unit's sig module (VoxSig_<Unit>.olean, next to its
+   .cmi): the interface's datatype declarations (public) and its block
+   text (verbatim; the author's own [public]/[@[expose]] markers are
+   the interface), over VoxCore and the sig modules of its imports.
+   Clients then [public import] the artifact: client verification
+   depends on the INTERFACE alone, and an interface [axiom] becomes an
+   OBLIGATION discharged by the implementation's seal, never trust. *)
+let build_sig_module vp =
+  let unit = Env.get_current_unit_name () in
+  let dirs = lean_path_dirs () in
+  let dir = Filename.dirname !Location.input_name in
+  let err e =
+    Location.raise_errorf
+      ~loc:(Location.in_file !Location.input_name)
+      "vox: could not build this interface's sig module:@ %s" e
+  in
+  (match
+     Vox_module.ensure_core ~lean_command:(lean_command ())
+       ~lean_path_dirs:dirs ~dir
+   with
+   | Ok _ -> ()
+   | Error e -> err e);
+  let buf = Buffer.create 1024 in
+  Buffer.add_string buf "module\n";
+  Buffer.add_string buf
+    (Printf.sprintf "public import %s\n" Vox_module.core_module_name);
+  let imported = gather_imported_specs () in
+  List.iter
+    (fun (u, (ivp : Cmi_format.vox_spec_export)) ->
+      if ivp.Cmi_format.vp_sig_module && not (String.equal u unit)
+      then
+        Buffer.add_string buf
+          (Printf.sprintf "public import %s\n" (Vox_module.sig_module_name u)))
+    imported;
+  (* Declarations already provided by an import are not re-spliced:
+     the tuple products ride VoxCore, an import's datatypes ride its
+     sig module. *)
+  let covered n =
+    Vox_module.core_tuple_uname n
+    || List.exists
+         (fun (u, (ivp : Cmi_format.vox_spec_export)) ->
+           ivp.Cmi_format.vp_sig_module
+           && (not (String.equal u unit))
+           && List.exists (fun (n', _) -> String.equal n n') ivp.vp_datatypes)
+         imported
+  in
+  List.iter
+    (fun (n, d) ->
+      if not (covered n) then Buffer.add_string buf ("public " ^ d))
+    vp.Cmi_format.vp_datatypes;
+  List.iter (fun b -> Buffer.add_string buf b) vp.Cmi_format.vp_blocks;
+  let olean_out =
+    Filename.concat dir (Vox_module.sig_module_name unit ^ ".olean")
+  in
+  match
+    Vox_module.build_olean ~lean_command:(lean_command ())
+      ~lean_path_dirs:dirs ~olean_out
+      ~module_name:(Vox_module.sig_module_name unit) (Buffer.contents buf)
+  with
+  | Ok () -> ()
+  | Error e -> err e
+;;
+
 let cmi_export_of_signature (tsg : Typedtree.signature) =
-  cmi_export tsg.sig_final_env tsg.sig_type ~defs:[]
-    ~blocks:(collect_blocks_sig tsg)
+  let blocks = collect_blocks_sig tsg in
+  match
+    cmi_export tsg.sig_final_env tsg.sig_type ~defs:[] ~blocks
+      ~sig_module:(blocks <> [])
+  with
+  | None -> None
+  | Some vp ->
+    if vp.Cmi_format.vp_sig_module then build_sig_module vp;
+    Some vp
 ;;
 
 let cmi_export_of_structure (str : structure) (sg : Types.signature) =
   cmi_export str.str_final_env sg ~defs:!spec_defs
-    ~blocks:(List.map fst (collect_blocks str))
+    ~blocks:(List.map fst (collect_blocks str)) ~sig_module:false
 ;;
 
 
@@ -3320,7 +3463,7 @@ let lean_theorem buf i vc =
                Buffer.add_string buf (Printf.sprintf "(h_exh%d : " !exh);
                lean_of_pred buf disj;
                Buffer.add_string buf ") "
-             | Some (_, Dt_record _) | None -> ())
+             | Some (_, (Dt_record _ | Dt_opaque)) | None -> ())
          | _ -> ());
         match q with
         | Refinement.Pis (_, _, a)
@@ -3402,31 +3545,99 @@ let lean_file vcs =
   in
   let segments = ref [] in
   let seg ?src text = if text <> "" then segments := (text, src) :: !segments in
-  if needs_voxu then seg "opaque VoxU : Type\n";
-  if needs_iarray then seg lean_iarray_theory;
+  (* MODULE-MODE (file compilation): the input is a Lean module over
+     VoxCore (VoxU, the iarray theory, tuple products -- their inline
+     emission below is toplevel-only) and the sig modules of
+     sig-bearing imports, whose datatypes and blocks then ride the
+     artifact instead of being spliced.  The compiling unit's OWN
+     interface, when sig-bearing, is neither imported nor spliced: its
+     text is re-elaborated by the SEAL, appended after the theorems,
+     which checks the implementation against it (an interface [axiom]
+     is an obligation).  Toplevel sessions keep the legacy
+     self-contained shape. *)
+  let file_mode = not !toplevel_active in
+  let this_unit = Env.get_current_unit_name () in
+  let self_vp =
+    if file_mode
+    then
+      List.find_map
+        (fun (u, vp) ->
+          if String.equal u this_unit
+             && vp.Cmi_format.vp_sig_module
+          then Some vp
+          else None)
+        !imported_specs
+    else None
+  in
+  let sealing = self_vp <> None in
+  (* Two self-modes (the F* interface discipline).  A TRANSPARENT unit
+     -- no implementation blocks and no reflected definitions -- keeps
+     its interface text spliced flat: the model lives wholly in the
+     .mli, and the trailing seal degenerates to the axiom guard (an
+     interface [axiom] finds only itself, an axiom, and is rejected as
+     unimplemented -- transparent units cannot owe laws).  A SEALED
+     unit owns every interface constant in its implementation blocks;
+     the interface text is elaborated only inside the seal's
+     namespace, and laws are matched against same-named impl
+     theorems. *)
+  let splice_self =
+    sealing && !embedded_blocks = [] && !spec_defs = []
+  in
+  let sig_imported (vp : Cmi_format.vox_spec_export) u =
+    file_mode && vp.Cmi_format.vp_sig_module && not (String.equal u this_unit)
+  in
+  (* Module files hide non-[public] declarations from public
+     signatures: datatype declarations must be [public] for interface
+     text (spliced or sealed) to mention them.  The solver input is
+     never imported, so the marker is otherwise inert. *)
+  let dt_vis = if file_mode then "public " else "" in
+  if file_mode
+  then (
+    seg "module\n";
+    if sealing then seg "import Lean\n";
+    seg (Printf.sprintf "public import %s\n" Vox_module.core_module_name);
+    List.iter
+      (fun (u, vp) ->
+        if sig_imported vp u
+        then
+          seg
+            (Printf.sprintf "public import %s\n" (Vox_module.sig_module_name u)))
+      !imported_specs);
+  if (not file_mode) && needs_voxu then seg "opaque VoxU : Type\n";
+  if (not file_mode) && needs_iarray then seg lean_iarray_theory;
   let seen = ref [] in
   List.iter
     (fun (unit, vp) ->
-      List.iter
-        (fun (n, leand) ->
-          if not (List.exists (String.equal n) !seen)
-          then (
-            seen := n :: !seen;
-            seg ~src:(Imported_block unit) leand))
-        vp.Cmi_format.vp_datatypes)
+      if sealing && (not splice_self) && String.equal unit this_unit
+      then
+        (* the seal re-elaborates the interface; the implementation's
+           own datatype declarations below cover the types *)
+        ()
+      else
+        List.iter
+          (fun (n, leand) ->
+            if not (List.exists (String.equal n) !seen)
+            then (
+              seen := n :: !seen;
+              if (not (sig_imported vp unit))
+                 && not (file_mode && Vox_module.core_tuple_uname n)
+              then seg ~src:(Imported_block unit) (dt_vis ^ leand)))
+          vp.Cmi_format.vp_datatypes)
     !imported_specs;
   (* Tuple product structures precede this module's datatypes (whose
      fields may be tuple-sorted); imported exports carry their own,
-     deduplicated by the stable per-arity name. *)
+     deduplicated by the stable per-arity name.  In file mode the
+     common arities ride VoxCore; only wider ones are spliced. *)
   List.iter
     (fun n ->
-      if not (List.exists (String.equal (tuple_uname n)) !seen)
+      if ((not file_mode) || n > Vox_module.max_tuple_arity)
+         && not (List.exists (String.equal (tuple_uname n)) !seen)
       then (
         seen := tuple_uname n :: !seen;
-        seg (lean_tuple_decl n)))
+        seg (lean_tuple_decl ~vis:dt_vis n)))
     !tuple_arities;
   let own_decls = Buffer.create 256 in
-  lean_datatype_decls own_decls ~skip:!seen;
+  lean_datatype_decls own_decls ~skip:!seen ~vis:dt_vis;
   seg (Buffer.contents own_decls);
   (* Imported blocks and the [-vox-prelude] file come BEFORE this
      module's reflected definitions: a definition may call an imported
@@ -3437,9 +3648,12 @@ let lean_file vcs =
   then (
     List.iter
       (fun (unit, vp) ->
-        List.iter
-          (fun text -> seg ~src:(Imported_block unit) text)
-          vp.Cmi_format.vp_blocks)
+        if not (sig_imported vp unit)
+           && not (sealing && (not splice_self) && String.equal unit this_unit)
+        then
+          List.iter
+            (fun text -> seg ~src:(Imported_block unit) text)
+            vp.Cmi_format.vp_blocks)
       !imported_specs;
     seg (prelude ()));
   (* Reflected definitions, unconditionally: they are checked
@@ -3479,13 +3693,25 @@ let lean_file vcs =
   in
   List.iter (fun (text, _) -> Buffer.add_string buf text) segments;
   List.iteri (fun i vc -> lean_theorem buf i vc) vcs;
+  (match self_vp with
+   | Some vp ->
+     Buffer.add_string buf
+       (Vox_module.seal_text
+          ~sig_text:(String.concat "\n" vp.Cmi_format.vp_blocks))
+   | None -> ());
+  (* The seal follows the VC theorems (one line each); errors there
+     are interface obligations, not VC failures. *)
+  let seal_start = first_line + List.length vcs in
   let block_of_line line =
-    List.find_map
-      (fun (start, n, src) ->
-        if start <= line && line < start + n
-        then Some (src, line - start + 1)
-        else None)
-      block_ranges
+    if sealing && line >= seal_start
+    then Some (Seal, line - seal_start + 1)
+    else
+      List.find_map
+        (fun (start, n, src) ->
+          if start <= line && line < start + n
+          then Some (src, line - start + 1)
+          else None)
+        block_ranges
   in
   ( Buffer.contents buf,
     (fun line ->
@@ -3589,6 +3815,25 @@ let run_lean vcs =
       | [], [] -> assert false
     in
     let contents, vc_of_line, block_of_line = lean_file vcs in
+    let env_prefix =
+      if !toplevel_active
+      then ""
+      else begin
+        (* Module-mode inputs import VoxCore (built on demand next to
+           the unit's output) and sig oleans found on the load path. *)
+        let dirs = lean_path_dirs () in
+        (match
+           Vox_module.ensure_core ~lean_command:(lean_command ())
+             ~lean_path_dirs:dirs
+             ~dir:(Filename.dirname !Location.input_name)
+         with
+         | Ok _ -> ()
+         | Error e ->
+           Location.raise_errorf ~loc:fallback_loc
+             "vox: could not build the base theory module:@ %s" e);
+        Vox_module.lean_path_env dirs ^ " "
+      end
+    in
     let in_file = Filename.temp_file "vox" ".lean" in
     let out_file = Filename.temp_file "vox" ".out" in
     Misc.try_finally
@@ -3600,7 +3845,11 @@ let run_lean vcs =
         output_string oc contents;
         close_out oc;
         let cmd =
-          Printf.sprintf "%s %s > %s 2>&1"
+          (* module-mode inputs must live under lean's root directory:
+             run from the temp dir the input was created in *)
+          Printf.sprintf "cd %s && %s%s %s > %s 2>&1"
+            (Filename.quote (Filename.dirname in_file))
+            env_prefix
             (Filename.quote (lean_command ()))
             (Filename.quote in_file) (Filename.quote out_file)
         in
@@ -3721,6 +3970,14 @@ let run_lean vcs =
                  unit
                  rel_line
                  (strip_msg !msg)
+             | Some (Seal, _) ->
+               (* The implementation does not pay its interface's
+                  obligations; there is no single expression to blame,
+                  so anchor at the unit. *)
+               Location.raise_errorf
+                 ~loc:(Location.in_file !Location.input_name)
+                 "vox: the implementation does not seal its interface:@ %s"
+                 (strip_msg !msg)
              | Some (Reflected_def d, _) ->
                (* The definition itself was rejected -- most often Lean
                   could not establish termination. *)
@@ -3733,6 +3990,38 @@ let run_lean vcs =
                  (if String.equal msg "" then "" else "\n(lean: " ^ msg ^ ")")
              | None ->
                let msg = strip_msg !msg in
+               (* Lean reports a failing [import] at the module header
+                  (line 1), which maps to no source; recover the unit
+                  from the message (e.g. two interfaces exporting one
+                  spec-function name collide at import). *)
+               let sig_import_failure =
+                 let tag = "import " ^ Vox_module.sig_module_prefix in
+                 match Misc.search_substring tag msg 0 with
+                 | exception Not_found -> None
+                 | j ->
+                   let start = j + String.length tag in
+                   let is_ident c =
+                     (c >= 'A' && c <= 'Z')
+                     || (c >= 'a' && c <= 'z')
+                     || (c >= '0' && c <= '9')
+                     || c = '_'
+                     || c = '\''
+                   in
+                   let n = String.length msg in
+                   let i = ref start in
+                   while !i < n && is_ident msg.[!i] do incr i done;
+                   if !i > start
+                   then Some (String.sub msg start (!i - start))
+                   else None
+               in
+               (match sig_import_failure with
+                | Some unit ->
+                  Location.raise_errorf
+                    ~loc:(Location.in_file !Location.input_name)
+                    "vox: error in the spec imported from unit %s:@ %s"
+                    unit
+                    msg
+                | None -> ());
                (match vc_of_line line, vcs with
                 | Some vc, _ | None, vc :: _ ->
                   Location.raise_errorf ~loc:vc.vc_loc
@@ -3982,14 +4271,24 @@ let check_sort_consistency (str : structure) (sg : Types.signature) =
            let impl_sort =
              List.find_map vox_sort_of_attribute impl_decl.type_attributes
            in
-           if not (sig_sort = impl_sort)
-           then
-             Location.raise_errorf
-               ~loc:impl_decl.type_loc
-               "vox: the vox.sort of type %s differs between the interface \
-                and the implementation; the attribute must appear \
-                identically on both declarations"
-               (Ident.name id))
+           (match sig_sort, impl_sort with
+            | Some Sa_opaque, None ->
+              (* the sealed-abstraction pattern: clients reason at the
+                 interface's opaque sort, the implementation at its
+                 concrete one.  Sound: the concrete sort is one model
+                 of the opaque sort, and every interface fact is
+                 either a contract checked against the implementation
+                 or a block obligation paid at the seal. *)
+              ()
+            | _ ->
+              if not (sig_sort = impl_sort)
+              then
+                Location.raise_errorf
+                  ~loc:impl_decl.type_loc
+                  "vox: the vox.sort of type %s differs between the \
+                   interface and the implementation; the attribute must \
+                   appear identically on both declarations"
+                  (Ident.name id)))
       | _ -> ())
     sg
 ;;
@@ -4028,7 +4327,6 @@ let check_implementation ?intf (str : structure) (sg : Types.signature) =
    contribute facts. *)
 let toplevel_ctx = ref { cfacts = []; cscope = [] }
 let toplevel_blocks : (string * Location.t) list ref = ref []
-let toplevel_active = ref false
 
 let check_toplevel_phrase (str : structure) ~(sig_acc : Types.signature)
       (sg : Types.signature) =

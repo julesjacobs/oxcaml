@@ -39,8 +39,8 @@ type proph [@@vox.sort int]
 type mut
 
 [%%vox.lean {lean|
-opaque now : VoxU -> Int
-opaque fin : VoxU -> Int
+public opaque now : VoxU -> Int
+public opaque fin : VoxU -> Int
 |lean}]
 
 val vnew : (v : int) -> vref{ _ = v } @ unique

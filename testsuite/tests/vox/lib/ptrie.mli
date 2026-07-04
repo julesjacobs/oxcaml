@@ -23,35 +23,35 @@ type t =
 -- the power-of-two bit [b]; [zbit i b] says bit [b] of [i] is clear.
 -- Euclidean / and % are floor semantics for positive divisors, i.e.
 -- exactly infinite two's complement.
-def mask (i b : Int) : Int := i % b
+@[expose] public def mask (i b : Int) : Int := i % b
 
-def zbit (i b : Int) : Prop := i % (2*b) < b
+@[expose] public def zbit (i b : Int) : Prop := i % (2*b) < b
 
-instance (i b : Int) : Decidable (zbit i b) := by unfold zbit; infer_instance
+public instance (i b : Int) : Decidable (zbit i b) := by unfold zbit; infer_instance
 
-inductive isbit : Int -> Prop where
+public inductive isbit : Int -> Prop where
   | one : isbit 1
   | dbl : {b : Int} -> isbit b -> isbit (2*b)
 
 -- Lowest differing bit of two distinct integers (junk 1 when equal).
-def bbit (p0 p1 : Int) : Int :=
+@[expose] public def bbit (p0 p1 : Int) : Int :=
   if p0 = p1 then 1
   else if p0 % 2 = p1 % 2 then 2 * bbit (p0/2) (p1/2)
   else 1
 termination_by (p0.natAbs + p1.natAbs)
 decreasing_by omega
 
-theorem isbit_pos {b : Int} (h : isbit b) : 1 ≤ b := by
+public theorem isbit_pos {b : Int} (h : isbit b) : 1 ≤ b := by
   induction h <;> omega
 
 -- The workhorse: peel one bit off a modulus.
-theorem emod_unique {a b q r : Int} (h0 : 0 ≤ r) (h1 : r < b)
+public theorem emod_unique {a b q r : Int} (h0 : 0 ≤ r) (h1 : r < b)
     (h : a = b*q + r) : a % b = r := by
   subst h
   rw [Int.add_comm, Int.add_mul_emod_self_left]
   exact Int.emod_eq_of_lt h0 h1
 
-theorem emod_double (p m : Int) (hm : 0 < m) :
+public theorem emod_double (p m : Int) (hm : 0 < m) :
     p % (2*m) = 2 * ((p/2) % m) + p % 2 := by
   have h2 := Int.mul_ediv_add_emod p 2
   have h3 := Int.mul_ediv_add_emod (p/2) m
@@ -64,18 +64,18 @@ theorem emod_double (p m : Int) (hm : 0 < m) :
     _ = (2*m) * ((p/2)/m) + (2 * ((p/2) % m) + p % 2) := by
           rw [Int.mul_add, Int.mul_assoc]; omega
 
-theorem bbit_isbit (p0 p1 : Int) : isbit (bbit p0 p1) := by
+public theorem bbit_isbit (p0 p1 : Int) : isbit (bbit p0 p1) := by
   fun_induction bbit p0 p1 with
   | case1 => exact isbit.one
   | case2 _ _ _ _ ih => exact isbit.dbl ih
   | case3 => exact isbit.one
 grind_pattern bbit_isbit => bbit p0 p1
 
-theorem bbit_pos (p0 p1 : Int) : 1 ≤ bbit p0 p1 :=
+public theorem bbit_pos (p0 p1 : Int) : 1 ≤ bbit p0 p1 :=
   isbit_pos (bbit_isbit p0 p1)
 
 -- Two distinct integers disagree AT their lowest differing bit ...
-theorem bbit_diff (p0 p1 : Int) :
+public theorem bbit_diff (p0 p1 : Int) :
     p0 ≠ p1 → (zbit p0 (bbit p0 p1) ↔ ¬ zbit p1 (bbit p0 p1)) := by
   fun_induction bbit p0 p1 with
   | case1 h => intro hne; contradiction
@@ -93,7 +93,7 @@ theorem bbit_diff (p0 p1 : Int) :
     omega
 
 -- ... and agree strictly below it.
-theorem bbit_agree (p0 p1 : Int) :
+public theorem bbit_agree (p0 p1 : Int) :
     p0 ≠ p1 → mask p0 (bbit p0 p1) = mask p1 (bbit p0 p1) := by
   fun_induction bbit p0 p1 with
   | case1 h => intro hne; contradiction
@@ -112,7 +112,7 @@ theorem bbit_agree (p0 p1 : Int) :
 
 -- Integers that differ below bit [b] have their lowest differing bit
 -- below [b].
-theorem bbit_lt (p0 p1 : Int) :
+public theorem bbit_lt (p0 p1 : Int) :
     ∀ b, isbit b → mask p0 b ≠ mask p1 b → bbit p0 p1 < b := by
   fun_induction bbit p0 p1 with
   | case1 h => intro b hb hm; exact absurd rfl hm
@@ -133,7 +133,7 @@ theorem bbit_lt (p0 p1 : Int) :
     | one => exact absurd (by unfold mask; omega) hm
     | @dbl c hc => have := isbit_pos hc; omega
 
-theorem isbit_dvd {b : Int} (hb : isbit b) :
+public theorem isbit_dvd {b : Int} (hb : isbit b) :
     ∀ a, isbit a → a ≤ b → a ∣ b := by
   induction hb with
   | one =>
@@ -150,7 +150,7 @@ theorem isbit_dvd {b : Int} (hb : isbit b) :
       rcases this with ⟨k, hk⟩
       exact ⟨k, by rw [hk, Int.mul_assoc]⟩
 
-theorem isbit_lt_dvd {b : Int} (hb : isbit b) :
+public theorem isbit_lt_dvd {b : Int} (hb : isbit b) :
     ∀ a, isbit a → a < b → 2*a ∣ b := by
   induction hb with
   | one =>
@@ -166,12 +166,12 @@ theorem isbit_lt_dvd {b : Int} (hb : isbit b) :
       rcases this with ⟨k, hk⟩
       exact ⟨k, by simp [hk, Int.mul_assoc]⟩
 
-theorem mask_tele {b b' : Int} (i : Int) (hd : b' ∣ b) :
+public theorem mask_tele {b b' : Int} (i : Int) (hd : b' ∣ b) :
     mask (mask i b) b' = mask i b' := by
   unfold mask
   exact Int.emod_emod_of_dvd i hd
 
-theorem zbit_mask {b b' : Int} (i : Int) (hd : 2*b' ∣ b) :
+public theorem zbit_mask {b b' : Int} (i : Int) (hd : 2*b' ∣ b) :
     zbit (mask i b) b' ↔ zbit i b' := by
   unfold zbit mask
   rw [Int.emod_emod_of_dvd i hd]
@@ -180,27 +180,27 @@ theorem zbit_mask {b b' : Int} (i : Int) (hd : 2*b' ∣ b) :
 -- invariant -- at every branch on bit [b] with prefix [p], all keys
 -- match [p] below [b], the zero side has bit [b] clear, the one side
 -- has it set.
-@[grind] def mem : Int -> Vox_Ptrie_t -> Prop
+@[grind, expose] public def mem : Int -> Vox_Ptrie_t -> Prop
   | _, .Empty => False
   | i, .Leaf j => i = j
   | i, .Branch _ _ t0 t1 => mem i t0 ∨ mem i t1
 
-@[grind] def allmatch : Vox_Ptrie_t -> Int -> Int -> Prop
+@[grind, expose] public def allmatch : Vox_Ptrie_t -> Int -> Int -> Prop
   | .Empty, _, _ => True
   | .Leaf j, p, b => mask j b = p
   | .Branch _ _ t0 t1, p, b => allmatch t0 p b ∧ allmatch t1 p b
 
-@[grind] def allzero : Vox_Ptrie_t -> Int -> Prop
+@[grind, expose] public def allzero : Vox_Ptrie_t -> Int -> Prop
   | .Empty, _ => True
   | .Leaf j, b => zbit j b
   | .Branch _ _ t0 t1, b => allzero t0 b ∧ allzero t1 b
 
-@[grind] def allone : Vox_Ptrie_t -> Int -> Prop
+@[grind, expose] public def allone : Vox_Ptrie_t -> Int -> Prop
   | .Empty, _ => True
   | .Leaf j, b => ¬ zbit j b
   | .Branch _ _ t0 t1, b => allone t0 b ∧ allone t1 b
 
-@[grind] def trie : Vox_Ptrie_t -> Prop
+@[grind, expose] public def trie : Vox_Ptrie_t -> Prop
   | .Empty => True
   | .Leaf _ => True
   | .Branch p b t0 t1 =>
@@ -208,13 +208,13 @@ theorem zbit_mask {b b' : Int} (i : Int) (hd : 2*b' ∣ b) :
       allmatch t0 p b ∧ allmatch t1 p b ∧
       allzero t0 b ∧ allone t1 b ∧ trie t0 ∧ trie t1
 
-@[grind] def join (p0 : Int) (t0 : Vox_Ptrie_t) (p1 : Int) (t1 : Vox_Ptrie_t) :
+@[grind, expose] public def join (p0 : Int) (t0 : Vox_Ptrie_t) (p1 : Int) (t1 : Vox_Ptrie_t) :
     Vox_Ptrie_t :=
   if zbit p0 (bbit p0 p1)
   then .Branch (mask p0 (bbit p0 p1)) (bbit p0 p1) t0 t1
   else .Branch (mask p0 (bbit p0 p1)) (bbit p0 p1) t1 t0
 
-@[grind] def insert (i : Int) : Vox_Ptrie_t -> Vox_Ptrie_t
+@[grind, expose] public def insert (i : Int) : Vox_Ptrie_t -> Vox_Ptrie_t
   | .Empty => .Leaf i
   | .Leaf j => if i = j then .Leaf i else join i (.Leaf i) j (.Leaf j)
   | .Branch p b t0 t1 =>
@@ -226,43 +226,43 @@ theorem zbit_mask {b b' : Int} (i : Int) (hd : 2*b' ∣ b) :
 -- The invariant makes one-path search complete: a key that fails the
 -- prefix test, or sits on the other side of the branching bit, is in
 -- NO subtree.
-theorem not_mem_mismatch (i p b : Int) (t : Vox_Ptrie_t)
+public theorem not_mem_mismatch (i p b : Int) (t : Vox_Ptrie_t)
     (h : allmatch t p b) (hm : mask i b ≠ p) : ¬ mem i t := by
   induction t <;> grind
 grind_pattern not_mem_mismatch => mem i t, allmatch t p b
 
-theorem not_mem_zero (i b : Int) (t : Vox_Ptrie_t)
+public theorem not_mem_zero (i b : Int) (t : Vox_Ptrie_t)
     (h : allzero t b) (hz : ¬ zbit i b) : ¬ mem i t := by
   induction t <;> grind
 grind_pattern not_mem_zero => mem i t, allzero t b
 
-theorem not_mem_one (i b : Int) (t : Vox_Ptrie_t)
+public theorem not_mem_one (i b : Int) (t : Vox_Ptrie_t)
     (h : allone t b) (hz : zbit i b) : ¬ mem i t := by
   induction t <;> grind
 grind_pattern not_mem_one => mem i t, allone t b
 
 -- Insertion adds exactly one key ...
-theorem mem_insert (x y : Int) (t : Vox_Ptrie_t) :
+public theorem mem_insert (x y : Int) (t : Vox_Ptrie_t) :
     mem y (insert x t) ↔ (y = x ∨ mem y t) := by
   induction t <;> grind
 grind_pattern mem_insert => mem y (insert x t)
 
-theorem allmatch_insert (x p b : Int) (t : Vox_Ptrie_t)
+public theorem allmatch_insert (x p b : Int) (t : Vox_Ptrie_t)
     (h : allmatch t p b) (hx : mask x b = p) : allmatch (insert x t) p b := by
   induction t <;> grind
 grind_pattern allmatch_insert => allmatch (insert x t) p b
 
-theorem allzero_insert (x b : Int) (t : Vox_Ptrie_t)
+public theorem allzero_insert (x b : Int) (t : Vox_Ptrie_t)
     (h : allzero t b) (hx : zbit x b) : allzero (insert x t) b := by
   induction t <;> grind
 grind_pattern allzero_insert => allzero (insert x t) b
 
-theorem allone_insert (x b : Int) (t : Vox_Ptrie_t)
+public theorem allone_insert (x b : Int) (t : Vox_Ptrie_t)
     (h : allone t b) (hx : ¬ zbit x b) : allone (insert x t) b := by
   induction t <;> grind
 grind_pattern allone_insert => allone (insert x t) b
 
-theorem allmatch_weaken {b b' : Int} (p : Int) (t : Vox_Ptrie_t)
+public theorem allmatch_weaken {b b' : Int} (p : Int) (t : Vox_Ptrie_t)
     (h : allmatch t p b) (hd : b' ∣ b) : allmatch t (mask p b') b' := by
   induction t with
   | Empty => trivial
@@ -271,7 +271,7 @@ theorem allmatch_weaken {b b' : Int} (p : Int) (t : Vox_Ptrie_t)
     grind [allmatch]
   | Branch q c t0 t1 ih0 ih1 => grind [allmatch]
 
-theorem allzero_of_allmatch {b b' : Int} (p : Int) (t : Vox_Ptrie_t)
+public theorem allzero_of_allmatch {b b' : Int} (p : Int) (t : Vox_Ptrie_t)
     (h : allmatch t p b) (hd : 2*b' ∣ b) (hp : zbit p b') : allzero t b' := by
   induction t with
   | Empty => trivial
@@ -280,7 +280,7 @@ theorem allzero_of_allmatch {b b' : Int} (p : Int) (t : Vox_Ptrie_t)
     grind [allmatch, allzero]
   | Branch q c t0 t1 ih0 ih1 => grind [allmatch, allzero]
 
-theorem allone_of_allmatch {b b' : Int} (p : Int) (t : Vox_Ptrie_t)
+public theorem allone_of_allmatch {b b' : Int} (p : Int) (t : Vox_Ptrie_t)
     (h : allmatch t p b) (hd : 2*b' ∣ b) (hp : ¬ zbit p b') : allone t b' := by
   induction t with
   | Empty => trivial
@@ -292,7 +292,7 @@ theorem allone_of_allmatch {b b' : Int} (p : Int) (t : Vox_Ptrie_t)
 -- Joining a fresh leaf with a whole subtree keeps the invariant: the
 -- branching bit of the two prefixes is a valid bit, both sides match
 -- the shared prefix below it, and they part ways exactly at it.
-theorem trie_join (x p : Int) (t : Vox_Ptrie_t)
+public theorem trie_join (x p : Int) (t : Vox_Ptrie_t)
     (ht : trie t) (hxnep : x ≠ p)
     (hall : allmatch t (mask p (bbit x p)) (bbit x p))
     (hz : zbit p (bbit x p) → allzero t (bbit x p))
@@ -306,7 +306,7 @@ theorem trie_join (x p : Int) (t : Vox_Ptrie_t)
   grind
 
 -- ... and preserves the shape that makes the pruning sound.
-theorem trie_insert (x : Int) (t : Vox_Ptrie_t) (h : trie t) :
+public theorem trie_insert (x : Int) (t : Vox_Ptrie_t) (h : trie t) :
     trie (insert x t) := by
   induction t with
   | Empty => grind

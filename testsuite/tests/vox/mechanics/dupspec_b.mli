@@ -1,7 +1,7 @@
 type t = C | D
 
 [%%vox.lean {lean|
-@[grind] def dup_spec : Vox_Dupspec_b_t -> Int
+@[grind, expose] public def dup_spec : Vox_Dupspec_b_t -> Int
   | .C => 0
   | .D => 1
 |lean}]

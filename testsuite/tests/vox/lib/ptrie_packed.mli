@@ -27,17 +27,17 @@ type t =
 -- strictly ABOVE the power-of-two bit [b]; [zbit i b] says bit [b] of
 -- [i] is clear.  Euclidean / and % are floor semantics for positive
 -- divisors, i.e. exactly infinite two's complement.
-def hmask (i b : Int) : Int := i - i % (2*b)
+@[expose] public def hmask (i b : Int) : Int := i - i % (2*b)
 
-def zbit (i b : Int) : Prop := i % (2*b) < b
+@[expose] public def zbit (i b : Int) : Prop := i % (2*b) < b
 
-instance (i b : Int) : Decidable (zbit i b) := by unfold zbit; infer_instance
+public instance (i b : Int) : Decidable (zbit i b) := by unfold zbit; infer_instance
 
-inductive isbit : Int -> Prop where
+public inductive isbit : Int -> Prop where
   | one : isbit 1
   | dbl : {b : Int} -> isbit b -> isbit (2*b)
 
-theorem isbit_pos {b : Int} (h : isbit b) : 1 ≤ b := by
+public theorem isbit_pos {b : Int} (h : isbit b) : 1 ≤ b := by
   induction h <;> omega
 grind_pattern isbit_pos => isbit b
 
@@ -45,7 +45,7 @@ grind_pattern isbit_pos => isbit b
 -- when equal or when either is negative: two integers of opposite
 -- sign differ at every sufficiently high bit, so no highest one
 -- exists on ideal integers).
-def hbit (p0 p1 : Int) : Int :=
+@[expose] public def hbit (p0 p1 : Int) : Int :=
   if p0 < 0 ∨ p1 < 0 ∨ p0/2 = p1/2 then 1
   else 2 * hbit (p0/2) (p1/2)
 termination_by (p0.natAbs + p1.natAbs)
@@ -53,7 +53,7 @@ decreasing_by omega
 
 -- Lowest set bit of a POSITIVE integer (junk 1 otherwise): the
 -- arithmetic meaning of the compiler's [x land (-x)].
-def lbit (x : Int) : Int :=
+@[expose] public def lbit (x : Int) : Int :=
   if x ≤ 0 then 1
   else if x % 2 = 1 then 1
   else 2 * lbit (x/2)
@@ -61,13 +61,13 @@ termination_by x.natAbs
 decreasing_by omega
 
 -- The workhorse: peel one bit off a modulus.
-theorem emod_unique {a b q r : Int} (h0 : 0 ≤ r) (h1 : r < b)
+public theorem emod_unique {a b q r : Int} (h0 : 0 ≤ r) (h1 : r < b)
     (h : a = b*q + r) : a % b = r := by
   subst h
   rw [Int.add_comm, Int.add_mul_emod_self_left]
   exact Int.emod_eq_of_lt h0 h1
 
-theorem emod_double (p m : Int) (hm : 0 < m) :
+public theorem emod_double (p m : Int) (hm : 0 < m) :
     p % (2*m) = 2 * ((p/2) % m) + p % 2 := by
   have h2 := Int.mul_ediv_add_emod p 2
   have h3 := Int.mul_ediv_add_emod (p/2) m
@@ -80,18 +80,18 @@ theorem emod_double (p m : Int) (hm : 0 < m) :
     _ = (2*m) * ((p/2)/m) + (2 * ((p/2) % m) + p % 2) := by
           rw [Int.mul_add, Int.mul_assoc]; omega
 
-theorem hbit_isbit (p0 p1 : Int) : isbit (hbit p0 p1) := by
+public theorem hbit_isbit (p0 p1 : Int) : isbit (hbit p0 p1) := by
   fun_induction hbit p0 p1 with
   | case1 => exact isbit.one
   | case2 _ _ _ ih => exact isbit.dbl ih
 grind_pattern hbit_isbit => hbit p0 p1
 
-theorem hbit_pos (p0 p1 : Int) : 1 ≤ hbit p0 p1 :=
+public theorem hbit_pos (p0 p1 : Int) : 1 ≤ hbit p0 p1 :=
   isbit_pos (hbit_isbit p0 p1)
 
 -- Two distinct nonnegative integers disagree AT their highest
 -- differing bit ...
-theorem hbit_diff (p0 p1 : Int) :
+public theorem hbit_diff (p0 p1 : Int) :
     0 ≤ p0 → 0 ≤ p1 → p0 ≠ p1 →
     (zbit p0 (hbit p0 p1) ↔ ¬ zbit p1 (hbit p0 p1)) := by
   fun_induction hbit p0 p1 with
@@ -117,7 +117,7 @@ theorem hbit_diff (p0 p1 : Int) :
     omega
 
 -- ... and agree strictly above it.
-theorem hbit_agree (p0 p1 : Int) :
+public theorem hbit_agree (p0 p1 : Int) :
     0 ≤ p0 → 0 ≤ p1 →
     hmask p0 (hbit p0 p1) = hmask p1 (hbit p0 p1) := by
   fun_induction hbit p0 p1 with
@@ -145,7 +145,7 @@ theorem hbit_agree (p0 p1 : Int) :
 
 -- Nonnegative integers that differ ABOVE bit [b] have their highest
 -- differing bit above [b].
-theorem hbit_gt (p0 p1 : Int) :
+public theorem hbit_gt (p0 p1 : Int) :
     0 ≤ p0 → 0 ≤ p1 →
     ∀ b, isbit b → hmask p0 b ≠ hmask p1 b → b < hbit p0 p1 := by
   fun_induction hbit p0 p1 with
@@ -182,7 +182,7 @@ theorem hbit_gt (p0 p1 : Int) :
       have := ih (by omega) (by omega) c hc' hm'
       omega
 
-theorem isbit_dvd {b : Int} (hb : isbit b) :
+public theorem isbit_dvd {b : Int} (hb : isbit b) :
     ∀ a, isbit a → a ≤ b → a ∣ b := by
   induction hb with
   | one =>
@@ -199,7 +199,7 @@ theorem isbit_dvd {b : Int} (hb : isbit b) :
       rcases this with ⟨k, hk⟩
       exact ⟨k, by rw [hk, Int.mul_assoc]⟩
 
-theorem isbit_lt_dvd {b : Int} (hb : isbit b) :
+public theorem isbit_lt_dvd {b : Int} (hb : isbit b) :
     ∀ a, isbit a → a < b → 2*a ∣ b := by
   induction hb with
   | one =>
@@ -217,7 +217,7 @@ theorem isbit_lt_dvd {b : Int} (hb : isbit b) :
 
 -- Two multiples of [d] strictly apart are at least [d] apart: the
 -- step that keeps every "multiple below a multiple" argument linear.
-theorem dvd_lt_le {d x y : Int} (hd : 0 < d) (hx : d ∣ x) (hy : d ∣ y)
+public theorem dvd_lt_le {d x y : Int} (hd : 0 < d) (hx : d ∣ x) (hy : d ∣ y)
     (h : x < y) : x + d ≤ y := by
   rcases hx with ⟨qx, hqx⟩
   rcases hy with ⟨qy, hqy⟩
@@ -235,7 +235,7 @@ theorem dvd_lt_le {d x y : Int} (hd : 0 < d) (hx : d ∣ x) (hy : d ∣ y)
 
 -- Telescoping upward: masking above [b], then above a HIGHER bit
 -- [b'], is masking above [b'].
-theorem hmask_tele {b b' : Int} (i : Int) (hb : 0 < b) (hb' : 0 < b')
+public theorem hmask_tele {b b' : Int} (i : Int) (hb : 0 < b) (hb' : 0 < b')
     (hd : (2*b) ∣ (2*b')) : hmask (hmask i b) b' = hmask i b' := by
   have hMM := Int.emod_emod_of_dvd i hd
   have h1 := Int.mul_ediv_add_emod i (2*b')
@@ -256,7 +256,7 @@ theorem hmask_tele {b b' : Int} (i : Int) (hb : 0 < b) (hb' : 0 < b')
 -- Keys that match a prefix above [b] follow the PREFIX's bits at any
 -- higher bit [B] with 2b | B: the whole subtree rides one side of a
 -- higher branch.
-theorem zbit_match {b B : Int} (j p : Int) (hb : 0 < b) (hB : 0 < B)
+public theorem zbit_match {b B : Int} (j p : Int) (hb : 0 < b) (hB : 0 < B)
     (hd : (2*b) ∣ B) (hp : p % (2*b) = 0) (hj : hmask j b = p) :
     (zbit j B ↔ zbit p B) := by
   have hd2 : (2*b) ∣ (2*B) := by
@@ -293,7 +293,7 @@ theorem zbit_match {b B : Int} (j p : Int) (hb : 0 < b) (hB : 0 < B)
     omega
 
 -- Helpers about hmask on nonnegative integers.
-theorem hmask_nonneg (i b : Int) (hi : 0 ≤ i) (_hb : 0 < b) :
+public theorem hmask_nonneg (i b : Int) (hi : 0 ≤ i) (_hb : 0 < b) :
     0 ≤ hmask i b := by
   have h1 := Int.mul_ediv_add_emod i (2*b)
   have h2 := Int.ediv_nonneg hi (show (0:Int) ≤ 2*b by omega)
@@ -302,7 +302,7 @@ theorem hmask_nonneg (i b : Int) (hi : 0 ≤ i) (_hb : 0 < b) :
   omega
 grind_pattern hmask_nonneg => hmask i b
 
-theorem hmask_mod (i b : Int) (hb : 0 < b) : hmask i b % (2*b) = 0 := by
+public theorem hmask_mod (i b : Int) (hb : 0 < b) : hmask i b % (2*b) = 0 := by
   have h1 := Int.mul_ediv_add_emod i (2*b)
   unfold hmask
   apply emod_unique (q := i / (2*b)) (by omega) (by omega)
@@ -310,7 +310,7 @@ theorem hmask_mod (i b : Int) (hb : 0 < b) : hmask i b % (2*b) = 0 := by
 grind_pattern hmask_mod => hmask i b
 
 -- A prefix with no bits at or below [b] is its own mask.
-theorem hmask_self (p b : Int) (hb : 0 < b) (hp : p % (2*b) = 0) :
+public theorem hmask_self (p b : Int) (hb : 0 < b) (hp : p % (2*b) = 0) :
     hmask p b = p := by
   unfold hmask
   omega
@@ -318,10 +318,10 @@ grind_pattern hmask_self => hmask p b
 
 -- [pack]'s disjointness precondition, as a named Prop the surface
 -- contract can state.
-@[grind] def packmod (p b : Int) : Prop := p % (2*b) = 0
+@[grind, expose] public def packmod (p b : Int) : Prop := p % (2*b) = 0
 
 -- [lbit] of anything is a bit (the junk value 1 included) ...
-theorem lbit_isbit (x : Int) : isbit (lbit x) := by
+public theorem lbit_isbit (x : Int) : isbit (lbit x) := by
   fun_induction lbit x with
   | case1 => exact isbit.one
   | case2 => exact isbit.one
@@ -329,7 +329,7 @@ theorem lbit_isbit (x : Int) : isbit (lbit x) := by
 grind_pattern lbit_isbit => lbit x
 
 -- ... a positive integer splits as prefix-above + lowest-bit ...
-theorem lbit_split (x : Int) :
+public theorem lbit_split (x : Int) :
     0 < x → (x - lbit x) % (2 * lbit x) = 0 ∧ 0 ≤ x - lbit x := by
   fun_induction lbit x with
   | case1 x h =>
@@ -353,7 +353,7 @@ grind_pattern lbit_split => lbit x
 
 -- ... and [lbit] is EXACTLY the decomposition [pack] built: the
 -- proved meaning of the compiler's [x land (-x)] unpack.
-theorem lbit_pack (b : Int) (hb : isbit b) :
+public theorem lbit_pack (b : Int) (hb : isbit b) :
     ∀ p, p % (2*b) = 0 → 0 ≤ p → lbit (p + b) = b := by
   induction hb with
   | one =>
@@ -385,32 +385,32 @@ grind_pattern lbit_pack => lbit (p + b)
 -- nonnegative key differ at every sufficiently high bit, so no
 -- highest differing bit exists (the compiler's finite word makes the
 -- sign bit an ordinary bit; width is outside the model, as always).
-@[grind] def mem : Int -> Vox_Ptrie_packed_t -> Prop
+@[grind, expose] public def mem : Int -> Vox_Ptrie_packed_t -> Prop
   | _, .Empty => False
   | i, .Leaf j => i = j
   | i, .Branch _ t0 t1 => mem i t0 ∨ mem i t1
 
-@[grind] def allmatch : Vox_Ptrie_packed_t -> Int -> Int -> Prop
+@[grind, expose] public def allmatch : Vox_Ptrie_packed_t -> Int -> Int -> Prop
   | .Empty, _, _ => True
   | .Leaf j, p, b => hmask j b = p
   | .Branch _ t0 t1, p, b => allmatch t0 p b ∧ allmatch t1 p b
 
-@[grind] def allzero : Vox_Ptrie_packed_t -> Int -> Prop
+@[grind, expose] public def allzero : Vox_Ptrie_packed_t -> Int -> Prop
   | .Empty, _ => True
   | .Leaf j, b => zbit j b
   | .Branch _ t0 t1, b => allzero t0 b ∧ allzero t1 b
 
-@[grind] def allone : Vox_Ptrie_packed_t -> Int -> Prop
+@[grind, expose] public def allone : Vox_Ptrie_packed_t -> Int -> Prop
   | .Empty, _ => True
   | .Leaf j, b => ¬ zbit j b
   | .Branch _ t0 t1, b => allone t0 b ∧ allone t1 b
 
-@[grind] def allpos : Vox_Ptrie_packed_t -> Prop
+@[grind, expose] public def allpos : Vox_Ptrie_packed_t -> Prop
   | .Empty => True
   | .Leaf j => 0 ≤ j
   | .Branch _ t0 t1 => allpos t0 ∧ allpos t1
 
-@[grind] def trie : Vox_Ptrie_packed_t -> Prop
+@[grind, expose] public def trie : Vox_Ptrie_packed_t -> Prop
   | .Empty => True
   | .Leaf j => 0 ≤ j
   | .Branch x t0 t1 =>
@@ -420,13 +420,13 @@ grind_pattern lbit_pack => lbit (p + b)
       allzero t0 (lbit x) ∧ allone t1 (lbit x) ∧
       trie t0 ∧ trie t1
 
-@[grind] def join (p0 : Int) (t0 : Vox_Ptrie_packed_t)
+@[grind, expose] public def join (p0 : Int) (t0 : Vox_Ptrie_packed_t)
     (p1 : Int) (t1 : Vox_Ptrie_packed_t) : Vox_Ptrie_packed_t :=
   if zbit p0 (hbit p0 p1)
   then .Branch (hmask p0 (hbit p0 p1) + hbit p0 p1) t0 t1
   else .Branch (hmask p0 (hbit p0 p1) + hbit p0 p1) t1 t0
 
-@[grind] def insert (i : Int) : Vox_Ptrie_packed_t -> Vox_Ptrie_packed_t
+@[grind, expose] public def insert (i : Int) : Vox_Ptrie_packed_t -> Vox_Ptrie_packed_t
   | .Empty => .Leaf i
   | .Leaf j => if i = j then .Leaf i else join i (.Leaf i) j (.Leaf j)
   | .Branch x t0 t1 =>
@@ -436,45 +436,45 @@ grind_pattern lbit_pack => lbit (p + b)
       else join i (.Leaf i) (x - lbit x) (.Branch x t0 t1)
 
 -- The invariant makes one-path search complete.
-theorem not_mem_mismatch (i p b : Int) (t : Vox_Ptrie_packed_t)
+public theorem not_mem_mismatch (i p b : Int) (t : Vox_Ptrie_packed_t)
     (h : allmatch t p b) (hm : hmask i b ≠ p) : ¬ mem i t := by
   induction t <;> grind
 grind_pattern not_mem_mismatch => mem i t, allmatch t p b
 
-theorem not_mem_zero (i b : Int) (t : Vox_Ptrie_packed_t)
+public theorem not_mem_zero (i b : Int) (t : Vox_Ptrie_packed_t)
     (h : allzero t b) (hz : ¬ zbit i b) : ¬ mem i t := by
   induction t <;> grind
 grind_pattern not_mem_zero => mem i t, allzero t b
 
-theorem not_mem_one (i b : Int) (t : Vox_Ptrie_packed_t)
+public theorem not_mem_one (i b : Int) (t : Vox_Ptrie_packed_t)
     (h : allone t b) (hz : zbit i b) : ¬ mem i t := by
   induction t <;> grind
 grind_pattern not_mem_one => mem i t, allone t b
 
 -- Insertion adds exactly one key ...
-theorem mem_insert (x y : Int) (t : Vox_Ptrie_packed_t) :
+public theorem mem_insert (x y : Int) (t : Vox_Ptrie_packed_t) :
     mem y (insert x t) ↔ (y = x ∨ mem y t) := by
   induction t <;> grind
 grind_pattern mem_insert => mem y (insert x t)
 
-theorem allmatch_insert (x p b : Int) (t : Vox_Ptrie_packed_t)
+public theorem allmatch_insert (x p b : Int) (t : Vox_Ptrie_packed_t)
     (h : allmatch t p b) (hx : hmask x b = p) :
     allmatch (insert x t) p b := by
   induction t <;> grind
 grind_pattern allmatch_insert => allmatch (insert x t) p b
 
-theorem allzero_insert (x b : Int) (t : Vox_Ptrie_packed_t)
+public theorem allzero_insert (x b : Int) (t : Vox_Ptrie_packed_t)
     (h : allzero t b) (hx : zbit x b) : allzero (insert x t) b := by
   induction t <;> grind
 grind_pattern allzero_insert => allzero (insert x t) b
 
-theorem allone_insert (x b : Int) (t : Vox_Ptrie_packed_t)
+public theorem allone_insert (x b : Int) (t : Vox_Ptrie_packed_t)
     (h : allone t b) (hx : ¬ zbit x b) : allone (insert x t) b := by
   induction t <;> grind
 grind_pattern allone_insert => allone (insert x t) b
 
 -- Weakening a subtree's prefix to a HIGHER bit.
-theorem allmatch_weaken {b B : Int} (p : Int) (t : Vox_Ptrie_packed_t)
+public theorem allmatch_weaken {b B : Int} (p : Int) (t : Vox_Ptrie_packed_t)
     (h : allmatch t p b) (hb : 0 < b) (hB : 0 < B)
     (hd : (2*b) ∣ (2*B)) : allmatch t (hmask p B) B := by
   induction t with
@@ -484,7 +484,7 @@ theorem allmatch_weaken {b B : Int} (p : Int) (t : Vox_Ptrie_packed_t)
     grind [allmatch]
   | Branch x t0 t1 ih0 ih1 => grind [allmatch]
 
-theorem allzero_of_allmatch {b B : Int} (p : Int) (t : Vox_Ptrie_packed_t)
+public theorem allzero_of_allmatch {b B : Int} (p : Int) (t : Vox_Ptrie_packed_t)
     (h : allmatch t p b) (hb : 0 < b) (hB : 0 < B) (hd : (2*b) ∣ B)
     (hp : p % (2*b) = 0) (hz : zbit p B) : allzero t B := by
   induction t with
@@ -494,7 +494,7 @@ theorem allzero_of_allmatch {b B : Int} (p : Int) (t : Vox_Ptrie_packed_t)
     grind [allmatch, allzero]
   | Branch x t0 t1 ih0 ih1 => grind [allmatch, allzero]
 
-theorem allone_of_allmatch {b B : Int} (p : Int) (t : Vox_Ptrie_packed_t)
+public theorem allone_of_allmatch {b B : Int} (p : Int) (t : Vox_Ptrie_packed_t)
     (h : allmatch t p b) (hb : 0 < b) (hB : 0 < B) (hd : (2*b) ∣ B)
     (hp : p % (2*b) = 0) (hz : ¬ zbit p B) : allone t B := by
   induction t with
@@ -505,7 +505,7 @@ theorem allone_of_allmatch {b B : Int} (p : Int) (t : Vox_Ptrie_packed_t)
   | Branch x t0 t1 ih0 ih1 => grind [allmatch, allone]
 
 -- Joining a fresh leaf with a whole subtree keeps the invariant.
-theorem trie_join (x p : Int) (t : Vox_Ptrie_packed_t)
+public theorem trie_join (x p : Int) (t : Vox_Ptrie_packed_t)
     (ht : trie t) (hx : 0 ≤ x) (hp : 0 ≤ p) (hxnep : x ≠ p)
     (hall : allmatch t (hmask p (hbit x p)) (hbit x p))
     (hz : zbit p (hbit x p) → allzero t (hbit x p))
@@ -523,7 +523,7 @@ theorem trie_join (x p : Int) (t : Vox_Ptrie_packed_t)
   grind
 
 -- ... and insertion of a nonnegative key preserves it.
-theorem trie_insert (x : Int) (t : Vox_Ptrie_packed_t)
+public theorem trie_insert (x : Int) (t : Vox_Ptrie_packed_t)
     (h : trie t) (hx : 0 ≤ x) : trie (insert x t) := by
   induction t with
   | Empty => grind

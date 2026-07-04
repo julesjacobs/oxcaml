@@ -299,6 +299,61 @@ element the counterexample names; below,
 <pre><code class="ml">@BST_FAIL@</code></pre>
 <pre class="out"><code>@BST_FAIL_OUT@</code></pre>
 
+<h3 id="seal">Sealed interfaces: one sig, two implementations</h3>
+<p>The interface can hide more than code.  <code>step.mli</code> exports an
+opaque model constant and a law about it &mdash; an <code>axiom</code>, on
+the client&rsquo;s side of the wall.  The block is compiled once, from the
+<code>.mli</code> alone, into a Lean <em>module</em>
+(<code>VoxSig_Step.olean</code>, next to the <code>.cmi</code>) that clients
+import: a client proof depends on the interface text and nothing else
+&mdash; it exists before any implementation does, and no <code>.ml</code>
+edit can perturb it.  For an implementation the same axiom is an
+<em>obligation</em>: its solver input ends in a seal that re-elaborates the
+interface and demands a same-named <em>proved</em> theorem for every law.
+Two different implementations pay the same text below; the client verifies
+unchanged against either.</p>
+
+<div class="tabs" data-tabs>
+  <button class="on">step.mli &mdash; the law, an axiom to clients</button>
+  <button>step_incr &mdash; one payment</button>
+  <button>step_double &mdash; another</button>
+  <button>a client, either way</button>
+</div>
+<div class="tabpane on"><pre><code class="ml">@SEAL_MLI@</code></pre></div>
+<div class="tabpane"><pre><code class="ml">@SEAL_INCR@</code></pre></div>
+<div class="tabpane"><pre><code class="ml">@SEAL_DOUBLE@</code></pre></div>
+<div class="tabpane"><pre><code class="ml">@SEAL_CLIENT@</code></pre>
+<p style="color:var(--dim);font-size:.9rem"><code>demo/lean_seal.ml</code>
+and <code>demo/lean_seal_alt.ml</code> verify this same body against
+step_incr and step_double respectively; <code>step</code> is opaque, so no
+client fact can distinguish them.</p></div>
+
+<p>And the seal fails closed.  An implementation that satisfies its own
+definition honestly but cannot prove the interface&rsquo;s law is refused at
+compile time &mdash; an unpaid obligation never reaches a client:</p>
+<pre><code class="ml">@SEAL_BAD@</code></pre>
+<pre class="out"><code>@SEAL_FAIL_OUT@</code></pre>
+
+<h3 id="oset">Full abstraction: the type hidden too</h3>
+<p><code>[@@vox.sort opaque]</code> gives an abstract type its own
+uninterpreted sort instead of the shared <code>VoxU</code>, so the interface
+block can state laws about exactly that type; the implementation&rsquo;s
+concrete declaration registers under the same solver name, and the sealed
+laws land on it.  Below, a set whose representation &mdash; even that it is
+a tree &mdash; never leaves the unit.  Clients prove membership facts from
+the four axioms alone; what the <code>.mli</code> hides, no client proof can
+see (<code>mechanics/lean_oset_opaque.ml</code> checks that a claim the
+axioms do not decide is refused).</p>
+
+<div class="tabs" data-tabs>
+  <button class="on">oset.mli &mdash; type and model both hidden</button>
+  <button>oset.ml &mdash; pays over the concrete tree</button>
+  <button>a client, from the axioms alone</button>
+</div>
+<div class="tabpane on"><pre style="max-height:34rem"><code class="ml">@OSET_MLI@</code></pre></div>
+<div class="tabpane"><pre style="max-height:34rem"><code class="ml">@OSET_ML@</code></pre></div>
+<div class="tabpane"><pre><code class="ml">@OSET_CLIENT@</code></pre></div>
+
 <h2 id="real">The Patricia trie</h2>
 <p>This is the integer-set structure OxCaml&rsquo;s optimizer uses
 (<code>middle_end/flambda2/algorithms/patricia_tree.ml</code>), in its

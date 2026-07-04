@@ -15,7 +15,7 @@
 open Slice_lib
 
 [%%vox.lean {lean|
-def merged : List Int -> List Int -> List Int
+@[expose] public def merged : List Int -> List Int -> List Int
   | [], right => right
   | left, [] => left
   | x :: xs, y :: ys =>
@@ -25,7 +25,7 @@ def merged : List Int -> List Int -> List Int
 termination_by left right => left.length + right.length
 decreasing_by all_goals simp_wf
 
-theorem cnt_merged (left right : List Int) (value : Int) :
+public theorem cnt_merged (left right : List Int) (value : Int) :
     cnt (merged left right) value = cnt left value + cnt right value := by
   fun_induction merged left right with
   | case1 => grind
@@ -37,21 +37,21 @@ theorem cnt_merged (left right : List Int) (value : Int) :
     have := ih
     grind
 
-theorem perm_merged (left right : List Int) :
+public theorem perm_merged (left right : List Int) :
     perm (merged left right) (app left right) := by
   intro value
   rw [cnt_merged, cnt_app]
 
-theorem perm_symm (left right : List Int) (h : perm left right) :
+public theorem perm_symm (left right : List Int) (h : perm left right) :
     perm right left := by
   intro value
   exact (h value).symm
 
-theorem perm_app_merged (left right : List Int) :
+public theorem perm_app_merged (left right : List Int) :
     perm (app left right) (merged left right) :=
   perm_symm _ _ (perm_merged left right)
 
-theorem perm_split_results (original left right : List Int) (k : Int)
+public theorem perm_split_results (original left right : List Int) (k : Int)
     (hl : perm (take k original) left)
     (hr : perm (drop k original) right) :
     perm original (app left right) := by
@@ -61,17 +61,17 @@ theorem perm_split_results (original left right : List Int) (k : Int)
   exact perm_glue2 original (take k original) left
     (drop k original) right h0 hl hr
 
-theorem merged_all_ge (left right : List Int) (bound : Int)
+public theorem merged_all_ge (left right : List Int) (bound : Int)
     (hl : all_ge left bound) (hr : all_ge right bound) :
     all_ge (merged left right) bound := by
   fun_induction merged left right <;> grind
 
-theorem all_ge_weaken (values : List Int) (high low : Int)
+public theorem all_ge_weaken (values : List Int) (high low : Int)
     (hge : all_ge values high) (hle : low <= high) :
     all_ge values low := by
   induction values <;> grind
 
-theorem sorted_tail_ge (head : Int) (tail : List Int)
+public theorem sorted_tail_ge (head : Int) (tail : List Int)
     (hs : sorted (head :: tail)) : all_ge tail head := by
   induction tail generalizing head with
   | nil => grind
@@ -80,11 +80,11 @@ theorem sorted_tail_ge (head : Int) (tail : List Int)
     have hweak := all_ge_weaken rest next head hrest (by grind)
     grind
 
-theorem sorted_tail (head : Int) (tail : List Int)
+public theorem sorted_tail (head : Int) (tail : List Int)
     (hs : sorted (head :: tail)) : sorted tail := by
   cases tail <;> grind
 
-theorem sorted_merged (left right : List Int)
+public theorem sorted_merged (left right : List Int)
     (hl : sorted left) (hr : sorted right) :
     sorted (merged left right) := by
   fun_induction merged left right with
@@ -113,32 +113,32 @@ theorem sorted_merged (left right : List Int)
     exact sorted_cons_ge _ _ htail hs
 
 -- ----- list plumbing the loop proofs need -----
-theorem merged_nil (l : List Int) : merged l [] = l := by
+public theorem merged_nil (l : List Int) : merged l [] = l := by
   cases l <;> grind [merged]
 
-theorem len_merged (a b : List Int) : len (merged a b) = len a + len b := by
+public theorem len_merged (a b : List Int) : len (merged a b) = len a + len b := by
   fun_induction merged a b <;> grind
 
-theorem app_nil (l : List Int) : app l [] = l := by
+public theorem app_nil (l : List Int) : app l [] = l := by
   induction l <;> grind
 
-theorem app_assoc (a b c : List Int) :
+public theorem app_assoc (a b c : List Int) :
     app (app a b) c = app a (app b c) := by
   induction a <;> grind
 
-theorem take_all (i : Int) (l : List Int) (h : len l <= i) :
+public theorem take_all (i : Int) (l : List Int) (h : len l <= i) :
     take i l = l := by
   induction l generalizing i with
   | nil => grind
   | cons x t ih => have := ih (i - 1); have := len_nonneg t; grind
 
-theorem take_app_exact (i : Int) (a b : List Int) (h : i = len a) :
+public theorem take_app_exact (i : Int) (a b : List Int) (h : i = len a) :
     take i (app a b) = a := by
   induction a generalizing i with
   | nil => grind [take_nonpos]
   | cons x t ih => have := ih (i - 1); have := len_nonneg t; grind
 
-theorem drop_app_exact (i : Int) (a b : List Int) (h : i = len a) :
+public theorem drop_app_exact (i : Int) (a b : List Int) (h : i = len a) :
     drop i (app a b) = b := by
   induction a generalizing i with
   | nil => grind [drop_nonpos]
@@ -146,7 +146,7 @@ theorem drop_app_exact (i : Int) (a b : List Int) (h : i = len a) :
 
 -- one-step unfoldings of [merged], phrased on the head element so
 -- the step lemmas below can case on which side the loop consumed
-theorem merged_step_left (x : Int) (xs ys : List Int)
+public theorem merged_step_left (x : Int) (xs ys : List Int)
     (h : ys = [] ∨ x <= elem ys 0) :
     merged (x :: xs) ys = x :: merged xs ys := by
   cases ys with
@@ -156,7 +156,7 @@ theorem merged_step_left (x : Int) (xs ys : List Int)
     | inl h => grind
     | inr h => grind [merged]
 
-theorem merged_step_right (y : Int) (xs ys : List Int)
+public theorem merged_step_right (y : Int) (xs ys : List Int)
     (h : xs = [] ∨ y < elem xs 0) :
     merged xs (y :: ys) = y :: merged xs ys := by
   cases xs with
@@ -170,16 +170,16 @@ theorem merged_step_right (y : Int) (xs ys : List Int)
 -- After consuming [i] elements of the left run [take k src] and
 -- [j - k] of the right run [drop k src], the output prefix written
 -- so far, continued by the merge of what remains, is the full merge.
-def fill_inv (src tmp : List Int) (k i j : Int) : Prop :=
+@[expose] public def fill_inv (src tmp : List Int) (k i j : Int) : Prop :=
   len tmp = len src
   /\ app (take (i + j - k) tmp)
        (merged (seg i k src) (seg j (len src) src))
      = merged (take k src) (drop k src)
 
-theorem fill_inv_len (src tmp : List Int) (k i j : Int)
+public theorem fill_inv_len (src tmp : List Int) (k i j : Int)
     (h : fill_inv src tmp k i j) : len tmp = len src := h.1
 
-theorem fill_inv_init (src tmp : List Int) (k : Int)
+public theorem fill_inv_init (src tmp : List Int) (k : Int)
     (hlen : len tmp = len src) (h0 : 0 <= k) (hk : k <= len src) :
     fill_inv src tmp k 0 k := by
   have h1 := take_nonpos (0 + k - k) tmp (by omega)
@@ -189,7 +189,7 @@ theorem fill_inv_init (src tmp : List Int) (k : Int)
   unfold fill_inv
   grind
 
-theorem fill_inv_left (src tmp : List Int) (k i j : Int)
+public theorem fill_inv_left (src tmp : List Int) (k i j : Int)
     (h0 : 0 <= i) (hik : i < k) (hkj : k <= j) (hjn : j <= len src)
     (hpick : j = len src ∨ elem src i <= elem src j)
     (hinv : fill_inv src tmp k i j) :
@@ -226,7 +226,7 @@ theorem fill_inv_left (src tmp : List Int) (k i j : Int)
   · have harith : i + 1 + j - k = (i + j - k) + 1 := by omega
     grind
 
-theorem fill_inv_right (src tmp : List Int) (k i j : Int)
+public theorem fill_inv_right (src tmp : List Int) (k i j : Int)
     (h0 : 0 <= i) (hik : i <= k) (hkj : k <= j) (hjn : j < len src)
     (hpick : i = k ∨ elem src j < elem src i)
     (hinv : fill_inv src tmp k i j) :
@@ -262,7 +262,7 @@ theorem fill_inv_right (src tmp : List Int) (k i j : Int)
   · have harith : i + (j + 1) - k = (i + j - k) + 1 := by omega
     grind
 
-theorem fill_inv_done (src tmp : List Int) (k : Int)
+public theorem fill_inv_done (src tmp : List Int) (k : Int)
     (h0 : 0 <= k) (hk : k <= len src)
     (hinv : fill_inv src tmp k k (len src)) :
     tmp = merged (take k src) (drop k src) := by
@@ -278,7 +278,7 @@ theorem fill_inv_done (src tmp : List Int) (k : Int)
   grind [merged]
 
 -- ----- the copy-back step -----
-theorem copy_step (dst src : List Int) (idx : Int)
+public theorem copy_step (dst src : List Int) (idx : Int)
     (h0 : 0 <= idx) (hlt : idx < len src) (hlen : len dst = len src)
     (hpre : take idx dst = take idx src) :
     take (idx + 1) (upd dst idx (elem src idx)) = take (idx + 1) src := by

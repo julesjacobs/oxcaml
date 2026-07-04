@@ -33,9 +33,9 @@ type icell
 type itoken
 
 [%%vox.lean {lean|
-opaque cid : VoxU -> Int
-opaque tid : VoxU -> Int
-opaque cts : VoxU -> Int
+public opaque cid : VoxU -> Int
+public opaque tid : VoxU -> Int
+public opaque cts : VoxU -> Int
 |lean}]
 
 val alloc :

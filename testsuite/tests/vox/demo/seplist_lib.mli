@@ -53,32 +53,32 @@ type stepped =
   }
 
 [%%vox.lean {lean|
-opaque rid : VoxU -> Int
-abbrev HeapM := Int -> Option (Int × Vox_Seplist_lib_link)
-opaque hp : VoxU -> HeapM
+public opaque rid : VoxU -> Int
+public abbrev HeapM := Int -> Option (Int × Vox_Seplist_lib_link)
+public opaque hp : VoxU -> HeapM
 
-abbrev hsplit (h h₁ h₂ : HeapM) : Prop :=
+public abbrev hsplit (h h₁ h₂ : HeapM) : Prop :=
   (∀ x, h₁ x = none ∨ h₂ x = none)
   ∧ (∀ x, h x = match h₁ x with | some c => some c | none => h₂ x)
 
-abbrev cell (r : VoxU) (v : Int) (nxt : Vox_Seplist_lib_link)
+public abbrev cell (r : VoxU) (v : Int) (nxt : Vox_Seplist_lib_link)
     (h : HeapM) : Prop :=
   h (rid r) = some (v, nxt) ∧ ∀ x, x ≠ rid r → h x = none
 
-@[grind] def lseg :
+@[grind, expose] public def lseg :
     Vox_Seplist_lib_link -> Vox_Seplist_lib_ilist -> HeapM -> Prop
   | .Null, .INil, h => ∀ x, h x = none
   | .Ptr r, .ICons v vs, h =>
       ∃ nxt h₁ h₂, hsplit h h₁ h₂ ∧ cell r v nxt h₁ ∧ lseg nxt vs h₂
   | _, _, _ => False
 
-@[grind] def sat : Vox_Seplist_lib_hprop -> HeapM -> Prop
+@[grind, expose] public def sat : Vox_Seplist_lib_hprop -> HeapM -> Prop
   | .Emp, h => ∀ x, h x = none
   | .Node r v nxt, h => cell r v nxt h
   | .Lseg l vs, h => lseg l vs h
   | .Star p q, h => ∃ h₁ h₂, hsplit h h₁ h₂ ∧ sat p h₁ ∧ sat q h₂
 
-theorem sat_star_rot (a b q : Vox_Seplist_lib_hprop) (h : HeapM) :
+public theorem sat_star_rot (a b q : Vox_Seplist_lib_hprop) (h : HeapM) :
     sat (.Star a (.Star b q)) h ↔ sat (.Star b (.Star a q)) h := by
   constructor <;>
     rintro ⟨ha, hbq, ⟨hd, hu⟩, sa, hb, hq, ⟨hd', hu'⟩, sb, sq⟩ <;>
@@ -90,14 +90,14 @@ theorem sat_star_rot (a b q : Vox_Seplist_lib_hprop) (h : HeapM) :
 grind_pattern sat_star_rot => sat (.Star a (.Star b q)) h
 
 -- An empty segment owns nothing: mint one in front, or discard one.
-theorem lseg_nil_intro (p : Vox_Seplist_lib_hprop) (h : HeapM) :
+public theorem lseg_nil_intro (p : Vox_Seplist_lib_hprop) (h : HeapM) :
     sat p h → sat (.Star (.Lseg .Null .INil) p) h := by
   intro s
   exact ⟨fun _ => none, h, ⟨fun x => .inl rfl, fun x => rfl⟩,
          fun x => rfl, s⟩
 grind_pattern lseg_nil_intro => sat (.Star (.Lseg .Null .INil) p) h
 
-theorem lseg_nil_elim (l : Vox_Seplist_lib_link)
+public theorem lseg_nil_elim (l : Vox_Seplist_lib_link)
     (q : Vox_Seplist_lib_hprop) (h : HeapM) :
     sat (.Star (.Lseg l .INil) q) h → sat q h := by
   rintro ⟨h₁, h₂, ⟨hd, hu⟩, s₁, s₂⟩
@@ -110,7 +110,7 @@ theorem lseg_nil_elim (l : Vox_Seplist_lib_link)
 grind_pattern lseg_nil_elim => sat (.Star (.Lseg l .INil) q) h
 
 -- A node pointing nowhere is a singleton segment.
-theorem lseg_singleton (r : VoxU) (v : Int) (p : Vox_Seplist_lib_hprop)
+public theorem lseg_singleton (r : VoxU) (v : Int) (p : Vox_Seplist_lib_hprop)
     (h : HeapM) :
     sat (.Star (.Node r v .Null) p) h →
     sat (.Star (.Lseg (.Ptr r) (.ICons v .INil)) p) h := by
@@ -122,7 +122,7 @@ theorem lseg_singleton (r : VoxU) (v : Int) (p : Vox_Seplist_lib_hprop)
 grind_pattern lseg_singleton => sat (.Star (.Node r v .Null) p) h
 
 -- Folding a node onto the segment it points at...
-theorem lseg_fold (r : VoxU) (v : Int) (l : Vox_Seplist_lib_link)
+public theorem lseg_fold (r : VoxU) (v : Int) (l : Vox_Seplist_lib_link)
     (vs : Vox_Seplist_lib_ilist) (p : Vox_Seplist_lib_hprop) (h : HeapM) :
     sat (.Star (.Node r v l) (.Star (.Lseg l vs) p)) h →
     sat (.Star (.Lseg (.Ptr r) (.ICons v vs)) p) h := by
@@ -137,7 +137,7 @@ grind_pattern lseg_fold => sat (.Star (.Node r v l) (.Star (.Lseg l vs) p)) h
 
 -- ... and the same fold reaching PAST an intervening chunk, the shape
 -- one write step leaves behind.
-theorem lseg_fold_deep (r : VoxU) (v : Int) (acc : Vox_Seplist_lib_link)
+public theorem lseg_fold_deep (r : VoxU) (v : Int) (acc : Vox_Seplist_lib_link)
     (ws : Vox_Seplist_lib_ilist) (q p : Vox_Seplist_lib_hprop) (h : HeapM) :
     sat (.Star (.Node r v acc) (.Star q (.Star (.Lseg acc ws) p))) h →
     sat (.Star (.Lseg (.Ptr r) (.ICons v ws)) (.Star q p)) h := by

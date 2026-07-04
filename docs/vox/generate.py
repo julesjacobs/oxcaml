@@ -54,6 +54,8 @@ UNSHOWN = {
         'client of lib/ptrie_packed; the packed subsection slices the lib itself',
     'demo/lean_reverse.ml':
         'McCarthy-array methodology note; kernel and quicksort are the page\'s array cards',
+    'demo/lean_seal_alt.ml':
+        'the identical client body of lean_seal.ml, against step_double',
 }
 
 
@@ -203,6 +205,18 @@ def main():
                                         r'^\(lean: '),
         '@KERNEL@': slice_between(read('demo/lean_kernel.ml'),
                                   r'^let sum', r'^    go 0 0'),
+        '@SEAL_MLI@': strip_leading_comment(read('lib/step.mli')),
+        '@SEAL_INCR@': strip_leading_comment(read('lib/step_incr/step.ml')),
+        '@SEAL_DOUBLE@': strip_leading_comment(read('lib/step_double/step.ml')),
+        '@SEAL_CLIENT@': slice_between(read('demo/lean_seal.ml'),
+                                       r'^open Step', r'^  b$'),
+        '@SEAL_BAD@': strip_leading_comment(read('lib/step_bad/step.ml')),
+        '@SEAL_FAIL_OUT@':
+            read('mechanics/lean_seal_fail.compilers.reference'),
+        '@OSET_MLI@': strip_leading_comment(read('lib/oset.mli')),
+        '@OSET_ML@': strip_leading_comment(read('lib/oset.ml')),
+        '@OSET_CLIENT@': slice_between(read('demo/lean_oset.ml'),
+                                       r'^open Oset', r'^  member 3 t2$'),
         '@PTRIE_MLI@': strip_leading_comment(read('lib/ptrie.mli')),
         '@PTRIE_ML@': strip_leading_comment(read('lib/ptrie.ml')),
         '@PTRIE_CLIENT@': slice_between(read('demo/lean_ptrie.ml'),

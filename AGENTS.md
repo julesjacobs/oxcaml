@@ -111,10 +111,24 @@ Configuration is needed after changing `.in` files or the autoconf script.
   State loop invariants as prelude Props with ONE hand-proved step
   lemma per loop whose variables are all bound by its conclusion
   (see demo/lean_reverse.ml).
-- Client `[%%vox.lean]` blocks may contain definitions and PROVED
-  theorems (Lean checks them); a client `axiom` silently joins the
-  TCB and can verify falsehoods -- currently unenforced, so review
-  for it.
+- `[%%vox.lean]` blocks in an INTERFACE (.mli) are compiled to a
+  VoxSig_<Unit>.olean module (clients import the artifact; author
+  marks declarations `public`, defs clients unfold `@[grind, expose]`),
+  and an interface `axiom` is an OBLIGATION: the implementation's
+  solver input ends in a seal that demands a same-named proved
+  theorem.  Blocks in an IMPLEMENTATION or client .ml keep the old
+  trust story: definitions and theorems are checked, but a .ml
+  `axiom` silently joins the TCB and can verify falsehoods --
+  unenforced there, so review for it.
+- FULL abstraction: `type t [@@vox.sort opaque]` in an .mli gives the
+  type its OWN uninterpreted sort (Vox_<Unit>_t) instead of the
+  shared VoxU, so interface blocks can state laws about it (declare
+  model constants as `axiom`s -- `opaque` needs an inhabitation
+  witness).  The implementation's concrete declaration registers
+  under the SAME solver name, which is how the seal's re-elaborated
+  laws land on the concrete type (see lib/oset.mli).  Sound
+  asymmetry: opaque interface over concrete impl is allowed; the
+  int/bool ghost sorts still must match on both sides.
 
 ## Important Notes
 

@@ -27,6 +27,11 @@ type vox_spec_export = {
       (* a datatype field uses the uninterpreted sort *)
   vp_blocks : string list;
       (* block text, in source order *)
+  vp_sig_module : bool;
+      (* whether a VoxSig_<Unit>.olean was compiled next to this
+         unit's .cmi -- clients then [public import] it instead of
+         splicing [vp_datatypes]/[vp_blocks], and the unit's own
+         implementation is SEALED against it *)
 }
 
 type pers_flags =

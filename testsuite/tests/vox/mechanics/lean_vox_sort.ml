@@ -87,7 +87,7 @@ type t1 [@@vox.sort float]
 Line 1, characters 8-26:
 1 | type t1 [@@vox.sort float]
             ^^^^^^^^^^^^^^^^^^
-Error: vox: unknown vox.sort "float" (expected "int" or "bool")
+Error: vox: unknown vox.sort "float" (expected "int", "bool", or "opaque")
 |}]
 
 type t2 [@@vox.sort]

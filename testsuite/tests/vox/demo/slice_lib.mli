@@ -53,89 +53,89 @@ type slice
 -- ghosts: an owned array denotes its contents [cts]; a live loan
 -- denotes current and prophesied-final contents [now]/[fin]; a
 -- prophecy denotes the sequence it will resolve to [pv]
-opaque cts : VoxU -> List Int
-opaque now : VoxU -> List Int
-opaque fin : VoxU -> List Int
-opaque pv : VoxU -> List Int
+public opaque cts : VoxU -> List Int
+public opaque now : VoxU -> List Int
+public opaque fin : VoxU -> List Int
+public opaque pv : VoxU -> List Int
 
 -- Int-indexed list operations, defined by structural recursion on
 -- the list so every lemma below is a uniform induction (no
 -- dependence on core Nat lemmas).
-@[grind] def len : List Int -> Int
+@[grind, expose] public def len : List Int -> Int
   | [] => 0
   | _ :: t => 1 + len t
 
-@[grind] def elem : List Int -> Int -> Int
+@[grind, expose] public def elem : List Int -> Int -> Int
   | [], _ => 0
   | x :: t, i => if i = 0 then x else elem t (i - 1)
 
-@[grind] def upd : List Int -> Int -> Int -> List Int
+@[grind, expose] public def upd : List Int -> Int -> Int -> List Int
   | [], _, _ => []
   | x :: t, i, v => if i = 0 then v :: t else x :: upd t (i - 1) v
 
-@[grind] def take : Int -> List Int -> List Int
+@[grind, expose] public def take : Int -> List Int -> List Int
   | _, [] => []
   | i, x :: t => if i <= 0 then [] else x :: take (i - 1) t
 
-@[grind] def drop : Int -> List Int -> List Int
+@[grind, expose] public def drop : Int -> List Int -> List Int
   | _, [] => []
   | i, x :: t => if i <= 0 then x :: t else drop (i - 1) t
 
-@[grind] def app : List Int -> List Int -> List Int
+@[grind, expose] public def app : List Int -> List Int -> List Int
   | [], r => r
   | x :: t, r => x :: app t r
 
-@[grind] def sngl (x : Int) : List Int := [x]
+@[grind, expose] public def sngl (x : Int) : List Int := [x]
 
-@[grind] def seg (i j : Int) (l : List Int) : List Int :=
+@[grind, expose] public def seg (i j : Int) (l : List Int) : List Int :=
   take (j - i) (drop i l)
 
-@[grind] def all_le : List Int -> Int -> Prop
+@[grind, expose] public def all_le : List Int -> Int -> Prop
   | [], _ => True
   | x :: t, p => x <= p ∧ all_le t p
 
-@[grind] def all_ge : List Int -> Int -> Prop
+@[grind, expose] public def all_ge : List Int -> Int -> Prop
   | [], _ => True
   | x :: t, p => x >= p ∧ all_ge t p
 
-@[grind] def sorted : List Int -> Prop
+@[grind, expose] public def sorted : List Int -> Prop
   | [] => True
   | [_] => True
   | x :: y :: t => x <= y ∧ sorted (y :: t)
 
-@[grind] def cnt : List Int -> Int -> Int
+@[grind, expose] public def cnt : List Int -> Int -> Int
   | [], _ => 0
   | y :: t, x => (if y = x then 1 else 0) + cnt t x
 
 -- permutation, kept folded (no @[grind]): all reasoning goes
 -- through the theorem interface below
-def perm (l r : List Int) : Prop := ∀ x : Int, cnt l x = cnt r x
+@[expose] public def perm (l r : List Int) : Prop := ∀ x : Int, cnt l x = cnt r x
 
 -- ----- length -----
-theorem len_nonneg (l : List Int) : 0 <= len l := by
+public theorem len_nonneg (l : List Int) : 0 <= len l := by
   induction l <;> grind
 
-theorem len_take (i : Int) (l : List Int)
+public theorem len_take (i : Int) (l : List Int)
     (h1 : 0 <= i) (h2 : i <= len l) : len (take i l) = i := by
   induction l generalizing i <;> grind [len_nonneg]
 
-theorem len_drop (i : Int) (l : List Int)
+public theorem len_drop (i : Int) (l : List Int)
     (h1 : 0 <= i) (h2 : i <= len l) : len (drop i l) = len l - i := by
   induction l generalizing i <;> grind
 
-theorem len_app (a b : List Int) : len (app a b) = len a + len b := by
+public theorem len_app (a b : List Int) : len (app a b) = len a + len b := by
   induction a <;> grind
 
-theorem len_upd (l : List Int) (i v : Int) : len (upd l i v) = len l := by
+public theorem len_upd (l : List Int) (i v : Int) : len (upd l i v) = len l := by
   induction l generalizing i <;> grind
 
 -- ----- elem / upd -----
-theorem elem_upd (l : List Int) (i j v : Int)
+public theorem elem_upd (l : List Int) (i j v : Int)
     (h1 : 0 <= i) (h2 : i < len l) :
     elem (upd l i v) j = if j = i then v else elem l j := by
   induction l generalizing i j <;> grind
 
-theorem elem_drop (i k : Int) (l : List Int)
+public theorem elem_drop (i k : Int) (l : List Int)
     (h1 : 0 <= i) (h2 : 0 <= k) :
     elem (drop i l) k = elem l (i + k) := by
   induction l generalizing i with
@@ -143,70 +143,70 @@ theorem elem_drop (i k : Int) (l : List Int)
   | cons x t ih => have := ih (i - 1); grind
 
 -- ----- take / drop -----
-theorem take_nonpos (i : Int) (l : List Int) (h : i <= 0) : take i l = [] := by
+public theorem take_nonpos (i : Int) (l : List Int) (h : i <= 0) : take i l = [] := by
   induction l <;> grind
 
-theorem drop_nonpos (i : Int) (l : List Int) (h : i <= 0) : drop i l = l := by
+public theorem drop_nonpos (i : Int) (l : List Int) (h : i <= 0) : drop i l = l := by
   induction l <;> grind
 
-theorem drop_all (i : Int) (l : List Int) (h : len l <= i) : drop i l = [] := by
+public theorem drop_all (i : Int) (l : List Int) (h : len l <= i) : drop i l = [] := by
   induction l generalizing i with
   | nil => grind
   | cons x t ih => have := ih (i - 1); have := len_nonneg t; grind
 
-theorem drop_drop (i j : Int) (l : List Int)
+public theorem drop_drop (i j : Int) (l : List Int)
     (h1 : 0 <= i) (h2 : 0 <= j) :
     drop i (drop j l) = drop (i + j) l := by
   induction l generalizing j with
   | nil => grind
   | cons x t ih => have := ih (j - 1); grind
 
-theorem take_upd_ge (n i v : Int) (l : List Int)
+public theorem take_upd_ge (n i v : Int) (l : List Int)
     (h : n <= i) : take n (upd l i v) = take n l := by
   induction l generalizing n i with
   | nil => grind
   | cons x t ih => have := ih (n - 1) (i - 1); grind
 
-theorem drop_upd_lt (n i v : Int) (l : List Int)
+public theorem drop_upd_lt (n i v : Int) (l : List Int)
     (h1 : 0 <= i) (h2 : i < n) : drop n (upd l i v) = drop n l := by
   induction l generalizing n i with
   | nil => grind
   | cons x t ih => have := ih (n - 1) (i - 1); grind
 
-theorem drop_upd_ge (n i v : Int) (l : List Int)
+public theorem drop_upd_ge (n i v : Int) (l : List Int)
     (h1 : 0 <= n) (h2 : n <= i) :
     drop n (upd l i v) = upd (drop n l) (i - n) v := by
   induction l generalizing n i with
   | nil => grind
   | cons x t ih => have := ih (n - 1) (i - 1); grind
 
-theorem upd_out (l : List Int) (i v : Int)
+public theorem upd_out (l : List Int) (i v : Int)
     (h : i < 0 ∨ len l <= i) : upd l i v = l := by
   induction l generalizing i with
   | nil => grind
   | cons x t ih => have := ih (i - 1); have := len_nonneg t; grind
 
-theorem take_drop_app (i : Int) (l : List Int) :
+public theorem take_drop_app (i : Int) (l : List Int) :
     app (take i l) (drop i l) = l := by
   induction l generalizing i with
   | nil => grind
   | cons x t ih => have := ih (i - 1); grind
 
-theorem take_snoc (i : Int) (l : List Int)
+public theorem take_snoc (i : Int) (l : List Int)
     (h1 : 0 <= i) (h2 : i < len l) :
     take (i + 1) l = app (take i l) (sngl (elem l i)) := by
   induction l generalizing i with
   | nil => grind
   | cons x t ih => have := ih (i - 1); grind [take_nonpos]
 
-theorem drop_cons (i : Int) (l : List Int)
+public theorem drop_cons (i : Int) (l : List Int)
     (h1 : 0 <= i) (h2 : i < len l) :
     drop i l = app (sngl (elem l i)) (drop (i + 1) l) := by
   induction l generalizing i with
   | nil => grind
   | cons x t ih => have := ih (i - 1); grind [drop_nonpos]
 
-theorem take1_drop (k : Int) (l : List Int)
+public theorem take1_drop (k : Int) (l : List Int)
     (h1 : 0 <= k) (h2 : k < len l) :
     take 1 (drop k l) = sngl (elem l k) := by
   induction l generalizing k with
@@ -214,7 +214,7 @@ theorem take1_drop (k : Int) (l : List Int)
   | cons x t ih => have := ih (k - 1); grind [take_nonpos]
 
 -- ----- seg -----
-theorem seg_upd_out (i j k v : Int) (l : List Int)
+public theorem seg_upd_out (i j k v : Int) (l : List Int)
     (h0 : 0 <= i) (h : k < i ∨ j <= k) :
     seg i j (upd l k v) = seg i j l := by
   cases h with
@@ -229,37 +229,37 @@ theorem seg_upd_out (i j k v : Int) (l : List Int)
       · have := len_nonneg l; grind [upd_out]
     · grind [take_nonpos]
 
-theorem seg_snoc (i j : Int) (l : List Int)
+public theorem seg_snoc (i j : Int) (l : List Int)
     (h1 : 0 <= i) (h2 : i <= j) (h3 : j < len l) :
     seg i (j + 1) l = app (seg i j l) (sngl (elem l j)) := by
   have hd := elem_drop i (j - i) l h1 (by grind)
   have hl := len_drop i l h1 (by grind [len_nonneg])
   grind [take_snoc]
 
-theorem seg_cons (i j : Int) (l : List Int)
+public theorem seg_cons (i j : Int) (l : List Int)
     (h1 : 0 <= i) (h2 : i < j) (h3 : j <= len l) :
     seg i j l = app (sngl (elem l i)) (seg (i + 1) j l) := by
   have hd := drop_cons i l h1 (by grind)
   have hl := len_drop i l h1 (by grind)
   grind
 
-theorem drop_split (i j : Int) (l : List Int)
+public theorem drop_split (i j : Int) (l : List Int)
     (h1 : 0 <= i) (h2 : i <= j) (_h3 : j <= len l) :
     drop i l = app (seg i j l) (drop j l) := by
   have := take_drop_app (j - i) (drop i l)
   grind [drop_drop]
 
 -- ----- all_le / all_ge -----
-theorem all_le_app (a b : List Int) (p : Int) :
+public theorem all_le_app (a b : List Int) (p : Int) :
     all_le (app a b) p ↔ (all_le a p ∧ all_le b p) := by
   induction a <;> grind
 
-theorem all_ge_app (a b : List Int) (p : Int) :
+public theorem all_ge_app (a b : List Int) (p : Int) :
     all_ge (app a b) p ↔ (all_ge a p ∧ all_ge b p) := by
   induction a <;> grind
 
 -- ----- sorted -----
-theorem sorted_short (l : List Int) (h : len l <= 1) : sorted l := by
+public theorem sorted_short (l : List Int) (h : len l <= 1) : sorted l := by
   cases l with
   | nil => grind
   | cons x t =>
@@ -267,16 +267,16 @@ theorem sorted_short (l : List Int) (h : len l <= 1) : sorted l := by
     | nil => grind
     | cons y t2 => have := len_nonneg t2; grind
 
-theorem sorted_cons_ge (b : List Int) (p : Int)
+public theorem sorted_cons_ge (b : List Int) (p : Int)
     (hge : all_ge b p) (hb : sorted b) : sorted (p :: b) := by
   cases b <;> grind
 
-theorem sorted_cons_app (b : List Int) (p : Int)
+public theorem sorted_cons_app (b : List Int) (p : Int)
     (hge : all_ge b p) (hb : sorted b) :
     sorted (app (sngl p) b) := by
   grind [sorted_cons_ge]
 
-theorem sorted_app_bound (a b : List Int) (p : Int)
+public theorem sorted_app_bound (a b : List Int) (p : Int)
     (ha : sorted a) (hb : sorted b)
     (hle : all_le a p) (hge : all_ge b p) :
     sorted (app a b) := by
@@ -287,7 +287,7 @@ theorem sorted_app_bound (a b : List Int) (p : Int)
     | nil => cases b <;> grind
     | cons y t2 => grind
 
-theorem sorted_elem (l : List Int) (i j : Int)
+public theorem sorted_elem (l : List Int) (i j : Int)
     (hs : sorted l) (h1 : 0 <= i) (h2 : i <= j) (h3 : j < len l) :
     elem l i <= elem l j := by
   induction l generalizing i j with
@@ -298,38 +298,38 @@ theorem sorted_elem (l : List Int) (i j : Int)
     cases t <;> grind [len_nonneg]
 
 -- ----- perm -----
-theorem cnt_nonneg (l : List Int) (x : Int) : 0 <= cnt l x := by
+public theorem cnt_nonneg (l : List Int) (x : Int) : 0 <= cnt l x := by
   induction l <;> grind
 
-theorem cnt_app (a b : List Int) (x : Int) :
+public theorem cnt_app (a b : List Int) (x : Int) :
     cnt (app a b) x = cnt a x + cnt b x := by
   induction a <;> grind
 
-theorem cnt_upd (l : List Int) (i v x : Int)
+public theorem cnt_upd (l : List Int) (i v x : Int)
     (h1 : 0 <= i) (h2 : i < len l) :
     cnt (upd l i v) x
       = cnt l x - (if elem l i = x then 1 else 0)
         + (if v = x then 1 else 0) := by
   induction l generalizing i <;> grind
 
-@[grind] def erase : List Int -> Int -> List Int
+@[grind, expose] public def erase : List Int -> Int -> List Int
   | [], _ => []
   | y :: t, x => if y = x then t else y :: erase t x
 
-theorem cnt_erase (l : List Int) (a x : Int) (h : 0 < cnt l a) :
+public theorem cnt_erase (l : List Int) (a x : Int) (h : 0 < cnt l a) :
     cnt (erase l a) x = cnt l x - (if a = x then 1 else 0) := by
   induction l <;> grind [cnt_nonneg]
 
-theorem len_erase (l : List Int) (a : Int) (h : 0 < cnt l a) :
+public theorem len_erase (l : List Int) (a : Int) (h : 0 < cnt l a) :
     len (erase l a) = len l - 1 := by
   induction l <;> grind [cnt_nonneg]
 
-theorem cnt_zero_nil (l : List Int) (h : ∀ x : Int, cnt l x = 0) : l = [] := by
+public theorem cnt_zero_nil (l : List Int) (h : ∀ x : Int, cnt l x = 0) : l = [] := by
   cases l with
   | nil => rfl
   | cons y t => have := h y; have := cnt_nonneg t y; grind
 
-theorem perm_len (a b : List Int) (h : perm a b) : len a = len b := by
+public theorem perm_len (a b : List Int) (h : perm a b) : len a = len b := by
   induction a generalizing b with
   | nil =>
     have : b = [] := cnt_zero_nil b (fun x => (h x).symm)
@@ -345,14 +345,14 @@ theorem perm_len (a b : List Int) (h : perm a b) : len a = len b := by
     have := len_erase b y hy
     grind
 
-theorem perm_refl (l : List Int) : perm l l := by
+public theorem perm_refl (l : List Int) : perm l l := by
   intro x; rfl
 
-theorem perm_trans (a b c : List Int)
+public theorem perm_trans (a b c : List Int)
     (h1 : perm a b) (h2 : perm b c) : perm a c := by
   intro x; exact (h1 x).trans (h2 x)
 
-theorem perm_swap (l : List Int) (i j : Int)
+public theorem perm_swap (l : List Int) (i j : Int)
     (h1 : 0 <= i) (h2 : i < len l) (h3 : 0 <= j) (h4 : j < len l) :
     perm l (upd (upd l i (elem l j)) j (elem l i)) := by
   intro x
@@ -364,7 +364,7 @@ theorem perm_swap (l : List Int) (i j : Int)
 
 -- the exact composition quicksort's reborrow produces, keyed on the
 -- goal atom so instantiation is non-generative
-theorem perm_glue2 (l0 a a' b b' : List Int)
+public theorem perm_glue2 (l0 a a' b b' : List Int)
     (h0 : perm l0 (app a b))
     (h1 : perm a a') (h2 : perm b b') :
     perm l0 (app a' b') := by
@@ -374,7 +374,7 @@ theorem perm_glue2 (l0 a a' b b' : List Int)
   have e2 := cnt_app a' b' x
   grind [perm]
 
-theorem perm_glue_right (l0 a b b' : List Int)
+public theorem perm_glue_right (l0 a b b' : List Int)
     (h0 : perm l0 (app a b))
     (h2 : perm b b') :
     perm l0 (app a b') := by
@@ -384,15 +384,15 @@ theorem perm_glue_right (l0 a b b' : List Int)
   have e2 := cnt_app a b' x
   grind [perm]
 
-theorem cnt_pos_le (l : List Int) (p x : Int)
+public theorem cnt_pos_le (l : List Int) (p x : Int)
     (ha : all_le l p) (hx : 0 < cnt l x) : x <= p := by
   induction l <;> grind [cnt_nonneg]
 
-theorem cnt_pos_ge (l : List Int) (p x : Int)
+public theorem cnt_pos_ge (l : List Int) (p x : Int)
     (ha : all_ge l p) (hx : 0 < cnt l x) : x >= p := by
   induction l <;> grind [cnt_nonneg]
 
-theorem all_le_of_cnt (l : List Int) (p : Int)
+public theorem all_le_of_cnt (l : List Int) (p : Int)
     (h : ∀ x : Int, 0 < cnt l x → x <= p) : all_le l p := by
   induction l with
   | nil => grind
@@ -405,7 +405,7 @@ theorem all_le_of_cnt (l : List Int) (p : Int)
       exact h x (by grind)
     grind
 
-theorem all_ge_of_cnt (l : List Int) (p : Int)
+public theorem all_ge_of_cnt (l : List Int) (p : Int)
     (h : ∀ x : Int, 0 < cnt l x → x >= p) : all_ge l p := by
   induction l with
   | nil => grind
@@ -418,13 +418,13 @@ theorem all_ge_of_cnt (l : List Int) (p : Int)
       exact h x (by grind)
     grind
 
-theorem all_le_perm (a b : List Int) (p : Int)
+public theorem all_le_perm (a b : List Int) (p : Int)
     (h : perm a b) (ha : all_le a p) : all_le b p := by
   apply all_le_of_cnt
   intro x hx
   exact cnt_pos_le a p x ha (by rw [h x]; exact hx)
 
-theorem all_ge_perm (a b : List Int) (p : Int)
+public theorem all_ge_perm (a b : List Int) (p : Int)
     (h : perm a b) (ha : all_ge a p) : all_ge b p := by
   apply all_ge_of_cnt
   intro x hx
@@ -433,7 +433,7 @@ theorem all_ge_perm (a b : List Int) (p : Int)
 -- ----- bespoke partition-maintenance lemmas -----
 -- After swap i j (i <= j < len l), the <=-prefix grows by the
 -- swapped-in elem l j and the middle window slides to (i+1, j+1).
-theorem swap_le (l : List Int) (p i j : Int)
+public theorem swap_le (l : List Int) (p i j : Int)
     (h1 : 0 <= i) (h2 : i <= j) (h3 : j < len l)
     (hle : all_le (take i l) p) (hj : elem l j <= p) :
     all_le (take (i + 1) (upd (upd l i (elem l j)) j (elem l i))) p := by
@@ -448,7 +448,7 @@ theorem swap_le (l : List Int) (p i j : Int)
   have he2 := elem_upd l i i (elem l j) h1 (by grind)
   grind [all_le_app]
 
-theorem swap_mid (l : List Int) (p i j : Int)
+public theorem swap_mid (l : List Int) (p i j : Int)
     (h1 : 0 <= i) (h2 : i <= j) (h3 : j < len l)
     (hge : all_ge (seg i j l) p) :
     all_ge (seg (i + 1) (j + 1) (upd (upd l i (elem l j)) j (elem l i))) p := by
@@ -473,7 +473,7 @@ theorem swap_mid (l : List Int) (p i j : Int)
 
 -- Final phase (the pivot sits at j = len l - 1): after swap i j the
 -- suffix from i is all >= p, with p itself now at position i.
-theorem swap_final_ge (l : List Int) (p i j : Int)
+public theorem swap_final_ge (l : List Int) (p i j : Int)
     (h1 : 0 <= i) (h2 : i <= j) (hj : j = len l - 1)
     (hpiv : elem l j = p)
     (hge : all_ge (seg i j l) p) :
@@ -509,20 +509,20 @@ theorem swap_final_ge (l : List Int) (p i j : Int)
     grind [all_ge_app]
 
 -- ----- split3 glue -----
-theorem seg_take1 (i : Int) (l : List Int)
+public theorem seg_take1 (i : Int) (l : List Int)
     (h1 : 0 <= i) (h2 : i < len l) :
     seg i (i + 1) l = sngl (elem l i) := by
   have := take1_drop i l h1 h2
   grind
 
-theorem app3_decomp (i j : Int) (l : List Int)
+public theorem app3_decomp (i j : Int) (l : List Int)
     (h1 : 0 <= i) (h2 : i <= j) (h3 : j <= len l) :
     app (take i l) (app (seg i j l) (drop j l)) = l := by
   have := take_drop_app i l
   have := drop_split i j l h1 h2 h3
   grind
 
-theorem sorted_glue (a b : List Int) (p : Int)
+public theorem sorted_glue (a b : List Int) (p : Int)
     (ha : sorted a) (hb : sorted b)
     (hle : all_le a p) (hge : all_ge b p) :
     sorted (app a (app (sngl p) b)) := by
@@ -530,7 +530,7 @@ theorem sorted_glue (a b : List Int) (p : Int)
   have h2 : all_ge (app (sngl p) b) p := by grind [all_ge_app]
   exact sorted_app_bound a (app (sngl p) b) p ha h1 hle h2
 
-theorem perm_glue3_mid (l0 a a' b c c' : List Int)
+public theorem perm_glue3_mid (l0 a a' b c c' : List Int)
     (h0 : perm l0 (app a (app b c)))
     (h1 : perm a a') (h2 : perm c c') :
     perm l0 (app a' (app b c')) := by
@@ -542,11 +542,11 @@ theorem perm_glue3_mid (l0 a a' b c c' : List Int)
   have e4 := cnt_app b c' x
   grind [perm]
 
-theorem all_ge_suffix (l : List Int) (p n : Int)
+public theorem all_ge_suffix (l : List Int) (p n : Int)
     (h : all_ge l p) : all_ge (drop n l) p := by
   induction l generalizing n <;> grind
 
-theorem swap_final_ge1 (l : List Int) (p i j : Int)
+public theorem swap_final_ge1 (l : List Int) (p i j : Int)
     (h1 : 0 <= i) (h2 : i <= j) (hj : j = len l - 1)
     (hpiv : elem l j = p)
     (hge : all_ge (seg i j l) p) :

@@ -364,23 +364,23 @@ let rec insert (x : int) (t : set) : set{ _ = insert x t &amp;&amp; mem x _ }
   | Node of tree * int * tree
 
 [%%vox.lean {lean|
-@[grind] def mem : Int -&gt; Vox_Bst_tree -&gt; Prop
+@[grind, expose] public def mem : Int -&gt; Vox_Bst_tree -&gt; Prop
   | _, .Leaf =&gt; False
   | x, .Node l v r =&gt; x = v ∨ mem x l ∨ mem x r
 
-@[grind] def all_lt : Vox_Bst_tree -&gt; Int -&gt; Prop
+@[grind, expose] public def all_lt : Vox_Bst_tree -&gt; Int -&gt; Prop
   | .Leaf, _ =&gt; True
   | .Node l v r, b =&gt; v &lt; b ∧ all_lt l b ∧ all_lt r b
 
-@[grind] def all_gt : Vox_Bst_tree -&gt; Int -&gt; Prop
+@[grind, expose] public def all_gt : Vox_Bst_tree -&gt; Int -&gt; Prop
   | .Leaf, _ =&gt; True
   | .Node l v r, b =&gt; v &gt; b ∧ all_gt l b ∧ all_gt r b
 
-@[grind] def bst : Vox_Bst_tree -&gt; Prop
+@[grind, expose] public def bst : Vox_Bst_tree -&gt; Prop
   | .Leaf =&gt; True
   | .Node l v r =&gt; all_lt l v ∧ all_gt r v ∧ bst l ∧ bst r
 
-@[grind] def insert : Int -&gt; Vox_Bst_tree -&gt; Vox_Bst_tree
+@[grind, expose] public def insert : Int -&gt; Vox_Bst_tree -&gt; Vox_Bst_tree
   | x, .Leaf =&gt; .Node .Leaf x .Leaf
   | x, .Node l v r =&gt;
       if x = v then .Node l v r
@@ -389,32 +389,32 @@ let rec insert (x : int) (t : set) : set{ _ = insert x t &amp;&amp; mem x _ }
 
 -- The ordering invariant makes one-path search complete: an element
 -- bounded away from a subtree is not in it.
-theorem not_mem_lt (x b : Int) (t : Vox_Bst_tree)
+public theorem not_mem_lt (x b : Int) (t : Vox_Bst_tree)
     (h : all_lt t b) (hx : b &lt;= x) : ¬ mem x t := by
   induction t &lt;;&gt; grind
 grind_pattern not_mem_lt =&gt; mem x t, all_lt t b
 
-theorem not_mem_gt (x b : Int) (t : Vox_Bst_tree)
+public theorem not_mem_gt (x b : Int) (t : Vox_Bst_tree)
     (h : all_gt t b) (hx : x &lt;= b) : ¬ mem x t := by
   induction t &lt;;&gt; grind
 grind_pattern not_mem_gt =&gt; mem x t, all_gt t b
 
-theorem all_lt_insert (x b : Int) (t : Vox_Bst_tree)
+public theorem all_lt_insert (x b : Int) (t : Vox_Bst_tree)
     (h : all_lt t b) (hx : x &lt; b) : all_lt (insert x t) b := by
   induction t &lt;;&gt; grind
 grind_pattern all_lt_insert =&gt; all_lt (insert x t) b
 
-theorem all_gt_insert (x b : Int) (t : Vox_Bst_tree)
+public theorem all_gt_insert (x b : Int) (t : Vox_Bst_tree)
     (h : all_gt t b) (hx : b &lt; x) : all_gt (insert x t) b := by
   induction t &lt;;&gt; grind
 grind_pattern all_gt_insert =&gt; all_gt (insert x t) b
 
-theorem bst_insert (x : Int) (t : Vox_Bst_tree)
+public theorem bst_insert (x : Int) (t : Vox_Bst_tree)
     (h : bst t) : bst (insert x t) := by
   induction t &lt;;&gt; grind
 grind_pattern bst_insert =&gt; bst (insert x t)
 
-theorem mem_insert (x y : Int) (t : Vox_Bst_tree) :
+public theorem mem_insert (x y : Int) (t : Vox_Bst_tree) :
     mem y (insert x t) ↔ (y = x ∨ mem y t) := by
   induction t &lt;;&gt; grind
 grind_pattern mem_insert =&gt; mem y (insert x t)
@@ -498,6 +498,215 @@ Possible counterexample:
   v = 0
   w_1 = 0
 (lean: error: `grind` failed)</code></pre>
+
+<h3 id="seal">Sealed interfaces: one sig, two implementations</h3>
+<p>The interface can hide more than code.  <code>step.mli</code> exports an
+opaque model constant and a law about it &mdash; an <code>axiom</code>, on
+the client&rsquo;s side of the wall.  The block is compiled once, from the
+<code>.mli</code> alone, into a Lean <em>module</em>
+(<code>VoxSig_Step.olean</code>, next to the <code>.cmi</code>) that clients
+import: a client proof depends on the interface text and nothing else
+&mdash; it exists before any implementation does, and no <code>.ml</code>
+edit can perturb it.  For an implementation the same axiom is an
+<em>obligation</em>: its solver input ends in a seal that re-elaborates the
+interface and demands a same-named <em>proved</em> theorem for every law.
+Two different implementations pay the same text below; the client verifies
+unchanged against either.</p>
+
+<div class="tabs" data-tabs>
+  <button class="on">step.mli &mdash; the law, an axiom to clients</button>
+  <button>step_incr &mdash; one payment</button>
+  <button>step_double &mdash; another</button>
+  <button>a client, either way</button>
+</div>
+<div class="tabpane on"><pre><code class="ml">[%%vox.lean {lean|
+public opaque step : Int -&gt; Int
+public axiom step_gt (x : Int) : x &lt; step x
+grind_pattern step_gt =&gt; step x
+|lean}]
+
+val step : (x : int) -&gt; int{ _ = step x }</code></pre></div>
+<div class="tabpane"><pre><code class="ml">[%%vox.lean {lean|
+@[grind] def step (x : Int) : Int := x + 1
+
+theorem step_gt (x : Int) : x &lt; step x := by grind
+|lean}]
+
+let step : (x : int) -&gt; int{ _ = step x } = fun x -&gt; x + 1</code></pre></div>
+<div class="tabpane"><pre><code class="ml">[%%vox.lean {lean|
+@[grind] def step (x : Int) : Int := if x &lt; 0 then x + 1 else 2 * x + 1
+
+theorem step_gt (x : Int) : x &lt; step x := by grind
+|lean}]
+
+let step : (x : int) -&gt; int{ _ = step x } = fun x -&gt; if x &lt; 0 then x + 1 else (2 * x) + 1</code></pre></div>
+<div class="tabpane"><pre><code class="ml">open Step
+
+let grows : int{ 0 &lt; _ } =
+  let a = step 0 in
+  let b = step a in
+  b</code></pre>
+<p style="color:var(--dim);font-size:.9rem"><code>demo/lean_seal.ml</code>
+and <code>demo/lean_seal_alt.ml</code> verify this same body against
+step_incr and step_double respectively; <code>step</code> is opaque, so no
+client fact can distinguish them.</p></div>
+
+<p>And the seal fails closed.  An implementation that satisfies its own
+definition honestly but cannot prove the interface&rsquo;s law is refused at
+compile time &mdash; an unpaid obligation never reaches a client:</p>
+<pre><code class="ml">[%%vox.lean {lean|
+@[grind] def step (x : Int) : Int := x
+|lean}]
+
+let step : (x : int) -&gt; int{ _ = step x } = fun x -&gt; x</code></pre>
+<pre class="out"><code>File "step.ml", line 1:
+Error: vox: the implementation does not seal its interface:
+       error: vox seal: interface law step_gt has no implementation theorem</code></pre>
+
+<h3 id="oset">Full abstraction: the type hidden too</h3>
+<p><code>[@@vox.sort opaque]</code> gives an abstract type its own
+uninterpreted sort instead of the shared <code>VoxU</code>, so the interface
+block can state laws about exactly that type; the implementation&rsquo;s
+concrete declaration registers under the same solver name, and the sealed
+laws land on it.  Below, a set whose representation &mdash; even that it is
+a tree &mdash; never leaves the unit.  Clients prove membership facts from
+the four axioms alone; what the <code>.mli</code> hides, no client proof can
+see (<code>mechanics/lean_oset_opaque.ml</code> checks that a claim the
+axioms do not decide is refused).</p>
+
+<div class="tabs" data-tabs>
+  <button class="on">oset.mli &mdash; type and model both hidden</button>
+  <button>oset.ml &mdash; pays over the concrete tree</button>
+  <button>a client, from the axioms alone</button>
+</div>
+<div class="tabpane on"><pre style="max-height:34rem"><code class="ml">type t [@@vox.sort opaque]
+
+[%%vox.lean {lean|
+public axiom mem : Int -&gt; Vox_Oset_t -&gt; Prop
+public axiom bst : Vox_Oset_t -&gt; Prop
+public axiom no_mem : Vox_Oset_t -&gt; Prop
+public axiom insert : Int -&gt; Vox_Oset_t -&gt; Vox_Oset_t
+
+public axiom no_mem_spec (x : Int) (t : Vox_Oset_t)
+    (h : no_mem t) : ¬ mem x t
+grind_pattern no_mem_spec =&gt; mem x t, no_mem t
+
+public axiom bst_insert (x : Int) (t : Vox_Oset_t)
+    (h : bst t) : bst (insert x t)
+grind_pattern bst_insert =&gt; bst (insert x t)
+
+public axiom mem_insert (x y : Int) (t : Vox_Oset_t) :
+    mem y (insert x t) ↔ (y = x ∨ mem y t)
+grind_pattern mem_insert =&gt; mem y (insert x t)
+|lean}]
+
+type set = t{ bst _ }
+
+val empty : set{ no_mem _ }
+val member : (x : int) -&gt; (t : set) -&gt; bool{ _ = mem x t }
+val insert : (x : int) -&gt; (t : set) -&gt; set{ _ = insert x t }</code></pre></div>
+<div class="tabpane"><pre style="max-height:34rem"><code class="ml">type t =
+  | Leaf
+  | Node of t * int * t
+
+[%%vox.lean {lean|
+@[grind] def mem : Int -&gt; Vox_Oset_t -&gt; Prop
+  | _, .Leaf =&gt; False
+  | x, .Node l v r =&gt; x = v ∨ mem x l ∨ mem x r
+
+@[grind] def all_lt : Vox_Oset_t -&gt; Int -&gt; Prop
+  | .Leaf, _ =&gt; True
+  | .Node l v r, b =&gt; v &lt; b ∧ all_lt l b ∧ all_lt r b
+
+@[grind] def all_gt : Vox_Oset_t -&gt; Int -&gt; Prop
+  | .Leaf, _ =&gt; True
+  | .Node l v r, b =&gt; v &gt; b ∧ all_gt l b ∧ all_gt r b
+
+@[grind] def bst : Vox_Oset_t -&gt; Prop
+  | .Leaf =&gt; True
+  | .Node l v r =&gt; all_lt l v ∧ all_gt r v ∧ bst l ∧ bst r
+
+@[grind] def no_mem (t : Vox_Oset_t) : Prop := ∀ x, ¬ mem x t
+
+@[grind] def insert : Int -&gt; Vox_Oset_t -&gt; Vox_Oset_t
+  | x, .Leaf =&gt; .Node .Leaf x .Leaf
+  | x, .Node l v r =&gt;
+      if x = v then .Node l v r
+      else if x &lt; v then .Node (insert x l) v r
+      else .Node l v (insert x r)
+
+theorem not_mem_lt (x b : Int) (t : Vox_Oset_t)
+    (h : all_lt t b) (hx : b &lt;= x) : ¬ mem x t := by
+  induction t &lt;;&gt; grind
+grind_pattern not_mem_lt =&gt; mem x t, all_lt t b
+
+theorem not_mem_gt (x b : Int) (t : Vox_Oset_t)
+    (h : all_gt t b) (hx : x &lt;= b) : ¬ mem x t := by
+  induction t &lt;;&gt; grind
+grind_pattern not_mem_gt =&gt; mem x t, all_gt t b
+
+theorem all_lt_insert (x b : Int) (t : Vox_Oset_t)
+    (h : all_lt t b) (hx : x &lt; b) : all_lt (insert x t) b := by
+  induction t &lt;;&gt; grind
+grind_pattern all_lt_insert =&gt; all_lt (insert x t) b
+
+theorem all_gt_insert (x b : Int) (t : Vox_Oset_t)
+    (h : all_gt t b) (hx : b &lt; x) : all_gt (insert x t) b := by
+  induction t &lt;;&gt; grind
+grind_pattern all_gt_insert =&gt; all_gt (insert x t) b
+
+theorem no_mem_spec (x : Int) (t : Vox_Oset_t)
+    (h : no_mem t) : ¬ mem x t := by grind
+
+theorem bst_insert (x : Int) (t : Vox_Oset_t)
+    (h : bst t) : bst (insert x t) := by
+  induction t &lt;;&gt; grind
+grind_pattern bst_insert =&gt; bst (insert x t)
+
+theorem mem_insert (x y : Int) (t : Vox_Oset_t) :
+    mem y (insert x t) ↔ (y = x ∨ mem y t) := by
+  induction t &lt;;&gt; grind
+grind_pattern mem_insert =&gt; mem y (insert x t)
+|lean}]
+
+type set = t{ bst _ }
+
+let empty : set{ no_mem _ } = Leaf
+
+let rec member : (x : int) -&gt; (t : set) -&gt; bool{ _ = mem x t } =
+  fun x t -&gt;
+    match t with
+    | Leaf -&gt; false
+    | Node (l, v, r) -&gt;
+      if x = v then true
+      else if x &lt; v then member x l
+      else member x r
+
+let rec insert : (x : int) -&gt; (t : set) -&gt; set{ _ = insert x t } =
+  fun x t -&gt;
+    match t with
+    | Leaf -&gt; Node (Leaf, x, Leaf)
+    | Node (l, v, r) -&gt;
+      if x = v then t
+      else if x &lt; v then begin
+        let l' = insert x l in
+        Node (l', v, r)
+      end
+      else begin
+        let r' = insert x r in
+        Node (l, v, r')
+      end</code></pre></div>
+<div class="tabpane"><pre><code class="ml">open Oset
+
+let found : bool{ _ = true } =
+  let t1 = insert 2 empty in
+  let t2 = insert 1 t1 in
+  member 1 t2
+
+let absent : bool{ _ = false } =
+  let t1 = insert 2 empty in
+  let t2 = insert 1 t1 in
+  member 3 t2</code></pre></div>
 
 <h2 id="real">The Patricia trie</h2>
 <p>This is the integer-set structure OxCaml&rsquo;s optimizer uses
@@ -601,35 +810,35 @@ primitives.  Everything else is proved.</p></div>
 -- the power-of-two bit [b]; [zbit i b] says bit [b] of [i] is clear.
 -- Euclidean / and % are floor semantics for positive divisors, i.e.
 -- exactly infinite two's complement.
-def mask (i b : Int) : Int := i % b
+@[expose] public def mask (i b : Int) : Int := i % b
 
-def zbit (i b : Int) : Prop := i % (2*b) &lt; b
+@[expose] public def zbit (i b : Int) : Prop := i % (2*b) &lt; b
 
-instance (i b : Int) : Decidable (zbit i b) := by unfold zbit; infer_instance
+public instance (i b : Int) : Decidable (zbit i b) := by unfold zbit; infer_instance
 
-inductive isbit : Int -&gt; Prop where
+public inductive isbit : Int -&gt; Prop where
   | one : isbit 1
   | dbl : {b : Int} -&gt; isbit b -&gt; isbit (2*b)
 
 -- Lowest differing bit of two distinct integers (junk 1 when equal).
-def bbit (p0 p1 : Int) : Int :=
+@[expose] public def bbit (p0 p1 : Int) : Int :=
   if p0 = p1 then 1
   else if p0 % 2 = p1 % 2 then 2 * bbit (p0/2) (p1/2)
   else 1
 termination_by (p0.natAbs + p1.natAbs)
 decreasing_by omega
 
-theorem isbit_pos {b : Int} (h : isbit b) : 1 ≤ b := by
+public theorem isbit_pos {b : Int} (h : isbit b) : 1 ≤ b := by
   induction h &lt;;&gt; omega
 
 -- The workhorse: peel one bit off a modulus.
-theorem emod_unique {a b q r : Int} (h0 : 0 ≤ r) (h1 : r &lt; b)
+public theorem emod_unique {a b q r : Int} (h0 : 0 ≤ r) (h1 : r &lt; b)
     (h : a = b*q + r) : a % b = r := by
   subst h
   rw [Int.add_comm, Int.add_mul_emod_self_left]
   exact Int.emod_eq_of_lt h0 h1
 
-theorem emod_double (p m : Int) (hm : 0 &lt; m) :
+public theorem emod_double (p m : Int) (hm : 0 &lt; m) :
     p % (2*m) = 2 * ((p/2) % m) + p % 2 := by
   have h2 := Int.mul_ediv_add_emod p 2
   have h3 := Int.mul_ediv_add_emod (p/2) m
@@ -642,18 +851,18 @@ theorem emod_double (p m : Int) (hm : 0 &lt; m) :
     _ = (2*m) * ((p/2)/m) + (2 * ((p/2) % m) + p % 2) := by
           rw [Int.mul_add, Int.mul_assoc]; omega
 
-theorem bbit_isbit (p0 p1 : Int) : isbit (bbit p0 p1) := by
+public theorem bbit_isbit (p0 p1 : Int) : isbit (bbit p0 p1) := by
   fun_induction bbit p0 p1 with
   | case1 =&gt; exact isbit.one
   | case2 _ _ _ _ ih =&gt; exact isbit.dbl ih
   | case3 =&gt; exact isbit.one
 grind_pattern bbit_isbit =&gt; bbit p0 p1
 
-theorem bbit_pos (p0 p1 : Int) : 1 ≤ bbit p0 p1 :=
+public theorem bbit_pos (p0 p1 : Int) : 1 ≤ bbit p0 p1 :=
   isbit_pos (bbit_isbit p0 p1)
 
 -- Two distinct integers disagree AT their lowest differing bit ...
-theorem bbit_diff (p0 p1 : Int) :
+public theorem bbit_diff (p0 p1 : Int) :
     p0 ≠ p1 → (zbit p0 (bbit p0 p1) ↔ ¬ zbit p1 (bbit p0 p1)) := by
   fun_induction bbit p0 p1 with
   | case1 h =&gt; intro hne; contradiction
@@ -671,7 +880,7 @@ theorem bbit_diff (p0 p1 : Int) :
     omega
 
 -- ... and agree strictly below it.
-theorem bbit_agree (p0 p1 : Int) :
+public theorem bbit_agree (p0 p1 : Int) :
     p0 ≠ p1 → mask p0 (bbit p0 p1) = mask p1 (bbit p0 p1) := by
   fun_induction bbit p0 p1 with
   | case1 h =&gt; intro hne; contradiction
@@ -690,7 +899,7 @@ theorem bbit_agree (p0 p1 : Int) :
 
 -- Integers that differ below bit [b] have their lowest differing bit
 -- below [b].
-theorem bbit_lt (p0 p1 : Int) :
+public theorem bbit_lt (p0 p1 : Int) :
     ∀ b, isbit b → mask p0 b ≠ mask p1 b → bbit p0 p1 &lt; b := by
   fun_induction bbit p0 p1 with
   | case1 h =&gt; intro b hb hm; exact absurd rfl hm
@@ -711,7 +920,7 @@ theorem bbit_lt (p0 p1 : Int) :
     | one =&gt; exact absurd (by unfold mask; omega) hm
     | @dbl c hc =&gt; have := isbit_pos hc; omega
 
-theorem isbit_dvd {b : Int} (hb : isbit b) :
+public theorem isbit_dvd {b : Int} (hb : isbit b) :
     ∀ a, isbit a → a ≤ b → a ∣ b := by
   induction hb with
   | one =&gt;
@@ -728,7 +937,7 @@ theorem isbit_dvd {b : Int} (hb : isbit b) :
       rcases this with ⟨k, hk⟩
       exact ⟨k, by rw [hk, Int.mul_assoc]⟩
 
-theorem isbit_lt_dvd {b : Int} (hb : isbit b) :
+public theorem isbit_lt_dvd {b : Int} (hb : isbit b) :
     ∀ a, isbit a → a &lt; b → 2*a ∣ b := by
   induction hb with
   | one =&gt;
@@ -744,12 +953,12 @@ theorem isbit_lt_dvd {b : Int} (hb : isbit b) :
       rcases this with ⟨k, hk⟩
       exact ⟨k, by simp [hk, Int.mul_assoc]⟩
 
-theorem mask_tele {b b' : Int} (i : Int) (hd : b' ∣ b) :
+public theorem mask_tele {b b' : Int} (i : Int) (hd : b' ∣ b) :
     mask (mask i b) b' = mask i b' := by
   unfold mask
   exact Int.emod_emod_of_dvd i hd
 
-theorem zbit_mask {b b' : Int} (i : Int) (hd : 2*b' ∣ b) :
+public theorem zbit_mask {b b' : Int} (i : Int) (hd : 2*b' ∣ b) :
     zbit (mask i b) b' ↔ zbit i b' := by
   unfold zbit mask
   rw [Int.emod_emod_of_dvd i hd]
@@ -758,27 +967,27 @@ theorem zbit_mask {b b' : Int} (i : Int) (hd : 2*b' ∣ b) :
 -- invariant -- at every branch on bit [b] with prefix [p], all keys
 -- match [p] below [b], the zero side has bit [b] clear, the one side
 -- has it set.
-@[grind] def mem : Int -&gt; Vox_Ptrie_t -&gt; Prop
+@[grind, expose] public def mem : Int -&gt; Vox_Ptrie_t -&gt; Prop
   | _, .Empty =&gt; False
   | i, .Leaf j =&gt; i = j
   | i, .Branch _ _ t0 t1 =&gt; mem i t0 ∨ mem i t1
 
-@[grind] def allmatch : Vox_Ptrie_t -&gt; Int -&gt; Int -&gt; Prop
+@[grind, expose] public def allmatch : Vox_Ptrie_t -&gt; Int -&gt; Int -&gt; Prop
   | .Empty, _, _ =&gt; True
   | .Leaf j, p, b =&gt; mask j b = p
   | .Branch _ _ t0 t1, p, b =&gt; allmatch t0 p b ∧ allmatch t1 p b
 
-@[grind] def allzero : Vox_Ptrie_t -&gt; Int -&gt; Prop
+@[grind, expose] public def allzero : Vox_Ptrie_t -&gt; Int -&gt; Prop
   | .Empty, _ =&gt; True
   | .Leaf j, b =&gt; zbit j b
   | .Branch _ _ t0 t1, b =&gt; allzero t0 b ∧ allzero t1 b
 
-@[grind] def allone : Vox_Ptrie_t -&gt; Int -&gt; Prop
+@[grind, expose] public def allone : Vox_Ptrie_t -&gt; Int -&gt; Prop
   | .Empty, _ =&gt; True
   | .Leaf j, b =&gt; ¬ zbit j b
   | .Branch _ _ t0 t1, b =&gt; allone t0 b ∧ allone t1 b
 
-@[grind] def trie : Vox_Ptrie_t -&gt; Prop
+@[grind, expose] public def trie : Vox_Ptrie_t -&gt; Prop
   | .Empty =&gt; True
   | .Leaf _ =&gt; True
   | .Branch p b t0 t1 =&gt;
@@ -786,13 +995,13 @@ theorem zbit_mask {b b' : Int} (i : Int) (hd : 2*b' ∣ b) :
       allmatch t0 p b ∧ allmatch t1 p b ∧
       allzero t0 b ∧ allone t1 b ∧ trie t0 ∧ trie t1
 
-@[grind] def join (p0 : Int) (t0 : Vox_Ptrie_t) (p1 : Int) (t1 : Vox_Ptrie_t) :
+@[grind, expose] public def join (p0 : Int) (t0 : Vox_Ptrie_t) (p1 : Int) (t1 : Vox_Ptrie_t) :
     Vox_Ptrie_t :=
   if zbit p0 (bbit p0 p1)
   then .Branch (mask p0 (bbit p0 p1)) (bbit p0 p1) t0 t1
   else .Branch (mask p0 (bbit p0 p1)) (bbit p0 p1) t1 t0
 
-@[grind] def insert (i : Int) : Vox_Ptrie_t -&gt; Vox_Ptrie_t
+@[grind, expose] public def insert (i : Int) : Vox_Ptrie_t -&gt; Vox_Ptrie_t
   | .Empty =&gt; .Leaf i
   | .Leaf j =&gt; if i = j then .Leaf i else join i (.Leaf i) j (.Leaf j)
   | .Branch p b t0 t1 =&gt;
@@ -804,43 +1013,43 @@ theorem zbit_mask {b b' : Int} (i : Int) (hd : 2*b' ∣ b) :
 -- The invariant makes one-path search complete: a key that fails the
 -- prefix test, or sits on the other side of the branching bit, is in
 -- NO subtree.
-theorem not_mem_mismatch (i p b : Int) (t : Vox_Ptrie_t)
+public theorem not_mem_mismatch (i p b : Int) (t : Vox_Ptrie_t)
     (h : allmatch t p b) (hm : mask i b ≠ p) : ¬ mem i t := by
   induction t &lt;;&gt; grind
 grind_pattern not_mem_mismatch =&gt; mem i t, allmatch t p b
 
-theorem not_mem_zero (i b : Int) (t : Vox_Ptrie_t)
+public theorem not_mem_zero (i b : Int) (t : Vox_Ptrie_t)
     (h : allzero t b) (hz : ¬ zbit i b) : ¬ mem i t := by
   induction t &lt;;&gt; grind
 grind_pattern not_mem_zero =&gt; mem i t, allzero t b
 
-theorem not_mem_one (i b : Int) (t : Vox_Ptrie_t)
+public theorem not_mem_one (i b : Int) (t : Vox_Ptrie_t)
     (h : allone t b) (hz : zbit i b) : ¬ mem i t := by
   induction t &lt;;&gt; grind
 grind_pattern not_mem_one =&gt; mem i t, allone t b
 
 -- Insertion adds exactly one key ...
-theorem mem_insert (x y : Int) (t : Vox_Ptrie_t) :
+public theorem mem_insert (x y : Int) (t : Vox_Ptrie_t) :
     mem y (insert x t) ↔ (y = x ∨ mem y t) := by
   induction t &lt;;&gt; grind
 grind_pattern mem_insert =&gt; mem y (insert x t)
 
-theorem allmatch_insert (x p b : Int) (t : Vox_Ptrie_t)
+public theorem allmatch_insert (x p b : Int) (t : Vox_Ptrie_t)
     (h : allmatch t p b) (hx : mask x b = p) : allmatch (insert x t) p b := by
   induction t &lt;;&gt; grind
 grind_pattern allmatch_insert =&gt; allmatch (insert x t) p b
 
-theorem allzero_insert (x b : Int) (t : Vox_Ptrie_t)
+public theorem allzero_insert (x b : Int) (t : Vox_Ptrie_t)
     (h : allzero t b) (hx : zbit x b) : allzero (insert x t) b := by
   induction t &lt;;&gt; grind
 grind_pattern allzero_insert =&gt; allzero (insert x t) b
 
-theorem allone_insert (x b : Int) (t : Vox_Ptrie_t)
+public theorem allone_insert (x b : Int) (t : Vox_Ptrie_t)
     (h : allone t b) (hx : ¬ zbit x b) : allone (insert x t) b := by
   induction t &lt;;&gt; grind
 grind_pattern allone_insert =&gt; allone (insert x t) b
 
-theorem allmatch_weaken {b b' : Int} (p : Int) (t : Vox_Ptrie_t)
+public theorem allmatch_weaken {b b' : Int} (p : Int) (t : Vox_Ptrie_t)
     (h : allmatch t p b) (hd : b' ∣ b) : allmatch t (mask p b') b' := by
   induction t with
   | Empty =&gt; trivial
@@ -849,7 +1058,7 @@ theorem allmatch_weaken {b b' : Int} (p : Int) (t : Vox_Ptrie_t)
     grind [allmatch]
   | Branch q c t0 t1 ih0 ih1 =&gt; grind [allmatch]
 
-theorem allzero_of_allmatch {b b' : Int} (p : Int) (t : Vox_Ptrie_t)
+public theorem allzero_of_allmatch {b b' : Int} (p : Int) (t : Vox_Ptrie_t)
     (h : allmatch t p b) (hd : 2*b' ∣ b) (hp : zbit p b') : allzero t b' := by
   induction t with
   | Empty =&gt; trivial
@@ -858,7 +1067,7 @@ theorem allzero_of_allmatch {b b' : Int} (p : Int) (t : Vox_Ptrie_t)
     grind [allmatch, allzero]
   | Branch q c t0 t1 ih0 ih1 =&gt; grind [allmatch, allzero]
 
-theorem allone_of_allmatch {b b' : Int} (p : Int) (t : Vox_Ptrie_t)
+public theorem allone_of_allmatch {b b' : Int} (p : Int) (t : Vox_Ptrie_t)
     (h : allmatch t p b) (hd : 2*b' ∣ b) (hp : ¬ zbit p b') : allone t b' := by
   induction t with
   | Empty =&gt; trivial
@@ -870,7 +1079,7 @@ theorem allone_of_allmatch {b b' : Int} (p : Int) (t : Vox_Ptrie_t)
 -- Joining a fresh leaf with a whole subtree keeps the invariant: the
 -- branching bit of the two prefixes is a valid bit, both sides match
 -- the shared prefix below it, and they part ways exactly at it.
-theorem trie_join (x p : Int) (t : Vox_Ptrie_t)
+public theorem trie_join (x p : Int) (t : Vox_Ptrie_t)
     (ht : trie t) (hxnep : x ≠ p)
     (hall : allmatch t (mask p (bbit x p)) (bbit x p))
     (hz : zbit p (bbit x p) → allzero t (bbit x p))
@@ -884,7 +1093,7 @@ theorem trie_join (x p : Int) (t : Vox_Ptrie_t)
   grind
 
 -- ... and preserves the shape that makes the pruning sound.
-theorem trie_insert (x : Int) (t : Vox_Ptrie_t) (h : trie t) :
+public theorem trie_insert (x : Int) (t : Vox_Ptrie_t) (h : trie t) :
     trie (insert x t) := by
   induction t with
   | Empty =&gt; grind
