@@ -605,6 +605,22 @@ let rec subst_vox_sort s (vs : Types.vox_sort) =
     let p' = type_path s p in
     let ss' = Misc.Stdlib.List.map_sharing (subst_vox_sort s) ss in
     if p == p' && ss == ss' then vs else Vs_data (p', ss')
+  | Vs_fact (s0, pred) ->
+    (* Remap both the underlying sort's paths and the invariant's
+       constructor / value paths, exactly as [typexp] remaps a
+       [Trefine] predicate. *)
+    let map_path q =
+      if to_subst_by_type_function s q then q else type_path s q
+    in
+    let map_value_path q =
+      match q with
+      | Path.Pdot (m, x) -> Path.Pdot (module_path s m, x)
+      | Path.Papply (m, a) -> Path.Papply (module_path s m, module_path s a)
+      | Path.Pident _ | Path.Pextra_ty _ -> q
+    in
+    let s0' = subst_vox_sort s s0 in
+    let pred' = Refinement.map_paths ~value:map_value_path map_path pred in
+    if s0 == s0' && pred == pred' then vs else Vs_fact (s0', pred')
 
 let subst_vox_refines s (r : Types.vox_refines) =
   match r with

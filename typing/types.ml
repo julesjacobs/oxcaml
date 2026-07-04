@@ -273,6 +273,14 @@ and vox_sort =
   | Vs_data of Path.t * vox_sort list
   | Vs_param of int
   | Vs_opaque
+  | Vs_fact of vox_sort * Refinement.pred
+    (* vox: a modeling that carries a declared INVARIANT.  [type nat :
+       value refines (int{ _ >= 0 })] models at the underlying sort
+       (here [Vs_int]) but every binder of the type contributes the
+       closed predicate as a free fact.  The predicate mentions only
+       the bound value [_] and constructor/spec symbols (closedness is
+       enforced at elaboration), so it is .cmi-stable like the paths in
+       [Vs_data]. *)
 
 and ('layout, 'd) base_and_axes =
   { base : 'layout jkind_base;

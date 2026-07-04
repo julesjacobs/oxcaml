@@ -805,6 +805,8 @@ let rec show_vox_sort (vs : Types.vox_sort) =
     ^ String.concat " " (List.map show_vox_sort ss)
     ^ ")"
   | Vs_opaque -> "<opaque>"
+  | Vs_fact (s, pred) ->
+    show_vox_sort s ^ "{ " ^ Refinement.to_string pred ^ " }"
 
 let show_vox_refines (r : Types.vox_refines) =
   match r with
@@ -1665,8 +1667,11 @@ let type_declarations_consistency env decl1 decl2 =
         Path.same p1 p2
         && List.length ss1 = List.length ss2
         && List.for_all2 vox_sort_equal ss1 ss2
+      | Vs_fact (s1, p1), Vs_fact (s2, p2) ->
+        (* Preds are closed, so no binder pairing is needed. *)
+        vox_sort_equal s1 s2 && Refinement.equal p1 p2
       | ( ( Vs_int | Vs_bool | Vs_tuple _ | Vs_data _ | Vs_param _
-          | Vs_opaque )
+          | Vs_opaque | Vs_fact _ )
         , _ ) ->
         false
     in
@@ -1687,12 +1692,19 @@ let type_declarations_consistency env decl1 decl2 =
         (match List.nth_opt args i with Some s -> s | None -> Vs_opaque)
       | Vs_tuple ss -> Vs_tuple (List.map (subst_sort args) ss)
       | Vs_data (p, ss) -> Vs_data (p, List.map (subst_sort args) ss)
+      | Vs_fact (s, pred) -> Vs_fact (subst_sort args s, pred)
       | (Vs_int | Vs_bool | Vs_opaque) as s -> s
     in
     let rec sort_of_manifest ty : Types.vox_sort option =
       match get_desc ty with
       | Tconstr (p, [], _) when Path.same p Predef.path_int -> Some Vs_int
       | Tconstr (p, [], _) when Path.same p Predef.path_bool -> Some Vs_bool
+      (* A refined manifest satisfies a [refines (int{ ... })] interface
+         HONESTLY: its structural modeling carries the same invariant. *)
+      | Trefine (skel, pred) ->
+        (match sort_of_manifest skel with
+         | Some s -> Some (Types.Vs_fact (s, pred))
+         | None -> None)
       | Tconstr (p, args, _) ->
         (match Env.find_type p env with
          | exception Not_found -> None

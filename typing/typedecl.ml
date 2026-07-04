@@ -1236,6 +1236,9 @@ let transl_declaration env sdecl (id, uid) =
             (match List.nth_opt args i with Some s -> s | None -> Vs_opaque)
           | Vs_tuple ss -> Vs_tuple (List.map (subst_sort args) ss)
           | Vs_data (p, ss) -> Vs_data (p, List.map (subst_sort args) ss)
+          (* The invariant is closed, so only its underlying sort
+             instantiates. *)
+          | Vs_fact (s, pred) -> Vs_fact (subst_sort args s, pred)
           | (Vs_int | Vs_bool | Vs_opaque) as s -> s
         in
         (* Elaborate the core type written in [refines (...)] into a
@@ -1263,8 +1266,24 @@ let transl_declaration env sdecl (id, uid) =
             Location.raise_errorf ~loc:cty.ptyp_loc
               "vox: this type cannot model a refinement sort"
           in
-          let rec go (ty : Types.type_expr) : Types.vox_sort =
+          let rec go ?(head = false) (ty : Types.type_expr) : Types.vox_sort =
             match get_desc ty with
+            | Trefine (skel, pred) when head ->
+              (* An INVARIANT at the head: [int{ _ >= 0 }] models at the
+                 skeleton's sort but carries the closed predicate.
+                 [free_vars] must be empty -- an invariant may name only
+                 the bound value and constructor/spec symbols. *)
+              (match Refinement.free_vars pred with
+               | [] -> Vs_fact (go ~head skel, pred)
+               | _ :: _ ->
+                 Location.raise_errorf ~loc:cty.ptyp_loc
+                   "vox: an invariant may mention only the value (and module-level \
+               values, constructors, and spec functions)")
+            | Trefine _ ->
+              (* v2 scope: invariants compose only at the head of the
+                 written type, never in an argument position. *)
+              Location.raise_errorf ~loc:cty.ptyp_loc
+                "vox: invariants compose at the head only"
             | Tvar _ ->
               (match param_index ty with Some i -> Vs_param i | None -> err ())
             | Tconstr (p, [], _) when Path.same p Predef.path_int -> Vs_int
@@ -1289,7 +1308,7 @@ let transl_declaration env sdecl (id, uid) =
                           moves GADT-equation ambiguity):
                           [type index = int] models like [int]. *)
                        (match decl.type_params, decl.type_manifest with
-                        | [], Some m -> go m
+                        | [], Some m -> go ~head m
                         | _ -> err ()))))
             | Ttuple comps
               when List.length comps >= 2
@@ -1297,7 +1316,7 @@ let transl_declaration env sdecl (id, uid) =
               Vs_tuple (List.map (fun (_, t) -> go t) comps)
             | _ -> err ()
           in
-          go ty
+          go ~head:true ty
         in
         let rec of_annot (a : Parsetree.jkind_annotation) =
           match a.pjka_desc with

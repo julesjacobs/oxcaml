@@ -358,6 +358,9 @@ and dsort_of_vox_sort env arg_sorts (vs : Types.vox_sort) =
   | Vs_data (p, ss) ->
     datatype_sort env p (List.map (dsort_of_vox_sort env arg_sorts) ss)
   | Vs_opaque -> S_other
+  (* The invariant is a FACT, not part of the modeling: values are
+     modeled at the underlying sort (registered as usual). *)
+  | Vs_fact (s, _) -> dsort_of_vox_sort env arg_sorts s
 
 and datatype_sort_unattributed env p arg_sorts =
   if List.exists (Path.same p) !poisoned
@@ -573,6 +576,35 @@ let refinement_of_type env ty =
   match get_desc (Ctype.vox_expand_head env ty) with
   | Trefine (_, p) -> Some p
   | _ -> None
+;;
+
+(* The declared INVARIANTS of a type's modeling: [type nat : value
+   refines (int{ _ >= 0 })] gives every binder of type [nat] the closed
+   fact [_ >= 0], even though [nat] is abstract and never expands to a
+   [Trefine].  The head decl's [refines] is consulted like the
+   [Tconstr] modeling arm does; the predicate is closed, so a
+   parameterized head's instantiation touches only the (discarded)
+   sort.  A [Trefine] skeleton is followed so a written [nat{ ... }]
+   collects the head invariant alongside its own refinement. *)
+let invariant_preds env ty =
+  let rec facts_of_vox_sort acc (vs : Types.vox_sort) =
+    match vs with
+    | Vs_fact (s, pred) -> facts_of_vox_sort (pred :: acc) s
+    | Vs_int | Vs_bool | Vs_tuple _ | Vs_data _ | Vs_param _ | Vs_opaque -> acc
+  in
+  let rec go ty =
+    match get_desc (Ctype.vox_expand_head env ty) with
+    | Trefine (skel, _) -> go skel
+    | Tconstr (p, _, _) ->
+      (match Env.find_type p env with
+       | exception Not_found -> []
+       | decl ->
+         (match Jkind.get_vox_refines decl.type_jkind with
+          | Vr_sort vs -> facts_of_vox_sort [] vs
+          | Vr_top -> []))
+    | _ -> []
+  in
+  go ty
 ;;
 
 (* The refinement of an arrow PARAMETER type (a contract, DESIGN.md),
@@ -792,11 +824,15 @@ let binder_facts : type k. Env.t -> k general_pattern -> Refinement.pred list =
   List.concat_map
     (fun (id, _, ty, _, _) ->
       record_name env id ty;
-      match refinement_of_type env ty with
-      | Some p ->
-        register_pred_paths env p;
-        [ Refinement.subst_bound ~by:(Refinement.Pvar id) p ]
-      | None -> [])
+      let preds =
+        (match refinement_of_type env ty with Some p -> [ p ] | None -> [])
+        @ invariant_preds env ty
+      in
+      List.map
+        (fun p ->
+          register_pred_paths env p;
+          Refinement.subst_bound ~by:(Refinement.Pvar id) p)
+        preds)
     (pat_bound_idents_full pat)
 ;;
 
@@ -856,13 +892,23 @@ let rec register_global env (p : Path.t) =
     | vd ->
       let vd = Subst.Lazy.force_value_description vd in
       Hashtbl.replace globals key (p, dsort_of_type env vd.val_type);
-      (match refinement_of_type env vd.val_type with
-       | Some pr ->
-         register_pred_paths env pr;
-         let fact = Refinement.subst_bound ~by:(Refinement.Pglobal p) pr in
-         List.iter (register_global env) (Refinement.free_globals fact);
-         global_facts := fact :: !global_facts
-       | None -> ())
+      (* Both the written refinement and the type's declared INVARIANTS
+         attach at the path: [val zero : nat] carries the invariant
+         exactly as [val zero : int{ _ >= 0 }] carries its
+         refinement. *)
+      let preds =
+        (match refinement_of_type env vd.val_type with
+         | Some pr -> [ pr ]
+         | None -> [])
+        @ invariant_preds env vd.val_type
+      in
+      List.iter
+        (fun pr ->
+          register_pred_paths env pr;
+          let fact = Refinement.subst_bound ~by:(Refinement.Pglobal p) pr in
+          List.iter (register_global env) (Refinement.free_globals fact);
+          global_facts := fact :: !global_facts)
+        preds
     | exception Not_found ->
       (* Unresolvable here (e.g. a stale path): declare at the
          uninterpreted sort; no fact. *)

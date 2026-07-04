@@ -229,3 +229,129 @@ type pos : value refines (index)
 type index = int
 type pos
 |}]
+
+(* vox: a modeling may carry an INVARIANT -- [refines (int{ _ >= 0 })]
+   declares that the type is modeled at [int] but every value satisfies
+   [_ >= 0].  The invariant survives abstraction as a FREE FACT: each
+   binder of the abstract type contributes it, so clients reason with
+   it even though the definition is hidden. *)
+module M : sig
+  type nat : value refines (int{ _ >= 0 })
+
+  val get : unit -> nat
+end = struct
+  type nat = int{ _ >= 0 }
+
+  let get () : nat = refine_ 0
+end
+[%%expect{|
+Line 8, characters 29-30: vox VC:
+  goal: 0 >= 0
+  hypotheses: <none>
+module M : sig type nat val get : unit -> nat end
+|}]
+
+(* The invariant flows to the client as a hypothesis about the binder,
+   with no refinement written at the use site. *)
+let use_nat () =
+  let n = M.get () in
+  let refine_ ok = (n : M.nat{ _ + 1 >= 1 }) in
+  ok
+[%%expect{|
+Line 3, characters 20-21: vox VC:
+  goal: (n + 1) >= 1
+  hypotheses:
+  n >= 0
+val use_nat : unit -> M.nat = <fun>
+|}]
+
+(* An HONEST refined manifest satisfies the invariant interface: [type
+   nat = int{ _ >= 0 }] structurally carries the same fact, no trusted
+   assertion needed. *)
+module Honest_inv : sig
+  type nat : value refines (int{ _ >= 0 })
+end = struct
+  type nat = int{ _ >= 0 }
+end
+[%%expect{|
+module Honest_inv : sig type nat end
+|}]
+
+(* Inclusion compares the invariant structurally; a different predicate
+   is rejected, and the printer renders both readably. *)
+module Bad_inv : sig
+  type t : value refines (int{ _ >= 0 })
+end = struct
+  type t = int{ _ > 0 }
+end
+[%%expect{|
+Lines 3-5, characters 6-3:
+3 | ......struct
+4 |   type t = int{ _ > 0 }
+5 | end
+Error: Signature mismatch:
+       Modules do not match:
+         sig type t = int{ _ > 0 } end
+       is not included in
+         sig type t end
+       Type declarations do not match:
+         type t = int{ _ > 0 }
+       is not included in
+         type t
+       The second declares refines int{ _ >= 0 } where the first declares refines int{ _ > 0 }.
+|}]
+
+(* An invariant may mention only the value: a program variable in the
+   predicate is a hard error at the annotation. *)
+let bound = 5
+type bad_inv : value refines (int{ _ >= bound })
+[%%expect{|
+val bound : int = 5
+Line 2, characters 30-47:
+2 | type bad_inv : value refines (int{ _ >= bound })
+                                  ^^^^^^^^^^^^^^^^^
+Error: vox: an invariant may mention only the value (and module-level values, constructors, and spec functions)
+|}]
+
+(* Invariants compose only at the head of the written type: one in an
+   argument position is out of v2 scope. *)
+type 'a box = Box of 'a
+type bad_arg : value refines ((int{ _ >= 0 }) box)
+[%%expect{|
+type 'a box = Box of 'a
+Line 2, characters 30-49:
+2 | type bad_arg : value refines ((int{ _ >= 0 }) box)
+                                  ^^^^^^^^^^^^^^^^^^^
+Error: vox: invariants compose at the head only
+|}]
+
+(* A module-level value of an invariant type carries the invariant BY
+   PATH, like a written refinement would (review finding). *)
+module ByPath : sig
+  type nat2 : value refines (int{ _ >= 0 })
+
+  val zero : nat2
+end = struct
+  type nat2 = int{ _ >= 0 }
+
+  let zero : nat2 = 0
+end
+[%%expect{|
+Line 8, characters 20-21: vox VC:
+  goal: 0 >= 0
+  hypotheses:
+  bound = 5
+module ByPath : sig type nat2 val zero : nat2 end
+|}]
+
+let use_by_path () =
+  let refine_ ok = (refine_ true : bool{ ByPath.zero >= 0 }) in
+  ok
+[%%expect{|
+Line 2, characters 28-32: vox VC:
+  goal: ByPath.zero >= 0
+  hypotheses:
+  bound = 5
+  ByPath.zero >= 0
+val use_by_path : unit -> bool = <fun>
+|}]
