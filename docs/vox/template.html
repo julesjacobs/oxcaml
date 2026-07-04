@@ -77,14 +77,14 @@ th{background:var(--panel);color:var(--fg)} td{color:var(--dim)} td:first-child{
 @media (max-width:760px){.cols{grid-template-columns:1fr}}
 </style>
 </head>
-<body>
+<body id="top">
 <nav><div class="in">
-  <b>vox</b>
+  <a href="#top" style="color:var(--fg);font-weight:bold;font-size:1.05rem">vox</a>
+  <a href="#example">example</a>
   <a href="#sixty">model</a>
-  <a href="#wrong">failures</a>
   <a href="#perf">performance</a>
-  <a href="#trust">trust &amp; costs</a>
   <a href="#modes">mutation &amp; modes</a>
+  <a href="#trust">trust &amp; costs</a>
   <a href="#real">real code</a>
   <a href="#fib">a full file</a>
   <a href="#tour">more features</a>
@@ -93,142 +93,96 @@ th{background:var(--panel);color:var(--fg)} td{color:var(--dim)} td:first-child{
 </div></nav>
 <main>
 
-<h1>Verified OxCaml:<br>
-<span class="l">refinement types backed by Lean.</span></h1>
+<h1>Verified OxCaml</h1>
 
-<pre style="margin-top:1.4rem"><code class="ml">@HERO_ILIST@</code></pre>
-<p style="color:var(--dim);font-size:.95rem;max-width:46rem">An ordinary
-datatype and ordinary recursive functions.  <code>total_</code> reflects
-<code>len</code> into the logic (Lean checks it terminates);
-<code>append</code> is proved to add lengths, each recursive call
-re-instantiating its signature as the induction hypothesis, so the
-textbook proof has no proof text; and <code>nth</code> needs no option
-and no default value, because the bounds on <code>i</code> are a
-contract at every call site and the <code>Nil</code> arm is accepted
-only because <code>unreachable_</code>&rsquo;s obligation
-(<code>false</code>) is provable from them.  From
-<code>demo/lean_nth.ml</code> in the branch&rsquo;s CI.</p>
-<p style="color:var(--dim);font-size:.95rem;max-width:46rem">Weakening
-the bound to <code>i &lt;= len l</code> makes the <code>Nil</code> arm
-reachable, and the compiler answers with the boundary case the sloppy
-bound admits:</p>
-<pre><code class="ml">@HERO_FAIL@</code></pre>
-<pre class="out"><code>@HERO_FAIL_OUT@</code></pre>
-
-<pre><code class="ml">@HERO_QSORT@</code></pre>
-<p style="color:var(--dim);font-size:.95rem;max-width:46rem">It reaches
-imperative code.  In-place
-quicksort on a borrowed slice, verified sorted-and-permutation, and the
-fork-join parallel version under the identical spec.  The ownership
-reasoning is OxCaml&rsquo;s mode system: <code>@ unique</code> says the
-loan has no other references (which is what justifies mutating in
-place), <code>@ local</code> confines it to its region, and the borrow
-is RustHorn-style: <code>now m</code> is its current contents,
-<code>fin m</code> the prophesied final contents.  In
-<code>psort</code> the mode checker proves the two recursive tasks own
-disjoint halves, so parallelizing changes nothing in the proof.  From
-<code>demo/lean_qsort.ml</code> in the branch&rsquo;s CI, along with its
-negative probes (racing tasks, forged exports, escaped loans), which
-are compile errors.</p>
+<p style="margin-top:.2rem;font-size:1.15rem;color:var(--dim)">Refinement
+types backed by Lean.</p>
 
 <div class="cols">
 <p class="tag" style="color:var(--fg)">
 <b>vox</b> is an experimental extension of the
 <a href="https://github.com/julesjacobs/oxcaml/tree/vox">OxCaml compiler</a>
-in which types carry logical predicates, as in the examples above.
+in which types carry logical predicates, as in the examples below.
 Refinements become proof obligations, discharged on every
 <code>ocamlc</code> invocation by Lean&nbsp;4&rsquo;s <code>grind</code>;
-a failed obligation is a compile error that reports the goal, the
-hypotheses in scope, and a candidate counterexample.  Specifications are
-ordinary OCaml: a recursive function marked <code>total_</code> becomes its
-own logical definition, so code is verified against itself rather than a
-hand-maintained model, and parameter refinements act as contracts
-discharged at each call site.  Where automation falls short, lemmas are
-stated and proved in Lean next to the code and registered with the automation.  Specs, lemmas, and reflected
-definitions travel in <code>.cmi</code> files, so verification is modular
-and adopted per function; unannotated code compiles as before and never
-invokes the prover.  For imperative code, OxCaml&rsquo;s
-uniqueness/linearity/locality modes supply the ownership discipline, which
-is enough to build separation-logic-style verification of mutation as a
-small trusted library, with no changes to the mode checker.  Trust is
-graded and explicit throughout: proved, runtime-checked, or trusted and
-greppable.
+a failed obligation is a compile error with a counterexample.  Specs,
+lemmas, and reflected definitions travel in <code>.cmi</code> files, so
+verification is modular and adopted per function; unannotated code
+compiles as before and never invokes the prover.
 </p>
 <div class="side">
-<h3>Verified so far</h3>
+<h3>Demos</h3>
 <ul>
-<li><a href="#modes">In-place quicksort</a> (the example above):
+<li><a href="#modes">In-place quicksort</a>:
   <code>sorted</code>-and-<code>perm</code>, sequential and fork-join
   parallel.</li>
 <li><a href="#real">The Patricia trie</a> from OxCaml&rsquo;s own
-  optimizer: the bit theory proved from first principles; three trusted
-  one-liners.</li>
-<li><a href="#real">A BST behind a model interface</a>: one-path search
-  proved equal to whole-tree membership.</li>
-<li><a href="#modes">Mutation over ghost models</a>: in-place list
-  reversal, a tree flipped in place, interior mutability.</li>
+  optimizer (the bit theory proved from first principles) and a BST,
+  each behind a proved model interface.</li>
+<li><a href="#modes">Unique mutation</a>: in-place list reversal, a
+  tree flipped in place, interior mutability.</li>
 <li><a href="#fib">Fast-doubling Fibonacci</a> verified against its own
   naive definition; <a href="#tour">binary search, integer square
   root</a>.</li>
-<li>A safe <code>nth</code> (the first example above), no option and
-  no default: the <code>Nil</code> arm is proved unreachable by
-  <code>unreachable_</code>.</li>
-<li><a href="#perf">A bounds-check-free kernel</a>: the dot product at
-  1.36&times; the checked loop; the sum matching hand-written
-  <code>unsafe_get</code>.</li>
+<li><a href="#perf">Dropping runtime checks</a>: a bounds-check-free
+  array kernel at 1.36&times; the checked loop.</li>
 </ul>
+<p style="font-size:.85rem;color:var(--dim);margin:.5rem 0 .2rem">(all
+<a href="#trust">vibe-proved</a> by AI)</p>
 </div>
 </div>
 
-<h3 style="margin-top:1.8rem">Design choices</h3>
+<h3>How it works</h3>
 <ul>
-<li><a href="#sixty">The spec language is Lean; the spec is the
-  program</a>: predicates are propositions about the logical
-  counterparts of program values, and <code>total_</code> reflects a
-  function into the logic (Lean checks its termination).  Only
-  reflected functions can be called in predicates, for soundness.</li>
-<li><a href="#sixty">Why refinement types</a>: a parameter refinement is
-  a precondition and a result refinement a postcondition, but a
-  refinement can also sit inside a type:
-  <code>int{ _ &gt;= 0 } list</code> puts the fact on the elements, where
-  the typechecker carries it and any polymorphic function preserves it
-  with nothing to prove.</li>
-<li><a href="#sixty">Why Lean</a>: the refinement theory is Lean&rsquo;s
-  logic, not a decidable fragment; anything provable in Lean can back a
-  refinement.  <code>grind</code> gives SMT-style automation in the
-  common case, a failed goal escalates to a tactic proof next to the code
-  (work LLMs are now good at) that registers back into the automation via
-  <code>@[grind]</code>, and everything, automation included, is
+<li><a href="#sixty">Refinements are Lean propositions</a> about the
+  logical values of the program; anything provable in Lean can be a
+  refinement.</li>
+<li><a href="#sixty">Refinements generalize pre/postconditions</a>: they
+  attach to any type, and the typechecker propagates them through data
+  structures and polymorphic functions.</li>
+<li><a href="#sixty">OCaml functions can be used in specs</a>: marking
+  a function <code>total_</code> reflects it into the logic, and
+  refinements can then call it.</li>
+<li><a href="#real">Specs go on module signatures</a>: an
+  <code>.mli</code> can state a model and prove its theorems; both
+  travel in the <code>.cmi</code>, and clients verify against the
+  interface.</li>
+<li><a href="#sixty">Automation</a>: <code>grind</code> handles the
+  common case; missed goals are proved with tactics next to the code and
+  registered with <code>@[grind]</code>; everything is
   kernel-checked.</li>
-<li><a href="#wrong">Counterexamples on failure</a>: goal, hypotheses, and
-  a violating input, reported at the offending expression in about a
-  second.</li>
-<li><a href="#trust">Vibe-proved, kernel-checked</a>: most of the Lean on
-  the branch was drafted by LLM agents against <code>grind</code>&rsquo;s
-  counterexample feedback; Lean re-checks every proof on every build, so
-  proof provenance does not affect soundness.</li>
-<li><a href="#modes">Modes as the ownership substrate</a>: unique tokens,
-  RustHorn-style borrows with prophecies, and a separation logic, all as
-  libraries over the mode checker.</li>
-<li><a href="#trust">Graded trust</a>: proved / runtime-checked
-  (<code>assume_</code>) / trusted (<code>assume_unchecked_</code> and
-  friends); the trust surface is small and greppable.</li>
-<li><a href="#why-test">Properties are separate from checking
-  mechanisms</a>: the same contract can be proved, runtime-checked, or
-  handed to property-based testing as an oracle.</li>
-<li><a href="#perf">Proofs erase</a>: verified code can use unchecked
-  primitives, deleting runtime checks the compiler has proofs for.</li>
-<li><a href="#tour">The usual verification vocabulary</a>: ADTs, records,
-  tuples and quantifiers in predicates; loop invariants; mutable locals
-  (SSA); cross-module specs.</li>
+<li><a href="#modes">Unique mutation using the mode system</a>:
+  RustHorn-style mutable borrows (see the parallel in-place quicksort
+  demo).</li>
+<li><a href="#why-test">Specs work as tests</a>: reflected predicates
+  are executable OCaml, usable as runtime checks (<code>assume_</code>)
+  and as oracles for property-based testing, fuzzing, and AI-driven bug
+  finding.</li>
 </ul>
 
+<h2 id="example">A complete example</h2>
+<pre style="margin-top:1rem"><code class="ml">@HERO_ILIST@</code></pre>
+<p style="color:var(--dim);font-size:.95rem;max-width:46rem">Weakening
+the bound to <code>i &lt;= len l</code> makes the <code>Nil</code> arm
+reachable, and the compiler answers with a counterexample:</p>
+<pre><code class="ml">@HERO_FAIL@</code></pre>
+<pre class="out"><code>@HERO_FAIL_OUT@</code></pre>
 
-<p style="color:var(--dim)">Every code snippet below is extracted verbatim
+<pre><code class="ml">@HERO_QSORT@</code></pre>
+<p style="color:var(--dim);font-size:.95rem;max-width:46rem">It reaches
+imperative code: in-place quicksort on a borrowed slice, verified
+sorted-and-permutation, and the fork-join parallel version under the
+identical spec.  <code>@ unique</code> says the loan has no other
+references (what justifies mutating in place), <code>@ local</code>
+confines it to its region, and <code>now m</code> / <code>fin m</code>
+are a RustHorn-style borrow&rsquo;s current and final (prophesied)
+contents.  In <code>psort</code> the mode checker proves the two tasks
+own disjoint halves, so parallelizing changes nothing in the proof.</p>
+
+<p style="color:var(--dim)">Every code snippet on this page is extracted verbatim
 from the branch&rsquo;s test suite; the passing files must verify and the
 failure files must fail with exactly the output shown, or CI is red.
-Sections are ordered for progressive depth; the first three cover the
-system.</p>
+Sections are ordered for progressive depth.</p>
 
 <h2 id="sixty">The model, in brief</h2>
 <p>A refinement is a predicate on a type: <code>int{ _ &gt;= 0 }</code>,
@@ -263,16 +217,26 @@ nonnegative elements with nothing to prove; in effect, unary
 parametricity for free.  Spelled as a contract, the same fact is a
 quantified invariant carried alongside the list and re-established at
 every step.</p>
-<p>Proof obligations arise in two places: applications to refined
-parameters, as above (no annotation at the call site), and explicit
+<p>Proof obligations arise in three places: applications to refined
+parameters, as above (no annotation at the call site); explicit
 <code>refine_&nbsp;e</code> claims such as a result refinement or a stored
-value.  Both are proved by Lean&nbsp;4&rsquo;s <code>grind</code>, invoked
+value; and <code>unreachable_</code>, whose obligation is
+<code>false</code>.  All are proved by Lean&nbsp;4&rsquo;s <code>grind</code>, invoked
 by the compiler; an undischarged obligation is a compile error.  Trust is
 graded: <code>assume_&nbsp;e</code> is checked at runtime (the compiler
 inserts the test), and <code>assume_unchecked_&nbsp;e</code> is trusted
 outright.  That is the main escape hatch, though not the only one; ghost
 declarations and the mutation library&rsquo;s mode casts are trusted too,
 and the full accounting is in the trust table below.</p>
+<p>A failed obligation reports like a type error, at the offending
+expression; the <code>nth</code> break at the top of the page is the
+shape.  The output shows the goal, the hypotheses in scope, and the
+arithmetic model the solver ended on, rewritten to source names: on
+linear goals the model is a genuine refutation, and nonlinear atoms
+print as separate entries, so a model that is only linear-consistent is
+identifiable as such.  The same information, back in about a second, is
+what an agent gets as feedback when it is the one writing the code or
+the proof.</p>
 <p>The predicate language does not stop at a decidable fragment:
 predicates and reflected definitions land in Lean, so anything provable
 in Lean can back a refinement.  For automation, <code>grind</code> covers
@@ -300,22 +264,6 @@ there is no second, solver-side copy to drift:</p>
 arguments, which is the induction hypothesis, so the textbook proof goes through
 with no proof text of its own.</p>
 
-<h2 id="wrong">What a failure looks like</h2>
-<p>A proof failure is an ordinary compile error at the offending
-expression.  It states what was to be proved, what was known, and a
-concrete input that breaks it:</p>
-<pre><code class="ml">@WRONG_SRC@</code></pre>
-<pre class="out"><code>@WRONG_OUT@</code></pre>
-<p>The output shows the goal, the hypotheses in scope, and the arithmetic
-model the solver ended on, rewritten to source names.  On linear goals the model is a genuine
-refutation; nonlinear atoms print as separate entries, so a model that is
-only linear-consistent is identifiable as such.  The same information,
-back in about a second, is what an agent gets as feedback when it is the
-one writing the code or the proof.  The same shape catches the
-classic search-tree bug (wrong-side descent) and the classic Patricia-trie
-bug (skipping the prefix check) with witnesses; both are shown below on
-real structures.</p>
-
 <h2 id="perf">Performance: checks the compiler can delete</h2>
 <p><code>get</code> reads with <code>Iarray.unsafe_get</code>, so there
 is no bounds check in the compiled code; its contract demands the proof at
@@ -331,6 +279,76 @@ costs nothing at runtime because it ran at compile time.  The same
 reasoning applies to other checks that exist only because a known fact was
 never stated: validation on trusted paths, defensive re-checks across
 module boundaries, option-wrapping of values that cannot be absent.</p>
+
+<h2 id="modes">OxCaml&rsquo;s modes</h2>
+<p>OxCaml&rsquo;s mode system was built for allocation control, but it
+provides the ownership substrate a verifier needs to reason about
+mutation.  A
+<code>unique</code> value has no other references, which is what justifies
+a strong update; the linearity axis (<code>once</code>) makes capability
+tokens affine; <code>local</code> confines a value to its region.  vox
+added no checker machinery for any of the following.  The mode checker
+enforces the ownership discipline, the refinements carry the ghost state,
+and a small trusted library (accounted for in the trust table below)
+encodes the heap logic on top; the mode checker&rsquo;s existing reasoning
+is what keeps that encoding sound to thread.  Rust&rsquo;s verifiers
+(Creusot, Prusti, RustHorn) make an analogous move on the borrow checker.
+OCaml&rsquo;s modes, designed for performance rather than verification,
+supply the same substrate, so refinement types reach in-place mutation
+through the mode system itself rather than through a bespoke ownership
+analysis.</p>
+
+<div class="grid">
+
+<div class="card"><h3>Interior mutability <span class="pill">demo/lean_pcell.ml</span></h3>
+<p>Mutable cells behind a linear token discipline: reads and writes consume
+and return a unique token, so facts about a cell&rsquo;s contents cannot
+survive a write.  Duplicated, stale, forged, and cross-cell tokens are
+compile-time errors.</p>
+<pre><code class="ml">@PCELL@</code></pre></div>
+
+<div class="card"><h3>Mutable borrows <span class="pill">demo/lean_borrow.ml</span></h3>
+<p>RustHorn-style: a borrow hands the continuation a loan whose final value
+is a prophecy variable <code>p</code>; the borrower proves an export in
+lender terms, and after resolution the lender reads the residual back with
+proof.  Double use, forged exports, and writes through frozen loans are
+compile-time errors.</p>
+<pre><code class="ml">@BORROW@</code></pre></div>
+
+<div class="card"><h3>A tree flipped in place <span class="pill">demo/lean_flip.ml</span></h3>
+<p>A mutable tree with a pure ghost model: <code>flip</code> swaps child
+pointers in place, its dependent signature
+<code>model _ = mirror (model h)</code> makes each recursive call the
+induction hypothesis, and flipping twice is provably the identity.</p>
+<pre><code class="ml">@FLIP@</code></pre></div>
+
+<div class="card"><h3>A separation logic <span class="pill">demo/lean_sep.ml</span></h3>
+<p>One unique token owns the heap; its refinement carries a reified
+assertion, and the frame is an explicit parameter.  Reads recover the ghost
+values, writes rewrite the points-to chunks, and two live references are
+distinct because <code>Star</code> means disjoint.</p>
+<pre><code class="ml">@SEP@</code></pre></div>
+
+<div class="card"><h3>In-place list reversal <span class="pill">demo/lean_seplist.ml</span></h3>
+<p>The textbook separation-logic proof: <code>Lseg (l, vs)</code> owns a
+null-terminated segment holding the model list, the reflected
+<code>rev_append</code> is the specification, and <code>reverse</code>
+rewires next pointers node by node, returning the same cells holding
+the reversed list.</p>
+<pre><code class="ml">@SEPLIST@</code></pre></div>
+
+<div class="card"><h3>Quicksort, sequential and parallel <span class="pill">demo/lean_qsort.ml</span></h3>
+<p>In-place quicksort over slice borrows, verified against
+<code>sorted</code>-and-<code>perm</code>: the recursion is a reborrow, and
+each side&rsquo;s facts come home as prophecy values.  Then the same
+verification runs fork-join: <code>psort</code> below carries the
+identical spec.  The mode checker proves the two tasks own disjoint state,
+so parallelizing the recursion changes nothing in the proof; the trusted
+<code>fork_join2</code> combinator (~20 lines) is where that guarantee is
+cashed out.</p>
+<pre><code class="ml">@QSORT@</code></pre></div>
+
+</div>
 
 <h2 id="trust">Costs and trust</h2>
 <p>What a claim on this page is worth depends on what is proved, what is
@@ -411,76 +429,6 @@ trie&rsquo;s bit theory, and the invariant step lemmas, was mostly
 checker accepted it and the batteries held.  Since Lean re-checks everything on every build, proof
 provenance does not matter for soundness, and agent-written proof text is
 safe to accept.</p>
-
-<h2 id="modes">OxCaml&rsquo;s modes</h2>
-<p>OxCaml&rsquo;s mode system was built for allocation control, but it
-provides the ownership substrate a verifier needs to reason about
-mutation.  A
-<code>unique</code> value has no other references, which is what justifies
-a strong update; the linearity axis (<code>once</code>) makes capability
-tokens affine; <code>local</code> confines a value to its region.  vox
-added no checker machinery for any of the following.  The mode checker
-enforces the ownership discipline, the refinements carry the ghost state,
-and a small trusted library (accounted for in the trust table above)
-encodes the heap logic on top; the mode checker&rsquo;s existing reasoning
-is what keeps that encoding sound to thread.  Rust&rsquo;s verifiers
-(Creusot, Prusti, RustHorn) make an analogous move on the borrow checker.
-OCaml&rsquo;s modes, designed for performance rather than verification,
-supply the same substrate, so refinement types reach in-place mutation
-through the mode system itself rather than through a bespoke ownership
-analysis.</p>
-
-<div class="grid">
-
-<div class="card"><h3>Interior mutability <span class="pill">demo/lean_pcell.ml</span></h3>
-<p>Mutable cells behind a linear token discipline: reads and writes consume
-and return a unique token, so facts about a cell&rsquo;s contents cannot
-survive a write.  Duplicated, stale, forged, and cross-cell tokens are
-compile-time errors.</p>
-<pre><code class="ml">@PCELL@</code></pre></div>
-
-<div class="card"><h3>Mutable borrows <span class="pill">demo/lean_borrow.ml</span></h3>
-<p>RustHorn-style: a borrow hands the continuation a loan whose final value
-is a prophecy variable <code>p</code>; the borrower proves an export in
-lender terms, and after resolution the lender reads the residual back with
-proof.  Double use, forged exports, and writes through frozen loans are
-compile-time errors.</p>
-<pre><code class="ml">@BORROW@</code></pre></div>
-
-<div class="card"><h3>A tree flipped in place <span class="pill">demo/lean_flip.ml</span></h3>
-<p>A mutable tree with a pure ghost model: <code>flip</code> swaps child
-pointers in place, its dependent signature
-<code>model _ = mirror (model h)</code> makes each recursive call the
-induction hypothesis, and flipping twice is provably the identity.</p>
-<pre><code class="ml">@FLIP@</code></pre></div>
-
-<div class="card"><h3>A separation logic <span class="pill">demo/lean_sep.ml</span></h3>
-<p>One unique token owns the heap; its refinement carries a reified
-assertion, and the frame is an explicit parameter.  Reads recover the ghost
-values, writes rewrite the points-to chunks, and two live references are
-distinct because <code>Star</code> means disjoint.</p>
-<pre><code class="ml">@SEP@</code></pre></div>
-
-<div class="card"><h3>In-place list reversal <span class="pill">demo/lean_seplist.ml</span></h3>
-<p>The textbook separation-logic proof: <code>Lseg (l, vs)</code> owns a
-null-terminated segment holding the model list, the reflected
-<code>rev_append</code> is the specification, and <code>reverse</code>
-rewires next pointers node by node, returning the same cells holding
-the reversed list.</p>
-<pre><code class="ml">@SEPLIST@</code></pre></div>
-
-<div class="card"><h3>Quicksort, sequential and parallel <span class="pill">demo/lean_qsort.ml</span></h3>
-<p>In-place quicksort over slice borrows, verified against
-<code>sorted</code>-and-<code>perm</code>: the recursion is a reborrow, and
-each side&rsquo;s facts come home as prophecy values.  Then the same
-verification runs fork-join: <code>psort</code> below carries the
-identical spec.  The mode checker proves the two tasks own disjoint state,
-so parallelizing the recursion changes nothing in the proof; the trusted
-<code>fork_join2</code> combinator (~20 lines) is where that guarantee is
-cashed out.</p>
-<pre><code class="ml">@QSORT@</code></pre></div>
-
-</div>
 
 <h2 id="real">Real code, verified as found</h2>
 <p>Two case studies on existing structures rather than examples written

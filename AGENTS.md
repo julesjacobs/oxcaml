@@ -69,7 +69,11 @@ Configuration is needed after changing `.in` files or the autoconf script.
   verified module is about 1 second of Lean end to end:
   `_build/_bootinstall/bin/ocamlc.opt -vox-solver-path <lean> -c file.ml`
   (locate `<lean>` the way `testsuite/tests/vox/has-lean.sh` does:
-  `$VOX_LEAN`, PATH, or its pinned copy).
+  `$VOX_LEAN`, PATH, or its pinned copy).  CAVEAT (2026-07-04): direct
+  invocation SIGSEGVs on some reflection-heavy multi-goal demos
+  (lean_reflect, lean_fib, lean_isqrt) that pass cleanly under the
+  ocamltest harness -- for those, validate with `make test-one`, and
+  treat a standalone segfault as suspect before blaming your edit.
 - `make -s test-one` costs ~17s even on an UNCHANGED tree (its
   install_for_test step re-checks the full dune install graph and
   re-rsyncs the testsuite into _runtest), and MINUTES after compiler

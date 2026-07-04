@@ -22,14 +22,14 @@ type ilist =
   | Nil
   | Cons of int * ilist
 
+(* total_ reflects len into the logic, so the refinements below can
+   call it; Lean checks it terminates. *)
 let rec total_ len l =
   match l with
   | Nil -> 0
   | Cons (_, t) -> 1 + len t
 
-(* Each recursive call re-instantiates the declared signature at its
-   arguments -- the induction hypothesis, unpacked by the [let] that
-   names it. *)
+(* Proved: each recursive call is the induction hypothesis. *)
 let rec append (a : ilist) (b : ilist) : ilist{ len _ = len a + len b } =
   match a with
   | Nil -> b
@@ -37,9 +37,8 @@ let rec append (a : ilist) (b : ilist) : ilist{ len _ = len a + len b } =
     let r = append t b in
     Cons (h, r)
 
-(* In-bounds access: callers must prove the bounds, and the [Nil] arm
-   must prove it is unreachable. *)
+(* The bounds are a contract, discharged at every call site. *)
 let rec nth (l : ilist) (i : int{ 0 <= _ && _ < len l }) : int =
   match l with
-  | Nil -> unreachable_
+  | Nil -> unreachable_   (* must be proved: [false] from the facts here *)
   | Cons (h, t) -> if i = 0 then h else nth t (i - 1)

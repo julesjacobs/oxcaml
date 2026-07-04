@@ -118,16 +118,11 @@ def main():
 
     fib = read('demo/lean_fib.ml')
     reflect = read('demo/lean_reflect.ml')
-    wrong = read('mechanics/lean_wrong.ml')
 
     snippets = {
         '@SIXTY@': slice_between(read('demo/lean_overview.ml'),
                                  r'^let div', r'^let safe .* else 0'),
         '@FIB_SRC@': strip_test_header(fib),
-        '@WRONG_SRC@': slice_between(wrong, r'^let rec total_ fib',
-                                     r'^let wrong'),
-        '@WRONG_OUT@': slice_between(wrong, r'^Error: vox: verification failed',
-                                     r'^\(lean: '),
         '@REFLECT@': slice_between(reflect, r'^let rec total_ len',
                                    r'Cons \(_, t\) -> 1 \+ len t')
                      + '\n\n'
@@ -235,12 +230,13 @@ def main():
     snippets['@HERO_ILIST@'] = (
         slice_between(nth, r'^type ilist', r'^  \| Cons of int \* ilist')
         + '\n\n'
-        + slice_between(nth, r'^let rec total_ len',
+        + slice_between(nth, r'^\(\* total_ reflects',
                         r'Cons \(_, t\) -> 1 \+ len t')
         + '\n\n'
-        + slice_between(nth, r'^let rec append', r'Cons \(h, r\)')
+        + slice_between(nth, r'^\(\* Proved: each recursive call',
+                        r'Cons \(h, r\)')
         + '\n\n'
-        + slice_between(nth, r'^let rec nth',
+        + slice_between(nth, r'^\(\* The bounds are a contract',
                         r'if i = 0 then h else nth t \(i - 1\)'))
     snippets['@HERO_FAIL@'] = slice_between(
         nth_fail, r'^let rec nth', r'if i = 0 then h else nth t \(i - 1\)')

@@ -77,14 +77,14 @@ th{background:var(--panel);color:var(--fg)} td{color:var(--dim)} td:first-child{
 @media (max-width:760px){.cols{grid-template-columns:1fr}}
 </style>
 </head>
-<body>
+<body id="top">
 <nav><div class="in">
-  <b>vox</b>
+  <a href="#top" style="color:var(--fg);font-weight:bold;font-size:1.05rem">vox</a>
+  <a href="#example">example</a>
   <a href="#sixty">model</a>
-  <a href="#wrong">failures</a>
   <a href="#perf">performance</a>
-  <a href="#trust">trust &amp; costs</a>
   <a href="#modes">mutation &amp; modes</a>
+  <a href="#trust">trust &amp; costs</a>
   <a href="#real">real code</a>
   <a href="#fib">a full file</a>
   <a href="#tour">more features</a>
@@ -93,18 +93,86 @@ th{background:var(--panel);color:var(--fg)} td{color:var(--dim)} td:first-child{
 </div></nav>
 <main>
 
-<h1>Verified OxCaml:<br>
-<span class="l">refinement types backed by Lean.</span></h1>
+<h1>Verified OxCaml</h1>
 
-<pre style="margin-top:1.4rem"><code class="ml">type ilist =
+<p style="margin-top:.2rem;font-size:1.15rem;color:var(--dim)">Refinement
+types backed by Lean.</p>
+
+<div class="cols">
+<p class="tag" style="color:var(--fg)">
+<b>vox</b> is an experimental extension of the
+<a href="https://github.com/julesjacobs/oxcaml/tree/vox">OxCaml compiler</a>
+in which types carry logical predicates, as in the examples below.
+Refinements become proof obligations, discharged on every
+<code>ocamlc</code> invocation by Lean&nbsp;4&rsquo;s <code>grind</code>;
+a failed obligation is a compile error with a counterexample.  Specs,
+lemmas, and reflected definitions travel in <code>.cmi</code> files, so
+verification is modular and adopted per function; unannotated code
+compiles as before and never invokes the prover.
+</p>
+<div class="side">
+<h3>Demos</h3>
+<ul>
+<li><a href="#modes">In-place quicksort</a>:
+  <code>sorted</code>-and-<code>perm</code>, sequential and fork-join
+  parallel.</li>
+<li><a href="#real">The Patricia trie</a> from OxCaml&rsquo;s own
+  optimizer (the bit theory proved from first principles) and a BST,
+  each behind a proved model interface.</li>
+<li><a href="#modes">Unique mutation</a>: in-place list reversal, a
+  tree flipped in place, interior mutability.</li>
+<li><a href="#fib">Fast-doubling Fibonacci</a> verified against its own
+  naive definition; <a href="#tour">binary search, integer square
+  root</a>.</li>
+<li><a href="#perf">Dropping runtime checks</a>: a bounds-check-free
+  array kernel at 1.36&times; the checked loop.</li>
+</ul>
+<p style="font-size:.85rem;color:var(--dim);margin:.5rem 0 .2rem">(all
+<a href="#trust">vibe-proved</a> by AI)</p>
+</div>
+</div>
+
+<h3>How it works</h3>
+<ul>
+<li><a href="#sixty">Refinements are Lean propositions</a> about the
+  logical values of the program; anything provable in Lean can be a
+  refinement.</li>
+<li><a href="#sixty">Refinements generalize pre/postconditions</a>: they
+  attach to any type, and the typechecker propagates them through data
+  structures and polymorphic functions.</li>
+<li><a href="#sixty">OCaml functions can be used in specs</a>: marking
+  a function <code>total_</code> reflects it into the logic, and
+  refinements can then call it.</li>
+<li><a href="#real">Specs go on module signatures</a>: an
+  <code>.mli</code> can state a model and prove its theorems; both
+  travel in the <code>.cmi</code>, and clients verify against the
+  interface.</li>
+<li><a href="#sixty">Automation</a>: <code>grind</code> handles the
+  common case; missed goals are proved with tactics next to the code and
+  registered with <code>@[grind]</code>; everything is
+  kernel-checked.</li>
+<li><a href="#modes">Unique mutation using the mode system</a>:
+  RustHorn-style mutable borrows (see the parallel in-place quicksort
+  demo).</li>
+<li><a href="#why-test">Specs work as tests</a>: reflected predicates
+  are executable OCaml, usable as runtime checks (<code>assume_</code>)
+  and as oracles for property-based testing, fuzzing, and AI-driven bug
+  finding.</li>
+</ul>
+
+<h2 id="example">A complete example</h2>
+<pre style="margin-top:1rem"><code class="ml">type ilist =
   | Nil
   | Cons of int * ilist
 
+(* total_ reflects len into the logic, so the refinements below can
+   call it; Lean checks it terminates. *)
 let rec total_ len l =
   match l with
   | Nil -&gt; 0
   | Cons (_, t) -&gt; 1 + len t
 
+(* Proved: each recursive call is the induction hypothesis. *)
 let rec append (a : ilist) (b : ilist) : ilist{ len _ = len a + len b } =
   match a with
   | Nil -&gt; b
@@ -112,25 +180,14 @@ let rec append (a : ilist) (b : ilist) : ilist{ len _ = len a + len b } =
     let r = append t b in
     Cons (h, r)
 
+(* The bounds are a contract, discharged at every call site. *)
 let rec nth (l : ilist) (i : int{ 0 &lt;= _ &amp;&amp; _ &lt; len l }) : int =
   match l with
-  | Nil -&gt; unreachable_
+  | Nil -&gt; unreachable_   (* must be proved: [false] from the facts here *)
   | Cons (h, t) -&gt; if i = 0 then h else nth t (i - 1)</code></pre>
-<p style="color:var(--dim);font-size:.95rem;max-width:46rem">An ordinary
-datatype and ordinary recursive functions.  <code>total_</code> reflects
-<code>len</code> into the logic (Lean checks it terminates);
-<code>append</code> is proved to add lengths, each recursive call
-re-instantiating its signature as the induction hypothesis, so the
-textbook proof has no proof text; and <code>nth</code> needs no option
-and no default value, because the bounds on <code>i</code> are a
-contract at every call site and the <code>Nil</code> arm is accepted
-only because <code>unreachable_</code>&rsquo;s obligation
-(<code>false</code>) is provable from them.  From
-<code>demo/lean_nth.ml</code> in the branch&rsquo;s CI.</p>
 <p style="color:var(--dim);font-size:.95rem;max-width:46rem">Weakening
 the bound to <code>i &lt;= len l</code> makes the <code>Nil</code> arm
-reachable, and the compiler answers with the boundary case the sloppy
-bound admits:</p>
+reachable, and the compiler answers with a counterexample:</p>
 <pre><code class="ml">let rec nth (l : ilist) (i : int{ 0 &lt;= _ &amp;&amp; _ &lt;= len l }) : int =
   match l with
   | Nil -&gt; unreachable_
@@ -162,118 +219,19 @@ let rec psort :
   fun m -&gt; ...   (* the SAME spec; the recursive calls
                     run under Par_lib.fork_join2 *)</code></pre>
 <p style="color:var(--dim);font-size:.95rem;max-width:46rem">It reaches
-imperative code.  In-place
-quicksort on a borrowed slice, verified sorted-and-permutation, and the
-fork-join parallel version under the identical spec.  The ownership
-reasoning is OxCaml&rsquo;s mode system: <code>@ unique</code> says the
-loan has no other references (which is what justifies mutating in
-place), <code>@ local</code> confines it to its region, and the borrow
-is RustHorn-style: <code>now m</code> is its current contents,
-<code>fin m</code> the prophesied final contents.  In
-<code>psort</code> the mode checker proves the two recursive tasks own
-disjoint halves, so parallelizing changes nothing in the proof.  From
-<code>demo/lean_qsort.ml</code> in the branch&rsquo;s CI, along with its
-negative probes (racing tasks, forged exports, escaped loans), which
-are compile errors.</p>
+imperative code: in-place quicksort on a borrowed slice, verified
+sorted-and-permutation, and the fork-join parallel version under the
+identical spec.  <code>@ unique</code> says the loan has no other
+references (what justifies mutating in place), <code>@ local</code>
+confines it to its region, and <code>now m</code> / <code>fin m</code>
+are a RustHorn-style borrow&rsquo;s current and final (prophesied)
+contents.  In <code>psort</code> the mode checker proves the two tasks
+own disjoint halves, so parallelizing changes nothing in the proof.</p>
 
-<div class="cols">
-<p class="tag" style="color:var(--fg)">
-<b>vox</b> is an experimental extension of the
-<a href="https://github.com/julesjacobs/oxcaml/tree/vox">OxCaml compiler</a>
-in which types carry logical predicates, as in the examples above.
-Refinements become proof obligations, discharged on every
-<code>ocamlc</code> invocation by Lean&nbsp;4&rsquo;s <code>grind</code>;
-a failed obligation is a compile error that reports the goal, the
-hypotheses in scope, and a candidate counterexample.  Specifications are
-ordinary OCaml: a recursive function marked <code>total_</code> becomes its
-own logical definition, so code is verified against itself rather than a
-hand-maintained model, and parameter refinements act as contracts
-discharged at each call site.  Where automation falls short, lemmas are
-stated and proved in Lean next to the code and registered with the automation.  Specs, lemmas, and reflected
-definitions travel in <code>.cmi</code> files, so verification is modular
-and adopted per function; unannotated code compiles as before and never
-invokes the prover.  For imperative code, OxCaml&rsquo;s
-uniqueness/linearity/locality modes supply the ownership discipline, which
-is enough to build separation-logic-style verification of mutation as a
-small trusted library, with no changes to the mode checker.  Trust is
-graded and explicit throughout: proved, runtime-checked, or trusted and
-greppable.
-</p>
-<div class="side">
-<h3>Verified so far</h3>
-<ul>
-<li><a href="#modes">In-place quicksort</a> (the example above):
-  <code>sorted</code>-and-<code>perm</code>, sequential and fork-join
-  parallel.</li>
-<li><a href="#real">The Patricia trie</a> from OxCaml&rsquo;s own
-  optimizer: the bit theory proved from first principles; three trusted
-  one-liners.</li>
-<li><a href="#real">A BST behind a model interface</a>: one-path search
-  proved equal to whole-tree membership.</li>
-<li><a href="#modes">Mutation over ghost models</a>: in-place list
-  reversal, a tree flipped in place, interior mutability.</li>
-<li><a href="#fib">Fast-doubling Fibonacci</a> verified against its own
-  naive definition; <a href="#tour">binary search, integer square
-  root</a>.</li>
-<li>A safe <code>nth</code> (the first example above), no option and
-  no default: the <code>Nil</code> arm is proved unreachable by
-  <code>unreachable_</code>.</li>
-<li><a href="#perf">A bounds-check-free kernel</a>: the dot product at
-  1.36&times; the checked loop; the sum matching hand-written
-  <code>unsafe_get</code>.</li>
-</ul>
-</div>
-</div>
-
-<h3 style="margin-top:1.8rem">Design choices</h3>
-<ul>
-<li><a href="#sixty">The spec language is Lean; the spec is the
-  program</a>: predicates are propositions about the logical
-  counterparts of program values, and <code>total_</code> reflects a
-  function into the logic (Lean checks its termination).  Only
-  reflected functions can be called in predicates, for soundness.</li>
-<li><a href="#sixty">Why refinement types</a>: a parameter refinement is
-  a precondition and a result refinement a postcondition, but a
-  refinement can also sit inside a type:
-  <code>int{ _ &gt;= 0 } list</code> puts the fact on the elements, where
-  the typechecker carries it and any polymorphic function preserves it
-  with nothing to prove.</li>
-<li><a href="#sixty">Why Lean</a>: the refinement theory is Lean&rsquo;s
-  logic, not a decidable fragment; anything provable in Lean can back a
-  refinement.  <code>grind</code> gives SMT-style automation in the
-  common case, a failed goal escalates to a tactic proof next to the code
-  (work LLMs are now good at) that registers back into the automation via
-  <code>@[grind]</code>, and everything, automation included, is
-  kernel-checked.</li>
-<li><a href="#wrong">Counterexamples on failure</a>: goal, hypotheses, and
-  a violating input, reported at the offending expression in about a
-  second.</li>
-<li><a href="#trust">Vibe-proved, kernel-checked</a>: most of the Lean on
-  the branch was drafted by LLM agents against <code>grind</code>&rsquo;s
-  counterexample feedback; Lean re-checks every proof on every build, so
-  proof provenance does not affect soundness.</li>
-<li><a href="#modes">Modes as the ownership substrate</a>: unique tokens,
-  RustHorn-style borrows with prophecies, and a separation logic, all as
-  libraries over the mode checker.</li>
-<li><a href="#trust">Graded trust</a>: proved / runtime-checked
-  (<code>assume_</code>) / trusted (<code>assume_unchecked_</code> and
-  friends); the trust surface is small and greppable.</li>
-<li><a href="#why-test">Properties are separate from checking
-  mechanisms</a>: the same contract can be proved, runtime-checked, or
-  handed to property-based testing as an oracle.</li>
-<li><a href="#perf">Proofs erase</a>: verified code can use unchecked
-  primitives, deleting runtime checks the compiler has proofs for.</li>
-<li><a href="#tour">The usual verification vocabulary</a>: ADTs, records,
-  tuples and quantifiers in predicates; loop invariants; mutable locals
-  (SSA); cross-module specs.</li>
-</ul>
-
-
-<p style="color:var(--dim)">Every code snippet below is extracted verbatim
+<p style="color:var(--dim)">Every code snippet on this page is extracted verbatim
 from the branch&rsquo;s test suite; the passing files must verify and the
 failure files must fail with exactly the output shown, or CI is red.
-Sections are ordered for progressive depth; the first three cover the
-system.</p>
+Sections are ordered for progressive depth.</p>
 
 <h2 id="sixty">The model, in brief</h2>
 <p>A refinement is a predicate on a type: <code>int{ _ &gt;= 0 }</code>,
@@ -310,16 +268,26 @@ nonnegative elements with nothing to prove; in effect, unary
 parametricity for free.  Spelled as a contract, the same fact is a
 quantified invariant carried alongside the list and re-established at
 every step.</p>
-<p>Proof obligations arise in two places: applications to refined
-parameters, as above (no annotation at the call site), and explicit
+<p>Proof obligations arise in three places: applications to refined
+parameters, as above (no annotation at the call site); explicit
 <code>refine_&nbsp;e</code> claims such as a result refinement or a stored
-value.  Both are proved by Lean&nbsp;4&rsquo;s <code>grind</code>, invoked
+value; and <code>unreachable_</code>, whose obligation is
+<code>false</code>.  All are proved by Lean&nbsp;4&rsquo;s <code>grind</code>, invoked
 by the compiler; an undischarged obligation is a compile error.  Trust is
 graded: <code>assume_&nbsp;e</code> is checked at runtime (the compiler
 inserts the test), and <code>assume_unchecked_&nbsp;e</code> is trusted
 outright.  That is the main escape hatch, though not the only one; ghost
 declarations and the mutation library&rsquo;s mode casts are trusted too,
 and the full accounting is in the trust table below.</p>
+<p>A failed obligation reports like a type error, at the offending
+expression; the <code>nth</code> break at the top of the page is the
+shape.  The output shows the goal, the hypotheses in scope, and the
+arithmetic model the solver ended on, rewritten to source names: on
+linear goals the model is a genuine refutation, and nonlinear atoms
+print as separate entries, so a model that is only linear-consistent is
+identifiable as such.  The same information, back in about a second, is
+what an agent gets as feedback when it is the one writing the code or
+the proof.</p>
 <p>The predicate language does not stop at a decidable fragment:
 predicates and reflected definitions land in Lean, so anything provable
 in Lean can back a refinement.  For automation, <code>grind</code> covers
@@ -362,33 +330,6 @@ let rec append : (a : ilist) -&gt; (b : ilist) -&gt; ilist{ len _ = len a + len 
 arguments, which is the induction hypothesis, so the textbook proof goes through
 with no proof text of its own.</p>
 
-<h2 id="wrong">What a failure looks like</h2>
-<p>A proof failure is an ordinary compile error at the offending
-expression.  It states what was to be proved, what was known, and a
-concrete input that breaks it:</p>
-<pre><code class="ml">let rec total_ fib n =
-  if n &lt;= 0 then 0 else if n = 1 then 1 else fib (n - 1) + fib (n - 2)
-[@@vox.decreases n]
-
-(* Off by one: fib is not n+1.  The compiler says so, with a witness. *)
-let wrong : (n : int) -&gt; int{ _ = fib n } = fun n -&gt; refine_ (n + 1)</code></pre>
-<pre class="out"><code>Error: vox: verification failed (lean).
-       Goal: (n + 1) = (fib n)
-Hypotheses: &lt;none&gt;
-Possible counterexample:
-  n = 0
-  fib n = 0
-(lean: error: `grind` failed)</code></pre>
-<p>The output shows the goal, the hypotheses in scope, and the arithmetic
-model the solver ended on, rewritten to source names.  On linear goals the model is a genuine
-refutation; nonlinear atoms print as separate entries, so a model that is
-only linear-consistent is identifiable as such.  The same information,
-back in about a second, is what an agent gets as feedback when it is the
-one writing the code or the proof.  The same shape catches the
-classic search-tree bug (wrong-side descent) and the classic Patricia-trie
-bug (skipping the prefix check) with witnesses; both are shown below on
-real structures.</p>
-
 <h2 id="perf">Performance: checks the compiler can delete</h2>
 <p><code>get</code> reads with <code>Iarray.unsafe_get</code>, so there
 is no bounds check in the compiled code; its contract demands the proof at
@@ -411,86 +352,6 @@ reasoning applies to other checks that exist only because a known fact was
 never stated: validation on trusted paths, defensive re-checks across
 module boundaries, option-wrapping of values that cannot be absent.</p>
 
-<h2 id="trust">Costs and trust</h2>
-<p>What a claim on this page is worth depends on what is proved, what is
-checked at runtime, and what is assumed:</p>
-<table>
-<tr><th>Construct</th><th>Status</th><th>Notes</th></tr>
-<tr><td><code>refine_ e</code></td><td><span class="g">Proved</span></td>
-  <td>Emitted as a Lean theorem; failure is a compile error with goal, hypotheses, and model.</td></tr>
-<tr><td>parameter contracts</td><td><span class="g">Proved</span></td>
-  <td>Discharged at every application, at the argument&rsquo;s logical name.</td></tr>
-<tr><td><code>total_</code> definitions</td><td><span class="g">Definitional</span></td>
-  <td>The emitted Lean <code>def</code> is the OCaml body; Lean independently checks termination.</td></tr>
-<tr><td><code>[%%vox.lean]</code> theorems</td><td><span class="g">Proved</span></td>
-  <td>Hand-written lemmas are Lean-checked on every compile; a false proof is a compile error.</td></tr>
-<tr><td><code>assume_ e</code></td><td><span class="w">Runtime-checked</span></td>
-  <td>The compiler inserts the test; a violated assumption raises rather than entering the logic.
-      Compiled only when the check is faithful to the logic; otherwise a compile error.</td></tr>
-<tr><td><code>assume_unchecked_ e</code>, <code>axiom</code> in blocks</td><td><span class="e">Trusted</span></td>
-  <td>The primary trust surface.  In the Patricia trie it is three
-      bit-twiddling one-liners.</td></tr>
-<tr><td><code>[@@vox.sort]</code> ghost sorts; library mode casts</td><td><span class="e">Trusted</span></td>
-  <td>The mutation encodings&rsquo; trust surface: ghost types declaring their logical sort, and the
-      <code>Obj.magic</code>-family casts inside the token, borrow, slice, and
-      separation-logic libraries (about 450 lines in all).  The audit grep is <code>assume_unchecked_</code> +
-      <code>Obj.magic</code> + <code>[@@vox.sort]</code> over the trusted libs.</td></tr>
-</table>
-<p><b>What it costs.</b>  Verification runs inside <code>ocamlc</code>.
-A typical fully-verified module in the suite adds on the order of one
-second of Lean per compile on a dev box; heavier developments with
-inductive Lean proofs (the trie, quicksort) cost proportionally more, and
-failures with small counterexamples report in under a second.  Obligations
-are re-proved from scratch on every build, so there is no stale-proof
-state to manage, and editing a spec changes the <code>.cmi</code>
-checksum, which forces clients to re-verify.  The compiler footprint is
-about 4,900 lines in <code>typing/</code>, plus real changes to arrows and
-unification for dependent binders and an elaboration-time annotation
-hoist.
-The build gains a dependency on a pinned Lean toolchain.  Verification is
-opt-in per module, and unannotated code never invokes the prover.</p>
-<p><b>When a proof fails.</b>  If a refactor breaks an
-obligation, the build goes red at that function, localized like a type
-error.  But closing a hard goal can require writing Lean, so a verified
-module carries a real maintenance cost that belongs with the team that
-owns it.  Automated discharge is also not guaranteed: <code>grind</code>
-can fail on a goal that is in fact true (nonlinear arithmetic, quantifier
-instantiation, timeouts).  The options in that case, in order: prove a
-lemma once in an embedded block, downgrade the fact to a runtime-checked
-<code>assume_</code>, or leave the function unannotated.  Refined types
-are rigid by design, and the inference sharp edges are documented in
-DESIGN.md.</p>
-<p><b>Known limits, by design.</b>  Partial correctness: a diverging call
-proves nothing (termination is checked only for <code>total_</code>
-definitions, by Lean).  Ideal integer arithmetic: overflow is outside the
-model.  No concurrency reasoning yet beyond mode-checked disjointness
-(fork-join above); shared-state protocols need an invariant layer that does
-not exist.  Client-written <code>axiom</code>s in lemma blocks join the
-trust surface silently today; a lint is planned.  All documented in
-<a href="https://github.com/julesjacobs/oxcaml/blob/vox/DESIGN.md">DESIGN.md</a>.</p>
-<p id="why-test"><b>Properties versus checking mechanisms.</b>  A
-contract is written once, independent of how it is enforced.  Today the
-mechanisms are proof (Lean) and runtime checking
-(<code>assume_&nbsp;e</code> compiles the predicate into a test).  Since
-reflected specifications are executable OCaml, the same contract can also
-serve as the oracle for property-based testing: quickcheck-style
-generators, fuzzers, or LLM-guided search for violating inputs, none of
-which exist yet in vox, all of which would consume the specs unchanged.
-Inductive invariants (a tree staying ordered
-under every insertion) are the facts sampling cannot confirm.</p>
-<p><b>Hardening and proof provenance.</b>  Each feature on
-the branch shipped with an adversarial probe battery (forged tokens,
-duplicated loans, escaped borrows, prophecy reuse, cross-cell confusion,
-false exports), and every probe is pinned in the test suite to the layer
-that rejects it: modes, locality, contract, or Lean.  A regression in any
-layer fails CI.  The Lean itself, meaning the lemma libraries, the
-trie&rsquo;s bit theory, and the invariant step lemmas, was mostly
-<i>vibe-proved</i>: drafted by agents against
-<code>grind</code>&rsquo;s counterexample feedback and kept when the
-checker accepted it and the batteries held.  Since Lean re-checks everything on every build, proof
-provenance does not matter for soundness, and agent-written proof text is
-safe to accept.</p>
-
 <h2 id="modes">OxCaml&rsquo;s modes</h2>
 <p>OxCaml&rsquo;s mode system was built for allocation control, but it
 provides the ownership substrate a verifier needs to reason about
@@ -500,7 +361,7 @@ a strong update; the linearity axis (<code>once</code>) makes capability
 tokens affine; <code>local</code> confines a value to its region.  vox
 added no checker machinery for any of the following.  The mode checker
 enforces the ownership discipline, the refinements carry the ghost state,
-and a small trusted library (accounted for in the trust table above)
+and a small trusted library (accounted for in the trust table below)
 encodes the heap logic on top; the mode checker&rsquo;s existing reasoning
 is what keeps that encoding sound to thread.  Rust&rsquo;s verifiers
 (Creusot, Prusti, RustHorn) make an analogous move on the borrow checker.
@@ -634,6 +495,86 @@ let rec psort :
                     run under Par_lib.fork_join2 *)</code></pre></div>
 
 </div>
+
+<h2 id="trust">Costs and trust</h2>
+<p>What a claim on this page is worth depends on what is proved, what is
+checked at runtime, and what is assumed:</p>
+<table>
+<tr><th>Construct</th><th>Status</th><th>Notes</th></tr>
+<tr><td><code>refine_ e</code></td><td><span class="g">Proved</span></td>
+  <td>Emitted as a Lean theorem; failure is a compile error with goal, hypotheses, and model.</td></tr>
+<tr><td>parameter contracts</td><td><span class="g">Proved</span></td>
+  <td>Discharged at every application, at the argument&rsquo;s logical name.</td></tr>
+<tr><td><code>total_</code> definitions</td><td><span class="g">Definitional</span></td>
+  <td>The emitted Lean <code>def</code> is the OCaml body; Lean independently checks termination.</td></tr>
+<tr><td><code>[%%vox.lean]</code> theorems</td><td><span class="g">Proved</span></td>
+  <td>Hand-written lemmas are Lean-checked on every compile; a false proof is a compile error.</td></tr>
+<tr><td><code>assume_ e</code></td><td><span class="w">Runtime-checked</span></td>
+  <td>The compiler inserts the test; a violated assumption raises rather than entering the logic.
+      Compiled only when the check is faithful to the logic; otherwise a compile error.</td></tr>
+<tr><td><code>assume_unchecked_ e</code>, <code>axiom</code> in blocks</td><td><span class="e">Trusted</span></td>
+  <td>The primary trust surface.  In the Patricia trie it is three
+      bit-twiddling one-liners.</td></tr>
+<tr><td><code>[@@vox.sort]</code> ghost sorts; library mode casts</td><td><span class="e">Trusted</span></td>
+  <td>The mutation encodings&rsquo; trust surface: ghost types declaring their logical sort, and the
+      <code>Obj.magic</code>-family casts inside the token, borrow, slice, and
+      separation-logic libraries (about 450 lines in all).  The audit grep is <code>assume_unchecked_</code> +
+      <code>Obj.magic</code> + <code>[@@vox.sort]</code> over the trusted libs.</td></tr>
+</table>
+<p><b>What it costs.</b>  Verification runs inside <code>ocamlc</code>.
+A typical fully-verified module in the suite adds on the order of one
+second of Lean per compile on a dev box; heavier developments with
+inductive Lean proofs (the trie, quicksort) cost proportionally more, and
+failures with small counterexamples report in under a second.  Obligations
+are re-proved from scratch on every build, so there is no stale-proof
+state to manage, and editing a spec changes the <code>.cmi</code>
+checksum, which forces clients to re-verify.  The compiler footprint is
+about 4,900 lines in <code>typing/</code>, plus real changes to arrows and
+unification for dependent binders and an elaboration-time annotation
+hoist.
+The build gains a dependency on a pinned Lean toolchain.  Verification is
+opt-in per module, and unannotated code never invokes the prover.</p>
+<p><b>When a proof fails.</b>  If a refactor breaks an
+obligation, the build goes red at that function, localized like a type
+error.  But closing a hard goal can require writing Lean, so a verified
+module carries a real maintenance cost that belongs with the team that
+owns it.  Automated discharge is also not guaranteed: <code>grind</code>
+can fail on a goal that is in fact true (nonlinear arithmetic, quantifier
+instantiation, timeouts).  The options in that case, in order: prove a
+lemma once in an embedded block, downgrade the fact to a runtime-checked
+<code>assume_</code>, or leave the function unannotated.  Refined types
+are rigid by design, and the inference sharp edges are documented in
+DESIGN.md.</p>
+<p><b>Known limits, by design.</b>  Partial correctness: a diverging call
+proves nothing (termination is checked only for <code>total_</code>
+definitions, by Lean).  Ideal integer arithmetic: overflow is outside the
+model.  No concurrency reasoning yet beyond mode-checked disjointness
+(fork-join above); shared-state protocols need an invariant layer that does
+not exist.  Client-written <code>axiom</code>s in lemma blocks join the
+trust surface silently today; a lint is planned.  All documented in
+<a href="https://github.com/julesjacobs/oxcaml/blob/vox/DESIGN.md">DESIGN.md</a>.</p>
+<p id="why-test"><b>Properties versus checking mechanisms.</b>  A
+contract is written once, independent of how it is enforced.  Today the
+mechanisms are proof (Lean) and runtime checking
+(<code>assume_&nbsp;e</code> compiles the predicate into a test).  Since
+reflected specifications are executable OCaml, the same contract can also
+serve as the oracle for property-based testing: quickcheck-style
+generators, fuzzers, or LLM-guided search for violating inputs, none of
+which exist yet in vox, all of which would consume the specs unchanged.
+Inductive invariants (a tree staying ordered
+under every insertion) are the facts sampling cannot confirm.</p>
+<p><b>Hardening and proof provenance.</b>  Each feature on
+the branch shipped with an adversarial probe battery (forged tokens,
+duplicated loans, escaped borrows, prophecy reuse, cross-cell confusion,
+false exports), and every probe is pinned in the test suite to the layer
+that rejects it: modes, locality, contract, or Lean.  A regression in any
+layer fails CI.  The Lean itself, meaning the lemma libraries, the
+trie&rsquo;s bit theory, and the invariant step lemmas, was mostly
+<i>vibe-proved</i>: drafted by agents against
+<code>grind</code>&rsquo;s counterexample feedback and kept when the
+checker accepted it and the batteries held.  Since Lean re-checks everything on every build, proof
+provenance does not matter for soundness, and agent-written proof text is
+safe to accept.</p>
 
 <h2 id="real">Real code, verified as found</h2>
 <p>Two case studies on existing structures rather than examples written
