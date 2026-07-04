@@ -114,8 +114,9 @@ types backed by Lean.</p>
 <li><a href="#seal">Sealed interfaces</a>: one sig, two verified
   implementations; <a href="#oset">a set</a> whose representation is
   hidden even from the logic.</li>
-<li><a href="#modes">Unique mutation</a>: in-place list reversal, a
-  tree flipped in place, interior mutability.</li>
+<li><a href="#modes">Unique mutation</a>: mutable borrows and mutable
+  slices into arrays; in-place list reversal, a tree flipped in
+  place.</li>
 <li><a href="#fib">Fast-doubling Fibonacci</a> verified against its own
   naive definition; <a href="#tour">binary search, integer square
   root</a>.</li>
@@ -1481,7 +1482,9 @@ mode checker enforces the ownership discipline, refinements carry the
 ghost state, and a small trusted library (accounted for in the trust
 table below) encodes the heap logic on top.  Rust&rsquo;s verifiers
 (Creusot, Prusti, RustHorn) make the analogous move on the borrow
-checker.</p>
+checker.  The two workhorses are mutable borrows &mdash; a loan whose
+final value is a prophecy variable &mdash; and mutable slices into
+arrays, which the sorting demos below run on.</p>
 
 
 <p>The smallest case is a mutable borrow
