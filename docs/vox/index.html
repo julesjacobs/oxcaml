@@ -1580,8 +1580,7 @@ refuses with the decode in the counterexample.</p>
     assume_unchecked_ (let bit = x land (-x) in (x lxor bit, bit))
 
     | Branch (x, t0, t1) -&gt;
-      let q = unpack x in
-      let (p, b) = q in
+      let (p, b) = unpack x in
       let m = mask i b in
       if m &lt;&gt; p then false
       else begin

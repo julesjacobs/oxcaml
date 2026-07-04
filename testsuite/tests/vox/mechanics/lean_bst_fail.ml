@@ -14,28 +14,28 @@ type tree =
   | Node of tree * int * tree
 
 [%%vox.lean {lean|
-@[grind] def mem : Int -> Vox__tree -> Prop
+@[grind] def mem : Int -> Vox_tree -> Prop
   | _, .Leaf => False
   | x, .Node l v r => x = v ∨ mem x l ∨ mem x r
 
-@[grind] def all_lt : Vox__tree -> Int -> Prop
+@[grind] def all_lt : Vox_tree -> Int -> Prop
   | .Leaf, _ => True
   | .Node l v r, b => v < b ∧ all_lt l b ∧ all_lt r b
 
-@[grind] def all_gt : Vox__tree -> Int -> Prop
+@[grind] def all_gt : Vox_tree -> Int -> Prop
   | .Leaf, _ => True
   | .Node l v r, b => v > b ∧ all_gt l b ∧ all_gt r b
 
-@[grind] def bst : Vox__tree -> Prop
+@[grind] def bst : Vox_tree -> Prop
   | .Leaf => True
   | .Node l v r => all_lt l v ∧ all_gt r v ∧ bst l ∧ bst r
 
-theorem not_mem_lt (x b : Int) (t : Vox__tree)
+theorem not_mem_lt (x b : Int) (t : Vox_tree)
     (h : all_lt t b) (hx : b <= x) : ¬ mem x t := by
   induction t <;> grind
 grind_pattern not_mem_lt => mem x t, all_lt t b
 
-theorem not_mem_gt (x b : Int) (t : Vox__tree)
+theorem not_mem_gt (x b : Int) (t : Vox_tree)
     (h : all_gt t b) (hx : x <= b) : ¬ mem x t := by
   induction t <;> grind
 grind_pattern not_mem_gt => mem x t, all_gt t b

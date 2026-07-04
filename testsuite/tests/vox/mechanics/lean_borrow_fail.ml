@@ -178,6 +178,8 @@ Line 11, characters 29-31:
 Error: vox: verification failed (lean).
        Goal: x' = a
 Hypotheses:
+  x' = (fst *unknown18*)
+  u = (snd *unknown18*)
   x' = p
   1 = 1
   x = a

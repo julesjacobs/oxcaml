@@ -16,7 +16,7 @@ opaque rid : VoxU -> Int
 abbrev HeapM := Int -> Option Int
 opaque hp : VoxU -> HeapM
 
-@[grind] def sat : Vox__S_hprop -> HeapM -> Prop
+@[grind] def sat : Vox_S_hprop -> HeapM -> Prop
   | .Emp, h => ∀ x, h x = none
   | .Pts r v, h => h (rid r) = some v ∧ ∀ x, x ≠ rid r → h x = none
   | .Star p q, h =>
@@ -25,7 +25,7 @@ opaque hp : VoxU -> HeapM
         ∧ (∀ x, h x = match h₁ x with | some v => some v | none => h₂ x)
         ∧ sat p h₁ ∧ sat q h₂
 
-theorem sat_pts_neq (r r' : VoxU) (a b : Int) (q : Vox__S_hprop)
+theorem sat_pts_neq (r r' : VoxU) (a b : Int) (q : Vox_S_hprop)
     (h : HeapM) :
     sat (.Star (.Pts r a) (.Star (.Pts r' b) q)) h → ¬ (r = r') := by
   rintro ⟨h₁, h₂, hd, hu, ⟨s₁, _⟩, h₃, h₄, hd', hu', ⟨s₃, _⟩, _⟩ heq

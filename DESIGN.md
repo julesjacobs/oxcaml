@@ -499,14 +499,25 @@ two channels, e.g. a binder fact and its selfification equation):
 - Dependent application: applying `f : (x:int) -> {z | p}` to variable
   `a` substitutes: the result type is `{z | p[x:=a]}`, so
   `let refine_ m = mul a b` yields `m = a * b`.
-- Match facts (the match refines the thing it matched on): in
-  `match s with ...` where `s` is a VARIABLE, a case whose pattern is
-  one constructor of a simple variant over variables or wildcards
-  checks its guard and body under `s = C x1 ... xn` (wildcards name
-  fresh unknowns); a simple-record pattern contributes `xi = s.li` per
-  variable sub-pattern (per-field, so partial patterns are fine).
-  `let p = x in ...` gets the same facts, so destructuring a record
-  binds its fields logically.  A bare VARIABLE arm aliases the
+- Match facts (the match refines the thing it matched on): the
+  scrutinee of `match s with ...` may be ANY expression -- a variable
+  matches at its stamp, a module-level value at its path name, and
+  anything else at a NAME for the one evaluation being matched (its
+  logic translation when it has one, a fresh unknown otherwise).  A
+  case whose pattern is one constructor of a simple variant over
+  variables or wildcards checks its guard and body under
+  `s = C x1 ... xn` (wildcards name fresh unknowns); a simple-record
+  pattern contributes `xi = s.li` per variable sub-pattern
+  (per-field, so partial patterns are fine).  `let p = e in ...` gets
+  the same facts, so destructuring binds components logically --
+  `let (p, b) = unpack x` ties `p`/`b` to the projections of the
+  call's name, and the result's REFINEMENT holds at that name too
+  (recovered from the callee's instantiated result type where
+  implicit erasure dropped it: the erasure argument was that an
+  unnamed value's fact is unreachable, and the destructuring is
+  exactly the naming).  Exception and effect arms receive none of
+  this (the scrutinee was interrupted, so there is no value the name
+  could denote).  A bare VARIABLE arm aliases the
   scrutinee (`match s with y -> ...` learns `y = s`).  Deeper patterns
   -- nesting, aliases, or-patterns, constants -- contribute nothing,
   which is sound.  `function`-cases are a match on the anonymous

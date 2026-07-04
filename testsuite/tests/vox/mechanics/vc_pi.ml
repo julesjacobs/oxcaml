@@ -43,6 +43,8 @@ Line 4, characters 29-30: vox VC:
   goal: not (x = 0)
   hypotheses:
   c
+  *unknown3* = (z < x)
+  c = *unknown3*
   c = (z < x)
   z = zero
   zero = 0
@@ -58,6 +60,8 @@ let partial (a : int) (b : int) : {w:bool | w || not w} =
 Line 4, characters 10-22: vox VC:
   goal: (c || (not c)) || (not (c || (not c)))
   hypotheses:
+  *unknown6* = (a < b)
+  c = *unknown6*
   c = (a < b)
   zero = 0
 val partial : int -> int -> bool{ _ || (not _) } = <fun>
@@ -115,6 +119,8 @@ let rec countdown : (x:int) -> (unit -> {v:int | v = x}) option -> int =
 Line 6, characters 42-43: vox VC:
   goal: r = x
   hypotheses:
+  *unknown11* = x
+  r = *unknown11*
   r = x
   zero = 0
 Line 12, characters 59-61: vox VC (RUNTIME CHECKED):

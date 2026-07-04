@@ -42,27 +42,27 @@ theorem bbit_isbit (p0 p1 : Int) : isbit (bbit p0 p1) := by
   | case3 => exact isbit.one
 grind_pattern bbit_isbit => bbit p0 p1
 
-@[grind] def mem : Int -> Vox__t -> Prop
+@[grind] def mem : Int -> Vox_t -> Prop
   | _, .Empty => False
   | i, .Leaf j => i = j
   | i, .Branch _ _ t0 t1 => mem i t0 ∨ mem i t1
 
-@[grind] def allmatch : Vox__t -> Int -> Int -> Prop
+@[grind] def allmatch : Vox_t -> Int -> Int -> Prop
   | .Empty, _, _ => True
   | .Leaf j, p, b => mask j b = p
   | .Branch _ _ t0 t1, p, b => allmatch t0 p b ∧ allmatch t1 p b
 
-@[grind] def allzero : Vox__t -> Int -> Prop
+@[grind] def allzero : Vox_t -> Int -> Prop
   | .Empty, _ => True
   | .Leaf j, b => zbit j b
   | .Branch _ _ t0 t1, b => allzero t0 b ∧ allzero t1 b
 
-@[grind] def allone : Vox__t -> Int -> Prop
+@[grind] def allone : Vox_t -> Int -> Prop
   | .Empty, _ => True
   | .Leaf j, b => ¬ zbit j b
   | .Branch _ _ t0 t1, b => allone t0 b ∧ allone t1 b
 
-@[grind] def trie : Vox__t -> Prop
+@[grind] def trie : Vox_t -> Prop
   | .Empty => True
   | .Leaf _ => True
   | .Branch p b t0 t1 =>
@@ -70,12 +70,12 @@ grind_pattern bbit_isbit => bbit p0 p1
       allmatch t0 p b ∧ allmatch t1 p b ∧
       allzero t0 b ∧ allone t1 b ∧ trie t0 ∧ trie t1
 
-@[grind] def join (p0 : Int) (t0 : Vox__t) (p1 : Int) (t1 : Vox__t) : Vox__t :=
+@[grind] def join (p0 : Int) (t0 : Vox_t) (p1 : Int) (t1 : Vox_t) : Vox_t :=
   if zbit p0 (bbit p0 p1)
   then .Branch (mask p0 (bbit p0 p1)) (bbit p0 p1) t0 t1
   else .Branch (mask p0 (bbit p0 p1)) (bbit p0 p1) t1 t0
 
-@[grind] def insert (i : Int) : Vox__t -> Vox__t
+@[grind] def insert (i : Int) : Vox_t -> Vox_t
   | .Empty => .Leaf i
   | .Leaf j => if i = j then .Leaf i else join i (.Leaf i) j (.Leaf j)
   | .Branch p b t0 t1 =>
@@ -84,17 +84,17 @@ grind_pattern bbit_isbit => bbit p0 p1
         else .Branch p b t0 (insert i t1)
       else join i (.Leaf i) p (.Branch p b t0 t1)
 
-theorem not_mem_mismatch (i p b : Int) (t : Vox__t)
+theorem not_mem_mismatch (i p b : Int) (t : Vox_t)
     (h : allmatch t p b) (hm : mask i b ≠ p) : ¬ mem i t := by
   induction t <;> grind
 grind_pattern not_mem_mismatch => mem i t, allmatch t p b
 
-theorem not_mem_zero (i b : Int) (t : Vox__t)
+theorem not_mem_zero (i b : Int) (t : Vox_t)
     (h : allzero t b) (hz : ¬ zbit i b) : ¬ mem i t := by
   induction t <;> grind
 grind_pattern not_mem_zero => mem i t, allzero t b
 
-theorem not_mem_one (i b : Int) (t : Vox__t)
+theorem not_mem_one (i b : Int) (t : Vox_t)
     (h : allone t b) (hz : zbit i b) : ¬ mem i t := by
   induction t <;> grind
 grind_pattern not_mem_one => mem i t, allone t b

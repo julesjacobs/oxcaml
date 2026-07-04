@@ -123,7 +123,11 @@ Hypotheses:
   t2 = q.tok
   c1 = p.cell
   _t1 = p.tok
+  ((tid *unknown8*.tok) = (cid *unknown8*.cell)) && ((cts *unknown8*.tok) = n)
+  q = *unknown8*
   ((tid q.tok) = (cid q.cell)) && ((cts q.tok) = n)
+  ((tid *unknown7*.tok) = (cid *unknown7*.cell)) && ((cts *unknown7*.tok) = n)
+  p = *unknown7*
   ((tid p.tok) = (cid p.cell)) && ((cts p.tok) = n)
 (lean: error: `grind` failed)
 |}]
@@ -151,7 +155,13 @@ Hypotheses:
   _t2 = q.tok
   _c1 = p.cell
   t1 = p.tok
+  ((tid *unknown11*.tok) = (cid *unknown11*.cell)) &&
+((cts *unknown11*.tok) = n)
+  q = *unknown11*
   ((tid q.tok) = (cid q.cell)) && ((cts q.tok) = n)
+  ((tid *unknown10*.tok) = (cid *unknown10*.cell)) &&
+((cts *unknown10*.tok) = n)
+  p = *unknown10*
   ((tid p.tok) = (cid p.cell)) && ((cts p.tok) = n)
 (lean: error: `grind` failed)
 |}]

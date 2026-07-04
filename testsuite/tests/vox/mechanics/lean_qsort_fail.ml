@@ -909,6 +909,8 @@ Line 11, characters 30-31:
 Error: vox: verification failed (lean).
        Goal: (0 <= n) && (n < (len (now m0)))
 Hypotheses:
+  n = (fst *unknown33*)
+  m0 = (snd *unknown33*)
   n = (len (now m))
   ((now m0) = (now m)) && ((fin m0) = (fin m))
   ((now m) = (cts x)) && ((fin m) = (pv p))
@@ -916,6 +918,7 @@ Possible counterexample:
   n = 0
   len (now m0) = 0
   len (now m) = 0
+  *unknown33*.p1 = 0
 (lean: error: `grind` failed)
 |}]
 
@@ -959,6 +962,8 @@ Error: vox: verification failed (lean).
        Goal: (len (pv p)) = (len (cts x))
 Hypotheses:
   _dead = m0
+  _n = (fst *unknown40*)
+  m0 = (snd *unknown40*)
   _n = (len (now m))
   ((now m0) = (now m)) && ((fin m0) = (fin m))
   ((now m) = (cts x)) && ((fin m) = (pv p))
@@ -967,6 +972,7 @@ Possible counterexample:
   len (cts x) = 1
   len (now m) = 1
   len (pv p) = 0
+  *unknown40*.p1 = 1
 (lean: error: `grind` failed)
 |}]
 

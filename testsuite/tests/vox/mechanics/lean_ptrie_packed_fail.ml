@@ -31,27 +31,27 @@ instance (i b : Int) : Decidable (zbit i b) := by unfold zbit; infer_instance
 termination_by x.natAbs
 decreasing_by omega
 
-@[grind] def mem : Int -> Vox__t -> Prop
+@[grind] def mem : Int -> Vox_t -> Prop
   | _, .Empty => False
   | i, .Leaf j => i = j
   | i, .Branch _ t0 t1 => mem i t0 ∨ mem i t1
 
-@[grind] def allmatch : Vox__t -> Int -> Int -> Prop
+@[grind] def allmatch : Vox_t -> Int -> Int -> Prop
   | .Empty, _, _ => True
   | .Leaf j, p, b => hmask j b = p
   | .Branch _ t0 t1, p, b => allmatch t0 p b ∧ allmatch t1 p b
 
-@[grind] def allzero : Vox__t -> Int -> Prop
+@[grind] def allzero : Vox_t -> Int -> Prop
   | .Empty, _ => True
   | .Leaf j, b => zbit j b
   | .Branch _ t0 t1, b => allzero t0 b ∧ allzero t1 b
 
-@[grind] def allone : Vox__t -> Int -> Prop
+@[grind] def allone : Vox_t -> Int -> Prop
   | .Empty, _ => True
   | .Leaf j, b => ¬ zbit j b
   | .Branch _ t0 t1, b => allone t0 b ∧ allone t1 b
 
-@[grind] def trie : Vox__t -> Prop
+@[grind] def trie : Vox_t -> Prop
   | .Empty => True
   | .Leaf j => 0 ≤ j
   | .Branch x t0 t1 =>

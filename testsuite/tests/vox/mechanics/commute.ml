@@ -31,6 +31,8 @@ let both () =
 Line 5, characters 28-29: vox VC:
   goal: r = (m + n)
   hypotheses:
+  *unknown2* = (m + n)
+  r = *unknown2*
   r = (m + n)
   m = 3
   n = 2
@@ -51,6 +53,8 @@ let deferred () =
 Line 6, characters 28-29: vox VC:
   goal: r = (m + n)
   hypotheses:
+  *unknown5* = (m + n)
+  r = *unknown5*
   r = (m + n)
   m = 3
   n = 2
@@ -99,6 +103,8 @@ let cmp_arg () =
 Line 6, characters 28-29: vox VC:
   goal: r = (p < q)
   hypotheses:
+  *unknown9* = c
+  r = *unknown9*
   r = c
   c = (p < q)
   q = 2

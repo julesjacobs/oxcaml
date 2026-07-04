@@ -13,12 +13,20 @@ File "collide_b.ml", line 7, characters 21-28: vox VC (RUNTIME CHECKED):
 File "stamp_collide.ml", line 24, characters 12-13: vox VC:
   goal: a = 5
   hypotheses:
+  *unknown3* = (n * n)
+  m = *unknown3*
   m = (n * n)
+  *unknown2* = n
+  a = *unknown2*
   a = n
   n = 5
 File "stamp_collide.ml", line 24, characters 43-44: vox VC:
   goal: m = 25
   hypotheses:
+  *unknown3* = (n * n)
+  m = *unknown3*
   m = (n * n)
+  *unknown2* = n
+  a = *unknown2*
   a = n
   n = 5

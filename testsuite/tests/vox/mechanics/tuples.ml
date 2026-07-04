@@ -96,6 +96,8 @@ val first : (p : (int * int)) -> int{ _ = (fst p) } = <fun>
 Line 6, characters 12-13: vox VC:
   goal: r = a
   hypotheses:
+  *unknown4* = (fst (a, b))
+  r = *unknown4*
   r = (fst (a, b))
   p = (1, 2)
 val use : (a : int) -> int -> int{ _ = a } = <fun>
@@ -138,4 +140,28 @@ Line 1, characters 59-74:
 1 | let eq_float (p : (float * float)) (q : (float * float)) = refine_ (p = q)
                                                                ^^^^^^^^^^^^^^^
 Error: vox: refine_ cannot translate this expression into the logic (only variables, int/bool constants, tuples, immutable field reads, fst/snd, calls to total_ functions, + - * / mod ~-, comparisons at int or bool, && || not, and constructors and records of simple types are supported); add a refined type annotation
+|}]
+
+(* Destructuring a refined pair straight off a call: the components
+   tie to a NAME for the result, and the result's refinement holds at
+   that name -- recovered from the callee's instantiated result type,
+   through the implicit erasure. *)
+let mk : (a : int) -> (int * int){ fst _ = a + 1 } = fun a -> (a + 1, 0)
+let use_direct : (a : int) -> int{ _ = a + 1 } =
+  fun a ->
+    let (r, _) = mk a in
+    r
+[%%expect{|
+Line 1, characters 62-72: vox VC:
+  goal: (fst (a + 1, 0)) = (a + 1)
+  hypotheses:
+  p = (1, 2)
+val mk : (a : int) -> (int * int){ (fst _) = (a + 1) } = <fun>
+Line 5, characters 4-5: vox VC:
+  goal: r = (a + 1)
+  hypotheses:
+  (fst *unknown8*) = (a + 1)
+  r = (fst *unknown8*)
+  p = (1, 2)
+val use_direct : (a : int) -> int{ _ = (a + 1) } = <fun>
 |}]

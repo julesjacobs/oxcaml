@@ -78,8 +78,7 @@ let rec mem : (i : int) -> (s : set) -> bool{ _ = mem i s } =
     | Empty -> false
     | Leaf j -> i = j
     | Branch (x, t0, t1) ->
-      let q = unpack x in
-      let (p, b) = q in
+      let (p, b) = unpack x in
       let m = mask i b in
       if m <> p then false
       else begin
@@ -99,8 +98,7 @@ let rec insert :
         join i l j s
       end
     | Branch (x, t0, t1) ->
-      let q = unpack x in
-      let (p, b) = q in
+      let (p, b) = unpack x in
       let m = mask i b in
       if m = p then begin
         let z = zero_bit i b in

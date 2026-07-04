@@ -114,6 +114,8 @@ val dep : (x : int) -> int{ _ = x } = <fun>
 Line 8, characters 10-11: vox VC:
   goal: y = 7
   hypotheses:
+  *unknown6* = x
+  y = *unknown6*
   y = x
   x = m@1
   m@1 = 7
@@ -141,6 +143,7 @@ Line 7, characters 10-11: vox VC:
   goal: 0 = 0
   hypotheses:
   x = y
+  w = true
   y = m@1
   x = m
   m@1 = (m + 1)
@@ -332,7 +335,7 @@ Line 5, characters 9-32: vox VC:
   goal: x@2 >= (i + 1)
   hypotheses:
   0 <= i
-  i <= *unknown13*
+  i <= *unknown14*
   x@1 >= i
   x@2 = (x@1 + 1)
 val opaque_bound : (unit -> int) -> int = <fun>
@@ -353,6 +356,7 @@ let interrupted (p : bool) : {r:int | r = 1} =
 Line 4, characters 18-19: vox VC:
   goal: x@1 = 1
   hypotheses:
+  *unknown16* = ()
   x@1 = 1
 Line 5, characters 35-36: vox VC:
   goal: x@2 = 1

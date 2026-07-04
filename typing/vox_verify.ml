@@ -215,7 +215,13 @@ let rec path_uname (p : Path.t) =
   | Path.Pident id ->
     if Ident.is_global_or_predef id
     then Ident.name id
-    else Env.get_current_unit_name () ^ "." ^ Ident.name id
+    else (
+      (* At the toplevel (and in expect tests) there is no unit: the
+         name is used bare, so a session type [t] is [Vox_t], not the
+         puzzling [Vox__t]. *)
+      match Env.get_current_unit_name () with
+      | "" -> Ident.name id
+      | u -> u ^ "." ^ Ident.name id)
   | Path.Pdot (q, s) -> path_uname q ^ "." ^ s
   | Path.Papply (q, r) -> path_uname q ^ "(" ^ path_uname r ^ ")"
   | Path.Pextra_ty (q, _) -> path_uname q ^ ".#extra"
@@ -1317,6 +1323,78 @@ let match_facts
   | _ -> []
 ;;
 
+(* The instantiated RESULT type of an application: walk the arrow
+   spine from the function's type, substituting each dependent binder
+   by its argument's stable name -- the same opening the application
+   site performed at typing time. *)
+let apply_result_type env funct (args : (_ * apply_arg) list) =
+  let arrow_ty = ref funct.exp_type in
+  List.iter
+    (fun (_lbl, (arg : apply_arg)) ->
+      match get_desc (Ctype.vox_expand_head env !arrow_ty) with
+      | Tarrow ((_, _, _, binder), _dom, ret, _) ->
+        (match arg, binder with
+         | Arg (a, _), Some b ->
+           (match stable_arg_name a with
+            | Some by -> arrow_ty := Vox_dep.subst_binder b ~by ret
+            | None -> arrow_ty := ret)
+         | _ -> arrow_ty := ret)
+      | _ -> ())
+    args;
+  !arrow_ty
+;;
+
+(* A refinement instantiated at a name can collapse to a triviality
+   ([3 = 3], [p.px = p.px]) when the name IS the refinement's witness
+   (exact-synthesis types at translatable scrutinees); such facts are
+   dropped, not asserted. *)
+let nontrivial_fact (f : Refinement.pred) =
+  match f with
+  | Refinement.Pbinop (Refinement.Eq, a, b) -> not (Refinement.equal a b)
+  | _ -> true
+;;
+
+(* A destructuring binding whose scrutinee is NOT a variable still
+   gets the match facts, through a NAME for the scrutinee: its logic
+   translation when it has one (tuples included -- they are
+   reflectable values), a fresh unknown otherwise; either way the
+   name denotes the single evaluation being destructured.  The
+   scrutinee's own refinement holds at that name too (for a variable
+   scrutinee the binder's facts already carry it).  If evaluation
+   raises instead of returning, the continuation never runs and the
+   facts are vacuous. *)
+let destructure_facts
+  : type k. Env.t -> expression -> k general_pattern -> Refinement.pred list
+  =
+  fun env rhs pat ->
+  let n = name_of_expr env rhs in
+  let refn =
+    (* Implicit elimination erases an application's refined result to
+       the skeleton precisely because an unnamed value's fact is
+       unreachable -- "name it with a let to keep it".  This binding
+       IS the naming, so the refinement is recovered the same way the
+       re-refinement hook recovers it: from the callee's instantiated
+       result type. *)
+    match
+      (match refinement_of_type env pat.pat_type with
+       | Some p -> Some p
+       | None ->
+         (match refinement_of_type env rhs.exp_type with
+          | Some p -> Some p
+          | None ->
+            (match rhs.exp_desc with
+             | Texp_apply (funct, args, _, _, _) ->
+               refinement_of_type env (apply_result_type env funct args)
+             | _ -> None)))
+    with
+    | Some p ->
+      register_pred_paths env p;
+      List.filter nontrivial_fact [ Refinement.subst_bound ~by:n p ]
+    | None -> []
+  in
+  refn @ match_facts env n pat
+;;
+
 (* Negative match facts: if control reaches an arm, every EARLIER arm
    failed to match.  That is a usable fact only when the earlier arm's
    failure is decided by its constructor head alone: a guard-free arm
@@ -1377,27 +1455,6 @@ let extend_pat
   { cfacts = unpack @ binder_facts env pat @ ctx.cfacts
   ; cscope = bound @ ctx.cscope
   }
-;;
-
-(* The instantiated RESULT type of an application: walk the arrow
-   spine from the function's type, substituting each dependent binder
-   by its argument's stable name -- the same opening the application
-   site performed at typing time. *)
-let apply_result_type env funct (args : (_ * apply_arg) list) =
-  let arrow_ty = ref funct.exp_type in
-  List.iter
-    (fun (_lbl, (arg : apply_arg)) ->
-      match get_desc (Ctype.vox_expand_head env !arrow_ty) with
-      | Tarrow ((_, _, _, binder), _dom, ret, _) ->
-        (match arg, binder with
-         | Arg (a, _), Some b ->
-           (match stable_arg_name a with
-            | Some by -> arrow_ty := Vox_dep.subst_binder b ~by ret
-            | None -> arrow_ty := ret)
-         | _ -> arrow_ty := ret)
-      | _ -> ())
-    args;
-  !arrow_ty
 ;;
 
 (* Whether a computation pattern is free of exception patterns: only
@@ -1597,7 +1654,11 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
                match_facts env (Refinement.Pvar v) vb.vb_pat @ ctx'.cfacts
            }
          | None -> ctx')
-      | _, _ -> ctx'
+      | _, Tpat_var _ -> ctx' (* selfification below carries the name *)
+      | _, _ ->
+        { ctx' with
+          cfacts = destructure_facts env vb.vb_expr vb.vb_pat @ ctx'.cfacts
+        }
     in
     (* Selfification (no self fact for a RECURSIVE binding: a cyclic
        constructor equation is unsatisfiable in the datatype theory). *)
@@ -1642,7 +1703,11 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
               cfacts =
                 match_facts env (Refinement.Pglobal p) vb.vb_pat @ ctx.cfacts
             }
-          | _ -> ctx)
+          | _, Tpat_var _ -> ctx
+          | _, _ ->
+            { ctx with
+              cfacts = destructure_facts env vb.vb_expr vb.vb_pat @ ctx.cfacts
+            })
         ctx'
         vbs
     in
@@ -1709,7 +1774,40 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
         Option.map
           (fun (v, _) -> Refinement.Pvar v)
           (Hashtbl.find_opt mut_versions id)
-      | _ -> None
+      | _ ->
+        (* Any other scrutinee is destructured through its NAME (its
+           logic translation, or a fresh unknown): value arms tie
+           their patterns to it below; interrupted arms are already
+           excluded. *)
+        Some (name_of_expr env scrut)
+    in
+    (* The named scrutinee's refinement holds at the name (a variable
+       scrutinee's binder facts already carry it). *)
+    let scrut_facts : type k. k general_pattern -> Refinement.pred list =
+      fun pat ->
+      match scrut.exp_desc, scrut_id with
+      | (Texp_ident _ | Texp_mutvar _), _ | _, None -> []
+      | _, Some n ->
+        (match
+           (match refinement_of_type env scrut.exp_type with
+            | Some p -> Some p
+            | None ->
+              (match refinement_of_type env pat.pat_type with
+               | Some p -> Some p
+               | None ->
+                 (* implicit elimination erased the scrutinee's
+                    refined result; recover it from the callee's
+                    instantiated result type, as at bindings *)
+                 (match scrut.exp_desc with
+                  | Texp_apply (funct, args, _, _, _) ->
+                    refinement_of_type env
+                      (apply_result_type env funct args)
+                  | _ -> None)))
+         with
+         | Some p ->
+           register_pred_paths env p;
+           List.filter nontrivial_fact [ Refinement.subst_bound ~by:n p ]
+         | None -> [])
     in
     (match single_arm comp_cases val_cases with
      | Some c ->
@@ -1723,7 +1821,12 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
        let ctx' =
          match scrut_id with
          | Some sid ->
-           { ctx' with cfacts = match_facts env sid c.c_lhs @ ctx'.cfacts }
+           { ctx' with
+             cfacts =
+               scrut_facts c.c_lhs
+               @ match_facts env sid c.c_lhs
+               @ ctx'.cfacts
+           }
          | None -> ctx'
        in
        let gctx =
@@ -1762,7 +1865,11 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
         match scrut_id with
         | Some sid when not interrupted ->
           { ctx' with
-            cfacts = match_facts env sid c.c_lhs @ negs @ ctx'.cfacts
+            cfacts =
+              scrut_facts c.c_lhs
+              @ match_facts env sid c.c_lhs
+              @ negs
+              @ ctx'.cfacts
           }
         | _ -> ctx'
       in

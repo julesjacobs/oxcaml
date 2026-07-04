@@ -45,12 +45,15 @@ Line 2, characters 28-30:
 Error: vox: verification failed (lean).
        Goal: (30 mod 25) = 0
 Hypotheses:
+  (*unknown2* mod 25) = 0
+  t = *unknown2*
   (t mod 25) = 0
   r = (-7 mod 2)
   (r = (-7 mod 2)) && (r = -1)
   q = (-7 / 2)
   (q = (-7 / 2)) && (q = -3)
 Possible counterexample:
+  *unknown2* = 0
   t = 0
   r = -1
   q = -3
