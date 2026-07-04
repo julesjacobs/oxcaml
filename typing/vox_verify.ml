@@ -47,6 +47,17 @@ type dsort =
        a [dt_decl]'s field sorts, never in a USE-site sort (uses have no
        parameters in scope, so a type variable there degrades to
        [S_other]). *)
+  | S_poly of Path.t * dsort list
+    (* an instance of a [@@vox.poly] parameterized ABSTRACT type,
+       modelled at a PARAMETERIZED opaque sort (one [opaque
+       Vox_<t> : Type -> ... -> Type] per head) instantiated at the
+       type arguments' sorts -- the abstract-carrier counterpart of a
+       parameterized [S_data].  The point is elaboration: a
+       sort-polymorphic ghost ([opaque cts {a : Type} : Vox_t a ->
+       List a]) applied to such a value has its type argument
+       INFERRED from the value's sort, so one polymorphic spec
+       serves every element type -- including facts (lengths, ghost-
+       to-ghost equations) that mention no element-sorted term. *)
   | S_tuple of dsort list
     (* an unlabeled tuple, modelled with one polymorphic product
        datatype per ARITY (VoxT2, VoxT3, ...) instantiated at the
@@ -167,6 +178,18 @@ let register_pred_tuple_arities p =
   List.iter register_tuple_arity (Refinement.tuple_arities p)
 ;;
 
+(* [@@vox.poly] heads in use, each needing its parameterized opaque
+   declared ([opaque Vox_<t> : Type -> ... -> Type]).  Like
+   [tuple_arities], there is nothing to render per INSTANCE -- the
+   head and its arity determine the declaration; instances differ
+   only in the argument sorts at the use site. *)
+let poly_heads : (Path.t * int) list ref = ref []
+
+let register_poly_head p n =
+  if not (List.exists (fun (q, _) -> Path.same p q) !poly_heads)
+  then poly_heads := !poly_heads @ [ p, n ]
+;;
+
 (* Reflected definitions ([total_] bindings) of the current module (or
    toplevel session), in definition order; emitted into the solver input
    between the [-vox-prelude] and the module's own embedded blocks, so
@@ -225,6 +248,7 @@ let reset () =
   registering := [];
   poisoned := [];
   tuple_arities := [];
+  poly_heads := [];
   spec_defs := [];
   unknown_counter := 0;
   embedded_blocks := [];
@@ -354,6 +378,22 @@ let assert_uname_fresh p =
            rename one of them"
           (path_uname p))
     !datatypes
+;;
+
+(* TRUSTED opt-in: a parameterized abstract type declared
+   [@@vox.poly] sorts its instances at a parameterized opaque, so
+   sort-polymorphic ghosts over it elaborate at every instantiation
+   (see [S_poly]).  Like [@@vox.sort], the declaring library asserts
+   that its ghost story is consistent per instantiation; the sorts
+   themselves stay uninterpreted, so distinct instantiations can
+   never exchange facts. *)
+let vox_poly_attribute env p =
+  match Env.find_type p env with
+  | exception Not_found -> false
+  | decl ->
+    List.exists
+      (fun (a : Parsetree.attribute) -> String.equal a.attr_name.txt "vox.poly")
+      decl.type_attributes
 ;;
 
 (* The sort of the type at path [p] applied to argument sorts
@@ -549,7 +589,17 @@ and dsort_of_type ?(visited = []) ?(params = []) env ty =
       let arg_sorts = List.map (dsort_of_type ~visited ~params env) args in
       (match vox_sort_attribute env p arg_sorts with
        | Some s -> s
-       | None -> datatype_sort env p arg_sorts)
+       | None ->
+         if vox_poly_attribute env p
+         then (
+           (* [@@vox.poly] overrides the structural story even when
+              the implementation side is a record: the trusted .ml's
+              carriers must sort at the SAME opaque as the .mli's
+              abstract types, or its ascriptions would be ill-sorted
+              against its own ghosts. *)
+           register_poly_head p (List.length arg_sorts);
+           S_poly (p, arg_sorts))
+         else datatype_sort env p arg_sorts)
     | Trefine (skel, _) -> dsort_of_type ~visited ~params env skel
     | Ttuple comps
       when List.length comps >= 2
@@ -621,6 +671,13 @@ let register_type_specs env ty =
       | Tarrow (_, a, r, _) ->
         go a visited;
         go r visited
+      | Tconstr (p, (_ :: _), _) when vox_poly_attribute env p ->
+        (* A [@@vox.poly] head registers even UNREFINED (a prophecy
+           parameter): the unit's block declares ghosts at its
+           parameterized sort, so clients need its opaque declared
+           whether or not any refinement mentions the type. *)
+        ignore (dsort_of_type env ty : dsort);
+        List.iter (fun t -> go t visited) (Vox_dep.children ty)
       | _ -> List.iter (fun t -> go t visited) (Vox_dep.children ty)
     end
   in
@@ -992,7 +1049,8 @@ let rec name_of_expr env (e : expression) : Refinement.pred =
             ( path
             , cstr.cstr_name
             , List.map (fun (_, a) -> name_of_expr env a) args )
-        | S_int | S_bool | S_param _ | S_tuple _ | S_iarray | S_other -> fresh_unknown env e)
+        | S_int | S_bool | S_param _ | S_tuple _ | S_iarray | S_poly _ | S_other ->
+          fresh_unknown env e)
      | Texp_record { fields; extended_expression; _ }
        when Array.length fields > 0 ->
        (* A record literal names the constructor term ["mk"] (a reserved
@@ -1019,7 +1077,8 @@ let rec name_of_expr env (e : expression) : Refinement.pred =
               fresh_unknown env e
           in
           Refinement.Pconstr (path, "mk", List.map arg_of (Array.to_list fields))
-        | S_int | S_bool | S_param _ | S_tuple _ | S_iarray | S_other -> fresh_unknown env e)
+        | S_int | S_bool | S_param _ | S_tuple _ | S_iarray | S_poly _ | S_other ->
+          fresh_unknown env e)
      | Texp_tuple (comps, _)
        when List.length comps >= 2
             && List.for_all (fun (lbl, _) -> Option.is_none lbl) comps ->
@@ -1117,7 +1176,12 @@ let rec dsort_equal a b =
     && List.for_all2 dsort_equal xs ys
   | S_tuple xs, S_tuple ys ->
     List.compare_lengths xs ys = 0 && List.for_all2 dsort_equal xs ys
-  | ( (S_int | S_bool | S_iarray | S_param _ | S_data _ | S_tuple _ | S_other)
+  | S_poly (p, xs), S_poly (q, ys) ->
+    Path.same p q
+    && List.compare_lengths xs ys = 0
+    && List.for_all2 dsort_equal xs ys
+  | ( ( S_int | S_bool | S_iarray | S_param _ | S_data _ | S_tuple _
+      | S_poly _ | S_other )
     , _ ) -> false
 ;;
 
@@ -1143,14 +1207,16 @@ and structural_sort ~seen (s : dsort) =
   match s with
   | S_int | S_bool -> true
   | S_data (p, []) -> structural_datatype ~seen p
-  | S_data (_, _ :: _) | S_param _ | S_tuple _ | S_iarray | S_other -> false
+  | S_data (_, _ :: _) | S_param _ | S_tuple _ | S_iarray | S_poly _
+  | S_other -> false
 ;;
 
 let equality_sort s =
   match s with
   | S_int | S_bool -> true
   | S_data (p, []) -> structural_datatype ~seen:[] p
-  | S_data (_, _ :: _) | S_param _ | S_tuple _ | S_iarray | S_other -> false
+  | S_data (_, _ :: _) | S_param _ | S_tuple _ | S_iarray | S_poly _
+  | S_other -> false
 ;;
 
 (* The gate: raises unless [goal] compiles to a faithful check.
@@ -1170,7 +1236,7 @@ let runtime_check_gate env ~loc goal =
     | S_data (p, _) -> "the datatype " ^ Path.name p
     | S_tuple _ -> "a tuple"
     | S_iarray -> "an iarray"
-    | S_param _ | S_other -> "an opaque sort"
+    | S_param _ | S_poly _ | S_other -> "an opaque sort"
   in
   let rec term (p : Refinement.pred) : dsort =
     match p with
@@ -1195,7 +1261,7 @@ let runtime_check_gate env ~loc goal =
       (match datatype_sort env path [] with
        | S_data (_, []) -> ()
        | S_int | S_bool | S_data _ | S_param _ | S_tuple _ | S_iarray
-       | S_other ->
+       | S_poly _ | S_other ->
          err
            (Printf.sprintf
               "the constructor %s's datatype cannot be built by the check"
@@ -1321,7 +1387,8 @@ let runtime_check_gate env ~loc goal =
          (match result with
           | S_int | S_bool -> ()
           | S_data (q, []) when structural_datatype ~seen:[] q -> ()
-          | S_data _ | S_param _ | S_tuple _ | S_iarray | S_other ->
+          | S_data _ | S_param _ | S_tuple _ | S_iarray | S_poly _
+          | S_other ->
             err
               (Printf.sprintf "%s returns %s, which the check cannot handle"
                  f (sort_name result)));
@@ -1712,7 +1779,7 @@ let match_facts
   let rec constructor_facts subject cstr args =
     let path = Data_types.cstr_res_type_path cstr in
     match datatype_sort env path [] with
-    | S_int | S_bool | S_param _ | S_tuple _ | S_iarray | S_other -> []
+    | S_int | S_bool | S_param _ | S_tuple _ | S_iarray | S_poly _ | S_other -> []
     | S_data (_, _) ->
       let parts = List.map arg_parts args in
       Refinement.Pbinop
@@ -1734,7 +1801,7 @@ let match_facts
     | (_, lbl0, _) :: _ ->
       let path = Data_types.lbl_res_type_path lbl0 in
       (match datatype_sort env path [] with
-       | S_int | S_bool | S_param _ | S_tuple _ | S_iarray | S_other -> []
+       | S_int | S_bool | S_param _ | S_tuple _ | S_iarray | S_poly _ | S_other -> []
        | S_data (_, _) ->
          List.concat_map
            (fun (_, (lbl : Data_types.label_description), sub) ->
@@ -1899,7 +1966,7 @@ let pattern_negation
   let head_negation cstr args =
     let path = Data_types.cstr_res_type_path cstr in
     match datatype_sort env path [] with
-    | S_int | S_bool | S_param _ | S_tuple _ | S_iarray | S_other -> None
+    | S_int | S_bool | S_param _ | S_tuple _ | S_iarray | S_poly _ | S_other -> None
     | S_data (_, _) ->
       let simple (_, (p : value general_pattern)) =
         match p.pat_desc with
@@ -2857,7 +2924,7 @@ let rec sort_needs_voxu = function
   (* a parameter is a bound [Type] binder in the declaration it appears
      in, never VoxU *)
   | S_param _ -> false
-  | S_tuple comps -> List.exists sort_needs_voxu comps
+  | S_tuple comps | S_poly (_, comps) -> List.exists sort_needs_voxu comps
   | S_data (p, args) ->
     find_datatype p = None || List.exists sort_needs_voxu args
 ;;
@@ -2867,7 +2934,7 @@ let rec sort_needs_voxu = function
 let rec sort_needs_iarray = function
   | S_iarray -> true
   | S_int | S_bool | S_other | S_param _ -> false
-  | S_tuple comps -> List.exists sort_needs_iarray comps
+  | S_tuple comps | S_poly (_, comps) -> List.exists sort_needs_iarray comps
   | S_data (_, args) -> List.exists sort_needs_iarray args
 ;;
 
@@ -3190,6 +3257,8 @@ let rec lean_sort = function
     "(" ^ tuple_uname (List.length comps) ^ " "
     ^ String.concat " " (List.map lean_sort comps)
     ^ ")"
+  | S_poly (p, args) ->
+    "(" ^ lean_dt_name p ^ " " ^ String.concat " " (List.map lean_sort args) ^ ")"
   | S_data (p, args) ->
     (match find_datatype p with
      | None -> "VoxU" (* unregistered: degrade, sound *)
@@ -3200,6 +3269,13 @@ let rec lean_sort = function
           "(" ^ lean_dt_name p ^ " "
           ^ String.concat " " (List.map lean_sort args)
           ^ ")"))
+;;
+
+(* The parameterized opaque for one [@@vox.poly] head, on a single
+   line (the error-line mapping counts lines). *)
+let lean_poly_decl (p, n) =
+  let arrows = String.concat "" (List.init n (fun _ -> "Type -> ")) in
+  Printf.sprintf "opaque %s : %sType\n" (lean_dt_name p) arrows
 ;;
 
 (* The product structure for one tuple arity, universe-polymorphic over
@@ -3303,7 +3379,7 @@ let boolish p =
      | Some (_, Dt_record (_, fields)) ->
        (match List.assoc_opt l fields with
         | Some S_bool -> true
-        | Some (S_int | S_data _ | S_param _ | S_tuple _ | S_iarray | S_other)
+        | Some (S_int | S_data _ | S_param _ | S_tuple _ | S_iarray | S_poly _ | S_other)
         | None -> false)
      | Some (_, (Dt_variant _ | Dt_opaque)) | None -> false)
   | Pis _ | Pquant _ -> true
@@ -3519,18 +3595,22 @@ let cmi_export env (sg : Types.signature) ~defs ~blocks ~sig_module =
   if blocks = []
   then None
   else begin
-    let saved = !datatypes, !registering, !poisoned, !tuple_arities in
+    let saved =
+      !datatypes, !registering, !poisoned, !tuple_arities, !poly_heads
+    in
     datatypes := [];
     registering := [];
     poisoned := [];
     tuple_arities := [];
+    poly_heads := [];
     Misc.try_finally
       ~always:(fun () ->
-        let d, r, po, ta = saved in
+        let d, r, po, ta, ph = saved in
         datatypes := d;
         registering := r;
         poisoned := po;
-        tuple_arities := ta)
+        tuple_arities := ta;
+        poly_heads := ph)
       (fun () ->
         iter_signature_types sg ~f:(fun ~loc:_ ~what:_ ty ->
           register_type_specs env ty);
@@ -3550,12 +3630,18 @@ let cmi_export env (sg : Types.signature) ~defs ~blocks ~sig_module =
             (fun ((p, _) as dt) -> path_uname p, lean_datatype_decl dt)
             !datatypes
         in
-        (* Tuple product declarations FIRST: the datatype declarations
-           may reference them in field sorts. *)
+        (* Tuple product and parameterized-opaque declarations FIRST:
+           the datatype declarations may reference either in field
+           sorts, and this unit's blocks may name a [@@vox.poly] head
+           directly (its ghosts' signatures) -- a client whose own
+           types never mention the head still needs it declared. *)
         let dts =
           List.map
-            (fun n -> tuple_uname n, lean_tuple_decl n)
-            !tuple_arities
+            (fun ((p, _) as hd) -> path_uname p, lean_poly_decl hd)
+            !poly_heads
+          @ List.map
+              (fun n -> tuple_uname n, lean_tuple_decl n)
+              !tuple_arities
           @ dts
         in
         Some
@@ -3902,6 +3988,18 @@ let lean_file vcs =
         seen := tuple_uname n :: !seen;
         seg (lean_tuple_decl ~vis:dt_vis n)))
     !tuple_arities;
+  (* Parameterized opaques for this module's own [@@vox.poly] heads
+     (imported units' heads arrive through their exported declaration
+     lists above, deduplicated by stable name like datatypes); they
+     precede the own datatypes, whose fields may be at such sorts. *)
+  List.iter
+    (fun ((p, _) as hd) ->
+      let n = path_uname p in
+      if not (List.exists (String.equal n) !seen)
+      then (
+        seen := n :: !seen;
+        seg (lean_poly_decl hd)))
+    !poly_heads;
   let own_decls = Buffer.create 256 in
   lean_datatype_decls own_decls ~skip:!seen ~vis:dt_vis;
   seg (Buffer.contents own_decls);
@@ -4608,7 +4706,7 @@ let register_datatypes_in_blocks env blocks =
           | exception Not_found -> ()
           | p, _ ->
             if String.equal (lean_dt_name p) ("Vox_" ^ token)
-            then ignore (datatype_sort env p : dsort)))
+            then ignore (datatype_sort env p [] : dsort)))
       (candidates token)
   in
   List.iter
@@ -4692,11 +4790,13 @@ let check_toplevel_phrase (str : structure) ~(sig_acc : Types.signature)
        retried phrase's. *)
     let saved_spec_defs = !spec_defs in
     let saved_datatypes = !datatypes in
+    let saved_poly_heads = !poly_heads in
     let ctx = ref !toplevel_ctx in
     Misc.try_finally
       ~exceptionally:(fun () ->
         spec_defs := saved_spec_defs;
-        datatypes := saved_datatypes)
+        datatypes := saved_datatypes;
+        poly_heads := saved_poly_heads)
       (fun () ->
         register_datatypes_in_blocks str.str_final_env !embedded_blocks;
         walk_items str ctx;
