@@ -788,19 +788,38 @@ let report_unsafe_mode_crossing_mismatch first second ppf e =
       first print_unsafe_mode_crossing first_umc
       second print_unsafe_mode_crossing second_umc
 
+(* vox: render a refinement sort readably for inclusion diagnostics. *)
+let rec show_vox_sort (vs : Types.vox_sort) =
+  match vs with
+  | Vs_int -> "int"
+  | Vs_bool -> "bool"
+  | Vs_param i ->
+    if i < 26 then Printf.sprintf "'%c" (Char.chr (Char.code 'a' + i))
+    else Printf.sprintf "'v%d" i
+  | Vs_tuple ss ->
+    "(" ^ String.concat " * " (List.map show_vox_sort ss) ^ ")"
+  | Vs_data (p, []) -> Path.name p
+  | Vs_data (p, ss) ->
+    "("
+    ^ Path.name p ^ " "
+    ^ String.concat " " (List.map show_vox_sort ss)
+    ^ ")"
+  | Vs_opaque -> "<opaque>"
+
+let show_vox_refines (r : Types.vox_refines) =
+  match r with
+  | Types.Vr_top -> "no refines"
+  | Types.Vr_sort vs -> "refines " ^ show_vox_sort vs
+
 let report_type_mismatch first second decl env ppf err =
   let pr fmt = Fmt.fprintf ppf fmt in
   match err with
   | Arity ->
       pr "They have different arities."
   | Vox_refines (r1, r2) ->
-      let show = function
-        | Types.Vr_top -> "no refines"
-        | Types.Vr_int -> "refines int"
-        | Types.Vr_bool -> "refines bool"
-      in
       pr "%s declares %s where %s declares %s."
-        (String.capitalize_ascii second) (show r2) first (show r1)
+        (String.capitalize_ascii second) (show_vox_refines r2)
+        first (show_vox_refines r1)
   | Privacy err ->
       report_privacy_mismatch ppf err
   | Kind err ->
@@ -1620,7 +1639,7 @@ let type_declarations_consistency env decl1 decl2 =
                               Pexp_ident { txt = Longident.Lident "int"; _ }
                           ; _ }
                         , _ )
-                  ; _ } ] -> Some Types.Vr_int
+                  ; _ } ] -> Some (Types.Vr_sort Types.Vs_int)
             | PStr
                 [ { pstr_desc =
                       Pstr_eval
@@ -1628,13 +1647,90 @@ let type_declarations_consistency env decl1 decl2 =
                               Pexp_ident { txt = Longident.Lident "bool"; _ }
                           ; _ }
                         , _ )
-                  ; _ } ] -> Some Types.Vr_bool
+                  ; _ } ] -> Some (Types.Vr_sort Types.Vs_bool)
             | _ -> None)
         decl.type_attributes
     in
+    (* Structural equality on sorts.  [Vs_param] is positional, but a
+       [Path.t] inside [Vs_data] must compare by [Path.same] (stamps make
+       [(=)] wrong across rebuilds). *)
+    let rec vox_sort_equal (s1 : Types.vox_sort) (s2 : Types.vox_sort) =
+      match s1, s2 with
+      | Vs_int, Vs_int | Vs_bool, Vs_bool | Vs_opaque, Vs_opaque -> true
+      | Vs_param i, Vs_param j -> Int.equal i j
+      | Vs_tuple ss1, Vs_tuple ss2 ->
+        List.length ss1 = List.length ss2
+        && List.for_all2 vox_sort_equal ss1 ss2
+      | Vs_data (p1, ss1), Vs_data (p2, ss2) ->
+        Path.same p1 p2
+        && List.length ss1 = List.length ss2
+        && List.for_all2 vox_sort_equal ss1 ss2
+      | ( ( Vs_int | Vs_bool | Vs_tuple _ | Vs_data _ | Vs_param _
+          | Vs_opaque )
+        , _ ) ->
+        false
+    in
+    let vox_refines_equal (r1 : Types.vox_refines) (r2 : Types.vox_refines) =
+      match r1, r2 with
+      | Vr_top, Vr_top -> true
+      | Vr_sort s1, Vr_sort s2 -> vox_sort_equal s1 s2
+      | (Vr_top | Vr_sort _), _ -> false
+    in
+    (* The STRUCTURAL modeling of a manifest, best-effort: a predef
+       int/bool head, an unlabeled tuple, or a head that declares its own
+       [refines] (instantiated at the argument sorts).  No [expand_head]
+       (moves GADT-equation ambiguity), and no fallback for a plain
+       variant/record (a manifest never silently CLAIMS a datatype
+       modeling). *)
+    let rec subst_sort args : Types.vox_sort -> Types.vox_sort = function
+      | Vs_param i ->
+        (match List.nth_opt args i with Some s -> s | None -> Vs_opaque)
+      | Vs_tuple ss -> Vs_tuple (List.map (subst_sort args) ss)
+      | Vs_data (p, ss) -> Vs_data (p, List.map (subst_sort args) ss)
+      | (Vs_int | Vs_bool | Vs_opaque) as s -> s
+    in
+    let rec sort_of_manifest ty : Types.vox_sort option =
+      match get_desc ty with
+      | Tconstr (p, [], _) when Path.same p Predef.path_int -> Some Vs_int
+      | Tconstr (p, [], _) when Path.same p Predef.path_bool -> Some Vs_bool
+      | Tconstr (p, args, _) ->
+        (match Env.find_type p env with
+         | exception Not_found -> None
+         | decl ->
+           (match Jkind.get_vox_refines decl.type_jkind with
+            | Types.Vr_sort s ->
+              (match Misc.Stdlib.List.map_option sort_of_manifest args with
+               | Some arg_sorts -> Some (subst_sort arg_sorts s)
+               | None -> None)
+            | Types.Vr_top ->
+              (* A simple variant/record manifest is structurally its
+                 own datatype sort: [type s = ilist] satisfies
+                 [refines (ilist)] HONESTLY, like [type t = int]
+                 satisfies [refines int]. *)
+              (match
+                 ( Ctype.vox_simple_variant env p,
+                   Ctype.vox_simple_record env p )
+               with
+               | None, None -> None
+               | Some _, _ | _, Some _ ->
+                 (match
+                    Misc.Stdlib.List.map_option sort_of_manifest args
+                  with
+                  | Some arg_sorts -> Some (Types.Vs_data (p, arg_sorts))
+                  | None -> None))))
+      | Ttuple comps
+        when List.length comps >= 2
+             && List.for_all (fun (l, _) -> Option.is_none l) comps ->
+        (match
+           Misc.Stdlib.List.map_option (fun (_, t) -> sort_of_manifest t) comps
+         with
+         | Some ss -> Some (Vs_tuple ss)
+         | None -> None)
+      | _ -> None
+    in
     let r1 =
       match Jkind.get_vox_refines decl1.type_jkind with
-      | (Types.Vr_int | Types.Vr_bool) as r -> r
+      | Types.Vr_sort _ as r -> r
       | Types.Vr_top ->
         match vox_sort_attr decl1 with
         | Some r -> r
@@ -1642,22 +1738,17 @@ let type_declarations_consistency env decl1 decl2 =
         (match decl1.type_manifest with
          | None -> Types.Vr_top
          | Some ty ->
-           (* No expansion (see the same choice in Typedecl): expanding
-              through a local equation moves ambiguity errors. *)
-           (match get_desc ty with
-            | Tconstr (p, [], _) when Path.same p Predef.path_int ->
-              Types.Vr_int
-            | Tconstr (p, [], _) when Path.same p Predef.path_bool ->
-              Types.Vr_bool
-            | _ -> Types.Vr_top))
+           (match sort_of_manifest ty with
+            | Some s -> Types.Vr_sort s
+            | None -> Types.Vr_top))
     in
     let r2 =
       match Jkind.get_vox_refines decl2.type_jkind with
-      | (Types.Vr_int | Types.Vr_bool) as r -> r
+      | Types.Vr_sort _ as r -> r
       | Types.Vr_top ->
         (match vox_sort_attr decl2 with Some r -> r | None -> Types.Vr_top)
     in
-    if not (match r2 with Types.Vr_top -> true | _ -> r1 = r2)
+    if not (match r2 with Types.Vr_top -> true | _ -> vox_refines_equal r1 r2)
     then Some (Vox_refines (r1, r2))
     else match privacy_mismatch env decl1 decl2 with
     | Some err -> Some (Privacy err)

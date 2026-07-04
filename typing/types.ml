@@ -255,12 +255,24 @@ and 'layout jkind_base =
 and vox_refines =
   (* vox: the REFINES component of a kind -- the type's declared
      logical modeling (see DESIGN.md).  A peer of [base], never an
-     axis: compared structurally under a flat order below [Vr_top]
-     (unconstrained), and inert for programs that never write
-     [refines]. *)
+     axis: compared structurally (below [Vr_top], the unconstrained
+     top), and inert for programs that never write [refines]. *)
   | Vr_top
-  | Vr_int
-  | Vr_bool
+  | Vr_sort of vox_sort
+
+and vox_sort =
+  (* vox: a REFINEMENT SORT -- the logical shape a value is modelled at.
+     Elaborated from the core type written in [refines (...)]; consumed
+     by the verifier, which turns it into a solver sort.  [Vs_param i]
+     stands for the declaration's [i]th type parameter, so a
+     parameterized head's declared sort instantiates positionally at a
+     use. *)
+  | Vs_int
+  | Vs_bool
+  | Vs_tuple of vox_sort list
+  | Vs_data of Path.t * vox_sort list
+  | Vs_param of int
+  | Vs_opaque
 
 and ('layout, 'd) base_and_axes =
   { base : 'layout jkind_base;

@@ -298,22 +298,6 @@ let validate_vox_sort_attributes ?(alias = false) (attrs : Parsetree.attributes)
     attrs
 ;;
 
-let vox_sort_attribute env p =
-  (* The declared refines component of [p]'s kind: [type t : value
-     refines int], or the trusted [@@vox.sort] attribute, which
-     Typedecl folds into the same field. *)
-  match Env.find_type p env with
-  | exception Not_found -> None
-  | decl ->
-    (match Jkind.get_vox_refines decl.type_jkind with
-     | Vr_int -> Some S_int
-     | Vr_bool -> Some S_bool
-     | Vr_top ->
-       (* Decl rebuilds along some typedecl paths drop the kind field;
-          the attribute on the declaration is authoritative there. *)
-       List.find_map vox_sort_of_attribute decl.type_attributes)
-;;
-
 (* Is [arg_sorts] the declaration's own parameters, in order --
    [S_param 0; ...; S_param (arity-1)]?  A recursive occurrence at
    exactly these is REGULAR (a uniform-parameter inductive); anything
@@ -338,9 +322,42 @@ let rec datatype_sort env p arg_sorts =
   else if Path.same p Predef.path_bool
   then S_bool
   else (
-    match vox_sort_attribute env p with
+    match vox_sort_attribute env p arg_sorts with
     | Some s -> s
     | None -> datatype_sort_unattributed env p arg_sorts)
+
+(* The declared refines component of [p]'s kind: [type t : value refines
+   (...)], or the trusted [@@vox.sort int|bool] attribute, which Typedecl
+   folds into the same field.  [arg_sorts] instantiates [p]'s parameters
+   at the use, so a [Vs_param] in the declared sort resolves to the
+   concrete argument sort (or [S_other] if the use is under-applied). *)
+and vox_sort_attribute env p arg_sorts =
+  match Env.find_type p env with
+  | exception Not_found -> None
+  | decl ->
+    (match Jkind.get_vox_refines decl.type_jkind with
+     | Vr_sort vs -> Some (dsort_of_vox_sort env arg_sorts vs)
+     | Vr_top ->
+       (* Decl rebuilds along some typedecl paths drop the kind field;
+          the attribute on the declaration is authoritative there. *)
+       List.find_map vox_sort_of_attribute decl.type_attributes)
+
+(* Turn a declared refinement sort into a solver sort, registering any
+   datatype/tuple it mentions.  [Vs_data] registers the MODELED datatype
+   (so an abstract type modeled as a datatype lets clients use its
+   constructors in predicates); [Vs_param i] reads the use's [arg_sorts]. *)
+and dsort_of_vox_sort env arg_sorts (vs : Types.vox_sort) =
+  match vs with
+  | Vs_int -> S_int
+  | Vs_bool -> S_bool
+  | Vs_param i ->
+    (match List.nth_opt arg_sorts i with Some s -> s | None -> S_other)
+  | Vs_tuple ss ->
+    register_tuple_arity (List.length ss);
+    S_tuple (List.map (dsort_of_vox_sort env arg_sorts) ss)
+  | Vs_data (p, ss) ->
+    datatype_sort env p (List.map (dsort_of_vox_sort env arg_sorts) ss)
+  | Vs_opaque -> S_other
 
 and datatype_sort_unattributed env p arg_sorts =
   if List.exists (Path.same p) !poisoned
@@ -464,12 +481,12 @@ and dsort_of_type ?(visited = []) ?(params = []) env ty =
     | Tconstr (p, args, _) ->
       (* A parameterized head sorts as its datatype instantiated at the
          arguments' sorts (registered generically on first sight); a
-         declared [refines] applies to every instance. *)
-      (match vox_sort_attribute env p with
+         declared [refines] applies to every instance, and its own
+         [Vs_param]s resolve against these same argument sorts. *)
+      let arg_sorts = List.map (dsort_of_type ~visited ~params env) args in
+      (match vox_sort_attribute env p arg_sorts with
        | Some s -> s
-       | None ->
-         datatype_sort env p
-           (List.map (dsort_of_type ~visited ~params env) args))
+       | None -> datatype_sort env p arg_sorts)
     | Trefine (skel, _) -> dsort_of_type ~visited ~params env skel
     | Ttuple comps
       when List.length comps >= 2

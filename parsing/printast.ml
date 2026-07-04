@@ -599,6 +599,10 @@ and jkind_annotation i ppf (jkind : jkind_annotation) =
   | Pjk_product jkinds ->
       line i ppf "Pjk_product\n";
       list i jkind_annotation ppf jkinds
+  | Pjk_refines (jkind, type_) ->
+      line i ppf "Pjk_refines\n";
+      jkind_annotation (i+1) ppf jkind;
+      core_type (i+1) ppf type_
 
 and function_param i ppf { pparam_desc = desc; pparam_loc = loc } =
   match desc with

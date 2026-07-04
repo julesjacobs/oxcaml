@@ -2137,9 +2137,9 @@ module Const = struct
           | { Location.txt = "refines"; loc } :: rest -> (
             match rest with
             | { Location.txt = "int"; _ } :: rest' ->
-              Some Vr_int, List.rev_append acc rest'
+              Some (Vr_sort Vs_int), List.rev_append acc rest'
             | { Location.txt = "bool"; _ } :: rest' ->
-              Some Vr_bool, List.rev_append acc rest'
+              Some (Vr_sort Vs_bool), List.rev_append acc rest'
             | _ -> raise ~loc (Unknown_kind_modifier "refines"))
           | x :: rest -> go (x :: acc) rest
           | [] -> None, List.rev acc
@@ -2199,6 +2199,14 @@ module Const = struct
           (* vox: [with] only extends with-bounds; preserve base's refines. *)
           refines = base.refines
         })
+    | Pjk_refines (base, _ty) ->
+      (* vox: the refines type cannot be elaborated here (no type env for
+         resolving its paths against the declaration's parameters).
+         Store a placeholder ([refines] is Vr_top) and let Typedecl's
+         setter elaborate the written type where env and the params
+         exist. *)
+      of_user_written_annotation_unchecked_level ~use_abstract_jkinds ~warn
+        env context base
     | Pjk_default | Pjk_kind_of _ ->
       raise ~loc:jkind.pjka_loc Unimplemented_syntax
 
@@ -2402,6 +2410,7 @@ let of_type_decl_overapproximate_unknown ~context env
     | Pjk_with _ -> true
     | Pjk_mod (base, _) -> has_with_bounds base
     | Pjk_operator (base, _) -> has_with_bounds base
+    | Pjk_refines (base, _) -> has_with_bounds base
     | Pjk_product jkinds -> List.exists has_with_bounds jkinds
     | Pjk_abbreviation _ -> false
     | Pjk_default | Pjk_kind_of _ ->

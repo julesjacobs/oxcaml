@@ -4167,13 +4167,24 @@ jkind_desc_gen(self):
       in
       Pjk_mod ($1, modes)
     }
-  | name = mkrhs(type_longident) axes = mkrhs(LIDENT)* {
-      match axes with
-      | [] -> Pjk_abbreviation name
-      | _ :: _ ->
+  | name = mkrhs(type_longident) axes = mkrhs(LIDENT)*
+    refty = ioption(delimited(LPAREN, core_type, RPAREN)) {
+      match axes, refty with
+      | [], None -> Pjk_abbreviation name
+      | _ :: _, None ->
         Pjk_operator
           ({ pjka_loc = make_loc $loc(name);
              pjka_desc = Pjk_abbreviation name }, axes)
+      | [ { Location.txt = "refines"; _ } ], Some ty ->
+        (* vox: [value refines (ty)] -- the general refinement modeling,
+           a base kind followed by [refines] and a parenthesized core
+           type.  The bare forms [refines int|bool] stay on the axis
+           path above. *)
+        Pjk_refines
+          ({ pjka_loc = make_loc $loc(name);
+             pjka_desc = Pjk_abbreviation name }, ty)
+      | _, Some _ ->
+        expecting $loc(refty) "refines"
     }
   | KIND_OF ty=core_type %prec below_LBRACKETAT {
       Pjk_kind_of ty

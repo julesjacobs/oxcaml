@@ -1224,25 +1224,96 @@ let transl_declaration env sdecl (id, uid) =
        [refines int] checks against [type t = int] unannotated). *)
     let jkind =
       match Jkind.get_vox_refines jkind with
-      | Vr_int | Vr_bool -> jkind
+      | Vr_sort _ -> jkind
       | Vr_top ->
         (* The stored jkind may be an overapproximation of the written
            annotation; read [refines] from the source annotation
            directly. *)
+        (* Substitute a parameterized head's declared sort at the
+           argument sorts elaborated from a use. *)
+        let rec subst_sort args : Types.vox_sort -> Types.vox_sort = function
+          | Vs_param i ->
+            (match List.nth_opt args i with Some s -> s | None -> Vs_opaque)
+          | Vs_tuple ss -> Vs_tuple (List.map (subst_sort args) ss)
+          | Vs_data (p, ss) -> Vs_data (p, List.map (subst_sort args) ss)
+          | (Vs_int | Vs_bool | Vs_opaque) as s -> s
+        in
+        (* Elaborate the core type written in [refines (...)] into a
+           refinement sort.  Translate it (no [expand_head], to avoid
+           moving GADT-equation ambiguity) and walk the result: a
+           parameter variable maps positionally, a simple variant/record
+           becomes a datatype sort, and a head that declares its own
+           modeling contributes that modeling instantiated at the
+           argument sorts. *)
+        let elaborate (cty : Parsetree.core_type) : Types.vox_sort =
+          let ty =
+            (transl_simple_type ~new_var_jkind:Any env ~closed:false
+               Mode.Alloc.Const.legacy cty).ctyp_type
+          in
+          let param_index ty =
+            let id = get_id ty in
+            let rec find i = function
+              | [] -> None
+              | p :: rest ->
+                if Int.equal (get_id p) id then Some i else find (i + 1) rest
+            in
+            find 0 params
+          in
+          let err () =
+            Location.raise_errorf ~loc:cty.ptyp_loc
+              "vox: this type cannot model a refinement sort"
+          in
+          let rec go (ty : Types.type_expr) : Types.vox_sort =
+            match get_desc ty with
+            | Tvar _ ->
+              (match param_index ty with Some i -> Vs_param i | None -> err ())
+            | Tconstr (p, [], _) when Path.same p Predef.path_int -> Vs_int
+            | Tconstr (p, [], _) when Path.same p Predef.path_bool -> Vs_bool
+            | Tconstr (p, args, _) ->
+              let arg_sorts = List.map go args in
+              (match Env.find_type p env with
+               | exception Not_found -> err ()
+               | decl ->
+                 (match Jkind.get_vox_refines decl.type_jkind with
+                  | Vr_sort s -> subst_sort arg_sorts s
+                  | Vr_top ->
+                    (match
+                       Ctype.vox_simple_variant env p,
+                       Ctype.vox_simple_record env p
+                     with
+                     | Some _, _ | _, Some _ -> Vs_data (p, arg_sorts)
+                     | None, None ->
+                       (* A MONOMORPHIC alias of a supported head
+                          unfolds one declaration at a time (decl
+                          manifests only -- never [expand_head], which
+                          moves GADT-equation ambiguity):
+                          [type index = int] models like [int]. *)
+                       (match decl.type_params, decl.type_manifest with
+                        | [], Some m -> go m
+                        | _ -> err ()))))
+            | Ttuple comps
+              when List.length comps >= 2
+                   && List.for_all (fun (l, _) -> Option.is_none l) comps ->
+              Vs_tuple (List.map (fun (_, t) -> go t) comps)
+            | _ -> err ()
+          in
+          go ty
+        in
         let rec of_annot (a : Parsetree.jkind_annotation) =
           match a.pjka_desc with
           | Pjk_operator (base, axes) ->
             let rec find = function
               | { Location.txt = "refines"; _ }
-                :: { Location.txt = "int"; _ } :: _ -> Some Vr_int
+                :: { Location.txt = "int"; _ } :: _ -> Some (Vr_sort Vs_int)
               | { Location.txt = "refines"; _ }
-                :: { Location.txt = "bool"; _ } :: _ -> Some Vr_bool
+                :: { Location.txt = "bool"; _ } :: _ -> Some (Vr_sort Vs_bool)
               | _ :: rest -> find rest
               | [] -> None
             in
             (match find axes with
              | Some r -> Some r
              | None -> of_annot base)
+          | Pjk_refines (_base, cty) -> Some (Vr_sort (elaborate cty))
           | Pjk_mod (base, _) | Pjk_with (base, _, _) -> of_annot base
           | _ -> None
         in
@@ -1275,8 +1346,8 @@ let transl_declaration env sdecl (id, uid) =
                             , _ )
                       ; _ } ] ->
                   (match s with
-                   | "int" -> Some Vr_int
-                   | "bool" -> Some Vr_bool
+                   | "int" -> Some (Vr_sort Vs_int)
+                   | "bool" -> Some (Vr_sort Vs_bool)
                    | _ -> None (* vox_verify reports the bad name *))
                 | _ -> None)
             sdecl.ptype_attributes
@@ -1806,7 +1877,7 @@ let narrow_to_manifest_jkind env loc path decl =
          metadata; see Types.vox_refines). *)
       match Jkind.get_vox_refines decl.type_jkind with
       | Vr_top -> manifest_jkind
-      | (Vr_int | Vr_bool) as r -> Jkind.set_vox_refines r manifest_jkind
+      | Vr_sort _ as r -> Jkind.set_vox_refines r manifest_jkind
     in
     { decl with type_jkind = manifest_jkind; type_ikind }
 
@@ -2818,7 +2889,7 @@ let update_decl_jkind env dpath decl =
   let decl' = update_decl_jkind0 env dpath decl in
   match Jkind.get_vox_refines decl.type_jkind with
   | Vr_top -> decl'
-  | (Vr_int | Vr_bool) as r ->
+  | Vr_sort _ as r ->
     { decl' with type_jkind = Jkind.set_vox_refines r decl'.type_jkind }
 
 let update_decls_jkind_reason decls =
@@ -3609,7 +3680,7 @@ let normalize_decl_jkinds env decls =
          metadata and survives it. *)
       match Jkind.get_vox_refines decl.type_jkind with
       | Vr_top -> normalized_jkind
-      | (Vr_int | Vr_bool) as r -> Jkind.set_vox_refines r normalized_jkind
+      | Vr_sort _ as r -> Jkind.set_vox_refines r normalized_jkind
     in
     let decl =
       { decl with

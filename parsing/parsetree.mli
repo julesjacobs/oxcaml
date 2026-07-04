@@ -1389,6 +1389,10 @@ and jkind_annotation_desc =
   | Pjk_with of jkind_annotation * core_type * modalities
   | Pjk_kind_of of core_type
   | Pjk_product of jkind_annotation list
+  | Pjk_refines of jkind_annotation * core_type
+  (** vox: [Pjk_refines(K, ty)] represents [K refines (ty)] -- the base
+      kind [K] carrying a declared refinement modeling written as a
+      parenthesized core type (see [Types.vox_refines]). *)
 
 and jkind_annotation =
   { pjka_loc : Location.t

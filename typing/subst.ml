@@ -286,7 +286,7 @@ let with_additional_action =
           let set_refines (k : (l * r) jkind) =
             match vox_refines with
             | Vr_top -> k
-            | Vr_int | Vr_bool ->
+            | Vr_sort _ ->
               { k with jkind = { k.jkind with refines = vox_refines } }
           in
           match Jkind.get_const jkind with
@@ -297,7 +297,7 @@ let with_additional_action =
                  modeling.  (The shallow equality itself stays
                  refines-blind: printing elision shares it.) *)
               match vox_refines with
-              | Vr_int | Vr_bool -> None
+              | Vr_sort _ -> None
               | Vr_top ->
                 Builtins_memo.find
                   ~quality:jkind.quality
@@ -591,7 +591,34 @@ let rec layout s l =
     if sort_l == sort_l' then l
     else Sort (sort_l', ax)
 
+(* vox: the refines component may carry TYPE paths ([Vs_data]); remap
+   them alongside the jkind's other paths (e.g. saving to a .cmi rewrites
+   module paths).  Share when nothing changes so the common [Vr_top] case
+   stays free. *)
+let rec subst_vox_sort s (vs : Types.vox_sort) =
+  match vs with
+  | Vs_int | Vs_bool | Vs_param _ | Vs_opaque -> vs
+  | Vs_tuple ss ->
+    let ss' = Misc.Stdlib.List.map_sharing (subst_vox_sort s) ss in
+    if ss == ss' then vs else Vs_tuple ss'
+  | Vs_data (p, ss) ->
+    let p' = type_path s p in
+    let ss' = Misc.Stdlib.List.map_sharing (subst_vox_sort s) ss in
+    if p == p' && ss == ss' then vs else Vs_data (p', ss')
+
+let subst_vox_refines s (r : Types.vox_refines) =
+  match r with
+  | Vr_top -> r
+  | Vr_sort vs ->
+    let vs' = subst_vox_sort s vs in
+    if vs == vs' then r else Vr_sort vs'
+
 let jkind_desc s jkind =
+  let refines' = subst_vox_refines s jkind.refines in
+  let jkind =
+    if refines' == jkind.refines then jkind
+    else { jkind with refines = refines' }
+  in
   match jkind.base with
   | Kconstr (p, sa) ->
     begin match Path.Map.find p s.jkinds with
@@ -619,6 +646,11 @@ let jkind_desc s jkind =
 
 let jkind_const_desc s
       ({ with_bounds = No_with_bounds } as jkind : jkind_const_desc_lr) =
+  let refines' = subst_vox_refines s jkind.refines in
+  let jkind =
+    if refines' == jkind.refines then jkind
+    else { jkind with refines = refines' }
+  in
   match jkind.base with
   | Kconstr (p, sa) ->
     begin match Path.Map.find p s.jkinds with
