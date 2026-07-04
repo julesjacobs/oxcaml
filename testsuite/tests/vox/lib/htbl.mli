@@ -280,6 +280,13 @@ val empty
 (* The hash of a key (non-negative, so the bucket is in range). *)
 val index : (k : int{ 0 <= _ }) -> int{ _ = index k }
 
+(* The bucket-level operations, exported for layers that reach a
+   bucket some other way (the mutable table reads one through a
+   loan): assoc-list search and insert/replace, each equal to its
+   model. *)
+val bucket_find : (k : int) -> (b : bucket) -> opt{ _ = bfind k b }
+val bucket_add : (k : int) -> (v : int) -> (b : bucket) -> bucket{ _ = badd k v b }
+
 (* Efficient one-bucket lookup, proved equal to the whole-table scan
    [tfind] (which quantifies EVERY bucket): [tfind_eq_jump] bridges
    the bucket visited to the buckets skipped. *)

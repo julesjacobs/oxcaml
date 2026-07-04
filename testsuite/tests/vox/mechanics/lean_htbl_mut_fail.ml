@@ -6,31 +6,39 @@
 
 (* Mutable hash-table (bucket-borrow) soundness probes, each pinned to
    its rejection layer.  The bucket-slice API is ascribed inline (the
-   same shape demo/bslice_lib gives, which demo/lean_htbl_mut.ml
-   exercises).  Lean rejects a stale-contents claim after a write; the
-   mode checker rejects reusing a loan already consumed by a strong
-   update, and reusing a prophecy already consumed by a borrow. *)
+   same shape lib/bslice gives, which lib/mhtbl builds the imperative
+   table on): array ghosts at the SPINE datatype, exactly as bslice
+   models them at Htbl's table.  Lean rejects a stale-contents claim
+   after a write; the mode checker rejects reusing a loan already
+   consumed by a strong update, and reusing a prophecy already
+   consumed by a borrow. *)
 
 type bucket =
   | BNil
   | BCons of int * int * bucket
 
+type table =
+  | TNil
+  | TCons of bucket * table
+
 [%%vox.lean {lean|
-opaque bcts : VoxU -> List Vox_bucket
-opaque bnow : VoxU -> List Vox_bucket
-opaque bfin : VoxU -> List Vox_bucket
-opaque bpv : VoxU -> List Vox_bucket
+instance : Inhabited Vox_table := ⟨.TNil⟩
+opaque bcts : VoxU -> Vox_table
+opaque bnow : VoxU -> Vox_table
+opaque bfin : VoxU -> Vox_table
+opaque bpv : VoxU -> Vox_table
 
-@[grind] def blen : List Vox_bucket -> Int
-  | [] => 0
-  | _ :: t => 1 + blen t
+@[grind] def tlen : Vox_table -> Int
+  | .TNil => 0
+  | .TCons _ r => 1 + tlen r
 
-@[grind] def bupd : List Vox_bucket -> Int -> Vox_bucket -> List Vox_bucket
-  | [], _, _ => []
-  | x :: t, i, v => if i = 0 then v :: t else x :: bupd t (i - 1) v
+@[grind] def tset : Vox_table -> Int -> Vox_bucket -> Vox_table
+  | .TNil, _, _ => .TNil
+  | .TCons b r, o, nb => if o <= 0 then .TCons nb r else .TCons b (tset r (o - 1) nb)
 |lean}]
 [%%expect{|
 type bucket = BNil | BCons of int * int * bucket
+type table = TNil | TCons of bucket * table
 |}]
 
 module S : sig
@@ -38,7 +46,7 @@ module S : sig
   type proph
   type slice
 
-  val bnew : (n : int{ 0 <= _ }) -> (b : bucket) -> varr{ blen (bcts _) = n } @ unique
+  val of_model : (m : table) -> varr{ bcts _ = m } @ unique
 
   val new_proph : unit -> proph @ unique
 
@@ -49,9 +57,9 @@ module S : sig
     (varr{ bcts _ = bpv p } * 'b) @ unique
 
   val sset :
-    (m : slice) @ local unique -> (i : int{ 0 <= _ && _ < blen (bnow m) }) ->
+    (m : slice) @ local unique -> (i : int{ 0 <= _ && _ < tlen (bnow m) }) ->
     (b : bucket) ->
-    slice{ bnow _ = bupd (bnow m) i b && bfin _ = bfin m } @ local unique
+    slice{ bnow _ = tset (bnow m) i b && bfin _ = bfin m } @ local unique
 
   val sdrop : (m : slice) @ local unique -> unit{ bfin m = bnow m }
 end = struct
@@ -59,8 +67,23 @@ end = struct
   type proph = P of { u : unit }
   type slice = L of { base : bucket array; off_ : int; len_ : int }
 
-  let bnew : (n : int{ 0 <= _ }) -> (b : bucket) -> varr{ blen (bcts _) = n } @ unique =
-    fun n b -> assume_unchecked_ (Obj.magic_unique (A { base = Array.make n b }))
+  let rec model_len (t : table) =
+    match t with
+    | TNil -> 0
+    | TCons (_, r) -> 1 + model_len r
+
+  let of_model : (m : table) -> varr{ bcts _ = m } @ unique =
+    fun m ->
+      let base = Array.make (model_len m) BNil in
+      let rec fill (t : table) (i : int) =
+        match t with
+        | TNil -> ()
+        | TCons (b, r) ->
+          base.(i) <- b;
+          fill r (i + 1)
+      in
+      fill m 0;
+      assume_unchecked_ (Obj.magic_unique (A { base }))
 
   let new_proph : unit -> proph @ unique = fun () -> Obj.magic_unique (P { u = () })
 
@@ -81,16 +104,16 @@ end = struct
       Obj.magic_unique ((assume_unchecked_ (A { base }) : varr{ bcts _ = bpv p }), b)
 
   let sset :
-    (m : slice) @ local unique -> (i : int{ 0 <= _ && _ < blen (bnow m) }) ->
+    (m : slice) @ local unique -> (i : int{ 0 <= _ && _ < tlen (bnow m) }) ->
     (b : bucket) ->
-    slice{ bnow _ = bupd (bnow m) i b && bfin _ = bfin m } @ local unique =
+    slice{ bnow _ = tset (bnow m) i b && bfin _ = bfin m } @ local unique =
     fun m i b ->
       let (L { base; off_; len_ }) = m in
       base.(off_ + i) <- b;
       exclave_
         (Obj.magic_unique
            (assume_unchecked_ (L { base; off_; len_ })
-             : slice{ bnow _ = bupd (bnow m) i b && bfin _ = bfin m }))
+             : slice{ bnow _ = tset (bnow m) i b && bfin _ = bfin m }))
 
   let sdrop : (m : slice) @ local unique -> unit{ bfin m = bnow m } =
     fun m ->
@@ -103,8 +126,7 @@ module S :
     type varr
     type proph
     type slice
-    val bnew :
-      (n : int{ 0 <= _ }) -> bucket -> varr{ (blen (bcts _)) = n } @ unique
+    val of_model : (m : table) -> varr{ (bcts _) = m } @ unique
     val new_proph : unit -> proph @ unique
     val borrow :
       (p : proph) @ unique ->
@@ -114,9 +136,9 @@ module S :
       once -> varr{ (bcts _) = (bpv p) } * 'b @ unique
     val sset :
       (m : slice) @ local unique ->
-      (i : int{ (0 <= _) && (_ < (blen (bnow m))) }) ->
+      (i : int{ (0 <= _) && (_ < (tlen (bnow m))) }) ->
       (b : bucket) ->
-      slice{ ((bnow _) = (bupd (bnow m) i b)) && ((bfin _) = (bfin m)) } @ local
+      slice{ ((bnow _) = (tset (bnow m) i b)) && ((bfin _) = (bfin m)) } @ local
       unique
     val sdrop : (m : slice) @ local unique -> unit{ (bfin m) = (bnow m) }
   end
@@ -125,10 +147,10 @@ module S :
 open S
 
 (* PROBE (a), LEAN LAYER: a stale-contents claim.  After writing bucket
-   [i], the loan's contents are [bupd (bnow m) i b], NOT the old
+   [i], the loan's contents are [tset (bnow m) i b], NOT the old
    [bnow m]; claiming they are unchanged fails with a counterexample. *)
 let stale :
-  (m : slice) @ local unique -> (i : int{ 0 <= _ && _ < blen (bnow m) }) ->
+  (m : slice) @ local unique -> (i : int{ 0 <= _ && _ < tlen (bnow m) }) ->
   (b : bucket) -> slice{ bnow _ = bnow m } @ local unique =
   fun m i b -> exclave_ (sset m i b)
 [%%expect{|
@@ -136,19 +158,19 @@ Line 9, characters 24-36:
 9 |   fun m i b -> exclave_ (sset m i b)
                             ^^^^^^^^^^^^
 Error: vox: verification failed (lean).
-       Goal: (bnow *unknown7*) = (bnow m)
+       Goal: (bnow *unknown8*) = (bnow m)
 Hypotheses:
-  ((bnow *unknown7*) = (bupd (bnow m) i b)) && ((bfin *unknown7*) = (bfin m))
-  (0 <= i) && (i < (blen (bnow m)))
+  ((bnow *unknown8*) = (tset (bnow m) i b)) && ((bfin *unknown8*) = (bfin m))
+  (0 <= i) && (i < (tlen (bnow m)))
 Possible counterexample:
   i = 0
-  blen (bnow m) = 1
+  tlen (bnow m) = 1
 (lean: error: `grind` failed)
 |}]
 
 (* PROBE (b), MODE LAYER: a strong update consumes the loan, so writing
    twice through the same loan name is a stale view -- rejected. *)
-let reuse : (m : slice{ 2 <= blen (bnow _) }) @ local unique -> (b : bucket) -> unit =
+let reuse : (m : slice{ 2 <= tlen (bnow _) }) @ local unique -> (b : bucket) -> unit =
   fun m b ->
     let m1 = sset m 0 b in
     let m2 = sset m 1 b in
