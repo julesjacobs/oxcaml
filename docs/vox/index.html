@@ -206,11 +206,11 @@ an <code>int</code>, a Lean inductive value for a variant such as
 refinement can therefore state a relation between run-time values:
 here, that the length of the result is the sum of the lengths of the
 arguments.</p>
-<p>Refinement types are often met as range restrictions such as
-<code>int{ _ &gt;= 0 }</code>; dependency is what turns them into
-contracts.  A refinement on the result is a postcondition, which the
-body must establish; a refinement on a parameter is a precondition
-(<code>nth</code>, below).</p>
+<p id="contracts">Refinement types are often met as range restrictions
+such as <code>int{ _ &gt;= 0 }</code>.  <b>With dependency, refinements
+generalize pre- and postconditions</b>: a refinement on the result is
+a postcondition, which the body must establish; a refinement on a
+parameter is a precondition (<code>nth</code>, below).</p>
 <p>The <code>Nil</code> arm returns <code>b</code>, so its obligation
 is <code>len b = len Nil + len b</code>, immediate from the definition
 of <code>len</code>.  In the <code>Cons</code> arm, the recursive call
@@ -242,8 +242,7 @@ result, a caller of <code>nth</code> constructs the argument
 <code>()</code> at a type nothing satisfies; an explicit
 <code>refine_ e</code> claim states a refined type for <code>e</code>
 directly.</p>
-<p id="contracts"><b>Refinements generalize pre- and
-postconditions.</b>  A refinement can also appear under a type
+<p>A refinement can also appear under a type
 constructor: <code>int{ _ &gt;= 0 } list</code> states that every
 element is nonnegative.  Because the fact is part of the type, the
 typechecker propagates it, and polymorphic functions preserve it by
