@@ -210,12 +210,17 @@ def main():
                                      r'^    @ unique =')
                      + '\n  fun l vs t -> ...',
         '@HERO_QSORT@': slice_between(read('demo/lean_qsort.ml'),
-                                 r'^let rec qsort', r'@ local unique =$')
-                   + '\n  fun m -> ...   (* sequential: partition, recurse *)\n\n'
+                                      r'^let rec qsort',
+                                      r'^\(\* Parallel quicksort',
+                                      include_stop=False).rstrip('\n')
+                   + '\n\n'
                    + slice_between(read('demo/lean_qsort.ml'),
-                                   r'^let rec psort', r'@ local unique =$')
+                                   r'^let rec psort',
+                                   r'^  unit\{ sorted \(fin m\)')
                    + '\n  fun m -> ...   (* the SAME spec; the recursive calls\n'
                      '                    run under Par_lib.fork_join2 *)',
+        '@QSORT_ARRAY@': slice_between(read('demo/lean_qsort.ml'),
+                                       r'^let sort_array', r"^    x'$"),
     }
 
     nth = read('demo/lean_nth.ml')

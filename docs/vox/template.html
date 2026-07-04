@@ -86,7 +86,6 @@ th{background:var(--panel);color:var(--fg)} td{color:var(--dim)} td:first-child{
   <a href="#example">example</a>
   <a href="#why-test">tests</a>
   <a href="#sig">signatures</a>
-  <a href="#real">trie</a>
   <a href="#automation">automation</a>
   <a href="#modes">mutation</a>
   <a href="#tour">more demos</a>
@@ -107,7 +106,7 @@ types backed by Lean.</p>
   <code>sorted</code>-and-<code>perm</code>, sequential and fork-join
   parallel.</li>
 <li><a href="#real">The Patricia trie</a> from OxCaml&rsquo;s own
-  optimizer (the bit theory proved from first principles) and a BST,
+  optimizer and a BST,
   each behind a proved model interface.</li>
 <li><a href="#seal">Sealed interfaces</a>: one sig, two verified
   implementations; <a href="#oset">a set</a> whose representation is
@@ -373,6 +372,10 @@ ergonomic.</p>
 <pre><code class="ml">@HERO_QSORT@</code></pre>
 <p>This quicksort eliminates bounds checks: indexing is statically
 proved, so the compiled code reads and writes without them.</p>
+<p>To sort an array, borrow it and sort the loan: the borrow hands the
+array back, and the prophecy carries the conclusion onto its
+contents:</p>
+<pre><code class="ml">@QSORT_ARRAY@</code></pre>
 
 <h2 id="tour">Some more demos</h2>
 <details><summary style="cursor:pointer;color:var(--dim)">Sixteen more

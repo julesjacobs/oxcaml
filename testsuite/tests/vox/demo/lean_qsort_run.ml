@@ -5,7 +5,7 @@
 *)
 
 (* The quicksorts of demo/lean_qsort.ml, RUN: same borrow API and
-   same sort code (inlined -- expect tests are single-unit), driven
+   same proof-style sort code (inlined -- expect tests are single-unit), driven
    on concrete arrays at the toplevel, so the sorted results below
    are real program output, not just verified types.  [fork_join2]
    here is the real one: it forks a domain where the runtime has them
@@ -979,106 +979,100 @@ val part :
   unique = <fun>
 |}]
 
-(* Sequential quicksort on a loan: read the pivot, partition, then
-   REBORROW -- one three-way split at the pivot's singleton.  Both
-   sides are sorted recursively and resolved; the singleton is
-   resolved as-is, pinning its prophecy to the pivot by equality.
-   The bracket's export restates the prophecies' facts in the scope
-   OUTSIDE it, and the parent loan comes back at
-   [app (pv p1) (app (pv p2) (pv p3))], where the glue lemmas
-   finish. *)
+(* Sequential quicksort, proof-style: sorting a loan CONSUMES and
+   RESOLVES it, and the conclusion comes back as a refined unit over
+   the prophesied final contents.  Each sub-loan is sorted-and-resolved
+   by the recursive call itself; the singleton is resolved as-is,
+   pinning its prophecy to the pivot by equality. *)
 let rec qsort :
   (m : slice) @ local unique ->
-  slice{ perm (now m) (now _) && sorted (now _) && fin _ = fin m }
-    @ local unique =
+  unit{ sorted (fin m) && perm (now m) (fin m) } =
   fun m ->
-    exclave_
-      (let (n, m0) = slen m in
-       if n <= 1
-       then m0
-       else begin
-         let (p, mp) = sget m0 (n - 1) in
-         let q = part p 0 0 mp n in
-         let (k, m2) = q in
-         let p1 = new_proph () in
-         let p2 = new_proph () in
-         let p3 = new_proph () in
-         let (mres, u) =
-           split3 p1 p2 p3 m2 k (k + 1) (fun a b c ->
-             let a' = qsort a in
-             let _u1 = sdrop a' in
-             let _u2 = sdrop b in
-             let c' = qsort c in
-             let _u3 = sdrop c' in
-             (() : unit{ sorted (pv p1)
-                         && perm (take k (now m2)) (pv p1)
-                         && pv p2 = seg k (k + 1) (now m2)
-                         && sorted (pv p3)
-                         && perm (drop (k + 1) (now m2)) (pv p3) }))
-         in
-         ignore u;
-         mres
-       end)
+    let (n, m0) = slen m in
+    if n <= 1
+    then begin
+      let _u = sdrop m0 in
+      (() : unit{ sorted (fin m) && perm (now m) (fin m) })
+    end
+    else begin
+      let (p, mp) = sget m0 (n - 1) in
+      let q = part p 0 0 mp n in
+      let (k, m2) = q in
+      let p1 = new_proph () in
+      let p2 = new_proph () in
+      let p3 = new_proph () in
+      let (mres, u) =
+        split3 p1 p2 p3 m2 k (k + 1) (fun a b c ->
+          let _u1 = qsort a in
+          let _u2 = sdrop b in
+          let _u3 = qsort c in
+          (() : unit{ sorted (pv p1)
+                      && perm (take k (now m2)) (pv p1)
+                      && pv p2 = seg k (k + 1) (now m2)
+                      && sorted (pv p3)
+                      && perm (drop (k + 1) (now m2)) (pv p3) }))
+      in
+      ignore u;
+      let _uf = sdrop mres in
+      (() : unit{ sorted (fin m) && perm (now m) (fin m) })
+    end
 [%%expect{|
 val qsort :
   (m : S.slice) @ local unique ->
-  S.slice{ ((perm (now m) (now _)) && (sorted (now _))) && ((fin _) = (fin m)) } @ local
-  unique = <fun>
+  unit{ (sorted (fin m)) && (perm (now m) (fin m)) } = <fun>
 |}]
 
 (* Parallel quicksort, same spec: the bracket's two outer sub-loans
-   are disjoint, so each once-closure consumes one and fork_join2
-   runs them on separate domains -- each task returns its side's
-   resolution facts (global refined units), which survive the join;
-   everything else is the sequential proof. *)
+   are disjoint, so each once-closure consumes one and fork_join2 runs
+   them on separate domains -- each task's result is its side's
+   conclusion, which survives the join. *)
 let rec psort :
   (m : slice) @ local unique ->
-  slice{ perm (now m) (now _) && sorted (now _) && fin _ = fin m }
-    @ local unique =
+  unit{ sorted (fin m) && perm (now m) (fin m) } =
   fun m ->
-    exclave_
-      (let (n, m0) = slen m in
-       if n <= 1
-       then m0
-       else begin
-         let (p, mp) = sget m0 (n - 1) in
-         let q = part p 0 0 mp n in
-         let (k, m2) = q in
-         let p1 = new_proph () in
-         let p2 = new_proph () in
-         let p3 = new_proph () in
-         let (mres, u) =
-           split3 p1 p2 p3 m2 k (k + 1) (fun a b c ->
-             let (ua, uc) =
-               fork_join2
-                 (fun () ->
-                   let a' = psort a in
-                   let _u = sdrop a' in
-                   (() : unit{ sorted (pv p1)
-                               && perm (take k (now m2)) (pv p1) }))
-                 (fun () ->
-                   let c' = psort c in
-                   let _u = sdrop c' in
-                   (() : unit{ sorted (pv p3)
-                               && perm (drop (k + 1) (now m2)) (pv p3) }))
-             in
-             ignore ua;
-             ignore uc;
-             let _u2 = sdrop b in
-             (() : unit{ sorted (pv p1)
-                         && perm (take k (now m2)) (pv p1)
-                         && pv p2 = seg k (k + 1) (now m2)
-                         && sorted (pv p3)
-                         && perm (drop (k + 1) (now m2)) (pv p3) }))
-         in
-         ignore u;
-         mres
-       end)
+    let (n, m0) = slen m in
+    if n <= 1
+    then begin
+      let _u = sdrop m0 in
+      (() : unit{ sorted (fin m) && perm (now m) (fin m) })
+    end
+    else begin
+      let (p, mp) = sget m0 (n - 1) in
+      let q = part p 0 0 mp n in
+      let (k, m2) = q in
+      let p1 = new_proph () in
+      let p2 = new_proph () in
+      let p3 = new_proph () in
+      let (mres, u) =
+        split3 p1 p2 p3 m2 k (k + 1) (fun a b c ->
+          let (ua, uc) =
+            fork_join2
+              (fun () ->
+                let u = psort a in
+                (u : unit{ sorted (pv p1)
+                           && perm (take k (now m2)) (pv p1) }))
+              (fun () ->
+                let u = psort c in
+                (u : unit{ sorted (pv p3)
+                           && perm (drop (k + 1) (now m2)) (pv p3) }))
+          in
+          ignore ua;
+          ignore uc;
+          let _u2 = sdrop b in
+          (() : unit{ sorted (pv p1)
+                      && perm (take k (now m2)) (pv p1)
+                      && pv p2 = seg k (k + 1) (now m2)
+                      && sorted (pv p3)
+                      && perm (drop (k + 1) (now m2)) (pv p3) }))
+      in
+      ignore u;
+      let _uf = sdrop mres in
+      (() : unit{ sorted (fin m) && perm (now m) (fin m) })
+    end
 [%%expect{|
 val psort :
   (m : S.slice) @ local unique ->
-  S.slice{ ((perm (now m) (now _)) && (sorted (now _))) && ((fin _) = (fin m)) } @ local
-  unique = <fun>
+  unit{ (sorted (fin m)) && (perm (now m) (fin m)) } = <fun>
 |}]
 
 (* Read an array out as a list (in-bounds by the threaded length). *)
@@ -1120,8 +1114,7 @@ let sorted_seq : int list =
   let p1 = new_proph () in
   let (x2, u1) =
     borrow p1 x1 (fun m ->
-      let ms = qsort m in
-      let _u = sdrop ms in
+      let _u = qsort m in
       ())
   in
   ignore u1;
@@ -1151,8 +1144,7 @@ let sorted_par : int list =
   let p1 = new_proph () in
   let (x2, u1) =
     borrow p1 x1 (fun m ->
-      let ms = psort m in
-      let _u = sdrop ms in
+      let _u = psort m in
       ())
   in
   ignore u1;
@@ -1167,8 +1159,7 @@ let empty_and_single : int list * int list =
   let pe = new_proph () in
   let (e1, ue) =
     borrow pe e (fun m ->
-      let ms = qsort m in
-      let _u = sdrop ms in
+      let _u = qsort m in
       ())
   in
   ignore ue;
@@ -1176,8 +1167,7 @@ let empty_and_single : int list * int list =
   let ps = new_proph () in
   let (s1, us) =
     borrow ps s (fun m ->
-      let ms = psort m in
-      let _u = sdrop ms in
+      let _u = psort m in
       ())
   in
   ignore us;
@@ -1193,8 +1183,7 @@ let all_equal : int list =
   let p = new_proph () in
   let (x1, u) =
     borrow p x (fun m ->
-      let ms = psort m in
-      let _u = sdrop ms in
+      let _u = psort m in
       ())
   in
   ignore u;
