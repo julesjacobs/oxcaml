@@ -1239,7 +1239,7 @@ let transl_declaration env sdecl (id, uid) =
           (* The invariant is closed, so only its underlying sort
              instantiates. *)
           | Vs_fact (s, pred) -> Vs_fact (subst_sort args s, pred)
-          | (Vs_int | Vs_bool | Vs_opaque) as s -> s
+          | (Vs_int | Vs_bool | Vs_opaque | Vs_lean _) as s -> s
         in
         (* Elaborate the core type written in [refines (...)] into a
            refinement sort.  Translate it (no [expand_head], to avoid
@@ -1368,6 +1368,29 @@ let transl_declaration env sdecl (id, uid) =
                    | "int" -> Some (Vr_sort Vs_int)
                    | "bool" -> Some (Vr_sort Vs_bool)
                    | _ -> None (* vox_verify reports the bad name *))
+                (* A ghost sort naming a block-defined Lean type:
+                   [@@vox.sort lean "ISet"].  vox_verify validates the
+                   name eagerly; here we just fold it into the kind. *)
+                | PStr
+                    [ { pstr_desc =
+                          Pstr_eval
+                            ( { pexp_desc =
+                                  Pexp_apply
+                                    ( { pexp_desc =
+                                          Pexp_ident
+                                            { txt = Longident.Lident "lean"; _ }
+                                      ; _ }
+                                    , [ ( Nolabel
+                                        , { pexp_desc =
+                                              Pexp_constant
+                                                { pconst_desc =
+                                                    Pconst_string (name, _, _)
+                                                ; _ }
+                                          ; _ } )
+                                      ] )
+                              ; _ }
+                            , _ )
+                      ; _ } ] -> Some (Vr_sort (Vs_lean name))
                 | _ -> None)
             sdecl.ptype_attributes
         in

@@ -597,7 +597,7 @@ let rec layout s l =
    stays free. *)
 let rec subst_vox_sort s (vs : Types.vox_sort) =
   match vs with
-  | Vs_int | Vs_bool | Vs_param _ | Vs_opaque -> vs
+  | Vs_int | Vs_bool | Vs_param _ | Vs_opaque | Vs_lean _ -> vs
   | Vs_tuple ss ->
     let ss' = Misc.Stdlib.List.map_sharing (subst_vox_sort s) ss in
     if ss == ss' then vs else Vs_tuple ss'

@@ -66,6 +66,12 @@ type dsort =
     (* [int iarray], modelled by the built-in theory: an opaque sort
        VoxIA with Vox_ia_len/Vox_ia_get (Refinement.ia_len/ia_get)
        and the length-nonnegativity axiom, emitted when used *)
+  | S_lean of string
+    (* a GHOST SORT: a block-defined Lean type, named VERBATIM by the
+       string ([type iset [@@vox.sort lean "ISet"]] renders as [ISet]).
+       Opaque to vox -- like [S_other] but carrying a caller-chosen Lean
+       name instead of VoxU; the block is the grammar police for its
+       every use. *)
   | S_other
 
 (* Failure diagnostics show what the solver was given, so a failed
@@ -298,33 +304,77 @@ let rec path_uname (p : Path.t) =
    -- an attributed interface over a concrete implementation -- is the
    sealed-abstraction pattern, sound because the concrete sort is one
    model of the opaque sort and every interface fact is either a
-   checked contract or a sealed obligation. *)
+   checked contract or a sealed obligation.
+
+   [@@vox.sort lean "ISet"] instead names a block-defined Lean type
+   (see [S_lean]): the value is modelled at that named sort, opaque to
+   vox but a real type in the module's blocks. *)
 type sort_attr =
   | Sa_sort of dsort
   | Sa_opaque
+
+(* A ghost sort's Lean name is rendered VERBATIM into binder
+   declarations and predicate translation, so a malformed name would
+   corrupt the solver input.  Reject it eagerly (trust doctrine: a
+   malformed ghost declaration is an error, not a silent VoxU
+   degradation): the name must be a non-empty dotted Lean identifier --
+   each dot-separated segment starts with a letter or [_] and continues
+   with letters, digits, [_] or ['] (namespaced names like [Foo.Bar]
+   are allowed; [Set Int], [""], [123] are not). *)
+let validate_lean_sort_name ~loc name =
+  let ident_seg seg =
+    String.length seg > 0
+    && (match seg.[0] with 'A' .. 'Z' | 'a' .. 'z' | '_' -> true | _ -> false)
+    && String.for_all
+         (function
+           | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' | '\'' -> true
+           | _ -> false)
+         seg
+  in
+  if String.length name = 0
+  then
+    Location.raise_errorf
+      ~loc
+      "vox: vox.sort lean requires a non-empty Lean type name"
+  else if not (List.for_all ident_seg (String.split_on_char '.' name))
+  then
+    Location.raise_errorf
+      ~loc
+      "vox: %S is not a valid Lean type name for vox.sort lean"
+      name;
+  name
+;;
 
 let vox_sort_of_attribute (a : Parsetree.attribute) =
   if not (String.equal a.attr_name.txt "vox.sort")
   then None
   else (
     match a.attr_payload with
-    | PStr
-        [ { pstr_desc =
-              Pstr_eval
-                ({ pexp_desc = Pexp_ident { txt = Longident.Lident s; _ }; _ }, _)
-          ; _
-          }
-        ] ->
-      (match s with
-       | "int" -> Some (Sa_sort S_int)
-       | "bool" -> Some (Sa_sort S_bool)
-       | "opaque" -> Some Sa_opaque
+    | PStr [ { pstr_desc = Pstr_eval (e, _); _ } ] ->
+      (match e.pexp_desc with
+       | Pexp_ident { txt = Longident.Lident "int"; _ } -> Some (Sa_sort S_int)
+       | Pexp_ident { txt = Longident.Lident "bool"; _ } -> Some (Sa_sort S_bool)
+       | Pexp_ident { txt = Longident.Lident "opaque"; _ } -> Some Sa_opaque
+       (* A ghost sort naming a block-defined Lean type. *)
+       | Pexp_apply
+           ( { pexp_desc = Pexp_ident { txt = Longident.Lident "lean"; _ }; _ }
+           , [ ( Nolabel
+               , { pexp_desc =
+                     Pexp_constant
+                       { pconst_desc = Pconst_string (name, _, _); _ }
+                 ; _
+                 } )
+             ] ) ->
+         Some (Sa_sort (S_lean (validate_lean_sort_name ~loc:a.attr_loc name)))
+       | Pexp_ident { txt = Longident.Lident s; _ } ->
+         Location.raise_errorf
+           ~loc:a.attr_loc
+           "vox: unknown vox.sort %S (expected \"int\", \"bool\", \"opaque\", or lean \"Name\")"
+           s
        | _ ->
          Location.raise_errorf
            ~loc:a.attr_loc
-           "vox: unknown vox.sort %S (expected \"int\", \"bool\", or \
-            \"opaque\")"
-           s)
+           "vox: vox.sort takes a sort name (int, bool, opaque) or lean \"Name\"")
     | _ ->
       Location.raise_errorf
         ~loc:a.attr_loc
@@ -457,6 +507,7 @@ and dsort_of_vox_sort env arg_sorts (vs : Types.vox_sort) =
   | Vs_data (p, ss) ->
     datatype_sort env p (List.map (dsort_of_vox_sort env arg_sorts) ss)
   | Vs_opaque -> S_other
+  | Vs_lean name -> S_lean name
   (* The invariant is a FACT, not part of the modeling: values are
      modeled at the underlying sort (registered as usual). *)
   | Vs_fact (s, _) -> dsort_of_vox_sort env arg_sorts s
@@ -707,7 +758,8 @@ let invariant_preds env ty =
   let rec facts_of_vox_sort acc (vs : Types.vox_sort) =
     match vs with
     | Vs_fact (s, pred) -> facts_of_vox_sort (pred :: acc) s
-    | Vs_int | Vs_bool | Vs_tuple _ | Vs_data _ | Vs_param _ | Vs_opaque -> acc
+    | Vs_int | Vs_bool | Vs_tuple _ | Vs_data _ | Vs_param _ | Vs_opaque
+    | Vs_lean _ -> acc
   in
   let rec go ty =
     match get_desc (Ctype.vox_expand_head env ty) with
@@ -1049,7 +1101,7 @@ let rec name_of_expr env (e : expression) : Refinement.pred =
             ( path
             , cstr.cstr_name
             , List.map (fun (_, a) -> name_of_expr env a) args )
-        | S_int | S_bool | S_param _ | S_tuple _ | S_iarray | S_poly _ | S_other ->
+        | S_int | S_bool | S_param _ | S_tuple _ | S_iarray | S_poly _ | S_lean _ | S_other ->
           fresh_unknown env e)
      | Texp_record { fields; extended_expression; _ }
        when Array.length fields > 0 ->
@@ -1077,7 +1129,7 @@ let rec name_of_expr env (e : expression) : Refinement.pred =
               fresh_unknown env e
           in
           Refinement.Pconstr (path, "mk", List.map arg_of (Array.to_list fields))
-        | S_int | S_bool | S_param _ | S_tuple _ | S_iarray | S_poly _ | S_other ->
+        | S_int | S_bool | S_param _ | S_tuple _ | S_iarray | S_poly _ | S_lean _ | S_other ->
           fresh_unknown env e)
      | Texp_tuple (comps, _)
        when List.length comps >= 2
@@ -1207,7 +1259,7 @@ and structural_sort ~seen (s : dsort) =
   match s with
   | S_int | S_bool -> true
   | S_data (p, []) -> structural_datatype ~seen p
-  | S_data (_, _ :: _) | S_param _ | S_tuple _ | S_iarray | S_poly _
+  | S_data (_, _ :: _) | S_param _ | S_tuple _ | S_iarray | S_poly _ | S_lean _
   | S_other -> false
 ;;
 
@@ -1215,7 +1267,7 @@ let equality_sort s =
   match s with
   | S_int | S_bool -> true
   | S_data (p, []) -> structural_datatype ~seen:[] p
-  | S_data (_, _ :: _) | S_param _ | S_tuple _ | S_iarray | S_poly _
+  | S_data (_, _ :: _) | S_param _ | S_tuple _ | S_iarray | S_poly _ | S_lean _
   | S_other -> false
 ;;
 
@@ -1236,7 +1288,7 @@ let runtime_check_gate env ~loc goal =
     | S_data (p, _) -> "the datatype " ^ Path.name p
     | S_tuple _ -> "a tuple"
     | S_iarray -> "an iarray"
-    | S_param _ | S_poly _ | S_other -> "an opaque sort"
+    | S_param _ | S_poly _ | S_lean _ | S_other -> "an opaque sort"
   in
   let rec term (p : Refinement.pred) : dsort =
     match p with
@@ -1261,7 +1313,7 @@ let runtime_check_gate env ~loc goal =
       (match datatype_sort env path [] with
        | S_data (_, []) -> ()
        | S_int | S_bool | S_data _ | S_param _ | S_tuple _ | S_iarray
-       | S_poly _ | S_other ->
+       | S_poly _ | S_lean _ | S_other ->
          err
            (Printf.sprintf
               "the constructor %s's datatype cannot be built by the check"
@@ -1387,7 +1439,7 @@ let runtime_check_gate env ~loc goal =
          (match result with
           | S_int | S_bool -> ()
           | S_data (q, []) when structural_datatype ~seen:[] q -> ()
-          | S_data _ | S_param _ | S_tuple _ | S_iarray | S_poly _
+          | S_data _ | S_param _ | S_tuple _ | S_iarray | S_poly _ | S_lean _
           | S_other ->
             err
               (Printf.sprintf "%s returns %s, which the check cannot handle"
@@ -1795,7 +1847,7 @@ let match_facts
   let rec constructor_facts subject cstr args =
     let path = Data_types.cstr_res_type_path cstr in
     match datatype_sort env path [] with
-    | S_int | S_bool | S_param _ | S_tuple _ | S_iarray | S_poly _ | S_other -> []
+    | S_int | S_bool | S_param _ | S_tuple _ | S_iarray | S_poly _ | S_lean _ | S_other -> []
     | S_data (_, _) ->
       let parts = List.map arg_parts args in
       Refinement.Pbinop
@@ -1817,7 +1869,7 @@ let match_facts
     | (_, lbl0, _) :: _ ->
       let path = Data_types.lbl_res_type_path lbl0 in
       (match datatype_sort env path [] with
-       | S_int | S_bool | S_param _ | S_tuple _ | S_iarray | S_poly _ | S_other -> []
+       | S_int | S_bool | S_param _ | S_tuple _ | S_iarray | S_poly _ | S_lean _ | S_other -> []
        | S_data (_, _) ->
          List.concat_map
            (fun (_, (lbl : Data_types.label_description), sub) ->
@@ -1989,7 +2041,7 @@ let pattern_negation
   let head_negation cstr args =
     let path = Data_types.cstr_res_type_path cstr in
     match datatype_sort env path [] with
-    | S_int | S_bool | S_param _ | S_tuple _ | S_iarray | S_poly _ | S_other -> None
+    | S_int | S_bool | S_param _ | S_tuple _ | S_iarray | S_poly _ | S_lean _ | S_other -> None
     | S_data (_, _) ->
       let simple (_, (p : value general_pattern)) =
         match p.pat_desc with
@@ -2943,7 +2995,7 @@ let tuple_uname = Vox_module.tuple_uname
    datatype? *)
 let rec sort_needs_voxu = function
   | S_other -> true
-  | S_int | S_bool | S_iarray -> false
+  | S_int | S_bool | S_iarray | S_lean _ -> false
   (* a parameter is a bound [Type] binder in the declaration it appears
      in, never VoxU *)
   | S_param _ -> false
@@ -2956,7 +3008,7 @@ let rec sort_needs_voxu = function
    operations), which is emitted only when something uses it. *)
 let rec sort_needs_iarray = function
   | S_iarray -> true
-  | S_int | S_bool | S_other | S_param _ -> false
+  | S_int | S_bool | S_other | S_param _ | S_lean _ -> false
   | S_tuple comps | S_poly (_, comps) -> List.exists sort_needs_iarray comps
   | S_data (_, args) -> List.exists sort_needs_iarray args
 ;;
@@ -3275,6 +3327,7 @@ let rec lean_sort = function
   | S_bool -> "Prop"
   | S_other -> "VoxU"
   | S_iarray -> "VoxIA"
+  | S_lean name -> name
   | S_param i -> lean_param_name i
   | S_tuple comps ->
     "(" ^ tuple_uname (List.length comps) ^ " "
@@ -3402,7 +3455,7 @@ let boolish p =
      | Some (_, Dt_record (_, fields)) ->
        (match List.assoc_opt l fields with
         | Some S_bool -> true
-        | Some (S_int | S_data _ | S_param _ | S_tuple _ | S_iarray | S_poly _ | S_other)
+        | Some (S_int | S_data _ | S_param _ | S_tuple _ | S_iarray | S_poly _ | S_lean _ | S_other)
         | None -> false)
      | Some (_, (Dt_variant _ | Dt_opaque)) | None -> false)
   | Pis _ | Pquant _ -> true

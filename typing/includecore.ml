@@ -805,6 +805,7 @@ let rec show_vox_sort (vs : Types.vox_sort) =
     ^ String.concat " " (List.map show_vox_sort ss)
     ^ ")"
   | Vs_opaque -> "<opaque>"
+  | Vs_lean name -> "lean \"" ^ name ^ "\""
   | Vs_fact (s, pred) ->
     show_vox_sort s ^ "{ " ^ Refinement.to_string pred ^ " }"
 
@@ -1650,6 +1651,26 @@ let type_declarations_consistency env decl1 decl2 =
                           ; _ }
                         , _ )
                   ; _ } ] -> Some (Types.Vr_sort Types.Vs_bool)
+            | PStr
+                [ { pstr_desc =
+                      Pstr_eval
+                        ( { pexp_desc =
+                              Pexp_apply
+                                ( { pexp_desc =
+                                      Pexp_ident
+                                        { txt = Longident.Lident "lean"; _ }
+                                  ; _ }
+                                , [ ( Nolabel
+                                    , { pexp_desc =
+                                          Pexp_constant
+                                            { pconst_desc =
+                                                Pconst_string (name, _, _)
+                                            ; _ }
+                                      ; _ } )
+                                  ] )
+                          ; _ }
+                        , _ )
+                  ; _ } ] -> Some (Types.Vr_sort (Types.Vs_lean name))
             | _ -> None)
         decl.type_attributes
     in
@@ -1659,6 +1680,7 @@ let type_declarations_consistency env decl1 decl2 =
     let rec vox_sort_equal (s1 : Types.vox_sort) (s2 : Types.vox_sort) =
       match s1, s2 with
       | Vs_int, Vs_int | Vs_bool, Vs_bool | Vs_opaque, Vs_opaque -> true
+      | Vs_lean n1, Vs_lean n2 -> String.equal n1 n2
       | Vs_param i, Vs_param j -> Int.equal i j
       | Vs_tuple ss1, Vs_tuple ss2 ->
         List.length ss1 = List.length ss2
@@ -1671,7 +1693,7 @@ let type_declarations_consistency env decl1 decl2 =
         (* Preds are closed, so no binder pairing is needed. *)
         vox_sort_equal s1 s2 && Refinement.equal p1 p2
       | ( ( Vs_int | Vs_bool | Vs_tuple _ | Vs_data _ | Vs_param _
-          | Vs_opaque | Vs_fact _ )
+          | Vs_opaque | Vs_lean _ | Vs_fact _ )
         , _ ) ->
         false
     in
@@ -1693,7 +1715,7 @@ let type_declarations_consistency env decl1 decl2 =
       | Vs_tuple ss -> Vs_tuple (List.map (subst_sort args) ss)
       | Vs_data (p, ss) -> Vs_data (p, List.map (subst_sort args) ss)
       | Vs_fact (s, pred) -> Vs_fact (subst_sort args s, pred)
-      | (Vs_int | Vs_bool | Vs_opaque) as s -> s
+      | (Vs_int | Vs_bool | Vs_opaque | Vs_lean _) as s -> s
     in
     let rec sort_of_manifest ty : Types.vox_sort option =
       match get_desc ty with

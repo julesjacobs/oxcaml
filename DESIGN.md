@@ -452,7 +452,23 @@
   pcell separation tokens: both are library encodings of interior
   mutability (tokens carry the cell's contents as facts; a ghost sort
   lets the value DENOTE them); no doctrine yet picks between them --
-  see the Wishlist.  See mechanics/lean_vox_sort.ml.
+  see the Wishlist.  See mechanics/lean_vox_sort.ml.  GENERALIZED: the
+  sort need not be a base sort -- `[@@vox.sort lean "ISet"]` declares
+  the value modelled at a block-defined Lean TYPE named verbatim by the
+  string (`def ISet := ...` in a `[%%vox.lean]` block), so a phantom
+  handle type can carry a bona fide Lean model (a set, a multiset, ...)
+  and its API specs speak that vocabulary directly rather than the
+  underlying representation.  The name is opaque to vox (Lean is the
+  grammar police for every use) and rendered verbatim into the solver,
+  so a malformed name -- empty, or not a dotted Lean identifier -- is an
+  eager error too, never a silent VoxU degradation.  Monomorphic for
+  now (no sort arguments); parameterized ghost sorts, `via` abstraction
+  functions, and the direct `refines (lean "...")` kind spelling are
+  later stages (see docs/plans).  A kind may already name a ghost sort
+  BY PATH -- `type t : value refines (iset)` -- through the existing
+  refines-kind elaboration, which is what a client binding an abstract
+  type at a ghost sort will rely on.  See mechanics/lean_ghost_sort.ml
+  and the solverless mechanics/ghost_sort.ml.
   KIND SYNTAX: the modeling may equivalently be declared in the
   type's kind -- `type t : value refines int` (or `bool`) -- which is
   the same trusted assertion carried as declaration METADATA in the

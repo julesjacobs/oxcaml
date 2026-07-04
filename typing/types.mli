@@ -424,6 +424,13 @@ and vox_sort =
   | Vs_data of Path.t * vox_sort list
   | Vs_param of int
   | Vs_opaque
+  | Vs_lean of string
+    (* vox: a GHOST SORT -- the value is modelled at a block-defined
+       Lean type named verbatim by the string ([type iset [@@vox.sort
+       lean "ISet"]]).  Opaque to vox (Lean is the grammar police for
+       every use); TRUSTED like the [Vs_int]/[Vs_bool] ghosts.  It is
+       .cmi-stable (a bare string, no paths).  Monomorphic for now --
+       parameterized ghost sorts (argument sorts) are a later stage. *)
   | Vs_fact of vox_sort * Refinement.pred
     (* vox: a modeling that carries a declared INVARIANT.  [type nat :
        value refines (int{ _ >= 0 })] models at the underlying sort
