@@ -294,9 +294,10 @@ location:</p>
 <pre class="out"><code>Exception:
 Failure "vox: assume_ check failed at :1:61: (0 &lt;= _) &amp;&amp; (_ &lt; (len l))".</code></pre>
 <p>The same mechanism turns a property that is stated but not proved
-into an executable oracle.  Reflected functions are ordinary OCaml, so
-the specification can simply run, and each call checks the
-property:</p>
+into an executable oracle: reflected functions are ordinary OCaml, so
+the specification can simply run, and each call checks the property.
+Property-based testing, fuzzing, or AI-driven input search could
+generate inputs and use the contract as the oracle:</p>
 <pre><code class="ml">let rec total_ rev l =
   match l with
   | Nil -&gt; Nil
@@ -305,8 +306,6 @@ property:</p>
 (* Lemma-style: stated, not proved; the reflected functions run as
    ordinary code, and every call checks the property. *)
 let rev_involutive (l : ilist) : unit{ rev (rev l) = l } = assume_ ()</code></pre>
-<p>Property-based testing, fuzzing, or AI-driven input search could
-generate inputs and use the contract as the oracle.</p>
 
 <h2 id="sig">Specs on module signatures</h2>
 <p>An <code>.mli</code> can carry a logical model of its module
@@ -1397,8 +1396,8 @@ theorem fib_add (m n : Int) (hm : 0 &lt;= m) (hn : 0 &lt;= n) :
   rw [e] at h
   grind
 |lean}]</code></pre></div>
-<div class="tabpane"><pre style="max-height:34rem"><code class="lean" id="genlean">opaque VoxU : Type
-structure VoxT2.{u1, u2} (t1 : Sort u1) (t2 : Sort u2) : Sort (max u1 (max u2 (1))) where (p1 : t1) (p2 : t2)
+<div class="tabpane"><pre style="max-height:34rem"><code class="lean" id="genlean">module
+public import VoxCore
 @[grind] def fib (v_n_280 : Int) : Int := (if (v_n_280 ≤ (0 : Int)) then (0 : Int) else (if (v_n_280 = (1 : Int)) then (1 : Int) else ((fib (v_n_280 - (1 : Int))) + (fib (v_n_280 - (2 : Int))))))
 termination_by (v_n_280).toNat
 decreasing_by all_goals (first | omega | grind)
@@ -1464,7 +1463,8 @@ theorem vc_12 (v_n_307 : Int) (v_y_313 : Int) (v_x_312 : Int) (v_k_308 : Int) (v
 theorem vc_13 : ((10 : Int) ≥ (0 : Int)) := by grind
 theorem vc_14 (v_u_316 : Int) (v_r_315 : (VoxT2 Int Int)) (h_0 : (v_u_316 = (VoxT2.p1 v_r_315))) (h_1 : (v_r_315 = (VoxT2.mk (fib (10 : Int)) (fib ((10 : Int) + (1 : Int)))))) : (v_u_316 = (fib (10 : Int))) := by grind</code></pre>
 <p style="color:var(--dim);font-size:.9rem">Regenerated and checked on every
-compile: the <code>pair</code> datatype, the reflected <code>fib</code> with
+compile: a Lean module over the compiler-built <code>VoxCore</code> (the
+tuple products live there), the reflected <code>fib</code> with
 its synthesized <code>termination_by</code>, the embedded lemma block
 verbatim, and one theorem per obligation (fifteen for this file), each
 closed by <code>grind</code>.</p></div>
@@ -1503,6 +1503,36 @@ errors.</p>
   ignore u;                              (* u carried p = a + 1 *)
   let s = vpeek x' in                    (* s = x' = p *)
   s</code></pre>
+<p>A false export is rejected by Lean.  Below, the borrower wrote
+<code>a&nbsp;+&nbsp;1</code> but claims <code>a&nbsp;+&nbsp;2</code>,
+and the counterexample shows the prophecy&rsquo;s actual
+resolution:</p>
+<pre><code class="ml">let lie : (a : int) -&gt; int =
+  fun a -&gt;
+  let x = vnew a in
+  let p = new_proph () in
+  let (x', u) = borrow_mut p x (fun m -&gt;
+    let m1 = mset m (a + 1) in
+    let _u0 = mdrop m1 in
+    (() : unit{ p = a + 2 }))
+  in
+  ignore x'; ignore u; 0</code></pre>
+<pre class="out"><code>Error: vox: verification failed (lean).
+       Goal: p = (a + 2)
+Hypotheses:
+  (fin m1) = (now m1)
+  ((now m1) = (a + 1)) &amp;&amp; ((fin m1) = (fin m))
+  ((now m) = x) &amp;&amp; ((fin m) = p)
+  x = a
+Possible counterexample:
+  a = -1
+  p = 0
+  x = -1
+  fin m1 = 0
+  fin m = 0
+  now m1 = 0
+  now m = -1
+(lean: error: `grind` failed)</code></pre>
 <h3 id="qsort">In-place quicksort</h3>
 <pre><code class="ml">let rec qsort :
   (m : slice) @ local unique -&gt;
@@ -1544,7 +1574,8 @@ and the path fact.  Nothing about any index is assumed:</p>
 <p>The benchmark (<code>docs/vox/bench</code>) compiles this kernel
 natively, under verification; the benchmark driver itself does not compile
 until it proves its arrays compatible.  Measured on a dev box, the
-verified dot product runs <b>1.36&times;</b> the bounds-checked loop, and
+verified dot product runs at <b>1.36&times;</b> the speed of the
+bounds-checked loop, and
 the verified sum matches hand-written <code>unsafe_get</code>.  The same
 reasoning applies to other checks that exist only because a known fact was
 never stated: validation on trusted paths, defensive re-checks across
@@ -1817,7 +1848,9 @@ checked at runtime, and what is assumed:</p>
 <table>
 <tr><th>Construct</th><th>Status</th><th>Notes</th></tr>
 <tr><td><code>refine_ e</code></td><td><span class="g">Proved</span></td>
-  <td>Emitted as a Lean theorem; failure is a compile error with goal, hypotheses, and model.</td></tr>
+  <td>Asserts a refinement of <code>e</code> by proof: the obligation is
+      emitted as a Lean theorem, and failure is a compile error with goal,
+      hypotheses, and model.</td></tr>
 <tr><td>parameter contracts</td><td><span class="g">Proved</span></td>
   <td>Discharged at every application, at the argument&rsquo;s logical name.</td></tr>
 <tr><td><code>total_</code> definitions</td><td><span class="g">Definitional</span></td>
@@ -1848,7 +1881,9 @@ module in the suite adds about one second of Lean per compile; heavier
 inductive developments (the trie, quicksort) cost more.  Obligations are
 re-proved on every build, so there is no stale-proof state, and editing
 a spec changes the <code>.cmi</code> checksum, which forces clients to
-re-verify.  The compiler footprint is about 5,700 lines in
+re-verify.  Imported interface theory is precompiled (the Lean module
+beside the <code>.cmi</code>), so a client compile does not
+re-elaborate it.  The compiler footprint is about 5,700 lines in
 <code>typing/</code> plus changes to arrows and unification; the build
 gains a pinned Lean toolchain.</p>
 <p>A broken obligation goes red at that function, like a type error,

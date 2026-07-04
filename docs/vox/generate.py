@@ -173,6 +173,12 @@ def main():
                                    r'go 0 \(x \+ 1\)'),
         '@BORROW@': slice_between(read('demo/lean_borrow.ml'), r'^let bump',
                                   r'^  s$'),
+        '@BORROW_FAIL@': slice_between(read('mechanics/lean_borrow_fail.ml'),
+                                       r'^let lie',
+                                       r"^  ignore x'; ignore u; 0$"),
+        '@BORROW_FAIL_OUT@': slice_between(
+            read('mechanics/lean_borrow_fail.ml'),
+            r'^Error: vox: verification failed', r'^\(lean: '),
         '@FLIP@': slice_between(read('demo/lean_flip.ml'), r'^let rec flip',
                                 r'^  else h1')
                   + '\n\n'

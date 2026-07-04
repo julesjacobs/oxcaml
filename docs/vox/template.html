@@ -257,12 +257,11 @@ checks:</p>
 location:</p>
 <pre class="out"><code>@ASSUME_FAIL_OUT@</code></pre>
 <p>The same mechanism turns a property that is stated but not proved
-into an executable oracle.  Reflected functions are ordinary OCaml, so
-the specification can simply run, and each call checks the
-property:</p>
+into an executable oracle: reflected functions are ordinary OCaml, so
+the specification can simply run, and each call checks the property.
+Property-based testing, fuzzing, or AI-driven input search could
+generate inputs and use the contract as the oracle:</p>
 <pre><code class="ml">@ASSUME_LEMMA@</code></pre>
-<p>Property-based testing, fuzzing, or AI-driven input search could
-generate inputs and use the contract as the oracle.</p>
 
 <h2 id="sig">Specs on module signatures</h2>
 <p>An <code>.mli</code> can carry a logical model of its module
@@ -447,7 +446,8 @@ the file.</p>
 <div class="tabpane"><pre style="max-height:34rem"><code class="ml">@FIB_LEMMAS@</code></pre></div>
 <div class="tabpane"><pre style="max-height:34rem"><code class="lean" id="genlean">@GEN_LEAN@</code></pre>
 <p style="color:var(--dim);font-size:.9rem">Regenerated and checked on every
-compile: the <code>pair</code> datatype, the reflected <code>fib</code> with
+compile: a Lean module over the compiler-built <code>VoxCore</code> (the
+tuple products live there), the reflected <code>fib</code> with
 its synthesized <code>termination_by</code>, the embedded lemma block
 verbatim, and one theorem per obligation (fifteen for this file), each
 closed by <code>grind</code>.</p></div>
@@ -474,6 +474,12 @@ lender gets the value back together with that fact.  Double use,
 forged exports, and writes through frozen loans are compile-time
 errors.</p>
 <pre><code class="ml">@BORROW@</code></pre>
+<p>A false export is rejected by Lean.  Below, the borrower wrote
+<code>a&nbsp;+&nbsp;1</code> but claims <code>a&nbsp;+&nbsp;2</code>,
+and the counterexample shows the prophecy&rsquo;s actual
+resolution:</p>
+<pre><code class="ml">@BORROW_FAIL@</code></pre>
+<pre class="out"><code>@BORROW_FAIL_OUT@</code></pre>
 <h3 id="qsort">In-place quicksort</h3>
 <pre><code class="ml">@HERO_QSORT@</code></pre>
 <p style="color:var(--dim);font-size:.95rem;max-width:46rem">Verified
@@ -498,7 +504,8 @@ and the path fact.  Nothing about any index is assumed:</p>
 <p>The benchmark (<code>docs/vox/bench</code>) compiles this kernel
 natively, under verification; the benchmark driver itself does not compile
 until it proves its arrays compatible.  Measured on a dev box, the
-verified dot product runs <b>1.36&times;</b> the bounds-checked loop, and
+verified dot product runs at <b>1.36&times;</b> the speed of the
+bounds-checked loop, and
 the verified sum matches hand-written <code>unsafe_get</code>.  The same
 reasoning applies to other checks that exist only because a known fact was
 never stated: validation on trusted paths, defensive re-checks across
@@ -638,7 +645,9 @@ checked at runtime, and what is assumed:</p>
 <table>
 <tr><th>Construct</th><th>Status</th><th>Notes</th></tr>
 <tr><td><code>refine_ e</code></td><td><span class="g">Proved</span></td>
-  <td>Emitted as a Lean theorem; failure is a compile error with goal, hypotheses, and model.</td></tr>
+  <td>Asserts a refinement of <code>e</code> by proof: the obligation is
+      emitted as a Lean theorem, and failure is a compile error with goal,
+      hypotheses, and model.</td></tr>
 <tr><td>parameter contracts</td><td><span class="g">Proved</span></td>
   <td>Discharged at every application, at the argument&rsquo;s logical name.</td></tr>
 <tr><td><code>total_</code> definitions</td><td><span class="g">Definitional</span></td>
@@ -669,7 +678,9 @@ module in the suite adds about one second of Lean per compile; heavier
 inductive developments (the trie, quicksort) cost more.  Obligations are
 re-proved on every build, so there is no stale-proof state, and editing
 a spec changes the <code>.cmi</code> checksum, which forces clients to
-re-verify.  The compiler footprint is about 5,700 lines in
+re-verify.  Imported interface theory is precompiled (the Lean module
+beside the <code>.cmi</code>), so a client compile does not
+re-elaborate it.  The compiler footprint is about 5,700 lines in
 <code>typing/</code> plus changes to arrows and unification; the build
 gains a pinned Lean toolchain.</p>
 <p>A broken obligation goes red at that function, like a type error,
