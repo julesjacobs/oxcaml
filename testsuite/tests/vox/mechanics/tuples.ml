@@ -160,3 +160,65 @@ Line 4, characters 2-3: vox VC:
   p = (1, 2)
 val use_direct : (a : int) -> int{ _ = (a + 1) } = <fun>
 |}]
+
+(* Destructuring reaches NESTED components: each sub-pattern
+   destructures its projection in turn, and an alias names it. *)
+let mknest (a : int) : ((int * int) * int){ fst (fst _) = a } = ((a, 0), 1)
+let use_nested (a : int) : int{ _ = a } =
+  let ((x, _) as _p, _) = mknest a in
+  x
+[%%expect{|
+Line 1, characters 64-75: vox VC:
+  goal: (fst (fst ((a, 0), 1))) = a
+  hypotheses:
+  p = (1, 2)
+val mknest : (a : int) -> ((int * int) * int){ (fst (fst _)) = a } = <fun>
+Line 4, characters 2-3: vox VC:
+  goal: x = a
+  hypotheses:
+  (fst (fst *unknown11*)) = a
+  _p = (fst *unknown11*)
+  x = (fst (fst *unknown11*))
+  p = (1, 2)
+val use_nested : (a : int) -> int{ _ = a } = <fun>
+|}]
+
+(* A match destructures a refined scrutinee like the equivalent let:
+   ordinary patterns type at the SKELETON (an unpack arm is the one
+   pattern that keeps the refined type), and every arm gets the
+   scrutinee's refinement at the name. *)
+let use_match (a : int) : int{ _ = a } =
+  match mknest a with
+  | ((x, _), _) when x > a -> x
+  | ((x, _), _) -> x
+[%%expect{|
+Line 3, characters 30-31: vox VC:
+  goal: x = a
+  hypotheses:
+  (fst (fst *unknown13*)) = a
+  x = (fst (fst *unknown13*))
+  p = (1, 2)
+Line 4, characters 19-20: vox VC:
+  goal: x = a
+  hypotheses:
+  (fst (fst *unknown13*)) = a
+  x = (fst (fst *unknown13*))
+  p = (1, 2)
+val use_match : (a : int) -> int{ _ = a } = <fun>
+|}]
+
+(* An [if] scrutinee recovers its refinement when BOTH branches
+   recover the same predicate; the facts of one branch alone do not
+   hold on the other. *)
+let use_if (a : int) (b : bool) : int{ _ = a + 1 } =
+  let (r, _) = if b then mk a else mk a in
+  r
+[%%expect{|
+Line 3, characters 2-3: vox VC:
+  goal: r = (a + 1)
+  hypotheses:
+  (fst *unknown15*) = (a + 1)
+  r = (fst *unknown15*)
+  p = (1, 2)
+val use_if : (a : int) -> bool -> int{ _ = (a + 1) } = <fun>
+|}]

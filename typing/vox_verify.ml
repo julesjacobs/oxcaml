@@ -1380,7 +1380,7 @@ let match_facts
       Some (Refinement.Pvar id)
     | _ -> None
   in
-  let constructor_facts cstr args =
+  let rec constructor_facts subject cstr args =
     let path = Data_types.cstr_res_type_path cstr in
     match datatype_sort env path [] with
     | S_int | S_bool | S_param _ | S_tuple _ | S_iarray | S_other -> []
@@ -1400,8 +1400,9 @@ let match_facts
              , Refinement.Pconstr (path, cstr.Data_types.cstr_name, names) )
          ]
        | None -> [])
-  in
-  let record_facts (fields : (_ * Data_types.label_description * _) list) =
+  and record_facts
+        subject (fields : (_ * Data_types.label_description * _) list)
+    =
     match fields with
     | [] -> []
     | (_, lbl0, _) :: _ ->
@@ -1409,45 +1410,38 @@ let match_facts
       (match datatype_sort env path [] with
        | S_int | S_bool | S_param _ | S_tuple _ | S_iarray | S_other -> []
        | S_data (_, _) ->
-         List.filter_map
+         List.concat_map
            (fun (_, (lbl : Data_types.label_description), sub) ->
-             match (sub : value general_pattern).pat_desc with
-             | Tpat_var { id; _ } ->
-               Some
-                 (Refinement.Pbinop
-                    ( Refinement.Eq
-                    , Refinement.Pvar id
-                    , Refinement.Pfield (path, lbl.lbl_name, subject)
-                    ))
-             | _ -> None)
+             value_facts
+               (Refinement.Pfield (path, lbl.lbl_name, subject))
+               (sub : value general_pattern))
            fields)
-  in
-  let tuple_facts (comps : (string option * value general_pattern) list) =
-    (* [xi = proj_i sid] per VARIABLE sub-pattern, like records
-       (per-component, so wildcards and deeper sub-patterns simply
-       contribute nothing).  Labeled tuples are not modelled. *)
+  and tuple_facts subject (comps : (string option * value general_pattern) list)
+    =
+    (* Per component at [proj_i sid], RECURSIVELY: a variable ties to
+       the projection, a deeper tuple/record/alias destructures the
+       projection in turn, so [let ((x, _), _) = e] reaches [x].
+       Labeled tuples are not modelled. *)
     if List.exists (fun (lbl, _) -> Option.is_some lbl) comps
     then []
     else begin
       let n = List.length comps in
       register_tuple_arity n;
       List.mapi (fun i (_, sub) -> i, sub) comps
-      |> List.filter_map (fun (i, (sub : value general_pattern)) ->
-        match sub.pat_desc with
-        | Tpat_var { id; _ } ->
-          Some
-            (Refinement.Pbinop
-               ( Refinement.Eq
-               , Refinement.Pvar id
-               , Refinement.Pproj (n, i, subject) ))
-        | _ -> None)
+      |> List.concat_map (fun (i, (sub : value general_pattern)) ->
+        value_facts (Refinement.Pproj (n, i, subject)) sub)
     end
-  in
-  let value_facts (p : value general_pattern) =
+  and value_facts subject (p : value general_pattern) =
     match p.pat_desc with
-    | Tpat_construct (_, cstr, _, args, _) -> constructor_facts cstr args
-    | Tpat_record (fields, _, _, _) -> record_facts fields
-    | Tpat_tuple comps -> tuple_facts comps
+    | Tpat_construct (_, cstr, _, args, _) ->
+      constructor_facts subject cstr args
+    | Tpat_record (fields, _, _, _) -> record_facts subject fields
+    | Tpat_tuple comps -> tuple_facts subject comps
+    | Tpat_alias { pattern = sub; id; _ } ->
+      (* [p as x]: the alias names the subject, and [p] destructures
+         it in turn. *)
+      Refinement.Pbinop (Refinement.Eq, Refinement.Pvar id, subject)
+      :: value_facts subject sub
     | Tpat_var { id; _ }
       when not (Refinement.equal (Refinement.Pvar id) subject) ->
       (* A variable pattern aliases the scrutinee: [match s with y ->]
@@ -1460,10 +1454,13 @@ let match_facts
     | _ -> []
   in
   match pat.pat_desc with
-  | Tpat_value p -> value_facts (p :> value general_pattern)
-  | Tpat_construct (_, cstr, _, args, _) -> constructor_facts cstr args
-  | Tpat_record (fields, _, _, _) -> record_facts fields
-  | Tpat_tuple comps -> tuple_facts comps
+  | Tpat_value p -> value_facts subject (p :> value general_pattern)
+  | Tpat_construct (_, cstr, _, args, _) -> constructor_facts subject cstr args
+  | Tpat_record (fields, _, _, _) -> record_facts subject fields
+  | Tpat_tuple comps -> tuple_facts subject comps
+  | Tpat_alias { pattern = sub; id; _ } ->
+    Refinement.Pbinop (Refinement.Eq, Refinement.Pvar id, subject)
+    :: value_facts subject sub
   | Tpat_var { id; _ }
     when not (Refinement.equal (Refinement.Pvar id) subject) ->
     (* Bare value patterns (let bindings and [function]-case arms reach
@@ -1505,6 +1502,33 @@ let nontrivial_fact (f : Refinement.pred) =
   | _ -> true
 ;;
 
+(* The refinement of an expression's RESULT, seen through implicit
+   erasure.  Implicit elimination erases an application's refined
+   result to the skeleton precisely because an unnamed value's fact is
+   unreachable -- "name it with a let to keep it"; a destructuring IS
+   the naming, so the refinement is recovered the same way the
+   re-refinement hook recovers it: from the callee's instantiated
+   result type.  The result position is followed through the
+   result-transparent forms (a let's body, a sequence's tail); an
+   [if] recovers only when both branches recover the SAME predicate
+   (there is no single callee to ask, and the facts of one branch do
+   not hold on the other). *)
+let rec result_refinement env (e : expression) : Refinement.pred option =
+  match refinement_of_type env e.exp_type with
+  | Some p -> Some p
+  | None ->
+    (match e.exp_desc with
+     | Texp_apply (funct, args, _, _, _) ->
+       refinement_of_type env (apply_result_type env funct args)
+     | Texp_let (_, _, body) -> result_refinement env body
+     | Texp_sequence (_, _, body) -> result_refinement env body
+     | Texp_ifthenelse (_, e2, Some e3) ->
+       (match result_refinement env e2, result_refinement env e3 with
+        | Some p2, Some p3 when Refinement.equal p2 p3 -> Some p2
+        | _ -> None)
+     | _ -> None)
+;;
+
 (* A destructuring binding whose scrutinee is NOT a variable still
    gets the match facts, through a NAME for the scrutinee: its logic
    translation when it has one (tuples included -- they are
@@ -1520,23 +1544,10 @@ let destructure_facts
   fun env rhs pat ->
   let n = name_of_expr env rhs in
   let refn =
-    (* Implicit elimination erases an application's refined result to
-       the skeleton precisely because an unnamed value's fact is
-       unreachable -- "name it with a let to keep it".  This binding
-       IS the naming, so the refinement is recovered the same way the
-       re-refinement hook recovers it: from the callee's instantiated
-       result type. *)
     match
       (match refinement_of_type env pat.pat_type with
        | Some p -> Some p
-       | None ->
-         (match refinement_of_type env rhs.exp_type with
-          | Some p -> Some p
-          | None ->
-            (match rhs.exp_desc with
-             | Texp_apply (funct, args, _, _, _) ->
-               refinement_of_type env (apply_result_type env funct args)
-             | _ -> None)))
+       | None -> result_refinement env rhs)
     with
     | Some p ->
       register_pred_paths env p;
@@ -1940,20 +1951,9 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
       | (Texp_ident _ | Texp_mutvar _), _ | _, None -> []
       | _, Some n ->
         (match
-           (match refinement_of_type env scrut.exp_type with
+           (match result_refinement env scrut with
             | Some p -> Some p
-            | None ->
-              (match refinement_of_type env pat.pat_type with
-               | Some p -> Some p
-               | None ->
-                 (* implicit elimination erased the scrutinee's
-                    refined result; recover it from the callee's
-                    instantiated result type, as at bindings *)
-                 (match scrut.exp_desc with
-                  | Texp_apply (funct, args, _, _, _) ->
-                    refinement_of_type env
-                      (apply_result_type env funct args)
-                  | _ -> None)))
+            | None -> refinement_of_type env pat.pat_type)
          with
          | Some p ->
            register_pred_paths env p;

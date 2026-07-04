@@ -7819,8 +7819,33 @@ and type_expect_
           may_lower_contravariant env arg;
           generalize arg.exp_type)
       in
+      (* vox: ordinary patterns destructure a refined scrutinee at its
+         SKELETON -- binders bind at skeletons, and the verification
+         pass carries the scrutinee's refinement at the destructured
+         name -- so [match mk a with (r, _) -> ...] types like the
+         equivalent [let].  An unpack arm ([refine_ x]) is the one
+         pattern that reads the refined type, so its presence keeps
+         it. *)
+      let scrut_ty =
+        let has_unpack =
+          List.exists
+            (fun c ->
+               exists_ppat
+                 (fun p ->
+                    match p.ppat_desc with
+                    | Ppat_extension ({txt = "vox.refine"; _}, _) -> true
+                    | _ -> false)
+                 c.pc_lhs)
+            val_caselist
+        in
+        if has_unpack then arg.exp_type
+        else
+          match get_desc (expand_head env arg.exp_type) with
+          | Trefine (skel, _) -> skel
+          | _ -> arg.exp_type
+      in
       let val_cases, partial =
-        type_cases Computation env arg_pat_mode expected_mode arg.exp_type
+        type_cases Computation env arg_pat_mode expected_mode scrut_ty
           sort ty_expected_explained ~check_if_total:true loc val_caselist
       in
       let eff_cases =
