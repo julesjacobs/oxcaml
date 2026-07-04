@@ -217,13 +217,6 @@ result, a caller of <code>nth</code> constructs the argument
 <code>i</code>, and <code>unreachable_ ()</code> constructs
 <code>()</code> at a type nothing satisfies.  All are discharged at
 compile time by the <a href="#automation">automation</a>.</p>
-<p>A refinement can also appear under a type
-constructor: <code>int{ _ &gt;= 0 } list</code> states that every
-element is nonnegative.  Because the fact is part of the type, the
-typechecker propagates it, and polymorphic functions preserve it by
-instantiation: <code>List.rev</code> at
-<code>'a = int{ _ &gt;= 0 }</code> returns nonnegative elements with
-nothing to prove (in effect, unary parametricity).</p>
 <p>Weakening <code>nth</code>&rsquo;s bound to
 <code>i &lt;= len l</code> makes the <code>Nil</code> arm reachable,
 and verification fails with a counterexample:</p>
@@ -234,6 +227,13 @@ error, at the offending expression, with the goal, the hypotheses in
 scope, and a candidate counterexample, rewritten to source names.  The
 report arrives in about a second; this is also the feedback an agent
 receives when it writes the code or the proof.</p>
+<p>A refinement can also appear under a type
+constructor: <code>int{ _ &gt;= 0 } list</code> states that every
+element is nonnegative.  Because the fact is part of the type, the
+typechecker propagates it, and polymorphic functions preserve it by
+instantiation: <code>List.rev</code> at
+<code>'a = int{ _ &gt;= 0 }</code> returns nonnegative elements with
+nothing to prove (in effect, unary parametricity).</p>
 <p style="color:var(--dim);font-size:.9rem">From
 <code>demo/lean_nth.ml</code> and <code>mechanics/lean_nth_fail.ml</code>
 in the branch&rsquo;s CI.</p>
