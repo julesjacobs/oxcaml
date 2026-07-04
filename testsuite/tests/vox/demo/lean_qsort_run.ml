@@ -472,6 +472,55 @@ theorem swap_final_ge (l : List Int) (p i j : Int)
       (by grind)
     grind [all_ge_app]
 
+-- ----- split3 glue -----
+theorem seg_take1 (i : Int) (l : List Int)
+    (h1 : 0 <= i) (h2 : i < len l) :
+    seg i (i + 1) l = sngl (elem l i) := by
+  have := take1_drop i l h1 h2
+  grind
+
+theorem app3_decomp (i j : Int) (l : List Int)
+    (h1 : 0 <= i) (h2 : i <= j) (h3 : j <= len l) :
+    app (take i l) (app (seg i j l) (drop j l)) = l := by
+  have := take_drop_app i l
+  have := drop_split i j l h1 h2 h3
+  grind
+
+theorem sorted_glue (a b : List Int) (p : Int)
+    (ha : sorted a) (hb : sorted b)
+    (hle : all_le a p) (hge : all_ge b p) :
+    sorted (app a (app (sngl p) b)) := by
+  have h1 := sorted_cons_app b p hge hb
+  have h2 : all_ge (app (sngl p) b) p := by grind [all_ge_app]
+  exact sorted_app_bound a (app (sngl p) b) p ha h1 hle h2
+
+theorem perm_glue3_mid (l0 a a' b c c' : List Int)
+    (h0 : perm l0 (app a (app b c)))
+    (h1 : perm a a') (h2 : perm c c') :
+    perm l0 (app a' (app b c')) := by
+  intro x
+  have e0 := h0 x
+  have e1 := cnt_app a (app b c) x
+  have e2 := cnt_app b c x
+  have e3 := cnt_app a' (app b c') x
+  have e4 := cnt_app b c' x
+  grind [perm]
+
+theorem all_ge_suffix (l : List Int) (p n : Int)
+    (h : all_ge l p) : all_ge (drop n l) p := by
+  induction l generalizing n <;> grind
+
+theorem swap_final_ge1 (l : List Int) (p i j : Int)
+    (h1 : 0 <= i) (h2 : i <= j) (hj : j = len l - 1)
+    (hpiv : elem l j = p)
+    (hge : all_ge (seg i j l) p) :
+    all_ge (drop (i + 1) (upd (upd l i (elem l j)) j (elem l i))) p := by
+  have hall := swap_final_ge l p i j h1 h2 hj hpiv hge
+  have hdd := drop_drop 1 i (upd (upd l i (elem l j)) j (elem l i))
+    (by grind) h1
+  have := all_ge_suffix (drop i (upd (upd l i (elem l j)) j (elem l i))) p 1 hall
+  grind
+
 -- ----- E-matching interface for the VCs -----
 grind_pattern len_nonneg => len l
 grind_pattern len_take => take i l
@@ -499,6 +548,11 @@ grind_pattern perm_glue_right => perm l0 (app a b'), perm b b'
 grind_pattern swap_le => all_le (take (i + 1) (upd (upd l i (elem l j)) j (elem l i))) p
 grind_pattern swap_mid => all_ge (seg (i + 1) (j + 1) (upd (upd l i (elem l j)) j (elem l i))) p
 grind_pattern swap_final_ge => all_ge (drop i (upd (upd l i (elem l j)) j (elem l i))) p
+grind_pattern swap_final_ge1 => all_ge (drop (i + 1) (upd (upd l i (elem l j)) j (elem l i))) p
+grind_pattern seg_take1 => seg i (i + 1) l
+grind_pattern app3_decomp => take i l, seg i j l, drop j l
+grind_pattern sorted_glue => app a (app (sngl p) b)
+grind_pattern perm_glue3_mid => perm l0 (app a' (app b c')), perm a a', perm c c'
 grind_pattern all_le_perm => perm a b, all_le a p
 grind_pattern all_ge_perm => perm a b, all_ge a p
 |lean}]
@@ -553,6 +607,22 @@ module S : sig
      'a @ unique)
       @ once local ->
     (slice{ now _ = app (pv pl) (pv pr) && fin _ = fin m } * 'a) @ local unique
+  
+  
+  val split3 :
+    (p1 : proph) @ unique ->
+    (p2 : proph) @ unique ->
+    (p3 : proph) @ unique ->
+    (m : slice) @ local unique ->
+    (i : int{ 0 <= _ }) ->
+    (j : int{ i <= _ && _ <= len (now m) }) ->
+    ((a : slice{ now _ = take i (now m) && fin _ = pv p1 }) @ local unique ->
+     (b : slice{ now _ = seg i j (now m) && fin _ = pv p2 }) @ local unique ->
+     (c : slice{ now _ = drop j (now m) && fin _ = pv p3 }) @ local unique ->
+     'a @ unique)
+      @ once local ->
+    (slice{ now _ = app (pv p1) (app (pv p2) (pv p3)) && fin _ = fin m } * 'a)
+      @ local unique
   
   val sdrop : (m : slice) @ local unique -> unit{ fin m = now m }
   val sdropa : (m : slice) @ local -> unit{ fin m = now m }
@@ -676,6 +746,47 @@ end = struct
                : slice{ now _ = app (pv pl) (pv pr) && fin _ = fin m }),
              a ))
   
+  let split3 :
+    (p1 : proph) @ unique ->
+    (p2 : proph) @ unique ->
+    (p3 : proph) @ unique ->
+    (m : slice) @ local unique ->
+    (i : int{ 0 <= _ }) ->
+    (j : int{ i <= _ && _ <= len (now m) }) ->
+    ((a : slice{ now _ = take i (now m) && fin _ = pv p1 }) @ local unique ->
+     (b : slice{ now _ = seg i j (now m) && fin _ = pv p2 }) @ local unique ->
+     (c : slice{ now _ = drop j (now m) && fin _ = pv p3 }) @ local unique ->
+     'a @ unique)
+      @ once local ->
+    (slice{ now _ = app (pv p1) (app (pv p2) (pv p3)) && fin _ = fin m } * 'a)
+      @ local unique =
+    fun p1 p2 p3 m i j k ->
+      let (P _) = p1 in
+      let (P _) = p2 in
+      let (P _) = p3 in
+      let (L { base; off_; len_ }) = m in
+      let a =
+        (assume_unchecked_ (Obj.magic_unique (L { base; off_; len_ = i }))
+          : slice{ now _ = take i (now m) && fin _ = pv p1 })
+      in
+      let b =
+        (assume_unchecked_
+           (Obj.magic_unique (L { base; off_ = off_ + i; len_ = j - i }))
+          : slice{ now _ = seg i j (now m) && fin _ = pv p2 })
+      in
+      let c =
+        (assume_unchecked_
+           (Obj.magic_unique (L { base; off_ = off_ + j; len_ = len_ - j }))
+          : slice{ now _ = drop j (now m) && fin _ = pv p3 })
+      in
+      let r = k a b c in
+      exclave_
+        (Obj.magic_unique
+           ( (assume_unchecked_ (L { base; off_; len_ })
+               : slice{ now _ = app (pv p1) (app (pv p2) (pv p3))
+                        && fin _ = fin m }),
+             r ))
+  
   let sdrop : (m : slice) @ local unique -> unit{ fin m = now m } =
     fun m ->
       let (L _) = m in
@@ -755,6 +866,22 @@ module S :
       once ->
       slice{ ((now _) = (app (pv pl) (pv pr))) && ((fin _) = (fin m)) } * 'a @ local
       unique
+    val split3 :
+      (p1 : proph) @ unique ->
+      (p2 : proph) @ unique ->
+      (p3 : proph) @ unique ->
+      (m : slice) @ local unique ->
+      (i : int{ 0 <= _ }) ->
+      (j : int{ (i <= _) && (_ <= (len (now m))) }) ->
+      (slice{ ((now _) = (take i (now m))) && ((fin _) = (pv p1)) } @ local
+       unique ->
+       slice{ ((now _) = (seg i j (now m))) && ((fin _) = (pv p2)) } @ local
+       unique ->
+       slice{ ((now _) = (drop j (now m))) && ((fin _) = (pv p3)) } @ local
+       unique -> 'a @ unique) @ local
+      once ->
+      slice{ ((now _) = (app (pv p1) (app (pv p2) (pv p3)))) && ((fin _) = (fin m)) } *
+      'a @ local unique
     val sdrop : (m : slice) @ local unique -> unit{ (fin m) = (now m) }
     val sdropa : (m : slice) @ local -> unit{ (fin m) = (now m) }
     val fork_join2 :
@@ -809,7 +936,7 @@ let rec part :
   (int * slice){ 0 <= fst _ && fst _ < n
                  && elem (now (snd _)) (fst _) = p
                  && all_le (take (fst _) (now (snd _))) p
-                 && all_ge (drop (fst _) (now (snd _))) p
+                 && all_ge (drop (fst _ + 1) (now (snd _))) p
                  && perm (now s) (now (snd _))
                  && fin (snd _) = fin s }
     @ local unique =
@@ -846,20 +973,20 @@ val part :
   (n : int{ _ = (len (now s)) }) ->
   (int * S.slice){ ((((((0 <= (fst _)) && ((fst _) < n)) && ((elem (now (snd _)) (fst _)) = p)) &&
    (all_le (take (fst _) (now (snd _))) p)) &&
-  (all_ge (drop (fst _) (now (snd _))) p)) &&
+  (all_ge (drop ((fst _) + 1) (now (snd _))) p)) &&
  (perm (now s) (now (snd _)))) &&
 ((fin (snd _)) = (fin s)) } @ local
   unique = <fun>
 |}]
 
 (* Sequential quicksort on a loan: read the pivot, partition, then
-   REBORROW -- the outer split at the pivot index, the inner split
-   isolating the pivot's singleton.  Each side is sorted recursively
-   and resolved; the singleton is resolved as-is; resolving the inner
-   bracket's advanced parent reveals [pv prest] as pivot-then-right.
-   Each bracket's export restates its prophecies' facts in the scope
-   OUTSIDE the bracket, and the parent loan comes back at
-   [app (pv pl) (pv prest)], where the glue lemmas finish. *)
+   REBORROW -- one three-way split at the pivot's singleton.  Both
+   sides are sorted recursively and resolved; the singleton is
+   resolved as-is, pinning its prophecy to the pivot by equality.
+   The bracket's export restates the prophecies' facts in the scope
+   OUTSIDE it, and the parent loan comes back at
+   [app (pv p1) (app (pv p2) (pv p3))], where the glue lemmas
+   finish. *)
 let rec qsort :
   (m : slice) @ local unique ->
   slice{ perm (now m) (now _) && sorted (now _) && fin _ = fin m }
@@ -873,29 +1000,21 @@ let rec qsort :
          let (p, mp) = sget m0 (n - 1) in
          let q = part p 0 0 mp n in
          let (k, m2) = q in
-         let pl = new_proph () in
-         let prest = new_proph () in
+         let p1 = new_proph () in
+         let p2 = new_proph () in
+         let p3 = new_proph () in
          let (mres, u) =
-           split pl prest m2 k (fun left rest ->
-             let left' = qsort left in
-             let _u1 = sdrop left' in
-             let pm = new_proph () in
-             let pr = new_proph () in
-             let (rest_adv, u2) =
-               split pm pr rest 1 (fun mid right ->
-                 let right' = qsort right in
-                 let _u2 = sdrop right' in
-                 let _u3 = sdrop mid in
-                 (() : unit{ pv pm = take 1 (now rest)
-                             && sorted (pv pr)
-                             && perm (drop 1 (now rest)) (pv pr) }))
-             in
-             ignore u2;
-             let _u4 = sdrop rest_adv in
-             (() : unit{ sorted (pv pl)
-                         && perm (take k (now m2)) (pv pl)
-                         && sorted (pv prest)
-                         && perm (drop k (now m2)) (pv prest) }))
+           split3 p1 p2 p3 m2 k (k + 1) (fun a b c ->
+             let a' = qsort a in
+             let _u1 = sdrop a' in
+             let _u2 = sdrop b in
+             let c' = qsort c in
+             let _u3 = sdrop c' in
+             (() : unit{ sorted (pv p1)
+                         && perm (take k (now m2)) (pv p1)
+                         && pv p2 = seg k (k + 1) (now m2)
+                         && sorted (pv p3)
+                         && perm (drop (k + 1) (now m2)) (pv p3) }))
          in
          ignore u;
          mres
@@ -907,11 +1026,11 @@ val qsort :
   unique = <fun>
 |}]
 
-(* Parallel quicksort, same spec: inside the inner bracket both
-   sub-loans are live and disjoint, so each once-closure consumes one
-   and fork_join2 runs them on separate domains -- each task returns
-   its side's resolution facts (global refined units), which survive
-   the join; everything else is the sequential proof. *)
+(* Parallel quicksort, same spec: the bracket's two outer sub-loans
+   are disjoint, so each once-closure consumes one and fork_join2
+   runs them on separate domains -- each task returns its side's
+   resolution facts (global refined units), which survive the join;
+   everything else is the sequential proof. *)
 let rec psort :
   (m : slice) @ local unique ->
   slice{ perm (now m) (now _) && sorted (now _) && fin _ = fin m }
@@ -925,42 +1044,32 @@ let rec psort :
          let (p, mp) = sget m0 (n - 1) in
          let q = part p 0 0 mp n in
          let (k, m2) = q in
-         let pl = new_proph () in
-         let prest = new_proph () in
+         let p1 = new_proph () in
+         let p2 = new_proph () in
+         let p3 = new_proph () in
          let (mres, u) =
-           split pl prest m2 k (fun left rest ->
-             let pm = new_proph () in
-             let pr = new_proph () in
-             let (rest_adv, u2) =
-               split pm pr rest 1 (fun mid right ->
-                 let (ul, ur) =
-                   fork_join2
-                     (fun () ->
-                       let left' = psort left in
-                       let _u = sdrop left' in
-                       (() : unit{ sorted (pv pl)
-                                   && perm (take k (now m2)) (pv pl) }))
-                     (fun () ->
-                       let right' = psort right in
-                       let _u = sdrop right' in
-                       (() : unit{ sorted (pv pr)
-                                   && perm (drop 1 (now rest)) (pv pr) }))
-                 in
-                 ignore ul;
-                 ignore ur;
-                 let _u3 = sdrop mid in
-                 (() : unit{ pv pm = take 1 (now rest)
-                             && sorted (pv pr)
-                             && perm (drop 1 (now rest)) (pv pr)
-                             && sorted (pv pl)
-                             && perm (take k (now m2)) (pv pl) }))
+           split3 p1 p2 p3 m2 k (k + 1) (fun a b c ->
+             let (ua, uc) =
+               fork_join2
+                 (fun () ->
+                   let a' = psort a in
+                   let _u = sdrop a' in
+                   (() : unit{ sorted (pv p1)
+                               && perm (take k (now m2)) (pv p1) }))
+                 (fun () ->
+                   let c' = psort c in
+                   let _u = sdrop c' in
+                   (() : unit{ sorted (pv p3)
+                               && perm (drop (k + 1) (now m2)) (pv p3) }))
              in
-             ignore u2;
-             let _u4 = sdrop rest_adv in
-             (() : unit{ sorted (pv pl)
-                         && perm (take k (now m2)) (pv pl)
-                         && sorted (pv prest)
-                         && perm (drop k (now m2)) (pv prest) }))
+             ignore ua;
+             ignore uc;
+             let _u2 = sdrop b in
+             (() : unit{ sorted (pv p1)
+                         && perm (take k (now m2)) (pv p1)
+                         && pv p2 = seg k (k + 1) (now m2)
+                         && sorted (pv p3)
+                         && perm (drop (k + 1) (now m2)) (pv p3) }))
          in
          ignore u;
          mres

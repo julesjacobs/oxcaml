@@ -474,6 +474,55 @@ theorem swap_final_ge (l : List Int) (p i j : Int)
       (by grind)
     grind [all_ge_app]
 
+-- ----- split3 glue -----
+theorem seg_take1 (i : Int) (l : List Int)
+    (h1 : 0 <= i) (h2 : i < len l) :
+    seg i (i + 1) l = sngl (elem l i) := by
+  have := take1_drop i l h1 h2
+  grind
+
+theorem app3_decomp (i j : Int) (l : List Int)
+    (h1 : 0 <= i) (h2 : i <= j) (h3 : j <= len l) :
+    app (take i l) (app (seg i j l) (drop j l)) = l := by
+  have := take_drop_app i l
+  have := drop_split i j l h1 h2 h3
+  grind
+
+theorem sorted_glue (a b : List Int) (p : Int)
+    (ha : sorted a) (hb : sorted b)
+    (hle : all_le a p) (hge : all_ge b p) :
+    sorted (app a (app (sngl p) b)) := by
+  have h1 := sorted_cons_app b p hge hb
+  have h2 : all_ge (app (sngl p) b) p := by grind [all_ge_app]
+  exact sorted_app_bound a (app (sngl p) b) p ha h1 hle h2
+
+theorem perm_glue3_mid (l0 a a' b c c' : List Int)
+    (h0 : perm l0 (app a (app b c)))
+    (h1 : perm a a') (h2 : perm c c') :
+    perm l0 (app a' (app b c')) := by
+  intro x
+  have e0 := h0 x
+  have e1 := cnt_app a (app b c) x
+  have e2 := cnt_app b c x
+  have e3 := cnt_app a' (app b c') x
+  have e4 := cnt_app b c' x
+  grind [perm]
+
+theorem all_ge_suffix (l : List Int) (p n : Int)
+    (h : all_ge l p) : all_ge (drop n l) p := by
+  induction l generalizing n <;> grind
+
+theorem swap_final_ge1 (l : List Int) (p i j : Int)
+    (h1 : 0 <= i) (h2 : i <= j) (hj : j = len l - 1)
+    (hpiv : elem l j = p)
+    (hge : all_ge (seg i j l) p) :
+    all_ge (drop (i + 1) (upd (upd l i (elem l j)) j (elem l i))) p := by
+  have hall := swap_final_ge l p i j h1 h2 hj hpiv hge
+  have hdd := drop_drop 1 i (upd (upd l i (elem l j)) j (elem l i))
+    (by grind) h1
+  have := all_ge_suffix (drop i (upd (upd l i (elem l j)) j (elem l i))) p 1 hall
+  grind
+
 -- ----- E-matching interface for the VCs -----
 grind_pattern len_nonneg => len l
 grind_pattern len_take => take i l
@@ -501,6 +550,11 @@ grind_pattern perm_glue_right => perm l0 (app a b'), perm b b'
 grind_pattern swap_le => all_le (take (i + 1) (upd (upd l i (elem l j)) j (elem l i))) p
 grind_pattern swap_mid => all_ge (seg (i + 1) (j + 1) (upd (upd l i (elem l j)) j (elem l i))) p
 grind_pattern swap_final_ge => all_ge (drop i (upd (upd l i (elem l j)) j (elem l i))) p
+grind_pattern swap_final_ge1 => all_ge (drop (i + 1) (upd (upd l i (elem l j)) j (elem l i))) p
+grind_pattern seg_take1 => seg i (i + 1) l
+grind_pattern app3_decomp => take i l, seg i j l, drop j l
+grind_pattern sorted_glue => app a (app (sngl p) b)
+grind_pattern perm_glue3_mid => perm l0 (app a' (app b c')), perm a a', perm c c'
 grind_pattern all_le_perm => perm a b, all_le a p
 grind_pattern all_ge_perm => perm a b, all_ge a p
 |lean}]
@@ -555,6 +609,22 @@ module S : sig
      'a @ unique)
       @ once local ->
     (slice{ now _ = app (pv pl) (pv pr) && fin _ = fin m } * 'a) @ local unique
+  
+  
+  val split3 :
+    (p1 : proph) @ unique ->
+    (p2 : proph) @ unique ->
+    (p3 : proph) @ unique ->
+    (m : slice) @ local unique ->
+    (i : int{ 0 <= _ }) ->
+    (j : int{ i <= _ && _ <= len (now m) }) ->
+    ((a : slice{ now _ = take i (now m) && fin _ = pv p1 }) @ local unique ->
+     (b : slice{ now _ = seg i j (now m) && fin _ = pv p2 }) @ local unique ->
+     (c : slice{ now _ = drop j (now m) && fin _ = pv p3 }) @ local unique ->
+     'a @ unique)
+      @ once local ->
+    (slice{ now _ = app (pv p1) (app (pv p2) (pv p3)) && fin _ = fin m } * 'a)
+      @ local unique
   
   val sdrop : (m : slice) @ local unique -> unit{ fin m = now m }
   val sdropa : (m : slice) @ local -> unit{ fin m = now m }
@@ -678,6 +748,47 @@ end = struct
                : slice{ now _ = app (pv pl) (pv pr) && fin _ = fin m }),
              a ))
   
+  let split3 :
+    (p1 : proph) @ unique ->
+    (p2 : proph) @ unique ->
+    (p3 : proph) @ unique ->
+    (m : slice) @ local unique ->
+    (i : int{ 0 <= _ }) ->
+    (j : int{ i <= _ && _ <= len (now m) }) ->
+    ((a : slice{ now _ = take i (now m) && fin _ = pv p1 }) @ local unique ->
+     (b : slice{ now _ = seg i j (now m) && fin _ = pv p2 }) @ local unique ->
+     (c : slice{ now _ = drop j (now m) && fin _ = pv p3 }) @ local unique ->
+     'a @ unique)
+      @ once local ->
+    (slice{ now _ = app (pv p1) (app (pv p2) (pv p3)) && fin _ = fin m } * 'a)
+      @ local unique =
+    fun p1 p2 p3 m i j k ->
+      let (P _) = p1 in
+      let (P _) = p2 in
+      let (P _) = p3 in
+      let (L { base; off_; len_ }) = m in
+      let a =
+        (assume_unchecked_ (Obj.magic_unique (L { base; off_; len_ = i }))
+          : slice{ now _ = take i (now m) && fin _ = pv p1 })
+      in
+      let b =
+        (assume_unchecked_
+           (Obj.magic_unique (L { base; off_ = off_ + i; len_ = j - i }))
+          : slice{ now _ = seg i j (now m) && fin _ = pv p2 })
+      in
+      let c =
+        (assume_unchecked_
+           (Obj.magic_unique (L { base; off_ = off_ + j; len_ = len_ - j }))
+          : slice{ now _ = drop j (now m) && fin _ = pv p3 })
+      in
+      let r = k a b c in
+      exclave_
+        (Obj.magic_unique
+           ( (assume_unchecked_ (L { base; off_; len_ })
+               : slice{ now _ = app (pv p1) (app (pv p2) (pv p3))
+                        && fin _ = fin m }),
+             r ))
+  
   let sdrop : (m : slice) @ local unique -> unit{ fin m = now m } =
     fun m ->
       let (L _) = m in
@@ -751,6 +862,22 @@ module S :
       once ->
       slice{ ((now _) = (app (pv pl) (pv pr))) && ((fin _) = (fin m)) } * 'a @ local
       unique
+    val split3 :
+      (p1 : proph) @ unique ->
+      (p2 : proph) @ unique ->
+      (p3 : proph) @ unique ->
+      (m : slice) @ local unique ->
+      (i : int{ 0 <= _ }) ->
+      (j : int{ (i <= _) && (_ <= (len (now m))) }) ->
+      (slice{ ((now _) = (take i (now m))) && ((fin _) = (pv p1)) } @ local
+       unique ->
+       slice{ ((now _) = (seg i j (now m))) && ((fin _) = (pv p2)) } @ local
+       unique ->
+       slice{ ((now _) = (drop j (now m))) && ((fin _) = (pv p3)) } @ local
+       unique -> 'a @ unique) @ local
+      once ->
+      slice{ ((now _) = (app (pv p1) (app (pv p2) (pv p3)))) && ((fin _) = (fin m)) } *
+      'a @ local unique
     val sdrop : (m : slice) @ local unique -> unit{ (fin m) = (now m) }
     val sdropa : (m : slice) @ local -> unit{ (fin m) = (now m) }
     val fork_join2 :

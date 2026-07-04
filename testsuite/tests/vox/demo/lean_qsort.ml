@@ -59,7 +59,7 @@ let rec part :
   (int * slice){ 0 <= fst _ && fst _ < n
                  && elem (now (snd _)) (fst _) = p
                  && all_le (take (fst _) (now (snd _))) p
-                 && all_ge (drop (fst _) (now (snd _))) p
+                 && all_ge (drop (fst _ + 1) (now (snd _))) p
                  && perm (now s) (now (snd _))
                  && fin (snd _) = fin s }
     @ local unique =
@@ -85,13 +85,13 @@ let rec part :
        end)
 
 (* Sequential quicksort on a loan: read the pivot, partition, then
-   REBORROW -- the outer split at the pivot index, the inner split
-   isolating the pivot's singleton.  Each side is sorted recursively
-   and resolved; the singleton is resolved as-is; resolving the inner
-   bracket's advanced parent reveals [pv prest] as pivot-then-right.
-   Each bracket's export restates its prophecies' facts in the scope
-   OUTSIDE the bracket, and the parent loan comes back at
-   [app (pv pl) (pv prest)], where the glue lemmas finish. *)
+   REBORROW -- one three-way split at the pivot's singleton.  Both
+   sides are sorted recursively and resolved; the singleton is
+   resolved as-is, pinning its prophecy to the pivot by equality.
+   The bracket's export restates the prophecies' facts in the scope
+   OUTSIDE it, and the parent loan comes back at
+   [app (pv p1) (app (pv p2) (pv p3))], where the glue lemmas
+   finish. *)
 let rec qsort :
   (m : slice) @ local unique ->
   slice{ perm (now m) (now _) && sorted (now _) && fin _ = fin m }
@@ -105,39 +105,31 @@ let rec qsort :
          let (p, mp) = sget m0 (n - 1) in
          let q = part p 0 0 mp n in
          let (k, m2) = q in
-         let pl = new_proph () in
-         let prest = new_proph () in
+         let p1 = new_proph () in
+         let p2 = new_proph () in
+         let p3 = new_proph () in
          let (mres, u) =
-           split pl prest m2 k (fun left rest ->
-             let left' = qsort left in
-             let _u1 = sdrop left' in
-             let pm = new_proph () in
-             let pr = new_proph () in
-             let (rest_adv, u2) =
-               split pm pr rest 1 (fun mid right ->
-                 let right' = qsort right in
-                 let _u2 = sdrop right' in
-                 let _u3 = sdrop mid in
-                 (() : unit{ pv pm = take 1 (now rest)
-                             && sorted (pv pr)
-                             && perm (drop 1 (now rest)) (pv pr) }))
-             in
-             ignore u2;
-             let _u4 = sdrop rest_adv in
-             (() : unit{ sorted (pv pl)
-                         && perm (take k (now m2)) (pv pl)
-                         && sorted (pv prest)
-                         && perm (drop k (now m2)) (pv prest) }))
+           split3 p1 p2 p3 m2 k (k + 1) (fun a b c ->
+             let a' = qsort a in
+             let _u1 = sdrop a' in
+             let _u2 = sdrop b in
+             let c' = qsort c in
+             let _u3 = sdrop c' in
+             (() : unit{ sorted (pv p1)
+                         && perm (take k (now m2)) (pv p1)
+                         && pv p2 = seg k (k + 1) (now m2)
+                         && sorted (pv p3)
+                         && perm (drop (k + 1) (now m2)) (pv p3) }))
          in
          ignore u;
          mres
        end)
 
-(* Parallel quicksort, same spec: inside the inner bracket both
-   sub-loans are live and disjoint, so each once-closure consumes one
-   and fork_join2 runs them on separate domains -- each task returns
-   its side's resolution facts (global refined units), which survive
-   the join; everything else is the sequential proof. *)
+(* Parallel quicksort, same spec: the bracket's two outer sub-loans
+   are disjoint, so each once-closure consumes one and fork_join2
+   runs them on separate domains -- each task returns its side's
+   resolution facts (global refined units), which survive the join;
+   everything else is the sequential proof. *)
 let rec psort :
   (m : slice) @ local unique ->
   slice{ perm (now m) (now _) && sorted (now _) && fin _ = fin m }
@@ -151,42 +143,32 @@ let rec psort :
          let (p, mp) = sget m0 (n - 1) in
          let q = part p 0 0 mp n in
          let (k, m2) = q in
-         let pl = new_proph () in
-         let prest = new_proph () in
+         let p1 = new_proph () in
+         let p2 = new_proph () in
+         let p3 = new_proph () in
          let (mres, u) =
-           split pl prest m2 k (fun left rest ->
-             let pm = new_proph () in
-             let pr = new_proph () in
-             let (rest_adv, u2) =
-               split pm pr rest 1 (fun mid right ->
-                 let (ul, ur) =
-                   Par_lib.fork_join2
-                     (fun () ->
-                       let left' = psort left in
-                       let _u = sdrop left' in
-                       (() : unit{ sorted (pv pl)
-                                   && perm (take k (now m2)) (pv pl) }))
-                     (fun () ->
-                       let right' = psort right in
-                       let _u = sdrop right' in
-                       (() : unit{ sorted (pv pr)
-                                   && perm (drop 1 (now rest)) (pv pr) }))
-                 in
-                 ignore ul;
-                 ignore ur;
-                 let _u3 = sdrop mid in
-                 (() : unit{ pv pm = take 1 (now rest)
-                             && sorted (pv pr)
-                             && perm (drop 1 (now rest)) (pv pr)
-                             && sorted (pv pl)
-                             && perm (take k (now m2)) (pv pl) }))
+           split3 p1 p2 p3 m2 k (k + 1) (fun a b c ->
+             let (ua, uc) =
+               Par_lib.fork_join2
+                 (fun () ->
+                   let a' = psort a in
+                   let _u = sdrop a' in
+                   (() : unit{ sorted (pv p1)
+                               && perm (take k (now m2)) (pv p1) }))
+                 (fun () ->
+                   let c' = psort c in
+                   let _u = sdrop c' in
+                   (() : unit{ sorted (pv p3)
+                               && perm (drop (k + 1) (now m2)) (pv p3) }))
              in
-             ignore u2;
-             let _u4 = sdrop rest_adv in
-             (() : unit{ sorted (pv pl)
-                         && perm (take k (now m2)) (pv pl)
-                         && sorted (pv prest)
-                         && perm (drop k (now m2)) (pv prest) }))
+             ignore ua;
+             ignore uc;
+             let _u2 = sdrop b in
+             (() : unit{ sorted (pv p1)
+                         && perm (take k (now m2)) (pv p1)
+                         && pv p2 = seg k (k + 1) (now m2)
+                         && sorted (pv p3)
+                         && perm (drop (k + 1) (now m2)) (pv p3) }))
          in
          ignore u;
          mres

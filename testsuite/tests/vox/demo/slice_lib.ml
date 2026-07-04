@@ -122,6 +122,47 @@ let split :
              : slice{ now _ = app (pv pl) (pv pr) && fin _ = fin m }),
            a ))
 
+let split3 :
+  (p1 : proph) @ unique ->
+  (p2 : proph) @ unique ->
+  (p3 : proph) @ unique ->
+  (m : slice) @ local unique ->
+  (i : int{ 0 <= _ }) ->
+  (j : int{ i <= _ && _ <= len (now m) }) ->
+  ((a : slice{ now _ = take i (now m) && fin _ = pv p1 }) @ local unique ->
+   (b : slice{ now _ = seg i j (now m) && fin _ = pv p2 }) @ local unique ->
+   (c : slice{ now _ = drop j (now m) && fin _ = pv p3 }) @ local unique ->
+   'a @ unique)
+    @ once local ->
+  (slice{ now _ = app (pv p1) (app (pv p2) (pv p3)) && fin _ = fin m } * 'a)
+    @ local unique =
+  fun p1 p2 p3 m i j k ->
+    let (P _) = p1 in
+    let (P _) = p2 in
+    let (P _) = p3 in
+    let (L { base; off_; len_ }) = m in
+    let a =
+      (assume_unchecked_ (Obj.magic_unique (L { base; off_; len_ = i }))
+        : slice{ now _ = take i (now m) && fin _ = pv p1 })
+    in
+    let b =
+      (assume_unchecked_
+         (Obj.magic_unique (L { base; off_ = off_ + i; len_ = j - i }))
+        : slice{ now _ = seg i j (now m) && fin _ = pv p2 })
+    in
+    let c =
+      (assume_unchecked_
+         (Obj.magic_unique (L { base; off_ = off_ + j; len_ = len_ - j }))
+        : slice{ now _ = drop j (now m) && fin _ = pv p3 })
+    in
+    let r = k a b c in
+    exclave_
+      (Obj.magic_unique
+         ( (assume_unchecked_ (L { base; off_; len_ })
+             : slice{ now _ = app (pv p1) (app (pv p2) (pv p3))
+                      && fin _ = fin m }),
+           r ))
+
 let sdrop : (m : slice) @ local unique -> unit{ fin m = now m } =
   fun m ->
     let (L _) = m in
