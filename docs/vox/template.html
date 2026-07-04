@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark light">
-<title>vox — refinement types for OxCaml, checked by Lean</title>
+<title>Verified OxCaml: refinement types backed by Lean</title>
 <style>
 :root{
   color-scheme: dark light;
@@ -68,192 +68,356 @@ th{background:var(--panel);color:var(--fg)} td{color:var(--dim)} td:first-child{
 .foot{margin-top:3.5rem;padding-top:1rem;border-top:1px solid var(--line);color:var(--dim);font-size:.85rem}
 .pill{display:inline-block;border:1px solid var(--line);border-radius:99px;padding:.05rem .6rem;
   font-size:.78rem;color:var(--dim);margin-left:.4rem;vertical-align:middle}
+.cols{display:grid;grid-template-columns:3fr 2fr;gap:1.6rem;align-items:start;margin:1.6rem 0}
+.cols .tag{margin:0}
+.side{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:.9rem 1.1rem .7rem}
+.side h3{margin:0 0 .4rem;font-size:1rem}
+.side ul{margin:0;padding-left:1.1rem}
+.side li{font-size:.88rem;color:var(--dim);margin:.4rem 0;line-height:1.5}
+@media (max-width:760px){.cols{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
 <nav><div class="in">
   <b>vox</b>
-  <a href="#sixty">the model</a>
-  <a href="#spec">total_</a>
-  <a href="#fib">fib, one file</a>
+  <a href="#sixty">model</a>
   <a href="#wrong">failures</a>
-  <a href="#tour">features</a>
-  <a href="#bst">a module</a>
-  <a href="#ptrie">the compiler's trie</a>
-  <a href="#trust">trust model</a>
+  <a href="#perf">performance</a>
+  <a href="#trust">trust &amp; costs</a>
+  <a href="#modes">mutation &amp; modes</a>
+  <a href="#real">real code</a>
+  <a href="#fib">a full file</a>
+  <a href="#tour">more features</a>
+  <a href="#next">directions</a>
   <a href="#run">running it</a>
 </div></nav>
 <main>
 
-<h1>Refinement types for OxCaml,<br><span class="l">discharged by Lean at compile time.</span></h1>
-<p class="tag">
-<b>vox</b> is an experimental extension of the
-<a href="https://github.com/julesjacobs/oxcaml/tree/vox">OxCaml compiler</a>.
-Types may carry logical predicates; the resulting proof obligations are sent
-to Lean&nbsp;4's <code>grind</code> on every <code>ocamlc</code> invocation,
-and an undischarged obligation is a compile error.
-</p>
+<h1>Verified OxCaml:<br>
+<span class="l">refinement types backed by Lean.</span></h1>
 
-<div class="claims">
-  <div class="claim"><b>The program is its own spec</b>
-    <span>A function marked <code>total_</code> becomes a logical function;
-    its OCaml body is the definition the solver reasons from.</span></div>
-  <div class="claim"><b>Re-checked on every build</b>
-    <span>Obligations are emitted as Lean theorems and re-proved from scratch
-    each compile.  Solver timeout or error fails the build.</span></div>
-  <div class="claim"><b>Failures include a model</b>
-    <span>A failed obligation reports its goal, the hypotheses in scope, and
-    the candidate counterexample the solver ended on.</span></div>
-  <div class="claim"><b>Specs cross module boundaries</b>
-    <span>Reflected definitions and lemma blocks travel in the
-    <code>.cmi</code>; clients verify against them directly.</span></div>
+<pre style="margin-top:1.4rem"><code class="ml">@HERO_ILIST@</code></pre>
+<p style="color:var(--dim);font-size:.95rem;max-width:46rem">An ordinary
+datatype and ordinary recursive functions.  <code>total_</code> reflects
+<code>len</code> into the logic (Lean checks it terminates);
+<code>append</code> is proved to add lengths, each recursive call
+re-instantiating its signature as the induction hypothesis, so the
+textbook proof has no proof text; and <code>nth</code> needs no option
+and no default value, because the bounds on <code>i</code> are a
+contract at every call site and the <code>Nil</code> arm is accepted
+only because <code>unreachable_</code>&rsquo;s obligation
+(<code>false</code>) is provable from them.  From
+<code>demo/lean_nth.ml</code> in the branch&rsquo;s CI.</p>
+<p style="color:var(--dim);font-size:.95rem;max-width:46rem">Weakening
+the bound to <code>i &lt;= len l</code> makes the <code>Nil</code> arm
+reachable, and the compiler answers with the boundary case the sloppy
+bound admits:</p>
+<pre><code class="ml">@HERO_FAIL@</code></pre>
+<pre class="out"><code>@HERO_FAIL_OUT@</code></pre>
+
+<pre><code class="ml">@HERO_QSORT@</code></pre>
+<p style="color:var(--dim);font-size:.95rem;max-width:46rem">It reaches
+imperative code.  In-place
+quicksort on a borrowed slice, verified sorted-and-permutation, and the
+fork-join parallel version under the identical spec.  The ownership
+reasoning is OxCaml&rsquo;s mode system: <code>@ unique</code> says the
+loan has no other references (which is what justifies mutating in
+place), <code>@ local</code> confines it to its region, and the borrow
+is RustHorn-style: <code>now m</code> is its current contents,
+<code>fin m</code> the prophesied final contents.  In
+<code>psort</code> the mode checker proves the two recursive tasks own
+disjoint halves, so parallelizing changes nothing in the proof.  From
+<code>demo/lean_qsort.ml</code> in the branch&rsquo;s CI, along with its
+negative probes (racing tasks, forged exports, escaped loans), which
+are compile errors.</p>
+
+<div class="cols">
+<p class="tag" style="color:var(--fg)">
+<b>vox</b> is an experimental extension of the
+<a href="https://github.com/julesjacobs/oxcaml/tree/vox">OxCaml compiler</a>
+in which types carry logical predicates, as in the examples above.
+Refinements become proof obligations, discharged on every
+<code>ocamlc</code> invocation by Lean&nbsp;4&rsquo;s <code>grind</code>;
+a failed obligation is a compile error that reports the goal, the
+hypotheses in scope, and a candidate counterexample.  Specifications are
+ordinary OCaml: a recursive function marked <code>total_</code> becomes its
+own logical definition, so code is verified against itself rather than a
+hand-maintained model, and parameter refinements act as contracts
+discharged at each call site.  Where automation falls short, lemmas are
+stated and proved in Lean next to the code and registered with the automation.  Specs, lemmas, and reflected
+definitions travel in <code>.cmi</code> files, so verification is modular
+and adopted per function; unannotated code compiles as before and never
+invokes the prover.  For imperative code, OxCaml&rsquo;s
+uniqueness/linearity/locality modes supply the ownership discipline, which
+is enough to build separation-logic-style verification of mutation as a
+small trusted library, with no changes to the mode checker.  Trust is
+graded and explicit throughout: proved, runtime-checked, or trusted and
+greppable.
+</p>
+<div class="side">
+<h3>Verified so far</h3>
+<ul>
+<li><a href="#modes">In-place quicksort</a> (the example above):
+  <code>sorted</code>-and-<code>perm</code>, sequential and fork-join
+  parallel.</li>
+<li><a href="#real">The Patricia trie</a> from OxCaml&rsquo;s own
+  optimizer: the bit theory proved from first principles; three trusted
+  one-liners.</li>
+<li><a href="#real">A BST behind a model interface</a>: one-path search
+  proved equal to whole-tree membership.</li>
+<li><a href="#modes">Mutation over ghost models</a>: in-place list
+  reversal, a tree flipped in place, interior mutability.</li>
+<li><a href="#fib">Fast-doubling Fibonacci</a> verified against its own
+  naive definition; <a href="#tour">binary search, integer square
+  root</a>.</li>
+<li>A safe <code>nth</code> (the first example above), no option and
+  no default: the <code>Nil</code> arm is proved unreachable by
+  <code>unreachable_</code>.</li>
+<li><a href="#perf">A bounds-check-free kernel</a>: the dot product at
+  1.36&times; the checked loop; the sum matching hand-written
+  <code>unsafe_get</code>.</li>
+</ul>
+</div>
 </div>
 
-<h2 id="sixty">The model, briefly</h2>
+<h3 style="margin-top:1.8rem">Design choices</h3>
+<ul>
+<li><a href="#sixty">The program is the spec</a>: <code>total_</code>
+  reflects a function into the logic; Lean checks its termination.</li>
+<li><a href="#sixty">Why refinement types</a>: a parameter refinement is
+  a precondition and a result refinement a postcondition, but a
+  refinement can also sit inside a type:
+  <code>int{ _ &gt;= 0 } list</code> puts the fact on the elements, where
+  the typechecker carries it and any polymorphic function preserves it
+  with nothing to prove.</li>
+<li><a href="#sixty">Why Lean</a>: the refinement theory is Lean&rsquo;s
+  logic, not a decidable fragment; anything provable in Lean can back a
+  refinement.  <code>grind</code> gives SMT-style automation in the
+  common case, a failed goal escalates to a tactic proof next to the code
+  (work LLMs are now good at) that registers back into the automation via
+  <code>@[grind]</code>, and everything, automation included, is
+  kernel-checked.</li>
+<li><a href="#wrong">Counterexamples on failure</a>: goal, hypotheses, and
+  a violating input, reported at the offending expression in about a
+  second.</li>
+<li><a href="#trust">Vibe-proved, kernel-checked</a>: most of the Lean on
+  the branch was drafted by LLM agents against <code>grind</code>&rsquo;s
+  counterexample feedback; Lean re-checks every proof on every build, so
+  proof provenance does not affect soundness.</li>
+<li><a href="#modes">Modes as the ownership substrate</a>: unique tokens,
+  RustHorn-style borrows with prophecies, and a separation logic, all as
+  libraries over the mode checker.</li>
+<li><a href="#trust">Graded trust</a>: proved / runtime-checked
+  (<code>assume_</code>) / trusted (<code>assume_unchecked_</code> and
+  friends); the trust surface is small and greppable.</li>
+<li><a href="#why-test">Properties are separate from checking
+  mechanisms</a>: the same contract can be proved, runtime-checked, or
+  handed to property-based testing as an oracle.</li>
+<li><a href="#perf">Proofs erase</a>: verified code can use unchecked
+  primitives, deleting runtime checks the compiler has proofs for.</li>
+<li><a href="#tour">The usual verification vocabulary</a>: ADTs, records,
+  tuples and quantifiers in predicates; loop invariants; mutable locals
+  (SSA); cross-module specs.</li>
+</ul>
+
+
+<p style="color:var(--dim)">Every code snippet below is extracted verbatim
+from the branch&rsquo;s test suite; the passing files must verify and the
+failure files must fail with exactly the output shown, or CI is red.
+Sections are ordered for progressive depth; the first three cover the
+system.</p>
+
+<h2 id="sixty">The model, in brief</h2>
 <p>A refinement is a predicate on a type: <code>int{ _ &gt;= 0 }</code>,
 <code>int{ not (_ = 0) }</code>.  A refinement on a parameter is a contract:
 the body assumes it, and each call site must discharge it.  Here the branch
 condition is sufficient, and the check is fully automatic:</p>
 <pre><code class="ml">@SIXTY@</code></pre>
-<p>Proof obligations arise from exactly two places: applications to refined
-parameters, as above — no annotation at the call — and explicit
-<code>refine_&nbsp;e</code> claims (a result refinement, a stored value).
-Both are proved.  Trust is explicit and graded: <code>assume_&nbsp;e</code> is
-checked at runtime (the compiler inserts the test), and
-<code>assume_unchecked_&nbsp;e</code> is trusted outright — the one escape
-hatch, and it is greppable.</p>
-
-<h2 id="spec">Reflected functions: <code>total_</code></h2>
+<p>Refinements generalize pre- and postconditions: a parameter refinement
+is a precondition and a result refinement a postcondition, but a
+refinement can also sit under a type constructor.
+<code>int{ _ &gt;= 0 } list</code> states a fact about every element.
+The fact lives in the type, so the typechecker propagates it, and any
+polymorphic function preserves it by instantiation:
+<code>List.rev</code> at <code>'a = int{ _ &gt;= 0 }</code> returns
+nonnegative elements with nothing to prove; in effect, unary
+parametricity for free.  Spelled as a contract, the same fact is a
+quantified invariant carried alongside the list and re-established at
+every step.</p>
+<p>Proof obligations arise in two places: applications to refined
+parameters, as above (no annotation at the call site), and explicit
+<code>refine_&nbsp;e</code> claims such as a result refinement or a stored
+value.  Both are proved by Lean&nbsp;4&rsquo;s <code>grind</code>, invoked
+by the compiler; an undischarged obligation is a compile error.  Trust is
+graded: <code>assume_&nbsp;e</code> is checked at runtime (the compiler
+inserts the test), and <code>assume_unchecked_&nbsp;e</code> is trusted
+outright.  That is the main escape hatch, though not the only one; ghost
+declarations and the mutation library&rsquo;s mode casts are trusted too,
+and the full accounting is in the trust table below.</p>
+<p>The predicate language does not stop at a decidable fragment:
+predicates and reflected definitions land in Lean, so anything provable
+in Lean can back a refinement.  For automation, <code>grind</code> covers
+the same ground as an SMT solver (congruence closure, E-matching, linear
+arithmetic), so the common case feels like SMT-backed refinement types.  The difference shows
+up when automation fails.  An SMT solver that answers "unknown" leaves you
+stuck.  Here, a missed goal can be closed by stating a lemma next to the
+code and proving it with tactics, which is work that language models are
+now good at; the lemma is then registered with the automation via
+<code>@[grind]</code> attributes and patterns, so the push-button case
+gets stronger over time for that codebase.  Lean&rsquo;s lemma libraries
+(mathlib) live in the same logic and are usable infrastructure rather than
+theory to re-encode for a solver.  The developments on this page prove
+everything from core Lean; wiring library imports into the prelude
+mechanism is routine roadmap.  Finally, <code>grind</code> produces proof
+terms that Lean&rsquo;s kernel checks, so the automation itself is not
+trusted: a solver bug cannot verify a falsehood.</p>
 <p>Marking a recursive function <code>total_</code> translates its body into
-the logic.  The compiler emits it as an ordinary Lean <code>def</code>, Lean
-checks termination, and the function's name becomes usable inside
-refinements.  The inductive proof about <code>append</code> below requires no
-solver-side definitions and no proof text:</p>
+the logic: the compiler emits it as an ordinary Lean <code>def</code>, Lean
+independently checks termination, and the function&rsquo;s name becomes
+usable inside refinements.  The program is its own specification &mdash;
+there is no second, solver-side copy to drift:</p>
 <pre><code class="ml">@REFLECT@</code></pre>
 <p>Each recursive call re-instantiates the declared signature at its actual
-arguments, which is the induction hypothesis.  Non-structural recursion
-carries a metric — <code>[@@vox.decreases n]</code> — from which the
-termination argument is synthesized.</p>
-
-<h2 id="fib">A complete development in one file</h2>
-<p>Three Fibonacci implementations: the naive recursion, reflected, is the
-specification; a tail-recursive accumulator loop carries its invariant in the
-parameter contracts; and <i>O</i>(log&nbsp;n) fast doubling is verified
-against the same <code>fib</code>.  The doubling identities are proved in an
-embedded Lean block, by functional induction on the reflected definition
-itself — there is no second, solver-side Fibonacci.  The one assumption is
-the halving primitive (<code>asr</code> is outside the logic), and it is
-runtime-checked.</p>
-
-<div class="tabs" data-tabs>
-  <button class="on">lean_fib.ml — complete</button>
-  <button>generated solver input</button>
-</div>
-<div class="tabpane on"><pre style="max-height:34rem"><code class="ml">@FIB_SRC@</code></pre></div>
-<div class="tabpane"><pre style="max-height:34rem"><code class="lean" id="genlean">@GEN_LEAN@</code></pre>
-<p style="color:var(--dim);font-size:.9rem">Regenerated and checked on every
-compile: the <code>pair</code> datatype, the reflected <code>fib</code> with
-its synthesized <code>termination_by</code>, the embedded lemma block
-verbatim, and one theorem per obligation — fifteen for this file, each closed
-by <code>grind</code>.</p></div>
+arguments, which is the induction hypothesis, so the textbook proof goes through
+with no proof text of its own.</p>
 
 <h2 id="wrong">What a failure looks like</h2>
+<p>A proof failure is an ordinary compile error at the offending
+expression.  It states what was to be proved, what was known, and a
+concrete input that breaks it:</p>
 <pre><code class="ml">@WRONG_SRC@</code></pre>
 <pre class="out"><code>@WRONG_OUT@</code></pre>
-<p>The goal, the hypotheses in scope, and the arithmetic model the solver
-ended on, rewritten to source names.  On linear goals the model is a genuine
+<p>The output shows the goal, the hypotheses in scope, and the arithmetic
+model the solver ended on, rewritten to source names.  On linear goals the model is a genuine
 refutation; nonlinear atoms print as separate entries, so a model that is
-only linear-consistent is identifiable as such.</p>
+only linear-consistent is identifiable as such.  The same information,
+back in about a second, is what an agent gets as feedback when it is the
+one writing the code or the proof.  The same shape catches the
+classic search-tree bug (wrong-side descent) and the classic Patricia-trie
+bug (skipping the prefix check) with witnesses; both are shown below on
+real structures.</p>
 
-<h2 id="tour">Features</h2>
+<h2 id="perf">Performance: checks the compiler can delete</h2>
+<p><code>get</code> reads with <code>Iarray.unsafe_get</code>, so there
+is no bounds check in the compiled code; its contract demands the proof at
+every call site instead.  The loop below discharges it from the loop bound
+and the path fact.  Nothing about any index is assumed:</p>
+<pre><code class="ml">@KERNEL@</code></pre>
+<p>The benchmark (<code>docs/vox/bench</code>) compiles this kernel
+natively, under verification; the benchmark driver itself does not compile
+until it proves its arrays compatible.  Measured on a dev box, the
+verified dot product runs <b>1.36&times;</b> the bounds-checked loop, and
+the verified sum matches hand-written <code>unsafe_get</code>.  The proof
+costs nothing at runtime because it ran at compile time.  The same
+reasoning applies to other checks that exist only because a known fact was
+never stated: validation on trusted paths, defensive re-checks across
+module boundaries, option-wrapping of values that cannot be absent.</p>
+
+<h2 id="trust">Costs and trust</h2>
+<p>What a claim on this page is worth depends on what is proved, what is
+checked at runtime, and what is assumed:</p>
+<table>
+<tr><th>Construct</th><th>Status</th><th>Notes</th></tr>
+<tr><td><code>refine_ e</code></td><td><span class="g">Proved</span></td>
+  <td>Emitted as a Lean theorem; failure is a compile error with goal, hypotheses, and model.</td></tr>
+<tr><td>parameter contracts</td><td><span class="g">Proved</span></td>
+  <td>Discharged at every application, at the argument&rsquo;s logical name.</td></tr>
+<tr><td><code>total_</code> definitions</td><td><span class="g">Definitional</span></td>
+  <td>The emitted Lean <code>def</code> is the OCaml body; Lean independently checks termination.</td></tr>
+<tr><td><code>[%%vox.lean]</code> theorems</td><td><span class="g">Proved</span></td>
+  <td>Hand-written lemmas are Lean-checked on every compile; a false proof is a compile error.</td></tr>
+<tr><td><code>assume_ e</code></td><td><span class="w">Runtime-checked</span></td>
+  <td>The compiler inserts the test; a violated assumption raises rather than entering the logic.
+      Compiled only when the check is faithful to the logic; otherwise a compile error.</td></tr>
+<tr><td><code>assume_unchecked_ e</code>, <code>axiom</code> in blocks</td><td><span class="e">Trusted</span></td>
+  <td>The primary trust surface.  In the Patricia trie it is three
+      bit-twiddling one-liners.</td></tr>
+<tr><td><code>[@@vox.sort]</code> ghost sorts; library mode casts</td><td><span class="e">Trusted</span></td>
+  <td>The mutation encodings&rsquo; trust surface: ghost types declaring their logical sort, and the
+      <code>Obj.magic</code>-family casts inside the token, borrow, slice, and
+      separation-logic libraries (about 450 lines in all).  The audit grep is <code>assume_unchecked_</code> +
+      <code>Obj.magic</code> + <code>[@@vox.sort]</code> over the trusted libs.</td></tr>
+</table>
+<p><b>What it costs.</b>  Verification runs inside <code>ocamlc</code>.
+A typical fully-verified module in the suite adds on the order of one
+second of Lean per compile on a dev box; heavier developments with
+inductive Lean proofs (the trie, quicksort) cost proportionally more, and
+failures with small counterexamples report in under a second.  Obligations
+are re-proved from scratch on every build, so there is no stale-proof
+state to manage, and editing a spec changes the <code>.cmi</code>
+checksum, which forces clients to re-verify.  The compiler footprint is
+about 4,900 lines in <code>typing/</code>, plus real changes to arrows and
+unification for dependent binders and an elaboration-time annotation
+hoist.
+The build gains a dependency on a pinned Lean toolchain.  Verification is
+opt-in per module, and unannotated code never invokes the prover.</p>
+<p><b>When a proof fails.</b>  If a refactor breaks an
+obligation, the build goes red at that function, localized like a type
+error.  But closing a hard goal can require writing Lean, so a verified
+module carries a real maintenance cost that belongs with the team that
+owns it.  Automated discharge is also not guaranteed: <code>grind</code>
+can fail on a goal that is in fact true (nonlinear arithmetic, quantifier
+instantiation, timeouts).  The options in that case, in order: prove a
+lemma once in an embedded block, downgrade the fact to a runtime-checked
+<code>assume_</code>, or leave the function unannotated.  Refined types
+are rigid by design, and the inference sharp edges are documented in
+DESIGN.md.</p>
+<p><b>Known limits, by design.</b>  Partial correctness: a diverging call
+proves nothing (termination is checked only for <code>total_</code>
+definitions, by Lean).  Ideal integer arithmetic: overflow is outside the
+model.  No concurrency reasoning yet beyond mode-checked disjointness
+(fork-join above); shared-state protocols need an invariant layer that does
+not exist.  Client-written <code>axiom</code>s in lemma blocks join the
+trust surface silently today; a lint is planned.  All documented in
+<a href="https://github.com/julesjacobs/oxcaml/blob/vox/DESIGN.md">DESIGN.md</a>.</p>
+<p id="why-test"><b>Properties versus checking mechanisms.</b>  A
+contract is written once, independent of how it is enforced.  Today the
+mechanisms are proof (Lean) and runtime checking
+(<code>assume_&nbsp;e</code> compiles the predicate into a test).  Since
+reflected specifications are executable OCaml, the same contract can also
+serve as the oracle for property-based testing: quickcheck-style
+generators, fuzzers, or LLM-guided search for violating inputs, none of
+which exist yet in vox, all of which would consume the specs unchanged.
+Inductive invariants (a tree staying ordered
+under every insertion) are the facts sampling cannot confirm.</p>
+<p><b>Hardening and proof provenance.</b>  Each feature on
+the branch shipped with an adversarial probe battery (forged tokens,
+duplicated loans, escaped borrows, prophecy reuse, cross-cell confusion,
+false exports), and every probe is pinned in the test suite to the layer
+that rejects it: modes, locality, contract, or Lean.  A regression in any
+layer fails CI.  The Lean itself, meaning the lemma libraries, the
+trie&rsquo;s bit theory, and the invariant step lemmas, was mostly
+<i>vibe-proved</i>: drafted by agents against
+<code>grind</code>&rsquo;s counterexample feedback and kept when the
+checker accepted it and the batteries held.  Since Lean re-checks everything on every build, proof
+provenance does not matter for soundness, and agent-written proof text is
+safe to accept.</p>
+
+<h2 id="modes">OxCaml&rsquo;s modes</h2>
+<p>OxCaml&rsquo;s mode system was built for allocation control, but it
+provides the ownership substrate a verifier needs to reason about
+mutation.  A
+<code>unique</code> value has no other references, which is what justifies
+a strong update; the linearity axis (<code>once</code>) makes capability
+tokens affine; <code>local</code> confines a value to its region.  vox
+added no checker machinery for any of the following.  The mode checker
+enforces the ownership discipline, the refinements carry the ghost state,
+and a small trusted library (accounted for in the trust table above)
+encodes the heap logic on top; the mode checker&rsquo;s existing reasoning
+is what keeps that encoding sound to thread.  Rust&rsquo;s verifiers
+(Creusot, Prusti, RustHorn) make an analogous move on the borrow checker.
+OCaml&rsquo;s modes, designed for performance rather than verification,
+supply the same substrate, so refinement types reach in-place mutation
+through the mode system itself rather than through a bespoke ownership
+analysis.</p>
+
 <div class="grid">
-
-<div class="card"><h3>Algebraic data types <span class="pill">demo/lean_adt.ml</span></h3>
-<p>Constructors of simple variants appear in predicates; a match refines its
-scrutinee; injectivity and distinctness come from the solver's datatype
-theory.  The <code>Nil</code> branch below is unreachable, and that is
-proved rather than assumed: its facts are contradictory, so the bare
-<code>0</code> discharges against <code>r = 3</code>.</p>
-<pre><code class="ml">@ADT@</code></pre></div>
-
-<div class="card"><h3>Records and projections <span class="pill">demo/lean_records.ml</span></h3>
-<p>Immutable records become Lean structures.  Field projection appears in
-predicates; functional update preserves the untouched fields' facts.</p>
-<pre><code class="ml">@RECORDS@</code></pre></div>
-
-<div class="card"><h3>Native tuples <span class="pill">demo/lean_tuples.ml</span></h3>
-<p>Unlabeled tuples are structural: one polymorphic product per arity, so
-construction and <code>fst</code>/<code>snd</code> appear in predicates with
-no wrapper type and the predicate language stays untyped.  Matching (or a
-destructuring <code>let</code>) contributes per-component facts, and tuples
-of int/bool compare with <code>=</code> in the logic.</p>
-<pre><code class="ml">@TUPLES@</code></pre></div>
-
-<div class="card"><h3>Contracts as loop invariants <span class="pill">demo/lean_fib.ml</span></h3>
-<p>Parameter refinements are preconditions, so a recursive function's
-parameters can carry its invariant — here
-<code>(a, b) = (fib i, fib (i+1))</code>.  Call sites discharge it as
-ordinary obligations, including at the literal seeds in
-<code>fib_loop n 0 0 1</code> and the compound arguments
-<code>(i + 1)</code>, <code>(a + b)</code>.</p>
-<pre><code class="ml">@CONTRACTS@</code></pre></div>
-
-<div class="card"><h3>Specs across modules <span class="pill">demo/lean_reflectclient.ml</span></h3>
-<p>A <code>total_</code> function's definition is exported in its unit's
-<code>.cmi</code>.  Clients apply it in predicates and prove against it; the
-<code>.cmi</code> checksum forces re-verification when the definition
-changes.</p>
-<pre><code class="ml">@CROSSMOD@</code></pre></div>
-
-<div class="card"><h3>Lemmas next to the code <span class="pill">[%%vox.lean]</span></h3>
-<p>Hand-written Lean — lemma statements and their proofs — embeds in the
-module it concerns, is checked on every compile, and is exported through the
-<code>.cmi</code>.  A solver error inside a block is reported at the block's
-own source location.</p>
-<pre><code class="lean">@EMBEDDED@</code></pre></div>
-
-<div class="card"><h3>Quantifiers <span class="pill">demo/lean_quant.ml</span></h3>
-<p><code>forall_</code>/<code>exists_</code> and implication in predicates;
-binders are untyped and Lean infers their sorts.  Here <code>max2</code> is
-not just an upper bound but provably the least one — each branch proves the
-quantified conclusion under its path fact.</p>
-<pre><code class="ml">@QUANT@</code></pre></div>
-
-<div class="card"><h3>Binary search <span class="pill">demo/lean_binsearch.ml</span></h3>
-<p>Immutable arrays are a built-in theory &mdash; <code>Iarray.length a</code>
-and <code>a.(i)</code> in predicates, reflected in expressions, nothing
-assumed: in-bounds access, the bracket invariant, and the flip-point
-characterization of the result are all proved.</p>
-<pre><code class="ml">@BINSEARCH@</code></pre></div>
-
-<div class="card"><h3>Correct, not just safe <span class="pill">demo/lean_isqrt.ml</span></h3>
-<p>Integer square root against a reflected <code>sq</code>: the result is
-bracketed by squares of the same function the program runs.  The midpoint is
-reflected division; one nonlinear lemma is proved in an embedded block.
-Nothing in the file is assumed — and returning the wrong endpoint is caught
-with a concrete counterexample (<code>x&nbsp;=&nbsp;0</code>).</p>
-<pre><code class="ml">@ISQRT@</code></pre></div>
-
-<div class="card"><h3>Mutable locals, loop invariants <span class="pill">demo/lean_mutable.ml</span></h3>
-<p>Reads of a <code>let mutable</code> variable name its current SSA
-version; every write mints a fresh one.  A <code>[@vox.invariant]</code>
-formula follows the classical quadruple — asserted at entry, assumed at
-the loop head, asserted again at the back-edge — and may mention a
-for-loop's index; after the loop it stands at one past the end.</p>
-<pre><code class="ml">@MUTABLE@</code></pre></div>
-
-<div class="card"><h3>The same search, imperatively <span class="pill">demo/lean_imp_binsearch.ml</span></h3>
-<p>The recursive bracket invariant of <code>lower_bound</code>, worn as a
-loop annotation: two unrefined mutable indices, plain reads and writes, and
-the flip-point postcondition falls out of the invariant together with the
-negated guard.</p>
-<pre><code class="ml">@IMP_BINSEARCH@</code></pre></div>
 
 <div class="card"><h3>Interior mutability <span class="pill">demo/lean_pcell.ml</span></h3>
 <p>Mutable cells behind a linear token discipline: reads and writes consume
-and return a unique token, so facts about a cell's contents cannot survive a
-write.  Duplicated, stale, forged, and cross-cell tokens are compile-time
-errors.</p>
+and return a unique token, so facts about a cell&rsquo;s contents cannot
+survive a write.  Duplicated, stale, forged, and cross-cell tokens are
+compile-time errors.</p>
 <pre><code class="ml">@PCELL@</code></pre></div>
 
 <div class="card"><h3>Mutable borrows <span class="pill">demo/lean_borrow.ml</span></h3>
@@ -282,60 +446,100 @@ distinct because <code>Star</code> means disjoint.</p>
 <p>The textbook separation-logic proof: <code>Lseg (l, vs)</code> owns a
 null-terminated segment holding the model list, the reflected
 <code>rev_append</code> is the specification, and <code>reverse</code>
-rewires next pointers node by node — returning the same cells holding the
-reversed list.</p>
+rewires next pointers node by node, returning the same cells holding
+the reversed list.</p>
 <pre><code class="ml">@SEPLIST@</code></pre></div>
 
-<div class="card"><h3>Deleting bounds checks, safely <span class="pill">demo/lean_kernel.ml</span></h3>
-<p><code>get</code> reads with <code>unsafe_get</code>: the per-access
-check is replaced by a proof at each call site.  The benchmark
-(<code>docs/vox/bench</code>) compiles this kernel natively, under
-verification — the driver itself would not compile until it proved its
-arrays compatible.  Measured on a dev box: the verified dot product runs
-<b>1.36×</b> the bounds-checked loop; the verified sum matches
-hand-written <code>unsafe_get</code> exactly — verification costs nothing
-at runtime.</p>
-<pre><code class="ml">@KERNEL@</code></pre></div>
-
-<div class="card"><h3>Quicksort, then in parallel <span class="pill">demo/lean_qsort.ml</span></h3>
+<div class="card"><h3>Quicksort, sequential and parallel <span class="pill">demo/lean_qsort.ml</span></h3>
 <p>In-place quicksort over slice borrows, verified against
 <code>sorted</code>-and-<code>perm</code>: the recursion is a reborrow, and
-each side's facts come home as prophecy values.  Then the same
-verification runs fork-join — the sub-loans are disjoint by mode, so the
-sequential proof is the parallel proof.</p>
+each side&rsquo;s facts come home as prophecy values.  Then the same
+verification runs fork-join: <code>psort</code> below carries the
+identical spec.  The mode checker proves the two tasks own disjoint state,
+so parallelizing the recursion changes nothing in the proof; the trusted
+<code>fork_join2</code> combinator (~20 lines) is where that guarantee is
+cashed out.</p>
 <pre><code class="ml">@QSORT@</code></pre></div>
-
-<div class="card"><h3>Reflected arithmetic <span class="pill">Vox_reflect</span></h3>
-<p><code>+ - * / mod</code>, comparisons, and <code>&amp;&amp; || not</code>
-carry their logical meaning, recognized by primitive rather than by name (a
-shadowed <code>(+)</code> is not addition).  Division is OCaml's T-division,
-totalized soundly under partial correctness.  A branch condition contributes
-itself as a fact: writing <code>if n &lt;= 0</code> is enough.</p></div>
 
 </div>
 
-<h2 id="bst">A verified module behind an interface</h2>
-<p>The shape that scales.  <code>bst.mli</code> states the model —
-whole-tree membership, the ordering invariant, a model-level
-<code>insert</code> — and proves its theorems once, in the interface's
-embedded block; definitions and theorems travel in the <code>.cmi</code>.
-The implementation is checked against them arm by arm: the efficient
-one-path search is proved equal to membership over the <i>whole</i> tree
-(the ordering lemmas account for the subtrees the code never visits), and
-each <code>insert</code> arm is proved to build exactly the model's tree.
-Nothing is assumed, and no verification keyword appears in the code.</p>
+<h2 id="real">Real code, verified as found</h2>
+<p>Two case studies on existing structures rather than examples written
+for the verifier.  The first is the integer-set structure OxCaml&rsquo;s
+optimizer uses
+(<code>middle_end/flambda2/algorithms/patricia_tree.ml</code>), as the
+classic little-endian toy: the GADT plumbing stripped, the bit twiddling
+kept, including <code>i&nbsp;land&nbsp;b&nbsp;=&nbsp;0</code>,
+<code>i&nbsp;land&nbsp;(b&nbsp;-&nbsp;1)</code>, and the lowest-set-bit
+trick <code>x&nbsp;land&nbsp;(-x)</code> that appears verbatim in the
+compiler&rsquo;s <code>unpack</code>.  The interface models the bit
+operations arithmetically and proves the bit-level facts from first
+principles in core Lean, so nothing about bits is axiomatized.  The trust
+surface is three one-line bridges (vox does not reflect the bitwise
+operators), each carrying its arithmetic model as its contract.  From
+there the Patricia invariant, the one-path search, and insertion are
+proved arm by arm against the model.</p>
 
 <div class="tabs" data-tabs>
-  <button class="on">bst.mli — the model is the interface</button>
-  <button>bst.ml — proved against it</button>
+  <button class="on">ptrie.ml &mdash; three trusted lines, the rest proved</button>
+  <button>ptrie.mli &mdash; the bit theory, written once</button>
+  <button>a client</button>
+</div>
+<div class="tabpane on"><pre style="max-height:34rem"><code class="ml">@PTRIE_ML@</code></pre>
+<p style="color:var(--dim);font-size:.9rem">The whole trust surface of the
+module: three <code>assume_unchecked_</code> one-liners bridging the bitwise
+primitives.  Everything else is proved.</p></div>
+<div class="tabpane"><pre style="max-height:34rem"><code class="ml">@PTRIE_MLI@</code></pre>
+<p style="color:var(--dim);font-size:.9rem">The interface carries the
+arithmetic bit theory and its lemmas: 346 lines of Lean written once,
+against an 89-line implementation containing no proof text &mdash; about
+four lines of theory per line of code for the hardest development in the
+prototype, exported through the <code>.cmi</code> so clients inherit it
+for free.</p></div>
+<div class="tabpane"><pre><code class="ml">@PTRIE_CLIENT@</code></pre>
+<p style="color:var(--dim);font-size:.9rem">The model membership never reads
+a prefix, so clients reason about the trie with no bit operations at all.</p></div>
+
+<p>The classic Patricia pitfall is descending by the branching bit without
+first checking the prefix, which files the key under a prefix it does not
+match (<code>insert</code> must <code>join</code> on a mismatch).  It is
+a compile error with a witness:</p>
+<pre><code class="ml">@PTRIE_FAIL@</code></pre>
+<pre class="out"><code>@PTRIE_FAIL_OUT@</code></pre>
+
+<p>And the FULL-fidelity variant (<code>lib/ptrie_packed</code>): big-endian
+like the compiler, with the prefix and the branching bit packed into
+<b>one int per branch</b> exactly as the compiler's
+<code>prefix_and_bit</code> packs them &mdash; <code>pack</code> is
+<code>lor</code>, and <code>unpack</code> recovers the bit with
+<code>x&nbsp;land&nbsp;(-x)</code>.  The invariant rides the packed int:
+for a well-formed node the bit IS its lowest set bit and the prefix IS the
+rest &mdash; theorems (<code>lbit_pack</code>), not fields.  A hand-built node's
+packed int is therefore <i>checked</i>: mis-pack it and the invariant
+refuses with the decode in the counterexample.</p>
+<pre><code class="ml">@PTRIE_PACKED@</code></pre>
+
+<h3>The model as the interface</h3>
+<p><code>bst.mli</code> states the model (whole-tree membership, the
+ordering invariant, a model-level <code>insert</code>) and proves its
+theorems once, in the interface&rsquo;s embedded block; definitions and
+theorems travel in the <code>.cmi</code>.  The implementation is checked
+against them arm by arm: the efficient one-path search is proved equal to
+membership over the <i>whole</i> tree, and each <code>insert</code> arm is
+proved to build exactly the model&rsquo;s tree.  The implementation
+contains no proof text and no trust keyword, only refinement type
+annotations.</p>
+
+<div class="tabs" data-tabs>
+  <button class="on">bst.mli &mdash; the model is the interface</button>
+  <button>bst.ml &mdash; proved against it</button>
   <button>a client</button>
   <button>an alt interface, quantified</button>
 </div>
 <div class="tabpane on"><pre style="max-height:34rem"><code class="ml">@BST_MLI@</code></pre></div>
 <div class="tabpane"><pre style="max-height:34rem"><code class="ml">@BST_ML@</code></pre></div>
 <div class="tabpane"><pre><code class="ml">@BST_CLIENT@</code></pre>
-<p style="color:var(--dim);font-size:.9rem">The miss is as proved as the
-hits: <code>mem_insert</code> characterizes each insertion completely, down
+<p style="color:var(--dim);font-size:.9rem"><code>mem_insert</code> characterizes each insertion completely, down
 to <code>mem 5 empty = False</code>.</p></div>
 <div class="tabpane"><pre style="max-height:34rem"><code class="ml">@BST_ALT@</code></pre>
 <p style="color:var(--dim);font-size:.9rem">With quantifiers in predicates
@@ -344,92 +548,179 @@ the TYPE instead: an alternative interface over the untouched module states
 everything <code>add</code> does in one refinement, and a client instantiates
 it at whatever key it asks about.</p></div>
 
-<p>The classic search-tree bugs are compile errors with witnesses.
-Descending the wrong side misses exactly the element the counterexample
-names — below, <code>x&nbsp;=&nbsp;-1</code> under a root of
-<code>0</code>:</p>
+<p>The classic search-tree bug, descending the wrong side, misses the
+element the counterexample names; below,
+<code>x&nbsp;=&nbsp;-1</code> under a root of <code>0</code>:</p>
 <pre><code class="ml">@BST_FAIL@</code></pre>
 <pre class="out"><code>@BST_FAIL_OUT@</code></pre>
 
-<h2 id="ptrie">Real code from the compiler: the Patricia trie</h2>
-<p>The integer-set structure OxCaml's own optimizer runs on
-(<code>middle_end/flambda2/algorithms/patricia_tree.ml</code>), as the
-classic little-endian toy — the GADT plumbing stripped, the bit twiddling
-kept: <code>i&nbsp;land&nbsp;b&nbsp;=&nbsp;0</code>,
-<code>i&nbsp;land&nbsp;(b&nbsp;-&nbsp;1)</code>, and the lowest-set-bit trick
-<code>x&nbsp;land&nbsp;(-x)</code> that appears verbatim in the compiler's
-<code>unpack</code>.  The interface models the bit operations
-<i>arithmetically</i> — under floor division an integer is its infinite
-two's-complement bit string, so masking is <code>%</code> and the branching
-bit is a two-line recursion — and proves every bit-level fact from first
-principles in core Lean: nothing about bits is axiomatized.  The trust
-surface is three one-line bridges (vox does not reflect the bitwise
-operators), each carrying its arithmetic model as its contract; from there
-the Patricia invariant, the one-path search, and insertion are proved arm by
-arm against the model.</p>
+<h2 id="fib">A complete development in one file</h2>
+<p>Three Fibonacci implementations: the naive recursion, reflected, is the
+specification; a tail-recursive accumulator loop carries its invariant in the
+parameter contracts; and <i>O</i>(log&nbsp;n) fast doubling is verified
+against the same <code>fib</code>.  The doubling identities are proved in an
+embedded Lean block, by functional induction on the reflected definition
+itself &mdash; there is no second, solver-side Fibonacci.  There is no trust
+keyword in the file: the halving step is reflected T-division
+(<code>n&nbsp;/&nbsp;2</code>), and its parity annotation is proved.</p>
 
 <div class="tabs" data-tabs>
-  <button class="on">ptrie.mli — bit theory, invariant, theorems</button>
-  <button>ptrie.ml — three trusted lines, the rest proved</button>
-  <button>a client</button>
+  <button class="on">lean_fib.ml &mdash; complete</button>
+  <button>generated solver input</button>
 </div>
-<div class="tabpane on"><pre style="max-height:34rem"><code class="ml">@PTRIE_MLI@</code></pre></div>
-<div class="tabpane"><pre style="max-height:34rem"><code class="ml">@PTRIE_ML@</code></pre></div>
-<div class="tabpane"><pre><code class="ml">@PTRIE_CLIENT@</code></pre>
-<p style="color:var(--dim);font-size:.9rem">Same shape as the BST client —
-the model membership never reads a prefix, so clients reason about a bit
-trie without a bit in sight.</p></div>
+<div class="tabpane on"><pre style="max-height:34rem"><code class="ml">@FIB_SRC@</code></pre></div>
+<div class="tabpane"><pre style="max-height:34rem"><code class="lean" id="genlean">@GEN_LEAN@</code></pre>
+<p style="color:var(--dim);font-size:.9rem">Regenerated and checked on every
+compile: the <code>pair</code> datatype, the reflected <code>fib</code> with
+its synthesized <code>termination_by</code>, the embedded lemma block
+verbatim, and one theorem per obligation &mdash; fifteen for this file, each
+closed by <code>grind</code>.</p></div>
 
-<p>THE Patricia pitfall — descending by the branching bit without first
-checking the prefix, which files the key under a prefix it does not match
-(<code>insert</code> must <code>join</code> on a mismatch) — is a compile
-error with a witness:</p>
-<pre><code class="ml">@PTRIE_FAIL@</code></pre>
-<pre class="out"><code>@PTRIE_FAIL_OUT@</code></pre>
+<h2 id="tour">The rest of the feature surface</h2>
+<details><summary style="cursor:pointer;color:var(--dim)">Twelve more
+cards &mdash; ADTs, records, tuples, quantifiers, loop invariants, cross-module
+specs, reflected arithmetic.  Expand if you want the breadth; nothing below
+is needed for the argument above.</summary>
+<div class="grid">
 
-<p>And the FULL-fidelity variant (<code>lib/ptrie_packed</code>): big-endian
-like the compiler, with the prefix and the branching bit packed into
-<b>one int per branch</b> exactly as the compiler's
-<code>prefix_and_bit</code> packs them — <code>pack</code> is
-<code>lor</code>, and <code>unpack</code> recovers the bit with
-<code>x&nbsp;land&nbsp;(-x)</code>.  The invariant rides the packed int:
-for a well-formed node the bit IS its lowest set bit and the prefix IS the
-rest — theorems (<code>lbit_pack</code>), not fields.  A hand-built node's
-packed int is therefore <i>checked</i>: mis-pack it and the invariant
-refuses with the decode in the counterexample.</p>
-<pre><code class="ml">@PTRIE_PACKED@</code></pre>
+<div class="card"><h3>Algebraic data types <span class="pill">demo/lean_adt.ml</span></h3>
+<p>Constructors of simple variants appear in predicates; a match refines its
+scrutinee; injectivity and distinctness come from the solver&rsquo;s
+datatype theory.  The <code>Nil</code> branch below is unreachable, and that
+is proved: its facts are contradictory, so the bare
+<code>0</code> discharges against <code>r = 3</code>.</p>
+<pre><code class="ml">@ADT@</code></pre></div>
 
-<h2 id="trust">Trust model</h2>
-<table>
-<tr><th>Construct</th><th>Status</th><th>Notes</th></tr>
-<tr><td><code>refine_ e</code></td><td><span class="g">Proved</span></td>
-  <td>Emitted as a Lean theorem; failure is a compile error with goal, hypotheses, and model.</td></tr>
-<tr><td>parameter contracts</td><td><span class="g">Proved</span></td>
-  <td>Discharged at every application, at the argument's logical name.</td></tr>
-<tr><td><code>total_</code> definitions</td><td><span class="g">Definitional</span></td>
-  <td>The emitted Lean <code>def</code> is the OCaml body; Lean independently checks termination.</td></tr>
-<tr><td><code>assume_ e</code></td><td><span class="w">Runtime-checked</span></td>
-  <td>The compiler inserts the test; a violated assumption raises rather than entering the logic.
-      Compiled only when the check is faithful to the logic; otherwise a compile error.</td></tr>
-<tr><td><code>assume_unchecked_ e</code>, <code>[%%vox.lean]</code> blocks</td><td><span class="e">Trusted</span></td>
-  <td>The explicit trust surface.  In the fib development it amounts to one line: floor halving.
-      In the Patricia trie, the three bit-twiddling one-liners.</td></tr>
-</table>
-<p>Known limits, by design: partial correctness (a diverging call neither
-proves nor asserts anything), and ideal integer arithmetic (overflow is
-outside the model).  Both are documented in
-<a href="https://github.com/julesjacobs/oxcaml/blob/vox/DESIGN.md">DESIGN.md</a>.</p>
+<div class="card"><h3>Records and projections <span class="pill">demo/lean_records.ml</span></h3>
+<p>Immutable records become Lean structures.  Field projection appears in
+predicates; functional update preserves the untouched fields&rsquo; facts.</p>
+<pre><code class="ml">@RECORDS@</code></pre></div>
+
+<div class="card"><h3>Native tuples <span class="pill">demo/lean_tuples.ml</span></h3>
+<p>Unlabeled tuples are structural: one polymorphic product per arity, so
+construction and <code>fst</code>/<code>snd</code> appear in predicates with
+no wrapper type and the predicate language stays untyped.  Matching (or a
+destructuring <code>let</code>) contributes per-component facts, and tuples
+of int/bool compare with <code>=</code> in the logic.</p>
+<pre><code class="ml">@TUPLES@</code></pre></div>
+
+<div class="card"><h3>Contracts as loop invariants <span class="pill">demo/lean_fib.ml</span></h3>
+<p>Parameter refinements are preconditions, so a recursive function&rsquo;s
+parameters can carry its invariant &mdash; here
+<code>(a, b) = (fib i, fib (i+1))</code>.  Call sites discharge it as
+ordinary obligations, including at the literal seeds in
+<code>fib_loop n 0 0 1</code> and the compound arguments
+<code>(i + 1)</code>, <code>(a + b)</code>.</p>
+<pre><code class="ml">@CONTRACTS@</code></pre></div>
+
+<div class="card"><h3>Specs across modules <span class="pill">demo/lean_reflectclient.ml</span></h3>
+<p>A <code>total_</code> function&rsquo;s definition is exported in its
+unit&rsquo;s <code>.cmi</code>.  Clients apply it in predicates and prove
+against it; the <code>.cmi</code> checksum forces re-verification when the
+definition changes.</p>
+<pre><code class="ml">@CROSSMOD@</code></pre></div>
+
+<div class="card"><h3>Lemmas next to the code <span class="pill">[%%vox.lean]</span></h3>
+<p>Hand-written Lean &mdash; lemma statements and their proofs &mdash;
+embeds in the module it concerns, is checked on every compile, and is
+exported through the <code>.cmi</code>.  A solver error inside a block is
+reported at the block&rsquo;s own source location.</p>
+<pre><code class="lean">@EMBEDDED@</code></pre></div>
+
+<div class="card"><h3>Quantifiers <span class="pill">demo/lean_quant.ml</span></h3>
+<p><code>forall_</code>/<code>exists_</code> and implication in predicates;
+binders are untyped and Lean infers their sorts.  Here <code>max2</code> is
+not just an upper bound but provably the least one &mdash; each branch
+proves the quantified conclusion under its path fact.</p>
+<pre><code class="ml">@QUANT@</code></pre></div>
+
+<div class="card"><h3>Binary search <span class="pill">demo/lean_binsearch.ml</span></h3>
+<p>Immutable arrays are a built-in theory: <code>Iarray.length a</code>
+and <code>a.(i)</code> appear in predicates and are reflected in
+expressions.  In-bounds access, the bracket invariant, and the flip-point
+characterization of the result are all proved.</p>
+<pre><code class="ml">@BINSEARCH@</code></pre></div>
+
+<div class="card"><h3>Correct, not just safe <span class="pill">demo/lean_isqrt.ml</span></h3>
+<p>Integer square root against a reflected <code>sq</code>: the result is
+bracketed by squares of the same function the program runs.  The midpoint is
+reflected division; one nonlinear lemma is proved in an embedded block.
+Nothing in the file is assumed, and returning the wrong endpoint is
+caught with a concrete counterexample (<code>x&nbsp;=&nbsp;0</code>).</p>
+<pre><code class="ml">@ISQRT@</code></pre></div>
+
+<div class="card"><h3>Mutable locals, loop invariants <span class="pill">demo/lean_mutable.ml</span></h3>
+<p>Reads of a <code>let mutable</code> variable name its current SSA
+version; every write mints a fresh one.  A <code>[@vox.invariant]</code>
+formula follows the classical quadruple &mdash; asserted at entry, assumed
+at the loop head, asserted again at the back-edge &mdash; and may mention a
+for-loop&rsquo;s index; after the loop it stands at one past the end.</p>
+<pre><code class="ml">@MUTABLE@</code></pre></div>
+
+<div class="card"><h3>The same search, imperatively <span class="pill">demo/lean_imp_binsearch.ml</span></h3>
+<p>The recursive bracket invariant of <code>lower_bound</code>, worn as a
+loop annotation: two unrefined mutable indices, plain reads and writes, and
+the flip-point postcondition falls out of the invariant together with the
+negated guard.</p>
+<pre><code class="ml">@IMP_BINSEARCH@</code></pre></div>
+
+<div class="card"><h3>Reflected arithmetic <span class="pill">Vox_reflect</span></h3>
+<p><code>+ - * / mod</code>, comparisons, and <code>&amp;&amp; || not</code>
+carry their logical meaning, recognized by primitive rather than by name (a
+shadowed <code>(+)</code> is not addition).  Division is OCaml&rsquo;s
+T-division, totalized soundly under partial correctness.  A branch condition
+contributes itself as a fact: writing <code>if n &lt;= 0</code> is
+enough.</p></div>
+
+</div>
+</details>
+
+<h2 id="next">Where this goes</h2>
+<p>Everything above exists and is CI-checked today, on unmodified OxCaml
+modes and a stock Lean.  Directions this opens, roughly in order:</p>
+<ul>
+<li><b>Verified kernels behind ordinary interfaces.</b>  Hot-path routines
+(parsers, codecs, index arithmetic, allocation-free data structures)
+proved once, exporting plain OCaml types to unannotated callers,
+with their defensive checks deleted (the benchmark above is the seed).</li>
+<li><b>Specifications for the code we already trust most.</b>  Interface
+models for core containers and protocol layers, so client code can prove
+against them without reading implementations &mdash; the BST/trie shape,
+applied to the standard library.</li>
+<li><b>Concurrency.</b>  Mode-checked disjointness already covers fork-join
+parallelism; an invariant layer for shared state is the natural next
+research step.  Prototype token encodings to build on exist; choosing and
+hardening one is part of that work.</li>
+<li><b>Spec-driven testing.</b>  The same contracts Lean proves are
+executable predicates, so every refinement is a ready-made oracle for
+property-based testing at the <code>assume_</code> boundary, from
+quickcheck-style generators to search-based methods (including LLM-guided
+input search) hunting for violations of the facts not yet proved.  One
+spec is enforced by proof where possible and by testing where not.</li>
+<li><b>Hardening for untrusted code.</b>  Confining the trust surface
+(<code>assume_unchecked_</code>, block <code>axiom</code>s) to designated
+modules, so a library&rsquo;s verification claims are meaningful to
+downstream users by construction.</li>
+</ul>
+<p>Verification here is not free, but the prototype gives a measurement
+of the current costs when the language itself is the proof surface:
+ordinary OCaml as the spec language, automatic discharge in the common
+case, four lines of once-written theory per line of the hardest code
+here, adoption one function at a time, and part of the cost returned as
+deleted runtime checks.  The proofs that exist were mostly agent-drafted
+and machine-checked; the human effort went into deciding what to
+prove.</p>
 
 <h2 id="run">Running it</h2>
 <pre><code>git clone -b vox https://github.com/julesjacobs/oxcaml && cd oxcaml
 autoconf && ./configure && make boot-compiler
 make test-one DIR=vox        # needs a Lean 4 toolchain (elan) on PATH</code></pre>
-<p>Every example on this page lives in the branch's test suite and this page
-is generated from it (<code>docs/vox/generate.py</code>): the demo files must
-verify, and the failure example must fail with exactly the output shown
-(<code>mechanics/lean_wrong.ml</code> pins it, location and counterexample
-included), for the suite to pass.  Ellipses mark elided bodies; everything
-else is extracted verbatim from
+<p>Every example on this page lives in the branch&rsquo;s test suite and
+this page is generated from it (<code>docs/vox/generate.py</code>): the demo
+files must verify, and the failure examples must fail with exactly the
+output shown &mdash; location and counterexample included &mdash; for the
+suite to pass.  Ellipses mark elided bodies; everything else is extracted
+verbatim from
 <a href="https://github.com/julesjacobs/oxcaml/tree/vox/testsuite/tests/vox">testsuite/tests/vox</a>.</p>
 
 <div class="foot">

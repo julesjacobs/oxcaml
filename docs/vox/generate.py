@@ -188,9 +188,11 @@ def main():
                      + '\n  fun l vs t -> ...',
         '@QSORT@': slice_between(read('demo/lean_qsort.ml'),
                                  r'^let rec qsort', r'@ local unique =$')
-                   + '\n  fun m -> ...\n\n'
+                   + '\n  fun m -> ...   (* sequential: partition, recurse *)\n\n'
                    + slice_between(read('demo/lean_qsort.ml'),
-                                   r'Par_lib.fork_join2', r'ignore uc;'),
+                                   r'^let rec psort', r'@ local unique =$')
+                   + '\n  fun m -> ...   (* the SAME spec; the recursive calls\n'
+                     '                    run under Par_lib.fork_join2 *)',
         '@BST_MLI@': strip_leading_comment(read('lib/bst.mli')),
         '@BST_ML@': strip_leading_comment(read('lib/bst.ml')),
         '@BST_CLIENT@': slice_between(read('demo/lean_bst.ml'), r'^let demo',
@@ -227,6 +229,24 @@ def main():
                      + slice_between(read('demo/lean_bst_alt.ml'),
                                      r'^let probe', r'^    b$'),
     }
+
+    nth = read('demo/lean_nth.ml')
+    nth_fail = read('mechanics/lean_nth_fail.ml')
+    snippets['@HERO_ILIST@'] = (
+        slice_between(nth, r'^type ilist', r'^  \| Cons of int \* ilist')
+        + '\n\n'
+        + slice_between(nth, r'^let rec total_ len',
+                        r'Cons \(_, t\) -> 1 \+ len t')
+        + '\n\n'
+        + slice_between(nth, r'^let rec append', r'Cons \(h, r\)')
+        + '\n\n'
+        + slice_between(nth, r'^let rec nth',
+                        r'if i = 0 then h else nth t \(i - 1\)'))
+    snippets['@HERO_FAIL@'] = slice_between(
+        nth_fail, r'^let rec nth', r'if i = 0 then h else nth t \(i - 1\)')
+    snippets['@HERO_FAIL_OUT@'] = slice_between(
+        nth_fail, r'^Error: vox: verification failed', r'^\(lean: ')
+    snippets['@HERO_QSORT@'] = snippets['@QSORT@']
 
     if args.ocamlc and args.lean:
         snippets['@GEN_LEAN@'] = capture_generated_lean(args.ocamlc, args.lean)
