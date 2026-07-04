@@ -965,9 +965,21 @@ let rec elab_vox_pred ~bound ~self_root env (e : Parsetree.expression)
                 Location.raise_errorf ~loc
                   "vox: mutable variables may not appear in refinements"
           | (Path.Pident id, _, _) -> Pvar id
+          | ((Path.Pdot _ | Path.Papply _) as p, {val_kind = Val_mut _; _}, _)
+            ->
+              ignore p;
+              Location.raise_errorf ~loc
+                "vox: mutable variables may not appear in refinements"
+          | ((Path.Pdot _ | Path.Papply _) as p, _, _) ->
+              (* A MODULE-LEVEL value names itself by path: stamp-free
+                 and .cmi-stable, so the predicate may travel through a
+                 signature; the value's own .cmi refinement arrives as
+                 a global fact wherever the predicate is used. *)
+              Pglobal p
           | _ ->
               Location.raise_errorf ~loc
-                "vox: only locally bound variables may appear in refinements"
+                "vox: only locally bound variables and module-level \
+                 values may appear in refinements"
           | exception _ ->
               Location.raise_errorf ~loc
                 "vox: unbound variable in refinement predicate"

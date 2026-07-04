@@ -275,11 +275,15 @@ let rec mem_var id p =
   | Pquant (_, b, a) -> (not (Ident.same id b)) && mem_var id a
 ;;
 
-(* Remap the type paths of constructor applications (used by [Subst] when a
-   predicate crosses a module boundary, exactly as [Tconstr] paths do). *)
-let rec map_paths f p =
+(* Remap the paths of a predicate (used by [Subst] when a predicate
+   crosses a module boundary): [f] rewrites TYPE paths (constructor
+   applications, fields, testers) exactly as [Tconstr] paths are
+   rewritten; [value] rewrites the VALUE paths of [Pglobal]s. *)
+let rec map_paths_impl value f p =
+  let map_paths = map_paths_impl value in
   match p with
-  | Pbound | Pvar _ | Pglobal _ | Pint _ | Pbool _ -> p
+  | Pglobal q -> Pglobal (value q)
+  | Pbound | Pvar _ | Pint _ | Pbool _ -> p
   | Pconstr (path, c, args) -> Pconstr (f path, c, List.map (map_paths f) args)
   | Pfun (g, args) -> Pfun (g, List.map (map_paths f) args)
   | Pfield (path, l, a) -> Pfield (f path, l, map_paths f a)
@@ -293,6 +297,8 @@ let rec map_paths f p =
   | Pimp (a, b) -> Pimp (map_paths f a, map_paths f b)
   | Pquant (q, b, a) -> Pquant (q, b, map_paths f a)
 ;;
+
+let map_paths ?(value = fun (q : Path.t) -> q) f p = map_paths_impl value f p
 
 let rec constr_paths acc p =
   match p with

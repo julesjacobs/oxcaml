@@ -224,8 +224,10 @@
 - Scope: a refinement may mention only parameters of its own type and
   program variables in scope at every point the type flows to; escape
   is an error ("annotate"). In module signatures, refinements may
-  mention only parameters of their own type -- never top-level values.
-  So .cmi predicates are self-contained.
+  mention parameters of their own type and MODULE-LEVEL values by
+  path (`Pglobal` -- stamp-free, so .cmi predicates stay
+  self-contained in the sense that matters: no process-local
+  stamps).  Local variables never appear.
 - Simple algebraic data types: constructors of "simple" variants
   (monomorphic, non-GADT, closed, at least one constructor, tuple
   arguments only -- hence immutable: mutability enters variants only
@@ -813,11 +815,6 @@ the scope rule above.
   [-> y:int{...}] is LR(1)-ambiguous with labeled arrows and labeled
   tuples)
 - [x] test/toplevel/error-message output is in that format
-- [ ] surface syntax for `Pglobal` in written predicates
-  (`val cap : int{ _ <= Config.max }`): the representation, facts,
-  and Subst-side path remapping questions ([map_paths] does not yet
-  rewrite value paths under functor substitution) -- "facts follow
-  paths".
 - [ ] strong update for @ unique mutation (the library encodings so
   far: pcell separation tokens, [@@vox.sort] trusted ghosts)
 - [ ] RustHorn style borrows via block indices

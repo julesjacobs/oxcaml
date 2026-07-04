@@ -760,7 +760,17 @@ let rec typexp copy_scope s ty =
           let map_path q =
             if to_subst_by_type_function s q then q else type_path s q
           in
-          Trefine (typexp copy_scope s t, Refinement.map_paths map_path p)
+          (* [Pglobal] value paths remap by module prefix. *)
+          let map_value_path q =
+            match q with
+            | Path.Pdot (m, x) -> Path.Pdot (module_path s m, x)
+            | Path.Papply (m, a) ->
+                Path.Papply (module_path s m, module_path s a)
+            | Path.Pident _ | Path.Pextra_ty _ -> q
+          in
+          Trefine
+            ( typexp copy_scope s t,
+              Refinement.map_paths ~value:map_value_path map_path p )
       | _ -> copy_type_desc (typexp copy_scope s) desc
     in
     Transient_expr.set_stub_desc ty' desc;
