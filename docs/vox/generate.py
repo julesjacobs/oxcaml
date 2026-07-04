@@ -231,12 +231,12 @@ def main():
     snippets['@EX_LEN@'] = (
         slice_between(nth, r'^type ilist', r'^  \| Cons of int \* ilist')
         + '\n\n'
-        + slice_between(nth, r'^\(\* total_ reflects',
+        + slice_between(nth, r'^let rec total_ len',
                         r'Cons \(_, t\) -> 1 \+ len t'))
     snippets['@EX_APPEND@'] = slice_between(
-        nth, r'^\(\* Proved: each recursive call', r'Cons \(h, r\)')
+        nth, r'^let rec append', r'Cons \(h, r\)')
     snippets['@EX_NTH@'] = slice_between(
-        nth, r'^\(\* Not a primitive',
+        nth, r'^let rec nth',
         r'if i = 0 then h else nth t \(i - 1\)')
     snippets['@HERO_FAIL@'] = slice_between(
         nth_fail, r'^let rec nth', r'if i = 0 then h else nth t \(i - 1\)')

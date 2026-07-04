@@ -26,14 +26,11 @@ type ilist =
   | Nil
   | Cons of int * ilist
 
-(* total_ reflects len into the logic, so the refinements below can
-   call it; Lean checks it terminates. *)
 let rec total_ len l =
   match l with
   | Nil -> 0
   | Cons (_, t) -> 1 + len t
 
-(* Proved: each recursive call is the induction hypothesis. *)
 let rec append (a : ilist) (b : ilist) : ilist{ len _ = len a + len b } =
   match a with
   | Nil -> b
@@ -41,12 +38,9 @@ let rec append (a : ilist) (b : ilist) : ilist{ len _ = len a + len b } =
     let r = append t b in
     Cons (h, r)
 
-(* Not a primitive: the argument type is uninhabited, so each call
-   is a proof obligation [false] -- allowed exactly where the facts
-   are contradictory. *)
+(* Not a primitive: the argument type is uninhabited (see header). *)
 let rec unreachable_ (u : unit{ false }) : 'a = unreachable_ u
 
-(* The bounds are a contract, discharged at every call site. *)
 let rec nth (l : ilist) (i : int{ 0 <= _ && _ < len l }) : int =
   match l with
   | Nil -> unreachable_ ()   (* dead code, and proved so *)

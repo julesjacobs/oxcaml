@@ -165,52 +165,61 @@ Verification is opt-in per function.
 </div>
 
 <h2 id="example">Refinement types, by example</h2>
-<p>The first example proves that appending two lists adds their
-lengths.  The specification needs a length function it can mention, so
-the setup is a list type and the usual recursive definition of
-length:</p>
+<p>In the first example, the compiler verifies that appending two
+lists adds their lengths.  The specification needs a length function
+it can mention, so the setup is a list type and the usual recursive
+definition of length:</p>
 <pre><code class="ml">@EX_LEN@</code></pre>
 <p id="reflect">The <code>total_</code> keyword reflects
 <code>len</code> into the logic: the compiler emits it as a Lean
 <code>def</code>, Lean checks that it terminates, and refinements can
 then call it (allowing arbitrary OCaml functions in specifications
-would be unsound: from <code>f x = f x + 1</code> the logic would
-conclude <code>0 = 1</code>).</p>
+would be unsound: from a definition like
+<code>let rec f x = f x + 1</code> the logic would conclude
+<code>0 = 1</code>).</p>
 <pre><code class="ml">@EX_APPEND@</code></pre>
 <p id="sixty">Apart from the annotation on its result type,
-<code>append</code> is ordinary OCaml, and it compiles to the same
-code.  The expression between braces is a term of the logic,
-written in OCaml syntax.  It may mention the program variables in
-scope, including the function&rsquo;s own parameters;
-<code>_</code> denotes the value the refinement is attached to, in
-this case the result of <code>append</code>.  In refinements, a program
-variable stands for the logical counterpart of its run-time value: an
-<code>int</code> corresponds to a mathematical integer, a variant such
-as <code>ilist</code> to the corresponding Lean inductive value, and
-values of other types to opaque atoms.</p>
-<p>A refinement on the result is a postcondition, which the body must
-establish in every arm.  The <code>Nil</code> arm follows from the
-definition of <code>len</code>.  In the <code>Cons</code> arm, the
-recursive call has the same signature, instantiated at <code>t</code>
-and <code>b</code>, so <code>len r = len t + len b</code> is known;
-this is the induction hypothesis.  The compiler emits each obligation
-as a Lean theorem, and Lean&rsquo;s
+<code>append</code> is ordinary OCaml, and the compiled code is the
+same as without the annotation.  Between the braces stands a
+proposition of the logic, written in OCaml syntax: <code>_</code>
+denotes the value the type is attached to, in this case
+<code>append</code>&rsquo;s result, and <code>a</code> and
+<code>b</code> are the function&rsquo;s parameters.
+<b>Refinements are dependent: a type may mention the program variables
+in scope.</b>  What gives this meaning is the correspondence between
+the two worlds: in a refinement, a program variable stands for the
+logical counterpart of its run-time value (a mathematical integer for
+an <code>int</code>, a Lean inductive value for a variant such as
+<code>ilist</code>, an opaque atom for values of other types).  A
+refinement can therefore state a relation between run-time values:
+here, that the length of the result is the sum of the lengths of the
+arguments.</p>
+<p>Refinement types are often met as range restrictions such as
+<code>int{ _ &gt;= 0 }</code>; dependency is what turns them into
+contracts.  A refinement on the result is a postcondition, which the
+body must establish; a refinement on a parameter is a precondition
+(<code>nth</code>, below).</p>
+<p>The <code>Nil</code> arm returns <code>b</code>, so its obligation
+is <code>len b = len Nil + len b</code>, immediate from the definition
+of <code>len</code>.  In the <code>Cons</code> arm, the recursive call
+has the same signature, instantiated at <code>t</code> and
+<code>b</code>, so <code>len r = len t + len b</code> is known; this
+is the induction hypothesis.  The compiler emits each obligation as a
+Lean theorem, and Lean&rsquo;s
 <a href="#automation"><code>grind</code></a> proves it automatically;
 the file contains no proof text.</p>
 <pre><code class="ml">@EX_NTH@</code></pre>
-<p>A refinement on a parameter is a precondition: every caller must
-prove it, and the body may assume it.  Within the body, branch
-conditions are also in scope, so the recursive call discharges its
-bounds from <code>i &lt;&gt; 0</code> and the <code>Cons</code> match.
-The <code>Nil</code> arm is dead code given the bounds, and calling
-<code>unreachable_ : unit{ false } -&gt; 'a</code> there proves it:
-the argument <code>()</code> must be given the type
-<code>unit{ false }</code>, so the obligation is <code>false</code>
-under the arm&rsquo;s hypotheses, where <code>assert false</code>
-would defer the claim to run time.  The definition itself carries no
-trust: inside the body <code>false</code> is a hypothesis, so the
-recursive call is discharged, and divergence is sound under partial
-correctness.</p>
+<p>The bounds on <code>i</code> are the precondition at work: every
+caller must prove them, and the body may assume them.  Within the
+body, branch conditions are also in scope, so the recursive call
+discharges its bounds from <code>i &lt;&gt; 0</code> and the
+<code>Cons</code> match.  The <code>Nil</code> arm is dead code given
+the bounds, and calling <code>unreachable_</code> there proves it:
+<code>unreachable_</code> is an ordinary library function of type
+<code>unit{ false } -&gt; 'a</code>, so the argument <code>()</code>
+must be constructed at an uninhabited type, and the obligation is
+<code>false</code> under the arm&rsquo;s hypotheses, where
+<code>assert false</code> would defer the claim to run time.</p>
 <p>Proof obligations arise in one way only: by constructing a value of
 a refined type.  The body of <code>append</code> constructs its
 result, a caller of <code>nth</code> constructs the argument
