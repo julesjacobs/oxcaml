@@ -215,10 +215,8 @@ must be constructed at an uninhabited type, and the obligation is
 a refined type.  The body of <code>append</code> constructs its
 result, a caller of <code>nth</code> constructs the argument
 <code>i</code>, and <code>unreachable_ ()</code> constructs
-<code>()</code> at a type nothing satisfies; an explicit
-<code>refine_ e</code> claim states a refined type for <code>e</code>
-directly.  All are discharged at compile time by the
-<a href="#automation">automation</a>.</p>
+<code>()</code> at a type nothing satisfies.  All are discharged at
+compile time by the <a href="#automation">automation</a>.</p>
 <p>A refinement can also appear under a type
 constructor: <code>int{ _ &gt;= 0 } list</code> states that every
 element is nonnegative.  Because the fact is part of the type, the
