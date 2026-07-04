@@ -50,6 +50,8 @@ UNSHOWN = {
     'demo/lean_qsort_run.ml': 'expect-block runner for the quicksort card',
     'demo/lean_slice_sort.ml':
         'proof-style merge sort; quicksort is the page\'s sorting development',
+    'demo/lean_slice_sort_run.ml':
+        'expect-block runner for the merge sorts, mentioned on the quicksort card',
     'demo/lean_ptrie_packed.ml':
         'client of lib/ptrie_packed; the packed subsection slices the lib itself',
     'demo/lean_reverse.ml':
