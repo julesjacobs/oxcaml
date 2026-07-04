@@ -271,11 +271,24 @@ beside the <code>.cmi</code> (<code>VoxSig_&lt;Unit&gt;.olean</code>),
 and clients import that: they verify against the interface without
 reading the implementation, and the interface&rsquo;s own proofs are
 not re-checked per client.  Editing a spec changes the
-<code>.cmi</code> checksum, which forces clients to re-verify.  The
-BST below is built this way; <a href="#real">the trie that
-follows</a> applies the same approach to harder code.</p>
+<code>.cmi</code> checksum, which forces clients to re-verify.</p>
 
-<p><code>bst.mli</code> states the model (whole-tree membership, the
+<p id="seal">The interface chooses what to reveal.  Definitions and
+proved theorems are facts a client may use &mdash; the transparent
+style, where the model is public.  An <code>axiom</code> is the
+reverse: a fact clients may use but the implementation must prove.
+The implementation&rsquo;s compile ends with a <em>seal</em> that
+re-elaborates the interface and requires a proved theorem with the
+same name and statement for every <code>axiom</code>; a module that
+cannot prove its interface&rsquo;s laws does not compile.  Marking an
+abstract type <code>[@@vox.sort opaque]</code> extends this to the
+representation: the type gets its own sort in the logic, laws can
+quantify over it, and the implementation proves them about the
+concrete type, which takes over the same solver-side name.</p>
+
+<p>The example below is the transparent style; <a href="#real">the
+trie that follows</a> applies it to harder code.
+<code>bst.mli</code> states the model (whole-tree membership, the
 ordering invariant, a model-level <code>insert</code>); the
 implementation is checked against it arm by arm.  The one-path search is
 proved equal to membership over the whole tree, and each
@@ -306,61 +319,18 @@ element.  The counterexample names one &mdash; below,
 <pre><code class="ml">@BST_FAIL@</code></pre>
 <pre class="out"><code>@BST_FAIL_OUT@</code></pre>
 
-<h3 id="seal">Sealed interfaces: one sig, two implementations</h3>
-<p>An interface can also hide the model itself.  <code>step.mli</code>
-declares <code>step</code> as an opaque constant and states one law
-about it, as an <code>axiom</code>.  Clients rely on the law without
-seeing a definition: their proofs depend on the interface text and
-nothing else, so they hold before any implementation is written and
-are unaffected by <code>.ml</code> edits.  The implementation does not
-get the axiom for free: its solver input ends with a <em>seal</em>
-that re-elaborates the interface and requires a proved theorem with
-the same name and statement for every <code>axiom</code>.  Below, two
-different implementations prove the same law, and one client verifies
-against either.</p>
-
-<div class="tabs" data-tabs>
-  <button class="on">step.mli &mdash; the law</button>
-  <button>step_incr &mdash; one implementation</button>
-  <button>step_double &mdash; another</button>
-  <button>a client, either way</button>
-</div>
-<div class="tabpane on"><pre><code class="ml">@SEAL_MLI@</code></pre></div>
-<div class="tabpane"><pre><code class="ml">@SEAL_INCR@</code></pre></div>
-<div class="tabpane"><pre><code class="ml">@SEAL_DOUBLE@</code></pre></div>
-<div class="tabpane"><pre><code class="ml">@SEAL_CLIENT@</code></pre>
-<p style="color:var(--dim);font-size:.9rem"><code>demo/lean_seal.ml</code>
-and <code>demo/lean_seal_alt.ml</code> verify this same body against
-step_incr and step_double respectively; <code>step</code> is opaque, so no
-client fact can distinguish them.</p></div>
-
-<p>An implementation that cannot prove the law is rejected at compile
-time, even when it honestly satisfies its own definitions &mdash; so a
-client never links against a module that does not meet its
-interface:</p>
-<pre><code class="ml">@SEAL_BAD@</code></pre>
-<pre class="out"><code>@SEAL_FAIL_OUT@</code></pre>
-
-<h3 id="oset">Full abstraction: the type hidden too</h3>
-<p>The representation type can be hidden as well.  Marking an abstract
-type <code>[@@vox.sort opaque]</code> gives it its own sort in the
-logic, rather than the shared <code>VoxU</code>, so the interface can
-state laws about values of that type.  In the implementation the
-concrete declaration takes over the same solver-side name, and the
-sealed laws are proved about the real representation.  The set below
-is a binary search tree, but neither clients nor their proofs can
-tell: everything a client knows follows from the four axioms
-(<code>mechanics/lean_oset_opaque.ml</code> checks that a fact the
+<p id="oset">The sealed style is exercised in the suite.
+<code>lib/step.mli</code> exports a single law as an axiom; two
+implementations (<code>step_incr</code>, <code>step_double</code>)
+each prove it, and <code>demo/lean_seal.ml</code> verifies the same
+client body against either, while an implementation that cannot prove
+the law is rejected at its seal
+(<code>mechanics/lean_seal_fail.ml</code>).  <code>lib/oset.mli</code>
+hides model and type both: the set is a binary search tree, but a
+client and its proofs see only four axioms
+(<code>demo/lean_oset.ml</code>;
+<code>mechanics/lean_oset_opaque.ml</code> checks that a fact the
 axioms do not imply is rejected).</p>
-
-<div class="tabs" data-tabs>
-  <button class="on">oset.mli &mdash; type and model both hidden</button>
-  <button>oset.ml &mdash; the implementation</button>
-  <button>a client</button>
-</div>
-<div class="tabpane on"><pre style="max-height:34rem"><code class="ml">@OSET_MLI@</code></pre></div>
-<div class="tabpane"><pre style="max-height:34rem"><code class="ml">@OSET_ML@</code></pre></div>
-<div class="tabpane"><pre><code class="ml">@OSET_CLIENT@</code></pre></div>
 
 <h2 id="real">The Patricia trie</h2>
 <p>This is the integer-set structure OxCaml&rsquo;s optimizer uses

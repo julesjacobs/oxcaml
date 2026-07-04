@@ -315,11 +315,24 @@ beside the <code>.cmi</code> (<code>VoxSig_&lt;Unit&gt;.olean</code>),
 and clients import that: they verify against the interface without
 reading the implementation, and the interface&rsquo;s own proofs are
 not re-checked per client.  Editing a spec changes the
-<code>.cmi</code> checksum, which forces clients to re-verify.  The
-BST below is built this way; <a href="#real">the trie that
-follows</a> applies the same approach to harder code.</p>
+<code>.cmi</code> checksum, which forces clients to re-verify.</p>
 
-<p><code>bst.mli</code> states the model (whole-tree membership, the
+<p id="seal">The interface chooses what to reveal.  Definitions and
+proved theorems are facts a client may use &mdash; the transparent
+style, where the model is public.  An <code>axiom</code> is the
+reverse: a fact clients may use but the implementation must prove.
+The implementation&rsquo;s compile ends with a <em>seal</em> that
+re-elaborates the interface and requires a proved theorem with the
+same name and statement for every <code>axiom</code>; a module that
+cannot prove its interface&rsquo;s laws does not compile.  Marking an
+abstract type <code>[@@vox.sort opaque]</code> extends this to the
+representation: the type gets its own sort in the logic, laws can
+quantify over it, and the implementation proves them about the
+concrete type, which takes over the same solver-side name.</p>
+
+<p>The example below is the transparent style; <a href="#real">the
+trie that follows</a> applies it to harder code.
+<code>bst.mli</code> states the model (whole-tree membership, the
 ordering invariant, a model-level <code>insert</code>); the
 implementation is checked against it arm by arm.  The one-path search is
 proved equal to membership over the whole tree, and each
@@ -502,215 +515,18 @@ Possible counterexample:
   w_1 = 0
 (lean: error: `grind` failed)</code></pre>
 
-<h3 id="seal">Sealed interfaces: one sig, two implementations</h3>
-<p>An interface can also hide the model itself.  <code>step.mli</code>
-declares <code>step</code> as an opaque constant and states one law
-about it, as an <code>axiom</code>.  Clients rely on the law without
-seeing a definition: their proofs depend on the interface text and
-nothing else, so they hold before any implementation is written and
-are unaffected by <code>.ml</code> edits.  The implementation does not
-get the axiom for free: its solver input ends with a <em>seal</em>
-that re-elaborates the interface and requires a proved theorem with
-the same name and statement for every <code>axiom</code>.  Below, two
-different implementations prove the same law, and one client verifies
-against either.</p>
-
-<div class="tabs" data-tabs>
-  <button class="on">step.mli &mdash; the law</button>
-  <button>step_incr &mdash; one implementation</button>
-  <button>step_double &mdash; another</button>
-  <button>a client, either way</button>
-</div>
-<div class="tabpane on"><pre><code class="ml">[%%vox.lean {lean|
-public opaque step : Int -&gt; Int
-public axiom step_gt (x : Int) : x &lt; step x
-grind_pattern step_gt =&gt; step x
-|lean}]
-
-val step : (x : int) -&gt; int{ _ = step x }</code></pre></div>
-<div class="tabpane"><pre><code class="ml">[%%vox.lean {lean|
-@[grind] def step (x : Int) : Int := x + 1
-
-theorem step_gt (x : Int) : x &lt; step x := by grind
-|lean}]
-
-let step : (x : int) -&gt; int{ _ = step x } = fun x -&gt; x + 1</code></pre></div>
-<div class="tabpane"><pre><code class="ml">[%%vox.lean {lean|
-@[grind] def step (x : Int) : Int := if x &lt; 0 then x + 1 else 2 * x + 1
-
-theorem step_gt (x : Int) : x &lt; step x := by grind
-|lean}]
-
-let step : (x : int) -&gt; int{ _ = step x } = fun x -&gt; if x &lt; 0 then x + 1 else (2 * x) + 1</code></pre></div>
-<div class="tabpane"><pre><code class="ml">open Step
-
-let grows : int{ 0 &lt; _ } =
-  let a = step 0 in
-  let b = step a in
-  b</code></pre>
-<p style="color:var(--dim);font-size:.9rem"><code>demo/lean_seal.ml</code>
-and <code>demo/lean_seal_alt.ml</code> verify this same body against
-step_incr and step_double respectively; <code>step</code> is opaque, so no
-client fact can distinguish them.</p></div>
-
-<p>An implementation that cannot prove the law is rejected at compile
-time, even when it honestly satisfies its own definitions &mdash; so a
-client never links against a module that does not meet its
-interface:</p>
-<pre><code class="ml">[%%vox.lean {lean|
-@[grind] def step (x : Int) : Int := x
-|lean}]
-
-let step : (x : int) -&gt; int{ _ = step x } = fun x -&gt; x</code></pre>
-<pre class="out"><code>File "step.ml", line 1:
-Error: vox: the implementation does not seal its interface:
-       error: vox seal: interface law step_gt has no implementation theorem</code></pre>
-
-<h3 id="oset">Full abstraction: the type hidden too</h3>
-<p>The representation type can be hidden as well.  Marking an abstract
-type <code>[@@vox.sort opaque]</code> gives it its own sort in the
-logic, rather than the shared <code>VoxU</code>, so the interface can
-state laws about values of that type.  In the implementation the
-concrete declaration takes over the same solver-side name, and the
-sealed laws are proved about the real representation.  The set below
-is a binary search tree, but neither clients nor their proofs can
-tell: everything a client knows follows from the four axioms
-(<code>mechanics/lean_oset_opaque.ml</code> checks that a fact the
+<p id="oset">The sealed style is exercised in the suite.
+<code>lib/step.mli</code> exports a single law as an axiom; two
+implementations (<code>step_incr</code>, <code>step_double</code>)
+each prove it, and <code>demo/lean_seal.ml</code> verifies the same
+client body against either, while an implementation that cannot prove
+the law is rejected at its seal
+(<code>mechanics/lean_seal_fail.ml</code>).  <code>lib/oset.mli</code>
+hides model and type both: the set is a binary search tree, but a
+client and its proofs see only four axioms
+(<code>demo/lean_oset.ml</code>;
+<code>mechanics/lean_oset_opaque.ml</code> checks that a fact the
 axioms do not imply is rejected).</p>
-
-<div class="tabs" data-tabs>
-  <button class="on">oset.mli &mdash; type and model both hidden</button>
-  <button>oset.ml &mdash; the implementation</button>
-  <button>a client</button>
-</div>
-<div class="tabpane on"><pre style="max-height:34rem"><code class="ml">type t [@@vox.sort opaque]
-
-[%%vox.lean {lean|
-public axiom mem : Int -&gt; Vox_Oset_t -&gt; Prop
-public axiom bst : Vox_Oset_t -&gt; Prop
-public axiom no_mem : Vox_Oset_t -&gt; Prop
-public axiom insert : Int -&gt; Vox_Oset_t -&gt; Vox_Oset_t
-
-public axiom no_mem_spec (x : Int) (t : Vox_Oset_t)
-    (h : no_mem t) : ¬ mem x t
-grind_pattern no_mem_spec =&gt; mem x t, no_mem t
-
-public axiom bst_insert (x : Int) (t : Vox_Oset_t)
-    (h : bst t) : bst (insert x t)
-grind_pattern bst_insert =&gt; bst (insert x t)
-
-public axiom mem_insert (x y : Int) (t : Vox_Oset_t) :
-    mem y (insert x t) ↔ (y = x ∨ mem y t)
-grind_pattern mem_insert =&gt; mem y (insert x t)
-|lean}]
-
-type set = t{ bst _ }
-
-val empty : set{ no_mem _ }
-val member : (x : int) -&gt; (t : set) -&gt; bool{ _ = mem x t }
-val insert : (x : int) -&gt; (t : set) -&gt; set{ _ = insert x t }</code></pre></div>
-<div class="tabpane"><pre style="max-height:34rem"><code class="ml">type t =
-  | Leaf
-  | Node of t * int * t
-
-[%%vox.lean {lean|
-@[grind] def mem : Int -&gt; Vox_Oset_t -&gt; Prop
-  | _, .Leaf =&gt; False
-  | x, .Node l v r =&gt; x = v ∨ mem x l ∨ mem x r
-
-@[grind] def all_lt : Vox_Oset_t -&gt; Int -&gt; Prop
-  | .Leaf, _ =&gt; True
-  | .Node l v r, b =&gt; v &lt; b ∧ all_lt l b ∧ all_lt r b
-
-@[grind] def all_gt : Vox_Oset_t -&gt; Int -&gt; Prop
-  | .Leaf, _ =&gt; True
-  | .Node l v r, b =&gt; v &gt; b ∧ all_gt l b ∧ all_gt r b
-
-@[grind] def bst : Vox_Oset_t -&gt; Prop
-  | .Leaf =&gt; True
-  | .Node l v r =&gt; all_lt l v ∧ all_gt r v ∧ bst l ∧ bst r
-
-@[grind] def no_mem (t : Vox_Oset_t) : Prop := ∀ x, ¬ mem x t
-
-@[grind] def insert : Int -&gt; Vox_Oset_t -&gt; Vox_Oset_t
-  | x, .Leaf =&gt; .Node .Leaf x .Leaf
-  | x, .Node l v r =&gt;
-      if x = v then .Node l v r
-      else if x &lt; v then .Node (insert x l) v r
-      else .Node l v (insert x r)
-
-theorem not_mem_lt (x b : Int) (t : Vox_Oset_t)
-    (h : all_lt t b) (hx : b &lt;= x) : ¬ mem x t := by
-  induction t &lt;;&gt; grind
-grind_pattern not_mem_lt =&gt; mem x t, all_lt t b
-
-theorem not_mem_gt (x b : Int) (t : Vox_Oset_t)
-    (h : all_gt t b) (hx : x &lt;= b) : ¬ mem x t := by
-  induction t &lt;;&gt; grind
-grind_pattern not_mem_gt =&gt; mem x t, all_gt t b
-
-theorem all_lt_insert (x b : Int) (t : Vox_Oset_t)
-    (h : all_lt t b) (hx : x &lt; b) : all_lt (insert x t) b := by
-  induction t &lt;;&gt; grind
-grind_pattern all_lt_insert =&gt; all_lt (insert x t) b
-
-theorem all_gt_insert (x b : Int) (t : Vox_Oset_t)
-    (h : all_gt t b) (hx : b &lt; x) : all_gt (insert x t) b := by
-  induction t &lt;;&gt; grind
-grind_pattern all_gt_insert =&gt; all_gt (insert x t) b
-
-theorem no_mem_spec (x : Int) (t : Vox_Oset_t)
-    (h : no_mem t) : ¬ mem x t := by grind
-
-theorem bst_insert (x : Int) (t : Vox_Oset_t)
-    (h : bst t) : bst (insert x t) := by
-  induction t &lt;;&gt; grind
-grind_pattern bst_insert =&gt; bst (insert x t)
-
-theorem mem_insert (x y : Int) (t : Vox_Oset_t) :
-    mem y (insert x t) ↔ (y = x ∨ mem y t) := by
-  induction t &lt;;&gt; grind
-grind_pattern mem_insert =&gt; mem y (insert x t)
-|lean}]
-
-type set = t{ bst _ }
-
-let empty : set{ no_mem _ } = Leaf
-
-let rec member : (x : int) -&gt; (t : set) -&gt; bool{ _ = mem x t } =
-  fun x t -&gt;
-    match t with
-    | Leaf -&gt; false
-    | Node (l, v, r) -&gt;
-      if x = v then true
-      else if x &lt; v then member x l
-      else member x r
-
-let rec insert : (x : int) -&gt; (t : set) -&gt; set{ _ = insert x t } =
-  fun x t -&gt;
-    match t with
-    | Leaf -&gt; Node (Leaf, x, Leaf)
-    | Node (l, v, r) -&gt;
-      if x = v then t
-      else if x &lt; v then begin
-        let l' = insert x l in
-        Node (l', v, r)
-      end
-      else begin
-        let r' = insert x r in
-        Node (l, v, r')
-      end</code></pre></div>
-<div class="tabpane"><pre><code class="ml">open Oset
-
-let found : bool{ _ = true } =
-  let t1 = insert 2 empty in
-  let t2 = insert 1 t1 in
-  member 1 t2
-
-let absent : bool{ _ = false } =
-  let t1 = insert 2 empty in
-  let t2 = insert 1 t1 in
-  member 3 t2</code></pre></div>
 
 <h2 id="real">The Patricia trie</h2>
 <p>This is the integer-set structure OxCaml&rsquo;s optimizer uses
