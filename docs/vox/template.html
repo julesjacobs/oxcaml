@@ -470,7 +470,11 @@ references (what justifies mutating in place), <code>@ local</code>
 confines it to its region, and <code>now m</code> / <code>fin m</code>
 are a RustHorn-style borrow&rsquo;s current and final (prophesied)
 contents.  In <code>psort</code> the mode checker proves the two tasks
-own disjoint halves, so parallelizing changes nothing in the proof.</p>
+own disjoint halves, so parallelizing changes nothing in the proof.
+Merge sort gets the same treatment
+(<code>demo/lean_slice_sort.ml</code>), sequential and parallel under
+one spec, with the merge loop itself verified &mdash; nothing assumed
+anywhere.</p>
 
 
 <h2 id="perf">Dropping runtime checks</h2>
