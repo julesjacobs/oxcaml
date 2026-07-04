@@ -135,7 +135,10 @@ bound admits:</p>
   match l with
   | Nil -&gt; unreachable_
   | Cons (h, t) -&gt; if i = 0 then h else nth t (i - 1)</code></pre>
-<pre class="out"><code>Error: vox: verification failed (lean).
+<pre class="out"><code>Line 12, characters 11-23:
+12 |   | Nil -&gt; unreachable_
+                ^^^^^^^^^^^^
+Error: vox: verification failed (lean).
        Goal: false
 Hypotheses:
   l = Nil
@@ -143,7 +146,7 @@ Hypotheses:
 Possible counterexample:
   i = 0
   len l = 0
-  len Vox__ilist.Nil = 0
+  len Vox_ilist.Nil = 0
 (lean: error: `grind` failed)</code></pre>
 
 <pre><code class="ml">let rec qsort :
@@ -224,8 +227,11 @@ greppable.
 
 <h3 style="margin-top:1.8rem">Design choices</h3>
 <ul>
-<li><a href="#sixty">The program is the spec</a>: <code>total_</code>
-  reflects a function into the logic; Lean checks its termination.</li>
+<li><a href="#sixty">The spec language is Lean; the spec is the
+  program</a>: predicates are propositions about the logical
+  counterparts of program values, and <code>total_</code> reflects a
+  function into the logic (Lean checks its termination).  Only
+  reflected functions can be called in predicates, for soundness.</li>
 <li><a href="#sixty">Why refinement types</a>: a parameter refinement is
   a precondition and a result refinement a postcondition, but a
   refinement can also sit inside a type:
@@ -277,6 +283,22 @@ condition is sufficient, and the check is fully automatic:</p>
 <pre><code class="ml">let div : (a : int) -&gt; (b : int{ not (_ = 0) }) -&gt; int = fun a b -&gt; a / b
 
 let safe x = if 0 &lt; x then div 100 x else 0</code></pre>
+<p>What sits inside the braces is not OCaml but a term of the logic.
+Each OxCaml value has a logical counterpart: for an <code>int</code>,
+the mathematical integer (no overflow); for a simple variant such as
+<code>ilist</code>, the corresponding Lean inductive value; for other
+types, an opaque atom that supports equality.  A variable in a
+predicate means the logical value of that variable, and the refinement
+as a whole is a proposition about logical values.  Functions enter the
+logic only by reflection: <code>total_</code> emits the function as a
+Lean definition, and only reflected functions can be applied inside
+predicates.  The restriction is soundness, not convenience: every Lean
+function is total, so a partial or diverging function has no logical
+counterpart to name (from <code>f x = f x + 1</code> the logic would
+conclude <code>0 = 1</code>).  The same picture fixes the corner cases:
+reflected division is OCaml&rsquo;s T-division totalized with
+<code>x / 0 = 0</code> in the logic where the program raises, which is
+sound under partial correctness.</p>
 <p>Refinements generalize pre- and postconditions: a parameter refinement
 is a precondition and a result refinement a postcondition, but a
 refinement can also sit under a type constructor.
@@ -1118,7 +1140,10 @@ a compile error with a witness:</p>
         let t1' = ins_unguarded i t1 in
         Branch (p, b, t0, t1')
       end</code></pre>
-<pre class="out"><code>Error: vox: verification failed (lean).
+<pre class="out"><code>Line 15, characters 8-30:
+15 |         Branch (p, b, t0', t1)
+             ^^^^^^^^^^^^^^^^^^^^^^
+Error: vox: verification failed (lean).
        Goal: (Branch (p, b, t0', t1)) = (insert i s)
 Hypotheses:
   t0' = (insert i t0)
@@ -1340,7 +1365,10 @@ element the counterexample names; below,
         let b = member_wrong x l in
         b
       end</code></pre>
-<pre class="out"><code>Error: vox: verification failed (lean).
+<pre class="out"><code>Line 9, characters 8-9:
+9 |         b
+            ^
+Error: vox: verification failed (lean).
        Goal: b = (mem x t)
 Hypotheses:
   b = (mem x r)

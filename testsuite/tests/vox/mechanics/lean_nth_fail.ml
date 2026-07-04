@@ -38,6 +38,6 @@ Hypotheses:
 Possible counterexample:
   i = 0
   len l = 0
-  len Vox__ilist.Nil = 0
+  len Vox_ilist.Nil = 0
 (lean: error: `grind` failed)
 |}]

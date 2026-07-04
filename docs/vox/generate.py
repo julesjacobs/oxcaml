@@ -201,7 +201,7 @@ def main():
                                     r'^let rec member_wrong', r'^\[%%expect',
                                     include_stop=False).rstrip('\n'),
         '@BST_FAIL_OUT@': slice_between(read('mechanics/lean_bst_fail.ml'),
-                                        r'^Error: vox: verification failed',
+                                        r'^Line \d+, characters',
                                         r'^\(lean: '),
         '@KERNEL@': slice_between(read('demo/lean_kernel.ml'),
                                   r'^let sum', r'^    go 0 0'),
@@ -222,7 +222,7 @@ def main():
         '@PTRIE_FAIL_OUT@': slice_between(
             slice_between(read('mechanics/lean_ptrie_fail.ml'),
                           r'^let rec ins_unguarded', r'^\(lean: '),
-            r'^Error: vox: verification failed', r'^\(lean: '),
+            r'^Line \d+, characters', r'^\(lean: '),
         '@BST_ALT@': slice_between(read('demo/lean_bst_alt.ml'),
                                    r'^module Set', r'^end')
                      + '\n\n'
@@ -245,7 +245,7 @@ def main():
     snippets['@HERO_FAIL@'] = slice_between(
         nth_fail, r'^let rec nth', r'if i = 0 then h else nth t \(i - 1\)')
     snippets['@HERO_FAIL_OUT@'] = slice_between(
-        nth_fail, r'^Error: vox: verification failed', r'^\(lean: ')
+        nth_fail, r'^Line \d+, characters', r'^\(lean: ')
     snippets['@HERO_QSORT@'] = snippets['@QSORT@']
 
     if args.ocamlc and args.lean:

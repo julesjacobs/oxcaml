@@ -182,8 +182,11 @@ greppable.
 
 <h3 style="margin-top:1.8rem">Design choices</h3>
 <ul>
-<li><a href="#sixty">The program is the spec</a>: <code>total_</code>
-  reflects a function into the logic; Lean checks its termination.</li>
+<li><a href="#sixty">The spec language is Lean; the spec is the
+  program</a>: predicates are propositions about the logical
+  counterparts of program values, and <code>total_</code> reflects a
+  function into the logic (Lean checks its termination).  Only
+  reflected functions can be called in predicates, for soundness.</li>
 <li><a href="#sixty">Why refinement types</a>: a parameter refinement is
   a precondition and a result refinement a postcondition, but a
   refinement can also sit inside a type:
@@ -233,6 +236,22 @@ system.</p>
 the body assumes it, and each call site must discharge it.  Here the branch
 condition is sufficient, and the check is fully automatic:</p>
 <pre><code class="ml">@SIXTY@</code></pre>
+<p>What sits inside the braces is not OCaml but a term of the logic.
+Each OxCaml value has a logical counterpart: for an <code>int</code>,
+the mathematical integer (no overflow); for a simple variant such as
+<code>ilist</code>, the corresponding Lean inductive value; for other
+types, an opaque atom that supports equality.  A variable in a
+predicate means the logical value of that variable, and the refinement
+as a whole is a proposition about logical values.  Functions enter the
+logic only by reflection: <code>total_</code> emits the function as a
+Lean definition, and only reflected functions can be applied inside
+predicates.  The restriction is soundness, not convenience: every Lean
+function is total, so a partial or diverging function has no logical
+counterpart to name (from <code>f x = f x + 1</code> the logic would
+conclude <code>0 = 1</code>).  The same picture fixes the corner cases:
+reflected division is OCaml&rsquo;s T-division totalized with
+<code>x / 0 = 0</code> in the logic where the program raises, which is
+sound under partial correctness.</p>
 <p>Refinements generalize pre- and postconditions: a parameter refinement
 is a precondition and a result refinement a postcondition, but a
 refinement can also sit under a type constructor.
