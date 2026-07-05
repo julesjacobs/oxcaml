@@ -169,6 +169,15 @@ Verification is opt-in per function.
 </ul>
 </div>
 
+<video controls loop muted playsinline width="940" poster="editor.png"
+  style="width:100%;max-width:940px;border:1px solid var(--line);border-radius:8px;margin:1.2rem 0 .2rem">
+  <source src="editor.webm" type="video/webm">
+</video>
+<p style="color:var(--dim);font-size:.9rem;margin:.2rem 0 2rem">The
+editor: hypotheses and goal at the cursor.  Weakening a bound breaks
+the proof &mdash; the counterexample names the input &mdash; and the
+fix turns it green again.</p>
+
 <h2 id="example">Refinement types, by example</h2>
 <p>In the first example, the compiler verifies that appending two
 lists adds their lengths.  The specification needs a length function
@@ -901,10 +910,19 @@ enough.</p></div>
 </div>
 </details>
 
+<h2 id="future">Future work</h2>
+<p>Total correctness, termination, liveness; exceptions and effect
+handlers; shared mutable state; concurrency with atomics.</p>
+
 <h2 id="run">Running it</h2>
 <pre><code>git clone -b vox https://github.com/julesjacobs/oxcaml && cd oxcaml
 autoconf && ./configure && make boot-compiler
 make test-one DIR=vox        # needs a Lean 4 toolchain (elan) on PATH</code></pre>
+<p>There is also a browser editor with a live proof pane &mdash; the
+hypotheses and goal at your cursor, including inside
+<code>[%%vox.lean]</code> blocks &mdash; in
+<a href="https://github.com/julesjacobs/oxcaml/tree/vox/tools/vox-editor">tools/vox-editor</a>;
+its README explains how to run it against your build.</p>
 <p>Every example on this page lives in the branch&rsquo;s test suite and
 this page is generated from it (<code>docs/vox/generate.py</code>): the demo
 files must verify, and the failure examples must fail with exactly the
