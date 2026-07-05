@@ -25,10 +25,10 @@ recursion appends last), so `toBag : ISet->IBag` is applied to a tree ->
 ill-typed Lean.  The failure surfaces as a VC whose goal is textually
 IDENTICAL to a hypothesis yet "fails" with a Lean "Application type
 mismatch" -- very confusing.  The DOCUMENTED layering path (nested type
-aliases) is unaffected.  Suggested fix (small, local): reject >1
-`[@vox.via]` on one type at `typetexp.ml` with a message pointing at
-nested aliases.  Reported, not fixed (compiler-source change; degenerate
-undocumented surface).
+aliases) is unaffected.  FIXED: `typetexp.transl_type_aux` now rejects
+more than one `[@vox.via]` on a single type at elaboration with "a type
+may carry at most one [@vox.via] attribute; layer abstractions through
+nested type aliases instead" (pinned by `mechanics/via_adv_double.ml`).
 
 ### F2 (minor, doc gap): VoxSig block name collisions are shape-blind
 Two units publicly defining `ISet` fail-closed when co-imported EVEN IF
@@ -36,9 +36,13 @@ the definitions are byte-identical (Lean `import` has no content dedup).
 This is sound (fail-closed) but the design doc's rule "same solver name,
 different shape -> fail" implies same-shape dedups; that holds only for
 AUTO-EMITTED datatypes (`check_imported_datatype_clashes` compares
-rendered text), NOT for user-written PUBLIC block declarations.  Doc
-should state: public model/ghost names must be globally unique across
-co-imported units; share a model by importing it, never by redefining.
+rendered text), NOT for user-written PUBLIC block declarations.
+
+RULE (holds now, no code change): public model/ghost names are globally
+unique across co-imported units; a client cannot pull in two units that
+each publicly declare the same Lean name (ghost sort, inductive, def),
+even if the declarations are identical.  Share a model by IMPORTING the
+one unit that defines it, never by redefining it in each unit.
 
 ### Diagnostic note (not a bug)
 Fail-closed VCs involving an opaque value where a skeleton sort is
