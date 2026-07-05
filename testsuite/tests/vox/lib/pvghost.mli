@@ -12,6 +12,13 @@ type ilist =
 (* ONE prophecy type for every sort: a prophecy over 'a denotes an 'a *)
 type 'a proph : value refines ('a)
 
-val new_proph : unit -> 'a proph @ unique
+(* A prophecy over 'a can be minted only against a WITNESS that 'a is
+   inhabited (the RustHorn discipline: a prophecy is born from a live
+   value).  [w] is a type-level witness -- discarded operationally --
+   so [empty proph] / [(unit{ false }) proph] are simply unwriteable:
+   there is no value to pass.  This closes the inhabitation hole that
+   [unit -> 'a proph] left open (a prophecy over an uninhabited sort
+   would assert its own existence). *)
+val new_proph : (w : 'a) -> 'a proph @ unique
 
 val resolve : (p : 'a proph) @ unique -> (v : 'a) -> unit{ p = v }

@@ -1,0 +1,6 @@
+File "lean_pvghost_witness.ml", line 22, characters 47-59:
+22 | let no_empty_proph () : empty proph @ unique = new_proph ()
+                                                    ^^^^^^^^^^^^
+Error: This expression has type unit Pvghost.proph
+       but an expression was expected of type empty Pvghost.proph
+       Type unit is not compatible with type empty

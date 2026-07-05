@@ -4,8 +4,8 @@ type ilist =
 
 type 'a proph : value refines ('a) = P of { u : unit }
 
-let new_proph : unit -> 'a proph @ unique =
-  fun () -> Obj.magic_unique (P { u = () })
+let new_proph : (w : 'a) -> 'a proph @ unique =
+  fun w -> ignore w; Obj.magic_unique (P { u = () })
 
 let resolve : (p : 'a proph) @ unique -> (v : 'a) -> unit{ p = v } =
   fun p v ->
