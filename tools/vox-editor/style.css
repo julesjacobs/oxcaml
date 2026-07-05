@@ -1,5 +1,8 @@
-/* Dense dark dev-tool aesthetic. */
+/* Dense dev-tool aesthetic, dark by default with a light counterpart.
+   Every colour is a variable so the @media block below can flip the
+   whole palette; the light values mirror docs/vox/template.html. */
 :root {
+  color-scheme: dark light;
   --bg: #10141a;
   --panel: #161b22;
   --border: #2b333d;
@@ -9,7 +12,45 @@
   --ok: #3fb950;
   --fail: #f0533f;
   --warn: #d0a54a;
+  /* surfaces + tints (were hardcoded) */
+  --btn-bg: #212a35;
+  --editor-bg: #0d1117;
+  --goal-bg: #16202b;
+  --hyp-bg: #131a22;
+  --cex-bg: #2a1614;
+  --live-bg: #201b12;
+  --block-tint: rgba(76, 155, 232, 0.08);
+  --badge-ok-bg: rgba(63, 185, 80, 0.2);
+  --badge-fail-bg: rgba(240, 83, 63, 0.2);
+  --badge-unknown-bg: #21262d;
+  --sel-bg: #24344d;
+  --sel-bg-focus: #2a3d5c;
   --mono: "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #ffffff;
+    --panel: #f6f7f9;
+    --border: #d9dde4;
+    --fg: #24292f;
+    --muted: #57606a;
+    --accent: #0b5fbf;
+    --ok: #1a7f37;
+    --fail: #c0334d;
+    --warn: #7d4e00;
+    --btn-bg: #eceef2;
+    --editor-bg: #ffffff;
+    --goal-bg: #eef4fb;
+    --hyp-bg: #f0f2f5;
+    --cex-bg: #fbecee;
+    --live-bg: #fbf3e6;
+    --block-tint: rgba(11, 95, 191, 0.1);
+    --badge-ok-bg: rgba(26, 127, 55, 0.15);
+    --badge-fail-bg: rgba(192, 51, 77, 0.15);
+    --badge-unknown-bg: #e7e9ee;
+    --sel-bg: #cfe0f7;
+    --sel-bg-focus: #b6d0f2;
+  }
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
@@ -32,7 +73,7 @@ body {
 #spacer { flex: 1; }
 #hint { color: var(--muted); font-size: 12px; }
 button {
-  background: #212a35;
+  background: var(--btn-bg);
   color: var(--fg);
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -42,7 +83,7 @@ button {
 }
 button:hover { border-color: var(--accent); }
 #examples {
-  background: #212a35;
+  background: var(--btn-bg);
   color: var(--fg);
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -64,17 +105,17 @@ main { flex: 1; display: flex; min-height: 0; }
   min-width: 0;
   overflow: auto;
   padding: 10px 14px;
-  background: #0d1117;
+  background: var(--editor-bg);
 }
 .CodeMirror { height: 100%; font: 13px/1.5 var(--mono); }
-.cm-s-default.CodeMirror { background: #0d1117; color: var(--fg); }
-.CodeMirror-gutters { background: #0d1117; border-right: 1px solid var(--border); }
+.cm-s-default.CodeMirror { background: var(--editor-bg); color: var(--fg); }
+.CodeMirror-gutters { background: var(--editor-bg); border-right: 1px solid var(--border); }
 
 /* VC markers layered over the source. */
 .vc-proved { border-bottom: 2px solid var(--ok); }
 .vc-failed { border-bottom: 2px solid var(--fail); }
 .vc-unknown { border-bottom: 2px dotted var(--muted); }
-.vc-block { background: rgba(76, 155, 232, 0.08); }
+.vc-block { background: var(--block-tint); }
 
 .pane-mode {
   color: var(--muted);
@@ -97,9 +138,9 @@ main { flex: 1; display: flex; min-height: 0; }
   border-radius: 3px;
   margin: 2px 0;
 }
-.goal { background: #16202b; border-left: 3px solid var(--accent); }
-.hyp { background: #131a22; border-left: 3px solid var(--border); }
-.cex { background: #2a1614; border-left: 3px solid var(--fail); }
+.goal { background: var(--goal-bg); border-left: 3px solid var(--accent); }
+.hyp { background: var(--hyp-bg); border-left: 3px solid var(--border); }
+.cex { background: var(--cex-bg); border-left: 3px solid var(--fail); }
 .badge {
   display: inline-block;
   padding: 1px 7px;
@@ -107,9 +148,9 @@ main { flex: 1; display: flex; min-height: 0; }
   font-size: 11px;
   margin-left: 6px;
 }
-.badge-proved { background: rgba(63,185,80,0.2); color: var(--ok); }
-.badge-failed { background: rgba(240,83,63,0.2); color: var(--fail); }
-.badge-unknown { background: #21262d; color: var(--muted); }
+.badge-proved { background: var(--badge-ok-bg); color: var(--ok); }
+.badge-failed { background: var(--badge-fail-bg); color: var(--fail); }
+.badge-unknown { background: var(--badge-unknown-bg); color: var(--muted); }
 .placeholder { color: var(--muted); }
 .nearest { margin-top: 6px; }
 .jump {
@@ -122,19 +163,19 @@ main { flex: 1; display: flex; min-height: 0; }
 .jump:hover { color: var(--fg); border-color: var(--accent); }
 #errors { margin-top: 10px; }
 .err {
-  background: #2a1614;
+  background: var(--cex-bg);
   border-left: 3px solid var(--fail);
   padding: 4px 8px;
   margin: 4px 0;
   white-space: pre-wrap;
 }
-.live-goals { border-left: 3px solid var(--warn); background: #201b12; }
+.live-goals { border-left: 3px solid var(--warn); background: var(--live-bg); }
 
-/* Cursor + selection visibility on the dark background (the vendored
-   CM5 defaults are black-on-white and vanish here). */
+/* Cursor + selection visibility (the vendored CM5 defaults are
+   black-on-white; drive both from palette variables instead). */
 .CodeMirror-cursor { border-left: 2px solid var(--fg); }
-.CodeMirror-selected { background: #24344d; }
-.CodeMirror-focused .CodeMirror-selected { background: #2a3d5c; }
+.CodeMirror-selected { background: var(--sel-bg); }
+.CodeMirror-focused .CodeMirror-selected { background: var(--sel-bg-focus); }
 .CodeMirror-line::selection,
 .CodeMirror-line > span::selection,
-.CodeMirror-line > span > span::selection { background: #2a3d5c; }
+.CodeMirror-line > span > span::selection { background: var(--sel-bg-focus); }

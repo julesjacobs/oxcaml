@@ -206,6 +206,26 @@ async function main() {
     console.log("ok - picked example checks:", exStatus.trim());
     assert.ok(exStatus.includes("verified"), "picked example verifies: " + exStatus);
 
+    // Light mode: emulate each OS preference and assert the palette flips.
+    // (Headless Chrome defaults to light, so pin dark first for a real
+    // before/after.)
+    const readBg = () =>
+      page.evaluate(() =>
+        getComputedStyle(document.documentElement).getPropertyValue("--bg").trim()
+      );
+    await page.emulateMediaFeatures([
+      { name: "prefers-color-scheme", value: "dark" },
+    ]);
+    const darkBg = await readBg();
+    await page.emulateMediaFeatures([
+      { name: "prefers-color-scheme", value: "light" },
+    ]);
+    const lightBg = await readBg();
+    console.log("ok - palette flips on light mode:", darkBg, "->", lightBg);
+    assert.notStrictEqual(lightBg, darkBg, "--bg should change under light mode");
+    assert.strictEqual(lightBg, "#ffffff", "light --bg should be white: " + lightBg);
+    assert.strictEqual(darkBg, "#10141a", "dark --bg should be the dark base: " + darkBg);
+
     console.log("\nALL BROWSER TESTS PASSED");
   } finally {
     if (browser) await browser.close();
