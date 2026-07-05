@@ -910,48 +910,9 @@ enough.</p></div>
 </div>
 </details>
 
-<h2 id="limits">What it does not do</h2>
-<p>Verification here is partial correctness, and only that.  A spec
-holds if the function returns normally; divergence or an exception
-makes it vacuous.  Total correctness is out of scope: there is no way
-to prove that a program function terminates (only <code>total_</code>
-spec functions are termination-checked, by Lean), and no liveness
-property is expressible &mdash; no progress, no eventual response, no
-fairness; specs only ever say what values are when code returns.
-Exceptional control flow cannot be specified &mdash;
-there is no &ldquo;raises <code>X</code> when <code>P</code>&rdquo;
-contract &mdash; and exception and effect-handler arms conservatively
-receive no facts: sound, and imprecise.  Integers are ideal
-(reflection equates modular with mathematical arithmetic, so overflow
-is not modeled) and floats are opaque.  Mutation is verified only
-under unique ownership &mdash; modes, borrows, and small trusted token
-libraries; the one shared form is a <code>ref</code> whose contents
-type carries an invariant.  There is no shared-state concurrency:
-no atomics, no memory model, no locks &mdash; fork-join disjointness
-is the whole story today.  What is assumed is as load-bearing as what
-is proved: <code>assume_unchecked_</code>, <code>axiom</code>s in
-implementation blocks, and declared modelings join the trusted base,
-alongside the emitter and Lean&rsquo;s kernel.  And the automation is
-incomplete &mdash; true goals can need hand-written lemmas, and how
-concrete a counterexample is depends on the model.</p>
-
 <h2 id="future">Future work</h2>
-<p>Roughly in the order we would take it on.  Termination for program
-functions &mdash; the machinery exists (<code>total_</code> functions
-are already termination-checked by Lean); extending it to ordinary
-recursion with measures is the natural next step, and it upgrades
-partial to total correctness where you opt in.  Exceptions as
-contracts: &ldquo;raises <code>X</code> when <code>P</code>&rdquo; as
-a specifiable outcome instead of an invisible path.  Shared state,
-in layers: an invariant layer first (protected regions whose invariant
-is checked at every release), atomics and a memory model only once
-that holds up.  Interface models for the core containers, so client
-code proves against maps and sets without reading implementations.
-Spec-driven testing at the <code>assume_</code> boundary &mdash;
-reflected contracts as oracles for property-based testing and
-fuzzing.  And the editor grows toward an IDE: hypothesis provenance
-(hover a fact, see the source that produced it), multi-unit projects,
-and proof-state history.</p>
+<p>Total correctness, termination, liveness; exceptions and effect
+handlers; shared mutable state; concurrency with atomics.</p>
 
 <h2 id="run">Running it</h2>
 <pre><code>git clone -b vox https://github.com/julesjacobs/oxcaml && cd oxcaml
