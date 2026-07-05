@@ -3298,6 +3298,66 @@ let normalize_block s =
   if String.length s > 0 && s.[String.length s - 1] = '\n' then s else s ^ "\n"
 ;;
 
+(* [%%vox.lean] blocks are UNIT-LEVEL: the solver input is assembled
+   once per compilation unit, and [collect_blocks] reads only the
+   top-level items.  A block nested in a module or functor body would be
+   silently dropped -- its definitions then undefined at VC time, an
+   error surfacing far from its cause -- so detect one and reject it
+   with a clear message pointing at the fix.  Traverses module/functor
+   bodies (structures on the implementation side, module types on the
+   interface side). *)
+let nested_block_error attr_loc =
+  Location.raise_errorf ~loc:attr_loc
+    "vox: [%%%%vox.lean] blocks are unit-level; move to the file top level"
+;;
+
+let rec check_no_nested_blocks_module_expr (me : module_expr) =
+  match me.mod_desc with
+  | Tmod_structure str -> check_no_nested_blocks_structure str
+  | Tmod_functor (_, body) -> check_no_nested_blocks_module_expr body
+  | Tmod_constraint (me, _, _, _) -> check_no_nested_blocks_module_expr me
+  | Tmod_apply (m1, m2, _) ->
+    check_no_nested_blocks_module_expr m1;
+    check_no_nested_blocks_module_expr m2
+  | Tmod_apply_unit m1 -> check_no_nested_blocks_module_expr m1
+  | Tmod_ident _ | Tmod_unpack _ -> ()
+
+and check_no_nested_blocks_structure (str : structure) =
+  List.iter
+    (fun item ->
+      match item.str_desc with
+      | Tstr_attribute ({attr_name = {txt; _}; attr_loc; _} : attribute)
+        when is_vox_block_name txt ->
+        nested_block_error attr_loc
+      | Tstr_module mb -> check_no_nested_blocks_module_expr mb.mb_expr
+      | Tstr_recmodule mbs ->
+        List.iter (fun mb -> check_no_nested_blocks_module_expr mb.mb_expr) mbs
+      | _ -> ())
+    str.str_items
+
+and check_no_nested_blocks_module_type (mty : module_type) =
+  match mty.mty_desc with
+  | Tmty_signature sg -> check_no_nested_blocks_signature sg
+  | Tmty_functor (_, body, _) -> check_no_nested_blocks_module_type body
+  | Tmty_with (mty, _) -> check_no_nested_blocks_module_type mty
+  | Tmty_strengthen (mty, _, _) -> check_no_nested_blocks_module_type mty
+  | Tmty_typeof me -> check_no_nested_blocks_module_expr me
+  | Tmty_ident _ | Tmty_alias _ -> ()
+
+and check_no_nested_blocks_signature (sg : signature) =
+  List.iter
+    (fun item ->
+      match item.sig_desc with
+      | Tsig_attribute ({attr_name = {txt; _}; attr_loc; _} : attribute)
+        when is_vox_block_name txt ->
+        nested_block_error attr_loc
+      | Tsig_module md -> check_no_nested_blocks_module_type md.md_type
+      | Tsig_recmodule mds ->
+        List.iter (fun md -> check_no_nested_blocks_module_type md.md_type) mds
+      | _ -> ())
+    sg.sig_items
+;;
+
 let collect_blocks (str : structure) =
   List.filter_map
     (fun item ->
@@ -3307,6 +3367,12 @@ let collect_blocks (str : structure) =
         (match vox_block_text ({txt; loc = attr_loc}, attr_payload) with
          | Some s -> Some (normalize_block s, attr_loc)
          | None -> None)
+      | Tstr_module mb ->
+        check_no_nested_blocks_module_expr mb.mb_expr;
+        None
+      | Tstr_recmodule mbs ->
+        List.iter (fun mb -> check_no_nested_blocks_module_expr mb.mb_expr) mbs;
+        None
       | _ -> None)
     str.str_items
 ;;
@@ -3327,6 +3393,12 @@ let collect_blocks_sig (sg : Typedtree.signature) =
          with
          | Some s -> Some (normalize_block s)
          | None -> None)
+      | Tsig_module md ->
+        check_no_nested_blocks_module_type md.md_type;
+        None
+      | Tsig_recmodule mds ->
+        List.iter (fun md -> check_no_nested_blocks_module_type md.md_type) mds;
+        None
       | _ -> None)
     sg.sig_items
 ;;

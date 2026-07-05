@@ -1,0 +1,5 @@
+File "block_in_module.ml", lines 15-17, characters 2-9:
+15 | ..[%%vox.lean {lean|
+16 |   @[grind] def foo (x : Int) : Int := x + 1
+17 |   |lean}]
+Error: vox: [%%vox.lean] blocks are unit-level; move to the file top level
