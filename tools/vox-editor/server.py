@@ -35,6 +35,7 @@ import lean_bridge  # pyright: ignore[reportImplicitRelativeImport]
 import vc_index  # pyright: ignore[reportImplicitRelativeImport]
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+EXAMPLES_DIR = os.path.join(HERE, "examples")
 
 _CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
@@ -225,11 +226,43 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._json(404, {"error": "no such endpoint"})
 
+    def _send_file(self, target: str, ctype: str) -> None:
+        with open(target, "rb") as fh:
+            data = fh.read()
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _serve_example(self, name: str) -> None:
+        """Serve a single curated example source by its index name.
+
+        Uses the same no-traversal discipline as the static assets: the
+        resolved path must stay within the examples dir."""
+        target = os.path.normpath(os.path.join(EXAMPLES_DIR, name + ".ml"))
+        if not target.startswith(EXAMPLES_DIR + os.sep) or not os.path.isfile(target):
+            self._json(404, {"error": "no such example"})
+            return
+        self._send_file(target, "text/plain; charset=utf-8")
+
     def do_GET(self) -> None:
         path = self._endpoint()
         if path == "/favicon.ico":
             self.send_response(204)
             self.end_headers()
+            return
+        # Curated examples: /examples is the index, /examples/<name> the
+        # source of one example (see make_examples.py).
+        if path == "/examples":
+            index = os.path.join(EXAMPLES_DIR, "index.json")
+            if not os.path.isfile(index):
+                self._json(404, {"error": "no examples index"})
+                return
+            self._send_file(index, "application/json; charset=utf-8")
+            return
+        if path.startswith("/examples/"):
+            self._serve_example(path[len("/examples/") :])
             return
         if path == "/":
             path = "/index.html"

@@ -29,6 +29,9 @@ let errors = [];
 let revision = 0;
 let applied = -1;
 let marks = [];
+// The source of the example currently loaded (or the initial SAMPLE), so
+// we can warn before discarding hand edits when a new one is picked.
+let lastLoaded = SAMPLE;
 
 const statusEl = document.getElementById("status");
 const modeEl = document.getElementById("pane-mode");
@@ -208,7 +211,56 @@ cm.addKeyMap({
   "Cmd-Enter": check,
 });
 
+// Examples dropdown: populated from /examples, each choice loads the
+// source and re-checks. A confirm() guards unsaved edits.
+const examplesEl = document.getElementById("examples");
+
+async function loadExamples() {
+  let list;
+  try {
+    const resp = await fetch("/examples");
+    list = (await resp.json()).examples || [];
+  } catch (e) {
+    return; // no examples served; leave the dropdown as-is
+  }
+  list.forEach((ex) => {
+    const opt = document.createElement("option");
+    opt.value = ex.name;
+    opt.textContent = (ex.verifies ? "" : "✗ ") + ex.title;
+    opt.title = ex.description;
+    examplesEl.appendChild(opt);
+  });
+}
+
+async function pickExample(name) {
+  if (cm.getValue() !== lastLoaded &&
+      !confirm("Discard your edits and load this example?")) {
+    return false;
+  }
+  try {
+    const resp = await fetch("/examples/" + encodeURIComponent(name));
+    if (!resp.ok) return false;
+    const source = await resp.text();
+    lastLoaded = source;
+    cm.setValue(source);
+    check();
+    return true;
+  } catch (e) {
+    setStatus("status-fail", "could not load example");
+    return false;
+  }
+}
+
+examplesEl.addEventListener("change", async () => {
+  const name = examplesEl.value;
+  if (!name) return;
+  await pickExample(name);
+  examplesEl.value = ""; // reset to the "Examples…" label
+});
+
+loadExamples();
+
 // Testability hook for the headless browser smoke test.
-window.__vox = { cm, check, renderPane };
+window.__vox = { cm, check, renderPane, pickExample, loadExamples };
 
 check();

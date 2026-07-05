@@ -146,5 +146,64 @@ class TestHttp(unittest.TestCase):
             self.assertIn(e.code, (400, 404))
 
 
+class TestExampleEndpoints(unittest.TestCase):
+    """GET /examples and /examples/<name>. These serve committed static
+    files, so no compiler is needed and the tests run unconditionally."""
+
+    httpd: server.ThreadingHTTPServer  # pyright: ignore[reportUninitializedInstanceVariable]
+    port: int  # pyright: ignore[reportUninitializedInstanceVariable]
+    thread: threading.Thread  # pyright: ignore[reportUninitializedInstanceVariable]
+
+    def setUp(self):
+        self.httpd, self.port = server.make_server(0, "", None)
+        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self.thread.start()
+
+    def tearDown(self):
+        self.httpd.shutdown()
+
+    def _get(self, path: str):
+        req = urllib.request.Request("http://127.0.0.1:%d%s" % (self.port, path))
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return resp.headers.get("Content-Type", ""), resp.read()
+
+    def test_examples_index(self):
+        ctype, body = self._get("/examples")
+        self.assertIn("application/json", ctype)
+        data = json.loads(body.decode("utf-8"))
+        examples = cast(List[Dict[str, Any]], data["examples"])
+        self.assertTrue(len(examples) >= 1)
+        for ex in examples:
+            self.assertIn("name", ex)
+            self.assertIn("title", ex)
+            self.assertIn("description", ex)
+            self.assertIn("verifies", ex)
+        # The failing counterexample is present and flagged.
+        cex = [e for e in examples if not e["verifies"]]
+        self.assertEqual(len(cex), 1)
+
+    def test_example_source(self):
+        # Load the index and fetch the first example's source.
+        _, body = self._get("/examples")
+        first = cast(List[Dict[str, Any]], json.loads(body)["examples"])[0]
+        ctype, src = self._get("/examples/" + first["name"])
+        self.assertIn("text/plain", ctype)
+        self.assertIn("let", src.decode("utf-8"))
+
+    def test_example_not_found(self):
+        try:
+            self._get("/examples/no_such_example")
+            self.fail("expected HTTP error")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 404)
+
+    def test_example_no_traversal(self):
+        try:
+            self._get("/examples/..%2f..%2fserver")
+            self.fail("expected HTTP error")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 404)
+
+
 if __name__ == "__main__":
     unittest.main()

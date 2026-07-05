@@ -41,6 +41,17 @@ button {
   font: inherit;
 }
 button:hover { border-color: var(--accent); }
+#examples {
+  background: #212a35;
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 6px;
+  cursor: pointer;
+  font: inherit;
+  max-width: 260px;
+}
+#examples:hover { border-color: var(--accent); }
 #status { padding: 2px 8px; border-radius: 4px; font-size: 12px; }
 .status-idle { color: var(--muted); }
 .status-checking { color: var(--warn); }

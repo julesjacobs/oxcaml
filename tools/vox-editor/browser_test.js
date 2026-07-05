@@ -152,6 +152,39 @@ async function main() {
     assert.ok(live.includes("⊢"), "live goal has a turnstile: " + live.slice(0, 160));
     assert.ok(/Int/.test(live), "live goal has a hypothesis: " + live.slice(0, 160));
 
+    // Examples dropdown: it is populated, and picking one loads that
+    // source into the editor and re-checks to a verdict.
+    await page.evaluate(() => {
+      window.confirm = () => true; // never block the headless run
+    });
+    const optCount = await page.$eval("#examples", (e) => e.options.length);
+    assert.ok(optCount > 1, "examples dropdown populated: " + optCount);
+    await page.evaluate(() => {
+      const sel = document.getElementById("examples");
+      sel.value = "overview";
+      sel.dispatchEvent(new Event("change"));
+    });
+    const loaded = await waitFor(
+      async () => {
+        const t = await page.evaluate(() => window.__vox.cm.getValue());
+        return t.includes("let div") ? t : false;
+      },
+      10000,
+      "example loaded into editor"
+    );
+    console.log("ok - example loaded into editor");
+    assert.ok(!loaded.includes("total_ dbl"), "sample replaced by the example");
+    const exStatus = await waitFor(
+      async () => {
+        const t = await page.$eval("#status", (e) => e.textContent);
+        return /verified|errors/.test(t) ? t : false;
+      },
+      60000,
+      "picked example to check"
+    );
+    console.log("ok - picked example checks:", exStatus.trim());
+    assert.ok(exStatus.includes("verified"), "picked example verifies: " + exStatus);
+
     console.log("\nALL BROWSER TESTS PASSED");
   } finally {
     if (browser) await browser.close();

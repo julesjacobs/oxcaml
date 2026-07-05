@@ -1,0 +1,58 @@
+{
+  "examples": [
+    {
+      "name": "overview",
+      "title": "Sixty seconds",
+      "description": "First contact: a division whose divisor carries a not (_ = 0) contract, discharged at each call site. The smallest end-to-end proof.",
+      "verifies": true
+    },
+    {
+      "name": "reflect",
+      "title": "The program as its own spec",
+      "description": "total_ recursive functions reflect into the logic, so len, mem and depth denote themselves in refinements -- no separate spec library, no proof text.",
+      "verifies": true
+    },
+    {
+      "name": "nth",
+      "title": "A precondition makes a branch dead",
+      "description": "Safe list indexing: len and append prove inductively, and the bound 0 <= i < len l rides nth's parameter as a contract, turning the Nil arm into a false obligation rather than an exception.",
+      "verifies": true
+    },
+    {
+      "name": "tuples",
+      "title": "Native tuples in refinements",
+      "description": "Construction, fst/snd projection, tuple-pattern matching and structural equality, reasoned through Lean's product structures.",
+      "verifies": true
+    },
+    {
+      "name": "quant",
+      "title": "Quantifiers in predicates",
+      "description": "forall_, exists_ and native implication in refinements, with notes on where grind's automation is reliable and where quantified reasoning belongs in a prelude block.",
+      "verifies": true
+    },
+    {
+      "name": "fib",
+      "title": "Fibonacci: fast doubling, one file",
+      "description": "The naive recursion is reflected and total; the O(log n) fast-doubling loop is verified against it. The addition and doubling identities are proved by functional induction in an embedded [%%vox.lean] block -- put the cursor there and ask for the live Lean goal.",
+      "verifies": true
+    },
+    {
+      "name": "reverse",
+      "title": "In-place array reverse (McCarthy stores)",
+      "description": "Mutable-array verification via McCarthy upd/elem stores and a loop-invariant Prop, with the step lemma proved in the block. The postcondition is the full reversal permutation.",
+      "verifies": true
+    },
+    {
+      "name": "mutable",
+      "title": "Flow-sensitive mutable locals",
+      "description": "SSA versioning, conditional joins, let mutable, and for / while loops with [@vox.invariant], all with reflected arithmetic through the mutable reads.",
+      "verifies": true
+    },
+    {
+      "name": "counterexample",
+      "title": "When you're wrong (counterexample)",
+      "description": "A deliberately false spec: fib n = n + 1. Verification fails and the solver hands back a concrete witness -- n = 0, where fib 0 = 0, not 1. The one example here that does NOT verify.",
+      "verifies": false
+    }
+  ]
+}

@@ -12,8 +12,8 @@ mkdir -p "$TMPDIR"
 export TMPDIR
 export NO_PROXY=127.0.0.1,localhost
 
-echo "== python: vc_index / lean_bridge / server (unit + end-to-end) =="
-python3 -m unittest test_vc_index test_lean_bridge test_server
+echo "== python: vc_index / lean_bridge / server / make_examples (unit + end-to-end) =="
+python3 -m unittest test_vc_index test_lean_bridge test_server test_make_examples
 
 echo "== node: selection logic =="
 node test_selection.js
