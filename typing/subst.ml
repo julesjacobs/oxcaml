@@ -827,6 +827,26 @@ let rec typexp copy_scope s ty =
           let arg = typexp copy_scope s arg in
           let ret = typexp copy_scope s ret in
           let comm = copy_commu comm in
+          (* vox: a dependent-arrow binder is a [Scoped] ident whose stamp is
+             only meaningful within its own compiler process, so two .cmis
+             routinely marshal COLLIDING binder stamps.  When importing a
+             signature, freshen the binder together with the [Refinement.Pvar]s
+             it binds in the codomain: imported binders then land in the
+             consuming unit's stamp space and can never collide -- with each
+             other, across imports, or with locally minted binders.  That is
+             the disjointness [Vox_dep.subst] and [Refinement.equal_var]
+             already assume; without it a cross-binder collision makes the
+             arrow pairing match the wrong partner (see stamp_collide and
+             functor_refine). *)
+          let binder, ret =
+            match s.sort_var_mapping, binder with
+            | Loading _, Some id ->
+                let id' =
+                  Ident.create_scoped ~scope:(Ident.scope id) (Ident.name id)
+                in
+                Some id', Vox_dep.subst_binder id ~by:(Refinement.Pvar id') ret
+            | Loading _, None | (Saving _ | Nothing), _ -> binder, ret
+          in
           Tarrow ((label, marg, mret, binder), arg, ret, comm)
       | Trefine (t, maps, p) ->
           (* vox: constructor applications in the predicate carry type

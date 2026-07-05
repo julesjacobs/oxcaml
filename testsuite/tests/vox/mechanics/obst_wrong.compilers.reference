@@ -1,0 +1,7 @@
+File "obst_wrong.ml", line 22, characters 17-18:
+22 |     fun _x _y -> 0
+                      ^
+Error: vox: verification failed (lean).
+       Goal: (0 = 0) -> (_x = _y)
+Hypotheses: <none>
+(lean: error: `grind` failed)

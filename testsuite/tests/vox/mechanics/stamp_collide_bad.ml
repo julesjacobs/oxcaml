@@ -8,7 +8,15 @@
 *)
 
 (* Negative side of stamp_collide.ml: the two units' SECOND dependent
-   signatures have colliding binder stamps but different predicates
-   (p + q vs r * s); colliding stamps must not make them unify. *)
+   signatures have different predicates (p + q vs r * s) and must not
+   unify.  Since imported binders are now freshened disjoint at
+   signature load, the historical stamp COLLISION this pair was shaped
+   to force no longer reaches the consuming unit; the rejection stands
+   on the differing operators (Add vs Mul).  The message renders the
+   expected codomain as [p + p]: on a FAILED arrow unify the binder-
+   alignment rename (ctype [unify]) has already substituted one arrow's
+   binder into the other's codomain, so the printer shows the aligned
+   name -- cosmetic, and orthogonal to the operator mismatch that
+   drives the error. *)
 
 let bad (b : bool) = if b then Collide_a.dep2 else Collide_b.dep2
