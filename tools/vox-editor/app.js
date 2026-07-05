@@ -29,6 +29,10 @@ let errors = [];
 let revision = 0;
 let applied = -1;
 let marks = [];
+// A 0-based line the next successful check should move the cursor to (an
+// example's suggested first-cursor / best-teaching line), consumed once so
+// the pane opens on that obligation instead of line 1. Null when idle.
+let pendingCursor = null;
 // The source of the example currently loaded (or the initial SAMPLE), so
 // we can warn before discarding hand edits when a new one is picked.
 let lastLoaded = SAMPLE;
@@ -87,9 +91,29 @@ async function check() {
       resp.ok ? "verified ✓" : "errors ✗"
     );
     renderPane();
+    applyPendingCursor();
   } catch (e) {
     setStatus("status-fail", "server error");
   }
+}
+
+// Move the cursor to a freshly-loaded example's suggested line, once the
+// regions for it are in. Snap to the region that STARTS on that line so
+// line-addressed VCs and span-addressed theorems both land precisely (a
+// theorem is "inside" only when the cursor is within its columns); fall
+// back to column 0 if nothing starts there.
+function applyPendingCursor() {
+  if (pendingCursor === null) return;
+  const line = pendingCursor;
+  pendingCursor = null;
+  const here = regions
+    .filter((r) => r.start.line === line)
+    .sort(
+      (a, b) => Selection.kindRank(b) - Selection.kindRank(a) || Selection.spanCmp(a, b)
+    );
+  const target = here[0];
+  cm.setCursor(target ? { line: target.start.line, ch: target.start.col } : { line, ch: 0 });
+  cm.focus();
 }
 
 const REGION_NOUN = {
@@ -309,6 +333,11 @@ async function loadExample(name, force) {
     lastLoaded = source;
     cm.setValue(source);
     examplesEl.value = name; // reflect the loaded example in the dropdown
+    // Open on the example's suggested teaching line (1-based in the
+    // manifest), applied by the check we kick off below.
+    const meta = examplesList.find((e) => e.name === name);
+    pendingCursor =
+      meta && typeof meta.cursor === "number" ? meta.cursor - 1 : null;
     check();
     return true;
   } catch (e) {

@@ -121,6 +121,29 @@ async function main() {
     );
     console.log("ok - default is the walkthrough, selected in the dropdown");
 
+    // On load the editor opens on the example's suggested teaching line
+    // (nth: line 21, the impossible Nil arm) and the pane shows that VC --
+    // its obligation is the impossible `false`, provable because the bound
+    // makes the arm dead.
+    await waitFor(
+      () => page.evaluate(() => window.__vox.cm.getCursor().line === 20),
+      5000,
+      "cursor on the suggested line (21)"
+    );
+    const paneOnLoad = await waitFor(
+      async () => {
+        const t = await page.$eval("#pane-body", (e) => e.textContent);
+        return /goal/.test(t) ? t : false;
+      },
+      5000,
+      "suggested VC pane on load"
+    );
+    assert.ok(
+      /false/.test(paneOnLoad),
+      "the Nil-arm obligation is false: " + paneOnLoad.slice(0, 100)
+    );
+    console.log("ok - opens with cursor on the suggested line, pane on that VC");
+
     // Cursor on the first VC region: the pane shows its goal.
     const vcPos = await page.evaluate(() => {
       const r = window.__vox.getRegions().find((x) => x.kind === "vc");

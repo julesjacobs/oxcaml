@@ -21,7 +21,10 @@ is expected to verify or to fail).  For each entry this script:
     broken tail therefore drop out here, on their own.
 
 Emits ``examples/<slug>.ml`` and ``examples/index.json`` (an ordered list
-of ``{name, title, description, verifies}``).
+of ``{name, title, description, verifies, cursor}``).  ``cursor`` is a
+hand-picked 1-based line -- the example's best teaching frame -- that the
+editor places the cursor on at load, so the proof pane opens on that
+obligation instead of line 1.
 
   python3 make_examples.py              # transform, validate, emit
   python3 make_examples.py --check-only # transform + validate, report only
@@ -59,6 +62,8 @@ MANIFEST: List[Dict[str, object]] = [
         "override": "nth.ml",
         "expect": "verify",
         "default": True,
+        # The impossible Nil arm: bound makes its `false` obligation provable.
+        "cursor": 21,
         "title": "Refinement types, by example",
         "description": (
             "The page walkthrough: len and append prove inductively, and "
@@ -71,6 +76,8 @@ MANIFEST: List[Dict[str, object]] = [
         "slug": "overview",
         "source": "demo/lean_overview.ml",
         "expect": "verify",
+        # The call-site obligation: the divisor's not (_ = 0) contract.
+        "cursor": 6,
         "title": "Sixty seconds",
         "description": (
             "First contact: a division whose divisor carries a "
@@ -83,6 +90,8 @@ MANIFEST: List[Dict[str, object]] = [
         "override": "tuples.ml",
         "source": "demo/lean_tuples.ml",
         "expect": "verify",
+        # A tuple-pattern match projecting a component obligation (z = 3).
+        "cursor": 38,
         "title": "Native tuples in refinements",
         "description": (
             "Construction, fst/snd projection, tuple-pattern matching "
@@ -94,6 +103,8 @@ MANIFEST: List[Dict[str, object]] = [
         "slug": "quant",
         "source": "demo/lean_quant.ml",
         "expect": "verify",
+        # An existential goal: exists_ y. y = 3 && 6 = 2 * y.
+        "cursor": 43,
         "title": "Quantifiers in predicates",
         "description": (
             "forall_, exists_ and native implication in refinements, "
@@ -105,6 +116,8 @@ MANIFEST: List[Dict[str, object]] = [
         "slug": "fib",
         "source": "demo/lean_fib.ml",
         "expect": "verify",
+        # Inside the block, on the fib_double lemma -- a live-Lean-goal line.
+        "cursor": 60,
         "title": "Fibonacci: fast doubling, one file",
         "description": (
             "The naive recursion is reflected and total; the O(log n) "
@@ -118,6 +131,8 @@ MANIFEST: List[Dict[str, object]] = [
         "slug": "reverse",
         "source": "demo/lean_reverse.ml",
         "expect": "verify",
+        # The reversal postcondition: len r = len a && the index permutation.
+        "cursor": 178,
         "title": "In-place array reverse (McCarthy stores)",
         "description": (
             "Mutable-array verification via McCarthy upd/elem stores and "
@@ -131,6 +146,8 @@ MANIFEST: List[Dict[str, object]] = [
         "slug": "mutable",
         "override": "mutable.ml",
         "expect": "verify",
+        # The loop-join disjunction: the while-loop's invariant at exit.
+        "cursor": 48,
         "title": "Flow-sensitive mutable locals",
         "description": (
             "SSA versioning, conditional joins, let mutable, and for / "
@@ -145,6 +162,8 @@ MANIFEST: List[Dict[str, object]] = [
         "slug": "deadcode",
         "override": "deadcode.ml",
         "expect": "verify",
+        # The K arm: y = 9 by constructor injectivity from m = K 9.
+        "cursor": 15,
         "title": "Dead code, proved dead",
         "description": (
             "A mutable local is written K 9, so matching L is impossible: "
@@ -157,6 +176,9 @@ MANIFEST: List[Dict[str, object]] = [
         "slug": "qsort",
         "source": "demo/lean_qsort_run.ml",
         "expect": "verify",
+        # qsort's top-level postcondition: sorted (fin m) && perm (now m)
+        # (fin m) -- the flagship spec, not a slice-internal assume.
+        "cursor": 874,
         "title": "In-place parallel quicksort",
         "description": (
             "The page's flagship: sorted-and-permutation on a borrowed "
@@ -164,15 +186,17 @@ MANIFEST: List[Dict[str, object]] = [
             "(borrow API and sort inlined for a single file). The "
             "heaviest example -- about 3s to verify, versus ~1s for the "
             "others."
-                    " The inlined slice module is the trusted layer; every sort "
+            " The inlined slice module is the trusted layer; every sort "
             "obligation past it is proved."
-),
+        ),
     },
     {
         # Direct-spelling override (result refinement on the annotation).
         "slug": "counterexample",
         "override": "counterexample.ml",
         "expect": "fail",
+        # The false spec fib n = n + 1: the failed VC with its counterexample.
+        "cursor": 11,
         "title": "When you're wrong (counterexample)",
         "description": (
             "A deliberately false spec: fib n = n + 1. Verification "
@@ -376,6 +400,8 @@ def main() -> None:
         }
         if entry.get("default"):
             item["default"] = True
+        if "cursor" in entry:
+            item["cursor"] = int(cast(int, entry["cursor"]))
         kept.append(item)
 
     if not args.check_only:
