@@ -14,12 +14,6 @@
       "verifies": true
     },
     {
-      "name": "reflect",
-      "title": "The program as its own spec",
-      "description": "total_ recursive functions reflect into the logic, so len, mem and depth denote themselves in refinements -- no separate spec library, no proof text.",
-      "verifies": true
-    },
-    {
       "name": "tuples",
       "title": "Native tuples in refinements",
       "description": "Construction, fst/snd projection, tuple-pattern matching and structural equality, reasoned through Lean's product structures.",

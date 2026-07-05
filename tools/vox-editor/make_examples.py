@@ -79,17 +79,6 @@ MANIFEST: List[Dict[str, object]] = [
         ),
     },
     {
-        "slug": "reflect",
-        "source": "demo/lean_reflect.ml",
-        "expect": "verify",
-        "title": "The program as its own spec",
-        "description": (
-            "total_ recursive functions reflect into the logic, so len, "
-            "mem and depth denote themselves in refinements -- no "
-            "separate spec library, no proof text."
-        ),
-    },
-    {
         "slug": "tuples",
         "override": "tuples.ml",
         "source": "demo/lean_tuples.ml",
