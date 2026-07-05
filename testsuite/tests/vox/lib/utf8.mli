@@ -1,11 +1,39 @@
-(* A verified UTF-8 codec behind a specced interface.  The Lean MODEL
-   -- the minimal encoding [enc_cp], the model decoder [dec1] with its
-   overlong/surrogate guards, and the roundtrip/soundness theorems --
-   lives HERE, in the interface, and travels to the implementation and
-   to every client through this .cmi.  Nothing is assumed anywhere; the
-   trust surface is zero ([enc_cp] is pure arithmetic, natively
-   reflected).  Scope: 1..3-byte sequences, U+0000..U+FFFF, surrogates
-   excluded. *)
+(* A verified UTF-8 codec behind a specced interface.
+
+   THE SPEC IS SIMPLER THAN THE CODE, AND THAT GAP IS THE POINT.  The
+   generation-direction spec [enc_cp : codepoint -> bytes] is 5 lines of
+   pure arithmetic with ZERO error handling; a byte sequence is VALID
+   exactly when it is [enc_cp]'s output (image membership), so minimality
+   -- hence overlong rejection -- is STRUCTURAL, not a check the spec
+   performs.  The decoder [decode1] is 37 lines that are mostly error
+   handling (9 distinct reject paths) and is PROVED equal to a model
+   decoder meeting the spec; none of it is trusted.
+
+   AUDIT SURFACE -- the ENTIRE set of lines you must read to trust the
+   guarantee; everything else is machine-checked:
+     - [enc_cp]   (5 lines) : the minimal encoding, no error handling.
+     - [valid_cp] (1 line)  : the domain side conditions, exactly THREE:
+         * 0 <= c                        (codepoints are non-negative)
+         * c < 0x10000                   (upper cap -- see SCOPE: 0x10000,
+                                          not the RFC's 0x10FFFF, because
+                                          4-byte sequences are omitted)
+         * not (0xD800 <= c <= 0xDFFF)   (surrogates forbidden in UTF-8)
+     - the STATEMENTS of [dec1_enc_cp] (roundtrip: dec1 (enc_cp c)=Good c)
+       and [dec1_sound] (accept => consumed bytes are the minimal encoding
+       of a valid codepoint), plus list-append [bapp] they mention
+       (trivial by inspection).
+   [dec1]/[dec2]/[dec3]'s guards, the decoders, and all proofs are
+   verified against those ~11 lines.  Trust surface is otherwise zero:
+   no assume_/assume_unchecked_; [enc_cp] is natively reflected
+   arithmetic.  The model lives HERE in the interface and travels to the
+   implementation and every client through this .cmi.
+
+   SCOPE: 1..3-byte sequences, U+0000..U+FFFF.  Dropping the 4-byte plane
+   only TIGHTENS one side condition (cap 0x10000 vs 0x10FFFF) and drops
+   nothing else: surrogate exclusion stays (surrogates are in the 3-byte
+   range) and the 2- and 3-byte overlong guards stay.  Adding 4-byte
+   would raise the cap to 0x10FFFF and add one branch with its own
+   overlong guard. *)
 
 type bytes_ = Bnil | Bcons of int * bytes_
 type res = Bad | Good of int * bytes_

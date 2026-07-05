@@ -26,7 +26,16 @@
        [dec1_sound]  : SOUNDNESS -- if the decoder accepts, the bytes it
                        consumed ARE the minimal encoding of a valid
                        codepoint.  This BUILDS IN overlong/surrogate
-                       rejection: no non-minimal sequence can decode. *)
+                       rejection: no non-minimal sequence can decode.
+
+   THE SPEC IS SIMPLER THAN THE CODE.  What you must READ to trust the
+   guarantee is only [enc_cp] (5 lines, no error handling) and the
+   domain side conditions in [valid_cp] -- exactly three: [0 <= c],
+   [c < 0x10000] (the cap; 0x10000 not 0x10FFFF because 4-byte is out of
+   scope), and surrogate exclusion [not (0xD800 <= c <= 0xDFFF)].  The
+   decoder below is 37 lines, mostly error handling (9 reject paths),
+   ALL proved -- not read.  Scope note: dropping 4-byte only tightens the
+   cap; surrogate exclusion and the 2/3-byte overlong guards stay. *)
 
 type bytes_ = Bnil | Bcons of int * bytes_
 type res = Bad | Good of int * bytes_
