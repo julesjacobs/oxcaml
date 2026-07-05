@@ -27,8 +27,27 @@ const THM = {
 const REGIONS = [VC, BLOCK, THM];
 
 let passed = 0;
+// Sync tests report inline; a test returning a promise is awaited and
+// reported when it settles (a rejection fails the run). The summary
+// line waits for all of them.
+const pending = [];
 function check(name, fn) {
-  fn();
+  const r = fn();
+  if (r && typeof r.then === "function") {
+    pending.push(
+      r.then(
+        () => {
+          passed += 1;
+          console.log("ok - " + name);
+        },
+        (e) => {
+          console.error("FAIL - " + name + ": " + e.message);
+          process.exitCode = 1;
+        }
+      )
+    );
+    return;
+  }
   passed += 1;
   console.log("ok - " + name);
 }
@@ -253,4 +272,43 @@ check("carryVerdicts ignores non-vc regions", () => {
   assert.strictEqual(fresh[0].status, undefined);
 });
 
-console.log("\n" + passed + " tests passed");
+// -- singleFlight: bounded as-you-type request scheduling ----------------
+
+// check() is async in the app; these tests drive a controllable task.
+async function flightScenario(fires, resolveAll) {
+  let runs = 0;
+  const resolvers = [];
+  const fire = S.singleFlight(
+    () => new Promise((res) => { runs += 1; resolvers.push(res); })
+  );
+  const done = [];
+  for (let i = 0; i < fires; i += 1) done.push(fire());
+  await resolveAll(resolvers, () => runs);
+  await Promise.all(done);
+  return runs;
+}
+
+check("singleFlight coalesces a burst into flight + one trailing", async () => {
+  const runs = await flightScenario(10, async (resolvers, getRuns) => {
+    assert.strictEqual(getRuns(), 1); // 9 calls landed mid-flight
+    resolvers[0]();                   // finish flight -> ONE trailing run
+    await new Promise((r) => setTimeout(r, 0));
+    assert.strictEqual(getRuns(), 2);
+    resolvers[1]();
+    await new Promise((r) => setTimeout(r, 0));
+  });
+  assert.strictEqual(runs, 2, "10 fires -> exactly 2 task runs");
+});
+
+check("singleFlight runs sequential fires individually", async () => {
+  let runs = 0;
+  const fire = S.singleFlight(async () => { runs += 1; });
+  await fire();
+  await fire();
+  await fire();
+  assert.strictEqual(runs, 3);
+});
+
+Promise.all(pending).then(() => {
+  console.log("\n" + passed + " tests passed");
+});

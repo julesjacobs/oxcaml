@@ -248,6 +248,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
+        # The assets are a live dev tool served through a proxy: without
+        # this, browsers cache app.js and users keep running last week's
+        # client after a plain reload.
+        self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(data)
 
@@ -290,13 +294,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         ext = os.path.splitext(target)[1]
         ctype = _CONTENT_TYPES.get(ext, "application/octet-stream")
-        with open(target, "rb") as fh:
-            data = fh.read()
-        self.send_response(200)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+        self._send_file(target, ctype)
 
 
 class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):

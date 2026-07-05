@@ -333,26 +333,33 @@ async function postJSON(path, body) {
 // Cursor moves: pane only (client-side, no network).
 cm.on("cursorActivity", renderPane);
 
-// Two-tier idle debounce: a fast (no-Lean) pass keeps the pane's
-// hypotheses tracking the buffer as you type; the full check follows
-// once typing pauses. Explicit triggers (button, Ctrl-Enter) go
-// straight to a full check -- wrapped, since event handlers pass a
-// truthy first argument that must not read as `fast`.
-let timer = null;
-let fastTimer = null;
+// Light-speed scheduling: every change fires BOTH passes immediately --
+// no debounce delay -- with single-flight coalescing as the only brake.
+// Each channel keeps at most one request in flight; keystrokes landing
+// meanwhile just mark the channel dirty, and the moment the in-flight
+// response returns, one new request fires with the LATEST buffer
+// (check() reads cm.getValue() at send time). So the backlog is bounded
+// at one per channel no matter how fast you type, while freshness is
+// bounded only by the round-trip: ~100ms for the fast (no-Lean) pass,
+// a couple of seconds for the full Lean verdicts running continuously
+// behind it.
+// (coalescing logic lives in selection.js, node-tested)
+const fireFast = Selection.singleFlight(() => check(true));
+const fireFull = Selection.singleFlight(() => check(false));
+
+// Marks are NOT cleared on change: CodeMirror shifts them with the edit,
+// and the fast pass re-lays them almost immediately -- clearing first
+// just made the underlines flicker on every keystroke.
 cm.on("change", () => {
-  clearMarks();
   clearHoverMark();
   setStatus("status-checking", "checking…");
-  if (fastTimer) clearTimeout(fastTimer);
-  fastTimer = setTimeout(() => check(true), 250);
-  if (timer) clearTimeout(timer);
-  timer = setTimeout(() => check(false), 900);
+  fireFast();
+  fireFull();
 });
-document.getElementById("check-btn").addEventListener("click", () => check(false));
+document.getElementById("check-btn").addEventListener("click", fireFull);
 cm.addKeyMap({
-  "Ctrl-Enter": () => check(false),
-  "Cmd-Enter": () => check(false),
+  "Ctrl-Enter": fireFull,
+  "Cmd-Enter": fireFull,
 });
 
 // Theme: dark by default (no OS sniffing); the toolbar toggle flips
@@ -431,7 +438,7 @@ async function loadExample(name, force) {
     const meta = examplesList.find((e) => e.name === name);
     pendingCursor =
       meta && typeof meta.cursor === "number" ? meta.cursor - 1 : null;
-    check();
+    fireFull();
     return true;
   } catch (e) {
     setStatus("status-fail", "could not load example");
@@ -453,7 +460,7 @@ async function init() {
   const list = await loadExamples();
   const def = list.find((e) => e.default) || list[0];
   if (def && (await loadExample(def.name, true))) return;
-  check();
+  fireFull();
 }
 
 // Testability hook for the headless browser smoke test.
