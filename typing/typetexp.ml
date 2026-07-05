@@ -1384,6 +1384,21 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
   let loc = styp.ptyp_loc in
   match vox_via_attr styp.ptyp_attributes with
   | Some (via_a, fn, target_styp) ->
+    (* A type may carry at most one [@vox.via]: two attributes on one
+       skeleton would compose in decode order rather than sort order
+       (the maps would not chain), so reject them and point at the
+       supported layering path. *)
+    (if
+       List.length
+         (List.filter
+            (fun (a : Parsetree.attribute) ->
+              String.equal a.attr_name.txt "vox.via")
+            styp.ptyp_attributes)
+       > 1
+     then
+       Location.raise_errorf ~loc:via_a.attr_loc
+         "vox: a type may carry at most one [@vox.via] attribute; layer \
+          abstractions through nested type aliases instead");
     (* Translate the inner type WITHOUT the via attribute, then append a
        map layer.  A via over a refined type extends its map list (the
        base predicate is unchanged -- an extra via layer with nothing
