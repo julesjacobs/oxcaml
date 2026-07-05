@@ -251,6 +251,10 @@ let mut_counts : (Ident.t, int) Hashtbl.t = Hashtbl.create 16
    equation.  They are pulled into each VC by relevance (emit_vc). *)
 let mut_defs : Refinement.pred list ref = ref []
 
+(* Sanitized solver name -> the [path_uname] that claimed it; see the
+   collision guard in [register_global]. *)
+let global_snames : (string, string) Hashtbl.t = Hashtbl.create 16
+
 let reset () =
   vcs := [];
   Hashtbl.reset name_sorts;
@@ -268,6 +272,7 @@ let reset () =
   embedded_blocks := [];
   imported_specs := [];
   Hashtbl.reset globals;
+  Hashtbl.reset global_snames;
   global_facts := []
 ;;
 
@@ -443,9 +448,39 @@ let regular_self_args arg_sorts arity =
 
 (* Solver-side names are stamp-free: reject a distinct path that would
    alias an already-registered datatype's name. *)
+(* Solver-side names go through [lean_sanitize], which maps every
+   non-word char to '_': NOT injective (A.B.c and A_B.c collide).  A
+   collision would emit two same-named Lean binders -- the later
+   SHADOWS the earlier while both hypotheses still attach, making the
+   context inconsistent and every goal provable.  So distinct paths
+   whose SANITIZED names coincide are rejected outright, for values
+   ([register_global]) and datatypes ([assert_uname_fresh]) alike. *)
+let lean_sanitize s =
+  let b = Bytes.of_string s in
+  Bytes.iteri
+    (fun i c ->
+      match c with
+      | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> ()
+      | _ -> Bytes.set b i '_')
+    b;
+  Bytes.to_string b
+;;
+
 let assert_uname_fresh p =
   List.iter
     (fun (q, _) ->
+      if String.equal
+           (lean_sanitize (path_uname p))
+           (lean_sanitize (path_uname q))
+         && not (String.equal (path_uname p) (path_uname q))
+      then
+        Location.raise_errorf
+          ~loc:(Location.in_file !Location.input_name)
+          "vox: types %s and %s would share the solver-side name %s; \
+           rename one of them"
+          (path_uname q)
+          (path_uname p)
+          (lean_sanitize (path_uname p));
       if String.equal (path_uname p) (path_uname q)
       then
         Location.raise_errorf
@@ -1221,6 +1256,17 @@ let rec register_global env (p : Path.t) =
     match Env.find_value p env with
     | vd ->
       let vd = Subst.Lazy.force_value_description vd in
+      let sname = lean_sanitize key in
+      (match Hashtbl.find_opt global_snames sname with
+       | Some other when not (String.equal other key) ->
+         Location.raise_errorf
+           ~loc:(Location.in_file !Location.input_name)
+           "vox: values %s and %s would share the solver-side name g_%s; \
+            rename one of them"
+           other
+           key
+           sname
+       | _ -> Hashtbl.replace global_snames sname key);
       Hashtbl.replace globals key (p, dsort_of_type env vd.val_type);
       (* Both the written refinement and the type's declared INVARIANTS
          attach at the path: [val zero : nat] carries the invariant
@@ -3699,17 +3745,6 @@ let lean_command () =
    map back to VCs.  Int-sorted names are [Int], bool-sorted names are
    modelled as [Prop] (equality between boolean-valued predicates
    becomes [↔]), everything else lives in an opaque type [VoxU]. *)
-
-let lean_sanitize s =
-  let b = Bytes.of_string s in
-  Bytes.iteri
-    (fun i c ->
-      match c with
-      | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> ()
-      | _ -> Bytes.set b i '_')
-    b;
-  Bytes.to_string b
-;;
 
 let lean_name id = "v_" ^ lean_sanitize (Ident.unique_name id)
 let lean_dt_name p = "Vox_" ^ lean_sanitize (path_uname p)
