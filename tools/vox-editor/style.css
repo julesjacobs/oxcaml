@@ -28,6 +28,7 @@
   --badge-ok-bg: rgba(63, 185, 80, 0.2);
   --badge-fail-bg: rgba(240, 83, 63, 0.2);
   --badge-unknown-bg: #21262d;
+  --badge-trusted-bg: rgba(208, 165, 74, 0.18);
   --sel-bg: #24344d;
   --sel-bg-focus: #2a3d5c;
   --mono: "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
@@ -57,6 +58,7 @@
   --badge-ok-bg: rgba(26, 127, 55, 0.15);
   --badge-fail-bg: rgba(192, 51, 77, 0.15);
   --badge-unknown-bg: #e7e9ee;
+  --badge-trusted-bg: rgba(125, 78, 0, 0.14);
   --sel-bg: #cfe0f7;
   --sel-bg-focus: #b6d0f2;
 }
@@ -123,6 +125,10 @@ main { flex: 1; display: flex; min-height: 0; }
 .vc-proved { border-bottom: 2px solid var(--vc-ok-line); }
 .vc-failed { border-bottom: 2px solid var(--vc-fail-line); }
 .vc-unknown { border-bottom: 2px dotted var(--muted); }
+/* Assumed (borrow/slice framing): trusted by construction, never solved.
+   A dashed amber line reads as "taken on trust", distinct from the dotted
+   grey of a genuinely unknown VC and the solid green of a proved one. */
+.vc-trusted { border-bottom: 2px dashed var(--warn); }
 .vc-block { background: var(--block-tint); }
 
 .pane-mode {
@@ -159,6 +165,7 @@ main { flex: 1; display: flex; min-height: 0; }
 .badge-proved { background: var(--badge-ok-bg); color: var(--ok); }
 .badge-failed { background: var(--badge-fail-bg); color: var(--fail); }
 .badge-unknown { background: var(--badge-unknown-bg); color: var(--muted); }
+.badge-trusted { background: var(--badge-trusted-bg); color: var(--warn); }
 .placeholder { color: var(--muted); }
 .nearest { margin-top: 6px; }
 .jump {

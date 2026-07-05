@@ -256,6 +256,12 @@ def build_index(
             for vc in vcs:
                 if vc["kind"] == "prove":
                     vc["status"] = "proved"
+                elif vc["kind"] == "assume":
+                    # Assumed VCs are never sent to the solver -- they are
+                    # trusted by construction (borrow/slice framing). Badge
+                    # them honestly as "trusted", not the grey "unknown"
+                    # that reads as "didn't verify" on a verified file.
+                    vc["status"] = "trusted"
         else:
             ok = False
             if err is not None:

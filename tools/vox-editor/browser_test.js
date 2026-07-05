@@ -240,6 +240,79 @@ async function main() {
     console.log("ok - live Lean goal fetched");
     assert.ok(live.includes("⊢"), "live goal has a turnstile: " + live.slice(0, 160));
 
+    // Examples dropdown: pick reverse (fully verified, but its borrow/slice
+    // framing VCs are ASSUMED). They must badge as "trusted", not the grey
+    // "unknown" that reads as "didn't verify".
+    await page.evaluate(() => {
+      const sel = document.getElementById("examples");
+      sel.value = "reverse";
+      sel.dispatchEvent(new Event("change"));
+    });
+    await waitFor(
+      async () => {
+        const t = await page.evaluate(() => window.__vox.cm.getValue());
+        return /revinv|McCarthy|reverse/.test(t) ? t : false;
+      },
+      10000,
+      "reverse loaded into editor"
+    );
+    const revStatus = await waitFor(
+      async () => {
+        const t = await page.$eval("#status", (e) => e.textContent);
+        return /verified|errors/.test(t) ? t : false;
+      },
+      60000,
+      "reverse check"
+    );
+    assert.ok(revStatus.includes("verified"), "reverse should verify: " + revStatus);
+    // A trusted (assumed) VC region exists; put the cursor on it (which
+    // scrolls it into CodeMirror's rendered viewport) and check both the
+    // source underline and the pane badge.
+    const trustedPos = await waitFor(
+      () =>
+        page.evaluate(() => {
+          const r = window.__vox
+            .getRegions()
+            .find((x) => x.kind === "vc" && x.status === "trusted");
+          return r ? { line: r.start.line, col: r.start.col } : false;
+        }),
+      10000,
+      "a trusted VC region"
+    );
+    console.log("ok - reverse has trusted (assumed) VCs");
+    await page.evaluate(
+      (p) => window.__vox.cm.setCursor({ line: p.line, ch: p.col }),
+      trustedPos
+    );
+    // Distinct .vc-trusted underline (not the grey .vc-unknown) on the now
+    // in-view assumed VC.
+    await waitFor(
+      () => page.$(".vc-trusted").then((el) => !!el),
+      5000,
+      "the .vc-trusted underline"
+    );
+    assert.strictEqual(
+      await page.$(".vc-unknown"),
+      null,
+      "no grey 'unknown' underline on a fully verified file"
+    );
+    // The pane shows a "trusted" badge, not "unknown".
+    const trustedBadge = await waitFor(
+      async () => {
+        const el = await page.$(".badge-trusted");
+        return el ? page.$eval(".badge-trusted", (e) => e.textContent) : false;
+      },
+      5000,
+      "trusted badge in pane"
+    );
+    assert.strictEqual(trustedBadge.trim(), "trusted", "badge reads 'trusted'");
+    assert.strictEqual(
+      await page.$("#pane-body .badge-unknown"),
+      null,
+      "the assumed VC is not badged 'unknown'"
+    );
+    console.log("ok - assumed VC pane badge reads 'trusted'");
+
     // Theme: dark is the default (no OS sniffing); the toolbar toggle
     // flips to light, and the choice persists across a reload.
     const readBg = () =>

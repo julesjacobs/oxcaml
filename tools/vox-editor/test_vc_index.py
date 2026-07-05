@@ -241,6 +241,27 @@ class TestEndToEnd(unittest.TestCase):
         err = errors[-1]
         self.assertIn("counterexample", err)
 
+    @unittest.skipUnless(LEAN, "no lean found (set VOX_LEAN)")
+    def test_assumed_vcs_trusted(self):
+        # The reverse example verifies fully; its borrow/slice framing VCs
+        # are ASSUMED (never sent to the solver) and must badge as
+        # "trusted", not the grey "unknown" that reads as "didn't verify"
+        # on a fully verified file.
+        assert OCAMLC is not None
+        example = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "examples", "reverse.ml"
+        )
+        with open(example) as fh:
+            d, p = self._write("reverse.ml", fh.read())
+        index = vc_index.build_index(p, OCAMLC, lean=LEAN, cwd=d)
+        self.assertTrue(index["ok"], msg=index.get("raw_solve"))
+        vcs = cast(List[Dict[str, Any]], index["vcs"])
+        assumed = [v for v in vcs if v["kind"] == "assume"]
+        self.assertTrue(assumed, "expected at least one ASSUMED VC")
+        self.assertTrue(all(v["status"] == "trusted" for v in assumed))
+        # Nothing is left grey (unknown) on a verified file.
+        self.assertFalse(any(v["status"] == "unknown" for v in vcs))
+
 
 if __name__ == "__main__":
     unittest.main()
