@@ -15,8 +15,7 @@
 
 let counter : int{ _ >= 0 } ref = ref (5 : int{ _ >= 0 })
 
-let bump (u : unit) : int{ _ >= 0 } =
-  ignore u;
+let bump () : int{ _ >= 0 } =
   let v = !counter in
   counter := v + 1;
   !counter
@@ -26,13 +25,12 @@ val bump : unit -> int{ _ >= 0 } = <fun>
 |}]
 
 (* A write that cannot re-establish the invariant is refused. *)
-let broken (u : unit) : unit =
-  ignore u;
+let broken () : unit =
   let v = !counter in
   counter := v - 1
 [%%expect{|
-Line 4, characters 13-18:
-4 |   counter := v - 1
+Line 3, characters 13-18:
+3 |   counter := v - 1
                  ^^^^^
 Error: vox: verification failed (lean).
        Goal: (v - 1) >= 0

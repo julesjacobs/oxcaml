@@ -627,8 +627,7 @@ through internal mutation, yet a lazy of a refined type forces to the
 refined value:</p>
 <pre><code class="ml">let counter : int{ _ &gt;= 0 } ref = ref (5 : int{ _ &gt;= 0 })
 
-let bump (u : unit) : int{ _ &gt;= 0 } =
-  ignore u;
+let bump () : int{ _ &gt;= 0 } =
   let v = !counter in
   counter := v + 1;
   !counter
