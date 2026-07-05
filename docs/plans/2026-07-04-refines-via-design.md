@@ -438,3 +438,68 @@ NOT delivered / honest limits:
    coercion-channel rules, all within one module (no abstraction yet).
 3. Inclusion rule + `refines` interop → the BST/Set end-to-end test.
 4. Parameterized versions of all three.
+
+## VIA AND BORROWS (settled 2026-07-05)
+
+`via` composes with RustHorn-style mutable borrows to give a MUTABLE
+value behind a sealed model.  Reference implementation:
+`testsuite/tests/vox/lib/mset_lib.{mli,ml}` (the trusted borrow
+library) + `lib/mset.{mli,ml}` (the sealed set), exercised by
+`mechanics/lean_mset_seal.ml` and pinned fail-closed by
+`mechanics/lean_mset_fail.ml`.  A mutable finite set is mutated IN
+PLACE through a borrow and sealed behind `type t : value refines
+(iset)`; the payoff module proves its set-vocabulary contracts
+(`insert : ... -> (s : t) @ unique -> t{ _ = ins x s } @ unique`) with
+ZERO `assume_unchecked_`, the trust confined to the six-function
+`mset_lib`.
+
+1. **The key realization: mutation and models were ALREADY joined —
+   by an explicit abstraction function.**  `lib/mhtbl` mutates a
+   `Bslice.varr` in place while its ghost `bcts : varr -> table` names
+   the immutable model; every mhtbl spec writes `bcts` explicitly, and
+   `mhtbl.mli` LEAKS it (`type t = varr{ twf (bcts _) 0 && ... }`).
+   `via`'s whole contribution is to make that same function the
+   IMPLICIT image-binder map and SEAL it away: `type t = varr{ .. }
+   via (setof : iset)` in the `.ml`, `type t : value refines (iset)`
+   in the `.mli`.  The client then sees only the model (`mem`/`ins`/
+   `card`), never the carrier, the abstraction function, or the borrow
+   discipline.  Nothing new is proved about mutation; the abstraction
+   is relocated from the client-facing type into the seal.
+
+2. **DESIGN RULE — loans do NOT get `via` types.**  A loan stays an
+   opaque token (sort `VoxU`); its `now`/`fin`/`pv` are declared as
+   trusted functions landing DIRECTLY at the image sort (`snow`/`sfin`/
+   `spv : VoxU -> ISet`), exactly the `bslice` pattern with the model
+   sort swapped from `Htbl.table` to `ISet`.  `sinsert`'s spec
+   `snow _ = ins x (snow m)` is then a borrow spec in pure set
+   vocabulary.  The `via` unpack (`refine_`) lives ONLY on the owned
+   endpoints: `insert` unpacks `s : t` to the base carrier `r0` with
+   the link `setof r0 = s`, borrows `r0`, runs the in-place op,
+   resolves the prophecy at the image, and re-injects the residual
+   `varr{ setof _ = spv p }` as `t{ _ = ins x s }`.  Consequence — one
+   trusted borrow library per image model (as `bslice`/`pslice` are one
+   library per model).  This routes AROUND the loan-of-via question
+   entirely; it never arises.
+
+3. **The generic alternative (spec'd, NOT built).**  One borrow library
+   serving EVERY `via` type would need loans to carry via types:
+   `borrow` over a `base via f` value would hand back a loan of
+   `base via f`, and the rule "unpacking a loan of `base via f` yields
+   a loan of `base` with LINKED now/fin images" (`now(base-loan)` and
+   `fin(base-loan)` related to the image loan's `now`/`fin` by `f`).
+   Implementing it needs a trusted loan-linking cast (loan-of-via to
+   loan-of-base, mirroring `refine_`'s owned-value unpack) plus a
+   loan-aware `refine_` in typecore.  It removes the per-model library
+   duplication ONLY; the routed-around design of rule 2 shows it is not
+   needed for correctness, so it is a convenience/scaling feature, not
+   a soundness gap.
+
+4. **Injection caveat (shared with the value-side sighting).**
+   Injecting an INLINE anonymous expression into a via type binds its
+   subject at the IMAGE sort, but a carried base-carrier refinement
+   still applies the map to that binder — a Lean "Application type
+   mismatch" (`setof : VoxU -> ISet` applied to an `ISet`-typed
+   binder).  `(mk () : t{ card _ = 0 })` fails; `let r = mk () in
+   (r : t{ card _ = 0 })` passes (a let-bound value keeps its base
+   sort).  Not cross-unit specific (reproduced fully local).
+   Workaround throughout `mset.ml`: let-bind before injecting.
