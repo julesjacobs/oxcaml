@@ -23,5 +23,9 @@ val mul : (a : t) -> (b : t) -> t{ _ = a * b }
 (* Constant folding, proved to preserve the denotation. *)
 val fold : (e : t) -> t{ _ = e }
 
+(* A peephole simplifier (identities, annihilation, a strength
+   reduction), also proved denotation-preserving. *)
+val simplify : (e : t) -> t{ _ = e }
+
 (* The evaluator agrees with the denotation. *)
 val eval : (e : t) -> int{ _ = e }

@@ -43,3 +43,19 @@ let value : int{ _ = 7 } =
   let e = add one prod in
   let folded = fold e in
   eval folded
+
+(* Chaining transformations: fold THEN simplify still preserves the
+   denotation, so [eval (simplify (fold e)) = eval e] carries for free
+   -- each transformation's [_ = e] composes at the image with no new
+   proof. *)
+let chained : bool{ _ } =
+  let one = lit 1 in
+  let two = lit 2 in
+  let three = lit 3 in
+  let prod = mul two three in
+  let e = add one prod in
+  let folded = fold e in
+  let simplified = simplify folded in
+  let ve = eval e in
+  let vf = eval simplified in
+  vf = ve

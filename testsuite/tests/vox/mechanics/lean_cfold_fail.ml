@@ -59,3 +59,48 @@ Possible counterexample:
   denote (w.Add w_1) = 1
 (lean: error: `grind` failed)
 |}]
+
+(* A WRONG peephole rule is likewise refuted.  Strength/annihilation
+   [x * 0 -> Lit 1] is unsound: at a subterm [Mul a b] with [b = Lit 0]
+   the VC [denote (Lit 1) = denote (Mul a b)] -- i.e. [1 = denote a * 0]
+   -- fails with a concrete counterexample. *)
+let bad_simp : (e : t) -> t{ _ = e } =
+  fun e ->
+    let refine_ e0 = e in
+    (match e0 with
+     | Lit n -> (Lit n : t{ _ = e })
+     | Add (a, b) -> (Add (a, b) : t{ _ = e })
+     | Mul (a, b) ->
+       (match b with
+        | Lit y ->
+          if y = 0 then (Lit 1 : t{ _ = e }) else (Mul (a, b) : t{ _ = e })
+        | _ -> (Mul (a, b) : t{ _ = e })))
+[%%expect{|
+Line 10, characters 25-30:
+10 |           if y = 0 then (Lit 1 : t{ _ = e }) else (Mul (a, b) : t{ _ = e })
+                              ^^^^^
+Error: vox: verification failed (lean).
+       Goal: ((denote (Lit 1)) = (denote (Lit 1))) && ((denote (Lit 1)) = e)
+Hypotheses:
+  y = 0
+  b = (Lit y)
+  e0 = (Mul (a, b))
+  not (e0 is Lit)
+  not (e0 is Add)
+  (denote e0) = (denote e0)
+  (denote e0) = e
+  e = e
+Possible counterexample:
+  e = 0
+  y = 0
+  denote e0 = 0
+  denote (Vox_expr.Lit 1) = 1
+  denote b = 0
+  denote a = 0
+  denote (a.Mul b) = 0
+  denote w = 0
+  denote w_1 = 0
+  denote (Vox_expr.Lit y) = 0
+  denote (w.Mul w_1) = 0
+(lean: error: `grind` failed)
+|}]
