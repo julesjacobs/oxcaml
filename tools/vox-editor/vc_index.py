@@ -41,8 +41,36 @@ _LOC_MULTI = re.compile(_FILE + r"[Ll]ines (\d+)-(\d+), characters (\d+)-(\d+):"
 # matches AND the line's prefix parses as a location.
 _VC_TAIL = re.compile(r": vox VC( \(([A-Z ]+)\))?:$")
 
+# The provenance suffix that -vox-dump-vc-provenance appends to a goal or
+# hypothesis: exactly two spaces, "@ ", then "line.col-line.col" (1-based
+# line, 0-based col, matching the "Line N, characters A-B" header).  A
+# predicate can itself contain '@' (SSA names like x@1), so we split on
+# the LAST "  @ " that is followed by the exact coordinate pattern anchored
+# at end of string -- never on a bare '@'.  The leading ".*" is greedy, so
+# the match lands on the final such suffix.
+_SPAN_SUFFIX = re.compile(r"^(.*)  @ (\d+)\.(\d+)-(\d+)\.(\d+)$")
+
 Loc = Dict[str, int]
 Range = Tuple[Loc, Loc]
+Span = Optional[Dict[str, Loc]]  # {"start": Loc, "end": Loc}, or None
+
+
+def split_span_suffix(text: str) -> Tuple[str, Span]:
+    """Split a dumped predicate into (text_without_suffix, span).
+
+    ``span`` is ``{"start": {line, col}, "end": {line, col}}`` (1-based
+    line, 0-based col) when the provenance suffix is present, else None.
+    Text without a suffix (a plain -dump-vc predicate, or a hypothesis
+    the compiler had no meaningful span for) is returned unchanged with a
+    None span, so this is safe to run on either dump flavour."""
+    m = _SPAN_SUFFIX.match(text)
+    if m is None:
+        return text, None
+    span: Span = {
+        "start": {"line": int(m.group(2)), "col": int(m.group(3))},
+        "end": {"line": int(m.group(4)), "col": int(m.group(5))},
+    }
+    return m.group(1), span
 
 
 def parse_loc(header: str) -> Optional[Range]:
@@ -93,22 +121,39 @@ def parse_dump(text: str) -> List[Dict[str, object]]:
         kind = _kind_from_suffix(tail.group(2))
         i += 1
         # goal: everything after "  goal: " until the "  hypotheses:" line.
+        # A multi-line goal carries its span suffix on the FIRST line only,
+        # so we strip per-line and keep the first span we find.
         goal_parts: List[str] = []
+        goal_span: Span = None
         while i < n and not lines[i].lstrip().startswith("hypotheses:"):
             stripped = lines[i].strip()
             if stripped.startswith("goal:"):
-                goal_parts.append(stripped[len("goal:") :].strip())
+                piece = stripped[len("goal:") :].strip()
             elif stripped:
-                goal_parts.append(stripped)
+                piece = stripped
+            else:
+                i += 1
+                continue
+            piece, span = split_span_suffix(piece)
+            if span is not None and goal_span is None:
+                goal_span = span
+            if piece:
+                goal_parts.append(piece)
             i += 1
-        goal = " ".join(p for p in goal_parts if p)
+        goal = " ".join(goal_parts)
         hypotheses: List[str] = []
+        # Parallel to ``hypotheses``: each entry is that hypothesis's source
+        # span, or None when the compiler synthesized it with no meaningful
+        # span (or under plain -dump-vc, where there are no suffixes).
+        hyp_spans: List[Span] = []
         if i < n:
             hyp_line = lines[i].strip()
             rest = hyp_line[len("hypotheses:") :].strip()
             i += 1
             if rest and rest != "<none>":
-                hypotheses.append(rest)
+                text, span = split_span_suffix(rest)
+                hypotheses.append(text)
+                hyp_spans.append(span)
             if not rest:
                 # Following indented lines are the hypotheses, until the
                 # next VC header or a blank/dedented line.
@@ -118,14 +163,18 @@ def parse_dump(text: str) -> List[Dict[str, object]]:
                         break
                     if not raw.startswith("  "):
                         break
-                    hypotheses.append(raw.strip())
+                    text, span = split_span_suffix(raw.strip())
+                    hypotheses.append(text)
+                    hyp_spans.append(span)
                     i += 1
         vcs.append(
             {
                 "start": start,
                 "end": end,
                 "goal": goal,
+                "goal_span": goal_span,
                 "hypotheses": hypotheses,
+                "hyp_spans": hyp_spans,
                 "kind": kind,
                 "status": "unknown",
             }
@@ -223,6 +272,36 @@ def compile_capture(
     return proc.returncode, proc.stdout
 
 
+# The dump flag that adds provenance spans; implies -dump-vc.  Compilers
+# that predate it reject it outright, so we probe once and cache the
+# verdict, falling back to plain -dump-vc (spans simply absent) thereafter.
+_PROVENANCE_FLAG = "-vox-dump-vc-provenance"
+_provenance_supported: Optional[bool] = None  # None = not yet probed
+
+
+def _flag_rejected(output: str, flag: str) -> bool:
+    """Did the compiler reject ``flag`` as unknown?  OCaml's arg parser
+    prints e.g. ``ocamlc.opt: unknown option '-vox-dump-vc-provenance'.``"""
+    return "unknown option" in output and flag in output
+
+
+def dump_capture(source_path: str, ocamlc: str, cwd: Optional[str]) -> str:
+    """Run the VC-shape pass, preferring the provenance flag and caching a
+    one-time fallback to plain -dump-vc for compilers that lack it."""
+    global _provenance_supported
+    if _provenance_supported is not False:
+        _, out = compile_capture(
+            source_path, ocamlc, [_PROVENANCE_FLAG, "-vox-dry-run"], cwd=cwd
+        )
+        if _flag_rejected(out, _PROVENANCE_FLAG):
+            _provenance_supported = False
+        else:
+            _provenance_supported = True
+            return out
+    _, out = compile_capture(source_path, ocamlc, ["-dump-vc", "-vox-dry-run"], cwd=cwd)
+    return out
+
+
 def build_index(
     source_path: str,
     ocamlc: str,
@@ -234,9 +313,7 @@ def build_index(
     {"vcs": [...], "errors": [...], "ok": bool, "raw_dump": str,
      "raw_solve": str|None}
     """
-    _, dump_out = compile_capture(
-        source_path, ocamlc, ["-dump-vc", "-vox-dry-run"], cwd=cwd
-    )
+    dump_out = dump_capture(source_path, ocamlc, cwd=cwd)
     vcs = parse_dump(dump_out)
     errors: List[Dict[str, object]] = []
     ok = True

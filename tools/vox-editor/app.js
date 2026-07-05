@@ -57,6 +57,50 @@ function clearMarks() {
   marks = [];
 }
 
+// Provenance hover: at most one transient CodeMirror mark painted over the
+// source span a hovered goal/hypothesis came from. Cleared on mouse-out (and
+// whenever the pane re-renders). `hoverSpans` collects the current pane's
+// spans (compiler convention) so a row's data-prov-key indexes back to one.
+let hoverMark = null;
+let hoverSpans = [];
+
+function clearHoverMark() {
+  if (hoverMark) {
+    hoverMark.clear();
+    hoverMark = null;
+  }
+}
+
+function paintSpan(span) {
+  clearHoverMark();
+  const range = Selection.markFromSpan(span);
+  if (!range) return;
+  hoverMark = cm.markText(range.from, range.to, { className: "vox-prov-hl" });
+}
+
+// A goal/hypothesis row. With a span it becomes hover-sensitive (the `prov`
+// class + a key into hoverSpans); without one it renders exactly as before,
+// with no affordance.
+function provRow(cls, text, span) {
+  if (!span) return '<div class="' + cls + '">' + esc(text) + "</div>";
+  const key = hoverSpans.push(span) - 1;
+  return (
+    '<div class="' + cls + ' prov" data-prov-key="' + key + '">' +
+    esc(text) +
+    "</div>"
+  );
+}
+
+// Wire mouseenter/mouseleave on the rows provRow marked hoverable.
+function wireProvenanceHover() {
+  clearHoverMark();
+  bodyEl.querySelectorAll("[data-prov-key]").forEach((el) => {
+    const span = hoverSpans[+el.dataset.provKey];
+    el.addEventListener("mouseenter", () => paintSpan(span));
+    el.addEventListener("mouseleave", clearHoverMark);
+  });
+}
+
 function markRegions() {
   clearMarks();
   regions.forEach((r) => {
@@ -126,6 +170,7 @@ function renderPane() {
   const c = cm.getCursor();
   const sel = Selection.selectRegion(regions, { line: c.line, col: c.ch });
   const r = sel.region;
+  hoverSpans = [];
   let html = "";
   if (sel.relation === "inside" && r) {
     // The cursor is AT this region: show it.
@@ -157,6 +202,7 @@ function renderPane() {
   }
   html += renderErrors();
   bodyEl.innerHTML = html;
+  wireProvenanceHover();
   const btn = document.getElementById("live-btn");
   if (btn) btn.addEventListener("click", liveGoal);
   const jump = document.getElementById("jump-btn");
@@ -175,8 +221,9 @@ function badge(status) {
 
 function renderVc(r) {
   let h = "<h3>goal" + badge(r.status) + "</h3>";
-  h += '<div class="goal">' + esc(r.goal) + "</div>";
-  h += renderHyps(r.hypotheses);
+  const g = Selection.splitSpanSuffix(r.goal);
+  h += provRow("goal", g.text, r.goal_span || g.span);
+  h += renderHyps(r.hypotheses, r.hyp_spans);
   if (r.counterexample && r.counterexample.length) {
     h += "<h3>counterexample</h3>";
     h += '<div class="cex">' + esc(r.counterexample.join("\n")) + "</div>";
@@ -185,16 +232,27 @@ function renderVc(r) {
 }
 
 function renderTheorem(r) {
+  // Static block theorems come from the Lean bridge, not the VC dumper, so
+  // they carry no provenance spans -- rendered plain, no hover.
   let h = "<h3>theorem " + esc(r.name) + " (static)</h3>";
   h += '<div class="goal">' + esc(r.goal) + "</div>";
   return h + renderHyps(r.hypotheses);
 }
 
-function renderHyps(hyps) {
+// `spans` (optional) is parallel to `hyps`: a per-hypothesis provenance span
+// or null. A hypothesis with a span becomes hover-sensitive; one without
+// renders exactly as today.
+function renderHyps(hyps, spans) {
   if (!hyps || !hyps.length) return "<h3>hypotheses</h3><div class='hyp'>—</div>";
+  spans = spans || [];
   return (
     "<h3>hypotheses</h3>" +
-    hyps.map((x) => '<div class="hyp">' + esc(x) + "</div>").join("")
+    hyps
+      .map((x, idx) => {
+        const s = Selection.splitSpanSuffix(x);
+        return provRow("hyp", s.text, spans[idx] || s.span);
+      })
+      .join("")
   );
 }
 
@@ -256,6 +314,7 @@ cm.on("cursorActivity", renderPane);
 let timer = null;
 cm.on("change", () => {
   clearMarks();
+  clearHoverMark();
   if (timer) clearTimeout(timer);
   timer = setTimeout(check, 900);
 });

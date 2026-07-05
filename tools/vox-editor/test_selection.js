@@ -134,4 +134,73 @@ check("cursor genuinely inside block content IS inside", () => {
   assert.ok(S.routesToLean(r.region));
 });
 
+// --- provenance: markFromSpan coordinate conversion ----------------------
+// A span is {start:{line,col}, end:{line,col}} in the compiler convention:
+// 1-based line, 0-based col. markFromSpan shifts the line to CodeMirror's
+// 0-based {line: L-1, ch: C}.
+
+check("markFromSpan shifts 1-based line to 0-based, col unchanged", () => {
+  const m = S.markFromSpan({ start: { line: 1, col: 58 }, end: { line: 1, col: 59 } });
+  assert.deepStrictEqual(m.from, { line: 0, ch: 58 });
+  assert.deepStrictEqual(m.to, { line: 0, ch: 59 });
+});
+
+check("markFromSpan handles a multi-line span", () => {
+  const m = S.markFromSpan({ start: { line: 3, col: 2 }, end: { line: 5, col: 8 } });
+  assert.deepStrictEqual(m.from, { line: 2, ch: 2 });
+  assert.deepStrictEqual(m.to, { line: 4, ch: 8 });
+});
+
+check("markFromSpan of a zero-width / col-0 span", () => {
+  const m = S.markFromSpan({ start: { line: 2, col: 0 }, end: { line: 2, col: 0 } });
+  assert.deepStrictEqual(m.from, { line: 1, ch: 0 });
+  assert.deepStrictEqual(m.to, { line: 1, ch: 0 });
+});
+
+check("markFromSpan of null/undefined is null", () => {
+  assert.strictEqual(S.markFromSpan(null), null);
+  assert.strictEqual(S.markFromSpan(undefined), null);
+});
+
+// --- provenance: splitSpanSuffix edge cases ------------------------------
+
+check("splitSpanSuffix peels a trailing span", () => {
+  const r = S.splitSpanSuffix("x > 0  @ 1.58-1.59");
+  assert.strictEqual(r.text, "x > 0");
+  assert.deepStrictEqual(r.span, {
+    start: { line: 1, col: 58 },
+    end: { line: 1, col: 59 },
+  });
+});
+
+check("splitSpanSuffix leaves a span-less predicate untouched", () => {
+  const r = S.splitSpanSuffix("x@2 = (x@1 + 1)");
+  assert.strictEqual(r.text, "x@2 = (x@1 + 1)");
+  assert.strictEqual(r.span, null);
+});
+
+check("splitSpanSuffix keeps an @ in the predicate (SSA name)", () => {
+  const r = S.splitSpanSuffix("x@1 = x + 1  @ 1.15-1.16");
+  assert.strictEqual(r.text, "x@1 = x + 1");
+  assert.deepStrictEqual(r.span, {
+    start: { line: 1, col: 15 },
+    end: { line: 1, col: 16 },
+  });
+});
+
+check("splitSpanSuffix splits on the LAST coordinate suffix only", () => {
+  const r = S.splitSpanSuffix("a  @ 1.2-3.4  @ 9.0-9.7");
+  assert.strictEqual(r.text, "a  @ 1.2-3.4");
+  assert.deepStrictEqual(r.span, {
+    start: { line: 9, col: 0 },
+    end: { line: 9, col: 7 },
+  });
+});
+
+check("splitSpanSuffix does not split a bare trailing @", () => {
+  const r = S.splitSpanSuffix("f @ g");
+  assert.strictEqual(r.text, "f @ g");
+  assert.strictEqual(r.span, null);
+});
+
 console.log("\n" + passed + " tests passed");

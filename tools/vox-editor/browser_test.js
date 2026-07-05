@@ -161,6 +161,118 @@ async function main() {
     );
     console.log("ok - VC pane shows a goal");
 
+    // Provenance hover: pick a VC that carries spans (preferring one that
+    // ALSO has a span-less hypothesis), open it, and assert that hovering a
+    // spanned row paints the source span and mouse-out clears it, while the
+    // span-less hypothesis gets no hover affordance.
+    const prov = await page.evaluate(() => {
+      const cands = window.__vox
+        .getRegions()
+        .filter((r) => r.kind === "vc")
+        .map((r) => {
+          const hs = r.hyp_spans || [];
+          return {
+            r,
+            spanned: (r.goal_span ? 1 : 0) + hs.filter(Boolean).length,
+            spanless: hs.filter((s) => !s).length,
+            first: r.goal_span || hs.find(Boolean) || null,
+          };
+        })
+        .filter((c) => c.spanned > 0);
+      // Prefer a VC exercising BOTH a spanned row and a span-less hyp.
+      cands.sort(
+        (a, b) => (b.spanless > 0) - (a.spanless > 0) || b.spanned - a.spanned
+      );
+      const c = cands[0];
+      return c
+        ? {
+            start: c.r.start,
+            nSpanned: c.spanned,
+            nSpanless: c.spanless,
+            first: c.first,
+          }
+        : null;
+    });
+    assert.ok(prov, "the walkthrough has a VC carrying provenance spans");
+    assert.ok(prov.nSpanless > 0, "and one carrying a span-less hypothesis");
+    await page.evaluate(
+      (p) => window.__vox.cm.setCursor({ line: p.start.line, ch: p.start.col }),
+      prov
+    );
+    // One hover-sensitive row per span (goal + spanned hyps); no more.
+    await waitFor(
+      async () => (await page.$$(".prov")).length === prov.nSpanned,
+      5000,
+      "one .prov row per span"
+    );
+    console.log("ok - " + prov.nSpanned + " hover-sensitive rows, one per span");
+
+    // A span-less hypothesis renders as a plain .hyp with no .prov affordance.
+    const hasPlainHyp = await page.$$eval(".hyp", (els) =>
+      els.some((e) => !e.classList.contains("prov"))
+    );
+    assert.ok(hasPlainHyp, "a span-less hypothesis has no hover affordance");
+    console.log("ok - span-less hypothesis has no hover affordance");
+
+    // No provenance highlight before hovering.
+    const before = await page.evaluate(
+      () =>
+        window.__vox.cm
+          .getAllMarks()
+          .filter((m) => m.className === "vox-prov-hl").length
+    );
+    assert.strictEqual(before, 0, "no provenance highlight before hover");
+
+    // Hover the first spanned row (the goal): a single mark appears over the
+    // exact source span, and its text matches getRange of markFromSpan.
+    await page.$eval(".prov", (el) =>
+      el.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }))
+    );
+    const marked = await page.evaluate(() => {
+      // find() carries an extra `sticky` field; keep only {line, ch}.
+      const pos = (p) => ({ line: p.line, ch: p.ch });
+      const ms = window.__vox.cm
+        .getAllMarks()
+        .filter((m) => m.className === "vox-prov-hl");
+      if (ms.length !== 1) return { count: ms.length };
+      const range = ms[0].find();
+      return {
+        count: 1,
+        range: { from: pos(range.from), to: pos(range.to) },
+        text: window.__vox.cm.getRange(range.from, range.to),
+      };
+    });
+    assert.strictEqual(marked.count, 1, "exactly one highlight while hovering");
+    const expected = await page.evaluate((span) => {
+      const r = window.Selection.markFromSpan(span);
+      return { range: r, text: window.__vox.cm.getRange(r.from, r.to) };
+    }, prov.first);
+    assert.deepStrictEqual(
+      marked.range,
+      expected.range,
+      "highlight covers markFromSpan(span): " + JSON.stringify(marked.range)
+    );
+    assert.strictEqual(
+      marked.text,
+      expected.text,
+      "highlight text is the span's source: " + JSON.stringify(marked.text)
+    );
+    assert.ok(marked.text.length > 0, "the span covers some source text");
+    console.log("ok - hover paints the source span:", JSON.stringify(marked.text));
+
+    // Mouse-out clears it.
+    await page.$eval(".prov", (el) =>
+      el.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true }))
+    );
+    const after = await page.evaluate(
+      () =>
+        window.__vox.cm
+          .getAllMarks()
+          .filter((m) => m.className === "vox-prov-hl").length
+    );
+    assert.strictEqual(after, 0, "highlight cleared on mouse-out");
+    console.log("ok - highlight clears on mouse-out");
+
     // Cursor at an uncovered line that has a region above it: empty state
     // plus a nearest-jump secondary, and NO in-block claim / live button.
     const gap = await page.evaluate(() => {

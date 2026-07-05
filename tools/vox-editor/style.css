@@ -31,6 +31,9 @@
   --badge-trusted-bg: rgba(208, 165, 74, 0.18);
   --sel-bg: #24344d;
   --sel-bg-focus: #2a3d5c;
+  /* Accent-tinted wash painted over the source span a hovered hypothesis /
+     goal came from (see app.js provenance hover). */
+  --prov-hl: rgba(76, 155, 232, 0.32);
   --mono: "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
 }
 :root[data-theme="light"] {
@@ -61,6 +64,7 @@
   --badge-trusted-bg: rgba(125, 78, 0, 0.14);
   --sel-bg: #cfe0f7;
   --sel-bg-focus: #b6d0f2;
+  --prov-hl: rgba(11, 95, 191, 0.22);
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
@@ -155,6 +159,15 @@ main { flex: 1; display: flex; min-height: 0; }
 .goal { background: var(--goal-bg); border-left: 3px solid var(--accent); }
 .hyp { background: var(--hyp-bg); border-left: 3px solid var(--border); }
 .cex { background: var(--cex-bg); border-left: 3px solid var(--fail); }
+
+/* Provenance: a goal/hypothesis that knows its source span gets a hover
+   affordance (cursor + accent left-border), and hovering paints the span in
+   the editor with .vox-prov-hl. Span-less rows keep the plain .goal/.hyp
+   look above -- no affordance. */
+.prov { cursor: pointer; }
+.hyp.prov:hover { border-left-color: var(--accent); }
+.goal.prov:hover { background: var(--goal-bg); filter: brightness(1.12); }
+.vox-prov-hl { background: var(--prov-hl); border-radius: 2px; }
 .badge {
   display: inline-block;
   padding: 1px 7px;

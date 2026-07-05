@@ -48,6 +48,31 @@ Line 8, characters 20-21: vox VC:
 module ByPath : sig type nat2 val zero : nat2 end
 """
 
+# --- byte-exact fixtures from mechanics/provenance.ml (spans present) -----
+
+# A refined parameter: goal + one spanned hypothesis.
+DUMP_PROV_PARAM = """\
+Line 1, characters 58-59: vox VC:
+  goal: x > 0  @ 1.58-1.59
+  hypotheses:
+  x > 0  @ 1.15-1.16
+val use_param : int{ _ > 0 } -> int{ _ > 0 } = <fun>
+"""
+
+# A loop back-edge VC: the goal and three hypotheses carry spans, one of
+# which (x@1 >= 0) is an @-CONTAINING predicate with a trailing span; the
+# synthesized fresh-version equation (x@2 = (x@1 + 1)) carries NO span.
+DUMP_PROV_LOOP = """\
+Line 5, characters 9-32: vox VC:
+  goal: x@2 >= 0  @ 5.9-5.32
+  hypotheses:
+  1 <= i  @ 3.2-5.8
+  i <= n  @ 3.2-5.8
+  x@1 >= 0  @ 5.9-5.32
+  x@2 = (x@1 + 1)
+val loopy : int -> int{ _ >= 0 } = <fun>
+"""
+
 # --- byte-exact fixture from mechanics/lean_refines_fact.ml ---------------
 
 ERROR_FAIL = """\
@@ -93,7 +118,9 @@ class TestParseDump(unittest.TestCase):
                 "start": {"line": 9, "col": 26},
                 "end": {"line": 9, "col": 27},
                 "goal": "0 = 0",
+                "goal_span": None,
                 "hypotheses": [],
+                "hyp_spans": [],
                 "kind": "prove",
                 "status": "unknown",
             },
@@ -133,6 +160,138 @@ class TestParseDump(unittest.TestCase):
         # Several VC dumps back to back parse to the sum.
         vcs = vc_index.parse_dump(DUMP_TWO_NONE + DUMP_MULTI_HYP + DUMP_BYPATH)
         self.assertEqual(len(vcs), 4)
+
+    def test_no_suffix_spans_are_none(self):
+        # Plain -dump-vc output (no suffixes, e.g. an old compiler via the
+        # fallback path): the schema keys exist but every span is None.
+        vcs = vc_index.parse_dump(DUMP_MULTI_HYP)
+        self.assertIsNone(vcs[0]["goal_span"])
+        self.assertEqual(vcs[0]["hyp_spans"], [None, None, None])
+
+    def test_prov_goal_and_hyp_span(self):
+        vcs = vc_index.parse_dump(DUMP_PROV_PARAM)
+        self.assertEqual(len(vcs), 1)
+        # Text is stripped of the suffix; the span is captured separately.
+        self.assertEqual(vcs[0]["goal"], "x > 0")
+        self.assertEqual(
+            vcs[0]["goal_span"],
+            {"start": {"line": 1, "col": 58}, "end": {"line": 1, "col": 59}},
+        )
+        self.assertEqual(vcs[0]["hypotheses"], ["x > 0"])
+        self.assertEqual(
+            vcs[0]["hyp_spans"],
+            [{"start": {"line": 1, "col": 15}, "end": {"line": 1, "col": 16}}],
+        )
+
+    def test_prov_at_predicate_and_spanless_hyp(self):
+        # The loop VC mixes an @-containing spanned hypothesis with a
+        # span-less synthesized one; parsing must keep the '@' in the text,
+        # attach the trailing span, and leave the synthesized hyp span None.
+        vcs = vc_index.parse_dump(DUMP_PROV_LOOP)
+        self.assertEqual(len(vcs), 1)
+        self.assertEqual(vcs[0]["goal"], "x@2 >= 0")
+        self.assertEqual(
+            vcs[0]["goal_span"],
+            {"start": {"line": 5, "col": 9}, "end": {"line": 5, "col": 32}},
+        )
+        self.assertEqual(
+            vcs[0]["hypotheses"],
+            ["1 <= i", "i <= n", "x@1 >= 0", "x@2 = (x@1 + 1)"],
+        )
+        spans = vcs[0]["hyp_spans"]
+        assert isinstance(spans, list)
+        self.assertEqual(
+            spans[0], {"start": {"line": 3, "col": 2}, "end": {"line": 5, "col": 8}}
+        )
+        self.assertEqual(
+            spans[2], {"start": {"line": 5, "col": 9}, "end": {"line": 5, "col": 32}}
+        )
+        # The synthesized fresh-version equation has no source span.
+        self.assertIsNone(spans[3])
+
+
+class TestSplitSpanSuffix(unittest.TestCase):
+    def test_with_suffix(self):
+        text, span = vc_index.split_span_suffix("x > 0  @ 1.58-1.59")
+        self.assertEqual(text, "x > 0")
+        self.assertEqual(
+            span, {"start": {"line": 1, "col": 58}, "end": {"line": 1, "col": 59}}
+        )
+
+    def test_without_suffix(self):
+        text, span = vc_index.split_span_suffix("x > 0")
+        self.assertEqual(text, "x > 0")
+        self.assertIsNone(span)
+
+    def test_at_in_predicate_with_suffix(self):
+        # An SSA name (x@1) must survive: split only on the trailing "  @ L.C"
+        # coordinate suffix, never on the bare '@' inside the predicate.
+        text, span = vc_index.split_span_suffix("x@1 = x + 1  @ 1.15-1.16")
+        self.assertEqual(text, "x@1 = x + 1")
+        self.assertEqual(
+            span, {"start": {"line": 1, "col": 15}, "end": {"line": 1, "col": 16}}
+        )
+
+    def test_at_in_predicate_without_suffix(self):
+        text, span = vc_index.split_span_suffix("x@2 = (x@1 + 1)")
+        self.assertEqual(text, "x@2 = (x@1 + 1)")
+        self.assertIsNone(span)
+
+    def test_last_occurrence_wins(self):
+        # A predicate that itself literally contains a coordinate-looking run
+        # keeps it; only the FINAL suffix is peeled off.
+        text, span = vc_index.split_span_suffix("a  @ 1.2-3.4  @ 9.0-9.7")
+        self.assertEqual(text, "a  @ 1.2-3.4")
+        self.assertEqual(
+            span, {"start": {"line": 9, "col": 0}, "end": {"line": 9, "col": 7}}
+        )
+
+
+class TestProvenanceFlagFallback(unittest.TestCase):
+    def test_flag_rejected_detector(self):
+        rej = (
+            "ocamlc.opt: unknown option '-vox-dump-vc-provenance'.\n"
+            "Usage: ocamlc <options> <files>\n"
+        )
+        self.assertTrue(vc_index._flag_rejected(rej, "-vox-dump-vc-provenance"))
+        self.assertFalse(
+            vc_index._flag_rejected("Line 1, ...: vox VC:\n", "-vox-dump-vc-provenance")
+        )
+
+    def test_fallback_probes_once_and_caches(self):
+        # Simulate an old compiler that rejects the provenance flag: the
+        # first dump_capture falls back to -dump-vc, and the verdict is
+        # cached so later calls never re-try the flag.
+        calls = []
+
+        def fake_compile(source_path, ocamlc, flags, cwd=None):
+            calls.append(list(flags))
+            if vc_index._PROVENANCE_FLAG in flags:
+                return 2, (
+                    "ocamlc.opt: unknown option '%s'.\n" % vc_index._PROVENANCE_FLAG
+                )
+            return 0, DUMP_MULTI_HYP
+
+        saved_state = vc_index._provenance_supported
+        saved_fn = vc_index.compile_capture
+        try:
+            vc_index._provenance_supported = None
+            vc_index.compile_capture = fake_compile
+            out1 = vc_index.dump_capture("x.ml", "ocamlc", cwd=None)
+            self.assertEqual(out1, DUMP_MULTI_HYP)
+            self.assertFalse(vc_index._provenance_supported)
+            # First call probed the flag then fell back (two invocations).
+            self.assertEqual(len(calls), 2)
+            self.assertIn(vc_index._PROVENANCE_FLAG, calls[0])
+            self.assertNotIn(vc_index._PROVENANCE_FLAG, calls[1])
+            # Second call skips the flag entirely (cached).
+            calls.clear()
+            vc_index.dump_capture("x.ml", "ocamlc", cwd=None)
+            self.assertEqual(len(calls), 1)
+            self.assertNotIn(vc_index._PROVENANCE_FLAG, calls[0])
+        finally:
+            vc_index._provenance_supported = saved_state
+            vc_index.compile_capture = saved_fn
 
 
 class TestParseError(unittest.TestCase):
@@ -220,6 +379,19 @@ class TestEndToEnd(unittest.TestCase):
         vc = vcs[0]
         self.assertIn("goal", vc)
         self.assertIn("hypotheses", vc)
+
+    def test_provenance_spans_present(self):
+        # With the real compiler and the provenance flag, the refined
+        # parameter's contract hypothesis and the goal both carry a span.
+        assert OCAMLC is not None
+        d, p = self._write("ok.ml", FIXTURE_OK)
+        index = vc_index.build_index(p, OCAMLC, cwd=d)
+        vcs = cast(List[Dict[str, Any]], index["vcs"])
+        self.assertTrue(any(vc.get("goal_span") is not None for vc in vcs))
+        self.assertTrue(
+            any(s is not None for vc in vcs for s in vc.get("hyp_spans", [])),
+            msg="expected at least one hypothesis to carry a provenance span",
+        )
 
     @unittest.skipUnless(LEAN, "no lean found (set VOX_LEAN)")
     def test_solve_ok(self):

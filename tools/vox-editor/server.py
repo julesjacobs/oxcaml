@@ -80,6 +80,15 @@ def build_check_response(
             "status": vc["status"],
             "vckind": vc["kind"],
         }
+        # Provenance spans (from -vox-dump-vc-provenance): the goal's origin
+        # and one per hypothesis, parallel to ``hypotheses`` (each may be
+        # null when the compiler had no meaningful span, or absent entirely
+        # under an old compiler).  Unlike the region's own start/end these
+        # are passed through in the compiler's native 1-based-line /
+        # 0-based-col convention; the client's markFromSpan converts to
+        # CodeMirror's 0-based lines at the single point of use.
+        region["goal_span"] = vc.get("goal_span")
+        region["hyp_spans"] = vc.get("hyp_spans", [])
         if "counterexample" in vc:
             region["counterexample"] = vc["counterexample"]
         if "lean_msg" in vc:

@@ -97,6 +97,48 @@ function routesToLean(region) {
   return !!region && (region.kind === "block" || region.kind === "theorem");
 }
 
+// --- provenance spans -----------------------------------------------------
+//
+// A provenance span is the source location a goal / hypothesis came from,
+// in the COMPILER's convention: {start:{line,col}, end:{line,col}} with a
+// 1-based line and a 0-based column. The server passes these through from
+// -vox-dump-vc-provenance untouched; the two helpers below are the single
+// point where that convention meets the pane and CodeMirror.
+
+// The provenance suffix the compiler appends to a predicate: exactly two
+// spaces, "@ ", then "line.col-line.col". A predicate can itself contain
+// '@' (SSA names like x@1), so we split on the LAST such run anchored at
+// the end of the string, never on a bare '@'.
+const SPAN_SUFFIX = /^(.*)  @ (\d+)\.(\d+)-(\d+)\.(\d+)$/;
+
+// Split "pred  @ L.C-L.C" into { text, span }. The server already strips
+// the suffix and sends a structured span alongside, so on normal input the
+// text arrives clean and this returns span:null -- it is a tolerant fallback
+// that also copes with a raw suffix-bearing predicate. Never splits on a
+// bare '@'.
+function splitSpanSuffix(text) {
+  const m = SPAN_SUFFIX.exec(text);
+  if (!m) return { text, span: null };
+  return {
+    text: m[1],
+    span: {
+      start: { line: +m[2], col: +m[3] },
+      end: { line: +m[4], col: +m[5] },
+    },
+  };
+}
+
+// Convert a provenance span (1-based line, 0-based col) to a CodeMirror
+// mark range {from:{line,ch}, to:{line,ch}} (0-based line). Returns null
+// for a null/undefined span so callers can `if (!range) return`.
+function markFromSpan(span) {
+  if (!span) return null;
+  return {
+    from: { line: span.start.line - 1, ch: span.start.col },
+    to: { line: span.end.line - 1, ch: span.end.col },
+  };
+}
+
 const Selection = {
   cmp,
   contains,
@@ -105,6 +147,8 @@ const Selection = {
   kindRank,
   selectRegion,
   routesToLean,
+  splitSpanSuffix,
+  markFromSpan,
 };
 
 if (typeof module !== "undefined" && module.exports) module.exports = Selection;
