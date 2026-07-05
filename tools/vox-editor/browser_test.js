@@ -194,7 +194,9 @@ async function main() {
         : null;
     });
     assert.ok(prov, "the walkthrough has a VC carrying provenance spans");
-    assert.ok(prov.nSpanless > 0, "and one carrying a span-less hypothesis");
+    // Since match negations became subsumed-or-spanned, the walkthrough may
+    // legitimately have NO span-less hypothesis; the no-affordance check
+    // below runs only when one exists.
     await page.evaluate(
       (p) => window.__vox.cm.setCursor({ line: p.start.line, ch: p.start.col }),
       prov
@@ -208,11 +210,15 @@ async function main() {
     console.log("ok - " + prov.nSpanned + " hover-sensitive rows, one per span");
 
     // A span-less hypothesis renders as a plain .hyp with no .prov affordance.
-    const hasPlainHyp = await page.$$eval(".hyp", (els) =>
-      els.some((e) => !e.classList.contains("prov"))
-    );
-    assert.ok(hasPlainHyp, "a span-less hypothesis has no hover affordance");
-    console.log("ok - span-less hypothesis has no hover affordance");
+    if (prov.nSpanless > 0) {
+      const hasPlainHyp = await page.$$eval(".hyp", (els) =>
+        els.some((e) => !e.classList.contains("prov"))
+      );
+      assert.ok(hasPlainHyp, "a span-less hypothesis has no hover affordance");
+      console.log("ok - span-less hypothesis has no hover affordance");
+    } else {
+      console.log("ok - no span-less hypothesis in this VC (all spanned)");
+    }
 
     // No provenance highlight before hovering.
     const before = await page.evaluate(

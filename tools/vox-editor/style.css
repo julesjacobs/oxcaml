@@ -33,7 +33,8 @@
   --sel-bg-focus: #2a3d5c;
   /* Accent-tinted wash painted over the source span a hovered hypothesis /
      goal came from (see app.js provenance hover). */
-  --prov-hl: rgba(76, 155, 232, 0.32);
+  --prov-hl: rgba(76, 155, 232, 0.5);
+  --prov-hl-edge: rgba(76, 155, 232, 0.9);
   --mono: "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
 }
 :root[data-theme="light"] {
@@ -64,7 +65,8 @@
   --badge-trusted-bg: rgba(125, 78, 0, 0.14);
   --sel-bg: #cfe0f7;
   --sel-bg-focus: #b6d0f2;
-  --prov-hl: rgba(11, 95, 191, 0.22);
+  --prov-hl: rgba(11, 95, 191, 0.3);
+  --prov-hl-edge: rgba(11, 95, 191, 0.85);
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
@@ -167,7 +169,12 @@ main { flex: 1; display: flex; min-height: 0; }
 .prov { cursor: pointer; }
 .hyp.prov:hover { border-left-color: var(--accent); }
 .goal.prov:hover { background: var(--goal-bg); filter: brightness(1.12); }
-.vox-prov-hl { background: var(--prov-hl); border-radius: 2px; }
+.vox-prov-hl {
+  background: var(--prov-hl);
+  border-radius: 2px;
+  outline: 1px solid var(--prov-hl-edge);
+  outline-offset: 0;
+}
 .badge {
   display: inline-block;
   padding: 1px 7px;
@@ -219,3 +226,9 @@ html:not([data-theme="light"]) .cm-string  { color: #9ece6a; }
 html:not([data-theme="light"]) .cm-atom    { color: #ff9e64; }
 html:not([data-theme="light"]) .cm-def     { color: #7aa2f7; }
 html:not([data-theme="light"]) .cm-variable-2 { color: #7dcfff; }
+/* mllike marks true/false/raise as builtin (#30a default) and OCaml
+   type-ish words as variable-3/type (#085) -- both vanish on black. */
+html:not([data-theme="light"]) .cm-builtin { color: #ff9e64; }
+html:not([data-theme="light"]) .cm-variable-3,
+html:not([data-theme="light"]) .cm-type    { color: #2ac3de; }
+html:not([data-theme="light"]) .cm-quote   { color: #9ece6a; }
