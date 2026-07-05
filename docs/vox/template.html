@@ -368,7 +368,9 @@ OxCaml language support for borrows would make this much more
 ergonomic.</p>
 
 <h3 id="qsort">In-place parallel quicksort</h3>
-<p>We sort a slice into an array:</p>
+<p>We sort a slice into an array, in parallel &mdash; the sequential
+<code>qsort</code> is the same body with the two recursive calls made
+directly instead of under <code>fork_join2</code>:</p>
 <pre><code class="ml">@HERO_QSORT@</code></pre>
 <p>This quicksort eliminates bounds checks: indexing is statically
 proved, so the compiled code reads and writes without them.</p>
