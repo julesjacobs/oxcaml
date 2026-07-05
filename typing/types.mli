@@ -277,7 +277,7 @@ and type_desc =
   | Tbox of type_expr
   (** [Tbox ty] ==> [ty box] *)
 
-  | Trefine of type_expr * (string * vox_sort) list * Refinement.pred
+  | Trefine of type_expr * vox_map list * Refinement.pred
   (** [Trefine (ty, maps, p)] ==> a vox refined type over skeleton [ty].
       [maps] is a list of [(lean_fn, target_sort)] abstraction-function
       layers ([[]] = an ordinary refinement, today's [Trefine]); the
@@ -445,6 +445,16 @@ and vox_sort =
        the bound value [_] and constructor/spec symbols (closedness is
        enforced at elaboration), so it is .cmi-stable like the paths in
        [Vs_data]. *)
+
+and vox_map =
+  (* vox: one abstraction-function layer of a [Trefine]'s [maps]:
+     [vm_fn] the Lean map function, [vm_target] the OCaml target type
+     (printing / inclusion), [vm_sort] its refinement sort (dsort /
+     rigid unification). *)
+  { vm_fn : string
+  ; vm_target : type_expr
+  ; vm_sort : vox_sort
+  }
 
 and ('layout, 'd) base_and_axes =
   { base : 'layout jkind_base;
@@ -1107,8 +1117,7 @@ and constructor_arguments =
 (* vox: structural equality on refinement sorts and on [Trefine] maps
    ([Vs_data] paths by [Path.same], invariants by [Refinement.equal]). *)
 val vox_sort_equal : vox_sort -> vox_sort -> bool
-val vox_maps_equal :
-  (string * vox_sort) list -> (string * vox_sort) list -> bool
+val vox_maps_equal : vox_map list -> vox_map list -> bool
 
 val tys_of_constr_args : constructor_arguments -> type_expr list
 

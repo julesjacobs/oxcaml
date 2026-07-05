@@ -1361,14 +1361,18 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
     let cty = transl_type env ~policy ~aliased ~row_context mode inner_styp in
     let target_cty = transl_type env ~policy ~row_context mode target_styp in
     let target_sort = vox_target_sort env target_cty.ctyp_type in
+    let m =
+      { Types.vm_fn = fn
+      ; vm_target = target_cty.ctyp_type
+      ; vm_sort = target_sort
+      }
+    in
     let ty =
       match get_desc cty.ctyp_type with
       | Trefine (skel, maps, pred) ->
-        newty (Trefine (skel, maps @ [ (fn, target_sort) ], pred))
+        newty (Trefine (skel, maps @ [ m ], pred))
       | _ ->
-        newty
-          (Trefine
-             (cty.ctyp_type, [ (fn, target_sort) ], Refinement.Pbool true))
+        newty (Trefine (cty.ctyp_type, [ m ], Refinement.Pbool true))
     in
     { cty with ctyp_type = ty }
   | None ->
@@ -1864,7 +1868,8 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
                    | _ ->
                      let composite =
                        List.fold_left
-                         (fun acc (fn, _) -> Refinement.Pfun (fn, [ acc ]))
+                         (fun acc m ->
+                           Refinement.Pfun (m.Types.vm_fn, [ acc ]))
                          Refinement.Pbound maps0
                      in
                      Refinement.subst_bound ~by:composite pred

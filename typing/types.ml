@@ -165,7 +165,7 @@ and type_desc =
   | Tpackage of package
   | Tof_kind of jkind_lr
   | Tbox of type_expr
-  | Trefine of type_expr * (string * vox_sort) list * Refinement.pred
+  | Trefine of type_expr * vox_map list * Refinement.pred
 
 and arg_label =
   | Nolabel
@@ -288,6 +288,19 @@ and vox_sort =
        the bound value [_] and constructor/spec symbols (closedness is
        enforced at elaboration), so it is .cmi-stable like the paths in
        [Vs_data]. *)
+
+and vox_map =
+  (* vox: one abstraction-function layer of a [Trefine]'s [maps] (see
+     [Trefine]).  [vm_fn] is the Lean map function; [vm_target] the
+     OCaml type it maps INTO (kept for printing the surface [via
+     (fn : target)] and for the inclusion rule, which relates a
+     manifest's target to a [refines] claim by the OCaml type); [vm_sort]
+     the target's refinement sort (what [dsort] renders and rigid
+     unification compares). *)
+  { vm_fn : string
+  ; vm_target : type_expr
+  ; vm_sort : vox_sort
+  }
 
 and ('layout, 'd) base_and_axes =
   { base : 'layout jkind_base;
@@ -669,10 +682,11 @@ let rec vox_sort_equal (s1 : vox_sort) (s2 : vox_sort) =
 
 (* vox: equality on [Trefine] maps -- same length, and each layer's
    Lean function name and target sort equal, in order. *)
-let vox_maps_equal m1 m2 =
+let vox_maps_equal (m1 : vox_map list) (m2 : vox_map list) =
   List.length m1 = List.length m2
   && List.for_all2
-       (fun (f1, s1) (f2, s2) -> String.equal f1 f2 && vox_sort_equal s1 s2)
+       (fun a b ->
+         String.equal a.vm_fn b.vm_fn && vox_sort_equal a.vm_sort b.vm_sort)
        m1 m2
 
 let tys_of_constr_args = function

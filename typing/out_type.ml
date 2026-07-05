@@ -1601,9 +1601,14 @@ let rec tree_of_modal_typexp mode modal ty =
     | Trefine (ty, maps, p) ->
       (* vox: compact surface format [ty{ pred }], with [via f] per
          abstraction-function layer. *)
+      let target_name (m : Types.vox_map) =
+        match get_desc m.vm_target with
+        | Tconstr (p, _, _) -> Path.name p
+        | _ -> "_"
+      in
       let s =
         List.fold_left
-          (fun acc (fn, _) -> acc ^ " via " ^ fn)
+          (fun acc m -> acc ^ " via (" ^ m.Types.vm_fn ^ " : " ^ target_name m ^ ")")
           (Refinement.to_string p) maps
       in
       Otyp_refine (tree_of_typexp mode Alloc.Const.legacy ty, s)

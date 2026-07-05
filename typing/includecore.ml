@@ -1729,7 +1729,7 @@ let type_declarations_consistency env decl1 decl2 =
          | None -> None)
       | Trefine (_, maps, _) ->
         (* a via manifest denotes at its last map's target sort *)
-        Some (snd (List.nth maps (List.length maps - 1)))
+        Some (List.nth maps (List.length maps - 1)).Types.vm_sort
       | Tconstr (p, args, _) ->
         (match Env.find_type p env with
          | exception Not_found -> None

@@ -845,7 +845,13 @@ let rec typexp copy_scope s ty =
             | Path.Pident _ | Path.Pextra_ty _ -> q
           in
           let maps =
-            List.map (fun (fn, tsort) -> (fn, subst_vox_sort s tsort)) maps
+            List.map
+              (fun m ->
+                { m with
+                  Types.vm_target = typexp copy_scope s m.Types.vm_target
+                ; vm_sort = subst_vox_sort s m.Types.vm_sort
+                })
+              maps
           in
           Trefine
             ( typexp copy_scope s t,

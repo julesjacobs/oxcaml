@@ -99,10 +99,18 @@ Consequences:
   never inside unify — exactly Trefine's discipline.
 - **Two localized changes:** (a) `_`-elaboration in typetexp becomes
   layer-aware — a predicate written over a via type elaborates `_` as
-  `maps(x)` at the target sort before storage; (b) `dsort_of_type`
-  returns the last map's target instead of deferring to the skeleton
-  (which is why maps carry target sorts — vox cannot infer `elems`'s
-  Lean type).
+  `maps(x)` at the target sort before storage; (b) `dsort_of_type` on a
+  via type.  STAGE-2 CORRECTION (landed): within one module (spine
+  visible) the binder IS the base value — the reader contributes
+  `bst x && P(elems x)`, and `bst x` needs `x` at the *skeleton* sort —
+  so `dsort_of_type` returns the SKELETON sort there (and registers the
+  map targets so the map functions' declarations reach the solver).
+  The last-map-target sort is what `dsort_of_type` returns only on the
+  ABSTRACT path (a `Tconstr` whose kind carries `refines (target)`),
+  where the client has no spine and the value simply IS the image —
+  which is stage 3.  Maps still carry target sorts (for rigid
+  unification and the abstract dsort); vox cannot infer `elems`'s Lean
+  type.
 - **Coercion rules** at the channels: extra refinement in the expected
   type at layer k → VC of that predicate at the composite image
   (today's rule, per layer).  Extra via layer with nothing above it →
@@ -112,6 +120,20 @@ Consequences:
   maps and predicate together (see the sharp-cases section).
 - Kind-level mirror: `Vs_map` next to `Vs_fact`, so a modeling in a
   kind may itself be mapped.
+
+STAGE-2 STATUS (landed): `Trefine` carries `maps : vox_map list`
+(`{ vm_fn; vm_target; vm_sort }` — the OCaml target type is kept for
+printing `via (fn : target)` and the stage-3 inclusion rule).  Maps
+default `[]` (today's refinement).  Surface: the `[@vox.via (fn :
+target)]` attribute (localized in `typetexp.vox_via_attr`; a real
+`via` grammar production can replace it there).  No implicit projection
+of a via VALUE to its skeleton (enforced at the application-result
+coercion).  Both target kinds work: a ghost-sort target (a block-defined
+`inductive`, e.g. `iset`) and an OCaml DATATYPE target (`Vs_data`, e.g.
+`via (to_list : ilist)`) -- the latter was blocked by a block-datatype
+emission-ordering bug, now resolved by the on-sight solver-block
+datatype registration that landed with the hash-table stack.  See
+mechanics/lean_via.ml.
 
 ## 3. Module abstraction: the payoff
 

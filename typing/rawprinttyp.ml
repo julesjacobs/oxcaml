@@ -166,7 +166,8 @@ and raw_type_desc ppf ty =
     fprintf ppf "@[Tbox@ %a@]" raw_type t
   | Trefine (t, maps, p) ->
     fprintf ppf "@[Trefine(@,%a,@,[%s],@,%s)@]" raw_type t
-      (String.concat ";" (List.map fst maps)) (Refinement.to_string p)
+      (String.concat ";" (List.map (fun m -> m.vm_fn) maps))
+      (Refinement.to_string p)
 
 and raw_row_fixed ppf = function
 | None -> fprintf ppf "None"

@@ -7791,10 +7791,22 @@ and type_expect_
          behavior. *)
       let ty_ret =
         match get_desc ty_ret with
-        | Trefine (skel', _, _) ->
+        | Trefine (skel', maps, _) ->
           (match get_desc ty_expected with
            | Tvar _ | Tunivar _ | Tpoly _ | Trefine _ -> ty_ret
-           | _ -> skel')
+           | _ ->
+             (* vox: dropping a via layer's map changes the denotation
+                vocabulary, so it is an EXPLICIT act -- unlike dropping
+                a predicate (weakening), which the skeleton erasure
+                below allows.  Reaching the bare skeleton from a via
+                value implicitly is rejected; [refine_] unpacks it. *)
+             if maps <> []
+             then
+               Location.raise_errorf ~loc
+                 "vox: this value has a via type; reaching its \
+                  skeleton drops its abstraction map -- unpack it \
+                  with refine_";
+             skel')
         | _ -> ty_ret
       in
       let exp = rue {

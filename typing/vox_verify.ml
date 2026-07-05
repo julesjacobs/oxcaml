@@ -660,7 +660,7 @@ and dsort_of_type ?(visited = []) ?(params = []) env ty =
          (An ABSTRACT via type reaches the solver as its image sort
          through the kind, a separate path -- that is stage 3.) *)
       List.iter
-        (fun (_, tsort) -> ignore (dsort_of_vox_sort env [] tsort : dsort))
+        (fun m -> ignore (dsort_of_vox_sort env [] m.Types.vm_sort : dsort))
         maps;
       dsort_of_type ~visited ~params env skel
     | Ttuple comps
@@ -731,7 +731,7 @@ let register_type_specs env ty =
         (* register each via layer's target datatype, so its declaration
            and the map functions that mention it reach the solver *)
         List.iter
-          (fun (_, tsort) -> ignore (dsort_of_vox_sort env [] tsort : dsort))
+          (fun m -> ignore (dsort_of_vox_sort env [] m.Types.vm_sort : dsort))
           maps;
         register_pred_paths env p;
         go skel visited
