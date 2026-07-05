@@ -557,6 +557,24 @@ alongside the emitter and Lean&rsquo;s kernel.  And the automation is
 incomplete &mdash; true goals can need hand-written lemmas, and how
 concrete a counterexample is depends on the model.</p>
 
+<h2 id="future">Future work</h2>
+<p>Roughly in the order we would take it on.  Termination for program
+functions &mdash; the machinery exists (<code>total_</code> functions
+are already termination-checked by Lean); extending it to ordinary
+recursion with measures is the natural next step, and it upgrades
+partial to total correctness where you opt in.  Exceptions as
+contracts: &ldquo;raises <code>X</code> when <code>P</code>&rdquo; as
+a specifiable outcome instead of an invisible path.  Shared state,
+in layers: an invariant layer first (protected regions whose invariant
+is checked at every release), atomics and a memory model only once
+that holds up.  Interface models for the core containers, so client
+code proves against maps and sets without reading implementations.
+Spec-driven testing at the <code>assume_</code> boundary &mdash;
+reflected contracts as oracles for property-based testing and
+fuzzing.  And the editor grows toward an IDE: hypothesis provenance
+(hover a fact, see the source that produced it), multi-unit projects,
+and proof-state history.</p>
+
 <h2 id="run">Running it</h2>
 <pre><code>git clone -b vox https://github.com/julesjacobs/oxcaml && cd oxcaml
 autoconf && ./configure && make boot-compiler
