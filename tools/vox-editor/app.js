@@ -241,26 +241,29 @@ cm.addKeyMap({
 // Examples dropdown: populated from /examples, each choice loads the
 // source and re-checks. A confirm() guards unsaved edits.
 const examplesEl = document.getElementById("examples");
+let examplesList = [];
 
 async function loadExamples() {
-  let list;
   try {
     const resp = await fetch("/examples");
-    list = (await resp.json()).examples || [];
+    examplesList = (await resp.json()).examples || [];
   } catch (e) {
-    return; // no examples served; leave the dropdown as-is
+    examplesList = []; // no examples served; leave the dropdown as-is
   }
-  list.forEach((ex) => {
+  examplesList.forEach((ex) => {
     const opt = document.createElement("option");
     opt.value = ex.name;
     opt.textContent = (ex.verifies ? "" : "✗ ") + ex.title;
     opt.title = ex.description;
     examplesEl.appendChild(opt);
   });
+  return examplesList;
 }
 
-async function pickExample(name) {
-  if (cm.getValue() !== lastLoaded &&
+// Load an example into the buffer and re-check. `force` skips the
+// unsaved-buffer guard (used on startup, where there is nothing to lose).
+async function loadExample(name, force) {
+  if (!force && cm.getValue() !== lastLoaded &&
       !confirm("Discard your edits and load this example?")) {
     return false;
   }
@@ -270,6 +273,7 @@ async function pickExample(name) {
     const source = await resp.text();
     lastLoaded = source;
     cm.setValue(source);
+    examplesEl.value = name; // reflect the loaded example in the dropdown
     check();
     return true;
   } catch (e) {
@@ -278,16 +282,32 @@ async function pickExample(name) {
   }
 }
 
-examplesEl.addEventListener("change", async () => {
+// Back-compat alias for the guarded, user-initiated path.
+const pickExample = (name) => loadExample(name, false);
+
+examplesEl.addEventListener("change", () => {
   const name = examplesEl.value;
-  if (!name) return;
-  await pickExample(name);
-  examplesEl.value = ""; // reset to the "Examples…" label
+  if (name) loadExample(name, false);
 });
 
-loadExamples();
+// Startup: open with the default example (auto-checked) rather than a
+// bare sample. Falls back to checking whatever is in the buffer.
+async function init() {
+  const list = await loadExamples();
+  const def = list.find((e) => e.default) || list[0];
+  if (def && (await loadExample(def.name, true))) return;
+  check();
+}
 
 // Testability hook for the headless browser smoke test.
-window.__vox = { cm, check, renderPane, pickExample, loadExamples };
+window.__vox = {
+  cm,
+  check,
+  renderPane,
+  loadExample,
+  pickExample,
+  loadExamples,
+  getRegions: () => regions,
+};
 
-check();
+init();

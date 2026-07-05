@@ -40,10 +40,32 @@ import vc_index  # pyright: ignore[reportImplicitRelativeImport]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SUITE = os.path.normpath(os.path.join(HERE, "..", "..", "testsuite", "tests", "vox"))
 OUT = os.path.join(HERE, "examples")
+# Hand-edited override sources (used when a suite file would carry an
+# unnecessary [refine_] the direct spelling drops -- see the cleanup note
+# below). Each still passes the same validation gate as a suite file.
+SRC_OVERRIDE = os.path.join(HERE, "examples_src")
 
 # The curated set, in pedagogical order.  Titles and descriptions are
 # written by hand; the script only transforms and validates the sources.
-MANIFEST: List[Dict[str, str]] = [
+# Each entry names a `source` (relative to the vox suite) OR an
+# `override` (a hand-edited file in examples_src/ that must still pass
+# validation). `default: True` marks the on-load example.
+MANIFEST: List[Dict[str, object]] = [
+    {
+        # The page's "Refinement types, by example" walkthrough
+        # (len -> append -> nth), and the editor's on-load default.
+        "slug": "nth",
+        "source": "demo/lean_nth.ml",
+        "expect": "verify",
+        "default": True,
+        "title": "Refinement types, by example",
+        "description": (
+            "The page walkthrough: len and append prove inductively, and "
+            "the bound 0 <= i < len l rides nth's parameter as a "
+            "contract, turning the Nil arm into a false obligation "
+            "rather than an exception."
+        ),
+    },
     {
         "slug": "overview",
         "source": "demo/lean_overview.ml",
@@ -64,18 +86,6 @@ MANIFEST: List[Dict[str, str]] = [
             "total_ recursive functions reflect into the logic, so len, "
             "mem and depth denote themselves in refinements -- no "
             "separate spec library, no proof text."
-        ),
-    },
-    {
-        "slug": "nth",
-        "source": "demo/lean_nth.ml",
-        "expect": "verify",
-        "title": "A precondition makes a branch dead",
-        "description": (
-            "Safe list indexing: len and append prove inductively, and "
-            "the bound 0 <= i < len l rides nth's parameter as a "
-            "contract, turning the Nil arm into a false obligation "
-            "rather than an exception."
         ),
     },
     {
@@ -125,8 +135,10 @@ MANIFEST: List[Dict[str, str]] = [
         ),
     },
     {
+        # Direct-spelling override: the suite file uses explicit refine_
+        # in result positions the annotation now carries on its own.
         "slug": "mutable",
-        "source": "demo/lean_mutable.ml",
+        "override": "mutable.ml",
         "expect": "verify",
         "title": "Flow-sensitive mutable locals",
         "description": (
@@ -136,8 +148,22 @@ MANIFEST: List[Dict[str, str]] = [
         ),
     },
     {
+        "slug": "qsort",
+        "source": "demo/lean_qsort_run.ml",
+        "expect": "verify",
+        "title": "In-place parallel quicksort",
+        "description": (
+            "The page's flagship: sorted-and-permutation on a borrowed "
+            "slice, with a fork-join parallel psort under the same spec "
+            "(borrow API and sort inlined for a single file). The "
+            "heaviest example -- about 3s to verify, versus ~1s for the "
+            "others."
+        ),
+    },
+    {
+        # Direct-spelling override (result refinement on the annotation).
         "slug": "counterexample",
-        "source": "mechanics/lean_wrong.ml",
+        "override": "counterexample.ml",
         "expect": "fail",
         "title": "When you're wrong (counterexample)",
         "description": (
@@ -297,10 +323,17 @@ def main() -> None:
     kept: List[Dict[str, object]] = []
     dropped: List[str] = []
     for entry in MANIFEST:
-        slug = entry["slug"]
-        src_path = os.path.join(SUITE, entry["source"])
+        slug = str(entry["slug"])
+        expect = str(entry["expect"])
+        # A hand-edited override (examples_src/) or a suite file.
+        if "override" in entry:
+            origin = "examples_src/" + str(entry["override"])
+            src_path = os.path.join(SRC_OVERRIDE, str(entry["override"]))
+        else:
+            origin = str(entry["source"])
+            src_path = os.path.join(SUITE, origin)
         if not os.path.exists(src_path):
-            dropped.append("%s: source %s missing" % (slug, entry["source"]))
+            dropped.append("%s: source %s missing" % (slug, origin))
             continue
         with open(src_path) as fh:
             raw = fh.read()
@@ -313,35 +346,29 @@ def main() -> None:
         )
         if not v.elaborated:
             status = "elaboration error: " + v.detail
+        matched = outcome_matches(expect, v)
         print(
-            "%-16s %-22s %-13s vcs=%d expect=%s%s"
-            % (
-                slug,
-                entry["source"],
-                status,
-                v.n_vcs,
-                entry["expect"],
-                "  OK" if outcome_matches(entry["expect"], v) else "  DROP",
-            ),
+            "%-16s %-26s %-13s vcs=%d expect=%s%s"
+            % (slug, origin, status, v.n_vcs, expect, "  OK" if matched else "  DROP"),
             flush=True,
         )
-        if not outcome_matches(entry["expect"], v):
+        if not matched:
             dropped.append(
-                "%s (%s): expected %s, got %s"
-                % (slug, entry["source"], entry["expect"], status)
+                "%s (%s): expected %s, got %s" % (slug, origin, expect, status)
             )
             continue
         if not args.check_only:
             with open(os.path.join(OUT, slug + ".ml"), "w") as fh:
                 fh.write(transformed)
-        kept.append(
-            {
-                "name": slug,
-                "title": entry["title"],
-                "description": entry["description"],
-                "verifies": entry["expect"] == "verify",
-            }
-        )
+        item: Dict[str, object] = {
+            "name": slug,
+            "title": str(entry["title"]),
+            "description": str(entry["description"]),
+            "verifies": expect == "verify",
+        }
+        if entry.get("default"):
+            item["default"] = True
+        kept.append(item)
 
     if not args.check_only:
         os.makedirs(OUT, exist_ok=True)

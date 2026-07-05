@@ -1,6 +1,13 @@
 {
   "examples": [
     {
+      "name": "nth",
+      "title": "Refinement types, by example",
+      "description": "The page walkthrough: len and append prove inductively, and the bound 0 <= i < len l rides nth's parameter as a contract, turning the Nil arm into a false obligation rather than an exception.",
+      "verifies": true,
+      "default": true
+    },
+    {
       "name": "overview",
       "title": "Sixty seconds",
       "description": "First contact: a division whose divisor carries a not (_ = 0) contract, discharged at each call site. The smallest end-to-end proof.",
@@ -10,12 +17,6 @@
       "name": "reflect",
       "title": "The program as its own spec",
       "description": "total_ recursive functions reflect into the logic, so len, mem and depth denote themselves in refinements -- no separate spec library, no proof text.",
-      "verifies": true
-    },
-    {
-      "name": "nth",
-      "title": "A precondition makes a branch dead",
-      "description": "Safe list indexing: len and append prove inductively, and the bound 0 <= i < len l rides nth's parameter as a contract, turning the Nil arm into a false obligation rather than an exception.",
       "verifies": true
     },
     {
@@ -46,6 +47,12 @@
       "name": "mutable",
       "title": "Flow-sensitive mutable locals",
       "description": "SSA versioning, conditional joins, let mutable, and for / while loops with [@vox.invariant], all with reflected arithmetic through the mutable reads.",
+      "verifies": true
+    },
+    {
+      "name": "qsort",
+      "title": "In-place parallel quicksort",
+      "description": "The page's flagship: sorted-and-permutation on a borrowed slice, with a fork-join parallel psort under the same spec (borrow API and sort inlined for a single file). The heaviest example -- about 3s to verify, versus ~1s for the others.",
       "verifies": true
     },
     {

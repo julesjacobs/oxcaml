@@ -7,6 +7,7 @@ byte-for-byte discipline of test_vc_index.
 """
 
 import os
+import re
 import unittest
 
 import make_examples  # pyright: ignore[reportImplicitRelativeImport]
@@ -81,6 +82,30 @@ class TestTransformPinned(unittest.TestCase):
             "refine_ (n + 1)\n"
         )
         self.assertEqual(make_examples.transform(raw), expected)
+
+
+class TestOverrides(unittest.TestCase):
+    """Hand-edited override sources are already clean, so the transform is
+    idempotent on them and they carry no explicit refine_ code."""
+
+    def _override_paths(self):
+        for entry in make_examples.MANIFEST:
+            if "override" in entry:
+                yield os.path.join(make_examples.SRC_OVERRIDE, str(entry["override"]))
+
+    def test_transform_idempotent_on_overrides(self):
+        for path in self._override_paths():
+            with open(path) as fh:
+                once = make_examples.transform(fh.read())
+            self.assertEqual(once, make_examples.transform(once))
+
+    def test_overrides_have_no_refine_code(self):
+        # refine_ may appear only in a comment (the cleanup note), never as
+        # a code token: strip (* ... *) comments and assert it is gone.
+        for path in self._override_paths():
+            with open(path) as fh:
+                code = re.sub(r"\(\*.*?\*\)", "", fh.read(), flags=re.DOTALL)
+            self.assertNotIn("refine_", code, "%s still uses refine_ in code" % path)
 
 
 if __name__ == "__main__":

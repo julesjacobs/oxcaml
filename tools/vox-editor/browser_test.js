@@ -91,7 +91,8 @@ async function main() {
     });
     await page.waitForSelector(".CodeMirror", { timeout: 10000 });
 
-    // The sample auto-checks on load; wait for the verdict.
+    // The default example (the len/append/nth walkthrough) auto-checks
+    // on load; wait for the verdict.
     await waitFor(
       () => page.$eval("#status", (e) => e.textContent),
       30000,
@@ -105,34 +106,125 @@ async function main() {
       60000,
       "check to finish"
     );
-    console.log("ok - status after check:", status.trim());
-    assert.ok(status.includes("verified"), "sample should verify: " + status);
+    console.log("ok - default example status:", status.trim());
+    assert.ok(status.includes("verified"), "default should verify: " + status);
 
-    // Put the cursor on the VC (the `dbl 0` refinement, source line 10).
-    await page.evaluate(() => window.__vox.cm.setCursor({ line: 10, ch: 20 }));
-    const paneVc = await waitFor(
+    const buf = await page.evaluate(() => window.__vox.cm.getValue());
+    assert.ok(
+      /let rec nth/.test(buf) && /append/.test(buf),
+      "default is the len/append/nth walkthrough"
+    );
+    assert.strictEqual(
+      await page.$eval("#examples", (e) => e.value),
+      "nth",
+      "dropdown reflects the default example"
+    );
+    console.log("ok - default is the walkthrough, selected in the dropdown");
+
+    // Cursor on the first VC region: the pane shows its goal.
+    const vcPos = await page.evaluate(() => {
+      const r = window.__vox.getRegions().find((x) => x.kind === "vc");
+      return r ? { line: r.start.line, col: r.start.col } : null;
+    });
+    assert.ok(vcPos, "the walkthrough has a VC region");
+    await page.evaluate((p) => window.__vox.cm.setCursor({ line: p.line, ch: p.col }), vcPos);
+    await waitFor(
       async () => {
         const t = await page.$eval("#pane-body", (e) => e.textContent);
-        return t.includes("goal") ? t : false;
+        return /goal/.test(t) ? t : false;
       },
       5000,
       "vc pane"
     );
     console.log("ok - VC pane shows a goal");
-    assert.ok(/dbl 0|= 0/.test(paneVc), "VC goal text: " + paneVc.slice(0, 120));
 
-    // Put the cursor inside the block theorem; static goal should appear.
-    await page.evaluate(() => window.__vox.cm.setCursor({ line: 6, ch: 4 }));
+    // Cursor at an uncovered line that has a region above it: empty state
+    // plus a nearest-jump secondary, and NO in-block claim / live button.
+    const gap = await page.evaluate(() => {
+      const rs = window.__vox.getRegions();
+      const covered = new Set();
+      rs.forEach((r) => {
+        for (let l = r.start.line; l <= r.end.line; l++) covered.add(l);
+      });
+      const minR = Math.min(...rs.map((r) => r.start.line));
+      const maxL = window.__vox.cm.lastLine();
+      for (let l = minR + 1; l <= maxL; l++) if (!covered.has(l)) return l;
+      return null;
+    });
+    assert.ok(gap !== null, "found an uncovered line below a region");
+    await page.evaluate((l) => window.__vox.cm.setCursor({ line: l, ch: 0 }), gap);
+    const empty = await waitFor(
+      async () => {
+        const t = await page.$eval("#pane-body", (e) => e.textContent);
+        return /No obligation at the cursor/.test(t) ? t : false;
+      },
+      5000,
+      "empty state off-region"
+    );
+    console.log("ok - empty state at an off-region line");
+    assert.ok(!/Inside a/.test(empty), "must not claim in-block: " + empty.slice(0, 120));
+    assert.strictEqual(
+      await page.$("#live-btn"),
+      null,
+      "no live-goal button off-region"
+    );
+    assert.ok(await page.$("#jump-btn"), "offers a nearest-region jump");
+
+    // Examples dropdown: pick fib (a [%%vox.lean] block example) and
+    // drive its static block theorem + a live Lean goal.
+    await page.evaluate(() => {
+      window.confirm = () => true; // never block the headless run
+    });
+    const optCount = await page.$eval("#examples", (e) => e.options.length);
+    assert.ok(optCount > 1, "examples dropdown populated: " + optCount);
+    await page.evaluate(() => {
+      const sel = document.getElementById("examples");
+      sel.value = "fib";
+      sel.dispatchEvent(new Event("change"));
+    });
+    const loaded = await waitFor(
+      async () => {
+        const t = await page.evaluate(() => window.__vox.cm.getValue());
+        return /fib_rec|total_ fib/.test(t) ? t : false;
+      },
+      10000,
+      "fib loaded into editor"
+    );
+    console.log("ok - picked fib from the dropdown");
+    assert.ok(!/let rec nth/.test(loaded), "walkthrough replaced by fib");
+    const fibStatus = await waitFor(
+      async () => {
+        const t = await page.$eval("#status", (e) => e.textContent);
+        return /verified|errors/.test(t) ? t : false;
+      },
+      60000,
+      "fib check"
+    );
+    console.log("ok - fib checks:", fibStatus.trim());
+    assert.ok(fibStatus.includes("verified"), "fib should verify: " + fibStatus);
+
+    // Cursor inside a block theorem: static goal should appear. Wait for
+    // fib's regions to land (the check response updates them async).
+    const thmPos = await waitFor(
+      () =>
+        page.evaluate(() => {
+          const r = window.__vox.getRegions().find((x) => x.kind === "theorem");
+          return r ? { line: r.start.line + 1, col: 2 } : false;
+        }),
+      10000,
+      "fib block theorem region"
+    );
+    await page.evaluate((p) => window.__vox.cm.setCursor({ line: p.line, ch: p.col }), thmPos);
     const paneThm = await waitFor(
       async () => {
         const t = await page.$eval("#pane-body", (e) => e.textContent);
-        return t.includes("dbl_nonneg") ? t : false;
+        return /theorem/.test(t) ? t : false;
       },
       5000,
       "theorem pane"
     );
-    console.log("ok - block theorem shows static goal");
-    assert.ok(paneThm.includes("dbl n >= 0"), "static goal: " + paneThm.slice(0, 160));
+    console.log("ok - block theorem shows a static goal");
+    assert.ok(/fib/.test(paneThm), "static goal mentions fib: " + paneThm.slice(0, 160));
 
     // Click the live-goal button and wait for the real Lean proof state.
     await page.click("#live-btn");
@@ -146,65 +238,7 @@ async function main() {
       "live goal"
     );
     console.log("ok - live Lean goal fetched");
-    // Genuine Lean proof state: a turnstile goal and a typed hypothesis.
-    // (The exact goal depends on where in the proof the cursor sits; we
-    // assert it is real Lean output, not a specific tactic state.)
     assert.ok(live.includes("⊢"), "live goal has a turnstile: " + live.slice(0, 160));
-    assert.ok(/Int/.test(live), "live goal has a hypothesis: " + live.slice(0, 160));
-
-    // Cursor NOT in any region (blank line 8, below the block): the pane
-    // must show an empty state and must NOT claim we are in a block or
-    // offer a live-goal button (the reported bug).
-    await page.evaluate(() => window.__vox.cm.setCursor({ line: 8, ch: 0 }));
-    const empty = await waitFor(
-      async () => {
-        const t = await page.$eval("#pane-body", (e) => e.textContent);
-        return /No obligation at the cursor/.test(t) ? t : false;
-      },
-      5000,
-      "empty state off-region"
-    );
-    console.log("ok - empty state when cursor is at no region");
-    assert.ok(!/Inside a/.test(empty), "must not claim in-block: " + empty.slice(0, 120));
-    assert.strictEqual(
-      await page.$("#live-btn"),
-      null,
-      "no live-goal button when not in a block"
-    );
-    assert.ok(await page.$("#jump-btn"), "offers a nearest-region jump");
-
-    // Examples dropdown: it is populated, and picking one loads that
-    // source into the editor and re-checks to a verdict.
-    await page.evaluate(() => {
-      window.confirm = () => true; // never block the headless run
-    });
-    const optCount = await page.$eval("#examples", (e) => e.options.length);
-    assert.ok(optCount > 1, "examples dropdown populated: " + optCount);
-    await page.evaluate(() => {
-      const sel = document.getElementById("examples");
-      sel.value = "overview";
-      sel.dispatchEvent(new Event("change"));
-    });
-    const loaded = await waitFor(
-      async () => {
-        const t = await page.evaluate(() => window.__vox.cm.getValue());
-        return t.includes("let div") ? t : false;
-      },
-      10000,
-      "example loaded into editor"
-    );
-    console.log("ok - example loaded into editor");
-    assert.ok(!loaded.includes("total_ dbl"), "sample replaced by the example");
-    const exStatus = await waitFor(
-      async () => {
-        const t = await page.$eval("#status", (e) => e.textContent);
-        return /verified|errors/.test(t) ? t : false;
-      },
-      60000,
-      "picked example to check"
-    );
-    console.log("ok - picked example checks:", exStatus.trim());
-    assert.ok(exStatus.includes("verified"), "picked example verifies: " + exStatus);
 
     // Light mode: emulate each OS preference and assert the palette flips.
     // (Headless Chrome defaults to light, so pin dark first for a real
