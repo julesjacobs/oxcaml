@@ -3999,7 +3999,7 @@ and type_pat_aux
           match sp_constrained.ppat_desc with
           | Ppat_var _ when vox_is_param_root ->
             (match get_desc (expand_head !!penv expected_ty') with
-             | Trefine (skel, _, _) -> skel
+             | Trefine (skel, [], _) -> skel
              | _ -> expected_ty')
           | _ -> expected_ty'
         in
@@ -5138,11 +5138,16 @@ let vox_is_cast_arg (sarg : Parsetree.expression) =
 
 let vox_strip_param_refinement env ty =
   match get_desc (expand_head env ty) with
-  | Trefine (skel, _, _) ->
+  | Trefine (skel, [], _) ->
       (* Flags the unit for the verification pass (see
          [Vox_dep.contract_use_seen]). *)
       Vox_dep.contract_use_seen := true;
       skel
+  | Trefine (_, _ :: _, _) ->
+      (* image-binder: a via param keeps its via type so it denotes the
+         image; the representation is reached only through refine_. *)
+      Vox_dep.contract_use_seen := true;
+      ty
   | _ -> ty
 
 (* See Note [Type-checking applications] for an overview *)
@@ -7442,7 +7447,9 @@ and type_expect_
          behavior). *)
       let use_ty =
         match desc.val_kind, get_desc desc.val_type with
-        | Val_reg _, Trefine (skel, _, _) -> skel
+        (* ordinary refinement strips to skeleton at a use; a VIA type
+           keeps its type (image-binder: reached only via refine_). *)
+        | Val_reg _, Trefine (skel, [], _) -> skel
         | _ -> desc.val_type
       in
       let exp = rue {

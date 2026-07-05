@@ -4,18 +4,16 @@
  expect;
 *)
 
-(* STAGE 2: [via] -- a type's denotation is a FUNCTION of its
-   representation's.  [type set = tree{ bst _ } [@vox.via (elems : iset)]]
-   models set at iset (the map elems's target) while the runtime value
-   stays the tree.  Predicates are stored at the BASE sort: a binder
-   t : set{ P } contributes bst t && P (elems t) -- the image elems t
-   appears explicitly, no layer recursion.  Within one module the spine
-   is visible, so the binder is the base value at the tree sort and
-   clients reason with the map applied.  Coercion: injection is the
-   ordinary refinement introduction (its base predicate is the VC);
-   reaching the skeleton drops the map and is EXPLICIT (refine_);
-   refine_ unpacks to the base with all facts.  See DESIGN.md /
-   docs/plans. *)
+(* [via] under IMAGE-BINDER.  [type set = tree{ bst _ } [@vox.via
+   (elems : iset)]] models [set] at [iset] (the map [elems]'s target).
+   A binder of a via type DENOTES the IMAGE (its solver sort is [iset]),
+   so refinements over it speak the image vocabulary directly
+   ([mem 0 t], not [mem 0 (elems t)]).  The representation -- the tree
+   and its invariant [bst] -- is reached ONLY through a [refine_]
+   unpack, which binds the base tree, carries [bst], AND supplies the
+   LINK [elems t0 = t] tying the opened tree to the image.  This is the
+   settled semantics: in code you want the plain payload, so you unpack.
+   See docs/plans. *)
 
 type tree = Leaf | Node of tree * int * tree
 type iset [@@vox.sort lean "ISet"]
@@ -37,13 +35,9 @@ inductive ISet where
   | .Leaf => True
   | .Node l v r => bst l ∧ bst r
 
--- the abstraction function: a tree's element set
 @[grind] def elems : Vox_tree -> ISet
   | .Leaf => .nil
-  | .Node l v r => .cons v (elems l)
-
--- a second map (ISet -> ISet), for nested via
-@[grind] def dup : ISet -> ISet := fun s => s
+  | .Node l v _ => .cons v (elems l)
 |lean}]
 
 type set = tree{ bst _ } [@vox.via (elems : iset)]
@@ -53,103 +47,68 @@ type iset
 type set = tree{ bst _ via (elems : iset) }
 |}]
 
-(* A binder of via type contributes [bst t && (image predicate)]: the
-   refinement [mem 0 _] is written at the image sort and pushed to the
-   base as [mem 0 (elems t)]. *)
-let binder_fact : (t : set{ mem 0 _ }) -> unit{ mem 0 (elems t) } =
+(* A binder of via type denotes the IMAGE: the refinement [mem 0 _] is
+   at the image sort, and the binder fact [mem 0 t] discharges the
+   goal directly -- no [elems] in sight. *)
+let binder_image : (t : set{ mem 0 _ }) -> unit{ mem 0 t } =
   fun t -> ()
 [%%expect{|
-val binder_fact :
+val binder_image :
   (t : tree{ (bst _) && (mem 0 (elems _)) via (elems : iset) }) ->
-  unit{ mem 0 (elems t) } = <fun>
+  unit{ mem 0 t } = <fun>
 |}]
 
-(* The invariant [bst] rides along at the base even though the client
-   reasons at the image. *)
-let carries_bst : (t : set) -> unit{ bst t } =
-  fun t -> ()
+(* [refine_] is THE way to the representation: it binds the base tree
+   [t0] with the invariant [bst t0] and the LINK [elems t0 = t], so a
+   fact about the tree bridges to the image.  The inner assertion is
+   the VC discharged from exactly those unpack facts. *)
+let unpack_idiom : (t : set) -> unit =
+  fun t ->
+    let refine_ t0 = t in
+    let _ : unit{ bst t0 && elems t0 = t } = () in
+    ()
 [%%expect{|
-val carries_bst : (t : set) -> unit{ bst t } = <fun>
+val unpack_idiom : set -> unit = <fun>
 |}]
 
-(* An OVERCLAIM about the image: adding [x] to the cardinality is not
-   the identity.  The goal reduces to [x = 0] and the solver returns a
+(* An OVERCLAIM at the image: [card] exposes an Int observable, and
+   [card t + x = card t] forces [x = 0]; the solver returns a
    counterexample. *)
-let overclaim : (x : int) -> (t : set) -> unit{ card (elems t) + x = card (elems t) } =
+let overclaim : (x : int) -> (t : set) -> unit{ card t + x = card t } =
   fun x t -> ()
 [%%expect{|
 Line 2, characters 13-15:
 2 |   fun x t -> ()
                  ^^
 Error: vox: verification failed (lean).
-       Goal: ((card (elems t)) + x) = (card (elems t))
-Hypotheses:
-  bst t
+       Goal: ((card t) + x) = (card t)
+Hypotheses: <none>
 Possible counterexample:
   x = 1
 (lean: error: `grind` failed)
 |}]
 
-(* A produced via value: [assume_unchecked_] injects a tree at the via
-   type, its base predicate ([bst] and the image predicate) asserted. *)
-let singleton : (v : int) -> set{ mem v _ } =
-  fun v -> assume_unchecked_ (Node (Leaf, v, Leaf))
+(* NO IMPLICIT PROJECTION (retained): a produced via value where its
+   skeleton [tree] is expected is an error -- reaching the
+   representation is the explicit [refine_], not a silent drop. *)
+let mk : (x : int) -> set{ mem x _ } =
+  fun x -> assume_unchecked_ (Node (Leaf, x, Leaf))
 [%%expect{|
-val singleton :
-  (v : int) -> tree{ (bst _) && (mem v (elems _)) via (elems : iset) } =
+val mk : (x : int) -> tree{ (bst _) && (mem x (elems _)) via (elems : iset) } =
   <fun>
 |}]
 
-(* [refine_] unpacks a produced via value to the plain BASE tree, with
-   BOTH facts ([bst] and the image predicate) transferred; the result
-   re-wraps at the via type as the ordinary injection, its VC
-   discharged from the retained facts -- no assume needed. *)
-let unpack_roundtrip : unit -> set{ mem 0 _ } =
-  fun () ->
-    let refine_ x = singleton 0 in
-    let _u : unit{ bst x && mem 0 (elems x) } = () in
-    (x : set{ mem 0 _ })
+let no_projection : (x : int) -> tree =
+  fun x -> mk x
 [%%expect{|
-val unpack_roundtrip :
-  unit -> tree{ (bst _) && (mem 0 (elems _)) via (elems : iset) } = <fun>
-|}]
-
-(* NO IMPLICIT PROJECTION: reaching a via value's skeleton drops the
-   abstraction map, which is an explicit act -- rejected, directed to
-   refine_.  (Binder-position projection is vacuous: a binder already
-   binds at the base skeleton, so [(t : set) : tree] is not a drop.) *)
-let no_projection : unit -> tree =
-  fun () -> singleton 0
-[%%expect{|
-Line 2, characters 12-23:
-2 |   fun () -> singleton 0
-                ^^^^^^^^^^^
+Line 2, characters 11-15:
+2 |   fun x -> mk x
+               ^^^^
 Error: vox: this value has a via type; reaching its skeleton drops its abstraction map -- unpack it with refine_
 |}]
 
-(* NESTED via flattens: [set{ P } [@vox.via (dup : iset)]] appends a
-   second map, so the layers compose ([dup (elems _)]) and the merged
-   normal form carries both, printed [via (elems : iset) via (dup : iset)]. *)
-type set2 = set{ mem 1 _ } [@vox.via (dup : iset)]
-[%%expect{|
-type set2 =
-    tree{ (bst _) && (mem 1 (elems _)) via (elems : iset) via (dup : iset) }
-|}]
-
-let nested_fact
-  : (t : set2{ mem 2 _ }) -> unit{ mem 2 (dup (elems t)) && mem 1 (elems t) } =
-  fun t -> ()
-[%%expect{|
-val nested_fact :
-  (t :
-   tree{ ((bst _) && (mem 1 (elems _))) && (mem 2 (dup (elems _))) via (elems : iset) via (dup : iset) }) ->
-  unit{ (mem 2 (dup (elems t))) && (mem 1 (elems t)) } = <fun>
-|}]
-
 (* A DATATYPE via target (Vs_data), not a ghost sort: the map's image
-   is a local variant [ilist].  (Was blocked by a block-datatype
-   emission-ordering bug; retest now that solver blocks register their
-   datatypes on-sight.) *)
+   is a local variant [ilist]. *)
 type ilist = INil | ICons of int * ilist
 
 [%%vox.lean {lean|
@@ -159,7 +118,7 @@ type ilist = INil | ICons of int * ilist
 
 @[grind] def to_list : Vox_tree -> Vox_ilist
   | .Leaf => .INil
-  | .Node l v r => .ICons v (to_list l)
+  | .Node l v _ => .ICons v (to_list l)
 |lean}]
 
 type lset = tree{ bst _ } [@vox.via (to_list : ilist)]
@@ -168,10 +127,10 @@ type ilist = INil | ICons of int * ilist
 type lset = tree{ bst _ via (to_list : ilist) }
 |}]
 
-let dt_binder_fact : (t : lset{ lmem 0 _ }) -> unit{ lmem 0 (to_list t) } =
+let dt_binder : (t : lset{ lmem 0 _ }) -> unit{ lmem 0 t } =
   fun t -> ()
 [%%expect{|
-val dt_binder_fact :
+val dt_binder :
   (t : tree{ (bst _) && (lmem 0 (to_list _)) via (to_list : ilist) }) ->
-  unit{ lmem 0 (to_list t) } = <fun>
+  unit{ lmem 0 t } = <fun>
 |}]

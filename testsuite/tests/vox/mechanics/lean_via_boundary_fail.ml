@@ -4,19 +4,13 @@
  expect;
 *)
 
-(* STAGE 3 fail-closed (Guard 2): honest impl PROVING across a
-   [refines]-over-[via] boundary is not yet supported and must FAIL
-   CLOSED, never silently mis-verify.  The interface reads the via
-   binder at the IMAGE (bare [ins x s]); the manifest binder is the
-   BASE tree, and the result is CONSTRUCTED from it ([Node (s, ..)]).
-   One via param thus lands at BOTH sorts in the single VC
-   [elems (Node (s,..)) = ins x s] -- no push can split a variable
-   across sorts, so the solver rejects the ill-sorted goal.  (The
-   clean fix is image-binder; see docs/plans STAGE 3 STATUS.  Until
-   then, a real via abstraction is either sealed with trusted
-   [assume_unchecked_] operations -- lib/via_set.ml, the declared-
-   interpretation trust class -- or reasons in explicit [elems]
-   vocabulary within the module.) *)
+(* STAGE 3 fail-closed: an interface OVERCLAIM over a via manifest is
+   rejected at the implementation's VC.  Under image-binder the honest
+   boundary PROVES (see lean_via_seal.ml); here the sealed spec claims
+   [add] returns [ins x (ins x s)] (two inserts) but the implementation
+   builds a single node, so the VC [elems (Node (t0,x,Leaf)) = ins x
+   (ins x s)] reduces to [cons x s = cons x (cons x s)] and the solver
+   rejects it -- fail-closed, never a silent pass. *)
 
 type tree = Leaf | Node of tree * int * tree
 type iset [@@vox.sort lean "ISet"]
@@ -39,21 +33,25 @@ inductive ISet where
 
 module M : sig
   type t : value refines (iset)
-  val add : (x : int) -> (s : t) -> t{ _ = ins x s }
+  val add : (x : int) -> (s : t) -> t{ _ = ins x (ins x s) }
 end = struct
   type t = tree{ bst _ } [@vox.via (elems : iset)]
-  let add : (x : int) -> (s : t) -> t{ _ = ins x s } =
-    fun x s -> (Node (s, x, Leaf) : t{ _ = ins x s })
+  let add : (x : int) -> (s : t) -> t{ _ = ins x (ins x s) } =
+    fun x s ->
+      let refine_ t0 = s in
+      (Node (t0, x, Leaf) : t{ _ = ins x (ins x s) })
 end
 [%%expect{|
 type tree = Leaf | Node of tree * int * tree
 type iset
-Line 26, characters 16-33:
-26 |     fun x s -> (Node (s, x, Leaf) : t{ _ = ins x s })
-                     ^^^^^^^^^^^^^^^^^
+Line 28, characters 7-25:
+28 |       (Node (t0, x, Leaf) : t{ _ = ins x (ins x s) })
+            ^^^^^^^^^^^^^^^^^^
 Error: vox: verification failed (lean).
-       Goal: (bst (Node (s, x, Leaf))) && ((elems (Node (s, x, Leaf))) = (ins x s))
+       Goal: (bst (Node (t0, x, Leaf))) &&
+((elems (Node (t0, x, Leaf))) = (ins x (ins x s)))
 Hypotheses:
-  bst s
-(lean: error: Application type mismatch: The argument)
+  bst t0
+  (elems t0) = s
+(lean: error: `grind` failed)
 |}]

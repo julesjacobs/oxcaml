@@ -652,17 +652,15 @@ and dsort_of_type ?(visited = []) ?(params = []) env ty =
            S_poly (p, arg_sorts))
          else datatype_sort env p arg_sorts)
     | Trefine (skel, maps, _) ->
-      (* A binder of a via type is the BASE value (the runtime value IS
-         the base -- predicates are stored at the base sort, mentioning
-         the image via the map functions), so its solver sort is the
-         SKELETON's.  Register each map's target datatype anyway, so the
-         map functions' declarations (which mention it) type-check.
-         (An ABSTRACT via type reaches the solver as its image sort
-         through the kind, a separate path -- that is stage 3.) *)
+      (* image-binder: a via type DENOTES at the composite image (the
+         last map's target sort), so a binder of it is that image. *)
+      let skel_sort = dsort_of_type ~visited ~params env skel in
       List.iter
         (fun m -> ignore (dsort_of_vox_sort env [] m.Types.vm_sort : dsort))
         maps;
-      dsort_of_type ~visited ~params env skel
+      (match List.rev maps with
+       | [] -> skel_sort
+       | last :: _ -> dsort_of_vox_sort env [] last.Types.vm_sort)
     | Ttuple comps
       when List.length comps >= 2
            && List.for_all (fun (lbl, _) -> Option.is_none lbl) comps ->
@@ -753,6 +751,73 @@ let register_type_specs env ty =
 
 let has_vox_attr name attrs =
   List.exists (fun (a : Parsetree.attribute) -> String.equal a.attr_name.txt name) attrs
+;;
+
+(* image-binder support: a via type's predicate is stored at the BASE
+   sort, mentioning the image as [composite _].  Consuming a binder
+   reads the IMAGE (the binder IS the composite image); the skeleton's
+   own invariant conjuncts (still over the bare base [_]) drop, reached
+   only through a [refine_] unpack. *)
+let via_composite maps =
+  List.fold_left
+    (fun acc (m : Types.vox_map) -> Refinement.Pfun (m.Types.vm_fn, [ acc ]))
+    Refinement.Pbound maps
+;;
+
+let rec pred_mentions_bound (p : Refinement.pred) =
+  match p with
+  | Refinement.Pbound -> true
+  | Refinement.Pvar _ | Refinement.Pglobal _ | Refinement.Pint _
+  | Refinement.Pbool _ -> false
+  | Refinement.Pconstr (_, _, args) | Refinement.Pfun (_, args)
+  | Refinement.Ptuple args -> List.exists pred_mentions_bound args
+  | Refinement.Pfield (_, _, a) | Refinement.Pis (_, _, a)
+  | Refinement.Pproj (_, _, a) | Refinement.Pnot a | Refinement.Pquant (_, _, a) ->
+    pred_mentions_bound a
+  | Refinement.Pbinop (_, a, b) | Refinement.Pand (a, b) | Refinement.Por (a, b)
+  | Refinement.Pimp (a, b) -> pred_mentions_bound a || pred_mentions_bound b
+;;
+
+let rec replace_subterm ~find ~by (p : Refinement.pred) =
+  if Refinement.equal p find
+  then by
+  else (
+    match p with
+    | Refinement.Pbound | Refinement.Pvar _ | Refinement.Pglobal _
+    | Refinement.Pint _ | Refinement.Pbool _ -> p
+    | Refinement.Pconstr (path, c, args) ->
+      Refinement.Pconstr (path, c, List.map (replace_subterm ~find ~by) args)
+    | Refinement.Pfun (f, args) ->
+      Refinement.Pfun (f, List.map (replace_subterm ~find ~by) args)
+    | Refinement.Pfield (path, l, a) ->
+      Refinement.Pfield (path, l, replace_subterm ~find ~by a)
+    | Refinement.Ptuple args ->
+      Refinement.Ptuple (List.map (replace_subterm ~find ~by) args)
+    | Refinement.Pproj (n, i, a) -> Refinement.Pproj (n, i, replace_subterm ~find ~by a)
+    | Refinement.Pis (path, c, a) -> Refinement.Pis (path, c, replace_subterm ~find ~by a)
+    | Refinement.Pbinop (op, a, b) ->
+      Refinement.Pbinop (op, replace_subterm ~find ~by a, replace_subterm ~find ~by b)
+    | Refinement.Pand (a, b) ->
+      Refinement.Pand (replace_subterm ~find ~by a, replace_subterm ~find ~by b)
+    | Refinement.Por (a, b) ->
+      Refinement.Por (replace_subterm ~find ~by a, replace_subterm ~find ~by b)
+    | Refinement.Pnot a -> Refinement.Pnot (replace_subterm ~find ~by a)
+    | Refinement.Pimp (a, b) ->
+      Refinement.Pimp (replace_subterm ~find ~by a, replace_subterm ~find ~by b)
+    | Refinement.Pquant (q, bd, a) ->
+      Refinement.Pquant (q, bd, replace_subterm ~find ~by a))
+;;
+
+let rec conjuncts (p : Refinement.pred) =
+  match p with
+  | Refinement.Pand (a, b) -> conjuncts a @ conjuncts b
+  | _ -> [ p ]
+;;
+
+let via_image_facts maps pred id =
+  let composite = via_composite maps in
+  let p = replace_subterm ~find:composite ~by:(Refinement.Pvar id) pred in
+  List.filter (fun c -> not (pred_mentions_bound c)) (conjuncts p)
 ;;
 
 (* The refinement of a type, if any. *)
@@ -1009,31 +1074,69 @@ let binder_facts : type k. Env.t -> k general_pattern -> Refinement.pred list =
   List.concat_map
     (fun (id, _, ty, _, _) ->
       record_name env id ty;
-      let preds =
-        (match refinement_of_type env ty with Some p -> [ p ] | None -> [])
-        @ invariant_preds env ty
-      in
-      List.map
-        (fun p ->
-          register_pred_paths env p;
-          Refinement.subst_bound ~by:(Refinement.Pvar id) p)
-        preds)
+      match get_desc (Ctype.vox_expand_head env ty) with
+      | Trefine (_, (_ :: _ as maps), pred) ->
+        let facts = via_image_facts maps pred id in
+        List.iter (register_pred_paths env) facts;
+        let inv =
+          List.map
+            (fun p ->
+              register_pred_paths env p;
+              Refinement.subst_bound ~by:(Refinement.Pvar id) p)
+            (invariant_preds env ty)
+        in
+        facts @ inv
+      | _ ->
+        let preds =
+          (match refinement_of_type env ty with Some p -> [ p ] | None -> [])
+          @ invariant_preds env ty
+        in
+        List.map
+          (fun p ->
+            register_pred_paths env p;
+            Refinement.subst_bound ~by:(Refinement.Pvar id) p)
+          preds)
     (pat_bound_idents_full pat)
 ;;
 
 (* The unpack fact: a pattern marked [refine_ x] binds [x] at the skeleton and contributes
    the SCRUTINEE's refinement at [x]. *)
 let unpack_fact
-  : type k. Env.t -> k general_pattern -> scrut:type_expr -> Refinement.pred list
+  : type k.
+    Env.t
+    -> k general_pattern
+    -> scrut:type_expr
+    -> scrut_name:Refinement.pred option
+    -> Refinement.pred list
   =
-  fun env pat ~scrut ->
+  fun env pat ~scrut ~scrut_name ->
   if not (has_vox_attr "vox.refine" pat.pat_attributes)
   then []
   else (
-    match pat_bound_idents pat, refinement_of_type env scrut with
-    | [ id ], Some p ->
-      register_pred_paths env p;
-      [ Refinement.subst_bound ~by:(Refinement.Pvar id) p ]
+    match pat_bound_idents pat, get_desc (Ctype.vox_expand_head env scrut) with
+    | [ id ], Trefine (_, ((_ :: _) as maps), pred) ->
+      (* image-binder unpack: [id] binds at the BASE skeleton with the
+         scrutinee's base predicate AND the LINK [composite id =
+         scrutinee-image] tying the opened base value to the image the
+         scrutinee denotes. *)
+      register_pred_paths env pred;
+      let base = Refinement.subst_bound ~by:(Refinement.Pvar id) pred in
+      let link =
+        match scrut_name with
+        | Some n ->
+          let composite_id =
+            List.fold_left
+              (fun acc (m : Types.vox_map) ->
+                Refinement.Pfun (m.Types.vm_fn, [ acc ]))
+              (Refinement.Pvar id) maps
+          in
+          [ Refinement.Pbinop (Refinement.Eq, composite_id, n) ]
+        | None -> []
+      in
+      base :: link
+    | [ id ], Trefine (_, [], pred) ->
+      register_pred_paths env pred;
+      [ Refinement.subst_bound ~by:(Refinement.Pvar id) pred ]
     | _ -> [])
 ;;
 
@@ -1925,13 +2028,17 @@ let match_facts
       Refinement.Pbinop (Refinement.Eq, Refinement.Pvar id, subject)
       :: value_facts subject sub
     | Tpat_var { id; _ }
-      when not (Refinement.equal (Refinement.Pvar id) subject) ->
+      when (not (Refinement.equal (Refinement.Pvar id) subject))
+           && not (has_vox_attr "vox.refine" p.pat_attributes) ->
       (* A variable pattern aliases the scrutinee: [match s with y ->]
          (and a [function y ->] case, whose scrutinee is [fc_param])
          learns [y = s]; [let refine_ x = m] (which desugars to a
          match) ties the binder to a mutable scrutinee's version.  The
          self-alias guard: [fc_param] IS the first variable case's
-         ident (see [Typecore.name_cases]), and [x = x] is noise. *)
+         ident (see [Typecore.name_cases]), and [x = x] is noise.  A
+         [refine_] unpack is EXCLUDED: its binder is at the BASE and the
+         scrutinee at the IMAGE, so the raw [x = s] would be ill-sorted;
+         [unpack_fact] contributes the correct link [composite x = s]. *)
       [ Refinement.Pbinop (Refinement.Eq, Refinement.Pvar id, subject) ]
     | _ -> []
   in
@@ -1947,11 +2054,13 @@ let match_facts
     Refinement.Pbinop (Refinement.Eq, Refinement.Pvar id, subject)
     :: value_facts subject sub
   | Tpat_var { id; _ }
-    when not (Refinement.equal (Refinement.Pvar id) subject) ->
+    when (not (Refinement.equal (Refinement.Pvar id) subject))
+         && not (has_vox_attr "vox.refine" pat.pat_attributes) ->
     (* Bare value patterns (let bindings and [function]-case arms reach
        here unwrapped).  The self-alias guard: [fc_param] IS the first
        variable case's ident (see [Typecore.name_cases]), and [x = x]
-       is noise. *)
+       is noise.  [refine_] unpacks are excluded (base vs image sort);
+       [unpack_fact] supplies the [composite x = s] link instead. *)
     [ Refinement.Pbinop (Refinement.Eq, Refinement.Pvar id, subject) ]
   | _ -> []
 ;;
@@ -2086,9 +2195,16 @@ let pattern_negation
    refined binders contribute their facts (plus the scrutinee's
    refinement for unpack patterns). *)
 let extend_pat
-  : type k. ?toplevel:bool -> ?scrut:type_expr -> Env.t -> ctx -> k general_pattern -> ctx
+  : type k.
+    ?toplevel:bool
+    -> ?scrut:type_expr
+    -> ?scrut_name:Refinement.pred option
+    -> Env.t
+    -> ctx
+    -> k general_pattern
+    -> ctx
   =
-  fun ?(toplevel = false) ?scrut env ctx pat ->
+  fun ?(toplevel = false) ?scrut ?(scrut_name = None) env ctx pat ->
   let bound = pat_bound_idents pat in
   List.iter
     (fun (id, _, ty, _, _) ->
@@ -2096,7 +2212,7 @@ let extend_pat
     (pat_bound_idents_full pat);
   let unpack =
     match scrut with
-    | Some s -> unpack_fact env pat ~scrut:s
+    | Some s -> unpack_fact env pat ~scrut:s ~scrut_name
     | None -> []
   in
   { cfacts = unpack @ binder_facts env pat @ ctx.cfacts
@@ -2453,14 +2569,25 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
           it, versions included, instead of joining.  Sound also for a
           partial single-arm match: on pattern failure the continuation
           is unreachable. *)
-       let ctx' = extend_pat ~scrut:scrut.exp_type env ctx0 c.c_lhs in
+       let ctx' = extend_pat ~scrut:scrut.exp_type ~scrut_name:scrut_id env ctx0 c.c_lhs in
        let ctx' =
          match scrut_id with
          | Some sid ->
            { ctx' with
              cfacts =
                scrut_facts c.c_lhs
-               @ match_facts env sid c.c_lhs
+               (* A [refine_] unpack of a VIA value binds at the BASE
+                  while the scrutinee is at the IMAGE, so the
+                  subject-alias fact [x = s] would be ill-sorted;
+                  [unpack_fact] already supplied the correct link
+                  [composite x = s].  (An ordinary refine_ keeps the
+                  alias: binder and scrutinee share the base sort.) *)
+               @ (if has_vox_attr "vox.refine" c.c_lhs.pat_attributes
+                     && (match get_desc (Ctype.vox_expand_head env scrut.exp_type) with
+                         | Trefine (_, _ :: _, _) -> true
+                         | _ -> false)
+                  then []
+                  else match_facts env sid c.c_lhs)
                @ ctx'.cfacts
            }
          | None -> ctx'
@@ -2495,7 +2622,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
       let ctx' =
         if interrupted
         then extend_pat env base c.c_lhs
-        else extend_pat ~scrut:scrut.exp_type env base c.c_lhs
+        else extend_pat ~scrut:scrut.exp_type ~scrut_name:scrut_id env base c.c_lhs
       in
       let ctx' =
         match scrut_id with

@@ -110,7 +110,22 @@ Consequences:
   where the client has no spine and the value simply IS the image —
   which is stage 3.  Maps still carry target sorts (for rigid
   unification and the abstract dsort); vox cannot infer `elems`'s Lean
-  type.
+  type.  IMAGE-BINDER CORRECTION (landed, stage 3, SUPERSEDES the
+  stage-2 base-binder above): `dsort_of_type` on a via type returns the
+  IMAGE (last map target) EVERYWHERE, unifying the within-module and
+  abstract paths.  A via binder denotes the image; the representation
+  (tree, `bst`) is reached ONLY through a `refine_` unpack, which binds
+  the base tree with its invariant AND the LINK `elems t0 = t`.  Writing
+  `bst x` on a raw via binder is no longer valid (it was the stage-2
+  deviation that broke the boundary); `bst` lives behind the unpack.
+  Consequences: a via type is NOT stripped to its skeleton at a use
+  (typecore: value reference, param binding, `vox_strip_param_refinement`
+  strip only ordinary refinements, `maps = []`), so `refine_` can unpack
+  it and direct skeleton use is a no-implicit-projection error;
+  `binder_facts` reads the image (`composite _ := binder`, dropping the
+  skeleton-invariant conjuncts); the `refine_` subject-alias `x = s` is
+  suppressed for a via unpack (it would be ill-sorted) in favour of the
+  `composite x = s` link.
 - **Coercion rules** at the channels: extra refinement in the expected
   type at layer k → VC of that predicate at the composite image
   (today's rule, per layer).  Extra via layer with nothing above it →
@@ -170,9 +185,9 @@ val member : (x : int) -> (t : t) -> bool{ _ = (x ∈ t) }
   `refines (iset{ finite _ })`, honest iff the manifest's top layer
   carries the rigidly-equal predicate.
 
-STAGE 3 STATUS (partial — the boundary MACHINERY landed; honest impl
-proving across the boundary is BLOCKED on a binder-sort decision, see
-below):
+STAGE 3 STATUS (landed — the boundary works, and honest impl proving
+across it is achieved via the IMAGE-BINDER pivot; the earlier
+base-binder blocker below is RESOLVED):
 
 Shipped and tested:
 - **Boundary type coherence** (`typing/ctype.ml`, `vox_flatten_view` /
@@ -200,53 +215,43 @@ Shipped and tested:
   VoxSig, and proves membership facts THROUGH the abstraction with no
   visibility into the tree (`testsuite/tests/vox/mechanics/lean_via_seal.ml`
   + `lib/via_set.mli`/`.ml`).
-- **Standalone via impl proving** works: a within-module function
-  `add : (x:int) -> (s:t) -> t{ _ = ins x (elems s) }` (explicit `elems`)
-  verifies against the bridging model — the base-binder VC
-  `elems(Node(s,x,Leaf)) = ins x (elems s)` discharges with `s` at the
-  tree sort throughout.
+- **Honest impl proving ACROSS the boundary** (the payoff, image-binder):
+  a SEALED unit's `add`/`member` PROVE against the abstract `.mli`'s
+  Set-vocab contracts with ZERO `assume_unchecked_`.  The impl unpacks
+  the image binder with `refine_ t0 = s` (getting the base tree, `bst t0`,
+  and the link `elems t0 = s`), builds/searches the tree behind the
+  unpack, and the image-vocab contract (`ins x s`, `mem x s`) is well
+  typed directly because `s` is the image.  `add`'s VC
+  `elems(Node(t0,x,Leaf)) = ins x s` discharges via the link + `elems`
+  def; `member` uses a local tree-recursive helper proving
+  `_ = mem x (elems u)`, bridged to `mem x s` by the link
+  (`testsuite/tests/vox/lib/via_set.{ml,mli}` + `mechanics/lean_via_seal.ml`).
 - **Datatype via targets** (not just ghost sorts): `via (to_list : ilist)`
   where `ilist` is a local variant now verifies — the block-datatype
   emission-ordering bug is unblocked by the hash-table stack's on-sight
   emitter fix (`testsuite/tests/vox/mechanics/lean_via.ml`).
 
-BLOCKED — honest impl proving ACROSS the boundary (`add`/`member` in a
-SEALED unit, proving against the abstract `.mli`'s bare contract rather
-than `assume_unchecked_`):
-- The obstacle is a genuine tension between stage 2's binder-sort choice
-  and this stage.  Stage 2 fixed binder = BASE (`dsort` = skeleton):
-  within a module a via binder is the tree, its invariant is `bst t`
-  (base), and the image is written EXPLICITLY as `elems t`.  But the
-  abstract `.mli` writes the via binder at the IMAGE (`mem x s`, `s` at
-  `ISet`) — it has no other vocabulary.  So the impl, to satisfy the
-  interface, must read its own via param at the image in exactly the
-  contracts the interface dictates, while still constructing results
-  from it at the base (`Node (s, x, Leaf)`).  A single via param thus
-  occurs at BOTH sorts in one VC (`elems (Node (s,..)) = ins x s`: `s`
-  base in the construction, image in `ins x s`).
-- No local push resolves this: substituting `s := elems s` in the goal
-  cannot split one variable across two sorts (it corrupts
-  `Node (s,..)`); pushing the interface's bare param at includemod
-  cannot be gated (an abstract `refines` type and a concrete via
-  abbreviation both present as a `Tconstr` expanding to a via `Trefine`
-  in the impl's env — distinguishing them needs the interface decl's
-  `Vr_sort` kind, not available in the `ctype` comparison); and a
-  per-occurrence sort-directed push is infeasible because Lean spec
-  functions' argument sorts are opaque to vox.
-- The clean fix is IMAGE-binder: make `dsort` of a via type return the
-  image (unifying the impl path with the abstract client path, which
-  already reads the image), and carry the base invariant + the
-  `elems tree = binder` link through the `refine_` unpack.  Then the
-  boundary genuinely "falls out" as this section claims — but it reworks
-  stage 2's base-sort stored-predicate / `binder_facts` representation
-  and its `lean_via.ml` expectations.  Recommend deciding this with the
-  team before pivoting, since it revisits a landed, tested decision.
-- Interim: the demo (`lib/via_set.ml`) implements the operations with
-  `assume_unchecked_` (the declared-interpretation trust class, same as
-  `lib/gset.ml`), so the boundary + client abstraction are exercised
-  honestly; only the manifest's honesty (that `elems` really relates the
-  tree ops to the set ops) is asserted rather than proved, pending
-  image-binder.
+RESOLVED (image-binder pivot) — the base-binder obstacle and how it was
+removed:
+- The obstacle was a tension with stage 2's binder=BASE choice.  Under
+  base-binder a via binder is the tree, its invariant is `bst t` (base),
+  and the image is written EXPLICITLY as `elems t` — but the abstract
+  `.mli` writes the via binder at the IMAGE (`mem x s`, `s` at `ISet`),
+  its only vocabulary.  So the impl had to read its via param at the
+  image (contracts) while constructing results from it at the base
+  (`Node (s, x, Leaf)`): one via param at BOTH sorts in one VC
+  (`elems (Node (s,..)) = ins x s`).  No local push resolves this — a
+  substitution cannot split one variable across two sorts, and an
+  includemod param-push cannot be gated (abstract `refines` and concrete
+  via both present as a `Tconstr` expanding to a via `Trefine` in the
+  impl's env).
+- The fix (landed): IMAGE-binder.  `dsort` of a via type is the image
+  everywhere; the via param IS the image (so `ins x s`/`mem x s` are
+  well typed with no push), and its tree is a SEPARATE name obtained by
+  `refine_` unpack (base tree + `bst t0` + link `elems t0 = t`).  The
+  two sorts never collide because construction uses `t0` (base) and the
+  contract uses `s` (image) — different names.  See the IMAGE-BINDER
+  CORRECTION under §2 for the exact typecore/vox_verify sites.
 
 Two properties the shipped normalization guarantees (regression-pinned):
 - **Directed, not symmetric.**  `vox_flatten_view` is wired only into
@@ -256,16 +261,11 @@ Two properties the shipped normalization guarantees (regression-pinned):
   for the abstract `t`), so a client can never unify `t` with
   `tree{ ... } via ...` — the abstraction stays opaque; only inclusion,
   in one direction, consumes the manifest expansion.
-- **Real proving across the boundary fails CLOSED.**  A contract that
-  needs the via param at the image while the impl constructs the result
-  from it at the base (`elems (Node (s,..)) = ins x s`) puts one param
-  at two sorts in a single VC; the solver rejects the ill-sorted goal as
-  a verification failure — never a silent mis-verification (pinned by
-  `mechanics/lean_via_boundary_fail.ml`).  So a `refines`-over-`via`
-  interface today supports the type boundary + client + trusted
-  (`assume_unchecked_`) operations; honest impl proving of such
-  operations awaits image-binder (until then, reason in explicit `elems`
-  vocabulary within the module, where proving works — verified).
+- **Overclaims fail CLOSED.**  A `refines`-over-`via` interface that
+  claims more than the implementation proves (e.g. `add` returning
+  `ins x (ins x s)` while the code inserts once) is rejected at the
+  impl's VC — the solver refutes `elems(Node(t0,x,Leaf)) = ins x (ins x s)`
+  — never a silent pass (pinned by `mechanics/lean_via_boundary_fail.ml`).
 
 ## Parameterization
 
