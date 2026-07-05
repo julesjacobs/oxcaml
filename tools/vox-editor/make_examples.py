@@ -91,6 +91,7 @@ MANIFEST: List[Dict[str, object]] = [
     },
     {
         "slug": "tuples",
+        "override": "tuples.ml",
         "source": "demo/lean_tuples.ml",
         "expect": "verify",
         "title": "Native tuples in refinements",
@@ -149,6 +150,21 @@ MANIFEST: List[Dict[str, object]] = [
         ),
     },
     {
+        # Dead code, proved dead: the mutable write is a fact (m = K 9),
+        # the K arm gets y = 9 by injectivity, and the L arm is
+        # contradictory -- unreachable_ turns that into a proof.
+        "slug": "deadcode",
+        "override": "deadcode.ml",
+        "expect": "verify",
+        "title": "Dead code, proved dead",
+        "description": (
+            "A mutable local is written K 9, so matching L is impossible: "
+            "the arm's facts are contradictory and unreachable_ discharges "
+            "false from them. The K arm returns y with y = 9 by "
+            "constructor injectivity."
+        ),
+    },
+    {
         "slug": "qsort",
         "source": "demo/lean_qsort_run.ml",
         "expect": "verify",
@@ -159,7 +175,9 @@ MANIFEST: List[Dict[str, object]] = [
             "(borrow API and sort inlined for a single file). The "
             "heaviest example -- about 3s to verify, versus ~1s for the "
             "others."
-        ),
+                    " The inlined slice module is the trusted layer; every sort "
+            "obligation past it is proved."
+),
     },
     {
         # Direct-spelling override (result refinement on the annotation).

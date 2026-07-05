@@ -50,9 +50,15 @@
       "verifies": true
     },
     {
+      "name": "deadcode",
+      "title": "Dead code, proved dead",
+      "description": "A mutable local is written K 9, so matching L is impossible: the arm's facts are contradictory and unreachable_ discharges false from them. The K arm returns y with y = 9 by constructor injectivity.",
+      "verifies": true
+    },
+    {
       "name": "qsort",
       "title": "In-place parallel quicksort",
-      "description": "The page's flagship: sorted-and-permutation on a borrowed slice, with a fork-join parallel psort under the same spec (borrow API and sort inlined for a single file). The heaviest example -- about 3s to verify, versus ~1s for the others.",
+      "description": "The page's flagship: sorted-and-permutation on a borrowed slice, with a fork-join parallel psort under the same spec (borrow API and sort inlined for a single file). The heaviest example -- about 3s to verify, versus ~1s for the others. The inlined slice module is the trusted layer; every sort obligation past it is proved.",
       "verifies": true
     },
     {
