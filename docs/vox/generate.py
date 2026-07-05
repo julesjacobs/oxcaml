@@ -82,6 +82,14 @@ UNSHOWN = {
         'mutable client of lib/mhtbl; the hash tables live in the suite, not on the page',
     'demo/lean_lphtbl.ml':
         'client of lib/lphtbl; the hash tables live in the suite, not on the page',
+    'demo/lean_cfold.ml':
+        'client of lib/cfold constant folder; a verified-transform library without a page card',
+    'demo/lean_triset.ml':
+        'client of lib/triset (Patricia-trie set face); a library layer without a page card',
+    'demo/lean_utf8.ml':
+        'verified UTF-8 codec demo; the codec lives in the suite, not on the page',
+    'demo/lean_utf8_lib.ml':
+        'client of lib/utf8; the codec lives in the suite, not on the page',
 }
 
 
