@@ -75,11 +75,13 @@ UNSHOWN = {
     'demo/lean_pvghost.ml':
         'pv-free prophecies via refines; a library prototype, not yet a card',
     'demo/lean_htbl.ml':
-        'immutable client of lib/htbl; the hash-table card slices its mutable twin',
+        'immutable client of lib/htbl; the hash tables live in the suite, not on the page',
     'demo/lean_pslice.ml':
-        'polymorphic slices at two element types; lib/pslice is linked from the hash-table card',
+        'polymorphic slices at two element types; a library layer without a page card',
+    'demo/lean_htbl_mut.ml':
+        'mutable client of lib/mhtbl; the hash tables live in the suite, not on the page',
     'demo/lean_lphtbl.ml':
-        'client of lib/lphtbl; the linear-probing table is linked from the hash-table card',
+        'client of lib/lphtbl; the hash tables live in the suite, not on the page',
 }
 
 
@@ -228,14 +230,6 @@ def main():
                   + '\n\n'
                   + slice_between(read('demo/lean_poly.ml'),
                                   r'^let thunk', r'^let forced'),
-        '@HTBL_ADD@': slice_between(read('lib/mhtbl.ml'), r'^type t = varr',
-                                    r'^type t = varr')
-                      + '\n\n'
-                      + slice_between(read('lib/mhtbl.ml'), r'^let add',
-                                      r"^    \(h' : t\{ bcts _ = madd"),
-        '@HTBL_CLIENT@': slice_between(read('demo/lean_htbl_mut.ml'),
-                                       r'^let demo',
-                                       r'\(hit3, hit11, miss\)'),
     }
 
     nth = read('demo/lean_nth.ml')

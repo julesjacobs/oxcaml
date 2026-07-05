@@ -114,8 +114,6 @@ types backed by Lean.</p>
 <li><a href="#modes">Unique mutation</a>: mutable borrows and mutable
   slices into arrays; in-place list reversal, a tree flipped in
   place.</li>
-<li><a href="#htbl">Hash tables</a>, bucketed and linear-probing,
-  mutated in place through uniquely owned arrays.</li>
 <li><a href="#fib">Fast-doubling Fibonacci</a> verified against its own
   naive definition; <a href="#tour">binary search, integer square
   root</a>.</li>
@@ -651,70 +649,6 @@ contents:</p>
       (psort m : unit{ sorted (pv p) &amp;&amp; perm (cts x) (pv p) }))
   in
   x'</code></pre>
-
-<h3 id="htbl">Hash tables, in place</h3>
-<p>The logical story lives on a signature:
-<a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/htbl.mli">htbl.mli</a>
-states the model &mdash; per-bucket association lists, the whole-table
-scan <code>tfind</code>, and the home invariant, every key in a bucket
-hashing to that bucket&rsquo;s index &mdash; and proves that a lookup
-inspecting exactly one bucket equals the whole-table scan, the way a
-BST&rsquo;s ordering invariant makes one-path search complete.  The
-mutable table
-(<a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/mhtbl.ml">mhtbl.ml</a>)
-is a uniquely owned bucket array whose ghost <em>is</em> the model
-table, so the interface&rsquo;s theorems apply to it verbatim &mdash;
-the mutable layer re-proves nothing.  <code>add</code> borrows the one
-home bucket and rewrites it; the residual&rsquo;s ghost is exactly the
-model insert:</p>
-<pre><code class="ml">type t = varr{ twf (bcts _) 0 &amp;&amp; tlen (bcts _) = 8 }
-
-let add :
-  (k : int{ 0 &lt;= _ }) -&gt; (v : int) -&gt; (h : t) @ unique -&gt;
-  t{ bcts _ = madd k v (bcts h) } @ unique =
-  fun k v h -&gt;
-    let p = new_proph () in
-    let i = index k in
-    let (h', u) =
-      borrow p h (fun m -&gt;
-        let (b0, m1) = sget m i in
-        let b = gbl b0 in
-        let b' = bucket_add k v b in
-        let m2 = sset m1 i b' in
-        let _u = sdrop m2 in
-        (() : unit{ bpv p = madd k v (bcts h) }))
-    in
-    ignore u;
-    (h' : t{ bcts _ = madd k v (bcts h) })</code></pre>
-<p>Ownership threads through every call &mdash; the table is consumed
-<code>@ unique</code> and handed back &mdash; so writes are
-unobservable: no alias survives to see the old state.  A client
-reasons about the in-place table word for word as about the immutable
-model (keys 3 and 11 collide, so the hits cross a real two-entry
-bucket):</p>
-<pre><code class="ml">let demo : opt{ _ = Found 7 } * opt{ _ = Found 5 } * opt{ _ = Missing } =
-  let h = create () in
-  let h = add 3 7 h in
-  let h = add 11 5 h in
-  let (hit3, h) = find 3 h in
-  let (hit11, h) = find 11 h in
-  let (miss, h) = find 4 h in
-  ignore h;
-  (hit3, hit11, miss)</code></pre>
-<p>The
-<a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/lphtbl.mli">linear-probing
-variant</a> keeps keys and values in two flat arrays over
-<a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/pslice.mli">polymorphic
-slices</a>, one borrow library whose list theory is proved once for
-every element type.  Probing makes the invariant global &mdash; every
-stored key reachable from its home slot through an unbroken run of
-occupied slots &mdash; and the model is fuel-bounded probing, with the
-bound as the semantics: eight probes scan the whole ring, so the model
-is total with no load-factor side condition, a full table simply
-misses, and the imperative loop needs no termination proof.  Clients
-never assume a free slot either: the hit theorem&rsquo;s hypothesis is
-derived from a free-slot count the fresh table pins at 8 and each
-insert decrements by at most one.</p>
 
 <h2 id="poly">What refinement types buy us</h2>
 <p>Because a refinement is part of the type, the language&rsquo;s
