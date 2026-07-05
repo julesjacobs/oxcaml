@@ -256,6 +256,41 @@ def enclosing_theorem(content: str, rel_line: int) -> Optional[Dict[str, object]
     return {"name": name, "hypotheses": binders, "goal": goal.strip()}
 
 
+def theorems_in_source(source: str) -> List[Dict[str, object]]:
+    """Every declaration in every [%%vox.lean] block, with its static
+    hypotheses/goal and its 0-based source range.  Used to make block
+    theorems selectable client-side (no Lean process)."""
+    result: List[Dict[str, object]] = []
+    for b in find_lean_blocks(source):
+        lines = b.content.split("\n")
+        headers = [i for i, l in enumerate(lines) if _THEOREM_RE.match(l)]
+        # Prefix char offsets of each content line.
+        prefix = [0]
+        for l in lines:
+            prefix.append(prefix[-1] + len(l) + 1)
+        for idx, h in enumerate(headers):
+            end_line = (
+                headers[idx + 1] - 1 if idx + 1 < len(headers) else len(lines) - 1
+            )
+            info = enclosing_theorem(b.content, h)
+            if info is None:
+                continue
+            start_off = b.content_offset + prefix[h]
+            end_off = b.content_offset + prefix[end_line] + len(lines[end_line])
+            sline, scol = offset_to_linecol(source, start_off)
+            eline, ecol = offset_to_linecol(source, end_off)
+            result.append(
+                {
+                    "name": info["name"],
+                    "hypotheses": info["hypotheses"],
+                    "goal": info["goal"],
+                    "start": {"line": sline, "col": scol},
+                    "end": {"line": eline, "col": ecol},
+                }
+            )
+    return result
+
+
 def _split_binders_and_goal(text: str) -> Tuple[List[str], str]:
     binders: List[str] = []
     i = 0

@@ -98,6 +98,19 @@ class TestStaticTheorem(unittest.TestCase):
     def test_none_outside(self):
         self.assertIsNone(lean_bridge.enclosing_theorem("-- just a comment\n", 0))
 
+    def test_theorems_in_source(self):
+        thms = lean_bridge.theorems_in_source(SOURCE)
+        self.assertEqual(len(thms), 1)
+        t = thms[0]
+        self.assertEqual(t["name"], "foo")
+        self.assertEqual(t["goal"], "n + 1 >= 3")
+        # The range covers the "theorem foo" line in the source.
+        start = t["start"]
+        assert isinstance(start, dict)
+        line = start["line"]
+        assert isinstance(line, int)
+        self.assertTrue(SOURCE.split("\n")[line].startswith("theorem foo"))
+
 
 class TestMapping(unittest.TestCase):
     def test_map_into_generated(self):
