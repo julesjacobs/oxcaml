@@ -26,7 +26,15 @@ type vc_kind =
 type vc =
   { vc_loc : Location.t
   ; vc_facts : Refinement.pred list (* Pbound-free *)
+  ; vc_fact_provs : Location.t option list
+    (* the source span each fact in [vc_facts] originated from,
+       PARALLEL to it (same length, same order); [None] where the
+       fact has no meaningful span.  Rendered only under
+       [-vox-dump-vc-provenance]. *)
   ; vc_goal : Refinement.pred (* Pbound-free *)
+  ; vc_goal_prov : Location.t option
+    (* the span of the refinement/annotation that induced the
+       obligation; defaults to the obligation site ([vc_loc]). *)
   ; vc_kind : vc_kind
   }
 
@@ -1333,9 +1341,23 @@ let binding_self_facts env (vb : value_binding) =
    prove false facts.  Out-of-scope facts are dropped (sound: fewer
    hypotheses); out-of-scope goals are errors. *)
 type ctx =
-  { cfacts : Refinement.pred list
+  { cfacts : (Refinement.pred * Location.t option) list
   ; cscope : Ident.t list
   }
+
+(* Tag a batch of freshly collected facts with the source span they
+   originated from -- the binder pattern, the branch condition, the
+   contract/invariant annotation -- or [None] where a fact is
+   synthesized with no meaningful span (selfification equalities,
+   mutable-version havoc, imported cross-unit facts).  Threaded
+   through [cfacts] so a hypothesis in a VC dump can point back at its
+   origin under [-vox-dump-vc-provenance]; invisible to the solver,
+   which reads only the predicates. *)
+let prov (loc : Location.t option) (ps : Refinement.pred list)
+  : (Refinement.pred * Location.t option) list
+  =
+  List.map (fun p -> p, loc) ps
+;;
 
 let in_scope ctx id =
   List.exists (Ident.same id) ctx.cscope || Hashtbl.mem synthetic_names id
@@ -1667,6 +1689,13 @@ let runtime_check_gate env ~loc goal =
 ;;
 
 let emit_vc ~env ~loc ~ctx ~goal ~kind =
+  (* The goal's provenance is the refinement/annotation text that
+     induced the obligation.  A refined type carries no syntactic loc
+     for its annotation, so the best span available is the obligation
+     site itself (which the header already reports): the two coincide,
+     and emitting it uniformly keeps the format regular for the
+     editor. *)
+  let goal_prov = Some loc in
   (* Register every module-level value this VC mentions: its solver
      declaration (sort) and its .cmi refinement as a global fact --
      the single chokepoint for all channels that can produce a
@@ -1674,7 +1703,7 @@ let emit_vc ~env ~loc ~ctx ~goal ~kind =
      predicates). *)
   List.iter
     (register_global env)
-    (List.concat_map Refinement.free_globals (goal :: ctx.cfacts));
+    (List.concat_map Refinement.free_globals (goal :: List.map fst ctx.cfacts));
   (* Facts mentioning out-of-scope stamps (including any dependent
      binder a substitution failed to open) are dropped (sound: fewer
      hypotheses); such goals cannot be discharged and are errors.  The
@@ -1695,7 +1724,7 @@ let emit_vc ~env ~loc ~ctx ~goal ~kind =
           assume_unchecked_";
      runtime_check_gate env ~loc goal
    | Assume -> ());
-  let facts = List.filter (pred_in_scope ctx) ctx.cfacts in
+  let facts = List.filter (fun (p, _) -> pred_in_scope ctx p) ctx.cfacts in
   (* Pull in the definitional equations reachable from the goal and
      facts (transitively through their right-hand sides); definitions
      mentioning out-of-scope program variables are dropped, which only
@@ -1708,7 +1737,7 @@ let emit_vc ~env ~loc ~ctx ~goal ~kind =
         (Refinement.free_vars p)
     in
     note goal;
-    List.iter note facts;
+    List.iter (fun (p, _) -> note p) facts;
     let rec grow acc remaining =
       let take, keep =
         List.partition
@@ -1727,7 +1756,7 @@ let emit_vc ~env ~loc ~ctx ~goal ~kind =
     in
     List.filter (pred_in_scope ctx) (grow [] !mut_defs)
   in
-  let facts = facts @ defs in
+  let facts = facts @ prov None defs in
   (* Global facts (the .cmi refinements of module-level values named in
      this VC) arrive by NEED: an import's fact appears exactly in the
      VCs that mention its name. *)
@@ -1742,9 +1771,9 @@ let emit_vc ~env ~loc ~ctx ~goal ~kind =
         (Refinement.free_globals p)
     in
     note goal;
-    List.iter note facts;
-    facts
-    @ List.filter
+    List.iter (fun (p, _) -> note p) facts;
+    let gfacts =
+      List.filter
         (fun g ->
           List.exists
             (fun id -> Hashtbl.mem mentioned (Ident.unique_name id))
@@ -1753,18 +1782,31 @@ let emit_vc ~env ~loc ~ctx ~goal ~kind =
                (fun gp -> Hashtbl.mem mentioned (path_uname gp))
                (Refinement.free_globals g))
         !global_facts
+    in
+    facts @ prov None gfacts
   in
   (* Several fact channels can deliver the same fact (a binder fact and
      its selfification equation, say); keep the first occurrence.
      Quadratic, but hypothesis lists are small. *)
   let facts =
     List.fold_left
-      (fun acc f -> if List.exists (Refinement.equal f) acc then acc else f :: acc)
+      (fun acc (f, l) ->
+        if List.exists (fun (g, _) -> Refinement.equal f g) acc
+        then acc
+        else (f, l) :: acc)
       []
       facts
     |> List.rev
   in
-  vcs := { vc_loc = loc; vc_facts = facts; vc_goal = goal; vc_kind = kind } :: !vcs
+  vcs
+  := { vc_loc = loc
+     ; vc_facts = List.map fst facts
+     ; vc_fact_provs = List.map snd facts
+     ; vc_goal = goal
+     ; vc_goal_prov = goal_prov
+     ; vc_kind = kind
+     }
+     :: !vcs
 ;;
 
 (* Escaped refinements (DESIGN: "escape is an error").  A binder's type
@@ -2252,7 +2294,7 @@ let extend_pat
     | Some s -> unpack_fact env pat ~scrut:s ~scrut_name
     | None -> []
   in
-  { cfacts = unpack @ binder_facts env pat @ ctx.cfacts
+  { cfacts = prov (Some pat.pat_loc) (unpack @ binder_facts env pat) @ ctx.cfacts
   ; cscope = bound @ ctx.cscope
   }
 ;;
@@ -2332,7 +2374,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
         emit_vc
           ~env
           ~loc:e.exp_loc
-          ~ctx:{ ctx with cfacts = self_hyps @ ctx.cfacts }
+          ~ctx:{ ctx with cfacts = prov None self_hyps @ ctx.cfacts }
           ~goal:(Refinement.subst_bound ~by:n p)
           ~kind
       | None -> ())
@@ -2357,7 +2399,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
     let written = written_mutables e in
     let child_ctx child =
       restore_versions saved;
-      { ctx with cfacts = sibling_havoc env ~written child @ ctx.cfacts }
+      { ctx with cfacts = prov None (sibling_havoc env ~written child) @ ctx.cfacts }
     in
     ignore (walk_expr env (child_ctx funct) funct : ctx);
     (* Contract obligations (parameters as preconditions): each
@@ -2413,7 +2455,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
         | _ -> ())
       args;
     restore_versions saved;
-    { ctx with cfacts = mut_havoc_written env e @ ctx.cfacts }
+    { ctx with cfacts = prov None (mut_havoc_written env e) @ ctx.cfacts }
   | Texp_let (rec_flag, [ vb ], body) ->
     (* Reflected definitions are global; a local one could capture
        enclosing variables (translate_def's closedness check would also
@@ -2436,12 +2478,16 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
       | Texp_ident { path = Path.Pident id; _ }, _ ->
         { ctx' with
           cfacts =
-            match_facts env (Refinement.Pvar id) vb.vb_pat @ ctx'.cfacts
+            prov (Some vb.vb_pat.pat_loc)
+              (match_facts env (Refinement.Pvar id) vb.vb_pat)
+            @ ctx'.cfacts
         }
       | Texp_ident { path = (Path.Pdot _ | Path.Papply _) as p; _ }, _ ->
         { ctx' with
           cfacts =
-            match_facts env (Refinement.Pglobal p) vb.vb_pat @ ctx'.cfacts
+            prov (Some vb.vb_pat.pat_loc)
+              (match_facts env (Refinement.Pglobal p) vb.vb_pat)
+            @ ctx'.cfacts
         }
       | Texp_mutvar { txt = mid; _ }, _ ->
         (match Hashtbl.find_opt mut_versions mid with
@@ -2451,13 +2497,18 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
               it. *)
            { ctx' with
              cfacts =
-               match_facts env (Refinement.Pvar v) vb.vb_pat @ ctx'.cfacts
+               prov (Some vb.vb_pat.pat_loc)
+                 (match_facts env (Refinement.Pvar v) vb.vb_pat)
+               @ ctx'.cfacts
            }
          | None -> ctx')
       | _, Tpat_var _ -> ctx' (* selfification below carries the name *)
       | _, _ ->
         { ctx' with
-          cfacts = destructure_facts env vb.vb_expr vb.vb_pat @ ctx'.cfacts
+          cfacts =
+            prov (Some vb.vb_pat.pat_loc)
+              (destructure_facts env vb.vb_expr vb.vb_pat)
+            @ ctx'.cfacts
         }
     in
     (* Selfification (no self fact for a RECURSIVE binding: a cyclic
@@ -2466,7 +2517,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
       match rec_flag with
       | Recursive -> ctx'
       | Nonrecursive ->
-        { ctx' with cfacts = binding_self_facts env vb @ ctx'.cfacts }
+        { ctx' with cfacts = prov None (binding_self_facts env vb) @ ctx'.cfacts }
     in
     walk_expr env ctx' body
   | Texp_let (rec_flag, vbs, body) ->
@@ -2481,13 +2532,13 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
         restore_versions saved;
         let hfacts = sibling_havoc env ~written vb.vb_expr in
         ignore
-          (walk_expr env { ctx with cfacts = hfacts @ ctx.cfacts } vb.vb_expr
+          (walk_expr env { ctx with cfacts = prov None hfacts @ ctx.cfacts } vb.vb_expr
             : ctx))
       vbs;
     restore_versions saved;
     let havoc = List.concat_map (mut_havoc env) written in
     let ctx' = List.fold_left (fun ctx vb -> extend_pat env ctx vb.vb_pat) ctx vbs in
-    let ctx' = { ctx' with cfacts = havoc @ ctx'.cfacts } in
+    let ctx' = { ctx' with cfacts = prov None havoc @ ctx'.cfacts } in
     let ctx' =
       List.fold_left
         (fun ctx vb ->
@@ -2496,17 +2547,24 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
           | Texp_ident { path = Path.Pident id; _ }, _ ->
             { ctx with
               cfacts =
-                match_facts env (Refinement.Pvar id) vb.vb_pat @ ctx.cfacts
+                prov (Some vb.vb_pat.pat_loc)
+                  (match_facts env (Refinement.Pvar id) vb.vb_pat)
+                @ ctx.cfacts
             }
           | Texp_ident { path = (Path.Pdot _ | Path.Papply _) as p; _ }, _ ->
             { ctx with
               cfacts =
-                match_facts env (Refinement.Pglobal p) vb.vb_pat @ ctx.cfacts
+                prov (Some vb.vb_pat.pat_loc)
+                  (match_facts env (Refinement.Pglobal p) vb.vb_pat)
+                @ ctx.cfacts
             }
           | _, Tpat_var _ -> ctx
           | _, _ ->
             { ctx with
-              cfacts = destructure_facts env vb.vb_expr vb.vb_pat @ ctx.cfacts
+              cfacts =
+                prov (Some vb.vb_pat.pat_loc)
+                  (destructure_facts env vb.vb_expr vb.vb_pat)
+                @ ctx.cfacts
             })
         ctx'
         vbs
@@ -2522,7 +2580,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
       | Nonrecursive when written = [] ->
         List.fold_left
           (fun ctx vb ->
-            { ctx with cfacts = binding_self_facts env vb @ ctx.cfacts })
+            { ctx with cfacts = prov None (binding_self_facts env vb) @ ctx.cfacts })
           ctx'
           vbs
       | Recursive | Nonrecursive -> ctx'
@@ -2536,7 +2594,9 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
        let ty = vb.vb_pat.pat_type in
        let rhs = name_of_expr env vb.vb_expr in
        let facts = mut_assign env id ty ~rhs in
-       let out = walk_expr env { ctx0 with cfacts = facts @ ctx0.cfacts } body in
+       let out =
+         walk_expr env { ctx0 with cfacts = prov None facts @ ctx0.cfacts } body
+       in
        (* the binder's scope ends; its versions (synthetic) live on *)
        Hashtbl.remove mut_versions id;
        out
@@ -2551,7 +2611,9 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
        (* name the right-hand side BEFORE minting: its reads use the
           version being replaced *)
        let rhs_name = name_of_expr env rhs in
-       { ctx0 with cfacts = mut_assign env id ty ~rhs:rhs_name @ ctx0.cfacts }
+       { ctx0 with
+         cfacts = prov None (mut_assign env id ty ~rhs:rhs_name) @ ctx0.cfacts
+       }
      | None -> ctx0)
   | Texp_mutvar _ -> ctx
   | Texp_sequence (e1, _, e2) ->
@@ -2612,7 +2674,8 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
          | Some sid ->
            { ctx' with
              cfacts =
-               scrut_facts c.c_lhs
+               prov (Some c.c_lhs.pat_loc)
+                 (scrut_facts c.c_lhs
                (* A [refine_] unpack of a VIA value binds at the BASE
                   while the scrutinee is at the IMAGE, so the
                   subject-alias fact [x = s] would be ill-sorted;
@@ -2624,7 +2687,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
                          | Trefine (_, _ :: _, _) -> true
                          | _ -> false)
                   then []
-                  else match_facts env sid c.c_lhs)
+                  else match_facts env sid c.c_lhs))
                @ ctx'.cfacts
            }
          | None -> ctx'
@@ -2649,7 +2712,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
           restore_versions saved_pre;
           { ctx with
             cfacts =
-              List.concat_map (mut_havoc env) (written_mutables scrut)
+              prov None (List.concat_map (mut_havoc env) (written_mutables scrut))
               @ ctx.cfacts
           })
         else (
@@ -2666,9 +2729,9 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
         | Some sid when not interrupted ->
           { ctx' with
             cfacts =
-              scrut_facts c.c_lhs
-              @ match_facts env sid c.c_lhs
-              @ negs
+              prov (Some c.c_lhs.pat_loc)
+                (scrut_facts c.c_lhs @ match_facts env sid c.c_lhs)
+              @ prov None negs
               @ ctx'.cfacts
           }
         | _ -> ctx'
@@ -2720,7 +2783,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
       then ctx
       else ctx0
     in
-    { base with cfacts = mut_havoc_written env e @ base.cfacts })
+    { base with cfacts = prov None (mut_havoc_written env e) @ base.cfacts })
   | Texp_ifthenelse (cond, e_then, e_else) ->
     let ctx0 = walk_expr env ctx cond in
     (* The path fact is the condition's logic translation when it has
@@ -2732,7 +2795,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
     let with_fact f ctx =
       match cond_fact with
       | None -> ctx
-      | Some c -> { ctx with cfacts = f c :: ctx.cfacts }
+      | Some c -> { ctx with cfacts = (f c, Some cond.exp_loc) :: ctx.cfacts }
     in
     let saved = save_versions () in
     ignore (walk_expr env (with_fact (fun c -> c) ctx0) e_then : ctx);
@@ -2775,7 +2838,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
             | None -> inv))
         saved
     in
-    { ctx0 with cfacts = join_facts @ ctx0.cfacts }
+    { ctx0 with cfacts = prov None join_facts @ ctx0.cfacts }
   | Texp_while { wh_cond; wh_body; _ } ->
     (* Head state: havoc everything the loop writes; head versions
        denote any iteration's entry, and the declared refinements
@@ -2797,10 +2860,11 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
          ~goal:(close_over_versions template)
          ~kind:Prove
      | None -> ());
-    let head = mut_havoc_written env e in
+    let head = prov None (mut_havoc_written env e) in
     let head =
       match inv with
-      | Some (template, _) -> close_over_versions template :: head
+      | Some (template, attr_loc) ->
+        (close_over_versions template, Some attr_loc) :: head
       | None -> head
     in
     let hctx = { ctx with cfacts = head @ ctx.cfacts } in
@@ -2809,7 +2873,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
     let saved = save_versions () in
     let bctx =
       match cond_fact with
-      | Some c -> { cctx with cfacts = c :: cctx.cfacts }
+      | Some c -> { cctx with cfacts = (c, Some wh_cond.exp_loc) :: cctx.cfacts }
       | None -> cctx
     in
     let bctx_out = walk_expr env bctx wh_body in
@@ -2826,7 +2890,8 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
      | None -> ());
     restore_versions saved;
     (match cond_fact with
-     | Some c -> { cctx with cfacts = Refinement.Pnot c :: cctx.cfacts }
+     | Some c ->
+       { cctx with cfacts = (Refinement.Pnot c, Some wh_cond.exp_loc) :: cctx.cfacts }
      | None -> cctx)
   | Texp_for { for_id; for_from; for_to; for_dir; for_body; _ } ->
     let c0 = walk_expr env ctx for_from in
@@ -2884,7 +2949,8 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
     let head_havoc = mut_havoc_written env e in
     let head_inv =
       match inv with
-      | Some (template, _) -> [ close_over_versions template ]
+      | Some (template, attr_loc) ->
+        [ close_over_versions template, Some attr_loc ]
       | None -> []
     in
     (* The post-loop instance of the invariant: over the head (havoc)
@@ -2894,7 +2960,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
     let post_inv =
       match inv with
       | None -> []
-      | Some (template, _) ->
+      | Some (template, attr_loc) ->
         if not mentions_index
         then head_inv
         else (
@@ -2907,11 +2973,12 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
               ( Refinement.Pbinop (Refinement.Ge, from_n, to_n)
               , Refinement.Pbinop (Refinement.Lt, from_n, to_n) )
           in
-          [ Refinement.Por
-              ( Refinement.Pand
-                  (empty, close_over_versions (at_index `First template))
-              , Refinement.Pand
-                  (ran, close_over_versions (at_index `Past template)) )
+          [ ( Refinement.Por
+                ( Refinement.Pand
+                    (empty, close_over_versions (at_index `First template))
+                , Refinement.Pand
+                    (ran, close_over_versions (at_index `Past template)) )
+            , Some attr_loc )
           ])
     in
     let bounds =
@@ -2925,7 +2992,9 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
       ]
     in
     let bctx =
-      { cfacts = bounds @ head_inv @ head_havoc @ c1.cfacts
+      { cfacts =
+          prov (Some e.exp_loc) bounds @ head_inv @ prov None head_havoc
+          @ c1.cfacts
       ; cscope = for_id :: c1.cscope
       }
     in
@@ -2941,7 +3010,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
          ~kind:Prove
      | None -> ());
     restore_versions saved;
-    { c1 with cfacts = post_inv @ head_havoc @ c1.cfacts }
+    { c1 with cfacts = post_inv @ prov None head_havoc @ c1.cfacts }
   | Texp_function { params; body; _ } ->
     (* A function body runs at call time: outer mutable variables are
        not live inside it (closures cannot capture them), so suspend
@@ -3011,7 +3080,9 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
                 in
                 register_pred_paths env p;
                 { ctx with
-                  cfacts = Refinement.subst_bound ~by:name p :: ctx.cfacts
+                  cfacts =
+                    (Refinement.subst_bound ~by:name p, Some pat.pat_loc)
+                    :: ctx.cfacts
                 }
               | _ -> ctx
             in
@@ -3046,7 +3117,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
               register_pred_paths env p;
               { ctx' with
                 cfacts =
-                  Refinement.subst_bound ~by:(Refinement.Pvar fc_param) p
+                  (Refinement.subst_bound ~by:(Refinement.Pvar fc_param) p, None)
                   :: ctx'.cfacts
               }
             | None -> ctx')
@@ -3059,8 +3130,9 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
               let ctx'' =
                 { ctx'' with
                   cfacts =
-                    match_facts env (Refinement.Pvar fc_param) c.c_lhs
-                    @ negs
+                    prov (Some c.c_lhs.pat_loc)
+                      (match_facts env (Refinement.Pvar fc_param) c.c_lhs)
+                    @ prov None negs
                     @ ctx''.cfacts
                 }
               in
@@ -3096,7 +3168,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
     let hctx =
       { ctx with
         cfacts =
-          List.concat_map (mut_havoc env) (written_mutables tried)
+          prov None (List.concat_map (mut_havoc env) (written_mutables tried))
           @ ctx.cfacts
       }
     in
@@ -3114,7 +3186,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
     List.iter do_handler cases;
     List.iter do_handler eff_cases;
     restore_versions saved;
-    { ctx with cfacts = mut_havoc_written env e @ ctx.cfacts }
+    { ctx with cfacts = prov None (mut_havoc_written env e) @ ctx.cfacts }
   | _ ->
     (* Generic traversal of children under the same context.  Patterns
        reached this way belong to constructs the walker does not model
@@ -3134,7 +3206,11 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
             restore_versions saved;
             let hfacts = sibling_havoc env ~written e' in
             ignore
-              (walk_expr env { ctx with cfacts = hfacts @ ctx.cfacts } e' : ctx))
+              (walk_expr
+                 env
+                 { ctx with cfacts = prov None hfacts @ ctx.cfacts }
+                 e'
+                : ctx))
       ; pat =
           (fun sub (type k) (p : k general_pattern) ->
             backstop_pat ctx p;
@@ -3148,7 +3224,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
     Tast_iterator.default_iterator.expr it e;
     restore_versions saved;
     let havoc = mut_havoc_written env e in
-    if havoc = [] then ctx else { ctx with cfacts = havoc @ ctx.cfacts }
+    if havoc = [] then ctx else { ctx with cfacts = prov None havoc @ ctx.cfacts }
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -4818,11 +4894,33 @@ let run_lean vcs =
 
 let print_pred ppf p = Format.pp_print_string ppf (Refinement.to_string p)
 
+(* A source span as [line.col-line.col]: 1-based lines (matching the
+   header's "Line N" convention) and 0-based columns (matching its
+   "characters A-B").  Editor-parsable, appended after two spaces. *)
+let span_string (loc : Location.t) =
+  let s = loc.Location.loc_start
+  and e = loc.Location.loc_end in
+  Printf.sprintf
+    "%d.%d-%d.%d"
+    s.Lexing.pos_lnum
+    (s.Lexing.pos_cnum - s.Lexing.pos_bol)
+    e.Lexing.pos_lnum
+    (e.Lexing.pos_cnum - e.Lexing.pos_bol)
+;;
+
+(* The provenance suffix for one dumped line: empty unless the
+   provenance flag is on AND a span is known, so the plain [-dump-vc]
+   output is byte-identical. *)
+let prov_suffix = function
+  | Some loc when !Clflags.vox_dump_vc_provenance -> "  @ " ^ span_string loc
+  | _ -> ""
+;;
+
 let dump_vc ppf vc =
   with_vc_display vc @@ fun () ->
   Format.fprintf
     ppf
-    "@[<v 2>%a: vox VC%s:@ goal: %a@ hypotheses:%t@]@."
+    "@[<v 2>%a: vox VC%s:@ goal: %a%s@ hypotheses:%t@]@."
     Location.print_loc
     vc.vc_loc
     (match vc.vc_kind with
@@ -4831,10 +4929,15 @@ let dump_vc ppf vc =
      | Assume -> " (ASSUMED)")
     print_pred
     vc.vc_goal
+    (prov_suffix vc.vc_goal_prov)
     (fun ppf ->
       if vc.vc_facts = []
       then Format.fprintf ppf " <none>"
-      else List.iter (fun f -> Format.fprintf ppf "@ %a" print_pred f) vc.vc_facts)
+      else
+        List.iter2
+          (fun f p -> Format.fprintf ppf "@ %a%s" print_pred f (prov_suffix p))
+          vc.vc_facts
+          vc.vc_fact_provs)
 ;;
 
 let discharge () =
@@ -4860,10 +4963,16 @@ let discharge () =
             ~loc:vc.vc_loc
             "vox: this obligation mentions constructors of a type that is \
              not usable here (not a simple variant, or mutually recursive)";
-        { vc with vc_facts = List.filter pred_usable vc.vc_facts })
+        let kept =
+          List.filter
+            (fun (f, _) -> pred_usable f)
+            (List.combine vc.vc_facts vc.vc_fact_provs)
+        in
+        { vc with vc_facts = List.map fst kept; vc_fact_provs = List.map snd kept })
       all
   in
-  if !Clflags.vox_dump_vc then List.iter (dump_vc Format.err_formatter) all;
+  if !Clflags.vox_dump_vc || !Clflags.vox_dump_vc_provenance
+  then List.iter (dump_vc Format.err_formatter) all;
   if !Clflags.vox_dry_run
   then ()
   else (
@@ -4986,7 +5095,8 @@ let walk_items (str : structure) ctx =
                 (fun ctx vb ->
                   { ctx with
                     cfacts =
-                      binding_self_facts str.str_final_env vb @ ctx.cfacts
+                      prov None (binding_self_facts str.str_final_env vb)
+                      @ ctx.cfacts
                   })
                 !ctx
                 vbs)

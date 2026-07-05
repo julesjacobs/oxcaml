@@ -928,6 +928,15 @@ let mk_dsource f =
 let mk_dump_vc f =
   "-dump-vc", Arg.Unit f, " vox: print every verification condition"
 
+let mk_dump_vc_provenance f =
+  ( "-vox-dump-vc-provenance"
+  , Arg.Unit f
+  , " vox: like -dump-vc, but also annotate the goal and each \
+     hypothesis with the source span it originated from, appended as \
+     \"  @ line.col-line.col\" (1-based lines, 0-based columns, \
+     matching the \"Line N, characters A-B\" header); hypotheses with \
+     no meaningful span are left unannotated" )
+
 let mk_vox_dry_run f =
   "-vox-dry-run", Arg.Unit f, " vox: generate VCs but do not run the solver"
 
@@ -1225,6 +1234,7 @@ module type Core_options = sig
 
   val _dsource : unit -> unit
   val _dump_vc : unit -> unit
+  val _dump_vc_provenance : unit -> unit
   val _vox_dry_run : unit -> unit
   val _vox_solver_path : string -> unit
   val _vox_prelude : string -> unit
@@ -1628,6 +1638,7 @@ struct
     mk_dlocations F._dlocations;
     mk_dsource F._dsource;
     mk_dump_vc F._dump_vc;
+    mk_dump_vc_provenance F._dump_vc_provenance;
     mk_vox_dry_run F._vox_dry_run;
     mk_vox_solver_path F._vox_solver_path;
     mk_vox_prelude F._vox_prelude;
@@ -1741,6 +1752,7 @@ struct
     mk_dlocations F._dlocations;
     mk_dsource F._dsource;
     mk_dump_vc F._dump_vc;
+    mk_dump_vc_provenance F._dump_vc_provenance;
     mk_vox_dry_run F._vox_dry_run;
     mk_vox_solver_path F._vox_solver_path;
     mk_vox_prelude F._vox_prelude;
@@ -1929,6 +1941,7 @@ struct
     mk_dlocations F._dlocations;
     mk_dsource F._dsource;
     mk_dump_vc F._dump_vc;
+    mk_dump_vc_provenance F._dump_vc_provenance;
     mk_vox_dry_run F._vox_dry_run;
     mk_vox_solver_path F._vox_solver_path;
     mk_vox_prelude F._vox_prelude;
@@ -2098,6 +2111,7 @@ module Make_opttop_options (F : Opttop_options) = struct
     mk_dlocations F._dlocations;
     mk_dsource F._dsource;
     mk_dump_vc F._dump_vc;
+    mk_dump_vc_provenance F._dump_vc_provenance;
     mk_vox_dry_run F._vox_dry_run;
     mk_vox_solver_path F._vox_solver_path;
     mk_vox_prelude F._vox_prelude;
@@ -2249,6 +2263,7 @@ struct
     mk_dlocations F._dlocations;
     mk_dsource F._dsource;
     mk_dump_vc F._dump_vc;
+    mk_dump_vc_provenance F._dump_vc_provenance;
     mk_vox_dry_run F._vox_dry_run;
     mk_vox_solver_path F._vox_solver_path;
     mk_vox_prelude F._vox_prelude;
@@ -2498,6 +2513,7 @@ module Default = struct
     let _drawlambda = set dump_rawlambda
     let _dsource = set dump_source
     let _dump_vc = set vox_dump_vc
+    let _dump_vc_provenance = set vox_dump_vc_provenance
     let _vox_dry_run = set vox_dry_run
     let _vox_solver_path s = vox_solver_path := s
     let _vox_prelude s = vox_prelude := s
