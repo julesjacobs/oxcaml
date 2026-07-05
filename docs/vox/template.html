@@ -262,55 +262,19 @@ generate inputs and use the contract as the oracle:</p>
 <pre><code class="ml">@ASSUME_LEMMA@</code></pre>
 
 <h2 id="sig">Specs on module signatures</h2>
-<p>An <code>.mli</code> can carry a logical model of its module
-&mdash; definitions, lemmas, proofs &mdash; in an embedded Lean block.
-The block is compiled from the interface alone into a Lean module
-beside the <code>.cmi</code> (<code>VoxSig_&lt;Unit&gt;.olean</code>),
-and clients import that: they verify against the interface without
-reading the implementation, and the interface&rsquo;s own proofs are
-not re-checked per client.  Editing a spec changes the
-<code>.cmi</code> checksum, which forces clients to re-verify.</p>
-
-<p id="seal">The interface chooses what to reveal.  Definitions and
-proved theorems are facts a client may use &mdash; the transparent
-style, where the model is public.  An <code>axiom</code> is the
-reverse: a fact clients may use but the implementation must prove.
-The implementation&rsquo;s compile ends with a <em>seal</em> that
-re-elaborates the interface and requires a proved theorem with the
-same name and statement for every <code>axiom</code>; a module that
-cannot prove its interface&rsquo;s laws does not compile.  Marking an
-abstract type <code>[@@vox.sort opaque]</code> extends this to the
-representation: the type gets its own sort in the logic, laws can
-quantify over it, and the implementation proves them about the
-concrete type, which takes over the same solver-side name.</p>
-
-<p id="via">An abstraction function goes further than
-<code>oset</code>&rsquo;s axioms: instead of a hand-picked list of
-laws, clients get a whole model &mdash; in the logic, a value of the
-type <em>is</em> a set.  The <code>.mli</code> defines a Lean set
-type and names it in OCaml
-(<code>type iset [@@vox.sort lean "ISet"]</code>), declares
-<code>type t : value refines (iset)</code>, and states the operations
-as facts about sets:
-<code>val member : (x : int) -&gt; (s : t) -&gt; bool{ _ = mem x s }</code>,
-where <code>mem</code> is set membership, not a tree search.  Nothing
-in the interface says there is a tree.  The <code>.ml</code> picks
-the representation and its meaning in one line &mdash;
-<code>type t = tree{ bst _ } [@vox.via (elems : iset)]</code>: a
-value of <code>t</code> is an ordered tree, standing for
-<code>elems</code> of that tree, the set of its elements.  The
-compiler holds the code to that reading: <code>member</code>&rsquo;s
-one-path search must return <code>mem x s</code> for the set
-<code>s</code> the tree stands for, and <code>add</code> must build a
-tree standing for <code>ins x s</code>.  To prove it, the module
-unpacks with <code>refine_</code>: from a set <code>s</code> it gets
-the tree <code>t0</code> behind it, plus <code>bst t0</code> and
-<code>elems t0 = s</code>, and the tree-recursive code discharges the
-set contracts from those; there is no trust keyword in the file.
-Replace the tree with another structure and only <code>elems</code>
-and the in-module proofs change &mdash; client proofs don&rsquo;t.
-<code>type 'a t : value refines ('a iset)</code> is the parameterized
-form, proved once.</p>
+<p>A module&rsquo;s spec lives on its interface, in the vocabulary
+its clients should reason in: a full model of the data structure, a
+handful of laws about an opaque type, or simply &ldquo;values of this
+type are sets.&rdquo;  The compiler enforces the contract from both
+sides.  The implementation must <em>prove</em> what its interface
+claims &mdash; a module that cannot prove its laws does not compile
+&mdash; and clients verify against the interface alone: the
+representation, its invariants, and the proofs never enter a
+client&rsquo;s obligations, so replacing a BST with another structure
+re-verifies no client.  Specs travel in the <code>.cmi</code>
+(compiled once to a Lean module beside it, not re-checked per
+client), and editing a spec changes the checksum, which forces
+dependents to re-verify.</p>
 
 <p>The examples, each in the branch&rsquo;s test suite:</p>
 <ul>
@@ -343,7 +307,7 @@ form, proved once.</p>
   big-endian like the compiler, prefix and branching bit packed into one
   int per branch; the invariant is stated about the packed int
   itself.</li>
-<li><b>Sealed: one law, two implementations</b> &mdash;
+<li id="seal"><b>Sealed: one law, two implementations</b> &mdash;
   <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/step.mli">step.mli</a> exports a single law
   as an axiom;
   <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/step_incr/step.ml">step_incr</a> and
@@ -362,7 +326,7 @@ form, proved once.</p>
   see only four axioms;
   <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/mechanics/lean_oset_opaque.ml">a fact the axioms
   do not imply</a> is rejected.</li>
-<li><b>A set that <em>is</em> a set</b> &mdash;
+<li id="via"><b>A set that <em>is</em> a set</b> &mdash;
   <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/via_set.mli">via_set.mli</a> declares
   <code>type t : value refines (iset)</code> with specs in set
   vocabulary and no mention of the representation;
