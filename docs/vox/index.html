@@ -905,6 +905,11 @@ enough.</p></div>
 <pre><code>git clone -b vox https://github.com/julesjacobs/oxcaml && cd oxcaml
 autoconf && ./configure && make boot-compiler
 make test-one DIR=vox        # needs a Lean 4 toolchain (elan) on PATH</code></pre>
+<p>There is also a browser editor with a live proof pane &mdash; the
+hypotheses and goal at your cursor, including inside
+<code>[%%vox.lean]</code> blocks &mdash; in
+<a href="https://github.com/julesjacobs/oxcaml/tree/vox/tools/vox-editor">tools/vox-editor</a>;
+its README explains how to run it against your build.</p>
 <p>Every example on this page lives in the branch&rsquo;s test suite and
 this page is generated from it (<code>docs/vox/generate.py</code>): the demo
 files must verify, and the failure examples must fail with exactly the
