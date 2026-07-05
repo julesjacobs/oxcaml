@@ -227,6 +227,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         path = self._endpoint()
+        if path == "/favicon.ico":
+            self.send_response(204)
+            self.end_headers()
+            return
         if path == "/":
             path = "/index.html"
         # Restrict to files in the tools dir (no traversal).
@@ -279,7 +283,8 @@ def main() -> None:
     httpd, port = make_server(args.port, ocamlc, lean)
     print(
         "vox-editor on http://127.0.0.1:%d  (ocamlc=%s, lean=%s)"
-        % (port, ocamlc, lean or "<none>")
+        % (port, ocamlc, lean or "<none>"),
+        flush=True,
     )
     try:
         httpd.serve_forever()

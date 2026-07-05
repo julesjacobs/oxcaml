@@ -124,6 +124,27 @@ class TestHttp(unittest.TestCase):
         except urllib.error.HTTPError as e:
             self.assertEqual(e.code, 404)
 
+    def _get(self, path: str) -> bytes:
+        req = urllib.request.Request("http://127.0.0.1:%d%s" % (self.port, path))
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return resp.read()
+
+    def test_serves_index(self):
+        body = self._get("/").decode("utf-8")
+        self.assertIn("vox editor", body)
+        self.assertIn("app.js", body)
+
+    def test_serves_static_js(self):
+        body = self._get("/selection.js").decode("utf-8")
+        self.assertIn("selectRegion", body)
+
+    def test_no_traversal(self):
+        try:
+            self._get("/../server.py")
+            self.fail("expected HTTP error")
+        except urllib.error.HTTPError as e:
+            self.assertIn(e.code, (400, 404))
+
 
 if __name__ == "__main__":
     unittest.main()
