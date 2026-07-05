@@ -222,6 +222,11 @@ def main():
                                       include_stop=False).rstrip('\n'),
         '@QSORT_ARRAY@': slice_between(read('demo/lean_qsort.ml'),
                                        r'^let sort_array', r"^  x'$"),
+        '@POLY@': slice_between(read('demo/lean_poly.ml'),
+                                r'^let counter', r'^  !counter$')
+                  + '\n\n'
+                  + slice_between(read('demo/lean_poly.ml'),
+                                  r'^let thunk', r'^let forced'),
     }
 
     nth = read('demo/lean_nth.ml')

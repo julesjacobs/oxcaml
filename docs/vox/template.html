@@ -382,6 +382,21 @@ array back, and the prophecy carries the conclusion onto its
 contents:</p>
 <pre><code class="ml">@QSORT_ARRAY@</code></pre>
 
+<h2 id="poly">What refinement types buy us</h2>
+<p>Because a refinement is part of the type, the language&rsquo;s
+polymorphism transports facts with no verifier support.  The
+<code>fork_join2</code> above is the untouched library function: its
+type is polymorphic, so instantiating <code>'a</code> at a refined
+unit is all it took to carry each task&rsquo;s conclusion across the
+domain join.  The same instantiation gives a first form of shared
+mutation &mdash; a <code>ref</code> whose contents type is an
+invariant: reads return the fact, and writes must re-establish it (a
+write that cannot is refused with a counterexample,
+<code>demo/lean_poly.ml</code>).  And <code>lazy</code> memoizes
+through internal mutation, yet a lazy of a refined type forces to the
+refined value:</p>
+<pre><code class="ml">@POLY@</code></pre>
+
 <h2 id="tour">Some more demos</h2>
 <details><summary style="cursor:pointer;color:var(--dim)">Sixteen more
 cards: ADTs, records, tuples, quantifiers, loop invariants, cross-module
