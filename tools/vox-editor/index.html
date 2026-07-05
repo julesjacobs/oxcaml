@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>vox editor</title>
+    <!-- Apply the saved theme before first paint (no flash). Dark is the
+         default; no OS sniffing. -->
+    <script>
+      try {
+        if (localStorage.getItem("vox-editor-theme") === "light")
+          document.documentElement.dataset.theme = "light";
+      } catch (e) {}
+    </script>
+    <link rel="stylesheet" href="vendor/codemirror/codemirror.css" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header id="topbar">
+      <span id="title">vox editor</span>
+      <select id="examples" title="Load a curated example">
+        <option value="">Examples…</option>
+      </select>
+      <button id="check-btn">Check ⌃⏎</button>
+      <span id="status" class="status-idle">idle</span>
+      <span id="spacer"></span>
+      <button id="theme-btn" title="Toggle light / dark theme">☀ Light</button>
+      <span id="hint">proof pane follows the cursor</span>
+    </header>
+    <main>
+      <section id="editor-pane">
+        <textarea id="code"></textarea>
+      </section>
+      <section id="proof-pane">
+        <div id="pane-mode" class="pane-mode"></div>
+        <div id="pane-body">
+          <p class="placeholder">Move the cursor onto a refinement or into
+            a <code>[%%vox.lean]</code> block.</p>
+        </div>
+      </section>
+    </main>
+    <script src="vendor/codemirror/codemirror.js"></script>
+    <script src="vendor/codemirror/mode/mllike/mllike.js"></script>
+    <script src="selection.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

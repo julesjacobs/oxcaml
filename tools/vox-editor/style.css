@@ -1,0 +1,189 @@
+/* Dense dev-tool aesthetic, dark by DEFAULT (no OS sniffing); the
+   toolbar toggle flips :root[data-theme="light"], persisted in
+   localStorage. Every colour is a variable so the light block below can
+   swap the whole palette; the light values mirror docs/vox/template.html. */
+:root {
+  color-scheme: dark;
+  --bg: #10141a;
+  --panel: #161b22;
+  --border: #2b333d;
+  --fg: #d5dae1;
+  --muted: #8b95a1;
+  --accent: #4c9be8;
+  --ok: #3fb950;
+  --fail: #f0533f;
+  --warn: #d0a54a;
+  /* VC underline colours, split from the badge/status text colours so
+     the underlines can stay vivid while badge text stays high-contrast. */
+  --vc-ok-line: #3fb950;
+  --vc-fail-line: #f0533f;
+  /* surfaces + tints (were hardcoded) */
+  --btn-bg: #212a35;
+  --editor-bg: #0d1117;
+  --goal-bg: #16202b;
+  --hyp-bg: #131a22;
+  --cex-bg: #2a1614;
+  --live-bg: #201b12;
+  --block-tint: rgba(76, 155, 232, 0.08);
+  --badge-ok-bg: rgba(63, 185, 80, 0.2);
+  --badge-fail-bg: rgba(240, 83, 63, 0.2);
+  --badge-unknown-bg: #21262d;
+  --sel-bg: #24344d;
+  --sel-bg-focus: #2a3d5c;
+  --mono: "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #ffffff;
+  --panel: #f6f7f9;
+  --border: #d9dde4;
+  --fg: #24292f;
+  --muted: #57606a;
+  --accent: #0b5fbf;
+  --ok: #1a7f37;
+  --fail: #c0334d;
+  --warn: #7d4e00;
+  /* vivid, editor-squiggle-like underlines (the dark badge greens/reds
+     above read muddy as a 2px line on a light background). */
+  --vc-ok-line: #2da44e;
+  --vc-fail-line: #e5484d;
+  --btn-bg: #eceef2;
+  --editor-bg: #ffffff;
+  --goal-bg: #eef4fb;
+  --hyp-bg: #f0f2f5;
+  --cex-bg: #fbecee;
+  --live-bg: #fbf3e6;
+  --block-tint: rgba(11, 95, 191, 0.1);
+  --badge-ok-bg: rgba(26, 127, 55, 0.15);
+  --badge-fail-bg: rgba(192, 51, 77, 0.15);
+  --badge-unknown-bg: #e7e9ee;
+  --sel-bg: #cfe0f7;
+  --sel-bg-focus: #b6d0f2;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.5 var(--mono);
+  display: flex;
+  flex-direction: column;
+}
+#topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+#title { font-weight: 700; letter-spacing: 0.5px; color: var(--accent); }
+#spacer { flex: 1; }
+#hint { color: var(--muted); font-size: 12px; }
+button {
+  background: var(--btn-bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 10px;
+  cursor: pointer;
+  font: inherit;
+}
+button:hover { border-color: var(--accent); }
+#examples {
+  background: var(--btn-bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 6px;
+  cursor: pointer;
+  font: inherit;
+  max-width: 260px;
+}
+#examples:hover { border-color: var(--accent); }
+#status { padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+.status-idle { color: var(--muted); }
+.status-checking { color: var(--warn); }
+.status-ok { color: var(--ok); }
+.status-fail { color: var(--fail); }
+main { flex: 1; display: flex; min-height: 0; }
+#editor-pane { flex: 1.4; min-width: 0; border-right: 1px solid var(--border); }
+#proof-pane {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 10px 14px;
+  background: var(--editor-bg);
+}
+.CodeMirror { height: 100%; font: 13px/1.5 var(--mono); }
+.cm-s-default.CodeMirror { background: var(--editor-bg); color: var(--fg); }
+.CodeMirror-gutters { background: var(--editor-bg); border-right: 1px solid var(--border); }
+
+/* VC markers layered over the source. */
+.vc-proved { border-bottom: 2px solid var(--vc-ok-line); }
+.vc-failed { border-bottom: 2px solid var(--vc-fail-line); }
+.vc-unknown { border-bottom: 2px dotted var(--muted); }
+.vc-block { background: var(--block-tint); }
+
+.pane-mode {
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  margin-bottom: 8px;
+}
+.pane-body h3 {
+  margin: 12px 0 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+}
+.goal, .hyp, .cex {
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  padding: 3px 6px;
+  border-radius: 3px;
+  margin: 2px 0;
+}
+.goal { background: var(--goal-bg); border-left: 3px solid var(--accent); }
+.hyp { background: var(--hyp-bg); border-left: 3px solid var(--border); }
+.cex { background: var(--cex-bg); border-left: 3px solid var(--fail); }
+.badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 11px;
+  margin-left: 6px;
+}
+.badge-proved { background: var(--badge-ok-bg); color: var(--ok); }
+.badge-failed { background: var(--badge-fail-bg); color: var(--fail); }
+.badge-unknown { background: var(--badge-unknown-bg); color: var(--muted); }
+.placeholder { color: var(--muted); }
+.nearest { margin-top: 6px; }
+.jump {
+  background: transparent;
+  color: var(--muted);
+  border: 1px dashed var(--border);
+  font-size: 12px;
+  padding: 2px 8px;
+}
+.jump:hover { color: var(--fg); border-color: var(--accent); }
+#errors { margin-top: 10px; }
+.err {
+  background: var(--cex-bg);
+  border-left: 3px solid var(--fail);
+  padding: 4px 8px;
+  margin: 4px 0;
+  white-space: pre-wrap;
+}
+.live-goals { border-left: 3px solid var(--warn); background: var(--live-bg); }
+
+/* Cursor + selection visibility (the vendored CM5 defaults are
+   black-on-white; drive both from palette variables instead). */
+.CodeMirror-cursor { border-left: 2px solid var(--fg); }
+.CodeMirror-selected { background: var(--sel-bg); }
+.CodeMirror-focused .CodeMirror-selected { background: var(--sel-bg-focus); }
+.CodeMirror-line::selection,
+.CodeMirror-line > span::selection,
+.CodeMirror-line > span > span::selection { background: var(--sel-bg-focus); }
