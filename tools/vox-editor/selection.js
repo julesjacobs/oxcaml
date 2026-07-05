@@ -9,7 +9,8 @@
 //   "none"    nothing to show.
 // Among "inside" regions the innermost (smallest span, most specific
 // kind) wins; the "nearest" region is the closest preceding on the line,
-// else the closest above.
+// else the closest by line distance in either direction (mode "above" or
+// "below"), ties going to the one below.
 //
 // A region of kind "block" or "theorem" routes to the Lean path. Those
 // regions count as "inside" ONLY when the cursor is within their span
@@ -62,8 +63,11 @@ function selectRegion(regions, pos) {
     const mode = contains(region, pos) ? "enclosing" : "on-line";
     return { region, relation: "inside", mode };
   }
-  // Not at any region: find the nearest to offer as a secondary. Prefer
-  // the closest preceding on the same line, else the closest above.
+  // Not at any region: offer the nearest as a secondary. A region ending
+  // earlier on THIS line wins outright; otherwise take the closest by line
+  // distance in EITHER direction (above OR below -- a cursor in the file
+  // header should still find the first obligation just below it), breaking
+  // a tie toward the one below since reading flows downward.
   const sameLine = regions.filter(
     (r) => r.end.line === pos.line && r.end.col <= pos.col
   );
@@ -71,11 +75,21 @@ function selectRegion(regions, pos) {
     sameLine.sort((a, b) => b.end.col - a.end.col || kindRank(b) - kindRank(a));
     return { region: sameLine[0], relation: "nearest", mode: "preceding" };
   }
-  const above = regions.filter((r) => r.end.line < pos.line);
-  if (above.length) {
-    above.sort((a, b) => b.end.line - a.end.line || b.end.col - a.end.col);
-    return { region: above[0], relation: "nearest", mode: "above" };
+  const nearestAbove = regions
+    .filter((r) => r.end.line < pos.line)
+    .sort((a, b) => b.end.line - a.end.line || b.end.col - a.end.col)[0];
+  const nearestBelow = regions
+    .filter((r) => r.start.line > pos.line)
+    .sort((a, b) => a.start.line - b.start.line || a.start.col - b.start.col)[0];
+  if (nearestAbove && nearestBelow) {
+    const distAbove = pos.line - nearestAbove.end.line;
+    const distBelow = nearestBelow.start.line - pos.line;
+    return distBelow <= distAbove
+      ? { region: nearestBelow, relation: "nearest", mode: "below" }
+      : { region: nearestAbove, relation: "nearest", mode: "above" };
   }
+  if (nearestBelow) return { region: nearestBelow, relation: "nearest", mode: "below" };
+  if (nearestAbove) return { region: nearestAbove, relation: "nearest", mode: "above" };
   return { region: null, relation: "none", mode: "none" };
 }
 

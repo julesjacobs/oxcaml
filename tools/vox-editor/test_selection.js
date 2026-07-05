@@ -64,21 +64,42 @@ check("anywhere on a VC's line counts as inside", () => {
   assert.strictEqual(r.region.kind, "vc");
 });
 
-check("no region on the line -> nearest above (not at cursor)", () => {
+check("off-region -> nearest by distance (closer below beats farther above)", () => {
+  // Line 3 is 2 lines below the VC (ends line 1) but only 1 above the
+  // block (starts line 4): the closer region, below, wins.
   const r = S.selectRegion(REGIONS, loc(3, 0));
   assert.strictEqual(r.relation, "nearest");
-  assert.strictEqual(r.mode, "above");
-  assert.strictEqual(r.region.kind, "vc");
+  assert.strictEqual(r.mode, "below");
+  assert.strictEqual(r.region.kind, "block");
 });
 
 check("nearest above prefers the closest", () => {
   const r = S.selectRegion(REGIONS, loc(8, 0));
   assert.strictEqual(r.relation, "nearest");
+  assert.strictEqual(r.mode, "above");
   assert.strictEqual(r.region.kind, "block");
 });
 
-check("none when cursor is above all regions", () => {
+check("above all regions -> nearest BELOW (the first obligation)", () => {
+  // The bug: a cursor in the file header (line 0), above every region,
+  // used to get a bare empty state. Now it finds the first VC just below.
   const r = S.selectRegion(REGIONS, loc(0, 0));
+  assert.strictEqual(r.relation, "nearest");
+  assert.strictEqual(r.mode, "below");
+  assert.strictEqual(r.region.kind, "vc");
+});
+
+check("equidistant above and below -> tie goes below", () => {
+  const a = { kind: "vc", start: loc(2, 0), end: loc(2, 5), goal: "a" };
+  const b = { kind: "vc", start: loc(6, 0), end: loc(6, 5), goal: "b" };
+  const r = S.selectRegion([a, b], loc(4, 0)); // 2 above, 2 below
+  assert.strictEqual(r.relation, "nearest");
+  assert.strictEqual(r.mode, "below");
+  assert.strictEqual(r.region, b);
+});
+
+check("none only when there are no regions at all", () => {
+  const r = S.selectRegion([], loc(3, 0));
   assert.strictEqual(r.relation, "none");
   assert.strictEqual(r.region, null);
   assert.strictEqual(S.routesToLean(r.region), false);

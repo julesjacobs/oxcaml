@@ -193,6 +193,24 @@ async function main() {
     );
     assert.ok(await page.$("#jump-btn"), "offers a nearest-region jump");
 
+    // The bug: a cursor in the file header (line 0, above every region)
+    // used to get a bare empty state. Now the nearest fallback searches
+    // downward too and offers the first obligation with a ↓ arrow.
+    await page.evaluate(() => window.__vox.cm.setCursor({ line: 0, ch: 0 }));
+    const headerJump = await waitFor(
+      async () => {
+        const b = await page.$("#jump-btn");
+        return b ? page.$eval("#jump-btn", (e) => e.textContent) : false;
+      },
+      5000,
+      "nearest jump above all regions"
+    );
+    assert.ok(
+      /↓/.test(headerJump),
+      "header cursor points DOWN to the nearest obligation: " + headerJump
+    );
+    console.log("ok - cursor above all regions finds the obligation below (↓)");
+
     // Examples dropdown: pick fib (a [%%vox.lean] block example) and
     // drive its static block theorem + a live Lean goal.
     await page.evaluate(() => {

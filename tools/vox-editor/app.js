@@ -141,11 +141,14 @@ function renderPane() {
     // Not at any region — do NOT present the nearest one as if it were
     // here. Empty state plus a muted, clickable secondary that jumps.
     modeEl.textContent = "no obligation at cursor";
+    // Arrow points the way to the nearest region (it may sit below the
+    // cursor, not just above).
+    const arrow = sel.mode === "below" ? "↓" : "↑";
     html =
       '<p class="placeholder">No obligation at the cursor.</p>' +
       '<div class="nearest"><button id="jump-btn" class="jump">nearest ' +
       esc(REGION_NOUN[r.kind] || r.kind) +
-      " ↑ line " +
+      " " + arrow + " line " +
       (r.start.line + 1) +
       "</button></div>";
   } else {
