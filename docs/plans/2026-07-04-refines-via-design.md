@@ -333,6 +333,14 @@ instantiate-per-use, Subst path remapping through functors and cmi):
   the algebraic-spec route (laws about an opaque type); via is the
   model-based route (a bona fide Lean carrier); via subsumes the
   oset pattern when a real model exists.
+- Reserved-namespace collision (hardened during the origin/vox rebase):
+  a ghost name is rendered VERBATIM, so one in the emitter's own
+  namespaces -- `Vox_` (datatypes/tuples/opaques) or `v_` (reflected
+  values) -- would silently ALIAS an emitted name (e.g. `lean "Vox_foo"`
+  captured by the datatype `foo`'s `Vox_foo`).  `validate_lean_sort_name`
+  now rejects those prefixes eagerly (fail closed), pinned by
+  `mechanics/lean_sort_reserved.ml`.  This is the S_lean counterpart of
+  the datatype `assert_uname_fresh` check.
 
 ## Suggested build order
 

@@ -341,6 +341,24 @@ let validate_lean_sort_name ~loc name =
     Location.raise_errorf
       ~loc
       "vox: %S is not a valid Lean type name for vox.sort lean"
+      name
+  (* The emitter's sanitizer owns the [Vox_] (datatypes/tuples/opaques)
+     and [v_] (reflected values) namespaces; a ghost name is rendered
+     VERBATIM, so one in those namespaces could silently ALIAS a
+     datatype's or value's emitted name (e.g. [lean "Vox_foo"] captured
+     by the datatype [foo]'s [Vox_foo]).  Reject it -- fail closed --
+     rather than let the collision pass unnoticed. *)
+  else if String.length name >= 4 && String.equal (String.sub name 0 4) "Vox_"
+  then
+    Location.raise_errorf
+      ~loc
+      "vox: %S may not name a ghost sort -- the Vox_ prefix is reserved        for the solver's emitted datatype names (it would collide)"
+      name
+  else if String.length name >= 2 && String.equal (String.sub name 0 2) "v_"
+  then
+    Location.raise_errorf
+      ~loc
+      "vox: %S may not name a ghost sort -- the v_ prefix is reserved        for the solver's emitted value names (it would collide)"
       name;
   name
 ;;
