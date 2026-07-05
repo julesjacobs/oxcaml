@@ -1239,7 +1239,8 @@ let transl_declaration env sdecl (id, uid) =
           (* The invariant is closed, so only its underlying sort
              instantiates. *)
           | Vs_fact (s, pred) -> Vs_fact (subst_sort args s, pred)
-          | (Vs_int | Vs_bool | Vs_opaque | Vs_lean _) as s -> s
+          | Vs_lean (n, largs) -> Vs_lean (n, List.map (subst_sort args) largs)
+          | (Vs_int | Vs_bool | Vs_opaque) as s -> s
         in
         (* Elaborate the core type written in [refines (...)] into a
            refinement sort.  Translate it (no [expand_head], to avoid
@@ -1390,7 +1391,8 @@ let transl_declaration env sdecl (id, uid) =
                                       ] )
                               ; _ }
                             , _ )
-                      ; _ } ] -> Some (Vr_sort (Vs_lean name))
+                      ; _ } ] ->
+                  Some (Vr_sort (Vs_lean (name, List.mapi (fun i _ -> Vs_param i) params)))
                 | _ -> None)
             sdecl.ptype_attributes
         in

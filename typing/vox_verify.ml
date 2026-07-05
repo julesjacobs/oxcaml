@@ -66,7 +66,7 @@ type dsort =
     (* [int iarray], modelled by the built-in theory: an opaque sort
        VoxIA with Vox_ia_len/Vox_ia_get (Refinement.ia_len/ia_get)
        and the length-nonnegativity axiom, emitted when used *)
-  | S_lean of string
+  | S_lean of string * dsort list
     (* a GHOST SORT: a block-defined Lean type, named VERBATIM by the
        string ([type iset [@@vox.sort lean "ISet"]] renders as [ISet]).
        Opaque to vox -- like [S_other] but carrying a caller-chosen Lean
@@ -383,7 +383,7 @@ let vox_sort_of_attribute (a : Parsetree.attribute) =
                  ; _
                  } )
              ] ) ->
-         Some (Sa_sort (S_lean (validate_lean_sort_name ~loc:a.attr_loc name)))
+         Some (Sa_sort (S_lean (validate_lean_sort_name ~loc:a.attr_loc name, [])))
        | Pexp_ident { txt = Longident.Lident s; _ } ->
          Location.raise_errorf
            ~loc:a.attr_loc
@@ -500,6 +500,13 @@ and vox_sort_attribute env p arg_sorts =
        (* Decl rebuilds along some typedecl paths drop the kind field;
           the attribute on the declaration is authoritative there. *)
        (match List.find_map vox_sort_of_attribute decl.type_attributes with
+        | Some (Sa_sort (S_lean (name, []))) when arg_sorts <> [] ->
+          (* The attribute carries no arity, so [vox_sort_of_attribute]
+             yields the bare ghost name; a parameterized ghost declared
+             this way applies to the use's argument sorts (which mirror
+             its parameters positionally), exactly as the [Vr_sort] path
+             does through [dsort_of_vox_sort]. *)
+          Some (S_lean (name, arg_sorts))
         | Some (Sa_sort s) -> Some s
         | Some Sa_opaque ->
           (* arity-0 only: one uninterpreted sort cannot distinguish
@@ -525,7 +532,7 @@ and dsort_of_vox_sort env arg_sorts (vs : Types.vox_sort) =
   | Vs_data (p, ss) ->
     datatype_sort env p (List.map (dsort_of_vox_sort env arg_sorts) ss)
   | Vs_opaque -> S_other
-  | Vs_lean name -> S_lean name
+  | Vs_lean (name, args) -> S_lean (name, List.map (dsort_of_vox_sort env arg_sorts) args)
   (* The invariant is a FACT, not part of the modeling: values are
      modeled at the underlying sort (registered as usual). *)
   | Vs_fact (s, _) -> dsort_of_vox_sort env arg_sorts s
@@ -671,14 +678,21 @@ and dsort_of_type ?(visited = []) ?(params = []) env ty =
          else datatype_sort env p arg_sorts)
     | Trefine (skel, maps, _) ->
       (* image-binder: a via type DENOTES at the composite image (the
-         last map's target sort), so a binder of it is that image. *)
+         last map's target sort), so a binder of it is that image.  The
+         image sort is read from each map's TARGET TYPE ([vm_target]),
+         not the stored [vm_sort]: [Subst] instantiates [vm_target] at a
+         use ([int t]'s manifest carries [int iset]), so a PARAMETERIZED
+         via renders its image at the right arguments ([(ISet Int)]),
+         whereas [vm_sort] is generic ([Vs_param]) with no argument sorts
+         in scope at this node. *)
       let skel_sort = dsort_of_type ~visited ~params env skel in
       List.iter
-        (fun m -> ignore (dsort_of_vox_sort env [] m.Types.vm_sort : dsort))
+        (fun m ->
+          ignore (dsort_of_type ~visited ~params env m.Types.vm_target : dsort))
         maps;
       (match List.rev maps with
        | [] -> skel_sort
-       | last :: _ -> dsort_of_vox_sort env [] last.Types.vm_sort)
+       | last :: _ -> dsort_of_type ~visited ~params env last.Types.vm_target)
     | Ttuple comps
       when List.length comps >= 2
            && List.for_all (fun (lbl, _) -> Option.is_none lbl) comps ->
@@ -745,9 +759,11 @@ let register_type_specs env ty =
       | Trefine (skel, maps, p) ->
         ignore (dsort_of_type env skel : dsort);
         (* register each via layer's target datatype, so its declaration
-           and the map functions that mention it reach the solver *)
+           and the map functions that mention it reach the solver; read
+           from [vm_target] (the instantiated type), so a parameterized
+           target registers at the right argument datatypes *)
         List.iter
-          (fun m -> ignore (dsort_of_vox_sort env [] m.Types.vm_sort : dsort))
+          (fun m -> ignore (dsort_of_type env m.Types.vm_target : dsort))
           maps;
         register_pred_paths env p;
         go skel visited
@@ -1358,7 +1374,10 @@ let pred_in_scope ctx p = List.for_all (in_scope ctx) (Refinement.free_vars p)
 let rec dsort_equal a b =
   match a, b with
   | S_int, S_int | S_bool, S_bool | S_iarray, S_iarray -> true
-  | S_lean n1, S_lean n2 -> String.equal n1 n2
+  | S_lean (n1, xs), S_lean (n2, ys) ->
+    String.equal n1 n2
+    && List.compare_lengths xs ys = 0
+    && List.for_all2 dsort_equal xs ys
   | S_param i, S_param j -> Int.equal i j
   | S_data (p, xs), S_data (q, ys) ->
     Path.same p q
@@ -3157,7 +3176,10 @@ let tuple_uname = Vox_module.tuple_uname
    datatype? *)
 let rec sort_needs_voxu = function
   | S_other -> true
-  | S_int | S_bool | S_iarray | S_lean _ -> false
+  | S_int | S_bool | S_iarray -> false
+  (* a ghost sort renders its argument sorts, so a VoxU inside one
+     ([(ISet VoxU)]) still needs VoxU emitted *)
+  | S_lean (_, args) -> List.exists sort_needs_voxu args
   (* a parameter is a bound [Type] binder in the declaration it appears
      in, never VoxU *)
   | S_param _ -> false
@@ -3170,7 +3192,8 @@ let rec sort_needs_voxu = function
    operations), which is emitted only when something uses it. *)
 let rec sort_needs_iarray = function
   | S_iarray -> true
-  | S_int | S_bool | S_other | S_param _ | S_lean _ -> false
+  | S_int | S_bool | S_other | S_param _ -> false
+  | S_lean (_, args) -> List.exists sort_needs_iarray args
   | S_tuple comps | S_poly (_, comps) -> List.exists sort_needs_iarray comps
   | S_data (_, args) -> List.exists sort_needs_iarray args
 ;;
@@ -3489,7 +3512,9 @@ let rec lean_sort = function
   | S_bool -> "Prop"
   | S_other -> "VoxU"
   | S_iarray -> "VoxIA"
-  | S_lean name -> name
+  | S_lean (name, []) -> name
+  | S_lean (name, args) ->
+    "(" ^ name ^ " " ^ String.concat " " (List.map lean_sort args) ^ ")"
   | S_param i -> lean_param_name i
   | S_tuple comps ->
     "(" ^ tuple_uname (List.length comps) ^ " "

@@ -273,13 +273,16 @@ and vox_sort =
   | Vs_data of Path.t * vox_sort list
   | Vs_param of int
   | Vs_opaque
-  | Vs_lean of string
+  | Vs_lean of string * vox_sort list
     (* vox: a GHOST SORT -- the value is modelled at a block-defined
        Lean type named verbatim by the string ([type iset [@@vox.sort
-       lean "ISet"]]).  Opaque to vox (Lean is the grammar police for
-       every use); TRUSTED like the [Vs_int]/[Vs_bool] ghosts.  It is
-       .cmi-stable (a bare string, no paths).  Monomorphic for now --
-       parameterized ghost sorts (argument sorts) are a later stage. *)
+       lean "ISet"]]), applied to argument sorts ([type 'a iset ...]
+       instantiates positionally, like [Vs_data]: [int iset] carries
+       [[Vs_int]], rendered [(ISet Int)]).  Opaque to vox (Lean is the
+       grammar police for every use); TRUSTED like the
+       [Vs_int]/[Vs_bool] ghosts.  The NAME is .cmi-stable (a bare
+       string, no paths); the argument sorts remap under [Subst] like
+       [Vs_data]'s. *)
   | Vs_fact of vox_sort * Refinement.pred
     (* vox: a modeling that carries a declared INVARIANT.  [type nat :
        value refines (int{ _ >= 0 })] models at the underlying sort
@@ -665,7 +668,10 @@ and type_transparence =
 let rec vox_sort_equal (s1 : vox_sort) (s2 : vox_sort) =
   match s1, s2 with
   | Vs_int, Vs_int | Vs_bool, Vs_bool | Vs_opaque, Vs_opaque -> true
-  | Vs_lean n1, Vs_lean n2 -> String.equal n1 n2
+  | Vs_lean (n1, a1), Vs_lean (n2, a2) ->
+    String.equal n1 n2
+    && List.length a1 = List.length a2
+    && List.for_all2 vox_sort_equal a1 a2
   | Vs_param i, Vs_param j -> Int.equal i j
   | Vs_tuple ss1, Vs_tuple ss2 ->
     List.length ss1 = List.length ss2 && List.for_all2 vox_sort_equal ss1 ss2

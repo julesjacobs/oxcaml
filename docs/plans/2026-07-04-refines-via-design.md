@@ -291,6 +291,94 @@ instantiate-per-use, Subst path remapping through functors and cmi):
 - Out of scope, inherited: predefined parameterized types as datatype
   sorts; GADTs.
 
+STAGE 4 STATUS (landed): all three ingredients parameterized, end to
+end.  Provenance: the types-layer plumbing (`Vs_lean of string *
+vox_sort list` + the five matching update sites -- `vox_sort_equal`,
+`subst_vox_sort`, typedecl/includecore `subst_sort` and the `of_attr`
+generic `Vs_param` binding, `dsort_of_vox_sort`, `dsort_equal`,
+`lean_sort`/`show_vox_sort` rendering) was begun by the stage-3 agent
+and, on review, adopted here.
+
+Shipped and tested:
+- **Parameterized ghost sorts.**  `type 'a iset [@@vox.sort lean
+  "ISet"]` carries argument sorts, bound positionally exactly like
+  `Vs_data` (`of_attr` declares the sort generically as `Vs_lean (name,
+  [Vs_param 0; ...])`; a use `int iset` instantiates through the same
+  `subst_sort`/`arg_sorts` path the `refines` heads use).  `int iset`
+  renders `(ISet Int)`, `int iset iset` renders `(ISet (ISet Int))`,
+  an opaque argument renders `(ISet VoxU)`.  DECISION (spec was silent
+  on nested parenthesization): each application is wrapped in parens
+  with space-separated args, mirroring `S_data`/`S_poly`, so nesting is
+  unambiguous.  cmi agreement: the `[@@vox.sort lean "Name"]` attribute
+  still compares by NAME (`check_sort_consistency`); the argument arity
+  is enforced by ordinary OCaml type inclusion and the kind's `refines`
+  (whose `Vs_param`s match positionally), so a name or arity mismatch is
+  rejected.  See mechanics/lean_param_ghost.ml.
+- **Parameterized via.**  `type 'a t = 'a tree{ bst _ } via (elems :
+  'a iset)` verifies; the map target `vm_target` mentions the type
+  parameter, `Subst` instantiates it at a use (`int t`'s manifest
+  carries `int iset`).  KEY DECISION (spec framed this as storing
+  `Vs_param` in `vm_sort`): the stored `vm_sort` cannot carry the use's
+  instantiation -- `dsort_of_type`'s via node has NO argument sorts in
+  scope (it passed `[]`, degrading any `Vs_param` to `VoxU`).  So the
+  SOLVER path now reads the image from the map's TARGET TYPE
+  (`vm_target`, which `Subst` instantiates correctly) via `dsort_of_type`
+  -- `int t` renders its image at `(ISet Int)` -- rather than the stored
+  `vm_sort` (`vox_verify` `dsort_of_type` + `register_type_specs`).  The
+  stored `vm_sort` stays as the monomorphic `vox_target_sort` computes
+  it (the target head's OWN parameter indices), used only for rigid
+  unification (consistent across instances, which is all unification
+  needs).  The one precise-index consumer -- the includecore HONESTY
+  rule -- was made parameter-aware there (`sort_of_manifest` gains a
+  `param_index` over `decl1.type_params`, a `Tvar` case, and computes
+  the via image from `vm_target`), so a non-first-parameter target
+  (`type ('a,'b) t = 'b tree via ('b iset)`) reconciles against `refines
+  ('b iset)` instead of spuriously reporting `ISet ('a)` vs `ISet ('b)`.
+- **Instantiated-image binders, end to end.**  lib/pset + lib/pset.mli
+  generalize lib/via_set to `'a`: the sealed abstract `type 'a t : value
+  refines ('a iset)` PROVES `add` HONESTLY (zero `assume_unchecked_`) at
+  the GENERIC element sort -- the equation `elems (Node ..) = ins x s`
+  needs no decidable equality, so one proof serves every instantiation.
+  A client (mechanics/lean_pset_seal.ml) binds `int Pset.t` at `(ISet
+  Int)` and proves `mem x (add x s)` through the abstraction with no view
+  of the tree.
+- **Typeclass fail-closed.**  A model constraining its parameter
+  (`tmem {a} [DecidableEq a]`) instantiated at an opaque element
+  (`opaque_elt iset` = `(ISet VoxU)`) fails at the solver with
+  `synthInstanceFailed` (no `DecidableEq VoxU`) -- the RIGHT layer.  This
+  relies on the emission fix: `sort_needs_voxu`/`sort_needs_iarray` now
+  recurse into a ghost sort's argument sorts, so `VoxU` is DECLARED and
+  the failure is typeclass synthesis, not an "unknown VoxU" identifier
+  error a layer too early.  Pinned in mechanics/lean_param_ghost.ml.
+- **Mutable via-typed record field** (the inherited untested corner).
+  UNREACHABLE by construction: vox bars ANY mutable field from
+  refinement predicates (mutable state is framed, never named), so a
+  mutable via field has no version fact to speak at any sort.  The
+  restriction is GENERAL, not via-specific (a mutable `int` field fails
+  identically).  Pinned with the error case in mechanics/via_mutfield.ml;
+  the reachable case (an IMMUTABLE via field) is nameable and speaks at
+  the IMAGE sort, consistent with image-binder.
+
+NOT delivered / honest limits:
+- The value-level polymorphic type variable of a POLYMORPHIC value
+  (`(x : 'a) -> ...`) collapses to `VoxU`, not a bound `Type` (this is
+  pre-existing vox behavior, shared with `type 'a proph : refines ('a)`
+  in lib/pvghost): sound (`VoxU` is one model; a generic VC proved at
+  `VoxU` instantiates soundly), but it means the within-module generic
+  proof reasons at `VoxU`, and parameterization "shines" at a CONCRETE
+  instantiation (`int t` -> `(ISet Int)`) reached through a `Tconstr`
+  head, not at a bare value type variable.
+- `vox_target_sort` (typetexp) was NOT made parameter-aware; the stored
+  `vm_sort` therefore carries the target head's own parameter indices.
+  This is invisible to the solver (which reads `vm_target`) and to
+  honesty (fixed at includecore), and correct for the common single-
+  parameter case; a future consumer that reads `vm_sort` for a precise
+  index would need the typetexp fix.
+- `member` (decidable membership) is deliberately absent from the
+  parameterized pset .mli: it needs `DecidableEq a`, which the generic
+  proof lacks -- the library-level comparator caveat above.  It is
+  demonstrated instead as the typeclass fail-closed case.
+
 ## Sharp cases (settled 2026-07-04, after seal/oset landed)
 
 - `refine_`/unpack across maps: unpack strips EVERYTHING — maps and

@@ -805,7 +805,11 @@ let rec show_vox_sort (vs : Types.vox_sort) =
     ^ String.concat " " (List.map show_vox_sort ss)
     ^ ")"
   | Vs_opaque -> "<opaque>"
-  | Vs_lean name -> "lean \"" ^ name ^ "\""
+  | Vs_lean (name, []) -> "lean \"" ^ name ^ "\""
+  | Vs_lean (name, args) ->
+    "lean \"" ^ name ^ "\" ("
+    ^ String.concat " " (List.map show_vox_sort args)
+    ^ ")"
   | Vs_fact (s, pred) ->
     show_vox_sort s ^ "{ " ^ Refinement.to_string pred ^ " }"
 
@@ -1670,7 +1674,11 @@ let type_declarations_consistency env decl1 decl2 =
                                   ] )
                           ; _ }
                         , _ )
-                  ; _ } ] -> Some (Types.Vr_sort (Types.Vs_lean name))
+                  ; _ } ] ->
+              Some
+                (Types.Vr_sort
+                   (Types.Vs_lean
+                      (name, List.mapi (fun i _ -> Types.Vs_param i) decl.type_params)))
             | _ -> None)
         decl.type_attributes
     in
@@ -1680,7 +1688,10 @@ let type_declarations_consistency env decl1 decl2 =
     let rec vox_sort_equal (s1 : Types.vox_sort) (s2 : Types.vox_sort) =
       match s1, s2 with
       | Vs_int, Vs_int | Vs_bool, Vs_bool | Vs_opaque, Vs_opaque -> true
-      | Vs_lean n1, Vs_lean n2 -> String.equal n1 n2
+      | Vs_lean (n1, a1), Vs_lean (n2, a2) ->
+        String.equal n1 n2
+        && List.length a1 = List.length a2
+        && List.for_all2 vox_sort_equal a1 a2
       | Vs_param i, Vs_param j -> Int.equal i j
       | Vs_tuple ss1, Vs_tuple ss2 ->
         List.length ss1 = List.length ss2
@@ -1715,10 +1726,24 @@ let type_declarations_consistency env decl1 decl2 =
       | Vs_tuple ss -> Vs_tuple (List.map (subst_sort args) ss)
       | Vs_data (p, ss) -> Vs_data (p, List.map (subst_sort args) ss)
       | Vs_fact (s, pred) -> Vs_fact (subst_sort args s, pred)
-      | (Vs_int | Vs_bool | Vs_opaque | Vs_lean _) as s -> s
+      | Vs_lean (n, largs) -> Vs_lean (n, List.map (subst_sort args) largs)
+      | (Vs_int | Vs_bool | Vs_opaque) as s -> s
+    in
+    (* [decl1]'s own type parameters, positionally: a manifest that
+       mentions one models at that [Vs_param], so a PARAMETERIZED
+       manifest's structural sort matches the interface's declared
+       [refines] (whose [Vs_param]s are these same positions). *)
+    let param_index ty =
+      let id = get_id ty in
+      let rec find i = function
+        | [] -> None
+        | q :: rest -> if Int.equal (get_id q) id then Some i else find (i + 1) rest
+      in
+      find 0 decl1.type_params
     in
     let rec sort_of_manifest ty : Types.vox_sort option =
       match get_desc ty with
+      | Tvar _ -> Option.map (fun i -> Types.Vs_param i) (param_index ty)
       | Tconstr (p, [], _) when Path.same p Predef.path_int -> Some Vs_int
       | Tconstr (p, [], _) when Path.same p Predef.path_bool -> Some Vs_bool
       (* A refined manifest satisfies a [refines (int{ ... })] interface
@@ -1728,8 +1753,13 @@ let type_declarations_consistency env decl1 decl2 =
          | Some s -> Some (Types.Vs_fact (s, pred))
          | None -> None)
       | Trefine (_, maps, _) ->
-        (* a via manifest denotes at its last map's target sort *)
-        Some (List.nth maps (List.length maps - 1)).Types.vm_sort
+        (* a via manifest denotes at its last map's target sort.  Read it
+           from the map's TARGET TYPE, which mentions [decl1]'s own type
+           parameters, so it matches the interface's [refines] positionally;
+           the stored [vm_sort] carries the target head's OWN parameter
+           indices (correct only when the target's arguments are the
+           declaration's parameters in order). *)
+        sort_of_manifest (List.nth maps (List.length maps - 1)).Types.vm_target
       | Tconstr (p, args, _) ->
         (match Env.find_type p env with
          | exception Not_found -> None

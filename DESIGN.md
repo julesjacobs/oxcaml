@@ -461,10 +461,20 @@
   underlying representation.  The name is opaque to vox (Lean is the
   grammar police for every use) and rendered verbatim into the solver,
   so a malformed name -- empty, or not a dotted Lean identifier -- is an
-  eager error too, never a silent VoxU degradation.  Monomorphic for
-  now (no sort arguments); parameterized ghost sorts, `via` abstraction
-  functions, and the direct `refines (lean "...")` kind spelling are
-  later stages (see docs/plans).  A kind may already name a ghost sort
+  eager error too, never a silent VoxU degradation.  A ghost name in the
+  emitter's reserved namespaces (`Vox_` for datatypes/tuples/opaques,
+  `v_` for reflected values) is rejected eagerly for the same reason: it
+  would otherwise silently ALIAS an emitted name.  Ghost sorts may be
+  PARAMETERIZED -- `type 'a iset [@@vox.sort lean "ISet"]` with
+  `def ISet (a : Type) := ...` in a block -- carrying argument sorts
+  bound positionally like a datatype: `int iset` models at `(ISet Int)`,
+  a nested `int iset iset` at `(ISet (ISet Int))` (each application
+  parenthesized), and an opaque argument at `VoxU`.  A model that
+  CONSTRAINS its parameter (e.g. `DecidableEq a` on a decidable
+  membership) fails CLOSED at the solver for an instantiation lacking the
+  instance -- never a silent pass.  (The direct `refines (lean "...")`
+  string spelling in a kind remains deferred; a ghost sort is named in a
+  kind BY PATH.)  A kind may already name a ghost sort
   BY PATH -- `type t : value refines (iset)` -- through the existing
   refines-kind elaboration, which is what a client binding an abstract
   type at a ghost sort will rely on.  See mechanics/lean_ghost_sort.ml
@@ -480,9 +490,39 @@
   interface may declare `refines` only if the implementation carries
   the same modeling -- by its own annotation or attribute, or
   structurally (`type t = int` satisfies `refines int` unannotated).
-  Sharp edges, v1: the component does not PRINT (a `refines` kind
-  displays as its base), and only the base sorts are declarable
-  (datatype sorts remain structural).  See mechanics/refines_kind.ml.
+  A `refines` kind may declare any SORT EXPRESSION, not only a base
+  sort: `int`/`bool`, a simple variant/record (a datatype sort), an
+  unlabeled tuple, a ghost sort (`lean "Name"`), a declared INVARIANT
+  (`refines (int{ _ >= 0 })`, whose closed predicate rides every binder
+  as a free fact), and a PARAMETERIZED head instantiated positionally at
+  its arguments' sorts.  Open sharp edge: the component still does not
+  fully PRINT (a `refines` kind can display as its base).  See
+  mechanics/refines_kind.ml.
+- `via` (abstraction functions): `type set = tree{ bst _ } via
+  (elems : iset)` declares that `set`'s LOGICAL denotation is `elems`
+  applied to the tree's -- a BST whose external model is a bona fide
+  `iset`, not a tree.  It generalizes the refinement rather than adding
+  a constructor (`Trefine` gains a MAPS list; `[]` is an ordinary
+  refinement).  A via binder denotes the IMAGE (its sort is the last
+  map's target), so clients and a sealed interface reason in the image's
+  vocabulary (`mem`/`ins`) with the representation, its invariant, and
+  `elems` itself invisible -- the interface declares only `type set :
+  value refines (iset)`.  The representation is reached ONLY through a
+  `refine_` unpack, which binds the base value with its invariant AND
+  the link `elems base = image`, so a construction (`Node ...`) and the
+  image-vocabulary contract never collide at two sorts.  Injection
+  (`t -> t via f`) is implicit and free; projection is explicit-only
+  (the unpack).  A SEALED unit proves its image-vocabulary specs
+  HONESTLY (no `assume_unchecked_`), the boundary normalization
+  flattening the interface's abstract `refines` against the
+  implementation's manifest.  Ghost-sort and OCaml-datatype targets both
+  work, and via is PARAMETERIZED (`type 'a t = 'a tree{ ... } via
+  (elems : 'a iset)`): the map target may mention type parameters, the
+  image renders at the instantiation (`int t` at `(ISet Int)`), and one
+  generic proof of an equation at the abstract element sort serves every
+  instantiation.  See lib/via_set + mechanics/lean_via_seal.ml (mono),
+  lib/pset + mechanics/lean_pset_seal.ml (parameterized), and the
+  via design in docs/plans.
 - Specced signatures: blocks in an `.mli` are EXPORTED through the
   `.cmi`, together with pre-rendered declarations of the datatypes the
   interface's refinements are about (a client may never mention those

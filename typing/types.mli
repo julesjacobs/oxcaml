@@ -430,7 +430,7 @@ and vox_sort =
   | Vs_data of Path.t * vox_sort list
   | Vs_param of int
   | Vs_opaque
-  | Vs_lean of string
+  | Vs_lean of string * vox_sort list
     (* vox: a GHOST SORT -- the value is modelled at a block-defined
        Lean type named verbatim by the string ([type iset [@@vox.sort
        lean "ISet"]]).  Opaque to vox (Lean is the grammar police for
