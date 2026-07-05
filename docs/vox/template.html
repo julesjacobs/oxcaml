@@ -150,7 +150,10 @@ Verification is opt-in per function.
   verify against the interface alone.  It can instead hide the model
   and export <a href="#seal">axioms as obligations</a> the
   implementation must prove &mdash; even the
-  <a href="#oset">representation type</a> can stay abstract.</li>
+  <a href="#oset">representation type</a> can stay abstract.  And
+  <a href="#via">the model can be a function of the representation</a>:
+  a BST whose values denote bona fide Lean sets, specced and proved in
+  set vocabulary.</li>
 <li><a href="#automation">Automation</a>: <code>grind</code> handles the
   common case; missed goals are proved with tactics next to the code and
   registered with <code>@[grind]</code>; everything is
@@ -283,6 +286,28 @@ representation: the type gets its own sort in the logic, laws can
 quantify over it, and the implementation proves them about the
 concrete type, which takes over the same solver-side name.</p>
 
+<p id="via">The model can also be a <em>function</em> of the
+representation.  A phantom type names a Lean type from the block
+(<code>type iset [@@vox.sort lean "ISet"]</code>), and the
+implementation maps its representation through an abstraction
+function &mdash;
+<code>type t = tree{ bst _ } [@vox.via (elems : iset)]</code> &mdash;
+so a value of <code>t</code> <em>denotes</em> the set of its
+elements.  The interface exports
+<code>type t : value refines (iset)</code> and specs in set
+vocabulary
+(<code>val member : (x : int) -&gt; (s : t) -&gt; bool{ _ = mem x s }</code>);
+the tree, its ordering invariant, and <code>elems</code> itself never
+appear in it.  Inside the module, <code>refine_</code> unpacks a set
+back to its tree, carrying the invariant and the link
+<code>elems t0 = s</code>, and the implementation <em>proves</em> the
+same interface text a client reads, with no trust keyword anywhere.
+Swapping the tree for another structure is a new <code>elems</code>
+and new bridging lemmas; clients re-verify nothing.  The abstraction
+is parametric: <code>type 'a t : value refines ('a iset)</code>
+proves <code>add</code> once at the generic element sort, and every
+instantiation inherits the proof.</p>
+
 <p>The examples, each in the branch&rsquo;s test suite:</p>
 <ul>
 <li><b>A BST behind a transparent model</b> &mdash;
@@ -333,6 +358,25 @@ concrete type, which takes over the same solver-side name.</p>
   see only four axioms;
   <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/mechanics/lean_oset_opaque.ml">a fact the axioms
   do not imply</a> is rejected.</li>
+<li><b>A set that <em>is</em> a set</b> &mdash;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/via_set.mli">via_set.mli</a> declares
+  <code>type t : value refines (iset)</code> with specs in set
+  vocabulary and no mention of the representation;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/via_set.ml">via_set.ml</a> is a BST mapped
+  through the abstraction function <code>elems</code> and proves
+  <code>add</code> and <code>member</code> honestly against that
+  interface;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/mechanics/lean_via_seal.ml">a client</a> proves
+  membership through the abstraction with no view of the tree;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/mechanics/lean_via_boundary_fail.ml">an interface
+  overclaim</a> is rejected at the implementation&rsquo;s obligation, and
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/mechanics/lean_via_honesty.ml">a manifest at the
+  wrong model</a> at signature inclusion.
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/pset.mli">The parameterized version</a>
+  (<code>'a t : value refines ('a iset)</code>) proves once,
+  generically, and
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/mechanics/lean_pset_seal.ml">a client
+  instantiates at <code>int</code></a>.</li>
 </ul>
 
 <h2 id="automation">Automation</h2>
