@@ -30,7 +30,6 @@ Line 10, characters 19-20: vox VC (RUNTIME CHECKED):
   goal: 0 = 3
   hypotheses:
   s = Nil
-  not (s is Cons)
   s = (Cons (3, Nil))
 val get_i : int mylist{ _ = (Cons (3, Nil)) } -> int{ _ = 3 } = <fun>
 |}]
@@ -75,6 +74,5 @@ Line 4, characters 19-20: vox VC:
   goal: 0 = 0
   hypotheses:
   s = Nil
-  not (s is Cons)
 val poly : 'a mylist -> int{ _ = 0 } = <fun>
 |}]

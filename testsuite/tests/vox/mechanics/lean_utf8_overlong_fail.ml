@@ -120,12 +120,10 @@ Hypotheses:
   c = (((b0 - 192) * 64) + (b1 - 128))
   (192 <= b0) && ((128 <= b1) && (b1 < 192))
   rest = (Bcons (b1, rest1))
-  not (rest is Bnil)
 Possible counterexample:
   b0 = 192
   c = 0
   b1 = 128
-  w = 128
 (lean: error: `grind` failed)
 |}]
 
@@ -158,16 +156,12 @@ Hypotheses:
   c = ((((b0 - 224) * 4096) + ((b1 - 128) * 64)) + (b2 - 128))
   (128 <= b1) && ((b1 < 192) && ((128 <= b2) && (b2 < 192)))
   rest1 = (Bcons (b2, rest2))
-  not (rest1 is Bnil)
   rest = (Bcons (b1, rest1))
-  not (rest is Bnil)
 Possible counterexample:
   b0 = 237
   c = 55296
   b2 = 128
   b1 = 160
-  w = 160
-  w_2 = 128
 (lean: error: `grind` failed)
 |}]
 

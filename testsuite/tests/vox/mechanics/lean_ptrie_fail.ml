@@ -166,8 +166,6 @@ Hypotheses:
   not (m <> p)
   m = (mask i b)
   s = (Branch (p, b, t0, t1))
-  not (s is Empty)
-  not (s is Leaf)
   trie s
   ok = (Branch (0, 1, Leaf 0, Leaf 1))
   trie ok
@@ -177,8 +175,6 @@ Possible counterexample:
   p = -1
   m = -1
   mask i b = -1
-  w = -1
-  w_1 = 0
   mask p b = -1
   mask 0 1 = 0
   mask 1 1 = 0
@@ -238,8 +234,6 @@ Hypotheses:
   z
   z = (zbit i b)
   s = (Branch (p, b, t0, t1))
-  not (s is Empty)
-  not (s is Leaf)
   trie s
   ok = (Branch (0, 1, Leaf 0, Leaf 1))
   trie ok
@@ -247,8 +241,6 @@ Possible counterexample:
   i = -1
   b = 0
   p = 0
-  w = 0
-  w_1 = 0
   mask i b = -1
   mask p b = 0
   mask 0 1 = 0

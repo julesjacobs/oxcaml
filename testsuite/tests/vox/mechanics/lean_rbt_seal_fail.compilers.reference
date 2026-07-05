@@ -9,9 +9,7 @@ Hypotheses:
   *vox-wild* = Red
   l = (Node (*vox-wild*#2, ll, xl, lr))
   *vox-wild*#2 = Red
-  not (l is Leaf)
   c = Black
-  not (c is Red)
   empty = Leaf
   (rb empty) && (empty = Leaf)
 (lean: error: `grind` failed)

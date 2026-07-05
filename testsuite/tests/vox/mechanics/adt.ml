@@ -50,7 +50,6 @@ Line 4, characters 17-18: vox VC (RUNTIME CHECKED):
   goal: 0 = 3
   hypotheses:
   s = L
-  not (s is K)
   s = (K 3)
   k3 = (K 3)
 val get : t{ _ = (K 3) } -> int{ _ = 3 } = <fun>
@@ -78,7 +77,6 @@ Line 8, characters 19-20: vox VC (RUNTIME CHECKED):
   goal: 0 = 3
   hypotheses:
   s = Nil
-  not (s is Cons)
   s = (Cons (3, Nil))
   k3 = (K 3)
 val head : ilist{ _ = (Cons (3, Nil)) } -> int{ _ = 3 } = <fun>
@@ -106,7 +104,6 @@ Line 8, characters 17-18: vox VC (RUNTIME CHECKED):
   goal: 1 > 0
   hypotheses:
   t = Z
-  not (t is W)
   k3 = (K 3)
 val getw : w -> int{ _ > 0 } = <fun>
 |}]
@@ -178,7 +175,6 @@ Line 9, characters 19-20: vox VC:
   goal: 1 >= 0
   hypotheses:
   s = Bee
-  not (s is Ay)
   k3 = (K 3)
 Line 11, characters 29-30: vox VC:
   goal: s = Cee

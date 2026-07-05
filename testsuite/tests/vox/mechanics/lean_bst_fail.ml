@@ -72,12 +72,10 @@ Hypotheses:
   x < v
   not (x = v)
   t = (Node (l, v, r))
-  not (t is Leaf)
   bst t
 Possible counterexample:
   x = -1
   v = 0
-  w_1 = 0
 (lean: error: `grind` failed)
 |}]
 
@@ -95,12 +93,10 @@ Error: vox: verification failed (lean).
        Goal: (x = v) = (mem x t)
 Hypotheses:
   t = (Node (*vox-wild*#2, v, *vox-wild*))
-  not (t is Leaf)
   bst t
 Possible counterexample:
   x = -1
   v = 0
-  w_1 = 0
 (lean: error: `grind` failed)
 |}]
 

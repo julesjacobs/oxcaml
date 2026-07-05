@@ -198,7 +198,6 @@ Line 10, characters 27-28: vox VC (ASSUMED):
   goal: 0 = 9
   hypotheses:
   m@1 = L
-  not (m@1 is K)
   m@1 = (K 9)
 val get : unit -> int{ _ = 9 } = <fun>
 |}]

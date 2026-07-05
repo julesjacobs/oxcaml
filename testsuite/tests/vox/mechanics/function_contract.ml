@@ -41,7 +41,6 @@ Line 3, characters 17-21: vox VC:
   goal: -1 >= 0
   hypotheses:
   param = L
-  not (param is K)
   not (param = L)
 val kk : t{ not (_ = L) } -> int{ _ >= 0 } = <fun>
 |}]

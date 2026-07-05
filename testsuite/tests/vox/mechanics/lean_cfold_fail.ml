@@ -43,7 +43,6 @@ Error: vox: verification failed (lean).
        Goal: ((denote (Lit 0)) = (denote (Lit 0))) && ((denote (Lit 0)) = e)
 Hypotheses:
   e0 = (Add (*vox-wild*#2, *vox-wild*))
-  not (e0 is Lit)
   (denote e0) = (denote e0)
   (denote e0) = e
   e = e
@@ -54,9 +53,6 @@ Possible counterexample:
   denote *vox-wild* = 1
   denote *vox-wild*#2 = 0
   denote (*vox-wild*#2.Add *vox-wild*) = 1
-  denote w = 0
-  denote w_1 = 1
-  denote (w.Add w_1) = 1
 (lean: error: `grind` failed)
 |}]
 
@@ -85,8 +81,6 @@ Hypotheses:
   y = 0
   b = (Lit y)
   e0 = (Mul (a, b))
-  not (e0 is Lit)
-  not (e0 is Add)
   (denote e0) = (denote e0)
   (denote e0) = e
   e = e
@@ -98,9 +92,6 @@ Possible counterexample:
   denote b = 0
   denote a = 0
   denote (a.Mul b) = 0
-  denote w = 0
-  denote w_1 = 0
   denote (Vox_expr.Lit y) = 0
-  denote (w.Mul w_1) = 0
 (lean: error: `grind` failed)
 |}]

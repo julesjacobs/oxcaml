@@ -159,7 +159,6 @@ Line 9, characters 23-24: vox VC (RUNTIME CHECKED):
   goal: 0 = 1
   hypotheses:
   s = Nothing
-  not (s is Pt)
   s = (Pt v)
   v.px = 1
   origin = (mk (0, 0))

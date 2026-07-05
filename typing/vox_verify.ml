@@ -2270,6 +2270,62 @@ let pattern_negation
   | _ -> None
 ;;
 
+(* The constructor head an arm's own positive match fact asserts, when
+   it asserts one: a (possibly aliased) constructor pattern over a
+   simple variant -- exactly the shape whose [match_facts] emits
+   [s = C ...] at the top level. *)
+let pattern_positive_head
+  : type k. Env.t -> k general_pattern -> string option
+  =
+  fun env pat ->
+  let head cstr =
+    let path = Data_types.cstr_res_type_path cstr in
+    match datatype_sort env path [] with
+    | S_int | S_bool | S_param _ | S_tuple _ | S_iarray | S_poly _
+    | S_lean _ | S_other -> None
+    | S_data (_, _) -> Some cstr.Data_types.cstr_name
+  in
+  let rec head_of : type k. k general_pattern -> string option =
+    fun p ->
+    match p.pat_desc with
+    | Tpat_value v -> head_of (v :> value general_pattern)
+    | Tpat_construct (_, cstr, _, _, _) -> head cstr
+    | Tpat_alias { pattern = sub; _ } -> head_of sub
+    | _ -> None
+  in
+  head_of pat
+;;
+
+(* The earlier-arm negations an arm actually needs, tagged with the
+   earlier arm's pattern span as provenance.  When the arm's own
+   pattern asserts [s = C ...], a negation [not (s is C')] with a
+   DIFFERENT constructor is subsumed by that equality (constructors
+   are distinct in the model) and dropped; a SAME-name negation is
+   kept -- it makes a duplicated arm's context inconsistent, which is
+   what proves the dead arm. *)
+let live_negations
+  : type k.
+    Env.t
+    -> k general_pattern
+    -> (Refinement.pred * Location.t) list
+    -> (Refinement.pred * Location.t option) list
+  =
+  fun env pat negs ->
+  let negs =
+    match pattern_positive_head env pat with
+    | None -> negs
+    | Some cname ->
+      List.filter
+        (fun (n, _) ->
+          match n with
+          | Refinement.Pnot (Refinement.Pis (_, c, _)) ->
+            String.equal c cname
+          | _ -> true)
+        negs
+  in
+  List.map (fun (n, l) -> n, Some l) negs
+;;
+
 (* Extend the context at a binding pattern: new stamps come into scope;
    refined binders contribute their facts (plus the scrutinee's
    refinement for unpack patterns). *)
@@ -2700,7 +2756,13 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
        walk_expr env gctx c.c_rhs
      | None ->
     let saved = save_versions () in
-    let do_case : type k. interrupted:bool -> Refinement.pred list -> k case -> unit =
+    let do_case
+      : type k.
+        interrupted:bool
+        -> (Refinement.pred * Location.t) list
+        -> k case
+        -> unit
+      =
       fun ~interrupted negs c ->
       let base =
         if interrupted
@@ -2731,7 +2793,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
             cfacts =
               prov (Some c.c_lhs.pat_loc)
                 (scrut_facts c.c_lhs @ match_facts env sid c.c_lhs)
-              @ prov None negs
+              @ live_negations env c.c_lhs negs
               @ ctx'.cfacts
           }
         | _ -> ctx'
@@ -2762,12 +2824,12 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
              match scrut_id, c.c_guard with
              | Some sid, None ->
                (match pattern_negation env sid c.c_lhs with
-                | Some n -> negs @ [ n ]
+                | Some n -> negs @ [ n, c.c_lhs.pat_loc ]
                 | None -> negs)
              | _ -> negs)
            []
            cases
-          : Refinement.pred list)
+          : (Refinement.pred * Location.t) list)
     in
     run_cases (fun p -> not (exceptionless p)) comp_cases;
     run_cases (fun _ -> true) val_cases;
@@ -3132,7 +3194,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
                   cfacts =
                     prov (Some c.c_lhs.pat_loc)
                       (match_facts env (Refinement.Pvar fc_param) c.c_lhs)
-                    @ prov None negs
+                    @ live_negations env c.c_lhs negs
                     @ ctx''.cfacts
                 }
               in
@@ -3144,13 +3206,15 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
               ignore (walk_expr env gctx c.c_rhs : ctx);
               match c.c_guard with
               | None ->
-                (match pattern_negation env (Refinement.Pvar fc_param) c.c_lhs with
-                 | Some n -> negs @ [ n ]
+                (match
+                   pattern_negation env (Refinement.Pvar fc_param) c.c_lhs
+                 with
+                 | Some n -> negs @ [ n, c.c_lhs.pat_loc ]
                  | None -> negs)
               | Some _ -> negs)
             []
             fc_cases
-           : Refinement.pred list));
+           : (Refinement.pred * Location.t) list));
     (* a function body runs at call time, not here: the continuation
        keeps the entry state (closures cannot capture mutable
        variables, so the body cannot write any variable we track) *)
