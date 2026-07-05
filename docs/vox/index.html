@@ -306,19 +306,15 @@ generate inputs and use the contract as the oracle:</p>
 let rev_involutive (l : ilist) : unit{ rev (rev l) = l } = assume_ ()</code></pre>
 
 <h2 id="sig">Specs on module signatures</h2>
-<p>A module&rsquo;s spec lives on its interface, in the vocabulary
-its clients should reason in: a full model of the data structure, a
-handful of laws about an opaque type, or simply &ldquo;values of this
-type are sets.&rdquo;  The compiler enforces the contract from both
-sides.  The implementation must <em>prove</em> what its interface
-claims &mdash; a module that cannot prove its laws does not compile
-&mdash; and clients verify against the interface alone: the
-representation, its invariants, and the proofs never enter a
-client&rsquo;s obligations, so replacing a BST with another structure
-re-verifies no client.  Specs travel in the <code>.cmi</code>
-(compiled once to a Lean module beside it, not re-checked per
-client), and editing a spec changes the checksum, which forces
-dependents to re-verify.</p>
+<p>Specs can go on an <code>.mli</code>.  The interface says what the
+module does &mdash; a model of its data structure, a few laws about
+an abstract type, or just &ldquo;values of this type are sets&rdquo;
+&mdash; and the compiler checks both directions: the implementation
+has to prove everything the interface claims (a module that
+can&rsquo;t prove its own interface doesn&rsquo;t compile), and
+clients verify against the interface without seeing the
+implementation.  So the representation can change, and no client
+proof breaks.</p>
 
 <p>The examples, each in the branch&rsquo;s test suite:</p>
 <ul>
