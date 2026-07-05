@@ -240,25 +240,28 @@ async function main() {
     console.log("ok - live Lean goal fetched");
     assert.ok(live.includes("⊢"), "live goal has a turnstile: " + live.slice(0, 160));
 
-    // Light mode: emulate each OS preference and assert the palette flips.
-    // (Headless Chrome defaults to light, so pin dark first for a real
-    // before/after.)
+    // Theme: dark is the default (no OS sniffing); the toolbar toggle
+    // flips to light, and the choice persists across a reload.
     const readBg = () =>
       page.evaluate(() =>
         getComputedStyle(document.documentElement).getPropertyValue("--bg").trim()
       );
-    await page.emulateMediaFeatures([
-      { name: "prefers-color-scheme", value: "dark" },
-    ]);
     const darkBg = await readBg();
-    await page.emulateMediaFeatures([
-      { name: "prefers-color-scheme", value: "light" },
-    ]);
+    assert.strictEqual(darkBg, "#10141a", "default theme is dark: " + darkBg);
+    await page.click("#theme-btn");
     const lightBg = await readBg();
-    console.log("ok - palette flips on light mode:", darkBg, "->", lightBg);
-    assert.notStrictEqual(lightBg, darkBg, "--bg should change under light mode");
-    assert.strictEqual(lightBg, "#ffffff", "light --bg should be white: " + lightBg);
-    assert.strictEqual(darkBg, "#10141a", "dark --bg should be the dark base: " + darkBg);
+    assert.strictEqual(lightBg, "#ffffff", "toggle switches to light: " + lightBg);
+    console.log("ok - theme toggle flips dark -> light:", darkBg, "->", lightBg);
+    // Persist across a reload (localStorage), no OS-preference influence.
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 20000 });
+    await page.waitForSelector(".CodeMirror", { timeout: 10000 });
+    const afterReload = await readBg();
+    assert.strictEqual(
+      afterReload,
+      "#ffffff",
+      "light choice persists across reload: " + afterReload
+    );
+    console.log("ok - light choice persists across reload");
 
     console.log("\nALL BROWSER TESTS PASSED");
   } finally {

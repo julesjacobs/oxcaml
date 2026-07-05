@@ -154,15 +154,17 @@ async function main() {
     );
     await new Promise((r) => setTimeout(r, 300));
 
-    await page.emulateMediaFeatures([
-      { name: "prefers-color-scheme", value: "dark" },
-    ]);
+    // Dark is the default (no attribute); capture it, then flip the
+    // [data-theme] attribute the toolbar toggle uses for the light shot.
+    await page.evaluate(() => {
+      delete document.documentElement.dataset.theme;
+    });
     await new Promise((r) => setTimeout(r, 150));
     await capture(page, "editor.png");
 
-    await page.emulateMediaFeatures([
-      { name: "prefers-color-scheme", value: "light" },
-    ]);
+    await page.evaluate(() => {
+      document.documentElement.dataset.theme = "light";
+    });
     await new Promise((r) => setTimeout(r, 150));
     await capture(page, "editor-light.png");
 

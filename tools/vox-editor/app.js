@@ -238,6 +238,41 @@ cm.addKeyMap({
   "Cmd-Enter": check,
 });
 
+// Theme: dark by default (no OS sniffing); the toolbar toggle flips
+// [data-theme="light"] on <html> and persists the choice. The <head>
+// applies the saved theme pre-paint; here we sync the button label and
+// wire the toggle.
+const THEME_KEY = "vox-editor-theme";
+const themeBtn = document.getElementById("theme-btn");
+
+function currentTheme() {
+  return document.documentElement.dataset.theme === "light" ? "light" : "dark";
+}
+
+function applyTheme(theme) {
+  if (theme === "light") document.documentElement.dataset.theme = "light";
+  else delete document.documentElement.dataset.theme; // dark = no attribute
+  themeBtn.textContent = theme === "light" ? "☾ Dark" : "☀ Light";
+}
+
+function initTheme() {
+  let saved = "dark";
+  try {
+    saved = localStorage.getItem(THEME_KEY) || "dark";
+  } catch (e) {}
+  applyTheme(saved);
+}
+
+themeBtn.addEventListener("click", () => {
+  const next = currentTheme() === "light" ? "dark" : "light";
+  try {
+    localStorage.setItem(THEME_KEY, next);
+  } catch (e) {}
+  applyTheme(next);
+});
+
+initTheme();
+
 // Examples dropdown: populated from /examples, each choice loads the
 // source and re-checks. A confirm() guards unsaved edits.
 const examplesEl = document.getElementById("examples");

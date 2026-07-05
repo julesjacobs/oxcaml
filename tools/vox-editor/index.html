@@ -4,6 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>vox editor</title>
+    <!-- Apply the saved theme before first paint (no flash). Dark is the
+         default; no OS sniffing. -->
+    <script>
+      try {
+        if (localStorage.getItem("vox-editor-theme") === "light")
+          document.documentElement.dataset.theme = "light";
+      } catch (e) {}
+    </script>
     <link rel="stylesheet" href="vendor/codemirror/codemirror.css" />
     <link rel="stylesheet" href="style.css" />
   </head>
@@ -16,6 +24,7 @@
       <button id="check-btn">Check ⌃⏎</button>
       <span id="status" class="status-idle">idle</span>
       <span id="spacer"></span>
+      <button id="theme-btn" title="Toggle light / dark theme">☀ Light</button>
       <span id="hint">proof pane follows the cursor</span>
     </header>
     <main>
