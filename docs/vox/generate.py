@@ -214,7 +214,7 @@ def main():
                                       r'^\(\* Sorting an ARRAY',
                                       include_stop=False).rstrip('\n'),
         '@QSORT_ARRAY@': slice_between(read('demo/lean_qsort.ml'),
-                                       r'^let sort_array', r"^    x'$"),
+                                       r'^let sort_array', r"^  x'$"),
     }
 
     nth = read('demo/lean_nth.ml')

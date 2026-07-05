@@ -6628,7 +6628,7 @@ let vox_hoist_value_binding (vb : Parsetree.value_binding) =
   | Ppat_var _, None,
     Pexp_function
       (params,
-       { mode_annotations = []; ret_mode_annotations = [];
+       { mode_annotations = []; ret_mode_annotations = ret_modes;
          ret_type_constraint = Some (Pconstraint ret) },
        Pfunction_body body)
     when (not vb.pvb_is_poly)
@@ -6643,36 +6643,47 @@ let vox_hoist_value_binding (vb : Parsetree.value_binding) =
               { ppat_desc =
                   Ppat_constraint
                     (({ ppat_desc = Ppat_var name; _ } as inner),
-                     Some ty, []);
+                     Some ty, pmodes);
                 _ }) ->
-           Option.map (fun r -> (p, name, inner, ty) :: r) (extract rest)
+           Option.map (fun r -> (p, name, inner, ty, pmodes) :: r)
+             (extract rest)
          | _ -> None)
     in
     (match extract params with
      | Some ((_ :: _) as infos)
        when List.exists vox_core_type_has_vox
-              (ret :: List.map (fun (_, _, _, ty) -> ty) infos) ->
-       let arrow =
-         List.fold_right
-           (fun (_, name, _, (ty : Parsetree.core_type)) acc ->
-             let dom =
-               { ptyp_desc =
-                   Ptyp_extension
-                     ({ txt = "vox.named." ^ name.txt; loc = ty.ptyp_loc },
-                      PTyp ty);
-                 ptyp_loc = ty.ptyp_loc;
-                 ptyp_loc_stack = [];
-                 ptyp_attributes = [] }
-             in
-             { ptyp_desc = Ptyp_arrow (Nolabel, dom, acc, [], []);
+              (ret :: List.map (fun (_, _, _, ty, _) -> ty) infos) ->
+       (* Parameter modes become the arrow's argument modes, and the
+          function's return-mode annotations become the INNERMOST
+          arrow's return modes -- [(m : t @ local unique)] and
+          [: r @ unique] hoist to [(m : t) @ local unique -> r @ unique],
+          exactly the arrow spelling. *)
+       let rec build = function
+         | [] -> assert false (* infos is non-empty *)
+         | ((_, name, _, (ty : Parsetree.core_type), pmodes) : _) :: rest ->
+           let dom =
+             { ptyp_desc =
+                 Ptyp_extension
+                   ({ txt = "vox.named." ^ name.txt; loc = ty.ptyp_loc },
+                    PTyp ty);
                ptyp_loc = ty.ptyp_loc;
                ptyp_loc_stack = [];
-               ptyp_attributes = [] })
-           infos ret
+               ptyp_attributes = [] }
+           in
+           let acc, rmodes =
+             match rest with
+             | [] -> ret, ret_modes
+             | _ :: _ -> build rest, []
+           in
+           { ptyp_desc = Ptyp_arrow (Nolabel, dom, acc, pmodes, rmodes);
+             ptyp_loc = ty.ptyp_loc;
+             ptyp_loc_stack = [];
+             ptyp_attributes = [] }
        in
+       let arrow = build infos in
        let params =
          List.map
-           (fun ((p : Parsetree.function_param), _, inner, _) ->
+           (fun ((p : Parsetree.function_param), _, inner, _, _) ->
              { p with pparam_desc = Pparam_val (Nolabel, None, inner) })
            infos
        in

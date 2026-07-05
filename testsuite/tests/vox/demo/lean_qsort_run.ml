@@ -895,20 +895,16 @@ open S
 (* Swap two in-bounds positions of a loan: four threaded ops; the
    composed [upd]/[elem] contents expression is re-proved at the
    annotation by congruence alone, and [fin] just threads. *)
-let swap :
-  (m : slice) @ local unique ->
-  (i : int{ 0 <= _ && _ < len (now m) }) ->
-  (j : int{ 0 <= _ && _ < len (now m) }) ->
-  slice{ now _ = upd (upd (now m) i (elem (now m) j)) j (elem (now m) i)
-         && fin _ = fin m }
-    @ local unique =
-  fun m i j ->
-    exclave_
-      (let (vi, m1) = sget m i in
-       let (vj, m2) = sget m1 j in
-       let m3 = sset m2 i vj in
-       let m4 = sset m3 j vi in
-       m4)
+let swap (m : slice @ local unique)
+    (i : int{ 0 <= _ && _ < len (now m) })
+    (j : int{ 0 <= _ && _ < len (now m) })
+  : slice{ now _ = upd (upd (now m) i (elem (now m) j)) j (elem (now m) i)
+           && fin _ = fin m } @ local unique =
+  exclave_
+    (let (vi, m1) = sget m i in
+     let (vj, m2) = sget m1 j in
+     let m3 = sset m2 i vj in
+     sset m3 j vi)
 [%%expect{|
 val swap :
   (m : S.slice) @ local unique ->
@@ -926,40 +922,33 @@ val swap :
    invariant from the path facts and the swap lemmas
    ([swap_le]/[swap_mid]); the final swap parks the pivot at [i], and
    [swap_final_ge] turns the window into the >=-suffix. *)
-let rec part :
-  (p : int) -> (i : int{ 0 <= _ }) -> (j : int{ i <= _ }) ->
-  (s : slice{ j <= len (now _) - 1
-              && elem (now _) (len (now _) - 1) = p
-              && all_le (take i (now _)) p
-              && all_ge (seg i j (now _)) p }) @ local unique ->
-  (n : int{ _ = len (now s) }) ->
-  (int * slice){ 0 <= fst _ && fst _ < n
-                 && elem (now (snd _)) (fst _) = p
-                 && all_le (take (fst _) (now (snd _))) p
-                 && all_ge (drop (fst _ + 1) (now (snd _))) p
-                 && perm (now s) (now (snd _))
-                 && fin (snd _) = fin s }
-    @ local unique =
-  fun p i j s n ->
-    exclave_
-      (if j < n - 1
+let rec part (p : int) (i : int{ 0 <= _ }) (j : int{ i <= _ })
+    (s : slice{ j <= len (now _) - 1
+                && elem (now _) (len (now _) - 1) = p
+                && all_le (take i (now _)) p
+                && all_ge (seg i j (now _)) p } @ local unique)
+    (n : int{ _ = len (now s) })
+  : (int * slice){ 0 <= fst _ && fst _ < n
+                   && elem (now (snd _)) (fst _) = p
+                   && all_le (take (fst _) (now (snd _))) p
+                   && all_ge (drop (fst _ + 1) (now (snd _))) p
+                   && perm (now s) (now (snd _))
+                   && fin (snd _) = fin s } @ local unique =
+  exclave_
+    (if j < n - 1
+     then begin
+       let (v, s1) = sget s j in
+       if v <= p
        then begin
-         let (v, s1) = sget s j in
-         if v <= p
-         then begin
-           let s2 = swap s1 i j in
-           let q = part p (i + 1) (j + 1) s2 n in
-           q
-         end
-         else begin
-           let q = part p i (j + 1) s1 n in
-           q
-         end
+         let s2 = swap s1 i j in
+         part p (i + 1) (j + 1) s2 n
        end
-       else begin
-         let s' = swap s i j in
-         ((i : int), s')
-       end)
+       else part p i (j + 1) s1 n
+     end
+     else begin
+       let s' = swap s i j in
+       ((i : int), s')
+     end)
 [%%expect{|
 val part :
   (p : int) ->
@@ -984,38 +973,32 @@ val part :
    the prophesied final contents.  Each sub-loan is sorted-and-resolved
    by the recursive call itself; the singleton is resolved as-is,
    pinning its prophecy to the pivot by equality. *)
-let rec qsort :
-  (m : slice) @ local unique ->
-  unit{ sorted (fin m) && perm (now m) (fin m) } =
-  fun m ->
-    let (n, m0) = slen m in
-    if n <= 1
-    then begin
-      let _u = sdrop m0 in
-      (() : unit{ sorted (fin m) && perm (now m) (fin m) })
-    end
-    else begin
-      let (p, mp) = sget m0 (n - 1) in
-      let q = part p 0 0 mp n in
-      let (k, m2) = q in
-      let p1 = new_proph () in
-      let p2 = new_proph () in
-      let p3 = new_proph () in
-      let (mres, u) =
-        split3 p1 p2 p3 m2 k (k + 1) (fun a b c ->
-          let _u1 = qsort a in
-          let _u2 = sdrop b in
-          let _u3 = qsort c in
-          (() : unit{ sorted (pv p1)
-                      && perm (take k (now m2)) (pv p1)
-                      && pv p2 = seg k (k + 1) (now m2)
-                      && sorted (pv p3)
-                      && perm (drop (k + 1) (now m2)) (pv p3) }))
-      in
-      ignore u;
-      let _uf = sdrop mres in
-      (() : unit{ sorted (fin m) && perm (now m) (fin m) })
-    end
+let rec qsort (m : slice @ local unique)
+  : unit{ sorted (fin m) && perm (now m) (fin m) } =
+  let (n, m0) = slen m in
+  if n <= 1
+  then begin
+    let _u = sdrop m0 in
+    ()
+  end
+  else begin
+    let (p, mp) = sget m0 (n - 1) in
+    let (k, m2) = part p 0 0 mp n in
+    let (p1, p2, p3) = (new_proph (), new_proph (), new_proph ()) in
+    let (mres, _u) =
+      split3 p1 p2 p3 m2 k (k + 1) (fun a b c ->
+        let _u1 = qsort a in
+        let _u2 = sdrop b in
+        let _u3 = qsort c in
+        (() : unit{ sorted (pv p1)
+                    && perm (take k (now m2)) (pv p1)
+                    && pv p2 = seg k (k + 1) (now m2)
+                    && sorted (pv p3)
+                    && perm (drop (k + 1) (now m2)) (pv p3) }))
+    in
+    let _uf = sdrop mres in
+    ()
+  end
 [%%expect{|
 val qsort :
   (m : S.slice) @ local unique ->
@@ -1026,49 +1009,41 @@ val qsort :
    are disjoint, so each once-closure consumes one and fork_join2 runs
    them on separate domains -- each task's result is its side's
    conclusion, which survives the join. *)
-let rec psort :
-  (m : slice) @ local unique ->
-  unit{ sorted (fin m) && perm (now m) (fin m) } =
-  fun m ->
-    let (n, m0) = slen m in
-    if n <= 1
-    then begin
-      let _u = sdrop m0 in
-      (() : unit{ sorted (fin m) && perm (now m) (fin m) })
-    end
-    else begin
-      let (p, mp) = sget m0 (n - 1) in
-      let q = part p 0 0 mp n in
-      let (k, m2) = q in
-      let p1 = new_proph () in
-      let p2 = new_proph () in
-      let p3 = new_proph () in
-      let (mres, u) =
-        split3 p1 p2 p3 m2 k (k + 1) (fun a b c ->
-          let (ua, uc) =
-            fork_join2
-              (fun () ->
-                let u = psort a in
-                (u : unit{ sorted (pv p1)
-                           && perm (take k (now m2)) (pv p1) }))
-              (fun () ->
-                let u = psort c in
-                (u : unit{ sorted (pv p3)
-                           && perm (drop (k + 1) (now m2)) (pv p3) }))
-          in
-          ignore ua;
-          ignore uc;
-          let _u2 = sdrop b in
-          (() : unit{ sorted (pv p1)
-                      && perm (take k (now m2)) (pv p1)
-                      && pv p2 = seg k (k + 1) (now m2)
-                      && sorted (pv p3)
-                      && perm (drop (k + 1) (now m2)) (pv p3) }))
-      in
-      ignore u;
-      let _uf = sdrop mres in
-      (() : unit{ sorted (fin m) && perm (now m) (fin m) })
-    end
+let rec psort (m : slice @ local unique)
+  : unit{ sorted (fin m) && perm (now m) (fin m) } =
+  let (n, m0) = slen m in
+  if n <= 1
+  then begin
+    let _u = sdrop m0 in
+    ()
+  end
+  else begin
+    let (p, mp) = sget m0 (n - 1) in
+    let (k, m2) = part p 0 0 mp n in
+    let (p1, p2, p3) = (new_proph (), new_proph (), new_proph ()) in
+    let (mres, _u) =
+      split3 p1 p2 p3 m2 k (k + 1) (fun a b c ->
+        let (_ua, _uc) =
+          fork_join2
+            (fun () ->
+              let u = psort a in
+              (u : unit{ sorted (pv p1)
+                         && perm (take k (now m2)) (pv p1) }))
+            (fun () ->
+              let u = psort c in
+              (u : unit{ sorted (pv p3)
+                         && perm (drop (k + 1) (now m2)) (pv p3) }))
+        in
+        let _ub = sdrop b in
+        (() : unit{ sorted (pv p1)
+                    && perm (take k (now m2)) (pv p1)
+                    && pv p2 = seg k (k + 1) (now m2)
+                    && sorted (pv p3)
+                    && perm (drop (k + 1) (now m2)) (pv p3) }))
+    in
+    let _uf = sdrop mres in
+    ()
+  end
 [%%expect{|
 val psort :
   (m : S.slice) @ local unique ->

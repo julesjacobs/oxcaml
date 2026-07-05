@@ -559,66 +559,55 @@ ergonomic.</p>
 <p>We sort a slice into an array, in parallel &mdash; the sequential
 <code>qsort</code> is the same body with the two recursive calls made
 directly instead of under <code>fork_join2</code>:</p>
-<pre><code class="ml">let rec psort :
-  (m : slice) @ local unique -&gt;
-  unit{ sorted (fin m) &amp;&amp; perm (now m) (fin m) } =
-  fun m -&gt;
-    let (n, m0) = slen m in
-    if n &lt;= 1
-    then begin
-      let _u = sdrop m0 in
-      (() : unit{ sorted (fin m) &amp;&amp; perm (now m) (fin m) })
-    end
-    else begin
-      let (p, mp) = sget m0 (n - 1) in
-      let q = part p 0 0 mp n in
-      let (k, m2) = q in
-      let p1 = new_proph () in
-      let p2 = new_proph () in
-      let p3 = new_proph () in
-      let (mres, u) =
-        split3 p1 p2 p3 m2 k (k + 1) (fun a b c -&gt;
-          let (ua, uc) =
-            Par_lib.fork_join2
-              (fun () -&gt;
-                let u = psort a in
-                (u : unit{ sorted (pv p1)
-                           &amp;&amp; perm (take k (now m2)) (pv p1) }))
-              (fun () -&gt;
-                let u = psort c in
-                (u : unit{ sorted (pv p3)
-                           &amp;&amp; perm (drop (k + 1) (now m2)) (pv p3) }))
-          in
-          ignore ua;
-          ignore uc;
-          let _u2 = sdrop b in
-          (() : unit{ sorted (pv p1)
-                      &amp;&amp; perm (take k (now m2)) (pv p1)
-                      &amp;&amp; pv p2 = seg k (k + 1) (now m2)
-                      &amp;&amp; sorted (pv p3)
-                      &amp;&amp; perm (drop (k + 1) (now m2)) (pv p3) }))
-      in
-      ignore u;
-      let _uf = sdrop mres in
-      (() : unit{ sorted (fin m) &amp;&amp; perm (now m) (fin m) })
-    end</code></pre>
+<pre><code class="ml">let rec psort (m : slice @ local unique)
+  : unit{ sorted (fin m) &amp;&amp; perm (now m) (fin m) } =
+  let (n, m0) = slen m in
+  if n &lt;= 1
+  then begin
+    let _u = sdrop m0 in
+    ()
+  end
+  else begin
+    let (p, mp) = sget m0 (n - 1) in
+    let (k, m2) = part p 0 0 mp n in
+    let (p1, p2, p3) = (new_proph (), new_proph (), new_proph ()) in
+    let (mres, _u) =
+      split3 p1 p2 p3 m2 k (k + 1) (fun a b c -&gt;
+        let (_ua, _uc) =
+          Par_lib.fork_join2
+            (fun () -&gt;
+              let u = psort a in
+              (u : unit{ sorted (pv p1)
+                         &amp;&amp; perm (take k (now m2)) (pv p1) }))
+            (fun () -&gt;
+              let u = psort c in
+              (u : unit{ sorted (pv p3)
+                         &amp;&amp; perm (drop (k + 1) (now m2)) (pv p3) }))
+        in
+        let _ub = sdrop b in
+        (() : unit{ sorted (pv p1)
+                    &amp;&amp; perm (take k (now m2)) (pv p1)
+                    &amp;&amp; pv p2 = seg k (k + 1) (now m2)
+                    &amp;&amp; sorted (pv p3)
+                    &amp;&amp; perm (drop (k + 1) (now m2)) (pv p3) }))
+    in
+    let _uf = sdrop mres in
+    ()
+  end</code></pre>
 <p>This quicksort eliminates bounds checks: indexing is statically
 proved, so the compiled code reads and writes without them.</p>
 <p>To sort an array, borrow it and sort the loan: the borrow hands the
 array back, and the prophecy carries the conclusion onto its
 contents:</p>
-<pre><code class="ml">let sort_array :
-  (x : varr) @ unique -&gt;
-  varr{ sorted (cts _) &amp;&amp; perm (cts x) (cts _) } @ unique =
-  fun x -&gt;
-    let p = new_proph () in
-    let (x', u) =
-      borrow p x (fun m -&gt;
-        let u = psort m in
-        (u : unit{ sorted (pv p) &amp;&amp; perm (cts x) (pv p) }))
-    in
-    ignore u;
-    x'</code></pre>
+<pre><code class="ml">let sort_array (x : varr @ unique)
+  : varr{ sorted (cts _) &amp;&amp; perm (cts x) (cts _) } @ unique =
+  let p = new_proph () in
+  let (x', _u) =
+    borrow p x (fun m -&gt;
+      let u = psort m in
+      (u : unit{ sorted (pv p) &amp;&amp; perm (cts x) (pv p) }))
+  in
+  x'</code></pre>
 
 <h2 id="tour">Some more demos</h2>
 <details><summary style="cursor:pointer;color:var(--dim)">Sixteen more
