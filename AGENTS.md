@@ -130,6 +130,38 @@ Configuration is needed after changing `.in` files or the autoconf script.
   asymmetry: opaque interface over concrete impl is allowed; the
   int/bool ghost sorts still must match on both sides.
 
+## Token economics (measured 2026-07-04 across all vox sessions)
+
+The prompt cache expires 5 minutes after last use; re-reading it costs
+ctx x $1/M, rewriting it after expiry costs ctx x $12.5/M.  A transcript
+audit (deduped by requestId) found 73% of all spend on calls with >400k
+context and ~$1.5k of full-prefix rewrites caused by blocking waits that
+outlived the TTL.  Rules:
+
+- NEVER block longer than 270s in one call (TaskOutput, sleeps, long
+  waits).  Chain 270s blocks instead: each cycle re-reads the warm
+  cache at 1/12.5 the cost of the rewrite that expiry causes.
+- The keep-alive-vs-drop break-even is ~55 MINUTES, independent of
+  model and context size (poll and rewrite both scale with ctx, so it
+  cancels: 12.5 polls x 4.5 min).  Expected wait under ~55 min: stay
+  in-turn and chain 270s blocks.  Longer or unbounded (waiting on a
+  human): end the turn and accept the one rewrite.
+- Cheaper than either: BATCH long validations (full suites, long Lean
+  runs) at the end of a work block so the cache dies once, not five
+  times -- or babysit them from a separate small-context session where
+  a rewrite costs cents.
+- Keep working context under ~300-400k.  You CAN measure it: the last
+  usage entry of your own transcript is the current context --
+    tail -50 ~/.claude/projects/<proj-dir>/<session-id>.jsonl \
+      | grep -o '"cache_read_input_tokens":[0-9]*' | tail -1
+  (add cache_creation + input for the exact figure).  Check it when a
+  phase completes.  The split itself is the USER's action (/clear or a
+  new session) -- your actions are: (a) push exploration into
+  subagents so the main thread stays lean, (b) at phase boundaries
+  past ~300k, write a handoff note (state, next steps, open questions)
+  to a file or commit message and SUGGEST the split, (c) below ~100k,
+  none of this matters -- don't busy-poll or nag there.
+
 ## Important Notes
 
 - NEVER create files unless absolutely necessary
