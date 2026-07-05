@@ -101,9 +101,7 @@ val member : (x : int) -> (s : t) -> bool{ _ = (mem x s) } = <fun>
    refuted -- here WITH an integer witness [x = 0], because the claim
    turns on an [Int].  The [Int -> Prop] trade-off (no [card]) bites
    only for a false SET-LEVEL equality with no integer to pin, which
-   would fail WITHOUT a witness; stating one needs a 0-ary constant like
-   [emp] referenceable in a refinement -- a separate surface gap, not
-   available here. *)
+   fails WITHOUT a witness -- see [overclaim_setlevel] at the end. *)
 let overclaim : (x : int) -> (s : t) -> bool{ _ = mem (x + 1) s } =
   fun x s -> member x s
 [%%expect{|
@@ -116,5 +114,25 @@ Hypotheses:
   *unknown6* = (mem x s)
 Possible counterexample:
   x = 0
+(lean: error: `grind` failed)
+|}]
+
+(* WITNESS-FREE FAILURE (contrast with [overclaim] above).  A false
+   SET-LEVEL claim -- an arbitrary [s] equals the empty set -- turns on
+   no [Int], so the [Int -> Prop] model has nothing to enumerate: the
+   solver rejects it fail-closed with NO "Possible counterexample" line,
+   where lean_via.ml's [card] model would print one.  This is the
+   witness loss the earlier int-turned overclaim could not express; it
+   is expressible now that a bare 0-ary constant [emp] resolves in a
+   refinement. *)
+let overclaim_setlevel : (s : iset) -> unit{ s = emp } =
+  fun s -> ()
+[%%expect{|
+Line 2, characters 11-13:
+2 |   fun s -> ()
+               ^^
+Error: vox: verification failed (lean).
+       Goal: s = emp
+Hypotheses: <none>
 (lean: error: `grind` failed)
 |}]

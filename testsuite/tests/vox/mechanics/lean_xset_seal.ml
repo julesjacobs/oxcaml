@@ -35,3 +35,10 @@ let add_twice : (x : int) -> (s : t) -> t{ _ = ins x s } =
   fun x s ->
     let u = add x s in
     add x u
+
+(* CROSS-UNIT 0-ARY CONSTANT: the client references [emp] -- a bare
+   0-ary spec constant exported by Xset's block through its VoxSig --
+   directly in a refinement.  [empty] denotes [emp], so [member 0 empty]
+   reads [mem 0 emp], which the exported [mem_emp] refutes. *)
+let empty_has_no_members : unit -> bool{ _ = mem 0 emp } =
+  fun () -> member 0 empty

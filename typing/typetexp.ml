@@ -981,8 +981,44 @@ let rec elab_vox_pred ~bound ~self_root env (e : Parsetree.expression)
                 "vox: only locally bound variables and module-level \
                  values may appear in refinements"
           | exception _ ->
-              Location.raise_errorf ~loc
-                "vox: unbound variable in refinement predicate"
+              (* vox: a bare LOWERCASE identifier that is neither the
+                 bound value / [_] nor an enclosing binder (both checked
+                 above) nor any value in scope ([Env.lookup_value] just
+                 failed) is read as a 0-ARY SPEC CONSTANT -- the nullary
+                 case of the spec-function namespace that an APPLIED
+                 lowercase head already enters as [Pfun (f, args)] below
+                 (e.g. [emp], the empty set of a block's model).  Like
+                 every spec name, block-defined constants are OPAQUE to
+                 the compiler (they live only in the shipped [%%vox.lean]
+                 text and imported units' VoxSig, never parsed here), so
+                 the name is not validated at elaboration: an unknown
+                 name -- or an arity>0 function referenced bare -- is a
+                 solver error at VC time, exactly as for an applied spec
+                 function.  Program locals and module values resolve
+                 FIRST (the [Env.lookup_value] success arms above), so a
+                 same-named value always shadows the constant; the
+                 fallback fires only when there is no such value, so
+                 there is no collision to sanitize.  Two exclusions keep
+                 the fallback from masking real errors: the reserved
+                 builtin words (meaningful only applied), and INVARIANT
+                 mode -- a loop invariant is a formula over program
+                 state, where a bare out-of-scope name is a scoping
+                 error (see mechanics/mutable.ml), not a licence to
+                 invent a constant. *)
+              (match lid with
+               | Longident.Lident name
+                 when (not !vox_invariant_mode)
+                      && String.length name > 0
+                      && (match name.[0] with
+                          | 'a' .. 'z' | '_' -> true
+                          | _ -> false)
+                      && not
+                           (List.mem name
+                              [ "mod"; "not"; "fst"; "snd"; "succ"; "pred" ])
+                 -> Pfun (name, [])
+               | _ ->
+                 Location.raise_errorf ~loc
+                   "vox: unbound variable in refinement predicate")
       end
   | Pexp_constant {pconst_desc = Pconst_integer (s, None); _} ->
       begin match int_of_string_opt s with

@@ -75,3 +75,7 @@ let member : (x : int) -> (s : t) -> bool{ _ = mem x s } =
             if bl then true else go r
     in
     go t0
+
+(* [empty] packs the leaf tree, whose [elems] is [emp] by definition, so
+   the obligation [bst Leaf && elems Leaf = emp] is [True && emp = emp]. *)
+let empty : t{ _ = emp } = (Leaf : t{ _ = emp })

@@ -54,3 +54,8 @@ public theorem iset_ext (a b : ISet) (h : ∀ x, mem x a ↔ mem x b) : a = b :=
 
 val add : (x : int) -> (s : t) -> t{ _ = ins x s }
 val member : (x : int) -> (s : t) -> bool{ _ = mem x s }
+
+(* The empty set: its denotation is the 0-ary spec constant [emp].
+   Referencing a bare 0-ary block constant in a refinement is the
+   surface feature this exercises. *)
+val empty : t{ _ = emp }
