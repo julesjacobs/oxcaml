@@ -284,26 +284,33 @@ representation: the type gets its own sort in the logic, laws can
 quantify over it, and the implementation proves them about the
 concrete type, which takes over the same solver-side name.</p>
 
-<p id="via">Finally, the model need not be the representation.  Here
-the block defines a set type <code>ISet</code>, a phantom type gives
-it an OCaml name (<code>type iset [@@vox.sort lean "ISet"]</code>),
-and the implementation declares an abstraction function into it:
-<code>type t = tree{ bst _ } [@vox.via (elems : iset)]</code> says
-that a value of <code>t</code> stands for the set of its elements.
-The interface declares <code>type t : value refines (iset)</code> and
-writes its contracts about sets
-(<code>val member : (x : int) -&gt; (s : t) -&gt; bool{ _ = mem x s }</code>);
-it mentions neither the tree nor the ordering invariant nor
-<code>elems</code>.  The implementation still computes on trees:
-<code>refine_</code> turns a set <code>s</code> back into a tree
-<code>t0</code> together with the invariant and the fact
-<code>elems t0 = s</code>, and proves the set-level contracts from
-those &mdash; there is no trust keyword in the file.  To swap in a
-different data structure, write a new <code>elems</code> and re-prove
-the bridging lemmas inside the module; no client changes.
-Parameterized types work too:
-<code>type 'a t : value refines ('a iset)</code> is proved once,
-generically.</p>
+<p id="via">An abstraction function goes further than
+<code>oset</code>&rsquo;s axioms: instead of a hand-picked list of
+laws, clients get a whole model &mdash; in the logic, a value of the
+type <em>is</em> a set.  The <code>.mli</code> defines a Lean set
+type and names it in OCaml
+(<code>type iset [@@vox.sort lean "ISet"]</code>), declares
+<code>type t : value refines (iset)</code>, and states the operations
+as facts about sets:
+<code>val member : (x : int) -&gt; (s : t) -&gt; bool{ _ = mem x s }</code>,
+where <code>mem</code> is set membership, not a tree search.  Nothing
+in the interface says there is a tree.  The <code>.ml</code> picks
+the representation and its meaning in one line &mdash;
+<code>type t = tree{ bst _ } [@vox.via (elems : iset)]</code>: a
+value of <code>t</code> is an ordered tree, standing for
+<code>elems</code> of that tree, the set of its elements.  The
+compiler holds the code to that reading: <code>member</code>&rsquo;s
+one-path search must return <code>mem x s</code> for the set
+<code>s</code> the tree stands for, and <code>add</code> must build a
+tree standing for <code>ins x s</code>.  To prove it, the module
+unpacks with <code>refine_</code>: from a set <code>s</code> it gets
+the tree <code>t0</code> behind it, plus <code>bst t0</code> and
+<code>elems t0 = s</code>, and the tree-recursive code discharges the
+set contracts from those; there is no trust keyword in the file.
+Replace the tree with another structure and only <code>elems</code>
+and the in-module proofs change &mdash; client proofs don&rsquo;t.
+<code>type 'a t : value refines ('a iset)</code> is the parameterized
+form, proved once.</p>
 
 <p>The examples, each in the branch&rsquo;s test suite:</p>
 <ul>
