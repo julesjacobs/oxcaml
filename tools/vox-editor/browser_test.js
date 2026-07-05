@@ -152,6 +152,27 @@ async function main() {
     assert.ok(live.includes("⊢"), "live goal has a turnstile: " + live.slice(0, 160));
     assert.ok(/Int/.test(live), "live goal has a hypothesis: " + live.slice(0, 160));
 
+    // Cursor NOT in any region (blank line 8, below the block): the pane
+    // must show an empty state and must NOT claim we are in a block or
+    // offer a live-goal button (the reported bug).
+    await page.evaluate(() => window.__vox.cm.setCursor({ line: 8, ch: 0 }));
+    const empty = await waitFor(
+      async () => {
+        const t = await page.$eval("#pane-body", (e) => e.textContent);
+        return /No obligation at the cursor/.test(t) ? t : false;
+      },
+      5000,
+      "empty state off-region"
+    );
+    console.log("ok - empty state when cursor is at no region");
+    assert.ok(!/Inside a/.test(empty), "must not claim in-block: " + empty.slice(0, 120));
+    assert.strictEqual(
+      await page.$("#live-btn"),
+      null,
+      "no live-goal button when not in a block"
+    );
+    assert.ok(await page.$("#jump-btn"), "offers a nearest-region jump");
+
     // Examples dropdown: it is populated, and picking one loads that
     // source into the editor and re-checks to a verdict.
     await page.evaluate(() => {

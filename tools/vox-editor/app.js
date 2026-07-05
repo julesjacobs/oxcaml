@@ -92,26 +92,53 @@ async function check() {
   }
 }
 
+const REGION_NOUN = {
+  vc: "obligation",
+  theorem: "theorem",
+  block: "[%%vox.lean] block",
+};
+
 function renderPane() {
   const c = cm.getCursor();
   const sel = Selection.selectRegion(regions, { line: c.line, col: c.ch });
   const r = sel.region;
-  modeEl.textContent = r ? sel.mode + " · " + r.kind : "no selection";
   let html = "";
-  if (!r) {
-    html = '<p class="placeholder">No verification condition here.</p>';
-  } else if (r.kind === "vc") {
-    html = renderVc(r);
-  } else if (r.kind === "theorem") {
-    html = renderTheorem(r) + liveButton();
-  } else if (r.kind === "block") {
+  if (sel.relation === "inside" && r) {
+    // The cursor is AT this region: show it.
+    modeEl.textContent = sel.mode + " · " + r.kind;
+    if (r.kind === "vc") {
+      html = renderVc(r);
+    } else if (r.kind === "theorem") {
+      html = renderTheorem(r) + liveButton();
+    } else if (r.kind === "block") {
+      html = '<p>Inside a <code>[%%vox.lean]</code> block.</p>' + liveButton();
+    }
+  } else if (sel.relation === "nearest" && r) {
+    // Not at any region — do NOT present the nearest one as if it were
+    // here. Empty state plus a muted, clickable secondary that jumps.
+    modeEl.textContent = "no obligation at cursor";
     html =
-      '<p>Inside a <code>[%%vox.lean]</code> block.</p>' + liveButton();
+      '<p class="placeholder">No obligation at the cursor.</p>' +
+      '<div class="nearest"><button id="jump-btn" class="jump">nearest ' +
+      esc(REGION_NOUN[r.kind] || r.kind) +
+      " ↑ line " +
+      (r.start.line + 1) +
+      "</button></div>";
+  } else {
+    modeEl.textContent = "no obligation at cursor";
+    html = '<p class="placeholder">No obligation at the cursor.</p>';
   }
   html += renderErrors();
   bodyEl.innerHTML = html;
   const btn = document.getElementById("live-btn");
   if (btn) btn.addEventListener("click", liveGoal);
+  const jump = document.getElementById("jump-btn");
+  if (jump && r) {
+    jump.addEventListener("click", () => {
+      cm.setCursor({ line: r.start.line, ch: r.start.col });
+      cm.focus();
+    });
+  }
 }
 
 function badge(status) {

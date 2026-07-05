@@ -111,6 +111,15 @@ main { flex: 1; display: flex; min-height: 0; }
 .badge-failed { background: rgba(240,83,63,0.2); color: var(--fail); }
 .badge-unknown { background: #21262d; color: var(--muted); }
 .placeholder { color: var(--muted); }
+.nearest { margin-top: 6px; }
+.jump {
+  background: transparent;
+  color: var(--muted);
+  border: 1px dashed var(--border);
+  font-size: 12px;
+  padding: 2px 8px;
+}
+.jump:hover { color: var(--fg); border-color: var(--accent); }
 #errors { margin-top: 10px; }
 .err {
   background: #2a1614;
