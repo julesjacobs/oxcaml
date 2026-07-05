@@ -109,3 +109,12 @@ main { flex: 1; display: flex; min-height: 0; }
   white-space: pre-wrap;
 }
 .live-goals { border-left: 3px solid var(--warn); background: #201b12; }
+
+/* Cursor + selection visibility on the dark background (the vendored
+   CM5 defaults are black-on-white and vanish here). */
+.CodeMirror-cursor { border-left: 2px solid var(--fg); }
+.CodeMirror-selected { background: #24344d; }
+.CodeMirror-focused .CodeMirror-selected { background: #2a3d5c; }
+.CodeMirror-line::selection,
+.CodeMirror-line > span::selection,
+.CodeMirror-line > span > span::selection { background: #2a3d5c; }
