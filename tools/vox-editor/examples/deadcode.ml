@@ -1,3 +1,7 @@
+(* The write [m <- K 9] is a fact, so the [L] arm's hypotheses are
+   contradictory: [unreachable_] proves it dead, and [K y] returns
+   [y = 9] by constructor injectivity. *)
+
 type kl =
   | K of int
   | L

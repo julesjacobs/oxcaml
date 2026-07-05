@@ -2,8 +2,8 @@
    versioning with reflected arithmetic, conditional joins, declared
    refinements as loop invariants (with reflected for-bounds), path
    facts through mutable reads, and the [let x = m] bridge.  The result
-   of each function is written directly on its annotation -- no explicit
-   [refine_] intro is needed (the direct spelling). *)
+   of each function is written directly on its annotation (the direct
+   spelling). *)
 
 let f () : int{ _ = 4 } =
   let mutable m = 3 in
