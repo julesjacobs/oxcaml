@@ -328,27 +328,26 @@ representation: the type gets its own sort in the logic, laws can
 quantify over it, and the implementation proves them about the
 concrete type, which takes over the same solver-side name.</p>
 
-<p id="via">The model can also be a <em>function</em> of the
-representation.  A phantom type names a Lean type from the block
-(<code>type iset [@@vox.sort lean "ISet"]</code>), and the
-implementation maps its representation through an abstraction
-function &mdash;
-<code>type t = tree{ bst _ } [@vox.via (elems : iset)]</code> &mdash;
-so a value of <code>t</code> <em>denotes</em> the set of its
-elements.  The interface exports
-<code>type t : value refines (iset)</code> and specs in set
-vocabulary
+<p id="via">Finally, the model need not be the representation.  Here
+the block defines a set type <code>ISet</code>, a phantom type gives
+it an OCaml name (<code>type iset [@@vox.sort lean "ISet"]</code>),
+and the implementation declares an abstraction function into it:
+<code>type t = tree{ bst _ } [@vox.via (elems : iset)]</code> says
+that a value of <code>t</code> stands for the set of its elements.
+The interface declares <code>type t : value refines (iset)</code> and
+writes its contracts about sets
 (<code>val member : (x : int) -&gt; (s : t) -&gt; bool{ _ = mem x s }</code>);
-the tree, its ordering invariant, and <code>elems</code> itself never
-appear in it.  Inside the module, <code>refine_</code> unpacks a set
-back to its tree, carrying the invariant and the link
-<code>elems t0 = s</code>, and the implementation <em>proves</em> the
-same interface text a client reads, with no trust keyword anywhere.
-Swapping the tree for another structure is a new <code>elems</code>
-and new bridging lemmas; clients re-verify nothing.  The abstraction
-is parametric: <code>type 'a t : value refines ('a iset)</code>
-proves <code>add</code> once at the generic element sort, and every
-instantiation inherits the proof.</p>
+it mentions neither the tree nor the ordering invariant nor
+<code>elems</code>.  The implementation still computes on trees:
+<code>refine_</code> turns a set <code>s</code> back into a tree
+<code>t0</code> together with the invariant and the fact
+<code>elems t0 = s</code>, and proves the set-level contracts from
+those &mdash; there is no trust keyword in the file.  To swap in a
+different data structure, write a new <code>elems</code> and re-prove
+the bridging lemmas inside the module; no client changes.
+Parameterized types work too:
+<code>type 'a t : value refines ('a iset)</code> is proved once,
+generically.</p>
 
 <p>The examples, each in the branch&rsquo;s test suite:</p>
 <ul>
