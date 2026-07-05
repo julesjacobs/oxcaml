@@ -207,3 +207,15 @@ main { flex: 1; display: flex; min-height: 0; }
 .CodeMirror-line::selection,
 .CodeMirror-line > span::selection,
 .CodeMirror-line > span > span::selection { background: var(--sel-bg-focus); }
+
+/* CodeMirror token colors for the dark theme -- CM5's defaults
+   (keyword #708 etc.) are designed for white backgrounds and vanish
+   on ours.  Values from the docs page's proven dark palette; light
+   mode keeps the CM defaults, which suit white. */
+html:not([data-theme="light"]) .cm-keyword { color: #bb9af7; }
+html:not([data-theme="light"]) .cm-comment { color: #565f89; }
+html:not([data-theme="light"]) .cm-number  { color: #ff9e64; }
+html:not([data-theme="light"]) .cm-string  { color: #9ece6a; }
+html:not([data-theme="light"]) .cm-atom    { color: #ff9e64; }
+html:not([data-theme="light"]) .cm-def     { color: #7aa2f7; }
+html:not([data-theme="light"]) .cm-variable-2 { color: #7dcfff; }
