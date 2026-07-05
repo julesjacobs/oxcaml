@@ -33,7 +33,17 @@
    nothing else: surrogate exclusion stays (surrogates are in the 3-byte
    range) and the 2- and 3-byte overlong guards stay.  Adding 4-byte
    would raise the cap to 0x10FFFF and add one branch with its own
-   overlong guard. *)
+   overlong guard.
+
+   GRANULARITY -- per-codepoint, NOT full-sequence.  [decode1] reads ONE
+   codepoint from the front and returns the remaining bytes ([Good c
+   rest]); roundtrip and soundness are proved at that granularity.
+   Folding it over a whole byte string (decode : bytes -> codepoint list,
+   and the list-level roundtrip decode (encode cs) = Ok cs) is NOT proved
+   here: that recursion is non-structural (the remainder from [decode1]
+   is not a Lean-visible subterm), so it needs well-founded recursion on
+   byte length plus a decrease lemma from [dec1_sound] -- a separate
+   proof chunk, deferred. *)
 
 type bytes_ = Bnil | Bcons of int * bytes_
 type res = Bad | Good of int * bytes_

@@ -35,7 +35,12 @@
    scope), and surrogate exclusion [not (0xD800 <= c <= 0xDFFF)].  The
    decoder below is 37 lines, mostly error handling (9 reject paths),
    ALL proved -- not read.  Scope note: dropping 4-byte only tightens the
-   cap; surrogate exclusion and the 2/3-byte overlong guards stay. *)
+   cap; surrogate exclusion and the 2/3-byte overlong guards stay.
+
+   GRANULARITY: this is PER-CODEPOINT -- [decode1] reads one codepoint
+   and returns the rest.  The whole-string fold (decode : bytes -> cps
+   list, list-level roundtrip) is deferred (non-structural recursion;
+   needs well-founded recursion on byte length). *)
 
 type bytes_ = Bnil | Bcons of int * bytes_
 type res = Bad | Good of int * bytes_
