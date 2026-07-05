@@ -6,7 +6,13 @@
    unit.  The interface text never mentions [elems].  Under image-binder
    the .ml PROVES these specs honestly (no [assume_unchecked_]): a via
    binder denotes the image, and the implementation reaches the tree
-   through a [refine_] unpack that supplies the link [elems t0 = s]. *)
+   through a [refine_] unpack that  supplies the link [elems t0 = s].
+
+   See lib/xset.mli for the EXTENSIONAL counterpart, which models [ISet]
+   as [Int -> Prop] (Lean's set type): it proves set-level equalities
+   such as [ins_idem] that this inductive-list model cannot, at the cost
+   of the decidable [card] observable and concrete counterexamples this
+   model keeps.  The two are the ends of the via modeling spectrum. *)
 type iset [@@vox.sort lean "ISet"]
 type t : value refines (iset)
 
