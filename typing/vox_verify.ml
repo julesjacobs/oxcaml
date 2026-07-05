@@ -1776,6 +1776,22 @@ let match_facts
         | Tpat_any -> None
         | _ -> Some p )
   in
+  (* A component's type refinement, instantiated at the component's
+     own logical term: an UNNAMED sub-pattern still receives its fact
+     ([let ((), ()) = e], [let (_, _) = e]) -- the subject is already
+     a term of the logic, so no binder is required.  Variables and
+     aliases contribute through [binder_facts] instead. *)
+  let type_facts subject (ty : Types.type_expr) =
+    let preds =
+      (match refinement_of_type env ty with Some p -> [ p ] | None -> [])
+      @ invariant_preds env ty
+    in
+    List.map
+      (fun p ->
+        register_pred_paths env p;
+        Refinement.subst_bound ~by:subject p)
+      preds
+  in
   let rec constructor_facts subject cstr args =
     let path = Data_types.cstr_res_type_path cstr in
     match datatype_sort env path [] with
@@ -1827,9 +1843,13 @@ let match_facts
   and value_facts subject (p : value general_pattern) =
     match p.pat_desc with
     | Tpat_construct (_, cstr, _, args, _) ->
-      constructor_facts subject cstr args
-    | Tpat_record (fields, _, _, _) -> record_facts subject fields
-    | Tpat_tuple comps -> tuple_facts subject comps
+      type_facts subject p.pat_type
+      @ constructor_facts subject cstr args
+    | Tpat_record (fields, _, _, _) ->
+      type_facts subject p.pat_type @ record_facts subject fields
+    | Tpat_tuple comps ->
+      type_facts subject p.pat_type @ tuple_facts subject comps
+    | Tpat_any | Tpat_constant _ -> type_facts subject p.pat_type
     | Tpat_alias { pattern = sub; id; _ } ->
       (* [p as x]: the alias names the subject, and [p] destructures
          it in turn. *)
@@ -1848,9 +1868,12 @@ let match_facts
   in
   match pat.pat_desc with
   | Tpat_value p -> value_facts subject (p :> value general_pattern)
-  | Tpat_construct (_, cstr, _, args, _) -> constructor_facts subject cstr args
-  | Tpat_record (fields, _, _, _) -> record_facts subject fields
-  | Tpat_tuple comps -> tuple_facts subject comps
+  | Tpat_construct (_, cstr, _, args, _) ->
+    type_facts subject pat.pat_type @ constructor_facts subject cstr args
+  | Tpat_record (fields, _, _, _) ->
+    type_facts subject pat.pat_type @ record_facts subject fields
+  | Tpat_tuple comps ->
+    type_facts subject pat.pat_type @ tuple_facts subject comps
   | Tpat_alias { pattern = sub; id; _ } ->
     Refinement.Pbinop (Refinement.Eq, Refinement.Pvar id, subject)
     :: value_facts subject sub

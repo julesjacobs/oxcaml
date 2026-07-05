@@ -127,9 +127,9 @@ vibe-proved by AI)</p>
 <b>vox</b> is an experimental extension of the OxCaml compiler in
 which types carry refinements, as in the examples below.  Refinements
 become proof obligations, discharged at compile time by
-Lean&nbsp;4&rsquo;s <code>grind</code> or manually proven lemmas (or
-checked at runtime with <code>assume_</code>);
-a failed obligation is a compile error with a counterexample.
+Lean&nbsp;4&rsquo;s <code>grind</code> or manually proven lemmas;
+a failed obligation is a compile error with a counterexample, or a
+runtime check if you used <code>assume_</code>.
 Verification is opt-in per function.
 </p>
 <h3 style="margin:1.2rem 0 .4rem">How it works</h3>
@@ -566,34 +566,32 @@ directly instead of under <code>fork_join2</code>:</p>
   let (n, m0) = slen m in
   if n &lt;= 1
   then begin
-    let _u = sdrop m0 in
+    let () = sdrop m0 in
     ()
   end
   else begin
     let (p, mp) = sget m0 (n - 1) in
     let (k, m2) = part p 0 0 mp n in
     let (p1, p2, p3) = (new_proph (), new_proph (), new_proph ()) in
-    let (mres, _u) =
+    let (mres, ()) =
       split3 p1 p2 p3 m2 k (k + 1) (fun a b c -&gt;
-        let (_ua, _uc) =
+        let ((), ()) =
           Par_lib.fork_join2
             (fun () -&gt;
-              let u = psort a in
-              (u : unit{ sorted (pv p1)
-                         &amp;&amp; perm (take k (now m2)) (pv p1) }))
+              (psort a : unit{ sorted (pv p1)
+                               &amp;&amp; perm (take k (now m2)) (pv p1) }))
             (fun () -&gt;
-              let u = psort c in
-              (u : unit{ sorted (pv p3)
-                         &amp;&amp; perm (drop (k + 1) (now m2)) (pv p3) }))
+              (psort c : unit{ sorted (pv p3)
+                               &amp;&amp; perm (drop (k + 1) (now m2)) (pv p3) }))
         in
-        let _ub = sdrop b in
+        let () = sdrop b in
         (() : unit{ sorted (pv p1)
                     &amp;&amp; perm (take k (now m2)) (pv p1)
                     &amp;&amp; pv p2 = seg k (k + 1) (now m2)
                     &amp;&amp; sorted (pv p3)
                     &amp;&amp; perm (drop (k + 1) (now m2)) (pv p3) }))
     in
-    let _uf = sdrop mres in
+    let () = sdrop mres in
     ()
   end</code></pre>
 <p>This quicksort eliminates bounds checks: indexing is statically
@@ -604,10 +602,9 @@ contents:</p>
 <pre><code class="ml">let sort_array (x : varr @ unique)
   : varr{ sorted (cts _) &amp;&amp; perm (cts x) (cts _) } @ unique =
   let p = new_proph () in
-  let (x', _u) =
+  let (x', ()) =
     borrow p x (fun m -&gt;
-      let u = psort m in
-      (u : unit{ sorted (pv p) &amp;&amp; perm (cts x) (pv p) }))
+      (psort m : unit{ sorted (pv p) &amp;&amp; perm (cts x) (pv p) }))
   in
   x'</code></pre>
 

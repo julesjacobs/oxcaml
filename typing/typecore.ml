@@ -3296,8 +3296,34 @@ let rec type_pat
       expected_ty sort ->
   Builtin_attributes.warning_scope sp.ppat_attributes
     (fun () ->
-       type_pat_aux tps category ~no_existentials
-         ~alloc_mode ~mutable_flag ~penv sp expected_ty sort
+       (* vox: a DESTRUCTURING pattern against a refined expected type
+          checks against the skeleton -- taking a value apart cannot
+          violate its refinement -- and keeps the refined type, from
+          which the verification pass contributes the component's fact
+          at its projection (no binder needed): [let ((), ()) = e]
+          receives the components' refinements like [let (u1, u2) = e]
+          does.  Binder-shaped patterns keep their own skeleton
+          discipline (binders as facts). *)
+       let vox_refined =
+         match sp.ppat_desc with
+         | Ppat_constant _ | Ppat_construct _ | Ppat_tuple _
+         | Ppat_record _ ->
+           (let ty_exp = expand_head !!penv (instance expected_ty) in
+            match get_desc ty_exp with
+            | Trefine (skel, _) -> Some (ty_exp, skel)
+            | _ -> None)
+         | _ -> None
+       in
+       match vox_refined with
+       | Some (refined, skel) ->
+         let p =
+           type_pat_aux tps category ~no_existentials
+             ~alloc_mode ~mutable_flag ~penv sp skel sort
+         in
+         { p with pat_type = refined }
+       | None ->
+         type_pat_aux tps category ~no_existentials
+           ~alloc_mode ~mutable_flag ~penv sp expected_ty sort
     )
 
 and type_pat_aux

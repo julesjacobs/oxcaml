@@ -978,25 +978,25 @@ let rec qsort (m : slice @ local unique)
   let (n, m0) = slen m in
   if n <= 1
   then begin
-    let _u = sdrop m0 in
+    let () = sdrop m0 in
     ()
   end
   else begin
     let (p, mp) = sget m0 (n - 1) in
     let (k, m2) = part p 0 0 mp n in
     let (p1, p2, p3) = (new_proph (), new_proph (), new_proph ()) in
-    let (mres, _u) =
+    let (mres, ()) =
       split3 p1 p2 p3 m2 k (k + 1) (fun a b c ->
-        let _u1 = qsort a in
-        let _u2 = sdrop b in
-        let _u3 = qsort c in
+        let () = qsort a in
+        let () = sdrop b in
+        let () = qsort c in
         (() : unit{ sorted (pv p1)
                     && perm (take k (now m2)) (pv p1)
                     && pv p2 = seg k (k + 1) (now m2)
                     && sorted (pv p3)
                     && perm (drop (k + 1) (now m2)) (pv p3) }))
     in
-    let _uf = sdrop mres in
+    let () = sdrop mres in
     ()
   end
 [%%expect{|
@@ -1014,34 +1014,32 @@ let rec psort (m : slice @ local unique)
   let (n, m0) = slen m in
   if n <= 1
   then begin
-    let _u = sdrop m0 in
+    let () = sdrop m0 in
     ()
   end
   else begin
     let (p, mp) = sget m0 (n - 1) in
     let (k, m2) = part p 0 0 mp n in
     let (p1, p2, p3) = (new_proph (), new_proph (), new_proph ()) in
-    let (mres, _u) =
+    let (mres, ()) =
       split3 p1 p2 p3 m2 k (k + 1) (fun a b c ->
-        let (_ua, _uc) =
+        let ((), ()) =
           fork_join2
             (fun () ->
-              let u = psort a in
-              (u : unit{ sorted (pv p1)
-                         && perm (take k (now m2)) (pv p1) }))
+              (psort a : unit{ sorted (pv p1)
+                               && perm (take k (now m2)) (pv p1) }))
             (fun () ->
-              let u = psort c in
-              (u : unit{ sorted (pv p3)
-                         && perm (drop (k + 1) (now m2)) (pv p3) }))
+              (psort c : unit{ sorted (pv p3)
+                               && perm (drop (k + 1) (now m2)) (pv p3) }))
         in
-        let _ub = sdrop b in
+        let () = sdrop b in
         (() : unit{ sorted (pv p1)
                     && perm (take k (now m2)) (pv p1)
                     && pv p2 = seg k (k + 1) (now m2)
                     && sorted (pv p3)
                     && perm (drop (k + 1) (now m2)) (pv p3) }))
     in
-    let _uf = sdrop mres in
+    let () = sdrop mres in
     ()
   end
 [%%expect{|

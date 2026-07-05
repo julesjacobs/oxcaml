@@ -127,9 +127,9 @@ vibe-proved by AI)</p>
 <b>vox</b> is an experimental extension of the OxCaml compiler in
 which types carry refinements, as in the examples below.  Refinements
 become proof obligations, discharged at compile time by
-Lean&nbsp;4&rsquo;s <code>grind</code> or manually proven lemmas (or
-checked at runtime with <code>assume_</code>);
-a failed obligation is a compile error with a counterexample.
+Lean&nbsp;4&rsquo;s <code>grind</code> or manually proven lemmas;
+a failed obligation is a compile error with a counterexample, or a
+runtime check if you used <code>assume_</code>.
 Verification is opt-in per function.
 </p>
 <h3 style="margin:1.2rem 0 .4rem">How it works</h3>
