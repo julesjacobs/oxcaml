@@ -329,6 +329,58 @@ async function main() {
     );
     console.log("ok - cursor above all regions finds the obligation below (↓)");
 
+    // Live typing: an edit triggers the fast (no-Lean) pass, which
+    // repaints the region map within ~half a second -- so hypotheses at
+    // the cursor track the buffer -- carrying verdicts of
+    // content-unchanged obligations; the slower full check then lands
+    // the new obligation's verdict and the verified status.
+    await page.evaluate(() => {
+      const cm = window.__vox.cm;
+      cm.replaceRange("\nlet extra : int{ _ >= 0 } = 5\n", {
+        line: cm.lineCount(),
+        ch: 0,
+      });
+    });
+    const typed = await waitFor(
+      async () =>
+        await page.evaluate(() => {
+          if (window.__vox.getLastCheckFast() !== true) return false;
+          const rs = window.__vox.getRegions();
+          const nu = rs.find(
+            (r) => r.kind === "vc" && /5 >= 0/.test(r.goal || "")
+          );
+          if (!nu) return false;
+          const carried = rs.find(
+            (r) => r.kind === "vc" && /Cons \(h, r\)/.test(r.goal || "")
+          );
+          return {
+            newStatus: nu.status,
+            carried: carried ? carried.status : null,
+          };
+        }),
+      8000,
+      "fast pass paints the freshly-typed obligation"
+    );
+    assert.strictEqual(typed.newStatus, "unknown", "new VC awaits its verdict");
+    assert.strictEqual(typed.carried, "proved", "untouched VC keeps its verdict");
+    console.log("ok - typing repaints via the fast pass, verdicts carried");
+    await waitFor(
+      async () => {
+        const t = await page.$eval("#status", (e) => e.textContent);
+        return /verified/.test(t) ? t : false;
+      },
+      30000,
+      "full check settles after typing"
+    );
+    const extraStatus = await page.evaluate(() => {
+      const r = window.__vox
+        .getRegions()
+        .find((x) => x.kind === "vc" && /5 >= 0/.test(x.goal || ""));
+      return r && r.status;
+    });
+    assert.strictEqual(extraStatus, "proved", "full check proves the new VC");
+    console.log("ok - full check follows and proves the new obligation");
+
     // Examples dropdown: pick fib (a [%%vox.lean] block example) and
     // drive its static block theorem + a live Lean goal.
     await page.evaluate(() => {

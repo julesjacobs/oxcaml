@@ -118,26 +118,49 @@ function markRegions() {
   });
 }
 
-async function check() {
+// One checking pipeline, two speeds. fast=true is the as-you-type pass:
+// the server skips the Lean solve (~20ms dry-run instead of seconds), so
+// the pane's goals/hypotheses/spans and any elaboration errors track the
+// buffer almost live; verdicts of content-unchanged VCs are carried over
+// (Selection.carryVerdicts), everything else shows "unknown" until the
+// slower full check lands its authoritative statuses. The shared
+// revision counter keeps late fast responses from clobbering a newer
+// full result.
+let lastCheckFast = null; // which pass painted last (browser-test probe)
+
+async function check(fast) {
   const source = cm.getValue();
   revision += 1;
   const rev = revision;
-  setStatus("status-checking", "checking…");
+  if (!fast) setStatus("status-checking", "checking…");
   try {
-    const resp = await postJSON("/check", { source, revision: rev });
+    const resp = await postJSON("/check", {
+      source,
+      revision: rev,
+      fast: !!fast,
+    });
     if (resp.revision < applied) return; // stale
     applied = resp.revision;
-    regions = resp.regions || [];
+    const fresh = resp.regions || [];
+    regions = resp.fast ? Selection.carryVerdicts(fresh, regions) : fresh;
     errors = resp.errors || [];
     markRegions();
-    setStatus(
-      resp.ok ? "status-ok" : "status-fail",
-      resp.ok ? "verified ✓" : "errors ✗"
-    );
+    if (resp.fast) {
+      // Elaboration errors need no Lean, so a failing fast pass is
+      // authoritative; a PASSING one is not a verdict -- leave the
+      // "checking…" status for the full check to resolve.
+      if (!resp.ok) setStatus("status-fail", "errors ✗");
+    } else {
+      setStatus(
+        resp.ok ? "status-ok" : "status-fail",
+        resp.ok ? "verified ✓" : "errors ✗"
+      );
+    }
+    lastCheckFast = !!resp.fast;
     renderPane();
     applyPendingCursor();
   } catch (e) {
-    setStatus("status-fail", "server error");
+    if (!fast) setStatus("status-fail", "server error");
   }
 }
 
@@ -310,18 +333,26 @@ async function postJSON(path, body) {
 // Cursor moves: pane only (client-side, no network).
 cm.on("cursorActivity", renderPane);
 
-// Idle debounce + explicit trigger.
+// Two-tier idle debounce: a fast (no-Lean) pass keeps the pane's
+// hypotheses tracking the buffer as you type; the full check follows
+// once typing pauses. Explicit triggers (button, Ctrl-Enter) go
+// straight to a full check -- wrapped, since event handlers pass a
+// truthy first argument that must not read as `fast`.
 let timer = null;
+let fastTimer = null;
 cm.on("change", () => {
   clearMarks();
   clearHoverMark();
+  setStatus("status-checking", "checking…");
+  if (fastTimer) clearTimeout(fastTimer);
+  fastTimer = setTimeout(() => check(true), 250);
   if (timer) clearTimeout(timer);
-  timer = setTimeout(check, 900);
+  timer = setTimeout(() => check(false), 900);
 });
-document.getElementById("check-btn").addEventListener("click", check);
+document.getElementById("check-btn").addEventListener("click", () => check(false));
 cm.addKeyMap({
-  "Ctrl-Enter": check,
-  "Cmd-Enter": check,
+  "Ctrl-Enter": () => check(false),
+  "Cmd-Enter": () => check(false),
 });
 
 // Theme: dark by default (no OS sniffing); the toolbar toggle flips
@@ -434,6 +465,7 @@ window.__vox = {
   pickExample,
   loadExamples,
   getRegions: () => regions,
+  getLastCheckFast: () => lastCheckFast,
 };
 
 init();

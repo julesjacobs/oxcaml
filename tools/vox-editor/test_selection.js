@@ -203,4 +203,54 @@ check("splitSpanSuffix does not split a bare trailing @", () => {
   assert.strictEqual(r.span, null);
 });
 
+// -- carryVerdicts: fast-pass verdict carryover by VC content ------------
+
+const vc = (goal, hyps, status, extra) =>
+  Object.assign(
+    { kind: "vc", goal, hypotheses: hyps, status },
+    extra || {}
+  );
+
+check("carryVerdicts carries a proved verdict when content matches", () => {
+  const prev = [vc("x >= 0", ["x = 1"], "proved")];
+  const fresh = [vc("x >= 0", ["x = 1"], "unknown")];
+  S.carryVerdicts(fresh, prev);
+  assert.strictEqual(fresh[0].status, "proved");
+});
+
+check("carryVerdicts carries failed + counterexample + lean_msg", () => {
+  const prev = [
+    vc("x = 2", ["x = 1"], "failed", {
+      counterexample: ["x = 1"],
+      lean_msg: "grind failed",
+    }),
+  ];
+  const fresh = [vc("x = 2", ["x = 1"], "unknown")];
+  S.carryVerdicts(fresh, prev);
+  assert.strictEqual(fresh[0].status, "failed");
+  assert.deepStrictEqual(fresh[0].counterexample, ["x = 1"]);
+  assert.strictEqual(fresh[0].lean_msg, "grind failed");
+});
+
+check("carryVerdicts leaves changed content unknown", () => {
+  const prev = [vc("x >= 0", ["x = 1"], "proved")];
+  const fresh = [vc("x >= 1", ["x = 1"], "unknown")];
+  S.carryVerdicts(fresh, prev);
+  assert.strictEqual(fresh[0].status, "unknown");
+});
+
+check("carryVerdicts never overwrites a fresh non-unknown status", () => {
+  const prev = [vc("x >= 0", [], "proved")];
+  const fresh = [vc("x >= 0", [], "trusted")];
+  S.carryVerdicts(fresh, prev);
+  assert.strictEqual(fresh[0].status, "trusted");
+});
+
+check("carryVerdicts ignores non-vc regions", () => {
+  const prev = [vc("g", [], "proved")];
+  const fresh = [{ kind: "theorem", goal: "g", hypotheses: [] }];
+  S.carryVerdicts(fresh, prev);
+  assert.strictEqual(fresh[0].status, undefined);
+});
+
 console.log("\n" + passed + " tests passed");

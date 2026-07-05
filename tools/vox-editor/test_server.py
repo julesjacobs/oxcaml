@@ -116,6 +116,30 @@ class TestHttp(unittest.TestCase):
         self.assertEqual(resp["revision"], 42)
         self.assertIn("regions", resp)
         self.assertTrue(len(cast(List[object], resp["regions"])) >= 1)
+        self.assertFalse(resp["fast"])
+
+    def test_fast_check_skips_lean(self):
+        """fast:true is the as-you-type pass: full VC shapes with spans,
+        no Lean solve (statuses unknown), no generated Lean."""
+        resp = self._post(
+            "/check", {"source": SOURCE, "revision": 43, "fast": True}
+        )
+        self.assertEqual(resp["revision"], 43)
+        self.assertTrue(resp["fast"])
+        self.assertIsNone(resp["generated_lean"])
+        vcs = _regions_of_kind(resp, "vc")
+        self.assertTrue(len(vcs) >= 1)
+        self.assertIn("hypotheses", vcs[0])
+        # No solver ran: nothing gets a Lean verdict.
+        self.assertTrue(all(v["status"] != "proved" for v in vcs))
+
+    def test_fast_check_reports_elaboration_errors(self):
+        resp = self._post(
+            "/check",
+            {"source": "let x : int{ _ = } = 1\n", "revision": 44, "fast": True},
+        )
+        self.assertFalse(resp["ok"])
+        self.assertTrue(len(cast(List[object], resp["errors"])) >= 1)
 
     def test_unknown_endpoint(self):
         try:

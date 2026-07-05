@@ -252,6 +252,37 @@ def parse_error(text: str) -> Optional[Dict[str, object]]:
     return None
 
 
+def parse_any_error(text: str) -> Optional[Dict[str, object]]:
+    """Like ``parse_error`` but falls back to the first PLAIN compiler
+    error (``Error: Syntax error``, type errors, ...), so the dry-run
+    pass surfaces every compilation failure, not just vox ones.  The
+    plain fallback takes the Error line plus its indented continuation
+    lines as the message."""
+    err = parse_error(text)
+    if err is not None:
+        return err
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        if not line.startswith("Error:"):
+            continue
+        rng: Optional[Range] = None
+        for j in range(i - 1, max(-1, i - 8), -1):
+            rng = parse_loc(lines[j])
+            if rng is not None:
+                break
+        msg = [line[len("Error:") :].strip()]
+        for k in range(i + 1, len(lines)):
+            if lines[k].startswith((" ", "\t")) and lines[k].strip():
+                msg.append(lines[k].strip())
+            else:
+                break
+        result: Dict[str, object] = {"message": " ".join(msg)}
+        if rng is not None:
+            result["start"], result["end"] = rng
+        return result
+    return None
+
+
 def compile_capture(
     source_path: str,
     ocamlc: str,
@@ -285,21 +316,25 @@ def _flag_rejected(output: str, flag: str) -> bool:
     return "unknown option" in output and flag in output
 
 
-def dump_capture(source_path: str, ocamlc: str, cwd: Optional[str]) -> str:
+def dump_capture(
+    source_path: str, ocamlc: str, cwd: Optional[str]
+) -> Tuple[int, str]:
     """Run the VC-shape pass, preferring the provenance flag and caching a
-    one-time fallback to plain -dump-vc for compilers that lack it."""
+    one-time fallback to plain -dump-vc for compilers that lack it.
+    Returns (exit code, output)."""
     global _provenance_supported
     if _provenance_supported is not False:
-        _, out = compile_capture(
+        code, out = compile_capture(
             source_path, ocamlc, [_PROVENANCE_FLAG, "-vox-dry-run"], cwd=cwd
         )
         if _flag_rejected(out, _PROVENANCE_FLAG):
             _provenance_supported = False
         else:
             _provenance_supported = True
-            return out
-    _, out = compile_capture(source_path, ocamlc, ["-dump-vc", "-vox-dry-run"], cwd=cwd)
-    return out
+            return code, out
+    return compile_capture(
+        source_path, ocamlc, ["-dump-vc", "-vox-dry-run"], cwd=cwd
+    )
 
 
 def build_index(
@@ -313,15 +348,20 @@ def build_index(
     {"vcs": [...], "errors": [...], "ok": bool, "raw_dump": str,
      "raw_solve": str|None}
     """
-    dump_out = dump_capture(source_path, ocamlc, cwd=cwd)
+    dump_code, dump_out = dump_capture(source_path, ocamlc, cwd=cwd)
     vcs = parse_dump(dump_out)
     errors: List[Dict[str, object]] = []
     ok = True
     raw_solve: Optional[str] = None
-    # A dry-run can still surface elaboration errors (bad sorts etc.).
-    dry_err = parse_error(dump_out)
+    # The dry-run surfaces every compilation failure: vox elaboration
+    # errors AND plain OCaml ones (syntax, typing) -- the fast editor
+    # pass has no solve step to catch them later.
+    dry_err = parse_any_error(dump_out)
     if dry_err is not None:
         errors.append(dry_err)
+        ok = False
+    elif dump_code != 0:
+        errors.append({"message": "compilation failed (see raw dump)"})
         ok = False
     if lean is not None:
         code, solve_out = compile_capture(

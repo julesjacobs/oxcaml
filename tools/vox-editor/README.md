@@ -27,10 +27,13 @@ python3 server.py --port 8000            # auto-detects ocamlc + pinned lean
 #   (or: python3 server.py --no-lean     # VC shapes only, no solver)
 ```
 
-Then open <http://127.0.0.1:8000/>. Type a program, press **Check**
-(or Ctrl-Enter; there is also an idle-debounce auto-check). Move the
-cursor onto a refinement or into a `[%%vox.lean]` block to drive the
-pane; inside a block, click **Get live Lean goal at cursor**.
+Then open <http://127.0.0.1:8000/>. Type a program — the pane's
+goals and hypotheses follow the buffer as you type (a fast no-Lean
+compile pass, ~250ms debounce; verdicts of unchanged obligations are
+carried over by content) and the full Lean check follows once typing
+pauses (also on **Check** / Ctrl-Enter). Move the cursor onto a
+refinement or into a `[%%vox.lean]` block to drive the pane; inside a
+block, click **Get live Lean goal at cursor**.
 
 > If a local HTTP proxy is set in the environment, start the browser
 > with `NO_PROXY=127.0.0.1` so it reaches the server directly.
@@ -41,7 +44,7 @@ pane; inside a block, click **Get live Lean goal at cursor**.
 |------|------|----------------|
 | 1 | `vc_index.py` | Compile a source file with the built `ocamlc`; parse `-dump-vc -vox-dry-run` output (VC shapes) and the verification-failure error format (goal / hypotheses / counterexample) into JSON. |
 | 2 | `lean_bridge.py` | In-block goals. Recover the generated Lean via a `-vox-solver-path` wrapper, rewrite it self-contained (inline VoxCore), map a block-source cursor to the generated position by verbatim substring search, and query `lean --server`'s `$/lean/plainGoal`. Also a static tier that parses the enclosing theorem. |
-| 3 | `server.py` | stdlib `http.server`. `POST /check` → unified 0-based **regions** (VCs, static block theorems, block outlines) + errors + generated Lean. `POST /goal` → live proof state. `GET` → static assets. |
+| 3 | `server.py` | stdlib `http.server`. `POST /check` → unified 0-based **regions** (VCs, static block theorems, block outlines) + errors + generated Lean; `fast:true` skips the Lean solve for the as-you-type pass. `POST /goal` → live proof state. `GET` → static assets. |
 | 4 | `selection.js` | Pure cursor→region logic: innermost enclosing region, else nearest preceding on the line, else nearest above; block/theorem regions route to the Lean path. Runs in node and the browser. |
 | 5 | `index.html`, `app.js`, `style.css` | The UI. The pane follows the cursor **client-side** (selection.js); server round-trips only on Check / idle / the explicit live-goal button. |
 | 6 | `browser_test.js` | Headless-Chrome smoke test of the assembled page. |

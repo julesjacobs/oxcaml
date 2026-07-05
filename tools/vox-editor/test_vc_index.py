@@ -277,7 +277,8 @@ class TestProvenanceFlagFallback(unittest.TestCase):
         try:
             vc_index._provenance_supported = None
             vc_index.compile_capture = fake_compile
-            out1 = vc_index.dump_capture("x.ml", "ocamlc", cwd=None)
+            code1, out1 = vc_index.dump_capture("x.ml", "ocamlc", cwd=None)
+            self.assertEqual(code1, 0)
             self.assertEqual(out1, DUMP_MULTI_HYP)
             self.assertFalse(vc_index._provenance_supported)
             # First call probed the flag then fell back (two invocations).

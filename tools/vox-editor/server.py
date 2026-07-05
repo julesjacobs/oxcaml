@@ -3,14 +3,18 @@
 
 Endpoints:
 
-  POST /check {source, revision}
+  POST /check {source, revision, fast?}
       Compile the source and return a unified list of REGIONS (0-based
       line/col), the errors, and the generated Lean.  A region is a
       verification condition (with goal/hypotheses/status/counterexample),
       a static block theorem (binders as hypotheses, stated goal), or a
       whole [%%vox.lean] block (for routing/highlight).  The client picks
       the innermost enclosing region as the cursor moves — no server call
-      per keystroke.
+      per cursor move.  With fast:true the Lean solve is skipped: the
+      ~20ms dry-run compile still yields every VC's goal/hypotheses/spans
+      and all elaboration errors, so the client can refresh the pane as
+      the user types (statuses come back "unknown"; the client carries
+      verdicts over by content until the next full check).
 
   POST /goal {source, line, col, revision}
       Live proof state at a 0-based cursor inside a block, via the Lean
@@ -220,9 +224,12 @@ class Handler(BaseHTTPRequestHandler):
         revision = _as_int(body.get("revision", 0))
         endpoint = self._endpoint()
         if endpoint == "/check":
-            self._json(
-                200, build_check_response(source, revision, self.ocamlc, self.lean)
+            fast = bool(body.get("fast", False))
+            resp = build_check_response(
+                source, revision, self.ocamlc, None if fast else self.lean
             )
+            resp["fast"] = fast
+            self._json(200, resp)
         elif endpoint == "/goal":
             line = _as_int(body.get("line", 0))
             col = _as_int(body.get("col", 0))
