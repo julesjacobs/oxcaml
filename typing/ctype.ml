@@ -4002,6 +4002,46 @@ let vox_arrow_has_binder b1 b2 =
   | None, None -> false
   | Some _, _ | _, Some _ -> true
 
+(* vox: normal form of a [Trefine] for cross-boundary comparison.  A via
+   type's DENOTATION is an abstract type's [refines] sort, so an
+   interface's [type t : value refines (iset)] and the implementation's
+   [type t = tree{ bst _ } via elems] must compare equal.  In the impl's
+   env the interface's abstract [t] expands to the via manifest, so a
+   refinement written over it -- [t{ p }] on the abstract side -- is the
+   nested [Trefine (Trefine (tree, [elems], bst), [], p)].  Flatten it
+   exactly as typetexp flattens [set{ p }] at elaboration: append the
+   manifest's maps and push the outer predicate's bound value through
+   them (the layer predicate over the image precomposes the map).  A
+   [Trefine] whose skeleton does not expand to another [Trefine] (the
+   common case, and every within-module use) is returned unchanged, so
+   this is a no-op except at an abstraction boundary. *)
+let rec vox_flatten_view env skel maps pred =
+  match get_desc (try expand_head env skel with _ -> skel) with
+  | Trefine (skel', maps', pred') ->
+    let pred =
+      match maps' with
+      | [] -> pred
+      | _ ->
+        let composite =
+          List.fold_left
+            (fun acc (m : Types.vox_map) -> Refinement.Pfun (m.vm_fn, [ acc ]))
+            Refinement.Pbound maps'
+        in
+        Refinement.subst_bound ~by:composite pred
+    in
+    vox_flatten_view env skel' (maps' @ maps) (Refinement.Pand (pred', pred))
+  | _ -> skel, maps, pred
+
+(* Compare two [Trefine]s up to the boundary flattening above: equal iff,
+   after flattening, their maps and predicates are equal; returns the
+   (flattened) skeletons to recurse on, or [None] if they differ. *)
+let vox_trefine_match env t1 m1 p1 t2 m2 p2 =
+  let s1, m1, p1 = vox_flatten_view env t1 m1 p1 in
+  let s2, m2, p2 = vox_flatten_view env t2 m2 p2 in
+  if Types.vox_maps_equal m1 m2 && Refinement.equal p1 p2
+  then Some (s1, s2)
+  else None
+
 let with_univar_pairs pairs f =
   let old = !univar_pairs in
   univar_pairs := pairs;
@@ -6491,9 +6531,13 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
                 (incr_stage env) t1 t2
           | (Tbox t1, Tbox t2) ->
               moregen inst_nongen variance type_pairs env t1 t2
-          | (Trefine (t1, m1, p1), Trefine (t2, m2, p2))
-            when Types.vox_maps_equal m1 m2 && Refinement.equal p1 p2 ->
-              moregen inst_nongen variance type_pairs env t1 t2
+          | (Trefine (t1, m1, p1), Trefine (t2, m2, p2)) -> (
+              (* vox: flatten an abstraction boundary before comparing --
+                 an interface's [t{ p }] (t abstract, [refines]) reconciles
+                 with the manifest's flattened via form; a no-op otherwise. *)
+              match vox_trefine_match env t1 m1 p1 t2 m2 p2 with
+              | Some (s1, s2) -> moregen inst_nongen variance type_pairs env s1 s2
+              | None -> raise_unexplained_for Moregen)
           | (Tbox t, _) when is_unboxable_ty env t2' ->
               moregen inst_nongen variance type_pairs
                 env t (unbox_ty_exn env t2')

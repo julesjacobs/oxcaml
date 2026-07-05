@@ -170,6 +170,103 @@ val member : (x : int) -> (t : t) -> bool{ _ = (x ∈ t) }
   `refines (iset{ finite _ })`, honest iff the manifest's top layer
   carries the rigidly-equal predicate.
 
+STAGE 3 STATUS (partial — the boundary MACHINERY landed; honest impl
+proving across the boundary is BLOCKED on a binder-sort decision, see
+below):
+
+Shipped and tested:
+- **Boundary type coherence** (`typing/ctype.ml`, `vox_flatten_view` /
+  `vox_trefine_match`, wired into `moregen`): an interface's
+  `Trefine(abstract_t, [], p)` — `type t : value refines (iset)` refined
+  by `t{ p }` — reconciles with the implementation's flattened via form
+  `Trefine(tree, [elems], bst && push(p))`.  The normalizer expands the
+  abstract skeleton to its manifest (visible in the impl's env) and
+  flattens exactly as typetexp does at elaboration (pushing the bound
+  value `_` through the maps).  A no-op except at an abstraction
+  boundary, so every within-module and opaque-seal comparison is
+  unchanged.  Net effect: the `.ml` and `.mli` write the SAME contract
+  text `t{ _ = ins x s }` — the `.mli` never mentions `elems` (the
+  no-leak constraint holds) — and the impl type-checks against the
+  abstract interface.
+- **Honesty / inclusion** (already in `includecore` from the map-record
+  change): a via manifest satisfies `refines (S)` iff its last map's
+  target sort equals `S`; a mismatch (`refines (ibag)` over an `iset`
+  manifest) is REJECTED, the message showing the manifest's OCaml target
+  (`via (elems : iset)`) alongside the sorts.  Fail-closed.
+- **Client through the abstraction**: an abstract `M.t : refines (iset)`
+  binder's `dsort` is the IMAGE (`S_lean "ISet"`) via the existing
+  `refines`-kind path (verified, no new code), so a client binds `M.t`
+  at the set sort, imports `ISet`/`mem`/`ins`/`card` from the unit's
+  VoxSig, and proves membership facts THROUGH the abstraction with no
+  visibility into the tree (`testsuite/tests/vox/mechanics/lean_via_seal.ml`
+  + `lib/via_set.mli`/`.ml`).
+- **Standalone via impl proving** works: a within-module function
+  `add : (x:int) -> (s:t) -> t{ _ = ins x (elems s) }` (explicit `elems`)
+  verifies against the bridging model — the base-binder VC
+  `elems(Node(s,x,Leaf)) = ins x (elems s)` discharges with `s` at the
+  tree sort throughout.
+- **Datatype via targets** (not just ghost sorts): `via (to_list : ilist)`
+  where `ilist` is a local variant now verifies — the block-datatype
+  emission-ordering bug is unblocked by the hash-table stack's on-sight
+  emitter fix (`testsuite/tests/vox/mechanics/lean_via.ml`).
+
+BLOCKED — honest impl proving ACROSS the boundary (`add`/`member` in a
+SEALED unit, proving against the abstract `.mli`'s bare contract rather
+than `assume_unchecked_`):
+- The obstacle is a genuine tension between stage 2's binder-sort choice
+  and this stage.  Stage 2 fixed binder = BASE (`dsort` = skeleton):
+  within a module a via binder is the tree, its invariant is `bst t`
+  (base), and the image is written EXPLICITLY as `elems t`.  But the
+  abstract `.mli` writes the via binder at the IMAGE (`mem x s`, `s` at
+  `ISet`) — it has no other vocabulary.  So the impl, to satisfy the
+  interface, must read its own via param at the image in exactly the
+  contracts the interface dictates, while still constructing results
+  from it at the base (`Node (s, x, Leaf)`).  A single via param thus
+  occurs at BOTH sorts in one VC (`elems (Node (s,..)) = ins x s`: `s`
+  base in the construction, image in `ins x s`).
+- No local push resolves this: substituting `s := elems s` in the goal
+  cannot split one variable across two sorts (it corrupts
+  `Node (s,..)`); pushing the interface's bare param at includemod
+  cannot be gated (an abstract `refines` type and a concrete via
+  abbreviation both present as a `Tconstr` expanding to a via `Trefine`
+  in the impl's env — distinguishing them needs the interface decl's
+  `Vr_sort` kind, not available in the `ctype` comparison); and a
+  per-occurrence sort-directed push is infeasible because Lean spec
+  functions' argument sorts are opaque to vox.
+- The clean fix is IMAGE-binder: make `dsort` of a via type return the
+  image (unifying the impl path with the abstract client path, which
+  already reads the image), and carry the base invariant + the
+  `elems tree = binder` link through the `refine_` unpack.  Then the
+  boundary genuinely "falls out" as this section claims — but it reworks
+  stage 2's base-sort stored-predicate / `binder_facts` representation
+  and its `lean_via.ml` expectations.  Recommend deciding this with the
+  team before pivoting, since it revisits a landed, tested decision.
+- Interim: the demo (`lib/via_set.ml`) implements the operations with
+  `assume_unchecked_` (the declared-interpretation trust class, same as
+  `lib/gset.ml`), so the boundary + client abstraction are exercised
+  honestly; only the manifest's honesty (that `elems` really relates the
+  tree ops to the set ops) is asserted rather than proved, pending
+  image-binder.
+
+Two properties the shipped normalization guarantees (regression-pinned):
+- **Directed, not symmetric.**  `vox_flatten_view` is wired only into
+  `moregen` (the value-INCLUSION channel), never `unify3`/`eqtype`/
+  `mcomp`/`subtype`.  Within a module `Trefine` unification stays rigid,
+  and the flatten is a no-op for a CLIENT (whose env holds no manifest
+  for the abstract `t`), so a client can never unify `t` with
+  `tree{ ... } via ...` — the abstraction stays opaque; only inclusion,
+  in one direction, consumes the manifest expansion.
+- **Real proving across the boundary fails CLOSED.**  A contract that
+  needs the via param at the image while the impl constructs the result
+  from it at the base (`elems (Node (s,..)) = ins x s`) puts one param
+  at two sorts in a single VC; the solver rejects the ill-sorted goal as
+  a verification failure — never a silent mis-verification (pinned by
+  `mechanics/lean_via_boundary_fail.ml`).  So a `refines`-over-`via`
+  interface today supports the type boundary + client + trusted
+  (`assume_unchecked_`) operations; honest impl proving of such
+  operations awaits image-binder (until then, reason in explicit `elems`
+  vocabulary within the module, where proving works — verified).
+
 ## Parameterization
 
 Every ingredient reuses the refines v2 parameterized story
