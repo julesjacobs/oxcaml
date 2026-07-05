@@ -56,6 +56,7 @@ MANIFEST: List[Dict[str, object]] = [
         # (len -> append -> nth), and the editor's on-load default.
         "slug": "nth",
         "source": "demo/lean_nth.ml",
+        "override": "nth.ml",
         "expect": "verify",
         "default": True,
         "title": "Refinement types, by example",
