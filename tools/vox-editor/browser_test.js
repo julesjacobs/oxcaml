@@ -662,6 +662,128 @@ async function main() {
     console.log("ok - live Lean goal fetched");
     assert.ok(live.includes("⊢"), "live goal has a turnstile: " + live.slice(0, 160));
 
+    // The user's fib flow, both reported bugs at once.  Keep the verified
+    // source, then DELETE the [%%vox.lean] block (the fast-doubling lemmas)
+    // exactly as the user did.
+    const fibSrc = await page.evaluate(() => window.__vox.cm.getValue());
+    const deleted = await page.evaluate(() => {
+      const cm = window.__vox.cm;
+      const lines = cm.getValue().split("\n");
+      let s = -1;
+      let e = -1;
+      for (let i = 0; i < lines.length; i++) {
+        // the block OPENER carries "{lean|"; a bare "[%%vox.lean]" in the
+        // header comment must not match (deleting from there would take
+        // the reflected `fib` def with it -> a hard error, not per-VC).
+        if (s < 0 && lines[i].includes("[%%vox.lean {lean|")) s = i;
+        if (s >= 0 && lines[i].includes("|lean}]")) {
+          e = i;
+          break;
+        }
+      }
+      if (s < 0 || e < 0) return null;
+      cm.replaceRange("", { line: s, ch: 0 }, { line: e + 1, ch: 0 });
+      return { s, e };
+    });
+    assert.ok(deleted, "found and deleted the [%%vox.lean] block");
+    // The edit fires both passes on its own; a "failed"/"unproved" status
+    // can ONLY come from the full (Lean) pass -- the fast dry-run never
+    // solves -- so polling for the coexistence below is race-proof.
+    const FAILED = ["failed", "disproved", "unproved"];
+    // BUG 2: on the failing check, the doubling obligations fail but the
+    // rest still PROVE -- the compiler attributes a per-VC verdict, so the
+    // editor keeps green badges on the survivors instead of greying all.
+    const coexist = await waitFor(
+      () =>
+        page.evaluate((FAILED) => {
+          const rs = window.__vox.getRegions().filter((r) => r.kind === "vc");
+          const proved = rs.filter((r) => r.status === "proved").length;
+          const failed = rs.filter((r) => FAILED.includes(r.status)).length;
+          if (proved === 0 || failed === 0) return false;
+          return {
+            proved,
+            failed,
+            // the fib(2k) doubling obligation needs the deleted lemma
+            doublingFailed: rs.filter(
+              (r) =>
+                /fib \(2 \* k\)/.test(r.goal || "") &&
+                FAILED.includes(r.status)
+            ).length,
+            status: document.getElementById("status").textContent,
+          };
+        }, FAILED),
+      90000,
+      "full check attributes per-VC verdicts (proved + failed coexist)"
+    );
+    assert.ok(
+      coexist.doublingFailed > 0,
+      "a fib(2k) obligation is among the failures: " + JSON.stringify(coexist)
+    );
+    // The status bar summarises the split, not a flat "errors".
+    assert.ok(
+      /\d+ unproved \/ \d+ proved/.test(coexist.status),
+      "status summarises partial success: " + coexist.status
+    );
+    console.log(
+      "ok - deleting the block: proved and failed VCs coexist (" +
+        JSON.stringify(coexist) + ")"
+    );
+
+    // BUG 1: RESTORE the block; every proved doubling obligation names the
+    // lemma it used, NOT "<arithmetic>" (which contradicted the fact that
+    // the goal fails without the lemma).
+    await page.evaluate((src) => {
+      window.__vox.setCompact(false);
+      window.__vox.cm.setValue(src); // fires both passes
+    }, fibSrc);
+    await waitFor(
+      async () => {
+        const fast = await page.evaluate(() => window.__vox.getLastCheckFast());
+        const t = await page.$eval("#status", (e) => e.textContent);
+        return fast === false && /verified/.test(t) ? t : false;
+      },
+      60000,
+      "fib verifies again after restoring the block"
+    );
+    // The x doubling obligation: goal is `... = fib (2 * k)` (not `+ 1`).
+    const xPos = await waitFor(
+      () =>
+        page.evaluate(() => {
+          const r = window.__vox.getRegions().find(
+            (x) =>
+              x.kind === "vc" &&
+              /fib \(2 \* k\)/.test(x.goal || "") &&
+              !/fib \(2 \* k \+ 1\)/.test(x.goal || "")
+          );
+          return r ? { line: r.start.line, col: r.start.col } : false;
+        }),
+      10000,
+      "the fib(2k) doubling VC region"
+    );
+    await page.evaluate(
+      (p) => window.__vox.cm.setCursor({ line: p.line, ch: p.col }),
+      xPos
+    );
+    const usedRow = await waitFor(
+      async () =>
+        page.evaluate(() => {
+          const row = document.querySelector("#pane-body .used");
+          return row ? row.textContent : false;
+        }),
+      5000,
+      "used-lemmas row for the doubling obligation"
+    );
+    assert.ok(
+      /fib_double/.test(usedRow),
+      "doubling obligation names its lemma: " + usedRow
+    );
+    assert.ok(
+      !/arithmetic/.test(usedRow),
+      "lemma-backed goal is NOT reported arithmetic-only: " + usedRow
+    );
+    console.log("ok - restored: doubling obligation names fib_double, not <arithmetic>");
+    await page.evaluate(() => window.__vox.setCompact(true));
+
     // Examples dropdown: pick reverse (fully verified, but its borrow/slice
     // framing VCs are ASSUMED). They must badge as "trusted", not the grey
     // "unknown" that reads as "didn't verify".

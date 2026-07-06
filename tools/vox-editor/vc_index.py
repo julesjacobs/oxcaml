@@ -186,6 +186,10 @@ def parse_dump(text: str) -> List[Dict[str, object]]:
         # -vox-dump-vc-provenance): None when absent, a list of names, or []
         # for an arithmetic/logic-only proof.
         used: Optional[List[str]] = None
+        # This VC's own verdict from a FAILED solve dump (-vox-dump-vc-provenance):
+        # "proved" | "unproved" | "disproved" | "failed", or None when the dump
+        # carries no verdict (the dry-run pass, or a successful solve).
+        verdict: Optional[str] = None
         if i < n:
             hyp_line = lines[i].strip()
             rest = hyp_line[len("hypotheses:") :].strip()
@@ -219,6 +223,10 @@ def parse_dump(text: str) -> List[Dict[str, object]]:
                         used = _parse_used(stripped[len("used:") :].strip())
                         i += 1
                         continue
+                    if stripped.startswith("verdict:"):
+                        verdict = stripped[len("verdict:") :].strip() or None
+                        i += 1
+                        continue
                     if section == "scope":
                         entry = parse_scope_line(stripped)
                         if entry is not None:
@@ -245,8 +253,9 @@ def parse_dump(text: str) -> List[Dict[str, object]]:
                 "module_hyp_spans": module_hyp_spans,
                 "scope": scope,
                 "kind": kind,
-                "status": "unknown",
+                "status": verdict if verdict else "unknown",
                 "used": used,
+                "verdict": verdict,
             }
         )
     return vcs
@@ -535,9 +544,7 @@ def solve_capture(
     if _explain_supported is not False:
         flags = base + [_PROVENANCE_FLAG, _EXPLAIN_FLAG]
         code, out = compile_capture(source_path, ocamlc, flags, cwd=cwd)
-        if _flag_rejected(out, _EXPLAIN_FLAG) or _flag_rejected(
-            out, _PROVENANCE_FLAG
-        ):
+        if _flag_rejected(out, _EXPLAIN_FLAG) or _flag_rejected(out, _PROVENANCE_FLAG):
             _explain_supported = False
             return compile_capture(source_path, ocamlc, base, cwd=cwd)
         _explain_supported = True
@@ -640,8 +647,24 @@ def build_index(
                     vc["status"] = "trusted"
         else:
             ok = False
+            # On a failure the compiler still dumps a per-VC verdict block
+            # (under -vox-dump-vc-provenance) BEFORE it raises, in the same VC
+            # order as the dry-run: a Prove VC whose theorem carried no Lean
+            # error is "proved", the failing ones "unproved"/"disproved".  Copy
+            # those verdicts across so still-holding obligations aren't left
+            # grey when a sibling fails.  Assumed VCs are trusted regardless.
+            solve_vcs = parse_dump(solve_out)
+            if len(solve_vcs) == len(vcs):
+                for vc, svc in zip(vcs, solve_vcs):
+                    if svc.get("verdict") is not None:
+                        vc["status"] = svc["status"]
+            for vc in vcs:
+                if vc["kind"] == "assume" and vc["status"] == "unknown":
+                    vc["status"] = "trusted"
             if err is not None:
                 errors.append(err)
+                # The primary error also carries the validated counterexample
+                # and lean message; attach those to its VC (status already set).
                 _attach_failure(vcs, err)
     return {
         "vcs": vcs,

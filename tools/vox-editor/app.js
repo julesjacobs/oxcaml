@@ -93,6 +93,19 @@ function setStatus(cls, text) {
   statusEl.textContent = text;
 }
 
+// A failing full check: when the compiler attributed a per-VC verdict
+// (Bug-2 fix) most obligations may still hold, so summarise "N unproved /
+// M proved" rather than a flat "errors". Falls back to "errors ✗" when no
+// VC carries a proved/failed verdict (a plain compile error, or an old
+// compiler that reports only the first failure).
+function failSummary(regs) {
+  const vcs = (regs || []).filter((r) => r.kind === "vc");
+  const failed = vcs.filter((r) => FAILED_STATUSES.includes(r.status)).length;
+  const proved = vcs.filter((r) => r.status === "proved").length;
+  if (failed + proved === 0) return "errors ✗";
+  return failed + " unproved / " + proved + " proved ✗";
+}
+
 function clearMarks() {
   marks.forEach((m) => m.clear());
   marks = [];
@@ -197,7 +210,7 @@ async function check(fast) {
     } else {
       setStatus(
         resp.ok ? "status-ok" : "status-fail",
-        resp.ok ? "verified ✓" : "errors ✗"
+        resp.ok ? "verified ✓" : failSummary(regions)
       );
     }
     lastCheckFast = !!resp.fast;
@@ -325,9 +338,14 @@ function renderPane() {
 const BADGE_HINT = {
   proved: "Lean proved this obligation",
   failed: "Lean rejected this obligation (see counterexample)",
+  disproved: "Lean rejected this obligation (a counterexample was validated)",
+  unproved: "automation gave up; no counterexample found (may still hold)",
   unknown: "not yet checked",
   trusted: "assumed by construction (borrow/slice framing), not proved",
 };
+
+// The statuses a failing solve attaches to an obligation.
+const FAILED_STATUSES = ["failed", "disproved", "unproved"];
 
 function badge(status) {
   const s = status || "unknown";
@@ -539,7 +557,7 @@ function renderErrors() {
   // A failed VC already shows its red badge + counterexample; the
   // generic "verification failed" error on top is pure duplication.
   const anyFailed = regions.some(
-    (r) => r.kind === "vc" && r.status === "failed"
+    (r) => r.kind === "vc" && FAILED_STATUSES.includes(r.status)
   );
   const shown = errors.filter(
     (e) => !(anyFailed && /vox: verification failed/.test(e.message || ""))

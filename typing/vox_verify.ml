@@ -238,6 +238,16 @@ let lemma_defs : (string * string * Location.t) list ref = ref []
    [dump_vc]. *)
 let used_lemmas : (int, string list) Hashtbl.t = Hashtbl.create 16
 
+(* Per-VC verdicts for a FAILED solve, keyed by position among the
+   [Prove] VCs (as [used_lemmas] is).  Populated by [run_lean] only when
+   [-vox-dump-vc-provenance] is on and the solve failed with all errors
+   attributable to VC theorems: a VC whose theorem line carried no error
+   is "proved"; the first failing one is classified ("disproved" if a
+   counterexample validated, else "unproved") and the rest are "unproved".
+   Read by [dump_vc], so the editor sees which obligations still hold when
+   one fails. *)
+let vc_verdicts : (int, string) Hashtbl.t = Hashtbl.create 16
+
 (* Program-point states for the editor ([-vox-dump-states]): the
    scope-filtered fact context at the ENTRY of each expression the
    walker visits, keyed by the expression's span.  The innermost span
@@ -322,6 +332,7 @@ let reset () =
   spec_defs := [];
   lemma_defs := [];
   Hashtbl.reset used_lemmas;
+  Hashtbl.reset vc_verdicts;
   point_states := [];
   Hashtbl.reset toplevel_names;
   lemma_sigs := [];
@@ -5540,7 +5551,8 @@ let lean_file ?(witness = "") ?(explain = false) vcs =
        (* An error on a header line maps to no VC (and a negative
           index would make [List.nth_opt] raise). *)
        if line < first_line then None else List.nth_opt vcs (line - first_line)),
-    block_of_line )
+    block_of_line,
+    first_line )
 ;;
 
 (* Counterexample rendering: a failed [grind] prints, among its goal
@@ -5957,7 +5969,7 @@ let validate_witness ~fallback_loc vc assigns =
         ^ String.concat ""
             (List.mapi (fun i row -> wc_theorem_text ~tac vc row i) candidates)
       in
-      let contents, _, _ = lean_file ~witness:wtext [ vc ] in
+      let contents, _, _, _ = lean_file ~witness:wtext [ vc ] in
       let n = List.length candidates in
       (match run_witness_check ~fallback_loc contents ~n with
        | [] -> None
@@ -6009,12 +6021,16 @@ let classify_and_raise vc ~assigns ~msg =
    grind's pattern-registration hint for an [@[grind]] declaration lacking
    a [grind_pattern] -- not a VC proof, so it is skipped.  Every other
    block is one VC's proof, emitted in the same order as the theorems, so
-   the k-th kept block is the k-th VC.  The [usr <name>] tokens in the
-   first apply are the user facts grind used ([grind only [usr a, usr b]]);
-   no such token ("grind only") is an arithmetic/logic-only proof.  A
-   [usr] name is already the source-visible name: an [@@vox.lemma]'s
-   solver-side name is its OCaml identifier, and block/prelude theorem
-   names pass through verbatim. *)
+   the k-th kept block is the k-th VC.  The named lemmas grind used are
+   the entries of its [grind only [...]] suggestion; a bare "grind only"
+   with no bracket is an arithmetic/logic-only proof.  Each entry may
+   carry a use marker before the name -- [usr foo] for a user lemma
+   registered by [grind_pattern] (an [@@vox.lemma]), [= foo] for an
+   equational lemma (an [@[grind]]/[@[grind =]] theorem, e.g. one from a
+   [%%vox.lean] block that fires by ambient E-matching) -- and we take
+   the name after any such marker.  The name is already source-visible:
+   an [@@vox.lemma]'s solver-side name is its OCaml identifier, and
+   block/prelude theorem names pass through verbatim. *)
 let parse_grind_used out_file =
   let lines =
     let ic = open_in out_file in
@@ -6043,8 +6059,12 @@ let parse_grind_used out_file =
   let is_indented l =
     String.length l > 0 && (l.[0] = ' ' || l.[0] = '\t')
   in
-  (* the [usr <name>] user facts named in [s], in order of appearance *)
-  let usr_names s =
+  (* the lemma names in [s]'s [grind only [...]] suggestion, in order of
+     appearance.  No bracket ("grind only") is an arithmetic/logic-only
+     proof (the empty list).  Each comma-separated entry is a use marker
+     ([usr], [=], [=_], [<-], ...) followed by the lemma name; we take the
+     trailing identifier of each entry. *)
+  let used_names s =
     let m = String.length s in
     let is_id c =
       (c >= 'a' && c <= 'z')
@@ -6052,20 +6072,40 @@ let parse_grind_used out_file =
       || (c >= '0' && c <= '9')
       || c = '_' || c = '\'' || c = '.'
     in
-    let out = ref [] in
-    let i = ref 0 in
-    while !i + 4 <= m do
-      if String.equal (String.sub s !i 4) "usr "
-      then begin
-        let start = !i + 4 in
-        let j = ref start in
-        while !j < m && is_id s.[!j] do incr j done;
-        if !j > start then out := String.sub s start (!j - start) :: !out;
-        i := !j
-      end
-      else incr i
-    done;
-    List.rev !out
+    let is_id_start c =
+      (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c = '_'
+    in
+    let opener = "only [" in
+    let ol = String.length opener in
+    let rec find i =
+      if i + ol > m then None
+      else if String.equal (String.sub s i ol) opener then Some (i + ol)
+      else find (i + 1)
+    in
+    match find 0 with
+    | None -> []
+    | Some start ->
+      let j = ref start in
+      while !j < m && s.[!j] <> ']' do incr j done;
+      let body = String.sub s start (!j - start) in
+      List.filter_map
+        (fun item ->
+          (* the lemma name is the last identifier token of the entry,
+             after its use marker; scan from the right. *)
+          let n = String.length item in
+          let e = ref n in
+          while !e > 0 && not (is_id item.[!e - 1]) do decr e done;
+          let b = ref !e in
+          while !b > 0 && is_id item.[!b - 1] do decr b done;
+          (* [#<hex>] is grind's name for an anonymous local fact, not a
+             source-referenceable lemma -- drop it (so does a def-unfold
+             like [fib], but that IS a named declaration, so it stays). *)
+          if !e > !b
+             && is_id_start item.[!b]
+             && not (!b > 0 && item.[!b - 1] = '#')
+          then Some (String.sub item !b (!e - !b))
+          else None)
+        (String.split_on_char ',' body)
   in
   let blocks = ref [] in
   let i = ref 0 in
@@ -6089,7 +6129,7 @@ let parse_grind_used out_file =
       done;
       let fa = Buffer.contents first in
       if !apply_count >= 1 && not (contains ~sub:"for pattern" fa)
-      then blocks := usr_names fa :: !blocks;
+      then blocks := used_names fa :: !blocks;
       i := !j
     end
     else incr i
@@ -6111,7 +6151,7 @@ let run_lean vcs =
       | [], [], (_, _, loc) :: _ -> loc
       | [], [], [] -> assert false
     in
-    let contents, vc_of_line, block_of_line = lean_file vcs in
+    let contents, vc_of_line, block_of_line, first_line = lean_file vcs in
     let env_prefix =
       if !toplevel_active
       then ""
@@ -6234,6 +6274,65 @@ let run_lean vcs =
             | Some i -> String.sub m i (String.length m - i)
             | None -> m
           in
+          (* Under the provenance dump (editor mode), attribute a verdict to
+             every Prove VC before raising: the theorem lines that carried a
+             Lean error are the failed obligations, the rest are proved.  We
+             trust this only when EVERY error lands on a VC theorem -- a
+             seal/block/reflect/import error can abort or cascade, which would
+             make "everything else proved" untrue -- otherwise the table stays
+             empty and the single-error behaviour below is unchanged. *)
+          if !Clflags.vox_dump_vc_provenance
+          then begin
+            let errored_lines =
+              let ic = open_in out_file in
+              let acc = ref [] in
+              (try
+                 while true do
+                   let l = input_line ic in
+                   if is_file_line l && error_marker l <> None
+                   then begin
+                     let rest =
+                       String.sub l
+                         (String.length in_file + 1)
+                         (String.length l - String.length in_file - 1)
+                     in
+                     match String.index_opt rest ':' with
+                     | Some i ->
+                       (match int_of_string_opt (String.sub rest 0 i) with
+                        | Some n -> acc := n :: !acc
+                        | None -> ())
+                     | None -> ()
+                   end
+                 done
+               with End_of_file -> ());
+              close_in ic;
+              List.rev !acc
+            in
+            let is_vc l =
+              match vc_of_line l with Some _ -> true | None -> false
+            in
+            if errored_lines <> [] && List.for_all is_vc errored_lines
+            then begin
+              let errored_idx = List.map (fun l -> l - first_line) errored_lines in
+              let first_failed = List.fold_left min max_int errored_idx in
+              List.iteri
+                (fun k vc ->
+                  let verdict =
+                    if not (List.mem k errored_idx)
+                    then "proved"
+                    else if k = first_failed
+                    then (
+                      match
+                        validate_witness ~fallback_loc:vc.vc_loc vc assigns
+                      with
+                      | Some _ -> "disproved"
+                      | None -> "unproved")
+                    else "unproved"
+                  in
+                  Hashtbl.replace vc_verdicts k verdict)
+                vcs
+            end
+          end;
           match !error_line with
           | None ->
             (* No per-theorem diagnostic: the solver itself failed
@@ -6351,7 +6450,7 @@ let run_lean vcs =
              theorems, hence their blocks, are in [vcs] order); attribute
              only when the counts line up, so a parse surprise degrades to
              "no used line" rather than a mislabelled one. *)
-          let contents2, _, _ = lean_file ~explain:true vcs in
+          let contents2, _, _, _ = lean_file ~explain:true vcs in
           let in2 = Filename.temp_file "vox" ".lean" in
           let out2 = Filename.temp_file "vox" ".out" in
           Misc.try_finally
@@ -6548,12 +6647,12 @@ let dump_state
       end)
 ;;
 
-let dump_vc ppf ?used vc =
+let dump_vc ppf ?used ?verdict vc =
   with_vc_display vc @@ fun () ->
   let scope = scope_entries vc in
   Format.fprintf
     ppf
-    "@[<v 2>%a: vox VC%s:@ goal: %a%s@ hypotheses:%t%t%t@]@."
+    "@[<v 2>%a: vox VC%s:@ goal: %a%s@ hypotheses:%t%t%t%t@]@."
     Location.print_loc
     vc.vc_loc
     (match vc.vc_kind with
@@ -6603,6 +6702,15 @@ let dump_vc ppf ?used vc =
            | [] -> "<arithmetic>"
            | _ -> String.concat ", " names)
       | _ -> ())
+    (fun ppf ->
+      (* On a FAILED solve under [-vox-dump-vc-provenance]: this VC's own
+         verdict, so the editor can badge the obligations that still hold
+         when a sibling fails.  Absent on success (every Prove VC proved)
+         and under plain [-dump-vc]. *)
+      match verdict with
+      | Some v when !Clflags.vox_dump_vc_provenance ->
+        Format.fprintf ppf "@ verdict: %s" v
+      | _ -> ())
 ;;
 
 let discharge () =
@@ -6650,15 +6758,15 @@ let discharge () =
       let prove_idx = ref 0 in
       List.iter
         (fun vc ->
-          let used =
+          let used, verdict =
             match vc.vc_kind with
             | Prove ->
-              let u = Hashtbl.find_opt used_lemmas !prove_idx in
+              let i = !prove_idx in
               incr prove_idx;
-              u
-            | Runtime_check | Assume -> None
+              Hashtbl.find_opt used_lemmas i, Hashtbl.find_opt vc_verdicts i
+            | Runtime_check | Assume -> None, None
           in
-          dump_vc Format.err_formatter ?used vc)
+          dump_vc Format.err_formatter ?used ?verdict vc)
         all
     end;
     if !Clflags.vox_dump_states
@@ -6669,10 +6777,16 @@ let discharge () =
   else if !Clflags.vox_explain_proofs
   then begin
     (* The used-lemma report exists only after the solver runs, so solve
-       BEFORE dumping under this flag; a failing solve raises here, as in
-       the default order below. *)
-    run_lean (List.filter needs_proof all);
-    dump_all ()
+       BEFORE dumping under this flag.  A failing solve raises, as in the
+       default order below -- but under the provenance dump (editor mode)
+       [run_lean] first records each VC's verdict, so we still dump (with
+       those verdicts) before re-raising, letting the editor badge the
+       obligations that held. *)
+    match run_lean (List.filter needs_proof all) with
+    | () -> dump_all ()
+    | exception exn ->
+      if !Clflags.vox_dump_vc_provenance then dump_all ();
+      raise exn
   end
   else begin
     dump_all ();

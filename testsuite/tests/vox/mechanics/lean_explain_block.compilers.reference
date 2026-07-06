@@ -1,0 +1,14 @@
+File "lean_explain_block.ml", line 30, characters 60-71: vox VC:
+  goal: f (2 * k) = 2 * k  @ 30.60-30.71
+  hypotheses:
+  k >= 0  @ 30.12-30.13
+  scope:
+  k : int  ~>  Int  @ 30.12-30.13
+  used: f_id
+File "lean_explain_block.ml", line 33, characters 55-62: vox VC:
+  goal: x + 1 >= 0  @ 33.55-33.62
+  hypotheses:
+  x > 0  @ 33.11-33.12
+  scope:
+  x : int  ~>  Int  @ 33.11-33.12
+  used: <arithmetic>

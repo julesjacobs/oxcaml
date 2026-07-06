@@ -260,6 +260,7 @@ class TestParseDump(unittest.TestCase):
                 "kind": "prove",
                 "status": "unknown",
                 "used": None,
+                "verdict": None,
             },
         )
         self.assertEqual(vcs[1]["goal"], "(x + 1) = (x + 1)")
@@ -650,6 +651,61 @@ class TestParseUsed(unittest.TestCase):
             vc_index.parse_dump(text)[0]["used"],
             ["lemma_a", "block_thm", "prelude_fact"],
         )
+
+
+# --- per-VC verdicts on a FAILED solve ("verdict:" line) ------------------
+
+# Byte-exact from mechanics/lean_explain_fail.compilers.reference (the dump
+# portion, before the raised Error): two proved obligations, one disproved
+# (the first failure), one unproved (the second failure).
+DUMP_VERDICTS = """\
+File "lean_explain_fail.ml", line 24, characters 53-60: vox VC:
+  goal: x + 1 >= 0  @ 24.53-24.60
+  hypotheses:
+  x > 0  @ 24.9-24.10
+  scope:
+  x : int  ~>  Int  @ 24.9-24.10
+  verdict: proved
+File "lean_explain_fail.ml", line 26, characters 45-46: vox VC:
+  goal: 0 = 5  @ 26.45-26.46
+  hypotheses: <none>
+  verdict: disproved
+File "lean_explain_fail.ml", line 28, characters 54-61: vox VC:
+  goal: y - 1 >= 2  @ 28.54-28.61
+  hypotheses:
+  y >= 3  @ 28.9-28.10
+  scope:
+  y : int  ~>  Int  @ 28.9-28.10
+  verdict: proved
+File "lean_explain_fail.ml", line 30, characters 45-46: vox VC:
+  goal: 0 = 7  @ 30.45-30.46
+  hypotheses: <none>
+  verdict: unproved
+"""
+
+
+class TestParseVerdict(unittest.TestCase):
+    def test_verdict_sets_status(self):
+        vcs = vc_index.parse_dump(DUMP_VERDICTS)
+        self.assertEqual(len(vcs), 4)
+        self.assertEqual(
+            [vc["status"] for vc in vcs],
+            ["proved", "disproved", "proved", "unproved"],
+        )
+        self.assertEqual(
+            [vc["verdict"] for vc in vcs],
+            ["proved", "disproved", "proved", "unproved"],
+        )
+        # the verdict line does not leak into hypotheses/scope
+        self.assertEqual(vcs[1]["hypotheses"], [])
+        self.assertEqual(vcs[0]["hypotheses"], ["x > 0"])
+
+    def test_verdict_absent_is_unknown(self):
+        # a dump without verdict lines (dry-run, or a successful solve)
+        # leaves status "unknown" and verdict None
+        vcs = vc_index.parse_dump(DUMP_USED)
+        self.assertEqual(vcs[0]["status"], "unknown")
+        self.assertIsNone(vcs[0]["verdict"])
 
 
 if __name__ == "__main__":
