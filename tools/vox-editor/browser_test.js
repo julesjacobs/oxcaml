@@ -729,6 +729,46 @@ async function main() {
         JSON.stringify(coexist) + ")"
     );
 
+    // Visual contract, part 1: an UNPROVED goal (no validated
+    // counterexample) underlines DASHED red.  Cursor onto the failing
+    // doubling VC first so CodeMirror renders that line's marker.
+    const upos = await page.evaluate((FAILED) => {
+      const r = window.__vox
+        .getRegions()
+        .find(
+          (x) =>
+            x.kind === "vc" &&
+            x.status === "unproved" &&
+            /fib \(2 \* k\)/.test(x.goal || "")
+        );
+      return r ? { line: r.start.line, col: r.start.col } : false;
+    }, FAILED);
+    assert.ok(upos, "an unproved doubling VC region exists");
+    await page.evaluate((p) => window.__vox.cm.setCursor(p), upos);
+    const unprovedMark = await waitFor(
+      () =>
+        page.evaluate(() => {
+          const el = document.querySelector(".vc-unproved");
+          if (!el) return false;
+          const s = getComputedStyle(el);
+          return { style: s.borderBottomStyle, color: s.borderBottomColor };
+        }),
+      5000,
+      "the .vc-unproved underline"
+    );
+    assert.strictEqual(
+      unprovedMark.style,
+      "dashed",
+      "unproved underline is dashed: " + JSON.stringify(unprovedMark)
+    );
+    // No solid-red or wavy line masquerading as this failure.
+    assert.strictEqual(
+      await page.$(".vc-failed"),
+      null,
+      "no legacy solid-red .vc-failed underline here"
+    );
+    console.log("ok - unproved goal underlines DASHED red:", JSON.stringify(unprovedMark));
+
     // BUG 1: RESTORE the block; every proved doubling obligation names the
     // lemma it used, NOT "<arithmetic>" (which contradicted the fact that
     // the goal fails without the lemma).
@@ -782,6 +822,92 @@ async function main() {
       "lemma-backed goal is NOT reported arithmetic-only: " + usedRow
     );
     console.log("ok - restored: doubling obligation names fib_double, not <arithmetic>");
+    await page.evaluate(() => window.__vox.setCompact(false));
+
+    // Visual contract, part 2: a DISPROVED goal (Lean-validated
+    // counterexample) underlines SOLID red -- the SAME red as the dashed
+    // unproved line above, but solid, so the two failure kinds are
+    // distinguishable at a glance -- and surfaces the counterexample.
+    await page.evaluate(() => {
+      const s = document.getElementById("examples");
+      s.value = "counterexample";
+      s.dispatchEvent(new Event("change"));
+    });
+    await waitFor(
+      async () => {
+        const fast = await page.evaluate(() => window.__vox.getLastCheckFast());
+        const t = await page.$eval("#status", (e) => e.textContent);
+        return fast === false && /unproved|errors/.test(t) ? t : false;
+      },
+      60000,
+      "counterexample example fails on the full pass"
+    );
+    const dpos = await waitFor(
+      () =>
+        page.evaluate(() => {
+          const r = window.__vox
+            .getRegions()
+            .find((x) => x.kind === "vc" && x.status === "disproved");
+          return r ? { line: r.start.line, col: r.start.col } : false;
+        }),
+      10000,
+      "a disproved VC region"
+    );
+    await page.evaluate((p) => window.__vox.cm.setCursor(p), dpos);
+    const disprovedMark = await waitFor(
+      () =>
+        page.evaluate(() => {
+          const el = document.querySelector(".vc-disproved");
+          if (!el) return false;
+          const s = getComputedStyle(el);
+          return { style: s.borderBottomStyle, color: s.borderBottomColor };
+        }),
+      5000,
+      "the .vc-disproved underline"
+    );
+    assert.strictEqual(
+      disprovedMark.style,
+      "solid",
+      "disproved underline is solid: " + JSON.stringify(disprovedMark)
+    );
+    // Same red as the unproved line, so both read as "failed"...
+    assert.strictEqual(
+      disprovedMark.color,
+      unprovedMark.color,
+      "disproved and unproved share the red fail colour: " +
+        JSON.stringify({ disprovedMark, unprovedMark })
+    );
+    // ...but solid vs dashed keeps them distinct.
+    assert.notStrictEqual(
+      disprovedMark.style,
+      unprovedMark.style,
+      "disproved (solid) is visually distinct from unproved (dashed)"
+    );
+    // The validated counterexample is surfaced in the pane, labelled so.
+    const cexPane = await waitFor(
+      async () => {
+        const t = await page.$eval("#pane-body", (e) => e.textContent);
+        return /counterexample \(validated\)/.test(t) ? t : false;
+      },
+      5000,
+      "validated counterexample in the pane"
+    );
+    assert.ok(
+      /goal is false when/.test(cexPane),
+      "the counterexample shows a falsifying assignment: " + cexPane.slice(0, 160)
+    );
+    // The goal badge reads 'disproved', with a solid-filled pill.
+    const dBadge = await page.evaluate(() => {
+      const el = document.querySelector("#pane-body .badge-disproved");
+      if (!el) return null;
+      const s = getComputedStyle(el);
+      return { text: el.textContent, border: s.borderBottomStyle };
+    });
+    assert.ok(dBadge && /disproved/.test(dBadge.text), "badge reads disproved: " + JSON.stringify(dBadge));
+    console.log(
+      "ok - disproved goal underlines SOLID red + validated counterexample surfaced " +
+        JSON.stringify(disprovedMark)
+    );
     await page.evaluate(() => window.__vox.setCompact(true));
 
     // Examples dropdown: pick reverse (fully verified, but its borrow/slice

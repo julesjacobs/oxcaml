@@ -129,14 +129,19 @@ main { flex: 1; display: flex; min-height: 0; }
 
 /* VC markers layered over the source. */
 .vc-proved { border-bottom: 2px solid var(--vc-ok-line); }
-.vc-failed { border-bottom: 2px solid var(--vc-fail-line); }
-/* Disproved: a counterexample was validated -- the goal is genuinely
-   false.  A solid red line, like the legacy "failed". */
+/* Two shades of failure, deliberately distinct at a glance.
+   Disproved: a counterexample was Lean-VALIDATED -- the goal is
+   genuinely false -- so a confident SOLID red line, with the
+   counterexample surfaced in the pane. */
 .vc-disproved { border-bottom: 2px solid var(--vc-fail-line); }
-/* Unproved: automation gave up but found no counterexample; the goal
-   MAY still hold.  A wavy amber line -- not the confident red of a
-   disproof, not the grey of "not checked". */
-.vc-unproved { border-bottom: 2px wavy var(--warn); }
+/* Unproved / failed: the obligation did not go through, but NO
+   counterexample was validated (automation gave up, or a rejection we
+   could not classify) -- so a DASHED red line: the same red "this
+   failed", broken to say "no witness, it may still hold".  Distinct
+   from the solid-red disproof, the dashed-AMBER trusted line, and the
+   dotted-grey unknown. */
+.vc-unproved,
+.vc-failed { border-bottom: 2px dashed var(--vc-fail-line); }
 .vc-unknown { border-bottom: 2px dotted var(--muted); }
 /* Assumed (borrow/slice framing): trusted by construction, never solved.
    A dashed amber line reads as "taken on trust", distinct from the dotted
@@ -190,9 +195,19 @@ main { flex: 1; display: flex; min-height: 0; }
   margin-left: 6px;
 }
 .badge-proved { background: var(--badge-ok-bg); color: var(--ok); }
-.badge-failed { background: var(--badge-fail-bg); color: var(--fail); }
+/* Disproved: SOLID red fill -- a validated counterexample. */
 .badge-disproved { background: var(--badge-fail-bg); color: var(--fail); }
-.badge-unproved { background: var(--badge-trusted-bg); color: var(--warn); }
+/* Unproved / failed: red, but OUTLINED with a dashed red border and no
+   fill -- echoing the dashed source underline, distinct from the solid
+   fill of a disproof.  Padding drops by the 1px border so the pill
+   keeps the height of the filled badges. */
+.badge-unproved,
+.badge-failed {
+  background: transparent;
+  color: var(--fail);
+  border: 1px dashed var(--vc-fail-line);
+  padding: 0 6px;
+}
 .badge-unknown { background: var(--badge-unknown-bg); color: var(--muted); }
 .badge-trusted { background: var(--badge-trusted-bg); color: var(--warn); }
 .placeholder { color: var(--muted); }

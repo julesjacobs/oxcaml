@@ -337,7 +337,7 @@ function renderPane() {
 
 const BADGE_HINT = {
   proved: "Lean proved this obligation",
-  failed: "Lean rejected this obligation (see counterexample)",
+  failed: "Lean rejected this obligation; no counterexample was validated",
   disproved: "Lean rejected this obligation (a counterexample was validated)",
   unproved: "automation gave up; no counterexample found (may still hold)",
   unknown: "not yet checked",
