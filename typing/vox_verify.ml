@@ -229,6 +229,15 @@ let spec_defs : Vox_reflect.spec_def list ref = ref []
    location (for error attribution). *)
 let lemma_defs : (string * string * Location.t) list ref = ref []
 
+(* [-vox-explain-proofs]: the lemmas grind reported using to close each
+   PROVED obligation, keyed by the VC's position among the [Prove]-kind
+   VCs passed to [run_lean] (in order).  [Some []] means grind closed it
+   by arithmetic/logic alone; a missing key means the solver was not run
+   or the suggestion could not be attributed.  Populated by [run_lean]
+   only when the flag is on and the whole file verified; read by
+   [dump_vc]. *)
+let used_lemmas : (int, string list) Hashtbl.t = Hashtbl.create 16
+
 (* Program-point states for the editor ([-vox-dump-states]): the
    scope-filtered fact context at the ENTRY of each expression the
    walker visits, keyed by the expression's span.  The innermost span
@@ -312,6 +321,7 @@ let reset () =
   poly_heads := [];
   spec_defs := [];
   lemma_defs := [];
+  Hashtbl.reset used_lemmas;
   point_states := [];
   Hashtbl.reset toplevel_names;
   lemma_sigs := [];
@@ -5021,7 +5031,7 @@ let cmi_export_of_structure (str : structure) (sg : Types.signature) =
 ;;
 
 
-let lean_theorem buf i vc =
+let lean_theorem ?(explain = false) buf i vc =
   Buffer.add_string buf (Printf.sprintf "theorem vc_%d " i);
   let seen = Hashtbl.create 16 in
   List.iter
@@ -5123,12 +5133,19 @@ let lean_theorem buf i vc =
     vc.vc_facts;
   Buffer.add_string buf ": ";
   lean_of_pred buf vc.vc_goal;
-  Buffer.add_string buf " := by grind\n"
+  (* [grind?] proves the goal exactly as [grind] would AND reports the
+     user facts it used -- but ONLY when it succeeds: on an unprovable
+     goal it inserts [sorry] and succeeds with a warning, which would be
+     unsound as a verifier.  So [grind?] is used purely for the
+     [-vox-explain-proofs] REPORT, in a second pass over a file [grind]
+     has already fully verified (see [run_lean]); the verdict always
+     comes from [grind]. *)
+  Buffer.add_string buf (if explain then " := by grind?\n" else " := by grind\n")
 ;;
 
 (* Returns the file contents and, per theorem, the 1-based line it
    occupies (for mapping lean's error locations back to VCs). *)
-let lean_file ?(witness = "") vcs =
+let lean_file ?(witness = "") ?(explain = false) vcs =
   let buf = Buffer.create 1024 in
   let needs_voxu =
     List.exists
@@ -5347,10 +5364,12 @@ let lean_file ?(witness = "") vcs =
   (* Witness-check mode ([witness] non-empty): emit the given check
      theorems in place of the VC theorems and the seal -- the header
      and prelude are identical, so a validated witness is checked
-     against exactly the theory the failed VC was discharged in. *)
+     against exactly the theory the failed VC was discharged in.
+     [explain] swaps grind for grind? on the normal path (the
+     used-lemmas report pass; never combined with witness mode). *)
   if String.equal witness ""
   then (
-    List.iteri (fun i vc -> lean_theorem buf i vc) vcs;
+    List.iteri (fun i vc -> lean_theorem ~explain buf i vc) vcs;
     (match self_vp with
      | Some vp ->
        Buffer.add_string buf
@@ -5839,6 +5858,101 @@ let classify_and_raise vc ~assigns ~msg =
       (if String.equal msg "" then "" else "\n(lean: " ^ msg ^ ")")
 ;;
 
+(* [-vox-explain-proofs]: parse the [grind?] used-fact suggestions from a
+   SUCCESSFUL solver run.  Lean prints, per proved goal, a block headed
+   "Try this:"/"Try these:"; the first "[apply] ..." line under it is the
+   canonical suggestion.  A first apply that mentions "for pattern" is
+   grind's pattern-registration hint for an [@[grind]] declaration lacking
+   a [grind_pattern] -- not a VC proof, so it is skipped.  Every other
+   block is one VC's proof, emitted in the same order as the theorems, so
+   the k-th kept block is the k-th VC.  The [usr <name>] tokens in the
+   first apply are the user facts grind used ([grind only [usr a, usr b]]);
+   no such token ("grind only") is an arithmetic/logic-only proof.  A
+   [usr] name is already the source-visible name: an [@@vox.lemma]'s
+   solver-side name is its OCaml identifier, and block/prelude theorem
+   names pass through verbatim. *)
+let parse_grind_used out_file =
+  let lines =
+    let ic = open_in out_file in
+    let acc = ref [] in
+    (try
+       while true do
+         acc := input_line ic :: !acc
+       done
+     with End_of_file -> ());
+    close_in ic;
+    Array.of_list (List.rev !acc)
+  in
+  let n = Array.length lines in
+  let contains ~sub s =
+    let m = String.length sub in
+    let rec at i =
+      i + m <= String.length s
+      && (String.equal (String.sub s i m) sub || at (i + 1))
+    in
+    at 0
+  in
+  let is_header l =
+    let t = String.trim l in
+    String.equal t "Try this:" || String.equal t "Try these:"
+  in
+  let is_indented l =
+    String.length l > 0 && (l.[0] = ' ' || l.[0] = '\t')
+  in
+  (* the [usr <name>] user facts named in [s], in order of appearance *)
+  let usr_names s =
+    let m = String.length s in
+    let is_id c =
+      (c >= 'a' && c <= 'z')
+      || (c >= 'A' && c <= 'Z')
+      || (c >= '0' && c <= '9')
+      || c = '_' || c = '\'' || c = '.'
+    in
+    let out = ref [] in
+    let i = ref 0 in
+    while !i + 4 <= m do
+      if String.equal (String.sub s !i 4) "usr "
+      then begin
+        let start = !i + 4 in
+        let j = ref start in
+        while !j < m && is_id s.[!j] do incr j done;
+        if !j > start then out := String.sub s start (!j - start) :: !out;
+        i := !j
+      end
+      else incr i
+    done;
+    List.rev !out
+  in
+  let blocks = ref [] in
+  let i = ref 0 in
+  while !i < n do
+    if is_header lines.(!i)
+    then begin
+      (* the first "[apply]" line plus its wrapped continuation (up to the
+         second "[apply]" alternative or the end of the indented body) *)
+      let j = ref (!i + 1) in
+      let apply_count = ref 0 in
+      let first = Buffer.create 64 in
+      while !j < n && is_indented lines.(!j) && not (is_header lines.(!j)) do
+        let l = lines.(!j) in
+        if contains ~sub:"[apply]" l then incr apply_count;
+        if !apply_count = 1
+        then begin
+          Buffer.add_char first ' ';
+          Buffer.add_string first l
+        end;
+        incr j
+      done;
+      let fa = Buffer.contents first in
+      if !apply_count >= 1 && not (contains ~sub:"for pattern" fa)
+      then blocks := usr_names fa :: !blocks;
+      i := !j
+    end
+    else incr i
+  done;
+  List.rev !blocks
+;;
+
 let run_lean vcs =
   (* Reflected definitions are checked (termination included) even when
      the module has no VCs of its own: a rejected definition must fail
@@ -6078,6 +6192,46 @@ let run_lean vcs =
                   Location.raise_errorf ~loc:fallback_loc
                     "vox: verification failed (lean): %s"
                     (if String.equal msg "" then "<no output>" else msg)))
+        end
+        else if !Clflags.vox_explain_proofs
+        then begin
+          (* Verification SUCCEEDED and [-vox-explain-proofs] is on: run a
+             SECOND pass with [grind?] purely to harvest the used-fact
+             report.  [grind?] is unsound as a verifier (it [sorry]s an
+             unprovable goal and succeeds), so it must never decide the
+             verdict; but this file has just fully verified under [grind],
+             so every goal is provable and [grind?] closes each with a
+             [grind only [...]] suggestion.  Failure of this pass only
+             degrades the report (verdict already stands), so it never
+             raises.  Attribute each suggestion to its VC by position (the
+             theorems, hence their blocks, are in [vcs] order); attribute
+             only when the counts line up, so a parse surprise degrades to
+             "no used line" rather than a mislabelled one. *)
+          let contents2, _, _ = lean_file ~explain:true vcs in
+          let in2 = Filename.temp_file "vox" ".lean" in
+          let out2 = Filename.temp_file "vox" ".out" in
+          Misc.try_finally
+            ~always:(fun () ->
+              Misc.remove_file in2;
+              Misc.remove_file out2)
+            (fun () ->
+              let oc = open_out in2 in
+              output_string oc contents2;
+              close_out oc;
+              let cmd2 =
+                Printf.sprintf "cd %s && %s%s %s > %s 2>&1"
+                  (Filename.quote (Filename.dirname in2))
+                  env_prefix
+                  (Filename.quote (lean_command ()))
+                  (Filename.quote in2) (Filename.quote out2)
+              in
+              ignore (Sys.command cmd2 : int);
+              let blocks = parse_grind_used out2 in
+              if List.length blocks = List.length vcs
+              then
+                List.iteri
+                  (fun k names -> Hashtbl.replace used_lemmas k names)
+                  blocks)
         end)
 ;;
 
@@ -6250,12 +6404,12 @@ let dump_state
       end)
 ;;
 
-let dump_vc ppf vc =
+let dump_vc ppf ?used vc =
   with_vc_display vc @@ fun () ->
   let scope = scope_entries vc in
   Format.fprintf
     ppf
-    "@[<v 2>%a: vox VC%s:@ goal: %a%s@ hypotheses:%t%t@]@."
+    "@[<v 2>%a: vox VC%s:@ goal: %a%s@ hypotheses:%t%t%t@]@."
     Location.print_loc
     vc.vc_loc
     (match vc.vc_kind with
@@ -6295,6 +6449,16 @@ let dump_vc ppf vc =
         Format.fprintf ppf "@ scope:";
         List.iter (fun e -> Format.fprintf ppf "@ %s" e) scope
       end)
+    (fun ppf ->
+      (* [-vox-explain-proofs] under [-vox-dump-vc-provenance]: the user
+         facts grind used to close this VC, or "<arithmetic>" if none. *)
+      match used with
+      | Some names when !Clflags.vox_dump_vc_provenance ->
+        Format.fprintf ppf "@ used: %s"
+          (match names with
+           | [] -> "<arithmetic>"
+           | _ -> String.concat ", " names)
+      | _ -> ())
 ;;
 
 let discharge () =
@@ -6328,19 +6492,48 @@ let discharge () =
         { vc with vc_facts = List.map fst kept; vc_fact_provs = List.map snd kept })
       all
   in
-  if !Clflags.vox_dump_vc || !Clflags.vox_dump_vc_provenance
-  then List.iter (dump_vc Format.err_formatter) all;
-  if !Clflags.vox_dump_states
-  then List.iter (dump_state Format.err_formatter) (List.rev !point_states);
+  let needs_proof vc =
+    match vc.vc_kind with
+    | Prove -> true
+    | Runtime_check | Assume -> false
+  in
+  let dump_all () =
+    if !Clflags.vox_dump_vc || !Clflags.vox_dump_vc_provenance
+    then begin
+      (* [used_lemmas] is keyed by position among the [Prove] VCs -- the
+         order [run_lean] proved them -- so walk [all] with that counter
+         to give each VC its own "used:" line. *)
+      let prove_idx = ref 0 in
+      List.iter
+        (fun vc ->
+          let used =
+            match vc.vc_kind with
+            | Prove ->
+              let u = Hashtbl.find_opt used_lemmas !prove_idx in
+              incr prove_idx;
+              u
+            | Runtime_check | Assume -> None
+          in
+          dump_vc Format.err_formatter ?used vc)
+        all
+    end;
+    if !Clflags.vox_dump_states
+    then List.iter (dump_state Format.err_formatter) (List.rev !point_states)
+  in
   if !Clflags.vox_dry_run
-  then ()
-  else (
-    let needs_proof vc =
-      match vc.vc_kind with
-      | Prove -> true
-      | Runtime_check | Assume -> false
-    in
-    run_lean (List.filter needs_proof all))
+  then dump_all ()
+  else if !Clflags.vox_explain_proofs
+  then begin
+    (* The used-lemma report exists only after the solver runs, so solve
+       BEFORE dumping under this flag; a failing solve raises here, as in
+       the default order below. *)
+    run_lean (List.filter needs_proof all);
+    dump_all ()
+  end
+  else begin
+    dump_all ();
+    run_lean (List.filter needs_proof all)
+  end
 ;;
 
 (* Entry point: called on the final typedtree of an implementation. *)

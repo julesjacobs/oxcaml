@@ -120,6 +120,15 @@ def parse_scope_line(line: str) -> Optional[Dict[str, object]]:
     }
 
 
+def _parse_used(rest: str) -> List[str]:
+    """Parse a dumped "used:" value into a list of lemma names.  The marker
+    "<arithmetic>" (grind closed the goal with no user facts) becomes the
+    empty list."""
+    if not rest or rest == "<arithmetic>":
+        return []
+    return [n.strip() for n in rest.split(",") if n.strip()]
+
+
 def parse_dump(text: str) -> List[Dict[str, object]]:
     """Parse ``-dump-vc`` output into a list of VC dicts.
 
@@ -173,6 +182,10 @@ def parse_dump(text: str) -> List[Dict[str, object]]:
         # folds them away.
         module_hypotheses: List[str] = []
         module_hyp_spans: List[Span] = []
+        # The lemmas grind used to close this VC (-vox-explain-proofs, under
+        # -vox-dump-vc-provenance): None when absent, a list of names, or []
+        # for an arithmetic/logic-only proof.
+        used: Optional[List[str]] = None
         if i < n:
             hyp_line = lines[i].strip()
             rest = hyp_line[len("hypotheses:") :].strip()
@@ -181,9 +194,11 @@ def parse_dump(text: str) -> List[Dict[str, object]]:
                 text, span = split_span_suffix(rest)
                 hypotheses.append(text)
                 hyp_spans.append(span)
-            if not rest:
-                # Following indented lines are the hypotheses, until the
-                # "scope:" section, the next VC header, or a dedent.
+            if not rest or rest == "<none>":
+                # Following indented lines are the hypotheses (when any),
+                # then the "scope:"/"used:" sections, until the next VC
+                # header or a dedent.  A "<none>" VC has no hypothesis
+                # lines but can still carry a scope and a used line.
                 section = "hyps"
                 while i < n:
                     raw = lines[i]
@@ -198,6 +213,10 @@ def parse_dump(text: str) -> List[Dict[str, object]]:
                         continue
                     if stripped == "module hypotheses:":
                         section = "mod"
+                        i += 1
+                        continue
+                    if stripped.startswith("used:"):
+                        used = _parse_used(stripped[len("used:") :].strip())
                         i += 1
                         continue
                     if section == "scope":
@@ -227,6 +246,7 @@ def parse_dump(text: str) -> List[Dict[str, object]]:
                 "scope": scope,
                 "kind": kind,
                 "status": "unknown",
+                "used": used,
             }
         )
     return vcs
@@ -456,8 +476,13 @@ def compile_capture(
 # verdict, falling back to plain -dump-vc (spans simply absent) thereafter.
 _PROVENANCE_FLAG = "-vox-dump-vc-provenance"
 _STATES_FLAG = "-vox-dump-states"
+# The solve pass adds these two to report the lemmas grind used per VC
+# ("used:" lines in the provenance dump).  Probe once; compilers that
+# predate the flag fall back to a plain solve (no used-list).
+_EXPLAIN_FLAG = "-vox-explain-proofs"
 _states_supported: Optional[bool] = None
 _provenance_supported: Optional[bool] = None  # None = not yet probed
+_explain_supported: Optional[bool] = None
 
 
 def _flag_rejected(output: str, flag: str) -> bool:
@@ -495,6 +520,29 @@ def dump_capture(source_path: str, ocamlc: str, cwd: Optional[str]) -> Tuple[int
             _provenance_supported = True
             return code, out
     return compile_capture(source_path, ocamlc, ["-dump-vc", "-vox-dry-run"], cwd=cwd)
+
+
+def solve_capture(
+    source_path: str, ocamlc: str, lean: str, cwd: Optional[str]
+) -> Tuple[int, str]:
+    """Run the real solver pass.  Under a compiler that supports it, also
+    request the provenance dump with per-VC "used:" lines
+    (-vox-explain-proofs); the used-lists ride along in this pass's output
+    (parsed by build_index).  Probe once and cache a fallback to a plain
+    solve for older compilers.  Returns (exit code, output)."""
+    global _explain_supported
+    base = ["-vox-solver-path", lean]
+    if _explain_supported is not False:
+        flags = base + [_PROVENANCE_FLAG, _EXPLAIN_FLAG]
+        code, out = compile_capture(source_path, ocamlc, flags, cwd=cwd)
+        if _flag_rejected(out, _EXPLAIN_FLAG) or _flag_rejected(
+            out, _PROVENANCE_FLAG
+        ):
+            _explain_supported = False
+            return compile_capture(source_path, ocamlc, base, cwd=cwd)
+        _explain_supported = True
+        return code, out
+    return compile_capture(source_path, ocamlc, base, cwd=cwd)
 
 
 # .annot blocks: a location line ("file" lnum bol cnum, twice) followed
@@ -569,12 +617,18 @@ def build_index(
         errors.append({"message": "compilation failed (see raw dump)"})
         ok = False
     if lean is not None:
-        code, solve_out = compile_capture(
-            source_path, ocamlc, ["-vox-solver-path", lean], cwd=cwd
-        )
+        code, solve_out = solve_capture(source_path, ocamlc, lean, cwd=cwd)
         raw_solve = solve_out
         err = parse_error(solve_out)
         if code == 0 and err is None:
+            # The solve pass emits its own provenance dump (with "used:"
+            # lines) in the SAME VC order as the dry-run, so attach each
+            # used-list to the matching VC by position.
+            solve_vcs = parse_dump(solve_out)
+            if len(solve_vcs) == len(vcs):
+                for vc, svc in zip(vcs, solve_vcs):
+                    if svc.get("used") is not None:
+                        vc["used"] = svc["used"]
             for vc in vcs:
                 if vc["kind"] == "prove":
                     vc["status"] = "proved"

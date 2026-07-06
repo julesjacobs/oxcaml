@@ -401,6 +401,42 @@ function renderModuleFacts(hyps, spans) {
   );
 }
 
+// The lemmas grind used to close this VC (-vox-explain-proofs).  Full mode
+// only, and only when the compiler reported it (r.used is a list of names;
+// null means no report -- old compiler or no solver).  An empty list is an
+// arithmetic/logic-only proof.  A name that matches a [%%vox.lean] theorem
+// region gets the provenance hover affordance (data-prov-key into
+// hoverSpans), so hovering it highlights that theorem's source span; plain
+// names (an [@@vox.lemma] whose source is a function, a prelude fact) render
+// without one.
+function renderUsed(used) {
+  if (compact || used == null) return "";
+  if (!used.length) {
+    return (
+      '<div class="used">used lemmas: ' +
+      '<span class="used-none">arithmetic only</span></div>'
+    );
+  }
+  const parts = used.map((name) => {
+    const region = regions.find(
+      (r) => r.name === name && (r.kind === "theorem" || r.kind === "block")
+    );
+    if (!region) return '<span class="used-name">' + esc(name) + "</span>";
+    // regions are 0-based; hoverSpans/markFromSpan want the compiler's
+    // 1-based line (it subtracts 1), so shift the line back up by one.
+    const span = {
+      start: { line: region.start.line + 1, col: region.start.col },
+      end: { line: region.end.line + 1, col: region.end.col },
+    };
+    const key = hoverSpans.push(span) - 1;
+    return (
+      '<span class="used-name prov" data-prov-key="' + key + '">' +
+      esc(name) + "</span>"
+    );
+  });
+  return '<div class="used">used lemmas: ' + parts.join(", ") + "</div>";
+}
+
 function renderVc(r) {
   let h = "";
   const g = Selection.splitSpanSuffix(r.goal);
@@ -418,6 +454,7 @@ function renderVc(r) {
     h += renderModuleFacts(r.module_hypotheses, r.module_hyp_spans);
     h += "<h3>goal" + badge(r.status) + "</h3>";
     h += provRow("goal turnstile", g.text, r.goal_span || g.span);
+    h += renderUsed(r.used);
   }
   if (r.counterexample && r.counterexample.length) {
     // A "disproved" VC carries a VALIDATED counterexample (the solver

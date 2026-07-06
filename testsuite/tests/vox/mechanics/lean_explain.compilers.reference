@@ -1,0 +1,30 @@
+File "lean_explain.ml", line 31, characters 11-13: vox VC:
+  goal: len l >= 0  @ 31.11-31.13
+  hypotheses:
+  l = Nil  @ 31.4-31.7
+  scope:
+  l : ilist  ~>  Vox_Lean_explain_ilist  @ 29.26-29.27
+  used: lemma_len_nonneg
+File "lean_explain.ml", line 32, characters 19-37: vox VC:
+  goal: len l >= 0  @ 32.19-32.37
+  hypotheses:
+  len t >= 0
+  l = Cons (*vox-wild*, t)  @ 32.4-32.15
+  scope:
+  l : ilist  ~>  Vox_Lean_explain_ilist  @ 29.26-29.27
+  t : ilist  ~>  Vox_Lean_explain_ilist  @ 32.13-32.14
+  *vox-wild* : int  ~>  Int
+  used: lemma_len_nonneg
+File "lean_explain.ml", line 36, characters 53-60: vox VC:
+  goal: len l >= 0  @ 36.53-36.60
+  hypotheses: <none>
+  scope:
+  l : ilist  ~>  Vox_Lean_explain_ilist  @ 36.16-36.17
+  used: lemma_len_nonneg
+File "lean_explain.ml", line 39, characters 55-62: vox VC:
+  goal: x + 1 >= 0  @ 39.55-39.62
+  hypotheses:
+  x > 0  @ 39.11-39.12
+  scope:
+  x : int  ~>  Int  @ 39.11-39.12
+  used: <arithmetic>

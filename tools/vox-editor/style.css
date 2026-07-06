@@ -354,3 +354,18 @@ html[data-theme="light"] .cm-vox-lean-op { color: #0550ae; }
   letter-spacing: 0.6px;
   cursor: pointer;
 }
+
+/* The "used lemmas" line under a proved goal (-vox-explain-proofs): a
+   subtle, small footnote.  A name backed by a [%%vox.lean] theorem gets
+   the .prov affordance and dotted underline; plain names stay quiet. */
+.used {
+  margin-top: .35rem;
+  color: var(--muted);
+  font-size: 11px;
+}
+.used-none { font-style: italic; }
+.used-name.prov {
+  border-bottom: 1px dotted var(--muted);
+  cursor: pointer;
+}
+.used-name.prov:hover { color: var(--fg); border-bottom-color: var(--accent); }

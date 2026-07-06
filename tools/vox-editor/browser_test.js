@@ -735,6 +735,115 @@ async function main() {
     );
     console.log("ok - assumed VC pane badge reads 'trusted'");
 
+    // Used-lemmas row (-vox-explain-proofs): load a source whose VC is
+    // closed by a [%%vox.lean] block theorem, so the report names that
+    // theorem.  Full mode shows a "used lemmas" row; the name matches a
+    // theorem region, so it hover-highlights the theorem's source span.
+    // Compact mode shows no such row.
+    const USED_SRC = [
+      "type ilist =",
+      "  | Nil",
+      "  | Cons of int * ilist",
+      "",
+      "let rec total_ len (l : ilist) : int =",
+      "  match l with",
+      "  | Nil -> 0",
+      "  | Cons (_, t) -> 1 + len t",
+      "",
+      "[%%vox.lean {lean|",
+      "theorem len_nn (l : Vox_Input_ilist) : 0 <= len l := by",
+      "  induction l <;> grind",
+      "grind_pattern len_nn => len l",
+      "|lean}]",
+      "",
+      "let use_it (l : ilist) : int{ _ >= 0 } = refine_ (len l)",
+    ].join("\n");
+    await page.evaluate(async (src) => {
+      window.__vox.setCompact(false);
+      window.__vox.cm.setValue(src);
+      await window.__vox.check(false);
+    }, USED_SRC);
+    await waitFor(
+      async () => {
+        const t = await page.$eval("#status", (e) => e.textContent);
+        return /verified|errors/.test(t) ? t : false;
+      },
+      60000,
+      "used-lemmas source check"
+    );
+    // Put the cursor on the use_it obligation (goal mentions len).
+    const usePos = await waitFor(
+      () =>
+        page.evaluate(() => {
+          const r = window.__vox
+            .getRegions()
+            .find((x) => x.kind === "vc" && /len l >= 0/.test(x.goal || ""));
+          return r ? { line: r.start.line, col: r.start.col } : false;
+        }),
+      10000,
+      "the use_it VC region"
+    );
+    await page.evaluate(
+      (p) => window.__vox.cm.setCursor({ line: p.line, ch: p.col }),
+      usePos
+    );
+    // Full mode: a "used lemmas" row names len_nn, and the name is a
+    // hover-sensitive .prov (it matches the theorem region).
+    const usedFull = await waitFor(
+      async () =>
+        page.evaluate(() => {
+          const row = document.querySelector("#pane-body .used");
+          if (!row) return false;
+          const named = row.querySelector(".used-name.prov");
+          return {
+            text: row.textContent,
+            hasProv: !!named,
+            name: named ? named.textContent : null,
+          };
+        }),
+      5000,
+      "the used-lemmas row (full mode)"
+    );
+    assert.ok(/used lemmas/.test(usedFull.text), "row labelled: " + usedFull.text);
+    assert.ok(/len_nn/.test(usedFull.text), "row names len_nn: " + usedFull.text);
+    assert.ok(usedFull.hasProv, "the block-theorem name is hover-sensitive");
+    console.log("ok - used-lemmas row names the block theorem:", usedFull.name);
+
+    // Hovering the used name highlights the theorem's source span.
+    const usedHover = await page.evaluate(() => {
+      const el = document.querySelector("#pane-body .used-name.prov");
+      el.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+      const marks = window.__vox.cm
+        .getAllMarks()
+        .filter((m) => m.className === "vox-prov-hl");
+      const text =
+        marks.length === 1
+          ? window.__vox.cm.getRange(marks[0].find().from, marks[0].find().to)
+          : null;
+      el.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true }));
+      const cleared =
+        window.__vox.cm
+          .getAllMarks()
+          .filter((m) => m.className === "vox-prov-hl").length === 0;
+      return { text, cleared };
+    });
+    assert.ok(
+      usedHover.text && /len_nn/.test(usedHover.text),
+      "hover highlights the theorem source: " + JSON.stringify(usedHover.text)
+    );
+    assert.ok(usedHover.cleared, "used-lemma hover clears on mouse-out");
+    console.log("ok - hovering the used lemma highlights its theorem span");
+
+    // Compact mode shows no used-lemmas row.
+    const usedCompact = await page.evaluate(() => {
+      window.__vox.setCompact(false); // ensure re-render baseline
+      window.__vox.setCompact(true);
+      return !!document.querySelector("#pane-body .used");
+    });
+    assert.ok(!usedCompact, "compact mode hides the used-lemmas row");
+    await page.evaluate(() => window.__vox.setCompact(false));
+    console.log("ok - compact mode hides the used-lemmas row");
+
     // Theme: dark is the default (no OS sniffing); the toolbar toggle
     // flips to light, and the choice persists across a reload.
     const readBg = () =>

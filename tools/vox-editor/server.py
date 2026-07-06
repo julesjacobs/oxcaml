@@ -98,6 +98,9 @@ def build_check_response(
         region["scope"] = vc.get("scope", [])
         region["module_hypotheses"] = vc.get("module_hypotheses", [])
         region["module_hyp_spans"] = vc.get("module_hyp_spans", [])
+        # The lemmas grind used to close this VC (-vox-explain-proofs);
+        # None under an old compiler or without a solver.
+        region["used"] = vc.get("used")
         if "counterexample" in vc:
             region["counterexample"] = vc["counterexample"]
         if "lean_msg" in vc:

@@ -259,6 +259,7 @@ class TestParseDump(unittest.TestCase):
                 "scope": [],
                 "kind": "prove",
                 "status": "unknown",
+                "used": None,
             },
         )
         self.assertEqual(vcs[1]["goal"], "(x + 1) = (x + 1)")
@@ -598,6 +599,57 @@ class TestEndToEnd(unittest.TestCase):
         self.assertTrue(all(v["status"] == "trusted" for v in assumed))
         # Nothing is left grey (unknown) on a verified file.
         self.assertFalse(any(v["status"] == "unknown" for v in vcs))
+
+
+# --- used-lemmas ("used:" line, -vox-explain-proofs) ----------------------
+
+# Byte-exact from mechanics/lean_explain.compilers.reference: a VC closed by
+# an [@@vox.lemma] (names it) and one closed by arithmetic ("<arithmetic>").
+DUMP_USED = """\
+File "lean_explain.ml", line 36, characters 53-60: vox VC:
+  goal: len l >= 0  @ 36.53-36.60
+  hypotheses: <none>
+  scope:
+  l : ilist  ~>  Vox_Lean_explain_ilist  @ 36.16-36.17
+  used: lemma_len_nonneg
+File "lean_explain.ml", line 39, characters 55-62: vox VC:
+  goal: x + 1 >= 0  @ 39.55-39.62
+  hypotheses:
+  x > 0  @ 39.11-39.12
+  scope:
+  x : int  ~>  Int  @ 39.11-39.12
+  used: <arithmetic>
+"""
+
+
+class TestParseUsed(unittest.TestCase):
+    def test_used_lemma_and_arithmetic(self):
+        vcs = vc_index.parse_dump(DUMP_USED)
+        self.assertEqual(len(vcs), 2)
+        # a lemma-backed proof names the lemma
+        self.assertEqual(vcs[0]["used"], ["lemma_len_nonneg"])
+        # an arithmetic-only proof is the empty list (marker "<arithmetic>")
+        self.assertEqual(vcs[1]["used"], [])
+        # the used line does not leak into hypotheses/scope
+        self.assertEqual(vcs[0]["hypotheses"], [])
+        self.assertEqual(len(vcs[0]["scope"]), 1)
+
+    def test_used_absent_is_none(self):
+        # plain provenance dump (no explain pass): used stays None
+        vcs = vc_index.parse_dump(DUMP_PROV_PARAM)
+        self.assertIsNone(vcs[0]["used"])
+
+    def test_multiple_used(self):
+        text = (
+            'File "x.ml", line 1, characters 0-1: vox VC:\n'
+            "  goal: p\n"
+            "  hypotheses: <none>\n"
+            "  used: lemma_a, block_thm, prelude_fact\n"
+        )
+        self.assertEqual(
+            vc_index.parse_dump(text)[0]["used"],
+            ["lemma_a", "block_thm", "prelude_fact"],
+        )
 
 
 if __name__ == "__main__":
