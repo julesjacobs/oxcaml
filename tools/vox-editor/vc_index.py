@@ -218,6 +218,81 @@ def parse_dump(text: str) -> List[Dict[str, object]]:
     return vcs
 
 
+_STATE_TAIL = re.compile(r"vox state:\s*$")
+
+
+def parse_states(text: str) -> List[Dict[str, object]]:
+    """Parse ``-vox-dump-states`` blocks: the fact context + scope at
+    each walked expression's entry.  Same hypothesis/scope line formats
+    as VCs, no goal."""
+    lines = text.split("\n")
+    out: List[Dict[str, object]] = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        header = lines[i]
+        if _STATE_TAIL.search(header) is None:
+            i += 1
+            continue
+        rng = parse_loc(header)
+        if rng is None:
+            i += 1
+            continue
+        start, end = rng
+        i += 1
+        hypotheses: List[str] = []
+        hyp_spans: List[Span] = []
+        scope: List[Dict[str, object]] = []
+        if i < n and lines[i].lstrip().startswith("hypotheses:"):
+            rest = lines[i].strip()[len("hypotheses:") :].strip()
+            i += 1
+            if rest and rest != "<none>":
+                t, sp = split_span_suffix(rest)
+                hypotheses.append(t)
+                hyp_spans.append(sp)
+            # "<none>" is printed inline, but a scope: section can still
+            # follow -- a point with no facts still has variables.
+            in_scope = False
+            while i < n:
+                raw = lines[i]
+                if (
+                    _VC_TAIL.search(raw) is not None
+                    or _STATE_TAIL.search(raw) is not None
+                ) and parse_loc(raw):
+                    break
+                if not raw.startswith("  "):
+                    break
+                stripped = raw.strip()
+                if stripped == "scope:":
+                    in_scope = True
+                    i += 1
+                    continue
+                if in_scope:
+                    entry = parse_scope_line(stripped)
+                    if entry is not None:
+                        scope.append(entry)
+                    i += 1
+                    continue
+                if rest:
+                    # inline hypotheses ("<none>" or a single fact):
+                    # anything before scope: is unexpected -- stop.
+                    break
+                t, sp = split_span_suffix(stripped)
+                hypotheses.append(t)
+                hyp_spans.append(sp)
+                i += 1
+        out.append(
+            {
+                "start": start,
+                "end": end,
+                "hypotheses": hypotheses,
+                "hyp_spans": hyp_spans,
+                "scope": scope,
+            }
+        )
+    return out
+
+
 def parse_error(text: str) -> Optional[Dict[str, object]]:
     """Parse the first vox verification error out of compiler output.
 
@@ -343,6 +418,8 @@ def compile_capture(
 # that predate it reject it outright, so we probe once and cache the
 # verdict, falling back to plain -dump-vc (spans simply absent) thereafter.
 _PROVENANCE_FLAG = "-vox-dump-vc-provenance"
+_STATES_FLAG = "-vox-dump-states"
+_states_supported: Optional[bool] = None
 _provenance_supported: Optional[bool] = None  # None = not yet probed
 
 
@@ -358,11 +435,25 @@ def dump_capture(
     """Run the VC-shape pass, preferring the provenance flag and caching a
     one-time fallback to plain -dump-vc for compilers that lack it.
     Returns (exit code, output)."""
-    global _provenance_supported
+    global _provenance_supported, _states_supported
     if _provenance_supported is not False:
+        flags = [_PROVENANCE_FLAG]
+        if _states_supported is not False:
+            flags.append(_STATES_FLAG)
         code, out = compile_capture(
-            source_path, ocamlc, [_PROVENANCE_FLAG, "-vox-dry-run", "-annot"], cwd=cwd
+            source_path, ocamlc, flags + ["-vox-dry-run", "-annot"], cwd=cwd
         )
+        if _flag_rejected(out, _STATES_FLAG):
+            # Older compiler: retry once without states, cache the verdict.
+            _states_supported = False
+            code, out = compile_capture(
+                source_path,
+                ocamlc,
+                [_PROVENANCE_FLAG, "-vox-dry-run", "-annot"],
+                cwd=cwd,
+            )
+        elif _states_supported is None:
+            _states_supported = True
         if _flag_rejected(out, _PROVENANCE_FLAG):
             _provenance_supported = False
         else:
@@ -434,6 +525,7 @@ def build_index(
     """
     dump_code, dump_out = dump_capture(source_path, ocamlc, cwd=cwd)
     vcs = parse_dump(dump_out)
+    states = parse_states(dump_out)
     errors: List[Dict[str, object]] = []
     ok = True
     raw_solve: Optional[str] = None
@@ -470,6 +562,7 @@ def build_index(
                 _attach_failure(vcs, err)
     return {
         "vcs": vcs,
+        "states": states,
         "errors": errors,
         "ok": ok,
         "types": read_annot(source_path),

@@ -937,6 +937,14 @@ let mk_dump_vc_provenance f =
      matching the \"Line N, characters A-B\" header); hypotheses with \
      no meaningful span are left unannotated" )
 
+let mk_vox_dump_states f =
+  ( "-vox-dump-states"
+  , Arg.Unit f
+  , " vox: print, for every expression the verifier walks, the \
+     logical facts and variables in scope at its entry (span-headed \
+     \"vox state:\" blocks in the -vox-dump-vc-provenance formats); \
+     drives the editor's program-point proof-state view" )
+
 let mk_vox_dry_run f =
   "-vox-dry-run", Arg.Unit f, " vox: generate VCs but do not run the solver"
 
@@ -1235,6 +1243,7 @@ module type Core_options = sig
   val _dsource : unit -> unit
   val _dump_vc : unit -> unit
   val _dump_vc_provenance : unit -> unit
+  val _vox_dump_states : unit -> unit
   val _vox_dry_run : unit -> unit
   val _vox_solver_path : string -> unit
   val _vox_prelude : string -> unit
@@ -1639,6 +1648,7 @@ struct
     mk_dsource F._dsource;
     mk_dump_vc F._dump_vc;
     mk_dump_vc_provenance F._dump_vc_provenance;
+    mk_vox_dump_states F._vox_dump_states;
     mk_vox_dry_run F._vox_dry_run;
     mk_vox_solver_path F._vox_solver_path;
     mk_vox_prelude F._vox_prelude;
@@ -1753,6 +1763,7 @@ struct
     mk_dsource F._dsource;
     mk_dump_vc F._dump_vc;
     mk_dump_vc_provenance F._dump_vc_provenance;
+    mk_vox_dump_states F._vox_dump_states;
     mk_vox_dry_run F._vox_dry_run;
     mk_vox_solver_path F._vox_solver_path;
     mk_vox_prelude F._vox_prelude;
@@ -1942,6 +1953,7 @@ struct
     mk_dsource F._dsource;
     mk_dump_vc F._dump_vc;
     mk_dump_vc_provenance F._dump_vc_provenance;
+    mk_vox_dump_states F._vox_dump_states;
     mk_vox_dry_run F._vox_dry_run;
     mk_vox_solver_path F._vox_solver_path;
     mk_vox_prelude F._vox_prelude;
@@ -2112,6 +2124,7 @@ module Make_opttop_options (F : Opttop_options) = struct
     mk_dsource F._dsource;
     mk_dump_vc F._dump_vc;
     mk_dump_vc_provenance F._dump_vc_provenance;
+    mk_vox_dump_states F._vox_dump_states;
     mk_vox_dry_run F._vox_dry_run;
     mk_vox_solver_path F._vox_solver_path;
     mk_vox_prelude F._vox_prelude;
@@ -2264,6 +2277,7 @@ struct
     mk_dsource F._dsource;
     mk_dump_vc F._dump_vc;
     mk_dump_vc_provenance F._dump_vc_provenance;
+    mk_vox_dump_states F._vox_dump_states;
     mk_vox_dry_run F._vox_dry_run;
     mk_vox_solver_path F._vox_solver_path;
     mk_vox_prelude F._vox_prelude;
@@ -2514,6 +2528,7 @@ module Default = struct
     let _dsource = set dump_source
     let _dump_vc = set vox_dump_vc
     let _dump_vc_provenance = set vox_dump_vc_provenance
+    let _vox_dump_states = set vox_dump_states
     let _vox_dry_run = set vox_dry_run
     let _vox_solver_path s = vox_solver_path := s
     let _vox_prelude s = vox_prelude := s

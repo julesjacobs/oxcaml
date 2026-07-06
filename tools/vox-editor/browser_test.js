@@ -374,15 +374,46 @@ async function main() {
     });
     assert.ok(gap !== null, "found an uncovered line below a region");
     await page.evaluate((l) => window.__vox.cm.setCursor({ line: l, ch: 0 }), gap);
+    // Off-obligation the pane now shows the PROGRAM POINT state (or the
+    // plain empty message where the walker never visited); either way it
+    // must not claim in-block membership or offer the live button.
     const empty = await waitFor(
       async () => {
-        const t = await page.$eval("#pane-body", (e) => e.textContent);
-        return /No obligation at the cursor/.test(t) ? t : false;
+        const mode = await page.$eval("#pane-mode", (e) => e.textContent);
+        if (!/program point|no obligation at cursor/.test(mode)) return false;
+        return page.$eval("#pane-body", (e) => e.textContent);
       },
       5000,
-      "empty state off-region"
+      "off-region pane (program point or empty)"
     );
-    console.log("ok - empty state at an off-region line");
+    console.log("ok - off-region line shows program point / empty state");
+
+    // Program-point view: on a line with NO obligation (the `match a
+    // with` header inside append), the pane shows the state of "here" --
+    // the variables in scope -- instead of a bare empty message.
+    const point = await page.evaluate(() => {
+      const cm = window.__vox.cm;
+      const idx = cm.getValue().indexOf("match a with");
+      cm.setCursor(cm.posFromIndex(idx + 2));
+      window.__vox.renderPane();
+      return {
+        mode: document.getElementById("pane-mode").textContent,
+        ctx: Array.from(document.querySelectorAll("#pane-body .ctx")).map(
+          (e) => e.textContent
+        ),
+      };
+    });
+    assert.strictEqual(
+      point.mode,
+      "program point",
+      "pane mode says so; got " + JSON.stringify(point)
+    );
+    assert.ok(
+      point.ctx.some((t) => /^a : ilist/.test(t)) &&
+        point.ctx.some((t) => /^b : ilist/.test(t)),
+      "the state shows a and b in scope: " + JSON.stringify(point.ctx)
+    );
+    console.log("ok - program-point view shows scope off-obligation");
     assert.ok(!/Inside a/.test(empty), "must not claim in-block: " + empty.slice(0, 120));
     assert.strictEqual(
       await page.$("#live-btn"),

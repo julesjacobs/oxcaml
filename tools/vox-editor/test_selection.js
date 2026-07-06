@@ -332,6 +332,23 @@ check("typeAtPos returns null outside all ranges", () => {
   assert.strictEqual(S.typeAtPos(null, { line: 2, col: 5 }), null);
 });
 
+// -- stateAtPos: innermost program-point state --------------------------
+
+const STATES = [
+  { start: { line: 1, col: 0 }, end: { line: 9, col: 5 },
+    hypotheses: ["outer"], scope: [] },
+  { start: { line: 3, col: 2 }, end: { line: 5, col: 10 },
+    hypotheses: ["inner"], scope: [] },
+];
+
+check("stateAtPos picks the innermost enclosing state", () => {
+  assert.strictEqual(
+    S.stateAtPos(STATES, { line: 4, col: 0 }).hypotheses[0], "inner");
+  assert.strictEqual(
+    S.stateAtPos(STATES, { line: 8, col: 0 }).hypotheses[0], "outer");
+  assert.strictEqual(S.stateAtPos(STATES, { line: 20, col: 0 }), null);
+});
+
 Promise.all(pending).then(() => {
   console.log("\n" + passed + " tests passed");
 });

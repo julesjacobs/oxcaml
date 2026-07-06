@@ -88,7 +88,7 @@ type dsort =
    later ones display as name#2, name#3, ... in order of appearance,
    so a hypothesis about a shadowed variable cannot read as identical
    to the goal it fails to prove. *)
-let vc_display_fun vc =
+let display_fun_of_preds preds =
   let seen : (string, Ident.t list) Hashtbl.t = Hashtbl.create 8 in
   List.iter
     (fun p ->
@@ -99,7 +99,7 @@ let vc_display_fun vc =
           if not (List.exists (Ident.same id) ids)
           then Hashtbl.replace seen name (ids @ [ id ]))
         (Refinement.free_vars p))
-    (vc.vc_goal :: vc.vc_facts);
+    preds;
   fun id ->
     let name = Ident.name id in
     match Hashtbl.find_opt seen name with
@@ -114,6 +114,7 @@ let vc_display_fun vc =
     | _ -> name
 ;;
 
+let vc_display_fun vc = display_fun_of_preds (vc.vc_goal :: vc.vc_facts)
 let with_vc_display vc k = Refinement.with_var_display (vc_display_fun vc) k
 
 let hyps_for_error vc =
@@ -228,6 +229,18 @@ let spec_defs : Vox_reflect.spec_def list ref = ref []
    location (for error attribution). *)
 let lemma_defs : (string * string * Location.t) list ref = ref []
 
+(* Program-point states for the editor ([-vox-dump-states]): the
+   scope-filtered fact context at the ENTRY of each expression the
+   walker visits, keyed by the expression's span.  The innermost span
+   containing the cursor is the proof state of "here". *)
+let point_states
+  : (Location.t
+    * (Refinement.pred * Location.t option) list
+    * Ident.t list)
+      list
+      ref
+  = ref []
+
 (* Embedded solver blocks ([%%vox.lean ...]) of the module (or
    toplevel session) being verified, in source order: text (ending in
    a newline) and the block's location (solver errors inside a block
@@ -288,6 +301,7 @@ let reset () =
   poly_heads := [];
   spec_defs := [];
   lemma_defs := [];
+  point_states := [];
   unknown_counter := 0;
   embedded_blocks := [];
   imported_specs := [];
@@ -2489,6 +2503,42 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
      types would then silently sort at VoxU -- same bug class as the
      walk_items nested-module fix. *)
   let env = e.exp_env in
+  if !Clflags.vox_dump_states && not e.exp_loc.Location.loc_ghost
+  then begin
+    (* Entry state of this expression: the facts usable here (scope
+       filter matches what a VC emitted here would keep).  First
+       record per span wins -- re-walks (guards, joins) do not
+       overwrite the entry state. *)
+    let already =
+      List.exists (fun (l, _, _) -> l = e.exp_loc) !point_states
+    in
+    if not already
+    then begin
+      let usable =
+        List.filter (fun (f, _) -> pred_in_scope ctx f) ctx.cfacts
+      in
+      (* The point's variables: everything BOUND here that the
+         verifier tracks (has a recorded sort), not just the vars the
+         facts happen to mention -- "what is in scope" is the
+         question the view answers. *)
+      let seen = Hashtbl.create 8 in
+      let ids =
+        List.filter
+          (fun id ->
+            Hashtbl.mem name_sorts id
+            && not (Hashtbl.mem synthetic_names id)
+            &&
+            let u = Ident.unique_name id in
+            if Hashtbl.mem seen u
+            then false
+            else (
+              Hashtbl.add seen u ();
+              true))
+          ctx.cscope
+      in
+      point_states := (e.exp_loc, usable, ids) :: !point_states
+    end
+  end;
   (* Intro forms: the node itself carries the vox attribute and the refined type. *)
   let kind =
     if has_vox_attr "vox.refine" e.exp_attributes
@@ -5286,11 +5336,9 @@ let prov_suffix = function
    predicates print with, so the rows line up with the hypotheses.
    Emitted only under the provenance flag; plain [-dump-vc] output is
    unchanged. *)
-let scope_entries vc =
-  if not !Clflags.vox_dump_vc_provenance
-  then []
-  else begin
-    let display = vc_display_fun vc in
+let scope_entries_of_preds ?(extra_ids = []) preds =
+  begin
+    let display = display_fun_of_preds preds in
     let seen = Hashtbl.create 8 in
     let vars =
       List.filter
@@ -5301,7 +5349,7 @@ let scope_entries vc =
           else (
             Hashtbl.add seen u ();
             true))
-        (free_vars_of_vc vc)
+        (List.concat_map Refinement.free_vars preds @ extra_ids)
     in
     let var_entry id =
       let oty =
@@ -5331,9 +5379,7 @@ let scope_entries vc =
           else (
             Hashtbl.add gseen key ();
             true))
-        (List.concat_map
-           Refinement.free_globals
-           (vc.vc_goal :: vc.vc_facts))
+        (List.concat_map Refinement.free_globals preds)
     in
     let g_entry gp =
       let key = path_uname gp in
@@ -5351,6 +5397,59 @@ let scope_entries vc =
     in
     List.map var_entry vars @ List.map g_entry gpaths
   end
+;;
+
+let scope_entries vc =
+  if not !Clflags.vox_dump_vc_provenance
+  then []
+  else scope_entries_of_preds (vc.vc_goal :: vc.vc_facts)
+;;
+
+(* One [-vox-dump-states] block: same span header, hypothesis and
+   scope formats as the VC dump, no goal. *)
+let dump_state
+  ppf
+  ( loc
+  , (facts : (Refinement.pred * Location.t option) list)
+  , (scope_ids : Ident.t list) )
+  =
+  (* A binding contributes both a selfification and a binder fact with
+     the same predicate; show one row, preferring the spanned copy. *)
+  let facts =
+    List.fold_left
+      (fun acc (f, p) ->
+        match List.find_opt (fun (f', _) -> Refinement.equal f f') acc with
+        | None -> acc @ [ (f, p) ]
+        | Some (_, None) when p <> None ->
+          List.map
+            (fun (f', p') -> if Refinement.equal f f' then f', p else f', p')
+            acc
+        | Some _ -> acc)
+      []
+      facts
+  in
+  let preds = List.map fst facts in
+  Refinement.with_var_display (display_fun_of_preds preds) @@ fun () ->
+  let scope = scope_entries_of_preds ~extra_ids:scope_ids preds in
+  Format.fprintf
+    ppf
+    "@[<v 2>%a: vox state:@ hypotheses:%t%t@]@."
+    Location.print_loc
+    loc
+    (fun ppf ->
+      if facts = []
+      then Format.fprintf ppf " <none>"
+      else
+        List.iter
+          (fun (f, p) ->
+            Format.fprintf ppf "@ %a%s" print_pred f (prov_suffix p))
+          facts)
+    (fun ppf ->
+      if scope <> []
+      then begin
+        Format.fprintf ppf "@ scope:";
+        List.iter (fun e -> Format.fprintf ppf "@ %s" e) scope
+      end)
 ;;
 
 let dump_vc ppf vc =
@@ -5417,6 +5516,8 @@ let discharge () =
   in
   if !Clflags.vox_dump_vc || !Clflags.vox_dump_vc_provenance
   then List.iter (dump_vc Format.err_formatter) all;
+  if !Clflags.vox_dump_states
+  then List.iter (dump_state Format.err_formatter) (List.rev !point_states);
   if !Clflags.vox_dry_run
   then ()
   else (

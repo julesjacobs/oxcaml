@@ -188,6 +188,37 @@ class TestScopeAndAnnot(unittest.TestCase):
         self.assertEqual(types[1]["type"], "ilist")
 
 
+class TestParseStates(unittest.TestCase):
+    def test_states_parsed(self):
+        dump = (
+            'File "x.ml", line 2, characters 25-26: vox VC:\n'
+            "  goal: 7 = 7  @ 2.25-2.26\n"
+            "  hypotheses:\n"
+            "  0 <= x  @ 1.7-1.8\n"
+            'File "x.ml", lines 2-3, characters 2-7: vox state:\n'
+            "  hypotheses:\n"
+            "  0 <= x  @ 1.7-1.8\n"
+            "  scope:\n"
+            "  x : int  ~>  Int  @ 1.7-1.8\n"
+            'File "x.ml", line 3, characters 2-7: vox state:\n'
+            "  hypotheses: <none>\n"
+            "  scope:\n"
+            "  a : ilist  ~>  Vox_X_ilist  @ 1.2-1.3\n"
+        )
+        vcs = vc_index.parse_dump(dump)
+        self.assertEqual(len(vcs), 1)  # the state blocks are not VCs
+        states = vc_index.parse_states(dump)
+        self.assertEqual(len(states), 2)
+        st = states[0]
+        self.assertEqual(st["start"], {"line": 2, "col": 2})
+        self.assertEqual(st["end"], {"line": 3, "col": 7})
+        self.assertEqual(st["hypotheses"], ["0 <= x"])
+        self.assertEqual(st["scope"][0]["name"], "x")
+        self.assertEqual(states[1]["hypotheses"], [])
+        # a scope: section after inline "<none>" hypotheses still parses
+        self.assertEqual(states[1]["scope"][0]["name"], "a")
+
+
 class TestParseDump(unittest.TestCase):
     def test_two_none(self):
         vcs = vc_index.parse_dump(DUMP_TWO_NONE)

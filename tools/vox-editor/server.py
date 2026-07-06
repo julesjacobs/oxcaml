@@ -140,10 +140,24 @@ def build_check_response(
         }
         for t in cast(List[Dict[str, Any]], index.get("types", []))
     ]
+    # Program-point states (facts + scope at every walked expression's
+    # entry): start/end to 0-based; hyp/scope spans stay in the
+    # compiler's convention like the regions' provenance spans.
+    states = [
+        {
+            "start": _loc0(cast(Dict[str, int], st["start"])),
+            "end": _loc0(cast(Dict[str, int], st["end"])),
+            "hypotheses": st["hypotheses"],
+            "hyp_spans": st["hyp_spans"],
+            "scope": st["scope"],
+        }
+        for st in cast(List[Dict[str, Any]], index.get("states", []))
+    ]
     return {
         "revision": revision,
         "ok": index["ok"],
         "regions": regions,
+        "states": states,
         "errors": [_error0(e) for e in cast(List[Dict[str, object]], index["errors"])],
         "generated_lean": generated,
         "types": types,

@@ -28,6 +28,8 @@ let regions = [];
 let errors = [];
 // Expression types from -annot (0-based coords), for type-at-cursor.
 let exprTypes = [];
+// Program-point states (facts + scope at each expression's entry).
+let pointStates = [];
 let revision = 0;
 let applied = -1;
 let marks = [];
@@ -147,6 +149,7 @@ async function check(fast) {
     regions = resp.fast ? Selection.carryVerdicts(fresh, regions) : fresh;
     errors = resp.errors || [];
     exprTypes = resp.types || [];
+    pointStates = resp.states || [];
     markRegions();
     if (resp.fast) {
       // Elaboration errors need no Lean, so a failing fast pass is
@@ -224,22 +227,23 @@ function renderPane() {
       html += '<p>Inside a <code>[%%vox.lean]</code> block.</p>' + liveButton();
     }
   } else if (sel.relation === "nearest" && r) {
-    // Not at any region — do NOT present the nearest one as if it were
-    // here. Empty state plus a muted, clickable secondary that jumps.
-    modeEl.textContent = "no obligation at cursor";
-    // Arrow points the way to the nearest region (it may sit below the
-    // cursor, not just above).
+    // Not at any obligation: show the PROGRAM-POINT state -- the
+    // context and facts that hold right here -- plus a muted jump to
+    // the nearest obligation. (No goal: nothing to prove here.)
     const arrow = sel.mode === "below" ? "↓" : "↑";
+    const stHtml = renderState({ line: c.line, col: c.ch });
+    modeEl.textContent = stHtml ? "program point" : "no obligation at cursor";
+    html += stHtml || '<p class="placeholder">No obligation at the cursor.</p>';
     html +=
-      '<p class="placeholder">No obligation at the cursor.</p>' +
       '<div class="nearest"><button id="jump-btn" class="jump">nearest ' +
       esc(REGION_NOUN[r.kind] || r.kind) +
       " " + arrow + " line " +
       (r.start.line + 1) +
       "</button></div>";
   } else {
-    modeEl.textContent = "no obligation at cursor";
-    html += '<p class="placeholder">No obligation at the cursor.</p>';
+    const stHtml = renderState({ line: c.line, col: c.ch });
+    modeEl.textContent = stHtml ? "program point" : "no obligation at cursor";
+    html += stHtml || '<p class="placeholder">No obligation at the cursor.</p>';
   }
   html += renderErrors();
   bodyEl.innerHTML = html;
@@ -264,11 +268,11 @@ function badge(status) {
 // variable with its OxCaml type, solver sort dimmed), the hypotheses,
 // then the goal behind a turnstile. Hover-provenance stays on the
 // hypothesis/goal rows.
-function renderVc(r) {
-  let h = "";
-  if (r.scope && r.scope.length) {
-    h += "<h3>context</h3>";
-    h += r.scope
+function renderCtx(scope) {
+  if (!scope || !scope.length) return "";
+  return (
+    "<h3>context</h3>" +
+    scope
       .map((v) => {
         const inner =
           '<span class="ctx-name">' + esc(v.name) + "</span> : " +
@@ -283,8 +287,13 @@ function renderVc(r) {
           "</div>"
         );
       })
-      .join("");
-  }
+      .join("")
+  );
+}
+
+function renderVc(r) {
+  let h = "";
+  h += renderCtx(r.scope);
   h += renderHyps(r.hypotheses, r.hyp_spans);
   h += "<h3>goal" + badge(r.status) + "</h3>";
   const g = Selection.splitSpanSuffix(r.goal);
@@ -294,6 +303,21 @@ function renderVc(r) {
     h += '<div class="cex">' + esc(r.counterexample.join("\n")) + "</div>";
   }
   return h;
+}
+
+// The proof state of "here" when the cursor is on no obligation: the
+// innermost program-point state's context + facts. Same sections and
+// hover behavior as a VC, no goal.
+function renderState(pos) {
+  const st = Selection.stateAtPos(pointStates, pos);
+  if (!st) return null;
+  let h = renderCtx(st.scope);
+  if (st.hypotheses && st.hypotheses.length) {
+    h += renderHyps(st.hypotheses, st.hyp_spans);
+  } else if (h) {
+    h += "<h3>hypotheses</h3><div class='hyp'>—</div>";
+  }
+  return h || null;
 }
 
 function renderTheorem(r) {
@@ -516,6 +540,7 @@ window.__vox = {
   getRegions: () => regions,
   getLastCheckFast: () => lastCheckFast,
   getTypes: () => exprTypes,
+  getStates: () => pointStates,
 };
 
 init();
