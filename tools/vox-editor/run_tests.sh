@@ -18,6 +18,9 @@ python3 -m unittest test_vc_index test_lean_bridge test_server test_make_example
 echo "== node: selection logic =="
 node test_selection.js
 
+echo "== node: vox syntax mode tokens =="
+node test_vox_mode.js
+
 if [ -d /tmp/vox-pptr/node_modules/puppeteer-core ]; then
   echo "== node: in-browser smoke test =="
   node browser_test.js

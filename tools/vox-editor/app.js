@@ -18,7 +18,7 @@ let use () =
 `;
 
 const cm = CodeMirror.fromTextArea(document.getElementById("code"), {
-  mode: "text/x-ocaml",
+  mode: "text/x-vox",
   lineNumbers: true,
   value: SAMPLE,
 });

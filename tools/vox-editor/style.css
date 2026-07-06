@@ -233,6 +233,72 @@ html:not([data-theme="light"]) .cm-variable-3,
 html:not([data-theme="light"]) .cm-type    { color: #2ac3de; }
 html:not([data-theme="light"]) .cm-quote   { color: #9ece6a; }
 
+/* --- vox-specific token classes (see vox-mode.js) -----------------------
+   The stock mllike mode is blind to these, so unlike the OCaml classes
+   above they carry NO CodeMirror default: both themes need explicit
+   colours.  Weight / style / shape are theme-independent (set once on the
+   base class); only the hue changes per theme.
+
+   The families:
+     refinement   { } delimiters, the _ hole (the star), spec-app verbs,
+                  forall_/exists_ quantifiers
+     ghost        trailing-underscore markers (total_, unreachable_, ...)
+     effect       let mutable, <- assignment
+     attribute    [@@vox.* ...] delimiters (dimmed) + the dotted name
+     lean         the {lean| ... |lean} interior, coloured AS Lean       */
+
+/* Theme-independent weight/style/shape. */
+.cm-vox-refine-delim { font-weight: 600; }
+.cm-vox-hole { font-weight: 700; border-radius: 3px; }
+.cm-vox-quant { font-weight: 600; font-style: italic; }
+.cm-vox-marker { font-weight: 600; }
+.cm-vox-assign { font-weight: 700; }
+.cm-vox-mutable { font-style: italic; }
+.cm-vox-attr-name { font-weight: 600; }
+.cm-vox-lean-delim { font-weight: 700; }
+.cm-vox-lean-keyword { font-weight: 600; }
+.cm-vox-lean-tactic { font-weight: 600; }
+.cm-vox-lean-comment { font-style: italic; }
+
+/* Dark palette (Tokyo-night-adjacent, matching the OCaml classes above). */
+html:not([data-theme="light"]) .cm-vox-refine-delim { color: #4c9be8; }
+html:not([data-theme="light"]) .cm-vox-hole {
+  color: #f7768e; background: rgba(247, 118, 142, 0.16);
+}
+html:not([data-theme="light"]) .cm-vox-spec-app { color: #73daca; }
+html:not([data-theme="light"]) .cm-vox-quant { color: #9d7cd8; }
+html:not([data-theme="light"]) .cm-vox-marker { color: #e0af68; }
+html:not([data-theme="light"]) .cm-vox-assign { color: #ff9e64; }
+html:not([data-theme="light"]) .cm-vox-mutable { color: #bb9af7; }
+html:not([data-theme="light"]) .cm-vox-attr { color: #565f89; }
+html:not([data-theme="light"]) .cm-vox-attr-name { color: #7dcfff; }
+html:not([data-theme="light"]) .cm-vox-lean-delim { color: #e0af68; }
+html:not([data-theme="light"]) .cm-vox-lean-keyword { color: #bb9af7; }
+html:not([data-theme="light"]) .cm-vox-lean-tactic { color: #7aa2f7; }
+html:not([data-theme="light"]) .cm-vox-lean-sort { color: #2ac3de; }
+html:not([data-theme="light"]) .cm-vox-lean-comment { color: #565f89; }
+html:not([data-theme="light"]) .cm-vox-lean-op { color: #89ddff; }
+
+/* Light palette: saturated, dark enough to read on white (the standard
+   OCaml classes fall back to CodeMirror's own light defaults). */
+html[data-theme="light"] .cm-vox-refine-delim { color: #0b5fbf; }
+html[data-theme="light"] .cm-vox-hole {
+  color: #c0334d; background: rgba(192, 51, 77, 0.1);
+}
+html[data-theme="light"] .cm-vox-spec-app { color: #0e7c66; }
+html[data-theme="light"] .cm-vox-quant { color: #8250df; }
+html[data-theme="light"] .cm-vox-marker { color: #9a6700; }
+html[data-theme="light"] .cm-vox-assign { color: #bc4c00; }
+html[data-theme="light"] .cm-vox-mutable { color: #8250df; }
+html[data-theme="light"] .cm-vox-attr { color: #6e7781; }
+html[data-theme="light"] .cm-vox-attr-name { color: #0550ae; }
+html[data-theme="light"] .cm-vox-lean-delim { color: #9a6700; }
+html[data-theme="light"] .cm-vox-lean-keyword { color: #8250df; }
+html[data-theme="light"] .cm-vox-lean-tactic { color: #0550ae; }
+html[data-theme="light"] .cm-vox-lean-sort { color: #1b7c83; }
+html[data-theme="light"] .cm-vox-lean-comment { color: #6e7781; }
+html[data-theme="light"] .cm-vox-lean-op { color: #0550ae; }
+
 /* Proof-state pane: Lean-style context rows, turnstile goal, and the
    type-at-cursor line. The Lean sort sits right-aligned and dimmed so
    the OxCaml view stays primary. */
