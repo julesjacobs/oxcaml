@@ -30,6 +30,10 @@ let errors = [];
 let exprTypes = [];
 // Program-point states (facts + scope at each expression's entry).
 let pointStates = [];
+// Compact pane (default): goal then hypotheses, nothing else -- the
+// original display. Unchecked = the full proof state (cursor type,
+// context, hypotheses, turnstile goal, program-point view).
+let compact = true;
 let revision = 0;
 let applied = -1;
 let marks = [];
@@ -202,8 +206,10 @@ function renderPane() {
   hoverSpans = [];
   let html = "";
   // Type of the expression under the cursor (from -annot), shown above
-  // whatever else the pane displays.
-  const at = Selection.typeAtPos(exprTypes, { line: c.line, col: c.ch });
+  // whatever else the pane displays (full mode only).
+  const at = compact
+    ? null
+    : Selection.typeAtPos(exprTypes, { line: c.line, col: c.ch });
   if (at) {
     const rng = { from: { line: at.start.line, ch: at.start.col },
                   to: { line: at.end.line, ch: at.end.col } };
@@ -293,11 +299,18 @@ function renderCtx(scope) {
 
 function renderVc(r) {
   let h = "";
-  h += renderCtx(r.scope);
-  h += renderHyps(r.hypotheses, r.hyp_spans);
-  h += "<h3>goal" + badge(r.status) + "</h3>";
   const g = Selection.splitSpanSuffix(r.goal);
-  h += provRow("goal turnstile", g.text, r.goal_span || g.span);
+  if (compact) {
+    // The original display: goal first, hypotheses after, nothing else.
+    h += "<h3>goal" + badge(r.status) + "</h3>";
+    h += provRow("goal", g.text, r.goal_span || g.span);
+    h += renderHyps(r.hypotheses, r.hyp_spans);
+  } else {
+    h += renderCtx(r.scope);
+    h += renderHyps(r.hypotheses, r.hyp_spans);
+    h += "<h3>goal" + badge(r.status) + "</h3>";
+    h += provRow("goal turnstile", g.text, r.goal_span || g.span);
+  }
   if (r.counterexample && r.counterexample.length) {
     h += "<h3>counterexample</h3>";
     h += '<div class="cex">' + esc(r.counterexample.join("\n")) + "</div>";
@@ -309,6 +322,7 @@ function renderVc(r) {
 // innermost program-point state's context + facts. Same sections and
 // hover behavior as a VC, no goal.
 function renderState(pos) {
+  if (compact) return null; // compact pane: obligations only
   const st = Selection.stateAtPos(pointStates, pos);
   if (!st) return null;
   let h = renderCtx(st.scope);
@@ -463,6 +477,27 @@ themeBtn.addEventListener("click", () => {
 
 initTheme();
 
+// Compact pane toggle (persisted; default checked = compact).
+const COMPACT_KEY = "vox-editor-compact";
+const compactBox = document.getElementById("compact-box");
+
+function initCompact() {
+  try {
+    compact = localStorage.getItem(COMPACT_KEY) !== "off";
+  } catch (e) {}
+  compactBox.checked = compact;
+}
+
+compactBox.addEventListener("change", () => {
+  compact = compactBox.checked;
+  try {
+    localStorage.setItem(COMPACT_KEY, compact ? "on" : "off");
+  } catch (e) {}
+  renderPane();
+});
+
+initCompact();
+
 // Examples dropdown: populated from /examples, each choice loads the
 // source and re-checks. A confirm() guards unsaved edits.
 const examplesEl = document.getElementById("examples");
@@ -541,6 +576,11 @@ window.__vox = {
   getLastCheckFast: () => lastCheckFast,
   getTypes: () => exprTypes,
   getStates: () => pointStates,
+  setCompact: (v) => {
+    compact = !!v;
+    document.getElementById("compact-box").checked = compact;
+    renderPane();
+  },
 };
 
 init();

@@ -321,3 +321,14 @@ html[data-theme="light"] .cm-vox-lean-op { color: #0550ae; }
   margin-bottom: .4rem;
 }
 .ctx.prov:hover { border-left-color: var(--accent); }
+
+#compact-label {
+  color: var(--muted);
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  cursor: pointer;
+  user-select: none;
+}
+#compact-label:hover { color: var(--fg); }

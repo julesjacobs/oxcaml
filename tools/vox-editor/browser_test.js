@@ -161,6 +161,31 @@ async function main() {
     );
     console.log("ok - VC pane shows a goal");
 
+    // COMPACT is the default: goal first, hypotheses after, nothing
+    // else -- no context rows, no turnstile, no cursor-type line.
+    const compactView = await page.evaluate(() => {
+      const body = document.getElementById("pane-body");
+      const rows = Array.from(body.children).map((e) => e.tagName + ":" + e.className);
+      return {
+        checked: document.getElementById("compact-box").checked,
+        hasCtx: !!body.querySelector(".ctx"),
+        hasTurnstile: !!body.querySelector(".turnstile"),
+        hasCursorType: !!body.querySelector(".cursor-type"),
+        goalBeforeHyp:
+          rows.findIndex((r) => /goal/.test(r)) <
+          rows.findIndex((r) => /hyp/.test(r)),
+      };
+    });
+    assert.ok(compactView.checked, "compact checkbox is checked by default");
+    assert.ok(!compactView.hasCtx, "compact: no context rows");
+    assert.ok(!compactView.hasTurnstile, "compact: no turnstile");
+    assert.ok(!compactView.hasCursorType, "compact: no cursor-type line");
+    assert.ok(compactView.goalBeforeHyp, "compact: goal renders before hypotheses");
+    console.log("ok - compact default: goal then hypotheses, nothing else");
+
+    // Uncheck compact for the FULL proof-state assertions below.
+    await page.evaluate(() => window.__vox.setCompact(false));
+
     // Proof-state extras: the pane shows the VC's variables with their
     // OxCaml type and Lean sort (context rows), the goal behind a
     // turnstile, and the type of the expression under the cursor.
