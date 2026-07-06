@@ -240,8 +240,9 @@ html:not([data-theme="light"]) .cm-quote   { color: #9ece6a; }
    base class); only the hue changes per theme.
 
    The families:
-     refinement   { } delimiters, the _ hole (the star), spec-app verbs,
-                  forall_/exists_ quantifiers
+     refinement   { } delimiters, the _ hole (the star), forall_/exists_
+                  quantifiers, and an italic body class carried by every
+                  token inside a refinement (colour untouched, just italic)
      ghost        trailing-underscore markers (total_, unreachable_, ...)
      effect       let mutable, <- assignment
      attribute    [@@vox.* ...] delimiters (dimmed) + the dotted name
@@ -249,6 +250,11 @@ html:not([data-theme="light"]) .cm-quote   { color: #9ece6a; }
 
 /* Theme-independent weight/style/shape. */
 .cm-vox-refine-delim { font-weight: 600; }
+/* Italicise the whole refinement interior. This class is layered on top
+   of each token's ordinary class (see vox-mode.js token()), so it changes
+   only the slant, never the hue -- the predicate keeps program-code
+   colours and reads set apart by the slant + the brace colour alone. */
+.cm-vox-refine-body { font-style: italic; }
 .cm-vox-hole { font-weight: 700; border-radius: 3px; }
 .cm-vox-quant { font-weight: 600; font-style: italic; }
 .cm-vox-marker { font-weight: 600; }
@@ -265,7 +271,6 @@ html:not([data-theme="light"]) .cm-vox-refine-delim { color: #4c9be8; }
 html:not([data-theme="light"]) .cm-vox-hole {
   color: #f7768e; background: rgba(247, 118, 142, 0.16);
 }
-html:not([data-theme="light"]) .cm-vox-spec-app { color: #73daca; }
 html:not([data-theme="light"]) .cm-vox-quant { color: #9d7cd8; }
 html:not([data-theme="light"]) .cm-vox-marker { color: #e0af68; }
 html:not([data-theme="light"]) .cm-vox-assign { color: #ff9e64; }
@@ -285,7 +290,6 @@ html[data-theme="light"] .cm-vox-refine-delim { color: #0b5fbf; }
 html[data-theme="light"] .cm-vox-hole {
   color: #c0334d; background: rgba(192, 51, 77, 0.1);
 }
-html[data-theme="light"] .cm-vox-spec-app { color: #0e7c66; }
 html[data-theme="light"] .cm-vox-quant { color: #8250df; }
 html[data-theme="light"] .cm-vox-marker { color: #9a6700; }
 html[data-theme="light"] .cm-vox-assign { color: #bc4c00; }

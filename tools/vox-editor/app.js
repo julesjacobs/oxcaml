@@ -58,6 +58,30 @@ function esc(s) {
     .replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 }
 
+// Colorize a fragment of pane text with the SAME tokenizer the buffer
+// uses (CodeMirror.voxTokenize from vox-mode.js), so a hypothesis / goal /
+// type row reads exactly like the corresponding source. Each token's text
+// is escaped individually and concatenated, so the row's textContent is
+// byte-for-byte the input -- provenance hover keys and layout are
+// untouched. `refine` true starts the tokenizer inside a refinement, for
+// predicate text (hypotheses, goals, counterexamples) that matches the
+// italic `type{ ... }` interior in the buffer; false is for plain program
+// text such as an OCaml type expression in the context rows.
+function tok(text, refine) {
+  const pairs = CodeMirror.voxTokenize(String(text), refine ? { refine: 1 } : null);
+  return pairs
+    .map(([t, cls]) =>
+      cls
+        ? '<span class="' +
+          cls.split(" ").map((c) => "cm-" + c).join(" ") +
+          '">' +
+          esc(t) +
+          "</span>"
+        : esc(t)
+    )
+    .join("");
+}
+
 function setStatus(cls, text) {
   statusEl.className = cls;
   statusEl.textContent = text;
@@ -93,11 +117,12 @@ function paintSpan(span) {
 // class + a key into hoverSpans); without one it renders exactly as before,
 // with no affordance.
 function provRow(cls, text, span) {
-  if (!span) return '<div class="' + cls + '">' + esc(text) + "</div>";
+  const body = tok(text, true); // predicate text: refinement-interior styling
+  if (!span) return '<div class="' + cls + '">' + body + "</div>";
   const key = hoverSpans.push(span) - 1;
   return (
     '<div class="' + cls + ' prov" data-prov-key="' + key + '">' +
-    esc(text) +
+    body +
     "</div>"
   );
 }
@@ -228,9 +253,9 @@ function renderPane() {
     } else if (snippet && snippet.length <= 40 && snippet.indexOf("\n") < 0) {
       html +=
         '<div class="cursor-type"><span class="ctx-name">' + esc(snippet) +
-        "</span> : " + esc(at.type) + "</div>";
+        "</span> : " + tok(at.type, false) + "</div>";
     } else {
-      html += '<div class="cursor-type">cursor : ' + esc(at.type) + "</div>";
+      html += '<div class="cursor-type">cursor : ' + tok(at.type, false) + "</div>";
     }
   }
   if (sel.relation === "inside" && r) {
@@ -314,7 +339,7 @@ function renderCtx(scope) {
       .map((v) => {
         const inner =
           '<span class="ctx-name">' + esc(v.name) + "</span> : " +
-          esc(v.ocaml) +
+          tok(v.ocaml, false) +
           '<span class="ctx-lean">' + esc(leanLabel(v.lean)) + "</span>";
         // A row that knows its binder's span gets the same hover
         // affordance as hypotheses: hovering highlights the binding.
@@ -361,7 +386,7 @@ function renderVc(r) {
     h += "<h3>counterexample</h3>";
     h +=
       '<div class="cex">goal is false when:\n' +
-      esc(r.counterexample.join("\n")) + "</div>";
+      tok(r.counterexample.join("\n"), true) + "</div>";
   }
   return h;
 }
@@ -390,7 +415,7 @@ function renderTheorem(r) {
   let h = "<h3>theorem " + esc(r.name) + "</h3>";
   h += renderHyps(r.hypotheses);
   h += "<h3>goal</h3>";
-  h += '<div class="goal turnstile">' + esc(r.goal) + "</div>";
+  h += '<div class="goal turnstile">' + tok(r.goal, true) + "</div>";
   return h;
 }
 

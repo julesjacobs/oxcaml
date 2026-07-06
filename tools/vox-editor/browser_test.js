@@ -183,6 +183,46 @@ async function main() {
     assert.ok(compactView.goalBeforeHyp, "compact: goal renders before hypotheses");
     console.log("ok - compact default: goal then hypotheses, nothing else");
 
+    // Pane colorization: goal / hypothesis rows are tokenized with the SAME
+    // vox mode as the buffer -- they carry cm-* token spans, and the
+    // refinement-interior italic class -- while their textContent stays
+    // byte-for-byte the predicate (so provenance keys + layout are intact).
+    const expGoalText = await page.evaluate(() => {
+      const r = window.__vox.getRegions().find((x) => x.kind === "vc");
+      return window.Selection.splitSpanSuffix(r.goal).text;
+    });
+    const paneColor = await page.evaluate(() => {
+      const el = document.querySelector("#pane-body .goal");
+      if (!el) return null;
+      return {
+        tokens: el.querySelectorAll('span[class*="cm-"]').length,
+        text: el.textContent,
+      };
+    });
+    assert.ok(paneColor, "a goal row is present in the pane");
+    assert.ok(
+      paneColor.tokens > 0,
+      "goal row is tokenized (has cm-* spans): " + JSON.stringify(paneColor)
+    );
+    assert.strictEqual(
+      paneColor.text,
+      expGoalText,
+      "tokenized goal row textContent is byte-for-byte the predicate"
+    );
+    const paneItalic = await page.evaluate(() => {
+      const el = document.querySelector("#pane-body .cm-vox-refine-body");
+      return el ? getComputedStyle(el).fontStyle : null;
+    });
+    assert.strictEqual(
+      paneItalic,
+      "italic",
+      "refinement-interior text renders italic in the pane: " + paneItalic
+    );
+    console.log(
+      "ok - pane rows tokenized (" + paneColor.tokens +
+        " spans), italic, textContent preserved"
+    );
+
     // Uncheck compact for the FULL proof-state assertions below.
     await page.evaluate(() => window.__vox.setCompact(false));
 

@@ -18,8 +18,11 @@
 // each with `cm-`):
 //
 //   vox-refine-delim   the { } of a refinement  int{ ... }
+//   vox-refine-body    every token INSIDE a refinement (rendered italic;
+//                      layered on top of the token's ordinary class, so the
+//                      predicate keeps program-code colours but reads set
+//                      apart -- see token())
 //   vox-hole           the _ hole inside a refinement  (the star)
-//   vox-spec-app       a spec function in application head position
 //   vox-quant          forall_ / exists_
 //   vox-marker         a trailing-underscore ghost marker (total_, ...)
 //   vox-assign         <-
@@ -177,14 +180,6 @@
     return /[\w')\]]/.test(str.charAt(i));
   }
 
-  // Is what follows the identifier of length `wlen` (starting at the
-  // stream's current, un-consumed position) the beginning of an argument?
-  // A space then a value-starter, or an immediately-abutting `(`.
-  function nextIsArg(stream, wlen) {
-    var after = stream.string.slice(stream.pos + wlen);
-    return /^\s+[\w'(]/.test(after) || /^\(/.test(after);
-  }
-
   // The vox interceptor.  Runs only when the OCaml sub-mode is at its base
   // tokenizer (see token()).  Returns a token class if it claimed a span,
   // or null to let the OCaml sub-mode tokenize normally.
@@ -208,20 +203,18 @@
       }
       if (stream.match(/^_(?![\w'])/)) return "vox-hole";
       if (stream.match(/^(?:forall_|exists_)(?![\w'])/)) return "vox-quant";
+      // A ghost marker (trailing _) reads the same inside a refinement as
+      // out.  EVERY other identifier is ordinary OCaml, coloured exactly
+      // as it would be in program code: a spec function like `len` is a
+      // plain variable here just as it is in a function body.  The
+      // refinement is set apart by the brace colour and the italic body
+      // (see token()), never by recolouring the identifiers it mentions --
+      // so the same name never pops in one place and lies flat in another.
       if (/[a-z_]/.test(ch)) {
         var m = stream.match(/^[a-z_][\w']*/, false);
-        if (m) {
-          var w = m[0];
-          if (OCAML_WORDS[w]) return null; // not, mod, true, ...
-          if (/_$/.test(w) && w.length > 1) {
-            stream.match(/^[a-z_][\w']*/);
-            return "vox-marker";
-          }
-          // Application head: not itself an argument, and followed by one.
-          if (!prevIsValue(str, start) && nextIsArg(stream, w.length)) {
-            stream.match(/^[a-z_][\w']*/);
-            return "vox-spec-app";
-          }
+        if (m && !OCAML_WORDS[m[0]] && /_$/.test(m[0]) && m[0].length > 1) {
+          stream.match(/^[a-z_][\w']*/);
+          return "vox-marker";
         }
       }
       return null;
@@ -330,9 +323,24 @@
           !state.ocaml.longString;
         if (!atBase) return ocaml.token(stream, state.ocaml);
         if (stream.eatSpace()) return null;
+        var wasRefine = state.refine > 0;
         var vox = voxIntercept(stream, state);
-        if (vox !== null) return vox;
-        return ocaml.token(stream, state.ocaml);
+        var style = vox !== null ? vox : ocaml.token(stream, state.ocaml);
+        // The whole refinement interior renders italic, so the predicate
+        // reads as set apart without any extra colour: this class is
+        // layered ON TOP of the token's ordinary class (variable, number,
+        // ...), leaving its hue alone.  The { } frame keeps its own weight
+        // and stays upright -- so a token is "interior" when the
+        // refinement was already open before it (wasRefine) or is still
+        // open after it, and is not itself a delimiter.
+        if (
+          style &&
+          style.indexOf("vox-refine-delim") < 0 &&
+          (wasRefine || state.refine > 0)
+        ) {
+          style += " vox-refine-body";
+        }
+        return style;
       },
       innerMode: function (state) {
         // Expose the active sub-language so CodeMirror's own helpers
@@ -352,9 +360,15 @@
   // returning [text, class] pairs.  Uses only public CodeMirror API
   // (getMode / startState / StringStream), so it works in the browser and
   // under a DOM stub in node.
-  CodeMirror.voxTokenize = function (text) {
+  // `opts.refine` (a positive integer) starts the tokenizer already inside
+  // that many refinement braces, so a bare predicate fragment -- e.g. the
+  // proof pane's hypothesis / goal rows, which are refinement-interior text
+  // with no surrounding `type{ ... }` -- tokenizes (and italicizes) exactly
+  // as it would in the buffer.
+  CodeMirror.voxTokenize = function (text, opts) {
     var mode = CodeMirror.getMode({ indentUnit: 2, tabSize: 2 }, "vox");
     var state = CodeMirror.startState(mode);
+    if (opts && opts.refine) state.refine = opts.refine;
     var out = [];
     var lines = text.split("\n");
     for (var i = 0; i < lines.length; i++) {

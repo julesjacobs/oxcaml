@@ -81,26 +81,46 @@ function refute(name, src, absentClass) {
   }
 }
 
-// --- refinements: braces, the hole, spec applications -------------------
+// --- refinements: braces, the hole, italic interior ---------------------
+// Every token INSIDE the braces carries an extra `vox-refine-body` class
+// (rendered italic) on top of its ordinary class; the { } frame does not.
 check(
-  "refinement: delim + hole + not stays plain",
+  "refinement: delim + hole + italic interior",
   "let div (a : int) (b : int{ not (_ = 0) }) : int = a / b",
   ["let=keyword", "div=variable", "a=variable", ":=operator", "int=type",
    "b=variable", ":=operator", "int=type", "{=vox-refine-delim",
-   "not=variable", "_=vox-hole", "==operator", "0=number",
+   "not=variable vox-refine-body", "_=vox-hole vox-refine-body",
+   "==operator vox-refine-body", "0=number vox-refine-body",
    "}=vox-refine-delim", ":=operator", "int=type", "==operator",
    "a=variable", "b=variable"]
 );
+// Consistency: a spec function like `len` is a plain variable inside a
+// refinement, exactly as it is in program code -- the same name never
+// pops in one place and lies flat in another (only the italic body and
+// the brace colour set the refinement apart).
 check(
-  "refinement: spec-application heads pop, arguments stay plain",
+  "refinement: spec functions read as plain variables, italic",
   "let rec append (a : ilist) (b : ilist) : ilist{ len _ = len a + len b } = b",
   ["let=keyword", "rec=keyword", "append=variable", "a=variable",
    ":=operator", "ilist=variable", "b=variable", ":=operator",
    "ilist=variable", ":=operator", "ilist=variable", "{=vox-refine-delim",
-   "len=vox-spec-app", "_=vox-hole", "==operator", "len=vox-spec-app",
-   "a=variable", "+=operator", "len=vox-spec-app", "b=variable",
+   "len=variable vox-refine-body", "_=vox-hole vox-refine-body",
+   "==operator vox-refine-body", "len=variable vox-refine-body",
+   "a=variable vox-refine-body", "+=operator vox-refine-body",
+   "len=variable vox-refine-body", "b=variable vox-refine-body",
    "}=vox-refine-delim", "==operator", "b=variable"]
 );
+// The same `len`, in a plain function body, is an identical plain variable
+// (no special class in OR out of a refinement).
+check(
+  "consistency: spec function in program code is a plain variable",
+  "let n = len a",
+  ["let=keyword", "n=variable", "==operator", "len=variable", "a=variable"]
+);
+refute("spec-app class is gone entirely (program code)",
+  "let n = len a", "vox-spec-app");
+refute("spec-app class is gone entirely (refinement)",
+  "let f : int{ len _ = 0 } = g", "vox-spec-app");
 
 // --- ghost markers and quantifiers --------------------------------------
 check(
@@ -111,12 +131,16 @@ check(
    "1=number", "[@@=vox-attr", "vox.decreases=vox-attr-name", "n=variable"]
 );
 check(
-  "quantifier: exists_ binder in a refinement",
+  "quantifier: exists_ binder in a refinement (italic interior)",
   "let six : unit{ exists_ y. y = 3 && 6 = 2 * y } = ()",
   ["let=keyword", "six=variable", ":=operator", "unit=type",
-   "{=vox-refine-delim", "exists_=vox-quant", "y=variable", ".=operator",
-   "y=variable", "==operator", "3=number", "&=operator", "&=operator",
-   "6=number", "==operator", "2=number", "*=operator", "y=variable",
+   "{=vox-refine-delim", "exists_=vox-quant vox-refine-body",
+   "y=variable vox-refine-body", ".=operator vox-refine-body",
+   "y=variable vox-refine-body", "==operator vox-refine-body",
+   "3=number vox-refine-body", "&=operator vox-refine-body",
+   "&=operator vox-refine-body", "6=number vox-refine-body",
+   "==operator vox-refine-body", "2=number vox-refine-body",
+   "*=operator vox-refine-body", "y=variable vox-refine-body",
    "}=vox-refine-delim", "==operator"]
 );
 
@@ -125,7 +149,8 @@ check(
   "mutable: let mutable + <- assignment",
   "let f () : int{ _ = 4 } =\n  let mutable m = 3 in\n  m <- m + 1;\n  m",
   ["let=keyword", "f=variable", ":=operator", "int=type",
-   "{=vox-refine-delim", "_=vox-hole", "==operator", "4=number",
+   "{=vox-refine-delim", "_=vox-hole vox-refine-body",
+   "==operator vox-refine-body", "4=number vox-refine-body",
    "}=vox-refine-delim", "==operator", "let=keyword", "mutable=vox-mutable",
    "m=variable", "==operator", "3=number", "in=keyword", "m=variable",
    "<-=vox-assign", "m=variable", "+=operator", "1=number", "m=variable"]
@@ -157,6 +182,42 @@ check(
    "VoxU=vox-lean-sort", "Prop=vox-lean-sort", ":==vox-lean-op",
    "|lean}=vox-lean-delim"]
 );
+
+// --- pane predicate text: refine-start option ---------------------------
+// The proof pane tokenizes bare predicate fragments (no surrounding
+// `type{ ... }`) with { refine: 1 }, so they colour + italicize exactly
+// like the buffer's refinement interior. Same tokens, same classes.
+(function () {
+  const got = CM.voxTokenize("len r = len t + len b", { refine: 1 })
+    .filter((t) => t[1] !== null && t[0].trim() !== "")
+    .map((t) => t[0] + "=" + t[1]);
+  const expected = [
+    "len=variable vox-refine-body", "r=variable vox-refine-body",
+    "==operator vox-refine-body", "len=variable vox-refine-body",
+    "t=variable vox-refine-body", "+=operator vox-refine-body",
+    "len=variable vox-refine-body", "b=variable vox-refine-body",
+  ];
+  try {
+    assert.deepStrictEqual(got, expected);
+    console.log("ok   - pane: refine-start tokenizes bare predicate italic");
+  } catch (e) {
+    failures++;
+    console.log("FAIL - pane: refine-start tokenizes bare predicate italic");
+    console.log("  expected: " + JSON.stringify(expected));
+    console.log("  got:      " + JSON.stringify(got));
+  }
+  // textContent invariant: the concatenation of token texts is the input
+  // byte-for-byte (the pane relies on this to keep provenance keys + layout).
+  const round = CM.voxTokenize("not (i = 0)", { refine: 1 })
+    .map((t) => t[0]).join("");
+  try {
+    assert.strictEqual(round, "not (i = 0)");
+    console.log("ok   - pane: tokenizer preserves text byte-for-byte");
+  } catch (e) {
+    failures++;
+    console.log("FAIL - pane: tokenizer preserves text byte-for-byte");
+  }
+})();
 
 // --- negatives: the safe-zone gating -----------------------------------
 // A record brace is NOT a refinement brace; `mutable` still reads as vox.
