@@ -107,12 +107,10 @@ let overclaim : (x : int) -> (s : t) -> bool{ _ = mem (x + 1) s } =
 Line 2, characters 13-23:
 2 |   fun x s -> member x s
                  ^^^^^^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: *unknown6* = mem (x + 1) s
 Hypotheses:
   *unknown6* = mem x s
-Possible counterexample:
-  x = 0
 (lean: error: `grind` failed)
 |}]
 
@@ -130,7 +128,7 @@ let overclaim_setlevel : (s : iset) -> unit{ s = emp } =
 Line 2, characters 11-13:
 2 |   fun s -> ()
                ^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: s = emp
 Hypotheses: <none>
 (lean: error: `grind` failed)

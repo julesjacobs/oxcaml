@@ -156,14 +156,11 @@ let stale :
 Line 9, characters 24-36:
 9 |   fun m i b -> exclave_ (sset m i b)
                             ^^^^^^^^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: bnow *unknown8* = bnow m
 Hypotheses:
   bnow *unknown8* = tset (bnow m) i b && bfin *unknown8* = bfin m
   0 <= i && i < tlen (bnow m)
-Possible counterexample:
-  i = 0
-  tlen (bnow m) = 1
 (lean: error: `grind` failed)
 |}]
 

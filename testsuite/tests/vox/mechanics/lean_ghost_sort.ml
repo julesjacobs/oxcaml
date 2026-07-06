@@ -121,17 +121,11 @@ let overclaim : (x : int) -> (s : S.iset) -> int{ _ = card s + x } =
 Line 4, characters 4-12:
 4 |     S.card t
         ^^^^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: *unknown13* = card s + x
 Hypotheses:
   *unknown13* = card t
   t = ins x s
-Possible counterexample:
-  x = 0
-  *unknown13* = 1
-  card s = 0
-  card t = 1
-  card (ISet.cons x s) = 1
 (lean: error: `grind` failed)
 |}]
 

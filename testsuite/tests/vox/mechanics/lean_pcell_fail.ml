@@ -114,7 +114,7 @@ let forge : (n : int) -> int =
 Line 8, characters 13-36:
 8 |     (refine_ { cell = c1; tok = t2 }
                  ^^^^^^^^^^^^^^^^^^^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: tid (mk (c1, t2)).tok = cid (mk (c1, t2)).cell && cts (mk (c1, t2)).tok = n
 Hypotheses:
   _c2 = q.cell
@@ -146,7 +146,7 @@ let cross : (n : int) -> int =
 Line 7, characters 21-23:
 7 |   let bad = (refine_ t1 : itoken{ tid _ = cid c2 && cts _ = n }) in
                          ^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: tid t1 = cid c2 && cts t1 = n
 Hypotheses:
   c2 = q.cell

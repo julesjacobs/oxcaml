@@ -34,12 +34,13 @@ let bad (s : (int mylist){ _ = Cons (3, Nil) }) : {r:int | r = 4} =
 Line 3, characters 27-28:
 3 |   | Cons (h, t) -> refine_ h
                                ^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
        Goal: h = 4
 Hypotheses:
   s = Cons (h, t)
   s = Cons (3, Nil)
-Possible counterexample:
+Counterexample (validated -- every hypothesis holds and the goal fails here):
   h = 3
-(lean: error: `grind` failed)
+  t = Nil
+  s = Cons (3, Nil)
 |}]

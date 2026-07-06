@@ -43,7 +43,7 @@ let eq_smuggle : (a : set) -> (b : set) -> bool{ _ = (elems a = elems b) } =
 Line 5, characters 4-11:
 5 |     ta = tb
         ^^^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: *unknown1* = (elems a = elems b)
 Hypotheses:
   triv tb

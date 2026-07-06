@@ -33,14 +33,12 @@ val unreachable_ : unit{ false } -> 'a = <fun>
 Line 14, characters 24-26:
 14 |   | Nil -> unreachable_ ()
                              ^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
        Goal: false
 Hypotheses:
   l = Nil
   0 <= i && i <= len l
-Possible counterexample:
+Counterexample (validated -- every hypothesis holds and the goal fails here):
+  l = Nil
   i = 0
-  len l = 0
-  len Vox_ilist.Nil = 0
-(lean: error: `grind` failed)
 |}]

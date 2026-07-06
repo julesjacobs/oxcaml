@@ -14,10 +14,10 @@ let bad : {v:int | v > 0} = refine_ 0
 Line 1, characters 36-37:
 1 | let bad : {v:int | v > 0} = refine_ 0
                                         ^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
        Goal: 0 > 0
 Hypotheses: <none>
-(lean: error: `grind` failed)
+The goal is false unconditionally.
 |}]
 
 (* Shadowing soundness: logical facts are keyed by stamp, never by
@@ -30,15 +30,14 @@ let shadow_unsound (a : {v:int | v > 0}) : {w:int | w > 0} =
 Line 3, characters 10-11:
 3 |   refine_ a
               ^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
        Goal: a > 0
 Hypotheses:
   a = 0
   a#2 > 0
-Possible counterexample:
+Counterexample (validated -- every hypothesis holds and the goal fails here):
   a = 0
   a#2 = 1
-(lean: error: `grind` failed)
 |}]
 
 (* A phrase that fails verification is backtracked by the toplevel; its
@@ -49,10 +48,10 @@ let contra : {v:int | v > 0 && not (v > 0)} = refine_ 0
 Line 1, characters 54-55:
 1 | let contra : {v:int | v > 0 && not (v > 0)} = refine_ 0
                                                           ^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
        Goal: 0 > 0 && not (0 > 0)
 Hypotheses: <none>
-(lean: error: `grind` failed)
+The goal is false unconditionally.
 |}]
 
 let oops : {v:int | v = 42} = refine_ 0
@@ -60,10 +59,10 @@ let oops : {v:int | v = 42} = refine_ 0
 Line 1, characters 38-39:
 1 | let oops : {v:int | v = 42} = refine_ 0
                                           ^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
        Goal: 0 = 42
 Hypotheses: <none>
-(lean: error: `grind` failed)
+The goal is false unconditionally.
 |}]
 
 (* Mutable locals, the exploits: the stale value after a write, and a
@@ -76,15 +75,14 @@ let stale () : {r:int | r = 3} =
 Line 4, characters 10-11:
 4 |   refine_ m
               ^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
        Goal: m@1 = 3
 Hypotheses:
   m = 3
   m@1 = m + 1
-Possible counterexample:
+Counterexample (validated -- every hypothesis holds and the goal fails here):
   m@1 = 4
   m = 3
-(lean: error: `grind` failed)
 |}]
 
 let post_loop (n : int) : {r:int | r = 0} =
@@ -99,15 +97,14 @@ let post_loop (n : int) : {r:int | r = 0} =
 Line 8, characters 10-11:
 8 |   refine_ m
               ^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
        Goal: m@1 = 0
 Hypotheses:
   not (i@1 < n)
-Possible counterexample:
+Counterexample (validated -- every hypothesis holds and the goal fails here):
   m@1 = 1
-  n = 0
-  i@1 = 0
-(lean: error: `grind` failed)
+  n = 1
+  i@1 = 1
 |}]
 
 (* Loop invariants must be established at entry... *)
@@ -121,13 +118,12 @@ let inv_entry (n : int) : int =
 Line 5, characters 9-31:
 5 |    done) [@vox.invariant x = 0];
              ^^^^^^^^^^^^^^^^^^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
        Goal: x = 0
 Hypotheses:
   x = 5
-Possible counterexample:
+Counterexample (validated -- every hypothesis holds and the goal fails here):
   x = 5
-(lean: error: `grind` failed)
 |}]
 
 (* ... and preserved by the body. *)
@@ -141,14 +137,13 @@ let inv_preserved (n : int) : int =
 Line 5, characters 9-42:
 5 |    done) [@vox.invariant x >= 0 && x <= n];
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
        Goal: x >= 0 && x <= n
 Hypotheses:
   x = 0
-Possible counterexample:
+Counterexample (validated -- every hypothesis holds and the goal fails here):
   n = -1
   x = 0
-(lean: error: `grind` failed)
 |}]
 
 (* The entry assertion instantiates an index-mentioning invariant at
@@ -163,13 +158,12 @@ let inv_index_entry (n : int) : int =
 Line 5, characters 9-31:
 5 |    done) [@vox.invariant x = i];
              ^^^^^^^^^^^^^^^^^^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
        Goal: x = 1
 Hypotheses:
   x = 0
-Possible counterexample:
+Counterexample (validated -- every hypothesis holds and the goal fails here):
   x = 0
-(lean: error: `grind` failed)
 |}]
 
 (* ... and the back-edge asserts it at the NEXT one: holding at the
@@ -184,18 +178,17 @@ let inv_index_step (n : int) : int =
 Line 5, characters 9-35:
 5 |    done) [@vox.invariant x = i - 1];
              ^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
        Goal: x = i + 1 - 1
 Hypotheses:
   1 <= i
   i <= n
   x = i - 1
   x = 0
-Possible counterexample:
+Counterexample (validated -- every hypothesis holds and the goal fails here):
   i = 1
   x = 0
   n = 1
-(lean: error: `grind` failed)
 |}]
 
 (* An exception arm can be reached with the scrutinee interrupted
@@ -210,12 +203,11 @@ let interrupted (p : bool) : {r:int | r = 1} =
 Line 5, characters 10-11:
 5 |   refine_ x
               ^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
        Goal: x@3 = 1
 Hypotheses: <none>
-Possible counterexample:
+Counterexample (validated -- every hypothesis holds and the goal fails here):
   x@3 = 2
-(lean: error: `grind` failed)
 |}]
 
 (* Application arguments evaluate in unspecified order (right-to-left
@@ -230,10 +222,9 @@ let siblings () : {r:int | r = 0} =
 Line 4, characters 23-24:
 4 |   let r = use (refine_ x) (x <- 1) in
                            ^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
        Goal: x@1 = 0
 Hypotheses: <none>
-Possible counterexample:
+Counterexample (validated -- every hypothesis holds and the goal fails here):
   x@1 = 1
-(lean: error: `grind` failed)
 |}]

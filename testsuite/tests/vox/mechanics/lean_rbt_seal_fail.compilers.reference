@@ -1,7 +1,7 @@
 File "rbt.ml", line 70, characters 8-70:
 70 |         Node (Red, Node (Black, a, xa, b), xl, Node (Black, r, x, lr))
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: Node (Red, Node (Black, a, xa, b), xl, Node (Black, r, x, lr)) =
 balance c l x r
 Hypotheses:

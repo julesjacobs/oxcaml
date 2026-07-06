@@ -65,7 +65,7 @@ let rec member_wrong : (x : int) -> (t : tree{ bst _ }) -> bool{ _ = mem x t } =
 Line 9, characters 8-9:
 9 |         b
             ^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: b = mem x t
 Hypotheses:
   b = mem x r
@@ -73,9 +73,6 @@ Hypotheses:
   not (x = v)
   t = Node (l, v, r)
   bst t
-Possible counterexample:
-  x = -1
-  v = 0
 (lean: error: `grind` failed)
 |}]
 
@@ -89,14 +86,11 @@ let rec member_shallow : (x : int) -> (t : tree{ bst _ }) -> bool{ _ = mem x t }
 Line 5, characters 24-29:
 5 |     | Node (_, v, _) -> x = v
                             ^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: (x = v) = mem x t
 Hypotheses:
   t = Node (*vox-wild*#2, v, *vox-wild*)
   bst t
-Possible counterexample:
-  x = -1
-  v = 0
 (lean: error: `grind` failed)
 |}]
 
@@ -106,7 +100,7 @@ let forged : tree{ bst _ } = Node (Node (Leaf, 5, Leaf), 3, Leaf)
 Line 1, characters 29-65:
 1 | let forged : tree{ bst _ } = Node (Node (Leaf, 5, Leaf), 3, Leaf)
                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: bst (Node (Node (Leaf, 5, Leaf), 3, Leaf))
 Hypotheses: <none>
 (lean: error: `grind` failed)

@@ -32,13 +32,12 @@ let broken () : unit =
 Line 3, characters 13-18:
 3 |   counter := v - 1
                  ^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
        Goal: v - 1 >= 0
 Hypotheses:
   v >= 0
-Possible counterexample:
+Counterexample (validated -- every hypothesis holds and the goal fails here):
   v = 0
-(lean: error: `grind` failed)
 |}]
 
 let thunk : int{ 0 <= _ } lazy_t = lazy (2 + 3 : int{ 0 <= _ })

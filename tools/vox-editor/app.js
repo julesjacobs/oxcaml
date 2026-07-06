@@ -420,7 +420,11 @@ function renderVc(r) {
     h += provRow("goal turnstile", g.text, r.goal_span || g.span);
   }
   if (r.counterexample && r.counterexample.length) {
-    h += "<h3>counterexample</h3>";
+    // A "disproved" VC carries a VALIDATED counterexample (the solver
+    // re-checked the assignment); label it so.
+    const cexHead =
+      r.status === "disproved" ? "counterexample (validated)" : "counterexample";
+    h += "<h3>" + cexHead + "</h3>";
     h +=
       '<div class="cex">goal is false when:\n' +
       tok(r.counterexample.join("\n"), true) + "</div>";

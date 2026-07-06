@@ -117,14 +117,10 @@ let bogus : unit -> unit =
 Line 6, characters 47-48:
 6 |     let d : int{ _ = plen (pcts b) } = refine_ c in
                                                    ^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: c = plen (pcts b)
 Hypotheses:
   c = plen (pcts a)
-  plen (pcts b) = 4
-  plen (pcts a) = 3
-Possible counterexample:
-  c = 3
   plen (pcts b) = 4
   plen (pcts a) = 3
 (lean: error: `grind` failed)
@@ -145,7 +141,7 @@ let noinst : (n : int) -> int{ 0 <= _ } =
 Line 5, characters 17-18:
 5 |     let q = fst_ a in
                      ^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: 0 < plen (pcts a)
 Hypotheses:
   plen (pcts a) = 1 && pelem (pcts a) 0 = x

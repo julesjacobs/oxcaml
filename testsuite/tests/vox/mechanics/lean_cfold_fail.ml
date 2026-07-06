@@ -39,20 +39,13 @@ let bad_fold : (e : t) -> t{ _ = e } =
 Line 6, characters 22-27:
 6 |      | Add (_, _) -> (Lit 0 : t{ _ = e })
                           ^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: denote (Lit 0) = denote (Lit 0) && denote (Lit 0) = e
 Hypotheses:
   e0 = Add (*vox-wild*#2, *vox-wild*)
   denote e0 = denote e0
   denote e0 = e
   e = e
-Possible counterexample:
-  e = 1
-  denote e0 = 1
-  denote (Vox_expr.Lit 0) = 0
-  denote *vox-wild* = 1
-  denote *vox-wild*#2 = 0
-  denote (*vox-wild*#2.Add *vox-wild*) = 1
 (lean: error: `grind` failed)
 |}]
 
@@ -75,7 +68,7 @@ let bad_simp : (e : t) -> t{ _ = e } =
 Line 10, characters 25-30:
 10 |           if y = 0 then (Lit 1 : t{ _ = e }) else (Mul (a, b) : t{ _ = e })
                               ^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: denote (Lit 1) = denote (Lit 1) && denote (Lit 1) = e
 Hypotheses:
   y = 0
@@ -84,14 +77,5 @@ Hypotheses:
   denote e0 = denote e0
   denote e0 = e
   e = e
-Possible counterexample:
-  e = 0
-  y = 0
-  denote e0 = 0
-  denote (Vox_expr.Lit 1) = 1
-  denote b = 0
-  denote a = 0
-  denote (a.Mul b) = 0
-  denote (Vox_expr.Lit y) = 0
 (lean: error: `grind` failed)
 |}]

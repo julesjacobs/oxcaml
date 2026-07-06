@@ -81,7 +81,7 @@ let isqrt_broken (x : int{ 0 <= _ })
 Line 12, characters 9-11:
 12 |     else hi
               ^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: 0 <= hi && sq hi <= x && x < sq (hi + 1)
 Hypotheses:
   not (lo + 1 < hi)
@@ -91,19 +91,5 @@ Hypotheses:
   _w = r
   _w = r && 0 <= _w
   0 <= r && sq r <= 9 && 9 < sq (r + 1)
-Possible counterexample:
-  hi = 1
-  x = 9
-  lo = 0
-  r = 0
-  _w = 0
-  sq hi = 0
-  sq lo = 0
-  sq r = 0
-  sq (hi + 1) = 0
-  sq (r + 1) = 0
-  hi ^ 2 = 10
-  lo ^ 2 = 9
-  ...
 (lean: error: `grind` failed)
 |}]

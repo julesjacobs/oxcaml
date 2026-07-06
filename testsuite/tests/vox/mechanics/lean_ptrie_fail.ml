@@ -128,14 +128,11 @@ let forged : t{ trie _ } = Branch (0, 1, Leaf 1, Leaf 0)
 Line 1, characters 27-56:
 1 | let forged : t{ trie _ } = Branch (0, 1, Leaf 1, Leaf 0)
                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: trie (Branch (0, 1, Leaf 1, Leaf 0))
 Hypotheses:
   ok = Branch (0, 1, Leaf 0, Leaf 1)
   trie ok
-Possible counterexample:
-  mask 0 1 = 0
-  mask 1 1 = 0
 (lean: error: `grind` failed)
 |}]
 
@@ -157,7 +154,7 @@ let rec mem_wrong : (i : int) -> (s : t{ trie _ }) -> bool{ _ = mem i s } =
 Line 11, characters 18-32:
 11 |         if z then mem_wrong i t1 else mem_wrong i t0
                        ^^^^^^^^^^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: *unknown7* = mem i s
 Hypotheses:
   *unknown7* = mem i t1
@@ -169,15 +166,6 @@ Hypotheses:
   trie s
   ok = Branch (0, 1, Leaf 0, Leaf 1)
   trie ok
-Possible counterexample:
-  i = -1
-  b = 0
-  p = -1
-  m = -1
-  mask i b = -1
-  mask p b = -1
-  mask 0 1 = 0
-  mask 1 1 = 0
 (lean: error: `grind` failed)
 |}]
 
@@ -227,7 +215,7 @@ let rec ins_unguarded : (i : int) -> (s : t{ trie _ }) -> t{ _ = insert i s } =
 Line 15, characters 8-30:
 15 |         Branch (p, b, t0', t1)
              ^^^^^^^^^^^^^^^^^^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: Branch (p, b, t0', t1) = insert i s
 Hypotheses:
   t0' = insert i t0
@@ -237,15 +225,5 @@ Hypotheses:
   trie s
   ok = Branch (0, 1, Leaf 0, Leaf 1)
   trie ok
-Possible counterexample:
-  i = -1
-  b = 0
-  p = 0
-  mask i b = -1
-  mask p b = 0
-  mask 0 1 = 0
-  bbit i p = 0
-  mask i (bbit i p) = -1
-  mask 1 1 = 0
 (lean: error: `grind` failed)
 |}]

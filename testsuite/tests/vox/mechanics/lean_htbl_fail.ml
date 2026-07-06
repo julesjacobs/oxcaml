@@ -80,7 +80,7 @@ let mem_wrong :
 Line 6, characters 4-18:
 6 |     bucket_mem k b
         ^^^^^^^^^^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: *unknown4* = tmem k t
 Hypotheses:
   *unknown4* = bmem k b
@@ -88,9 +88,6 @@ Hypotheses:
   i = k mod 8 + 1
   twf t 0
   0 <= k
-Possible counterexample:
-  k = 0
-  i = 1
 (lean: error: `grind` failed)
 |}]
 
@@ -103,10 +100,8 @@ let forged : table{ twf _ 0 } =
 Line 2, characters 2-34:
 2 |   TCons (BCons (3, 7, BNil), TNil)
       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: twf (TCons (BCons (3, 7, BNil), TNil)) 0
 Hypotheses: <none>
-Possible counterexample:
-  index 3 = 3
 (lean: error: `grind` failed)
 |}]

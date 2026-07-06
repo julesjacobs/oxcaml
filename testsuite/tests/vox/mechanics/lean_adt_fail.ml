@@ -24,10 +24,10 @@ let bad : t{ _ = K 3 } = refine_ (K 4)
 Line 1, characters 33-38:
 1 | let bad : t{ _ = K 3 } = refine_ (K 4)
                                      ^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
        Goal: K 4 = K 3
 Hypotheses: <none>
-(lean: error: `grind` failed)
+The goal is false unconditionally.
 |}]
 
 (* Distinct constructors must never be equal. *)
@@ -36,10 +36,10 @@ let bad2 : t{ _ = K 0 } = refine_ L
 Line 1, characters 34-35:
 1 | let bad2 : t{ _ = K 0 } = refine_ L
                                       ^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
        Goal: L = K 0
 Hypotheses: <none>
-(lean: error: `grind` failed)
+The goal is false unconditionally.
 |}]
 
 (* Injectivity gives y = 4 here, not y = 3: the goal must fail. *)
@@ -51,14 +51,14 @@ let inj (s : t{ _ = K 4 }) : {r:int | r = 3} =
 Line 3, characters 19-20:
 3 |   | K y -> refine_ y
                        ^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
        Goal: y = 3
 Hypotheses:
   s = K y
   s = K 4
-Possible counterexample:
+Counterexample (validated -- every hypothesis holds and the goal fails here):
   y = 4
-(lean: error: `grind` failed)
+  s = K 4
 |}]
 
 type point =
@@ -75,10 +75,10 @@ let badp : point{ _.px = 1 } = refine_ { px = 0; py = 0 }
 Line 1, characters 39-57:
 1 | let badp : point{ _.px = 1 } = refine_ { px = 0; py = 0 }
                                            ^^^^^^^^^^^^^^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
        Goal: (mk (0, 0)).px = 1
 Hypotheses: <none>
-(lean: error: `grind` failed)
+The goal is false unconditionally.
 |}]
 
 (* The functional-update frame gives _.py = p.py, never p.py + 1. *)
@@ -88,10 +88,11 @@ let badu : (p : point) -> point{ _.py = p.py + 1 } =
 Line 2, characters 19-36:
 2 |   fun p -> refine_ { p with px = 3 }
                        ^^^^^^^^^^^^^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
        Goal: (mk (3, p.py)).py = p.py + 1
 Hypotheses: <none>
-(lean: error: `grind` failed)
+Counterexample (validated -- every hypothesis holds and the goal fails here):
+  p = mk (0, 0)
 |}]
 
 (* A failed phrase must not leak its datatype registration: every

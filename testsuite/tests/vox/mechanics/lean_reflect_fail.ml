@@ -32,12 +32,10 @@ let bad : ilist{ len _ = 1 } = refine_ Nil
 Line 1, characters 39-42:
 1 | let bad : ilist{ len _ = 1 } = refine_ Nil
                                            ^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
        Goal: len Nil = 1
 Hypotheses: <none>
-Possible counterexample:
-  len Vox_ilist.Nil = 0
-(lean: error: `grind` failed)
+The goal is false unconditionally.
 |}]
 
 (* An inconsistent definition must be rejected at its binding: if it

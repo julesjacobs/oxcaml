@@ -76,10 +76,8 @@ let overclaim
 Line 4, characters 13-15:
 4 |   fun x t -> ()
                  ^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: card t + x = card t
 Hypotheses: <none>
-Possible counterexample:
-  x = 1
 (lean: error: `grind` failed)
 |}]

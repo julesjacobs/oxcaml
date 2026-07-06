@@ -124,7 +124,7 @@ module type SET =
 Line 89, characters 7-9:
 89 |       (u2 : t{ _ = ins x (ins x s) })
             ^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: bst u2 && elems u2 = ins x (ins x s)
 Hypotheses:
   u2 = tins x t0 && bst u2

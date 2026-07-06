@@ -61,7 +61,7 @@ let overclaim : (x : int) -> (s : int iset) -> unit{ mem x s } =
 Line 2, characters 28-30:
 2 |   fun x s -> ignore (x, s); ()
                                 ^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: mem x s
 Hypotheses: <none>
 (lean: error: `grind` failed)
@@ -84,7 +84,7 @@ type opaque_elt
 Line 6, characters 28-30:
 6 |   fun x s -> ignore (x, s); ()
                                 ^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: tmem x s = true
 Hypotheses:
   tmem x s = true

@@ -66,11 +66,8 @@ let bad : (k : int) -> (v : int) -> (m : d)
 Line 3, characters 15-17:
 3 |   fun k v m -> ()
                    ^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: isVal (dget (dset m k v) k) (v + 1)
 Hypotheses: <none>
-Possible counterexample:
-  v = 0
-  k = 2
 (lean: error: `grind` failed)
 |}]

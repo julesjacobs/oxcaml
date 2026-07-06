@@ -5126,7 +5126,7 @@ let lean_theorem buf i vc =
 
 (* Returns the file contents and, per theorem, the 1-based line it
    occupies (for mapping lean's error locations back to VCs). *)
-let lean_file vcs =
+let lean_file ?(witness = "") vcs =
   let buf = Buffer.create 1024 in
   let needs_voxu =
     List.exists
@@ -5342,13 +5342,20 @@ let lean_file vcs =
       segments
   in
   List.iter (fun (text, _) -> Buffer.add_string buf text) segments;
-  List.iteri (fun i vc -> lean_theorem buf i vc) vcs;
-  (match self_vp with
-   | Some vp ->
-     Buffer.add_string buf
-       (Vox_module.seal_text
-          ~sig_text:(String.concat "\n" vp.Cmi_format.vp_blocks))
-   | None -> ());
+  (* Witness-check mode ([witness] non-empty): emit the given check
+     theorems in place of the VC theorems and the seal -- the header
+     and prelude are identical, so a validated witness is checked
+     against exactly the theory the failed VC was discharged in. *)
+  if String.equal witness ""
+  then (
+    List.iteri (fun i vc -> lean_theorem buf i vc) vcs;
+    (match self_vp with
+     | Some vp ->
+       Buffer.add_string buf
+         (Vox_module.seal_text
+            ~sig_text:(String.concat "\n" vp.Cmi_format.vp_blocks))
+     | None -> ()))
+  else Buffer.add_string buf witness;
   (* The seal follows the VC theorems (one line each); errors there
      are interface obligations, not VC failures. *)
   let seal_start = first_line + List.length vcs in
@@ -5396,59 +5403,438 @@ let replace_all ~sub ~by s =
   Buffer.contents buf
 ;;
 
-let counterexample_for_error vc assigns =
-  match assigns with
-  | [] -> ""
-  | _ ->
-    let display = vc_display_fun vc in
-    let vars =
-      List.fold_left
-        (fun acc id -> if List.exists (Ident.same id) acc then acc else id :: acc)
-        []
-        (free_vars_of_vc vc)
-    in
-    let subs =
-      List.sort
-        (fun (a, _) (b, _) -> compare (String.length b) (String.length a))
-        (List.map (fun id -> lean_name id, display id) vars)
-    in
-    let rewrite s =
-      List.fold_left (fun s (sub, by) -> replace_all ~sub ~by s) s subs
-    in
-    let contains ~sub s =
-      let n = String.length sub in
-      let rec at i =
-        i + n <= String.length s
-        && (String.equal (String.sub s i n) sub || at (i + 1))
+
+(* ------------------------------------------------------------------ *)
+(* Witness-based classification of a FAILED VC.
+
+   A [grind] failure alone does not tell truth from timeout: grind
+   treats nonlinear terms as atoms, so for [x * x >= 0] it "refutes"
+   the goal with the impossible atom value [x*x = -1].  Reporting that
+   as a counterexample is a lie.  Instead, once a VC fails we try to
+   VALIDATE a real counterexample by evaluation: pick concrete values
+   for the VC's binders and let Lean EVALUATE (via [decide]/[grind] on
+   the fully ground instance) whether every hypothesis holds and the
+   goal fails.  A validated assignment DISPROVES the VC; if none is
+   found the failure is UNKNOWN (automation gave up -- the property may
+   still be true) and NO witness is shown.  Nonlinear atoms are never
+   assigned (only binders are), so a nonsense atom value can never
+   masquerade as a counterexample. *)
+
+(* Instantiate a datatype declaration's field sort at a use site's type
+   arguments (turning each [S_param i] into [args.(i)]). *)
+let rec inst_sort args = function
+  | S_param i -> (match List.nth_opt args i with Some s -> s | None -> S_other)
+  | S_data (p, a) -> S_data (p, List.map (inst_sort args) a)
+  | S_tuple cs -> S_tuple (List.map (inst_sort args) cs)
+  | S_poly (p, a) -> S_poly (p, List.map (inst_sort args) a)
+  | S_lean (n, a) -> S_lean (n, List.map (inst_sort args) a)
+  | (S_int | S_bool | S_iarray | S_other) as s -> s
+;;
+
+(* A sort whose values we can ENUMERATE and Lean can EVALUATE: Int,
+   bool (a Prop, valued True/False), and simple variants/records whose
+   fields are themselves evaluable.  Opaque (VoxU), array, poly, ghost
+   (S_lean) sorts and bare type parameters are not -- we cannot name
+   ground inhabitants a decision procedure can compute over. *)
+let rec sort_evaluable ?(seen = []) = function
+  | S_int | S_bool -> true
+  | S_tuple comps -> List.for_all (sort_evaluable ~seen) comps
+  | S_data (p, args) ->
+    (* A datatype we are already expanding recurs structurally (e.g. a
+       list's tail): treat the recursive occurrence as evaluable --
+       [enum_sort] bounds the actual enumeration by [depth], so unlike
+       here it terminates.  Without this guard [sort_evaluable] loops
+       forever on any recursive datatype. *)
+    List.exists (Path.same p) seen
+    || (match find_datatype p with
+        | Some (_, Dt_variant (_, constrs)) ->
+          List.for_all
+            (fun (_, fss) ->
+              List.for_all
+                (fun fs -> sort_evaluable ~seen:(p :: seen) (inst_sort args fs))
+                fss)
+            constrs
+        | Some (_, Dt_record (_, fields)) ->
+          List.for_all
+            (fun (_, fs) ->
+              sort_evaluable ~seen:(p :: seen) (inst_sort args fs))
+            fields
+        | Some (_, Dt_opaque) | None -> false)
+  | S_param _ | S_poly _ | S_lean _ | S_iarray | S_other -> false
+;;
+
+let reflected_names () =
+  List.map (fun (d : Vox_reflect.spec_def) -> d.Vox_reflect.sd_name) !spec_defs
+;;
+
+(* A predicate Lean can evaluate on a ground instance: no quantifiers,
+   no constructor testers (existentials over uninterpretable sorts),
+   and every spec-function application names a REFLECTED (computable)
+   definition -- an opaque/block/axiom function has no runtime body. *)
+let rec pred_evaluable names (p : Refinement.pred) =
+  let open Refinement in
+  match p with
+  | Pquant _ | Pis _ -> false
+  | Pfun (f, args) -> List.mem f names && List.for_all (pred_evaluable names) args
+  | Pbound -> false
+  | Pvar _ | Pglobal _ | Pint _ | Pbool _ -> true
+  | Pconstr (_, _, args) | Ptuple args -> List.for_all (pred_evaluable names) args
+  | Pfield (_, _, a) | Pproj (_, _, a) | Pnot a -> pred_evaluable names a
+  | Pbinop (_, a, b) | Pand (a, b) | Por (a, b) | Pimp (a, b) ->
+    pred_evaluable names a && pred_evaluable names b
+;;
+
+(* Can we even attempt witness validation?  Every hypothesis and the
+   goal must be evaluable, and every free binder (and mentioned global)
+   must be at an evaluable sort.  Otherwise the honest verdict is
+   UNKNOWN, never DISPROVED. *)
+let vc_evaluable vc =
+  let names = reflected_names () in
+  List.for_all (pred_evaluable names) (vc.vc_goal :: vc.vc_facts)
+  && List.for_all
+       (fun id ->
+         match Hashtbl.find_opt name_sorts id with
+         | Some s -> sort_evaluable s
+         | None -> false)
+       (free_vars_of_vc vc)
+  && List.for_all
+       (fun gp ->
+         match Hashtbl.find_opt globals (path_uname gp) with
+         | Some (_, s) -> sort_evaluable s
+         | None -> false)
+       (List.concat_map Refinement.free_globals (vc.vc_goal :: vc.vc_facts))
+;;
+
+let cap_list n xs = if List.length xs > n then List.filteri (fun i _ -> i < n) xs else xs
+
+(* The integer candidate pool: values the grind model suggested (so a
+   witness OUTSIDE the small spread is still reachable) followed by a
+   small symmetric spread around zero. *)
+let int_pool model_ints =
+  let seen = Hashtbl.create 16 in
+  List.filter_map
+    (fun n ->
+      if Hashtbl.mem seen n
+      then None
+      else (
+        Hashtbl.add seen n ();
+        Some (Refinement.Pint n)))
+    (model_ints @ [ 0; 1; -1; 2; -2; 3; -3 ])
+  |> cap_list 12
+;;
+
+let product ~cap (doms : 'a list list) : 'a list list =
+  List.fold_left
+    (fun acc d ->
+      cap_list cap
+        (List.concat_map (fun row -> List.map (fun v -> row @ [ v ]) d) acc))
+    [ [] ]
+    doms
+;;
+
+(* Ground values of a sort, up to [depth] of datatype nesting. *)
+let rec enum_sort ~model_ints ~depth s : Refinement.pred list =
+  match s with
+  | S_int -> int_pool model_ints
+  | S_bool -> [ Refinement.Pbool false; Refinement.Pbool true ]
+  | S_tuple comps ->
+    let doms = List.map (enum_sort ~model_ints ~depth) comps in
+    List.map (fun vs -> Refinement.Ptuple vs) (product ~cap:40 doms)
+  | S_data (p, args) ->
+    (match find_datatype p with
+     | Some (_, Dt_variant (_, constrs)) ->
+       cap_list 40
+         (List.concat_map
+            (fun (cname, fss) ->
+              if fss = []
+              then [ Refinement.Pconstr (p, cname, []) ]
+              else if depth <= 0
+              then []
+              else (
+                let doms =
+                  List.map
+                    (fun fs -> enum_sort ~model_ints ~depth:(depth - 1) (inst_sort args fs))
+                    fss
+                in
+                List.map
+                  (fun vs -> Refinement.Pconstr (p, cname, vs))
+                  (product ~cap:40 doms)))
+            constrs)
+     | Some (_, Dt_record (_, fields)) ->
+       if fields <> [] && depth <= 0
+       then []
+       else (
+         let doms =
+           List.map
+             (fun (_, fs) -> enum_sort ~model_ints ~depth:(depth - 1) (inst_sort args fs))
+             fields
+         in
+         (* a record is a single-constructor structure: its anonymous
+            constructor is [<StructName>.mk], which [Pconstr .. "mk" ..]
+            serializes correctly. *)
+         List.map (fun vs -> Refinement.Pconstr (p, "mk", vs)) (product ~cap:40 doms))
+     | Some (_, Dt_opaque) | None -> [])
+  | S_param _ | S_poly _ | S_lean _ | S_iarray | S_other -> []
+;;
+
+(* Integers appearing on the right of a grind [[assign] name := N]
+   line -- model hints to seed the integer pool. *)
+let parse_model_ints assigns =
+  List.filter_map
+    (fun s ->
+      match Misc.search_substring ":=" s 0 with
+      | exception Not_found -> None
+      | i ->
+        let rhs = String.trim (String.sub s (i + 2) (String.length s - i - 2)) in
+        let rhs = replace_all ~sub:"\xe3\x80\x8c" ~by:"" rhs in
+        let rhs = replace_all ~sub:"\xe3\x80\x8d" ~by:"" rhs in
+        int_of_string_opt (String.trim rhs))
+    assigns
+;;
+
+(* A candidate assignment: a value for every free binder and global. *)
+type wkey =
+  | Wvar of Ident.t
+  | Wglobal of Path.t
+
+let candidate_domains vc model_ints =
+  let seen = Hashtbl.create 8 in
+  let vars =
+    List.filter
+      (fun id ->
+        let u = Ident.unique_name id in
+        if Hashtbl.mem seen u then false else (Hashtbl.add seen u (); true))
+      (free_vars_of_vc vc)
+  in
+  let gseen = Hashtbl.create 4 in
+  let gpaths =
+    List.filter
+      (fun gp ->
+        let k = path_uname gp in
+        if Hashtbl.mem gseen k then false else (Hashtbl.add gseen k (); true))
+      (List.concat_map Refinement.free_globals (vc.vc_goal :: vc.vc_facts))
+  in
+  let var_dom id =
+    match Hashtbl.find_opt name_sorts id with
+    | Some s -> List.map (fun v -> Wvar id, v) (enum_sort ~model_ints ~depth:2 s)
+    | None -> []
+  in
+  let glob_dom gp =
+    match Hashtbl.find_opt globals (path_uname gp) with
+    | Some (_, s) -> List.map (fun v -> Wglobal gp, v) (enum_sort ~model_ints ~depth:2 s)
+    | None -> []
+  in
+  List.map var_dom vars @ List.map glob_dom gpaths
+;;
+
+(* One witness-check theorem: bind every candidate value with [let],
+   then assert every hypothesis together with the NEGATED goal.  If
+   Lean can prove it, the assignment is a real counterexample.  Both
+   [decide] (ground Int/Prop) and [grind] (ground reflected functions)
+   are tried; whichever closes it validates the witness. *)
+let wc_theorem_text ~tac vc (row : (wkey * Refinement.pred) list) i =
+  let buf = Buffer.create 256 in
+  Buffer.add_string buf (Printf.sprintf "theorem wc_%d : (" i);
+  List.iter
+    (fun (k, v) ->
+      (match k with
+       | Wvar id ->
+         let sort =
+           match Hashtbl.find_opt name_sorts id with
+           | Some ds -> lean_sort ds
+           | None -> "VoxU"
+         in
+         Buffer.add_string buf (Printf.sprintf "let %s : %s := " (lean_name id) sort)
+       | Wglobal gp ->
+         let key = path_uname gp in
+         let sort =
+           match Hashtbl.find_opt globals key with
+           | Some (_, ds) -> lean_sort ds
+           | None -> "VoxU"
+         in
+         Buffer.add_string buf
+           (Printf.sprintf "let g_%s : %s := " (lean_sanitize key) sort));
+      lean_of_pred buf v;
+      Buffer.add_string buf "; ")
+    row;
+  Buffer.add_char buf '(';
+  List.iter
+    (fun f ->
+      Buffer.add_char buf '(';
+      lean_of_pred buf f;
+      Buffer.add_string buf ") \xe2\x88\xa7 ")
+    vc.vc_facts;
+  Buffer.add_string buf "(\xc2\xac (";
+  lean_of_pred buf vc.vc_goal;
+  Buffer.add_string buf ")))";
+  Buffer.add_string buf (Printf.sprintf ") := %s\n" tac);
+  Buffer.contents buf
+;;
+
+(* The VoxCore/sig import prefix a module-mode solver run needs (empty
+   for toplevel sessions).  Factored so witness validation runs in the
+   same environment as the VC did. *)
+let lean_env_prefix ~fallback_loc =
+  if !toplevel_active
+  then ""
+  else begin
+    let dirs = lean_path_dirs () in
+    (match
+       Vox_module.ensure_core ~lean_command:(lean_command ())
+         ~lean_path_dirs:dirs
+         ~dir:(Filename.dirname !Location.input_name)
+     with
+     | Ok _ -> ()
+     | Error e ->
+       Location.raise_errorf ~loc:fallback_loc
+         "vox: could not build the base theory module:@ %s" e);
+    Vox_module.lean_path_env dirs ^ " "
+  end
+;;
+
+(* Run the [n] witness-check theorems and return the indices that Lean
+   PROVED (their line carries no error).  A proved [wc_i] is a
+   validated counterexample. *)
+let run_witness_check ~fallback_loc contents ~n =
+  let env_prefix = lean_env_prefix ~fallback_loc in
+  let in_file = Filename.temp_file "voxwc" ".lean" in
+  let out_file = Filename.temp_file "voxwc" ".out" in
+  Misc.try_finally
+    ~always:(fun () ->
+      Misc.remove_file in_file;
+      Misc.remove_file out_file)
+    (fun () ->
+      let oc = open_out in_file in
+      output_string oc contents;
+      close_out oc;
+      (* [-D maxErrors]: with Lean's default (100) a batch of >100 failing
+         candidates makes the frontend stop after 100 errors ("maximum
+         number of errors reached, exiting"); the remaining theorems, then
+         missing an error line, would be misread as validated witnesses.
+         The option only takes effect from the command line. *)
+      let cmd =
+        Printf.sprintf "cd %s && %s%s -D maxErrors=1000000 %s > %s 2>&1"
+          (Filename.quote (Filename.dirname in_file))
+          env_prefix
+          (Filename.quote (lean_command ()))
+          (Filename.quote in_file) (Filename.quote out_file)
       in
-      at 0
-    in
-    let shown =
+      let _status = Sys.command cmd in
+      (* the [n] theorems are the last [n] lines; the first sits at *)
+      let first_wc_line = count_lines contents - n + 1 in
+      let is_file_line l =
+        String.length l > String.length in_file
+        && String.equal (String.sub l 0 (String.length in_file)) in_file
+      in
+      let error_marker l =
+        let needle = " error" in
+        let m = String.length needle in
+        let rec at j =
+          if j + m > String.length l
+          then false
+          else if
+            String.equal (String.sub l j m) needle
+            && j + m < String.length l
+            && (l.[j + m] = ':' || l.[j + m] = '(')
+          then true
+          else at (j + 1)
+        in
+        at 0
+      in
+      let failed = Hashtbl.create 16 in
+      let ic = open_in out_file in
+      (try
+         while true do
+           let l = input_line ic in
+           if is_file_line l && error_marker l
+           then begin
+             let rest =
+               String.sub l (String.length in_file + 1)
+                 (String.length l - String.length in_file - 1)
+             in
+             match String.index_opt rest ':' with
+             | Some j ->
+               (match int_of_string_opt (String.sub rest 0 j) with
+                | Some ln -> Hashtbl.replace failed (ln - first_wc_line) ()
+                | None -> ())
+             | None -> ()
+           end
+         done
+       with
+       | End_of_file -> ());
+      close_in ic;
+      List.filter (fun i -> not (Hashtbl.mem failed i)) (List.init n Fun.id))
+;;
+
+(* Validate a counterexample for [vc]; [Some row] is a proved
+   assignment, [None] means none of the tried assignments checked. *)
+let validate_witness ~fallback_loc vc assigns =
+  if not (vc_evaluable vc)
+  then None
+  else (
+    let model_ints = parse_model_ints assigns in
+    let doms = candidate_domains vc model_ints in
+    let candidates = cap_list 128 (product ~cap:128 doms) in
+    match candidates with
+    | [] -> None
+    | _ ->
+      (* [simp] with the reflected definitions EVALUATES a ground goal
+         over spec functions and fails fast when it is false; [grind]
+         is a last resort, and a low heartbeat bound keeps a doomed
+         candidate from searching to the global limit. *)
+      let defs = reflected_names () in
+      let simp_part =
+        if defs = [] then "simp" else "simp [" ^ String.concat ", " defs ^ "]"
+      in
+      let tac = Printf.sprintf "by first | decide | %s | grind" simp_part in
+      let wtext =
+        "set_option maxHeartbeats 8000\n"
+        ^ String.concat ""
+            (List.mapi (fun i row -> wc_theorem_text ~tac vc row i) candidates)
+      in
+      let contents, _, _ = lean_file ~witness:wtext [ vc ] in
+      let n = List.length candidates in
+      (match run_witness_check ~fallback_loc contents ~n with
+       | [] -> None
+       | ok :: _ -> Some (List.nth candidates ok)))
+;;
+
+let witness_display vc (row : (wkey * Refinement.pred) list) =
+  with_vc_display vc (fun () ->
+    let display = vc_display_fun vc in
+    let entries =
       List.filter_map
-        (fun l ->
-          let l = rewrite l in
-          if contains ~sub:"v_" l
-          then None
-          else (
-            (* Nonlinear monomials and other theory atoms print in
-               corner brackets ("[x * y] := 1"); keep them, brackets
-               stripped -- dropping them could show a partial model
-               that satisfies the goal. *)
-            let l = replace_all ~sub:"\xe3\x80\x8c" ~by:"" l in
-            let l = replace_all ~sub:"\xe3\x80\x8d" ~by:"" l in
-            Some (replace_all ~sub:" := " ~by:" = " l)))
-        assigns
+        (fun (k, v) ->
+          match k with
+          | Wvar id -> Some (display id ^ " = " ^ Refinement.to_string v)
+          | Wglobal gp -> Some (Path.name gp ^ " = " ^ Refinement.to_string v))
+        row
     in
-    let shown =
-      if List.length shown > 12
-      then List.filteri (fun i _ -> i < 12) shown @ [ "..." ]
-      else shown
-    in
-    (match shown with
-     | [] -> ""
-     | _ ->
-       "\nPossible counterexample:"
-       ^ String.concat "" (List.map (fun l -> "\n  " ^ l) shown))
+    match entries with
+    | [] -> "\nThe goal is false unconditionally."
+    | _ ->
+      "\nCounterexample (validated -- every hypothesis holds and the goal \
+       fails here):"
+      ^ String.concat "" (List.map (fun e -> "\n  " ^ e) entries))
+;;
+
+(* Classify a failed VC and raise the corresponding diagnostic:
+   DISPROVED (a validated counterexample) or NOT PROVED (automation
+   gave up -- no counterexample found; the property may still hold). *)
+let classify_and_raise vc ~assigns ~msg =
+  match validate_witness ~fallback_loc:vc.vc_loc vc assigns with
+  | Some row ->
+    Location.raise_errorf ~loc:vc.vc_loc
+      "vox: verification failed -- goal DISPROVED (a counterexample was \
+       validated).@ Goal: %s%s%s"
+      (goal_for_error vc) (hyps_for_error vc) (witness_display vc row)
+  | None ->
+    Location.raise_errorf ~loc:vc.vc_loc
+      "vox: verification failed -- NOT PROVED (automation gave up; no \
+       counterexample was found, so the property may still hold).@ Goal: \
+       %s%s%s"
+      (goal_for_error vc) (hyps_for_error vc)
+      (if String.equal msg "" then "" else "\n(lean: " ^ msg ^ ")")
 ;;
 
 let run_lean vcs =
@@ -5685,13 +6071,7 @@ let run_lean vcs =
                 | None -> ());
                (match vc_of_line line, vcs with
                 | Some vc, _ | None, vc :: _ ->
-                  Location.raise_errorf ~loc:vc.vc_loc
-                    "vox: verification failed (lean).@ Goal: %s%s%s%s"
-                    (goal_for_error vc)
-                    (hyps_for_error vc)
-                    (counterexample_for_error vc assigns)
-                    (if String.equal msg "" then ""
-                     else "\n(lean: " ^ msg ^ ")")
+                  classify_and_raise vc ~assigns ~msg
                 | None, [] ->
                   Location.raise_errorf ~loc:fallback_loc
                     "vox: verification failed (lean): %s"

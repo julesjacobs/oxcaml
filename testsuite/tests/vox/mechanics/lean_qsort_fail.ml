@@ -900,7 +900,7 @@ let oob : (x : varr) @ unique -> int =
 Line 11, characters 30-31:
 11 |         let (v, m1) = sget m0 n in
                                    ^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: 0 <= n && n < len (now m0)
 Hypotheses:
   n = fst *unknown33*
@@ -908,11 +908,6 @@ Hypotheses:
   n = len (now m)
   now m0 = now m && fin m0 = fin m
   now m = cts x && fin m = pv p
-Possible counterexample:
-  n = 0
-  len (now m0) = 0
-  len (now m) = 0
-  *unknown33*.p1 = 0
 (lean: error: `grind` failed)
 |}]
 
@@ -927,11 +922,9 @@ let fake_sort :
 Line 5, characters 11-12:
 5 |   fun m -> m
                ^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: perm (now m) (now m) && sorted (now m) && fin m = fin m
 Hypotheses: <none>
-Possible counterexample:
-  len (now m) = 2
 (lean: error: `grind` failed)
 |}]
 
@@ -952,7 +945,7 @@ let leak : (x : varr) @ unique -> unit =
 Line 8, characters 9-11:
 8 |         (() : unit{ len (pv p) = len (cts x) }))
              ^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: len (pv p) = len (cts x)
 Hypotheses:
   _dead = m0
@@ -961,12 +954,6 @@ Hypotheses:
   _n = len (now m)
   now m0 = now m && fin m0 = fin m
   now m = cts x && fin m = pv p
-Possible counterexample:
-  _n = 1
-  len (cts x) = 1
-  len (now m) = 1
-  len (pv p) = 0
-  *unknown40*.p1 = 1
 (lean: error: `grind` failed)
 |}]
 

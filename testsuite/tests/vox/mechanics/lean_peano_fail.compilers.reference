@@ -1,12 +1,8 @@
 File "lean_peano_fail.ml", line 24, characters 13-20:
 24 |   fun a b -> add a b
                   ^^^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: *unknown1* = a + b + 1
 Hypotheses:
   *unknown1* = a + b
-Possible counterexample:
-  b = 0
-  a = 0
-  *unknown1* = 0
 (lean: error: `grind` failed)

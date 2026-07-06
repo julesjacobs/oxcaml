@@ -1,9 +1,7 @@
 File "mli_totalspec_abstract_fail.ml", line 18, characters 2-67:
 18 |   Mli_totalspec.Cons (5, Mli_totalspec.Cons (6, Mli_totalspec.Nil))
        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: len (Cons (5, Cons (6, Nil))) = 2
 Hypotheses: <none>
-Possible counterexample:
-  len (Vox_Mli_totalspec_ilist.Cons 5 (Vox_Mli_totalspec_ilist.Cons 6 Vox_Mli_totalspec_ilist.Nil)) = 1
 (lean: error: `grind` failed)

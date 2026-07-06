@@ -1,7 +1,9 @@
 File "obst_wrong.ml", line 22, characters 17-18:
 22 |     fun _x _y -> 0
                       ^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
        Goal: 0 = 0 -> _x = _y
 Hypotheses: <none>
-(lean: error: `grind` failed)
+Counterexample (validated -- every hypothesis holds and the goal fails here):
+  _y = 0
+  _x = 1

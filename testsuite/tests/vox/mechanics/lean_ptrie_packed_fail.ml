@@ -79,18 +79,10 @@ let bad : set = Branch (3, Leaf 1, Leaf 3)
 Line 1, characters 16-42:
 1 | let bad : set = Branch (3, Leaf 1, Leaf 3)
                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: trie (Branch (3, Leaf 1, Leaf 3))
 Hypotheses:
   ok = Branch (2, Leaf 1, Leaf 3)
   trie ok && mem 1 ok
-Possible counterexample:
-  lbit 2 = 2
-  lbit 3 = 1
-  lbit 1 = 1
-  hmask 1 (lbit 2) = 0
-  hmask 1 (lbit 3) = 0
-  hmask 3 (lbit 2) = 0
-  hmask 3 (lbit 3) = 2
 (lean: error: `grind` failed)
 |}]

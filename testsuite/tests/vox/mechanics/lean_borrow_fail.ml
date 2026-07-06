@@ -139,21 +139,13 @@ let lie : (a : int) -> int =
 Line 8, characters 5-7:
 8 |     (() : unit{ p = a + 2 }))
          ^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: p = a + 2
 Hypotheses:
   fin m1 = now m1
   now m1 = a + 1 && fin m1 = fin m
   now m = x && fin m = p
   x = a
-Possible counterexample:
-  a = -1
-  p = 0
-  x = -1
-  fin m1 = 0
-  fin m = 0
-  now m1 = 0
-  now m = -1
 (lean: error: `grind` failed)
 |}]
 
@@ -175,7 +167,7 @@ let leak : (a : int) -> int =
 Line 11, characters 29-31:
 11 |   let (_ : unit{ x' = a }) = () in
                                   ^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: x' = a
 Hypotheses:
   x' = fst *unknown18*

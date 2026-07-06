@@ -42,7 +42,7 @@ let bad : int =
 Line 2, characters 28-30:
 2 |   let refine_ t = next_tick 30 in
                                 ^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
        Goal: 30 mod 25 = 0
 Hypotheses:
   *unknown2* mod 25 = 0
@@ -52,12 +52,11 @@ Hypotheses:
   r = (-7) mod 2 && r = -1
   q = (-7) / 2
   q = (-7) / 2 && q = -3
-Possible counterexample:
+Counterexample (validated -- every hypothesis holds and the goal fails here):
   *unknown2* = 0
   t = 0
   r = -1
   q = -3
-(lean: error: `grind` failed)
 |}]
 
 (* [assume_] cannot compile a faithful runtime check of a predicate

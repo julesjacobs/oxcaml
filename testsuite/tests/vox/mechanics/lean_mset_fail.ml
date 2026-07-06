@@ -126,7 +126,7 @@ let insert_noop : (x : int) -> (s : t) @ unique -> t{ _ = s } @ unique =
 Line 12, characters 5-7:
 12 |     (r1 : t{ _ = s })
           ^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: 0 = 0 && setof r1 = s
 Hypotheses:
   r1 = fst *unknown8*

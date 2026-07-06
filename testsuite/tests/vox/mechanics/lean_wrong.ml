@@ -19,11 +19,9 @@ val fib : int -> int = <fun>
 Line 6, characters 61-68:
 6 | let wrong : (n : int) -> int{ _ = fib n } = fun n -> refine_ (n + 1)
                                                                  ^^^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
        Goal: n + 1 = fib n
 Hypotheses: <none>
-Possible counterexample:
+Counterexample (validated -- every hypothesis holds and the goal fails here):
   n = 0
-  fib n = 0
-(lean: error: `grind` failed)
 |}]

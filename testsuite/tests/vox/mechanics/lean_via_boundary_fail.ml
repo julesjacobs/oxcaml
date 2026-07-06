@@ -47,7 +47,7 @@ type iset
 Line 28, characters 7-25:
 28 |       (Node (t0, x, Leaf) : t{ _ = ins x (ins x s) })
             ^^^^^^^^^^^^^^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: bst (Node (t0, x, Leaf)) && elems (Node (t0, x, Leaf)) = ins x (ins x s)
 Hypotheses:
   bst t0
