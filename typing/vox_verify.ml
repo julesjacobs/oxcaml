@@ -3144,12 +3144,35 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
     let ctx0 = walk_expr env ctx cond in
     (* The path fact is the condition's logic translation when it has
        one (a variable, or a translatable int/bool expression);
-       untranslatable conditions contribute nothing.  Translatable
-       implies pure, so the versions its reads name are stable. *)
+       translatable implies pure, so the versions its reads name are
+       stable.  When it does NOT translate, treat [if c] as
+       [let n = c in if n]: NAME the condition's result and attach its
+       result refinement at the name (its declared refinement, or a
+       call's instantiated contract), so a refined-bool decision
+       procedure threads its spec into the branches -- the then-branch
+       adds the path fact [n] and the equation [n = P], the else-branch
+       [not n] and the same equation.  A condition with neither a
+       translation nor a result refinement contributes nothing, exactly
+       as before. *)
     let cond_fact = Vox_reflect.translate ~mutvar:mut_read cond in
     Option.iter (register_pred_paths env) cond_fact;
-    let with_fact f ctx =
+    let ctx0, path_cond =
       match cond_fact with
+      | Some c -> ctx0, Some c
+      | None ->
+        (match result_refinement env cond with
+         | None -> ctx0, None
+         | Some p ->
+           let n = name_of_expr env cond in
+           register_pred_paths env p;
+           let eqs =
+             List.filter nontrivial_fact [ Refinement.subst_bound ~by:n p ]
+           in
+           ( { ctx0 with cfacts = prov (Some cond.exp_loc) eqs @ ctx0.cfacts }
+           , Some n ))
+    in
+    let with_fact f ctx =
+      match path_cond with
       | None -> ctx
       | Some c -> { ctx with cfacts = (f c, Some cond.exp_loc) :: ctx.cfacts }
     in
@@ -3226,9 +3249,28 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
     let hctx = { ctx with cfacts = head @ ctx.cfacts } in
     let cctx = walk_expr env hctx wh_cond in
     let cond_fact = Vox_reflect.translate ~mutvar:mut_read wh_cond in
+    (* Same treatment as [if]: an untranslatable but refined condition
+       is named, its result refinement attached at the name, so the body
+       sees [n] and [n = P] and normal exit sees [not n] and the same
+       equation. *)
+    let cctx, path_cond =
+      match cond_fact with
+      | Some c -> cctx, Some c
+      | None ->
+        (match result_refinement env wh_cond with
+         | None -> cctx, None
+         | Some p ->
+           let n = name_of_expr env wh_cond in
+           register_pred_paths env p;
+           let eqs =
+             List.filter nontrivial_fact [ Refinement.subst_bound ~by:n p ]
+           in
+           ( { cctx with cfacts = prov (Some wh_cond.exp_loc) eqs @ cctx.cfacts }
+           , Some n ))
+    in
     let saved = save_versions () in
     let bctx =
-      match cond_fact with
+      match path_cond with
       | Some c -> { cctx with cfacts = (c, Some wh_cond.exp_loc) :: cctx.cfacts }
       | None -> cctx
     in
@@ -3245,7 +3287,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
          ~kind:Prove
      | None -> ());
     restore_versions saved;
-    (match cond_fact with
+    (match path_cond with
      | Some c ->
        { cctx with cfacts = (Refinement.Pnot c, Some wh_cond.exp_loc) :: cctx.cfacts }
      | None -> cctx)
