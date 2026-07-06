@@ -970,10 +970,17 @@ let rec elab_vox_pred ~bound ~self_root env (e : Parsetree.expression)
         | Longident.Lident name -> vox_find_scope ~self_root name
         | _ -> None
       in
+      let is_self = match scope_entry with Some `Self -> true | _ -> false in
       begin match scope_entry with
       | Some (`Pi id) -> Pvar id
-      | Some `Self -> Pbound
-      | None ->
+      | Some `Self | None ->
+          (* [`Self] -- the refined value's OWN name in its own top
+             annotation -- YIELDS to an ordinary binding of the same name
+             in scope: under OCaml scoping a free [x] in the annotation of
+             [let x = ...] is the OUTER [x], not the value being defined
+             (not yet bound in a non-recursive binding).  So resolve
+             through [env] first; the self-name applies only when the name
+             is otherwise unbound. *)
           match Env.lookup_value ~use:false ~loc lid env with
           | (Path.Pident id, {val_kind = Val_mut _; _}, _) ->
               (* A mutable variable has no stable logical value: facts
@@ -1008,6 +1015,10 @@ let rec elab_vox_pred ~bound ~self_root env (e : Parsetree.expression)
               Location.raise_errorf ~loc
                 "vox: only locally bound variables and module-level \
                  values may appear in refinements"
+          | exception _ when is_self ->
+              (* No ordinary binding of the self-name is in scope, so the
+                 name denotes the refined value itself. *)
+              Pbound
           | exception _ ->
               (* vox: a bare LOWERCASE identifier that is neither the
                  bound value / [_] nor an enclosing binder (both checked
