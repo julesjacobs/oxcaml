@@ -35,7 +35,7 @@ let kk : t{ not (_ = L) } -> {r:int | r >= 0} = function
 Line 2, characters 19-20: vox VC:
   goal: 0 >= 0
   hypotheses:
-  param = (K n)
+  param = K n
   not (param = L)
 Line 3, characters 17-21: vox VC:
   goal: -1 >= 0

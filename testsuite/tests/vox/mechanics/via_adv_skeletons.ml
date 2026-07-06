@@ -61,6 +61,6 @@ type bag = set{ true via (toBag : ibag) }
 let layered : (t : bag{ bmem 0 _ }) -> unit{ bmem 0 t } = fun t -> ()
 [%%expect{|
 val layered :
-  (t : set{ true && (bmem 0 (toBag _)) via (toBag : ibag) }) ->
+  (t : set{ true && bmem 0 (toBag _) via (toBag : ibag) }) ->
   unit{ bmem 0 t } = <fun>
 |}]

@@ -77,19 +77,18 @@ module P :
     type itoken
     type cpair = { cell : icell; tok : itoken; }
     val alloc :
-      (v : int) ->
-      cpair{ ((tid _.tok) = (cid _.cell)) && ((cts _.tok) = v) } @ unique
+      (v : int) -> cpair{ tid _.tok = cid _.cell && cts _.tok = v } @ unique
     val read :
       (c : icell) ->
       (k : int) ->
-      itoken{ ((tid _) = (cid c)) && ((cts _) = k) } @ unique ->
-      int{ _ = k } * itoken{ ((tid _) = (cid c)) && ((cts _) = k) } @ unique
+      itoken{ tid _ = cid c && cts _ = k } @ unique ->
+      int{ _ = k } * itoken{ tid _ = cid c && cts _ = k } @ unique
     val write :
       (c : icell) ->
       (old : int) ->
       (v : int) ->
-      itoken{ ((tid _) = (cid c)) && ((cts _) = old) } @ unique ->
-      itoken{ ((tid _) = (cid c)) && ((cts _) = v) } @ unique
+      itoken{ tid _ = cid c && cts _ = old } @ unique ->
+      itoken{ tid _ = cid c && cts _ = v } @ unique
   end
 |}]
 
@@ -116,19 +115,18 @@ Line 8, characters 13-36:
 8 |     (refine_ { cell = c1; tok = t2 }
                  ^^^^^^^^^^^^^^^^^^^^^^^
 Error: vox: verification failed (lean).
-       Goal: ((tid (mk (c1, t2)).tok) = (cid (mk (c1, t2)).cell)) &&
-((cts (mk (c1, t2)).tok) = n)
+       Goal: tid (mk (c1, t2)).tok = cid (mk (c1, t2)).cell && cts (mk (c1, t2)).tok = n
 Hypotheses:
   _c2 = q.cell
   t2 = q.tok
   c1 = p.cell
   _t1 = p.tok
-  ((tid *unknown8*.tok) = (cid *unknown8*.cell)) && ((cts *unknown8*.tok) = n)
+  tid *unknown8*.tok = cid *unknown8*.cell && cts *unknown8*.tok = n
   q = *unknown8*
-  ((tid q.tok) = (cid q.cell)) && ((cts q.tok) = n)
-  ((tid *unknown7*.tok) = (cid *unknown7*.cell)) && ((cts *unknown7*.tok) = n)
+  tid q.tok = cid q.cell && cts q.tok = n
+  tid *unknown7*.tok = cid *unknown7*.cell && cts *unknown7*.tok = n
   p = *unknown7*
-  ((tid p.tok) = (cid p.cell)) && ((cts p.tok) = n)
+  tid p.tok = cid p.cell && cts p.tok = n
 (lean: error: `grind` failed)
 |}]
 
@@ -149,20 +147,18 @@ Line 7, characters 21-23:
 7 |   let bad = (refine_ t1 : itoken{ tid _ = cid c2 && cts _ = n }) in
                          ^^
 Error: vox: verification failed (lean).
-       Goal: ((tid t1) = (cid c2)) && ((cts t1) = n)
+       Goal: tid t1 = cid c2 && cts t1 = n
 Hypotheses:
   c2 = q.cell
   _t2 = q.tok
   _c1 = p.cell
   t1 = p.tok
-  ((tid *unknown11*.tok) = (cid *unknown11*.cell)) &&
-((cts *unknown11*.tok) = n)
+  tid *unknown11*.tok = cid *unknown11*.cell && cts *unknown11*.tok = n
   q = *unknown11*
-  ((tid q.tok) = (cid q.cell)) && ((cts q.tok) = n)
-  ((tid *unknown10*.tok) = (cid *unknown10*.cell)) &&
-((cts *unknown10*.tok) = n)
+  tid q.tok = cid q.cell && cts q.tok = n
+  tid *unknown10*.tok = cid *unknown10*.cell && cts *unknown10*.tok = n
   p = *unknown10*
-  ((tid p.tok) = (cid p.cell)) && ((cts p.tok) = n)
+  tid p.tok = cid p.cell && cts p.tok = n
 (lean: error: `grind` failed)
 |}]
 

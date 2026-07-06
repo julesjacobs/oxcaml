@@ -115,11 +115,11 @@ Line 10, characters 8-23:
 10 |         Good (c, rest1)
              ^^^^^^^^^^^^^^^
 Error: vox: verification failed (lean).
-       Goal: (Good (c, rest1)) = (dec2 b0 rest)
+       Goal: Good (c, rest1) = dec2 b0 rest
 Hypotheses:
-  c = (((b0 - 192) * 64) + (b1 - 128))
-  (192 <= b0) && ((128 <= b1) && (b1 < 192))
-  rest = (Bcons (b1, rest1))
+  c = (b0 - 192) * 64 + (b1 - 128)
+  192 <= b0 && (128 <= b1 && b1 < 192)
+  rest = Bcons (b1, rest1)
 Possible counterexample:
   b0 = 192
   c = 0
@@ -150,13 +150,13 @@ Line 13, characters 36-51:
 13 |           if c < 2048 then Bad else Good (c, rest2)
                                          ^^^^^^^^^^^^^^^
 Error: vox: verification failed (lean).
-       Goal: (Good (c, rest2)) = (dec3 b0 rest)
+       Goal: Good (c, rest2) = dec3 b0 rest
 Hypotheses:
   not (c < 2048)
-  c = ((((b0 - 224) * 4096) + ((b1 - 128) * 64)) + (b2 - 128))
-  (128 <= b1) && ((b1 < 192) && ((128 <= b2) && (b2 < 192)))
-  rest1 = (Bcons (b2, rest2))
-  rest = (Bcons (b1, rest1))
+  c = (b0 - 224) * 4096 + (b1 - 128) * 64 + (b2 - 128)
+  128 <= b1 && (b1 < 192 && (128 <= b2 && b2 < 192))
+  rest1 = Bcons (b2, rest2)
+  rest = Bcons (b1, rest1)
 Possible counterexample:
   b0 = 237
   c = 55296
@@ -176,7 +176,7 @@ Line 2, characters 11-61:
 2 |   fun c -> Bcons (192 + c / 64, Bcons (128 + c mod 64, Bnil))
                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: vox: verification failed (lean).
-       Goal: (Bcons (192 + (c / 64), Bcons (128 + (c mod 64), Bnil))) = (enc_cp c)
+       Goal: Bcons (192 + c / 64, Bcons (128 + c mod 64, Bnil)) = enc_cp c
 Hypotheses:
   valid_cp c
 Possible counterexample:

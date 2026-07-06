@@ -85,8 +85,8 @@ Line 6, characters 28-30:
 6 |   fun x s -> ignore (x, s); ()
                                 ^^
 Error: vox: verification failed (lean).
-       Goal: (tmem x s) = true
+       Goal: tmem x s = true
 Hypotheses:
-  (tmem x s) = true
+  tmem x s = true
 (lean: error(lean.synthInstanceFailed): failed to synthesize instance of type class)
 |}]

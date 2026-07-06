@@ -4,8 +4,8 @@ File "lean_slice_sort_unsorted_fail.ml", line 19, characters 3-5:
 Error: vox: verification failed (lean).
        Goal: sorted (fin m)
 Hypotheses:
-  (fin m) = (merged (take 1 (now m)) (drop 1 (now m)))
-  1 <= (len (now m))
+  fin m = merged (take 1 (now m)) (drop 1 (now m))
+  1 <= len (now m)
 Possible counterexample:
   len (now m) = 3
   len (fin m) = 3

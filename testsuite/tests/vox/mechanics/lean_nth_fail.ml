@@ -37,7 +37,7 @@ Error: vox: verification failed (lean).
        Goal: false
 Hypotheses:
   l = Nil
-  (0 <= i) && (i <= (len l))
+  0 <= i && i <= len l
 Possible counterexample:
   i = 0
   len l = 0

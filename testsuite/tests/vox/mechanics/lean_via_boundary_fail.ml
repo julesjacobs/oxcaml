@@ -48,10 +48,9 @@ Line 28, characters 7-25:
 28 |       (Node (t0, x, Leaf) : t{ _ = ins x (ins x s) })
             ^^^^^^^^^^^^^^^^^^
 Error: vox: verification failed (lean).
-       Goal: (bst (Node (t0, x, Leaf))) &&
-((elems (Node (t0, x, Leaf))) = (ins x (ins x s)))
+       Goal: bst (Node (t0, x, Leaf)) && elems (Node (t0, x, Leaf)) = ins x (ins x s)
 Hypotheses:
   bst t0
-  (elems t0) = s
+  elems t0 = s
 (lean: error: `grind` failed)
 |}]

@@ -48,8 +48,7 @@ let isqrt (x : int{ 0 <= _ }) : {r:int | 0 <= r && sq r <= x && x < sq (r + 1)} 
 [%%expect{|
 val sq : int -> int = <fun>
 val isqrt :
-  (x : int{ 0 <= _ }) ->
-  int{ ((0 <= _) && ((sq _) <= x)) && (x < (sq (_ + 1))) } = <fun>
+  (x : int{ 0 <= _ }) -> int{ 0 <= _ && sq _ <= x && x < sq (_ + 1) } = <fun>
 |}]
 
 (* Client side: the precondition [0 <= 9] is discharged at the literal
@@ -83,15 +82,15 @@ Line 12, characters 9-11:
 12 |     else hi
               ^^
 Error: vox: verification failed (lean).
-       Goal: ((0 <= hi) && ((sq hi) <= x)) && (x < (sq (hi + 1)))
+       Goal: 0 <= hi && sq hi <= x && x < sq (hi + 1)
 Hypotheses:
-  not ((lo + 1) < hi)
-  (lo < hi) && (x < (sq hi))
-  (0 <= lo) && ((sq lo) <= x)
+  not (lo + 1 < hi)
+  lo < hi && x < sq hi
+  0 <= lo && sq lo <= x
   0 <= x
   _w = r
-  (_w = r) && (0 <= _w)
-  ((0 <= r) && ((sq r) <= 9)) && (9 < (sq (r + 1)))
+  _w = r && 0 <= _w
+  0 <= r && sq r <= 9 && 9 < sq (r + 1)
 Possible counterexample:
   hi = 1
   x = 9

@@ -25,7 +25,7 @@ Line 1, characters 33-38:
 1 | let bad : t{ _ = K 3 } = refine_ (K 4)
                                      ^^^^^
 Error: vox: verification failed (lean).
-       Goal: (K 4) = (K 3)
+       Goal: K 4 = K 3
 Hypotheses: <none>
 (lean: error: `grind` failed)
 |}]
@@ -37,7 +37,7 @@ Line 1, characters 34-35:
 1 | let bad2 : t{ _ = K 0 } = refine_ L
                                       ^
 Error: vox: verification failed (lean).
-       Goal: L = (K 0)
+       Goal: L = K 0
 Hypotheses: <none>
 (lean: error: `grind` failed)
 |}]
@@ -54,8 +54,8 @@ Line 3, characters 19-20:
 Error: vox: verification failed (lean).
        Goal: y = 3
 Hypotheses:
-  s = (K y)
-  s = (K 4)
+  s = K y
+  s = K 4
 Possible counterexample:
   y = 4
 (lean: error: `grind` failed)
@@ -89,7 +89,7 @@ Line 2, characters 19-36:
 2 |   fun p -> refine_ { p with px = 3 }
                        ^^^^^^^^^^^^^^^^^
 Error: vox: verification failed (lean).
-       Goal: (mk (3, p.py)).py = (p.py + 1)
+       Goal: (mk (3, p.py)).py = p.py + 1
 Hypotheses: <none>
 (lean: error: `grind` failed)
 |}]

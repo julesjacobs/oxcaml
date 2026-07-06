@@ -113,22 +113,22 @@ module type ORD =
     val compare :
       (x : t) ->
       (y : t) ->
-      int{ (((_ < 0) -> (x < y)) && ((_ = 0) -> (x = y))) && ((_ > 0) -> (y < x)) }
+      int{ (_ < 0 -> x < y) && (_ = 0 -> x = y) && (_ > 0 -> y < x) }
   end
 module type SET =
   sig
     type elt
     type t
-    val add : (x : elt) -> (s : t) -> t{ _ = (ins x (ins x s)) }
+    val add : (x : elt) -> (s : t) -> t{ _ = ins x (ins x s) }
   end
 Line 89, characters 7-9:
 89 |       (u2 : t{ _ = ins x (ins x s) })
             ^^
 Error: vox: verification failed (lean).
-       Goal: (bst u2) && ((elems u2) = (ins x (ins x s)))
+       Goal: bst u2 && elems u2 = ins x (ins x s)
 Hypotheses:
-  (u2 = (tins x t0)) && (bst u2)
+  u2 = tins x t0 && bst u2
   bst t0
-  (elems t0) = s
+  elems t0 = s
 (lean: error: `grind` failed)
 |}]

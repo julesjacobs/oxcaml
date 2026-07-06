@@ -70,7 +70,7 @@ let ok : set{ mem 1 _ } = Branch (2, Leaf 1, Leaf 3)
 [%%expect{|
 type t = Empty | Leaf of int | Branch of int * t * t
 type set = t{ trie _ }
-val ok : t{ (trie _) && (mem 1 _) } = Branch (2, Leaf 1, Leaf 3)
+val ok : t{ trie _ && mem 1 _ } = Branch (2, Leaf 1, Leaf 3)
 |}]
 
 (* Mis-packed: 3 decodes as prefix 2, bit 1 -- the invariant refuses. *)
@@ -82,8 +82,8 @@ Line 1, characters 16-42:
 Error: vox: verification failed (lean).
        Goal: trie (Branch (3, Leaf 1, Leaf 3))
 Hypotheses:
-  ok = (Branch (2, Leaf 1, Leaf 3))
-  (trie ok) && (mem 1 ok)
+  ok = Branch (2, Leaf 1, Leaf 3)
+  trie ok && mem 1 ok
 Possible counterexample:
   lbit 2 = 2
   lbit 3 = 1

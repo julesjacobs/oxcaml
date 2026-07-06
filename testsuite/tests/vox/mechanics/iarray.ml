@@ -15,9 +15,9 @@
 let read (a : int iarray) (i : int) : int{ _ = a.(i) } = Iarray.get a i
 [%%expect{|
 Line 1, characters 57-71: vox VC:
-  goal: (a.(i)) = (a.(i))
+  goal: a.(i) = a.(i)
   hypotheses: <none>
-val read : (a : int iarray) -> (i : int) -> int{ _ = (a.(i)) } = <fun>
+val read : (a : int iarray) -> (i : int) -> int{ _ = a.(i) } = <fun>
 |}]
 
 (* Selfification names both operations; the qualified and sugar
@@ -28,12 +28,11 @@ let len2 (a : int iarray) : int{ _ = Iarray.length a + a.(0) } =
   n + h
 [%%expect{|
 Line 4, characters 2-7: vox VC:
-  goal: (n + h) = ((Iarray.length a) + (a.(0)))
+  goal: n + h = Iarray.length a + a.(0)
   hypotheses:
-  h = (a.(0))
-  n = (Iarray.length a)
-val len2 : (a : int iarray) -> int{ _ = ((Iarray.length a) + (a.(0))) } =
-  <fun>
+  h = a.(0)
+  n = Iarray.length a
+val len2 : (a : int iarray) -> int{ _ = Iarray.length a + a.(0) } = <fun>
 |}]
 
 (* A mutable array's reads stay fresh unknowns (same primitives,

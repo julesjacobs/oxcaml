@@ -25,7 +25,7 @@ type t = expr{ denote _ = denote _ } [@vox.via (denote : lint)]
 [%%expect{|
 type expr = Lit of int | Add of expr * expr | Mul of expr * expr
 type lint
-type t = expr{ (denote _) = (denote _) via (denote : lint) }
+type t = expr{ denote _ = denote _ via (denote : lint) }
 |}]
 
 let bad_fold : (e : t) -> t{ _ = e } =
@@ -40,11 +40,11 @@ Line 6, characters 22-27:
 6 |      | Add (_, _) -> (Lit 0 : t{ _ = e })
                           ^^^^^
 Error: vox: verification failed (lean).
-       Goal: ((denote (Lit 0)) = (denote (Lit 0))) && ((denote (Lit 0)) = e)
+       Goal: denote (Lit 0) = denote (Lit 0) && denote (Lit 0) = e
 Hypotheses:
-  e0 = (Add (*vox-wild*#2, *vox-wild*))
-  (denote e0) = (denote e0)
-  (denote e0) = e
+  e0 = Add (*vox-wild*#2, *vox-wild*)
+  denote e0 = denote e0
+  denote e0 = e
   e = e
 Possible counterexample:
   e = 1
@@ -76,13 +76,13 @@ Line 10, characters 25-30:
 10 |           if y = 0 then (Lit 1 : t{ _ = e }) else (Mul (a, b) : t{ _ = e })
                               ^^^^^
 Error: vox: verification failed (lean).
-       Goal: ((denote (Lit 1)) = (denote (Lit 1))) && ((denote (Lit 1)) = e)
+       Goal: denote (Lit 1) = denote (Lit 1) && denote (Lit 1) = e
 Hypotheses:
   y = 0
-  b = (Lit y)
-  e0 = (Mul (a, b))
-  (denote e0) = (denote e0)
-  (denote e0) = e
+  b = Lit y
+  e0 = Mul (a, b)
+  denote e0 = denote e0
+  denote e0 = e
   e = e
 Possible counterexample:
   e = 0

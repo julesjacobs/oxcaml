@@ -109,9 +109,9 @@ let zero_bit : (i : int) -> (b : int{ isbit _ }) -> bool{ _ = zbit i b } =
 let mask : (i : int) -> (b : int{ isbit _ }) -> int{ _ = mask i b } =
   fun i b -> assume_unchecked_ (i land (b - 1))
 [%%expect{|
-val zero_bit : (i : int) -> (b : int{ isbit _ }) -> bool{ _ = (zbit i b) } =
+val zero_bit : (i : int) -> (b : int{ isbit _ }) -> bool{ _ = zbit i b } =
   <fun>
-val mask : (i : int) -> (b : int{ isbit _ }) -> int{ _ = (mask i b) } = <fun>
+val mask : (i : int) -> (b : int{ isbit _ }) -> int{ _ = mask i b } = <fun>
 |}]
 
 (* A well-formed literal branch on bit 1: key 0 on the zero side, key
@@ -131,7 +131,7 @@ Line 1, characters 27-56:
 Error: vox: verification failed (lean).
        Goal: trie (Branch (0, 1, Leaf 1, Leaf 0))
 Hypotheses:
-  ok = (Branch (0, 1, Leaf 0, Leaf 1))
+  ok = Branch (0, 1, Leaf 0, Leaf 1)
   trie ok
 Possible counterexample:
   mask 0 1 = 0
@@ -158,16 +158,16 @@ Line 11, characters 18-32:
 11 |         if z then mem_wrong i t1 else mem_wrong i t0
                        ^^^^^^^^^^^^^^
 Error: vox: verification failed (lean).
-       Goal: *unknown7* = (mem i s)
+       Goal: *unknown7* = mem i s
 Hypotheses:
-  *unknown7* = (mem i t1)
+  *unknown7* = mem i t1
   z
-  z = (zbit i b)
+  z = zbit i b
   not (m <> p)
-  m = (mask i b)
-  s = (Branch (p, b, t0, t1))
+  m = mask i b
+  s = Branch (p, b, t0, t1)
   trie s
-  ok = (Branch (0, 1, Leaf 0, Leaf 1))
+  ok = Branch (0, 1, Leaf 0, Leaf 1)
   trie ok
 Possible counterexample:
   i = -1
@@ -193,11 +193,11 @@ let join : (p0 : int) -> (t0 : t) -> (p1 : int{ _ <> p0 }) -> (t1 : t)
     if z then Branch (p, b, t0, t1) else Branch (p, b, t1, t0)
 [%%expect{|
 val branching_bit :
-  (p0 : int) -> (p1 : int{ _ <> p0 }) -> int{ _ = (bbit p0 p1) } = <fun>
+  (p0 : int) -> (p1 : int{ _ <> p0 }) -> int{ _ = bbit p0 p1 } = <fun>
 val join :
   (p0 : int) ->
-  (t0 : t) ->
-  (p1 : int{ _ <> p0 }) -> (t1 : t) -> t{ _ = (join p0 t0 p1 t1) } = <fun>
+  (t0 : t) -> (p1 : int{ _ <> p0 }) -> (t1 : t) -> t{ _ = join p0 t0 p1 t1 } =
+  <fun>
 |}]
 
 (* Forgetting the prefix guard: descending by the branching bit alone
@@ -228,14 +228,14 @@ Line 15, characters 8-30:
 15 |         Branch (p, b, t0', t1)
              ^^^^^^^^^^^^^^^^^^^^^^
 Error: vox: verification failed (lean).
-       Goal: (Branch (p, b, t0', t1)) = (insert i s)
+       Goal: Branch (p, b, t0', t1) = insert i s
 Hypotheses:
-  t0' = (insert i t0)
+  t0' = insert i t0
   z
-  z = (zbit i b)
-  s = (Branch (p, b, t0, t1))
+  z = zbit i b
+  s = Branch (p, b, t0, t1)
   trie s
-  ok = (Branch (0, 1, Leaf 0, Leaf 1))
+  ok = Branch (0, 1, Leaf 0, Leaf 1)
   trie ok
 Possible counterexample:
   i = -1

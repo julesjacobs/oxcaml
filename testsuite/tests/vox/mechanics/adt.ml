@@ -18,9 +18,9 @@ let k3 : t{ _ = K 3 } = refine_ (K 3)
 [%%expect{|
 type t = K of int | L
 Line 5, characters 32-37: vox VC:
-  goal: (K 3) = (K 3)
+  goal: K 3 = K 3
   hypotheses: <none>
-val k3 : t{ _ = (K 3) } = K 3
+val k3 : t{ _ = K 3 } = K 3
 |}]
 
 (* The dependent constructor wrapper is PROVED (lambda opening
@@ -28,10 +28,10 @@ val k3 : t{ _ = (K 3) } = K 3
 let mk (x : int) : t{ _ = K x } = refine_ (K x)
 [%%expect{|
 Line 1, characters 42-47: vox VC:
-  goal: (K x) = (K x)
+  goal: K x = K x
   hypotheses:
-  k3 = (K 3)
-val mk : (x : int) -> t{ _ = (K x) } = <fun>
+  k3 = K 3
+val mk : (x : int) -> t{ _ = K x } = <fun>
 |}]
 
 (* Match facts: injectivity of K proves y = 3. *)
@@ -43,16 +43,16 @@ let get (s : t{ _ = K 3 }) : {r:int | r = 3} =
 Line 3, characters 19-20: vox VC:
   goal: y = 3
   hypotheses:
-  s = (K y)
-  s = (K 3)
-  k3 = (K 3)
+  s = K y
+  s = K 3
+  k3 = K 3
 Line 4, characters 17-18: vox VC (RUNTIME CHECKED):
   goal: 0 = 3
   hypotheses:
   s = L
-  s = (K 3)
-  k3 = (K 3)
-val get : t{ _ = (K 3) } -> int{ _ = 3 } = <fun>
+  s = K 3
+  k3 = K 3
+val get : t{ _ = K 3 } -> int{ _ = 3 } = <fun>
 |}]
 
 (* Wildcard sub-patterns name fresh unknowns; recursion is fine; the
@@ -70,16 +70,16 @@ type ilist = Nil | Cons of int * ilist
 Line 7, characters 27-28: vox VC:
   goal: h = 3
   hypotheses:
-  s = (Cons (h, *vox-wild*))
-  s = (Cons (3, Nil))
-  k3 = (K 3)
+  s = Cons (h, *vox-wild*)
+  s = Cons (3, Nil)
+  k3 = K 3
 Line 8, characters 19-20: vox VC (RUNTIME CHECKED):
   goal: 0 = 3
   hypotheses:
   s = Nil
-  s = (Cons (3, Nil))
-  k3 = (K 3)
-val head : ilist{ _ = (Cons (3, Nil)) } -> int{ _ = 3 } = <fun>
+  s = Cons (3, Nil)
+  k3 = K 3
+val head : ilist{ _ = Cons (3, Nil) } -> int{ _ = 3 } = <fun>
 |}]
 
 (* Refined constructor arguments compose with match facts: matching
@@ -97,14 +97,14 @@ type w = W of int{ _ > 0 } | Z
 Line 7, characters 11-12: vox VC:
   goal: y > 0
   hypotheses:
-  t = (W y)
+  t = W y
   y > 0
-  k3 = (K 3)
+  k3 = K 3
 Line 8, characters 17-18: vox VC (RUNTIME CHECKED):
   goal: 1 > 0
   hypotheses:
   t = Z
-  k3 = (K 3)
+  k3 = K 3
 val getw : w -> int{ _ > 0 } = <fun>
 |}]
 
@@ -169,19 +169,19 @@ type abc = Ay of int | Bee | Cee
 Line 8, characters 20-21: vox VC:
   goal: 0 >= 0
   hypotheses:
-  s = (Ay *vox-wild*)
-  k3 = (K 3)
+  s = Ay *vox-wild*
+  k3 = K 3
 Line 9, characters 19-20: vox VC:
   goal: 1 >= 0
   hypotheses:
   s = Bee
-  k3 = (K 3)
+  k3 = K 3
 Line 11, characters 29-30: vox VC:
   goal: s = Cee
   hypotheses:
   not (s is Ay)
   not (s is Bee)
-  k3 = (K 3)
+  k3 = K 3
 Line 12, characters 12-13: vox VC:
   goal: 2 >= 0
   hypotheses:
@@ -189,7 +189,7 @@ Line 12, characters 12-13: vox VC:
   w = Cee
   not (s is Ay)
   not (s is Bee)
-  k3 = (K 3)
+  k3 = K 3
 val classify : abc -> int{ _ >= 0 } = <fun>
 |}]
 
@@ -207,6 +207,6 @@ let suppressed (s : abc) (g : bool) : int =
 Line 6, characters 39-40: vox VC (ASSUMED):
   goal: s = Cee
   hypotheses:
-  k3 = (K 3)
+  k3 = K 3
 val suppressed : abc -> bool -> int = <fun>
 |}]

@@ -49,7 +49,7 @@ Error: vox: verification failed (lean).
        Goal: bst (Node (Leaf, -1, Leaf))
 Hypotheses:
   bst t0
-  (elems t0) = s
+  elems t0 = s
 (lean: error: `grind` failed)
 |}]
 
@@ -66,7 +66,7 @@ Error: vox: verification failed (lean).
        Goal: bst *unknown4*
 Hypotheses:
   bst t0
-  (elems t0) = s
+  elems t0 = s
 (lean: error: Application type mismatch: The argument)
 |}]
 
@@ -85,6 +85,6 @@ Error: vox: verification failed (lean).
        Goal: bst *unknown7*
 Hypotheses:
   bst t0
-  (elems t0) = s
+  elems t0 = s
 (lean: error: Application type mismatch: The argument)
 |}]

@@ -66,12 +66,12 @@ Line 9, characters 8-9:
 9 |         b
             ^
 Error: vox: verification failed (lean).
-       Goal: b = (mem x t)
+       Goal: b = mem x t
 Hypotheses:
-  b = (mem x r)
+  b = mem x r
   x < v
   not (x = v)
-  t = (Node (l, v, r))
+  t = Node (l, v, r)
   bst t
 Possible counterexample:
   x = -1
@@ -90,9 +90,9 @@ Line 5, characters 24-29:
 5 |     | Node (_, v, _) -> x = v
                             ^^^^^
 Error: vox: verification failed (lean).
-       Goal: (x = v) = (mem x t)
+       Goal: (x = v) = mem x t
 Hypotheses:
-  t = (Node (*vox-wild*#2, v, *vox-wild*))
+  t = Node (*vox-wild*#2, v, *vox-wild*)
   bst t
 Possible counterexample:
   x = -1

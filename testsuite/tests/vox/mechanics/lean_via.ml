@@ -54,7 +54,7 @@ let binder_image : (t : set{ mem 0 _ }) -> unit{ mem 0 t } =
   fun t -> ()
 [%%expect{|
 val binder_image :
-  (t : tree{ (bst _) && (mem 0 (elems _)) via (elems : iset) }) ->
+  (t : tree{ bst _ && mem 0 (elems _) via (elems : iset) }) ->
   unit{ mem 0 t } = <fun>
 |}]
 
@@ -81,7 +81,7 @@ Line 2, characters 13-15:
 2 |   fun x t -> ()
                  ^^
 Error: vox: verification failed (lean).
-       Goal: ((card t) + x) = (card t)
+       Goal: card t + x = card t
 Hypotheses: <none>
 Possible counterexample:
   x = 1
@@ -94,7 +94,7 @@ Possible counterexample:
 let mk : (x : int) -> set{ mem x _ } =
   fun x -> assume_unchecked_ (Node (Leaf, x, Leaf))
 [%%expect{|
-val mk : (x : int) -> tree{ (bst _) && (mem x (elems _)) via (elems : iset) } =
+val mk : (x : int) -> tree{ bst _ && mem x (elems _) via (elems : iset) } =
   <fun>
 |}]
 
@@ -131,6 +131,6 @@ let dt_binder : (t : lset{ lmem 0 _ }) -> unit{ lmem 0 t } =
   fun t -> ()
 [%%expect{|
 val dt_binder :
-  (t : tree{ (bst _) && (lmem 0 (to_list _)) via (to_list : ilist) }) ->
+  (t : tree{ bst _ && lmem 0 (to_list _) via (to_list : ilist) }) ->
   unit{ lmem 0 t } = <fun>
 |}]

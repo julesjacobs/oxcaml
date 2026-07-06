@@ -92,7 +92,7 @@ let branch (c : bool) : {v:bool | v || not v} =
   if c then refine_ c else refine_ false
 [%%expect{|
 Line 2, characters 20-21: vox VC:
-  goal: c || (not c)
+  goal: c || not c
   hypotheses:
   c
   unpack > 0
@@ -104,7 +104,7 @@ Line 2, characters 20-21: vox VC:
   x = 3
   x > 0
 Line 2, characters 35-40: vox VC:
-  goal: false || (not false)
+  goal: false || not false
   hypotheses:
   not c
   unpack > 0
@@ -115,7 +115,7 @@ Line 2, characters 35-40: vox VC:
   b
   x = 3
   x > 0
-val branch : bool -> bool{ _ || (not _) } = <fun>
+val branch : bool -> bool{ _ || not _ } = <fun>
 |}]
 
 (* assume_unchecked_ skips the obligation and the runtime check;

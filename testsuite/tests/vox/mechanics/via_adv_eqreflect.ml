@@ -44,11 +44,11 @@ Line 5, characters 4-11:
 5 |     ta = tb
         ^^^^^^^
 Error: vox: verification failed (lean).
-       Goal: *unknown1* = ((elems a) = (elems b))
+       Goal: *unknown1* = (elems a = elems b)
 Hypotheses:
   triv tb
-  (elems tb) = b
+  elems tb = b
   triv ta
-  (elems ta) = a
+  elems ta = a
 (lean: error: Application type mismatch: The argument)
 |}]

@@ -33,7 +33,7 @@ Line 1, characters 39-42:
 1 | let bad : ilist{ len _ = 1 } = refine_ Nil
                                            ^^^
 Error: vox: verification failed (lean).
-       Goal: (len Nil) = 1
+       Goal: len Nil = 1
 Hypotheses: <none>
 Possible counterexample:
   len Vox_ilist.Nil = 0

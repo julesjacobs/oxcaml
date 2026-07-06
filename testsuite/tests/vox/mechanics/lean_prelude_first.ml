@@ -21,5 +21,5 @@ opaque f : Int -> Int
 (* Provable only if the block survived to this phrase's input. *)
 let ok : {v:int | f v = f v} = refine_ 1
 [%%expect{|
-val ok : int{ (f _) = (f _) } = 1
+val ok : int{ f _ = f _ } = 1
 |}]

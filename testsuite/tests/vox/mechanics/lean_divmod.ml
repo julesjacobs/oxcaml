@@ -11,12 +11,12 @@
 
 let q : int{ _ = (-7) / 2 && _ = -3 } = refine_ ((-7) / 2)
 [%%expect{|
-val q : int{ (_ = (-7 / 2)) && (_ = -3) } = -3
+val q : int{ _ = (-7) / 2 && _ = -3 } = -3
 |}]
 
 let r : int{ _ = (-7) mod 2 && _ = -1 } = refine_ ((-7) mod 2)
 [%%expect{|
-val r : int{ (_ = (-7 mod 2)) && (_ = -1) } = -1
+val r : int{ _ = (-7) mod 2 && _ = -1 } = -1
 |}]
 
 (* Tick alignment travels through arithmetic: the contract on [p] and
@@ -24,7 +24,7 @@ val r : int{ (_ = (-7 mod 2)) && (_ = -1) } = -1
 let next_tick (p : int{ _ mod 25 = 0 }) : int{ _ mod 25 = 0 } =
   refine_ (p + 25)
 [%%expect{|
-val next_tick : int{ (_ mod 25) = 0 } -> int{ (_ mod 25) = 0 } = <fun>
+val next_tick : int{ _ mod 25 = 0 } -> int{ _ mod 25 = 0 } = <fun>
 |}]
 
 let t50 : int =
@@ -43,15 +43,15 @@ Line 2, characters 28-30:
 2 |   let refine_ t = next_tick 30 in
                                 ^^
 Error: vox: verification failed (lean).
-       Goal: (30 mod 25) = 0
+       Goal: 30 mod 25 = 0
 Hypotheses:
-  (*unknown2* mod 25) = 0
+  *unknown2* mod 25 = 0
   t = *unknown2*
-  (t mod 25) = 0
-  r = (-7 mod 2)
-  (r = (-7 mod 2)) && (r = -1)
-  q = (-7 / 2)
-  (q = (-7 / 2)) && (q = -3)
+  t mod 25 = 0
+  r = (-7) mod 2
+  r = (-7) mod 2 && r = -1
+  q = (-7) / 2
+  q = (-7) / 2 && q = -3
 Possible counterexample:
   *unknown2* = 0
   t = 0
@@ -80,5 +80,5 @@ let rec total_ steps n = if n <= 1 then 0 else 1 + steps (n / 2)
 let s4 : int{ _ = steps 4 && _ = 2 } = refine_ (steps 4)
 [%%expect{|
 val steps : int -> int = <fun>
-val s4 : int{ (_ = (steps 4)) && (_ = 2) } = 2
+val s4 : int{ _ = steps 4 && _ = 2 } = 2
 |}]

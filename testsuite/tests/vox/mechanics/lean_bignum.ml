@@ -49,9 +49,8 @@ let succ : (n : t) -> t{ _ = n + 1 } =
     let w = bsucc pn in
     (w : t{ _ = n + 1 })
 [%%expect{|
-val bsucc : (u : bits) -> bits{ (toN _) = ((toN u) + 1) } = <fun>
-val succ : (n : t) -> bits{ true && ((toN _) = (n + 1)) via (toN : lnat) } =
-  <fun>
+val bsucc : (u : bits) -> bits{ toN _ = toN u + 1 } = <fun>
+val succ : (n : t) -> bits{ true && toN _ = n + 1 via (toN : lnat) } = <fun>
 |}]
 
 (* NON-CANONICITY, logic side.  [Bnil] and [B0 Bnil] are different
@@ -64,10 +63,8 @@ let zero_plain : unit -> t{ _ = 0 } =
 let zero_padded : unit -> t{ _ = 0 } =
   fun () -> (B0 Bnil : t{ _ = 0 })
 [%%expect{|
-val zero_plain : unit -> bits{ true && ((toN _) = 0) via (toN : lnat) } =
-  <fun>
-val zero_padded : unit -> bits{ true && ((toN _) = 0) via (toN : lnat) } =
-  <fun>
+val zero_plain : unit -> bits{ true && toN _ = 0 via (toN : lnat) } = <fun>
+val zero_padded : unit -> bits{ true && toN _ = 0 via (toN : lnat) } = <fun>
 |}]
 
 (* POLYMORPHIC [(=)] IS REPRESENTATION EQUALITY.  At the abstract sort a

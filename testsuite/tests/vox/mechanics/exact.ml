@@ -51,7 +51,7 @@ val safe2 : int -> int = <fun>
 let bump (x : int) : int{ _ > x } = refine_ (x + 1)
 [%%expect{|
 Line 1, characters 44-51: vox VC:
-  goal: (x + 1) > x
+  goal: x + 1 > x
   hypotheses:
   three = 3
 val bump : (x : int) -> int{ _ > x } = <fun>
@@ -82,16 +82,16 @@ Error: vox: the type of leak carries a refinement mentioning three, which may no
 let neg (x : int) : int{ _ = - x } = refine_ (0 - x)
 [%%expect{|
 Line 1, characters 45-52: vox VC:
-  goal: (0 - x) = (0 - x)
+  goal: 0 - x = 0 - x
   hypotheses:
   three = 3
-val neg : (x : int) -> int{ _ = (0 - x) } = <fun>
+val neg : (x : int) -> int{ _ = 0 - x } = <fun>
 |}]
 
 let m : int{ _ = -1 } = refine_ (0 - 1)
 [%%expect{|
 Line 1, characters 32-39: vox VC:
-  goal: (0 - 1) = -1
+  goal: 0 - 1 = -1
   hypotheses:
   three = 3
 val m : int{ _ = -1 } = -1

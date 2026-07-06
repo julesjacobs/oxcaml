@@ -2,9 +2,9 @@ File "lean_peano_fail.ml", line 24, characters 13-20:
 24 |   fun a b -> add a b
                   ^^^^^^^
 Error: vox: verification failed (lean).
-       Goal: *unknown1* = ((a + b) + 1)
+       Goal: *unknown1* = a + b + 1
 Hypotheses:
-  *unknown1* = (a + b)
+  *unknown1* = a + b
 Possible counterexample:
   b = 0
   a = 0

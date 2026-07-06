@@ -823,48 +823,44 @@ module S :
     type varr
     type proph
     type slice
-    val anew :
-      (n : int{ 0 <= _ }) -> int -> varr{ (len (cts _)) = n } @ unique
+    val anew : (n : int{ 0 <= _ }) -> int -> varr{ len (cts _) = n } @ unique
     val alen :
       (x : varr) @ unique ->
-      int{ _ = (len (cts x)) } * varr{ (cts _) = (cts x) } @ unique
+      int{ _ = len (cts x) } * varr{ cts _ = cts x } @ unique
     val aget :
       (x : varr) @ unique ->
-      (i : int{ (0 <= _) && (_ < (len (cts x))) }) ->
-      int{ _ = (elem (cts x) i) } * varr{ (cts _) = (cts x) } @ unique
+      (i : int{ 0 <= _ && _ < len (cts x) }) ->
+      int{ _ = elem (cts x) i } * varr{ cts _ = cts x } @ unique
     val new_proph : unit -> proph @ unique
     val borrow :
       (p : proph) @ unique ->
       (x : varr) @ unique ->
-      (slice{ ((now _) = (cts x)) && ((fin _) = (pv p)) } @ local unique ->
-       'b @ unique) @ local
-      once -> varr{ (cts _) = (pv p) } * 'b @ unique
+      (slice{ now _ = cts x && fin _ = pv p } @ local unique -> 'b @ unique) @ local
+      once -> varr{ cts _ = pv p } * 'b @ unique
     val slen :
       (m : slice) @ local unique ->
-      int{ _ = (len (now m)) } *
-      slice{ ((now _) = (now m)) && ((fin _) = (fin m)) } @ local unique
+      int{ _ = len (now m) } * slice{ now _ = now m && fin _ = fin m } @ local
+      unique
     val sget :
       (m : slice) @ local unique ->
-      (i : int{ (0 <= _) && (_ < (len (now m))) }) ->
-      int{ _ = (elem (now m) i) } *
-      slice{ ((now _) = (now m)) && ((fin _) = (fin m)) } @ local unique
+      (i : int{ 0 <= _ && _ < len (now m) }) ->
+      int{ _ = elem (now m) i } * slice{ now _ = now m && fin _ = fin m } @ local
+      unique
     val sset :
       (m : slice) @ local unique ->
-      (i : int{ (0 <= _) && (_ < (len (now m))) }) ->
-      (v : int) ->
-      slice{ ((now _) = (upd (now m) i v)) && ((fin _) = (fin m)) } @ local
+      (i : int{ 0 <= _ && _ < len (now m) }) ->
+      (v : int) -> slice{ now _ = upd (now m) i v && fin _ = fin m } @ local
       unique
     val split :
       (pl : proph) @ unique ->
       (pr : proph) @ unique ->
       (m : slice) @ local unique ->
-      (i : int{ (0 <= _) && (_ <= (len (now m))) }) ->
-      (slice{ ((now _) = (take i (now m))) && ((fin _) = (pv pl)) } @ local
-       unique ->
-       slice{ ((now _) = (drop i (now m))) && ((fin _) = (pv pr)) } @ local
-       unique -> 'a @ unique) @ local
+      (i : int{ 0 <= _ && _ <= len (now m) }) ->
+      (slice{ now _ = take i (now m) && fin _ = pv pl } @ local unique ->
+       slice{ now _ = drop i (now m) && fin _ = pv pr } @ local unique ->
+       'a @ unique) @ local
       once ->
-      slice{ ((now _) = (app (pv pl) (pv pr))) && ((fin _) = (fin m)) } * 'a @ local
+      slice{ now _ = app (pv pl) (pv pr) && fin _ = fin m } * 'a @ local
       unique
     val split3 :
       (p1 : proph) @ unique ->
@@ -872,18 +868,16 @@ module S :
       (p3 : proph) @ unique ->
       (m : slice) @ local unique ->
       (i : int{ 0 <= _ }) ->
-      (j : int{ (i <= _) && (_ <= (len (now m))) }) ->
-      (slice{ ((now _) = (take i (now m))) && ((fin _) = (pv p1)) } @ local
-       unique ->
-       slice{ ((now _) = (seg i j (now m))) && ((fin _) = (pv p2)) } @ local
-       unique ->
-       slice{ ((now _) = (drop j (now m))) && ((fin _) = (pv p3)) } @ local
-       unique -> 'a @ unique) @ local
+      (j : int{ i <= _ && _ <= len (now m) }) ->
+      (slice{ now _ = take i (now m) && fin _ = pv p1 } @ local unique ->
+       slice{ now _ = seg i j (now m) && fin _ = pv p2 } @ local unique ->
+       slice{ now _ = drop j (now m) && fin _ = pv p3 } @ local unique ->
+       'a @ unique) @ local
       once ->
-      slice{ ((now _) = (app (pv p1) (app (pv p2) (pv p3)))) && ((fin _) = (fin m)) } *
+      slice{ now _ = app (pv p1) (app (pv p2) (pv p3)) && fin _ = fin m } *
       'a @ local unique
-    val sdrop : (m : slice) @ local unique -> unit{ (fin m) = (now m) }
-    val sdropa : (m : slice) @ local -> unit{ (fin m) = (now m) }
+    val sdrop : (m : slice) @ local unique -> unit{ fin m = now m }
+    val sdropa : (m : slice) @ local -> unit{ fin m = now m }
     val fork_join2 :
       (unit -> 'a @ unique) @ local once ->
       (unit -> 'b @ unique) @ local once -> 'a * 'b @ unique
@@ -908,10 +902,10 @@ let swap (m : slice @ local unique)
 [%%expect{|
 val swap :
   (m : S.slice) @ local unique ->
-  (i : int{ (0 <= _) && (_ < (len (now m))) }) ->
-  (j : int{ (0 <= _) && (_ < (len (now m))) }) ->
-  S.slice{ ((now _) = (upd (upd (now m) i (elem (now m) j)) j (elem (now m) i))) &&
-((fin _) = (fin m)) } @ local
+  (i : int{ 0 <= _ && _ < len (now m) }) ->
+  (j : int{ 0 <= _ && _ < len (now m) }) ->
+  S.slice{ now _ = upd (upd (now m) i (elem (now m) j)) j (elem (now m) i) &&
+fin _ = fin m } @ local
   unique = <fun>
 |}]
 
@@ -955,16 +949,14 @@ val part :
   (i : int{ 0 <= _ }) ->
   (j : int{ i <= _ }) ->
   (s :
-   S.slice{ (((j <= ((len (now _)) - 1)) && ((elem (now _) ((len (now _)) - 1)) = p)) &&
- (all_le (take i (now _)) p)) &&
-(all_ge (seg i j (now _)) p) }) @ local
+   S.slice{ j <= len (now _) - 1 && elem (now _) (len (now _) - 1) = p &&
+all_le (take i (now _)) p && all_ge (seg i j (now _)) p }) @ local
   unique ->
-  (n : int{ _ = (len (now s)) }) ->
-  (int * S.slice){ ((((((0 <= (fst _)) && ((fst _) < n)) && ((elem (now (snd _)) (fst _)) = p)) &&
-   (all_le (take (fst _) (now (snd _))) p)) &&
-  (all_ge (drop ((fst _) + 1) (now (snd _))) p)) &&
- (perm (now s) (now (snd _)))) &&
-((fin (snd _)) = (fin s)) } @ local
+  (n : int{ _ = len (now s) }) ->
+  (int * S.slice){ 0 <= fst _ && fst _ < n && elem (now (snd _)) (fst _) = p &&
+all_le (take (fst _) (now (snd _))) p &&
+all_ge (drop (fst _ + 1) (now (snd _))) p && perm (now s) (now (snd _)) &&
+fin (snd _) = fin s } @ local
   unique = <fun>
 |}]
 
@@ -1002,7 +994,7 @@ let rec qsort (m : slice @ local unique)
 [%%expect{|
 val qsort :
   (m : S.slice) @ local unique ->
-  unit{ (sorted (fin m)) && (perm (now m) (fin m)) } = <fun>
+  unit{ sorted (fin m) && perm (now m) (fin m) } = <fun>
 |}]
 
 (* Parallel quicksort, same spec: the bracket's two outer sub-loans
@@ -1045,7 +1037,7 @@ let rec psort (m : slice @ local unique)
 [%%expect{|
 val psort :
   (m : S.slice) @ local unique ->
-  unit{ (sorted (fin m)) && (perm (now m) (fin m)) } = <fun>
+  unit{ sorted (fin m) && perm (now m) (fin m) } = <fun>
 |}]
 
 (* Read an array out as a list (in-bounds by the threaded length). *)

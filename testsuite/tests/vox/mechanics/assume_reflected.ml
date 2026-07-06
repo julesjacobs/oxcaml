@@ -41,14 +41,14 @@ let singleton_rev (l : ilist) : unit{ rev l = Cons (1, Nil) } = assume_ ()
 
 let ok = let l = Cons (1, Nil) in let _ = singleton_rev l in "held"
 [%%expect{|
-val singleton_rev : (l : ilist) -> unit{ (rev l) = (Cons (1, Nil)) } = <fun>
+val singleton_rev : (l : ilist) -> unit{ rev l = Cons (1, Nil) } = <fun>
 val ok : string = "held"
 |}]
 
 let no = let l = Cons (2, Nil) in let _ = singleton_rev l in "held"
 [%%expect{|
 Exception:
-Failure "vox: assume_ check failed at :1:72: (rev l) = (Cons (1, Nil))".
+Failure "vox: assume_ check failed at :1:72: rev l = Cons (1, Nil)".
 |}]
 
 (* A spec-function result can feed arithmetic and order when it is
@@ -57,7 +57,7 @@ let short (l : ilist) : unit{ len l + 1 <= 3 } = assume_ ()
 
 let ok2 = let l = Cons (1, Nil) in let _ = short l in "held"
 [%%expect{|
-val short : (l : ilist) -> unit{ ((len l) + 1) <= 3 } = <fun>
+val short : (l : ilist) -> unit{ len l + 1 <= 3 } = <fun>
 val ok2 : string = "held"
 |}]
 

@@ -23,11 +23,11 @@ let f (q : (int * int)) : int{ _ = fst q } =
   | (x, _) -> refine_ x
 [%%expect{|
 Line 3, characters 22-23: vox VC:
-  goal: x = (fst q)
+  goal: x = fst q
   hypotheses:
-  x = (fst q)
+  x = fst q
   p = (1, 2)
-val f : (q : (int * int)) -> int{ _ = (fst q) } = <fun>
+val f : (q : (int * int)) -> int{ _ = fst q } = <fun>
 |}]
 
 (* Triples: projections beyond pairs have no surface syntax; the match
@@ -85,16 +85,16 @@ let use (a : int) (b : int) : int{ _ = a } =
   refine_ r
 [%%expect{|
 Line 1, characters 57-64: vox VC:
-  goal: (fst p) = (fst p)
+  goal: fst p = fst p
   hypotheses:
   p#2 = (1, 2)
-val first : (p : (int * int)) -> int{ _ = (fst p) } = <fun>
+val first : (p : (int * int)) -> int{ _ = fst p } = <fun>
 Line 4, characters 10-11: vox VC:
   goal: r = a
   hypotheses:
-  *unknown4* = (fst (a, b))
+  *unknown4* = fst (a, b)
   r = *unknown4*
-  r = (fst (a, b))
+  r = fst (a, b)
   p = (1, 2)
 val use : (a : int) -> int -> int{ _ = a } = <fun>
 |}]
@@ -148,17 +148,17 @@ let use_direct (a : int) : int{ _ = a + 1 } =
   r
 [%%expect{|
 Line 1, characters 50-60: vox VC:
-  goal: (fst (a + 1, 0)) = (a + 1)
+  goal: fst (a + 1, 0) = a + 1
   hypotheses:
   p = (1, 2)
-val mk : (a : int) -> (int * int){ (fst _) = (a + 1) } = <fun>
+val mk : (a : int) -> (int * int){ fst _ = a + 1 } = <fun>
 Line 4, characters 2-3: vox VC:
-  goal: r = (a + 1)
+  goal: r = a + 1
   hypotheses:
-  (fst *unknown8*) = (a + 1)
-  r = (fst *unknown8*)
+  fst *unknown8* = a + 1
+  r = fst *unknown8*
   p = (1, 2)
-val use_direct : (a : int) -> int{ _ = (a + 1) } = <fun>
+val use_direct : (a : int) -> int{ _ = a + 1 } = <fun>
 |}]
 
 (* Destructuring reaches NESTED components: each sub-pattern
@@ -169,16 +169,16 @@ let use_nested (a : int) : int{ _ = a } =
   x
 [%%expect{|
 Line 1, characters 64-75: vox VC:
-  goal: (fst (fst ((a, 0), 1))) = a
+  goal: fst (fst ((a, 0), 1)) = a
   hypotheses:
   p = (1, 2)
-val mknest : (a : int) -> ((int * int) * int){ (fst (fst _)) = a } = <fun>
+val mknest : (a : int) -> ((int * int) * int){ fst (fst _) = a } = <fun>
 Line 4, characters 2-3: vox VC:
   goal: x = a
   hypotheses:
-  (fst (fst *unknown11*)) = a
-  _p = (fst *unknown11*)
-  x = (fst (fst *unknown11*))
+  fst (fst *unknown11*) = a
+  _p = fst *unknown11*
+  x = fst (fst *unknown11*)
   p = (1, 2)
 val use_nested : (a : int) -> int{ _ = a } = <fun>
 |}]
@@ -195,14 +195,14 @@ let use_match (a : int) : int{ _ = a } =
 Line 3, characters 30-31: vox VC:
   goal: x = a
   hypotheses:
-  (fst (fst *unknown13*)) = a
-  x = (fst (fst *unknown13*))
+  fst (fst *unknown13*) = a
+  x = fst (fst *unknown13*)
   p = (1, 2)
 Line 4, characters 19-20: vox VC:
   goal: x = a
   hypotheses:
-  (fst (fst *unknown13*)) = a
-  x = (fst (fst *unknown13*))
+  fst (fst *unknown13*) = a
+  x = fst (fst *unknown13*)
   p = (1, 2)
 val use_match : (a : int) -> int{ _ = a } = <fun>
 |}]
@@ -215,12 +215,12 @@ let use_if (a : int) (b : bool) : int{ _ = a + 1 } =
   r
 [%%expect{|
 Line 3, characters 2-3: vox VC:
-  goal: r = (a + 1)
+  goal: r = a + 1
   hypotheses:
-  (fst *unknown15*) = (a + 1)
-  r = (fst *unknown15*)
+  fst *unknown15* = a + 1
+  r = fst *unknown15*
   p = (1, 2)
-val use_if : (a : int) -> bool -> int{ _ = (a + 1) } = <fun>
+val use_if : (a : int) -> bool -> int{ _ = a + 1 } = <fun>
 |}]
 
 (* Constructor ARGUMENTS destructure too: each argument gets a name
@@ -234,10 +234,10 @@ let use_box (v : box) (a : int) : int{ _ = a } =
 [%%expect{|
 type box = Box of (int * int) * int
 Line 4, characters 48-57: vox VC:
-  goal: ((x + a) - x) = a
+  goal: x + a - x = a
   hypotheses:
-  v = (Box (p, k))
-  x = (fst p)
+  v = Box (p, k)
+  x = fst p
   p#2 = (1, 2)
 val use_box : box -> (a : int) -> int{ _ = a } = <fun>
 |}]

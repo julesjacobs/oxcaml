@@ -46,7 +46,7 @@ val len : ilist -> int = <fun>
 val append : ilist -> ilist -> ilist = <fun>
 val rev : ilist -> ilist = <fun>
 val unreachable_ : unit{ false } -> 'a = <fun>
-val nth : (l : ilist) -> int{ (0 <= _) && (_ < (len l)) } -> int = <fun>
+val nth : (l : ilist) -> int{ 0 <= _ && _ < len l } -> int = <fun>
 |}]
 
 (* Inline, at the boundary: [nth]'s own contract compiles to the
@@ -64,15 +64,14 @@ val ok : int = 2
 
 let boom = let l = Cons (1, Nil) in nth_checked l 5
 [%%expect{|
-Exception:
-Failure "vox: assume_ check failed at :1:61: (0 <= _) && (_ < (len l))".
+Exception: Failure "vox: assume_ check failed at :1:61: 0 <= _ && _ < len l".
 |}]
 
 (* Lemma-style: stated, not proved; the reflected functions run as
    ordinary code, and every call checks the property. *)
 let rev_involutive (l : ilist) : unit{ rev (rev l) = l } = assume_ ()
 [%%expect{|
-val rev_involutive : (l : ilist) -> unit{ (rev (rev l)) = l } = <fun>
+val rev_involutive : (l : ilist) -> unit{ rev (rev l) = l } = <fun>
 |}]
 
 let checked =
@@ -88,6 +87,6 @@ let rev_id (l : ilist) : unit{ rev l = l } = assume_ ()
 
 let refuted = let l = Cons (1, Cons (2, Nil)) in let _ = rev_id l in "?"
 [%%expect{|
-val rev_id : (l : ilist) -> unit{ (rev l) = l } = <fun>
-Exception: Failure "vox: assume_ check failed at :1:53: (rev l) = l".
+val rev_id : (l : ilist) -> unit{ rev l = l } = <fun>
+Exception: Failure "vox: assume_ check failed at :1:53: rev l = l".
 |}]

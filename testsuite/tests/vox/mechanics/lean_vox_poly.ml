@@ -60,13 +60,12 @@ end
 [%%expect{|
 module S :
   sig
-    val make : (n : int{ 0 <= _ }) -> 'a -> 'a varr{ (plen (pcts _)) = n }
+    val make : (n : int{ 0 <= _ }) -> 'a -> 'a varr{ plen (pcts _) = n }
     val make1 :
-      (x : 'a) ->
-      'a varr{ ((plen (pcts _)) = 1) && ((pelem (pcts _) 0) = x) }
+      (x : 'a) -> 'a varr{ plen (pcts _) = 1 && pelem (pcts _) 0 = x }
     val fst_ :
-      (m : 'a varr{ 0 < (plen (pcts _)) }) -> 'a{ _ = (pelem (pcts m) 0) }
-    val len_of : (m : 'a varr) -> int{ _ = (plen (pcts m)) }
+      (m : 'a varr{ 0 < plen (pcts _) }) -> 'a{ _ = pelem (pcts m) 0 }
+    val len_of : (m : 'a varr) -> int{ _ = plen (pcts m) }
   end
 |}]
 
@@ -119,11 +118,11 @@ Line 6, characters 47-48:
 6 |     let d : int{ _ = plen (pcts b) } = refine_ c in
                                                    ^
 Error: vox: verification failed (lean).
-       Goal: c = (plen (pcts b))
+       Goal: c = plen (pcts b)
 Hypotheses:
-  c = (plen (pcts a))
-  (plen (pcts b)) = 4
-  (plen (pcts a)) = 3
+  c = plen (pcts a)
+  plen (pcts b) = 4
+  plen (pcts a) = 3
 Possible counterexample:
   c = 3
   plen (pcts b) = 4
@@ -147,9 +146,9 @@ Line 5, characters 17-18:
 5 |     let q = fst_ a in
                      ^
 Error: vox: verification failed (lean).
-       Goal: 0 < (plen (pcts a))
+       Goal: 0 < plen (pcts a)
 Hypotheses:
-  ((plen (pcts a)) = 1) && ((pelem (pcts a) 0) = x)
-  x = (Leek n)
+  plen (pcts a) = 1 && pelem (pcts a) 0 = x
+  x = Leek n
 (lean: error(lean.synthInstanceFailed): failed to synthesize instance of type class)
 |}]

@@ -51,7 +51,7 @@ val succ_pos : int{ _ > 0 } -> int = <fun>
 let inc (n : {v:int | v >= 0}) : {v:int | v >= 1} = n + 1
 [%%expect{|
 Line 1, characters 52-57: vox VC:
-  goal: (n + 1) >= 1
+  goal: n + 1 >= 1
   hypotheses:
   n >= 0
   x = 3

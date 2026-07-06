@@ -71,8 +71,7 @@ let add : (x : int) -> (s : t) -> t{ _ = ins x s } =
 [%%expect{|
 val add :
   (x : int) ->
-  (s : t) -> tree{ (bst _) && ((elems _) = (ins x s)) via (elems : iset) } =
-  <fun>
+  (s : t) -> tree{ bst _ && elems _ = ins x s via (elems : iset) } = <fun>
 |}]
 
 (* [member]: each recursive result is let-bound so its spec fact is
@@ -93,7 +92,7 @@ let member : (x : int) -> (s : t) -> bool{ _ = mem x s } =
     in
     go t0
 [%%expect{|
-val member : (x : int) -> (s : t) -> bool{ _ = (mem x s) } = <fun>
+val member : (x : int) -> (s : t) -> bool{ _ = mem x s } = <fun>
 |}]
 
 (* The solver runs on the Prop model and rejects a false claim
@@ -109,9 +108,9 @@ Line 2, characters 13-23:
 2 |   fun x s -> member x s
                  ^^^^^^^^^^
 Error: vox: verification failed (lean).
-       Goal: *unknown6* = (mem (x + 1) s)
+       Goal: *unknown6* = mem (x + 1) s
 Hypotheses:
-  *unknown6* = (mem x s)
+  *unknown6* = mem x s
 Possible counterexample:
   x = 0
 (lean: error: `grind` failed)

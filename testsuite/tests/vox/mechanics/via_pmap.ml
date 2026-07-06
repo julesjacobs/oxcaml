@@ -54,8 +54,7 @@ let get_set_other : (k : int) -> (k' : int) -> (v : int) -> (m : d)
 val get_set_other :
   (k : int) ->
   (k' : int) ->
-  (v : int) ->
-  (m : d) -> unit{ (k' <> k) -> ((dget (dset m k v) k') = (dget m k')) } =
+  (v : int) -> (m : d) -> unit{ k' <> k -> dget (dset m k v) k' = dget m k' } =
   <fun>
 |}]
 

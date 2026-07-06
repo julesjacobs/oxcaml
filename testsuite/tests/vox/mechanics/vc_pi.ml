@@ -58,13 +58,13 @@ let partial (a : int) (b : int) : {w:bool | w || not w} =
   refine_ (c || not c)
 [%%expect{|
 Line 4, characters 10-22: vox VC:
-  goal: (c || (not c)) || (not (c || (not c)))
+  goal: c || not c || not (c || not c)
   hypotheses:
   *unknown6* = (a < b)
   c = *unknown6*
   c = (a < b)
   zero = 0
-val partial : int -> int -> bool{ _ || (not _) } = <fun>
+val partial : int -> int -> bool{ _ || not _ } = <fun>
 |}]
 
 (* Dependent LATER PARAMETERS: the binder is opened at the lambda
@@ -126,7 +126,7 @@ Line 6, characters 42-43: vox VC:
 Line 12, characters 59-61: vox VC (RUNTIME CHECKED):
   goal: x' = x'
   hypotheses:
-  x' = (x - 1)
+  x' = x - 1
   not (x = 0)
   zero = 0
 val countdown : (x : int) -> (unit -> int{ _ = x }) option -> int = <fun>

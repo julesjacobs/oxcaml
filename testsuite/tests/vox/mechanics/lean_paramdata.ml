@@ -21,7 +21,7 @@ let get_i (s : (int mylist){ _ = Cons (3, Nil) }) : {r:int | r = 3} =
   | Nil -> assume_ 0
 [%%expect{|
 type 'a mylist = Nil | Cons of 'a * 'a mylist
-val get_i : int mylist{ _ = (Cons (3, Nil)) } -> int{ _ = 3 } = <fun>
+val get_i : int mylist{ _ = Cons (3, Nil) } -> int{ _ = 3 } = <fun>
 |}]
 
 (* A false goal must FAIL: [Cons (3, Nil)] is not [Cons (4, Nil)], so
@@ -37,8 +37,8 @@ Line 3, characters 27-28:
 Error: vox: verification failed (lean).
        Goal: h = 4
 Hypotheses:
-  s = (Cons (h, t))
-  s = (Cons (3, Nil))
+  s = Cons (h, t)
+  s = Cons (3, Nil)
 Possible counterexample:
   h = 3
 (lean: error: `grind` failed)

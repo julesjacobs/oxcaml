@@ -126,21 +126,20 @@ module S :
     type varr
     type proph
     type slice
-    val of_model : (m : table) -> varr{ (bcts _) = m } @ unique
+    val of_model : (m : table) -> varr{ bcts _ = m } @ unique
     val new_proph : unit -> proph @ unique
     val borrow :
       (p : proph) @ unique ->
       (x : varr) @ unique ->
-      (slice{ ((bnow _) = (bcts x)) && ((bfin _) = (bpv p)) } @ local
-       unique -> 'b @ unique) @ local
-      once -> varr{ (bcts _) = (bpv p) } * 'b @ unique
+      (slice{ bnow _ = bcts x && bfin _ = bpv p } @ local unique ->
+       'b @ unique) @ local
+      once -> varr{ bcts _ = bpv p } * 'b @ unique
     val sset :
       (m : slice) @ local unique ->
-      (i : int{ (0 <= _) && (_ < (tlen (bnow m))) }) ->
+      (i : int{ 0 <= _ && _ < tlen (bnow m) }) ->
       (b : bucket) ->
-      slice{ ((bnow _) = (tset (bnow m) i b)) && ((bfin _) = (bfin m)) } @ local
-      unique
-    val sdrop : (m : slice) @ local unique -> unit{ (bfin m) = (bnow m) }
+      slice{ bnow _ = tset (bnow m) i b && bfin _ = bfin m } @ local unique
+    val sdrop : (m : slice) @ local unique -> unit{ bfin m = bnow m }
   end
 |}]
 
@@ -158,10 +157,10 @@ Line 9, characters 24-36:
 9 |   fun m i b -> exclave_ (sset m i b)
                             ^^^^^^^^^^^^
 Error: vox: verification failed (lean).
-       Goal: (bnow *unknown8*) = (bnow m)
+       Goal: bnow *unknown8* = bnow m
 Hypotheses:
-  ((bnow *unknown8*) = (tset (bnow m) i b)) && ((bfin *unknown8*) = (bfin m))
-  (0 <= i) && (i < (tlen (bnow m)))
+  bnow *unknown8* = tset (bnow m) i b && bfin *unknown8* = bfin m
+  0 <= i && i < tlen (bnow m)
 Possible counterexample:
   i = 0
   tlen (bnow m) = 1

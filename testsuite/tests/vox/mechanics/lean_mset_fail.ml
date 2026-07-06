@@ -91,15 +91,14 @@ module Lib :
     val borrow :
       (p : proph) @ unique ->
       (x : varr) @ unique ->
-      (slice{ ((snow _) = (setof x)) && ((sfin _) = (spv p)) } @ local
-       unique -> 'b @ unique) @ local
-      once -> varr{ (setof _) = (spv p) } * 'b @ unique
+      (slice{ snow _ = setof x && sfin _ = spv p } @ local unique ->
+       'b @ unique) @ local
+      once -> varr{ setof _ = spv p } * 'b @ unique
     val sinsert :
       (m : slice) @ local unique ->
       (x : int) ->
-      slice{ ((snow _) = (ins x (snow m))) && ((sfin _) = (sfin m)) } @ local
-      unique
-    val sdrop : (m : slice) @ local unique -> unit{ (sfin m) = (snow m) }
+      slice{ snow _ = ins x (snow m) && sfin _ = sfin m } @ local unique
+    val sdrop : (m : slice) @ local unique -> unit{ sfin m = snow m }
   end
 |}]
 
@@ -128,13 +127,13 @@ Line 12, characters 5-7:
 12 |     (r1 : t{ _ = s })
           ^^
 Error: vox: verification failed (lean).
-       Goal: (0 = 0) && ((setof r1) = s)
+       Goal: 0 = 0 && setof r1 = s
 Hypotheses:
-  r1 = (fst *unknown8*)
-  u = (snd *unknown8*)
-  (setof r1) = (spv p)
-  (spv p) = (ins x (setof r0))
+  r1 = fst *unknown8*
+  u = snd *unknown8*
+  setof r1 = spv p
+  spv p = ins x (setof r0)
   0 = 0
-  (setof r0) = s
+  setof r0 = s
 (lean: error: `grind` failed)
 |}]

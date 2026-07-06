@@ -27,10 +27,10 @@ Line 9, characters 26-27: vox VC:
   goal: 0 = 0
   hypotheses: <none>
 Line 10, characters 50-55: vox VC:
-  goal: (x + 1) = (x + 1)
+  goal: x + 1 = x + 1
   hypotheses: <none>
 module M :
-  sig type t val zero : t{ _ = 0 } val next : (x : t) -> t{ _ = (x + 1) } end
+  sig type t val zero : t{ _ = 0 } val next : (x : t) -> t{ _ = x + 1 } end
 |}]
 
 (* The client computes at the declared modeling: [M.t] values are
@@ -45,7 +45,7 @@ let one () =
 Line 4, characters 20-21: vox VC:
   goal: o = 1
   hypotheses:
-  o = (z + 1)
+  o = z + 1
   z = M.zero
   M.zero = 0
 val one : unit -> M.t = <fun>
@@ -119,9 +119,9 @@ end = struct
 end
 [%%expect{|
 Line 8, characters 65-71: vox VC:
-  goal: (fst (a, b)) = a
+  goal: fst (a, b) = a
   hypotheses: <none>
-module Pair : sig type t val mk : (a : int) -> int -> t{ (fst _) = a } end
+module Pair : sig type t val mk : (a : int) -> int -> t{ fst _ = a } end
 |}]
 
 let use_pair () =
@@ -130,9 +130,9 @@ let use_pair () =
   ok
 [%%expect{|
 Line 3, characters 20-21: vox VC:
-  goal: (fst p) = 3
+  goal: fst p = 3
   hypotheses:
-  (fst p) = 3
+  fst p = 3
 val use_pair : unit -> Pair.t = <fun>
 |}]
 
@@ -153,10 +153,10 @@ let use_ilist (x : opaque_list{ _ = ICons (1, INil) }) =
   ok
 [%%expect{|
 Line 2, characters 20-21: vox VC:
-  goal: x = (ICons (1, INil))
+  goal: x = ICons (1, INil)
   hypotheses:
-  x = (ICons (1, INil))
-val use_ilist : opaque_list{ _ = (ICons (1, INil)) } -> opaque_list = <fun>
+  x = ICons (1, INil)
+val use_ilist : opaque_list{ _ = ICons (1, INil) } -> opaque_list = <fun>
 |}]
 
 (* A PARAMETERIZED modeling: [refines ('a mylist)] carries a type
@@ -174,10 +174,10 @@ let use_q (s : (int q){ _ = Cons (7, Nil) }) =
   ok
 [%%expect{|
 Line 2, characters 20-21: vox VC:
-  goal: s = (Cons (7, Nil))
+  goal: s = Cons (7, Nil)
   hypotheses:
-  s = (Cons (7, Nil))
-val use_q : int q{ _ = (Cons (7, Nil)) } -> int q = <fun>
+  s = Cons (7, Nil)
+val use_q : int q{ _ = Cons (7, Nil) } -> int q = <fun>
 |}]
 
 (* Inclusion checks the whole sort structurally, and the printer renders
@@ -259,7 +259,7 @@ let use_nat () =
   ok
 [%%expect{|
 Line 3, characters 20-21: vox VC:
-  goal: (n + 1) >= 1
+  goal: n + 1 >= 1
   hypotheses:
   n >= 0
 val use_nat : unit -> M.nat = <fun>

@@ -50,7 +50,7 @@ Line 1, characters 54-55:
 1 | let contra : {v:int | v > 0 && not (v > 0)} = refine_ 0
                                                           ^
 Error: vox: verification failed (lean).
-       Goal: (0 > 0) && (not (0 > 0))
+       Goal: 0 > 0 && not (0 > 0)
 Hypotheses: <none>
 (lean: error: `grind` failed)
 |}]
@@ -80,7 +80,7 @@ Error: vox: verification failed (lean).
        Goal: m@1 = 3
 Hypotheses:
   m = 3
-  m@1 = (m + 1)
+  m@1 = m + 1
 Possible counterexample:
   m@1 = 4
   m = 3
@@ -142,7 +142,7 @@ Line 5, characters 9-42:
 5 |    done) [@vox.invariant x >= 0 && x <= n];
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: vox: verification failed (lean).
-       Goal: (x >= 0) && (x <= n)
+       Goal: x >= 0 && x <= n
 Hypotheses:
   x = 0
 Possible counterexample:
@@ -185,11 +185,11 @@ Line 5, characters 9-35:
 5 |    done) [@vox.invariant x = i - 1];
              ^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: vox: verification failed (lean).
-       Goal: x = ((i + 1) - 1)
+       Goal: x = i + 1 - 1
 Hypotheses:
   1 <= i
   i <= n
-  x = (i - 1)
+  x = i - 1
   x = 0
 Possible counterexample:
   i = 1

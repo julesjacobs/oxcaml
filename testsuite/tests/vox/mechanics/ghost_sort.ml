@@ -41,16 +41,16 @@ end = struct
 end
 [%%expect{|
 Line 10, characters 48-76: vox VC (ASSUMED):
-  goal: *unknown1* = (ins x s)
+  goal: *unknown1* = ins x s
   hypotheses: <none>
 Line 13, characters 48-53: vox VC (ASSUMED):
-  goal: false = (mem x s)
+  goal: false = mem x s
   hypotheses: <none>
 module S :
   sig
     type iset
-    val add : (x : int) -> (s : iset) -> iset{ _ = (ins x s) } @ unique
-    val mem : (x : int) -> (s : iset) -> bool{ _ = (mem x s) }
+    val add : (x : int) -> (s : iset) -> iset{ _ = ins x s } @ unique
+    val mem : (x : int) -> (s : iset) -> bool{ _ = mem x s }
   end
 |}]
 
@@ -63,11 +63,11 @@ let use : (x : int) -> (s : S.iset) -> bool{ _ = mem x (ins x s) } =
     S.mem x t
 [%%expect{|
 Line 4, characters 4-13: vox VC:
-  goal: *unknown3* = (mem x (ins x s))
+  goal: *unknown3* = mem x (ins x s)
   hypotheses:
-  *unknown3* = (mem x t)
-  t = (ins x s)
-val use : (x : int) -> (s : S.iset) -> bool{ _ = (mem x (ins x s)) } = <fun>
+  *unknown3* = mem x t
+  t = ins x s
+val use : (x : int) -> (s : S.iset) -> bool{ _ = mem x (ins x s) } = <fun>
 |}]
 
 (* The ghost sort is also reachable through the refines KIND spelling by
@@ -85,10 +85,10 @@ let via_kind_use (x : via_kind{ _ = ins 1 x }) =
   ok
 [%%expect{|
 Line 2, characters 20-21: vox VC:
-  goal: x = (ins 1 x)
+  goal: x = ins 1 x
   hypotheses:
-  x = (ins 1 x)
-val via_kind_use : via_kind{ _ = (ins 1 _) } -> via_kind = <fun>
+  x = ins 1 x
+val via_kind_use : via_kind{ _ = ins 1 _ } -> via_kind = <fun>
 |}]
 
 (* Eager validation of malformed declarations, mirroring

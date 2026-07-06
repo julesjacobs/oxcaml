@@ -31,21 +31,21 @@ let sub : (x : int{x > 3}) -> (y : int) -> int{ x + _ = y } =
   fun x y -> assume_ (y - (x :> int))
 [%%expect{|
 Line 2, characters 21-37: vox VC (RUNTIME CHECKED):
-  goal: (x + (y - x)) = y
+  goal: x + (y - x) = y
   hypotheses:
   x > 3
   a' = a
   a' >= 0
   a = 3
   a >= 0
-val sub : (x : int{ _ > 3 }) -> (y : int) -> int{ (x + _) = y } = <fun>
+val sub : (x : int{ _ > 3 }) -> (y : int) -> int{ x + _ = y } = <fun>
 |}]
 
 (* Named result binder. *)
 let above : (x : int) -> (y : int{ y > x }) = fun x -> assume_ (x + 1)
 [%%expect{|
 Line 1, characters 63-70: vox VC (RUNTIME CHECKED):
-  goal: (x + 1) > x
+  goal: x + 1 > x
   hypotheses:
   a' = a
   a' >= 0
@@ -127,8 +127,8 @@ Line 1, characters 48-51:
 1 | let dep_wrong : (y : int) -> int{ _ = y + 1 } = dep
                                                     ^^^
 Error: The value "dep" has type "(x : int) -> int{ _ = x }"
-       but an expression was expected of type "(y : int) -> int{ _ = (y + 1) }"
-       Type "int{ _ = y }" is not compatible with type "int{ _ = (y + 1) }"
+       but an expression was expected of type "(y : int) -> int{ _ = y + 1 }"
+       Type "int{ _ = y }" is not compatible with type "int{ _ = y + 1 }"
 |}]
 
 (* Refined recursive occurrences must not loop jkind computation. *)

@@ -819,48 +819,44 @@ module S :
     type varr
     type proph
     type slice
-    val anew :
-      (n : int{ 0 <= _ }) -> int -> varr{ (len (cts _)) = n } @ unique
+    val anew : (n : int{ 0 <= _ }) -> int -> varr{ len (cts _) = n } @ unique
     val alen :
       (x : varr) @ unique ->
-      int{ _ = (len (cts x)) } * varr{ (cts _) = (cts x) } @ unique
+      int{ _ = len (cts x) } * varr{ cts _ = cts x } @ unique
     val aget :
       (x : varr) @ unique ->
-      (i : int{ (0 <= _) && (_ < (len (cts x))) }) ->
-      int{ _ = (elem (cts x) i) } * varr{ (cts _) = (cts x) } @ unique
+      (i : int{ 0 <= _ && _ < len (cts x) }) ->
+      int{ _ = elem (cts x) i } * varr{ cts _ = cts x } @ unique
     val new_proph : unit -> proph @ unique
     val borrow :
       (p : proph) @ unique ->
       (x : varr) @ unique ->
-      (slice{ ((now _) = (cts x)) && ((fin _) = (pv p)) } @ local unique ->
-       'b @ unique) @ local
-      once -> varr{ (cts _) = (pv p) } * 'b @ unique
+      (slice{ now _ = cts x && fin _ = pv p } @ local unique -> 'b @ unique) @ local
+      once -> varr{ cts _ = pv p } * 'b @ unique
     val slen :
       (m : slice) @ local unique ->
-      int{ _ = (len (now m)) } *
-      slice{ ((now _) = (now m)) && ((fin _) = (fin m)) } @ local unique
+      int{ _ = len (now m) } * slice{ now _ = now m && fin _ = fin m } @ local
+      unique
     val sget :
       (m : slice) @ local unique ->
-      (i : int{ (0 <= _) && (_ < (len (now m))) }) ->
-      int{ _ = (elem (now m) i) } *
-      slice{ ((now _) = (now m)) && ((fin _) = (fin m)) } @ local unique
+      (i : int{ 0 <= _ && _ < len (now m) }) ->
+      int{ _ = elem (now m) i } * slice{ now _ = now m && fin _ = fin m } @ local
+      unique
     val sset :
       (m : slice) @ local unique ->
-      (i : int{ (0 <= _) && (_ < (len (now m))) }) ->
-      (v : int) ->
-      slice{ ((now _) = (upd (now m) i v)) && ((fin _) = (fin m)) } @ local
+      (i : int{ 0 <= _ && _ < len (now m) }) ->
+      (v : int) -> slice{ now _ = upd (now m) i v && fin _ = fin m } @ local
       unique
     val split :
       (pl : proph) @ unique ->
       (pr : proph) @ unique ->
       (m : slice) @ local unique ->
-      (i : int{ (0 <= _) && (_ <= (len (now m))) }) ->
-      (slice{ ((now _) = (take i (now m))) && ((fin _) = (pv pl)) } @ local
-       unique ->
-       slice{ ((now _) = (drop i (now m))) && ((fin _) = (pv pr)) } @ local
-       unique -> 'a @ unique) @ local
+      (i : int{ 0 <= _ && _ <= len (now m) }) ->
+      (slice{ now _ = take i (now m) && fin _ = pv pl } @ local unique ->
+       slice{ now _ = drop i (now m) && fin _ = pv pr } @ local unique ->
+       'a @ unique) @ local
       once ->
-      slice{ ((now _) = (app (pv pl) (pv pr))) && ((fin _) = (fin m)) } * 'a @ local
+      slice{ now _ = app (pv pl) (pv pr) && fin _ = fin m } * 'a @ local
       unique
     val split3 :
       (p1 : proph) @ unique ->
@@ -868,18 +864,16 @@ module S :
       (p3 : proph) @ unique ->
       (m : slice) @ local unique ->
       (i : int{ 0 <= _ }) ->
-      (j : int{ (i <= _) && (_ <= (len (now m))) }) ->
-      (slice{ ((now _) = (take i (now m))) && ((fin _) = (pv p1)) } @ local
-       unique ->
-       slice{ ((now _) = (seg i j (now m))) && ((fin _) = (pv p2)) } @ local
-       unique ->
-       slice{ ((now _) = (drop j (now m))) && ((fin _) = (pv p3)) } @ local
-       unique -> 'a @ unique) @ local
+      (j : int{ i <= _ && _ <= len (now m) }) ->
+      (slice{ now _ = take i (now m) && fin _ = pv p1 } @ local unique ->
+       slice{ now _ = seg i j (now m) && fin _ = pv p2 } @ local unique ->
+       slice{ now _ = drop j (now m) && fin _ = pv p3 } @ local unique ->
+       'a @ unique) @ local
       once ->
-      slice{ ((now _) = (app (pv p1) (app (pv p2) (pv p3)))) && ((fin _) = (fin m)) } *
+      slice{ now _ = app (pv p1) (app (pv p2) (pv p3)) && fin _ = fin m } *
       'a @ local unique
-    val sdrop : (m : slice) @ local unique -> unit{ (fin m) = (now m) }
-    val sdropa : (m : slice) @ local -> unit{ (fin m) = (now m) }
+    val sdrop : (m : slice) @ local unique -> unit{ fin m = now m }
+    val sdropa : (m : slice) @ local -> unit{ fin m = now m }
     val fork_join2 :
       (unit -> 'a @ unique) @ local once ->
       (unit -> 'b @ unique) @ local once -> 'a * 'b @ unique
@@ -907,13 +901,13 @@ Line 11, characters 30-31:
 11 |         let (v, m1) = sget m0 n in
                                    ^
 Error: vox: verification failed (lean).
-       Goal: (0 <= n) && (n < (len (now m0)))
+       Goal: 0 <= n && n < len (now m0)
 Hypotheses:
-  n = (fst *unknown33*)
-  m0 = (snd *unknown33*)
-  n = (len (now m))
-  ((now m0) = (now m)) && ((fin m0) = (fin m))
-  ((now m) = (cts x)) && ((fin m) = (pv p))
+  n = fst *unknown33*
+  m0 = snd *unknown33*
+  n = len (now m)
+  now m0 = now m && fin m0 = fin m
+  now m = cts x && fin m = pv p
 Possible counterexample:
   n = 0
   len (now m0) = 0
@@ -934,7 +928,7 @@ Line 5, characters 11-12:
 5 |   fun m -> m
                ^
 Error: vox: verification failed (lean).
-       Goal: ((perm (now m) (now m)) && (sorted (now m))) && ((fin m) = (fin m))
+       Goal: perm (now m) (now m) && sorted (now m) && fin m = fin m
 Hypotheses: <none>
 Possible counterexample:
   len (now m) = 2
@@ -959,14 +953,14 @@ Line 8, characters 9-11:
 8 |         (() : unit{ len (pv p) = len (cts x) }))
              ^^
 Error: vox: verification failed (lean).
-       Goal: (len (pv p)) = (len (cts x))
+       Goal: len (pv p) = len (cts x)
 Hypotheses:
   _dead = m0
-  _n = (fst *unknown40*)
-  m0 = (snd *unknown40*)
-  _n = (len (now m))
-  ((now m0) = (now m)) && ((fin m0) = (fin m))
-  ((now m) = (cts x)) && ((fin m) = (pv p))
+  _n = fst *unknown40*
+  m0 = snd *unknown40*
+  _n = len (now m)
+  now m0 = now m && fin m0 = fin m
+  now m = cts x && fin m = pv p
 Possible counterexample:
   _n = 1
   len (cts x) = 1

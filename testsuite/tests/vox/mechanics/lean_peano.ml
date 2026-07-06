@@ -42,8 +42,7 @@ let succ : (n : t) -> t{ _ = n + 1 } =
     let refine_ pn = n in
     (S pn : t{ _ = n + 1 })
 [%%expect{|
-val succ : (n : t) -> pnat{ true && ((toN _) = (n + 1)) via (toN : lnat) } =
-  <fun>
+val succ : (n : t) -> pnat{ true && toN _ = n + 1 via (toN : lnat) } = <fun>
 |}]
 
 (* [add] by Peano recursion on the first skeleton.  The recursion IS the
@@ -67,7 +66,7 @@ let add : (a : t) -> (b : t) -> t{ _ = a + b } =
     (w : t{ _ = a + b })
 [%%expect{|
 val add :
-  (a : t) -> (b : t) -> pnat{ true && ((toN _) = (a + b)) via (toN : lnat) } =
+  (a : t) -> (b : t) -> pnat{ true && toN _ = a + b via (toN : lnat) } =
   <fun>
 |}]
 
@@ -82,6 +81,6 @@ let restate : (a : t) -> (b : t) -> t{ _ = a + b } =
   fun a b -> add a b
 [%%expect{|
 val restate :
-  (a : t) -> (b : t) -> pnat{ true && ((toN _) = (a + b)) via (toN : lnat) } =
+  (a : t) -> (b : t) -> pnat{ true && toN _ = a + b via (toN : lnat) } =
   <fun>
 |}]

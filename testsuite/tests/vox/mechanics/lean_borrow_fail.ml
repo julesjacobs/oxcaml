@@ -108,14 +108,14 @@ module B :
     val borrow_mut :
       (p : proph) @ unique ->
       (x : vref) @ unique ->
-      (mut{ ((now _) = x) && ((fin _) = p) } @ local unique -> 'b @ unique) @ local
+      (mut{ now _ = x && fin _ = p } @ local unique -> 'b @ unique) @ local
       once -> vref{ _ = p } * 'b @ unique
-    val mpeek : (m : mut) @ local -> int{ _ = (now m) }
+    val mpeek : (m : mut) @ local -> int{ _ = now m }
     val mset :
       (m : mut) @ local unique ->
-      (w : int) -> mut{ ((now _) = w) && ((fin _) = (fin m)) } @ local unique
-    val mdrop : (m : mut) @ local unique -> unit{ (fin m) = (now m) }
-    val mdropa : (m : mut) @ local -> unit{ (fin m) = (now m) }
+      (w : int) -> mut{ now _ = w && fin _ = fin m } @ local unique
+    val mdrop : (m : mut) @ local unique -> unit{ fin m = now m }
+    val mdropa : (m : mut) @ local -> unit{ fin m = now m }
   end
 |}]
 
@@ -140,11 +140,11 @@ Line 8, characters 5-7:
 8 |     (() : unit{ p = a + 2 }))
          ^^
 Error: vox: verification failed (lean).
-       Goal: p = (a + 2)
+       Goal: p = a + 2
 Hypotheses:
-  (fin m1) = (now m1)
-  ((now m1) = (a + 1)) && ((fin m1) = (fin m))
-  ((now m) = x) && ((fin m) = p)
+  fin m1 = now m1
+  now m1 = a + 1 && fin m1 = fin m
+  now m = x && fin m = p
   x = a
 Possible counterexample:
   a = -1
@@ -178,8 +178,8 @@ Line 11, characters 29-31:
 Error: vox: verification failed (lean).
        Goal: x' = a
 Hypotheses:
-  x' = (fst *unknown18*)
-  u = (snd *unknown18*)
+  x' = fst *unknown18*
+  u = snd *unknown18*
   x' = p
   1 = 1
   x = a

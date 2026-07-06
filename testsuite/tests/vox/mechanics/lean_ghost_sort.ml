@@ -67,10 +67,10 @@ end
 module S :
   sig
     type iset
-    val add : (x : int) -> (s : iset) -> iset{ _ = (ins x s) } @ unique
-    val union : (s : iset) -> (t : iset) -> iset{ _ = (uni s t) } @ unique
-    val mem : (x : int) -> (s : iset) -> bool{ _ = (mem x s) }
-    val card : (s : iset) -> int{ _ = (card s) }
+    val add : (x : int) -> (s : iset) -> iset{ _ = ins x s } @ unique
+    val union : (s : iset) -> (t : iset) -> iset{ _ = uni s t } @ unique
+    val mem : (x : int) -> (s : iset) -> bool{ _ = mem x s }
+    val card : (s : iset) -> int{ _ = card s }
   end
 |}]
 
@@ -83,7 +83,7 @@ let roundtrip : (x : int) -> (s : S.iset) -> bool{ _ = mem x (ins x s) } =
     let t = S.add x s in
     S.mem x t
 [%%expect{|
-val roundtrip : (x : int) -> (s : S.iset) -> bool{ _ = (mem x (ins x s)) } =
+val roundtrip : (x : int) -> (s : S.iset) -> bool{ _ = mem x (ins x s) } =
   <fun>
 |}]
 
@@ -95,7 +95,7 @@ let via_union : (x : int) -> (s : S.iset) -> (t : S.iset)
     S.mem x u
 [%%expect{|
 val via_union :
-  (x : int) -> (s : S.iset) -> (t : S.iset) -> bool{ _ = (mem x (uni s t)) } =
+  (x : int) -> (s : S.iset) -> (t : S.iset) -> bool{ _ = mem x (uni s t) } =
   <fun>
 |}]
 
@@ -107,7 +107,7 @@ let grows : (x : int) -> (s : S.iset) -> int{ _ = card s + 1 } =
     let t = S.add x s in
     S.card t
 [%%expect{|
-val grows : int -> (s : S.iset) -> int{ _ = ((card s) + 1) } = <fun>
+val grows : int -> (s : S.iset) -> int{ _ = card s + 1 } = <fun>
 |}]
 
 (* An OVERCLAIM: adding one element grows the cardinality by exactly
@@ -122,10 +122,10 @@ Line 4, characters 4-12:
 4 |     S.card t
         ^^^^^^^^
 Error: vox: verification failed (lean).
-       Goal: *unknown13* = ((card s) + x)
+       Goal: *unknown13* = card s + x
 Hypotheses:
-  *unknown13* = (card t)
-  t = (ins x s)
+  *unknown13* = card t
+  t = ins x s
 Possible counterexample:
   x = 0
   *unknown13* = 1

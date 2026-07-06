@@ -61,7 +61,7 @@ Line 3, characters 11-13: vox VC:
   hypotheses:
   mem 0 t
 val binder_image :
-  (t : tree{ (bst _) && (mem 0 (elems _)) via (elems : iset) }) ->
+  (t : tree{ bst _ && mem 0 (elems _) via (elems : iset) }) ->
   unit{ mem 0 t } = <fun>
 |}]
 
@@ -74,9 +74,9 @@ let mk
   fun x -> assume_unchecked_ (Node (Leaf, x, Leaf))
 [%%expect{|
 Line 3, characters 29-51: vox VC (ASSUMED):
-  goal: (bst (Node (Leaf, x, Leaf))) && (mem x (elems (Node (Leaf, x, Leaf))))
+  goal: bst (Node (Leaf, x, Leaf)) && mem x (elems (Node (Leaf, x, Leaf)))
   hypotheses: <none>
-val mk : (x : int) -> tree{ (bst _) && (mem x (elems _)) via (elems : iset) } =
+val mk : (x : int) -> tree{ bst _ && mem x (elems _) via (elems : iset) } =
   <fun>
 |}]
 

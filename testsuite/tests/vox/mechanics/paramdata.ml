@@ -24,14 +24,14 @@ type 'a mylist = Nil | Cons of 'a * 'a mylist
 Line 9, characters 27-28: vox VC:
   goal: h = 3
   hypotheses:
-  s = (Cons (h, t))
-  s = (Cons (3, Nil))
+  s = Cons (h, t)
+  s = Cons (3, Nil)
 Line 10, characters 19-20: vox VC (RUNTIME CHECKED):
   goal: 0 = 3
   hypotheses:
   s = Nil
-  s = (Cons (3, Nil))
-val get_i : int mylist{ _ = (Cons (3, Nil)) } -> int{ _ = 3 } = <fun>
+  s = Cons (3, Nil)
+val get_i : int mylist{ _ = Cons (3, Nil) } -> int{ _ = 3 } = <fun>
 |}]
 
 (* The SAME declaration reused at the [bool] instantiation (the solver
@@ -69,7 +69,7 @@ let poly (s : 'a mylist) : {r:int | r = 0} =
 Line 3, characters 27-28: vox VC:
   goal: 0 = 0
   hypotheses:
-  s = (Cons (h, t))
+  s = Cons (h, t)
 Line 4, characters 19-20: vox VC:
   goal: 0 = 0
   hypotheses:

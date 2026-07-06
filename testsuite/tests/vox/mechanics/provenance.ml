@@ -82,7 +82,7 @@ Line 5, characters 9-32: vox VC:
   1 <= i  @ 3.2-5.8
   i <= n  @ 3.2-5.8
   x@1 >= 0  @ 5.9-5.32
-  x@2 = (x@1 + 1)
+  x@2 = x@1 + 1
   scope:
   x@2 : int  ~>  Int
   i : int  ~>  Int

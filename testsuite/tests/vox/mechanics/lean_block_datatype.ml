@@ -43,5 +43,5 @@ let rec g : (x : a) -> int{ _ = fa 0 x } =
     | ANil -> 0
     | ACons (h, t) -> if 0 = h then 1 else g t
 [%%expect{|
-val g : (x : a) -> int{ _ = (fa 0 x) } = <fun>
+val g : (x : a) -> int{ _ = fa 0 x } = <fun>
 |}]

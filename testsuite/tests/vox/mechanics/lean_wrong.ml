@@ -20,7 +20,7 @@ Line 6, characters 61-68:
 6 | let wrong : (n : int) -> int{ _ = fib n } = fun n -> refine_ (n + 1)
                                                                  ^^^^^^^
 Error: vox: verification failed (lean).
-       Goal: (n + 1) = (fib n)
+       Goal: n + 1 = fib n
 Hypotheses: <none>
 Possible counterexample:
   n = 0

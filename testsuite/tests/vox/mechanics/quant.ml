@@ -16,19 +16,18 @@ let lub : (x : int) -> int{ x <= _ && (forall_ z. x <= z -> _ <= z) } =
   fun x -> refine_ x
 [%%expect{|
 Line 2, characters 19-20: vox VC:
-  goal: (x <= x) && (forall_ z. (x <= z) -> (x <= z))
+  goal: x <= x && (forall_ z. x <= z -> x <= z)
   hypotheses: <none>
-val lub : (x : int) -> int{ (x <= _) && (forall_ z. (x <= z) -> (_ <= z)) } =
-  <fun>
+val lub : (x : int) -> int{ x <= _ && (forall_ z. x <= z -> _ <= z) } = <fun>
 |}]
 
 (* Multiple binders nest; the printed form reparses. *)
 let pair : unit{ forall_ i j. i + j = j + i } = assume_unchecked_ ()
 [%%expect{|
 Line 1, characters 66-68: vox VC (ASSUMED):
-  goal: forall_ i. forall_ j. (i + j) = (j + i)
+  goal: forall_ i. forall_ j. i + j = j + i
   hypotheses: <none>
-val pair : unit{ forall_ i. forall_ j. (i + j) = (j + i) } = ()
+val pair : unit{ forall_ i. forall_ j. i + j = j + i } = ()
 |}]
 
 (* Alpha-equivalence: differently named binders are the SAME type
@@ -37,11 +36,11 @@ val pair : unit{ forall_ i. forall_ j. (i + j) = (j + i) } = ()
 let pair2 : unit{ forall_ a b. a + b = b + a } = pair
 [%%expect{|
 Line 1, characters 49-53: vox VC:
-  goal: forall_ a. forall_ b. (a + b) = (b + a)
+  goal: forall_ a. forall_ b. a + b = b + a
   hypotheses:
   pair = ()
-  forall_ i. forall_ j. (i + j) = (j + i)
-val pair2 : unit{ forall_ a. forall_ b. (a + b) = (b + a) } = ()
+  forall_ i. forall_ j. i + j = j + i
+val pair2 : unit{ forall_ a. forall_ b. a + b = b + a } = ()
 |}]
 
 (* Different structure is a different type; subsumption turns the
@@ -50,12 +49,12 @@ val pair2 : unit{ forall_ a. forall_ b. (a + b) = (b + a) } = ()
 let swapped : unit{ forall_ a b. b + a = a + b } = pair
 [%%expect{|
 Line 1, characters 51-55: vox VC:
-  goal: forall_ a. forall_ b. (b + a) = (a + b)
+  goal: forall_ a. forall_ b. b + a = a + b
   hypotheses:
   pair2 = pair
-  forall_ a. forall_ b. (a + b) = (b + a)
+  forall_ a. forall_ b. a + b = b + a
   pair = ()
-val swapped : unit{ forall_ a. forall_ b. (b + a) = (a + b) } = ()
+val swapped : unit{ forall_ a. forall_ b. b + a = a + b } = ()
 |}]
 
 (* A quantifier binder shadows ordinary program variables (the body
@@ -67,9 +66,9 @@ Line 2, characters 21-23: vox VC (ASSUMED):
   goal: exists_ k. k = k
   hypotheses:
   swapped = pair
-  forall_ a. forall_ b. (b + a) = (a + b)
+  forall_ a. forall_ b. b + a = a + b
   pair2 = pair
-  forall_ a. forall_ b. (a + b) = (b + a)
+  forall_ a. forall_ b. a + b = b + a
   pair = ()
 val shadow : int -> unit{ exists_ k. k = k } = <fun>
 |}]
@@ -102,14 +101,14 @@ let lub2 : (x : int) -> {r:int | x <= r && (forall_ z. x <= z -> r <= z)} =
   fun x -> x
 [%%expect{|
 Line 2, characters 11-12: vox VC:
-  goal: (x <= x) && (forall_ z. (x <= z) -> (x <= z))
+  goal: x <= x && (forall_ z. x <= z -> x <= z)
   hypotheses:
   swapped = pair
-  forall_ a. forall_ b. (b + a) = (a + b)
+  forall_ a. forall_ b. b + a = a + b
   pair2 = pair
-  forall_ a. forall_ b. (a + b) = (b + a)
+  forall_ a. forall_ b. a + b = b + a
   pair = ()
-val lub2 : (x : int) -> int{ (x <= _) && (forall_ z. (x <= z) -> (_ <= z)) } =
+val lub2 : (x : int) -> int{ x <= _ && (forall_ z. x <= z -> _ <= z) } =
   <fun>
 |}]
 

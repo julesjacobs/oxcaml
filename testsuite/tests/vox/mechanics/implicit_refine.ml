@@ -49,12 +49,12 @@ val promote : int -> int = <fun>
 let inc (x : int) : int{ _ = x + 1 } = x + 1
 [%%expect{|
 Line 1, characters 39-44: vox VC:
-  goal: (x + 1) = (x + 1)
+  goal: x + 1 = x + 1
   hypotheses:
   keep = three
   keep = 3
   three = 3
-val inc : (x : int) -> int{ _ = (x + 1) } = <fun>
+val inc : (x : int) -> int{ _ = x + 1 } = <fun>
 |}]
 
 (* A refined constructor argument. *)
@@ -90,7 +90,7 @@ let origin = { px = 0; py = 0 }
 Line 1, characters 20-21: vox VC:
   goal: 0 >= 0
   hypotheses:
-  w1 = (W 3)
+  w1 = W 3
   keep = three
   keep = 3
   three = 3
@@ -100,10 +100,10 @@ val origin : point = {px = 0; py = 0}
 let shift (p : point) (d : int) = { p with px = d * d }
 [%%expect{|
 Line 1, characters 48-53: vox VC:
-  goal: (d * d) >= 0
+  goal: d * d >= 0
   hypotheses:
-  origin = (mk (0, 0))
-  w1 = (W 3)
+  origin = mk (0, 0)
+  w1 = W 3
   keep = three
   keep = 3
   three = 3
@@ -121,8 +121,8 @@ let local_payload () =
 Line 2, characters 25-26: vox VC:
   goal: 3 > 0
   hypotheses:
-  origin = (mk (0, 0))
-  w1 = (W 3)
+  origin = mk (0, 0)
+  w1 = W 3
   keep = three
   keep = 3
   three = 3
@@ -150,10 +150,10 @@ let field_fact (v : w) : int =
 Line 4, characters 22-23: vox VC:
   goal: y > 0
   hypotheses:
-  v = (W y)
+  v = W y
   y > 0
-  origin = (mk (0, 0))
-  w1 = (W 3)
+  origin = mk (0, 0)
+  w1 = W 3
   keep = three
   keep = 3
   three = 3

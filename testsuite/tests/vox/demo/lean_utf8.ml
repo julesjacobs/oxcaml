@@ -137,7 +137,7 @@ let encode1 : (c : int{ valid_cp _ }) -> bytes_{ _ = enc_cp c } =
         ( 224 + c / 4096,
           Bcons (128 + (c / 64) mod 64, Bcons (128 + c mod 64, Bnil)) )
 [%%expect{|
-val encode1 : (c : int{ valid_cp _ }) -> bytes_{ _ = (enc_cp c) } = <fun>
+val encode1 : (c : int{ valid_cp _ }) -> bytes_{ _ = enc_cp c } = <fun>
 |}]
 
 (* Continuation-byte decoders, proved equal to the model's [dec2]/[dec3]. *)
@@ -182,11 +182,11 @@ let decode1 : (bs : bytes_) -> res{ _ = dec1 bs } =
       then decode3 b0 rest
       else Bad
 [%%expect{|
-val decode2 : (b0 : int) -> (rest : bytes_) -> res{ _ = (dec2 b0 rest) } =
+val decode2 : (b0 : int) -> (rest : bytes_) -> res{ _ = dec2 b0 rest } =
   <fun>
-val decode3 : (b0 : int) -> (rest : bytes_) -> res{ _ = (dec3 b0 rest) } =
+val decode3 : (b0 : int) -> (rest : bytes_) -> res{ _ = dec3 b0 rest } =
   <fun>
-val decode1 : (bs : bytes_) -> res{ _ = (dec1 bs) } = <fun>
+val decode1 : (bs : bytes_) -> res{ _ = dec1 bs } = <fun>
 |}]
 
 (* ROUNDTRIP on real characters, PROVED (not tested):
@@ -205,12 +205,12 @@ let roundtrip_euro : res{ _ = Good (8364, Bnil) } =
   let b = encode1 8364 in
   decode1 b
 [%%expect{|
-val e_acute_bytes : bytes_{ _ = (Bcons (195, Bcons (169, Bnil))) } =
+val e_acute_bytes : bytes_{ _ = Bcons (195, Bcons (169, Bnil)) } =
   Bcons (195, Bcons (169, Bnil))
-val euro_bytes : bytes_{ _ = (Bcons (226, Bcons (130, Bcons (172, Bnil)))) } =
+val euro_bytes : bytes_{ _ = Bcons (226, Bcons (130, Bcons (172, Bnil))) } =
   Bcons (226, Bcons (130, Bcons (172, Bnil)))
-val roundtrip_e_acute : res{ _ = (Good (233, Bnil)) } = Good (233, Bnil)
-val roundtrip_euro : res{ _ = (Good (8364, Bnil)) } = Good (8364, Bnil)
+val roundtrip_e_acute : res{ _ = Good (233, Bnil) } = Good (233, Bnil)
+val roundtrip_euro : res{ _ = Good (8364, Bnil) } = Good (8364, Bnil)
 |}]
 
 (* REJECTION, as a PROOF consequence of the model (the bytes are

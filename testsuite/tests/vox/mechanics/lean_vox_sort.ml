@@ -39,7 +39,7 @@ Line 3, characters 6-7:
           ^
 Warning 26 [unused-var]: unused variable "x".
 
-val use : (n : int) -> int{ _ = (n + 1) } = <fun>
+val use : (n : int) -> int{ _ = n + 1 } = <fun>
 |}]
 
 (* The sort is logic-level only: the program cannot treat g as int. *)
@@ -139,5 +139,5 @@ Line 10, characters 6-7:
            ^
 Warning 26 [unused-var]: unused variable "x".
 
-val localmod : (n : int) -> int{ _ = (n + 1) } = <fun>
+val localmod : (n : int) -> int{ _ = n + 1 } = <fun>
 |}]

@@ -14,9 +14,9 @@ let f : foo:(x : int) -> bar:(y : int) -> int{ _ = x + y } =
   fun ~foo:x ~bar:y -> assume_unchecked_ (x + y)
 [%%expect{|
 Line 2, characters 41-48: vox VC (ASSUMED):
-  goal: (x + y) = (x + y)
+  goal: x + y = x + y
   hypotheses: <none>
-val f : foo:(x : int) -> bar:(y : int) -> int{ _ = (x + y) } = <fun>
+val f : foo:(x : int) -> bar:(y : int) -> int{ _ = x + y } = <fun>
 |}]
 
 (* Both arguments, commuted at one application: both stamps are
@@ -29,11 +29,11 @@ let both () =
   ok
 [%%expect{|
 Line 5, characters 28-29: vox VC:
-  goal: r = (m + n)
+  goal: r = m + n
   hypotheses:
-  *unknown2* = (m + n)
+  *unknown2* = m + n
   r = *unknown2*
-  r = (m + n)
+  r = m + n
   m = 3
   n = 2
 val both : unit -> int = <fun>
@@ -51,11 +51,11 @@ let deferred () =
   ok
 [%%expect{|
 Line 6, characters 28-29: vox VC:
-  goal: r = (m + n)
+  goal: r = m + n
   hypotheses:
-  *unknown5* = (m + n)
+  *unknown5* = m + n
   r = *unknown5*
-  r = (m + n)
+  r = m + n
   m = 3
   n = 2
 val deferred : unit -> int = <fun>

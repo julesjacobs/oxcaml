@@ -19,7 +19,7 @@ Line 4, characters 10-11: vox VC:
   goal: m@1 = 4
   hypotheses:
   m = 3
-  m@1 = (m + 1)
+  m@1 = m + 1
 val f : unit -> int{ _ = 4 } = <fun>
 |}]
 
@@ -33,8 +33,8 @@ let g (b : bool) : {r:int | r >= 1} =
 Line 4, characters 10-11: vox VC:
   goal: m@2 >= 1
   hypotheses:
-  (b && (m@2 = m@1)) || ((not b) && (m@2 = m))
-  m@1 = (m + 1)
+  b && m@2 = m@1 || not b && m@2 = m
+  m@1 = m + 1
   m = 1
 val g : bool -> int{ _ >= 1 } = <fun>
 |}]
@@ -54,7 +54,7 @@ Line 2, characters 49-50: vox VC:
   goal: 0 >= 0
   hypotheses: <none>
 Line 5, characters 22-29: vox VC:
-  goal: (t + i) >= 0
+  goal: t + i >= 0
   hypotheses:
   t = total@1
   t >= 0
@@ -85,13 +85,13 @@ Line 4, characters 24-25: vox VC:
   hypotheses:
   m@1 > 0
   m = 4
-  m@1 = (m + 1)
+  m@1 = m + 1
 Line 4, characters 39-40: vox VC:
   goal: 1 > 0
   hypotheses:
   not (m@1 > 0)
   m = 4
-  m@1 = (m + 1)
+  m@1 = m + 1
 val h : unit -> int{ _ > 0 } = <fun>
 |}]
 
@@ -137,7 +137,7 @@ Line 6, characters 37-41: vox VC (ASSUMED):
   hypotheses:
   y = m@1
   x = m
-  m@1 = (m + 1)
+  m@1 = m + 1
   m = 0
 Line 7, characters 10-11: vox VC:
   goal: 0 = 0
@@ -146,7 +146,7 @@ Line 7, characters 10-11: vox VC:
   w = true
   y = m@1
   x = m
-  m@1 = (m + 1)
+  m@1 = m + 1
   m = 0
 Line 3, characters 6-7:
 3 |   let x = m in
@@ -192,13 +192,13 @@ type t = K of int | L
 Line 9, characters 19-20: vox VC:
   goal: y = 9
   hypotheses:
-  m@1 = (K y)
-  m@1 = (K 9)
+  m@1 = K y
+  m@1 = K 9
 Line 10, characters 27-28: vox VC (ASSUMED):
   goal: 0 = 9
   hypotheses:
   m@1 = L
-  m@1 = (K 9)
+  m@1 = K 9
 val get : unit -> int{ _ = 9 } = <fun>
 |}]
 
@@ -218,22 +218,22 @@ let count (n : int) : {r:int | r >= 0} =
   refine_ x
 [%%expect{|
 Line 7, characters 9-45: vox VC:
-  goal: (x >= 0) && ((x + y) = n)
+  goal: x >= 0 && x + y = n
   hypotheses:
   y = n
   x = 0
 Line 7, characters 9-45: vox VC:
-  goal: (x@2 >= 0) && ((x@2 + y@2) = n)
+  goal: x@2 >= 0 && x@2 + y@2 = n
   hypotheses:
   y@1 > 0
-  (x@1 >= 0) && ((x@1 + y@1) = n)
-  y@2 = (y@1 - 1)
-  x@2 = (x@1 + 1)
+  x@1 >= 0 && x@1 + y@1 = n
+  y@2 = y@1 - 1
+  x@2 = x@1 + 1
 Line 8, characters 10-11: vox VC:
   goal: x@1 >= 0
   hypotheses:
   not (y@1 > 0)
-  (x@1 >= 0) && ((x@1 + y@1) = n)
+  x@1 >= 0 && x@1 + y@1 = n
 val count : int -> int{ _ >= 0 } = <fun>
 |}]
 
@@ -266,22 +266,21 @@ let iota (n : int) : {r:int | (n < 1 && r = 0) || (n >= 1 && r = n)} =
   refine_ x
 [%%expect{|
 Line 5, characters 9-35: vox VC:
-  goal: x = (1 - 1)
+  goal: x = 1 - 1
   hypotheses:
   x = 0
 Line 5, characters 9-35: vox VC:
-  goal: x@2 = ((i + 1) - 1)
+  goal: x@2 = i + 1 - 1
   hypotheses:
   1 <= i
   i <= n
-  x@1 = (i - 1)
-  x@2 = (x@1 + 1)
+  x@1 = i - 1
+  x@2 = x@1 + 1
 Line 6, characters 10-11: vox VC:
-  goal: ((n < 1) && (x@1 = 0)) || ((n >= 1) && (x@1 = n))
+  goal: n < 1 && x@1 = 0 || n >= 1 && x@1 = n
   hypotheses:
-  ((1 > n) && (x@1 = (1 - 1))) || ((1 <= n) && (x@1 = ((n + 1) - 1)))
-val iota : (n : int) -> int{ ((n < 1) && (_ = 0)) || ((n >= 1) && (_ = n)) } =
-  <fun>
+  1 > n && x@1 = 1 - 1 || 1 <= n && x@1 = n + 1 - 1
+val iota : (n : int) -> int{ n < 1 && _ = 0 || n >= 1 && _ = n } = <fun>
 |}]
 
 (* [downto] mirrors, stepping the index down. *)
@@ -295,22 +294,21 @@ let count_down (n : int)
   refine_ x
 [%%expect{|
 Line 7, characters 9-35: vox VC:
-  goal: x = (n - n)
+  goal: x = n - n
   hypotheses:
   x = 0
 Line 7, characters 9-35: vox VC:
-  goal: x@2 = (n - (i - 1))
+  goal: x@2 = n - (i - 1)
   hypotheses:
   0 <= i
   i <= n
-  x@1 = (n - i)
-  x@2 = (x@1 + 1)
+  x@1 = n - i
+  x@2 = x@1 + 1
 Line 8, characters 10-11: vox VC:
-  goal: ((n < 0) && (x@1 = 0)) || ((n >= 0) && (x@1 = (n + 1)))
+  goal: n < 0 && x@1 = 0 || n >= 0 && x@1 = n + 1
   hypotheses:
-  ((n < 0) && (x@1 = (n - n))) || ((n >= 0) && (x@1 = (n - (0 - 1))))
-val count_down :
-  (n : int) -> int{ ((n < 0) && (_ = 0)) || ((n >= 0) && (_ = (n + 1))) } =
+  n < 0 && x@1 = n - n || n >= 0 && x@1 = n - (0 - 1)
+val count_down : (n : int) -> int{ n < 0 && _ = 0 || n >= 0 && _ = n + 1 } =
   <fun>
 |}]
 
@@ -329,12 +327,12 @@ Line 5, characters 9-32: vox VC:
   hypotheses:
   x = 0
 Line 5, characters 9-32: vox VC:
-  goal: x@2 >= (i + 1)
+  goal: x@2 >= i + 1
   hypotheses:
   0 <= i
   i <= *unknown14*
   x@1 >= i
-  x@2 = (x@1 + 1)
+  x@2 = x@1 + 1
 val opaque_bound : (unit -> int) -> int = <fun>
 |}]
 

@@ -61,8 +61,8 @@ let rec bucket_mem : (k : int) -> (b : bucket) -> bool{ _ = bmem k b } =
     | BNil -> false
     | BCons (k', _, r) -> if k = k' then true else bucket_mem k r
 [%%expect{|
-val nth_bucket : (t : table) -> (o : int) -> bucket{ _ = (tnth t o) } = <fun>
-val bucket_mem : (k : int) -> (b : bucket) -> bool{ _ = (bmem k b) } = <fun>
+val nth_bucket : (t : table) -> (o : int) -> bucket{ _ = tnth t o } = <fun>
+val bucket_mem : (k : int) -> (b : bucket) -> bool{ _ = bmem k b } = <fun>
 |}]
 
 (* PROBE (a): looking in the WRONG bucket.  A key hashes to [index k];
@@ -81,11 +81,11 @@ Line 6, characters 4-18:
 6 |     bucket_mem k b
         ^^^^^^^^^^^^^^
 Error: vox: verification failed (lean).
-       Goal: *unknown4* = (tmem k t)
+       Goal: *unknown4* = tmem k t
 Hypotheses:
-  *unknown4* = (bmem k b)
-  b = (tnth t i)
-  i = ((k mod 8) + 1)
+  *unknown4* = bmem k b
+  b = tnth t i
+  i = k mod 8 + 1
   twf t 0
   0 <= k
 Possible counterexample:

@@ -33,7 +33,7 @@ Line 3, characters 13-18:
 3 |   counter := v - 1
                  ^^^^^
 Error: vox: verification failed (lean).
-       Goal: (v - 1) >= 0
+       Goal: v - 1 >= 0
 Hypotheses:
   v >= 0
 Possible counterexample:

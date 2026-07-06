@@ -64,7 +64,6 @@ let rec append (a : ilist) (b : ilist) : ilist{ len _ = len a + len b } =
 [%%expect{|
 type ilist = Nil | Cons of int * ilist
 val len : ilist -> int = <fun>
-val append :
-  (a : ilist) -> (b : ilist) -> ilist{ (len _) = ((len a) + (len b)) } =
+val append : (a : ilist) -> (b : ilist) -> ilist{ len _ = len a + len b } =
   <fun>
 |}]

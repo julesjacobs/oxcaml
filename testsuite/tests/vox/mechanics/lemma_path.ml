@@ -26,15 +26,15 @@ let rec lemma_nonneg (l : ilist) : unit{ len l >= 0 } =
 [%%expect{|
 vox: [@vox.lemma] lemma_nonneg exported via structural translation
 Line 2, characters 22-24: vox VC:
-  goal: (len l) >= 0
+  goal: len l >= 0
   hypotheses:
   l = Nil
 Line 2, characters 42-56: vox VC:
-  goal: (len l) >= 0
+  goal: len l >= 0
   hypotheses:
-  (len t) >= 0
-  l = (Cons (*vox-wild*, t))
-val lemma_nonneg : (l : ilist) -> unit{ (len l) >= 0 } = <fun>
+  len t >= 0
+  l = Cons (*vox-wild*, t)
+val lemma_nonneg : (l : ilist) -> unit{ len l >= 0 } = <fun>
 |}]
 
 (* A call to a non-lemma helper is outside the translator fragment ->
@@ -50,13 +50,13 @@ let rec lemma_fb (l : ilist) : unit{ len l >= 0 } =
 [%%expect{|
 vox: [@vox.lemma] lemma_fb exported via fallback translation
 Line 2, characters 22-30: vox VC:
-  goal: (len l) >= 0
+  goal: len l >= 0
   hypotheses:
   l = Nil
 Line 2, characters 48-58: vox VC:
-  goal: (len l) >= 0
+  goal: len l >= 0
   hypotheses:
-  (len t) >= 0
-  l = (Cons (*vox-wild*, t))
-val lemma_fb : (l : ilist) -> unit{ (len l) >= 0 } = <fun>
+  len t >= 0
+  l = Cons (*vox-wild*, t)
+val lemma_fb : (l : ilist) -> unit{ len l >= 0 } = <fun>
 |}]

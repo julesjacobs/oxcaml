@@ -2,14 +2,14 @@ File "rbt.ml", line 70, characters 8-70:
 70 |         Node (Red, Node (Black, a, xa, b), xl, Node (Black, r, x, lr))
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: vox: verification failed (lean).
-       Goal: (Node (Red, Node (Black, a, xa, b), xl, Node (Black, r, x, lr))) =
-(balance c l x r)
+       Goal: Node (Red, Node (Black, a, xa, b), xl, Node (Black, r, x, lr)) =
+balance c l x r
 Hypotheses:
-  ll = (Node (*vox-wild*, a, xa, b))
+  ll = Node (*vox-wild*, a, xa, b)
   *vox-wild* = Red
-  l = (Node (*vox-wild*#2, ll, xl, lr))
+  l = Node (*vox-wild*#2, ll, xl, lr)
   *vox-wild*#2 = Red
   c = Black
   empty = Leaf
-  (rb empty) && (empty = Leaf)
+  rb empty && empty = Leaf
 (lean: error: `grind` failed)

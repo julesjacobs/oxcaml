@@ -15,7 +15,7 @@ let d (n : int) : int{ _ = double n } = double n
 [%%expect{|
 val double : int -> int = <fun>
 Line 4, characters 40-48: vox VC:
-  goal: (double n) = (double n)
+  goal: double n = double n
   hypotheses: <none>
-val d : (n : int) -> int{ _ = (double n) } = <fun>
+val d : (n : int) -> int{ _ = double n } = <fun>
 |}]
