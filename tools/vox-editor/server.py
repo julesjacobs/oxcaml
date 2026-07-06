@@ -96,6 +96,8 @@ def build_check_response(
         # The VC's variables with OxCaml type + Lean sort (the pane's
         # context section); empty under an old compiler.
         region["scope"] = vc.get("scope", [])
+        region["module_hypotheses"] = vc.get("module_hypotheses", [])
+        region["module_hyp_spans"] = vc.get("module_hyp_spans", [])
         if "counterexample" in vc:
             region["counterexample"] = vc["counterexample"]
         if "lean_msg" in vc:
@@ -149,6 +151,8 @@ def build_check_response(
             "end": _loc0(cast(Dict[str, int], st["end"])),
             "hypotheses": st["hypotheses"],
             "hyp_spans": st["hyp_spans"],
+            "module_hypotheses": st.get("module_hypotheses", []),
+            "module_hyp_spans": st.get("module_hyp_spans", []),
             "scope": st["scope"],
         }
         for st in cast(List[Dict[str, Any]], index.get("states", []))

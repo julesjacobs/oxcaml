@@ -50,9 +50,12 @@ const modeEl = document.getElementById("pane-mode");
 const bodyEl = document.getElementById("pane-body");
 
 function esc(s) {
-  return String(s).replace(/[&<>]/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])
-  );
+  // Internal names never reach the user: fresh unknowns display as ?N,
+  // wildcard synthetics as _ (compiler task tracks the real fix).
+  return String(s)
+    .replace(/\*unknown(\d+)\*/g, "?$1")
+    .replace(/\*vox-wild\*(#\d+)?/g, "_")
+    .replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 }
 
 function setStatus(cls, text) {
@@ -213,8 +216,16 @@ function renderPane() {
   if (at) {
     const rng = { from: { line: at.start.line, ch: at.start.col },
                   to: { line: at.end.line, ch: at.end.col } };
-    const snippet = cm.getRange(rng.from, rng.to);
-    if (snippet && snippet.length <= 40 && snippet.indexOf("\n") < 0) {
+    let snippet = cm.getRange(rng.from, rng.to);
+    const om = /^\(?\s*Obj\.magic\s+([^)]*)\)?$/.exec(snippet || "");
+    if (om) snippet = om[1].trim();
+    // Skip when it just repeats a context row (x : int over x : int).
+    const dup =
+      r && r.scope &&
+      r.scope.some((v) => v.name === snippet && v.ocaml === at.type);
+    if (dup) {
+      // nothing
+    } else if (snippet && snippet.length <= 40 && snippet.indexOf("\n") < 0) {
       html +=
         '<div class="cursor-type"><span class="ctx-name">' + esc(snippet) +
         "</span> : " + esc(at.type) + "</div>";
@@ -223,8 +234,10 @@ function renderPane() {
     }
   }
   if (sel.relation === "inside" && r) {
-    // The cursor is AT this region: show it.
-    modeEl.textContent = sel.mode + " · " + r.kind;
+    // The cursor is AT this region: show it. Header: a plain noun in
+    // full mode; compact keeps the header empty (the body's own h3
+    // already says what it is).
+    modeEl.textContent = compact ? "" : (REGION_NOUN[r.kind] || r.kind);
     if (r.kind === "vc") {
       html += renderVc(r);
     } else if (r.kind === "theorem") {
@@ -238,7 +251,7 @@ function renderPane() {
     // the nearest obligation. (No goal: nothing to prove here.)
     const arrow = sel.mode === "below" ? "↓" : "↑";
     const stHtml = renderState({ line: c.line, col: c.ch });
-    modeEl.textContent = stHtml ? "program point" : "no obligation at cursor";
+    modeEl.textContent = stHtml ? "program point" : "";
     html += stHtml || '<p class="placeholder">No obligation at the cursor.</p>';
     html +=
       '<div class="nearest"><button id="jump-btn" class="jump">nearest ' +
@@ -248,7 +261,7 @@ function renderPane() {
       "</button></div>";
   } else {
     const stHtml = renderState({ line: c.line, col: c.ch });
-    modeEl.textContent = stHtml ? "program point" : "no obligation at cursor";
+    modeEl.textContent = stHtml ? "program point" : "";
     html += stHtml || '<p class="placeholder">No obligation at the cursor.</p>';
   }
   html += renderErrors();
@@ -265,15 +278,34 @@ function renderPane() {
   }
 }
 
+const BADGE_HINT = {
+  proved: "Lean proved this obligation",
+  failed: "Lean rejected this obligation (see counterexample)",
+  unknown: "not yet checked",
+  trusted: "assumed by construction (borrow/slice framing), not proved",
+};
+
 function badge(status) {
   const s = status || "unknown";
-  return '<span class="badge badge-' + s + '">' + s + "</span>";
+  return (
+    '<span class="badge badge-' + s + '" title="' +
+    esc(BADGE_HINT[s] || "") + '">' + s + "</span>"
+  );
 }
 
 // A VC renders as a Lean/Rocq-style proof state: the context (each
 // variable with its OxCaml type, solver sort dimmed), the hypotheses,
 // then the goal behind a turnstile. Hover-provenance stays on the
 // hypothesis/goal rows.
+// The raw Lean sort names are solver spellings; show readable labels.
+function leanLabel(sort) {
+  if (sort === "VoxU") return "opaque";
+  const m = /^Vox_[A-Za-z0-9]+_(.+)$/.exec(sort);
+  if (m) return m[1];
+  if (sort === "Vox_unit") return "unit";
+  return sort;
+}
+
 function renderCtx(scope) {
   if (!scope || !scope.length) return "";
   return (
@@ -283,7 +315,7 @@ function renderCtx(scope) {
         const inner =
           '<span class="ctx-name">' + esc(v.name) + "</span> : " +
           esc(v.ocaml) +
-          '<span class="ctx-lean">' + esc(v.lean) + "</span>";
+          '<span class="ctx-lean">' + esc(leanLabel(v.lean)) + "</span>";
         // A row that knows its binder's span gets the same hover
         // affordance as hypotheses: hovering highlights the binding.
         if (!v.span) return '<div class="ctx">' + inner + "</div>";
@@ -294,6 +326,19 @@ function renderCtx(scope) {
         );
       })
       .join("")
+  );
+}
+
+function renderModuleFacts(hyps, spans) {
+  if (compact || !hyps || !hyps.length) return "";
+  let rows = "";
+  hyps.forEach((x, idx) => {
+    const t = Selection.splitSpanSuffix(x);
+    rows += provRow("hyp", t.text, (spans || [])[idx] || t.span);
+  });
+  return (
+    '<details class="modfacts"><summary>module facts (' + hyps.length +
+    ")</summary>" + rows + "</details>"
   );
 }
 
@@ -308,12 +353,15 @@ function renderVc(r) {
   } else {
     h += renderCtx(r.scope);
     h += renderHyps(r.hypotheses, r.hyp_spans);
+    h += renderModuleFacts(r.module_hypotheses, r.module_hyp_spans);
     h += "<h3>goal" + badge(r.status) + "</h3>";
     h += provRow("goal turnstile", g.text, r.goal_span || g.span);
   }
   if (r.counterexample && r.counterexample.length) {
     h += "<h3>counterexample</h3>";
-    h += '<div class="cex">' + esc(r.counterexample.join("\n")) + "</div>";
+    h +=
+      '<div class="cex">goal is false when:\n' +
+      esc(r.counterexample.join("\n")) + "</div>";
   }
   return h;
 }
@@ -331,15 +379,19 @@ function renderState(pos) {
   } else if (h) {
     h += "<h3>hypotheses</h3><div class='hyp'>—</div>";
   }
+  h += renderModuleFacts(st.module_hypotheses, st.module_hyp_spans);
   return h || null;
 }
 
 function renderTheorem(r) {
   // Static block theorems come from the Lean bridge, not the VC dumper, so
-  // they carry no provenance spans -- rendered plain, no hover.
-  let h = "<h3>theorem " + esc(r.name) + " (static)</h3>";
-  h += '<div class="goal">' + esc(r.goal) + "</div>";
-  return h + renderHyps(r.hypotheses);
+  // they carry no provenance spans -- rendered plain, no hover. Same
+  // order as a VC: hypotheses above, the goal behind a turnstile.
+  let h = "<h3>theorem " + esc(r.name) + "</h3>";
+  h += renderHyps(r.hypotheses);
+  h += "<h3>goal</h3>";
+  h += '<div class="goal turnstile">' + esc(r.goal) + "</div>";
+  return h;
 }
 
 // `spans` (optional) is parallel to `hyps`: a per-hypothesis provenance span
@@ -364,10 +416,18 @@ function liveButton() {
 }
 
 function renderErrors() {
-  if (!errors.length) return "";
+  // A failed VC already shows its red badge + counterexample; the
+  // generic "verification failed" error on top is pure duplication.
+  const anyFailed = regions.some(
+    (r) => r.kind === "vc" && r.status === "failed"
+  );
+  const shown = errors.filter(
+    (e) => !(anyFailed && /vox: verification failed/.test(e.message || ""))
+  );
+  if (!shown.length) return "";
   return (
     '<div id="errors"><h3>errors</h3>' +
-    errors
+    shown
       .map((e) => '<div class="err">' + esc(e.message || "") + "</div>")
       .join("") +
     "</div>"

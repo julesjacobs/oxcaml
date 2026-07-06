@@ -232,6 +232,8 @@ class TestParseDump(unittest.TestCase):
                 "goal_span": None,
                 "hypotheses": [],
                 "hyp_spans": [],
+                "module_hypotheses": [],
+                "module_hyp_spans": [],
                 "scope": [],
                 "kind": "prove",
                 "status": "unknown",

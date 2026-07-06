@@ -332,3 +332,12 @@ html[data-theme="light"] .cm-vox-lean-op { color: #0550ae; }
   user-select: none;
 }
 #compact-label:hover { color: var(--fg); }
+
+.modfacts { margin: .3rem 0; }
+.modfacts summary {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  cursor: pointer;
+}

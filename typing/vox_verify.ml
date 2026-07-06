@@ -5639,6 +5639,8 @@ let scope_entries_of_preds ?(extra_ids = []) preds =
     let vars =
       List.filter
         (fun id ->
+          (not (Hashtbl.mem toplevel_names id))
+          &&
           let u = Ident.unique_name id in
           if Hashtbl.mem seen u
           then false
@@ -5703,6 +5705,15 @@ let scope_entries vc =
 
 (* One [-vox-dump-states] block: same span header, hypothesis and
    scope formats as the VC dump, no goal. *)
+(* A fact is MODULE-level when it mentions at least one variable and
+   every variable it mentions is a top-level binder: true and usable,
+   but noise at most cursor positions -- the pane folds these away. *)
+let module_level_fact f =
+  match Refinement.free_vars f with
+  | [] -> false
+  | vars -> List.for_all (fun id -> Hashtbl.mem toplevel_names id) vars
+;;
+
 let dump_state
   ppf
   ( loc
@@ -5733,13 +5744,23 @@ let dump_state
     Location.print_loc
     loc
     (fun ppf ->
-      if facts = []
+      let locals = List.filter (fun (f, _) -> not (module_level_fact f)) facts in
+      let mods = List.filter (fun (f, _) -> module_level_fact f) facts in
+      if locals = []
       then Format.fprintf ppf " <none>"
       else
         List.iter
           (fun (f, p) ->
             Format.fprintf ppf "@ %a%s" print_pred f (prov_suffix p))
-          facts)
+          locals;
+      if mods <> []
+      then begin
+        Format.fprintf ppf "@ module hypotheses:";
+        List.iter
+          (fun (f, p) ->
+            Format.fprintf ppf "@ %a%s" print_pred f (prov_suffix p))
+          mods
+      end)
     (fun ppf ->
       if scope <> []
       then begin
@@ -5764,13 +5785,29 @@ let dump_vc ppf vc =
     vc.vc_goal
     (prov_suffix vc.vc_goal_prov)
     (fun ppf ->
-      if vc.vc_facts = []
+      let pairs = List.combine vc.vc_facts vc.vc_fact_provs in
+      (* The split is an editor affordance: plain [-dump-vc] output
+         stays byte-identical (everything under hypotheses:). *)
+      let locals, mods =
+        if !Clflags.vox_dump_vc_provenance
+        then List.partition (fun (f, _) -> not (module_level_fact f)) pairs
+        else pairs, []
+      in
+      if locals = []
       then Format.fprintf ppf " <none>"
       else
-        List.iter2
-          (fun f p -> Format.fprintf ppf "@ %a%s" print_pred f (prov_suffix p))
-          vc.vc_facts
-          vc.vc_fact_provs)
+        List.iter
+          (fun (f, p) ->
+            Format.fprintf ppf "@ %a%s" print_pred f (prov_suffix p))
+          locals;
+      if mods <> []
+      then begin
+        Format.fprintf ppf "@ module hypotheses:";
+        List.iter
+          (fun (f, p) ->
+            Format.fprintf ppf "@ %a%s" print_pred f (prov_suffix p))
+          mods
+      end)
     (fun ppf ->
       if scope <> []
       then begin

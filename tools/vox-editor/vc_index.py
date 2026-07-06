@@ -169,6 +169,10 @@ def parse_dump(text: str) -> List[Dict[str, object]]:
         # The VC's variables: {name, ocaml, lean} per entry, from the dump's
         # "scope:" section (provenance flag only; empty otherwise).
         scope: List[Dict[str, object]] = []
+        # Facts about module-level names only: true but noisy; the pane
+        # folds them away.
+        module_hypotheses: List[str] = []
+        module_hyp_spans: List[Span] = []
         if i < n:
             hyp_line = lines[i].strip()
             rest = hyp_line[len("hypotheses:") :].strip()
@@ -180,7 +184,7 @@ def parse_dump(text: str) -> List[Dict[str, object]]:
             if not rest:
                 # Following indented lines are the hypotheses, until the
                 # "scope:" section, the next VC header, or a dedent.
-                in_scope = False
+                section = "hyps"
                 while i < n:
                     raw = lines[i]
                     if _VC_TAIL.search(raw) is not None and parse_loc(raw):
@@ -189,18 +193,26 @@ def parse_dump(text: str) -> List[Dict[str, object]]:
                         break
                     stripped = raw.strip()
                     if stripped == "scope:":
-                        in_scope = True
+                        section = "scope"
                         i += 1
                         continue
-                    if in_scope:
+                    if stripped == "module hypotheses:":
+                        section = "mod"
+                        i += 1
+                        continue
+                    if section == "scope":
                         entry = parse_scope_line(stripped)
                         if entry is not None:
                             scope.append(entry)
                         i += 1
                         continue
                     text, span = split_span_suffix(stripped)
-                    hypotheses.append(text)
-                    hyp_spans.append(span)
+                    if section == "mod":
+                        module_hypotheses.append(text)
+                        module_hyp_spans.append(span)
+                    else:
+                        hypotheses.append(text)
+                        hyp_spans.append(span)
                     i += 1
         vcs.append(
             {
@@ -210,6 +222,8 @@ def parse_dump(text: str) -> List[Dict[str, object]]:
                 "goal_span": goal_span,
                 "hypotheses": hypotheses,
                 "hyp_spans": hyp_spans,
+                "module_hypotheses": module_hypotheses,
+                "module_hyp_spans": module_hyp_spans,
                 "scope": scope,
                 "kind": kind,
                 "status": "unknown",
@@ -242,6 +256,8 @@ def parse_states(text: str) -> List[Dict[str, object]]:
         i += 1
         hypotheses: List[str] = []
         hyp_spans: List[Span] = []
+        module_hypotheses: List[str] = []
+        module_hyp_spans: List[Span] = []
         scope: List[Dict[str, object]] = []
         if i < n and lines[i].lstrip().startswith("hypotheses:"):
             rest = lines[i].strip()[len("hypotheses:") :].strip()
@@ -252,7 +268,7 @@ def parse_states(text: str) -> List[Dict[str, object]]:
                 hyp_spans.append(sp)
             # "<none>" is printed inline, but a scope: section can still
             # follow -- a point with no facts still has variables.
-            in_scope = False
+            section = "hyps"
             while i < n:
                 raw = lines[i]
                 if (
@@ -264,22 +280,31 @@ def parse_states(text: str) -> List[Dict[str, object]]:
                     break
                 stripped = raw.strip()
                 if stripped == "scope:":
-                    in_scope = True
+                    section = "scope"
                     i += 1
                     continue
-                if in_scope:
+                if stripped == "module hypotheses:":
+                    section = "mod"
+                    i += 1
+                    continue
+                if section == "scope":
                     entry = parse_scope_line(stripped)
                     if entry is not None:
                         scope.append(entry)
                     i += 1
                     continue
-                if rest:
+                if section == "hyps" and rest:
                     # inline hypotheses ("<none>" or a single fact):
-                    # anything before scope: is unexpected -- stop.
+                    # plain facts cannot follow -- stop unless a section
+                    # header switched us.
                     break
                 t, sp = split_span_suffix(stripped)
-                hypotheses.append(t)
-                hyp_spans.append(sp)
+                if section == "mod":
+                    module_hypotheses.append(t)
+                    module_hyp_spans.append(sp)
+                else:
+                    hypotheses.append(t)
+                    hyp_spans.append(sp)
                 i += 1
         out.append(
             {
@@ -287,6 +312,8 @@ def parse_states(text: str) -> List[Dict[str, object]]:
                 "end": end,
                 "hypotheses": hypotheses,
                 "hyp_spans": hyp_spans,
+                "module_hypotheses": module_hypotheses,
+                "module_hyp_spans": module_hyp_spans,
                 "scope": scope,
             }
         )

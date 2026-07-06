@@ -205,11 +205,19 @@ async function main() {
       state.ctx.some((t) => /: *(int|ilist)/.test(t)),
       "a context row shows an OxCaml type: " + JSON.stringify(state.ctx)
     );
-    // The "~" prefix is CSS ::before content, invisible to textContent;
-    // match the sort name itself.
+    // The "~" prefix is CSS ::before content, invisible to textContent.
+    // Sorts render as READABLE labels (Int, ilist, opaque) -- never the
+    // raw solver spelling.
+    const sortLabels = await page.evaluate(() =>
+      Array.from(document.querySelectorAll("#pane-body .ctx-lean")).map(
+        (e) => e.textContent
+      )
+    );
+    assert.ok(sortLabels.length > 0, "context rows carry sort labels");
     assert.ok(
-      state.ctx.some((t) => /(Int$|Vox_)/.test(t)),
-      "a context row shows a Lean sort: " + JSON.stringify(state.ctx)
+      sortLabels.every((t) => t && !/^Vox_/.test(t)),
+      "sort labels are readable, no solver spellings: " +
+        JSON.stringify(sortLabels)
     );
     assert.ok(state.turnstile, "goal renders behind a turnstile");
     // -annot covers EXPRESSIONS, so the type-at-cursor line needs the
@@ -405,8 +413,12 @@ async function main() {
     const empty = await waitFor(
       async () => {
         const mode = await page.$eval("#pane-mode", (e) => e.textContent);
-        if (!/program point|no obligation at cursor/.test(mode)) return false;
-        return page.$eval("#pane-body", (e) => e.textContent);
+        const body = await page.$eval("#pane-body", (e) => e.textContent);
+        // Either a program-point state or the single empty message
+        // (the header stays blank off-region -- no duplicate text).
+        if (!/program point/.test(mode) && !/No obligation/.test(body))
+          return false;
+        return body;
       },
       5000,
       "off-region pane (program point or empty)"
