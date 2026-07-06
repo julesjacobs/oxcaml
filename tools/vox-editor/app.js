@@ -68,7 +68,13 @@ function esc(s) {
 // italic `type{ ... }` interior in the buffer; false is for plain program
 // text such as an OCaml type expression in the context rows.
 function tok(text, refine) {
-  const pairs = CodeMirror.voxTokenize(String(text), refine ? { refine: 1 } : null);
+  // Mask internal names on the WHOLE string before tokenizing: the
+  // tokenizer splits *unknown1* into pieces the per-token mask in
+  // esc() can never reassemble (found by review round 4).
+  const masked = String(text)
+    .replace(/\*unknown(\d+)\*/g, "?$1")
+    .replace(/\*vox-wild\*(#\d+)?/g, "_");
+  const pairs = CodeMirror.voxTokenize(masked, refine ? { refine: 1 } : null);
   return pairs
     .map(([t, cls]) =>
       cls
