@@ -246,6 +246,12 @@ let point_states
    earlier top-level function at every point drowned the view). *)
 let toplevel_names : (Ident.t, unit) Hashtbl.t = Hashtbl.create 16
 
+(* Signatures of lemmas already registered THIS unit (ident + number
+   of precondition hypotheses), so a later lemma's body can call an
+   earlier one and the v2 translator can emit the right proof
+   arguments. *)
+let lemma_sigs : (Ident.t * int) list ref = ref []
+
 (* Embedded solver blocks ([%%vox.lean ...]) of the module (or
    toplevel session) being verified, in source order: text (ending in
    a newline) and the block's location (solver errors inside a block
@@ -308,6 +314,7 @@ let reset () =
   lemma_defs := [];
   point_states := [];
   Hashtbl.reset toplevel_names;
+  lemma_sigs := [];
   unknown_counter := 0;
   embedded_blocks := [];
   imported_specs := [];
@@ -4285,6 +4292,167 @@ let funinduction_cands param_ids (p : Refinement.pred) =
   |> List.rev
 ;;
 
+(* v2 lemma export: translate the OCaml lemma body into a genuine Lean
+   recursive proof term that mirrors it, so a lemma whose body already
+   verified never fails to export (given Lean accepts termination).
+   Match arms become Lean matches; each recursive / other-lemma call
+   becomes a [have _ := lemma <actual args> <precond proofs>] at the
+   EXACT instantiation the body used (accumulators and non-first-argument
+   recursion included -- the difference from a blind [induction]); each
+   arm's residual is [grind], with the same hypotheses the body VC had.
+   Shapes the translator does not cover raise [Lemma_v2_unsupported],
+   routing that lemma to the v1 tactic re-proof (still fail-closed). *)
+exception Lemma_v2_unsupported
+
+let rec subst_vars sub (p : Refinement.pred) =
+  let open Refinement in
+  let go = subst_vars sub in
+  match p with
+  | Pvar id -> (match List.assoc_opt id sub with Some q -> q | None -> p)
+  | Pbound | Pglobal _ | Pint _ | Pbool _ -> p
+  | Pconstr (path, c, args) -> Pconstr (path, c, List.map go args)
+  | Pfun (f, args) -> Pfun (f, List.map go args)
+  | Pfield (path, l, a) -> Pfield (path, l, go a)
+  | Ptuple args -> Ptuple (List.map go args)
+  | Pproj (n, i, a) -> Pproj (n, i, go a)
+  | Pis (path, c, a) -> Pis (path, c, go a)
+  | Pbinop (op, a, b) -> Pbinop (op, go a, go b)
+  | Pand (a, b) -> Pand (go a, go b)
+  | Por (a, b) -> Por (go a, go b)
+  | Pnot a -> Pnot (go a)
+  | Pimp (a, b) -> Pimp (go a, go b)
+  | Pquant (q, id, a) -> Pquant (q, id, go a)
+;;
+
+let pred_to_lean (p : Refinement.pred) =
+  let b = Buffer.create 32 in
+  lean_of_pred b p;
+  Buffer.contents b
+;;
+
+(* [Some (fid, nhyps, arg_exprs)] if [e] is a saturated application of the
+   lemma being defined ([self_id]) or of a previously-registered lemma. *)
+let lemma_call ~self_id ~self_nhyps (e : expression) =
+  match e.exp_desc with
+  | Texp_apply
+      ({ exp_desc = Texp_ident { path = Path.Pident fid; _ }; _ }, args, _, _, _)
+    ->
+    let nh =
+      if Ident.same fid self_id
+      then Some self_nhyps
+      else List.assoc_opt fid !lemma_sigs
+    in
+    (match nh with
+     | None -> None
+     | Some nh ->
+       let argexprs =
+         List.filter_map
+           (fun (lbl, a) ->
+             match (lbl : Types.arg_label), a with
+             | Nolabel, Arg (ae, _) -> Some ae
+             | _ -> None)
+           args
+       in
+       if List.length argexprs = List.length args
+       then Some (fid, nh, argexprs)
+       else None)
+  | _ -> None
+;;
+
+(* Translate a lemma body into a Lean proof term. *)
+let translate_lemma_body ~self_id ~self_nhyps ~has_decreases (body : expression) =
+  let arg_lean sub ae =
+    match Vox_reflect.translate_rhs ae with
+    | Some pr -> pred_to_lean (subst_vars sub pr)
+    | None -> raise Lemma_v2_unsupported
+  in
+  let call_have sub buf (fid, nh, argexprs) =
+    Buffer.add_string buf ("have _ih := " ^ Ident.name fid);
+    List.iter (fun ae -> Buffer.add_string buf (" (" ^ arg_lean sub ae ^ ")")) argexprs;
+    for _ = 1 to nh do Buffer.add_string buf " (by grind)" done;
+    Buffer.add_string buf "; "
+  in
+  (* Straight-line arm body: thread value-lets as a substitution, emit a
+     [have] per recursive / lemma call, then close with [grind]. *)
+  let rec leaf sub buf (e : expression) =
+    match e.exp_desc with
+    | Texp_construct (_, cstr, _, _, _) when String.equal cstr.cstr_name "()" ->
+      ()
+    | _ when lemma_call ~self_id ~self_nhyps e <> None ->
+      (match lemma_call ~self_id ~self_nhyps e with
+       | Some c -> call_have sub buf c
+       | None -> ())
+    | Texp_let (Nonrecursive, [ vb ], body2) ->
+      (match lemma_call ~self_id ~self_nhyps vb.vb_expr with
+       | Some c ->
+         call_have sub buf c;
+         leaf sub buf body2
+       | None ->
+         (match vb.vb_pat.pat_desc, Vox_reflect.translate_rhs vb.vb_expr with
+          | Tpat_var { id; _ }, Some pr ->
+            leaf ((id, subst_vars sub pr) :: sub) buf body2
+          | _, Some _ -> leaf sub buf body2
+          | _, None -> raise Lemma_v2_unsupported))
+    | _ -> raise Lemma_v2_unsupported
+  in
+  let rec ctrl (e : expression) =
+    match e.exp_desc with
+    | Texp_match (scrut, _, cases, val_cases, _) when val_cases = [] ->
+      let scrut_lean =
+        match scrut.exp_desc with
+        | Texp_ident { path = Path.Pident id; _ } -> lean_name id
+        | _ -> raise Lemma_v2_unsupported
+      in
+      let b = Buffer.create 128 in
+      Buffer.add_string b ("(match " ^ scrut_lean ^ " with");
+      List.iter (fun c -> arm b c) cases;
+      Buffer.add_char b ')';
+      Buffer.contents b
+    | Texp_ifthenelse (c, a, Some belse) ->
+      (* [if]-controlled recursion is int-indexed: without a
+         [@@vox.decreases] metric Lean cannot show termination
+         structurally, so route to the v1 fallback (fun_induction). *)
+      if not has_decreases then raise Lemma_v2_unsupported;
+      let cl =
+        match Vox_reflect.translate c with
+        | Some pr -> pred_to_lean pr
+        | None -> raise Lemma_v2_unsupported
+      in
+      "(if _h : " ^ cl ^ " then " ^ ctrl a ^ " else " ^ ctrl belse ^ ")"
+    | _ ->
+      let b = Buffer.create 64 in
+      Buffer.add_string b "(by ";
+      leaf [] b e;
+      Buffer.add_string b "grind)";
+      Buffer.contents b
+  and arm b (c : computation case) =
+    (match c.c_guard with
+     | Some _ -> raise Lemma_v2_unsupported
+     | None -> ());
+    let rec cpat : type k. k general_pattern -> _ =
+     fun pat ->
+      match pat.pat_desc with
+      | Tpat_value p -> cpat (p :> value general_pattern)
+      | Tpat_construct (_, cstr, _, args, _) ->
+        let path = Data_types.cstr_res_type_path cstr in
+        let field (_, (p : value general_pattern)) =
+          match p.pat_desc with
+          | Tpat_var { id; _ } -> lean_name id
+          | Tpat_any -> "_"
+          | _ -> raise Lemma_v2_unsupported
+        in
+        path, cstr.cstr_name, List.map field args
+      | _ -> raise Lemma_v2_unsupported
+    in
+    let path, cname, fields = cpat c.c_lhs in
+    Buffer.add_string b (" | " ^ lean_constr_name path cname);
+    List.iter (fun f -> Buffer.add_string b (" " ^ f)) fields;
+    Buffer.add_string b " => ";
+    Buffer.add_string b (ctrl c.c_rhs)
+  in
+  ctrl body
+;;
+
 let register_lemma env (vb : Typedtree.value_binding) =
   let loc = vb.vb_loc in
   let name =
@@ -4312,21 +4480,24 @@ let register_lemma env (vb : Typedtree.value_binding) =
            rename one of them"
           name)
     !lemma_defs;
-  let rec walk acc ty =
+  let self_id =
+    match vb.vb_pat.pat_desc with
+    | Tpat_var { id; _ } -> id
+    | _ -> Ident.create_local name
+  in
+  let rec skel ty =
+    match get_desc (Ctype.vox_expand_head env ty) with
+    | Tpoly (t, []) -> skel t
+    | Trefine (sk, _, _) -> skel sk
+    | _ -> ty
+  in
+  (* Prefer the FUNCTION's own parameter patterns as the canonical
+     names: the v2 body translation refers to them, so the theorem
+     binders must share their stamps.  Fall back to the arrow's binders
+     (and force the v1 tactic proof) for irregular shapes. *)
+  let param_of_arrow id ty =
     match get_desc (Ctype.vox_expand_head env ty) with
     | Tarrow ((_, _, _, binder), dom, ret, _) ->
-      let id =
-        match binder with Some b -> b | None -> Ident.create_local "_arg"
-      in
-      (* The parameter's SKELETON sort: strip the [Tpoly] arrow wrapper
-         and any contract refinement (the contract is collected
-         separately, below). *)
-      let rec skel ty =
-        match get_desc (Ctype.vox_expand_head env ty) with
-        | Tpoly (t, []) -> skel t
-        | Trefine (sk, _, _) -> skel sk
-        | _ -> ty
-      in
       let sort =
         Vox_reflect.rsort_of_type env ~loc ~what:"each [@@vox.lemma] parameter"
           (skel dom)
@@ -4336,19 +4507,66 @@ let register_lemma env (vb : Typedtree.value_binding) =
         | Some pr -> Some (Refinement.subst_bound ~by:(Refinement.Pvar id) pr)
         | None -> None
       in
-      walk ((id, sort, contract) :: acc) ret
-    | _ ->
+      let ret =
+        match binder with
+        | Some b -> Vox_dep.subst_binder b ~by:(Refinement.Pvar id) ret
+        | None -> ret
+      in
+      Some ((id, sort, contract), ret)
+    | _ -> None
+  in
+  let simple_param (fp : function_param) =
+    match fp.fp_arg_label, fp.fp_kind with
+    | Nolabel, Tparam_pat { pat_desc = Tpat_var { id; _ }; _ } -> Some id
+    | _ -> None
+  in
+  let params, q, v2_body =
+    match vb.vb_expr.exp_desc with
+    | Texp_function { params = fps; body = Tfunction_body bexp; _ }
+      when List.for_all (fun fp -> simple_param fp <> None) fps && fps <> [] ->
+      let arrow = ref vb.vb_expr.exp_type in
+      let ps =
+        List.map
+          (fun fp ->
+            let id = Option.get (simple_param fp) in
+            match param_of_arrow id !arrow with
+            | Some (p, ret) ->
+              arrow := ret;
+              p
+            | None -> raise Lemma_v2_unsupported)
+          fps
+      in
       let q =
-        match refinement_of_type env ty with
+        match refinement_of_type env !arrow with
         | Some pr -> pr
         | None ->
           Location.raise_errorf ~loc
             "vox: a [@@vox.lemma] must state a proposition as its refined \
              result (e.g. [unit{ ... }])"
       in
-      List.rev acc, q
+      ps, q, Some bexp
+    | _ ->
+      (* Type-only walk (arrow binders); body not translatable to v2. *)
+      let rec walk acc ty =
+        match get_desc (Ctype.vox_expand_head env ty) with
+        | Tarrow (_, _, _, _) ->
+          let id = Ident.create_local "_arg" in
+          (match param_of_arrow id ty with
+           | Some (p, ret) -> walk (p :: acc) ret
+           | None -> List.rev acc, ty)
+        | _ -> List.rev acc, ty
+      in
+      let params, rest = walk [] vb.vb_expr.exp_type in
+      let q =
+        match refinement_of_type env rest with
+        | Some pr -> pr
+        | None ->
+          Location.raise_errorf ~loc
+            "vox: a [@@vox.lemma] must state a proposition as its refined \
+             result (e.g. [unit{ ... }])"
+      in
+      params, q, None
   in
-  let params, q = walk [] vb.vb_expr.exp_type in
   if params = []
   then
     Location.raise_errorf ~loc
@@ -4367,11 +4585,15 @@ let register_lemma env (vb : Typedtree.value_binding) =
     params;
   register_pred_paths env q;
   let param_ids = List.map (fun (id, _, _) -> id) params in
-  let buf = Buffer.create 256 in
-  Buffer.add_string buf ("theorem " ^ name);
+  let self_nhyps =
+    List.length (List.filter (fun (_, _, c) -> c <> None) params)
+  in
+  (* Common statement header: [theorem name (params) (h_i : C_i) : Q]. *)
+  let header = Buffer.create 256 in
+  Buffer.add_string header ("theorem " ^ name);
   List.iter
     (fun (id, s, _) ->
-      Buffer.add_string buf
+      Buffer.add_string header
         (Printf.sprintf " (%s : %s)" (lean_name id) (lean_rsort s)))
     params;
   List.iteri
@@ -4379,32 +4601,79 @@ let register_lemma env (vb : Typedtree.value_binding) =
       match c with
       | None -> ()
       | Some pr ->
-        Buffer.add_string buf (Printf.sprintf " (h%d : " i);
-        lean_of_pred buf pr;
-        Buffer.add_char buf ')')
+        Buffer.add_string header (Printf.sprintf " (h%d : " i);
+        lean_of_pred header pr;
+        Buffer.add_char header ')')
     params;
-  Buffer.add_string buf " : ";
-  lean_of_pred buf q;
-  Buffer.add_string buf " := by\n  first\n  | grind\n";
-  List.iter
-    (fun (id, s, _) ->
-      match s with
-      | Vox_reflect.Rdata _ ->
-        Buffer.add_string buf
-          (Printf.sprintf "  | (induction %s <;> grind)\n" (lean_name id))
-      | _ -> ())
-    params;
-  List.iter
-    (fun (f, x) ->
-      Buffer.add_string buf
-        (Printf.sprintf "  | (fun_induction %s %s <;> grind)\n" f (lean_name x)))
-    (funinduction_cands param_ids q);
+  Buffer.add_string header " : ";
+  lean_of_pred header q;
+  (* The [@@vox.decreases] metric, for int-indexed (non-structural)
+     lemma recursion -- emitted as [termination_by], exactly as for a
+     reflected definition. *)
+  let termination () =
+    match Vox_reflect.find_attr "vox.decreases" vb.vb_attributes with
+    | Some { attr_payload = PStr [ { pstr_desc = Pstr_eval (e, _); _ } ]; _ } ->
+      let menv =
+        match v2_body with Some b -> b.exp_env | None -> vb.vb_expr.exp_env
+      in
+      let m =
+        Vox_reflect.translate_metric menv
+          (List.map (fun (id, s, _) -> id, s) params)
+          e
+      in
+      "\ntermination_by (" ^ pred_to_lean m
+      ^ ").toNat\ndecreasing_by all_goals (first | omega | grind)\n"
+    | _ -> "\n"
+  in
+  (* v1 tactic re-proof, the fallback. *)
+  let v1_proof () =
+    let b = Buffer.create 128 in
+    Buffer.add_string b " := by\n  first\n  | grind\n";
+    List.iter
+      (fun (id, s, _) ->
+        match s with
+        | Vox_reflect.Rdata _ ->
+          Buffer.add_string b
+            (Printf.sprintf "  | (induction %s <;> grind)\n" (lean_name id))
+        | _ -> ())
+      params;
+    List.iter
+      (fun (f, x) ->
+        Buffer.add_string b
+          (Printf.sprintf "  | (fun_induction %s %s <;> grind)\n" f
+             (lean_name x)))
+      (funinduction_cands param_ids q);
+    Buffer.contents b
+  in
+  let has_decreases =
+    Vox_reflect.find_attr "vox.decreases" vb.vb_attributes <> None
+  in
+  (* v2: try the structural proof-term translation; on any unsupported
+     shape, route to the v1 tactic re-proof. *)
+  let proof, path =
+    match v2_body with
+    | Some bexp ->
+      (try
+         let term = translate_lemma_body ~self_id ~self_nhyps ~has_decreases bexp in
+         " :=\n" ^ term ^ termination (), "structural"
+       with Lemma_v2_unsupported -> v1_proof (), "fallback")
+    | None -> v1_proof (), "fallback"
+  in
+  if !Clflags.vox_dump_vc
+  then
+    Format.eprintf "vox: [@vox.lemma] %s exported via %s translation@." name
+      path;
+  let buf = Buffer.create 320 in
+  Buffer.add_string buf (Buffer.contents header);
+  Buffer.add_string buf proof;
+  Buffer.add_char buf '\n';
   (match outermost_funs q with
    | (f, args) :: _ ->
      Buffer.add_string buf ("grind_pattern " ^ name ^ " => ");
      lean_of_pred buf (Refinement.Pfun (f, args));
      Buffer.add_char buf '\n'
    | [] -> ());
+  lemma_sigs := !lemma_sigs @ [ (self_id, self_nhyps) ];
   lemma_defs := !lemma_defs @ [ (name, Buffer.contents buf, loc) ]
 ;;
 
