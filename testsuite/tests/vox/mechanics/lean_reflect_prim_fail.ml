@@ -23,7 +23,7 @@ let uses_unknown (x : int) (m : int) : int{ _ = b1 x m } = b1 x m
 Line 1, characters 59-65:
 1 | let uses_unknown (x : int) (m : int) : int{ _ = b1 x m } = b1 x m
                                                                ^^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: no_such_lean_symbol x m = no_such_lean_symbol x m
 Hypotheses: <none>
 (lean: error: Function expected at)
@@ -48,7 +48,7 @@ let false_claim (x : int) (m : int) : int{ _ = x } = b2 x m
 Line 1, characters 53-59:
 1 | let false_claim (x : int) (m : int) : int{ _ = x } = b2 x m
                                                          ^^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: band2 x m = x
 Hypotheses: <none>
 (lean: error: `grind` failed)
