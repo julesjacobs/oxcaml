@@ -60,7 +60,7 @@ let bad_ordering : tree{ bst _ } =
 Line 2, characters 2-50:
 2 |   Node (Black, Node (Red, Leaf, 5, Leaf), 3, Leaf)
       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
+Error: vox: verification failed (lean).
        Goal: bst (Node (Black, Node (Red, Leaf, 5, Leaf), 3, Leaf))
 Hypotheses: <none>
 (lean: error: `grind` failed)
@@ -75,7 +75,7 @@ let bad_no_red_red : tree{ invc _ } =
 Line 2, characters 2-48:
 2 |   Node (Red, Node (Red, Leaf, 1, Leaf), 2, Leaf)
       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
+Error: vox: verification failed (lean).
        Goal: invc (Node (Red, Node (Red, Leaf, 1, Leaf), 2, Leaf))
 Hypotheses: <none>
 (lean: error: `grind` failed)
@@ -89,8 +89,11 @@ let bad_black_height : tree{ invh _ } =
 Line 2, characters 2-52:
 2 |   Node (Black, Node (Black, Leaf, 1, Leaf), 2, Leaf)
       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
+Error: vox: verification failed (lean).
        Goal: invh (Node (Black, Node (Black, Leaf, 1, Leaf), 2, Leaf))
 Hypotheses: <none>
+Possible counterexample:
+  bheight Vox_tree.Leaf = 0
+  bheight (Vox_tree.Node Vox_color.Black Vox_tree.Leaf 1 Vox_tree.Leaf) = 1
 (lean: error: `grind` failed)
 |}]

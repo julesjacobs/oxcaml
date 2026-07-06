@@ -119,7 +119,7 @@ let steal :
 Line 10, characters 22-23:
 10 |   let pr = get r2 a e t in
                            ^
-Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
+Error: vox: verification failed (lean).
        Goal: sat (Star (Pts (r2, a), e)) (hp t)
 Hypotheses:
   e = Emp
@@ -139,7 +139,7 @@ let alias :
 Line 7, characters 3-7:
 7 |   (true, t)
        ^^^^
-Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
+Error: vox: verification failed (lean).
        Goal: true = (r1 = r2)
 Hypotheses:
   sat (Star (Pts (r1, a), Star (Pts (r2, b), p))) (hp t)

@@ -340,14 +340,6 @@ def parse_error(text: str) -> Optional[Dict[str, object]]:
                 break
         message = lines[i][len("Error: ") :].strip()
         result: Dict[str, object] = {"message": message}
-        # A failed proof now carries a VERDICT: DISPROVED (a
-        # counterexample was validated by evaluation) vs NOT PROVED
-        # (automation gave up -- the property may still hold, and no
-        # nonsense witness is shown).
-        if "DISPROVED" in message:
-            result["verdict"] = "disproved"
-        elif "NOT PROVED" in message:
-            result["verdict"] = "unproved"
         if rng is not None:
             result["start"], result["end"] = rng
         # Scan the remaining lines for the structured verification-failure
@@ -369,9 +361,7 @@ def parse_error(text: str) -> Optional[Dict[str, object]]:
                 if rest and rest != "<none>":
                     hyps.append(rest)
                 mode = "hyps"
-            elif stripped.startswith("Possible counterexample:") or stripped.startswith(
-                "Counterexample (validated"
-            ):
+            elif stripped.startswith("Possible counterexample:"):
                 mode = "cex"
             elif stripped.startswith("(lean:"):
                 lean_msg = stripped
@@ -466,7 +456,9 @@ def _flag_rejected(output: str, flag: str) -> bool:
     return "unknown option" in output and flag in output
 
 
-def dump_capture(source_path: str, ocamlc: str, cwd: Optional[str]) -> Tuple[int, str]:
+def dump_capture(
+    source_path: str, ocamlc: str, cwd: Optional[str]
+) -> Tuple[int, str]:
     """Run the VC-shape pass, preferring the provenance flag and caching a
     one-time fallback to plain -dump-vc for compilers that lack it.
     Returns (exit code, output)."""
@@ -494,13 +486,17 @@ def dump_capture(source_path: str, ocamlc: str, cwd: Optional[str]) -> Tuple[int
         else:
             _provenance_supported = True
             return code, out
-    return compile_capture(source_path, ocamlc, ["-dump-vc", "-vox-dry-run"], cwd=cwd)
+    return compile_capture(
+        source_path, ocamlc, ["-dump-vc", "-vox-dry-run"], cwd=cwd
+    )
 
 
 # .annot blocks: a location line ("file" lnum bol cnum, twice) followed
 # by one or more kind( ... ) payloads; we keep the type( ... ) ones.
 # Columns are cnum - bol (0-based); lines are 1-based.
-_ANNOT_LOC = re.compile(r'^"[^"]*" (\d+) (\d+) (\d+) "[^"]*" (\d+) (\d+) (\d+)\s*$')
+_ANNOT_LOC = re.compile(
+    r'^"[^"]*" (\d+) (\d+) (\d+) "[^"]*" (\d+) (\d+) (\d+)\s*$'
+)
 
 
 def parse_annot(text: str) -> List[Dict[str, object]]:
@@ -527,7 +523,9 @@ def parse_annot(text: str) -> List[Dict[str, object]]:
             while i < n and lines[i] != ")":
                 body.append(lines[i].strip())
                 i += 1
-            out.append({"start": loc[0], "end": loc[1], "type": " ".join(body)})
+            out.append(
+                {"start": loc[0], "end": loc[1], "type": " ".join(body)}
+            )
         i += 1
     return out
 
@@ -601,15 +599,14 @@ def build_index(
 
 
 def _attach_failure(vcs: List[Dict[str, object]], err: Dict[str, object]) -> None:
-    """Mark the VC whose location matches the failure with its verdict
-    ('disproved' or 'unproved', falling back to 'failed') and copy its
-    counterexample across."""
+    """Mark the VC whose location matches the failure as 'failed' and copy
+    its counterexample across."""
     if "start" not in err:
         return
     estart = err["start"]
     for vc in vcs:
         if vc["start"] == estart:
-            vc["status"] = err.get("verdict", "failed")
+            vc["status"] = "failed"
             if "counterexample" in err:
                 vc["counterexample"] = err["counterexample"]
             if "lean_msg" in err:

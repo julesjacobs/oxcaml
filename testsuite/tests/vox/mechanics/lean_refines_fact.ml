@@ -43,10 +43,11 @@ let bad () =
 Line 3, characters 19-20:
 3 |   let refine_ r = (n : M.nat{ _ >= 1 }) in
                        ^
-Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
+Error: vox: verification failed (lean).
        Goal: n >= 1
 Hypotheses:
   n >= 0
-Counterexample (validated -- every hypothesis holds and the goal fails here):
+Possible counterexample:
   n = 0
+(lean: error: `grind` failed)
 |}]
