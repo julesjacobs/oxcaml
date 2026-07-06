@@ -924,6 +924,34 @@ let vox_invariant_mutables : Ident.t list ref = ref []
    de Bruijn parameter references), then to simple (non-module) value
    identifiers in [env].  The predicate is NOT type checked (DESIGN.md):
    ill-sorted predicates surface as solver errors at VC time. *)
+(* A [@@vox.reflect "sym"] value denotes the Lean symbol [sym] in
+   predicates, exactly as it does on the code side (Vox_reflect): so a
+   refinement spells the OCaml name and reflects to the same symbol.
+   Inlined (Vox_reflect is not in dynlink's module set, like the
+   [has_total_attr] check below). *)
+let reflect_name_of (attrs : Parsetree.attributes) : string option =
+  List.find_map
+    (fun (a : Parsetree.attribute) ->
+      if not (String.equal a.attr_name.txt "vox.reflect")
+      then None
+      else
+        match a.attr_payload with
+        | Parsetree.PStr
+            [ { pstr_desc =
+                  Pstr_eval
+                    ( { pexp_desc =
+                          Pexp_constant
+                            { pconst_desc = Pconst_string (s, _, _); _ }
+                      ; _
+                      }
+                    , _ )
+              ; _
+              }
+            ] -> Some s
+        | _ -> None)
+    attrs
+;;
+
 let rec elab_vox_pred ~bound ~self_root env (e : Parsetree.expression)
   : Refinement.pred =
   let open Refinement in
@@ -1204,6 +1232,14 @@ let rec elab_vox_pred ~bound ~self_root env (e : Parsetree.expression)
              Operator names do NOT fall through here: an unsupported
              operator shape must be an error, never silently an
              uninterpreted function. *)
+          let f =
+            match Env.lookup_value ~use:false ~loc (Longident.Lident f) env with
+            | (_, desc, _) ->
+              (match reflect_name_of desc.val_attributes with
+               | Some s -> s
+               | None -> f)
+            | exception _ -> f
+          in
           Pfun (f, List.map (elab_vox_pred ~bound ~self_root env) args)
       | Pexp_ident
           {txt = Longident.Ldot ({txt = Longident.Lident "Iarray"; _},
@@ -1237,14 +1273,19 @@ let rec elab_vox_pred ~bound ~self_root env (e : Parsetree.expression)
               attrs
           in
           begin match Env.lookup_value ~use:false ~loc lid env with
-          | (path, desc, _)
-            when has_total_attr desc.val_attributes ->
-              Pfun (Path.last path,
-                    List.map (elab_vox_pred ~bound ~self_root env) args)
-          | _ ->
-              Location.raise_errorf ~loc
-                "vox: a qualified identifier in a predicate must denote a \
-                 total_ function"
+          | (path, desc, _) ->
+              (match reflect_name_of desc.val_attributes with
+               | Some s ->
+                   Pfun (s, List.map (elab_vox_pred ~bound ~self_root env) args)
+               | None ->
+                   if has_total_attr desc.val_attributes
+                   then
+                     Pfun (Path.last path,
+                           List.map (elab_vox_pred ~bound ~self_root env) args)
+                   else
+                     Location.raise_errorf ~loc
+                       "vox: a qualified identifier in a predicate must \
+                        denote a total_ or [@@vox.reflect] function")
           | exception _ ->
               Location.raise_errorf ~loc
                 "vox: unbound identifier in refinement predicate"

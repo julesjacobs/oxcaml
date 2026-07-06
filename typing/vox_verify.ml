@@ -2102,6 +2102,8 @@ let rec validate_signature_sorts (sg : Types.signature) =
           && Option.is_some decl.type_manifest
         in
         validate_vox_sort_attributes ~alias decl.type_attributes
+      | Sig_value (_, vd, _) ->
+        Vox_reflect.validate_reflect_attr vd.val_attributes
       | Sig_module (_, _, md, _, _) ->
         (match md.md_type with
          | Mty_signature sub -> validate_signature_sorts sub
@@ -6413,7 +6415,21 @@ let walk_items (str : structure) ctx =
   List.iter
     (fun item ->
       match item.str_desc with
+      | Tstr_primitive vd ->
+        Vox_reflect.validate_reflect_attr vd.val_attributes
       | Tstr_value (rec_flag, vbs) ->
+        List.iter
+          (fun vb ->
+            Vox_reflect.validate_reflect_attr vb.vb_attributes;
+            if Option.is_some
+                 (Vox_reflect.reflect_attr_name vb.vb_attributes)
+               && Vox_reflect.is_total_binding vb
+            then
+              Location.raise_errorf ~loc:vb.vb_loc
+                "vox: a value cannot be both total_ (a translated \
+                 definition) and [@@vox.reflect] (an assumed Lean symbol); \
+                 choose one")
+          vbs;
         (match vbs with
          | _ :: _ :: _
            when List.exists

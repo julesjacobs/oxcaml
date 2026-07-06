@@ -192,6 +192,83 @@ let find_attr name (attrs : Parsetree.attributes) =
 
 let has_total_attr attrs = find_attr "vox.total" attrs <> None
 
+(* [@@vox.reflect "LeanSymbol"]: bind this value's solver-side name to a
+   given Lean symbol.  Unlike [total_] (whose body is TRANSLATED and
+   emitted as a checked def), a reflect binding emits NO definition --
+   the named symbol must already exist (Lean stdlib, a [%%vox.lean]
+   block, or an imported spec module), and the OCaml value / Lean symbol
+   correspondence is ASSUMED (the author's word, TCB, like a [%%vox.lean]
+   axiom or [@@vox.sort lean]).  The attribute rides [val_attributes]
+   into the .cmi, so a library declares the binding once and clients
+   translate calls to it; recognized for externals ([Val_prim]) and
+   abstract library values ([Val_reg]) alike. *)
+let reflect_attr_name (attrs : Parsetree.attributes) : string option =
+  match find_attr "vox.reflect" attrs with
+  | None -> None
+  | Some
+      { attr_payload =
+          Parsetree.PStr
+            [ { pstr_desc =
+                  Pstr_eval
+                    ( { pexp_desc =
+                          Pexp_constant
+                            { pconst_desc = Pconst_string (s, _, _); _ }
+                      ; _
+                      }
+                    , _ )
+              ; _
+              }
+            ]
+      ; _
+      } -> Some s
+  | Some _ -> None
+;;
+
+(* Eager validation at the declaration: the payload must be a non-empty
+   Lean symbol name, the value may not ALSO be [total_] (the two
+   prescribe different solver names for one value), and the [Vox_]/[v_]
+   prefixes are reserved for the emitter's own datatype/value names.
+   Sound to skip (a malformed attribute simply fails to translate, an
+   opaque atom), but a typo deserves an error, not silence. *)
+let validate_reflect_attr (attrs : Parsetree.attributes) =
+  match find_attr "vox.reflect" attrs with
+  | None -> ()
+  | Some a ->
+    let name =
+      match reflect_attr_name attrs with
+      | Some s -> s
+      | None ->
+        Location.raise_errorf ~loc:a.attr_loc
+          "vox: [@@vox.reflect] expects a string payload naming a Lean            symbol, e.g. [@@vox.reflect \"Int.natAbs\"]"
+    in
+    if String.length (String.trim name) = 0
+    then
+      Location.raise_errorf ~loc:a.attr_loc
+        "vox: [@@vox.reflect] requires a non-empty Lean symbol name";
+    String.iter
+      (fun c ->
+        match c with
+        | ' ' | '\t' | '\n' | '\r' | '(' | ')' ->
+          Location.raise_errorf ~loc:a.attr_loc
+            "vox: %S is not a valid Lean symbol name for [@@vox.reflect]"
+            name
+        | _ -> ())
+      name;
+    let reserved p =
+      String.length name >= String.length p
+      && String.equal (String.sub name 0 (String.length p)) p
+    in
+    if reserved "Vox_" || reserved "v_"
+    then
+      Location.raise_errorf ~loc:a.attr_loc
+        "vox: %S may not name a reflected symbol -- the Vox_ and v_          prefixes are reserved for the solver's emitted names"
+        name;
+    if has_total_attr attrs
+    then
+      Location.raise_errorf ~loc:a.attr_loc
+        "vox: a value cannot be both total_ (a translated definition) and          [@@vox.reflect] (an assumed Lean symbol); choose one"
+;;
+
 (* [Some (name, arity)] when [path] denotes a reflected function: a
    local one (the typing-time table), or any value carrying the
    [vox.total] marker in its val_attributes -- the marker rides the
@@ -202,23 +279,27 @@ let has_total_attr attrs = find_attr "vox.total" attrs <> None
    solver-side name is the source name, and the arity is the type's
    arrow count: reflected functions are first-order, so it is exact. *)
 let reflected_call_info env path (desc : Types.value_description) =
-  let table =
-    match path with
-    | Path.Pident id -> Hashtbl.find_opt reflected id
-    | _ -> None
+  let rec arity ty acc =
+    match Types.get_desc (Ctype.vox_expand_head env ty) with
+    | Tarrow (_, _, ret, _) -> arity ret (acc + 1)
+    | _ -> acc
   in
-  match table with
-  | Some _ -> table
+  (* A reflect binding names a Lean symbol directly, ahead of any
+     [total_] registration (a value is never both -- [validate_reflect_attr]). *)
+  match reflect_attr_name desc.val_attributes with
+  | Some lean_name -> Some (lean_name, arity desc.val_type 0)
   | None ->
-    if has_total_attr desc.val_attributes
-    then (
-      let rec arity ty acc =
-        match Types.get_desc (Ctype.vox_expand_head env ty) with
-        | Tarrow (_, _, ret, _) -> arity ret (acc + 1)
-        | _ -> acc
-      in
-      Some (Path.last path, arity desc.val_type 0))
-    else None
+    let table =
+      match path with
+      | Path.Pident id -> Hashtbl.find_opt reflected id
+      | _ -> None
+    in
+    (match table with
+     | Some _ -> table
+     | None ->
+       if has_total_attr desc.val_attributes
+       then Some (Path.last path, arity desc.val_type 0)
+       else None)
 ;;
 
 (* The compiler-attached logical meaning of a PRIMITIVE application:
@@ -347,16 +428,22 @@ let rec translate_surface env (e : Parsetree.expression)
         sargs
     in
     (match Env.lookup_value ~use:false ~loc:pexp_loc lid.txt env with
-     | _, ({ val_kind = Val_prim prim; _ } as desc), _ ->
-       prim_pred prim.prim_name ~eq_ok:false ~cmp_ok:false
-         ~proj_ok:(declared_domain_is_unlabeled_pair env desc) ~ia_ok:false
-         args
      | path, desc, _ ->
+       (* Reflect / total_ names win over the primitive fragment (an
+          external may carry a [@@vox.reflect] override); a plain
+          primitive falls through to [prim_pred]. *)
        (match reflected_call_info env path desc with
         | Some (name, arity)
           when List.length args = arity && List.for_all Option.is_some args ->
           Some (Refinement.Pfun (name, List.map Option.get args))
-        | _ -> None)
+        | Some _ -> None
+        | None ->
+          (match desc.val_kind with
+           | Val_prim prim ->
+             prim_pred prim.prim_name ~eq_ok:false ~cmp_ok:false
+               ~proj_ok:(declared_domain_is_unlabeled_pair env desc)
+               ~ia_ok:false args
+           | _ -> None))
      | exception _ -> None)
   | _ -> None
 ;;
