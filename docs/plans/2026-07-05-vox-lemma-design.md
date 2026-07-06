@@ -404,6 +404,35 @@
   Caveats: the program/logic correspondence of a reflected call is
   partial-correctness (a diverging call returns no value) and ideal
   arithmetic (overflow, as everywhere).
+- LEMMAS as functions (`[@@vox.lemma]`): a `total_` function is a MODEL
+  (an equation for grind), so its result may not be refined; the proof
+  vehicle is instead an ORDINARY recursive function whose refined RESULT
+  states a proposition over its parameters.  Such a function is a proof
+  by induction: each recursive call re-instantiates the dependent
+  signature, so its refined result is the induction hypothesis (this
+  already works at CALL sites -- naming the call binds the fact; see
+  demo/lean_spec.ml for the value-property version).  `[@@vox.lemma]`
+  additionally EXPORTS the proposition as an AMBIENT fact: the compiler
+  emits `forall (params), (parameter-contracts) -> Q` (the result
+  refinement `Q`, which must be a proposition over the parameters --
+  `unit{ ... }` -- not a constraint on the return value) as a Lean
+  theorem and registers it with a `grind_pattern` on `Q`'s spec-function
+  applications, so downstream VCs discharge it with NO call to the
+  lemma.  SOUNDNESS is Lean's, not trusted: the theorem is RE-PROVED by
+  `induction`/`fun_induction` + grind, never asserted as an `axiom`.
+  Ordinary recursion is only PARTIALLY correct (a `unit{ false }`
+  self-call verifies its own body -- the recursive call's contract is
+  the induction hypothesis, and divergence makes the postcondition
+  vacuous at every terminating use), so a naive universal export would
+  register a false fact; the re-proof is what closes this -- structural
+  `induction` is well-founded and EXHAUSTIVE over constructors (a
+  partial-match false lemma fails at the missing case), and
+  `fun_induction f` borrows the termination Lean already checked for the
+  reflected `f`, so a false or non-terminating "lemma" has no proof and
+  fails CLOSED.  Parameters sort at int, bool, or a simple variant (the
+  reflected-function fragment); v0 is same-unit (no `.cmi` export yet)
+  and single-trigger.  See mechanics/lean_lemma.ml (proved) and
+  lean_lemma_false_fail.ml / lean_lemma_partial_fail.ml (rejected).
 - Embedded solver blocks: `[%%vox.lean {lean|...|lean}]` puts the
   solver-side text directly in the module, next to the datatypes and
   reflected definitions it is about (blocks are not "preludes":
@@ -935,6 +964,9 @@ the scope rule above.
 - [x] Algebraic data types with refined constructors
 - [x] simple records, native tuples
 - [x] total_ (reflected) functions, cross-module through the .cmi
+- [x] lemmas as functions (`[@@vox.lemma]`): a recursive function whose
+  refined result is a proposition exports it as an ambient grind fact,
+  re-proved by induction (same-unit; .cmi export is future work)
 - [x] embedded [%%vox.lean] blocks and specced .mli signatures
 - [x] quantifiers (forall_/exists_) and implication in predicates
 - [ ] a reconciled story for interior mutability (pcell tokens vs

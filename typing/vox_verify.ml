@@ -223,6 +223,11 @@ let register_poly_head p n =
    them: a definition may call an imported reflected function). *)
 let spec_defs : Vox_reflect.spec_def list ref = ref []
 
+(* [@@vox.lemma] exports: for each lemma, its solver-side name, the
+   rendered Lean [theorem] + [grind_pattern] text, and its source
+   location (for error attribution). *)
+let lemma_defs : (string * string * Location.t) list ref = ref []
+
 (* Embedded solver blocks ([%%vox.lean ...]) of the module (or
    toplevel session) being verified, in source order: text (ending in
    a newline) and the block's location (solver errors inside a block
@@ -282,6 +287,7 @@ let reset () =
   tuple_arities := [];
   poly_heads := [];
   spec_defs := [];
+  lemma_defs := [];
   unknown_counter := 0;
   embedded_blocks := [];
   imported_specs := [];
@@ -3729,6 +3735,7 @@ type block_src =
   | Local_block of Location.t
   | Imported_block of string (* unit name *)
   | Reflected_def of Vox_reflect.spec_def
+  | Lemma of string * Location.t (* an [@@vox.lemma] theorem *)
   | Seal (* the trailing interface seal of a sig-bearing unit *)
 
 let count_lines s = String.fold_left (fun n c -> if c = '\n' then n + 1 else n) 0 s
@@ -4125,6 +4132,203 @@ let lean_spec_def buf (d : Vox_reflect.spec_def) =
     lean_of_pred buf m;
     Buffer.add_string buf
       ").toNat\ndecreasing_by all_goals (first | omega | grind)\n"
+;;
+
+(* [@@vox.lemma]: an ordinary recursive function whose refined result is
+   a PROPOSITION over its parameters is a proof by induction (the
+   recursive call is the induction hypothesis; see NOTES.md).  We EXPORT
+   that proposition as an ambient grind fact: [forall params, contracts
+   -> Q] is emitted as a Lean [theorem], RE-PROVED by structural /
+   functional induction + grind, with a [grind_pattern] so it fires at
+   the spec-function applications it is about.  Soundness is Lean's: a
+   false or non-terminating "lemma" ([unit{ false }] self-calls, a
+   partial match, an untrue proposition) has no proof under any
+   alternative, so the [first] block fails and verification fails closed
+   -- never registering a false universal.  Structural [induction] is
+   well-founded by construction and [fun_induction] borrows the reflected
+   function's Lean-checked termination, so the lemma needs no trust and
+   no metric of its own. *)
+let pred_mentions_bound (p : Refinement.pred) =
+  let open Refinement in
+  let rec go = function
+    | Pbound -> true
+    | Pvar _ | Pglobal _ | Pint _ | Pbool _ -> false
+    | Pconstr (_, _, args) | Pfun (_, args) | Ptuple args -> List.exists go args
+    | Pfield (_, _, a) | Pproj (_, _, a) | Pis (_, _, a) | Pnot a
+    | Pquant (_, _, a) -> go a
+    | Pbinop (_, a, b) | Pand (a, b) | Por (a, b) | Pimp (a, b) -> go a || go b
+  in
+  go p
+;;
+
+(* Outermost spec-function applications of [p] (do not descend into a
+   [Pfun]'s own arguments): the trigger a lemma fact fires on. *)
+let outermost_funs (p : Refinement.pred) =
+  let open Refinement in
+  let acc = ref [] in
+  let rec go = function
+    | Pfun (f, args) -> acc := (f, args) :: !acc
+    | Pbound | Pvar _ | Pglobal _ | Pint _ | Pbool _ -> ()
+    | Pconstr (_, _, args) | Ptuple args -> List.iter go args
+    | Pfield (_, _, a) | Pproj (_, _, a) | Pis (_, _, a) | Pnot a
+    | Pquant (_, _, a) -> go a
+    | Pbinop (_, a, b) | Pand (a, b) | Por (a, b) | Pimp (a, b) ->
+      go a;
+      go b
+  in
+  go p;
+  List.rev !acc
+;;
+
+(* Spec-function applications [f p] of a bare PARAMETER [p]: the
+   [fun_induction] candidates (int-indexed lemmas borrow the reflected
+   function's induction principle). *)
+let funinduction_cands param_ids (p : Refinement.pred) =
+  let open Refinement in
+  let acc = ref [] in
+  let rec go = function
+    | Pfun (f, [ Pvar x ]) when List.exists (Ident.same x) param_ids ->
+      acc := (f, x) :: !acc
+    | Pfun (_, args) | Pconstr (_, _, args) | Ptuple args -> List.iter go args
+    | Pfield (_, _, a) | Pproj (_, _, a) | Pis (_, _, a) | Pnot a
+    | Pquant (_, _, a) -> go a
+    | Pbinop (_, a, b) | Pand (a, b) | Por (a, b) | Pimp (a, b) ->
+      go a;
+      go b
+    | Pbound | Pvar _ | Pglobal _ | Pint _ | Pbool _ -> ()
+  in
+  go p;
+  List.fold_left
+    (fun seen (f, x) ->
+      if List.exists (fun (g, y) -> String.equal f g && Ident.same x y) seen
+      then seen
+      else (f, x) :: seen)
+    []
+    !acc
+  |> List.rev
+;;
+
+let register_lemma env (vb : Typedtree.value_binding) =
+  let loc = vb.vb_loc in
+  let name =
+    match vb.vb_pat.pat_desc with
+    | Tpat_var { id; _ } -> Ident.name id
+    | _ ->
+      Location.raise_errorf ~loc
+        "vox: [@@vox.lemma] requires a binding of a single variable"
+  in
+  List.iter
+    (fun (d : Vox_reflect.spec_def) ->
+      if String.equal d.sd_name name
+      then
+        Location.raise_errorf ~loc
+          "vox: the [@@vox.lemma] %s shares its solver-side name with a \
+           reflected function; rename one of them"
+          name)
+    !spec_defs;
+  List.iter
+    (fun (n, _, _) ->
+      if String.equal n name
+      then
+        Location.raise_errorf ~loc
+          "vox: two [@@vox.lemma]s would share the solver-side name %s; \
+           rename one of them"
+          name)
+    !lemma_defs;
+  let rec walk acc ty =
+    match get_desc (Ctype.vox_expand_head env ty) with
+    | Tarrow ((_, _, _, binder), dom, ret, _) ->
+      let id =
+        match binder with Some b -> b | None -> Ident.create_local "_arg"
+      in
+      (* The parameter's SKELETON sort: strip the [Tpoly] arrow wrapper
+         and any contract refinement (the contract is collected
+         separately, below). *)
+      let rec skel ty =
+        match get_desc (Ctype.vox_expand_head env ty) with
+        | Tpoly (t, []) -> skel t
+        | Trefine (sk, _, _) -> skel sk
+        | _ -> ty
+      in
+      let sort =
+        Vox_reflect.rsort_of_type env ~loc ~what:"each [@@vox.lemma] parameter"
+          (skel dom)
+      in
+      let contract =
+        match param_refinement env dom with
+        | Some pr -> Some (Refinement.subst_bound ~by:(Refinement.Pvar id) pr)
+        | None -> None
+      in
+      walk ((id, sort, contract) :: acc) ret
+    | _ ->
+      let q =
+        match refinement_of_type env ty with
+        | Some pr -> pr
+        | None ->
+          Location.raise_errorf ~loc
+            "vox: a [@@vox.lemma] must state a proposition as its refined \
+             result (e.g. [unit{ ... }])"
+      in
+      List.rev acc, q
+  in
+  let params, q = walk [] vb.vb_expr.exp_type in
+  if params = []
+  then
+    Location.raise_errorf ~loc
+      "vox: a [@@vox.lemma] must take at least one parameter to quantify over";
+  if pred_mentions_bound q
+  then
+    Location.raise_errorf ~loc
+      "vox: a [@@vox.lemma] result must be a proposition over the parameters \
+       ([unit{ ... }]); it must not constrain the return value";
+  List.iter
+    (fun (_, s, c) ->
+      (match s with
+       | Vox_reflect.Rdata dp -> ignore (datatype_sort env dp [])
+       | _ -> ());
+      Option.iter (register_pred_paths env) c)
+    params;
+  register_pred_paths env q;
+  let param_ids = List.map (fun (id, _, _) -> id) params in
+  let buf = Buffer.create 256 in
+  Buffer.add_string buf ("theorem " ^ name);
+  List.iter
+    (fun (id, s, _) ->
+      Buffer.add_string buf
+        (Printf.sprintf " (%s : %s)" (lean_name id) (lean_rsort s)))
+    params;
+  List.iteri
+    (fun i (_, _, c) ->
+      match c with
+      | None -> ()
+      | Some pr ->
+        Buffer.add_string buf (Printf.sprintf " (h%d : " i);
+        lean_of_pred buf pr;
+        Buffer.add_char buf ')')
+    params;
+  Buffer.add_string buf " : ";
+  lean_of_pred buf q;
+  Buffer.add_string buf " := by\n  first\n  | grind\n";
+  List.iter
+    (fun (id, s, _) ->
+      match s with
+      | Vox_reflect.Rdata _ ->
+        Buffer.add_string buf
+          (Printf.sprintf "  | (induction %s <;> grind)\n" (lean_name id))
+      | _ -> ())
+    params;
+  List.iter
+    (fun (f, x) ->
+      Buffer.add_string buf
+        (Printf.sprintf "  | (fun_induction %s %s <;> grind)\n" f (lean_name x)))
+    (funinduction_cands param_ids q);
+  (match outermost_funs q with
+   | (f, args) :: _ ->
+     Buffer.add_string buf ("grind_pattern " ^ name ^ " => ");
+     lean_of_pred buf (Refinement.Pfun (f, args));
+     Buffer.add_char buf '\n'
+   | [] -> ());
+  lemma_defs := !lemma_defs @ [ (name, Buffer.contents buf, loc) ]
 ;;
 
 (* The .cmi spec export of a unit: its reflected definitions
@@ -4671,6 +4875,12 @@ let lean_file vcs =
      outside elaboration remains out of scope.)  Emitted
      after the prelude so a prelude may begin with [import], which
      Lean requires to be the first command in the file. *)
+  (* [@@vox.lemma] facts: after the reflected defs and blocks they may
+     mention, before the VC theorems that use them (the grind_pattern
+     makes each fire by E-matching). *)
+  List.iter
+    (fun (nm, text, lemloc) -> seg ~src:(Lemma (nm, lemloc)) text)
+    !lemma_defs;
   seg "set_option maxHeartbeats 400000\n";
   let segments = List.rev !segments in
   let block_ranges, first_line =
@@ -4800,14 +5010,15 @@ let run_lean vcs =
   (* Reflected definitions are checked (termination included) even when
      the module has no VCs of its own: a rejected definition must fail
      its defining module, not lie in wait. *)
-  match vcs, !spec_defs with
-  | [], [] -> ()
+  match vcs, !spec_defs, !lemma_defs with
+  | [], [], [] -> ()
   | _ ->
     let fallback_loc =
-      match vcs, !spec_defs with
-      | vc :: _, _ -> vc.vc_loc
-      | [], d :: _ -> d.Vox_reflect.sd_loc
-      | [], [] -> assert false
+      match vcs, !spec_defs, !lemma_defs with
+      | vc :: _, _, _ -> vc.vc_loc
+      | [], d :: _, _ -> d.Vox_reflect.sd_loc
+      | [], [], (_, _, loc) :: _ -> loc
+      | [], [], [] -> assert false
     in
     let contents, vc_of_line, block_of_line = lean_file vcs in
     let env_prefix =
@@ -4982,6 +5193,16 @@ let run_lean vcs =
                   solver (is it terminating?  int-indexed recursion needs a \
                   [@@vox.decreases] metric)%s"
                  d.Vox_reflect.sd_name
+                 (if String.equal msg "" then "" else "\n(lean: " ^ msg ^ ")")
+             | Some (Lemma (nm, lem_loc), _) ->
+               (* An [@@vox.lemma] theorem Lean could not re-prove: the
+                  proposition is false, the recursion is not
+                  well-founded, or grind could not close the induction. *)
+               let msg = strip_msg !msg in
+               Location.raise_errorf ~loc:lem_loc
+                 "vox: the [@@vox.lemma] %s was not proved (is the \
+                  proposition true, and does the induction terminate?)%s"
+                 nm
                  (if String.equal msg "" then "" else "\n(lean: " ^ msg ^ ")")
              | None ->
                let msg = strip_msg !msg in
@@ -5297,6 +5518,14 @@ let walk_items (str : structure) ctx =
           (fun vb ->
             if Vox_reflect.is_total_binding vb
             then register_spec_def str.str_final_env vb)
+          vbs;
+        List.iter
+          (fun vb ->
+            if List.exists
+                 (fun (a : Parsetree.attribute) ->
+                   String.equal a.attr_name.txt "vox.lemma")
+                 vb.vb_attributes
+            then register_lemma str.str_final_env vb)
           vbs;
         List.iter
           (fun vb -> ctx := walk_expr str.str_final_env !ctx vb.vb_expr)

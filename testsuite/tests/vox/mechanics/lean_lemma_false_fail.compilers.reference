@@ -1,0 +1,8 @@
+File "lean_lemma_false_fail.ml", lines 23-27, characters 0-13:
+23 | let rec bad (l : ilist) : unit{ 1 = 2 } =
+24 |   match l with
+25 |   | Nil -> bad l
+26 |   | Cons (_, t) -> bad t
+27 | [@@vox.lemma]
+Error: vox: the [@vox.lemma] bad was not proved (is the proposition true, and does the induction terminate?)
+(lean: error: `grind` failed)
