@@ -4902,8 +4902,107 @@ let build_sig_module vp =
 ;;
 
 
+(* Does an interface [%%vox.lean] block already declare [name]?  If so
+   that block is authoritative and a [val total_ name] must not also
+   emit an opaque stub (Lean would see the name twice). *)
+let block_declares blocks name =
+  let is_id c =
+    (c >= 'A' && c <= 'Z')
+    || (c >= 'a' && c <= 'z')
+    || (c >= '0' && c <= '9')
+    || c = '_'
+    || c = '\''
+  in
+  let hits text kw =
+    let k = kw ^ " " in
+    let nk = String.length k
+    and nn = String.length name
+    and nt = String.length text in
+    let rec scan i =
+      if i + nk + nn > nt
+      then false
+      else if String.equal (String.sub text i nk) k
+              && String.equal (String.sub text (i + nk) nn) name
+              && (i + nk + nn = nt || not (is_id text.[i + nk + nn]))
+      then true
+      else scan (i + 1)
+    in
+    scan 0
+  in
+  List.exists
+    (fun text -> List.exists (hits text) [ "def"; "opaque"; "abbrev" ])
+    blocks
+;;
+
+(* Name-only export of [total_] spec functions declared in an .mli as
+   [val total_ f : t1 -> ... -> tn -> ret].  The interface has no body,
+   so the client-facing declaration is an uninterpreted [opaque f :
+   sorts]: clients name [f] in refinements and receive facts about it
+   (an exported contract that mentions [f], or a sealed obligation),
+   but cannot UNFOLD it -- the implementation's [total_ f] equations
+   stay private to the implementation, which discharges its own VCs
+   with them and reads this stub only as any client would.  Abstraction
+   is the default: over an interface that hides a type, a client must
+   not compute [f] on that type's constructors.  To EXPOSE the
+   equations instead, write them in an interface block
+   ([@[grind, expose] public def f ... := ...]); then [f] unfolds
+   everywhere (the block wins, and this stub is suppressed). *)
+let total_spec_decls env (sg : Types.signature) ~blocks =
+  List.filter_map
+    (fun (item : Types.signature_item) ->
+      match item with
+      | Sig_value (id, vd, _)
+        when Vox_reflect.has_total_attr vd.val_attributes
+             && not (block_declares blocks (Ident.name id)) ->
+        let loc = vd.val_loc in
+        let rec decompose ty =
+          match get_desc (Ctype.vox_expand_head env ty) with
+          | Tarrow (_, a, r, _) ->
+            let args, ret = decompose r in
+            a :: args, ret
+          | _ -> [], ty
+        in
+        let args, ret = decompose vd.val_type in
+        (* The sort of each argument/result.  A signature wraps a value
+           type in [Tpoly] (and a refinement in [Trefine]); peel both to
+           the head.  int/bool are the ghost scalars; any other datatype
+           sorts at its own [Vox_<path>].  The name is rendered from the
+           PATH (path-keyed resolution is unavailable at .mli-export
+           time), and the datatype itself is DECLARED in the sig module
+           by [register_datatypes_in_blocks], which scans this very
+           block's text for the same [Vox_<path>] token. *)
+        let rec peel t =
+          match get_desc (Ctype.vox_expand_head env t) with
+          | Tpoly (t', _) -> peel t'
+          | Trefine (skel, _, _) -> peel skel
+          | d -> d
+        in
+        let sort what t =
+          match peel t with
+          | Tconstr (p, [], _) when Path.same p Predef.path_int -> "Int"
+          | Tconstr (p, [], _) when Path.same p Predef.path_bool -> "Prop"
+          | Tconstr (p, [], _) -> lean_dt_name p
+          | _ ->
+            Location.raise_errorf ~loc
+              "vox: %s of the [val total_] spec function %s must be \
+               int, bool, or a simple (non-parameterized) datatype"
+              what (Ident.name id)
+        in
+        let arrows =
+          List.map (sort "a parameter") args @ [ sort "the result" ret ]
+        in
+        Some
+          (Printf.sprintf "public opaque %s : %s\n" (Ident.name id)
+             (String.concat " -> " arrows))
+      | _ -> None)
+    sg
+;;
+
 let cmi_export_of_signature (tsg : Typedtree.signature) =
   let blocks = collect_blocks_sig tsg in
+  let blocks =
+    blocks @ total_spec_decls tsg.sig_final_env tsg.sig_type ~blocks
+  in
   match
     cmi_export tsg.sig_final_env tsg.sig_type ~defs:[] ~blocks
       ~sig_module:(blocks <> [])

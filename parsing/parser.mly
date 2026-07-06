@@ -3984,12 +3984,26 @@ value_description:
   ext = ext
   attrs1 = attributes
   poly_flag = poly_flag
+  total = ioption(TOTAL)
   id = mkrhs(val_ident)
   COLON
   ty = possibly_poly(core_type)
   modalities = optional_atat_modalities_expr
   attrs2 = post_item_attributes
     { let attrs = attrs1 @ attrs2 in
+      (* vox: [val total_ f : ...] marks the value as a TOTAL
+         (reflected) spec function, exactly like [let rec total_ f];
+         the marker rides the value description's attributes into the
+         .cmi, so clients name [f] in refinements. *)
+      let attrs =
+        match total with
+        | None -> attrs
+        | Some () ->
+          mk_attr ~loc:(make_loc $loc(total))
+            { txt = "vox.total"; loc = make_loc $loc(total) }
+            (PStr [])
+          :: attrs
+      in
       let loc = make_loc $sloc in
       let docs = symbol_docs $sloc in
       Val.mk id ty ~poly:poly_flag ~attrs ~modalities ~loc ~docs,
