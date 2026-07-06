@@ -31,13 +31,12 @@ let alive (n : int) : int =
 Line 2, characters 29-31:
 2 |   if n < 0 then unreachable_ () else n
                                  ^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
        Goal: false
 Hypotheses:
   n < 0
-Possible counterexample:
+Counterexample (validated -- every hypothesis holds and the goal fails here):
   n = -1
-(lean: error: `grind` failed)
 |}]
 
 (* The direct spelling [let rec f (a : t) (b : t) : r = e] hoists into

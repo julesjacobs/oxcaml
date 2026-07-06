@@ -130,6 +130,13 @@ main { flex: 1; display: flex; min-height: 0; }
 /* VC markers layered over the source. */
 .vc-proved { border-bottom: 2px solid var(--vc-ok-line); }
 .vc-failed { border-bottom: 2px solid var(--vc-fail-line); }
+/* Disproved: a counterexample was validated -- the goal is genuinely
+   false.  A solid red line, like the legacy "failed". */
+.vc-disproved { border-bottom: 2px solid var(--vc-fail-line); }
+/* Unproved: automation gave up but found no counterexample; the goal
+   MAY still hold.  A wavy amber line -- not the confident red of a
+   disproof, not the grey of "not checked". */
+.vc-unproved { border-bottom: 2px wavy var(--warn); }
 .vc-unknown { border-bottom: 2px dotted var(--muted); }
 /* Assumed (borrow/slice framing): trusted by construction, never solved.
    A dashed amber line reads as "taken on trust", distinct from the dotted
@@ -184,6 +191,8 @@ main { flex: 1; display: flex; min-height: 0; }
 }
 .badge-proved { background: var(--badge-ok-bg); color: var(--ok); }
 .badge-failed { background: var(--badge-fail-bg); color: var(--fail); }
+.badge-disproved { background: var(--badge-fail-bg); color: var(--fail); }
+.badge-unproved { background: var(--badge-trusted-bg); color: var(--warn); }
 .badge-unknown { background: var(--badge-unknown-bg); color: var(--muted); }
 .badge-trusted { background: var(--badge-trusted-bg); color: var(--warn); }
 .placeholder { color: var(--muted); }

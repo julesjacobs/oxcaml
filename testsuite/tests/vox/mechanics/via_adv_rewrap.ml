@@ -45,7 +45,7 @@ let direct : (s : set) -> set =
 Line 2, characters 45-66:
 2 |   fun s -> let refine_ t0 = s in ignore t0; (Node (Leaf, -1, Leaf) : set)
                                                  ^^^^^^^^^^^^^^^^^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: bst (Node (Leaf, -1, Leaf))
 Hypotheses:
   bst t0
@@ -62,7 +62,7 @@ val bad_tree : unit -> tree = <fun>
 Line 3, characters 45-56:
 3 |   fun s -> let refine_ t0 = s in ignore t0; (bad_tree () : set)
                                                  ^^^^^^^^^^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: bst *unknown4*
 Hypotheses:
   bst t0
@@ -81,7 +81,7 @@ let via_ref : (s : set) -> set =
 Line 6, characters 5-7:
 6 |     (!r : set)
          ^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
        Goal: bst *unknown7*
 Hypotheses:
   bst t0

@@ -88,6 +88,30 @@ Possible counterexample:
 (lean: error: `grind` failed)
 """
 
+# --- new verdict fixtures (mechanics/lean_disproof.ml) --------------------
+
+ERROR_DISPROVED = """\
+Line 1, characters 57-64:
+1 | let under_hyp (x : {v:int | v >= 0}) : {w:int | w >= 0} = refine_ (x - 1)
+                                                             ^^^^^^^
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
+       Goal: (x - 1) >= 0
+Hypotheses:
+  x >= 0
+Counterexample (validated -- every hypothesis holds and the goal fails here):
+  x = 0
+"""
+
+ERROR_UNPROVED = """\
+Line 1, characters 44-51:
+1 | let nonlinear_true (x : int) : {v:int | v >= 0} = refine_ (x * x)
+                                            ^^^^^^^
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
+       Goal: (x * x) >= 0
+Hypotheses: <none>
+(lean: error: `grind` failed)
+"""
+
 
 class TestParseLoc(unittest.TestCase):
     def test_single(self):
@@ -126,13 +150,11 @@ class TestScopeAndAnnot(unittest.TestCase):
         self.assertEqual(
             vcs[0]["scope"],
             [
-                {"name": "l", "ocaml": "ilist", "lean": "Vox_X_ilist",
-                 "span": None},
+                {"name": "l", "ocaml": "ilist", "lean": "Vox_X_ilist", "span": None},
                 {"name": "i", "ocaml": "int", "lean": "Int", "span": None},
                 # a labeled-arrow type contains " : "-ish text; the name
                 # still splits off the FIRST " : ".
-                {"name": "f", "ocaml": "x:int -> int", "lean": "VoxU",
-                 "span": None},
+                {"name": "f", "ocaml": "x:int -> int", "lean": "VoxU", "span": None},
             ],
         )
 
@@ -433,6 +455,34 @@ class TestParseError(unittest.TestCase):
         vc_index._attach_failure(vcs, err)
         self.assertEqual(vcs[0]["status"], "failed")
         self.assertEqual(vcs[0]["counterexample"], ["n = 0"])
+
+    def test_disproved_verdict(self):
+        err = vc_index.parse_error(ERROR_DISPROVED)
+        assert err is not None
+        self.assertEqual(err["verdict"], "disproved")
+        self.assertEqual(err["goal"], "(x - 1) >= 0")
+        self.assertEqual(err["hypotheses"], ["x >= 0"])
+        # the validated counterexample is parsed like the legacy one
+        self.assertEqual(err["counterexample"], ["x = 0"])
+        vcs = vc_index.parse_dump(
+            "Line 1, characters 57-64: vox VC:\n"
+            "  goal: (x - 1) >= 0\n  hypotheses:\n  x >= 0\n"
+        )
+        vc_index._attach_failure(vcs, err)
+        self.assertEqual(vcs[0]["status"], "disproved")
+
+    def test_unproved_verdict(self):
+        err = vc_index.parse_error(ERROR_UNPROVED)
+        assert err is not None
+        self.assertEqual(err["verdict"], "unproved")
+        self.assertEqual(err["goal"], "(x * x) >= 0")
+        # automation gave up: NO counterexample is shown
+        self.assertNotIn("counterexample", err)
+        vcs = vc_index.parse_dump(
+            "Line 1, characters 44-51: vox VC:\n  goal: (x * x) >= 0\n"
+        )
+        vc_index._attach_failure(vcs, err)
+        self.assertEqual(vcs[0]["status"], "unproved")
 
 
 # --- end-to-end (skipped unless a built compiler is available) ------------
