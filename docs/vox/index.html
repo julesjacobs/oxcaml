@@ -263,7 +263,7 @@ Error: vox: verification failed (lean).
        Goal: false
 Hypotheses:
   l = Nil
-  (0 &lt;= i) &amp;&amp; (i &lt;= (len l))
+  0 &lt;= i &amp;&amp; i &lt;= len l
 Possible counterexample:
   i = 0
   len l = 0
@@ -298,8 +298,7 @@ checks:</p>
 let nth_checked (l : ilist) (i : int) : int = nth l (assume_ i)</code></pre>
 <p>A violated assumption raises, with the predicate and the
 location:</p>
-<pre class="out"><code>Exception:
-Failure "vox: assume_ check failed at :1:61: (0 &lt;= _) &amp;&amp; (_ &lt; (len l))".</code></pre>
+<pre class="out"><code>Exception: Failure "vox: assume_ check failed at :1:61: 0 &lt;= _ &amp;&amp; _ &lt; len l".</code></pre>
 <p>The same mechanism turns a property that is stated but not proved
 into an executable oracle: reflected functions are ordinary OCaml, so
 the specification can simply run, and each call checks the property.

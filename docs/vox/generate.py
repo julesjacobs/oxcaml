@@ -255,8 +255,10 @@ def main():
     assume = read('demo/lean_assume.ml')
     snippets['@ASSUME_INLINE@'] = slice_between(
         assume, r'^\(\* Inline, at the boundary', r'nth l \(assume_ i\)')
+    # The minimal-paren printer let the exception message fit on one
+    # line, so the Failure text may share the Exception: line.
     snippets['@ASSUME_FAIL_OUT@'] = slice_between(
-        assume, r'^Exception:', r'^Failure "vox: assume_ check')
+        assume, r'^Exception:', r'Failure "vox: assume_ check')
     snippets['@ASSUME_LEMMA@'] = (
         slice_between(assume, r'^let rec total_ rev',
                       r'append \(rev t\) \(Cons \(h, Nil\)\)')
