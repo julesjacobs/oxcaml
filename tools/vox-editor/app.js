@@ -249,9 +249,14 @@ function renderPane() {
     const rng = { from: { line: at.start.line, ch: at.start.col },
                   to: { line: at.end.line, ch: at.end.col } };
     let snippet = cm.getRange(rng.from, rng.to);
-    const om = /^\(?\s*Obj\.magic\s+([^)]*)\)?$/.exec(snippet || "");
-    if (om) snippet = om[1].trim();
-    if (/^\(?\s*Obj\.magic\s*\)?$/.test(snippet || "")) snippet = "";
+    // Peel any chain of Obj.magic* coercion heads; if one still
+    // remains (unparseable nesting), suppress the line entirely.
+    for (let guard = 0; guard < 4; guard += 1) {
+      const om = /^\(?\s*Obj\.magic\w*\s+(.*?)\)?\s*$/.exec(snippet || "");
+      if (!om) break;
+      snippet = om[1].trim();
+    }
+    if (/Obj\.magic/.test(snippet || "")) snippet = "";
     // Skip when it just repeats a context row (x : int over x : int).
     const dup =
       r && r.scope &&
@@ -434,20 +439,30 @@ function renderState(pos) {
   return h || null;
 }
 
+// Static theorem text carries solver sort spellings verbatim; keep the
+// "no raw internal names" invariant at the display boundary.
+function leanText(t) {
+  return String(t)
+    .replace(/\bVoxU\b/g, "opaque")
+    .replace(/\bVox_[A-Za-z0-9]+_([A-Za-z0-9_]+)\b/g, "$1")
+    .replace(/\bVox_unit\b/g, "unit");
+}
+
 function renderTheorem(r) {
   // Static block theorems come from the Lean bridge, not the VC dumper, so
   // they carry no provenance spans -- rendered plain, no hover. Each mode
   // matches its VC layout: compact = goal first, no turnstile; full =
   // hypotheses above, the goal behind a turnstile.
   let h = "<h3>theorem " + esc(r.name) + "</h3>";
+  const hyps = (r.hypotheses || []).map(leanText);
   if (compact) {
     h += "<h3>goal</h3>";
-    h += '<div class="goal">' + tok(r.goal, true) + "</div>";
-    if (r.hypotheses && r.hypotheses.length) h += renderHyps(r.hypotheses);
+    h += '<div class="goal">' + tok(leanText(r.goal), true) + "</div>";
+    if (hyps.length) h += renderHyps(hyps);
   } else {
-    h += renderHyps(r.hypotheses);
+    h += renderHyps(hyps);
     h += "<h3>goal</h3>";
-    h += '<div class="goal turnstile">' + tok(r.goal, true) + "</div>";
+    h += '<div class="goal turnstile">' + tok(leanText(r.goal), true) + "</div>";
   }
   return h;
 }

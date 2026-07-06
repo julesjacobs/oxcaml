@@ -269,7 +269,7 @@ html:not([data-theme="light"]) .cm-quote   { color: #9ece6a; }
 /* Dark palette (Tokyo-night-adjacent, matching the OCaml classes above). */
 html:not([data-theme="light"]) .cm-vox-refine-delim { color: #4c9be8; }
 html:not([data-theme="light"]) .cm-vox-hole {
-  color: #f7768e; background: rgba(247, 118, 142, 0.16);
+  color: #4c9be8; background: rgba(76, 155, 232, 0.16);
 }
 html:not([data-theme="light"]) .cm-vox-quant { color: #9d7cd8; }
 html:not([data-theme="light"]) .cm-vox-marker { color: #e0af68; }
@@ -288,7 +288,7 @@ html:not([data-theme="light"]) .cm-vox-lean-op { color: #89ddff; }
    OCaml classes fall back to CodeMirror's own light defaults). */
 html[data-theme="light"] .cm-vox-refine-delim { color: #0b5fbf; }
 html[data-theme="light"] .cm-vox-hole {
-  color: #c0334d; background: rgba(192, 51, 77, 0.1);
+  color: #0b5fbf; background: rgba(11, 95, 191, 0.1);
 }
 html[data-theme="light"] .cm-vox-quant { color: #8250df; }
 html[data-theme="light"] .cm-vox-marker { color: #9a6700; }
