@@ -93,6 +93,9 @@ def build_check_response(
         # CodeMirror's 0-based lines at the single point of use.
         region["goal_span"] = vc.get("goal_span")
         region["hyp_spans"] = vc.get("hyp_spans", [])
+        # The VC's variables with OxCaml type + Lean sort (the pane's
+        # context section); empty under an old compiler.
+        region["scope"] = vc.get("scope", [])
         if "counterexample" in vc:
             region["counterexample"] = vc["counterexample"]
         if "lean_msg" in vc:
@@ -127,12 +130,23 @@ def build_check_response(
         gen = lean_bridge.capture_generated(path, ocamlc, lean, cwd=scratch)
         if gen is not None:
             generated = lean_bridge.to_self_contained(gen)
+    # Expression types from -annot, for type-at-cursor: converted to the
+    # client's 0-based lines here (cols are already 0-based).
+    types = [
+        {
+            "start": _loc0(cast(Dict[str, int], t["start"])),
+            "end": _loc0(cast(Dict[str, int], t["end"])),
+            "type": t["type"],
+        }
+        for t in cast(List[Dict[str, Any]], index.get("types", []))
+    ]
     return {
         "revision": revision,
         "ok": index["ok"],
         "regions": regions,
         "errors": [_error0(e) for e in cast(List[Dict[str, object]], index["errors"])],
         "generated_lean": generated,
+        "types": types,
     }
 
 

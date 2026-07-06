@@ -232,3 +232,26 @@ html:not([data-theme="light"]) .cm-builtin { color: #ff9e64; }
 html:not([data-theme="light"]) .cm-variable-3,
 html:not([data-theme="light"]) .cm-type    { color: #2ac3de; }
 html:not([data-theme="light"]) .cm-quote   { color: #9ece6a; }
+
+/* Proof-state pane: Lean-style context rows, turnstile goal, and the
+   type-at-cursor line. The Lean sort sits right-aligned and dimmed so
+   the OxCaml view stays primary. */
+.ctx {
+  background: var(--hyp-bg);
+  border-left: 2px solid var(--border);
+  padding: .2rem .5rem;
+  margin: .15rem 0;
+  display: flex;
+  gap: .3rem;
+}
+.ctx-name { color: var(--accent); font-weight: 600; }
+.ctx-lean { margin-left: auto; color: var(--muted); }
+.ctx-lean::before { content: "~ "; }
+.turnstile::before { content: "⊢ "; color: var(--accent); font-weight: 700; }
+.cursor-type {
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: .3rem;
+  margin-bottom: .4rem;
+}
+.ctx.prov:hover { border-left-color: var(--accent); }

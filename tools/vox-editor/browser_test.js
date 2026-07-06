@@ -161,6 +161,82 @@ async function main() {
     );
     console.log("ok - VC pane shows a goal");
 
+    // Proof-state extras: the pane shows the VC's variables with their
+    // OxCaml type and Lean sort (context rows), the goal behind a
+    // turnstile, and the type of the expression under the cursor.
+    const state = await page.evaluate(() => {
+      const ctx = Array.from(document.querySelectorAll("#pane-body .ctx")).map(
+        (e) => e.textContent
+      );
+      return {
+        ctx,
+        turnstile: !!document.querySelector("#pane-body .turnstile"),
+        cursorType: (document.querySelector("#pane-body .cursor-type") || {})
+          .textContent || null,
+      };
+    });
+    assert.ok(state.ctx.length > 0, "context rows present");
+    assert.ok(
+      state.ctx.some((t) => /: *(int|ilist)/.test(t)),
+      "a context row shows an OxCaml type: " + JSON.stringify(state.ctx)
+    );
+    // The "~" prefix is CSS ::before content, invisible to textContent;
+    // match the sort name itself.
+    assert.ok(
+      state.ctx.some((t) => /(Int$|Vox_)/.test(t)),
+      "a context row shows a Lean sort: " + JSON.stringify(state.ctx)
+    );
+    assert.ok(state.turnstile, "goal renders behind a turnstile");
+    // -annot covers EXPRESSIONS, so the type-at-cursor line needs the
+    // cursor on one (the VC start above sits on a type annotation).
+    const cursorType = await page.evaluate(() => {
+      const cm = window.__vox.cm;
+      const idx = cm.getValue().indexOf("nth t (i - 1)");
+      cm.setCursor(cm.posFromIndex(idx + 1)); // inside `nth`
+      window.__vox.renderPane();
+      const el = document.querySelector("#pane-body .cursor-type");
+      return el
+        ? el.textContent
+        : "null (types=" + window.__vox.getTypes().length + ", pos=" +
+          JSON.stringify(cm.getCursor()) + ")";
+    });
+    assert.ok(
+      cursorType && /:/.test(cursorType),
+      "type-at-cursor line present: " + cursorType
+    );
+    console.log(
+      "ok - proof state: context + sorts + turnstile; cursor type: " +
+        JSON.stringify(cursorType)
+    );
+
+    // Context rows hover like hypotheses: highlighting the BINDER.
+    const ctxHover = await page.evaluate(() => {
+      const row = document.querySelector("#pane-body .ctx.prov");
+      if (!row) return { present: false };
+      row.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+      const marks = window.__vox.cm
+        .getAllMarks()
+        .filter((m) => m.className === "vox-prov-hl");
+      const painted = marks.length === 1
+        ? window.__vox.cm.getRange(marks[0].find().from, marks[0].find().to)
+        : null;
+      row.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true }));
+      const cleared =
+        window.__vox.cm.getAllMarks().filter((m) => m.className === "vox-prov-hl")
+          .length === 0;
+      return { present: true, painted, cleared,
+               name: row.querySelector(".ctx-name").textContent };
+    });
+    assert.ok(ctxHover.present, "a hoverable context row exists");
+    assert.strictEqual(
+      ctxHover.painted,
+      ctxHover.name.replace(/#\d+$/, "").replace(/@\d+$/, ""),
+      "hovering the row highlights the binder: " + JSON.stringify(ctxHover)
+    );
+    assert.ok(ctxHover.cleared, "context hover clears on mouse-out");
+    console.log("ok - context row hover highlights the binder:",
+      JSON.stringify(ctxHover.painted));
+
     // Provenance hover: pick a VC that carries spans (preferring one that
     // ALSO has a span-less hypothesis), open it, and assert that hovering a
     // spanned row paints the source span and mouse-out clears it, while the
@@ -201,9 +277,11 @@ async function main() {
       (p) => window.__vox.cm.setCursor({ line: p.start.line, ch: p.start.col }),
       prov
     );
-    // One hover-sensitive row per span (goal + spanned hyps); no more.
+    // One hover-sensitive goal/hyp row per span (context rows carry
+    // their own binder spans and are counted separately).
     await waitFor(
-      async () => (await page.$$(".prov")).length === prov.nSpanned,
+      async () =>
+        (await page.$$(".hyp.prov, .goal.prov")).length === prov.nSpanned,
       5000,
       "one .prov row per span"
     );
@@ -231,7 +309,9 @@ async function main() {
 
     // Hover the first spanned row (the goal): a single mark appears over the
     // exact source span, and its text matches getRange of markFromSpan.
-    await page.$eval(".prov", (el) =>
+    // Lean-style layout puts the goal row last; hover it specifically
+    // and compare against the goal's own span.
+    await page.$eval(".goal.prov", (el) =>
       el.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }))
     );
     const marked = await page.evaluate(() => {
@@ -267,7 +347,7 @@ async function main() {
     console.log("ok - hover paints the source span:", JSON.stringify(marked.text));
 
     // Mouse-out clears it.
-    await page.$eval(".prov", (el) =>
+    await page.$eval(".goal.prov", (el) =>
       el.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true }))
     );
     const after = await page.evaluate(

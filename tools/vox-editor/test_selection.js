@@ -309,6 +309,29 @@ check("singleFlight runs sequential fires individually", async () => {
   assert.strictEqual(runs, 3);
 });
 
+// -- typeAtPos: innermost -annot range at the cursor ---------------------
+
+const TYPES = [
+  { start: { line: 2, col: 0 }, end: { line: 2, col: 20 }, type: "int" },
+  { start: { line: 2, col: 4 }, end: { line: 2, col: 9 }, type: "ilist" },
+  { start: { line: 2, col: 4 }, end: { line: 2, col: 6 }, type: "int -> ilist" },
+];
+
+check("typeAtPos picks the innermost containing range", () => {
+  const t = S.typeAtPos(TYPES, { line: 2, col: 5 });
+  assert.strictEqual(t.type, "int -> ilist");
+});
+
+check("typeAtPos falls back to a wider range off the inner one", () => {
+  const t = S.typeAtPos(TYPES, { line: 2, col: 15 });
+  assert.strictEqual(t.type, "int");
+});
+
+check("typeAtPos returns null outside all ranges", () => {
+  assert.strictEqual(S.typeAtPos(TYPES, { line: 9, col: 0 }), null);
+  assert.strictEqual(S.typeAtPos(null, { line: 2, col: 5 }), null);
+});
+
 Promise.all(pending).then(() => {
   console.log("\n" + passed + " tests passed");
 });

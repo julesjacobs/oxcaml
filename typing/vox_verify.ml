@@ -137,6 +137,17 @@ let toplevel_active = ref false
 
 let name_sorts : (Ident.t, dsort) Hashtbl.t = Hashtbl.create 64
 
+(* Source-level type of each recorded name, formatted -- populated only
+   under the provenance dump flag, where the editor shows a VC's
+   variables with their OxCaml type next to their solver sort. *)
+let name_types : (Ident.t, string) Hashtbl.t = Hashtbl.create 64
+
+(* Where each pattern-bound name was BOUND (the variable in the
+   pattern), for the editor's hover-the-context-row highlight.
+   Populated at [extend_pat] under the provenance flag; names minted
+   elsewhere (synthetics, versions) simply have no entry. *)
+let name_locs : (Ident.t, Location.t) Hashtbl.t = Hashtbl.create 64
+
 (* Fresh unknowns minted by the pass itself; always "in scope".
    Numbered so distinct unknowns are distinguishable in diagnostics. *)
 let synthetic_names : (Ident.t, unit) Hashtbl.t = Hashtbl.create 16
@@ -146,6 +157,7 @@ let unknown_counter = ref 0
    path, with the import's .cmi refinement as a global fact (see
    [register_global]). *)
 let globals : (string, Path.t * dsort) Hashtbl.t = Hashtbl.create 16
+let global_types : (string, string) Hashtbl.t = Hashtbl.create 16
 let global_facts : Refinement.pred list ref = ref []
 
 (* The solver-side declaration of a "simple" type: a variant becomes a free
@@ -258,6 +270,8 @@ let global_snames : (string, string) Hashtbl.t = Hashtbl.create 16
 let reset () =
   vcs := [];
   Hashtbl.reset name_sorts;
+  Hashtbl.reset name_types;
+  Hashtbl.reset name_locs;
   Hashtbl.reset synthetic_names;
   Hashtbl.reset mut_versions;
   Hashtbl.reset mut_counts;
@@ -272,6 +286,7 @@ let reset () =
   embedded_blocks := [];
   imported_specs := [];
   Hashtbl.reset globals;
+  Hashtbl.reset global_types;
   Hashtbl.reset global_snames;
   global_facts := []
 ;;
@@ -745,7 +760,32 @@ and dsort_of_type ?(visited = []) ?(params = []) env ty =
     | _ -> S_other)
 ;;
 
-let record_name env id ty = Hashtbl.replace name_sorts id (dsort_of_type env ty)
+(* One-line rendering of a type for the dump's scope section (the
+   parse there is line-based, so Format's margin breaks must go). *)
+let type_one_line ty =
+  String.concat " "
+    (List.filter
+       (fun s -> s <> "")
+       (String.split_on_char '\n' (Format.asprintf "%a" Printtyp.type_expr ty)
+        |> List.map String.trim))
+;;
+
+let record_name env id ty =
+  Hashtbl.replace name_sorts id (dsort_of_type env ty);
+  if !Clflags.vox_dump_vc_provenance
+  then begin
+    (* The context display strips a TOP-level refinement: it has
+       already become a logical hypothesis, so the row shows the
+       skeleton (arrow contracts inside the type are kept -- they are
+       not hypotheses). *)
+    let display_ty =
+      match Types.get_desc (Ctype.vox_expand_head env ty) with
+      | Trefine (skel, _, _) -> skel
+      | _ -> ty
+    in
+    Hashtbl.replace name_types id (type_one_line display_ty)
+  end
+;;
 
 (* Register the datatypes of any constructor application in [p].  Called
    wherever a predicate enters the fact/goal stream; a path that fails to
@@ -1268,6 +1308,8 @@ let rec register_global env (p : Path.t) =
            sname
        | _ -> Hashtbl.replace global_snames sname key);
       Hashtbl.replace globals key (p, dsort_of_type env vd.val_type);
+      if !Clflags.vox_dump_vc_provenance
+      then Hashtbl.replace global_types key (type_one_line vd.val_type);
       (* Both the written refinement and the type's declared INVARIANTS
          attach at the path: [val zero : nat] carries the invariant
          exactly as [val zero : int{ _ >= 0 }] carries its
@@ -2388,7 +2430,9 @@ let extend_pat
   fun ?(toplevel = false) ?scrut ?(scrut_name = None) env ctx pat ->
   let bound = pat_bound_idents pat in
   List.iter
-    (fun (id, _, ty, _, _) ->
+    (fun (id, (sloc : string Location.loc), ty, _, _) ->
+      if !Clflags.vox_dump_vc_provenance
+      then Hashtbl.replace name_locs id sloc.loc;
       check_binder_escape ~toplevel ctx ~extra_scope:bound pat id ty)
     (pat_bound_idents_full pat);
   let unpack =
@@ -5015,11 +5059,85 @@ let prov_suffix = function
   | _ -> ""
 ;;
 
+(* The VC's variables and mentioned globals with their source type and
+   solver sort, one per line as "name : TYPE  ~>  SORT" -- the editor's
+   context display.  Names come from the SAME display function the
+   predicates print with, so the rows line up with the hypotheses.
+   Emitted only under the provenance flag; plain [-dump-vc] output is
+   unchanged. *)
+let scope_entries vc =
+  if not !Clflags.vox_dump_vc_provenance
+  then []
+  else begin
+    let display = vc_display_fun vc in
+    let seen = Hashtbl.create 8 in
+    let vars =
+      List.filter
+        (fun id ->
+          let u = Ident.unique_name id in
+          if Hashtbl.mem seen u
+          then false
+          else (
+            Hashtbl.add seen u ();
+            true))
+        (free_vars_of_vc vc)
+    in
+    let var_entry id =
+      let oty =
+        match Hashtbl.find_opt name_types id with
+        | Some t -> t
+        | None -> "_"
+      in
+      let sort =
+        match Hashtbl.find_opt name_sorts id with
+        | Some ds -> lean_sort ds
+        | None -> "VoxU"
+      in
+      Printf.sprintf
+        "%s : %s  ~>  %s%s"
+        (display id)
+        oty
+        sort
+        (prov_suffix (Hashtbl.find_opt name_locs id))
+    in
+    let gseen = Hashtbl.create 4 in
+    let gpaths =
+      List.filter
+        (fun gp ->
+          let key = path_uname gp in
+          if Hashtbl.mem gseen key
+          then false
+          else (
+            Hashtbl.add gseen key ();
+            true))
+        (List.concat_map
+           Refinement.free_globals
+           (vc.vc_goal :: vc.vc_facts))
+    in
+    let g_entry gp =
+      let key = path_uname gp in
+      let oty =
+        match Hashtbl.find_opt global_types key with
+        | Some t -> t
+        | None -> "_"
+      in
+      let sort =
+        match Hashtbl.find_opt globals key with
+        | Some (_, ds) -> lean_sort ds
+        | None -> "VoxU"
+      in
+      Printf.sprintf "%s : %s  ~>  %s" (Path.name gp) oty sort
+    in
+    List.map var_entry vars @ List.map g_entry gpaths
+  end
+;;
+
 let dump_vc ppf vc =
   with_vc_display vc @@ fun () ->
+  let scope = scope_entries vc in
   Format.fprintf
     ppf
-    "@[<v 2>%a: vox VC%s:@ goal: %a%s@ hypotheses:%t@]@."
+    "@[<v 2>%a: vox VC%s:@ goal: %a%s@ hypotheses:%t%t@]@."
     Location.print_loc
     vc.vc_loc
     (match vc.vc_kind with
@@ -5037,6 +5155,12 @@ let dump_vc ppf vc =
           (fun f p -> Format.fprintf ppf "@ %a%s" print_pred f (prov_suffix p))
           vc.vc_facts
           vc.vc_fact_provs)
+    (fun ppf ->
+      if scope <> []
+      then begin
+        Format.fprintf ppf "@ scope:";
+        List.iter (fun e -> Format.fprintf ppf "@ %s" e) scope
+      end)
 ;;
 
 let discharge () =

@@ -24,6 +24,7 @@ Locations use the compiler's own convention verbatim: ``line`` is
 """
 
 import json
+import os
 import re
 import subprocess
 from typing import Dict, List, Optional, Tuple
@@ -100,6 +101,25 @@ def _kind_from_suffix(suffix: Optional[str]) -> str:
     return "prove"
 
 
+# A scope row: "name : OCAML TYPE  ~>  LEAN SORT".  The OCaml type can
+# itself contain " : " (labeled arrows), so the name is split on the
+# FIRST " : " and the sort on the LAST "  ~>  ".
+def parse_scope_line(line: str) -> Optional[Dict[str, object]]:
+    line, span = split_span_suffix(line)
+    if "  ~>  " not in line or " : " not in line:
+        return None
+    body, _, sort = line.rpartition("  ~>  ")
+    name, _, otype = body.partition(" : ")
+    if not name or not sort:
+        return None
+    return {
+        "name": name.strip(),
+        "ocaml": otype.strip(),
+        "lean": sort.strip(),
+        "span": span,
+    }
+
+
 def parse_dump(text: str) -> List[Dict[str, object]]:
     """Parse ``-dump-vc`` output into a list of VC dicts.
 
@@ -146,6 +166,9 @@ def parse_dump(text: str) -> List[Dict[str, object]]:
         # span, or None when the compiler synthesized it with no meaningful
         # span (or under plain -dump-vc, where there are no suffixes).
         hyp_spans: List[Span] = []
+        # The VC's variables: {name, ocaml, lean} per entry, from the dump's
+        # "scope:" section (provenance flag only; empty otherwise).
+        scope: List[Dict[str, object]] = []
         if i < n:
             hyp_line = lines[i].strip()
             rest = hyp_line[len("hypotheses:") :].strip()
@@ -156,14 +179,26 @@ def parse_dump(text: str) -> List[Dict[str, object]]:
                 hyp_spans.append(span)
             if not rest:
                 # Following indented lines are the hypotheses, until the
-                # next VC header or a blank/dedented line.
+                # "scope:" section, the next VC header, or a dedent.
+                in_scope = False
                 while i < n:
                     raw = lines[i]
                     if _VC_TAIL.search(raw) is not None and parse_loc(raw):
                         break
                     if not raw.startswith("  "):
                         break
-                    text, span = split_span_suffix(raw.strip())
+                    stripped = raw.strip()
+                    if stripped == "scope:":
+                        in_scope = True
+                        i += 1
+                        continue
+                    if in_scope:
+                        entry = parse_scope_line(stripped)
+                        if entry is not None:
+                            scope.append(entry)
+                        i += 1
+                        continue
+                    text, span = split_span_suffix(stripped)
                     hypotheses.append(text)
                     hyp_spans.append(span)
                     i += 1
@@ -175,6 +210,7 @@ def parse_dump(text: str) -> List[Dict[str, object]]:
                 "goal_span": goal_span,
                 "hypotheses": hypotheses,
                 "hyp_spans": hyp_spans,
+                "scope": scope,
                 "kind": kind,
                 "status": "unknown",
             }
@@ -325,7 +361,7 @@ def dump_capture(
     global _provenance_supported
     if _provenance_supported is not False:
         code, out = compile_capture(
-            source_path, ocamlc, [_PROVENANCE_FLAG, "-vox-dry-run"], cwd=cwd
+            source_path, ocamlc, [_PROVENANCE_FLAG, "-vox-dry-run", "-annot"], cwd=cwd
         )
         if _flag_rejected(out, _PROVENANCE_FLAG):
             _provenance_supported = False
@@ -335,6 +371,54 @@ def dump_capture(
     return compile_capture(
         source_path, ocamlc, ["-dump-vc", "-vox-dry-run"], cwd=cwd
     )
+
+
+# .annot blocks: a location line ("file" lnum bol cnum, twice) followed
+# by one or more kind( ... ) payloads; we keep the type( ... ) ones.
+# Columns are cnum - bol (0-based); lines are 1-based.
+_ANNOT_LOC = re.compile(
+    r'^"[^"]*" (\d+) (\d+) (\d+) "[^"]*" (\d+) (\d+) (\d+)\s*$'
+)
+
+
+def parse_annot(text: str) -> List[Dict[str, object]]:
+    """Parse ``-annot`` output into [{start, end, type}] (1-based lines,
+    0-based cols -- the same convention as provenance spans)."""
+    out: List[Dict[str, object]] = []
+    lines = text.split("\n")
+    i = 0
+    n = len(lines)
+    loc: Optional[Tuple[Dict[str, int], Dict[str, int]]] = None
+    while i < n:
+        m = _ANNOT_LOC.match(lines[i])
+        if m is not None:
+            l1, b1, c1, l2, b2, c2 = (int(g) for g in m.groups())
+            loc = (
+                {"line": l1, "col": c1 - b1},
+                {"line": l2, "col": c2 - b2},
+            )
+            i += 1
+            continue
+        if lines[i].startswith("type(") and loc is not None:
+            body: List[str] = []
+            i += 1
+            while i < n and lines[i] != ")":
+                body.append(lines[i].strip())
+                i += 1
+            out.append(
+                {"start": loc[0], "end": loc[1], "type": " ".join(body)}
+            )
+        i += 1
+    return out
+
+
+def read_annot(source_path: str) -> List[Dict[str, object]]:
+    annot = os.path.splitext(source_path)[0] + ".annot"
+    try:
+        with open(annot, "r") as fh:
+            return parse_annot(fh.read())
+    except OSError:
+        return []
 
 
 def build_index(
@@ -388,6 +472,7 @@ def build_index(
         "vcs": vcs,
         "errors": errors,
         "ok": ok,
+        "types": read_annot(source_path),
         "raw_dump": dump_out,
         "raw_solve": raw_solve,
     }

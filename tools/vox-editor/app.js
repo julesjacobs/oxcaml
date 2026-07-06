@@ -26,6 +26,8 @@ cm.setValue(SAMPLE);
 
 let regions = [];
 let errors = [];
+// Expression types from -annot (0-based coords), for type-at-cursor.
+let exprTypes = [];
 let revision = 0;
 let applied = -1;
 let marks = [];
@@ -144,6 +146,7 @@ async function check(fast) {
     const fresh = resp.regions || [];
     regions = resp.fast ? Selection.carryVerdicts(fresh, regions) : fresh;
     errors = resp.errors || [];
+    exprTypes = resp.types || [];
     markRegions();
     if (resp.fast) {
       // Elaboration errors need no Lean, so a failing fast pass is
@@ -195,15 +198,30 @@ function renderPane() {
   const r = sel.region;
   hoverSpans = [];
   let html = "";
+  // Type of the expression under the cursor (from -annot), shown above
+  // whatever else the pane displays.
+  const at = Selection.typeAtPos(exprTypes, { line: c.line, col: c.ch });
+  if (at) {
+    const rng = { from: { line: at.start.line, ch: at.start.col },
+                  to: { line: at.end.line, ch: at.end.col } };
+    const snippet = cm.getRange(rng.from, rng.to);
+    if (snippet && snippet.length <= 40 && snippet.indexOf("\n") < 0) {
+      html +=
+        '<div class="cursor-type"><span class="ctx-name">' + esc(snippet) +
+        "</span> : " + esc(at.type) + "</div>";
+    } else {
+      html += '<div class="cursor-type">cursor : ' + esc(at.type) + "</div>";
+    }
+  }
   if (sel.relation === "inside" && r) {
     // The cursor is AT this region: show it.
     modeEl.textContent = sel.mode + " · " + r.kind;
     if (r.kind === "vc") {
-      html = renderVc(r);
+      html += renderVc(r);
     } else if (r.kind === "theorem") {
-      html = renderTheorem(r) + liveButton();
+      html += renderTheorem(r) + liveButton();
     } else if (r.kind === "block") {
-      html = '<p>Inside a <code>[%%vox.lean]</code> block.</p>' + liveButton();
+      html += '<p>Inside a <code>[%%vox.lean]</code> block.</p>' + liveButton();
     }
   } else if (sel.relation === "nearest" && r) {
     // Not at any region — do NOT present the nearest one as if it were
@@ -212,7 +230,7 @@ function renderPane() {
     // Arrow points the way to the nearest region (it may sit below the
     // cursor, not just above).
     const arrow = sel.mode === "below" ? "↓" : "↑";
-    html =
+    html +=
       '<p class="placeholder">No obligation at the cursor.</p>' +
       '<div class="nearest"><button id="jump-btn" class="jump">nearest ' +
       esc(REGION_NOUN[r.kind] || r.kind) +
@@ -221,7 +239,7 @@ function renderPane() {
       "</button></div>";
   } else {
     modeEl.textContent = "no obligation at cursor";
-    html = '<p class="placeholder">No obligation at the cursor.</p>';
+    html += '<p class="placeholder">No obligation at the cursor.</p>';
   }
   html += renderErrors();
   bodyEl.innerHTML = html;
@@ -242,11 +260,35 @@ function badge(status) {
   return '<span class="badge badge-' + s + '">' + s + "</span>";
 }
 
+// A VC renders as a Lean/Rocq-style proof state: the context (each
+// variable with its OxCaml type, solver sort dimmed), the hypotheses,
+// then the goal behind a turnstile. Hover-provenance stays on the
+// hypothesis/goal rows.
 function renderVc(r) {
-  let h = "<h3>goal" + badge(r.status) + "</h3>";
-  const g = Selection.splitSpanSuffix(r.goal);
-  h += provRow("goal", g.text, r.goal_span || g.span);
+  let h = "";
+  if (r.scope && r.scope.length) {
+    h += "<h3>context</h3>";
+    h += r.scope
+      .map((v) => {
+        const inner =
+          '<span class="ctx-name">' + esc(v.name) + "</span> : " +
+          esc(v.ocaml) +
+          '<span class="ctx-lean">' + esc(v.lean) + "</span>";
+        // A row that knows its binder's span gets the same hover
+        // affordance as hypotheses: hovering highlights the binding.
+        if (!v.span) return '<div class="ctx">' + inner + "</div>";
+        const key = hoverSpans.push(v.span) - 1;
+        return (
+          '<div class="ctx prov" data-prov-key="' + key + '">' + inner +
+          "</div>"
+        );
+      })
+      .join("");
+  }
   h += renderHyps(r.hypotheses, r.hyp_spans);
+  h += "<h3>goal" + badge(r.status) + "</h3>";
+  const g = Selection.splitSpanSuffix(r.goal);
+  h += provRow("goal turnstile", g.text, r.goal_span || g.span);
   if (r.counterexample && r.counterexample.length) {
     h += "<h3>counterexample</h3>";
     h += '<div class="cex">' + esc(r.counterexample.join("\n")) + "</div>";
@@ -473,6 +515,7 @@ window.__vox = {
   loadExamples,
   getRegions: () => regions,
   getLastCheckFast: () => lastCheckFast,
+  getTypes: () => exprTypes,
 };
 
 init();

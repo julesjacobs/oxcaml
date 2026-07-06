@@ -108,6 +108,86 @@ class TestParseLoc(unittest.TestCase):
         self.assertIsNone(vc_index.parse_loc("Error: vox: nope"))
 
 
+class TestScopeAndAnnot(unittest.TestCase):
+    def test_scope_section_parsed(self):
+        dump = (
+            'File "x.ml", line 2, characters 4-5: vox VC:\n'
+            "  goal: (0 <= i)  @ 2.4-2.5\n"
+            "  hypotheses:\n"
+            "  l = Nil  @ 1.0-1.3\n"
+            "  scope:\n"
+            "  l : ilist  ~>  Vox_X_ilist\n"
+            "  i : int  ~>  Int\n"
+            "  f : x:int -> int  ~>  VoxU\n"
+        )
+        vcs = vc_index.parse_dump(dump)
+        self.assertEqual(len(vcs), 1)
+        self.assertEqual(vcs[0]["hypotheses"], ["l = Nil"])
+        self.assertEqual(
+            vcs[0]["scope"],
+            [
+                {"name": "l", "ocaml": "ilist", "lean": "Vox_X_ilist",
+                 "span": None},
+                {"name": "i", "ocaml": "int", "lean": "Int", "span": None},
+                # a labeled-arrow type contains " : "-ish text; the name
+                # still splits off the FIRST " : ".
+                {"name": "f", "ocaml": "x:int -> int", "lean": "VoxU",
+                 "span": None},
+            ],
+        )
+
+    def test_scope_row_with_binder_span(self):
+        dump = (
+            'File "x.ml", line 3, characters 2-7: vox VC:\n'
+            "  goal: 0 <= (x + y)  @ 3.2-3.7\n"
+            "  hypotheses:\n"
+            "  0 <= x  @ 1.7-1.8\n"
+            "  scope:\n"
+            "  x : int  ~>  Int  @ 1.7-1.8\n"
+        )
+        vcs = vc_index.parse_dump(dump)
+        self.assertEqual(
+            vcs[0]["scope"],
+            [
+                {
+                    "name": "x",
+                    "ocaml": "int",
+                    "lean": "Int",
+                    "span": {
+                        "start": {"line": 1, "col": 7},
+                        "end": {"line": 1, "col": 8},
+                    },
+                }
+            ],
+        )
+
+    def test_annot_parsed(self):
+        annot = (
+            '"x.ml" 5 46 61 "x.ml" 5 46 64\n'
+            "type(\n"
+            "  ilist -> int\n"
+            ")\n"
+            "ident(\n"
+            '  def len "x.ml" 5 46 46 "x.ml" 0 0 -1\n'
+            ")\n"
+            '"x.ml" 5 46 65 "x.ml" 5 46 66\n'
+            "type(\n"
+            "  ilist\n"
+            ")\n"
+        )
+        types = vc_index.parse_annot(annot)
+        self.assertEqual(len(types), 2)
+        self.assertEqual(
+            types[0],
+            {
+                "start": {"line": 5, "col": 15},
+                "end": {"line": 5, "col": 18},
+                "type": "ilist -> int",
+            },
+        )
+        self.assertEqual(types[1]["type"], "ilist")
+
+
 class TestParseDump(unittest.TestCase):
     def test_two_none(self):
         vcs = vc_index.parse_dump(DUMP_TWO_NONE)
@@ -121,6 +201,7 @@ class TestParseDump(unittest.TestCase):
                 "goal_span": None,
                 "hypotheses": [],
                 "hyp_spans": [],
+                "scope": [],
                 "kind": "prove",
                 "status": "unknown",
             },

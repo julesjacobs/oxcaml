@@ -21,6 +21,8 @@ Line 1, characters 58-59: vox VC:
   goal: x > 0  @ 1.58-1.59
   hypotheses:
   x > 0  @ 1.15-1.16
+  scope:
+  x : int  ~>  Int  @ 1.15-1.16
 val use_param : int{ _ > 0 } -> int{ _ > 0 } = <fun>
 |}]
 
@@ -33,10 +35,14 @@ Line 2, characters 24-25: vox VC:
   goal: x >= 0  @ 2.24-2.25
   hypotheses:
   x > 0  @ 2.5-2.10
+  scope:
+  x : int  ~>  Int  @ 1.12-1.13
 Line 2, characters 39-40: vox VC:
   goal: 0 >= 0  @ 2.39-2.40
   hypotheses:
   not (x > 0)  @ 2.5-2.10
+  scope:
+  x : int  ~>  Int  @ 1.12-1.13
 val branch : int -> int{ _ >= 0 } = <fun>
 |}]
 
@@ -68,6 +74,8 @@ Line 5, characters 9-32: vox VC:
   goal: x >= 0  @ 5.9-5.32
   hypotheses:
   x = 0
+  scope:
+  x : int  ~>  Int
 Line 5, characters 9-32: vox VC:
   goal: x@2 >= 0  @ 5.9-5.32
   hypotheses:
@@ -75,9 +83,16 @@ Line 5, characters 9-32: vox VC:
   i <= n  @ 3.2-5.8
   x@1 >= 0  @ 5.9-5.32
   x@2 = (x@1 + 1)
+  scope:
+  x@2 : int  ~>  Int
+  i : int  ~>  Int
+  n : int  ~>  Int  @ 1.11-1.12
+  x@1 : int  ~>  Int
 Line 6, characters 10-11: vox VC:
   goal: x@1 >= 0  @ 6.10-6.11
   hypotheses:
   x@1 >= 0  @ 5.9-5.32
+  scope:
+  x@1 : int  ~>  Int
 val loopy : int -> int{ _ >= 0 } = <fun>
 |}]
