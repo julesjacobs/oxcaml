@@ -1314,6 +1314,77 @@ let fresh_unknown env (e : expression) =
   Refinement.Pvar id
 ;;
 
+(* RULE 2 -- a call that never returns normally.  By parametricity a
+   TOTAL function whose declared result type is a type variable that
+   occurs in NONE of its argument types cannot produce a value of that
+   type: any such call diverges or raises, so its result refinement is
+   [false] and its continuation is vacuous.  The test runs on the
+   callee's SCHEME (the generalized type as declared, via [Env]) -- the
+   use-site type has already been unified (a sequence LHS forces [unit],
+   an [if] arm the arm type), so it is not the honest source.
+
+   EXTERNALS break parametricity ([Obj.magic : 'a -> 'b = "%identity"]
+   has a result variable in no argument yet RETURNS), so for a primitive
+   the scheme test is IGNORED: it is bottom iff its name is a raising
+   primitive (the primitive IS its semantics, as the reflection table
+   keys on [%addint]).  [raise] is [%raise]; everything built on top
+   ([failwith], [invalid_arg], [exit], a user [let rec loop () : 'a])
+   is an ordinary value the scheme test classifies. *)
+let raising_primitives =
+  [ "%raise"; "%reraise"; "%raise_notrace"; "%raise_with_backtrace" ]
+;;
+
+let scheme_never_returns env scheme args =
+  let rec peel ty doms = function
+    | [] -> Some (ty, doms)
+    | _ :: rest ->
+      (match get_desc (Ctype.vox_expand_head env ty) with
+       | Tarrow (_, dom, ret, _) -> peel ret (dom :: doms) rest
+       | _ -> None)
+  in
+  match peel scheme [] args with
+  | None -> false
+  | Some (res, doms) ->
+    let res = Ctype.vox_expand_head env res in
+    (match get_desc res with
+     | Tvar _ ->
+       let rid = get_id res in
+       not
+         (List.exists
+            (fun dom ->
+              List.exists
+                (fun v -> Int.equal (get_id v) rid)
+                (Ctype.free_variables ~env dom))
+            doms)
+     | _ -> false)
+;;
+
+(* Does this application provably never return normally? *)
+let diverging_apply env funct args =
+  match funct.exp_desc with
+  | Texp_ident { path; _ } ->
+    (match Env.find_value path env with
+     | vd ->
+       let vd = Subst.Lazy.force_value_description vd in
+       (match vd.val_kind with
+        | Val_prim prim -> List.mem prim.Primitive.prim_name raising_primitives
+        | _ -> scheme_never_returns env vd.val_type args)
+     | exception Not_found -> false)
+  | _ -> false
+;;
+
+(* An expression that never returns normally: a diverging application,
+   or a compound all of whose exits diverge (a sequence/let whose tail
+   does, an [if] both of whose branches do). *)
+let rec diverges env (e : expression) : bool =
+  match e.exp_desc with
+  | Texp_apply (funct, args, _, _, _) -> diverging_apply env funct args
+  | Texp_sequence (_, _, e2) -> diverges env e2
+  | Texp_let (_, _, body) -> diverges env body
+  | Texp_ifthenelse (_, e2, Some e3) -> diverges env e2 && diverges env e3
+  | _ -> false
+;;
+
 (* The name a dependent argument was opened at by the type checker:
    [Vox_reflect.translate] is the typed twin of the surface translation
    [vox_open_dependent_arrow] substituted (the surface fragment is a
@@ -1440,6 +1511,13 @@ let rec name_of_expr env (e : expression) : Refinement.pred =
         | Types.Immutable, S_data (_, _) ->
           Refinement.Pfield (path, label.lbl_name, name_of_expr env record)
         | _ -> fresh_unknown env e)
+     | Texp_ifthenelse (_, e2, Some e3)
+       when not (Bool.equal (diverges env e2) (diverges env e3)) ->
+       (* An [if] with a diverging branch denotes, wherever its value is
+          observed, the value of the OTHER branch (control took it, or
+          the value would not exist): [let x = if b then raise E else 0]
+          selfifies to [x = 0]. *)
+       if diverges env e2 then name_of_expr env e3 else name_of_expr env e2
      | _ -> fresh_unknown env e)
 ;;
 
@@ -2325,13 +2403,19 @@ let rec result_refinement env (e : expression) : Refinement.pred option =
   | None ->
     (match e.exp_desc with
      | Texp_apply (funct, args, _, _, _) ->
-       refinement_of_type env (apply_result_type env funct args)
+       if diverging_apply env funct args
+       then Some (Refinement.Pbool false)
+       else refinement_of_type env (apply_result_type env funct args)
      | Texp_let (_, _, body) -> result_refinement env body
      | Texp_sequence (_, _, body) -> result_refinement env body
      | Texp_ifthenelse (_, e2, Some e3) ->
-       (match result_refinement env e2, result_refinement env e3 with
-        | Some p2, Some p3 when Refinement.equal p2 p3 -> Some p2
-        | _ -> None)
+       (match diverges env e2, diverges env e3 with
+        | true, false -> result_refinement env e3
+        | false, true -> result_refinement env e2
+        | _ ->
+          (match result_refinement env e2, result_refinement env e3 with
+           | Some p2, Some p3 when Refinement.equal p2 p3 -> Some p2
+           | _ -> None))
      | _ -> None)
 ;;
 
@@ -2866,6 +2950,24 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
   | Texp_mutvar _ -> ctx
   | Texp_sequence (e1, _, e2) ->
     let ctx1 = walk_expr env ctx e1 in
+    (* Thread e1's result refinement to e2, exactly as [let () = e1 in
+       e2] would (RULE 1): name e1's value and instantiate its result
+       refinement there.  A diverging e1 (Rule 2) contributes [false],
+       so dead code after a mid-body raise is vacuous; a call with a
+       dependent postcondition contributes that postcondition. *)
+    let ctx1 =
+      match result_refinement env e1 with
+      | Some p ->
+        register_pred_paths env p;
+        let n = name_of_expr env e1 in
+        { ctx1 with
+          cfacts =
+            prov (Some e1.exp_loc)
+              (List.filter nontrivial_fact [ Refinement.subst_bound ~by:n p ])
+            @ ctx1.cfacts
+        }
+      | None -> ctx1
+    in
     walk_expr env ctx1 e2
   | Texp_match (scrut, _sort, comp_cases, val_cases, _partial) ->
     let saved_pre = save_versions () in
