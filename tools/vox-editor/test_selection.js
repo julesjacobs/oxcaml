@@ -363,6 +363,46 @@ check("stateAtPos picks the innermost enclosing state", () => {
   assert.strictEqual(S.stateAtPos(STATES, { line: 20, col: 0 }), null);
 });
 
+// -- verdict taxonomy: the three failure DISPLAY families ---------------
+
+check("verdictFamily maps each status to its display family", () => {
+  assert.strictEqual(S.verdictFamily("proved"), "proved");
+  assert.strictEqual(S.verdictFamily("disproved"), "disproved");
+  assert.strictEqual(S.verdictFamily("unproved"), "unproved");
+  // legacy "failed" folds into the dashed-red unproved family
+  assert.strictEqual(S.verdictFamily("failed"), "unproved");
+  assert.strictEqual(S.verdictFamily("trusted"), "trusted");
+  assert.strictEqual(S.verdictFamily("unknown"), "unknown");
+  assert.strictEqual(S.verdictFamily(undefined), "unknown");
+});
+
+const vcr = (status) => ({ kind: "vc", status, goal: "g" });
+
+check("failSummary names disproved separately from unproved", () => {
+  const s = S.failSummary([
+    vcr("disproved"),
+    vcr("proved"),
+    vcr("unproved"),
+    vcr("proved"),
+    { kind: "block" }, // ignored
+  ]);
+  assert.strictEqual(s, "1 disproved / 1 unproved / 2 proved ✗");
+});
+
+check("failSummary omits the disproved clause when there is none", () => {
+  // failed groups into unproved -> 2 unproved
+  const s = S.failSummary([vcr("unproved"), vcr("proved"), vcr("failed")]);
+  assert.strictEqual(s, "2 unproved / 1 proved ✗");
+});
+
+check("failSummary falls back to 'errors' when no VC carries a verdict", () => {
+  assert.strictEqual(
+    S.failSummary([vcr("unknown"), { kind: "block" }]),
+    "errors ✗"
+  );
+  assert.strictEqual(S.failSummary([]), "errors ✗");
+});
+
 Promise.all(pending).then(() => {
   console.log("\n" + passed + " tests passed");
 });

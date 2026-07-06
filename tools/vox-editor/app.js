@@ -93,17 +93,33 @@ function setStatus(cls, text) {
   statusEl.textContent = text;
 }
 
-// A failing full check: when the compiler attributed a per-VC verdict
-// (Bug-2 fix) most obligations may still hold, so summarise "N unproved /
-// M proved" rather than a flat "errors". Falls back to "errors ✗" when no
-// VC carries a proved/failed verdict (a plain compile error, or an old
-// compiler that reports only the first failure).
-function failSummary(regs) {
-  const vcs = (regs || []).filter((r) => r.kind === "vc");
-  const failed = vcs.filter((r) => FAILED_STATUSES.includes(r.status)).length;
-  const proved = vcs.filter((r) => r.status === "proved").length;
-  if (failed + proved === 0) return "errors ✗";
-  return failed + " unproved / " + proved + " proved ✗";
+// The failing-check status text and the verdict taxonomy live in
+// selection.js (node-tested); see Selection.failSummary / verdictFamily.
+
+// The verdict legend in the toolbar: a self-documenting key that appears
+// only while the last full check is FAILING (exactly when the red lines
+// need explaining) and disappears once everything is proved.  Each swatch
+// reuses the vc-* marker classes, so the legend and the source underlines
+// can never drift apart.  Toolbar-level, so compact mode (a pane concern)
+// is untouched.
+function renderLegend(regs, ok) {
+  const el = document.getElementById("legend");
+  if (!el) return;
+  const anyFail =
+    !ok &&
+    (regs || []).some(
+      (r) => r.kind === "vc" && FAILED_STATUSES.includes(r.status)
+    );
+  if (!anyFail) {
+    el.hidden = true;
+    el.innerHTML = "";
+    return;
+  }
+  el.innerHTML =
+    '<span class="leg vc-proved">proved</span>' +
+    '<span class="leg vc-disproved">disproved (counterexample)</span>' +
+    '<span class="leg vc-unproved">unproved (no witness)</span>';
+  el.hidden = false;
 }
 
 function clearMarks() {
@@ -210,8 +226,11 @@ async function check(fast) {
     } else {
       setStatus(
         resp.ok ? "status-ok" : "status-fail",
-        resp.ok ? "verified ✓" : failSummary(regions)
+        resp.ok ? "verified ✓" : Selection.failSummary(regions)
       );
+      // The legend explains the red lines; only the authoritative full
+      // pass carries verdicts, so drive it from here (not the fast pass).
+      renderLegend(regions, resp.ok);
     }
     lastCheckFast = !!resp.fast;
     renderPane();
@@ -344,8 +363,9 @@ const BADGE_HINT = {
   trusted: "assumed by construction (borrow/slice framing), not proved",
 };
 
-// The statuses a failing solve attaches to an obligation.
-const FAILED_STATUSES = ["failed", "disproved", "unproved"];
+// The statuses a failing solve attaches to an obligation (shared with
+// selection.js, which owns the verdict taxonomy).
+const FAILED_STATUSES = Selection.FAIL_STATUSES;
 
 function badge(status) {
   const s = status || "unknown";

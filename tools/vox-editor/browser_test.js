@@ -824,90 +824,154 @@ async function main() {
     console.log("ok - restored: doubling obligation names fib_double, not <arithmetic>");
     await page.evaluate(() => window.__vox.setCompact(false));
 
-    // Visual contract, part 2: a DISPROVED goal (Lean-validated
-    // counterexample) underlines SOLID red -- the SAME red as the dashed
-    // unproved line above, but solid, so the two failure kinds are
-    // distinguishable at a glance -- and surfaces the counterexample.
-    await page.evaluate(() => {
-      const s = document.getElementById("examples");
-      s.value = "counterexample";
-      s.dispatchEvent(new Event("change"));
-    });
-    await waitFor(
+    // Visual contract, part 2: ALL THREE failure-display classes in ONE
+    // file -- a validated-false goal (disproved -> SOLID red, with the
+    // counterexample surfaced), a still-proved goal (proved -> GREEN), and
+    // a goal grind gives up on with no witness (unproved -> DASHED red).
+    // Assert they coexist with the right visuals, the counterexample is
+    // reachable ON the disproved goal, the status bar counts disproofs
+    // apart from unproved, and the legend explains the colours.
+    const TRI_SRC = [
+      "let wrong (n : int{ _ > 0 }) : int{ _ = n + 1 } = refine_ n",
+      "let ok (x : int{ _ > 0 }) : int{ _ >= 0 } = refine_ (x + 1)",
+      "let sq (x : int) : int{ _ >= 0 } = refine_ (x * x)",
+      "",
+    ].join("\n");
+    await page.evaluate((src) => {
+      window.__vox.setCompact(false);
+      window.__vox.cm.setValue(src);
+    }, TRI_SRC);
+    const triStatus = await waitFor(
       async () => {
         const fast = await page.evaluate(() => window.__vox.getLastCheckFast());
-        const t = await page.$eval("#status", (e) => e.textContent);
-        return fast === false && /unproved|errors/.test(t) ? t : false;
+        if (fast !== false) return false;
+        return page.evaluate(() => {
+          const rs = window.__vox.getRegions().filter((r) => r.kind === "vc");
+          const by = (s) => rs.filter((r) => r.status === s).length;
+          if (by("disproved") !== 1 || by("proved") !== 1 || by("unproved") !== 1)
+            return false;
+          return document.getElementById("status").textContent;
+        });
       },
-      60000,
-      "counterexample example fails on the full pass"
+      90000,
+      "tri-class file: disproved + proved + unproved coexist"
     );
-    const dpos = await waitFor(
-      () =>
-        page.evaluate(() => {
-          const r = window.__vox
-            .getRegions()
-            .find((x) => x.kind === "vc" && x.status === "disproved");
-          return r ? { line: r.start.line, col: r.start.col } : false;
-        }),
-      10000,
-      "a disproved VC region"
+    console.log("ok - all three failure-display classes coexist in one file");
+    // Status bar counts disproofs SEPARATELY from unproved (no longer
+    // lumping a genuinely-false goal under the milder "unproved").
+    assert.ok(
+      /1 disproved \/ 1 unproved \/ 1 proved/.test(triStatus),
+      "status bar separates disproved from unproved: " + triStatus
     );
-    await page.evaluate((p) => window.__vox.cm.setCursor(p), dpos);
-    const disprovedMark = await waitFor(
-      () =>
-        page.evaluate(() => {
-          const el = document.querySelector(".vc-disproved");
-          if (!el) return false;
-          const s = getComputedStyle(el);
-          return { style: s.borderBottomStyle, color: s.borderBottomColor };
-        }),
-      5000,
-      "the .vc-disproved underline"
+    console.log("ok - status bar: " + triStatus.trim());
+
+    // The legend appears (only on failure) and shows the three families,
+    // each swatch wearing its own vc-* underline (single source of truth).
+    const legend = await page.evaluate(() => {
+      const el = document.getElementById("legend");
+      if (!el || el.hidden) return false;
+      return Array.from(el.querySelectorAll(".leg")).map((s) => ({
+        text: s.textContent,
+        cls: s.className,
+        style: getComputedStyle(s).borderBottomStyle,
+      }));
+    });
+    assert.ok(legend && legend.length === 3, "legend shows three families: " + JSON.stringify(legend));
+    assert.ok(
+      legend.some((i) => /vc-proved/.test(i.cls) && i.style === "solid"),
+      "legend: proved is solid: " + JSON.stringify(legend)
     );
-    assert.strictEqual(
-      disprovedMark.style,
-      "solid",
-      "disproved underline is solid: " + JSON.stringify(disprovedMark)
+    assert.ok(
+      legend.some(
+        (i) => /vc-disproved/.test(i.cls) && i.style === "solid" && /counterexample/.test(i.text)
+      ),
+      "legend: disproved is solid + names the counterexample: " + JSON.stringify(legend)
     );
-    // Same red as the unproved line, so both read as "failed"...
+    assert.ok(
+      legend.some((i) => /vc-unproved/.test(i.cls) && i.style === "dashed"),
+      "legend: unproved is dashed: " + JSON.stringify(legend)
+    );
+    console.log("ok - legend explains the three families");
+
+    // Per-class underline: cursor onto each VC (renders its line's marker),
+    // read the computed border style + colour.
+    const markStyleFor = async (status) => {
+      const pos = await page.evaluate((s) => {
+        const r = window.__vox
+          .getRegions()
+          .find((x) => x.kind === "vc" && x.status === s);
+        return r ? { line: r.start.line, col: r.start.col } : null;
+      }, status);
+      assert.ok(pos, "a " + status + " VC region exists");
+      await page.evaluate((p) => window.__vox.cm.setCursor(p), pos);
+      return waitFor(
+        () =>
+          page.evaluate((s) => {
+            const el = document.querySelector(".vc-" + s);
+            if (!el) return false;
+            const cs = getComputedStyle(el);
+            return { style: cs.borderBottomStyle, color: cs.borderBottomColor };
+          }, status),
+        5000,
+        ".vc-" + status + " underline"
+      );
+    };
+    const provedMark = await markStyleFor("proved");
+    const disprovedMark = await markStyleFor("disproved");
+    const unprovedMark2 = await markStyleFor("unproved");
+    assert.strictEqual(provedMark.style, "solid", "proved underline solid: " + JSON.stringify(provedMark));
+    assert.strictEqual(disprovedMark.style, "solid", "disproved underline solid: " + JSON.stringify(disprovedMark));
+    assert.strictEqual(unprovedMark2.style, "dashed", "unproved underline dashed: " + JSON.stringify(unprovedMark2));
+    assert.notStrictEqual(provedMark.color, disprovedMark.color, "green (proved) != red (disproved)");
     assert.strictEqual(
       disprovedMark.color,
-      unprovedMark.color,
+      unprovedMark2.color,
       "disproved and unproved share the red fail colour: " +
-        JSON.stringify({ disprovedMark, unprovedMark })
+        JSON.stringify({ disprovedMark, unprovedMark2 })
     );
-    // ...but solid vs dashed keeps them distinct.
-    assert.notStrictEqual(
-      disprovedMark.style,
-      unprovedMark.style,
-      "disproved (solid) is visually distinct from unproved (dashed)"
+    console.log(
+      "ok - underlines: proved solid green, disproved SOLID red, unproved DASHED red"
     );
-    // The validated counterexample is surfaced in the pane, labelled so.
+
+    // The validated counterexample is reachable ON the disproved goal
+    // (its pane), labelled and with the falsifying assignment -- not only
+    // in a global error strip.
+    const dpos = await page.evaluate(() => {
+      const r = window.__vox.getRegions().find((x) => x.status === "disproved");
+      return { line: r.start.line, col: r.start.col };
+    });
+    await page.evaluate((p) => window.__vox.cm.setCursor(p), dpos);
     const cexPane = await waitFor(
       async () => {
         const t = await page.$eval("#pane-body", (e) => e.textContent);
         return /counterexample \(validated\)/.test(t) ? t : false;
       },
       5000,
-      "validated counterexample in the pane"
+      "validated counterexample reachable on the disproved goal"
     );
     assert.ok(
-      /goal is false when/.test(cexPane),
-      "the counterexample shows a falsifying assignment: " + cexPane.slice(0, 160)
+      /goal is false when/.test(cexPane) && /n = /.test(cexPane),
+      "the counterexample names a falsifying assignment for n: " + cexPane.slice(0, 200)
     );
-    // The goal badge reads 'disproved', with a solid-filled pill.
-    const dBadge = await page.evaluate(() => {
-      const el = document.querySelector("#pane-body .badge-disproved");
-      if (!el) return null;
-      const s = getComputedStyle(el);
-      return { text: el.textContent, border: s.borderBottomStyle };
-    });
-    assert.ok(dBadge && /disproved/.test(dBadge.text), "badge reads disproved: " + JSON.stringify(dBadge));
-    console.log(
-      "ok - disproved goal underlines SOLID red + validated counterexample surfaced " +
-        JSON.stringify(disprovedMark)
-    );
+    const dBadge = await page
+      .$eval("#pane-body .badge-disproved", (e) => e.textContent)
+      .catch(() => null);
+    assert.ok(dBadge && /disproved/.test(dBadge), "the goal badge reads 'disproved': " + dBadge);
+    console.log("ok - counterexample reachable on the disproved goal, badge 'disproved'");
+
+    // Screenshots of the tri-state pane in BOTH themes (only when asked,
+    // via VOX_SHOTS=<dir> -- keeps the test portable otherwise).
+    if (process.env.VOX_SHOTS) {
+      const dir = process.env.VOX_SHOTS;
+      await page.screenshot({ path: path.join(dir, "tristate_dark.png") });
+      await page.click("#theme-btn");
+      await new Promise((r) => setTimeout(r, 300));
+      await page.evaluate((p) => window.__vox.cm.setCursor(p), dpos);
+      await page.screenshot({ path: path.join(dir, "tristate_light.png") });
+      await page.click("#theme-btn"); // restore dark for the theme test below
+      await new Promise((r) => setTimeout(r, 200));
+      console.log("ok - wrote tristate_{dark,light}.png to " + dir);
+    }
     await page.evaluate(() => window.__vox.setCompact(true));
 
     // Examples dropdown: pick reverse (fully verified, but its borrow/slice
