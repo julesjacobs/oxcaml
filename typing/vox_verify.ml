@@ -2430,6 +2430,81 @@ let rec result_refinement env (e : expression) : Refinement.pred option =
      | _ -> None)
 ;;
 
+(* A boolean CONDITION need not translate wholesale to still expose a
+   refined atom: [a && mem k t] has no logic image ([mem] is opaque),
+   yet its then-branch knows both [a] and [mem]'s spec.  [decompose_bool]
+   walks the &&/||/not structure, translating what it can and NAMING each
+   untranslatable leaf; a refined leaf contributes its result refinement
+   at the name, GUARDED by the short-circuit condition under which the
+   leaf is evaluated -- a leaf the operator skips is never evaluated, so
+   its contract is not established and must say nothing.  It returns the
+   condition's logic formula over those names together with the guarded
+   spec facts; the [if]/[while] handlers use the formula as the path fact
+   (negated on the else/exit) and attach the facts to both sides.  The
+   guard threads left-to-right: in [a && b] the right leaf is guarded by
+   [a], in [a || b] by [not a]. *)
+let rec decompose_bool env ~guard (e : expression)
+  : Refinement.pred * Refinement.pred list
+  =
+  match Vox_reflect.translate ~mutvar:mut_read e with
+  | Some p ->
+    register_pred_paths env p;
+    p, []
+  | None ->
+    let and_guard g f =
+      match g with
+      | Refinement.Pbool true -> f
+      | _ -> Refinement.Pand (g, f)
+    in
+    let guarded eq =
+      match guard with
+      | Refinement.Pbool true -> eq
+      | g -> Refinement.Pimp (g, eq)
+    in
+    (match e.exp_desc with
+     | Texp_apply
+         ( { exp_desc = Texp_ident { desc = { val_kind = Val_prim prim; _ }; _ }
+           ; _
+           }
+         , [ (Nolabel, Arg (a, _)); (Nolabel, Arg (b, _)) ]
+         , _
+         , _
+         , _ )
+       when String.equal prim.prim_name "%sequand"
+            || String.equal prim.prim_name "%sequor" ->
+       let fa, sa = decompose_bool env ~guard a in
+       let is_and = String.equal prim.prim_name "%sequand" in
+       let guard_b =
+         if is_and
+         then and_guard guard fa
+         else and_guard guard (Refinement.Pnot fa)
+       in
+       let fb, sb = decompose_bool env ~guard:guard_b b in
+       let formula =
+         if is_and then Refinement.Pand (fa, fb) else Refinement.Por (fa, fb)
+       in
+       formula, sa @ sb
+     | Texp_apply
+         ( { exp_desc = Texp_ident { desc = { val_kind = Val_prim prim; _ }; _ }
+           ; _
+           }
+         , [ (Nolabel, Arg (a, _)) ]
+         , _
+         , _
+         , _ )
+       when String.equal prim.prim_name "%boolnot" ->
+       let fa, sa = decompose_bool env ~guard a in
+       Refinement.Pnot fa, sa
+     | _ ->
+       let n = name_of_expr env e in
+       (match result_refinement env e with
+        | Some p ->
+          register_pred_paths env p;
+          let eq = Refinement.subst_bound ~by:n p in
+          if nontrivial_fact eq then n, [ guarded eq ] else n, []
+        | None -> n, []))
+;;
+
 (* A destructuring binding whose scrutinee is NOT a variable still
    gets the match facts, through a NAME for the scrutinee: its logic
    translation when it has one (tuples included -- they are
@@ -3157,30 +3232,32 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
        one (a variable, or a translatable int/bool expression);
        translatable implies pure, so the versions its reads name are
        stable.  When it does NOT translate, treat [if c] as
-       [let n = c in if n]: NAME the condition's result and attach its
-       result refinement at the name (its declared refinement, or a
-       call's instantiated contract), so a refined-bool decision
-       procedure threads its spec into the branches -- the then-branch
-       adds the path fact [n] and the equation [n = P], the else-branch
-       [not n] and the same equation.  A condition with neither a
-       translation nor a result refinement contributes nothing, exactly
-       as before. *)
+       [let n = c in if n]: DECOMPOSE the condition's &&/||/not structure,
+       naming each untranslatable leaf and attaching a refined leaf's
+       result refinement at its name (guarded by short-circuit), so a
+       refined-bool decision procedure threads its spec into the branches
+       even inside a conjunction ([if b && mem k t]).  The then-branch
+       gets the condition's formula, the else-branch its negation, and
+       both (with the continuation) the guarded spec equations.  A
+       condition with no refined leaf contributes nothing, exactly as
+       before. *)
     let cond_fact = Vox_reflect.translate ~mutvar:mut_read cond in
     Option.iter (register_pred_paths env) cond_fact;
     let ctx0, path_cond =
       match cond_fact with
       | Some c -> ctx0, Some c
       | None ->
-        (match result_refinement env cond with
-         | None -> ctx0, None
-         | Some p ->
-           let n = name_of_expr env cond in
-           register_pred_paths env p;
-           let eqs =
-             List.filter nontrivial_fact [ Refinement.subst_bound ~by:n p ]
-           in
-           ( { ctx0 with cfacts = prov (Some cond.exp_loc) eqs @ ctx0.cfacts }
-           , Some n ))
+        let formula, side_facts =
+          decompose_bool env ~guard:(Refinement.Pbool true) cond
+        in
+        (match side_facts with
+         | [] -> ctx0, None
+         | _ ->
+           register_pred_paths env formula;
+           ( { ctx0 with
+               cfacts = prov (Some cond.exp_loc) side_facts @ ctx0.cfacts
+             }
+           , Some formula ))
     in
     let with_fact f ctx =
       match path_cond with
@@ -3260,24 +3337,25 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
     let hctx = { ctx with cfacts = head @ ctx.cfacts } in
     let cctx = walk_expr env hctx wh_cond in
     let cond_fact = Vox_reflect.translate ~mutvar:mut_read wh_cond in
-    (* Same treatment as [if]: an untranslatable but refined condition
-       is named, its result refinement attached at the name, so the body
-       sees [n] and [n = P] and normal exit sees [not n] and the same
-       equation. *)
+    (* Same treatment as [if]: decompose the condition's &&/||/not
+       structure, so the body sees the condition's formula plus the
+       guarded spec equations of its refined leaves and normal exit sees
+       the negated formula. *)
     let cctx, path_cond =
       match cond_fact with
       | Some c -> cctx, Some c
       | None ->
-        (match result_refinement env wh_cond with
-         | None -> cctx, None
-         | Some p ->
-           let n = name_of_expr env wh_cond in
-           register_pred_paths env p;
-           let eqs =
-             List.filter nontrivial_fact [ Refinement.subst_bound ~by:n p ]
-           in
-           ( { cctx with cfacts = prov (Some wh_cond.exp_loc) eqs @ cctx.cfacts }
-           , Some n ))
+        let formula, side_facts =
+          decompose_bool env ~guard:(Refinement.Pbool true) wh_cond
+        in
+        (match side_facts with
+         | [] -> cctx, None
+         | _ ->
+           register_pred_paths env formula;
+           ( { cctx with
+               cfacts = prov (Some wh_cond.exp_loc) side_facts @ cctx.cfacts
+             }
+           , Some formula ))
     in
     let saved = save_versions () in
     let bctx =

@@ -84,3 +84,68 @@ Hypotheses: <none>
 Counterexample (validated -- every hypothesis holds and the goal fails here):
   x = 0
 |}]
+
+(* &&/|| short-circuit: the condition need not translate wholesale.
+   In the then-branch of [b && sat x] both operands hold, so the refined
+   leaf's spec [x > 0] lands even though [b && sat x] has no translation. *)
+let conj (b : bool) (x : int) : int{ _ > 0 } =
+  if b && sat x then refine_ x else refine_ 1
+[%%expect{|
+val conj : bool -> int -> int{ _ > 0 } = <fun>
+|}]
+
+(* In the else-branch of [b || sat x] both operands are false, so the
+   negated leaf spec [not (x > 0)] i.e. [x <= 0] lands. *)
+let disj (b : bool) (x : int) : int{ _ <= 0 } =
+  if b || sat x then refine_ 0 else refine_ x
+[%%expect{|
+val disj : bool -> int -> int{ _ <= 0 } = <fun>
+|}]
+
+(* Two refined leaves under &&: both specs land in the then-branch, the
+   second guarded by the first (short-circuit). *)
+let sat5 (x : int) : bool{ _ = (x > 5) } = refine_ (x > 5)
+let both (x : int) : int{ _ > 5 } =
+  if sat x && sat5 x then refine_ x else refine_ 6
+[%%expect{|
+val sat5 : (x : int) -> bool{ _ = (x > 5) } = <fun>
+val both : int -> int{ _ > 5 } = <fun>
+|}]
+
+(* SOUNDNESS: the &&-then-branch gives [x > 0] (both true), NOT its
+   negation -- proving [x <= 0] there is DISPROVED. *)
+let n_conj (b : bool) (x : int) : int{ _ <= 0 } =
+  if b && sat x then refine_ x else refine_ 0
+[%%expect{|
+Line 2, characters 29-30:
+2 |   if b && sat x then refine_ x else refine_ 0
+                                 ^
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
+       Goal: x <= 0
+Hypotheses:
+  b && *unknown22*
+  b -> *unknown22* = (x > 0)
+Counterexample (validated -- every hypothesis holds and the goal fails here):
+  x = 1
+  *unknown22* = true
+  b = true
+|}]
+
+(* SOUNDNESS: the ||-then-branch only knows [b || sat x]; [b] alone can
+   satisfy it, so [x > 0] is NOT implied and is DISPROVED. *)
+let n_disj (b : bool) (x : int) : int{ _ > 0 } =
+  if b || sat x then refine_ x else refine_ 1
+[%%expect{|
+Line 2, characters 29-30:
+2 |   if b || sat x then refine_ x else refine_ 1
+                                 ^
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
+       Goal: x > 0
+Hypotheses:
+  b || *unknown24*
+  not b -> *unknown24* = (x > 0)
+Counterexample (validated -- every hypothesis holds and the goal fails here):
+  x = 0
+  *unknown24* = false
+  b = true
+|}]
