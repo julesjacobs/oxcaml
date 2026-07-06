@@ -360,78 +360,134 @@ let with_var_display f k =
   Fun.protect ~finally:(fun () -> var_display := saved) k
 ;;
 
-let rec print ppf p =
+(* Precedence-aware printing, in the compact surface format.  Each node
+   prints at a precedence LEVEL; a child is parenthesized only when its
+   own level is looser (lower) than the level its position requires.
+   Levels and associativity mirror the predicate grammar (parser.mly
+   [vox_pred]) so the printed form reparses to the same predicate:
+   quantifiers and implication [->] are loosest (implication
+   right-associative), then [||], then [&&] (both left-associative),
+   then comparisons (non-associative, so [a = b = c] keeps its
+   parentheses), then additive, then multiplicative (both
+   left-associative), then application, then atoms. *)
+let l_quant = 5
+let l_imp = 10
+let l_or = 20
+let l_and = 30
+let l_cmp = 40
+let l_add = 50
+let l_mul = 60
+let l_app = 70
+let l_atom = 80
+
+let binop_level = function
+  | Eq | Neq | Lt | Le | Gt | Ge -> l_cmp
+  | Add | Sub -> l_add
+  | Mul | Div | Mod -> l_mul
+;;
+
+(* [pr ctx ppf p]: print [p] where the surrounding position tolerates a
+   node of level >= [ctx] without parentheses.  A node of level [lvl]
+   parenthesizes itself exactly when [lvl < ctx]. *)
+let rec pr ctx ppf p =
   let open Format in
+  let node lvl f =
+    if lvl < ctx
+    then (
+      pp_print_char ppf '(';
+      f ();
+      pp_print_char ppf ')')
+    else f ()
+  in
   match p with
   | Pbound -> pp_print_string ppf "_"
   | Pvar id -> pp_print_string ppf (!var_display id)
   | Pglobal p -> pp_print_string ppf (Path.name p)
-  | Pint n -> pp_print_int ppf n
+  | Pint n ->
+    (* A negative literal is parenthesized wherever a leading [-] would
+       otherwise read as subtraction -- as an arithmetic operator's
+       right operand or a function argument -- but [x = -1] stays bare. *)
+    if n < 0
+    then node l_add (fun () -> pp_print_int ppf n)
+    else pp_print_int ppf n
   | Pbool b -> pp_print_bool ppf b
   | Pconstr (_, c, []) -> pp_print_string ppf c
-  | Pconstr (_, c, [ a ]) -> fprintf ppf "@[%s %a@]" c print_atom a
+  | Pconstr (_, c, [ a ]) ->
+    node l_app (fun () -> fprintf ppf "@[%s %a@]" c (pr l_atom) a)
   | Pconstr (_, c, a :: args) ->
-    fprintf ppf "@[%s (%a" c print a;
-    List.iter (fun x -> fprintf ppf ",@ %a" print x) args;
-    fprintf ppf ")@]"
+    node l_app (fun () ->
+      fprintf ppf "@[%s (%a" c (pr 0) a;
+      List.iter (fun x -> fprintf ppf ",@ %a" (pr 0) x) args;
+      fprintf ppf ")@]")
   | Pfun (f, []) -> pp_print_string ppf f
   | Pfun (f, [ a ]) when String.equal f "Vox_ia_len" ->
-    fprintf ppf "@[Iarray.length %a@]" print_atom a
+    node l_app (fun () -> fprintf ppf "@[Iarray.length %a@]" (pr l_atom) a)
   | Pfun (f, [ a; i ]) when String.equal f "Vox_ia_get" ->
-    fprintf ppf "%a.(%a)" print_atom a print i
+    (* [a.(i)] binds at projection level (tighter than application), so
+       it reads bare as a function argument, like a field access *)
+    fprintf ppf "%a.(%a)" (pr l_atom) a (pr 0) i
   | Pfun (f, args) ->
-    fprintf ppf "@[%s" f;
-    List.iter (fun x -> fprintf ppf "@ %a" print_atom x) args;
-    fprintf ppf "@]"
-  | Pfield (_, l, a) -> fprintf ppf "%a.%s" print_atom a l
+    node l_app (fun () ->
+      fprintf ppf "@[%s" f;
+      List.iter (fun x -> fprintf ppf "@ %a" (pr l_atom) x) args;
+      fprintf ppf "@]")
+  | Pfield (_, l, a) -> fprintf ppf "%a.%s" (pr l_atom) a l
   | Ptuple (a :: args) ->
-    fprintf ppf "@[(%a" print a;
-    List.iter (fun x -> fprintf ppf ",@ %a" print x) args;
+    fprintf ppf "@[(%a" (pr 0) a;
+    List.iter (fun x -> fprintf ppf ",@ %a" (pr 0) x) args;
     fprintf ppf ")@]"
   | Ptuple [] ->
     (* unreachable (arity >= 2 by construction), but diagnostics must
        never crash *)
     pp_print_string ppf "()"
-  | Pproj (2, 0, a) -> fprintf ppf "@[fst %a@]" print_atom a
-  | Pproj (2, 1, a) -> fprintf ppf "@[snd %a@]" print_atom a
+  | Pproj (2, 0, a) ->
+    node l_app (fun () -> fprintf ppf "@[fst %a@]" (pr l_atom) a)
+  | Pproj (2, 1, a) ->
+    node l_app (fun () -> fprintf ppf "@[snd %a@]" (pr l_atom) a)
   | Pproj (_, i, a) ->
     (* diagnostics only: projections beyond pairs arise from match
        facts, never from surface predicates (1-based, as in Lean) *)
-    fprintf ppf "%a.%d" print_atom a (i + 1)
-  | Pis (_, c, a) -> fprintf ppf "@[%a is@ %s@]" print_atom a c
+    fprintf ppf "%a.%d" (pr l_atom) a (i + 1)
+  | Pis (_, c, a) ->
+    node l_cmp (fun () -> fprintf ppf "@[%a is@ %s@]" (pr l_atom) a c)
   | Pbinop (op, a, b) ->
-    fprintf ppf "@[%a %s@ %a@]" print_atom a (binop_name op) print_atom b
-  | Pand (a, b) -> fprintf ppf "@[%a &&@ %a@]" print_atom a print_atom b
-  | Por (a, b) -> fprintf ppf "@[%a ||@ %a@]" print_atom a print_atom b
-  | Pnot a -> fprintf ppf "@[not %a@]" print_atom a
+    let lvl = binop_level op in
+    (* comparisons are non-associative (both operands parenthesize a
+       peer); additive and multiplicative are left-associative *)
+    let lctx, rctx =
+      match op with
+      | Eq | Neq | Lt | Le | Gt | Ge -> lvl + 1, lvl + 1
+      | Add | Sub | Mul | Div | Mod -> lvl, lvl + 1
+    in
+    node lvl (fun () ->
+      fprintf ppf "@[%a %s@ %a@]" (pr lctx) a (binop_name op) (pr rctx) b)
+  | Pand (a, b) ->
+    node l_and (fun () ->
+      fprintf ppf "@[%a &&@ %a@]" (pr l_and) a (pr (l_and + 1)) b)
+  | Por (a, b) ->
+    node l_or (fun () ->
+      fprintf ppf "@[%a ||@ %a@]" (pr l_or) a (pr (l_or + 1)) b)
+  | Pnot a -> node l_app (fun () -> fprintf ppf "@[not %a@]" (pr l_atom) a)
   | Pimp (a, b) ->
-    (* Right-associative, weakest after quantifiers: the right operand
-       prints unparenthesized so chains reparse as written. *)
-    (match b with
-     | Pimp _ | Pquant _ -> fprintf ppf "@[%a ->@ %a@]" print_atom a print b
-     | _ -> fprintf ppf "@[%a ->@ %a@]" print_atom a print_atom b)
+    (* Right-associative and loosest: the left operand parenthesizes a
+       nested implication, while the right operand is a trailing
+       position where anything -- a chained [->], a quantifier -- reads
+       bare, so chains reparse as written. *)
+    node l_imp (fun () ->
+      fprintf ppf "@[%a ->@ %a@]" (pr (l_imp + 1)) a (pr 0) b)
   | Pquant (q, b, a) ->
-    (* Reparses: [forall_ x. p] is the surface syntax.  The binder
-       prints through [var_display] so shadowing diagnostics
-       disambiguate it like any other variable. *)
-    fprintf ppf "@[%s %s.@ %a@]"
-      (match q with Qforall -> "forall_" | Qexists -> "exists_")
-      (!var_display b)
-      print a
+    (* [forall_ x. p] is the surface syntax; the binder prints through
+       [var_display] so shadowing diagnostics disambiguate it like any
+       other variable.  The body is a trailing position (printed at [0])
+       and the quantifier itself is looser than every binary operator,
+       so it parenthesizes when it appears as an operand. *)
+    node l_quant (fun () ->
+      fprintf ppf "@[%s %s.@ %a@]"
+        (match q with Qforall -> "forall_" | Qexists -> "exists_")
+        (!var_display b)
+        (pr 0) a)
 
-and print_atom ppf p =
-  match p with
-  | Pbound | Pvar _ | Pglobal _ | Pint _ | Pbool _ | Pconstr (_, _, [])
-  | Pfun (_, [])
-  | Pfield _ | Ptuple _ -> print ppf p
-  | Pproj (n, _, _) ->
-    (* [fst]/[snd] print as applications; the [.i] form is atomic *)
-    if n = 2 then Format.fprintf ppf "(%a)" print p else print ppf p
-  | Pconstr (_, _, _ :: _) | Pfun (_, _ :: _) | Pis _ | Pbinop _
-  | Pand _ | Por _ | Pnot _ | Pimp _ | Pquant _ ->
-    Format.fprintf ppf "(%a)" print p
-;;
-
+let print ppf p = pr 0 ppf p
 let to_string p = Format.asprintf "%a" print p
 
 (* Built-in iarray theory: [Iarray.length a] and [a.(i)] in predicates
