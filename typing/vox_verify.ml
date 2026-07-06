@@ -241,6 +241,11 @@ let point_states
       ref
   = ref []
 
+(* Module-level binders: excluded from a point's variable list (they
+   are the module's interface, not local context -- listing every
+   earlier top-level function at every point drowned the view). *)
+let toplevel_names : (Ident.t, unit) Hashtbl.t = Hashtbl.create 16
+
 (* Embedded solver blocks ([%%vox.lean ...]) of the module (or
    toplevel session) being verified, in source order: text (ending in
    a newline) and the block's location (solver errors inside a block
@@ -302,6 +307,7 @@ let reset () =
   spec_defs := [];
   lemma_defs := [];
   point_states := [];
+  Hashtbl.reset toplevel_names;
   unknown_counter := 0;
   embedded_blocks := [];
   imported_specs := [];
@@ -2453,6 +2459,7 @@ let extend_pat
     (fun (id, (sloc : string Location.loc), ty, _, _) ->
       if !Clflags.vox_dump_vc_provenance
       then Hashtbl.replace name_locs id sloc.loc;
+      if toplevel then Hashtbl.replace toplevel_names id ();
       check_binder_escape ~toplevel ctx ~extra_scope:bound pat id ty)
     (pat_bound_idents_full pat);
   let unpack =
@@ -2496,6 +2503,38 @@ let single_arm
    hypotheses never reach a sibling branch -- and the version table is
    saved and restored around branching so each branch names the state it
    actually sees. *)
+(* Record the proof state of a program point ([-vox-dump-states]): the
+   facts usable there (same scope filter a VC emitted there would
+   apply) and every LOCAL tracked binder in scope (module-level names
+   are the interface, not context).  First record per span wins --
+   re-walks (guards, joins) do not overwrite the entry state. *)
+let record_point loc ctx =
+  let already = List.exists (fun (l, _, _) -> l = loc) !point_states in
+  if not already
+  then begin
+    let usable =
+      List.filter (fun (f, _) -> pred_in_scope ctx f) ctx.cfacts
+    in
+    let seen = Hashtbl.create 8 in
+    let ids =
+      List.filter
+        (fun id ->
+          Hashtbl.mem name_sorts id
+          && (not (Hashtbl.mem synthetic_names id))
+          && (not (Hashtbl.mem toplevel_names id))
+          &&
+          let u = Ident.unique_name id in
+          if Hashtbl.mem seen u
+          then false
+          else (
+            Hashtbl.add seen u ();
+            true))
+        ctx.cscope
+    in
+    point_states := (loc, usable, ids) :: !point_states
+  end
+;;
+
 let rec walk_expr _outer_env ctx (e : expression) : ctx =
   (* Use the node's OWN env, re-derived at every recursive call: an env
      threaded from the enclosing structure misses type declarations
@@ -2504,41 +2543,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
      walk_items nested-module fix. *)
   let env = e.exp_env in
   if !Clflags.vox_dump_states && not e.exp_loc.Location.loc_ghost
-  then begin
-    (* Entry state of this expression: the facts usable here (scope
-       filter matches what a VC emitted here would keep).  First
-       record per span wins -- re-walks (guards, joins) do not
-       overwrite the entry state. *)
-    let already =
-      List.exists (fun (l, _, _) -> l = e.exp_loc) !point_states
-    in
-    if not already
-    then begin
-      let usable =
-        List.filter (fun (f, _) -> pred_in_scope ctx f) ctx.cfacts
-      in
-      (* The point's variables: everything BOUND here that the
-         verifier tracks (has a recorded sort), not just the vars the
-         facts happen to mention -- "what is in scope" is the
-         question the view answers. *)
-      let seen = Hashtbl.create 8 in
-      let ids =
-        List.filter
-          (fun id ->
-            Hashtbl.mem name_sorts id
-            && not (Hashtbl.mem synthetic_names id)
-            &&
-            let u = Ident.unique_name id in
-            if Hashtbl.mem seen u
-            then false
-            else (
-              Hashtbl.add seen u ();
-              true))
-          ctx.cscope
-      in
-      point_states := (e.exp_loc, usable, ids) :: !point_states
-    end
-  end;
+  then record_point e.exp_loc ctx;
   (* Intro forms: the node itself carries the vox attribute and the refined type. *)
   let kind =
     if has_vox_attr "vox.refine" e.exp_attributes
@@ -2721,6 +2726,15 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
       | Nonrecursive ->
         { ctx' with cfacts = prov None (binding_self_facts env vb) @ ctx'.cfacts }
     in
+    (* The whitespace between [in] and the body is inside the LET's
+       span but outside the body's -- without this extra state (from
+       the binding's end to the let's end) a cursor there would fall
+       back to the state WITHOUT the freshly-bound name. *)
+    if !Clflags.vox_dump_states && not e.exp_loc.Location.loc_ghost
+    then
+      record_point
+        { e.exp_loc with Location.loc_start = vb.vb_loc.Location.loc_end }
+        ctx';
     walk_expr env ctx' body
   | Texp_let (rec_flag, vbs, body) ->
     List.iter reject_local_reflect vbs;
@@ -2787,6 +2801,15 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
           vbs
       | Recursive | Nonrecursive -> ctx'
     in
+    (if !Clflags.vox_dump_states && not e.exp_loc.Location.loc_ghost
+     then
+       match List.rev vbs with
+       | last :: _ ->
+         record_point
+           { e.exp_loc with
+             Location.loc_start = last.vb_loc.Location.loc_end }
+           ctx'
+       | [] -> ());
     walk_expr env ctx' body
   | Texp_letmutable (vb, body) ->
     let ctx0 = walk_expr env ctx vb.vb_expr in
@@ -2796,9 +2819,13 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
        let ty = vb.vb_pat.pat_type in
        let rhs = name_of_expr env vb.vb_expr in
        let facts = mut_assign env id ty ~rhs in
-       let out =
-         walk_expr env { ctx0 with cfacts = prov None facts @ ctx0.cfacts } body
-       in
+       let bctx = { ctx0 with cfacts = prov None facts @ ctx0.cfacts } in
+       if !Clflags.vox_dump_states && not e.exp_loc.Location.loc_ghost
+       then
+         record_point
+           { e.exp_loc with Location.loc_start = vb.vb_loc.Location.loc_end }
+           bctx;
+       let out = walk_expr env bctx body in
        (* the binder's scope ends; its versions (synthetic) live on *)
        Hashtbl.remove mut_versions id;
        out

@@ -71,6 +71,58 @@ class TestCheckResponse(unittest.TestCase):
         self.assertIsInstance(resp["generated_lean"], str)
 
 
+@unittest.skipUnless(OCAMLC, "no ocamlc (set VOX_OCAMLC)")
+class TestPointStates(unittest.TestCase):
+    SRC = (
+        "let top1 (u : unit) : int{ _ >= 0 } = 0\n"
+        "\n"
+        "let f (u : unit) : int =\n"
+        "  let x = 1 in\n"
+        "  let y = 2 in\n"
+        "  x + y\n"
+    )
+
+    def _state_at(self, states, line, col):
+        best = None
+        for st in states:
+            if (st["start"]["line"], st["start"]["col"]) <= (line, col) <= (
+                st["end"]["line"],
+                st["end"]["col"],
+            ):
+                if best is None or (
+                    st["end"]["line"] - st["start"]["line"],
+                    st["end"]["col"] - st["start"]["col"],
+                ) < (
+                    best["end"]["line"] - best["start"]["line"],
+                    best["end"]["col"] - best["start"]["col"],
+                ):
+                    best = st
+        return best
+
+    def test_gap_after_in_sees_the_binder(self):
+        resp = server.build_check_response(self.SRC, 1, OCAMLC or "", None)
+        states = cast(List[Dict[str, Any]], resp["states"])
+        self.assertTrue(states)
+        # 0-based (3, 13): just after "let x = 1 in" on source line 4.
+        st = self._state_at(states, 3, 13)
+        self.assertIsNotNone(st)
+        names = [v["name"] for v in cast(List[Dict[str, Any]], st["scope"])]
+        self.assertIn("x", names)
+        # 0-based (4, 13): after the second in -> both binders.
+        st2 = self._state_at(states, 4, 13)
+        names2 = [v["name"] for v in cast(List[Dict[str, Any]], st2["scope"])]
+        self.assertIn("x", names2)
+        self.assertIn("y", names2)
+
+    def test_toplevel_names_excluded(self):
+        resp = server.build_check_response(self.SRC, 1, OCAMLC or "", None)
+        states = cast(List[Dict[str, Any]], resp["states"])
+        for st in states:
+            names = [v["name"] for v in cast(List[Dict[str, Any]], st["scope"])]
+            self.assertNotIn("top1", names)
+            self.assertNotIn("f", names)
+
+
 @unittest.skipUnless(OCAMLC and LEAN, "need ocamlc + lean")
 class TestGoalResponse(unittest.TestCase):
     def test_live_goal_in_block(self):
