@@ -194,8 +194,12 @@ val classify : abc -> int{ _ >= 0 } = <fun>
 |}]
 
 (* A guarded arm contributes NO negation (its pattern may have matched
-   with the guard false), and neither does an arm whose sub-pattern can
-   refute (the head may have matched anyway). *)
+   with the guard false).  A GROUND earlier arm like [Ay 0] contributes
+   the EQUALITY negation [not (s = Ay 0)] -- sound even though its head
+   [Ay] may have matched with a different payload (a head test would be
+   unsound here; the equality is not).  A sub-pattern holding a VARIABLE
+   would still contribute nothing (no ground term, and only the unsound
+   head test was available). *)
 let suppressed (s : abc) (g : bool) : int =
   match s with
   | Ay 0 -> 0
@@ -207,6 +211,7 @@ let suppressed (s : abc) (g : bool) : int =
 Line 6, characters 39-40: vox VC (ASSUMED):
   goal: s = Cee
   hypotheses:
+  not (s = Ay 0)
   k3 = K 3
 val suppressed : abc -> bool -> int = <fun>
 |}]

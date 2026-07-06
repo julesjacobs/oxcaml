@@ -2331,6 +2331,10 @@ let match_facts
     match p.pat_desc with
     | Tpat_var { id; _ } -> Refinement.Pvar id, None
     | Tpat_alias { pattern = sub; id; _ } -> Refinement.Pvar id, Some sub
+    | Tpat_constant (Const_int n) ->
+      (* A literal component names itself: [C 0] is the term [C 0], no
+         fresh unknown and no separate equation. *)
+      Refinement.Pint n, None
     | _ ->
       let id = Ident.create_local "*vox-wild*" in
       record_name env id p.pat_type;
@@ -2413,7 +2417,13 @@ let match_facts
       type_facts subject p.pat_type @ record_facts subject fields
     | Tpat_tuple comps ->
       type_facts subject p.pat_type @ tuple_facts subject comps
-    | Tpat_any | Tpat_constant _ -> type_facts subject p.pat_type
+    | Tpat_any -> type_facts subject p.pat_type
+    | Tpat_constant (Const_int n) ->
+      (* A literal payload propagates its equality: [Lit 0] contributes
+         [subject = 0], not merely a fresh unknown. *)
+      Refinement.Pbinop (Refinement.Eq, subject, Refinement.Pint n)
+      :: type_facts subject p.pat_type
+    | Tpat_constant _ -> type_facts subject p.pat_type
     | Tpat_alias { pattern = sub; id; _ } ->
       (* [p as x]: the alias names the subject, and [p] destructures
          it in turn. *)
@@ -2625,18 +2635,49 @@ let destructure_facts
 ;;
 
 (* Negative match facts: if control reaches an arm, every EARLIER arm
-   failed to match.  That is a usable fact only when the earlier arm's
-   failure is decided by its constructor head alone: a guard-free arm
-   whose pattern is one constructor of a simple variant over variables
-   or wildcards (the same shape that earns a positive fact).  Such an
-   arm contributes [not (s is C)] to every later arm.  Guarded arms
-   contribute nothing (the pattern may have matched with the guard
-   false); deeper patterns contribute nothing (the head may have
-   matched while a sub-pattern refuted). *)
+   failed to match.  A guard-free arm contributes a usable fact in two
+   shapes.  (1) A GROUND pattern -- constants and constructors all the
+   way down, no variables -- matches [subject] exactly when [subject]
+   equals the corresponding logic term, so its failure is
+   [not (subject = term)]; this reaches [Lit 0] and bare int literals.
+   (2) Otherwise, when the failure is decided by the constructor HEAD
+   alone (one constructor of a simple variant over variables or
+   wildcards, the same shape that earns a positive fact), it is
+   [not (subject is C)].  A deeper pattern with variables in
+   sub-positions (e.g. [Node (R, Node (R, ..), ..)]) still contributes
+   nothing: the head may have matched while a sub-pattern refuted, and
+   the logic has no constructor-field projection to name the refuting
+   position (the systematic fix is the bidirectional match walk).
+   Guarded arms contribute nothing (the pattern may have matched with
+   the guard false). *)
 let pattern_negation
   : type k. Env.t -> Refinement.pred -> k general_pattern -> Refinement.pred option
   =
   fun env subject pat ->
+  let rec ground_term (p : value general_pattern) : Refinement.pred option =
+    match p.pat_desc with
+    | Tpat_constant (Const_int n) -> Some (Refinement.Pint n)
+    | Tpat_construct (_, cstr, _, args, _) -> ground_construct cstr args
+    | _ -> None
+  and ground_construct cstr args =
+    let path = Data_types.cstr_res_type_path cstr in
+    match datatype_sort env path [] with
+    | S_data (_, _) ->
+      let subs = List.map (fun (_, a) -> ground_term a) args in
+      if List.for_all Option.is_some subs
+      then
+        Some
+          (Refinement.Pconstr
+             (path, cstr.Data_types.cstr_name, List.map Option.get subs))
+      else None
+    | S_bool ->
+      (match cstr.Data_types.cstr_name with
+       | "true" -> Some (Refinement.Pbool true)
+       | "false" -> Some (Refinement.Pbool false)
+       | _ -> None)
+    | S_int | S_param _ | S_tuple _ | S_iarray | S_poly _ | S_lean _ | S_other ->
+      None
+  in
   let head_negation cstr args =
     let path = Data_types.cstr_res_type_path cstr in
     match datatype_sort env path [] with
@@ -2655,12 +2696,29 @@ let pattern_negation
                 (path, cstr.Data_types.cstr_name, subject)))
       else None
   in
+  let ground_neg t =
+    Refinement.Pnot (Refinement.Pbinop (Refinement.Eq, subject, t))
+  in
+  let construct_neg cstr args =
+    (* Prefer the head test (no churn on shallow arms); fall back to the
+       ground equality when a sub-pattern is a literal or nested
+       constructor. *)
+    match head_negation cstr args with
+    | Some n -> Some n
+    | None ->
+      (match ground_construct cstr args with
+       | Some t -> Some (ground_neg t)
+       | None -> None)
+  in
+  let value_neg (p : value general_pattern) =
+    match p.pat_desc with
+    | Tpat_construct (_, cstr, _, args, _) -> construct_neg cstr args
+    | Tpat_constant (Const_int n) -> Some (ground_neg (Refinement.Pint n))
+    | _ -> None
+  in
   match pat.pat_desc with
-  | Tpat_value p ->
-    (match (p :> value general_pattern).pat_desc with
-     | Tpat_construct (_, cstr, _, args, _) -> head_negation cstr args
-     | _ -> None)
-  | Tpat_construct (_, cstr, _, args, _) -> head_negation cstr args
+  | Tpat_value p -> value_neg (p :> value general_pattern)
+  | Tpat_construct (_, cstr, _, args, _) -> construct_neg cstr args
   | _ -> None
 ;;
 
