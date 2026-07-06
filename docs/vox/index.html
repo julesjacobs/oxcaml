@@ -391,6 +391,26 @@ proof breaks.</p>
   generically, and
   <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/mechanics/lean_pset_seal.ml">a client
   instantiates at <code>int</code></a>.</li>
+<li id="htbl"><b>Hash tables, three ways</b> &mdash;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/htbl.mli">htbl.mli</a> proves the bucketed table's
+  central theorem once &mdash; a lookup that hashes the key and inspects
+  exactly <em>one</em> bucket equals a scan of the whole table, because
+  the bucket invariant makes the skipped buckets provably irrelevant
+  (<a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/demo/lean_htbl.ml">client</a>);
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/mhtbl.mli">mhtbl</a> is the same table
+  <em>imperative</em>: in-place bucket mutation whose ghost is the
+  immutable model, so
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/demo/lean_htbl_mut.ml">a client</a> reuses the very same
+  theorems with nothing re-proved and nothing new assumed; and
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/lphtbl.mli">lphtbl</a> is <em>linear probing</em>
+  over parallel arrays, where the invariant is global &mdash; every
+  stored key reachable from its home slot through an unbroken occupied
+  run &mdash; kept quantifier-free by fuel-bounded probing
+  (<a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/demo/lean_lphtbl.ml">client</a>);
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/mechanics/lean_htbl_fail.ml">a broken bucket
+  invariant</a> and
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/mechanics/lean_lphtbl_fail.ml">a broken probe run</a>
+  are both rejected.</li>
 </ul>
 
 <h2 id="automation">Automation</h2>

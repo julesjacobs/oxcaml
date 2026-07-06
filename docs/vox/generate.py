@@ -75,13 +75,13 @@ UNSHOWN = {
     'demo/lean_pvghost.ml':
         'pv-free prophecies via refines; a library prototype, not yet a card',
     'demo/lean_htbl.ml':
-        'immutable client of lib/htbl; the hash tables live in the suite, not on the page',
+        'linked from the hash-tables card (lib/htbl); snippets not inlined',
     'demo/lean_pslice.ml':
         'polymorphic slices at two element types; a library layer without a page card',
     'demo/lean_htbl_mut.ml':
-        'mutable client of lib/mhtbl; the hash tables live in the suite, not on the page',
+        'linked from the hash-tables card (lib/mhtbl); snippets not inlined',
     'demo/lean_lphtbl.ml':
-        'client of lib/lphtbl; the hash tables live in the suite, not on the page',
+        'linked from the hash-tables card (lib/lphtbl); snippets not inlined',
     'demo/lean_cfold.ml':
         'client of lib/cfold constant folder; a verified-transform library without a page card',
     'demo/lean_triset.ml':
@@ -90,6 +90,10 @@ UNSHOWN = {
         'verified UTF-8 codec demo; the codec lives in the suite, not on the page',
     'demo/lean_utf8_lib.ml':
         'client of lib/utf8; the codec lives in the suite, not on the page',
+    'demo/lean_reflect_prim.ml':
+        'reflected-primitive (bit ops) demo; card candidate once the at-a-distance library form lands',
+    'demo/lean_reflectprim_client.ml':
+        'cross-unit client of the reflected primitives; same card candidacy',
 }
 
 
