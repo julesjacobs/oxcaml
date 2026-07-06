@@ -259,16 +259,14 @@ and verification fails with a counterexample:</p>
 <pre class="out"><code>Line 14, characters 24-26:
 14 |   | Nil -&gt; unreachable_ ()
                              ^^
-Error: vox: verification failed (lean).
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
        Goal: false
 Hypotheses:
   l = Nil
   0 &lt;= i &amp;&amp; i &lt;= len l
-Possible counterexample:
-  i = 0
-  len l = 0
-  len Vox_ilist.Nil = 0
-(lean: error: `grind` failed)</code></pre>
+Counterexample (validated -- every hypothesis holds and the goal fails here):
+  l = Nil
+  i = 0</code></pre>
 <p id="counterexamples">A failed obligation is reported like a type
 error, at the offending expression, with the goal, the hypotheses in
 scope, and a candidate counterexample, rewritten to source names.

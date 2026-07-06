@@ -267,8 +267,10 @@ def main():
                         r'rev \(rev l\) = l \} = assume_ \(\)'))
     snippets['@HERO_FAIL@'] = slice_between(
         nth_fail, r'^let rec nth', r'if i = 0 then h else nth t \(i - 1\)')
+    # The disproof classifier replaced the '(lean: ...)' trailer with a
+    # validated-counterexample block; slice through its last witness.
     snippets['@HERO_FAIL_OUT@'] = slice_between(
-        nth_fail, r'^Line \d+, characters', r'^\(lean: ')
+        nth_fail, r'^Line \d+, characters', r'^  i = 0$')
 
     if args.ocamlc and args.lean:
         snippets['@GEN_LEAN@'] = capture_generated_lean(args.ocamlc, args.lean)
