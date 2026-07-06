@@ -309,6 +309,20 @@ check("singleFlight runs sequential fires individually", async () => {
   assert.strictEqual(runs, 3);
 });
 
+// -- strictVc: full mode is column-precise for obligations ---------------
+
+check("strictVc: off-span same-line cursor is NOT inside the VC", () => {
+  const vcs = [
+    { kind: "vc", start: { line: 5, col: 40 }, end: { line: 5, col: 53 } },
+  ];
+  const loose = S.selectRegion(vcs, { line: 5, col: 20 });
+  assert.strictEqual(loose.relation, "inside"); // compact behavior
+  const strict = S.selectRegion(vcs, { line: 5, col: 20 }, { strictVc: true });
+  assert.strictEqual(strict.relation, "nearest");
+  const on = S.selectRegion(vcs, { line: 5, col: 45 }, { strictVc: true });
+  assert.strictEqual(on.relation, "inside");
+});
+
 // -- typeAtPos: innermost -annot range at the cursor ---------------------
 
 const TYPES = [

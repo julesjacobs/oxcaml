@@ -229,7 +229,14 @@ const REGION_NOUN = {
 
 function renderPane() {
   const c = cm.getCursor();
-  const sel = Selection.selectRegion(regions, { line: c.line, col: c.ch });
+  // Full mode tracks the cursor COLUMN-precisely: an obligation only
+  // claims the cursor inside its span, so elsewhere on the line the
+  // program-point state (with the correct branch facts) shows instead.
+  const sel = Selection.selectRegion(
+    regions,
+    { line: c.line, col: c.ch },
+    { strictVc: !compact }
+  );
   const r = sel.region;
   hoverSpans = [];
   let html = "";
@@ -244,6 +251,7 @@ function renderPane() {
     let snippet = cm.getRange(rng.from, rng.to);
     const om = /^\(?\s*Obj\.magic\s+([^)]*)\)?$/.exec(snippet || "");
     if (om) snippet = om[1].trim();
+    if (/^\(?\s*Obj\.magic\s*\)?$/.test(snippet || "")) snippet = "";
     // Skip when it just repeats a context row (x : int over x : int).
     const dup =
       r && r.scope &&
@@ -323,12 +331,24 @@ function badge(status) {
 // then the goal behind a turnstile. Hover-provenance stays on the
 // hypothesis/goal rows.
 // The raw Lean sort names are solver spellings; show readable labels.
-function leanLabel(sort) {
-  if (sort === "VoxU") return "opaque";
-  const m = /^Vox_[A-Za-z0-9]+_(.+)$/.exec(sort);
-  if (m) return m[1];
-  if (sort === "Vox_unit") return "unit";
-  return sort;
+function leanLabel(sort, ocaml) {
+  let label = sort;
+  if (sort === "VoxU") label = "opaque";
+  else if (sort === "Vox_unit") label = "unit";
+  else {
+    const m = /^Vox_[A-Za-z0-9]+_(.+)$/.exec(sort);
+    if (m) label = m[1];
+  }
+  // A label that repeats the OxCaml type, or a compound solver
+  // spelling (VoxT2 VoxU Vox_unit), is noise -- show nothing.
+  if (
+    (ocaml && label.toLowerCase() === String(ocaml).toLowerCase()) ||
+    /\s/.test(label) ||
+    /^Vox/.test(label)
+  ) {
+    return "";
+  }
+  return label;
 }
 
 function renderCtx(scope) {
@@ -340,7 +360,10 @@ function renderCtx(scope) {
         const inner =
           '<span class="ctx-name">' + esc(v.name) + "</span> : " +
           tok(v.ocaml, false) +
-          '<span class="ctx-lean">' + esc(leanLabel(v.lean)) + "</span>";
+          (leanLabel(v.lean, v.ocaml)
+            ? '<span class="ctx-lean">' + esc(leanLabel(v.lean, v.ocaml)) +
+              "</span>"
+            : "");
         // A row that knows its binder's span gets the same hover
         // affordance as hypotheses: hovering highlights the binding.
         if (!v.span) return '<div class="ctx">' + inner + "</div>";
@@ -371,10 +394,13 @@ function renderVc(r) {
   let h = "";
   const g = Selection.splitSpanSuffix(r.goal);
   if (compact) {
-    // The original display: goal first, hypotheses after, nothing else.
+    // The original display: goal first, hypotheses after, nothing else
+    // -- and nothing means nothing: no empty-section headers either.
     h += "<h3>goal" + badge(r.status) + "</h3>";
     h += provRow("goal", g.text, r.goal_span || g.span);
-    h += renderHyps(r.hypotheses, r.hyp_spans);
+    if (r.hypotheses && r.hypotheses.length) {
+      h += renderHyps(r.hypotheses, r.hyp_spans);
+    }
   } else {
     h += renderCtx(r.scope);
     h += renderHyps(r.hypotheses, r.hyp_spans);
@@ -410,12 +436,19 @@ function renderState(pos) {
 
 function renderTheorem(r) {
   // Static block theorems come from the Lean bridge, not the VC dumper, so
-  // they carry no provenance spans -- rendered plain, no hover. Same
-  // order as a VC: hypotheses above, the goal behind a turnstile.
+  // they carry no provenance spans -- rendered plain, no hover. Each mode
+  // matches its VC layout: compact = goal first, no turnstile; full =
+  // hypotheses above, the goal behind a turnstile.
   let h = "<h3>theorem " + esc(r.name) + "</h3>";
-  h += renderHyps(r.hypotheses);
-  h += "<h3>goal</h3>";
-  h += '<div class="goal turnstile">' + tok(r.goal, true) + "</div>";
+  if (compact) {
+    h += "<h3>goal</h3>";
+    h += '<div class="goal">' + tok(r.goal, true) + "</div>";
+    if (r.hypotheses && r.hypotheses.length) h += renderHyps(r.hypotheses);
+  } else {
+    h += renderHyps(r.hypotheses);
+    h += "<h3>goal</h3>";
+    h += '<div class="goal turnstile">' + tok(r.goal, true) + "</div>";
+  }
   return h;
 }
 

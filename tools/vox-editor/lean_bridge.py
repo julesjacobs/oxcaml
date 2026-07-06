@@ -263,12 +263,25 @@ def theorems_in_source(source: str) -> List[Dict[str, object]]:
     result: List[Dict[str, object]] = []
     for b in find_lean_blocks(source):
         lines = b.content.split("\n")
-        headers = [i for i, l in enumerate(lines) if _THEOREM_RE.match(l)]
+        matches = [
+            (i, m.group(1))
+            for i, l in enumerate(lines)
+            for m in [_THEOREM_RE.match(l)]
+            if m
+        ]
+        headers = [i for i, _ in matches]
+        # ``def``s bound the regions but are DEFINITIONS, not statements:
+        # rendering one as "theorem" with a goal that swallows the
+        # following declarations (pattern-match defs have no ``:=`` on
+        # the header line) was pure confusion.
+        stmt = {i for i, kw in matches if kw != "def"}
         # Prefix char offsets of each content line.
         prefix = [0]
         for l in lines:
             prefix.append(prefix[-1] + len(l) + 1)
         for idx, h in enumerate(headers):
+            if h not in stmt:
+                continue
             end_line = (
                 headers[idx + 1] - 1 if idx + 1 < len(headers) else len(lines) - 1
             )

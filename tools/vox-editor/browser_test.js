@@ -253,11 +253,13 @@ async function main() {
         (e) => e.textContent
       )
     );
-    assert.ok(sortLabels.length > 0, "context rows carry sort labels");
+    // Labels render ONLY when they add information beyond the OxCaml
+    // type (e.g. "opaque"); duplicates and compound solver spellings
+    // are suppressed -- so zero labels is legitimate. What must never
+    // appear is a raw solver spelling.
     assert.ok(
-      sortLabels.every((t) => t && !/^Vox_/.test(t)),
-      "sort labels are readable, no solver spellings: " +
-        JSON.stringify(sortLabels)
+      sortLabels.every((t) => t && !/^Vox/.test(t) && !/\s/.test(t)),
+      "any rendered sort label is readable: " + JSON.stringify(sortLabels)
     );
     assert.ok(state.turnstile, "goal renders behind a turnstile");
     // -annot covers EXPRESSIONS, so the type-at-cursor line needs the
@@ -281,6 +283,27 @@ async function main() {
       "ok - proof state: context + sorts + turnstile; cursor type: " +
         JSON.stringify(cursorType)
     );
+
+    // Column-precise tracking (full mode): cursor near `h` in the
+    // then-branch of nth's Cons arm must show the BRANCH state (i = 0
+    // holds there), never the same-line else-branch obligation with
+    // `not (i = 0)`.
+    const branch = await page.evaluate(() => {
+      const cm = window.__vox.cm;
+      const idx = cm.getValue().indexOf("then h else");
+      cm.setCursor(cm.posFromIndex(idx + 5)); // on `h`
+      window.__vox.renderPane();
+      return document.getElementById("pane-body").textContent;
+    });
+    assert.ok(
+      !branch.includes("not (i = 0)"),
+      "then-branch must not show the else obligation: " + branch.slice(0, 200)
+    );
+    assert.ok(
+      /i = 0/.test(branch),
+      "then-branch shows its own fact i = 0: " + branch.slice(0, 200)
+    );
+    console.log("ok - column-precise: then-branch shows i = 0, not the else VC");
 
     // Context rows hover like hypotheses: highlighting the BINDER.
     const ctxHover = await page.evaluate(() => {
