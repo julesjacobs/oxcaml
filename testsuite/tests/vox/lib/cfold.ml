@@ -22,17 +22,6 @@ type lint [@@vox.sort lean "Int"]
   | .Lit n => n
   | .Add a b => denote a + denote b
   | .Mul a b => denote a * denote b
-
--- Peephole rule table: each simplification's DENOTATION-preservation as
--- a named lemma (over the Int denotations).  [simp] below applies these
--- arm by arm; @[grind] feeds them to the per-node obligation.
-theorem pr_add_zero (a : Int) : a + 0 = a := by omega
-theorem pr_zero_add (a : Int) : 0 + a = a := by omega
-theorem pr_mul_one (a : Int) : a * 1 = a := by omega
-theorem pr_one_mul (a : Int) : 1 * a = a := by omega
-theorem pr_mul_zero (a : Int) : a * 0 = 0 := by omega
-theorem pr_zero_mul (a : Int) : 0 * a = 0 := by omega
-theorem pr_mul_two (a : Int) : a * 2 = a + a := by omega
 |lean}]
 
 type t = expr{ denote _ = denote _ } [@vox.via (denote : lint)]
@@ -82,10 +71,11 @@ let fold : (e : t) -> t{ _ = e } =
      | Add (a, b) -> (Add (a, b) : t{ _ = e })
      | Mul (a, b) -> (Mul (a, b) : t{ _ = e }))
 
-(* A first-order peephole simplifier: ONE bottom-up pass applying the
-   rule table (constant folding, additive/multiplicative identities,
-   annihilation, and a strength reduction x*2 -> x+x).  Each arm's
-   [denote]-preservation is a rule lemma above; the recursion carries
+(* A first-order peephole simplifier: ONE bottom-up pass of rewrites
+   (constant folding, additive/multiplicative identities, annihilation,
+   and a strength reduction x*2 -> x+x).  Each arm's denotation-
+   preservation is an Int identity grind's linear arithmetic closes on
+   its own -- no hand lemmas -- and the recursion carries
    [denote _ = denote u] just like [go]. *)
 let rec simp : (u : expr) -> expr{ denote _ = denote u } =
   fun u ->
