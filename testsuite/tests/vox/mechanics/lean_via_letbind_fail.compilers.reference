@@ -1,0 +1,11 @@
+File "lean_via_letbind_fail.ml", line 42, characters 5-20:
+42 |     (Cons (x, inner) : t{ _ = lcons x (lcons x z) })
+          ^^^^^^^^^^^^^^^
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
+       Goal: 0 = 0 && lrepr (Cons (x, inner)) = lcons x (lcons x z)
+Hypotheses:
+  inner = Cons (y, tz)
+  0 = 0 && lrepr inner = lcons y z
+  0 = 0
+  lrepr tz = z
+(lean: error: `grind` failed)

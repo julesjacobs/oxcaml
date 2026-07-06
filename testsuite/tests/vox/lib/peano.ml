@@ -12,6 +12,14 @@ type t = pnat [@vox.via (toN : lnat)]
   | .S n => toN n + 1
 |lean}]
 
+(* [zero] denotes [toN Z = 0].  gap #31 fix: a top-level via value built
+   by an inline constructor now binds at its SKELETON sort, so its self
+   fact [zero = Z] is well sorted ([pnat = pnat], not [Nat = pnat]).  It
+   may therefore be defined HERE, first; before the fix it had to be
+   defined LAST so its ill-sorted fact stayed out of the other
+   functions' scope. *)
+let zero : t{ _ = 0 } = (Z : t{ _ = 0 })
+
 (* [succ]: unpack the image binder to its skeleton [pn] (link
    [toN pn = n]), rebuild [S pn], whose [toN] is [toN pn + 1 = n + 1]. *)
 let succ : (n : t) -> t{ _ = n + 1 } =
@@ -41,12 +49,3 @@ let add : (a : t) -> (b : t) -> t{ _ = a + b } =
     in
     let w = go pa in
     (w : t{ _ = a + b })
-
-(* [zero] denotes [toN Z = 0].  Defined LAST deliberately: a top-level
-   via VALUE built by an inline constructor leaks its skeleton-link fact
-   ([zero = Z]) into ambient hypotheses, and that fact is ill-sorted
-   ([Nat = pnat]) -- so if [zero] preceded [succ]/[add] their VCs would
-   fail with a Lean "Type mismatch".  Ordering it after the functions
-   keeps its facts out of their scope (xset's [empty] is last for the
-   same reason). *)
-let zero : t{ _ = 0 } = (Z : t{ _ = 0 })

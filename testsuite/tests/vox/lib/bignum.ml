@@ -15,6 +15,13 @@ type t = bits [@vox.via (toN : lnat)]
   | .B1 r => 1 + 2 * toN r
 |lean}]
 
+(* [zero] denotes [toN Bnil = 0].  gap #31 fix: a top-level via value
+   built by an inline constructor now binds at its SKELETON sort, so its
+   self fact [zero = Bnil] is well sorted ([bits = bits], not
+   [Nat = bits]) and it may be defined HERE, first, rather than forced
+   last to keep an ill-sorted fact out of the other functions' scope. *)
+let zero : t{ _ = 0 } = (Bnil : t{ _ = 0 })
+
 (* [succ] by ripple carry on the skeleton: set a low [0] bit, or carry
    past a low [1].  Each step is linear over [Nat] ([2 *] stays linear). *)
 let rec bsucc : (u : bits) -> bits{ toN _ = toN u + 1 } =
@@ -90,5 +97,3 @@ let equal : (a : t) -> (b : t) -> bool{ _ = (a = b) } =
     let refine_ pa = a in
     let refine_ pb = b in
     beq pa pb
-
-let zero : t{ _ = 0 } = (Bnil : t{ _ = 0 })

@@ -503,3 +503,71 @@ ZERO `assume_unchecked_`, the trust confined to the six-function
    (r : t{ card _ = 0 })` passes (a let-bound value keeps its base
    sort).  Not cross-unit specific (reproduced fully local).
    Workaround throughout `mset.ml`: let-bind before injecting.
+
+## ADDENDUM (2026-07-06): KNOWN-via value bindings bind at the skeleton (gap #31)
+
+The IMAGE-BINDER rule above (§2) makes a via binder denote the image
+EVERYWHERE, reached down to the representation only through a `refine_`
+unpack.  That is right for a via PARAMETER and for an ABSTRACT
+(sealed-`.mli`) value — the client has no spine — but it stranded a
+value of a KNOWN (transparent, spine-visible) via type bound by an
+ordinary `let`: the binder was registered at the image sort while its
+construction fact spoke the base language (`v = Cons ..`, a tree term),
+so the two were ill-sorted across the abstraction function (`ISet = tree`
+in the emitted Lean).  Seven recorded sightings, one root cause; the
+stdlib PoC's `append` and the top-level `zero`/`empty` ordering
+contortions were the fallout.
+
+**Ruling (settled 2026-07-06, implemented here):** a binder of KNOWN
+`Trefine` type at a *value binding* puts its facts in the logical
+context and the variable at the SKELETON sort — exactly what a
+transparent `refine_` unpack does, so `refine_` becomes REDUNDANT at
+such a binding (it stays supported).
+
+Precisely, at `let v = e` where `e`'s type expands to a transparent
+`Trefine(skel, maps, pred)` (`maps ≠ []`, spine visible):
+
+- `v` is registered at `skel`'s dsort (the plain payload), not the
+  image.  (`vox_verify.record_name`, guarded by a `~via_skel` flag set
+  only at the three value-binding `extend_pat` callers: the single- and
+  multi-`let` paths and the top-level structure bindings.  Parameters,
+  match-arm binders, record fields and try-handler arms are UNCHANGED —
+  they keep the image binding.)
+- Injected fact = the FULL base-sort predicate `pred[_ := v]`
+  (`<inv> v ∧ <image contract>(map v)`), the same facts `unpack_fact`
+  contributes: both the skeleton invariant and the map-link to the image
+  the RHS established.  (Not `via_image_facts`, which strips the base
+  conjuncts and rebases at the image.)
+- **Image rewrite for dependent occurrences.**  When such a skeleton
+  binder is passed as a via ARGUMENT, the callee's contract mentions the
+  parameter at the image, so the dependent substitution places the bare
+  skeleton stamp where an image is expected.  A KNOWN via binder's base
+  predicate has other free variables ONLY in its image-layer conjuncts
+  (they arrive by that same dependent substitution), never in the
+  skeleton invariant (which is closed over the binder), so those
+  occurrences are rewritten to the composite map applied to them
+  (`once ↦ lrepr once`); the binder itself is EXCLUDED (it is legitimately
+  at the skeleton in `bst v`).  This is `rewrite_skel_via_images`, keyed
+  off the `via_skel_binders` registry.
+
+Flow-back into a via-expected position (constructor field, result /
+ascription, via argument) is the EXISTING entailment/rewrap path — no
+new coercion — discharged from the base facts now in context.
+
+**Scope / boundary.**  An ABSTRACT `refines` value (its skeleton hidden)
+never reaches the `Trefine` arm and is unchanged (image binder, verified
+by the untouched `via_set`/`xset`/`pset`/`mset` seal-client tests).  The
+INLINE-injection caveat of §4 above is a DIFFERENT (result-naming)
+sighting and is NOT addressed here: `(f x : t{...})` where `f x` is an
+application still mis-sorts (its result is a fresh unknown at the image);
+the workaround remains "bind to a variable first", which now composes
+cleanly with the skeleton binding.
+
+**Workarounds that fell away** (proof the fix landed): `lib/peano.ml` and
+`lib/bignum.ml` define `zero` FIRST instead of being forced last; the
+stdlib PoC's `append` returns the via type `t` directly with a plain
+`let rest = go r` recursion, no refined-skeleton return type and no
+`refine_`.  Pinned by `mechanics/lean_via_letbind.ml` (positive: the
+sightings) and `mechanics/lean_via_letbind_fail.ml` (soundness: a false
+image equation over honest skeleton facts is refuted at grind, not a
+silent pass and not an elaboration error).

@@ -138,6 +138,15 @@ let toplevel_active = ref false
 
 let name_sorts : (Ident.t, dsort) Hashtbl.t = Hashtbl.create 64
 
+(* gap #31: idents bound at their via SKELETON sort by a value binding,
+   with the via type's maps.  When such a binder feeds a via PARAMETER,
+   its dependent name is the composite map applied to it (the image the
+   parameter's contract speaks over), not the bare skeleton stamp.
+   Image-bound via values (parameters, sealed abstracts) are absent from
+   this table and keep their bare name. *)
+let via_skel_binders : (Ident.t, Types.vox_map list) Hashtbl.t =
+  Hashtbl.create 16
+
 (* Source-level type of each recorded name, formatted -- populated only
    under the provenance dump flag, where the editor shows a VC's
    variables with their OxCaml type next to their solver sort. *)
@@ -318,6 +327,7 @@ let global_snames : (string, string) Hashtbl.t = Hashtbl.create 16
 let reset () =
   vcs := [];
   Hashtbl.reset name_sorts;
+  Hashtbl.reset via_skel_binders;
   Hashtbl.reset name_types;
   Hashtbl.reset name_locs;
   Hashtbl.reset synthetic_names;
@@ -824,8 +834,22 @@ let type_one_line ty =
         |> List.map String.trim))
 ;;
 
-let record_name env id ty =
-  Hashtbl.replace name_sorts id (dsort_of_type env ty);
+let record_name ?(via_skel = false) env id ty =
+  (* A transparent via binder at a value binding is registered at its
+     SKELETON sort (gap #31): the binder is the plain payload in the
+     logic, exactly as a [refine_] unpack binds it, so its
+     construction and callee-contract facts (base sort) are well
+     sorted.  Only a KNOWN (spine-visible) [Trefine] is routed here;
+     an abstract [refines] value keeps its image sort. *)
+  let sort_ty =
+    if via_skel
+    then (
+      match Types.get_desc (Ctype.vox_expand_head env ty) with
+      | Trefine (skel, _ :: _, _) -> skel
+      | _ -> ty)
+    else ty
+  in
+  Hashtbl.replace name_sorts id (dsort_of_type env sort_ty);
   if !Clflags.vox_dump_vc_provenance
   then begin
     (* The context display strips a TOP-level refinement: it has
@@ -989,6 +1013,51 @@ let via_image_facts maps pred id =
   let composite = via_composite maps in
   let p = replace_subterm ~find:composite ~by:(Refinement.Pvar id) pred in
   List.filter (fun c -> not (pred_mentions_bound c)) (conjuncts p)
+;;
+
+(* gap #31: in a KNOWN via binder's base predicate, a free variable
+   other than the binder itself is there only because a dependent
+   substitution put an argument where an IMAGE-sorted parameter stood
+   (the image layer's preds are the only place such a var lands).  If
+   that argument is itself a skeleton-bound via value, its bare stamp is
+   ill sorted at the image; rewrite it to the composite map applied to
+   it ([once] -> [lrepr once]), the image the layer speaks over.  The
+   binder [id] is EXCLUDED: it legitimately appears at the skeleton in
+   the invariant conjuncts ([bst id]). *)
+let rec rewrite_skel_via_images ~except (p : Refinement.pred) =
+  let go = rewrite_skel_via_images ~except in
+  let under_own_map f v =
+    (* [v] as the direct argument of its own innermost (first) map is
+       already at the image -- leave it, do not re-apply the map. *)
+    match Hashtbl.find_opt via_skel_binders v with
+    | Some (m :: _) -> String.equal m.Types.vm_fn f
+    | _ -> false
+  in
+  match p with
+  | Refinement.Pvar v when not (List.exists (Ident.same v) except) ->
+    (match Hashtbl.find_opt via_skel_binders v with
+     | Some maps ->
+       List.fold_left
+         (fun acc (m : Types.vox_map) -> Refinement.Pfun (m.Types.vm_fn, [ acc ]))
+         (Refinement.Pvar v)
+         maps
+     | None -> p)
+  | Refinement.Pvar _ | Refinement.Pbound | Refinement.Pglobal _
+  | Refinement.Pint _ | Refinement.Pbool _ -> p
+  | Refinement.Pconstr (path, c, args) ->
+    Refinement.Pconstr (path, c, List.map go args)
+  | Refinement.Pfun (f, [ Refinement.Pvar v ]) when under_own_map f v -> p
+  | Refinement.Pfun (f, args) -> Refinement.Pfun (f, List.map go args)
+  | Refinement.Pfield (path, l, a) -> Refinement.Pfield (path, l, go a)
+  | Refinement.Ptuple args -> Refinement.Ptuple (List.map go args)
+  | Refinement.Pproj (n, i, a) -> Refinement.Pproj (n, i, go a)
+  | Refinement.Pis (path, c, a) -> Refinement.Pis (path, c, go a)
+  | Refinement.Pbinop (op, a, b) -> Refinement.Pbinop (op, go a, go b)
+  | Refinement.Pand (a, b) -> Refinement.Pand (go a, go b)
+  | Refinement.Por (a, b) -> Refinement.Por (go a, go b)
+  | Refinement.Pnot a -> Refinement.Pnot (go a)
+  | Refinement.Pimp (a, b) -> Refinement.Pimp (go a, go b)
+  | Refinement.Pquant (q, bd, a) -> Refinement.Pquant (q, bd, go a)
 ;;
 
 (* The refinement of a type, if any. *)
@@ -1240,15 +1309,37 @@ let elab_loop_invariant ienv (e : expression) =
 (* Facts contributed by the binders of a pattern: every binder is recorded (for its
    declaration sort); binders of refined type contribute their refinement instantiated at
    the binder. *)
-let binder_facts : type k. Env.t -> k general_pattern -> Refinement.pred list =
-  fun env pat ->
+let binder_facts
+  : type k. ?via_skel:bool -> Env.t -> k general_pattern -> Refinement.pred list
+  =
+  fun ?(via_skel = false) env pat ->
   List.concat_map
     (fun (id, _, ty, _, _) ->
-      record_name env id ty;
+      record_name ~via_skel env id ty;
       match get_desc (Ctype.vox_expand_head env ty) with
       | Trefine (_, (_ :: _ as maps), pred) ->
-        let facts = via_image_facts maps pred id in
-        List.iter (register_pred_paths env) facts;
+        let facts =
+          if via_skel
+          then (
+            (* gap #31: bound at the skeleton, so inject the FULL
+               base-sort predicate ([bst _ && <image contract> _]
+               instantiated at the binder) -- the same facts a
+               [refine_] unpack contributes: both the skeleton
+               invariant and the map-link to the image the RHS
+               established.  Other via-skel vars in it (dependent-
+               substituted arguments) are rewritten to their image. *)
+            Hashtbl.replace via_skel_binders id maps;
+            let fact =
+              rewrite_skel_via_images ~except:[ id ]
+                (Refinement.subst_bound ~by:(Refinement.Pvar id) pred)
+            in
+            register_pred_paths env fact;
+            [ fact ])
+          else (
+            let facts = via_image_facts maps pred id in
+            List.iter (register_pred_paths env) facts;
+            facts)
+        in
         let inv =
           List.map
             (fun p ->
@@ -2635,6 +2726,7 @@ let live_negations
 let extend_pat
   : type k.
     ?toplevel:bool
+    -> ?via_skel:bool
     -> ?scrut:type_expr
     -> ?scrut_name:Refinement.pred option
     -> Env.t
@@ -2642,7 +2734,8 @@ let extend_pat
     -> k general_pattern
     -> ctx
   =
-  fun ?(toplevel = false) ?scrut ?(scrut_name = None) env ctx pat ->
+  fun ?(toplevel = false) ?(via_skel = false) ?scrut ?(scrut_name = None)
+    env ctx pat ->
   let bound = pat_bound_idents pat in
   List.iter
     (fun (id, (sloc : string Location.loc), ty, _, _) ->
@@ -2656,7 +2749,8 @@ let extend_pat
     | Some s -> unpack_fact env pat ~scrut:s ~scrut_name
     | None -> []
   in
-  { cfacts = prov (Some pat.pat_loc) (unpack @ binder_facts env pat) @ ctx.cfacts
+  { cfacts =
+      prov (Some pat.pat_loc) (unpack @ binder_facts ~via_skel env pat) @ ctx.cfacts
   ; cscope = bound @ ctx.cscope
   }
 ;;
@@ -2858,7 +2952,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
        catch that, but the restriction is the honest one). *)
     reject_local_reflect vb;
     let ctx0 = walk_expr env ctx vb.vb_expr in
-    let ctx' = extend_pat env ctx0 vb.vb_pat in
+    let ctx' = extend_pat ~via_skel:true env ctx0 vb.vb_pat in
     (* A destructuring let of a variable gets the same facts a match
        case would: [let { x; y } = r in ...].  A let of a MUTABLE
        variable additionally pins its current value to the immutable
@@ -2942,7 +3036,12 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
       vbs;
     restore_versions saved;
     let havoc = List.concat_map (mut_havoc env) written in
-    let ctx' = List.fold_left (fun ctx vb -> extend_pat env ctx vb.vb_pat) ctx vbs in
+    let ctx' =
+      List.fold_left
+        (fun ctx vb -> extend_pat ~via_skel:true env ctx vb.vb_pat)
+        ctx
+        vbs
+    in
     let ctx' = { ctx' with cfacts = prov None havoc @ ctx'.cfacts } in
     let ctx' =
       List.fold_left
@@ -6991,7 +7090,8 @@ let walk_items (str : structure) ctx =
         ctx
         := List.fold_left
              (fun ctx vb ->
-               extend_pat ~toplevel:true str.str_final_env ctx vb.vb_pat)
+               extend_pat ~toplevel:true ~via_skel:true str.str_final_env ctx
+                 vb.vb_pat)
              !ctx
              vbs;
         (match rec_flag with
