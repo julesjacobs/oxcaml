@@ -150,9 +150,50 @@ turned from `public theorem ... := by ...` into `public axiom ...` (keep its
 `public` stripped.  Verify: module compiles, every existing client + the module's
 suite test verify, zero `assume_unchecked_` delta.  One commit per module.
 
-### Remaining (handed off): rbt, htbl, ptrie_packed, lphtbl, bst
+### Phase 2 DONE (2026-07-06): rbt, htbl, ptrie_packed, lphtbl, bst
 
-Each needs its per-module client-law identification (which theorems stay as
-obligations) + a build/test/promote cycle.  rbt is the highest-value (26/31
-scaffolding).  Watch for cross-module reuse as ptrie->triset showed: check each
-module's importers before de-exposing anything.
+All five refactored to the obligation pattern, one commit each, on branch
+`vox-hygiene`.  Full vox suite after all five: **177 passed / 0 unexpected
+errors**.  Zero trust delta across every module (no `assume_unchecked_` /
+`.ml axiom` added or removed).  The `.ml` blocks grow to hold the moved proofs;
+the audit surface that matters — the client-facing `.mli` — shrinks by 1382
+lines (2104 -> 722).
+
+| module        | .mli before -> after | obligations kept (`public axiom`)                     | scaffolding moved to .ml | importers verified |
+|---------------|----------------------|-------------------------------------------------------|--------------------------|--------------------|
+| bst           | 87 -> 66             | bst_insert, mem_insert                                | 4                        | lean_bst, lean_bst_alt |
+| htbl          | 299 -> 162           | index_range, tfind_eq_jump, twf_madd, tlen_madd, tfind_madd_eq, tfind_madd_ne | 11 | lean_htbl, lean_htbl_mut (htbl->bslice->mhtbl) |
+| ptrie_packed  | 616 -> 141           | mem_insert                                            | 30                       | lean_ptrie_packed |
+| lphtbl        | 798 -> 215           | T1, T1_len, T1v_len, T2, T3, T4, wf_empty, freecnt_hasfree, freecnt_pconst, freecnt_ins, client_chain_miss | 39 | lean_lphtbl (pslice->lphtbl); lean_lphtbl_fail byte-identical |
+| rbt           | 304 -> 138           | bst_add, mem_add, invc_add, invh_add, rb_add          | 23                       | lean_rbt; lean_rbt_seal_fail byte-identical |
+
+**Per-module client-law identification** (the judgment call each module needed):
+
+- **bst** — the demo (lean_bst) + the quantified-alt interface (lean_bst_alt)
+  need `bst_insert`/`mem_insert`; the four `not_mem_lt/gt`, `all_lt/gt_insert`
+  are one-path-search + bound-preservation scaffolding.
+- **htbl** — the client-facing set is exactly the names lib/mhtbl (which
+  *reuses* htbl's model) + the two demos reference: the six `index_range`/
+  `tfind_eq_jump`/`twf_madd`/`tlen_madd`/`tfind_madd_eq`/`tfind_madd_ne`.  The
+  empty-table ground facts, bucket lemmas, and spine lemmas are internal.
+- **ptrie_packed** — the packed big-endian twin of ptrie; identical shape, one
+  client law `mem_insert`, 30 bit-algebra + invariant lemmas moved.
+- **lphtbl** — the `.mli` already grouped its client laws under an explicit
+  "E-matching interface for client VCs" section (a DETACHED grind_pattern block,
+  which the split must keep with the axioms it names); `client_chain_miss` is
+  also kept because its pattern is what closes the demo's two-insert miss VC.
+- **rbt** — only `mem_add` is client-*named* (by lean_rbt); the other four
+  (`bst_add`/`invc_add`/`invh_add`/`rb_add`) are kept as the module's headline
+  invariant-preservation guarantees (they justify the `set` return type).
+
+**RESISTANCE (rbt only, documented in commit):** three scaffolding lemmas
+(`not_mem_lt`, `not_mem_gt`, `balance_eq_balanceR`) stay PROVED in rbt.mli.  The
+seal-fail fixture `lib/rbt_bad_balance/rbt.ml` is a *blockless* copy of the impl
+whose own `mem` and `balance` VCs consume these three; moving them out makes
+that fixture fail earlier (mem line 24, then the balanceR delegation line 65)
+instead of at the intended wrong-rotation VC (line 70), changing its
+`.compilers.reference`.  Keeping the three in the `.mli` (also restated in the
+`.ml` block, which does not clash — exactly as the defs are) preserves the
+fixture's rejection byte-for-byte.  Partial hygiene, fixture + reference
+untouched.  (The other four modules had no blockless-fixture dependency and
+converted cleanly.)
