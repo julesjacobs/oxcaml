@@ -4040,6 +4040,7 @@ let rec sort_uses_lean = function
   | S_int | S_bool | S_other | S_iarray | S_param _ -> false
   | S_tuple comps | S_poly (_, comps) -> List.exists sort_uses_lean comps
   | S_data (_, args) -> List.exists sort_uses_lean args
+  | S_arrow (a, b) -> sort_uses_lean a || sort_uses_lean b
 ;;
 
 let dt_uses_lean_field = function
@@ -5296,6 +5297,7 @@ let dt_lean_sort_names decl =
     | S_lean (n, args) -> List.fold_left (fun a x -> go x a) (n :: acc) args
     | S_tuple cs | S_poly (_, cs) -> List.fold_left (fun a x -> go x a) acc cs
     | S_data (_, args) -> List.fold_left (fun a x -> go x a) acc args
+    | S_arrow (a, b) -> go b (go a acc)
     | S_int | S_bool | S_other | S_iarray | S_param _ -> acc
   in
   match decl with
