@@ -7,6 +7,9 @@ balance c l x r
 Hypotheses:
   ll = Node (Red, a, xa, b)
   l = Node (Red, ll, xl, lr)
+  not (exists_ *vox-ex*.
+     exists_ *vox-ex*.
+     exists_ *vox-ex*. l = Node (Black, *vox-ex*, *vox-ex*, *vox-ex*))
   c = Black
   empty = Leaf
   rb empty && empty = Leaf

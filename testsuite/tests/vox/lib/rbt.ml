@@ -19,62 +19,27 @@ let rec mem (x : int) (t : set) : bool{ _ = mem x t } =
     else if x < y then mem x l
     else mem x r
 
-(* Okasaki balance in two halves.  Colours are matched EXPLICITLY (as
-   their own shallow scrutinees) because vox surfaces a match arm's
-   negative information -- "an earlier arm failed" -- only for a
-   single-constructor pattern over variables (a nullary colour
-   qualifies; a deep [Node (Red, Node (Red, ..), ..)] does not).  With
-   the colours pinned positively, the model [balance] reduces to a
-   unique case and the arm's result is proved equal to it.  The
-   right-rotation cases are factored into [balance_r], whose left
-   argument is known conflict-free ([notRR]) at every call, letting the
-   checker rule out the left rotations there. *)
-let balance_r (l : tree) (x : int) (r : tree)
-  : tree{ _ = balanceR Black l x r } =
-  match r with
-  | Leaf -> Node (Black, l, x, r)
-  | Node (Black, _, _, _) -> Node (Black, l, x, r)
-  | Node (Red, rl, xr, rr) ->
-    match rl with
-    | Node (Red, b, y, cc) ->
-      Node (Red, Node (Black, l, x, b), y, Node (Black, cc, xr, rr))
-    | Leaf ->
-      (match rr with
-       | Node (Red, cc, z, d) ->
-         Node (Red, Node (Black, l, x, rl), xr, Node (Black, cc, z, d))
-       | Leaf -> Node (Black, l, x, r)
-       | Node (Black, _, _, _) -> Node (Black, l, x, r))
-    | Node (Black, _, _, _) ->
-      (match rr with
-       | Node (Red, cc, z, d) ->
-         Node (Red, Node (Black, l, x, rl), xr, Node (Black, cc, z, d))
-       | Leaf -> Node (Black, l, x, r)
-       | Node (Black, _, _, _) -> Node (Black, l, x, r))
-
+(* Okasaki balance in its NATURAL four-rotation-plus-fall-through form,
+   matched as a 4-tuple exactly like the model.  The earlier arms leave
+   the subtree corners (the [a]/[b]/[c]/[d] and pivots) as variables, so
+   the model [balance] overlaps their cases; each later arm learns the
+   deep-pattern NEGATIVE of every guard-free earlier arm
+   ([not (c = Black && exists f.., l = Node (Red, Node (Red, f..), f, f))]),
+   and its VC discharges by splitting the model match and refuting the
+   overlapping case with that negative.  No explicit colour scrutinees or
+   [balance_r] factoring is needed. *)
 let balance (c : color) (l : tree) (x : int) (r : tree)
   : tree{ _ = balance c l x r } =
-  match c with
-  | Red -> Node (Red, l, x, r)
-  | Black ->
-    match l with
-    | Leaf -> balance_r l x r
-    | Node (Black, _, _, _) -> balance_r l x r
-    | Node (Red, ll, xl, lr) ->
-      match ll with
-      | Node (Red, a, xa, b) ->
-        Node (Red, Node (Black, a, xa, b), xl, Node (Black, lr, x, r))
-      | Leaf ->
-        (match lr with
-         | Node (Red, b, y, cc) ->
-           Node (Red, Node (Black, ll, xl, b), y, Node (Black, cc, x, r))
-         | Leaf -> balance_r l x r
-         | Node (Black, _, _, _) -> balance_r l x r)
-      | Node (Black, _, _, _) ->
-        (match lr with
-         | Node (Red, b, y, cc) ->
-           Node (Red, Node (Black, ll, xl, b), y, Node (Black, cc, x, r))
-         | Leaf -> balance_r l x r
-         | Node (Black, _, _, _) -> balance_r l x r)
+  match c, l, x, r with
+  | Black, Node (Red, Node (Red, a, xa, b), y, cc), z, d ->
+    Node (Red, Node (Black, a, xa, b), y, Node (Black, cc, z, d))
+  | Black, Node (Red, a, xa, Node (Red, b, y, cc)), z, d ->
+    Node (Red, Node (Black, a, xa, b), y, Node (Black, cc, z, d))
+  | Black, a, xa, Node (Red, Node (Red, b, y, cc), z, d) ->
+    Node (Red, Node (Black, a, xa, b), y, Node (Black, cc, z, d))
+  | Black, a, xa, Node (Red, b, y, Node (Red, c, z, d)) ->
+    Node (Red, Node (Black, a, xa, b), y, Node (Black, c, z, d))
+  | c, l, x, r -> Node (c, l, x, r)
 
 let rec ins (x : int) (t : tree) : tree{ _ = ins x t } =
   match t with
@@ -98,4 +63,3 @@ let paint_black (t : tree) : tree{ _ = paintBlack t } =
 let add (x : int) (t : set) : set{ _ = add x t && mem x _ } =
   let t' = ins x t in
   paint_black t'
-

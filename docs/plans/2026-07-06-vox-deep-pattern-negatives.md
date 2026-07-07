@@ -133,3 +133,39 @@ whose spine is determined but whose leaves are variables (e.g.
 Red" at a sub-position, which needs field access (Option 2) or the
 existential (Option 1); it is not ground, so the task-#22 ground path does not
 fire. Nothing to add to part 1.
+
+## OUTCOME (implemented, task #38 part 2)
+
+Option 1 was probed and built. The empirical question resolved with a twist:
+
+- **grind will NOT instantiate the existential negative under a plain
+  `by grind` goal.** Every shape was tried against the real solver on the
+  natural-Okasaki arm-2 VC — whole-tuple `¬∃`, component `¬∃`, component
+  `∀`-NNF disequality, and even the ideal negative stated directly on the
+  split sub-position. grind derives the conditional match-reduction fact but
+  does not discharge its `∀`-antecedent. `grind (splits:=100) (ematch:=100)`,
+  `+splitImp`, `+splitIndPred` do not help.
+- **The negatives ARE sufficient once the spec function's match is split.**
+  The tactic `unfold <spec fn>; split <;> grind` (uniform, no variable names)
+  closes all four rotation arms and the catch-all. So Option 1 works, but a VC
+  that carries a deep existential negative must be emitted with the proof
+  fallback `by first | grind | (unfold <goal spec fns>; split <;> grind)`
+  instead of `by grind`. `first | grind | …` keeps every already-passing VC
+  byte-identical; the fallback fires only on grind failure, and `split <;>
+  grind` is sound, so no false goal becomes provable.
+
+No new logic primitive was needed (existing `Pquant`/`Pconstr`/`Pand`/`Pbinop`;
+the Lean encoder already renders `Pquant` as `(∃ v, …)`). The only additions
+are `pattern_negation`'s existential fallback (single-constructor + tuple) and
+the per-VC split fallback in `lean_theorem`.
+
+**Soundness knife-edge:** the tuple negative must be the negation of the FULL
+conjunction over pinned components, INCLUDING every nullary-constructor pin
+(`c = Black`). Dropping a pin over-strengthens the negation and is unsound
+(the catch-all has `c` free). Guarded by `mechanics/lean_patneg_fail.ml`.
+
+Gate met: `lib/rbt.ml` now uses the natural four-rotation `balance` (dropped
+the explicit-colour scrutinees and the `balance_r` helper) and verifies
+against the sealed `lib/rbt.mli`. Tests: `mechanics/lean_patneg.ml`
+(single-scrutinee positive), `mechanics/lean_patneg_fail.ml` (soundness),
+`mechanics/lean_rbt.ml` (the natural gate, via the updated `lib/rbt.ml`).

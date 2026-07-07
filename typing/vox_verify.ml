@@ -2697,6 +2697,56 @@ let pattern_negation
     | S_int | S_param _ | S_tuple _ | S_iarray | S_poly _ | S_lean _ | S_other ->
       None
   in
+  (* Reconstruct a pattern as a logic TERM, minting a fresh existential
+     binder for every variable/wildcard leaf and PINNING every constant
+     and constructor position.  [None] whenever a node cannot be
+     represented faithfully (a record, a nested tuple, an or-pattern):
+     over-generalising a pinned position would weaken the match predicate
+     and unsoundly strengthen its negation, so the whole negative is
+     abandoned instead. *)
+  let rec reconstruct (p : value general_pattern)
+    : (Refinement.pred * Ident.t list) option
+    =
+    match p.pat_desc with
+    | Tpat_var _ | Tpat_any ->
+      let e = Ident.create_local "*vox-ex*" in
+      Some (Refinement.Pvar e, [ e ])
+    | Tpat_constant (Const_int n) -> Some (Refinement.Pint n, [])
+    | Tpat_alias { pattern = sub; _ } -> reconstruct sub
+    | Tpat_construct (_, cstr, _, args, _) -> reconstruct_construct cstr args
+    | _ -> None
+  and reconstruct_construct cstr args =
+    let path = Data_types.cstr_res_type_path cstr in
+    match datatype_sort env path [] with
+    | S_data (_, _) ->
+      let rec go terms ids = function
+        | [] -> Some (List.rev terms, ids)
+        | (_, a) :: rest ->
+          (match reconstruct a with
+           | Some (t, is_) -> go (t :: terms) (ids @ is_) rest
+           | None -> None)
+      in
+      (match go [] [] args with
+       | Some (terms, ids) ->
+         Some (Refinement.Pconstr (path, cstr.Data_types.cstr_name, terms), ids)
+       | None -> None)
+    | S_bool ->
+      (match cstr.Data_types.cstr_name with
+       | "true" -> Some (Refinement.Pbool true, [])
+       | "false" -> Some (Refinement.Pbool false, [])
+       | _ -> None)
+    | S_int | S_param _ | S_tuple _ | S_iarray | S_poly _ | S_lean _ | S_other ->
+      None
+  in
+  let wrap_exists ids body =
+    List.fold_right
+      (fun id acc -> Refinement.Pquant (Refinement.Qexists, id, acc))
+      ids
+      body
+  in
+  let trivial (p : value general_pattern) =
+    match p.pat_desc with Tpat_var _ | Tpat_any -> true | _ -> false
+  in
   let head_negation cstr args =
     let path = Data_types.cstr_res_type_path cstr in
     match datatype_sort env path [] with
@@ -2718,26 +2768,78 @@ let pattern_negation
   let ground_neg t =
     Refinement.Pnot (Refinement.Pbinop (Refinement.Eq, subject, t))
   in
+  (* The deepest sound negative for a constructor pattern that has
+     variable/wildcard leaves: [not (exists f.., subject = C (..f..))],
+     the leaves existentially bound and every other position pinned.
+     Grind will not instantiate it under a plain goal, but once the spec
+     function's match is [split] it refutes the overlapping model case
+     (see [lean_theorem]'s split fallback, keyed on this existential). *)
+  let exists_construct_neg cstr args =
+    match reconstruct_construct cstr args with
+    | Some (term, ids) ->
+      Some
+        (Refinement.Pnot
+           (wrap_exists ids (Refinement.Pbinop (Refinement.Eq, subject, term))))
+    | None -> None
+  in
   let construct_neg cstr args =
-    (* Prefer the head test (no churn on shallow arms); fall back to the
-       ground equality when a sub-pattern is a literal or nested
-       constructor. *)
+    (* Prefer the head test (no churn on shallow arms); then the ground
+       equality (a literal / nested-constructor payload); finally the
+       existential negative for a deep pattern with variable leaves. *)
     match head_negation cstr args with
     | Some n -> Some n
     | None ->
       (match ground_construct cstr args with
        | Some t -> Some (ground_neg t)
-       | None -> None)
+       | None -> exists_construct_neg cstr args)
+  in
+  (* A tuple (multi-scrutinee) earlier arm failed to match iff some
+     PINNED component does not match; the sound negative is the negation
+     of the CONJUNCTION over the non-trivial components, each an
+     existential component equality [exists f.., subject.i = <recon>].  A
+     bare-variable component always matches and is dropped; an
+     unrepresentable pinned component abandons the whole negative
+     (dropping it would weaken the conjunction). *)
+  let tuple_neg comps =
+    if List.exists (fun (lbl, _) -> Option.is_some lbl) comps
+    then None
+    else begin
+      let n = List.length comps in
+      let rec build i acc = function
+        | [] -> Some (List.rev acc)
+        | (_, comp) :: rest ->
+          if trivial comp
+          then build (i + 1) acc rest
+          else (
+            match reconstruct comp with
+            | Some (term, ids) ->
+              let conj =
+                wrap_exists ids
+                  (Refinement.Pbinop
+                     (Refinement.Eq, Refinement.Pproj (n, i, subject), term))
+              in
+              build (i + 1) (conj :: acc) rest
+            | None -> None)
+      in
+      match build 0 [] comps with
+      | Some [] | None -> None
+      | Some (h :: t) ->
+        Some
+          (Refinement.Pnot
+             (List.fold_left (fun a c -> Refinement.Pand (a, c)) h t))
+    end
   in
   let value_neg (p : value general_pattern) =
     match p.pat_desc with
     | Tpat_construct (_, cstr, _, args, _) -> construct_neg cstr args
     | Tpat_constant (Const_int n) -> Some (ground_neg (Refinement.Pint n))
+    | Tpat_tuple comps -> tuple_neg comps
     | _ -> None
   in
   match pat.pat_desc with
   | Tpat_value p -> value_neg (p :> value general_pattern)
   | Tpat_construct (_, cstr, _, args, _) -> construct_neg cstr args
+  | Tpat_tuple comps -> tuple_neg comps
   | _ -> None
 ;;
 
@@ -5440,6 +5542,57 @@ let cmi_export_of_structure (str : structure) (sg : Types.signature) =
 ;;
 
 
+(* A verification condition needs the match-splitting proof fallback
+   exactly when it carries a deep-pattern existential negation (a [Pnot]
+   over a [Pquant Qexists ...]): grind will not instantiate such a
+   negative under a plain goal, but once the spec function's match is
+   [split] the negation refutes the overlapping model case.  Ordinary
+   negatives ([not (s is C)], ground disequalities) carry no existential
+   and keep the plain [by grind]. *)
+let rec pred_has_exists (p : Refinement.pred) =
+  let open Refinement in
+  match p with
+  | Pquant (Qexists, _, _) -> true
+  | Pquant (Qforall, _, a) | Pnot a | Pfield (_, _, a) | Pis (_, _, a)
+  | Pproj (_, _, a) -> pred_has_exists a
+  | Pconstr (_, _, args) | Pfun (_, args) | Ptuple args ->
+    List.exists pred_has_exists args
+  | Pbinop (_, a, b) | Pand (a, b) | Por (a, b) | Pimp (a, b) ->
+    pred_has_exists a || pred_has_exists b
+  | Pbound | Pvar _ | Pglobal _ | Pint _ | Pbool _ -> false
+;;
+
+let vc_needs_split vc =
+  List.exists
+    (fun f ->
+      match f with Refinement.Pnot b -> pred_has_exists b | _ -> false)
+    vc.vc_facts
+;;
+
+(* The spec-function heads applied in a predicate, outermost-first and
+   de-duplicated: the definitions the split fallback [unfold]s so the
+   match they wrap becomes visible to [split]. *)
+let pfun_heads p =
+  let acc = ref [] in
+  let add f = if not (List.mem f !acc) then acc := !acc @ [ f ] in
+  let rec go (p : Refinement.pred) =
+    let open Refinement in
+    match p with
+    | Pfun (f, args) ->
+      add f;
+      List.iter go args
+    | Pconstr (_, _, args) | Ptuple args -> List.iter go args
+    | Pfield (_, _, a) | Pis (_, _, a) | Pproj (_, _, a) | Pnot a
+    | Pquant (_, _, a) -> go a
+    | Pbinop (_, a, b) | Pand (a, b) | Por (a, b) | Pimp (a, b) ->
+      go a;
+      go b
+    | Pbound | Pvar _ | Pglobal _ | Pint _ | Pbool _ -> ()
+  in
+  go p;
+  !acc
+;;
+
 let lean_theorem ?(explain = false) buf i vc =
   Buffer.add_string buf (Printf.sprintf "theorem vc_%d " i);
   let seen = Hashtbl.create 16 in
@@ -5549,7 +5702,18 @@ let lean_theorem ?(explain = false) buf i vc =
      [-vox-explain-proofs] REPORT, in a second pass over a file [grind]
      has already fully verified (see [run_lean]); the verdict always
      comes from [grind]. *)
-  Buffer.add_string buf (if explain then " := by grind?\n" else " := by grind\n")
+  if vc_needs_split vc
+  then begin
+    let tail = if explain then "grind?" else "grind" in
+    let prefix =
+      match pfun_heads vc.vc_goal with
+      | [] -> ""
+      | fs -> "unfold " ^ String.concat " " fs ^ "; "
+    in
+    Buffer.add_string buf
+      (Printf.sprintf " := by first | grind | (%ssplit <;> %s)\n" prefix tail)
+  end
+  else Buffer.add_string buf (if explain then " := by grind?\n" else " := by grind\n")
 ;;
 
 (* Returns the file contents and, per theorem, the 1-based line it
