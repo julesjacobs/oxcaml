@@ -6003,6 +6003,29 @@ let lean_file ?(witness = "") ?(explain = false) vcs =
     ~filter:dt_uses_lean_field;
   if Buffer.length own_lean_decls > 0 then seg (Buffer.contents own_lean_decls);
   List.iter emit_block own_post;
+  (* Sealing self-unit view-model blocks (task #69): a sig-module block
+     that references a held-back view datatype -- a model def OVER the
+     view (e.g. [vv_depth : ..._vlist_view -> Int]) -- is re-elaborated
+     inside the seal's [VoxSealSig] namespace, but the implementation's
+     OUTER-scope VCs also need it (a VC spec may read [_ = vv_depth v]).
+     Unlike the ghost-sort-defining blocks -- whose defs the
+     implementation restates over its own representation ([ll_repr]...) --
+     a view-model block names only the exposed view, so it is spliced
+     verbatim here (AFTER the held-back view datatype it references)
+     rather than paid as a duplication tax.  Any interface axiom in it is
+     still discharged at the seal; splicing the block outer only publishes
+     its definitions, and the [VoxSealSig] namespace keeps the seal's own
+     copies distinct. *)
+  (match self_vp with
+   | Some vp when sealing && not splice_self ->
+     List.iter
+       (fun s ->
+         if block_mentions_holdback own_hb s
+         then
+           seg ~src:(Imported_block this_unit)
+             (publicize_ghost_decls ghost_names s))
+       vp.Cmi_format.vp_blocks
+   | _ -> ());
   (* Bound elaboration per theorem: a diverging [grind] must count as
      a verification failure, not hang the build.  (A wedged process
      outside elaboration remains out of scope.)  Emitted

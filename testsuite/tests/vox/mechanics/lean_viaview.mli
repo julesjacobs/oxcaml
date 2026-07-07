@@ -20,8 +20,9 @@
    (1) the ghost-sort-defining block ([inductive LList] + ll ops) comes
        BEFORE [type vlist_view]; (2) the view-referencing model def
        ([vv_depth]) is in a SEPARATE block AFTER it; (3) that view-model
-       block is repeated in the .ml so the implementation VCs over the
-       view can see it (pending the seal-path splice, task #69). *)
+       block lives ONLY in the .mli -- task #69's seal-path splice makes
+       the interface's copy available to the implementation's VCs over the
+       view, so it is NOT restated in the .ml. *)
 
 (* Vlist: a verified list behind a via-ABSTRACTED interface.  The
    representation is an ordinary cons-list, but this .mli hides it: [t]
@@ -156,7 +157,8 @@ val append : (a : t) -> (b : t) -> t{ _ = ll_app a b }
 
 (* First-order destructor (Mech B equivalent): guarded head/tail let a client
    traverse structurally -- `if is_empty l then base else recurse (tail l)`.
-   The view-ADT form `uncons : t -> (VNil | VCons of int * t)` is blocked by a
-   compiler universe bug on via-typed ADT fields (see notes/vlist.md). *)
+   The view-ADT form `uncons : t -> (VNil | VCons of int * t)` is now
+   expressible: task #63 fixed the via-typed-ADT-field universe bug (this
+   file's [vlist_view] + [classify] exercise it). *)
 val head : (l : t) -> int{ _ = ll_head l }
 val tail : (l : t) -> t{ _ = ll_tail l }

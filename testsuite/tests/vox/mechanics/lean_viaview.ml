@@ -1,6 +1,8 @@
 (* Implementation for lean_viaview.mli -- see its header for the
-   view-ADT authoring rule (split ghost-sort / view-model blocks; the
-   view-model block is repeated here for the impl-side VCs). *)
+   view-ADT authoring rule (split ghost-sort / view-model blocks).  The
+   ghost-sort block IS restated here (it defines [ll_repr] over the
+   concrete repr); the view-model block is NOT -- task #69's seal-path
+   splice makes the .mli's [vv_depth] available to [classify]'s VC. *)
 
 (* Pays Vlist.mli's obligations over the concrete cons-list repr.  The
    model defs are RESTATED here without [public] (the model-duplication
@@ -169,11 +171,6 @@ let tail : (l : t) -> t{ _ = ll_tail l } =
 
 type vlist_view = VNil | VCons of int * t
 
-[%%vox.lean {lean|
-@[grind, expose] public def vv_depth : Vox_Lean_viaview_vlist_view -> Int
-  | .VNil => 0
-  | .VCons _ _ => 1
-|lean}]
 
 let classify (v : vlist_view) : int{ _ = vv_depth v } =
   match v with
