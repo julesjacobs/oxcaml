@@ -147,7 +147,16 @@ let dranges = ref false
 
 let opt_level = ref Default
 
-let internal_assembler = ref false
+let internal_assembler =
+  (* Default the internal assembler ON for x86-64 ELF targets: the binary
+     emitter produces ELF and is registered only on amd64 (see
+     [Amd64.Emit.begin_assembly]).  Keep the system assembler on Mach-O /
+     Windows / other targets.  Still selectable with -internal-assembler. *)
+  ref
+    (String.equal Config.architecture "amd64"
+    && (match Config.system with
+        | "linux" | "linux_elf" | "gnu" | "bsd_elf" -> true
+        | _ -> false))
 
 let verify_binary_emitter = ref false
 
