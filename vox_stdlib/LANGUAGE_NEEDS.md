@@ -474,13 +474,55 @@ dependency artifact; the integrator freezes and refreshes it once. Recorded as
 the "one snapshot per dependency wave" rule; drove the check_wave1/2 per-module
 `mod_deps` + fail-loud dep-staging (the DAG is now explicit in the harness).
 
-### C1 tally + refine_-on-refined-via (running)
-- **C1** (dependent-arg must be a nameable variable) now at **8+ sites** —
-  every eliminator call too (`Vset.add h (of_list tl)`, nested `of_list`).
-  Unchanged dominant friction; auto-ANF of pure arguments remains the fix.
-- **refine_ on a refined via type** (`t{ ll_iscons _ }`) is rejected;
-  workaround = alias to the unrefined `t` first (`let lu = (l : t) in let
-  refine_ t0 = lu`). Same via-binder-sorting family as #31.
+### C1 — LARGELY REMOVED by #53 (post-landing, 2026-07-07)
+Task #53 (dependent-argument reflectable consistency) LANDED on vox
+(1bd9c3698). The C1 de-contortion micro-pass over vox_stdlib removed the
+let-binds everywhere the natural nested form now verifies, and pinned down
+the exact remaining boundaries. **The determinant is the CALLEE's result
+contract**, not "call vs variable":
+- **REMOVED (equational / reflectable):** a dependent-arg that is a reflectable
+  expression (constructor `Vsome x`/`Vok x`, literal, arith, field) OR a call
+  whose result contract is EXACT/EQUATIONAL (`{ _ = f ... }`) now inlines.
+  De-contorted inline across smoke_voption, smoke_vresult, smoke_Vlist (incl.
+  the reconstruction `length (cons (head l) (tail l))` — the trigger
+  materializes inline), smoke_vset_bst (incl. nested `member y (remove x
+  (insert y s))`), smoke_Vplist, and the equational half of smoke_vmap/vpmap
+  (find/add/empty). ~30 let-binds deleted.
+- **KEPT — relational-contract boundary (NEW finding):** a call whose result
+  contract is RELATIONAL (∀), e.g. `vs_addspec`/`vs_removespec`/`vs_isempty`/
+  `vs_elements_spec` (all of Vset), `m_remove_spec`/`m_keys_spec` (Vmap/Vpmap
+  remove & keys), is NOT an "exact result contract" #53 can substitute, so its
+  result must STILL be let-bound before feeding a dependent parameter. This is
+  the dominant residual in the via-abstract set/map modules (their whole point
+  is ∀-membership specs). **Ask:** extend #53 substitution to a relational
+  result contract (name the result + carry its ∀-fact), or accept this as the
+  permanent boundary.
+- **KEPT — constructor-wrapping-a-tier-2-call boundary (team-lead's shape):**
+  `client_opt_result.ok_then_some` (`get_or 0 (Vsome (get_ok_or d (Vok x)))`)
+  stays fully let-bound. Every inline variant is **DISPROVED** (a false
+  counterexample for a true goal) — even inlining just the innermost `Vok x`
+  into get_ok_or (which verifies standalone in smoke_vresult) makes the goal
+  DISPROVED once that result is let-bound and fed downstream through a
+  constructor into another dependent op. A #53 sharp edge worth a look: the
+  failure is DISPROVED, not a clean C1 rejection.
+- **KEPT — `&&`/`||` operand must be a bool VARIABLE (NEW finding):** a
+  dependent-arg call used DIRECTLY as an `&&` operand mis-models —
+  `is_ok (Vok x) && is_some (Vsome x)` is **DISPROVED** even though each
+  operand verifies alone, and half-inlining is NOT PROVED. Let-binding the
+  bool result of each call before the `&&` fixes it (`let ok = … in let some =
+  … in ok && some` is GREEN). So the C1 constructor-arg inline is fine, but the
+  bool result feeding `&&` must be named. Bit `client_opt_result.ok_and_some`
+  and `client_set_of_list.head_in_both`. **Ask:** thread the reflected fact of
+  an inline dependent-arg call through `&&`/`||`, or document the let-the-bool
+  rule. (Same family as the short-circuit fact-threading item.)
+- **client function results (no contract):** `client_dedup.of_list` — a client
+  recursive fn has no result refinement, so its result feeding `Vset.add`'s
+  dependent set param stays let-bound; its own `head l`/`tail l` args (EQ)
+  inline. Expected — only spec'd callees can substitute.
+- **refine_ on a refined via type** (`t{ ll_iscons _ }`) is still rejected;
+  workaround = alias to the unrefined `t` first. Same via-binder-sorting family
+  as #31; unaffected by #53 (it is a `refine_` sorting issue, not dependent-arg
+  naming).
 
 ---
 
@@ -500,14 +542,18 @@ validated against the new compiler; this table supersedes the per-note
 | Vset add / remove: inline-ctor re-match of the backend result | #31 / (note: "natural already worked") | **REMOVED** | direct coerce `(r : t{ … })` of the let-bound backend result verifies for both add and remove; the triset-era re-match deleted. |
 | of_list guarded traversal (Vlist→Vset dedup) blocked by #32 (head precondition not threaded through `if is_empty`) | #32 | **REMOVED (ADDED as client)** | with total head/tail the traversal needs no `¬ll_isnil` fact; `clients/client_dedup.ml` (of_list + dedup_elems, Vlist→Vset→Vlist) verifies — the F-2 dedup the usability review wanted is now expressible. |
 | Vlist.append: skeleton-thread (inner `go` over `tree` with `ll_repr` explicit + inject once) | #31 | **KEPT — claim REFUTED** | natural recursion over the via `t` with an image-spec (`go : t -> t{ _ = ll_app u b }`, via raw `Cons` OR the `cons` op) still FAILS at the base: `Goal 0=0 && ll_repr b = ll_app u b` — the base-case image doesn't reduce. This is orthogonal to #31 (a let-bound via value's *fact*): building/recursing a via result at the skeleton with an image-spec still needs the skeleton-thread. **Ask:** reduce a via-recursion image-spec at the base without the explicit-`ll_repr` skeleton helper. |
-| C1: dependent-arg must be a let-bound variable (all ops + eliminators + `Vset.add h (of_list tl)`) | task #53 (ANF) | **PENDING-#53** | left as-is per instruction; #53 (reflectable-inline / auto-ANF) in flight will subsume. |
+| C1: dependent-arg must be a let-bound variable (all ops + eliminators) | task #53 (reflectable-inline) | **MOSTLY REMOVED (#53 landed 1bd9c3698)** | ~30 let-binds deleted where the callee's result is reflectable/EQUATIONAL. KEPT-boundary (3 kinds, all documented above): (a) RELATIONAL (∀) result contracts — Vset add/remove/empty/elements, Vmap/Vpmap remove/keys; (b) a constructor WRAPPING a tier-2 call (ok_then_some — inline is DISPROVED); (c) a dependent-arg call as a bare `&&`/`||` operand (must let-bind the bool — inline is DISPROVED). See the "C1 — LARGELY REMOVED by #53" section. |
 
 **Net:** 3 workarounds REMOVED (head/tail precondition+alias, Vset add/remove
 re-match, of_list traversal → new dedup client), 1 **NOT REMOVED / claim
 RETRACTED** (the view-ADT universe bug is UNFIXED at 04f02386d — re-probed
 2026-07-07; the interim "FIXED" entry was an un-probed error, now corrected),
 1 KEPT with its removed-by claim refuted (append skeleton-thread — #31 does
-not cover via-recursion image-specs), 1 PENDING-#53 (C1). The two genuinely
+not cover via-recursion image-specs), 1 was PENDING-#53 (C1) — now
+**RESOLVED**: #53 landed (1bd9c3698) and the C1 micro-pass removed ~30
+let-binds, leaving three documented boundaries (relational-contract results;
+constructor-wrapping-a-tier-2-call; and a dependent-arg call as a bare `&&`
+operand — the last two fail as DISPROVED, a #53 sharp edge). The two genuinely
 load-bearing NEGATIVE findings are (a) the **view-ADT universe bug** (still
 blocks every view/pop eliminator — total head/tail is the shipped alternative)
 and (b) the **append via-recursion image-spec base non-reduction**. The one
@@ -604,7 +650,10 @@ uncons_universe_{min_,}repro.mli`. Vlist untouched (total head/tail retained);
 the adoption waits on deep-neg's #63.
 
 ### Process
-C1 (dependent-arg must be a nameable variable) recurs unchanged in the poly
-modules (nested op-call results let-bound in every smoke). Manifest reconciled
+C1 (dependent-arg must be a nameable variable) recurred unchanged in the poly
+modules at v1.5-wave time (nested op-call results let-bound in every smoke) —
+since RESOLVED by #53; the poly smokes were de-contorted in the C1 micro-pass
+(cons/append/add/find inline; remove/keys keep the relational-contract let).
+See the "C1 — LARGELY REMOVED by #53" section. Manifest reconciled
 clean (three leaf wave-3 rows, no dup despite three concurrent builder edits);
 artifact freeze is a no-op for this wave (all leaf, no inter-module deps).

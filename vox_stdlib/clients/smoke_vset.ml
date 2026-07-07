@@ -19,8 +19,11 @@
      [vs_subset] as CONSUMABLE goals: a client discharges them from the vs_mem
      algebra without writing its own quantifier (F-3).
 
-   Nested call results are let-bound before the dependent call (the C1
-   named-call-result-injection restriction). *)
+   Post-#53 (finding C1): Vset's ops (add/remove/empty/elements) carry
+   RELATIONAL (forall) result contracts (vs_addspec / vs_removespec /
+   vs_isempty / vs_elements_spec), NOT an exact equational one, so #53 canNOT
+   substitute them -- their results are STILL let-bound before the dependent
+   [mem] call (the relational-contract boundary; see LANGUAGE_NEEDS). *)
 
 open Vset
 open Vlist

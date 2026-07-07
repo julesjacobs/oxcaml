@@ -17,23 +17,21 @@
    - [ok_after_insert] forces bok_insert (bok of a symbolic bins).
    - [ok_after_remove] forces bok_delete (bok of a symbolic bdel).
 
-   Call results feeding a dependent parameter ([member]/[insert]/[remove] take
-   a [set]) are let-bound to a variable first (workaround C1; see notes). *)
+   Post-#53 (finding C1): insert/remove have EQUATIONAL result contracts
+   ({ _ = bins/bdel ... }), so their call results now pass INLINE to member's
+   dependent [set] param -- the C1 let-binds are removed, including the nested
+   member y (remove x (insert y s)) (see notes). *)
 open Vset_bst
 
 let inserted_is_member (x : int) (s : set) : bool{ _ = true } =
-  let s' = insert x s in
-  member x s'
+  member x (insert x s)
 
 let removed_is_absent (x : int) (s : set) : bool{ _ = false } =
-  let s' = remove x s in
-  member x s'
+  member x (remove x s)
 
 let member_survives_other_remove (x : int) (y : int{ _ <> x }) (s : set)
   : bool{ _ = true } =
-  let s1 = insert y s in
-  let s2 = remove x s1 in
-  member y s2
+  member y (remove x (insert y s))
 
 let ok_after_insert (x : int) (s : set) : unit{ bok (bins x s) } = ()
 

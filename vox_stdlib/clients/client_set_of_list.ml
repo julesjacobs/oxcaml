@@ -18,8 +18,9 @@
    different op/law names, adjust these three references at part-3 verify. *)
 
 let head_in_both (x : int) (l : Vlist.t) (s : Vset.t) : bool{ _ = true } =
-  let l' = Vlist.cons x l in
+  (* Vlist.cons is equational -> inlines into mem (C1 REMOVED); Vset.add is
+     RELATIONAL (vs_addspec) -> s' KEPT; inl/ins bound for the && threading. *)
   let s' = Vset.add x s in
-  let inl = Vlist.mem x l' in
+  let inl = Vlist.mem x (Vlist.cons x l) in
   let ins = Vset.mem x s' in
   inl && ins

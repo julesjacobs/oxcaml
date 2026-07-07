@@ -11,10 +11,8 @@ let rec of_list (l : Vlist.t) : Vset.t =
   if Vlist.is_empty l
   then Vset.empty ()
   else (
-    let h = Vlist.head l in
-    let tl = Vlist.tail l in
-    let rest = of_list tl in
-    Vset.add h rest)
+    let rest = of_list (Vlist.tail l) in
+    Vset.add (Vlist.head l) rest)
 ;;
 
 (* the reviewer's dedup: elements of the set of a list's elements *)

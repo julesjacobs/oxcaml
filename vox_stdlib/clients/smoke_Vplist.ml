@@ -12,8 +12,9 @@
    forced under a [{ _ = pl_nil }] client HYPOTHESIS: [empty] is unspecced
    (study F-B2), so a client cannot derive [pl_nil] from [empty ()], but it
    CAN assert a list is empty as a precondition -- which is exactly how these
-   two laws stay client-reachable.  Nested op-call results are let-bound (C1
-   friction; see notes/vplist.md). *)
+   two laws stay client-reachable.  Post-#53 (finding C1): cons/append have
+   EQUATIONAL result contracts, so their results pass INLINE to a dependent
+   parameter -- the C1 let-binds are removed (see notes/vplist.md). *)
 
 (* ===== int Vplist.t ===== *)
 
@@ -22,18 +23,15 @@ let i_nonneg (l : int Vplist.t) : int{ _ >= 0 } = Vplist.length l
 
 (* pl_len_cons *)
 let i_len_cons (x : int) (l : int Vplist.t) : int{ _ = 1 + pl_len l } =
-  let l' = Vplist.cons x l in
-  Vplist.length l'
+  Vplist.length (Vplist.cons x l)
 
 (* pl_len_app *)
 let i_len_app (p : int Vplist.t) (q : int Vplist.t) : int{ _ = pl_len p + pl_len q } =
-  let pq = Vplist.append p q in
-  Vplist.length pq
+  Vplist.length (Vplist.append p q)
 
 (* pl_not_isnil_cons *)
 let i_cons_not_empty (x : int) (l : int Vplist.t) : bool{ _ = false } =
-  let l' = Vplist.cons x l in
-  Vplist.is_empty l'
+  Vplist.is_empty (Vplist.cons x l)
 
 (* pl_isnil_nil (forced under a { _ = pl_nil } hypothesis) *)
 let i_nil_is_empty (l : int Vplist.t{ _ = pl_nil }) : bool{ _ = true } =
@@ -55,19 +53,16 @@ let s_nonneg (l : string Vplist.t) : int{ _ >= 0 } = Vplist.length l
 
 (* pl_len_cons *)
 let s_len_cons (x : string) (l : string Vplist.t) : int{ _ = 1 + pl_len l } =
-  let l' = Vplist.cons x l in
-  Vplist.length l'
+  Vplist.length (Vplist.cons x l)
 
 (* pl_len_app *)
 let s_len_app (p : string Vplist.t) (q : string Vplist.t)
   : int{ _ = pl_len p + pl_len q } =
-  let pq = Vplist.append p q in
-  Vplist.length pq
+  Vplist.length (Vplist.append p q)
 
 (* pl_not_isnil_cons *)
 let s_cons_not_empty (x : string) (l : string Vplist.t) : bool{ _ = false } =
-  let l' = Vplist.cons x l in
-  Vplist.is_empty l'
+  Vplist.is_empty (Vplist.cons x l)
 
 (* pl_isnil_nil *)
 let s_nil_is_empty (l : string Vplist.t{ _ = pl_nil }) : bool{ _ = true } =

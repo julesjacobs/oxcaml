@@ -37,9 +37,13 @@ is load-bearing.
   a pure expression the logic can name (let-bind it first)`.
 - **workaround used:** let-bind every nested call result / coercion first
   (`let l' = Vlist.cons x l in Vlist.length l'`), then pass the variable.
-- **removed by:** naming call results automatically (ANF the argument, or admit
-  a call whose result type the logic can already name).
-- **severity:** MINOR (mechanical, but pervasive — hits every nested call).
+- **removed by:** REALIZED by #53 (landed 1bd9c3698): a call with an EQUATIONAL
+  result contract now inlines into a dependent parameter. All this note's sites
+  (length/mem/append/head/tail, and the reconstruction cons(head l)(tail l))
+  are de-contorted in the C1 micro-pass. Boundary: a call with a RELATIONAL (∀)
+  result contract still needs the let — see LANGUAGE_NEEDS "C1 — LARGELY
+  REMOVED by #53".
+- **severity:** MINOR (was pervasive; now mostly gone post-#53).
 
 ### Vlist · statement typed twice (obligation pattern M1)
 - **site:** vox_stdlib/Vlist.mli:36-58 (5 `public axiom`s) vs vox_stdlib/Vlist.ml:38-63

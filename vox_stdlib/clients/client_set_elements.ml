@@ -8,6 +8,6 @@
    args are let-bound (C1). *)
 
 let roundtrip (x : int) (s : Vset.t) : bool{ _ = true } =
-  let s' = Vset.add x s in          (* vs_addspec s' x s : vs_mem x s' = true *)
-  let es = Vset.elements s' in      (* vs_elements_spec es s' : ll_mem x es = vs_mem x s' *)
-  Vlist.mem x es                    (* = ll_mem x es = vs_mem x s' = true *)
+  let s' = Vset.add x s in
+  let es = Vset.elements s' in
+  Vlist.mem x es

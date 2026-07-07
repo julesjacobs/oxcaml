@@ -9,33 +9,35 @@
    [m_find] applications (never naming the [mopt] constructors, which the
    refinement grammar rejects -- see notes/vmap.md): the only way to prove
    the two sides equal is for the relevant law to rewrite each to the same
-   normal form.  Verified against Vmap.cmi + VoxSig_Vmap.olean. *)
+   normal form.  Verified against Vmap.cmi + VoxSig_Vmap.olean.
+
+   Post-#53 (finding C1): find/add/empty have EQUATIONAL result contracts
+   ({ _ = m_find/m_add/m_empty }) so their results inline into a dependent
+   parameter (C1 let-binds removed); remove/keys have RELATIONAL contracts
+   (m_remove_spec / m_keys_spec) so their results are STILL let-bound (the
+   relational-contract boundary -- see LANGUAGE_NEEDS). *)
 
 open Vmap
 
 (* forces m_isempty_empty : m_isempty m_empty *)
 let empty_is_empty : bool{ _ = true } =
-  let e = Vmap.empty () in
-  Vmap.is_empty e
+  Vmap.is_empty (Vmap.empty ())
 
 (* forces m_find_empty : find on empty is key-independent (both -> MMiss) *)
 let find_empty_eq (k1 : int) (k2 : int) : mopt{ _ = m_find k2 m_empty } =
-  let e = Vmap.empty () in
-  Vmap.find k1 e
+  Vmap.find k1 (Vmap.empty ())
 
 (* forces m_find_add_eq : find of the just-added key is map-independent
    (both -> MFound v) *)
 let find_added_eq (k : int) (v : int) (m1 : Vmap.t) (m2 : Vmap.t) :
     mopt{ _ = m_find k (m_add k v m2) } =
-  let a = Vmap.add k v m1 in
-  Vmap.find k a
+  Vmap.find k (Vmap.add k v m1)
 
 (* forces m_find_add_ne : find sees through a shadowing add of a different
    key.  Ground distinct keys (1, 2): grind discharges 1 <> 2, then the
    law carries find through the add. *)
 let find_added_other (v : int) (m : Vmap.t) : mopt{ _ = m_find 1 m } =
-  let a = Vmap.add 2 v m in
-  Vmap.find 1 a
+  Vmap.find 1 (Vmap.add 2 v m)
 
 (* forces m_remove_spec at k' = k: the removed key misses (compare to empty).
    The ∀ lives in m_remove_spec (F-3): the client writes no quantifier, it
