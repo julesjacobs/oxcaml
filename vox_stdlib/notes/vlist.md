@@ -151,6 +151,28 @@ is load-bearing.
   via/custom-sort field's universe (so an exposed ADT may carry a via-typed
   field). Also unblocks Vset/Vmap `pop`-style views.
 - **severity:** BLOCKING (for view-ADT eliminators over via types).
+- **STATUS 2026-07-07 (v1.5 uncons-adoption attempt — bug NOT fixed):** the
+  v1.5 quest premised that this was fixed on the current base (origin/vox
+  04f02386d); it is NOT (compiler task #63 "derived-inductive universe pin" is
+  still in_progress).  SHARPENED trigger, isolated by probe:
+    - `type vlist_view = VNil | VCons of int * t` ALONE compiles (OK).
+    - `val uncons : (l : t) -> vlist_view` with a TRIVIAL (no) spec compiles (OK).
+    - the FAILURE is triggered only when a `[%%vox.lean]` block REFERENCES the
+      derived inductive `Vox_<Unit>_vlist_view` — which any model spec must, e.g.
+      `def ll_uncons : LList -> Vox_<Unit>_vlist_view | .LNil => .VNil | …`.
+      That emission carries the universe metavar on the `LList` field, `sorry`s,
+      and `.VNil`/`.VCons` dotted access then fails.  So the bug is in the
+      block-visible emission of the derived inductive, not in the OCaml ADT
+      declaration or an unspecced return.
+  Minimal repro (fails): `/usr/local/home/jujacobs/tmp/repro/uncons_universe_min_repro.mli`
+  is the OK type-only case; the failing case adds the `ll_uncons` block def
+  (see the report / `uncons_universe_repro.mli`).  DECISION: head/tail RETAINED
+  unchanged (client_dedup untouched, still green); uncons deferred to #63.
+  WOULD-SUBSUME assessment (for when #63 lands): a spec'd `uncons` subsumes the
+  head/tail/reconstruction trio in one match arm and is strictly more ergonomic
+  (VNil ⇒ ll_isnil; VCons(h,tl) ⇒ h = ll_head, tl's image = ll_tail, and
+  ll_cons h tl = l all in one destructor) — so at that point head/tail become
+  deprecate-for-compat, not complementary.
 
 ### Vlist · refine_ rejected on a refined via type
 - **site:** vox_stdlib/Vlist.ml (`head`, `tail`; arg type `t{ not (ll_isnil _) }`)

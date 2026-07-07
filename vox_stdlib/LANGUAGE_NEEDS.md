@@ -513,3 +513,98 @@ blocks every view/pop eliminator — total head/tail is the shipped alternative)
 and (b) the **append via-recursion image-spec base non-reduction**. The one
 POSITIVE capability confirmation is the total-head/tail first-order eliminator
 (the round-trip + dedup clients ride it); there is NO uncons confirmation.
+
+---
+
+## v1.5 POLYMORPHIC WAVE (Vplist / Vpmap / Vpset, 2026-07-07)
+
+Three element-polymorphic modules built on origin/vox 04f02386d in the
+relocated `vox_stdlib/` layout, each verified at BOTH `int` and `string`
+instantiations. All leaf modules (no cross-unit deps). Harness: `check_poly.sh`
+(reads MODULES.manifest wave-3 rows; enforces parameterized-via + dual
+int/string smoke). Result: 18 PASS / 0 FAIL / 1 WARN (the WARN is a verified
+false positive — see below).
+
+### POSITIVE — the parameterized-model route resolves S_param at every instantiation
+Genericity is carried by a PARAMETERIZED ghost sort — `'a plist
+[@@vox.sort lean "PList"]` over `inductive PList (a : Type)` (and MList / PSet
+likewise) — never the shared VoxU (study F-B4: the VoxU "opaque element" cheat
+is ill-typed). A law proved at the abstract element sort FIRES at each concrete
+element type: every module's smoke discharges all its law-goals at both `int t`
+and `string t` (the parameter resolves through the `Tconstr` head). This is the
+core v1.5 thesis, now demonstrated three ways. It is the sound, shippable
+polymorphic-container path on today's compiler.
+
+### POSITIVE — a parameterized-PAYLOAD result ADT works (narrows #63)
+Vpmap's `find` returns `'v mopt = MMiss | MFound of 'v` (an exposed ADT with an
+`S_param` payload field). It sealed FIRST TRY at both `int`/`string` value
+types — the auto-generated `Vox_Vpmap_mopt v` is correctly `(v : Type)`-
+parameterized, NO universe/metavar wall. This is the empirical narrowing of the
+view-ADT universe bug (#63): the bug is specific to VIA / NAMED-sorted
+(`S_lean`) constructor fields, NOT parameterized (`S_param`) payloads. Relayed
+to deep-neg as a #63 test-matrix guard (the working parameterized-payload path
+gets a regression test).
+
+### The dead-law lint criterion — SHARPENED (from the ps_isnil false positive)
+An `@[grind, expose]` NON-recursive def is a dead-law **RISK**, not a
+certainty. The law is actually DEAD only if it is stated on **concrete
+constructors** (grind discharges it by one-step unfolding) — that is the
+`ll_cons`/`pl_isnil` case (laws `ll_len_cons`, `pl_isnil_nil`-style). A law
+stated on a **symbolic argument** stays **LIVE even when the def is exposed**,
+because grind cannot unfold the def on a variable. Vpset's `ps_isnil` is the
+exemplar: it is exposed + non-recursive, yet its only law — the bridge
+`ps_isnil s ↔ ps_isempty s` on a symbolic `s` — is load-bearing (removal test:
+deleting the bridge leaves the module sealing but FAILS the `sing_not_empty`
+smoke goal; verified by the integrator independently and by build-vpset). So
+`ps_isnil` correctly ships EXPOSED. **Ask (refines backlog #5 dead-law lint):**
+the lint must flag an exposed non-recursive def only when a shipped law's
+grind_pattern LHS is a def-application to CONCRETE constructors; symbolic-arg
+(bridge) laws are exempt. The §6.7 harness WARN is the coarse form (flags all
+exposed non-recursive defs) and needs the removal test to adjudicate.
+
+### The other side of the same coin — empty-non-membership laws die without a Bool-mem forcer
+build-vplist finding: `pl_nil_not_mem` (`¬ pl_mem x pl_nil`) is DEAD in Vplist
+and was dropped — exposed `pl_mem` + a grind-reducible nullary `pl_nil`
+discharge it by reduction, with no op to force it. Vlist's identically-shaped
+`ll_nil_not_mem` is LIVE ONLY because Vlist ships a Bool `mem` OP whose spec
+routes the goal through the law. **Convention:** an empty-non-membership law is
+dead unless a Bool-`mem` op forces it; a container without a decidable `mem`
+(Vplist, Vpset) cannot keep one live. This is the concrete-constructor case of
+the sharpened criterion above (nullary `pl_nil` IS a concrete constructor).
+
+### NEGATIVE — no decidable mem/remove at the abstract element (F-B3, DecidableEq wall)
+A Bool-valued `mem` is a DECIDER and needs `DecidableEq a`, which the abstract
+element sort lacks. Vpset is therefore RELATIONAL-ONLY: no Bool `mem`, no
+`remove` — blocked at two DISTINCT layers (mem fails at PROOF; remove fails at
+ELABORATION with `synthInstanceFailed`). Decisive control: the identical `mem`
+recursion PASSES at concrete `int`, fails at `'a` — so it is the DecidableEq
+wall, not #32. Membership ships only as the Prop-valued model predicate + its
+laws (a client STATES membership in a spec; cannot QUERY it at runtime), plus
+relational `ps_subset`/`ps_equal`. Vplist likewise ships Prop `pl_mem` only.
+
+### NEGATIVE — unspecced empty over a parameterized model (F-B2, confirmed ×3)
+A polymorphic NULLARY via constructor cannot carry a refinement: the via
+injection of `Nil`/`Empty` leaves the Lean type parameter `a` an unsolved
+metavariable, even at a concrete element type. So all three ship `empty`
+UNSPECCED (no `{ _ = pl_nil }`); emptiness stays OBSERVABLE via `is_empty`.
+Vpmap sharpened two consequences: (ask-#2) a spec'd empty fails with a
+MISLEADING re-refinement diagnostic, not the predicted "synthesize implicit a"
+message; and `m_isempty_empty` is genuinely client-UNREACHABLE (can't produce
+or even state an `m_empty` goal — the grammar rejects the `: MList int`
+ascription, `v` unsynthesizable) — shipped for Vmap parity, auto-lives once
+ask-#2 lands.
+
+### uncons / view-ADT — still BLOCKED (routed to #63)
+build-vplist confirmed the universe bug is unfixed on 04f02386d and produced
+the SHARPEST trigger yet: `type vlist_view = VNil | VCons of int * t` AND an
+unspecced `val uncons` both COMPILE; the failure fires ONLY when a
+`[%%vox.lean]` block references the derived inductive `Vox_<Unit>_vlist_view`
+(which any model spec must). Repros at `/usr/local/home/jujacobs/tmp/repro/
+uncons_universe_{min_,}repro.mli`. Vlist untouched (total head/tail retained);
+the adoption waits on deep-neg's #63.
+
+### Process
+C1 (dependent-arg must be a nameable variable) recurs unchanged in the poly
+modules (nested op-call results let-bound in every smoke). Manifest reconciled
+clean (three leaf wave-3 rows, no dup despite three concurrent builder edits);
+artifact freeze is a no-op for this wave (all leaf, no inter-module deps).
