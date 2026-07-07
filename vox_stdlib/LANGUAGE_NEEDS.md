@@ -391,6 +391,31 @@ the let, and the skeleton workaround isn't even available to a client). Three
 independent confirmations (build-vset elements, build-vmap add-vs-remove,
 Vlist append). Corrects the addendum's "elements → #31 budget".
 
+### The honest boundary of the #31 fix — refined-via binders don't bridge the Nil arm
+The bind-at-skeleton landing (#31) made a *plain* `let t0 = l` on a
+transparent-via `l` carry the map — so much so that `refine_` on a KNOWN via
+type is now **rejected**: `let refine_ t0 = l` where `l : t{ not (ll_isnil _) }`
+fails with the NEW message `vox: a refine_ pattern requires the scrutinee to
+have a refined type (a plain let binds at the skeleton and carries the fact
+already)`. But the residual gap: a *plain* `let` binder of a **refined** via
+type (`t{ not (ll_isnil _) }`) binds at the skeleton yet **cannot bridge its
+constructor-case skeleton facts (`t0 = Nil`) to the image side (`ll_repr`)** —
+on the `Nil` arm grind sort-mismatches (goal `0 = ll_head l` under
+`t0 = Nil, t0 = l, ¬ll_isnil l`, ending in a Lean type mismatch). So a
+head/tail written with the `not (ll_isnil _)` PRECONDITION is unprovable on
+the vacuous `Nil` arm. This is a genuine **#31-family edge the bind-at-skeleton
+landing exposed**, not covered by the fix: #31 threads a *transparent-value's*
+map through a let, but a *refined*-via binder's constructor-case skeleton
+equalities still don't reach the image contract. **Removed by (used here):**
+make head/tail **TOTAL** (drop the precondition; `ll_head .LNil = 0`,
+`ll_tail .LNil = .LNil` are total on the model), which sidesteps the vacuous
+arm entirely — the shipped de-contortion. **Real fix ask:** let a refined-via
+`let` (or `refine_` on a refined via type) carry the constructor-arm skeleton
+facts across to the `ll_repr` image, so a genuinely-guarded destructor
+(`t{ not (ll_isnil _) } -> …`) is provable. Someone will hit this outside
+head/tail (any partial op with a via precondition). See notes/vlist.md
+("refine_ rejected on a refined via type").
+
 ### E-matcher: a conclusion-absent variable is uncoverable (M3 family, ×3)
 grind's E-matcher indexes function-APPLICATION terms, not `≤`/`<` atoms or
 hypotheses, so a lemma variable that appears ONLY in an inequality/hypothesis
@@ -470,17 +495,21 @@ validated against the new compiler; this table supersedes the per-note
 
 | Workaround (note) | removed-by claim | VERDICT | Evidence |
 |---|---|---|---|
-| Vlist head/tail: refined-via arg `t{ not (ll_isnil _) }` + alias-then-`refine_` + vacuous Nil arm | #31 / universe fix | **REMOVED** | head/tail are TOTAL (ll_head/ll_tail total on `.LNil`), so the precondition was unneeded; unrefined arg + the inner-`go`-over-tree pattern (as length/mem) verifies. Precondition + alias workaround deleted. |
-| Vlist view-ADT (uncons) BLOCKING: exposed ADT with a via-typed field → universe metavar | compiler fix | **REMOVED (bug FIXED)** | the `VCons of int * t` view ADT now compiles clean on origin/vox. Shipped total head/tail (minimal); the uncons view is now a viable v1.5 cleanup. |
+| Vlist head/tail: refined-via arg `t{ not (ll_isnil _) }` + alias-then-`refine_` + vacuous Nil arm | #31 family (refine_-on-refined-via) | **REMOVED** | head/tail are TOTAL (ll_head/ll_tail total on `.LNil`), so the precondition was unneeded; unrefined arg + the inner-`go`-over-tree pattern (as length/mem) verifies. Precondition + alias workaround deleted. |
+| Vlist view-ADT (uncons) BLOCKING: exposed ADT with a via-typed field → universe metavar | compiler fix | **NOT REMOVED — claim RETRACTED (2026-07-07 re-probe)** | RE-PROBED on 04f02386d: `type vlist_view = VNil \| VCons of int * t` still fails at the seal with the exact recorded error — `Constructor field LList of Vox_Vlist_vlist_view.VCons contains universe level metavariables … Sort ?u.7`. The interim "bug FIXED" entry was written **without re-probing** and is WRONG; it directly contradicted the accurate BLOCKING section above. The universe bug is UNFIXED — uncons / view-ADT / pop-style eliminators remain blocked for **every** container. Total head/tail is the correct shipped eliminator (not merely a minimal stop-gap) and stays. Team-lead's optional "which commit fixed it" bisect is MOOT (nothing fixed it). |
 | Vset add / remove: inline-ctor re-match of the backend result | #31 / (note: "natural already worked") | **REMOVED** | direct coerce `(r : t{ … })` of the let-bound backend result verifies for both add and remove; the triset-era re-match deleted. |
 | of_list guarded traversal (Vlist→Vset dedup) blocked by #32 (head precondition not threaded through `if is_empty`) | #32 | **REMOVED (ADDED as client)** | with total head/tail the traversal needs no `¬ll_isnil` fact; `clients/client_dedup.ml` (of_list + dedup_elems, Vlist→Vset→Vlist) verifies — the F-2 dedup the usability review wanted is now expressible. |
 | Vlist.append: skeleton-thread (inner `go` over `tree` with `ll_repr` explicit + inject once) | #31 | **KEPT — claim REFUTED** | natural recursion over the via `t` with an image-spec (`go : t -> t{ _ = ll_app u b }`, via raw `Cons` OR the `cons` op) still FAILS at the base: `Goal 0=0 && ll_repr b = ll_app u b` — the base-case image doesn't reduce. This is orthogonal to #31 (a let-bound via value's *fact*): building/recursing a via result at the skeleton with an image-spec still needs the skeleton-thread. **Ask:** reduce a via-recursion image-spec at the base without the explicit-`ll_repr` skeleton helper. |
 | C1: dependent-arg must be a let-bound variable (all ops + eliminators + `Vset.add h (of_list tl)`) | task #53 (ANF) | **PENDING-#53** | left as-is per instruction; #53 (reflectable-inline / auto-ANF) in flight will subsume. |
 
-**Net:** 4 workarounds REMOVED (head/tail precondition+alias, view-ADT
-universe bug, Vset add/remove re-match, of_list traversal → new dedup
-client), 1 KEPT with its removed-by claim refuted (append skeleton-thread —
-#31 does not cover via-recursion image-specs), 1 PENDING-#53 (C1). The new
-NEGATIVE finding (append) and the two POSITIVE capability confirmations
-(uncons universe-bug fixed; total-head/tail eliminator) are the load-bearing
-de-contortion evidence.
+**Net:** 3 workarounds REMOVED (head/tail precondition+alias, Vset add/remove
+re-match, of_list traversal → new dedup client), 1 **NOT REMOVED / claim
+RETRACTED** (the view-ADT universe bug is UNFIXED at 04f02386d — re-probed
+2026-07-07; the interim "FIXED" entry was an un-probed error, now corrected),
+1 KEPT with its removed-by claim refuted (append skeleton-thread — #31 does
+not cover via-recursion image-specs), 1 PENDING-#53 (C1). The two genuinely
+load-bearing NEGATIVE findings are (a) the **view-ADT universe bug** (still
+blocks every view/pop eliminator — total head/tail is the shipped alternative)
+and (b) the **append via-recursion image-spec base non-reduction**. The one
+POSITIVE capability confirmation is the total-head/tail first-order eliminator
+(the round-trip + dedup clients ride it); there is NO uncons confirmation.
