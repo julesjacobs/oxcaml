@@ -1,0 +1,11 @@
+File "reflect_deparg_neg.ml", line 24, characters 51-69:
+24 | let bad (x : int) (t : ilist) : int{ _ = len t } = f_l (ICons (x, t))
+                                                        ^^^^^^^^^^^^^^^^^^
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
+       Goal: *unknown2* = len t
+Hypotheses:
+  *unknown2* = len (ICons (x, t))
+Counterexample (validated -- every hypothesis holds and the goal fails here):
+  t = INil
+  *unknown2* = 1
+  x = 0

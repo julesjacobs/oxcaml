@@ -116,7 +116,7 @@ val g : (k : int) -> int{ _ = k } = <fun>
 Line 4, characters 27-36:
 4 | let bad (v : t2) : int = g (cheat v)
                                ^^^^^^^^^
-Error: vox: the argument for a dependent parameter must be a variable or a pure expression the logic can name (let-bind it first)
+Error: vox: this argument for a dependent parameter cannot be named in the logic: it is neither a reflectable expression (a variable, literal, arithmetic, constructor, field read, or reflected call) nor a call with an exact result contract; bind it with a let first
 |}]
 
 (* Equality translates at tuples of int/bool; ORDER comparisons do not

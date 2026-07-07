@@ -5044,17 +5044,32 @@ let collect_unknown_apply_args env funct ty_fun0 mode_fun rev_args sargs
 
 (* vox: open a dependent arrow at its application site, like
    [instance_poly] opens a [Tpoly]: the argument must be an expression
-   the logic can name WITHOUT typing it -- a variable (its stamp), or a
-   pure surface expression over the reflected int/bool operations and
-   total_ functions ([Vox_reflect.translate_surface]) -- and the binder
-   is substituted by that term throughout the remaining type, so later
-   parameter types and the result are instantiated before any argument
-   expression is typechecked.  A dependent parameter DEFERRED by label
-   commutation is not opened at all -- the caller keeps the binder and
-   the partial application's rebuilt arrow rebinds it -- so
-   [sarg_opt = None] here means the parameter was ELIMINATED (an
-   omittable argument with no future application), which cannot be
-   named and is an error. *)
+   the logic can name WITHOUT typing it, and the binder is substituted
+   by that term throughout the remaining type, so later parameter types
+   and the result are instantiated before any argument expression is
+   typechecked.  Two ways to name an argument:
+
+   - it REFLECTS ([Vox_reflect.translate_surface]) -- a variable, a
+     literal, arithmetic over the reflected int/bool operations, a
+     simple-variant constructor application, an immutable field read of
+     a simple record, or a saturated total_ call.  The name IS that
+     term (pure and total up to Division_by_zero, whose pre-call raise
+     makes the never-bound result's facts vacuous).  This is exactly
+     the fragment the predicate grammar names, so [f expr] works
+     wherever [expr] may appear in a refinement (finding C1).
+
+   - otherwise it may be a CALL with an exact result contract
+     ([Vox_reflect.call_result_term]): if the callee's result type is
+     [_ = rhs], the value equals [rhs] with the callee's dependent
+     binders replaced by the (reflected) argument terms -- the contract
+     guarantees it, so the name is again a pure term, mechanizing the
+     [let s' = insert x s in member x s'] workaround.
+
+   A dependent parameter DEFERRED by label commutation is not opened at
+   all -- the caller keeps the binder and the partial application's
+   rebuilt arrow rebinds it -- so [sarg_opt = None] here means the
+   parameter was ELIMINATED (an omittable argument with no future
+   application), which cannot be named and is an error. *)
 let vox_open_dependent_arrow env binder ~sarg_opt ~app_loc ty_ret ty_ret0 =
   match binder with
   | None -> ty_ret, ty_ret0
@@ -5066,8 +5081,11 @@ let vox_open_dependent_arrow env binder ~sarg_opt ~app_loc ty_ret ty_ret0 =
     | Some (sarg : Parsetree.expression) ->
       let let_bind () =
         Location.raise_errorf ~loc:sarg.pexp_loc
-          "vox: the argument for a dependent parameter must be a variable \
-           or a pure expression the logic can name (let-bind it first)"
+          "vox: this argument for a dependent parameter cannot be named in \
+           the logic: it is neither a reflectable expression (a variable, \
+           literal, arithmetic, constructor, field read, or reflected \
+           call) nor a call with an exact result contract; bind it with a \
+           let first"
       in
       let subst by =
         let ty_ret' = Vox_dep.subst_binder b ~by ty_ret in

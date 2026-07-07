@@ -402,9 +402,84 @@ let prim_pred prim_name ~eq_ok ~cmp_ok ~proj_ok ~ia_ok
    value; a cell has many).  The fragment is pure up to
    Division_by_zero, whose raise makes downstream facts vacuous
    (partial correctness). *)
+(* Tier 2 -- name a call by its OWN exact result contract.  When [g]'s
+   type is a (dependent) arrow spine whose fully-applied result is a
+   refinement of the exact form [_ = rhs] (with [rhs] not mentioning the
+   value binder), and every argument is itself reflectable, the call
+   [g a1 .. an] equals [rhs] with each dependent binder replaced by its
+   argument's term -- a pure name the contract GUARANTEES, so it
+   substitutes exactly like a reflectable expression, with no fresh
+   binder and no fact channel.  This mechanizes the manual
+   [let s' = insert x s in member x s'] workaround.  Used only for
+   dependent-argument instantiation, on both sides (the surface entry
+   from the application site and [call_result_name] in the walker), so
+   the type checker's opening and the walker's instantiation agree. *)
+let exact_result_rhs (p : Refinement.pred) : Refinement.pred option =
+  let rec no_bound (p : Refinement.pred) =
+    match p with
+    | Refinement.Pbound -> false
+    | Refinement.Pvar _ | Refinement.Pglobal _ | Refinement.Pint _
+    | Refinement.Pbool _ -> true
+    | Refinement.Pconstr (_, _, a) | Refinement.Pfun (_, a)
+    | Refinement.Ptuple a -> List.for_all no_bound a
+    | Refinement.Pfield (_, _, a) | Refinement.Pproj (_, _, a)
+    | Refinement.Pis (_, _, a) | Refinement.Pnot a | Refinement.Pquant (_, _, a)
+      -> no_bound a
+    | Refinement.Pbinop (_, a, b) | Refinement.Pand (a, b) | Refinement.Por (a, b)
+    | Refinement.Pimp (a, b) -> no_bound a && no_bound b
+  in
+  let rec find (p : Refinement.pred) =
+    match p with
+    | Refinement.Pbinop (Refinement.Eq, Refinement.Pbound, rhs) when no_bound rhs
+      -> Some rhs
+    | Refinement.Pbinop (Refinement.Eq, lhs, Refinement.Pbound) when no_bound lhs
+      -> Some lhs
+    (* A conjunctive result contract ([_ = bins x t && bmem x _]) still
+       names the value by its equational conjunct: the callee guarantees
+       the whole conjunction, so [_ = rhs] holds and the extra conjuncts
+       are derived facts we do not need for the name. *)
+    | Refinement.Pand (a, b) ->
+      (match find a with
+       | Some _ as r -> r
+       | None -> find b)
+    | _ -> None
+  in
+  find p
+;;
+
+let call_result_term env callee_ty (arg_terms : Refinement.pred option list)
+  : Refinement.pred option
+  =
+  let rec go ty args =
+    match args with
+    | [] ->
+      (match Types.get_desc (Ctype.vox_expand_head env ty) with
+       | Trefine (_, _, p) -> exact_result_rhs p
+       | _ -> None)
+    | None :: _ -> None
+    | Some by :: rest ->
+      (match Types.get_desc (Ctype.vox_expand_head env ty) with
+       | Tarrow ((_, _, _, binder), _dom, ret, _) ->
+         let ret =
+           match binder with
+           | Some b -> Vox_dep.subst_binder b ~by ret
+           | None -> ret
+         in
+         go ret rest
+       | _ -> None)
+  in
+  go callee_ty arg_terms
+;;
+
 let rec translate_surface env (e : Parsetree.expression)
   : Refinement.pred option
   =
+  let all_reflectable es =
+    let ps = List.map (translate_surface env) es in
+    if List.for_all Option.is_some ps
+    then Some (List.map Option.get ps)
+    else None
+  in
   match e.pexp_desc with
   | Pexp_constant { pconst_desc = Pconst_integer (s, None); _ } ->
     Option.map (fun n -> Refinement.Pint n) (int_of_string_opt s)
@@ -412,6 +487,34 @@ let rec translate_surface env (e : Parsetree.expression)
     Some (Refinement.Pbool true)
   | Pexp_construct ({ txt = Longident.Lident "false"; _ }, None) ->
     Some (Refinement.Pbool false)
+  | Pexp_construct ({ txt = lid; _ }, arg_opt) ->
+    (* A constructor application at a simple variant names the datatype
+       term the predicate grammar writes the same way ([elab_vox_constr]):
+       resolve the constructor by name -- the same resolution the later
+       typing performs -- gate on [vox_simple_variant], and translate the
+       arguments (a multi-arity constructor's arguments arrive as an
+       unlabeled tuple). *)
+    (match
+       Env.lookup_constructor ~use:false ~loc:e.pexp_loc Env.Positive lid env
+     with
+     | cstr, _ ->
+       let path = Data_types.cstr_res_type_path cstr in
+       (match Ctype.vox_simple_variant env path with
+        | None -> None
+        | Some _ ->
+          let args =
+            match arg_opt with
+            | None -> Some []
+            | Some { pexp_desc = Pexp_tuple comps; _ }
+              when cstr.cstr_arity > 1
+                   && List.for_all (fun (lbl, _) -> Option.is_none lbl) comps ->
+              all_reflectable (List.map snd comps)
+            | Some a -> all_reflectable [ a ]
+          in
+          Option.map
+            (fun ns -> Refinement.Pconstr (path, cstr.cstr_name, ns))
+            args)
+     | exception _ -> None)
   | Pexp_tuple comps
     when List.length comps >= 2
          && List.for_all (fun (lbl, _) -> Option.is_none lbl) comps ->
@@ -453,7 +556,27 @@ let rec translate_surface env (e : Parsetree.expression)
              prim_pred prim.prim_name ~eq_ok:false ~cmp_ok:false
                ~proj_ok:(declared_domain_is_unlabeled_pair env desc)
                ~ia_ok:false args
-           | _ -> None))
+           | _ ->
+             (* Not a reflected/total_ name or a primitive: name it by its
+                own exact result contract if it has one (tier 2). *)
+             call_result_term env desc.val_type args))
+     | exception _ -> None)
+  | Pexp_field (base, { txt = lid; _ }) ->
+    (* An immutable field read of a simple record names the projection
+       the predicate grammar writes as [_.px] (mirrors [elab_vox_pred]'s
+       [Pexp_field] arm). *)
+    (match
+       Env.lookup_label ~use:false ~record_form:Data_types.Legacy
+         ~loc:e.pexp_loc Env.Projection lid env
+     with
+     | label ->
+       let path = Data_types.lbl_res_type_path label in
+       (match Ctype.vox_simple_record env path with
+        | None -> None
+        | Some _ ->
+          Option.map
+            (fun b -> Refinement.Pfield (path, label.Data_types.lbl_name, b))
+            (translate_surface env base))
      | exception _ -> None)
   | _ -> None
 ;;
@@ -753,6 +876,35 @@ let rec translate_nameable (e : expression) : Refinement.pred option =
             (translate_nameable record)
         | _ -> None)
      | _ -> None)
+;;
+
+(* The typed twin of the surface tier-2 naming ([call_result_term]): a
+   call whose function value carries an exact result contract names the
+   call by that contract's right-hand side.  Used by the walker's
+   dependent-binder instantiation ([Vox_verify.stable_arg_name]) so it
+   agrees with the opening the type checker performed at the application
+   site. *)
+let rec call_result_name env (e : expression) : Refinement.pred option =
+  match e.exp_desc with
+  | Texp_apply ({ exp_desc = Texp_ident { desc; _ }; _ }, args, _, _, _) ->
+    let arg_terms =
+      List.map
+        (fun (lbl, arg) ->
+          match (lbl : Types.arg_label), arg with
+          | Nolabel, Arg (a, _) ->
+            (* Reflect each argument with the SAME namer the walker uses
+               ([translate_nameable] then this exact-contract naming), so
+               a tier-2 call nested inside another ([remove x (insert y
+               s)]) is named too -- mirroring the recursion in the surface
+               twin [translate_surface]. *)
+            (match translate_nameable a with
+             | Some _ as r -> r
+             | None -> call_result_name a.exp_env a)
+          | _ -> None)
+        args
+    in
+    call_result_term env desc.val_type arg_terms
+  | _ -> None
 ;;
 
 let def_unsupported loc =

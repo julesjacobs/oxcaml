@@ -100,7 +100,7 @@ let bad (x : int) = lt (abs x) x
 Line 1, characters 23-30:
 1 | let bad (x : int) = lt (abs x) x
                            ^^^^^^^
-Error: vox: the argument for a dependent parameter must be a variable or a pure expression the logic can name (let-bind it first)
+Error: vox: this argument for a dependent parameter cannot be named in the logic: it is neither a reflectable expression (a variable, literal, arithmetic, constructor, field read, or reflected call) nor a call with an exact result contract; bind it with a let first
 |}]
 
 (* Escaped refinements are errors (DESIGN: "escape is an error").  An

@@ -1494,7 +1494,18 @@ let rec diverges env (e : expression) : bool =
    functions on what the identifier resolves to), so the walker's
    instantiation of the remaining contracts agrees with the types. *)
 let stable_arg_name (a : expression) : Refinement.pred option =
-  Vox_reflect.translate a
+  (* [translate_nameable], not [translate]: the type checker's opening
+     ([Vox_reflect.translate_surface]) names constructor applications and
+     field reads, so the walker's twin must too, or the recovered result
+     type would keep an unopened callee binder (out of scope, its fact
+     dropped).  [translate_nameable] is the typed superset of the surface
+     fragment. *)
+  match Vox_reflect.translate_nameable a with
+  | Some _ as r -> r
+  | None ->
+    (* Tier 2: a non-reflectable call may still name its value by its
+       own exact result contract, matching the type checker's opening. *)
+    Vox_reflect.call_result_name a.exp_env a
 ;;
 
 (* Register a module-level value on first sight: its sort (for the
@@ -3218,11 +3229,23 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
                         || has_vox_attr "vox.assume_unchecked"
                              a.exp_attributes) ->
                 register_pred_paths env p;
+                (* Discharge the precondition at the SAME name the binder
+                   substitution uses ([stable_arg_name]): for a call named
+                   by its exact result contract (tier 2) this is the
+                   contract term (e.g. [bins x s]), so an invariant
+                   precondition on the parameter type discharges from the
+                   callee's result laws instead of stalling on a fresh
+                   unknown.  A non-stable argument keeps [name_of_expr]. *)
+                let subject =
+                  match stable_arg_name a with
+                  | Some by -> by
+                  | None -> name_of_expr env a
+                in
                 emit_vc
                   ~env
                   ~loc:a.exp_loc
                   ~ctx:actx
-                  ~goal:(Refinement.subst_bound ~by:(name_of_expr env a) p)
+                  ~goal:(Refinement.subst_bound ~by:subject p)
                   ~kind:Prove
               | _ -> ());
              (match binder, stable_arg_name a with
