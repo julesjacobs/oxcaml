@@ -131,6 +131,20 @@ The verifier is not accepting these vacuously: the negative control
 `n0_neg_control.ml` (`x+1 = x+2`) is correctly **DISPROVED** with
 counterexample `x=0`.
 
+**Independently corroborated by the Phase-C soundness probes**
+(`scratch_probe/phasec_sound/`, credit to that reviewer): the same
+unbounded-`Int` witness was reached there, and it is not merely
+hypothetical — it has *already shipped into the stdlib*.
+`stdlib/Vint.mli:48`'s `vi_abs_nonneg : 0 <= vi_abs x` and its smoke
+client `stdlib/clients/smoke_vint.ml:19`
+(`s_abs_nonneg (x:int) : int{ 0 <= _ } = iabs x`) are exactly the `w2`
+witness in shipped form: verified, yet runtime-false at `min_int`. So the
+ideal-arithmetic gap is not an abstract caveat — a current stdlib law
+depends on it, which sharpens R2 below: stdlib laws leaning on unbounded
+`Int` (the `Vint` bound/abs family) should carry an explicit
+ideal-arithmetic annotation so a client cannot mistake them for
+machine-true.
+
 **This is KNOWN and ACCEPTED, not an unacknowledged hole.** It is vox's
 foundational "ideal arithmetic" TCB assumption, stated in:
 `vox-editor/typing/vox_reflect.ml:35-37` ("the logic's ints are unbounded
