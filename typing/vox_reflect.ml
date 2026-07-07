@@ -816,8 +816,21 @@ let rec translate_nameable (e : expression) : Refinement.pred option =
   match translate e with
   | Some p -> Some p
   | None ->
+    (* A SUB-POSITION may itself be a call named by its exact result
+       contract (tier 2): [Vsome (succ1 x)], [C (insert y s)].  Thread
+       [call_result_name] through the recursion (helper [nm]) so the typed
+       namer matches the surface twin [translate_surface], which recurses
+       on itself and whose [Pexp_apply] arm falls to [call_result_term].
+       The TOP-LEVEL call case stays [None] here (its caller
+       [stable_arg_name] adds [call_result_name]; [refine_] synthesis keeps
+       its existing fresh-unknown fallback). *)
+    let nm a =
+      match translate_nameable a with
+      | Some _ as r -> r
+      | None -> call_result_name a.exp_env a
+    in
     let all_nameable args =
-      let args = List.map translate_nameable args in
+      let args = List.map nm args in
       if List.for_all Option.is_some args
       then Some (List.map Option.get args)
       else None
@@ -842,15 +855,14 @@ let rec translate_nameable (e : expression) : Refinement.pred option =
           let base =
             match extended_expression with
             | None -> Some None
-            | Some (be, _, _) ->
-              Option.map Option.some (translate_nameable be)
+            | Some (be, _, _) -> Option.map Option.some (nm be)
           in
           (match base with
            | None -> None
            | Some base ->
              let arg_of (lbl, _, def) =
                match def, base with
-               | Typedtree.Overridden (_, ex), _ -> translate_nameable ex
+               | Typedtree.Overridden (_, ex), _ -> nm ex
                | Kept _, Some b ->
                  Some (Refinement.Pfield (path, lbl.Data_types.lbl_name, b))
                | Kept _, None -> None
@@ -873,18 +885,16 @@ let rec translate_nameable (e : expression) : Refinement.pred option =
         | Types.Immutable, Some _ ->
           Option.map
             (fun b -> Refinement.Pfield (path, label.lbl_name, b))
-            (translate_nameable record)
+            (nm record)
         | _ -> None)
      | _ -> None)
-;;
 
 (* The typed twin of the surface tier-2 naming ([call_result_term]): a
    call whose function value carries an exact result contract names the
-   call by that contract's right-hand side.  Used by the walker's
-   dependent-binder instantiation ([Vox_verify.stable_arg_name]) so it
-   agrees with the opening the type checker performed at the application
-   site. *)
-let rec call_result_name env (e : expression) : Refinement.pred option =
+   call by that contract's right-hand side.  Mutually recursive with
+   [translate_nameable] so nested calls and constructor-wrapped calls are
+   named the same way the surface twin names them. *)
+and call_result_name env (e : expression) : Refinement.pred option =
   match e.exp_desc with
   | Texp_apply ({ exp_desc = Texp_ident { desc; _ }; _ }, args, _, _, _) ->
     let arg_terms =
@@ -892,11 +902,6 @@ let rec call_result_name env (e : expression) : Refinement.pred option =
         (fun (lbl, arg) ->
           match (lbl : Types.arg_label), arg with
           | Nolabel, Arg (a, _) ->
-            (* Reflect each argument with the SAME namer the walker uses
-               ([translate_nameable] then this exact-contract naming), so
-               a tier-2 call nested inside another ([remove x (insert y
-               s)]) is named too -- mirroring the recursion in the surface
-               twin [translate_surface]. *)
             (match translate_nameable a with
              | Some _ as r -> r
              | None -> call_result_name a.exp_env a)

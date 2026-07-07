@@ -1,0 +1,11 @@
+File "reflect_deparg_bool_neg.ml", line 24, characters 29-53:
+24 | let bad : bool{ _ = true } = hasb Vnone && hasb Vnone
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
+       Goal: (*unknown2* && *unknown3*) = true
+Hypotheses:
+  *unknown2* = has Vnone
+  *unknown2* -> *unknown3* = has Vnone
+Counterexample (validated -- every hypothesis holds and the goal fails here):
+  *unknown3* = false
+  *unknown2* = false

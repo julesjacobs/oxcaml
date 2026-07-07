@@ -3141,24 +3141,47 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
      (match refinement_of_type env e.exp_type with
       | Some p ->
         register_pred_paths env p;
-        let n = name_of_expr env e in
         (* An intro-marked APPLICATION re-proves the expected
            refinement of a value whose own instantiated result
            refinement is a fact: selfify that refinement at the node's
            name -- the inline unpack that [let q = f x in q] used to
            spell.  Sound: the value satisfies its type, and on any
-           path where the goal matters the call has returned. *)
-        let self_hyps =
+           path where the goal matters the call has returned.
+
+           A boolean CONNECTIVE ([&&]/[||]/[not]) is not a dependent
+           call, so [apply_result_type] recovers nothing; model it with
+           [decompose_bool] instead, whose formula is over the operand
+           NAMES and whose (short-circuit-guarded) spec facts establish
+           each refined-call operand's result -- otherwise the value is
+           an opaque unknown and a TRUE connective goal spuriously
+           DISPROVES (task #67; the operand facts are only dropped, never
+           mis-stated, so this was a completeness gap, not unsound). *)
+        let n, self_hyps =
           match e.exp_desc with
+          | Texp_apply
+              ( { exp_desc =
+                    Texp_ident { desc = { val_kind = Val_prim prim; _ }; _ }
+                ; _
+                }
+              , _
+              , _
+              , _
+              , _ )
+            when String.equal prim.prim_name "%sequand"
+                 || String.equal prim.prim_name "%sequor"
+                 || String.equal prim.prim_name "%boolnot" ->
+            decompose_bool env ~guard:(Refinement.Pbool true) e
           | Texp_apply (funct, args, _, _, _) ->
-            (match
-               refinement_of_type env (apply_result_type env funct args)
-             with
-             | Some ps when not (Refinement.equal ps p) ->
-               register_pred_paths env ps;
-               [ Refinement.subst_bound ~by:n ps ]
-             | _ -> [])
-          | _ -> []
+            let n = name_of_expr env e in
+            ( n
+            , match
+                refinement_of_type env (apply_result_type env funct args)
+              with
+              | Some ps when not (Refinement.equal ps p) ->
+                register_pred_paths env ps;
+                [ Refinement.subst_bound ~by:n ps ]
+              | _ -> [] )
+          | _ -> name_of_expr env e, []
         in
         emit_vc
           ~env
