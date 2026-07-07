@@ -403,6 +403,58 @@ check("failSummary falls back to 'errors' when no VC carries a verdict", () => {
   assert.strictEqual(S.failSummary([]), "errors ✗");
 });
 
+// -- column-precise selection among MULTIPLE VCs on one line ------------
+// The qsort `split3 ... k (k + 1) ...` line: two dependent-argument
+// precondition VCs, whose narrow spans are `k` (cols 25-26) and `(k + 1)`
+// (cols 27-34).  Compact mode (strictVc:false) must still track the
+// cursor COLUMN here, not show the same goal across the whole line.
+const VC_K = {
+  kind: "vc",
+  start: { line: 881, col: 25 },
+  end: { line: 881, col: 26 },
+  goal: "0 <= k",
+};
+const VC_K1 = {
+  kind: "vc",
+  start: { line: 881, col: 27 },
+  end: { line: 881, col: 34 },
+  goal: "k <= k + 1 && k + 1 <= len (now m2)",
+};
+const SPLIT3 = [VC_K1, VC_K]; // order-independent: put K second on purpose
+const pickGoal = (col) =>
+  S.selectRegion(SPLIT3, { line: 881, col }, { strictVc: false }).region.goal;
+
+check("compact: cursor inside k's span shows k's goal", () => {
+  assert.strictEqual(pickGoal(25), "0 <= k");
+});
+
+check("compact: cursor inside (k+1)'s span shows (k+1)'s goal", () => {
+  assert.strictEqual(pickGoal(30), "k <= k + 1 && k + 1 <= len (now m2)");
+});
+
+check("compact: outside both spans -> the column-NEAREST VC, not a fixed pick", () => {
+  // far right (on the lambda) is nearer (k+1)
+  assert.strictEqual(pickGoal(40), "k <= k + 1 && k + 1 <= len (now m2)");
+  // before both is nearer k
+  assert.strictEqual(pickGoal(22), "0 <= k");
+});
+
+check("compact: a lone VC still claims its whole line (forgiving preserved)", () => {
+  const one = [VC_K];
+  // cursor far from the tiny span still selects the only VC on the line
+  const sel = S.selectRegion(one, { line: 881, col: 60 }, { strictVc: false });
+  assert.strictEqual(sel.relation, "inside");
+  assert.strictEqual(sel.region.goal, "0 <= k");
+});
+
+check("colDist is 0 inside the span, else the gap to the nearer edge", () => {
+  const p = (col) => ({ line: 881, col });
+  assert.strictEqual(S.colDist(VC_K1, p(30)), 0);
+  assert.strictEqual(S.colDist(VC_K1, p(40)), 6); // 40 - 34
+  assert.strictEqual(S.colDist(VC_K1, p(22)), 5); // 27 - 22
+  assert.strictEqual(S.colDist(VC_K1, { line: 880, col: 30 }) > 1e6, true);
+});
+
 Promise.all(pending).then(() => {
   console.log("\n" + passed + " tests passed");
 });

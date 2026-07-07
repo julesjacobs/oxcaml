@@ -1281,6 +1281,63 @@ async function main() {
     console.log("ok - qsort: complete wrapped hypotheses + anonN placeholders (no ?N, no *unknown*)");
     await page.evaluate(() => window.__vox.setCompact(true));
 
+    // Task #74 (column-precise selection): the split3 line carries TWO
+    // dependent-argument obligations -- `0 <= k` over the `k` argument and
+    // `k <= k + 1 && ...` over `(k + 1)`.  In compact mode (where the bug
+    // lived) the cursor COLUMN must pick the right one, not show the same
+    // goal across the whole line.  (qsort is still loaded, compact on.)
+    const split3 = await waitFor(
+      () =>
+        page.evaluate(() => {
+          const rs = window.__vox.getRegions().filter((r) => r.kind === "vc");
+          const k = rs.find((x) => /^0 <= k$/.test((x.goal || "").trim()));
+          const k1 = rs.find((x) => /^k <= k \+ 1\b/.test((x.goal || "").trim()));
+          return k && k1 && k.start.line === k1.start.line
+            ? {
+                k: { line: k.start.line, ch: k.start.col },
+                k1: { line: k1.start.line, ch: k1.start.col },
+              }
+            : false;
+        }),
+      60000,
+      "the two split3 obligations sharing one line"
+    );
+    // Cursor inside `k`'s span -> k's goal (NOT the (k+1) goal).
+    await page.evaluate((p) => window.__vox.cm.setCursor(p.k), split3);
+    const gK = await waitFor(
+      async () => {
+        const t = await page.$eval("#pane-body", (e) => e.textContent);
+        return /goal/.test(t) ? t : false;
+      },
+      5000,
+      "pane at k"
+    );
+    assert.ok(/0 <= k/.test(gK), "cursor on k shows `0 <= k`: " + gK.slice(0, 120));
+    assert.ok(
+      !/k <= k \+ 1/.test(gK),
+      "cursor on k must NOT show the (k+1) goal: " + gK.slice(0, 120)
+    );
+    // Cursor inside `(k + 1)`'s span -> its goal (column discriminates).
+    await page.evaluate((p) => window.__vox.cm.setCursor(p.k1), split3);
+    const gK1 = await waitFor(
+      async () => {
+        const t = await page.$eval("#pane-body", (e) => e.textContent);
+        return /k <= k \+ 1/.test(t) ? t : false;
+      },
+      5000,
+      "pane at (k+1)"
+    );
+    assert.ok(
+      /k <= k \+ 1/.test(gK1) && !/^\s*0 <= k\s*$/.test(gK1),
+      "cursor on (k+1) shows its own goal: " + gK1.slice(0, 120)
+    );
+    assert.notStrictEqual(
+      gK.replace(/\s+/g, " ").trim(),
+      gK1.replace(/\s+/g, " ").trim(),
+      "the two columns show DIFFERENT goals (column-precise, not a fixed pick)"
+    );
+    console.log("ok - split3 line: cursor column picks k vs (k+1) obligation");
+
     // Theme: dark is the default (no OS sniffing); the toolbar toggle
     // flips to light, and the choice persists across a reload.
     const readBg = () =>
