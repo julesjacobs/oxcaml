@@ -1073,7 +1073,15 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
       (_, b * (b, _) Comp_hint.t * b * (b, _) Comp_hint.t) result =
    fun ~log pp dst v f f_hint mv u g g_hint ->
     let g' = C.left_adjoint dst g in
-    let _, src, g'_hint = Comp_hint.Morph_hint.left_adjoint pp dst g_hint in
+    let src = C.src dst g in
+    (* Defer the hint adjoint with an O(1) wrapper instead of eagerly
+       walking and rebuilding [g_hint]. On the transitive-closure
+       maintenance path [g_hint] is a growing [Compose] chain, so the eager
+       adjoint is superlinear and its rebuilt result is retained on every
+       derived vlower edge. The tree is only walked if the hint is consumed
+       to render an error. Same deferral as the reversed/level-update
+       paths (Adjoint_l/Adjoint_r). *)
+    let g'_hint = Comp_hint.Morph_hint.Adjoint_l (g_hint, g') in
     let g'f = C.compose src g' (C.disallow_right f) in
     let g'f_hint =
       Comp_hint.Morph_hint.compose g'_hint
@@ -1113,7 +1121,9 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
       (_, b * (b, _) Comp_hint.t * b * (b, _) Comp_hint.t) result =
    fun ~log pp dst v f f_hint u g g_hint mu ->
     let f' = C.right_adjoint dst f in
-    let _, src, f'_hint = Comp_hint.Morph_hint.right_adjoint pp dst f_hint in
+    let src = C.src dst f in
+    (* Defer the hint adjoint: see [add_vlower]. *)
+    let f'_hint = Comp_hint.Morph_hint.Adjoint_r (f_hint, f') in
     let f'g = C.compose src f' (C.disallow_left g) in
     let f'g_hint =
       Comp_hint.Morph_hint.compose f'_hint
