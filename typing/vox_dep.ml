@@ -132,6 +132,36 @@ let rec iter_preds ~bound ty visited f =
 
 let iter_refinement_preds ty f = iter_preds ~bound:[] ty [] f
 
+(* The stamps of every [Refinement.Pvar] occurring in the refinements
+   of [ty], together with the enclosing dependent-arrow binder stamps.
+   [Subst] uses this to freshen an imported binder to a stamp that
+   cannot alias any stamp already present in the codomain -- otherwise a
+   later inner freshening (whose fresh stamp equals an outer binder's
+   original) would be clobbered when the outer binder is substituted. *)
+let stamps_in ty =
+  let tbl = Hashtbl.create 16 in
+  let add id = Hashtbl.replace tbl (Ident.stamp id) () in
+  let rec pred (p : Refinement.pred) =
+    match p with
+    | Refinement.Pvar id -> add id
+    | Refinement.Pfun (_, a) | Refinement.Pconstr (_, _, a) | Refinement.Ptuple a ->
+      List.iter pred a
+    | Refinement.Pfield (_, _, a) | Refinement.Pproj (_, _, a)
+    | Refinement.Pis (_, _, a) | Refinement.Pnot a | Refinement.Pquant (_, _, a) ->
+      pred a
+    | Refinement.Pbinop (_, a, b) | Refinement.Pand (a, b) | Refinement.Por (a, b)
+    | Refinement.Pimp (a, b) ->
+      pred a;
+      pred b
+    | Refinement.Pbound | Refinement.Pglobal _ | Refinement.Pint _
+    | Refinement.Pbool _ -> ()
+  in
+  iter_refinement_preds ty (fun ~bound p ->
+    List.iter add bound;
+    pred p);
+  tbl
+;;
+
 (* Set by the type checker when a lambda or an application consumes a
    refined (contract) parameter -- detected there because typing already
    expands those domains AT THE CORRECT STAGE.  Read and cleared per

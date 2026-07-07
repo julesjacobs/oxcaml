@@ -4,5 +4,5 @@ File "stamp_collide_bad.ml", line 22, characters 51-65:
 Error: The value Collide_b.dep2 has type
          (r : int) -> (s : int) -> int{ _ = r * s }
        but an expression was expected of type
-         (p : int) -> (q : int) -> int{ _ = p + p }
-       Type int{ _ = p * q } is not compatible with type int{ _ = p + p }
+         (p : int) -> (q : int) -> int{ _ = p + q }
+       Type int{ _ = p * q } is not compatible with type int{ _ = p + q }

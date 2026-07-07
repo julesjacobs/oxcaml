@@ -13,10 +13,10 @@
    signature load, the historical stamp COLLISION this pair was shaped
    to force no longer reaches the consuming unit; the rejection stands
    on the differing operators (Add vs Mul).  The message renders the
-   expected codomain as [p + p]: on a FAILED arrow unify the binder-
-   alignment rename (ctype [unify]) has already substituted one arrow's
-   binder into the other's codomain, so the printer shows the aligned
-   name -- cosmetic, and orthogonal to the operator mismatch that
-   drives the error. *)
+   expected codomain faithfully as [p + q]: because imported binders are
+   now freshened DISJOINT from every stamp already in the codomain
+   (Subst), the binder-alignment rename on a FAILED arrow unify no longer
+   aliases the two parameters (the historical [p + p] artifact is gone),
+   leaving the operator mismatch as the sole, honest driver. *)
 
 let bad (b : bool) = if b then Collide_a.dep2 else Collide_b.dep2

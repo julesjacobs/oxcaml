@@ -825,8 +825,6 @@ let rec typexp copy_scope s ty =
             | _ -> marg, mret
           in
           let arg = typexp copy_scope s arg in
-          let ret = typexp copy_scope s ret in
-          let comm = copy_commu comm in
           (* vox: a dependent-arrow binder is a [Scoped] ident whose stamp is
              only meaningful within its own compiler process, so two .cmis
              routinely marshal COLLIDING binder stamps.  When importing a
@@ -837,16 +835,34 @@ let rec typexp copy_scope s ty =
              the disjointness [Vox_dep.subst] and [Refinement.equal_var]
              already assume; without it a cross-binder collision makes the
              arrow pairing match the wrong partner (see stamp_collide and
-             functor_refine). *)
+             functor_refine).
+
+             Freshen BEFORE recursing into [ret], so [subst_binder] runs
+             over the still-original codomain whose binder stamps are
+             distinct within the chain (the substitution is then
+             unambiguous), and pick a fresh stamp DISJOINT from every
+             stamp already present in [ret].  Otherwise a later inner
+             freshening could draw a stamp equal to this binder's
+             original (the process counter overlaps the marshalled .cmi
+             range); the subsequent [subst_binder] of this binder would
+             then clobber that inner reference too, aliasing two distinct
+             parameters (F-1: [Vmap.add 1 10 m] modelled [m_add 1 10 1]). *)
           let binder, ret =
             match s.sort_var_mapping, binder with
             | Loading _, Some id ->
-                let id' =
-                  Ident.create_scoped ~scope:(Ident.scope id) (Ident.name id)
+                let avoid = Vox_dep.stamps_in ret in
+                let rec fresh () =
+                  let cand =
+                    Ident.create_scoped ~scope:(Ident.scope id) (Ident.name id)
+                  in
+                  if Hashtbl.mem avoid (Ident.stamp cand) then fresh () else cand
                 in
+                let id' = fresh () in
                 Some id', Vox_dep.subst_binder id ~by:(Refinement.Pvar id') ret
             | Loading _, None | (Saving _ | Nothing), _ -> binder, ret
           in
+          let ret = typexp copy_scope s ret in
+          let comm = copy_commu comm in
           Tarrow ((label, marg, mret, binder), arg, ret, comm)
       | Trefine (t, maps, p) ->
           (* vox: constructor applications in the predicate carry type
