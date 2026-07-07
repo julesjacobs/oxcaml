@@ -596,6 +596,16 @@ let translate ?(mutvar = fun _ -> None) (e : expression) : Refinement.pred optio
   let rec go (e : expression) : Refinement.pred option =
     match e.exp_desc with
     | Texp_mutvar { txt = id; _ } -> mutvar id
+    (* A value carrying [@@vox.reflect "Sym"] denotes its Lean symbol even when referenced
+       UNAPPLIED -- so a NAMED relation value passed whole to a higher-order contract
+       flows its concrete identity (e.g. a reflected [ge : (int -> int -> bool)] models as
+       the block symbol), the value-level analogue of a 0-ary spec constant. Without this
+       a named relation degrades to an opaque binder and its meaning is lost. Applied
+       occurrences are handled by the [Texp_apply] arm. *)
+    | Texp_ident { desc; _ } when reflect_attr_name desc.val_attributes <> None ->
+      (match reflect_attr_name desc.val_attributes with
+       | Some sym -> Some (Refinement.Pfun (sym, []))
+       | None -> None)
     | Texp_ident { path = Path.Pident id; _ } -> Some (Refinement.Pvar id)
     | Texp_ident { path = (Path.Pdot _ | Path.Papply _) as p; _ } ->
       (* A module-level value names itself by PATH: stamp-free, .cmi-stable, registered

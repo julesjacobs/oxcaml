@@ -5103,6 +5103,15 @@ let vox_open_dependent_arrow env binder ~sarg_opt ~app_loc ty_ret ty_ret0 =
       match sarg.pexp_desc with
       | Pexp_ident lid ->
         (match Env.lookup_value ~use:false ~loc:sarg.pexp_loc lid.txt env with
+         | (_, desc, _)
+           when Vox_reflect.reflect_attr_name desc.val_attributes <> None ->
+           (* A NAMED relation value carrying [@@vox.reflect "Sym"] denotes
+              its Lean symbol; substitute that (matching the walker's
+              [stable_arg_name], which resolves the same reflect name), so
+              the relation's concrete identity flows into the contract. *)
+           (match Vox_reflect.reflect_attr_name desc.val_attributes with
+            | Some sym -> subst (Refinement.Pfun (sym, []))
+            | None -> ty_ret, ty_ret0)
          | (Path.Pident _, {val_kind = Val_mut _; _}, _) ->
            (* Substituting a mutable variable's stamp would let facts
               recorded about it at different times contradict. *)

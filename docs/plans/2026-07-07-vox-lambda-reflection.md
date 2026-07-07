@@ -72,12 +72,63 @@ both refuted by grind, never silently accepted.
    `(v_r : Int -> Int -> Prop)` in the VC, so `rHolds v_r ..` is well typed
    (previously `r` sorted as `VoxU`, and the application was ill-typed).
 
+## Named relation values ([@@vox.reflect]) flow too
+
+A relation supplied as a NAMED value carrying `[@@vox.reflect "Sym"]`
+flows its Lean symbol instead of degrading to an opaque binder.  The fix
+is in two places that must AGREE: `Vox_reflect.translate` (the walker's
+`stable_arg_name`) and `Typecore.vox_open_dependent_arrow`'s ident case
+(the type-checker's opening) both substitute `Pfun(Sym, [])` for a bare
+reference to a reflect value — otherwise the walker names it `Sym` while
+the opener leaves an opaque `Pvar`, and the mismatch surfaces as "a
+variable that has escaped its scope".  With both, `apply_step le_rel f x`
+(where `external le_rel = "%lessequal" [@@vox.reflect "leRel"]`) reasons
+with the concrete `leRel` (demo `client_named`).  Caveat (pre-existing,
+R-a): `[@@vox.reflect]` on a plain `let` is still dropped from
+`val_attributes`, so a named value must be an `external` (or `.mli val`);
+the demo uses the real `%lessequal` primitive, whose runtime meaning is
+exactly `leRel`.
+
+## Composition
+
+`rcomp` (block def `fun a c => ∃ b, r a b ∧ s b c`) applied to two
+lambda-substituted relations verifies: `compose2 (fun a b -> a <= b)
+(fun a b -> a < b) f g x` proves `rHolds (rcomp (..<=) (..<)) x result`
+(demo `client_comp`) — grind unfolds `rcomp` and discharges the ∃.
+
+## Ghost-invocation boundary
+
+The relation is a REAL `int -> int -> bool`, not a phantom ghost — so it
+MAY be invoked at runtime (demo `runtime_call`).  Safe BY CONSTRUCTION:
+the reflected Lean term is derived from the same OCaml body, so the
+runtime result and the logical meaning agree.  This is *stronger* than a
+phantom ghost sort (which cannot be invoked at all).  Modeling note: vox
+does not reflect `r a b` (a relation PARAMETER applied) as a spec term
+(`r` is neither `total_` nor `[@@vox.reflect]`), so a contract over an
+*invocation* of `r` leaves its result opaque; the relation is applied in
+the LOGIC (`rHolds`/`rcomp`/a fixpoint), where its meaning is used.  No
+soundness consequence.
+
+## Interaction with #67 (bool connectives / ctor-wrap)
+
+#67 (954f36bb3) fixed `decompose_bool` to thread guarded operand facts
+through OCaml `&&`/`||`/`not` EXPRESSIONS and constructor-wrapped tier-2
+calls.  A lambda relation is substituted into a REFINEMENT predicate,
+where a `&&` is `Refinement.Pand` (handled by `lean_of_pred`) — a
+different layer from `decompose_bool` (bool-valued *expressions*).  So
+lambda terms do not reach #67's machinery; a lambda-derived relation
+feeding a `&&` GOAL verifies fine (demo `client_and`).  Orthogonal;
+they compose.  (Rebased onto 954f36bb3; the earlier do-not-substitute
+conservatism is moot.)
+
 ## Files
 - `typing/refinement.ml`: `Plam` constructor + all walkers (equal α, subst,
   free/mem, map_paths, printer, …).
 - `typing/vox_reflect.ml`: `translate_surface` (`bound` threading + lambda
   arm + comparison-in-lambda), `translate_nameable` (`Texp_function` arm),
-  `exact_result_rhs` no_bound arm.
+  `exact_result_rhs` no_bound arm, `translate` (bare-`[@@vox.reflect]` arm).
+- `typing/typecore.ml`: `vox_open_dependent_arrow` ident case resolves a
+  `[@@vox.reflect]` value to its symbol (agrees with the walker).
 - `typing/vox_verify.ml`: `S_arrow` + `dsort_of_type`/`lean_sort` + emission
   (`lean_of_pred` Plam) + every dsort/pred walker.
 - `typing/vox_dep.ml`, `lambda/translcore.ml`: Plam arms.

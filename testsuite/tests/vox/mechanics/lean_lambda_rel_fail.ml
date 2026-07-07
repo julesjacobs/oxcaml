@@ -58,3 +58,20 @@ Hypotheses:
   rHolds (fun p q -> p > q) x *unknown4*
 (lean: error: `grind` failed)
 |}]
+
+(* A lambda whose BODY is not reflectable (a call to a plain function with
+   no contract) cannot be named in the logic -- rejected at the argument
+   with a clean diagnostic, never silently opaque. *)
+let opaque2 (a : int) (b : int) : bool = a = b
+[%%expect{|
+val opaque2 : int -> int -> bool = <fun>
+|}]
+
+let bad_body (x : int) : int{ x = x } =
+  apply_step (fun p q -> opaque2 p q) (fun a -> a) x
+[%%expect{|
+Line 2, characters 13-37:
+2 |   apply_step (fun p q -> opaque2 p q) (fun a -> a) x
+                 ^^^^^^^^^^^^^^^^^^^^^^^^
+Error: vox: this argument for a dependent parameter cannot be named in the logic: it is neither a reflectable expression (a variable, literal, arithmetic, constructor, field read, or reflected call) nor a call with an exact result contract; bind it with a let first
+|}]
