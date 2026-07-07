@@ -1999,6 +1999,111 @@ let runtime_check_gate env ~loc goal =
   bool_operand goal
 ;;
 
+(* R1 (kinds study): reject order/arithmetic/tuple-projection applied to a
+   value whose solver sort carries no such theory.  Fixed-width and unboxed
+   types (int64#/int32#/nativeint#, float#/float, char, unboxed products and
+   records, or_null) all model at the uninterpreted sort, where only equality
+   is available.  Without this the obligation reaches Lean and fails instance
+   synthesis, surfaced to the user as "NOT PROVED (may still hold)" -- which
+   is misleading: the spec is unsatisfiable as stated, not merely unproved.
+   Strictly LOOSER than [runtime_check_gate]: equality/disequality stay
+   allowed at every sort (uninterpreted equality is sound).  Permissive where
+   a sort is UNKNOWN -- quantifier binders are intentionally unsorted, and
+   spec-function / global results are opaque here -- so those are left to Lean
+   exactly as before, avoiding false rejections of quantified-int arithmetic. *)
+let check_operator_sorts ~loc (root : Refinement.pred) =
+  let kind_name s =
+    match s with
+    | S_int -> "Int"
+    | S_bool -> "Bool"
+    | S_data (p, _) -> "the datatype " ^ Path.name p
+    | S_tuple _ -> "a tuple"
+    | S_iarray -> "an iarray"
+    | S_param _ | S_poly _ | S_lean _ | S_other -> "an opaque sort"
+  in
+  (* best-effort, SIDE-EFFECT-FREE sort; [None] = unknown (be permissive). *)
+  let rec sort_of (p : Refinement.pred) : dsort option =
+    match p with
+    | Refinement.Pint _ -> Some S_int
+    | Refinement.Pbool _ -> Some S_bool
+    | Refinement.Pvar id -> Hashtbl.find_opt name_sorts id
+    | Refinement.Pbinop
+        ( ( Refinement.Add | Refinement.Sub | Refinement.Mul | Refinement.Div
+          | Refinement.Mod )
+        , _, _ ) -> Some S_int
+    | Refinement.Pbinop _ -> Some S_bool
+    | Refinement.Pand _ | Refinement.Por _ | Refinement.Pimp _
+    | Refinement.Pnot _ | Refinement.Pis _ | Refinement.Pquant _ -> Some S_bool
+    | Refinement.Ptuple ps ->
+      Some
+        (S_tuple
+           (List.map (fun p -> Option.value (sort_of p) ~default:S_other) ps))
+    | Refinement.Pproj (_, i, a) ->
+      (match sort_of a with
+       | Some (S_tuple ss) -> List.nth_opt ss i
+       | _ -> None)
+    | Refinement.Pbound | Refinement.Pglobal _ | Refinement.Pfun _
+    | Refinement.Pconstr _ | Refinement.Pfield _ -> None
+  in
+  let describe (p : Refinement.pred) =
+    match p with
+    | Refinement.Pvar id when not (Hashtbl.mem synthetic_names id) ->
+      Printf.sprintf "\"%s\"" (Ident.name id)
+    | _ -> "a subterm"
+  in
+  (* Reject ONLY the genuinely uninterpreted sort [S_other] (VoxU): that is
+     where fixed-width and unboxed kinds land, and where Lean can synthesize
+     no arithmetic / order / product instance, so the obligation can never be
+     discharged.  A ghost sort ([S_lean] -- e.g. a via image the author named
+     [Int]), a datatype, or an abstract parameter is left to Lean exactly as
+     before, so via-image arithmetic (cfold's [a + b] over [t refines Int])
+     keeps working.  Unknown sorts (quantifier binders, spec-fn results) are
+     also permissive. *)
+  let voxu p = match sort_of p with Some S_other -> true | _ -> false in
+  let rec walk (p : Refinement.pred) =
+    (match p with
+     | Refinement.Pbinop
+         ( ( Refinement.Add | Refinement.Sub | Refinement.Mul | Refinement.Div
+           | Refinement.Mod | Refinement.Lt | Refinement.Le | Refinement.Gt
+           | Refinement.Ge ) as op
+         , a, b ) ->
+       let chk x =
+         if voxu x
+         then
+           Location.raise_errorf ~loc
+             "vox: the operator (%s) needs Int operands, but %s is modeled at \
+              %s; only equality (= and <>) is available for this kind \
+              (fixed-width and unboxed types are left uninterpreted)"
+             (Refinement.binop_name op) (describe x)
+             (kind_name (Option.value (sort_of x) ~default:S_other))
+       in
+       chk a;
+       chk b
+     | Refinement.Pproj (_, _, a) ->
+       if voxu a
+       then
+         Location.raise_errorf ~loc
+           "vox: fst/snd project a tuple, but %s is modeled at %s (unboxed \
+            products #( ) are not modeled; only boxed tuples project)"
+           (describe a)
+           (kind_name (Option.value (sort_of a) ~default:S_other))
+     | _ -> ());
+    match p with
+    | Refinement.Pbinop (_, a, b) | Refinement.Pand (a, b)
+    | Refinement.Por (a, b) | Refinement.Pimp (a, b) ->
+      walk a;
+      walk b
+    | Refinement.Pnot a | Refinement.Pfield (_, _, a)
+    | Refinement.Pquant (_, _, a) | Refinement.Pproj (_, _, a)
+    | Refinement.Pis (_, _, a) -> walk a
+    | Refinement.Ptuple ps | Refinement.Pconstr (_, _, ps)
+    | Refinement.Pfun (_, ps) -> List.iter walk ps
+    | Refinement.Pint _ | Refinement.Pbool _ | Refinement.Pbound
+    | Refinement.Pvar _ | Refinement.Pglobal _ -> ()
+  in
+  walk root
+;;
+
 let emit_vc ~env ~loc ~ctx ~goal ~kind =
   (* The goal's provenance is the refinement/annotation text that
      induced the obligation.  A refined type carries no syntactic loc
@@ -2025,7 +2130,8 @@ let emit_vc ~env ~loc ~ctx ~goal ~kind =
      if not (pred_in_scope ctx goal)
      then
        Location.raise_errorf ~loc
-         "vox: this obligation mentions a variable that has escaped its scope"
+         "vox: this obligation mentions a variable that has escaped its scope";
+     check_operator_sorts ~loc goal
    | Runtime_check ->
      if not (pred_in_scope ctx goal)
      then
@@ -2036,6 +2142,9 @@ let emit_vc ~env ~loc ~ctx ~goal ~kind =
      runtime_check_gate env ~loc goal
    | Assume -> ());
   let facts = List.filter (fun (p, _) -> pred_in_scope ctx p) ctx.cfacts in
+  (match kind with
+   | Prove -> List.iter (fun (p, _) -> check_operator_sorts ~loc p) facts
+   | Runtime_check | Assume -> ());
   (* Pull in the definitional equations reachable from the goal and
      facts (transitively through their right-hand sides); definitions
      mentioning out-of-scope program variables are dropped, which only

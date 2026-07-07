@@ -36,6 +36,16 @@
    machine's wrap, so the translation of + - * equates modular with
    ideal arithmetic; overflow is outside the model.
 
+   HOUSE RULE (kinds study, R2): fixed-width UNBOXED integers
+   (int64#/int32#/nativeint#) are, by design, left uninterpreted (they
+   sort at the opaque VoxU, where only equality is available).  They
+   MUST NOT be modeled via [@vox.via]/[@@vox.reflect] through Lean [Int]:
+   that would silently assert UNBOUNDED semantics on a value whose whole
+   point is to wrap, which is worse than the plain-int caveat above
+   because the programmer expects wraparound.  If refinement arithmetic
+   on them is ever wanted, model with Lean [BitVec 64]/[BitVec 32]
+   (faithful two's-complement wraparound), never [Int].
+
    THE TRANSLATOR TOWER -- what turns a term into a logic term, and
    why there are several entry points rather than one:
    - [translate_surface]: Parsetree, for DEPENDENT ARGUMENTS -- runs

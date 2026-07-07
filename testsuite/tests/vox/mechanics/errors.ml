@@ -407,3 +407,46 @@ Line 2, characters 8-9:
             ^
 Error: vox: a reflected function cannot [match] on bool (the solver models bool as a proposition); use [if] instead
 |}]
+
+(* R1 (kinds study): order / arithmetic / tuple-projection applied to a
+   value at an uninterpreted solver sort (fixed-width int64#, float#, or an
+   unboxed product) is rejected HERE, naming the operand and its sort --
+   rather than reaching Lean and failing instance synthesis, surfaced as a
+   misleading "NOT PROVED (may still hold)".  Equality at such a sort stays
+   ACCEPTED (the (b) cells below): uninterpreted equality is sound. *)
+let ord_i64 : (x : int64#) -> int64#{ _ > x } = fun x -> x
+[%%expect{|
+Line 1, characters 57-58:
+1 | let ord_i64 : (x : int64#) -> int64#{ _ > x } = fun x -> x
+                                                             ^
+Error: vox: the operator (>) needs Int operands, but "x" is modeled at an opaque sort; only equality (= and <>) is available for this kind (fixed-width and unboxed types are left uninterpreted)
+|}]
+
+let arith_fu : (x : float#) -> int{ _ = x + 1 } = fun x -> 0
+[%%expect{|
+Line 1, characters 59-60:
+1 | let arith_fu : (x : float#) -> int{ _ = x + 1 } = fun x -> 0
+                                                               ^
+Error: vox: the operator (+) needs Int operands, but "x" is modeled at an opaque sort; only equality (= and <>) is available for this kind (fixed-width and unboxed types are left uninterpreted)
+|}]
+
+let proj_uprod : (x : #(int * int)) -> int{ _ = fst x } =
+  fun x -> let #(a, _) = x in a
+[%%expect{|
+Line 2, characters 30-31:
+2 |   fun x -> let #(a, _) = x in a
+                                  ^
+Error: vox: fst/snd project a tuple, but "x" is modeled at an opaque sort (unboxed products #( ) are not modeled; only boxed tuples project)
+|}]
+
+(* Preserved (b) cells: equality/disequality at an uninterpreted sort must
+   NOT be over-rejected. *)
+let eq_fu : (x : float#) -> float#{ _ = x } = fun x -> x
+[%%expect{|
+val eq_fu : (x : float#) -> float#{ _ = x } = <fun>
+|}]
+
+let eq_uprod : (x : #(int * int)) -> #(int * int){ _ = x } = fun x -> x
+[%%expect{|
+val eq_uprod : (x : #(int * int)) -> #(int * int){ _ = x } = <fun>
+|}]
