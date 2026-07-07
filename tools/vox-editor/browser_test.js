@@ -115,11 +115,20 @@ async function main() {
       "default is the len/append/nth walkthrough"
     );
     assert.strictEqual(
-      await page.$eval("#examples", (e) => e.value),
-      "nth",
-      "dropdown reflects the default example"
+      await page.evaluate(() => window.__vox.getCurrentPath()),
+      "examples/nth.ml",
+      "explorer reflects the default file as current"
     );
-    console.log("ok - default is the walkthrough, selected in the dropdown");
+    const activePath = await page.$eval(
+      "#tree .tree-file.active",
+      (e) => e.dataset.path
+    );
+    assert.strictEqual(
+      activePath,
+      "examples/nth.ml",
+      "the default file's tree row is highlighted active"
+    );
+    console.log("ok - default is the walkthrough, active in the file explorer");
 
     // On load the editor opens on the example's suggested teaching line
     // (nth: line 21, the impossible Nil arm) and the pane shows that VC --
@@ -592,17 +601,20 @@ async function main() {
     assert.strictEqual(extraStatus, "proved", "full check proves the new VC");
     console.log("ok - full check follows and proves the new obligation");
 
-    // Examples dropdown: pick fib (a [%%vox.lean] block example) and
-    // drive its static block theorem + a live Lean goal.
+    // File explorer: click fib (a [%%vox.lean] block example) in the tree
+    // and drive its static block theorem + a live Lean goal.
     await page.evaluate(() => {
       window.confirm = () => true; // never block the headless run
     });
-    const optCount = await page.$eval("#examples", (e) => e.options.length);
-    assert.ok(optCount > 1, "examples dropdown populated: " + optCount);
+    const exampleCount = await page.$$eval(
+      '#tree .tree-file[data-path^="examples/"]',
+      (els) => els.length
+    );
+    assert.ok(exampleCount > 1, "examples populated in the tree: " + exampleCount);
     await page.evaluate(() => {
-      const sel = document.getElementById("examples");
-      sel.value = "fib";
-      sel.dispatchEvent(new Event("change"));
+      document
+        .querySelector('#tree .tree-file[data-path="examples/fib.ml"]')
+        .click();
     });
     const loaded = await waitFor(
       async () => {
@@ -612,7 +624,7 @@ async function main() {
       10000,
       "fib loaded into editor"
     );
-    console.log("ok - picked fib from the dropdown");
+    console.log("ok - clicked fib in the file explorer");
     assert.ok(!/let rec nth/.test(loaded), "walkthrough replaced by fib");
     const fibStatus = await waitFor(
       async () => {
@@ -974,13 +986,13 @@ async function main() {
     }
     await page.evaluate(() => window.__vox.setCompact(true));
 
-    // Examples dropdown: pick reverse (fully verified, but its borrow/slice
+    // File explorer: pick reverse (fully verified, but its borrow/slice
     // framing VCs are ASSUMED). They must badge as "trusted", not the grey
     // "unknown" that reads as "didn't verify".
     await page.evaluate(() => {
-      const sel = document.getElementById("examples");
-      sel.value = "reverse";
-      sel.dispatchEvent(new Event("change"));
+      document
+        .querySelector('#tree .tree-file[data-path="examples/reverse.ml"]')
+        .click();
     });
     await waitFor(
       async () => {
@@ -1348,9 +1360,9 @@ async function main() {
     // (not truncated at `&&`); (2) those anonymous values must display as
     // `anonN`, never the alarming Lean-metavar-looking `?N`.
     await page.evaluate(() => {
-      const s = document.getElementById("examples");
-      s.value = "qsort";
-      s.dispatchEvent(new Event("change"));
+      document
+        .querySelector('#tree .tree-file[data-path="examples/qsort.ml"]')
+        .click();
     });
     await waitFor(
       async () =>
@@ -1464,6 +1476,109 @@ async function main() {
       "the two columns show DIFFERENT goals (column-precise, not a fixed pick)"
     );
     console.log("ok - split3 line: cursor column picks k vs (k+1) obligation");
+
+    // Task #76 (file explorer): the sidebar tree lists both allowlisted
+    // roots, dirs collapse, and a vox stdlib unit checks GREEN through the
+    // pane (its interface artifacts staged server-side from the path we
+    // send with /check).
+    const tree = await page.evaluate(() => window.__vox.getTree());
+    assert.ok(
+      tree && tree.roots && tree.roots.length === 2,
+      "tree has both roots"
+    );
+    assert.deepStrictEqual(
+      tree.roots.map((r) => r.id).sort(),
+      ["examples", "stdlib"],
+      "roots are examples + stdlib"
+    );
+    // The stdlib root shows voption.mli and voption.ml.
+    const stdlibPaths = await page.$$eval(
+      '#tree .tree-file[data-path^="stdlib/"]',
+      (els) => els.map((e) => e.dataset.path)
+    );
+    assert.ok(
+      stdlibPaths.includes("stdlib/voption.ml") &&
+        stdlibPaths.includes("stdlib/voption.mli"),
+      "stdlib sources are in the tree: " + stdlibPaths.slice(0, 6)
+    );
+    // Collapsing the stdlib root hides its children; expanding restores.
+    const stdlibVisible = () =>
+      page.evaluate(() => {
+        const el = document.querySelector(
+          '#tree .tree-file[data-path="stdlib/voption.ml"]'
+        );
+        return !!(el && el.offsetParent !== null);
+      });
+    assert.ok(await stdlibVisible(), "stdlib file visible before collapse");
+    await page.evaluate(() => {
+      // The second root is stdlib; click its directory label to collapse.
+      document
+        .querySelectorAll("#tree > .tree-root > .tree-dir-label")[1]
+        .click();
+    });
+    assert.ok(!(await stdlibVisible()), "collapsing stdlib hides its files");
+    await page.evaluate(() => {
+      document
+        .querySelectorAll("#tree > .tree-root > .tree-dir-label")[1]
+        .click();
+    });
+    assert.ok(await stdlibVisible(), "expanding stdlib shows its files again");
+    console.log("ok - explorer lists both roots; stdlib dir collapses/expands");
+
+    // Open Voption (a leaf stdlib module) and verify it goes green.
+    await page.evaluate(() => {
+      document
+        .querySelector('#tree .tree-file[data-path="stdlib/voption.ml"]')
+        .click();
+    });
+    await waitFor(
+      async () => {
+        const t = await page.evaluate(() => window.__vox.cm.getValue());
+        return /vo_is_some|Vsome|Vnone/.test(t) ? t : false;
+      },
+      10000,
+      "voption.ml loaded into editor"
+    );
+    assert.strictEqual(
+      await page.evaluate(() => window.__vox.getCurrentPath()),
+      "stdlib/voption.ml",
+      "currentPath tracks the open stdlib unit (so /check stages its deps)"
+    );
+    const voStatus = await waitFor(
+      async () => {
+        const t = await page.$eval("#status", (e) => e.textContent);
+        return /verified|errors|✗/.test(t) ? t : false;
+      },
+      120000,
+      "voption check completes"
+    );
+    assert.ok(
+      /verified/.test(voStatus),
+      "Voption verifies green through the pane: " + voStatus
+    );
+    // A real proved VC is present and its pane renders a goal.
+    const voProved = await page.evaluate(() =>
+      window.__vox
+        .getRegions()
+        .some((r) => r.kind === "vc" && r.status === "proved")
+    );
+    assert.ok(voProved, "Voption has a proved VC");
+    console.log("ok - stdlib Voption verifies green through the pane");
+
+    // A notes/*.md doc opens read-only (reference material, not checked).
+    await page.evaluate(() => {
+      const md = document.querySelector(
+        '#tree .tree-file.kind-doc[data-path^="stdlib/notes/"]'
+      );
+      if (md) md.click();
+    });
+    const docRO = await waitFor(
+      () => page.evaluate(() => window.__vox.cm.getOption("readOnly") === true),
+      8000,
+      "a notes doc opened read-only"
+    );
+    assert.ok(docRO, "notes/*.md opens read-only (documentation, not verified)");
+    console.log("ok - notes/*.md doc opens read-only");
 
     // Theme: dark is the default (no OS sniffing); the toolbar toggle
     // flips to light, and the choice persists across a reload.

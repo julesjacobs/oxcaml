@@ -98,23 +98,66 @@ button {
   font: inherit;
 }
 button:hover { border-color: var(--accent); }
-#examples {
-  background: var(--btn-bg);
-  color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 3px 6px;
-  cursor: pointer;
-  font: inherit;
-  max-width: 260px;
-}
-#examples:hover { border-color: var(--accent); }
+#sidebar-btn { padding: 3px 8px; line-height: 1; }
 #status { padding: 2px 8px; border-radius: 4px; font-size: 12px; }
 .status-idle { color: var(--muted); }
 .status-checking { color: var(--warn); }
 .status-ok { color: var(--ok); }
 .status-fail { color: var(--fail); }
 main { flex: 1; display: flex; min-height: 0; }
+
+/* File explorer sidebar (task #76). */
+#sidebar {
+  width: 232px;
+  flex: 0 0 232px;
+  min-width: 0;
+  overflow: auto;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  font-size: 12.5px;
+  padding: 6px 0;
+}
+body.sidebar-hidden #sidebar { display: none; }
+#tree { user-select: none; }
+.tree-children { display: block; }
+.tree-dir.collapsed > .tree-children { display: none; }
+.tree-root > .tree-dir-label {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 11px;
+}
+.tree-dir-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+  color: var(--fg);
+}
+.tree-dir-label:hover { background: var(--hyp-bg); }
+.tree-chevron { width: 10px; color: var(--muted); font-size: 10px; }
+.tree-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Children indent one level under their directory. */
+.tree-children { padding-left: 12px; }
+.tree-file {
+  padding: 2px 8px 2px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg);
+  border-left: 2px solid transparent;
+}
+.tree-file:hover { background: var(--hyp-bg); }
+.tree-file.active {
+  background: var(--goal-bg);
+  border-left-color: var(--accent);
+}
+/* Interfaces read as declarations; docs as muted; impls plain. */
+.tree-file.kind-mli { color: var(--accent); }
+.tree-file.kind-doc { color: var(--muted); font-style: italic; }
+
 #editor-pane { flex: 1.4; min-width: 0; border-right: 1px solid var(--border); }
 #proof-pane {
   flex: 1;

@@ -37,6 +37,7 @@ from typing import Any, Dict, List, Optional, Tuple, cast
 
 import lean_bridge  # pyright: ignore[reportImplicitRelativeImport]
 import vc_index  # pyright: ignore[reportImplicitRelativeImport]
+import workspace  # pyright: ignore[reportImplicitRelativeImport]
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 EXAMPLES_DIR = os.path.join(HERE, "examples")
@@ -66,12 +67,26 @@ def build_check_response(
     revision: int,
     ocamlc: str,
     lean: Optional[str],
+    file_path: Optional[str] = None,
 ) -> Dict[str, object]:
-    """Compile ``source`` and produce the /check payload."""
-    scratch = tempfile.mkdtemp(prefix="voxeditor")
-    path = os.path.join(scratch, "input.ml")
-    with open(path, "w") as fh:
-        fh.write(source)
+    """Compile ``source`` and produce the /check payload.
+
+    ``file_path`` is the sidebar path id of the buffer, if any.  When it
+    names a vox stdlib unit the source is checked as that module -- written
+    under its real filename, with its own and every dependency's interface
+    artifacts staged (workspace.stage_for_check) -- so the unit verifies the
+    way it does under the build recipe.  Any other buffer is checked
+    standalone, as before."""
+    mod = workspace.module_of_path(file_path) if file_path else None
+    if mod is not None:
+        module, filename = mod
+        path = workspace.stage_for_check(module, source, filename, ocamlc, lean)
+        scratch = os.path.dirname(path)
+    else:
+        scratch = tempfile.mkdtemp(prefix="voxeditor")
+        path = os.path.join(scratch, "input.ml")
+        with open(path, "w") as fh:
+            fh.write(source)
     index = vc_index.build_index(path, ocamlc, lean=lean, cwd=scratch)
     regions: List[Dict[str, object]] = []
     for vc in cast(List[Dict[str, Any]], index["vcs"]):
@@ -193,8 +208,12 @@ def build_goal_response(
     revision: int,
     ocamlc: str,
     lean: Optional[str],
+    file_path: Optional[str] = None,
 ) -> Dict[str, object]:
-    """Live proof state at a 0-based cursor (must be inside a block)."""
+    """Live proof state at a 0-based cursor (must be inside a block).
+
+    ``file_path`` routes a stdlib unit through the same interface-artifact
+    staging as /check, so a block inside a stdlib module elaborates."""
     if lean is None:
         return {
             "revision": revision,
@@ -202,10 +221,16 @@ def build_goal_response(
             "goals": [],
             "detail": "server started without a Lean solver",
         }
-    scratch = tempfile.mkdtemp(prefix="voxeditorgoal")
-    path = os.path.join(scratch, "input.ml")
-    with open(path, "w") as fh:
-        fh.write(source)
+    mod = workspace.module_of_path(file_path) if file_path else None
+    if mod is not None:
+        module, filename = mod
+        path = workspace.stage_for_check(module, source, filename, ocamlc, lean)
+        scratch = os.path.dirname(path)
+    else:
+        scratch = tempfile.mkdtemp(prefix="voxeditorgoal")
+        path = os.path.join(scratch, "input.ml")
+        with open(path, "w") as fh:
+            fh.write(source)
     bg = lean_bridge.goal_at_source_pos(path, ocamlc, lean, line, col, cwd=scratch)
     out = bg.to_json()
     out["revision"] = revision
@@ -263,11 +288,20 @@ class Handler(BaseHTTPRequestHandler):
             return
         source = str(body.get("source", ""))
         revision = _as_int(body.get("revision", 0))
+        # The sidebar path id of the open buffer (a stdlib unit is checked
+        # with its interface artifacts staged); optional and untrusted --
+        # workspace only acts on it when it names a known stdlib module.
+        file_path = body.get("path")
+        file_path = str(file_path) if isinstance(file_path, str) else None
         endpoint = self._endpoint()
         if endpoint == "/check":
             fast = bool(body.get("fast", False))
             resp = build_check_response(
-                source, revision, self.ocamlc, None if fast else self.lean
+                source,
+                revision,
+                self.ocamlc,
+                None if fast else self.lean,
+                file_path=file_path,
             )
             resp["fast"] = fast
             self._json(200, resp)
@@ -277,7 +311,13 @@ class Handler(BaseHTTPRequestHandler):
             self._json(
                 200,
                 build_goal_response(
-                    source, line, col, revision, self.ocamlc, self.lean
+                    source,
+                    line,
+                    col,
+                    revision,
+                    self.ocamlc,
+                    self.lean,
+                    file_path=file_path,
                 ),
             )
         else:
@@ -312,6 +352,21 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/favicon.ico":
             self.send_response(204)
             self.end_headers()
+            return
+        # File explorer (task #76): /ls is the allowlisted tree of the
+        # read-only roots; /file?path=<id> serves one file's text after the
+        # same traversal check (workspace.resolve).
+        if path == "/ls":
+            self._json(200, workspace.list_tree())
+            return
+        if path == "/file":
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            path_id = (query.get("path") or [""])[0]
+            target = workspace.resolve(path_id)
+            if target is None:
+                self._json(404, {"error": "no such file"})
+                return
+            self._send_file(target, "text/plain; charset=utf-8")
             return
         # Curated examples: /examples is the index, /examples/<name> the
         # source of one example (see make_examples.py).

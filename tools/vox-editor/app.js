@@ -47,6 +47,11 @@ let pendingCursor = null;
 // The source of the example currently loaded (or the initial SAMPLE), so
 // we can warn before discarding hand edits when a new one is picked.
 let lastLoaded = SAMPLE;
+// The file-explorer path id of the buffer's current file ("stdlib/vmap.ml",
+// "examples/fib.ml"), or null for the built-in sample. Sent with every
+// /check so the server stages a stdlib unit's interface artifacts; harmless
+// for anything that is not a stdlib unit.
+let currentPath = null;
 
 const statusEl = document.getElementById("status");
 const modeEl = document.getElementById("pane-mode");
@@ -218,6 +223,7 @@ async function check(fast) {
       source,
       revision: rev,
       fast: !!fast,
+      path: currentPath,
     });
     if (resp.revision < applied) return; // stale
     applied = resp.revision;
@@ -666,6 +672,9 @@ const fireFull = Selection.singleFlight(() => check(false));
 // and the fast pass re-lays them almost immediately -- clearing first
 // just made the underlines flicker on every keystroke.
 cm.on("change", () => {
+  // A read-only .md doc is loaded for reading, not verifying; its
+  // setValue still emits a change, so skip the check entirely.
+  if (cm.getOption("readOnly")) return;
   clearHoverMark();
   setStatus("status-checking", "checking…");
   fireFast();
@@ -754,68 +763,179 @@ fadeBox.addEventListener("change", () => {
 
 initFade();
 
-// Examples dropdown: populated from /examples, each choice loads the
-// source and re-checks. A confirm() guards unsaved edits.
-const examplesEl = document.getElementById("examples");
+// File explorer (task #76): a collapsible left-sidebar tree of the two
+// allowlisted read-only roots (curated examples + vox_stdlib). Selecting an
+// .ml/.mli loads it into the buffer and checks it; a stdlib unit checks
+// with its interface artifacts staged server-side (we send currentPath with
+// /check). A notes/*.md doc opens read-only, with no verification.
+const treeEl = document.getElementById("tree");
+// The curated examples' metadata (title / cursor) still comes from
+// /examples; the tree itself comes from /ls. Kept so the pickExample /
+// loadExample compatibility API (and the startup default) can open on an
+// example's suggested teaching line.
 let examplesList = [];
+let treeData = null;
+// path id -> file node, for cursor lookup and active-row highlighting.
+const fileNodes = {};
 
 async function loadExamples() {
   try {
     const resp = await fetch("/examples");
     examplesList = (await resp.json()).examples || [];
   } catch (e) {
-    examplesList = []; // no examples served; leave the dropdown as-is
+    examplesList = [];
   }
-  examplesList.forEach((ex) => {
-    const opt = document.createElement("option");
-    opt.value = ex.name;
-    opt.textContent = (ex.verifies ? "" : "✗ ") + ex.title;
-    opt.title = ex.description;
-    examplesEl.appendChild(opt);
-  });
   return examplesList;
 }
 
-// Load an example into the buffer and re-check. `force` skips the
-// unsaved-buffer guard (used on startup, where there is nothing to lose).
-async function loadExample(name, force) {
-  if (!force && cm.getValue() !== lastLoaded &&
-      !confirm("Discard your edits and load this example?")) {
+function renderPlaceholder(text) {
+  modeEl.textContent = "";
+  bodyEl.innerHTML = '<p class="placeholder">' + esc(text) + "</p>";
+}
+
+function highlightActive(path) {
+  treeEl.querySelectorAll(".tree-file.active").forEach((e) =>
+    e.classList.remove("active")
+  );
+  treeEl.querySelectorAll(".tree-file").forEach((e) => {
+    if (e.dataset.path === path) e.classList.add("active");
+  });
+}
+
+// Load any allowlisted file into the buffer. `node` is a tree file node
+// ({path, kind, ...}); `force` skips the unsaved-edits guard (startup).
+async function openFile(node, force) {
+  if (
+    !force &&
+    cm.getValue() !== lastLoaded &&
+    !confirm("Discard your edits and load this file?")
+  ) {
     return false;
   }
   try {
-    const resp = await fetch("/examples/" + encodeURIComponent(name));
+    const resp = await fetch("/file?path=" + encodeURIComponent(node.path));
     if (!resp.ok) return false;
     const source = await resp.text();
+    const doc = node.kind === "doc";
+    // Set read-only BEFORE setValue: setValue emits a change, and the
+    // change handler skips the check when the buffer is read-only.
+    cm.setOption("readOnly", doc);
     lastLoaded = source;
+    currentPath = node.path;
     cm.setValue(source);
-    examplesEl.value = name; // reflect the loaded example in the dropdown
-    // Open on the example's suggested teaching line (1-based in the
-    // manifest), applied by the check we kick off below.
-    const meta = examplesList.find((e) => e.name === name);
+    highlightActive(node.path);
+    if (doc) {
+      setStatus("status-idle", "read-only doc");
+      renderPlaceholder(
+        "Documentation (read-only). Open an .ml or .mli to verify."
+      );
+      return true;
+    }
+    // Open an example on its suggested teaching line (1-based in the
+    // manifest); other files open at the top.
+    const meta = examplesList.find(
+      (e) => "examples/" + e.name + ".ml" === node.path
+    );
     pendingCursor =
       meta && typeof meta.cursor === "number" ? meta.cursor - 1 : null;
     fireFull();
     return true;
   } catch (e) {
-    setStatus("status-fail", "could not load example");
+    setStatus("status-fail", "could not load file");
     return false;
   }
 }
 
-// Back-compat alias for the guarded, user-initiated path.
+// Compatibility API for the headless tests and startup: load a curated
+// example by bare name (e.g. "fib").
+async function loadExample(name, force) {
+  return openFile({ path: "examples/" + name + ".ml", kind: "ml" }, force);
+}
 const pickExample = (name) => loadExample(name, false);
 
-examplesEl.addEventListener("change", () => {
-  const name = examplesEl.value;
-  if (name) loadExample(name, false);
-});
+function renderFileNode(node) {
+  const el = document.createElement("div");
+  el.className = "tree-file kind-" + (node.kind || "file");
+  el.setAttribute("role", "treeitem");
+  el.dataset.path = node.path;
+  el.title = node.title ? node.title : node.path;
+  el.textContent = (node.verifies === false ? "✗ " : "") + node.name;
+  el.addEventListener("click", () => openFile(node, false));
+  fileNodes[node.path] = node;
+  return el;
+}
 
-// Startup: open with the default example (auto-checked) rather than a
-// bare sample. Falls back to checking whatever is in the buffer.
+function renderDirNode(node, isRoot) {
+  const wrap = document.createElement("div");
+  wrap.className = "tree-dir" + (isRoot ? " tree-root" : "");
+  const label = document.createElement("div");
+  label.className = "tree-dir-label";
+  label.setAttribute("role", "treeitem");
+  const chevron = document.createElement("span");
+  chevron.className = "tree-chevron";
+  chevron.textContent = "▾";
+  label.appendChild(chevron);
+  const name = document.createElement("span");
+  name.className = "tree-name";
+  name.textContent = node.name;
+  label.appendChild(name);
+  const kids = document.createElement("div");
+  kids.className = "tree-children";
+  (node.children || []).forEach((c) =>
+    kids.appendChild(c.type === "dir" ? renderDirNode(c, false) : renderFileNode(c))
+  );
+  label.addEventListener("click", () => {
+    const collapsed = wrap.classList.toggle("collapsed");
+    chevron.textContent = collapsed ? "▸" : "▾";
+  });
+  wrap.appendChild(label);
+  wrap.appendChild(kids);
+  return wrap;
+}
+
+function renderTree(data) {
+  treeEl.innerHTML = "";
+  (data.roots || []).forEach((root) =>
+    treeEl.appendChild(renderDirNode(root, true))
+  );
+  if (currentPath) highlightActive(currentPath);
+}
+
+async function loadTree() {
+  await loadExamples();
+  try {
+    const resp = await fetch("/ls");
+    treeData = await resp.json();
+  } catch (e) {
+    treeData = { roots: [] };
+  }
+  renderTree(treeData);
+  return treeData;
+}
+
+// Sidebar show/hide (persisted). Collapsing the whole explorer gives the
+// editor the full width when the tree is not needed.
+const sidebarBtn = document.getElementById("sidebar-btn");
+const SIDEBAR_KEY = "vox-editor-sidebar";
+function applySidebar(hidden) {
+  document.body.classList.toggle("sidebar-hidden", hidden);
+}
+sidebarBtn.addEventListener("click", () => {
+  const hidden = !document.body.classList.contains("sidebar-hidden");
+  try {
+    localStorage.setItem(SIDEBAR_KEY, hidden ? "hidden" : "shown");
+  } catch (e) {}
+  applySidebar(hidden);
+});
+try {
+  applySidebar(localStorage.getItem(SIDEBAR_KEY) === "hidden");
+} catch (e) {}
+
+// Startup: render the tree, then open the default example (auto-checked).
+// Falls back to checking whatever is in the buffer.
 async function init() {
-  const list = await loadExamples();
-  const def = list.find((e) => e.default) || list[0];
+  await loadTree();
+  const def = examplesList.find((e) => e.default) || examplesList[0];
   if (def && (await loadExample(def.name, true))) return;
   fireFull();
 }
@@ -828,6 +948,10 @@ window.__vox = {
   loadExample,
   pickExample,
   loadExamples,
+  loadTree,
+  openFile,
+  getTree: () => treeData,
+  getCurrentPath: () => currentPath,
   getRegions: () => regions,
   getLastCheckFast: () => lastCheckFast,
   getTypes: () => exprTypes,

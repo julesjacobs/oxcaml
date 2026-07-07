@@ -101,9 +101,13 @@ class TestPointStates(unittest.TestCase):
     def _state_at(self, states, line, col):
         best = None
         for st in states:
-            if (st["start"]["line"], st["start"]["col"]) <= (line, col) <= (
-                st["end"]["line"],
-                st["end"]["col"],
+            if (
+                (st["start"]["line"], st["start"]["col"])
+                <= (line, col)
+                <= (
+                    st["end"]["line"],
+                    st["end"]["col"],
+                )
             ):
                 if best is None or (
                     st["end"]["line"] - st["start"]["line"],
@@ -189,9 +193,7 @@ class TestHttp(unittest.TestCase):
     def test_fast_check_skips_lean(self):
         """fast:true is the as-you-type pass: full VC shapes with spans,
         no Lean solve (statuses unknown), no generated Lean."""
-        resp = self._post(
-            "/check", {"source": SOURCE, "revision": 43, "fast": True}
-        )
+        resp = self._post("/check", {"source": SOURCE, "revision": 43, "fast": True})
         self.assertEqual(resp["revision"], 43)
         self.assertTrue(resp["fast"])
         self.assertIsNone(resp["generated_lean"])
@@ -236,6 +238,56 @@ class TestHttp(unittest.TestCase):
             self.fail("expected HTTP error")
         except urllib.error.HTTPError as e:
             self.assertIn(e.code, (400, 404))
+
+    def test_ls_tree(self):
+        data = json.loads(self._get("/ls").decode("utf-8"))
+        roots = {r["id"]: r for r in cast(List[Dict[str, Any]], data["roots"])}
+        self.assertEqual(set(roots), {"examples", "stdlib"})
+        stdlib_paths = self._flatten_paths(roots["stdlib"])
+        self.assertIn("stdlib/voption.ml", stdlib_paths)
+        self.assertIn("stdlib/voption.mli", stdlib_paths)
+
+    def _flatten_paths(self, node: Dict[str, Any]) -> List[str]:
+        if node.get("type") == "file":
+            return [node["path"]]
+        out: List[str] = []
+        for c in cast(List[Dict[str, Any]], node.get("children", [])):
+            out.extend(self._flatten_paths(c))
+        return out
+
+    def test_file_serves_allowlisted(self):
+        body = self._get("/file?path=stdlib/voption.mli").decode("utf-8")
+        self.assertIn("val", body)
+
+    def test_file_rejects_traversal(self):
+        for bad in [
+            "/file?path=stdlib/../../server.py",
+            "/file?path=stdlib/../server.py",
+            "/file?path=secret/x.ml",
+            "/file?path=stdlib/MODULES.manifest",
+            "/file?path=",
+        ]:
+            try:
+                self._get(bad)
+                self.fail("expected HTTP error for " + bad)
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 404, msg=bad)
+
+    @unittest.skipUnless(LEAN, "no lean")
+    def test_stdlib_unit_checks_green(self):
+        # A stdlib unit checked with its path staged verifies the way the
+        # build recipe does: Voption is a leaf, its .ml proves against its
+        # own interface artifacts (staged from the buffer's path).
+        with open(os.path.join(server.workspace.STDLIB_DIR, "voption.ml")) as fh:
+            src = fh.read()
+        resp = self._post(
+            "/check",
+            {"source": src, "revision": 7, "path": "stdlib/voption.ml"},
+        )
+        self.assertTrue(resp["ok"], msg=resp.get("errors"))
+        vcs = _regions_of_kind(resp, "vc")
+        self.assertTrue(vcs)
+        self.assertTrue(all(v["status"] == "proved" for v in vcs))
 
 
 class TestExampleEndpoints(unittest.TestCase):

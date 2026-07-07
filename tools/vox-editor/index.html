@@ -17,10 +17,8 @@
   </head>
   <body>
     <header id="topbar">
+      <button id="sidebar-btn" title="Show / hide the file explorer" aria-label="Toggle file explorer">☰</button>
       <span id="title">vox editor</span>
-      <select id="examples" title="Load a curated example">
-        <option value="">Examples…</option>
-      </select>
       <button id="check-btn">Check ⌃⏎</button>
       <span id="status" class="status-idle">idle</span>
       <span id="spacer"></span>
@@ -30,6 +28,9 @@
       <span id="hint">proof pane follows the cursor</span>
     </header>
     <main>
+      <aside id="sidebar" aria-label="File explorer">
+        <div id="tree" role="tree"></div>
+      </aside>
       <section id="editor-pane">
         <textarea id="code"></textarea>
       </section>
