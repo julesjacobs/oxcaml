@@ -34,6 +34,9 @@ let pointStates = [];
 // original display. Unchecked = the full proof state (cursor type,
 // context, hypotheses, turnstile goal, program-point view).
 let compact = true;
+// Fade hypotheses the found proof did not reference (-vox-explain-proofs,
+// r.hyp_used). On by default; the toolbar checkbox turns it off.
+let fadeUnused = true;
 let revision = 0;
 let applied = -1;
 let marks = [];
@@ -156,12 +159,13 @@ function paintSpan(span) {
 // A goal/hypothesis row. With a span it becomes hover-sensitive (the `prov`
 // class + a key into hoverSpans); without one it renders exactly as before,
 // with no affordance.
-function provRow(cls, text, span) {
+function provRow(cls, text, span, title) {
   const body = tok(text, true); // predicate text: refinement-interior styling
-  if (!span) return '<div class="' + cls + '">' + body + "</div>";
+  const t = title ? ' title="' + esc(title) + '"' : "";
+  if (!span) return '<div class="' + cls + '"' + t + ">" + body + "</div>";
   const key = hoverSpans.push(span) - 1;
   return (
-    '<div class="' + cls + ' prov" data-prov-key="' + key + '">' +
+    '<div class="' + cls + ' prov" data-prov-key="' + key + '"' + t + ">" +
     body +
     "</div>"
   );
@@ -489,11 +493,11 @@ function renderVc(r) {
     h += "<h3>goal" + badge(r.status) + "</h3>";
     h += provRow("goal", g.text, r.goal_span || g.span);
     if (r.hypotheses && r.hypotheses.length) {
-      h += renderHyps(r.hypotheses, r.hyp_spans);
+      h += renderHyps(r.hypotheses, r.hyp_spans, r.hyp_used);
     }
   } else {
     h += renderCtx(r.scope);
-    h += renderHyps(r.hypotheses, r.hyp_spans);
+    h += renderHyps(r.hypotheses, r.hyp_spans, r.hyp_used);
     h += renderModuleFacts(r.module_hypotheses, r.module_hyp_spans);
     h += "<h3>goal" + badge(r.status) + "</h3>";
     h += provRow("goal turnstile", g.text, r.goal_span || g.span);
@@ -560,15 +564,23 @@ function renderTheorem(r) {
 // `spans` (optional) is parallel to `hyps`: a per-hypothesis provenance span
 // or null. A hypothesis with a span becomes hover-sensitive; one without
 // renders exactly as today.
-function renderHyps(hyps, spans) {
+function renderHyps(hyps, spans, used) {
   if (!hyps || !hyps.length) return "<h3>hypotheses</h3><div class='hyp'>—</div>";
   spans = spans || [];
+  used = used || [];
   return (
     "<h3>hypotheses</h3>" +
     hyps
       .map((x, idx) => {
         const s = Selection.splitSpanSuffix(x);
-        return provRow("hyp", s.text, spans[idx] || s.span);
+        // used[idx] === false means the linter flagged this hypothesis as
+        // absent from the proof grind found; fade it (unless the toggle is
+        // off). The predicate text is untouched so provenance hover stays
+        // byte-exact.
+        const faded = fadeUnused && used[idx] === false;
+        const cls = faded ? "hyp hyp-unused" : "hyp";
+        const title = faded ? "unused in this proof" : undefined;
+        return provRow(cls, s.text, spans[idx] || s.span, title);
       })
       .join("")
   );
@@ -720,6 +732,27 @@ compactBox.addEventListener("change", () => {
 });
 
 initCompact();
+
+// Fade-unused toggle (persisted; default checked = fade).
+const FADE_KEY = "vox-editor-fade";
+const fadeBox = document.getElementById("fade-box");
+
+function initFade() {
+  try {
+    fadeUnused = localStorage.getItem(FADE_KEY) !== "off";
+  } catch (e) {}
+  fadeBox.checked = fadeUnused;
+}
+
+fadeBox.addEventListener("change", () => {
+  fadeUnused = fadeBox.checked;
+  try {
+    localStorage.setItem(FADE_KEY, fadeUnused ? "on" : "off");
+  } catch (e) {}
+  renderPane();
+});
+
+initFade();
 
 // Examples dropdown: populated from /examples, each choice loads the
 // source and re-checks. A confirm() guards unsaved edits.

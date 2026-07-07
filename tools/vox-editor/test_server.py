@@ -70,6 +70,22 @@ class TestCheckResponse(unittest.TestCase):
         self.assertTrue(any(v["status"] == "proved" for v in vcs))
         self.assertIsInstance(resp["generated_lean"], str)
 
+    @unittest.skipUnless(LEAN, "no lean")
+    def test_unused_hyps_flow(self):
+        # A VC that uses x >= 0 to close the goal but not y >= 0: the
+        # explain pass reports the unused index and the server forwards it
+        # plus the parallel per-hypothesis used-flag the pane fades on.
+        src = (
+            "let f (x : int{ _ >= 0 }) (y : int{ _ >= 0 }) : int{ _ >= 0 } "
+            "= refine_ x\n"
+        )
+        resp = server.build_check_response(src, 1, OCAMLC or "", LEAN)
+        vcs = _regions_of_kind(resp, "vc")
+        vc = next(v for v in vcs if "x >= 0" in v["goal"])
+        # dump order is [y >= 0, x >= 0]; only y >= 0 (index 0) is unused.
+        self.assertEqual(vc["unused_hyps"], [0])
+        self.assertEqual(vc["hyp_used"], [False, True])
+
 
 @unittest.skipUnless(OCAMLC, "no ocamlc (set VOX_OCAMLC)")
 class TestPointStates(unittest.TestCase):

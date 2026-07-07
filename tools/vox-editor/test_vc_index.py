@@ -261,6 +261,8 @@ class TestParseDump(unittest.TestCase):
                 "status": "unknown",
                 "used": None,
                 "verdict": None,
+                "unused_hyps": None,
+                "hyp_used": [],
             },
         )
         self.assertEqual(vcs[1]["goal"], "(x + 1) = (x + 1)")
@@ -651,6 +653,66 @@ class TestParseUsed(unittest.TestCase):
             vc_index.parse_dump(text)[0]["used"],
             ["lemma_a", "block_thm", "prelude_fact"],
         )
+
+
+# --- unused hypotheses ("unused_hyps:" line, -vox-explain-proofs) ---------
+
+# Byte-exact from mechanics/lean_explain.compilers.reference, the [Cons]
+# case: goal [len l >= 0] proved from the ambient lemma, so BOTH local
+# hypotheses ([len t >= 0] at index 0, [l = Cons (...)] at index 1) are
+# unreferenced -> "unused_hyps: 0 1".
+DUMP_UNUSED = """\
+File "lean_explain.ml", line 32, characters 19-37: vox VC:
+  goal: len l >= 0  @ 32.19-32.37
+  hypotheses:
+  len t >= 0
+  l = Cons (*vox-wild*, t)  @ 32.4-32.15
+  scope:
+  l : ilist  ~>  Vox_Lean_explain_ilist  @ 29.26-29.27
+  used: lemma_len_nonneg
+  unused_hyps: 0 1
+"""
+
+# A goal that USES one of two hypotheses: only the other index is flagged.
+DUMP_ONE_UNUSED = """\
+File "f.ml", line 2, characters 19-20: vox VC:
+  goal: x >= 0  @ 2.19-2.20
+  hypotheses:
+  y >= 0  @ 1.27-1.28
+  x >= 0  @ 1.7-1.8
+  scope:
+  x : int  ~>  Int  @ 1.7-1.8
+  y : int  ~>  Int  @ 1.27-1.28
+  used: <arithmetic>
+  unused_hyps: 0
+"""
+
+
+class TestParseUnusedHyps(unittest.TestCase):
+    def test_all_hyps_unused(self):
+        vcs = vc_index.parse_dump(DUMP_UNUSED)
+        self.assertEqual(len(vcs), 1)
+        vc = vcs[0]
+        self.assertEqual(vc["hypotheses"], ["len t >= 0", "l = Cons (*vox-wild*, t)"])
+        self.assertEqual(vc["unused_hyps"], [0, 1])
+        # span-parallel used flags: both False
+        self.assertEqual(vc["hyp_used"], [False, False])
+        # the line does not leak into the used names or hypotheses
+        self.assertEqual(vc["used"], ["lemma_len_nonneg"])
+
+    def test_one_hyp_unused_exact_index(self):
+        # exactly one of two hypotheses flagged: index 0 (y>=0) unused, the
+        # goal-relevant index 1 (x>=0) stays used.
+        vc = vc_index.parse_dump(DUMP_ONE_UNUSED)[0]
+        self.assertEqual(vc["unused_hyps"], [0])
+        self.assertEqual(vc["hyp_used"], [False, True])
+
+    def test_absent_means_all_used(self):
+        # No unused_hyps line (e.g. the arithmetic VC that used its hyp):
+        # unused_hyps is None and every hypothesis is shown solid.
+        vc = vc_index.parse_dump(DUMP_USED)[1]
+        self.assertIsNone(vc["unused_hyps"])
+        self.assertEqual(vc["hyp_used"], [True])  # one hyp: x > 0
 
 
 # --- per-VC verdicts on a FAILED solve ("verdict:" line) ------------------

@@ -129,6 +129,20 @@ def _parse_used(rest: str) -> List[str]:
     return [n.strip() for n in rest.split(",") if n.strip()]
 
 
+def _parse_unused_hyps(rest: str) -> List[int]:
+    """Parse a dumped "unused_hyps:" value into a list of 0-based indices
+    into the VC's (local) ``hypotheses`` list -- the hypotheses grind did
+    not reference in the proof it found (``-vox-explain-proofs``).  The
+    value is space-separated integers; anything unparseable is dropped."""
+    out: List[int] = []
+    for tok in rest.split():
+        try:
+            out.append(int(tok))
+        except ValueError:
+            pass
+    return out
+
+
 def _join_wrapped(lines: List[str]) -> List[str]:
     """Rejoin predicates the compiler's Format-based dumper WRAPPED across
     physical lines at its margin.
@@ -220,6 +234,10 @@ def parse_dump(text: str) -> List[Dict[str, object]]:
         # "proved" | "unproved" | "disproved" | "failed", or None when the dump
         # carries no verdict (the dry-run pass, or a successful solve).
         verdict: Optional[str] = None
+        # The hypotheses grind did not reference to close this VC
+        # (-vox-explain-proofs): 0-based indices into ``hypotheses``, or
+        # None when the compiler reported nothing (fade nothing).
+        unused_hyps: Optional[List[int]] = None
         if i < n:
             hyp_line = lines[i].strip()
             rest = hyp_line[len("hypotheses:") :].strip()
@@ -257,6 +275,12 @@ def parse_dump(text: str) -> List[Dict[str, object]]:
                         verdict = stripped[len("verdict:") :].strip() or None
                         i += 1
                         continue
+                    if stripped.startswith("unused_hyps:"):
+                        unused_hyps = _parse_unused_hyps(
+                            stripped[len("unused_hyps:") :].strip()
+                        )
+                        i += 1
+                        continue
                     if section == "scope":
                         entry = parse_scope_line(stripped)
                         if entry is not None:
@@ -286,6 +310,16 @@ def parse_dump(text: str) -> List[Dict[str, object]]:
                 "status": verdict if verdict else "unknown",
                 "used": used,
                 "verdict": verdict,
+                # 0-based indices into ``hypotheses`` grind did not use, or
+                # None when unreported.
+                "unused_hyps": unused_hyps,
+                # Parallel to ``hypotheses``: True where the hypothesis was
+                # used in the proof grind found (or unknown -> shown solid),
+                # False where the linter flagged it unused (faded).
+                "hyp_used": [
+                    unused_hyps is None or idx not in unused_hyps
+                    for idx in range(len(hypotheses))
+                ],
             }
         )
     return vcs
@@ -666,6 +700,12 @@ def build_index(
                 for vc, svc in zip(vcs, solve_vcs):
                     if svc.get("used") is not None:
                         vc["used"] = svc["used"]
+                    # The unused-hypothesis report also rides the solve
+                    # pass (the dry-run has no proof term); carry it and the
+                    # parallel used-flag across from the solve VC.
+                    if svc.get("unused_hyps") is not None:
+                        vc["unused_hyps"] = svc["unused_hyps"]
+                        vc["hyp_used"] = svc["hyp_used"]
             for vc in vcs:
                 if vc["kind"] == "prove":
                     vc["status"] = "proved"

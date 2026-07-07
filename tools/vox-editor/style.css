@@ -398,3 +398,16 @@ html[data-theme="light"] .cm-vox-lean-op { color: #0550ae; }
   cursor: pointer;
 }
 .used-name.prov:hover { color: var(--fg); border-bottom-color: var(--accent); }
+
+/* A hypothesis grind did not reference in the proof it found
+   (-vox-explain-proofs): rendered dimmed so the eye skips it, restored to
+   full opacity on hover.  Theme-agnostic (opacity only).  The "fade
+   unused" toolbar toggle removes the class entirely, so nothing here
+   fires when it is off. */
+.hyp-unused {
+  opacity: 0.4;
+  transition: opacity 0.12s ease;
+}
+.hyp-unused:hover {
+  opacity: 1;
+}

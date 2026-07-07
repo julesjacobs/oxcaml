@@ -101,6 +101,12 @@ def build_check_response(
         # The lemmas grind used to close this VC (-vox-explain-proofs);
         # None under an old compiler or without a solver.
         region["used"] = vc.get("used")
+        # The hypotheses grind did not reference in the proof it found
+        # (-vox-explain-proofs), and the parallel per-hypothesis used-flag
+        # the pane fades on.  unused_hyps is None under an old compiler /
+        # without a solver; hyp_used defaults to all-true then.
+        region["unused_hyps"] = vc.get("unused_hyps")
+        region["hyp_used"] = vc.get("hyp_used", [])
         if "counterexample" in vc:
             region["counterexample"] = vc["counterexample"]
         if "lean_msg" in vc:

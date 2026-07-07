@@ -1156,6 +1156,133 @@ async function main() {
     await page.evaluate(() => window.__vox.setCompact(false));
     console.log("ok - compact mode hides the used-lemmas row");
 
+    // Task #75: unused-hypothesis fading (-vox-explain-proofs).  A VC with
+    // one hypothesis grind used (x >= 0, which closes the goal) and one it
+    // did not (y >= 0): the unused row renders dimmed with an "unused in
+    // this proof" title while the used row stays solid; hovering the dimmed
+    // row restores it; the toolbar toggle disables fading entirely.
+    const FADE_SRC =
+      "let f (x : int{ _ >= 0 }) (y : int{ _ >= 0 }) : int{ _ >= 0 } = refine_ x\n";
+    await page.evaluate((src) => {
+      window.__vox.setCompact(false);
+      window.__vox.cm.setValue(src);
+    }, FADE_SRC);
+    await waitFor(
+      async () => {
+        const fast = await page.evaluate(() => window.__vox.getLastCheckFast());
+        const t = await page.$eval("#status", (e) => e.textContent);
+        return fast === false && /verified/.test(t) ? t : false;
+      },
+      60000,
+      "fade-source file verifies"
+    );
+    const fadePos = await waitFor(
+      () =>
+        page.evaluate(() => {
+          const r = window.__vox
+            .getRegions()
+            .find((x) => x.kind === "vc" && /x >= 0/.test(x.goal || ""));
+          return r ? { line: r.start.line, col: r.start.col } : false;
+        }),
+      10000,
+      "the fade VC region"
+    );
+    await page.evaluate((p) => window.__vox.cm.setCursor(p), fadePos);
+    const fadeRows = await waitFor(
+      async () =>
+        page.evaluate(() => {
+          const rows = Array.from(document.querySelectorAll("#pane-body .hyp"));
+          if (rows.length < 2) return false;
+          return rows.map((el) => ({
+            text: el.textContent,
+            unused: el.classList.contains("hyp-unused"),
+            title: el.getAttribute("title"),
+            opacity: getComputedStyle(el).opacity,
+          }));
+        }),
+      5000,
+      "hyp rows for the fade VC"
+    );
+    const yRow = fadeRows.find((r) => /y >= 0/.test(r.text));
+    const xRow = fadeRows.find((r) => /x >= 0/.test(r.text));
+    assert.ok(yRow && xRow, "both hyp rows present: " + JSON.stringify(fadeRows));
+    // The linter measured that grind's proof references x >= 0 but not
+    // y >= 0, so exactly y >= 0 fades.
+    assert.ok(yRow.unused, "the unused hypothesis y >= 0 is faded: " + JSON.stringify(yRow));
+    assert.ok(!xRow.unused, "the used hypothesis x >= 0 is NOT faded: " + JSON.stringify(xRow));
+    assert.strictEqual(
+      yRow.title,
+      "unused in this proof",
+      "faded row is labelled 'unused in this proof': " + yRow.title
+    );
+    assert.ok(parseFloat(yRow.opacity) < 1, "faded row is dimmed: " + yRow.opacity);
+    assert.strictEqual(xRow.opacity, "1", "used row is full opacity: " + xRow.opacity);
+    console.log("ok - unused hypothesis fades, used one stays solid");
+
+    // Hovering the faded row restores full opacity.  A synthetic :hover
+    // is unreliable headless, so assert the CSS rule that wires it
+    // (.hyp-unused:hover -> opacity 1) rather than a computed hover state.
+    const hoverRule = await page.evaluate(() => {
+      for (const sheet of document.styleSheets) {
+        let rules;
+        try {
+          rules = sheet.cssRules;
+        } catch (e) {
+          continue;
+        }
+        for (const r of rules) {
+          if (r.selectorText && /\.hyp-unused:hover/.test(r.selectorText)) {
+            return r.style.opacity;
+          }
+        }
+      }
+      return null;
+    });
+    assert.strictEqual(
+      hoverRule,
+      "1",
+      "the .hyp-unused:hover rule restores full opacity: " + hoverRule
+    );
+    console.log("ok - hover-restore rule present (.hyp-unused:hover -> opacity 1)");
+
+    // The predicate text stays byte-exact under the fade (provenance hover
+    // depends on it): the faded row still carries its .prov span affordance.
+    const fadedHasProv = await page.$eval(
+      "#pane-body .hyp-unused",
+      (el) => el.classList.contains("prov")
+    );
+    assert.ok(fadedHasProv, "the faded row keeps its provenance affordance");
+
+    // Toggle fading OFF: the class disappears and every row is solid.
+    await page.evaluate(() => {
+      const box = document.getElementById("fade-box");
+      box.checked = false;
+      box.dispatchEvent(new Event("change"));
+    });
+    const afterOff = await waitFor(
+      async () =>
+        page.evaluate(() => {
+          const rows = Array.from(document.querySelectorAll("#pane-body .hyp"));
+          if (rows.length < 2) return false;
+          return {
+            anyUnused: rows.some((el) => el.classList.contains("hyp-unused")),
+            allSolid: rows.every((el) => getComputedStyle(el).opacity === "1"),
+          };
+        }),
+      5000,
+      "pane re-rendered with fading off"
+    );
+    assert.ok(!afterOff.anyUnused, "toggle off removes the fade class");
+    assert.ok(afterOff.allSolid, "toggle off: every hypothesis is full opacity");
+    console.log("ok - the fade toggle disables fading");
+    // Restore the toggle (default on) for later sections.
+    await page.evaluate(() => {
+      const box = document.getElementById("fade-box");
+      box.checked = true;
+      box.dispatchEvent(new Event("change"));
+    });
+    await page.evaluate(() => window.__vox.setCompact(true));
+
     // Wrapped-predicate regression (the qsort bug): the compiler's Format
     // dumper breaks a long conjunction across physical lines (continuation
     // at column 0, after a `&&`); vc_index must rejoin it so the pane shows

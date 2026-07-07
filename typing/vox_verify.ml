@@ -230,6 +230,15 @@ let lemma_defs : (string * string * Location.t) list ref = ref []
    only when the flag is on and the whole file verified; read by [dump_vc]. *)
 let used_lemmas : (int, string list) Hashtbl.t = Hashtbl.create 16
 
+(* [-vox-explain-proofs]: the hypotheses grind did NOT reference in the
+   proof term it found for each PROVED obligation, keyed like
+   [used_lemmas] by position among the [Prove] VCs.  The value lists the
+   0-based indices into that VC's [vc_facts] flagged by Lean's
+   unusedVariables linter (a missing key or [[]] fades nothing --
+   conservative).  Populated by [run_lean]'s explain pass; read by
+   [dump_vc]. *)
+let unused_hyps : (int, int list) Hashtbl.t = Hashtbl.create 16
+
 (* Per-VC verdicts for a FAILED solve, keyed by position among the [Prove] VCs (as
    [used_lemmas] is). Populated by [run_lean] only when [-vox-dump-vc-provenance] is on
    and the solve failed with all errors attributable to VC theorems: a VC whose theorem
@@ -311,6 +320,7 @@ let reset () =
   spec_defs := [];
   lemma_defs := [];
   Hashtbl.reset used_lemmas;
+  Hashtbl.reset unused_hyps;
   Hashtbl.reset vc_verdicts;
   point_states := [];
   Hashtbl.reset toplevel_names;
@@ -6005,6 +6015,12 @@ let lean_file ?(witness = "") ?(explain = false) vcs =
     (fun (nm, text, lemloc) -> seg ~src:(Lemma (nm, lemloc)) text)
     !lemma_defs;
   seg "set_option maxHeartbeats 400000\n";
+  (* [-vox-explain-proofs]: turn on the unusedVariables linter so the
+     explain pass names, per proved theorem, the hypotheses its found
+     proof term does not reference (the fadeable ones).  It rides the
+     existing [grind?] run -- warnings never affect the verdict, which
+     [grind] already decided. *)
+  if explain then seg "set_option linter.unusedVariables true\n";
   let segments = List.rev !segments in
   let block_ranges, first_line =
     List.fold_left
@@ -6642,6 +6658,81 @@ let parse_grind_used out_file =
   List.rev !blocks
 ;;
 
+(* [-vox-explain-proofs]: parse the unusedVariables linter warnings out
+   of the explain pass.  Lean prints, per unreferenced binder,
+   "<in_file>:L:C: warning: Variable name `h_N` is not explicitly
+   referenced."; each VC is ONE theorem on line L, so L maps to the VC
+   and N is the 0-based index into that VC's hypotheses ([h_0, h_1, ...]
+   emitted in [vc_facts] order by [lean_theorem]).  Scope vars ([v_...]),
+   globals ([g_...]) and exhaustiveness hyps ([h_exhK]) are not
+   [h_<digits>] and are skipped.  Returns per-Prove-VC-index sorted
+   hypothesis indices. *)
+let parse_unused_hyps out_file in_file first_line nvcs =
+  let tbl = Hashtbl.create 16 in
+  let is_file_line l =
+    String.length l > String.length in_file
+    && String.equal (String.sub l 0 (String.length in_file)) in_file
+  in
+  (* the h-index of a "Variable name `h_N`" warning, else None *)
+  let hyp_index l =
+    let marker = "Variable name `h_" in
+    let m = String.length marker in
+    let rec find i =
+      if i + m > String.length l
+      then None
+      else if String.equal (String.sub l i m) marker
+      then Some (i + m)
+      else find (i + 1)
+    in
+    match find 0 with
+    | None -> None
+    | Some start ->
+      let j = ref start in
+      while !j < String.length l && l.[!j] >= '0' && l.[!j] <= '9' do
+        incr j
+      done;
+      if !j > start && !j < String.length l && l.[!j] = '`'
+      then int_of_string_opt (String.sub l start (!j - start))
+      else None
+  in
+  let ic = open_in out_file in
+  (try
+     while true do
+       let l = input_line ic in
+       if is_file_line l
+       then
+         match hyp_index l with
+         | None -> ()
+         | Some hidx ->
+           let rest =
+             String.sub l
+               (String.length in_file + 1)
+               (String.length l - String.length in_file - 1)
+           in
+           (match String.index_opt rest ':' with
+            | Some i ->
+              (match int_of_string_opt (String.sub rest 0 i) with
+               | Some line ->
+                 let k = line - first_line in
+                 if k >= 0 && k < nvcs
+                 then begin
+                   let cur =
+                     match Hashtbl.find_opt tbl k with
+                     | Some xs -> xs
+                     | None -> []
+                   in
+                   if not (List.mem hidx cur)
+                   then Hashtbl.replace tbl k (hidx :: cur)
+                 end
+               | None -> ())
+            | None -> ())
+     done
+   with End_of_file -> ());
+  close_in ic;
+  Hashtbl.iter (fun k xs -> Hashtbl.replace tbl k (List.sort compare xs)) tbl;
+  tbl
+;;
+
 let run_lean vcs =
   (* Reflected definitions are checked (termination included) even when the module has no
      VCs of its own: a rejected definition must fail its defining module, not lie in wait. *)
@@ -6951,7 +7042,7 @@ let run_lean vcs =
              (the theorems, hence their blocks, are in [vcs] order); attribute only when
              the counts line up, so a parse surprise degrades to "no used line" rather
              than a mislabelled one. *)
-          let contents2, _, _, _ = lean_file ~explain:true vcs in
+          let contents2, _, _, first_line2 = lean_file ~explain:true vcs in
           let in2 = Filename.temp_file "vox" ".lean" in
           let out2 = Filename.temp_file "vox" ".out" in
           Misc.try_finally
@@ -6974,7 +7065,9 @@ let run_lean vcs =
               ignore (Sys.command cmd2 : int);
               let blocks = parse_grind_used out2 in
               if List.length blocks = List.length vcs
-              then List.iteri (fun k names -> Hashtbl.replace used_lemmas k names) blocks)))
+              then List.iteri (fun k names -> Hashtbl.replace used_lemmas k names) blocks;
+              let uh = parse_unused_hyps out2 in2 first_line2 (List.length vcs) in
+              Hashtbl.iter (fun k idxs -> Hashtbl.replace unused_hyps k idxs) uh)))
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -7135,13 +7228,13 @@ let dump_state
         List.iter (fun e -> Format.fprintf ppf "@ %s" e) scope))
 ;;
 
-let dump_vc ppf ?used ?verdict vc =
+let dump_vc ppf ?used ?verdict ?unused vc =
   with_vc_display vc
   @@ fun () ->
   let scope = scope_entries vc in
   Format.fprintf
     ppf
-    "@[<v 2>%a: vox VC%s:@ goal: %a%s@ hypotheses:%t%t%t%t@]@."
+    "@[<v 2>%a: vox VC%s:@ goal: %a%s@ hypotheses:%t%t%t%t%t@]@."
     Location.print_loc
     vc.vc_loc
     (match vc.vc_kind with
@@ -7197,6 +7290,33 @@ let dump_vc ppf ?used ?verdict vc =
       | Some v when !Clflags.vox_dump_vc_provenance ->
         Format.fprintf ppf "@ verdict: %s" v
       | _ -> ())
+    (fun ppf ->
+      (* [-vox-explain-proofs] under [-vox-dump-vc-provenance]: the
+         hypotheses grind did not reference, as indices into the LOCAL
+         hypotheses list printed above (module-level facts are a
+         separate, folded section and are never faded).  [unused] carries
+         indices into [vc_facts]; re-map them to local positions using
+         the same [module_level_fact] split the printer used.  Absent
+         when nothing was flagged, so the pane fades nothing by default. *)
+      match unused with
+      | Some idxs when !Clflags.vox_dump_vc_provenance && idxs <> [] ->
+        let pairs = List.combine vc.vc_facts vc.vc_fact_provs in
+        let j = ref 0 in
+        let locals = ref [] in
+        List.iteri
+          (fun i (f, _) ->
+            if not (module_level_fact f)
+            then begin
+              if List.mem i idxs then locals := !j :: !locals;
+              incr j
+            end)
+          pairs;
+        (match List.rev !locals with
+         | [] -> ()
+         | ls ->
+           Format.fprintf ppf "@ unused_hyps: %s"
+             (String.concat " " (List.map string_of_int ls)))
+      | _ -> ())
 ;;
 
 let discharge () =
@@ -7244,15 +7364,17 @@ let discharge () =
       let prove_idx = ref 0 in
       List.iter
         (fun vc ->
-          let used, verdict =
+          let used, verdict, unused =
             match vc.vc_kind with
             | Prove ->
               let i = !prove_idx in
               incr prove_idx;
-              Hashtbl.find_opt used_lemmas i, Hashtbl.find_opt vc_verdicts i
-            | Runtime_check | Assume -> None, None
+              ( Hashtbl.find_opt used_lemmas i,
+                Hashtbl.find_opt vc_verdicts i,
+                Hashtbl.find_opt unused_hyps i )
+            | Runtime_check | Assume -> None, None, None
           in
-          dump_vc Format.err_formatter ?used ?verdict vc)
+          dump_vc Format.err_formatter ?used ?verdict ?unused vc)
         all);
     if !Clflags.vox_dump_states
     then List.iter (dump_state Format.err_formatter) (List.rev !point_states)
