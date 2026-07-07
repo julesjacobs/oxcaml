@@ -11,20 +11,33 @@ Exploratory design study, 2026-07-07.  Commissioned brief (user's words):
 > that expression is the same kind of thing that we can use in refinements
 > (except its type is IntRel).
 
-The verdict up front: **the substrate already exists.**  A relation is an
-OCaml ghost type whose logic sort is a Lean *arrow* type; vox already
-declares such a binder in the VC context at the arrow sort, already lets a
-parameterized `@[grind] def` fixpoint take it, and already substitutes a
-concrete relation for it at a call site.  The higher-order verified
-`map`/`fold` that this unlocks — the study's biggest payoff — **works today
-with zero compiler changes**.  Two ergonomic gaps remain (direct `R x _`
-application; a slick relation *literal*), both with cheap, ranked fixes;
-one of them (relation-value identity at a call site) is prototyped here in
-one line.
+The verdict up front: **the substrate already exists, and there are TWO
+viable directions — the recommended one (D2) needs ZERO compiler changes.**
+
+- **D1 — ghost arrow sorts (§1–§9).**  A relation is an OCaml *ghost* type
+  whose logic sort is a Lean *arrow* type (`IntRel := Int→Int→Prop`).  vox
+  already declares such a binder at the arrow sort, lets a parameterized
+  `@[grind]` fixpoint take it, and substitutes a concrete relation at a
+  call site.  Fully open (any Lean Prop), but semantic-only: no runtime
+  value, and relation *identity* at a call site needs a small (prototyped)
+  fix.
+- **D2 — relation SYNTAX as an ordinary (via) value (§10, RECOMMENDED).**
+  A relation is an ordinary OCaml ADT (`type intrel = Rlt | Rle | Rcomp of
+  intrel*intrel | …`), modeled by the *standard* oxcaml↔Lean datatype
+  correspondence (`S_data` inductive) plus a `denote : intrel → Int → Int →
+  Prop` block def.  R is then a **normal dependent parameter at an
+  inductive sort** — no new sorts, no reflect plumbing.  Construction is
+  ordinary constructors; passing R is passing a variable; refinements
+  *about* relations are ordinary refinements on the syntax.  **Works end to
+  end today with ZERO compiler changes** (probed).
+
+The headline payoff — higher-order verified `map`/`fold` specified by a
+relation parameter, dodging function-argument modeling — works in BOTH
+directions today (D1: probe7; D2: probeD4).
 
 Everything below is backed by a probe compiled with the real Lean 4.31
-solver; probe files are in `scratch_hor/` (probe1..probeC).  Claims not
-backed by a probe are marked **UNPROBED**.
+solver; probe files are in `scratch_hor/` (probe1..probeC for D1,
+probeD1..probeD4 for D2).  Claims not backed by a probe are **UNPROBED**.
 
 ---
 
@@ -447,3 +460,164 @@ land on machinery vox already has.
 - `scratch_hor/probeA.ml` — concrete client reasoning from a named relation (F8)
 - `scratch_hor/probeC.ml` — relation combinators over abstract relations (F9)
 - prototype diff: `typing/vox_reflect.ml` `translate` `Texp_ident` reflect-symbol arm (ask #1)
+
+---
+
+## 10. DIRECTION 2 — relation SYNTAX as an ordinary (via) value  [RECOMMENDED]
+
+User's addition (their words): *"define oxcaml types and apis corresponding
+to lean constructors so that we can construct them at runtime and prove
+things about them with refinements and then we can pass them into the iter
+function just as a normal variable.  So basically it's exactly how the
+oxcaml-lean correspondence works for other values.  The `{ ... }` thing
+could be then just one possible way to construct such a thing."*
+
+This is a **deep embedding**: instead of R being a semantic Lean function
+(D1), R is a piece of **relation syntax** — an ordinary OCaml ADT — whose
+Lean meaning is given by a `denote` block def.  It needs **no new compiler
+machinery at all**; it is the existing datatype (`S_data`) correspondence
+plus a structurally-recursive block def.
+
+### The pattern
+```ocaml
+type intrel = Rlt | Rle | Rcomp of intrel * intrel     (* ordinary ADT *)
+[%%vox.lean {lean|
+@[grind] def denote : Vox_<Unit>_intrel -> Int -> Int -> Prop
+  | .Rlt, a, b => a < b
+  | .Rle, a, b => a <= b
+  | .Rcomp r s, a, c => exists b, denote r a b /\ denote s b c
+|lean}]
+
+val iter : (r : intrel) -> (f : (x:int) -> int{ denote r x _ }) -> ...
+        -> int{ relIter r n x0 _ }     (* relIter = a denote-based fixpoint *)
+```
+`r` is a **normal dependent parameter** whose sort is the inductive
+`Vox_<Unit>_intrel` (auto-emitted, recursion and all).  Specs apply `denote
+r`; grind unfolds `denote` at concrete constructors (or symbolically).
+There is no arrow sort, no ghost, no reflect binding.
+
+### Probe-established facts (G#)
+
+- **G1 — the whole pattern works today, zero changes.**  The ADT
+  auto-emits as `public inductive Vox_ProbeD1_intrel …` (recursive `Rcomp`
+  included); `denote` is an ordinary block def; a dependent param `(r :
+  intrel)` sorts at the inductive; a client with an explicit constructor
+  proves a concrete consequence:
+  `theorem vc_0 (h_0 : denote …Rle x result) : x ≤ result := by grind`
+  (probeD1).
+
+- **G2 — call-site substitution of a runtime-built relation value.**  `let
+  r = Rle in use_it r a y` substitutes `Rle` for the binder; the client's
+  fact becomes `denote Rle a result` and the concrete `x ≤ result` proves
+  (probeD2, vc_1).  (Passing a bare constructor as a dependent arg needs a
+  `let` today — the C1 dependent-argument restriction, already fixed on
+  origin/vox after this clone's base; harmless.)
+
+- **G3 — composition via nested constructors.**  `denote (Rcomp (Rle,
+  Rlt)) x _` from an `Rle`-step then an `Rlt`-step: grind unfolds `Rcomp`'s
+  denotation `∃ b, …` and instantiates the witness (probeD2, vc_3).
+
+- **G4 — composition works over ABSTRACT sub-relations (no E-matcher
+  choke).**  `compose_abs : (r) -> (s) -> … -> int{ denote (Rcomp (r,s)) x
+  _ }` proves for *abstract* `r s : intrel` — grind unfolds `denote (Rcomp
+  r s)` symbolically and instantiates the existential from the two step
+  facts (probeD3, vc_0).  This is the key ergonomics result: the predecessor
+  quantifier-instantiation worry does not bite here, because `denote`'s
+  equations are `@[grind]` and the composite is a first-order term.
+
+- **G5 — refinements ABOUT the relation (proving things about syntax).**  A
+  predicate on the syntax — `@[grind] def isMono : intrel → Prop` — used as
+  an ordinary refinement `intrel{ isMono _ }` verifies for a runtime-built
+  value (`Rcomp (Rle, Rle)`; probeD3, vc_1).  This is the thing D1 CANNOT
+  do (a D1 ghost has no runtime value and no syntax to constrain), and it
+  is exactly the user's "prove things about them with refinements."
+
+- **G6 — the map/fold payoff, D2 form.**  `map_r : (r:intrel) -> (f:(x)->int{
+  denote r x _ }) -> (xs:tree) -> tree{ listRel r xs _ }` verifies (probeD4)
+  — identical structure to D1's probe7, with `denote r` in place of `rHolds
+  r`.  Same TCB-free, function-never-modeled payoff.
+
+### The `{ ... }` literal, under D2
+It is exactly what the user surmised: **one construction surface among
+several**.  `iter { a b -> a <= b } …` desugars by a *reflection-into-
+syntax* pass — elaborate the refinement-grammar body (with two binders)
+into the ADT: `a <= b` ⇒ `Rle`, `a < b` ⇒ `Rlt`, a composed body ⇒ `Rcomp
+…`, and so on.  Where the body uses a shape the ADT covers, it builds that
+constructor; where it doesn't, it is a compile error (or falls back to a D1
+ghost, see below).  So the literal is *sugar over ordinary constructors*,
+not a foundation — and it is the ONE ranked ask for D2 (§10.2).
+
+### Expressiveness ceiling + an extensible base signature
+D2 expresses exactly what the ADT covers — a **closed but extensible**
+universe (a client adds a relation by adding a constructor + a `denote`
+arm + re-proving `denote`'s laws; it cannot add one without touching the
+ADT).  A useful base signature, all ordinary constructors with structural
+`denote` arms and no new machinery:
+`Rlt | Rle | Req | Rtrue | Rand of _*_ | Ror of _*_ | Rnot of _ | Rconverse
+of _ | Rcomp of _*_ | Rshift of int (a+k) | Rscale of int`, plus a
+transitive-closure `Rstar of _` whose `denote` is a bounded/`Nat`-fuelled
+fixpoint (the standard loop treatment).  Predicates (`IntPred`) are the
+1-argument analogue (`type intpred = …`, `denote : intpred → Int → Prop`).
+
+### D2 soundness / TCB
+Strictly the **existing datatype correspondence** — no new trust:
+- the ADT ⇒ Lean inductive is `S_data`, already sound and battle-tested;
+- `denote`/`isMono`/`listRel` are `@[grind] def`s (definitions, not
+  axioms — cannot introduce `False`), checked by Lean;
+- there is no reflect binding and no ghost assumption at all;
+- fail-closed: a false lifted or composed claim is refuted at grind
+  (verified for the negative in the D1 twin; the D2 VCs are the same shape).
+This is *lower* TCB than D1: D1's reflected-value route (F7) carries the
+(toothless-but-present) reflect caveat; D2 carries none.
+
+---
+
+## 11. D1 vs D2 — comparison and updated recommendation
+
+| axis | D1 (ghost arrow sort) | D2 (relation syntax ADT) |
+| --- | --- | --- |
+| compiler changes to work | small (1-line reflect fix for value identity) | **none** |
+| new sort machinery | reuses `Vs_lean`, but arrow *use* is novel | none (`S_data`) |
+| relation universe | **open** — any Lean `… → Prop` | closed but extensible (the ADT) |
+| runtime value | none (phantom/ghost) | **real ADT value**, constructed at runtime |
+| refinements ABOUT a relation | no (no syntax to constrain) | **yes** (`intrel{ isMono _ }`, G5) |
+| construction | name it / reflected token / `{…}` literal | **ordinary constructors** / `{…}` literal |
+| pass as a plain variable | via a ghost token | **yes, natively** (G2) |
+| composition proved abstractly | yes (F9) | yes (G4) |
+| map/fold payoff today | yes (probe7) | yes (probeD4) |
+| TCB | reflect caveat on value route (toothless) | **none beyond existing datatypes** |
+| iter north star today | binder+subst+n=0 client; body needs 1 loop lemma | same, plus runtime construction for free |
+
+**They compose.**  `denote` *is* a D1-style semantic object produced from a
+D2 syntax value, so D2 subsumes the common case and hands D1's semantics
+back when needed.  To embed an OPEN D1 relation as a leaf of the D2 syntax
+— `Rquote of <ghost intrel>` — the ADT would carry a ghost/named-sorted
+**constructor field**; that specific shape currently hits the known
+derived-inductive **universe-pin** bug (a `Prop`/named-sort field in an
+emitted inductive), tracked separately (the compiler task on via/named-
+sorted constructor fields).  So D1⊆D2-embedding is a *future* compose,
+gated on that fix; the two directions stand independently today.
+
+### Recommendation (updated)
+**Lead with D2.**  It is the cleaner, zero-cost, higher-fidelity match to
+the user's mental model ("exactly how the oxcaml↔Lean correspondence works
+for other values"): relations are ordinary values, built with constructors,
+reasoned about with ordinary refinements, passed as variables.  Ship it as
+a small `vox_stdlib` module:
+- `intrel`/`intpred` ADTs with the base signature above + `denote`/laws;
+- relational-combinator `map`/`fold`/`filter`/`iter` specified by a
+  relation/predicate parameter (the first genuinely higher-order verified
+  stdlib entries, TCB-free);
+- the `{ … }` literal (§10.2) as the ergonomic construction surface — the
+  single ranked compiler ask for D2, a reflection-into-syntax elaborator.
+
+Keep **D1 in reserve** for the open-universe case (a relation the ADT
+cannot express, or a client-supplied Lean relation): its arrow ghost sort
++ the prototyped reflect-identity fix make it work, and `Rquote` will fold
+it into D2 once the universe-pin fix lands.
+
+### D2 probes
+- `scratch_hor/probeD1.ml` — ADT + denote + dependent param + explicit-constructor client (G1)
+- `scratch_hor/probeD2.ml` — call-site substitution of a runtime value + nested-constructor composition (G2/G3)
+- `scratch_hor/probeD3.ml` — abstract composition (E-matcher) + refinement ON the syntax (G4/G5)
+- `scratch_hor/probeD4.ml` — the map/fold payoff, D2 form (G6)
