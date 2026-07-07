@@ -1,0 +1,20 @@
+# vox stdlib module manifest — module : deps : wave
+# Read by the integrator harnesses; the v1.5 polymorphic wave appends below.
+# deps = space-separated dependency modules (cmi + VoxSig olean staged before verify).
+
+# --- v1 core (waves 1-2) ---
+Vlist     :            : 1
+Voption   :            : 1
+Vresult   :            : 1
+Vint      :            : 1
+Viarray   :            : 1
+Vset_bst  :            : 1
+Vmap      : Vlist      : 1   # keys enumerates into a Vlist
+Vset      : Vset_bst Vlist : 2   # face over backend; elements enumerates into a Vlist
+
+# --- v1.5 polymorphic wave (Vplist / Vpmap / Vpset) — SLOT, per poly study ---
+# check_poly.sh will verify these against v1 artifacts + the ORDERED/EQ element
+# signature; append here as they land.
+# Vplist   : <elt>      : 3
+# Vpset    : <elt> Vplist : 3
+# Vpmap    : <elt> Vplist : 3

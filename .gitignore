@@ -391,3 +391,4 @@ ocaml/primitives.new
 /natdynlinkops
 build.log
 configure.log
+vox_stdlib/_artifacts/
