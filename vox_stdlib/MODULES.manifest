@@ -18,3 +18,6 @@ Vset      : Vset_bst Vlist : 2   # face over backend; elements enumerates into a
 Vplist     :            : 3   # element-poly 'a list; LEAF (no deps); parameterized PList model; unspecced empty (F-B2), no bool mem (F-B3)
 Vpset      :            : 3   # order-free 'a set; LEAF (no deps); C-1, RELATIONAL membership only (no bool mem/remove — DecidableEq at S_param)
 Vpmap      :            : 3   # 'v-valued int-keyed map; LEAF (empty/is_empty/find/add/remove, no keys op → no Vlist/Vplist dep)
+
+# --- capstone: higher-order relational specs (task #68 lambda reflection) ---
+Vrel       :            : 4   # relational HOF (iter/map/fold/filter/compose2); LEAF (own ilist); relation = dependent fn-type param supplied as call-site lambda or [@@vox.reflect] value; IntRel/IntPred abbrev, lifting defs expose, toNat bridges public, listRel_len obligation
