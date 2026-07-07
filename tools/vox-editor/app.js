@@ -50,10 +50,15 @@ const modeEl = document.getElementById("pane-mode");
 const bodyEl = document.getElementById("pane-body");
 
 function esc(s) {
-  // Internal names never reach the user: fresh unknowns display as ?N,
-  // wildcard synthetics as _ (compiler task tracks the real fix).
+  // Internal names never reach the user: a fresh unknown (a value the pass
+  // could not reflect -- an opaque call result, a tuple/record component)
+  // displays as anonN, wildcard synthetics as _.  NOT ?N: a leading `?`
+  // reads as a Lean metavariable and alarms users into thinking the proof
+  // state is broken.  The number correlates repeated uses (e.g. the three
+  // projections of one anonymous triple).  Meaningful, source-derived
+  // names are the compiler-side readable-names task (backlog #8).
   return String(s)
-    .replace(/\*unknown(\d+)\*/g, "?$1")
+    .replace(/\*unknown(\d+)\*/g, "anon$1")
     .replace(/\*vox-wild\*(#\d+)?/g, "_")
     .replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 }
@@ -72,7 +77,7 @@ function tok(text, refine) {
   // tokenizer splits *unknown1* into pieces the per-token mask in
   // esc() can never reassemble (found by review round 4).
   const masked = String(text)
-    .replace(/\*unknown(\d+)\*/g, "?$1")
+    .replace(/\*unknown(\d+)\*/g, "anon$1")
     .replace(/\*vox-wild\*(#\d+)?/g, "_");
   const pairs = CodeMirror.voxTokenize(masked, refine ? { refine: 1 } : null);
   return pairs

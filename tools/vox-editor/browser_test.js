@@ -1215,6 +1215,72 @@ async function main() {
     );
     console.log("ok - wrapped predicate rejoined: pane shows the complete goal");
 
+    // Task #70 on the ACTUAL qsort example: both defects at once.  Its
+    // split3 obligations carry long wrapped conjunctions over anonymous
+    // tuple-component values.  (1) hypotheses/goal must render COMPLETE
+    // (not truncated at `&&`); (2) those anonymous values must display as
+    // `anonN`, never the alarming Lean-metavar-looking `?N`.
+    await page.evaluate(() => {
+      const s = document.getElementById("examples");
+      s.value = "qsort";
+      s.dispatchEvent(new Event("change"));
+    });
+    await waitFor(
+      async () =>
+        /split3|let rec qsort/.test(
+          await page.evaluate(() => window.__vox.cm.getValue())
+        ),
+      10000,
+      "qsort loaded"
+    );
+    // The fast pass populates regions from the dump (no Lean needed); find a
+    // VC carrying a WRAPPED conjunction over an anonymous value (raw region
+    // text keeps `*unknownN*` for byte-for-byte hover; the pane transforms).
+    const qsortVc = await waitFor(
+      () =>
+        page.evaluate(() => {
+          const rs = window.__vox.getRegions().filter((r) => r.kind === "vc");
+          const r = rs.find(
+            (x) =>
+              /\*unknown\d+\*/.test(x.goal || "") &&
+              (x.goal.match(/&&/g) || []).length >= 2
+          );
+          return r
+            ? { line: r.start.line, col: r.start.col, goal: r.goal }
+            : false;
+        }),
+      60000,
+      "a qsort VC with a wrapped conjunction over an anonymous value"
+    );
+    // Defect 1: the region goal is COMPLETE -- reassembled, not truncated.
+    assert.ok(
+      !/&&\s*$/.test(qsortVc.goal),
+      "qsort VC goal is not truncated at a dangling &&: " + qsortVc.goal.slice(0, 160)
+    );
+    // Put the cursor on it and read the rendered pane.
+    await page.evaluate(
+      (p) => window.__vox.cm.setCursor({ line: p.line, ch: p.col }),
+      qsortVc
+    );
+    const qPane = await waitFor(
+      async () => {
+        const t = await page.$eval("#pane-body", (e) => e.textContent);
+        return /goal/.test(t) ? t : false;
+      },
+      5000,
+      "qsort VC pane"
+    );
+    // Defect 2: anonymous values render as anonN, never `?N` (metavar-look).
+    assert.ok(/anon\d/.test(qPane), "pane shows anonymized values as anonN: " + qPane.slice(0, 200));
+    assert.ok(
+      !/\?\d/.test(qPane),
+      "pane must NOT show ?N metavar-style placeholders: " + qPane.slice(0, 200)
+    );
+    // And the raw *unknownN* internal name never leaks to the user.
+    assert.ok(!/\*unknown/.test(qPane), "raw *unknownN* must not reach the pane");
+    console.log("ok - qsort: complete wrapped hypotheses + anonN placeholders (no ?N, no *unknown*)");
+    await page.evaluate(() => window.__vox.setCompact(true));
+
     // Theme: dark is the default (no OS sniffing); the toolbar toggle
     // flips to light, and the choice persists across a reload.
     const readBg = () =>
