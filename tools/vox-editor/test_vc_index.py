@@ -708,5 +708,75 @@ class TestParseVerdict(unittest.TestCase):
         self.assertIsNone(vcs[0]["verdict"])
 
 
+# --- wrapped predicates: the compiler's Format dumper breaks long goals
+#     and hypotheses across physical lines (continuation at column 0).
+#     The qsort bug: a hypothesis cut off at "... < n &&" with the rest
+#     bleeding out.  parse_dump must rejoin them. -------------------------
+
+# The goal wraps over three physical lines (span on the last); the first
+# hypothesis wraps over two (span on its last line); a second hypothesis
+# is a single line.  Continuations sit at column 0, exactly as Format
+# emits them.
+DUMP_WRAPPED = (
+    'File "w.ml", line 20, characters 4-8: vox VC:\n'
+    "  goal: 0 <= a && a < n &&\n"
+    "b = c &&\n"
+    "d = e  @ 20.4-20.8\n"
+    "  hypotheses:\n"
+    "  0 <= a && a < n &&\n"
+    "p = q  @ 19.1-19.2\n"
+    "  x = y  @ 18.1-18.2\n"
+)
+
+
+class TestParseWrapped(unittest.TestCase):
+    def test_wrapped_goal_and_hyps_are_rejoined(self):
+        vcs = vc_index.parse_dump(DUMP_WRAPPED)
+        self.assertEqual(len(vcs), 1)
+        vc = vcs[0]
+        # goal is reassembled whole, not truncated at the first "&&"
+        self.assertEqual(vc["goal"], "0 <= a && a < n && b = c && d = e")
+        self.assertEqual(
+            vc["goal_span"],
+            {"start": {"line": 20, "col": 4}, "end": {"line": 20, "col": 8}},
+        )
+        # both hypotheses survive; the first is whole (not "... < n &&")
+        self.assertEqual(vc["hypotheses"], ["0 <= a && a < n && p = q", "x = y"])
+        # spans stay parallel and attach to the rejoined logical line
+        # (direct list equality -- no len()/index on the object-typed value)
+        self.assertEqual(
+            vc["hyp_spans"],
+            [
+                {"start": {"line": 19, "col": 1}, "end": {"line": 19, "col": 2}},
+                {"start": {"line": 18, "col": 1}, "end": {"line": 18, "col": 2}},
+            ],
+        )
+
+    def test_join_wrapped_is_noop_on_unwrapped(self):
+        # a normal dump has no column-0 continuations, so nothing changes
+        lines = str(DUMP_USED).split("\n")
+        self.assertEqual(vc_index._join_wrapped(lines), lines)
+
+    def test_join_wrapped_only_after_a_dangling_operator(self):
+        # a line ending in && / || / -> is incomplete -> the next column-0
+        # line is its continuation; any other line is a boundary, so
+        # headers and trailing `val`/`module` compiler output stay put.
+        self.assertEqual(
+            vc_index._join_wrapped(["  0 <= a &&", "a < n  @ 1.1-1.2"]),
+            ["  0 <= a && a < n  @ 1.1-1.2"],
+        )
+        # complete line, then a col-0 VC header / compiler output: untouched
+        self.assertEqual(
+            vc_index._join_wrapped(["  M.zero = 0", "val one : unit -> M.t = <fun>"]),
+            ["  M.zero = 0", "val one : unit -> M.t = <fun>"],
+        )
+        self.assertEqual(
+            vc_index._join_wrapped(
+                ["  d = e  @ 1.1-1.2", 'File "x.ml", line 2, characters 0-1: vox VC:']
+            ),
+            ["  d = e  @ 1.1-1.2", 'File "x.ml", line 2, characters 0-1: vox VC:'],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

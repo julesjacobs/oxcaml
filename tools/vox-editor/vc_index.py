@@ -129,13 +129,43 @@ def _parse_used(rest: str) -> List[str]:
     return [n.strip() for n in rest.split(",") if n.strip()]
 
 
+def _join_wrapped(lines: List[str]) -> List[str]:
+    """Rejoin predicates the compiler's Format-based dumper WRAPPED across
+    physical lines at its margin.
+
+    The dump is a line-oriented protocol: one predicate (goal / hypothesis
+    / scope entry) per line, section content indented two spaces.  A long
+    predicate, however, is broken by Format at its margin, and the vox
+    predicate printer boxes conjunctions/implications so the break lands
+    right after a ``&&`` / ``||`` / ``->`` with the continuation at COLUMN
+    0 -- which the line-based parsers below would otherwise read as a
+    predicate truncated at ``... < n &&`` with the rest bleeding out (the
+    reported qsort bug).
+
+    A COMPLETE predicate never ends with a dangling ``&&`` / ``||`` /
+    ``->``, so use exactly that as the continuation signal: fold a
+    non-indented, non-empty line onto the previous logical line iff that
+    line ends with one of those operators.  This leaves every other
+    column-0 line alone -- VC/state headers, ``module``/``val``/``sig``
+    compiler output, alert underlines -- and is a no-op on an unwrapped
+    dump."""
+    cont_ops = ("&&", "||", "->")
+    out: List[str] = []
+    for ln in lines:
+        if out and ln and not ln[0].isspace() and out[-1].rstrip().endswith(cont_ops):
+            out[-1] = out[-1].rstrip() + " " + ln.strip()
+        else:
+            out.append(ln)
+    return out
+
+
 def parse_dump(text: str) -> List[Dict[str, object]]:
     """Parse ``-dump-vc`` output into a list of VC dicts.
 
     Each VC dict has: start, end (locations), goal (str),
     hypotheses (list of str), kind (prove|runtime_check|assume).
     """
-    lines = text.split("\n")
+    lines = _join_wrapped(text.split("\n"))
     vcs: List[Dict[str, object]] = []
     i = 0
     n = len(lines)
@@ -268,7 +298,7 @@ def parse_states(text: str) -> List[Dict[str, object]]:
     """Parse ``-vox-dump-states`` blocks: the fact context + scope at
     each walked expression's entry.  Same hypothesis/scope line formats
     as VCs, no goal."""
-    lines = text.split("\n")
+    lines = _join_wrapped(text.split("\n"))
     out: List[Dict[str, object]] = []
     i = 0
     n = len(lines)

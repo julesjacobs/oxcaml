@@ -1156,6 +1156,65 @@ async function main() {
     await page.evaluate(() => window.__vox.setCompact(false));
     console.log("ok - compact mode hides the used-lemmas row");
 
+    // Wrapped-predicate regression (the qsort bug): the compiler's Format
+    // dumper breaks a long conjunction across physical lines (continuation
+    // at column 0, after a `&&`); vc_index must rejoin it so the pane shows
+    // the WHOLE goal, not a fragment truncated at `&&` with the rest
+    // bleeding out.  This 7-conjunct refinement wraps under the dumper's
+    // margin.
+    const WRAP_SRC =
+      "let f (x : int{ _ >= 0 }) : int{ _ >= 0 && _ >= 1 && _ >= 2 " +
+      "&& _ >= 3 && _ >= 4 && _ >= 5 && _ >= 6 } =\n  refine_ (x + 100)\n";
+    await page.evaluate((src) => {
+      window.__vox.setCompact(false);
+      window.__vox.cm.setValue(src);
+    }, WRAP_SRC);
+    await waitFor(
+      async () => {
+        const fast = await page.evaluate(() => window.__vox.getLastCheckFast());
+        const t = await page.$eval("#status", (e) => e.textContent);
+        return fast === false && /verified/.test(t) ? t : false;
+      },
+      60000,
+      "wrapped-goal file verifies"
+    );
+    const wrapGoal = await page.evaluate(() => {
+      const r = window.__vox
+        .getRegions()
+        .find((x) => x.kind === "vc" && /x \+ 100/.test(x.goal || ""));
+      return r ? r.goal : null;
+    });
+    assert.ok(wrapGoal, "found the wrapped-goal VC");
+    assert.ok(
+      /x \+ 100 >= 6/.test(wrapGoal),
+      "goal reassembled through the LAST conjunct: " + wrapGoal
+    );
+    assert.ok(
+      !/&&\s*$/.test(wrapGoal),
+      "goal is not truncated at a dangling &&: " + wrapGoal
+    );
+    // The pane renders the whole goal (cursor on the VC).
+    const wrapPos = await page.evaluate(() => {
+      const r = window.__vox
+        .getRegions()
+        .find((x) => x.kind === "vc" && /x \+ 100/.test(x.goal || ""));
+      return { line: r.start.line, col: r.start.col };
+    });
+    await page.evaluate((p) => window.__vox.cm.setCursor(p), wrapPos);
+    const paneGoal = await waitFor(
+      async () => {
+        const t = await page.$eval("#pane-body", (e) => e.textContent);
+        return /x \+ 100 >= 0/.test(t) ? t : false;
+      },
+      5000,
+      "wrapped goal rendered in the pane"
+    );
+    assert.ok(
+      /x \+ 100 >= 6/.test(paneGoal),
+      "pane shows the whole goal through >= 6, no bleed: " + paneGoal.slice(0, 200)
+    );
+    console.log("ok - wrapped predicate rejoined: pane shows the complete goal");
+
     // Theme: dark is the default (no OS sniffing); the toolbar toggle
     // flips to light, and the choice persists across a reload.
     const readBg = () =>
