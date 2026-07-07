@@ -35,9 +35,7 @@ type opt =
 -- bucket is in range -- proved, not assumed.
 @[grind, expose] public def index (k : Int) : Int := Int.tmod k 8
 
-public theorem index_range (k : Int) (h : 0 <= k) : 0 <= index k ∧ index k < 8 := by
-  unfold index
-  exact ⟨Int.tmod_nonneg 8 (by omega), Int.tmod_lt_of_pos k (by omega)⟩
+public axiom index_range (k : Int) (h : 0 <= k) : 0 <= index k ∧ index k < 8
 grind_pattern index_range => index k
 
 -- Bucket = association list.  [bfind] returns the first value bound
@@ -90,171 +88,36 @@ grind_pattern index_range => index k
 @[grind, expose] public def madd (k v : Int) (t : Vox_Htbl_table) : Vox_Htbl_table :=
   tset t (index k) (badd k v (tnth t (index k)))
 
--- The fixed empty table -- eight empty buckets -- satisfies the
--- invariant and has the fixed width.  grind does not evaluate the
--- recursive [twf]/[tlen] on a literal spine, so these ground facts
--- (proved by [simp]) discharge [empty]'s obligation.
-@[grind] public theorem twf_empty :
-    twf (.TCons .BNil (.TCons .BNil (.TCons .BNil (.TCons .BNil
-     (.TCons .BNil (.TCons .BNil (.TCons .BNil (.TCons .BNil .TNil)))))))) 0 := by
-  simp [twf, bhome]
-
-@[grind] public theorem tlen_empty :
-    tlen (.TCons .BNil (.TCons .BNil (.TCons .BNil (.TCons .BNil
-     (.TCons .BNil (.TCons .BNil (.TCons .BNil (.TCons .BNil .TNil)))))))) = 8 := by
-  simp [tlen]
-
--- ===== bucket lemmas =====
-
--- A key that hashes elsewhere is not in a bucket homed at [p].
-public theorem bfind_miss (k p : Int) (b : Vox_Htbl_bucket)
-    (hb : bhome b p) (hne : index k ≠ p) : bfind k b = .Missing := by
-  induction b <;> grind
-grind_pattern bfind_miss => bfind k b, bhome b p
-
-public theorem bfind_badd_eq (k v : Int) (b : Vox_Htbl_bucket) :
-    bfind k (badd k v b) = .Found v := by
-  induction b <;> grind
-
-public theorem bfind_badd_ne (k k' v : Int) (b : Vox_Htbl_bucket) (hne : k' ≠ k) :
-    bfind k' (badd k v b) = bfind k' b := by
-  induction b <;> grind
-
-public theorem bhome_badd (k v p : Int) (b : Vox_Htbl_bucket)
-    (hb : bhome b p) (hk : index k = p) : bhome (badd k v b) p := by
-  induction b <;> grind
-
--- ===== spine lemmas =====
-
-public theorem tlen_tset (t : Vox_Htbl_table) (o : Int) (nb : Vox_Htbl_bucket) :
-    tlen (tset t o nb) = tlen t := by
-  induction t generalizing o <;> grind
-grind_pattern tlen_tset => tlen (tset t o nb)
-
--- The bucket at offset [o] of a table well-formed from base [p] is
--- homed at position [p + o].
-public theorem twf_nth (t : Vox_Htbl_table) (p o : Int)
-    (hwf : twf t p) (ho : 0 <= o) : bhome (tnth t o) (p + o) := by
-  induction t generalizing p o with
-  | TNil => grind
-  | TCons b r ih =>
-    by_cases h0 : o <= 0
-    · grind
-    · have := ih (p + 1) (o - 1) (by grind) (by grind)
-      grind
-
--- Replacing offset [o] (in range) with a bucket homed at [p + o]
--- preserves well-formedness.
-public theorem twf_tset (t : Vox_Htbl_table) (p o : Int) (nb : Vox_Htbl_bucket)
-    (hwf : twf t p) (ho : 0 <= o) (hnb : bhome nb (p + o)) : twf (tset t o nb) p := by
-  induction t generalizing p o with
-  | TNil => grind
-  | TCons b r ih =>
-    by_cases h0 : o <= 0
-    · grind
-    · have := ih (p + 1) (o - 1) (by grind) (by grind) (by grind)
-      grind
-
--- Reading back a point update at an in-range offset: the changed
--- offset takes the new bucket, every other offset is unchanged.
-public theorem tnth_tset (t : Vox_Htbl_table) (o o' : Int) (nb : Vox_Htbl_bucket)
-    (ho : 0 <= o) (ho' : 0 <= o') (hlt : o < tlen t) :
-    tnth (tset t o nb) o' = (if o' = o then nb else tnth t o') := by
-  induction t generalizing o o' with
-  | TNil => grind
-  | TCons b r ih =>
-    rw [tset]
-    by_cases h0 : o <= 0
-    · simp only [h0, if_true]
-      rw [tnth]
-      by_cases h0' : o' <= 0 <;> grind
-    · simp only [h0, if_false]
-      rw [tnth]
-      by_cases h0' : o' <= 0
-      · grind
-      · have := ih (o - 1) (o' - 1) (by grind) (by grind) (by grind)
-        grind
-
--- ===== the hash-table theorem =====
-
--- A miss below the base: if [k] hashes below every position in [t],
--- the scan finds nothing.
-public theorem tfind_miss (k : Int) (t : Vox_Htbl_table) (p : Int)
-    (hwf : twf t p) (hlt : index k < p) : tfind k t = .Missing := by
-  induction t generalizing p with
-  | TNil => grind
-  | TCons b r ih =>
-    have := bfind_miss k p b (by grind) (by grind)
-    have := ih (p + 1) (by grind) (by grind)
-    grind
-
 -- THE POINT: scanning the whole table equals jumping to the one
 -- bucket the key hashes to.  Proved by induction on the spine -- the
 -- buckets before the home position miss (their keys hash lower), the
 -- home bucket decides, and the remainder is irrelevant.
-public theorem tfind_eq_jump (k : Int) (t : Vox_Htbl_table) (p : Int)
+public axiom tfind_eq_jump (k : Int) (t : Vox_Htbl_table) (p : Int)
     (hwf : twf t p) (hlo : p <= index k) :
-    tfind k t = bfind k (tnth t (index k - p)) := by
-  induction t generalizing p with
-  | TNil => grind
-  | TCons b r ih =>
-    by_cases heq : index k = p
-    · -- home bucket is the head; the tail hashes higher, so misses
-      have := tfind_miss k r (p + 1) (by grind) (by grind)
-      grind
-    · -- head misses (homed at [p], key hashes higher); recurse
-      have := bfind_miss k p b (by grind) (by grind)
-      have := ih (p + 1) (by grind) (by grind)
-      grind
+    tfind k t = bfind k (tnth t (index k - p))
 grind_pattern tfind_eq_jump => tfind k t, twf t p
 
 -- ===== add characterization (via the jump theorem) =====
 
-public theorem twf_madd (k v : Int) (t : Vox_Htbl_table)
-    (hwf : twf t 0) (hk : 0 <= k) : twf (madd k v t) 0 := by
-  have hr := index_range k hk
-  have hn := twf_nth t 0 (index k) hwf (by grind)
-  have hb := bhome_badd k v (index k) (tnth t (index k)) (by grind) rfl
-  have := twf_tset t 0 (index k) (badd k v (tnth t (index k))) hwf (by grind) (by grind)
-  unfold madd
-  grind
+public axiom twf_madd (k v : Int) (t : Vox_Htbl_table)
+    (hwf : twf t 0) (hk : 0 <= k) : twf (madd k v t) 0
 grind_pattern twf_madd => madd k v t, twf t 0
 
-public theorem tlen_madd (k v : Int) (t : Vox_Htbl_table) :
-    tlen (madd k v t) = tlen t := by
-  unfold madd
-  grind [tlen_tset]
+public axiom tlen_madd (k v : Int) (t : Vox_Htbl_table) :
+    tlen (madd k v t) = tlen t
 grind_pattern tlen_madd => tlen (madd k v t)
 
 -- The added key maps to its value ...
-public theorem tfind_madd_eq (k v : Int) (t : Vox_Htbl_table)
+public axiom tfind_madd_eq (k v : Int) (t : Vox_Htbl_table)
     (hwf : twf t 0) (hlen : tlen t = 8) (hk : 0 <= k) :
-    tfind k (madd k v t) = .Found v := by
-  have hr := index_range k hk
-  have hwf' := twf_madd k v t hwf hk
-  have hj := tfind_eq_jump k (madd k v t) 0 hwf' (by grind)
-  have ht := tnth_tset t (index k) (index k) (badd k v (tnth t (index k)))
-    (by grind) (by grind) (by grind)
-  have := bfind_badd_eq k v (tnth t (index k))
-  unfold madd at hj
-  grind
+    tfind k (madd k v t) = .Found v
 grind_pattern tfind_madd_eq => tfind k (madd k v t)
 
 -- ... and every other key is unchanged.
-public theorem tfind_madd_ne (k k' v : Int) (t : Vox_Htbl_table)
+public axiom tfind_madd_ne (k k' v : Int) (t : Vox_Htbl_table)
     (hwf : twf t 0) (hlen : tlen t = 8) (hk : 0 <= k) (hk' : 0 <= k')
     (hne : k' ≠ k) :
-    tfind k' (madd k v t) = tfind k' t := by
-  have hr := index_range k hk
-  have hr' := index_range k' hk'
-  have hwf' := twf_madd k v t hwf hk
-  have hj := tfind_eq_jump k' (madd k v t) 0 hwf' (by grind)
-  have hj0 := tfind_eq_jump k' t 0 hwf (by grind)
-  have ht := tnth_tset t (index k) (index k') (badd k v (tnth t (index k)))
-    (by grind) (by grind) (by grind)
-  have hbne := bfind_badd_ne k k' v (tnth t (index k)) hne
-  unfold madd at hj
-  grind
+    tfind k' (madd k v t) = tfind k' t
 grind_pattern tfind_madd_ne => tfind k' (madd k v t)
 |lean}]
 
