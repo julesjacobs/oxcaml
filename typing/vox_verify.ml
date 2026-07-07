@@ -2327,23 +2327,6 @@ let match_facts
      the pattern is one (an alias counts), a fresh synthetic
      otherwise; the name denotes the matched component, so a deeper
      pattern destructures it in turn. *)
-  let arg_parts (_, (p : value general_pattern)) =
-    match p.pat_desc with
-    | Tpat_var { id; _ } -> Refinement.Pvar id, None
-    | Tpat_alias { pattern = sub; id; _ } -> Refinement.Pvar id, Some sub
-    | Tpat_constant (Const_int n) ->
-      (* A literal component names itself: [C 0] is the term [C 0], no
-         fresh unknown and no separate equation. *)
-      Refinement.Pint n, None
-    | _ ->
-      let id = Ident.create_local "*vox-wild*" in
-      record_name env id p.pat_type;
-      Hashtbl.replace synthetic_names id ();
-      ( Refinement.Pvar id
-      , match p.pat_desc with
-        | Tpat_any -> None
-        | _ -> Some p )
-  in
   (* A component's type refinement, instantiated at the component's
      own logical term: an UNNAMED sub-pattern still receives its fact
      ([let ((), ()) = e], [let (_, _) = e]) -- the subject is already
@@ -2360,23 +2343,59 @@ let match_facts
         Refinement.subst_bound ~by:subject p)
       preds
   in
-  let rec constructor_facts subject cstr args =
+  let rec arg_term (p : value general_pattern) =
+    (* The logic TERM denoting a matched component, built as DEEPLY as
+       the pattern is structural: a variable is its stamp, a literal
+       itself, a (possibly nested) simple-variant constructor its
+       constructor term over its components' terms.  A deep pattern
+       [Node (Red, Node (Red, a, x, b), ..)] thus yields ONE nested term
+       [Node (Red, Node (Red, a, x, b), ..)] instead of a chain of fresh
+       unknowns each tied back by an equation -- which the solver could
+       not reduce a reflected model call against (a combinatorial split
+       per unknown).  Anything else (a record, a tuple, a wildcard, an
+       opaque value) still names a fresh unknown and destructures that
+       in turn.  Returns the term together with the facts the component
+       contributes AT that term (its type refinement, an alias binding,
+       a nested record/tuple's projections). *)
+    match p.pat_desc with
+    | Tpat_var { id; _ } -> Refinement.Pvar id, []
+    | Tpat_constant (Const_int n) -> Refinement.Pint n, []
+    | Tpat_alias { pattern = sub; id; _ } ->
+      (* The alias names the whole component; destructure the aliased
+         pattern AT that name (matching the pre-deep-term behavior --
+         avoids a spurious unknown for an aliased tuple/record). *)
+      Refinement.Pvar id, value_facts (Refinement.Pvar id) sub
+    | Tpat_construct (_, cstr, _, cargs, _)
+      when (match datatype_sort env (Data_types.cstr_res_type_path cstr) [] with
+            | S_data (_, _) -> true
+            | _ -> false) ->
+      let path = Data_types.cstr_res_type_path cstr in
+      let parts = List.map (fun (_, a) -> arg_term a) cargs in
+      let term =
+        Refinement.Pconstr
+          (path, cstr.Data_types.cstr_name, List.map fst parts)
+      in
+      term, type_facts term p.pat_type @ List.concat_map snd parts
+    | _ ->
+      let id = Ident.create_local "*vox-wild*" in
+      record_name env id p.pat_type;
+      Hashtbl.replace synthetic_names id ();
+      ( Refinement.Pvar id
+      , match p.pat_desc with
+        | Tpat_any -> []
+        | _ -> value_facts (Refinement.Pvar id) p )
+  and constructor_facts subject cstr args =
     let path = Data_types.cstr_res_type_path cstr in
     match datatype_sort env path [] with
     | S_int | S_bool | S_param _ | S_tuple _ | S_iarray | S_poly _ | S_lean _ | S_other -> []
     | S_data (_, _) ->
-      let parts = List.map arg_parts args in
+      let parts = List.map (fun (_, a) -> arg_term a) args in
       Refinement.Pbinop
         ( Refinement.Eq
         , subject
         , Refinement.Pconstr
             (path, cstr.Data_types.cstr_name, List.map fst parts) )
-      :: List.concat_map
-           (fun (n, sub) ->
-             match sub with
-             | Some p -> value_facts n p
-             | None -> [])
-           parts
+      :: List.concat_map snd parts
   and record_facts
         subject (fields : (_ * Data_types.label_description * _) list)
     =

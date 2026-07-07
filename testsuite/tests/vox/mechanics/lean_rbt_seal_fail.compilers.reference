@@ -5,10 +5,8 @@ Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexa
        Goal: Node (Red, Node (Black, a, xa, b), xl, Node (Black, r, x, lr)) =
 balance c l x r
 Hypotheses:
-  ll = Node (*vox-wild*, a, xa, b)
-  *vox-wild* = Red
-  l = Node (*vox-wild*#2, ll, xl, lr)
-  *vox-wild*#2 = Red
+  ll = Node (Red, a, xa, b)
+  l = Node (Red, ll, xl, lr)
   c = Black
   empty = Leaf
   rb empty && empty = Leaf
