@@ -4206,6 +4206,27 @@ let rec sort_needs_iarray = function
    pattern-registered so grind instantiates it at every [len] term. *)
 let lean_iarray_theory = Vox_module.lean_iarray_theory ()
 
+(* A field sort that renders a named/via ([S_lean]) sort -- e.g. a via
+   image type like [LList] -- directly or nested.  A datatype with such
+   a field must be emitted AFTER the unit's blocks: the named sort may
+   be DEFINED by a block (the via image's own [inductive]), and Lean
+   resolves identifiers top-to-bottom, so a forward reference autobinds
+   the name to a universe metavariable ([Sort ?u]) and the derived
+   inductive fails to elaborate. *)
+let rec sort_uses_lean = function
+  | S_lean _ -> true
+  | S_int | S_bool | S_other | S_iarray | S_param _ -> false
+  | S_tuple comps | S_poly (_, comps) -> List.exists sort_uses_lean comps
+  | S_data (_, args) -> List.exists sort_uses_lean args
+;;
+
+let dt_uses_lean_field = function
+  | Dt_variant (_, cs) ->
+    List.exists (fun (_, fs) -> List.exists sort_uses_lean fs) cs
+  | Dt_record (_, fs) -> List.exists (fun (_, s) -> sort_uses_lean s) fs
+  | Dt_opaque -> false
+;;
+
 let datatype_field_needs_iarray () =
   List.exists
     (fun (_, decl) ->
@@ -4675,10 +4696,10 @@ let lean_datatype_decl ?(vis = "") (p, decl) =
 
 (* All registered datatypes except [skip] (already declared by an
    imported export), in dependency order. *)
-let lean_datatype_decls buf ~skip ~vis =
+let lean_datatype_decls ?(filter = fun _ -> true) buf ~skip ~vis =
   List.iter
-    (fun ((p, _) as dt) ->
-      if not (List.exists (String.equal (path_uname p)) skip)
+    (fun ((p, decl) as dt) ->
+      if (not (List.exists (String.equal (path_uname p)) skip)) && filter decl
       then Buffer.add_string buf (lean_datatype_decl ~vis dt))
     !datatypes
 ;;
@@ -5436,6 +5457,83 @@ let register_datatypes_in_blocks env blocks =
     blocks
 ;;
 
+(* [S_lean]-field datatypes of the interface currently being sealed, as
+   (uname, Lean name) pairs.  They -- and the blocks that reference them
+   -- are ordered AROUND the ghost-sort-defining blocks in
+   [build_sig_module].  Set by [cmi_export] while the freshly
+   re-registered [!datatypes] is live (it is restored to the caller's
+   value before [build_sig_module] runs, so [build_sig_module] cannot
+   recompute it). *)
+let sig_hold_back : (string * string) list ref = ref []
+
+let str_contains hay needle =
+  let nl = String.length needle and hl = String.length hay in
+  nl = 0
+  || (let rec at i =
+        i + nl <= hl
+        && (String.equal (String.sub hay i nl) needle || at (i + 1))
+      in
+      at 0)
+;;
+
+(* Replace every occurrence of [needle] in [hay] with [repl]. *)
+let str_replace_all hay needle repl =
+  if String.equal needle "" then hay
+  else begin
+    let buf = Buffer.create (String.length hay) in
+    let nl = String.length needle and hl = String.length hay in
+    let i = ref 0 in
+    while !i < hl do
+      if !i + nl <= hl && String.equal (String.sub hay !i nl) needle
+      then (Buffer.add_string buf repl; i := !i + nl)
+      else (Buffer.add_char buf hay.[!i]; incr i)
+    done;
+    Buffer.contents buf
+  end
+;;
+
+(* The named/via ([S_lean]) sort names a field of [decl] renders. *)
+let dt_lean_sort_names decl =
+  let rec go s acc =
+    match s with
+    | S_lean (n, args) -> List.fold_left (fun a x -> go x a) (n :: acc) args
+    | S_tuple cs | S_poly (_, cs) -> List.fold_left (fun a x -> go x a) acc cs
+    | S_data (_, args) -> List.fold_left (fun a x -> go x a) acc args
+    | S_int | S_bool | S_other | S_iarray | S_param _ -> acc
+  in
+  match decl with
+  | Dt_variant (_, cs) ->
+    List.concat_map (fun (_, fs) -> List.concat_map (fun s -> go s []) fs) cs
+  | Dt_record (_, fs) -> List.concat_map (fun (_, s) -> go s []) fs
+  | Dt_opaque -> []
+;;
+
+(* A local (impl-side, [public]-less) block that DEFINES a via/ghost sort
+   referenced by a held-back PUBLIC datatype must expose that sort's
+   declaration as [public]: the held-back datatype (emitted [public] so
+   the seal can name it) forward-references the sort, and in a Lean module
+   a public declaration may not mention a private one.  Publicise only the
+   named sort's own declaration, nothing else in the block. *)
+let publicize_ghost_decls names text =
+  List.fold_left
+    (fun text name ->
+      List.fold_left
+        (fun text kw ->
+          let d = kw ^ " " ^ name in
+          if str_contains text ("public " ^ d) then text
+          else str_replace_all text d ("public " ^ d))
+        text
+        [ "inductive"; "opaque"; "structure" ])
+    text
+    names
+;;
+
+(* A block whose text names one of the held-back datatypes (a model def
+   over a view ADT): it must follow that datatype's declaration. *)
+let block_mentions_holdback names text =
+  List.exists (fun (_, ln) -> str_contains text ln) names
+;;
+
 let cmi_export env (sg : Types.signature) ~defs ~blocks ~sig_module =
   let def_blocks =
     List.map
@@ -5502,6 +5600,13 @@ let cmi_export env (sg : Types.signature) ~defs ~blocks ~sig_module =
               !tuple_arities
           @ dts
         in
+        sig_hold_back :=
+          List.filter_map
+            (fun (p, decl) ->
+              if dt_uses_lean_field decl
+              then Some (path_uname p, lean_dt_name p)
+              else None)
+            !datatypes;
         Some
           { Cmi_format.vp_datatypes = dts
           ; vp_needs_voxu = datatype_field_needs_voxu ()
@@ -5562,11 +5667,32 @@ let build_sig_module vp =
            && List.exists (fun (n', _) -> String.equal n n') ivp.vp_datatypes)
          imported
   in
+  (* Order around the ghost-sort-defining blocks (see [sig_hold_back]):
+     (1) datatypes with no via/ghost field, (2) the blocks that do NOT
+     reference a held-back datatype -- these DEFINE the ghost sorts,
+     (3) the held-back datatypes (their fields now resolve), (4) the
+     blocks that DO reference a held-back datatype (a model def over the
+     view).  Any other order forward-references a name and Lean autobinds
+     it to a universe metavariable ([Sort ?u]). *)
+  let hb = !sig_hold_back in
+  let held n = List.exists (fun (u, _) -> String.equal u n) hb in
   List.iter
     (fun (n, d) ->
-      if not (covered n) then Buffer.add_string buf ("public " ^ d))
+      if (not (covered n)) && not (held n)
+      then Buffer.add_string buf ("public " ^ d))
     vp.Cmi_format.vp_datatypes;
-  List.iter (fun b -> Buffer.add_string buf b) vp.Cmi_format.vp_blocks;
+  let blocks_pre, blocks_post =
+    List.partition
+      (fun b -> not (block_mentions_holdback hb b))
+      vp.Cmi_format.vp_blocks
+  in
+  List.iter (fun b -> Buffer.add_string buf b) blocks_pre;
+  List.iter
+    (fun (n, d) ->
+      if (not (covered n)) && held n
+      then Buffer.add_string buf ("public " ^ d))
+    vp.Cmi_format.vp_datatypes;
+  List.iter (fun b -> Buffer.add_string buf b) blocks_post;
   let olean_out =
     Filename.concat dir (Vox_module.sig_module_name unit ^ ".olean")
   in
@@ -6028,7 +6154,11 @@ let lean_file ?(witness = "") ?(explain = false) vcs =
         seg (lean_poly_decl hd)))
     !poly_heads;
   let own_decls = Buffer.create 256 in
-  lean_datatype_decls own_decls ~skip:!seen ~vis:dt_vis;
+  (* Datatypes with a named/via ([S_lean]) field are held back until
+     AFTER this unit's own blocks (which may define that sort); see
+     [dt_uses_lean_field]. *)
+  lean_datatype_decls own_decls ~skip:!seen ~vis:dt_vis
+    ~filter:(fun d -> not (dt_uses_lean_field d));
   seg (Buffer.contents own_decls);
   (* Imported blocks and the [-vox-prelude] file come BEFORE this
      module's reflected definitions: a definition may call an imported
@@ -6057,11 +6187,46 @@ let lean_file ?(witness = "") ?(explain = false) vcs =
       lean_spec_def b d;
       seg ~src:(Reflected_def d) (Buffer.contents b))
     !spec_defs;
-  if want_spec_text
-  then
-    List.iter
-      (fun (s, loc) -> seg ~src:(Local_block loc) s)
-      !embedded_blocks;
+  (* Own blocks straddle the held-back (via/ghost-field) datatypes: the
+     ghost-sort-defining blocks come first, then those datatypes, then
+     any block that references one (a model def over the view). *)
+  let own_hb =
+    List.filter_map
+      (fun (p, decl) ->
+        if dt_uses_lean_field decl
+        then Some (path_uname p, lean_dt_name p)
+        else None)
+      !datatypes
+  in
+  let own_pre, own_post =
+    if want_spec_text
+    then
+      List.partition
+        (fun (s, _) -> not (block_mentions_holdback own_hb s))
+        !embedded_blocks
+    else [], []
+  in
+  (* In file mode the held-back view datatypes are emitted [public] (so
+     the seal can name them); a local block that defines a via/ghost sort
+     one of them references must expose THAT sort [public] too. *)
+  let ghost_names =
+    if file_mode
+    then
+      List.concat_map
+        (fun (_, decl) ->
+          if dt_uses_lean_field decl then dt_lean_sort_names decl else [])
+        !datatypes
+    else []
+  in
+  let emit_block (s, loc) =
+    seg ~src:(Local_block loc) (publicize_ghost_decls ghost_names s)
+  in
+  List.iter emit_block own_pre;
+  let own_lean_decls = Buffer.create 128 in
+  lean_datatype_decls own_lean_decls ~skip:!seen ~vis:dt_vis
+    ~filter:dt_uses_lean_field;
+  if Buffer.length own_lean_decls > 0 then seg (Buffer.contents own_lean_decls);
+  List.iter emit_block own_post;
   (* Bound elaboration per theorem: a diverging [grind] must count as
      a verification failure, not hang the build.  (A wedged process
      outside elaboration remains out of scope.)  Emitted
