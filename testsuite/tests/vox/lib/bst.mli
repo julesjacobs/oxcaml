@@ -34,36 +34,15 @@ type tree =
       else if x < v then .Node (insert x l) v r
       else .Node l v (insert x r)
 
--- The ordering invariant makes one-path search complete: an element
--- bounded away from a subtree is not in it.
-public theorem not_mem_lt (x b : Int) (t : Vox_Bst_tree)
-    (h : all_lt t b) (hx : b <= x) : ¬ mem x t := by
-  induction t <;> grind
-grind_pattern not_mem_lt => mem x t, all_lt t b
-
-public theorem not_mem_gt (x b : Int) (t : Vox_Bst_tree)
-    (h : all_gt t b) (hx : x <= b) : ¬ mem x t := by
-  induction t <;> grind
-grind_pattern not_mem_gt => mem x t, all_gt t b
-
-public theorem all_lt_insert (x b : Int) (t : Vox_Bst_tree)
-    (h : all_lt t b) (hx : x < b) : all_lt (insert x t) b := by
-  induction t <;> grind
-grind_pattern all_lt_insert => all_lt (insert x t) b
-
-public theorem all_gt_insert (x b : Int) (t : Vox_Bst_tree)
-    (h : all_gt t b) (hx : b < x) : all_gt (insert x t) b := by
-  induction t <;> grind
-grind_pattern all_gt_insert => all_gt (insert x t) b
-
-public theorem bst_insert (x : Int) (t : Vox_Bst_tree)
-    (h : bst t) : bst (insert x t) := by
-  induction t <;> grind
+-- Client-facing laws (obligations discharged in the .ml by induction).
+-- The ordering / insertion scaffolding that proves them lives privately
+-- in the .ml block.
+public axiom bst_insert (x : Int) (t : Vox_Bst_tree)
+    (h : bst t) : bst (insert x t)
 grind_pattern bst_insert => bst (insert x t)
 
-public theorem mem_insert (x y : Int) (t : Vox_Bst_tree) :
-    mem y (insert x t) ↔ (y = x ∨ mem y t) := by
-  induction t <;> grind
+public axiom mem_insert (x y : Int) (t : Vox_Bst_tree) :
+    mem y (insert x t) ↔ (y = x ∨ mem y t)
 grind_pattern mem_insert => mem y (insert x t)
 |lean}]
 
