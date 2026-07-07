@@ -473,13 +473,14 @@ module IdTbl =
       }
 
     let rec find_same_without_locks id tbl =
-      try Ident.find_same id tbl.current
-      with Not_found as exn ->
+      match Ident.find_same_opt id tbl.current with
+      | Some data -> data
+      | None ->
         begin match tbl.layer with
         | Open {next; _} -> find_same_without_locks id next
         | Map {f; next} -> f (find_same_without_locks id next)
         | Lock {lock=_; next} -> find_same_without_locks id next
-        | Nothing -> raise exn
+        | Nothing -> raise Not_found
         end
 
     let find_same id (tbl : (empty, _, _) t) =
@@ -2056,7 +2057,7 @@ let find_type_expansion path env =
      private row are still considered unknown to the type system.
      Hence, this case is caught by the following clause that also handles
      purely abstract data types without manifest type definition. *)
-  | _ -> raise Not_found
+  | _ -> raise_notrace Not_found
 
 (* Find the manifest type information associated to a type, i.e.
    the necessary information for the compiler's type-based optimisations.
@@ -2069,7 +2070,7 @@ let find_type_expansion_opt path env =
      an approximation using their manifest type. *)
   | Some body ->
       (decl.type_params, body, decl.type_expansion_scope)
-  | _ -> raise Not_found
+  | _ -> raise_notrace Not_found
 
 let find_jkind_expansion path env =
   let decl = find_jkind path env in
