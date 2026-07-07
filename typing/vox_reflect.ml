@@ -1,105 +1,84 @@
-(* vox: partial translation of pure typedtree expressions into
-   refinement predicates -- the compiler-attached logical meaning of the
-   built-in int/bool operations.
+(* vox: partial translation of pure typedtree expressions into refinement predicates --
+   the compiler-attached logical meaning of the built-in int/bool operations.
 
-   [translate e] returns the logic term denoting [e]'s value when [e]
-   is built from variables, int/bool literals, immutable field reads
-   of simple records, and the primitive operations the predicate
-   language models (+ - * / mod ~- succ pred on int; && || not;
-   comparisons at int or bool, equality also at unlabeled tuples of
-   int/bool); [None] otherwise.
-   Recognition is keyed on the PRIMITIVE ([Val_prim]), never the source
-   name, so shadowing [(+)] cannot be mistaken for integer addition.
-   Comparisons are polymorphic primitives, translated only where the
-   logic's relation agrees with the program's: equality at int, bool,
-   and tuples of them (structural equality on immutable int/bool
-   components is the product datatypes' equality), order at int/bool
-   only (OCaml's tuple order is lexicographic; the logic has none at
-   product sorts).  At other types the logic's equality is
-   uninterpreted, and [compare] does not denote it.
+   [translate e] returns the logic term denoting [e]'s value when [e] is built from
+   variables, int/bool literals, immutable field reads of simple records, and the
+   primitive operations the predicate language models (+ - * / mod ~- succ pred on int; &&
+   || not; comparisons at int or bool, equality also at unlabeled tuples of int/bool);
+   [None] otherwise. Recognition is keyed on the PRIMITIVE ([Val_prim]), never the source
+   name, so shadowing [(+)] cannot be mistaken for integer addition. Comparisons are
+   polymorphic primitives, translated only where the logic's relation agrees with the
+   program's: equality at int, bool, and tuples of them (structural equality on immutable
+   int/bool components is the product datatypes' equality), order at int/bool only
+   (OCaml's tuple order is lexicographic; the logic has none at product sorts). At other
+   types the logic's equality is uninterpreted, and [compare] does not denote it.
 
-   The translatable fragment is pure up to Division_by_zero: [/] and
-   [mod] can raise where the logic's T-division is total ([tdiv x 0 =
-   0]).  Sound under partial correctness -- a raised exception aborts
-   the continuation, so facts recorded about the never-bound result
-   hold vacuously -- and naming a subexpression still never duplicates
-   or reorders effects (the LOGIC term is a value either way).  A
-   short-circuit condition can also leave a division UNEVALUATED
-   ([a && b / c > 0] with [a] false): the path fact still holds,
-   because reaching a branch means the evaluated prefix already
-   determines the condition's value -- [false && X] is false for
-   EVERY [X] -- so the totalized value of the unevaluated suffix
-   cannot flip the recorded fact, and every division that did
+   The translatable fragment is pure up to Division_by_zero: [/] and [mod] can raise where
+   the logic's T-division is total ([tdiv x 0 = 0]). Sound under partial correctness -- a
+   raised exception aborts the continuation, so facts recorded about the never-bound
+   result hold vacuously -- and naming a subexpression still never duplicates or reorders
+   effects (the LOGIC term is a value either way). A short-circuit condition can also
+   leave a division UNEVALUATED ([a && b / c > 0] with [a] false): the path fact still
+   holds, because reaching a branch means the evaluated prefix already determines the
+   condition's value -- [false && X] is false for EVERY [X] -- so the totalized value of
+   the unevaluated suffix cannot flip the recorded fact, and every division that did
    evaluate returned (no raise) with exactly the logic's value.
 
-   CAVEAT (DESIGN.md): the logic's ints are unbounded while the
-   machine's wrap, so the translation of + - * equates modular with
-   ideal arithmetic; overflow is outside the model.
+   CAVEAT (DESIGN.md): the logic's ints are unbounded while the machine's wrap, so the
+   translation of + - * equates modular with ideal arithmetic; overflow is outside the
+   model.
 
-   HOUSE RULE (kinds study, R2): fixed-width UNBOXED integers
-   (int64#/int32#/nativeint#) are, by design, left uninterpreted (they
-   sort at the opaque VoxU, where only equality is available).  They
-   MUST NOT be modeled via [@vox.via]/[@@vox.reflect] through Lean [Int]:
-   that would silently assert UNBOUNDED semantics on a value whose whole
-   point is to wrap, which is worse than the plain-int caveat above
-   because the programmer expects wraparound.  If refinement arithmetic
-   on them is ever wanted, model with Lean [BitVec 64]/[BitVec 32]
-   (faithful two's-complement wraparound), never [Int].
+   HOUSE RULE (kinds study, R2): fixed-width UNBOXED integers (int64#/int32#/nativeint#)
+   are, by design, left uninterpreted (they sort at the opaque VoxU, where only equality
+   is available). They MUST NOT be modeled via [@vox.via]/[@@vox.reflect] through Lean
+   [Int]: that would silently assert UNBOUNDED semantics on a value whose whole point is
+   to wrap, which is worse than the plain-int caveat above because the programmer expects
+   wraparound. If refinement arithmetic on them is ever wanted, model with Lean
+   [BitVec 64]/[BitVec 32] (faithful two's-complement wraparound), never [Int].
 
-   THE TRANSLATOR TOWER -- what turns a term into a logic term, and
-   why there are several entry points rather than one:
-   - [translate_surface]: Parsetree, for DEPENDENT ARGUMENTS -- runs
-     before the argument is typed, so admission is keyed on resolution
-     and declared types only;
-   - [translate]: the typed superset of the surface fragment (same
-     [prim_pred] table, plus type-gated comparisons/projections and
-     field reads) -- names arguments in the VC walker, if-conditions,
-     and exact synthesis;
-   - [translate_rhs]: [translate] plus applications of simple-variant
-     constructors, for reflected definition bodies (where an
-     untranslatable term is an ERROR, never a fresh unknown);
-   - [Vox_verify.name_of_expr]: [translate] made TOTAL -- adds
-     registration-aware constructor/record/tuple naming and degrades
-     everything else to a fresh unknown;
-   - [Typetexp.elab_vox_pred]: the PREDICATE language, deliberately
-     separate -- a different grammar ([_], named binders, spec
-     functions, implication, quantifiers) whose operators are spelled,
-     not resolved.
-   The primitive fragment lives once, in [prim_pred]; the
-   [@@vox.decreases] metric reuses [translate_surface]. *)
+   THE TRANSLATOR TOWER -- what turns a term into a logic term, and why there are several
+   entry points rather than one:
+   - [translate_surface]: Parsetree, for DEPENDENT ARGUMENTS -- runs before the argument
+     is typed, so admission is keyed on resolution and declared types only;
+   - [translate]: the typed superset of the surface fragment (same [prim_pred] table, plus
+     type-gated comparisons/projections and field reads) -- names arguments in the VC
+     walker, if-conditions, and exact synthesis;
+   - [translate_rhs]: [translate] plus applications of simple-variant constructors, for
+     reflected definition bodies (where an untranslatable term is an ERROR, never a fresh
+     unknown);
+   - [Vox_verify.name_of_expr]: [translate] made TOTAL -- adds registration-aware
+     constructor/record/tuple naming and degrades everything else to a fresh unknown;
+   - [Typetexp.elab_vox_pred]: the PREDICATE language, deliberately separate -- a
+     different grammar ([_], named binders, spec functions, implication, quantifiers)
+     whose operators are spelled, not resolved. The primitive fragment lives once, in
+     [prim_pred]; the [@@vox.decreases] metric reuses [translate_surface]. *)
 
 open Typedtree
 
 let is_int_or_bool env ty =
   match Types.get_desc (Ctype.vox_expand_head env ty) with
-  | Tconstr (p, [], _) ->
-    Path.same p Predef.path_int || Path.same p Predef.path_bool
+  | Tconstr (p, [], _) -> Path.same p Predef.path_int || Path.same p Predef.path_bool
   | _ -> false
 ;;
 
-(* Types at which the polymorphic EQUALITIES translate: int, bool, and
-   unlabeled tuples thereof (nested included) -- structural equality
-   on immutable int/bool components is exactly the logic's equality on
-   the product datatypes.  The ORDER comparisons stay int/bool only:
-   OCaml's order on tuples is lexicographic, and the logic has no
-   order at product sorts. *)
+(* Types at which the polymorphic EQUALITIES translate: int, bool, and unlabeled tuples
+   thereof (nested included) -- structural equality on immutable int/bool components is
+   exactly the logic's equality on the product datatypes. The ORDER comparisons stay
+   int/bool only: OCaml's order on tuples is lexicographic, and the logic has no order at
+   product sorts. *)
 let rec is_eq_comparable env ty =
   match Types.get_desc (Ctype.vox_expand_head env ty) with
-  | Tconstr (p, [], _) ->
-    Path.same p Predef.path_int || Path.same p Predef.path_bool
+  | Tconstr (p, [], _) -> Path.same p Predef.path_int || Path.same p Predef.path_bool
   | Ttuple comps ->
     List.length comps >= 2
-    && List.for_all
-         (fun (lbl, t) -> Option.is_none lbl && is_eq_comparable env t)
-         comps
+    && List.for_all (fun (lbl, t) -> Option.is_none lbl && is_eq_comparable env t) comps
   | _ -> false
 ;;
 
-(* An UNLABELED pair type: the shape [fst]/[snd] project out of.  The
-   projection primitives ([%field0_immut]/[%field1_immut]) are generic
-   block reads, so the argument's type is the gate -- a user [external]
-   with the same primitive at another type must not be mistaken for a
-   tuple projection. *)
+(* An UNLABELED pair type: the shape [fst]/[snd] project out of. The projection primitives
+   ([%field0_immut]/[%field1_immut]) are generic block reads, so the argument's type is
+   the gate -- a user [external] with the same primitive at another type must not be
+   mistaken for a tuple projection. *)
 let is_unlabeled_pair env ty =
   let ty = Ctype.vox_expand_head env ty in
   match Types.get_desc ty with
@@ -108,9 +87,9 @@ let is_unlabeled_pair env ty =
 ;;
 
 (* An [int iarray]: the type that admits the built-in array theory
-   ([Iarray.length]/[Iarray.get] reflect as Refinement.ia_len/ia_get).
-   Immutability is what makes the reflection sound (an iarray value
-   denotes one array); the int gate keeps [get]'s result Int-sorted. *)
+   ([Iarray.length]/[Iarray.get] reflect as Refinement.ia_len/ia_get). Immutability is
+   what makes the reflection sound (an iarray value denotes one array); the int gate keeps
+   [get]'s result Int-sorted. *)
 let is_int_iarray env ty =
   match Types.get_desc (Ctype.vox_expand_head env ty) with
   | Tconstr (p, [ elt ], _) when Path.same p Predef.path_iarray ->
@@ -120,14 +99,12 @@ let is_int_iarray env ty =
   | _ -> false
 ;;
 
-(* The surface twin of the gate above, usable BEFORE the argument is
-   typed: the resolved value's DECLARED domain is an unlabeled pair
-   (as [Stdlib.fst]'s ['a * 'b -> 'a] is), so any application that
-   typechecks has its argument at a pair type -- exactly when
-   [translate] will admit the projection.  A user [external] carrying
-   the same primitive at a non-pair or fully polymorphic type is
-   refused here (and [translate], gated on the actual argument type,
-   stays a superset). *)
+(* The surface twin of the gate above, usable BEFORE the argument is typed: the resolved
+   value's DECLARED domain is an unlabeled pair (as [Stdlib.fst]'s ['a * 'b -> 'a] is), so
+   any application that typechecks has its argument at a pair type -- exactly when
+   [translate] will admit the projection. A user [external] carrying the same primitive at
+   a non-pair or fully polymorphic type is refused here (and [translate], gated on the
+   actual argument type, stays a superset). *)
 let declared_domain_is_unlabeled_pair env (desc : Types.value_description) =
   let ty =
     match Ctype.expand_head env desc.val_type with
@@ -136,8 +113,8 @@ let declared_domain_is_unlabeled_pair env (desc : Types.value_description) =
   in
   match Types.get_desc ty with
   | Tarrow (_, dom, _, _) ->
-    (* Arrow domains wrap their type in [Tpoly]; a trivial one is
-       transparent, a genuinely polymorphic parameter is refused. *)
+    (* Arrow domains wrap their type in [Tpoly]; a trivial one is transparent, a genuinely
+       polymorphic parameter is refused. *)
     let dom =
       match Types.get_desc dom with
       | Tpoly (t, []) -> t
@@ -147,32 +124,26 @@ let declared_domain_is_unlabeled_pair env (desc : Types.value_description) =
   | _ -> false
 ;;
 
-(* TOTAL (reflected) functions ([let rec total_ f ... = ...]): program
-   functions whose definitions are translated into the logic
-   (translate_def below) and emitted as solver-side definitions
-   (vox_verify).  Registered by stamp when the binding is typed
-   (Typecore.type_let), so a SATURATED application of a reflected
-   function translates like a primitive: [Pfun (name, args)].  Stamps
-   are process-unique, so entries from other units in the same process
-   can never be confused with the current unit's identifiers. *)
+(* TOTAL (reflected) functions ([let rec total_ f ... = ...]): program functions whose
+   definitions are translated into the logic (translate_def below) and emitted as
+   solver-side definitions (vox_verify). Registered by stamp when the binding is typed
+   (Typecore.type_let), so a SATURATED application of a reflected function translates like
+   a primitive: [Pfun (name, args)]. Stamps are process-unique, so entries from other
+   units in the same process can never be confused with the current unit's identifiers. *)
 let reflected : (Ident.t, string * int) Hashtbl.t = Hashtbl.create 16
 
-(* Runtime-check resolution (compiled [assume_] checks CALL reflected
-   functions): the reflected function a spec-function NAME denotes.
-   Resolution must be stamp-accurate -- looking the name up in the
-   check site's environment could be captured by a program-level
-   shadowing [let rev = ...], and a check calling the wrong function
-   could verify a falsehood.  The table maps each name to its LATEST
-   registration (in a verifying program a redefinition at the same
-   name would already fail solver-side as a duplicate definition,
-   so "latest" is the only candidate that can be live), together
-   with the binding's type (for the gate's sort discipline) and a
-   GENERATION stamp: the tables are process-global, so when one
-   process compiles several units, a name registered by an earlier
-   unit must not resolve in a later one (its identifier is not in
-   the later unit's lambda scope).  [new_unit] bumps the generation
-   at the start of each implementation; the toplevel never bumps, so
-   a session is one generation, matching how its logical context
+(* Runtime-check resolution (compiled [assume_] checks CALL reflected functions): the
+   reflected function a spec-function NAME denotes. Resolution must be stamp-accurate --
+   looking the name up in the check site's environment could be captured by a
+   program-level shadowing [let rev = ...], and a check calling the wrong function could
+   verify a falsehood. The table maps each name to its LATEST registration (in a verifying
+   program a redefinition at the same name would already fail solver-side as a duplicate
+   definition, so "latest" is the only candidate that can be live), together with the
+   binding's type (for the gate's sort discipline) and a GENERATION stamp: the tables are
+   process-global, so when one process compiles several units, a name registered by an
+   earlier unit must not resolve in a later one (its identifier is not in the later unit's
+   lambda scope). [new_unit] bumps the generation at the start of each implementation; the
+   toplevel never bumps, so a session is one generation, matching how its logical context
    accumulates across phrases. *)
 let generation = ref 0
 let new_unit () = incr generation
@@ -186,8 +157,8 @@ let register_reflected id ~ty ~arity =
   Hashtbl.replace reflected_by_name (Ident.name id) (!generation, id, ty)
 ;;
 
-(* [Some (id, ty)] when [name] denotes a current-unit reflected
-   function a compiled check may call. *)
+(* [Some (id, ty)] when [name] denotes a current-unit reflected function a compiled check
+   may call. *)
 let reflected_for_check name =
   match Hashtbl.find_opt reflected_by_name name with
   | Some (gen, id, ty) when gen = !generation -> Some (id, ty)
@@ -195,23 +166,19 @@ let reflected_for_check name =
 ;;
 
 let find_attr name (attrs : Parsetree.attributes) =
-  List.find_opt
-    (fun (a : Parsetree.attribute) -> String.equal a.attr_name.txt name)
-    attrs
+  List.find_opt (fun (a : Parsetree.attribute) -> String.equal a.attr_name.txt name) attrs
 ;;
 
 let has_total_attr attrs = find_attr "vox.total" attrs <> None
 
-(* [@@vox.reflect "LeanSymbol"]: bind this value's solver-side name to a
-   given Lean symbol.  Unlike [total_] (whose body is TRANSLATED and
-   emitted as a checked def), a reflect binding emits NO definition --
-   the named symbol must already exist (Lean stdlib, a [%%vox.lean]
-   block, or an imported spec module), and the OCaml value / Lean symbol
-   correspondence is ASSUMED (the author's word, TCB, like a [%%vox.lean]
-   axiom or [@@vox.sort lean]).  The attribute rides [val_attributes]
-   into the .cmi, so a library declares the binding once and clients
-   translate calls to it; recognized for externals ([Val_prim]) and
-   abstract library values ([Val_reg]) alike. *)
+(* [@@vox.reflect "LeanSymbol"]: bind this value's solver-side name to a given Lean
+   symbol. Unlike [total_] (whose body is TRANSLATED and emitted as a checked def), a
+   reflect binding emits NO definition -- the named symbol must already exist (Lean
+   stdlib, a [%%vox.lean] block, or an imported spec module), and the OCaml value / Lean
+   symbol correspondence is ASSUMED (the author's word, TCB, like a [%%vox.lean] axiom or
+   [@@vox.sort lean]). The attribute rides [val_attributes] into the .cmi, so a library
+   declares the binding once and clients translate calls to it; recognized for externals
+   ([Val_prim]) and abstract library values ([Val_reg]) alike. *)
 let reflect_attr_name (attrs : Parsetree.attributes) : string option =
   match find_attr "vox.reflect" attrs with
   | None -> None
@@ -221,8 +188,7 @@ let reflect_attr_name (attrs : Parsetree.attributes) : string option =
             [ { pstr_desc =
                   Pstr_eval
                     ( { pexp_desc =
-                          Pexp_constant
-                            { pconst_desc = Pconst_string (s, _, _); _ }
+                          Pexp_constant { pconst_desc = Pconst_string (s, _, _); _ }
                       ; _
                       }
                     , _ )
@@ -234,12 +200,11 @@ let reflect_attr_name (attrs : Parsetree.attributes) : string option =
   | Some _ -> None
 ;;
 
-(* Eager validation at the declaration: the payload must be a non-empty
-   Lean symbol name, the value may not ALSO be [total_] (the two
-   prescribe different solver names for one value), and the [Vox_]/[v_]
-   prefixes are reserved for the emitter's own datatype/value names.
-   Sound to skip (a malformed attribute simply fails to translate, an
-   opaque atom), but a typo deserves an error, not silence. *)
+(* Eager validation at the declaration: the payload must be a non-empty Lean symbol name,
+   the value may not ALSO be [total_] (the two prescribe different solver names for one
+   value), and the [Vox_]/[v_] prefixes are reserved for the emitter's own datatype/value
+   names. Sound to skip (a malformed attribute simply fails to translate, an opaque atom),
+   but a typo deserves an error, not silence. *)
 let validate_reflect_attr (attrs : Parsetree.attributes) =
   match find_attr "vox.reflect" attrs with
   | None -> ()
@@ -248,18 +213,22 @@ let validate_reflect_attr (attrs : Parsetree.attributes) =
       match reflect_attr_name attrs with
       | Some s -> s
       | None ->
-        Location.raise_errorf ~loc:a.attr_loc
-          "vox: [@@vox.reflect] expects a string payload naming a Lean            symbol, e.g. [@@vox.reflect \"Int.natAbs\"]"
+        Location.raise_errorf
+          ~loc:a.attr_loc
+          "vox: [@@vox.reflect] expects a string payload naming a Lean            \
+           symbol, e.g. [@@vox.reflect \"Int.natAbs\"]"
     in
     if String.length (String.trim name) = 0
     then
-      Location.raise_errorf ~loc:a.attr_loc
+      Location.raise_errorf
+        ~loc:a.attr_loc
         "vox: [@@vox.reflect] requires a non-empty Lean symbol name";
     String.iter
       (fun c ->
         match c with
         | ' ' | '\t' | '\n' | '\r' | '(' | ')' ->
-          Location.raise_errorf ~loc:a.attr_loc
+          Location.raise_errorf
+            ~loc:a.attr_loc
             "vox: %S is not a valid Lean symbol name for [@@vox.reflect]"
             name
         | _ -> ())
@@ -270,32 +239,34 @@ let validate_reflect_attr (attrs : Parsetree.attributes) =
     in
     if reserved "Vox_" || reserved "v_"
     then
-      Location.raise_errorf ~loc:a.attr_loc
-        "vox: %S may not name a reflected symbol -- the Vox_ and v_          prefixes are reserved for the solver's emitted names"
+      Location.raise_errorf
+        ~loc:a.attr_loc
+        "vox: %S may not name a reflected symbol -- the Vox_ and v_          prefixes \
+         are reserved for the solver's emitted names"
         name;
     if has_total_attr attrs
     then
-      Location.raise_errorf ~loc:a.attr_loc
-        "vox: a value cannot be both total_ (a translated definition) and          [@@vox.reflect] (an assumed Lean symbol); choose one"
+      Location.raise_errorf
+        ~loc:a.attr_loc
+        "vox: a value cannot be both total_ (a translated definition) and          \
+         [@@vox.reflect] (an assumed Lean symbol); choose one"
 ;;
 
-(* [Some (name, arity)] when [path] denotes a reflected function: a
-   local one (the typing-time table), or any value carrying the
-   [vox.total] marker in its val_attributes -- the marker rides the
-   binder pattern into the value description and hence the .cmi, so
-   IMPORTED reflected functions are recognized too (their definitions
-   ride the exporting unit's spec blocks; a unit with an .mli exports
-   no marker and no definition, consistently).  The definition's
-   solver-side name is the source name, and the arity is the type's
-   arrow count: reflected functions are first-order, so it is exact. *)
+(* [Some (name, arity)] when [path] denotes a reflected function: a local one (the
+   typing-time table), or any value carrying the [vox.total] marker in its val_attributes
+   -- the marker rides the binder pattern into the value description and hence the .cmi,
+   so IMPORTED reflected functions are recognized too (their definitions ride the
+   exporting unit's spec blocks; a unit with an .mli exports no marker and no definition,
+   consistently). The definition's solver-side name is the source name, and the arity is
+   the type's arrow count: reflected functions are first-order, so it is exact. *)
 let reflected_call_info env path (desc : Types.value_description) =
   let rec arity ty acc =
     match Types.get_desc (Ctype.vox_expand_head env ty) with
     | Tarrow (_, _, ret, _) -> arity ret (acc + 1)
     | _ -> acc
   in
-  (* A reflect binding names a Lean symbol directly, ahead of any
-     [total_] registration (a value is never both -- [validate_reflect_attr]). *)
+  (* A reflect binding names a Lean symbol directly, ahead of any [total_] registration (a
+     value is never both -- [validate_reflect_attr]). *)
   match reflect_attr_name desc.val_attributes with
   | Some lean_name -> Some (lean_name, arity desc.val_type 0)
   | None ->
@@ -312,23 +283,26 @@ let reflected_call_info env path (desc : Types.value_description) =
        else None)
 ;;
 
-(* The compiler-attached logical meaning of a PRIMITIVE application:
-   ONE table, shared by the typed translation ([translate]) and its
-   surface twin ([translate_surface]) so the two fragments cannot
-   drift -- a primitive admitted in one is admitted in both.
-   Admissions that need TYPE information are the callers' gates:
-   [eq_ok] (the polymorphic equalities, at int/bool/tuple-of-them
-   operands), [cmp_ok] (the polymorphic ORDER comparisons, at int/bool
-   operands only), and [proj_ok] ([fst]/[snd], at a pair argument
-   only) -- the typed side inspects the argument's type; the surface
-   side passes what it can know before typing (no comparisons; the
-   resolved declaration's domain for projections). *)
-let prim_pred prim_name ~eq_ok ~cmp_ok ~proj_ok ~ia_ok
-      (args : Refinement.pred option list) : Refinement.pred option =
+(* The compiler-attached logical meaning of a PRIMITIVE application: ONE table, shared by
+   the typed translation ([translate]) and its surface twin ([translate_surface]) so the
+   two fragments cannot drift -- a primitive admitted in one is admitted in both.
+   Admissions that need TYPE information are the callers' gates: [eq_ok] (the polymorphic
+   equalities, at int/bool/tuple-of-them operands), [cmp_ok] (the polymorphic ORDER
+   comparisons, at int/bool operands only), and [proj_ok] ([fst]/[snd], at a pair argument
+   only) -- the typed side inspects the argument's type; the surface side passes what it
+   can know before typing (no comparisons; the resolved declaration's domain for
+   projections). *)
+let prim_pred
+  prim_name
+  ~eq_ok
+  ~cmp_ok
+  ~proj_ok
+  ~ia_ok
+  (args : Refinement.pred option list)
+  : Refinement.pred option
+  =
   match
-    if List.for_all Option.is_some args
-    then Some (List.map Option.get args)
-    else None
+    if List.for_all Option.is_some args then Some (List.map Option.get args) else None
   with
   | None -> None
   | Some args ->
@@ -343,9 +317,7 @@ let prim_pred prim_name ~eq_ok ~cmp_ok ~proj_ok ~ia_ok
       | _ -> None
     in
     let intop op = binary (fun a b -> Refinement.Pbinop (op, a, b)) in
-    let proj i =
-      if proj_ok then unary (fun a -> Refinement.Pproj (2, i, a)) else None
-    in
+    let proj i = if proj_ok then unary (fun a -> Refinement.Pproj (2, i, a)) else None in
     let cmp op = if cmp_ok then intop op else None in
     let eq op = if eq_ok then intop op else None in
     (match prim_name with
@@ -354,18 +326,13 @@ let prim_pred prim_name ~eq_ok ~cmp_ok ~proj_ok ~ia_ok
      | "%mulint" -> intop Refinement.Mul
      | "%divint" -> intop Refinement.Div
      | "%modint" -> intop Refinement.Mod
-     | "%negint" ->
-       unary (fun a -> Refinement.Pbinop (Sub, Refinement.Pint 0, a))
-     | "%succint" ->
-       unary (fun a -> Refinement.Pbinop (Add, a, Refinement.Pint 1))
-     | "%predint" ->
-       unary (fun a -> Refinement.Pbinop (Sub, a, Refinement.Pint 1))
+     | "%negint" -> unary (fun a -> Refinement.Pbinop (Sub, Refinement.Pint 0, a))
+     | "%succint" -> unary (fun a -> Refinement.Pbinop (Add, a, Refinement.Pint 1))
+     | "%predint" -> unary (fun a -> Refinement.Pbinop (Sub, a, Refinement.Pint 1))
      | "%field0_immut" -> proj 0
      | "%field1_immut" -> proj 1
      | "%array_length" ->
-       if ia_ok
-       then unary (fun a -> Refinement.Pfun (Refinement.ia_len, [ a ]))
-       else None
+       if ia_ok then unary (fun a -> Refinement.Pfun (Refinement.ia_len, [ a ])) else None
      | "%array_safe_get" ->
        if ia_ok
        then binary (fun a i -> Refinement.Pfun (Refinement.ia_get, [ a; i ]))
@@ -382,62 +349,59 @@ let prim_pred prim_name ~eq_ok ~cmp_ok ~proj_ok ~ia_ok
      | _ -> None)
 ;;
 
-(* SURFACE translation, for dependent application: the logic term
-   denoting an argument expression that has not been typed yet (the
-   binder must be substituted throughout the remaining type BEFORE
-   later arguments are typechecked, so [translate] below cannot be
-   used).  Sound despite being syntactic because every construct is
-   keyed on what the identifier RESOLVES to in [env] -- the same
-   resolution the later typing will perform: a primitive recognized by
-   its name cannot be a shadowing impostor, and the admitted int/bool
-   primitives are monomorphic, so if the program typechecks their
-   operands are ints/bools.  Unlabeled tuples need no type gate (the
-   product model is per-arity, polymorphic); [fst]/[snd] are gated on
-   the resolved value's DECLARED pair domain, which any typechecking
-   application's argument then has.  The POLYMORPHIC comparisons are
-   excluded: their operand sort is unknown before typing, and the
-   logic's equality disagrees with the program's at floats (nan) and
-   functions.
-   Mutable variables are rejected as everywhere (a stamp names one
-   value; a cell has many).  The fragment is pure up to
-   Division_by_zero, whose raise makes downstream facts vacuous
-   (partial correctness). *)
-(* Tier 2 -- name a call by its OWN exact result contract.  When [g]'s
-   type is a (dependent) arrow spine whose fully-applied result is a
-   refinement of the exact form [_ = rhs] (with [rhs] not mentioning the
-   value binder), and every argument is itself reflectable, the call
-   [g a1 .. an] equals [rhs] with each dependent binder replaced by its
-   argument's term -- a pure name the contract GUARANTEES, so it
-   substitutes exactly like a reflectable expression, with no fresh
-   binder and no fact channel.  This mechanizes the manual
-   [let s' = insert x s in member x s'] workaround.  Used only for
-   dependent-argument instantiation, on both sides (the surface entry
-   from the application site and [call_result_name] in the walker), so
-   the type checker's opening and the walker's instantiation agree. *)
+(* SURFACE translation, for dependent application: the logic term denoting an argument
+   expression that has not been typed yet (the binder must be substituted throughout the
+   remaining type BEFORE later arguments are typechecked, so [translate] below cannot be
+   used). Sound despite being syntactic because every construct is keyed on what the
+   identifier RESOLVES to in [env] -- the same resolution the later typing will perform: a
+   primitive recognized by its name cannot be a shadowing impostor, and the admitted
+   int/bool primitives are monomorphic, so if the program typechecks their operands are
+   ints/bools. Unlabeled tuples need no type gate (the product model is per-arity,
+   polymorphic); [fst]/[snd] are gated on the resolved value's DECLARED pair domain, which
+   any typechecking application's argument then has. The POLYMORPHIC comparisons are
+   excluded: their operand sort is unknown before typing, and the logic's equality
+   disagrees with the program's at floats (nan) and functions. Mutable variables are
+   rejected as everywhere (a stamp names one value; a cell has many). The fragment is pure
+   up to Division_by_zero, whose raise makes downstream facts vacuous (partial
+   correctness). *)
+(* Tier 2 -- name a call by its OWN exact result contract. When [g]'s type is a
+   (dependent) arrow spine whose fully-applied result is a refinement of the exact form
+   [_ = rhs] (with [rhs] not mentioning the value binder), and every argument is itself
+   reflectable, the call [g a1 .. an] equals [rhs] with each dependent binder replaced by
+   its argument's term -- a pure name the contract GUARANTEES, so it substitutes exactly
+   like a reflectable expression, with no fresh binder and no fact channel. This
+   mechanizes the manual [let s' = insert x s in member x s'] workaround. Used only for
+   dependent-argument instantiation, on both sides (the surface entry from the application
+   site and [call_result_name] in the walker), so the type checker's opening and the
+   walker's instantiation agree. *)
 let exact_result_rhs (p : Refinement.pred) : Refinement.pred option =
   let rec no_bound (p : Refinement.pred) =
     match p with
     | Refinement.Pbound -> false
-    | Refinement.Pvar _ | Refinement.Pglobal _ | Refinement.Pint _
-    | Refinement.Pbool _ -> true
-    | Refinement.Pconstr (_, _, a) | Refinement.Pfun (_, a)
-    | Refinement.Ptuple a -> List.for_all no_bound a
-    | Refinement.Pfield (_, _, a) | Refinement.Pproj (_, _, a)
-    | Refinement.Pis (_, _, a) | Refinement.Pnot a | Refinement.Pquant (_, _, a)
-      -> no_bound a
-    | Refinement.Pbinop (_, a, b) | Refinement.Pand (a, b) | Refinement.Por (a, b)
+    | Refinement.Pvar _ | Refinement.Pglobal _ | Refinement.Pint _ | Refinement.Pbool _ ->
+      true
+    | Refinement.Pconstr (_, _, a) | Refinement.Pfun (_, a) | Refinement.Ptuple a ->
+      List.for_all no_bound a
+    | Refinement.Pfield (_, _, a)
+    | Refinement.Pproj (_, _, a)
+    | Refinement.Pis (_, _, a)
+    | Refinement.Pnot a
+    | Refinement.Pquant (_, _, a)
+    | Refinement.Plam (_, a) -> no_bound a
+    | Refinement.Pbinop (_, a, b)
+    | Refinement.Pand (a, b)
+    | Refinement.Por (a, b)
     | Refinement.Pimp (a, b) -> no_bound a && no_bound b
   in
   let rec find (p : Refinement.pred) =
     match p with
-    | Refinement.Pbinop (Refinement.Eq, Refinement.Pbound, rhs) when no_bound rhs
-      -> Some rhs
-    | Refinement.Pbinop (Refinement.Eq, lhs, Refinement.Pbound) when no_bound lhs
-      -> Some lhs
-    (* A conjunctive result contract ([_ = bins x t && bmem x _]) still
-       names the value by its equational conjunct: the callee guarantees
-       the whole conjunction, so [_ = rhs] holds and the extra conjuncts
-       are derived facts we do not need for the name. *)
+    | Refinement.Pbinop (Refinement.Eq, Refinement.Pbound, rhs) when no_bound rhs ->
+      Some rhs
+    | Refinement.Pbinop (Refinement.Eq, lhs, Refinement.Pbound) when no_bound lhs ->
+      Some lhs
+    (* A conjunctive result contract ([_ = bins x t && bmem x _]) still names the value by
+       its equational conjunct: the callee guarantees the whole conjunction, so [_ = rhs]
+       holds and the extra conjuncts are derived facts we do not need for the name. *)
     | Refinement.Pand (a, b) ->
       (match find a with
        | Some _ as r -> r
@@ -471,14 +435,21 @@ let call_result_term env callee_ty (arg_terms : Refinement.pred option list)
   go callee_ty arg_terms
 ;;
 
-let rec translate_surface env (e : Parsetree.expression)
+(* [bound] maps a lambda parameter NAME (see the [Pexp_function] arm) to the fresh ident
+   minted for it, so an occurrence in the lambda body resolves to that binder rather than
+   through [env] (the params are not in the typing environment during this pre-typing
+   surface pass). A non-empty [bound] means we are inside a relation lambda body, where
+   comparisons and equalities DO reflect ([cmp_eq]): the body is a Prop-valued relation
+   over the params, and an ill-sorted comparison is a solver error at VC time
+   (fail-closed), not a silent unknown -- so the surface pass need not know the operand
+   types here. At the top level ([bound = []]) comparisons stay opaque, unchanged. *)
+let rec translate_surface ?(bound = []) env (e : Parsetree.expression)
   : Refinement.pred option
   =
+  let cmp_eq = bound <> [] in
   let all_reflectable es =
-    let ps = List.map (translate_surface env) es in
-    if List.for_all Option.is_some ps
-    then Some (List.map Option.get ps)
-    else None
+    let ps = List.map (translate_surface ~bound env) es in
+    if List.for_all Option.is_some ps then Some (List.map Option.get ps) else None
   in
   match e.pexp_desc with
   | Pexp_constant { pconst_desc = Pconst_integer (s, None); _ } ->
@@ -487,16 +458,48 @@ let rec translate_surface env (e : Parsetree.expression)
     Some (Refinement.Pbool true)
   | Pexp_construct ({ txt = Longident.Lident "false"; _ }, None) ->
     Some (Refinement.Pbool false)
+  | Pexp_ident { txt = Longident.Lident n; _ } when List.mem_assoc n bound ->
+    (* a lambda-bound parameter *)
+    Some (Refinement.Pvar (List.assoc n bound))
+  | Pexp_function (params, _constraint, body) ->
+    (* A LAMBDA supplied at a relation-(ghost-arrow-)sorted dependent parameter --
+       [iter (fun x y -> y >= x) ..]. Reflect it to a Lean [Plam] whose body reflects
+       under the params bound to fresh idents; [subst_binder] at the application site then
+       substitutes this lambda for the relation binder, and grind beta-reduces it against
+       the fixpoint that consumes it. Only a simple [fun x .. -> e] (unlabeled variable
+       params, no defaults, an expression body) reflects; any other shape returns [None]
+       and the dependent-arg site rejects it cleanly. The Lean term is DERIVED from the
+       body, so the correspondence is checked (unlike [@@vox.reflect]). *)
+    let param_name (p : Parsetree.function_param) =
+      match p.pparam_desc with
+      | Pparam_val (Asttypes.Nolabel, None, { ppat_desc = Ppat_var { txt = n; _ }; _ }) ->
+        Some n
+      | _ -> None
+    in
+    let body_expr =
+      match body with
+      | Pfunction_body e -> Some e
+      | Pfunction_cases _ -> None
+    in
+    let names = List.map param_name params in
+    (match body_expr with
+     | Some be when params <> [] && List.for_all Option.is_some names ->
+       let ids =
+         List.map
+           (fun n -> n, Ident.create_scoped ~scope:Ident.lowest_scope n)
+           (List.map Option.get names)
+       in
+       (match translate_surface ~bound:(ids @ bound) env be with
+        | Some body_pred -> Some (Refinement.Plam (List.map snd ids, body_pred))
+        | None -> None)
+     | _ -> None)
   | Pexp_construct ({ txt = lid; _ }, arg_opt) ->
-    (* A constructor application at a simple variant names the datatype
-       term the predicate grammar writes the same way ([elab_vox_constr]):
-       resolve the constructor by name -- the same resolution the later
-       typing performs -- gate on [vox_simple_variant], and translate the
-       arguments (a multi-arity constructor's arguments arrive as an
+    (* A constructor application at a simple variant names the datatype term the predicate
+       grammar writes the same way ([elab_vox_constr]): resolve the constructor by name --
+       the same resolution the later typing performs -- gate on [vox_simple_variant], and
+       translate the arguments (a multi-arity constructor's arguments arrive as an
        unlabeled tuple). *)
-    (match
-       Env.lookup_constructor ~use:false ~loc:e.pexp_loc Env.Positive lid env
-     with
+    (match Env.lookup_constructor ~use:false ~loc:e.pexp_loc Env.Positive lid env with
      | cstr, _ ->
        let path = Data_types.cstr_res_type_path cstr in
        (match Ctype.vox_simple_variant env path with
@@ -511,24 +514,21 @@ let rec translate_surface env (e : Parsetree.expression)
               all_reflectable (List.map snd comps)
             | Some a -> all_reflectable [ a ]
           in
-          Option.map
-            (fun ns -> Refinement.Pconstr (path, cstr.cstr_name, ns))
-            args)
+          Option.map (fun ns -> Refinement.Pconstr (path, cstr.cstr_name, ns)) args)
      | exception _ -> None)
   | Pexp_tuple comps
-    when List.length comps >= 2
-         && List.for_all (fun (lbl, _) -> Option.is_none lbl) comps ->
-    (* An unlabeled tuple is a product term regardless of its type
-       (the per-arity product datatype is polymorphic), so it needs no
-       type-based gate.  Labeled tuples are not modelled. *)
-    let args = List.map (fun (_, a) -> translate_surface env a) comps in
+    when List.length comps >= 2 && List.for_all (fun (lbl, _) -> Option.is_none lbl) comps
+    ->
+    (* An unlabeled tuple is a product term regardless of its type (the per-arity product
+       datatype is polymorphic), so it needs no type-based gate. Labeled tuples are not
+       modelled. *)
+    let args = List.map (fun (_, a) -> translate_surface ~bound env a) comps in
     if List.for_all Option.is_some args
     then Some (Refinement.Ptuple (List.map Option.get args))
     else None
   | Pexp_ident lid ->
     (match Env.lookup_value ~use:false ~loc:e.pexp_loc lid.txt env with
-     | Path.Pident id, { val_kind = Val_reg _; _ }, _ ->
-       Some (Refinement.Pvar id)
+     | Path.Pident id, { val_kind = Val_reg _; _ }, _ -> Some (Refinement.Pvar id)
      | _ -> None
      | exception _ -> None)
   | Pexp_apply ({ pexp_desc = Pexp_ident lid; pexp_loc; _ }, sargs) ->
@@ -536,15 +536,14 @@ let rec translate_surface env (e : Parsetree.expression)
       List.map
         (fun (lbl, a) ->
           match (lbl : Asttypes.arg_label) with
-          | Nolabel -> translate_surface env a
+          | Nolabel -> translate_surface ~bound env a
           | _ -> None)
         sargs
     in
     (match Env.lookup_value ~use:false ~loc:pexp_loc lid.txt env with
      | path, desc, _ ->
-       (* Reflect / total_ names win over the primitive fragment (an
-          external may carry a [@@vox.reflect] override); a plain
-          primitive falls through to [prim_pred]. *)
+       (* Reflect / total_ names win over the primitive fragment (an external may carry a
+          [@@vox.reflect] override); a plain primitive falls through to [prim_pred]. *)
        (match reflected_call_info env path desc with
         | Some (name, arity)
           when List.length args = arity && List.for_all Option.is_some args ->
@@ -553,21 +552,29 @@ let rec translate_surface env (e : Parsetree.expression)
         | None ->
           (match desc.val_kind with
            | Val_prim prim ->
-             prim_pred prim.prim_name ~eq_ok:false ~cmp_ok:false
+             prim_pred
+               prim.prim_name
+               ~eq_ok:cmp_eq
+               ~cmp_ok:cmp_eq
                ~proj_ok:(declared_domain_is_unlabeled_pair env desc)
-               ~ia_ok:false args
+               ~ia_ok:false
+               args
            | _ ->
-             (* Not a reflected/total_ name or a primitive: name it by its
-                own exact result contract if it has one (tier 2). *)
+             (* Not a reflected/total_ name or a primitive: name it by its own exact
+                result contract if it has one (tier 2). *)
              call_result_term env desc.val_type args))
      | exception _ -> None)
   | Pexp_field (base, { txt = lid; _ }) ->
-    (* An immutable field read of a simple record names the projection
-       the predicate grammar writes as [_.px] (mirrors [elab_vox_pred]'s
-       [Pexp_field] arm). *)
+    (* An immutable field read of a simple record names the projection the predicate
+       grammar writes as [_.px] (mirrors [elab_vox_pred]'s [Pexp_field] arm). *)
     (match
-       Env.lookup_label ~use:false ~record_form:Data_types.Legacy
-         ~loc:e.pexp_loc Env.Projection lid env
+       Env.lookup_label
+         ~use:false
+         ~record_form:Data_types.Legacy
+         ~loc:e.pexp_loc
+         Env.Projection
+         lid
+         env
      with
      | label ->
        let path = Data_types.lbl_res_type_path label in
@@ -576,142 +583,137 @@ let rec translate_surface env (e : Parsetree.expression)
         | Some _ ->
           Option.map
             (fun b -> Refinement.Pfield (path, label.Data_types.lbl_name, b))
-            (translate_surface env base))
+            (translate_surface ~bound env base))
      | exception _ -> None)
   | _ -> None
 ;;
 
-(* [mutvar] names reads of mutable variables ([Texp_mutvar]): the VC
-   walker passes its current-version lookup, so reflected expressions
-   read the SSA version in force at this program point; every other
-   caller keeps the default, under which mutable reads stay opaque. *)
-let translate ?(mutvar = fun _ -> None) (e : expression)
-  : Refinement.pred option
-  =
+(* [mutvar] names reads of mutable variables ([Texp_mutvar]): the VC walker passes its
+   current-version lookup, so reflected expressions read the SSA version in force at this
+   program point; every other caller keeps the default, under which mutable reads stay
+   opaque. *)
+let translate ?(mutvar = fun _ -> None) (e : expression) : Refinement.pred option =
   let rec go (e : expression) : Refinement.pred option =
     match e.exp_desc with
     | Texp_mutvar { txt = id; _ } -> mutvar id
     | Texp_ident { path = Path.Pident id; _ } -> Some (Refinement.Pvar id)
     | Texp_ident { path = (Path.Pdot _ | Path.Papply _) as p; _ } ->
-      (* A module-level value names itself by PATH: stamp-free,
-         .cmi-stable, registered (sort and .cmi-refinement fact) by
-         the verification pass at VC emission. *)
+      (* A module-level value names itself by PATH: stamp-free, .cmi-stable, registered
+         (sort and .cmi-refinement fact) by the verification pass at VC emission. *)
       Some (Refinement.Pglobal p)
-  | Texp_constant (Const_int n) -> Some (Refinement.Pint n)
-  | Texp_construct ({ txt = Longident.Lident "true"; _ }, _, _, [], _) ->
-    Some (Refinement.Pbool true)
-  | Texp_construct ({ txt = Longident.Lident "false"; _ }, _, _, [], _) ->
-    Some (Refinement.Pbool false)
-  | Texp_tuple (comps, _)
-    when List.length comps >= 2
-         && List.for_all (fun (lbl, _) -> Option.is_none lbl) comps ->
-    (* An unlabeled tuple is the product term the predicate language
-       writes as [(p1, ..., pn)]; labeled tuples are not modelled. *)
-    let args = List.map (fun (_, a) -> go a) comps in
-    if List.for_all Option.is_some args
-    then Some (Refinement.Ptuple (List.map Option.get args))
-    else None
-  | Texp_field { record; label; _ } ->
-    (* A field read of a simple record is the structure projection the
-       predicate language writes as [_.px].  [vox_simple_record]
-       requires every field immutable, so the read is pure and its
-       value is stable -- a mutable field (which disqualifies the whole
-       record) must stay a fresh unknown at each read. *)
-    let path = Data_types.lbl_res_type_path label in
-    (match Ctype.vox_simple_record record.exp_env path with
-     | Some _ ->
-       Option.map
-         (fun base -> Refinement.Pfield (path, label.lbl_name, base))
-         (go record)
-     | None -> None)
-  | Texp_apply
-      ({ exp_desc = Texp_ident { path; desc; _ }; _ }, args, _, _, _)
-    when reflected_call_info e.exp_env path desc <> None ->
-    let name, arity =
-      match reflected_call_info e.exp_env path desc with
-      | Some info -> info
-      | None -> assert false
-    in
-    let args =
-      List.map
-        (fun (lbl, arg) ->
-          match (lbl : Types.arg_label), arg with
-          | Nolabel, Arg (a, _) -> go a
-          | _ -> None)
-        args
-    in
-    if List.length args = arity && List.for_all Option.is_some args
-    then Some (Refinement.Pfun (name, List.map Option.get args))
-    else None
-  | Texp_apply
-      ( { exp_desc = Texp_ident { desc = { val_kind = Val_prim prim; _ }; _ }
-        ; _
-        }
-      , args
-      , _
-      , _
-      , _ ) ->
-    let sargs =
-      List.map
-        (fun (lbl, arg) ->
-          match (lbl : Types.arg_label), arg with
-          | Nolabel, Arg (a, _) -> Some a
-          | _ -> None)
-        args
-    in
-    (* The type-dependent gates: equality at int/bool or tuples of
-       them, order comparisons at int/bool (both operands have the
-       same type; checking one suffices), and fst/snd at an
-       unlabeled-pair argument (the primitive itself is a generic
-       block read). *)
-    let eq_ok =
-      match sargs with
-      | Some a :: _ -> is_eq_comparable a.exp_env a.exp_type
-      | _ -> false
-    in
-    let cmp_ok =
-      match sargs with
-      | Some a :: _ -> is_int_or_bool a.exp_env a.exp_type
-      | _ -> false
-    in
-    let proj_ok =
-      match sargs with
-      | [ Some a ] -> is_unlabeled_pair a.exp_env a.exp_type
-      | _ -> false
-    in
-    let ia_ok =
-      (* [%array_length]/[%array_safe_get] are also the MUTABLE
-         array's primitives; the gate admits only [int iarray]. *)
-      match sargs with
-      | Some a :: _ -> is_int_iarray a.exp_env a.exp_type
-      | _ -> false
-    in
-    prim_pred prim.prim_name ~eq_ok ~cmp_ok ~proj_ok ~ia_ok
-      (List.map (fun a -> Option.bind a go) sargs)
+    | Texp_constant (Const_int n) -> Some (Refinement.Pint n)
+    | Texp_construct ({ txt = Longident.Lident "true"; _ }, _, _, [], _) ->
+      Some (Refinement.Pbool true)
+    | Texp_construct ({ txt = Longident.Lident "false"; _ }, _, _, [], _) ->
+      Some (Refinement.Pbool false)
+    | Texp_tuple (comps, _)
+      when List.length comps >= 2
+           && List.for_all (fun (lbl, _) -> Option.is_none lbl) comps ->
+      (* An unlabeled tuple is the product term the predicate language writes as
+         [(p1, ..., pn)]; labeled tuples are not modelled. *)
+      let args = List.map (fun (_, a) -> go a) comps in
+      if List.for_all Option.is_some args
+      then Some (Refinement.Ptuple (List.map Option.get args))
+      else None
+    | Texp_field { record; label; _ } ->
+      (* A field read of a simple record is the structure projection the predicate
+         language writes as [_.px]. [vox_simple_record] requires every field immutable, so
+         the read is pure and its value is stable -- a mutable field (which disqualifies
+         the whole record) must stay a fresh unknown at each read. *)
+      let path = Data_types.lbl_res_type_path label in
+      (match Ctype.vox_simple_record record.exp_env path with
+       | Some _ ->
+         Option.map
+           (fun base -> Refinement.Pfield (path, label.lbl_name, base))
+           (go record)
+       | None -> None)
+    | Texp_apply ({ exp_desc = Texp_ident { path; desc; _ }; _ }, args, _, _, _)
+      when reflected_call_info e.exp_env path desc <> None ->
+      let name, arity =
+        match reflected_call_info e.exp_env path desc with
+        | Some info -> info
+        | None -> assert false
+      in
+      let args =
+        List.map
+          (fun (lbl, arg) ->
+            match (lbl : Types.arg_label), arg with
+            | Nolabel, Arg (a, _) -> go a
+            | _ -> None)
+          args
+      in
+      if List.length args = arity && List.for_all Option.is_some args
+      then Some (Refinement.Pfun (name, List.map Option.get args))
+      else None
+    | Texp_apply
+        ( { exp_desc = Texp_ident { desc = { val_kind = Val_prim prim; _ }; _ }; _ }
+        , args
+        , _
+        , _
+        , _ ) ->
+      let sargs =
+        List.map
+          (fun (lbl, arg) ->
+            match (lbl : Types.arg_label), arg with
+            | Nolabel, Arg (a, _) -> Some a
+            | _ -> None)
+          args
+      in
+      (* The type-dependent gates: equality at int/bool or tuples of them, order
+         comparisons at int/bool (both operands have the same type; checking one
+         suffices), and fst/snd at an unlabeled-pair argument (the primitive itself is a
+         generic block read). *)
+      let eq_ok =
+        match sargs with
+        | Some a :: _ -> is_eq_comparable a.exp_env a.exp_type
+        | _ -> false
+      in
+      let cmp_ok =
+        match sargs with
+        | Some a :: _ -> is_int_or_bool a.exp_env a.exp_type
+        | _ -> false
+      in
+      let proj_ok =
+        match sargs with
+        | [ Some a ] -> is_unlabeled_pair a.exp_env a.exp_type
+        | _ -> false
+      in
+      let ia_ok =
+        (* [%array_length]/[%array_safe_get] are also the MUTABLE array's primitives; the
+           gate admits only [int iarray]. *)
+        match sargs with
+        | Some a :: _ -> is_int_iarray a.exp_env a.exp_type
+        | _ -> false
+      in
+      prim_pred
+        prim.prim_name
+        ~eq_ok
+        ~cmp_ok
+        ~proj_ok
+        ~ia_ok
+        (List.map (fun a -> Option.bind a go) sargs)
     | _ -> None
   in
   go e
 ;;
 
 (* ------------------------------------------------------------------ *)
-(* Reflected DEFINITIONS: the translation of a [total_] binding's
-   body into an equation-style logical definition.
+(* Reflected DEFINITIONS: the translation of a [total_] binding's body into an
+   equation-style logical definition.
 
-   The reflectable fragment is deliberately small (sharp edges, not
-   bugs): a function whose parameters are plain variables of int, bool
-   or simple-variant sort, whose body is built from [if] on translatable
-   conditions, exhaustive one-level [match] on a variable in scope
-   (constructor patterns over variables or wildcards, simple variants
-   only), and right-hand sides in the [translate] fragment extended
-   with constructor applications and saturated calls to reflected
-   functions (self-calls included).  The definition must be CLOSED:
-   every variable it mentions is one of its own parameters or match
-   fields -- a local function capturing enclosing variables would
-   otherwise smuggle activation-local stamps into a global definition.
+   The reflectable fragment is deliberately small (sharp edges, not bugs): a function
+   whose parameters are plain variables of int, bool or simple-variant sort, whose body is
+   built from [if] on translatable conditions, exhaustive one-level [match] on a variable
+   in scope (constructor patterns over variables or wildcards, simple variants only), and
+   right-hand sides in the [translate] fragment extended with constructor applications and
+   saturated calls to reflected functions (self-calls included). The definition must be
+   CLOSED: every variable it mentions is one of its own parameters or match fields -- a
+   local function capturing enclosing variables would otherwise smuggle activation-local
+   stamps into a global definition.
 
-   Termination is checked by the solver (the Lean backend emits an
-   honest [def]); int-indexed recursion carries a [@@vox.decreases e]
-   metric from which [termination_by (e).toNat] is synthesized. *)
+   Termination is checked by the solver (the Lean backend emits an honest [def]);
+   int-indexed recursion carries a [@@vox.decreases e] metric from which
+   [termination_by (e).toNat] is synthesized. *)
 
 type rsort =
   | Rint
@@ -751,18 +753,19 @@ let rsort_of_type env ~loc ~what ty =
       match Ctype.vox_simple_variant env p with
       | Some _ -> Rdata p
       | None ->
-        Location.raise_errorf ~loc
-          "vox: %s of a reflected function must be int, bool, or a simple \
-           variant"
+        Location.raise_errorf
+          ~loc
+          "vox: %s of a reflected function must be int, bool, or a simple variant"
           what)
   | _ ->
-    Location.raise_errorf ~loc
+    Location.raise_errorf
+      ~loc
       "vox: %s of a reflected function must be int, bool, or a simple variant"
       what
 ;;
 
-(* Right-hand sides: the [translate] fragment, extended with
-   applications of simple-variant constructors. *)
+(* Right-hand sides: the [translate] fragment, extended with applications of
+   simple-variant constructors. *)
 let rec translate_rhs (e : expression) : Refinement.pred option =
   match translate e with
   | Some p -> Some p
@@ -775,18 +778,14 @@ let rec translate_rhs (e : expression) : Refinement.pred option =
         | Some _ ->
           let args = List.map (fun (_, a) -> translate_rhs a) args in
           if List.for_all Option.is_some args
-          then
-            Some
-              (Refinement.Pconstr
-                 (path, cstr.cstr_name, List.map Option.get args))
+          then Some (Refinement.Pconstr (path, cstr.cstr_name, List.map Option.get args))
           else None)
-     | Texp_apply
-         ({ exp_desc = Texp_ident { path; desc; _ }; _ }, args, _, _, _)
+     | Texp_apply ({ exp_desc = Texp_ident { path; desc; _ }; _ }, args, _, _, _)
        when reflected_call_info e.exp_env path desc <> None ->
-       (* A saturated reflected call whose arguments are themselves in
-          the RHS fragment: [translate]'s own reflected-call case only
-          admits [translate]-fragment arguments, which shuts out the
-          accumulator idiom ([rev_append vs' (ICons (v, ws))]). *)
+       (* A saturated reflected call whose arguments are themselves in the RHS fragment:
+          [translate]'s own reflected-call case only admits [translate]-fragment
+          arguments, which shuts out the accumulator idiom
+          ([rev_append vs' (ICons (v, ws))]). *)
        let name, arity =
          match reflected_call_info e.exp_env path desc with
          | Some info -> info
@@ -806,24 +805,22 @@ let rec translate_rhs (e : expression) : Refinement.pred option =
      | _ -> None)
 ;;
 
-(* The NAMEABLE fragment: [translate] extended with constructor terms,
-   record literals ([mk]), unlabeled tuples, and immutable field reads
-   of nameable bases -- everything that names a value DETERMINISTICALLY,
-   with no fresh-unknown fallback.  Used by [refine_]'s synthesis mode;
-   [Vox_verify.name_of_expr] is the same fragment plus fresh unknowns
-   (and solver-side datatype registration). *)
+(* The NAMEABLE fragment: [translate] extended with constructor terms, record literals
+   ([mk]), unlabeled tuples, and immutable field reads of nameable bases -- everything
+   that names a value DETERMINISTICALLY, with no fresh-unknown fallback. Used by
+   [refine_]'s synthesis mode; [Vox_verify.name_of_expr] is the same fragment plus fresh
+   unknowns (and solver-side datatype registration). *)
 let rec translate_nameable (e : expression) : Refinement.pred option =
   match translate e with
   | Some p -> Some p
   | None ->
-    (* A SUB-POSITION may itself be a call named by its exact result
-       contract (tier 2): [Vsome (succ1 x)], [C (insert y s)].  Thread
-       [call_result_name] through the recursion (helper [nm]) so the typed
-       namer matches the surface twin [translate_surface], which recurses
-       on itself and whose [Pexp_apply] arm falls to [call_result_term].
-       The TOP-LEVEL call case stays [None] here (its caller
-       [stable_arg_name] adds [call_result_name]; [refine_] synthesis keeps
-       its existing fresh-unknown fallback). *)
+    (* A SUB-POSITION may itself be a call named by its exact result contract (tier 2):
+       [Vsome (succ1 x)], [C (insert y s)]. Thread [call_result_name] through the
+       recursion (helper [nm]) so the typed namer matches the surface twin
+       [translate_surface], which recurses on itself and whose [Pexp_apply] arm falls to
+       [call_result_term]. The TOP-LEVEL call case stays [None] here (its caller
+       [stable_arg_name] adds [call_result_name]; [refine_] synthesis keeps its existing
+       fresh-unknown fallback). *)
     let nm a =
       match translate_nameable a with
       | Some _ as r -> r
@@ -831,9 +828,7 @@ let rec translate_nameable (e : expression) : Refinement.pred option =
     in
     let all_nameable args =
       let args = List.map nm args in
-      if List.for_all Option.is_some args
-      then Some (List.map Option.get args)
-      else None
+      if List.for_all Option.is_some args then Some (List.map Option.get args) else None
     in
     (match e.exp_desc with
      | Texp_construct (_, cstr, _, args, _) ->
@@ -844,10 +839,11 @@ let rec translate_nameable (e : expression) : Refinement.pred option =
           Option.map
             (fun ns -> Refinement.Pconstr (path, cstr.cstr_name, ns))
             (all_nameable (List.map snd args)))
-     | Texp_record { fields; extended_expression; _ }
-       when Array.length fields > 0 ->
+     | Texp_record { fields; extended_expression; _ } when Array.length fields > 0 ->
        let path =
-         Data_types.lbl_res_type_path (match fields.(0) with lbl, _, _ -> lbl)
+         Data_types.lbl_res_type_path
+           (match fields.(0) with
+            | lbl, _, _ -> lbl)
        in
        (match Ctype.vox_simple_record e.exp_env path with
         | None -> None
@@ -869,31 +865,44 @@ let rec translate_nameable (e : expression) : Refinement.pred option =
              in
              let args = List.map arg_of (Array.to_list fields) in
              if List.for_all Option.is_some args
-             then
-               Some
-                 (Refinement.Pconstr (path, "mk", List.map Option.get args))
+             then Some (Refinement.Pconstr (path, "mk", List.map Option.get args))
              else None))
      | Texp_tuple (comps, _)
        when List.length comps >= 2
             && List.for_all (fun (lbl, _) -> Option.is_none lbl) comps ->
-       Option.map
-         (fun ns -> Refinement.Ptuple ns)
-         (all_nameable (List.map snd comps))
+       Option.map (fun ns -> Refinement.Ptuple ns) (all_nameable (List.map snd comps))
      | Texp_field { record; label; _ } ->
        let path = Data_types.lbl_res_type_path label in
        (match label.lbl_mut, Ctype.vox_simple_record e.exp_env path with
         | Types.Immutable, Some _ ->
-          Option.map
-            (fun b -> Refinement.Pfield (path, label.lbl_name, b))
-            (nm record)
+          Option.map (fun b -> Refinement.Pfield (path, label.lbl_name, b)) (nm record)
         | _ -> None)
+     | Texp_function { params; body = Tfunction_body be; _ } ->
+       (* The typed twin of [translate_surface]'s lambda arm: a relation lambda
+          [fun x y -> body] supplied at a ghost-arrow-sorted dependent parameter names
+          itself as the Lean [Plam] over its typed parameter idents ([fp_param]). Only
+          simple non-optional unlabelled value parameters and an expression body reflect;
+          the body reflects through the typed fragment (comparisons and equalities
+          included -- operand types are known here). This is alpha-equivalent to the
+          surface form the opening substituted. *)
+       let param_id (p : Typedtree.function_param) =
+         match p.fp_arg_label, p.fp_kind with
+         | Typedtree.Nolabel, Typedtree.Tparam_pat _ -> Some p.fp_param
+         | _ -> None
+       in
+       let ids = List.map param_id params in
+       if params <> [] && List.for_all Option.is_some ids
+       then
+         Option.map
+           (fun body_pred -> Refinement.Plam (List.map Option.get ids, body_pred))
+           (translate_nameable be)
+       else None
      | _ -> None)
 
-(* The typed twin of the surface tier-2 naming ([call_result_term]): a
-   call whose function value carries an exact result contract names the
-   call by that contract's right-hand side.  Mutually recursive with
-   [translate_nameable] so nested calls and constructor-wrapped calls are
-   named the same way the surface twin names them. *)
+(* The typed twin of the surface tier-2 naming ([call_result_term]): a call whose function
+   value carries an exact result contract names the call by that contract's right-hand
+   side. Mutually recursive with [translate_nameable] so nested calls and
+   constructor-wrapped calls are named the same way the surface twin names them. *)
 and call_result_name env (e : expression) : Refinement.pred option =
   match e.exp_desc with
   | Texp_apply ({ exp_desc = Texp_ident { desc; _ }; _ }, args, _, _, _) ->
@@ -913,12 +922,12 @@ and call_result_name env (e : expression) : Refinement.pred option =
 ;;
 
 let def_unsupported loc =
-  Location.raise_errorf ~loc
-    "vox: this expression cannot be reflected into the logic (reflected \
-     bodies are built from int/bool operations, constructors of simple \
-     variants, saturated calls to reflected functions, [if] on \
-     translatable conditions, and exhaustive one-level [match] on a \
-     variable)"
+  Location.raise_errorf
+    ~loc
+    "vox: this expression cannot be reflected into the logic (reflected bodies are built \
+     from int/bool operations, constructors of simple variants, saturated calls to \
+     reflected functions, [if] on translatable conditions, and exhaustive one-level \
+     [match] on a variable)"
 ;;
 
 let rec translate_body (e : expression) : def_body =
@@ -932,26 +941,28 @@ let rec translate_body (e : expression) : def_body =
       match scrut.exp_desc with
       | Texp_ident { path = Path.Pident id; _ } -> id
       | _ ->
-        Location.raise_errorf ~loc:scrut.exp_loc
+        Location.raise_errorf
+          ~loc:scrut.exp_loc
           "vox: a reflected [match] must scrutinize a variable"
     in
-    (* [bool] passes the simple-variant test, but its solver-side sort
-       is a proposition, not a datatype: [match (b : Prop) with | True]
-       is a Lean type error.  Reject it here with the fix spelled out
-       rather than blaming the definition on an opaque solver error. *)
+    (* [bool] passes the simple-variant test, but its solver-side sort is a proposition,
+       not a datatype: [match (b : Prop) with | True] is a Lean type error. Reject it here
+       with the fix spelled out rather than blaming the definition on an opaque solver
+       error. *)
     (match Types.get_desc (Ctype.vox_expand_head scrut.exp_env scrut.exp_type) with
      | Tconstr (p, [], _) when Path.same p Predef.path_bool ->
-       Location.raise_errorf ~loc:scrut.exp_loc
-         "vox: a reflected function cannot [match] on bool (the solver \
-          models bool as a proposition); use [if] instead"
+       Location.raise_errorf
+         ~loc:scrut.exp_loc
+         "vox: a reflected function cannot [match] on bool (the solver models bool as a \
+          proposition); use [if] instead"
      | _ -> ());
-    (* Ordinary clauses arrive as COMPUTATION cases (value patterns
-       wrapped in [Tpat_value]); [val_cases] holds effect handlers. *)
+    (* Ordinary clauses arrive as COMPUTATION cases (value patterns wrapped in
+       [Tpat_value]); [val_cases] holds effect handlers. *)
     if val_cases <> [] || partial <> Total
     then
-      Location.raise_errorf ~loc:e.exp_loc
-        "vox: a reflected [match] must be exhaustive, without effect \
-         handlers";
+      Location.raise_errorf
+        ~loc:e.exp_loc
+        "vox: a reflected [match] must be exhaustive, without effect handlers";
     Bcase (scrut_id, List.map translate_clause comp_cases)
   | _ ->
     (match translate_rhs e with
@@ -963,7 +974,8 @@ and translate_clause : type k. k case -> def_clause =
   (match c.c_guard with
    | None -> ()
    | Some g ->
-     Location.raise_errorf ~loc:g.exp_loc
+     Location.raise_errorf
+       ~loc:g.exp_loc
        "vox: a reflected [match] cannot have when-guards");
   let rec constructor_clause : type k2. k2 general_pattern -> def_clause =
     fun pat ->
@@ -974,16 +986,18 @@ and translate_clause : type k. k case -> def_clause =
       (match Ctype.vox_simple_variant pat.pat_env path with
        | Some _ -> ()
        | None ->
-         Location.raise_errorf ~loc:pat.pat_loc
+         Location.raise_errorf
+           ~loc:pat.pat_loc
            "vox: a reflected [match] is limited to simple variants");
       let field (_, (p : value general_pattern)) =
         match p.pat_desc with
         | Tpat_var { id; _ } -> id
         | Tpat_any -> Ident.create_local "*vox-reflect-wild*"
         | _ ->
-          Location.raise_errorf ~loc:p.pat_loc
-            "vox: a reflected [match] is limited to one-level constructor \
-             patterns over variables or wildcards"
+          Location.raise_errorf
+            ~loc:p.pat_loc
+            "vox: a reflected [match] is limited to one-level constructor patterns over \
+             variables or wildcards"
       in
       { dc_path = path
       ; dc_cstr = cstr.cstr_name
@@ -991,38 +1005,39 @@ and translate_clause : type k. k case -> def_clause =
       ; dc_rhs = translate_body c.c_rhs
       }
     | _ ->
-      Location.raise_errorf ~loc:pat.pat_loc
-        "vox: a reflected [match] is limited to one-level constructor \
-         patterns over variables or wildcards"
+      Location.raise_errorf
+        ~loc:pat.pat_loc
+        "vox: a reflected [match] is limited to one-level constructor patterns over \
+         variables or wildcards"
   in
   constructor_clause c.c_lhs
 ;;
 
-(* The [@@vox.decreases e] metric: an int-valued expression over the
-   parameters, in the SAME surface fragment dependent arguments use
-   ([translate_surface] -- one fragment, not a bespoke third), plus a
-   parameters-only restriction ([termination_by] quantifies over the
-   definition's parameters, nothing else). *)
+(* The [@@vox.decreases e] metric: an int-valued expression over the parameters, in the
+   SAME surface fragment dependent arguments use ([translate_surface] -- one fragment, not
+   a bespoke third), plus a parameters-only restriction ([termination_by] quantifies over
+   the definition's parameters, nothing else). *)
 let translate_metric env params (e : Parsetree.expression) : Refinement.pred =
   match translate_surface env e with
   | None ->
-    Location.raise_errorf ~loc:e.pexp_loc
-      "vox: a [@@vox.decreases] metric must be a pure expression the logic \
-       can name, over the function's parameters"
+    Location.raise_errorf
+      ~loc:e.pexp_loc
+      "vox: a [@@vox.decreases] metric must be a pure expression the logic can name, \
+       over the function's parameters"
   | Some p ->
     List.iter
       (fun v ->
         if not (List.exists (fun (id, _) -> Ident.same v id) params)
         then
-          Location.raise_errorf ~loc:e.pexp_loc
-            "vox: a [@@vox.decreases] metric may mention only the function's \
-             parameters")
+          Location.raise_errorf
+            ~loc:e.pexp_loc
+            "vox: a [@@vox.decreases] metric may mention only the function's parameters")
       (Refinement.free_vars p);
     p
 ;;
 
-(* The [total_] marker rides the binder pattern (parser); the
-   [@@vox.total] attribute spelling on the binding also works. *)
+(* The [total_] marker rides the binder pattern (parser); the [@@vox.total] attribute
+   spelling on the binding also works. *)
 let is_total_binding (vb : Typedtree.value_binding) =
   has_total_attr vb.vb_attributes || has_total_attr vb.vb_pat.pat_attributes
 ;;
@@ -1038,24 +1053,18 @@ let rec body_bound acc = function
   | Bpred _ -> acc
   | Bite (_, a, b) -> body_bound (body_bound acc a) b
   | Bcase (_, clauses) ->
-    List.fold_left
-      (fun acc cl -> body_bound (cl.dc_fields @ acc) cl.dc_rhs)
-      acc
-      clauses
+    List.fold_left (fun acc cl -> body_bound (cl.dc_fields @ acc) cl.dc_rhs) acc clauses
 ;;
 
 let rec body_scrutinees acc = function
   | Bpred _ -> acc
   | Bite (_, a, b) -> body_scrutinees (body_scrutinees acc a) b
   | Bcase (x, clauses) ->
-    List.fold_left
-      (fun acc cl -> body_scrutinees acc cl.dc_rhs)
-      (x :: acc)
-      clauses
+    List.fold_left (fun acc cl -> body_scrutinees acc cl.dc_rhs) (x :: acc) clauses
 ;;
 
-(* Datatype paths a definition depends on (for solver-side registration):
-   scrutinized datatypes plus constructor applications in the preds. *)
+(* Datatype paths a definition depends on (for solver-side registration): scrutinized
+   datatypes plus constructor applications in the preds. *)
 let def_datatype_paths (d : spec_def) =
   let clause_paths =
     let rec go acc = function
@@ -1079,16 +1088,15 @@ let def_datatype_paths (d : spec_def) =
   @ List.concat_map Refinement.constr_paths (body_preds [] d.sd_body)
 ;;
 
-(* Translate a typed [total_] binding into a definition.  Raises
-   with a source location on anything outside the fragment. *)
+(* Translate a typed [total_] binding into a definition. Raises with a source location on
+   anything outside the fragment. *)
 let translate_def (vb : Typedtree.value_binding) : spec_def =
   let loc = vb.vb_loc in
   let id =
     match vb.vb_pat.pat_desc with
     | Tpat_var { id; _ } -> id
     | _ ->
-      Location.raise_errorf ~loc
-        "vox: total_ requires a binding of a single variable"
+      Location.raise_errorf ~loc "vox: total_ requires a binding of a single variable"
   in
   match vb.vb_expr.exp_desc with
   | Texp_function { params; body; _ } ->
@@ -1096,11 +1104,10 @@ let translate_def (vb : Typedtree.value_binding) : spec_def =
     let param (fp : function_param) =
       match fp.fp_arg_label, fp.fp_kind with
       | Nolabel, Tparam_pat ({ pat_desc = Tpat_var { id; _ }; _ } as pat) ->
-        ( id
-        , rsort_of_type env ~loc:pat.pat_loc ~what:"each parameter"
-            pat.pat_type )
+        id, rsort_of_type env ~loc:pat.pat_loc ~what:"each parameter" pat.pat_type
       | _ ->
-        Location.raise_errorf ~loc:fp.fp_loc
+        Location.raise_errorf
+          ~loc:fp.fp_loc
           "vox: a reflected function's parameters must be plain variables"
     in
     let params = List.map param params in
@@ -1113,16 +1120,15 @@ let translate_def (vb : Typedtree.value_binding) : spec_def =
          | c0 :: _ ->
            if fc.fc_partial <> Total
            then
-             Location.raise_errorf ~loc
-               "vox: a reflected [function] must be exhaustive";
+             Location.raise_errorf ~loc "vox: a reflected [function] must be exhaustive";
            let scrut_sort =
              rsort_of_type env ~loc ~what:"each parameter" c0.c_lhs.pat_type
            in
            ( params @ [ fc.fc_param, scrut_sort ]
            , Bcase (fc.fc_param, List.map translate_clause fc.fc_cases)
            , c0.c_rhs.exp_type
-             (* the pattern's env: the parameters are in scope, the
-                case's own binders are not *)
+             (* the pattern's env: the parameters are in scope, the case's own binders are
+                not *)
            , c0.c_lhs.pat_env ))
     in
     if params = [] then def_unsupported loc;
@@ -1130,25 +1136,26 @@ let translate_def (vb : Typedtree.value_binding) : spec_def =
     let decreases =
       match find_attr "vox.decreases" vb.vb_attributes with
       | None -> None
-      | Some { attr_payload = PStr [ { pstr_desc = Pstr_eval (e, _); _ } ]; _ }
-        -> Some (translate_metric metric_env params e)
+      | Some { attr_payload = PStr [ { pstr_desc = Pstr_eval (e, _); _ } ]; _ } ->
+        Some (translate_metric metric_env params e)
       | Some a ->
-        Location.raise_errorf ~loc:a.attr_loc
+        Location.raise_errorf
+          ~loc:a.attr_loc
           "vox: [@@vox.decreases] expects an expression payload"
     in
-    (* Closedness: every variable in the definition -- in a
-       right-hand side, an [if] condition, the metric, or as a [match]
-       scrutinee -- is a parameter or a match field.  (A local function
-       could otherwise capture an enclosing activation's variable in a
-       global definition.) *)
+    (* Closedness: every variable in the definition -- in a right-hand side, an [if]
+       condition, the metric, or as a [match] scrutinee -- is a parameter or a match
+       field. (A local function could otherwise capture an enclosing activation's variable
+       in a global definition.) *)
     let bound = List.map fst params @ body_bound [] def_body in
     let check_closed v =
       if not (List.exists (Ident.same v) bound)
       then
-        Location.raise_errorf ~loc
-          "vox: a reflected definition must be closed, but this one mentions \
-           %s; reflected functions may only be defined at the module level, \
-           over their own parameters"
+        Location.raise_errorf
+          ~loc
+          "vox: a reflected definition must be closed, but this one mentions %s; \
+           reflected functions may only be defined at the module level, over their own \
+           parameters"
           (Ident.name v)
     in
     List.iter
@@ -1163,7 +1170,5 @@ let translate_def (vb : Typedtree.value_binding) : spec_def =
     ; sd_decreases = decreases
     ; sd_loc = loc
     }
-  | _ ->
-    Location.raise_errorf ~loc
-      "vox: total_ requires a function binding"
+  | _ -> Location.raise_errorf ~loc "vox: total_ requires a function binding"
 ;;

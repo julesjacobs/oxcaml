@@ -3,8 +3,8 @@
    Predicates are untyped logical terms: the compiler never type checks them; ill-sorted
    predicates surface as solver errors at VC time, which count as verification failures.
    The bound value variable [v] is [Pbound]; program variables are identified by [Ident.t]
-   stamp.  Dependent-arrow parameters are ordinary [Pvar]s whose binding ident is stored
-   on the arrow ([Types.arrow_desc]), mirroring how [Tpoly] binds its univars: opening a
+   stamp. Dependent-arrow parameters are ordinary [Pvar]s whose binding ident is stored on
+   the arrow ([Types.arrow_desc]), mirroring how [Tpoly] binds its univars: opening a
    binder substitutes the stamp; comparing two independently written (hence
    differently-stamped) dependent signatures runs under a binder pairing pushed at each
    arrow, the analogue of [Ctype.univar_pairs]. *)
@@ -26,68 +26,68 @@ type pred =
   | Pbound (* the bound value variable v *)
   | Pvar of Ident.t (* logical value of a program variable or dependent-arrow binder *)
   | Pglobal of Path.t
-    (* logical value of a MODULE-LEVEL (immutable) value, identified
-       by path -- the global counterpart of [Pvar].  Stamp-free and
-       .cmi-stable, like the type paths in [Pconstr]/[Pfield]/[Pis];
-       two distinct paths to one value are distinct names (both facts
-       true, equality not assumed). *)
+    (* logical value of a MODULE-LEVEL (immutable) value, identified by path -- the global
+       counterpart of [Pvar]. Stamp-free and .cmi-stable, like the type paths in
+       [Pconstr]/[Pfield]/[Pis]; two distinct paths to one value are distinct names (both
+       facts true, equality not assumed). *)
   | Pint of int
   | Pbool of bool
   | Pconstr of Path.t * string * pred list
-    (* application of a variant constructor, identified by its type's
-       path and the constructor's name.  Only constructors of "simple"
-       variants (monomorphic, non-GADT, tuple arguments) are admitted
-       at elaboration; the solver models them with the datatype theory
-       (free, injective, pairwise-distinct constructors). *)
+    (* application of a variant constructor, identified by its type's path and the
+       constructor's name. Only constructors of "simple" variants (monomorphic, non-GADT,
+       tuple arguments) are admitted at elaboration; the solver models them with the
+       datatype theory (free, injective, pairwise-distinct constructors). *)
   | Pfun of string * pred list
-    (* application of a SPEC function: a logical function (measure,
-       predicate, ...) defined on the solver side -- by a prelude (the
-       [-vox-prelude] file, an embedded [%%vox.lean] block, or an
-       imported spec export) or by a [total_] definition.  Purely a name -- the compiler neither resolves
-       nor sorts it; an undefined or ill-sorted application is a solver
-       error at VC time, i.e. a verification failure. *)
+    (* application of a SPEC function: a logical function (measure, predicate, ...)
+       defined on the solver side -- by a prelude (the [-vox-prelude] file, an embedded
+       [%%vox.lean] block, or an imported spec export) or by a [total_] definition. Purely
+       a name -- the compiler neither resolves nor sorts it; an undefined or ill-sorted
+       application is a solver error at VC time, i.e. a verification failure. *)
   | Pfield of Path.t * string * pred
-    (* projection of a field out of a record term.  Carries the record
-       type's path (selector symbols are per-type, and predicates are
-       untyped, so the label resolves at elaboration like constructors
-       do).  Only fields of "simple" records (monomorphic, all fields
-       immutable) are admitted; the solver models such records as
+    (* projection of a field out of a record term. Carries the record type's path
+       (selector symbols are per-type, and predicates are untyped, so the label resolves
+       at elaboration like constructors do). Only fields of "simple" records (monomorphic,
+       all fields immutable) are admitted; the solver models such records as
        single-constructor datatypes with named selectors. *)
   | Ptuple of pred list
-    (* an unlabeled tuple term [(p1, ..., pn)], n >= 2.  Tuples are
-       structural (no type path): the solver models each ARITY with one
-       polymorphic product datatype, so construction and projection
-       need no instantiation info and predicates stay untyped. *)
+    (* an unlabeled tuple term [(p1, ..., pn)], n >= 2. Tuples are structural (no type
+       path): the solver models each ARITY with one polymorphic product datatype, so
+       construction and projection need no instantiation info and predicates stay untyped. *)
   | Pproj of int * int * pred
-    (* [Pproj (arity, i, t)]: the [i]th component (0-based) of tuple
-       term [t] at the given arity -- [fst]/[snd] in the surface
-       syntax.  The arity picks the product datatype's selector. *)
+    (* [Pproj (arity, i, t)]: the [i]th component (0-based) of tuple term [t] at the given
+       arity -- [fst]/[snd] in the surface syntax. The arity picks the product datatype's
+       selector. *)
   | Pis of Path.t * string * pred
-    (* constructor tester: "the term is an application of THIS
-       constructor".  INTERNAL ONLY -- not expressible in surface
-       predicates; minted by the VC pass as the negative match fact
-       [not (s is C)] for arms below a guard-free simple arm.  Lean
-       encodes it existentially, with an exhaustiveness hypothesis
-       supplied per tester subject. *)
+    (* constructor tester: "the term is an application of THIS constructor". INTERNAL ONLY
+       -- not expressible in surface predicates; minted by the VC pass as the negative
+       match fact [not (s is C)] for arms below a guard-free simple arm. Lean encodes it
+       existentially, with an exhaustiveness hypothesis supplied per tester subject. *)
   | Pbinop of binop * pred * pred
   | Pand of pred * pred
   | Por of pred * pred
   | Pnot of pred
   | Pimp of pred * pred
-    (* implication [p -> q].  NATIVE, not sugar for [not p || q]: the
-       two spellings are structurally distinct types (bridged by
-       subsumption at binders, like any respelling), diagnostics show
-       what the user wrote, and Lean receives a genuine arrow. *)
+    (* implication [p -> q]. NATIVE, not sugar for [not p || q]: the two spellings are
+       structurally distinct types (bridged by subsumption at binders, like any
+       respelling), diagnostics show what the user wrote, and Lean receives a genuine
+       arrow. *)
   | Pquant of quant * Ident.t * pred
-    (* quantifier [forall_ x. p] / [exists_ x. p].  The binder is a
-       fresh [Scoped] ident, like a dependent-arrow binder: [Scoped]
-       stamps marshalled through a .cmi can never collide with a
-       consuming unit's [Local] variables, and freshness makes
-       substitution capture-free.  The binder is UNSORTED (predicates
-       are untyped): the Lean side emits it unannotated and lets
-       elaboration infer, exactly as the existential encoding of [Pis]
-       already does; an uninferable binder is a solver error, i.e. a
-       verification failure. *)
+    (* quantifier [forall_ x. p] / [exists_ x. p]. The binder is a fresh [Scoped] ident,
+       like a dependent-arrow binder: [Scoped] stamps marshalled through a .cmi can never
+       collide with a consuming unit's [Local] variables, and freshness makes substitution
+       capture-free. The binder is UNSORTED (predicates are untyped): the Lean side emits
+       it unannotated and lets elaboration infer, exactly as the existential encoding of
+       [Pis] already does; an uninferable binder is a solver error, i.e. a verification
+       failure. *)
+  | Plam of Ident.t list * pred
+(* a LEAN LAMBDA [fun x0 .. xn => body]: the reflected form of an OCaml lambda
+   [fun x0 .. xn -> e] supplied at a relation-typed (ghost-arrow-sorted) dependent
+   argument -- the [iter (fun x y -> y >= x) ..] surface. Binders are fresh, UNSORTED,
+   alpha-compared by the same binder pairing [Pquant] uses (positionally over the list).
+   Emitted to Lean verbatim as an anonymous function; grind beta-reduces at an
+   application. The body is a predicate over the binders and any outer variables the
+   lambda closes over. Unlike [@@vox.reflect], the Lean term is DERIVED from the OCaml
+   body, so the correspondence is checked, not assumed. *)
 
 and quant =
   | Qforall
@@ -108,7 +108,7 @@ let binop_name = function
 ;;
 
 (* Alpha-equivalence support: while two arrow types are being compared, their binders are
-   paired here (innermost first), and [Pvar]s are compared modulo the pairing.  A stamp
+   paired here (innermost first), and [Pvar]s are compared modulo the pairing. A stamp
    paired at some level must correspond exactly to its partner there; unpaired stamps
    compare by identity. *)
 let binder_pairs : (Ident.t * Ident.t) list ref = ref []
@@ -119,21 +119,17 @@ let with_binder_pair id1 id2 f =
 ;;
 
 let equal_var id1 id2 =
-  (* Orientation-insensitive: unification can swap its two sides (e.g.
-     when only one expands an abbreviation), so a pair must match with
-     the ids in either order.  Innermost involvement wins, which keeps
-     shadowed binders distinct. *)
+  (* Orientation-insensitive: unification can swap its two sides (e.g. when only one
+     expands an abbreviation), so a pair must match with the ids in either order.
+     Innermost involvement wins, which keeps shadowed binders distinct. *)
   let involved x (a, b) = Ident.same x a || Ident.same x b in
   let partners (a, b) =
-    (Ident.same id1 a && Ident.same id2 b)
-    || (Ident.same id1 b && Ident.same id2 a)
+    (Ident.same id1 a && Ident.same id2 b) || (Ident.same id1 b && Ident.same id2 a)
   in
   let rec find = function
     | [] -> Ident.same id1 id2
     | pair :: rest ->
-      if involved id1 pair || involved id2 pair
-      then partners pair
-      else find rest
+      if involved id1 pair || involved id2 pair then partners pair else find rest
   in
   find !binder_pairs
 ;;
@@ -152,9 +148,9 @@ let rec equal p1 p2 =
   | Pand (a1, b1), Pand (a2, b2) | Por (a1, b1), Por (a2, b2) ->
     equal a1 a2 && equal b1 b2
   | Pconstr (p1, c1, args1), Pconstr (p2, c2, args2) ->
-    (* The type path compares with [Path.same]: two ways of naming the
-       same type through different module aliases are DIFFERENT, like
-       every other structural discrepancy.  Sharp edges, not bugs. *)
+    (* The type path compares with [Path.same]: two ways of naming the same type through
+       different module aliases are DIFFERENT, like every other structural discrepancy.
+       Sharp edges, not bugs. *)
     Path.same p1 p2
     && String.equal c1 c2
     && List.length args1 = List.length args2
@@ -174,14 +170,40 @@ let rec equal p1 p2 =
   | Pnot a1, Pnot a2 -> equal a1 a2
   | Pimp (a1, b1), Pimp (a2, b2) -> equal a1 a2 && equal b1 b2
   | Pquant (q1, id1, a1), Pquant (q2, id2, a2) ->
-    (* Alpha-equivalence, by the same binder pairing dependent arrows
-       use: two independently written (hence differently-stamped)
-       quantifiers compare with their binders paired. *)
+    (* Alpha-equivalence, by the same binder pairing dependent arrows use: two
+       independently written (hence differently-stamped) quantifiers compare with their
+       binders paired. *)
     q1 = q2 && with_binder_pair id1 id2 (fun () -> equal a1 a2)
-  | ( ( Pbound | Pvar _ | Pglobal _ | Pint _ | Pbool _ | Pconstr _ | Pfun _
-      | Pfield _ | Ptuple _ | Pproj _
-      | Pis _ | Pbinop _ | Pand _ | Por _ | Pnot _ | Pimp _ | Pquant _ ),
-      _ ) -> false
+  | Plam (ids1, a1), Plam (ids2, a2) ->
+    (* Alpha-equivalence over the whole binder list, paired positionally. *)
+    List.length ids1 = List.length ids2
+    &&
+    let rec go l1 l2 =
+      match l1, l2 with
+      | [], [] -> equal a1 a2
+      | i1 :: r1, i2 :: r2 -> with_binder_pair i1 i2 (fun () -> go r1 r2)
+      | _ -> false
+    in
+    go ids1 ids2
+  | ( ( Pbound
+      | Pvar _
+      | Pglobal _
+      | Pint _
+      | Pbool _
+      | Pconstr _
+      | Pfun _
+      | Pfield _
+      | Ptuple _
+      | Pproj _
+      | Pis _
+      | Pbinop _
+      | Pand _
+      | Por _
+      | Pnot _
+      | Pimp _
+      | Pquant _
+      | Plam _ )
+    , _ ) -> false
 ;;
 
 (* Substitute program variable [id] by predicate [by] (dependent application and lambda
@@ -202,9 +224,13 @@ let rec subst_var id ~by p =
   | Pnot a -> Pnot (subst_var id ~by a)
   | Pimp (a, b) -> Pimp (subst_var id ~by a, subst_var id ~by b)
   | Pquant (q, b, a) ->
-    (* No capture and no shadowing: quantifier binders are fresh
-       stamps, distinct from every substitutable variable. *)
+    (* No capture and no shadowing: quantifier binders are fresh stamps, distinct from
+       every substitutable variable. *)
     Pquant (q, b, subst_var id ~by a)
+  | Plam (bs, a) ->
+    (* Lambda binders are fresh stamps, distinct from every substitutable variable -- no
+       capture, no shadowing. *)
+    Plam (bs, subst_var id ~by a)
 ;;
 
 (* Substitute the bound variable [v] (used when instantiating a refinement at a logical
@@ -225,6 +251,7 @@ let rec subst_bound ~by p =
   | Pnot a -> Pnot (subst_bound ~by a)
   | Pimp (a, b) -> Pimp (subst_bound ~by a, subst_bound ~by b)
   | Pquant (q, b, a) -> Pquant (q, b, subst_bound ~by a)
+  | Plam (bs, a) -> Plam (bs, subst_bound ~by a)
 ;;
 
 let rec free_vars acc p =
@@ -238,10 +265,12 @@ let rec free_vars acc p =
     free_vars (free_vars acc a) b
   | Pnot a -> free_vars acc a
   | Pquant (_, b, a) ->
-    (* The binder is bound, not free.  Filtering the body's variables
-       suffices: binder stamps are fresh, so [b] cannot also occur in
-       [acc]. *)
+    (* The binder is bound, not free. Filtering the body's variables suffices: binder
+       stamps are fresh, so [b] cannot also occur in [acc]. *)
     List.filter (fun id -> not (Ident.same id b)) (free_vars acc a)
+  | Plam (bs, a) ->
+    (* The binders are bound, not free. *)
+    List.filter (fun id -> not (List.exists (Ident.same id) bs)) (free_vars acc a)
 ;;
 
 let free_vars p = free_vars [] p
@@ -258,6 +287,7 @@ let rec free_globals acc p =
     free_globals (free_globals acc a) b
   | Pnot a -> free_globals acc a
   | Pquant (_, _, a) -> free_globals acc a
+  | Plam (_, a) -> free_globals acc a
 ;;
 
 let free_globals p = free_globals [] p
@@ -266,19 +296,18 @@ let rec mem_var id p =
   match p with
   | Pvar id' -> Ident.same id id'
   | Pbound | Pglobal _ | Pint _ | Pbool _ -> false
-  | Pconstr (_, _, args) | Pfun (_, args) | Ptuple args ->
-    List.exists (mem_var id) args
+  | Pconstr (_, _, args) | Pfun (_, args) | Ptuple args -> List.exists (mem_var id) args
   | Pfield (_, _, a) | Pis (_, _, a) | Pproj (_, _, a) -> mem_var id a
   | Pbinop (_, a, b) | Pand (a, b) | Por (a, b) | Pimp (a, b) ->
     mem_var id a || mem_var id b
   | Pnot a -> mem_var id a
   | Pquant (_, b, a) -> (not (Ident.same id b)) && mem_var id a
+  | Plam (bs, a) -> (not (List.exists (Ident.same id) bs)) && mem_var id a
 ;;
 
-(* Remap the paths of a predicate (used by [Subst] when a predicate
-   crosses a module boundary): [f] rewrites TYPE paths (constructor
-   applications, fields, testers) exactly as [Tconstr] paths are
-   rewritten; [value] rewrites the VALUE paths of [Pglobal]s. *)
+(* Remap the paths of a predicate (used by [Subst] when a predicate crosses a module
+   boundary): [f] rewrites TYPE paths (constructor applications, fields, testers) exactly
+   as [Tconstr] paths are rewritten; [value] rewrites the VALUE paths of [Pglobal]s. *)
 let rec map_paths_impl value f p =
   let map_paths = map_paths_impl value in
   match p with
@@ -296,6 +325,7 @@ let rec map_paths_impl value f p =
   | Pnot a -> Pnot (map_paths f a)
   | Pimp (a, b) -> Pimp (map_paths f a, map_paths f b)
   | Pquant (q, b, a) -> Pquant (q, b, map_paths f a)
+  | Plam (bs, a) -> Plam (bs, map_paths f a)
 ;;
 
 let map_paths ?(value = fun (q : Path.t) -> q) f p = map_paths_impl value f p
@@ -311,12 +341,13 @@ let rec constr_paths acc p =
     constr_paths (constr_paths acc a) b
   | Pnot a -> constr_paths acc a
   | Pquant (_, _, a) -> constr_paths acc a
+  | Plam (_, a) -> constr_paths acc a
 ;;
 
 let constr_paths p = constr_paths [] p
 
-(* Tuple arities used by a predicate (construction and projection): the
-   solver input must declare one product datatype per arity. *)
+(* Tuple arities used by a predicate (construction and projection): the solver input must
+   declare one product datatype per arity. *)
 let rec tuple_arities acc p =
   match p with
   | Pbound | Pvar _ | Pglobal _ | Pint _ | Pbool _ -> acc
@@ -328,24 +359,24 @@ let rec tuple_arities acc p =
     tuple_arities (tuple_arities acc a) b
   | Pnot a -> tuple_arities acc a
   | Pquant (_, _, a) -> tuple_arities acc a
+  | Plam (_, a) -> tuple_arities acc a
 ;;
 
 let tuple_arities p = tuple_arities [] p
 
-(* Does [p] apply any spec function?  Spec text (which defines
-   them) is injected only into solver inputs that need it: it may
-   reference datatypes of one module, which do not exist in another
-   module's input. *)
+(* Does [p] apply any spec function? Spec text (which defines them) is injected only into
+   solver inputs that need it: it may reference datatypes of one module, which do not
+   exist in another module's input. *)
 let rec mentions_spec_fun p =
   match p with
   | Pbound | Pvar _ | Pglobal _ | Pint _ | Pbool _ -> false
   | Pfun _ -> true
   | Pconstr (_, _, args) | Ptuple args -> List.exists mentions_spec_fun args
-  | Pfield (_, _, a) | Pis (_, _, a) | Pproj (_, _, a) | Pnot a ->
-    mentions_spec_fun a
+  | Pfield (_, _, a) | Pis (_, _, a) | Pproj (_, _, a) | Pnot a -> mentions_spec_fun a
   | Pbinop (_, a, b) | Pand (a, b) | Por (a, b) | Pimp (a, b) ->
     mentions_spec_fun a || mentions_spec_fun b
   | Pquant (_, _, a) -> mentions_spec_fun a
+  | Plam (_, a) -> mentions_spec_fun a
 ;;
 
 (* Printing, in the compact surface format: the bound value variable prints as [_];
@@ -360,15 +391,13 @@ let with_var_display f k =
   Fun.protect ~finally:(fun () -> var_display := saved) k
 ;;
 
-(* Precedence-aware printing, in the compact surface format.  Each node
-   prints at a precedence LEVEL; a child is parenthesized only when its
-   own level is looser (lower) than the level its position requires.
-   Levels and associativity mirror the predicate grammar (parser.mly
-   [vox_pred]) so the printed form reparses to the same predicate:
-   quantifiers and implication [->] are loosest (implication
-   right-associative), then [||], then [&&] (both left-associative),
-   then comparisons (non-associative, so [a = b = c] keeps its
-   parentheses), then additive, then multiplicative (both
+(* Precedence-aware printing, in the compact surface format. Each node prints at a
+   precedence LEVEL; a child is parenthesized only when its own level is looser (lower)
+   than the level its position requires. Levels and associativity mirror the predicate
+   grammar (parser.mly [vox_pred]) so the printed form reparses to the same predicate:
+   quantifiers and implication [->] are loosest (implication right-associative), then
+   [||], then [&&] (both left-associative), then comparisons (non-associative, so
+   [a = b = c] keeps its parentheses), then additive, then multiplicative (both
    left-associative), then application, then atoms. *)
 let l_quant = 5
 let l_imp = 10
@@ -386,9 +415,9 @@ let binop_level = function
   | Mul | Div | Mod -> l_mul
 ;;
 
-(* [pr ctx ppf p]: print [p] where the surrounding position tolerates a
-   node of level >= [ctx] without parentheses.  A node of level [lvl]
-   parenthesizes itself exactly when [lvl < ctx]. *)
+(* [pr ctx ppf p]: print [p] where the surrounding position tolerates a node of level >=
+   [ctx] without parentheses. A node of level [lvl] parenthesizes itself exactly when
+   [lvl < ctx]. *)
 let rec pr ctx ppf p =
   let open Format in
   let node lvl f =
@@ -404,12 +433,10 @@ let rec pr ctx ppf p =
   | Pvar id -> pp_print_string ppf (!var_display id)
   | Pglobal p -> pp_print_string ppf (Path.name p)
   | Pint n ->
-    (* A negative literal is parenthesized wherever a leading [-] would
-       otherwise read as subtraction -- as an arithmetic operator's
-       right operand or a function argument -- but [x = -1] stays bare. *)
-    if n < 0
-    then node l_add (fun () -> pp_print_int ppf n)
-    else pp_print_int ppf n
+    (* A negative literal is parenthesized wherever a leading [-] would otherwise read as
+       subtraction -- as an arithmetic operator's right operand or a function argument --
+       but [x = -1] stays bare. *)
+    if n < 0 then node l_add (fun () -> pp_print_int ppf n) else pp_print_int ppf n
   | Pbool b -> pp_print_bool ppf b
   | Pconstr (_, c, []) -> pp_print_string ppf c
   | Pconstr (_, c, [ a ]) ->
@@ -423,8 +450,8 @@ let rec pr ctx ppf p =
   | Pfun (f, [ a ]) when String.equal f "Vox_ia_len" ->
     node l_app (fun () -> fprintf ppf "@[Iarray.length %a@]" (pr l_atom) a)
   | Pfun (f, [ a; i ]) when String.equal f "Vox_ia_get" ->
-    (* [a.(i)] binds at projection level (tighter than application), so
-       it reads bare as a function argument, like a field access *)
+    (* [a.(i)] binds at projection level (tighter than application), so it reads bare as a
+       function argument, like a field access *)
     fprintf ppf "%a.(%a)" (pr l_atom) a (pr 0) i
   | Pfun (f, args) ->
     node l_app (fun () ->
@@ -437,23 +464,19 @@ let rec pr ctx ppf p =
     List.iter (fun x -> fprintf ppf ",@ %a" (pr 0) x) args;
     fprintf ppf ")@]"
   | Ptuple [] ->
-    (* unreachable (arity >= 2 by construction), but diagnostics must
-       never crash *)
+    (* unreachable (arity >= 2 by construction), but diagnostics must never crash *)
     pp_print_string ppf "()"
-  | Pproj (2, 0, a) ->
-    node l_app (fun () -> fprintf ppf "@[fst %a@]" (pr l_atom) a)
-  | Pproj (2, 1, a) ->
-    node l_app (fun () -> fprintf ppf "@[snd %a@]" (pr l_atom) a)
+  | Pproj (2, 0, a) -> node l_app (fun () -> fprintf ppf "@[fst %a@]" (pr l_atom) a)
+  | Pproj (2, 1, a) -> node l_app (fun () -> fprintf ppf "@[snd %a@]" (pr l_atom) a)
   | Pproj (_, i, a) ->
-    (* diagnostics only: projections beyond pairs arise from match
-       facts, never from surface predicates (1-based, as in Lean) *)
+    (* diagnostics only: projections beyond pairs arise from match facts, never from
+       surface predicates (1-based, as in Lean) *)
     fprintf ppf "%a.%d" (pr l_atom) a (i + 1)
-  | Pis (_, c, a) ->
-    node l_cmp (fun () -> fprintf ppf "@[%a is@ %s@]" (pr l_atom) a c)
+  | Pis (_, c, a) -> node l_cmp (fun () -> fprintf ppf "@[%a is@ %s@]" (pr l_atom) a c)
   | Pbinop (op, a, b) ->
     let lvl = binop_level op in
-    (* comparisons are non-associative (both operands parenthesize a
-       peer); additive and multiplicative are left-associative *)
+    (* comparisons are non-associative (both operands parenthesize a peer); additive and
+       multiplicative are left-associative *)
     let lctx, rctx =
       match op with
       | Eq | Neq | Lt | Le | Gt | Ge -> lvl + 1, lvl + 1
@@ -462,63 +485,68 @@ let rec pr ctx ppf p =
     node lvl (fun () ->
       fprintf ppf "@[%a %s@ %a@]" (pr lctx) a (binop_name op) (pr rctx) b)
   | Pand (a, b) ->
-    node l_and (fun () ->
-      fprintf ppf "@[%a &&@ %a@]" (pr l_and) a (pr (l_and + 1)) b)
+    node l_and (fun () -> fprintf ppf "@[%a &&@ %a@]" (pr l_and) a (pr (l_and + 1)) b)
   | Por (a, b) ->
-    node l_or (fun () ->
-      fprintf ppf "@[%a ||@ %a@]" (pr l_or) a (pr (l_or + 1)) b)
+    node l_or (fun () -> fprintf ppf "@[%a ||@ %a@]" (pr l_or) a (pr (l_or + 1)) b)
   | Pnot a -> node l_app (fun () -> fprintf ppf "@[not %a@]" (pr l_atom) a)
   | Pimp (a, b) ->
-    (* Right-associative and loosest: the left operand parenthesizes a
-       nested implication, while the right operand is a trailing
-       position where anything -- a chained [->], a quantifier -- reads
-       bare, so chains reparse as written. *)
-    node l_imp (fun () ->
-      fprintf ppf "@[%a ->@ %a@]" (pr (l_imp + 1)) a (pr 0) b)
+    (* Right-associative and loosest: the left operand parenthesizes a nested implication,
+       while the right operand is a trailing position where anything -- a chained [->], a
+       quantifier -- reads bare, so chains reparse as written. *)
+    node l_imp (fun () -> fprintf ppf "@[%a ->@ %a@]" (pr (l_imp + 1)) a (pr 0) b)
   | Pquant (q, b, a) ->
-    (* [forall_ x. p] is the surface syntax; the binder prints through
-       [var_display] so shadowing diagnostics disambiguate it like any
-       other variable.  The body is a trailing position (printed at [0])
-       and the quantifier itself is looser than every binary operator,
-       so it parenthesizes when it appears as an operand. *)
+    (* [forall_ x. p] is the surface syntax; the binder prints through [var_display] so
+       shadowing diagnostics disambiguate it like any other variable. The body is a
+       trailing position (printed at [0]) and the quantifier itself is looser than every
+       binary operator, so it parenthesizes when it appears as an operand. *)
     node l_quant (fun () ->
-      fprintf ppf "@[%s %s.@ %a@]"
-        (match q with Qforall -> "forall_" | Qexists -> "exists_")
+      fprintf
+        ppf
+        "@[%s %s.@ %a@]"
+        (match q with
+         | Qforall -> "forall_"
+         | Qexists -> "exists_")
         (!var_display b)
-        (pr 0) a)
+        (pr 0)
+        a)
+  | Plam (bs, a) ->
+    (* [fun x y -> body] -- the relation-literal surface; loosest like a quantifier, so it
+       parenthesizes as an operand and its body reads bare in trailing position. *)
+    node l_quant (fun () ->
+      fprintf ppf "@[fun";
+      List.iter (fun b -> fprintf ppf " %s" (!var_display b)) bs;
+      fprintf ppf " ->@ %a@]" (pr 0) a)
+;;
 
 let print ppf p = pr 0 ppf p
 let to_string p = Format.asprintf "%a" print p
 
-(* Built-in iarray theory: [Iarray.length a] and [a.(i)] in predicates
-   (and the reflected [Iarray.length]/[Iarray.get] in expressions)
-   denote these reserved spec functions.  Capitalized, so no
-   total_/prelude lowercase name can collide from OCaml source; the
-   theory declarations are emitted by Vox_verify when used.  [get] is
-   TOTAL in the logic, like division: the safe program [get] raises
-   out of bounds, so no value flows there and the unconstrained fact
-   is vacuous -- sound under partial correctness.  Bounds SAFETY is
+(* Built-in iarray theory: [Iarray.length a] and [a.(i)] in predicates (and the reflected
+   [Iarray.length]/[Iarray.get] in expressions) denote these reserved spec functions.
+   Capitalized, so no total_/prelude lowercase name can collide from OCaml source; the
+   theory declarations are emitted by Vox_verify when used. [get] is TOTAL in the logic,
+   like division: the safe program [get] raises out of bounds, so no value flows there and
+   the unconstrained fact is vacuous -- sound under partial correctness. Bounds SAFETY is
    an opt-in contract, not a forced obligation. *)
 let ia_len = "Vox_ia_len"
 let ia_get = "Vox_ia_get"
 
-(* Does [p] apply the spec function called [name]?  (Emission gates
-   the built-in theories on use.) *)
+(* Does [p] apply the spec function called [name]? (Emission gates the built-in theories
+   on use.) *)
 let rec mentions_fun name p =
   match p with
   | Pbound | Pvar _ | Pglobal _ | Pint _ | Pbool _ -> false
-  | Pfun (f, args) ->
-    String.equal f name || List.exists (mentions_fun name) args
+  | Pfun (f, args) -> String.equal f name || List.exists (mentions_fun name) args
   | Pconstr (_, _, args) | Ptuple args -> List.exists (mentions_fun name) args
-  | Pfield (_, _, a) | Pis (_, _, a) | Pproj (_, _, a) | Pnot a
-  | Pquant (_, _, a) -> mentions_fun name a
+  | Pfield (_, _, a) | Pis (_, _, a) | Pproj (_, _, a) | Pnot a | Pquant (_, _, a) ->
+    mentions_fun name a
+  | Plam (_, a) -> mentions_fun name a
   | Pbinop (_, a, b) | Pand (a, b) | Por (a, b) | Pimp (a, b) ->
     mentions_fun name a || mentions_fun name b
 ;;
 
-(* The constructs a compiled runtime check cannot evaluate faithfully,
-   for diagnostics.  Owned here so the two rejection messages
-   (Vox_verify's gate and Translcore's backstop) cannot drift from the
-   [pred] type or from each other; keep in sync with
+(* The constructs a compiled runtime check cannot evaluate faithfully, for diagnostics.
+   Owned here so the two rejection messages (Vox_verify's gate and Translcore's backstop)
+   cannot drift from the [pred] type or from each other; keep in sync with
    [Vox_verify.runtime_check_gate]. *)
 let unreflectable_what = "a tuple, projection, record field, or quantifier"

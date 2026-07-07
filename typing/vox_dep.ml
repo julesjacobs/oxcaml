@@ -1,24 +1,22 @@
 (* vox: dependent-arrow support over the type graph.
 
-   A dependent arrow stores its binder [Ident.t] in its [arrow_desc]
-   (like [Tpoly] stores its univars); refinements in the codomain
-   reference it as an ordinary [Refinement.Pvar].  Consuming an arrow
-   (at an application or when a lambda binds the parameter)
-   substitutes the binder's stamp by the argument's (respectively the
-   parameter's) stamp throughout the remaining type: no positional
-   arithmetic is involved, so partial, labelled, and commuted
-   applications are all handled by construction.
+   A dependent arrow stores its binder [Ident.t] in its [arrow_desc] (like [Tpoly] stores
+   its univars); refinements in the codomain reference it as an ordinary
+   [Refinement.Pvar]. Consuming an arrow (at an application or when a lambda binds the
+   parameter) substitutes the binder's stamp by the argument's (respectively the
+   parameter's) stamp throughout the remaining type: no positional arithmetic is involved,
+   so partial, labelled, and commuted applications are all handled by construction.
 
-   Nodes are rebuilt only along paths whose predicates change; shared
-   subtrees are reused.  Cycles are cut with a physical visited list
-   (refinements on cyclic paths are unsupported in v0). *)
+   Nodes are rebuilt only along paths whose predicates change; shared subtrees are reused.
+   Cycles are cut with a physical visited list (refinements on cyclic paths are
+   unsupported in v0). *)
 
 open Types
 
 let rec subst id ~by ty visited =
   if List.memq ty visited
   then ty
-  else begin
+  else (
     let visited = ty :: visited in
     match get_desc ty with
     | Trefine (skel, maps, p) ->
@@ -50,37 +48,29 @@ let rec subst id ~by ty visited =
       else Btype.newty2 ~level:(get_level ty) (Tunboxed_tuple l')
     | Tpoly (t, vars) ->
       let t' = subst id ~by t visited in
-      if t' == t
-      then ty
-      else Btype.newty2 ~level:(get_level ty) (Tpoly (t', vars))
-    | _ -> ty
-  end
+      if t' == t then ty else Btype.newty2 ~level:(get_level ty) (Tpoly (t', vars))
+    | _ -> ty)
 ;;
 
-(* Open the binder [id]: replace it by [by] throughout [ty].  Non-
-   destructive: rebuilds only changed spines, so annotation types and
-   other instances are unaffected.
+(* Open the binder [id]: replace it by [by] throughout [ty]. Non- destructive: rebuilds
+   only changed spines, so annotation types and other instances are unaffected.
 
-   [subst] has no notion of shadowing, so it relies on this INVARIANT:
-   within any type graph it can reach, binder stamps are distinct.
-   In-unit this holds because typetexp mints a fresh ident per arrow
-   (and copies share, never re-bind, binders).  Across units it is
-   delicate: stamps restart per compiler process, so two .cmis
-   routinely contain COLLIDING [Scoped] binder stamps ([Ident.same]
-   already keeps them apart from every [Local] program variable).  Two
-   things keep a foreign colliding binder out of reach: signature
-   self-containment (Vox_verify.check_signature) forces every
-   .cmi-crossing binder reference to sit under its own arrow, and
-   [subst] walks [Tconstr] ARGUMENTS only, never a constructor's
-   expansion, so another unit's binder can only be reached through its
-   own (freshly copied, consistently stamped) arrow.  See
+   [subst] has no notion of shadowing, so it relies on this INVARIANT: within any type
+   graph it can reach, binder stamps are distinct. In-unit this holds because typetexp
+   mints a fresh ident per arrow (and copies share, never re-bind, binders). Across units
+   it is delicate: stamps restart per compiler process, so two .cmis routinely contain
+   COLLIDING [Scoped] binder stamps ([Ident.same] already keeps them apart from every
+   [Local] program variable). Two things keep a foreign colliding binder out of reach:
+   signature self-containment (Vox_verify.check_signature) forces every .cmi-crossing
+   binder reference to sit under its own arrow, and [subst] walks [Tconstr] ARGUMENTS
+   only, never a constructor's expansion, so another unit's binder can only be reached
+   through its own (freshly copied, consistently stamped) arrow. See
    testsuite/tests/vox/stamp_collide.ml. *)
 let subst_binder id ~by ty = subst id ~by ty []
 
-(* Refinements can hide inside object fields, polymorphic-variant
-   arguments and package constraints too; [subst] does not rebuild
-   those (dependent substitution through them is unsupported), so a
-   binder reference left behind there surfaces as an escape error
+(* Refinements can hide inside object fields, polymorphic-variant arguments and package
+   constraints too; [subst] does not rebuild those (dependent substitution through them is
+   unsupported), so a binder reference left behind there surfaces as an escape error
    rather than being missed. *)
 let children ty =
   match get_desc ty with
@@ -102,14 +92,13 @@ let children ty =
   | _ -> []
 ;;
 
-(* Iterate over every refinement predicate in [ty], with the binders
-   of the arrows enclosing it WITHIN [ty]: a [Pvar] of a bound ident
-   is a dependent-parameter reference, anything else is a free
-   program variable. *)
+(* Iterate over every refinement predicate in [ty], with the binders of the arrows
+   enclosing it WITHIN [ty]: a [Pvar] of a bound ident is a dependent-parameter reference,
+   anything else is a free program variable. *)
 let rec iter_preds ~bound ty visited f =
   if List.memq ty visited
   then ()
-  else begin
+  else (
     let visited = ty :: visited in
     match get_desc ty with
     | Trefine (skel, _maps, p) ->
@@ -123,20 +112,23 @@ let rec iter_preds ~bound ty visited f =
         | None -> bound
       in
       iter_preds ~bound r visited f
-    | Tconstr _ | Ttuple _ | Tunboxed_tuple _ | Tpoly _ | Tobject _ | Tfield _
-    | Tvariant _ | Tpackage _ ->
-      List.iter (fun t -> iter_preds ~bound t visited f) (children ty)
-    | _ -> ()
-  end
+    | Tconstr _
+    | Ttuple _
+    | Tunboxed_tuple _
+    | Tpoly _
+    | Tobject _
+    | Tfield _
+    | Tvariant _
+    | Tpackage _ -> List.iter (fun t -> iter_preds ~bound t visited f) (children ty)
+    | _ -> ())
 ;;
 
 let iter_refinement_preds ty f = iter_preds ~bound:[] ty [] f
 
-(* The stamps of every [Refinement.Pvar] occurring in the refinements
-   of [ty], together with the enclosing dependent-arrow binder stamps.
-   [Subst] uses this to freshen an imported binder to a stamp that
-   cannot alias any stamp already present in the codomain -- otherwise a
-   later inner freshening (whose fresh stamp equals an outer binder's
+(* The stamps of every [Refinement.Pvar] occurring in the refinements of [ty], together
+   with the enclosing dependent-arrow binder stamps. [Subst] uses this to freshen an
+   imported binder to a stamp that cannot alias any stamp already present in the codomain
+   -- otherwise a later inner freshening (whose fresh stamp equals an outer binder's
    original) would be clobbered when the outer binder is substituted. *)
 let stamps_in ty =
   let tbl = Hashtbl.create 16 in
@@ -146,15 +138,22 @@ let stamps_in ty =
     | Refinement.Pvar id -> add id
     | Refinement.Pfun (_, a) | Refinement.Pconstr (_, _, a) | Refinement.Ptuple a ->
       List.iter pred a
-    | Refinement.Pfield (_, _, a) | Refinement.Pproj (_, _, a)
-    | Refinement.Pis (_, _, a) | Refinement.Pnot a | Refinement.Pquant (_, _, a) ->
+    | Refinement.Pfield (_, _, a)
+    | Refinement.Pproj (_, _, a)
+    | Refinement.Pis (_, _, a)
+    | Refinement.Pnot a
+    | Refinement.Pquant (_, _, a) -> pred a
+    | Refinement.Plam (bs, a) ->
+      List.iter add bs;
       pred a
-    | Refinement.Pbinop (_, a, b) | Refinement.Pand (a, b) | Refinement.Por (a, b)
+    | Refinement.Pbinop (_, a, b)
+    | Refinement.Pand (a, b)
+    | Refinement.Por (a, b)
     | Refinement.Pimp (a, b) ->
       pred a;
       pred b
-    | Refinement.Pbound | Refinement.Pglobal _ | Refinement.Pint _
-    | Refinement.Pbool _ -> ()
+    | Refinement.Pbound | Refinement.Pglobal _ | Refinement.Pint _ | Refinement.Pbool _ ->
+      ()
   in
   iter_refinement_preds ty (fun ~bound p ->
     List.iter add bound;
@@ -162,20 +161,18 @@ let stamps_in ty =
   tbl
 ;;
 
-(* Set by the type checker when a lambda or an application consumes a
-   refined (contract) parameter -- detected there because typing already
-   expands those domains AT THE CORRECT STAGE.  Read and cleared per
-   compilation unit / toplevel phrase by [Vox_verify.uses_vox]: the gate
-   itself must not expand the types of programs that never use vox (an
-   abbreviation-hidden contract arrow would otherwise escape the gate,
-   but expanding staged types under the wrong stage env is fatal --
-   [Misc.fatal_error] prints eagerly even when the exception is caught).
-   Set-then-backtracked typing paths only over-approximate: the walker
-   runs and finds nothing. *)
+(* Set by the type checker when a lambda or an application consumes a refined (contract)
+   parameter -- detected there because typing already expands those domains AT THE CORRECT
+   STAGE. Read and cleared per compilation unit / toplevel phrase by
+   [Vox_verify.uses_vox]: the gate itself must not expand the types of programs that never
+   use vox (an abbreviation-hidden contract arrow would otherwise escape the gate, but
+   expanding staged types under the wrong stage env is fatal -- [Misc.fatal_error] prints
+   eagerly even when the exception is caught). Set-then-backtracked typing paths only
+   over-approximate: the walker runs and finds nothing. *)
 let contract_use_seen = ref false
 
-(* Does any refinement in [ty] reference [id]?  Used to normalize away
-   unused binders and to detect dependence on an argument. *)
+(* Does any refinement in [ty] reference [id]? Used to normalize away unused binders and
+   to detect dependence on an argument. *)
 let mentions_ident id ty =
   let found = ref false in
   iter_refinement_preds ty (fun ~bound:_ p ->
