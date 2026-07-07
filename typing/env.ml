@@ -473,9 +473,9 @@ module IdTbl =
       }
 
     let rec find_same_without_locks id tbl =
-      match Ident.find_same_opt id tbl.current with
-      | Some data -> data
-      | None ->
+      match Ident.find_same_or_null id tbl.current with
+      | This data -> data
+      | Null ->
         begin match tbl.layer with
         | Open {next; _} -> find_same_without_locks id next
         | Map {f; next} -> f (find_same_without_locks id next)
