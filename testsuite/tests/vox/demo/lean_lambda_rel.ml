@@ -71,6 +71,14 @@ external le_rel : (int -> int -> bool) = "%lessequal" [@@vox.reflect "leRel"]
 let client_named (x : int) : int{ x <= _ } =
   apply_step le_rel (fun a -> a + 1) x
 
+(* #67 INTERACTION: a relation-APPLICATION result [le_rel a b] (a
+   reflected relation) feeding a && operand routes through
+   [decompose_bool]; the threaded, short-circuit-guarded operand facts
+   ([leRel x x], [leRel x (x+1)]) discharge the goal. *)
+let chk : (a : int) -> (b : int) -> bool{ _ = leRel a b } = fun a b -> le_rel a b
+
+let both_le (x : int) : bool{ _ = true } = chk x x && chk x (x + 1)
+
 (* GHOST-INVOCATION BOUNDARY: the relation is a REAL [int -> int -> bool],
    so it may be INVOKED at runtime; its runtime meaning agrees with its
    reflection (both derive from [p <= q]) -- no ghost phantom, zero trust. *)
