@@ -128,6 +128,26 @@ MANIFEST: List[Dict[str, object]] = [
         ),
     },
     {
+        # Capstone higher-order: a relation passed as a call-site lambda
+        # specifies iter, and picking the callback's graph makes the spec
+        # EXACT.  Self-contained (the Vrel machinery inlined into one block).
+        "slug": "relational",
+        "override": "relational.ml",
+        "expect": "verify",
+        # The symbolic-count exact spec: k >= 0 -> _ = x0 + k.
+        "cursor": 82,
+        "title": "Higher-order, exact output",
+        "description": (
+            "A relation supplied as a call-site lambda specifies iter by "
+            "relating result to input -- the callback is never modeled, "
+            "only its per-element contract. Picking the relation to be the "
+            "callback's GRAPH (y = x + 1) makes the spec COMPLETE: a "
+            "concrete count proves the exact value directly, and a "
+            "symbolic count is closed by the relIter_succ_exact induction "
+            "law proved in the block."
+        ),
+    },
+    {
         "slug": "reverse",
         "source": "demo/lean_reverse.ml",
         "expect": "verify",

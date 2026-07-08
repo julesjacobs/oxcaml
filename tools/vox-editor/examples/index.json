@@ -37,6 +37,13 @@
       "cursor": 60
     },
     {
+      "name": "relational",
+      "title": "Higher-order, exact output",
+      "description": "A relation supplied as a call-site lambda specifies iter by relating result to input -- the callback is never modeled, only its per-element contract. Picking the relation to be the callback's GRAPH (y = x + 1) makes the spec COMPLETE: a concrete count proves the exact value directly, and a symbolic count is closed by the relIter_succ_exact induction law proved in the block.",
+      "verifies": true,
+      "cursor": 82
+    },
+    {
       "name": "reverse",
       "title": "In-place array reverse (McCarthy stores)",
       "description": "Mutable-array verification via McCarthy upd/elem stores and a loop-invariant Prop, with the step lemma proved in the block. The postcondition is the full reversal permutation.",
