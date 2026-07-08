@@ -1250,6 +1250,67 @@ let transl_declaration env sdecl (id, uid) =
            modeling contributes that modeling instantiated at the
            argument sorts. *)
         let elaborate (cty : Parsetree.core_type) : Types.vox_sort =
+          match cty.ptyp_desc with
+          | Ptyp_extension ({ txt = "lean"; _ }, payload) ->
+            (* Inline ghost sort: [refines ([%lean "MyT"])] points the type
+               directly at a block-declared Lean type, elaborating to exactly
+               what the intermediary [type myt [@@vox.sort lean "MyT"]] +
+               [refines (myt)] produced -- [Vs_lean] at the given name with the
+               type's own parameters mapped positionally. *)
+            let name =
+              match payload with
+              | PStr
+                  [ { pstr_desc =
+                        Pstr_eval
+                          ( { pexp_desc =
+                                Pexp_constant
+                                  { pconst_desc = Pconst_string (s, _, _); _ }
+                            ; _ }
+                          , _ )
+                    ; _ } ] -> s
+              | _ ->
+                Location.raise_errorf
+                  ~loc:cty.ptyp_loc
+                  "vox: refines ([%%lean ...]) takes a single Lean type name, \
+                   e.g. [%%lean \"MyT\"]"
+            in
+            (* Validate the Lean type name the same way the [@@vox.sort lean]
+               attribute is validated eagerly in vox_verify
+               ([validate_lean_sort_name]): a non-empty dotted identifier, not in
+               the reserved [Vox_]/[v_] solver namespaces (a name there could
+               silently alias an emitted datatype/value name).  Keep in sync with
+               that copy. *)
+            let ident_seg seg =
+              String.length seg > 0
+              && (match seg.[0] with
+                  | 'A' .. 'Z' | 'a' .. 'z' | '_' -> true
+                  | _ -> false)
+              && String.for_all
+                   (function
+                     | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' | '\'' -> true
+                     | _ -> false)
+                   seg
+            in
+            let reserved pre =
+              String.length name >= String.length pre
+              && String.equal (String.sub name 0 (String.length pre)) pre
+            in
+            if String.length name = 0
+               || not (List.for_all ident_seg (String.split_on_char '.' name))
+            then
+              Location.raise_errorf
+                ~loc:cty.ptyp_loc
+                "vox: %S is not a valid Lean type name for refines ([%%lean ...])"
+                name
+            else if reserved "Vox_" || reserved "v_"
+            then
+              Location.raise_errorf
+                ~loc:cty.ptyp_loc
+                "vox: %S may not name a ghost sort -- the Vox_ and v_ prefixes are \
+                 reserved for the solver's emitted names (it would collide)"
+                name;
+            Vs_lean (name, List.mapi (fun i _ -> Vs_param i) params)
+          | _ ->
           let ty =
             (transl_simple_type ~new_var_jkind:Any env ~closed:false
                Mode.Alloc.Const.legacy cty).ctyp_type
