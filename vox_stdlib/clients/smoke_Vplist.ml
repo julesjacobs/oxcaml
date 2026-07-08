@@ -1,78 +1,35 @@
-(* Smoke client for Vplist: one goal per shipped law, each forced so the
-   solver MUST apply that law's grind_pattern (blueprint 6.7 dead-law check).
-   EVERY law is exercised at BOTH [int Vplist.t] AND [string Vplist.t] -- the
-   poly study's S_param-resolution check: a law proved at the abstract element
-   sort must fire at each concrete instantiation (the parameter sort resolves
-   through the [Tconstr] head [int]/[string]).  Verifies against Vplist.cmi +
-   VoxSig_Vplist.olean only -- no view of the 'a tree repr or pl_repr.
+(* Smoke client for Vplist's eq-param layer (WP-2). The CENTREPIECE is dedup:
+   the polymorphic op is PROVEN ONCE at the abstract element (Vplist.ml, verified
+   at 'a); a client USES it at a concrete element with a call-site decider lambda.
+   This is the WP-6-C gate — dedup was UNWRITABLE before the eq-param route (no
+   bool mem at an abstract element). Instantiated here at int (a concrete element whose = reflects). Verified against Vplist + Vhof.
 
-   Membership is Prop-valued (Vplist ships no decidable Bool [mem], study
-   F-B3), so its laws are forced by pure-Prop [unit{ ... }] goals rather than
-   an op result.  The empty-algebra laws (pl_isnil_nil / pl_nil_not_mem) are
-   forced under a [{ _ = pl_nil }] client HYPOTHESIS: [empty] is unspecced
-   (study F-B2), so a client cannot derive [pl_nil] from [empty ()], but it
-   CAN assert a list is empty as a precondition -- which is exactly how these
-   two laws stay client-reachable.  Post-#53 (finding C1): cons/append have
-   EQUATIONAL result contracts, so their results pass INLINE to a dependent
-   parameter -- the C1 let-binds are removed (see notes/vplist.md). *)
+   NOTE (total-no-forward): the decider param is [@vox.total], and a total param
+   cannot be FORWARDED (only a call-site lambda / [@vox.reflect] value is a valid
+   total arg), so a client supplies the lambda at a concrete element type rather
+   than threading an abstract decider param. *)
+[@@@warning "-6-32-26-27"]
+open Vhof
+open Vplist
 
-(* ===== int Vplist.t ===== *)
+[%%vox.lean {lean|
+abbrev intEq : Int -> Int -> Prop := fun a b => a = b
+|lean}]
 
-(* pl_len_nonneg *)
-let i_nonneg (l : int Vplist.t) : int{ _ >= 0 } = Vplist.length l
+(* dedup at int: result is a subset of the input. *)
+let dedup_int (l : int Vplist.t) : int Vplist.t{ pl_dedup_sub intEq l _ } =
+  Vplist.dedup (fun a b -> a = b) (fun a b -> a = b) l
 
-(* pl_len_cons *)
-let i_len_cons (x : int) (l : int Vplist.t) : int{ _ = 1 + pl_len l } =
-  Vplist.length (Vplist.cons x l)
+(* NB an int decider (native = reflects to the Prop model) works; a STRING
+   decider does NOT — OCaml bool `=` on string carries no model fact (no
+   reflected string equality; ties to the no-string-theory wall). So the concrete
+   comparator must be at a type whose = reflects (int). The op itself is proven
+   at the abstract element regardless. *)
 
-(* pl_len_app *)
-let i_len_app (p : int Vplist.t) (q : int Vplist.t) : int{ _ = pl_len p + pl_len q } =
-  Vplist.length (Vplist.append p q)
+(* bool membership at int, up to the decider. *)
+let mem_int (x : int) (l : int Vplist.t) : bool{ _ = pl_memr intEq x l } =
+  Vplist.mem (fun a b -> a = b) (fun a b -> a = b) x l
 
-(* pl_not_isnil_cons *)
-let i_cons_not_empty (x : int) (l : int Vplist.t) : bool{ _ = false } =
-  Vplist.is_empty (Vplist.cons x l)
-
-(* pl_isnil_nil (forced under a { _ = pl_nil } hypothesis) *)
-let i_nil_is_empty (l : int Vplist.t{ _ = pl_nil }) : bool{ _ = true } =
-  Vplist.is_empty l
-
-
-(* pl_mem_cons *)
-let i_mem_cons (x : int) (y : int) (l : int Vplist.t)
-  : unit{ pl_mem x (pl_cons y l) = (x = y || pl_mem x l) } = ()
-
-(* pl_mem_app *)
-let i_mem_app (x : int) (p : int Vplist.t) (q : int Vplist.t)
-  : unit{ pl_mem x (pl_app p q) = (pl_mem x p || pl_mem x q) } = ()
-
-(* ===== string Vplist.t (same laws, other instantiation) ===== *)
-
-(* pl_len_nonneg *)
-let s_nonneg (l : string Vplist.t) : int{ _ >= 0 } = Vplist.length l
-
-(* pl_len_cons *)
-let s_len_cons (x : string) (l : string Vplist.t) : int{ _ = 1 + pl_len l } =
-  Vplist.length (Vplist.cons x l)
-
-(* pl_len_app *)
-let s_len_app (p : string Vplist.t) (q : string Vplist.t)
-  : int{ _ = pl_len p + pl_len q } =
-  Vplist.length (Vplist.append p q)
-
-(* pl_not_isnil_cons *)
-let s_cons_not_empty (x : string) (l : string Vplist.t) : bool{ _ = false } =
-  Vplist.is_empty (Vplist.cons x l)
-
-(* pl_isnil_nil *)
-let s_nil_is_empty (l : string Vplist.t{ _ = pl_nil }) : bool{ _ = true } =
-  Vplist.is_empty l
-
-
-(* pl_mem_cons *)
-let s_mem_cons (x : string) (y : string) (l : string Vplist.t)
-  : unit{ pl_mem x (pl_cons y l) = (x = y || pl_mem x l) } = ()
-
-(* pl_mem_app *)
-let s_mem_app (x : string) (p : string Vplist.t) (q : string Vplist.t)
-  : unit{ pl_mem x (pl_app p q) = (pl_mem x p || pl_mem x q) } = ()
+(* remove at int: x is not a member of the result. *)
+let remove_gone (x : int) (l : int Vplist.t) : int Vplist.t{ not (pl_memr intEq x _) } =
+  Vplist.remove (fun a b -> a = b) (fun a b -> a = b) x l

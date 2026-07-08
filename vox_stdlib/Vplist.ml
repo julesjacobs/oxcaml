@@ -7,6 +7,7 @@
    uses the gap #31 skeleton-threading pattern (as Vlist): its recursive [go]
    returns a refined SKELETON at the ['a tree] level and the via injection
    happens once, through a variable. *)
+open Vhof
 type 'a plist [@@vox.sort lean "PList"]
 type 'a tree = Nil | Cons of 'a * 'a tree
 type 'a t = 'a tree{ 0 = 0 } [@vox.via (pl_repr : 'a plist)]
@@ -67,6 +68,22 @@ theorem pl_mem_app {a : Type} (x : a) (p q : PList a) :
     pl_mem x (pl_app p q) = (pl_mem x p ∨ pl_mem x q) := by
   induction p <;> grind
 grind_pattern pl_mem_app => pl_mem x (pl_app p q)
+-- pl_memr: membership up to the client decider's equality (eqHolds e), the
+-- eq-param route (probe3) around the missing DecidableEq at the abstract sort.
+@[grind, expose] def pl_memr {a : Type} (e : a -> a -> Prop) (x : a) : PList a -> Prop
+  | .PNil => False
+  | .PCons y t => eqHolds e x y \/ pl_memr e x t
+-- pl_dedup_sub: dedup's result is a SUBSET of its input (holds for ANY
+-- decider e; a membership-EQUALITY spec would need e to be an equivalence).
+@[grind, expose] def pl_dedup_sub {a : Type} (e : a -> a -> Prop) (l r : PList a) : Prop :=
+  forall y, pl_memr e y r -> pl_memr e y l
+-- pl_remove_ok: remove's honest spec for an ARBITRARY decider e -- x is not
+-- a member of the result (up to e) AND the result is a subset of the input.
+-- (The full membership-EQUALITY spec ∀y, mem y r <-> (¬e x y /\ mem y l) needs
+-- e to be an EQUIVALENCE; it is NOT PROVABLE for an arbitrary decider -- see
+-- notes/vplist.md. These two conjuncts hold for any e.)
+@[grind, expose] def pl_remove_ok {a : Type} (e : a -> a -> Prop) (x : a) (l r : PList a) : Prop :=
+  (¬ pl_memr e x r) /\ (forall y, pl_memr e y r -> pl_memr e y l)
 |lean}]
 
 let empty : (u : unit) -> 'a t =
@@ -109,3 +126,59 @@ let append : (p : 'a t) -> (q : 'a t) -> 'a t{ _ = pl_app p q } =
     in
     let res = go tp in
     (res : 'a t{ _ = pl_app p q })
+
+let mem :
+      (e : (('a -> 'a -> bool) [@vox.total])) ->
+      (eq : ((x : 'a) -> (y : 'a) -> bool{ _ = eqHolds e x y })) ->
+      (x : 'a) -> (l : 'a t) -> bool{ _ = pl_memr e x l } =
+  fun e eq x l ->
+    ignore e;
+    let refine_ t0 = l in
+    let rec go : (u : 'a tree) -> bool{ _ = pl_memr e x (pl_repr u) } =
+      fun u ->
+        match u with
+        | Nil -> false
+        | Cons (y, r) -> if eq x y then true else go r
+    in
+    go t0
+
+let dedup :
+      (e : (('a -> 'a -> bool) [@vox.total])) ->
+      (eq : ((x : 'a) -> (y : 'a) -> bool{ _ = eqHolds e x y })) ->
+      (l : 'a t) -> 'a t{ pl_dedup_sub e l _ } =
+  fun e eq l ->
+    ignore e;
+    let refine_ t0 = l in
+    let rec tmem : (x : 'a) -> (u : 'a tree) -> bool{ _ = pl_memr e x (pl_repr u) } =
+      fun x u -> match u with
+        | Nil -> false
+        | Cons (y, r) -> if eq x y then true else tmem x r
+    in
+    let rec go : (u : 'a tree) -> 'a tree{ pl_dedup_sub e (pl_repr u) (pl_repr _) } =
+      fun u -> match u with
+        | Nil -> (Nil : 'a tree{ pl_dedup_sub e (pl_repr u) (pl_repr _) })
+        | Cons (x, r) ->
+            let d = go r in
+            if tmem x d then (d : 'a tree{ pl_dedup_sub e (pl_repr u) (pl_repr _) })
+            else (Cons (x, d) : 'a tree{ pl_dedup_sub e (pl_repr u) (pl_repr _) })
+    in
+    let res = go t0 in
+    (res : 'a t{ pl_dedup_sub e l _ })
+
+let remove :
+      (e : (('a -> 'a -> bool) [@vox.total])) ->
+      (eq : ((x : 'a) -> (y : 'a) -> bool{ _ = eqHolds e x y })) ->
+      (x : 'a) -> (l : 'a t) -> 'a t{ pl_remove_ok e x l _ } =
+  fun e eq x l ->
+    ignore e;
+    let refine_ t0 = l in
+    let rec go : (u : 'a tree) -> 'a tree{ pl_remove_ok e x (pl_repr u) (pl_repr _) } =
+      fun u -> match u with
+        | Nil -> (Nil : 'a tree{ pl_remove_ok e x (pl_repr u) (pl_repr _) })
+        | Cons (y, r) ->
+            let t' = go r in
+            if eq x y then (t' : 'a tree{ pl_remove_ok e x (pl_repr u) (pl_repr _) })
+            else (Cons (y, t') : 'a tree{ pl_remove_ok e x (pl_repr u) (pl_repr _) })
+    in
+    let res = go t0 in
+    (res : 'a t{ pl_remove_ok e x l _ })

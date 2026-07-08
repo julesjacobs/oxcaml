@@ -23,6 +23,7 @@
      [DecidableEq a], which the abstract element sort lacks.  So membership
      ships ONLY as the Prop-valued model predicate [pl_mem] and its laws
      (a client STATES membership in a spec; it cannot QUERY it at runtime). *)
+open Vhof
 type 'a plist [@@vox.sort lean "PList"]
 type 'a t : value refines ('a plist)
 
@@ -91,6 +92,22 @@ grind_pattern pl_mem_cons => pl_mem x (pl_cons y l)
 public axiom pl_mem_app {a : Type} (x : a) (p q : PList a) :
     pl_mem x (pl_app p q) = (pl_mem x p ∨ pl_mem x q)
 grind_pattern pl_mem_app => pl_mem x (pl_app p q)
+-- pl_memr: membership up to the client decider's equality (eqHolds e), the
+-- eq-param route (probe3) around the missing DecidableEq at the abstract sort.
+@[grind, expose] public def pl_memr {a : Type} (e : a -> a -> Prop) (x : a) : PList a -> Prop
+  | .PNil => False
+  | .PCons y t => eqHolds e x y \/ pl_memr e x t
+-- pl_dedup_sub: dedup's result is a SUBSET of its input (holds for ANY
+-- decider e; a membership-EQUALITY spec would need e to be an equivalence).
+@[grind, expose] public def pl_dedup_sub {a : Type} (e : a -> a -> Prop) (l r : PList a) : Prop :=
+  forall y, pl_memr e y r -> pl_memr e y l
+-- pl_remove_ok: remove's honest spec for an ARBITRARY decider e -- x is not
+-- a member of the result (up to e) AND the result is a subset of the input.
+-- (The full membership-EQUALITY spec ∀y, mem y r <-> (¬e x y /\ mem y l) needs
+-- e to be an EQUIVALENCE; it is NOT PROVABLE for an arbitrary decider -- see
+-- notes/vplist.md. These two conjuncts hold for any e.)
+@[grind, expose] public def pl_remove_ok {a : Type} (e : a -> a -> Prop) (x : a) (l r : PList a) : Prop :=
+  (¬ pl_memr e x r) /\ (forall y, pl_memr e y r -> pl_memr e y l)
 |lean}]
 
 (* empty ships UNSPECCED (study F-B2): the emptiness fact [_ = pl_nil] cannot
@@ -102,3 +119,28 @@ val cons : (x : 'a) -> (l : 'a t) -> 'a t{ _ = pl_cons x l }
 val is_empty : (l : 'a t) -> bool{ _ = pl_isnil l }
 val length : (l : 'a t) -> int{ _ = pl_len l }
 val append : (p : 'a t) -> (q : 'a t) -> 'a t{ _ = pl_app p q }
+
+(* Bool membership via a client-supplied decider (eq-param, probe3): [eq] is a
+   bool decider whose contract ties it to the Prop model equality [eqHolds e];
+   membership is then decidable up to [e]. Escapes the DecidableEq-at-abstract
+   wall at zero new TCB. *)
+val mem :
+  (e : (('a -> 'a -> bool) [@vox.total])) ->
+  (eq : ((x : 'a) -> (y : 'a) -> bool{ _ = eqHolds e x y })) ->
+  (x : 'a) -> (l : 'a t) -> bool{ _ = pl_memr e x l }
+
+(* dedup: drop e-duplicates. Result is a SUBSET of the input (membership up to
+   the decider e). The end-to-end demonstration that eq-param membership
+   unblocks abstract-'a set work (WP-6-C). *)
+val dedup :
+  (e : (('a -> 'a -> bool) [@vox.total])) ->
+  (eq : ((x : 'a) -> (y : 'a) -> bool{ _ = eqHolds e x y })) ->
+  (l : 'a t) -> 'a t{ pl_dedup_sub e l _ }
+
+(* remove x l: drop every element the decider e equates to x. For an arbitrary
+   decider the result satisfies pl_remove_ok (x gone + subset); the stronger
+   membership-equality spec needs e to be an equivalence (notes/vplist.md). *)
+val remove :
+  (e : (('a -> 'a -> bool) [@vox.total])) ->
+  (eq : ((x : 'a) -> (y : 'a) -> bool{ _ = eqHolds e x y })) ->
+  (x : 'a) -> (l : 'a t) -> 'a t{ pl_remove_ok e x l _ }

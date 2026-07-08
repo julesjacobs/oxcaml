@@ -139,3 +139,56 @@ generalizes unchanged.
 - **removed by:** an obligation form stating each law once; a way for the .ml
   block to import the .mli block's model defs.
 - **severity:** MINOR (accepted hygiene tax).
+
+## eq-param layer (WP-2, 2026-07-08)
+
+bool `mem` + `remove` + `dedup` at an ABSTRACT element via a client-supplied
+decider (probe3/4): a comparator `e : 'a -> 'a -> bool` passed as a decider
+`eq : (x:'a) -> (y:'a) -> bool{ _ = eqHolds e x y }` (eqHolds from Vhof). This
+ESCAPES the DecidableEq-at-abstract wall at zero new TCB — the documented
+headline. `mem` -> `bool{ _ = pl_memr e x l }`; `remove` -> `pl_remove_ok`;
+`dedup` -> `pl_dedup_sub` (the WP-6-C gate: dedup over abstract 'a, now WRITABLE).
+Decider spec params are [@vox.total]. All verify; smoke green; negatives fail
+closed.
+
+### Vplist · the full ∀↔ removespec needs e to be an EQUIVALENCE
+- **site:** vox_stdlib/Vplist.ml (`remove`, spec `pl_remove_ok`)
+- **milestone/gap:** new (sharpens probe4)
+- **what I tried:** probe4's spec `pl_removespec e x l r := ∀y, pl_memr e y r ↔
+  (¬ eqHolds e x y ∧ pl_memr e y l)` — "the result is exactly the input minus x's
+  e-class". probe4 said this "needs a membership helper lemma".
+- **error:** NOT PROVED for an arbitrary decider (confirmed by build: goal
+  `pl_removespec e x (pl_repr u) (pl_repr t')` un-dischargeable). Root cause is
+  NOT a missing helper lemma: the spec is FALSE for a non-equivalence e. If z is
+  e-equal to the removed y but not to x (¬ e x z ∧ e z y), the ∀↔ demands z stay,
+  but removing y drops it — only reflexive+symmetric+transitive e makes the ∀↔
+  hold.
+- **workaround used:** ship the honest `pl_remove_ok e x l r := (¬ pl_memr e x r)
+  ∧ (∀y, pl_memr e y r -> pl_memr e y l)` — "x is gone (up to e) AND result ⊆
+  input". Both conjuncts hold for ANY decider and prove by `induction ... grind`
+  (grind instantiates the IH's ∀). The equivalence-strength spec is a client-block
+  one-liner for a client that supplies an equivalence e.
+- **removed by:** n/a — the weaker spec is correct for the general decider; the
+  strong spec is available under an equivalence hypothesis.
+- **severity:** MINOR (refines probe4's verdict: the elaboration wall is gone,
+  but the ∀↔ spec is equivalence-gated, not lemma-gated).
+
+### Vplist · [@vox.total] decider cannot be forwarded -> instantiate at a concrete element
+- **site:** vox_stdlib/clients/smoke_Vplist.ml (dedup_int; the dropped abstract-'a client)
+- **milestone/gap:** new (total-no-forward × poly)
+- **what I tried:** a client generic over 'a that FORWARDS its own
+  `(e [@vox.total])` decider param into `Vplist.dedup`/`mem`.
+- **error:** `the argument for this parameter must be a TOTAL spec function` — a
+  total param VARIABLE is not a valid total argument (only a call-site lambda /
+  [@vox.reflect] value is; the WP-1 total-no-forward finding). So a fully abstract
+  client cannot thread a decider.
+- **workaround used:** instantiate the poly op at a CONCRETE element (int) with a
+  call-site lambda decider `(fun a b -> a = b)`; the op itself is still proven
+  ONCE at the abstract element (Vplist.ml). This is normal usage (dedup an int
+  list). A STRING decider additionally fails: bool `=` on string carries no model
+  fact (no reflected string equality — ties to the no-string-theory wall), so the
+  concrete comparator must be at a type whose `=` reflects (int).
+- **removed by:** a total-forwarding rule accepting a total-typed param variable
+  as a total argument; and a reflected string-equality primitive.
+- **severity:** MINOR (the concrete-element instantiation is the realistic client
+  shape; the abstract proof lives in the module).
