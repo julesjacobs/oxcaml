@@ -551,6 +551,49 @@ let vox_poly_attribute env p =
       decl.type_attributes
 ;;
 
+(* [@@vox.sort opaque] INFERENCE support.  A sortless abstract type -- no
+   manifest, no [refines]/ghost/int/bool sort, no [@@vox.sort] attribute -- may
+   be given its OWN opaque sort automatically rather than degrading to the
+   shared VoxU.  Two unambiguous signals drive it, at their natural sites: this
+   unit's interface block MENTIONS the type's minted solver name
+   [Vox_<unit>_<t>] (handled in [register_datatypes_in_blocks], which already
+   scans block text for such names), or an imported unit already declared the
+   type opaque in its [vp_datatypes] (so a client sorts it at that same name,
+   not VoxU -- handled in [vox_sort_attribute]).  The explicit
+   [@@vox.sort opaque] attribute still means exactly this; the inference only
+   saves the line, and never overrides a type that already has a sort. *)
+let is_sortless_abstract env p =
+  match Env.find_type p env with
+  | exception Not_found -> false
+  | decl ->
+    (* Arity 0 only: one uninterpreted sort cannot distinguish instantiations of
+       a parameterized type -- the same guard [Sa_opaque] uses.  This also
+       excludes [@@vox.poly] carriers, which are parameterized. *)
+    decl.type_params = []
+    && Option.is_none decl.type_manifest
+    && (match decl.type_kind with Types.Type_abstract _ -> true | _ -> false)
+    && (match Jkind.get_vox_refines decl.type_jkind with
+        | Vr_top -> true
+        | Vr_sort _ -> false)
+    && Option.is_none (List.find_map vox_sort_of_attribute decl.type_attributes)
+;;
+
+(* Does an imported unit's interface declare [p] (by its stable [path_uname]) as
+   an opaque sort?  The export stores the rendered Lean declaration, whose form
+   for an opaque is [opaque <name> : Type]. *)
+let imported_declares_opaque p =
+  let key = path_uname p in
+  List.exists
+    (fun (_, vp) ->
+      List.exists
+        (fun (n, leand) ->
+          String.equal n key
+          && String.length leand >= 7
+          && String.equal (String.sub leand 0 7) "opaque ")
+        vp.Cmi_format.vp_datatypes)
+    !imported_specs
+;;
+
 (* The sort of the type at path [p] applied to argument sorts [arg_sorts], registering it
    as a datatype (with its field datatypes, recursively) on first sight. [arg_sorts]
    instantiates the declaration's parameters at the USE; the declaration itself is
@@ -595,7 +638,14 @@ and vox_sort_attribute env p arg_sorts =
           (* arity-0 only: one uninterpreted sort cannot distinguish instantiations of a
              parameterized type *)
           if decl.type_params = [] then Some (datatype_sort_opaque p) else Some S_other
-        | None -> None))
+        | None ->
+          (* Infer [@@vox.sort opaque] for a sortless abstract type an imported
+             unit already declared opaque, so the client sorts it at the same
+             [Vox_] name (the block-mention signal is handled where the block is
+             scanned, in [register_datatypes_in_blocks]). *)
+          if is_sortless_abstract env p && imported_declares_opaque p
+          then Some (datatype_sort_opaque p)
+          else None))
 
 (* Turn a declared refinement sort into a solver sort, registering any datatype/tuple it
    mentions. [Vs_data] registers the MODELED datatype (so an abstract type modeled as a
@@ -5554,7 +5604,13 @@ let register_datatypes_in_blocks env blocks =
           | exception Not_found -> ()
           | p, _ ->
             if String.equal (lean_dt_name p) ("Vox_" ^ token)
-            then ignore (datatype_sort env p [] : dsort)))
+            then
+              (* The block names [p]'s own minted [Vox_] sort.  A sortless
+                 abstract type here is inferred opaque (its own uninterpreted
+                 sort); a concrete/aliased type registers normally. *)
+              if is_sortless_abstract env p
+              then ignore (datatype_sort_opaque p : dsort)
+              else ignore (datatype_sort env p [] : dsort)))
       (candidates token)
   in
   List.iter
