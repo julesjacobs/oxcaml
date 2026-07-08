@@ -225,13 +225,13 @@ let _ = test5 ()
 (*****************************************)
 (* Test 6: variants containing only void *)
 
-type void_holder = Vh of void [@immediate_all_void_constructor]
+type void_holder = Vh of void
 
 (* Multiple constructors *)
 type void_variants =
-  | V1 of void [@immediate_all_void_constructor]
-  | V2 of void * void [@immediate_all_void_constructor]
-  | V3 of void * #(void * void) [@immediate_all_void_constructor]
+  | V1 of void
+  | V2 of void * void
+  | V3 of void * #(void * void)
 
 let test6 () =
   start_test "variants containing only void";

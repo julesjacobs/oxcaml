@@ -18,7 +18,7 @@
  output = "e2e_inline.table";
  script = "sh ${test_source_directory}/e2e_table.sh \
            ${test_build_directory}/e2e_inline.o \
-           '(caml|U[0-9]+)(Stdlib|Camlinternal)'";
+           'camlStdlib|camlCamlinternal'";
  script;
  reference = "${test_source_directory}/e2e_inline.reference";
  check-program-output;

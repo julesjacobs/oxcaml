@@ -427,10 +427,13 @@ let simplify_lets lam ~restrict_to_upstream_dwarf ~gdwarf_may_alter_codegen =
   in
   let optimize = !Clflags.native_code || not !Clflags.debug in
   let optimize_except_alias_bindings =
-    (* The debug info degrades when we substitute let x = y in ... bindings. We
-       disable their simplification when [dwarf_wants_to_prevent_substitutions].
-       Flambda2 runs more simplification subsequently, which should take care of
-       these. *)
+    (* This doesn't yet include Alias bindings of variables to variables
+       because of what is described in this CR.  Other used-once Alias
+       bindings will not be substituted out when we want to preserve them
+       for DWARF.  (They will only be let-bound again by Flambda 2
+       anyway, even if substituted - it's just a matter of placement.) *)
+    (* CR mshinwell: Fix bug whereby Alias bindings of variables to variables
+      are being generated (probably by Matching) with the wrong layout. *)
     optimize && not dwarf_wants_to_prevent_substitutions
   in
 
@@ -491,7 +494,7 @@ let simplify_lets lam ~restrict_to_upstream_dwarf ~gdwarf_may_alter_codegen =
       end
   | Lfunction fn ->
       count_lfunction fn
-  | Llet(_str, _k, v, _duid, Lvar w, l2) when optimize_except_alias_bindings ->
+  | Llet(_str, _k, v, _duid, Lvar w, l2) when optimize ->
       (* v will be replaced by w in l2, so each occurrence of v in l2
          increases w's refcount *)
       count (bind_var bv v) l2;
@@ -618,7 +621,7 @@ let simplify_lets lam ~restrict_to_upstream_dwarf ~gdwarf_may_alter_codegen =
               attr=attr1; loc; ret_mode; mode} ->
       begin match outer_kind, ret_mode, simplif l with
         Curried {nlocal=0},
-        Alloc_heap,
+        Not_alloc_stack,
         Lfunction{kind=Curried _ as kind; params=params'; return=return2;
                   body; attr=attr2; loc; mode=inner_mode; ret_mode}
         when optimize &&
@@ -635,7 +638,7 @@ let simplify_lets lam ~restrict_to_upstream_dwarf ~gdwarf_may_alter_codegen =
       | kind, ret_mode, body ->
           lfunction ~kind ~params ~return:outer_return ~body ~attr:attr1 ~loc ~mode ~ret_mode
       end
-  | Llet(_str, _k, v, _duid, Lvar w, l2) when optimize_except_alias_bindings ->
+  | Llet(_str, _k, v, _duid, Lvar w, l2) when optimize ->
       Hashtbl.add subst v (simplif (Lvar w));
       simplif l2
   | Llet(Strict, kind, v, duid,
@@ -900,7 +903,7 @@ let split_default_wrapper ~id:fun_id ~debug_uid:fun_duid ~kind ~params ~return
             ap_result_layout = return;
             ap_loc = loc;
             ap_region_close = Rc_normal;
-            ap_mode = alloc_heap;
+            ap_mode = not_alloc_stack;
             ap_tailcall = Default_tailcall;
             ap_inlined = Default_inlined;
             ap_specialised = Default_specialise;
@@ -931,9 +934,9 @@ let split_default_wrapper ~id:fun_id ~debug_uid:fun_duid ~kind ~params ~return
     (* TODO: enable this optimisation even in the presence of local returns *)
     begin match kind, ret_mode with
     | Curried {nlocal}, _ when nlocal > 0 -> raise Exit
-    | Tupled, Alloc_local -> raise Exit
-    | _, Alloc_heap -> ()
-    | _, Alloc_local -> assert false
+    | Tupled, Maybe_alloc_stack -> raise Exit
+    | _, Not_alloc_stack -> ()
+    | _, Maybe_alloc_stack -> assert false
     end;
     let body, inner = aux [] false body in
     let attr = { default_stub_attribute with zero_alloc = attr.zero_alloc } in

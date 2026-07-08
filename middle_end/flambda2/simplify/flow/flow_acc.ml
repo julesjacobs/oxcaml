@@ -495,10 +495,10 @@ let record_lifted_constants lifted_constants (t : t) =
 (* ************* *)
 
 let add_extra_args_to_call ~extra_args rewrite_id original_args =
-  match Apply_cont_rewrite_id.Map.find_or_null rewrite_id extra_args with
-  | Null -> Some original_args
-  | This Or_invalid.Invalid -> None
-  | This (Or_invalid.Ok extra_args) ->
+  match Apply_cont_rewrite_id.Map.find rewrite_id extra_args with
+  | exception Not_found -> Some original_args
+  | Or_invalid.Invalid -> None
+  | Or_invalid.Ok extra_args ->
     let args_acc =
       if Numeric_types.Int.Map.is_empty original_args
       then 0, Numeric_types.Int.Map.empty
@@ -533,16 +533,15 @@ let normalize_acc ~specialization_map (t : T.Acc.t) =
         let apply_cont_args =
           Continuation.Map.fold
             (fun cont rewrite_ids acc ->
-              match Continuation.Map.find_or_null cont specialization_map with
-              | Null -> Continuation.Map.add cont rewrite_ids acc
-              | This specialized_ids ->
+              match Continuation.Map.find cont specialization_map with
+              | exception Not_found -> Continuation.Map.add cont rewrite_ids acc
+              | specialized_ids ->
                 Apply_cont_rewrite_id.Map.fold
                   (fun id args acc ->
-                    match
-                      Apply_cont_rewrite_id.Map.find_or_null id specialized_ids
-                    with
-                    | Null -> Continuation_callsite_map.add cont id args acc
-                    | This specialized ->
+                    match Apply_cont_rewrite_id.Map.find id specialized_ids with
+                    | exception Not_found ->
+                      Continuation_callsite_map.add cont id args acc
+                    | specialized ->
                       Continuation_callsite_map.add specialized id args acc)
                   rewrite_ids acc)
             elt.apply_cont_args Continuation.Map.empty
@@ -552,9 +551,9 @@ let normalize_acc ~specialization_map (t : T.Acc.t) =
           Continuation.Map.filter_map
             (fun cont rewrite_ids ->
               let rewrite_ids =
-                match Continuation.Map.find_or_null cont t.extra with
-                | Null -> rewrite_ids
-                | This epa ->
+                match Continuation.Map.find cont t.extra with
+                | exception Not_found -> rewrite_ids
+                | epa ->
                   let extra_args = EPA.extra_args epa in
                   Apply_cont_rewrite_id.Map.filter_map
                     (add_extra_args_to_call ~extra_args)
@@ -583,18 +582,18 @@ let normalize_acc ~specialization_map (t : T.Acc.t) =
         let defined =
           Continuation.Map.fold
             (fun callee_cont rewrite_ids defined ->
-              match Continuation.Map.find_or_null callee_cont t.extra with
-              | Null -> defined
-              | This epa ->
+              match Continuation.Map.find callee_cont t.extra with
+              | exception Not_found -> defined
+              | epa ->
                 Apply_cont_rewrite_id.Map.fold
                   (fun rewrite_id _args defined ->
                     match
-                      Apply_cont_rewrite_id.Map.find_or_null rewrite_id
+                      Apply_cont_rewrite_id.Map.find rewrite_id
                         (EPA.extra_args epa)
                     with
-                    | Null -> defined
-                    | This Invalid -> defined
-                    | This (Ok extra_args) ->
+                    | exception Not_found -> defined
+                    | Invalid -> defined
+                    | Ok extra_args ->
                       let defined =
                         List.fold_left
                           (fun defined -> function

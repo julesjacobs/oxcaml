@@ -4123,13 +4123,8 @@ jkind_desc_gen(self):
       in
       Pjk_mod ($1, modes)
     }
-  | name = mkrhs(type_longident) axes = mkrhs(LIDENT)* {
-      match axes with
-      | [] -> Pjk_abbreviation name
-      | _ :: _ ->
-        Pjk_operator
-          ({ pjka_loc = make_loc $loc(name);
-             pjka_desc = Pjk_abbreviation name }, axes)
+  | mkrhs(type_longident) mkrhs(LIDENT)* {
+      Pjk_abbreviation ($1, $2)
     }
   | KIND_OF ty=core_type %prec below_LBRACKETAT {
       Pjk_kind_of ty
@@ -4140,12 +4135,8 @@ jkind_desc_gen(self):
   | reverse_product_jkind_gen(self) %prec below_AMPERSAND {
       Pjk_product (List.rev $1)
     }
-  | LPAREN inner = self RPAREN axes = mkrhs(LIDENT)* {
-      match axes with
-      | [] -> inner
-      | _ :: _ ->
-        Pjk_operator
-          ({ pjka_loc = make_loc $loc(inner); pjka_desc = inner }, axes)
+  | LPAREN self RPAREN {
+      $2
     }
 ;
 

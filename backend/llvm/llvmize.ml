@@ -629,10 +629,7 @@ let extcall t (i : Cfg.terminator Cfg.instruction) ~func_symbol ~alloc
             in
             emit_ins_no_res t (I.store ~ptr:slot ~to_store:temp)
           | Stack (Local _ | Incoming _ | Domainstate _) | Unknown | Reg _ ->
-            Misc.fatal_errorf
-              "Llvmize.extcall: unexpected non-Outgoing stack-argument \
-               location %a for call to %s"
-              Printreg.reg reg func_symbol)
+            assert false)
         stack_arg_regs;
       (* Prepare direct args + special values for [caml_c_call_stack_args] *)
       let stack_args_begin =

@@ -14,23 +14,22 @@
 (*                                                                        *)
 (**************************************************************************)
 
-open Oxcaml_utils
-
 (** Contents of middle-end-specific portion of .cmx files when using Flambda. *)
 
 type t
 
 type raw
 
-val from_raw : sections:File_sections.t -> raw -> t
+val to_raw : t -> raw * Oxcaml_utils.File_sections.t
 
-val create_raw :
+val from_raw : sections:Oxcaml_utils.File_sections.t -> raw -> t
+
+val create :
   final_typing_env:Flambda2_types.Typing_env.Serializable.t ->
   all_code:Exported_code.t ->
   exported_offsets:Exported_offsets.t ->
   used_value_slots:Value_slot.Set.t ->
-  sections:File_sections.Builder.t ->
-  raw
+  t
 
 val import_typing_env_and_code :
   t -> Flambda2_types.Typing_env.Serializable.t * Exported_code.t
@@ -39,11 +38,8 @@ val exported_offsets : t -> Exported_offsets.t
 
 val with_exported_offsets : t -> Exported_offsets.t -> t
 
-(** Append a cmx for packs *)
-val append :
-  raw option ->
-  raw option * (File_sections.Idx.t -> File_sections.Idx.t) ->
-  raw option
+(** Aggregate several cmx into one for packs *)
+val merge : t option -> t option -> t option
 
 (** For ocamlobjinfo *)
 val print :

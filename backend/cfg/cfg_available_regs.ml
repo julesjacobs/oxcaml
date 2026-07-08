@@ -390,9 +390,7 @@ module Transfer = struct
       | Unreachable -> unreachable, unreachable
       | Ok avail_before -> (
         match term.desc with
-        | Never ->
-          Misc.fatal_error
-            "Cfg_available_regs.terminator: unexpected Never terminator"
+        | Never -> assert false
         | Always _ | Parity_test _ | Truth_test _ | Float_test _ | Int_test _
         | Switch _ | Call _ | Prim _ | Return | Raise _ | Tailcall_func _
         | Call_no_return _ | Invalid _ | Tailcall_self _ ->
@@ -400,9 +398,7 @@ module Transfer = struct
             ~is_interesting_constructor:
               Cfg.(
                 function
-                | Never ->
-                  Misc.fatal_error
-                    "Cfg_available_regs.terminator: unexpected Never terminator"
+                | Never -> assert false
                 | Call _ | Prim { op = Probe _; label_after = _ } -> true
                 | Always _ | Parity_test _ | Truth_test _ | Float_test _
                 | Int_test _ | Switch _ | Return | Raise _ | Tailcall_self _

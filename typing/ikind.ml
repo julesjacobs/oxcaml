@@ -118,7 +118,7 @@ module Solver = struct
     | Types.Tvariant _ -> true
     | Types.Tconstr _ -> true
     | Types.Tobject _ -> true
-    | _ -> !Clflags.recursive_types
+    | _ -> false
 
   let is_principal_type (ty : Types.type_expr) : bool =
     (not !Clflags.principal) || Types.get_level ty = Btype.generic_level
@@ -214,23 +214,7 @@ module Solver = struct
         (* We add the parameters to the TyTbl so that they will refer to
            rigid variables that represent them in the solver. *)
         List.iter2
-          (fun ty var ->
-            (* Parameters written as plain type variables may have explicit
-               bounds, as in [('a : bound)]. Cap their rigid variables by those
-               bounds (needed for recursive payload ikinds). Other parameter
-               expressions do not have a written parameter bound to apply here,
-               so keep their rigid atoms bare. *)
-            let param_kind =
-              match Types.get_desc ty with
-              | Types.Tvar { jkind; _ } ->
-                Ldd.meet (Ldd.node_of_var var) (ckind_of_jkind ctx jkind)
-              | Types.Tunivar _ ->
-                Misc.fatal_error
-                  ("Ikind.type_declaration_ikind_of_jkind: "
-                 ^ "unexpected Tunivar in parameter list")
-              | _ -> Ldd.node_of_var var
-            in
-            TyTbl.add ctx.ty_to_kind ty param_kind)
+          (fun ty var -> TyTbl.add ctx.ty_to_kind ty (Ldd.node_of_var var))
           params rigid_vars;
         (* Compute body kind *)
         (* CR jujacobs: potential efficiency win:
@@ -306,7 +290,7 @@ module Solver = struct
           let unresolved_base =
             match jkind_desc.base with
             | Types.Layout _ -> None
-            | Types.Kconstr (path, _) -> Some path
+            | Types.Kconstr path -> Some path
           in
           jkind_desc.mod_bounds, jkind_desc.with_bounds, unresolved_base
         in
@@ -322,7 +306,7 @@ module Solver = struct
             let unresolved_base =
               match jkind_desc.base with
               | Types.Layout _ -> None
-              | Types.Kconstr (path, _) -> Some path
+              | Types.Kconstr path -> Some path
             in
             jkind_desc.mod_bounds, jkind_desc.with_bounds, unresolved_base
         in
@@ -365,7 +349,7 @@ module Solver = struct
           let unresolved_base =
             match jkind_desc.base with
             | Types.Layout _ -> None
-            | Types.Kconstr (path, _) -> Some path
+            | Types.Kconstr path -> Some path
           in
           jkind_desc.mod_bounds, unresolved_base
         | Some env -> (
@@ -375,7 +359,7 @@ module Solver = struct
             let unresolved_base =
               match jkind_desc.base with
               | Types.Layout _ -> None
-              | Types.Kconstr (path, _) -> Some path
+              | Types.Kconstr path -> Some path
             in
             jkind_desc.mod_bounds, unresolved_base)
       in

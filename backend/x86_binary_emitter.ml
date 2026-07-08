@@ -163,16 +163,22 @@ let str_int64L s pos v =
   str_int32L s pos v;
   str_int32L s (pos + 4) (Int64.shift_right_logical v 32)
 
-(* Forward local jumps are sized by fixed-point iteration. We first emit the
-   short form for code size. During relocation resolution, any jump whose 8-bit
-   displacement does not fit is recorded in [forced_long_jumps], and the
-   section is reassembled with that jump in long form. *)
+(* When a jump has to be generated, we compare the offset between the
+   source instruction and the target instruction, in number of
+   instructions.
+
+   If the offset is less than [short_jump_threshold] instructions,
+   we generate a short jump during the first pass. 16 is a "safe"
+   value, as most instructions are shorter than 8 bytes: [REX] +
+   [OPCODE] + [MODRM] + [SIB] + [IMM32] *)
 
 let local_relocs = ref []
 
 let local_labels = String.Tbl.create 100
 
 let forced_long_jumps = ref IntSet.empty
+
+let instr_size = ref 4
 
 let new_buffer sec =
   {
@@ -1116,11 +1122,8 @@ let emit_reloc_jump near_opcodes far_opcodes b loc symbol =
     let target_loc = String.Tbl.find local_labels symbol in
     if target_loc < loc then (
       (* backward *)
-      (* The target position is known, and so is the actual offset.  Even so,
-         once a backward jump has been promoted to the long form in a prior pass
-         we keep it long for all subsequent passes to ensure growth is
-         monotonic. This avoids oscillating layouts and matches common assembler
-         behavior. *)
+      (* The target position is known, and so is the actual offset.  We can
+         thus decide locally if a short jump can be used. *)
       let target_pos =
         try label_pos b symbol with Not_found -> assert false
       in
@@ -1130,27 +1133,36 @@ let emit_reloc_jump near_opcodes far_opcodes b loc symbol =
       let togo_short =
         Int64.sub togo (Int64.of_int (1 + List.length near_opcodes))
       in
-      let force_far = IntSet.mem loc !forced_long_jumps in
-      let short_fits =
-        Int64.compare togo_short (-128L) >= 0
-        && Int64.compare togo_short 128L < 0
-      in
-      if (not force_far) && short_fits then (
+
+      (*      Printf.printf "%s/%i: backward  togo_short=%Ld\n%!" symbol loc togo_short; *)
+      if Int64.compare togo_short (-128L)  >= 0 && Int64.compare togo_short 128L < 0 then (
         buf_opcodes b near_opcodes;
         buf_int8L b togo_short)
       else (
-        if not force_far then
-          forced_long_jumps := IntSet.add loc !forced_long_jumps;
         buf_opcodes b far_opcodes;
         buf_int32L b
           (Int64.sub togo (Int64.of_int (4 + List.length far_opcodes)))))
     else
       (* forward *)
-      (* Have we detected previously that this jump instruction needs
-         to be a long one?  If not, optimistically emit a short jump and
-         let the retry mechanism upgrade it on a later pass if the actual
-         offset turns out to exceed the 8-bit range. *)
-      let force_far = IntSet.mem loc !forced_long_jumps in
+      (* Is the target too far forward (in term of instruction count)
+         or have we detected previously that this jump instruction needs
+         to be a long one?
+
+         The str_size constant (see below) is chosen to avoid a second
+         pass most oftenm while not being overly pessimistic. *)
+
+      (*
+      if Int64.of_int ((target_loc - loc) * !instr_size) >= 120L then
+        Printf.printf "%s/%i: probably too far (%i)\n%!" symbol loc target_loc
+      else if IntSet.mem loc !forced_long_jumps then
+        Printf.printf "%s/%i: forced long jump\n%!" symbol loc
+      else
+        Printf.printf "%s/%i: short\n%!" symbol loc;
+*)
+      let force_far =
+        Int64.compare (Int64.of_int ((target_loc - loc) * !instr_size)) 120L >= 0
+        || IntSet.mem loc !forced_long_jumps
+      in
       if force_far then (
         buf_opcodes b far_opcodes;
         record_local_reloc b (RelocLongJump symbol);
@@ -1483,9 +1495,6 @@ let assemble_instr b loc = function
   | SBB (src, dst) -> emit_SBB b dst src
   | SET (condition, dst) -> emit_set b condition dst
   | TEST (src, dst) -> emit_test b dst src
-  | UD2 ->
-      buf_int8 b 0x0F;
-      buf_int8 b 0x0B
   | XCHG (src, dst) -> emit_XCHG b dst src
   | XOR (src, dst) -> emit_XOR b dst src
   | SIMD (instr, args) -> emit_simd b instr args
@@ -1668,7 +1677,8 @@ let rec assemble_section arch section =
     X86_gas.generate_asm Out_channel.stderr dll;
     Printexc.raise_with_backtrace Misc.Fatal_error bt
 
-and assemble_section0 _arch section =
+and assemble_section0 arch section =
+  (match arch with X86 -> instr_size := 5 | X64 -> instr_size := 6);
   forced_long_jumps := IntSet.empty;
   String.Tbl.clear local_labels;
 

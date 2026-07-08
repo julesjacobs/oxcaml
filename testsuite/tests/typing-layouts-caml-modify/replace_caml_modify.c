@@ -35,8 +35,3 @@ CAMLprim void __wrap_caml_modify_local(value obj, intnat i, value val)
   __real_caml_modify_local(obj, i, val);
   called_modify = true;
 }
-
-intnat caml_native_pointer_of_value (value v)
-{
-  return (intnat) v;
-}

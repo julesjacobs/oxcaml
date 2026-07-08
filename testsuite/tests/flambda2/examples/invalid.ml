@@ -4,17 +4,8 @@
  ocamlopt_flags = "-dcmm";
  setup-ocamlopt.byte-build-env;
  ocamlopt.byte with dump-simplify;
- {
-   flat-float-array;
-   check-fexpr-dump;
-   check-ocamlopt.byte-output;
- }{
-   no-flat-float-array;
-   fexpr_reference_suffix = "no-flat-float-array.reference";
-   compiler_reference = "${test_source_directory}/invalid.no-flat-float-array.compilers.reference";
-   check-fexpr-dump;
-   check-ocamlopt.byte-output;
- }
+ check-fexpr-dump;
+ check-ocamlopt.byte-output;
 *)
 
 (* This example showed an isntance where [Simplify] produced an invalid, which

@@ -6,13 +6,8 @@
  ocamlopt.opt;
 
  only-default-codegen;
- no-flat-float-array;
  flags = " -O3 -I ocamlopt.opt";
- flags += " -cfg-prologue-shrink-wrap";
- flags += " -x86-peephole-optimize";
- flags += " -regalloc-param SPLIT_AROUND_LOOPS:on";
- flags += " -regalloc-param AFFINITY:on -regalloc irc";
- flags += " -cfg-merge-blocks";
+ flags += " -experimental-optimizations";
  expect.opt;
 *)
 
@@ -38,14 +33,16 @@ let push (vec : 'a option vec) x =
 push:
   subq  $8, %rsp
   movq  %rax, %r12
-  movq  %rdi, %rsi
+  movq  %rdi, %rdx
   movq  -8(%rbx), %rax
   salq  $8, %rax
   shrq  $17, %rax
   cmpq  %rax, %r12
   jae   .L0
-  leaq  -4(%rbx,%r12,4), %rdi
-  call  caml_modify@PLT
+  movq  %r12, %rsi
+  sarq  $1, %rsi
+  movq  %rbx, %rdi
+  call  caml_modify_local@PLT
   leaq  2(%r12), %rax
   addq  $8, %rsp
   ret
@@ -109,9 +106,11 @@ let ref_unsafe_set (a : string array) (i : int) (v : string) =
 [%%expect_asm X86_64{|
 ref_unsafe_set:
   subq  $8, %rsp
-  movq  %rdi, %rsi
-  leaq  -4(%rax,%rbx,4), %rdi
-  call  caml_modify@PLT
+  movq  %rbx, %rsi
+  movq  %rdi, %rdx
+  sarq  $1, %rsi
+  movq  %rax, %rdi
+  call  caml_modify_local@PLT
   movl  $1, %eax
   addq  $8, %rsp
   ret
@@ -124,7 +123,23 @@ let poly_unsafe_get (a : 'a array) (i : int) =
   Array.unsafe_get a i
 [%%expect_asm X86_64{|
 poly_unsafe_get:
-  movq  -4(%rax,%rbx,4), %rax
+  movq  %rax, %rdi
+  movzbq -8(%rdi), %rax
+  cmpq  $254, %rax
+  jne   .L1
+  subq  $8, %rsp
+  subq  $16, %r15
+  cmpq  (%r14), %r15
+  jb    <hidden GC jump pad>
+.L0:
+  leaq  8(%r15), %rax
+  movq  $1277, -8(%rax)
+  vmovsd -4(%rdi,%rbx,4), %xmm0
+  vmovsd %xmm0, (%rax)
+  addq  $8, %rsp
+  ret
+.L1:
+  movq  -4(%rdi,%rbx,4), %rax
   ret
 |}]
 
@@ -132,10 +147,20 @@ let poly_unsafe_set (a : 'a array) (i : int) (v : 'a) =
   Array.unsafe_set a i v
 [%%expect_asm X86_64{|
 poly_unsafe_set:
+  movq  %rbx, %rsi
+  movq  %rdi, %rdx
+  movzbq -8(%rax), %rbx
+  cmpq  $254, %rbx
+  jne   .L0
+  vmovsd (%rdx), %xmm0
+  vmovsd %xmm0, -4(%rax,%rsi,4)
+  movl  $1, %eax
+  ret
+.L0:
   subq  $8, %rsp
-  movq  %rdi, %rsi
-  leaq  -4(%rax,%rbx,4), %rdi
-  call  caml_modify@PLT
+  sarq  $1, %rsi
+  movq  %rax, %rdi
+  call  caml_modify_local@PLT
   movl  $1, %eax
   addq  $8, %rsp
   ret
@@ -196,8 +221,7 @@ let float_unsafe_get_plain (a : float array) (i : int) =
   Float_u.of_float (Array.unsafe_get a i)
 [%%expect_asm X86_64{|
 float_unsafe_get_plain:
-  movq  -4(%rax,%rbx,4), %rax
-  vmovsd (%rax), %xmm0
+  vmovsd -4(%rax,%rbx,4), %xmm0
   ret
 |}]
 
@@ -205,18 +229,8 @@ let float_unsafe_set_plain (a : float array) (i : int) (v : float#) =
   Array.unsafe_set a i (Float_u.to_float v)
 [%%expect_asm X86_64{|
 float_unsafe_set_plain:
-  subq  $8, %rsp
-  subq  $16, %r15
-  cmpq  (%r14), %r15
-  jb    <hidden GC jump pad>
-.L0:
-  leaq  8(%r15), %rsi
-  movq  $1277, -8(%rsi)
-  vmovsd %xmm0, (%rsi)
-  leaq  -4(%rax,%rbx,4), %rdi
-  call  caml_modify@PLT
+  vmovsd %xmm0, -4(%rax,%rbx,4)
   movl  $1, %eax
-  addq  $8, %rsp
   ret
 |}]
 
@@ -434,14 +448,16 @@ let ref_safe_set (a : string array) (i : int) (v : string) =
 [%%expect_asm X86_64{|
 ref_safe_set:
   subq  $8, %rsp
-  movq  %rdi, %rsi
-  movq  -8(%rax), %rdi
-  salq  $8, %rdi
-  shrq  $17, %rdi
-  cmpq  %rdi, %rbx
+  movq  %rbx, %rsi
+  movq  %rdi, %rdx
+  movq  -8(%rax), %rbx
+  salq  $8, %rbx
+  shrq  $17, %rbx
+  cmpq  %rbx, %rsi
   jae   .L0
-  leaq  -4(%rax,%rbx,4), %rdi
-  call  caml_modify@PLT
+  sarq  $1, %rsi
+  movq  %rax, %rdi
+  call  caml_modify_local@PLT
   movl  $1, %eax
   addq  $8, %rsp
   ret
@@ -461,14 +477,31 @@ let poly_safe_get (a : 'a array) (i : int) =
   Array.get a i
 [%%expect_asm X86_64{|
 poly_safe_get:
-  movq  -8(%rax), %rdi
-  salq  $8, %rdi
-  shrq  $17, %rdi
-  cmpq  %rdi, %rbx
-  jae   .L0
-  movq  -4(%rax,%rbx,4), %rax
-  ret
+  movq  %rax, %rdi
+  movq  -8(%rdi), %rax
+  salq  $8, %rax
+  shrq  $17, %rax
+  cmpq  %rax, %rbx
+  jae   .L2
+  movzbq -8(%rdi), %rax
+  cmpq  $254, %rax
+  jne   .L1
+  subq  $8, %rsp
+  subq  $16, %r15
+  cmpq  (%r14), %r15
+  jb    <hidden GC jump pad>
 .L0:
+  leaq  8(%r15), %rax
+  movq  $1277, -8(%rax)
+  vmovsd -4(%rdi,%rbx,4), %xmm0
+  vmovsd %xmm0, (%rax)
+  addq  $8, %rsp
+  ret
+.L1:
+  movq  -4(%rdi,%rbx,4), %rax
+  ret
+.L2:
+  subq  $8, %rsp
   movq  <hidden PC-relative offset>(%rip), %rax
   movq  48(%r14), %rsp
   popq  48(%r14)
@@ -480,19 +513,30 @@ let poly_safe_set (a : 'a array) (i : int) (v : 'a) =
   Array.set a i v
 [%%expect_asm X86_64{|
 poly_safe_set:
+  movq  %rbx, %rsi
+  movq  %rdi, %rdx
+  movq  -8(%rax), %rbx
+  salq  $8, %rbx
+  shrq  $17, %rbx
+  cmpq  %rbx, %rsi
+  jae   .L1
+  movzbq -8(%rax), %rbx
+  cmpq  $254, %rbx
+  jne   .L0
+  vmovsd (%rdx), %xmm0
+  vmovsd %xmm0, -4(%rax,%rsi,4)
+  movl  $1, %eax
+  ret
+.L0:
   subq  $8, %rsp
-  movq  %rdi, %rsi
-  movq  -8(%rax), %rdi
-  salq  $8, %rdi
-  shrq  $17, %rdi
-  cmpq  %rdi, %rbx
-  jae   .L0
-  leaq  -4(%rax,%rbx,4), %rdi
-  call  caml_modify@PLT
+  sarq  $1, %rsi
+  movq  %rax, %rdi
+  call  caml_modify_local@PLT
   movl  $1, %eax
   addq  $8, %rsp
   ret
-.L0:
+.L1:
+  subq  $8, %rsp
   movq  <hidden PC-relative offset>(%rip), %rax
   movq  48(%r14), %rsp
   popq  48(%r14)
@@ -549,8 +593,7 @@ float_safe_get_plain:
   shrq  $17, %rdi
   cmpq  %rdi, %rbx
   jae   .L0
-  movq  -4(%rax,%rbx,4), %rax
-  vmovsd (%rax), %xmm0
+  vmovsd -4(%rax,%rbx,4), %xmm0
   ret
 .L0:
   movq  <hidden PC-relative offset>(%rip), %rax
@@ -582,4 +625,15 @@ int32_safe_get:
   popq  48(%r14)
   popq  %r11
   jmp   *%r11
+|}]
+
+(* [float# box] gets optimized like [float] *)
+let float_u_box_unsafe_set (a : float# box array) (i : int) (v : float# box) =
+  Array.unsafe_set a i v
+[%%expect_asm X86_64{|
+float_u_box_unsafe_set:
+  vmovsd (%rdi), %xmm0
+  vmovsd %xmm0, -4(%rax,%rbx,4)
+  movl  $1, %eax
+  ret
 |}]

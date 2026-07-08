@@ -142,13 +142,4 @@ let () =
 
 (* TEST
  flags = "-g";
- { bytecode; }
- {
-   flat-float-array;
-   native;
- }{
-   no-flat-float-array;
-   reference = "${test_source_directory}/names.no-flat-float-array.reference";
-   native;
- }
 *)

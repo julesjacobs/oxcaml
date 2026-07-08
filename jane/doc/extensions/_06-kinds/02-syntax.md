@@ -119,6 +119,8 @@ The abbreviations defined in the language are as follows:
     Using `mod everything` is appropriate for data represented directly,
     like `int` or `float32#`.
 
+* `any_non_null = any non_null separable`
+
 * `value = value_or_null non_null separable`
 
     This is the kind of typical OCaml values, as they have been before OxCaml
@@ -495,17 +497,12 @@ atomic-kind ::= layout
 
 layout ::= `any`
        |   `value_or_null`
-       |   `void`
        |   `float64`
        |   `float32`
        |   `word`
-       |   `bits8`
-       |   `bits16`
-       |   `bits32`
        |   `bits64`
+       |   `bits32`
        |   `vec128`
-       |   `vec256`
-       |   `vec512`
        |   layout scannable_axis
 
 scannable_axis ::= `non_null`
@@ -516,17 +513,13 @@ scannable_axis ::= `non_null`
               |    `separable`
               |    `maybe_separable`
 
-kind_abbreviation ::= `value`
+kind_abbreviation ::= `any_non_null`
+                  |   `value`
                   |   `immediate`
-                  |   `immediate_or_null`
                   |   `immediate64`
-                  |   `immediate64_or_null`
                   |   `immutable_data`
-                  |   `immutable_data_or_null`
                   |   `sync_data`
-                  |   `sync_data_or_null`
                   |   `mutable_data`
-                  |   `mutable_data_or_null`
 
 mod-bounds ::= `everything`
            |   { mod-bound }+

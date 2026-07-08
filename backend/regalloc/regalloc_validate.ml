@@ -1140,10 +1140,7 @@ module Transfer (Desc_val : Description_value) :
     let loc =
       match reg.reg_id with
       | Preassigned { location } -> location
-      | Named _ ->
-        Misc.fatal_error
-          "Regalloc_validate.remove_exn_bucket: exception bucket register must \
-           be preassigned"
+      | Named _ -> assert false
     in
     Equation_set.remove_result equations ~reg_res:[| reg |] ~loc_res:[| loc |]
     |> Result.map_error (fun message ->
@@ -1215,11 +1212,7 @@ module Transfer (Desc_val : Description_value) :
       match instr.desc with
       | Op (Spill | Reload | Move) ->
         Result.ok @@ rename_location t ~loc_instr:instr
-      | _ ->
-        Regalloc_utils.fatal
-          "Regalloc_validate.basic: added instruction no. %a must be Spill, \
-           Reload, or Move: %a"
-          InstructionId.format instr.id Printcfg.basic instr)
+      | _ -> assert false)
     | Some instr_before -> (
       match instr.desc with
       | Op Move

@@ -206,8 +206,8 @@ end = struct
         ~ran_out_of_fuel_during_normalize
         ~annotation:
           (Some { pjka_loc = Location.none;
-                  pjka_desc = Pjk_abbreviation { loc = Location.none;
-                                                 txt = name } })
+                  pjka_desc = Pjk_abbreviation ({ loc = Location.none;
+                                                  txt = name }, []) })
         ~why:Jkind_intf.History.Imported)
       (const_builtins @ const_predefs)
 
@@ -301,8 +301,11 @@ let with_additional_action =
         in
         (* CR-someday zqian: preserve the hints *)
         (* modes and modalities should have been zapped already *)
+        (* if a mode is generic variable we leave it as is *)
         let prepare_mode mode =
-          Mode.Alloc.(mode |> to_const_exn |> of_const)
+          if Mode.Alloc.check_level_var mode generic_level
+          then mode
+          else Mode.Alloc.(mode |> to_const_exn |> of_const)
         in
         let prepare_modality modality =
           Mode.Modality.(modality |> to_const_exn|> of_const)
@@ -508,7 +511,8 @@ let apply_type_function params args body =
           let t = newgenstub ~scope:(get_scope ty)
             (Jkind.Builtin.any ~why:Dummy_jkind) in
           For_copy.redirect_desc copy_scope ty (Tsubst (t, None));
-          let desc' = copy_type_desc copy desc in
+          let copy_mode m = For_copy.mode_copy_generic copy_scope m in
+          let desc' = copy_type_desc copy copy_mode desc in
           Transient_expr.set_stub_desc t desc';
           t
     in
@@ -573,16 +577,16 @@ let rec layout s l =
 
 let jkind_desc s jkind =
   match jkind.base with
-  | Kconstr (p, sa) ->
+  | Kconstr p ->
     begin match Path.Map.find p s.jkinds with
     | exception Not_found ->
       let p' = jkind_path s p in
       if Path.compare p' p = 0 then jkind else
-        { jkind with base = Kconstr (p', sa) }
-    | Jkind_path p' -> { jkind with base = Kconstr (p', sa) }
+        { jkind with base = Kconstr p' }
+    | Jkind_path p -> { jkind with base = Kconstr p }
     | Jkind_const { base; mod_bounds; with_bounds = No_with_bounds } ->
       let const =
-        { base = Jkind.Base_and_axes.meet_scannable_axes base sa;
+        { base;
           mod_bounds = Jkind.Mod_bounds.meet mod_bounds jkind.mod_bounds;
           with_bounds = jkind.with_bounds }
       in
@@ -596,15 +600,15 @@ let jkind_desc s jkind =
 let jkind_const_desc s
       ({ with_bounds = No_with_bounds } as jkind : jkind_const_desc_lr) =
   match jkind.base with
-  | Kconstr (p, sa) ->
+  | Kconstr p ->
     begin match Path.Map.find p s.jkinds with
     | exception Not_found ->
       let p' = jkind_path s p in
       if Path.compare p' p = 0 then jkind else
-        { jkind with base = Kconstr (p', sa) }
-    | Jkind_path p' -> { jkind with base = Kconstr (p', sa) }
+        { jkind with base = Kconstr p' }
+    | Jkind_path p -> { jkind with base = Kconstr p }
     | Jkind_const { base; mod_bounds; with_bounds = No_with_bounds } ->
-      { base = Jkind.Base_and_axes.meet_scannable_axes base sa;
+      { base;
         mod_bounds = Jkind.Mod_bounds.meet mod_bounds jkind.mod_bounds;
         with_bounds = jkind.with_bounds }
     end
@@ -742,16 +746,25 @@ let rec typexp copy_scope s ty =
           Tlink (typexp copy_scope s t2)
       | Tarrow ((label, marg, mret), arg, ret, comm) ->
           let marg, mret =
+            if get_id ty < 0 then
+              For_copy.mode_copy_generic copy_scope marg,
+              For_copy.mode_copy_generic copy_scope mret
+            else
             match s.additional_action with
             | Prepare_for_saving { prepare_mode; _ } ->
-              prepare_mode marg, prepare_mode mret
+              For_copy.mode_copy_generic copy_scope (prepare_mode marg),
+              For_copy.mode_copy_generic copy_scope (prepare_mode mret)
+            | Duplicate_variables ->
+              For_copy.mode_copy_generic copy_scope marg,
+              For_copy.mode_copy_generic copy_scope mret
             | _ -> marg, mret
           in
           let arg = typexp copy_scope s arg in
           let ret = typexp copy_scope s ret in
           let comm = copy_commu comm in
           Tarrow ((label, marg, mret), arg, ret, comm)
-      | _ -> copy_type_desc (typexp copy_scope s) desc
+      | _ ->
+        copy_type_desc (typexp copy_scope s) (fun _ -> assert false) desc
     in
     Transient_expr.set_stub_desc ty' desc;
     ty'
@@ -790,7 +803,8 @@ let jkind copy_scope s loc jk =
 *)
 let type_expr s ty =
   let loc = Option.value s.loc ~default:Location.none in
-  For_copy.with_scope (fun copy_scope -> typexp copy_scope s loc ty)
+  For_copy.with_scope (fun copy_scope ->
+    typexp copy_scope s loc ty)
 
 let label_declaration copy_scope s l =
   {

@@ -67,8 +67,9 @@ let dacc_inside_function context ~outer_dacc ~params ~my_closure ~my_alloc_mode
   in
   let denv =
     match (my_alloc_mode : Alloc_mode.For_applications.t) with
-    | Heap -> denv
-    | Local { region = my_region; ghost_region = my_ghost_region } ->
+    | Not_alloc_stack -> denv
+    | Maybe_alloc_stack { region = my_region; ghost_region = my_ghost_region }
+      ->
       let my_region_duid = Flambda_debug_uid.none in
       let my_region =
         Bound_var.create my_region my_region_duid Name_mode.normal
@@ -188,8 +189,8 @@ let simplify_function_body context ~outer_dacc function_slot_opt
   let my_ghost_region_duid = Flambda_debug_uid.none in
   let region_params =
     match (my_alloc_mode : Alloc_mode.For_applications.t) with
-    | Heap -> []
-    | Local { region; ghost_region } ->
+    | Not_alloc_stack -> []
+    | Maybe_alloc_stack { region; ghost_region } ->
       [ Bound_parameter.create region Flambda_kind.With_subkind.region
           my_region_duid;
         Bound_parameter.create ghost_region Flambda_kind.With_subkind.region
@@ -411,11 +412,10 @@ let simplify_function0 context ~outer_dacc function_slot_opt code_id code
   let old_code_id = code_id in
   let code_id, newer_version_of =
     match
-      Code_id.Map.find_or_null old_code_id
-        (C.old_to_new_code_ids_all_sets context)
+      Code_id.Map.find old_code_id (C.old_to_new_code_ids_all_sets context)
     with
-    | This new_code_id -> new_code_id, Some old_code_id
-    | Null -> old_code_id, None
+    | new_code_id -> new_code_id, Some old_code_id
+    | exception Not_found -> old_code_id, None
   in
   let inlining_decision =
     let decision =
@@ -705,13 +705,11 @@ let simplify_and_lift_set_of_closures dacc ~closure_bound_vars_inverse
           ~name:(fun name ~coercion ->
             Name.pattern_match name
               ~var:(fun var ->
-                match
-                  Variable.Map.find_or_null var closure_bound_vars_inverse
-                with
-                | Null ->
+                match Variable.Map.find var closure_bound_vars_inverse with
+                | exception Not_found ->
                   assert (DE.mem_variable (DA.denv dacc) var);
                   T.alias_type_of kind in_slot
-                | This function_slot ->
+                | function_slot ->
                   let closure_symbol =
                     Function_slot.Map.find function_slot closure_symbols_map
                   in

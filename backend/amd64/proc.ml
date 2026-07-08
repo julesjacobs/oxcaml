@@ -571,9 +571,7 @@ let destroyed_at_basic (basic : Cfg_intf.S.basic) =
 (* note: keep this function in sync with `is_destruction_point` below. *)
 let destroyed_at_terminator (terminator : Cfg_intf.S.terminator) =
   match terminator with
-  | Never ->
-    Misc.fatal_error
-      "Proc.destroyed_at_terminator: unexpected Never terminator"
+  | Never -> assert false
   | Always _ | Parity_test _ | Truth_test _ | Float_test _ | Int_test _
   | Return | Raise _ | Tailcall_self  _ | Tailcall_func _
   | Prim {op = Probe _; _}
@@ -600,9 +598,7 @@ let destroyed_at_terminator (terminator : Cfg_intf.S.terminator) =
 (* note: keep this function in sync with `destroyed_at_terminator` above. *)
 let is_destruction_point ~(more_destruction_points : bool) (terminator : Cfg_intf.S.terminator) =
   match terminator with
-  | Never ->
-    Misc.fatal_error
-      "Proc.is_destruction_point: unexpected Never terminator"
+  | Never -> assert false
   | Always _ | Parity_test _ | Truth_test _ | Float_test _ | Int_test _
   | Return | Raise _ | Tailcall_self  _ | Tailcall_func _
   | Prim {op = Probe _; _} ->

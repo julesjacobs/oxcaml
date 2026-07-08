@@ -19,7 +19,7 @@ type code_status =
   | Loaded of Code.t
   | Not_loaded of
       { sections : File_sections.t;
-        index : File_sections.Idx.t;
+        index : int;
         metadata : Code_metadata.t;
         delayed_renaming : Renaming.t
       }
@@ -29,7 +29,7 @@ type t =
   | Metadata_only of Code_metadata.t
 
 type code_present =
-  | Present of { index : File_sections.Idx.t }
+  | Present of { index : int }
   | Absent
 
 type raw =

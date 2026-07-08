@@ -1,30 +1,18 @@
 (* TEST
  include stdlib_stable;
  {
-   flat-float-array;
-   {
-     reference = "${test_source_directory}/float_iarray.heap.reference";
-     bytecode;
-   }{
-     stack-allocation;
-     reference = "${test_source_directory}/float_iarray.stack.reference";
-     native;
-   }{
-     no-stack-allocation;
-     reference = "${test_source_directory}/float_iarray.heap.reference";
-     native;
-   }
+   reference = "${test_source_directory}/float_iarray.heap.reference";
+   bytecode;
  }{
-   no-flat-float-array;
-   reference = "${test_source_directory}/float_iarray.heap.no-flat.reference";
-   {
-     bytecode;
-   }{
-     native;
-   }
+   stack-allocation;
+   reference = "${test_source_directory}/float_iarray.stack.reference";
+   native;
+ }{
+   no-stack-allocation;
+   reference = "${test_source_directory}/float_iarray.heap.reference";
+   native;
  }
 *)
-
 
 (* Testing that local [float iarray]s don't allocate on access.  This is a
    question because for flat float arrays, accesses have to box the float. *)

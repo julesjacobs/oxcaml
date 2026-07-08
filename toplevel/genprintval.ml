@@ -535,12 +535,9 @@ module Make(O : OBJ)(EVP : EVALPATH with type valu = O.t) = struct
                   if !printer_steps < 0 || depth < 0 then
                     Oval_ellipsis :: tree_list
                   else if i < length then
-                    let elt =
-                      let is_double_array = O.tag obj = O.double_array_tag in
-                      if is_double_array then O.repr (O.double_field obj i)
-                      else O.field obj i
+                    let tree = nest tree_of_val (depth - 1)
+                                    (O.field obj i) ty_arg
                     in
-                    let tree = nest tree_of_val (depth - 1) elt ty_arg in
                     tree_of_items (tree :: tree_list) (i + 1)
                   else tree_list
                 in
@@ -717,8 +714,7 @@ module Make(O : OBJ)(EVP : EVALPATH with type valu = O.t) = struct
         | None ->
             let rep =
               match rep with
-              | (Record_variable | Record_inlined (_, Constructor_variable, _))
-                as old_repres ->
+              | Record_variable ->
                   let label_params_and_types, record_params =
                     Ctype.instance_label_declarations ~fixed:false
                       (lbl_list |> Array.of_list) ~params:type_params
@@ -730,7 +726,7 @@ module Make(O : OBJ)(EVP : EVALPATH with type valu = O.t) = struct
                   in
                   (match
                      Typedecl.update_record_representation env Location.none
-                       Legacy ~old_repres lds_and_types ~why:Field_projection
+                       Legacy lds_and_types ~why:Field_projection
                    with
                    | Ok (_sorts, rep) -> rep
                    | Error _ -> Misc.fatal_error "unrepresentable record")
@@ -764,7 +760,7 @@ module Make(O : OBJ)(EVP : EVALPATH with type valu = O.t) = struct
                     else Outval_record_boxed
               | Record_dummy _ ->
                   Misc.fatal_error "dummy record representation"
-              | Record_variable | Record_inlined (_, Constructor_variable, _) ->
+              | Record_variable ->
                   Misc.fatal_error "variable record representation"
             in
             tree_of_record_fields depth

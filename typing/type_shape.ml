@@ -482,9 +482,6 @@ module Type_decl_shape = struct
               args
           in
           Array.of_list lys
-        | Constructor_variable ->
-          Misc.fatal_error
-            "Type_shape: unexpected variable constructor representation"
       in
       Some
         { Shape.name;

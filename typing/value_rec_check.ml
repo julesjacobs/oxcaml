@@ -798,10 +798,7 @@ let rec expression : Typedtree.expression -> term_judg =
                  | Float64 | Float32 | Bits8 | Bits16 | Bits32 | Bits64
                  | Vec128 | Vec256 | Vec512 | Word | Untagged_immediate
                  | Void | Product _ ->
-                   Dereference)
-            | Constructor_variable ->
-                Misc.fatal_error
-                  "value_rec_check: variable constructor representation")
+                   Dereference))
       in
       let arg i (_sort, e) = expression e << arg_mode i in
       join [
@@ -832,7 +829,6 @@ let rec expression : Typedtree.expression -> term_judg =
                Dereference)
           | Record_dummy _ ->
             Misc.fatal_error "value_rec_check: unexpected dummy representation"
-          | Record_inlined (_, Constructor_variable, _)
           | Record_variable ->
             Misc.fatal_error
               "value_rec_check: unexpected unknown representation"

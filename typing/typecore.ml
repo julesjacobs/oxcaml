@@ -291,7 +291,8 @@ type error =
   | Curried_application_complete of
       arg_label * Mode.Alloc.error * [`Prefix|`Single_arg|`Entire_apply]
   | Mode_mismatch of mode_mismatch_kind * Alloc.equate_error
-  | Uncurried_function_escapes of Alloc.error
+  | Uncurried_function_escapes_comonadic of Alloc.Comonadic.error
+  | Uncurried_function_escapes_locality
   | Function_returns_local
   | Tail_call_local_returning
   | Bad_tail_annotation of [`Conflict|`Not_a_tailcall]
@@ -459,6 +460,12 @@ type expected_mode =
 
         Each location points to the corresponding sub-pattern of [Ppat_tuple].
     *)
+
+    return_from_exclave : bool ref option;
+    (** Indicates whether the expected mode is for an exclave expression in tail
+        position. The field is a bool ref so that it is preserved across all
+        copies.
+    *)
   }
 
 type position_and_mode = {
@@ -467,11 +474,13 @@ type position_and_mode = {
   region_mode : Regionality.r option;
   (** INVARIANT: [Some m] iff [apply_position] is [Tail], where [m] is the mode
      of the surrounding region *)
+  return_from_exclave : bool ref option;
 }
 
 let position_and_mode_default = {
   apply_position = Default;
   region_mode = None;
+  return_from_exclave = None;
 }
 
 (** Decides the runtime tail call behaviour based on lexical structures and user
@@ -490,14 +499,24 @@ let position_and_mode env (expected_mode : expected_mode) sexp
   | RTail (m ,FTail) -> begin
       match requested with
       | Some `Tail | Some `Tail_if_possible | None ->
-          {apply_position = Tail; region_mode = Some m}
-      | Some `Nontail -> {apply_position = Nontail; region_mode = None}
+          { apply_position = Tail;
+            region_mode = Some m;
+            return_from_exclave = expected_mode.return_from_exclave }
+      | Some `Nontail ->
+          { apply_position = Nontail;
+            region_mode = None;
+            return_from_exclave = None }
     end
   | RNontail | RTail(_, FNontail) -> begin
       match requested with
       | None | Some `Tail_if_possible ->
-          {apply_position = Default; region_mode = None}
-      | Some `Nontail -> {apply_position = Nontail; region_mode = None}
+          { apply_position = Default;
+            region_mode = None;
+            return_from_exclave = None }
+      | Some `Nontail ->
+          { apply_position = Nontail;
+            region_mode = None;
+            return_from_exclave = None }
       | Some `Tail -> fail `Not_a_tailcall
   end
 
@@ -528,7 +547,8 @@ let mode_default mode =
   { position = RNontail;
     mode = Value.disallow_left mode;
     strictly_local = false;
-    tuple_modes = None }
+    tuple_modes = None;
+    return_from_exclave = None }
 
 let mode_legacy = mode_default Value.legacy
 
@@ -629,7 +649,7 @@ let mode_max_with_position position =
 
 (** Take the expected mode of [exclave_ exp], return the expected mode of [exp].
     [expected_mode] must be higher than [regional]. *)
-let mode_exclave expected_mode =
+let mode_exclave (expected_mode : expected_mode) =
   let mode =
      as_single_mode expected_mode
      (* if we expect an exclave to be [regional], then inside the exclave the
@@ -637,14 +657,20 @@ let mode_exclave expected_mode =
      |> value_to_alloc_r2l
      |> alloc_as_value
   in
+  Option.iter (fun excl -> excl := true) expected_mode.return_from_exclave;
   { (mode_default mode)
-    with strictly_local = true
+    with strictly_local = true;
+         return_from_exclave = expected_mode.return_from_exclave
   }
 
 let mode_strictly_local expected_mode =
   { expected_mode
     with strictly_local = true
   }
+
+let mode_return_from_exclave (expected_mode : expected_mode) r =
+  { expected_mode
+    with return_from_exclave = Some r }
 
 let mode_coerce mode expected_mode =
   mode_morph (fun m -> Value.meet [m; mode]) expected_mode
@@ -715,7 +741,10 @@ tail-call. Returns [expected_mode] and [Value.lr] which are backed by the same
 mode variable. We encode extra position information in the former. We need the
 latter to the both left and right mode because of how it will be used. *)
 let mode_argument ~funct ~index ~position_and_mode ~partial_app marg =
-  let vmode , _ = Value.newvar_below (alloc_as_value marg) in
+  let vmode , _ =
+    Value.newvar_below
+      (Ctype.get_current_level ()) (alloc_as_value marg)
+  in
   if partial_app then mode_default vmode, vmode
   else match funct.exp_desc, index, position_and_mode.apply_position with
   | Texp_ident { desc = {val_kind =
@@ -723,7 +752,9 @@ let mode_argument ~funct ~index ~position_and_mode ~partial_app marg =
                 kind = Id_prim _; _ }, 1, Tail ->
      (* RHS of (&&) and (||) is at the tail of function region if the
         application is. The argument mode is not constrained otherwise. *)
-     mode_with_position vmode (RTail (Option.get position_and_mode.region_mode, FTail)),
+     { (mode_with_position vmode
+          (RTail (Option.get position_and_mode.region_mode, FTail)))
+       with return_from_exclave = position_and_mode.return_from_exclave },
      vmode
   | Texp_ident { kind = Id_prim _; _ }, _, _ ->
      (* Other primitives cannot be tail-called *)
@@ -794,17 +825,97 @@ let dynamic_pat_mode pat_mode =
   in
   {pat_mode with mode}
 
-let allocations : Alloc.r list ref = Local_store.s_ref []
+let allocations : Typedtree.alloc_mode_r list ref = Local_store.s_ref []
 
 let reset_allocations () = allocations := []
 
 let register_allocation_mode alloc_mode =
-  let alloc_mode = Alloc.disallow_left alloc_mode in
   allocations := alloc_mode :: !allocations
+
+let newvar_below_if_modepoly level m =
+  if Language_extension.(is_at_least_mode_poly Beta)
+  then fst (Locality.newvar_below level m)
+  else m
+
+let newvar_above_if_modepoly level m =
+  if Language_extension.(is_at_least_mode_poly Beta)
+  then fst (Locality.newvar_above level m)
+  else m
+
+let create_allocation_mode_l mode =
+  let locality_mode = Alloc.proj_comonadic Areality mode in
+  newvar_above_if_modepoly 0 locality_mode |> Locality.disallow_right
+
+let create_function_return_mode
+    ~return_from_exclave ret_mode : return_mode =
+  let ret_mode =
+    if Language_extension.(is_at_least_mode_poly Beta) then
+      if return_from_exclave
+      then Locality.disallow_right Locality.local
+      else Locality.disallow_right Locality.global
+    else create_allocation_mode_l ret_mode
+  in
+  Typedtree.create_return_mode ret_mode
+
+let create_application_mode ~return_from_exclave ret_mode : return_mode =
+  match return_from_exclave with
+  | Some return_from_exclave ->
+    create_function_return_mode
+      ~return_from_exclave:!return_from_exclave ret_mode
+  | None ->
+    create_allocation_mode_l ret_mode
+    |> Typedtree.create_return_mode
+
+let create_allocation_mode_r mode =
+  let locality_mode = Alloc.proj_comonadic Areality mode in
+  newvar_below_if_modepoly 0 locality_mode |> Locality.disallow_left
+
+(* Whether the allocation mode's locality can (currently) be [global].
+   This is a non-committing probe: the trial constraint is rolled back
+   rather than recorded, using the change log instead of duplicating the
+   mode's constraint graph.
+
+   CR jujacobs: because the probe does not constrain the variable, a later
+   constraint can still resolve it to local while the typedtree records
+   global/heap for the omitted-argument wrapper (e.g. the eta-wrapper's
+   continuation after a local argument in an out-of-order application),
+   letting the backend heap-allocate a closure that captures
+   stack-allocated values. Committing the constraint here instead changes
+   inferred schemes (see typing-mode-polymorphism/labelled_args.ml and
+   typing-modes/currying.ml), so the right fix needs a policy decision. *)
+let alloc_mode_can_be_global mode =
+  let snap = Btype.snapshot () in
+  let result =
+    match
+      Locality.submode (Alloc.proj_comonadic Areality mode) Locality.global
+    with
+    | Ok () -> true
+    | Error _ -> false
+  in
+  Btype.backtrack snap;
+  result
+
+let should_pin_omitted_mode_global mode =
+  Language_extension.(is_at_least_mode_poly Beta)
+  && alloc_mode_can_be_global mode
+
+let create_allocation_mode_l_global_if_possible mode : alloc_mode_l =
+  if should_pin_omitted_mode_global mode
+  then Locality.disallow_right Locality.global
+  else create_allocation_mode_l mode
+
+let create_omitted_closure_mode mode : alloc_mode_r =
+  if should_pin_omitted_mode_global mode
+  then Locality.disallow_left Locality.global
+  else create_allocation_mode_r mode
+
+let create_omitted_return_mode mode : return_mode =
+  create_allocation_mode_l_global_if_possible mode
+  |> Typedtree.create_return_mode
 
 let register_allocation_value_mode ~loc
     ?(desc  = (Unknown : Mode.Hint.allocation_desc)) mode =
-  let alloc_mode = value_to_alloc_r2g mode in
+  let alloc_mode = create_allocation_mode_r (value_to_alloc_r2g mode) in
   register_allocation_mode alloc_mode;
   (* We must apply each morphism separately so that their hints correspond to
      the correct morphism *)
@@ -820,16 +931,20 @@ let register_allocation_value_mode ~loc
    parameter function needs to be made global if its partial application
    to one argument must be global. As a result, a function gets an
    [Alloc.lr] allocation mode that can be further constrained. *)
-let register_closure_allocation (mode : Value.r) ~loc : Alloc.lr * Value.r =
+let register_closure_allocation (mode : Value.r) ~loc
+  : Locality.lr * Alloc.lr * Value.r =
   let allocation : Hint.allocation = {loc; txt = Unknown} in
-  let (alloc_mode : Alloc.lr), _ =
-    Alloc.newvar_below (value_to_alloc_r2g ~allocation mode)
+  let (mode : Alloc.lr), _ =
+    Alloc.newvar_below (Ctype.get_current_level ())
+      (value_to_alloc_r2g ~allocation mode)
   in
-  register_allocation_mode (Alloc.disallow_left alloc_mode);
+  let locality_mode = Alloc.proj_comonadic Areality mode in
+  let alloc_mode, _ = Locality.newvar_below 0 locality_mode in
   let closed_over_mode =
-    alloc_as_value ~allocation (Alloc.disallow_left alloc_mode)
+    alloc_as_value ~allocation (Alloc.disallow_left mode)
   in
-  alloc_mode, closed_over_mode
+  register_allocation_mode (Locality.disallow_left alloc_mode);
+  alloc_mode, mode, closed_over_mode
 
 (** Register as allocation the expression constrained by the given
     [expected_mode]. Returns the mode of the allocation, and the expected mode
@@ -849,7 +964,7 @@ let optimise_allocations () =
   - Add it back when middle-end can really utilize this information. *)
   List.iter
     (fun mode ->
-      Locality.zap_to_ceil (Alloc.proj_comonadic Areality mode)
+      Locality.zap_to_ceil_exn mode
       |> ignore)
     !allocations;
   reset_allocations ()
@@ -1158,13 +1273,17 @@ let has_poly_constraint spat =
     end
   | _ -> false
 
-(** Mode cross a mode whose monadic fragment is a right mode, and whose comonadic
-    fragment is a left mode. *)
-let alloc_mode_cross_to_max_min env ty { monadic; comonadic } =
+(** Mode cross a right monadic mode fragment *)
+let alloc_monadic_mode_cross_to_min env ty monadic =
   let monadic = Alloc.Monadic.disallow_left monadic in
+  let crossing = crossing_of_ty env ty in
+  Crossing.Monadic.apply_right_alloc crossing.monadic monadic
+
+(** Mode cross a left comonadic mode fragment *)
+let alloc_comonadic_mode_cross_to_max env ty comonadic =
   let comonadic = Alloc.Comonadic.disallow_right comonadic in
   let crossing = crossing_of_ty env ty in
-  Crossing.apply_left_right_alloc crossing { monadic; comonadic }
+  Crossing.Comonadic.apply_left_alloc crossing.comonadic comonadic
 
 (** Mode cross a right mode *)
 (* This is very similar to Ctype.mode_cross_right. Any bugs here are likely bugs
@@ -1225,8 +1344,8 @@ let check_dynamic pp hint expected_mode =
 (** Take [m0] which is the parameter to mutable, and the mode of the RHS (the
     content expression), returns the strongest mode the mutable variable can be.
 *)
-let mutvar_mode ~loc ~env m0 exp_mode =
-  let m = Value.newvar () in
+let mutvar_mode ~loc ~env level m0 exp_mode =
+  let m = Value.newvar level in
   let mode = mode_default m in
   let modalities = Typemode.let_mutable_modalities in
   submode ~loc ~env exp_mode (mode_modality modalities mode);
@@ -1786,7 +1905,9 @@ and build_as_type_and_mode_extra env p ~mode : _ -> _ * _ = function
          If we used [generic_instance] we would lose the sharing between
          [instance ty] and [ty].  *)
       let ty =
-        with_local_level_generalize_structure (fun () -> instance ty)
+        with_local_level_generalize_structure
+          ~before_generalize:generalize_structure
+          (fun () -> instance ty)
       in
       (* This call to unify may only fail due to missing GADT equations *)
       unify_pat_types p.pat_loc env (instance as_ty) (instance ty);
@@ -1838,7 +1959,7 @@ and build_as_type_aux (env : Env.t) p ~mode =
       let priv = (cstr.cstr_private = Private) in
       let mode =
         if priv || pl <> [] then mode
-        else Value.newvar ()
+        else Value.newvar (get_current_level ())
       in
       let keep =
         priv ||
@@ -1859,7 +1980,7 @@ and build_as_type_aux (env : Env.t) p ~mode =
   | Tpat_variant(l, p', _) ->
       let ty = Option.map (build_as_type env) p' in
       let mode =
-        if p' = None then Value.newvar ()
+        if p' = None then Value.newvar (get_current_level ())
         else mode
       in
       let ty =
@@ -1888,7 +2009,7 @@ and build_as_type_aux (env : Env.t) p ~mode =
               fields
           in
           let mode =
-            if all_constant then Value.newvar ()
+            if all_constant then Value.newvar (get_current_level ())
             else mode
           in
           let ty =
@@ -1907,8 +2028,7 @@ and build_as_type_aux (env : Env.t) p ~mode =
 let is_variable_repres : type rep. rep record_form -> rep -> bool =
   fun form rep ->
     match form, rep with
-    | Legacy, (Record_variable | Record_inlined (_, Constructor_variable, _)) ->
-      true
+    | Legacy, Record_variable -> true
     | Unboxed_product, Record_unboxed_product_variable -> true
     | _ -> false
 
@@ -1943,7 +2063,6 @@ let update_labels (type rep) env (form : rep record_form) ~representative_label
       in
       match
         Typedecl.update_record_representation ~why env loc form
-          ~old_repres:representative_label.lbl_repres
           (lbls_and_ty_args |> Array.to_list)
       with
       | Ok (sorts, rep) ->
@@ -2108,6 +2227,7 @@ let solve_constructor_annotation
   (* Translate the type annotation using these type names. *)
   let cty, ty, force =
     with_local_level_generalize_structure
+      ~before_generalize:(fun (_, ty, _) -> generalize_structure ty)
       (fun () ->
          Typetexp.transl_simple_type_delayed !!penv Alloc.Const.legacy sty)
   in
@@ -2232,16 +2352,22 @@ let solve_Ppat_construct tps (penv : Pattern_env.t) loc constr no_existentials
       ~expected:expected_ty
   in
 
-  let ty_args, equated_types, existential_ctyp =
-    with_local_level_generalize_structure begin fun () ->
+  let (ty_args, equated_types, existential_ctyp), _ =
+    with_local_level_generalize_structure
+      ~before_generalize:(fun (_, tys) ->
+        List.iter generalize_structure tys)
+      begin fun () ->
       let expected_ty = instance expected_ty in
-      let ty_args, ty_res, equated_types, existential_ctyp =
+      let ty_args, ty_args_ty, ty_res, equated_types, existential_ctyp =
         match existential_styp with
           None ->
             let ty_args, ty_res, _ =
               instance_constructor (Make_existentials_abstract penv) constr
             in
-            ty_args, ty_res, unify_res ty_res expected_ty, None
+            let ty_args_ty =
+              List.map (fun ca -> ca.Types.ca_type) ty_args
+            in
+            ty_args, ty_args_ty, ty_res, unify_res ty_res expected_ty, None
         | Some (name_list, sty) ->
             let existential_treatment =
               if name_list = [] then
@@ -2264,11 +2390,13 @@ let solve_Ppat_construct tps (penv : Pattern_env.t) loc constr no_existentials
               List.map2 (fun arg ca_type -> {arg with Types.ca_type}) ty_args
                 ty_args_ty
             in
-            ty_args, ty_res, Lazy.force equated_types, existential_ctyp
+            ty_args, ty_args_ty, ty_res,
+            Lazy.force equated_types, existential_ctyp
       in
       if constr.cstr_existentials <> [] then
         lower_variables_only !!penv penv.Pattern_env.equations_scope ty_res;
-      (ty_args, equated_types, existential_ctyp)
+      (ty_args, equated_types, existential_ctyp),
+      expected_ty :: ty_res :: ty_args_ty
     end
   in
   if !Clflags.principal && not penv.in_counterexample then begin
@@ -2277,6 +2405,10 @@ let solve_Ppat_construct tps (penv : Pattern_env.t) loc constr no_existentials
     try
       TypePairs.iter
         (fun (t1, t2) ->
+          (* CR ageorges: are these still needed after putting back
+             generalize_structure? *)
+          generalize_structure t1;
+          generalize_structure t2;
           if not (fully_generic t1 && fully_generic t2) then
             let msg =
               Format_doc.doc_printf
@@ -2295,7 +2427,9 @@ let solve_Ppat_construct tps (penv : Pattern_env.t) loc constr no_existentials
 
 let solve_Ppat_record_field loc penv label label_lid record_ty
       record_form =
-  with_local_level_generalize_structure begin fun () ->
+  with_local_level_generalize_structure
+    ~before_generalize:(fun (_, tys) -> List.iter generalize_structure tys)
+    begin fun () ->
     let (_, ty_arg, ty_res) = instance_label ~fixed:false label in
     begin try
       unify_pat_types_penv loc penv ty_res (instance record_ty)
@@ -2303,8 +2437,9 @@ let solve_Ppat_record_field loc penv label label_lid record_ty
       raise(Error(label_lid.loc, !!penv,
                   Label_mismatch(P record_form, label_lid.txt, err)))
     end;
-    ty_arg
+    ty_arg, [ty_res; ty_arg]
   end
+  |> fst
 
 let solve_Ppat_array loc env (mutability : mutable_flag) expected_ty
   : _ * _ * mutable_flag =
@@ -2341,6 +2476,7 @@ let solve_Ppat_lazy loc env expected_ty =
 let solve_Ppat_constraint tps loc env mode sty expected_ty =
   let cty, ty, force =
     with_local_level_generalize_structure
+      ~before_generalize:(fun (_, ty, _) -> generalize_structure ty)
       (fun () -> Typetexp.transl_simple_type_delayed env mode sty)
   in
   tps.tps_pattern_force <- force :: tps.tps_pattern_force;
@@ -3074,7 +3210,7 @@ type unrepresentable_arg =
 let representation_for_tuple_constructor env constr ty_args ~loc ~types
       ~containing_type ~why : _ Result.t =
   match constr.cstr_shape with
-  | (Constructor_uniform_value | Constructor_mixed _) as shape ->
+  | Some shape ->
       begin match
         Misc.Stdlib.List.map_option
           (fun arg -> arg.ca_sort |> Option.map Jkind.Sort.of_const)
@@ -3083,7 +3219,7 @@ let representation_for_tuple_constructor env constr ty_args ~loc ~types
       | Some sorts -> Ok (shape, sorts)
       | None -> Misc.fatal_error "representable constructor missing a sort"
       end
-  | Constructor_variable ->
+  | None ->
       begin match
         Misc.Stdlib.List.mapi_result
           (fun _ (ty, loc) ->
@@ -3470,8 +3606,11 @@ and type_pat_aux
         match mutable_flag with
         | Immutable -> alloc_mode, Val_reg sort
         | Mutable ->
-            let m0 = Value.Comonadic.newvar () in
-            let mode = mutvar_mode ~loc ~env:!!penv m0 alloc_mode in
+            let m0 = Value.Comonadic.newvar (Ctype.get_current_level ()) in
+            let mode =
+              mutvar_mode ~loc ~env:!!penv
+                (Ctype.get_current_level ()) m0 alloc_mode
+            in
             let kind = Val_mut (m0, sort) in
             mode, kind
       in
@@ -4021,7 +4160,10 @@ let type_pattern_list
 
 let type_class_arg_pattern cl_num val_env met_env l spat =
   let pvs, pat =
-    with_local_level_generalize_structure_if_principal begin fun () ->
+    with_local_level_generalize_structure_if_principal
+      ~before_generalize:(fun (pvs, _) ->
+        iter_pattern_variables_type generalize_structure pvs)
+      begin fun () ->
       let tps = create_type_pat_state Modules_rejected in
       let nv = newvar (Jkind.Builtin.value ~why:Class_term_argument) in
       let alloc_mode = simple_pat_mode Value.legacy in
@@ -4803,7 +4945,8 @@ let remaining_function_type_for_error ty_ret mode_ret rev_args =
                  (Tarrow (arrow_desc, ty_arg, ty_ret, commu_ok))
              in
              let mode_ret, _ =
-               Alloc.newvar_above (Alloc.join (mode_fun :: closed_args))
+               Alloc.newvar_above (Ctype.get_current_level ())
+               (Alloc.join (mode_fun :: closed_args))
              in
              (ty_ret, mode_ret, closed_args))
       (ty_ret, mode_ret, []) rev_args
@@ -4857,8 +5000,8 @@ let collect_unknown_apply_args env funct ty_fun0 mode_fun rev_args sargs
               then
                 Location.prerr_warning sarg.pexp_loc
                   Warnings.Ignored_extra_argument;
-              let mode_arg = Alloc.newvar () in
-              let mode_ret = Alloc.newvar () in
+              let mode_arg = Alloc.newvar (get_current_level ()) in
+              let mode_ret = Alloc.newvar (get_current_level ()) in
               let kind = (lbl, mode_arg, mode_ret) in
               begin try
                 unify env ty_fun
@@ -5047,6 +5190,12 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
 (* See Note [Type-checking applications] for an overview *)
 let type_omitted_parameters_and_build_result_type expected_mode env loc ty_ret
       mode_ret args =
+  let has_omitted_arg =
+    List.exists
+      (fun (_, arg, _) ->
+         match arg with Omitted _ -> true | Arg _ -> false)
+      args
+  in
   let ty_ret, mode_ret, _, _, args =
     List.fold_left
       (fun (ty_ret, mode_ret, open_args, closed_args, args) (lbl, arg, sch) ->
@@ -5079,23 +5228,36 @@ let type_omitted_parameters_and_build_result_type expected_mode env loc ty_ret
              let open_args = [] in
              let mode_closed_args = List.map Alloc.close_over closed_args in
              let mode_partial_fun = Alloc.partial_apply mode_fun in
-             let mode_closure, _ =
-               Alloc.newvar_above (Alloc.join
+             let mode_cls, _ =
+               Alloc.newvar_above (Ctype.get_current_level ()) (Alloc.join
                 (mode_partial_fun:: mode_closed_args))
+             in
+             let mode_closure =
+               create_omitted_closure_mode mode_cls
+             in
+             let mode_arg =
+               create_allocation_mode_l_global_if_possible mode_arg
+             in
+             let mode_ret =
+               create_omitted_return_mode mode_ret
              in
              register_allocation_mode mode_closure;
              let arg =
               Omitted {
-                mode_closure = Alloc.disallow_left mode_closure;
-                mode_arg = Alloc.disallow_right mode_arg;
-                mode_ret = Alloc.disallow_right mode_ret;
+                mode_closure;
+                mode_arg;
+                mode_ret;
                 sort_arg;
                 sort_ret }
              in
              let args = (lbl, arg, None) :: args in
-             (ty_ret, mode_closure, open_args, closed_args, args))
+             (ty_ret, mode_cls, open_args, closed_args, args))
       (ty_ret, mode_ret, [], [], []) (List.rev args)
   in
+  if has_omitted_arg then
+    submode ~loc ~env ~reason:Other
+      (alloc_as_value mode_ret)
+      (mode_partial_application expected_mode);
   ty_ret, mode_ret, args
 
 (* Generalization criterion for expressions *)
@@ -5487,7 +5649,7 @@ let rec approx_type env sty =
         in
         let ret = approx_type env sty in
         let marg = Alloc.of_const arg_mode.mode_modes in
-        let mret = Alloc.newvar () in
+        let mret = Alloc.newvar (get_current_level ()) in
         newty (Tarrow ((p,marg,mret), arg_ty.ctyp_type, ret, commu_ok))
       end
   | Ptyp_arrow (p, arg_sty, sty, arg_mode, _) ->
@@ -5500,7 +5662,7 @@ let rec approx_type env sty =
       in
       let ret = approx_type env sty in
       let marg = Alloc.of_const arg_mode.mode_modes in
-      let mret = Alloc.newvar () in
+      let mret = Alloc.newvar (get_current_level ()) in
       newty (Tarrow ((p,marg,mret), newmono arg, ret, commu_ok))
   | Ptyp_tuple args ->
       newty (Ttuple (List.map (fun (l, t) -> l, approx_type env t) args))
@@ -5867,9 +6029,18 @@ let pattern_needs_partial_application_check p =
 (* Check that a type is generalizable at some level *)
 let generalizable level ty =
   with_type_mark begin fun mark ->
+    (* CR ageorges: what should the following behavior be if one of the
+      modes in a Join is generic the rest aren't?*)
+    let check_const_mode m =
+      if Mode.Alloc.check_level_var m generic_level then
+        Option.is_some (Mode.Alloc.Guts.check_const m)
+      else true
+    in
+    let checkmode m = if not (check_const_mode m) then raise Exit in
     let rec check ty =
       if try_mark_node mark ty then
-        if get_level ty <= level then raise Exit else iter_type_expr check ty
+        if get_level ty <= level then raise Exit
+        else iter_type_expr check checkmode ty
     in
     try check ty; true with Exit -> false
   end
@@ -5892,7 +6063,7 @@ let contains_variant_either ty =
               (row_fields row);
           iter_row loop row
       | _ ->
-          iter_type_expr loop ty
+          iter_type_expr loop (Fun.const ()) ty
       end
   in
   try loop ty; false with Exit -> true
@@ -6097,8 +6268,23 @@ let with_explanation explanation f =
         raise (Error (loc', env', err))
 
 (* Generalize expressions *)
+let generalize_structure_exp exp = generalize_structure exp.exp_type
+
 let may_lower_contravariant env exp =
   if maybe_expansive exp then lower_contravariant env exp.exp_type
+
+let generalize_structure_type_block_access_result
+      { ba; base_ty; el_ty; modality = _ } =
+  generalize_structure base_ty;
+  generalize_structure el_ty;
+  match ba with
+  | Baccess_field _ -> ()
+  | Baccess_block (_, idx) ->
+    generalize_structure_exp idx
+
+let generalize_structure_type_unboxed_access_result
+      (el_ty, Uaccess_unboxed_field _) =
+  generalize_structure el_ty
 
 let unique_use ~loc ~env mode_l mode_r  =
   if not (Language_extension.is_at_least Unique
@@ -6176,10 +6362,15 @@ type split_function_ty =
       *)
     expected_pat_mode: expected_pat_mode;
     expected_inner_mode: expected_mode;
-    (* [alloc_mode] is the mode of [fun x_i ... x_n -> e].
-       This needs to be a left mode for the construction of the [fp_curry] field
-       of the outer function. *)
-    alloc_mode: Mode.Alloc.lr;
+    (* [closure_mode] is the mode of [fun x_i ... x_n -> e].
+       This needs to be a left mode for making sure that nested
+       closures have a mode greater than outer closures, and it
+       needs to be a right mode for making sure
+       arguments generate a lower bound for subsequent closures.
+       [alloc_mode] tracks the locality component to store in the Typedtree. *)
+    closure_mode: Mode.Alloc.Comonadic.lr;
+    env_mode: Mode.Alloc.Monadic.r;
+    alloc_mode: Locality.lr;
     really_poly: bool
   }
 
@@ -6201,16 +6392,20 @@ let split_function_ty
     env (expected_mode : expected_mode) ty_expected loc ~arg_label ~has_poly
     ~mode_annots ~ret_mode_annots ~in_function ~is_first_val_param ~is_final_val_param
   =
-  let alloc_mode, closed_over_mode =
+  let alloc_mode, closure_mode, closed_over_mode =
     register_closure_allocation ~loc (as_single_mode expected_mode)
   in
   if expected_mode.strictly_local then
     Locality.submode_exn ~pp:(loc, Function) Locality.local
-      (Alloc.proj_comonadic Areality alloc_mode);
+      (Alloc.proj_comonadic Areality closure_mode);
   let { ty = ty_fun; explanation }, loc_fun = in_function in
   let separate = !Clflags.principal || Env.has_local_constraints env in
   let { ty_arg; ty_ret; arg_mode; ret_mode } as filtered_arrow =
-    with_local_level_generalize_structure_if separate begin fun () ->
+    with_local_level_generalize_structure_if separate
+      ~before_generalize:(fun { ty_arg; ty_ret; _ } ->
+        generalize_structure ty_arg;
+        generalize_structure ty_ret)
+      begin fun () ->
       let force_tpoly =
         (* If [has_poly] is true then we rely on the later call to
            type_pat to enforce the invariant that the parameter type
@@ -6249,14 +6444,15 @@ let split_function_ty
   in
   let ret_value_mode = alloc_as_value ret_mode in
   let expected_inner_mode =
-    if not is_final_val_param then
+    if not is_final_val_param then begin
       (* no need to check mode crossing in this case because ty_res always a
       function *)
       mode_default ret_value_mode
-    else
+    end else begin
       let ret_value_mode = mode_return ret_value_mode in
       let ret_value_mode = expect_mode_cross env ty_ret ret_value_mode in
       ret_value_mode
+    end
   in
   let ty_arg_mono =
     if has_poly then ty_arg
@@ -6269,7 +6465,8 @@ let split_function_ty
       end
     end
   in
-  let arg_value_mode = alloc_to_value_l2r arg_mode in
+  let env_mode, _ = Alloc.newvar_above (get_current_level ()) arg_mode in
+  let arg_value_mode = alloc_to_value_l2r env_mode in
   let expected_pat_mode = simple_pat_mode arg_value_mode in
   let type_sort ~why ty =
     match Ctype.type_sort ~why ~fixed:false env ty with
@@ -6280,14 +6477,19 @@ let split_function_ty
   let ret_sort = type_sort ~why:Function_result ty_ret in
   env,
   { filtered_arrow; arg_sort; ret_sort;
-    alloc_mode; ty_arg_mono;
+    alloc_mode; closure_mode=closure_mode.comonadic; ty_arg_mono;
     expected_inner_mode; expected_pat_mode;
-    really_poly
+    really_poly; env_mode=(Alloc.Monadic.disallow_left env_mode.monadic)
   }
 
 type type_function_result_param =
   { param : function_param;
     has_poly : bool;
+  }
+
+type fun_alloc_mode =
+  { alloc_mode: Locality.lr;
+    fun_closure_mode: Mode.Alloc.Comonadic.lr
   }
 
 (* The result of calling [type_function]. For the outer call to
@@ -6308,7 +6510,7 @@ type type_function_result =
        be a left mode for the construction of the [fp_curry] field of the outer
        function.
     *)
-    fun_alloc_mode: Mode.Alloc.lr option;
+    fun_alloc_mode: fun_alloc_mode option;
     (* Information about the return of the function. None only for
        recursive calls to [type_function] when there are no parameters
        left.
@@ -6318,7 +6520,7 @@ type type_function_result =
 
 and type_function_ret_info =
   { (* The mode the function returns at. *)
-    ret_mode: Mode.Alloc.l modes;
+    ret_mode: return_mode modes;
     (* The sort returned by the function. *)
     ret_sort: Jkind.sort;
   }
@@ -6392,12 +6594,19 @@ let pat_modes ~force_toplevel rec_mode_var ~is_lpoly (attrs, spat) =
     | None -> begin
         match pat_tuple_arity spat with
         | Not_local_tuple | Maybe_local_tuple ->
-            let mode = Value.newvar () in
+            let mode = Value.newvar (get_current_level ()) in
             simple_pat_mode mode, mode_default mode
         | Local_tuple locs ->
-            let modes = List.map (fun loc -> Value.newvar (), loc) locs in
+            let modes =
+              List.map
+                (fun loc ->
+                   Value.newvar (get_current_level ()), loc)
+                locs
+            in
             let modes_pat = List.map fst modes in
-            let mode = Value.newvar () in
+            let mode =
+              Value.newvar (get_current_level ())
+            in
             tuple_pat_mode mode modes_pat, mode_tuple mode modes
       end
     | Some mode ->
@@ -6510,8 +6719,11 @@ and type_expect_
         | None -> None
         | Some sexp ->
             let exp, mode =
-              with_local_level_generalize_structure_if_principal begin fun () ->
-                let mode = Value.newvar () in
+              with_local_level_generalize_structure_if_principal
+                ~before_generalize:(fun (exp, _) ->
+                  generalize_structure_exp exp)
+                begin fun () ->
+                let mode = Value.newvar 0 in
                 let exp = type_exp ~recarg env (mode_default mode) sexp in
                 exp, mode
               end
@@ -6563,6 +6775,7 @@ and type_expect_
             let decl = Env.find_type p' env in
             let ty =
               with_local_level_generalize_structure
+                ~before_generalize:generalize_structure
                 (fun () -> newconstr p' (instance_list decl.type_params))
             in
             ty, opt_exp_opath
@@ -6815,8 +7028,7 @@ and type_expect_
                  each label all over again. Possibly we're doing things in the
                  wrong order. *)
               Typedecl.update_record_representation ~why env
-                sexp.pexp_loc record_form ~old_repres:representation
-                labels_with_updated_types
+                sexp.pexp_loc record_form labels_with_updated_types
             with
             | Ok (_, rep) -> rep
             | Error _ ->
@@ -7148,12 +7360,12 @@ and type_expect_
         match pm.apply_position with
         | Tail ->
           let mode, _ =
-            Value.(newvar_below
+            Value.(newvar_below (get_current_level ())
               (of_const ~hint_comonadic:Tailcall_function
                 { Const.max with areality = Regional }))
           in
           mode
-        | Nontail | Default -> Value.newvar ()
+        | Nontail | Default -> Value.newvar (get_current_level ())
       in
       let funct_expected_mode = mode_default funct_mode in
       let outer_level = get_current_level () in
@@ -7182,6 +7394,7 @@ and type_expect_
       let type_sfunct sfunct =
         let funct =
           with_local_level_generalize_structure_if_principal
+            ~before_generalize:generalize_structure_exp
             (fun () -> type_exp env funct_expected_mode sfunct)
         in
         let ty = instance funct.exp_type in
@@ -7217,6 +7430,11 @@ and type_expect_
       let (args, ty_ret, mode_ret, pm) =
         type_application env loc expected_mode pm funct funct_mode sargs rt
       in
+      let ap_mode_alloc =
+        create_application_mode
+          ~return_from_exclave:expected_mode.return_from_exclave
+          mode_ret
+      in
       let mode_ret = Alloc.disallow_right mode_ret in
       let ap_mode = Alloc.proj_comonadic Areality mode_ret in
       let mode_ret = cross_left env ty_ret (alloc_as_value mode_ret) in
@@ -7237,7 +7455,7 @@ and type_expect_
       in
       let args = List.map (fun (lbl, arg, _) -> (lbl, arg)) args in
       let exp = rue {
-        exp_desc = Texp_apply(funct, args, pm.apply_position, ap_mode,
+        exp_desc = Texp_apply(funct, args, pm.apply_position, ap_mode_alloc,
                               zero_alloc);
         exp_loc = loc; exp_extra;
         exp_type = ty_ret;
@@ -7272,12 +7490,19 @@ and type_expect_
           let arg_pat_mode, arg_expected_mode =
             match cases_tuple_arity caselist with
             | Not_local_tuple | Maybe_local_tuple ->
-              let mode = Value.newvar () in
+              let mode = Value.newvar (get_current_level ()) in
               simple_pat_mode mode, mode_default mode
             | Local_tuple locs ->
-              let modes = List.map (fun loc -> Value.newvar (), loc) locs in
+              let modes =
+            List.map
+              (fun loc ->
+                 Value.newvar (get_current_level ()), loc)
+              locs
+          in
               let modes_pat = List.map fst modes in
-              let mode = Value.newvar () in
+              let mode =
+            Value.newvar (get_current_level ())
+          in
               tuple_pat_mode mode modes_pat, mode_tuple mode modes
           in
           env, arg_pat_mode, arg_expected_mode, expected_mode
@@ -7566,6 +7791,9 @@ and type_expect_
           (Texp_inspected_type (Label_disambiguation ambiguity), loc, [])
             :: record.exp_extra }
       in
+      let modality, _ =
+        Mode.Locality.newvar_above 0
+          (Mode.Alloc.proj_comonadic Areality (value_to_alloc_r2l rmode)) in
       unify_exp ~sexp env record ty_record;
       let record_sorts, record_repres =
         update_labels env Legacy ~representative_label:label ~loc
@@ -7577,10 +7805,7 @@ and type_expect_
           record;
           record_repres;
           record_sorts;
-          modality =
-            Locality.disallow_right
-              (Alloc.proj_comonadic Areality
-               (value_to_alloc_r2l rmode));
+          modality;
           lid = label_loc;
           label;
           newval;
@@ -7671,6 +7896,7 @@ and type_expect_
     let principal = is_principal ty_expected in
     let { ba; base_ty; el_ty; modality } =
       with_local_level_generalize_structure_if_principal
+        ~before_generalize:generalize_structure_type_block_access_result
         (fun () ->
            let res = type_block_access env expected_base_ty principal ba in
            (* This unification is to get a better [base_ty], and is not
@@ -7706,6 +7932,8 @@ and type_expect_
            (* Generalize after each step, otherwise we'll have more
               "non-principal" warnings than desired. *)
            with_local_level_generalize_structure_if_principal
+             ~before_generalize:(fun ((t, _), ua) ->
+               generalize_structure_type_unboxed_access_result (t, ua))
              (fun () ->
                 let (el_ty, ua_modality), ua =
                   type_unboxed_access env loc el_ty ua
@@ -7920,6 +8148,7 @@ and type_expect_
       let pm = position_and_mode env expected_mode sexp in
       let (obj,meth,typ) =
         with_local_level_generalize_structure_if_principal
+          ~before_generalize:(fun (_, _, typ) -> generalize_structure typ)
           (fun () -> type_send env loc explanation e met.txt)
       in
       let typ, obj_extra =
@@ -8167,6 +8396,7 @@ and type_expect_
   | Pexp_poly(sbody, sty) ->
       let ty, cty =
         with_local_level_generalize_structure_if_principal
+          ~before_generalize:(fun (ty, _) -> generalize_structure ty)
           begin fun () ->
             match sty with None -> protect_expansion env ty_expected, None
             | Some sty ->
@@ -8192,6 +8422,8 @@ and type_expect_
               with_local_level_generalize begin fun () ->
                 let vars, ty'' =
                   with_local_level_generalize_structure_if_principal
+                    ~before_generalize:(fun (_, ty'') ->
+                      generalize_structure ty'')
                     (fun () -> instance_poly_fixed tl ty')
                 in
                 let exp = type_expect env expected_mode sbody (mk_expected ty'') in
@@ -8307,10 +8539,13 @@ and type_expect_
             let ty_acc = newty (Ttuple [None, ty_acc; None, ty]) in
             loop spat_acc ty_acc Jkind.Sort.scannable rest
       in
-      let op_path, op_desc, op_type, spat_params, ty_params, param_sort,
+      let (op_path, op_desc, op_type, spat_params, ty_params, param_sort,
           ty_func_result, body_sort, ty_result, op_result_sort,
-          ty_andops, sort_andops =
-        with_local_level_generalize_structure_if_principal begin fun () ->
+          ty_andops, sort_andops), _ =
+        with_local_level_generalize_structure_if_principal
+          ~before_generalize:
+            (fun (_, tys) -> List.iter generalize_structure tys)
+          begin fun () ->
           let let_loc = slet.pbop_op.loc in
           let op_path, op_desc = type_binding_op_ident env slet.pbop_op in
           let op_type = op_desc.val_type in
@@ -8345,7 +8580,8 @@ and type_expect_
           end;
           (op_path, op_desc, op_type, spat_params, ty_params, param_sort,
            ty_func_result, body_sort, ty_result, op_result_sort,
-           ty_andops, sort_andops)
+           ty_andops, sort_andops),
+           [ty_andops; ty_params; ty_func_result; ty_result]
         end
       in
       let exp, exp_sort, ands =
@@ -8525,11 +8761,9 @@ and type_expect_
             Value.(of_const ~hint_comonadic:Stack_expression
               { Const.min with areality = Local })
             expected_mode;
-          let local =
-            Alloc.(of_const ~hint_comonadic:Stack_expression
-              { Const.min with areality = Local })
-          in
-          Alloc.submode_err (exp.exp_loc, Allocation) local alloc_mode
+          Locality.submode_err (exp.exp_loc, Allocation)
+            (Locality.of_const ~hint:Stack_expression Local)
+            alloc_mode
         end
       | Texp_list_comprehension _ -> unsupported List_comprehension
       | Texp_array_comprehension _ -> unsupported Array_comprehension
@@ -8569,6 +8803,7 @@ and type_expect_
         (* The overwritten cell has to be unique
            and should have the areality expected here: *)
         Value.newvar_below
+          (get_current_level ())
           (Value.meet [
             Value.of_const {Value.Const.max with uniqueness = Unique};
             Value.max_with_comonadic Areality
@@ -8825,7 +9060,9 @@ and type_coerce
   match sty with
   | None ->
     let (cty', ty', force) =
-      with_local_level_generalize_structure begin fun () ->
+      with_local_level_generalize_structure
+        ~before_generalize:(fun (_, ty, _) -> generalize_structure ty)
+        begin fun () ->
         Typetexp.transl_simple_type_delayed env type_mode sty'
       end
     in
@@ -8875,14 +9112,17 @@ and type_coerce
       end;
       (arg, ty', Texp_coerce (None, cty'))
   | Some sty ->
-      let cty, ty, force, cty', ty', force' =
-        with_local_level_generalize_structure begin fun () ->
+      let (cty, ty, force, cty', ty', force'), _ =
+        with_local_level_generalize_structure
+          ~before_generalize:(fun (_, tys) ->
+            List.iter generalize_structure tys)
+          begin fun () ->
           let (cty, ty, force) =
             Typetexp.transl_simple_type_delayed env type_mode sty
           and (cty', ty', force') =
             Typetexp.transl_simple_type_delayed env type_mode sty'
           in
-          (cty, ty, force, cty', ty', force')
+          (cty, ty, force, cty', ty', force'), [ty; ty']
         end
       in
       begin try
@@ -8899,7 +9139,9 @@ and type_coerce
 and type_constraint env sty type_mode =
   (* Pretend separate = true, 1% slowdown for lablgtk *)
   let cty =
-    with_local_level_generalize_structure begin fun () ->
+    with_local_level_generalize_structure
+      ~before_generalize:(fun cty -> generalize_structure cty.ctyp_type)
+      begin fun () ->
       Typetexp.transl_simple_type ~new_var_jkind:Any env ~closed:false type_mode
         sty
     end
@@ -8972,7 +9214,7 @@ and type_newtype
         Hashtbl.add seen (get_id t) ();
         match get_desc t with
         | Tconstr (Path.Pident id', _, _) when id == id' -> link_type t ty
-        | _ -> Btype.iter_type_expr replace t
+        | _ -> Btype.iter_type_expr replace (Fun.const ()) t
       end
     in
     let ety = Subst.type_expr Subst.identity exp_type in
@@ -9057,7 +9299,8 @@ and type_ident env ?(recarg=Rejected) lid =
        (* if the locality of returned value of the primitive is poly
           we then register allocation for further optimization *)
        | (Prim_poly, _), Some mode ->
-           register_allocation_mode (Alloc.max_with_comonadic Areality mode)
+           let mode = Locality.disallow_left mode in
+           register_allocation_mode mode
        | _ -> ()
        end;
        [], ty, Id_prim (Option.map Locality.disallow_right mode, sort)
@@ -9198,7 +9441,7 @@ and type_function
           { filtered_arrow = { ty_arg; arg_mode; ty_ret; ret_mode };
             arg_sort; ret_sort;
             ty_arg_mono; expected_pat_mode; expected_inner_mode;
-            alloc_mode; really_poly
+            alloc_mode; closure_mode; really_poly; env_mode
           } =
         split_function_ty env expected_mode ty_expected loc
           ~is_first_val_param:first ~is_final_val_param
@@ -9248,6 +9491,10 @@ and type_function
             ty_default_arg, Some (default_arg, arg_label, default_arg_sort),
               default_arg_sort
       in
+      let excl = ref false in
+      let expected_inner_mode =
+        mode_return_from_exclave expected_inner_mode excl
+      in
       let (pat, params, body, ret_info, newtypes, contains_gadt, curry), partial =
         (* Check everything else in the scope of the parameter. *)
         map_half_typed_cases Value env expected_pat_mode
@@ -9280,28 +9527,53 @@ and type_function
                 | None ->
                   assert(is_final_val_param);
                   Final_arg
-                | Some fun_alloc_mode ->
+                | Some { fun_closure_mode; alloc_mode } ->
                   assert(not is_final_val_param);
                   (* Handle mode crossing of [arg_mode]. Note that [close_over]
                      uses the [arg_mode.comonadic] as a left mode, and
                      [arg_mode.monadic] as a right mode, hence they need to be
                      mode-crossed differently. *)
-                  let arg_mode = alloc_mode_cross_to_max_min env ty_arg arg_mode in
+                  let arg_mode =
+                    alloc_comonadic_mode_cross_to_max env ty_arg
+                      arg_mode.comonadic
+                  in
+                  let env_mode =
+                    alloc_monadic_mode_cross_to_min env ty_arg env_mode
+                  in
+                  let cls_details : Mode.Hint.closure_details =
+                    { closure = (loc, Function);
+                      closed = (pparam_loc, Pattern) }
+                  in
+                  let hint : _ Hint.morph =
+                    Is_closed_by (Monadic, cls_details)
+                  in
+                  Alloc.Monadic.submode_err (pparam_loc, Pattern)
+                    (Alloc.comonadic_to_monadic_min ~hint fun_closure_mode)
+                    env_mode;
                   begin match
-                    Alloc.submode (Alloc.close_over arg_mode) fun_alloc_mode
+                    Alloc.Comonadic.submode arg_mode fun_closure_mode
                   with
-                    | Ok () -> ()
+                    | Ok () ->
+                        Locality.submode_exn
+                        (Alloc.Comonadic.proj Areality arg_mode)
+                        alloc_mode
                     | Error e ->
-                      raise (Error(loc_fun, env, Uncurried_function_escapes e))
+                      raise (Error(loc_fun, env,
+                        Uncurried_function_escapes_comonadic e))
                   end;
                   begin match
-                    Alloc.submode (Alloc.partial_apply alloc_mode) fun_alloc_mode
-                  with
-                    | Ok () -> ()
+                      Alloc.Comonadic.submode closure_mode fun_closure_mode
+                    with
+                    | Ok () ->
+                        Locality.submode_exn
+                        (Alloc.Comonadic.proj Areality closure_mode)
+                        alloc_mode
                     | Error e ->
-                      raise (Error(loc_fun, env, Uncurried_function_escapes e))
+                      raise (Error(loc_fun, env,
+                        Uncurried_function_escapes_comonadic e));
                   end;
-                  More_args {partial_mode = Alloc.disallow_right fun_alloc_mode}
+                  More_args
+                    { partial_mode = Locality.disallow_right alloc_mode }
               in
               pat, params_suffix, body, ret_info, newtypes, contains_gadt, curry
           end
@@ -9361,6 +9633,9 @@ and type_function
             param,
             param_uid
       in
+      let arg_mode =
+        create_allocation_mode_l arg_mode
+      in
       let param =
         { has_poly;
           param =
@@ -9372,24 +9647,32 @@ and type_function
               fp_newtypes = newtypes;
               fp_sort = arg_sort;
               fp_mode =
-                { mode_annots with mode_modes = Alloc.disallow_right arg_mode };
+                { mode_annots with mode_modes = arg_mode };
               fp_curry = curry;
               fp_loc = pparam_loc;
             };
         }
+      in
+      let return_from_exclave = !excl in
+      let ret_mode =
+        create_function_return_mode ~return_from_exclave ret_mode
       in
       let ret_info =
         match ret_info with
         | Some _ as x -> x
         | None ->
           let ret_mode =
-            {ret_mode_annots with mode_modes = Alloc.disallow_right ret_mode }
+            {ret_mode_annots with mode_modes = ret_mode }
           in
           Some { ret_sort ; ret_mode }
       in
+      let fun_alloc_mode =
+        { fun_closure_mode = closure_mode;
+          alloc_mode }
+      in
       { function_ = exp_type, param :: params, body;
         newtypes = []; params_contain_gadt = contains_gadt;
-        ret_info; fun_alloc_mode = Some alloc_mode;
+        ret_info; fun_alloc_mode = Some fun_alloc_mode;
       }
   | [] ->
     let exp_type, body, fun_alloc_mode, ret_info =
@@ -9505,13 +9788,14 @@ and type_label_access
   : 'rep . 'rep record_form -> _ -> _ -> _ -> _ ->
     _ * _ * _ * 'rep gen_label_description * _ * _
   = fun record_form env srecord usage lid ->
-  let mode = Value.newvar () in
+  let mode = Value.newvar (get_current_level ()) in
   let record_jkind, record_sort =
     Jkind.of_new_sort_var ~why:Record_projection
       ~level:(Ctype.get_current_level ())
   in
   let record =
     with_local_level_generalize_structure_if_principal
+      ~before_generalize:generalize_structure_exp
       (fun () ->
          type_expect ~recarg:Allowed env (mode_default mode) srecord
            (mk_expected (newvar record_jkind)))
@@ -9550,7 +9834,9 @@ and solve_Pexp_field
        [update_label], but doing it that way causes principality issues.
        Notably, this call to [update_label] happens inside a local level and the
        [Texp_setfield] call does not. *)
-    with_local_level_generalize_structure_if_principal begin fun () ->
+    with_local_level_generalize_structure_if_principal
+      ~before_generalize:(fun (ty_arg, _, _) -> generalize_structure ty_arg)
+      begin fun () ->
       (* [ty_arg] is the type of field, [ty_res] is the type of record, they
        could share type variables, which are now instantiated *)
       let (_, ty_arg, ty_res) = instance_label ~fixed:false label in
@@ -9856,9 +10142,15 @@ and type_label_exp
     (* raise level to check univars *)
     with_local_level_generalize_if is_poly begin fun () ->
       let unify_as_label ty_expected =
-        with_local_level_generalize_structure_if separate begin fun () ->
+        with_local_level_generalize_structure_if separate
+          ~before_generalize:(fun (_, ty_arg) ->
+            generalize_structure ty_arg)
+          begin fun () ->
           let (vars, ty_arg, ty_res) =
             with_local_level_generalize_structure_if separate
+              ~before_generalize:(fun (_, ty_arg, ty_res) ->
+                generalize_structure ty_arg;
+                generalize_structure ty_res)
               (fun () -> instance_label ~fixed:true label)
           in
           begin try
@@ -9911,15 +10203,19 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
     let lv = get_level expty in
     let lv' = get_level expty' in
     match get_desc expty', get_desc expty with
-    | Tarrow((l, marg, mret), ty_arg', ty_res', _),
+    | Tarrow((l, marg', mret'), ty_arg', ty_res', _),
       Tarrow(_, ty_arg,  ty_res,  _)
       when lv' = generic_level || not !Clflags.principal ->
       let ty_res', ty_res, changed = loosen_arrow_modes ty_res' ty_res in
-      let mret, changed' = Alloc.newvar_below mret in
-      let marg, changed'' = Alloc.newvar_above marg in
-      if changed || changed' || changed'' then
-        newty2 ~level:lv' (Tarrow((l, marg, mret), ty_arg', ty_res', commu_ok)),
-        newty2 ~level:lv  (Tarrow((l, marg, mret), ty_arg,  ty_res,  commu_ok)),
+      let mret', changed1 = Alloc.newvar_below (lv) mret' in
+      let marg', changed2 = Alloc.newvar_above (lv) marg' in
+      if changed || changed1 || changed2 then
+        newty2 ~level:lv'
+          (Tarrow((l, marg', mret'), ty_arg', ty_res',
+                  commu_ok)),
+        newty2 ~level:lv
+          (Tarrow((l, marg', mret'), ty_arg, ty_res,
+                  commu_ok)),
         true
       else
         ty', ty, false
@@ -9959,9 +10255,13 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
     Some (safe_expect, lv) ->
       (* apply omittable arguments when expected type is "" *)
       (* we must be very careful about not breaking the semantics *)
-      let exp_mode, _ = Value.newvar_below (as_single_mode mode) in
+      let exp_mode, _ =
+        Value.newvar_below
+          (get_current_level ()) (as_single_mode mode)
+      in
       let texp =
         with_local_level_generalize_structure_if_principal
+          ~before_generalize:generalize_structure_exp
           (fun () ->
             let expected_mode =
               mode
@@ -10043,7 +10343,10 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
                       desc; kind = Id_value; unique_use = uu;
                       mode = Value.disallow_right mode }}
       in
-      let eta_mode, _ = Value.newvar_below (alloc_as_value marg) in
+      let eta_mode, _ =
+        Value.newvar_below
+          (get_current_level ()) (alloc_as_value marg)
+      in
       Regionality.submode_exn
         (Value.proj_comonadic Areality eta_mode) Regionality.regional;
       let type_sort ~why ty =
@@ -10055,6 +10358,12 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
       let arg_sort = type_sort ~why:Function_argument ty_arg in
       let ret_sort = type_sort ~why:Function_result ty_res in
       let eta_pat, eta_var = var_pair ~mode:eta_mode "eta" ty_arg arg_sort in
+      let fc_arg_mode =
+        create_allocation_mode_l marg
+      in
+      let fc_ret_mode =
+        create_omitted_return_mode mret
+      in
       (* CR layouts v10: When we add abstract jkinds, the eta expansion here
          becomes impossible in some cases - we'll need better errors.  For test
          cases, look toward the end of
@@ -10066,7 +10375,7 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
              (texp,
               args @ [Nolabel, Arg (eta_var, arg_sort)],
               Nontail,
-              Alloc.proj_comonadic Areality (Alloc.disallow_right mret),
+              fc_ret_mode,
               None)}
         in
         let e = {texp with exp_type = ty_res; exp_desc = Texp_exclave e} in
@@ -10082,11 +10391,12 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
                     fc_param_debug_uid = param_uid; fc_env = env;
                     fc_ret_type = ty_res; fc_loc = cases_loc;
                     fc_exp_extra = []; fc_attributes = [];
-                    fc_arg_mode = Alloc.disallow_right marg;
+                    fc_arg_mode;
                     fc_arg_sort = arg_sort;
                   };
               ret_mode =
-                { mode_modes = Alloc.disallow_right mret; mode_desc = [] };
+                { mode_modes = fc_ret_mode;
+                  mode_desc = [] };
               ret_sort;
               alloc_mode;
               zero_alloc = Zero_alloc.default
@@ -10176,6 +10486,8 @@ and type_apply_arg env ~app_loc ~funct ~index ~position_and_mode ~partial_app
             with_local_level_generalize begin fun () ->
               let vars, ty_arg' =
                 with_local_level_generalize_structure_if separate
+                  ~before_generalize:(fun (_, ty_arg') ->
+                    generalize_structure ty_arg')
                   begin fun () ->
                   instance_poly_fixed vars ty_arg'
                 end
@@ -10221,8 +10533,10 @@ and type_application env app_loc expected_mode position_and_mode
   | (* Special case for ignore: avoid discarding warning *)
     [Parsetree.Nolabel, sarg] when is_ignore funct ->
       let {ty_arg; arg_mode; ty_ret; ret_mode} =
-        with_local_level_generalize_structure_if_principal (fun () ->
-          filter_arrow_mono env (instance funct.exp_type) Nolabel)
+        with_local_level_generalize_structure_if_principal
+          ~before_generalize:(fun { ty_ret; _ } ->
+            generalize_structure ty_ret)
+          (fun () -> filter_arrow_mono env (instance funct.exp_type) Nolabel)
       in
       let type_sort ~why ty =
         match Ctype.type_sort ~why ~fixed:false env ty with
@@ -10260,7 +10574,10 @@ and type_application env app_loc expected_mode position_and_mode
         end
       in
       let ty_ret, mode_ret, args, position_and_mode =
-        with_local_level_generalize_structure_if_principal begin fun () ->
+        with_local_level_generalize_structure_if_principal
+          ~before_generalize:(fun (ty_ret, _, _, _) ->
+            generalize_structure ty_ret)
+          begin fun () ->
           (* Consider for example the application
                [f n]
              with
@@ -10488,9 +10805,18 @@ and type_construct ~overwrite ~sexp env (expected_mode : expected_mode) lid sarg
                   (lid.txt, constr.cstr_arity, List.length sargs)));
   let separate = !Clflags.principal || Env.has_local_constraints env in
   let unify_as_construct ty_expected =
-    with_local_level_generalize_structure_if separate begin fun () ->
+    with_local_level_generalize_structure_if separate
+      ~before_generalize:(fun (ty_args, ty_res, _) ->
+        generalize_structure ty_res;
+        List.iter
+          (fun { Types.ca_type = ty; _ } -> generalize_structure ty)
+          ty_args)
+      begin fun () ->
       let ty_args, ty_res, texp =
-        with_local_level_generalize_structure_if separate begin fun () ->
+        with_local_level_generalize_structure_if separate
+          ~before_generalize:(fun (_, ty_res, _) ->
+            generalize_structure ty_res)
+          begin fun () ->
           let (ty_args, ty_res, _) =
             instance_constructor Keep_existentials_flexible constr
           in
@@ -10766,10 +11092,14 @@ and map_half_typed_cases
         map_conts
         (fun ({ Parmatch.pattern; _ } as untyped_case, case_data) cont ->
           let htc =
-            with_local_level_generalize_structure_if_principal begin fun () ->
+            with_local_level_generalize_structure_if_principal
+              ~before_generalize:(fun htc ->
+                iter_pattern_variables_type generalize_structure htc.pat_vars)
+              begin fun () ->
               let ty_arg =
                 (* propagation of pattern *)
                 with_local_level_generalize_structure
+                  ~before_generalize:generalize_structure
                   (fun () -> instance ?partial:take_partial_instance ty_arg)
               in
               let (pat, ext_env, force, pvs, mvs) =
@@ -11030,13 +11360,17 @@ and type_function_cases_expect
   Builtin_attributes.warning_scope attrs begin fun () ->
     let env,
         { filtered_arrow = { ty_arg; ty_ret; arg_mode; ret_mode };
-          arg_sort; ret_sort;
+          arg_sort; ret_sort; closure_mode;
           ty_arg_mono; expected_pat_mode; expected_inner_mode; alloc_mode;
         } =
       split_function_ty env expected_mode ty_expected loc ~arg_label:Nolabel
         ~in_function ~has_poly:false ~mode_annots:Mode.Alloc.Const.Option.none
         ~ret_mode_annots:Mode.Alloc.Const.Option.none
         ~is_first_val_param:first ~is_final_val_param:true
+    in
+    let excl = ref false in
+    let expected_inner_mode =
+      mode_return_from_exclave expected_inner_mode excl
     in
     let cases, partial =
       type_cases Value env
@@ -11049,6 +11383,9 @@ and type_function_cases_expect
            (Tarrow ((Nolabel, arg_mode, ret_mode), ty_arg, ty_ret, commu_ok)))
     in
     unify_exp_types loc env ty_fun (instance ty_expected);
+    let fc_arg_mode =
+      create_allocation_mode_l arg_mode
+    in
     let param , param_uid = name_cases "param" cases in
     let cases =
       { fc_cases = cases;
@@ -11060,14 +11397,21 @@ and type_function_cases_expect
         fc_env = env;
         fc_ret_type = ty_ret;
         fc_attributes = [];
-        fc_arg_mode = Alloc.disallow_right arg_mode;
+        fc_arg_mode;
         fc_arg_sort = arg_sort;
       }
     in
-    cases, ty_fun, alloc_mode,
+    let fun_alloc_mode =
+      { fun_closure_mode = closure_mode;
+        alloc_mode }
+    in
+    let return_from_exclave = !excl in
+    cases, ty_fun, fun_alloc_mode,
       { ret_sort;
         ret_mode =
-          {mode_modes = Alloc.disallow_right ret_mode; mode_desc = []} }
+          { mode_modes =
+              create_function_return_mode ~return_from_exclave ret_mode;
+            mode_desc = [] } }
   end
 
 and type_effect_cases
@@ -11132,7 +11476,8 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
   let entirely_functions = List.for_all vb_is_fun spat_sexp_list in
   let rec_mode_var =
     match rec_flag with
-    | Recursive when entirely_functions -> Some (Value.newvar ())
+    | Recursive when entirely_functions ->
+      Some (Value.newvar (get_current_level ()))
     | Recursive ->
         (* If the definitions are not purely functions, this involves multiple
            allocations pointing to each other. For this to be safe, they are all
@@ -11141,7 +11486,7 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
         let m, _ =
           {Value.Const.max with areality = Global}
           |> Value.of_const
-          |> Value.newvar_below
+          |> Value.newvar_below (get_current_level ())
         in
         Some m
     | Nonrecursive -> None
@@ -11157,7 +11502,13 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
     with_local_level_generalize begin fun () ->
       if existential_context = At_toplevel then Typetexp.TyVarEnv.reset ();
       let (pat_list, new_env, force, pvs, mvs), sorts =
-        with_local_level_generalize_structure_if_principal begin fun () ->
+        with_local_level_generalize_structure_if_principal
+          ~before_generalize:
+            (fun ((pat_list, _, _, pvs, _), _) ->
+              iter_pattern_variables_type generalize_structure pvs;
+              List.iter
+                (fun (_, pat) -> generalize_structure pat.pat_type) pat_list)
+          begin fun () ->
           let nvs, sorts =
             List.split (List.map (fun _ -> new_rep_var ~why:Let_binding ())
                           spatl)
@@ -11260,6 +11611,8 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
             | Tpoly (ty, tl) ->
                 let vars, ty' =
                   with_local_level_generalize_structure_if_principal
+                    ~before_generalize:(fun (_, ty') ->
+                      generalize_structure ty')
                     (fun () -> instance_poly_fixed ~keep_names:true tl ty)
                 in
                 let exp =
@@ -11536,9 +11889,12 @@ and type_andops env sarg sands expected_sort expected_ty =
         expected_sort,
         []
     | { pbop_op = sop; pbop_exp = sexp; pbop_loc = loc; _ } :: rest ->
-        let op_path, op_desc, op_type, ty_arg, sort_arg, ty_rest, sort_rest,
-            ty_result, op_result_sort =
-          with_local_level_generalize_structure_if_principal begin fun () ->
+        let (op_path, op_desc, op_type, ty_arg, sort_arg, ty_rest, sort_rest,
+            ty_result, op_result_sort), _ =
+          with_local_level_generalize_structure_if_principal
+            ~before_generalize:
+              (fun (_, tys) -> List.iter generalize_structure tys)
+            begin fun () ->
             let op_path, op_desc = type_binding_op_ident env sop in
             let op_type = op_desc.val_type in
             let ty_arg, sort_arg = new_rep_var ~why:Function_argument () in
@@ -11557,7 +11913,7 @@ and type_andops env sarg sands expected_sort expected_ty =
               raise(Error(sop.loc, env, Andop_type_clash(sop.txt, err)))
             end;
             (op_path, op_desc, op_type, ty_arg, sort_arg, ty_rest, sort_rest,
-             ty_result, op_result_sort)
+             ty_result, op_result_sort), [ty_rest; ty_arg; ty_result]
           end
         in
         let let_arg, sort_let_arg, rest =
@@ -11650,7 +12006,9 @@ and type_n_ary_function
                           (Jkind.of_new_sort ~why
                              ~level:(Ctype.get_current_level ()))
                       in
-                      let new_mode_var () = Mode.Alloc.newvar () in
+                      let new_mode_var () =
+                        Mode.Alloc.newvar (get_current_level ())
+                      in
                       (newty
                          (Tarrow
                             ( (arg_label, new_mode_var (), new_mode_var ())
@@ -11708,12 +12066,17 @@ and type_n_ary_function
       | (Check _ | Assume _ | Ignore_assert_all) ->
         Zero_alloc.create_const zero_alloc
     in
-    let alloc_mode = Mode.Alloc.disallow_left fun_alloc_mode in
+    let ret_mode =
+      { ret_mode with
+        mode_modes = ret_mode.mode_modes }
+    in
     re
       { exp_desc =
           Texp_function
             { params; body; ret_sort;
-              alloc_mode; ret_mode;
+              alloc_mode =
+                Locality.disallow_left fun_alloc_mode.alloc_mode;
+              ret_mode;
               zero_alloc
             };
         exp_loc = loc;
@@ -11849,7 +12212,9 @@ and type_comprehension_expr ~loc ~env ~ty_expected ~attributes cexpr =
           ~why:Jkind.History.Array_comprehension_element
   in
   let element_ty =
-    with_local_level_generalize_structure_if_principal begin fun () ->
+    with_local_level_generalize_structure_if_principal
+      ~before_generalize:generalize_structure
+      begin fun () ->
       let element_ty = newvar jkind in
       unify_exp_types
         loc
@@ -13189,19 +13554,26 @@ let report_error ~loc env =
         but was expected to %s which is %a.@]"
         desc (Style.as_inline_code (Alloc.Const.print_axis ax)) actual
         desc_inf (Style.as_inline_code (Alloc.Const.print_axis ax)) expected
-  | Uncurried_function_escapes e -> begin
-      let Mode.Alloc.Error (ax, {left; right}) = Mode.Alloc.to_simple_error e in
+  | Uncurried_function_escapes_comonadic e -> begin
+      let Mode.Alloc.Comonadic.Error (ax, {left; right}) =
+        Mode.Alloc.Comonadic.to_simple_error e
+      in
       match ax with
-      | Comonadic Areality ->
-          Location.errorf ~loc
+      | Areality ->
+        Location.errorf ~loc
             "This function or one of its parameters escape their region@ \
             when it is partially applied."
       | _ ->
-          Location.errorf ~loc
+        Location.errorf ~loc
             "This function when partially applied returns a value which is %a,@ \
               but expected to be %a."
-            (Style.as_inline_code (Alloc.Const.print_axis ax)) left
-            (Style.as_inline_code (Alloc.Const.print_axis ax)) right
+            (Style.as_inline_code (Alloc.Const.print_axis (Comonadic ax))) left
+            (Style.as_inline_code (Alloc.Const.print_axis (Comonadic ax))) right
+    end
+  | Uncurried_function_escapes_locality -> begin
+      Location.errorf ~loc
+        "This function or one of its parameters escape their region@ \
+        when it is partially applied."
     end
   | Bad_tail_annotation err ->
       Location.errorf ~loc

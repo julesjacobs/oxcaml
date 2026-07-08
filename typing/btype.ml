@@ -108,7 +108,7 @@ end
 
 (**** Type level management ****)
 
-let generic_level = Ident.highest_scope
+let generic_level = Mode.Alloc.generic_level
 let lowest_level = Ident.lowest_scope
 
 (**** leveled type pool ****)
@@ -343,11 +343,13 @@ let iter_row f row =
   fold_row (fun () v -> f v) () row
 
 
-let fold_type_expr f init ty =
+let fold_type_expr f fm init ty =
   match get_desc ty with
     Tvar _              -> init
-  | Tarrow (_, ty1, ty2, _) ->
-      let result = f init ty1 in
+  | Tarrow ((_, m1, m2), ty1, ty2, _) ->
+      let result = fm init m1 in
+      let result = fm result m2 in
+      let result = f result ty1 in
       f result ty2
   | Ttuple l            -> List.fold_left (fun acc (_, t) -> f acc t) init l
   | Tunboxed_tuple l    -> List.fold_left (fun acc (_, t) -> f acc t) init l
@@ -379,8 +381,8 @@ let fold_type_expr f init ty =
   | Tof_kind _ -> init
   | Tbox ty -> f init ty
 
-let iter_type_expr f ty =
-  fold_type_expr (fun () v -> f v) () ty
+let iter_type_expr f fm ty =
+  fold_type_expr (fun () v -> f v) (fun () v -> fm v) () ty
 
 let rec iter_abbrev f = function
     Mnil                   -> ()
@@ -417,10 +419,11 @@ let iter_type_expr_kind f = function
                   (**********************************)
 
 let rec mark_type mark ty =
-  if try_mark_node mark ty then iter_type_expr (mark_type mark) ty
+  if try_mark_node mark ty then
+    iter_type_expr (mark_type mark) (Fun.const ()) ty
 
 let mark_type_params mark ty =
-  iter_type_expr (mark_type mark) ty
+  iter_type_expr (mark_type mark) (Fun.const ()) ty
 
                   (**********************************)
                   (*  (Object-oriented) iterator    *)
@@ -445,6 +448,8 @@ type 'a type_iterators =
     it_type_kind: 'a type_iterators -> type_decl_kind -> unit;
     it_do_type_expr: 'a type_iterators -> 'a;
     it_type_expr: 'a type_iterators -> type_expr -> unit;
+    it_mode_expr: Mode.Alloc.lr -> unit;
+    it_modality: Mode.Modality.t -> unit;
     it_path: Path.t -> unit; }
 
 type type_iterators_full = (type_expr -> unit) type_iterators
@@ -463,7 +468,8 @@ let type_iterators_without_type_expr =
     | Sig_class_type (_, ctd, _, _) -> it.it_class_type_declaration it ctd
     | Sig_jkind (_ , jkd, _)        -> it.it_jkind_declaration it jkd
   and it_value_description it vd =
-    it.it_type_expr it vd.val_type
+    it.it_type_expr it vd.val_type;
+    it.it_modality vd.val_modalities
   and it_type_declaration it td =
     List.iter (it.it_type_expr it) td.type_params;
     Option.iter (it.it_type_expr it) td.type_manifest;
@@ -475,7 +481,8 @@ let type_iterators_without_type_expr =
     iter_type_expr_cstr_args (it.it_type_expr it) td.ext_args;
     Option.iter (it.it_type_expr it) td.ext_ret_type
   and it_module_declaration it md =
-    it.it_module_type it md.md_type
+    it.it_module_type it md.md_type;
+    it.it_modality md.md_modalities
   and it_modtype_declaration it mtd =
     Option.iter (it.it_module_type it) mtd.mtd_type
   and it_class_declaration it cd =
@@ -490,21 +497,23 @@ let type_iterators_without_type_expr =
   and it_jkind_declaration it jkd =
     match jkd.jkind_manifest with
     | None -> ()
-    | Some { base = Kconstr (p, _); mod_bounds = _;
-             with_bounds = No_with_bounds } ->
+    | Some { base = Kconstr p; mod_bounds = _; with_bounds = No_with_bounds } ->
       it.it_path p
     | Some { base = Layout _; mod_bounds = _; with_bounds = No_with_bounds } ->
       ()
   and it_functor_param it = function
     | Unit -> ()
-    | Named (_, mt, _) -> it.it_module_type it mt
+    | Named (_, mt, mode) ->
+        it.it_module_type it mt;
+        it.it_mode_expr mode
   and it_module_type it = function
       Mty_ident p
     | Mty_alias p -> it.it_path p
     | Mty_signature sg -> it.it_signature it sg
-    | Mty_functor (p, mt, _) ->
+    | Mty_functor (p, mt, mode) ->
         it.it_functor_param it p;
-        it.it_module_type it mt
+        it.it_module_type it mt;
+        it.it_mode_expr mode
     | Mty_strengthen (mty, p, _) ->
         it.it_module_type it mty;
         it.it_path p
@@ -524,19 +533,22 @@ let type_iterators_without_type_expr =
   and it_type_kind it kind =
     iter_type_expr_kind (it.it_type_expr it) kind
   and it_path _p = ()
+  and it_mode_expr _m = ()
+  and it_modality _m = ()
   in
   { it_path; it_type_expr = (fun _ _ -> ()); it_do_type_expr = (fun _ _ -> ());
     it_type_kind; it_class_type; it_functor_param; it_module_type;
     it_signature; it_class_type_declaration; it_class_declaration;
     it_jkind_declaration;
     it_modtype_declaration; it_module_declaration; it_extension_constructor;
-    it_type_declaration; it_value_description; it_signature_item; }
+    it_type_declaration; it_value_description;
+    it_signature_item; it_mode_expr; it_modality }
 
 let type_iterators mark =
   let it_type_expr it ty =
     if try_mark_node mark ty then it.it_do_type_expr it ty
   and it_do_type_expr it ty =
-    iter_type_expr (it.it_type_expr it) ty;
+    iter_type_expr (it.it_type_expr it) (it.it_mode_expr) ty;
     match get_desc ty with
       Tconstr (p, _, _)
     | Tobject (_, {contents=Some (p, _)})
@@ -588,11 +600,12 @@ let instance_jkind (t : jkind_lr) : jkind_lr =
   | Layout l ->
     { t with jkind = { t.jkind with base = Layout (instance_layout l) } }
 
-let rec copy_type_desc ?(keep_names=false) f = function
+let rec copy_type_desc ?(keep_names=false) f fm = function
     Tvar { name; jkind } ->
      let jkind = instance_jkind jkind in
      if keep_names then Tvar { name; jkind } else Tvar { name=None; jkind }
-  | Tarrow (p, ty1, ty2, c)-> Tarrow (p, f ty1, f ty2, copy_commu c)
+  | Tarrow ((p, m1, m2), ty1, ty2, c)->
+    Tarrow ((p, fm m1, fm m2), f ty1, f ty2, copy_commu c)
   | Ttuple l            -> Ttuple (List.map (fun (label, t) -> label, f t) l)
   | Tunboxed_tuple l    ->
     Tunboxed_tuple (List.map (fun (label, t) -> label, f t) l)
@@ -608,7 +621,7 @@ let rec copy_type_desc ?(keep_names=false) f = function
       Tfield (p, field_kind_internal_repr k, f ty1, f ty2)
       (* the kind is kept shared, with indirections removed for performance *)
   | Tnil                -> Tnil
-  | Tlink ty            -> copy_type_desc f (get_desc ty)
+  | Tlink ty            -> copy_type_desc f fm (get_desc ty)
   | Tsubst _            -> assert false
   | Tunivar _ as ty     -> ty (* always keep the name *)
   | Tpoly (ty, tyl)     ->
@@ -628,11 +641,24 @@ module For_copy : sig
 
   val redirect_desc: copy_scope -> type_expr -> type_desc -> unit
 
+  val mode_instantiate :
+    copy_scope -> current_level:int ->
+    Mode.Alloc.lr -> Mode.Alloc.lr
+
+  val mode_copy_generic :
+    copy_scope -> Mode.Alloc.lr -> Mode.Alloc.lr
+
+  val mode_duplicate: copy_scope -> Mode.Alloc.lr -> Mode.Alloc.lr
+
+  val mode_copy_to_generic :
+    copy_scope -> current_level:int -> Mode.Alloc.lr -> Mode.Alloc.lr
+
   val with_scope: (copy_scope -> 'a) -> 'a
 end = struct
   type copy_scope = {
     mutable saved_desc : (transient_expr * type_desc) list;
     (* Save association of generic nodes with their description. *)
+    saved_mode_changes : Mode.copy_scope;
   }
 
   let redirect_desc copy_scope ty desc =
@@ -640,13 +666,30 @@ end = struct
     copy_scope.saved_desc <- (ty, ty.desc) :: copy_scope.saved_desc;
     Transient_expr.set_desc ty desc
 
+  let mode_instantiate copy_scope ~current_level m =
+    let copy_scope = copy_scope.saved_mode_changes in
+    Mode.Alloc.instantiate ~copy_scope ~current_level m
+
+  let mode_copy_generic copy_scope m =
+    let copy_scope = copy_scope.saved_mode_changes in
+    Mode.Alloc.copy_generic ~copy_scope m
+
+  let mode_duplicate copy_scope m =
+    let copy_scope = copy_scope.saved_mode_changes in
+    Mode.Alloc.duplicate ~copy_scope m
+
+  let mode_copy_to_generic copy_scope ~current_level m =
+    let copy_scope = copy_scope.saved_mode_changes in
+    Mode.Alloc.copy_to_generic ~copy_scope ~current_level m
+
   (* Restore type descriptions. *)
   let cleanup { saved_desc; _ } =
     List.iter (fun (ty, desc) -> Transient_expr.set_desc ty desc) saved_desc
 
   let with_scope f =
-    let scope = { saved_desc = [] } in
-    Fun.protect ~finally:(fun () -> cleanup scope) (fun () -> f scope)
+    Mode.with_copy_scope (fun ms ->
+      let scope = { saved_desc = []; saved_mode_changes = ms } in
+      Fun.protect ~finally:(fun () -> cleanup scope) (fun () -> f scope))
 
 end
 
@@ -1270,13 +1313,6 @@ module Jkind0 = struct
       | Layout l -> (
         match f l with None -> None | Some l -> Some { t with base = Layout l })
 
-    let meet_scannable_axes (base : Jkind_types.Layout.Const.t jkind_base) sa :
-        Jkind_types.Layout.Const.t jkind_base =
-      match base with
-      | Kconstr (p, sa') -> Kconstr (p, Jkind_types.Scannable_axes.meet sa sa')
-      | Layout l ->
-        Layout (Jkind_types.Layout.Const.meet_root_scannable_axes l sa)
-
     let map_type_expr f t =
       { t with with_bounds = With_bounds.map_type_expr f t.with_bounds }
 
@@ -1307,7 +1343,7 @@ module Jkind0 = struct
     end)
 
     let of_path path =
-      { base = Kconstr (path, Jkind_types.Scannable_axes.max);
+      { base = Kconstr path;
         mod_bounds = Mod_bounds.max;
         with_bounds = No_with_bounds
       }
@@ -1336,9 +1372,8 @@ module Jkind0 = struct
       | None -> false
       | Some (t1, t2) -> (
         match t1.base, t2.base with
-        | Kconstr (p1, sa1), Kconstr (p2, sa2) ->
+        | Kconstr p1, Kconstr p2 ->
           Path.same p1 p2 &&
-          Jkind_types.Scannable_axes.equal sa1 sa2 &&
           Mod_bounds.equal t1.mod_bounds t2.mod_bounds
         | Kconstr _, Layout _ | Layout _, Kconstr _ -> false
         | Layout l1, Layout l2 ->
@@ -2079,8 +2114,8 @@ module Jkind0 = struct
       Some
         Parsetree.{
           pjka_loc = Location.none;
-          pjka_desc = Pjk_abbreviation { loc = Location.none;
-                                         txt = (Lident name) }
+          pjka_desc = Pjk_abbreviation ({ loc = Location.none;
+                                          txt = (Lident name) }, [])
         }
 
     let mark_best (type l r) (t : (l * r) jkind) =
@@ -2106,28 +2141,6 @@ module Jkind0 = struct
         | _ ->
           fresh_jkind Jkind_desc.Builtin.any
             ~annotation:(mk_annot "any") ~why:(Any_creation why)
-
-      let any_with_nullability nullability
-          ~(why : Jkind_intf.History.any_creation_reason) =
-        fresh_jkind
-          { Jkind_desc.Builtin.any with
-            base =
-              Layout
-                (Jkind_types.Layout.Any
-                   { Jkind_types.Scannable_axes.max with nullability })
-          }
-          ~annotation:None ~why:(Any_creation why)
-
-      let any_with_separability separability
-          ~(why : Jkind_intf.History.any_creation_reason) =
-        fresh_jkind
-          { Jkind_desc.Builtin.any with
-            base =
-              Layout
-                (Jkind_types.Layout.Any
-                   { Jkind_types.Scannable_axes.max with separability })
-          }
-          ~annotation:None ~why:(Any_creation why)
 
       let value_v1_safety_check =
         { jkind = Jkind_desc.Builtin.value_or_null;

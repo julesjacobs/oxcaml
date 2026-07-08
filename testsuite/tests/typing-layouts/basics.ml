@@ -610,9 +610,9 @@ type s4 = string t4
 and ('a : any) t4
 |}];;
 
-type ('a : void) void4 = Void4  of 'a [@immediate_all_void_constructor];;
+type ('a : void) void4 = Void4  of 'a;;
 [%%expect{|
-type ('a : void) void4 = Void4 of 'a [@immediate_all_void_constructor]
+type ('a : void) void4 = Void4 of 'a
 |}];;
 
 type ('a : any) any4 = Any4 of 'a
@@ -2311,7 +2311,7 @@ Error: The value "x" has type "< foo : ('a : float64). 'a foo bar >"
 let rec f () : 'a -> 'a = f ()
 
 [%%expect{|
-val f : ('a : any). unit -> 'a -> 'a = <fun>
+val f : ('a : any). unit -> ('a -> 'a) = <fun>
 |}]
 
 module M = struct
@@ -2326,7 +2326,7 @@ let rec f () : 'a -> 'a = f ()
 let g : ('a : any). unit -> 'a -> 'a = f
 
 [%%expect{|
-val f : ('a : any). unit -> 'a -> 'a = <fun>
+val f : ('a : any). unit -> ('a -> 'a) = <fun>
 val g : ('a : any). unit -> 'a -> 'a = <fun>
 |}]
 

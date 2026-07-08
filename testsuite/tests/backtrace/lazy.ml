@@ -29,15 +29,8 @@ let () =
    no-flambda;
    native;
  }{
+   reference = "${test_source_directory}/lazy.flambda.reference";
    flambda;
-   {
-     flat-float-array;
-     reference = "${test_source_directory}/lazy.flambda.reference";
-     native;
-   }{
-     no-flat-float-array;
-     reference = "${test_source_directory}/lazy.flambda.no-flat-float-array.reference";
-     native;
-   }
+   native;
  }
 *)

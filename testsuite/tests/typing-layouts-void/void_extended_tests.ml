@@ -33,12 +33,12 @@ let[@inline never] use_void (v : void) =
 (******************************************************)
 (* Test 1: Equality, comparison, hashing, marshalling *)
 
-type void_holder = Vh of void [@immediate_all_void_constructor]
+type void_holder = Vh of void
 
 type variant_with_void =
   | Empty
-  | Single of void [@immediate_all_void_constructor]
-  | Pair of void * void [@immediate_all_void_constructor]
+  | Single of void
+  | Pair of void * void
   | Mixed of int * void * string
 
 type record_with_void = {

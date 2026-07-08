@@ -17,7 +17,7 @@ let local_aliased_use (local_ a) = ()
 val local_aliased_use : 'a @ local -> unit = <fun>
 |}]
 
-let unique_aliased_use (x @ local unique) (local_ y) = ()
+let unique_aliased_use (x @ local unique) (local_ y) = unique_use x; ()
 [%%expect{|
 val unique_aliased_use : 'a @ local unique -> 'b @ local -> unit = <fun>
 |}]
@@ -730,7 +730,7 @@ Error: This value is "local"
        but is expected to be "local" to the parent region or "global"
          because it escapes the borrow region at line 4, characters 10-50.
 Hint: This is a partial application
-      Adding 1 more argument will make the value non-local
+      Adding 1 more argument may make the value non-local
 |}]
 
 let rec foo x =

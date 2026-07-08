@@ -1382,7 +1382,7 @@ and cps_function env ~fid ~fuid ~(recursive : Recursive.t)
     ({ kind; params; return; body; attr; loc; mode; ret_mode } : L.lfunction) :
     Function_decl.t =
   let contains_no_escaping_local_allocs =
-    match ret_mode with Alloc_heap -> true | Alloc_local -> false
+    match ret_mode with Not_alloc_stack -> true | Maybe_alloc_stack -> false
   in
   let first_complex_local_param =
     List.length params
@@ -1473,7 +1473,9 @@ and cps_function env ~fid ~fuid ~(recursive : Recursive.t)
     let is_a_param_unboxed =
       List.exists (fun (p : Lambda.lparam) -> p.attributes.unbox_param) params
     in
-    if attr.stub || ((not attr.unbox_return) && not is_a_param_unboxed)
+    if
+      attr.stub
+      || ((not (Option.is_some attr.unbox_return)) && not is_a_param_unboxed)
     then Normal_calling_convention
     else
       let unboxed_function_slot =
@@ -1483,7 +1485,9 @@ and cps_function env ~fid ~fuid ~(recursive : Recursive.t)
           ~is_always_immediate:false Flambda_kind.value
       in
       let unboxed_return =
-        if attr.unbox_return then unboxing_kind return else None
+        match unboxing_kind return, attr.unbox_return with
+        | Some kind, Some mode -> Some (kind, mode)
+        | _, _ -> None
       in
       let unboxed_param (param : Lambda.lparam) =
         if param.attributes.unbox_param
@@ -1822,7 +1826,7 @@ and cps_switch acc env ccenv (switch : L.lambda_switch) ~condition_dbg
 (* CR pchambart: define a record `target_config` to hold things like
    `big_endian` *)
 let lambda_to_flambda ~mode ~machine_width ~big_endian ~cmx_loader
-    ~compilation_unit ~module_repr ~sections (lam : Lambda.lambda) =
+    ~compilation_unit ~module_repr (lam : Lambda.lambda) =
   let return_continuation = Continuation.create ~sort:Define_root_symbol () in
   let exn_continuation = Continuation.create () in
   let toplevel_my_region = Ident.create_local "toplevel_my_region" in
@@ -1839,4 +1843,4 @@ let lambda_to_flambda ~mode ~machine_width ~big_endian ~cmx_loader
   CC.close_program ~mode ~machine_width ~big_endian ~cmx_loader
     ~compilation_unit ~module_repr ~program
     ~prog_return_cont:return_continuation ~exn_continuation ~toplevel_my_region
-    ~toplevel_my_ghost_region ~sections
+    ~toplevel_my_ghost_region

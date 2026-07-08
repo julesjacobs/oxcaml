@@ -196,6 +196,14 @@ let to_modify_mode ~poly = function
     | None -> assert false
     | Some mode -> transl_modify_mode mode
 
+let to_return_mode ~poly = function
+  | Prim_global, _ -> not_alloc_stack
+  | Prim_local, _ -> maybe_alloc_stack
+  | Prim_poly, _ ->
+    match poly with
+    | None -> assert false
+    | Some locality -> transl_return_mode_l locality
+
 let extern_repr_of_native_repr:
   poly_sort:Jkind.Sort.t option -> Primitive.native_repr -> Lambda.extern_repr
   = fun ~poly_sort r -> match r, poly_sort with
@@ -1226,13 +1234,6 @@ let lookup_primitive_unspecialized loc ~poly_mode ~poly_sort pos p =
     | "%unsafe_set_ptr" ->
       let layout = List.nth (get_arg_layouts ()) 1 in
       Primitive(Pset_ptr (layout, get_first_arg_mode ()), 2)
-    | "%unsafe_get_ext_ptr_imm" ->
-      Primitive(Pget_ext_ptr (layout, Immutable), 1)
-    | "%unsafe_get_ext_ptr" ->
-      Primitive(Pget_ext_ptr (layout, Mutable), 1)
-    | "%unsafe_set_ext_ptr" ->
-      let layout = List.nth (get_arg_layouts ()) 1 in
-      Primitive(Pset_ext_ptr (layout, get_first_arg_mode ()), 2)
     | "%peek" -> Peek None
     | "%poke" -> Poke None
     | s when String.length s > 0 && s.[0] = '%' ->
@@ -1899,9 +1900,6 @@ let specialize_primitive env loc ty ~has_constant_constructor prim =
   | Primitive (Pset_ptr (_, m), arity), (_ :: p2 :: _) ->
     let l = layout_of_ty_for_idx_set env loc p2 in
     Some (Primitive (Pset_ptr (l, m), arity))
-  | Primitive (Pset_ext_ptr (_, m), arity), (_ :: p2 :: _) ->
-    let l = layout_of_ty_for_idx_set env loc p2 in
-    Some (Primitive (Pset_ext_ptr (l, m), arity))
   | Primitive (Pmake_idx_array (_, ik, _mbe, path), arity), _ ->
     let loc = to_location loc in
     let err () =
@@ -2263,15 +2261,16 @@ let lambda_of_prim prim_name prim loc args arg_exps =
       Lprim(Pmakeblock(0, Immutable, All_value, alloc_heap),
             [lam; arg], loc)
   | Send (pos, layout), [obj; meth] ->
-      Lsend(Public, meth, obj, [], pos, alloc_heap, loc, layout)
+      Lsend(Public, meth, obj, [], pos, not_alloc_stack, loc, layout)
   | Send_self (pos, layout), [obj; meth] ->
-      Lsend(Self, meth, obj, [], pos, alloc_heap, loc, layout)
+      Lsend(Self, meth, obj, [], pos, not_alloc_stack, loc, layout)
   | Send_cache (apos, layout), [obj; meth; cache; pos] ->
       (* Cached mode only works in the native backend *)
       if !Clflags.native_code then
-        Lsend(Cached, meth, obj, [cache; pos], apos, alloc_heap, loc, layout)
+        Lsend(Cached, meth, obj, [cache; pos], apos,
+              not_alloc_stack, loc, layout)
       else
-        Lsend(Public, meth, obj, [], apos, alloc_heap, loc, layout)
+        Lsend(Public, meth, obj, [], apos, not_alloc_stack, loc, layout)
   | Frame_pointers, [] ->
      (of_bool (!Clflags.native_code && Config.with_frame_pointers))
   | Identity, [arg] -> arg
@@ -2290,7 +2289,7 @@ let lambda_of_prim prim_name prim loc args arg_exps =
         ap_specialised = Default_specialise;
         ap_probe = None;
         ap_region_close = pos;
-        ap_mode = alloc_heap;
+        ap_mode = not_alloc_stack;
       }
   | Peek None, _ | Poke None, _ ->
       raise(Error(to_location loc, Wrong_layout_for_peek_or_poke prim_name))
@@ -2484,7 +2483,7 @@ let transl_primitive loc p env ty ~poly_mode ~poly_sort path =
        ~loc
        ~body
        ~mode:alloc_heap
-       ~ret_mode:(to_locality p.prim_native_repr_res)
+       ~ret_mode:(to_return_mode ~poly:poly_mode p.prim_native_repr_res)
 
 let lambda_primitive_needs_event_after = function
   (* We add an event after any primitive resulting in a C call that MAY raise
@@ -2539,7 +2538,6 @@ let lambda_primitive_needs_event_after = function
   | Preinterpret_tuple_as_boxed_vector _
   | Pget_idx _ | Pset_idx _
   | Pget_ptr _ | Pset_ptr _
-  | Pget_ext_ptr _ | Pset_ext_ptr _
   | Pwith_stack | Pwith_stack_bind | Pwith_stack_preemptible
   | Pwith_stack_bind_preemptible | Pperform | Preperform | Presume
   | Ppoll | Pobj_dup | Pget_header _ -> true

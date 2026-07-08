@@ -194,6 +194,15 @@ module type Solver_mono = sig
 
   type pinpoint
 
+  (** Represents a sequence of local changes to the copying scope of a mode
+      variable. Copying a mode takes a [copy_scope], and it is up to the caller
+      to create a new copy scope, and reset it once all copies have been made *)
+  type copy_scope
+
+  (** Runs a function [f] in a fresh mode copy scope, which gets cleaned up once
+      [f] is finished *)
+  val with_copy_scope : (copy_scope -> 'a) -> 'a
+
   type 'd hint_morph constraint 'd = 'l * 'r
 
   type 'd hint_const constraint 'd = 'l * 'r
@@ -238,6 +247,9 @@ module type Solver_mono = sig
   (** The maximum mode in the lattice *)
   val max : 'a obj -> ('a, 'l * 'r) mode
 
+  (** The level of generic variables *)
+  val generic_level : int
+
   (* CR-someday zqian: [zap_*] should take optional hint, pointing to the location in
      the source code where zapping happens *)
 
@@ -250,8 +262,8 @@ module type Solver_mono = sig
   val zap_to_ceil :
     'a obj -> ('a, 'l * allowed) mode -> log:changes ref option -> 'a
 
-  (** Create a new mode variable of the full range. *)
-  val newvar : 'a obj -> ('a, 'l * 'r) mode
+  (** Create a new mode variable of the full range at given level. *)
+  val newvar : 'a obj -> int -> ('a, 'l * 'r) mode
 
   (** Remove hints from all vars that have been created. This doesn't affect
       hints that were applied on top of vars. For example:
@@ -290,17 +302,54 @@ module type Solver_mono = sig
     log:changes ref option ->
     (unit, 'a error_raw) result
 
+  (** Lowers a level of a variable. *)
+  val update_level :
+    int -> 'a obj -> ('a, 'l * 'r) mode -> log:changes ref option -> unit
+
+  (** Generalizes a variable whose level is above [current_level], by putting
+      its level to [generic_level], and all its children above [current_level]
+      to [generic_level + i] for some nonzero [i]. *)
+  val generalize :
+    current_level:int ->
+    'a obj ->
+    ('a, 'l * 'r) mode ->
+    log:changes ref option ->
+    unit
+
+  (** Generalizes all reachable variables whose level is above [current_level],
+      whose value is fully determined, by putting their level to
+      [generic_level].*)
+  val generalize_structure :
+    current_level:int ->
+    'a obj ->
+    ('a, 'l * 'r) mode ->
+    log:changes ref option ->
+    unit
+
+  (** If the variable has not yet been copied within the same [copy_scope],
+      [copy] copies all reachable variables whose level is at or above
+      [copy_from_level], and enforces that the copy is below [copy_to_level].
+      Returns either the freshly copied mode, or the copy cached in
+      [copy_scope]. *)
+  val copy :
+    copy_scope:copy_scope ->
+    copy_from_level:int ->
+    copy_to_level:int ->
+    'a obj ->
+    ('a, 'l * 'r) mode ->
+    ('a, 'l * 'r) mode
+
   (** Creates a new mode variable above the given mode and returns [true]. In
       the speical case where the given mode is top, returns the constant top and
       [false]. *)
   val newvar_above :
-    'a obj -> ('a, allowed * 'r_) mode -> ('a, 'l * 'r) mode * bool
+    'a obj -> int -> ('a, allowed * 'r_) mode -> ('a, 'l * 'r) mode * bool
 
   (** Creates a new mode variable below the given mode and returns [true]. In
       the speical case where the given mode is bottom, returns the constant
       bottom and [false]. *)
   val newvar_below :
-    'a obj -> ('a, 'l_ * allowed) mode -> ('a, 'l * 'r) mode * bool
+    'a obj -> int -> ('a, 'l_ * allowed) mode -> ('a, 'l * 'r) mode * bool
 
   (** Returns the join of the list of modes. *)
   val join : 'a obj -> ('a, allowed * 'r) mode list -> ('a, left_only) mode
@@ -330,6 +379,40 @@ module type Solver_mono = sig
   (** Printing a mode for debugging. *)
   val print :
     ?verbose:bool -> 'a obj -> Fmt.formatter -> ('a, 'l * 'r) mode -> unit
+
+  (** Returns true iff the mode has the given level or is a constant *)
+  val check_level : ('a, 'l * 'r) mode -> int -> bool
+
+  (** Returns true iff the mode is a variable at the given level *)
+  val check_level_var : ('a, 'l * 'r) mode -> int -> bool
+
+  type var_iterator =
+    { iter : 'a. 'a obj -> ('a, allowed * allowed) mode -> unit }
+  [@@unboxed]
+
+  val mode_iter : 'a obj -> ('a, 'l * 'r) mode -> var_iterator -> unit
+
+  (** Applies an iterator over every reachable covariant (left-) constraint
+      variable. The iterator is only applied to constraint variables at level 0,
+      and exposes the int identifier of the constraint variable. WARNING: the
+      iterator is only applied once per constraint, even when it appears as a
+      constraint multiple times via different morphisms *)
+  val iter_covariant :
+    'a obj ->
+    ('a, allowed * 'r) mode ->
+    (id:int -> level:int -> ('a, allowed * disallowed) mode -> unit) ->
+    unit
+
+  (** Applies an iterator over every reachable contravariant (right-) constraint
+      variable. The iterator is only applied to constraint variables at level 0,
+      and exposes the int identifier of the constraint variable. WARNING: the
+      iterator is only applied once per constraint, even when it appears as a
+      constraint multiple times via different morphisms *)
+  val iter_contravariant :
+    'a obj ->
+    ('a, 'l * allowed) mode ->
+    (id:int -> level:int -> ('a, disallowed * allowed) mode -> unit) ->
+    unit
 
   (** Apply a monotone morphism explained by an optional hint *)
   val apply :
@@ -397,6 +480,52 @@ module type Solver_mono = sig
     val apply :
       'b obj -> ('a, 'b, 'l * 'r) morph -> ('a, 'l * 'r) t -> ('b, 'l * 'r) t
   end
+
+  (** The exposed description of modes *)
+  module Desc : sig
+    module Var : sig
+      type 'a t
+
+      type ('b, 'd) t_with_morph =
+        | Amorphvar : 'a t * ('a, 'b, 'd) morph -> ('b, 'd) t_with_morph
+
+      module Head : sig
+        type 'a t =
+          { desc_id : int;
+            desc_upper : 'a;
+            desc_lower : 'a;
+            desc_vlower : ('a, left_only) t_with_morph list;
+            desc_level : int
+          }
+
+        val equal : 'a t -> 'b t -> bool
+
+        val hash : 'a t -> int
+      end
+
+      val force : 'a obj -> 'a t -> 'a Head.t
+    end
+
+    type ('b, 'd) morphvar =
+      | Amorphvar : 'a Var.Head.t * ('a, 'b, 'd) morph -> ('b, 'd) morphvar
+
+    type ('a, 'd) t =
+      | Amode : 'a -> ('a, 'l * 'r) t
+      | Amodevar : ('a, 'd) morphvar -> ('a, 'd) t
+      | Amodejoin :
+          'a * ('a, 'l * disallowed) morphvar list
+          -> ('a, 'l * disallowed) t
+      | Amodemeet :
+          'a * ('a, disallowed * 'r) morphvar list
+          -> ('a, disallowed * 'r) t
+
+    val equal : 'a obj -> ('a, 'l * 'r) t -> ('a, 'l * 'r) t -> bool
+
+    val print : 'a obj -> Fmt.formatter -> ('a, 'l * 'r) t -> unit
+  end
+
+  (** Returns the description of a mode. *)
+  val desc : 'a obj -> ('a, 'd) mode -> ('a, 'd) Desc.t
 end
 
 (** Hint module to be provided by the user of the solver. *)

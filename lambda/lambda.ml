@@ -58,6 +58,10 @@ include (struct
     | Alloc_heap
     | Alloc_local
 
+  type return_mode =
+    | Maybe_alloc_stack
+    | Not_alloc_stack
+
   type modify_mode =
     | Modify_heap
     | Modify_maybe_stack
@@ -67,6 +71,12 @@ include (struct
   let alloc_local =
     if Config.stack_allocation then Alloc_local
     else Alloc_heap
+
+  let not_alloc_stack = Not_alloc_stack
+
+  let maybe_alloc_stack : return_mode =
+    if Config.stack_allocation then Maybe_alloc_stack
+    else Not_alloc_stack
 
   let modify_heap = Modify_heap
 
@@ -78,11 +88,20 @@ include (struct
     match a, b with
     | Alloc_local, _ | _, Alloc_local -> Alloc_local
     | Alloc_heap, Alloc_heap -> Alloc_heap
+
+  let return_mode_to_locality_mode a =
+    match a with
+    | Maybe_alloc_stack -> Alloc_local
+    | Not_alloc_stack -> Alloc_heap
 end : sig
 
   type locality_mode = private
     | Alloc_heap
     | Alloc_local
+
+  type return_mode = private
+    | Maybe_alloc_stack
+    | Not_alloc_stack
 
   type modify_mode = private
     | Modify_heap
@@ -91,11 +110,16 @@ end : sig
   val alloc_heap : locality_mode
   val alloc_local : locality_mode
 
+  val not_alloc_stack : return_mode
+  val maybe_alloc_stack : return_mode
+
   val modify_heap : modify_mode
 
   val modify_maybe_stack : modify_mode
 
   val join_locality_mode : locality_mode -> locality_mode -> locality_mode
+
+  val return_mode_to_locality_mode : return_mode -> locality_mode
 end)
 
 let is_local_mode = function
@@ -116,8 +140,27 @@ let eq_locality_mode a b =
   match a, b with
   | Alloc_heap, Alloc_heap -> true
   | Alloc_local, Alloc_local -> true
-  | Alloc_heap, Alloc_local -> false
-  | Alloc_local, Alloc_heap -> false
+  | (Alloc_heap | Alloc_local), _ -> false
+
+let is_maybe_alloc_stack = function
+  | Not_alloc_stack -> false
+  | Maybe_alloc_stack -> true
+
+let is_not_alloc_stack = function
+  | Not_alloc_stack -> true
+  | Maybe_alloc_stack -> false
+
+let eq_return_mode a b =
+  match a, b with
+  | Not_alloc_stack, Not_alloc_stack -> true
+  | Maybe_alloc_stack, Maybe_alloc_stack -> true
+  | (Not_alloc_stack | Maybe_alloc_stack), _ -> false
+
+let locality_return_compat a b =
+  match a, b with
+  | Alloc_heap, _ -> true
+  | _, Maybe_alloc_stack -> true
+  | Alloc_local, Not_alloc_stack -> false
 
 type staticity =
   | Static
@@ -415,8 +458,6 @@ type primitive =
   | Pset_idx of layout * modify_mode
   | Pget_ptr of layout * Asttypes.mutable_flag
   | Pset_ptr of layout * modify_mode
-  | Pget_ext_ptr of layout * Asttypes.mutable_flag
-  | Pset_ext_ptr of layout * modify_mode
 
 and extern_repr =
   | Same_as_ocaml_repr of Jkind.Sort.Const.t
@@ -909,6 +950,8 @@ type shared_code = (int * int) list
 
 type static_label = Static_label.t
 
+type unbox_return_attribute = locality_mode option
+
 type function_attribute = {
   inline : inline_attribute;
   specialise : specialise_attribute;
@@ -924,7 +967,7 @@ type function_attribute = {
   stub: bool;
   tmc_candidate: bool;
   may_fuse_arity: bool;
-  unbox_return: bool;
+  unbox_return: unbox_return_attribute;
 }
 
 type scoped_location = Debuginfo.Scoped_location.t
@@ -973,7 +1016,7 @@ type lambda =
   | Lassign of Ident.t * lambda
   | Lsend of
       meth_kind * lambda * lambda * lambda list
-      * region_close * locality_mode * scoped_location * layout
+      * region_close * return_mode * scoped_location * layout
   | Levent of lambda * lambda_event
   | Lifused of Ident.t * lambda
   | Lregion of lambda * layout
@@ -1028,7 +1071,7 @@ and lfunction =
     attr: function_attribute; (* specified with [@inline] attribute *)
     loc: scoped_location;
     mode: locality_mode;
-    ret_mode: locality_mode;
+    ret_mode: return_mode;
   }
 
 and lambda_while =
@@ -1051,7 +1094,7 @@ and lambda_apply =
     ap_args : lambda list;
     ap_result_layout : layout;
     ap_region_close : region_close;
-    ap_mode : locality_mode;
+    ap_mode : return_mode;
     ap_loc : scoped_location;
     ap_tailcall : tailcall_attribute;
     ap_inlined : inlined_attribute;
@@ -1307,7 +1350,7 @@ let lfunction' ~kind ~params ~return ~body ~attr ~loc ~mode ~ret_mode =
      let nparams = List.length params in
      assert (0 <= nlocal);
      assert (nlocal <= nparams);
-     if is_local_mode ret_mode then assert (nlocal >= 1);
+     if is_maybe_alloc_stack ret_mode then assert (nlocal >= 1);
      if is_local_mode mode then assert (nlocal = nparams)
   end;
   { kind; params; return; body; attr; loc; mode; ret_mode }
@@ -1464,7 +1507,7 @@ let default_function_attribute = {
      them multi-argument. So, we keep arity fusion turned on by default for now.
   *)
   may_fuse_arity = true;
-  unbox_return = false;
+  unbox_return = None;
 }
 
 let default_stub_attribute =
@@ -2357,9 +2400,13 @@ let find_exact_application kind ~arity args =
 let reset () =
   Static_label.reset static_label_sequence
 
-let locality_mode_of_primitive_description (p : external_call_description) =
+type alloc_mode =
+| Stack
+| Heap
+
+let alloc_mode_of_primitive_description (p : external_call_description) =
   if not Config.stack_allocation then
-    if p.prim_alloc then Some alloc_heap else None
+    if p.prim_alloc then Some Heap else None
   else
     match p.prim_native_repr_res with
     | Prim_local, _ ->
@@ -2367,7 +2414,7 @@ let locality_mode_of_primitive_description (p : external_call_description) =
          whether [caml_c_call] is required, without telling us anything
          about local allocation.  (However if [p.prim_alloc = false] we
          do actually know that the primitive does not allocate on the heap.) *)
-      Some alloc_local
+      Some Stack
     | (Prim_global | Prim_poly), _ ->
       (* For primitives that definitely do not allocate locally,
          [p.prim_alloc = false] actually tells us that the primitive does
@@ -2375,7 +2422,19 @@ let locality_mode_of_primitive_description (p : external_call_description) =
 
          No external call that is [Prim_poly] may allocate locally.
       *)
-      if p.prim_alloc then Some alloc_heap else None
+      if p.prim_alloc then Some Heap else None
+
+let locality_mode_of_primitive_description (p : external_call_description) =
+  match alloc_mode_of_primitive_description p with
+  | Some Stack -> Some alloc_local
+  | Some Heap -> Some alloc_heap
+  | None -> None
+
+let return_mode_of_primitive_description (p : external_call_description) =
+  match alloc_mode_of_primitive_description p with
+  | Some Stack -> Some maybe_alloc_stack
+  | Some Heap -> Some not_alloc_stack
+  | None -> None
 
 let project_from_mixed_block_shape
     : 'a. 'a mixed_block_element array -> path:int list
@@ -2596,7 +2655,6 @@ let primitive_may_allocate : primitive -> locality_mode option = function
   | Parray_element_size_in_bytes _
   | Pget_idx _ | Pset_idx _
   | Pget_ptr _ | Pset_ptr _
-  | Pget_ext_ptr _ | Pset_ext_ptr _
   | Ppeek _ | Ppoke _ ->
     None
   | Pmake_idx_field _
@@ -2784,7 +2842,6 @@ let primitive_can_raise prim =
   | Pidx_deepen _
   | Pget_idx _ | Pset_idx _
   | Pget_ptr _ | Pset_ptr _
-  | Pget_ext_ptr _ | Pset_ext_ptr _
   | Ppeek _ | Ppoke _ ->
     false
 
@@ -2881,44 +2938,19 @@ and layout_of_ignorable_kind = function
   | Punboxedoruntaggedint_ignorable i -> layout_unboxed_int i
   | Pproduct_ignorable kinds -> layout_of_ignorable_kinds kinds
 
-let element_layout_of_array_kind = function
-  | Pintarray -> layout_int
-  | Pfloatarray -> layout_boxed_float Boxed_float64
-  | Punboxedfloatarray bf -> layout_unboxed_float bf
-  | Pgenarray | Paddrarray | Pgcignorableaddrarray -> layout_value_field
-  | Punboxedoruntaggedintarray i -> layout_unboxed_int i
-  | Punboxedvectorarray bv -> layout_unboxed_vector bv
-  | Pgcscannableproductarray kinds -> layout_of_scannable_kinds kinds
-  | Pgcignorableproductarray kinds -> layout_of_ignorable_kinds kinds
-  | Punspecializedarray ->
+let array_ref_kind_result_layout = function
+  | Pintarray_ref -> layout_int
+  | Pfloatarray_ref _ -> layout_boxed_float Boxed_float64
+  | Punboxedfloatarray_ref bf -> layout_unboxed_float bf
+  | Pgenarray_ref _ | Paddrarray_ref | Pgcignorableaddrarray_ref ->
+    layout_value_field
+  | Punboxedoruntaggedintarray_ref i -> layout_unboxed_int i
+  | Punboxedvectorarray_ref bv -> layout_unboxed_vector bv
+  | Pgcscannableproductarray_ref kinds -> layout_of_scannable_kinds kinds
+  | Pgcignorableproductarray_ref kinds -> layout_of_ignorable_kinds kinds
+  | Punspecializedarray_ref _ ->
     Misc.fatal_error
-      "Lambda.element_layout_of_array_kind: Punspecializedarray_ref"
-
-let array_kind_of_array_ref_kind : array_ref_kind -> array_kind = function
-  | Pgenarray_ref _ -> Pgenarray
-  | Paddrarray_ref -> Paddrarray
-  | Pgcignorableaddrarray_ref -> Pgcignorableaddrarray
-  | Pintarray_ref -> Pintarray
-  | Pfloatarray_ref _ -> Pfloatarray
-  | Punboxedfloatarray_ref bf -> Punboxedfloatarray bf
-  | Punboxedoruntaggedintarray_ref i -> Punboxedoruntaggedintarray i
-  | Punboxedvectorarray_ref bv -> Punboxedvectorarray bv
-  | Pgcscannableproductarray_ref kinds -> Pgcscannableproductarray kinds
-  | Pgcignorableproductarray_ref kinds -> Pgcignorableproductarray kinds
-  | Punspecializedarray_ref _ -> Punspecializedarray
-
-let array_kind_of_array_set_kind : array_set_kind -> array_kind = function
-  | Pgenarray_set _ -> Pgenarray
-  | Paddrarray_set _ -> Paddrarray
-  | Pgcignorableaddrarray_set -> Pgcignorableaddrarray
-  | Pintarray_set -> Pintarray
-  | Pfloatarray_set -> Pfloatarray
-  | Punboxedfloatarray_set bf -> Punboxedfloatarray bf
-  | Punboxedoruntaggedintarray_set i -> Punboxedoruntaggedintarray i
-  | Punboxedvectorarray_set bv -> Punboxedvectorarray bv
-  | Pgcscannableproductarray_set (_, kinds) -> Pgcscannableproductarray kinds
-  | Pgcignorableproductarray_set kinds -> Pgcignorableproductarray kinds
-  | Punspecializedarray_set _ -> Punspecializedarray
+      "Lambda.array_ref_kind_result_layout: Punspecializedarray_ref"
 
 let rec layout_of_mixed_block_element element =
   match element with
@@ -3126,7 +3158,7 @@ let primitive_result_layout (p : primitive) =
   | Pbigstring_load_i16 { tagged = false; _ } ->
     layout_unboxed_int16
   | Parrayrefu (array_ref_kind, _, _) | Parrayrefs (array_ref_kind, _, _) ->
-    element_layout_of_array_kind (array_kind_of_array_ref_kind array_ref_kind)
+    array_ref_kind_result_layout array_ref_kind
   | Punbox_unit -> layout_unboxed_unit
   | Pstring_load_32 { boxed = true; _ } | Pbytes_load_32 { boxed = true; _ }
   | Pbigstring_load_32 { boxed = true; _ } ->
@@ -3259,8 +3291,6 @@ let primitive_result_layout (p : primitive) =
   | Pset_idx _ -> layout_unit
   | Pget_ptr (layout, _) -> layout
   | Pset_ptr _ -> layout_unit
-  | Pget_ext_ptr (layout, _) -> layout
-  | Pset_ext_ptr _ -> layout_unit
 
 let array_ref_kind mode = function
   | Pgenarray -> Pgenarray_ref mode
@@ -3320,8 +3350,8 @@ let may_allocate_in_region lam =
     | Lfunction {mode=Alloc_heap} -> ()
     | Lfunction {mode=Alloc_local} -> raise Exit
 
-    | Lapply {ap_mode=Alloc_local}
-    | Lsend (_,_,_,_,_,Alloc_local,_,_) -> raise Exit
+    | Lapply {ap_mode=Maybe_alloc_stack}
+    | Lsend (_,_,_,_,_,Maybe_alloc_stack,_,_) -> raise Exit
 
     | Lprim (prim, args, _) ->
        begin match primitive_may_allocate prim with
@@ -3447,6 +3477,10 @@ let array_element_size_in_bytes (array_kind : array_kind) =
   | Punspecializedarray ->
     Misc.fatal_error
       "Lambda.array_element_size_in_bytes: Punspecializedarray"
+
+let element_layout_of_array_kind ak =
+  (* [alloc_heap] is ignored by [array_ref_kind_result_layout]. *)
+  array_ref_kind_result_layout (array_ref_kind alloc_heap ak)
 
 let rec ignorable_product_element_kind_involves_int
     (kind : ignorable_product_element_kind) =

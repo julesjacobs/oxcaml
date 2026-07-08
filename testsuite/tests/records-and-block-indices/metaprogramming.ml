@@ -925,20 +925,8 @@ module Type_naming = struct
                     match (c : Type.constructor).args with
                     | [] -> c.name
                     | args ->
-                      let all_void =
-                        List.for_all args ~f:(fun arg ->
-                            Layout.all_void
-                              (Type_structure.layout (Type.structure arg))
-                        )
-                      in
-                      let attr =
-                        if all_void
-                        then " [@immediate_all_void_constructor]"
-                        else ""
-                      in
-                      sprintf "%s of %s%s" c.name
+                      sprintf "%s of %s" c.name
                         (String.concat ~sep:" * " (List.map args ~f:Type.code))
-                        attr
                 )
               in
               String.concat ~sep:" | " constructor_defs

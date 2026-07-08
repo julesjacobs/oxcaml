@@ -66,14 +66,7 @@ type bswap_bitwidth = Sixteen | Thirtytwo | Sixtyfour
 (* Specific operations, including [Simd], must not raise. *)
 type specific_operation =
   | Ifar_poll
-  | Ifar_alloc of
-      { bytes : int;
-        dbginfo : Cmm.alloc_dbginfo;
-        mode : Cmm.Alloc_mode.t
-      }
-  | Ifar_stackcheck of { max_frame_size_bytes : int }
-      (* stack check whose branch to the out-of-line reallocation block has been
-         relaxed to reach further (see [Branch_relaxation]) *)
+  | Ifar_alloc of { bytes : int; dbginfo : Cmm.alloc_dbginfo }
   | Ishiftarith of arith_operation * int
   | Imuladd       (* multiply and add *)
   | Imulsub       (* multiply and subtract *)
@@ -180,12 +173,8 @@ let print_specific_operation printreg op ppf arg =
   match op with
   | Ifar_poll ->
     fprintf ppf "(far) poll"
-  | Ifar_alloc { bytes; dbginfo = _; mode = Heap } ->
+  | Ifar_alloc { bytes; dbginfo = _ } ->
     fprintf ppf "(far) alloc %i" bytes
-  | Ifar_alloc { bytes; dbginfo = _; mode = Local } ->
-    fprintf ppf "(far) local alloc %i" bytes
-  | Ifar_stackcheck { max_frame_size_bytes } ->
-    fprintf ppf "(far) stackcheck %i" max_frame_size_bytes
   | Ishiftarith(op, shift) ->
       let op_name = function
       | Ishiftadd -> "+"
@@ -251,13 +240,8 @@ let print_specific_operation printreg op ppf arg =
 let specific_operation_name : specific_operation -> string = fun op ->
   match op with
   | Ifar_poll -> "far poll"
-  | Ifar_alloc { bytes; dbginfo = _; mode = Heap } ->
+  | Ifar_alloc { bytes; dbginfo = _ } ->
       Printf.sprintf "far alloc of %d bytes" bytes
-  | Ifar_alloc { bytes; dbginfo = _; mode = Local } ->
-      Printf.sprintf "far local alloc of %d bytes" bytes
-  | Ifar_stackcheck { max_frame_size_bytes } ->
-      Printf.sprintf "far stackcheck of max frame size %d bytes"
-        max_frame_size_bytes
   | Ishiftarith (op, shift) ->
       let op_name = function
         | Ishiftadd -> "+"
@@ -298,13 +282,9 @@ let equal_arith_operation left right =
 
 let equal_specific_operation left right =
   match left, right with
-  | Ifar_alloc { bytes = left_bytes; dbginfo = _; mode = left_mode },
-    Ifar_alloc { bytes = right_bytes; dbginfo = _; mode = right_mode } ->
+  | Ifar_alloc { bytes = left_bytes; dbginfo = _; },
+    Ifar_alloc { bytes = right_bytes; dbginfo = _; } ->
     Int.equal left_bytes right_bytes
-    && Cmm.Alloc_mode.equal left_mode right_mode
-  | Ifar_stackcheck { max_frame_size_bytes = left },
-    Ifar_stackcheck { max_frame_size_bytes = right } ->
-    Int.equal left right
   | Ishiftarith (left_arith_operation, left_int),
     Ishiftarith (right_arith_operation, right_int) ->
     equal_arith_operation left_arith_operation right_arith_operation
@@ -323,7 +303,7 @@ let equal_specific_operation left right =
   | Isignext left, Isignext right -> Int.equal left right
   | Isimd left, Isimd right -> Simd.equal_operation left right
   | Illvm_intrinsic left, Illvm_intrinsic right -> String.equal left right
-  | (Ifar_alloc _  | Ifar_poll | Ifar_stackcheck _ | Ishiftarith _
+  | (Ifar_alloc _  | Ifar_poll  | Ishiftarith _
     | Imuladd | Imulsub | Inegmulf | Imuladdf | Inegmuladdf | Imulsubf
     | Inegmulsubf | Isqrtf | Ibswap _ | Imove32 | Isignext _ | Isimd _
     | Illvm_intrinsic _), _ -> false
@@ -334,7 +314,7 @@ let isomorphic_specific_operation op1 op2 =
 (* Specific operations that are pure *)
 
 let operation_is_pure : specific_operation -> bool = function
-  | Ifar_alloc _ | Ifar_poll | Ifar_stackcheck _ -> false
+  | Ifar_alloc _ | Ifar_poll -> false
   | Ishiftarith _ -> true
   | Imuladd -> true
   | Imulsub -> true
@@ -358,7 +338,6 @@ let operation_is_pure : specific_operation -> bool = function
 let operation_allocates = function
   | Ifar_alloc _ -> true
   | Ifar_poll
-  | Ifar_stackcheck _
   | Imuladd
   | Imulsub
   | Inegmulf

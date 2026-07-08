@@ -245,7 +245,7 @@ end = struct
       ~params:[param_from_name id]
       ~return:(Pvalue { raw_kind = Pgenval; nullable = Non_nullable })
       ~attr:default_function_attribute ~body ~loc ~mode:alloc_heap
-      ~ret_mode:alloc_heap
+      ~ret_mode:not_alloc_stack
 
   let func ~loc arg_sort body_lam id body =
     func_ ~loc arg_sort id (body_lam body)
@@ -365,7 +365,7 @@ let apply modname field loc args =
          ap_result_layout =
            Pvalue { raw_kind = Pgenval; nullable = Non_nullable };
          ap_region_close = Rc_normal;
-         ap_mode = alloc_heap;
+         ap_mode = not_alloc_stack;
          ap_tailcall = Default_tailcall;
          ap_inlined = Default_inlined;
          ap_specialised = Default_specialise
@@ -2483,9 +2483,6 @@ let type_for_path loc env = function
         | "nativeint#" -> Identifier.Type.unboxed_nativeint
         | "int32#" -> Identifier.Type.unboxed_int32
         | "int64#" -> Identifier.Type.unboxed_int64
-        | "nativeint_u" -> Identifier.Type.unboxed_nativeint
-        | "int32_u" -> Identifier.Type.unboxed_int32
-        | "int64_u" -> Identifier.Type.unboxed_int64
         | "int8x16" -> Identifier.Type.int8x16
         | "int16x8" -> Identifier.Type.int16x8
         | "int32x4" -> Identifier.Type.int32x4
@@ -2754,7 +2751,7 @@ let assert_no_jkinds jkind =
     (fun ({ pjka_loc; pjka_desc } : Parsetree.jkind_annotation) ->
       (* Naively check if the jkind annotation is trivial *)
       match pjka_desc with
-      | Pjk_abbreviation { loc = _; txt = Lident "value" } -> ()
+      | Pjk_abbreviation ({ loc = _; txt = Lident "value" }, []) -> ()
       | _ ->
         fatal_errorf
           "Translquote [at %a]: no support for jkind annotations in this \

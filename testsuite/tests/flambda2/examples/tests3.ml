@@ -3,15 +3,7 @@
  flambda2;
  setup-ocamlopt.byte-build-env;
  ocamlopt.byte with dump-raw, dump-simplify;
- {
-   flat-float-array;
-   check-fexpr-dump;
- }{
-   no-flat-float-array;
-   fexpr_reference_suffix = "no-flat-float-array.reference";
-   check-fexpr-dump;
- }
-
+ check-fexpr-dump;
 *)
 
 external ( + ) : int -> int -> int = "%addint"

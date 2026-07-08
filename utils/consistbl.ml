@@ -80,12 +80,6 @@ end) = struct
       mod_names
       Module_name.Map.empty
 
-  let fold_map mod_names ~init ~f tbl =
-    Module_name.Set.fold
-      (fun name result -> f result name (find tbl name))
-      mod_names
-      init
-
   let filter p tbl =
     let to_remove = ref [] in
     Module_name.Tbl.iter

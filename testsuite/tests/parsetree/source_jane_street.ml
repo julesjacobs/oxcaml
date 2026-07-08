@@ -156,12 +156,10 @@ type ('a, 'b : float64, 'c : any, 'd, 'e, 'f, 'g, 'h, 'i, 'j : bits64, 'k,
 type t15 : any non_pointer
 type t16 : value non_pointer
 type t17 : value & value non_pointer
-type t17b : (value & value) non_pointer
 [%%expect{|
 type t15 : any non_pointer
 type t16 : value non_pointer
 type t17 : value & value non_pointer
-type t17b : value & value
 |}]
 
 type ('a : value mod external_ stateless many unyielding non_float) t18 =
@@ -553,8 +551,8 @@ val f :
   string ->
   'd @ local ->
   'b * string * (string -> string) * ('e -> 'e) * 'c * string * string *
-  int array * string * (int -> (int -> int) @ local) *
-  (int -> (int -> int) @ local) @ local contended = <fun>
+  int array * string * (int -> int -> int) * (int -> int -> int) @ local
+  contended = <fun>
 |}]
 
 let f1 (_ @ local) = ()

@@ -422,9 +422,7 @@ let evaluate_terminator (known_values : known_value Reg.UsingLocEquality.Tbl.t)
           then Some (Array.unsafe_get labels idx)
           else None
         else None)
-  | Never ->
-    Misc.fatal_error
-      "Simplify_terminator.evaluate_terminator: unexpected Never terminator"
+  | Never -> assert false
   | Always _ | Return | Raise _ | Tailcall_self _ | Tailcall_func _
   | Call_no_return _ | Call _ | Prim _ | Invalid _ ->
     None

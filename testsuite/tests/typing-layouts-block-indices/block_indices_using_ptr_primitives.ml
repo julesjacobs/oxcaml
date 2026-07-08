@@ -11,8 +11,6 @@
    ocamlc.byte;
    check-ocamlc.byte-output;
  } {
-   bytecode;
- } {
    native;
  } {
    flags = "-Oclassic";
