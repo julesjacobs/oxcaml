@@ -54,3 +54,54 @@ let tail_cons_len (x : int) (l : Vlist.t) : int{ _ = ll_len l } =
    materialized, so the client rebuilds it explicitly. *)
 let recon_rebuild (l : Vlist.t{ not (ll_isnil _) }) : int{ _ = ll_len l } =
   Vlist.length (Vlist.cons (Vlist.head l) (Vlist.tail l))
+
+(* ============================ HOF surface (WP-0) ============================
+   map / filter / fold_left / for_all / exists / rev / nth / find_opt. Relations
+   and predicates are supplied at the CALL SITE as OCaml lambdas (reflected +
+   substituted); refinement GOALS name block abbrevs (a lambda may not appear in
+   refinement text). Verifies against Vlist.cmi + VoxSig_Vlist.olean AND
+   Voption.cmi + VoxSig_Voption.olean (find_opt's result type). *)
+
+[@@@warning "-6-32-26-27"]
+
+[%%vox.lean {lean|
+@[grind, expose] abbrev pPos : Int -> Prop := fun x => x > 0
+@[grind, expose] abbrev pNn  : Int -> Prop := fun x => x >= 0
+@[grind, expose] abbrev pGt5 : Int -> Prop := fun x => x > 5
+|lean}]
+
+(* rev: length + membership preserved (ll_len_rev / ll_mem_rev). *)
+let rev_len (l : Vlist.t) : int{ _ = ll_len l } = Vlist.length (Vlist.rev l)
+let rev_mem (x : int) (l : Vlist.t) : bool{ _ = ll_mem x l } = Vlist.mem x (Vlist.rev l)
+
+(* nth: index 0 of a cons is the head element (ll_nth_cons). *)
+let nth0_cons (x : int) (l : Vlist.t) : int{ _ = x } =
+  let c = Vlist.cons x l in Vlist.nth 0 c
+
+(* map: length preserved (ll_listRel_len fires on the listRel contract). *)
+(* map preserves length (ll_listRel_len fires on the listRel contract); the
+   relation + callback are supplied as call-site lambdas (total). *)
+let map_len (l : Vlist.t) : int{ _ = ll_len l } =
+  let m = Vlist.map (fun a b -> a <= b) (fun x -> x + 1) l in Vlist.length m
+
+(* filter: every kept element satisfies p (allP). *)
+let filter_pos (l : Vlist.t) : Vlist.t{ ll_allP pPos _ } =
+  Vlist.filter (fun x -> x > 0) (fun x -> x > 0) l
+
+(* fold_left, SUM step: exact result (ll_relFold_sum_exact, over abstract l). *)
+let fold_sum (l : Vlist.t) : int{ _ = ll_sum l } =
+  Vlist.fold_left (fun acc x acc' -> acc' = acc + x) (fun acc x -> acc + x) 0 l
+
+(* fold_left, COUNT step: exact result = length (ll_relFold_count_exact). *)
+let fold_count (l : Vlist.t) : int{ _ = ll_len l } =
+  Vlist.fold_left (fun acc x acc' -> acc' = acc + 1) (fun acc x -> acc + 1) 0 l
+
+(* fold_left, SUM from a nonzero init. *)
+let fold_sum_from (init : int) (l : Vlist.t) : int{ _ = init + ll_sum l } =
+  Vlist.fold_left (fun acc x acc' -> acc' = acc + x) (fun acc x -> acc + x) init l
+
+(* for_all / exists: bool result equals the lifted predicate. *)
+let forall_nn (l : Vlist.t) : bool{ _ = ll_allP pNn l } =
+  Vlist.for_all (fun x -> x >= 0) (fun x -> x >= 0) l
+let exists_gt5 (l : Vlist.t) : bool{ _ = ll_exP pGt5 l } =
+  Vlist.exists (fun x -> x > 5) (fun x -> x > 5) l

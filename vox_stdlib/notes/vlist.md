@@ -234,3 +234,74 @@ is load-bearing.
   the dead-axiom lint that permits them) subsumes this.
 - **severity:** MINOR (honest 2-line list law; the cost is authoring it by hand
   rather than getting it from an exposed def).
+
+## HOF surface (WP-0, 2026-07-08)
+
+map / filter / fold_left / for_all / exists / rev / nth / find_opt, via the HOF
+kit (notes/hof_kit.md, docs/plans/2026-07-08-vox-stdlib-hof-recipe.md). All
+verified; smoke green (clients/smoke_Vlist.ml, HOF section); every shipped law
+deletion-liveness-swept (removal seals the module but breaks the smoke); one
+negative control per op fails closed.
+
+### Vlist · exact element output does not survive the via face (map/nth)
+- **site:** vox_stdlib/Vlist.mli (`map`, `ll_listRel`; `nth`, `ll_nth`)
+- **milestone/gap:** new (via-abstraction × HOF)
+- **what I tried:** a client exact-element goal off `map` — `head (map (+1) l) =
+  head l + 1` — and `nth 0 (cons x l) = x`, reducing `ll_listRel`/`ll_nth`
+  through the client-built list.
+- **error:** NOT PROVED. A client list is built from `ll_cons` (OPAQUE, per the
+  dead-law house rule), so `ll_listRel`/`ll_nth` cannot reduce on it — their
+  match arms are on `.LCons`/`.LNil`, which opaque `ll_cons` never exposes.
+- **workaround used:** ship `map` RELATIONAL (`ll_listRel r l _`) + the LENGTH
+  obligation `ll_listRel_len` (the plain consequence that survives the face);
+  ship a `ll_nth_cons` reduction law (`ll_nth i (ll_cons x l) = if i<=0 then x
+  else ll_nth (i-1) l`) so `nth` is usable at a client cons. Exact per-element
+  output remains an EXPOSED-container capability (Vrel/ilist). fold's exact laws
+  DO survive — they are stated over the abstract accessors `ll_sum`/`ll_len l`,
+  needing no constructor reduction.
+- **removed by:** a via face that exposes model-constructor reduction laws by
+  default, or grind reducing an opaque wrapper against a shipped reduction law
+  inside a lift def.
+- **severity:** MINOR (the relational + length + fold-exact specs cover the
+  real client consequences; only per-element exact output is via-blocked).
+
+### Vlist · a val named `exists_` fails to parse; bare `exists` is accepted
+- **site:** vox_stdlib/Vlist.mli (`val exists`)
+- **milestone/gap:** new (surface lexer)
+- **what I tried:** name the existential-query op `exists_` (trailing
+  underscore, to dodge a suspected `exists` keyword clash).
+- **error:** `Syntax error` at `val exists_`. Counter-intuitively, the bare
+  `val exists` parses and a client `Vlist.exists …` call works.
+- **workaround used:** name it `exists` (also the OCaml Stdlib name).
+- **removed by:** a lexer that treats `exists_` as an ordinary lowercase
+  identifier (greedy), rather than tokenizing `exists` + `_`.
+- **severity:** COSMETIC (the desired name works; only the `_`-suffixed variant
+  trips).
+
+### Vlist · a wildcard binder in a reflected relation lambda fails reflection
+- **site:** clients/smoke_Vlist.ml (`fold_count` call site)
+- **milestone/gap:** C1-adjacent (lambda reflection)
+- **what I tried:** a step relation ignoring the element:
+  `Vlist.fold_left (fun acc _ acc' -> acc' = acc + 1) (fun acc _ -> acc + 1) 0 l`.
+- **error:** `vox: this argument for a dependent parameter cannot be named in
+  the logic: it is neither a reflectable expression … nor a call with an exact
+  result contract`. The `_` binder in the reflected lambda has no name to bind.
+- **workaround used:** name every binder even when unused —
+  `fun acc x acc' -> acc' = acc + 1`.
+- **removed by:** reflection synthesizing a fresh name for a wildcard lambda
+  binder.
+- **severity:** MINOR.
+
+### Vlist · fold_left uses a ternary element-aware step (positive)
+- **site:** vox_stdlib/Vlist.mli (`fold_left`, `ll_relFold`, `r3Holds`)
+- **milestone/gap:** new (design choice)
+- **what I tried:** choose between a binary fuel-style fold (Vrel.fold, via
+  `relIter`/`toNat`) and a ternary structural fold (Vrel.fold3, via `relFold`).
+- **error:** none — recorded as the recommended choice. The ternary
+  `ll_relFold r (acc,elem,acc')` is strictly more expressive (its step depends
+  on the element, so it expresses sum), is structural over the list (no fuel /
+  `toNat` bridges), and yields the exact sum/count laws directly.
+- **workaround used:** ship `fold_left` with the ternary step; the binary case
+  is the element-ignoring specialization.
+- **removed by:** n/a (positive finding — the recipe default for fold).
+- **severity:** none.

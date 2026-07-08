@@ -3,7 +3,7 @@
 # deps = space-separated dependency modules (cmi + VoxSig olean staged before verify).
 
 # --- v1 core (waves 1-2) ---
-Vlist     :            : 1
+Vlist     :            : 1   # + HOF surface (WP-0): map/filter/fold_left/for_all/exists/rev/nth (LEAF)
 Voption   :            : 1
 Vresult   :            : 1
 Vint      :            : 1

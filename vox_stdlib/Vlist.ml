@@ -87,6 +87,57 @@ grind_pattern ll_tail_cons => ll_tail (ll_cons x l)
 theorem ll_cons_head_tail (l : LList) (h : ¬ ll_isnil l) :
     ll_cons (ll_head l) (ll_tail l) = l := by cases l <;> grind
 grind_pattern ll_cons_head_tail => ll_cons (ll_head l) (ll_tail l)
+
+-- ===== HOF KIT: container-independent substrate (copy-in; see notes/hof_kit.md) =====
+abbrev IntRel := Int -> Int -> Prop
+abbrev IntPred := Int -> Prop
+abbrev IntRel3 := Int -> Int -> Int -> Prop
+@[grind, expose] def rHolds (r : IntRel) (a b : Int) : Prop := r a b
+@[grind, expose] def pHolds (p : IntPred) (x : Int) : Prop := p x
+@[grind, expose] def r3Holds (r : IntRel3) (a b c : Int) : Prop := r a b c
+
+-- ===== HOF KIT: per-container relational lifts over LList =====
+-- ll_listRel: b is pointwise r-related to a (same length) -- map's spec.
+@[grind, expose] def ll_listRel (r : IntRel) : LList -> LList -> Prop
+  | .LNil, .LNil => True
+  | .LCons a s, .LCons b t => r a b /\ ll_listRel r s t
+  | _, _ => False
+-- ll_allP / ll_exP: every / some element satisfies p -- filter/for_all/exists.
+@[grind, expose] def ll_allP (p : IntPred) : LList -> Prop
+  | .LNil => True
+  | .LCons x t => pHolds p x /\ ll_allP p t
+@[grind, expose] def ll_exP (p : IntPred) : LList -> Prop
+  | .LNil => False
+  | .LCons x t => pHolds p x \/ ll_exP p t
+-- ll_relFold: fold_left with a TERNARY element-aware step (acc, elem, acc').
+@[grind, expose] def ll_relFold (r : IntRel3) : LList -> Int -> Int -> Prop
+  | .LNil, init, final => init = final
+  | .LCons x t, init, final => exists acc, r init x acc /\ ll_relFold r t acc final
+-- ll_sum: list sum accessor for fold's exact sum-law.
+@[grind, expose] def ll_sum : LList -> Int
+  | .LNil => 0
+  | .LCons x t => x + ll_sum t
+-- ll_rev / ll_nth: first-order surface ops.
+@[grind, expose] def ll_rev : LList -> LList
+  | .LNil => .LNil
+  | .LCons x t => ll_app (ll_rev t) (.LCons x .LNil)
+@[grind, expose] def ll_nth : Int -> LList -> Int
+  | _, .LNil => 0
+  | i, .LCons x t => if i <= 0 then x else ll_nth (i-1) t
+-- ===== HOF laws (discharge the .mli obligations) =====
+theorem ll_listRel_len (r : IntRel) (a b : LList) :
+    ll_listRel r a b -> ll_len a = ll_len b := by
+  induction a generalizing b <;> cases b <;> grind
+grind_pattern ll_listRel_len => ll_listRel r a b
+theorem ll_len_rev (l : LList) : ll_len (ll_rev l) = ll_len l := by
+  induction l <;> grind
+grind_pattern ll_len_rev => ll_len (ll_rev l)
+theorem ll_mem_rev (x : Int) (l : LList) : ll_mem x (ll_rev l) = ll_mem x l := by
+  induction l <;> grind
+grind_pattern ll_mem_rev => ll_mem x (ll_rev l)
+theorem ll_nth_cons (i x : Int) (l : LList) :
+    ll_nth i (ll_cons x l) = (if i <= 0 then x else ll_nth (i-1) l) := by grind
+grind_pattern ll_nth_cons => ll_nth i (ll_cons x l)
 |lean}]
 
 let empty : (u : unit) -> t{ _ = ll_nil } =
@@ -162,3 +213,124 @@ let tail : (l : t) -> t{ _ = ll_tail l } =
         | Nil -> (Nil : tree{ ll_repr _ = ll_tail (ll_repr u) })
         | Cons (_, r) -> (r : tree{ ll_repr _ = ll_tail (ll_repr u) })
     in let res = go t0 in (res : t{ _ = ll_tail l })
+
+(* append_tree: concrete-list append (no via) -- rev's building block. Its
+   image law ll_repr (append_tree a b) = ll_app (ll_repr a) (ll_repr b) is what
+   lets rev's skeleton spec close; proven inline via the go-over-tree pattern. *)
+let append_tree : (a : tree) -> (b : tree) -> tree{ ll_repr _ = ll_app (ll_repr a) (ll_repr b) } =
+  fun a b ->
+    let rec go : (u : tree) -> tree{ ll_repr _ = ll_app (ll_repr u) (ll_repr b) } =
+      fun u -> match u with
+        | Nil -> (b : tree{ ll_repr _ = ll_app (ll_repr u) (ll_repr b) })
+        | Cons (x, r) ->
+            let rest = go r in
+            (Cons (x, rest) : tree{ ll_repr _ = ll_app (ll_repr u) (ll_repr b) })
+    in
+    go a
+
+(* ===== HOF surface (WP-0) ===== *)
+let rev : (l : t) -> t{ _ = ll_rev l } =
+  fun l ->
+    let refine_ t0 = l in
+    let rec go : (u : tree) -> tree{ ll_repr _ = ll_rev (ll_repr u) } =
+      fun u -> match u with
+        | Nil -> (Nil : tree{ ll_repr _ = ll_rev (ll_repr u) })
+        | Cons (x, r) ->
+            let rr = go r in
+            let one = Cons (x, Nil) in
+            let res = append_tree rr one in
+            (res : tree{ ll_repr _ = ll_rev (ll_repr u) })
+    in
+    let res = go t0 in
+    (res : t{ _ = ll_rev l })
+
+let nth : (i : int) -> (l : t) -> int{ _ = ll_nth i l } =
+  fun i l ->
+    let refine_ t0 = l in
+    let rec go : (j : int) -> (u : tree) -> int{ _ = ll_nth j (ll_repr u) } =
+      fun j u -> match u with
+        | Nil -> 0
+        | Cons (x, r) -> if j <= 0 then x else go (j - 1) r
+    in
+    go i t0
+
+let map :
+      (r : ((int -> int -> bool) [@vox.total])) ->
+      (f : ((x : int) -> int{ rHolds r x _ })) ->
+      (l : t) -> t{ ll_listRel r l _ } =
+  fun r f l ->
+    ignore r;
+    let refine_ t0 = l in
+    let rec go : (u : tree) -> tree{ ll_listRel r (ll_repr u) (ll_repr _) } =
+      fun u -> match u with
+        | Nil -> (Nil : tree{ ll_listRel r (ll_repr u) (ll_repr _) })
+        | Cons (x, rest) ->
+            let y = f x in
+            let ys = go rest in
+            (Cons (y, ys) : tree{ ll_listRel r (ll_repr u) (ll_repr _) })
+    in
+    let res = go t0 in
+    (res : t{ ll_listRel r l _ })
+
+let filter :
+      (p : ((int -> bool) [@vox.total])) ->
+      (test : ((x : int) -> bool{ _ = pHolds p x })) ->
+      (l : t) -> t{ ll_allP p _ } =
+  fun p test l ->
+    ignore p;
+    let refine_ t0 = l in
+    let rec go : (u : tree) -> tree{ ll_allP p (ll_repr _) } =
+      fun u -> match u with
+        | Nil -> (Nil : tree{ ll_allP p (ll_repr _) })
+        | Cons (x, rest) ->
+            let ys = go rest in
+            if test x then (Cons (x, ys) : tree{ ll_allP p (ll_repr _) })
+            else (ys : tree{ ll_allP p (ll_repr _) })
+    in
+    let res = go t0 in
+    (res : t{ ll_allP p _ })
+
+let fold_left :
+      (r : ((int -> int -> int -> bool) [@vox.total])) ->
+      (f : ((acc : int) -> (x : int) -> int{ r3Holds r acc x _ })) ->
+      (init : int) -> (l : t) -> int{ ll_relFold r l init _ } =
+  fun r f init l ->
+    ignore r;
+    let refine_ t0 = l in
+    let rec go : (a : int) -> (u : tree) -> int{ ll_relFold r (ll_repr u) a _ } =
+      fun a u -> match u with
+        | Nil -> (a : int{ ll_relFold r (ll_repr u) a _ })
+        | Cons (x, rest) ->
+            let a' = f a x in
+            let res = go a' rest in
+            (res : int{ ll_relFold r (ll_repr u) a _ })
+    in
+    go init t0
+
+let for_all :
+      (p : ((int -> bool) [@vox.total])) ->
+      (test : ((x : int) -> bool{ _ = pHolds p x })) ->
+      (l : t) -> bool{ _ = ll_allP p l } =
+  fun p test l ->
+    ignore p;
+    let refine_ t0 = l in
+    let rec go : (u : tree) -> bool{ _ = ll_allP p (ll_repr u) } =
+      fun u -> match u with
+        | Nil -> true
+        | Cons (x, rest) -> if test x then go rest else false
+    in
+    go t0
+
+let exists :
+      (p : ((int -> bool) [@vox.total])) ->
+      (test : ((x : int) -> bool{ _ = pHolds p x })) ->
+      (l : t) -> bool{ _ = ll_exP p l } =
+  fun p test l ->
+    ignore p;
+    let refine_ t0 = l in
+    let rec go : (u : tree) -> bool{ _ = ll_exP p (ll_repr u) } =
+      fun u -> match u with
+        | Nil -> false
+        | Cons (x, rest) -> if test x then true else go rest
+    in
+    go t0
