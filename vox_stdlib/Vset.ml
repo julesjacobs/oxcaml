@@ -15,7 +15,7 @@
    bmem_insert / bmem_delete (the latter under the set's bok invariant).
 
    [elements] (eliminator addendum, Mech A) enumerates the backend tree into a
-   Vlist by composing Vlist's own empty/cons/append, so the built list's LList
+   Vlist by composing Vlist's own empty/cons/append, so the built list's Vox_Vlist_t
    image is exactly [vs_tolist] of the tree; [vs_tolist_spec] then bridges
    ll_mem over that list to vs_mem over the abstraction. Threading the recursive
    Vlist.t (an OPAQUE cross-unit via value) through lets does NOT hit gap #31 --
@@ -67,7 +67,7 @@ grind_pattern vs_mem_elems => vs_mem x (vs_elems t)
   ∀ y, vs_mem y r = (y = x ∨ vs_mem y s)
 @[grind] def vs_removespec (r : ISet) (x : Int) (s : ISet) : Prop :=
   ∀ y, vs_mem y r = (y ≠ x ∧ vs_mem y s)
-@[grind] def vs_elements_spec (l : LList) (s : ISet) : Prop :=
+@[grind] def vs_elements_spec (l : Vox_Vlist_t) (s : ISet) : Prop :=
   ∀ x, ll_mem x l = vs_mem x s
 @[grind] def vs_subset (a b : ISet) : Prop :=
   ∀ x, vs_mem x a -> vs_mem x b
@@ -204,10 +204,10 @@ grind_pattern bsubset_node => bsubset (.Node l v r) b
 
 -- vs_tolist mirrors [elements]' construction ENTIRELY in Vlist's OWN vocabulary
 -- (ll_nil / ll_cons / ll_app), so the Vlist value [elements] builds carries this
--- exact LList image. Both wrappers are opaque in Vlist (ll_cons, ll_nil ship
--- non-exposed), so grind cannot unfold them to .LCons / .LNil -- the mirror MUST
+-- exact Vox_Vlist_t image. Both wrappers are opaque in Vlist (ll_cons, ll_nil ship
+-- non-exposed), so grind cannot unfold them to .Cons / .Nil -- the mirror MUST
 -- use the wrappers or the images won't match what Vlist.empty/cons/append emit.
-@[grind] def vs_tolist : Vox_Vset_bst_tree -> LList
+@[grind] def vs_tolist : Vox_Vset_bst_tree -> Vox_Vlist_t
   | .Leaf => ll_nil
   | .Node l v r => ll_cons v (ll_app (vs_tolist l) (vs_tolist r))
 

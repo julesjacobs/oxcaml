@@ -29,7 +29,7 @@
 
    Eliminator + relational vocab (eliminator addendum, F-2/F-3): [elements]
    enumerates the set into the stdlib's own [Vlist.t] (a second in-stdlib R7
-   edge -- this face imports Vlist's [LList]/[ll_mem] alongside its own [ISet]),
+   edge -- this face imports Vlist's [Vox_Vlist_t]/[ll_mem] alongside its own [ISet]),
    membership-bridged by [vs_elements_spec]; the relational defs [vs_subset] and
    [vs_equal] are quantified spec vocabulary a client consumes as a goal or
    hypothesis without writing its own quantifier. *)
@@ -63,8 +63,8 @@ public inductive ISet where
   ∀ y, vs_mem y r = (y ≠ x ∧ vs_mem y s)
 
 -- [l] enumerates [s]: the Vlist image agrees, pointwise, with set membership.
--- References Vlist's imported LList/ll_mem (R7) as well as this face's ISet.
-@[grind, expose] public def vs_elements_spec (l : LList) (s : ISet) : Prop :=
+-- References Vlist's imported Vox_Vlist_t/ll_mem (R7) as well as this face's ISet.
+@[grind, expose] public def vs_elements_spec (l : Vox_Vlist_t) (s : ISet) : Prop :=
   ∀ x, ll_mem x l = vs_mem x s
 
 -- Relational set vocabulary (F-3): the quantifier lives here, not in a client

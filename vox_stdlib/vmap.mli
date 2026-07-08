@@ -50,7 +50,7 @@ public axiom m_add : Int -> Int -> MList -> MList
 -- the point predicate; m_keys_spec is the ∀-agreement the client consumes.
 @[grind, expose] public def m_haskey (k : Int) (m : MList) : Prop :=
   m_find k m ≠ .MMiss
-@[grind, expose] public def m_keys_spec (l : LList) (m : MList) : Prop :=
+@[grind, expose] public def m_keys_spec (l : Vox_Vlist_t) (m : MList) : Prop :=
   ∀ k, ll_mem k l = m_haskey k m
 
 -- union is LEFT/a-biased (a's binding wins where a has the key, else b's), the

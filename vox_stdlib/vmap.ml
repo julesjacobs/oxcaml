@@ -71,7 +71,7 @@ grind_pattern m_remove_find => m_find k' (m_remove k m)
 
 @[grind, expose] def m_haskey (k : Int) (m : MList) : Prop :=
   m_find k m ≠ .MMiss
-@[grind, expose] def m_keys_spec (l : LList) (m : MList) : Prop :=
+@[grind, expose] def m_keys_spec (l : Vox_Vlist_t) (m : MList) : Prop :=
   ∀ k, ll_mem k l = m_haskey k m
 
 -- union = list append; m_find of an append is find-a-then-b (first-match wins),
