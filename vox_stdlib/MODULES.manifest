@@ -10,8 +10,8 @@ Vresult   : Vhof Voption : 1   # + HOF surface: map/map_error/bind/fold/to_optio
 Vint      :            : 1
 Viarray   :            : 1
 Vset_bst  :            : 1
-Vmap      : Vlist Voption Vhof : 1   # keys enumerates into a Vlist; Voption+Vhof staged transitively (VoxSig_Vlist imports both)
-Vset      : Vset_bst Vlist Voption Vhof : 2   # face over backend; elements enumerates into a Vlist; Voption+Vhof staged transitively (via Vlist's VoxSig)
+Vmap      : Vlist Voption Vhof : 1   # keys enumerates into a Vlist; Voption+Vhof staged transitively (VoxSig_Vlist imports both). WP-3: + mem (bool), singleton, union (a-biased). DEFERRED: cardinal (shadowing), fold (ternary-kit arity), bindings (no tuple sort; keys+find covers) — notes/vmap.md
+Vset      : Vset_bst Vlist Voption Vhof : 2   # face over backend; elements enumerates into a Vlist; Voption+Vhof staged transitively (via Vlist's VoxSig). WP-3: + singleton, union, inter, diff, cardinal, subset (bool), fold (relational + order-free sum/count exact laws). inter=a\(a\b) uses exposed backend delete only; specs match Vpset (union/singleton) — notes/vset.md
 
 # --- v1.5 polymorphic wave (Vplist / Vpmap / Vpset) — SLOT, per poly study ---
 # check_poly.sh will verify these against v1 artifacts + the ORDERED/EQ element
