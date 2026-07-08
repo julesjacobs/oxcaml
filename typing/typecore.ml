@@ -5107,16 +5107,18 @@ let vox_open_dependent_arrow env binder ~param_ty ~sarg_opt ~app_loc ty_ret ty_r
          dedicated message, taking precedence over the loc-keyed ANF naming a
          non-total dependent argument would receive. *)
       let rec is_total ty =
-        match Types.get_desc (Ctype.vox_expand_head env ty) with
+        (* Detect the [_ vox_total] former WITHOUT [vox_expand_head] (which, being
+           transparent, would erase it): match the nominal [Tconstr] directly, and
+           expand aliases ONE step at a time so [type rel = arrow vox_total] used as
+           [(r : rel)] is still recognised (stop before expanding vox_total itself). *)
+        match Types.get_desc ty with
         | Types.Tpoly (t, []) -> is_total t
-        | Types.Trefine (skel, [], Refinement.Pbool true) ->
-          (match Types.get_desc (Ctype.vox_expand_head env skel) with
-           | Types.Tarrow _ -> true
-           | Types.Tpoly (t, []) ->
-             (match Types.get_desc (Ctype.vox_expand_head env t) with
-              | Types.Tarrow _ -> true
-              | _ -> false)
-           | _ -> false)
+        | Types.Tconstr (p, [ _ ], _) when Path.same p Predef.path_vox_total -> true
+        | Types.Tconstr _ ->
+          (match Ctype.try_expand_once_opt env ty with
+           | ty' when not (Types.eq_type ty ty') -> is_total ty'
+           | _ -> false
+           | exception _ -> false)
         | _ -> false
       in
       let total = is_total param_ty in

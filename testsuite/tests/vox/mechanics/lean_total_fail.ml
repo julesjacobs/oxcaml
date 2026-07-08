@@ -26,7 +26,7 @@ let apply_step :
   fun r f x -> ignore r; f x
 [%%expect{|
 val apply_step :
-  (r : (int -> int -> bool){ true }) ->
+  (r : (int -> int -> bool) vox_total) ->
   ((x : int) -> int{ rHolds r x _ }) -> (x : int) -> int{ rHolds r x _ } =
   <fun>
 |}]

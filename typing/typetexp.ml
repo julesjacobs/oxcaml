@@ -1576,7 +1576,7 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
           let arg_ty = arg_cty.ctyp_type in
           let arg_ty =
             if vox_total
-            then newty (Trefine (arg_ty, [], Refinement.Pbool true))
+            then newconstr Predef.path_vox_total [arg_ty]
             else arg_ty
           in
           let arg_ty =

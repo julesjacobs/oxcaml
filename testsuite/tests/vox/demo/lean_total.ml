@@ -58,3 +58,18 @@ let apply_alias :
 
 let client_alias (x : int) : int{ x <= _ } =
   apply_alias (fun p q -> p <= q) (fun a -> a + 1) x
+
+(* the [vox_total] former named directly in an alias carries totality
+   (unlike a bare arrow alias): [type t = arrow vox_total] used as [(r : t)]
+   is total.  This is why the former (a nominal type) closes the
+   alias-propagation hole a plain attribute would leave. *)
+type trel = (int -> int -> bool) vox_total
+
+let apply_named :
+      (r : trel) ->
+      (f : ((x : int) -> int{ rHolds r x _ })) ->
+      (x : int) -> int{ rHolds r x _ } =
+  fun r f x -> ignore r; f x
+
+let client_named_alias (x : int) : int{ x <= _ } =
+  apply_named (fun p q -> p <= q) (fun a -> a + 1) x

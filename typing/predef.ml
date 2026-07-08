@@ -56,6 +56,7 @@ type abstract_type_constr = [
   | `Float32
   | `Int8
   | `Int16
+  | `Vox_total
 ]
 type abstract_non_value_type_constr = [
   | `Nativeint_u
@@ -124,6 +125,7 @@ let base_type_constrs : type_constr list = [
   `Atomic_loc;
   `Lexing_position;
   `Box;
+  `Vox_total;
   `Nativeint_u;
   `Int32_u;
   `Int64_u;
@@ -215,6 +217,7 @@ and ident_lexing_position = ident_create "lexing_position"
 and ident_code = ident_create "expr"
 and ident_eval = ident_create "eval"
 and ident_box = ident_create "box"
+and ident_vox_total = ident_create "vox_total"
 
 and ident_nativeint_u = ident_create "nativeint_u"
 and ident_int32_u = ident_create "int32_u"
@@ -271,6 +274,7 @@ let ident_of_type_constr : type_constr -> Ident.t = function
   | `Code -> ident_code
   | `Eval -> ident_eval
   | `Box -> ident_box
+  | `Vox_total -> ident_vox_total
   | `Float32 -> ident_float32
   | `Int8 -> ident_int8
   | `Int16 -> ident_int16
@@ -325,6 +329,7 @@ and path_string = Pident ident_string
 and path_extension_constructor = Pident ident_extension_constructor
 and path_floatarray = Pident ident_floatarray
 and path_iarray = Pident ident_iarray
+and path_vox_total = Pident ident_vox_total
 and path_atomic_loc = Pident ident_atomic_loc
 and path_lexing_position = Pident ident_lexing_position
 and path_nativeint_u = Pident ident_nativeint_u
@@ -988,6 +993,22 @@ let decl_of_type_constr type_constr =
            position = 1;
            arity = 1;
          }))
+       ()
+  | `Vox_total ->
+    (* vox: the TOTAL spec-function former [type 'f vox_total = 'f] -- a
+       transparent identity abbreviation.  A relation/spec parameter typed
+       [(r : ((int -> int -> bool) [@vox.total]))] elaborates to [_ vox_total]
+       (Typetexp); the marker is a nominal [Tconstr] (unforgeable, prints
+       honestly, rides copy/.cmi through aliases), while transparency keeps the
+       value an ordinary closure -- so it unifies against a lambda argument, may
+       be invoked at runtime, and sorts at the underlying arrow.  Recognised at
+       the application site (Typecore.is_total). *)
+    decl1
+       ~variance:Variance.covariant
+       ~separability:Separability.Ind
+       ~manifest:(fun param -> param)
+       ~jkind:(fun _ -> Jkind.Builtin.value ~why:(Primitive ident_vox_total))
+       ~param_jkind:value_param_jkind
        ()
   | `Int8x16 ->
     decl0 ~jkind:(builtin Jkind.Const.Builtin.immutable_data)
