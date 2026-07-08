@@ -160,18 +160,91 @@ def capture_generated(
 
 
 def imports_sig_module(generated: str) -> bool:
-    """Does the generated file import another unit's sig module?  Such
-    files are out of scope for the single-file prototype."""
-    return (
-        re.search(r"^\s*public import VoxSig_", generated, flags=re.MULTILINE)
-        is not None
-    )
+    """Does the generated file import another unit's sig module?"""
+    return bool(_sig_imports(generated))
 
 
-def to_self_contained(generated: str) -> str:
-    """Rewrite a module-mode solver input into a self-contained Lean file:
-    drop the ``module`` line, inline VoxCore in place of its import, and
-    strip ``public`` markers (invalid outside a module)."""
+def _sig_imports(text: str) -> List[str]:
+    """The VoxSig_* modules ``text`` imports, in file order (each name
+    including the ``VoxSig_`` prefix, e.g. ``VoxSig_Vhof``)."""
+    return re.findall(r"^\s*public import (VoxSig_\w+)", text, flags=re.MULTILINE)
+
+
+def _read_sig_source(sig_dir: str, module: str) -> Optional[str]:
+    """The captured Lean source of sig ``module`` (``VoxSig_<M>``) staged in
+    ``sig_dir`` as ``<module>.leansrc``, or None if it was not staged."""
+    path = os.path.join(sig_dir, module + ".leansrc")
+    if os.path.isfile(path):
+        with open(path) as fh:
+            return fh.read()
+    return None
+
+
+def _strip_public(line: str) -> str:
+    """Drop a ``public`` declaration modifier, whether it starts the line
+    (``public def ...``) or follows an attribute (``@[grind] public def
+    ...``).  ``public`` is invalid outside a module."""
+    line = re.sub(r"^(\s*)public ", r"\1", line)
+    line = re.sub(r"(\]\s*)public ", r"\1", line)
+    return line
+
+
+def _strip_module_scaffolding(text: str) -> str:
+    """Turn a captured module-mode body (a client's or a sig's generated
+    Lean) into inline declarations: drop the ``module`` line, drop every
+    ``import`` (VoxCore and the sig imports are inlined separately by the
+    caller; ``import Lean`` cannot appear after declarations), and strip
+    ``public`` markers."""
+    out: List[str] = []
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if stripped == "module":
+            continue
+        if re.match(r"(public )?import ", stripped):
+            continue
+        out.append(_strip_public(line))
+    return "\n".join(out)
+
+
+def _collect_sig_bodies(generated: str, sig_dir: str) -> str:
+    """Concatenated inline bodies of every VoxSig module ``generated``
+    imports, transitively, dependencies before dependents and each at most
+    once.  A sig whose ``.leansrc`` is not staged in ``sig_dir`` is skipped
+    (its dependents may then fail to elaborate, which the pane surfaces as
+    no goal -- better than crashing)."""
+    order: List[str] = []
+    seen: set = set()
+
+    def visit(module: str) -> None:
+        if module in seen:
+            return
+        seen.add(module)
+        raw = _read_sig_source(sig_dir, module)
+        if raw is None:
+            return
+        for dep in _sig_imports(raw):
+            visit(dep)
+        order.append(_strip_module_scaffolding(raw))
+
+    for module in _sig_imports(generated):
+        visit(module)
+    return "\n".join(order)
+
+
+def to_self_contained(generated: str, sig_dir: Optional[str] = None) -> str:
+    """Rewrite a module-mode solver input into a self-contained Lean file
+    the LSP server can elaborate: drop the ``module`` line, inline VoxCore
+    in place of its import, inline each imported ``VoxSig_*`` module's body
+    (recursively, dependencies first) from ``sig_dir``, and strip ``public``
+    markers (invalid outside a module).
+
+    The interactive server cannot ``import`` the batch-built VoxCore/VoxSig
+    oleans -- they carry no IR data, so an import fails with "missing IR
+    data file" -- so their content is inlined instead.  ``sig_dir`` is the
+    scratch/work dir where /check and /goal stage the dependencies'
+    ``VoxSig_<M>.leansrc`` sources; with ``sig_dir=None`` (or a sig not
+    staged) the imports are dropped, as before."""
+    inlined_sigs = _collect_sig_bodies(generated, sig_dir) if sig_dir else ""
     out: List[str] = []
     for line in generated.split("\n"):
         stripped = line.strip()
@@ -179,13 +252,15 @@ def to_self_contained(generated: str) -> str:
             continue
         if re.match(r"public import VoxCore\b", stripped):
             out.append(_voxcore_body().rstrip("\n"))
+            if inlined_sigs:
+                out.append(inlined_sigs)
             continue
         if stripped.startswith("public import "):
-            # Other imports (sig modules) are unsupported here; drop and
-            # let elaboration surface the gap.
+            # VoxSig imports: content is inlined above (or dropped when its
+            # source was not staged).  Any other public import is
+            # unsupported here; drop and let elaboration surface the gap.
             continue
-        # Strip a leading `public ` declaration modifier.
-        out.append(re.sub(r"^(\s*)public ", r"\1", line))
+        out.append(_strip_public(line))
     return "\n".join(out)
 
 
@@ -517,16 +592,14 @@ def goal_at_source_pos(
     generated = capture_generated(source_path, ocamlc, lean, cwd=cwd)
     if generated is None:
         return BlockGoal("unsupported", detail="no solver input produced")
-    if imports_sig_module(generated):
-        return BlockGoal(
-            "unsupported", detail="block file imports a sig module (cross-unit)"
-        )
-    self_contained = to_self_contained(generated)
+    work = cwd or os.path.dirname(os.path.abspath(source_path))
+    # Imported VoxSig modules are inlined from the sig sources staged in the
+    # work dir (VoxSig_<M>.leansrc); a multi-module buffer now renders.
+    self_contained = to_self_contained(generated, sig_dir=work)
     mapped = map_source_to_generated(source, self_contained, line, col)
     if mapped is None:
         return BlockGoal("unsupported", detail="could not locate block text")
     gline, gcol = mapped
-    work = cwd or os.path.dirname(os.path.abspath(source_path))
     lean_path = os.path.join(work, "_vox_self_contained.lean")
     with open(lean_path, "w") as fh:
         fh.write(self_contained)

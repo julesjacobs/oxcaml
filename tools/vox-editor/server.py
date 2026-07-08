@@ -164,7 +164,7 @@ def build_check_response(
     if lean is not None:
         gen = lean_bridge.capture_generated(path, ocamlc, lean, cwd=scratch)
         if gen is not None:
-            generated = lean_bridge.to_self_contained(gen)
+            generated = lean_bridge.to_self_contained(gen, sig_dir=scratch)
     # Expression types from -annot, for type-at-cursor: converted to the
     # client's 0-based lines here (cols are already 0-based).
     types = [

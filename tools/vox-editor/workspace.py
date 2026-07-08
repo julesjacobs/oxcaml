@@ -328,6 +328,13 @@ def _artifact_paths(module: str) -> Tuple[str, str, str]:
     return d, os.path.join(d, cmi_name), os.path.join(d, "VoxSig_%s.olean" % module)
 
 
+def _leansrc_path(module: str) -> str:
+    """Cache slot for ``module``'s captured VoxSig Lean SOURCE.  The LSP
+    server cannot import the batch-built olean (no IR data), so the goal
+    pane inlines this text instead (lean_bridge.to_self_contained)."""
+    return os.path.join(_CACHE_ROOT, module, "VoxSig_%s.leansrc" % module)
+
+
 def _cache_fresh(module: str, mli_path: str) -> bool:
     d, cmi, olean = _artifact_paths(module)
     stamp = os.path.join(d, ".mli.mtime")
@@ -335,6 +342,11 @@ def _cache_fresh(module: str, mli_path: str) -> bool:
     # the stamp is written only after a completed build, so cmi+stamp
     # suffice for freshness.
     if not (os.path.isfile(cmi) and os.path.isfile(stamp)):
+        return False
+    # A block-bearing module (has an olean) must also have its captured
+    # VoxSig source; an older cache entry built before source capture lacks
+    # it, so treat that as stale to re-capture (the goal pane needs it).
+    if os.path.isfile(olean) and not os.path.isfile(_leansrc_path(module)):
         return False
     try:
         with open(stamp) as fh:
@@ -366,8 +378,16 @@ def ensure_artifacts(module: str, ocamlc: str, lean: str) -> Tuple[str, str]:
                     shutil.copy(dolean, build)
             shutil.copy(mli, build)
             mli_name = os.path.basename(mli)
+            # Wrap the solver so building the .mli also captures the VoxSig
+            # module's Lean SOURCE (the file the compiler hands the solver):
+            # the LSP server inlines it, having no way to import the olean.
+            captured = os.path.join(build, "_voxsig_capture.lean")
+            wrapper = os.path.join(build, "_voxsig_wrap.sh")
+            with open(wrapper, "w") as fh:
+                fh.write('#!/bin/sh\ncp "$1" %s\nexec %s "$@"\n' % (captured, lean))
+            os.chmod(wrapper, 0o755)
             proc = subprocess.run(
-                [ocamlc, "-c", "-vox-solver-path", lean, mli_name],
+                [ocamlc, "-c", "-vox-solver-path", wrapper, mli_name],
                 cwd=build,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -382,11 +402,17 @@ def ensure_artifacts(module: str, ocamlc: str, lean: str) -> Tuple[str, str]:
                 )
             os.makedirs(d, exist_ok=True)
             shutil.copy(built_cmi, cmi)
-            # A block-less interface has no VoxSig olean; cache without it.
+            leansrc = _leansrc_path(module)
+            # A block-less interface has no VoxSig olean (nor a capture);
+            # cache without them, clearing any stale slot.
             if os.path.isfile(built_olean):
                 shutil.copy(built_olean, olean)
             elif os.path.isfile(olean):
                 os.remove(olean)
+            if os.path.isfile(captured):
+                shutil.copy(captured, leansrc)
+            elif os.path.isfile(leansrc):
+                os.remove(leansrc)
             with open(os.path.join(d, ".mli.mtime"), "w") as fh:
                 fh.write(str(int(os.path.getmtime(mli))))
             return cmi, olean
@@ -441,6 +467,10 @@ def stage_for_check(
                 shutil.copy(cmi, scratch)
                 if os.path.isfile(olean):
                     shutil.copy(olean, scratch)
+                # The captured VoxSig source, for the goal pane to inline.
+                leansrc = _leansrc_path(m)
+                if os.path.isfile(leansrc):
+                    shutil.copy(leansrc, scratch)
             except (RuntimeError, OSError):
                 # Missing/failed dep: let the compile surface the real
                 # error (unbound module) rather than masking it here.
@@ -448,7 +478,7 @@ def stage_for_check(
     else:
         for m in _transitive_deps(module) + [module]:
             d, cmi, olean = _artifact_paths(m)
-            for art in (cmi, olean):
+            for art in (cmi, olean, _leansrc_path(m)):
                 if os.path.isfile(art):
                     try:
                         shutil.copy(art, scratch)

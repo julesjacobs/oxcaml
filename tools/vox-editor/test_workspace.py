@@ -9,6 +9,28 @@ import unittest
 import workspace as w  # pyright: ignore[reportImplicitRelativeImport]
 
 
+def _find_lean():
+    env = os.environ.get("VOX_LEAN")
+    if env and os.path.exists(env):
+        return env
+    pinned = "/nix/store/h6z4nr52r2x6v7ygqg59cl8nzjg0yxcy-lean4-4.31.0/bin/lean"
+    return pinned if os.path.exists(pinned) else None
+
+
+def _find_ocamlc():
+    env = os.environ.get("VOX_OCAMLC")
+    if env and os.path.exists(env):
+        return env
+    here = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.dirname(os.path.dirname(here))
+    cand = os.path.join(root, "_build", "_bootinstall", "bin", "ocamlc.opt")
+    return cand if os.path.exists(cand) else None
+
+
+LEAN = _find_lean()
+OCAMLC = _find_ocamlc()
+
+
 def _files(node):
     """All file nodes under a tree node, flattened."""
     if node.get("type") == "file":
@@ -146,6 +168,38 @@ class TestManifest(unittest.TestCase):
         self.assertTrue(w._find_source("Voption", ".mli"))
         self.assertTrue(w._find_source("Vlist", ".ml"))
         self.assertIsNone(w._find_source("NoSuchModule", ".mli"))
+
+
+@unittest.skipUnless(LEAN and OCAMLC, "need lean + ocamlc")
+class TestSigSourceStaging(unittest.TestCase):
+    """ensure_artifacts captures each block-bearing interface's VoxSig Lean
+    SOURCE, and stage_for_check drops it (with the cmi/olean) into the
+    scratch so the goal pane can inline it."""
+
+    def test_ensure_captures_leansrc(self):
+        assert LEAN is not None and OCAMLC is not None
+        w.ensure_artifacts("Vhof", OCAMLC, LEAN)
+        leansrc = w._leansrc_path("Vhof")
+        self.assertTrue(os.path.isfile(leansrc), leansrc)
+        with open(leansrc) as fh:
+            body = fh.read()
+        # It is the sig module's Lean, importing VoxCore and declaring the
+        # shared HOF substrate.
+        self.assertIn("public import VoxCore", body)
+        self.assertIn("IntRel", body)
+
+    def test_stage_for_check_stages_dep_leansrc(self):
+        assert LEAN is not None and OCAMLC is not None
+        vlist_ml = os.path.join(w.STDLIB_DIR, "Vlist.ml")
+        if not os.path.isfile(vlist_ml):
+            self.skipTest("no Vlist.ml")
+        with open(vlist_ml) as fh:
+            source = fh.read()
+        dest = w.stage_for_check("Vlist", source, "Vlist.ml", OCAMLC, LEAN)
+        scratch = os.path.dirname(dest)
+        # Vlist depends on Vhof and Voption: both sig sources are staged.
+        self.assertTrue(os.path.isfile(os.path.join(scratch, "VoxSig_Vhof.leansrc")))
+        self.assertTrue(os.path.isfile(os.path.join(scratch, "VoxSig_Voption.leansrc")))
 
 
 if __name__ == "__main__":

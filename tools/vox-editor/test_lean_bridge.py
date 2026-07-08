@@ -80,6 +80,104 @@ class TestSelfContained(unittest.TestCase):
         )
 
 
+class TestSigInlining(unittest.TestCase):
+    """The import-preserving transformation: a client that imports one or
+    more VoxSig modules inlines their staged sources (deps first, once
+    each) rather than dropping the import."""
+
+    CLIENT = (
+        "module\n"
+        "import Lean\n"
+        "public import VoxCore\n"
+        "public import VoxSig_Vhof\n"
+        "public theorem t (r : IntRel) (x : Int) : rHolds r x x -> r x x := by grind\n"
+    )
+    VHOF = (
+        "module\n"
+        "public import VoxCore\n"
+        "public abbrev IntRel := Int -> Int -> Prop\n"
+        "@[grind, expose] public def rHolds (r : IntRel) (a b : Int) : Prop := r a b\n"
+    )
+
+    def _stage(self, **sigs: str) -> str:
+        d = tempfile.mkdtemp(prefix="voxsig")
+        for name, body in sigs.items():
+            with open(os.path.join(d, name + ".leansrc"), "w") as fh:
+                fh.write(body)
+        return d
+
+    def test_inlines_sig_body(self):
+        d = self._stage(VoxSig_Vhof=self.VHOF)
+        sc = lean_bridge.to_self_contained(self.CLIENT, sig_dir=d)
+        # VoxCore is inlined, the sig body is inlined, and the import lines
+        # (module / public import) are gone.
+        self.assertIn("opaque VoxU : Type", sc)
+        self.assertIn("abbrev IntRel", sc)
+        self.assertIn("def rHolds", sc)
+        self.assertNotIn("import VoxSig_Vhof", sc)
+        self.assertNotIn("public ", sc)
+        self.assertNotIn("\nmodule\n", "\n" + sc + "\n")
+        # The sig body precedes the theorem that uses it.
+        self.assertLess(sc.index("def rHolds"), sc.index("theorem t"))
+
+    def test_missing_sig_dropped(self):
+        # No staged source: the import is dropped (no crash), as before.
+        sc = lean_bridge.to_self_contained(self.CLIENT, sig_dir=self._stage())
+        self.assertNotIn("import VoxSig_Vhof", sc)
+        self.assertNotIn("def rHolds", sc)
+
+    def test_none_sig_dir_drops(self):
+        sc = lean_bridge.to_self_contained(self.CLIENT, sig_dir=None)
+        self.assertNotIn("def rHolds", sc)
+        self.assertNotIn("import VoxSig_Vhof", sc)
+
+    def test_transitive_deps_ordered_once(self):
+        # B imports A; client imports only B.  Both inline, A before B, and
+        # neither twice.
+        sig_a = (
+            "module\npublic import VoxCore\n"
+            "@[grind, expose] public def a_def (x : Int) : Prop := x >= 0\n"
+        )
+        sig_b = (
+            "module\npublic import VoxCore\npublic import VoxSig_A\n"
+            "@[grind, expose] public def b_def (x : Int) : Prop := a_def x\n"
+        )
+        client = (
+            "module\npublic import VoxCore\npublic import VoxSig_B\n"
+            "public theorem t (x : Int) : b_def x -> a_def x := by grind\n"
+        )
+        d = self._stage(VoxSig_A=sig_a, VoxSig_B=sig_b)
+        sc = lean_bridge.to_self_contained(client, sig_dir=d)
+        self.assertIn("def a_def", sc)
+        self.assertIn("def b_def", sc)
+        self.assertLess(sc.index("def a_def"), sc.index("def b_def"))
+        self.assertEqual(sc.count("def a_def"), 1)
+        self.assertEqual(sc.count("def b_def"), 1)
+
+    def test_diamond_dedups(self):
+        # B and C both import A; client imports B and C.  A appears once.
+        sig_a = "module\npublic import VoxCore\npublic def a_def : Prop := True\n"
+        sig_b = "module\npublic import VoxCore\npublic import VoxSig_A\npublic def b_def : Prop := a_def\n"
+        sig_c = "module\npublic import VoxCore\npublic import VoxSig_A\npublic def c_def : Prop := a_def\n"
+        client = (
+            "module\npublic import VoxCore\n"
+            "public import VoxSig_B\npublic import VoxSig_C\n"
+            "public theorem t : b_def := by grind\n"
+        )
+        d = self._stage(VoxSig_A=sig_a, VoxSig_B=sig_b, VoxSig_C=sig_c)
+        sc = lean_bridge.to_self_contained(client, sig_dir=d)
+        self.assertEqual(sc.count("def a_def"), 1)
+        self.assertLess(sc.index("def a_def"), sc.index("def b_def"))
+        self.assertLess(sc.index("def a_def"), sc.index("def c_def"))
+
+    def test_strip_module_scaffolding(self):
+        stripped = lean_bridge._strip_module_scaffolding(self.VHOF)
+        self.assertNotIn("module", stripped.split("\n"))
+        self.assertNotIn("import", stripped)
+        self.assertNotIn("public ", stripped)
+        self.assertIn("abbrev IntRel", stripped)
+
+
 class TestStaticTheorem(unittest.TestCase):
     def test_parse(self):
         content = SOURCE[lean_bridge.find_lean_blocks(SOURCE)[0].content_offset :]
@@ -237,6 +335,117 @@ let use () =
             fh.write(self.FIB)
         bg = lean_bridge.goal_at_source_pos(path, OCAMLC, LEAN, 0, 4, cwd=d)
         self.assertEqual(bg.status, "not_in_block")
+
+
+@unittest.skipUnless(LEAN, "no lean (set VOX_LEAN)")
+class TestLiveSigInline(unittest.TestCase):
+    """The LSP renders a goal inside a declaration that references an
+    imported VoxSig module's content -- but ONLY when the sig body is
+    inlined.  Hermetic (no ocamlc): the client generated Lean and the sig
+    source are hand-written, so this isolates the inlining mechanism."""
+
+    CLIENT = (
+        "module\n"
+        "import Lean\n"
+        "public import VoxCore\n"
+        "public import VoxSig_Demo\n"
+        "public theorem t (x : Int) (h : demo_pos x) : x >= 0 := by\n"
+        "  grind [demo_pos]\n"
+    )
+    DEMO = (
+        "module\n"
+        "public import VoxCore\n"
+        "@[grind, expose] public def demo_pos (x : Int) : Prop := x >= 0\n"
+    )
+
+    def _goal(self, sig_dir):
+        assert LEAN is not None
+        sc = lean_bridge.to_self_contained(self.CLIENT, sig_dir=sig_dir)
+        d = tempfile.mkdtemp(prefix="voxsiginline")
+        path = os.path.join(d, "sc.lean")
+        with open(path, "w") as fh:
+            fh.write(sc)
+        gline = None
+        for i, line in enumerate(sc.split("\n")):
+            if "grind [demo_pos]" in line:
+                gline = i
+        assert gline is not None
+        server = lean_bridge.LeanServer(LEAN, cwd=d)
+        try:
+            server.initialize(d)
+            uri = "file://" + path
+            server.open_wait(uri, sc)
+            return server.plain_goal(uri, gline, 2)
+        finally:
+            server.close()
+
+    def test_renders_with_inlined_sig(self):
+        d = tempfile.mkdtemp(prefix="voxsigstage")
+        with open(os.path.join(d, "VoxSig_Demo.leansrc"), "w") as fh:
+            fh.write(self.DEMO)
+        goals = self._goal(d)
+        assert goals is not None, "no goal rendered with the sig inlined"
+        joined = "\n".join(goals)
+        self.assertIn("demo_pos", joined)
+        self.assertIn("x : Int", joined)
+        # Clean elaboration: the imported symbol resolved to its definition,
+        # so the hypothesis is well-typed (no autobound `sorry`).
+        self.assertNotIn("sorry", joined)
+
+    def test_inlining_is_load_bearing(self):
+        # Without the sig staged, demo_pos is unbound; Lean cannot produce
+        # the same proof state (it either gives no goal or, via autobound
+        # implicits, a degraded `sorry` context).  So the inlined-sig result
+        # must differ -- the fix is doing real work, not a no-op.
+        d = tempfile.mkdtemp(prefix="voxsigstage")
+        with open(os.path.join(d, "VoxSig_Demo.leansrc"), "w") as fh:
+            fh.write(self.DEMO)
+        with_sig = self._goal(d)
+        without = self._goal(tempfile.mkdtemp(prefix="voxsigempty"))
+        self.assertIsNotNone(with_sig)
+        degraded = without is None or "sorry" in "\n".join(without)
+        self.assertTrue(
+            degraded,
+            "expected a degraded/absent goal without the sig, got %r" % without,
+        )
+        self.assertNotEqual(with_sig, without)
+
+
+@unittest.skipUnless(LEAN and OCAMLC, "need lean + ocamlc")
+class TestLiveMultiModule(unittest.TestCase):
+    """End-to-end: /goal inside a real multi-module stdlib unit (Vlist.ml
+    imports VoxSig_Vhof and VoxSig_Voption).  Staging + inlining the sigs
+    lets a declaration that references imported content render its goal."""
+
+    def test_vlist_listrel_goal(self):
+        import workspace  # pyright: ignore[reportImplicitRelativeImport]
+
+        assert LEAN is not None and OCAMLC is not None
+        stdlib = workspace.STDLIB_DIR
+        vlist = os.path.join(stdlib, "Vlist.ml")
+        if not os.path.isfile(vlist):
+            self.skipTest("no Vlist.ml in stdlib")
+        with open(vlist) as fh:
+            source = fh.read()
+        # Stage Vlist's interface artifacts + every dependency's (including
+        # the VoxSig_*.leansrc the pane inlines), exactly as the server does.
+        path = workspace.stage_for_check("Vlist", source, "Vlist.ml", OCAMLC, LEAN)
+        scratch = os.path.dirname(path)
+        # Cursor on the "induction a ..." proof line of ll_listRel_len, whose
+        # statement references IntRel (from VoxSig_Vhof).
+        target = None
+        for i, line in enumerate(source.split("\n")):
+            if "induction a generalizing b" in line:
+                target = i
+        assert target is not None, "ll_listRel_len proof line not found"
+        col = source.split("\n")[target].index("induction")
+        bg = lean_bridge.goal_at_source_pos(
+            path, OCAMLC, LEAN, target, col, cwd=scratch
+        )
+        self.assertEqual(bg.status, "ok", msg=bg.detail)
+        joined = "\n".join(bg.goals)
+        # A real proof state that mentions the imported IntRel content.
+        self.assertIn("IntRel", joined)
 
 
 if __name__ == "__main__":
