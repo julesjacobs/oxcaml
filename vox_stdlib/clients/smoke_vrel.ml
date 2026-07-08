@@ -77,3 +77,48 @@ let step_conv :
 
 let rconv_le (x : int) : int{ x <= _ } =
   step_conv (fun a b -> a >= b) (fun a -> a + 1) x
+
+(* ============================ EXACT-OUTPUT demos ============================
+   Picking the relation to be the callback's GRAPH turns each relational spec
+   into a COMPLETE (exact) one.  These exercise the shipped [_exact] laws +
+   the ihead/itail/il_sum accessors; every positive verifies, and the
+   corresponding negative controls (wrong constant) fail closed -- their
+   observed NOT-PROVED output is recorded in notes/vrel.md §5. *)
+
+(* iter, CONCRETE count: graph (y = x+1), three steps -> exactly x0 + 3. *)
+let iter_exact3 (x0 : int) : int{ _ = x0 + 3 } =
+  Vrel.iter (fun x y -> y = x + 1) (fun a -> a + 1) x0 3
+
+(* iter, NEGATIVE count clamps at zero via toNat -> exactly x0. *)
+let iter_clamp (x0 : int) : int{ _ = x0 } =
+  Vrel.iter (fun x y -> y = x + 1) (fun a -> a + 1) x0 (-5)
+
+(* iter, SYMBOLIC count: relIter_succ_exact (rides the olean) fires on the
+   relIter hypothesis and discharges the graph premise by beta. *)
+let iter_exact_k (x0 : int) (k : int) : int{ k >= 0 -> _ = x0 + k } =
+  Vrel.iter (fun x y -> y = x + 1) (fun a -> a + 1) x0 k
+
+(* map, SYMBOLIC nonempty: head of the mapped list is exactly head+1 (the
+   pointwise-exact consequence rides on the exposed listRel, no extra law). *)
+let map_head_exact (a : int) (s : Vrel.ilist) : Vrel.ilist{ ihead _ = a + 1 } =
+  let xs = Vrel.Icons (a, s) in
+  Vrel.map (fun x y -> y = x + 1) (fun x -> x + 1) xs
+
+(* map, CONCRETE: map (+1) over [1;2] gives head 2 and second element 3. *)
+let map_concrete (u : unit) : Vrel.ilist{ ihead _ = 2 && ihead (itail _) = 3 } =
+  ignore u;
+  let xs = Vrel.Icons (1, Vrel.Icons (2, Vrel.Inil)) in
+  Vrel.map (fun x y -> y = x + 1) (fun x -> x + 1) xs
+
+(* fold3, SUM: ternary graph (acc' = acc + x) from 0 -> exactly il_sum xs.
+   relFold_sum_exact fires on the relFold hypothesis. *)
+let fold3_sum (xs : Vrel.ilist) : int{ _ = il_sum xs } =
+  Vrel.fold3 (fun acc x acc' -> acc' = acc + x) (fun acc x -> acc + x) 0 xs
+
+(* fold3, COUNT: ternary graph (acc' = acc + 1) from 0 -> exactly il_len xs. *)
+let fold3_count (xs : Vrel.ilist) : int{ _ = il_len xs } =
+  Vrel.fold3 (fun acc x acc' -> acc' = acc + 1) (fun acc x -> acc + 1) 0 xs
+
+(* fold3, NONZERO init: exact output = init + il_sum xs. *)
+let fold3_sum_from (init : int) (xs : Vrel.ilist) : int{ _ = init + il_sum xs } =
+  Vrel.fold3 (fun acc x acc' -> acc' = acc + x) (fun acc x -> acc + x) init xs

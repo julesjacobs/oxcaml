@@ -180,3 +180,102 @@ frictions below are the price, in the §5 format.
 - **removed by:** obligation statements shared between `.mli` and `.ml` (write
   once, prove once).
 - **severity:** MINOR.
+
+## EXACT-OUTPUT ("complete-spec") extension (2026-07-07)
+
+The relational combinators become COMPLETE specs when the client picks the
+relation to be the callback's GRAPH: `iter (fun x y -> y = x + 1) ..` pins the
+result to `x0 + n`, `fold3 (fun acc x acc' -> acc' = acc + x) ..` to
+`init + il_sum xs`. Shipped: the `_exact` law family (`relIterN_succ_exact` /
+`relIter_succ_exact` for iter; `relFold_sum_exact` / `relFold_count_exact` for
+fold3), a NEW ternary substrate (`IntRel3` / `r3Holds` / `relFold` / `fold3`)
+for element-aware folds, and the `il_sum` / `ihead` / `itail` accessors clients
+name to state exact element-level goals. Demos in clients/smoke_vrel.ml; three
+negative controls (wrong constant per combinator) fail closed. Deletion-sweep:
+rebuilding Vrel with the three `_exact` laws stripped leaves the module green
+but turns each symbolic client goal NOT PROVED (grind gives up -- it does not do
+induction), so every law is load-bearing.
+
+### Vrel · the EXACT-law lambda-pattern trap -> abstract-r + graph-premise idiom
+- **site:** vox_stdlib/Vrel.mli:136-185 (the four `_exact` theorems + patterns)
+- **milestone/gap:** new (the core exact-output technique)
+- **what I tried:** state the law directly over the concrete graph lambda, e.g.
+  `theorem relIter_plus1_exact ... (h : relIter (fun a b => b = a + 1) k x y) ...`
+  with `grind_pattern relIter_plus1_exact => relIter (fun a b => b = a + 1) k x y`.
+- **error:** the pattern NEVER fires. grind arithmetic-normalizes lambda bodies
+  at indexing (`b = a + 1` becomes `-1*a + b + -1 = 0`), so a lambda-containing
+  grind_pattern matches neither the surface nor the normalized call-site term;
+  grind then unfold-chases relIterN to its gen ceiling and gives up.
+- **workaround used:** state the law over an ABSTRACT relation `r` with the graph
+  as a PREMISE (`hr : ∀ a b, r a b → b = a + 1`) and a VARIABLE-r trigger
+  (`grind_pattern .. => relIter r k x y`). The pattern fires on any relIter/
+  relFold hypothesis; grind discharges `hr` by beta against the reflected
+  call-site lambda. Verified end-to-end (symbolic `_ = x0 + k` / `_ = il_sum xs`
+  green; wrong constant refutes fail-closed).
+- **removed by:** grind matching modulo its own lambda-body normalization, so a
+  concrete-graph pattern could be registered directly.
+- **severity:** COSMETIC (the idiom is clean and general) -- but a genuine trap:
+  the direct spelling looks right, type-checks, and silently never fires.
+
+### Vrel · a general step constant `c` cannot ride a grind_pattern
+- **site:** scratch_probe/vrel_exact/pe_cgen.ml (the rejected general law)
+- **milestone/gap:** new (why the shipped law is the `+1` / `+x` form only)
+- **what I tried:** generalize the step from `+1` to `+c`:
+  `theorem relIter_step_exact (r) (c k x y) (hr : ∀ a b, r a b → b = a + c) ..
+   : y = x + k * c` with `grind_pattern relIter_step_exact => relIter r k x y`.
+  The theorem BODY proves in Lean (the minimal vox prelude has no `ring`, so the
+  `n*c` step needs an explicit `((m:Int)+1)*c = m*c + c` lemma + `push_cast`, but
+  it closes).
+- **error:** the compiler REJECTS the registration outright --
+  `error: invalid pattern(s) for relIter_step_exact`. `c` is a lemma variable
+  that appears only in the premise and conclusion, never in the trigger term
+  `relIter r k x y`, so grind cannot determine it from a match and refuses the
+  pattern (this is a hard rejection, not a silent non-firing).
+- **workaround used:** ship the `+1` (iter) and `+x` / `+1` (fold3 sum/count)
+  specialisations, whose step is fixed and needs no synthesized `c`. A client
+  wanting `+c` writes a one-line specialised law in its own block.
+- **removed by:** grind synthesizing pattern-absent lemma variables from the
+  premise (unify `hr` against the call-site lambda to read off `c`), or a
+  multi-pattern trigger that also indexes on the graph premise.
+- **severity:** MINOR (the specialised forms cover the common exact cases; a
+  fully general step-constant law is a client-block one-liner away).
+
+### Vrel · 3-ary S_arrow works (element-aware fold), same paren requirement
+- **site:** vox_stdlib/Vrel.mli (`fold3`, `(r : (int -> int -> int -> bool))`),
+  vox_stdlib/Vrel.ml (`fold3` impl), block `IntRel3` / `r3Holds` / `relFold`
+- **milestone/gap:** new (positive capability -- the ternary substrate)
+- **what I tried:** a fold whose step relation is TERNARY (acc, element, acc'),
+  so it can depend on the element -- unlike the binary `fold`, which cannot
+  express a sum. Dependent binder `(r : (int -> int -> int -> bool))`, reflected
+  and substituted at a 3-arg call-site lambda `(fun acc x acc' -> acc' = acc+x)`.
+- **error:** none -- 3-ary S_arrow reflects to `Int -> Int -> Int -> Prop` and
+  the 3-arg lambda substitutes at the binder exactly as the binary case does.
+  The only surface requirement is the SAME parenthesisation the binary binder
+  needs (the dependent-binder grammar accepts only an atomic inner type). So the
+  fold-ternary deliverable is FULL, not element-blind-only.
+- **workaround used:** n/a (works). Recorded as confirmation that S_arrow is
+  arity-general, not hard-wired to binary.
+- **removed by:** n/a.
+- **severity:** none (positive finding).
+
+### Vrel · exact laws ship as .mli-only public theorems (not obligations)
+- **site:** vox_stdlib/Vrel.mli:136-185 (`public theorem`, proved in-block);
+  ABSENT from vox_stdlib/Vrel.ml
+- **milestone/gap:** M1-adjacent (obligation vs proved-public-theorem)
+- **what I tried:** decide where the `_exact` laws live. An interface `axiom`
+  would be an obligation the `.ml` must re-prove (model-dup for the whole
+  induction); the toNat bridges precedent restated public theorems in BOTH
+  blocks because the `.ml`'s own combinator proofs USED them.
+- **error:** none. No `.ml` combinator proof uses the `_exact` laws (iter proves
+  `relIter`, fold3 proves `relFold` -- the raw relational specs), so the `.ml`
+  need not restate them; and a proved `public theorem` (unlike an `axiom`) is not
+  an obligation, so the seal does not demand a `.ml` copy. They are proved once,
+  in the `.mli` block (checked at `.mli` compile -> zero TCB), and ride the
+  VoxSig olean to clients (grind_pattern fires in the importing client -- verified
+  with a client carrying NO local block).
+- **workaround used:** `public theorem` in the `.mli` only; nothing in the `.ml`.
+  This is the right shape for a law a client reasons WITH but the producer does
+  not: it halves the model-dup versus the toNat-bridge pattern.
+- **removed by:** n/a (this is the recommended shape; recorded as the contrast to
+  the toNat bridges, which DID need `.ml` copies).
+- **severity:** none (design note).
