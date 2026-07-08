@@ -455,6 +455,78 @@ check("colDist is 0 inside the span, else the gap to the nearer edge", () => {
   assert.strictEqual(S.colDist(VC_K1, { line: 880, col: 30 }) > 1e6, true);
 });
 
+// -- nested obligations: containingVcs + columnFor -----------------------
+// The depth-3 `bump (bump (bump n))` chain (d3.ml), 0-based line 1:
+//   postcond   46-66  (*unknown2* >= 1, the whole RHS)
+//   outer arg  51-66  (*arg* >= 0, "(bump (bump n))")
+//   mid arg    57-65  (*arg* >= 0, "(bump n)")   -- same goal text as outer!
+//   inner arg  63-64  (n >= 0, "n")
+const N_POST = { kind: "vc", start: { line: 1, col: 46 }, end: { line: 1, col: 66 }, goal: "*unknown2* >= 1" };
+const N_OUT = { kind: "vc", start: { line: 1, col: 51 }, end: { line: 1, col: 66 }, goal: "*arg* >= 0" };
+const N_MID = { kind: "vc", start: { line: 1, col: 57 }, end: { line: 1, col: 65 }, goal: "*arg* >= 0" };
+const N_IN = { kind: "vc", start: { line: 1, col: 63 }, end: { line: 1, col: 64 }, goal: "n >= 0" };
+const NEST = [N_POST, N_OUT, N_MID, N_IN];
+
+check("containingVcs lists the whole chain innermost-first at the inner arg", () => {
+  const c = S.containingVcs(NEST, { line: 1, col: 63 });
+  assert.deepStrictEqual(c, [N_IN, N_MID, N_OUT, N_POST]);
+});
+
+check("containingVcs narrows as the cursor leaves inner spans", () => {
+  // col 66 is the outer/postcond end, past mid (65) and inner (64)
+  assert.deepStrictEqual(S.containingVcs(NEST, { line: 1, col: 66 }), [N_OUT, N_POST]);
+  // col 48 is in "bump " -- only the postcond shell covers it
+  assert.deepStrictEqual(S.containingVcs(NEST, { line: 1, col: 48 }), [N_POST]);
+});
+
+check("containingVcs is spatial, not whole-line (col 0 -> none)", () => {
+  assert.deepStrictEqual(S.containingVcs(NEST, { line: 1, col: 0 }), []);
+  // a VC on a different line never counts
+  assert.deepStrictEqual(S.containingVcs(NEST, { line: 2, col: 60 }), []);
+});
+
+check("containingVcs ignores non-vc regions", () => {
+  const withThm = NEST.concat([
+    { kind: "theorem", start: { line: 1, col: 50 }, end: { line: 1, col: 70 }, goal: "t" },
+  ]);
+  const c = S.containingVcs(withThm, { line: 1, col: 60 });
+  assert.ok(c.every((r) => r.kind === "vc"));
+});
+
+check("columnFor returns a column that selects each nested obligation", () => {
+  for (const strict of [false, true]) {
+    const opts = { strictVc: strict };
+    for (const t of NEST) {
+      const col = S.columnFor(NEST, t, 1, opts);
+      const sel = S.selectRegion(NEST, { line: 1, col }, opts);
+      assert.strictEqual(
+        sel.region, t,
+        `columnFor(${t.goal}, strict=${strict}) -> col ${col} selected ${sel.region && sel.region.goal}`
+      );
+    }
+  }
+});
+
+check("columnFor prefers the target's start column when it selects it", () => {
+  // each nested shell's start col is exclusive to it here
+  assert.strictEqual(S.columnFor(NEST, N_POST, 1, { strictVc: true }), 46);
+  assert.strictEqual(S.columnFor(NEST, N_OUT, 1, { strictVc: true }), 51);
+  assert.strictEqual(S.columnFor(NEST, N_MID, 1, { strictVc: true }), 57);
+  assert.strictEqual(S.columnFor(NEST, N_IN, 1, { strictVc: true }), 63);
+});
+
+check("columnFor handles a same-start parent shadowed at its start col", () => {
+  // parent and child share a start; the child (smaller) wins there, so the
+  // parent must be reachable via a later, exclusive column (its tail).
+  const child = { kind: "vc", start: { line: 3, col: 10 }, end: { line: 3, col: 15 }, goal: "child" };
+  const parent = { kind: "vc", start: { line: 3, col: 10 }, end: { line: 3, col: 20 }, goal: "parent" };
+  const regs = [child, parent];
+  const col = S.columnFor(regs, parent, 3, { strictVc: true });
+  assert.notStrictEqual(col, 10); // 10 selects the child
+  assert.strictEqual(
+    S.selectRegion(regs, { line: 3, col }, { strictVc: true }).region, parent);
+});
+
 Promise.all(pending).then(() => {
   console.log("\n" + passed + " tests passed");
 });

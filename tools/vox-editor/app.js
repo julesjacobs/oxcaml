@@ -344,6 +344,12 @@ function renderPane() {
       } else {
         html += renderVc(r);
       }
+      // A nested expression puts SEVERAL obligations at overlapping spans
+      // over one point; the primary above is the innermost the cursor is
+      // in.  List the rest of that chain (parents / siblings) so they are
+      // discoverable -- otherwise two identical-reading `*arg* >= 0` goals
+      // are indistinguishable and the outer obligation looks absent.
+      html += renderNested(group, { line: c.line, col: c.ch });
     } else if (r.kind === "theorem") {
       html += renderTheorem(r) + liveButton();
     } else if (r.kind === "block") {
@@ -380,6 +386,17 @@ function renderPane() {
       cm.focus();
     });
   }
+  // Clicking a nested-obligation row selects that obligation (moves the
+  // cursor to a column columnFor computed makes it primary).
+  bodyEl.querySelectorAll(".nested-row").forEach((el) => {
+    el.addEventListener("click", () => {
+      cm.setCursor({
+        line: +el.dataset.nestLine,
+        ch: +el.dataset.nestCol,
+      });
+      cm.focus();
+    });
+  });
 }
 
 const BADGE_HINT = {
@@ -521,6 +538,58 @@ function coLocatedVcs(r) {
 function vcGroupLabel(vc, i, n) {
   const label = vc.role || "obligation " + (i + 1) + " of " + n;
   return '<h4 class="vc-role">' + esc(label) + "</h4>";
+}
+
+// The chain of obligations the cursor sits inside, minus the primary group
+// already rendered above: the parents and siblings at wider (or merely
+// different) overlapping spans.  Each renders as one compact, clickable row
+// -- source snippet, goal, verdict badge -- innermost first.  Clicking a
+// row moves the cursor to a column that makes that obligation the primary;
+// hovering it highlights its source span (the prov affordance).  Shown in
+// both panes: this is the discoverability aid for nested goals.  Empty (so
+// nothing renders) whenever the cursor is inside at most one obligation --
+// the common, non-nested case -- so ordinary programs look exactly as
+// before.
+function renderNested(group, pos) {
+  const chain = Selection.containingVcs(regions, pos).filter(
+    (vc) => group.indexOf(vc) < 0
+  );
+  if (!chain.length) return "";
+  const opts = { strictVc: !compact };
+  const rows = chain
+    .map((vc) => {
+      const goal = Selection.splitSpanSuffix(vc.goal).text;
+      let snip = cm
+        .getRange(
+          { line: vc.start.line, ch: vc.start.col },
+          { line: vc.end.line, ch: vc.end.col }
+        )
+        .replace(/\s+/g, " ")
+        .trim();
+      if (snip.length > 32) snip = snip.slice(0, 31) + "…";
+      const col = Selection.columnFor(regions, vc, vc.start.line, opts);
+      // hoverSpans wants the compiler's 1-based line (markFromSpan -1s it);
+      // regions are 0-based, so shift the line up by one (as renderUsed does).
+      const span = {
+        start: { line: vc.start.line + 1, col: vc.start.col },
+        end: { line: vc.end.line + 1, col: vc.end.col },
+      };
+      const key = hoverSpans.push(span) - 1;
+      return (
+        '<button class="nested-row prov" data-prov-key="' + key +
+        '" data-nest-line="' + vc.start.line +
+        '" data-nest-col="' + col + '">' +
+        '<span class="nested-snip">' + esc(snip) + "</span>" +
+        '<span class="nested-goal">' + tok(goal, true) + "</span>" +
+        badge(vc.status) +
+        "</button>"
+      );
+    })
+    .join("");
+  return (
+    '<div class="nested"><div class="nested-head">also at this point (' +
+    chain.length + ")</div>" + rows + "</div>"
+  );
 }
 
 function renderVc(r) {

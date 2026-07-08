@@ -1687,6 +1687,127 @@ async function main() {
     console.log("ok - invariant pane renders BOTH obligations with role labels + badges");
     await page.evaluate(() => window.__vox.setCompact(true));
 
+    // Nested obligations (task #39): a nested call chain emits several VCs
+    // at overlapping, strictly-contained spans.  selectRegion picks the
+    // innermost as primary; the pane lists the REST of the chain (parents /
+    // siblings) as compact clickable rows so a hidden sibling with an
+    // identical-reading goal is discoverable.
+    await page.evaluate(async () => {
+      // bump requires x>=0 AND returns _>=x+1, so nesting it stacks a
+      // precondition VC at every argument span (three, plus the postcond).
+      const src =
+        "let bump (x : int{ x >= 0 }) : int{ _ >= x + 1 } = x + 1\n" +
+        "let use (n : int{ n >= 0 }) : int{ _ >= 1 } = bump (bump (bump n))\n";
+      window.__vox.cm.setValue(src);
+      await window.__vox.check(false);
+    });
+    // wait until the nested chain's VCs are proved (line 1, 0-based)
+    await waitFor(
+      async () =>
+        page.evaluate(() =>
+          window.__vox
+            .getRegions()
+            .filter((r) => r.kind === "vc" && r.start.line === 1).length >= 4 &&
+          window.__vox
+            .getRegions()
+            .every((r) => r.kind !== "vc" || (r.status && r.status !== "unknown"))
+        ),
+      30000,
+      "nested chain verified"
+    );
+    // Cursor on the innermost argument `n`: primary is `n >= 0`, and three
+    // more obligations are listed, distinguished by their source snippets --
+    // including the two identical-reading `*arg* >= 0` goals.
+    const innerCol = await page.evaluate(() => {
+      const r = window.__vox
+        .getRegions()
+        .filter((x) => x.kind === "vc" && x.start.line === 1)
+        .sort((a, b) => a.end.col - a.start.col - (b.end.col - b.start.col))[0];
+      return r.start.col; // the smallest-span VC's start (the inner arg)
+    });
+    const nested = await page.evaluate((col) => {
+      window.__vox.cm.setCursor({ line: 1, ch: col });
+      window.__vox.renderPane();
+      const body = document.getElementById("pane-body");
+      return {
+        primaryGoal: (body.querySelector(".goal") || {}).textContent,
+        rows: Array.from(body.querySelectorAll(".nested-row")).length,
+        snips: Array.from(body.querySelectorAll(".nested-snip")).map(
+          (e) => e.textContent
+        ),
+        goals: Array.from(body.querySelectorAll(".nested-goal")).map(
+          (e) => e.textContent
+        ),
+      };
+    }, innerCol);
+    assert.ok(/n >= 0/.test(nested.primaryGoal), "primary is the inner n>=0: " + nested.primaryGoal);
+    assert.strictEqual(nested.rows, 3, "three nested siblings/parents listed: " + nested.rows);
+    assert.ok(
+      nested.snips.includes("(bump n)") && nested.snips.includes("(bump (bump n))"),
+      "the two identical *arg* goals are told apart by snippet: " + JSON.stringify(nested.snips)
+    );
+    assert.strictEqual(
+      nested.goals.filter((g) => /\*arg\* >= 0/.test(g)).length,
+      2,
+      "both identical-reading *arg* >= 0 obligations are shown: " + JSON.stringify(nested.goals)
+    );
+    console.log("ok - nested pane lists the overlapping chain, snippets disambiguate identical goals");
+
+    // Hovering a nested row highlights its source subexpression.
+    const nestHover = await page.evaluate(() => {
+      const row = document.querySelector(".nested-row.prov");
+      row.dispatchEvent(new MouseEvent("mouseenter"));
+      const ms = window.__vox.cm
+        .getAllMarks()
+        .filter((m) => m.className === "vox-prov-hl");
+      return ms.length
+        ? window.__vox.cm.getRange(ms[0].find().from, ms[0].find().to)
+        : null;
+    });
+    assert.strictEqual(
+      nestHover,
+      "(bump n)",
+      "hovering the innermost sibling row highlights its span: " + nestHover
+    );
+    console.log("ok - nested-row provenance hover highlights the sibling's span");
+
+    // Clicking a nested row makes that obligation the primary selection.
+    const afterClick = await page.evaluate(() => {
+      const rows = document.querySelectorAll(".nested-row");
+      const last = rows[rows.length - 1]; // the outermost (postcondition)
+      last.click();
+      window.__vox.renderPane();
+      return {
+        goal: (document.querySelector("#pane-body .goal") || {}).textContent,
+        cursor: window.__vox.cm.getCursor().ch,
+      };
+    });
+    assert.ok(
+      />= 1/.test(afterClick.goal),
+      "clicking the outer row selects the postcondition (>= 1): " + afterClick.goal
+    );
+    console.log("ok - clicking a nested row re-primaries that obligation");
+
+    // A non-nested obligation shows NO chain list (no regression for
+    // ordinary single-obligation programs).
+    const plain = await page.evaluate(async () => {
+      window.__vox.cm.setValue("let f (x : int{ x >= 0 }) : int{ _ >= 0 } = x\n");
+      await window.__vox.check(false);
+      const vcs = window.__vox.getRegions().filter((r) => r.kind === "vc");
+      let maxRows = 0;
+      for (const r of vcs) {
+        window.__vox.cm.setCursor({ line: r.start.line, ch: r.start.col });
+        window.__vox.renderPane();
+        maxRows = Math.max(
+          maxRows,
+          document.querySelectorAll(".nested-row").length
+        );
+      }
+      return maxRows;
+    });
+    assert.strictEqual(plain, 0, "single-obligation program renders no nested list: " + plain);
+    console.log("ok - non-nested obligation shows no chain list");
+
     // Theme: dark is the default (no OS sniffing); the toolbar toggle
     // flips to light, and the choice persists across a reload.
     const readBg = () =>

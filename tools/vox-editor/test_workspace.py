@@ -117,17 +117,29 @@ class TestModuleMapping(unittest.TestCase):
 
 class TestManifest(unittest.TestCase):
     def test_direct_deps(self):
+        # Structural, not exact-list: the manifest legitimately grows as the
+        # stdlib gains modules (Vhof, Voption riders); the invariants are
+        # membership and shape, not a frozen snapshot.
         m = w._parse_manifest()
-        self.assertEqual(m.get("vmap"), ["Vlist"])
-        self.assertEqual(m.get("vset"), ["Vset_bst", "Vlist"])
-        self.assertEqual(m.get("voption"), [])
+        self.assertIn("Vlist", m.get("vmap", []))
+        self.assertIn("Vset_bst", m.get("vset", []))
+        self.assertIn("Vlist", m.get("vset", []))
+        for deps in m.values():
+            self.assertEqual(len(deps), len(set(d.lower() for d in deps)))
 
     def test_transitive_deps_unique_and_ordered(self):
-        # Vmap depends on Vlist; Vset on Vset_bst and Vlist.
-        self.assertEqual(w._transitive_deps("Vmap"), ["Vlist"])
-        deps = w._transitive_deps("Vset")
-        self.assertEqual(set(deps), {"Vset_bst", "Vlist"})
-        self.assertEqual(len(deps), len(set(d.lower() for d in deps)))
+        # Unique (case-insensitive) and dependency-ordered: every dep's own
+        # deps appear before it.
+        m = w._parse_manifest()
+        for mod in ("Vmap", "Vset", "Vrel"):
+            deps = w._transitive_deps(mod)
+            self.assertEqual(len(deps), len(set(d.lower() for d in deps)))
+            seen = set()
+            for d in deps:
+                for dd in m.get(d.lower(), []):
+                    self.assertIn(dd.lower(), seen, "%s before its dep %s" % (d, dd))
+                seen.add(d.lower())
+        self.assertIn("Vlist", w._transitive_deps("Vmap"))
 
     def test_find_source_case_insensitive(self):
         # voption.mli is lowercase on disk; the manifest name is Voption.

@@ -138,6 +138,41 @@ function routesToLean(region) {
   return !!region && (region.kind === "block" || region.kind === "theorem");
 }
 
+// --- nested obligations ---------------------------------------------------
+//
+// A nested expression (`shrink (bump (bump n))`) emits several VCs at
+// STRICTLY-CONTAINED, non-identical spans -- the outer call's obligation
+// plus one per nested argument.  selectRegion picks a single primary (the
+// innermost span containing the cursor); these two helpers let the pane
+// surface the REST of the chain the cursor sits inside, so a sibling or
+// parent obligation -- especially one whose goal text reads identically,
+// like two `*arg* >= 0` -- is discoverable rather than hidden.
+
+// Every kind:"vc" region whose span CONTAINS pos, innermost (smallest
+// span, most specific kind) first.  Spatial containment only -- never the
+// forgiving whole-line match -- so on a line with two disjoint nests the
+// cursor in one nest never lists the other's obligations.
+function containingVcs(regions, pos) {
+  return (regions || [])
+    .filter((r) => r.kind === "vc" && contains(r, pos))
+    .sort((a, b) => spanCmp(a, b) || kindRank(b) - kindRank(a));
+}
+
+// A column on `line` at which selectRegion (under `opts`) selects exactly
+// `target` -- used to make a nested obligation the primary selection when
+// its pane row is clicked.  Prefers the target's start column (each nested
+// shell's start is normally exclusive to it), then scans its span; falls
+// back to the start column if nothing selects it (should not happen for a
+// reachable obligation).
+function columnFor(regions, target, line, opts) {
+  const tryCol = (c) => selectRegion(regions, { line, col: c }, opts).region === target;
+  if (tryCol(target.start.col)) return target.start.col;
+  for (let c = target.start.col; c <= target.end.col; c += 1) {
+    if (tryCol(c)) return c;
+  }
+  return target.start.col;
+}
+
 // --- provenance spans -----------------------------------------------------
 //
 // A provenance span is the source location a goal / hypothesis came from,
@@ -318,6 +353,8 @@ const Selection = {
   kindRank,
   colDist,
   selectRegion,
+  containingVcs,
+  columnFor,
   routesToLean,
   splitSpanSuffix,
   markFromSpan,

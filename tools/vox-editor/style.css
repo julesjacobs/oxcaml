@@ -295,6 +295,57 @@ body.sidebar-hidden #sidebar { display: none; }
   padding: 2px 8px;
 }
 .jump:hover { color: var(--fg); border-color: var(--accent); }
+
+/* Nested obligations: the parents/siblings of the primary that also cover
+   the cursor.  A compact, clickable list under the primary VC -- one row
+   each (source snippet, goal, verdict badge) -- so a hidden sibling with an
+   identical-reading goal is discoverable.  Themed via the shared vars, so
+   light mode follows automatically. */
+.nested {
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+.nested-head {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.nested-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: var(--hyp-bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 3px 6px;
+  margin: 3px 0;
+  cursor: pointer;
+  font-family: var(--mono);
+  color: var(--fg);
+}
+.nested-row:hover { border-color: var(--accent); }
+.nested-snip {
+  flex: 0 0 auto;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.nested-goal {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nested-row .badge { flex: 0 0 auto; margin-left: auto; }
+
 #errors { margin-top: 10px; }
 .err {
   background: var(--cex-bg);
