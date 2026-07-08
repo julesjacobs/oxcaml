@@ -5123,7 +5123,8 @@ let vox_open_dependent_arrow env binder ~sarg_opt ~app_loc ty_ret ty_ret0 =
            (* A module-level value: immutable by construction, named
               stably by its path. *)
            subst (Refinement.Pglobal p)
-         | (Path.Pextra_ty _, _, _) -> let_bind ()
+         | (Path.Pextra_ty _, _, _) ->
+           subst (Refinement.Pvar (Vox_reflect.arg_anf_ident sarg.pexp_loc))
          | exception _ ->
            (* Unbound: skip the substitution and let the argument's own
               typing report the error. *)
@@ -5135,7 +5136,21 @@ let vox_open_dependent_arrow env binder ~sarg_opt ~app_loc ty_ret ty_ret0 =
            total_ functions.  Substituting its translation is exact. *)
         (match Vox_reflect.translate_surface env sarg with
          | Some p -> subst p
-         | None -> let_bind ())
+         | None ->
+           (match sarg.pexp_desc with
+            | Pexp_function _ ->
+              (* A lambda/relation argument is denoted by its reflected form,
+                 not a first-order name; an unreflectable one stays an error. *)
+              let_bind ()
+            | _ ->
+              (* vox: a nested non-nameable argument (a call with a non-exact
+                 result contract, an [if]/[match], or a chain) is named by a
+                 loc-keyed synthetic ident -- logical ANF, the [let n = a in ..]
+                 the user would otherwise have to write. The verification walker
+                 consults the SAME memo ([Vox_reflect.arg_anf_ident]), so both
+                 passes substitute one stamp and the argument's own result
+                 refinement threads through as a hypothesis. *)
+              subst (Refinement.Pvar (Vox_reflect.arg_anf_ident sarg.pexp_loc))))
 
 (* vox: a refinement on an arrow PARAMETER is a contract, not a value
    type.  The callee binds the parameter at the SKELETON and assumes

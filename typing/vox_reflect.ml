@@ -169,6 +169,29 @@ let find_attr name (attrs : Parsetree.attributes) =
   List.find_opt (fun (a : Parsetree.attribute) -> String.equal a.attr_name.txt name) attrs
 ;;
 
+(* Logical ANF for a NON-nameable argument in a dependent/refined position: name
+   the single value the argument evaluates to by a synthetic ident keyed on its
+   SOURCE LOCATION. The type checker's dependent-arrow opening
+   ([Typecore.vox_open_dependent_arrow]) and the verification walker
+   ([Vox_verify]) both consult this memo, so they mint the SAME stamp for one
+   argument -- required because solver names go through [Ident.unique_name], which
+   is stamp-sensitive; a shared name string would not unify. Loc-keying is sound
+   for effects: each syntactic occurrence has one location, so two
+   textually-identical subexpressions at different sites get distinct idents and
+   are never equated. The [*arg*] name renders like the existing [*unknown*]
+   synthetic names in VC dumps and the editor pane. *)
+let arg_anf_idents : (int * int, Ident.t) Hashtbl.t = Hashtbl.create 32
+
+let arg_anf_ident (loc : Location.t) : Ident.t =
+  let key = loc.Location.loc_start.Lexing.pos_cnum, loc.Location.loc_end.Lexing.pos_cnum in
+  match Hashtbl.find_opt arg_anf_idents key with
+  | Some id -> id
+  | None ->
+    let id = Ident.create_local "*arg*" in
+    Hashtbl.replace arg_anf_idents key id;
+    id
+;;
+
 let has_total_attr attrs = find_attr "vox.total" attrs <> None
 
 (* [@@vox.reflect "LeanSymbol"]: bind this value's solver-side name to a given Lean

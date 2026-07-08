@@ -2557,6 +2557,28 @@ let match_facts
 (* The instantiated RESULT type of an application: walk the arrow spine from the
    function's type, substituting each dependent binder by its argument's stable name --
    the same opening the application site performed at typing time. *)
+(* Name the value a NON-nameable argument evaluates to (logical ANF): a loc-keyed
+   synthetic ident, registered in scope ([synthetic_names]) and at the argument's
+   sort ([record_name]) so the solver declares it. Memoized in [Vox_reflect] so
+   the type checker's dependent-arrow opening and this walker agree on the stamp. *)
+let anf_name env (a : expression) =
+  let id = Vox_reflect.arg_anf_ident a.exp_loc in
+  record_name env id a.exp_type;
+  Hashtbl.replace synthetic_names id ();
+  Refinement.Pvar id
+;;
+
+(* The logical name to substitute a dependent binder / discharge a precondition
+   at: a stably-nameable argument names itself ([stable_arg_name], the surface
+   twin of the type checker's opening); any other argument gets the loc-keyed ANF
+   name -- the same one [vox_open_dependent_arrow] substitutes into the callee's
+   result type. *)
+let dep_arg_subject env (a : expression) : Refinement.pred =
+  match stable_arg_name a with
+  | Some by -> by
+  | None -> anf_name env a
+;;
+
 let apply_result_type env funct (args : (_ * apply_arg) list) =
   let arrow_ty = ref funct.exp_type in
   List.iter
@@ -2565,9 +2587,7 @@ let apply_result_type env funct (args : (_ * apply_arg) list) =
       | Tarrow ((_, _, _, binder), _dom, ret, _) ->
         (match arg, binder with
          | Arg (a, _), Some b ->
-           (match stable_arg_name a with
-            | Some by -> arrow_ty := Vox_dep.subst_binder b ~by ret
-            | None -> arrow_ty := ret)
+           arrow_ty := Vox_dep.subst_binder b ~by:(dep_arg_subject env a) ret
          | _ -> arrow_ty := ret)
       | _ -> ())
     args;
@@ -2611,6 +2631,32 @@ let rec result_refinement env (e : expression) : Refinement.pred option =
            | Some p2, Some p3 when Refinement.equal p2 p3 -> Some p2
            | _ -> None))
      | _ -> None)
+;;
+
+(* The facts a NON-nameable argument's ANF name carries: its own result
+   refinement, instantiated at the name. A stably-nameable argument needs no
+   extra fact (its facts already flow through its logic term). When the argument
+   has no recoverable result refinement, the facts are DROPPED -- sound (the
+   contract VC is still emitted, only its hypotheses are weaker) and the [None]
+   case of a manual let-bind. *)
+let dep_arg_facts env (a : expression) (subject : Refinement.pred)
+  : Refinement.pred list
+  =
+  match stable_arg_name a with
+  | Some _ -> []
+  | None ->
+    (match result_refinement env a with
+     | Some p ->
+       register_pred_paths env p;
+       List.filter nontrivial_fact [ Refinement.subst_bound ~by:subject p ]
+     | None -> [])
+;;
+
+(* The ANF name of a dependent/refined argument together with the facts that name
+   carries -- the logical-ANF analogue of [let n = a in ..]. *)
+let dep_arg_name_and_facts env (a : expression) : Refinement.pred * Refinement.pred list =
+  let subject = dep_arg_subject env a in
+  subject, dep_arg_facts env a subject
 ;;
 
 (* A boolean CONDITION need not translate wholesale to still expose a refined atom:
@@ -3084,12 +3130,25 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
             decompose_bool env ~guard:(Refinement.Pbool true) e
           | Texp_apply (funct, args, _, _, _) ->
             let n = name_of_expr env e in
+            (* A nested non-nameable argument in this call is named by its
+               loc-keyed ANF ident (the same one [apply_result_type] substituted
+               into the recovered result type); its own result refinement rides
+               along so the re-proved goal can use it. *)
+            let dep_hyps =
+              List.concat_map
+                (fun (_lbl, (arg : apply_arg)) ->
+                  match arg with
+                  | Arg (a, _) -> snd (dep_arg_name_and_facts env a)
+                  | Omitted _ -> [])
+                args
+            in
             ( n
-            , (match refinement_of_type env (apply_result_type env funct args) with
-               | Some ps when not (Refinement.equal ps p) ->
-                 register_pred_paths env ps;
-                 [ Refinement.subst_bound ~by:n ps ]
-               | _ -> []) )
+            , dep_hyps
+              @ (match refinement_of_type env (apply_result_type env funct args) with
+                 | Some ps when not (Refinement.equal ps p) ->
+                   register_pred_paths env ps;
+                   [ Refinement.subst_bound ~by:n ps ]
+                 | _ -> []) )
           | _ -> name_of_expr env e, []
         in
         emit_vc
@@ -3131,6 +3190,11 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
        obligation is emitted under the argument's child context, whose version state is
        what [name_of_expr] reads. *)
     let arrow_ty = ref funct.exp_type in
+    (* Facts contributed by earlier arguments' ANF names ([let n = a in ..]):
+       threaded left-to-right in parameter order so a LATER parameter's
+       precondition (which the dependent binder substitution may phrase over an
+       earlier argument's name) can use them. *)
+    let dep_facts = ref [] in
     List.iter
       (fun (_lbl, (arg : apply_arg)) ->
         let arg_expr =
@@ -3141,48 +3205,69 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
         let actx =
           match arg_expr with
           | Some a ->
-            let actx = child_ctx a in
-            ignore (walk_expr env actx a : ctx);
-            actx
+            (* Keep the argument's OWN walk facts (a nested call's ANF facts among
+               them) so a chain [f (g (h x))] threads: the inner names' facts are
+               established while walking the argument, not recoverable from its
+               result refinement alone. *)
+            let a_out = walk_expr env (child_ctx a) a in
+            { a_out with cfacts = prov None !dep_facts @ a_out.cfacts }
           | None -> ctx
         in
         match get_desc (Ctype.vox_expand_head env !arrow_ty) with
         | Tarrow ((_, _, _, binder), dom, ret, _) ->
           (match arg_expr with
            | Some a ->
-             (match param_refinement env dom with
-              | Some p
-                when not
-                       (has_vox_attr "vox.refine" a.exp_attributes
-                        || has_vox_attr "vox.assume" a.exp_attributes
-                        || has_vox_attr "vox.assume_unchecked" a.exp_attributes) ->
-                register_pred_paths env p;
-                (* Discharge the precondition at the SAME name the binder substitution
-                   uses ([stable_arg_name]): for a call named by its exact result contract
-                   (tier 2) this is the contract term (e.g. [bins x s]), so an invariant
-                   precondition on the parameter type discharges from the callee's result
-                   laws instead of stalling on a fresh unknown. A non-stable argument
-                   keeps [name_of_expr]. *)
-                let subject =
-                  match stable_arg_name a with
-                  | Some by -> by
-                  | None -> name_of_expr env a
-                in
-                emit_vc
-                  ~env
-                  ~loc:a.exp_loc
-                  ~ctx:actx
-                  ~goal:(Refinement.subst_bound ~by:subject p)
-                  ~kind:Prove
-              | _ -> ());
-             (match binder, stable_arg_name a with
-              | Some b, Some by -> arrow_ty := Vox_dep.subst_binder b ~by ret
-              | _ -> arrow_ty := ret)
+             (* Name the argument's value once ([let n = a in ..]): the binder is
+                substituted by [n] and the precondition discharged at [n], with
+                the argument's own result refinement as a hypothesis. Nameable
+                arguments keep their exact logic term and contribute no extra
+                fact; every other argument gets a loc-keyed ANF name whose fact
+                is its result refinement (dropped when there is none -- sound).
+                A name (and its fact) is only synthesized where it can be used:
+                a refined precondition to discharge, or a dependent binder to
+                substitute -- an ordinary argument at a plain parameter names
+                nothing (an intro-form argument carries its own obligation). *)
+             let is_intro =
+               has_vox_attr "vox.refine" a.exp_attributes
+               || has_vox_attr "vox.assume" a.exp_attributes
+               || has_vox_attr "vox.assume_unchecked" a.exp_attributes
+             in
+             let precond =
+               match param_refinement env dom with
+               | Some p when not is_intro -> Some p
+               | _ -> None
+             in
+             if Option.is_some precond || Option.is_some binder
+             then (
+               let subject, afacts = dep_arg_name_and_facts env a in
+               (match precond with
+                | Some p ->
+                  register_pred_paths env p;
+                  emit_vc
+                    ~env
+                    ~loc:a.exp_loc
+                    ~ctx:
+                      { actx with
+                        cfacts = prov (Some a.exp_loc) afacts @ actx.cfacts
+                      }
+                    ~goal:(Refinement.subst_bound ~by:subject p)
+                    ~kind:Prove
+                | None -> ());
+               dep_facts := !dep_facts @ afacts;
+               match binder with
+               | Some b -> arrow_ty := Vox_dep.subst_binder b ~by:subject ret
+               | None -> arrow_ty := ret)
+             else arrow_ty := ret
            | None -> arrow_ty := ret)
         | _ -> ())
       args;
     restore_versions saved;
-    { ctx with cfacts = prov None (mut_havoc_written env e) @ ctx.cfacts }
+    (* The arguments' ANF names live on (synthetic, in scope everywhere); carry
+       their facts into the continuation so a nested application feeding another
+       refined position (a chain) can use them. *)
+    { ctx with
+      cfacts = prov None (!dep_facts @ mut_havoc_written env e) @ ctx.cfacts
+    }
   | Texp_let (rec_flag, [ vb ], body) ->
     (* Reflected definitions are global; a local one could capture enclosing variables
        (translate_def's closedness check would also catch that, but the restriction is the
