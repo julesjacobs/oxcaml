@@ -87,3 +87,19 @@ Line 1, characters 33-43: vox VC:
   *arg*#2 <= 10
 val use_chain : unit -> int = <fun>
 |}]
+
+(* DEEP CHAIN [consume (g (g (g 10)))]: at depth 3 the innermost name's fact
+   [*arg*#3 <= 10] is established two levels down, inside the walk of the
+   outer argument; it is carried out alongside each level's own fact so the
+   full transitive chain [*arg* <= *arg*#2 <= *arg*#3 <= 10] reaches the goal
+   (the depth-3 boundary that previously dropped it). *)
+let use_chain3 () : int = consume (g (g (g 10)))
+[%%expect{|
+Line 1, characters 34-48: vox VC:
+  goal: *arg* <= 10
+  hypotheses:
+  *arg* <= *arg*#2
+  *arg*#2 <= *arg*#3
+  *arg*#3 <= 10
+val use_chain3 : unit -> int = <fun>
+|}]

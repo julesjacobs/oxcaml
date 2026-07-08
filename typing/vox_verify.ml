@@ -2668,6 +2668,31 @@ let dep_arg_name_and_facts env (a : expression) : Refinement.pred * Refinement.p
   subject, dep_arg_facts env a subject
 ;;
 
+(* Every ANF fact contributed by argument [a] and, transitively, by ITS
+   arguments -- the full chain [f (g (h x))] establishes. [a]'s own result
+   refinement at its ANF name, plus the same recovered from each nested
+   application argument down the spine. The one-level [dep_arg_name_and_facts]
+   suffices for a value already in scope; a self-refinement / intro VC on an
+   application (which cannot walk the arguments first) needs the whole chain, or
+   the innermost fact is dropped at depth >= 2 (the depth-3 boundary in the
+   self-VC path). Recurses through applications only -- an [if]/[match]/[let]
+   argument is out of the feature's scope and denotes no single ANF value. *)
+let rec arg_chain_facts env (a : expression) : Refinement.pred list =
+  let own = snd (dep_arg_name_and_facts env a) in
+  let nested =
+    match a.exp_desc with
+    | Texp_apply (_, args, _, _, _) ->
+      List.concat_map
+        (fun (_lbl, (arg : apply_arg)) ->
+          match arg with
+          | Arg (aa, _) -> arg_chain_facts env aa
+          | Omitted _ -> [])
+        args
+    | _ -> []
+  in
+  own @ nested
+;;
+
 (* A boolean CONDITION need not translate wholesale to still expose a refined atom:
    [a && mem k t] has no logic image ([mem] is opaque), yet its then-branch knows both [a]
    and [mem]'s spec. [decompose_bool] walks the &&/||/not structure, translating what it
@@ -3147,7 +3172,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
               List.concat_map
                 (fun (_lbl, (arg : apply_arg)) ->
                   match arg with
-                  | Arg (a, _) -> snd (dep_arg_name_and_facts env a)
+                  | Arg (a, _) -> arg_chain_facts env a
                   | Omitted _ -> [])
                 args
             in
@@ -3211,16 +3236,28 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
           | Arg (a, _) -> Some a
           | Omitted _ -> None
         in
-        let actx =
+        let actx, arg_walk_facts =
           match arg_expr with
           | Some a ->
             (* Keep the argument's OWN walk facts (a nested call's ANF facts among
                them) so a chain [f (g (h x))] threads: the inner names' facts are
                established while walking the argument, not recoverable from its
-               result refinement alone. *)
-            let a_out = walk_expr env (child_ctx a) a in
-            { a_out with cfacts = prov None !dep_facts @ a_out.cfacts }
-          | None -> ctx
+               result refinement alone. [arg_walk_facts] is the batch [a]'s walk
+               ADDED over its child context -- the inner ANF names of a NESTED
+               chain -- carried out (below) alongside [a]'s own result fact so a
+               depth >= 3 chain [f (g (h (k x)))] closes: the innermost fact is
+               established inside [a]'s walk, and returning only this level's
+               facts would drop it (the depth-3 boundary bug). *)
+            let cctx = child_ctx a in
+            let a_out = walk_expr env cctx a in
+            let extra = List.length a_out.cfacts - List.length cctx.cfacts in
+            let arg_walk_facts =
+              if extra > 0
+              then a_out.cfacts |> List.filteri (fun i _ -> i < extra) |> List.map fst
+              else []
+            in
+            { a_out with cfacts = prov None !dep_facts @ a_out.cfacts }, arg_walk_facts
+          | None -> ctx, []
         in
         match get_desc (Ctype.vox_expand_head env !arrow_ty) with
         | Tarrow ((_, _, _, binder), dom, ret, _) ->
@@ -3262,7 +3299,7 @@ let rec walk_expr _outer_env ctx (e : expression) : ctx =
                     ~goal:(Refinement.subst_bound ~by:subject p)
                     ~kind:Prove
                 | None -> ());
-               dep_facts := !dep_facts @ afacts;
+               dep_facts := !dep_facts @ afacts @ arg_walk_facts;
                match binder with
                | Some b -> arrow_ty := Vox_dep.subst_binder b ~by:subject ret
                | None -> arrow_ty := ret)

@@ -69,3 +69,44 @@ Counterexample (validated -- every hypothesis holds and the goal fails here):
   *unknown10* = 10
   *arg* = 9
 |}]
+
+(* POSITIVE: a depth-3 chain [g (g (g 10))] proves end to end -- the innermost
+   fact is threaded out of the nested walk (regression for the depth-3
+   boundary). *)
+let ok_chain3 () : int = consume (g (g (g 10)))
+[%%expect{|
+val ok_chain3 : unit -> int = <fun>
+|}]
+
+(* POSITIVE: a variable-terminated depth-3 chain, whose innermost fact mentions
+   a real parameter [n]. *)
+let bump (x : int) : int{ _ >= x + 1 } = refine_ (x + 1)
+let atleast (y : int{ y >= 0 }) : int = (y :> int)
+let ok_var_chain3 (n : int{ n >= 0 }) : int = atleast (bump (bump (bump n)))
+[%%expect{|
+val bump : (x : int) -> int{ _ >= x + 1 } = <fun>
+val atleast : int{ _ >= 0 } -> int = <fun>
+val ok_var_chain3 : int{ _ >= 0 } -> int = <fun>
+|}]
+
+(* NEGATIVE: a depth-3 chain gives only [<= 10]; a [<= 5] precondition must
+   still fail closed (the extra threaded hypotheses are true, so a genuinely
+   false goal is unaffected). *)
+let bad_chain3 () : int =
+  let consume5 (y : int{ y <= 5 }) : int = (y :> int) in
+  consume5 (g (g (g 10)))
+[%%expect{|
+Line 3, characters 11-25:
+3 |   consume5 (g (g (g 10)))
+               ^^^^^^^^^^^^^^
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
+       Goal: *arg* <= 5
+Hypotheses:
+  *arg* <= *arg*#2
+  *arg*#2 <= *arg*#3
+  *arg*#3 <= 10
+Counterexample (validated -- every hypothesis holds and the goal fails here):
+  *arg* = 6
+  *arg*#2 = 6
+  *arg*#3 = 6
+|}]

@@ -29,6 +29,16 @@ let pipeline (x : int) : int{ _ >= 0 } = half (abs x)
    satisfies the next stage's nonneg precondition, transitively. *)
 let pipeline2 (x : int) : int{ _ >= 0 } = half (half (abs x))
 
+(* DEEP TRANSITIVITY CHAIN, no let: [atleast3 (bump (bump (bump x)))].  Each
+   [bump] promises only [>= arg + 1] (an inequality -- the value is not
+   nameable by an exact term, so each stage takes a synthetic [*arg*] name),
+   and the [>= 3] bound closes ONLY by chaining all three postconditions down
+   to [x >= 0].  The innermost stage's fact is established three levels into
+   the nested walk; a depth-3 chain requires it to thread all the way out. *)
+let bump (n : int) : int{ _ >= n + 1 } = refine_ (n + 1)
+let atleast3 (n : int{ n >= 3 }) : int = (n :> int)
+let chain3 (x : int{ x >= 0 }) : int = atleast3 (bump (bump (bump x)))
+
 (* DEPENDENT result over a nested call: [succ]'s result mentions its argument;
    opening substitutes the nested value's synthetic name, and [abs x >= 0]
    threads to prove the pipeline's own [_ >= 1] contract. *)
