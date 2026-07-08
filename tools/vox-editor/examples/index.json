@@ -37,6 +37,13 @@
       "cursor": 60
     },
     {
+      "name": "nested",
+      "title": "Nested calls, no let-binding",
+      "description": "Refined results flow through nested calls directly: the verifier names each argument value itself (the *arg* in the obligation), so bump (bump n) discharges shrink's precondition without a manual let in sight.",
+      "verifies": true,
+      "cursor": 16
+    },
+    {
       "name": "relational",
       "title": "Higher-order, exact output",
       "description": "A relation supplied as a call-site lambda specifies iter by relating result to input -- the callback is never modeled, only its per-element contract. Picking the relation to be the callback's GRAPH (y = x + 1) makes the spec COMPLETE: a concrete count proves the exact value directly, and a symbolic count is closed by the relIter_succ_exact induction law proved in the block.",

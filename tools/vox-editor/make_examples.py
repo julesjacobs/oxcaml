@@ -128,6 +128,22 @@ MANIFEST: List[Dict[str, object]] = [
         ),
     },
     {
+        # Contracts flow through nested calls via verifier-named argument
+        # values (the *arg* binders) -- the C1 feature, live.
+        "slug": "nested",
+        "override": "nested.ml",
+        "expect": "verify",
+        # The nested call: shrink's y >= 2 discharged by two bumps' contracts.
+        "cursor": 16,
+        "title": "Nested calls, no let-binding",
+        "description": (
+            "Refined results flow through nested calls directly: the "
+            "verifier names each argument value itself (the *arg* in the "
+            "obligation), so bump (bump n) discharges shrink's "
+            "precondition without a manual let in sight."
+        ),
+    },
+    {
         # Capstone higher-order: a relation passed as a call-site lambda
         # specifies iter, and picking the callback's graph makes the spec
         # EXACT.  Self-contained (the Vrel machinery inlined into one block).
