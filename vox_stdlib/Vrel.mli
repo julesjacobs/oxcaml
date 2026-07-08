@@ -189,14 +189,14 @@ grind_pattern relFold_count_exact => relFold r xs init final
    n r-steps.  f's per-element contract IS the relation r.  With r the
    callback's GRAPH, relIter_succ_exact pins the result: [_ = x0 + n]. *)
 val iter :
-  (r : (int -> int -> bool)) ->
+  (r : ((int -> int -> bool) [@vox.total])) ->
   (f : ((x : int) -> int{ rHolds r x _ })) ->
   (x0 : int) -> (n : int) -> int{ relIter r n x0 _ }
 
 (* map r f xs : the result is pointwise r-related to xs (probe7 shape).  With
    r the callback's graph, ihead / itail name the exact element outputs. *)
 val map :
-  (r : (int -> int -> bool)) ->
+  (r : ((int -> int -> bool) [@vox.total])) ->
   (f : ((x : int) -> int{ rHolds r x _ })) ->
   (xs : ilist) -> ilist{ listRel r xs _ }
 
@@ -205,7 +205,7 @@ val length : (l : ilist) -> int{ _ = il_len l }
 (* fold r f init xs : a left fold whose step f is r-related (acc to acc');
    over a list of length n the result is [init] after n r-steps. *)
 val fold :
-  (r : (int -> int -> bool)) ->
+  (r : ((int -> int -> bool) [@vox.total])) ->
   (f : ((acc : int) -> (x : int) -> int{ rHolds r acc _ })) ->
   (init : int) -> (xs : ilist) -> int{ relIter r (il_len xs) init _ }
 
@@ -216,21 +216,21 @@ val fold :
    sum ([c = a + x]) gives [_ = init + il_sum xs], count ([c = a + 1]) gives
    [_ = init + il_len xs]. *)
 val fold3 :
-  (r : (int -> int -> int -> bool)) ->
+  (r : ((int -> int -> int -> bool) [@vox.total])) ->
   (f : ((acc : int) -> (x : int) -> int{ r3Holds r acc x _ })) ->
   (init : int) -> (xs : ilist) -> int{ relFold r xs init _ }
 
 (* filter p test xs : keep the elements [test] accepts.  test's contract ties
    its bool result to [pHolds p x], so every KEPT element satisfies p. *)
 val filter :
-  (p : (int -> bool)) ->
+  (p : ((int -> bool) [@vox.total])) ->
   (test : ((x : int) -> bool{ _ = pHolds p x })) ->
   (xs : ilist) -> ilist{ allP p _ }
 
 (* compose2 r s f g x : an r-step then an s-step is an (rcomp r s)-step. *)
 val compose2 :
-  (r : (int -> int -> bool)) ->
-  (s : (int -> int -> bool)) ->
+  (r : ((int -> int -> bool) [@vox.total])) ->
+  (s : ((int -> int -> bool) [@vox.total])) ->
   (f : ((x : int) -> int{ rHolds r x _ })) ->
   (g : ((y : int) -> int{ rHolds s y _ })) ->
   (x : int) -> int{ rHolds (rcomp r s) x _ }

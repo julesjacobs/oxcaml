@@ -76,7 +76,7 @@ grind_pattern listRel_len => listRel r a b
 |lean}]
 
 let iter :
-      (r : (int -> int -> bool)) ->
+      (r : ((int -> int -> bool) [@vox.total])) ->
       (f : ((x : int) -> int{ rHolds r x _ })) ->
       (x0 : int) -> (n : int) -> int{ relIter r n x0 _ } =
   fun r f x0 n ->
@@ -92,7 +92,7 @@ let iter :
     go x0 n
 
 let map :
-      (r : (int -> int -> bool)) ->
+      (r : ((int -> int -> bool) [@vox.total])) ->
       (f : ((x : int) -> int{ rHolds r x _ })) ->
       (xs : ilist) -> ilist{ listRel r xs _ } =
   fun r f xs ->
@@ -116,7 +116,7 @@ let length : (l : ilist) -> int{ _ = il_len l } =
     go l
 
 let fold :
-      (r : (int -> int -> bool)) ->
+      (r : ((int -> int -> bool) [@vox.total])) ->
       (f : ((acc : int) -> (x : int) -> int{ rHolds r acc _ })) ->
       (init : int) -> (xs : ilist) -> int{ relIter r (il_len xs) init _ } =
   fun r f init xs ->
@@ -133,7 +133,7 @@ let fold :
     go init xs
 
 let fold3 :
-      (r : (int -> int -> int -> bool)) ->
+      (r : ((int -> int -> int -> bool) [@vox.total])) ->
       (f : ((acc : int) -> (x : int) -> int{ r3Holds r acc x _ })) ->
       (init : int) -> (xs : ilist) -> int{ relFold r xs init _ } =
   fun r f init xs ->
@@ -150,7 +150,7 @@ let fold3 :
     go init xs
 
 let filter :
-      (p : (int -> bool)) ->
+      (p : ((int -> bool) [@vox.total])) ->
       (test : ((x : int) -> bool{ _ = pHolds p x })) ->
       (xs : ilist) -> ilist{ allP p _ } =
   fun p test xs ->
@@ -167,8 +167,8 @@ let filter :
     go xs
 
 let compose2 :
-      (r : (int -> int -> bool)) ->
-      (s : (int -> int -> bool)) ->
+      (r : ((int -> int -> bool) [@vox.total])) ->
+      (s : ((int -> int -> bool) [@vox.total])) ->
       (f : ((x : int) -> int{ rHolds r x _ })) ->
       (g : ((y : int) -> int{ rHolds s y _ })) ->
       (x : int) -> int{ rHolds (rcomp r s) x _ } =
