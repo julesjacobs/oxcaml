@@ -100,7 +100,9 @@ val use : (a : int) -> int -> int{ _ = a } = <fun>
 |}]
 
 (* The projection primitives are generic block reads: a user external
-   at a NON-pair type is not [fst] and stays unnameable. *)
+   at a NON-pair type is not [fst], so it is not reflectable; the nested call
+   is named by a synthetic loc-keyed ident instead (logical ANF), and [bad]
+   type-checks (the name carries no fact, [cheat] having no result contract). *)
 type t2 = { x2 : int; y2 : int }
 external cheat : t2 -> int = "%field0_immut"
 let g (k : int) : int{ _ = k } = refine_ k
@@ -113,10 +115,7 @@ Line 3, characters 41-42: vox VC:
   hypotheses:
   p = (1, 2)
 val g : (k : int) -> int{ _ = k } = <fun>
-Line 4, characters 27-36:
-4 | let bad (v : t2) : int = g (cheat v)
-                               ^^^^^^^^^
-Error: vox: this argument for a dependent parameter cannot be named in the logic: it is neither a reflectable expression (a variable, literal, arithmetic, constructor, field read, or reflected call) nor a call with an exact result contract; bind it with a let first
+val bad : t2 -> int = <fun>
 |}]
 
 (* Equality translates at tuples of int/bool; ORDER comparisons do not
@@ -155,8 +154,8 @@ val mk : (a : int) -> (int * int){ fst _ = a + 1 } = <fun>
 Line 4, characters 2-3: vox VC:
   goal: r = a + 1
   hypotheses:
-  fst *unknown8* = a + 1
-  r = fst *unknown8*
+  fst *unknown9* = a + 1
+  r = fst *unknown9*
   p = (1, 2)
 val use_direct : (a : int) -> int{ _ = a + 1 } = <fun>
 |}]
@@ -176,9 +175,9 @@ val mknest : (a : int) -> ((int * int) * int){ fst (fst _) = a } = <fun>
 Line 4, characters 2-3: vox VC:
   goal: x = a
   hypotheses:
-  fst (fst *unknown11*) = a
-  _p = fst *unknown11*
-  x = fst (fst *unknown11*)
+  fst (fst *unknown12*) = a
+  _p = fst *unknown12*
+  x = fst (fst *unknown12*)
   p = (1, 2)
 val use_nested : (a : int) -> int{ _ = a } = <fun>
 |}]
@@ -195,14 +194,14 @@ let use_match (a : int) : int{ _ = a } =
 Line 3, characters 30-31: vox VC:
   goal: x = a
   hypotheses:
-  fst (fst *unknown13*) = a
-  x = fst (fst *unknown13*)
+  fst (fst *unknown14*) = a
+  x = fst (fst *unknown14*)
   p = (1, 2)
 Line 4, characters 19-20: vox VC:
   goal: x = a
   hypotheses:
-  fst (fst *unknown13*) = a
-  x = fst (fst *unknown13*)
+  fst (fst *unknown14*) = a
+  x = fst (fst *unknown14*)
   p = (1, 2)
 val use_match : (a : int) -> int{ _ = a } = <fun>
 |}]
@@ -217,8 +216,8 @@ let use_if (a : int) (b : bool) : int{ _ = a + 1 } =
 Line 3, characters 2-3: vox VC:
   goal: r = a + 1
   hypotheses:
-  fst *unknown15* = a + 1
-  r = fst *unknown15*
+  fst *unknown16* = a + 1
+  r = fst *unknown16*
   p = (1, 2)
 val use_if : (a : int) -> bool -> int{ _ = a + 1 } = <fun>
 |}]

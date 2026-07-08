@@ -94,13 +94,17 @@ let ok (x : int) =
 val ok : int -> bool = <fun>
 |}]
 
-(* An expression the logic cannot name is still an error. *)
+(* A nested non-nameable argument ([abs x]) is now named by a synthetic
+   loc-keyed ident (logical ANF), so it is no longer rejected at the argument.
+   Here the resulting refinement [_ = *arg* < x] mentions the caller's
+   parameter [x] and so is caught by the module-level escape rule instead --
+   the dependency, once named, still may not leak into a module-level type. *)
 let bad (x : int) = lt (abs x) x
 [%%expect{|
-Line 1, characters 23-30:
+Line 1, characters 4-7:
 1 | let bad (x : int) = lt (abs x) x
-                           ^^^^^^^
-Error: vox: this argument for a dependent parameter cannot be named in the logic: it is neither a reflectable expression (a variable, literal, arithmetic, constructor, field read, or reflected call) nor a call with an exact result contract; bind it with a let first
+        ^^^
+Error: vox: the type of bad carries a refinement mentioning x, which may not appear in a module-level type; annotate with a dependent arrow ((x : ...) -> ...) or a self-contained refinement
 |}]
 
 (* Escaped refinements are errors (DESIGN: "escape is an error").  An
