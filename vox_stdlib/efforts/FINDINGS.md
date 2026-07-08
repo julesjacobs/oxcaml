@@ -1,5 +1,25 @@
 # WP-6 verification-efforts findings (2026-07-08)
 
+> **UPDATE 2026-07-08 (transparency flip):** F-B1/F-B2/F-B3 below were the
+> case FOR exposing Vlist's type.  That flip has now LANDED (Vlist +
+> Vplist expose `Nil | Cons`; native derived inductive; see
+> notes/vlist.md).  Status after the flip:
+> - **F-B1 — CLOSED.** Client-side structural recursion over a Vlist now
+>   verifies: a client pattern-matches native Nil/Cons, patterns mint facts,
+>   the exposed recursive model defs reduce.  Proof:
+>   clients/client_list_recursion.ml (F-B1 inverted) and the once-blocked
+>   SORTED INSERT now a working client in efforts/effort_sorted.ml.
+> - **F-B2 — FIXED.** ll_sum_cons + ll_sum_app shipped (live).  And for
+>   native .Cons-built lists ll_sum reduces directly (no law needed).
+> - **F-B3 — CLOSED (client-expressible).** A client's own `cl_sorted` /
+>   `cl_lb` model defs reduce on the native constructors, so a sortedness
+>   invariant IS now client-expressible and provable — demonstrated by the
+>   sorted insert.  (Module-internal sorted-container ops remain an option
+>   for callers who want the op rather than to hand-roll it.)
+>
+> The original (pre-flip) finding text is preserved below for the record.
+
+
 Three consumer mini-projects stressing the polished stdlib as a real user would,
 each verified with the real solver (effort_scope / effort_sorted / effort_dedup).
 The friction list below is the primary product — it feeds the next campaign round.
