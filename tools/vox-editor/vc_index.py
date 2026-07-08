@@ -432,6 +432,18 @@ def parse_error(text: str) -> Optional[Dict[str, object]]:
             if rng is not None:
                 break
         message = lines[i][len("Error: ") :].strip()
+        # The detail of a non-proof vox error (e.g. "could not build this
+        # interface's sig module:") sits on indented continuation lines;
+        # keep them, stopping at the structured proof-failure payload.
+        _markers = ("Goal:", "Hypotheses:", "Possible counterexample:",
+                    "Counterexample (validated", "(lean:")
+        for c in range(i + 1, n):
+            cs = lines[c].strip()
+            if not (lines[c].startswith((" ", "\t")) and cs):
+                break
+            if cs.startswith(_markers):
+                break
+            message += " " + cs
         result: Dict[str, object] = {"message": message}
         # A failed proof now carries a VERDICT: DISPROVED (a
         # counterexample was validated by evaluation) vs NOT PROVED
@@ -564,17 +576,26 @@ def _flag_rejected(output: str, flag: str) -> bool:
     return "unknown option" in output and flag in output
 
 
-def dump_capture(source_path: str, ocamlc: str, cwd: Optional[str]) -> Tuple[int, str]:
+def dump_capture(
+    source_path: str,
+    ocamlc: str,
+    cwd: Optional[str],
+    lean: Optional[str] = None,
+) -> Tuple[int, str]:
     """Run the VC-shape pass, preferring the provenance flag and caching a
     one-time fallback to plain -dump-vc for compilers that lack it.
-    Returns (exit code, output)."""
+    ``lean`` is passed through as -vox-solver-path when set: an .mli's
+    [%%vox.lean] blocks compile to its sig module even under -vox-dry-run,
+    which needs the solver ("could not build this interface's sig module"
+    otherwise).  Returns (exit code, output)."""
+    solver = [] if lean is None else ["-vox-solver-path", lean]
     global _provenance_supported, _states_supported
     if _provenance_supported is not False:
         flags = [_PROVENANCE_FLAG]
         if _states_supported is not False:
             flags.append(_STATES_FLAG)
         code, out = compile_capture(
-            source_path, ocamlc, flags + ["-vox-dry-run", "-annot"], cwd=cwd
+            source_path, ocamlc, flags + ["-vox-dry-run", "-annot"] + solver, cwd=cwd
         )
         if _flag_rejected(out, _STATES_FLAG):
             # Older compiler: retry once without states, cache the verdict.
@@ -582,7 +603,7 @@ def dump_capture(source_path: str, ocamlc: str, cwd: Optional[str]) -> Tuple[int
             code, out = compile_capture(
                 source_path,
                 ocamlc,
-                [_PROVENANCE_FLAG, "-vox-dry-run", "-annot"],
+                [_PROVENANCE_FLAG, "-vox-dry-run", "-annot"] + solver,
                 cwd=cwd,
             )
         elif _states_supported is None:
@@ -592,7 +613,9 @@ def dump_capture(source_path: str, ocamlc: str, cwd: Optional[str]) -> Tuple[int
         else:
             _provenance_supported = True
             return code, out
-    return compile_capture(source_path, ocamlc, ["-dump-vc", "-vox-dry-run"], cwd=cwd)
+    return compile_capture(
+        source_path, ocamlc, ["-dump-vc", "-vox-dry-run"] + solver, cwd=cwd
+    )
 
 
 def solve_capture(
@@ -671,7 +694,10 @@ def build_index(
     {"vcs": [...], "errors": [...], "ok": bool, "raw_dump": str,
      "raw_solve": str|None}
     """
-    dump_code, dump_out = dump_capture(source_path, ocamlc, cwd=cwd)
+    # An interface's dry pass needs the solver for its sig module; a .ml
+    # dry pass stays solver-free (fast).
+    dump_lean = lean if source_path.endswith(".mli") else None
+    dump_code, dump_out = dump_capture(source_path, ocamlc, cwd=cwd, lean=dump_lean)
     vcs = parse_dump(dump_out)
     states = parse_states(dump_out)
     errors: List[Dict[str, object]] = []

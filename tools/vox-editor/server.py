@@ -301,6 +301,11 @@ class Handler(BaseHTTPRequestHandler):
         endpoint = self._endpoint()
         if endpoint == "/check":
             fast = bool(body.get("fast", False))
+            # An interface cannot be checked without the solver (its
+            # [%%vox.lean] blocks build the sig module), so promote .mli
+            # buffers to a full check even in fast mode.
+            if fast and file_path is not None and file_path.endswith(".mli"):
+                fast = False
             resp = build_check_response(
                 source,
                 revision,
