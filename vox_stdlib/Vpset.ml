@@ -10,6 +10,7 @@
    plus [ps_isnil] so [is_empty]'s VC unfolds.  The relational specs are restated
    so the op VCs can name them. *)
 
+open Vhof
 type 'a pset [@@vox.sort lean "PSet"]
 type 'a cell = PNil | PCons of 'a * 'a cell
 
@@ -52,6 +53,13 @@ inductive PSet (a : Type) where
   ∀ y, ps_mem y a0 -> ps_mem y b0
 @[grind] def ps_equal {a : Type} (a0 b0 : PSet a) : Prop :=
   ∀ y, ps_mem y a0 ↔ ps_mem y b0
+-- eq-param layer (probe3/4): membership + remove up to a client decider e
+-- (eqHolds e), escaping the missing DecidableEq at the abstract element sort.
+@[grind, expose] def ps_memr {a : Type} (e : a -> a -> Prop) (x : a) : PSet a -> Prop
+  | .pnil => False
+  | .pcons y s => eqHolds e x y \/ ps_memr e x s
+@[grind, expose] def ps_remove_ok {a : Type} (e : a -> a -> Prop) (x : a) (s r : PSet a) : Prop :=
+  (¬ ps_memr e x r) /\ (forall y, ps_memr e y r -> ps_memr e y s)
 |lean}]
 
 type 'a t = 'a cell{ 0 = 0 } [@vox.via (ps_elems : 'a pset)]
@@ -105,3 +113,35 @@ let union : (s1 : 'a t) -> (s2 : 'a t) -> 'a t{ ps_unionspec _ s1 s2 } =
     let refine_ c2 = s2 in
     let c = un c1 c2 in
     (c : 'a t{ ps_unionspec _ s1 s2 })
+
+let mem :
+      (e : (('a -> 'a -> bool) [@vox.total])) ->
+      (eq : ((x : 'a) -> (y : 'a) -> bool{ _ = eqHolds e x y })) ->
+      (x : 'a) -> (s : 'a t) -> bool{ _ = ps_memr e x s } =
+  fun e eq x s ->
+    ignore e;
+    let refine_ c0 = s in
+    let rec go : (u : 'a cell) -> bool{ _ = ps_memr e x (ps_elems u) } =
+      fun u -> match u with
+        | PNil -> false
+        | PCons (y, r) -> if eq x y then true else go r
+    in
+    go c0
+
+let remove :
+      (e : (('a -> 'a -> bool) [@vox.total])) ->
+      (eq : ((x : 'a) -> (y : 'a) -> bool{ _ = eqHolds e x y })) ->
+      (x : 'a) -> (s : 'a t) -> 'a t{ ps_remove_ok e x s _ } =
+  fun e eq x s ->
+    ignore e;
+    let refine_ c0 = s in
+    let rec go : (u : 'a cell) -> 'a cell{ ps_remove_ok e x (ps_elems u) (ps_elems _) } =
+      fun u -> match u with
+        | PNil -> (PNil : 'a cell{ ps_remove_ok e x (ps_elems u) (ps_elems _) })
+        | PCons (y, r) ->
+            let r' = go r in
+            if eq x y then (r' : 'a cell{ ps_remove_ok e x (ps_elems u) (ps_elems _) })
+            else (PCons (y, r') : 'a cell{ ps_remove_ok e x (ps_elems u) (ps_elems _) })
+    in
+    let c = go c0 in
+    (c : 'a t{ ps_remove_ok e x s _ })

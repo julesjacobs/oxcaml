@@ -207,3 +207,31 @@ build. It gates the two ops a set "should" have, at **two different layers**:
   concurrently by a sibling builder and Vpset is kept a LEAF to avoid a race on
   its artifacts. No language obstacle expected — an `'a`-list enumeration stores
   elements only, the same equality-free family as `union`.
+
+## eq-param layer (WP-2, 2026-07-08)
+
+bool `mem` + `remove` at an abstract element via a client decider (eqHolds from
+Vhof, probe3/4) — the runtime queries the RELATIONAL-only Vpset deliberately
+omitted. `mem` -> `bool{ _ = ps_memr e x s }`; `remove` -> `ps_remove_ok` (x gone
++ subset; the ∀↔ set-difference spec is equivalence-gated, same finding as
+notes/vplist.md). The DecidableEq-at-abstract wall (the module header's central
+probe) is thus ESCAPABLE by parameterizing the decider — the headline WP-2
+result. Decider spec params [@vox.total]. All verify; smoke green; negatives fail
+closed. The relational-only ps_mem/ps_subset vocabulary is retained (unchanged).
+
+### Vpset · of_list (Vplist -> Vpset) is blocked by the missing Vplist eliminator
+- **site:** (not shipped) Vpset.of_list
+- **milestone/gap:** L2 (via-typed eliminator)
+- **what I tried:** `of_list : 'a Vplist.t -> 'a t` (build a set from a list),
+  listed in the inventory as "where it follows".
+- **error:** it does NOT follow. of_list must CONSUME (traverse) a Vplist.t, but
+  Vplist is via-abstracted with no eliminator (no head/tail/uncons/fold exposed),
+  so nothing outside Vplist can traverse it. Contrast Vmap.keys -> Vlist, which
+  PRODUCES a Vlist by recursing over Vmap's OWN repr (no consumption of a via
+  value). of_list is the consuming direction, blocked.
+- **workaround used:** not shipped. A future Vplist.fold (HOF) would unblock it
+  (of_list = fold add empty), or a Vplist eliminator.
+- **removed by:** a Vplist fold/eliminator (the #63 via-ADT-eliminator gap for the
+  view form; a total fold is the head/tail-style substitute).
+- **severity:** MINOR (mem/remove — the parity headline — ship; of_list waits on a
+  Vplist traversal op).

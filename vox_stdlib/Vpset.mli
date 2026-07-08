@@ -42,6 +42,7 @@
    removal-test confirmed.)  All private scaffolding (the abstraction fn,
    [ps_app], its membership lemma) stays in the .ml. *)
 
+open Vhof
 type 'a pset [@@vox.sort lean "PSet"]
 type 'a t : value refines ('a pset)
 
@@ -103,6 +104,13 @@ public inductive PSet (a : Type) where
     constructor
     · intro h; exact h.elim
     · intro h; exact (h y) (Or.inl rfl)
+-- eq-param layer (probe3/4): membership + remove up to a client decider e
+-- (eqHolds e), escaping the missing DecidableEq at the abstract element sort.
+@[grind, expose] public def ps_memr {a : Type} (e : a -> a -> Prop) (x : a) : PSet a -> Prop
+  | .pnil => False
+  | .pcons y s => eqHolds e x y \/ ps_memr e x s
+@[grind, expose] public def ps_remove_ok {a : Type} (e : a -> a -> Prop) (x : a) (s r : PSet a) : Prop :=
+  (¬ ps_memr e x r) /\ (forall y, ps_memr e y r -> ps_memr e y s)
 |lean}]
 
 val empty : (u : unit) -> 'a t
@@ -110,3 +118,17 @@ val singleton : (x : 'a) -> 'a t{ ps_singletonspec _ x }
 val is_empty : (s : 'a t) -> bool{ _ = ps_isnil s }
 val add : (x : 'a) -> (s : 'a t) -> 'a t{ ps_addspec _ x s }
 val union : (s1 : 'a t) -> (s2 : 'a t) -> 'a t{ ps_unionspec _ s1 s2 }
+
+(* Bool membership + remove via a client-supplied decider (eq-param, probe3/4) --
+   the runtime queries the RELATIONAL-only model could not offer. [mem] decides
+   membership up to [e]; [remove] drops e-matches of x. For an arbitrary decider
+   [remove] satisfies ps_remove_ok (x gone + subset); the membership-EQUALITY
+   spec needs [e] to be an equivalence (notes/vpset.md). *)
+val mem :
+  (e : (('a -> 'a -> bool) [@vox.total])) ->
+  (eq : ((x : 'a) -> (y : 'a) -> bool{ _ = eqHolds e x y })) ->
+  (x : 'a) -> (s : 'a t) -> bool{ _ = ps_memr e x s }
+val remove :
+  (e : (('a -> 'a -> bool) [@vox.total])) ->
+  (eq : ((x : 'a) -> (y : 'a) -> bool{ _ = eqHolds e x y })) ->
+  (x : 'a) -> (s : 'a t) -> 'a t{ ps_remove_ok e x s _ }
