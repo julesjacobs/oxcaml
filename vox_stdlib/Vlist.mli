@@ -10,6 +10,7 @@
    House rules: specs mention DEFS (ll_cons), never the LList
    CONSTRUCTORS (.LCons); names carry the [ll_] prefix so they never
    collide with Lean-core identifiers or a co-imported unit's names. *)
+open Vhof
 open Voption
 type llist [@@vox.sort lean "LList"]
 type t : value refines (llist)
@@ -111,13 +112,6 @@ public axiom ll_cons_head_tail (l : LList) (h : ¬ ll_isnil l) :
     ll_cons (ll_head l) (ll_tail l) = l
 grind_pattern ll_cons_head_tail => ll_cons (ll_head l) (ll_tail l)
 
--- ===== HOF KIT: container-independent substrate (copy-in; see notes/hof_kit.md) =====
-public abbrev IntRel := Int -> Int -> Prop
-public abbrev IntPred := Int -> Prop
-public abbrev IntRel3 := Int -> Int -> Int -> Prop
-@[grind, expose] public def rHolds (r : IntRel) (a b : Int) : Prop := r a b
-@[grind, expose] public def pHolds (p : IntPred) (x : Int) : Prop := p x
-@[grind, expose] public def r3Holds (r : IntRel3) (a b c : Int) : Prop := r a b c
 
 -- ===== HOF KIT: per-container relational lifts over LList =====
 -- ll_listRel: b is pointwise r-related to a (same length) -- map's spec.

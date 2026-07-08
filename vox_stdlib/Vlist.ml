@@ -6,6 +6,7 @@
    uses the gap #31 skeleton-threading workaround: its recursive [go]
    returns a refined SKELETON and the via injection happens once, through
    a variable (see notes/vlist.md). *)
+open Vhof
 open Voption
 type llist [@@vox.sort lean "LList"]
 type tree = Nil | Cons of int * tree
@@ -89,13 +90,6 @@ theorem ll_cons_head_tail (l : LList) (h : ¬ ll_isnil l) :
     ll_cons (ll_head l) (ll_tail l) = l := by cases l <;> grind
 grind_pattern ll_cons_head_tail => ll_cons (ll_head l) (ll_tail l)
 
--- ===== HOF KIT: container-independent substrate (copy-in; see notes/hof_kit.md) =====
-abbrev IntRel := Int -> Int -> Prop
-abbrev IntPred := Int -> Prop
-abbrev IntRel3 := Int -> Int -> Int -> Prop
-@[grind, expose] def rHolds (r : IntRel) (a b : Int) : Prop := r a b
-@[grind, expose] def pHolds (p : IntPred) (x : Int) : Prop := p x
-@[grind, expose] def r3Holds (r : IntRel3) (a b c : Int) : Prop := r a b c
 
 -- ===== HOF KIT: per-container relational lifts over LList =====
 -- ll_listRel: b is pointwise r-related to a (same length) -- map's spec.

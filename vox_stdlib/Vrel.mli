@@ -40,21 +40,11 @@
      concrete OR symbolic relations; only the load-bearing length law
      listRel_len ships as an obligation (axiom here / theorem in the .ml). *)
 
+open Vhof
 type ilist = Inil | Icons of int * ilist
 
 [%%vox.lean {lean|
-public abbrev IntRel := Int -> Int -> Prop
-public abbrev IntPred := Int -> Prop
-public abbrev IntRel3 := Int -> Int -> Int -> Prop
 
--- rHolds / pHolds: the pass-whole idiom.  A relation parameter is only ever
--- APPLIED inside Lean, through these wrappers, so it appears in the VC as a
--- bare hypothesis and grind unfolds the wrapper against the substituted
--- lambda.  Exposed: a client beta-reduces [rHolds (fun p q => ..) a b].
-@[grind, expose] public def rHolds (r : IntRel) (a b : Int) : Prop := r a b
-@[grind, expose] public def pHolds (p : IntPred) (x : Int) : Prop := p x
--- r3Holds: the ternary analogue -- relates (acc, elem, acc') for fold3.
-@[grind, expose] public def r3Holds (r : IntRel3) (a b c : Int) : Prop := r a b c
 
 -- The relation algebra, over ABSTRACT relations (combinators the study's F9
 -- proves compose generically).  All exposed so a client unfolds them.

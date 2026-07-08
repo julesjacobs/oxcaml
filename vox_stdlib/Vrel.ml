@@ -9,16 +9,11 @@
    .mli block -- they are proved public theorems (not obligations) and no
    .ml combinator proof uses them, so the .ml need not restate them. *)
 
+open Vhof
 type ilist = Inil | Icons of int * ilist
 
 [%%vox.lean {lean|
-abbrev IntRel := Int -> Int -> Prop
-abbrev IntPred := Int -> Prop
-abbrev IntRel3 := Int -> Int -> Int -> Prop
 
-@[grind, expose] def rHolds (r : IntRel) (a b : Int) : Prop := r a b
-@[grind, expose] def pHolds (p : IntPred) (x : Int) : Prop := p x
-@[grind, expose] def r3Holds (r : IntRel3) (a b c : Int) : Prop := r a b c
 
 @[grind, expose] def rcomp (r s : IntRel) : IntRel :=
   fun a c => exists b, r a b /\ s b c
