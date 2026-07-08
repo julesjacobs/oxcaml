@@ -68,6 +68,7 @@ def build_check_response(
     ocamlc: str,
     lean: Optional[str],
     file_path: Optional[str] = None,
+    explain: bool = True,
 ) -> Dict[str, object]:
     """Compile ``source`` and produce the /check payload.
 
@@ -87,7 +88,10 @@ def build_check_response(
         path = os.path.join(scratch, "input.ml")
         with open(path, "w") as fh:
             fh.write(source)
-    index = vc_index.build_index(path, ocamlc, lean=lean, cwd=scratch)
+        # PROTOTYPE (lever A): a standalone buffer's scratch also gets the
+        # shared VoxCore so its check skips the per-scratch rebuild.
+        workspace.stage_voxcore(scratch, ocamlc, lean)
+    index = vc_index.build_index(path, ocamlc, lean=lean, cwd=scratch, explain=explain)
     regions: List[Dict[str, object]] = []
     for vc in cast(List[Dict[str, Any]], index["vcs"]):
         region: Dict[str, object] = {
@@ -306,12 +310,18 @@ class Handler(BaseHTTPRequestHandler):
             # buffers to a full check even in fast mode.
             if fast and file_path is not None and file_path.endswith(".mli"):
                 fast = False
+            # PROTOTYPE (lever B): the client may request explain=False to get
+            # a fast verdict-only check and defer the used/unused-hypothesis
+            # harvest (a second Lean pass) to when the pane is focused.
+            # Defaults True to preserve current behaviour.
+            explain = bool(body.get("explain", True))
             resp = build_check_response(
                 source,
                 revision,
                 self.ocamlc,
                 None if fast else self.lean,
                 file_path=file_path,
+                explain=explain,
             )
             resp["fast"] = fast
             self._json(200, resp)

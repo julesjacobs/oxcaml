@@ -435,8 +435,13 @@ def parse_error(text: str) -> Optional[Dict[str, object]]:
         # The detail of a non-proof vox error (e.g. "could not build this
         # interface's sig module:") sits on indented continuation lines;
         # keep them, stopping at the structured proof-failure payload.
-        _markers = ("Goal:", "Hypotheses:", "Possible counterexample:",
-                    "Counterexample (validated", "(lean:")
+        _markers = (
+            "Goal:",
+            "Hypotheses:",
+            "Possible counterexample:",
+            "Counterexample (validated",
+            "(lean:",
+        )
         for c in range(i + 1, n):
             cs = lines[c].strip()
             if not (lines[c].startswith((" ", "\t")) and cs):
@@ -619,22 +624,42 @@ def dump_capture(
 
 
 def solve_capture(
-    source_path: str, ocamlc: str, lean: str, cwd: Optional[str]
+    source_path: str,
+    ocamlc: str,
+    lean: str,
+    cwd: Optional[str],
+    explain: bool = True,
 ) -> Tuple[int, str]:
     """Run the real solver pass.  Under a compiler that supports it, also
     request the provenance dump with per-VC "used:" lines
     (-vox-explain-proofs); the used-lists ride along in this pass's output
     (parsed by build_index).  Probe once and cache a fallback to a plain
-    solve for older compilers.  Returns (exit code, output)."""
+    solve for older compilers.  Returns (exit code, output).
+
+    PROTOTYPE (lever B -- lazy explain): with ``explain=False`` the
+    -vox-explain-proofs pass is skipped.  That pass is a SECOND full Lean
+    invocation (grind?) run only to harvest the used-lemma / unused-hypothesis
+    report; it never decides a verdict (the verdict already came from the first
+    grind), so skipping it is zero-soundness-risk -- it only omits the pane's
+    used/unused annotations, which the client already treats as optional
+    (None).  The provenance dump (per-VC verdicts) still rides along.  Roughly
+    halves the solve pass on files with real proof content."""
     global _explain_supported
     base = ["-vox-solver-path", lean]
-    if _explain_supported is not False:
+    if explain and _explain_supported is not False:
         flags = base + [_PROVENANCE_FLAG, _EXPLAIN_FLAG]
         code, out = compile_capture(source_path, ocamlc, flags, cwd=cwd)
         if _flag_rejected(out, _EXPLAIN_FLAG) or _flag_rejected(out, _PROVENANCE_FLAG):
             _explain_supported = False
             return compile_capture(source_path, ocamlc, base, cwd=cwd)
         _explain_supported = True
+        return code, out
+    if not explain and _provenance_supported is not False:
+        # Verdicts without the explain pass: provenance dump only.
+        flags = base + [_PROVENANCE_FLAG]
+        code, out = compile_capture(source_path, ocamlc, flags, cwd=cwd)
+        if _flag_rejected(out, _PROVENANCE_FLAG):
+            return compile_capture(source_path, ocamlc, base, cwd=cwd)
         return code, out
     return compile_capture(source_path, ocamlc, base, cwd=cwd)
 
@@ -688,6 +713,7 @@ def build_index(
     ocamlc: str,
     lean: Optional[str] = None,
     cwd: Optional[str] = None,
+    explain: bool = True,
 ) -> Dict[str, object]:
     """Compile ``source_path`` and return a JSON-serialisable index.
 
@@ -714,7 +740,9 @@ def build_index(
         errors.append({"message": "compilation failed (see raw dump)"})
         ok = False
     if lean is not None:
-        code, solve_out = solve_capture(source_path, ocamlc, lean, cwd=cwd)
+        code, solve_out = solve_capture(
+            source_path, ocamlc, lean, cwd=cwd, explain=explain
+        )
         raw_solve = solve_out
         err = parse_error(solve_out)
         if code == 0 and err is None:

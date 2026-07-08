@@ -21,6 +21,7 @@ Only files under the two roots, with a servable extension, are ever
 reachable; nothing here writes into the source tree.
 """
 
+import hashlib
 import json
 import os
 import shutil
@@ -56,6 +57,70 @@ _CACHE_ROOT = os.path.join(tempfile.gettempdir(), "vox-editor-depcache")
 # holding the lock; a non-reentrant Lock self-deadlocks on any dep-bearing
 # module (Vmap, Vset) and every other stdlib check then hangs behind it.
 _cache_lock = threading.RLock()
+
+# PROTOTYPE (perf lever A -- shared VoxCore artifact).  The compiler rebuilds
+# VoxCore.olean in its working dir whenever the dir lacks a FRESH one (an
+# .olean plus a VoxCore.olean.src sidecar whose digest matches the compiler's
+# own base-theory text).  Every /check runs in a private scratch (BUILD.md's
+# write-race discipline), so each check pays that ~0.5s rebuild from cold.
+# Here we build VoxCore ONCE per (compiler, lean) and copy the artifact into
+# each scratch; the compiler's own digest check then finds it fresh and skips
+# the rebuild.
+#
+# Soundness/staleness: staging is self-correcting.  If the staged artifact is
+# stale for THIS compiler (its .src digest no longer matches the compiler's
+# base-theory text -- e.g. after a compiler change), the compiler rebuilds it
+# in the private scratch exactly as before; a wrong artifact can never be
+# trusted.  The cache dir is keyed on the lean path because .olean is a
+# lean-version-specific format (a stale lean would make the import fail, which
+# a cache clear fixes -- a hard failure, never a false "proved").
+_VOXCORE_CACHE = os.path.join(tempfile.gettempdir(), "vox-editor-voxcore")
+
+
+def _shared_voxcore_dir(ocamlc: str, lean: str) -> Optional[str]:
+    """Directory holding a prebuilt VoxCore.olean for (ocamlc, lean), built
+    once and reused.  Returns None if the build did not produce the artifact
+    (the caller then falls back to the per-scratch rebuild)."""
+    key = hashlib.sha1(
+        (os.path.abspath(ocamlc) + "\0" + os.path.abspath(lean)).encode()
+    ).hexdigest()[:16]
+    cdir = os.path.join(_VOXCORE_CACHE, key)
+    olean = os.path.join(cdir, "VoxCore.olean")
+    with _cache_lock:
+        if not os.path.isfile(olean):
+            os.makedirs(cdir, exist_ok=True)
+            probe = os.path.join(cdir, "_voxcore_probe.ml")
+            with open(probe, "w") as fh:
+                fh.write(
+                    "let _voxcore_probe (x : int) : int{ _ >= 0 } =\n"
+                    "  if x < 0 then 0 else x\n"
+                )
+            # Any solve builds VoxCore.olean (+ .src) as a side effect.
+            subprocess.run(
+                [ocamlc, "-vox-solver-path", lean, "-c", probe],
+                cwd=cdir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+            )
+        return cdir if os.path.isfile(olean) else None
+
+
+def stage_voxcore(scratch: str, ocamlc: str, lean: Optional[str]) -> None:
+    """Copy the shared prebuilt VoxCore artifact into ``scratch`` so the
+    compiler's ensure_core finds it fresh and skips the ~0.5s rebuild."""
+    if lean is None:
+        return
+    cdir = _shared_voxcore_dir(ocamlc, lean)
+    if cdir is None:
+        return
+    for suffix in ("", ".private", ".server", ".src"):
+        art = os.path.join(cdir, "VoxCore.olean" + suffix)
+        if os.path.isfile(art):
+            try:
+                shutil.copy(art, scratch)
+            except OSError:
+                pass
 
 
 # --------------------------------------------------------------------------
@@ -361,6 +426,9 @@ def stage_for_check(
     dest = os.path.join(scratch, filename)
     with open(dest, "w") as fh:
         fh.write(source)
+    # PROTOTYPE (lever A): stage the shared VoxCore so the compiler skips its
+    # per-scratch rebuild.
+    stage_voxcore(scratch, ocamlc, lean)
     if lean is not None:
         needed = _transitive_deps(module)
         # Checking the .ml needs the module's own interface too; checking
