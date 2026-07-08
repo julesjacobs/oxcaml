@@ -145,3 +145,25 @@ confirmed LIVE. One SOUNDNESS finding (below) plus ergonomic friction.
 - **workaround used:** none.
 - **removed by:** n/a — recorded so a later builder does not needlessly avoid it.
 - **severity:** COSMETIC.
+
+## HOF surface (WP-1, 2026-07-08)
+
+map (on Ok) / map_error (on Error) / bind / fold / to_option via the HOF kit.
+Exposed ADT -> exact output available (smoke: map_ok_exact / fold_ok_exact).
+to_option enumerates into a Voption, so Vresult DEPENDS ON Voption. Substrate
+comes from the shared Vhof module (open Vhof); Vresult declares none of its own
+(see notes/vhof.md). Spec params [@vox.total]. All verify; smoke green; negatives
+fail closed.
+
+### Vresult · imports both Vhof (substrate) and Voption (to_option target)
+- **site:** vox_stdlib/vresult.mli (`open Vhof` + `open Voption`)
+- **milestone/gap:** new (multi-import HOF module)
+- **what I tried:** ship map/bind/fold using the substrate + a to_option bridging
+  to the Voption model.
+- **error:** none — `open Vhof` supplies IntRel/rHolds/r3Holds; `open Voption`
+  supplies Vox_Voption_t/.Vsome/.Vnone for vr_to_opt_rel. Both VoxSig oleans are
+  staged.
+- **workaround used:** n/a (works). Recorded as the reference for a HOF module
+  that imports the substrate AND another container.
+- **removed by:** n/a.
+- **severity:** none.

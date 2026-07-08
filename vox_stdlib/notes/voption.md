@@ -99,3 +99,32 @@ either would be miscalibrated).
   documented conventions rule, not a per-module rediscovery.
 - **severity:** MAJOR (soundness-of-evidence: silently ships unexercised laws
   and defeats the dead-law check; downgraded to MINOR only once a lint exists)
+
+## HOF surface (WP-1, 2026-07-08)
+
+map / bind / filter / fold / is_some_and via the HOF kit. Voption is an EXPOSED
+ADT, so the relational lift defs (vo_maprel / vo_bindrel / vo_filterrel /
+vo_foldrel / vo_is_some_and) reduce on Vnone/Vsome at the client — EXACT
+per-element output IS available (smoke: map_some_exact / fold_some_exact), the
+exposed-container payoff the via-abstracted Vlist cannot offer. Spec params
+[@vox.total]. Substrate comes from the shared Vhof module (open Vhof); Voption
+declares none of its own (see notes/vhof.md). Voption stays a LEAF-over-Vhof
+(to_result omitted to keep the Voption<->Vresult dependency acyclic). All verify;
+smoke green; negatives fail closed.
+
+### Voption · [@vox.total] does not forward; option->result omitted to avoid a cycle
+- **site:** vox_stdlib/clients/smoke_voption.ml (`map_then_filter`); no `to_result`
+- **milestone/gap:** new (total ergonomics + layering)
+- **what I tried:** (a) a combinator-of-combinator client forwarding a shared
+  relation param into two totals; (b) a `Voption.to_result` companion to
+  `Vresult.to_option`.
+- **error:** (a) `the argument for this parameter must be a TOTAL spec function`
+  — a total-declared param VARIABLE is not accepted where a total arg is
+  required (only a call-site lambda / [@vox.reflect] value is). (b) would create
+  a Voption<->Vresult import cycle.
+- **workaround used:** (a) chain by supplying a CALL-SITE lambda to each
+  combinator (smoke map_then_filter); (b) ship the conversion only in the upper
+  layer (Vresult.to_option), keep Voption below.
+- **removed by:** (a) a total-forwarding rule accepting a total-typed param
+  variable as a total argument; (b) n/a (correct layering).
+- **severity:** MINOR.
