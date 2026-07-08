@@ -1580,6 +1580,113 @@ async function main() {
     assert.ok(docRO, "notes/*.md opens read-only (documentation, not verified)");
     console.log("ok - notes/*.md doc opens read-only");
 
+    // vox.invariant display (task #18): a loop [@vox.invariant] emits its
+    // establishment and preservation obligations at the SAME span.  The pane
+    // must render BOTH -- neither hidden behind the other -- with the right
+    // per-VC badge (here establishment PROVES at entry, preservation is
+    // DISPROVED), role sublabels, and the counterexample on the preservation
+    // only (never borrowed by the proved establishment).
+    const INV_SRC = [
+      "let ex (n : int) : int =",
+      "  let mutable x = 0 in",
+      "  (while x < n do",
+      "     x <- x + 1",
+      "   done) [@vox.invariant x = 0];",
+      "  x",
+      "",
+    ].join("\n");
+    // Reset to a writable buffer first: the previous step left a read-only
+    // notes/*.md doc open, which suppresses edits (and thus checks).
+    await page.evaluate(() => {
+      document.querySelector('#tree .tree-file[data-path="examples/nth.ml"]').click();
+    });
+    await waitFor(
+      async () => {
+        const t = await page.evaluate(() => window.__vox.cm.getValue());
+        return /let rec nth/.test(t) ? t : false;
+      },
+      10000,
+      "nth reloaded before the invariant test"
+    );
+    await page.evaluate((src) => {
+      window.__vox.setCompact(false);
+      window.__vox.cm.setValue(src);
+    }, INV_SRC);
+    // Wait for the full (Lean) pass to attribute per-VC verdicts.
+    const inv = await waitFor(
+      () =>
+        page.evaluate(() => {
+          if (window.__vox.getLastCheckFast() !== false) return false;
+          const rs = window.__vox.getRegions().filter((r) => r.kind === "vc");
+          const est = rs.find((r) => r.role === "establishment");
+          const pre = rs.find((r) => r.role === "preservation");
+          if (!est || !pre) return false;
+          if (est.status === "unknown" || pre.status === "unknown") return false;
+          return {
+            est: { status: est.status, cex: !!est.counterexample, goal: est.goal },
+            pre: { status: pre.status, cex: !!pre.counterexample, goal: pre.goal },
+            sameSpan:
+              est.start.line === pre.start.line &&
+              est.start.col === pre.start.col &&
+              est.end.line === pre.end.line &&
+              est.end.col === pre.end.col,
+          };
+        }),
+      90000,
+      "invariant VCs get roles + verdicts"
+    );
+    assert.ok(inv.sameSpan, "establishment and preservation share a span");
+    assert.strictEqual(inv.est.status, "proved", "establishment proves (x = 0 at entry)");
+    assert.strictEqual(inv.pre.status, "disproved", "preservation is disproved");
+    // BUG B: the validated counterexample lands on the preservation VC, NOT
+    // borrowed by the proved establishment.
+    assert.ok(!inv.est.cex, "proved establishment carries NO counterexample: " + JSON.stringify(inv.est));
+    assert.ok(inv.pre.cex, "disproved preservation carries the counterexample");
+    console.log("ok - invariant verdicts: establishment proved (no cex), preservation disproved (cex)");
+
+    // BUG A: cursor on the invariant attribute -> the pane shows BOTH
+    // obligations, each with its role sublabel and correct badge.
+    const invPos = await page.evaluate(() => {
+      const r = window.__vox.getRegions().find((x) => x.role === "establishment");
+      return { line: r.start.line, col: r.start.col };
+    });
+    await page.evaluate((p) => window.__vox.cm.setCursor({ line: p.line, ch: p.col }), invPos);
+    const invPane = await waitFor(
+      async () =>
+        page.evaluate(() => {
+          const body = document.getElementById("pane-body");
+          const roles = Array.from(body.querySelectorAll(".vc-role")).map((e) => e.textContent);
+          if (roles.length < 2) return false;
+          return {
+            roles,
+            badges: Array.from(body.querySelectorAll(".badge")).map((e) => e.textContent),
+            goals: Array.from(body.querySelectorAll(".goal")).map((e) => e.textContent),
+            text: body.textContent,
+          };
+        }),
+      5000,
+      "both invariant obligations rendered in the pane"
+    );
+    assert.deepStrictEqual(
+      invPane.roles,
+      ["establishment", "preservation"],
+      "pane labels both roles in order: " + JSON.stringify(invPane.roles)
+    );
+    assert.ok(
+      invPane.badges.includes("proved") && invPane.badges.includes("disproved"),
+      "pane shows a proved AND a disproved badge: " + JSON.stringify(invPane.badges)
+    );
+    assert.ok(
+      invPane.goals.some((g) => /x@2/.test(g)),
+      "the preservation goal (over x@2) is visible, not hidden: " + JSON.stringify(invPane.goals)
+    );
+    assert.ok(
+      /counterexample \(validated\)/.test(invPane.text),
+      "the preservation counterexample is reachable in the same pane"
+    );
+    console.log("ok - invariant pane renders BOTH obligations with role labels + badges");
+    await page.evaluate(() => window.__vox.setCompact(true));
+
     // Theme: dark is the default (no OS sniffing); the toolbar toggle
     // flips to light, and the choice persists across a reload.
     const readBg = () =>

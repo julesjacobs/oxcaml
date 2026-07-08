@@ -330,7 +330,20 @@ function renderPane() {
     // already says what it is).
     modeEl.textContent = compact ? "" : (REGION_NOUN[r.kind] || r.kind);
     if (r.kind === "vc") {
-      html += renderVc(r);
+      // A loop [@vox.invariant] emits its establishment and preservation
+      // obligations at the SAME span (the attribute's), so the cursor can
+      // only ever select one of the pair.  Render EVERY co-located VC, each
+      // under its role sublabel, so neither half is hidden behind the other.
+      const group = coLocatedVcs(r);
+      if (group.length > 1) {
+        if (!compact) modeEl.textContent = "obligations";
+        group.forEach((vc, i) => {
+          html += vcGroupLabel(vc, i, group.length);
+          html += renderVc(vc);
+        });
+      } else {
+        html += renderVc(r);
+      }
     } else if (r.kind === "theorem") {
       html += renderTheorem(r) + liveButton();
     } else if (r.kind === "block") {
@@ -488,6 +501,26 @@ function renderUsed(used) {
     );
   });
   return '<div class="used">used lemmas: ' + parts.join(", ") + "</div>";
+}
+
+// Every VC region co-extensive with `r` (same start AND end).  A loop
+// invariant's establishment and preservation obligations share the
+// attribute's span, so selecting one must surface the whole group.
+function coLocatedVcs(r) {
+  return regions.filter(
+    (x) =>
+      x.kind === "vc" &&
+      x.start.line === r.start.line && x.start.col === r.start.col &&
+      x.end.line === r.end.line && x.end.col === r.end.col
+  );
+}
+
+// Sublabel over one obligation of a co-located group.  The server tags a
+// loop invariant's pair with roles (establishment / preservation); any other
+// co-located group falls back to positional numbering.
+function vcGroupLabel(vc, i, n) {
+  const label = vc.role || "obligation " + (i + 1) + " of " + n;
+  return '<h4 class="vc-role">' + esc(label) + "</h4>";
 }
 
 function renderVc(r) {

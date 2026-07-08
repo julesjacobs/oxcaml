@@ -27,7 +27,7 @@ import json
 import os
 import re
 import subprocess
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, cast
 
 # A location header.  Two spellings occur: toplevel/expect output uses
 # "Line 9, characters 26-27:"; file compilation prefixes the file name
@@ -736,6 +736,7 @@ def build_index(
                 # The primary error also carries the validated counterexample
                 # and lean message; attach those to its VC (status already set).
                 _attach_failure(vcs, err)
+    _assign_invariant_roles(vcs)
     return {
         "vcs": vcs,
         "states": states,
@@ -747,21 +748,63 @@ def build_index(
     }
 
 
+def _assign_invariant_roles(vcs: List[Dict[str, object]]) -> None:
+    """Tag the establishment / preservation roles of loop-invariant VCs.
+
+    A ``[@vox.invariant]`` emits its establishment (entry) obligation and its
+    preservation (back-edge) obligation at the SAME source span -- the
+    attribute's -- and in that dump order (see typing/vox_verify.ml).  Group
+    the Prove VCs by exact span; in any group of two or more the first is the
+    establishment and the rest the preservation.  The pane, which now renders
+    the whole co-located group together, uses ``role`` for its sublabels; a VC
+    not in such a group gets ``role`` None (rendered alone, unlabelled)."""
+    groups: Dict[Tuple[int, int, int, int], List[Dict[str, object]]] = {}
+    for vc in vcs:
+        vc["role"] = None
+        if vc.get("kind") != "prove":
+            continue
+        start = cast(Dict[str, int], vc["start"])
+        end = cast(Dict[str, int], vc["end"])
+        key = (start["line"], start["col"], end["line"], end["col"])
+        groups.setdefault(key, []).append(vc)
+    for group in groups.values():
+        if len(group) >= 2:
+            group[0]["role"] = "establishment"
+            for vc in group[1:]:
+                vc["role"] = "preservation"
+
+
 def _attach_failure(vcs: List[Dict[str, object]], err: Dict[str, object]) -> None:
-    """Mark the VC whose location matches the failure with its verdict
-    ('disproved' or 'unproved', falling back to 'failed') and copy its
-    counterexample across."""
+    """Mark the VC that raised the failure with its verdict ('disproved' or
+    'unproved', falling back to 'failed') and copy its counterexample across.
+
+    The match is on start AND goal, not start alone.  A loop
+    ``[@vox.invariant]`` emits its establishment and preservation obligations
+    at the SAME span (the attribute's), so a start-only match would attach the
+    failure -- and its counterexample -- to whichever comes first (the
+    establishment), even when that one PROVED and it was preservation that
+    failed; the establishment would then wear a "disproved" badge and a
+    counterexample about SSA variables (x@2) absent from its own goal.  The
+    goal text disambiguates the pair.  Fall back to the first start-matched VC
+    when no goal matches (an older compiler with no ``Goal:`` line, or a
+    goal-text mismatch), preserving the previous behaviour."""
     if "start" not in err:
         return
     estart = err["start"]
-    for vc in vcs:
-        if vc["start"] == estart:
-            vc["status"] = err.get("verdict", "failed")
-            if "counterexample" in err:
-                vc["counterexample"] = err["counterexample"]
-            if "lean_msg" in err:
-                vc["lean_msg"] = err["lean_msg"]
-            return
+    egoal = err.get("goal")
+    start_matches = [vc for vc in vcs if vc["start"] == estart]
+    if not start_matches:
+        return
+    target: Optional[Dict[str, object]] = None
+    if egoal is not None:
+        target = next((vc for vc in start_matches if vc["goal"] == egoal), None)
+    if target is None:
+        target = start_matches[0]
+    target["status"] = err.get("verdict", "failed")
+    if "counterexample" in err:
+        target["counterexample"] = err["counterexample"]
+    if "lean_msg" in err:
+        target["lean_msg"] = err["lean_msg"]
 
 
 def main() -> None:

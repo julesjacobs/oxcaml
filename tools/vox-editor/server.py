@@ -122,6 +122,11 @@ def build_check_response(
         # without a solver; hyp_used defaults to all-true then.
         region["unused_hyps"] = vc.get("unused_hyps")
         region["hyp_used"] = vc.get("hyp_used", [])
+        # A loop invariant's establishment/preservation obligations share a
+        # span; ``role`` (assigned in vc_index by dump order) lets the pane
+        # label each when it renders the co-located pair together.  None for
+        # any VC not in such a group.
+        region["role"] = vc.get("role")
         if "counterexample" in vc:
             region["counterexample"] = vc["counterexample"]
         if "lean_msg" in vc:

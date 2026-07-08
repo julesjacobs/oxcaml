@@ -489,6 +489,92 @@ class TestParseError(unittest.TestCase):
         self.assertEqual(vcs[0]["status"], "unproved")
 
 
+# --- same-span loop invariant: establishment proved, preservation failed --
+
+# A [@vox.invariant] emits its establishment (goal over x) and preservation
+# (goal over x@2) obligations at the SAME span -- the attribute's.  Here the
+# invariant holds at entry (establishment: proved) but is not preserved
+# (preservation: disproved).  Byte-exact shape from the compiler's provenance
+# dump (the "established but not preserved" case).
+DUMP_INV_SAMESPAN = """\
+File "e.ml", line 5, characters 9-31: vox VC:
+  goal: x = 0  @ 5.9-5.31
+  hypotheses:
+  x = 0
+  verdict: proved
+File "e.ml", line 5, characters 9-31: vox VC:
+  goal: x@2 = 0  @ 5.9-5.31
+  hypotheses:
+  x@1 = 0
+  x@2 = x@1 + 1
+  verdict: disproved
+"""
+
+ERROR_INV_PRESERVE = """\
+File "e.ml", line 5, characters 9-31:
+5 |    done) [@vox.invariant x = 0];
+             ^^^^^^^^^^^^^^^^^^^^^^
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
+       Goal: x@2 = 0
+Hypotheses:
+  x@1 = 0
+  x@2 = x@1 + 1
+Counterexample (validated -- every hypothesis holds and the goal fails here):
+  x@2 = 1
+  n = 1
+  x@1 = 0
+"""
+
+
+class TestAttachFailureSameSpan(unittest.TestCase):
+    def test_failure_attaches_to_goal_matched_vc(self):
+        # The two obligations share a span; positional verdicts from the dump
+        # give establishment "proved", preservation "disproved".
+        vcs = vc_index.parse_dump(DUMP_INV_SAMESPAN)
+        self.assertEqual(len(vcs), 2)
+        self.assertEqual([vc["status"] for vc in vcs], ["proved", "disproved"])
+        err = vc_index.parse_error(ERROR_INV_PRESERVE)
+        assert err is not None
+        self.assertEqual(err["goal"], "x@2 = 0")
+        vc_index._attach_failure(vcs, err)
+        # The proved establishment VC is untouched: no false "disproved",
+        # and no borrowed counterexample (the bug attached the x@2 witness
+        # to the goal `x = 0`).
+        self.assertEqual(vcs[0]["status"], "proved")
+        self.assertNotIn("counterexample", vcs[0])
+        # The counterexample lands on the preservation VC it belongs to.
+        self.assertEqual(vcs[1]["status"], "disproved")
+        self.assertEqual(vcs[1]["counterexample"], ["x@2 = 1", "n = 1", "x@1 = 0"])
+
+    def test_fallback_to_start_when_no_goal_in_error(self):
+        # An older compiler error with no `Goal:` line: fall back to the
+        # first start-matched VC (previous start-only behaviour preserved).
+        vcs = vc_index.parse_dump(DUMP_INV_SAMESPAN)
+        err = {
+            "start": {"line": 5, "col": 9},
+            "verdict": "failed",
+            "counterexample": ["x = 0"],
+        }
+        vc_index._attach_failure(vcs, err)
+        self.assertEqual(vcs[0]["status"], "failed")
+        self.assertEqual(vcs[0]["counterexample"], ["x = 0"])
+        self.assertNotIn("counterexample", vcs[1])
+
+
+class TestAssignInvariantRoles(unittest.TestCase):
+    def test_same_span_pair_gets_roles(self):
+        vcs = vc_index.parse_dump(DUMP_INV_SAMESPAN)
+        vc_index._assign_invariant_roles(vcs)
+        self.assertEqual(vcs[0]["role"], "establishment")
+        self.assertEqual(vcs[1]["role"], "preservation")
+
+    def test_distinct_span_vcs_get_no_role(self):
+        # A refined parameter's single VC (its own span) is in no group.
+        vcs = vc_index.parse_dump(DUMP_PROV_PARAM)
+        vc_index._assign_invariant_roles(vcs)
+        self.assertIsNone(vcs[0]["role"])
+
+
 # --- end-to-end (skipped unless a built compiler is available) ------------
 
 
@@ -525,6 +611,18 @@ FIXTURE_FAIL = """\
 let f (x : int{ _ >= 0 }) =
   let refine_ ok = (x : int{ _ >= 1 }) in
   ok
+"""
+
+# A loop invariant that HOLDS at entry (x = 0) but is NOT preserved by the
+# body (x becomes 1): establishment proves, preservation is disproved.  Both
+# obligations sit at the [@vox.invariant] span.
+FIXTURE_INV = """\
+let ex (n : int) : int =
+  let mutable x = 0 in
+  (while x < n do
+     x <- x + 1
+   done) [@vox.invariant x = 0];
+  x
 """
 
 
@@ -581,6 +679,32 @@ class TestEndToEnd(unittest.TestCase):
         self.assertTrue(len(errors) >= 1)
         err = errors[-1]
         self.assertIn("counterexample", err)
+
+    @unittest.skipUnless(LEAN, "no lean found (set VOX_LEAN)")
+    def test_invariant_established_not_preserved(self):
+        # End-to-end: the establishment (goal over x) proves, the preservation
+        # (goal over x@2) is disproved.  The verdict AND the counterexample
+        # must land on the preservation VC -- the proved establishment keeps
+        # its green verdict and no borrowed witness -- and the pair is tagged
+        # establishment/preservation.
+        assert OCAMLC is not None
+        d, p = self._write("inv.ml", FIXTURE_INV)
+        index = vc_index.build_index(p, OCAMLC, lean=LEAN, cwd=d)
+        self.assertFalse(index["ok"])
+        vcs = cast(List[Dict[str, Any]], index["vcs"])
+        same_span = [
+            v for v in vcs if v["start"]["line"] == 5 and v["end"]["line"] == 5
+        ]
+        self.assertEqual(len(same_span), 2, msg=index.get("raw_solve"))
+        est = next(v for v in same_span if v["role"] == "establishment")
+        pre = next(v for v in same_span if v["role"] == "preservation")
+        # establishment: proved, no borrowed counterexample
+        self.assertEqual(est["status"], "proved")
+        self.assertNotIn("counterexample", est)
+        self.assertNotIn("x@2", est["goal"])
+        # preservation: disproved, carries the validated witness
+        self.assertEqual(pre["status"], "disproved")
+        self.assertIn("counterexample", pre)
 
     @unittest.skipUnless(LEAN, "no lean found (set VOX_LEAN)")
     def test_assumed_vcs_trusted(self):
