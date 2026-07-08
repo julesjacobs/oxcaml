@@ -1,0 +1,5 @@
+File "with_realize_bad.ml", line 24, characters 31-43:
+24 | module type ORD_int = ORD with type t = int
+                                    ^^^^^^^^^^^^
+Error: vox: this `with type` constraint would realize the abstract sort `lean "MyKey"` at a concrete type without discharging its axioms.
+       An abstract-sorted type is realized only by functor instantiation (e.g. `Make(Arg)`), which proves the sort's axioms against the argument's model.
