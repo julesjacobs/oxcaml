@@ -289,3 +289,125 @@ liveness + negative-control suite against the fresh artifacts.
 - **removed by:** n/a (clean; the backend's `bmem_delete`/`bok_delete` obligation
   laws did all the work).
 - **severity:** none (positive result — closed set algebra add/remove/mem shipped)
+
+---
+
+## WP-3 surface completion (union / inter / diff / cardinal / subset / singleton / fold)
+
+Added the set algebra a real `Set` has, all VERIFIED over the backend artifacts
+(Vset_bst + Vlist + Voption cmi/VoxSig), smoke-exercised, negative controls
+fail closed, one standalone law (`vs_card_nonneg`) deletion-liveness-checked
+(seals without it, breaks the `cardinal_nonneg` smoke). Specs named to MATCH
+Vpset (`vs_singletonspec`/`vs_unionspec` <-> `ps_singletonspec`/`ps_unionspec`)
+so a future ISet->PSet Int unification lines up (see the parity table in the
+WP-3 report). Ops shipped: `singleton`, `union`, `inter`, `diff`, `cardinal`,
+`subset` (bool query), `fold`.
+
+### Vset · union over the backend insert-fold (bunion) — positive
+- **site:** vox_stdlib/Vset.ml `bunion` + `union`
+- **milestone/gap:** new (set algebra; in-face model over the exposed backend)
+- **what I tried:** define `bunion a acc = fold a's elements into acc via bins`
+  in the Vset `.ml` block (NOT a Vset_bst addition — bunion is definable from
+  the exposed `bins`, so the backend stays untouched), prove `bmem_bunion`
+  (membership OR) and `bok_bunion` from the ambient `bmem_insert`/`bok_insert`,
+  and impl `union` by an insert-fold calling the real `Vset_bst.insert`.
+- **error:** none. `induction a generalizing b <;> grind` closes both laws; the
+  bridge `vs_mem_elems` (= backend `bmem`) carries the OR to `vs_unionspec`.
+- **workaround used:** none.
+- **removed by:** n/a (positive — the exposed backend `bins` + its two laws are
+  enough to build union in the face without a backend op).
+- **severity:** none (positive result)
+
+### Vset · inter = a \ (a \ b): avoids the private backend join lemmas
+- **site:** vox_stdlib/Vset.ml `bdiff`/`bdiff_go`/`diff`/`inter`
+- **milestone/gap:** new (set algebra; routes around backend hygiene)
+- **what I tried:** first a direct `binter` with `if bmem v b then Node .. else
+  bjoin ..`. That needs `bok_join` / `ball_lt_delete`-style bound-preservation
+  lemmas to reprove `bok` at the dropped-pivot join — but those are PRIVATE to
+  `Vset_bst.ml` (the `.mli` exposes only `bok_insert`/`bmem_insert`/`bok_delete`/
+  `bmem_delete`). So a join-based inter is not buildable from the face.
+- **error:** (anticipated) no exposed `bjoin`/bound lemmas to discharge `bok`.
+- **workaround used:** the identity `a ∩ b = a \ (a \ b)`. Both differences use
+  the backend's EXPOSED delete (`Vset_bst.remove` = `bdel`, with `bok_delete`/
+  `bmem_delete`), so no join lemma is needed. `bdiff` + `bmem_bdiff` (needs the
+  input's `bok`, supplied by the `set` repr's `bok _`) + `bok_bdiff` prove by
+  `induction b <;> grind`; `inter` applies `bmem_bdiff` twice and grind derives
+  `vs_interspec` from the double negation.
+- **removed by:** n/a (a clean routing — an exposed backend `inter`/`bjoin`
+  would let a direct binter ship, but is not needed).
+- **severity:** none (positive result — full inter/diff from exposed delete only)
+
+### Vset · inter cannot call the via-producer diff within the unit (via re-inject)
+- **site:** vox_stdlib/Vset.ml `inter` (first cut called `diff a (diff a b)`)
+- **milestone/gap:** new (intra-unit via-value threading)
+- **what I tried:** `let d = diff a b in let res = diff a d in (res : t{..})` —
+  compose the two top-level via-producers `diff`.
+- **error:** `vox: verification failed -- NOT PROVED` / `Goal: bok a && 0 = 0`
+  / `lean: Application type mismatch: The argument` at the `diff a b` call —
+  passing a same-unit `t` value into another same-unit via-producer's `t`
+  parameter re-triggers the via skeleton obligation and mis-elaborates.
+- **workaround used:** factor the concrete delete-fold into a shared
+  `bdiff_go : Vset_bst.set -> tree -> Vset_bst.set{ _ = bdiff .. }` and build
+  BOTH diff and inter at the CONCRETE `Vset_bst.set` level, injecting the via
+  `t` exactly once at each op's end (`inter` calls `bdiff_go` twice on concretes).
+- **removed by:** allowing a same-unit via value to flow into a same-unit
+  via-producer parameter without re-proving the skeleton (sibling of the C1
+  named-call-result injection asks).
+- **severity:** MINOR (clean workaround; the concrete-helper factoring is tidy)
+
+### Vset · subset bool query via tree-level bsubset + bridge
+- **site:** vox_stdlib/Vset.ml `bsubset`/`vs_subset_bridge`/`bsubset_node`/`subset`
+- **milestone/gap:** new (bool query over an existing relational F-3 def)
+- **what I tried:** run the existing relational `vs_subset` (∀) as a bool: recurse
+  a's tree, test each element's membership in b via `Vset_bst.member`, `&&` the
+  subtree results (branch on a spec'd bool — no #32, cf. Vlist.filter).
+- **error:** none, once the ∀ was decomposed. A raw `vs_subset (scons v ..) b`
+  goal does not self-decompose under grind (conclusion-bound ∀). Introduced a
+  tree-level `bsubset a b := ∀ y, bmem y a -> bmem y b`, a bridge
+  `vs_subset (vs_elems a)(vs_elems b) = bsubset a b` (via `vs_mem_elems`), and a
+  `bsubset_node` decomposition (`= bmem v b ∧ bsubset l b ∧ bsubset r b`); then
+  the recursion's per-node VC closes.
+- **workaround used:** the bsubset bridge + node-decomposition lemmas (proved by
+  `simp only [bsubset]; grind`).
+- **removed by:** grind learning to decompose a conclusion-quantified ∀-spec
+  over a constructor argument (the recurring ∀-decomposition ask).
+- **severity:** MINOR
+
+### Vset · cardinal is model-list length; concrete counts don't survive the face
+- **site:** vox_stdlib/Vset.ml `vs_card`/`vs_card_union`/`cardinal`, mli `vs_card_nonneg`
+- **milestone/gap:** new (via-face scalar accessor; recipe §8 boundary)
+- **what I tried:** `cardinal : int{ _ = vs_card s }` (vs_card = ISet list length),
+  proved by the tree recursion `1 + card l + card r` + `vs_card_union`.
+- **error:** none for the op, BUT a client cannot get a CONCRETE count
+  (`cardinal (singleton x) = 1`, `cardinal (empty ()) = 0`) because add/union/
+  singleton/empty carry MEMBERSHIP (relational) specs, not structural ones, so
+  the ISet image is never pinned to constructors. The only client-consumable
+  cardinal fact is `vs_card_nonneg` (shipped as an obligation). Because the
+  backend is a bok BST (no duplicates), vs_card coincides with the true distinct
+  cardinality.
+- **workaround used:** ship the exact `_ = vs_card s` spec + the `vs_card_nonneg`
+  law; document that concrete counts are an exposed-container capability.
+- **removed by:** n/a (recipe §8 boundary — exact scalar output over abstract
+  accessors survives; exact output for RELATIONALLY-built values does not).
+- **severity:** none (calibration; matches the recipe's via-face boundary)
+
+### Vset · fold ships relational + ORDER-FREE exact sum/count laws (recipe §8)
+- **site:** vox_stdlib/Vset.ml `vs_relFold`/`vs_sum`/`vs_relFold_union`/`fold`,
+  mli exact laws `vs_relFold_{sum,count}_exact`
+- **milestone/gap:** new (HOF kit on a via face, scalar result)
+- **what I tried:** apply the WP-0 HOF recipe (ternary `vs_relFold`, `vs_sum`,
+  exact sum/count laws) to the set. The impl folds the tree in `vs_elems` order
+  (node, then left, then right); `vs_relFold_union` splits the fold-over-append
+  at each node.
+- **error:** none. Two calibrations: (1) `IntRel3`/`r3Holds` are IMPORTED from
+  Vhof (the shared substrate leaf; this face opens Vhof), so redeclaring them fails with `already
+  declared` — dropped the substrate redeclaration, use the imported ones. (2)
+  `vs_relFold_union` (an existential fold-over-append) closes with `induction a
+  <;> grind` — grind handles the ∃ reassociation here.
+- **workaround used:** import the HOF substrate from Vhof instead of copying it
+  (the recipe's copy-in is only needed when no upstream already exports it).
+- **removed by:** n/a. The exact VALUE does not survive (unordered set,
+  relationally-built), but the sum/count laws are ORDER-INDEPENDENT (commutative)
+  so they DO survive the via face and are client-consumable.
+- **severity:** none (positive — recipe applies cleanly to a via face; sum/count
+  laws survive)

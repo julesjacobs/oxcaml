@@ -34,6 +34,7 @@
    [vs_equal] are quantified spec vocabulary a client consumes as a goal or
    hypothesis without writing its own quantifier. *)
 
+open Vhof
 open Vset_bst
 open Vlist
 
@@ -72,6 +73,84 @@ public inductive ISet where
   ∀ x, vs_mem x a -> vs_mem x b
 @[grind, expose] public def vs_equal (a b : ISet) : Prop :=
   ∀ x, vs_mem x a ↔ vs_mem x b
+
+-- [r] is the singleton {x}; and [r] is the union of [a0] and [b0].  Named to
+-- MATCH Vpset's ps_singletonspec / ps_unionspec (surface reconciliation): a
+-- future unification binds ISet -> PSet Int and the specs line up.
+@[grind, expose] public def vs_singletonspec (r : ISet) (x : Int) : Prop :=
+  ∀ y, vs_mem y r = (y = x)
+@[grind, expose] public def vs_unionspec (r a0 b0 : ISet) : Prop :=
+  ∀ y, vs_mem y r = (vs_mem y a0 ∨ vs_mem y b0)
+-- [r] is the intersection / difference of [a0] and [b0] (Vset-only; Vpset ships
+-- neither -- it has no exposed backend delete to build them on).
+@[grind, expose] public def vs_interspec (r a0 b0 : ISet) : Prop :=
+  ∀ y, vs_mem y r = (vs_mem y a0 ∧ vs_mem y b0)
+@[grind, expose] public def vs_diffspec (r a0 b0 : ISet) : Prop :=
+  ∀ y, vs_mem y r = (vs_mem y a0 ∧ ¬ vs_mem y b0)
+
+-- cardinal is the model-list length of the set image.  Recursive over the
+-- abstract ISet, so [expose] leaves it load-bearing (a client's grind cannot
+-- discharge [_ = vs_card s] without it).  Because the backend maintains a BST
+-- (bok, no duplicates), this coincides with the true distinct-element count --
+-- see notes/vset.md (cardinal distinctness caveat).
+@[grind, expose] public def vs_card : ISet -> Int
+  | .snil => 0
+  | .scons _ s => 1 + vs_card s
+
+-- cardinal is nonneg (the one cardinal fact a client can consume through the
+-- relational op surface -- concrete counts do NOT survive the via face, since
+-- add/union/singleton carry membership specs, not structural ones; see
+-- notes/vset.md).  Obligation: discharged by induction in the .ml.
+public axiom vs_card_nonneg (s : ISet) : vs_card s >= 0
+grind_pattern vs_card_nonneg => vs_card s
+
+-- ===== HOF KIT: fold over the set (recipe §2, via-face scalar-result case) =====
+-- IntRel3 / r3Holds are imported from Vhof (the shared substrate leaf).
+-- fold_left with a TERNARY element-aware step (acc, elem, acc'), over the set's
+-- enumeration order (vs_elems: node then subtrees).
+@[grind, expose] public def vs_relFold (r : IntRel3) : ISet -> Int -> Int -> Prop
+  | .snil, init, final => init = final
+  | .scons x t, init, final => exists acc, r init x acc /\ vs_relFold r t acc final
+-- element sum accessor for fold's exact sum-law.
+@[grind, expose] public def vs_sum : ISet -> Int
+  | .snil => 0
+  | .scons x t => x + vs_sum t
+
+-- fold EXACT-output laws (.mli-only public theorems; ride VoxSig to clients).
+-- These are ORDER-INDEPENDENT (sum/count are commutative), so they survive the
+-- unordered set abstraction even though the exact fold VALUE does not.  Stated
+-- over an abstract r with the callback's graph as a premise (never a lambda in
+-- the trigger).
+public theorem vs_relFold_sum_exact (r : IntRel3)
+    (hr : forall a x c, r a x c -> c = a + x) :
+    forall (xs : ISet) (init final : Int),
+      vs_relFold r xs init final -> final = init + vs_sum xs := by
+  intro xs
+  induction xs with
+  | snil => intro init final h; simp only [vs_relFold, vs_sum] at *; omega
+  | scons x t ih =>
+      intro init final h
+      simp only [vs_relFold] at h
+      obtain ⟨acc, hacc, hrest⟩ := h
+      have h1 := hr init x acc hacc
+      have h2 := ih acc final hrest
+      simp only [vs_sum]; omega
+grind_pattern vs_relFold_sum_exact => vs_relFold r xs init final
+public theorem vs_relFold_count_exact (r : IntRel3)
+    (hr : forall a x c, r a x c -> c = a + 1) :
+    forall (xs : ISet) (init final : Int),
+      vs_relFold r xs init final -> final = init + vs_card xs := by
+  intro xs
+  induction xs with
+  | snil => intro init final h; simp only [vs_relFold, vs_card] at *; omega
+  | scons x t ih =>
+      intro init final h
+      simp only [vs_relFold] at h
+      obtain ⟨acc, hacc, hrest⟩ := h
+      have h1 := hr init x acc hacc
+      have h2 := ih acc final hrest
+      simp only [vs_card]; omega
+grind_pattern vs_relFold_count_exact => vs_relFold r xs init final
 |lean}]
 
 val empty : (u : unit) -> t{ vs_isempty _ }
@@ -79,3 +158,23 @@ val add : (x : int) -> (s : t) -> t{ vs_addspec _ x s }
 val remove : (x : int) -> (s : t) -> t{ vs_removespec _ x s }
 val mem : (x : int) -> (s : t) -> bool{ _ = vs_mem x s }
 val elements : (s : t) -> Vlist.t{ vs_elements_spec _ s }
+
+(* ===== set algebra (WP-3) ===== *)
+val singleton : (x : int) -> t{ vs_singletonspec _ x }
+val union : (a : t) -> (b : t) -> t{ vs_unionspec _ a b }
+val inter : (a : t) -> (b : t) -> t{ vs_interspec _ a b }
+val diff : (a : t) -> (b : t) -> t{ vs_diffspec _ a b }
+val cardinal : (s : t) -> int{ _ = vs_card s }
+
+(* [subset a b] is the bool QUERY: every element of [a] is a member of [b].  The
+   relational [vs_subset] def (above) is the CONSUMABLE spec; this runs it. *)
+val subset : (a : t) -> (b : t) -> bool{ _ = vs_subset a b }
+
+(* [fold r f init s] folds f over the set's elements (enumeration order).  The
+   exact VALUE does not survive the unordered abstraction, but the ORDER-FREE
+   exact laws vs_relFold_{sum,count}_exact do (fold sum = init + sum of elts,
+   count = init + cardinal).  Same HOF shape as Vlist.fold_left. *)
+val fold :
+  (r : ((int -> int -> int -> bool) [@vox.total])) ->
+  (f : ((acc : int) -> (x : int) -> int{ r3Holds r acc x _ })) ->
+  (init : int) -> (s : t) -> int{ vs_relFold r s init _ }
