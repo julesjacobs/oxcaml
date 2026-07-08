@@ -4,16 +4,21 @@
    theorems (the toNat bridges + il_len_nonneg) are what let iter's and
    fold's symbolic-fuel recursions close without a hand loop lemma -- the
    forward recursion matches relIterN's PREPEND form, so one definitional
-   unfold plus the toNat arithmetic discharges each step. *)
+   unfold plus the toNat arithmetic discharges each step.  The EXACT-OUTPUT
+   laws (relIter_succ_exact / relFold_{sum,count}_exact) live ONLY in the
+   .mli block -- they are proved public theorems (not obligations) and no
+   .ml combinator proof uses them, so the .ml need not restate them. *)
 
 type ilist = Inil | Icons of int * ilist
 
 [%%vox.lean {lean|
 abbrev IntRel := Int -> Int -> Prop
 abbrev IntPred := Int -> Prop
+abbrev IntRel3 := Int -> Int -> Int -> Prop
 
 @[grind, expose] def rHolds (r : IntRel) (a b : Int) : Prop := r a b
 @[grind, expose] def pHolds (p : IntPred) (x : Int) : Prop := p x
+@[grind, expose] def r3Holds (r : IntRel3) (a b c : Int) : Prop := r a b c
 
 @[grind, expose] def rcomp (r s : IntRel) : IntRel :=
   fun a c => exists b, r a b /\ s b c
@@ -44,6 +49,21 @@ abbrev IntPred := Int -> Prop
 @[grind] theorem il_len_nonneg (l : Vox_Vrel_ilist) : il_len l >= 0 := by
   induction l <;> grind
 grind_pattern il_len_nonneg => il_len l
+
+@[grind, expose] def il_sum : Vox_Vrel_ilist -> Int
+  | .Inil => 0
+  | .Icons x t => x + il_sum t
+@[grind, expose] def ihead : Vox_Vrel_ilist -> Int
+  | .Inil => 0
+  | .Icons x _ => x
+@[grind, expose] def itail : Vox_Vrel_ilist -> Vox_Vrel_ilist
+  | .Inil => .Inil
+  | .Icons _ t => t
+
+@[grind, expose] def relFold (r : IntRel3) :
+    Vox_Vrel_ilist -> Int -> Int -> Prop
+  | .Inil, init, final => init = final
+  | .Icons x t, init, final => exists acc, r init x acc /\ relFold r t acc final
 
 @[grind, expose] def allP (p : IntPred) : Vox_Vrel_ilist -> Prop
   | .Inil => True
@@ -109,6 +129,23 @@ let fold :
             let a' = f a x in
             let res = go a' rest in
             (res : int{ relIter r (il_len u) a _ })
+    in
+    go init xs
+
+let fold3 :
+      (r : (int -> int -> int -> bool)) ->
+      (f : ((acc : int) -> (x : int) -> int{ r3Holds r acc x _ })) ->
+      (init : int) -> (xs : ilist) -> int{ relFold r xs init _ } =
+  fun r f init xs ->
+    ignore r;
+    let rec go : (a : int) -> (u : ilist) -> int{ relFold r u a _ } =
+      fun a u ->
+        match u with
+        | Inil -> (a : int{ relFold r u a _ })
+        | Icons (x, rest) ->
+            let a' = f a x in
+            let res = go a' rest in
+            (res : int{ relFold r u a _ })
     in
     go init xs
 
