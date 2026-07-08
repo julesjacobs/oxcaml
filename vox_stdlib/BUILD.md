@@ -52,3 +52,19 @@ Notes:
   handled cleanly. #32 is hit by bind-then-branch on a spec'd bool, NOT by a
   tail-recursive one-path search — don't file it against the latter.
 ```
+
+## Functor wave (Vmap_make / Vset_make / Vpmap_ord)
+
+Same recipe; three specifics:
+
+- **Vmap_make / Vset_make are LEAF** (no stdlib deps). **Vpmap_ord depends on
+  Vhof** (stage Vhof.cmi + VoxSig_Vhof.olean).
+- **The cross-unit instantiation demo lives in the SMOKE unit**: the client
+  (`clients/smoke_vmap_make.ml`) does `module M = Make (IntOrd)` in its OWN
+  unit and proves facts through the sealed abstraction. The headline NEGATIVE
+  (`clients/smoke_vmap_make_bad.ml`, `smoke_vset_make_bad.ml`) instantiates with
+  a sign-flipped comparator and must be **DISPROVED** (validated counterexample)
+  -- it is an EXPECTED-FAIL client, not a green build.
+- **Self-contained suite demo**: `testsuite/tests/vox/demo/lean_map_make.ml`
+  (pass-style, mirrors `mechanics/lean_functor_bst.ml`; no `.reference` file --
+  a clean compile emits nothing). ADDITIVE: suite 202 -> 203/0.

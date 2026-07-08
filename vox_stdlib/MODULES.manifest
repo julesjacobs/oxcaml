@@ -23,3 +23,13 @@ Vpmap      :            : 3   # 'v-valued int-keyed map; LEAF (empty/is_empty/fi
 
 # --- capstone: higher-order relational specs (task #68 lambda reflection) ---
 Vrel       : Vhof       : 4   # relational HOF (iter/map/fold/fold3/filter/compose2); LEAF (own ilist); relation = dependent fn-type param supplied as call-site lambda or [@@vox.reflect] value; IntRel/IntPred/IntRel3 abbrev, lifting defs expose, toNat bridges public, listRel_len obligation; EXACT-output law family (relIter_succ_exact, relFold_{sum,count}_exact) as .mli-only public theorems (graph-relation completeness); fold3 = element-aware ternary-relation fold (relFold + il_sum)
+
+# --- functor wave: ORD-functor containers (int-representable keys) + poly fallback ---
+# The Map.Make(ORD)/Set.Make(ORD) shape, productized from the proven functor
+# probe (testsuite/tests/vox/mechanics/lean_functor_bst.ml). Model + tree bridge
+# at FILE TOP LEVEL (blocks are unit-level); functor body names Vox_<Unit>_tree.
+# Cross-unit instantiation works (F-1 freshening); a sign-flipped comparator is
+# DISPROVED (validated counterexample). LEAF modules (no stdlib deps).
+Vmap_make  :            : 3   # HEADLINE: Map.Make(ORD), int-repr ordered KEYS + int values, char-function model MMap=Int->MOpt (funext = map equality → STRUCTURAL specs _ = m_add k v m), OVERWRITE add. Ships empty/find/add/mem/singleton + 3 opaque-op laws (m_find_empty/add_eq/add_ne). DEFERRED: remove (ordered BST delete). notes/vmap_make.md
+Vset_make  :            : 3   # Set.Make(ORD), int-repr ordered elts, char-function model ISet=Int->Prop (bst-carrying tree). Ships empty/add/mem/singleton + 3 opaque-op laws (mem_s_ins/_ne/_empty). NO cardinal (char-fn has no support size — the model trade vs flat Vset). notes/vset_make.md
+Vpmap_ord  : Vhof       : 3   # PARAMETER-STYLE poly fallback: abstract-KEY 'a map, int values, comparator threaded as a CALL-SITE VALUE (eq/ord-param, Vpset route). Ships empty(unspecced F-B2)/singleton/add/mem(relational, up to threaded e). find ABSENT (functional value at abstract key needs DecidableEq — the crisp functor-vs-param delta). notes/vpmap_ord.md
