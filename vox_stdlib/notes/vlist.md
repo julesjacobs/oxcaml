@@ -1,5 +1,73 @@
 # Vlist — LANGUAGE_NEEDS notes
 
+## TRANSPARENCY FLIP (2026-07-08) — WHY lists are transparent, maps/sets are not
+
+User direction (responding to WP-6 F-B1): "for lists we want to export the
+type since that's how lists work in the compiler. Just map etc. should be
+abstract types."
+
+Vlist now EXPOSES its representation: `type t = Nil | Cons of int * t`.  Its
+Lean correspondent is the auto-derived NATIVE inductive `Vox_Vlist_t`
+(constructors .Nil/.Cons) -- there is NO `[@vox.via]` remap to a separate
+`LList` model and NO `refines` kind.  The model vocabulary
+(ll_len / ll_mem / ll_app / ...) is defined directly over `Vox_Vlist_t`, so it
+REDUCES on the .Nil/.Cons a client builds and matches.
+
+**The rationale (the boundary line).**  A list is structural, canonical, and
+has one obvious shape -- it *is* how the compiler itself represents sequences,
+and a client should be able to pattern-match and recurse over a Vlist exactly
+like a built-in list.  Vmap / Vset / Vset_bst-backed / Vpset have
+REPRESENTATION FREEDOM worth hiding (assoc-list vs tree vs balanced tree;
+prepend-shadow vs dedup; the "set = pointwise membership" quotient), so they
+stay ABSTRACT (via/refines) and expose only a membership/find algebra.  Lists
+have no such freedom to hide, so hiding the constructors only costs the client
+the ability to recurse -- which is the whole point of a list.  Transparency
+buys client-side structural recursion at zero soundness cost (the derived
+inductive is honest; the seal is nominal).
+
+**What the flip fixes.**  F-B1 (client structural recursion over a
+via-abstracted Vlist was blocked -- the head/tail/is_empty eliminator surface
+was insufficient) is CLOSED: a client `match l with Nil -> .. | Cons (y, r) ->
+..` mints facts (l = .Cons y r), the exposed recursive defs reduce on those
+constructors, and consumer-side recursive proofs verify.  Evidence:
+clients/client_list_recursion.ml (hand-rolled length/sum/append/mem proved
+against the module model -- the F-B1 test INVERTED) and efforts/effort_sorted.ml
+(the originally-blocked SORTED INSERT, now a working client: structural
+recursion + a sortedness invariant threaded through the postcondition +
+length preservation; negative control fails closed).
+
+**What stayed opaque, and why.**  The NON-recursive wrappers (ll_cons / ll_nil
+/ ll_isnil / ll_head / ll_tail) remain opaque `@[grind] public def` (NOT
+`expose`d), following the Voption-accessor precedent and the dead-law house
+rule: exposing a non-recursive wrapper lets grind discharge its law by one-step
+reduction, killing the law.  Kept opaque, their reduction facts ship as the
+named laws (ll_len_cons / ll_mem_cons / ll_isnil_nil / ll_nil_not_mem /
+ll_head_cons / ll_tail_cons / ...), which stay LIVE for `Vlist.cons`/`empty`-
+built lists (a client that goes through the op face, not native constructors).
+The transparency payoff comes from the EXPOSED RECURSIVE defs reducing on the
+NATIVE constructors a client builds directly -- independent of the wrappers.
+
+**F-B2 laws shipped.**  ll_sum_cons / ll_sum_app now ship (both live: probe
+drops them, clients/client_list_recursion.ml sum_cons/sum_app fail).
+
+**Consumer migration.**  Vmap (m_keys_spec) and Vset (vs_elements_spec /
+vs_tolist) referenced the sort by its old name `LList`; renamed to
+`Vox_Vlist_t`.  No other change -- they still build the Vlist via
+Vlist.empty/cons/append and close by the same ll_* laws (all unchanged names).
+Surface points changed for downstream (map-max / functor work coded against the
+old .mli): (1) sort name `LList` -> `Vox_Vlist_t`; (2) `type t` is now a
+concrete exported ADT `Nil | Cons of int * t` (was `type t : value refines
+(llist)`); (3) `ll_repr` no longer exists (was impl-private anyway).  All ll_*
+DEF and LAW names are UNCHANGED, so specs referencing them are unaffected.
+
+**Pinned demos.**  testsuite/tests/vox/lib/Vlist.{ml,mli} is a WP-5 SNAPSHOT
+(still the via version) and is compiled by the lean_std_* demos independently
+of the live vox_stdlib/Vlist.  It is pinned by design and left untouched; the
+divergence (live = transparent, snapshot = via) now grows, as expected.
+
+---
+
+
 One block per pain-site (blueprint §5). Sites that "just worked with the
 documented workaround" still get a note — that is the evidence the workaround
 is load-bearing.

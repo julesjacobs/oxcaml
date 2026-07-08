@@ -192,3 +192,25 @@ closed.
   as a total argument; and a reflected string-equality primitive.
 - **severity:** MINOR (the concrete-element instantiation is the realistic client
   shape; the abstract proof lives in the module).
+
+## POLY TRANSPARENCY FLIP (2026-07-08) — the Vlist flip applied at S_param
+
+Assessed and DONE: the transparency flip carries to the polymorphic list.
+Vplist now exposes `type 'a t = PNil | PCons of 'a * 'a t`; its Lean
+correspondent is the auto-derived PARAMETERIZED inductive `Vox_Vplist_t a`
+(constructors .PNil/.PCons) — no `[@vox.via]`, no ghost `'a plist`/`PList`
+sort, no `pl_repr`.  Verdict: the poly sort machinery DID NOT resist — a
+scratch probe (scratch_probe/plflip) confirmed the derived parameterized
+inductive builds, and the full module (cons/is_empty/length/append + the
+eq-param mem/dedup/remove) re-verifies with native `let rec` over `'a t`
+(refine_/skeleton threading GONE).  All consumers (smoke_Vplist, effort_dedup,
+smoke_Vpset) stay green with zero change (no consumer referenced the `PList`
+sort name — they use the pl_* def names, which are unchanged).
+
+The ONE residual friction is PRE-EXISTING and unchanged by the flip: the
+nullary `empty` still cannot carry its `_ = pl_nil` spec — the native `PNil`
+at `empty`'s result leaves the Lean type parameter `a` an unsolved
+metavariable ("don't know how to synthesize implicit argument `α`"), exactly
+the old via-era F-B2 (unspecced empty).  So `empty` ships UNSPECCED as before;
+emptiness stays observable via `is_empty`.  This is a poly-nullary-constructor
+issue, orthogonal to transparency (it bit the via version identically).
