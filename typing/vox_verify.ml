@@ -4486,13 +4486,17 @@ let lean_param_name i = "a" ^ Int.to_string i
 
 let rec lean_sort = function
   | S_int -> "Int"
-  | S_bool -> "Prop"
+  (* Variant V: a bool VALUE sorts at Lean [Bool]. *)
+  | S_bool -> "Bool"
   | S_other -> "VoxU"
   | S_iarray -> "VoxIA"
   | S_lean (name, []) -> name
   | S_lean (name, args) ->
     "(" ^ name ^ " " ^ String.concat " " (List.map lean_sort args) ^ ")"
-  | S_arrow (a, b) -> "(" ^ lean_sort a ^ " -> " ^ lean_sort b ^ ")"
+  (* Variant V: a function RESULT is a formula atom, so an arrow codomain [bool]
+     sorts at [Prop] -- a relation [(int -> int -> bool)] is [Int -> Int -> Prop],
+     matching the Prop-world relation model and keeping reflected lambdas clean. *)
+  | S_arrow (a, b) -> "(" ^ lean_sort a ^ " -> " ^ lean_arrow_cod b ^ ")"
   | S_param i -> lean_param_name i
   | S_tuple comps ->
     "("
@@ -4510,6 +4514,11 @@ let rec lean_sort = function
         | [] -> lean_dt_name p
         | _ ->
           "(" ^ lean_dt_name p ^ " " ^ String.concat " " (List.map lean_sort args) ^ ")"))
+
+and lean_arrow_cod = function
+  | S_bool -> "Prop"
+  | S_arrow (a, b) -> "(" ^ lean_sort a ^ " -> " ^ lean_arrow_cod b ^ ")"
+  | s -> lean_sort s
 ;;
 
 (* The parameterized opaque for one [@@vox.poly] head, on a single line (the error-line
@@ -4630,6 +4639,20 @@ let boolish p =
   | Pbinop ((Add | Sub | Mul | Div | Mod), _, _) -> false
 ;;
 
+(* Variant V: a pred denoting an OCaml BOOL VALUE (renders as a Lean [Bool]).
+   Recursive: a boolean connective is a bool value only when all operands are.
+   [Pis]/[Pquant]/[Plam] are genuine [Prop]; a [Pfun] application is a FORMULA;
+   structural (non-bool) equality stays [Prop] [=]. *)
+let rec is_boolval (p : Refinement.pred) =
+  let open Refinement in
+  match p with
+  | Pis _ | Pquant _ | Plam _ -> false
+  | Pand (a, b) | Por (a, b) | Pimp (a, b) -> is_boolval a && is_boolval b
+  | Pnot a -> is_boolval a
+  | Pbinop ((Eq | Neq), a, b) -> boolish a || boolish b
+  | _ -> boolish p
+;;
+
 let rec lean_of_pred buf (p : Refinement.pred) =
   let open Refinement in
   let bin op a b =
@@ -4639,7 +4662,10 @@ let rec lean_of_pred buf (p : Refinement.pred) =
     lean_of_pred buf b;
     Buffer.add_char buf ')'
   in
-  match p with
+  (* Variant V: a bool VALUE renders as a [Bool] term via [bval]. *)
+  if is_boolval p
+  then bval buf p
+  else match p with
   | Pbound -> assert false
   | Pvar id -> Buffer.add_string buf (lean_name id)
   | Pglobal p -> Buffer.add_string buf ("g_" ^ lean_sanitize (path_uname p))
@@ -4686,19 +4712,9 @@ let rec lean_of_pred buf (p : Refinement.pred) =
     Buffer.add_string buf (Printf.sprintf "(%s.p%d " (tuple_uname n) (i + 1));
     lean_of_pred buf a;
     Buffer.add_char buf ')'
-  | Pquant (q, id, a) ->
-    (* The binder is unannotated -- predicates are untyped, and Lean infers its sort from
-       the body, exactly as for the existential encoding of [Pis] below; an uninferable
-       binder is a solver error, i.e. a verification failure. *)
-    Buffer.add_string
-      buf
-      ((match q with
-        | Qforall -> "(∀ "
-        | Qexists -> "(∃ ")
-       ^ lean_name id
-       ^ ", ");
-    lean_of_pred buf a;
-    Buffer.add_char buf ')'
+  | Pquant _ ->
+    (* A genuine [Prop]: render (coercing any bool leaves) through [emit_prop]. *)
+    emit_prop buf p
   | Plam (ids, a) ->
     (* An anonymous Lean function [fun x y => body]; binders unannotated (Lean infers from
        the applied context, e.g. the relation parameter's ghost arrow sort). grind
@@ -4707,7 +4723,9 @@ let rec lean_of_pred buf (p : Refinement.pred) =
     Buffer.add_string buf "(fun";
     List.iter (fun id -> Buffer.add_string buf (" " ^ lean_name id)) ids;
     Buffer.add_string buf " => ";
-    lean_of_pred buf a;
+    (* Variant V: a relation lambda's body is a formula (its arrow codomain is
+       [Prop]); render it as clean [Prop]. *)
+    emit_prop buf a;
     Buffer.add_char buf ')'
   | Pis (p, c, a) ->
     (* existential tester; the exhaustiveness hypothesis emitted per tester subject
@@ -4748,13 +4766,171 @@ let rec lean_of_pred buf (p : Refinement.pred) =
   | Pbinop (Le, a, b) -> bin "≤" a b
   | Pbinop (Gt, a, b) -> bin ">" a b
   | Pbinop (Ge, a, b) -> bin "≥" a b
-  | Pand (a, b) -> bin "∧" a b
-  | Por (a, b) -> bin "∨" a b
-  | Pnot a ->
-    Buffer.add_string buf "(¬ ";
+  | Pand _ | Por _ | Pnot _ | Pimp _ ->
+    (* Reached only for a [prop_forced] connective (a pure bool connective is
+       routed to [bval] above): render as a [Prop] connective via [emit_prop]. *)
+    emit_prop buf p
+
+and bval buf (p : Refinement.pred) =
+  let open Refinement in
+  let cmp op a b =
+    Buffer.add_string buf "(decide (";
+    lean_of_pred buf a;
+    Buffer.add_string buf (" " ^ op ^ " ");
+    lean_of_pred buf b;
+    Buffer.add_string buf "))"
+  in
+  let bbin op a b =
+    Buffer.add_char buf '(';
+    bval buf a;
+    Buffer.add_string buf (" " ^ op ^ " ");
+    bval buf b;
+    Buffer.add_char buf ')'
+  in
+  match p with
+  | Pbool b -> Buffer.add_string buf (if b then "true" else "false")
+  | Pvar id -> Buffer.add_string buf (lean_name id)
+  | Pglobal q -> Buffer.add_string buf ("g_" ^ lean_sanitize (path_uname q))
+  | Pfield (q, l, a) ->
+    Buffer.add_string buf ("(" ^ lean_dt_name q ^ "." ^ lean_sanitize l ^ " ");
     lean_of_pred buf a;
     Buffer.add_char buf ')'
-  | Pimp (a, b) -> bin "→" a b
+  | Pbinop (Lt, a, b) -> cmp "<" a b
+  | Pbinop (Le, a, b) -> cmp "≤" a b
+  | Pbinop (Gt, a, b) -> cmp ">" a b
+  | Pbinop (Ge, a, b) -> cmp "≥" a b
+  | Pbinop (Eq, a, b) ->
+    if boolish a || boolish b then bbin "==" a b else cmp "=" a b
+  | Pbinop (Neq, a, b) ->
+    Buffer.add_string buf "(! ";
+    bval buf (Pbinop (Eq, a, b));
+    Buffer.add_char buf ')'
+  | Pand (a, b) -> bbin "&&" a b
+  | Por (a, b) -> bbin "||" a b
+  | Pnot a ->
+    Buffer.add_string buf "(! ";
+    bval buf a;
+    Buffer.add_char buf ')'
+  | Pimp (a, b) ->
+    Buffer.add_string buf "(! ";
+    bval buf a;
+    Buffer.add_string buf " || ";
+    bval buf b;
+    Buffer.add_char buf ')'
+  | Pbound | Pint _ | Pconstr _ | Pfun _ | Ptuple _ | Pproj _ | Plam _
+  | Pbinop ((Add | Sub | Mul | Div | Mod), _, _) -> lean_of_pred buf p
+  | Pis _ | Pquant _ ->
+    Buffer.add_string buf "(decide (";
+    lean_of_pred buf p;
+    Buffer.add_string buf "))"
+
+(* Variant V: goal/hypothesis (Prop) position -- a CLEAN [Prop] statement.
+   Comparisons emit their underlying ordering (no [decide]); connectives descend
+   to [∧]/[∨]/[→]; a bool-VALUED equality reads as an [↔] of the two props (so
+   [bool{ _ = P }] becomes [(_ = true) ↔ P]); a spec-function application is
+   emitted BARE (a Prop-declared model function stays Prop; a bool-returning one
+   coerces via Lean's built-in [Bool -> Prop]); structural/int/opaque equality
+   stays [Prop] [=].  The ONLY [= true] left is on a genuine [Bool] leaf. *)
+and emit_prop buf (p : Refinement.pred) =
+  let open Refinement in
+  let prop_bin op a b =
+    Buffer.add_char buf '(';
+    emit_prop buf a;
+    Buffer.add_string buf (" " ^ op ^ " ");
+    emit_prop buf b;
+    Buffer.add_char buf ')'
+  in
+  let cmp op a b =
+    Buffer.add_char buf '(';
+    lean_of_pred buf a;
+    Buffer.add_string buf (" " ^ op ^ " ");
+    lean_of_pred buf b;
+    Buffer.add_char buf ')'
+  in
+  match p with
+  | Pbinop (Lt, a, b) -> cmp "<" a b
+  | Pbinop (Le, a, b) -> cmp "≤" a b
+  | Pbinop (Gt, a, b) -> cmp ">" a b
+  | Pbinop (Ge, a, b) -> cmp "≥" a b
+  | Pand (a, b) -> prop_bin "∧" a b
+  | Por (a, b) -> prop_bin "∨" a b
+  | Pimp (a, b) -> prop_bin "→" a b
+  | Pnot a ->
+    Buffer.add_string buf "(¬ ";
+    emit_prop buf a;
+    Buffer.add_char buf ')'
+  | Pquant (q, id, a) ->
+    Buffer.add_string buf
+      ((match q with Qforall -> "(∀ " | Qexists -> "(∃ ") ^ lean_name id ^ ", ");
+    emit_prop buf a;
+    Buffer.add_char buf ')'
+  | Pbinop (Eq, a, b) when boolish a || boolish b -> prop_bin "↔" a b
+  | Pbinop (Neq, a, b) when boolish a || boolish b ->
+    Buffer.add_string buf "(¬ ";
+    prop_bin "↔" a b;
+    Buffer.add_char buf ')'
+  | Pbinop (Eq, _, _) -> lean_of_pred buf p
+  | Pbinop (Neq, _, _) -> lean_of_pred buf p
+  | Pbool b -> Buffer.add_string buf (if b then "True" else "False")
+  | Pfun _ | Plam _ ->
+    (* Variant V: a spec-function application / relation lambda is a FORMULA,
+       emitted bare (Prop-declared stays Prop; bool-returning coerces via Lean's
+       [Bool -> Prop]).  No migration, no classical bridge. *)
+    lean_of_pred buf p
+  | Pvar _ | Pglobal _ | Pfield _ | Pproj _ ->
+    (* the one value->formula bridge: a genuine [Bool] leaf. *)
+    Buffer.add_char buf '(';
+    bval buf p;
+    Buffer.add_string buf " = true)"
+  | Pis _ | Pbound | Pint _ | Pconstr _ | Ptuple _
+  | Pbinop ((Add | Sub | Mul | Div | Mod), _, _) -> lean_of_pred buf p
+
+(* Reflected-def [if] condition (a decidable [Prop] position): rendered as clean
+   [Prop] (NOT [decide]-wrapped), so a reflected def matches its [Prop]-world
+   shape and [fun_induction]'s case hypotheses stay in the [n ≤ 0] form
+   hand-authored proofs expect. *)
+and lean_cond buf (p : Refinement.pred) =
+  let open Refinement in
+  let bin op a b =
+    Buffer.add_char buf '(';
+    lean_of_pred buf a;
+    Buffer.add_string buf (" " ^ op ^ " ");
+    lean_of_pred buf b;
+    Buffer.add_char buf ')'
+  in
+  match p with
+  | Pbinop (Lt, a, b) -> bin "<" a b
+  | Pbinop (Le, a, b) -> bin "≤" a b
+  | Pbinop (Gt, a, b) -> bin ">" a b
+  | Pbinop (Ge, a, b) -> bin "≥" a b
+  | Pbinop (Eq, a, b) -> bin "=" a b
+  | Pbinop (Neq, a, b) ->
+    Buffer.add_string buf "(¬ ";
+    bin "=" a b;
+    Buffer.add_char buf ')'
+  | Pand (a, b) ->
+    Buffer.add_char buf '(';
+    lean_cond buf a;
+    Buffer.add_string buf " ∧ ";
+    lean_cond buf b;
+    Buffer.add_char buf ')'
+  | Por (a, b) ->
+    Buffer.add_char buf '(';
+    lean_cond buf a;
+    Buffer.add_string buf " ∨ ";
+    lean_cond buf b;
+    Buffer.add_char buf ')'
+  | Pnot a ->
+    Buffer.add_string buf "(¬ ";
+    lean_cond buf a;
+    Buffer.add_char buf ')'
+  | Pimp (a, b) ->
+    Buffer.add_char buf '(';
+    lean_cond buf a;
+    Buffer.add_string buf " → ";
+    lean_cond buf b;
+    Buffer.add_char buf ')'
+  | _ -> lean_of_pred buf p
 ;;
 
 (* Reflected definitions, emitted between the datatypes and the prelude. [@[grind] def]
@@ -4767,20 +4943,23 @@ let rec lean_of_pred buf (p : Refinement.pred) =
 let lean_rsort (s : Vox_reflect.rsort) =
   match s with
   | Vox_reflect.Rint -> "Int"
-  | Vox_reflect.Rbool -> "Prop"
+  | Vox_reflect.Rbool -> "Bool"
   | Vox_reflect.Rdata p -> lean_sort (S_data (p, []))
 ;;
 
-let rec lean_def_body buf (b : Vox_reflect.def_body) =
+let rec lean_def_body ~as_bool buf (b : Vox_reflect.def_body) =
   match b with
-  | Vox_reflect.Bpred p -> lean_of_pred buf p
+  | Vox_reflect.Bpred p ->
+    (* Variant V: a [Bool]-returning def renders its result as a [Bool] term
+       ([bval]); a [Prop]-returning one stays clean. *)
+    if as_bool then bval buf p else lean_of_pred buf p
   | Vox_reflect.Bite (c, a, b') ->
     Buffer.add_string buf "(if ";
-    lean_of_pred buf c;
+    lean_cond buf c;
     Buffer.add_string buf " then ";
-    lean_def_body buf a;
+    lean_def_body ~as_bool buf a;
     Buffer.add_string buf " else ";
-    lean_def_body buf b';
+    lean_def_body ~as_bool buf b';
     Buffer.add_char buf ')'
   | Vox_reflect.Bcase (x, clauses) ->
     Buffer.add_string buf ("(match " ^ lean_name x ^ " with");
@@ -4789,7 +4968,7 @@ let rec lean_def_body buf (b : Vox_reflect.def_body) =
         Buffer.add_string buf (" | " ^ lean_constr_name cl.dc_path cl.dc_cstr);
         List.iter (fun f -> Buffer.add_string buf (" " ^ lean_name f)) cl.dc_fields;
         Buffer.add_string buf " => ";
-        lean_def_body buf cl.dc_rhs)
+        lean_def_body ~as_bool buf cl.dc_rhs)
       clauses;
     Buffer.add_char buf ')'
 ;;
@@ -4801,7 +4980,8 @@ let lean_spec_def buf (d : Vox_reflect.spec_def) =
       Buffer.add_string buf (Printf.sprintf " (%s : %s)" (lean_name id) (lean_rsort s)))
     d.sd_params;
   Buffer.add_string buf (" : " ^ lean_rsort d.sd_ret ^ " := ");
-  lean_def_body buf d.sd_body;
+  let as_bool = match d.sd_ret with Vox_reflect.Rbool -> true | _ -> false in
+  lean_def_body ~as_bool buf d.sd_body;
   Buffer.add_char buf '\n';
   match d.sd_decreases with
   | None -> ()
@@ -5660,7 +5840,7 @@ let total_spec_decls env (sg : Types.signature) ~blocks =
         let sort what t =
           match peel t with
           | Tconstr (p, [], _) when Path.same p Predef.path_int -> "Int"
-          | Tconstr (p, [], _) when Path.same p Predef.path_bool -> "Prop"
+          | Tconstr (p, [], _) when Path.same p Predef.path_bool -> "Bool"
           | Tconstr (p, [], _) -> lean_dt_name p
           | _ ->
             Location.raise_errorf
@@ -5793,7 +5973,7 @@ let lean_theorem ?(explain = false) buf i vc =
   List.iteri
     (fun j f ->
       Buffer.add_string buf (Printf.sprintf "(h_%d : " j);
-      lean_of_pred buf f;
+      emit_prop buf f;
       Buffer.add_string buf ") ")
     vc.vc_facts;
   (* Exhaustiveness hypotheses: for each tester subject among the facts, tell grind the
@@ -5857,12 +6037,19 @@ let lean_theorem ?(explain = false) buf i vc =
       collect f)
     vc.vc_facts;
   Buffer.add_string buf ": ";
-  lean_of_pred buf vc.vc_goal;
+  emit_prop buf vc.vc_goal;
   (* [grind?] proves the goal exactly as [grind] would AND reports the user facts it used
      -- but ONLY when it succeeds: on an unprovable goal it inserts [sorry] and succeeds
      with a warning, which would be unsound as a verifier. So [grind?] is used purely for
      the [-vox-explain-proofs] REPORT, in a second pass over a file [grind] has already
      fully verified (see [run_lean]); the verdict always comes from [grind]. *)
+  (* Variant V: statements are clean [Prop], so plain [grind] leads.  A light
+     [decide]/[Bool] normalization is a fallback for a hypothesis that arrives
+     [Bool] from an imported library lemma; a trailing PLAIN [grind] keeps
+     expected-failure messages as [grind failed]. *)
+  let norm =
+    "simp only [Bool.and_eq_true, Bool.or_eq_true, Bool.not_eq_true',      decide_eq_true_eq, beq_iff_eq] at *"
+  in
   if vc_needs_split vc
   then (
     let tail = if explain then "grind?" else "grind" in
@@ -5871,10 +6058,23 @@ let lean_theorem ?(explain = false) buf i vc =
       | [] -> ""
       | fs -> "unfold " ^ String.concat " " fs ^ "; "
     in
+    if explain
+    then
+      Buffer.add_string
+        buf
+        (Printf.sprintf " := by first | grind | (%ssplit <;> %s)\n" prefix tail)
+    else
+      Buffer.add_string
+        buf
+        (Printf.sprintf
+           " := by first | grind | (%s <;> grind) | (%ssplit <;> grind) | grind\n"
+           norm prefix))
+  else
     Buffer.add_string
       buf
-      (Printf.sprintf " := by first | grind | (%ssplit <;> %s)\n" prefix tail))
-  else Buffer.add_string buf (if explain then " := by grind?\n" else " := by grind\n")
+      (if explain
+       then " := by grind?\n"
+       else Printf.sprintf " := by first | grind | (%s <;> grind) | grind\n" norm)
 ;;
 
 (* Returns the file contents and, per theorem, the 1-based line it occupies (for mapping
@@ -6465,11 +6665,11 @@ let wc_theorem_text ~tac vc (row : (wkey * Refinement.pred) list) i =
   List.iter
     (fun f ->
       Buffer.add_char buf '(';
-      lean_of_pred buf f;
+      emit_prop buf f;
       Buffer.add_string buf ") \xe2\x88\xa7 ")
     vc.vc_facts;
   Buffer.add_string buf "(\xc2\xac (";
-  lean_of_pred buf vc.vc_goal;
+  emit_prop buf vc.vc_goal;
   Buffer.add_string buf ")))";
   Buffer.add_string buf (Printf.sprintf ") := %s\n" tac);
   Buffer.contents buf
@@ -6886,6 +7086,12 @@ let run_lean vcs =
         let oc = open_out in_file in
         output_string oc contents;
         close_out oc;
+        (match Sys.getenv_opt "VOX_KEEP_LEAN" with
+         | Some p ->
+           let o = open_out p in
+           output_string o contents;
+           close_out o
+         | None -> ());
         let cmd =
           (* module-mode inputs must live under lean's root directory: run from the temp
              dir the input was created in *)
