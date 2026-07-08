@@ -43,29 +43,32 @@ for the *via-abstracted* case. Copy §1, fill in §2 per container, apply §3–
 
 ---
 
-## 1. Substrate snippet (copy verbatim into BOTH the .mli and .ml block)
+## 1. Substrate: `open Vhof` (do NOT declare the atoms)
 
-In the `.mli` block prefix each with `public `; in the `.ml` block drop
-`public `. (Model-dup tax L9 — the two blocks are kept textually in sync.)
+The container-independent atoms live ONCE in the shared leaf module `Vhof`
+(vox_stdlib/Vhof.{mli,ml}): the `IntRel`/`IntPred`/`IntRel3` abbrevs and the
+`@[grind, expose]` `rHolds`/`pHolds`/`r3Holds` wrappers. Your module gets them by
+importing Vhof — it must NOT redeclare them (the atoms are `public`, so a second
+declaration collides in the shared Lean namespace: `IntRel has already been
+declared`).
 
-```lean
-public abbrev IntRel := Int -> Int -> Prop
-public abbrev IntPred := Int -> Prop
-public abbrev IntRel3 := Int -> Int -> Int -> Prop
-@[grind, expose] public def rHolds (r : IntRel) (a b : Int) : Prop := r a b
-@[grind, expose] public def pHolds (p : IntPred) (x : Int) : Prop := p x
-@[grind, expose] public def r3Holds (r : IntRel3) (a b c : Int) : Prop := r a b c
+```ocaml
+open Vhof            (* both the .mli and the .ml, before your `type`/block *)
 ```
 
-- **`abbrev`, never `def`** (reducibility across the client import boundary).
-- **`@[grind, expose]`** on the wrappers: the client reasons *through* them
-  (beta against the substituted lambda), so exposing is correct here and passes
-  the expose-kills-laws test (contrast the opaque-op house rule for data ops).
+Then reference `IntRel`/`rHolds`/etc. directly in your lift signatures and
+callback contracts — they resolve against Vhof's imported VoxSig. Add `Vhof` to
+your module's dependency list in MODULES.manifest (and note it is staged
+transitively by anything that imports your module).
+
+- Vhof's `IntRel`/... are `abbrev`s (reducible), so the S_arrow binder
+  `(r : (int -> int -> bool))` unifies against them across the import boundary
+  (the original Vrel finding; verified end-to-end through the Vhof import).
 - Fuel-style folds (a binary step whose length drives the recursion, cf.
-  `Vrel.fold`) additionally need `relIter`/`relIterN` + the `toNat_nonpos`/
-  `toNat_succ` bridges (public theorems) from Vrel. **Prefer the ternary
-  structural `relFold` (§2) for `fold_left`** — it is element-aware, needs no
-  fuel/`toNat`, and yields exact sum/count laws.
+  `Vrel.fold`) additionally need `relIter`/`relIterN` + the `toNat` bridges,
+  which live in Vrel (not Vhof — they are Vrel-specific). **Prefer the ternary
+  structural `relFold` (§2) for `fold_left`** — element-aware, no fuel/`toNat`,
+  and yields exact sum/count laws.
 
 ## 2. Per-container lifts (fill in over YOUR model inductive `M` with ctors `Nil`/`Cons`)
 

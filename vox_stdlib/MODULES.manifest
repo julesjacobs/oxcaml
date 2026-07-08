@@ -3,14 +3,15 @@
 # deps = space-separated dependency modules (cmi + VoxSig olean staged before verify).
 
 # --- v1 core (waves 1-2) ---
-Vlist     : Voption    : 1   # + HOF surface (WP-0): map/filter/fold_left/for_all/exists/rev/nth are LEAF; find_opt returns Voption.t -> adds the Voption dep (VoxSig_Vlist imports VoxSig_Voption transitively)
-Voption   :            : 1
-Vresult   :            : 1
+Vhof      :            : 0   # SHARED HOF-kit substrate (IntRel/IntPred/IntRel3 abbrevs + rHolds/pHolds/r3Holds). Pure [%%vox.lean] leaf, no OCaml surface. Every HOF module `open Vhof` and reuses these (nobody redeclares) -> no cross-module substrate collision.
+Vlist     : Vhof Voption : 1   # + HOF surface: map/filter/fold_left/for_all/exists/rev/nth + find_opt (Voption dep). Substrate from Vhof (open Vhof).
+Voption   : Vhof       : 1   # + HOF surface: map/bind/filter/fold/is_some_and. Substrate from Vhof.
+Vresult   : Vhof Voption : 1   # + HOF surface: map/map_error/bind/fold/to_option. Substrate from Vhof; to_option enumerates into a Voption.
 Vint      :            : 1
 Viarray   :            : 1
 Vset_bst  :            : 1
-Vmap      : Vlist Voption : 1   # keys enumerates into a Vlist; Voption staged transitively (VoxSig_Vlist now imports VoxSig_Voption via Vlist.find_opt)
-Vset      : Vset_bst Vlist Voption : 2   # face over backend; elements enumerates into a Vlist; Voption staged transitively (via Vlist.find_opt's VoxSig)
+Vmap      : Vlist Voption Vhof : 1   # keys enumerates into a Vlist; Voption+Vhof staged transitively (VoxSig_Vlist imports both)
+Vset      : Vset_bst Vlist Voption Vhof : 2   # face over backend; elements enumerates into a Vlist; Voption+Vhof staged transitively (via Vlist's VoxSig)
 
 # --- v1.5 polymorphic wave (Vplist / Vpmap / Vpset) — SLOT, per poly study ---
 # check_poly.sh will verify these against v1 artifacts + the ORDERED/EQ element
@@ -20,4 +21,4 @@ Vpset      :            : 3   # order-free 'a set; LEAF (no deps); C-1, RELATION
 Vpmap      :            : 3   # 'v-valued int-keyed map; LEAF (empty/is_empty/find/add/remove, no keys op → no Vlist/Vplist dep)
 
 # --- capstone: higher-order relational specs (task #68 lambda reflection) ---
-Vrel       :            : 4   # relational HOF (iter/map/fold/fold3/filter/compose2); LEAF (own ilist); relation = dependent fn-type param supplied as call-site lambda or [@@vox.reflect] value; IntRel/IntPred/IntRel3 abbrev, lifting defs expose, toNat bridges public, listRel_len obligation; EXACT-output law family (relIter_succ_exact, relFold_{sum,count}_exact) as .mli-only public theorems (graph-relation completeness); fold3 = element-aware ternary-relation fold (relFold + il_sum)
+Vrel       : Vhof       : 4   # relational HOF (iter/map/fold/fold3/filter/compose2); LEAF (own ilist); relation = dependent fn-type param supplied as call-site lambda or [@@vox.reflect] value; IntRel/IntPred/IntRel3 abbrev, lifting defs expose, toNat bridges public, listRel_len obligation; EXACT-output law family (relIter_succ_exact, relFold_{sum,count}_exact) as .mli-only public theorems (graph-relation completeness); fold3 = element-aware ternary-relation fold (relFold + il_sum)

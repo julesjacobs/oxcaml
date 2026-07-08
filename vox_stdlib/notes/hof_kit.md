@@ -10,8 +10,10 @@ relational lifts — is irreducibly per-container. `Vrel` is the reference for
 EXPOSED containers; `Vlist` (this WP) for VIA-ABSTRACTED containers.
 
 **Layers.**
-1. *Substrate* (copy verbatim, `public` in .mli / bare in .ml): `IntRel`/
-   `IntPred`/`IntRel3` abbrevs + `@[grind, expose]` `rHolds`/`pHolds`/`r3Holds`.
+1. *Substrate* — DO NOT declare it. `open Vhof` (the shared leaf
+   vox_stdlib/Vhof.{mli,ml}) provides `IntRel`/`IntPred`/`IntRel3` +
+   `rHolds`/`pHolds`/`r3Holds` once for everyone; redeclaring collides. Add
+   `Vhof` to your manifest deps.
 2. *Per-container lifts* over your model inductive: `m_listRel` (map),
    `m_allP`/`m_exP` (filter/for_all/exists), `m_relFold` + `m_sum` (fold_left).
 
