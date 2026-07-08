@@ -2451,8 +2451,17 @@ let match_facts
   and constructor_facts subject cstr args =
     let path = Data_types.cstr_res_type_path cstr in
     match datatype_sort env path [] with
+    | S_bool ->
+      (* wart (b) positive-arm fact (from A'/vox-propfix, credit boolproto-4):
+         a bool-literal match arm mints its POSITIVE equation [subject = true]
+         / [subject = false], symmetric to the landed ground-negation. *)
+      (match cstr.Data_types.cstr_name with
+       | "true" ->
+         [ Refinement.Pbinop (Refinement.Eq, subject, Refinement.Pbool true) ]
+       | "false" ->
+         [ Refinement.Pbinop (Refinement.Eq, subject, Refinement.Pbool false) ]
+       | _ -> [])
     | S_int
-    | S_bool
     | S_param _
     | S_tuple _
     | S_iarray
