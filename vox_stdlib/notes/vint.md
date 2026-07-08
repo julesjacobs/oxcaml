@@ -76,3 +76,67 @@ be used.
 - **workaround used:** read item 7 as "every law has a consuming goal (no orphan)", which holds — smoke_vint has one goal per law. `comm`/`idem` are the strictly-independent core; the paired bounds are deliberate ergonomic completeness mirroring §3.
 - **removed by:** n/a — check-semantics clarification, not a language change.
 - **severity:** COSMETIC (informational).
+
+## WP-4 additions (sign / pow / clamp / min3 / max3 / div / mod / succ / pred / even / odd)
+
+Law inventory added (all proved `public theorem`, zero axioms): vi_sign_cases,
+vi_sign_pos, vi_sign_neg, vi_sign_zero; vi_pow_zero, vi_pow_succ, vi_pow_nonneg;
+vi_clamp_lb, vi_clamp_ub, vi_clamp_id; vi_min3_le_{left,mid,right}, vi_min3_cases;
+vi_max3_ge_{left,mid,right}, vi_max3_cases; vi_mod_nonneg, vi_mod_lt, vi_divmod.
+succ/pred/even/odd carry native inline specs (no def, no law).
+
+### Vint · F-W4a — an ambient div/mod law keyed on a CORE symbol (Int.tmod) is INERT after the VoxSig import
+- **site:** Vint.mli (`vi_mod`/`vi_div` + `vi_mod_nonneg`/`vi_mod_lt`/`vi_divmod`),
+  clients/smoke_vint.ml (s_mod_nonneg/s_mod_lt/s_divmod); probes tfire/pmod (scratch)
+- **milestone/gap:** new (cross-unit grind-pattern registration)
+- **what I tried:** ship the division algorithm as laws on the RAW rendered
+  operators — OCaml `x mod d` / `x / d` render to `Int.tmod x d` / `Int.tdiv x d`
+  (T-division toward zero, faithful to OCaml: `(-1) mod 2 = -1`, so NO Euclidean
+  soundness gap) — as `@[grind] theorem vi_tmod_nonneg ... : 0 <= Int.tmod x d`
+  with `grind_pattern ... => Int.tmod x d`.
+- **error:** fires IN-UNIT (a `by grind` goal `0 <= Int.tmod x d` closes) but is
+  INERT CROSS-UNIT: the smoke goal `0 <= x mod d` (under `0<=x`, `0<d`) comes back
+  NOT PROVED. A grind law whose trigger head is a CORE Lean constant does not
+  survive the VoxSig olean import as an active pattern, whereas a law keyed on a
+  MODULE-OWN def (vi_min, etc.) does.
+- **workaround used:** wrap the ops as module-own defs `vi_mod x d := Int.tmod x d`
+  / `vi_div x d := Int.tdiv x d` (public, NOT exposed) and key the laws on
+  `vi_mod`/`vi_div`; ship reflected `imod`/`idiv`. Clients get the division facts
+  by CALLING idiv/imod (not the native `x mod d`, which stays fact-free by design).
+- **removed by:** cross-unit registration of grind patterns headed by imported/core
+  constants — then div/mod facts could ride the native operators directly.
+- **severity:** MAJOR-ERGONOMIC (silent: the law compiles, is `@[grind]`, proves
+  in-unit, and is simply never active downstream; only a cross-unit smoke reveals it).
+
+### Vint · F-W4b — the VoxSig (.mli-block) prover env is LEANER than the .ml-block/VoxCore env
+- **site:** Vint.mli (vi_pow_nonneg, vi_mod_nonneg proofs); probes tpow/ttmod (scratch)
+- **milestone/gap:** new (model-dup / M1-adjacent: the two block contexts prove differently)
+- **what I tried:** proof forms that verified in a standalone `.ml` block —
+  `induction n using vi_pow.induct b`, `exact mul_nonneg hb ih`, and term-mode
+  `:= Int.tmod_nonneg x (by omega)`.
+- **error:** ALL fail when the SAME text is compiled to a VoxSig (`.mli`) module:
+  (i) `vi_pow.induct b` → "argument b expected Int -> Prop" (the induct motive is
+  first in this env); (ii) `mul_nonneg` → unknown identifier (Mathlib-ish lemmas
+  absent; core `Int.mul_nonneg` exists); (iii) term-mode `Int.tmod_nonneg x (by
+  omega)` mis-unifies the implicit divisor (`x.tmod x` not `x.tmod d`).
+- **workaround used:** VoxSig-robust forms — `induction n using vi_pow.induct with`
+  (no positional fixed-param), `Int.mul_nonneg`, and `by exact Int.tmod_nonneg
+  (a := x) (b := d) hx` (pin implicits). A standalone-.ml-probe passing is NOT
+  sufficient evidence a `.mli` block will seal — probe in `.mli` shape.
+- **removed by:** aligning the VoxSig prover environment with VoxCore (same
+  imports/lemma set/elaboration), or documenting the delta so authors probe in the
+  right shape. Generalizes L9 (model-dup) to a PROOF-behaviour divergence, not just
+  a statement-duplication tax.
+- **severity:** MAJOR-ERGONOMIC (a proof that verifies in the .ml/probe context
+  silently fails to seal the .mli; costs an iteration loop per tricky proof).
+
+### Vint · pow overflow caveat (L6, same status as abs)
+- **site:** Vint.mli (`vi_pow_nonneg`), Vint.ml (`ipow`)
+- **milestone/gap:** L6 (bounded-int / overflow), same family as vi_abs_nonneg
+- **what I tried:** `vi_pow_nonneg (0<=b) : 0 <= vi_pow b n`.
+- **error:** model-true under vox's unbounded Int, but a machine-int `ipow` can
+  overflow to a negative — same latent gap as `vi_abs_nonneg` at min_int.
+- **workaround used:** documented in the file headers and here; no code change (the
+  law is correct under the model vox uses). Bounded-int model (#40) is the fix.
+- **removed by:** a bounded/machine-int model for OCaml `int` in vox (#40).
+- **severity:** SHOULD-FIX (latent).
