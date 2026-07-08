@@ -52,7 +52,10 @@ _STDLIB_SUBDIRS = ("notes", "clients")
 # run-independent; invalidated by source mtime).  Kept out of the source
 # tree so browsing stays read-only.
 _CACHE_ROOT = os.path.join(tempfile.gettempdir(), "vox-editor-depcache")
-_cache_lock = threading.Lock()
+# RLock: ensure_artifacts recurses into itself for manifest deps while
+# holding the lock; a non-reentrant Lock self-deadlocks on any dep-bearing
+# module (Vmap, Vset) and every other stdlib check then hangs behind it.
+_cache_lock = threading.RLock()
 
 
 # --------------------------------------------------------------------------
@@ -263,7 +266,10 @@ def _artifact_paths(module: str) -> Tuple[str, str, str]:
 def _cache_fresh(module: str, mli_path: str) -> bool:
     d, cmi, olean = _artifact_paths(module)
     stamp = os.path.join(d, ".mli.mtime")
-    if not (os.path.isfile(cmi) and os.path.isfile(olean) and os.path.isfile(stamp)):
+    # The olean is absent for a block-less interface (e.g. viarray);
+    # the stamp is written only after a completed build, so cmi+stamp
+    # suffice for freshness.
+    if not (os.path.isfile(cmi) and os.path.isfile(stamp)):
         return False
     try:
         with open(stamp) as fh:
@@ -291,7 +297,8 @@ def ensure_artifacts(module: str, ocamlc: str, lean: str) -> Tuple[str, str]:
             for dep in deps:
                 dcmi, dolean = ensure_artifacts(dep, ocamlc, lean)
                 shutil.copy(dcmi, build)
-                shutil.copy(dolean, build)
+                if os.path.isfile(dolean):
+                    shutil.copy(dolean, build)
             shutil.copy(mli, build)
             mli_name = os.path.basename(mli)
             proc = subprocess.run(
@@ -304,15 +311,17 @@ def ensure_artifacts(module: str, ocamlc: str, lean: str) -> Tuple[str, str]:
             base = os.path.splitext(mli_name)[0]
             built_cmi = os.path.join(build, base + ".cmi")
             built_olean = os.path.join(build, "VoxSig_%s.olean" % module)
-            if proc.returncode != 0 or not (
-                os.path.isfile(built_cmi) and os.path.isfile(built_olean)
-            ):
+            if proc.returncode != 0 or not os.path.isfile(built_cmi):
                 raise RuntimeError(
                     "building %s interface failed:\n%s" % (module, proc.stdout)
                 )
             os.makedirs(d, exist_ok=True)
             shutil.copy(built_cmi, cmi)
-            shutil.copy(built_olean, olean)
+            # A block-less interface has no VoxSig olean; cache without it.
+            if os.path.isfile(built_olean):
+                shutil.copy(built_olean, olean)
+            elif os.path.isfile(olean):
+                os.remove(olean)
             with open(os.path.join(d, ".mli.mtime"), "w") as fh:
                 fh.write(str(int(os.path.getmtime(mli))))
             return cmi, olean
@@ -362,7 +371,8 @@ def stage_for_check(
             try:
                 cmi, olean = ensure_artifacts(m, ocamlc, lean)
                 shutil.copy(cmi, scratch)
-                shutil.copy(olean, scratch)
+                if os.path.isfile(olean):
+                    shutil.copy(olean, scratch)
             except (RuntimeError, OSError):
                 # Missing/failed dep: let the compile surface the real
                 # error (unbound module) rather than masking it here.
