@@ -7,8 +7,9 @@ Vhof      :            : 0   # SHARED HOF-kit substrate (IntRel/IntPred/IntRel3 
 Vlist     : Vhof Voption : 1   # + HOF surface: map/filter/fold_left/for_all/exists/rev/nth + find_opt (Voption dep). Substrate from Vhof (open Vhof).
 Voption   : Vhof       : 1   # + HOF surface: map/bind/filter/fold/is_some_and. Substrate from Vhof.
 Vresult   : Vhof Voption : 1   # + HOF surface: map/map_error/bind/fold/to_option. Substrate from Vhof; to_option enumerates into a Voption.
-Vint      :            : 1
-Viarray   :            : 1
+Vint      :            : 1   # + WP-4 surface: sign/pow/clamp/min3/max3 (reflected), idiv/imod (division algorithm on module-own defs -- a core-symbol law is inert cross-unit, F-W4a), native succ/pred/even/odd
+Vbool     :            : 1   # NEW (WP-4, first post-Variant-V module): bnot(via match)/band/bor/bxor/bequal native, to_int/of_int bool-as-data; V-acceptance findings in notes/vbool.md
+Viarray   : Vhof       : 1   # + WP-4 read-only queries for_all/any/mem (loop over the opaque iarray theory); construction ops (map/sub/of_list/fill/blit) unshippable -- no constructor (L10/N2)
 Vset_bst  :            : 1
 Vmap      : Vlist Voption Vhof : 1   # keys enumerates into a Vlist; Voption+Vhof staged transitively (VoxSig_Vlist imports both). WP-3: + mem (bool), singleton, union (a-biased). DEFERRED: cardinal (shadowing), fold (ternary-kit arity), bindings (no tuple sort; keys+find covers) — notes/vmap.md
 Vset      : Vset_bst Vlist Voption Vhof : 2   # face over backend; elements enumerates into a Vlist; Voption+Vhof staged transitively (via Vlist's VoxSig). WP-3: + singleton, union, inter, diff, cardinal, subset (bool), fold (relational + order-free sum/count exact laws). inter=a\(a\b) uses exposed backend delete only; specs match Vpset (union/singleton) — notes/vset.md

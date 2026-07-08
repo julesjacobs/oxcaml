@@ -47,3 +47,70 @@ limitation the built-in theory imposes.
   `int array` that lets writes/reads reflect without `assume_unchecked_`.
 - **severity:** MINOR (a real limit, but exactly the v1.1 boundary the
   blueprint already draws — no v1 module needs more than `int iarray`).
+
+## WP-4 additions (for_all / any / mem — the read-only query surface)
+
+Viarray graduates from zero-block to a small block: three `@[grind, expose]`
+window SPEC defs (`ia_all_from` bounded-∀, `ia_ex_from`/`ia_mem_from` bounded-∃
+over `Vox_ia_get`) + three read-only index loops. No stores/unique modes (the
+array is immutable). This is the queryable surface the opaque theory admits.
+
+### Viarray · a read-only scalar loop over the OPAQUE iarray theory verifies (positive)
+- **site:** viarray.mli/ml (`for_all`/`any`/`mem`); probe iaAll (scratch)
+- **milestone/gap:** new (the opaque-theory query ceiling — how high is it?)
+- **what I tried:** `for_all p test a : bool{ _ = ia_all_from p a 0 (length a) }`
+  with an inner `go (i : int{0<=_}) : bool{ _ = ia_all_from p a i n }` recursion.
+- **error:** none — the loop seals. `Vox_ia_get` is total in the logic, and the
+  window predicate exposed as a bounded quantifier lets grind discharge each
+  step/base obligation by UNFOLDING it (the bounds `0<=i` and `i<n=length a` keep
+  every `a.(i)` in range). So a per-element read-loop is fully within reach of the
+  opaque theory — the theory's limit is CONSTRUCTION, not iteration.
+- **workaround used:** none — this is the shippable shape for array queries.
+- **removed by:** n/a — positive result; nothing to remove.
+- **severity:** COSMETIC (positive: the query ceiling is higher than "get/length only").
+
+### Viarray · the step/done window laws are DEAD (exposed ∀/∃ defs subsume them)
+- **site:** viarray.mli (an earlier draft shipped ia_all_step/done etc.)
+- **milestone/gap:** §6.7 dead-law (exposed spec def)
+- **what I tried:** ship step (`window i = head ∧ window (i+1)`) and done (`empty
+  window past the end`) laws as the loop's proof vocabulary, as a via-container
+  would.
+- **error:** the removal test proved them ALL dead — with the window defs
+  `@[grind, expose]`, grind proves every loop obligation by unfolding the ∀/∃, so
+  deleting all six step/done laws leaves mli/ml/smoke green.
+- **workaround used:** dropped all six laws; keep only the exposed window defs.
+  Exposed bounded-∀/∃ SPEC defs are sanctioned (blueprint 6.7 excludes forall/
+  exists spec defs from the dead-law warning), so exposure is correct here and
+  there is nothing to keep live.
+- **removed by:** n/a — the fix WAS the removal (dropped the dead laws).
+- **severity:** COSMETIC (guidance — don't ship step/done laws for an exposed
+  quantified window predicate; the unfold does the work).
+
+### Viarray · CONSTRUCTION ops are unshippable — the opaque theory has no constructor (L10/N2)
+- **site:** viarray.mli (absent: map/sub/append/of_list/fill/blit)
+- **milestone/gap:** L10 (int-iarray-only) / N2 (no constructor)
+- **what I tried:** the inventory's fill/blit/of_list/to_list/map/sub surface.
+- **error:** not attempted to completion — the built-in theory is `opaque VoxIA`
+  with `Vox_ia_len`/`Vox_ia_get` and ONE axiom (length nonneg); there is NO
+  constructor, so an op that BUILDS a new array cannot state its result's length
+  or elements (nothing relates a fresh VoxIA to the input). fill/blit additionally
+  need MUTATION, which the immutable `int iarray` theory does not model (a mutable
+  `int array` read becomes `assume_unchecked_`, N2). of_list/to_list would need to
+  bridge VoxIA to the LList model across a loop with no constructor to anchor on.
+- **workaround used:** none — these stay out of Viarray. Queries (for_all/any/mem)
+  are the shippable half; construction is the v1.1 boundary the blueprint draws.
+- **removed by:** a reflected array theory with a constructor (element+length of a
+  built array), a mutable McCarthy `int array` reflection, and an element-poly
+  `'a iarray` theory (N2).
+- **severity:** MINOR (a real limit, exactly the drawn v1.1 boundary).
+
+### Viarray · `exists_` collides with the vox refinement quantifier keyword
+- **site:** viarray.mli (`any`, née `exists_`)
+- **milestone/gap:** new (grammar; minor)
+- **what I tried:** name the exists-query `exists_` (mirroring `forall_`/`exists_`
+  quantifier spelling).
+- **error:** `Syntax error` at the `val exists_` — `exists_` is a reserved
+  refinement quantifier token in the vox grammar, so it cannot be an OCaml val name.
+- **workaround used:** renamed the val to `any`.
+- **removed by:** n/a — naming choice, no compiler change wanted.
+- **severity:** COSMETIC (naming; the underscore-quantifier tokens are reserved).
