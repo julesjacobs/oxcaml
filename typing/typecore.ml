@@ -5070,7 +5070,7 @@ let collect_unknown_apply_args env funct ty_fun0 mode_fun rev_args sargs
    rebuilt arrow rebinds it -- so [sarg_opt = None] here means the
    parameter was ELIMINATED (an omittable argument with no future
    application), which cannot be named and is an error. *)
-let vox_open_dependent_arrow env binder ~sarg_opt ~app_loc ty_ret ty_ret0 =
+let vox_open_dependent_arrow env binder ~param_ty ~sarg_opt ~app_loc ty_ret ty_ret0 =
   match binder with
   | None -> ty_ret, ty_ret0
   | Some b ->
@@ -5100,6 +5100,34 @@ let vox_open_dependent_arrow env binder ~sarg_opt ~app_loc ty_ret ty_ret0 =
              variant, or first-class module); this is not supported";
         ty_ret', Vox_dep.subst_binder b ~by ty_ret0
       in
+      (* Design A: is this a TOTAL spec-function parameter?  Marker =
+         [Trefine(arrow, [], true)] sentinel (Typetexp), carried structurally so
+         it rides copy and the .cmi.  A total parameter admits ONLY reflectable
+         functions; every non-reflectable path below is rejected HERE with a
+         dedicated message, taking precedence over the loc-keyed ANF naming a
+         non-total dependent argument would receive. *)
+      let rec is_total ty =
+        match Types.get_desc (Ctype.vox_expand_head env ty) with
+        | Types.Tpoly (t, []) -> is_total t
+        | Types.Trefine (skel, [], Refinement.Pbool true) ->
+          (match Types.get_desc (Ctype.vox_expand_head env skel) with
+           | Types.Tarrow _ -> true
+           | Types.Tpoly (t, []) ->
+             (match Types.get_desc (Ctype.vox_expand_head env t) with
+              | Types.Tarrow _ -> true
+              | _ -> false)
+           | _ -> false)
+        | _ -> false
+      in
+      let total = is_total param_ty in
+      let total_error () =
+        Location.raise_errorf ~loc:sarg.pexp_loc
+          "vox: the argument for this parameter must be a TOTAL spec function -- \
+           the parameter is declared [@vox.total], a total function space that \
+           admits only reflectable, effect-free functions (a lambda with a pure, \
+           logic-nameable body, or a value marked [@@vox.reflect]); this argument \
+           is not one of those"
+      in
       match sarg.pexp_desc with
       | Pexp_ident lid ->
         (match Env.lookup_value ~use:false ~loc:sarg.pexp_loc lid.txt env with
@@ -5118,11 +5146,14 @@ let vox_open_dependent_arrow env binder ~sarg_opt ~app_loc ty_ret ty_ret0 =
            Location.raise_errorf ~loc:sarg.pexp_loc
              "vox: the argument for a dependent parameter must be an \
               immutable variable (let-bind it first)"
+         | (Path.Pident _, _, _) when total -> total_error ()
          | (Path.Pident id, _, _) -> subst (Refinement.Pvar id)
+         | ((Path.Pdot _ | Path.Papply _), _, _) when total -> total_error ()
          | ((Path.Pdot _ | Path.Papply _) as p, _, _) ->
            (* A module-level value: immutable by construction, named
               stably by its path. *)
            subst (Refinement.Pglobal p)
+         | (Path.Pextra_ty _, _, _) when total -> total_error ()
          | (Path.Pextra_ty _, _, _) ->
            subst (Refinement.Pvar (Vox_reflect.arg_anf_ident sarg.pexp_loc))
          | exception _ ->
@@ -5136,6 +5167,10 @@ let vox_open_dependent_arrow env binder ~sarg_opt ~app_loc ty_ret ty_ret0 =
            total_ functions.  Substituting its translation is exact. *)
         (match Vox_reflect.translate_surface env sarg with
          | Some p -> subst p
+         | None when total ->
+           (* A total parameter never falls back to a first-order/ANF name: an
+              unreflectable relation is rejected at the type layer. *)
+           total_error ()
          | None ->
            (match sarg.pexp_desc with
             | Pexp_function _ ->
@@ -5328,6 +5363,7 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
                 ty_ret, ty_ret0
               | _ ->
                 vox_open_dependent_arrow env vox_binder
+                  ~param_ty:ty_arg
                   ~sarg_opt:
                     (match arg_opt with
                      | Some (sarg, _, ~commuted:_) -> Some sarg

@@ -1513,10 +1513,23 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
         | (l, arg_mode, arg) :: rest ->
           check_arg_type arg;
           let l = transl_label l (Some arg) in
-          let vox_binder, arg =
+          let vox_binder, arg, vox_total =
             match vox_named_binder arg with
-            | Some (name, inner) -> Some name, inner
-            | None -> None, arg
+            | Some (name, inner) ->
+              (* Design A (total function space): [(r : ((int -> int -> bool)
+                 [@vox.total]))] marks the binder's arrow type as a TOTAL spec
+                 function -- admitting only reflectable, effect-free functions.
+                 Carried structurally as a [Trefine(arrow, [], true)] sentinel so
+                 it survives type copy and rides the .cmi ([true] is a no-op
+                 contract). *)
+              let total =
+                List.exists
+                  (fun (a : Parsetree.attribute) ->
+                    String.equal a.attr_name.txt "vox.total")
+                  inner.ptyp_attributes
+              in
+              Some name, inner, total
+            | None -> None, arg, false
           in
           (match vox_binder, l with
            | Some _, (Optional _ | Position _) ->
@@ -1561,6 +1574,11 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
               loop acc_mode rest)
           in
           let arg_ty = arg_cty.ctyp_type in
+          let arg_ty =
+            if vox_total
+            then newty (Trefine (arg_ty, [], Refinement.Pbool true))
+            else arg_ty
+          in
           let arg_ty =
             if Btype.is_Tpoly arg_ty then arg_ty else newmono arg_ty
           in
