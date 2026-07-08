@@ -105,3 +105,8 @@ let forall_nn (l : Vlist.t) : bool{ _ = ll_allP pNn l } =
   Vlist.for_all (fun x -> x >= 0) (fun x -> x >= 0) l
 let exists_gt5 (l : Vlist.t) : bool{ _ = ll_exP pGt5 l } =
   Vlist.exists (fun x -> x > 5) (fun x -> x > 5) l
+
+(* find_opt: the result carries the find spec for the reflected predicate
+   (Some -> value satisfies p AND is a member; None -> nothing satisfies p). *)
+let find_pos (l : Vlist.t) : Voption.t{ ll_find_result pPos l _ } =
+  Vlist.find_opt (fun x -> x > 0) (fun x -> x > 0) l

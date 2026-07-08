@@ -10,6 +10,7 @@
    House rules: specs mention DEFS (ll_cons), never the LList
    CONSTRUCTORS (.LCons); names carry the [ll_] prefix so they never
    collide with Lean-core identifiers or a co-imported unit's names. *)
+open Voption
 type llist [@@vox.sort lean "LList"]
 type t : value refines (llist)
 
@@ -146,6 +147,16 @@ public abbrev IntRel3 := Int -> Int -> Int -> Prop
 @[grind, expose] public def ll_nth : Int -> LList -> Int
   | _, .LNil => 0
   | i, .LCons x t => if i <= 0 then x else ll_nth (i-1) t
+-- ll_nosat: no element satisfies p -- find_opt's None-case spec.
+@[grind, expose] public def ll_nosat (p : IntPred) : LList -> Prop
+  | .LNil => True
+  | .LCons x t => (¬ pHolds p x) /\ ll_nosat p t
+-- ll_find_result: find_opt's spec (references imported Voption model). Some ->
+-- the found value satisfies p AND is a member; None -> no element satisfies p.
+@[grind, expose] public def ll_find_result (p : IntPred) (l : LList) (o : Vox_Voption_t) : Prop :=
+  (vo_is_some o -> (pHolds p (vo_get o) /\ ll_mem (vo_get o) l)) /\
+  ((¬ vo_is_some o) -> ll_nosat p l)
+
 -- ===== HOF laws (obligations) =====
 public axiom ll_listRel_len (r : IntRel) (a b : LList) :
     ll_listRel r a b -> ll_len a = ll_len b
@@ -226,3 +237,7 @@ val exists :
   (p : ((int -> bool) [@vox.total])) ->
   (test : ((x : int) -> bool{ _ = pHolds p x })) ->
   (l : t) -> bool{ _ = ll_exP p l }
+val find_opt :
+  (p : ((int -> bool) [@vox.total])) ->
+  (test : ((x : int) -> bool{ _ = pHolds p x })) ->
+  (l : t) -> Voption.t{ ll_find_result p l _ }

@@ -6,6 +6,7 @@
    uses the gap #31 skeleton-threading workaround: its recursive [go]
    returns a refined SKELETON and the via injection happens once, through
    a variable (see notes/vlist.md). *)
+open Voption
 type llist [@@vox.sort lean "LList"]
 type tree = Nil | Cons of int * tree
 type t = tree{ 0 = 0 } [@vox.via (ll_repr : llist)]
@@ -124,6 +125,16 @@ abbrev IntRel3 := Int -> Int -> Int -> Prop
 @[grind, expose] def ll_nth : Int -> LList -> Int
   | _, .LNil => 0
   | i, .LCons x t => if i <= 0 then x else ll_nth (i-1) t
+-- ll_nosat: no element satisfies p -- find_opt's None-case spec.
+@[grind, expose] def ll_nosat (p : IntPred) : LList -> Prop
+  | .LNil => True
+  | .LCons x t => (¬ pHolds p x) /\ ll_nosat p t
+-- ll_find_result: find_opt's spec (references imported Voption model). Some ->
+-- the found value satisfies p AND is a member; None -> no element satisfies p.
+@[grind, expose] def ll_find_result (p : IntPred) (l : LList) (o : Vox_Voption_t) : Prop :=
+  (vo_is_some o -> (pHolds p (vo_get o) /\ ll_mem (vo_get o) l)) /\
+  ((¬ vo_is_some o) -> ll_nosat p l)
+
 -- ===== HOF laws (discharge the .mli obligations) =====
 theorem ll_listRel_len (r : IntRel) (a b : LList) :
     ll_listRel r a b -> ll_len a = ll_len b := by
@@ -332,5 +343,21 @@ let exists :
       fun u -> match u with
         | Nil -> false
         | Cons (x, rest) -> if test x then true else go rest
+    in
+    go t0
+
+let find_opt :
+      (p : ((int -> bool) [@vox.total])) ->
+      (test : ((x : int) -> bool{ _ = pHolds p x })) ->
+      (l : t) -> Voption.t{ ll_find_result p l _ } =
+  fun p test l ->
+    ignore p;
+    let refine_ t0 = l in
+    let rec go : (u : tree) -> Voption.t{ ll_find_result p (ll_repr u) _ } =
+      fun u -> match u with
+        | Nil -> (Vnone : Voption.t{ ll_find_result p (ll_repr u) _ })
+        | Cons (x, rest) ->
+            if test x then (Vsome x : Voption.t{ ll_find_result p (ll_repr u) _ })
+            else let o = go rest in (o : Voption.t{ ll_find_result p (ll_repr u) _ })
     in
     go t0

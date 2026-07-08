@@ -3,14 +3,14 @@
 # deps = space-separated dependency modules (cmi + VoxSig olean staged before verify).
 
 # --- v1 core (waves 1-2) ---
-Vlist     :            : 1   # + HOF surface (WP-0): map/filter/fold_left/for_all/exists/rev/nth (LEAF)
+Vlist     : Voption    : 1   # + HOF surface (WP-0): map/filter/fold_left/for_all/exists/rev/nth are LEAF; find_opt returns Voption.t -> adds the Voption dep (VoxSig_Vlist imports VoxSig_Voption transitively)
 Voption   :            : 1
 Vresult   :            : 1
 Vint      :            : 1
 Viarray   :            : 1
 Vset_bst  :            : 1
-Vmap      : Vlist      : 1   # keys enumerates into a Vlist
-Vset      : Vset_bst Vlist : 2   # face over backend; elements enumerates into a Vlist
+Vmap      : Vlist Voption : 1   # keys enumerates into a Vlist; Voption staged transitively (VoxSig_Vlist now imports VoxSig_Voption via Vlist.find_opt)
+Vset      : Vset_bst Vlist Voption : 2   # face over backend; elements enumerates into a Vlist; Voption staged transitively (via Vlist.find_opt's VoxSig)
 
 # --- v1.5 polymorphic wave (Vplist / Vpmap / Vpset) — SLOT, per poly study ---
 # check_poly.sh will verify these against v1 artifacts + the ORDERED/EQ element

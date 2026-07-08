@@ -292,6 +292,26 @@ negative control per op fails closed.
   binder.
 - **severity:** MINOR.
 
+### Vlist · find_opt pulls Voption into VoxSig_Vlist transitively
+- **site:** vox_stdlib/Vlist.mli (`open Voption`, `ll_find_result`, `find_opt`)
+- **milestone/gap:** new (cross-module VoxSig transitivity)
+- **what I tried:** ship `find_opt : … -> Voption.t{ ll_find_result p l _ }`;
+  `ll_find_result` references the imported `vo_is_some`/`vo_get`, so it is a
+  public def over `Vox_Voption_t`.
+- **error:** none for Vlist itself — but VoxSig_Vlist.olean now IMPORTS
+  VoxSig_Voption, so every Vlist consumer fails to load Vlist's VoxSig unless
+  VoxSig_Voption.olean is ALSO staged (`unknown module prefix 'VoxSig_Voption'`
+  building Vmap with only Vlist staged; green once Voption is staged too).
+- **workaround used:** declare the dependency (Vlist : Voption) in
+  MODULES.manifest; the integrator harness `mod_deps` needs `Vlist) echo
+  "Voption"`, and Vmap/Vset staging must add Voption transitively. The core
+  seven HOFs (map/filter/fold_left/for_all/exists/rev/nth) are Voption-free and
+  keep Vlist a leaf; find_opt is the ONLY op that adds the dep (separable).
+- **removed by:** n/a (inherent — any op returning another module's type
+  imports that module's VoxSig).
+- **severity:** MINOR (mechanical staging change; blast radius = Vmap + Vset +
+  the wave-1 harness `mod_deps`).
+
 ### Vlist · fold_left uses a ternary element-aware step (positive)
 - **site:** vox_stdlib/Vlist.mli (`fold_left`, `ll_relFold`, `r3Holds`)
 - **milestone/gap:** new (design choice)
