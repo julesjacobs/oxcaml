@@ -39,8 +39,9 @@ let compose_lt (x : int) : int{ x < _ } =
 (* fold: a <=-related step over a one-element list is one relIter step, so
    the initial accumulator a satisfies a <= result. *)
 let fold_le (a : int) (b : int) : int{ a <= _ } =
-  let l = Vrel.Icons (b, Vrel.Inil) in
-  Vrel.fold (fun p q -> p <= q) (fun acc x -> acc + 1) a l
+  (* the one-element list is a constructor application straight into fold's
+     dependent [xs] parameter -- no let-bind (nested refined expressions). *)
+  Vrel.fold (fun p q -> p <= q) (fun acc x -> acc + 1) a (Vrel.Icons (b, Vrel.Inil))
 
 (* filter: every kept element is positive.  The predicate p is a lambda at
    the call site; the decision procedure test ties its bool to [pHolds p x];

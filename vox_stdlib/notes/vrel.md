@@ -110,10 +110,11 @@ frictions below are the price, in the §5 format.
 - **workaround used:** `let`-bind the constructor value first
   (`let l = Icons (b, Inil) in ... fold .. l`), so the binder carries the
   equation `l = Icons (b, Inil)` into the VC (the C1 house pattern).
-- **removed by:** binding call arguments at the skeleton the way transparent-via
-  let-binders already do, so an inline constructor into a dependent param keeps
-  its structural equation.
-- **severity:** MINOR.
+- **removed by:** DONE (2026-07-08 nesting sweep). The inline constructor into
+  the dependent param now keeps its structural equation (nested refined
+  expressions); `smoke_vrel.fold_le` no longer let-binds. See
+  `docs/plans/2026-07-08-nesting-sweep-findings.md`.
+- **severity:** RESOLVED (was MINOR).
 
 ### Vrel · an UNAPPLIED named predicate over a symbolic structure must be a reducible `abbrev`
 - **site:** clients/smoke_vrel.ml:14 (`abbrev isPos`), :48 (`allP isPos _`)

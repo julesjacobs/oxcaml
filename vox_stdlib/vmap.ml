@@ -129,8 +129,9 @@ let remove : (k : int) -> (m : t) -> t{ m_remove_spec _ k m } =
    EXTERNAL module's via type (Vlist) does NOT hit #31: the recursive Vlist.t
    result keeps its refinement across the let, so the membership spec threads
    directly (no skeleton needed, and none available -- Vlist's repr is hidden).
-   Base closes by Vlist.ll_nil_not_mem; cons step by Vlist.ll_mem_cons.  C1:
-   Vlist.cons's dependent arg must be a variable, hence the let l. *)
+   Base closes by Vlist.ll_nil_not_mem; cons step by Vlist.ll_mem_cons.  The
+   recursive [go r] flows straight into Vlist.cons's dependent list parameter
+   (nested refined expressions -- no let-bind). *)
 let keys : (m : t) -> Vlist.t{ m_keys_spec _ m } =
   fun m ->
     let refine_ t0 = m in
@@ -139,8 +140,7 @@ let keys : (m : t) -> Vlist.t{ m_keys_spec _ m } =
         match u with
         | ANil -> (Vlist.empty () : Vlist.t{ m_keys_spec _ (m_repr u) })
         | ACons (k, _, r) ->
-            let l = go r in
-            (Vlist.cons k l : Vlist.t{ m_keys_spec _ (m_repr u) })
+            (Vlist.cons k (go r) : Vlist.t{ m_keys_spec _ (m_repr u) })
     in
     let res = go t0 in
     (res : Vlist.t{ m_keys_spec _ m })
