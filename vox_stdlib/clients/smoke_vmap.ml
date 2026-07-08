@@ -64,3 +64,24 @@ let agree_point (a : Vmap.t) (b : Vmap.t{ m_agree a _ }) (k : int) :
 let key_enumerated (k : int) (m : Vmap.t) : bool{ _ = m_haskey k m } =
   let ks = Vmap.keys m in
   Vlist.mem k ks
+
+(* forces the bool [mem] via m_find_add_eq: a just-added key is present. *)
+let mem_after_add (k : int) (v : int) (m : Vmap.t) : bool{ _ = true } =
+  let m' = Vmap.add k v m in
+  Vmap.mem k m'
+
+(* forces [mem] miss on empty (m_find_empty). *)
+let mem_empty (k : int) : bool{ _ = false } =
+  Vmap.mem k (Vmap.empty ())
+
+(* forces singleton's spec + m_find_add_eq: the singleton's key is present. *)
+let singleton_has_key (k : int) (v : int) : bool{ _ = true } =
+  Vmap.mem k (Vmap.singleton k v)
+
+(* forces m_unionspec (a-biased) + m_find_add_eq: a key present in a is present
+   in union a b (a wins, so it is found regardless of b). *)
+let union_has_left_key (k : int) (v : int) (a : Vmap.t) (b : Vmap.t) :
+    bool{ _ = true } =
+  let a' = Vmap.add k v a in
+  let u = Vmap.union a' b in
+  Vmap.mem k u

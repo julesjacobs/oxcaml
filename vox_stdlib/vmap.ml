@@ -73,6 +73,20 @@ grind_pattern m_remove_find => m_find k' (m_remove k m)
   m_find k m ≠ .MMiss
 @[grind, expose] def m_keys_spec (l : LList) (m : MList) : Prop :=
   ∀ k, ll_mem k l = m_haskey k m
+
+-- union = list append; m_find of an append is find-a-then-b (first-match wins),
+-- which is exactly the a-biased m_unionspec.  m_app + m_find_app are private
+-- scaffolding; the seal discharges m_unionspec from m_find_app.
+@[grind] def m_app : MList -> MList -> MList
+  | .MNil, m => m
+  | .MCons k v t, m => .MCons k v (m_app t m)
+theorem m_find_app (k : Int) (a b : MList) :
+    m_find k (m_app a b) = (match m_find k a with | .MMiss => m_find k b | x => x) := by
+  induction a <;> grind
+grind_pattern m_find_app => m_find k (m_app a b)
+
+@[grind, expose] def m_unionspec (r a b : MList) : Prop :=
+  ∀ k, m_find k r = (match m_find k a with | .MMiss => m_find k b | x => x)
 |lean}]
 
 let empty : (u : unit) -> t{ _ = m_empty } =
@@ -144,3 +158,40 @@ let keys : (m : t) -> Vlist.t{ m_keys_spec _ m } =
     in
     let res = go t0 in
     (res : Vlist.t{ m_keys_spec _ m })
+
+(* [mem] is the bool key-presence query; one-path recursion branching on the
+   primitive k = k' (no #32).  m_haskey unfolds through the concrete m_find. *)
+let mem : (k : int) -> (m : t) -> bool{ _ = m_haskey k m } =
+  fun k m ->
+    let refine_ t0 = m in
+    let rec go : (u : alist) -> bool{ _ = m_haskey k (m_repr u) } =
+      fun u ->
+        match u with
+        | ANil -> false
+        | ACons (k', _, r) -> if k = k' then true else go r
+    in
+    go t0
+
+(* [singleton k v] = add over empty; direct constructor injection (like [add]),
+   avoiding an intra-unit via call. *)
+let singleton : (k : int) -> (v : int) -> t{ _ = m_add k v m_empty } =
+  fun k v -> (ACons (k, v, ANil) : t{ _ = m_add k v m_empty })
+
+(* [union a b] appends a's bindings before b's (a-biased); like [Vlist.append]
+   it threads a refined SKELETON (m_repr _ = m_app (m_repr u) (m_repr tb)) and
+   injects into t once (the #31 pattern).  m_unionspec discharged from
+   m_find_app. *)
+let union : (a : t) -> (b : t) -> t{ m_unionspec _ a b } =
+  fun a b ->
+    let refine_ ta = a in
+    let refine_ tb = b in
+    let rec go : (u : alist) -> alist{ m_repr _ = m_app (m_repr u) (m_repr tb) } =
+      fun u ->
+        match u with
+        | ANil -> (tb : alist{ m_repr _ = m_app (m_repr u) (m_repr tb) })
+        | ACons (k, v, r) ->
+            let rest = go r in
+            (ACons (k, v, rest) : alist{ m_repr _ = m_app (m_repr u) (m_repr tb) })
+    in
+    let res = go ta in
+    (res : t{ m_unionspec _ a b })

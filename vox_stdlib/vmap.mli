@@ -53,6 +53,15 @@ public axiom m_add : Int -> Int -> MList -> MList
 @[grind, expose] public def m_keys_spec (l : LList) (m : MList) : Prop :=
   ∀ k, ll_mem k l = m_haskey k m
 
+-- union is LEFT/a-biased (a's binding wins where a has the key, else b's), the
+-- shadowing-consistent choice: it is exactly list append (add already prepends
+-- shadow), so [find] of the union is [find a] falling back to [find b].  Stated
+-- via [m_find] so it composes with the shipped find-laws.  (Right-biased would
+-- reverse the append but break the "first binding wins" story that [add]/[find]
+-- establish -- see notes/vmap.md union-bias.)
+@[grind, expose] public def m_unionspec (r a b : MList) : Prop :=
+  ∀ k, m_find k r = (match m_find k a with | .MMiss => m_find k b | x => x)
+
 -- The algebra clients reason with (all four LIVE under opaque model ops).
 public axiom m_isempty_empty : m_isempty m_empty
 grind_pattern m_isempty_empty => m_isempty m_empty
@@ -75,3 +84,11 @@ val find : (k : int) -> (m : t) -> mopt{ _ = m_find k m }
 val add : (k : int) -> (v : int) -> (m : t) -> t{ _ = m_add k v m }
 val remove : (k : int) -> (m : t) -> t{ m_remove_spec _ k m }
 val keys : (m : t) -> Vlist.t{ m_keys_spec _ m }
+
+(* ===== map surface (WP-3) ===== *)
+(* [mem] is the bool key-presence QUERY (m_haskey is the consumable spec). *)
+val mem : (k : int) -> (m : t) -> bool{ _ = m_haskey k m }
+(* [singleton k v] is the one-binding map (add over empty). *)
+val singleton : (k : int) -> (v : int) -> t{ _ = m_add k v m_empty }
+(* [union a b] is the a-biased merge (= list append). *)
+val union : (a : t) -> (b : t) -> t{ m_unionspec _ a b }

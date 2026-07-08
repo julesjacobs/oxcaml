@@ -238,3 +238,103 @@ trivializing `m_agree` to `True` breaks exactly `agree_point` (line 56).
   the client's bridge from key-enumeration to find-presence (unfolds to
   `m_find k m ≠ .MMiss`), which is load-bearing utility, and exposing it kills
   no law (nothing is dead). Same posture as Vlist's `ll_isnil` pre-de-expose.
+
+---
+
+## WP-3 surface completion (mem / singleton / union) + probes (bindings, cardinal, fold)
+
+Shipped `mem` (bool key-presence query), `singleton`, `union` (a-biased),
+all VERIFIED against Vlist+Voption artifacts, smoke-exercised, negative controls
+fail closed. Three requested ops DEFERRED with findings (below): `bindings`
+(pair-model probe), `cardinal` (shadowing), `fold` (arity + shadowing).
+
+### Vmap · mem / singleton / union — positive
+- **site:** vox_stdlib/vmap.ml `mem`/`singleton`/`union`, `m_app`/`m_find_app`,
+  mli `m_unionspec`
+- **milestone/gap:** new (map surface)
+- **what I tried:** `mem` = one-path recursion branching on the primitive `k=k'`
+  (no #32), spec `_ = m_haskey k m` (m_haskey already shipped, exposed).
+  `singleton k v` = direct `ACons (k,v,ANil)` injection (avoids an intra-unit
+  via call), spec `_ = m_add k v m_empty`. `union` = a-biased list append
+  (m_app), spec `m_unionspec r a b := ∀k, m_find k r = match m_find k a with
+  MMiss => m_find k b | x => x` — the first-match-wins semantics that `add`'s
+  prepend-shadow already establishes.
+- **error:** none. `union` threads the refined skeleton like `keys`/`remove`
+  (#31 pattern); `m_find_app` (proved `induction a <;> grind`) discharges
+  `m_unionspec`.
+- **workaround used:** the #31 skeleton-thread for `union` (same as `remove`);
+  direct-constructor injection for `singleton` (same as `add`).
+- **removed by:** n/a (positive).
+- **severity:** none (positive result)
+
+### Vmap · union bias choice (a-biased / left-wins) — design
+- **site:** vox_stdlib/vmap.mli `m_unionspec`
+- **milestone/gap:** new (design decision, per WP-3 dispatch)
+- **what I tried:** pick a union bias. Chose A-BIASED (a's binding wins where a
+  has the key) because it is exactly LIST APPEND (a ++ b) and `m_find` already
+  returns the first match — so the spec `m_find (union a b) = find-a-else-b`
+  falls straight out of `m_find_app` with no new machinery, AND it is consistent
+  with `add`'s "first binding wins / prepend shadows" story. Right-biased would
+  reverse the append and contradict that story.
+- **error:** none.
+- **workaround used:** n/a (design).
+- **removed by:** n/a.
+- **severity:** none (design justification)
+
+### Vmap · bindings PAIR-MODEL PROBE — verdict: expressible, but needs a new container
+- **site:** vox_stdlib/scratch_probe/wp3/probe_pair_tuple.ml (+ the MList precedent)
+- **milestone/gap:** L (pair/tuple value model)
+- **what I tried:** model `bindings : t -> <list of (int*int)>`. Probe A: give an
+  OCaml tuple alias `type pair = int * int` a `[@@vox.sort lean "IPair"]`.
+- **error:** `vox: vox.sort on a type alias has no effect (an alias expands to
+  its definition before sorting)` — a tuple is a structural alias, so a VALUE
+  pair `(int*int)` cannot carry a model sort. So `bindings` as a tuple-element
+  list is not directly modelable.
+- **workaround used:** a pair is expressible as a NOMINAL pair-carrying inductive
+  — indeed `MList` itself IS `MCons : Int -> Int -> MList`, a verified list of
+  (key,value). So the MODEL layer expresses key×value entries fine; the block
+  can define `pl_headkey`/`pl_headval : PList -> Int` accessors (both int, no
+  tuple destructor). Shipping `bindings` therefore means a WHOLE NEW via-abstract
+  "pair list" container (own inductive + head_key/head_val/tail accessors +
+  membership/lookup laws) — that duplicates most of a list module and is beyond
+  Vmap surface completion. AND a client can already reconstruct bindings from the
+  shipped `keys` eliminator + `find` (`for each k in keys m: (k, find k m)`), so
+  a dedicated op is not load-bearing.
+- **removed by:** a first-class tuple/pair value sort (then `bindings :
+  t -> Vlist-of-pairs` is trivial), OR a dedicated `Vpairlist`/`Vassoc` module.
+- **severity:** MEDIUM (deferred to v1.1; keys+find covers the use case today)
+
+### Vmap · cardinal DEFERRED — shadowing model + Decidable m_haskey
+- **site:** (not shipped) — vox_stdlib/vmap.ml model `MList`
+- **milestone/gap:** new (map cardinality vs shadowing invariant)
+- **what I tried:** `cardinal : t -> int{ _ = distinct-key count }`. The map's
+  `add` is an unconditional prepend (shadows), so the assoc-list can hold
+  DUPLICATE keys and `remove` drops all of them — the invariant is NOT "distinct
+  keys". A list-length cardinal over-counts shadowed bindings (wrong vs OCaml
+  Map.cardinal). A correct distinct count needs `m_card (MCons k v t) = m_card t
+  + (if m_haskey k t then 0 else 1)`, which needs `Decidable (m_haskey k t)`
+  (= `m_find k t ≠ .MMiss`) in the model AND an O(n^2) impl that re-scans the
+  tail per entry.
+- **error:** (anticipated) Decidable-m_haskey in the model + a costly, hard-to-
+  verify dedup impl.
+- **workaround used:** DEFER. Not shipped.
+- **removed by:** either a distinct-keys invariant on the repr (would change
+  `add` to overwrite, out of scope) or a Decidable m_haskey instance + dedup
+  proof.
+- **severity:** MEDIUM (deferred; the shadowing model is the real obstacle)
+
+### Vmap · fold DEFERRED — HOF kit is ternary; map fold is quaternary + shadowing
+- **site:** (not shipped) — HOF kit (Vlist ternary `relFold`)
+- **milestone/gap:** L14-adjacent (HOF kit arity)
+- **what I tried:** `fold : (key -> value -> acc -> acc) -> ...`. The WP-0 HOF
+  kit's `relFold` is TERNARY (acc:int, elem:int, acc':int); a map fold needs a
+  QUATERNARY step (acc, key, value, acc'). Folding the raw assoc-list with the
+  ternary kit (over keys or values only) would ALSO visit shadowed bindings
+  (add prepends), so a fold spec over `m_repr` leaks shadowed entries — wrong
+  for a map fold that should visit each key once.
+- **error:** ternary kit cannot express the (key,value) step; shadowing leaks.
+- **workaround used:** DEFER. A client folds over `keys m` (Vlist.fold_left) and
+  looks up values with `find` (which returns the VISIBLE binding), making the
+  fold explicit and shadow-correct.
+- **removed by:** a quaternary HOF kit variant + a distinct-keys map invariant.
+- **severity:** MEDIUM (deferred; client keys+find+Vlist.fold_left covers it)
