@@ -16,8 +16,8 @@ Vset      : Vset_bst Vlist Voption Vhof : 2   # face over backend; elements enum
 # --- v1.5 polymorphic wave (Vplist / Vpmap / Vpset) — SLOT, per poly study ---
 # check_poly.sh will verify these against v1 artifacts + the ORDERED/EQ element
 # signature; append here as they land.
-Vplist     :            : 3   # element-poly 'a list; LEAF (no deps); parameterized PList model; unspecced empty (F-B2), no bool mem (F-B3)
-Vpset      :            : 3   # order-free 'a set; LEAF (no deps); C-1, RELATIONAL membership only (no bool mem/remove — DecidableEq at S_param)
+Vplist    : Vhof       : 3   # + eq-param layer (WP-2): bool mem/remove + dedup at abstract 'a via a client decider (eqHolds from Vhof). open Vhof.
+Vpset     : Vhof       : 3   # + eq-param layer (WP-2): bool mem/remove at abstract 'a via a client decider (eqHolds from Vhof). open Vhof.
 Vpmap      :            : 3   # 'v-valued int-keyed map; LEAF (empty/is_empty/find/add/remove, no keys op → no Vlist/Vplist dep)
 
 # --- capstone: higher-order relational specs (task #68 lambda reflection) ---

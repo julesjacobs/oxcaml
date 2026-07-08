@@ -25,3 +25,17 @@ cross-module substrate-collision hazard (below).
   stopgap, which now lives only in git history).
 - **severity:** none (positive: removes an entire hazard class; the recipe §1 is
   now "open Vhof", not copy-in).
+
+### Vhof · poly eqHolds added for the eq-param route (WP-2)
+- **site:** vox_stdlib/Vhof.mli (`eqHolds {a : Type} (e : a -> a -> Prop)`)
+- **milestone/gap:** new (poly substrate atom)
+- **what I tried:** the eq-param membership route (probe3) needs a pass-whole
+  wrapper for a client-supplied equality DECIDER at an ABSTRACT element — the
+  Int-only `rHolds`/`IntRel` do not generalize to `'a`.
+- **error:** none — a polymorphic `eqHolds {a} (e : a -> a -> Prop) (x y : a)`
+  added to Vhof serves every poly module and is additive (existing consumers
+  unaffected; full chain re-verified).
+- **workaround used:** extend Vhof with poly `eqHolds` (the anticipated
+  'a-sorted substrate variant). IntRel/rHolds stay Int-specific.
+- **removed by:** n/a — this is the fix.
+- **severity:** none (positive: Vhof scales to poly substrate).

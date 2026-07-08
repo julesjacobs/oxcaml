@@ -28,4 +28,5 @@ public abbrev IntRel3 := Int -> Int -> Int -> Prop
 @[grind, expose] public def rHolds (r : IntRel) (a b : Int) : Prop := r a b
 @[grind, expose] public def pHolds (p : IntPred) (x : Int) : Prop := p x
 @[grind, expose] public def r3Holds (r : IntRel3) (a b c : Int) : Prop := r a b c
+@[grind, expose] public def eqHolds {a : Type} (e : a -> a -> Prop) (x y : a) : Prop := e x y
 |lean}]
