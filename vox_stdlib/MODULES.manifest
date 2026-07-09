@@ -1,0 +1,35 @@
+# vox stdlib module manifest — module : deps : wave
+# Read by the integrator harnesses; the v1.5 polymorphic wave appends below.
+# deps = space-separated dependency modules (cmi + VoxSig olean staged before verify).
+
+# --- v1 core (waves 1-2) ---
+Vhof      :            : 0   # SHARED HOF-kit substrate (IntRel/IntPred/IntRel3 abbrevs + rHolds/pHolds/r3Holds). Pure [%%vox.lean] leaf, no OCaml surface. Every HOF module `open Vhof` and reuses these (nobody redeclares) -> no cross-module substrate collision.
+Vlist     : Vhof Voption : 1   # + HOF surface: map/filter/fold_left/for_all/exists/rev/nth + find_opt (Voption dep). Substrate from Vhof (open Vhof).
+Voption   : Vhof       : 1   # + HOF surface: map/bind/filter/fold/is_some_and. Substrate from Vhof.
+Vresult   : Vhof Voption : 1   # + HOF surface: map/map_error/bind/fold/to_option. Substrate from Vhof; to_option enumerates into a Voption.
+Vint      :            : 1   # + WP-4 surface: sign/pow/clamp/min3/max3 (reflected), idiv/imod (division algorithm on module-own defs -- a core-symbol law is inert cross-unit, F-W4a), native succ/pred/even/odd
+Vbool     :            : 1   # NEW (WP-4, first post-Variant-V module): bnot(via match)/band/bor/bxor/bequal native, to_int/of_int bool-as-data; V-acceptance findings in notes/vbool.md
+Viarray   : Vhof       : 1   # + WP-4 read-only queries for_all/any/mem (loop over the opaque iarray theory); construction ops (map/sub/of_list/fill/blit) unshippable -- no constructor (L10/N2)
+Vset_bst  :            : 1
+Vmap      : Vlist Voption Vhof : 1   # keys enumerates into a Vlist; Voption+Vhof staged transitively (VoxSig_Vlist imports both). WP-3: + mem (bool), singleton, union (a-biased). DEFERRED: cardinal (shadowing), fold (ternary-kit arity), bindings (no tuple sort; keys+find covers) — notes/vmap.md
+Vset      : Vset_bst Vlist Voption Vhof : 2   # face over backend; elements enumerates into a Vlist; Voption+Vhof staged transitively (via Vlist's VoxSig). WP-3: + singleton, union, inter, diff, cardinal, subset (bool), fold (relational + order-free sum/count exact laws). inter=a\(a\b) uses exposed backend delete only; specs match Vpset (union/singleton) — notes/vset.md
+
+# --- v1.5 polymorphic wave (Vplist / Vpmap / Vpset) — SLOT, per poly study ---
+# check_poly.sh will verify these against v1 artifacts + the ORDERED/EQ element
+# signature; append here as they land.
+Vplist    : Vhof       : 3   # + eq-param layer (WP-2): bool mem/remove + dedup at abstract 'a via a client decider (eqHolds from Vhof). open Vhof.
+Vpset     : Vhof       : 3   # + eq-param layer (WP-2): bool mem/remove at abstract 'a via a client decider (eqHolds from Vhof). open Vhof.
+Vpmap      :            : 3   # 'v-valued int-keyed map; LEAF (empty/is_empty/find/add/remove, no keys op → no Vlist/Vplist dep)
+
+# --- capstone: higher-order relational specs (task #68 lambda reflection) ---
+Vrel       : Vhof       : 4   # relational HOF (iter/map/fold/fold3/filter/compose2); LEAF (own ilist); relation = dependent fn-type param supplied as call-site lambda or [@@vox.reflect] value; IntRel/IntPred/IntRel3 abbrev, lifting defs expose, toNat bridges public, listRel_len obligation; EXACT-output law family (relIter_succ_exact, relFold_{sum,count}_exact) as .mli-only public theorems (graph-relation completeness); fold3 = element-aware ternary-relation fold (relFold + il_sum)
+
+# --- functor wave: ORD-functor containers (int-representable keys) + poly fallback ---
+# The Map.Make(ORD)/Set.Make(ORD) shape, productized from the proven functor
+# probe (testsuite/tests/vox/mechanics/lean_functor_bst.ml). Model + tree bridge
+# at FILE TOP LEVEL (blocks are unit-level); functor body names Vox_<Unit>_tree.
+# Cross-unit instantiation works (F-1 freshening); a sign-flipped comparator is
+# DISPROVED (validated counterexample). LEAF modules (no stdlib deps).
+Vmap_make  :            : 3   # HEADLINE: Map.Make(ORD), int-repr ordered KEYS + int values, char-function model MMap=Int->MOpt (funext = map equality → STRUCTURAL specs _ = m_add k v m), OVERWRITE add. Ships empty/find/add/mem/singleton + 3 opaque-op laws (m_find_empty/add_eq/add_ne). DEFERRED: remove (ordered BST delete). notes/vmap_make.md
+Vset_make  :            : 3   # Set.Make(ORD), int-repr ordered elts, char-function model ISet=Int->Prop (bst-carrying tree). Ships empty/add/mem/singleton + 3 opaque-op laws (mem_s_ins/_ne/_empty). NO cardinal (char-fn has no support size — the model trade vs flat Vset). notes/vset_make.md
+Vpmap_ord  : Vhof       : 3   # PARAMETER-STYLE poly fallback: abstract-KEY 'a map, int values, comparator threaded as a CALL-SITE VALUE (eq/ord-param, Vpset route). Ships empty(unspecced F-B2)/singleton/add/mem(relational, up to threaded e). find ABSENT (functional value at abstract key needs DecidableEq — the crisp functor-vs-param delta). notes/vpmap_ord.md

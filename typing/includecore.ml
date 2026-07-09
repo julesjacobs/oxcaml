@@ -418,6 +418,7 @@ type type_mismatch =
   | Fixed_representation of position
   | Jkind of Jkind.Violation.t
   | Unsafe_mode_crossing of unsafe_mode_crossing_mismatch
+  | Vox_refines of Types.vox_refines * Types.vox_refines
 
 type jkind_mismatch =
   | Manifest_missing
@@ -787,11 +788,45 @@ let report_unsafe_mode_crossing_mismatch first second ppf e =
       first print_unsafe_mode_crossing first_umc
       second print_unsafe_mode_crossing second_umc
 
+(* vox: render a refinement sort readably for inclusion diagnostics. *)
+let rec show_vox_sort (vs : Types.vox_sort) =
+  match vs with
+  | Vs_int -> "int"
+  | Vs_bool -> "bool"
+  | Vs_param i ->
+    if i < 26 then Printf.sprintf "'%c" (Char.chr (Char.code 'a' + i))
+    else Printf.sprintf "'v%d" i
+  | Vs_tuple ss ->
+    "(" ^ String.concat " * " (List.map show_vox_sort ss) ^ ")"
+  | Vs_data (p, []) -> Path.name p
+  | Vs_data (p, ss) ->
+    "("
+    ^ Path.name p ^ " "
+    ^ String.concat " " (List.map show_vox_sort ss)
+    ^ ")"
+  | Vs_opaque -> "<opaque>"
+  | Vs_lean (name, []) -> "lean \"" ^ name ^ "\""
+  | Vs_lean (name, args) ->
+    "lean \"" ^ name ^ "\" ("
+    ^ String.concat " " (List.map show_vox_sort args)
+    ^ ")"
+  | Vs_fact (s, pred) ->
+    show_vox_sort s ^ "{ " ^ Refinement.to_string pred ^ " }"
+
+let show_vox_refines (r : Types.vox_refines) =
+  match r with
+  | Types.Vr_top -> "no refines"
+  | Types.Vr_sort vs -> "refines " ^ show_vox_sort vs
+
 let report_type_mismatch first second decl env ppf err =
   let pr fmt = Fmt.fprintf ppf fmt in
   match err with
   | Arity ->
       pr "They have different arities."
+  | Vox_refines (r1, r2) ->
+      pr "%s declares %s where %s declares %s."
+        (String.capitalize_ascii second) (show_vox_refines r2)
+        first (show_vox_refines r1)
   | Privacy err ->
       report_privacy_mismatch ppf err
   | Kind err ->
@@ -1589,7 +1624,200 @@ let type_manifest env ty1 ty2 priv2 kind2 =
    context E where all type constructors are equal). *)
 let type_declarations_consistency env decl1 decl2 =
   if decl1.type_arity <> decl2.type_arity then Some Arity
-  else match privacy_mismatch env decl1 decl2 with
+  else
+    (* vox: refines is declaration metadata, checked once, here: the
+       interface may not claim a logical modeling the implementation
+       does not carry.  An unconstrained interface accepts anything
+       (abstraction erases the modeling, soundly).  The implementation
+       side falls back to the STRUCTURAL modeling of its manifest
+       (decl rebuilds do not thread the field, and [type t = int]
+       must satisfy [refines int] unannotated). *)
+    let vox_sort_attr (decl : Types.type_declaration) =
+      List.find_map
+        (fun (a : Parsetree.attribute) ->
+          if not (String.equal a.attr_name.txt "vox.sort")
+          then None
+          else
+            match a.attr_payload with
+            | PStr
+                [ { pstr_desc =
+                      Pstr_eval
+                        ( { pexp_desc =
+                              Pexp_ident { txt = Longident.Lident "int"; _ }
+                          ; _ }
+                        , _ )
+                  ; _ } ] -> Some (Types.Vr_sort Types.Vs_int)
+            | PStr
+                [ { pstr_desc =
+                      Pstr_eval
+                        ( { pexp_desc =
+                              Pexp_ident { txt = Longident.Lident "bool"; _ }
+                          ; _ }
+                        , _ )
+                  ; _ } ] -> Some (Types.Vr_sort Types.Vs_bool)
+            | PStr
+                [ { pstr_desc =
+                      Pstr_eval
+                        ( { pexp_desc =
+                              Pexp_apply
+                                ( { pexp_desc =
+                                      Pexp_ident
+                                        { txt = Longident.Lident "lean"; _ }
+                                  ; _ }
+                                , [ ( Nolabel
+                                    , { pexp_desc =
+                                          Pexp_constant
+                                            { pconst_desc =
+                                                Pconst_string (name, _, _)
+                                            ; _ }
+                                      ; _ } )
+                                  ] )
+                          ; _ }
+                        , _ )
+                  ; _ } ] ->
+              Some
+                (Types.Vr_sort
+                   (Types.Vs_lean
+                      (name, List.mapi (fun i _ -> Types.Vs_param i) decl.type_params)))
+            | _ -> None)
+        decl.type_attributes
+    in
+    (* Structural equality on sorts.  [Vs_param] is positional, but a
+       [Path.t] inside [Vs_data] must compare by [Path.same] (stamps make
+       [(=)] wrong across rebuilds). *)
+    let rec vox_sort_equal (s1 : Types.vox_sort) (s2 : Types.vox_sort) =
+      match s1, s2 with
+      | Vs_int, Vs_int | Vs_bool, Vs_bool | Vs_opaque, Vs_opaque -> true
+      | Vs_lean (n1, a1), Vs_lean (n2, a2) ->
+        String.equal n1 n2
+        && List.length a1 = List.length a2
+        && List.for_all2 vox_sort_equal a1 a2
+      | Vs_param i, Vs_param j -> Int.equal i j
+      | Vs_tuple ss1, Vs_tuple ss2 ->
+        List.length ss1 = List.length ss2
+        && List.for_all2 vox_sort_equal ss1 ss2
+      | Vs_data (p1, ss1), Vs_data (p2, ss2) ->
+        Path.same p1 p2
+        && List.length ss1 = List.length ss2
+        && List.for_all2 vox_sort_equal ss1 ss2
+      | Vs_fact (s1, p1), Vs_fact (s2, p2) ->
+        (* Preds are closed, so no binder pairing is needed. *)
+        vox_sort_equal s1 s2 && Refinement.equal p1 p2
+      | ( ( Vs_int | Vs_bool | Vs_tuple _ | Vs_data _ | Vs_param _
+          | Vs_opaque | Vs_lean _ | Vs_fact _ )
+        , _ ) ->
+        false
+    in
+    let vox_refines_equal (r1 : Types.vox_refines) (r2 : Types.vox_refines) =
+      match r1, r2 with
+      | Vr_top, Vr_top -> true
+      | Vr_sort s1, Vr_sort s2 -> vox_sort_equal s1 s2
+      | (Vr_top | Vr_sort _), _ -> false
+    in
+    (* The STRUCTURAL modeling of a manifest, best-effort: a predef
+       int/bool head, an unlabeled tuple, or a head that declares its own
+       [refines] (instantiated at the argument sorts).  No [expand_head]
+       (moves GADT-equation ambiguity), and no fallback for a plain
+       variant/record (a manifest never silently CLAIMS a datatype
+       modeling). *)
+    let rec subst_sort args : Types.vox_sort -> Types.vox_sort = function
+      | Vs_param i ->
+        (match List.nth_opt args i with Some s -> s | None -> Vs_opaque)
+      | Vs_tuple ss -> Vs_tuple (List.map (subst_sort args) ss)
+      | Vs_data (p, ss) -> Vs_data (p, List.map (subst_sort args) ss)
+      | Vs_fact (s, pred) -> Vs_fact (subst_sort args s, pred)
+      | Vs_lean (n, largs) -> Vs_lean (n, List.map (subst_sort args) largs)
+      | (Vs_int | Vs_bool | Vs_opaque) as s -> s
+    in
+    (* [decl1]'s own type parameters, positionally: a manifest that
+       mentions one models at that [Vs_param], so a PARAMETERIZED
+       manifest's structural sort matches the interface's declared
+       [refines] (whose [Vs_param]s are these same positions). *)
+    let param_index ty =
+      let id = get_id ty in
+      let rec find i = function
+        | [] -> None
+        | q :: rest -> if Int.equal (get_id q) id then Some i else find (i + 1) rest
+      in
+      find 0 decl1.type_params
+    in
+    let rec sort_of_manifest ty : Types.vox_sort option =
+      match get_desc ty with
+      | Tvar _ -> Option.map (fun i -> Types.Vs_param i) (param_index ty)
+      | Tconstr (p, [], _) when Path.same p Predef.path_int -> Some Vs_int
+      | Tconstr (p, [], _) when Path.same p Predef.path_bool -> Some Vs_bool
+      (* A refined manifest satisfies a [refines (int{ ... })] interface
+         HONESTLY: its structural modeling carries the same invariant. *)
+      | Trefine (skel, [], pred) ->
+        (match sort_of_manifest skel with
+         | Some s -> Some (Types.Vs_fact (s, pred))
+         | None -> None)
+      | Trefine (_, maps, _) ->
+        (* a via manifest denotes at its last map's target sort.  Read it
+           from the map's TARGET TYPE, which mentions [decl1]'s own type
+           parameters, so it matches the interface's [refines] positionally;
+           the stored [vm_sort] carries the target head's OWN parameter
+           indices (correct only when the target's arguments are the
+           declaration's parameters in order). *)
+        sort_of_manifest (List.nth maps (List.length maps - 1)).Types.vm_target
+      | Tconstr (p, args, _) ->
+        (match Env.find_type p env with
+         | exception Not_found -> None
+         | decl ->
+           (match Jkind.get_vox_refines decl.type_jkind with
+            | Types.Vr_sort s ->
+              (match Misc.Stdlib.List.map_option sort_of_manifest args with
+               | Some arg_sorts -> Some (subst_sort arg_sorts s)
+               | None -> None)
+            | Types.Vr_top ->
+              (* A simple variant/record manifest is structurally its
+                 own datatype sort: [type s = ilist] satisfies
+                 [refines (ilist)] HONESTLY, like [type t = int]
+                 satisfies [refines int]. *)
+              (match
+                 ( Ctype.vox_simple_variant env p,
+                   Ctype.vox_simple_record env p )
+               with
+               | None, None -> None
+               | Some _, _ | _, Some _ ->
+                 (match
+                    Misc.Stdlib.List.map_option sort_of_manifest args
+                  with
+                  | Some arg_sorts -> Some (Types.Vs_data (p, arg_sorts))
+                  | None -> None))))
+      | Ttuple comps
+        when List.length comps >= 2
+             && List.for_all (fun (l, _) -> Option.is_none l) comps ->
+        (match
+           Misc.Stdlib.List.map_option (fun (_, t) -> sort_of_manifest t) comps
+         with
+         | Some ss -> Some (Vs_tuple ss)
+         | None -> None)
+      | _ -> None
+    in
+    let r1 =
+      match Jkind.get_vox_refines decl1.type_jkind with
+      | Types.Vr_sort _ as r -> r
+      | Types.Vr_top ->
+        match vox_sort_attr decl1 with
+        | Some r -> r
+        | None ->
+        (match decl1.type_manifest with
+         | None -> Types.Vr_top
+         | Some ty ->
+           (match sort_of_manifest ty with
+            | Some s -> Types.Vr_sort s
+            | None -> Types.Vr_top))
+    in
+    let r2 =
+      match Jkind.get_vox_refines decl2.type_jkind with
+      | Types.Vr_sort _ as r -> r
+      | Types.Vr_top ->
+        (match vox_sort_attr decl2 with Some r -> r | None -> Types.Vr_top)
+    in
+    if not (match r2 with Types.Vr_top -> true | _ -> vox_refines_equal r1 r2)
+    then Some (Vox_refines (r1, r2))
+    else match privacy_mismatch env decl1 decl2 with
     | Some err -> Some (Privacy err)
     | None -> None
 

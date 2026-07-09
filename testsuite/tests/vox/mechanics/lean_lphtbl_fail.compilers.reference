@@ -1,0 +1,15 @@
+File "lean_lphtbl_fail.ml", line 26, characters 15-18:
+26 |     let ks2 = (ks1 : int varr{ pcts _ = pcts ks }) in
+                    ^^^
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
+       Goal: pcts ks1 = pcts ks
+Hypotheses:
+  ks1 = fst *unknown2*
+  vs1 = snd *unknown2*
+  pcts ks1 = pinsk 3 7 (pcts ks) && wf (pcts ks1)
+  pcts vs1 = pinsv 3 7 (pcts ks) (pcts vs) && plen (pcts vs1) = 8
+  ks = fst *unknown1*
+  vs = snd *unknown1*
+  wf (pcts ks) && pconst (pcts ks) (-1)
+  plen (pcts vs) = 8
+(lean: error: `grind` failed)

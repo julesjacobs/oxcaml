@@ -1427,7 +1427,7 @@ let rec tree_of_modal_typexp mode modal ty =
         let non_gen = is_non_gen mode ty in
         let name_gen = Variable_names.new_var_name ~non_gen ty in
         Otyp_var (non_gen, Variable_names.name_of_type name_gen tty)
-    | Tarrow ((l, marg, mret), ty1, ty2, _) ->
+    | Tarrow ((l, marg, mret, vox_binder), ty1, ty2, _) ->
         let lab =
           if !print_labels || is_omittable l then outcome_label l
           else Nolabel
@@ -1448,6 +1448,13 @@ let rec tree_of_modal_typexp mode modal ty =
             | _ -> Otyp_stuff "<hidden>"
           else
             tree_of_typexp mode arg_mode ty1
+        in
+        let t1 =
+          (* vox: display the dependent binder, [(x : dom) -> ...]; the
+             printed form reparses to an alpha-equivalent type. *)
+          match vox_binder with
+          | Some b -> Otyp_vox_named (Ident.name b, t1)
+          | None -> t1
         in
         let acc_mode = curry_mode alloc_mode arg_mode in
         let modal = Arrow_return {acc = acc_mode; mode = mret} in
@@ -1591,6 +1598,20 @@ let rec tree_of_modal_typexp mode modal ty =
       let tyl' = apply_subst s [ty] in
       Internal_names.add p';
       Otyp_constr (tree_of_path (Some Type) p', tree_of_typlist mode tyl')
+    | Trefine (ty, maps, p) ->
+      (* vox: compact surface format [ty{ pred }], with [via f] per
+         abstraction-function layer. *)
+      let target_name (m : Types.vox_map) =
+        match get_desc m.vm_target with
+        | Tconstr (p, _, _) -> Path.name p
+        | _ -> "_"
+      in
+      let s =
+        List.fold_left
+          (fun acc m -> acc ^ " via (" ^ m.Types.vm_fn ^ " : " ^ target_name m ^ ")")
+          (Refinement.to_string p) maps
+      in
+      Otyp_refine (tree_of_typexp mode Alloc.Const.legacy ty, s)
   in
   Aliases.remove_delay px;
   alias_nongen_row mode px ty;

@@ -76,6 +76,8 @@ _profile/
 /configure
 /ocaml-*.cache
 /config.log
+/configure.log
+/build.log
 /config.status
 /configure~
 /flexlink.opt
@@ -387,3 +389,6 @@ ocaml/primitives.new
 /yacc/.gdb_history
 
 /natdynlinkops
+build.log
+configure.log
+vox_stdlib/_artifacts/

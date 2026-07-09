@@ -1,0 +1,44 @@
+(* TEST
+ script = "sh ${test_source_directory}/../has-lean.sh";
+ script;
+ setup-ocamlc.byte-build-env;
+ ocamlc.byte;
+ check-ocamlc.byte-output;
+*)
+
+(* Embedded prelude: the spec functions live INSIDE the module as a
+   [%%vox.lean] block -- no -vox-prelude file.  A subset of
+   lean_spec.ml's proofs in that style: every obligation is really
+   discharged by grind, the recursive ones inductively.  Blocks may appear anywhere; they are
+   emitted (in source order) into every solver input for the module,
+   after the datatype declarations, whose solver-side names are stable
+   (Vox_<Unit>_<type>). *)
+
+type ilist =
+  | Nil
+  | Cons of int * ilist
+
+[%%vox.lean {lean|
+@[grind] def len : Vox_Lean_embed_ilist -> Int
+  | .Nil => 0
+  | .Cons _ t => 1 + len t
+|lean}]
+
+let l2 : ilist{ len _ = 2 } = Cons (1, Cons (2, Nil))
+
+let push (l : ilist{ len _ = 2 }) : ilist{ len _ = 3 } = Cons (9, l)
+
+(* Later blocks may use earlier blocks' definitions (source order). *)
+[%%vox.lean {lean|
+@[grind] def nonempty (l : Vox_Lean_embed_ilist) : Prop := len l > 0
+|lean}]
+
+let ne : ilist{ nonempty _ } = Cons (7, Nil)
+
+(* The textbook inductive proof, through an embedded measure. *)
+let rec append (a : ilist) (b : ilist) : ilist{ len _ = len a + len b } =
+  match a with
+  | Nil -> b
+  | Cons (h, t) ->
+    let r = append t b in
+    Cons (h, r)

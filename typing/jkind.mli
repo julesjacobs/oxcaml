@@ -915,3 +915,10 @@ module Debug_printers : sig
     val t : Format.formatter -> 'd Const.t -> unit
   end
 end
+
+(* vox: accessors for the refines component -- declaration metadata,
+   never consulted by the kind algebra. *)
+val get_vox_refines : ('l * 'r) Types.jkind -> Types.vox_refines
+
+val set_vox_refines :
+  Types.vox_refines -> ('l * 'r) Types.jkind -> ('l * 'r) Types.jkind

@@ -90,6 +90,13 @@ module type Core_options = sig
   val _dno_locations : unit -> unit
   val _dlocations : unit -> unit
   val _dsource : unit -> unit
+  val _dump_vc : unit -> unit
+  val _dump_vc_provenance : unit -> unit
+  val _vox_dump_states : unit -> unit
+  val _vox_dry_run : unit -> unit
+  val _vox_solver_path : string -> unit
+  val _vox_prelude : string -> unit
+  val _vox_explain_proofs : unit -> unit
   val _dparsetree : unit -> unit
   val _dparsetree_loc_ghost_invariants : unit -> unit
   val _dtypedtree : unit -> unit

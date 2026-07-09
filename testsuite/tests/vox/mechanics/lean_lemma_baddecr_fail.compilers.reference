@@ -1,0 +1,7 @@
+File "lean_lemma_baddecr_fail.ml", lines 20-23, characters 0-13:
+20 | let rec lemma_dbl (n : int{ 0 <= _ }) : unit{ dbl n = 2 * n } =
+21 |   if n <= 0 then () else lemma_dbl (n - 1)
+22 | [@@vox.decreases 0]
+23 | [@@vox.lemma]
+Error: vox: the [@vox.lemma] lemma_dbl was not proved (is the proposition true, and does the induction terminate?)
+(lean: error: `grind` failed)

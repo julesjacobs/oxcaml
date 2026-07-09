@@ -1,0 +1,4 @@
+File "scope_selfcapture_annotation.ml", line 28, characters 4-5:
+28 | let x : int{ _ = x } = 3
+         ^
+Error: vox: the type of x carries a refinement mentioning x, which may not appear in a module-level type; annotate with a dependent arrow ((x : ...) -> ...) or a self-contained refinement

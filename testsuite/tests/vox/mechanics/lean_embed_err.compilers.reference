@@ -1,0 +1,7 @@
+File "lean_embed_err.ml", lines 15-18, characters 0-7:
+15 | [%%vox.lean {lean|
+16 | @[grind] def spec_id (n : Int) : Int := n
+17 | def broken : Int := unknown_identifier
+18 | |lean}]
+Error: vox: error in this solver block (line 3 of the block):
+       error(lean.unknownIdentifier): Unknown identifier `unknown_identifier`

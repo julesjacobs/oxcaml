@@ -1037,6 +1037,8 @@ let maybe_pmod_constraint mode expr =
 %token FUN                    "fun"
 %token FUNCTION               "function"
 %token FUNCTOR                "functor"
+%token ASSUME                 "assume_"
+%token ASSUME_UNCHECKED       "assume_unchecked_"
 %token GLOBAL                 "global_"
 %token GREATER                ">"
 %token GREATERRBRACE          ">}"
@@ -1115,6 +1117,9 @@ let maybe_pmod_constraint mode expr =
 %token RBRACKET               "]"
 %token RBRACKETGREATER        "]>"
 %token REC                    "rec"
+%token REFINE                 "refine_"
+%token FORALL                 "forall_"
+%token EXISTS                 "exists_"
 %token REPR                   "repr_"
 %token RPAREN                 ")"
 %token SEMI                   ";"
@@ -1136,6 +1141,7 @@ let maybe_pmod_constraint mode expr =
 %token THEN                   "then"
 %token TILDE                  "~"
 %token TO                     "to"
+%token TOTAL                  "total_"
 %token TRUE                   "true"
 %token TRY                    "try"
 %token TYPE                   "type"
@@ -2893,6 +2899,21 @@ fun_expr:
      { mkexp_constraint ~loc:$sloc ~exp ~cty:None ~modes:[mode] }
   | EXCLAVE seq_expr
      { mkexp_exclave ~loc:$sloc ~kwd_loc:($loc($1)) $2 }
+  | REFINE seq_expr
+     { mkexp ~loc:$sloc
+         (Pexp_extension
+            ({ txt = "vox.refine"; loc = make_loc $loc($1) },
+             PStr [ Str.eval $2 ])) }
+  | ASSUME seq_expr
+     { mkexp ~loc:$sloc
+         (Pexp_extension
+            ({ txt = "vox.assume"; loc = make_loc $loc($1) },
+             PStr [ Str.eval $2 ])) }
+  | ASSUME_UNCHECKED seq_expr
+     { mkexp ~loc:$sloc
+         (Pexp_extension
+            ({ txt = "vox.assume_unchecked"; loc = make_loc $loc($1) },
+             PStr [ Str.eval $2 ])) }
 ;
 %inline expr:
   | or_function(fun_expr) { $1 }
@@ -3355,6 +3376,18 @@ let_binding_body_no_punning:
 let_binding_body:
   | poly_flag = poly_flag let_binding_body_no_punning
       { let p,e,c,modes = $2 in (p,e,c,modes,false,poly_flag) }
+  (* vox: [let rec total_ f x = e] marks the binding as a TOTAL
+     (reflected) function; the marker rides the binder pattern as a
+     "vox.total" attribute. *)
+  | TOTAL poly_flag = poly_flag body = let_binding_body_no_punning
+      { let p,e,c,modes = body in
+        let attr =
+          mk_attr ~loc:(make_loc $loc($1))
+            { txt = "vox.total"; loc = make_loc $loc($1) }
+            (PStr [])
+        in
+        let p = { p with ppat_attributes = attr :: p.ppat_attributes } in
+        (p,e,c,modes,false,poly_flag) }
 /* BEGIN AVOID */
   | poly_flag = poly_flag val_ident %prec below_HASH
       { (mkpatvar ~loc:$loc($2) $2, ghexpvar ~loc:$loc($2) $2,
@@ -3744,6 +3777,11 @@ pattern_gen:
     ) { $1 }
   | LAZY ext_attributes simple_pattern
       { mkpat_attrs ~loc:$sloc (Ppat_lazy $3) $2}
+  | REFINE simple_pattern
+      { mkpat ~loc:$sloc
+          (Ppat_extension
+             ({ txt = "vox.refine"; loc = make_loc $loc($1) },
+              PPat ($2, None))) }
 ;
 
 simple_pattern:
@@ -3946,12 +3984,26 @@ value_description:
   ext = ext
   attrs1 = attributes
   poly_flag = poly_flag
+  total = ioption(TOTAL)
   id = mkrhs(val_ident)
   COLON
   ty = possibly_poly(core_type)
   modalities = optional_atat_modalities_expr
   attrs2 = post_item_attributes
     { let attrs = attrs1 @ attrs2 in
+      (* vox: [val total_ f : ...] marks the value as a TOTAL
+         (reflected) spec function, exactly like [let rec total_ f];
+         the marker rides the value description's attributes into the
+         .cmi, so clients name [f] in refinements. *)
+      let attrs =
+        match total with
+        | None -> attrs
+        | Some () ->
+          mk_attr ~loc:(make_loc $loc(total))
+            { txt = "vox.total"; loc = make_loc $loc(total) }
+            (PStr [])
+          :: attrs
+      in
       let loc = make_loc $sloc in
       let docs = symbol_docs $sloc in
       Val.mk id ty ~poly:poly_flag ~attrs ~modalities ~loc ~docs,
@@ -4123,13 +4175,24 @@ jkind_desc_gen(self):
       in
       Pjk_mod ($1, modes)
     }
-  | name = mkrhs(type_longident) axes = mkrhs(LIDENT)* {
-      match axes with
-      | [] -> Pjk_abbreviation name
-      | _ :: _ ->
+  | name = mkrhs(type_longident) axes = mkrhs(LIDENT)*
+    refty = ioption(delimited(LPAREN, core_type, RPAREN)) {
+      match axes, refty with
+      | [], None -> Pjk_abbreviation name
+      | _ :: _, None ->
         Pjk_operator
           ({ pjka_loc = make_loc $loc(name);
              pjka_desc = Pjk_abbreviation name }, axes)
+      | [ { Location.txt = "refines"; _ } ], Some ty ->
+        (* vox: [value refines (ty)] -- the general refinement modeling,
+           a base kind followed by [refines] and a parenthesized core
+           type.  The bare forms [refines int|bool] stay on the axis
+           path above. *)
+        Pjk_refines
+          ({ pjka_loc = make_loc $loc(name);
+             pjka_desc = Pjk_abbreviation name }, ty)
+      | _, Some _ ->
+        expecting $loc(refty) "refines"
     }
   | KIND_OF ty=core_type %prec below_LBRACKETAT {
       Pjk_kind_of ty
@@ -4912,6 +4975,12 @@ tuple_type:
 delimited_type_supporting_local_open:
   | LPAREN type_ = core_type RPAREN
       { type_ }
+  (* vox named type [(y : ty)].  Typetexp gives it meaning: as an
+     arrow domain it is a dependent binder ([(x : int) -> ...]);
+     elsewhere [ty] must be refined and [y] names the bound value
+     variable ([(y : int{ y > 3 })]). *)
+  | LPAREN type_ = vox_named_type RPAREN
+      { type_ }
   | LPAREN MODULE ext_attrs = ext_attributes package_type = package_type_ RPAREN
       { mktyp_attrs ~loc:$sloc (Ptyp_package package_type) ext_attrs }
   | mktyp(
@@ -5009,7 +5078,213 @@ atomic_type:
       { mktyp ~loc:$sloc (Ptyp_any (Some jkind)) }
   | LPAREN TYPE COLON jkind=jkind_annotation RPAREN
       { mktyp ~loc:$loc (Ptyp_of_kind jkind) }
+  (* vox compact refined type [ty{ pred }]: postfix braces on an
+     atomic type; [_] denotes the bound value variable.  The predicate
+     has its own small grammar (the expression grammar has no [_]). *)
+  | ty = atomic_type LBRACE pred = vox_pred RBRACE
+      { mktyp ~loc:$sloc
+          (Ptyp_extension
+             ({ txt = "vox.refine"; loc = make_loc $sloc },
+              PStr [ Str.eval (Exp.constraint_ pred (Some ty) []) ])) }
+  (* vox refined type [{v:ty | pred}].  The [mutable_or_global_flag] and
+     [possibly_poly(core_type_no_attr)] mirror the record
+     [label_declaration] grammar exactly so that LR states stay merged
+     until BAR (refined type) vs SEMI/RBRACE (record declaration).
+     After BAR the production is committed, so the predicate uses the
+     same [vox_pred] grammar as the compact form -- quantifiers,
+     implication, and [_] work in both spellings. *)
+  | LBRACE flag=mutable_or_global_flag bound=LIDENT COLON
+    ty=possibly_poly(core_type_no_attr) BAR pred=vox_pred RBRACE
+      { (match flag with
+         | Immutable, [] -> ()
+         | _ -> expecting $loc(flag) "an unqualified refinement variable");
+        (* The bound variable's name rides the extension name. *)
+        mktyp ~loc:$sloc
+          (Ptyp_extension
+             ({ txt = "vox.refine." ^ bound; loc = make_loc $sloc },
+              PStr [ Str.eval (Exp.constraint_ pred (Some ty) []) ])) }
 
+
+(* vox: a named type [y : ty]; see its two use sites. *)
+vox_named_type:
+  | mktyp(
+      l = LIDENT COLON ty = atomic_type
+        { Ptyp_extension
+            ({ txt = "vox.named." ^ l; loc = make_loc $sloc }, PTyp ty) }
+    )
+    { $1 }
+;
+
+(* vox: the predicate sublanguage of compact refined types [ty{ pred }].
+   A dedicated grammar rather than [seq_expr] so that [_] (the bound
+   value variable) is expressible; it builds ordinary [Parsetree]
+   expressions ([_] becomes the identifier "_", which only the vox
+   elaborator understands). *)
+%inline vox_cmp_op:
+  | EQUAL { "=" }
+  | LESS { "<" }
+  | GREATER { ">" }
+  | op = INFIXOP0 { op }
+;
+
+(* Quantifiers bind weakest and extend maximally right, like [fun];
+   implication [p -> q] sits just above them, right-associative, and
+   desugars to [not p || q] (so the printed form, which shows the
+   desugaring, reparses).  Both live only at the top of a predicate or
+   inside parentheses.  A quantifier is encoded as an application of
+   the (keyword, hence unspoofable) ident [forall_]/[exists_] to the
+   binder names and the body; the elaborator peels it back apart. *)
+vox_pred:
+  | p = vox_pred_or { p }
+  | a = vox_pred_or MINUSGREATER b = vox_pred
+      { (* native implication; the marker operator is unspoofable in
+           the predicate grammar (it has no operator atoms) *)
+        mkexp ~loc:$sloc (mkinfix a (mkoperator ~loc:$loc($2) "==>") b) }
+  | q = vox_quant_head bs = nonempty_list(mkrhs(LIDENT)) DOT body = vox_pred
+      { let binder b =
+          Nolabel,
+          mkexp ~loc:(b.loc.Location.loc_start, b.loc.Location.loc_end)
+            (Pexp_ident { b with txt = Longident.Lident b.txt })
+        in
+        mkexp ~loc:$sloc
+          (Pexp_apply
+             (mkexpvar ~loc:$loc(q) q,
+              List.map binder bs @ [ Nolabel, body ])) }
+;
+
+%inline vox_quant_head:
+  | FORALL { "forall_" }
+  | EXISTS { "exists_" }
+;
+
+vox_pred_or:
+  | a = vox_pred_or BARBAR b = vox_pred_and
+      { mkexp ~loc:$sloc (mkinfix a (mkoperator ~loc:$loc($2) "||") b) }
+  | p = vox_pred_and { p }
+;
+
+vox_pred_and:
+  | a = vox_pred_and AMPERAMPER b = vox_pred_cmp
+      { mkexp ~loc:$sloc (mkinfix a (mkoperator ~loc:$loc($2) "&&") b) }
+  | p = vox_pred_cmp { p }
+;
+
+vox_pred_cmp:
+  | a = vox_pred_add op = vox_cmp_op b = vox_pred_add
+      { mkexp ~loc:$sloc (mkinfix a (mkoperator ~loc:$loc(op) op) b) }
+  | p = vox_pred_add { p }
+;
+
+vox_pred_add:
+  | a = vox_pred_add PLUS b = vox_pred_mul
+      { mkexp ~loc:$sloc (mkinfix a (mkoperator ~loc:$loc($2) "+") b) }
+  | a = vox_pred_add MINUS b = vox_pred_mul
+      { mkexp ~loc:$sloc (mkinfix a (mkoperator ~loc:$loc($2) "-") b) }
+  | p = vox_pred_mul { p }
+;
+
+vox_pred_mul:
+  | a = vox_pred_mul STAR b = vox_pred_app
+      { mkexp ~loc:$sloc (mkinfix a (mkoperator ~loc:$loc($2) "*") b) }
+  | a = vox_pred_mul op = INFIXOP3 b = vox_pred_app
+      { (* Of the INFIXOP3 tokens only [/] is in the logic; the others
+           (land, lor, ...) must error rather than silently become
+           spec functions. *)
+        if not (String.equal op "/") then expecting $loc(op) "/";
+        mkexp ~loc:$sloc (mkinfix a (mkoperator ~loc:$loc(op) "/") b) }
+  | a = vox_pred_mul MOD b = vox_pred_app
+      { mkexp ~loc:$sloc (mkinfix a (mkoperator ~loc:$loc($2) "mod") b) }
+  | p = vox_pred_app { p }
+;
+
+(* Application is generic and left-nested: [len x], [mem 2 _] (curried,
+   flattened by the elaborator), and constructor application [Cons (h, t)]
+   ([mod_longident] atoms are constructors; a parenthesized comma list is
+   a tuple).  Argument atoms exclude [- INT] so that [len x - 1] stays a
+   subtraction; write [len (-1)] to apply to a negative literal. *)
+vox_pred_app:
+  | h = vox_pred_app a = vox_pred_proj
+      { mkexp ~loc:$sloc (Pexp_apply (h, [Nolabel, a])) }
+  | p = vox_pred_atom { p }
+;
+
+(* Prefix minus: [- INT] stays a (negative) literal, so [min_int] is
+   writable; any other operand is the logic's negation, elaborated as
+   [0 - p].  Minus lives at the atom level, not inside application or
+   projection operands, so [len x - 1] stays a subtraction. *)
+vox_pred_atom:
+  | p = vox_pred_proj { p }
+  | MINUS n = INT
+      { let (n, m) = n in
+        mkexp ~loc:$sloc
+          (Pexp_constant
+             (mkconst ~loc:$sloc (Pconst_integer ("-" ^ n, m)))) }
+  | MINUS p = vox_pred_arg_not_int
+      { mkexp ~loc:$sloc
+          (Pexp_apply (mkoperator ~loc:$loc($1) "~-", [Nolabel, p])) }
+;
+
+(* Field projection binds tighter than application, as in expressions:
+   [len r.x] is [len (r.x)].  Constructors are not projection bases
+   (their DOT belongs to [mod_longident]), which keeps the grammar
+   deterministic. *)
+vox_pred_proj:
+  | p = vox_pred_projbase { p }
+  | c = mkrhs(mod_longident)
+      { mkexp ~loc:$sloc (Pexp_construct (c, None)) }
+  (* Qualified lowercase identifier [M.f]: a reflected (total_)
+     function of another module, applied as a spec function. *)
+  | m = mod_longident DOT id = LIDENT
+      { mkexp ~loc:$sloc
+          (Pexp_ident
+             (mkrhs (ldot m $loc(m) id $loc(id)) $sloc)) }
+;
+
+vox_pred_projbase:
+  | a = vox_pred_projbase DOT l = mkrhs(LIDENT)
+      { mkexp ~loc:$sloc
+          (Pexp_field (a, { l with txt = Longident.Lident l.txt })) }
+  (* array indexing [a.(i)]: sugar for [Iarray.get a i], the built-in
+     theory's read (the elaborator owns the [Iarray] spelling). *)
+  | a = vox_pred_projbase DOT LPAREN i = vox_pred RPAREN
+      { let get =
+          mkexp ~loc:$sloc
+            (Pexp_ident
+               (mkrhs
+                  (Longident.Ldot
+                     (mkrhs (Longident.Lident "Iarray") $sloc,
+                      mkrhs "get" $sloc))
+                  $sloc))
+        in
+        mkexp ~loc:$sloc
+          (Pexp_apply (get, [ Nolabel, a; Nolabel, i ])) }
+  | p = vox_pred_arg { p }
+;
+
+vox_pred_arg:
+  | n = INT
+      { let (n, m) = n in
+        mkexp ~loc:$sloc
+          (Pexp_constant (mkconst ~loc:$sloc (Pconst_integer (n, m)))) }
+  | p = vox_pred_arg_not_int { p }
+;
+
+vox_pred_arg_not_int:
+  | UNDERSCORE
+      { mkexpvar ~loc:$sloc "_" }
+  | id = LIDENT
+      { mkexpvar ~loc:$sloc id }
+  | TRUE
+      { mkexp ~loc:$sloc
+          (Pexp_construct (mkrhs (Lident "true") $sloc, None)) }
+  | FALSE
+      { mkexp ~loc:$sloc
+          (Pexp_construct (mkrhs (Lident "false") $sloc, None)) }
+  | LPAREN ps = separated_nonempty_llist(COMMA, vox_pred) RPAREN
+      { match ps with
+        | [ p ] -> p
+        | ps -> mkexp ~loc:$sloc (Pexp_tuple (List.map (fun p -> None, p) ps)) }
+;
 
 (* This is the syntax of the actual type parameters in an application of
    a type constructor, such as int, int list, or (int, bool) Hashtbl.t.

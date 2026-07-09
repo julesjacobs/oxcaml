@@ -1,0 +1,968 @@
+#!/usr/bin/env python3
+"""Tests for vc_index.
+
+The parser tests use output copied BYTE-FOR-BYTE from the vox mechanics
+suite expect blocks (testsuite/tests/vox/mechanics/refines_kind.ml and
+lean_refines_fact.ml), so they pin the parser against real compiler
+output without needing a built compiler.
+
+The end-to-end tests run only when a built ocamlc is discoverable (env
+VOX_OCAMLC, else the sibling clone's _build path); they are skipped
+otherwise.
+"""
+
+import os
+import unittest
+from typing import Any, Dict, List, cast
+
+import vc_index  # pyright: ignore[reportImplicitRelativeImport]
+
+# --- byte-exact fixtures from mechanics/refines_kind.ml -------------------
+
+DUMP_TWO_NONE = """\
+Line 9, characters 26-27: vox VC:
+  goal: 0 = 0
+  hypotheses: <none>
+Line 10, characters 50-55: vox VC:
+  goal: (x + 1) = (x + 1)
+  hypotheses: <none>
+module M :
+  sig type t val zero : t{ _ = 0 } val next : (x : t) -> t{ _ = (x + 1) } end
+"""
+
+DUMP_MULTI_HYP = """\
+Line 4, characters 20-21: vox VC:
+  goal: o = 1
+  hypotheses:
+  o = (z + 1)
+  z = M.zero
+  M.zero = 0
+val one : unit -> M.t = <fun>
+"""
+
+DUMP_BYPATH = """\
+Line 8, characters 20-21: vox VC:
+  goal: 0 >= 0
+  hypotheses:
+  bound = 5
+module ByPath : sig type nat2 val zero : nat2 end
+"""
+
+# --- byte-exact fixtures from mechanics/provenance.ml (spans present) -----
+
+# A refined parameter: goal + one spanned hypothesis.
+DUMP_PROV_PARAM = """\
+Line 1, characters 58-59: vox VC:
+  goal: x > 0  @ 1.58-1.59
+  hypotheses:
+  x > 0  @ 1.15-1.16
+val use_param : int{ _ > 0 } -> int{ _ > 0 } = <fun>
+"""
+
+# A loop back-edge VC: the goal and three hypotheses carry spans, one of
+# which (x@1 >= 0) is an @-CONTAINING predicate with a trailing span; the
+# synthesized fresh-version equation (x@2 = (x@1 + 1)) carries NO span.
+DUMP_PROV_LOOP = """\
+Line 5, characters 9-32: vox VC:
+  goal: x@2 >= 0  @ 5.9-5.32
+  hypotheses:
+  1 <= i  @ 3.2-5.8
+  i <= n  @ 3.2-5.8
+  x@1 >= 0  @ 5.9-5.32
+  x@2 = (x@1 + 1)
+val loopy : int -> int{ _ >= 0 } = <fun>
+"""
+
+# --- byte-exact fixture from mechanics/lean_refines_fact.ml ---------------
+
+ERROR_FAIL = """\
+Line 3, characters 19-20:
+3 |   let refine_ r = (n : M.nat{ _ >= 1 }) in
+                       ^
+Error: vox: verification failed (lean).
+       Goal: n >= 1
+Hypotheses:
+  n >= 0
+Possible counterexample:
+  n = 0
+(lean: error: `grind` failed)
+"""
+
+# --- new verdict fixtures (mechanics/lean_disproof.ml) --------------------
+
+ERROR_DISPROVED = """\
+Line 1, characters 57-64:
+1 | let under_hyp (x : {v:int | v >= 0}) : {w:int | w >= 0} = refine_ (x - 1)
+                                                             ^^^^^^^
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
+       Goal: (x - 1) >= 0
+Hypotheses:
+  x >= 0
+Counterexample (validated -- every hypothesis holds and the goal fails here):
+  x = 0
+"""
+
+ERROR_UNPROVED = """\
+Line 1, characters 44-51:
+1 | let nonlinear_true (x : int) : {v:int | v >= 0} = refine_ (x * x)
+                                            ^^^^^^^
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
+       Goal: (x * x) >= 0
+Hypotheses: <none>
+(lean: error: `grind` failed)
+"""
+
+
+class TestParseLoc(unittest.TestCase):
+    def test_single(self):
+        rng = vc_index.parse_loc("Line 9, characters 26-27: vox VC:")
+        assert rng is not None
+        start, end = rng
+        self.assertEqual(start, {"line": 9, "col": 26})
+        self.assertEqual(end, {"line": 9, "col": 27})
+
+    def test_multi(self):
+        rng = vc_index.parse_loc("Lines 3-5, characters 6-3:")
+        assert rng is not None
+        start, end = rng
+        self.assertEqual(start, {"line": 3, "col": 6})
+        self.assertEqual(end, {"line": 5, "col": 3})
+
+    def test_none(self):
+        self.assertIsNone(vc_index.parse_loc("Error: vox: nope"))
+
+
+class TestScopeAndAnnot(unittest.TestCase):
+    def test_scope_section_parsed(self):
+        dump = (
+            'File "x.ml", line 2, characters 4-5: vox VC:\n'
+            "  goal: (0 <= i)  @ 2.4-2.5\n"
+            "  hypotheses:\n"
+            "  l = Nil  @ 1.0-1.3\n"
+            "  scope:\n"
+            "  l : ilist  ~>  Vox_X_ilist\n"
+            "  i : int  ~>  Int\n"
+            "  f : x:int -> int  ~>  VoxU\n"
+        )
+        vcs = vc_index.parse_dump(dump)
+        self.assertEqual(len(vcs), 1)
+        self.assertEqual(vcs[0]["hypotheses"], ["l = Nil"])
+        self.assertEqual(
+            vcs[0]["scope"],
+            [
+                {"name": "l", "ocaml": "ilist", "lean": "Vox_X_ilist", "span": None},
+                {"name": "i", "ocaml": "int", "lean": "Int", "span": None},
+                # a labeled-arrow type contains " : "-ish text; the name
+                # still splits off the FIRST " : ".
+                {"name": "f", "ocaml": "x:int -> int", "lean": "VoxU", "span": None},
+            ],
+        )
+
+    def test_scope_row_with_binder_span(self):
+        dump = (
+            'File "x.ml", line 3, characters 2-7: vox VC:\n'
+            "  goal: 0 <= (x + y)  @ 3.2-3.7\n"
+            "  hypotheses:\n"
+            "  0 <= x  @ 1.7-1.8\n"
+            "  scope:\n"
+            "  x : int  ~>  Int  @ 1.7-1.8\n"
+        )
+        vcs = vc_index.parse_dump(dump)
+        self.assertEqual(
+            vcs[0]["scope"],
+            [
+                {
+                    "name": "x",
+                    "ocaml": "int",
+                    "lean": "Int",
+                    "span": {
+                        "start": {"line": 1, "col": 7},
+                        "end": {"line": 1, "col": 8},
+                    },
+                }
+            ],
+        )
+
+    def test_annot_parsed(self):
+        annot = (
+            '"x.ml" 5 46 61 "x.ml" 5 46 64\n'
+            "type(\n"
+            "  ilist -> int\n"
+            ")\n"
+            "ident(\n"
+            '  def len "x.ml" 5 46 46 "x.ml" 0 0 -1\n'
+            ")\n"
+            '"x.ml" 5 46 65 "x.ml" 5 46 66\n'
+            "type(\n"
+            "  ilist\n"
+            ")\n"
+        )
+        types = vc_index.parse_annot(annot)
+        self.assertEqual(len(types), 2)
+        self.assertEqual(
+            types[0],
+            {
+                "start": {"line": 5, "col": 15},
+                "end": {"line": 5, "col": 18},
+                "type": "ilist -> int",
+            },
+        )
+        self.assertEqual(types[1]["type"], "ilist")
+
+
+class TestParseStates(unittest.TestCase):
+    def test_states_parsed(self):
+        dump = (
+            'File "x.ml", line 2, characters 25-26: vox VC:\n'
+            "  goal: 7 = 7  @ 2.25-2.26\n"
+            "  hypotheses:\n"
+            "  0 <= x  @ 1.7-1.8\n"
+            'File "x.ml", lines 2-3, characters 2-7: vox state:\n'
+            "  hypotheses:\n"
+            "  0 <= x  @ 1.7-1.8\n"
+            "  scope:\n"
+            "  x : int  ~>  Int  @ 1.7-1.8\n"
+            'File "x.ml", line 3, characters 2-7: vox state:\n'
+            "  hypotheses: <none>\n"
+            "  scope:\n"
+            "  a : ilist  ~>  Vox_X_ilist  @ 1.2-1.3\n"
+        )
+        vcs = vc_index.parse_dump(dump)
+        self.assertEqual(len(vcs), 1)  # the state blocks are not VCs
+        states = vc_index.parse_states(dump)
+        self.assertEqual(len(states), 2)
+        st = states[0]
+        self.assertEqual(st["start"], {"line": 2, "col": 2})
+        self.assertEqual(st["end"], {"line": 3, "col": 7})
+        self.assertEqual(st["hypotheses"], ["0 <= x"])
+        self.assertEqual(st["scope"][0]["name"], "x")
+        self.assertEqual(states[1]["hypotheses"], [])
+        # a scope: section after inline "<none>" hypotheses still parses
+        self.assertEqual(states[1]["scope"][0]["name"], "a")
+
+
+class TestParseDump(unittest.TestCase):
+    def test_two_none(self):
+        vcs = vc_index.parse_dump(DUMP_TWO_NONE)
+        self.assertEqual(len(vcs), 2)
+        self.assertEqual(
+            vcs[0],
+            {
+                "start": {"line": 9, "col": 26},
+                "end": {"line": 9, "col": 27},
+                "goal": "0 = 0",
+                "goal_span": None,
+                "hypotheses": [],
+                "hyp_spans": [],
+                "module_hypotheses": [],
+                "module_hyp_spans": [],
+                "scope": [],
+                "kind": "prove",
+                "status": "unknown",
+                "used": None,
+                "verdict": None,
+                "unused_hyps": None,
+                "hyp_used": [],
+            },
+        )
+        self.assertEqual(vcs[1]["goal"], "(x + 1) = (x + 1)")
+        self.assertEqual(vcs[1]["hypotheses"], [])
+        # The trailing "module M : ... sig ..." lines must not leak in.
+        self.assertEqual(len(vcs), 2)
+
+    def test_multi_hyp(self):
+        vcs = vc_index.parse_dump(DUMP_MULTI_HYP)
+        self.assertEqual(len(vcs), 1)
+        self.assertEqual(vcs[0]["goal"], "o = 1")
+        self.assertEqual(
+            vcs[0]["hypotheses"], ["o = (z + 1)", "z = M.zero", "M.zero = 0"]
+        )
+
+    def test_bypath(self):
+        vcs = vc_index.parse_dump(DUMP_BYPATH)
+        self.assertEqual(len(vcs), 1)
+        self.assertEqual(vcs[0]["hypotheses"], ["bound = 5"])
+
+    def test_kind_suffix(self):
+        text = (
+            "Line 1, characters 0-1: vox VC (RUNTIME CHECKED):\n"
+            "  goal: x = 1\n  hypotheses: <none>\n"
+        )
+        vcs = vc_index.parse_dump(text)
+        self.assertEqual(vcs[0]["kind"], "runtime_check")
+        text2 = (
+            "Line 1, characters 0-1: vox VC (ASSUMED):\n"
+            "  goal: x = 1\n  hypotheses: <none>\n"
+        )
+        self.assertEqual(vc_index.parse_dump(text2)[0]["kind"], "assume")
+
+    def test_concatenated(self):
+        # Several VC dumps back to back parse to the sum.
+        vcs = vc_index.parse_dump(DUMP_TWO_NONE + DUMP_MULTI_HYP + DUMP_BYPATH)
+        self.assertEqual(len(vcs), 4)
+
+    def test_no_suffix_spans_are_none(self):
+        # Plain -dump-vc output (no suffixes, e.g. an old compiler via the
+        # fallback path): the schema keys exist but every span is None.
+        vcs = vc_index.parse_dump(DUMP_MULTI_HYP)
+        self.assertIsNone(vcs[0]["goal_span"])
+        self.assertEqual(vcs[0]["hyp_spans"], [None, None, None])
+
+    def test_prov_goal_and_hyp_span(self):
+        vcs = vc_index.parse_dump(DUMP_PROV_PARAM)
+        self.assertEqual(len(vcs), 1)
+        # Text is stripped of the suffix; the span is captured separately.
+        self.assertEqual(vcs[0]["goal"], "x > 0")
+        self.assertEqual(
+            vcs[0]["goal_span"],
+            {"start": {"line": 1, "col": 58}, "end": {"line": 1, "col": 59}},
+        )
+        self.assertEqual(vcs[0]["hypotheses"], ["x > 0"])
+        self.assertEqual(
+            vcs[0]["hyp_spans"],
+            [{"start": {"line": 1, "col": 15}, "end": {"line": 1, "col": 16}}],
+        )
+
+    def test_prov_at_predicate_and_spanless_hyp(self):
+        # The loop VC mixes an @-containing spanned hypothesis with a
+        # span-less synthesized one; parsing must keep the '@' in the text,
+        # attach the trailing span, and leave the synthesized hyp span None.
+        vcs = vc_index.parse_dump(DUMP_PROV_LOOP)
+        self.assertEqual(len(vcs), 1)
+        self.assertEqual(vcs[0]["goal"], "x@2 >= 0")
+        self.assertEqual(
+            vcs[0]["goal_span"],
+            {"start": {"line": 5, "col": 9}, "end": {"line": 5, "col": 32}},
+        )
+        self.assertEqual(
+            vcs[0]["hypotheses"],
+            ["1 <= i", "i <= n", "x@1 >= 0", "x@2 = (x@1 + 1)"],
+        )
+        spans = vcs[0]["hyp_spans"]
+        assert isinstance(spans, list)
+        self.assertEqual(
+            spans[0], {"start": {"line": 3, "col": 2}, "end": {"line": 5, "col": 8}}
+        )
+        self.assertEqual(
+            spans[2], {"start": {"line": 5, "col": 9}, "end": {"line": 5, "col": 32}}
+        )
+        # The synthesized fresh-version equation has no source span.
+        self.assertIsNone(spans[3])
+
+
+class TestSplitSpanSuffix(unittest.TestCase):
+    def test_with_suffix(self):
+        text, span = vc_index.split_span_suffix("x > 0  @ 1.58-1.59")
+        self.assertEqual(text, "x > 0")
+        self.assertEqual(
+            span, {"start": {"line": 1, "col": 58}, "end": {"line": 1, "col": 59}}
+        )
+
+    def test_without_suffix(self):
+        text, span = vc_index.split_span_suffix("x > 0")
+        self.assertEqual(text, "x > 0")
+        self.assertIsNone(span)
+
+    def test_at_in_predicate_with_suffix(self):
+        # An SSA name (x@1) must survive: split only on the trailing "  @ L.C"
+        # coordinate suffix, never on the bare '@' inside the predicate.
+        text, span = vc_index.split_span_suffix("x@1 = x + 1  @ 1.15-1.16")
+        self.assertEqual(text, "x@1 = x + 1")
+        self.assertEqual(
+            span, {"start": {"line": 1, "col": 15}, "end": {"line": 1, "col": 16}}
+        )
+
+    def test_at_in_predicate_without_suffix(self):
+        text, span = vc_index.split_span_suffix("x@2 = (x@1 + 1)")
+        self.assertEqual(text, "x@2 = (x@1 + 1)")
+        self.assertIsNone(span)
+
+    def test_last_occurrence_wins(self):
+        # A predicate that itself literally contains a coordinate-looking run
+        # keeps it; only the FINAL suffix is peeled off.
+        text, span = vc_index.split_span_suffix("a  @ 1.2-3.4  @ 9.0-9.7")
+        self.assertEqual(text, "a  @ 1.2-3.4")
+        self.assertEqual(
+            span, {"start": {"line": 9, "col": 0}, "end": {"line": 9, "col": 7}}
+        )
+
+
+class TestProvenanceFlagFallback(unittest.TestCase):
+    def test_flag_rejected_detector(self):
+        rej = (
+            "ocamlc.opt: unknown option '-vox-dump-vc-provenance'.\n"
+            "Usage: ocamlc <options> <files>\n"
+        )
+        self.assertTrue(vc_index._flag_rejected(rej, "-vox-dump-vc-provenance"))
+        self.assertFalse(
+            vc_index._flag_rejected("Line 1, ...: vox VC:\n", "-vox-dump-vc-provenance")
+        )
+
+    def test_fallback_probes_once_and_caches(self):
+        # Simulate an old compiler that rejects the provenance flag: the
+        # first dump_capture falls back to -dump-vc, and the verdict is
+        # cached so later calls never re-try the flag.
+        calls = []
+
+        def fake_compile(source_path, ocamlc, flags, cwd=None):
+            calls.append(list(flags))
+            if vc_index._PROVENANCE_FLAG in flags:
+                return 2, (
+                    "ocamlc.opt: unknown option '%s'.\n" % vc_index._PROVENANCE_FLAG
+                )
+            return 0, DUMP_MULTI_HYP
+
+        saved_state = vc_index._provenance_supported
+        saved_fn = vc_index.compile_capture
+        try:
+            vc_index._provenance_supported = None
+            vc_index.compile_capture = fake_compile
+            code1, out1 = vc_index.dump_capture("x.ml", "ocamlc", cwd=None)
+            self.assertEqual(code1, 0)
+            self.assertEqual(out1, DUMP_MULTI_HYP)
+            self.assertFalse(vc_index._provenance_supported)
+            # First call probed the flag then fell back (two invocations).
+            self.assertEqual(len(calls), 2)
+            self.assertIn(vc_index._PROVENANCE_FLAG, calls[0])
+            self.assertNotIn(vc_index._PROVENANCE_FLAG, calls[1])
+            # Second call skips the flag entirely (cached).
+            calls.clear()
+            vc_index.dump_capture("x.ml", "ocamlc", cwd=None)
+            self.assertEqual(len(calls), 1)
+            self.assertNotIn(vc_index._PROVENANCE_FLAG, calls[0])
+        finally:
+            vc_index._provenance_supported = saved_state
+            vc_index.compile_capture = saved_fn
+
+
+class TestParseError(unittest.TestCase):
+    def test_fail(self):
+        err = vc_index.parse_error(ERROR_FAIL)
+        assert err is not None
+        self.assertEqual(err["start"], {"line": 3, "col": 19})
+        self.assertEqual(err["end"], {"line": 3, "col": 20})
+        self.assertEqual(err["goal"], "n >= 1")
+        self.assertEqual(err["hypotheses"], ["n >= 0"])
+        self.assertEqual(err["counterexample"], ["n = 0"])
+        self.assertTrue(str(err["lean_msg"]).startswith("(lean:"))
+
+    def test_no_error(self):
+        self.assertIsNone(vc_index.parse_error(DUMP_TWO_NONE))
+
+    def test_attach_failure(self):
+        vcs = vc_index.parse_dump(
+            "Line 3, characters 19-20: vox VC:\n"
+            "  goal: n >= 1\n  hypotheses:\n  n >= 0\n"
+        )
+        err = vc_index.parse_error(ERROR_FAIL)
+        assert err is not None
+        vc_index._attach_failure(vcs, err)
+        self.assertEqual(vcs[0]["status"], "failed")
+        self.assertEqual(vcs[0]["counterexample"], ["n = 0"])
+
+    def test_disproved_verdict(self):
+        err = vc_index.parse_error(ERROR_DISPROVED)
+        assert err is not None
+        self.assertEqual(err["verdict"], "disproved")
+        self.assertEqual(err["goal"], "(x - 1) >= 0")
+        self.assertEqual(err["hypotheses"], ["x >= 0"])
+        # the validated counterexample is parsed like the legacy one
+        self.assertEqual(err["counterexample"], ["x = 0"])
+        vcs = vc_index.parse_dump(
+            "Line 1, characters 57-64: vox VC:\n"
+            "  goal: (x - 1) >= 0\n  hypotheses:\n  x >= 0\n"
+        )
+        vc_index._attach_failure(vcs, err)
+        self.assertEqual(vcs[0]["status"], "disproved")
+
+    def test_unproved_verdict(self):
+        err = vc_index.parse_error(ERROR_UNPROVED)
+        assert err is not None
+        self.assertEqual(err["verdict"], "unproved")
+        self.assertEqual(err["goal"], "(x * x) >= 0")
+        # automation gave up: NO counterexample is shown
+        self.assertNotIn("counterexample", err)
+        vcs = vc_index.parse_dump(
+            "Line 1, characters 44-51: vox VC:\n  goal: (x * x) >= 0\n"
+        )
+        vc_index._attach_failure(vcs, err)
+        self.assertEqual(vcs[0]["status"], "unproved")
+
+
+# --- same-span loop invariant: establishment proved, preservation failed --
+
+# A [@vox.invariant] emits its establishment (goal over x) and preservation
+# (goal over x@2) obligations at the SAME span -- the attribute's.  Here the
+# invariant holds at entry (establishment: proved) but is not preserved
+# (preservation: disproved).  Byte-exact shape from the compiler's provenance
+# dump (the "established but not preserved" case).
+DUMP_INV_SAMESPAN = """\
+File "e.ml", line 5, characters 9-31: vox VC:
+  goal: x = 0  @ 5.9-5.31
+  hypotheses:
+  x = 0
+  verdict: proved
+File "e.ml", line 5, characters 9-31: vox VC:
+  goal: x@2 = 0  @ 5.9-5.31
+  hypotheses:
+  x@1 = 0
+  x@2 = x@1 + 1
+  verdict: disproved
+"""
+
+ERROR_INV_PRESERVE = """\
+File "e.ml", line 5, characters 9-31:
+5 |    done) [@vox.invariant x = 0];
+             ^^^^^^^^^^^^^^^^^^^^^^
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
+       Goal: x@2 = 0
+Hypotheses:
+  x@1 = 0
+  x@2 = x@1 + 1
+Counterexample (validated -- every hypothesis holds and the goal fails here):
+  x@2 = 1
+  n = 1
+  x@1 = 0
+"""
+
+
+class TestAttachFailureSameSpan(unittest.TestCase):
+    def test_failure_attaches_to_goal_matched_vc(self):
+        # The two obligations share a span; positional verdicts from the dump
+        # give establishment "proved", preservation "disproved".
+        vcs = vc_index.parse_dump(DUMP_INV_SAMESPAN)
+        self.assertEqual(len(vcs), 2)
+        self.assertEqual([vc["status"] for vc in vcs], ["proved", "disproved"])
+        err = vc_index.parse_error(ERROR_INV_PRESERVE)
+        assert err is not None
+        self.assertEqual(err["goal"], "x@2 = 0")
+        vc_index._attach_failure(vcs, err)
+        # The proved establishment VC is untouched: no false "disproved",
+        # and no borrowed counterexample (the bug attached the x@2 witness
+        # to the goal `x = 0`).
+        self.assertEqual(vcs[0]["status"], "proved")
+        self.assertNotIn("counterexample", vcs[0])
+        # The counterexample lands on the preservation VC it belongs to.
+        self.assertEqual(vcs[1]["status"], "disproved")
+        self.assertEqual(vcs[1]["counterexample"], ["x@2 = 1", "n = 1", "x@1 = 0"])
+
+    def test_fallback_to_start_when_no_goal_in_error(self):
+        # An older compiler error with no `Goal:` line: fall back to the
+        # first start-matched VC (previous start-only behaviour preserved).
+        vcs = vc_index.parse_dump(DUMP_INV_SAMESPAN)
+        err = {
+            "start": {"line": 5, "col": 9},
+            "verdict": "failed",
+            "counterexample": ["x = 0"],
+        }
+        vc_index._attach_failure(vcs, err)
+        self.assertEqual(vcs[0]["status"], "failed")
+        self.assertEqual(vcs[0]["counterexample"], ["x = 0"])
+        self.assertNotIn("counterexample", vcs[1])
+
+
+class TestAssignInvariantRoles(unittest.TestCase):
+    def test_same_span_pair_gets_roles(self):
+        vcs = vc_index.parse_dump(DUMP_INV_SAMESPAN)
+        vc_index._assign_invariant_roles(vcs)
+        self.assertEqual(vcs[0]["role"], "establishment")
+        self.assertEqual(vcs[1]["role"], "preservation")
+
+    def test_distinct_span_vcs_get_no_role(self):
+        # A refined parameter's single VC (its own span) is in no group.
+        vcs = vc_index.parse_dump(DUMP_PROV_PARAM)
+        vc_index._assign_invariant_roles(vcs)
+        self.assertIsNone(vcs[0]["role"])
+
+
+# --- end-to-end (skipped unless a built compiler is available) ------------
+
+
+def _find_ocamlc():
+    env = os.environ.get("VOX_OCAMLC")
+    if env and os.path.exists(env):
+        return env
+    here = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.dirname(os.path.dirname(here))  # tools/vox-editor -> repo
+    cand = os.path.join(root, "_build", "_bootinstall", "bin", "ocamlc.opt")
+    if os.path.exists(cand):
+        return cand
+    return None
+
+
+def _find_lean():
+    env = os.environ.get("VOX_LEAN")
+    if env and os.path.exists(env):
+        return env
+    pinned = "/nix/store/h6z4nr52r2x6v7ygqg59cl8nzjg0yxcy-lean4-4.31.0/bin/lean"
+    return pinned if os.path.exists(pinned) else None
+
+
+OCAMLC = _find_ocamlc()
+LEAN = _find_lean()
+
+FIXTURE_OK = """\
+let f (x : int{ _ >= 0 }) =
+  let refine_ ok = (x : int{ _ + 1 >= 1 }) in
+  ok
+"""
+
+FIXTURE_FAIL = """\
+let f (x : int{ _ >= 0 }) =
+  let refine_ ok = (x : int{ _ >= 1 }) in
+  ok
+"""
+
+# A loop invariant that HOLDS at entry (x = 0) but is NOT preserved by the
+# body (x becomes 1): establishment proves, preservation is disproved.  Both
+# obligations sit at the [@vox.invariant] span.
+FIXTURE_INV = """\
+let ex (n : int) : int =
+  let mutable x = 0 in
+  (while x < n do
+     x <- x + 1
+   done) [@vox.invariant x = 0];
+  x
+"""
+
+
+@unittest.skipUnless(OCAMLC, "no built ocamlc found (set VOX_OCAMLC)")
+class TestEndToEnd(unittest.TestCase):
+    def _write(self, name, text):
+        import tempfile
+
+        d = tempfile.mkdtemp(prefix="voxvc")
+        p = os.path.join(d, name)
+        with open(p, "w") as fh:
+            fh.write(text)
+        return d, p
+
+    def test_dump_shapes(self):
+        assert OCAMLC is not None
+        d, p = self._write("ok.ml", FIXTURE_OK)
+        index = vc_index.build_index(p, OCAMLC, cwd=d)
+        vcs = cast(List[Dict[str, Any]], index["vcs"])
+        self.assertTrue(len(vcs) >= 1)
+        vc = vcs[0]
+        self.assertIn("goal", vc)
+        self.assertIn("hypotheses", vc)
+
+    def test_provenance_spans_present(self):
+        # With the real compiler and the provenance flag, the refined
+        # parameter's contract hypothesis and the goal both carry a span.
+        assert OCAMLC is not None
+        d, p = self._write("ok.ml", FIXTURE_OK)
+        index = vc_index.build_index(p, OCAMLC, cwd=d)
+        vcs = cast(List[Dict[str, Any]], index["vcs"])
+        self.assertTrue(any(vc.get("goal_span") is not None for vc in vcs))
+        self.assertTrue(
+            any(s is not None for vc in vcs for s in vc.get("hyp_spans", [])),
+            msg="expected at least one hypothesis to carry a provenance span",
+        )
+
+    @unittest.skipUnless(LEAN, "no lean found (set VOX_LEAN)")
+    def test_solve_ok(self):
+        assert OCAMLC is not None
+        d, p = self._write("ok.ml", FIXTURE_OK)
+        index = vc_index.build_index(p, OCAMLC, lean=LEAN, cwd=d)
+        vcs = cast(List[Dict[str, Any]], index["vcs"])
+        self.assertTrue(index["ok"], msg=index.get("raw_solve"))
+        self.assertTrue(any(vc["status"] == "proved" for vc in vcs))
+
+    @unittest.skipUnless(LEAN, "no lean found (set VOX_LEAN)")
+    def test_solve_fail(self):
+        assert OCAMLC is not None
+        d, p = self._write("bad.ml", FIXTURE_FAIL)
+        index = vc_index.build_index(p, OCAMLC, lean=LEAN, cwd=d)
+        errors = cast(List[Dict[str, Any]], index["errors"])
+        self.assertFalse(index["ok"])
+        self.assertTrue(len(errors) >= 1)
+        err = errors[-1]
+        self.assertIn("counterexample", err)
+
+    @unittest.skipUnless(LEAN, "no lean found (set VOX_LEAN)")
+    def test_invariant_established_not_preserved(self):
+        # End-to-end: the establishment (goal over x) proves, the preservation
+        # (goal over x@2) is disproved.  The verdict AND the counterexample
+        # must land on the preservation VC -- the proved establishment keeps
+        # its green verdict and no borrowed witness -- and the pair is tagged
+        # establishment/preservation.
+        assert OCAMLC is not None
+        d, p = self._write("inv.ml", FIXTURE_INV)
+        index = vc_index.build_index(p, OCAMLC, lean=LEAN, cwd=d)
+        self.assertFalse(index["ok"])
+        vcs = cast(List[Dict[str, Any]], index["vcs"])
+        same_span = [
+            v for v in vcs if v["start"]["line"] == 5 and v["end"]["line"] == 5
+        ]
+        self.assertEqual(len(same_span), 2, msg=index.get("raw_solve"))
+        est = next(v for v in same_span if v["role"] == "establishment")
+        pre = next(v for v in same_span if v["role"] == "preservation")
+        # establishment: proved, no borrowed counterexample
+        self.assertEqual(est["status"], "proved")
+        self.assertNotIn("counterexample", est)
+        self.assertNotIn("x@2", est["goal"])
+        # preservation: disproved, carries the validated witness
+        self.assertEqual(pre["status"], "disproved")
+        self.assertIn("counterexample", pre)
+
+    @unittest.skipUnless(LEAN, "no lean found (set VOX_LEAN)")
+    def test_assumed_vcs_trusted(self):
+        # The reverse example verifies fully; its borrow/slice framing VCs
+        # are ASSUMED (never sent to the solver) and must badge as
+        # "trusted", not the grey "unknown" that reads as "didn't verify"
+        # on a fully verified file.
+        assert OCAMLC is not None
+        example = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "examples", "reverse.ml"
+        )
+        with open(example) as fh:
+            d, p = self._write("reverse.ml", fh.read())
+        index = vc_index.build_index(p, OCAMLC, lean=LEAN, cwd=d)
+        self.assertTrue(index["ok"], msg=index.get("raw_solve"))
+        vcs = cast(List[Dict[str, Any]], index["vcs"])
+        assumed = [v for v in vcs if v["kind"] == "assume"]
+        self.assertTrue(assumed, "expected at least one ASSUMED VC")
+        self.assertTrue(all(v["status"] == "trusted" for v in assumed))
+        # Nothing is left grey (unknown) on a verified file.
+        self.assertFalse(any(v["status"] == "unknown" for v in vcs))
+
+
+# --- used-lemmas ("used:" line, -vox-explain-proofs) ----------------------
+
+# Byte-exact from mechanics/lean_explain.compilers.reference: a VC closed by
+# an [@@vox.lemma] (names it) and one closed by arithmetic ("<arithmetic>").
+DUMP_USED = """\
+File "lean_explain.ml", line 36, characters 53-60: vox VC:
+  goal: len l >= 0  @ 36.53-36.60
+  hypotheses: <none>
+  scope:
+  l : ilist  ~>  Vox_Lean_explain_ilist  @ 36.16-36.17
+  used: lemma_len_nonneg
+File "lean_explain.ml", line 39, characters 55-62: vox VC:
+  goal: x + 1 >= 0  @ 39.55-39.62
+  hypotheses:
+  x > 0  @ 39.11-39.12
+  scope:
+  x : int  ~>  Int  @ 39.11-39.12
+  used: <arithmetic>
+"""
+
+
+class TestParseUsed(unittest.TestCase):
+    def test_used_lemma_and_arithmetic(self):
+        vcs = vc_index.parse_dump(DUMP_USED)
+        self.assertEqual(len(vcs), 2)
+        # a lemma-backed proof names the lemma
+        self.assertEqual(vcs[0]["used"], ["lemma_len_nonneg"])
+        # an arithmetic-only proof is the empty list (marker "<arithmetic>")
+        self.assertEqual(vcs[1]["used"], [])
+        # the used line does not leak into hypotheses/scope
+        self.assertEqual(vcs[0]["hypotheses"], [])
+        self.assertEqual(len(vcs[0]["scope"]), 1)
+
+    def test_used_absent_is_none(self):
+        # plain provenance dump (no explain pass): used stays None
+        vcs = vc_index.parse_dump(DUMP_PROV_PARAM)
+        self.assertIsNone(vcs[0]["used"])
+
+    def test_multiple_used(self):
+        text = (
+            'File "x.ml", line 1, characters 0-1: vox VC:\n'
+            "  goal: p\n"
+            "  hypotheses: <none>\n"
+            "  used: lemma_a, block_thm, prelude_fact\n"
+        )
+        self.assertEqual(
+            vc_index.parse_dump(text)[0]["used"],
+            ["lemma_a", "block_thm", "prelude_fact"],
+        )
+
+
+# --- unused hypotheses ("unused_hyps:" line, -vox-explain-proofs) ---------
+
+# Byte-exact from mechanics/lean_explain.compilers.reference, the [Cons]
+# case: goal [len l >= 0] proved from the ambient lemma, so BOTH local
+# hypotheses ([len t >= 0] at index 0, [l = Cons (...)] at index 1) are
+# unreferenced -> "unused_hyps: 0 1".
+DUMP_UNUSED = """\
+File "lean_explain.ml", line 32, characters 19-37: vox VC:
+  goal: len l >= 0  @ 32.19-32.37
+  hypotheses:
+  len t >= 0
+  l = Cons (*vox-wild*, t)  @ 32.4-32.15
+  scope:
+  l : ilist  ~>  Vox_Lean_explain_ilist  @ 29.26-29.27
+  used: lemma_len_nonneg
+  unused_hyps: 0 1
+"""
+
+# A goal that USES one of two hypotheses: only the other index is flagged.
+DUMP_ONE_UNUSED = """\
+File "f.ml", line 2, characters 19-20: vox VC:
+  goal: x >= 0  @ 2.19-2.20
+  hypotheses:
+  y >= 0  @ 1.27-1.28
+  x >= 0  @ 1.7-1.8
+  scope:
+  x : int  ~>  Int  @ 1.7-1.8
+  y : int  ~>  Int  @ 1.27-1.28
+  used: <arithmetic>
+  unused_hyps: 0
+"""
+
+
+class TestParseUnusedHyps(unittest.TestCase):
+    def test_all_hyps_unused(self):
+        vcs = vc_index.parse_dump(DUMP_UNUSED)
+        self.assertEqual(len(vcs), 1)
+        vc = vcs[0]
+        self.assertEqual(vc["hypotheses"], ["len t >= 0", "l = Cons (*vox-wild*, t)"])
+        self.assertEqual(vc["unused_hyps"], [0, 1])
+        # span-parallel used flags: both False
+        self.assertEqual(vc["hyp_used"], [False, False])
+        # the line does not leak into the used names or hypotheses
+        self.assertEqual(vc["used"], ["lemma_len_nonneg"])
+
+    def test_one_hyp_unused_exact_index(self):
+        # exactly one of two hypotheses flagged: index 0 (y>=0) unused, the
+        # goal-relevant index 1 (x>=0) stays used.
+        vc = vc_index.parse_dump(DUMP_ONE_UNUSED)[0]
+        self.assertEqual(vc["unused_hyps"], [0])
+        self.assertEqual(vc["hyp_used"], [False, True])
+
+    def test_absent_means_all_used(self):
+        # No unused_hyps line (e.g. the arithmetic VC that used its hyp):
+        # unused_hyps is None and every hypothesis is shown solid.
+        vc = vc_index.parse_dump(DUMP_USED)[1]
+        self.assertIsNone(vc["unused_hyps"])
+        self.assertEqual(vc["hyp_used"], [True])  # one hyp: x > 0
+
+
+# --- per-VC verdicts on a FAILED solve ("verdict:" line) ------------------
+
+# Byte-exact from mechanics/lean_explain_fail.compilers.reference (the dump
+# portion, before the raised Error): two proved obligations, one disproved
+# (the first failure), one unproved (the second failure).
+DUMP_VERDICTS = """\
+File "lean_explain_fail.ml", line 24, characters 53-60: vox VC:
+  goal: x + 1 >= 0  @ 24.53-24.60
+  hypotheses:
+  x > 0  @ 24.9-24.10
+  scope:
+  x : int  ~>  Int  @ 24.9-24.10
+  verdict: proved
+File "lean_explain_fail.ml", line 26, characters 45-46: vox VC:
+  goal: 0 = 5  @ 26.45-26.46
+  hypotheses: <none>
+  verdict: disproved
+File "lean_explain_fail.ml", line 28, characters 54-61: vox VC:
+  goal: y - 1 >= 2  @ 28.54-28.61
+  hypotheses:
+  y >= 3  @ 28.9-28.10
+  scope:
+  y : int  ~>  Int  @ 28.9-28.10
+  verdict: proved
+File "lean_explain_fail.ml", line 30, characters 45-46: vox VC:
+  goal: 0 = 7  @ 30.45-30.46
+  hypotheses: <none>
+  verdict: unproved
+"""
+
+
+class TestParseVerdict(unittest.TestCase):
+    def test_verdict_sets_status(self):
+        vcs = vc_index.parse_dump(DUMP_VERDICTS)
+        self.assertEqual(len(vcs), 4)
+        self.assertEqual(
+            [vc["status"] for vc in vcs],
+            ["proved", "disproved", "proved", "unproved"],
+        )
+        self.assertEqual(
+            [vc["verdict"] for vc in vcs],
+            ["proved", "disproved", "proved", "unproved"],
+        )
+        # the verdict line does not leak into hypotheses/scope
+        self.assertEqual(vcs[1]["hypotheses"], [])
+        self.assertEqual(vcs[0]["hypotheses"], ["x > 0"])
+
+    def test_verdict_absent_is_unknown(self):
+        # a dump without verdict lines (dry-run, or a successful solve)
+        # leaves status "unknown" and verdict None
+        vcs = vc_index.parse_dump(DUMP_USED)
+        self.assertEqual(vcs[0]["status"], "unknown")
+        self.assertIsNone(vcs[0]["verdict"])
+
+
+# --- wrapped predicates: the compiler's Format dumper breaks long goals
+#     and hypotheses across physical lines (continuation at column 0).
+#     The qsort bug: a hypothesis cut off at "... < n &&" with the rest
+#     bleeding out.  parse_dump must rejoin them. -------------------------
+
+# The goal wraps over three physical lines (span on the last); the first
+# hypothesis wraps over two (span on its last line); a second hypothesis
+# is a single line.  Continuations sit at column 0, exactly as Format
+# emits them.
+DUMP_WRAPPED = (
+    'File "w.ml", line 20, characters 4-8: vox VC:\n'
+    "  goal: 0 <= a && a < n &&\n"
+    "b = c &&\n"
+    "d = e  @ 20.4-20.8\n"
+    "  hypotheses:\n"
+    "  0 <= a && a < n &&\n"
+    "p = q  @ 19.1-19.2\n"
+    "  x = y  @ 18.1-18.2\n"
+)
+
+
+class TestParseWrapped(unittest.TestCase):
+    def test_wrapped_goal_and_hyps_are_rejoined(self):
+        vcs = vc_index.parse_dump(DUMP_WRAPPED)
+        self.assertEqual(len(vcs), 1)
+        vc = vcs[0]
+        # goal is reassembled whole, not truncated at the first "&&"
+        self.assertEqual(vc["goal"], "0 <= a && a < n && b = c && d = e")
+        self.assertEqual(
+            vc["goal_span"],
+            {"start": {"line": 20, "col": 4}, "end": {"line": 20, "col": 8}},
+        )
+        # both hypotheses survive; the first is whole (not "... < n &&")
+        self.assertEqual(vc["hypotheses"], ["0 <= a && a < n && p = q", "x = y"])
+        # spans stay parallel and attach to the rejoined logical line
+        # (direct list equality -- no len()/index on the object-typed value)
+        self.assertEqual(
+            vc["hyp_spans"],
+            [
+                {"start": {"line": 19, "col": 1}, "end": {"line": 19, "col": 2}},
+                {"start": {"line": 18, "col": 1}, "end": {"line": 18, "col": 2}},
+            ],
+        )
+
+    def test_join_wrapped_is_noop_on_unwrapped(self):
+        # a normal dump has no column-0 continuations, so nothing changes
+        lines = str(DUMP_USED).split("\n")
+        self.assertEqual(vc_index._join_wrapped(lines), lines)
+
+    def test_join_wrapped_only_after_a_dangling_operator(self):
+        # a line ending in && / || / -> is incomplete -> the next column-0
+        # line is its continuation; any other line is a boundary, so
+        # headers and trailing `val`/`module` compiler output stay put.
+        self.assertEqual(
+            vc_index._join_wrapped(["  0 <= a &&", "a < n  @ 1.1-1.2"]),
+            ["  0 <= a && a < n  @ 1.1-1.2"],
+        )
+        # complete line, then a col-0 VC header / compiler output: untouched
+        self.assertEqual(
+            vc_index._join_wrapped(["  M.zero = 0", "val one : unit -> M.t = <fun>"]),
+            ["  M.zero = 0", "val one : unit -> M.t = <fun>"],
+        )
+        self.assertEqual(
+            vc_index._join_wrapped(
+                ["  d = e  @ 1.1-1.2", 'File "x.ml", line 2, characters 0-1: vox VC:']
+            ),
+            ["  d = e  @ 1.1-1.2", 'File "x.ml", line 2, characters 0-1: vox VC:'],
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

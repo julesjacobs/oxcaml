@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>vox-web pipeline harness</title>
+    <style>
+      body { font: 14px/1.5 ui-monospace, monospace; margin: 1.5rem; max-width: 60rem; }
+      h1 { font-size: 1.1rem; }
+      textarea { width: 100%; height: 6rem; font: inherit; }
+      #status { font-weight: bold; }
+      .vc { border-left: 3px solid #999; padding: 0.25rem 0.5rem; margin: 0.4rem 0; }
+      .vc.proved { border-color: #2a2; }
+      .vc.failed { border-color: #c33; }
+      .vc .goal { font-weight: bold; }
+      .vc .meta { color: #666; }
+      pre { background: #f4f4f4; padding: 0.5rem; overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <h1>vox-web pipeline harness</h1>
+    <p>
+      The check pipeline runs entirely in a Web Worker behind a pluggable
+      <code>CheckBackend</code>. This page uses <code>MockBackend</code>, so it
+      needs <strong>no server</strong> — served as flat static files. Switch to
+      <code>RemoteBackend</code> to talk to the real <code>/check</code>.
+    </p>
+    <label>backend:
+      <select id="backend">
+        <option value="mock">mock (offline)</option>
+        <option value="remote">remote (/check)</option>
+      </select>
+    </label>
+    <textarea id="source">let f a i = a.(i)</textarea>
+    <button id="run">check</button>
+    <div id="status">idle</div>
+    <div id="regions"></div>
+    <h2 style="font-size: 1rem">generated Lean</h2>
+    <pre id="lean"></pre>
+
+    <script>
+      const worker = new Worker("check-worker.js");
+      let nextId = 1;
+      let applied = 0;
+      const pending = new Map();
+
+      // Expose for headless tests.
+      window.__vox = { lastResult: null, ready: false };
+
+      worker.onmessage = (ev) => {
+        const msg = ev.data || {};
+        if (msg.type === "error") {
+          document.getElementById("status").textContent = "error: " + msg.error;
+          return;
+        }
+        if (msg.type === "checkResult") {
+          if (msg.id < applied) return; // stale
+          applied = msg.id;
+          render(msg.result);
+        }
+      };
+
+      function render(result) {
+        window.__vox.lastResult = result;
+        const ok = result.ok;
+        document.getElementById("status").textContent = ok ? "verified" : "not verified";
+        const box = document.getElementById("regions");
+        box.innerHTML = "";
+        for (const r of result.regions || []) {
+          if (r.kind !== "vc") continue;
+          const div = document.createElement("div");
+          div.className = "vc " + (r.status || "");
+          const cex = r.counterexample ? " — cex: " + r.counterexample.join(", ") : "";
+          div.innerHTML =
+            '<div class="goal">' + escapeHtml(r.goal) + "</div>" +
+            '<div class="meta">' + escapeHtml(r.status) + " @ line " +
+            (r.start.line + 1) + escapeHtml(cex) + "</div>";
+          box.appendChild(div);
+        }
+        document.getElementById("lean").textContent = result.generated_lean || "";
+      }
+
+      function escapeHtml(s) {
+        return String(s == null ? "" : s).replace(/[&<>]/g, (c) =>
+          ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])
+        );
+      }
+
+      function run() {
+        const backend = document.getElementById("backend").value;
+        worker.postMessage({ type: "config", backend, opts: {} });
+        const id = nextId++;
+        const source = document.getElementById("source").value;
+        document.getElementById("status").textContent = "checking…";
+        worker.postMessage({ type: "check", id, source, revision: id });
+      }
+
+      document.getElementById("run").addEventListener("click", run);
+      // Kick an initial check so the page is useful (and testable) on load.
+      window.__vox.ready = true;
+      run();
+    </script>
+  </body>
+</html>

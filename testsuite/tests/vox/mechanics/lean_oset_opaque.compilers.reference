@@ -1,0 +1,10 @@
+File "lean_oset_opaque.ml", line 22, characters 2-13:
+22 |   member 5 t1
+       ^^^^^^^^^^^
+Error: vox: verification failed -- NOT PROVED (automation gave up; no counterexample was found, so the property may still hold).
+       Goal: *unknown2* = true
+Hypotheses:
+  *unknown2* = mem 5 t1
+  bst t1 && t1 = insert 2 Oset.empty
+  bst Oset.empty && no_mem Oset.empty
+(lean: error: `grind` failed)

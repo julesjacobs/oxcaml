@@ -787,7 +787,8 @@ module Base_and_axes = struct
   let jkind_desc_of_const const =
     { const with base = Base.map_layout ~f:Layout.of_const const.base }
 
-  let debug_print format_layout ppf { base; mod_bounds; with_bounds } =
+  let debug_print format_layout ppf
+      { base; mod_bounds; with_bounds; refines = _ } =
     Format.fprintf ppf "{ base = %a;@ mod_bounds = %a;@ with_bounds = %a }"
       (Base.format format_layout)
       base Mod_bounds.debug_print mod_bounds With_bounds.debug_print with_bounds
@@ -835,7 +836,10 @@ module Base_and_axes = struct
           Expanded
             { base = meet_scannable_axes jkind.base sa;
               mod_bounds;
-              with_bounds = t.with_bounds
+              with_bounds = t.with_bounds;
+              (* vox: expansion resolves an alias in [t]; preserve [t]'s
+                 refines. *)
+              refines = t.refines
             })
 
   let rec fully_expand_aliases_const env t : _ jkind_const_desc =
@@ -1171,7 +1175,7 @@ module Base_and_axes = struct
              belong in the next case. What is the right behaviour here? *)
           | Tquote _ | Tsplice _ | Tquote_eval _ -> Skip
           | Tvar _ | Tarrow _ | Tunboxed_tuple _ | Tobject _ | Tfield _ | Tnil
-          | Tunivar _ | Tpackage _ | Tof_kind _ | Tbox _ ->
+          | Tunivar _ | Tpackage _ | Tof_kind _ | Tbox _ | Trefine _ ->
             (* these cases either cannot be infinitely recursive or their jkinds
                do not have with_bounds *)
             (* CR layouts v2.8: Some of these might get with-bounds someday. We
@@ -1195,6 +1199,15 @@ module Base_and_axes = struct
             No_with_bounds,
             { ctl with fuel_status = Sufficient_fuel } )
         | (ty, ti) :: bs -> (
+          (* vox: refinements are transparent to jkinds; strip them so
+             the skeleton (e.g. a recursive type constructor) gets the
+             normal fuel accounting instead of looping forever. *)
+          let rec vox_strip ty =
+            match get_desc ty with
+            | Trefine (skel, _, _) -> vox_strip skel
+            | _ -> ty
+          in
+          let ty = vox_strip ty in
           (* Map the type's info before expanding the type *)
           let ti =
             match map_type_info with
@@ -1434,13 +1447,15 @@ module Jkind_desc = struct
   let rec equate_or_equal ~allow_mutation env t1 t2 =
     let { base = base1;
           mod_bounds = mod_bounds1;
-          with_bounds = (No_with_bounds : (allowed * allowed) with_bounds)
+          with_bounds = (No_with_bounds : (allowed * allowed) with_bounds);
+          refines = _
         } =
       t1
     in
     let { base = base2;
           mod_bounds = mod_bounds2;
-          with_bounds = (No_with_bounds : (allowed * allowed) with_bounds)
+          with_bounds = (No_with_bounds : (allowed * allowed) with_bounds);
+          refines = _
         } =
       t2
     in
@@ -1459,9 +1474,11 @@ module Jkind_desc = struct
       | Some (t1, t2) -> equate_or_equal ~allow_mutation env t1 t2)
 
   let sub_expanded (type l r)
-      ({ base = base1; mod_bounds = bounds1; with_bounds = with_bounds1 } :
+      ({ base = base1; mod_bounds = bounds1; with_bounds = with_bounds1;
+         refines = _ } :
         (allowed * r) jkind_desc)
-      ({ base = base2; mod_bounds = bounds2; with_bounds = No_with_bounds } :
+      ({ base = base2; mod_bounds = bounds2; with_bounds = No_with_bounds;
+         refines = _ } :
         (l * allowed) jkind_desc) =
     (* Rather than carefully expanding only as much as needed, this assumes both
        kinds are fully expanded, and that [sub] is Ignore_best normalized. See
@@ -1521,15 +1538,19 @@ module Jkind_desc = struct
     sub_expanded sub super
 
   let rec intersection env
-      ({ base = base1; mod_bounds = mod_bounds1; with_bounds = with_bounds1 } as
+      ({ base = base1; mod_bounds = mod_bounds1; with_bounds = with_bounds1;
+         refines = refines1 } as
        t1)
-      ({ base = base2; mod_bounds = mod_bounds2; with_bounds = with_bounds2 } as
+      ({ base = base2; mod_bounds = mod_bounds2; with_bounds = with_bounds2;
+         refines = _ } as
        t2) =
     let make_intersection base =
       Intersection
         { base;
           mod_bounds = Mod_bounds.meet mod_bounds1 mod_bounds2;
-          with_bounds = With_bounds.meet with_bounds1 with_bounds2
+          with_bounds = With_bounds.meet with_bounds1 with_bounds2;
+          (* vox: refines is declaration metadata; never combined *)
+          refines = refines1
         }
     in
     match base1, base2 with
@@ -1570,7 +1591,8 @@ module Jkind_desc = struct
     let layout, sort = Layout.of_new_sort_var ~level sa in
     ( { base = Layout layout;
         mod_bounds = Mod_bounds.max;
-        with_bounds = No_with_bounds
+        with_bounds = No_with_bounds;
+        refines = Vr_top
       },
       sort )
 
@@ -1578,7 +1600,8 @@ module Jkind_desc = struct
     let layout = Layout.Sort (Sort.Univar univar, Scannable_axes.max) in
     { base = Layout layout;
       mod_bounds = Mod_bounds.max;
-      with_bounds = No_with_bounds
+      with_bounds = No_with_bounds;
+      refines = Vr_top
     }
 
   let get t = Base_and_axes.map_layout Layout.get t
@@ -1899,7 +1922,8 @@ module Const = struct
                 { jkind =
                     { base = jkind.base;
                       mod_bounds = Mod_bounds.max;
-                      with_bounds = No_with_bounds
+                      with_bounds = No_with_bounds;
+                      refines = Vr_top
                     };
                   name = Base.to_string layout_to_string jkind.base
                 }
@@ -1926,7 +1950,8 @@ module Const = struct
                   { jkind =
                       { base = jkind.base;
                         mod_bounds = Mod_bounds.max;
-                        with_bounds = No_with_bounds
+                        with_bounds = No_with_bounds;
+                        refines = Vr_top
                       };
                     name = layout_str
                   }
@@ -2028,7 +2053,7 @@ module Const = struct
       =
     let folder (type l r) (layouts_acc, mod_bounds_acc, with_bounds_acc)
         (kind : (l * r) t) =
-      let { base; mod_bounds; with_bounds } =
+      let { base; mod_bounds; with_bounds; refines = _ } =
         Base_and_axes.fully_expand_aliases_const env kind
       in
       let layout =
@@ -2047,7 +2072,10 @@ module Const = struct
     in
     { base = Layout (Layout.Const.Product (List.rev layouts));
       mod_bounds;
-      with_bounds
+      with_bounds;
+      (* vox: a product kind built from its components; like
+         [Jkind_desc.product], the refines component is unconstrained. *)
+      refines = Vr_top
     }
 
   let transl_scannable_axis ({ txt; loc } : string Location.loc) =
@@ -2088,7 +2116,9 @@ module Const = struct
         Typemode.transl_mod_bounds modifiers
       in
       let mod_bounds = Mod_bounds.meet base.mod_bounds mod_bounds in
-      { base = base.base; mod_bounds; with_bounds = No_with_bounds }
+      (* vox: [mod] only lowers mod bounds; preserve the base's refines. *)
+      { base = base.base; mod_bounds; with_bounds = No_with_bounds;
+        refines = base.refines }
       (* For scannable axes in mod bounds, we do not print redundancy warnings,
          as scannable axes in mod bounds will be deprecated anyway *)
       |> apply_scannable_axis ~warn env
@@ -2096,6 +2126,26 @@ module Const = struct
       |> apply_scannable_axis ~warn env
            (Scannable_axis.annot_of_separability_annot separability)
     | Pjk_operator (base, sa_annot) ->
+      (* vox: [refines int|bool] rides the operator syntax ([type t :
+         value refines int]); extract the pair before the
+         scannable-axis fold.  The component is declaration METADATA
+         (see [Types.vox_refines]): it never participates in the kind
+         algebra, and is read back by the verifier and checked once at
+         signature inclusion. *)
+      let vox_refines, sa_annot =
+        let rec go acc = function
+          | { Location.txt = "refines"; loc } :: rest -> (
+            match rest with
+            | { Location.txt = "int"; _ } :: rest' ->
+              Some (Vr_sort Vs_int), List.rev_append acc rest'
+            | { Location.txt = "bool"; _ } :: rest' ->
+              Some (Vr_sort Vs_bool), List.rev_append acc rest'
+            | _ -> raise ~loc (Unknown_kind_modifier "refines"))
+          | x :: rest -> go (x :: acc) rest
+          | [] -> None, List.rev acc
+        in
+        go [] sa_annot
+      in
       let base_jkind =
         of_user_written_annotation_unchecked_level ~use_abstract_jkinds ~warn
           env context base
@@ -2110,7 +2160,9 @@ module Const = struct
               axis.Location.txt :: rev_axes ))
           (base_jkind, []) sa_annot
       in
-      jkind
+      (match vox_refines with
+       | None -> jkind
+       | Some r -> { jkind with refines = r })
     | Pjk_product ts ->
       let jkinds =
         List.map
@@ -2143,8 +2195,18 @@ module Const = struct
         in
         { base = base.base;
           mod_bounds = base.mod_bounds;
-          with_bounds = With_bounds.add type_ { relevant_axes } base.with_bounds
+          with_bounds = With_bounds.add type_ { relevant_axes } base.with_bounds;
+          (* vox: [with] only extends with-bounds; preserve base's refines. *)
+          refines = base.refines
         })
+    | Pjk_refines (base, _ty) ->
+      (* vox: the refines type cannot be elaborated here (no type env for
+         resolving its paths against the declaration's parameters).
+         Store a placeholder ([refines] is Vr_top) and let Typedecl's
+         setter elaborate the written type where env and the params
+         exist. *)
+      of_user_written_annotation_unchecked_level ~use_abstract_jkinds ~warn
+        env context base
     | Pjk_default | Pjk_kind_of _ ->
       raise ~loc:jkind.pjka_loc Unimplemented_syntax
 
@@ -2348,6 +2410,7 @@ let of_type_decl_overapproximate_unknown ~context env
     | Pjk_with _ -> true
     | Pjk_mod (base, _) -> has_with_bounds base
     | Pjk_operator (base, _) -> has_with_bounds base
+    | Pjk_refines (base, _) -> has_with_bounds base
     | Pjk_product jkinds -> List.exists has_with_bounds jkinds
     | Pjk_abbreviation _ -> false
     | Pjk_default | Pjk_kind_of _ ->
@@ -2388,7 +2451,10 @@ let for_abbreviation ~type_jkind_purely ~modality ty =
   fresh_jkind_poly
     { base = jkind.jkind.base;
       mod_bounds = Mod_bounds.min;
-      with_bounds = With_bounds with_bounds_types
+      with_bounds = With_bounds with_bounds_types;
+      (* vox: the abbreviation kind is derived from the underlying type's
+         kind; preserve its refines. *)
+      refines = jkind.jkind.refines
     }
     ~annotation:None ~why:Abbreviation
 
@@ -2410,7 +2476,8 @@ let for_open_boxed_row =
              ( Base Scannable,
                { nullability = Non_null; separability = Non_float } ));
       mod_bounds;
-      with_bounds = No_with_bounds
+      with_bounds = No_with_bounds;
+      refines = Vr_top
     }
     ~annotation:None ~why:(Value_creation Polymorphic_variant)
 
@@ -2456,7 +2523,8 @@ let for_arrow =
              ( Base Scannable,
                { nullability = Non_null; separability = Non_float } ));
       mod_bounds = Mod_bounds.for_arrow;
-      with_bounds = No_with_bounds
+      with_bounds = No_with_bounds;
+      refines = Vr_top
     }
     ~annotation:None ~why:(Value_creation Arrow)
   |> mark_best
@@ -2485,7 +2553,8 @@ let for_object =
                { nullability = Non_null; separability = Non_float } ));
       mod_bounds =
         Mod_bounds.create { comonadic; monadic } ~externality:Externality.max;
-      with_bounds = No_with_bounds
+      with_bounds = No_with_bounds;
+      refines = Vr_top
     }
     ~annotation:None ~why:(Value_creation Object)
 
@@ -2607,7 +2676,8 @@ let get_mod_bounds (type l r) ~context ~skip_axes env (jk : (l * r) jkind) =
        this function is mainly used for mode crossing or optimizations, we don't
        expect this to come up much. *)
     Mod_bounds.max
-  | { base = Kconstr _ | Layout _; with_bounds = No_with_bounds; mod_bounds } ->
+  | { base = Kconstr _ | Layout _; with_bounds = No_with_bounds; mod_bounds;
+      refines = _ } ->
     mod_bounds
   | { base = Layout _; with_bounds = With_bounds _; _ } ->
     Misc.fatal_error
@@ -3872,7 +3942,8 @@ let sub_jkind_l ~type_equal ~context ?(allow_any_crossing = false) env sub super
           })
     in
     match sub with
-    | { base = _; mod_bounds = sub_upper_bounds; with_bounds = No_with_bounds }
+    | { base = _; mod_bounds = sub_upper_bounds; with_bounds = No_with_bounds;
+        refines = _ }
       ->
       let* () =
         (* MB_MODE : verify that the remaining upper_bounds from sub are <=
@@ -3893,20 +3964,28 @@ let is_obviously_max (t : (_ * allowed) jkind) =
   (* This doesn't do any mutation because mutating a sort variable can't make it
      any, and modal upper bounds are constant. *)
   | { jkind =
-        { base = Layout (Any sa); mod_bounds; with_bounds = No_with_bounds };
+        { base = Layout (Any sa); mod_bounds; with_bounds = No_with_bounds;
+          refines = _ };
       _
     } ->
     Scannable_axes.(equal sa max) && Mod_bounds.is_max mod_bounds
-  | { jkind = { base = Layout _ | Kconstr _; mod_bounds = _; with_bounds = _ };
+  | { jkind =
+        { base = Layout _ | Kconstr _; mod_bounds = _; with_bounds = _;
+          refines = _ };
       _
     } ->
     false
 
 let mod_bounds_are_obviously_max (type l r) (t : (l * r) jkind) =
   match t with
-  | { jkind = { base = _; mod_bounds; with_bounds = No_with_bounds }; _ } ->
+  (* vox: this is only about the mod bounds; refines is irrelevant here. *)
+  | { jkind =
+        { base = _; mod_bounds; with_bounds = No_with_bounds; refines = _ };
+      _ } ->
     Mod_bounds.is_max mod_bounds
-  | { jkind = { base = _; mod_bounds = _; with_bounds = With_bounds _ }; _ } ->
+  | { jkind =
+        { base = _; mod_bounds = _; with_bounds = With_bounds _; refines = _ };
+      _ } ->
     false
 
 let fully_expand_aliases env ({ jkind; _ } as jk) =
@@ -4197,7 +4276,7 @@ module Debug_printers = struct
       (match q with Best -> "Best" | Not_best -> "Not_best")
 
   module Const = struct
-    let t ppf ({ base; mod_bounds; with_bounds } : _ Const.t) =
+    let t ppf ({ base; mod_bounds; with_bounds; refines = _ } : _ Const.t) =
       fprintf ppf
         "@[<v 2>{ base = %a@,; mod_bounds = %a@,; with_bounds = %a@, }@]"
         (Base.format Layout.Const.Debug_printers.t)
@@ -4254,3 +4333,11 @@ let () =
   Location.register_error_of_exn (function
     | Error.User_error (loc, err) -> Some (report_error ~loc err)
     | _ -> None)
+
+(* vox: the refines component is declaration metadata (see
+   [Types.vox_refines]); these are its only accessors -- the kind
+   algebra never consults it. *)
+let get_vox_refines (t : (_ * _) jkind) = t.jkind.refines
+
+let set_vox_refines refines (t : ('l * 'r) jkind) =
+  { t with jkind = { t.jkind with refines } }

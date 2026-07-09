@@ -677,7 +677,7 @@ module Digraph = struct
     let std_edge = edge std in
     match desc with
     | Types.Tvar { name; _ } -> mk "%a" Pp.pretty_var name
-    | Types.Tarrow ((l,_,_),t1,t2,_) ->
+    | Types.Tarrow ((l,_,_,_),t1,t2,_) ->
        mk "→%a" Pp.exponent_of_label l |> numbered [t1; t2]
     | Types.Ttuple tl ->
         mk "*" |> labeled_edges params id tl
@@ -764,6 +764,8 @@ module Digraph = struct
         mk "[Kind]"
     | Types.Tbox t ->
         mk "[Box]" |> std_edge t
+    | Types.Trefine (t, _, _) ->
+        mk "[Refine]" |> std_edge t
   and variant params id0 (elts,main,fields) (name,rf)  =
     let id = Index.subnode ~name id0 in
     let fnode = Node id in

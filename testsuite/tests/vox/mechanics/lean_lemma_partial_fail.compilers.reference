@@ -1,0 +1,8 @@
+File "lean_lemma_partial_fail.ml", lines 25-29, characters 0-13:
+25 | let rec lemma_partial (l : ilist) : unit{ len l >= 5 } =
+26 |   match l with
+27 |   | Cons (_, t) -> lemma_partial t
+28 |   | Nil -> lemma_partial l
+29 | [@@vox.lemma]
+Error: vox: the [@vox.lemma] lemma_partial was not proved (is the proposition true, and does the induction terminate?)
+(lean: error: `grind` failed)

@@ -295,6 +295,7 @@ module Solver = struct
   (* Converting surface jkinds to solver ckinds. *)
   and ckind_of_jkind_desc : type a l r.
       ctx -> (a, l * r) Types.base_and_axes -> Ldd.node =
+   (* vox: refines is declaration metadata; the lattice does not carry it *)
    fun ctx jkind_desc ->
     let expand =
       match ctx.env with
@@ -459,6 +460,9 @@ module Solver = struct
       | Types.Tbox t ->
         let base = Ldd.const Axis_lattice.mutable_data in
         Ldd.join base (kind ~use_tables:true ctx t)
+      | Types.Trefine (t, _, _) ->
+        (* vox: refined types erase to their skeleton; same kind. *)
+        kind ~use_tables:true ctx t
       | Types.Tfield _ -> failwith "Tfield shouldn't appear in kind"
       | Types.Tnil -> failwith "Tnil shouldn't appear in kind"
       | Types.Tquote _ | Types.Tsplice _ | Types.Tquote_eval _ ->

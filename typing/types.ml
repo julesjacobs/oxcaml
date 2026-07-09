@@ -165,6 +165,7 @@ and type_desc =
   | Tpackage of package
   | Tof_kind of jkind_lr
   | Tbox of type_expr
+  | Trefine of type_expr * vox_map list * Refinement.pred
 
 and arg_label =
   | Nolabel
@@ -173,7 +174,13 @@ and arg_label =
   | Position of string
 
 and arrow_desc =
-  arg_label * Mode.Alloc.lr * Mode.Alloc.lr
+  arg_label * Mode.Alloc.lr * Mode.Alloc.lr * Ident.t option
+  (* vox: the last component is the dependent-arrow binder, if any:
+     refinements in the codomain may reference it as an ordinary
+     [Refinement.Pvar].  Bound like [Tpoly] binds its univars: opened
+     by substitution at application and lambda sites; alpha-compared
+     via [Refinement.with_binder_pair] when two arrows are unified.
+     [None] whenever the codomain does not mention the parameter. *)
 
 and package =
     { pack_path : Path.t;
@@ -245,10 +252,64 @@ and 'layout jkind_base =
   | Layout of 'layout
   | Kconstr of Path.t * Jkind_types.Scannable_axes.t
 
+and vox_refines =
+  (* vox: the REFINES component of a kind -- the type's declared
+     logical modeling (see DESIGN.md).  A peer of [base], never an
+     axis: compared structurally (below [Vr_top], the unconstrained
+     top), and inert for programs that never write [refines]. *)
+  | Vr_top
+  | Vr_sort of vox_sort
+
+and vox_sort =
+  (* vox: a REFINEMENT SORT -- the logical shape a value is modelled at.
+     Elaborated from the core type written in [refines (...)]; consumed
+     by the verifier, which turns it into a solver sort.  [Vs_param i]
+     stands for the declaration's [i]th type parameter, so a
+     parameterized head's declared sort instantiates positionally at a
+     use. *)
+  | Vs_int
+  | Vs_bool
+  | Vs_tuple of vox_sort list
+  | Vs_data of Path.t * vox_sort list
+  | Vs_param of int
+  | Vs_opaque
+  | Vs_lean of string * vox_sort list
+    (* vox: a GHOST SORT -- the value is modelled at a block-defined
+       Lean type named verbatim by the string ([type iset [@@vox.sort
+       lean "ISet"]]), applied to argument sorts ([type 'a iset ...]
+       instantiates positionally, like [Vs_data]: [int iset] carries
+       [[Vs_int]], rendered [(ISet Int)]).  Opaque to vox (Lean is the
+       grammar police for every use); TRUSTED like the
+       [Vs_int]/[Vs_bool] ghosts.  The NAME is .cmi-stable (a bare
+       string, no paths); the argument sorts remap under [Subst] like
+       [Vs_data]'s. *)
+  | Vs_fact of vox_sort * Refinement.pred
+    (* vox: a modeling that carries a declared INVARIANT.  [type nat :
+       value refines (int{ _ >= 0 })] models at the underlying sort
+       (here [Vs_int]) but every binder of the type contributes the
+       closed predicate as a free fact.  The predicate mentions only
+       the bound value [_] and constructor/spec symbols (closedness is
+       enforced at elaboration), so it is .cmi-stable like the paths in
+       [Vs_data]. *)
+
+and vox_map =
+  (* vox: one abstraction-function layer of a [Trefine]'s [maps] (see
+     [Trefine]).  [vm_fn] is the Lean map function; [vm_target] the
+     OCaml type it maps INTO (kept for printing the surface [via
+     (fn : target)] and for the inclusion rule, which relates a
+     manifest's target to a [refines] claim by the OCaml type); [vm_sort]
+     the target's refinement sort (what [dsort] renders and rigid
+     unification compares). *)
+  { vm_fn : string
+  ; vm_target : type_expr
+  ; vm_sort : vox_sort
+  }
+
 and ('layout, 'd) base_and_axes =
   { base : 'layout jkind_base;
     mod_bounds : mod_bounds;
-    with_bounds : 'd with_bounds
+    with_bounds : 'd with_bounds;
+    refines : vox_refines
   }
   constraint 'd = 'l * 'r
 
@@ -598,6 +659,41 @@ and type_transparence =
     Type_public      (* unrestricted expansion *)
   | Type_new         (* "new" type *)
   | Type_private     (* private type *)
+
+(* vox: structural equality on refinement sorts.  [Vs_param] is
+   positional; a [Path.t] in [Vs_data] compares by [Path.same] (stamps
+   make [(=)] wrong across rebuilds); an invariant predicate by
+   [Refinement.equal].  Shared by rigid unification of [Trefine] maps
+   and the verifier's coercion channels. *)
+let rec vox_sort_equal (s1 : vox_sort) (s2 : vox_sort) =
+  match s1, s2 with
+  | Vs_int, Vs_int | Vs_bool, Vs_bool | Vs_opaque, Vs_opaque -> true
+  | Vs_lean (n1, a1), Vs_lean (n2, a2) ->
+    String.equal n1 n2
+    && List.length a1 = List.length a2
+    && List.for_all2 vox_sort_equal a1 a2
+  | Vs_param i, Vs_param j -> Int.equal i j
+  | Vs_tuple ss1, Vs_tuple ss2 ->
+    List.length ss1 = List.length ss2 && List.for_all2 vox_sort_equal ss1 ss2
+  | Vs_data (p1, ss1), Vs_data (p2, ss2) ->
+    Path.same p1 p2
+    && List.length ss1 = List.length ss2
+    && List.for_all2 vox_sort_equal ss1 ss2
+  | Vs_fact (s1, p1), Vs_fact (s2, p2) ->
+    vox_sort_equal s1 s2 && Refinement.equal p1 p2
+  | ( ( Vs_int | Vs_bool | Vs_tuple _ | Vs_data _ | Vs_param _ | Vs_opaque
+      | Vs_lean _ | Vs_fact _ )
+    , _ ) ->
+    false
+
+(* vox: equality on [Trefine] maps -- same length, and each layer's
+   Lean function name and target sort equal, in order. *)
+let vox_maps_equal (m1 : vox_map list) (m2 : vox_map list) =
+  List.length m1 = List.length m2
+  && List.for_all2
+       (fun a b ->
+         String.equal a.vm_fn b.vm_fn && vox_sort_equal a.vm_sort b.vm_sort)
+       m1 m2
 
 let tys_of_constr_args = function
   | Cstr_tuple tl -> List.map (fun ca -> ca.ca_type) tl
@@ -1352,6 +1448,7 @@ let best_effort_compare_type_expr te1 te2 =
         | Tsplice _
         | Tquote_eval _
         | Tbox _
+        | Trefine _
         (* CR layouts v2.8: we can actually see Tsubst here in certain cases, eg during
            [Ctype.copy] when copying the types inside of with_bounds. We also can't
            compare Tsubst structurally, because the Tsubsts that are created in

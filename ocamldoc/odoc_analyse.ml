@@ -79,6 +79,10 @@ let unit_from_source source_file source_kind =
 
 let process_implementation_file sourcefile =
   init_path ();
+  (* vox: documentation generation must not depend on an external
+     solver; type_implementation would otherwise discharge every
+     verification condition through z3/lean. *)
+  Clflags.vox_dry_run := true;
   let source = unit_from_source sourcefile Unit_info.Impl in
   let compilation_unit = Unit_info.modname source in
   Env.set_current_unit source;

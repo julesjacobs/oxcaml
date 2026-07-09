@@ -277,6 +277,18 @@ and type_desc =
   | Tbox of type_expr
   (** [Tbox ty] ==> [ty box] *)
 
+  | Trefine of type_expr * vox_map list * Refinement.pred
+  (** [Trefine (ty, maps, p)] ==> a vox refined type over skeleton [ty].
+      [maps] is a list of [(lean_fn, target_sort)] abstraction-function
+      layers ([[]] = an ordinary refinement, today's [Trefine]); the
+      DENOTATION is [maps] folded (left to right) over [deno(ty)], and
+      the predicate [p] is stored at the BASE sort (over [deno(ty)]),
+      mentioning the image explicitly where a layer predicate was pushed
+      down.  Rigid: unifies only with a [Trefine] whose skeleton
+      unifies, whose [maps] are equal (name + target sort), and whose
+      predicate is structurally equal.  Erased to [ty] at compilation;
+      its jkind and layout are those of [ty]. *)
+
 (** This is used in the Typedtree. It is distinct from
     {{!Asttypes.arg_label}[arg_label]} because Position argument labels are
     discovered through typechecking. *)
@@ -287,7 +299,13 @@ and arg_label =
   | Position of string (** [label:[%call_pos] -> ...] *)
 
 and arrow_desc =
-  arg_label * Mode.Alloc.lr * Mode.Alloc.lr
+  arg_label * Mode.Alloc.lr * Mode.Alloc.lr * Ident.t option
+(** vox: the last component is the dependent-arrow binder, if any:
+    refinements in the codomain may reference it as an ordinary
+    [Refinement.Pvar].  Bound like [Tpoly] binds its univars: opened
+    by substitution at application and lambda sites; alpha-compared
+    via [Refinement.with_binder_pair] when two arrows are unified.
+    [None] whenever the codomain does not mention the parameter. *)
 
 (** [package] corresponds to the type of a first-class module *)
 and package =
@@ -391,10 +409,58 @@ and 'layout jkind_base =
   | Layout of 'layout
   | Kconstr of Path.t * Jkind_types.Scannable_axes.t
 
+and vox_refines =
+  (* vox: the REFINES component of a kind -- the type's declared
+     logical modeling (see DESIGN.md).  A peer of [base], never an
+     axis: compared structurally (below [Vr_top], the unconstrained
+     top), and inert for programs that never write [refines]. *)
+  | Vr_top
+  | Vr_sort of vox_sort
+
+and vox_sort =
+  (* vox: a REFINEMENT SORT -- the logical shape a value is modelled at.
+     Elaborated from the core type written in [refines (...)]; consumed
+     by the verifier, which turns it into a solver sort.  [Vs_param i]
+     stands for the declaration's [i]th type parameter, so a
+     parameterized head's declared sort instantiates positionally at a
+     use. *)
+  | Vs_int
+  | Vs_bool
+  | Vs_tuple of vox_sort list
+  | Vs_data of Path.t * vox_sort list
+  | Vs_param of int
+  | Vs_opaque
+  | Vs_lean of string * vox_sort list
+    (* vox: a GHOST SORT -- the value is modelled at a block-defined
+       Lean type named verbatim by the string ([type iset [@@vox.sort
+       lean "ISet"]]).  Opaque to vox (Lean is the grammar police for
+       every use); TRUSTED like the [Vs_int]/[Vs_bool] ghosts.  It is
+       .cmi-stable (a bare string, no paths).  Monomorphic for now --
+       parameterized ghost sorts (argument sorts) are a later stage. *)
+  | Vs_fact of vox_sort * Refinement.pred
+    (* vox: a modeling that carries a declared INVARIANT.  [type nat :
+       value refines (int{ _ >= 0 })] models at the underlying sort
+       (here [Vs_int]) but every binder of the type contributes the
+       closed predicate as a free fact.  The predicate mentions only
+       the bound value [_] and constructor/spec symbols (closedness is
+       enforced at elaboration), so it is .cmi-stable like the paths in
+       [Vs_data]. *)
+
+and vox_map =
+  (* vox: one abstraction-function layer of a [Trefine]'s [maps]:
+     [vm_fn] the Lean map function, [vm_target] the OCaml target type
+     (printing / inclusion), [vm_sort] its refinement sort (dsort /
+     rigid unification). *)
+  { vm_fn : string
+  ; vm_target : type_expr
+  ; vm_sort : vox_sort
+  }
+
 and ('layout, 'd) base_and_axes =
   { base : 'layout jkind_base;
     mod_bounds : mod_bounds;
-    with_bounds : 'd with_bounds
+    with_bounds : 'd with_bounds;
+    refines : vox_refines
   }
   constraint 'd = 'l * 'r
 
@@ -1047,6 +1113,11 @@ and constructor_argument =
 and constructor_arguments =
   | Cstr_tuple of constructor_argument list
   | Cstr_record of label_declaration list
+
+(* vox: structural equality on refinement sorts and on [Trefine] maps
+   ([Vs_data] paths by [Path.same], invariants by [Refinement.equal]). *)
+val vox_sort_equal : vox_sort -> vox_sort -> bool
+val vox_maps_equal : vox_map list -> vox_map list -> bool
 
 val tys_of_constr_args : constructor_arguments -> type_expr list
 

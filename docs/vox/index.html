@@ -1,0 +1,996 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Verified OxCaml: refinement types backed by Lean</title>
+<style>
+:root{
+  color-scheme: dark light;
+  --bg:#0f1115; --panel:#161a22; --panel2:#1c2230; --line:#2a3245;
+  --fg:#d8dee9; --dim:#8b95a7; --acc:#7aa2f7; --acc2:#9ece6a; --warn:#e0af68;
+  --err:#f7768e; --kw:#bb9af7; --com:#565f89; --lit:#ff9e64;
+  --navbg:rgba(15,17,21,.92);
+  --mono:'SF Mono',ui-monospace,'Cascadia Code',Menlo,Consolas,monospace;
+  --sans:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+}
+@media (prefers-color-scheme: light){
+  :root{
+    --bg:#ffffff; --panel:#f6f7f9; --panel2:#eceef2; --line:#d9dde4;
+    --fg:#24292f; --dim:#57606a; --acc:#0b5fbf; --acc2:#1a7f37; --warn:#7d4e00;
+    --err:#c0334d; --kw:#8250df; --com:#6e7781; --lit:#953800;
+    --navbg:rgba(255,255,255,.92);
+  }
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 var(--sans)}
+a{color:var(--acc);text-decoration:none} a:hover{text-decoration:underline}
+nav{position:sticky;top:0;z-index:9;background:var(--navbg);backdrop-filter:blur(6px);
+    border-bottom:1px solid var(--line);padding:.6rem 1.2rem}
+nav .in{max-width:960px;margin:0 auto;display:flex;gap:1.2rem;
+    align-items:baseline;flex-wrap:wrap}
+nav b{color:var(--fg);font-size:1.05rem}
+nav a{color:var(--dim);font-size:.9rem} nav a:hover{color:var(--fg)}
+main{max-width:960px;margin:0 auto;padding:0 1.2rem 4rem}
+h1{font-size:2.1rem;line-height:1.2;margin:2.5rem 0 .5rem}
+h1 .l{color:var(--acc)}
+h2{margin:3rem 0 .6rem;font-size:1.45rem;border-bottom:1px solid var(--line);
+   padding-bottom:.3rem;scroll-margin-top:3.5rem}
+h3{margin:1.6rem 0 .4rem;font-size:1.1rem}
+.tag{color:var(--dim);font-size:1.08rem;max-width:46rem}
+.claims{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:.8rem;margin:1.6rem 0}
+.claim{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:.8rem 1rem}
+.claim b{display:block;color:var(--acc2);margin-bottom:.2rem;font-size:.95rem}
+.claim span{color:var(--dim);font-size:.87rem;line-height:1.45;display:block}
+pre{background:var(--panel);border:1px solid var(--line);border-radius:8px;
+    padding:.9rem 1rem;overflow-x:auto;font:13px/1.55 var(--mono);margin:.8rem 0}
+code{font-family:var(--mono)}
+p code, li code, td code{background:var(--panel2);padding:.08em .35em;border-radius:4px;font-size:.88em}
+.k{color:var(--kw)} .c{color:var(--com)} .n{color:var(--lit)}
+.e{color:var(--err)} .g{color:var(--acc2)} .w{color:var(--warn)}
+.out{border-left:3px solid var(--err)}
+.tabs{display:flex;gap:.3rem;margin:.9rem 0 0;flex-wrap:wrap}
+.tabs button{background:var(--panel);color:var(--dim);border:1px solid var(--line);
+  border-bottom:none;border-radius:8px 8px 0 0;padding:.45rem .9rem;font:.88rem var(--sans);cursor:pointer}
+.tabs button.on{background:var(--panel2);color:var(--fg)}
+.tabpane{display:none;margin-top:0}
+.tabpane.on{display:block}
+.tabpane pre{margin-top:0;border-top-left-radius:0}
+.grid{display:grid;grid-template-columns:1fr;gap:1rem}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:1rem 1.1rem}
+.card h3{margin:.1rem 0 .35rem} .card p{color:var(--dim);font-size:.92rem;margin:.2rem 0 .6rem}
+.card pre{background:var(--panel2);margin:.4rem 0 0}
+table{border-collapse:collapse;width:100%;font-size:.92rem;margin:.8rem 0}
+th,td{border:1px solid var(--line);padding:.5rem .7rem;text-align:left;vertical-align:top}
+th{background:var(--panel);color:var(--fg)} td{color:var(--dim)} td:first-child{color:var(--fg);white-space:nowrap}
+.foot{margin-top:3.5rem;padding-top:1rem;border-top:1px solid var(--line);color:var(--dim);font-size:.85rem}
+.pill{display:inline-block;border:1px solid var(--line);border-radius:99px;padding:.05rem .6rem;
+  font-size:.78rem;color:var(--dim);margin-left:.4rem;vertical-align:middle}
+.cols{margin:1.6rem 0;text-align:justify}
+.cols .side{text-align:left}
+.cols::after{content:"";display:table;clear:both}
+.cols .tag{margin:0}
+.side{float:right;width:42%;max-width:26rem;margin:0 0 .9rem 1.6rem;
+  background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:.9rem 1.1rem .7rem}
+.side h3{margin:0 0 .4rem;font-size:1rem}
+.side ul{margin:0;padding-left:1.1rem}
+.side li{font-size:.88rem;color:var(--dim);margin:.4rem 0;line-height:1.5}
+@media (max-width:760px){.side{float:none;width:auto;max-width:none;margin:.9rem 0}}
+</style>
+</head>
+<body id="top">
+<nav><div class="in">
+  <a href="#top" style="color:var(--fg);font-weight:bold;font-size:1.05rem">vox</a>
+  <a href="#example">example</a>
+  <a href="#why-test">tests</a>
+  <a href="#sig">signatures</a>
+  <a href="#automation">automation</a>
+  <a href="#modes">mutation</a>
+  <a href="#tour">more demos</a>
+  <a href="#run">running it</a>
+</div></nav>
+<main>
+
+<h1>Verified OxCaml</h1>
+
+<p style="margin-top:.2rem;font-size:1.15rem;color:var(--dim)">Refinement
+types backed by Lean.</p>
+
+<div class="cols">
+<div class="side">
+<h3>Demos</h3>
+<ul>
+<li><a href="#qsort">In-place quicksort</a>:
+  <code>sorted</code>-and-<code>perm</code>, sequential and fork-join
+  parallel.</li>
+<li><a href="#real">The Patricia trie</a> from OxCaml&rsquo;s own
+  optimizer and a BST,
+  each behind a proved model interface.</li>
+<li><a href="#seal">Sealed interfaces</a>: one sig, two verified
+  implementations; <a href="#oset">a set</a> whose representation is
+  hidden even from the logic.</li>
+<li><a href="#modes">Unique mutation</a>: mutable borrows and mutable
+  slices into arrays; in-place list reversal, a tree flipped in
+  place.</li>
+<li><a href="#fib">Fast-doubling Fibonacci</a> verified against its own
+  naive definition; <a href="#tour">binary search, integer square
+  root</a>.</li>
+</ul>
+<p style="font-size:.85rem;color:var(--dim);margin:.5rem 0 .2rem">(all
+vibe-proved by AI)</p>
+</div>
+<p class="tag" style="color:var(--fg)">
+<b>vox</b> is an experimental extension of the OxCaml compiler in
+which types carry refinements, as in the examples below.  Refinements
+become proof obligations, discharged at compile time by
+Lean&nbsp;4&rsquo;s <code>grind</code> or manually proven lemmas;
+a failed obligation is a compile error with a counterexample, or a
+runtime check if you used <code>assume_</code>.
+Verification is opt-in per function.
+</p>
+<h3 style="margin:1.2rem 0 .4rem">How it works</h3>
+<ul>
+<li><a href="#sixty">Refinements are Lean propositions</a>; anything
+  provable in Lean can be a refinement.</li>
+<li><a href="#sixty">Refinements can mention the variables in scope</a>,
+  function arguments included (dependent types); a program variable in a
+  refinement denotes its logical Lean counterpart.</li>
+<li><a href="#contracts">Refinements generalize pre/postconditions</a>: they
+  attach to any type, and the typechecker propagates them through data
+  structures and polymorphic functions.</li>
+<li><a href="#reflect">OCaml functions can be used in specs</a>: marking
+  a function <code>total_</code> reflects it into the logic, and
+  refinements can then call it.</li>
+<li><a href="#sig">Specs go on module signatures</a>: an
+  <code>.mli</code> can state a model and prove its theorems; clients
+  verify against the interface alone.  It can instead hide the model
+  and export <a href="#seal">axioms as obligations</a> the
+  implementation must prove &mdash; even the
+  <a href="#oset">representation type</a> can stay abstract.  And
+  <a href="#via">the model can be a function of the representation</a>:
+  a BST whose values denote bona fide Lean sets, specced and proved in
+  set vocabulary.</li>
+<li><a href="#automation">Automation</a>: <code>grind</code> handles the
+  common case; missed goals are proved with tactics next to the code and
+  registered with <code>@[grind]</code>; everything is
+  kernel-checked.</li>
+<li><a href="#counterexamples">Failures produce counterexamples</a>:
+  the goal, the hypotheses in scope, and a violating input, at the
+  offending expression.</li>
+<li><a href="#modes">Unique mutation using the mode system</a>:
+  RustHorn-style mutable borrows (see the parallel in-place quicksort
+  demo).</li>
+<li><a href="#why-test">Specs work as tests</a>: reflected predicates
+  are executable OCaml, usable as runtime checks (<code>assume_</code>)
+  and as oracles for property-based testing, fuzzing, and AI-driven bug
+  finding.</li>
+</ul>
+</div>
+
+<video controls loop muted playsinline width="940" poster="editor.png"
+  style="width:100%;max-width:940px;border:1px solid var(--line);border-radius:8px;margin:1.2rem 0 .2rem">
+  <source src="editor.webm" type="video/webm">
+</video>
+<p style="color:var(--dim);font-size:.9rem;margin:.2rem 0 2rem">The
+editor: hypotheses and goal at the cursor.  Weakening a bound breaks
+the proof &mdash; the counterexample names the input &mdash; and the
+fix turns it green again.</p>
+
+<h2 id="example">Refinement types, by example</h2>
+<p>In the first example, the compiler verifies that appending two
+lists adds their lengths.  The specification needs a length function
+it can mention, so the setup is a list type and the usual recursive
+definition of length:</p>
+<pre><code class="ml">type ilist =
+  | Nil
+  | Cons of int * ilist
+
+let rec total_ len l =
+  match l with
+  | Nil -&gt; 0
+  | Cons (_, t) -&gt; 1 + len t</code></pre>
+<p id="reflect">The <code>total_</code> keyword reflects
+<code>len</code> into the logic: the compiler emits it as a Lean
+<code>def</code>, Lean checks that it terminates, and refinements can
+then call it (allowing arbitrary OCaml functions in specifications
+would be unsound: from a definition like
+<code>let rec f x = f x + 1</code> the logic would conclude
+<code>0 = 1</code>).</p>
+<pre><code class="ml">(* Each obligation is a Lean theorem, proved automatically by grind;
+   the file contains no proof text. *)
+let rec append (a : ilist) (b : ilist) : ilist{ len _ = len a + len b } =
+  match a with
+  | Nil -&gt; b  (* obligation: len b = len Nil + len b *)
+  | Cons (h, t) -&gt;
+    let r = append t b in  (* induction hypothesis: len r = len t + len b *)
+    (* obligation: len (Cons (h, r)) = len (Cons (h, t)) + len b *)
+    Cons (h, r)</code></pre>
+<p id="sixty">Apart from the annotation on its result type,
+<code>append</code> is ordinary OCaml, and the compiled code is the
+same as without the annotation.  Between the braces stands a
+proposition of the logic, written in OCaml syntax: <code>_</code>
+denotes the value the type is attached to, in this case
+<code>append</code>&rsquo;s result, and <code>a</code> and
+<code>b</code> are the function&rsquo;s parameters.
+<b>Refinements are dependent: a type may mention the program variables
+in scope.</b>  What gives this meaning is the correspondence between
+the two worlds: in a refinement, a program variable stands for the
+logical counterpart of its run-time value (a mathematical integer for
+an <code>int</code>, a Lean inductive value for a variant such as
+<code>ilist</code>, an opaque atom for values of other types).  A
+refinement can therefore state a relation between run-time values:
+here, that the length of the result is the sum of the lengths of the
+arguments.</p>
+<p id="contracts">Refinement types are often met as range restrictions
+such as <code>int{ _ &gt;= 0 }</code>.  <b>With dependency, refinements
+generalize pre- and postconditions</b>: a refinement on the result is
+a postcondition, which the body must establish; a refinement on a
+parameter is a precondition (<code>nth</code>, below).</p>
+<pre><code class="ml">let rec nth (l : ilist) (i : int{ 0 &lt;= _ &amp;&amp; _ &lt; len l }) : int =
+  match l with
+  | Nil -&gt; unreachable_ ()   (* dead code by the precondition *)
+  | Cons (h, t) -&gt; if i = 0 then h else nth t (i - 1)</code></pre>
+<p>The bounds on <code>i</code> are the precondition at work: every
+caller must prove them, and the body may assume them.  Within the
+body, branch conditions are also in scope, so the recursive call
+discharges its bounds from <code>i &lt;&gt; 0</code> and the
+<code>Cons</code> match.  The <code>Nil</code> arm is dead code given
+the bounds, and calling <code>unreachable_</code> there proves it:
+<code>unreachable_</code> is an ordinary library function of type
+<code>unit{ false } -&gt; 'a</code>, so the argument <code>()</code>
+must be constructed at an uninhabited type, and the obligation is
+<code>false</code> under the arm&rsquo;s hypotheses, where
+<code>assert false</code> would defer the claim to run time.</p>
+<p>Proof obligations arise in one way only: by constructing a value of
+a refined type.  The body of <code>append</code> constructs its
+result, a caller of <code>nth</code> constructs the argument
+<code>i</code>, and <code>unreachable_ ()</code> constructs
+<code>()</code> at a type nothing satisfies.  All are discharged at
+compile time by the <a href="#automation">automation</a>.</p>
+<p>Weakening <code>nth</code>&rsquo;s bound to
+<code>i &lt;= len l</code> makes the <code>Nil</code> arm reachable,
+and verification fails with a counterexample:</p>
+<pre><code class="ml">let rec nth (l : ilist) (i : int{ 0 &lt;= _ &amp;&amp; _ &lt;= len l }) : int =
+  match l with
+  | Nil -&gt; unreachable_ ()
+  | Cons (h, t) -&gt; if i = 0 then h else nth t (i - 1)</code></pre>
+<pre class="out"><code>Line 14, characters 24-26:
+14 |   | Nil -&gt; unreachable_ ()
+                             ^^
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
+       Goal: false
+Hypotheses:
+  l = Nil
+  0 &lt;= i &amp;&amp; i &lt;= len l
+Counterexample (validated -- every hypothesis holds and the goal fails here):
+  l = Nil
+  i = 0</code></pre>
+<p id="counterexamples">A failed obligation is reported like a type
+error, at the offending expression, with the goal, the hypotheses in
+scope, and a candidate counterexample, rewritten to source names.
+This is also the feedback an agent receives when it writes the code or
+the proof.  When the automation misses a correct obligation, the agent
+proves the missing lemmas in Lean and registers them with
+<code>grind</code>, and the check goes through.</p>
+<p>A refinement can also appear under a type
+constructor: <code>int{ _ &gt;= 0 } list</code> states that every
+element is nonnegative.  Because the fact is part of the type, the
+typechecker propagates it, and polymorphic functions preserve it by
+instantiation: <code>List.rev</code> at
+<code>'a = int{ _ &gt;= 0 }</code> returns nonnegative elements with
+nothing to prove (in effect, unary parametricity).</p>
+
+<h2 id="why-test">Specs as tests</h2>
+<p>Proof is not the only way to enforce a contract.
+<code>assume_ e</code> compiles the refinement into a runtime check:
+the value flows through when the predicate holds, and the program
+raises when it does not.  This is useful at a trust boundary &mdash;
+validate an input where it enters, and the fact is then available to
+proofs, so the code behind the boundary compiles without further
+checks:</p>
+<pre><code class="ml">(* Inline, at the boundary: [nth]'s own contract compiles to the
+   check, [len] call included; past it, [nth] runs proved and
+   checkless. *)
+let nth_checked (l : ilist) (i : int) : int = nth l (assume_ i)</code></pre>
+<p>A violated assumption raises, with the predicate and the
+location:</p>
+<pre class="out"><code>Exception: Failure "vox: assume_ check failed at :1:61: 0 &lt;= _ &amp;&amp; _ &lt; len l".</code></pre>
+<p>The same mechanism turns a property that is stated but not proved
+into an executable oracle: reflected functions are ordinary OCaml, so
+the specification can simply run, and each call checks the property.
+Property-based testing, fuzzing, or AI-driven input search could
+generate inputs and use the contract as the oracle:</p>
+<pre><code class="ml">let rec total_ rev l =
+  match l with
+  | Nil -&gt; Nil
+  | Cons (h, t) -&gt; append (rev t) (Cons (h, Nil))
+
+(* Lemma-style: stated, not proved; the reflected functions run as
+   ordinary code, and every call checks the property. *)
+let rev_involutive (l : ilist) : unit{ rev (rev l) = l } = assume_ ()</code></pre>
+
+<h2 id="sig">Specs on module signatures</h2>
+<p>Specs can go on an <code>.mli</code>.  The interface says what the
+module does &mdash; a model of its data structure, a few laws about
+an abstract type, or just &ldquo;values of this type are sets&rdquo;
+&mdash; and the compiler checks both directions: the implementation
+has to prove everything the interface claims (a module that
+can&rsquo;t prove its own interface doesn&rsquo;t compile), and
+clients verify against the interface without seeing the
+implementation.  So the representation can change, and no client
+proof breaks.</p>
+
+<p>The examples, each in the branch&rsquo;s test suite:</p>
+<ul>
+<li><b>A BST behind a transparent model</b> &mdash;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/bst.mli">bst.mli</a> states whole-tree
+  membership, the ordering invariant, and a model-level
+  <code>insert</code>;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/bst.ml">bst.ml</a> is checked against it arm
+  by arm, with no proof text and no trust keyword;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/demo/lean_bst.ml">a client</a> proves against the
+  exported theorems, and
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/demo/lean_bst_alt.ml">an alternative
+  interface</a> states everything <code>add</code> does in one quantified
+  refinement.
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/mechanics/lean_bst_fail.ml">The classic
+  wrong-side bug</a> is rejected with a counterexample naming a missed
+  element.</li>
+<li id="real"><b>The Patricia trie</b> from OxCaml&rsquo;s optimizer
+  (<code>middle_end/flambda2/algorithms/patricia_tree.ml</code>),
+  little-endian, the bit twiddling kept:
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/ptrie.mli">ptrie.mli</a> models the bit
+  operations arithmetically and proves the bit theory from first
+  principles in core Lean, so nothing about bits is axiomatized;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/ptrie.ml">ptrie.ml</a>&rsquo;s whole trust
+  surface is three one-line bridges (vox does not reflect the bitwise
+  operators);
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/mechanics/lean_ptrie_fail.ml">descending without
+  checking the prefix</a> is a compile error with a witness.
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/ptrie_packed.ml">The packed variant</a> is
+  big-endian like the compiler, prefix and branching bit packed into one
+  int per branch; the invariant is stated about the packed int
+  itself.</li>
+<li id="seal"><b>Sealed: one law, two implementations</b> &mdash;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/step.mli">step.mli</a> exports a single law
+  as an axiom;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/step_incr/step.ml">step_incr</a> and
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/step_double/step.ml">step_double</a> each
+  prove it, and
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/demo/lean_seal.ml">the same client body</a>
+  verifies against either;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/mechanics/lean_seal_fail.ml">an implementation
+  that cannot prove the law</a> is rejected at its seal.</li>
+<li id="oset"><b>Full abstraction</b> &mdash;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/oset.mli">oset.mli</a> hides model and
+  representation both;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/oset.ml">the implementation</a> is a binary
+  search tree, but
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/demo/lean_oset.ml">a client</a> and its proofs
+  see only four axioms;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/mechanics/lean_oset_opaque.ml">a fact the axioms
+  do not imply</a> is rejected.</li>
+<li id="via"><b>A set that <em>is</em> a set</b> &mdash;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/via_set.mli">via_set.mli</a> declares
+  <code>type t : value refines (iset)</code> with specs in set
+  vocabulary and no mention of the representation;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/via_set.ml">via_set.ml</a> is a BST mapped
+  through the abstraction function <code>elems</code> and proves
+  <code>add</code> and <code>member</code> honestly against that
+  interface;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/mechanics/lean_via_seal.ml">a client</a> proves
+  membership through the abstraction with no view of the tree;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/mechanics/lean_via_boundary_fail.ml">an interface
+  overclaim</a> is rejected at the implementation&rsquo;s obligation, and
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/mechanics/lean_via_honesty.ml">a manifest at the
+  wrong model</a> at signature inclusion.
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/pset.mli">The parameterized version</a>
+  (<code>'a t : value refines ('a iset)</code>) proves once,
+  generically, and
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/mechanics/lean_pset_seal.ml">a client
+  instantiates at <code>int</code></a>.</li>
+<li id="htbl"><b>Hash tables, three ways</b> &mdash;
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/htbl.mli">htbl.mli</a> proves the bucketed table's
+  central theorem once &mdash; a lookup that hashes the key and inspects
+  exactly <em>one</em> bucket equals a scan of the whole table, because
+  the bucket invariant makes the skipped buckets provably irrelevant
+  (<a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/demo/lean_htbl.ml">client</a>);
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/mhtbl.mli">mhtbl</a> is the same table
+  <em>imperative</em>: in-place bucket mutation whose ghost is the
+  immutable model, so
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/demo/lean_htbl_mut.ml">a client</a> reuses the very same
+  theorems with nothing re-proved and nothing new assumed; and
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/lib/lphtbl.mli">lphtbl</a> is <em>linear probing</em>
+  over parallel arrays, where the invariant is global &mdash; every
+  stored key reachable from its home slot through an unbroken occupied
+  run &mdash; kept quantifier-free by fuel-bounded probing
+  (<a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/demo/lean_lphtbl.ml">client</a>);
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/mechanics/lean_htbl_fail.ml">a broken bucket
+  invariant</a> and
+  <a href="https://github.com/julesjacobs/oxcaml/blob/vox/testsuite/tests/vox/mechanics/lean_lphtbl_fail.ml">a broken probe run</a>
+  are both rejected.</li>
+</ul>
+
+<h2 id="automation">Automation</h2>
+<p><code>grind</code> covers the same ground as an SMT solver
+(congruence closure, E-matching, linear arithmetic), so the common case
+feels like SMT-backed refinement types.  When automation fails, you can
+prove a Lean lemma with tactics and register it with
+<code>grind</code>, or use a lemma from a Lean library.</p>
+
+<h3 id="fib">Fast-doubling Fibonacci</h3>
+<p>We define three versions of Fibonacci: by naive exponential
+recursion, linear loop, and fast-doubling <i>O</i>(log&nbsp;n)
+iterations, and prove them equivalent.  SMT can&rsquo;t do this on its
+own, so we help it out with some lemmas:</p>
+<div class="tabs" data-tabs>
+  <button class="on">the implementations</button>
+  <button>the embedded lemmas</button>
+  <button>generated solver input</button>
+</div>
+<div class="tabpane on"><pre style="max-height:34rem"><code class="ml">let rec total_ fib n =
+  if n &lt;= 0
+  then 0
+  else if n = 1
+  then 1
+  else fib (n - 1) + fib (n - 2)
+[@@vox.decreases n]
+
+let fib_slow (n : int) : int{ _ = fib n } = fib n
+
+let rec fib_loop (n : int) (i : int) (a : int{ _ = fib i &amp;&amp; i &gt;= 0 })
+  (b : int{ _ = fib (i + 1) }) : int{ _ = fib n }
+  =
+  if i = n
+  then a
+  else begin
+    fib_loop n (i + 1) b (a + b)
+  end
+
+let fib_iter (n : int) : int{ _ = fib n } = fib_loop n 0 0 1
+
+let rec fib_fd (n : int{ _ &gt;= 0 }) : (int * int){ _ = (fib n, fib (n + 1)) } =
+  if n &lt;= 0
+  then (0, 1)
+  else begin
+    let k : int{ n = 2 * _ || n = 2 * _ + 1 } = n / 2 in
+    let q = fib_fd k in
+    match q with
+    | (a, b) -&gt;
+      let x : int{ _ = fib (2 * k) } = a * (2 * b - a) in
+      let y : int{ _ = fib (2 * k + 1) } = a * a + b * b in
+      if n = 2 * k
+      then (x, y)
+      else (y, x + y)
+  end</code></pre></div>
+<div class="tabpane"><pre style="max-height:34rem"><code class="ml">[%%vox.lean {lean|
+theorem fib_rec (n : Int) (h : 2 &lt;= n) : fib n = fib (n - 1) + fib (n - 2) := by
+  grind
+
+theorem fib_add (m n : Int) (hm : 0 &lt;= m) (hn : 0 &lt;= n) :
+    fib (m + n + 1) = fib (m + 1) * fib (n + 1) + fib m * fib n := by
+  fun_induction fib m with
+  | case1 x h =&gt; grind
+  | case2 x =&gt; grind
+  | case3 x h1 h2 ih1 ih2 =&gt;
+    have i1 := ih1 (by omega)
+    have i2 := ih2 (by omega)
+    have e1 : x - 1 + n + 1 = x + n := by omega
+    have e2 : x - 2 + n + 1 = x + n - 1 := by omega
+    have e3 : x - 1 + 1 = x := by omega
+    have e4 : x - 2 + 1 = x - 1 := by omega
+    rw [e1, e3] at i1
+    rw [e2, e4] at i2
+    have u0 := fib_rec (x + n + 1) (by omega)
+    have e5 : x + n + 1 - 1 = x + n := by omega
+    have e6 : x + n + 1 - 2 = x + n - 1 := by omega
+    rw [e5, e6] at u0
+    have u1 := fib_rec (x + 1) (by omega)
+    have e7 : x + 1 - 1 = x := by omega
+    have e8 : x + 1 - 2 = x - 1 := by omega
+    rw [e7, e8] at u1
+    have u2 := fib_rec x (by omega)
+    grind
+
+@[grind =] theorem fib_double (k : Int) (hk : 0 &lt;= k) :
+    fib (2 * k) = fib k * (2 * fib (k + 1) - fib k) := by
+  by_cases h0 : k = 0
+  · subst h0; grind
+  · have h := fib_add (k - 1) k (by omega) hk
+    have e1 : k - 1 + k + 1 = 2 * k := by omega
+    have e2 : k - 1 + 1 = k := by omega
+    rw [e1, e2] at h
+    grind
+
+@[grind =] theorem fib_double_succ (k : Int) (hk : 0 &lt;= k) :
+    fib (2 * k + 1) = fib k * fib k + fib (k + 1) * fib (k + 1) := by
+  have h := fib_add k k hk hk
+  have e : k + k + 1 = 2 * k + 1 := by omega
+  rw [e] at h
+  grind
+|lean}]</code></pre></div>
+<div class="tabpane"><pre style="max-height:34rem"><code class="lean" id="genlean">module
+public import VoxCore
+@[grind] def fib (v_n_280 : Int) : Int := (if (v_n_280 ≤ (0 : Int)) then (0 : Int) else (if (v_n_280 = (1 : Int)) then (1 : Int) else ((fib (v_n_280 - (1 : Int))) + (fib (v_n_280 - (2 : Int))))))
+termination_by (v_n_280).toNat
+decreasing_by all_goals (first | omega | grind)
+
+theorem fib_rec (n : Int) (h : 2 &lt;= n) : fib n = fib (n - 1) + fib (n - 2) := by
+  grind
+
+theorem fib_add (m n : Int) (hm : 0 &lt;= m) (hn : 0 &lt;= n) :
+    fib (m + n + 1) = fib (m + 1) * fib (n + 1) + fib m * fib n := by
+  fun_induction fib m with
+  | case1 x h =&gt; grind
+  | case2 x =&gt; grind
+  | case3 x h1 h2 ih1 ih2 =&gt;
+    have i1 := ih1 (by omega)
+    have i2 := ih2 (by omega)
+    have e1 : x - 1 + n + 1 = x + n := by omega
+    have e2 : x - 2 + n + 1 = x + n - 1 := by omega
+    have e3 : x - 1 + 1 = x := by omega
+    have e4 : x - 2 + 1 = x - 1 := by omega
+    rw [e1, e3] at i1
+    rw [e2, e4] at i2
+    have u0 := fib_rec (x + n + 1) (by omega)
+    have e5 : x + n + 1 - 1 = x + n := by omega
+    have e6 : x + n + 1 - 2 = x + n - 1 := by omega
+    rw [e5, e6] at u0
+    have u1 := fib_rec (x + 1) (by omega)
+    have e7 : x + 1 - 1 = x := by omega
+    have e8 : x + 1 - 2 = x - 1 := by omega
+    rw [e7, e8] at u1
+    have u2 := fib_rec x (by omega)
+    grind
+
+@[grind =] theorem fib_double (k : Int) (hk : 0 &lt;= k) :
+    fib (2 * k) = fib k * (2 * fib (k + 1) - fib k) := by
+  by_cases h0 : k = 0
+  · subst h0; grind
+  · have h := fib_add (k - 1) k (by omega) hk
+    have e1 : k - 1 + k + 1 = 2 * k := by omega
+    have e2 : k - 1 + 1 = k := by omega
+    rw [e1, e2] at h
+    grind
+
+@[grind =] theorem fib_double_succ (k : Int) (hk : 0 &lt;= k) :
+    fib (2 * k + 1) = fib k * fib k + fib (k + 1) * fib (k + 1) := by
+  have h := fib_add k k hk hk
+  have e : k + k + 1 = 2 * k + 1 := by omega
+  rw [e] at h
+  grind
+set_option maxHeartbeats 400000
+theorem vc_0 (v_n_285 : Int) : ((fib v_n_285) = (fib v_n_285)) := by grind
+theorem vc_1 (v_n_295 : Int) (v_a_297 : Int) (v_i_296 : Int) (v_b_298 : Int) (h_0 : (v_i_296 = v_n_295)) (h_1 : (v_b_298 = (fib (v_i_296 + (1 : Int))))) (h_2 : ((v_a_297 = (fib v_i_296)) ∧ (v_i_296 ≥ (0 : Int)))) : (v_a_297 = (fib v_n_295)) := by grind
+theorem vc_2 (v_i_296 : Int) (v_b_298 : Int) (v_n_295 : Int) (v_a_297 : Int) (h_0 : (¬ (v_i_296 = v_n_295))) (h_1 : (v_b_298 = (fib (v_i_296 + (1 : Int))))) (h_2 : ((v_a_297 = (fib v_i_296)) ∧ (v_i_296 ≥ (0 : Int)))) : ((v_b_298 = (fib (v_i_296 + (1 : Int)))) ∧ ((v_i_296 + (1 : Int)) ≥ (0 : Int))) := by grind
+theorem vc_3 (v_i_296 : Int) (v_b_298 : Int) (v_a_297 : Int) (v_n_295 : Int) (h_0 : (¬ (v_i_296 = v_n_295))) (h_1 : (v_b_298 = (fib (v_i_296 + (1 : Int))))) (h_2 : ((v_a_297 = (fib v_i_296)) ∧ (v_i_296 ≥ (0 : Int)))) : ((v_a_297 + v_b_298) = (fib ((v_i_296 + (1 : Int)) + (1 : Int)))) := by grind
+theorem vc_4 : (((0 : Int) = (fib (0 : Int))) ∧ ((0 : Int) ≥ (0 : Int))) := by grind
+theorem vc_5 : ((1 : Int) = (fib ((0 : Int) + (1 : Int)))) := by grind
+theorem vc_6 (v_n_307 : Int) (h_0 : (v_n_307 ≤ (0 : Int))) (h_1 : (v_n_307 ≥ (0 : Int))) : ((VoxT2.mk (0 : Int) (1 : Int)) = (VoxT2.mk (fib v_n_307) (fib (v_n_307 + (1 : Int))))) := by grind
+theorem vc_7 (v_n_307 : Int) (h_0 : (¬ (v_n_307 ≤ (0 : Int)))) (h_1 : (v_n_307 ≥ (0 : Int))) : ((v_n_307 = ((2 : Int) * (Int.tdiv v_n_307 (2 : Int)))) ∨ (v_n_307 = (((2 : Int) * (Int.tdiv v_n_307 (2 : Int))) + (1 : Int)))) := by grind
+theorem vc_8 (v_k_308 : Int) (v_n_307 : Int) (h_0 : (v_k_308 = (Int.tdiv v_n_307 (2 : Int)))) (h_1 : ((v_n_307 = ((2 : Int) * v_k_308)) ∨ (v_n_307 = (((2 : Int) * v_k_308) + (1 : Int))))) (h_2 : (¬ (v_n_307 ≤ (0 : Int)))) (h_3 : (v_n_307 ≥ (0 : Int))) : (v_k_308 ≥ (0 : Int)) := by grind
+theorem vc_9 (v_k_308 : Int) (v_a_310 : Int) (v_b_311 : Int) (v_q_309 : (VoxT2 Int Int)) (v_n_307 : Int) (h_0 : (v_a_310 = (VoxT2.p1 v_q_309))) (h_1 : (v_b_311 = (VoxT2.p2 v_q_309))) (h_2 : (v_q_309 = (VoxT2.mk (fib v_k_308) (fib (v_k_308 + (1 : Int)))))) (h_3 : (v_k_308 = (Int.tdiv v_n_307 (2 : Int)))) (h_4 : ((v_n_307 = ((2 : Int) * v_k_308)) ∨ (v_n_307 = (((2 : Int) * v_k_308) + (1 : Int))))) (h_5 : (¬ (v_n_307 ≤ (0 : Int)))) (h_6 : (v_n_307 ≥ (0 : Int))) : ((v_a_310 * (((2 : Int) * v_b_311) - v_a_310)) = (fib ((2 : Int) * v_k_308))) := by grind
+theorem vc_10 (v_k_308 : Int) (v_b_311 : Int) (v_a_310 : Int) (v_x_312 : Int) (v_q_309 : (VoxT2 Int Int)) (v_n_307 : Int) (h_0 : (v_x_312 = (v_a_310 * (((2 : Int) * v_b_311) - v_a_310)))) (h_1 : (v_x_312 = (fib ((2 : Int) * v_k_308)))) (h_2 : (v_a_310 = (VoxT2.p1 v_q_309))) (h_3 : (v_b_311 = (VoxT2.p2 v_q_309))) (h_4 : (v_q_309 = (VoxT2.mk (fib v_k_308) (fib (v_k_308 + (1 : Int)))))) (h_5 : (v_k_308 = (Int.tdiv v_n_307 (2 : Int)))) (h_6 : ((v_n_307 = ((2 : Int) * v_k_308)) ∨ (v_n_307 = (((2 : Int) * v_k_308) + (1 : Int))))) (h_7 : (¬ (v_n_307 ≤ (0 : Int)))) (h_8 : (v_n_307 ≥ (0 : Int))) : (((v_a_310 * v_a_310) + (v_b_311 * v_b_311)) = (fib (((2 : Int) * v_k_308) + (1 : Int)))) := by grind
+theorem vc_11 (v_n_307 : Int) (v_y_313 : Int) (v_x_312 : Int) (v_k_308 : Int) (v_b_311 : Int) (v_a_310 : Int) (v_q_309 : (VoxT2 Int Int)) (h_0 : (v_n_307 = ((2 : Int) * v_k_308))) (h_1 : (v_y_313 = ((v_a_310 * v_a_310) + (v_b_311 * v_b_311)))) (h_2 : (v_y_313 = (fib (((2 : Int) * v_k_308) + (1 : Int))))) (h_3 : (v_x_312 = (v_a_310 * (((2 : Int) * v_b_311) - v_a_310)))) (h_4 : (v_x_312 = (fib ((2 : Int) * v_k_308)))) (h_5 : (v_a_310 = (VoxT2.p1 v_q_309))) (h_6 : (v_b_311 = (VoxT2.p2 v_q_309))) (h_7 : (v_q_309 = (VoxT2.mk (fib v_k_308) (fib (v_k_308 + (1 : Int)))))) (h_8 : (v_k_308 = (Int.tdiv v_n_307 (2 : Int)))) (h_9 : ((v_n_307 = ((2 : Int) * v_k_308)) ∨ (v_n_307 = (((2 : Int) * v_k_308) + (1 : Int))))) (h_10 : (¬ (v_n_307 ≤ (0 : Int)))) (h_11 : (v_n_307 ≥ (0 : Int))) : ((VoxT2.mk v_x_312 v_y_313) = (VoxT2.mk (fib v_n_307) (fib (v_n_307 + (1 : Int))))) := by grind
+theorem vc_12 (v_n_307 : Int) (v_y_313 : Int) (v_x_312 : Int) (v_k_308 : Int) (v_b_311 : Int) (v_a_310 : Int) (v_q_309 : (VoxT2 Int Int)) (h_0 : (¬ (v_n_307 = ((2 : Int) * v_k_308)))) (h_1 : (v_y_313 = ((v_a_310 * v_a_310) + (v_b_311 * v_b_311)))) (h_2 : (v_y_313 = (fib (((2 : Int) * v_k_308) + (1 : Int))))) (h_3 : (v_x_312 = (v_a_310 * (((2 : Int) * v_b_311) - v_a_310)))) (h_4 : (v_x_312 = (fib ((2 : Int) * v_k_308)))) (h_5 : (v_a_310 = (VoxT2.p1 v_q_309))) (h_6 : (v_b_311 = (VoxT2.p2 v_q_309))) (h_7 : (v_q_309 = (VoxT2.mk (fib v_k_308) (fib (v_k_308 + (1 : Int)))))) (h_8 : (v_k_308 = (Int.tdiv v_n_307 (2 : Int)))) (h_9 : ((v_n_307 = ((2 : Int) * v_k_308)) ∨ (v_n_307 = (((2 : Int) * v_k_308) + (1 : Int))))) (h_10 : (¬ (v_n_307 ≤ (0 : Int)))) (h_11 : (v_n_307 ≥ (0 : Int))) : ((VoxT2.mk v_y_313 (v_x_312 + v_y_313)) = (VoxT2.mk (fib v_n_307) (fib (v_n_307 + (1 : Int))))) := by grind
+theorem vc_13 : ((10 : Int) ≥ (0 : Int)) := by grind
+theorem vc_14 (v_u_316 : Int) (v_r_315 : (VoxT2 Int Int)) (h_0 : (v_u_316 = (VoxT2.p1 v_r_315))) (h_1 : (v_r_315 = (VoxT2.mk (fib (10 : Int)) (fib ((10 : Int) + (1 : Int)))))) : (v_u_316 = (fib (10 : Int))) := by grind</code></pre>
+<p style="color:var(--dim);font-size:.9rem">Regenerated and checked on every
+compile: a Lean module over the compiler-built <code>VoxCore</code> (the
+tuple products live there), the reflected <code>fib</code> with
+its synthesized <code>termination_by</code>, the embedded lemma block
+verbatim, and one theorem per obligation (fifteen for this file), each
+closed by <code>grind</code>.</p></div>
+<h2 id="modes">Unique mutation</h2>
+<p>OxCaml&rsquo;s <code>@ unique</code> mode lets us reason about
+mutation within the pure refinement system, and <code>@ local</code>
+lets us model mutable borrows and slices and verify them with
+RustHorn-style prophecies.  Today the borrows are library-encoded;
+OxCaml language support for borrows would make this much more
+ergonomic.</p>
+
+<h3 id="qsort">In-place parallel quicksort</h3>
+<p>We sort a slice into an array, in parallel &mdash; the sequential
+<code>qsort</code> is the same body with the two recursive calls made
+directly instead of under <code>fork_join2</code>:</p>
+<pre><code class="ml">let rec psort (m : slice @ local unique)
+  : unit{ sorted (fin m) &amp;&amp; perm (now m) (fin m) } =
+  let (n, m0) = slen m in
+  if n &lt;= 1
+  then begin
+    let () = sdrop m0 in
+    ()
+  end
+  else begin
+    let (p, mp) = sget m0 (n - 1) in
+    let (k, m2) = part p 0 0 mp n in
+    let (p1, p2, p3) = (new_proph (), new_proph (), new_proph ()) in
+    let (mres, ()) =
+      split3 p1 p2 p3 m2 k (k + 1) (fun a b c -&gt;
+        let ((), ()) =
+          Par_lib.fork_join2
+            (fun () -&gt;
+              (psort a : unit{ sorted (pv p1)
+                               &amp;&amp; perm (take k (now m2)) (pv p1) }))
+            (fun () -&gt;
+              (psort c : unit{ sorted (pv p3)
+                               &amp;&amp; perm (drop (k + 1) (now m2)) (pv p3) }))
+        in
+        let () = sdrop b in
+        (() : unit{ sorted (pv p1)
+                    &amp;&amp; perm (take k (now m2)) (pv p1)
+                    &amp;&amp; pv p2 = seg k (k + 1) (now m2)
+                    &amp;&amp; sorted (pv p3)
+                    &amp;&amp; perm (drop (k + 1) (now m2)) (pv p3) }))
+    in
+    let () = sdrop mres in
+    ()
+  end</code></pre>
+<p>This quicksort eliminates bounds checks: indexing is statically
+proved, so the compiled code reads and writes without them.</p>
+<p>To sort an array, borrow it and sort the loan: the borrow hands the
+array back, and the prophecy carries the conclusion onto its
+contents:</p>
+<pre><code class="ml">let sort_array (x : varr @ unique)
+  : varr{ sorted (cts _) &amp;&amp; perm (cts x) (cts _) } @ unique =
+  let p = new_proph () in
+  let (x', ()) =
+    borrow p x (fun m -&gt;
+      (psort m : unit{ sorted (pv p) &amp;&amp; perm (cts x) (pv p) }))
+  in
+  x'</code></pre>
+
+<h2 id="poly">What refinement types buy us</h2>
+<p>Because a refinement is part of the type, the language&rsquo;s
+polymorphism transports facts with no verifier support.  The
+<code>fork_join2</code> above is the untouched library function: its
+type is polymorphic, so instantiating <code>'a</code> at a refined
+unit is all it took to carry each task&rsquo;s conclusion across the
+domain join.  The same instantiation gives a first form of shared
+mutation &mdash; a <code>ref</code> whose contents type is an
+invariant: reads return the fact, and writes must re-establish it (a
+write that cannot is refused with a counterexample,
+<code>demo/lean_poly.ml</code>).  And <code>lazy</code> memoizes
+through internal mutation, yet a lazy of a refined type forces to the
+refined value:</p>
+<pre><code class="ml">let counter : int{ _ &gt;= 0 } ref = ref (5 : int{ _ &gt;= 0 })
+
+let bump () : int{ _ &gt;= 0 } =
+  let v = !counter in
+  counter := v + 1;
+  !counter
+
+let thunk : int{ 0 &lt;= _ } lazy_t = lazy (2 + 3 : int{ 0 &lt;= _ })
+
+let forced : int{ 0 &lt;= _ } = Lazy.force thunk</code></pre>
+
+<h2 id="tour">Some more demos</h2>
+<details><summary style="cursor:pointer;color:var(--dim)">Sixteen more
+cards: ADTs, records, tuples, quantifiers, loop invariants, cross-module
+specs, interior mutability, separation logic.</summary>
+<div class="grid">
+
+<div class="card"><h3>Interior mutability <span class="pill">demo/lean_pcell.ml</span></h3>
+<p>Mutable cells behind a linear token discipline: reads and writes consume
+and return a unique token, so facts about a cell&rsquo;s contents cannot
+survive a write.  Duplicated, stale, forged, and cross-cell tokens are
+compile-time errors.</p>
+<pre><code class="ml">let swap_sum : (a : int) -&gt; (b : int) -&gt; int{ _ = a + b } =
+  fun a b -&gt;
+  let p = alloc a in
+  let q = alloc b in
+  let (c1, t1) = p in
+  let (c2, t2) = q in
+  let (r1, t1a) = read c1 a t1 in             (* r1 = a *)
+    ...</code></pre></div>
+
+<div class="card"><h3>A tree flipped in place <span class="pill">demo/lean_flip.ml</span></h3>
+<p>A mutable tree with a pure ghost model: <code>flip</code> swaps child
+pointers in place, its dependent signature
+<code>model _ = mirror (model h)</code> makes each recursive call the
+induction hypothesis, and flipping twice is provably the identity.</p>
+<pre><code class="ml">let rec flip : (h : vtree) @ unique -&gt; vtree{ model _ = mirror (model h) } @ unique =
+  fun h -&gt;
+  let (b, h1) = is_node h in
+  if b
+  then (
+    let (l, k) = take_left h1 in
+    let l' = flip l in
+    let h2 = put_left k l' in
+    let (r, k2) = take_right h2 in
+    let r' = flip r in
+    let h3 = put_right k2 r' in
+    let h4 = swap_kids h3 in
+    h4)
+  else h1
+
+let roundtrip : (t : tree) -&gt; tree{ _ = t } =
+  fun t -&gt;
+  let h = of_pure t in
+  let h1 = flip h in
+  let h2 = flip h1 in
+  let r = to_pure h2 in
+  r</code></pre></div>
+
+<div class="card"><h3>A separation logic <span class="pill">demo/lean_sep.ml</span></h3>
+<p>One unique token owns the heap; its refinement carries a reified
+assertion, and the frame is an explicit parameter.  Reads recover the ghost
+values, writes rewrite the points-to chunks, and two live references are
+distinct because <code>Star</code> means disjoint.</p>
+<pre><code class="ml">let swap :
+  (r1 : href) -&gt; (r2 : href) -&gt; (a : int) -&gt; (b : int) -&gt; (p : hprop) -&gt;
+  htoken{ sat (Star (Pts (r1, a), Star (Pts (r2, b), p))) (hp _) } @ unique -&gt;
+  htoken{ sat (Star (Pts (r1, b), Star (Pts (r2, a), p))) (hp _) } @ unique =
+  fun r1 r2 a b p t -&gt;
+  let f1 = Star (Pts (r2, b), p) in
+  let (x, t) = get r1 a f1 t in
+  let f2 = Star (Pts (r1, a), p) in
+  let (y, t) = get r2 b f2 t in
+  let t = set r1 a y f1 t in
+  let f3 = Star (Pts (r1, y), p) in
+  let t = set r2 b x f3 t in
+  ignore x; ignore y;
+  t</code></pre></div>
+
+<div class="card"><h3>In-place list reversal <span class="pill">demo/lean_seplist.ml</span></h3>
+<p>The textbook separation-logic proof: <code>Lseg (l, vs)</code> owns a
+null-terminated segment holding the model list, the reflected
+<code>rev_append</code> is the specification, and <code>reverse</code>
+rewires next pointers node by node, returning the same cells holding
+the reversed list.</p>
+<pre><code class="ml">let rec total_ rev_append (vs : ilist) (ws : ilist) : ilist =
+  match vs with
+  | INil -&gt; ws
+  | ICons (v, vs') -&gt; rev_append vs' (ICons (v, ws))
+
+let reverse :
+  (l : link) -&gt; (vs : ilist) -&gt;
+  htoken{ sat (Star (Lseg (l, vs), Emp)) (hp _) } @ unique -&gt;
+  stepped{ sat (Star (Lseg (_.lnk, rev_append vs INil), Emp)) (hp _.stok) }
+    @ unique =
+  fun l vs t -&gt; ...</code></pre></div>
+
+
+<div class="card"><h3>Algebraic data types <span class="pill">demo/lean_adt.ml</span></h3>
+<p>Constructors of simple variants appear in predicates; a match refines its
+scrutinee; injectivity and distinctness come from the solver&rsquo;s
+datatype theory.  The <code>Nil</code> branch below is unreachable, and that
+is proved: its facts are contradictory, so the bare
+<code>0</code> discharges against <code>r = 3</code>.</p>
+<pre><code class="ml">let head (s : ilist{ _ = Cons (3, Nil) }) : {r:int | r = 3} =
+  match s with
+  | Cons (h, _) -&gt; h
+  | Nil -&gt; 0</code></pre></div>
+
+<div class="card"><h3>Records and projections <span class="pill">demo/lean_records.ml</span></h3>
+<p>Immutable records become Lean structures.  Field projection appears in
+predicates; functional update preserves the untouched fields&rsquo; facts.</p>
+<pre><code class="ml">let origin : point{ _.px = 0 &amp;&amp; _.py = 0 } = { px = 0; py = 0 }
+
+let swap (p : point) : point{ _.px = p.py &amp;&amp; _.py = p.px } =
+  { px = p.py; py = p.px }</code></pre></div>
+
+<div class="card"><h3>Native tuples <span class="pill">demo/lean_tuples.ml</span></h3>
+<p>Unlabeled tuples are structural: one polymorphic product per arity, so
+construction and <code>fst</code>/<code>snd</code> appear in predicates with
+no wrapper type and the predicate language stays untyped.  Matching (or a
+destructuring <code>let</code>) contributes per-component facts, and tuples
+of int/bool compare with <code>=</code> in the logic.</p>
+<pre><code class="ml">let swap (p : (int * int)) : (int * int){ _ = (snd p, fst p) } =
+  match p with
+  | (x, y) -&gt; (y, x)
+
+let first_pos (p : (int * int){ fst _ &gt; 0 }) : {r:int | r &gt; 0} =
+  match p with
+  | (x, _) -&gt; x</code></pre></div>
+
+<div class="card"><h3>Contracts as loop invariants <span class="pill">demo/lean_fib.ml</span></h3>
+<p>Parameter refinements are preconditions, so a recursive function&rsquo;s
+parameters can carry its invariant &mdash; here
+<code>(a, b) = (fib i, fib (i+1))</code>.  Call sites discharge it as
+ordinary obligations, including at the literal seeds in
+<code>fib_loop n 0 0 1</code> and the compound arguments
+<code>(i + 1)</code>, <code>(a + b)</code>.</p>
+<pre><code class="ml">let rec fib_loop (n : int) (i : int) (a : int{ _ = fib i &amp;&amp; i &gt;= 0 })
+  (b : int{ _ = fib (i + 1) }) : int{ _ = fib n }
+  =
+  if i = n
+  then a
+  else begin
+    fib_loop n (i + 1) b (a + b)
+  end
+
+let fib_iter (n : int) : int{ _ = fib n } = fib_loop n 0 0 1</code></pre></div>
+
+<div class="card"><h3>Specs across modules <span class="pill">demo/lean_reflectclient.ml</span></h3>
+<p>A <code>total_</code> function&rsquo;s definition is exported in its
+unit&rsquo;s <code>.cmi</code>.  Clients apply it in predicates and prove
+against it; the <code>.cmi</code> checksum forces re-verification when the
+definition changes.</p>
+<pre><code class="ml">let l2 : Reflect_lib.ilist{ Reflect_lib.len _ = 2 } =
+  Reflect_lib.Cons (1, Reflect_lib.Cons (2, Reflect_lib.Nil))
+
+let f5 : int{ _ = Reflect_lib.fib 5 } = Reflect_lib.fib 5</code></pre></div>
+
+<div class="card"><h3>Lemmas next to the code <span class="pill">[%%vox.lean]</span></h3>
+<p>Hand-written Lean &mdash; lemma statements and their proofs &mdash;
+embeds in the module it concerns, is checked on every compile, and is
+exported through the <code>.cmi</code>.  A solver error inside a block is
+reported at the block&rsquo;s own source location.</p>
+<pre><code class="lean">[%%vox.lean {lean|
+...
+
+@[grind =] theorem fib_double (k : Int) (hk : 0 &lt;= k) :
+    fib (2 * k) = fib k * (2 * fib (k + 1) - fib k) := by
+  ...
+|lean}]</code></pre></div>
+
+<div class="card"><h3>Quantifiers <span class="pill">demo/lean_quant.ml</span></h3>
+<p><code>forall_</code>/<code>exists_</code> and implication in predicates;
+binders are untyped and Lean infers their sorts.  Here <code>max2</code> is
+not just an upper bound but provably the least one &mdash; each branch
+proves the quantified conclusion under its path fact.</p>
+<pre><code class="ml">let max2 (x : int) (y : int)
+  : int{ x &lt;= _ &amp;&amp; y &lt;= _ &amp;&amp; (forall_ z. x &lt;= z &amp;&amp; y &lt;= z -&gt; _ &lt;= z) }
+  =
+  if x &lt; y then y else x</code></pre></div>
+
+<div class="card"><h3>Binary search <span class="pill">demo/lean_binsearch.ml</span></h3>
+<p>Immutable arrays are a built-in theory: <code>Iarray.length a</code>
+and <code>a.(i)</code> appear in predicates and are reflected in
+expressions.  In-bounds access, the bracket invariant, and the flip-point
+characterization of the result are all proved.</p>
+<pre><code class="ml">let lower_bound (a : int iarray) (x : int)
+  : int{ 0 &lt;= _ &amp;&amp; _ &lt;= Iarray.length a
+         &amp;&amp; (_ &lt; Iarray.length a -&gt; a.(_) &gt;= x)
+         &amp;&amp; (0 &lt; _ -&gt; a.(_ - 1) &lt; x) }
+  =
+  ...</code></pre></div>
+
+<div class="card"><h3>Integer square root <span class="pill">demo/lean_isqrt.ml</span></h3>
+<p>Integer square root against a reflected <code>sq</code>: the result is
+bracketed by squares of the same function the program runs.  The midpoint is
+reflected division; one nonlinear lemma is proved in an embedded block.
+Nothing in the file is assumed, and returning the wrong endpoint is
+caught with a concrete counterexample (<code>x&nbsp;=&nbsp;0</code>).</p>
+<pre><code class="ml">let total_ sq m = m * m
+
+let isqrt (x : int{ 0 &lt;= _ }) : {r:int | 0 &lt;= r &amp;&amp; sq r &lt;= x &amp;&amp; x &lt; sq (r + 1)} =
+  let rec go (lo : int{ 0 &lt;= _ &amp;&amp; sq _ &lt;= x })
+    (hi : int{ lo &lt; _ &amp;&amp; x &lt; sq _ })
+    : {r:int | 0 &lt;= r &amp;&amp; sq r &lt;= x &amp;&amp; x &lt; sq (r + 1)}
+    =
+    if lo + 1 &lt; hi
+    then begin
+      let m = (lo + hi) / 2 in
+      if sq m &lt;= x then go m hi else go lo m
+    end
+    else lo
+  in
+  go 0 (x + 1)</code></pre></div>
+
+<div class="card"><h3>Mutable locals, loop invariants <span class="pill">demo/lean_mutable.ml</span></h3>
+<p>Reads of a <code>let mutable</code> variable name its current SSA
+version; every write mints a fresh one.  A <code>[@vox.invariant]</code>
+formula is handled classically &mdash; asserted at entry, assumed
+at the loop head, asserted again at the back-edge &mdash; and may mention a
+for-loop&rsquo;s index; after the loop it holds at one past the end.</p>
+<pre><code class="ml">let iota : (n : int) -&gt; {r:int | (n &lt; 1 &amp;&amp; r = 0) || (n &gt;= 1 &amp;&amp; r = n)} =
+  fun n -&gt;
+  let mutable x = 0 in
+  (for i = 1 to n do
+     x &lt;- x + 1
+   done) [@vox.invariant x = i - 1];
+  refine_ x</code></pre></div>
+
+<div class="card"><h3>Binary search, imperative <span class="pill">demo/lean_imp_binsearch.ml</span></h3>
+<p>The bracket invariant from the recursive <code>lower_bound</code>,
+restated as a loop annotation: two unrefined mutable indices, plain reads
+and writes, and the flip-point postcondition follows from the invariant
+and the negated guard.</p>
+<pre><code class="ml">let search2
+  : (a : int iarray) -&gt; (x : int)
+    -&gt; bracket{ _.hi = _.lo + 1
+                &amp;&amp; -1 &lt;= _.lo &amp;&amp; _.hi &lt;= Iarray.length a
+                &amp;&amp; (0 &lt;= _.lo -&gt; a.(_.lo) &lt; x)
+                &amp;&amp; (_.hi &lt; Iarray.length a -&gt; a.(_.hi) &gt;= x) }
+  =
+  fun a x -&gt;
+  let n = Iarray.length a in
+  let mutable lo = -1 in
+  let mutable hi = n in
+  (while hi - lo &gt; 1 do
+     let l = lo in
+     let h = hi in
+     let mid = (l + h) / 2 in
+     let v = Ia_lib.get a mid in
+     if v &gt;= x then hi &lt;- mid else lo &lt;- mid
+   done)
+  [@vox.invariant
+    -1 &lt;= lo &amp;&amp; lo &lt; hi &amp;&amp; hi &lt;= Iarray.length a
+    &amp;&amp; (lo = -1 || Iarray.get a lo &lt; x)
+    &amp;&amp; (hi = Iarray.length a || Iarray.get a hi &gt;= x)];
+  let l = lo in
+  let h = hi in
+  { lo = l; hi = h }</code></pre></div>
+
+<div class="card"><h3>Reflected arithmetic <span class="pill">Vox_reflect</span></h3>
+<p><code>+ - * / mod</code>, comparisons, and <code>&amp;&amp; || not</code>
+carry their logical meaning, recognized by primitive rather than by name (a
+shadowed <code>(+)</code> is not addition).  Division is OCaml&rsquo;s
+T-division, totalized soundly under partial correctness.  A branch condition
+contributes itself as a fact: writing <code>if n &lt;= 0</code> is
+enough.</p></div>
+
+</div>
+</details>
+
+<h2 id="future">Future work</h2>
+<p>Total correctness, termination, liveness; exceptions and effect
+handlers; shared mutable state; concurrency with atomics; subtyping
+inference instead of HM; CHC invariant inference.</p>
+
+<h2 id="run">Running it</h2>
+<pre><code>git clone -b vox https://github.com/julesjacobs/oxcaml && cd oxcaml
+autoconf && ./configure && make boot-compiler
+make test-one DIR=vox        # needs a Lean 4 toolchain (elan) on PATH</code></pre>
+<p>There is also a browser editor with a live proof pane &mdash; the
+hypotheses and goal at your cursor, including inside
+<code>[%%vox.lean]</code> blocks &mdash; in
+<a href="https://github.com/julesjacobs/oxcaml/tree/vox/tools/vox-editor">tools/vox-editor</a>;
+its README explains how to run it against your build.</p>
+<p>Every example on this page lives in the branch&rsquo;s test suite and
+this page is generated from it (<code>docs/vox/generate.py</code>): the demo
+files must verify, and the failure examples must fail with exactly the
+output shown &mdash; location and counterexample included &mdash; for the
+suite to pass.  Ellipses mark elided bodies; everything else is extracted
+verbatim from
+<a href="https://github.com/julesjacobs/oxcaml/tree/vox/testsuite/tests/vox">testsuite/tests/vox</a>.</p>
+
+<div class="foot">
+vox is a research prototype on a public fork of
+<a href="https://github.com/oxcaml/oxcaml">OxCaml</a>.
+Design notes: <a href="https://github.com/julesjacobs/oxcaml/blob/vox/DESIGN.md">DESIGN.md</a>.
+Page generated from the test suite by
+<a href="https://github.com/julesjacobs/oxcaml/blob/vox/docs/vox/generate.py">docs/vox/generate.py</a>.
+</div>
+</main>
+
+<script>
+// tabs
+document.querySelectorAll('[data-tabs]').forEach(bar=>{
+  const btns=[...bar.querySelectorAll('button')];
+  const panes=[];let el=bar.nextElementSibling;
+  while(el&&el.classList.contains('tabpane')){panes.push(el);el=el.nextElementSibling;}
+  btns.forEach((b,i)=>b.addEventListener('click',()=>{
+    btns.forEach(x=>x.classList.remove('on'));panes.forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');panes[i].classList.add('on');
+  }));
+});
+// Minimal highlighting: one pass per language, alternation-ordered
+// (comments first), over already-escaped text.  OCaml blocks may embed
+// {lean|...|lean} regions, which are highlighted as Lean.
+const RX_ML = /(\(\*[\s\S]*?\*\))|(\b(?:let|rec|fun|function|match|with|if|then|else|type|of|open|module|in|and|begin|end|val|true|false|not|total_|refine_|assume_|assume_unchecked_)\b)|(\b\d+\b)/g;
+const RX_LEAN = /(--[^\n]*)|(\b(?:theorem|axiom|def|inductive|structure|by|fun_induction|grind|omega|termination_by|decreasing_by|have|rw|subst|by_cases|match|with|if|then|else|Int|Prop|Type|where)\b)|(\b\d+\b)/g;
+function paint(text, rx){
+  return text.replace(rx, (m, c, k, n) =>
+    c ? '<span class="c">'+c+'</span>'
+      : k ? '<span class="k">'+k+'</span>'
+      : '<span class="n">'+n+'</span>');
+}
+document.querySelectorAll('code.ml, code.lean').forEach(el=>{
+  if (el.classList.contains('lean')) { el.innerHTML = paint(el.innerHTML, RX_LEAN); return; }
+  el.innerHTML = el.innerHTML
+    .split(/(\{lean\|[\s\S]*?\|lean\})/)
+    .map((part, i) => i % 2
+      ? '<span class="c">{lean|</span>'
+        + paint(part.slice(6, -6), RX_LEAN)
+        + '<span class="c">|lean}</span>'
+      : paint(part, RX_ML))
+    .join('');
+});
+</script>
+</body>
+</html>

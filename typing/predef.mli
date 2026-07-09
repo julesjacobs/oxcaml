@@ -40,6 +40,7 @@ type abstract_type_constr = [
   | `Float32
   | `Int8
   | `Int16
+  | `Vox_total
 ]
 type abstract_non_value_type_constr = [
   | `Nativeint_u
@@ -187,6 +188,7 @@ val path_exn: Path.t
 val path_eff: Path.t
 val path_array: Path.t
 val path_iarray: Path.t
+val path_vox_total: Path.t
 val path_list: Path.t
 val path_option: Path.t
 val path_nativeint: Path.t
@@ -269,6 +271,7 @@ val path_unboxed_float64x8: Path.t
 val path_match_failure: Path.t
 val path_invalid_argument: Path.t
 val path_assert_failure : Path.t
+val path_failure : Path.t
 val path_undefined_recursive_module : Path.t
 
 val ident_false : Ident.t

@@ -861,12 +861,624 @@ let type_open :
     ref =
   ref (fun ?used_slot:_ _ -> assert false)
 
+(* vox: names with special meaning inside refinement predicates during
+   type elaboration, innermost first.  A dependent arrow pushes its
+   binder ([Vox_pi], resolving to the [Ident] stored in the arrow's
+   [arrow_desc]) around its CODOMAIN; around a binder's own type -- the
+   domain of [(x : ty) -> ...], or the annotation in [let f (x : ty)] --
+   the name denotes the refined value itself ([Vox_self], resolving to
+   the bound variable, like [_]). *)
+type vox_scope_entry =
+  | Vox_pi of string * Ident.t
+  | Vox_self of string * Parsetree.core_type
+    (* the annotation's root: the name denotes the bound value ONLY in
+       the refinement at the top of its own annotation, not in nested
+       refinements (where it would silently denote a different
+       value). *)
+
+let vox_scope : vox_scope_entry list ref = ref []
+
+(* vox: recognize the parser's named-type encoding [(x : ty)]. *)
+let vox_named_binder (sty : Parsetree.core_type) =
+  match sty.ptyp_desc with
+  | Ptyp_extension ({txt; _}, PTyp inner)
+    when String.starts_with ~prefix:"vox.named." txt ->
+      Some (String.sub txt 10 (String.length txt - 10), inner)
+  | _ -> None
+
+let vox_push_scope entry f =
+  vox_scope := entry :: !vox_scope;
+  Fun.protect ~finally:(fun () -> vox_scope := List.tl !vox_scope) f
+
+let vox_with_pi_binder binder f =
+  match binder with
+  | None -> f ()
+  | Some (name, id) -> vox_push_scope (Vox_pi (name, id)) f
+
+let vox_with_self_name ~root name f = vox_push_scope (Vox_self (name, root)) f
+
+let vox_find_scope ~self_root name =
+  List.find_map
+    (function
+      | Vox_pi (n, id) when String.equal n name -> Some (`Pi id)
+      | Vox_self (n, root) when String.equal n name ->
+          if root == self_root then Some `Self else None
+      | Vox_pi _ | Vox_self _ -> None)
+    !vox_scope
+
+(* vox: loop-invariant elaboration mode.  An invariant is a FORMULA in
+   the logical environment, not a refinement type: it never travels, is
+   never compared by unification, and is instantiated by the VC walker
+   at specific boundary points by substituting each mutable variable's
+   current SSA version (Thrust-style: refinements over stable logical
+   names only; the mutable STAMP in the elaborated template is a
+   placeholder the walker always closes over before use).  So mutable
+   mentions -- banned in refinement types -- are permitted here, and
+   collected for the walker's liveness check. *)
+let vox_invariant_mode = ref false
+let vox_invariant_mutables : Ident.t list ref = ref []
+
+(* vox: elaborate a refinement predicate (an untyped logical term) from
+   its surface form.  [v] denotes the bound value variable; other
+   variables resolve first to enclosing dependent-arrow binders (as
+   de Bruijn parameter references), then to simple (non-module) value
+   identifiers in [env].  The predicate is NOT type checked (DESIGN.md):
+   ill-sorted predicates surface as solver errors at VC time. *)
+(* A [@@vox.reflect "sym"] value denotes the Lean symbol [sym] in
+   predicates, exactly as it does on the code side (Vox_reflect): so a
+   refinement spells the OCaml name and reflects to the same symbol.
+   Inlined (Vox_reflect is not in dynlink's module set, like the
+   [has_total_attr] check below). *)
+let reflect_name_of (attrs : Parsetree.attributes) : string option =
+  List.find_map
+    (fun (a : Parsetree.attribute) ->
+      if not (String.equal a.attr_name.txt "vox.reflect")
+      then None
+      else
+        match a.attr_payload with
+        | Parsetree.PStr
+            [ { pstr_desc =
+                  Pstr_eval
+                    ( { pexp_desc =
+                          Pexp_constant
+                            { pconst_desc = Pconst_string (s, _, _); _ }
+                      ; _
+                      }
+                    , _ )
+              ; _
+              }
+            ] -> Some s
+        | _ -> None)
+    attrs
+;;
+
+let rec elab_vox_pred ~bound ~self_root env (e : Parsetree.expression)
+  : Refinement.pred =
+  let open Refinement in
+  let loc = e.pexp_loc in
+  let unsupported () =
+    Location.raise_errorf ~loc
+      "vox: unsupported form in a refinement predicate"
+  in
+  match e.pexp_desc with
+  | Pexp_ident {txt = Longident.Lident name; _}
+    when String.equal name bound || String.equal name "_" ->
+      Pbound
+  | Pexp_ident {txt = lid; _} ->
+      let scope_entry =
+        match lid with
+        | Longident.Lident name -> vox_find_scope ~self_root name
+        | _ -> None
+      in
+      let is_self = match scope_entry with Some `Self -> true | _ -> false in
+      begin match scope_entry with
+      | Some (`Pi id) -> Pvar id
+      | Some `Self | None ->
+          (* [`Self] -- the refined value's OWN name in its own top
+             annotation -- YIELDS to an ordinary binding of the same name
+             in scope: under OCaml scoping a free [x] in the annotation of
+             [let x = ...] is the OUTER [x], not the value being defined
+             (not yet bound in a non-recursive binding).  So resolve
+             through [env] first; the self-name applies only when the name
+             is otherwise unbound. *)
+          match Env.lookup_value ~use:false ~loc lid env with
+          | (Path.Pident id, {val_kind = Val_mut _; _}, _) ->
+              (* A mutable variable has no stable logical value: facts
+                 recorded about it at different times would contradict.
+                 (The VC walker also never scopes mutable binders, so
+                 the rejection must not depend on that.)  The exception
+                 is a loop INVARIANT, which is a formula instantiated
+                 by the walker at boundary points over the variable's
+                 current version. *)
+              if !vox_invariant_mode
+              then begin
+                if not (List.exists (Ident.same id) !vox_invariant_mutables)
+                then vox_invariant_mutables := id :: !vox_invariant_mutables;
+                Pvar id
+              end
+              else
+                Location.raise_errorf ~loc
+                  "vox: mutable variables may not appear in refinements"
+          | (Path.Pident id, _, _) -> Pvar id
+          | ((Path.Pdot _ | Path.Papply _) as p, {val_kind = Val_mut _; _}, _)
+            ->
+              ignore p;
+              Location.raise_errorf ~loc
+                "vox: mutable variables may not appear in refinements"
+          | ((Path.Pdot _ | Path.Papply _) as p, _, _) ->
+              (* A MODULE-LEVEL value names itself by path: stamp-free
+                 and .cmi-stable, so the predicate may travel through a
+                 signature; the value's own .cmi refinement arrives as
+                 a global fact wherever the predicate is used. *)
+              Pglobal p
+          | _ ->
+              Location.raise_errorf ~loc
+                "vox: only locally bound variables and module-level \
+                 values may appear in refinements"
+          | exception _ when is_self ->
+              (* No ordinary binding of the self-name is in scope, so the
+                 name denotes the refined value itself. *)
+              Pbound
+          | exception _ ->
+              (* vox: a bare LOWERCASE identifier that is neither the
+                 bound value / [_] nor an enclosing binder (both checked
+                 above) nor any value in scope ([Env.lookup_value] just
+                 failed) is read as a 0-ARY SPEC CONSTANT -- the nullary
+                 case of the spec-function namespace that an APPLIED
+                 lowercase head already enters as [Pfun (f, args)] below
+                 (e.g. [emp], the empty set of a block's model).  Like
+                 every spec name, block-defined constants are OPAQUE to
+                 the compiler (they live only in the shipped [%%vox.lean]
+                 text and imported units' VoxSig, never parsed here), so
+                 the name is not validated at elaboration: an unknown
+                 name -- or an arity>0 function referenced bare -- is a
+                 solver error at VC time, exactly as for an applied spec
+                 function.  Program locals and module values resolve
+                 FIRST (the [Env.lookup_value] success arms above), so a
+                 same-named value always shadows the constant; the
+                 fallback fires only when there is no such value, so
+                 there is no collision to sanitize.  Two exclusions keep
+                 the fallback from masking real errors: the reserved
+                 builtin words (meaningful only applied), and INVARIANT
+                 mode -- a loop invariant is a formula over program
+                 state, where a bare out-of-scope name is a scoping
+                 error (see mechanics/mutable.ml), not a licence to
+                 invent a constant. *)
+              (match lid with
+               | Longident.Lident name
+                 when (not !vox_invariant_mode)
+                      && String.length name > 0
+                      && (match name.[0] with
+                          | 'a' .. 'z' | '_' -> true
+                          | _ -> false)
+                      && not
+                           (List.mem name
+                              [ "mod"; "not"; "fst"; "snd"; "succ"; "pred" ])
+                 -> Pfun (name, [])
+               | _ ->
+                 Location.raise_errorf ~loc
+                   "vox: unbound variable in refinement predicate")
+      end
+  | Pexp_constant {pconst_desc = Pconst_integer (s, None); _} ->
+      begin match int_of_string_opt s with
+      | Some n -> Pint n
+      | None -> unsupported ()
+      end
+  | Pexp_construct ({txt = Longident.Lident "true"; _}, None) -> Pbool true
+  | Pexp_construct ({txt = Longident.Lident "false"; _}, None) -> Pbool false
+  | Pexp_construct ({txt = lid; _}, arg) ->
+      elab_vox_constr ~bound ~self_root env ~loc lid arg
+  | Pexp_tuple comps when List.length comps >= 2 ->
+      (* An unlabeled tuple term: modelled per ARITY with a polymorphic
+         product datatype, so no instantiation info is needed and the
+         predicate stays untyped.  Labeled tuples are not modelled. *)
+      let comps =
+        List.map
+          (fun (lbl, a) ->
+            match lbl with
+            | None -> a
+            | Some _ ->
+                Location.raise_errorf ~loc:a.Parsetree.pexp_loc
+                  "vox: labeled tuples may not appear in refinement \
+                   predicates")
+          comps
+      in
+      Ptuple (List.map (elab_vox_pred ~bound ~self_root env) comps)
+  | Pexp_field (base, {txt = lid; _}) ->
+      (* Field projection: the label resolves like constructors do (the
+         predicate is untyped, and selector symbols are per-type), and
+         only fields of simple immutable records are admitted. *)
+      let label =
+        match
+          Env.lookup_label ~use:false ~record_form:Data_types.Legacy ~loc
+            Env.Projection lid env
+        with
+        | l -> l
+        | exception _ ->
+            Location.raise_errorf ~loc
+              "vox: unbound record field in refinement predicate"
+      in
+      let path = Data_types.lbl_res_type_path label in
+      if Ctype.vox_simple_record env path = None then
+        Location.raise_errorf ~loc
+          "vox: only fields of simple records (monomorphic, no mutable \
+           fields) may appear in refinement predicates";
+      Pfield
+        (path, label.Data_types.lbl_name, elab_vox_pred ~bound ~self_root env base)
+  | Pexp_apply _ ->
+      (* Flatten a curried spine: the compact predicate grammar nests
+         applications one argument at a time. *)
+      let rec spine (e : Parsetree.expression) acc =
+        match e.pexp_desc with
+        | Pexp_apply (h, args) ->
+            let args =
+              List.map
+                (fun (lbl, a) ->
+                  match lbl with
+                  | Asttypes.Nolabel -> a
+                  | _ -> unsupported ())
+                args
+            in
+            spine h (args @ acc)
+        | _ -> e, acc
+      in
+      let head, args = spine e [] in
+      begin match head.pexp_desc, args with
+      | Pexp_construct ({txt = lid; _}, None), [a] ->
+          (* constructor application from the compact grammar *)
+          elab_vox_constr ~bound ~self_root env ~loc lid (Some a)
+      | Pexp_ident {txt = Longident.Lident (("forall_" | "exists_") as q); _},
+        (_ :: _ :: _ as args) ->
+          (* Quantifier: the grammar encodes [forall_ x y. p] as an
+             application of the keyword ident to the binder names and
+             the body.  Binders are minted as fresh [Scoped] idents
+             (like dependent-arrow binders: .cmi-marshalled stamps must
+             not collide with a client's [Local] variables) and pushed
+             on the elaboration scope, innermost first, so they shadow
+             program variables.  Shadowing the refined value's own name
+             or an enclosing binder is rejected: the bound-value check
+             above would win the lookup, resolving occurrences to the
+             wrong variable.  Sharp edges, not bugs. *)
+          let quant =
+            match q with
+            | "forall_" -> Refinement.Qforall
+            | _ -> Refinement.Qexists
+          in
+          let body, binders =
+            match List.rev args with
+            | body :: rev_binders -> body, List.rev rev_binders
+            | [] -> assert false
+          in
+          let binder_name (b : Parsetree.expression) =
+            match b.pexp_desc with
+            | Pexp_ident {txt = Longident.Lident n; _} ->
+                if String.equal n bound
+                   || String.equal n "_"
+                   || vox_find_scope ~self_root n <> None
+                then
+                  Location.raise_errorf ~loc:b.pexp_loc
+                    "vox: this quantifier binder shadows the refined \
+                     value or an enclosing binder; rename it"
+                else n
+            | _ ->
+                Location.raise_errorf ~loc:b.pexp_loc
+                  "vox: a quantifier binder must be a plain variable name"
+          in
+          let rec go = function
+            | [] -> elab_vox_pred ~bound ~self_root env body
+            | b :: rest ->
+                let n = binder_name b in
+                let id = Ident.create_scoped ~scope:Ident.lowest_scope n in
+                vox_push_scope (Vox_pi (n, id)) (fun () ->
+                  Pquant (quant, id, go rest))
+          in
+          go binders
+      | Pexp_ident {txt = Longident.Lident "not"; _}, [a] ->
+          Pnot (elab_vox_pred ~bound ~self_root env a)
+      | Pexp_ident {txt = Longident.Lident "fst"; _}, [a] ->
+          (* [fst]/[snd] are pair projections, reserved: they never fall
+             through to the spec-function namespace (so a misapplied one
+             below is an error, never silently an uninterpreted
+             function). *)
+          Pproj (2, 0, elab_vox_pred ~bound ~self_root env a)
+      | Pexp_ident {txt = Longident.Lident "snd"; _}, [a] ->
+          Pproj (2, 1, elab_vox_pred ~bound ~self_root env a)
+      | Pexp_ident {txt = Longident.Lident "succ"; _}, [a] ->
+          (* [succ]/[pred] are reserved builtins, translated exactly as
+             the program fragments translate them ([x + 1]/[x - 1]);
+             falling through to the spec-function namespace would
+             silently split one value into two non-equal logic terms. *)
+          Pbinop (Add, elab_vox_pred ~bound ~self_root env a, Pint 1)
+      | Pexp_ident {txt = Longident.Lident "pred"; _}, [a] ->
+          Pbinop (Sub, elab_vox_pred ~bound ~self_root env a, Pint 1)
+      | Pexp_ident
+          {txt = Longident.Lident (("fst" | "snd" | "succ" | "pred") as f); _},
+        _ ->
+          Location.raise_errorf ~loc
+            "vox: %s expects exactly one argument in a refinement predicate"
+            f
+      | Pexp_ident {txt = Longident.Lident ("-" | "~-"); _}, [a] ->
+          (* unary minus *)
+          Pbinop (Sub, Pint 0, elab_vox_pred ~bound ~self_root env a)
+      | Pexp_ident {txt = Longident.Lident "&&"; _}, [a; b] ->
+          Pand (elab_vox_pred ~bound ~self_root env a, elab_vox_pred ~bound ~self_root env b)
+      | Pexp_ident {txt = Longident.Lident "||"; _}, [a; b] ->
+          Por (elab_vox_pred ~bound ~self_root env a, elab_vox_pred ~bound ~self_root env b)
+      | Pexp_ident {txt = Longident.Lident "==>"; _}, [a; b] ->
+          (* the parser's native-implication marker *)
+          Pimp (elab_vox_pred ~bound ~self_root env a, elab_vox_pred ~bound ~self_root env b)
+      | Pexp_ident {txt = Longident.Lident
+            (("+" | "-" | "*" | "/" | "mod"
+             | "=" | "<>" | "<" | "<=" | ">" | ">=") as op);
+          _}, [a; b] ->
+          let binop =
+            match op with
+            | "+" -> Add
+            | "-" -> Sub
+            | "*" -> Mul
+            | "/" -> Div
+            | "mod" -> Mod
+            | "=" -> Eq
+            | "<>" -> Neq
+            | "<" -> Lt
+            | "<=" -> Le
+            | ">" -> Gt
+            | ">=" -> Ge
+            | _ -> assert false
+          in
+          Pbinop (binop, elab_vox_pred ~bound ~self_root env a, elab_vox_pred ~bound ~self_root env b)
+      | Pexp_ident {txt = Longident.Lident f; _}, (_ :: _ as args)
+        when String.length f > 0
+             && (match f.[0] with 'a' .. 'z' | '_' -> true | _ -> false)
+             (* the two LOWERCASE operator names: a wrong-arity use
+                must be an error, never silently a spec function *)
+             && not (String.equal f "mod")
+             && not (String.equal f "not") ->
+          (* Any other applied lowercase identifier is a SPEC function:
+             a logical function the user defines on the solver side via
+             [-vox-prelude].  Spec functions live in their own namespace
+             (program functions have no logical meaning), and, like the
+             rest of the predicate language, they are untyped: undefined
+             or ill-sorted applications are solver errors at VC time.
+             Operator names do NOT fall through here: an unsupported
+             operator shape must be an error, never silently an
+             uninterpreted function. *)
+          let f =
+            match Env.lookup_value ~use:false ~loc (Longident.Lident f) env with
+            | (_, desc, _) ->
+              (match reflect_name_of desc.val_attributes with
+               | Some s -> s
+               | None -> f)
+            | exception _ -> f
+          in
+          Pfun (f, List.map (elab_vox_pred ~bound ~self_root env) args)
+      | Pexp_ident
+          {txt = Longident.Ldot ({txt = Longident.Lident "Iarray"; _},
+                                 {txt = ("length" | "get") as op; _}); _},
+        args ->
+          (* The built-in iarray theory: [Iarray.length a] and
+             [Iarray.get a i] (surface sugar [a.(i)]) denote the
+             reserved operations, regardless of any user module named
+             Iarray -- the theory owns the spelling. *)
+          let expect n k =
+            if List.length args = n
+            then k (List.map (elab_vox_pred ~bound ~self_root env) args)
+            else
+              Location.raise_errorf ~loc
+                "vox: Iarray.%s expects %d argument%s in a predicate"
+                op n (if n = 1 then "" else "s")
+          in
+          if String.equal op "length"
+          then expect 1 (fun args -> Pfun (Refinement.ia_len, args))
+          else expect 2 (fun args -> Pfun (Refinement.ia_get, args))
+      | Pexp_ident {txt = (Longident.Ldot _ as lid); _}, (_ :: _ as args) ->
+          (* A QUALIFIED applied identifier must denote a reflected
+             ([total_]) function of another module: its definition
+             rides that unit's spec export, under its source name.
+             (The marker check is inlined rather than taken from
+             Vox_reflect, which is not part of dynlink's module set.) *)
+          let has_total_attr attrs =
+            List.exists
+              (fun (a : Parsetree.attribute) ->
+                String.equal a.attr_name.txt "vox.total")
+              attrs
+          in
+          begin match Env.lookup_value ~use:false ~loc lid env with
+          | (path, desc, _) ->
+              (match reflect_name_of desc.val_attributes with
+               | Some s ->
+                   Pfun (s, List.map (elab_vox_pred ~bound ~self_root env) args)
+               | None ->
+                   if has_total_attr desc.val_attributes
+                   then
+                     Pfun (Path.last path,
+                           List.map (elab_vox_pred ~bound ~self_root env) args)
+                   else
+                     Location.raise_errorf ~loc
+                       "vox: a qualified identifier in a predicate must \
+                        denote a total_ or [@@vox.reflect] function")
+          | exception _ ->
+              Location.raise_errorf ~loc
+                "vox: unbound identifier in refinement predicate"
+          end
+      | _ -> unsupported ()
+      end
+  | _ -> unsupported ()
+
+(* Constructor application in a predicate: admitted only at "simple"
+   variants, whose constructors the solver models with its datatype
+   theory.  The argument list is syntactic (no arity or sort checking,
+   per the untyped-predicates rule). *)
+and elab_vox_constr ~bound ~self_root env ~loc lid
+      (arg : Parsetree.expression option) : Refinement.pred =
+  let cstr =
+    match Env.lookup_constructor ~use:false ~loc Env.Positive lid env with
+    | (cstr, _locks) -> cstr
+    | exception _ ->
+        Location.raise_errorf ~loc
+          "vox: unbound constructor in refinement predicate"
+  in
+  let path = Data_types.cstr_res_type_path cstr in
+  if Ctype.vox_simple_variant env path = None then
+    Location.raise_errorf ~loc
+      "vox: only constructors of simple variant types (monomorphic, \
+       non-GADT, tuple constructor arguments) may appear in refinement \
+       predicates";
+  let args =
+    match arg with
+    | None -> []
+    | Some {pexp_desc = Pexp_tuple comps; _} when cstr.cstr_arity > 1 ->
+        List.map
+          (fun (lbl, a) ->
+            match lbl with
+            | None -> a
+            | Some _ ->
+                Location.raise_errorf ~loc:a.Parsetree.pexp_loc
+                  "vox: unsupported form in a refinement predicate")
+          comps
+    | Some a -> [a]
+  in
+  Refinement.Pconstr
+    (path, cstr.cstr_name, List.map (elab_vox_pred ~bound ~self_root env) args)
+
+(* vox: elaborate a loop-invariant formula (see [vox_invariant_mode]).
+   Returns the template together with the mutable variables it mentions,
+   which the walker must find tracked at the loop.  [self_root] is a
+   dummy: an invariant has no bound value variable, and no enclosing
+   named-binder annotation. *)
+let elab_vox_invariant env (e : Parsetree.expression)
+  : Refinement.pred * Ident.t list
+  =
+  let dummy_root =
+    { Parsetree.ptyp_desc = Ptyp_any None
+    ; ptyp_loc = e.pexp_loc
+    ; ptyp_loc_stack = []
+    ; ptyp_attributes = []
+    }
+  in
+  vox_invariant_mode := true;
+  vox_invariant_mutables := [];
+  Fun.protect
+    ~finally:(fun () ->
+      vox_invariant_mode := false;
+      vox_invariant_mutables := [])
+    (fun () ->
+      let p = elab_vox_pred ~bound:"" ~self_root:dummy_root env e in
+      p, !vox_invariant_mutables)
+;;
+
+(* vox: the [@vox.via (fn : target)] attribute -- the surface spelling
+   of an abstraction-function layer on a refined type ([type set =
+   tree{ bst _ } [@vox.via (elems : iset)]]).  [fn] is the Lean map
+   function, [target] the OCaml type whose sort the layer maps INTO. *)
+let vox_via_attr (attrs : Parsetree.attributes) =
+  List.find_map
+    (fun (a : Parsetree.attribute) ->
+      if not (String.equal a.attr_name.txt "vox.via")
+      then None
+      else
+        match a.attr_payload with
+        | PStr
+            [ { pstr_desc =
+                  Pstr_eval
+                    ( { pexp_desc =
+                          Pexp_constraint
+                            ( { pexp_desc =
+                                  Pexp_ident { txt = Longident.Lident fn; _ }
+                              ; _ }
+                            , Some target
+                            , [] )
+                      ; _ }
+                    , _ )
+              ; _ } ] -> Some (a, fn, target)
+        | _ ->
+          Location.raise_errorf ~loc:a.attr_loc
+            "vox: vox.via takes a map and its target sort, e.g. \
+             [@vox.via (elems : iset)]")
+    attrs
+
+(* vox: the refinement sort of an OCaml type, for a via layer's target.
+   Mirrors typedecl's target elaboration for the shapes a target takes
+   in this (monomorphic) stage: int/bool, a head that declares its own
+   modeling (ghost sorts and [refines] kinds), a simple variant/record
+   (a datatype sort), or an unlabeled tuple; anything else degrades to
+   the uninterpreted sort (sound). *)
+let rec vox_target_sort env ty : Types.vox_sort =
+  match get_desc ty with
+  | Tconstr (p, [], _) when Path.same p Predef.path_int -> Types.Vs_int
+  | Tconstr (p, [], _) when Path.same p Predef.path_bool -> Types.Vs_bool
+  | Tconstr (p, args, _) ->
+    (match Env.find_type p env with
+     | exception Not_found -> Types.Vs_opaque
+     | decl ->
+       (match Jkind.get_vox_refines decl.type_jkind with
+        (* a head with its own modeling -- a ghost sort or a [refines]
+           kind.  Monomorphic here, so no [Vs_param] to instantiate. *)
+        | Types.Vr_sort s -> s
+        | Types.Vr_top ->
+          (match
+             Ctype.vox_simple_variant env p, Ctype.vox_simple_record env p
+           with
+           | Some _, _ | _, Some _ ->
+             Types.Vs_data (p, List.map (vox_target_sort env) args)
+           | None, None -> Types.Vs_opaque)))
+  | Ttuple comps
+    when List.length comps >= 2
+         && List.for_all (fun (l, _) -> Option.is_none l) comps ->
+    Types.Vs_tuple (List.map (fun (_, t) -> vox_target_sort env t) comps)
+  | _ -> Types.Vs_opaque
+
 let rec transl_type env ~policy ?(aliased=false) ~row_context mode styp =
   Builtin_attributes.warning_scope styp.ptyp_attributes
     (fun () -> transl_type_aux env ~policy ~aliased ~row_context mode styp)
 
 and transl_type_aux env ~row_context ~aliased ~policy mode styp =
   let loc = styp.ptyp_loc in
+  match vox_via_attr styp.ptyp_attributes with
+  | Some (via_a, fn, target_styp) ->
+    (* A type may carry at most one [@vox.via]: two attributes on one
+       skeleton would compose in decode order rather than sort order
+       (the maps would not chain), so reject them and point at the
+       supported layering path. *)
+    (if
+       List.length
+         (List.filter
+            (fun (a : Parsetree.attribute) ->
+              String.equal a.attr_name.txt "vox.via")
+            styp.ptyp_attributes)
+       > 1
+     then
+       Location.raise_errorf ~loc:via_a.attr_loc
+         "vox: a type may carry at most one [@vox.via] attribute; layer \
+          abstractions through nested type aliases instead");
+    (* Translate the inner type WITHOUT the via attribute, then append a
+       map layer.  A via over a refined type extends its map list (the
+       base predicate is unchanged -- an extra via layer with nothing
+       above it is free); a via over a bare type starts a map list with
+       a trivially-true base predicate. *)
+    let inner_styp =
+      { styp with
+        ptyp_attributes =
+          List.filter (fun a -> not (a == via_a)) styp.ptyp_attributes }
+    in
+    let cty = transl_type env ~policy ~aliased ~row_context mode inner_styp in
+    let target_cty = transl_type env ~policy ~row_context mode target_styp in
+    let target_sort = vox_target_sort env target_cty.ctyp_type in
+    let m =
+      { Types.vm_fn = fn
+      ; vm_target = target_cty.ctyp_type
+      ; vm_sort = target_sort
+      }
+    in
+    let ty =
+      match get_desc cty.ctyp_type with
+      | Trefine (skel, maps, pred) ->
+        newty (Trefine (skel, maps @ [ m ], pred))
+      | _ ->
+        newty (Trefine (cty.ctyp_type, [ m ], Refinement.Pbool true))
+    in
+    { cty with ctyp_type = ty }
+  | None ->
   let ctyp ctyp_desc ctyp_type =
     { ctyp_desc; ctyp_type; ctyp_env = env;
       ctyp_loc = loc; ctyp_attributes = styp.ptyp_attributes }
@@ -892,16 +1504,52 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
       in
       ctyp desc typ
   | Ptyp_arrow _ ->
+      (* vox: a domain written [(x : ty)] makes this arrow dependent
+         with binder [x]: within [ty] itself, [x] denotes the refined
+         value; over the codomain, [x] denotes the parameter. *)
       let args, ret, ret_mode = extract_params styp in
       let rec loop acc_mode args =
         match args with
         | (l, arg_mode, arg) :: rest ->
           check_arg_type arg;
           let l = transl_label l (Some arg) in
+          let vox_binder, arg, vox_total =
+            match vox_named_binder arg with
+            | Some (name, inner) ->
+              (* Design A (total function space): [(r : ((int -> int -> bool)
+                 [@vox.total]))] marks the binder's arrow type as a TOTAL spec
+                 function -- admitting only reflectable, effect-free functions.
+                 Carried structurally as a [Trefine(arrow, [], true)] sentinel so
+                 it survives type copy and rides the .cmi ([true] is a no-op
+                 contract). *)
+              let total =
+                List.exists
+                  (fun (a : Parsetree.attribute) ->
+                    String.equal a.attr_name.txt "vox.total")
+                  inner.ptyp_attributes
+              in
+              Some name, inner, total
+            | None -> None, arg, false
+          in
+          (match vox_binder, l with
+           | Some _, (Optional _ | Position _) ->
+             (* An optional argument can be passed as the option
+                (wrapping/eliminating at the call site), so the binder
+                would not name the value the definition sees. *)
+             Location.raise_errorf ~loc:arg.ptyp_loc
+               "vox: a dependent binder is not supported on an optional \
+                or position parameter"
+           | _ -> ());
           let arg_cty =
             if Btype.is_position l then
               ctyp Ttyp_call_pos (newconstr Predef.path_lexing_position [])
-            else transl_type env ~policy ~row_context arg_mode.mode_modes arg
+            else
+              (match vox_binder with
+               | Some name ->
+                 vox_with_self_name ~root:arg name (fun () ->
+                   transl_type env ~policy ~row_context arg_mode.mode_modes arg)
+               | None ->
+                 transl_type env ~policy ~row_context arg_mode.mode_modes arg)
           in
           let acc_mode = curry_mode acc_mode arg_mode.mode_modes in
           let ret_mode =
@@ -910,8 +1558,27 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
             | _ :: _ ->
               { mode_modes = acc_mode; mode_desc = [] }
           in
-          let ret_cty = loop acc_mode rest in
+          let vox_arrow_binder =
+            match vox_binder with
+            | Some name ->
+                (* A [Scoped] ident: [Ident.same] never equates it with
+                   any [Local] program variable, so binder stamps
+                   marshalled through .cmis cannot collide with a
+                   consuming unit's variables (stamps are only
+                   process-local). *)
+                Some (name, Ident.create_scoped ~scope:Ident.lowest_scope name)
+            | None -> None
+          in
+          let ret_cty =
+            vox_with_pi_binder vox_arrow_binder (fun () ->
+              loop acc_mode rest)
+          in
           let arg_ty = arg_cty.ctyp_type in
+          let arg_ty =
+            if vox_total
+            then newconstr Predef.path_vox_total [arg_ty]
+            else arg_ty
+          in
           let arg_ty =
             if Btype.is_Tpoly arg_ty then arg_ty else newmono arg_ty
           in
@@ -926,7 +1593,16 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
           in
           let arg_mode_desc = Alloc.of_const arg_mode.mode_modes in
           let ret_mode_desc = Alloc.of_const ret_mode.mode_modes in
-          let arrow_desc = (l, arg_mode_desc, ret_mode_desc) in
+          (* Normalize: keep the binder only if the codomain actually
+             references it, so [(x:int) -> t] and [int -> t] are the
+             same type when [x] is unused. *)
+          let vox_stored_binder =
+            match vox_arrow_binder with
+            | Some (_, id) when Vox_dep.mentions_ident id ret_cty.ctyp_type ->
+                Some id
+            | _ -> None
+          in
+          let arrow_desc = (l, arg_mode_desc, ret_mode_desc, vox_stored_binder) in
           let ty =
             newty (Tarrow(arrow_desc, arg_ty, ret_cty.ctyp_type, commu_ok))
           in
@@ -1243,6 +1919,87 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
       let new_env = Env.enter_splice ~loc env in
       let cty = transl_type new_env ~policy ~row_context mode t in
       ctyp (Ttyp_splice cty) (newty (Tsplice cty.ctyp_type))
+  | Ptyp_extension ({txt; _}, PTyp inner)
+    when String.starts_with ~prefix:"vox.named." txt ->
+      (* vox named type [(y : ty)] outside an arrow domain (domains are
+         consumed by the arrow translation above): [ty] must be
+         refined, and [y] names its bound value variable. *)
+      let name = String.sub txt 10 (String.length txt - 10) in
+      let is_refined =
+        match inner.ptyp_desc with
+        | Ptyp_extension ({txt = t; _}, _) ->
+            String.starts_with ~prefix:"vox.refine" t
+        | _ -> false
+      in
+      if not is_refined
+      then
+        Location.raise_errorf ~loc
+          "vox: (%s : ...) names a value and is only meaningful as a \
+           function parameter or around a refined type (ty{ ... })"
+          name;
+      vox_with_self_name ~root:inner name (fun () ->
+        transl_type env ~policy ~row_context mode inner)
+  | Ptyp_extension ({txt = vox_ext; _}, payload)
+    when String.starts_with ~prefix:"vox.refine" vox_ext ->
+      (* vox refined type [{b:ty | pred}]; the bound variable's name
+         [b] rides the extension name as "vox.refine.b". *)
+      let bound =
+        if String.length vox_ext > 11
+        then String.sub vox_ext 11 (String.length vox_ext - 11)
+        else "_"
+      in
+      let pred_expr, skel_styp =
+        match payload with
+        | PStr [{pstr_desc =
+                   Pstr_eval
+                     ({pexp_desc = Pexp_constraint (e, Some ty, []); _}, _);
+                 _}] ->
+            (e, ty)
+        | _ ->
+            Location.raise_errorf ~loc
+              "vox: malformed refined-type payload"
+      in
+      let cty = transl_type env ~policy ~row_context mode skel_styp in
+      let skel = cty.ctyp_type in
+      (* Refinements are allowed at every skeleton type: the solver
+         declares int as Int and bool as Bool, and everything else at a
+         single uninterpreted sort where equality is all the logic
+         knows (DESIGN.md). *)
+      let pred = elab_vox_pred ~bound ~self_root:styp env pred_expr in
+      (* vox: refining a type whose EXPANSION is already refined -- an
+         abbreviation like [type set = tree{ bst _ }] -- CONJOINS the
+         layers on the underlying skeleton: [set{ p }] is
+         [tree{ bst _ && p }].  Flattening at elaboration keeps a
+         single normal form, so nothing downstream ever meets a nested
+         [Trefine] from this path.  (A skeleton that becomes refined
+         only through later instantiation of a type variable is not
+         flattened; rigid unification then fails closed, as before.) *)
+      let refined =
+        match Ctype.expand_head env skel with
+        | expanded ->
+            (match get_desc expanded with
+             | Trefine (sk0, maps0, q) ->
+                 (* [set{ P }] over a via type: [P]'s bound value is at
+                    the composite image sort, so push it through the
+                    maps ([_ := g (f _)]) before conjoining at the base
+                    sort where predicates are stored. *)
+                 let pred =
+                   match maps0 with
+                   | [] -> pred
+                   | _ ->
+                     let composite =
+                       List.fold_left
+                         (fun acc m ->
+                           Refinement.Pfun (m.Types.vm_fn, [ acc ]))
+                         Refinement.Pbound maps0
+                     in
+                     Refinement.subst_bound ~by:composite pred
+                 in
+                 newty (Trefine (sk0, maps0, Refinement.Pand (q, pred)))
+             | _ -> newty (Trefine (skel, [], pred)))
+        | exception _ -> newty (Trefine (skel, [], pred))
+      in
+      { cty with ctyp_type = refined }
   | Ptyp_extension ext ->
       raise (Error_forward (Builtin_attributes.error_of_extension ext))
 

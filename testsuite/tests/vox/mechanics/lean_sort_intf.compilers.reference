@@ -1,0 +1,10 @@
+File "sortlean_i.ml", line 1:
+Error: The implementation sortlean_i.ml
+       does not match the interface sortlean_i.cmi: 
+       Type declarations do not match:
+         type t = { mutable c : int; }
+       is not included in
+         type t
+       The second declares refines lean "ISet" where the first declares refines lean "IBag".
+       File "sortlean_i.mli", line 3, characters 0-31: Expected declaration
+       File "sortlean_i.ml", line 1, characters 0-53: Actual declaration

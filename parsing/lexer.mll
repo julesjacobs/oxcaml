@@ -53,6 +53,8 @@ let all_keywords =
     "and", AND, always;
     "as", AS, always;
     "assert", ASSERT, v1_6;
+    "assume_", ASSUME, oxcaml;
+    "assume_unchecked_", ASSUME_UNCHECKED, oxcaml;
     "begin", BEGIN, always;
     "borrow_", BORROW, oxcaml;
     "class", CLASS, v1_0;
@@ -64,10 +66,12 @@ let all_keywords =
     "else", ELSE, always;
     "end", END, always;
     "exception", EXCEPTION, always;
+    "exists_", EXISTS, oxcaml;
     "exclave_", EXCLAVE, oxcaml;
     "external", EXTERNAL, always;
     "false", FALSE, always;
     "for", FOR, always;
+    "forall_", FORALL, oxcaml;
     "fun", FUN, always;
     "function", FUNCTION, always;
     "functor", FUNCTOR, always;
@@ -99,12 +103,14 @@ let all_keywords =
     "poly_", POLY, oxcaml;
     "private", PRIVATE, v1_0;
     "rec", REC, always;
+    "refine_", REFINE, oxcaml;
     "repr_", REPR, oxcaml;
     "sig", SIG, always;
     "stack_", STACK, oxcaml;
     "struct", STRUCT, always;
     "then", THEN, always;
     "to", TO, always;
+    "total_", TOTAL, oxcaml;
     "true", TRUE, always;
     "try", TRY, always;
     "type", TYPE, always;

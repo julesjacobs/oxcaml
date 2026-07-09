@@ -358,7 +358,9 @@ type filtered_arrow =
   { ty_arg : type_expr;
     arg_mode : Mode.Alloc.lr;
     ty_ret : type_expr;
-    ret_mode : Mode.Alloc.lr
+    ret_mode : Mode.Alloc.lr;
+    arrow_binder : Ident.t option
+    (* vox: dependent-arrow binder of the consumed arrow, if any *)
   }
 
 val filter_arrow: Env.t -> type_expr -> arg_label -> force_tpoly:bool ->
@@ -915,3 +917,28 @@ val apply_left_is_contained_by : Mode.Hint.is_contained_by
 val apply_right_is_contained_by : Mode.Hint.is_contained_by
   -> ?modalities:Mode.Modality.Const.t
   -> ('l * allowed) Mode.Value.t -> Mode.Value.r
+
+(** vox: [expand_head] with a no-expansion fallback when expansion
+    fails; conservative for vox translation purposes. *)
+val vox_expand_head : Env.t -> Types.type_expr -> Types.type_expr
+
+(** vox: if [p] is a "simple" variant (non-GADT, closed, non-empty,
+    tuple constructor arguments only), its type parameters and
+    constructor declarations.  May be parameterized when USER-DEFINED (a
+    predefined parameterized type is out of scope); monomorphic types
+    are unrestricted.  The parameters and the constructor argument types
+    share type-variable nodes (same declaration), so a caller can
+    classify the arguments in terms of the parameters. *)
+val vox_simple_variant :
+  Env.t
+  -> Path.t
+  -> (Types.type_expr list * Types.constructor_declaration list) option
+
+(** vox: if [p] is a "simple" record (all fields immutable), its type
+    parameters and label declarations.  May be parameterized when
+    user-defined.  The parameters and the field types share
+    type-variable nodes. *)
+val vox_simple_record :
+  Env.t
+  -> Path.t
+  -> (Types.type_expr list * Types.label_declaration list) option

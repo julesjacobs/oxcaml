@@ -2796,7 +2796,7 @@ let type_for_annotation ~env ~loc typ =
         | Tunivar _ ->
           let name, jkind_annotation = unwrap_univar ty |> Option.get in
           Ttyp_var (Some name, jkind_annotation)
-        | Tarrow ((arg_label, _, _), ty, ty', _) ->
+        | Tarrow ((arg_label, _, _, _), ty, ty', _) ->
           Ttyp_arrow
             ( arg_label,
               go ty,
@@ -2871,7 +2871,7 @@ let type_for_annotation ~env ~loc typ =
               tpt_type = Mty_ident pack_path;
               tpt_txt = mkloc (Untypeast.lident_of_path pack_path) loc
             }
-        | Tlink _ | Tsubst _ | Tfield _ | Tnil ->
+        | Tlink _ | Tsubst _ | Tfield _ | Tnil | Trefine _ ->
           fatal_errorf
             "Translquote [at %a]:@ Unexpected type expression@ in a quoted \
              higher-rank function type"

@@ -325,6 +325,7 @@ let save_import penv crc modname impl flags filename =
     (function
         | Rectypes -> ()
         | Alerts _ -> ()
+        | Vox_spec _ -> ()
         | Opaque -> register_import_as_opaque penv modname)
     flags;
   Consistbl.check crc_units modname impl crc filename;
@@ -349,6 +350,7 @@ let acknowledge_import penv ~check modname pers_sig =
             if not !Clflags.recursive_types then
               error (Need_recursive_types(modname))
         | Alerts _ -> ()
+        | Vox_spec _ -> ()
         | Opaque -> register_import_as_opaque penv modname)
     flags;
   begin match kind, CU.get_current () with
@@ -1100,17 +1102,45 @@ let looked_up {persistent_structures; _} modname =
 let is_imported_opaque {imported_opaque_units; _} s =
   CU.Name.Set.mem s !imported_opaque_units
 
+(* vox: the embedded prelude blocks of every loaded import, with the
+   unit's own import names (so Vox_verify can order blocks by
+   dependency).  A unit's own .mli, read while compiling its .ml, is
+   in this table too, which is exactly what lets the implementation be
+   verified against the interface's specs. *)
+let vox_imported_specs {imports; _} =
+  Hashtbl.fold
+    (fun name info acc ->
+      match info with
+      | Missing -> acc
+      | Found imp ->
+        let export =
+          List.find_map
+            (function Cmi_format.Vox_spec vp -> Some vp | _ -> None)
+            imp.imp_flags
+        in
+        (match export with
+         | None -> acc
+         | Some vp ->
+           let deps =
+             Array.to_list imp.imp_crcs |> List.map Import_info.name
+           in
+           (name, vp, deps) :: acc))
+    imports []
+
 let implemented_parameter penv modname =
   match find_name_info_in_cache penv modname with
   | Some { pn_import = { imp_arg_for; _ }; _ } -> imp_arg_for
   | None -> None
 
-let make_cmi penv modname kind sign alerts =
+let make_cmi penv modname kind sign alerts ~vox_preludes =
   let flags =
     List.concat [
       if !Clflags.recursive_types then [Cmi_format.Rectypes] else [];
       if !Clflags.opaque then [Cmi_format.Opaque] else [];
       [Alerts alerts];
+      (match vox_preludes with
+       | None -> []
+       | Some vp -> [Cmi_format.Vox_spec vp]);
     ]
   in
   let params =

@@ -1,0 +1,29 @@
+File "lean_explain_fail.ml", line 24, characters 53-60: vox VC:
+  goal: x + 1 >= 0  @ 24.53-24.60
+  hypotheses:
+  x > 0  @ 24.9-24.10
+  scope:
+  x : int  ~>  Int  @ 24.9-24.10
+  verdict: proved
+File "lean_explain_fail.ml", line 26, characters 45-46: vox VC:
+  goal: 0 = 5  @ 26.45-26.46
+  hypotheses: <none>
+  verdict: disproved
+File "lean_explain_fail.ml", line 28, characters 54-61: vox VC:
+  goal: y - 1 >= 2  @ 28.54-28.61
+  hypotheses:
+  y >= 3  @ 28.9-28.10
+  scope:
+  y : int  ~>  Int  @ 28.9-28.10
+  verdict: proved
+File "lean_explain_fail.ml", line 30, characters 45-46: vox VC:
+  goal: 0 = 7  @ 30.45-30.46
+  hypotheses: <none>
+  verdict: unproved
+File "lean_explain_fail.ml", line 26, characters 45-46:
+26 | let bad1 (u : unit) : int{ _ = 5 } = refine_ 0
+                                                  ^
+Error: vox: verification failed -- goal DISPROVED (a counterexample was validated).
+       Goal: 0 = 5
+Hypotheses: <none>
+The goal is false unconditionally.

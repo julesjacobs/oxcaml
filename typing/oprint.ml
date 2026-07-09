@@ -494,6 +494,17 @@ and print_simple_out_type ppf =
   | Otyp_attribute (t, attr) ->
       fprintf ppf "@[<1>(%a [@@%s])@]"
         print_out_type_0 t attr.oattr_name
+  | Otyp_refine (t, pred) ->
+      fprintf ppf "@[<1>%a{ %s }@]" print_simple_out_type t pred
+  | Otyp_vox_named (name, t) ->
+      (* A tuple domain must keep its own parentheses: [(p : int * int)]
+         reparses as a LABELED TUPLE type [p:int * int], not a binder
+         (the LR(1) ambiguity noted in DESIGN.md); [(p : (int * int))]
+         round-trips. *)
+      (match t with
+       | Otyp_tuple _ ->
+           fprintf ppf "@[<1>(%s :@ (%a))@]" name print_out_type_0 t
+       | _ -> fprintf ppf "@[<1>(%s :@ %a)@]" name print_out_type_0 t)
   | Otyp_jkind_annot (t, jk) ->
     fprintf ppf "@[<1>(%a@ :@ %a)@]"
       print_out_type_0 t

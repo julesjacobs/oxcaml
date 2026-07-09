@@ -277,25 +277,45 @@ let with_additional_action =
     | Duplicate_variables -> Duplicate_variables, Nothing
     | Prepare_for_saving ->
         let prepare_jkind (type l r) loc (jkind : (l * r) jkind) =
+          (* vox: the refines component may live only in the WRITTEN
+             annotation at this point (decl rebuilds do not thread the
+             field), and the annotation is dropped on save.  Rematerialize
+             it into the saved field so a client's .cmi view carries the
+             declared modeling. *)
+          let vox_refines = jkind.jkind.refines in
+          let set_refines (k : (l * r) jkind) =
+            match vox_refines with
+            | Vr_top -> k
+            | Vr_sort _ ->
+              { k with jkind = { k.jkind with refines = vox_refines } }
+          in
           match Jkind.get_const jkind with
           | Some const ->
             let memoized =
-              Builtins_memo.find
-                ~quality:jkind.quality
-                ~ran_out_of_fuel_during_normalize:
-                  jkind.ran_out_of_fuel_during_normalize
-                const
+              (* vox: a refines-carrying kind must not collapse into the
+                 refines-less memoized builtin -- the .cmi would drop the
+                 modeling.  (The shallow equality itself stays
+                 refines-blind: printing elision shares it.) *)
+              match vox_refines with
+              | Vr_sort _ -> None
+              | Vr_top ->
+                Builtins_memo.find
+                  ~quality:jkind.quality
+                  ~ran_out_of_fuel_during_normalize:
+                    jkind.ran_out_of_fuel_during_normalize
+                  const
             in
             begin match memoized with
-            | Some jkind -> jkind
+            | Some jkind -> set_refines jkind
             | None ->
-              Jkind.of_const
-                ~quality:jkind.quality
-                ~ran_out_of_fuel_during_normalize:
-                  jkind.ran_out_of_fuel_during_normalize
-                const
-                ~annotation:None
-                ~why:Imported
+              set_refines
+                (Jkind.of_const
+                   ~quality:jkind.quality
+                   ~ran_out_of_fuel_during_normalize:
+                     jkind.ran_out_of_fuel_during_normalize
+                   const
+                   ~annotation:None
+                   ~why:Imported)
             end
           | None -> raise(Error (loc, Unconstrained_jkind_variable))
         in
@@ -571,7 +591,51 @@ let rec layout s l =
     if sort_l == sort_l' then l
     else Sort (sort_l', ax)
 
+(* vox: the refines component may carry TYPE paths ([Vs_data]); remap
+   them alongside the jkind's other paths (e.g. saving to a .cmi rewrites
+   module paths).  Share when nothing changes so the common [Vr_top] case
+   stays free. *)
+let rec subst_vox_sort s (vs : Types.vox_sort) =
+  match vs with
+  | Vs_lean (n, args) -> Vs_lean (n, List.map (subst_vox_sort s) args)
+  | Vs_int | Vs_bool | Vs_param _ | Vs_opaque -> vs
+  | Vs_tuple ss ->
+    let ss' = Misc.Stdlib.List.map_sharing (subst_vox_sort s) ss in
+    if ss == ss' then vs else Vs_tuple ss'
+  | Vs_data (p, ss) ->
+    let p' = type_path s p in
+    let ss' = Misc.Stdlib.List.map_sharing (subst_vox_sort s) ss in
+    if p == p' && ss == ss' then vs else Vs_data (p', ss')
+  | Vs_fact (s0, pred) ->
+    (* Remap both the underlying sort's paths and the invariant's
+       constructor / value paths, exactly as [typexp] remaps a
+       [Trefine] predicate. *)
+    let map_path q =
+      if to_subst_by_type_function s q then q else type_path s q
+    in
+    let map_value_path q =
+      match q with
+      | Path.Pdot (m, x) -> Path.Pdot (module_path s m, x)
+      | Path.Papply (m, a) -> Path.Papply (module_path s m, module_path s a)
+      | Path.Pident _ | Path.Pextra_ty _ -> q
+    in
+    let s0' = subst_vox_sort s s0 in
+    let pred' = Refinement.map_paths ~value:map_value_path map_path pred in
+    if s0 == s0' && pred == pred' then vs else Vs_fact (s0', pred')
+
+let subst_vox_refines s (r : Types.vox_refines) =
+  match r with
+  | Vr_top -> r
+  | Vr_sort vs ->
+    let vs' = subst_vox_sort s vs in
+    if vs == vs' then r else Vr_sort vs'
+
 let jkind_desc s jkind =
+  let refines' = subst_vox_refines s jkind.refines in
+  let jkind =
+    if refines' == jkind.refines then jkind
+    else { jkind with refines = refines' }
+  in
   match jkind.base with
   | Kconstr (p, sa) ->
     begin match Path.Map.find p s.jkinds with
@@ -580,11 +644,15 @@ let jkind_desc s jkind =
       if Path.compare p' p = 0 then jkind else
         { jkind with base = Kconstr (p', sa) }
     | Jkind_path p' -> { jkind with base = Kconstr (p', sa) }
-    | Jkind_const { base; mod_bounds; with_bounds = No_with_bounds } ->
+    | Jkind_const { base; mod_bounds; with_bounds = No_with_bounds;
+                    refines = _ } ->
       let const =
         { base = Jkind.Base_and_axes.meet_scannable_axes base sa;
           mod_bounds = Jkind.Mod_bounds.meet mod_bounds jkind.mod_bounds;
-          with_bounds = jkind.with_bounds }
+          with_bounds = jkind.with_bounds;
+          (* vox: resolving an alias reference; preserve the referencing
+             kind's refines. *)
+          refines = jkind.refines }
       in
       Jkind.Base_and_axes.map_layout Jkind_types.Layout.of_const const
     end
@@ -595,6 +663,11 @@ let jkind_desc s jkind =
 
 let jkind_const_desc s
       ({ with_bounds = No_with_bounds } as jkind : jkind_const_desc_lr) =
+  let refines' = subst_vox_refines s jkind.refines in
+  let jkind =
+    if refines' == jkind.refines then jkind
+    else { jkind with refines = refines' }
+  in
   match jkind.base with
   | Kconstr (p, sa) ->
     begin match Path.Map.find p s.jkinds with
@@ -603,10 +676,14 @@ let jkind_const_desc s
       if Path.compare p' p = 0 then jkind else
         { jkind with base = Kconstr (p', sa) }
     | Jkind_path p' -> { jkind with base = Kconstr (p', sa) }
-    | Jkind_const { base; mod_bounds; with_bounds = No_with_bounds } ->
+    | Jkind_const { base; mod_bounds; with_bounds = No_with_bounds;
+                    refines = _ } ->
       { base = Jkind.Base_and_axes.meet_scannable_axes base sa;
         mod_bounds = Jkind.Mod_bounds.meet mod_bounds jkind.mod_bounds;
-        with_bounds = jkind.with_bounds }
+        with_bounds = jkind.with_bounds;
+        (* vox: resolving an alias reference; preserve the referencing
+           kind's refines. *)
+        refines = jkind.refines }
     end
   | Layout _ -> jkind
 
@@ -740,7 +817,7 @@ let rec typexp copy_scope s ty =
           end
       | Tfield(_label, kind, _t1, t2) when field_kind_repr kind = Fabsent ->
           Tlink (typexp copy_scope s t2)
-      | Tarrow ((label, marg, mret), arg, ret, comm) ->
+      | Tarrow ((label, marg, mret, binder), arg, ret, comm) ->
           let marg, mret =
             match s.additional_action with
             | Prepare_for_saving { prepare_mode; _ } ->
@@ -748,9 +825,75 @@ let rec typexp copy_scope s ty =
             | _ -> marg, mret
           in
           let arg = typexp copy_scope s arg in
+          (* vox: a dependent-arrow binder is a [Scoped] ident whose stamp is
+             only meaningful within its own compiler process, so two .cmis
+             routinely marshal COLLIDING binder stamps.  When importing a
+             signature, freshen the binder together with the [Refinement.Pvar]s
+             it binds in the codomain: imported binders then land in the
+             consuming unit's stamp space and can never collide -- with each
+             other, across imports, or with locally minted binders.  That is
+             the disjointness [Vox_dep.subst] and [Refinement.equal_var]
+             already assume; without it a cross-binder collision makes the
+             arrow pairing match the wrong partner (see stamp_collide and
+             functor_refine).
+
+             Freshen BEFORE recursing into [ret], so [subst_binder] runs
+             over the still-original codomain whose binder stamps are
+             distinct within the chain (the substitution is then
+             unambiguous), and pick a fresh stamp DISJOINT from every
+             stamp already present in [ret].  Otherwise a later inner
+             freshening could draw a stamp equal to this binder's
+             original (the process counter overlaps the marshalled .cmi
+             range); the subsequent [subst_binder] of this binder would
+             then clobber that inner reference too, aliasing two distinct
+             parameters (F-1: [Vmap.add 1 10 m] modelled [m_add 1 10 1]). *)
+          let binder, ret =
+            match s.sort_var_mapping, binder with
+            | Loading _, Some id ->
+                let avoid = Vox_dep.stamps_in ret in
+                let rec fresh () =
+                  let cand =
+                    Ident.create_scoped ~scope:(Ident.scope id) (Ident.name id)
+                  in
+                  if Hashtbl.mem avoid (Ident.stamp cand) then fresh () else cand
+                in
+                let id' = fresh () in
+                Some id', Vox_dep.subst_binder id ~by:(Refinement.Pvar id') ret
+            | Loading _, None | (Saving _ | Nothing), _ -> binder, ret
+          in
           let ret = typexp copy_scope s ret in
           let comm = copy_commu comm in
-          Tarrow ((label, marg, mret), arg, ret, comm)
+          Tarrow ((label, marg, mret, binder), arg, ret, comm)
+      | Trefine (t, maps, p) ->
+          (* vox: constructor applications in the predicate carry type
+             paths, which must be remapped exactly as [Tconstr] paths
+             are.  A path substituted away by a type function is left
+             untouched: the orphaned predicate then fails structural
+             comparison / VC-time resolution, which is sound. *)
+          let map_path q =
+            if to_subst_by_type_function s q then q else type_path s q
+          in
+          (* [Pglobal] value paths remap by module prefix. *)
+          let map_value_path q =
+            match q with
+            | Path.Pdot (m, x) -> Path.Pdot (module_path s m, x)
+            | Path.Papply (m, a) ->
+                Path.Papply (module_path s m, module_path s a)
+            | Path.Pident _ | Path.Pextra_ty _ -> q
+          in
+          let maps =
+            List.map
+              (fun m ->
+                { m with
+                  Types.vm_target = typexp copy_scope s m.Types.vm_target
+                ; vm_sort = subst_vox_sort s m.Types.vm_sort
+                })
+              maps
+          in
+          Trefine
+            ( typexp copy_scope s t,
+              maps,
+              Refinement.map_paths ~value:map_value_path map_path p )
       | _ -> copy_type_desc (typexp copy_scope s) desc
     in
     Transient_expr.set_stub_desc ty' desc;

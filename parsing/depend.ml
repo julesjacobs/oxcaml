@@ -93,6 +93,11 @@ let handle_extension ext =
   | _ ->
     ()
 
+(* vox refinement predicates embed expressions in types; [add_type]
+   is defined before [add_expr], hence the forward reference. *)
+let add_expr_forward : (bound_map -> Parsetree.expression -> unit) ref =
+  ref (fun _ _ -> ())
+
 let rec add_type bv ty =
   match ty.ptyp_desc with
     Ptyp_any jkind
@@ -128,6 +133,22 @@ let rec add_type bv ty =
   | Ptyp_of_kind jkind -> add_jkind bv jkind
   | Ptyp_repr(_, t) -> add_type bv t
   | Ptyp_newlayout(_, t) -> add_type bv t
+  | Ptyp_extension ({txt; _}, PTyp t)
+    when String.starts_with ~prefix:"vox.named." txt ->
+      (* vox named type [(x : ty)]: the type rides the payload. *)
+      add_type bv t
+  | Ptyp_extension ({txt; _},
+                    PStr [{pstr_desc =
+                             Pstr_eval
+                               ({pexp_desc =
+                                   Pexp_constraint (pred, Some ty, _); _},
+                                _); _}])
+    when String.starts_with ~prefix:"vox.refine" txt ->
+      (* vox refined type {v:ty | p}: both the skeleton and the
+         predicate can reference modules (the predicate through
+         qualified constructors such as [M.Cons]). *)
+      add_type bv ty;
+      !add_expr_forward bv pred
   | Ptyp_extension e -> handle_extension e
 
 and add_package_type bv ptyp =
@@ -149,6 +170,9 @@ and add_jkind bv (jkind : jkind_annotation) =
       add_type bv typ
   | Pjk_product jkinds ->
       List.iter (fun jkind -> add_jkind bv jkind) jkinds
+  | Pjk_refines (jkind, typ) ->
+      add_jkind bv jkind;
+      add_type bv typ
 
 and add_vars_jkinds bv vars_jkinds =
   let add_one (_, jkind) = Option.iter (add_jkind bv) jkind in
@@ -236,6 +260,9 @@ let rec add_pattern bv pat =
   | Ppat_open ( m, p) -> let bv = open_module bv m.txt in add_pattern bv p
   | Ppat_effect(p1, p2) -> add_pattern bv p1; add_pattern bv p2
   | Ppat_exception p -> add_pattern bv p
+  | Ppat_extension ({txt = "vox.refine"; _}, PPat (p, None)) ->
+      (* vox unpack pattern [refine_ p]. *)
+      add_pattern bv p
   | Ppat_extension e -> handle_extension e
 
 let add_pattern bv pat =
@@ -328,6 +355,11 @@ let rec add_expr bv exp =
       | Error () -> handle_extension e
       | Ok { arg; _ } -> add_expr bv arg
       end
+  | Pexp_extension
+      ({txt = ("vox.refine" | "vox.assume" | "vox.assume_unchecked"); _},
+       PStr [{pstr_desc = Pstr_eval (e, _); _}]) ->
+      (* vox [refine_ e] / [assume_ e] / [assume_unchecked_ e]. *)
+      add_expr bv e
   | Pexp_extension e -> handle_extension e
   | Pexp_stack e -> add_expr bv e
   | Pexp_overwrite (e1, e2) -> add_expr bv e1; add_expr bv e2
@@ -765,3 +797,5 @@ and add_class_field bv pcf =
 
 and add_class_declaration bv decl =
   add_class_expr bv decl.pci_expr
+
+let () = add_expr_forward := add_expr

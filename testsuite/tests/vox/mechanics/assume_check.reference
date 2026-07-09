@@ -1,0 +1,10 @@
+pos 5 = 5
+failure: vox: assume_ check failed at assume_check.ml:13:46: _ > 0
+range 7 = 7
+range 5 rejected
+above 11 = 11 (k = 10)
+above 10 rejected
+mul 6 7 = 42
+bad_mul rejected
+compact 100 = 100
+unchecked = 1

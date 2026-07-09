@@ -1217,6 +1217,256 @@ let transl_declaration env sdecl (id, uid) =
       | Type_abstract _ | Type_variant _ | Type_record _
       | Type_open -> jkind
     in
+    (* vox: the refines component of the declaration's kind.  An
+       explicit [refines] in a kind annotation is already in [jkind];
+       otherwise the trusted [@@vox.sort int|bool] attribute sets it,
+       and a plain int/bool manifest sets it structurally (so an .mli
+       [refines int] checks against [type t = int] unannotated). *)
+    let jkind =
+      match Jkind.get_vox_refines jkind with
+      | Vr_sort _ -> jkind
+      | Vr_top ->
+        (* The stored jkind may be an overapproximation of the written
+           annotation; read [refines] from the source annotation
+           directly. *)
+        (* Substitute a parameterized head's declared sort at the
+           argument sorts elaborated from a use. *)
+        let rec subst_sort args : Types.vox_sort -> Types.vox_sort = function
+          | Vs_param i ->
+            (match List.nth_opt args i with Some s -> s | None -> Vs_opaque)
+          | Vs_tuple ss -> Vs_tuple (List.map (subst_sort args) ss)
+          | Vs_data (p, ss) -> Vs_data (p, List.map (subst_sort args) ss)
+          (* The invariant is closed, so only its underlying sort
+             instantiates. *)
+          | Vs_fact (s, pred) -> Vs_fact (subst_sort args s, pred)
+          | Vs_lean (n, largs) -> Vs_lean (n, List.map (subst_sort args) largs)
+          | (Vs_int | Vs_bool | Vs_opaque) as s -> s
+        in
+        (* Elaborate the core type written in [refines (...)] into a
+           refinement sort.  Translate it (no [expand_head], to avoid
+           moving GADT-equation ambiguity) and walk the result: a
+           parameter variable maps positionally, a simple variant/record
+           becomes a datatype sort, and a head that declares its own
+           modeling contributes that modeling instantiated at the
+           argument sorts. *)
+        let elaborate (cty : Parsetree.core_type) : Types.vox_sort =
+          match cty.ptyp_desc with
+          | Ptyp_extension ({ txt = "lean"; _ }, payload) ->
+            (* Inline ghost sort: [refines ([%lean "MyT"])] points the type
+               directly at a block-declared Lean type, elaborating to exactly
+               what the intermediary [type myt [@@vox.sort lean "MyT"]] +
+               [refines (myt)] produced -- [Vs_lean] at the given name with the
+               type's own parameters mapped positionally. *)
+            let name =
+              match payload with
+              | PStr
+                  [ { pstr_desc =
+                        Pstr_eval
+                          ( { pexp_desc =
+                                Pexp_constant
+                                  { pconst_desc = Pconst_string (s, _, _); _ }
+                            ; _ }
+                          , _ )
+                    ; _ } ] -> s
+              | _ ->
+                Location.raise_errorf
+                  ~loc:cty.ptyp_loc
+                  "vox: refines ([%%lean ...]) takes a single Lean type name, \
+                   e.g. [%%lean \"MyT\"]"
+            in
+            (* Validate the Lean type name the same way the [@@vox.sort lean]
+               attribute is validated eagerly in vox_verify
+               ([validate_lean_sort_name]): a non-empty dotted identifier, not in
+               the reserved [Vox_]/[v_] solver namespaces (a name there could
+               silently alias an emitted datatype/value name).  Keep in sync with
+               that copy. *)
+            let ident_seg seg =
+              String.length seg > 0
+              && (match seg.[0] with
+                  | 'A' .. 'Z' | 'a' .. 'z' | '_' -> true
+                  | _ -> false)
+              && String.for_all
+                   (function
+                     | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' | '\'' -> true
+                     | _ -> false)
+                   seg
+            in
+            let reserved pre =
+              String.length name >= String.length pre
+              && String.equal (String.sub name 0 (String.length pre)) pre
+            in
+            if String.length name = 0
+               || not (List.for_all ident_seg (String.split_on_char '.' name))
+            then
+              Location.raise_errorf
+                ~loc:cty.ptyp_loc
+                "vox: %S is not a valid Lean type name for refines ([%%lean ...])"
+                name
+            else if reserved "Vox_" || reserved "v_"
+            then
+              Location.raise_errorf
+                ~loc:cty.ptyp_loc
+                "vox: %S may not name a ghost sort -- the Vox_ and v_ prefixes are \
+                 reserved for the solver's emitted names (it would collide)"
+                name;
+            Vs_lean (name, List.mapi (fun i _ -> Vs_param i) params)
+          | _ ->
+          let ty =
+            (transl_simple_type ~new_var_jkind:Any env ~closed:false
+               Mode.Alloc.Const.legacy cty).ctyp_type
+          in
+          let param_index ty =
+            let id = get_id ty in
+            let rec find i = function
+              | [] -> None
+              | p :: rest ->
+                if Int.equal (get_id p) id then Some i else find (i + 1) rest
+            in
+            find 0 params
+          in
+          let err () =
+            Location.raise_errorf ~loc:cty.ptyp_loc
+              "vox: this type cannot model a refinement sort"
+          in
+          let rec go ?(head = false) (ty : Types.type_expr) : Types.vox_sort =
+            match get_desc ty with
+            | Trefine (skel, _maps, pred) when head ->
+              (* An INVARIANT at the head: [int{ _ >= 0 }] models at the
+                 skeleton's sort but carries the closed predicate.
+                 [free_vars] must be empty -- an invariant may name only
+                 the bound value and constructor/spec symbols. *)
+              (match Refinement.free_vars pred with
+               | [] -> Vs_fact (go ~head skel, pred)
+               | _ :: _ ->
+                 Location.raise_errorf ~loc:cty.ptyp_loc
+                   "vox: an invariant may mention only the value (and module-level \
+               values, constructors, and spec functions)")
+            | Trefine _ ->
+              (* v2 scope: invariants compose only at the head of the
+                 written type, never in an argument position. *)
+              Location.raise_errorf ~loc:cty.ptyp_loc
+                "vox: invariants compose at the head only"
+            | Tvar _ ->
+              (match param_index ty with Some i -> Vs_param i | None -> err ())
+            | Tconstr (p, [], _) when Path.same p Predef.path_int -> Vs_int
+            | Tconstr (p, [], _) when Path.same p Predef.path_bool -> Vs_bool
+            | Tconstr (p, args, _) ->
+              let arg_sorts = List.map go args in
+              (match Env.find_type p env with
+               | exception Not_found -> err ()
+               | decl ->
+                 (match Jkind.get_vox_refines decl.type_jkind with
+                  | Vr_sort s -> subst_sort arg_sorts s
+                  | Vr_top ->
+                    (match
+                       Ctype.vox_simple_variant env p,
+                       Ctype.vox_simple_record env p
+                     with
+                     | Some _, _ | _, Some _ -> Vs_data (p, arg_sorts)
+                     | None, None ->
+                       (* A MONOMORPHIC alias of a supported head
+                          unfolds one declaration at a time (decl
+                          manifests only -- never [expand_head], which
+                          moves GADT-equation ambiguity):
+                          [type index = int] models like [int]. *)
+                       (match decl.type_params, decl.type_manifest with
+                        | [], Some m -> go ~head m
+                        | _ -> err ()))))
+            | Ttuple comps
+              when List.length comps >= 2
+                   && List.for_all (fun (l, _) -> Option.is_none l) comps ->
+              Vs_tuple (List.map (fun (_, t) -> go t) comps)
+            | _ -> err ()
+          in
+          go ~head:true ty
+        in
+        let rec of_annot (a : Parsetree.jkind_annotation) =
+          match a.pjka_desc with
+          | Pjk_operator (base, axes) ->
+            let rec find = function
+              | { Location.txt = "refines"; _ }
+                :: { Location.txt = "int"; _ } :: _ -> Some (Vr_sort Vs_int)
+              | { Location.txt = "refines"; _ }
+                :: { Location.txt = "bool"; _ } :: _ -> Some (Vr_sort Vs_bool)
+              | _ :: rest -> find rest
+              | [] -> None
+            in
+            (match find axes with
+             | Some r -> Some r
+             | None -> of_annot base)
+          | Pjk_refines (_base, cty) -> Some (Vr_sort (elaborate cty))
+          | Pjk_mod (base, _) | Pjk_with (base, _, _) -> of_annot base
+          | _ -> None
+        in
+        let of_annot =
+          Option.bind sdecl.ptype_jkind_annotation of_annot
+        in
+        (* Parity with [@@vox.sort]: on a pure ALIAS the modeling is a
+           footgun (the alias and its definition would diverge), so it
+           is rejected on both spellings. *)
+        (match of_annot, kind, man with
+         | Some _, Type_abstract _, Some _ ->
+           Location.raise_errorf ~loc:sdecl.ptype_loc
+             "vox: refines on a type alias has no effect; put it on the \
+              definition"
+         | _ -> ());
+        let of_attr =
+          List.find_map
+            (fun (a : Parsetree.attribute) ->
+              if not (String.equal a.attr_name.txt "vox.sort")
+              then None
+              else
+                match a.attr_payload with
+                | PStr
+                    [ { pstr_desc =
+                          Pstr_eval
+                            ( { pexp_desc =
+                                  Pexp_ident
+                                    { txt = Longident.Lident s; _ }
+                              ; _ }
+                            , _ )
+                      ; _ } ] ->
+                  (match s with
+                   | "int" -> Some (Vr_sort Vs_int)
+                   | "bool" -> Some (Vr_sort Vs_bool)
+                   | _ -> None (* vox_verify reports the bad name *))
+                (* A ghost sort naming a block-defined Lean type:
+                   [@@vox.sort lean "ISet"].  vox_verify validates the
+                   name eagerly; here we just fold it into the kind. *)
+                | PStr
+                    [ { pstr_desc =
+                          Pstr_eval
+                            ( { pexp_desc =
+                                  Pexp_apply
+                                    ( { pexp_desc =
+                                          Pexp_ident
+                                            { txt = Longident.Lident "lean"; _ }
+                                      ; _ }
+                                    , [ ( Nolabel
+                                        , { pexp_desc =
+                                              Pexp_constant
+                                                { pconst_desc =
+                                                    Pconst_string (name, _, _)
+                                                ; _ }
+                                          ; _ } )
+                                      ] )
+                              ; _ }
+                            , _ )
+                      ; _ } ] ->
+                  Some (Vr_sort (Vs_lean (name, List.mapi (fun i _ -> Vs_param i) params)))
+                | _ -> None)
+            sdecl.ptype_attributes
+        in
+
+        (* The field is the DECLARED modeling only (annotation or
+           attribute); structural satisfaction ([type t = int] under
+           [refines int]) is computed at the inclusion check, so a
+           plain manifest never CLAIMS a modeling ([= private int] in
+           an interface must not). *)
+        (match of_annot, of_attr with
+         | Some r, _ | None, Some r -> Jkind.set_vox_refines r jkind
+         | None, None -> jkind)
+    in
     let arity = List.length params in
     let decl =
       { type_params = params;
@@ -1726,6 +1976,13 @@ let narrow_to_manifest_jkind env loc path decl =
     end;
     let type_ikind =
       Ikind.type_declaration_ikind_gated ~env:(Some env) ~path
+    in
+    let manifest_jkind =
+      (* vox: rebuilds preserve the refines component (declaration
+         metadata; see Types.vox_refines). *)
+      match Jkind.get_vox_refines decl.type_jkind with
+      | Vr_top -> manifest_jkind
+      | Vr_sort _ as r -> Jkind.set_vox_refines r manifest_jkind
     in
     { decl with type_jkind = manifest_jkind; type_ikind }
 
@@ -2486,11 +2743,11 @@ let update_record_representation
    [update_decls_jkind], so that mutually recursive type decls see each others'
    best kinds during normalization and subsumption
 *)
-let rec update_decl_jkind env dpath decl =
+let rec update_decl_jkind0 env dpath decl =
   let type_unboxed_version =
     Option.map
       (fun d ->
-        update_decl_jkind env (Path.unboxed_version dpath) d)
+        update_decl_jkind0 env (Path.unboxed_version dpath) d)
       decl.type_unboxed_version
   in
   let decl = { decl with type_unboxed_version } in
@@ -2729,6 +2986,16 @@ let rec update_decl_jkind env dpath decl =
   | Ok () -> new_decl
   | Error err ->
     raise (Error (decl.type_loc, Jkind_mismatch_of_path (env, dpath, err)))
+
+(* vox: the jkind updates above rebuild the kind from the
+   representation; the refines component is declaration metadata and
+   survives them. *)
+let update_decl_jkind env dpath decl =
+  let decl' = update_decl_jkind0 env dpath decl in
+  match Jkind.get_vox_refines decl.type_jkind with
+  | Vr_top -> decl'
+  | Vr_sort _ as r ->
+    { decl' with type_jkind = Jkind.set_vox_refines r decl'.type_jkind }
 
 let update_decls_jkind_reason decls =
   List.map
@@ -3512,6 +3779,13 @@ let normalize_decl_jkinds env decls =
         ~context:normalization_context
         env
         decl.type_jkind
+    in
+    let normalized_jkind =
+      (* vox: normalization rebuilds the desc; refines is declaration
+         metadata and survives it. *)
+      match Jkind.get_vox_refines decl.type_jkind with
+      | Vr_top -> normalized_jkind
+      | Vr_sort _ as r -> Jkind.set_vox_refines r normalized_jkind
     in
     let decl =
       { decl with
@@ -4459,7 +4733,7 @@ let rec parse_native_repr_attributes env core_type ty rmode
   with
   | Ptyp_arrow _, Tarrow _, Native_repr_attr_present kind  ->
     raise (Error (core_type.ptyp_loc, Cannot_unbox_or_untag_type kind))
-  | Ptyp_arrow (_, ct1, ct2, _, _), Tarrow ((_,marg,mret), t1, t2, _), _
+  | Ptyp_arrow (_, ct1, ct2, _, _), Tarrow ((_,marg,mret,_), t1, t2, _), _
     when not (Builtin_attributes.has_curry core_type.ptyp_attributes) ->
     let t1, _ = Btype.tpoly_get_poly t1 in
     let repr_arg =

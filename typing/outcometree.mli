@@ -148,6 +148,11 @@ and out_type =
   | Otyp_newlayout of out_sort_genvar list * out_type
   | Otyp_module of out_package
   | Otyp_attribute of out_type * out_attribute
+  | Otyp_refine of out_type * string
+  (** vox refined type, rendered [ty{ pred }]; the predicate is
+      pre-printed (the bound value variable as [_]) *)
+  | Otyp_vox_named of string * out_type
+  (** vox dependent-arrow binder, rendered [(x : ty)] *)
   | Otyp_jkind_annot of out_type * out_jkind
       (* Currently only introduced with very explicit code in [Printtyp] and not
          synthesized directly from the [Typedtree] *)

@@ -925,6 +925,45 @@ let mk_dlocations f =
 let mk_dsource f =
   "-dsource", Arg.Unit f, " (undocumented)"
 
+let mk_dump_vc f =
+  "-dump-vc", Arg.Unit f, " vox: print every verification condition"
+
+let mk_dump_vc_provenance f =
+  ( "-vox-dump-vc-provenance"
+  , Arg.Unit f
+  , " vox: like -dump-vc, but also annotate the goal and each \
+     hypothesis with the source span it originated from, appended as \
+     \"  @ line.col-line.col\" (1-based lines, 0-based columns, \
+     matching the \"Line N, characters A-B\" header); hypotheses with \
+     no meaningful span are left unannotated" )
+
+let mk_vox_dump_states f =
+  ( "-vox-dump-states"
+  , Arg.Unit f
+  , " vox: print, for every expression the verifier walks, the \
+     logical facts and variables in scope at its entry (span-headed \
+     \"vox state:\" blocks in the -vox-dump-vc-provenance formats); \
+     drives the editor's program-point proof-state view" )
+
+let mk_vox_dry_run f =
+  "-vox-dry-run", Arg.Unit f, " vox: generate VCs but do not run the solver"
+
+let mk_vox_solver_path f =
+  "-vox-solver-path", Arg.String f,
+  "<path>  vox: path to the solver binary"
+
+let mk_vox_prelude f =
+  "-vox-prelude", Arg.String f,
+  "<file>  vox: solver-side definitions (spec functions) inserted into\n\
+  \      every generated solver input, after the datatype declarations"
+
+let mk_vox_explain_proofs f =
+  ( "-vox-explain-proofs"
+  , Arg.Unit f
+  , " vox: for each PROVED obligation, report which lemmas the solver \
+     used (via [grind?]); shown as a \"used:\" line per VC under \
+     -vox-dump-vc-provenance (\"<arithmetic>\" when none)" )
+
 let mk_dtlambda f =
   "-dtlambda", Arg.Unit f, " (undocumented)"
 
@@ -1209,6 +1248,13 @@ module type Core_options = sig
   val _dlocations : unit -> unit
 
   val _dsource : unit -> unit
+  val _dump_vc : unit -> unit
+  val _dump_vc_provenance : unit -> unit
+  val _vox_dump_states : unit -> unit
+  val _vox_dry_run : unit -> unit
+  val _vox_solver_path : string -> unit
+  val _vox_prelude : string -> unit
+  val _vox_explain_proofs : unit -> unit
   val _dparsetree : unit -> unit
   val _dparsetree_loc_ghost_invariants : unit -> unit
   val _dtypedtree : unit -> unit
@@ -1608,6 +1654,13 @@ struct
     mk_dno_locations F._dno_locations;
     mk_dlocations F._dlocations;
     mk_dsource F._dsource;
+    mk_dump_vc F._dump_vc;
+    mk_dump_vc_provenance F._dump_vc_provenance;
+    mk_vox_dump_states F._vox_dump_states;
+    mk_vox_dry_run F._vox_dry_run;
+    mk_vox_solver_path F._vox_solver_path;
+    mk_vox_prelude F._vox_prelude;
+    mk_vox_explain_proofs F._vox_explain_proofs;
     mk_dparsetree F._dparsetree;
     mk_dparsetree_loc_ghost_invariants F._dparsetree_loc_ghost_invariants;
     mk_dtypedtree F._dtypedtree;
@@ -1717,6 +1770,13 @@ struct
     mk_dno_locations F._dno_locations;
     mk_dlocations F._dlocations;
     mk_dsource F._dsource;
+    mk_dump_vc F._dump_vc;
+    mk_dump_vc_provenance F._dump_vc_provenance;
+    mk_vox_dump_states F._vox_dump_states;
+    mk_vox_dry_run F._vox_dry_run;
+    mk_vox_solver_path F._vox_solver_path;
+    mk_vox_prelude F._vox_prelude;
+    mk_vox_explain_proofs F._vox_explain_proofs;
     mk_dparsetree F._dparsetree;
     mk_dparsetree_loc_ghost_invariants F._dparsetree_loc_ghost_invariants;
     mk_dtypedtree F._dtypedtree;
@@ -1901,6 +1961,13 @@ struct
     mk_dno_locations F._dno_locations;
     mk_dlocations F._dlocations;
     mk_dsource F._dsource;
+    mk_dump_vc F._dump_vc;
+    mk_dump_vc_provenance F._dump_vc_provenance;
+    mk_vox_dump_states F._vox_dump_states;
+    mk_vox_dry_run F._vox_dry_run;
+    mk_vox_solver_path F._vox_solver_path;
+    mk_vox_prelude F._vox_prelude;
+    mk_vox_explain_proofs F._vox_explain_proofs;
     mk_dparsetree F._dparsetree;
     mk_dparsetree_loc_ghost_invariants F._dparsetree_loc_ghost_invariants;
     mk_dtypedtree F._dtypedtree;
@@ -2066,6 +2133,13 @@ module Make_opttop_options (F : Opttop_options) = struct
     mk_dno_locations F._dno_locations;
     mk_dlocations F._dlocations;
     mk_dsource F._dsource;
+    mk_dump_vc F._dump_vc;
+    mk_dump_vc_provenance F._dump_vc_provenance;
+    mk_vox_dump_states F._vox_dump_states;
+    mk_vox_dry_run F._vox_dry_run;
+    mk_vox_solver_path F._vox_solver_path;
+    mk_vox_prelude F._vox_prelude;
+    mk_vox_explain_proofs F._vox_explain_proofs;
     mk_dparsetree F._dparsetree;
     mk_dparsetree_loc_ghost_invariants F._dparsetree_loc_ghost_invariants;
     mk_dtypedtree F._dtypedtree;
@@ -2213,6 +2287,13 @@ struct
     mk_dno_locations F._dno_locations;
     mk_dlocations F._dlocations;
     mk_dsource F._dsource;
+    mk_dump_vc F._dump_vc;
+    mk_dump_vc_provenance F._dump_vc_provenance;
+    mk_vox_dump_states F._vox_dump_states;
+    mk_vox_dry_run F._vox_dry_run;
+    mk_vox_solver_path F._vox_solver_path;
+    mk_vox_prelude F._vox_prelude;
+    mk_vox_explain_proofs F._vox_explain_proofs;
     mk_dparsetree F._dparsetree;
     mk_dtypedtree F._dtypedtree;
     mk_dshape F._dshape;
@@ -2458,6 +2539,13 @@ module Default = struct
     let _dparsetree_loc_ghost_invariants = set parsetree_ghost_loc_invariant
     let _drawlambda = set dump_rawlambda
     let _dsource = set dump_source
+    let _dump_vc = set vox_dump_vc
+    let _dump_vc_provenance = set vox_dump_vc_provenance
+    let _vox_dump_states = set vox_dump_states
+    let _vox_explain_proofs = set vox_explain_proofs
+    let _vox_dry_run = set vox_dry_run
+    let _vox_solver_path s = vox_solver_path := s
+    let _vox_prelude s = vox_prelude := s
     let _dtypedtree = set dump_typedtree
     let _dshape = set dump_shape
     let _dmatchcomp = set dump_matchcomp

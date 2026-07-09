@@ -1,0 +1,525 @@
+/* Dense dev-tool aesthetic, dark by DEFAULT (no OS sniffing); the
+   toolbar toggle flips :root[data-theme="light"], persisted in
+   localStorage. Every colour is a variable so the light block below can
+   swap the whole palette; the light values mirror docs/vox/template.html. */
+:root {
+  color-scheme: dark;
+  --bg: #10141a;
+  --panel: #161b22;
+  --border: #2b333d;
+  --fg: #d5dae1;
+  --muted: #8b95a1;
+  --accent: #4c9be8;
+  --ok: #3fb950;
+  --fail: #f0533f;
+  --warn: #d0a54a;
+  /* VC underline colours, split from the badge/status text colours so
+     the underlines can stay vivid while badge text stays high-contrast. */
+  --vc-ok-line: #3fb950;
+  --vc-fail-line: #f0533f;
+  /* surfaces + tints (were hardcoded) */
+  --btn-bg: #212a35;
+  --editor-bg: #0d1117;
+  --goal-bg: #16202b;
+  --hyp-bg: #131a22;
+  --cex-bg: #2a1614;
+  --live-bg: #201b12;
+  --block-tint: rgba(76, 155, 232, 0.08);
+  --badge-ok-bg: rgba(63, 185, 80, 0.2);
+  --badge-fail-bg: rgba(240, 83, 63, 0.2);
+  --badge-unknown-bg: #21262d;
+  --badge-trusted-bg: rgba(208, 165, 74, 0.18);
+  --sel-bg: #24344d;
+  --sel-bg-focus: #2a3d5c;
+  /* Accent-tinted wash painted over the source span a hovered hypothesis /
+     goal came from (see app.js provenance hover). */
+  --prov-hl: rgba(76, 155, 232, 0.5);
+  --prov-hl-edge: rgba(76, 155, 232, 0.9);
+  --mono: "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #ffffff;
+  --panel: #f6f7f9;
+  --border: #d9dde4;
+  --fg: #24292f;
+  --muted: #57606a;
+  --accent: #0b5fbf;
+  --ok: #1a7f37;
+  --fail: #c0334d;
+  --warn: #7d4e00;
+  /* vivid, editor-squiggle-like underlines (the dark badge greens/reds
+     above read muddy as a 2px line on a light background). */
+  --vc-ok-line: #2da44e;
+  --vc-fail-line: #e5484d;
+  --btn-bg: #eceef2;
+  --editor-bg: #ffffff;
+  --goal-bg: #eef4fb;
+  --hyp-bg: #f0f2f5;
+  --cex-bg: #fbecee;
+  --live-bg: #fbf3e6;
+  --block-tint: rgba(11, 95, 191, 0.1);
+  --badge-ok-bg: rgba(26, 127, 55, 0.15);
+  --badge-fail-bg: rgba(192, 51, 77, 0.15);
+  --badge-unknown-bg: #e7e9ee;
+  --badge-trusted-bg: rgba(125, 78, 0, 0.14);
+  --sel-bg: #cfe0f7;
+  --sel-bg-focus: #b6d0f2;
+  --prov-hl: rgba(11, 95, 191, 0.3);
+  --prov-hl-edge: rgba(11, 95, 191, 0.85);
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.5 var(--mono);
+  display: flex;
+  flex-direction: column;
+}
+#topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+#title { font-weight: 700; letter-spacing: 0.5px; color: var(--accent); }
+#spacer { flex: 1; }
+#hint { color: var(--muted); font-size: 12px; }
+button {
+  background: var(--btn-bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 10px;
+  cursor: pointer;
+  font: inherit;
+}
+button:hover { border-color: var(--accent); }
+#sidebar-btn { padding: 3px 8px; line-height: 1; }
+#status { padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+.status-idle { color: var(--muted); }
+.status-checking { color: var(--warn); }
+.status-ok { color: var(--ok); }
+.status-fail { color: var(--fail); }
+main { flex: 1; display: flex; min-height: 0; }
+
+/* File explorer sidebar (task #76). */
+#sidebar {
+  width: 232px;
+  flex: 0 0 232px;
+  min-width: 0;
+  overflow: auto;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  font-size: 12.5px;
+  padding: 6px 0;
+}
+body.sidebar-hidden #sidebar { display: none; }
+#tree { user-select: none; }
+.tree-children { display: block; }
+.tree-dir.collapsed > .tree-children { display: none; }
+.tree-root > .tree-dir-label {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 11px;
+}
+.tree-dir-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+  color: var(--fg);
+}
+.tree-dir-label:hover { background: var(--hyp-bg); }
+.tree-chevron { width: 10px; color: var(--muted); font-size: 10px; }
+.tree-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Children indent one level under their directory. */
+.tree-children { padding-left: 12px; }
+.tree-file {
+  padding: 2px 8px 2px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg);
+  border-left: 2px solid transparent;
+}
+.tree-file:hover { background: var(--hyp-bg); }
+.tree-file.active {
+  background: var(--goal-bg);
+  border-left-color: var(--accent);
+}
+/* Interfaces read as declarations; docs as muted; impls plain. */
+.tree-file.kind-mli { color: var(--accent); }
+.tree-file.kind-doc { color: var(--muted); font-style: italic; }
+
+#editor-pane { flex: 1.4; min-width: 0; border-right: 1px solid var(--border); }
+#proof-pane {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 10px 14px;
+  background: var(--editor-bg);
+}
+.CodeMirror { height: 100%; font: 13px/1.5 var(--mono); }
+.cm-s-default.CodeMirror { background: var(--editor-bg); color: var(--fg); }
+.CodeMirror-gutters { background: var(--editor-bg); border-right: 1px solid var(--border); }
+
+/* VC markers layered over the source. */
+.vc-proved { border-bottom: 2px solid var(--vc-ok-line); }
+/* Two shades of failure, deliberately distinct at a glance.
+   Disproved: a counterexample was Lean-VALIDATED -- the goal is
+   genuinely false -- so a confident SOLID red line, with the
+   counterexample surfaced in the pane. */
+.vc-disproved { border-bottom: 2px solid var(--vc-fail-line); }
+/* Unproved / failed: the obligation did not go through, but NO
+   counterexample was validated (automation gave up, or a rejection we
+   could not classify) -- so a DASHED red line: the same red "this
+   failed", broken to say "no witness, it may still hold".  Distinct
+   from the solid-red disproof, the dashed-AMBER trusted line, and the
+   dotted-grey unknown. */
+.vc-unproved,
+.vc-failed { border-bottom: 2px dashed var(--vc-fail-line); }
+.vc-unknown { border-bottom: 2px dotted var(--muted); }
+/* Assumed (borrow/slice framing): trusted by construction, never solved.
+   A dashed amber line reads as "taken on trust", distinct from the dotted
+   grey of a genuinely unknown VC and the solid green of a proved one. */
+.vc-trusted { border-bottom: 2px dashed var(--warn); }
+.vc-block { background: var(--block-tint); }
+
+/* Verdict legend: a self-documenting key shown in the pane only while the
+   last full check is failing.  Each item wears the matching vc-* marker
+   class, so its underline swatch IS the source underline -- the legend
+   and the markers cannot drift apart. */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-bottom: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.legend .leg { padding-bottom: 1px; white-space: nowrap; }
+
+.pane-mode {
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  margin-bottom: 8px;
+}
+.pane-body h3 {
+  margin: 12px 0 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+}
+/* Role sublabel over one obligation of a co-located group (a loop
+   invariant's establishment/preservation pair, rendered together): a
+   ruled divider so the two proof states read as distinct. */
+.vc-role {
+  margin: 16px 0 2px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.vc-role:first-child {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
+.goal, .hyp, .cex {
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  padding: 3px 6px;
+  border-radius: 3px;
+  margin: 2px 0;
+}
+.goal { background: var(--goal-bg); border-left: 3px solid var(--accent); }
+.hyp { background: var(--hyp-bg); border-left: 3px solid var(--border); }
+.cex { background: var(--cex-bg); border-left: 3px solid var(--fail); }
+
+/* Provenance: a goal/hypothesis that knows its source span gets a hover
+   affordance (cursor + accent left-border), and hovering paints the span in
+   the editor with .vox-prov-hl. Span-less rows keep the plain .goal/.hyp
+   look above -- no affordance. */
+.prov { cursor: pointer; }
+.hyp.prov:hover { border-left-color: var(--accent); }
+.goal.prov:hover { background: var(--goal-bg); filter: brightness(1.12); }
+.vox-prov-hl {
+  background: var(--prov-hl);
+  border-radius: 2px;
+  outline: 1px solid var(--prov-hl-edge);
+  outline-offset: 0;
+}
+.badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 11px;
+  margin-left: 6px;
+}
+.badge-proved { background: var(--badge-ok-bg); color: var(--ok); }
+/* Disproved: SOLID red fill -- a validated counterexample. */
+.badge-disproved { background: var(--badge-fail-bg); color: var(--fail); }
+/* Unproved / failed: red, but OUTLINED with a dashed red border and no
+   fill -- echoing the dashed source underline, distinct from the solid
+   fill of a disproof.  Padding drops by the 1px border so the pill
+   keeps the height of the filled badges. */
+.badge-unproved,
+.badge-failed {
+  background: transparent;
+  color: var(--fail);
+  border: 1px dashed var(--vc-fail-line);
+  padding: 0 6px;
+}
+.badge-unknown { background: var(--badge-unknown-bg); color: var(--muted); }
+.badge-trusted { background: var(--badge-trusted-bg); color: var(--warn); }
+.placeholder { color: var(--muted); }
+.nearest { margin-top: 6px; }
+.jump {
+  background: transparent;
+  color: var(--muted);
+  border: 1px dashed var(--border);
+  font-size: 12px;
+  padding: 2px 8px;
+}
+.jump:hover { color: var(--fg); border-color: var(--accent); }
+
+/* Nested obligations: the parents/siblings of the primary that also cover
+   the cursor.  A compact, clickable list under the primary VC -- one row
+   each (source snippet, goal, verdict badge) -- so a hidden sibling with an
+   identical-reading goal is discoverable.  Themed via the shared vars, so
+   light mode follows automatically. */
+.nested {
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+.nested-head {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.nested-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: var(--hyp-bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 3px 6px;
+  margin: 3px 0;
+  cursor: pointer;
+  font-family: var(--mono);
+  color: var(--fg);
+}
+.nested-row:hover { border-color: var(--accent); }
+.nested-snip {
+  flex: 0 0 auto;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.nested-goal {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nested-row .badge { flex: 0 0 auto; margin-left: auto; }
+
+#errors { margin-top: 10px; }
+.err {
+  background: var(--cex-bg);
+  border-left: 3px solid var(--fail);
+  padding: 4px 8px;
+  margin: 4px 0;
+  white-space: pre-wrap;
+}
+.live-goals { border-left: 3px solid var(--warn); background: var(--live-bg); }
+
+/* Cursor + selection visibility (the vendored CM5 defaults are
+   black-on-white; drive both from palette variables instead). */
+.CodeMirror-cursor { border-left: 2px solid var(--fg); }
+.CodeMirror-selected { background: var(--sel-bg); }
+.CodeMirror-focused .CodeMirror-selected { background: var(--sel-bg-focus); }
+.CodeMirror-line::selection,
+.CodeMirror-line > span::selection,
+.CodeMirror-line > span > span::selection { background: var(--sel-bg-focus); }
+
+/* CodeMirror token colors for the dark theme -- CM5's defaults
+   (keyword #708 etc.) are designed for white backgrounds and vanish
+   on ours.  Values from the docs page's proven dark palette; light
+   mode keeps the CM defaults, which suit white. */
+html:not([data-theme="light"]) .cm-keyword { color: #bb9af7; }
+html:not([data-theme="light"]) .cm-comment { color: #565f89; }
+html:not([data-theme="light"]) .cm-number  { color: #ff9e64; }
+html:not([data-theme="light"]) .cm-string  { color: #9ece6a; }
+html:not([data-theme="light"]) .cm-atom    { color: #ff9e64; }
+html:not([data-theme="light"]) .cm-def     { color: #7aa2f7; }
+html:not([data-theme="light"]) .cm-variable-2 { color: #7dcfff; }
+/* mllike marks true/false/raise as builtin (#30a default) and OCaml
+   type-ish words as variable-3/type (#085) -- both vanish on black. */
+html:not([data-theme="light"]) .cm-builtin { color: #ff9e64; }
+html:not([data-theme="light"]) .cm-variable-3,
+html:not([data-theme="light"]) .cm-type    { color: #2ac3de; }
+html:not([data-theme="light"]) .cm-quote   { color: #9ece6a; }
+
+/* --- vox-specific token classes (see vox-mode.js) -----------------------
+   The stock mllike mode is blind to these, so unlike the OCaml classes
+   above they carry NO CodeMirror default: both themes need explicit
+   colours.  Weight / style / shape are theme-independent (set once on the
+   base class); only the hue changes per theme.
+
+   The families:
+     refinement   { } delimiters, the _ hole (the star), forall_/exists_
+                  quantifiers, and an italic body class carried by every
+                  token inside a refinement (colour untouched, just italic)
+     ghost        trailing-underscore markers (total_, unreachable_, ...)
+     effect       let mutable, <- assignment
+     attribute    [@@vox.* ...] delimiters (dimmed) + the dotted name
+     lean         the {lean| ... |lean} interior, coloured AS Lean       */
+
+/* Theme-independent weight/style/shape. */
+.cm-vox-refine-delim { font-weight: 600; }
+/* Italicise the whole refinement interior. This class is layered on top
+   of each token's ordinary class (see vox-mode.js token()), so it changes
+   only the slant, never the hue -- the predicate keeps program-code
+   colours and reads set apart by the slant + the brace colour alone. */
+.cm-vox-refine-body { font-style: italic; }
+.cm-vox-hole { font-weight: 700; border-radius: 3px; }
+.cm-vox-quant { font-weight: 600; font-style: italic; }
+.cm-vox-marker { font-weight: 600; }
+.cm-vox-assign { font-weight: 700; }
+.cm-vox-mutable { font-style: italic; }
+.cm-vox-attr-name { font-weight: 600; }
+.cm-vox-lean-delim { font-weight: 700; }
+.cm-vox-lean-keyword { font-weight: 600; }
+.cm-vox-lean-tactic { font-weight: 600; }
+.cm-vox-lean-comment { font-style: italic; }
+
+/* Dark palette (Tokyo-night-adjacent, matching the OCaml classes above). */
+html:not([data-theme="light"]) .cm-vox-refine-delim { color: #4c9be8; }
+html:not([data-theme="light"]) .cm-vox-hole {
+  color: #4c9be8; background: rgba(76, 155, 232, 0.16);
+}
+html:not([data-theme="light"]) .cm-vox-quant { color: #9d7cd8; }
+html:not([data-theme="light"]) .cm-vox-marker { color: #e0af68; }
+html:not([data-theme="light"]) .cm-vox-assign { color: #ff9e64; }
+html:not([data-theme="light"]) .cm-vox-mutable { color: #bb9af7; }
+html:not([data-theme="light"]) .cm-vox-attr { color: #565f89; }
+html:not([data-theme="light"]) .cm-vox-attr-name { color: #7dcfff; }
+html:not([data-theme="light"]) .cm-vox-lean-delim { color: #e0af68; }
+html:not([data-theme="light"]) .cm-vox-lean-keyword { color: #bb9af7; }
+html:not([data-theme="light"]) .cm-vox-lean-tactic { color: #7aa2f7; }
+html:not([data-theme="light"]) .cm-vox-lean-sort { color: #2ac3de; }
+html:not([data-theme="light"]) .cm-vox-lean-comment { color: #565f89; }
+html:not([data-theme="light"]) .cm-vox-lean-op { color: #89ddff; }
+
+/* Light palette: saturated, dark enough to read on white (the standard
+   OCaml classes fall back to CodeMirror's own light defaults). */
+html[data-theme="light"] .cm-vox-refine-delim { color: #0b5fbf; }
+html[data-theme="light"] .cm-vox-hole {
+  color: #0b5fbf; background: rgba(11, 95, 191, 0.1);
+}
+html[data-theme="light"] .cm-vox-quant { color: #8250df; }
+html[data-theme="light"] .cm-vox-marker { color: #9a6700; }
+html[data-theme="light"] .cm-vox-assign { color: #bc4c00; }
+html[data-theme="light"] .cm-vox-mutable { color: #8250df; }
+html[data-theme="light"] .cm-vox-attr { color: #6e7781; }
+html[data-theme="light"] .cm-vox-attr-name { color: #0550ae; }
+html[data-theme="light"] .cm-vox-lean-delim { color: #9a6700; }
+html[data-theme="light"] .cm-vox-lean-keyword { color: #8250df; }
+html[data-theme="light"] .cm-vox-lean-tactic { color: #0550ae; }
+html[data-theme="light"] .cm-vox-lean-sort { color: #1b7c83; }
+html[data-theme="light"] .cm-vox-lean-comment { color: #6e7781; }
+html[data-theme="light"] .cm-vox-lean-op { color: #0550ae; }
+
+/* Proof-state pane: Lean-style context rows, turnstile goal, and the
+   type-at-cursor line. The Lean sort sits right-aligned and dimmed so
+   the OxCaml view stays primary. */
+.ctx {
+  background: var(--hyp-bg);
+  border-left: 2px solid var(--border);
+  padding: .2rem .5rem;
+  margin: .15rem 0;
+  display: flex;
+  gap: .3rem;
+}
+.ctx-name { color: var(--accent); font-weight: 600; }
+.ctx-lean { margin-left: auto; color: var(--muted); }
+.ctx-lean::before { content: "~ "; }
+.turnstile::before { content: "⊢ "; color: var(--accent); font-weight: 700; }
+.cursor-type {
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: .3rem;
+  margin-bottom: .4rem;
+}
+.ctx.prov:hover { border-left-color: var(--accent); }
+
+#compact-label {
+  color: var(--muted);
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  cursor: pointer;
+  user-select: none;
+}
+#compact-label:hover { color: var(--fg); }
+
+.modfacts { margin: .3rem 0; }
+.modfacts summary {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  cursor: pointer;
+}
+
+/* The "used lemmas" line under a proved goal (-vox-explain-proofs): a
+   subtle, small footnote.  A name backed by a [%%vox.lean] theorem gets
+   the .prov affordance and dotted underline; plain names stay quiet. */
+.used {
+  margin-top: .35rem;
+  color: var(--muted);
+  font-size: 11px;
+}
+.used-none { font-style: italic; }
+.used-name.prov {
+  border-bottom: 1px dotted var(--muted);
+  cursor: pointer;
+}
+.used-name.prov:hover { color: var(--fg); border-bottom-color: var(--accent); }
+
+/* A hypothesis grind did not reference in the proof it found
+   (-vox-explain-proofs): rendered dimmed so the eye skips it, restored to
+   full opacity on hover.  Theme-agnostic (opacity only).  The "fade
+   unused" toolbar toggle removes the class entirely, so nothing here
+   fires when it is off. */
+.hyp-unused {
+  opacity: 0.4;
+  transition: opacity 0.12s ease;
+}
+.hyp-unused:hover {
+  opacity: 1;
+}
