@@ -22,6 +22,10 @@ module Options = Oxcaml_args.Make_optcomp_options
 
 let main unix argv ppf ~flambda2 =
   native_code := true;
+  (* Bench experiment: force exception-backtrace recording off in ocamlopt
+     regardless of OCAMLRUNPARAM, to measure the farm-wide cost of backtrace
+     maintenance during compilation. Not for merging. *)
+  Printexc.record_backtrace false;
   let columns =
     match Sys.getenv "COLUMNS" with
     | exception Not_found -> None
