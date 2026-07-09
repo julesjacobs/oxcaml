@@ -123,6 +123,32 @@ let read_clflags_from_env () =
   set_from_env Clflags.error_style Clflags.error_style_reader;
   ()
 
+(* The build farm runs every build action -- including the compiler's own
+   ocamlopt/ocamlc processes -- with OCAMLRUNPARAM=b=1 so that a crashing
+   build action leaves a backtrace. For the compiler that is a poor trade:
+   every [raise] then walks the stack to stash a backtrace (the
+   caml_stash_backtrace / frame-descr walk), which measures at ~+2.8%
+   instructions / +4.8% cycles on typing-heavy compiles, while the recorded
+   trace is only ever useful for an internal compiler error (ICE) -- never
+   for the user-facing type/syntax errors that are the compiler's normal
+   "failure" output and carry their own source locations. So we turn
+   backtrace recording OFF for compiler processes by default, regardless of
+   the ambient b=1.
+
+   The opt-in is the OXCAML_BACKTRACES environment variable (the ICE hint in
+   [Location.report_exception] points users at it). We deliberately key off a
+   fresh variable rather than honouring OCAMLRUNPARAM 'b': the farm ALWAYS
+   sets b=1, so honouring 'b' would mean the default never fires. (Contrast
+   the GC space_overhead default, which can honour an explicit o= precisely
+   because the farm does not set o=.) *)
+let backtraces_forced_on () =
+  match Sys.getenv_opt "OXCAML_BACKTRACES" with
+  | None | Some ("" | "0" | "false") -> false
+  | Some _ -> true
+
+let set_backtrace_defaults () =
+  if not (backtraces_forced_on ()) then Printexc.record_backtrace false
+
 let directory_exists dir =
   Sys.file_exists dir && Sys.is_directory dir
 
