@@ -1,0 +1,4 @@
+File "total_in_functor_param.ml", line 17, characters 4-28:
+17 |     val total_ sz : t -> int
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+Error: vox: total_ spec function "sz" is only supported at the file top level; a total_ in a functor or nested-module signature can never be implemented

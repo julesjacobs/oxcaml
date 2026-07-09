@@ -4337,6 +4337,20 @@ let nested_block_error attr_loc =
     "vox: [%%%%vox.lean] blocks are unit-level; move to the file top level"
 ;;
 
+(* [total_] (reflected) spec functions are only definable at the top level of the
+   compilation unit ([reject_local_reflect]); a [val total_ f] in a functor
+   parameter, functor result, or nested-module signature therefore forms but can
+   never be implemented (any module satisfying it is a nested binding). Reject it
+   at the signature, with a functor-aware message, rather than letting it fail
+   later and far away at the would-be implementation. *)
+let nested_total_error loc name =
+  Location.raise_errorf
+    ~loc
+    "vox: total_ spec function %S is only supported at the file top level; a \
+     total_ in a functor or nested-module signature can never be implemented"
+    name
+;;
+
 let rec check_no_nested_blocks_module_expr (me : module_expr) =
   match me.mod_desc with
   | Tmod_structure str -> check_no_nested_blocks_structure str
@@ -4391,6 +4405,8 @@ and check_no_nested_blocks_signature (sg : signature) =
       match item.sig_desc with
       | Tsig_attribute ({ attr_name = { txt; _ }; attr_loc; _ } : attribute)
         when is_vox_block_name txt -> nested_block_error attr_loc
+      | Tsig_value vd when Vox_reflect.has_total_attr vd.val_attributes ->
+        nested_total_error vd.val_loc (Ident.name vd.val_id)
       | Tsig_module md -> check_no_nested_blocks_module_type md.md_type
       | Tsig_recmodule mds ->
         List.iter (fun md -> check_no_nested_blocks_module_type md.md_type) mds
