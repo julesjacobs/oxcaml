@@ -17,8 +17,15 @@
 
    Canary: two instantiations, each result contract's binder-fact used in a
    DISTINGUISHING obligation ([from_a] needs [not (q<p)], [from_b] the swapped
-   [not (p<q)]).  If the binders crossed, one obligation would take the other's
-   fact and fail.  Verifies green post-fix. *)
+   [not (p<q)]).  Verifies green post-fix.
+
+   SCOPE (per review): this is a NON-BREAKAGE lock, not a revert-catcher -- the
+   two obligations live in separate VCs, so shared stamps cross nothing today;
+   no source-level shape can pair two instantiations' arrows until
+   via-through-functor unblocks (write the true collision test then).  Also:
+   the fix covers the path-argument applicative branch only; the None-arg
+   (nondep_supertype) and generative-Unit branches share the same LATENT class
+   and are consciously deferred (they do not route through [Subst.modtype]). *)
 
 module IntOrd = struct
   type t = int

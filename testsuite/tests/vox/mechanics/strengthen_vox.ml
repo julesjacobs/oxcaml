@@ -18,11 +18,14 @@
 module A = Strengthen_vox_lib.M
 
 (* The strengthened [A.get] still carries its refined return contract. *)
-let use_get : (x : A.t) -> int{ _ = 0 -> true } = fun x -> A.get x
+let use_get : (x : A.t) -> int{ _ = x } = fun x -> A.get x
 
-(* Re-ascribe the strengthened module against a signature that DEMANDS the sort
-   and the contract: exercises inclusion of the strengthened declaration. *)
+(* Re-ascribe the STRENGTHENED alias (A, not the original M) against a
+   signature that DEMANDS the sort and the load-bearing contract: this runs
+   inclusion against the strengthened declaration itself, so a
+   [strengthen_decl] that drops the jkind [refines] fails the sort demand and
+   one that mangles [Sig_value] fails the structural contract match. *)
 module A2 : sig
   type t [@@vox.sort int]
-  val get : (x : t) -> int{ _ = 0 -> true }
-end = Strengthen_vox_lib.M
+  val get : (x : t) -> int{ _ = x }
+end = A

@@ -5,5 +5,5 @@
 module M : sig
   type t [@@vox.sort int]
   val mk : (n : int) -> t
-  val get : (x : t) -> int{ _ = 0 -> true }
+  val get : (x : t) -> int{ _ = x }
 end
