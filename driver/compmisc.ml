@@ -130,7 +130,7 @@ let read_clflags_from_env () =
    heap. We only bump the default: if OCAMLRUNPARAM/CAMLRUNPARAM explicitly
    sets space_overhead ("o=..."), the user/build-farm asked for a specific
    value (possibly the default 120) and we leave it untouched. *)
-let compiler_space_overhead = 200
+let compiler_space_overhead = 400
 
 (* Mirror the runtime's OCAMLRUNPARAM parser (runtime/startup_aux.c): the
    active variable is OCAMLRUNPARAM if it is set at all, otherwise
