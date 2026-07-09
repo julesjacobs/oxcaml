@@ -1136,14 +1136,18 @@ module Current_unit : sig
 end = struct
   let current_unit : Unit_info.t option ref =
     ref None
+  let current_cu : Compilation_unit.t option ref =
+    ref None
   let get () =
     !current_unit
   let get_cu () =
-    Option.map Unit_info.modname (get ())
+    !current_cu
   let set cu =
-    current_unit := Some cu
+    current_unit := Some cu;
+    current_cu := Some (Unit_info.modname cu)
   let unset () =
-    current_unit := None
+    current_unit := None;
+    current_cu := None
 
   module Name = struct
     let get () =
@@ -5538,6 +5542,6 @@ let () =
 
 let () =
   let get_current_compilation_unit () =
-    Option.map Unit_info.modname (get_current_unit ())
+    Current_unit.get_cu ()
   in
   Compilation_unit.Private.fwd_get_current := get_current_compilation_unit
