@@ -1,0 +1,693 @@
+(* ocamlopt entry point.
+
+   When [OCAMLOPT_FORKSERVER=<rundir>] is set, ocamlopt becomes a self-bootstrapping warm
+   fork-server: the first invocation spawns a resident daemon that has paid the ~23 ms
+   exec + runtime init + GC frametable cost ONCE, and every invocation delegates its
+   compile to a child forked from that warm daemon. The daemon NEVER compiles in its own
+   parent, so its global state stays pristine and each child forks from a clean snapshot.
+
+   This EMBEDS the exact machinery reviewed for the standalone tools/fork-server (PR #47):
+   stdio forwarded via SCM_RIGHTS (real fd passing, so redirected files keep their
+   offset/append semantics), an SO_PEERCRED uid gate, a 0600 socket in a 0700 rundir,
+   per-request SO_RCVTIMEO + wall-clock deadline + size cap, parallel children with async
+   SIGCHLD reaping and kill-on-client- disconnect, and a hash+OCAMLRUNPARAM+OCAMLLIB
+   handshake. It links the C stub fork_server_stubs.c via (foreign_stubs) on the
+   executable.
+
+   When OCAMLOPT_FORKSERVER is UNSET (every stock invocation) the fork-server code is
+   never entered and behaviour is byte-identical to the compiler without it. Any error on
+   the fork-server path FAILS OPEN to a normal in-process compile. *)
+
+external recvmsg_fds
+  :  Unix.file_descr
+  -> bytes
+  -> int * Unix.file_descr array
+  = "forksrv_recvmsg_fds"
+
+external sendmsg_fds
+  :  Unix.file_descr
+  -> bytes
+  -> int
+  -> Unix.file_descr array
+  -> int
+  = "forksrv_sendmsg_fds"
+
+external clearenv : unit -> unit = "forksrv_clearenv"
+external peer_uid : Unix.file_descr -> int = "forksrv_peer_uid"
+
+module Fork_server = struct
+  let getenv k =
+    match Sys.getenv_opt k with
+    | Some s when s <> "" -> Some s
+    | _ -> None
+  ;;
+
+  let idle_timeout = 30.0
+  let request_recv_timeout = 3.0
+  let request_deadline = 5.0
+  let max_request = 4 * 1024 * 1024
+
+  let compiler_hash =
+    lazy
+      (try Digest.to_hex (Digest.file "/proc/self/exe") with
+       | _ -> "unknown")
+  ;;
+
+  let runparam =
+    match getenv "OCAMLRUNPARAM" with
+    | Some s -> s
+    | None -> ""
+  ;;
+
+  let ocamllib =
+    match getenv "OCAMLLIB" with
+    | Some s -> s
+    | None -> ""
+  ;;
+
+  let fd_int (fd : Unix.file_descr) : int = Obj.magic fd
+
+  let close_noerr fd =
+    try Unix.close fd with
+    | _ -> ()
+  ;;
+
+  let close_fds = Array.iter close_noerr
+
+  let write_all fd s =
+    let n = String.length s in
+    let rec loop off =
+      if off < n
+      then (
+        let w = Unix.write_substring fd s off (n - off) in
+        if w > 0 then loop (off + w))
+    in
+    loop 0
+  ;;
+
+  let dbg fmt =
+    match getenv "OCAMLOPT_FORKSERVER_DEBUG" with
+    | Some p ->
+      Printf.ksprintf
+        (fun s ->
+          try
+            let oc = open_out_gen [ Open_append; Open_creat ] 0o644 p in
+            Printf.fprintf oc "[%d] %s\n" (Unix.getpid ()) s;
+            close_out oc
+          with
+          | _ -> ())
+        fmt
+    | None -> Printf.ksprintf (fun _ -> ()) fmt
+  ;;
+
+  let token_path sockpath = sockpath ^ ".token"
+
+  let rundir_safe rundir =
+    try
+      let st = Unix.lstat rundir in
+      st.Unix.st_kind = Unix.S_DIR
+      && st.Unix.st_uid = Unix.getuid ()
+      && st.Unix.st_perm land 0o777 = 0o700
+    with
+    | _ -> false
+  ;;
+
+  let gen_token () =
+    try
+      let ic = open_in_bin "/dev/urandom" in
+      let raw = really_input_string ic 32 in
+      close_in ic;
+      String.concat
+        ""
+        (List.init (String.length raw) (fun i ->
+           Printf.sprintf "%02x" (Char.code raw.[i])))
+    with
+    | _ -> Printf.sprintf "%d-%f" (Unix.getpid ()) (Unix.gettimeofday ())
+  ;;
+
+  let read_token path =
+    try
+      let ic = open_in_bin path in
+      let s = In_channel.input_all ic in
+      close_in ic;
+      String.trim s
+    with
+    | _ -> ""
+  ;;
+
+  (* ---- request framing (NUL-joined) ---- FSRV1 hash runparam ocamllib token cwd argc
+     args.. envc envs.. fds [stdin;stdout;stderr] travel as SCM_RIGHTS ancillary (no pid
+     field: real fd passing, not /proc). *)
+  let build_body ~token argv =
+    let b = Buffer.create 4096 in
+    let add s =
+      Buffer.add_string b s;
+      Buffer.add_char b '\000'
+    in
+    add "FSRV1";
+    add (Lazy.force compiler_hash);
+    add runparam;
+    add ocamllib;
+    add token;
+    add (Sys.getcwd ());
+    let args = Array.to_list argv in
+    add (string_of_int (List.length args));
+    List.iter add args;
+    let env = Array.to_list (Unix.environment ()) in
+    add (string_of_int (List.length env));
+    List.iter add env;
+    Buffer.contents b
+  ;;
+
+  type request =
+    { hash : string
+    ; runparam : string
+    ; ocamllib : string
+    ; token : string
+    ; cwd : string
+    ; argv : string array
+    ; env : string list
+    }
+
+  let parse_body s =
+    let f = Array.of_list (String.split_on_char '\000' s) in
+    if Array.length f < 8 || f.(0) <> "FSRV1"
+    then None
+    else (
+      try
+        let hash = f.(1)
+        and runparam = f.(2)
+        and ocamllib = f.(3)
+        and token = f.(4)
+        and cwd = f.(5) in
+        let argc = int_of_string f.(6) in
+        let argv = Array.sub f 7 argc in
+        let envc = int_of_string f.(7 + argc) in
+        let env = Array.to_list (Array.sub f (8 + argc) envc) in
+        Some { hash; runparam; ocamllib; token; cwd; argv; env }
+      with
+      | _ -> None)
+  ;;
+
+  (* ---- client (the ocamlopt process delegating its own compile) ---- *)
+
+  let connect sockpath =
+    let fd = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+    match Unix.connect fd (Unix.ADDR_UNIX sockpath) with
+    | () -> Some fd
+    | exception _ ->
+      close_noerr fd;
+      None
+  ;;
+
+  let delegate ~token fd argv =
+    let body = build_body ~token argv in
+    let len = String.length body in
+    let hdr = Bytes.create 4 in
+    Bytes.set hdr 0 (Char.chr ((len lsr 24) land 0xff));
+    Bytes.set hdr 1 (Char.chr ((len lsr 16) land 0xff));
+    Bytes.set hdr 2 (Char.chr ((len lsr 8) land 0xff));
+    Bytes.set hdr 3 (Char.chr (len land 0xff));
+    match
+      (* fds attach to the 4-byte length prefix; body streams after *)
+      ignore (sendmsg_fds fd hdr 4 [| Unix.stdin; Unix.stdout; Unix.stderr |] : int);
+      write_all fd body;
+      let buf = Bytes.create 256 in
+      let n = Unix.read fd buf 0 256 in
+      if n <= 0 then "" else Bytes.sub_string buf 0 n
+    with
+    | exception _ -> None
+    | reply ->
+      if String.length reply >= 5 && String.sub reply 0 5 = "EXIT="
+      then (
+        try
+          Some
+            (int_of_string (String.trim (String.sub reply 5 (String.length reply - 5))))
+        with
+        | _ -> None)
+      else None
+  ;;
+
+  (* ---- daemon ---- *)
+
+  let recv_request ctrl =
+    let give_up_at = Unix.gettimeofday () +. request_deadline in
+    let bufsz = 262144 in
+    let buf = Bytes.create bufsz in
+    let n, fds = recvmsg_fds ctrl buf in
+    if n < 4
+    then (
+      close_fds fds;
+      None)
+    else (
+      let b i = Char.code (Bytes.get buf i) in
+      let len = (b 0 lsl 24) lor (b 1 lsl 16) lor (b 2 lsl 8) lor b 3 in
+      if len < 0 || len > max_request
+      then (
+        close_fds fds;
+        None)
+      else (
+        let body = Buffer.create (min len bufsz) in
+        Buffer.add_subbytes body buf 4 (n - 4);
+        (try
+           while Buffer.length body < len do
+             if Unix.gettimeofday () > give_up_at then raise Exit;
+             let want = min bufsz (len - Buffer.length body) in
+             let m =
+               try Unix.read ctrl buf 0 want with
+               | _ -> 0
+             in
+             if m <= 0 then raise Exit;
+             Buffer.add_subbytes body buf 0 m
+           done
+         with
+         | Exit -> ());
+        if Buffer.length body < len
+        then (
+          close_fds fds;
+          None)
+        else Some (fds, Buffer.contents body)))
+  ;;
+
+  (* global fds a child must close (set at bootstrap) *)
+  let listen_fd = ref Unix.stdin
+  let sigchld_rd = ref Unix.stdin
+  let sigchld_wr = ref Unix.stdin
+
+  type child =
+    { ctrl : Unix.file_descr
+    ; deadline : float
+    }
+
+  let children : (int, child) Hashtbl.t = Hashtbl.create 64
+
+  let reply_code fd code =
+    try write_all fd (Printf.sprintf "EXIT=%d\n" code) with
+    | _ -> ()
+  ;;
+
+  let os_signum s =
+    if s = Sys.sigkill
+    then 9
+    else if s = Sys.sigsegv
+    then 11
+    else if s = Sys.sigterm
+    then 15
+    else if s = Sys.sigabrt
+    then 6
+    else if s = Sys.sigxcpu
+    then 24
+    else if s = Sys.sigint
+    then 2
+    else if s = Sys.sigfpe
+    then 8
+    else if s = Sys.sigbus
+    then 7
+    else 0
+  ;;
+
+  let serve_child ~compile fds req ctrl =
+    if Array.length fds >= 3
+    then (
+      Unix.dup2 fds.(0) Unix.stdin;
+      Unix.dup2 fds.(1) Unix.stdout;
+      Unix.dup2 fds.(2) Unix.stderr);
+    Array.iter (fun fd -> if fd_int fd > 2 then close_noerr fd) fds;
+    close_noerr ctrl;
+    close_noerr !listen_fd;
+    close_noerr !sigchld_rd;
+    close_noerr !sigchld_wr;
+    Hashtbl.iter (fun _ c -> close_noerr c.ctrl) children;
+    clearenv ();
+    List.iter
+      (fun kv ->
+        match String.index_opt kv '=' with
+        | Some i ->
+          (try
+             Unix.putenv
+               (String.sub kv 0 i)
+               (String.sub kv (i + 1) (String.length kv - i - 1))
+           with
+           | _ -> ())
+        | None -> ())
+      req.env;
+    (match Unix.chdir req.cwd with
+     | () -> ()
+     | exception e ->
+       Printf.eprintf
+         "ocamlopt fork-server: chdir %s failed: %s\n%!"
+         req.cwd
+         (Printexc.to_string e);
+       exit 2);
+    (* [compile] arms Memtrace post-fork (per child, from the requester's env) and then
+       runs the driver. *)
+    let code =
+      try compile req.argv with
+      | _ -> 2
+    in
+    exit code
+  ;;
+
+  let accept_one ~compile ~server_token () =
+    let ctrl, _ = Unix.accept !listen_fd in
+    Unix.set_close_on_exec ctrl;
+    if peer_uid ctrl <> Unix.getuid ()
+    then close_noerr ctrl
+    else (
+      (try Unix.setsockopt_float ctrl Unix.SO_RCVTIMEO request_recv_timeout with
+       | _ -> ());
+      match
+        try recv_request ctrl with
+        | _ -> None
+      with
+      | None -> close_noerr ctrl
+      | Some (fds, body) ->
+        (match parse_body body with
+         | exception _ ->
+           close_fds fds;
+           close_noerr ctrl
+         | None ->
+           close_fds fds;
+           close_noerr ctrl
+         | Some req ->
+           let refuse tag =
+             (try write_all ctrl (tag ^ "\n") with
+              | _ -> ());
+             close_fds fds;
+             close_noerr ctrl
+           in
+           if req.token <> server_token || server_token = ""
+           then refuse "TOKENMISS"
+           else if req.hash <> Lazy.force compiler_hash
+           then refuse "HASHMISS"
+           else if req.runparam <> runparam
+           then refuse "RUNPARAMMISS"
+           else if req.ocamllib <> ocamllib
+           then refuse "OCAMLLIBMISS"
+           else (
+             dbg "serving argc=%d" (Array.length req.argv);
+             match Unix.fork () with
+             | 0 -> serve_child ~compile fds req ctrl
+             | pid ->
+               close_fds fds;
+               Hashtbl.replace
+                 children
+                 pid
+                 { ctrl; deadline = Unix.gettimeofday () +. 3600. }
+             | exception e ->
+               dbg "fork failed: %s" (Printexc.to_string e);
+               reply_code ctrl 2;
+               close_fds fds;
+               close_noerr ctrl)))
+  ;;
+
+  let reap () =
+    let rec loop () =
+      match
+        try Unix.waitpid [ Unix.WNOHANG ] (-1) with
+        | _ -> 0, Unix.WEXITED 0
+      with
+      | 0, _ -> ()
+      | pid, status ->
+        (match Hashtbl.find_opt children pid with
+         | Some { ctrl; _ } ->
+           let code =
+             match status with
+             | Unix.WEXITED c -> c
+             | Unix.WSIGNALED s | Unix.WSTOPPED s -> 128 + os_signum s
+           in
+           dbg "child pid=%d -> %d, replying" pid code;
+           reply_code ctrl code;
+           close_noerr ctrl;
+           Hashtbl.remove children pid
+         | None -> ());
+        loop ()
+    in
+    loop ()
+  ;;
+
+  let kill_owner_of fd =
+    Hashtbl.iter
+      (fun pid c ->
+        if c.ctrl = fd
+        then (
+          try Unix.kill pid Sys.sigkill with
+          | _ -> ()))
+      children
+  ;;
+
+  let enforce_timeouts () =
+    let now = Unix.gettimeofday () in
+    Hashtbl.iter
+      (fun pid c ->
+        if now > c.deadline
+        then (
+          try Unix.kill pid Sys.sigkill with
+          | _ -> ()))
+      children
+  ;;
+
+  let daemon_loop ~compile ~server_token sockpath =
+    Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
+    let onebyte = Bytes.make 1 'x' in
+    Sys.set_signal
+      Sys.sigchld
+      (Sys.Signal_handle
+         (fun _ ->
+           try ignore (Unix.write !sigchld_wr onebyte 0 1 : int) with
+           | _ -> ()));
+    let drain = Bytes.create 4096 in
+    let last_activity = ref (Unix.gettimeofday ()) in
+    let continue = ref true in
+    while !continue do
+      try
+        let ctrl_fds = Hashtbl.fold (fun _ c acc -> c.ctrl :: acc) children [] in
+        let timeout = if Hashtbl.length children = 0 then idle_timeout else 1.0 in
+        let rd, _, _ =
+          try Unix.select (!listen_fd :: !sigchld_rd :: ctrl_fds) [] [] timeout with
+          | Unix.Unix_error (Unix.EINTR, _, _) -> [], [], []
+        in
+        if rd = []
+           && Hashtbl.length children = 0
+           && Unix.gettimeofday () -. !last_activity > idle_timeout
+        then (
+          (try Unix.unlink sockpath with
+           | _ -> ());
+          (try Unix.unlink (token_path sockpath) with
+           | _ -> ());
+          continue := false)
+        else (
+          if List.mem !sigchld_rd rd
+          then (
+            (try ignore (Unix.read !sigchld_rd drain 0 (Bytes.length drain) : int) with
+             | _ -> ());
+            reap ());
+          if List.mem !listen_fd rd
+          then (
+            last_activity := Unix.gettimeofday ();
+            try accept_one ~compile ~server_token () with
+            | _ -> ());
+          List.iter
+            (fun fd -> if fd <> !listen_fd && fd <> !sigchld_rd then kill_owner_of fd)
+            rd;
+          enforce_timeouts ())
+      with
+      | _ -> ()
+    done;
+    exit 0
+  ;;
+
+  let bootstrap ~compile ~rundir ~sockpath =
+    match Unix.fork () with
+    | 0 ->
+      (try ignore (Unix.setsid () : int) with
+       | _ -> ());
+      (match Unix.fork () with
+       | 0 ->
+         (try Unix.mkdir rundir 0o700 with
+          | _ -> ());
+         (try Unix.chmod rundir 0o700 with
+          | _ -> ());
+         if not (rundir_safe rundir)
+         then (
+           dbg "rundir %s unsafe; refusing" rundir;
+           exit 0);
+         (* Item 6: single-daemon election via an advisory lock. Under a -jN cold start
+            every client sees no daemon and bootstraps; only the lock-holder becomes the
+            daemon, the losers exit, and every client then connects to the one winner. The
+            lock is held for the daemon's whole lifetime (lockfd is never closed), so
+            idle-exit unlinking the socket is always done by the sole owner -- no orphan
+            churn. *)
+         let lockfd =
+           try
+             Some (Unix.openfile (sockpath ^ ".lock") [ Unix.O_CREAT; Unix.O_RDWR ] 0o600)
+           with
+           | _ -> None
+         in
+         (match lockfd with
+          | None ->
+            dbg "lockfile open failed; refusing";
+            exit 0
+          | Some lockfd ->
+            let got_lock =
+              try
+                Unix.lockf lockfd Unix.F_TLOCK 0;
+                true
+              with
+              | _ -> false
+            in
+            if not got_lock
+            then (
+              dbg "another daemon holds the lock; exiting";
+              exit 0);
+            let srv = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+            Unix.set_close_on_exec srv;
+            (* Bind WITHOUT a pre-unlink. EADDRINUSE here means a STALE socket from a dead
+               prior owner (we hold the lock -> no live daemon), so it is safe to unlink
+               and rebind. *)
+            let bound =
+              try
+                Unix.bind srv (Unix.ADDR_UNIX sockpath);
+                true
+              with
+              | Unix.Unix_error (Unix.EADDRINUSE, _, _) ->
+                (try Unix.unlink sockpath with
+                 | _ -> ());
+                (try
+                   Unix.bind srv (Unix.ADDR_UNIX sockpath);
+                   true
+                 with
+                 | _ -> false)
+              | _ -> false
+            in
+            if not bound
+            then (
+              dbg "bind failed after election";
+              exit 0);
+            (try Unix.chmod sockpath 0o600 with
+             | _ -> ());
+            (* token written BEFORE listen() so the socket is never connectable without a
+               valid token in place. *)
+            let tokfile = token_path sockpath in
+            let server_token = gen_token () in
+            (try Unix.unlink tokfile with
+             | _ -> ());
+            let ok_token =
+              try
+                let fd =
+                  Unix.openfile tokfile [ Unix.O_CREAT; Unix.O_EXCL; Unix.O_WRONLY ] 0o600
+                in
+                write_all fd server_token;
+                close_noerr fd;
+                true
+              with
+              | _ -> false
+            in
+            if not ok_token
+            then (
+              dbg "token write failed; refusing";
+              exit 0);
+            Unix.listen srv 128;
+            let rd, wr = Unix.pipe () in
+            Unix.set_close_on_exec rd;
+            Unix.set_close_on_exec wr;
+            listen_fd := srv;
+            sigchld_rd := rd;
+            sigchld_wr := wr;
+            dbg "daemon elected+listening on %s" sockpath;
+            let devnull =
+              try Unix.openfile "/dev/null" [ Unix.O_RDWR ] 0 with
+              | _ -> Unix.stdin
+            in
+            Unix.dup2 devnull Unix.stdin;
+            Unix.dup2 devnull Unix.stdout;
+            Unix.dup2 devnull Unix.stderr;
+            daemon_loop ~compile ~server_token sockpath)
+       | _ -> exit 0
+       | exception _ -> exit 0)
+    | pid -> ignore (Unix.waitpid [] pid : int * Unix.process_status)
+    | exception _ -> ()
+  ;;
+
+  let connect_retry sockpath ~deadline =
+    let rec loop () =
+      match connect sockpath with
+      | Some fd -> Some fd
+      | None ->
+        if Unix.gettimeofday () > deadline
+        then None
+        else (
+          ignore (Unix.select [] [] [] 0.01 : _ * _ * _);
+          loop ())
+    in
+    loop ()
+  ;;
+
+  let run ~rundir ~argv ~compile =
+    let fallback () = compile argv in
+    try
+      let short_hash =
+        let h = Lazy.force compiler_hash in
+        if String.length h >= 16 then String.sub h 0 16 else h
+      in
+      let sockpath = Filename.concat rundir ("ocamlopt-" ^ short_hash ^ ".sock") in
+      let attempt fd =
+        let token = read_token (token_path sockpath) in
+        let r = delegate ~token fd argv in
+        close_noerr fd;
+        r
+      in
+      match connect sockpath with
+      | Some fd ->
+        (match attempt fd with
+         | Some code ->
+           dbg "delegated (existing) -> %d" code;
+           code
+         | None ->
+           dbg "existing delegate None; fail-open";
+           fallback ())
+      | None ->
+        (try Unix.mkdir rundir 0o700 with
+         | _ -> ());
+        dbg "no daemon; bootstrapping";
+        bootstrap ~compile ~rundir ~sockpath;
+        (match connect_retry sockpath ~deadline:(Unix.gettimeofday () +. 5.0) with
+         | Some fd ->
+           (match attempt fd with
+            | Some code ->
+              dbg "delegated (bootstrapped) -> %d" code;
+              code
+            | None ->
+              dbg "bootstrapped delegate None; fail-open";
+              fallback ())
+         | None ->
+           dbg "connect_retry failed; fail-open";
+           fallback ())
+    with
+    | e ->
+      dbg "run exception %s; fail-open" (Printexc.to_string e);
+      fallback ()
+  ;;
+end
+
+let () =
+  (* [compile] arms Memtrace then runs the driver. Placing the Memtrace arming here
+     (rather than unconditionally at process start) means: on the UNSET path it runs
+     exactly as before (byte-identical); on the fork-server path it runs POST-fork inside
+     each serve_child from the requester's env, never in the daemon parent -- so the
+     daemon can't hold a memprof/trace fd. *)
+  let compile argv =
+    (match Sys.backend_type with
+     | Native -> Memtrace.trace_if_requested ~context:"ocamlopt" ()
+     | Bytecode | Other _ -> ());
+    Optmaindriver.main
+      (module Unix : Compiler_owee.Unix_intf.S)
+      argv
+      Format.err_formatter
+      ~flambda2:Flambda2.lambda_to_cmm
+  in
+  match Sys.getenv_opt "OCAMLOPT_FORKSERVER" with
+  | Some rundir when rundir <> "" ->
+    exit (Fork_server.run ~rundir ~argv:Sys.argv ~compile)
+  | _ -> exit (compile Sys.argv)
+;;

@@ -777,6 +777,9 @@
   arm64_binary_emitter)
  (modules oxcaml_args oxcaml_flags))
 
+; Bytecode ocamlopt.byte stays STOCK: pure-bytecode executables cannot contain
+; foreign stubs, so the fork-server (which needs the SCM_RIGHTS/SO_PEERCRED C
+; stub) is native-only. oxcaml_main.ml here is the unmodified stock entry.
 (executable
  (name oxcaml_main)
  (modes byte)
@@ -793,10 +796,13 @@
   unix)
  (modules oxcaml_main))
 
+; The NATIVE ocamlopt.opt gets the fork-server variant. Its source is a non-.ml
+; file so dune does not scan it as an orphan module; it is copied to the
+; module the native executable builds.
 (rule
  (targets oxcaml_main_native.ml)
  (action
-  (copy driver/oxcaml_main.ml %{targets})))
+  (copy driver/oxcaml_main_native.mlsrc %{targets})))
 
 (executable
  (name oxcaml_main_native)
@@ -805,6 +811,9 @@
   (backend bisect_ppx))
  (ocamlopt_flags
   (:standard -runtime-variant nnp))
+ (foreign_stubs
+  (language c)
+  (names fork_server_stubs))
  (libraries
   memtrace
   flambda2
