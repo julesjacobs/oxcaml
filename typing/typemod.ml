@@ -3636,6 +3636,9 @@ and type_one_application
              | None -> Subst.identity
              | Some p -> Subst.add_module p path Subst.identity
            in
+           (* vox: freshen dependent-arrow binders so two applications of the
+              same functor never share result-signature binder stamps. *)
+           let subst = Subst.for_functor_application subst in
            Subst.modtype (Rescope scope) subst mty_res
          | None ->
            let env, nondep_mty =

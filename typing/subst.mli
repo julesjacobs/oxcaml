@@ -46,6 +46,10 @@ type t = safe subst
 
 val identity: 'a subst
 val for_loading_cmi : unit -> t
+
+(* vox: freshen dependent-arrow binders during this substitution (set for
+   functor application; see subst.ml). *)
+val for_functor_application : 'a subst -> 'a subst
 val unsafe: t -> unsafe subst
 
 val add_type: Ident.t -> Path.t -> 'k subst -> 'k subst

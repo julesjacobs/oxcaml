@@ -72,6 +72,13 @@ type s =
 
     additional_action: additional_action;
     sort_var_mapping: sort_map;
+    (* vox: freshen dependent-arrow binders during this substitution even
+       outside .cmi loading.  Set for functor application, where the result
+       signature (already imported once) is substituted under [Nothing]: two
+       instantiations would otherwise SHARE binder stamps and a later
+       arrow-pairing (subsumption, higher-order functors) could cross them
+       (the F-1 collision class, at [Make] instead of at import). *)
+    freshen_vox_binders: bool;
 
     loc: Location.t option;
     mutable last_compose: (s * s) option  (* Memoized composition *)
@@ -108,12 +115,18 @@ let identity =
     jkinds = Path.Map.empty;
     additional_action = No_action;
     sort_var_mapping = Nothing;
+    freshen_vox_binders = false;
     loc = None;
     last_compose = None;
   }
 
 let for_loading_cmi () =
   { identity with sort_var_mapping = Loading (Hashtbl.create 17) }
+
+(* vox: substitution for a functor application's result signature -- freshen
+   dependent-arrow binders so distinct instantiations never share stamps. *)
+let for_functor_application s =
+  { s with freshen_vox_binders = true; last_compose = None }
 
 (* Add a replacement for both a path and its unboxed version, even if that
    unboxed version doesn't exist (as we can't tell here whether it exists).
@@ -847,9 +860,14 @@ let rec typexp copy_scope s ty =
              range); the subsequent [subst_binder] of this binder would
              then clobber that inner reference too, aliasing two distinct
              parameters (F-1: [Vmap.add 1 10 m] modelled [m_add 1 10 1]). *)
+          let freshen =
+            match s.sort_var_mapping with
+            | Loading _ -> true
+            | Saving _ | Nothing -> s.freshen_vox_binders
+          in
           let binder, ret =
-            match s.sort_var_mapping, binder with
-            | Loading _, Some id ->
+            match binder with
+            | Some id when freshen ->
                 let avoid = Vox_dep.stamps_in ret in
                 let rec fresh () =
                   let cand =
@@ -859,7 +877,7 @@ let rec typexp copy_scope s ty =
                 in
                 let id' = fresh () in
                 Some id', Vox_dep.subst_binder id ~by:(Refinement.Pvar id') ret
-            | Loading _, None | (Saving _ | Nothing), _ -> binder, ret
+            | Some _ | None -> binder, ret
           in
           let ret = typexp copy_scope s ret in
           let comm = copy_commu comm in
@@ -1491,6 +1509,8 @@ and compose s1 s2 =
             | Loading _, Saving _ ->
               fatal_error "compose: composing Saving and Loading"
           end;
+          freshen_vox_binders =
+            s1.freshen_vox_binders || s2.freshen_vox_binders;
           loc = keep_latest_loc s1.loc s2.loc;
           last_compose = None
         }
