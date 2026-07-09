@@ -123,14 +123,20 @@ let read_clflags_from_env () =
   set_from_env Clflags.error_style Clflags.error_style_reader;
   ()
 
-(* The compiler is allocation-heavy and short-lived, so it benefits from a
-   laxer GC pace than the runtime default (space_overhead = 120): raising it
-   trades peak heap for fewer major collections. On large compilation units
-   this is about -8 to -10% wall-clock time at the cost of roughly +45% peak
-   heap. We only bump the default: if OCAMLRUNPARAM/CAMLRUNPARAM explicitly
-   sets space_overhead ("o=..."), the user/build-farm asked for a specific
-   value (possibly the default 120) and we leave it untouched. *)
-let compiler_space_overhead = 200
+(* Runtime heap-size-adaptive GC pace (version 3). Start with a lax pace (o=400)
+   and TIGHTEN it once the major heap crosses a size threshold, via a Gc alarm
+   (its callback runs after each major collection). Unlike a source-size proxy
+   this reacts to the ACTUAL heap, so it needs no per-input thresholds and cannot
+   be fooled by the "small source / huge compile" misfit (e.g. the mode-poly
+   generated_byte_test is 903 KB of source but allocates a 10-16 GB heap). The
+   common case (small/medium units, heap well under the threshold) keeps o=400
+   for the full compile; only the few big-heap units get the tighter pace, which
+   is where the fleet's memory-pressure regression lives. If OCAMLRUNPARAM/
+   CAMLRUNPARAM sets o= we leave everything untouched (and install no alarm). *)
+let space_overhead_start = 400
+let space_overhead_big_heap = 150
+(* ~2 GB of live major heap, in words (Sys.word_size is in bits). *)
+let big_heap_words = (2 * 1024 * 1024 * 1024) / (Sys.word_size / 8)
 
 (* Mirror the runtime's OCAMLRUNPARAM parser (runtime/startup_aux.c): the
    active variable is OCAMLRUNPARAM if it is set at all, otherwise
@@ -149,9 +155,30 @@ let space_overhead_set_in_env () =
     String.split_on_char ',' s
     |> List.exists (fun field -> String.length field > 0 && field.[0] = 'o')
 
+(* One-shot: once the heap is big we tighten and stop checking. The guard on
+   [tightened] keeps the post-tighten cost to a single ref read per major GC. *)
+let tightened = ref false
+let major_ticks = ref 0
+
+(* [Gc.quick_stat] is ~35-40M instructions/call in this runtime (it aggregates
+   heap state), so polling it every major cycle costs ~1-2% -- worse than the win
+   on small units. Throttle the expensive probe to every 4th major cycle; the
+   per-cycle cost is then just a ref bump + mask. *)
+let heap_guard () =
+  if not !tightened then begin
+    incr major_ticks;
+    if !major_ticks land 3 = 0 then
+      if (Gc.quick_stat ()).Gc.heap_words > big_heap_words then begin
+        Gc.set { (Gc.get ()) with Gc.space_overhead = space_overhead_big_heap };
+        tightened := true
+      end
+  end
+
 let set_gc_pacing_defaults () =
-  if not (space_overhead_set_in_env ()) then
-    Gc.set { (Gc.get ()) with Gc.space_overhead = compiler_space_overhead }
+  if not (space_overhead_set_in_env ()) then begin
+    Gc.set { (Gc.get ()) with Gc.space_overhead = space_overhead_start };
+    ignore (Gc.create_alarm heap_guard : Gc.alarm)
+  end
 
 let directory_exists dir =
   Sys.file_exists dir && Sys.is_directory dir
