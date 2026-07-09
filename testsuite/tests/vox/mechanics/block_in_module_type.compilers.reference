@@ -1,0 +1,5 @@
+File "block_in_module_type.ml", lines 16-18, characters 2-9:
+16 | ..[%%vox.lean {lean|
+17 |   public opaque Z : Type
+18 |   |lean}]
+Error: vox: [%%vox.lean] blocks are unit-level; move to the file top level

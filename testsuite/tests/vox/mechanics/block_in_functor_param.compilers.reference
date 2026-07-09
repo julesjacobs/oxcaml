@@ -1,0 +1,5 @@
+File "block_in_functor_param.ml", lines 18-20, characters 4-11:
+18 | ....[%%vox.lean {lean|
+19 |     public opaque Z : Type
+20 |     |lean}]
+Error: vox: [%%vox.lean] blocks are unit-level; move to the file top level

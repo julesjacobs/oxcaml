@@ -4340,13 +4340,25 @@ let nested_block_error attr_loc =
 let rec check_no_nested_blocks_module_expr (me : module_expr) =
   match me.mod_desc with
   | Tmod_structure str -> check_no_nested_blocks_structure str
-  | Tmod_functor (_, body) -> check_no_nested_blocks_module_expr body
+  | Tmod_functor (param, body) ->
+    check_no_nested_blocks_functor_parameter param;
+    check_no_nested_blocks_module_expr body
   | Tmod_constraint (me, _, _, _) -> check_no_nested_blocks_module_expr me
   | Tmod_apply (m1, m2, _) ->
     check_no_nested_blocks_module_expr m1;
     check_no_nested_blocks_module_expr m2
   | Tmod_apply_unit m1 -> check_no_nested_blocks_module_expr m1
   | Tmod_ident _ | Tmod_unpack _ -> ()
+
+(* A functor parameter is itself a signature (module type): a block inside it --
+   [functor (O : sig ... [%%vox.lean| ... |] ... end) -> ...] -- is just as
+   unit-level-in-the-wrong-place as one in the body, and was previously neither
+   collected nor rejected (the old [Tmty_functor (_, body, _)] discarded the
+   parameter). *)
+and check_no_nested_blocks_functor_parameter (param : functor_parameter) =
+  match param with
+  | Unit -> ()
+  | Named (_, _, mty, _) -> check_no_nested_blocks_module_type mty
 
 and check_no_nested_blocks_structure (str : structure) =
   List.iter
@@ -4357,13 +4369,17 @@ and check_no_nested_blocks_structure (str : structure) =
       | Tstr_module mb -> check_no_nested_blocks_module_expr mb.mb_expr
       | Tstr_recmodule mbs ->
         List.iter (fun mb -> check_no_nested_blocks_module_expr mb.mb_expr) mbs
+      | Tstr_modtype mtd ->
+        Option.iter check_no_nested_blocks_module_type mtd.mtd_type
       | _ -> ())
     str.str_items
 
 and check_no_nested_blocks_module_type (mty : module_type) =
   match mty.mty_desc with
   | Tmty_signature sg -> check_no_nested_blocks_signature sg
-  | Tmty_functor (_, body, _) -> check_no_nested_blocks_module_type body
+  | Tmty_functor (param, body, _) ->
+    check_no_nested_blocks_functor_parameter param;
+    check_no_nested_blocks_module_type body
   | Tmty_with (mty, _) -> check_no_nested_blocks_module_type mty
   | Tmty_strengthen (mty, _, _) -> check_no_nested_blocks_module_type mty
   | Tmty_typeof me -> check_no_nested_blocks_module_expr me
@@ -4378,6 +4394,8 @@ and check_no_nested_blocks_signature (sg : signature) =
       | Tsig_module md -> check_no_nested_blocks_module_type md.md_type
       | Tsig_recmodule mds ->
         List.iter (fun md -> check_no_nested_blocks_module_type md.md_type) mds
+      | Tsig_modtype mtd | Tsig_modtypesubst mtd ->
+        Option.iter check_no_nested_blocks_module_type mtd.mtd_type
       | _ -> ())
     sg.sig_items
 ;;
@@ -4396,6 +4414,9 @@ let collect_blocks (str : structure) =
         None
       | Tstr_recmodule mbs ->
         List.iter (fun mb -> check_no_nested_blocks_module_expr mb.mb_expr) mbs;
+        None
+      | Tstr_modtype mtd ->
+        Option.iter check_no_nested_blocks_module_type mtd.mtd_type;
         None
       | _ -> None)
     str.str_items
@@ -4418,6 +4439,9 @@ let collect_blocks_sig (sg : Typedtree.signature) =
         None
       | Tsig_recmodule mds ->
         List.iter (fun md -> check_no_nested_blocks_module_type md.md_type) mds;
+        None
+      | Tsig_modtype mtd | Tsig_modtypesubst mtd ->
+        Option.iter check_no_nested_blocks_module_type mtd.mtd_type;
         None
       | _ -> None)
     sg.sig_items
