@@ -528,7 +528,7 @@ static int frame_cache_path(char *buf, size_t bufsz)
 /* in only the buckets actually probed (true lazy fault, lower RSS). The       */
 /* checksum is still stored and verified on demand via CAML_FRAME_BAKE_VERIFY. */
 
-#define FRAME_BAKED_MAGIC 0x314b425846584f56ull /* "VOXFBK1" */
+#define FRAME_BAKED_MAGIC 0x314b424d5246584full /* "OXFRMBK1" */
 #define FRAME_BAKED_BODY_OFF 4096u               /* body page-aligned for faulting */
 #define FRAME_BAKED_CAP_MAX (1u << 19)           /* 524288 slots = 4 MB */
 #define FRAME_BAKED_RESERVE \
@@ -559,6 +559,7 @@ static int frame_baked_load(caml_frametable_list *fts, int verify)
   intnat num_descr = count_descriptors(fts);
   if (h->num_descr != (uint64_t) num_descr) return 0;
   if (h->cap == 0 || (h->cap & (h->cap - 1)) != 0) return 0; /* power of 2 */
+  if (h->cap > FRAME_BAKED_CAP_MAX) return 0; /* prevent cap*8 overflow */
   if (FRAME_BAKED_BODY_OFF + h->cap * sizeof(frame_descr *) > FRAME_BAKED_RESERVE)
     return 0;
   struct frame_buildid bid;
