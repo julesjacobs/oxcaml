@@ -398,6 +398,9 @@ static int frame_cache_load(const char *path, caml_frametable_list *fts)
   close(fd);
   if (m == MAP_FAILED) return 0;
   struct frame_cache_hdr *h = (struct frame_cache_hdr *) m;
+  if (h->cap > (SIZE_MAX - sizeof(*h)) / sizeof(frame_descr *)) {
+    munmap(m, st.st_size); return 0; /* prevent size_t overflow of [want] */
+  }
   size_t want = sizeof(*h) + (size_t) h->cap * sizeof(frame_descr *);
   struct frame_buildid bid;
   frame_get_buildid(&bid);
