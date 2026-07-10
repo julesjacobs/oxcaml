@@ -798,6 +798,19 @@
  (action
   (copy driver/oxcaml_main.ml %{targets})))
 
+; C1 frame-table bake (task #11): the compiler opts in to the baked
+; frame-descriptor table by linking the reserve object into its own native
+; executable. Built here in the main context so the link path is unambiguous;
+; this is the ONLY place the ~4 MB reserve is pulled in (normal executables
+; never link it). The post-link bake step (tools/bake_frame_table.sh) then
+; fills the section in the installed ocamlopt.opt.
+(rule
+ (targets caml_frame_bake_reserve.o)
+ (deps runtime/caml_frame_bake_reserve.c)
+ (action
+  (run %{ocaml-config:c_compiler} -c -O2 -o caml_frame_bake_reserve.o
+    runtime/caml_frame_bake_reserve.c)))
+
 (executable
  (name oxcaml_main_native)
  (modes native)
@@ -805,6 +818,9 @@
   (backend bisect_ppx))
  (ocamlopt_flags
   (:standard -runtime-variant nnp))
+ (link_deps caml_frame_bake_reserve.o)
+ (link_flags
+  (:standard caml_frame_bake_reserve.o))
  (libraries
   memtrace
   flambda2

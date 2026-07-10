@@ -534,19 +534,25 @@ static int frame_cache_path(char *buf, size_t bufsz)
 #define FRAME_BAKED_RESERVE \
   (FRAME_BAKED_BODY_OFF + FRAME_BAKED_CAP_MAX * sizeof(frame_descr *))
 
-/* The reserved section. Zero-initialised into a named section => PROGBITS
-   (file-backed with zeros in a freshly-linked binary). The post-link bake step
-   overwrites it in place with [objcopy --update-section] (same size => no ELF
-   relayout, build-id note preserved). Non-const/non-static so the compiler
-   never assumes the zero initialiser survives (objcopy rewrites it) and so
-   [objcopy] can address the section by name. */
-__attribute__((section(".caml_frametable_baked"), aligned(4096)))
-unsigned char caml_baked_frametable[FRAME_BAKED_RESERVE];
+/* The reserve is NOT defined here: it lives in a separate, opt-in object
+   (runtime/caml_frame_bake_reserve.c => caml_frame_bake_reserve.o, installed
+   beside libasmrun.a). We reference it WEAKLY so that a binary linked WITHOUT
+   the reserve object — every normal executable, since the object is not in
+   libasmrun.a — resolves the symbol to NULL and falls straight through to the
+   rebuild path with ZERO size or runtime cost (no 4 MB section, base file size
+   preserved byte-for-byte). Only binaries that opt in (the compiler, by adding
+   the reserve object to their link line) carry the section and are bakeable.
+   The weak reference means no config fork in the runtime: presence of the
+   symbol is the switch. */
+extern unsigned char caml_baked_frametable[] __attribute__((weak));
 
 /* Point [current_frame_descrs] at the baked in-image table; return 1 on a
    validated hit. Any mismatch returns 0 so the caller rebuilds normally. */
 static int frame_baked_load(caml_frametable_list *fts, int verify)
 {
+  /* Weak-null check FIRST: if this binary was linked without the reserve
+     object, the symbol is NULL and there is no baked table — rebuild. */
+  if (caml_baked_frametable == NULL) return 0;
   struct frame_cache_hdr *h =
     (struct frame_cache_hdr *) (void *) caml_baked_frametable;
   if (h->magic != FRAME_BAKED_MAGIC) return 0;
