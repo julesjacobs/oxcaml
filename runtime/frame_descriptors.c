@@ -505,6 +505,111 @@ static int frame_cache_path(char *buf, size_t bufsz)
   return 1;
 }
 
+/* ------------------------------------------------------------------------- */
+/* C1 (bake-frame, task #63): a frame-descriptor table baked into the         */
+/* executable at LINK time. The fleet compiler is non-PIE (Type EXEC), so     */
+/* every [frame_descr*] is a link-time constant and the ~4 MB hashtable is    */
+/* byte-identical across all runs. Rather than rebuild it at every startup     */
+/* (~7.5 ms — see frame-lazy-findings.md) we reserve a section in the binary,  */
+/* fill it once after linking (a bake step dumps it and objcopy patches it),   */
+/* and at startup point [descriptors] straight at the in-image table.          */
+/*                                                                            */
+/* Safe-by-construction fallback: the reserved section is zero in every        */
+/* freshly-linked (unpatched / bootstrap) binary, so [magic] fails to match    */
+/* and the runtime rebuilds exactly as today. A relink resets the section to   */
+/* zero, so a stale baked table can never survive a rebuild. The bake dump     */
+/* reuses the runtime's own [add_frame_descriptors] — no reimplementation of   */
+/* the fill logic that could drift.                                            */
+/*                                                                            */
+/* Guard = magic + runtime-counted num_descr + ELF build-id + cap-fits (all    */
+/* O(1)/O(build-id)). Unlike the C2 file cache there is no foreign file to     */
+/* mistrust: the build-id note ties the baked table to this exact binary, so   */
+/* the full-4 MB FNV checksum is NOT walked by default — startup then faults    */
+/* in only the buckets actually probed (true lazy fault, lower RSS). The       */
+/* checksum is still stored and verified on demand via CAML_FRAME_BAKE_VERIFY. */
+
+#define FRAME_BAKED_MAGIC 0x314b425846584f56ull /* "VOXFBK1" */
+#define FRAME_BAKED_BODY_OFF 4096u               /* body page-aligned for faulting */
+#define FRAME_BAKED_CAP_MAX (1u << 19)           /* 524288 slots = 4 MB */
+#define FRAME_BAKED_RESERVE \
+  (FRAME_BAKED_BODY_OFF + FRAME_BAKED_CAP_MAX * sizeof(frame_descr *))
+
+/* The reserved section. Zero-initialised into a named section => PROGBITS
+   (file-backed with zeros in a freshly-linked binary). The post-link bake step
+   overwrites it in place with [objcopy --update-section] (same size => no ELF
+   relayout, build-id note preserved). Non-const/non-static so the compiler
+   never assumes the zero initialiser survives (objcopy rewrites it) and so
+   [objcopy] can address the section by name. */
+__attribute__((section(".caml_frametable_baked"), aligned(4096)))
+unsigned char caml_baked_frametable[FRAME_BAKED_RESERVE];
+
+/* Point [current_frame_descrs] at the baked in-image table; return 1 on a
+   validated hit. Any mismatch returns 0 so the caller rebuilds normally. */
+static int frame_baked_load(caml_frametable_list *fts, int verify)
+{
+  struct frame_cache_hdr *h =
+    (struct frame_cache_hdr *) (void *) caml_baked_frametable;
+  if (h->magic != FRAME_BAKED_MAGIC) return 0;
+  intnat num_descr = count_descriptors(fts);
+  if (h->num_descr != (uint64_t) num_descr) return 0;
+  if (h->cap == 0 || (h->cap & (h->cap - 1)) != 0) return 0; /* power of 2 */
+  if (FRAME_BAKED_BODY_OFF + h->cap * sizeof(frame_descr *) > FRAME_BAKED_RESERVE)
+    return 0;
+  struct frame_buildid bid;
+  frame_get_buildid(&bid);
+  if (h->build_id_len != bid.len
+      || memcmp(h->build_id, bid.id, bid.len) != 0)
+    return 0;
+  frame_descr **descrs =
+    (frame_descr **) (void *) (caml_baked_frametable + FRAME_BAKED_BODY_OFF);
+  if (verify && h->checksum != frame_checksum(descrs, (intnat) h->cap))
+    return 0;
+  current_frame_descrs.descriptors = descrs;
+  current_frame_descrs.mask = (int) (h->cap - 1);
+  current_frame_descrs.num_descr = (int) num_descr;
+  current_frame_descrs.frametables = fts;
+  frame_descrs_from_cache = 1; /* copy-out-on-mutation via ensure_heap_descriptors */
+  return 1;
+}
+
+/* Bake step: serialize the freshly-built table into [path] as the exact
+   FRAME_BAKED_RESERVE-byte section image (header at offset 0, descriptors[] at
+   FRAME_BAKED_BODY_OFF, zero-padded to the reserve). objcopy --update-section
+   then patches this into the binary. Failures are reported but non-fatal. */
+static void frame_baked_dump(const char *path)
+{
+  intnat cap = capacity(current_frame_descrs);
+  if (FRAME_BAKED_BODY_OFF + (size_t) cap * sizeof(frame_descr *)
+      > FRAME_BAKED_RESERVE) {
+    fprintf(stderr,
+            "[frame] bake: table (cap=%ld) exceeds reserve %zu — not baked\n",
+            (long) cap, (size_t) FRAME_BAKED_RESERVE);
+    return;
+  }
+  unsigned char *img =
+    (unsigned char *) caml_stat_calloc_noexc(FRAME_BAKED_RESERVE, 1);
+  if (img == NULL) return;
+  struct frame_cache_hdr *h = (struct frame_cache_hdr *) (void *) img;
+  h->magic = FRAME_BAKED_MAGIC;
+  h->num_descr = (uint64_t) current_frame_descrs.num_descr;
+  h->cap = (uint64_t) cap;
+  h->checksum = frame_checksum(current_frame_descrs.descriptors, cap);
+  struct frame_buildid bid;
+  frame_get_buildid(&bid);
+  h->build_id_len = bid.len;
+  memcpy(h->build_id, bid.id, bid.len);
+  memcpy(img + FRAME_BAKED_BODY_OFF, current_frame_descrs.descriptors,
+         (size_t) cap * sizeof(frame_descr *));
+  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  int ok = 0;
+  if (fd >= 0) {
+    ok = (write(fd, img, FRAME_BAKED_RESERVE) == (ssize_t) FRAME_BAKED_RESERVE);
+    close(fd);
+  }
+  caml_stat_free(img);
+  if (!ok) fprintf(stderr, "[frame] bake: failed to write %s\n", path);
+}
+
 void caml_init_frame_descriptors(void)
 {
   caml_frametable_list *frametables = NULL;
@@ -515,16 +620,24 @@ void caml_init_frame_descriptors(void)
      any mutator can run. We can mutate [current_frame_descrs]
      at will. */
   const char *fstats = getenv("CAML_FRAME_STATS");
-  char path[4096];
-  int use_cache = frame_cache_path(path, sizeof(path));
+  const char *fbake = getenv("CAML_FRAME_BAKE");
+  int bake_verify = getenv("CAML_FRAME_BAKE_VERIFY") != NULL;
   struct timespec t0, t1;
   if (fstats) clock_gettime(CLOCK_MONOTONIC, &t0);
   int hit = 0;
-  if (use_cache) hit = frame_cache_load(path, frametables);
+  /* C1: the link-time baked table takes precedence (zero-config, no file I/O).
+     In bake mode we always build fresh so the dump reflects this binary. */
+  if (fbake == NULL) hit = frame_baked_load(frametables, bake_verify);
   if (!hit) {
-    add_frame_descriptors(&current_frame_descrs, frametables);
-    if (use_cache) frame_cache_store(path);
+    char path[4096];
+    int use_cache = frame_cache_path(path, sizeof(path)); /* C2 file cache */
+    if (use_cache) hit = frame_cache_load(path, frametables);
+    if (!hit) {
+      add_frame_descriptors(&current_frame_descrs, frametables);
+      if (use_cache) frame_cache_store(path);
+    }
   }
+  if (fbake) frame_baked_dump(fbake);
   if (fstats) {
     clock_gettime(CLOCK_MONOTONIC, &t1);
     double ms = (t1.tv_sec - t0.tv_sec) * 1000.0
@@ -533,6 +646,9 @@ void caml_init_frame_descriptors(void)
             hit, current_frame_descrs.num_descr,
             current_frame_descrs.mask + 1, ms);
   }
+  /* Bake mode: the section image is dumped; exit before running any mutator.
+     _exit avoids atexit handlers touching the half-initialised runtime. */
+  if (fbake) { fflush(NULL); _exit(0); }
 }
 
 static void register_frametables_from_stw_single(
