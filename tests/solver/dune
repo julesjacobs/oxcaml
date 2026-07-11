@@ -1,0 +1,17 @@
+; The real-solver CLI (dev/bench tooling, NOT shipped) and its wiring unit tests. Both
+; live under tests/ precisely because they link the TEST-ONLY SMT-LIB parser
+; (oxsmt_smtlib_parser) — the shipped session library (oxsmt_interface) must never depend
+; on the parser (DESIGN.md §3, AGENTS.md). oxsmt_cli is the harness SOLVER for `make test`
+; (see the Makefile default). Test-only, but still stdlib-only over the smt/ libraries (I3).
+
+(executable
+ (name oxsmt_cli)
+ (modules oxsmt_cli)
+ (libraries oxsmt_core oxsmt_interface oxsmt_smtlib_parser))
+
+; Session semantics + namespace-guard unit tests (make wiring-test).
+
+(executable
+ (name wiring_test)
+ (modules wiring_test)
+ (libraries oxsmt_core oxsmt_interface oxsmt_smtlib_parser))
