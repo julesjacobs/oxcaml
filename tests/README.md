@@ -349,7 +349,12 @@ deterministic discipline. Two entry points:
   unsupported constructs are expected diversity. Full per-file results to
   `../logs/smtlib-corpus-smoke.log`, digest to stdout. A 20 MB per-file size cap
   (`--max-bytes`) guards the box from pathological multi-MB instances the eager
-  parser would otherwise blow up on.
+  parser would otherwise blow up on. Current QF_UFLIA (659 files): 583 ok, 76
+  unsupported, 0 malformed, 0 crashed. With `define-fun` now expanded, the entire
+  remaining 76 are the *same* files, blocked only by integer literals beyond native
+  `int` (Certora uint256 constants ≈ 2^256) — the tracked native-`int`/bignum
+  limitation (ADR-0003), not a parser-coverage gap. 659/659 needs bignum in the
+  core, out of this task's scope.
 
 ### Printer rendering choices (kept parseable by standard tools)
 
@@ -374,13 +379,28 @@ addition, silently certifying a different formula. See `printer.mli`.
 
 Commands: `set-logic` (QF_UF/QF_LIA/QF_UFLIA/QF_IDL/QF_RDL), `set-info :status`,
 `declare-sort` (arity 0), `declare-fun`, `declare-const`, `assert`, `check-sat`,
-`exit`. Terms: `true`/`false`, numerals, `and`/`or`/`not`/`=>`, `ite`,
-`=`/`distinct`, chainable `<=`/`<`/`>=`/`>`/`=`, `+`/`-`/`*` (multiplication must be
-linear — ≥2 non-constant factors is `Unsupported`), `div`/`mod`/`abs`, `let`
-(parallel binding), `(! t …)` annotations (attributes dropped), `|quoted symbols|`,
-`;` comments, and declared symbols. `define-fun` macros, quantifiers, `push`/`pop`,
-compound sorts, and arithmetic exceeding native `int` are `Unsupported`;
-ill-sorted / undeclared / wrong-arity input is `Malformed`.
+`exit`, `define-fun`. Terms: `true`/`false`, numerals, `and`/`or`/`not`/`=>`,
+`ite`, `=`/`distinct`, chainable `<=`/`<`/`>=`/`>`/`=`, `+`/`-`/`*` (multiplication
+must be linear — ≥2 non-constant factors is `Unsupported`), `div`/`mod`/`abs`,
+`let` (parallel binding), `(! t …)` annotations (attributes dropped),
+`|quoted symbols|`, `;` comments, and declared symbols. Quantifiers, `push`/`pop`,
+compound sorts, recursive `define-fun`(-rec), and arithmetic exceeding native `int`
+are `Unsupported`; ill-sorted / undeclared / wrong-arity input is `Malformed`.
+
+**`define-fun` macros** are expanded by capture-avoiding substitution at each use
+site (they are macros, not recursive functions). The argument s-expressions are
+read in the *caller's* scope; the body is then read in a fresh scope containing
+*only* the parameters, so the caller's local `let`-bindings never leak into the
+body and a nested `let` in the body binds tighter than a parameter (both fall out
+of the innermost-first scope lookup). Argument values are already-built `Term.t`s,
+so substituting them can never capture. Zero-arg `define-fun` is a named constant.
+Recursion (direct or mutual) is caught by a cycle guard and rejected `Unsupported`;
+`define-fun-rec`/`define-funs-rec` are rejected outright. The expansion is
+sort-checked through `Context` as usual — an ill-sorted argument or a body whose
+sort disagrees with the declared result sort fails `Malformed`, never silently.
+**define-fun is erased by expansion**, so round-tripping prints the *expanded*
+terms (no `define-fun` in the output) and re-parsing still fixpoints — the
+`define_fun_cases` tests cover both the expansion equalities and this round-trip.
 
 ### Bool-`=` / gate interaction (tracked M0-gate-iff)
 

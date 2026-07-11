@@ -23,11 +23,23 @@ type fundecl =
   ; dom : Sort.t list
   }
 
+(* A [define-fun] macro: parameters (name + sort), declared result sort, and the body as
+   an unread s-expression. The body is expanded (capture-avoidingly) at each use site,
+   never at definition time — see [expand]. *)
+type definition =
+  { params : (string * Sort.t) list
+  ; ret : Sort.t
+  ; body : Sexp.t
+  }
+
 type pstate =
   { ctx : Context.t
   ; env : Env.t
   ; sorts : (string, Symbol.t) Hashtbl.t
   ; funs : (string, fundecl) Hashtbl.t
+  ; defines : (string, definition) Hashtbl.t
+  ; expanding :
+      (string, unit) Hashtbl.t (* define names currently mid-expansion (cycle guard) *)
   }
 
 (* ---- sorts ---- *)
@@ -66,10 +78,13 @@ let rec read_term st scope (s : Sexp.t) : Term.t =
     (match List.assoc_opt a scope with
      | Some t -> t
      | None ->
-       (match Hashtbl.find_opt st.funs a with
-        | Some { sym; dom = []; _ } -> Context.const st.ctx sym
-        | Some { dom = _ :: _; _ } -> malformedf "function %s used without arguments" a
-        | None -> malformedf "undeclared symbol: %s" a))
+       (match Hashtbl.find_opt st.defines a with
+        | Some def -> expand st scope a def []
+        | None ->
+          (match Hashtbl.find_opt st.funs a with
+           | Some { sym; dom = []; _ } -> Context.const st.ctx sym
+           | Some { dom = _ :: _; _ } -> malformedf "function %s used without arguments" a
+           | None -> malformedf "undeclared symbol: %s" a)))
   | Sexp.List (Sexp.Atom "let" :: rest) -> read_let st scope rest
   (* [(! t :attr ...)] annotation: keep the term, drop the attributes (e.g. :named). *)
   | Sexp.List (Sexp.Atom "!" :: body :: _attrs) -> read_term st scope body
@@ -134,15 +149,51 @@ and read_app st scope op args orig =
   | "abs", _ -> malformedf "abs expects 1 argument"
   | ("forall" | "exists"), _ -> unsupportedf "quantifiers are not supported (QF only)"
   | _ ->
-    (match Hashtbl.find_opt st.funs op with
-     | Some { sym; dom; _ } ->
-       let n_expect = List.length dom
-       and n_got = List.length args in
-       if n_expect <> n_got
-       then malformedf "%s applied to %d args, expected %d" op n_got n_expect;
-       Context.app st.ctx sym (rds ())
+    (match Hashtbl.find_opt st.defines op with
+     | Some def -> expand st scope op def args
      | None ->
-       malformedf "undeclared function or unknown operator: %s" (Sexp.to_string orig))
+       (match Hashtbl.find_opt st.funs op with
+        | Some { sym; dom; _ } ->
+          let n_expect = List.length dom
+          and n_got = List.length args in
+          if n_expect <> n_got
+          then malformedf "%s applied to %d args, expected %d" op n_got n_expect;
+          Context.app st.ctx sym (rds ())
+        | None ->
+          malformedf "undeclared function or unknown operator: %s" (Sexp.to_string orig)))
+
+(* Expand a [define-fun] use site by capture-avoiding substitution: the argument
+   s-expressions are read in the CALLER's [scope] (so they may use the caller's
+   let-bindings and globals), then the body is read in a FRESH scope containing ONLY the
+   parameters — the caller's locals do not leak into the body, and a nested [let] in the
+   body binds tighter than a parameter (both fall out of [read_term]'s innermost-first
+   scope lookup). Argument values are already-built [Term.t]s, so substituting them can
+   never capture. Recursion (direct or mutual) is rejected via the [expanding] cycle
+   guard; SMT-LIB non-rec [define-fun] bodies reference only earlier definitions, so this
+   is the only cycle possible. *)
+and expand st scope name (def : definition) arg_sexps =
+  if Hashtbl.mem st.expanding name
+  then unsupportedf "recursive use of define-fun %s is not supported" name;
+  let n_expect = List.length def.params
+  and n_got = List.length arg_sexps in
+  if n_expect <> n_got
+  then malformedf "define-fun %s applied to %d args, expected %d" name n_got n_expect;
+  let bindings =
+    List.map2
+      (fun (pname, psort) arg ->
+         let t = read_term st scope arg in
+         if not (Sort.equal t.Term.sort psort)
+         then malformedf "define-fun %s: argument for %s has the wrong sort" name pname;
+         pname, t)
+      def.params
+      arg_sexps
+  in
+  Hashtbl.replace st.expanding name ();
+  let body = read_term st bindings def.body in
+  Hashtbl.remove st.expanding name;
+  if not (Sort.equal body.Term.sort def.ret)
+  then malformedf "define-fun %s body sort differs from declared result sort" name;
+  body
 
 (* [(=> a b c)] is right-associative: [a => (b => c)]. *)
 and read_implies st scope args =
@@ -197,10 +248,32 @@ let declare_sort st name =
 ;;
 
 let declare_fun st name dom cod =
-  if Hashtbl.mem st.funs name then malformedf "redeclaration of symbol %s" name;
+  if Hashtbl.mem st.funs name || Hashtbl.mem st.defines name
+  then malformedf "redeclaration of symbol %s" name;
   match Env.declare_fun st.env name (Rank.create dom cod) with
   | sym -> Hashtbl.replace st.funs name { sym; dom }
   | exception Env.Reserved_symbol _ -> malformedf "cannot declare reserved symbol %s" name
+;;
+
+(* [(define-fun name ((p S)...) Ret body)]: a MACRO. We parse the parameter/result sorts
+   now (so undeclared sorts fail here) but store the body unread — it is expanded at each
+   use site (see [expand]). define-fun names share the function namespace, so they collide
+   with declares and each other; [div]/[mod] stay reserved. *)
+let define_fun st name params_sexp ret_sexp body =
+  if Hashtbl.mem st.funs name || Hashtbl.mem st.defines name
+  then malformedf "redeclaration of symbol %s" name;
+  if String.equal name "div" || String.equal name "mod"
+  then malformedf "cannot define reserved symbol %s" name;
+  let params =
+    List.map
+      (fun p ->
+         match p with
+         | Sexp.List [ Sexp.Atom pn; psort ] -> pn, sort_of_sexp st psort
+         | _ -> malformedf "malformed define-fun parameter: %s" (Sexp.to_string p))
+      params_sexp
+  in
+  let ret = sort_of_sexp st ret_sexp in
+  Hashtbl.replace st.defines name { params; ret; body }
 ;;
 
 let read_signature st (params : Sexp.t) (ret : Sexp.t) =
@@ -244,6 +317,10 @@ let run st sexps =
        | Sexp.List [ Sexp.Atom "declare-fun"; Sexp.Atom name; params; ret ] ->
          let dom, cod = read_signature st params ret in
          declare_fun st name dom cod
+       | Sexp.List [ Sexp.Atom "define-fun"; Sexp.Atom name; Sexp.List params; ret; body ]
+         -> define_fun st name params ret body
+       | Sexp.List (Sexp.Atom ("define-fun-rec" | "define-funs-rec") :: _) ->
+         unsupportedf "recursive define-fun-rec / define-funs-rec is not supported"
        | Sexp.List [ Sexp.Atom "assert"; body ] ->
          let t = read_term st [] body in
          if not (Sort.equal t.Term.sort Sort.bool) then malformedf "assertion is not Bool";
@@ -253,7 +330,7 @@ let run st sexps =
        | Sexp.List (Sexp.Atom ("push" | "pop") :: _) ->
          unsupportedf "incremental push/pop is not supported"
        | Sexp.List (Sexp.Atom "define-fun" :: _) ->
-         unsupportedf "define-fun (macros) is not supported"
+         malformedf "malformed define-fun: %s" (Sexp.to_string cmd)
        | Sexp.List (Sexp.Atom ("get-model" | "get-value" | "get-unsat-core") :: _) -> ()
        | Sexp.List (Sexp.Atom ("set-option" | "reset" | "reset-assertions") :: _) -> ()
        | Sexp.Atom a -> malformedf "unexpected top-level atom: %s" a
@@ -264,7 +341,15 @@ let run st sexps =
 ;;
 
 let parse_into env ctx src =
-  let st = { ctx; env; sorts = Hashtbl.create 16; funs = Hashtbl.create 64 } in
+  let st =
+    { ctx
+    ; env
+    ; sorts = Hashtbl.create 16
+    ; funs = Hashtbl.create 64
+    ; defines = Hashtbl.create 16
+    ; expanding = Hashtbl.create 8
+    }
+  in
   let sexps =
     try Sexp.parse_many src with
     | Sexp.Malformed m -> raise (Malformed ("s-expression: " ^ m))

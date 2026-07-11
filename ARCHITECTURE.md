@@ -87,8 +87,10 @@ linked into the compiler (DESIGN.md §3):
   names with `|`/`\`) are in `printer.mli`.
 - `oxsmt_smtlib_parser` (`smt/smtlib/parser/`, TEST-ONLY) — a SEPARATE library
   reading the subset back into frozen-API terms through a `Context`; distinguishes
-  `Malformed` from `Unsupported`. Shipped code depends on `oxsmt_smtlib`, never on
-  this library — the mechanical boundary DESIGN.md §3 mandates.
+  `Malformed` from `Unsupported`. `define-fun` macros are expanded by
+  capture-avoiding substitution at use sites (recursion rejected). Shipped code
+  depends on `oxsmt_smtlib`, never on this library — the mechanical boundary
+  DESIGN.md §3 mandates.
 Tests (`smt/smtlib/test/`, `make smtlib-test` / `make smtlib-corpus`): print↔parse
 round-trips + a parse-only corpus smoke. Owner: M0-smtlib.
 

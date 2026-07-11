@@ -113,6 +113,54 @@ let check_refused ~name build =
     fail "refuse/%s: expected Printer.Unsupported, got %s" name (Printexc.to_string e)
 ;;
 
+(* ---- define-fun expansion helpers (parse two texts into ONE Context and compare) ---- *)
+
+(* [a] uses a define-fun macro; [b] is the same query hand-expanded. Parsing both into the
+   same Context and comparing by [Term.equal] asserts the macro expands to exactly the
+   hand-written term. *)
+let check_same ~name a b =
+  incr checks;
+  let env = Env.create () in
+  let ctx = Context.create env in
+  match Parser.parse_into env ctx a with
+  | pa ->
+    (match Parser.parse_into env ctx b with
+     | pb ->
+       if not (terms_equal pa.assertions pb.assertions)
+       then fail "expand/%s: macro form differs from hand-expanded form" name
+     | exception e ->
+       fail "expand/%s: hand-expanded parse raised %s" name (Printexc.to_string e))
+  | exception e -> fail "expand/%s: macro parse raised %s" name (Printexc.to_string e)
+;;
+
+let check_parse ~name ~kind text =
+  incr checks;
+  match Parser.parse text with
+  | _ -> fail "%s/%s: expected %s, parsed OK" kind name kind
+  | exception Parser.Malformed _ when String.equal kind "malformed" -> ()
+  | exception Parser.Unsupported _ when String.equal kind "unsupported" -> ()
+  | exception e -> fail "%s/%s: wrong exception %s" kind name (Printexc.to_string e)
+;;
+
+let check_malformed ~name text = check_parse ~name ~kind:"malformed" text
+let check_unsupported ~name text = check_parse ~name ~kind:"unsupported" text
+
+(* parse (expands define-fun) -> print (define-fun erased) -> parse : must fixpoint. *)
+let check_df_roundtrip ~name text =
+  incr checks;
+  let env = Env.create () in
+  let ctx = Context.create env in
+  match Parser.parse_into env ctx text with
+  | p ->
+    let out = Printer.print_session ?status:p.status env p.assertions in
+    (match Parser.parse_into env ctx out with
+     | p2 ->
+       if not (terms_equal p.assertions p2.assertions)
+       then fail "df-roundtrip/%s: differ after reprint\n%s" name out
+     | exception e -> fail "df-roundtrip/%s: reparse %s" name (Printexc.to_string e))
+  | exception e -> fail "df-roundtrip/%s: parse %s" name (Printexc.to_string e)
+;;
+
 (* declaration helpers *)
 let const env ctx name sort =
   Context.const ctx (Env.declare_fun env name (Rank.create [] sort))
@@ -377,6 +425,121 @@ let naming_classes () =
     [ Context.eq ctx a c ])
 ;;
 
+(* ---- define-fun macro expansion (task board #76) ---- *)
+
+let define_fun_cases () =
+  let hdr = "(set-logic QF_UFLIA)\n" in
+  let decls = "(declare-const a Int)\n(declare-const b Int)\n" in
+  (* 1. basic unary macro: (inc a) == (+ a 1) *)
+  check_same
+    ~name:"basic"
+    (hdr ^ decls ^ "(define-fun inc ((x Int)) Int (+ x 1))\n(assert (<= (inc a) b))\n")
+    (hdr ^ decls ^ "(assert (<= (+ a 1) b))\n");
+  (* 2. zero-arg define = named constant *)
+  check_same
+    ~name:"zero-arg-const"
+    (hdr ^ decls ^ "(define-fun k () Int 42)\n(assert (<= a k))\n")
+    (hdr ^ decls ^ "(assert (<= a 42))\n");
+  (* 3. multi-arg + nested application in body *)
+  check_same
+    ~name:"multi-arg"
+    (hdr
+     ^ decls
+     ^ "(define-fun g ((x Int) (y Int)) Int (+ x (* 2 y)))\n(assert (<= (g a b) 0))\n")
+    (hdr ^ decls ^ "(assert (<= (+ a (* 2 b)) 0))\n");
+  (* 4. parameter shadowed by a nested let in the body (let binds tighter): the arg is
+     ignored, body = 7 + 1 = 8. If shadowing were wrong we'd get a+1 instead. *)
+  check_same
+    ~name:"param-shadowed-by-let"
+    (hdr
+     ^ decls
+     ^ "(define-fun h ((x Int)) Int (let ((x 7)) (+ x 1)))\n(assert (<= (h a) b))\n")
+    (hdr ^ decls ^ "(assert (<= 8 b))\n");
+  (* 5. body references a global const *)
+  check_same
+    ~name:"body-uses-global"
+    (hdr ^ decls ^ "(define-fun m ((x Int)) Int (+ x b))\n(assert (<= (m a) 0))\n")
+    (hdr ^ decls ^ "(assert (<= (+ a b) 0))\n");
+  (* 6. Bool-valued macro over an uninterpreted sort + predicate *)
+  check_same
+    ~name:"bool-macro"
+    (hdr
+     ^ "(declare-sort S 0)\n\
+        (declare-fun p (S) Bool)\n\
+        (declare-const u S)\n\
+        (define-fun q ((z S)) Bool (not (p z)))\n\
+        (assert (q u))\n")
+    (hdr
+     ^ "(declare-sort S 0)\n\
+        (declare-fun p (S) Bool)\n\
+        (declare-const u S)\n\
+        (assert (not (p u)))\n");
+  (* 7. a macro used inside a let: the argument is read in the caller scope (sees the
+     let), but the body does NOT see the caller's let binding. (m x) = x + b, arg = a. *)
+  check_same
+    ~name:"arg-read-in-caller-scope"
+    (hdr
+     ^ decls
+     ^ "(define-fun m2 ((x Int)) Int (+ x b))\n(assert (<= (let ((c a)) (m2 c)) 0))\n")
+    (hdr ^ decls ^ "(assert (<= (+ a b) 0))\n");
+  (* round-trip: expanded terms print (define-fun erased) and re-parse identically *)
+  check_df_roundtrip
+    ~name:"basic"
+    (hdr ^ decls ^ "(define-fun inc ((x Int)) Int (+ x 1))\n(assert (<= (inc a) b))\n");
+  check_df_roundtrip
+    ~name:"nested-and-bool"
+    (hdr
+     ^ decls
+     ^ "(define-fun clamp ((x Int)) Int (ite (< x 0) 0 x))\n\
+        (assert (= (clamp a) (clamp b)))\n");
+  (* ---- rejections ---- *)
+  (* caller's let binding must NOT leak into the body: body references y, which is neither
+     a param nor a global, so expansion fails with an undeclared-symbol Malformed even
+     though the caller binds y. *)
+  check_malformed
+    ~name:"no-caller-capture"
+    (hdr
+     ^ decls
+     ^ "(define-fun leak ((x Int)) Int (+ x y))\n(assert (<= (let ((y a)) (leak 0)) 0))\n"
+    );
+  (* direct recursion *)
+  check_unsupported
+    ~name:"direct-recursion"
+    (hdr ^ decls ^ "(define-fun r ((x Int)) Int (r x))\n(assert (<= (r a) 0))\n");
+  (* mutual recursion (f -> g -> f); both defined before use, cycle caught at expansion *)
+  check_unsupported
+    ~name:"mutual-recursion"
+    (hdr
+     ^ decls
+     ^ "(define-fun f ((x Int)) Int (g x))\n\
+        (define-fun g ((x Int)) Int (f x))\n\
+        (assert (<= (f a) 0))\n");
+  (* define-fun-rec is rejected outright *)
+  check_unsupported
+    ~name:"define-fun-rec"
+    (hdr
+     ^ "(define-fun-rec r ((x Int)) Int (ite (<= x 0) 0 (r (- x 1))))\n(assert true)\n");
+  (* arity mismatch at use site *)
+  check_malformed
+    ~name:"arity-mismatch"
+    (hdr ^ decls ^ "(define-fun inc ((x Int)) Int (+ x 1))\n(assert (<= (inc a b) 0))\n");
+  (* argument sort mismatch: inc expects Int, given a Bool *)
+  check_malformed
+    ~name:"arg-sort-mismatch"
+    (hdr
+     ^ "(declare-const p Bool)\n\
+        (define-fun inc ((x Int)) Int (+ x 1))\n\
+        (assert (<= (inc p) 0))\n");
+  (* body sort disagrees with declared result sort (Int body, Bool result) *)
+  check_malformed
+    ~name:"body-ret-sort-mismatch"
+    (hdr ^ decls ^ "(define-fun bad ((x Int)) Bool (+ x 1))\n(assert (bad a))\n");
+  (* redeclaration: a name both declared and defined *)
+  check_malformed
+    ~name:"redeclare-decl-then-define"
+    (hdr ^ "(declare-fun f (Int) Int)\n(define-fun f ((x Int)) Int x)\n(assert true)\n")
+;;
+
 (* ---- direction B: parse -> print -> parse over committed files ---- *)
 
 let smt2_files dir =
@@ -434,6 +597,8 @@ let () =
   print_endline
     "== naming classes (reserved words quoted; operators/sorts/empty refused) ==";
   naming_classes ();
+  print_endline "== define-fun macro expansion ==";
+  define_fun_cases ();
   let dirs = List.tl (Array.to_list Sys.argv) in
   if dirs <> []
   then (
