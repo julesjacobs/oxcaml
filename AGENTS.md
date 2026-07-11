@@ -65,6 +65,24 @@ canonicalization / cache-key code. "No findings" is a valid recorded verdict; a
 content-filter refusal that exits 0 with zero findings is not — validate per
 `logs/codex-review-runbook.md`.
 
+Integrator merges only on an explicit master "APPROVED FOR MERGE: task/X at
+<sha>" message; board rows, worktrees, and review-round status are tracking, not
+authorization.
+
+**Scoped re-review after rebase.** A review of pre-rebase code does not transfer
+to semantically-shifted code: if a rebase produces conflicts touching hunks the
+reviews examined, or moves ANY TCB-path hunk, the integrator bounces for a scoped
+re-verify before landing. Trivial / no-conflict rebases need only the suite re-run.
+
+**Speculative pipelining (queue depth ≥2).** By the ff-only invariant, item N's
+post-merge trunk is bit-identical to N's tested rebased head, so while N's suite
+runs the integrator may rebase item N+1 onto N's candidate head in a scratch
+worktree and pre-run N+1's suite. If N lands, N+1 is already green → immediate ff;
+if N fails or is reversed, the speculative run is discarded and redone against real
+trunk. Speculation never touches trunk; ff-only pushes stay strictly in order, each
+only after its own item's reviews + suite are green. Scratch worktrees are cleaned
+like any other (no orphans).
+
 ## Acceptance thresholds (milestone-done, author policy)
 
 Milestone-done is defined by `STATUS.md` numbers, two tiers: the VC-shaped corpus
