@@ -39,7 +39,9 @@ let unknown_block =
   { verdict = "unknown"; model = None; conflicts = 0; decisions = 0; propagations = 0 }
 ;;
 
-let print_block b =
+(* Render one result block to text. Raises [Printer.Unsupported] if a model symbol name is
+   unrepresentable in SMT-LIB (see [print_block]); nothing is emitted on that path. *)
+let render_block b =
   let buf = Buffer.create 128 in
   Buffer.add_string buf "(result";
   Printf.bprintf buf " (verdict %s)" b.verdict;
@@ -49,12 +51,12 @@ let print_block b =
      Buffer.add_string buf " (model (";
      List.iteri
        (fun i (name, v) ->
-         if i > 0 then Buffer.add_char buf ' ';
-         (* Re-quote the symbol name: [Session.get_model] returns the bare content of a
+          if i > 0 then Buffer.add_char buf ' ';
+          (* Re-quote the symbol name: [Session.get_model] returns the bare content of a
             |quoted| declared const, so a name like [p q] must print as [|p q|] to survive
             the harness/eval round-trip. Reuse the shipped printer's SMT-LIB 2.6 quoting
             (the CLI already links smt/; only the firewalled harness lib hand-rolls it). *)
-         Printf.bprintf buf "(%s %b)" (Oxsmt_smtlib.Printer.quote_symbol name) v)
+          Printf.bprintf buf "(%s %b)" (Oxsmt_smtlib.Printer.quote_symbol name) v)
        m;
      Buffer.add_string buf "))"
    | None -> ());
@@ -64,7 +66,20 @@ let print_block b =
     b.conflicts
     b.decisions
     b.propagations;
-  print_string (Buffer.contents buf);
+  Buffer.contents buf
+;;
+
+let print_block b =
+  (* A model symbol the shipped printer refuses (empty [||], an operator collision like
+     [|+|]) is representable in the parser but not printable — rendering it raises
+     [Printer.Unsupported]. Never crash and never emit a malformed/partial model: degrade
+     this goal to a sound [unknown] with no model. [unknown_block] has no model, so the
+     fallback render cannot re-raise. (Matches the wiring branch's fix shape.) *)
+  let text =
+    try render_block b with
+    | Oxsmt_smtlib.Printer.Unsupported _ -> render_block unknown_block
+  in
+  print_string text;
   print_newline ()
 ;;
 
@@ -73,13 +88,13 @@ let print_block b =
 let scan_commands sexps =
   List.fold_left
     (fun (n_checks, incr) sx ->
-      match sx with
-      | Sexp.List (head :: _) ->
-        (match Sexp.simple head with
-         | Some ("check-sat" | "check-sat-assuming") -> n_checks + 1, incr
-         | Some ("push" | "pop") -> n_checks, true
-         | _ -> n_checks, incr)
-      | _ -> n_checks, incr)
+       match sx with
+       | Sexp.List (head :: _) ->
+         (match Sexp.simple head with
+          | Some ("check-sat" | "check-sat-assuming") -> n_checks + 1, incr
+          | Some ("push" | "pop") -> n_checks, true
+          | _ -> n_checks, incr)
+       | _ -> n_checks, incr)
     (0, false)
     sexps
 ;;
