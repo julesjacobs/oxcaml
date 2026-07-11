@@ -52,3 +52,6 @@ M0-smtlib.
 `tests/harness` runner (.smt2 golden/expect + promote), `tests/gate` Lean encoder
 + certification + content-addressed cache, `tests/cases/*.smt2` corpus. Gate
 paths are master-only (AGENTS.md). See `tests/README.md`.
+Status: **landed** — harness (M0-harness) and gate (M0-gate) both merged;
+`tests/cases/` seeded with 11 cases (harness goldens are `unknown` under the stub
+solver until the real solver lands). Not skeleton; the rest of the DAG still is.
