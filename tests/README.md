@@ -300,10 +300,18 @@ from scratch in the same test lib, plus model self-evaluation.
   verdict (SATLIB `uf*` = sat, `uuf*` = unsat), self-checks every sat model, and
   fails on any mismatch. Digest to stdout; full per-file log under `../logs`.
   Deterministic: the "slowest" ranking is by conflict count, never wall-clock.
+  `--parse-only` parses + strict-validates every file without solving — a
+  corpus-hygiene sweep that surfaces truncated/corrupt DIMACS over families too
+  hard to solve (e.g. pigeon-hole).
 
 - **`smt/solver/test/dimacs.ml`** — the DIMACS parser is a **test-only** dune
   library (`oxsmt_dimacs`), never linked into shipped solver code, the same split
-  discipline the SMT-LIB parser follows (DESIGN.md §3).
+  discipline the SMT-LIB parser follows (DESIGN.md §3). It is **strict**: with a
+  `p cnf V C` header present it rejects (loud `Parse_error`) a parsed-clause-count
+  ≠ C and any nonempty unterminated trailing clause, so a truncated file is a
+  reject rather than a silently-shorter formula that can flip unsat→sat
+  undetected (sat-review item 11, the dubois100 corruption shape). The SATLIB
+  `%`-footer early-stop is preserved.
 
 ## SMT-LIB printer + parser tests (`smt/smtlib/test/`, M0-smtlib)
 

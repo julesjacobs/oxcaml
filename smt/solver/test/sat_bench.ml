@@ -3,15 +3,18 @@ module Dimacs = Oxsmt_dimacs.Dimacs
 
 (* SAT benchmark runner over a DIMACS corpus (TASKS.md M1-sat, DESIGN.md §8).
 
-   Usage: sat_bench <corpus-dir> [--log FILE]
+   Usage: sat_bench <corpus-dir>... [--parse-only] [--log FILE]
 
-   Globs <corpus-dir>/**/*.cnf at runtime (sorted, deterministic). Tolerates an absent or
-   empty corpus with a clear message and exit 0 — the SAT corpus is fetched out-of-band
-   and may not be present. For families whose name encodes the verdict (SATLIB: uf* = sat,
-   uuf* = unsat) the result is label-checked; a mismatch is a failure. Every sat verdict
-   is additionally self-checked by evaluating the model. A digest (counts, failures,
-   slowest-by-conflicts) prints to stdout; the full per-file log goes to --log if given
-   (context-frugal, §11).
+   Globs each <corpus-dir>/**/*.cnf at runtime (sorted, deterministic). Tolerates an
+   absent or empty corpus with a clear message and exit 0 — the SAT corpus is fetched
+   out-of-band and may not be present. For families whose name encodes the verdict
+   (SATLIB: uf* = sat, uuf* = unsat) the result is label-checked; a mismatch is a failure.
+   Every sat verdict is additionally self-checked by evaluating the model. A digest
+   (counts, failures, slowest-by-conflicts) prints to stdout; the full per-file log goes
+   to --log if given (context-frugal, §11). With [--parse-only] each file is parsed and
+   strict-validated but not solved — a corpus-hygiene sweep that surfaces
+   truncated/corrupt DIMACS (a parse-error failure) even over families too hard to solve
+   (e.g. pigeon-hole).
 
    Deterministic: the "slowest" ranking is by conflict count, never wall-clock. *)
 
@@ -71,10 +74,14 @@ type outcome =
 let () =
   let dirs = ref [] in
   let log = ref "" in
+  let parse_only = ref false in
   let rec parse = function
     | [] -> ()
     | "--log" :: f :: rest ->
       log := f;
+      parse rest
+    | "--parse-only" :: rest ->
+      parse_only := true;
       parse rest
     | d :: rest ->
       dirs := d :: !dirs;
@@ -84,7 +91,7 @@ let () =
   let dirs = List.rev !dirs in
   if dirs = []
   then (
-    prerr_endline "usage: sat_bench <corpus-dir>... [--log FILE]";
+    prerr_endline "usage: sat_bench <corpus-dir>... [--parse-only] [--log FILE]";
     exit 2);
   let files = List.sort compare (List.concat_map (fun d -> walk d []) dirs) in
   if files = []
@@ -109,6 +116,16 @@ let () =
            ; decisions = 0
            ; propagations = 0
            ; failure = Some (Printexc.to_string e)
+           }
+         | _problem when !parse_only ->
+           (* Validate parse only (strict DIMACS); do not solve. Useful for corpus hygiene
+             sweeps over families too hard to solve (e.g. pigeon-hole). *)
+           { path
+           ; verdict = "parsed"
+           ; conflicts = 0
+           ; decisions = 0
+           ; propagations = 0
+           ; failure = None
            }
          | problem ->
            let s = Dimacs.to_sat problem in

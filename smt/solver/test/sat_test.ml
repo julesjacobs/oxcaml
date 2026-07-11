@@ -288,8 +288,56 @@ let test_pigeonhole n =
 ;;
 
 (* ------------------------------------------------------------------ *)
+(* DIMACS reader strictness (sat-review item 11): a truncated file must be a loud reject,
+   not a silently-shorter formula that can flip unsat->sat. *)
+
+let write_tmp contents =
+  let path = Filename.temp_file "dimacs_test" ".cnf" in
+  let oc = open_out path in
+  output_string oc contents;
+  close_out oc;
+  path
+;;
+
+let parses_to name contents expected_clauses =
+  let path = write_tmp contents in
+  (match Dimacs.parse_file path with
+   | p -> check name (List.length p.Dimacs.clauses = expected_clauses)
+   | exception e -> check (name ^ " (unexpected " ^ Printexc.to_string e ^ ")") false);
+  Sys.remove path
+;;
+
+let rejects name contents =
+  let path = write_tmp contents in
+  (match Dimacs.parse_file path with
+   | _ -> check (name ^ " (no reject)") false
+   | exception Dimacs.Parse_error _ -> check name true
+   | exception e -> check (name ^ " (wrong exn " ^ Printexc.to_string e ^ ")") false);
+  Sys.remove path
+;;
+
+let test_dimacs_strict () =
+  (* Complete file with no SATLIB "%" footer still parses (the final clause's own 0
+     terminates it) — regression guard for the footer-independence the review checked. *)
+  parses_to "dimacs: complete file, no % footer" "p cnf 3 2\n1 -2 0\n2 3 0\n" 2;
+  (* "%" footer early-stops and its lone trailing 0 is not a phantom empty clause. *)
+  parses_to "dimacs: % footer early-stop" "p cnf 1 1\n1 0\n%\n0\n" 1;
+  (* Clauses may span lines / share a line; count is by 0-terminators, not lines. *)
+  parses_to "dimacs: multiline clause" "p cnf 3 2\n1\n-2 0 2 3 0\n" 2;
+  (* Truncation: header declares more clauses than are present -> loud reject. *)
+  rejects "dimacs: truncated (fewer clauses than header)" "p cnf 3 3\n1 -2 0\n2 3 0\n";
+  (* More clauses than the header declares -> also a mismatch, reject. *)
+  rejects "dimacs: more clauses than header" "p cnf 3 1\n1 0\n2 0\n";
+  (* Nonempty unterminated trailing clause (truncated mid-clause) -> reject. *)
+  rejects "dimacs: unterminated trailing clause (with header)" "p cnf 3 2\n1 -2 0\n2 3\n";
+  (* Same, with no header at all -> the trailing-clause rule still fires. *)
+  rejects "dimacs: unterminated trailing clause (no header)" "1 2 3\n4 5\n"
+;;
+
+(* ------------------------------------------------------------------ *)
 
 let () =
+  test_dimacs_strict ();
   test_analyze_multi ();
   test_analyze_unit ();
   test_propagation ();
