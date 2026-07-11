@@ -294,6 +294,14 @@ honeypot-breach / accounting-mismatch are RED. This makes silent oracle bypass
 (e.g. the old div/mod MALFORMED-green) structurally impossible, not patched
 per-bug.
 
+**Ruling — quarantine-is-green is an accepted asymmetry** (master, recorded as a
+decision): it is the same asymmetry as INCONCLUSIVE — nothing can be CERTIFIED
+through quarantine, so no unsound verdict is laundered; the only cost is oracle
+coverage, kept LOUD via the per-reason counts + QUARANTINED listing. The real
+close of the div/mod (+abs) gap is the `gate-divmod-elim` follow-up (encoder-side
+euclidean/ite elimination, before M4 LIA). Quarantine counts should also flow to
+STATUS.md as a coverage metric (a `status_gen` concern, task #133).
+
 ### Cache format (`../cache`, never in git)
 
 One s-expression file per entry, named `<key>.sexp`. The key is

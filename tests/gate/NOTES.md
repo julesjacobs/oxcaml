@@ -164,3 +164,20 @@ This generalises G4 (and the honeypot floor) — silent bypass is now structural
 impossible (an unaccounted or reader-rejected-but-claimed query is loud), not
 patched per-bug. Quarantine is not RED (it is a coverage gap, not a soundness
 failure); only refuted/encode_error/honeypot-breach/accounting-mismatch are RED.
+
+## Ruling: quarantine-is-green is an accepted asymmetry (master, codex round-2 (c))
+
+Recorded as a decision, not an accident. Quarantine (MALFORMED / UNSUPPORTED /
+NO_STATUS) leaves the gate GREEN. This is the same accepted asymmetry as
+INCONCLUSIVE: **nothing can be CERTIFIED through quarantine**, so no unsound
+verdict can be laundered — the only cost is oracle COVERAGE, and that cost stays
+LOUD via the per-reason accounting counts + the per-file QUARANTINED listing (a
+query the gate can't judge is never silent). Making quarantine RED would instead
+punish legitimately-out-of-subset corpus inputs and pressure toward test-gaming.
+The REAL close of the div/mod (and abs) coverage gap is `gate-divmod-elim` (filed
+follow-up, scheduled before M4 LIA cases exercise div/mod) — encoder-side
+euclidean/ite elimination that turns those quarantines into CERTIFIED/REFUTED.
+
+Coverage-metric flow: quarantine counts appear in the gate digest today; they
+should also flow to STATUS.md as a coverage metric. If `status_gen` does not yet
+pick them up, that is the `status_gen` task's concern (#133), NOT fixed here.

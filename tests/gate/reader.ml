@@ -422,6 +422,13 @@ let of_string (src : string) : query =
          malformedf "command head must be a bare keyword, not a quoted symbol or string"
        | Sexp.List _ -> malformedf "malformed command: %s" (Sexp.to_string cmd))
     sexps;
+  (* Single-query model (codex round-2 (a)): a query needs EXACTLY ONE check-sat. The >1
+     case is already rejected above; here reject the ZERO case — a document of asserts
+     with no check-sat asks nothing, so certifying its assertion conjunction would stamp a
+     verdict on a non-query. *)
+  if not !checked
+  then
+    unsupportedf "no check-sat: not a query (the gate certifies a single check-sat query)";
   { logic = !logic
   ; sort_decls = List.rev env.sorts
   ; fun_decls = List.rev env.funs
