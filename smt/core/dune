@@ -1,4 +1,13 @@
-; stdlib-only — no libraries field, ever (AGENTS.md dependency firewall).
+; stdlib-only — no libraries field, ever (AGENTS.md dependency firewall, I3).
+;
+; [node] holds the private-type definition + hash-consing + smart-constructor
+;   normalization: a term's private record can only be built in its defining
+;   module, so construction lives here and [Term]/[Context] expose the frozen
+;   views. It is [private_modules] so no consumer can reach the raw builders
+;   (I2: smart constructors via [Context] are the sole public construction path).
+; [iarr_unsafe] holds the optional no-copy [Iarr] cast, private for the same
+;   reason (ADR-0003 fixes B1).
 
 (library
- (name oxsmt_core))
+ (name oxsmt_core)
+ (private_modules node iarr_unsafe))

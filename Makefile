@@ -19,11 +19,17 @@ FIXTURES ?= tests/harness/fixtures
 HARNESS_ARGS := --solver $(SOLVER) --dir $(CASES) --dir $(FIXTURES) \
                 --logs $(LOGS) --stats $(STATS)
 
-.PHONY: build fmt test bench gate promote
+.PHONY: build fmt test core-test bench gate promote
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
 	$(DUNE) build @@default
+
+## core-test — smt/core unit + property self-test (stdlib-only, deterministic).
+##   Separate from `test` (the .smt2 harness): this is the in-tree TCB check for
+##   the term layer (ADR-0003). Nonzero exit on any failed check.
+core-test:
+	$(DUNE) exec smt/core/test/core_test.exe
 
 ## fmt — format all sources in place with ocamlformat.
 fmt:

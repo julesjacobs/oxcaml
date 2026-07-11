@@ -21,7 +21,14 @@ All modules are **skeleton** until their owning task lands.
 Sorts, hash-consed terms, smart constructors, symbol environments. Owns the
 `Term.t`/`Sort.t` representation; smart constructors are the sole construction
 path so well-sortedness and hash-consing hold by construction (I1, I2).
-Representation frozen by ADR-0003. Owner: TASKS.md M0-core (blocked on ADR-0003).
+Representation frozen by ADR-0003. **Status: implemented** (was skeleton). Public
+modules `Iarr`, `Symbol`, `Sort`, `Rank`, `Env`, `Term` (with `Term.Debug.check`),
+`Context` (the smart-constructor surface), `Theory_view`; the private type's
+construction machinery lives in the library-private `Node` module (dune
+`private_modules node iarr_unsafe`) so `Context` is the sole build path. Frozen
+`.mli`s: `iarr`, `symbol`, `sort`, `rank`, `env`, `term`, `context`, `theory_view`.
+Unit + property tests under `smt/core/test/` (`make core-test`). Owner: TASKS.md
+M0-core.
 
 ## smt/solver (`oxsmt_solver`)
 CDCL(T) engine: trail, two-watched-literal propagation, 1UIP conflict analysis,
