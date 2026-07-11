@@ -11,7 +11,7 @@ criteria are the contract. Specs live in the task dispatch, not paraphrased here
 | ADR-0003 | Term/sort representation design pass | in progress | (separate agent) | ADR written + adversarial review; freezes `core` API |
 | M0-core | Implement `smt/core` (Sort, Symbol, Term, hash-consing, smart constructors, `Debug.check`) | blocked (ADR-0003) | — | I1/I2 hold; `Debug.check` validates invariants; unit self-checks |
 | M0-smtlib | SMT-LIB2 printer (shipped) + test-only parser | todo | — | prints `QF_UFLIA` sessions; round-trips our dumps |
-| M0-harness | `.smt2` golden/expect harness + promote workflow | todo | — | runs `tests/cases`, digest output to `../logs`, promote accepts goldens; also generates `STATUS.md` |
+| M0-harness | `.smt2` golden/expect harness + promote workflow | done (branch `task/harness`) | (harness agent) | runs `tests/cases`+fixtures, digest to `../logs`, promote accepts goldens, bucketed counters + label check + stats sidecar. STATUS.md *generation* deferred to CI/nightly (harness feeds the stats sidecar only — DESIGN.md §11) |
 | M0-gate | Lean encoder + certification CI job + content-addressed cache | todo (master-only) | — | unsat→Lean theorem, sat→`decide`; cache keyed by hash+encoding+toolchain+grind cfg |
 | M0-honeypots | Nightly known-wrong verdicts + seeded mutants must turn the gate red | todo (master-only) | — | gate goes red on injected faults; validates the encoder during M0 |
 | M0-corpora | Fetch public SMT-LIB sets (QF_UF, QF_LIA, QF_UFLIA) into `../corpora` | in progress | (separate agent) | sets present, pre-labeled, not tracked in git |
