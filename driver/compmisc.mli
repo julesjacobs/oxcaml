@@ -22,6 +22,11 @@ val initial_env : unit -> Env.t
 val set_from_env : 'a option ref -> 'a Clflags.env_reader -> unit
 val read_clflags_from_env : unit -> unit
 
+(** Turn off exception-backtrace recording for the compiler process unless
+    the [OXCAML_BACKTRACES] environment variable requests it. Called once at
+    driver startup; see the implementation for the rationale. *)
+val set_backtrace_defaults : unit -> unit
+
 val with_ppf_file :
   file_prefix:string -> file_extension:string -> (Format.formatter -> 'a) -> 'a
 
