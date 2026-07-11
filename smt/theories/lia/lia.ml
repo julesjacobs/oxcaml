@@ -8,6 +8,7 @@
 open Oxsmt_core
 
 exception Unsupported of string
+exception Poisoned
 
 (* Simplex premise tokens: user atoms carry the caller's ['tok]; B&B branch bounds carry
    an internal marker so they never masquerade as an input-core premise. *)
@@ -59,6 +60,11 @@ let create ctx =
   ; overflows = 0
   }
 ;;
+
+(* Refuse to reason on a bricked instance (an overflow left the tableau mid-pivot, so any
+   verdict would be unsound — CONTRACT: discard, don't reuse). Every public entry that
+   could read or extend solver state calls this first. *)
+let ensure_live t = if Simplex.is_poisoned t.simplex then raise Poisoned
 
 (* Get or create the problem variable for a term leaf. *)
 let problem_var t (term : Term.t) =
@@ -162,6 +168,7 @@ let constraints_of_atom t (atom : Term.t) ~polarity
 ;;
 
 let assert_atom t atom ~polarity ~premise =
+  ensure_live t;
   List.iter
     (fun (var, sense, rhs) ->
        let _ : _ Simplex.conflict option =
@@ -174,6 +181,7 @@ let assert_atom t atom ~polarity ~premise =
 ;;
 
 let register_atom t (atom : Term.t) =
+  ensure_live t;
   (* Record the positive reading of a [Le] atom for bound-propagation. Equality atoms are
      not propagation targets in v1. *)
   match atom.node with
@@ -206,12 +214,14 @@ let externalize (c : _ Simplex.conflict) : 'tok conflict =
 ;;
 
 let check t =
+  ensure_live t;
   match Simplex.check t.simplex with
   | None -> Sat_candidate
   | Some c -> Conflict (externalize c)
 ;;
 
 let rational_value t (term : Term.t) =
+  ensure_live t;
   match Term.Table.find_opt t.var_of_term term with
   | Some id -> Delta.c_part (Simplex.value t.simplex id)
   | None -> Rational.zero
@@ -219,7 +229,11 @@ let rational_value t (term : Term.t) =
 
 let value_is_integer d = Delta.is_rational d && Rational.is_int (Delta.c_part d)
 
-(* Lowest-tag problem variable whose current value is non-integer (needs branching). *)
+(* Lowest-tag problem variable whose current value is non-integer (needs branching).
+   Branching (below) floors the c_part only. That is exact here because the LIA atom
+   translation never emits a δ bound (every assert_atom bound has k=0), so problem-var
+   values are always δ=0; a hypothetical strict δ bound wired through this layer would
+   still branch soundly (x<=floor ∨ x>=floor+1 partitions ℤ) but could spin to the budget. *)
 let first_non_integer t =
   let best = ref None in
   Dynarray.iter
@@ -235,6 +249,7 @@ let first_non_integer t =
 ;;
 
 let suggest_branch t =
+  ensure_live t;
   match first_non_integer t with
   | None -> None
   | Some (term, _, d) ->
@@ -256,9 +271,13 @@ let extract_model t =
   |> List.sort (fun (a, _) (b, _) -> Int.compare a.Term.tag b.Term.tag)
 ;;
 
-let model t = extract_model t
+let model t =
+  ensure_live t;
+  extract_model t
+;;
 
 let solve_integer ?(budget = default_budget) t =
+  ensure_live t;
   let splits = ref 0 in
   (* [root_conflict] captures a ℚ-level conflict found with no branch in scope, so a
      genuine single-Farkas certificate can be surfaced. *)
@@ -308,6 +327,7 @@ let solve_integer ?(budget = default_budget) t =
 ;;
 
 let propagate t =
+  ensure_live t;
   let out = ref [] in
   Dynarray.iter
     (fun r ->
@@ -338,7 +358,18 @@ let propagate t =
   List.rev !out
 ;;
 
-let push t = Simplex.push t.simplex
-let pop t n = Simplex.pop t.simplex n
+let push t =
+  ensure_live t;
+  Simplex.push t.simplex
+;;
+
+let pop t n =
+  ensure_live t;
+  Simplex.pop t.simplex n
+;;
+
+(* Diagnostics stay readable after poisoning (you need [overflow_count] precisely to
+   attribute the brick). *)
 let pivot_count t = Simplex.pivot_count t.simplex
 let overflow_count t = t.overflows
+let is_poisoned t = Simplex.is_poisoned t.simplex

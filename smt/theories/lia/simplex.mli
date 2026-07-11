@@ -79,5 +79,12 @@ val pop : 'a t -> int -> unit
 (** Total pivots performed (determinism/perf stat, DESIGN.md §8). *)
 val pivot_count : 'a t -> int
 
+(** [true] once a {!Rational.Overflow} has escaped a state-mutating op ({!assert_lower},
+    {!assert_upper}, {!check}, {!new_slack}): the tableau may be left mid-pivot with
+    INV-EQ broken, so every later result would be unsound. Callers must refuse to reason
+    on a poisoned instance (the {!Lia} layer raises [Lia.Poisoned]); the flag is never
+    cleared. *)
+val is_poisoned : 'a t -> bool
+
 (** Number of variables allocated. *)
 val num_vars : 'a t -> int

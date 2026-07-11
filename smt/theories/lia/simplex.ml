@@ -57,6 +57,10 @@ type 'a t =
   ; scopes : int Dynarray.t (* trail length at each open frame *)
   ; mutable pending : 'a conflict option
   ; mutable pivots : int
+  ; mutable poisoned : bool
+    (* set the instant a Rational.Overflow escapes a state-mutating op: the tableau may be
+     left mid-pivot (INV-EQ broken), so any further reasoning is unsound and must be
+     refused rather than trusted (see is_poisoned / Lia.Poisoned). *)
   }
 
 and 'a conflict =
@@ -70,7 +74,20 @@ let create () =
   ; scopes = Dynarray.create ()
   ; pending = None
   ; pivots = 0
+  ; poisoned = false
   }
+;;
+
+let is_poisoned t = t.poisoned
+
+(* Run [f] (a state-mutating body that does exact arithmetic); if it raises
+   [Rational.Overflow] the tableau may be left mid-pivot, so brick the instance before
+   re-raising — every entry point then refuses to reason on it. *)
+let guarded t f =
+  try f () with
+  | Rational.Overflow ->
+    t.poisoned <- true;
+    raise Rational.Overflow
 ;;
 
 let get t i = Dynarray.get t.vars i
@@ -129,22 +146,23 @@ let expand t (def : linexp) : linexp =
 ;;
 
 let new_slack t (pairs : (int * Rational.t) list) =
-  let def = List.fold_left (fun m (j, c) -> IntMap.add j c m) IntMap.empty pairs in
-  let id = Dynarray.length t.vars in
-  let v =
-    { id
-    ; def
-    ; value = Delta.zero
-    ; lower = None
-    ; upper = None
-    ; basic = true
-    ; row = IntMap.empty
-    }
-  in
-  Dynarray.add_last t.vars v;
-  v.row <- expand t def;
-  v.value <- eval_def t def;
-  id
+  guarded t (fun () ->
+    let def = List.fold_left (fun m (j, c) -> IntMap.add j c m) IntMap.empty pairs in
+    let id = Dynarray.length t.vars in
+    let v =
+      { id
+      ; def
+      ; value = Delta.zero
+      ; lower = None
+      ; upper = None
+      ; basic = true
+      ; row = IntMap.empty
+      }
+    in
+    Dynarray.add_last t.vars v;
+    v.row <- expand t def;
+    v.value <- eval_def t def;
+    id)
 ;;
 
 (* ---- Farkas certificate assembly + self-check (always on). ---- *)
@@ -213,58 +231,60 @@ let update t (v : 'a var) (d : Delta.t) =
 ;;
 
 let assert_lower t vid (d : Delta.t) reason =
-  let v = get t vid in
-  match v.lower with
-  | Some b when Delta.le d b.bval -> None (* not tighter *)
-  | _ ->
-    (match v.upper with
-     | Some u when Delta.lt u.bval d ->
-       (* l > u: immediate contradiction. Farkas: 1·(l - def) + 1·(def - u) = l - u > 0. *)
-       let old = v.lower in
-       record_lower t v old;
-       v.lower <- Some { bval = d; reason };
-       let c =
-         build_conflict
-           t
-           [ { var = vid; mult = Rational.one; use_lower = true }
-           ; { var = vid; mult = Rational.one; use_lower = false }
-           ]
-       in
-       t.pending <- Some c;
-       Some c
-     | _ ->
-       let old = v.lower in
-       record_lower t v old;
-       v.lower <- Some { bval = d; reason };
-       if (not v.basic) && Delta.lt v.value d then update t v d;
-       None)
+  guarded t (fun () ->
+    let v = get t vid in
+    match v.lower with
+    | Some b when Delta.le d b.bval -> None (* not tighter *)
+    | _ ->
+      (match v.upper with
+       | Some u when Delta.lt u.bval d ->
+         (* l > u: immediate contradiction. Farkas: 1·(l - def) + 1·(def - u) = l - u > 0. *)
+         let old = v.lower in
+         record_lower t v old;
+         v.lower <- Some { bval = d; reason };
+         let c =
+           build_conflict
+             t
+             [ { var = vid; mult = Rational.one; use_lower = true }
+             ; { var = vid; mult = Rational.one; use_lower = false }
+             ]
+         in
+         t.pending <- Some c;
+         Some c
+       | _ ->
+         let old = v.lower in
+         record_lower t v old;
+         v.lower <- Some { bval = d; reason };
+         if (not v.basic) && Delta.lt v.value d then update t v d;
+         None))
 ;;
 
 let assert_upper t vid (d : Delta.t) reason =
-  let v = get t vid in
-  match v.upper with
-  | Some b when Delta.le b.bval d -> None (* not tighter *)
-  | _ ->
-    (match v.lower with
-     | Some l when Delta.lt d l.bval ->
-       let old = v.upper in
-       record_upper t v old;
-       v.upper <- Some { bval = d; reason };
-       let c =
-         build_conflict
-           t
-           [ { var = vid; mult = Rational.one; use_lower = false }
-           ; { var = vid; mult = Rational.one; use_lower = true }
-           ]
-       in
-       t.pending <- Some c;
-       Some c
-     | _ ->
-       let old = v.upper in
-       record_upper t v old;
-       v.upper <- Some { bval = d; reason };
-       if (not v.basic) && Delta.lt d v.value then update t v d;
-       None)
+  guarded t (fun () ->
+    let v = get t vid in
+    match v.upper with
+    | Some b when Delta.le b.bval d -> None (* not tighter *)
+    | _ ->
+      (match v.lower with
+       | Some l when Delta.lt d l.bval ->
+         let old = v.upper in
+         record_upper t v old;
+         v.upper <- Some { bval = d; reason };
+         let c =
+           build_conflict
+             t
+             [ { var = vid; mult = Rational.one; use_lower = false }
+             ; { var = vid; mult = Rational.one; use_lower = true }
+             ]
+         in
+         t.pending <- Some c;
+         Some c
+       | _ ->
+         let old = v.upper in
+         record_upper t v old;
+         v.upper <- Some { bval = d; reason };
+         if (not v.basic) && Delta.lt d v.value then update t v d;
+         None))
 ;;
 
 (* ---- Pivoting (DdM06 Pivot / PivotAndUpdate). ---- *)
@@ -380,28 +400,29 @@ let conflict_of t (bi : 'a var) ~low =
 ;;
 
 let check t =
-  match t.pending with
-  | Some c -> Some c
-  | None ->
-    let rec loop () =
-      match first_violating t with
-      | None -> None
-      | Some (bi, `Low) ->
-        (match entering t bi `Inc with
-         | None -> Some (conflict_of t bi ~low:true)
-         | Some nj ->
-           let target = (Option.get bi.lower).bval in
-           pivot_and_update t bi nj target;
-           loop ())
-      | Some (bi, `High) ->
-        (match entering t bi `Dec with
-         | None -> Some (conflict_of t bi ~low:false)
-         | Some nj ->
-           let target = (Option.get bi.upper).bval in
-           pivot_and_update t bi nj target;
-           loop ())
-    in
-    loop ()
+  guarded t (fun () ->
+    match t.pending with
+    | Some c -> Some c
+    | None ->
+      let rec loop () =
+        match first_violating t with
+        | None -> None
+        | Some (bi, `Low) ->
+          (match entering t bi `Inc with
+           | None -> Some (conflict_of t bi ~low:true)
+           | Some nj ->
+             let target = (Option.get bi.lower).bval in
+             pivot_and_update t bi nj target;
+             loop ())
+        | Some (bi, `High) ->
+          (match entering t bi `Dec with
+           | None -> Some (conflict_of t bi ~low:false)
+           | Some nj ->
+             let target = (Option.get bi.upper).bval in
+             pivot_and_update t bi nj target;
+             loop ())
+      in
+      loop ())
 ;;
 
 (* ---- push / pop ---- *)

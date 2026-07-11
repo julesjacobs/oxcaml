@@ -23,10 +23,21 @@
     {!Int_unknown} and counts it (see {!overflow_count}), so a benchmark pass-rate gap is
     attributable rather than mysterious. The overflow lives in the numeric layer, which
     never touches the {!Context} intern table, so core state (I8) is intact and a fresh
-    solver is unaffected — but the solver {e instance} whose {!check} let an overflow
-    escape is left mid-pivot and {b must be discarded, not reused} (a subsequent operation
-    on it may reach a different, spurious verdict). {!solve_integer}, which catches the
-    overflow itself, has no such hazard. *)
+    solver is unaffected.
+
+    {b Poisoned instances (brick semantics).} When a {!Rational.Overflow} escapes a
+    state-mutating op the tableau may be left mid-pivot (INV-EQ broken), so the
+    {e instance} is bricked: it is flagged poisoned and {b every} later public entry
+    raises {!Poisoned} rather than return a value computed from corrupt state. This covers
+    {b both} paths equally — the {!check}/{!assert_atom} path that lets the overflow
+    propagate {b and} the {!solve_integer} path that catches it internally (the earlier
+    claim that {!solve_integer} "has no such hazard" was wrong: only its own
+    {!Int_unknown} return for the call that {e hit} the overflow is safe; reuse of that
+    instance is not). The call that hits the overflow behaves as documented (the
+    propagating ops re-raise {!Rational.Overflow}; {!solve_integer} returns {!Int_unknown}
+    and bumps {!overflow_count}); only {e subsequent} operations raise {!Poisoned}.
+    Diagnostics ({!pivot_count}, {!overflow_count}, {!is_poisoned}) stay readable. The
+    flag is never cleared — discard the instance and build a fresh one. *)
 
 open Oxsmt_core
 
@@ -54,6 +65,12 @@ type 'tok integer_result =
     split, ADR-0005 CONTRACT-SPLIT — reaching the direct assert path). Same session-caught
     contract as {!Rational.Overflow}. *)
 exception Unsupported of string
+
+(** Raised by every public entry (other than the diagnostics {!pivot_count},
+    {!overflow_count}, {!is_poisoned}) when the instance has been poisoned by an escaped
+    {!Rational.Overflow} — see the "Poisoned instances" note above. Converts silent
+    mid-pivot corruption into a loud, sound failure; the fix is to discard the instance. *)
+exception Poisoned
 
 (** [create ctx] is an empty solver threading the session {!Context.t} (ADR-0003 D6): all
     branch atoms built by {!suggest_branch} go through [ctx], sharing its tag stream. *)
@@ -116,3 +133,7 @@ val pivot_count : 'tok t -> int
     distinct stat attributing the native-int incompleteness gap (DESIGN.md §8 bench
     digest). *)
 val overflow_count : 'tok t -> int
+
+(** [true] once an escaped overflow has bricked the instance (see the "Poisoned instances"
+    note); safe to call at any time, never raises {!Poisoned}. *)
+val is_poisoned : 'tok t -> bool

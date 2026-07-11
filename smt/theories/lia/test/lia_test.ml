@@ -542,6 +542,45 @@ let test_overflow () =
    let r = Lia.solve_integer fx.solver in
    check "solve_integer degrades overflow to Int_unknown" (r = Lia.Int_unknown);
    check "overflow_count attributes the degradation" (Lia.overflow_count fx.solver = 1));
+  let is_poisoned name f =
+    incr checks;
+    match f () with
+    | _ ->
+      incr failures;
+      Printf.printf "  FAIL %s (expected Lia.Poisoned, no exception)\n" name
+    | exception Lia.Poisoned -> ()
+    | exception e ->
+      incr failures;
+      Printf.printf
+        "  FAIL %s (expected Lia.Poisoned, got %s)\n"
+        name
+        (Printexc.to_string e)
+  in
+  (* BRICK SEMANTICS (review item 10): once an overflow escapes, the instance is poisoned;
+     REUSE must raise Lia.Poisoned rather than return a spurious verdict. This is the
+     exact reviewer scenario that previously returned Sat_candidate / SAT[2,0]. *)
+  (* Path 1: the check-escape path. *)
+  (let fx = mk_overflowing () in
+   (try ignore (Lia.check fx.solver) with
+    | Rational.Overflow -> ());
+   check "poisoned after escaped check" (Lia.is_poisoned fx.solver);
+   is_poisoned "reuse check on poisoned -> Poisoned (was spurious Sat)" (fun () ->
+     Lia.check fx.solver);
+   is_poisoned "reuse solve_integer on poisoned -> Poisoned (was spurious SAT)" (fun () ->
+     Lia.solve_integer fx.solver);
+   is_poisoned "reuse assert_atom on poisoned -> Poisoned" (fun () ->
+     assert_le fx [ 1, 1 ] 0 ~polarity:true));
+  (* Path 2: the solve_integer-internal-catch path is EQUALLY poisoned (the old mli claim
+     that solve_integer "has no such hazard" was wrong). *)
+  (let fx = mk_overflowing () in
+   check
+     "solve_integer (hitting call) returns Int_unknown"
+     (Lia.solve_integer fx.solver = Lia.Int_unknown);
+   check "poisoned after solve_integer internal catch" (Lia.is_poisoned fx.solver);
+   is_poisoned "reuse check after solve_integer-catch -> Poisoned" (fun () ->
+     Lia.check fx.solver);
+   is_poisoned "reuse solve_integer after solve_integer-catch -> Poisoned" (fun () ->
+     Lia.solve_integer fx.solver));
   (* state-safe (I8): a fresh solver on a small problem is unaffected. *)
   let fx2 = make_fixture 1 in
   ignore (assert_le fx2 [ 0, 1 ] (-3) ~polarity:true);

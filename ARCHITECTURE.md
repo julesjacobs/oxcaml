@@ -96,7 +96,10 @@ exact ℤ complement of a negated `Le`, `check` for rational feasibility,
 bound propagation, and integer model extraction). The THEORY-functor adapter
 binding `'tok` to `Lit.t` is deferred to M4 (ADR-0005 freezes at M1-end).
 Determinism (I6): variables numbered in atom-arrival order, Bland's rule, branch
-by lowest `Term` tag. Unit + property tests under `smt/theories/lia/test/`
+by lowest `Term` tag. An escaped overflow leaves the tableau mid-pivot, so the
+instance is bricked (`is_poisoned`): every later public entry raises
+`Lia.Poisoned` rather than return a verdict from corrupt state (review item 10) —
+discard and rebuild. Unit + property tests under `smt/theories/lia/test/`
 (`make lia-test`). Owner: TASKS.md M3-lia.
 
 ## smt/interface (`oxsmt_interface`)
