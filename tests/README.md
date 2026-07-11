@@ -168,14 +168,19 @@ are never cached. The phase is not vacuously satisfiable:
 
 - a hard floor (`min_honeypots`, currently 4) — fewer present ⇒ RED "gate
   unaudited" (so an empty/missing glob cannot pass);
-- each honeypot declares its expected outcome in a sidecar `foo.expect` (one tag:
-  `REFUTED` / `MALFORMED` / `UNSUPPORTED` / `INCONCLUSIVE`). The gate asserts the
-  actual outcome equals it, so a honeypot degrading from REFUTED to INCONCLUSIVE
-  turns the gate RED rather than passing silently; a missing `.expect` is a breach.
+- each honeypot declares its expected outcome in a sidecar `foo.expect`, one tag
+  from the allowlist `REFUTED` / `MALFORMED` / `UNSUPPORTED` / `INCONCLUSIVE`.
+  `CERTIFIED` (or any other/typo'd value) is rejected as an invalid expectation
+  — a honeypot may never be expected to certify. The gate asserts the actual
+  outcome equals it, so a honeypot degrading from REFUTED to INCONCLUSIVE turns
+  the gate RED rather than passing silently; a missing `.expect` is a breach.
 
 A honeypot that gets CERTIFIED is always a breach. Current set: two sat-claimed-
 unsat (LIA + EUF, each REFUTED via a kernel-checked witness model), one unsat-
 claimed-sat with a wrong model (REFUTED via grind), one malformed (rejected).
+
+The stdout digest always prints a one-line attestation that the audit ran, green
+or red, e.g. `honeypots: 4/4 matched, floor 4, none certified`.
 
 ### Cache format (`../cache`, never in git)
 

@@ -227,56 +227,83 @@ let run_dir_now logs_root =
 let min_honeypots = 4
 let expect_path smt2 = Filename.remove_extension smt2 ^ ".expect"
 
+(* A honeypot's declared expectation must be a non-certifying outcome. CERTIFIED is
+   explicitly rejected — a honeypot may never be expected to certify — as is any typo or
+   outcome (ENCODE_ERROR/NO_STATUS) that would make the audit meaningless. *)
+let valid_expect = [ "REFUTED"; "MALFORMED"; "UNSUPPORTED"; "INCONCLUSIVE" ]
+
 let load_expect smt2 : string option =
   let p = expect_path smt2 in
   if Sys.file_exists p then Some (String.trim (Lean_runner.read_file p)) else None
 ;;
 
-(* Returns (ok, breach messages). Honeypots run with the cache DISABLED and are never
-   cached (DESIGN.md §10). A breach is any of: too few honeypots present, a honeypot with
-   no declared expected outcome, a honeypot that got CERTIFIED, or a honeypot whose
-   outcome differs from its .expect (so REFUTED degrading to INCONCLUSIVE turns the gate
-   red rather than passing silently). *)
-let honeypots_phase ctx ~cache_dir dir : bool * string list =
+(* Returns (ok, breach messages, attestation line). Honeypots run with the cache DISABLED
+   and are never cached (DESIGN.md §10). A breach is any of: too few honeypots present, a
+   honeypot with no declared expected outcome, an invalid .expect value, a honeypot that
+   got CERTIFIED, or a honeypot whose outcome differs from its .expect (so REFUTED
+   degrading to INCONCLUSIVE turns the gate red rather than passing silently). *)
+let honeypots_phase ctx ~cache_dir dir : bool * string list * string =
   let files = smt2_files dir in
+  let total = List.length files in
   logf
     ctx
     "HONEYPOTS (%d; floor %d) — each must match its .expect and never CERTIFY:"
-    (List.length files)
+    total
     min_honeypots;
   let breaches = ref [] in
   let add f msg = breaches := Printf.sprintf "%s: %s" (short f) msg :: !breaches in
-  if List.length files < min_honeypots
+  if total < min_honeypots
   then
     breaches
     := [ Printf.sprintf
            "gate unaudited — only %d honeypot(s) present, need >= %d"
-           (List.length files)
+           total
            min_honeypots
        ];
+  let matched = ref 0
+  and certified = ref 0 in
   List.iter
     (fun f ->
        let o, disp = certify_file ctx ~cache_dir ~allow_cache:false f in
        print_line ctx "honeypot" f o disp;
-       if Outcome.is_certified o then add f "CERTIFIED (gate is broken)";
+       let certified_here = Outcome.is_certified o in
+       if certified_here
+       then (
+         incr certified;
+         add f "CERTIFIED (gate is broken)");
        match load_expect f with
        | None -> add f "missing .expect sidecar (expected outcome undeclared)"
+       | Some exp when not (List.mem exp valid_expect) ->
+         add
+           f
+           (Printf.sprintf
+              "invalid .expect value %S (allowed: %s)"
+              exp
+              (String.concat "/" valid_expect))
        | Some exp ->
          let got = Outcome.tag o in
-         if not (String.equal got exp)
+         if String.equal got exp && not certified_here
+         then incr matched
+         else if not (String.equal got exp)
          then add f (Printf.sprintf "expected %s but got %s" exp got))
     files;
   let breaches = List.rev !breaches in
+  let attestation =
+    Printf.sprintf
+      "honeypots: %d/%d matched, floor %d, %s"
+      !matched
+      total
+      min_honeypots
+      (if !certified = 0
+       then "none certified"
+       else Printf.sprintf "%d CERTIFIED" !certified)
+  in
   (match breaches with
-   | [] ->
-     logf
-       ctx
-       "  -> all %d honeypots matched their expected outcome; none certified"
-       (List.length files)
+   | [] -> logf ctx "  -> %s" attestation
    | bs ->
-     logf ctx "  -> BREACH (%d):" (List.length bs);
+     logf ctx "  -> BREACH (%d): %s" (List.length bs) attestation;
      List.iter (fun b -> logf ctx "       %s" b) bs);
-  breaches = [], breaches
+  breaches = [], breaches, attestation
 ;;
 
 let cases_phase ctx ~cache_dir dir =
@@ -318,7 +345,14 @@ let cmd_run ~cases_dir ~honeypots_dir ~cache_dir ~logs_root ~timeout ~allow_cach
   logf ctx "  cache: %s (%s)" cache_dir (if allow_cache then "enabled" else "disabled");
   logf ctx "  logdir: %s" logdir;
   logf ctx "";
-  let honeypots_ok, hp_breaches = honeypots_phase ctx ~cache_dir honeypots_dir in
+  (* Sweep any orphaned temp cache files (crashed writer) before touching the cache. *)
+  if allow_cache
+  then (
+    let swept = Cache.sweep_orphan_temps cache_dir in
+    if swept > 0 then logf ctx "  swept %d orphan temp file(s) from cache" swept);
+  let honeypots_ok, hp_breaches, hp_attestation =
+    honeypots_phase ctx ~cache_dir honeypots_dir
+  in
   logf ctx "";
   (* If a honeypot certified, abort red BEFORE trusting any case result. *)
   let tally, hits, misses, ship_stoppers, encode_errors =
@@ -334,6 +368,8 @@ let cmd_run ~cases_dir ~honeypots_dir ~cache_dir ~logs_root ~timeout ~allow_cach
   let get t = Option.value (Hashtbl.find_opt tally t) ~default:0 in
   let green = honeypots_ok && ship_stoppers = [] && encode_errors = [] in
   Printf.printf "oxsmt gate: %s\n" (if green then "GREEN" else "RED");
+  (* Always attest the audit ran, green or red (DESIGN.md §10). *)
+  Printf.printf "  %s\n" hp_attestation;
   if not honeypots_ok
   then (
     Printf.printf "  HONEYPOT BREACH (gate unaudited or broken):\n";
@@ -472,6 +508,28 @@ let cmd_selftest () =
   else (
     ok := false;
     print_endline "ser injectivity: FAIL");
+  (* Iff (Bool-sorted =) canonicalises under its own tag: distinct from a plain
+     conjunction of the same atoms, and commutative (p<->q = q<->p). *)
+  let canon s =
+    try Some (Canonical.canonical_query (Reader.of_string s)) with
+    | _ -> None
+  in
+  let decls = "(set-logic QF_UF)(declare-const p Bool)(declare-const q Bool)" in
+  let status = "(set-info :status unsat)(check-sat)" in
+  (match
+     ( canon (decls ^ "(assert (= p q))" ^ status)
+     , canon (decls ^ "(assert (= q p))" ^ status)
+     , canon (decls ^ "(assert (and p q))" ^ status) )
+   with
+   | Some iff_pq, Some iff_qp, Some and_pq ->
+     if String.equal iff_pq iff_qp && not (String.equal iff_pq and_pq)
+     then print_endline "iff canonical: OK (own tag, commutative)"
+     else (
+       ok := false;
+       print_endline "iff canonical: FAIL")
+   | _ ->
+     ok := false;
+     print_endline "iff canonical: FAIL (parse)");
   if !ok then 0 else 1
 ;;
 

@@ -24,6 +24,15 @@ Read this before touching `encoder.ml`. Lean 4.31.0, core only (no mathlib).
   classically regardless.
 - **Booleans**: SMT Bool modelled as Lean `Prop`. `and/or/not/=>` map to
   `∧ ∨ ¬ →`. A Bool constant is a `Prop` binder; an assert of it is a hypothesis.
+- **Bool-sorted `=` (iff)** and **`distinct` over Bool** (exp9, M0-gate-iff): SMT
+  `=` over Bool is pairwise iff; the reader's `normalize` pass rewrites Bool
+  `Eq` to a dedicated `Iff` node (chains `(= p q r)` become the pairwise `And`
+  of iffs, same as other relations). Lean encoding: `Iff` → `↔`; grind closes
+  iff goals, iff-chains, and iff mixed with theory atoms directly (no setup).
+  `distinct` over Bool is pairwise `≠` (Ne on Prop) — grind closes it (three
+  distinct Bools ⇒ unsat by pigeonhole). SAT direction: a Bool model value is
+  `True`/`False` (Prop) and `↔`/`≠` over concrete Props close by `decide`.
+  Iff/distinct-Bool are the only nodes touched; everything else is unchanged.
 
 ## Outcome detection
 
@@ -98,5 +107,13 @@ too — old keys are otherwise stale (it is folded into the key).
   collision-bug risk in the trust-critical path, so it is deferred. The dominant
   benefit (never re-running Lean on a byte-identical or reformatted file) is
   already captured by operand/assertion sorting + canonical printing.
-- Bool-sorted equality (`(= p q)` with p,q Bool) is currently rejected as
-  Unsupported; add `↔` encoding if a benchmark needs it.
+## encoding_version and iff (M0-gate-iff)
+
+`encoding_version` stays `enc-v1` after adding iff support. The bump rule is:
+bump iff previously-supported queries emit *different* Lean. Iff is purely NEW
+coverage — Bool-sorted `=` used to be rejected UNSUPPORTED (never certified,
+never cached), so no stale entry can exist for it. Every previously-supported
+query contains no Bool `=`, so `normalize` leaves it unchanged and the encoder
+and canonical form emit byte-identical output (only an `Iff` branch was added
+alongside the untouched `Eq` branch). Hence old cache entries remain valid and a
+bump would needlessly discard them.

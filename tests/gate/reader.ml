@@ -9,7 +9,9 @@
 
    Supported commands: set-logic, set-info, declare-sort (arity 0), declare-fun,
    declare-const, assert, check-sat, exit. Supported terms: true false, and or not =>,
-   ite, = distinct, <= < >= >, + - *, integer numerals, let, plus declared symbols. *)
+   ite, = distinct, <= < >= >, + - *, integer numerals, let, plus declared symbols. [=]
+   over Bool operands is iff: [normalize] rewrites it to the [Iff] node (chains desugar
+   pairwise); [distinct] over Bool is pairwise [<>]. *)
 
 open Ast
 
@@ -179,14 +181,17 @@ let rec sort_of env (t : term) : sort =
     expect env s el;
     s
   | Eq (a, b) ->
+    (* Bool-sorted [=] is rewritten to [Iff] by [normalize] before this runs; a residual
+       Bool [Eq] would be Lean Prop-equality, so guard against it. *)
     let s = sort_of env a in
-    if
-      match s with
-      | Bool -> true
-      | _ -> false
-    then
-      unsupportedf "equality between Bool terms; use <=>/= at formula level differently";
+    (match s with
+     | Bool -> malformedf "internal: Bool-sorted Eq should have been normalized to Iff"
+     | _ -> ());
     expect env s b;
+    Bool
+  | Iff (a, b) ->
+    expect env Bool a;
+    expect env Bool b;
     Bool
   | Distinct xs ->
     (match xs with
@@ -243,6 +248,37 @@ and describe t =
   | App (n, _) -> Printf.sprintf "application of %s" n
   | Int_lit n -> Printf.sprintf "numeral %s" n
   | _ -> "subterm"
+;;
+
+(* Rewrite Bool-sorted [Eq] to [Iff] (SMT [=] over Bool is iff). Runs after [read_term]
+   and before the assert-level sort check; recurses fully because a Bool equality can be
+   nested (e.g. inside [and]/[ite]). Post-order so the [sort_of] probe on an [Eq]'s
+   operand sees already-rewritten children. *)
+let rec normalize env (t : term) : term =
+  match t with
+  | True | False | Int_lit _ | Const _ -> t
+  | App (f, args) -> App (f, List.map (normalize env) args)
+  | Not a -> Not (normalize env a)
+  | And xs -> And (List.map (normalize env) xs)
+  | Or xs -> Or (List.map (normalize env) xs)
+  | Implies (a, b) -> Implies (normalize env a, normalize env b)
+  | Ite (c, th, el) -> Ite (normalize env c, normalize env th, normalize env el)
+  | Eq (a, b) ->
+    let a = normalize env a
+    and b = normalize env b in
+    (match sort_of env a with
+     | Bool -> Iff (a, b)
+     | _ -> Eq (a, b))
+  | Iff (a, b) -> Iff (normalize env a, normalize env b)
+  | Distinct xs -> Distinct (List.map (normalize env) xs)
+  | Le (a, b) -> Le (normalize env a, normalize env b)
+  | Lt (a, b) -> Lt (normalize env a, normalize env b)
+  | Ge (a, b) -> Ge (normalize env a, normalize env b)
+  | Gt (a, b) -> Gt (normalize env a, normalize env b)
+  | Add xs -> Add (List.map (normalize env) xs)
+  | Sub xs -> Sub (List.map (normalize env) xs)
+  | Neg a -> Neg (normalize env a)
+  | Mul xs -> Mul (List.map (normalize env) xs)
 ;;
 
 (* ---- command reader ---- *)
@@ -303,7 +339,7 @@ let of_string (src : string) : query =
          let params, ret = read_signature env params ret in
          declare_fun name params ret
        | Sexp.List [ Sexp.Atom "assert"; body ] ->
-         let term = read_term env body in
+         let term = normalize env (read_term env body) in
          (* sort-check: assertions must be Bool *)
          (match sort_of env term with
           | Bool -> ()

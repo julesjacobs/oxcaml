@@ -62,6 +62,7 @@ let rec cterm (t : term) : ctree =
   | Implies (a, b) -> L [ A "=>"; cterm a; cterm b ]
   | Ite (c, th, el) -> L [ A "ite"; cterm c; cterm th; cterm el ]
   | Eq (a, b) -> L (A "=" :: sort_children [ cterm a; cterm b ])
+  | Iff (a, b) -> L (A "iff" :: sort_children [ cterm a; cterm b ])
   | Distinct xs -> L (A "distinct" :: sort_children (List.map cterm xs))
   | Le (a, b) -> L [ A "<="; cterm a; cterm b ]
   | Lt (a, b) -> L [ A "<"; cterm a; cterm b ]

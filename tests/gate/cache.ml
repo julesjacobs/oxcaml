@@ -25,6 +25,37 @@ let rec mkdir_p dir =
     | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
 ;;
 
+(* Entry files are [<hash>.sexp]; atomic writes stage as [<hash>.sexp.tmp.<pid>] (see
+   [store]). This infix identifies a staging file and nothing else. *)
+let temp_infix = ".sexp.tmp."
+
+let contains ~needle s =
+  let nl = String.length needle
+  and sl = String.length s in
+  let rec loop i = i + nl <= sl && (String.sub s i nl = needle || loop (i + 1)) in
+  nl = 0 || loop 0
+;;
+
+(* Remove staging files a crashed writer may have left behind. Scoped strictly to [dir]
+   and to names carrying [temp_infix]; committed [<hash>.sexp] entries and anything else
+   are never touched. *)
+let sweep_orphan_temps dir : int =
+  if not (Sys.file_exists dir && Sys.is_directory dir)
+  then 0
+  else
+    Sys.readdir dir
+    |> Array.to_list
+    |> List.filter (fun f -> contains ~needle:temp_infix f)
+    |> List.fold_left
+         (fun n f ->
+            try
+              Sys.remove (Filename.concat dir f);
+              n + 1
+            with
+            | _ -> n)
+         0
+;;
+
 type key =
   { hash : string
   ; query_hash : string

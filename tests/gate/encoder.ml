@@ -78,6 +78,7 @@ let rec enc names (t : term) : string =
   | Ite (c, th, el) ->
     Printf.sprintf "(if %s then %s else %s)" (enc names c) (enc names th) (enc names el)
   | Eq (a, b) -> Printf.sprintf "(%s = %s)" (enc names a) (enc names b)
+  | Iff (a, b) -> Printf.sprintf "(%s ↔ %s)" (enc names a) (enc names b)
   | Distinct xs -> enc_distinct names xs
   | Le (a, b) -> Printf.sprintf "(%s ≤ %s)" (enc names a) (enc names b)
   | Lt (a, b) -> Printf.sprintf "(%s < %s)" (enc names a) (enc names b)

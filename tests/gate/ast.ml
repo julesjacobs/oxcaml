@@ -29,7 +29,8 @@ type term =
   | Or of term list
   | Implies of term * term
   | Ite of term * term * term
-  | Eq of term * term
+  | Eq of term * term (* over non-Bool sorts; Bool-sorted [=] becomes [Iff] *)
+  | Iff of term * term (* Bool-sorted [=] (SMT [=] over Bool is pairwise iff) *)
   | Distinct of term list
   | Le of term * term
   | Lt of term * term
