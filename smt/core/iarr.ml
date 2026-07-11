@@ -1,8 +1,8 @@
 (* Backed by ['a array], but the type is abstract: the only bridges to the array are the
    two [%identity] externals below, and [inj]/[prj] are never exported (iarr.mli exposes
    neither). Covariance (+'a) is asserted here because the value is never mutated through
-   this module (I1/I2); stock OCaml's [array] is invariant, so the assertion is what buys
-   us the sound covariant view. *)
+   this module (INVARIANTS.md I7); stock OCaml's [array] is invariant, so the assertion is
+   what buys us the sound covariant view. *)
 
 type +'a t
 

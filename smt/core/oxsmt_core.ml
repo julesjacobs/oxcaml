@@ -18,3 +18,13 @@ module Env = Env
 module Term = Term
 module Context = Context
 module Theory_view = Theory_view
+
+(** Test-only whitebox hook into the hash-cons bucket primitives (R1). NOT part of the
+    frozen public surface and NOT for solver code — it exists so the core test suite can
+    exercise [Node.equal_node] / [Node.hash_node] in isolation, i.e. detect a scalar
+    payload dropped from bucket comparison alone (which differing hashes would otherwise
+    mask) or from hashing alone. Read-only: it cannot construct or mutate a term. *)
+module For_test = struct
+  let equal_node (a : Term.t) (b : Term.t) = Node.equal_node a.node b.node
+  let hash_node (a : Term.t) = Node.hash_node a.node
+end

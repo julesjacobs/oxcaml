@@ -4,7 +4,15 @@
     mid-solve — so every term shares the tag stream (I6) and hash-consing. These smart
     constructors are the sole public construction path (I2): each sort-checks, normalizes,
     and hash-conses; ill-sorted operands raise {!Term.Sort_error}, overflowing arithmetic
-    raises {!Term.Overflow} before any interning. *)
+    raises {!Term.Overflow} before any interning.
+
+    {b WARNING — single-Context contract.} A [Term.t] belongs to the [Context] that built
+    it: identity (tag) is assigned by that context's counter. Mixing terms from two
+    different contexts in one construction, comparison, or {!Term.equal} is
+    {b undefined behavior} — tags collide across contexts, so {!Term.equal} and the
+    hash-cons table silently misbehave. v1 has no per-context brand enforcing this (a
+    brand needs an interface unfreeze — flagged for the M1 THEORY-freeze checkpoint);
+    until then it is a caller contract. Use one [Context] per session. *)
 
 type t
 

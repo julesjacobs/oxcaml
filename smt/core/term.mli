@@ -5,6 +5,12 @@
     [equal]/[compare]/[hash] are O(1) via the hash-cons [tag]; equal terms are physically
     equal.
 
+    {b WARNING — single-Context contract.} [equal]/[compare]/[hash] use the [tag], which
+    is unique only {e within} the {!Context} that built the term. Comparing or combining
+    terms from two different contexts is {b undefined behavior} (cross-context tags
+    collide). v1 has no per-context brand (flagged for the M1 THEORY-freeze checkpoint);
+    use one [Context] per session — see {!Context}.
+
     Booleans are terms: connectives ([And]/[Or]/[Not]/[Ite]/Bool-sorted [Eq]) are
     Bool-sorted nodes (Decision 2). Arithmetic is a single normalized linear form
     ([Arith]); order comparisons lower to one [Le] atom ([arg <= 0]), gcd-tightened

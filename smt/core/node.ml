@@ -7,7 +7,7 @@
    Construction is effect-free until [hashcons]: every constructor computes and
    overflow-checks its normalized node first, and only then interns it, so a raised
    [Overflow]/[Sort_error]/[Unsupported] never leaves partial state in the intern table
-   (ADR-0003 Overflow/Unsupported contract; I7/I8). *)
+   (ADR-0003 Overflow/Unsupported contract; INVARIANTS.md I8). *)
 
 exception Overflow
 exception Sort_error of string

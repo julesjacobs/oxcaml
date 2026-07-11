@@ -4,8 +4,8 @@
     The type is {b abstract} and covariant: values can only be built by the two copying
     constructors below, and there is no mutator and no [to_array]. No read path hands back
     the backing array and no write path exists, so a term's hash-consed [Iarr] payload
-    cannot be corrupted in place (INVARIANTS.md I1/I2). Covariance is sound precisely
-    because the value is immutable.
+    cannot be corrupted in place (INVARIANTS.md I7; upholds I1/I2). Covariance is sound
+    precisely because the value is immutable.
 
     There is deliberately {b no} aliasing / unsafe constructor on this public surface. A
     no-copy cast lives in the library-private [Iarr_unsafe] module (dune

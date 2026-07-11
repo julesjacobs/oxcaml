@@ -63,6 +63,7 @@ let bool_vars =
 ;;
 
 let f_sym = Env.declare_fun env "f" (Rank.create [ Sort.int ] Sort.int)
+let f2_sym = Env.declare_fun env "f2" (Rank.create [ Sort.int ] Sort.int)
 let g_sym = Env.declare_fun env "g" (Rank.create [ Sort.int; Sort.int ] Sort.int)
 let p_sym = Env.declare_fun env "pred" (Rank.create [ Sort.int ] Sort.bool)
 
@@ -137,7 +138,22 @@ let test_symbol_sort_env () =
   check "rank lookup" (Rank.arity (Env.rank env f_sym) = 1);
   check "reserved div declared" (Rank.arity (Env.rank env (Env.div_sym env)) = 2);
   check_raises "rank of undeclared raises" (fun () ->
-    Env.rank env (Symbol.intern "never_declared_xyz"))
+    Env.rank env (Symbol.intern "never_declared_xyz"));
+  (* R2: re-declaring a reserved symbol must RAISE, not clobber the reserved rank. *)
+  check_raises "declare_fun \"div\" raises Reserved_symbol" (fun () ->
+    Env.declare_fun env "div" (Rank.create [ Sort.int ] Sort.int));
+  check_raises "declare_fun \"mod\" raises Reserved_symbol" (fun () ->
+    Env.declare_fun env "mod" (Rank.create [ Sort.int ] Sort.int));
+  check_raises "declare_sort \"div\" raises Reserved_symbol" (fun () ->
+    Env.declare_sort env "div");
+  (match Env.declare_fun env "div" (Rank.create [] Sort.int) with
+   | exception Env.Reserved_symbol "div" -> check "Reserved_symbol carries the name" true
+   | exception _ -> check "Reserved_symbol carries the name" false
+   | _ -> check "Reserved_symbol carries the name" false);
+  (* The reserved rank survived the rejected re-declaration. *)
+  check
+    "reserved div rank intact after rejected redeclare"
+    (Rank.arity (Env.rank env (Env.div_sym env)) = 2)
 ;;
 
 (* ================================================================== *)
@@ -371,6 +387,59 @@ let test_scalar_distinctness () =
           (Context.app c f_sym [ Context.int_const c 0 ])));
   (* coefficient distinctness: 2x vs 3x. *)
   check "2x <> 3x" (not (Term.equal (Context.mul_const c 2 x) (Context.mul_const c 3 x)))
+;;
+
+(* ================================================================== *)
+(* R1 — whitebox test of the bucket primitives in isolation.
+
+   The behavioral test above can be fooled: dropping a scalar from equal_node ALONE is
+   masked because hash_node still separates the terms into different buckets, so
+   equal_node's collision-time check is never consulted; and dropping a scalar from
+   hash_node ALONE is behaviorally invisible (equal_node still separates them). So we test
+   each primitive directly via the For_test hook:
+   - equal_node: two nodes differing ONLY in one scalar payload must compare unequal
+     regardless of hashing/bucketing.
+   - hash_node: a scalar family must not all hash to one value (the payload must influence
+     the hash), which kills a hash-only payload drop. *)
+
+let test_bucket_primitives_whitebox () =
+  print_endline "R1 whitebox: equal_node / hash_node per scalar family:";
+  let c = Context.create env in
+  let x = Context.const c int_vars.(0) in
+  let neq name a b = check name (not (For_test.equal_node a b)) in
+  (* equal_node must distinguish, in isolation from hashing, terms differing in ONE scalar
+     payload. *)
+  neq "equal_node: Int_const scalar" (Context.int_const c 2) (Context.int_const c 3);
+  neq
+    "equal_node: Bool_const scalar"
+    (Context.bool_const c true)
+    (Context.bool_const c false);
+  neq "equal_node: App symbol" (Context.app c f_sym [ x ]) (Context.app c f2_sym [ x ]);
+  neq
+    "equal_node: Arith const"
+    (Context.add c x (Context.int_const c 2))
+    (Context.add c x (Context.int_const c 3));
+  neq "equal_node: Arith coeff" (Context.mul_const c 2 x) (Context.mul_const c 3 x);
+  (* hash_node must depend on each scalar payload: a family is not all one hash. *)
+  let distinct_hashes ts =
+    List.length (List.sort_uniq Int.compare (List.map For_test.hash_node ts)) > 1
+  in
+  check
+    "hash_node: Int_const family"
+    (distinct_hashes (List.init 10 (fun k -> Context.int_const c k)));
+  check
+    "hash_node: Bool_const"
+    (distinct_hashes [ Context.bool_const c true; Context.bool_const c false ]);
+  check
+    "hash_node: App symbol"
+    (distinct_hashes [ Context.app c f_sym [ x ]; Context.app c f2_sym [ x ] ]);
+  check
+    "hash_node: Arith const family"
+    (distinct_hashes
+       (List.init 6 (fun k -> Context.add c x (Context.int_const c (k + 1)))));
+  check
+    "hash_node: Arith coeff family"
+    (distinct_hashes (List.init 6 (fun k -> Context.mul_const c (k + 2) x)))
 ;;
 
 (* ================================================================== *)
@@ -656,6 +725,7 @@ let () =
   test_overflow_unsupported ();
   test_hashcons_sharing ();
   test_scalar_distinctness ();
+  test_bucket_primitives_whitebox ();
   test_theory_view ();
   test_property_debug_check ();
   test_property_equal_phys ();

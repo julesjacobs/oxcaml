@@ -5,7 +5,14 @@
 
     Names live in a process-global table keyed by id (this is why [name] needs no
     environment); ids are handed out in first-encounter order. Ranks live in {!Env}, not
-    here. *)
+    here.
+
+    {b Deviation from ADR-0003 Decision 4:} the ADR pictured interning living in [Env]; we
+    moved it to this process-global table so [name : t -> string] can be environment-free
+    (the frozen signature takes no [Env]). I6 is unaffected — term identity is the
+    per-[Context] tag stream, not the symbol id, and the cross-run cache key is computed
+    gate-side (ADR-0003 Decision 4); global interning is idempotent-by-name, so a fixed
+    declaration sequence still yields identical ids across runs. *)
 
 type t = private int
 
