@@ -23,12 +23,18 @@ Sorts, hash-consed terms, smart constructors, symbol environments. Owns the
 path so well-sortedness and hash-consing hold by construction (I1, I2).
 Representation frozen by ADR-0003. **Status: implemented** (was skeleton). Public
 modules `Iarr`, `Symbol`, `Sort`, `Rank`, `Env`, `Term` (with `Term.Debug.check`),
-`Context` (the smart-constructor surface), `Theory_view`; the private type's
-construction machinery lives in the library-private `Node` module (dune
-`private_modules node iarr_unsafe`) so `Context` is the sole build path. Frozen
-`.mli`s: `iarr`, `symbol`, `sort`, `rank`, `env`, `term`, `context`, `theory_view`.
-Unit + property tests under `smt/core/test/` (`make core-test`). Owner: TASKS.md
-M0-core.
+`Context` (the smart-constructor surface), `Theory_view`; plus the ADR-0005 THEORY
+vocabulary `Atom`, `Lit` (packed literal currency), `Explanation` (premise-set +
+`Rule_tag`), `Theory` (the `THEORY` module type + `effort`/`check_result`), and
+`Model` (candidate assignment). The private type's construction machinery lives in
+the library-private `Node` module (dune `private_modules node iarr_unsafe`;
+`explanation`/`theory` are `modules_without_implementation` — pure signatures) so
+`Context` is the sole build path. Frozen `.mli`s (12, `FROZEN.sha256`): ADR-0003's
+`iarr`/`symbol`/`sort`/`term`/`context` (5) plus ADR-0005 Tranche-A's `env`, `rank`,
+`theory_view`, `atom`, `lit`, `explanation`, `theory` (7). `model.mli` (Tranche B, M2)
+and `smt/solver/sat.mli` (Tranche C, M4) freeze later — see
+`decisions/adr-0005-freeze-plan.md`. Unit + property tests under `smt/core/test/`
+(`make core-test`). Owner: TASKS.md M0-core, M1-brand-checkpoint (ADR-0005).
 
 ## smt/preprocess (`oxsmt_preprocess`)
 Desugaring passes (ADR-0003 §5 pipeline invariants) + Tseitin clausifier, over

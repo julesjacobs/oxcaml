@@ -22,14 +22,24 @@ cd "$(dirname "$0")/.."   # repo root (tools/ is one level down)
 MANIFEST=FROZEN.sha256
 SPINE=SPINE.md
 
-# Frozen at the M0-core merge (ADR-0003). env.mli / rank.mli / theory_view.mli
-# freeze later, at the M1 THEORY freeze.
+# Frozen at the M0-core merge (ADR-0003): sort/symbol/term/context/iarr.
+# Frozen at the M1 THEORY freeze (ADR-0005 Tranche A): env/rank/theory_view (the
+# scheduled three) + the new THEORY vocabulary atom/lit/explanation/theory.
+# model.mli (Tranche B, M2) and sat.mli (Tranche C, M4) freeze later — see
+# decisions/adr-0005-freeze-plan.md.
 FROZEN_FILES=(
   smt/core/sort.mli
   smt/core/symbol.mli
   smt/core/term.mli
   smt/core/context.mli
   smt/core/iarr.mli
+  smt/core/env.mli
+  smt/core/rank.mli
+  smt/core/theory_view.mli
+  smt/core/atom.mli
+  smt/core/lit.mli
+  smt/core/explanation.mli
+  smt/core/theory.mli
 )
 
 case "${1:-check}" in

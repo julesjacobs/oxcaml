@@ -11,3 +11,7 @@ decision requires the adversarial-review ritual (DESIGN.md §10, §11).
   frozen core. [accepted (frozen)]
 - ADR-0004 — Task branch naming: `oxsmt/task/<name>` collides with the `oxsmt`
   trunk ref in git; amended to `task/<name>`. [accepted]
+- ADR-0005 — THEORY plugin interface: the frozen plugin signature (EUF/LIA/N-O),
+  `Atom`/`Lit`/`Explanation` currency, `check(effort)`/lazy `explain`, `Split`
+  disjunctions, engine `CONTRACT-POISON`. [accepted (Tranche-A frozen)];
+  freeze schedule in `adr-0005-freeze-plan.md`.

@@ -68,24 +68,34 @@ ADR rather than comply. Read DESIGN.md for the full plan (start with §1, §3, �
 Hash-checked in CI; changing one requires an explicit unfreeze + adversarial
 review by a fresh agent (DESIGN.md §10).
 
-**Hash-frozen at M0-core (ADR-0003).** Five interfaces are frozen by content
-hash in `FROZEN.sha256` (repo root):
+**Twelve interfaces are frozen** by content hash in `FROZEN.sha256` (repo root):
 
-- `smt/core/sort.mli`
-- `smt/core/symbol.mli`
-- `smt/core/term.mli`
-- `smt/core/context.mli`
-- `smt/core/iarr.mli`
+- M0-core (ADR-0003): `sort.mli`, `symbol.mli`, `term.mli`, `context.mli`, `iarr.mli`
+- M1 THEORY freeze (ADR-0005 Tranche A): `env.mli`, `rank.mli`, `theory_view.mli`,
+  `atom.mli`, `lit.mli`, `explanation.mli`, `theory.mli` (all under `smt/core/`)
 
 `make check-frozen` (run first inside `make test`, via `tools/check_frozen.sh`)
 recomputes their sha256 and diffs the manifest, going **red** on any drift.
-`SPINE.md` (regenerate with `make spine`) is the master's concatenated view of
-these five.
+`SPINE.md` (regenerate with `make spine`) is the master's concatenated view of the
+frozen set.
 
 **Changing a frozen `.mli` requires all of:** (1) an updated `FROZEN.sha256`
 (`tools/check_frozen.sh generate`), (2) an unfreeze ADR in `decisions/`, and
 (3) an adversarial review by a fresh agent. Otherwise CI (`make check-frozen`)
 goes red.
 
-`env.mli` / `rank.mli` / `theory_view.mli` are **not** frozen yet — they freeze
-at the M1 `THEORY` freeze, when this list and the manifest are extended.
+**Remaining ADR-0005 freeze tranches** (schedule in
+`decisions/adr-0005-freeze-plan.md`):
+- Tranche B (M2, with the EUF adapter): `smt/core/model.mli` — its `value` variant's
+  `Uninterp` encoding is pinned by EUF (open q3); `model.mli`/`model.ml` exist now
+  but are deliberately **not** frozen until M2.
+- Tranche C (M4, with CDCL(T) integration): `smt/solver/sat.mli`, frozen with the
+  theory-callback seam (trail-extension notify, theory-literal enqueue w/ lazy
+  reason, conflict injection, backtrack notify) + ADR-0006's `trace.on_input`/
+  `on_unit` DRAT hooks, in one combined event.
+
+**`CONTRACT-POISON` is an engine obligation (M4):** any exception escaping a THEORY
+op bricks that theory instance — the engine discards it and degrades the query to
+`unknown` (I8), uniform across theories (EUF needs no mechanism; LIA's `poisoned`
+flag is defense-in-depth). It is ADR-level discipline, deliberately **not** baked
+into the frozen `theory.mli`.

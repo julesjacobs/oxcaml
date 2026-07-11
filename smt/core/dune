@@ -8,6 +8,10 @@
 ; [iarr_unsafe] holds the optional no-copy [Iarr] cast, private for the same
 ;   reason (ADR-0003 fixes B1).
 
+; [explanation] and [theory] are pure signatures (types + a module type, no
+;   values) — the ADR-0005 THEORY vocabulary; they have no [.ml].
+
 (library
  (name oxsmt_core)
- (private_modules node iarr_unsafe))
+ (private_modules node iarr_unsafe)
+ (modules_without_implementation explanation theory))

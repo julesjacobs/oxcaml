@@ -249,3 +249,278 @@ val compare : ('a -> 'a -> int) -> 'a t -> 'a t -> int
     distinct arrays hash distinctly (ADR-0003 required #8). *)
 val hash_fold : (int -> 'a -> int) -> int -> 'a t -> int
 
+=== smt/core/env.mli ===
+
+(** Symbol environment (ADR-0003 Decision 6): maps function symbols to their {!Rank.t} and
+    tracks declared uninterpreted sorts. One [Env.t] backs a session's {!Context.t}.
+    [create] pre-declares the reserved [div]/[mod] built-in symbols (ADR-0003 Decision 5),
+    reachable via {!div_sym}/{!mod_sym} for the div/mod-elimination pass.
+
+    Symbol ids themselves are process-global (see {!Symbol}); an [Env] only owns the
+    ranks.
+
+    {b Shared name/symbol namespace (parser-layer obligation).} Because symbols are
+    interned by name in one global table, sort names and function names share a namespace:
+    [declare_sort t "S"] and [declare_fun t "S" r] return the {e same} symbol id. v1
+    uninterpreted sorts are rare and 0-arity, so this is accepted; a front end (e.g. the
+    SMT-LIB parser) that needs SMT-LIB's separate sort/function namespaces must
+    disambiguate names before calling here. *)
+
+type t
+
+(** Raised by {!declare_sort}/{!declare_fun} when asked to (re)declare a reserved built-in
+    name ([div] or [mod]); protects the pre-declared reserved ranks from being clobbered
+    (R2). *)
+exception Reserved_symbol of string
+
+(** [create ()] builds a fresh environment with [div]/[mod] pre-declared. *)
+val create : unit -> t
+
+(** [declare_sort t name] interns [name] as a 0-arity uninterpreted sort symbol (v1:
+    uninterpreted sorts are 0-arity). Raises {!Reserved_symbol} if [name] is [div]/[mod]. *)
+val declare_sort : t -> string -> Symbol.t
+
+(** [declare_fun t name rank] interns [name] and records its rank. Re-declaring a
+    (non-reserved) name overwrites the rank. Raises {!Reserved_symbol} if [name] is
+    [div]/[mod]. *)
+val declare_fun : t -> string -> Rank.t -> Symbol.t
+
+(** [rank t sym] is the recorded rank of [sym]. Raises [Not_found] if [sym] has no rank in
+    [t] (e.g. an undeclared symbol or a sort symbol). {!Context.app} turns this into a
+    [Term.Sort_error]. *)
+val rank : t -> Symbol.t -> Rank.t
+
+(** The reserved [div]/[mod] symbols, ranks [(Int, Int) -> Int]. Deviation from the ADR's
+    four-function [Env] sketch: exposed so {!Context} can build [div]/[mod] applications
+    without re-interning by name. *)
+val div_sym : t -> Symbol.t
+
+val mod_sym : t -> Symbol.t
+
+=== smt/core/rank.mli ===
+
+(** The signature of an uninterpreted function symbol (ADR-0003 Decision 6): argument
+    sorts and result sort. A predicate is a symbol whose [codomain] is [Sort.bool]; a
+    nullary constant or program variable has an empty [domain]. Ranks live in {!Env},
+    keyed by symbol. *)
+
+type t =
+  { domain : Sort.t Iarr.t
+  ; codomain : Sort.t
+  }
+
+val create : Sort.t list -> Sort.t -> t
+val arity : t -> int
+
+=== smt/core/theory_view.mli ===
+
+(** How the solver reads a term for theory dispatch (ADR-0003 Decision 2). The [App] vs
+    [Arith]/[Le] split is the load-bearing signal: EUF congruence-closes only [App];
+    [Arith]/[Le] are opaque leaves owned by LIA. *)
+
+type atom =
+  | Equality of Term.t * Term.t (* non-Bool Eq: uninterpreted / shared equality *)
+  | Le_zero of Term.t (* LIA: [term <= 0] *)
+  | Predicate of Symbol.t * Term.t Iarr.t (* Bool-codomain App *)
+  | Bool_lit of bool
+
+(** [is_atom t] is the frozen Decision-2 predicate: for a Bool-sorted [t], true unless
+    [top(t)] is [And]/[Or]/[Not], a result-Bool [Ite], or an [Eq] whose {e arguments} are
+    Bool-sorted (a disguised iff — a connective the clausifier descends into, never an
+    opaque EUF atom). Non-Bool terms are not atoms. *)
+val is_atom : Term.t -> bool
+
+(** [atom t] classifies an atom; requires [is_atom t]. *)
+val atom : Term.t -> atom
+
+(** [is_app t] holds for [App] nodes — the terms EUF congruence applies to. *)
+val is_app : Term.t -> bool
+
+(** [linear t] is the linear form when [t] is an [Arith] node, else [None]. *)
+val linear : Term.t -> Term.linear option
+
+=== smt/core/atom.mli ===
+
+(** Engine-assigned theory-atom id — the per-assertion currency across the THEORY seam
+    (ADR-0005 Decision 2). A dense [private int], 1:1 with the SAT variable the clausifier
+    gives the atom; identity is the id, so [equal]/[compare]/[hash] are O(1) and
+    deterministic (INVARIANTS.md I6). A theory reasons in terms of [Atom.t]/[Lit.t] and
+    receives the underlying [Term.t] only once, at
+    {!Oxsmt_core.Theory.THEORY.register_atom} — this keeps per-assertion traffic a packed
+    int and designs the single-[Context] hazard (core-review R3) off the hot path.
+
+    {b Allocation is the engine's (ADR-0005 CONTRACT-ATOM).} The engine allocates
+    [Atom.t]s 1:1 with SAT variables via a deterministic monotonic counter (I6); this
+    module only provides the typed wrapper {!of_int} and the id-keyed containers. Frozen
+    at the M1 THEORY freeze (ADR-0005 Tranche A). *)
+
+type t = private int
+
+(** [of_int v] tags SAT-variable id [v] as an atom id. The engine's atom allocator is the
+    sole intended caller (CONTRACT-ATOM: called once per theory atom, 1:1 with the SAT
+    var, in monotonic allocation order — I6). A theory plugin never calls this: it
+    receives its atoms through {!Oxsmt_core.Theory.THEORY.register_atom}. *)
+val of_int : int -> t
+
+val equal : t -> t -> bool
+val compare : t -> t -> int
+val hash : t -> int
+
+module Set : Set.S with type elt = t
+module Map : Map.S with type key = t
+module Table : Hashtbl.S with type key = t
+
+=== smt/core/lit.mli ===
+
+(** A signed theory literal — an {!Atom.t} plus a polarity, packed into a [private int]
+    (MiniSat-style low bit: [0] positive, [1] negative), mirroring {!Oxsmt_solver.Sat}'s
+    literal encoding. [equal]/[compare]/[hash] are O(1) (INVARIANTS.md I6). This is the
+    polarity-carrying currency the engine asserts into a theory ([assert_lit]) and that
+    theories return as propagations, conflict premises, and explanation premises (ADR-0005
+    D2/D3/D7).
+
+    Frozen at the M1 THEORY freeze (ADR-0005 Tranche A). *)
+
+type t = private int
+
+(** [make a positive] is the literal for atom [a] with the given polarity
+    ([positive = true] is the positive literal). *)
+val make : Atom.t -> bool -> t
+
+(** The underlying atom. *)
+val atom : t -> Atom.t
+
+(** [true] for a positive literal. *)
+val sign : t -> bool
+
+(** [negate l] flips the polarity, keeping the atom. *)
+val negate : t -> t
+
+val equal : t -> t -> bool
+val compare : t -> t -> int
+val hash : t -> int
+
+module Set : Set.S with type elt = t
+module Map : Map.S with type key = t
+
+=== smt/core/explanation.mli ===
+
+(** The uniform reason currency (DESIGN.md §7; INVARIANTS.md I4): every derived fact — a
+    theory propagation or a theory conflict — is justified by a
+    {b premise set + rule tag}. The engine turns a conflict's premises into the learned
+    clause and resolves them against the trail for 1UIP and selector-based unsat cores
+    (§7).
+
+    Frozen at the M1 THEORY freeze (ADR-0005 Tranche A). Pure signature — no
+    implementation module. *)
+
+(** A certificate-shaped classifier of a derived fact. {b Payload-free, permanently}
+    (ADR-0006): the M5 certificate witnesses (Farkas vectors, congruence chains) live in
+    the off-core [smt/certificate/] module, never as a tag payload — this keeps LIA's
+    rational type off the frozen core on the hot 1UIP path (I3). A future theory may add
+    {e new constructors} (e.g. datatype rules); that is an additive enum unfreeze,
+    orthogonal to the no-payload rule. *)
+module Rule_tag : sig
+  type t =
+    | Trivial (** a tautology / constant-folded fact *)
+    | Euf_congruence (** EUF: a proof-forest transitivity + congruence chain *)
+    | Lia_bound (** LIA: a simplex bound propagation *)
+    | Lia_farkas (** LIA: an infeasible row, Farkas-certified *)
+    | Lia_branch (** LIA: a branch-and-bound case split *)
+    | Shared_eq
+    (** Nelson–Oppen: an equality entailed in one theory, replayed in another *)
+end
+
+(** The premises are asserted theory literals currently true on the trail; their
+    conjunction T-entails the explained fact (is T-unsat, for a conflict). For a
+    propagated literal they are {b precedence-valid} (ADR-0005 CONTRACT-EX: each assigned
+    strictly before the propagated literal) and in deterministic order (C2). *)
+type t =
+  { premises : Lit.t list
+  ; rule : Rule_tag.t
+  }
+
+=== smt/core/theory.mli ===
+
+(** The frozen THEORY plugin signature (ADR-0005) — the seam the CDCL(T) engine (M1/M4)
+    drives and that EUF (M2) and LIA (M3) implement, through a thin adapter over their
+    [Term]/[Context]-facing engines. Nelson–Oppen combination (M4) is itself a THEORY:
+    [Combine (A) (B)] presents one THEORY to the engine (functor packaging à la Alt-Ergo
+    [CC(X)]; engine-observable semantics are Z3's model-based combination).
+
+    All shared vocabulary ([Atom]/[Lit]/[Explanation]/[Model]) lives in [core] because the
+    module DAG forbids [theories → solver]. Frozen at the M1 THEORY freeze (ADR-0005
+    Tranche A). Pure signature — no implementation module.
+
+    {b Determinism (INVARIANTS.md I6, ADR-0005 C1–C8)} and the soundness contracts
+    CONTRACT-EX (precedence-valid explanations), CONTRACT-SPLIT (a [Split] is a clausified
+    disjunction over ≥2 distinct atoms), CONTRACT-MODEL, and CONTRACT-POISON (an
+    {e engine} obligation: any exception escaping a THEORY op bricks the instance and
+    degrades the query to [unknown], I8) are stated in the ADR; they are discipline on the
+    caller/implementer, not encoded in this signature. *)
+
+(** The effort of a {!THEORY.check}. *)
+type effort =
+  | Propagate
+  (** cheap, in-search: theory propagation + fast inconsistency; never returns [Sat] or
+      [Split]. *)
+  | Final
+  (** the SAT core has a full boolean model: the theory must be complete (LIA
+      branch-and-bound for integrality; model-based Nelson–Oppen). *)
+
+(** The result of a {!THEORY.check}. *)
+type check_result =
+  | Sat (** [Final] only: the theory certifies this assignment T-satisfiable. *)
+  | Propagations of Lit.t list
+  (** consistent so far; these literals are T-implied (lazy explanation via
+      {!THEORY.explain}), in deterministic order (C1). *)
+  | Conflict of Explanation.t (** the asserted set is T-inconsistent. *)
+  | Split of Term.t list
+  (** [Final] only: clausify each term to a literal and assert their {b disjunction} as
+      one clause (ADR-0005 CONTRACT-SPLIT) — a B&B branch, an N-O ℤ-trichotomy, or an
+      E-matching lemma. Must force a choice among ≥2 distinct atoms. *)
+
+module type THEORY = sig
+  type t
+
+  (** [create ctx env] is an empty theory state bound to the session [Context] (ADR-0003
+      D6): every term the theory builds mid-solve (a [Split] disjunct) goes through [ctx],
+      sharing its tag stream and hash-consing (I6). *)
+  val create : Context.t -> Env.t -> t
+
+  (** The sole point a theory receives a [Term.t] (ADR-0005 CONTRACT-REG-1/2). Called as
+      the clausifier internalizes each theory atom and for atoms minted from a {!Split}.
+      The theory walks the term for subterms, indexes them by [Term] tag, and builds its
+      structure (EUF: e-graph; LIA: bound/row). Idempotent (C7). *)
+  val register_atom : t -> Atom.t -> Term.t -> unit
+
+  (** Assert a signed literal (its atom is registered). Cheap incremental state update, no
+      output; consistency/propagation are deferred to {!check}. Asserted in the current
+      frame (see {!push}/{!pop}). *)
+  val assert_lit : t -> Lit.t -> unit
+
+  (** Theory reasoning over the currently-asserted literals; see {!check_result}.
+      Propagations are returned in deterministic order (C1). [Sat]/[Split] are legal only
+      at [Final]. *)
+  val check : t -> effort -> check_result
+
+  (** The premises + rule tag justifying a literal THIS theory propagated (a
+      {!Propagations} element). Lazy but always available (§7), and precedence-valid
+      (ADR-0005 CONTRACT-EX: every premise was assigned strictly before [lit] on the
+      trail). Deterministic (C2). *)
+  val explain : t -> Lit.t -> Explanation.t
+
+  (** [push t] opens a backtrack frame; [pop t n] discards the last [n], restoring state
+      to that checkpoint. A frame is opened at each SAT decision level and each user
+      assertion frame, so assert-after-check and incremental push/pop are first-class
+      (ADR-0005 D6). *)
+  val push : t -> unit
+
+  val pop : t -> int -> unit
+
+  (** A candidate model, valid whenever the last {!check} was consistent — a complete,
+      integer-valued, N-O-agreed model after [Final]→[Sat] (ADR-0005 CONTRACT-MODEL). Used
+      by [Combine] for model-based combination (§6) and by the §8 sat evaluator. *)
+  val model : t -> Model.t
+end
+
