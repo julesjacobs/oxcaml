@@ -16,8 +16,9 @@
    TCB hardening (codex G1-G4, see NOTES.md): token KIND from [Sexp] is honoured — a
    [Quoted] |sym| is ALWAYS a plain symbol (never a numeral/keyword/operator), a [Str]
    "..." is inert data (never a command/term). A single [check-sat] bounds the query:
-   asserts after it, or a second check-sat, are UNSUPPORTED (no silent union). [div]/[mod]
-   are recognised but UNSUPPORTED (loud) — grind can't do Euclidean ediv/emod (M4). *)
+   asserts after it, or a second check-sat, are UNSUPPORTED (no silent union).
+   [div]/[mod]/ [abs] are recognised but UNSUPPORTED (loud) — need encoder elimination
+   (M4). *)
 
 open Ast
 
@@ -141,16 +142,18 @@ and read_app env op args _orig =
   | "-", [ a ] -> Neg (read_term env a)
   | "-", _ :: _ :: _ -> Sub (t ())
   | ("forall" | "exists"), _ -> unsupportedf "quantifiers are not supported (QF only)"
-  | ("div" | "mod"), _ ->
+  | ("div" | "mod" | "abs"), _ ->
     (* Recognised LIA operators the gate cannot certify TODAY (codex G4): grind does not
        reason about Lean's Euclidean [Int.ediv]/[Int.emod] (verified by experiment — it
-       treats them as opaque), so emitting them would only ever yield INCONCLUSIVE. Real
-       support needs euclidean elimination (fresh q,r + side constraints), a separate TCB
-       feature tracked for M4 LIA. Classify LOUD + distinct (UNSUPPORTED, not MALFORMED)
-       so the coverage gap is visible in the digest rather than a silent MALFORMED-green. *)
+       treats them as opaque), so emitting them would only ever yield INCONCLUSIVE; [abs]
+       is the same class (codex). Real support needs the encoder eliminations (div/mod:
+       fresh q,r + side constraints; abs: ite(x>=0,x,-x)), a separate TCB feature tracked
+       for M4 LIA. Classify LOUD + distinct (UNSUPPORTED, not MALFORMED) so the coverage
+       gap is visible in the digest/quarantine rather than a silent MALFORMED-green. *)
     unsupportedf
-      "div/mod not yet certifiable by the gate (grind lacks Euclidean ediv/emod \
-       reasoning); needs euclidean elimination — tracked for M4 LIA"
+      "%s not yet certifiable by the gate (grind lacks Euclidean ediv/emod reasoning; \
+       abs needs ite elimination); needs encoder elimination — tracked for M4 LIA"
+      op
   | _ ->
     (* uninterpreted function application (unquoted non-operator head) *)
     read_fun_app env op args
