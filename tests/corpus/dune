@@ -1,0 +1,9 @@
+; Full pre-labeled SMT-LIB corpus run (board #124). Test-only, outside the smt/
+; firewall (I3). corpus_classify is the per-file classifier (one process per file,
+; driven in parallel by corpus_run.sh under `timeout`); it links the same test-only
+; parser + shipped Session the solver CLI uses. `make corpus-run`.
+
+(executable
+ (name corpus_classify)
+ (modules corpus_classify)
+ (libraries oxsmt_interface oxsmt_smtlib_parser))

@@ -740,3 +740,61 @@ mitigated contrast — the parser routes flat n-ary `+` through a single
 `linear_combination` pass (O(n log n)); and (2) the **pure-Boolean pigeonhole** search,
 a real `unsat` verdict from the SAT core. Sizes are chosen so the worst case today is
 sub-second, not minutes.
+## Full corpus run (`tests/corpus/corpus_run.sh`, `make corpus-run`)
+
+Board #124: run the current solver over the whole pre-labeled SMT-LIB corpus
+(`corpora/{QF_UF,QF_LIA,QF_UFLIA}`, 21,468 files), label-checked, no Lean. The real
+payload is **zero soundness mismatches** — a definite verdict (`sat`/`unsat`)
+contradicting a file's `(set-info :status ...)` is CRITICAL and makes the run exit
+nonzero. `unknown`-vs-label is the expected v1 completeness gap. This is the
+baseline M4 theory-adapter merges are measured against, and it is a repeatable
+deliverable, not a one-off — M4 re-runs it, so the marginal cost of a full sweep is
+~minutes.
+
+**Parallel, one process per file.** The solver is single-threaded and
+deterministic, so the corpus is embarrassingly parallel: `corpus_run.sh` fans out
+`CORPUS_JOBS` workers with `find … -print0 | xargs -0 -P`, each a `corpus_classify`
+**process** under a hard `CORPUS_TIMEOUT`s `timeout` (SIGKILL). One process per file
+means no shared state, so a tight timeout is safe and deterministic (no shared
+intern table / SIGALRM-mid-intern hazard that an in-process serial sweep has).
+`corpus_classify` mirrors the CLI's Parser→Session decision but, unlike the CLI
+(which soundly folds a rejected parse into `unknown`), keeps **`parse-fail`
+distinct** — that distinction is load-bearing (the QF_UFLIA bignum ceiling is 76
+parse-fails, tracked separately) — and reads the file's `:status` label (skipping
+whitespace **including newlines**) to flag `mismatch`. Per-file outcome ∈
+{`solved-sat`, `solved-unsat`, `unknown`, `unknown-incremental`, `parse-fail`,
+`timeout`, `skip-too-big`, `error`, `mismatch`}; files above `CORPUS_MAX_BYTES`
+(20 MB precedent) are skipped. 2 s is enough for the baseline: pre-adapter,
+theory-bearing files degrade to a fast `unknown` and propositional solving on these
+sizes is sub-second; `timeout` is counted **separately** from `unknown` so the
+numbers stay interpretable (the two-tier acceptance timeout bar bites at M4
+evaluation, not here). Knobs: `CORPUS_JOBS` (default 48, headroom on the 64-core
+box), `CORPUS_TIMEOUT`, `CORPUS_MAX_BYTES`, `CORPUS_DIRS`.
+
+Outputs: a digest table + wall-clock + throughput to stdout; per-file detail to
+`../logs/corpus-run.raw`; and a JSON summary to `../logs/corpus-run.json` in the
+**same schema as the committed snapshot** (`oxsmt-corpus-baseline/v1`: per-logic
+`total_available`/`scanned`/`outcomes`/`mismatches` + `mismatch_count`, plus run
+metadata `trunk`/`timeout_s`/`workers`/`wall_s`). `make corpus-run` **never** writes
+`tests/corpus/baseline_summary.json`.
+
+### The committed snapshot (`tests/corpus/baseline_summary.json`)
+
+`baseline_summary.json` is a **milestone snapshot** — the pre-adapter measuring
+stick M4 theory-adapter merges are compared against — read by `tools/status_gen`.
+It is committed and **never regenerated at a newer trunk**; promoting a new snapshot
+is a deliberate manual step (run `make corpus-run`, review the `../logs` JSON, copy
+it in, commit). The current file is the **pre-adapter FULL-corpus** baseline
+(trunk 79fd661; `scanned` == `total_available` for every logic — no sampling),
+measured by `make corpus-run` at a 2 s budget. It **supersedes** the earlier
+df11c26 1-in-20 QF_LIA sample (the parallel runner made the full sweep cheap, ~2.5
+min). For determinism it carries **no wall-clock-sensitive counts**: `timeout` and
+`skip-too-big` are folded into `unknown` (solved counts, `parse-fail`, and
+`mismatch_count` are exact and unaffected; the timeout/skip breakdown lives only in
+the uncommitted `../logs` run JSON). Solved-rate = (solved-sat + solved-unsat) /
+total = 1036 / 21468 = 4.8%. `mismatch_count` staying 0 is the soundness tripwire.
+
+For history, the superseded **df11c26** snapshot sampled QF_LIA 1-in-20 (679 of
+13306 scanned): QF_LIA solved-unsat 41, unknown 613 (post-fold), parse-fail 19;
+QF_UF and QF_UFLIA were run in full with the same counts shown above. The
+full-corpus run replaced it once the parallel runner made the complete sweep cheap.

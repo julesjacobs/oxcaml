@@ -1,0 +1,11 @@
+{
+  "schema": "oxsmt-corpus-baseline/v1",
+  "trunk": "79fd661",
+  "_note": "Pre-adapter FULL-corpus baseline (no sampling), measured by `make corpus-run` at 2s/file, 48 workers. Committed snapshot is deterministic: the wall-clock-sensitive `timeout` counts and `skip-too-big` are folded into `unknown` (solved counts, parse-fail, and mismatch_count are exact and unaffected). The timeout/skip breakdown lives only in the uncommitted ../logs run JSON. Promoting a new snapshot is a deliberate manual step (see tests/README).",
+  "logics": {
+    "QF_UF": { "total_available": 7503, "scanned": 7503, "outcomes": { "solved-sat": 9, "solved-unsat": 178, "unknown": 7316, "unknown-incremental": 0, "parse-fail": 0, "timeout": 0, "skip-too-big": 0, "error": 0 }, "mismatches": 0 },
+    "QF_LIA": { "total_available": 13306, "scanned": 13306, "outcomes": { "solved-sat": 0, "solved-unsat": 783, "unknown": 12147, "unknown-incremental": 0, "parse-fail": 376, "timeout": 0, "skip-too-big": 0, "error": 0 }, "mismatches": 0 },
+    "QF_UFLIA": { "total_available": 659, "scanned": 659, "outcomes": { "solved-sat": 0, "solved-unsat": 66, "unknown": 517, "unknown-incremental": 0, "parse-fail": 76, "timeout": 0, "skip-too-big": 0, "error": 0 }, "mismatches": 0 }
+  },
+  "mismatch_count": 0
+}

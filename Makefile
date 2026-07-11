@@ -60,7 +60,16 @@ OXCAML_LIBS := smt/core/oxsmt_core smt/interface/oxsmt_interface \
                smt/smtlib/oxsmt_smtlib smt/smtlib/parser/oxsmt_smtlib_parser \
                smt/theories/euf/oxsmt_euf smt/theories/lia/oxsmt_lia
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test sat-bench perf-gen perf-bench preprocess-test lia-test lia-adapter-test euf-test euf-adapter-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh mutants
+# corpus-run knobs (board #124). Parallel sweep over the solver CLI: CORPUS_JOBS workers
+# (default 48, leaving headroom on this 64-core box for in-flight builds), CORPUS_TIMEOUT
+# seconds hard per-file budget (2s is enough — theory files degrade to a fast unknown
+# pre-adapter). Files above CORPUS_MAX_BYTES (the 20 MB precedent) are skipped.
+CORPUS_DIRS ?= ../corpora/QF_UF ../corpora/QF_LIA ../corpora/QF_UFLIA
+CORPUS_TIMEOUT ?= 2
+CORPUS_JOBS ?= 48
+CORPUS_MAX_BYTES ?= 20971520
+
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test sat-bench corpus-run perf-gen perf-bench preprocess-test lia-test lia-adapter-test euf-test euf-adapter-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -136,6 +145,24 @@ perf-bench:
 	@mkdir -p $(LOGS)/perf
 	$(DUNE) build $(SOLVER) tests/perf/perf_bench.exe
 	_build/default/tests/perf/perf_bench.exe $(SOLVER) $(PERF_CASES) --log $(LOGS)/perf/perf-bench.log
+
+## corpus-run — parallel, label-checked sweep of the full pre-labeled SMT-LIB corpus
+##   ($(CORPUS_DIRS)), no Lean. Fans out $(CORPUS_JOBS) corpus_classify processes with a
+##   hard $(CORPUS_TIMEOUT)s per-file timeout. Payload: ZERO soundness mismatches — a
+##   definite verdict contradicting a file's :status is CRITICAL and exits nonzero;
+##   unknown-vs-label is the expected v1 completeness gap. Digest to stdout; per-file
+##   detail to $(LOGS)/corpus-run.raw; a JSON summary in the committed baseline schema
+##   (oxsmt-corpus-baseline/v1) to $(LOGS)/corpus-run.json. It NEVER writes the committed
+##   snapshot tests/corpus/baseline_summary.json — promoting a milestone snapshot is a
+##   deliberate manual copy+commit (see tests/README.md). Repeatable — M4 re-runs it.
+corpus-run:
+	@mkdir -p $(LOGS)
+	$(DUNE) build tests/corpus/corpus_classify.exe
+	CLASSIFY=_build/default/tests/corpus/corpus_classify.exe \
+	  CORPUS_TIMEOUT=$(CORPUS_TIMEOUT) CORPUS_JOBS=$(CORPUS_JOBS) \
+	  CORPUS_MAX_BYTES=$(CORPUS_MAX_BYTES) \
+	  CORPUS_JSON=$(LOGS)/corpus-run.json CORPUS_RAW=$(LOGS)/corpus-run.raw \
+	  bash tests/corpus/corpus_run.sh $(CORPUS_DIRS)
 
 ## preprocess-test — smt/preprocess unit + property self-test (stdlib-only,
 ##   deterministic). Brute-force equivalence-by-evaluation for the desugaring
