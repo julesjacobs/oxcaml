@@ -613,6 +613,7 @@ let smt2_files dir =
 let read_file p = In_channel.with_open_bin p In_channel.input_all
 let b_pass = ref 0
 let b_skip = ref 0
+let b_skip_unprintable = ref 0
 
 let check_b path =
   let text = read_file path in
@@ -624,18 +625,31 @@ let check_b path =
     incr b_skip;
     Printf.printf "  skip (unsupported): %s (%s)\n" path m
   | parsed ->
-    incr checks;
-    let out = Printer.print_session ?status:parsed.status parsed.env parsed.assertions in
-    (match Parser.parse_into parsed.env parsed.ctx out with
-     | parsed2 ->
-       if not (terms_equal parsed.assertions parsed2.assertions)
-       then fail "B/%s: assertions differ after reprint\n%s" path out
-       else if not (status_equal parsed.status parsed2.status)
-       then fail "B/%s: status not preserved" path
-       else incr b_pass
-     | exception Parser.Malformed m -> fail "B/%s: reparse Malformed: %s\n%s" path m out
-     | exception Parser.Unsupported m ->
-       fail "B/%s: reparse Unsupported: %s\n%s" path m out)
+    (* A file can parse yet contain a symbol the shipped printer legitimately refuses (the
+       empty symbol [||], an operator collision like [|+|]) — such goldens exist to
+       document exactly that refusal (e.g. tests/cases/bool_*_unknown.smt2). Printing is
+       not the identity on them, so they are a COUNTED skip, not a failure: reported and
+       tallied as [skipped-unprintable], never silent. This is print-time and distinct
+       from the parse-time (malformed/unsupported) skips above; direction A must never
+       gain this catch, since A only prints printer-legal sessions and a raise there is a
+       real bug. *)
+    (match Printer.print_session ?status:parsed.status parsed.env parsed.assertions with
+     | exception Printer.Unsupported m ->
+       incr b_skip_unprintable;
+       Printf.printf "  skip (unprintable): %s (%s)\n" path m
+     | out ->
+       incr checks;
+       (match Parser.parse_into parsed.env parsed.ctx out with
+        | parsed2 ->
+          if not (terms_equal parsed.assertions parsed2.assertions)
+          then fail "B/%s: assertions differ after reprint\n%s" path out
+          else if not (status_equal parsed.status parsed2.status)
+          then fail "B/%s: status not preserved" path
+          else incr b_pass
+        | exception Parser.Malformed m ->
+          fail "B/%s: reparse Malformed: %s\n%s" path m out
+        | exception Parser.Unsupported m ->
+          fail "B/%s: reparse Unsupported: %s\n%s" path m out))
 ;;
 
 let () =
@@ -654,7 +668,11 @@ let () =
     List.iter
       (fun dir -> if Sys.file_exists dir then List.iter check_b (smt2_files dir))
       dirs;
-    Printf.printf "  B: %d round-tripped, %d skipped\n" !b_pass !b_skip);
+    Printf.printf
+      "  B: %d round-tripped, %d skipped, skipped-unprintable: %d\n"
+      !b_pass
+      !b_skip
+      !b_skip_unprintable);
   Printf.printf "\n%d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;

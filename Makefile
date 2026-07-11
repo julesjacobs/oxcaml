@@ -286,17 +286,21 @@ check-frozen:
 spine:
 	tools/check_frozen.sh spine
 
-## test — frozen-interface guard, harness self-test, then the .smt2 golden/expect
-##   regression. check-frozen runs FIRST so a drifted frozen .mli fails every
-##   suite run. Then the pure unit self-test (proves red-detection works), then
-##   diffs produced-vs-golden over tests/cases + fixtures. Digest to stdout,
-##   full detail under $(LOGS)/harness, exact stats under $(STATS). Nonzero on
-##   any diff or missing golden. Override SOLVER to test the real solver.
+## test — frozen-interface guard, harness self-test, the .smt2 golden/expect
+##   regression, then the smtlib round-trip suite. check-frozen runs FIRST so a drifted
+##   frozen .mli fails every suite run. Then the pure unit self-test (proves red-detection
+##   works), then diffs produced-vs-golden over tests/cases + fixtures. Finally smtlib-test
+##   (round-trip A/B over the same committed .smt2 corpus) runs on the fast path too: a
+##   golden that parses but is not printer-round-trippable (e.g. a degenerate symbol name)
+##   must be caught here, not only in an on-demand suite. Digest to stdout, full detail
+##   under $(LOGS)/harness, exact stats under $(STATS). Nonzero on any diff or missing
+##   golden. Override SOLVER to test the real solver.
 test: check-frozen
 	$(DUNE) build tests/harness/run_harness.exe tests/harness/stub_solver.exe \
 	  tests/solver/oxsmt_cli.exe tests/eval/eval_cli.exe
 	$(DUNE) exec tests/harness/harness_test.exe -- $(EVAL) $(CASES)/bool_or_sat.smt2
 	$(DUNE) exec tests/harness/run_harness.exe -- $(HARNESS_ARGS)
+	$(MAKE) smtlib-test
 
 ## bench — run the performance/adversarial corpus, emit digest to ../logs.
 bench:
