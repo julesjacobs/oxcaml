@@ -56,8 +56,14 @@ let unsat_goal =
   }
 ;;
 
-let eval ?(expected = []) ?golden out =
-  evaluate ~path:"<test>" ~expected_statuses:expected ~golden ~solver_result:(Ok out)
+let eval ?(expected = []) ?golden ?(evals = []) out =
+  evaluate
+    ~path:"<test>"
+    ~expected_statuses:expected
+    ~golden
+    ~solver_result:(Ok out)
+    ~eval_outcomes:evals
+    ()
 ;;
 
 let is_pass = function
@@ -82,6 +88,16 @@ let is_label = function
 
 let is_error = function
   | Fail_error _ -> true
+  | _ -> false
+;;
+
+let is_unsound = function
+  | Fail_model_unsound _ -> true
+  | _ -> false
+;;
+
+let is_eval_unusable = function
+  | Fail_eval_unusable _ -> true
   | _ -> false
 ;;
 
@@ -145,8 +161,49 @@ let () =
           ~path:"<test>"
           ~expected_statuses:[ None ]
           ~golden:None
-          ~solver_result:(Error "boom"))
+          ~solver_result:(Error "boom")
+          ())
          .outcome);
+  (* Eval self-check (layer 1). sat + MODEL-SATISFIES + matching golden -> Pass. *)
+  check
+    "sat + eval satisfies -> Pass"
+    (is_pass
+       (eval ~expected:[ Some Sat ] ~golden:sat_g ~evals:[ Eval_satisfies ] [ sat_goal ])
+         .outcome);
+  (* sat + MODEL-FAILS -> soundness RED, dominating a matching golden. *)
+  check
+    "eval MODEL-FAILS -> Fail_model_unsound (dominates matching golden)"
+    (is_unsound
+       (eval
+          ~expected:[ Some Sat ]
+          ~golden:sat_g
+          ~evals:[ Eval_fails "trace" ]
+          [ sat_goal ])
+         .outcome);
+  (* sat + eval unusable (exit 2 / not configured) -> harness failure, distinct. *)
+  check
+    "eval unusable -> Fail_eval_unusable"
+    (is_eval_unusable
+       (eval
+          ~expected:[ Some Sat ]
+          ~golden:sat_g
+          ~evals:[ Eval_unusable "malformed" ]
+          [ sat_goal ])
+         .outcome);
+  (* Neither soundness failure nor an unreadable model is promotable. *)
+  check "model-unsound not promotable" (not (promotable (Fail_model_unsound "x")));
+  check "eval-unusable not promotable" (not (promotable (Fail_eval_unusable "x")));
+  (* Counter overflow clamps to >=10k rather than erroring (M0-harness-hygiene). *)
+  check
+    "counter > max_int clamps to >=10k"
+    (match
+       parse_solver_output
+         "(result (verdict unsat) (counters (conflicts 99999999999999999999) (decisions \
+          0) (propagations 0)))"
+     with
+     | Ok [ g ] ->
+       g.counters.conflicts = max_int && String.equal (Bucket.label max_int) ">=10k"
+     | _ -> false);
   (* Output parsing round-trips the contract. *)
   check
     "parse_solver_output ok"
@@ -171,6 +228,47 @@ let () =
           (check-sat)"
      in
      expected_statuses sexps = [ Some Unsat; Some Sat ]);
+  (* End-to-end lying-model demonstration (integration): when the Makefile passes the
+     built eval CLI + a real sat case, spawn eval on a CORRECT model (expect satisfies)
+     and on a WRONG model (expect MODEL-FAILS), and confirm a lying solver — one that
+     emits sat with the wrong model — is driven RED through evaluate. Skipped (with a
+     note) for a bare `dune exec` without args, so the pure checks still stand alone. *)
+  (match Array.to_list Sys.argv with
+   | _ :: eval_bin :: case_smt2 :: _ ->
+     (* bool_or_sat: (or p q) and (not q); q=true violates (not q). *)
+     let good = [ "p", "true"; "q", "false" ] in
+     let bad = [ "p", "false"; "q", "true" ] in
+     let sat_of model =
+       { verdict = Sat
+       ; core_size = None
+       ; model = Some model
+       ; counters = { conflicts = 0; decisions = 0; propagations = 0 }
+       }
+     in
+     let eo_good = Harness.run_eval ~eval_bin ~smt2:case_smt2 ~model:good in
+     let eo_bad = Harness.run_eval ~eval_bin ~smt2:case_smt2 ~model:bad in
+     check
+       "e2e: eval accepts a correct model"
+       (match eo_good with
+        | Eval_satisfies -> true
+        | _ -> false);
+     check
+       "e2e: eval rejects a lying (wrong) model"
+       (match eo_bad with
+        | Eval_fails _ -> true
+        | _ -> false);
+     check
+       "e2e: lying-model solver is driven RED via eval"
+       (is_unsound
+          (evaluate
+             ~path:case_smt2
+             ~expected_statuses:[ Some Sat ]
+             ~golden:(Some (produced_text [ sat_of bad ]))
+             ~solver_result:(Ok [ sat_of bad ])
+             ~eval_outcomes:[ eo_bad ]
+             ())
+            .outcome)
+   | _ -> Printf.printf "  note: e2e eval checks skipped (no eval-bin/case args)\n");
   if !failures = 0
   then Printf.printf "harness self-test: all checks passed\n"
   else (

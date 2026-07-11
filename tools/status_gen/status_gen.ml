@@ -584,7 +584,14 @@ let () =
   let milestones =
     List.filter_map (fun r -> Option.map (fun m -> m, r) (milestone_of_id r.id)) rows
   in
-  let ms_names = List.sort_uniq String.compare (List.map fst milestones) in
+  (* Sort by the numeric suffix so M10 sorts after M2, not between M1 and M2. *)
+  let ms_num m =
+    try int_of_string (String.sub m 1 (String.length m - 1)) with
+    | _ -> max_int
+  in
+  let ms_names =
+    List.sort_uniq (fun a b -> compare (ms_num a) (ms_num b)) (List.map fst milestones)
+  in
   let current =
     List.find_opt
       (fun m ->
@@ -592,11 +599,18 @@ let () =
          List.exists (fun (_, r) -> not (is_done r.status)) these)
       ms_names
   in
-  out
-    "- **Current milestone:** %s\n"
-    (match current with
-     | Some m -> Printf.sprintf "%s (first milestone with open rows)" m
-     | None -> "all parsed milestones complete");
+  (* Three distinct states: no milestone rows parsed at all (TASKS.md unreadable or its
+     table shape changed) is "unknown" — NOT "all complete", which would falsely imply the
+     project is finished. *)
+  let milestone_summary =
+    if milestones = []
+    then "unknown (no M-milestone rows parsed from TASKS.md — check the board's shape)"
+    else (
+      match current with
+      | Some m -> Printf.sprintf "%s (first milestone with open rows)" m
+      | None -> "all parsed milestones complete")
+  in
+  out "- **Current milestone:** %s\n" milestone_summary;
   out "  | milestone | done / total |\n  |---|---|\n";
   List.iter
     (fun m ->
@@ -630,13 +644,38 @@ let () =
          ", "
          (List.map (fun (k, v) -> Printf.sprintf "%s %d" k v) g.case_outcomes)
      in
+     let count_of k =
+       match List.assoc_opt k g.case_outcomes with
+       | Some n -> n
+       | None -> 0
+     in
+     (* A REFUTED case = Lean kernel-checked our verdict WRONG (a ship-stopping soundness
+        breach, DESIGN.md §8); a honeypot that fails its floor / gets CERTIFIED = the gate
+        itself is unaudited. Either turns this into a LOUD leading line — outcome metrics
+        must scream a soundness breach, not bury it. *)
+     let refuted = count_of "REFUTED" in
+     let breach =
+       if refuted > 0
+       then
+         Some
+           (Printf.sprintf
+              "%d gate case(s) REFUTED — Lean proved our verdict WRONG"
+              refuted)
+       else if not g.honeypots_ok
+       then Some "gate honeypots did not all fire (a honeypot CERTIFIED, or below floor)"
+       else None
+     in
+     (match breach with
+      | Some why ->
+        out "- **‼ GATE RED — SOUNDNESS BREACH:** %s. Ship-stopping (DESIGN.md §8).\n" why
+      | None -> ());
      out
        "- **Gate (Lean oracle):** %d case(s) [%s]; honeypots %d/floor %s %s\n"
        g.cache_total
        (if outc = "" then "none" else outc)
        g.honeypots
        g.honeypot_floor
-       (if g.honeypots_ok then "(all matched)" else "(CHECK: no match-confirmation line)"));
+       (if g.honeypots_ok then "(all fired)" else "(BREACH)"));
   (* Corpus solved-rate from stats over tests/cases. Use only the single most recent stats
      file: `make status` never writes a new one, so this is stable between back-to-back
      runs, and it reflects one coherent run rather than a mix. `make status-fresh`
@@ -673,10 +712,12 @@ let () =
     "- **Corpus solved-rate (tests/cases, by our solver):** %s\n"
     (if total_cases = 0
      then
-       "0% — no solver verdicts yet (solver is a stub; THIS is the number that must move)"
+       "0% — no solver verdicts in the latest stats run; THIS is the number that must \
+        move"
      else
        Printf.sprintf
-         "%d%% (%d/%d) — solver is a stub until M1+; THIS is the number that must move"
+         "%d%% (%d/%d definite sat/unsat) — THIS is the headline number that must move \
+          toward 100%%"
          (100 * solved / total_cases)
          solved
          total_cases);
@@ -713,13 +754,13 @@ let () =
             match String.split_on_char ' ' line |> List.filter (fun w -> w <> "") with
             | [ path; budget ] ->
               let n = count_lines_in_module cfg.repo path in
-              let bud =
-                match int_of_string_opt budget with
-                | Some b -> b
-                | None -> 0
-              in
-              let flag = if bud > 0 && n > bud then "OVER" else "ok" in
-              out "| %s | %d | %d | %s |\n" path n bud flag
+              (match int_of_string_opt budget with
+               | Some bud ->
+                 let flag = if n > bud then "OVER" else "ok" in
+                 out "| %s | %d | %d | %s |\n" path n bud flag
+               | None ->
+                 (* A non-numeric budget is a config bug, not a silent 0. Surface it. *)
+                 out "| %s | %d | %s | ⚠ non-numeric budget |\n" path n budget)
             | _ -> ()))
        (lines s));
   out "\n";
@@ -784,6 +825,10 @@ let () =
      is manual `make gate`)\n\n";
   (* Hygiene *)
   out "### Repository hygiene\n\n";
+  out
+    "_Volatile snapshot: live worktrees/branches change as tasks start and land, so this \
+     section legitimately differs run-to-run and its diff is not a regression signal \
+     (unlike the outcome metrics above)._\n\n";
   let strip_ref b =
     if starts_with ~prefix:"refs/heads/" b
     then String.sub b 11 (String.length b - 11)
@@ -830,9 +875,12 @@ let () =
   Printf.printf "status: wrote %s @ %s\n" cfg.out head;
   Printf.printf
     "  milestone: %s\n"
-    (match current with
-     | Some m -> m
-     | None -> "all complete");
+    (if milestones = []
+     then "unknown"
+     else (
+       match current with
+       | Some m -> m
+       | None -> "all complete"));
   Printf.printf
     "  harness: %s\n"
     (match harness_line with

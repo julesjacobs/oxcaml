@@ -4,7 +4,10 @@
 # The bare `dune` on PATH is a Jane Street dispatch wrapper that fails outside
 # jane workspaces, so we pin the opam toolchain explicitly.
 
-OPAM_BIN := /usr/local/home/jujacobs/.opam/5.4.0/bin
+# OPAM_BIN: the opam 5.4.0 toolchain bin dir. Overridable (env or `make OPAM_BIN=...`)
+# so this is not hard-pinned to one developer's home when CI runs off-box; the default
+# is this environment's toolchain (M0-harness-hygiene).
+OPAM_BIN ?= /usr/local/home/jujacobs/.opam/5.4.0/bin
 DUNE := $(OPAM_BIN)/dune
 export PATH := $(OPAM_BIN):$(PATH)
 
@@ -15,11 +18,19 @@ export PATH := $(OPAM_BIN):$(PATH)
 # `SOLVER=_build/default/tests/harness/stub_solver.exe` to use it.
 # LOGS/STATS resolve relative to the make invocation dir (the project root).
 SOLVER   ?= _build/default/tests/solver/oxsmt_cli.exe
+# EVAL: the N-version model evaluator CLI (tests/eval). The harness runs it on every
+# sat verdict's model before accepting (DESIGN.md §8 layer 1). A sat we cannot
+# self-check is a failure, never a pass.
+EVAL     ?= _build/default/tests/eval/eval_cli.exe
+# LOGS/STATS resolve relative to the make invocation dir. `make` is meant to run from
+# main/, where ../logs is the sibling log dir (DESIGN §11 topology). From a worktree,
+# ../logs would resolve to worktrees/logs — so pass LOGS=<abs path> when running suites
+# from a task worktree (M0-harness-hygiene). CI runs from main/, so the default is right.
 LOGS     ?= ../logs
 STATS    ?= $(LOGS)/stats
 CASES    ?= tests/cases
 FIXTURES ?= tests/harness/fixtures
-HARNESS_ARGS := --solver $(SOLVER) --dir $(CASES) --dir $(FIXTURES) \
+HARNESS_ARGS := --solver $(SOLVER) --eval $(EVAL) --dir $(CASES) --dir $(FIXTURES) \
                 --logs $(LOGS) --stats $(STATS)
 
 # SAT bench corpus. Defaults to the uf50/uuf50 families (the M1 verdict-agreement
@@ -208,8 +219,8 @@ spine:
 ##   any diff or missing golden. Override SOLVER to test the real solver.
 test: check-frozen
 	$(DUNE) build tests/harness/run_harness.exe tests/harness/stub_solver.exe \
-	  tests/solver/oxsmt_cli.exe
-	$(DUNE) exec tests/harness/harness_test.exe
+	  tests/solver/oxsmt_cli.exe tests/eval/eval_cli.exe
+	$(DUNE) exec tests/harness/harness_test.exe -- $(EVAL) $(CASES)/bool_or_sat.smt2
 	$(DUNE) exec tests/harness/run_harness.exe -- $(HARNESS_ARGS)
 
 ## bench — run the performance/adversarial corpus, emit digest to ../logs.
@@ -256,7 +267,7 @@ status:
 ##   makes the committed artifact's diff meaningful.
 status-fresh:
 	$(DUNE) build tests/harness/run_harness.exe tests/harness/stub_solver.exe \
-	  tests/solver/oxsmt_cli.exe
+	  tests/solver/oxsmt_cli.exe tests/eval/eval_cli.exe
 	@mkdir -p $(LOGS)/harness
 	-$(DUNE) exec tests/harness/run_harness.exe -- $(HARNESS_ARGS) > $(LOGS)/harness/last-digest.txt 2>&1
 	$(MAKE) status LOGS=$(LOGS) STATS=$(STATS)
@@ -267,5 +278,5 @@ status-fresh:
 ##   Label mismatches and solver errors are never masked — they still fail.
 promote:
 	$(DUNE) build tests/harness/run_harness.exe tests/harness/stub_solver.exe \
-	  tests/solver/oxsmt_cli.exe
+	  tests/solver/oxsmt_cli.exe tests/eval/eval_cli.exe
 	$(DUNE) exec tests/harness/run_harness.exe -- $(HARNESS_ARGS) --promote

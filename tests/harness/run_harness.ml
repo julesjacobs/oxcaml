@@ -1,10 +1,11 @@
 (* The .smt2 golden/expect regression runner (DESIGN.md §8, §11).
 
-   Usage: run_harness --solver PATH [--dir DIR]... [--logs DIR] [--stats DIR] [--promote]
-   [--max-failures N]
+   Usage: run_harness --solver PATH [--eval PATH] [--dir DIR]... [--logs DIR]
+   [--stats DIR] [--promote] [--max-failures N]
 
    Scans each --dir for *.smt2 files (sorted, deterministic), runs the solver on each, and
-   compares produced golden text against the committed sidecar FILE.smt2.expected. Full
+   compares produced golden text against the committed sidecar FILE.smt2.expected. Every
+   sat verdict's model is self-checked by the eval CLI (--eval) before acceptance. Full
    detail (produced output, diffs, solver stderr) is written under --logs; only a digest
    goes to stdout (context-frugal, §11). Exact counters and wall-clock go to an
    uncommitted JSONL stats sidecar under --stats (never committed — I5). Exits non-zero on
@@ -17,6 +18,7 @@ let default_max_failures = 10
 
 type config =
   { solver : string
+  ; eval : string (* eval CLI path; "" = not configured (a sat verdict then fails) *)
   ; dirs : string list
   ; logs : string
   ; stats : string
@@ -26,13 +28,14 @@ type config =
 
 let usage () =
   prerr_endline
-    "usage: run_harness --solver PATH [--dir DIR]... [--logs DIR] [--stats DIR] \
-     [--promote] [--max-failures N]";
+    "usage: run_harness --solver PATH [--eval PATH] [--dir DIR]... [--logs DIR] [--stats \
+     DIR] [--promote] [--max-failures N]";
   exit 2
 ;;
 
 let parse_args argv =
   let solver = ref "" in
+  let eval = ref "" in
   let dirs = ref [] in
   let logs = ref default_logs in
   let stats = ref "" in
@@ -41,6 +44,9 @@ let parse_args argv =
   let rec go = function
     | "--solver" :: v :: r ->
       solver := v;
+      go r
+    | "--eval" :: v :: r ->
+      eval := v;
       go r
     | "--dir" :: v :: r ->
       dirs := v :: !dirs;
@@ -65,6 +71,7 @@ let parse_args argv =
   go (List.tl (Array.to_list argv));
   if String.equal !solver "" then usage ();
   { solver = !solver
+  ; eval = !eval
   ; dirs = List.rev !dirs
   ; logs = !logs
   ; stats = (if String.equal !stats "" then Filename.concat !logs "stats" else !stats)
@@ -199,11 +206,16 @@ let category = function
   | Fail_missing_golden -> "missing golden"
   | Fail_golden_mismatch -> "golden mismatch"
   | Fail_label_mismatch _ -> "label mismatch (soundness)"
+  | Fail_model_unsound _ -> "model unsound (soundness)"
+  | Fail_eval_unusable _ -> "eval unusable (contract bug)"
   | Fail_error _ -> "solver error"
 ;;
 
 let outcome_detail = function
-  | Harness.Fail_label_mismatch m | Fail_error m -> Some m
+  | Harness.Fail_label_mismatch m
+  | Fail_model_unsound m
+  | Fail_eval_unusable m
+  | Fail_error m -> Some m
   | _ -> None
 ;;
 
@@ -246,7 +258,37 @@ let () =
            let t0 = Unix.gettimeofday () in
            let solver_result, errs = Harness.run_solver cfg.solver path in
            let wall_ms = (Unix.gettimeofday () -. t0) *. 1000.0 in
-           let fe = Harness.evaluate ~path ~expected_statuses ~golden ~solver_result in
+           (* Layer-1 self-check: run the eval CLI on every sat model before accepting. A
+             sat verdict we cannot self-check (no eval configured, or no model) is a
+             failure, not a pass — we never accept an unchecked sat. *)
+           let eval_outcomes =
+             match solver_result with
+             | Error _ -> []
+             | Ok out ->
+               List.map
+                 (fun (g : Harness.goal_result) ->
+                    match g.verdict, g.model with
+                    | Harness.Sat, Some model ->
+                      if String.equal cfg.eval ""
+                      then
+                        Harness.Eval_unusable
+                          "no eval CLI configured (--eval); cannot self-check the sat \
+                           model"
+                      else Harness.run_eval ~eval_bin:cfg.eval ~smt2:path ~model
+                    | Harness.Sat, None ->
+                      Harness.Eval_unusable "sat verdict with no model to self-check"
+                    | _ -> Harness.Eval_skipped)
+                 out
+           in
+           let fe =
+             Harness.evaluate
+               ~path
+               ~expected_statuses
+               ~golden
+               ~solver_result
+               ~eval_outcomes
+               ()
+           in
            if not (String.equal errs "")
            then
              write_file

@@ -156,20 +156,44 @@ degradation-to-`sat` regression. As of M1-wiring those are `euf_congruence`,
 *propositionally* unsat — e.g. `distinct_case`, `iff_chain_unsat` — verdicts a real
 `unsat` and does not exercise the degradation path.)
 
+### Eval self-check (layer 1 — every sat model)
+
+Before accepting **any `sat` verdict**, the harness runs the independent N-version
+evaluator CLI (`tests/eval`, `--eval PATH`, default the built `eval_cli.exe`) on
+that goal's model (DESIGN.md §8 layer 1). It renders the solver's inline model
+into the evaluator's sidecar grammar (one `(const NAME VALUE)` per binding, into a
+temp file) and maps the CLI's exit code:
+
+- **`MODEL-SATISFIES` (exit 0)** → the model checks out; the goal may pass.
+- **`MODEL-FAILS` (exit 1)** → a **soundness failure** (`model unsound`): our own
+  `sat` model does not satisfy the assertions. Red regardless of the golden, and
+  **never promotable** — the same class as a label mismatch.
+- **`MALFORMED`/`UNSUPPORTED` (exit 2), or eval could not run** → a **harness
+  failure** (`eval unusable`) with a distinct message: a model our own evaluator
+  cannot read is a contract bug, not a pass. Also never promotable.
+
+A `sat` verdict the harness *cannot* self-check (no `--eval` configured, or a
+`sat` with no model) is likewise a failure — we never accept an unchecked `sat`.
+Only single-check-sat batch files currently produce `sat` (incremental files
+degrade to `unknown`), so evaluating the whole file's assertion set matches the
+goal; a future multi-check-sat `sat` would need per-goal assertion slicing.
+The harness self-test drives this end-to-end: a lying-model solver (emits `sat`
+with a wrong model) is confirmed to go red via eval.
+
 ### Workflow
 
-- `make test` — runs the pure harness self-test (which proves red-detection
-  works), then the golden regression over `cases/` + `fixtures/`. Prints a
-  digest (`PASS`/`FAIL` counts, first failures with paths to full diffs under
-  `../logs/harness/<run>/`). Exits non-zero on any diff, missing golden, label
-  mismatch, or solver error.
+- `make test` — runs the harness self-test (proves red-detection works, incl. the
+  lying-model eval path), then the golden regression over `cases/` + `fixtures/`.
+  Prints a digest (`PASS`/`FAIL` counts, first failures with paths to full diffs
+  under `../logs/harness/<run>/`). Exits non-zero on any diff, missing golden,
+  label mismatch, **unsound sat model, unusable eval,** or solver error.
 - `make promote` — accepts current solver output as the new golden, rewriting
   the `.expected` sidecars for missing/mismatched goldens and printing a
-  per-file diffstat so the promoting agent sees what it accepts. **Label
-  mismatches and solver errors are never masked** — promote refuses them and
-  they stay red.
-- Override the solver or paths: `make test SOLVER=path/to/real`, or
-  `LOGS=`, `STATS=`, `CASES=`, `FIXTURES=`.
+  per-file diffstat so the promoting agent sees what it accepts. **Soundness
+  signals (label mismatch, unsound sat model) and errors (solver, or eval unable
+  to read our model) are never masked** — promote refuses them and they stay red.
+- Override the solver, evaluator, or paths: `make test SOLVER=path/to/real`,
+  `EVAL=path/to/eval`, or `LOGS=`, `STATS=`, `CASES=`, `FIXTURES=`.
 
 ### Stats sidecar (uncommitted)
 
@@ -303,8 +327,10 @@ does not couple to the harness build) **only aggregates existing artifacts**;
 it runs nothing and re-derives no product state. Inputs, each optional (a missing
 one degrades to `n/a`, never a crash):
 
-- **TASKS.md** → per-milestone done/total and the current milestone (first
-  `M<n>-` row group with any non-`done` row);
+- **TASKS.md** → per-milestone done/total (milestones sorted numerically, so `M10`
+  follows `M2`) and the current milestone (first `M<n>-` row group with any
+  non-`done` row). If no milestone rows parse at all, the current milestone reads
+  **`unknown`** — never "all complete", which would falsely imply the project is done;
 - **git** → the `generated at <HEAD>` line (git HEAD short hash, **never
   wall-clock**, so the committed file stays reproducible), worktree/branch
   hygiene, and days-since-last-outcome-improvement (commits touching `smt/` or
@@ -314,7 +340,9 @@ one degrades to `n/a`, never a crash):
 - **the latest full `../logs/gate-*/gate.log`** → gate outcome counts, honeypot
   floor, cache hit-rate, Lean/encoding versions (prefers a full `gate run` over an
   honeypot-only `gate selftest`; honeypot health = none `CERTIFIED` and count ≥
-  floor);
+  floor). A **REFUTED** case (Lean proved our verdict wrong) or a honeypot breach
+  emits a **loud leading `‼ GATE RED — SOUNDNESS BREACH`** line so a soundness
+  failure screams from the outcome metrics rather than hiding in a count;
 - **the most recent stats JSONL** (the sidecar above) → search-counter **bucket**
   distributions (log-scale, deterministic) and the corpus solved-rate over
   `tests/cases` (fraction of goals with a definite `sat`/`unsat` verdict — **0%
