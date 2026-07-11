@@ -242,6 +242,12 @@ that before touching `encoder.ml`.
   4 UNSUPPORTED, 5 NO_STATUS.
 - `gate run [--cases DIR] [--honeypots DIR] [--cache DIR] [--logs DIR] [--no-cache]
   [--timeout SECS]`. Env overrides: `OXSMT_LEAN`, `OXSMT_CACHE`, `OXSMT_LOGS`.
+- `gate dump-canonical FILE.smt2` — print the file's canonical query (or
+  `MALFORMED`/`UNSUPPORTED`), no Lean. This is the reader-preservation differential:
+  before touching the reader/lexer, dump every `tests/cases` + honeypot file; after,
+  dump again and `diff`. Byte-identical canonical output proves the change preserves
+  the reader (the cache-key input) independently of the Lean layer and of shared-cache
+  churn. It is exactly how the shared-lexer migration (ADR-0008) was verified.
 
 ### Outcome semantics (DESIGN.md §8)
 

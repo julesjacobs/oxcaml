@@ -940,6 +940,23 @@ let () =
         ~logs_root:!logs_root
         ~timeout:!timeout
         ~allow_cache:!allow_cache
+    (* Print the canonical query (or MALFORMED/UNSUPPORTED) for one file — a Lean-free
+       differential tool for any future reader change: dump over the corpus before and
+       after, diff, and the byte-identity is the reader-preservation proof (this is
+       exactly how task/tokenizer-gate proved the shared-lexer migration; see
+       tests/README). *)
+    | "dump-canonical" :: file :: _ ->
+      let src = In_channel.with_open_bin file In_channel.input_all in
+      (match Reader.of_string src with
+       | q ->
+         print_endline (Canonical.canonical_query q);
+         0
+       | exception Reader.Malformed m ->
+         Printf.printf "MALFORMED %s\n" m;
+         0
+       | exception Reader.Unsupported m ->
+         Printf.printf "UNSUPPORTED %s\n" m;
+         0)
     | _ -> usage ()
   in
   exit code
