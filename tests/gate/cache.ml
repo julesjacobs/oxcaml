@@ -192,9 +192,9 @@ let read_fields src : (string * string) list =
   | _ -> raise (Parse_error "expected a single (entry ...)")
 ;;
 
-(* The exact field set {!store} writes, each required exactly once (no missing, extra, or
-   duplicate). Used by {!lookup} to reject a corrupt / hand-crafted / stale-format entry. *)
-let expected_fields =
+(* The content fields {!store} writes, in a FIXED order — the preimage of the [integrity]
+   digest below. *)
+let content_fields =
   [ "key"
   ; "query-hash"
   ; "claim"
@@ -204,6 +204,27 @@ let expected_fields =
   ; "grind-config"
   ; "timestamp"
   ]
+;;
+
+(* An entry carries the {!content_fields} PLUS an [integrity] digest over their values.
+   The digest binds the OUTCOME (and detail) to the entry, closing the last false-GREEN
+   hole (codex round-3): identity validation ties an entry to its KEY, but nothing tied
+   the CERTIFICATION RESULT to that identity, so flipping
+   [(outcome REFUTED)]→[(outcome CERTIFIED)] in an otherwise-valid entry was trusted,
+   dropping a ship-stopper under GREEN. {!store} writes [integrity = SHA-256] of the
+   content values ([content_fields] order); {!lookup} recomputes it from the read-back
+   fields and rejects a mismatch as [Unreadable] (re-certified via Lean). This defeats
+   accidental corruption AND naive tampering. RESIDUAL, stated honestly (see
+   tests/gate/NOTES.md): with no secret in the TCB, a keyless digest cannot stop a
+   determined same-UID adversary who edits a field and RECOMPUTES the digest — an in-file
+   MAC would need an embedded "secret" (security theater). The systemic backstops are the
+   documented trust assumption (the cache dir is trusted local state) and the nightly
+   cache-audit intent (re-certify N random hits, alarm on mismatch). *)
+let expected_fields = content_fields @ [ "integrity" ]
+
+let content_digest fields =
+  Sha256.hex_digest
+    (String.concat "\x00" (List.map (fun n -> List.assoc n fields) content_fields))
 ;;
 
 (* The three outcomes of a lookup, kept DISTINCT so the driver can count a corrupted /
@@ -253,6 +274,11 @@ let lookup ~dir ~claim (k : key) : lookup_result =
       then Unreadable "cache entry encoding-version mismatch"
       else if not (field_is "grind-config" Encoder.grind_config)
       then Unreadable "cache entry grind-config mismatch"
+      else if not (field_is "integrity" (content_digest fields))
+      then
+        (* Integrity binds outcome+detail to the entry: a flipped/corrupted content field
+           whose digest was not recomputed fails here → the ship-stopper survives. *)
+        Unreadable "cache entry integrity mismatch (outcome/detail tampered or corrupted)"
       else (
         let tag = List.assoc "outcome" fields in
         let detail = List.assoc "detail" fields in
@@ -263,7 +289,7 @@ let lookup ~dir ~claim (k : key) : lookup_result =
 
 let store ~dir (k : key) ~claim (outcome : Outcome.t) : unit =
   mkdir_p dir;
-  let fields =
+  let content =
     [ "key", k.hash
     ; "query-hash", k.query_hash
     ; "claim", claim
@@ -274,6 +300,8 @@ let store ~dir (k : key) ~claim (outcome : Outcome.t) : unit =
     ; "timestamp", Printf.sprintf "%.0f" (Unix.time ())
     ]
   in
+  (* Bind outcome+detail to the entry (see {!content_digest}); written as the last field. *)
+  let fields = content @ [ "integrity", content_digest content ] in
   let buf = Buffer.create 256 in
   Buffer.add_string buf "(entry\n";
   List.iter

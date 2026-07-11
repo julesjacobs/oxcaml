@@ -269,3 +269,39 @@ distinct `divmod-eliminated: N case(s) certified` line so the movement is visibl
 
 **Soundness spot-check.** A satisfiable div/mod query mislabeled unsat with NO witness
 model returns INCONCLUSIVE (grind correctly fails to prove False), never CERTIFIED.
+
+## Cache-entry integrity + the honest residual (tokenizer-gate round 3)
+
+The migrated cache reader (`cache.ml`) validates an entry's *identity* — schema (exactly
+the written fields, no missing/extra/duplicate) and `key`/`query-hash`/`claim`/`encoding-version`/
+`grind-config` against the requested key. But identity binds the entry to its INPUTS, not to
+its RESULT: a codex round-3 pass showed that flipping `(outcome REFUTED)` → `(outcome
+CERTIFIED)` in an otherwise-valid entry was trusted, dropping a ship-stopper while the gate
+stayed GREEN. This is exactly the §10 test-gaming vector: deleting a REFUTED entry self-heals
+(the case re-certifies and is re-refuted), but a *flip* would stick.
+
+**Fix (proportionate):** `store` writes an `integrity` field = SHA-256 over the content-field
+values; `lookup` recomputes it and rejects a mismatch as `Unreadable` (→ Lean re-runs). This
+binds the outcome (and detail) to the entry, so a flipped/corrupted result whose digest was
+not recomputed fails validation. Kills accidental corruption and NAIVE tampering. Selftests:
+store a REFUTED entry, flip only the on-disk outcome tag → `Unreadable`; and the mirrored
+CERTIFIED→REFUTED direction.
+
+**Residual, stated honestly — this is NOT a full authenticity guarantee.** With no secret
+available in the TCB, a keyless digest cannot stop a *determined same-UID adversary* who edits
+a field AND recomputes the digest. An in-file MAC would need an embedded "secret", which is
+security theater (a reviewer should reject it) — the secret would sit in the same repo/dir the
+adversary already controls. So the integrity field is a corruption/naive-tamper guard, not a
+cryptographic authenticator. The systemic backstops for the residual are:
+
+1. **Documented trust assumption.** The cache directory is TRUSTED local state, on the same
+   footing as the source tree and the build outputs: an actor who can rewrite cache entries
+   under our UID can equally rewrite `encoder.ml` or the Lean sources. The gate's soundness
+   argument assumes an untampered local checkout; the cache is inside that boundary.
+2. **Nightly cache-audit intent (documented intent only — no scheduler exists yet).** Alongside
+   the existing nightly-intent rows (mutation testing, the honeypot floor), add a nightly
+   **cache audit**: sample N random CERTIFIED cache hits, re-run the Lean oracle on them with
+   the cache disabled, and ALARM on any hit whose fresh verdict differs from the cached one.
+   This catches a determined tamper (and any latent cache/oracle drift) out-of-band, without
+   putting a fake secret in the repo. Not implemented here (like the other nightly rows, this
+   records intent; wiring it needs the nightly scheduler that does not yet exist).

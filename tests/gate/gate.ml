@@ -941,7 +941,25 @@ let cmd_selftest () =
     Buffer.add_string b trailing;
     Buffer.contents b
   in
+  (* Append the integrity digest {!Cache.store} would write, so a crafted entry passes
+     schema + integrity and ISOLATES the specific check under test (identity, tag, claim)
+     rather than tripping the integrity guard first. *)
+  let with_integrity content = content @ [ "integrity", Cache.content_digest content ] in
   let write_raw (k : Cache.key) s = Lean_runner.write_file (Cache.path cache_dir k) s in
+  let replace_first ~needle ~repl s =
+    let ls = String.length s
+    and ln = String.length needle in
+    let rec find i =
+      if i + ln > ls
+      then None
+      else if String.sub s i ln = needle
+      then Some i
+      else find (i + 1)
+    in
+    match find 0 with
+    | None -> s
+    | Some i -> String.sub s 0 i ^ repl ^ String.sub s (i + ln) (ls - i - ln)
+  in
   let expect_unreadable label ~claim (k : Cache.key) =
     match Cache.lookup ~dir:cache_dir ~claim k with
     | Cache.Unreadable _ -> print_endline (label ^ ": OK (Unreadable, never a Hit)")
@@ -978,7 +996,9 @@ let cmd_selftest () =
   let k = dummy "corrupt_tag" in
   write_raw
     k
-    (entry_str (full_fields k ~claim:"unsat" ~tag:"REFUTEX" ~detail:"cex") ~trailing:"");
+    (entry_str
+       (with_integrity (full_fields k ~claim:"unsat" ~tag:"REFUTEX" ~detail:"cex"))
+       ~trailing:"");
   expect_unreadable "cache corrupt-tag" ~claim:"unsat" k;
   (* (4) trailing garbage after the first entry's ')': a truncated-then-reappended file. *)
   let k = dummy "trailing" in
@@ -993,21 +1013,48 @@ let cmd_selftest () =
   let k = dummy "crafted" in
   write_raw k "(entry (outcome CERTIFIED))\n";
   expect_unreadable "cache crafted-minimal (missing fields)" ~claim:"unsat" k;
-  (* (6) identity mismatch: a full 8-field entry whose [key] field is someone else's hash. *)
+  (* (6) identity mismatch: a full entry (schema + integrity valid) whose [key] field is
+     someone else's hash — must fail the identity check, not slip through. *)
   let k = dummy "wrongkey" in
   write_raw
     k
     (entry_str
-       (("key", "SOMEONE-ELSE")
-        :: List.tl (full_fields k ~claim:"unsat" ~tag:"CERTIFIED" ~detail:""))
+       (with_integrity
+          (("key", "SOMEONE-ELSE")
+           :: List.tl (full_fields k ~claim:"unsat" ~tag:"CERTIFIED" ~detail:"")))
        ~trailing:"");
   expect_unreadable "cache wrong-key identity mismatch" ~claim:"unsat" k;
   (* (7) claim mismatch: a valid entry stored for unsat, looked up for a sat claim. *)
   let k = dummy "claimx" in
   write_raw
     k
-    (entry_str (full_fields k ~claim:"unsat" ~tag:"CERTIFIED" ~detail:"") ~trailing:"");
+    (entry_str
+       (with_integrity (full_fields k ~claim:"unsat" ~tag:"CERTIFIED" ~detail:""))
+       ~trailing:"");
   expect_unreadable "cache claim mismatch" ~claim:"sat" k;
+  (* (8)/(9) OUTCOME-FLIP (round-3 residual): store a valid entry, then flip ONLY the
+     outcome tag on disk, leaving the (now-stale) integrity. Lookup must reject it — the
+     ship-stopper survives a REFUTED→CERTIFIED flip, and a CERTIFIED→REFUTED flip cannot
+     manufacture a spurious ship-stopper either. *)
+  let flip_test label ~claim ~stored ~needle ~repl =
+    let k = dummy label in
+    Cache.store ~dir:cache_dir k ~claim stored;
+    let orig = Lean_runner.read_file (Cache.path cache_dir k) in
+    write_raw k (replace_first ~needle ~repl orig);
+    expect_unreadable ("cache outcome-flip " ^ label) ~claim k
+  in
+  flip_test
+    "refuted->certified"
+    ~claim:"unsat"
+    ~stored:(Outcome.Refuted "kernel-checked counterexample")
+    ~needle:"(outcome REFUTED)"
+    ~repl:"(outcome CERTIFIED)";
+  flip_test
+    "certified->refuted"
+    ~claim:"unsat"
+    ~stored:Outcome.Certified
+    ~needle:"(outcome CERTIFIED)"
+    ~repl:"(outcome REFUTED)";
   (* Best-effort cleanup of the throwaway cache dir. *)
   (try
      Array.iter
