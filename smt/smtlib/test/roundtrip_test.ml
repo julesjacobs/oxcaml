@@ -330,9 +330,17 @@ let operator_class =
 
 let naming_classes () =
   let i = Sort.int in
-  (* reserved words as function names: |quoted|, round-trip *)
+  (* reserved words as function names: must RENDER as |w| (direct string assertion on the
+     printed text — a round-trip alone would pass even if rendered bare, since our own
+     parser is lenient; that masking is exactly the R1 pattern) AND round-trip. *)
   List.iter
     (fun w ->
+       check_print
+         ~name:("reserved-word-render:" ^ w)
+         ~expect:(Printf.sprintf "(declare-const |%s| Int)" w)
+         (fun env ctx ->
+            let c = const env ctx w i in
+            [ Context.eq ctx c (Context.int_const ctx 0) ]);
        check_a ~name:("reserved-word:" ^ w) (fun env ctx ->
          let c = const env ctx w i in
          [ Context.eq ctx c (Context.int_const ctx 0) ]))
