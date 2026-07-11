@@ -1985,6 +1985,45 @@ let test_use_history_transition_real () =
     second
 ;;
 
+(* GUARD-DROP PIN (build-digest deviation, team-lead-approved): the build plan's step-4
+   boundary rule carried an extra `parent_owner <> Neutral` clause that EXCLUDED the owned
+   sides of an equality atom (an [Eq] node is Neutral). That contradicts ADR §3.1 (a
+   crossing is recorded per parent→child EDGE) and the §6 mixed-equality totality test,
+   and it is unsound at the MODEL level: f(a)≠f(b) ∧ a≤b is SAT, but with the guard
+   f(a),f(b) never enter the interface, the EUF/LIA disagreement on them is never found,
+   and the merged model takes LIA's free (equal) values for f(a),f(b) — violating the
+   asserted f(a)≠f(b). This pins the fix: the merged model MUST satisfy the formula; a
+   reviewer who re-adds `parent_owner <> Neutral` makes this go red.
+
+   Driven through the TOY stack (not the real Euf/Lia): the toy LIA totalizes a value for
+   every registered App variable, so an owned Eq-side dropped from the interface surfaces
+   as a concrete f(a)=f(b) in the merged model — the observable inconsistency. The real
+   Lia_adapter leaves an unconstrained App term unvalued, so its model OMITS f(a),f(b)
+   (codex C3 pure-EUF-Int-term case) and cannot exhibit the fault, which is why the
+   original empirical demonstration was the toy layer. Distinct shape from the f(x)=x+y
+   mixed-equality test: here the owned sides are under a NEGATED Int equality whose diseq
+   routes to EUF only (S1), so LIA is never told them apart. *)
+let test_owned_eq_sides_guard_toy () =
+  let f = fixture () in
+  let a = const f "a"
+  and b = const f "b" in
+  let ff = ufun f "f" in
+  let fa = Context.app f.ctx ff [ a ]
+  and fb = Context.app f.ctx ff [ b ] in
+  let formula = [ Context.eq f.ctx fa fb, false; Context.le f.ctx a b, true ] in
+  match solve ~cells:full_assignment_cells f formula with
+  | Vsat m ->
+    check "guard-drop pin: f(a)≠f(b) ∧ a≤b ⇒ SAT" true;
+    check
+      "guard-drop pin: merged model SATISFIES f(a)≠f(b) (owned Eq-sides in the interface)"
+      (model_satisfies m formula)
+  | Vunsat | Vunknown ->
+    check "guard-drop pin: f(a)≠f(b) ∧ a≤b ⇒ SAT" false;
+    check
+      "guard-drop pin: merged model SATISFIES f(a)≠f(b) (owned Eq-sides in the interface)"
+      false
+;;
+
 (* ================================================================================== *)
 
 let () =
@@ -2031,6 +2070,7 @@ let () =
   test_buried_lia_euf_owned_real ();
   test_predicate_variant_real ();
   test_mixed_equality_totality_real ();
+  test_owned_eq_sides_guard_toy ();
   test_deep_tower_real ();
   test_pure_qf_lia_zero_splits ();
   test_push_pop_reassert_real ();
