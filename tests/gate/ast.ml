@@ -40,6 +40,10 @@ type term =
   | Sub of term list (* left-associative subtraction, >= 1 args *)
   | Neg of term
   | Mul of term list
+  | Div of term * term
+    (* euclidean integer division (SMT-LIB [div]); divisor must be a nonzero integer
+       literal — see [Elim] *)
+  | Mod of term * term (* euclidean remainder (SMT-LIB [mod]); same divisor restriction *)
 
 type query =
   { logic : string option

@@ -9,16 +9,16 @@
 
    Supported commands: set-logic, set-info, declare-sort (arity 0), declare-fun,
    declare-const, assert, check-sat, exit. Supported terms: true false, and or not =>,
-   ite, = distinct, <= < >= >, + - *, integer numerals, let, plus declared symbols. [=]
-   over Bool operands is iff: [normalize] rewrites it to the [Iff] node (chains desugar
-   pairwise); [distinct] over Bool is pairwise [<>].
+   ite, = distinct, <= < >= >, + - *, div mod abs, integer numerals, let, plus declared
+   symbols. [=] over Bool operands is iff: [normalize] rewrites it to the [Iff] node
+   (chains desugar pairwise); [distinct] over Bool is pairwise [<>]. [abs] desugars to
+   [ite(x>=0,x,-x)] here; [div]/[mod] become [Div]/[Mod] nodes the encoder eliminates
+   ([Elim]) — a non-literal or zero divisor stays UNSUPPORTED (fail closed).
 
    TCB hardening (codex G1-G4, see NOTES.md): token KIND from [Sexp] is honoured — a
    [Quoted] |sym| is ALWAYS a plain symbol (never a numeral/keyword/operator), a [Str]
    "..." is inert data (never a command/term). A single [check-sat] bounds the query:
    asserts after it, or a second check-sat, are UNSUPPORTED (no silent union).
-   [div]/[mod]/ [abs] are recognised but UNSUPPORTED (loud) — need encoder elimination
-   (M4).
 
    Reader-vs-execution divergence is fatal (codex round-3): [(check-sat)] and [(exit)]
    take NO arguments, and execution TERMINATES at [(exit)]. So [(check-sat ...)] and
@@ -33,6 +33,20 @@ exception Unsupported of string
 
 let malformedf fmt = Printf.ksprintf (fun s -> raise (Malformed s)) fmt
 let unsupportedf fmt = Printf.ksprintf (fun s -> raise (Unsupported s)) fmt
+
+(* Reserved fresh-symbol namespace, shared with [Elim]. The encoder's div/mod elimination
+   introduces nullary symbols named [.oxsmt.<kind>.<n>]; a user declaration or let-binding
+   in this namespace could CAPTURE a fresh symbol and make the euclidean witness alias a
+   user value — a soundness bug. So the reader rejects any user name in it (matching
+   smt/preprocess's "front ends must keep user names out of this namespace" contract). The
+   gate's own fresh names are the exact class task #127 covers; this is that guard for the
+   gate's independent reader. *)
+let reserved_prefix = ".oxsmt."
+
+let is_reserved_name name =
+  let p = reserved_prefix in
+  String.length name >= String.length p && String.sub name 0 (String.length p) = p
+;;
 
 (* ---- environment built up while reading declarations ---- *)
 
@@ -111,7 +125,14 @@ and read_let env rest =
   match rest with
   | [ Sexp.List bindings; body ] ->
     let binding_name = function
-      | Sexp.Atom name | Sexp.Quoted name -> name
+      | Sexp.Atom name | Sexp.Quoted name ->
+        if is_reserved_name name
+        then
+          malformedf
+            "let-binding name %s is in the reserved %s namespace"
+            name
+            reserved_prefix;
+        name
       | b -> malformedf "malformed let binding variable: %s" (Sexp.to_string b)
     in
     let new_scope =
@@ -148,18 +169,21 @@ and read_app env op args _orig =
   | "-", [ a ] -> Neg (read_term env a)
   | "-", _ :: _ :: _ -> Sub (t ())
   | ("forall" | "exists"), _ -> unsupportedf "quantifiers are not supported (QF only)"
-  | ("div" | "mod" | "abs"), _ ->
-    (* Recognised LIA operators the gate cannot certify TODAY (codex G4): grind does not
-       reason about Lean's Euclidean [Int.ediv]/[Int.emod] (verified by experiment — it
-       treats them as opaque), so emitting them would only ever yield INCONCLUSIVE; [abs]
-       is the same class (codex). Real support needs the encoder eliminations (div/mod:
-       fresh q,r + side constraints; abs: ite(x>=0,x,-x)), a separate TCB feature tracked
-       for M4 LIA. Classify LOUD + distinct (UNSUPPORTED, not MALFORMED) so the coverage
-       gap is visible in the digest/quarantine rather than a silent MALFORMED-green. *)
-    unsupportedf
-      "%s not yet certifiable by the gate (grind lacks Euclidean ediv/emod reasoning; \
-       abs needs ite elimination); needs encoder elimination — tracked for M4 LIA"
-      op
+  (* Euclidean div/mod (SMT-LIB). Built as nodes here; the encoder eliminates them
+     ([Elim]): the unsat direction rewrites to fresh vars + linear constraints (grind has
+     no Euclidean ediv/emod reasoning), the sat direction emits [Int.ediv]/[Int.emod]
+     (decide computes them on a concrete model). The divisor restriction (nonzero integer
+     literal) is enforced in [Elim], matching smt/preprocess's div/mod elimination. *)
+  | "div", [ a; b ] -> Div (read_term env a, read_term env b)
+  | "div", _ -> malformedf "div expects 2 arguments"
+  | "mod", [ a; b ] -> Mod (read_term env a, read_term env b)
+  | "mod", _ -> malformedf "mod expects 2 arguments"
+  (* [abs] desugars to [ite(x >= 0, x, -x)] exactly as smt/core's [Context.abs] does at
+     construction; both directions then handle the ite (grind via Classical / decide). *)
+  | "abs", [ a ] ->
+    let x = read_term env a in
+    Ite (Ge (x, Int_lit "0"), x, Neg x)
+  | "abs", _ -> malformedf "abs expects 1 argument"
   | _ ->
     (* uninterpreted function application (unquoted non-operator head) *)
     read_fun_app env op args
@@ -259,6 +283,10 @@ let rec sort_of env (t : term) : sort =
     List.iter (expect env Int) xs;
     check_linear env xs;
     Int
+  | Div (a, b) | Mod (a, b) ->
+    expect env Int a;
+    expect env Int b;
+    Int
 
 and expect env (s : sort) (t : term) : unit =
   let s' = sort_of env t in
@@ -327,6 +355,8 @@ let rec normalize env (t : term) : term =
   | Sub xs -> Sub (List.map (normalize env) xs)
   | Neg a -> Neg (normalize env a)
   | Mul xs -> Mul (List.map (normalize env) xs)
+  | Div (a, b) -> Div (normalize env a, normalize env b)
+  | Mod (a, b) -> Mod (normalize env a, normalize env b)
 ;;
 
 (* ---- command reader ---- *)
@@ -373,9 +403,14 @@ let of_string (src : string) : query =
      [exited] and any later command is a hard REJECT — never a silent truncation of the
      ignored tail, which is the same laundering class. *)
   let exited = ref false in
-  (* A declared name may be an unquoted [Atom] or a [Quoted] symbol (e.g. |0|). *)
+  (* A declared name may be an unquoted [Atom] or a [Quoted] symbol (e.g. |0|). Reserved
+     [.oxsmt.*] names are rejected so a user cannot capture the encoder's fresh symbols. *)
   let decl_name = function
-    | Sexp.Atom name | Sexp.Quoted name -> name
+    | Sexp.Atom name | Sexp.Quoted name ->
+      if is_reserved_name name
+      then
+        malformedf "declared name %s is in the reserved %s namespace" name reserved_prefix;
+      name
     | other -> malformedf "expected a symbol name, got %s" (Sexp.to_string other)
   in
   let declare_fun name params ret =

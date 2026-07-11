@@ -1,12 +1,12 @@
-; G4 trap (codex): (mod x 3) = 5 is genuinely unsat (mod is in [0,3)), but the
-; gate cannot certify div/mod (grind has no Euclidean ediv/emod reasoning). The
-; old reader had no div/mod case, so `mod` fell through to "undeclared operator"
-; = MALFORMED, which is not red — a div/mod query silently bypassed the oracle on
-; a green gate. The fixed reader recognises div/mod and classifies it LOUD +
-; distinct: UNSUPPORTED (never silently green, never CERTIFIED). Flip to
-; KILLED-if-CERTIFIED and expect UNSUPPORTED until euclidean elimination lands (M4).
+; Variable-divisor trap (gate-divmod): div/mod is now certifiable ONLY for a nonzero
+; INTEGER-LITERAL divisor (v1 solves linear arithmetic; euclidean elimination needs a
+; constant d for the x = d*q + r rewrite). A variable divisor (y) is outside that theory,
+; so the gate must fail closed: UNSUPPORTED (quarantined, never CERTIFIED, never a silent
+; MALFORMED-green). This matches smt/preprocess, which raises "div/mod by a non-constant
+; divisor". Labelled unsat so a regression to CERTIFIED would be caught as a breach.
 (set-logic QF_LIA)
 (set-info :status unsat)
 (declare-const x Int)
-(assert (= (mod x 3) 5))
+(declare-const y Int)
+(assert (= (mod x y) 0))
 (check-sat)

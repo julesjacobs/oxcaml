@@ -19,8 +19,14 @@ let errf fmt = Printf.ksprintf (fun s -> raise (Encode_error s)) fmt
    Lean emission is unchanged — every verdict cached under enc-v1 was computed through a
    reader with known soundness holes (quoted-token/string-injection/multi-check-sat), so
    the whole enc-v1 certified cache is suspect and must be force-invalidated and
-   re-certified through the fixed reader (see logs/gate3-recertification.md). *)
-let encoding_version = "enc-v2"
+   re-certified through the fixed reader (see logs/gate3-recertification.md).
+
+   enc-v3 (div/mod/abs support): the unsat direction now eliminates div/mod to fresh
+   euclidean witnesses ([Elim]) and abs desugars to ite; the sat direction emits
+   [Int.ediv]/[Int.emod]. The emitted Lean changes for any div/mod/abs query, so the bump
+   is mandatory — prior [UNSUPPORTED]-quarantined div/mod verdicts were never cached, and
+   all other keys change to keep the cache monotonic. *)
+let encoding_version = "enc-v3"
 
 (* Centralised grind invocation; part of the cache key via [grind_config]. *)
 let grind_tactic = "grind"
@@ -93,6 +99,15 @@ let rec enc names (t : term) : string =
   | Add xs -> join names " + " xs
   | Mul xs -> join names " * " xs
   | Neg a -> Printf.sprintf "(-(%s))" (enc names a)
+  (* SMT-LIB div/mod are Euclidean = Lean [Int.ediv]/[Int.emod] (both verified against
+     [decide], incl. negative operands, in NOTES.md). The UNSAT direction never reaches
+     these: [Elim.eliminate] has already replaced div/mod with fresh witnesses. The SAT
+     direction DOES emit them: [decide] computes them on the model-substituted (closed)
+     term. A residual div/mod in the unsat direction (only if the [Elim] fail-safe left
+     one — impossible past the divisor preflight) would render here and grind would return
+     INCONCLUSIVE, never a false certification. *)
+  | Div (a, b) -> Printf.sprintf "(Int.ediv %s %s)" (enc names a) (enc names b)
+  | Mod (a, b) -> Printf.sprintf "(Int.emod %s %s)" (enc names a) (enc names b)
   | Sub xs ->
     (match xs with
      | [] -> errf "internal: empty subtraction"
@@ -151,6 +166,11 @@ let binders_for_decls names (q : query) : string list =
 ;;
 
 let encode_unsat (q : query) : string =
+  (* Eliminate div/mod to fresh euclidean witnesses so grind (which cannot reason about
+     [Int.ediv]/[Int.emod]) sees pure linear arithmetic. [Elim.check_divisors] has already
+     rejected invalid divisors in the gate preflight; abs was desugared to ite in the
+     reader. *)
+  let q = Elim.eliminate q in
   let names = make_names q in
   let buf = Buffer.create 512 in
   Buffer.add_string buf "set_option linter.unusedVariables false\n";

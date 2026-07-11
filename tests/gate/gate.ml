@@ -136,43 +136,58 @@ type disposition =
   | `Uncached
   ]
 
-let certify_file ctx ~cache_dir ~allow_cache smt2 : Outcome.t * disposition =
+(* Returns (outcome, disposition, used_divmod). [used_divmod] flags a query that contains
+   [div]/[mod] (whose unsat direction goes through euclidean elimination); the run digest
+   counts the div/mod cases that CERTIFY so the quarantined -> certified movement is
+   visible. *)
+let certify_file ctx ~cache_dir ~allow_cache smt2 : Outcome.t * disposition * bool =
   match Lean_runner.read_file smt2 with
-  | exception e -> Encode_error (Printexc.to_string e), `Uncached
+  | exception e -> Encode_error (Printexc.to_string e), `Uncached, false
   | text ->
     (match Reader.of_string text with
-     | exception Reader.Malformed m -> Malformed m, `Uncached
-     | exception Reader.Unsupported m -> Unsupported m, `Uncached
-     | exception Sexp.Malformed m -> Malformed ("sexp: " ^ m), `Uncached
+     | exception Reader.Malformed m -> Malformed m, `Uncached, false
+     | exception Reader.Unsupported m -> Unsupported m, `Uncached, false
+     | exception Sexp.Malformed m -> Malformed ("sexp: " ^ m), `Uncached, false
      | q ->
-       (match q.status with
-        | None -> No_status, `Uncached
-        | Some Ast.Unknown -> No_status, `Uncached
-        | Some claim ->
-          (match load_model smt2 with
-           | exception Model.Bad_model m -> Encode_error ("bad model: " ^ m), `Uncached
-           | model_opt, model_str ->
-             let claim_str = Ast.verdict_to_string claim in
-             let key =
-               Cache.compose
-                 ~canonical:(Canonical.canonical_query q)
-                 ~claim:claim_str
-                 ~model:model_str
-                 ~lean_version:ctx.lean_version
-             in
-             let cached = if allow_cache then Cache.lookup ~dir:cache_dir key else None in
-             (match cached with
-              | Some o -> o, `Hit
-              | None ->
-                let o =
-                  match claim with
-                  | Ast.Unsat -> certify_unsat ctx q model_opt
-                  | Ast.Sat -> certify_sat ctx q model_opt
-                  | Ast.Unknown -> No_status
+       let dm = Elim.uses_divmod q in
+       (* Preflight: reject an invalid (zero / non-literal) div/mod divisor BEFORE any
+          encoding, in one place, so NEITHER direction can certify a divisor outside the
+          theory the solver solves (the sat direction would otherwise let decide compute a
+          variable-divisor model). Fail closed -> UNSUPPORTED quarantine. *)
+       (match Elim.check_divisors q with
+        | exception Reader.Unsupported m -> Unsupported m, `Uncached, dm
+        | () ->
+          (match q.status with
+           | None -> No_status, `Uncached, dm
+           | Some Ast.Unknown -> No_status, `Uncached, dm
+           | Some claim ->
+             (match load_model smt2 with
+              | exception Model.Bad_model m ->
+                Encode_error ("bad model: " ^ m), `Uncached, dm
+              | model_opt, model_str ->
+                let claim_str = Ast.verdict_to_string claim in
+                let key =
+                  Cache.compose
+                    ~canonical:(Canonical.canonical_query q)
+                    ~claim:claim_str
+                    ~model:model_str
+                    ~lean_version:ctx.lean_version
                 in
-                if allow_cache && should_cache o
-                then Cache.store ~dir:cache_dir key ~claim:claim_str o;
-                o, if allow_cache then `Miss else `Uncached))))
+                let cached =
+                  if allow_cache then Cache.lookup ~dir:cache_dir key else None
+                in
+                (match cached with
+                 | Some o -> o, `Hit, dm
+                 | None ->
+                   let o =
+                     match claim with
+                     | Ast.Unsat -> certify_unsat ctx q model_opt
+                     | Ast.Sat -> certify_sat ctx q model_opt
+                     | Ast.Unknown -> No_status
+                   in
+                   if allow_cache && should_cache o
+                   then Cache.store ~dir:cache_dir key ~claim:claim_str o;
+                   o, (if allow_cache then `Miss else `Uncached), dm)))))
 ;;
 
 (* ---- corpus listing ---- *)
@@ -224,7 +239,7 @@ let run_dir_now logs_root =
 (* A green gate that hasn't proven it can go red is unaudited (DESIGN.md §10), so the
    honeypot phase is not vacuously satisfiable: it enforces a hard floor and an exact
    expected outcome per honeypot. *)
-let min_honeypots = 11
+let min_honeypots = 12
 let expect_path smt2 = Filename.remove_extension smt2 ^ ".expect"
 
 (* A honeypot's declared expectation must be a non-certifying outcome. CERTIFIED is
@@ -264,7 +279,7 @@ let honeypots_phase ctx ~cache_dir dir : bool * string list * string =
   and certified = ref 0 in
   List.iter
     (fun f ->
-       let o, disp = certify_file ctx ~cache_dir ~allow_cache:false f in
+       let o, disp, _dm = certify_file ctx ~cache_dir ~allow_cache:false f in
        print_line ctx "honeypot" f o disp;
        let certified_here = Outcome.is_certified o in
        if certified_here
@@ -317,15 +332,19 @@ let cases_phase ctx ~cache_dir dir =
   and misses = ref 0 in
   let ship_stoppers = ref []
   and encode_errors = ref []
-  and quarantined = ref [] in
+  and quarantined = ref []
+  and divmod_certified = ref 0 in
   List.iter
     (fun f ->
-       let o, disp = certify_file ctx ~cache_dir ~allow_cache:true f in
+       let o, disp, dm = certify_file ctx ~cache_dir ~allow_cache:true f in
        (match disp with
         | `Hit -> incr hits
         | `Miss -> incr misses
         | `Uncached -> ());
        bump (Outcome.tag o);
+       (* A div/mod case that now CERTIFIES is one the pre-elimination gate would have
+         UNSUPPORTED-quarantined; count the movement so it is visible in the digest. *)
+       if dm && Outcome.is_certified o then incr divmod_certified;
        if Outcome.is_ship_stopper o then ship_stoppers := (f, o) :: !ship_stoppers;
        (match o with
         | Encode_error _ -> encode_errors := (f, o) :: !encode_errors
@@ -341,7 +360,8 @@ let cases_phase ctx ~cache_dir dir =
   , !misses
   , List.rev !ship_stoppers
   , List.rev !encode_errors
-  , List.rev !quarantined )
+  , List.rev !quarantined
+  , !divmod_certified )
 ;;
 
 let cmd_run ~cases_dir ~honeypots_dir ~cache_dir ~logs_root ~timeout ~allow_cache =
@@ -365,10 +385,18 @@ let cmd_run ~cases_dir ~honeypots_dir ~cache_dir ~logs_root ~timeout ~allow_cach
   in
   logf ctx "";
   (* If a honeypot certified, abort red BEFORE trusting any case result. *)
-  let tally, n_cases, hits, misses, ship_stoppers, encode_errors, quarantined =
+  let ( tally
+      , n_cases
+      , hits
+      , misses
+      , ship_stoppers
+      , encode_errors
+      , quarantined
+      , divmod_certified )
+    =
     if honeypots_ok
     then cases_phase ctx ~cache_dir cases_dir
-    else Hashtbl.create 1, 0, 0, 0, [], [], []
+    else Hashtbl.create 1, 0, 0, 0, [], [], [], 0
   in
   logf ctx "";
   (* Write full log. *)
@@ -421,6 +449,15 @@ let cmd_run ~cases_dir ~honeypots_dir ~cache_dir ~logs_root ~timeout ~allow_cach
     (if accounting_ok
      then ""
      else Printf.sprintf "  [MISMATCH: %d unaccounted — RED]" (n_cases - accounted));
+  (* Visible movement: div/mod cases that CERTIFY via euclidean elimination — these would
+     have been UNSUPPORTED-quarantined before this feature. Part of the certified count in
+     the accounting identity above (not a separate class). *)
+  if divmod_certified > 0
+  then
+    Printf.printf
+      "  divmod-eliminated: %d case(s) certified (were UNSUPPORTED-quarantined \
+       pre-elimination)\n"
+      divmod_certified;
   if quarantined <> []
   then (
     Printf.printf "  QUARANTINED (counted, not certified — no silent bypass):\n";
@@ -453,7 +490,7 @@ let cmd_certify ~cache_dir ~logs_root ~timeout ~allow_cache file =
   Cache.mkdir_p logdir;
   let lean_version = Lean_runner.version () in
   let ctx = { logdir; lean_version; timeout; counter = 0; log = Buffer.create 1024 } in
-  let o, disp = certify_file ctx ~cache_dir ~allow_cache file in
+  let o, disp, _dm = certify_file ctx ~cache_dir ~allow_cache file in
   Lean_runner.write_file (Filename.concat logdir "gate.log") (Buffer.contents ctx.log);
   let d =
     match disp with
@@ -599,6 +636,63 @@ let cmd_selftest () =
   rejects_malformed
     "post-exit reject"
     "(set-logic QF_LIA) (set-info :status unsat) (exit) (assert false) (check-sat)";
+  (* div/mod elimination (Lean-free structural checks). A nonzero-literal divisor is
+     eliminated: the transformed query has NO Div/Mod and DOES declare fresh .oxsmt.*
+     witnesses; a zero / variable divisor fails the divisor preflight (UNSUPPORTED); a
+     user name in the reserved namespace is rejected so it cannot capture a fresh witness. *)
+  let dm_decls = "(set-logic QF_LIA)(declare-const x Int)(declare-const y Int)" in
+  let read s =
+    try Some (Reader.of_string s) with
+    | _ -> None
+  in
+  (match
+     read (dm_decls ^ "(assert (>= (mod x 4) 4))(set-info :status unsat)(check-sat)")
+   with
+   | Some q ->
+     (match Elim.check_divisors q with
+      | () ->
+        let q' = Elim.eliminate q in
+        let no_divmod = not (Elim.uses_divmod q') in
+        let has_fresh =
+          List.exists (fun (n, _, _) -> Reader.is_reserved_name n) q'.fun_decls
+        in
+        if Elim.uses_divmod q && no_divmod && has_fresh
+        then print_endline "divmod elim: OK (mod eliminated to fresh .oxsmt witnesses)"
+        else (
+          ok := false;
+          print_endline "divmod elim: FAIL (residual div/mod or no fresh witness)")
+      | exception _ ->
+        ok := false;
+        print_endline "divmod elim: FAIL (literal divisor wrongly rejected)")
+   | None ->
+     ok := false;
+     print_endline "divmod elim: FAIL (parse)");
+  let rejects_unsupported label src =
+    match read src with
+    | Some q ->
+      (match Elim.check_divisors q with
+       | () ->
+         ok := false;
+         Printf.printf "%s: FAIL (divisor accepted; must reject)\n" label
+       | exception Reader.Unsupported _ ->
+         print_endline (label ^ ": OK (rejected UNSUPPORTED)")
+       | exception e ->
+         ok := false;
+         Printf.printf "%s: FAIL (raised %s)\n" label (Printexc.to_string e))
+    | None ->
+      ok := false;
+      Printf.printf "%s: FAIL (parse)\n" label
+  in
+  rejects_unsupported
+    "divmod zero-divisor reject"
+    (dm_decls ^ "(assert (= (div x 0) 0))(set-info :status unsat)(check-sat)");
+  rejects_unsupported
+    "divmod variable-divisor reject"
+    (dm_decls ^ "(assert (= (mod x y) 0))(set-info :status unsat)(check-sat)");
+  rejects_malformed
+    "reserved-name reject"
+    "(set-logic QF_LIA)(declare-const |.oxsmt.q.0| Int)(assert (>= |.oxsmt.q.0| \
+     0))(set-info :status unsat)(check-sat)";
   if !ok then 0 else 1
 ;;
 

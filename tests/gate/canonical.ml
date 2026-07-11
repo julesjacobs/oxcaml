@@ -72,6 +72,9 @@ let rec cterm (t : term) : ctree =
   | Mul xs -> L (A "*" :: sort_children (List.map cterm xs))
   | Neg a -> L [ A "neg"; cterm a ]
   | Sub xs -> L (A "-" :: List.map cterm xs)
+  (* div/mod are non-commutative (dividend, divisor); order preserved. *)
+  | Div (a, b) -> L [ A "div"; cterm a; cterm b ]
+  | Mod (a, b) -> L [ A "mod"; cterm a; cterm b ]
 ;;
 
 (* non-commutative: order preserved *)

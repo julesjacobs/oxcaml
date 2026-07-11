@@ -219,3 +219,53 @@ audit" checked classification OUTCOMES but not COMMAND HANDLERS. Extended checkl
 item — every command the reader matches-and-ignores must be justified against
 SMT-LIB *execution* semantics: what would a conformant solver DO here, and does
 ignoring it change the effective query the gate certifies?
+
+## div/mod/abs support — euclidean elimination (gate-divmod, enc-v3)
+
+Closes the div/mod (+abs) quarantine gap the round-3 NOTES flagged as the real fix
+(previously div/mod/abs were loud UNSUPPORTED). Two directions, because grind and
+decide have opposite strengths on Euclidean division:
+
+- **UNSAT (grind)**: [Encoder.encode_unsat] runs [Elim.eliminate], which replaces
+  each [(div x d)]/[(mod x d)] (nonzero integer-literal d) with fresh nullary
+  [.oxsmt.q.n]/[.oxsmt.r.n] plus `x = d*q + r ∧ 0 <= r < |d|`, returning q/r. grind
+  then sees pure linear arithmetic (verified exp: grind proves the eliminated
+  `(mod x 4) >= 4 → False`, `4*(div x 4) >= x+1 → False`, mod-periodicity). This is
+  EXACTLY smt/preprocess's [div_mod_elimination] rewrite (preprocess.ml:118) — same
+  `rhs = d*q + r`, `0 <= r`, `r < |d|`. Divergences, both sound: the gate uses
+  arbitrary-precision numeral strings (no min_int |d| overflow, unlike preprocess's
+  native-int ceiling), and does NOT memoise one witness per (dividend, divisor)
+  (per-occurrence witnesses are equivalent — euclidean q,r are unique given x,d).
+- **SAT (decide)**: [Encoder.enc] emits [Int.ediv]/[Int.emod] directly; decide
+  computes them on the model-substituted closed term. SMT-LIB div/mod are Euclidean =
+  Lean [Int.ediv]/[Int.emod] (verified exp incl. negatives: `emod (-1) 3 = 2`,
+  `ediv (-1) 3 = -1`, the euclidean identity, and `0 <= emod < |d|`). This is why the
+  refute honeypot ((mod x 3)=1 mislabeled unsat, witness x:=1) goes REFUTED not
+  INCONCLUSIVE — the sat path proves the assertion under the model by decide.
+
+- **abs**: desugared in the reader to `ite(x>=0, x, -x)`, EXACTLY smt/core's
+  [Context.abs] (context.mli:51). Both directions already handle ite (grind via
+  Classical / decide), so no fresh var and no dual path.
+
+**Divisor restriction = fail closed (matches the solver's theory).** [Elim.check_divisors]
+is the single authoritative preflight (run in [certify_file] before either encoding):
+a ZERO divisor (SMT-LIB leaves div/mod-by-zero unconstrained; preprocess rejects it —
+note Lean's `Int.emod x 0 = x` would otherwise let the sat path "compute" a value the
+solver never sanctions) and a NON-LITERAL / variable divisor (v1 is linear) both stay
+UNSUPPORTED. Known coverage gap (not a soundness issue): the solver's core folds a
+constant divisor like `(+ 1 2)` to a literal and accepts it; the gate does NOT
+constant-fold, so it quarantines such a divisor. The gate is strictly MORE conservative
+— it never certifies a divisor the solver rejects — so the asymmetry is a completeness
+gap, filed for a future fold-then-check refinement, never a false certification.
+
+**Fresh-name capture (#127 for the gate).** [Elim]'s fresh symbols live in the reserved
+[.oxsmt.] namespace; [Reader] now rejects any user declaration OR let-binding in that
+namespace ([is_reserved_name]), so a crafted `(declare-const |.oxsmt.q.0| Int)` cannot
+alias a euclidean witness. This is the gate's independent instance of the #127 guard.
+
+**Accounting.** Eliminated-and-certified div/mod cases move quarantined → certified; the
+5-term identity is unchanged (they are in the certified count), and the digest prints a
+distinct `divmod-eliminated: N case(s) certified` line so the movement is visible.
+
+**Soundness spot-check.** A satisfiable div/mod query mislabeled unsat with NO witness
+model returns INCONCLUSIVE (grind correctly fails to prove False), never CERTIFIED.
