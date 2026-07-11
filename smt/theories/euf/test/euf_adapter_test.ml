@@ -453,21 +453,29 @@ let test_register_idempotent () =
 ;;
 
 (* ------------------------------------------------------------------ *)
-(* 6. Error contracts: Le atom rejected, non-atom rejected, unregistered assert raises. *)
+(* 6. Error contracts: foreign (Le) atom REGISTERS but must not be asserted; non-atom
+   rejected; unregistered assert raises. *)
 
 let test_error_contracts () =
   let env, _u, _unary, _pred, konst, _bpred = make_env () in
   let ctx = Context.create env in
   let h = make_harness env ctx in
-  (* A genuine (non-constant-folded) Le atom: [xi <= 0] over an Int variable — belongs to
-     LIA, must be rejected by the EUF adapter. (A constant [1 <= 0] would fold to
-     [Bool_const false], which is a legitimate Bool atom, so it must NOT be used here.) *)
+  (* A genuine (non-constant-folded) Le atom: [xi <= 0] over an Int variable — a LIA
+     (foreign) atom. The combinator registers it with EUF (register-not-assert) so
+     congruence sees its subterms; registration must SUCCEED, but asserting it must fail
+     loud. (A constant [1 <= 0] would fold to [Bool_const false], a legitimate Bool atom,
+     so it must NOT be used here.) *)
   let xi = Context.const ctx (Env.declare_fun env "xi" (Rank.create [] Sort.int)) in
   let le_atom = Context.le ctx xi (Context.int_const ctx 0) in
-  check_raises "register Le atom raises" (fun () ->
-    A.register_atom h.adapter (Atom.fresh h.alloc) le_atom);
-  (* a non-atom (a genuine 2-conjunct conjunction) is rejected. Distinct conjuncts, since
-     [Eq(a,b)]/[Eq(b,a)] are the same tag-ordered term and would dedup to one atom. *)
+  let le_id = Atom.fresh h.alloc in
+  (match A.register_atom h.adapter le_id le_atom with
+   | () -> check "register foreign (Le) atom succeeds" true
+   | exception _ -> check "register foreign (Le) atom succeeds" false);
+  check_raises "assert_lit on a foreign (Le) atom raises" (fun () ->
+    A.assert_lit h.adapter (Lit.make le_id true));
+  (* a non-atom (a genuine 2-conjunct conjunction) is still rejected at register: it is
+     not an atom at all. Distinct conjuncts, since [Eq(a,b)]/[Eq(b,a)] are the same
+     tag-ordered term and would dedup to one atom. *)
   let a = Context.const ctx (konst "a") in
   let b = Context.const ctx (konst "b") in
   let c = Context.const ctx (konst "c") in
@@ -479,6 +487,87 @@ let test_error_contracts () =
   let ghost = Atom.fresh h.alloc in
   check_raises "assert unregistered atom raises" (fun () ->
     A.assert_lit h.adapter (Lit.make ghost true))
+;;
+
+(* ------------------------------------------------------------------ *)
+(* 6b. Register-non-owned (task/euf-register-nonown): registering a foreign atom (e.g. a
+   LIA [Le]) internalises its App-subterm closure into the e-graph so congruence fires
+   over terms EUF does not own, and model() can value them — without EUF asserting or
+   watching the atom. This is what lets the combinator register-with-child /
+   assert-only-owned. *)
+
+let test_register_non_owned () =
+  let env, usort, _unary, _pred, konst, _bpred = make_env () in
+  let ctx = Context.create env in
+  (* f : U -> Int and g : Int -> Int, so the foreign Le atoms [f(x) <= f(y)] and
+     [g(f(x)) <= 0] typecheck (Le is an Int comparison) — the W1 shape. *)
+  let f = Env.declare_fun env "f" (Rank.create [ usort ] Sort.int) in
+  let g = Env.declare_fun env "g" (Rank.create [ Sort.int ] Sort.int) in
+  let x = Context.const ctx (konst "x") in
+  let y = Context.const ctx (konst "y") in
+  let fx = Context.app ctx f [ x ] in
+  let fy = Context.app ctx f [ y ] in
+  (* (a) A foreign Le atom over f(x), f(y): [f(x) - f(y) <= 0]. Registering it must put
+         BOTH f(x) and f(y) in the e-graph; then asserting x=y (a normal EUF atom) fires
+         congruence over the registered-not-asserted terms => f(x) ~ f(y), and model()
+         values them equally. *)
+  let h = make_harness env ctx in
+  let le = Context.le ctx fx fy in
+  let _le_id = reg h le in
+  (* x=y via an owned EUF atom *)
+  let a_xy = reg h (Context.eq ctx x y) in
+  assert_lit h (Lit.make a_xy true);
+  (match settle h Theory.Final with
+   | Theory.Conflict _ -> check "nonown(a): consistent" false
+   | _ -> check "nonown(a): consistent" true);
+  let m = A.model h.adapter in
+  check
+    "nonown(a): f(x), f(y) both valued by model"
+    (Model.value m fx <> None && Model.value m fy <> None);
+  check
+    "nonown(a): congruence fired f(x)=f(y) over foreign-registered terms"
+    (Model.value m fx = Model.value m fy);
+  (* (b) Nested closure g(f(x)): registering a foreign Le over g(f(x)) internalises the
+     whole nest; asserting x=z makes g(f(x)) ~ g(f(z)) by congruence. *)
+  let z = Context.const ctx (konst "z") in
+  let gfx = Context.app ctx g [ Context.app ctx f [ x ] ] in
+  let gfz = Context.app ctx g [ Context.app ctx f [ z ] ] in
+  let h2 = make_harness env ctx in
+  (* both nests registered via foreign Le atoms (as the combinator would) — congruence can
+     only relate g(f(x)) and g(f(z)) if BOTH are in the e-graph *)
+  let _ = reg h2 (Context.le ctx gfx (Context.int_const ctx 0)) in
+  let _ = reg h2 (Context.le ctx gfz (Context.int_const ctx 0)) in
+  let a_xz = reg h2 (Context.eq ctx x z) in
+  assert_lit h2 (Lit.make a_xz true);
+  ignore (settle h2 Theory.Final : Theory.check_result);
+  let m2 = A.model h2.adapter in
+  check "nonown(b): nested g(f(x)) valued" (Model.value m2 gfx <> None);
+  check
+    "nonown(b): g(f(x))=g(f(z)) by nested congruence over foreign-registered nests"
+    (Model.value m2 gfx = Model.value m2 gfz);
+  (* (d) push/pop: a term registered only via a foreign atom inside a frame is truncated
+     on pop and rederivable after — identical to a normal registration (CONTRACT-REG). *)
+  let h3 = make_harness env ctx in
+  let a_xy3 = reg h3 (Context.eq ctx x y) in
+  assert_lit h3 (Lit.make a_xy3 true);
+  A.push h3.adapter;
+  let _ = reg h3 (Context.le ctx fx fy) in
+  (* inside the frame, f(x) ~ f(y) holds (x=y at base, congruence over the just-registered
+     foreign terms) *)
+  let m_in = A.model h3.adapter in
+  check
+    "nonown(d): in-frame congruence f(x)=f(y)"
+    (Model.value m_in fx = Model.value m_in fy);
+  A.pop h3.adapter 1;
+  (match settle h3 Theory.Final with
+   | Theory.Conflict _ -> check "nonown(d): consistent after pop" false
+   | _ -> check "nonown(d): consistent after pop" true);
+  (* re-register after pop: rederives identically (no stale state) *)
+  let _ = reg h3 (Context.le ctx fx fy) in
+  let m_re = A.model h3.adapter in
+  check
+    "nonown(d): rederived f(x)=f(y) after pop+re-register"
+    (Model.value m_re fx = Model.value m_re fy)
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -720,6 +809,7 @@ let () =
   test_pop_boundaries ();
   test_register_idempotent ();
   test_error_contracts ();
+  test_register_non_owned ();
   test_eq_atom_model_currency ();
   test_determinism ();
   test_random ();

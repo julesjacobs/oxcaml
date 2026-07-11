@@ -15,10 +15,14 @@ type prem =
 
 (* How an atom's term is encoded into the engine. A non-Bool [Eq(a,b)] atom asserts a
    (dis)equality on its two sides. A Bool-codomain predicate / bool constant is encoded
-   against [true_const]/[false_const]. *)
+   against [true_const]/[false_const]. A [K_foreign] atom is one EUF does {e not} own
+   (e.g. a LIA [Le]): the combinator registers it with EUF so congruence closes over its
+   [App] subterms and the model can value them ({b register-not-assert}), but EUF never
+   watches it, propagates it, explains it, or lets it be asserted. *)
 type kind =
   | K_eq of Term.t * Term.t
   | K_bool
+  | K_foreign
 
 type info =
   { term : Term.t
@@ -58,8 +62,7 @@ let classify (term : Term.t) : kind =
   match Theory_view.atom term with
   | Theory_view.Equality (a, b) -> K_eq (a, b)
   | Theory_view.Predicate (_, _) | Theory_view.Bool_lit _ -> K_bool
-  | Theory_view.Le_zero _ ->
-    invalid_arg "Euf_adapter.register_atom: Le atom belongs to LIA, not EUF"
+  | Theory_view.Le_zero _ -> K_foreign
 ;;
 
 let register_atom t atom term =
@@ -67,6 +70,9 @@ let register_atom t atom term =
      truncated this atom's e-nodes — re-registering here rederives them. The [atoms] map
      is NOT trailed: the Atom<->term binding is permanent (CONTRACT-ATOM ids are stable),
      so keeping it across pops is what lets a later [assert_lit] recover the encoding. *)
+  (* [register_term] internalises [term] AND its full subterm closure (post-order,
+     CONTRACT-REG-1/2), so for a [K_foreign] atom this is exactly the "register every App/
+     Int subterm" step — congruence fires over those App nodes with no extra walk. *)
   Euf.register_term t.engine term;
   if not (Atom.Table.mem t.atoms atom)
   then (
@@ -75,7 +81,7 @@ let register_atom t atom term =
     t.atom_terms <- term :: t.atom_terms;
     match kind with
     | K_eq _ -> Term.Table.replace t.watched term atom
-    | K_bool -> ())
+    | K_bool | K_foreign -> ())
 ;;
 
 let assert_lit t lit =
@@ -90,6 +96,11 @@ let assert_lit t lit =
   | Some { kind = K_bool; term } ->
     let target = if positive then t.true_const else t.false_const in
     Euf.assert_eq t.engine ~premise:(P_lit lit) term target
+  | Some { kind = K_foreign; _ } ->
+    (* A foreign atom is registered (so congruence sees its subterms) but never owned by
+       EUF; the combinator's contract guarantees it is never asserted here. Fail loud so a
+       contract violation is caught, not silently absorbed. *)
+    invalid_arg "Euf_adapter.assert_lit: a foreign (non-EUF) atom must not be asserted"
 ;;
 
 (* Drop the axiom token; keep only genuinely-asserted literals. Sound because the dropped

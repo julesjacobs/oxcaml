@@ -13,8 +13,11 @@
     [true ≠ false] disequality (textbook CC-for-predicates): positive ⇒ [p = true],
     negative ⇒ [p = false]. That axiom is justified by an internal token, {b never} a real
     [Lit], and is filtered out of every {!Oxsmt_core.Explanation} — so a returned premise
-    set contains only literals the engine actually asserted. A [Le_zero] atom belongs to
-    LIA and is rejected ([Invalid_argument]).
+    set contains only literals the engine actually asserted. A non-owned atom (e.g. a LIA
+    [Le_zero]) is {b accepted} by [register_atom] as [K_foreign]: its subterm closure is
+    registered in the e-graph so model-based combination sees terms shared with owned
+    atoms. A foreign atom is never asserted, watched, propagated, or explained; only
+    [assert_lit] on a non-owned atom raises [Invalid_argument].
 
     {b Soundness discipline (DESIGN §7, I4).} The underlying engine self-checks every
     explanation it produces (independent naive-closure replay). This adapter adds no new
