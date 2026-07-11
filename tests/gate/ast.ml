@@ -10,7 +10,10 @@ type sort =
   | Int
   | Usort of string (* uninterpreted sort, declared arity 0 *)
 
-type verdict = Sat | Unsat | Unknown
+type verdict =
+  | Sat
+  | Unsat
+  | Unknown
 
 (* Numerals are kept as their nonnegative decimal string (arbitrary precision); negation
    is an explicit [Neg]. This avoids native-int overflow in the gate and matches Lean's
@@ -37,19 +40,23 @@ type term =
   | Neg of term
   | Mul of term list
 
-type query = {
-  logic : string option;
-  sort_decls : string list (* uninterpreted sort names *);
-  fun_decls :
-    (string * sort list * sort)
-    list (* name, arg sorts, result; [] args = const *);
-  asserts : term list;
-  status : verdict option;
-}
+type query =
+  { logic : string option
+  ; sort_decls : string list (* uninterpreted sort names *)
+  ; fun_decls :
+      (string * sort list * sort) list (* name, arg sorts, result; [] args = const *)
+  ; asserts : term list
+  ; status : verdict option
+  }
 
 let verdict_to_string = function
   | Sat -> "sat"
   | Unsat -> "unsat"
   | Unknown -> "unknown"
+;;
 
-let sort_to_string = function Bool -> "Bool" | Int -> "Int" | Usort s -> s
+let sort_to_string = function
+  | Bool -> "Bool"
+  | Int -> "Int"
+  | Usort s -> s
+;;

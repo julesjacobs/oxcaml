@@ -22,15 +22,23 @@ let tag = function
   | Malformed _ -> "MALFORMED"
   | Unsupported _ -> "UNSUPPORTED"
   | No_status -> "NO_STATUS"
+;;
 
 let detail = function
   | Certified | No_status -> ""
-  | Refuted s | Inconclusive s | Encode_error s | Malformed s | Unsupported s ->
-      s
+  | Refuted s | Inconclusive s | Encode_error s | Malformed s | Unsupported s -> s
+;;
 
 (* A ship-stopping outcome blocks the gate (DESIGN.md §8 verdict asymmetry). *)
-let is_ship_stopper = function Refuted _ -> true | _ -> false
-let is_certified = function Certified -> true | _ -> false
+let is_ship_stopper = function
+  | Refuted _ -> true
+  | _ -> false
+;;
+
+let is_certified = function
+  | Certified -> true
+  | _ -> false
+;;
 
 (* Exit code for the single-file [certify] subcommand. Malformed vs Unsupported get
    distinct codes (DESIGN task: "exit code distinguishes unsupported from malformed"). *)
@@ -41,3 +49,4 @@ let exit_code = function
   | Malformed _ -> 3
   | Unsupported _ -> 4
   | No_status -> 5
+;;

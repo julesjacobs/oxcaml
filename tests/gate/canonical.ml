@@ -27,24 +27,27 @@
 open Ast
 
 (* Canonical tree: atoms carry arbitrary bytes, lists carry ordered children. *)
-type ctree = A of string | L of ctree list
+type ctree =
+  | A of string
+  | L of ctree list
 
 let rec ser = function
   | A s -> Printf.sprintf "A%d:%s" (String.length s) s
-  | L xs ->
-      Printf.sprintf "L%d:%s" (List.length xs)
-        (String.concat "" (List.map ser xs))
+  | L xs -> Printf.sprintf "L%d:%s" (List.length xs) (String.concat "" (List.map ser xs))
+;;
 
 (* Sort children of a commutative operator by their (injective) serialization, so operand
    order does not affect the canonical form. *)
 let sort_children (xs : ctree list) : ctree list =
   List.sort (fun a b -> String.compare (ser a) (ser b)) xs
+;;
 
 let csort = function
   | Bool -> A "Bool"
   | Int -> A "Int"
   (* Tagged so a user sort literally named "Int"/"Bool" cannot collide with the builtin. *)
   | Usort s -> L [ A "usort"; A s ]
+;;
 
 let rec cterm (t : term) : ctree =
   match t with
@@ -68,22 +71,23 @@ let rec cterm (t : term) : ctree =
   | Mul xs -> L (A "*" :: sort_children (List.map cterm xs))
   | Neg a -> L [ A "neg"; cterm a ]
   | Sub xs -> L (A "-" :: List.map cterm xs)
+;;
 
 (* non-commutative: order preserved *)
 
 let cdecl (name, params, ret) =
   L [ A "decl"; A name; L (List.map csort params); csort ret ]
+;;
 
 let ctree_of_query (q : query) : ctree =
   (* Sort names have no payload beyond the name; sort them as atoms. Fun-decls and
      assertions are sorted by their serialization. *)
   let sorts =
-    L
-      (A "sorts"
-      :: List.map (fun s -> A s) (List.sort String.compare q.sort_decls))
+    L (A "sorts" :: List.map (fun s -> A s) (List.sort String.compare q.sort_decls))
   in
   let funs = L (A "funs" :: sort_children (List.map cdecl q.fun_decls)) in
   let asserts = L (A "asserts" :: sort_children (List.map cterm q.asserts)) in
   L [ A "query"; sorts; funs; asserts ]
+;;
 
 let canonical_query (q : query) : string = ser (ctree_of_query q)
