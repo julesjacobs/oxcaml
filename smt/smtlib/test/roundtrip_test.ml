@@ -615,6 +615,20 @@ let b_pass = ref 0
 let b_skip = ref 0
 let b_skip_unprintable = ref 0
 
+(* The EXACT set of committed files allowed to enter the print-time unprintable-skip
+   class: the two degenerate goldens that exist to DOCUMENT a legitimate printer refusal
+   (the empty symbol [||]; a predefined-operator collision like [|+|]). The skip class
+   must stay bounded to these — any OTHER file that becomes unprintable is a printer
+   regression on legal input (e.g. [quote_sort_symbol] wrongly raising on an ordinary sort
+   would silently skip [euf_unsat.smt2]) and MUST fail the suite rather than hide behind
+   the counter. Matched by basename so it is independent of which argv dir supplied the
+   file. *)
+let b_unprintable_allowlist =
+  [ "bool_empty_symbol_unknown.smt2"; "bool_operator_collision_unknown.smt2" ]
+;;
+
+let b_unprintable_seen = ref []
+
 let check_b path =
   let text = read_file path in
   match Parser.parse text with
@@ -636,6 +650,7 @@ let check_b path =
     (match Printer.print_session ?status:parsed.status parsed.env parsed.assertions with
      | exception Printer.Unsupported m ->
        incr b_skip_unprintable;
+       b_unprintable_seen := Filename.basename path :: !b_unprintable_seen;
        Printf.printf "  skip (unprintable): %s (%s)\n" path m
      | out ->
        incr checks;
@@ -668,11 +683,37 @@ let () =
     List.iter
       (fun dir -> if Sys.file_exists dir then List.iter check_b (smt2_files dir))
       dirs;
+    (* Bound the unprintable-skip class to the exact allowlist (the two degenerate
+       goldens). Any OTHER file skipped here is a printer regression on legal input hiding
+       behind the counter — hard FAILURE, named. Symmetrically, an allowlist golden that
+       STOPPED being unprintable (printer/golden drift) is also flagged: the standard
+       invocation scans tests/cases, so both goldens are exercised every run. *)
+    let seen = List.sort_uniq String.compare !b_unprintable_seen in
+    let unexpected =
+      List.filter (fun n -> not (List.mem n b_unprintable_allowlist)) seen
+    in
+    let missing = List.filter (fun n -> not (List.mem n seen)) b_unprintable_allowlist in
+    List.iter
+      (fun n ->
+         fail
+           "B: %s entered the unprintable-skip class but is NOT allowlisted (printer \
+            regression on legal input?)"
+           n)
+      unexpected;
+    List.iter
+      (fun n ->
+         fail
+           "B: allowlisted golden %s was NOT unprintable-skipped this run (printer \
+            stopped refusing it, or it was not scanned — expected under tests/cases)"
+           n)
+      missing;
+    let expected = unexpected = [] && missing = [] in
     Printf.printf
-      "  B: %d round-tripped, %d skipped, skipped-unprintable: %d\n"
+      "  B: %d round-tripped, %d skipped, skipped-unprintable: %d (%s)\n"
       !b_pass
       !b_skip
-      !b_skip_unprintable);
+      !b_skip_unprintable
+      (if expected then "expected" else "UNEXPECTED — see failures above"));
   Printf.printf "\n%d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;
