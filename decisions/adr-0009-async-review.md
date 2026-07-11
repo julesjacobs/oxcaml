@@ -1,9 +1,10 @@
 # ADR-0009: Async review pipelining
 
-Status: Accepted 2026-07-11 (user directive). Extends the DESIGN.md §11
-integrator workflow ("rebase → test → fast-forward only"); adopted operationally
-during the M4 convoy, when several branches were under review and test
-concurrently.
+Status: Accepted 2026-07-11 (user directive). Formalizes **DESIGN.md Addenda A1**
+("Async review pipelining", which amends §11 and closes with "In-repo ADR to
+follow in `decisions/`" — this is that ADR); extends the §11 integrator workflow
+("rebase → test → fast-forward only"). Adopted operationally during the M4 convoy,
+when several branches were under review and test concurrently.
 
 ## Context
 
@@ -42,7 +43,8 @@ and every landed commit was fully reviewed AND tested at its exact rebased sha**
    trunk moves, it re-runs — cheap and mechanical.
 3. **Merge gating** stays: a sha-pinned master approval ("APPROVED FOR MERGE:
    task/X at `<sha>`") plus a green suite on the rebased head.
-4. **Triviality exception to the exact-sha re-test rule** (user, 2026-07-11). For
+4. **Triviality exception to the exact-sha re-test rule** (DESIGN.md Addenda A1,
+   triviality-exception paragraph). For
    a *trivial* rebase — a formatting-only delta, or hunks fully disjoint from
    everything that landed since the reviewed base — the integrator carries the
    existing verdicts forward and lands with the fast suite (a whitespace-only

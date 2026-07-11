@@ -618,3 +618,124 @@ better spec, different decomposition) rather than re-prompt the same task.
 8. **Integer-semantics gap** (ℤ vs 63-bit wraparound) — accepted for v1,
    flagged for an opt-in overflow-side-condition mode or bitvector theory
    later.
+
+## Addenda
+
+### A1 — Async review pipelining (2026-07-11, design author)
+
+Amends the §11 git workflow. Agents produce **"PR" branches**; reviews and
+test runs happen **independently and speculatively** against pinned shas —
+multiple review rounds and suite runs per branch proceed in parallel with
+each other and with other lanes, and the integrator **pre-rebases and
+pre-tests** queued branches before final verdicts land, so landing is
+instant on approval. **Rebasing triggers a re-run.**
+
+The load-bearing invariant is unchanged: trunk stays linear, and every
+landed commit was fully reviewed *and* fully tested at its exact rebased
+sha (rebase → test → ff-only). Async here means *decoupled and
+speculative*, not post-merge: blocking gates (TCB codex passes, soundness
+verdicts) still gate landing; only the §10 trailing cross-model reviewer
+reviews post-merge. Rationale: (a) more parallelism and speculation for
+the same serial merge discipline; (b) more review rounds per branch per
+unit wall-clock. Sha-pinned dispatch and frozen tips remain the
+coordination primitives that make speculation safe. (In-repo ADR to
+follow in `decisions/`.)
+
+### A2 — Combination by internalization (2026-07-11, design author)
+
+Amends §6 ("Combination — Nelson-Oppen, lazy"). The preprocessing
+purification sketch is superseded by **internalization** (Z3-style, per
+de Moura & Bjørner): no fresh proxy variables, no defining equations —
+**each term node is its own proxy**. Theory ownership is by head symbol;
+the interface set is the **boundary-crossing nodes** (nodes whose owner
+differs from their parent's: an arith-headed node under `f`; an
+EUF-headed node inside a sum, which LIA treats as an opaque variable),
+computed structurally at assertion time — sharedness is total by
+construction, never the output of a relevance filter. This deletes the
+combinator's per-case gates and the wrong-SAT bug family they
+approximated away, with less machinery than explicit purification.
+
+The CDCL(T) **seam is kept** — no e-graph hub. Equality exchange between
+theories stays at the seam as SAT-visible atoms over **original terms**,
+with splits requested as decisions (not tautology clauses); EUF remains
+an ordinary plugin behind the frozen interface. Rationale: decoupling
+(the parallel-workstream seam), reasons-purity, and certificates —
+splits over original terms need no definitional layer in Lean replay.
+
+Spec-by-citation: each boundary node is its own proxy; this implements
+Nelson–Oppen-with-purification, per de Moura & Bjørner's observation
+that internalization makes explicit proxies unnecessary. Reviewers check
+conformance against the textbook account through that stated
+correspondence.
+
+Lemma-readiness invariants (stage-2-proof): (i) instantiated instances
+and all their interface bookkeeping are asserted at the scope of their
+quantifier, never at the current decision level — all interface state is
+grow-only and retraction-free (registry mutant: an instance asserted at
+decision level must be caught by a test where backtracking strands
+interface state); (ii) interface registration is a pure function of the
+hash-consed node — idempotent, deduplicated; (iii) the seam walks the
+current interface set in canonical term-id order, bucketing by candidate
+value; termination is scoped per ground check (finite current set, each
+pair split once per branch) — not claimed globally across instantiation
+rounds; (iv) triggers follow the standard discipline (uninterpreted
+symbols only); arithmetic lives in lemma bodies, which the assert-time
+pipeline handles like any other assertion.
+
+Acceptance: the dual-review repro corpus (including
+`x=0 ∧ f(x+1)<f(1)` and `x=y ∧ f(x+1)<f(y+1)`) is the acceptance suite;
+UNSAT through the real stack gates the close.
+
+**A2 erratum — splits ruling (design author, same day).** The
+"splits as decisions" clause above is overruled by the evidence: the
+frozen `THEORY` seam has no decision-request channel (verified against
+source in review), and both original arguments for decisions dissolve.
+The discardability hazard applied to the two-literal `A ∨ ¬A` form;
+the trichotomy `x=y ∨ x<y ∨ x>y` is three distinct atoms —
+propositionally not a tautology, genuinely constraining, and no
+cleanup pass may discard it. Reasons-purity is preserved: the
+trichotomy is a valid LIA lemma (one uniform "theory-valid clause"
+step in the certificate ledger), and branch choice remains an ordinary
+SAT decision — fact and guess stay in their lanes, which was the actual
+principle. Conditions: clauses created lazily, only for pairs the seam
+actually questions (bounded by the interface set), always in the
+multi-literal non-tautological form; for non-arithmetic sorts, use the
+equality atom with disequality handled by EUF — the clause exists only
+where a real third literal does. Watch item (bought on measurement
+only, never preemptively): split-exploration promptness rides the
+final-check re-fail loop; if the perf corpus shows combination-heavy
+lag, a decision-request/phase-hint hook is a Tranche-C candidate.
+*Lesson (at the design author's expense): the directive specified a
+mechanism where it meant a principle; the frozen interface plus a
+reviewer reading actual code caught it. Directives should state the
+invariant — "guesses must never carry fake justifications; splits must
+not be discardable" — and leave mechanism to the people holding the
+code.*
+
+**A2 erratum — interface-membership invariant.** "Registration is a
+pure function of the hash-consed node" is corrected: boundary status is
+a property of *occurrences*, not terms (`x` in `x ≤ 0` is purely
+arithmetic; a later `f(x)` creates an ownership-crossing occurrence and
+promotes `x`). Blessed form: shared-status grows monotonically as new
+uses appear and is never retracted; each processing step is idempotent
+and deterministic. Riders: (1) the safe direction of error is
+over-approximation — wrongly-in costs harmless extra questions,
+wrongly-out is the wrong-SAT family; caches and push/pop resolve doubt
+toward *more* shared (conservatively retain membership until the
+creating scope pops). (2) The debug check adapts rather than dies:
+membership must be constant between assertions — snapshot-identical
+across branching rounds, cut generation, and seam passes — and may only
+grow at an assertion. The original sentence stays in the ADR with the
+correction labeled beneath it, as permanent teaching material.
+
+**Triviality exception (design author, same day):** the exact-sha rule is
+not absolute. For **trivial rebases** — formatting-only deltas, or hunks
+fully disjoint from everything that landed since the reviewed base — the
+integrator may carry review verdicts forward and land with the fast suite
+(or, for whitespace-only deltas, a build check) instead of the full PR
+suite. The integrator classifies triviality and records the
+classification in the merge report; anything with semantic overlap, a
+touched reviewed/TCB hunk, or a conflict resolution gets the full
+re-test, and a moved reviewed hunk still triggers the scoped re-review.
+The point of the exact-sha discipline is semantic-conflict defense, not
+ceremony — spend it where that risk exists.
