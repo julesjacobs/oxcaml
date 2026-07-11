@@ -30,6 +30,25 @@ let check_raises name f =
     Printf.printf "  FAIL %s (expected an exception, got none)\n" name
 ;;
 
+(* Stronger than check_raises: the exception must be [Term.Sort_error] specifically (not
+   e.g. Overflow, Unsupported, or a returned term). Kills mutants that drop a per-operand
+   sort guard: without the guard the constructor either returns an ill-sorted term (no
+   exception) or raises a different error. *)
+let check_sort_error name f =
+  incr checks;
+  match f () with
+  | exception Term.Sort_error _ -> ()
+  | exception e ->
+    incr failures;
+    Printf.printf
+      "  FAIL %s (raised %s, expected Sort_error)\n"
+      name
+      (Printexc.to_string e)
+  | _ ->
+    incr failures;
+    Printf.printf "  FAIL %s (no exception, expected Sort_error)\n" name
+;;
+
 (* ------------------------------------------------------------------ *)
 (* Deterministic PRNG: xorshift64*, fixed seed. *)
 
@@ -276,22 +295,76 @@ let test_normalization () =
 ;;
 
 (* ================================================================== *)
+(* Systematic negative sort-rejection matrix. One row per constructor operand position
+   that carries a sort obligation, each expected to raise [Term.Sort_error]. Table-driven
+   so the coverage class cannot silently regress: dropping any single per-operand guard in
+   a smart constructor turns exactly the matching row(s) red (oracle gap #93 — the mutant
+   that dropped [require_int] on [le]'s SECOND operand previously survived because only
+   first-operand rows existed). [xi]=Int term, [pb]=Bool term, [yi]=another Int term. *)
 let test_sort_errors () =
-  print_endline "sort errors:";
+  print_endline "sort errors (systematic operand-position matrix):";
   let c = Context.create env in
-  let x = Context.const c int_vars.(0) in
-  let p = Context.const c bool_vars.(0) in
-  check_raises "add of Bool raises" (fun () -> Context.add c p x);
-  check_raises "le of Bool raises" (fun () -> Context.le c p x);
-  check_raises "not of Int raises" (fun () -> Context.not_ c x);
-  check_raises "and of Int raises" (fun () -> Context.and_ c [ x ]);
-  check_raises "eq mismatched sorts raises" (fun () -> Context.eq c x p);
-  check_raises "ite branches mismatched raises" (fun () -> Context.ite c p x p);
-  check_raises "ite non-Bool cond raises" (fun () -> Context.ite c x x x);
-  check_raises "app arity mismatch raises" (fun () -> Context.app c f_sym [ x; x ]);
-  check_raises "app arg sort mismatch raises" (fun () -> Context.app c f_sym [ p ]);
-  check_raises "app undeclared symbol raises" (fun () ->
-    Context.app c (Symbol.intern "undeclared_q") [])
+  let xi = Context.const c int_vars.(0) in
+  let yi = Context.const c int_vars.(1) in
+  let pb = Context.const c bool_vars.(0) in
+  let qb = Context.const c bool_vars.(1) in
+  let i0 = Context.int_const c 0 in
+  let cases : (string * (unit -> Term.t)) list =
+    [ (* add / sub — both operand positions must be Int. *)
+      ("add(Bool,Int)", fun () -> Context.add c pb xi)
+    ; ("add(Int,Bool)", fun () -> Context.add c xi pb)
+    ; ("sub(Bool,Int)", fun () -> Context.sub c pb xi)
+    ; ("sub(Int,Bool)", fun () -> Context.sub c xi pb)
+    ; ("neg(Bool)", fun () -> Context.neg c pb)
+    ; ("mul_const(_,Bool)", fun () -> Context.mul_const c 2 pb)
+    ; ("linear_combination(Bool)", fun () -> Context.linear_combination c [ 1, pb ] 0)
+    ; ("abs(Bool)", fun () -> Context.abs c pb)
+      (* le / lt / ge / gt — BOTH operand positions must be Int (the survivor). *)
+    ; ("le(Bool,Int)", fun () -> Context.le c pb xi)
+    ; ("le(Int,Bool)", fun () -> Context.le c xi pb)
+    ; ("lt(Bool,Int)", fun () -> Context.lt c pb xi)
+    ; ("lt(Int,Bool)", fun () -> Context.lt c xi pb)
+    ; ("ge(Bool,Int)", fun () -> Context.ge c pb xi)
+    ; ("ge(Int,Bool)", fun () -> Context.ge c xi pb)
+    ; ("gt(Bool,Int)", fun () -> Context.gt c pb xi)
+    ; ("gt(Int,Bool)", fun () -> Context.gt c xi pb) (* eq — same-sort, both orders. *)
+    ; ("eq(Int,Bool)", fun () -> Context.eq c xi pb)
+    ; ("eq(Bool,Int)", fun () -> Context.eq c pb xi)
+      (* and / or / not — every child must be Bool. *)
+    ; ("and[Int]", fun () -> Context.and_ c [ xi ])
+    ; ("and[Bool;Int]", fun () -> Context.and_ c [ pb; xi ])
+    ; ("and[Int;Bool]", fun () -> Context.and_ c [ xi; pb ])
+    ; ("or[Int]", fun () -> Context.or_ c [ xi ])
+    ; ("or[Bool;Int]", fun () -> Context.or_ c [ pb; xi ])
+    ; ("not(Int)", fun () -> Context.not_ c xi)
+    ; ("implies(Int,Bool)", fun () -> Context.implies c xi pb)
+    ; ("implies(Bool,Int)", fun () -> Context.implies c pb xi)
+    ; ("iff(Int,Bool)", fun () -> Context.iff c xi pb)
+      (* ite — condition Bool; branches share a sort. *)
+    ; ("ite(Int cond)", fun () -> Context.ite c xi yi i0)
+    ; ("ite(Int/Bool branches)", fun () -> Context.ite c pb xi qb)
+    ; ("ite(Bool/Int branches)", fun () -> Context.ite c pb qb xi)
+      (* distinct — all same sort. *)
+    ; ("distinct[Int;Bool]", fun () -> Context.distinct c [ xi; pb ])
+      (* app — arity and per-argument sort against the rank. *)
+    ; ("app f (arity 0<>1)", fun () -> Context.app c f_sym [])
+    ; ("app f (arity 2<>1)", fun () -> Context.app c f_sym [ xi; xi ])
+    ; ("app f (arg Bool<>Int)", fun () -> Context.app c f_sym [ pb ])
+    ; ("app g (arity 1<>2)", fun () -> Context.app c g_sym [ xi ])
+    ; ("app g (arg1 Bool)", fun () -> Context.app c g_sym [ pb; xi ])
+    ; ("app g (arg2 Bool)", fun () -> Context.app c g_sym [ xi; pb ])
+    ; ("app undeclared", fun () -> Context.app c (Symbol.intern "undeclared_q") [])
+      (* div / mod_ — first operand and divisor must be Int (sort, before the
+         nonzero-constant Unsupported check). *)
+    ; ("div(Bool,Int_const)", fun () -> Context.div c pb (Context.int_const c 2))
+    ; ("div(Int,Bool)", fun () -> Context.div c xi pb)
+    ; ("mod_(Bool,Int_const)", fun () -> Context.mod_ c pb (Context.int_const c 2))
+    ; ("mod_(Int,Bool)", fun () -> Context.mod_ c xi pb)
+    ]
+  in
+  List.iter
+    (fun (name, f) -> check_sort_error ("Sort_error: " ^ name) (fun () -> f ()))
+    cases
 ;;
 
 (* ================================================================== *)
