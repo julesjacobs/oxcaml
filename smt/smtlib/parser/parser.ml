@@ -100,9 +100,9 @@ and read_let st scope rest =
     let new_scope =
       List.map
         (fun b ->
-          match b with
-          | Sexp.List [ Sexp.Atom name; def ] -> name, read_term st scope def
-          | _ -> malformedf "malformed let binding: %s" (Sexp.to_string b))
+           match b with
+           | Sexp.List [ Sexp.Atom name; def ] -> name, read_term st scope def
+           | _ -> malformedf "malformed let binding: %s" (Sexp.to_string b))
         bindings
     in
     read_term st (new_scope @ scope) body
@@ -181,10 +181,10 @@ and expand st scope name (def : definition) arg_sexps =
   let bindings =
     List.map2
       (fun (pname, psort) arg ->
-        let t = read_term st scope arg in
-        if not (Sort.equal t.Term.sort psort)
-        then malformedf "define-fun %s: argument for %s has the wrong sort" name pname;
-        pname, t)
+         let t = read_term st scope arg in
+         if not (Sort.equal t.Term.sort psort)
+         then malformedf "define-fun %s: argument for %s has the wrong sort" name pname;
+         pname, t)
       def.params
       arg_sexps
   in
@@ -209,9 +209,9 @@ and read_mul st scope args =
   let consts, nonconsts =
     List.partition_map
       (fun (t : Term.t) ->
-        match t.node with
-        | Term.Int_const k -> Either.Left k
-        | _ -> Either.Right t)
+         match t.node with
+         | Term.Int_const k -> Either.Left k
+         | _ -> Either.Right t)
       ts
   in
   match nonconsts with
@@ -290,9 +290,9 @@ let define_fun st name params_sexp ret_sexp body =
   let params =
     List.map
       (fun p ->
-        match p with
-        | Sexp.List [ Sexp.Atom pn; psort ] -> pn, sort_of_sexp st psort
-        | _ -> malformedf "malformed define-fun parameter: %s" (Sexp.to_string p))
+         match p with
+         | Sexp.List [ Sexp.Atom pn; psort ] -> pn, sort_of_sexp st psort
+         | _ -> malformedf "malformed define-fun parameter: %s" (Sexp.to_string p))
       params_sexp
   in
   let ret = sort_of_sexp st ret_sexp in
@@ -319,46 +319,46 @@ let run st sexps =
   let asserts = ref [] in
   List.iter
     (fun (cmd : Sexp.t) ->
-      match cmd with
-      | Sexp.List [ Sexp.Atom "set-logic"; Sexp.Atom l ] ->
-        if known_logic l
-        then logic := Some l
-        else unsupportedf "unsupported logic: %s (need QF_UF/QF_LIA/QF_UFLIA)" l
-      | Sexp.List (Sexp.Atom "set-info" :: rest) ->
-        (match rest with
-         | [ Sexp.Atom ":status"; Sexp.Atom v ] ->
-           (match Oxsmt_smtlib.Status.of_string v with
-            | Some s -> status := Some s
-            | None -> malformedf "unknown :status value: %s" v)
-         | _ -> () (* ignore other :info, incl. multi-line |...| :source *))
-      | Sexp.List [ Sexp.Atom "declare-sort"; Sexp.Atom name; Sexp.Atom "0" ] ->
-        declare_sort st name
-      | Sexp.List [ Sexp.Atom "declare-sort"; Sexp.Atom name; _ ] ->
-        unsupportedf "declare-sort %s with nonzero arity" name
-      | Sexp.List [ Sexp.Atom "declare-const"; Sexp.Atom name; ret ] ->
-        declare_fun st name [] (sort_of_sexp st ret)
-      | Sexp.List [ Sexp.Atom "declare-fun"; Sexp.Atom name; params; ret ] ->
-        let dom, cod = read_signature st params ret in
-        declare_fun st name dom cod
-      | Sexp.List [ Sexp.Atom "define-fun"; Sexp.Atom name; Sexp.List params; ret; body ]
-        -> define_fun st name params ret body
-      | Sexp.List (Sexp.Atom ("define-fun-rec" | "define-funs-rec") :: _) ->
-        unsupportedf "recursive define-fun-rec / define-funs-rec is not supported"
-      | Sexp.List [ Sexp.Atom "assert"; body ] ->
-        let t = read_term st [] body in
-        if not (Sort.equal t.Term.sort Sort.bool) then malformedf "assertion is not Bool";
-        asserts := t :: !asserts
-      | Sexp.List (Sexp.Atom "check-sat" :: _) -> ()
-      | Sexp.List (Sexp.Atom "exit" :: _) -> ()
-      | Sexp.List (Sexp.Atom ("push" | "pop") :: _) ->
-        unsupportedf "incremental push/pop is not supported"
-      | Sexp.List (Sexp.Atom "define-fun" :: _) ->
-        malformedf "malformed define-fun: %s" (Sexp.to_string cmd)
-      | Sexp.List (Sexp.Atom ("get-model" | "get-value" | "get-unsat-core") :: _) -> ()
-      | Sexp.List (Sexp.Atom ("set-option" | "reset" | "reset-assertions") :: _) -> ()
-      | Sexp.Atom a -> malformedf "unexpected top-level atom: %s" a
-      | Sexp.List (Sexp.Atom other :: _) -> unsupportedf "unsupported command: %s" other
-      | Sexp.List _ -> malformedf "malformed command: %s" (Sexp.to_string cmd))
+       match cmd with
+       | Sexp.List [ Sexp.Atom "set-logic"; Sexp.Atom l ] ->
+         if known_logic l
+         then logic := Some l
+         else unsupportedf "unsupported logic: %s (need QF_UF/QF_LIA/QF_UFLIA)" l
+       | Sexp.List (Sexp.Atom "set-info" :: rest) ->
+         (match rest with
+          | [ Sexp.Atom ":status"; Sexp.Atom v ] ->
+            (match Oxsmt_smtlib.Status.of_string v with
+             | Some s -> status := Some s
+             | None -> malformedf "unknown :status value: %s" v)
+          | _ -> () (* ignore other :info, incl. multi-line |...| :source *))
+       | Sexp.List [ Sexp.Atom "declare-sort"; Sexp.Atom name; Sexp.Atom "0" ] ->
+         declare_sort st name
+       | Sexp.List [ Sexp.Atom "declare-sort"; Sexp.Atom name; _ ] ->
+         unsupportedf "declare-sort %s with nonzero arity" name
+       | Sexp.List [ Sexp.Atom "declare-const"; Sexp.Atom name; ret ] ->
+         declare_fun st name [] (sort_of_sexp st ret)
+       | Sexp.List [ Sexp.Atom "declare-fun"; Sexp.Atom name; params; ret ] ->
+         let dom, cod = read_signature st params ret in
+         declare_fun st name dom cod
+       | Sexp.List [ Sexp.Atom "define-fun"; Sexp.Atom name; Sexp.List params; ret; body ]
+         -> define_fun st name params ret body
+       | Sexp.List (Sexp.Atom ("define-fun-rec" | "define-funs-rec") :: _) ->
+         unsupportedf "recursive define-fun-rec / define-funs-rec is not supported"
+       | Sexp.List [ Sexp.Atom "assert"; body ] ->
+         let t = read_term st [] body in
+         if not (Sort.equal t.Term.sort Sort.bool) then malformedf "assertion is not Bool";
+         asserts := t :: !asserts
+       | Sexp.List (Sexp.Atom "check-sat" :: _) -> ()
+       | Sexp.List (Sexp.Atom "exit" :: _) -> ()
+       | Sexp.List (Sexp.Atom ("push" | "pop") :: _) ->
+         unsupportedf "incremental push/pop is not supported"
+       | Sexp.List (Sexp.Atom "define-fun" :: _) ->
+         malformedf "malformed define-fun: %s" (Sexp.to_string cmd)
+       | Sexp.List (Sexp.Atom ("get-model" | "get-value" | "get-unsat-core") :: _) -> ()
+       | Sexp.List (Sexp.Atom ("set-option" | "reset" | "reset-assertions") :: _) -> ()
+       | Sexp.Atom a -> malformedf "unexpected top-level atom: %s" a
+       | Sexp.List (Sexp.Atom other :: _) -> unsupportedf "unsupported command: %s" other
+       | Sexp.List _ -> malformedf "malformed command: %s" (Sexp.to_string cmd))
     sexps;
   !logic, !status, List.rev !asserts
 ;;
