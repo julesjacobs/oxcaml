@@ -883,6 +883,15 @@ end = struct
       t1.for_loc
 
   let union t1 t2 =
+    (* Fast path: [union] with an empty operand is the identity, but the
+       [Map.merge] below is O(size). In straight-line code the backward
+       dataflow joins each block's equations into a still-empty predecessor,
+       so without this guard the pass is O(blocks * live-set) = quadratic. *)
+    if is_empty t1
+    then t2
+    else if is_empty t2
+    then t1
+    else
     { for_loc =
         Location.Map.merge
           (fun _loc regs1 regs2 ->
