@@ -260,7 +260,7 @@ Known-wrong inputs the gate must catch — a green gate that hasn't proven it ca
 go red is unaudited (DESIGN.md §10). They run first, with the cache disabled, and
 are never cached. The phase is not vacuously satisfiable:
 
-- a hard floor (`min_honeypots`, currently 8) — fewer present ⇒ RED "gate
+- a hard floor (`min_honeypots`, currently 9) — fewer present ⇒ RED "gate
   unaudited" (so an empty/missing glob cannot pass);
 - each honeypot declares its expected outcome in a sidecar `foo.expect`, one tag
   from the allowlist `REFUTED` / `MALFORMED` / `UNSUPPORTED` / `INCONCLUSIVE`.
@@ -269,7 +269,7 @@ are never cached. The phase is not vacuously satisfiable:
   outcome equals it, so a honeypot degrading from REFUTED to INCONCLUSIVE turns
   the gate RED rather than passing silently; a missing `.expect` is a breach.
 
-A honeypot that gets CERTIFIED is always a breach. Current set (8): two sat-
+A honeypot that gets CERTIFIED is always a breach. Current set (9): two sat-
 claimed-unsat (LIA + EUF, each REFUTED via a kernel-checked witness model), one
 unsat-claimed-sat with a wrong model (REFUTED via grind), one malformed
 (rejected); plus one per codex reader-hardening finding (G1–G4): a `|0|`-vs-`0`
@@ -277,11 +277,12 @@ quoted-numeral trap (MALFORMED — the quoted symbol is ill-sorted against the
 numeral), a `:source "(assert false)"` string-injection trap (REFUTED — the
 string is inert, the real theorem is refuted), a multi-`check-sat` trap
 (UNSUPPORTED — asserts after check-sat rejected), and a `div`/`mod` trap
-(UNSUPPORTED — loud, not a silent MALFORMED-green bypass). See
+(UNSUPPORTED — loud, not a silent MALFORMED-green bypass); plus an `abs` trap
+(UNSUPPORTED — same recognised-but-unsupported LIA class as div/mod). See
 `../logs/gate3-recertification.md`.
 
 The stdout digest always prints a one-line attestation that the audit ran, green
-or red, e.g. `honeypots: 8/8 matched, floor 8, none certified`.
+or red, e.g. `honeypots: 9/9 matched, floor 9, none certified`.
 
 **Accounting invariant.** The case digest prints a sum identity — `accounting: N
 inputs = C certified + I inconclusive + Q quarantined + R refuted + E
