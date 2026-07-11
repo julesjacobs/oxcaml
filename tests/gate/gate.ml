@@ -233,19 +233,14 @@ let is_head s =
   && String.for_all (fun c -> (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) s
 ;;
 
-(* Restart a syscall interrupted by EINTR (codex Scope B B4: an EINTR must not be mistaken
-   for a result). *)
-let rec eintr_restart f =
-  try f () with
-  | Unix.Unix_error (Unix.EINTR, _, _) -> eintr_restart f
-;;
-
 (* Read from [fd] until EOF or [deadline], whichever first, capped at [cap] bytes. Returns
    [`Eof raw] only if EOF is reached within budget (the child fully closed its stdout — a
    complete, trustworthy output); [`Timeout] if the deadline passes first. B2: the read is
    itself deadlined, so a git that exits 0 yet leaves a descendant holding the write end
-   open (EOF never arrives) yields `Timeout rather than wedging the gate. select is
-   EINTR-restarted; a well-behaved git reaches EOF in microseconds. *)
+   open (EOF never arrives) yields `Timeout rather than wedging the gate. Every EINTR
+   (from select OR read) falls back into this loop, whose FIRST act rechecks the deadline
+   — so an EINTR storm can never spin unbounded (codex round-4); it can only shorten the
+   budget. A well-behaved git reaches EOF in microseconds. *)
 let read_deadlined fd ~deadline ~cap =
   let buf = Buffer.create 64 in
   let chunk = Bytes.create 4096 in
@@ -264,13 +259,14 @@ let read_deadlined fd ~deadline ~cap =
       if not ready
       then if Unix.gettimeofday () > deadline then `Timeout else loop ()
       else (
-        match eintr_restart (fun () -> Unix.read fd chunk 0 (Bytes.length chunk)) with
+        match Unix.read fd chunk 0 (Bytes.length chunk) with
         | 0 -> `Eof (Buffer.contents buf)
         | n ->
           Buffer.add_subbytes buf chunk 0 n;
           (* An output that never EOFs but keeps dribbling can't grow unbounded: cap it,
              and the oversized buffer fails the exact-match validation below. *)
-          if Buffer.length buf > cap then `Eof (Buffer.contents buf) else loop ()))
+          if Buffer.length buf > cap then `Eof (Buffer.contents buf) else loop ()
+        | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop () (* recheck deadline *)))
   in
   loop ()
 ;;
@@ -314,8 +310,25 @@ let provenance_head () =
     | Some p ->
       (try Unix.kill p Sys.sigkill with
        | _ -> ());
-      (try ignore (eintr_restart (fun () -> Unix.waitpid [] p)) with
-       | _ -> ());
+      (* Bounded reap (codex round-4): poll WNOHANG up to a small fresh budget rather than
+         a blocking waitpid. An EINTR just re-polls (budget rechecked at the top); a
+         SIGKILLed child we cannot reap within budget is left as a rare zombie — strictly
+         better than a wedged gate. Never blocks unbounded. *)
+      let reap_deadline = Unix.gettimeofday () +. 2.0 in
+      let rec poll () =
+        if Unix.gettimeofday () > reap_deadline
+        then () (* give up: log-and-move-on, rare zombie *)
+        else (
+          match Unix.waitpid [ Unix.WNOHANG ] p with
+          | 0, _ ->
+            (try Unix.sleepf 0.005 with
+             | _ -> ());
+            poll ()
+          | _, _ -> () (* reaped *)
+          | exception Unix.Unix_error (Unix.ECHILD, _, _) -> () (* already gone *)
+          | exception Unix.Unix_error (Unix.EINTR, _, _) -> poll ())
+      in
+      poll ();
       pid := None
     | None -> ()
   in
@@ -341,19 +354,23 @@ let provenance_head () =
          close_opt w;
          (* parent's write end; child holds its own *)
          close_opt dn;
+         (* Deadline is rechecked at the TOP of every iteration, so an EINTR on waitpid
+           (which just loops back here) can never spin unbounded — it only shortens the
+           budget, exactly like the select path (codex round-4). *)
          let rec wait_exit () =
-           match eintr_restart (fun () -> Unix.waitpid [ Unix.WNOHANG ] p) with
-           | 0, _ ->
-             if Unix.gettimeofday () > deadline
-             then `Timeout
-             else (
+           if Unix.gettimeofday () > deadline
+           then `Timeout
+           else (
+             match Unix.waitpid [ Unix.WNOHANG ] p with
+             | 0, _ ->
                (try Unix.sleepf 0.01 with
                 | Unix.Unix_error (Unix.EINTR, _, _) -> ());
-               wait_exit ())
-           | _, status ->
-             pid := None;
-             (* reaped *)
-             `Exited status
+               wait_exit ()
+             | _, status ->
+               pid := None;
+               (* reaped *)
+               `Exited status
+             | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait_exit ())
          in
          match wait_exit () with
          | `Timeout -> "nohead" (* finally kills + reaps the still-live child *)
