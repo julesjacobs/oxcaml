@@ -1,4 +1,7 @@
-; stdlib-only — no libraries field, ever (AGENTS.md dependency firewall).
+; Shipped session layer. stdlib-only over the other smt/ libraries (AGENTS.md dependency
+; firewall, I3): core + preprocess + solver, no opam packages, no ppx. It must NOT depend
+; on oxsmt_smtlib_parser (test-only) — the .smt2-driving CLI lives under tests/solver.
 
 (library
- (name oxsmt_interface))
+ (name oxsmt_interface)
+ (libraries oxsmt_core oxsmt_preprocess oxsmt_solver))
