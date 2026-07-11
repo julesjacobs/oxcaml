@@ -4,11 +4,37 @@
     THEORY the CDCL(T) engine drives — the multiplexer of DESIGN §6. The engine sees a
     single theory; this module routes each atom/literal to its owning child, merges their
     propagations and conflicts, forwards [push]/[pop] in lockstep, and — at [Final] —
-    performs Z3-style {b model-based} combination: it reads the children's candidate
-    models and, only when they {e disagree} on a shared-variable equality, emits a
-    genuinely-constraining {!Oxsmt_core.Theory.Split} through the SAT core rather than
-    eagerly propagating the equality (LIA over ℤ is non-convex, so eager arrangement
-    propagation is unsound/incomplete; DESIGN §6).
+    performs Z3-style {b model-based} combination over the INTERFACE SET: it reads the
+    children's candidate models and, only when they {e disagree} on a shared interface
+    node, emits a genuinely-constraining {!Oxsmt_core.Theory.Split} through the SAT core
+    rather than eagerly propagating the equality (LIA over ℤ is non-convex, so eager
+    arrangement propagation is unsound/incomplete; DESIGN §6).
+
+    {b Internalization (the interface set).} Following the internalization ADR, each term
+    node is its own proxy — no fresh variables, no defining equations. As each atom is
+    registered, a total structural walk classifies every node by its head ([A]/congruence:
+    uninterpreted applications + the Bool constants; [B]/arithmetic:
+    [Arith]/[Le]/numerals; neutral: bare variables and Bool connectives) and records the
+    INTERFACE SET: a node whose owner differs from a parent edge's owner (an arith term
+    under an uninterpreted [f]; a numeral under [f]; an [App] inside a sum; an owned
+    equality side), plus a bare variable used as an operand by BOTH an [A]-owned and a
+    [B]-owned node (which includes an (dis)equality operand, since the congruence child
+    decides equality). Sharedness is thus {b total by construction}, never a relevance
+    filter — this is what dissolves the too-small (wrong-SAT) / too-large
+    (non-terminating) approximation bug family. A boundary term that surfaces only inside
+    [B]'s atom is made visible to the congruence child via
+    {!CONGRUENCE_CHILD.internalize_term}. The disagreement search at [Final] ranges over
+    the interface set, comparing only members BOTH child models currently value (a stale
+    post-[pop] member is skipped, not split).
+
+    {b PRECONDITION — preprocessed fragment.} The interface walk assumes every asserted
+    term is in the preprocessed QF_UFLIA fragment: {b no Int-sorted [Ite]} and no reserved
+    [div]/[mod] applications (ADR-0003 invariant 10; the [Term.Debug] [Pipeline] mode). An
+    Int [Ite] is a neutral node whose Int branches under a neutral parent would take no
+    use-bit, so it must be lifted by smt/preprocess before assertion — combination
+    correctness depends on that lift. (A Bool [Ite] as a UF argument is handled: it
+    degrades via {!Incomplete}, §3.6 case (ii).) The walk carries a debug assertion for a
+    residual Int [Ite].
 
     {b Two distinct cross-theory paths.} (1) An equality a child ENTAILS (EUF's congruence
     deriving [f a = f b] after [a = b], or LIA a bound-implied equality) is returned by
@@ -31,9 +57,10 @@
     to build the equality split for a given sort — is structural knowledge the combinator
     needs but the engine must not. A generic functor takes it as the {!ROUTER} parameter,
     so [Combine] depends only on [core] (I3) and is tested against hand-rolled child
-    theories, independent of the real EUF/LIA engines. (The shared-variable comparison
-    domain is derived from the children's candidate models directly — see the disagreement
-    search — not from a router hint, so the router needs no [interface_terms].)
+    theories, independent of the real EUF/LIA engines. (The interface set is derived by
+    the combinator's own structural walk of each registered atom — see above — not from a
+    router hint, so the [ROUTER] carries only ownership + the sort-appropriate equality
+    split.)
 
     {b Soundness backbone (INVARIANTS.md I4/I8; DESIGN §6, Session SOUNDNESS RULE).} The
     combinator NEVER fabricates an assertion: it only ever forwards literals the engine
@@ -68,14 +95,14 @@ module type ROUTER = sig
       {b NB — there is no purification pass in this pipeline} (smt/preprocess does
       ite/divmod/simplify only; purification was deferred, ADR-0005), so atoms are NOT
       guaranteed pure. The combinator's robustness on mixed atoms comes not from purity
-      but from (a) [owner]'s structural dispatch classifying by head/sort, (b)
-      [interface_terms]' OVER-approximation of shared variables — a mixed atom is routed
-      to one theory and its Int-sorted foreign subterms still surface as shared
-      candidates, never silently dropped — and (c) the combinator EVALUATING (folding) a
-      compound term like [x + 1] through a child's leaf-only model rather than requiring
-      the child to key it (so a pinned equality over a compound is verified, not degraded
-      — see [check_pins]/[model]). A future maintainer must not reintroduce a purity
-      assumption. *)
+      but from (a) [owner]'s structural dispatch classifying by head/sort, (b) the
+      combinator's own structural INTERFACE WALK, which records every boundary-crossing
+      node of each registered atom — a mixed atom is routed to one theory yet its foreign
+      Int subterms still surface as interface members, never silently dropped — and (c)
+      the combinator EVALUATING (folding) a compound term like [x + 1] through a child's
+      leaf-only model rather than requiring the child to key it (so a pinned equality over
+      a compound is verified, not degraded — see [check_pins]/[model]). A future
+      maintainer must not reintroduce a purity assumption. *)
   type owner =
     | A
     | B

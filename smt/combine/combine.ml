@@ -64,6 +64,16 @@ struct
          Grow-only. *)
       mutable euf_used : Term.Set.t
     ; mutable lia_used : Term.Set.t
+    ; (* Bool leaves / Bool-returning applications used as an argument of an uninterpreted
+         function (ADR §3.6 cases (i)/Bool-returning-UF). Sound ONLY when EUF has bound
+         the term to [true_const]/[false_const] — which happens iff it surfaced as a SAT
+         atom (a top-level literal routed to EUF via K_bool). A BURIED such term (only
+         under the UF argument, never a SAT atom) stays a third opaque Boolean class in
+         EUF, so h(·) congruence would wrong-SAT (codex H2 / its Bool-returning-UF
+         sibling). At the Sat certification point {!combine_models} requires each member
+         to be bound, else degrades to {!Incomplete} (team-lead ruling: buried-unbound →
+         unknown; a surfaced leaf stays decidable). Grow-only. *)
+      mutable bool_uf_args : Term.Set.t
     ; (* which child propagated a literal — for routing [explain]. Keyed on the SIGNED
          {!Lit.t} (not the atom): A propagating [+e] and B propagating [-e] must not
          clobber each other, else [explain] returns the wrong premise set and 1UIP learns
@@ -85,6 +95,7 @@ struct
     ; interface = Term.Set.empty
     ; euf_used = Term.Set.empty
     ; lia_used = Term.Set.empty
+    ; bool_uf_args = Term.Set.empty
     ; propagated_by = Lit.Map.empty
     ; pin_frames = [ [] ]
     ; eq_pair = Atom.Table.create 16
@@ -172,9 +183,25 @@ struct
      inside another sum is not, and a neutral variable's use bit is per parent-owner) — a
      term-only memo could drop the second occurrence and miss a both-used variable. Each
      node is visited under at most the 3 distinct parent-owners, so the walk stays linear.
-     The TOP atom is entered with [parent_owner = O_neutral] (no crossing at the root). *)
+     The TOP atom is entered with [parent_owner = O_neutral] (no crossing at the root).
+
+     PRECONDITION (codex): the walk runs on the PREPROCESSED fragment — no residual
+     Int-sorted [Ite] and no reserved [div]/[mod] applications (Term.Debug [Pipeline]
+     mode, ADR-0003 invariant 10). An Int [Ite] is a [Neutral] node whose Int branches
+     under a [Neutral] parent would take no use-bit; since preprocessing removes it before
+     any assertion reaches a theory, that case is unreachable here. A Bool [Ite] as a UF
+     argument still degrades (§3.6 (ii), below), independent of this precondition. *)
   let interface_walk t (top : Term.t) =
     let visited : (int * int, unit) Hashtbl.t = Hashtbl.create 64 in
+    (* set an owner use-bit on a node; both bits set ⇒ it is a both-used interface member *)
+    let mark_use (term : Term.t) owner =
+      (match owner with
+       | O_euf -> t.euf_used <- Term.Set.add term t.euf_used
+       | O_lia -> t.lia_used <- Term.Set.add term t.lia_used
+       | O_neutral -> ());
+      if Term.Set.mem term t.euf_used && Term.Set.mem term t.lia_used
+      then t.interface <- Term.Set.add term t.interface
+    in
     let rec go ~parent_owner (term : Term.t) =
       let key = term.Term.tag, owner_code parent_owner in
       if not (Hashtbl.mem visited key)
@@ -186,6 +213,13 @@ struct
           | Sort.Int _ -> true
           | Sort.Bool | Sort.Uninterpreted _ -> false
         in
+        (* PRECONDITION defensive check (codex): preprocessing lifts every Int-sorted
+           [Ite] before assertion (ADR-0003 invariant 10); a residual one would take no
+           use-bit for its neutral-parented Int branches. Fail loud in debug rather than
+           silently under-approximate. *)
+        (match term.Term.node with
+         | Term.Ite _ -> assert (not is_int)
+         | _ -> ());
         (* boundary Int node: an OWNED node under a parent EDGE whose owner differs (ADR
            §3.1 "for each parent→child edge it compares owners and records a crossing").
            This INCLUDES an owned side of an equality atom (parent [Eq] is neutral): the
@@ -199,26 +233,40 @@ struct
         then t.interface <- Term.Set.add term t.interface;
         (* neutral Int variable: record the per-owner use bit; both bits set ⇒ interface *)
         if is_int && o = O_neutral && parent_owner <> O_neutral
-        then (
-          (match parent_owner with
-           | O_euf -> t.euf_used <- Term.Set.add term t.euf_used
-           | O_lia -> t.lia_used <- Term.Set.add term t.lia_used
-           | O_neutral -> ());
-          if Term.Set.mem term t.euf_used && Term.Set.mem term t.lia_used
-          then t.interface <- Term.Set.add term t.interface);
+        then mark_use term parent_owner;
+        (* H1 (codex): the congruence child DECIDES every equality (merge for [=], diseq
+           for [≠]), so a bare Int variable that is an OPERAND of an equality atom is
+           EUF-used. Combined with a LIA arithmetic occurrence it becomes a both-used
+           interface member — the [(distinct x y) ∧ x≤y ∧ y≤x] class: the diseq routes to
+           EUF only (S1), LIA entails the equality, and without this bit the interface is
+           empty and the disagreement is missed (wrong SAT). An OWNED equality side ([App]
+           / a sum) is already caught by the boundary rule above; only a bare-variable
+           side needs this. *)
+        (match term.Term.node with
+         | Term.Eq (a, b) when not (Sort.equal a.Term.sort Sort.bool) ->
+           List.iter
+             (fun (side : Term.t) ->
+                match side.Term.node, side.Term.sort with
+                | Term.App (_, sa), Sort.Int _ when Iarr.length sa = 0 ->
+                  mark_use side O_euf
+                | _ -> ())
+             [ a; b ]
+         | _ -> ());
         (* Bool boundary — a Bool node as an argument of an uninterpreted function
-           ([parent_owner = O_euf]); three cases (ADR §3.6). No integer arrangement. *)
+           ([parent_owner = O_euf]); ADR §3.6. No integer arrangement. *)
         (match term.Term.sort, parent_owner with
          | Sort.Bool, O_euf ->
            (match term.Term.node with
-            (* (i) bare Bool variable → leaf: native via the Predicate/K_bool routing (its
-               SAT literal is asserted to EUF as [= true_const]/[= false_const]) *)
-            | Term.App (_, args) when Iarr.length args = 0 -> ()
-            (* (i') Bool constant → native EUF [true_const]/[false_const], nothing to
-               bridge *)
+            (* (i) bare Bool variable → leaf, and a Bool-returning UF ([h (g x)], g : … →
+               Bool). BOTH are native ONLY if EUF binds them to [true_const]/[false_const]
+               (i.e. they surfaced as a SAT atom asserted via K_bool). A BURIED occurrence
+               (only here, never a SAT atom) stays a third opaque Boolean class →
+               wrong-SAT (codex H2 + its Bool-returning-UF sibling). Record for the
+               Sat-point binding check in {!combine_models} rather than deciding now; the
+               walk cannot yet know whether the term will surface. *)
+            | Term.App (_, _) -> t.bool_uf_args <- Term.Set.add term t.bool_uf_args
+            (* (i') Bool constant → native EUF [true_const]/[false_const], nothing to bind *)
             | Term.Bool_const _ -> ()
-            (* Bool-returning UF under UF (h(g x), g : … → Bool) → native EUF-in-EUF *)
-            | Term.App (_, _) -> ()
             (* (ii) STRUCTURED Bool compound → degrade (C6: the leaf bridge names a
                nullary leaf, so a compound argument would decouple from its operands and
                wrong-SAT). A LIA order atom [Le] as a UF argument degrades for the same
@@ -435,14 +483,40 @@ struct
     outer valued
   ;;
 
+  (* H2 (codex): a Bool leaf / Bool-returning UF used as an argument of an uninterpreted
+     function is sound only if EUF has BOUND it to [true]/[false] — which happens exactly
+     when it surfaced as a SAT atom (a top-level literal asserted via K_bool). A BURIED
+     such term stays a third opaque Boolean class ([Uninterp]) in EUF, so h(·) congruence
+     could wrong-SAT ([h(b)≠h(true) ∧ h(b)≠h(false)], likewise buried [h(g x)]). Checked
+     at the Sat certification point ONLY (after the Int arrangement agrees): if a member
+     is opaque, the model cannot be soundly certified for that h(·) argument → degrade to
+     [unknown] (team-lead ruling: buried-unbound → {!Incomplete}). A SURFACED leaf is
+     bound, so it stays decidable (the ADR §3.6 case-(i) UNSAT survives). *)
+  let require_bool_args_bound t ma =
+    Term.Set.iter
+      (fun term ->
+         match model_eval ma term with
+         | Some (Model.Bool _) -> ()
+         | _ ->
+           raise
+             (Incomplete
+                "Bool leaf / predicate under an uninterpreted function is unbound \
+                 (buried, no true/false binding in EUF)"))
+      t.bool_uf_args
+  ;;
+
   (* Both children have just certified [Final]→[Sat] (codex C4): consume their models. *)
   let combine_models t : Theory.check_result =
     let ma = A.model t.a in
     let mb = B.model t.b in
     check_pins t ma mb;
     match find_disagreement t ma mb with
-    | None -> Theory.Sat
     | Some (x, y) -> Theory.Split (R.equality_split t.ctx x y)
+    | None ->
+      (* Int arrangement agrees; about to certify Sat — now require every buried Bool UF
+         argument to be bound (else a wrong-SAT would leak, codex H2). *)
+      require_bool_args_bound t ma;
+      Theory.Sat
   ;;
 
   let check_b_propagate t la : Theory.check_result =

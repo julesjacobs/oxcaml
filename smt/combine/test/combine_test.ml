@@ -1611,38 +1611,57 @@ let test_w1_real_tower () =
 (* Part 3 — Bool-boundary through the REAL stack (internalization ADR §3.6). *)
 
 let bfun f name = Env.declare_fun f.env name (Rank.create [ Sort.bool ] Sort.int)
+let pfun f name = Env.declare_fun f.env name (Rank.create [ Sort.int ] Sort.bool)
 
 let bvar f name =
   Context.const f.ctx (Env.declare_fun f.env name (Rank.create [] Sort.bool))
 ;;
 
-(* Case (i) leaf + (i') constant: ¬b ∧ h(b) ≠ h(false) — UNSAT. ¬b routes b=false_const
-   into EUF (Predicate/K_bool); h(false) is native EUF (false = false_const, §3.1), so
-   congruence fires h(b)=h(false) against the asserted disequality. The Bool-constant
-   carve-out is what keeps this UNSAT rather than a degrade. *)
+(* Case (i) leaf + (i') constant, and the codex-H2 buried-leaf boundary. h : Bool → Int.
+   Three companion shapes pin the exact H2 ruling (surfaced/bound leaf stays decidable;
+   buried/unbound leaf degrades):
+   - ¬b ∧ h(b)≠h(false) → UNSAT: ¬b SURFACES b (a SAT atom), routing b=false_const into
+     EUF (Predicate/K_bool); h(false) is native EUF (false = false_const, §3.1), so
+     congruence fires h(b)=h(false) against the asserted disequality.
+   - b ∧ h(b)≠h(false) → SAT: b surfaced true, so b≠false_const (true≠false axiom); the
+     h-arguments differ, no congruence, and — b being BOUND — no degrade.
+   - h(b)≠h(false) ALONE → UNKNOWN: b is BURIED (only under h, never a SAT atom) and
+     unbound in EUF, so the combinator cannot soundly certify (it would keep b a third
+     Boolean class) and degrades via Combine.Incomplete (codex H2; team-lead ruling). *)
 let test_bool_leaf_real () =
-  let f = fixture () in
-  let b = bvar f "b" in
-  let h = bfun f "h" in
-  let hb = Context.app f.ctx h [ b ]
-  and hfalse = Context.app f.ctx h [ Context.bool_const f.ctx false ] in
-  let formula = [ b, false; Context.eq f.ctx hb hfalse, false ] in
-  (match Driver_real.solve ~cells:full_assignment_cells f formula with
-   | Vunsat -> check "Bool leaf real stack: ¬b ∧ h(b)≠h(false) ⇒ UNSAT" true
-   | Vsat _ | Vunknown -> check "Bool leaf real stack: ¬b ∧ h(b)≠h(false) ⇒ UNSAT" false);
-  (* Discriminator — DROP ¬b: h(b)≠h(false) alone is SAT (b free, pick b=true). *)
-  let g = fixture () in
-  let b = bvar g "b" in
-  let h = bfun g "h" in
-  let hb = Context.app g.ctx h [ b ]
-  and hfalse = Context.app g.ctx h [ Context.bool_const g.ctx false ] in
-  match
-    Driver_real.solve ~cells:full_assignment_cells g [ Context.eq g.ctx hb hfalse, false ]
-  with
-  | Vsat _ ->
-    check "Bool leaf real stack: h(b)≠h(false) alone ⇒ SAT (no spurious UNSAT)" true
-  | Vunsat | Vunknown ->
-    check "Bool leaf real stack: h(b)≠h(false) alone ⇒ SAT (no spurious UNSAT)" false
+  let leaf_h () =
+    let f = fixture () in
+    let b = bvar f "b" in
+    let h = bfun f "h" in
+    let hb = Context.app f.ctx h [ b ]
+    and hfalse = Context.app f.ctx h [ Context.bool_const f.ctx false ] in
+    f, b, Context.eq f.ctx hb hfalse
+  in
+  let f, b, hb_ne_hfalse = leaf_h () in
+  (match
+     Driver_real.solve ~cells:full_assignment_cells f [ b, false; hb_ne_hfalse, false ]
+   with
+   | Vunsat ->
+     check "Bool leaf real stack: ¬b ∧ h(b)≠h(false) ⇒ UNSAT (b bound false)" true
+   | Vsat _ | Vunknown ->
+     check "Bool leaf real stack: ¬b ∧ h(b)≠h(false) ⇒ UNSAT (b bound false)" false);
+  let f, b, hb_ne_hfalse = leaf_h () in
+  (match
+     Driver_real.solve ~cells:full_assignment_cells f [ b, true; hb_ne_hfalse, false ]
+   with
+   | Vsat _ -> check "Bool leaf real stack: b ∧ h(b)≠h(false) ⇒ SAT (b bound true)" true
+   | Vunsat | Vunknown ->
+     check "Bool leaf real stack: b ∧ h(b)≠h(false) ⇒ SAT (b bound true)" false);
+  let f, _b, hb_ne_hfalse = leaf_h () in
+  match Driver_real.solve ~cells:full_assignment_cells f [ hb_ne_hfalse, false ] with
+  | Vunknown ->
+    check
+      "Bool leaf real stack: h(b)≠h(false) alone ⇒ UNKNOWN (buried unbound b, H2)"
+      true
+  | Vsat _ | Vunsat ->
+    check
+      "Bool leaf real stack: h(b)≠h(false) alone ⇒ UNKNOWN (buried unbound b, H2)"
+      false
 ;;
 
 (* Case (ii): ¬b ∧ h(b∧c) ≠ h(false) — genuinely UNSAT, but the leaf bridge cannot couple
@@ -1678,12 +1697,94 @@ let test_bool_compound_real () =
     check "Bool compound real stack: (b∧c) ∧ h(b∧c)≠h(true) ⇒ UNKNOWN (degrade)" false
 ;;
 
+(* codex FIX-ROUND fixtures — the two HIGH wrong-SAT triggers, now corrected. *)
+
+(* H1: a bare Int variable occurring ONLY as an (dis)equality side got no EUF-use bit, so
+   the interface stayed empty and the disagreement was missed. Trigger: (distinct x y) ∧
+   x≤y ∧ y≤x — LIA entails x=y, EUF holds x≠y (the diseq routes to EUF only, S1). With x,y
+   now EUF-used (equality operands) AND lia_used (arith), they enter the interface, the
+   disagreement splits, and every branch is refuted → UNSAT. *)
+let test_h1_distinct_bare_vars_real () =
+  let f = fixture () in
+  let x = const f "x"
+  and y = const f "y" in
+  let formula =
+    [ Context.eq f.ctx x y, false (* (distinct x y) = x ≠ y *)
+    ; Context.le f.ctx x y, true
+    ; Context.le f.ctx y x, true
+    ]
+  in
+  (match Driver_real.solve ~cells:full_assignment_cells f formula with
+   | Vunsat -> check "H1 real stack: (distinct x y) ∧ x≤y ∧ y≤x ⇒ UNSAT" true
+   | Vsat _ | Vunknown -> check "H1 real stack: (distinct x y) ∧ x≤y ∧ y≤x ⇒ UNSAT" false);
+  (* discriminator — DROP y≤x: (distinct x y) ∧ x≤y is SAT (x<y) *)
+  let g = fixture () in
+  let x = const g "x"
+  and y = const g "y" in
+  match
+    Driver_real.solve
+      ~cells:full_assignment_cells
+      g
+      [ Context.eq g.ctx x y, false; Context.le g.ctx x y, true ]
+  with
+  | Vsat _ -> check "H1 real stack: (distinct x y) ∧ x≤y alone ⇒ SAT (x<y)" true
+  | Vunsat | Vunknown ->
+    check "H1 real stack: (distinct x y) ∧ x≤y alone ⇒ SAT (x<y)" false
+;;
+
+(* H2: a bare Bool leaf buried under a UF argument, never surfaced as a SAT atom, could
+   stay a third opaque EUF Boolean class. Trigger: h(b)≠h(true) ∧ h(b)≠h(false),
+   h:Bool→Int — genuinely UNSAT (b is true or false, forcing one congruence), but the
+   combinator can only see b as opaque. Sound outcome under the ruling: degrade to UNKNOWN
+   (buried unbound → Incomplete), never wrong-SAT. *)
+let test_h2_buried_bool_leaf_real () =
+  let f = fixture () in
+  let b = bvar f "b" in
+  let h = bfun f "h" in
+  let hb = Context.app f.ctx h [ b ] in
+  let htrue = Context.app f.ctx h [ Context.bool_const f.ctx true ]
+  and hfalse = Context.app f.ctx h [ Context.bool_const f.ctx false ] in
+  let formula = [ Context.eq f.ctx hb htrue, false; Context.eq f.ctx hb hfalse, false ] in
+  match Driver_real.solve ~cells:full_assignment_cells f formula with
+  | Vunknown ->
+    check
+      "H2 real stack: h(b)≠h(true) ∧ h(b)≠h(false) ⇒ UNKNOWN (buried leaf, no wrong-SAT)"
+      true
+  | Vsat _ | Vunsat ->
+    check
+      "H2 real stack: h(b)≠h(true) ∧ h(b)≠h(false) ⇒ UNKNOWN (buried leaf, no wrong-SAT)"
+      false
+;;
+
+(* H2 sibling: the same hole for a buried Bool-RETURNING uninterpreted application g(x),
+   g:Int→Bool, under h. h(g(x))≠h(true) ∧ h(g(x))≠h(false) — g(x) is opaque (never a
+   surfaced predicate atom) → degrade to UNKNOWN (sound). *)
+let test_h2_buried_bool_uf_real () =
+  let f = fixture () in
+  let x = const f "x" in
+  let g = pfun f "g" in
+  let h = bfun f "h" in
+  let gx = Context.app f.ctx g [ x ] in
+  let hgx = Context.app f.ctx h [ gx ] in
+  let htrue = Context.app f.ctx h [ Context.bool_const f.ctx true ]
+  and hfalse = Context.app f.ctx h [ Context.bool_const f.ctx false ] in
+  let formula =
+    [ Context.eq f.ctx hgx htrue, false; Context.eq f.ctx hgx hfalse, false ]
+  in
+  match Driver_real.solve ~cells:full_assignment_cells f formula with
+  | Vunknown ->
+    check "H2-sib real stack: h(g x)≠h(true) ∧ h(g x)≠h(false) ⇒ UNKNOWN (buried UF)" true
+  | Vsat _ | Vunsat ->
+    check
+      "H2-sib real stack: h(g x)≠h(true) ∧ h(g x)≠h(false) ⇒ UNKNOWN (buried UF)"
+      false
+;;
+
 (* Part 4 — the ADR §6 acceptance corpus through the REAL stack (Euf_adapter +
    Lia_adapter, no mocks). Every fixture is the internalization design's load-bearing
    evidence. *)
 
 let kfun f name usort = Env.declare_fun f.env name (Rank.create [ Sort.int ] usort)
-let pfun f name = Env.declare_fun f.env name (Rank.create [ Sort.int ] Sort.bool)
 
 (* codex round-7 R1: x=0 ∧ f(x+1)<f(1) — UNSAT. The boundary node [x+1] (LIA under the EUF
    [f]) is exactly what round-7's euf_domain gate over-excluded; the interface set
@@ -2063,6 +2164,9 @@ let () =
   test_w1_real_tower ();
   test_bool_leaf_real ();
   test_bool_compound_real ();
+  test_h1_distinct_bare_vars_real ();
+  test_h2_buried_bool_leaf_real ();
+  test_h2_buried_bool_uf_real ();
   Printf.printf "\n== combine ADR §6 corpus (REAL Euf_adapter + real Lia_adapter) ==\n";
   test_r1_real ();
   test_fx1_fy1_real ();
