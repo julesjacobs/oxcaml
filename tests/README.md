@@ -433,3 +433,77 @@ The runner never mutates `main/` or the task worktree — every fault is applied
 a scratch worktree under `../worktrees/scratch-mutant-*`, always cleaned up on exit.
 This is the on-demand / nightly counterpart to the per-PR suites; it is not on the
 `make test` path.
+
+## N-version model evaluator (`tests/eval/`, `make eval-test`)
+
+Layer-1 self-check (DESIGN.md §8): *every `sat` answer is checked by evaluating the
+assertions under the candidate model with a trivial independent interpreter.* Written
+**spec-only** by a separate agent session with no access to solver internals (§10
+N-version checkers), so it shares no common-mode blind spot with the search code. The
+library `oxsmt_eval` depends on **`oxsmt_core` only** — the frozen `Term`/`Sort`/
+`Context` vocabulary — and nothing else in the tree (not the shipped parser, not the
+gate reader, not the preprocess test evaluator).
+
+Modules: `sexp` (a fresh ~120-line s-expression reader), `reader` (an independent
+QF_UFLIA `.smt2` reader that builds frozen-API terms through `Context`'s smart
+constructors, so its output is well-sorted/hash-consed by construction; reject-don't-
+guess on anything outside the subset), `model` (the sidecar reader), `value` +
+`eval` (the total denotational evaluator). The `eval` CLI answers *does MODEL satisfy
+ASSERTIONS?*
+
+```
+eval <file.smt2> <file.model>
+  exit 0  MODEL-SATISFIES
+  exit 1  MODEL-FAILS <index>       # 0-based first falsified assertion; failing-path
+                                    # subterm values to stderr
+  exit 2  MALFORMED | UNSUPPORTED   # bad syntax/sort/undefined-symbol vs out-of-subset
+```
+
+Digest to stdout, all detail to stderr (§11 context-frugal).
+
+### Evaluation semantics (from ADR-0003, independently derived)
+
+Values are `Bool b | Int n | Uninterp (sort, id)` (`id` = element index of an
+uninterpreted sort). Per node: `Bool_const`/`Int_const` self-evaluate; `Arith` =
+`Σ cᵢ·⟦tᵢ⟧ + const` over ℤ (subterms evaluated recursively — they may be `App`s);
+`Le arg` = `⟦arg⟧ ≤ 0`; `Eq(a,b)` = structural value equality (Bool operands ⇒ iff);
+`Not`/`And`/`Or` standard (`And`/`Or` force every operand so a model error stays loud
+past a false one); `Ite` picks the taken branch. `App` on the reserved `div`/`mod`
+symbols is **euclidean** (`x = d·q + r ∧ 0 ≤ r < |d|`); any other `App` is resolved in
+the model. Integer ops are **overflow-guarded — they raise, never wrap** (I8 spirit).
+An undefined symbol or a type mismatch is a loud failure, never a silent default.
+
+### Model sidecar format (the documented contract, as this evaluator reads it)
+
+A single s-expression. Tokens are typed against each symbol's *declared* sort/rank
+(taken from the `.smt2`), which is why a bare numeral can mean an `Int` or an
+uninterpreted element index depending on the declaration:
+
+```
+(model
+  (sort S 2)                 ; optional: cardinality of an uninterpreted sort (for range checks)
+  (const x 3)                ; Int-sorted constant
+  (const p true)             ; Bool-sorted constant
+  (const a 0)                ; uninterpreted element index (0-based, < the sort's card)
+  (fun f (default 0)         ; every function needs a (default …)
+         (case (0) 0)        ; (case (arg…) result); first matching case wins, else default
+         (case (1) 0)))
+```
+
+Reading choices where the shape is thin (documented so they are the contract): negative
+integers may be written bare (`-3`) or as `(- 3)`; a function's cases are matched by
+structural value equality on the argument tuple, first match wins, falling back to the
+mandatory `default`; a nullary symbol appears as `(const …)`, an arity-≥1 symbol as
+`(fun …)`; a symbol declared in the `.smt2` but absent from the model is a loud
+`MALFORMED` (an incomplete model), distinct from a model that defines a *wrong* value
+(a clean `MODEL-FAILS`).
+
+### `make eval-test` (53 checks, deterministic, nonzero exit on any failure)
+
+One satisfying + one falsifying model per `Term` node kind (through the full reader →
+model → eval pipeline); the gate's real `sat` cases + their `.model` sidecars, all of
+which must `MODEL-SATISFIES` (auto-discovered from `tests/cases/*.model`); deliberately-
+corrupted models that must `MODEL-FAIL`; the euclidean div/mod sign matrix (4 combos,
+hand-computed `q`/`r` plus the `x = d·q + r` identity); an integer-overflow case that
+must raise; and reject-don't-guess probes (unsupported logic, quantifier, nonlinear
+`*`, undeclared symbol, ill-typed model value).

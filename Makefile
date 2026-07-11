@@ -30,7 +30,7 @@ SAT_CORPUS ?= ../corpora/SAT/uf50-218 ../corpora/SAT/uuf50-218
 # (from a worktree, override SMTLIB_CORPUS to ../../corpora/... — same caveat as LOGS).
 SMTLIB_CORPUS ?= ../corpora/QF_UFLIA
 
-.PHONY: build fmt test core-test sat-test sat-bench preprocess-test smtlib-test smtlib-corpus bench gate promote check-frozen spine status status-fresh mutants
+.PHONY: build fmt test core-test sat-test sat-bench preprocess-test smtlib-test smtlib-corpus eval-test bench gate promote check-frozen spine status status-fresh mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -85,6 +85,16 @@ smtlib-corpus:
 	$(DUNE) build smt/smtlib/test/corpus_smoke.exe
 	$(DUNE) exec smt/smtlib/test/corpus_smoke.exe -- \
 	  $(SMTLIB_CORPUS) --log $(LOGS)/smtlib-corpus-smoke.log
+
+## eval-test — N-version model-evaluator self-test (tests/eval, task #74, DESIGN.md §8
+##   layer 1 / §10). Independent judge: consumes oxsmt_core ONLY, written from spec with
+##   no access to solver internals. One satisfying + one falsifying model per Term node,
+##   the gate's real sat cases + .model sidecars (all MODEL-SATISFIES), deliberately-
+##   corrupted models (MODEL-FAILS), the euclidean div/mod sign matrix, and overflow
+##   raising. Nonzero exit on any failed check. The `eval` CLI is built alongside.
+eval-test:
+	$(DUNE) build tests/eval/eval_cli.exe
+	$(DUNE) exec tests/eval/test/eval_test.exe -- $(CASES)
 
 ## fmt — format all sources in place with ocamlformat.
 fmt:
