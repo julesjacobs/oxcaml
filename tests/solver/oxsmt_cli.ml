@@ -70,9 +70,11 @@ let scan_commands sexps =
   List.fold_left
     (fun (n_checks, incr) sx ->
        match sx with
-       | Sexp.List (Sexp.Atom ("check-sat" | "check-sat-assuming") :: _) ->
-         n_checks + 1, incr
-       | Sexp.List (Sexp.Atom ("push" | "pop") :: _) -> n_checks, true
+       | Sexp.List (head :: _) ->
+         (match Sexp.simple head with
+          | Some ("check-sat" | "check-sat-assuming") -> n_checks + 1, incr
+          | Some ("push" | "pop") -> n_checks, true
+          | _ -> n_checks, incr)
        | _ -> n_checks, incr)
     (0, false)
     sexps

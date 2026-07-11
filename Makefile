@@ -60,7 +60,7 @@ OXCAML_LIBS := smt/core/oxsmt_core smt/interface/oxsmt_interface \
                smt/smtlib/oxsmt_smtlib smt/smtlib/parser/oxsmt_smtlib_parser \
                smt/theories/euf/oxsmt_euf smt/theories/lia/oxsmt_lia
 
-.PHONY: build build-oxcaml fmt test core-test sat-test sat-bench perf-gen perf-bench preprocess-test lia-test euf-test wiring-test smtlib-test smtlib-corpus eval-test bench gate promote check-frozen spine status status-fresh mutants
+.PHONY: build build-oxcaml fmt test core-test sat-test sat-bench perf-gen perf-bench preprocess-test lia-test euf-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -173,9 +173,20 @@ lia-test:
 ##   nesting) and round-trip B (parse->print->parse over tests/cases + harness fixtures +
 ##   gate honeypots). Nonzero exit on any round-trip mismatch or lost :status.
 smtlib-test:
-	$(DUNE) build smt/smtlib/test/roundtrip_test.exe
+	$(DUNE) build smt/smtlib/test/roundtrip_test.exe smt/smtlib/test/fuzz_lex.exe
 	$(DUNE) exec smt/smtlib/test/roundtrip_test.exe -- \
 	  tests/cases tests/harness/fixtures tests/gate/honeypots
+	$(DUNE) exec smt/smtlib/test/fuzz_lex.exe -- 500
+
+## fuzz-lex — standing adversarial round-trip fuzzer for the shared lexer (ADR-0008).
+##   Deterministic (fixed seeds). Checks printer<->lexer kind preservation, print->parse
+##   round-trip, and lexer idempotence over token-boundary-adversarial inputs. A smaller
+##   subset also runs inside smtlib-test; this target runs the full stream.
+##   Override iterations per seed: make fuzz-lex FUZZ_ITERS=100000
+FUZZ_ITERS ?= 20000
+fuzz-lex:
+	$(DUNE) build smt/smtlib/test/fuzz_lex.exe
+	$(DUNE) exec smt/smtlib/test/fuzz_lex.exe -- $(FUZZ_ITERS)
 
 ## smtlib-corpus — parse-only smoke over a public corpus (default $(SMTLIB_CORPUS)).
 ##   Corpora are never in git, so this is SEPARATE from smtlib-test. Reports

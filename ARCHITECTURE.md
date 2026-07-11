@@ -9,7 +9,8 @@ Module DAG (DESIGN.md §3). Edges point from user to dependency; nothing under
              solver/   euf/     lia/       <- theories are plugins vs THEORY
                     \     |      /
                         core/              <- terms/sorts, depends only on stdlib
-        smtlib/  (printer ships; parser test-only; sits alongside, over core)
+        smtlib/  (printer ships; parser test-only; over core + lexical)
+        lexical/ (the one SMT-LIB lexer; stdlib-only; printer + parser + gate link it)
 
   tests/ (harness runner, Lean gate encoder, .smt2 cases) lives OUTSIDE smt/,
   consuming the SMT-LIB2 dumps the printer produces.
@@ -124,16 +125,27 @@ theory inconsistency); propositional `Unsat` stays sound; pure-Boolean formulas 
 real sat/unsat; `Overflow`/`Unsupported` → `Unknown` (I8). Unsat cores / reasons and
 the SMT-LIB serialization seam arrive with M4. Owner: M1-wiring (was M4-interface).
 
+## smt/lexical (`oxsmt_lexical`)
+The one SMT-LIB 2.6 §3.1 lexer (ADR-0008), stdlib-only, zero deps. Emits a `token`
+type whose **headline invariant is "token kind is never lost"**: a quoted `|0|` is a
+`Symbol {quoted=true}`, never the numeral `0`; `|let|` is a `Symbol`, never the
+`Reserved` word `let`. Both the shipped printer (its quoting decision) and the
+test-only parser now tokenize through it, so they cannot disagree on a token
+boundary — the fix for the `|0|`/cache-collision bug family. The gate reader
+migrates onto it after task/gate3 (a deliberate break of the gate's
+zero-`smt/`-deps posture, argued in ADR-0008). Exercised by `make fuzz-lex`.
+
 ## smt/smtlib (`oxsmt_smtlib` printer; `oxsmt_smtlib_parser` test-only)
 SMT-LIB2 interchange, the format for the oracle and public benchmarks. **Status:
 implemented** (was skeleton). Split into two libraries so the parser can never be
 linked into the compiler (DESIGN.md §3):
-- `oxsmt_smtlib` (`smt/smtlib/`, SHIPS) — the printer over `Oxsmt_core`
-  (stdlib-only, I3). `Printer.print_session` renders an `Env` + ordered assertions
-  (+ optional `:status`) as a complete `QF_UFLIA` script: declarations in first-use
-  order (all sorts before all funs), one `(assert …)` per assertion, `(check-sat)`.
-  Deterministic (I6). Rendering choices + SMT-LIB symbol quoting (`|…|`, refusing
-  names with `|`/`\`) are in `printer.mli`.
+- `oxsmt_smtlib` (`smt/smtlib/`, SHIPS) — the printer over `Oxsmt_core` +
+  `Oxsmt_lexical` (both stdlib-only, I3). `Printer.print_session` renders an `Env` +
+  ordered assertions (+ optional `:status`) as a complete `QF_UFLIA` script:
+  declarations in first-use order (all sorts before all funs), one `(assert …)` per
+  assertion, `(check-sat)`. Deterministic (I6). Its symbol-quoting decision is
+  grounded in the shared lexer (emit bare iff the name re-lexes as that one symbol),
+  plus the predefined-operator/empty refusals; see `printer.mli`.
 - `oxsmt_smtlib_parser` (`smt/smtlib/parser/`, TEST-ONLY) — a SEPARATE library
   reading the subset back into frozen-API terms through a `Context`; distinguishes
   `Malformed` from `Unsupported`. `define-fun` macros are expanded by

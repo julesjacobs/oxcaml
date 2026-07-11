@@ -4,9 +4,9 @@
 ; printer library does not list this library, and nothing under smt/ (besides the smtlib
 ; tests) may depend on it.
 ;
-; Stdlib-only over oxsmt_core + oxsmt_smtlib (both stdlib-only), so it still honors the
-; dependency firewall (I3) even though it is test-only.
+; Stdlib-only over oxsmt_core + oxsmt_smtlib + oxsmt_lexical (all stdlib-only), so it still
+; honors the dependency firewall (I3) even though it is test-only.
 
 (library
  (name oxsmt_smtlib_parser)
- (libraries oxsmt_core oxsmt_smtlib))
+ (libraries oxsmt_core oxsmt_smtlib oxsmt_lexical))

@@ -492,6 +492,23 @@ predefined sort (sort position). Reserved *words* are representable and are
 printed `(+ a b)` — read by any standard tool (and our own parser) as integer
 addition, silently certifying a different formula. See `printer.mli`.
 
+### Shared lexer + `make fuzz-lex` (ADR-0008)
+
+Both the printer's quoting and the parser's tokenizing go through one lexer,
+`smt/lexical` (`oxsmt_lexical`, SMT-LIB 2.6 §3.1), whose token type never loses
+kind: a quoted `|0|` is a symbol, never the numeral `0`; `|let|` is a symbol, never
+the reserved word. This is the fix for the token-boundary bug family (the gate's
+`|0|` confusion + the cache-collision exploit). `make fuzz-lex` is a standing,
+deterministic adversarial fuzzer (fixed seeds) over that boundary: it checks
+printer↔lexer kind-preservation, print→parse round-trip, and lexer idempotence on
+inputs built from numeral-lookalikes, reserved-word/operator symbols, whitespace/
+paren/newline-bearing quoted symbols, and high bytes. A small subset runs inside
+`make smtlib-test`; the full stream (`make fuzz-lex`, 160k cases) runs on demand.
+Because a shared-lexer bug hits printer and reader symmetrically (round-trips can't
+catch it), the truly uncorrelated check is the cross-implementation differential
+against the gate's independent reader — that lands with the gate migration over
+`task/gate3` (ADR-0008).
+
 ### Parser subset
 
 Commands: `set-logic` (QF_UF/QF_LIA/QF_UFLIA/QF_IDL/QF_RDL), `set-info :status`,

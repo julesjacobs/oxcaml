@@ -1,5 +1,6 @@
-; The SHIPPED SMT-LIB2 printer. Stdlib-only over oxsmt_core (AGENTS.md dependency
-; firewall, I3): oxsmt_core is itself stdlib-only, and no other library is linked.
+; The SHIPPED SMT-LIB2 printer. Stdlib-only over oxsmt_core + oxsmt_lexical (both
+; stdlib-only, so the firewall / I3 holds): the printer's quoting decision is grounded in
+; the one shared lexer (ADR-0008) so it cannot disagree with any reader on a token boundary.
 ;
 ; The printer is the only thing that ships. The test-only PARSER is a separate library
 ; (parser/), never listed here and never depended on by shipped code, so it cannot be
@@ -8,4 +9,4 @@
 
 (library
  (name oxsmt_smtlib)
- (libraries oxsmt_core))
+ (libraries oxsmt_core oxsmt_lexical))

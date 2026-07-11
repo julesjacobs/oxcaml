@@ -47,23 +47,27 @@ type pstate =
      Tags are the [Context] hash-cons identity, so the key is exact and cheap. *)
   }
 
+module Tok = Oxsmt_lexical.Lexer
+
 (* ---- sorts ---- *)
 
 let sort_of_sexp st (s : Sexp.t) : Sort.t =
-  match s with
-  | Sexp.Atom "Bool" -> Sort.bool
-  | Sexp.Atom "Int" -> Sort.int
-  | Sexp.Atom name ->
+  match Sexp.symbol_name s with
+  (* [Bool]/[Int] are the builtin sorts regardless of quoting (quoting is lexical). *)
+  | Some "Bool" -> Sort.bool
+  | Some "Int" -> Sort.int
+  | Some name ->
     (match Hashtbl.find_opt st.sorts name with
      | Some sym -> Sort.uninterpreted sym
      | None -> malformedf "unknown sort: %s" name)
-  | Sexp.List _ ->
-    unsupportedf "parametric/compound sorts are not supported: %s" (Sexp.to_string s)
+  | None ->
+    (match s with
+     | Sexp.List _ ->
+       unsupportedf "parametric/compound sorts are not supported: %s" (Sexp.to_string s)
+     | _ -> malformedf "expected a sort, got %s" (Sexp.to_string s))
 ;;
 
 (* ---- numerals ---- *)
-
-let is_numeral s = String.length s > 0 && String.for_all (fun c -> c >= '0' && c <= '9') s
 
 let int_lit st a =
   match int_of_string_opt a with
@@ -73,30 +77,44 @@ let int_lit st a =
 
 (* ---- terms ---- *)
 
-(* [scope] is the let-binding stack, innermost first. *)
+(* [scope] is the let-binding stack, innermost first. Matching is on the shared lexer's
+   token KINDS, so a quoted [|0|]/[|let|] is a symbol looked up by name — never the
+   numeral [0] or the [let] keyword (the ADR-0008 boundary invariant, enforced
+   end-to-end). *)
 let rec read_term st scope (s : Sexp.t) : Term.t =
   match s with
-  | Sexp.Atom "true" -> Context.bool_const st.ctx true
-  | Sexp.Atom "false" -> Context.bool_const st.ctx false
-  | Sexp.Atom a when is_numeral a -> int_lit st a
-  | Sexp.Atom a ->
-    (match List.assoc_opt a scope with
+  | Sexp.Atom tok -> read_atom st scope tok
+  | Sexp.List (Sexp.Atom (Tok.Reserved "let") :: rest) -> read_let st scope rest
+  (* [(! t :attr ...)] annotation: keep the term, drop the attributes (e.g. :named). *)
+  | Sexp.List (Sexp.Atom (Tok.Reserved "!") :: body :: _attrs) -> read_term st scope body
+  | Sexp.List (head :: args) -> read_app st scope head args s
+  | Sexp.List [] -> malformedf "empty application ()"
+
+and read_atom st scope (tok : Tok.token) : Term.t =
+  match tok with
+  | Tok.Numeral n -> int_lit st n
+  | Tok.Decimal d -> unsupportedf "decimal (real) literal is not in QF_UFLIA: %s" d
+  | Tok.Hex h -> unsupportedf "bitvector literal #x%s is not supported" h
+  | Tok.Binary b -> unsupportedf "bitvector literal #b%s is not supported" b
+  | Tok.String s -> malformedf "unexpected string literal in term position: %S" s
+  | Tok.Keyword k -> malformedf "unexpected keyword :%s in term position" k
+  | Tok.Reserved r -> malformedf "unexpected reserved word %s in term position" r
+  | Tok.Lparen | Tok.Rparen -> malformedf "internal: paren token as atom"
+  (* [true]/[false] are the booleans only UNQUOTED; [|true|] is a symbol named "true". *)
+  | Tok.Symbol { text = "true"; quoted = false } -> Context.bool_const st.ctx true
+  | Tok.Symbol { text = "false"; quoted = false } -> Context.bool_const st.ctx false
+  | Tok.Symbol { text = name; _ } ->
+    (match List.assoc_opt name scope with
      | Some t -> t
      | None ->
-       (match Hashtbl.find_opt st.defines a with
-        | Some def -> expand st scope a def []
+       (match Hashtbl.find_opt st.defines name with
+        | Some def -> expand st scope name def []
         | None ->
-          (match Hashtbl.find_opt st.funs a with
+          (match Hashtbl.find_opt st.funs name with
            | Some { sym; dom = []; _ } -> Context.const st.ctx sym
-           | Some { dom = _ :: _; _ } -> malformedf "function %s used without arguments" a
-           | None -> malformedf "undeclared symbol: %s" a)))
-  | Sexp.List (Sexp.Atom "let" :: rest) -> read_let st scope rest
-  (* [(! t :attr ...)] annotation: keep the term, drop the attributes (e.g. :named). *)
-  | Sexp.List (Sexp.Atom "!" :: body :: _attrs) -> read_term st scope body
-  | Sexp.List (Sexp.Atom op :: args) -> read_app st scope op args s
-  | Sexp.List [] -> malformedf "empty application ()"
-  | Sexp.List (hd :: _) ->
-    unsupportedf "higher-order / non-symbol application head: %s" (Sexp.to_string hd)
+           | Some { dom = _ :: _; _ } ->
+             malformedf "function %s used without arguments" name
+           | None -> malformedf "undeclared symbol: %s" name)))
 
 and read_let st scope rest =
   match rest with
@@ -106,14 +124,46 @@ and read_let st scope rest =
       List.map
         (fun b ->
            match b with
-           | Sexp.List [ Sexp.Atom name; def ] -> name, read_term st scope def
+           | Sexp.List [ name; def ] ->
+             (match Sexp.symbol_name name with
+              | Some n -> n, read_term st scope def
+              | None -> malformedf "malformed let binding name: %s" (Sexp.to_string name))
            | _ -> malformedf "malformed let binding: %s" (Sexp.to_string b))
         bindings
     in
     read_term st (new_scope @ scope) body
   | _ -> malformedf "malformed let (expected (let (bindings) body))"
 
-and read_app st scope op args orig =
+(* The application head selects interpretation. Only an UNQUOTED symbol can be a builtin
+   operator; a quoted [|+|] head (or a reserved word) is never an operator. *)
+and read_app st scope head args orig =
+  match head with
+  | Sexp.Atom (Tok.Symbol { text = op; quoted = false }) -> read_op st scope op args orig
+  | Sexp.Atom (Tok.Symbol { text = op; quoted = true }) ->
+    apply_named st scope op args orig
+  | Sexp.Atom (Tok.Reserved ("forall" | "exists")) ->
+    unsupportedf "quantifiers are not supported (QF only)"
+  | Sexp.Atom (Tok.Reserved r) ->
+    malformedf "reserved word %s cannot head an application" r
+  | _ ->
+    unsupportedf "higher-order / non-symbol application head: %s" (Sexp.to_string head)
+
+(* Apply a user-declared function or expand a define-fun (no builtin-operator meaning). *)
+and apply_named st scope op args orig =
+  match Hashtbl.find_opt st.defines op with
+  | Some def -> expand st scope op def args
+  | None ->
+    (match Hashtbl.find_opt st.funs op with
+     | Some { sym; dom; _ } ->
+       let n_expect = List.length dom
+       and n_got = List.length args in
+       if n_expect <> n_got
+       then malformedf "%s applied to %d args, expected %d" op n_got n_expect;
+       Context.app st.ctx sym (List.map (read_term st scope) args)
+     | None ->
+       malformedf "undeclared function or unknown operator: %s" (Sexp.to_string orig))
+
+and read_op st scope op args orig =
   let rd = read_term st scope in
   let rds () = List.map rd args in
   match op, args with
@@ -152,20 +202,8 @@ and read_app st scope op args orig =
   | ("div" | "mod"), _ -> malformedf "%s expects 2 arguments" op
   | "abs", [ a ] -> Context.abs st.ctx (rd a)
   | "abs", _ -> malformedf "abs expects 1 argument"
-  | ("forall" | "exists"), _ -> unsupportedf "quantifiers are not supported (QF only)"
-  | _ ->
-    (match Hashtbl.find_opt st.defines op with
-     | Some def -> expand st scope op def args
-     | None ->
-       (match Hashtbl.find_opt st.funs op with
-        | Some { sym; dom; _ } ->
-          let n_expect = List.length dom
-          and n_got = List.length args in
-          if n_expect <> n_got
-          then malformedf "%s applied to %d args, expected %d" op n_got n_expect;
-          Context.app st.ctx sym (rds ())
-        | None ->
-          malformedf "undeclared function or unknown operator: %s" (Sexp.to_string orig)))
+  (* not a builtin operator — a user-declared function or a define-fun *)
+  | _ -> apply_named st scope op args orig
 
 (* Expand a [define-fun] use site by capture-avoiding substitution: the argument
    s-expressions are read in the CALLER's [scope] (so they may use the caller's
@@ -303,7 +341,11 @@ let define_fun st name params_sexp ret_sexp body =
     List.map
       (fun p ->
          match p with
-         | Sexp.List [ Sexp.Atom pn; psort ] -> pn, sort_of_sexp st psort
+         | Sexp.List [ pn; psort ] ->
+           (match Sexp.symbol_name pn with
+            | Some pn -> pn, sort_of_sexp st psort
+            | None ->
+              malformedf "malformed define-fun parameter name: %s" (Sexp.to_string pn))
          | _ -> malformedf "malformed define-fun parameter: %s" (Sexp.to_string p))
       params_sexp
   in
@@ -329,48 +371,64 @@ let run st sexps =
   let logic = ref None in
   let status = ref None in
   let asserts = ref [] in
+  (* Extract a declared name (any symbol atom, quoted or not). *)
+  let name_of s =
+    match Sexp.symbol_name s with
+    | Some n -> n
+    | None -> malformedf "expected a symbol name, got %s" (Sexp.to_string s)
+  in
   List.iter
     (fun (cmd : Sexp.t) ->
+       (* Command keywords are UNQUOTED symbol heads; dispatch on that text. *)
        match cmd with
-       | Sexp.List [ Sexp.Atom "set-logic"; Sexp.Atom l ] ->
-         if known_logic l
-         then logic := Some l
-         else unsupportedf "unsupported logic: %s (need QF_UF/QF_LIA/QF_UFLIA)" l
-       | Sexp.List (Sexp.Atom "set-info" :: rest) ->
-         (match rest with
-          | [ Sexp.Atom ":status"; Sexp.Atom v ] ->
-            (match Oxsmt_smtlib.Status.of_string v with
-             | Some s -> status := Some s
-             | None -> malformedf "unknown :status value: %s" v)
-          | _ -> () (* ignore other :info, incl. multi-line |...| :source *))
-       | Sexp.List [ Sexp.Atom "declare-sort"; Sexp.Atom name; Sexp.Atom "0" ] ->
-         declare_sort st name
-       | Sexp.List [ Sexp.Atom "declare-sort"; Sexp.Atom name; _ ] ->
-         unsupportedf "declare-sort %s with nonzero arity" name
-       | Sexp.List [ Sexp.Atom "declare-const"; Sexp.Atom name; ret ] ->
-         declare_fun st name [] (sort_of_sexp st ret)
-       | Sexp.List [ Sexp.Atom "declare-fun"; Sexp.Atom name; params; ret ] ->
-         let dom, cod = read_signature st params ret in
-         declare_fun st name dom cod
-       | Sexp.List [ Sexp.Atom "define-fun"; Sexp.Atom name; Sexp.List params; ret; body ]
-         -> define_fun st name params ret body
-       | Sexp.List (Sexp.Atom ("define-fun-rec" | "define-funs-rec") :: _) ->
-         unsupportedf "recursive define-fun-rec / define-funs-rec is not supported"
-       | Sexp.List [ Sexp.Atom "assert"; body ] ->
-         let t = read_term st [] body in
-         if not (Sort.equal t.Term.sort Sort.bool) then malformedf "assertion is not Bool";
-         asserts := t :: !asserts
-       | Sexp.List (Sexp.Atom "check-sat" :: _) -> ()
-       | Sexp.List (Sexp.Atom "exit" :: _) -> ()
-       | Sexp.List (Sexp.Atom ("push" | "pop") :: _) ->
-         unsupportedf "incremental push/pop is not supported"
-       | Sexp.List (Sexp.Atom "define-fun" :: _) ->
-         malformedf "malformed define-fun: %s" (Sexp.to_string cmd)
-       | Sexp.List (Sexp.Atom ("get-model" | "get-value" | "get-unsat-core") :: _) -> ()
-       | Sexp.List (Sexp.Atom ("set-option" | "reset" | "reset-assertions") :: _) -> ()
-       | Sexp.Atom a -> malformedf "unexpected top-level atom: %s" a
-       | Sexp.List (Sexp.Atom other :: _) -> unsupportedf "unsupported command: %s" other
-       | Sexp.List _ -> malformedf "malformed command: %s" (Sexp.to_string cmd))
+       | Sexp.Atom _ -> malformedf "unexpected top-level atom: %s" (Sexp.to_string cmd)
+       | Sexp.List [] -> malformedf "malformed command: ()"
+       | Sexp.List (head :: rest) ->
+         (match Sexp.simple head, rest with
+          | Some "set-logic", [ l ] ->
+            (match Sexp.simple l with
+             | Some l when known_logic l -> logic := Some l
+             | Some l ->
+               unsupportedf "unsupported logic: %s (need QF_UF/QF_LIA/QF_UFLIA)" l
+             | None -> malformedf "malformed set-logic argument")
+          | Some "set-info", _ ->
+            (match rest with
+             | [ Sexp.Atom (Tok.Keyword "status"); v ] ->
+               (match Sexp.simple v with
+                | Some v ->
+                  (match Oxsmt_smtlib.Status.of_string v with
+                   | Some s -> status := Some s
+                   | None -> malformedf "unknown :status value: %s" v)
+                | None -> malformedf "malformed :status value")
+             | _ -> () (* ignore other :info, incl. multi-line |...| / string values *))
+          | Some "declare-sort", [ n; arity ] ->
+            (match arity with
+             | Sexp.Atom (Tok.Numeral "0") -> declare_sort st (name_of n)
+             | _ -> unsupportedf "declare-sort %s with nonzero arity" (name_of n))
+          | Some "declare-const", [ n; ret ] ->
+            declare_fun st (name_of n) [] (sort_of_sexp st ret)
+          | Some "declare-fun", [ n; params; ret ] ->
+            let dom, cod = read_signature st params ret in
+            declare_fun st (name_of n) dom cod
+          | Some "define-fun", [ n; Sexp.List params; ret; body ] ->
+            define_fun st (name_of n) params ret body
+          | Some ("define-fun-rec" | "define-funs-rec"), _ ->
+            unsupportedf "recursive define-fun-rec / define-funs-rec is not supported"
+          | Some "define-fun", _ ->
+            malformedf "malformed define-fun: %s" (Sexp.to_string cmd)
+          | Some "assert", [ body ] ->
+            let t = read_term st [] body in
+            if not (Sort.equal t.Term.sort Sort.bool)
+            then malformedf "assertion is not Bool";
+            asserts := t :: !asserts
+          | Some "check-sat", _ -> ()
+          | Some "exit", _ -> ()
+          | Some ("push" | "pop"), _ ->
+            unsupportedf "incremental push/pop is not supported"
+          | Some ("get-model" | "get-value" | "get-unsat-core"), _ -> ()
+          | Some ("set-option" | "reset" | "reset-assertions"), _ -> ()
+          | Some other, _ -> unsupportedf "unsupported command: %s" other
+          | None, _ -> malformedf "malformed command: %s" (Sexp.to_string cmd)))
     sexps;
   !logic, !status, List.rev !asserts
 ;;
@@ -389,6 +447,7 @@ let parse_into env ctx src =
   let sexps =
     try Sexp.parse_many src with
     | Sexp.Malformed m -> raise (Malformed ("s-expression: " ^ m))
+    | Tok.Error m -> raise (Malformed ("lexical: " ^ m))
   in
   let logic, status, assertions =
     try run st sexps with

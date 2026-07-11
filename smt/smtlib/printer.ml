@@ -18,54 +18,7 @@ exception Unsupported of string
    A RESERVED WORD (a token that only *looks* like a symbol, e.g. [let]) is representable —
    [|let|] is a legal symbol distinct from the keyword — so it is quoted, not refused. *)
 
-let is_simple_char = function
-  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' -> true
-  | '~'
-  | '!'
-  | '@'
-  | '$'
-  | '%'
-  | '^'
-  | '&'
-  | '*'
-  | '_'
-  | '+'
-  | '='
-  | '<'
-  | '>'
-  | '.'
-  | '?'
-  | '/'
-  | '-' -> true
-  | _ -> false
-;;
-
-let is_simple_symbol name =
-  String.length name > 0
-  && (match name.[0] with
-      | '0' .. '9' -> false
-      | _ -> true)
-  && String.for_all is_simple_char name
-;;
-
-(* SMT-LIB 2.6 §3.1 reserved words: match the symbol syntax but are keywords; quoting
-   turns them into legal, distinct symbols. *)
-let reserved_words =
-  [ "_"
-  ; "!"
-  ; "as"
-  ; "let"
-  ; "exists"
-  ; "forall"
-  ; "match"
-  ; "par"
-  ; "BINARY"
-  ; "DECIMAL"
-  ; "HEXADECIMAL"
-  ; "NUMERAL"
-  ; "STRING"
-  ]
-;;
+module Tok = Oxsmt_lexical.Lexer
 
 (* Predefined Core + Ints (QF_UFLIA) function/operator symbols. A user symbol with one of
    these names is unrepresentable (see header). [div]/[mod] are deliberately absent: they
@@ -111,10 +64,19 @@ let check_representable name =
     name
 ;;
 
+(* [quote_lexical name] emits [name] bare iff the shared lexer reads the bare form back as
+   exactly one UNQUOTED symbol with the same text. Numerals ([0]), reserved words ([let]),
+   and multi-token or malformed names ([a b(c)], [3x]) all fail that test and are
+   [|quoted|]. Grounding the decision in the one shared lexer is what stops the printer
+   and any reader from disagreeing on a token boundary (ADR-0008). *)
 let quote_lexical name =
-  if is_simple_symbol name && not (List.mem name reserved_words)
-  then name
-  else "|" ^ name ^ "|"
+  let bare_ok =
+    match Tok.tokenize name with
+    | [ Tok.Symbol { text; quoted = false } ] -> String.equal text name
+    | _ -> false
+    | exception Tok.Error _ -> false
+  in
+  if bare_ok then name else "|" ^ name ^ "|"
 ;;
 
 let quote_symbol name =
