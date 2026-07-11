@@ -1,0 +1,13 @@
+diff --git a/smt/theories/lia/lia.ml b/smt/theories/lia/lia.ml
+index 78a6a8e..3d19300 100644
+--- a/smt/theories/lia/lia.ml
++++ b/smt/theories/lia/lia.ml
+@@ -64,7 +64,7 @@ let create ctx =
+ (* Refuse to reason on a bricked instance (an overflow left the tableau mid-pivot, so any
+    verdict would be unsound — CONTRACT: discard, don't reuse). Every public entry that
+    could read or extend solver state calls this first. *)
+-let ensure_live t = if Simplex.is_poisoned t.simplex then raise Poisoned
++let ensure_live _t = ()
+ 
+ (* Get or create the problem variable for a term leaf. *)
+ let problem_var t (term : Term.t) =
