@@ -105,7 +105,13 @@ let lits_of_prems prems =
 let check t effort =
   match Euf.check t.engine with
   | Euf.Conflict prems ->
-    Theory.Conflict { Explanation.premises = lits_of_prems prems; rule = Euf_congruence }
+    let premises = lits_of_prems prems in
+    (* N1 (insurance): a conflict with no premises would be an unconditional [false] — a
+       soundness bug. Unconstructible here (the violated disequality forces true=false or
+       a merged asserted diseq, always citing >= 1 asserted literal; reflexive [Eq] folds
+       to [true] before registration so no vacuous atom exists), asserted anyway. *)
+    assert (premises <> []);
+    Theory.Conflict { Explanation.premises; rule = Euf_congruence }
   | Euf.Consistent ->
     (* A watched Eq atom whose entailed truth just changed becomes a theory propagation —
        but only for atoms this adapter registered (C6); a watched Eq that is merely a
@@ -132,9 +138,12 @@ let explain t lit =
        literal's sign. [explain_implied] returns a precedence-valid premise set
        (CONTRACT-EX), self-checked by the engine. *)
     let imp = { Euf.atom = term; value = Lit.sign lit } in
-    { Explanation.premises = lits_of_prems (Euf.explain_implied t.engine imp)
-    ; rule = Euf_congruence
-    }
+    let premises = lits_of_prems (Euf.explain_implied t.engine imp) in
+    (* N1 (insurance): an empty propagation reason is unconstructible — a registered [Eq]
+       atom has distinct sides (reflexive folds to [true]), so proving it (dis)equal cites
+       >= 1 asserted literal. *)
+    assert (premises <> []);
+    { Explanation.premises; rule = Euf_congruence }
   | _ -> invalid_arg "Euf_adapter.explain: literal was not propagated by this theory"
 ;;
 
@@ -166,14 +175,23 @@ let model t =
     then (
       Term.Table.replace seen term ();
       let v =
-        if Sort.equal term.sort Sort.bool
-        then
-          if Euf.are_equal t.engine term t.true_const
-          then Model.Bool true
-          else if Euf.are_equal t.engine term t.false_const
-          then Model.Bool false
+        match term.node with
+        | Eq (a, b) ->
+          (* An equality is Bool-sorted, but its e-node is never merged with
+             true/false_const — asserting the atom merges its SIDES, not the [Eq] node.
+             Its truth is exactly whether the sides are congruent, so read that, rather
+             than falling through to a stray [Uninterp] class id (codex HIGH: a shared
+             equality term must carry Bool currency for N-O model combination). *)
+          Model.Bool (Euf.are_equal t.engine a b)
+        | _ ->
+          if Sort.equal term.sort Sort.bool
+          then
+            if Euf.are_equal t.engine term t.true_const
+            then Model.Bool true
+            else if Euf.are_equal t.engine term t.false_const
+            then Model.Bool false
+            else Model.Uninterp (Euf.class_of t.engine term)
           else Model.Uninterp (Euf.class_of t.engine term)
-        else Model.Uninterp (Euf.class_of t.engine term)
       in
       acc := (term, v) :: !acc;
       List.iter walk (children term))

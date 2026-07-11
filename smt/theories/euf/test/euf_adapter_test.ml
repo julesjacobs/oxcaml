@@ -482,6 +482,47 @@ let test_error_contracts () =
 ;;
 
 (* ------------------------------------------------------------------ *)
+(* 6c. Model currency of an equality atom (codex HIGH repro): a registered Eq(a,b) atom is
+   Bool-sorted; its model value must be Bool (its truth), not a stray Uninterp class id —
+   both polarities. The atom's e-node is never merged with true/false_const (assertion
+   merges its SIDES), so a naive Bool-sort/true-const check would fall through to
+   Uninterp; model() special-cases Eq via are_equal on the sides. *)
+
+let test_eq_atom_model_currency () =
+  let env, _u, _unary, _pred, konst, _bpred = make_env () in
+  let ctx = Context.create env in
+  let a = Context.const ctx (konst "a") in
+  let b = Context.const ctx (konst "b") in
+  let eqterm = Context.eq ctx a b in
+  (* +A => a=b => Eq(a,b) is true *)
+  let hp = make_harness env ctx in
+  let ap = reg hp eqterm in
+  assert_lit hp (Lit.make ap true);
+  (match settle hp Theory.Final with
+   | Theory.Sat ->
+     let m = A.model hp.adapter in
+     check
+       "eq-currency+: model(Eq(a,b)) = Bool true"
+       (Model.value m eqterm = Some (Model.Bool true));
+     check "eq-currency+: sides share a witness" (Model.value m a = Model.value m b)
+   | _ -> check "eq-currency+: expected Final Sat" false);
+  (* -A => a<>b => Eq(a,b) is false *)
+  let hn = make_harness env ctx in
+  let an = reg hn eqterm in
+  assert_lit hn (Lit.make an false);
+  match settle hn Theory.Final with
+  | Theory.Sat ->
+    let m = A.model hn.adapter in
+    check
+      "eq-currency-: model(Eq(a,b)) = Bool false"
+      (Model.value m eqterm = Some (Model.Bool false));
+    check
+      "eq-currency-: sides have distinct witnesses"
+      (Model.value m a <> Model.value m b)
+  | _ -> check "eq-currency-: expected Final Sat" false
+;;
+
+(* ------------------------------------------------------------------ *)
 (* 7. Determinism: identical script on two fresh adapters => identical model snapshot. *)
 
 let model_snapshot h terms =
@@ -679,6 +720,7 @@ let () =
   test_pop_boundaries ();
   test_register_idempotent ();
   test_error_contracts ();
+  test_eq_atom_model_currency ();
   test_determinism ();
   test_random ();
   Printf.printf
