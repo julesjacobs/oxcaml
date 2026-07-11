@@ -1,7 +1,11 @@
-; The gate is OUTSIDE the smt/ stdlib-only firewall (I3), but stays lean:
-; stdlib + Unix only, no opam packages. It never links anything under smt/ —
-; this is the N-version / trust-isolation boundary (DESIGN.md §10).
+; The gate is OUTSIDE the smt/ stdlib-only firewall (I3), and stays lean: stdlib + Unix,
+; no opam packages. It links exactly ONE module under smt/ — the shared SMT-LIB lexer
+; oxsmt_lexical (ADR-0008) — so the token-boundary bug family is fixed once rather than in
+; three divergent lexers. This narrows the DESIGN §10 N-version isolation at the LEXICAL
+; layer only; the encoder and the Lean kernel (where oracle independence actually lives)
+; link nothing else from smt/. Uncorrelated backstops: the fuzzer's cross-impl differential,
+; Lean elaboration, and pre-labeled benchmarks (ADR-0008).
 
 (executable
  (name gate)
- (libraries unix))
+ (libraries unix oxsmt_lexical))
