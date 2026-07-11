@@ -5,6 +5,12 @@
    existing artifacts; it runs nothing (no harness, no Lean) and re-derives no product
    state, so its output is a pure function of the inputs on disk:
 
+   - the COMMITTED tests/corpus/baseline_summary.json (schema oxsmt-corpus-baseline/v1) ->
+     the HEADLINE per-logic corpus solved-rate (solved-sat+solved-unsat)/scanned, a loud
+     `‼ CORPUS SOUNDNESS BREACH` line if mismatch_count>0, and a staleness caption if the
+     baseline's trunk hash isn't a prefix of the summarized HEAD. Read from the fixed repo
+     path ONLY — never the ad-hoc run JSONs `make corpus-run` writes to ../logs (task
+     #124/#133).
    - TASKS.md -> milestone completion (parse the M-rows)
    - git -> generated-at HEAD, days-since-last-outcome-improvement, worktree/branch
      hygiene
@@ -14,7 +20,8 @@
      all worktrees share ../logs, so a log is trusted only if the gate dir name
      (gate-<stamp>-<pid>-<HEAD>) records the same HEAD we are summarizing — otherwise loud
      absence, never a foreign/stale verdict -> gate outcome counts, honeypot floor, cache
-   - most recent stats JSONL -> counter-bucket distribution + solved-rate (buckets and
+   - most recent stats JSONL -> counter-bucket distribution + the tests/cases suite-health
+     sub-metric (demoted from headline once the corpus baseline landed; buckets and
      verdicts are deterministic; per-goal wall_ms is deliberately NOT emitted — it is
      nondeterministic and stays in the uncommitted sidecar)
    - tools/line_budgets.txt + smt/ -> per-module line counts vs budget
@@ -79,18 +86,40 @@ let read_all_fd fd =
   Buffer.contents b
 ;;
 
-(* Run [argv], capture stdout (stderr -> /dev/null). Returns (stdout, ok). *)
+(* Run [argv], capture stdout (stderr -> /dev/null). Returns (stdout, ok). fds are opened
+   inside the protected region and closed on every path incl. a create_process raise
+   (status-guard review S3: no pipe/devnull leak). git here is our own trusted repo, so —
+   unlike the gate's hostile-git path — no read timeout is needed. *)
 let run_capture argv =
+  let r = ref None
+  and w = ref None
+  and dn = ref None in
+  let close_opt rf =
+    match !rf with
+    | Some fd ->
+      (try Unix.close fd with
+       | _ -> ());
+      rf := None
+    | None -> ()
+  in
   match
-    let r, w = Unix.pipe () in
-    let devnull = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0 in
-    let pid = Unix.create_process argv.(0) argv Unix.stdin w devnull in
-    Unix.close w;
-    Unix.close devnull;
-    let out = read_all_fd r in
-    Unix.close r;
-    let _, status = Unix.waitpid [] pid in
-    out, status
+    Fun.protect
+      ~finally:(fun () ->
+        close_opt r;
+        close_opt w;
+        close_opt dn)
+      (fun () ->
+         let rr, ww = Unix.pipe () in
+         r := Some rr;
+         w := Some ww;
+         let d = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0 in
+         dn := Some d;
+         let pid = Unix.create_process argv.(0) argv Unix.stdin ww d in
+         close_opt w;
+         close_opt dn;
+         let out = read_all_fd rr in
+         let _, status = Unix.waitpid [] pid in
+         out, status)
   with
   | out, Unix.WEXITED 0 -> out, true
   | out, _ -> out, false
@@ -281,6 +310,219 @@ let stat_row_of_line line : stat_row option =
          ; propagations = Option.value ~default:0 (geti "propagations")
          }
      | _ -> None)
+;;
+
+(* ------------------------------------------------------------------ *)
+(* Committed corpus baseline (tests/corpus/baseline_summary.json). *)
+(* The JSONL reader above is FLAT; this artifact is nested *)
+(* (logics.<L>.outcomes.<k>), so a small recursive JSON reader — stdlib *)
+(* only. Any parse failure degrades to "no committed corpus baseline",  *)
+(* never a crash. status_gen reads ONLY this committed path, never the *)
+(* ad-hoc run JSONs `make corpus-run` writes under ../logs. *)
+(* ------------------------------------------------------------------ *)
+
+type json =
+  | JNull
+  | JBool of bool
+  | JNum of float
+  | JStr of string
+  | JArr of json list
+  | JObj of (string * json) list
+
+exception Json_error of string
+
+let json_parse (s : string) : json =
+  let n = String.length s in
+  let pos = ref 0 in
+  let peek () = if !pos < n then s.[!pos] else '\000' in
+  let adv () = incr pos in
+  let rec skip_ws () =
+    if !pos < n
+    then (
+      match s.[!pos] with
+      | ' ' | '\t' | '\n' | '\r' ->
+        adv ();
+        skip_ws ()
+      | _ -> ())
+  in
+  let expect c =
+    if peek () = c then adv () else raise (Json_error (Printf.sprintf "expected %c" c))
+  in
+  let rec value () =
+    skip_ws ();
+    match peek () with
+    | '{' -> obj ()
+    | '[' -> arr ()
+    | '"' -> JStr (str ())
+    | 't' -> lit "true" (JBool true)
+    | 'f' -> lit "false" (JBool false)
+    | 'n' -> lit "null" JNull
+    | c when c = '-' || (c >= '0' && c <= '9') -> num ()
+    | c -> raise (Json_error (Printf.sprintf "unexpected %c" c))
+  and lit word v =
+    String.iter
+      (fun c -> if peek () = c then adv () else raise (Json_error "bad literal"))
+      word;
+    v
+  and str () =
+    expect '"';
+    let b = Buffer.create 16 in
+    let rec loop () =
+      match peek () with
+      | '\000' -> raise (Json_error "unterminated string")
+      | '"' -> adv ()
+      | '\\' ->
+        adv ();
+        (match peek () with
+         | 'n' -> Buffer.add_char b '\n'
+         | 't' -> Buffer.add_char b '\t'
+         | 'r' -> Buffer.add_char b '\r'
+         | c -> Buffer.add_char b c);
+        adv ();
+        loop ()
+      | c ->
+        Buffer.add_char b c;
+        adv ();
+        loop ()
+    in
+    loop ();
+    Buffer.contents b
+  and num () =
+    let start = !pos in
+    if peek () = '-' then adv ();
+    while
+      match peek () with
+      | '0' .. '9' | '.' | 'e' | 'E' | '+' | '-' -> true
+      | _ -> false
+    do
+      adv ()
+    done;
+    let sub = String.sub s start (!pos - start) in
+    match float_of_string_opt sub with
+    | Some f -> JNum f
+    | None -> raise (Json_error ("bad number " ^ sub))
+  and arr () =
+    expect '[';
+    skip_ws ();
+    if peek () = ']'
+    then (
+      adv ();
+      JArr [])
+    else (
+      let items = ref [] in
+      let rec loop () =
+        let v = value () in
+        items := v :: !items;
+        skip_ws ();
+        match peek () with
+        | ',' ->
+          adv ();
+          loop ()
+        | ']' -> adv ()
+        | _ -> raise (Json_error "expected , or ]")
+      in
+      loop ();
+      JArr (List.rev !items))
+  and obj () =
+    expect '{';
+    skip_ws ();
+    if peek () = '}'
+    then (
+      adv ();
+      JObj [])
+    else (
+      let items = ref [] in
+      let rec loop () =
+        skip_ws ();
+        let k = str () in
+        skip_ws ();
+        expect ':';
+        let v = value () in
+        items := (k, v) :: !items;
+        skip_ws ();
+        match peek () with
+        | ',' ->
+          adv ();
+          loop ()
+        | '}' -> adv ()
+        | _ -> raise (Json_error "expected , or }")
+      in
+      loop ();
+      JObj (List.rev !items))
+  in
+  let v = value () in
+  skip_ws ();
+  v
+;;
+
+let jmember k = function
+  | JObj kvs -> List.assoc_opt k kvs
+  | _ -> None
+;;
+
+let jint = function
+  | JNum f -> Some (int_of_float f)
+  | _ -> None
+;;
+
+let jstr = function
+  | JStr s -> Some s
+  | _ -> None
+;;
+
+type logic_stat =
+  { logic : string
+  ; total_available : int
+  ; scanned : int
+  ; solved : int (* solved-sat + solved-unsat *)
+  ; mismatches : int
+  }
+
+type corpus_summary =
+  { schema : string
+  ; c_trunk : string (* the trunk hash/label the baseline measured *)
+  ; logics : logic_stat list
+  ; mismatch_count : int
+  }
+
+(* Pure parse of the committed baseline. Returns None on any structural surprise or an
+   unrecognized schema (forward-safety: an unknown shape must degrade, not mis-report). *)
+let parse_corpus_summary (s : string) : corpus_summary option =
+  match json_parse s with
+  | exception _ -> None
+  | j ->
+    let top_str k = Option.value ~default:"?" (Option.bind (jmember k j) jstr) in
+    let top_int k = Option.value ~default:0 (Option.bind (jmember k j) jint) in
+    let schema = top_str "schema" in
+    if not (starts_with ~prefix:"oxsmt-corpus-baseline/" schema)
+    then None
+    else (
+      match jmember "logics" j with
+      | Some (JObj entries) ->
+        let logics =
+          List.map
+            (fun (name, lj) ->
+               let li k = Option.value ~default:0 (Option.bind (jmember k lj) jint) in
+               let oi k =
+                 Option.value
+                   ~default:0
+                   (Option.bind (Option.bind (jmember "outcomes" lj) (jmember k)) jint)
+               in
+               { logic = name
+               ; total_available = li "total_available"
+               ; scanned = li "scanned"
+               ; solved = oi "solved-sat" + oi "solved-unsat"
+               ; mismatches = li "mismatches"
+               })
+            entries
+        in
+        Some
+          { schema
+          ; c_trunk = top_str "trunk"
+          ; logics
+          ; mismatch_count = top_int "mismatch_count"
+          }
+      | _ -> None)
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -639,6 +881,41 @@ let selftest () =
     "non-hex final -> None"
     (provenance_of_dirname ("gate-20260101-000000-" ^ String.make 40 'g'))
     None;
+  (* Corpus baseline parse (task #124): nested JSON, per-logic solved math, mismatch
+     detection, schema/robustness. *)
+  let cfix =
+    {|{"schema":"oxsmt-corpus-baseline/v1","trunk":"abc1234",
+       "logics":{"QF_UF":{"total_available":100,"scanned":80,
+         "outcomes":{"solved-sat":3,"solved-unsat":7,"unknown":70},"mismatches":0}},
+       "mismatch_count":0}|}
+  in
+  (match parse_corpus_summary cfix with
+   | Some cs ->
+     check "corpus schema" cs.schema "oxsmt-corpus-baseline/v1";
+     check "corpus trunk" cs.c_trunk "abc1234";
+     check "corpus mismatch_count 0" cs.mismatch_count 0;
+     (match cs.logics with
+      | [ l ] ->
+        check "corpus logic name" l.logic "QF_UF";
+        check "corpus solved = sat+unsat" l.solved 10;
+        check "corpus scanned" l.scanned 80;
+        check "corpus total_available" l.total_available 100
+      | _ -> check "corpus exactly one logic" false true)
+   | None -> check "corpus fixture parses" false true);
+  check
+    "corpus mismatch>0 surfaced"
+    (match
+       parse_corpus_summary
+         {|{"schema":"oxsmt-corpus-baseline/v1","trunk":"x","logics":{},"mismatch_count":3}|}
+     with
+     | Some cs -> cs.mismatch_count
+     | None -> -1)
+    3;
+  check
+    "corpus bad schema -> None"
+    (parse_corpus_summary {|{"schema":"other/v9","logics":{},"mismatch_count":0}|} = None)
+    true;
+  check "corpus malformed json -> None" (parse_corpus_summary "{not json" = None) true;
   if !failures = 0
   then print_endline "status_gen selftest: all checks passed"
   else (
@@ -679,6 +956,60 @@ let () =
   out "generated at %s\n\n" head;
   (* ================= OUTCOME METRICS ================= *)
   out "## Outcome metrics\n\n";
+  (* Corpus solved-rate — THE headline (task #124/#133): per-logic
+     (solved-sat+solved-unsat)/scanned from the COMMITTED baseline snapshot, never the
+     ../logs run JSONs. Read once; reused by the stdout digest below. *)
+  let corpus =
+    match
+      read_file_opt (Filename.concat cfg.repo "tests/corpus/baseline_summary.json")
+    with
+    | Some s -> parse_corpus_summary s
+    | None -> None
+  in
+  let corpus_stale cs =
+    (* fresh iff the baseline's trunk hash is a prefix of the summarized HEAD *)
+    match full_head with
+    | Some h -> not (String.length cs.c_trunk > 0 && starts_with ~prefix:cs.c_trunk h)
+    | None -> true
+  in
+  (match corpus with
+   | None ->
+     out
+       "- **Corpus solved-rate (committed baseline):** n/a (no committed \
+        tests/corpus/baseline_summary.json)\n"
+   | Some cs ->
+     (* Soundness alarm FIRST: a verdict mismatch vs the pre-labeled corpus is a
+        ship-stopping breach, honeypot-severity (DESIGN.md §8). *)
+     if cs.mismatch_count > 0
+     then
+       out
+         "- **‼ CORPUS SOUNDNESS BREACH:** %d verdict mismatch(es) vs the pre-labeled \
+          corpus — ship-stopping (DESIGN.md §8).\n"
+         cs.mismatch_count;
+     out "- **Corpus solved-rate (committed pre-adapter baseline) — the headline:**\n";
+     List.iter
+       (fun l ->
+          let pct = if l.scanned = 0 then 0 else 100 * l.solved / l.scanned in
+          out
+            "  - %s: %d%% (%d/%d solved; %d/%d scanned)%s\n"
+            l.logic
+            pct
+            l.solved
+            l.scanned
+            l.scanned
+            l.total_available
+            (if l.mismatches > 0
+             then Printf.sprintf "  ‼ %d mismatch(es)" l.mismatches
+             else ""))
+       cs.logics;
+     out
+       "  - _baseline measured at %s; tree at %s — %s_\n"
+       cs.c_trunk
+       head
+       (if corpus_stale cs
+        then "STALE, re-run `make corpus-run` + promote for a current number"
+        else "current"));
+  out "\n";
   (* Milestones from TASKS.md *)
   let rows = parse_tasks cfg.tasks in
   let milestones =
@@ -825,16 +1156,16 @@ let () =
       (List.filter (fun r -> r.verdict = "sat" || r.verdict = "unsat") case_rows_dedup)
   in
   let total_cases = List.length case_rows_dedup in
+  (* Demoted (task #124): the tests/cases number is now a SUITE-HEALTH sub-metric, not the
+     headline — the committed corpus baseline above is the headline. This tracks that the
+     small committed regression corpus is being solved, not overall progress. *)
   out
-    "- **Corpus solved-rate (tests/cases, by our solver):** %s\n"
+    "- **Suite health (tests/cases regression, by our solver):** %s\n"
     (if total_cases = 0
-     then
-       "0% — no solver verdicts in the latest stats run; THIS is the number that must \
-        move"
+     then "0% — no solver verdicts in the latest stats run"
      else
        Printf.sprintf
-         "%d%% (%d/%d definite sat/unsat) — THIS is the headline number that must move \
-          toward 100%%"
+         "%d%% (%d/%d definite sat/unsat)"
          (100 * solved / total_cases)
          solved
          total_cases);
@@ -1015,6 +1346,22 @@ let () =
          g.honeypots
      | None -> "n/a");
   Printf.printf
-    "  corpus solved-rate: %s\n"
+    "  corpus baseline: %s\n"
+    (match corpus with
+     | None -> "n/a (no committed baseline)"
+     | Some cs ->
+       let tot_scanned = List.fold_left (fun a l -> a + l.scanned) 0 cs.logics in
+       let tot_solved = List.fold_left (fun a l -> a + l.solved) 0 cs.logics in
+       Printf.sprintf
+         "%s%d%% (%d/%d)%s"
+         (if cs.mismatch_count > 0
+          then Printf.sprintf "MISMATCH x%d! " cs.mismatch_count
+          else "")
+         (if tot_scanned = 0 then 0 else 100 * tot_solved / tot_scanned)
+         tot_solved
+         tot_scanned
+         (if corpus_stale cs then " [stale]" else ""));
+  Printf.printf
+    "  suite health (tests/cases): %s\n"
     (if total_cases = 0 then "0%" else Printf.sprintf "%d%%" (100 * solved / total_cases))
 ;;

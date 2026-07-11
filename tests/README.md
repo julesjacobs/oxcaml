@@ -410,12 +410,21 @@ one degrades to `n/a`, never a crash):
   whose HEAD equals the tree it is summarizing. No matching log ⇒ the gate/cache lines
   say **"no gate run at this HEAD"** (loud absence) — a concurrent worktree's gate run can
   never surface a foreign or stale verdict as trunk's state (the b30b6e2 contamination);
+- **the committed `tests/corpus/baseline_summary.json`** (schema
+  `oxsmt-corpus-baseline/v1`, task #124) → the **headline** per-logic corpus
+  solved-rate `(solved-sat+solved-unsat)/scanned`, shown with `scanned/total_available`
+  so a partial snapshot is never overstated; a **loud leading `‼ CORPUS SOUNDNESS
+  BREACH`** line if `mismatch_count > 0` (honeypot-severity); and a **staleness** caption
+  when the baseline's `trunk` hash is not a prefix of the summarized HEAD (re-run
+  `make corpus-run` + promote). status_gen reads this **committed** path ONLY — never
+  the ad-hoc run JSONs `make corpus-run` writes to `../logs` (deterministic ⇒ byte-stable).
+  The `_note` fold-note documents that timeout/skip-too-big are folded into `unknown`;
 - **the most recent stats JSONL** (the sidecar above) → search-counter **bucket**
-  distributions (log-scale, deterministic) and the corpus solved-rate over
-  `tests/cases` (fraction of goals with a definite `sat`/`unsat` verdict — **0%
-  while the solver is a stub; this is the number that must move**). Per-goal
-  `wall_ms` is deliberately **not** emitted into `STATUS.md` — it is
-  nondeterministic and stays only in the uncommitted stats sidecar/logs;
+  distributions (log-scale, deterministic) and, **demoted to a suite-health sub-metric**,
+  the `tests/cases` regression solved-rate (fraction of goals with a definite
+  `sat`/`unsat` verdict). Per-goal `wall_ms` is deliberately **not** emitted into
+  `STATUS.md` — it is nondeterministic and stays only in the uncommitted stats
+  sidecar/logs;
 - **`tools/line_budgets.txt`** (committed, master-owned) → per-module `.ml`+`.mli`
   line counts vs budget, flagged `OVER` past budget (a tripwire, not a gate —
   DESIGN.md §10).
