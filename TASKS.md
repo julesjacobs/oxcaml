@@ -8,8 +8,8 @@ criteria are the contract. Specs live in the task dispatch, not paraphrased here
 | id | title | status | owner | acceptance |
 |----|-------|--------|-------|-----------|
 | M0-bootstrap | Constitution, skeleton, build entry points | done | (bootstrap) | `make build` green, `make fmt` clean, initial commit on `oxsmt` |
-| ADR-0003 | Term/sort representation design pass | in progress | (separate agent) | ADR written + adversarial review; freezes `core` API |
-| M0-core | Implement `smt/core` (Sort, Symbol, Term, hash-consing, smart constructors, `Debug.check`) | done (branch `task/core`) | (core agent) | I1/I2 hold; `Debug.check` validates ADR invariants; 111 unit+property self-checks (`make core-test`); mutation-checked (gcd/Eq-order/sort-check/dedup mutants caught). Freezes `iarr`/`symbol`/`sort`/`rank`/`env`/`term`/`context`/`theory_view` `.mli`s |
+| ADR-0003 | Term/sort representation design pass | done | (separate agent) | accepted + frozen (`decisions/adr-0003-term-representation.md`); adversarial review + verification pass; freezes `core` API |
+| M0-core | Implement `smt/core` (Sort, Symbol, Term, hash-consing, smart constructors, `Debug.check`) | done (branch `task/core`) | (core agent) | I1/I2 hold; `Debug.check` validates ADR invariants; 126 unit+property self-checks (`make core-test`); reviewed + approved (APPROVE-WITH-REQUIRED-CHANGES → fixes → APPROVE-FOR-MERGE; 10/10 mutants killed incl. the R1 `equal_node` bucket gap): see `../logs/core-review.md`. Hash-freezes `sort`/`symbol`/`term`/`context`/`iarr` `.mli`s (`FROZEN.sha256`, `make check-frozen`); `env`/`rank`/`theory_view` freeze at the M1 `THEORY` freeze |
 | M0-smtlib | SMT-LIB2 printer (shipped) + test-only parser | todo | — | prints `QF_UFLIA` sessions; round-trips our dumps |
 | M0-harness | `.smt2` golden/expect harness + promote workflow | done (branch `task/harness`) | (harness agent) | runs `tests/cases`+fixtures, digest to `../logs`, promote accepts goldens, bucketed counters + label check + stats sidecar. STATUS.md *generation* deferred to CI/nightly (harness feeds the stats sidecar only — DESIGN.md §11) |
 | M0-gate | Lean encoder + certification CI job + content-addressed cache | done (branch `task/gate`) | (gate) | unsat→Lean theorem (`by grind`), sat→model `by decide`/`native_decide`; REFUTED = kernel-checked opposite; cache keyed by canonical-query+claim+model+encoding+lean+grind cfg; honeypots run first (floor 4), gate red on breach. `make gate` green on 11 seed cases + 4 day-one honeypots. Reviewed + approved (initial REJECT on cache-key non-injectivity → fixed → APPROVE-FOR-MERGE): see `../logs/gate-review.md`; encoder notes in tests/gate/NOTES.md |
@@ -26,6 +26,7 @@ criteria are the contract. Specs live in the task dispatch, not paraphrased here
 | id | title | status | acceptance |
 |----|-------|--------|-----------|
 | M1-cdcl | Clausifier + CDCL SAT core | todo | passes public SAT benchmarks; `THEORY` frozen at end of M1 |
+| M1-brand-checkpoint | Per-Context brand on `Term.t` decision at the `THEORY` freeze | todo | evaluate a debug-only (or phantom) per-Context id — R3 from core review: the single-Context contract is convention-only, so mixing terms across Contexts silently corrupts `Term.equal`/`Set`/`Map`. See `../logs/core-review.md` R3 |
 | M2-euf | EUF congruence closure | todo | QF_UF passes |
 | M3-lia | LIA simplex + branch-and-bound | todo | QF_LIA passes |
 | M4-interface | Session API + combination (QF_UFLIA) + unsat cores | todo | QF_UFLIA passes; stage-1 feature-complete |

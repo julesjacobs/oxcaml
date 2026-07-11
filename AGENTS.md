@@ -58,8 +58,24 @@ ADR rather than comply. Read DESIGN.md for the full plan (start with §1, §3, �
 Hash-checked in CI; changing one requires an explicit unfreeze + adversarial
 review by a fresh agent (DESIGN.md §10).
 
-- **ADR-0003 accepted:** `Sort` / `Symbol` / `Term` / `Context` / the public
-  `Iarr` surface are design-frozen per `decisions/adr-0003-term-representation.md`;
-  the corresponding `.mli`s become hash-frozen when M0-core merges; changes
-  require the unfreeze ritual (DESIGN §10).
-- `THEORY` freezes after M1 — this list is updated when it does.
+**Hash-frozen at M0-core (ADR-0003).** Five interfaces are frozen by content
+hash in `FROZEN.sha256` (repo root):
+
+- `smt/core/sort.mli`
+- `smt/core/symbol.mli`
+- `smt/core/term.mli`
+- `smt/core/context.mli`
+- `smt/core/iarr.mli`
+
+`make check-frozen` (run first inside `make test`, via `tools/check_frozen.sh`)
+recomputes their sha256 and diffs the manifest, going **red** on any drift.
+`SPINE.md` (regenerate with `make spine`) is the master's concatenated view of
+these five.
+
+**Changing a frozen `.mli` requires all of:** (1) an updated `FROZEN.sha256`
+(`tools/check_frozen.sh generate`), (2) an unfreeze ADR in `decisions/`, and
+(3) an adversarial review by a fresh agent. Otherwise CI (`make check-frozen`)
+goes red.
+
+`env.mli` / `rank.mli` / `theory_view.mli` are **not** frozen yet — they freeze
+at the M1 `THEORY` freeze, when this list and the manifest are extended.

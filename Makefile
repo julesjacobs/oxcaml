@@ -19,7 +19,7 @@ FIXTURES ?= tests/harness/fixtures
 HARNESS_ARGS := --solver $(SOLVER) --dir $(CASES) --dir $(FIXTURES) \
                 --logs $(LOGS) --stats $(STATS)
 
-.PHONY: build fmt test core-test bench gate promote
+.PHONY: build fmt test core-test bench gate promote check-frozen spine
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -35,12 +35,24 @@ core-test:
 fmt:
 	$(DUNE) fmt
 
-## test — harness self-test, then the .smt2 golden/expect regression.
-##   Runs the pure unit self-test (proves red-detection works) first, then
+## check-frozen — enforce the frozen-interface hashes (DESIGN.md §10, §11).
+##   Recomputes sha256 of the five frozen core .mlis and diffs FROZEN.sha256;
+##   red (with the unfreeze instructions) on any drift. Runs first in `test`.
+check-frozen:
+	tools/check_frozen.sh check
+
+## spine — regenerate SPINE.md, the master's concatenated view of the frozen
+##   core .mlis (DESIGN.md §11). Commit the result; it is a generated file.
+spine:
+	tools/check_frozen.sh spine
+
+## test — frozen-interface guard, harness self-test, then the .smt2 golden/expect
+##   regression. check-frozen runs FIRST so a drifted frozen .mli fails every
+##   suite run. Then the pure unit self-test (proves red-detection works), then
 ##   diffs produced-vs-golden over tests/cases + fixtures. Digest to stdout,
 ##   full detail under $(LOGS)/harness, exact stats under $(STATS). Nonzero on
 ##   any diff or missing golden. Override SOLVER to test the real solver.
-test:
+test: check-frozen
 	$(DUNE) build tests/harness/run_harness.exe tests/harness/stub_solver.exe
 	$(DUNE) exec tests/harness/harness_test.exe
 	$(DUNE) exec tests/harness/run_harness.exe -- $(HARNESS_ARGS)
