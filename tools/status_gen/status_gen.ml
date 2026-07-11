@@ -787,32 +787,58 @@ let parse_gate_log path : gate_summary option =
 (* digest; no extra plumbing). It catches the count-drift class that *)
 (* actually bit us; a same-count content edit is a documented residual *)
 (* — status-fresh (the nightly path) always regenerates and is exact. *)
+(* *)
+(* FAIL CLOSED on an unparseable digest: if a digest is present but its *)
+(* per-dir count block is absent/empty or ANY entry is malformed, the *)
+(* guard refuses rather than treating "zero parsed counts" as no-drift *)
+(* — otherwise a future digest-wording change would silently DISARM the *)
+(* guard (the cache-reader lesson: an unrecognized shape must be loud, *)
+(* not benign). Partial tolerance is deliberately rejected: one bad *)
+(* entry poisons the whole check, so a malformed `tests/cases` entry *)
+(* can't slip past by leaving the other dirs well-formed. *)
 (* ------------------------------------------------------------------ *)
 
 (* Parse the per-dir file counts embedded in a run_harness "harness:" digest line, e.g.
    "harness: 31 file(s) [tests/cases: 27, tests/harness/fixtures: 4] | PASS 31 | FAIL 0"
-   -> [("tests/cases", 27); ("tests/harness/fixtures", 4)]. Anything unparseable in a
-   segment is dropped (tolerant), so a wording change degrades to "fewer dirs checked",
-   never a crash. *)
-let parse_harness_dir_counts (harness_line : string) : (string * int) list =
+   -> Ok [("tests/cases", 27); ("tests/harness/fixtures", 4)]. STRICT: the "[...]" block
+   must be present, non-empty, and every comma-separated entry must be exactly "<dir>:
+   <int>" (dir non-empty); anything else is [Error why] (fail-closed), never a
+   partial/empty success. *)
+let parse_harness_dir_counts (harness_line : string)
+  : ((string * int) list, string) result
+  =
   match String.index_opt harness_line '[' with
-  | None -> []
+  | None -> Error "no per-dir count block ([...]) in the harness digest line"
   | Some lb ->
     (match String.index_from_opt harness_line lb ']' with
-     | None -> []
-     | Some rb when rb > lb + 1 ->
-       String.sub harness_line (lb + 1) (rb - lb - 1)
-       |> String.split_on_char ','
-       |> List.filter_map (fun seg ->
-         match String.rindex_opt seg ':' with
-         | None -> None
-         | Some ci ->
-           let dir = trim (String.sub seg 0 ci) in
-           let cnt = trim (String.sub seg (ci + 1) (String.length seg - ci - 1)) in
-           (match int_of_string_opt cnt with
-            | Some n when dir <> "" -> Some (dir, n)
-            | _ -> None))
-     | Some _ -> [])
+     | None -> Error "unterminated per-dir count block ('[' with no ']')"
+     | Some rb ->
+       let inner = trim (String.sub harness_line (lb + 1) (rb - lb - 1)) in
+       if inner = ""
+       then Error "empty per-dir count block ([])"
+       else (
+         let segs = String.split_on_char ',' inner in
+         let rec go acc = function
+           | [] -> Ok (List.rev acc)
+           | seg :: rest ->
+             (match String.rindex_opt seg ':' with
+              | None ->
+                Error (Printf.sprintf "malformed per-dir entry %S (no ':')" (trim seg))
+              | Some ci ->
+                let dir = trim (String.sub seg 0 ci) in
+                let cnt = trim (String.sub seg (ci + 1) (String.length seg - ci - 1)) in
+                (match dir, int_of_string_opt cnt with
+                 | "", _ ->
+                   Error
+                     (Printf.sprintf "malformed per-dir entry %S (empty dir)" (trim seg))
+                 | _, None ->
+                   Error
+                     (Printf.sprintf
+                        "malformed per-dir entry %S (non-integer count)"
+                        (trim seg))
+                 | _, Some n -> go ((dir, n) :: acc) rest))
+         in
+         go [] segs))
 ;;
 
 (* Count .smt2 files directly under [dir] (non-recursive), matching the harness's own
@@ -827,15 +853,30 @@ let count_smt2_in dir =
   | exception _ -> 0
 ;;
 
-(* Compare the digest's recorded per-dir counts against the live tree. Returns the list of
-   drifted dirs as (dir, recorded, actual); empty means fresh. Dirs are resolved relative
-   to [repo] (the harness is invoked from the repo root), absolute dirs used as-is. *)
-let digest_drift ~repo (harness_line : string) : (string * int * int) list =
-  parse_harness_dir_counts harness_line
-  |> List.filter_map (fun (dir, recorded) ->
-    let path = if Filename.is_relative dir then Filename.concat repo dir else dir in
-    let actual = count_smt2_in path in
-    if actual = recorded then None else Some (dir, recorded, actual))
+(* Verdict of checking a present harness digest against the live tree. *)
+type digest_check =
+  | Fresh (* every recorded per-dir count matches the tree *)
+  | Drifted of (string * int * int) list (* (dir, recorded, actual) for each mismatch *)
+  | Unparseable of string (* the digest is present but its count block can't be trusted *)
+
+(* Compare the digest's recorded per-dir counts against the live tree. Dirs are resolved
+   relative to [repo] (the harness is invoked from the repo root), absolute dirs used
+   as-is. Unparseable counts are [Unparseable] (fail-closed), NOT silently "fresh". *)
+let digest_check ~repo (harness_line : string) : digest_check =
+  match parse_harness_dir_counts harness_line with
+  | Error why -> Unparseable why
+  | Ok dirs ->
+    let drift =
+      List.filter_map
+        (fun (dir, recorded) ->
+           let path =
+             if Filename.is_relative dir then Filename.concat repo dir else dir
+           in
+           let actual = count_smt2_in path in
+           if actual = recorded then None else Some (dir, recorded, actual))
+        dirs
+    in
+    if drift = [] then Fresh else Drifted drift
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -986,30 +1027,43 @@ let selftest () =
     (parse_corpus_summary {|{"schema":"other/v9","logics":{},"mismatch_count":0}|} = None)
     true;
   check "corpus malformed json -> None" (parse_corpus_summary "{not json" = None) true;
-  (* Harness-digest per-dir count parse (task #25 staleness guard). *)
+  (* Harness-digest per-dir count parse (task #25 staleness guard). Happy paths return
+     [Ok]; the three degenerate shapes fail CLOSED as [Error] so an unparseable digest can
+     never silently disarm the guard. *)
+  let is_err = function
+    | Error _ -> true
+    | Ok _ -> false
+  in
   check
     "digest dir-counts: two dirs"
     (parse_harness_dir_counts
        "harness: 31 file(s) [tests/cases: 27, tests/harness/fixtures: 4] | PASS 31 | \
         FAIL 0")
-    [ "tests/cases", 27; "tests/harness/fixtures", 4 ];
+    (Ok [ "tests/cases", 27; "tests/harness/fixtures", 4 ]);
   check
     "digest dir-counts: single dir"
     (parse_harness_dir_counts "harness: 5 file(s) [tests/cases: 5] | PASS 5 | FAIL 0")
-    [ "tests/cases", 5 ];
+    (Ok [ "tests/cases", 5 ]);
   check
     "digest dir-counts: promote suffix tolerated"
     (parse_harness_dir_counts
        "harness: 27 file(s) [tests/cases: 27] | PASS 27 | FAIL 0 | promote")
-    [ "tests/cases", 27 ];
+    (Ok [ "tests/cases", 27 ]);
   check
-    "digest dir-counts: no bracket -> []"
-    (parse_harness_dir_counts "harness: something without a bracket")
-    [];
+    "digest dir-counts: no bracket -> fail-closed"
+    (is_err (parse_harness_dir_counts "harness: something without a bracket"))
+    true;
   check
-    "digest dir-counts: empty bracket -> []"
-    (parse_harness_dir_counts "harness: 0 file(s) [] | PASS 0 | FAIL 0")
-    [];
+    "digest dir-counts: empty bracket -> fail-closed"
+    (is_err (parse_harness_dir_counts "harness: 0 file(s) [] | PASS 0 | FAIL 0"))
+    true;
+  check
+    "digest dir-counts: malformed entry -> fail-closed (poisons whole check)"
+    (is_err
+       (parse_harness_dir_counts
+          "harness: 31 file(s) [tests/cases: abc, tests/harness/fixtures: 4] | PASS 31 | \
+           FAIL 0"))
+    true;
   if !failures = 0
   then print_endline "status_gen selftest: all checks passed"
   else (
@@ -1154,39 +1208,65 @@ let () =
        | None -> None)
     | None -> None
   in
-  (* Staleness guard (task #25): if a digest is present but its recorded per-dir file
-     counts no longer match the tree, it predates a tests/cases change and would commit
-     stale pass/fail numbers. Fail LOUDLY (before writing STATUS.md), directing to `make
-     status-fresh` — the pure-aggregation `make status` must never silently regenerate
-     from stale inputs, and deliberately does NOT re-run the harness itself (that
-     separation is what keeps the committed artifact's diff meaningful). A missing or
-     count-matching digest is fine; absence is reported honestly below, not as staleness. *)
-  (match harness_line with
-   | Some l ->
-     (match digest_drift ~repo:cfg.repo l with
-      | [] -> ()
-      | drift ->
-        prerr_endline
-          "status: STALE harness digest — refusing to aggregate stale pass/fail counts.";
-        List.iter
-          (fun (dir, recorded, actual) ->
-             Printf.eprintf
-               "  %s: digest recorded %d .smt2 file(s), tree now has %d\n"
-               dir
-               recorded
-               actual)
-          drift;
-        prerr_endline
-          (Printf.sprintf
-             "  digest: %s"
-             (match cfg.harness_digest with
-              | Some f -> f
-              | None -> "<none>"));
-        prerr_endline
-          "  run `make status-fresh` to re-run the harness and refresh the digest, then \
-           `make status`.";
-        exit 1)
-   | None -> ());
+  (* Staleness guard (task #25). If a harness digest is PRESENT, it must validate against
+     the live tree before we aggregate it into STATUS.md; otherwise `make status` would
+     commit stale (or, worse, silently unchecked) pass/fail numbers. Fail LOUDLY —
+     nonzero, BEFORE writing STATUS.md — on any of:
+     - the per-dir count block is absent/empty or has a malformed entry (fail CLOSED: a
+       future wording change must not silently disarm the guard by parsing to nothing);
+     - a recorded per-dir count no longer matches the tree (the stale-count drift). `make
+       status` deliberately does NOT re-run the harness (that is `make status-fresh`); the
+       separation is what keeps the committed diff meaningful, so the guard refuses rather
+       than regenerating. A MISSING digest FILE (or no --harness-digest) is NOT a failure:
+       it is honest absence, reported as "n/a" in the body below — never a stale or
+       unchecked number. *)
+  let digest_file =
+    match cfg.harness_digest with
+    | Some f when Sys.file_exists f -> Some f
+    | _ -> None
+  in
+  let fail_closed heading details =
+    prerr_endline ("status: " ^ heading);
+    List.iter prerr_endline details;
+    prerr_endline
+      (Printf.sprintf
+         "  digest: %s"
+         (match cfg.harness_digest with
+          | Some f -> f
+          | None -> "<none>"));
+    prerr_endline
+      "  run `make status-fresh` to re-run the harness and refresh the digest, then \
+       `make status`.";
+    exit 1
+  in
+  (match digest_file with
+   | None -> () (* no digest FILE: honest n/a below (behavior unchanged) *)
+   | Some _ ->
+     (match harness_line with
+      | None ->
+        fail_closed
+          "harness digest present but unparseable — refusing to aggregate."
+          [ "  no 'harness:' summary line in the digest (harness crash, or a wording \
+             change that would disarm this guard)"
+          ]
+      | Some l ->
+        (match digest_check ~repo:cfg.repo l with
+         | Fresh -> ()
+         | Unparseable why ->
+           fail_closed
+             "harness digest present but unparseable — refusing to aggregate."
+             [ Printf.sprintf "  %s" why ]
+         | Drifted drift ->
+           fail_closed
+             "STALE harness digest — refusing to aggregate stale pass/fail counts."
+             (List.map
+                (fun (dir, recorded, actual) ->
+                   Printf.sprintf
+                     "  %s: digest recorded %d .smt2 file(s), tree now has %d"
+                     dir
+                     recorded
+                     actual)
+                drift))));
   out
     "- **Harness (fast regression suite):** %s\n"
     (match harness_line with
