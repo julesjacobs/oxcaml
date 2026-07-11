@@ -1,4 +1,7 @@
-; stdlib-only — no libraries field, ever (AGENTS.md dependency firewall).
+; stdlib-only + oxsmt_core (AGENTS.md dependency firewall, INVARIANTS.md I3): no opam
+; packages, no Base/Core, no ppx. The LIA decision procedure (Dutertre-de Moura simplex +
+; branch-and-bound) lives here, over the frozen core term API only.
 
 (library
- (name oxsmt_lia))
+ (name oxsmt_lia)
+ (libraries oxsmt_core))

@@ -77,7 +77,27 @@ on `core` only, NOT on `solver`). The ADR-0005 THEORY adapter (mapping `Atom`/`L
 ## smt/theories/lia (`oxsmt_lia`)
 LIA via incremental simplex over rationals + branch-and-bound for integrality
 (Dutertre-de Moura); conflicts as infeasible bound sets with Farkas coefficients
-(I4). Implements THEORY. Owner: M3-lia.
+(I4). **Status: implemented (algorithm-first, M3-lia).** Stdlib-only over
+`oxsmt_core`. Public submodules: `Rational` (exact overflow-guarded ℚ, raises
+`Rational.Overflow` before wrapping — the LIA analogue of I8; DdM coefficient
+growth makes this a known native-int incompleteness ceiling that degrades to
+`unknown`, counted via `Lia.overflow_count`, until the post-M4 core-bignum row),
+`Delta`
+(δ-rationals `a + b·δ` for strict bounds), `Simplex` (the DdM two-layer tableau:
+`new_problem_var`/`new_slack`, `assert_upper`/`assert_lower`, Bland-rule `check`,
+backtrackable `push`/`pop` restoring bounds only, and Farkas conflicts whose
+certificate is **self-checked at production** — `Farkas_error` if the
+multiplier-weighted half-planes don't cancel to a strictly positive constant),
+and `Lia` (the adapter-facing decision procedure over frozen-core `Le`/`Eq`
+atoms, parameterized by an opaque `'tok` premise token: `assert_atom` with the
+exact ℤ complement of a negated `Le`, `check` for rational feasibility,
+`solve_integer` branch-and-bound with a split budget → `Int_unknown`,
+`suggest_branch` mirroring the ADR-0005 Split, `register_atom`/`propagate` for
+bound propagation, and integer model extraction). The THEORY-functor adapter
+binding `'tok` to `Lit.t` is deferred to M4 (ADR-0005 freezes at M1-end).
+Determinism (I6): variables numbered in atom-arrival order, Bland's rule, branch
+by lowest `Term` tag. Unit + property tests under `smt/theories/lia/test/`
+(`make lia-test`). Owner: TASKS.md M3-lia.
 
 ## smt/interface (`oxsmt_interface`)
 Session API (`Session`): the sole client entry point — declare sorts/funs/consts,

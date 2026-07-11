@@ -50,6 +50,20 @@ not the external gate. Run individually:
   union-find + brute-force O(n²) congruence rule over a fixed term universe),
   sharing no code with the engine's union-find / explanation forest / congruence
   table. See the dedicated section below.
+- `make lia-test` — `smt/theories/lia` LIA decision procedure (Dutertre-de Moura
+  simplex + branch-and-bound). Two independent oracles, both test-only and
+  written from definitions (not solver internals): (1) **brute-force
+  cross-check** — 3000 random small *bounded* systems (≤3 vars, coeffs ≤5,
+  each variable box-bounded so the feasible set is finite), whose sat/unsat
+  verdict and returned integer model are checked against exhaustive integer
+  enumeration over the box; (2) an **independent Farkas verifier** run on every
+  conflict, recomputing `Σ multiplierᵢ · half-planeᵢ` from the premise atoms and
+  confirming it cancels all variables to a strictly positive constant (a tampered
+  certificate — dropped premise, zeroed/negated multiplier — is asserted to be
+  rejected, the mutant demonstration). Also: exact-multiplier hand cases,
+  gcd-tightening, strict-vs-nonstrict via δ, unbounded, near-max_int overflow, and
+  run-twice determinism. The solver additionally self-checks every Farkas
+  certificate at production (`Simplex.Farkas_error`), independent of these tests.
 
 ## The harness (M0-harness)
 

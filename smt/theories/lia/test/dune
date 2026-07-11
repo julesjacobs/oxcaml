@@ -1,0 +1,12 @@
+; In-tree unit + property tests for smt/theories/lia. Depends only on oxsmt_core and
+; oxsmt_lia, so it honors the dependency firewall (I3) even though it lives under smt/.
+; Run via `make lia-test`; also built by `make build`.
+;
+; The independent Farkas verifier and the brute-force enumerator here are deliberately
+; test-only and written from the certificate/semantics definitions (DESIGN §10), not from
+; the solver internals.
+
+(executable
+ (name lia_test)
+ (modules lia_test)
+ (libraries oxsmt_core oxsmt_lia))

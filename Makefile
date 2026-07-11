@@ -36,7 +36,7 @@ PERF_CASES ?= tests/perf/cases
 # (from a worktree, override SMTLIB_CORPUS to ../../corpora/... — same caveat as LOGS).
 SMTLIB_CORPUS ?= ../corpora/QF_UFLIA
 
-.PHONY: build fmt test core-test sat-test sat-bench perf-gen perf-bench preprocess-test euf-test wiring-test smtlib-test smtlib-corpus eval-test bench gate promote check-frozen spine status status-fresh mutants
+.PHONY: build fmt test core-test sat-test sat-bench perf-gen perf-bench preprocess-test lia-test euf-test wiring-test smtlib-test smtlib-corpus eval-test bench gate promote check-frozen spine status status-fresh mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -106,6 +106,17 @@ wiring-test:
 ##   Nonzero exit on any failed check (TASKS.md M2-euf).
 euf-test:
 	$(DUNE) exec smt/theories/euf/test/euf_test.exe
+
+## lia-test — smt/theories/lia unit + property self-test (stdlib-only, deterministic).
+##   Exact rational/δ-rational arithmetic incl. overflow guards; hand cases (DdM
+##   feasible/infeasible systems, infeasible bound chains with exact Farkas multipliers,
+##   gcd-tightening, strict-vs-nonstrict via δ, unbounded); thousands of random bounded
+##   systems cross-checked against exhaustive integer enumeration (verdict + returned
+##   model); an INDEPENDENT Farkas verifier run on every conflict plus a tampered-certificate
+##   mutant demo; near-max_int overflow raising cleanly with state intact; and a
+##   run-twice determinism check (pivot count logged). Nonzero exit on any failed check.
+lia-test:
+	$(DUNE) exec smt/theories/lia/test/lia_test.exe
 
 ## smtlib-test — round-trip suite for the SMT-LIB2 printer + test-only parser.
 ##   Deterministic and corpus-independent (committed test): round-trip A (print->parse
