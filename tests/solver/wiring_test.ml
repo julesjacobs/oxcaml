@@ -179,6 +179,47 @@ let test_parser_into_session () =
   check_verdict "parsed unsat formula" Session.Unsat (Session.check_sat s)
 ;;
 
+(* Degradation honeypots (mirrors the tests/cases/degrade_*.smt2 files): formulas whose
+   boolean skeleton is satisfiable but whose theory is unsat MUST verdict `unknown`, never
+   `sat`. This is the exact asymmetry a later refactor could silently break. *)
+
+let test_degradation_honeypots () =
+  (* LIA: x<0 /\ x>0 *)
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let zero = Context.int_const ctx 0 in
+  Session.assert_term s (Context.lt ctx x zero);
+  Session.assert_term s (Context.gt ctx x zero);
+  check_verdict "honeypot LIA x<0 /\\ x>0" Session.Unknown (Session.check_sat s);
+  (* EUF: x=y /\ f(x)≠f(y) *)
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let su = Session.declare_sort s "S" in
+  let ssort = Sort.uninterpreted su in
+  let f = Session.declare_fun s "f" (Rank.create [ ssort ] ssort) in
+  let x = Context.const ctx (Session.declare_const s "x" ssort) in
+  let y = Context.const ctx (Session.declare_const s "y" ssort) in
+  Session.assert_term s (Context.eq ctx x y);
+  Session.assert_term
+    s
+    (Context.not_
+       ctx
+       (Context.eq ctx (Context.app ctx f [ x ]) (Context.app ctx f [ y ])));
+  check_verdict "honeypot EUF x=y /\\ f(x)≠f(y)" Session.Unknown (Session.check_sat s);
+  (* mixed: x=y /\ f(x)<f(y) *)
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let f = Session.declare_fun s "f" (Rank.create [ Sort.int ] Sort.int) in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let y = Context.const ctx (Session.declare_const s "y" Sort.int) in
+  Session.assert_term s (Context.eq ctx x y);
+  Session.assert_term
+    s
+    (Context.lt ctx (Context.app ctx f [ x ]) (Context.app ctx f [ y ]));
+  check_verdict "honeypot mixed x=y /\\ f(x)<f(y)" Session.Unknown (Session.check_sat s)
+;;
+
 let () =
   test_push_pop ();
   test_assert_after_check ();
@@ -186,6 +227,7 @@ let () =
   test_get_model ();
   test_namespace_guard ();
   test_parser_into_session ();
+  test_degradation_honeypots ();
   Printf.printf "wiring_test: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;

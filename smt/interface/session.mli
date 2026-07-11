@@ -6,17 +6,33 @@
     Decision 6), so the same atom is the same SAT variable throughout the session.
     Shipped, stdlib-only (INVARIANTS.md I3): it never links the test-only SMT-LIB parser.
 
-    {b THE SOUNDNESS RULE (v1 is a propositional core, not yet a theory solver).} The SAT
-    core knows nothing about arithmetic or congruence. Therefore:
+    {b THE SOUNDNESS RULE (v1 is a propositional core, not yet a theory solver).}
+
+    {i Why it holds — the boolean skeleton over-approximates.} Clausification replaces
+    each theory atom by a fresh Boolean variable, dropping every theory constraint that
+    ties those variables to arithmetic/congruence. So the propositional problem is a
+    {b relaxation} of the real one: every real model induces a propositional model (read
+    off the truth value each atom takes under the real interpretation), but not conversely
+    — a propositional model may assign the atoms in a way no theory interpretation allows
+    (it can set both [x < 0] and [x > 0] true, which are independent Booleans to the SAT
+    core). Two consequences, asymmetric:
+
+    - {b Propositional [Unsat] ⇒ real [Unsat] (sound, even with theory atoms).} If not
+      even the relaxation has a model, the (more constrained) real problem has none
+      either. The SAT core cannot see theory constraints, but adding them only removes
+      models, never adds them.
+    - {b Propositional [Sat] proves nothing} until a theory vets the atom assignment: the
+      witness may be theory-inconsistent. So with any theory atom present, [Sat] must
+      become [Unknown] — reporting [Sat] would be unsound.
+
+    Concretely:
 
     - If the asserted formulas contain {b any theory atom} — an order atom [Le], a
       non-Bool equality [Eq], or an applied predicate [App] of arity ≥ 1 — then a
-      propositional [Sat] verdict is {b downgraded to [Unknown]}: the SAT model assigns
-      those atoms freely and may be theory-inconsistent (e.g. it can satisfy both [x < 0]
-      and [x > 0]).
-    - Propositional [Unsat] {b remains sound} even with theory atoms present: adding
-      theory reasoning only removes models, so an unsatisfiable Boolean skeleton is
-      unsatisfiable under any theory.
+      propositional [Sat] verdict is {b downgraded to [Unknown]} (per the argument above;
+      e.g. the skeleton of [x < 0] ∧ [x > 0] is satisfiable though the theory is not).
+    - Propositional [Unsat] is reported as [Unsat] {b even with theory atoms present}
+      (sound by the first consequence above).
     - A {b pure-Boolean} formula (every atom is a propositional variable — a nullary
       Bool-sorted symbol — or a Bool constant) gets a real [Sat]/[Unsat].
     - {!Term.Overflow}/{!Term.Unsupported} anywhere in preprocessing or clausification

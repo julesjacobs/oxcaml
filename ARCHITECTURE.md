@@ -116,4 +116,6 @@ default harness `SOLVER` (M1-wiring). Gate paths are master-only (AGENTS.md). Se
 Status: **landed** — harness (M0-harness) and gate (M0-gate) merged; the real
 solver is wired (M1-wiring), so pure-Boolean goldens are now real sat/unsat and
 cases with theory atoms are `unknown` under THE SOUNDNESS RULE. `tests/cases/`
-holds 18 cases, all gate-certified.
+holds 21 cases, all gate-certified — including `degrade_*.smt2` degradation
+honeypots (propositionally-sat but theory-unsat, `:status unsat`, golden
+`unknown`) that turn a regression to `sat` into a red label-check failure.

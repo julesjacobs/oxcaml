@@ -113,6 +113,20 @@ signal. `unknown` against a definite label is only a completeness gap and does
 not fail. Status is tracked per check-sat (the most recent `set-info :status`
 in effect).
 
+#### Degradation honeypots (`tests/cases/degrade_*.smt2`)
+
+These exist to weaponize the label check against a specific regression. Each is a
+formula whose **boolean skeleton is satisfiable but whose theory is unsat** — two
+independent theory atoms that the propositional core cannot relate (e.g. `x<0 ∧
+x>0`; `x=y ∧ f(x)≠f(y)`; the mixed `x=y ∧ f(x)<f(y)`). They carry `:status unsat`,
+and the wired v1 solver's correct answer is `unknown` (THE SOUNDNESS RULE in
+`session.mli`: theory atoms present ⇒ a propositional sat is downgraded), which is a
+tolerated completeness gap. The trap: if the wiring ever regresses to reporting
+`sat` here, the label check turns that into a **soundness failure (red)** rather
+than a silent golden diff. The same three are asserted directly in
+`tests/solver/wiring_test.ml`. When EUF/LIA/combination land (M2–M4) these become
+real `unsat` and the goldens flip.
+
 ### Workflow
 
 - `make test` — runs the pure harness self-test (which proves red-detection
