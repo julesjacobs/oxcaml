@@ -316,7 +316,8 @@ let cases_phase ctx ~cache_dir dir =
   let hits = ref 0
   and misses = ref 0 in
   let ship_stoppers = ref []
-  and encode_errors = ref [] in
+  and encode_errors = ref []
+  and quarantined = ref [] in
   List.iter
     (fun f ->
        let o, disp = certify_file ctx ~cache_dir ~allow_cache:true f in
@@ -328,10 +329,19 @@ let cases_phase ctx ~cache_dir dir =
        if Outcome.is_ship_stopper o then ship_stoppers := (f, o) :: !ship_stoppers;
        (match o with
         | Encode_error _ -> encode_errors := (f, o) :: !encode_errors
+        (* Quarantine = a query the gate could not judge (reader-rejected) or that carries
+          no claim; visibly counted per-reason, never dropped. *)
+        | Malformed _ | Unsupported _ | No_status -> quarantined := (f, o) :: !quarantined
         | _ -> ());
        print_line ctx "case" f o disp)
     files;
-  tally, !hits, !misses, List.rev !ship_stoppers, List.rev !encode_errors
+  ( tally
+  , List.length files
+  , !hits
+  , !misses
+  , List.rev !ship_stoppers
+  , List.rev !encode_errors
+  , List.rev !quarantined )
 ;;
 
 let cmd_run ~cases_dir ~honeypots_dir ~cache_dir ~logs_root ~timeout ~allow_cache =
@@ -355,10 +365,10 @@ let cmd_run ~cases_dir ~honeypots_dir ~cache_dir ~logs_root ~timeout ~allow_cach
   in
   logf ctx "";
   (* If a honeypot certified, abort red BEFORE trusting any case result. *)
-  let tally, hits, misses, ship_stoppers, encode_errors =
+  let tally, n_cases, hits, misses, ship_stoppers, encode_errors, quarantined =
     if honeypots_ok
     then cases_phase ctx ~cache_dir cases_dir
-    else Hashtbl.create 1, 0, 0, [], []
+    else Hashtbl.create 1, 0, 0, 0, [], [], []
   in
   logf ctx "";
   (* Write full log. *)
@@ -366,7 +376,20 @@ let cmd_run ~cases_dir ~honeypots_dir ~cache_dir ~logs_root ~timeout ~allow_cach
   Lean_runner.write_file logfile (Buffer.contents ctx.log);
   (* Digest to stdout. *)
   let get t = Option.value (Hashtbl.find_opt tally t) ~default:0 in
-  let green = honeypots_ok && ship_stoppers = [] && encode_errors = [] in
+  (* Accounting invariant (author directive): every query exits in EXACTLY ONE class —
+     certified / inconclusive / quarantined — plus the two RED terminal classes refuted
+     (soundness breach) and encode_error (encoder bug). The sum of the per-class counts
+     MUST equal the number of case files; a mismatch means a query was silently dropped
+     and is itself RED. This makes silent bypass structurally impossible rather than fixed
+     per-bug. *)
+  let n_certified = get "CERTIFIED"
+  and n_inconclusive = get "INCONCLUSIVE"
+  and n_quarantined = get "MALFORMED" + get "UNSUPPORTED" + get "NO_STATUS"
+  and n_refuted = get "REFUTED"
+  and n_encode = get "ENCODE_ERROR" in
+  let accounted = n_certified + n_inconclusive + n_quarantined + n_refuted + n_encode in
+  let accounting_ok = accounted = n_cases in
+  let green = honeypots_ok && ship_stoppers = [] && encode_errors = [] && accounting_ok in
   Printf.printf "oxsmt gate: %s\n" (if green then "GREEN" else "RED");
   (* Always attest the audit ran, green or red (DESIGN.md §10). *)
   Printf.printf "  %s\n" hp_attestation;
@@ -384,6 +407,28 @@ let cmd_run ~cases_dir ~honeypots_dir ~cache_dir ~logs_root ~timeout ~allow_cach
     (get "UNSUPPORTED")
     (get "MALFORMED")
     (get "NO_STATUS");
+  (* Accounting identity: inputs = certified + inconclusive + quarantined + refuted +
+     encode_error. Every input query lands in exactly one class; the sum must close. *)
+  Printf.printf
+    "  accounting: %d inputs = %d certified + %d inconclusive + %d quarantined + %d \
+     refuted + %d encode_error%s\n"
+    n_cases
+    n_certified
+    n_inconclusive
+    n_quarantined
+    n_refuted
+    n_encode
+    (if accounting_ok
+     then ""
+     else Printf.sprintf "  [MISMATCH: %d unaccounted — RED]" (n_cases - accounted));
+  if quarantined <> []
+  then (
+    Printf.printf "  QUARANTINED (counted, not certified — no silent bypass):\n";
+    List.iter
+      (fun (f, o) ->
+         Printf.printf "    %s [%s]: %s" (short f) (Outcome.tag o) (Outcome.detail o);
+         print_newline ())
+      quarantined);
   Printf.printf "  cache: %d hit, %d miss\n" hits misses;
   if ship_stoppers <> []
   then (

@@ -150,3 +150,17 @@ unchanged, but every verdict cached under enc-v1 was computed through the broken
 reader, so the bump forcibly invalidates the whole certified cache and forces
 re-certification through the fixed reader. Re-cert found zero regressions (our
 printer-emitted corpus never exercised the holes).
+
+## Gate accounting invariant (author directive, #119)
+
+Every input query exits `gate run` in EXACTLY ONE class: **certified** /
+**inconclusive**(-with-reason) / **quarantined**(-with-reason), plus the two RED
+terminal classes **refuted** (soundness breach) and **encode_error** (encoder
+bug). The digest prints the sum identity — `inputs = certified + inconclusive +
+quarantined + refuted + encode_error` — and the gate is RED if it does not close
+(a query silently dropped). MALFORMED / UNSUPPORTED / NO_STATUS are *quarantine*
+reasons: visibly counted AND listed per-file with their reason, never dropped.
+This generalises G4 (and the honeypot floor) — silent bypass is now structurally
+impossible (an unaccounted or reader-rejected-but-claimed query is loud), not
+patched per-bug. Quarantine is not RED (it is a coverage gap, not a soundness
+failure); only refuted/encode_error/honeypot-breach/accounting-mismatch are RED.

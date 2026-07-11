@@ -283,6 +283,16 @@ string is inert, the real theorem is refuted), a multi-`check-sat` trap
 The stdout digest always prints a one-line attestation that the audit ran, green
 or red, e.g. `honeypots: 8/8 matched, floor 8, none certified`.
 
+**Accounting invariant.** The case digest prints a sum identity — `accounting: N
+inputs = C certified + I inconclusive + Q quarantined + R refuted + E
+encode_error` — and the gate is RED if it does not close (a query silently
+dropped). Every input lands in exactly one class; MALFORMED / UNSUPPORTED /
+NO_STATUS are *quarantine* reasons, listed per-file with their reason (never
+dropped). Quarantine is a coverage gap, not RED; only refuted / encode_error /
+honeypot-breach / accounting-mismatch are RED. This makes silent oracle bypass
+(e.g. the old div/mod MALFORMED-green) structurally impossible, not patched
+per-bug.
+
 ### Cache format (`../cache`, never in git)
 
 One s-expression file per entry, named `<key>.sexp`. The key is
