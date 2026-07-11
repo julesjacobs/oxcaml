@@ -78,7 +78,13 @@ type mock_config =
          all are exhausted *)
   ; explain_override : (Sat.lit -> Sat.lit list) option
     (* if set, [explain] returns this instead of the rule antecedents — used to inject a
-     CONTRACT-EX-violating reason and confirm the core raises rather than trusts it *)
+         CONTRACT-EX-violating reason and confirm the core raises rather than trusts it *)
+  ; propose_once : bool
+    (* if true, each consequent is proposed at most once across the whole solve (a latch
+     that survives backtracking). Lets a negative test isolate a single guarded path: with
+     the guard removed, the solve then TERMINATES without re-proposing into a different
+     guard, so the revert-check produces a clean RED instead of raising elsewhere or
+     looping. *)
   }
 
 let empty_config =
@@ -87,6 +93,7 @@ let empty_config =
   ; final_conflicts = []
   ; final_splits = []
   ; explain_override = None
+  ; propose_once = false
   }
 ;;
 
@@ -119,6 +126,8 @@ let make_mock st config =
   let all_true ls = List.for_all is_true ls in
   (* remaining (not-yet-true) splits, popped one at a time *)
   let pending_splits = ref config.final_splits in
+  (* consequents already proposed at least once (a latch, not cleared on backtrack) *)
+  let proposed = ref [] in
   let check ~final =
     (* push/pop synchronization oracle: NOTHING the theory currently holds may sit above
        the solver's current decision level. A backjump/restart that failed to pop, or a
@@ -136,10 +145,16 @@ let make_mock st config =
       let props =
         List.filter_map
           (fun (ants, cons) ->
-             if all_true ants && not (is_true cons) then Some cons else None)
+             if
+               all_true ants
+               && (not (is_true cons))
+               && not (config.propose_once && List.mem cons !proposed)
+             then Some cons
+             else None)
           config.implications
       in
       let props = List.sort_uniq compare props in
+      if config.propose_once then proposed := props @ !proposed;
       if props <> []
       then Sat.T_consistent props
       else if final
@@ -431,31 +446,94 @@ let solve_raises_contract_violation s assumptions =
   | exception Sat.Theory_contract_violation _ -> true
 ;;
 
-let test_bad_explain_1uip () =
-  (* test_lazy_explain_called shape: c is resolved during 1UIP, so theory_reason_clause
-     runs the guard on explain(c). *)
+(* The batch shape that genuinely drives {!theory_reason_clause} (the textbook 1UIP
+   lazy-reason path). Under assumption a, the theory propagates BOTH c and d TRUE in one
+   [T_consistent [c; d]] batch (nothing forces them false first — the only clause, ¬c∨¬d,
+   is not unit while both are unknown). Re-propagation then conflicts ¬c∨¬d, and 1UIP
+   resolves the true theory literals d and c against their lazy reasons — so
+   [theory.explain] flows through [theory_reason_clause], NOT the already-false
+   [theory_prop_conflict_clause] path. (A plain rule ⇒ single-consequent shape does NOT
+   reach here: Boolean BCP reaches fixpoint before the theory check, so a clause
+   mentioning the consequent propagates it false first, routing through the falsification
+   guard.) *)
+let reason_clause_setup ?(bad_explain = false) () =
   let s = Sat.create () in
   let a = Sat.new_var s
-  and b = Sat.new_var s
   and c = Sat.new_var s
-  and d = Sat.new_var s in
+  and d = Sat.new_var s
+  and e = Sat.new_var s in
   let la = Sat.pos a
-  and lb = Sat.pos b
   and lc = Sat.pos c
   and ld = Sat.pos d in
+  (* [e] is allocated but NEVER asserted; a bad explanation citing it violates strict
+     precedence (trail_pos -1) — an allocated var, so we hit the guard, not an out-of-
+     bounds access *)
+  let explain_override = if bad_explain then Some (fun _ -> [ Sat.pos e ]) else None in
   let mock =
     make_mock
       s
       { empty_config with
-        implications = [ [ la ], lc ]
-      ; explain_override = Some (fun _ -> [ ld ]) (* d is never asserted ⇒ violation *)
+        implications = [ [ la ], lc; [ la ], ld ]
+      ; explain_override
+      ; propose_once = true
       }
   in
   Sat.set_theory s (Some mock.theory);
-  Sat.add_clause s [ Sat.neg a; lb ];
-  Sat.add_clause s [ Sat.neg b; Sat.neg c ];
+  Sat.add_clause s [ Sat.neg c; Sat.neg d ];
+  s, mock, la
+;;
+
+(* Happy path through theory_reason_clause, constructed so the reason clause's CONTENT
+   (not just which var is the UIP) flows into the learned clause — so breaking the
+   construction (e.g. dropping the negation of the premises) changes the learned clause
+   and turns this RED. Two levels: assume p (level 1), then a (level 2). With [{p,a}] the
+   theory propagates BOTH c and d TRUE at level 2 (explain each = [p; a]); the clause
+   ¬c∨¬d then conflicts. 1UIP resolves the two true theory literals d and c against their
+   reasons: the UIP is a (level 2), and each reason contributes its lower-level premise ¬p
+   (level 1) to the learned clause. So the learned clause is [¬a ∨ ¬p], backjumping to
+   level 1 — and the ¬p literal is exactly what a mis-built reason clause (un-negated
+   premise) corrupts to +p. *)
+let test_reason_clause_1uip () =
+  let s = Sat.create () in
+  let p = Sat.new_var s
+  and a = Sat.new_var s
+  and c = Sat.new_var s
+  and d = Sat.new_var s in
+  let lp = Sat.pos p
+  and la = Sat.pos a
+  and lc = Sat.pos c
+  and ld = Sat.pos d in
+  let mock =
+    make_mock s { empty_config with implications = [ [ lp; la ], lc; [ lp; la ], ld ] }
+  in
+  Sat.set_theory s (Some mock.theory);
+  Sat.add_clause s [ Sat.neg c; Sat.neg d ];
+  (* ¬c ∨ ¬d *)
+  let learned = with_collector s in
+  let r = Sat.solve ~assumptions:[ lp; la ] s in
+  let ls = learned () in
+  check "reason-1uip: unsat under p,a" (r = Sat.Unsat);
+  (match ls with
+   | (clause, _ants, bt) :: _ ->
+     check
+       (Printf.sprintf "reason-1uip: first learned = [-2;-1] (got %s)" (show_ints clause))
+       (clause = [ -2; -1 ]);
+     check (Printf.sprintf "reason-1uip: backjump to level 1 (got %d)" bt) (bt = 1)
+   | [] -> check "reason-1uip: at least one learned clause" false);
   check
-    "bad-explain-1uip: raises Theory_contract_violation"
+    (Printf.sprintf "reason-1uip: explain consulted in 1UIP (%d)" !(mock.explain_calls))
+    (!(mock.explain_calls) >= 1);
+  check "reason-1uip: push/pop invariant held" !(mock.invariant_ok)
+;;
+
+(* Negative test on the SAME batch shape: a precedence-violating explanation (an
+   unasserted premise) resolved in 1UIP must make theory_reason_clause raise
+   Theory_contract_violation rather than learn a bogus clause. Deleting/neutering the
+   strict guard makes this pass silently — i.e. this test goes RED without the guard. *)
+let test_bad_explain_1uip () =
+  let s, _mock, la = reason_clause_setup ~bad_explain:true () in
+  check
+    "bad-explain-1uip: raises Theory_contract_violation (via theory_reason_clause)"
     (solve_raises_contract_violation s [ la ])
 ;;
 
@@ -696,6 +774,7 @@ let () =
   test_lazy_explain_not_called ();
   test_propagate_into_false ();
   test_explain_after_backjump ();
+  test_reason_clause_1uip ();
   test_bad_explain_1uip ();
   test_bad_explain_final ();
   test_set_theory_after_assert_raises ();
