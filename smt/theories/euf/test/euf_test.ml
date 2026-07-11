@@ -141,9 +141,10 @@ module Naive = struct
             let all = ref true in
             List.iteri
               (fun k arg ->
-                let bj = Iarr.get aj k in
-                if find t (Term.Table.find t.idx arg) <> find t (Term.Table.find t.idx bj)
-                then all := false)
+                 let bj = Iarr.get aj k in
+                 if
+                   find t (Term.Table.find t.idx arg) <> find t (Term.Table.find t.idx bj)
+                 then all := false)
               (Iarr.to_list ai);
             if !all
             then (
@@ -267,11 +268,11 @@ let test_chain_orders () =
   let ok = ref true in
   Array.iter
     (fun s ->
-      Array.iter
-        (fun t ->
-          if Euf.are_equal e s t <> Naive.equal nz (Naive.index nz s) (Naive.index nz t)
-          then ok := false)
-        univ)
+       Array.iter
+         (fun t ->
+            if Euf.are_equal e s t <> Naive.equal nz (Naive.index nz s) (Naive.index nz t)
+            then ok := false)
+         univ)
     univ;
   check "orders: classes match naive oracle" !ok
 ;;
@@ -582,11 +583,11 @@ let scripted_run ctx univ watch script =
   let props = ref [] in
   List.iter
     (fun (i, j, p) ->
-      Euf.assert_eq e ~premise:p univ.(i) univ.(j);
-      let step =
-        List.map (fun imp -> imp.Euf.atom.Term.tag, imp.Euf.value) (Euf.propagate e)
-      in
-      props := step :: !props)
+       Euf.assert_eq e ~premise:p univ.(i) univ.(j);
+       let step =
+         List.map (fun imp -> imp.Euf.atom.Term.tag, imp.Euf.value) (Euf.propagate e)
+       in
+       props := step :: !props)
     script;
   (* also a fixed explanation, if the pair is equal *)
   let expl =

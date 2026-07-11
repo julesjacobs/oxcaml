@@ -51,7 +51,7 @@ type watched =
   ; w_a : int
   ; w_b : int
   ; mutable w_reported : int
-  (* last value propagate reported: -1 unknown, 0 distinct, 1 equal *)
+    (* last value propagate reported: -1 unknown, 0 distinct, 1 equal *)
   }
 
 type 'p diseq =
@@ -154,11 +154,11 @@ let dedup_int lst =
   let seen = Hashtbl.create 16 in
   List.filter
     (fun x ->
-      if Hashtbl.mem seen x
-      then false
-      else (
-        Hashtbl.add seen x ();
-        true))
+       if Hashtbl.mem seen x
+       then false
+       else (
+         Hashtbl.add seen x ();
+         true))
     lst
 ;;
 
@@ -292,11 +292,11 @@ let merge t a0 b0 reason0 =
       (* recompute parent signatures; schedule congruences *)
       List.iter
         (fun p ->
-          let key = sig_key t p in
-          match Sig.find_opt t.sigtbl key with
-          | Some qq when find t qq <> find t p -> Queue.add (p, qq, R_cong (p, qq)) q
-          | Some _ -> ()
-          | None -> sig_add t key p)
+           let key = sig_key t p in
+           match Sig.find_opt t.sigtbl key with
+           | Some qq when find t qq <> find t p -> Queue.add (p, qq, R_cong (p, qq)) q
+           | Some _ -> ()
+           | None -> sig_add t key p)
         parents)
   done
 ;;
@@ -504,15 +504,15 @@ let check t =
   (try
      Dynarray.iteri
        (fun _ d ->
-         if find t d.d_a = find t d.d_b
-         then (
-           let edges = explain_core t d.d_a d.d_b in
-           if !self_check && not (Naive.equal (naive_closure t edges) d.d_a d.d_b)
-           then
-             failwith
-               "Euf self-check: conflict explanation does not connect the disequal terms";
-           result := Conflict (premises edges @ [ d.d_prem ]);
-           raise Exit))
+          if find t d.d_a = find t d.d_b
+          then (
+            let edges = explain_core t d.d_a d.d_b in
+            if !self_check && not (Naive.equal (naive_closure t edges) d.d_a d.d_b)
+            then
+              failwith
+                "Euf self-check: conflict explanation does not connect the disequal terms";
+            result := Conflict (premises edges @ [ d.d_prem ]);
+            raise Exit))
        t.diseqs
    with
    | Exit -> ());
@@ -530,12 +530,12 @@ let distinct_witness t a b =
   (try
      Dynarray.iter
        (fun d ->
-         let du = find t d.d_a
-         and dv = find t d.d_b in
-         if (du = ra && dv = rb) || (du = rb && dv = ra)
-         then (
-           w := Some d;
-           raise Exit))
+          let du = find t d.d_a
+          and dv = find t d.d_b in
+          if (du = ra && dv = rb) || (du = rb && dv = ra)
+          then (
+            w := Some d;
+            raise Exit))
        t.diseqs
    with
    | Exit -> ());
@@ -551,17 +551,17 @@ let propagate t =
   let acc = ref [] in
   Dynarray.iteri
     (fun idx w ->
-      let cur =
-        if find t w.w_a = find t w.w_b
-        then 1
-        else if distinct_witness t w.w_a w.w_b <> None
-        then 0
-        else -1
-      in
-      if cur <> -1 && cur <> w.w_reported
-      then (
-        set_reported t idx cur;
-        acc := { atom = w.w_atom; value = cur = 1 } :: !acc))
+       let cur =
+         if find t w.w_a = find t w.w_b
+         then 1
+         else if distinct_witness t w.w_a w.w_b <> None
+         then 0
+         else -1
+       in
+       if cur <> -1 && cur <> w.w_reported
+       then (
+         set_reported t idx cur;
+         acc := { atom = w.w_atom; value = cur = 1 } :: !acc))
     t.watched;
   List.rev !acc
 ;;
