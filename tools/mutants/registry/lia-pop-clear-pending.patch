@@ -1,0 +1,11 @@
+diff --git a/smt/theories/lia/simplex.ml b/smt/theories/lia/simplex.ml
+index 1083a05..fc94772 100644
+--- a/smt/theories/lia/simplex.ml
++++ b/smt/theories/lia/simplex.ml
+@@ -467,5 +467,5 @@ let pop t n =
+      conflict rooted BELOW the popped scope (its trigger still on the trail) survives: its
+      bounds are still asserted, so the contradiction is still real and must not be
+      silently dropped (which would let the next check return a false Sat). *)
+-  if t.pending <> None && t.pending_pos > Dynarray.length t.trail then t.pending <- None
++  if t.pending <> None && t.pending_pos >= 0 then t.pending <- None
+ ;;
