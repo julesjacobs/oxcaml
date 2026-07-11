@@ -30,6 +30,21 @@ construction machinery lives in the library-private `Node` module (dune
 Unit + property tests under `smt/core/test/` (`make core-test`). Owner: TASKS.md
 M0-core.
 
+## smt/preprocess (`oxsmt_preprocess`)
+Desugaring passes (ADR-0003 §5 pipeline invariants) + Tseitin clausifier, over
+`core` only (stdlib-only, I3). `Preprocess`: `ite_removal` (lift non-Bool `Ite`
+to a fresh constant + guarded equalities), `div_mod_elimination` (euclidean
+`q`/`r` for nonzero-constant divisors), a minimal `simplify`, and `run`
+(`div_mod` then `ite`, whose output satisfies `Term.Debug.check ~mode:Pipeline`);
+all thread the session `Context`, declaring fresh symbols in a reserved
+`.oxsmt.` namespace. `Cnf`: plain-Tseitin clausification of the boolean skeleton
+into **abstract** CNF (its own `Lit`/`Clause` over its own var ids + an
+atom↔var map), deterministic by term-tag order (I6). Deliberately does **not**
+depend on `smt/solver`; the abstract CNF is mapped to the SAT core's literals at
+M1-end wiring. Unit + property tests (`make preprocess-test`): brute-force
+equivalence-by-evaluation for the passes, brute-force original⇔CNF for the
+clausifier. Owner: TASKS.md M1-preprocess.
+
 ## smt/solver (`oxsmt_solver`)
 CDCL(T) engine (MiniSat design, novelty-free): trail, two-watched-literal
 propagation, 1UIP conflict analysis with clause learning + local minimization,

@@ -25,7 +25,7 @@ HARNESS_ARGS := --solver $(SOLVER) --dir $(CASES) --dir $(FIXTURES) \
 # tree (which includes intentionally-hard families like pigeon-hole).
 SAT_CORPUS ?= ../corpora/SAT/uf50-218 ../corpora/SAT/uuf50-218
 
-.PHONY: build fmt test core-test sat-test sat-bench bench gate promote check-frozen spine status status-fresh
+.PHONY: build fmt test core-test sat-test sat-bench preprocess-test bench gate promote check-frozen spine status status-fresh
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -53,6 +53,14 @@ sat-bench:
 	@mkdir -p $(LOGS)
 	$(DUNE) build smt/solver/test/sat_bench.exe
 	_build/default/smt/solver/test/sat_bench.exe $(SAT_CORPUS) --log $(LOGS)/sat-bench.log
+
+## preprocess-test — smt/preprocess unit + property self-test (stdlib-only,
+##   deterministic). Brute-force equivalence-by-evaluation for the desugaring
+##   passes, brute-force original<=>CNF for the Tseitin clausifier, Pipeline
+##   Debug.check on outputs, determinism, and the Unsupported boundary. Nonzero
+##   exit on any failed check.
+preprocess-test:
+	$(DUNE) exec smt/preprocess/test/preprocess_test.exe
 
 ## fmt — format all sources in place with ocamlformat.
 fmt:

@@ -29,6 +29,23 @@ adjudication.
 Status: harness landed (M0-harness) and the gate (M0-gate) is implemented — both
 documented below; the harness tolerates an empty `cases/`.
 
+## In-tree module self-tests (outside this dir)
+
+Some modules also carry a stdlib-only unit/property self-test living *beside the
+code* under `smt/<module>/test/`, not here — they are the module's own TCB check,
+not the external gate. Run individually:
+
+- `make core-test` — `smt/core` term layer (ADR-0003 invariants).
+- `make preprocess-test` — `smt/preprocess` desugaring passes + Tseitin
+  clausifier. Its oracle is brute-force **equivalence by evaluation** (a
+  deliberately independent, test-only evaluator over `Term.t`): original vs.
+  preprocessed formula on every enumerated assignment (fresh symbols witnessed
+  via the passes' definitions), and original⇔CNF over enumerated atom
+  assignments for the clausifier. Also checks `Term.Debug.check ~mode:Pipeline`
+  on outputs, determinism, and the `Unsupported` boundary. This evaluator is
+  *not* the project's N-version model evaluator (that is a separate, later
+  agent's work); it shares no code with the gate.
+
 ## The harness (M0-harness)
 
 ### Solver CLI contract
