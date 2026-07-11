@@ -1,0 +1,7 @@
+; The gate is OUTSIDE the smt/ stdlib-only firewall (I3), but stays lean:
+; stdlib + Unix only, no opam packages. It never links anything under smt/ —
+; this is the N-version / trust-isolation boundary (DESIGN.md §10).
+
+(executable
+ (name gate)
+ (libraries unix))
