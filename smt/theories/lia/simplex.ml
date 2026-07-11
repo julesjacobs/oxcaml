@@ -55,12 +55,6 @@ type 'a t =
   { vars : 'a var Dynarray.t
   ; trail : 'a undo Dynarray.t
   ; scopes : int Dynarray.t (* trail length at each open frame *)
-  ; mutable pending : 'a conflict option
-  ; mutable pending_pos : int
-    (* trail length at the moment [pending] was set, i.e. its triggering bound's undo
-         entry is at index [pending_pos - 1]. [pop] uses this to clear [pending] only when
-         that bound is actually undone (codex L3), never for a conflict rooted below the
-         popped scope. Meaningless when [pending = None]. *)
   ; mutable pivots : int
   ; mutable poisoned : bool
     (* set the instant a Rational.Overflow escapes a state-mutating op: the tableau may be
@@ -77,8 +71,6 @@ let create () =
   { vars = Dynarray.create ()
   ; trail = Dynarray.create ()
   ; scopes = Dynarray.create ()
-  ; pending = None
-  ; pending_pos = 0
   ; pivots = 0
   ; poisoned = false
   }
@@ -272,8 +264,6 @@ let assert_lower t vid (d : Delta.t) reason =
              ; { var = vid; mult = Rational.one; use_lower = false }
              ]
          in
-         t.pending <- Some c;
-         t.pending_pos <- Dynarray.length t.trail;
          Some c
        | _ ->
          let old = v.lower in
@@ -301,8 +291,6 @@ let assert_upper t vid (d : Delta.t) reason =
              ; { var = vid; mult = Rational.one; use_lower = true }
              ]
          in
-         t.pending <- Some c;
-         t.pending_pos <- Dynarray.length t.trail;
          Some c
        | _ ->
          let old = v.upper in
@@ -424,9 +412,37 @@ let conflict_of t (bi : 'a var) ~low =
   build_conflict t (List.rev !contribs)
 ;;
 
+(* An asserted lower bound above an asserted upper bound (empty interval) is an immediate
+   contradiction. The pivot loop is basic-only and value-driven, so it does not witness this
+   for a nonbasic variable — [check] detects it structurally here. This replaces the earlier
+   cached-[pending] scheme, which used a single scalar that a later [assert] overwrote and a
+   subsequent [pop] then dropped, losing an earlier still-live contradiction (codex R1,
+   false-SAT). Reading current bounds is the ground truth: reports the conflict iff both
+   bounds are still asserted, vanishes exactly when a [pop] removes one. Scans in id order
+   (determinism, I6). Farkas certificate: 1·(l - def) + 1·(def - u) = l - u > 0. *)
+let empty_interval_conflict t =
+  let n = Dynarray.length t.vars in
+  let rec go i =
+    if i >= n
+    then None
+    else (
+      let v = get t i in
+      match v.lower, v.upper with
+      | Some l, Some u when Delta.lt u.bval l.bval ->
+        Some
+          (build_conflict
+             t
+             [ { var = i; mult = Rational.one; use_lower = true }
+             ; { var = i; mult = Rational.one; use_lower = false }
+             ])
+      | _ -> go (i + 1))
+  in
+  go 0
+;;
+
 let check t =
   guarded t (fun () ->
-    match t.pending with
+    match empty_interval_conflict t with
     | Some c -> Some c
     | None ->
       let rec loop () =
@@ -462,10 +478,5 @@ let pop t n =
       | Undo_lower (vid, old) -> (get t vid).lower <- old
       | Undo_upper (vid, old) -> (get t vid).upper <- old
     done
-  done;
-  (* Clear [pending] ONLY if its triggering bound was undone by this pop (codex L3). A
-     conflict rooted BELOW the popped scope (its trigger still on the trail) survives: its
-     bounds are still asserted, so the contradiction is still real and must not be
-     silently dropped (which would let the next check return a false Sat). *)
-  if t.pending <> None && t.pending_pos > Dynarray.length t.trail then t.pending <- None
+  done
 ;;

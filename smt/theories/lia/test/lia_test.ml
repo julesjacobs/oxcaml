@@ -750,7 +750,45 @@ let test_codex_findings () =
   let eq = Context.eq fx.ctx a b in
   raises_overflow "L5: (max_int·x0 = -x0) raises on the guarded coeff merge" (fun () ->
     Lia.assert_atom fx.solver eq ~polarity:true ~premise:0);
-  check "L5: instance poisoned after coeff-merge overflow" (Lia.is_poisoned fx.solver)
+  check "L5: instance poisoned after coeff-merge overflow" (Lia.is_poisoned fx.solver);
+  (* R1 (re-verify HIGH, false-SAT): an earlier-scope l>u contradiction must not be lost
+     when a LATER assert (in a pushed scope) records its own contradiction and that scope
+     is then popped. The old single-scalar `pending` was overwritten by the second
+     conflict and dropped on pop; `check` now detects the empty bound interval
+     structurally. *)
+  (* Simplex level. *)
+  (let s = Simplex.create () in
+   let x = Simplex.new_problem_var s in
+   let y = Simplex.new_problem_var s in
+   let d k = Delta.of_rat (Rational.of_int k) in
+   ignore (Simplex.assert_upper s x (d 0) "x<=0");
+   ignore (Simplex.assert_lower s x (d 1) "x>=1");
+   (* c1: x empty interval, at root *)
+   Simplex.push s;
+   ignore (Simplex.assert_upper s y (d 0) "y<=0");
+   ignore (Simplex.assert_lower s y (d 1) "y>=1");
+   (* c2: y empty interval, overwrites the old scalar pending *)
+   Simplex.pop s 1;
+   (* undoes y's bounds; x's still asserted *)
+   check "R1 simplex: earlier x-conflict survives overwrite+pop" (Simplex.check s <> None));
+  (* Lia level, check AND solve_integer. *)
+  let fx = make_fixture 2 in
+  ignore (assert_le fx [ 0, 1 ] 0 ~polarity:true);
+  (* x <= 0 *)
+  ignore (assert_le fx [ 0, 1 ] 0 ~polarity:false);
+  (* x >= 1 => c1 on x at root *)
+  Lia.push fx.solver;
+  ignore (assert_le fx [ 1, 1 ] 0 ~polarity:true);
+  (* y <= 0 *)
+  ignore (assert_le fx [ 1, 1 ] 0 ~polarity:false);
+  (* y >= 1  => c2 on y, "overwrites" *)
+  Lia.pop fx.solver 1;
+  (match Lia.check fx.solver with
+   | Lia.Conflict _ -> check "R1 Lia check: x-conflict survives overwrite+pop" true
+   | Lia.Sat_candidate -> check "R1 Lia check: x-conflict survives overwrite+pop" false);
+  match Lia.solve_integer fx.solver with
+  | Lia.Int_unsat _ -> check "R1 Lia solve_integer: still UNSAT after overwrite+pop" true
+  | _ -> check "R1 Lia solve_integer: still UNSAT after overwrite+pop" false
 ;;
 
 (* ================================================================== *)

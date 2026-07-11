@@ -1,6 +1,0 @@
-module=lia
-suite=lia-test
-target=smt/theories/lia/simplex.ml
-description=pop clears `pending` unconditionally, discarding a conflict recorded BELOW the popped scope (assert x<=0 ∧ x>=1 at root, push, pop => conflict lost => false Int_sat) (codex L3, false-sat).
-review=codex-review/3086f73-lia.md item L3; DESIGN §10 (mutation testing)
-expected=KILLED-TEST
