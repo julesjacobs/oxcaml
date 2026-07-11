@@ -409,3 +409,27 @@ parser reads it back. The Lean gate's *reader* separately tracks whether it acce
 Bool-sorted `=` (the M0-gate-iff item); that is the gate's concern, not the
 printer's — the printer must render the frozen term type completely, and a dump
 containing an iff is valid SMT-LIB regardless.
+
+## Mutation testing (`tools/mutants/`, `make mutants`)
+
+The suites above are only as good as their ability to go red. Mutation testing
+audits that (DESIGN.md §10: "routinely inject seeded faults and require the tiered
+suite catches them; a surviving mutant halts feature work on that module").
+
+`tools/mutants/registry/` holds seeded faults (one `<name>.patch` + `<name>.meta`
+each), drawn from the project's review history and spanning core / sat /
+preprocess / gate / smtlib. `make mutants` (or `make mutants MODULE=core`) applies
+each patch in a throwaway git worktree off HEAD, runs the mutant's declared suite,
+and requires a red exit:
+
+- **KILLED** — the suite caught it (the system working).
+- **SURVIVED** — the suite stayed green: a real oracle gap. Exits 1 and halts
+  feature work on that module. Strengthen the suite; never weaken the mutant.
+- **PATCH-FAILED / LINT-REJECT** — the patch drifted, or targets a frozen `.mli`
+  (never a legal target). Exits 2.
+
+Full detail and how to add/refresh a mutant: `tools/mutants/registry/README.md`.
+The runner never mutates `main/` or the task worktree — every fault is applied in
+a scratch worktree under `../worktrees/scratch-mutant-*`, always cleaned up on exit.
+This is the on-demand / nightly counterpart to the per-PR suites; it is not on the
+`make test` path.
